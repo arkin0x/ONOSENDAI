@@ -59,6 +59,16 @@ export function HiddenPanel(): JSX.Element {
   return <BagList mode="hidden" />
 }
 
+/**
+ * The rows one panel lists: the opened bags in DISCOVERED, the rest in
+ * HIDDEN. While the /demo tour curates its district (useShards curated),
+ * only the curators' bags, here as in the scene: on a desktop these panels
+ * stay open beside it, with each bag's author and riddle (review of #364).
+ */
+export function shownBags(items: LootItem[], opened: ReadonlySet<string>, mode: Mode, curated: readonly string[] | null): LootItem[] {
+  return items.filter((it) => opened.has(it.bagId) === (mode === 'discovered') && (!curated || curated.includes(it.author)))
+}
+
 /** The bags on the relay your keys have opened, where they stand. */
 export function DiscoveredPanel(): JSX.Element {
   return <BagList mode="discovered" />
@@ -95,10 +105,8 @@ function BagList({ mode }: { mode: Mode }): JSX.Element {
   )
   const nearbyCount = useNearbyLoot().length
   // One state per panel: the opened bags here, the rest there.
-  const shown = useMemo(
-    () => items.filter((it) => opened.has(it.bagId) === (mode === 'discovered')),
-    [items, opened, mode],
-  )
+  const curated = useShards((s) => s.curated)
+  const shown = useMemo(() => shownBags(items, opened, mode, curated), [items, opened, mode, curated])
   const [now, setNow] = useState(() => Date.now() / 1000)
   useEffect(() => {
     const t = window.setInterval(() => setNow(Date.now() / 1000), 10_000)

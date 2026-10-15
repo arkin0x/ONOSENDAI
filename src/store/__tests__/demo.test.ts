@@ -23,7 +23,8 @@ import { useCyberspace } from '../useCyberspace'
 import { PREV_LIVE_KEY, SESSION_KEY, TOUR_KEY_KEY, gateHeld, hadHopsAtStart, restoreAfterUnfinishedTour, startTourInPlace, tourKeyNeedsSpawn, useDemo, watchAction } from '../useDemo'
 import { startCoordRoute, useCoordRoute } from '../useCoordRoute'
 import { useShards } from '../useShards'
-import { DEMO_DISTRICT, DEMO_SCRIPT } from '../../demo/script'
+import { DEMO_CURATORS, DEMO_DISTRICT, DEMO_SCRIPT, GENESIS_ROOT } from '../../demo/script'
+import { planeOfMerkleRoot, stopCoordExact, stopFromAnchor } from '../../lib/hyperspace/stops'
 import { PREFERRED_VOICES, pickVoice } from '../../demo/voice'
 import { parseDemoRoute } from '../../lib/demoRoute'
 import { captionFor } from '../../hud/DemoCoach'
@@ -37,6 +38,7 @@ import { newShard } from 'sno-core/shards'
 import { coordPlace } from '../../lib/coordRoute'
 import { useHyperspace } from '../useHyperspace'
 import { useToast } from '../useToast'
+import { useCeremony } from '../useCeremony'
 
 beforeEach(() => {
   if (useDemo.getState().active) useDemo.getState().exit()
@@ -626,5 +628,116 @@ describe('starting in place from a /C/ link view (review of #362, 2026-10-15)', 
     expect(useDemo.getState().active).toBe(true)
     expect(useCoordRoute.getState().label).toBeNull()
     stop()
+  })
+})
+
+describe('the genesis district (arkinox, 2026-10-15)', () => {
+  it('is block 0\'s port, and the examples are block 0 (a port) and block 1 (a landfall)', () => {
+    expect(DEMO_DISTRICT.coord).toBe(GENESIS_ROOT)
+    const port = stopFromAnchor({ kind: 321, tags: [['B', '0'], ['C', GENESIS_ROOT], ['H', '000000000019d6689c085ae165831e934ff763ae46a2a6c172b3f1b60a8ce26f']] })!
+    expect(port.kind).toBe('port')
+    expect(stopCoordExact(port).toString(16).padStart(64, '0')).toBe(GENESIS_ROOT)
+    expect(coordPlace(DEMO_DISTRICT.coord).plane).toBe(1)
+    const block1 = '0e3e2357e806b6cdb1f70b54c3a3a17b6714ee1f0e68bebb44a74b1efd512098'
+    expect(planeOfMerkleRoot(block1)).toBe(0)
+    const at = (id: string) => DEMO_SCRIPT.steps.find((s) => s.id === id)!
+    expect(at('port').scene.target).toEqual({ block: GENESIS_ROOT })
+    expect(at('landfall').scene.target).toEqual({ block: block1 })
+    expect(at('port').caption).toBe('When a block\'s merkle root ends in a 1 bit, its station is a port in ideaspace, sitting exactly at the merkle root read as a coordinate. This is block 0, Bitcoin\'s genesis block.')
+    expect(at('landfall').caption).toBe('Otherwise the station is a landfall on Earth, at a point derived from the block hash. This is block 1.')
+    expect(at('landfall').scene.scale).toBe(52)
+  })
+})
+
+describe('the district shows only the curators\' things (2026-10-15)', () => {
+  const thing = (author: string, n: number) => ({ eventId: `${author.slice(0, 4)}${n}`, type: 'message', at: { x: 1n, y: 1n, z: 1n }, plane: 1, height: 0, author, text: 'hi', createdAt: n, lookupId: 'l', bagId: 'b', inner: { id: 'i', pubkey: author, created_at: n, kind: 1, tags: [], content: '', sig: '' } })
+  const STRANGER = 'ef'.repeat(32)
+  let saved: Record<string, unknown> = {}
+  beforeEach(() => {
+    saved = useShards.getState().discovered
+    const all = [thing(DEMO_CURATORS[0], 1), thing(DEMO_CURATORS[1], 2), thing(STRANGER, 3)]
+    useShards.setState({ discovered: Object.fromEntries(all.map((t) => [t.eventId, t])) as never, scanning: false })
+  })
+  afterEach(() => { useShards.setState({ discovered: saved as never, curated: null }) })
+  const authors = () => useShards.getState().worldItems().map((w) => w.author).sort()
+
+  it('draws everyone outside the tour, the curators only on the district\'s steps, and everyone again after', () => {
+    expect(authors()).toHaveLength(3)
+    useDemo.getState().start('district')
+    expect(authors()).toEqual([...DEMO_CURATORS].sort())
+    for (const id of ['found', 'chalk', 'key-item', 'chest', 'item-feed']) {
+      useDemo.getState().goTo(DEMO_SCRIPT.steps.findIndex((s) => s.id === id))
+      expect(authors(), id).toEqual([...DEMO_CURATORS].sort())
+    }
+    useDemo.getState().goTo(DEMO_SCRIPT.steps.findIndex((s) => s.id === 'line'))
+    expect(authors()).toHaveLength(3)
+    // The port step stands on block 0's port, the district's coordinate.
+    useDemo.getState().goTo(DEMO_SCRIPT.steps.findIndex((s) => s.id === 'port'))
+    expect(authors(), 'port').toEqual([...DEMO_CURATORS].sort())
+    useDemo.getState().goTo(DEMO_SCRIPT.steps.findIndex((s) => s.id === 'landfall'))
+    expect(authors(), 'landfall').toHaveLength(3)
+    useDemo.getState().goTo(DEMO_SCRIPT.steps.findIndex((s) => s.id === 'found'))
+    useDemo.getState().exit()
+    expect(authors()).toHaveLength(3)
+  })
+
+  it('"found" with something of the curators\' to open waits for the tap', () => {
+    useDemo.getState().start('found')
+    expect(useDemo.getState().done).toBe(false)
+    expect(useDemo.getState().empty).toBe(false)
+  })
+
+  it('"found" on an empty district says so and lets you go on, and waits again if something lands', () => {
+    useShards.setState({ discovered: { s: thing(STRANGER, 9) } as never }) // only a stranger's: hidden in the tour
+    useDemo.getState().start('found')
+    expect(useDemo.getState().done).toBe(true)
+    expect(useDemo.getState().empty).toBe(true)
+    useShards.setState({ discovered: { a: thing(DEMO_CURATORS[0], 10) } as never })
+    expect(useDemo.getState().done).toBe(false)
+    expect(useDemo.getState().empty).toBe(false)
+  })
+
+  it('"found" waits for the scan to finish before calling the district empty', () => {
+    useShards.setState({ discovered: {}, scanning: true })
+    useDemo.getState().start('found')
+    expect(useDemo.getState().done).toBe(false)
+    useShards.setState({ scanning: false })
+    expect(useDemo.getState().empty).toBe(true)
+  })
+
+  it('"found" that opened empty still counts the tap once something lands (review of #364)', () => {
+    useShards.setState({ discovered: {}, scanning: false, selectedSecret: null })
+    useDemo.getState().start('found')
+    expect(useDemo.getState().empty).toBe(true)
+    useShards.setState({ discovered: { a: thing(DEMO_CURATORS[0], 11) } as never })
+    expect(useDemo.getState().done).toBe(false)
+    useShards.setState({ selectedSecret: 'e8ed11' })
+    expect(useDemo.getState().done).toBe(true)
+    useShards.setState({ selectedSecret: null })
+  })
+
+  it('"found" stays empty while a later scan runs and finds nothing: no flicker (review of #364)', () => {
+    useShards.setState({ discovered: {}, scanning: false })
+    useDemo.getState().start('found')
+    expect(useDemo.getState().empty).toBe(true)
+    useShards.setState({ scanning: true })
+    expect(useDemo.getState().empty).toBe(true)
+    expect(useDemo.getState().done).toBe(true)
+    useShards.setState({ scanning: false })
+    expect(useDemo.getState().empty).toBe(true)
+  })
+
+  it('a stranger\'s find on the district raises no found chip; outside the tour it does (review of #364)', () => {
+    useCeremony.setState({ chip: null })
+    useDemo.getState().start('district')
+    useCeremony.getState().mark([thing(STRANGER, 20) as never])
+    expect(useCeremony.getState().chip).toBeNull()
+    useCeremony.getState().mark([thing(STRANGER, 21) as never, thing(DEMO_CURATORS[1], 22) as never])
+    expect(useCeremony.getState().chip?.count).toBe(1)
+    useDemo.getState().exit()
+    useCeremony.setState({ chip: null })
+    useCeremony.getState().mark([thing(STRANGER, 23) as never])
+    expect(useCeremony.getState().chip?.count).toBe(1)
+    useCeremony.setState({ chip: null })
   })
 })

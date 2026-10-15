@@ -14,27 +14,50 @@ import { coordToHex, xyzToCoord } from 'cyberspace-core'
 import type { DemoScript } from './types'
 
 /**
+ * Block 0, Bitcoin's genesis block: its merkle root as an explorer shows it
+ * (DECK-0001 §1). The last bit is 1, so its station is a port in ideaspace
+ * at the root read as a coordinate. Checked 2026-10-15 with the app's own
+ * functions (headers.ts over the headers-v1 blob 0, stops.ts stopFromAnchor):
+ * block 0 hashes to the pinned GENESIS_HASH, its root has plane bit 1, and
+ * its stop is a port at exactly this coordinate. Inside the header blobs, so
+ * the tour names it at once with no relay.
+ */
+export const GENESIS_ROOT = '4a5e1e4baab89f3a32518a88c31bc87f618f76673e2cc77ab2127b7afdeda33b'
+
+/**
  * The demo district: where chapter 5 flies everyone to scan and find
- * things. PLACEHOLDER (2026-10-14): the port of Bitcoin block 971,473, a
- * real hyperspace port in ideaspace, read from its kind 321 anchor.
- * arkinox: replace with the port you choose once the demo world is built
- * there. A full 64-hex coord256; its last bit is the plane (1 = ideaspace).
+ * things. Block 0's port (arkinox, 2026-10-15: he builds a welcoming area
+ * there for the class on 2026-10-28). Labeled as the tour labels any
+ * station. A full 64-hex coord256; its last bit is the plane (1 = ideaspace).
  */
 export const DEMO_DISTRICT = {
-  coord: 'c68df687ca58f6d3a9e8b7e6ab7fdd94d32b155c4f7d5351f4edb8be32d891cb',
-  label: 'DEMO DISTRICT',
+  coord: GENESIS_ROOT,
+  label: 'BLOCK 0 · PORT',
 }
 
 /**
- * A port: block 900,001's merkle root as an explorer shows it (DECK-0001 §1).
- * Inside the header blobs (blocks 0 to 949,999), so the tour names it at
- * once with no relay; block 971,270 waited on its anchor from the AUTH-gated
- * canonical relay and stayed a raw coordinate on a slow network (rehearsal,
- * 2026-10-15).
+ * Whose hidden things the tour shows at the district: arkinox and his agent
+ * XOR. A famous public station can collect anything from anyone before the
+ * class, so the district's steps draw only these authors (DemoScene.curated);
+ * ONOSENDAI outside the tour shows everything as before. Hex pubkeys:
+ * npub1arkn0xxxll4llgy9qxkrncn3vc4l69s0dz8ef3zadykcwe7ax3dqrrh43w (arkinox),
+ * npub16njvq7dd3chcftcd54hetstpgvfzdy6rnrncc73uy38z23lk702qa5ehsr (XOR's
+ * cyberspace identity, the key its MCP body signs with).
  */
-const PORT_ROOT = '529d6e345c8038cc946df1da49c07e0e3cd242b88ed5576cb35fd763fd9f1c37'
-/** A landfall: block 900,000's merkle root; its stop is on Earth, placed by the block hash. */
-const LANDFALL_ROOT = '0cfb54e522b07bd1a381adc774ec1851590ef4c3add83958135106534569f970'
+export const DEMO_CURATORS: readonly string[] = [
+  'e8ed3798c6ffebffa08501ac39e271662bfd160f688f94c45d692d8767dd345a',
+  'd4e4c079ad8e2f84af0da56f95c161431226934398e78c7a3c244e2547f6f3d4',
+]
+
+/** The port example: block 0's station, the same place as the district. */
+const PORT_ROOT = GENESIS_ROOT
+/**
+ * The landfall example: block 1's merkle root. Its last bit is 0, so its
+ * station is on Earth, placed by the block hash
+ * (00000000839a8e6886ab5951d76f411475428afc90947ee320161bbf18eb6048); checked
+ * 2026-10-15 the same way as block 0, a landfall in dataspace.
+ */
+const LANDFALL_ROOT = '0e3e2357e806b6cdb1f70b54c3a3a17b6714ee1f0e68bebb44a74b1efd512098'
 
 /**
  * Earth's center: dataspace's half-axis point, where §9.7 centers the WGS84
@@ -194,38 +217,39 @@ export const DEMO_SCRIPT: DemoScript = {
     {
       id: 'district', chapter: 'hidden', title: 'The demo district',
       caption: 'This is the demo district. As you arrive, ONOSENDAI computes the region keys around you and asks the relays for anything encrypted to them.',
-      scene: { target: 'district', scale: 8 },
+      scene: { target: 'district', scale: 8, curated: true },
       wait: 'scan',
       hint: 'Scanning the district.',
     },
     {
       id: 'found', chapter: 'hidden', title: 'Found',
       caption: 'Whatever decrypted is now drawn in the scene. Tap something to open it.',
-      scene: { target: 'keep', scale: 8 },
+      scene: { target: 'keep', scale: 8, curated: true },
       wait: 'open-item',
       hint: 'Tap something you found.',
+      emptyHint: 'Nothing is hidden here yet.',
     },
     {
       id: 'chalk', chapter: 'hidden', title: 'Chalk on the sidewalk',
       caption: 'Think of chalk on a sidewalk. The ciphertext sits on public relays, but only someone who did the work of being here can read it.',
-      scene: { target: 'keep', scale: 0 },
+      scene: { target: 'keep', scale: 0, curated: true },
     },
 
     // 6. Items and chests
     {
       id: 'key-item', chapter: 'items', title: 'Key items',
       caption: 'A key item is a keypair hidden at a place. Find it and you hold its private key, and holding the key is owning the item.',
-      scene: { target: 'keep', scale: 0 },
+      scene: { target: 'keep', scale: 0, curated: true },
     },
     {
       id: 'chest', chapter: 'items', title: 'Chests',
       caption: 'A chest is a list of things sealed to an item\'s public key. Whoever holds that item can open it, wherever the chest is found.',
-      scene: { target: 'keep', scale: 0 },
+      scene: { target: 'keep', scale: 0, curated: true },
     },
     {
       id: 'item-feed', chapter: 'items', title: 'The item feed',
       caption: 'A creator can list an item in the ITEM FEED: its name, picture and public key, never the private key. Then anyone can seal a chest to it.',
-      scene: { target: 'keep', scale: 0 },
+      scene: { target: 'keep', scale: 0, curated: true },
     },
 
     // 7. Hyperspace
@@ -237,12 +261,14 @@ export const DEMO_SCRIPT: DemoScript = {
     },
     {
       id: 'port', chapter: 'hyperspace', title: 'A port',
-      caption: 'When a block\'s merkle root ends in a 1 bit, its station is a port in ideaspace, sitting exactly at the merkle root read as a coordinate. This is block 900,001.',
-      scene: { target: { block: PORT_ROOT }, scale: 0 },
+      caption: 'When a block\'s merkle root ends in a 1 bit, its station is a port in ideaspace, sitting exactly at the merkle root read as a coordinate. This is block 0, Bitcoin\'s genesis block.',
+      // Block 0's port is the district's own coordinate, so the port step
+      // draws only the curators' things too (review of #364, 2026-10-15).
+      scene: { target: { block: PORT_ROOT }, scale: 0, curated: true },
     },
     {
       id: 'landfall', chapter: 'hyperspace', title: 'A landfall',
-      caption: 'Otherwise the station is a landfall on Earth, at a point derived from the block hash. This is block 900,000.',
+      caption: 'Otherwise the station is a landfall on Earth, at a point derived from the block hash. This is block 1.',
       scene: { target: { block: LANDFALL_ROOT }, scale: 52 },
     },
     {

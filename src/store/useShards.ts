@@ -429,6 +429,13 @@ interface ShardsState {
   deployError: string | null
   mine: MyDeployment[]
   discovered: Record<string, Hidden>
+  /**
+   * Only these authors' things are in the world while set: the /demo tour's
+   * district steps (DemoScene.curated). Null everywhere else, which is the
+   * whole world as always.
+   */
+  curated: readonly string[] | null
+  setCurated: (authors: readonly string[] | null) => void
   deleted: Record<string, true>
   /** Bags taken down from here, by `author:lookupId`: what the public LOOT list matches on. */
   deletedBags: Record<string, true>
@@ -810,6 +817,7 @@ export const useShards = create<ShardsState>((set, get) => {
     deployError: null,
     mine: loadMine(),
     discovered: {},
+    curated: null,
     deleted: loadDeleted(),
     deletedBags: loadDeletedBags(),
     inspecting: null,
@@ -1527,22 +1535,31 @@ export const useShards = create<ShardsState>((set, get) => {
       return pending.object?.shard ?? useWorkshop.getState().shards.find((s) => s.id === pending.shardId) ?? null
     },
 
+    setCurated: (authors) => { if (get().curated !== authors) set({ curated: authors }) },
+
     worldItems: () => {
-      const out: WorldItem[] = []
-      const seen = new Set<string>()
-      const me = useCyberspace.getState().identity.pubkey
-      for (const d of get().mine) {
-        seen.add(d.eventId)
-        out.push({ key: d.eventId, type: d.type, at: positionOf(d), plane: d.plane, height: d.height, mine: true, author: me, shard: d.shard, text: d.text, keyItem: d.key, chest: d.chest, createdAt: d.createdAt, lookupId: d.lookupId, bagId: d.bagId, target: itemTargetOf(d.inner, d.ref) })
-      }
-      for (const h of Object.values(get().discovered)) {
-        if (seen.has(h.eventId)) continue
-        out.push({ key: h.eventId, type: h.type, at: h.at, plane: h.plane, height: h.height, mine: false, author: h.author, shard: h.shard, text: h.text, keyItem: h.key, chest: h.chest, createdAt: h.createdAt, lookupId: h.lookupId, bagId: h.bagId, target: itemTargetOf(h.inner, h.ref), chestId: h.chestId })
-      }
-      return out
+      const curated = get().curated
+      if (curated) return worldOf(get()).filter((w) => w.author !== undefined && curated.includes(w.author))
+      return worldOf(get())
     },
 
     secretByEvent: (eventId) => get().worldItems().find((w) => w.key === eventId) ?? null,
+  }
+
+  /** Everything in the world, before any curation. */
+  function worldOf(state: ShardsState): WorldItem[] {
+    const out: WorldItem[] = []
+    const seen = new Set<string>()
+    const me = useCyberspace.getState().identity.pubkey
+    for (const d of state.mine) {
+      seen.add(d.eventId)
+      out.push({ key: d.eventId, type: d.type, at: positionOf(d), plane: d.plane, height: d.height, mine: true, author: me, shard: d.shard, text: d.text, keyItem: d.key, chest: d.chest, createdAt: d.createdAt, lookupId: d.lookupId, bagId: d.bagId, target: itemTargetOf(d.inner, d.ref) })
+    }
+    for (const h of Object.values(state.discovered)) {
+      if (seen.has(h.eventId)) continue
+      out.push({ key: h.eventId, type: h.type, at: h.at, plane: h.plane, height: h.height, mine: false, author: h.author, shard: h.shard, text: h.text, keyItem: h.key, chest: h.chest, createdAt: h.createdAt, lookupId: h.lookupId, bagId: h.bagId, target: itemTargetOf(h.inner, h.ref), chestId: h.chestId })
+    }
+    return out
   }
 })
 

@@ -14,6 +14,8 @@ import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { NostrEvent } from '../events'
 
 const sent: string[] = []
+/** The events themselves, as publish got them: what a relay would hold. */
+const sentEvents: NostrEvent[] = []
 /**
  * Who takes a publish: `acceptedBy`, when set, is the relays that took it
  * (as publish reports them); `canonicalFailsLeft` is how many more times the
@@ -22,7 +24,7 @@ const sent: string[] = []
 const pub = vi.hoisted(() => ({ acceptedBy: null as string[] | null, canonicalFailsLeft: 0, toCanonical: [] as string[] }))
 vi.mock('../relay', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../relay')>()),
-  publish: (e: NostrEvent) => { sent.push(e.id); return Promise.resolve(pub.acceptedBy ? { ok: true as const, accepted: pub.acceptedBy } : { ok: true as const }) },
+  publish: (e: NostrEvent) => { sent.push(e.id); sentEvents.push({ ...e }); return Promise.resolve(pub.acceptedBy ? { ok: true as const, accepted: pub.acceptedBy } : { ok: true as const }) },
   publishMany: (relays: string[], e: NostrEvent) => {
     pub.toCanonical.push(e.id)
     if (pub.canonicalFailsLeft > 0) { pub.canonicalFailsLeft--; return Promise.resolve({ ok: false as const, reason: 'timeout' }) }
@@ -48,6 +50,8 @@ if (typeof (globalThis as { window?: unknown }).window === 'undefined') {
 
 import { startPublisher } from '../publisher'
 import { clearLookFirst, markLookFirst, needsLookFirst } from '../lookFirst'
+import { SIGNED_ID_CHANGED, unsignedEvent } from '../signLater'
+import { verifyEvent } from 'nostr-tools/pure'
 import { useCyberspace, type PublishStatus } from '../../store/useCyberspace'
 
 const PUBKEY = 'a'.repeat(64)
@@ -402,5 +406,135 @@ describe('a move signed offline is never sent before the relays are looked at (l
     expect(needsLookFirst(me)).toBe(true)
     clearLookFirst(me, lookedAt + 10)
     expect(needsLookFirst(me)).toBe(false)
+  })
+})
+
+describe('an action kept unsigned is signed before it is sent (signLater.ts)', () => {
+  beforeAll(() => { startPublisher() })
+
+  beforeEach(async () => {
+    useCyberspace.setState({ live: false, held: false, chainConflict: null })
+    await idle()
+    sent.length = 0
+    sentEvents.length = 0
+  })
+
+  it('the publisher has it signed, with the same id, and sends the signed one', async () => {
+    const me = useCyberspace.getState().identity.pubkey
+    const u = unsignedEvent({ kind: 3333, created_at: 2, tags: [['e', ev('a1').id, '', 'previous']], content: '' }, me)
+    useCyberspace.setState({ events: [ev('a1'), u], genesisId: ev('a1').id, prevEventId: u.id, published: { [ev('a1').id]: 'ok', [u.id]: 'queued' } })
+    useCyberspace.setState({ live: true })
+    await idle()
+    append('b2')
+    await until(() => sent.length === 2)
+    expect(sent[0]).toBe(u.id)
+    expect(sentEvents[0].sig).toMatch(/^[0-9a-f]{128}$/)
+    expect(verifyEvent({ ...sentEvents[0] })).toBe(true)
+    useCyberspace.setState({ live: false })
+    await idle()
+  })
+
+  it('a signature that would change the id is refused: nothing is sent, and the reason is said', async () => {
+    const me = useCyberspace.getState().identity.pubkey
+    // Kept unsigned under an id its contents do not hash to: the signer's
+    // answer cannot match it, as with a signer that rewrites the time.
+    const u = { ...unsignedEvent({ kind: 3333, created_at: 3, tags: [], content: '' }, me), id: 'e'.repeat(64) }
+    useCyberspace.setState({ events: [ev('a1'), u], genesisId: ev('a1').id, prevEventId: u.id, published: { [ev('a1').id]: 'ok', [u.id]: 'queued' } })
+    useCyberspace.setState({ live: true })
+    await idle()
+    append('b2')
+    await until(() => useCyberspace.getState().published[u.id] === 'failed')
+    await idle()
+    expect(sent).toEqual([])
+    expect(useCyberspace.getState().publishError).toBe(SIGNED_ID_CHANGED)
+    useCyberspace.setState({ live: false })
+    await idle()
+  })
+})
+
+describe('an action signed later is sent only if it still may be, once the signer answers (review of #368, B1)', () => {
+  beforeAll(() => { startPublisher() })
+
+  /** Hold the signer's answer until `release()`, as a phone waiting for approval does. */
+  function slowSigner(): { release: () => void; restore: () => void; asked: () => boolean } {
+    const real = useCyberspace.getState().signEvent
+    let open!: () => void
+    const gate = new Promise<void>((r) => { open = r })
+    let asked = false
+    useCyberspace.setState({ signEvent: async (t, p) => { asked = true; await gate; return real(t, p) } })
+    return { release: () => open(), restore: () => useCyberspace.setState({ signEvent: real }), asked: () => asked }
+  }
+
+  function unsignedChain(): NostrEvent {
+    const me = useCyberspace.getState().identity.pubkey
+    const u = unsignedEvent({ kind: 3333, created_at: 4, tags: [['e', ev('a1').id, '', 'previous']], content: '' }, me)
+    useCyberspace.setState({ events: [ev('a1'), u], genesisId: ev('a1').id, prevEventId: u.id, published: { [ev('a1').id]: 'ok', [u.id]: 'queued' } })
+    return u
+  }
+
+  beforeEach(async () => {
+    useCyberspace.setState({ live: false, held: false, chainConflict: null })
+    await idle()
+    sent.length = 0
+    sentEvents.length = 0
+  })
+
+  it('LIVE switched off while the signer thought: nothing goes out', async () => {
+    const signer = slowSigner()
+    try {
+      const u = unsignedChain()
+      useCyberspace.setState({ live: true })
+      await idle()
+      append('b2')
+      await until(signer.asked)
+      useCyberspace.setState({ live: false })
+      signer.release()
+      await new Promise((r) => setTimeout(r, 50))
+      expect(sent).toEqual([])
+      expect(useCyberspace.getState().published[u.id]).toBe('queued')
+    } finally {
+      signer.release()
+      signer.restore()
+    }
+  })
+
+  it('another device\'s move arrived (a conflict) while the signer thought: nothing goes out', async () => {
+    const signer = slowSigner()
+    try {
+      unsignedChain()
+      useCyberspace.setState({ live: true })
+      await idle()
+      append('b2')
+      await until(signer.asked)
+      useCyberspace.setState({ chainConflict: { kind: 'branch', forkId: ev('a1').id, relayEvents: [], at: Date.now() } as never })
+      signer.release()
+      await new Promise((r) => setTimeout(r, 50))
+      expect(sent).toEqual([])
+    } finally {
+      signer.release()
+      signer.restore()
+      useCyberspace.setState({ live: false, chainConflict: null })
+      await idle()
+    }
+  })
+
+  it('the action left the chain while the signer thought (the relays\' version kept): it is never sent', async () => {
+    const signer = slowSigner()
+    try {
+      const u = unsignedChain()
+      useCyberspace.setState({ live: true })
+      await idle()
+      append('b2')
+      await until(signer.asked)
+      useCyberspace.setState({ events: [ev('a1')], prevEventId: ev('a1').id, published: { [ev('a1').id]: 'ok' } })
+      signer.release()
+      await new Promise((r) => setTimeout(r, 50))
+      expect(sent).not.toContain(u.id)
+    } finally {
+      signer.release()
+      signer.restore()
+      useCyberspace.setState({ live: false })
+      await idle()
+    }
   })
 })

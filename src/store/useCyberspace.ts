@@ -16,6 +16,7 @@
  */
 
 import { deviceOnline, markLookFirst } from '../lib/lookFirst'
+import { isUnsigned, SIGNED_ID_CHANGED, signsLater, soundUnsigned, templateOf, unsignedEvent } from '../lib/signLater'
 import { create } from 'zustand'
 import { destinationHeights, holdCloudDestinationKeys, holdDestinationCubes } from '../lib/destinationKeys'
 import { localKeyCeiling } from '../lib/deployPlan'
@@ -911,6 +912,14 @@ export interface CyberspaceState {
    * extension or a bunker is genuinely remote. The only door to it outside this module. */
   /** Sign as the current identity. `patienceMs` is how long to wait for a remote signer before asking again over fresh sockets; a human-in-the-loop signature (an avatar) deserves more than a hop's. */
   signEvent: (template: EventTemplate, patienceMs?: number) => Promise<NostrEvent>
+  /**
+   * Have the signer sign an action kept unsigned (lib/signLater.ts), in
+   * place: same id, so nothing that names it changes, then saved. Throws
+   * SIGNED_ID_CHANGED when the signer's answer has another id, and the
+   * signer's own refusal when it refuses. Resolves with the event as it now
+   * stands (already signed: as it was).
+   */
+  signUnsigned: (id: string) => Promise<NostrEvent>
 
   /** How the current identity signs: a local key, an extension, or a bunker. */
   signerKind: SignerKind
@@ -1232,12 +1241,15 @@ function loadChain(pubkey: string, later = false): (PersistedChain & { unchecked
     if (data.version !== 2 || !Array.isArray(data.events) || data.events.length === 0) return null
     // Only authentic events, even from our own storage (authenticStretch);
     // with `later`, as stored, and checked off the main thread.
-    const events = authenticStretch(pubkey, data.events, later ? () => true : authentic)
+    // An action kept unsigned (lib/signLater.ts) has no signature to check:
+    // it stands when its id is the hash of its contents and it is ours,
+    // checked here at once in both modes, and never in `unchecked`.
+    const events = authenticStretch(pubkey, data.events, (e) => isUnsigned(e) ? soundUnsigned(e, pubkey) : later || authentic(e))
     if (!events) return null
     return {
       version: 2,
       events,
-      unchecked: later ? events.filter((e) => !verifiedSigs.has(sigKey(e))) : [],
+      unchecked: later ? events.filter((e) => !isUnsigned(e) && !verifiedSigs.has(sigKey(e))) : [],
       published: Array.isArray(data.published) ? data.published : [],
       stats: { ...EMPTY_STATS, ...(data.stats ?? {}) },
       held: data.held === true,
@@ -1437,6 +1449,59 @@ async function signEvent(template: EventTemplate, patienceMs?: number, signer: S
 }
 
 /**
+ * Give an action kept unsigned here the signature another copy of it
+ * carries: the same id, signed (another tab, or the relays, after this
+ * identity signed it elsewhere). Without this the unsigned copy was kept
+ * over the signed one and marked published, and never signed (review of
+ * #368, S1). The copy's signature is checked unless `checked`. In place, as
+ * signUnsigned does; saved when anything changed. Returns whether it did.
+ */
+function takeSignatures(copies: NostrEvent[], checked: boolean): boolean {
+  const s = useCyberspace.getState()
+  const waiting = new Map(s.events.filter(isUnsigned).map((e) => [e.id, e]))
+  if (waiting.size === 0) return false
+  let changed = false
+  for (const c of copies) {
+    const e = waiting.get(c.id)
+    if (!e || isUnsigned(c) || c.pubkey !== e.pubkey) continue
+    if (getEventHash(c) !== e.id) continue
+    if (!checked && !authentic(c)) continue
+    e.sig = c.sig
+    verifiedSigs.add(sigKey(e))
+    waiting.delete(c.id)
+    changed = true
+  }
+  if (changed) saveChain(s.events, s.published, s.chain)
+  return changed
+}
+
+/** Said when a spawn is asked of a remote signer with no network: a chain must start signed. */
+export const SIGNER_UNREACHABLE_SPAWN = "A new chain starts with a signed spawn, and your signer can't be reached offline. Try again when you're back online."
+
+/** Whether the signer in use cannot sign now: a remote signer with no network (lib/signLater.ts). */
+export function signerUnreachable(): boolean {
+  return signsLater(currentSigner.kind, deviceOnline())
+}
+
+/**
+ * Sign a chain action, or, with a remote signer and no network, keep it
+ * unsigned with its real id, for the publisher to have signed before it is
+ * sent (lib/signLater.ts). Only the actions of the chain itself: anything
+ * else a signer signs (AUTH, HOSAKA, a profile, a bag) is for now or never.
+ */
+async function signChainAction(template: EventTemplate): Promise<NostrEvent> {
+  const signer = currentSigner
+  if (signsLater(signer.kind, deviceOnline())) {
+    // Kept unsigned means offline, whatever the head check saw a moment
+    // ago: the relays are looked at before it is sent (review of #368, N6).
+    markLookFirst(signer.pubkey)
+    return unsignedEvent(template, signer.pubkey)
+  }
+  // Through the store, as every chain action signed before this did.
+  return useCyberspace.getState().signEvent(template)
+}
+
+/**
  * A remote signer's answer is checked before anything holds it (spec §8.2,
  * §8.7.3, Q4): an event whose id or signature does not verify is not
  * authentic, so it never goes onto a chain, here or on a relay. The local
@@ -1568,6 +1633,8 @@ function foldOtherTabs(pubkey: string): void {
   knownMarks.set(pubkey, mark)
   const stored = loadChain(pubkey)
   if (!stored) return
+  // Another tab signed what this one holds unsigned (loadChain checked it).
+  takeSignatures(stored.events, true)
   const have = new Set(s.events.map((e) => e.id))
   const extra = stored.events.filter((e) => !have.has(e.id))
   if (extra.length === 0) return
@@ -1807,6 +1874,8 @@ const SPAWN: Position = { x: SPAWN_XYZ.x, y: SPAWN_XYZ.y, z: SPAWN_XYZ.z }
  * shown or saved, and never silently dropped by loadChain on the next load.
  */
 async function freshSpawnAsync(signer: Signer, retiring?: NostrEvent): Promise<PersistedChain> {
+  // A remote signer offline: refused at once, not after its wait runs out.
+  if (signsLater(signer.kind, deviceOnline())) throw new Error(SIGNER_UNREACHABLE_SPAWN)
   const now = Math.floor(Date.now() / 1000)
   const createdAt = retiring ? Math.max(now, retiring.created_at + 1) : now
   const spawn = await signEvent(spawnTemplate(signer.pubkey, createdAt), undefined, signer)
@@ -2052,6 +2121,11 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
         return false
       }
       if (lost()) return false
+      // A remote signer offline: said at once, not after its wait runs out.
+      if (signerUnreachable()) {
+        set({ pendingTarget: null, proof: { ...IDLE_PROOF, status: 'infeasible', message: SIGNER_UNREACHABLE_SPAWN } })
+        return false
+      }
       set({ proof: IDLE_PROOF })
       let spawn: NostrEvent
       try {
@@ -3436,7 +3510,7 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
 
     let event: NostrEvent
     try {
-      event = await get().signEvent(
+      event = await signChainAction(
         msg.mode === 'sidestep' && msg.sidestep
           ? sidestepTemplate({ ...link, ...msg.sidestep })
           : hopTemplate(link),
@@ -3999,7 +4073,7 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
     })
     let event: NostrEvent
     try {
-      event = await get().signEvent(template)
+      event = await signChainAction(template)
     } catch (err) {
       // The signer refused, or answered with a signature that does not
       // verify: no boarding, said where a hop's refusal is said. Unless the
@@ -4079,7 +4153,7 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
     })
     let event: NostrEvent
     try {
-      event = await get().signEvent(template)
+      event = await signChainAction(template)
     } catch (err) {
       // The signer refused, or answered with a signature that does not
       // verify: no ride. Thrown with the words a hop's refusal uses, so the
@@ -4150,6 +4224,8 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
     // them, so the chain they are saved into is not checked again when it is
     // read back this session.
     for (const e of mine) if ((e as unknown as VerifiedEvent)[verifiedSymbol] === true) verifiedSigs.add(`${e.id}:${e.sig}`)
+    // Actions this device holds unsigned that arrive signed take the signature.
+    takeSignatures(mine, false)
     // A HELD chain never adopts. It was started before the relays could say
     // whether this identity had a chain, so a chain arriving now is exactly
     // the one it may rival, and "newest spawn wins" would pick the local one
@@ -4824,6 +4900,29 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
   },
 
   setInvoiceOpen: (open) => set({ cloud: { ...get().cloud, invoiceOpen: open } }),
+
+  signUnsigned: async (id) => {
+    const pubkey = get().identity.pubkey
+    const e = get().events.find((x) => x.id === id)
+    if (!e) throw new Error('that action is no longer on this chain')
+    if (!isUnsigned(e)) return e
+    // Only the identity's own action, asked of its own signer (review of #368, S2).
+    if (e.pubkey !== pubkey) throw new Error('that action is another identity\'s')
+    const signed = await get().signEvent(templateOf(e))
+    if (signed.id !== e.id) throw new Error(SIGNED_ID_CHANGED)
+    // In place: the event object every derived list holds is this one, and
+    // only its signature was missing. Saved, so a reload keeps it signed.
+    const now = get()
+    if (now.identity.pubkey !== pubkey) throw new Error('the identity changed while the action was being signed')
+    // Still on this chain: a kept relay version or a respawn may have
+    // dropped it while the signer thought (review of #368, B1).
+    if (!now.events.includes(e)) throw new Error('that action left the chain while it was being signed')
+    if (!isUnsigned(e)) return e
+    e.sig = signed.sig
+    verifiedSigs.add(sigKey(e))
+    saveChain(now.events, now.published, now.chain)
+    return e
+  },
 
   setPublishStatus: (id, status, reason) => {
     const { published, events, chain } = get()

@@ -29,6 +29,7 @@ import type { NostrEvent } from './events'
 import { chainFacts, gateAfter, maySend } from './release'
 import { newestEventOnRelays, useCyberspace } from '../store/useCyberspace'
 import { clearLookFirst, needsLookFirst } from './lookFirst'
+import { isUnsigned, SIGNED_ID_CHANGED } from './signLater'
 
 /** First retry after a refusal or a dead socket; doubles up to the cap. */
 const RETRY_MS = 4000
@@ -120,7 +121,44 @@ async function pump(): Promise<void> {
 
   inFlight = true
   s.setPublishStatus(next.id, 'sending')
-  const result = await publish(next)
+  // An action taken offline with a remote signer waits for its signature
+  // (signLater.ts): signed now, after the look above, in chain order.
+  let toSend = next
+  if (isUnsigned(next)) {
+    try {
+      toSend = await s.signUnsigned(next.id)
+    } catch (err) {
+      inFlight = false
+      const reason = err instanceof Error ? err.message : String(err)
+      const now = useCyberspace.getState()
+      now.setPublishStatus(next.id, 'failed', reason)
+      lastFailed = true
+      backlogChecked = false
+      // A signer that changes the id will change it again: no retry, the
+      // chain stays here and the reason is on screen.
+      if (reason === SIGNED_ID_CHANGED) return
+      if (maySend(now, released)) retryLater()
+      return
+    }
+    // The signer can take half a minute per action, and the world moves
+    // meanwhile: LIVE switched off, another device's move arrived (a
+    // conflict), the relays' version kept. Sending after any of those would
+    // break the gate or fork the chain on the relays, which ends it (review
+    // of #368, B1). So it goes only if it may still: the gate is open, and
+    // it is still this chain's oldest unsent action. Otherwise it waits,
+    // signed, and the next pump decides.
+    const after = useCyberspace.getState()
+    const stillFirst = after.events.find((e) => after.published[e.id] !== 'ok')?.id === toSend.id
+    if (!maySend(after, released) || !after.events.includes(toSend) || !stillFirst) {
+      inFlight = false
+      if (after.published[toSend.id] === 'sending') after.setPublishStatus(toSend.id, 'queued')
+      // Still allowed to send (the action left the chain, or is no longer
+      // first): what changed while the signer thought was not pumped for.
+      if (maySend(useCyberspace.getState(), released)) void pump()
+      return
+    }
+  }
+  const result = await publish(toSend)
   inFlight = false
 
   // Re-read: Live may have been switched off, which also shuts the gate, or
@@ -131,10 +169,10 @@ async function pump(): Promise<void> {
     // Published once any relay took it (arkinox's ruling of 2026-10-08,
     // option B). The canonical relay is where every other device looks, so
     // when it was not among them it is asked again in the background.
-    if (result.accepted && !result.accepted.includes(CANONICAL)) awaitCanonical(next)
+    if (result.accepted && !result.accepted.includes(CANONICAL)) awaitCanonical(toSend)
     // Every relay that took it now holds this chain, and a move's
     // confirmation waits for it from now on (chainHolders.ts).
-    if (result.accepted) noteChainHolders(next.pubkey, result.accepted)
+    if (result.accepted) noteChainHolders(toSend.pubkey, result.accepted)
     now.setPublishStatus(next.id, 'ok')
     backoff = RETRY_MS
     lastFailed = false
@@ -218,6 +256,9 @@ function scheduleCanonical(): void {
 
 /** Keep asking the canonical relay to take `event` until it does. */
 function awaitCanonical(event: NostrEvent): void {
+  // Never an action still waiting for its signature: the publisher signs
+  // it first, and an unsigned copy is refused by every relay (review of #368).
+  if (isUnsigned(event)) return
   if (!notOnCanonical.has(event.id)) notOnCanonical.set(event.id, { event, since: Date.now() })
   savePending(event.pubkey)
   reportCanonicalLate()
@@ -241,7 +282,7 @@ async function retryCanonical(): Promise<void> {
     // An event no longer on this device's chain (a respawn, another chain
     // kept) is not worth sending; another identity's is still in its own
     // storage, for when that identity is back.
-    if (!ids.has(id)) { notOnCanonical.delete(id); continue }
+    if (!ids.has(id) || isUnsigned(event)) { notOnCanonical.delete(id); continue }
     const result = await publishMany([CANONICAL], event)
     if (result.ok) notOnCanonical.delete(id)
   }

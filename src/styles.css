@@ -407,6 +407,12 @@ body {
   color: var(--dim);
 }
 
+/* Taken offline and waiting for the signer: still here, like LOCAL, but it
+ * needs the signer before it can go anywhere. */
+.tag--unsigned {
+  color: var(--warn);
+}
+
 /* Mid-flight, and refused. Both mean "still on this device", but a refusal is
  * not a choice and must not read like one. */
 .tag--sending {

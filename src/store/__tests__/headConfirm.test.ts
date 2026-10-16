@@ -48,6 +48,12 @@ vi.mock('../../lib/workers', async (orig) => ({
   postProof: (m: { id: number; mode: string }) => { posted.push(m) },
   cancelProof: () => {},
 }))
+/** Makes this identity's signer one that signs later (a remote signer offline), for the sign-later case. */
+const later = vi.hoisted(() => ({ force: false }))
+vi.mock('../../lib/signLater', async (orig) => {
+  const actual = await orig() as typeof import('../../lib/signLater')
+  return { ...actual, signsLater: (kind: Parameters<typeof actual.signsLater>[0], online: boolean) => later.force || actual.signsLater(kind, online) }
+})
 vi.mock('../../lib/hyperspace/enter', async (orig) => ({ ...(await orig() as object), computeEnterProof: () => '0'.repeat(64) }))
 
 import { HEAD_RETRYING_MESSAGE, HEAD_UNCONFIRMED_MESSAGE, useCyberspace } from '../useCyberspace'
@@ -55,6 +61,8 @@ import { placeSpawn } from '../fixtures/placeSpawn'
 import { moveDirection } from '../../lib/moves'
 import { hopTemplate, positionHex, type NostrEvent } from '../../lib/events'
 import { clearLookFirst, needsLookFirst } from '../../lib/lookFirst'
+import { isUnsigned } from '../../lib/signLater'
+import { getEventHash } from 'nostr-tools/pure'
 
 const S = () => useCyberspace.getState()
 
@@ -239,6 +247,34 @@ describe('offline, a move is signed without asking, and marked to be looked at b
       expect(needsLookFirst(me)).toBe(false)
     } finally {
       vi.unstubAllGlobals()
+    }
+  })
+})
+
+describe('offline with a remote signer, a move is kept unsigned (lib/signLater.ts)', () => {
+  it('the move is chained with its real id and no signature, and the signer is never asked', async () => {
+    const me = S().identity.pubkey
+    vi.stubGlobal('navigator', { onLine: false })
+    later.force = true
+    const signSpy = vi.spyOn(S(), 'signEvent')
+    try {
+      S().moveCursor(moveDirection(S().axes(), 'right'))
+      const head = S().prevEventId
+      const events = S().events.length
+      await S().commit()
+      await S().applyProofMessage(done(5, head))
+      expect(S().events).toHaveLength(events + 1)
+      const made = S().events[S().events.length - 1]
+      expect(isUnsigned(made)).toBe(true)
+      expect(getEventHash(made)).toBe(made.id)
+      expect(made.tags.find((t) => t[0] === 'e' && t[3] === 'previous')?.[1] ?? made.tags.find((t) => t[0] === 'e')?.[1]).toBe(head)
+      expect(S().prevEventId).toBe(made.id)
+      expect(signSpy).not.toHaveBeenCalled()
+    } finally {
+      later.force = false
+      signSpy.mockRestore()
+      vi.unstubAllGlobals()
+      clearLookFirst(me, Date.now() + 1)
     }
   })
 })

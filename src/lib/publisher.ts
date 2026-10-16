@@ -152,6 +152,9 @@ async function pump(): Promise<void> {
     if (!maySend(after, released) || !after.events.includes(toSend) || !stillFirst) {
       inFlight = false
       if (after.published[toSend.id] === 'sending') after.setPublishStatus(toSend.id, 'queued')
+      // Still allowed to send (the action left the chain, or is no longer
+      // first): what changed while the signer thought was not pumped for.
+      if (maySend(useCyberspace.getState(), released)) void pump()
       return
     }
   }

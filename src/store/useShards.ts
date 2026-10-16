@@ -35,7 +35,7 @@ import { deviceOnline } from '../lib/lookFirst'
 import { clampUnit, normalizeStored } from 'sno-core/shards'
 import { snapOffered, wrapSpin } from '../lib/pose'
 import { create } from 'zustand'
-import { MAX_COMPUTE_HEIGHT, useCyberspace } from './useCyberspace'
+import { MAX_COMPUTE_HEIGHT, useCyberspace, signerUnreachable } from './useCyberspace'
 import { publishMany, query, relaySet } from '../lib/relay'
 import { forgetReference, resolveReference } from '../lib/references'
 import { unbagRemembered } from '../lib/foundCache'
@@ -658,6 +658,9 @@ function nextBagAt(lookupId: string): number {
   return at
 }
 
+/** Said when a deploy is asked for with a remote signer and no network. */
+export const DEPLOY_NEEDS_SIGNER = "Deploying needs your signer, and it can't be reached offline. Keep building in the workshop and deploy when you're back online."
+
 export const useShards = create<ShardsState>((set, get) => {
   const cyber = () => useCyberspace.getState()
 
@@ -959,6 +962,14 @@ export const useShards = create<ShardsState>((set, get) => {
       // thing: two signatures, and the item in the bag twice (found in
       // review, 2026-10-07).
       if (get().deployStatus === 'working') return
+      // A deploy seals a signed object inside its bag, so it cannot be kept
+      // for a signature later the way a move is (lib/signLater.ts). Said at
+      // once, before any key is computed, rather than after the signer's
+      // wait runs out.
+      if (signerUnreachable()) {
+        set({ deployStatus: 'error', deployError: DEPLOY_NEEDS_SIGNER })
+        return
+      }
       const cs = cyber()
       // The center of the build cursor's cell at the zoom you are building in
       // (or of the region, for a bag smaller than a cell), where the ghost

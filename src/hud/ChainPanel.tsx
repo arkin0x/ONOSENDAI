@@ -33,6 +33,7 @@ import { TriangleAlert } from 'lucide-react'
 import { actionKind, actionLabel, firstBreak, openBracket } from '../lib/events'
 import { BrokenChainNotice } from './BrokenChain'
 import { PUBLISH_TAG_LABEL, PUBLISH_TAG_TITLE, publishTag } from '../lib/release'
+import { isUnsigned } from '../lib/signLater'
 import { useCyberspace } from '../store/useCyberspace'
 import { useBuilder, walkChain } from '../store/useBuilder'
 import { CYBERSPACE_RELAY } from '../lib/relay'
@@ -174,7 +175,7 @@ export function ChainPanel(): JSX.Element {
           control on a row. */}
       <ol className="chainrows" ref={list}>
         {events.map((e, i) => {
-          const tag = publishTag(published[e.id])
+          const tag = publishTag(published[e.id], isUnsigned(e))
           const a = byId.get(e.id)
           // A row that breaks a rule reads BROKEN whatever its role, with the
           // warning glyph, so it is never mistaken for a game's pink row.

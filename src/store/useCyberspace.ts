@@ -16,6 +16,7 @@
  */
 
 import { deviceOnline, markLookFirst } from '../lib/lookFirst'
+import { isUnsigned, SIGNED_ID_CHANGED, signsLater, soundUnsigned, templateOf, unsignedEvent } from '../lib/signLater'
 import { create } from 'zustand'
 import { destinationHeights, holdCloudDestinationKeys, holdDestinationCubes } from '../lib/destinationKeys'
 import { localKeyCeiling } from '../lib/deployPlan'
@@ -911,6 +912,14 @@ export interface CyberspaceState {
    * extension or a bunker is genuinely remote. The only door to it outside this module. */
   /** Sign as the current identity. `patienceMs` is how long to wait for a remote signer before asking again over fresh sockets; a human-in-the-loop signature (an avatar) deserves more than a hop's. */
   signEvent: (template: EventTemplate, patienceMs?: number) => Promise<NostrEvent>
+  /**
+   * Have the signer sign an action kept unsigned (lib/signLater.ts), in
+   * place: same id, so nothing that names it changes, then saved. Throws
+   * SIGNED_ID_CHANGED when the signer's answer has another id, and the
+   * signer's own refusal when it refuses. Resolves with the event as it now
+   * stands (already signed: as it was).
+   */
+  signUnsigned: (id: string) => Promise<NostrEvent>
 
   /** How the current identity signs: a local key, an extension, or a bunker. */
   signerKind: SignerKind
@@ -1232,12 +1241,15 @@ function loadChain(pubkey: string, later = false): (PersistedChain & { unchecked
     if (data.version !== 2 || !Array.isArray(data.events) || data.events.length === 0) return null
     // Only authentic events, even from our own storage (authenticStretch);
     // with `later`, as stored, and checked off the main thread.
-    const events = authenticStretch(pubkey, data.events, later ? () => true : authentic)
+    // An action kept unsigned (lib/signLater.ts) has no signature to check:
+    // it stands when its id is the hash of its contents and it is ours,
+    // checked here at once in both modes, and never in `unchecked`.
+    const events = authenticStretch(pubkey, data.events, (e) => isUnsigned(e) ? soundUnsigned(e, pubkey) : later || authentic(e))
     if (!events) return null
     return {
       version: 2,
       events,
-      unchecked: later ? events.filter((e) => !verifiedSigs.has(sigKey(e))) : [],
+      unchecked: later ? events.filter((e) => !isUnsigned(e) && !verifiedSigs.has(sigKey(e))) : [],
       published: Array.isArray(data.published) ? data.published : [],
       stats: { ...EMPTY_STATS, ...(data.stats ?? {}) },
       held: data.held === true,
@@ -1434,6 +1446,24 @@ async function signEvent(template: EventTemplate, patienceMs?: number, signer: S
     pendingSigns--
   }
   return checkedAnswer(signed, signer)
+}
+
+/** Whether the signer in use cannot sign now: a remote signer with no network (lib/signLater.ts). */
+export function signerUnreachable(): boolean {
+  return signsLater(currentSigner.kind, deviceOnline())
+}
+
+/**
+ * Sign a chain action, or, with a remote signer and no network, keep it
+ * unsigned with its real id, for the publisher to have signed before it is
+ * sent (lib/signLater.ts). Only the actions of the chain itself: anything
+ * else a signer signs (AUTH, HOSAKA, a profile, a bag) is for now or never.
+ */
+async function signChainAction(template: EventTemplate): Promise<NostrEvent> {
+  const signer = currentSigner
+  if (signsLater(signer.kind, deviceOnline())) return unsignedEvent(template, signer.pubkey)
+  // Through the store, as every chain action signed before this did.
+  return useCyberspace.getState().signEvent(template)
 }
 
 /**
@@ -3436,7 +3466,7 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
 
     let event: NostrEvent
     try {
-      event = await get().signEvent(
+      event = await signChainAction(
         msg.mode === 'sidestep' && msg.sidestep
           ? sidestepTemplate({ ...link, ...msg.sidestep })
           : hopTemplate(link),
@@ -3999,7 +4029,7 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
     })
     let event: NostrEvent
     try {
-      event = await get().signEvent(template)
+      event = await signChainAction(template)
     } catch (err) {
       // The signer refused, or answered with a signature that does not
       // verify: no boarding, said where a hop's refusal is said. Unless the
@@ -4079,7 +4109,7 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
     })
     let event: NostrEvent
     try {
-      event = await get().signEvent(template)
+      event = await signChainAction(template)
     } catch (err) {
       // The signer refused, or answered with a signature that does not
       // verify: no ride. Thrown with the words a hop's refusal uses, so the
@@ -4824,6 +4854,23 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
   },
 
   setInvoiceOpen: (open) => set({ cloud: { ...get().cloud, invoiceOpen: open } }),
+
+  signUnsigned: async (id) => {
+    const pubkey = get().identity.pubkey
+    const e = get().events.find((x) => x.id === id)
+    if (!e) throw new Error('that action is no longer on this chain')
+    if (!isUnsigned(e)) return e
+    const signed = await get().signEvent(templateOf(e))
+    if (signed.id !== e.id) throw new Error(SIGNED_ID_CHANGED)
+    // In place: the event object every derived list holds is this one, and
+    // only its signature was missing. Saved, so a reload keeps it signed.
+    const now = get()
+    if (now.identity.pubkey !== pubkey) throw new Error('the identity changed while the action was being signed')
+    e.sig = signed.sig
+    verifiedSigs.add(sigKey(e))
+    saveChain(now.events, now.published, now.chain)
+    return e
+  },
 
   setPublishStatus: (id, status, reason) => {
     const { published, events, chain } = get()

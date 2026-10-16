@@ -26,9 +26,16 @@ vi.mock('../../lib/relay', () => ({
   relaySet: () => ['wss://relay.test'],
 }))
 
+/** Makes the signer one that cannot sign now (a remote signer offline). */
+const later = vi.hoisted(() => ({ force: false }))
+vi.mock('../../lib/signLater', async (orig) => {
+  const actual = await orig() as typeof import('../../lib/signLater')
+  return { ...actual, signsLater: (kind: Parameters<typeof actual.signsLater>[0], online: boolean) => later.force || actual.signsLater(kind, online) }
+})
+
 import { newShard, type ShardModel } from 'sno-core/shards'
 import { useCyberspace } from '../useCyberspace'
-import { useShards } from '../useShards'
+import { DEPLOY_NEEDS_SIGNER, useShards } from '../useShards'
 import { useWorkshop } from '../useWorkshop'
 
 function benchShard(): ShardModel {
@@ -54,6 +61,7 @@ beforeEach(() => {
 })
 
 afterEach(() => {
+  later.force = false
   vi.unstubAllGlobals()
   useCyberspace.setState({ live: false })
 })
@@ -80,5 +88,17 @@ describe('deploying offline', () => {
     await useShards.getState().deploy()
     expect(relay.sent).toBeGreaterThan(0)
     expect(useShards.getState().mine.some((d) => d.published)).toBe(false)
+  })
+
+  it('with a remote signer that cannot be reached, it says so at once: nothing computed, signed or kept', async () => {
+    vi.stubGlobal('navigator', { onLine: false })
+    later.force = true
+    const shard = benchShard()
+    useShards.getState().startDeployShard(shard.id)
+    await useShards.getState().deploy()
+    expect(useShards.getState().deployStatus).toBe('error')
+    expect(useShards.getState().deployError).toBe(DEPLOY_NEEDS_SIGNER)
+    expect(useShards.getState().mine).toHaveLength(0)
+    expect(relay.sent).toBe(0)
   })
 })

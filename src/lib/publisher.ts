@@ -29,6 +29,7 @@ import type { NostrEvent } from './events'
 import { chainFacts, gateAfter, maySend } from './release'
 import { newestEventOnRelays, useCyberspace } from '../store/useCyberspace'
 import { clearLookFirst, needsLookFirst } from './lookFirst'
+import { isUnsigned, SIGNED_ID_CHANGED } from './signLater'
 
 /** First retry after a refusal or a dead socket; doubles up to the cap. */
 const RETRY_MS = 4000
@@ -120,7 +121,27 @@ async function pump(): Promise<void> {
 
   inFlight = true
   s.setPublishStatus(next.id, 'sending')
-  const result = await publish(next)
+  // An action taken offline with a remote signer waits for its signature
+  // (signLater.ts): signed now, after the look above, in chain order.
+  let toSend = next
+  if (isUnsigned(next)) {
+    try {
+      toSend = await s.signUnsigned(next.id)
+    } catch (err) {
+      inFlight = false
+      const reason = err instanceof Error ? err.message : String(err)
+      const now = useCyberspace.getState()
+      now.setPublishStatus(next.id, 'failed', reason)
+      lastFailed = true
+      backlogChecked = false
+      // A signer that changes the id will change it again: no retry, the
+      // chain stays here and the reason is on screen.
+      if (reason === SIGNED_ID_CHANGED) return
+      if (maySend(now, released)) retryLater()
+      return
+    }
+  }
+  const result = await publish(toSend)
   inFlight = false
 
   // Re-read: Live may have been switched off, which also shuts the gate, or

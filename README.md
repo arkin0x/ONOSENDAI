@@ -309,7 +309,8 @@ With no network (the browser reports `navigator.onLine` false, as in airplane mo
 
 - **Moves** are signed and kept on this device. The relay head check (the 2026-10-08 ruling) can't run offline, so before any of them is sent, the publisher always asks the relays first (`src/lib/lookFirst.ts`). If another device moved meanwhile, you get the choice between the two versions of your chain rather than a fork.
 - **Deploys** made while LIVE act as LOCAL: sealed and kept here, with BROADCAST on the row for when you are back.
-- **Signing** needs a signer that works offline: a key stored in ONOSENDAI or a browser extension. A remote signer (bunker) can't sign without a connection.
+- **Signing:** a key stored in ONOSENDAI or a browser extension signs offline as usual. A remote signer (bunker, Amber, nsec.app) can't, so with one, moves are kept unsigned with their real ids (UNSIGNED in the chain panel) and your signer signs them, in order, before the publisher sends them (`src/lib/signLater.ts`). A Nostr id is the hash of everything but the signature, so signing later changes nothing that follows. If a signer hands back a different id, nothing is sent and the moves stay on the device.
+- **Deploys** with a remote signer offline are refused at once: the placed object is signed and then sealed inside its bag, so it can't wait for a signature. Build in the workshop and deploy when you're back.
 
 Plane wifi you haven't paid for can report "online" while no relay is reachable. Turn wifi off, and the app knows it is offline.
 

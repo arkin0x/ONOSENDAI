@@ -127,10 +127,15 @@ export function maySend(s: { live: boolean; held: boolean; chainConflict?: unkno
  * only one of the four that means the relay has it; the other three are all
  * still here, told apart so that a refusal does not read as a choice.
  */
-export type PublishTag = 'live' | 'local' | 'sending' | 'failed'
+export type PublishTag = 'live' | 'local' | 'unsigned' | 'sending' | 'failed'
 
-/** Per event id, from `useCyberspace.published`. An id with no entry is local. */
-export function publishTag(status: PublishStatus | undefined): PublishTag {
+/**
+ * Per event id, from `useCyberspace.published`. An id with no entry is local;
+ * `unsigned` marks an action kept for its signature (lib/signLater.ts), which
+ * reads UNSIGNED until it is sending or refused.
+ */
+export function publishTag(status: PublishStatus | undefined, unsigned = false): PublishTag {
+  if (unsigned && status !== 'sending' && status !== 'failed' && status !== 'ok') return 'unsigned'
   switch (status) {
     case 'ok': return 'live'
     case 'sending': return 'sending'
@@ -143,6 +148,7 @@ export function publishTag(status: PublishStatus | undefined): PublishTag {
 export const PUBLISH_TAG_LABEL: Record<PublishTag, string> = {
   live: 'LIVE',
   local: 'LOCAL',
+  unsigned: 'UNSIGNED',
   sending: 'SENDING',
   failed: 'FAILED',
 }
@@ -150,6 +156,7 @@ export const PUBLISH_TAG_LABEL: Record<PublishTag, string> = {
 export const PUBLISH_TAG_TITLE: Record<PublishTag, string> = {
   live: 'On the relay: anyone reading this chain can see this action.',
   local: 'Signed and held on this device. It goes out with the whole chain the next time you act while LIVE.',
+  unsigned: 'Taken offline, with no signer to reach. Held on this device; your signer signs it before it goes out, the next time you act while LIVE.',
   sending: 'On its way to the relay now.',
   failed: 'The relay would not take it. The publisher keeps retrying while LIVE.',
 }

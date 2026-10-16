@@ -1,4 +1,7 @@
 {
+  "headers": [
+    { "source": "/sw.js", "headers": [{ "key": "Cache-Control", "value": "no-cache" }] }
+  ],
   "rewrites": [
     { "source": "/C/:path*", "destination": "/index.html" },
     { "source": "/c/:path*", "destination": "/index.html" },

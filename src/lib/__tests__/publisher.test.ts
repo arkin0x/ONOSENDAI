@@ -32,12 +32,12 @@ vi.mock('../relay', async (importOriginal) => ({
 
 // The look at the relays before a backlog finds nothing here: no relay.
 // `canonical.answers` says whether the canonical relay answers it.
-const canonical = vi.hoisted(() => ({ answers: true }))
+const canonical = vi.hoisted(() => ({ answers: true, asked: 0 }))
 vi.mock('../chains', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../chains')>()),
   fetchChainEvents: () => Promise.resolve([]),
   askChainEvents: async () => [{ url: (await import('../../store/useRelays')).DEFAULT_RELAY, outcome: 'answered' as const, events: [] }],
-  confirmChainEvents: () => Promise.resolve(canonical.answers ? [] : null),
+  confirmChainEvents: () => { canonical.asked++; return Promise.resolve(canonical.answers ? [] : null) },
 }))
 
 // A retry needs window.setTimeout; nothing here fails, but a stub costs one
@@ -47,6 +47,7 @@ if (typeof (globalThis as { window?: unknown }).window === 'undefined') {
 }
 
 import { startPublisher } from '../publisher'
+import { clearLookFirst, markLookFirst, needsLookFirst } from '../lookFirst'
 import { useCyberspace, type PublishStatus } from '../../store/useCyberspace'
 
 const PUBKEY = 'a'.repeat(64)
@@ -298,5 +299,62 @@ describe('the publisher and the release gate', () => {
     useCyberspace.setState({ held: false, publishRequest: useCyberspace.getState().publishRequest + 1 })
     await until(() => sent.length === 2)
     expect(sent).toEqual([ev('a1').id, ev('b2').id])
+  })
+})
+
+describe('a move signed offline is never sent before the relays are looked at (lookFirst.ts)', () => {
+  beforeAll(() => { startPublisher() })
+
+  beforeEach(async () => {
+    useCyberspace.setState({ live: false, held: false, chainConflict: null })
+    await idle()
+    sent.length = 0
+    canonical.asked = 0
+  })
+
+  it('a single action signed offline waits for a look that answers, where a fresh online one would go straight out', async () => {
+    const me = useCyberspace.getState().identity.pubkey
+    canonical.answers = false
+    try {
+      setChain(['a1'], { [ev('a1').id]: 'ok' })
+      markLookFirst(me)
+      useCyberspace.setState({ live: true })
+      await idle()
+      append('b2')
+      await new Promise((resolve) => setTimeout(resolve, 50))
+      expect(canonical.asked).toBeGreaterThan(0)
+      expect(sent).toEqual([])
+      expect(needsLookFirst(me)).toBe(true)
+    } finally {
+      canonical.answers = true
+      useCyberspace.setState({ live: false })
+      await idle()
+      clearLookFirst(me, Date.now() + 1)
+    }
+  })
+
+  it('once the look answers, the action goes out and the mark is cleared', async () => {
+    const me = useCyberspace.getState().identity.pubkey
+    setChain(['a1'], { [ev('a1').id]: 'ok' })
+    markLookFirst(me, Date.now() - 1000)
+    useCyberspace.setState({ live: true })
+    await idle()
+    append('b2')
+    await until(() => sent.length === 1)
+    expect(canonical.asked).toBe(1)
+    expect(sent).toEqual([ev('b2').id])
+    expect(needsLookFirst(me)).toBe(false)
+    useCyberspace.setState({ live: false })
+    await idle()
+  })
+
+  it('a mark set while the look was out survives it: that look never saw the move', () => {
+    const me = 'c'.repeat(64)
+    const lookedAt = Date.now()
+    markLookFirst(me, lookedAt + 5)
+    clearLookFirst(me, lookedAt)
+    expect(needsLookFirst(me)).toBe(true)
+    clearLookFirst(me, lookedAt + 10)
+    expect(needsLookFirst(me)).toBe(false)
   })
 })

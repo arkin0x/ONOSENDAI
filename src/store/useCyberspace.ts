@@ -15,6 +15,7 @@
  * history you would have had from the start.
  */
 
+import { deviceOnline, markLookFirst } from '../lib/lookFirst'
 import { create } from 'zustand'
 import { destinationHeights, holdCloudDestinationKeys, holdDestinationCubes } from '../lib/destinationKeys'
 import { localKeyCeiling } from '../lib/deployPlan'
@@ -1628,6 +1629,13 @@ async function confirmHead(retrying: () => void): Promise<string | null | typeof
   if (chainEpoch !== epoch) return STALE_CONFIRMATION
   if (cut) return cut
   foldOtherTabs(pubkey)
+  // Offline, nobody can be asked, and refusing would stop every move on an
+  // airplane. The move is signed and kept on this device, and the relays
+  // are looked at before any of it is sent (lib/lookFirst.ts).
+  if (!deviceOnline()) {
+    markLookFirst(pubkey)
+    return null
+  }
   // No confirmation is reused, however recent (arkinox, 2026-10-08): another
   // device can move in the second between two looks, and only a fresh answer
   // makes the relay's silence mean "nothing newer".

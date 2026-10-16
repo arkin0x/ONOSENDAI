@@ -28,6 +28,7 @@ import { noteChainHolders } from './chainHolders'
 import type { NostrEvent } from './events'
 import { chainFacts, gateAfter, maySend } from './release'
 import { newestEventOnRelays, useCyberspace } from '../store/useCyberspace'
+import { clearLookFirst, needsLookFirst } from './lookFirst'
 
 /** First retry after a refusal or a dead socket; doubles up to the cap. */
 const RETRY_MS = 4000
@@ -52,7 +53,9 @@ let lastFailed = false
  * against it; adoptChain finds that and raises the diverged-branch prompt
  * (lib/branchConflict.ts), which stops the drain before anything goes out.
  * A single fresh action needs no look: the action that signed it confirmed
- * the head a moment ago (useCyberspace confirmHead).
+ * the head a moment ago (useCyberspace confirmHead). Unless it was signed
+ * offline, where nothing was confirmed: then the look always comes first
+ * (lookFirst.ts).
  *
  * The look is the same confirmation a move takes (chains.ts
  * confirmChainEvents, arkinox's ruling of 2026-10-08, option B): the
@@ -69,10 +72,20 @@ async function preflight(): Promise<boolean> {
   const s = useCyberspace.getState()
   const pubkey = s.identity.pubkey
   const anchor = newestEventOnRelays(s.events, s.published)
+  const lookedAt = Date.now()
   const events = await confirmChainEvents(pubkey, s.genesisId || undefined, s.events, { since: anchor?.created_at, anchorId: anchor?.id }).catch(() => null)
   if (events === null) return false
   const now = useCyberspace.getState()
-  if (now.identity.pubkey === pubkey && events.length > 0) now.adoptChain(events)
+  // An identity switch while the look was out: its answer is about a chain
+  // no longer in hand, and counting it would let the new identity's backlog
+  // go out unlooked (review of #367). The next pump looks again.
+  if (now.identity.pubkey !== pubkey) return false
+  if (events.length > 0) now.adoptChain(events)
+  // What was signed offline is checked only when the look found no other
+  // version of the chain. A conflict keeps the mark: the prompt lives in
+  // memory, and after a reload the mark is what makes the next send look
+  // again and raise it again (review of #367).
+  if (!useCyberspace.getState().chainConflict) clearLookFirst(pubkey, lookedAt)
   return true
 }
 
@@ -93,7 +106,7 @@ async function pump(): Promise<void> {
   if (!s.events.some((e) => s.published[e.id] !== 'ok')) { backlogChecked = false; return }
 
   const waiting = s.events.filter((e) => s.published[e.id] !== 'ok').length
-  if (!backlogChecked && (waiting > 1 || lastFailed)) {
+  if (!backlogChecked && (waiting > 1 || lastFailed || needsLookFirst(s.identity.pubkey))) {
     inFlight = true
     const answered = await preflight()
     inFlight = false

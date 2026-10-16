@@ -54,6 +54,7 @@ import { HEAD_RETRYING_MESSAGE, HEAD_UNCONFIRMED_MESSAGE, useCyberspace } from '
 import { placeSpawn } from '../fixtures/placeSpawn'
 import { moveDirection } from '../../lib/moves'
 import { hopTemplate, positionHex, type NostrEvent } from '../../lib/events'
+import { clearLookFirst, needsLookFirst } from '../../lib/lookFirst'
 
 const S = () => useCyberspace.getState()
 
@@ -200,5 +201,44 @@ describe('a move is signed only from a head the relays confirm', () => {
     S().moveCursor(moveDirection(S().axes(), 'right'))
     await S().commit()
     expect(relay.args).toEqual([{ since: undefined, reconnect: false }])
+  })
+})
+
+describe('offline, a move is signed without asking, and marked to be looked at before it is sent', () => {
+  it('moves with no network: no relay is asked, the move is signed, and the identity is marked', async () => {
+    const me = S().identity.pubkey
+    clearLookFirst(me, Date.now() + 1)
+    vi.stubGlobal('navigator', { onLine: false })
+    try {
+      relay.answers = [null, null, null, null]
+      S().moveCursor(moveDirection(S().axes(), 'right'))
+      const head = S().prevEventId
+      const events = S().events.length
+      await S().commit()
+      expect(posted).toHaveLength(1)
+      expect(S().proof.message).not.toBe(HEAD_UNCONFIRMED_MESSAGE)
+      await S().applyProofMessage(done(5, head))
+      expect(relay.asked).toBe(0)
+      expect(S().events).toHaveLength(events + 1)
+      expect(needsLookFirst(me)).toBe(true)
+    } finally {
+      vi.unstubAllGlobals()
+      clearLookFirst(me, Date.now() + 1)
+    }
+  })
+
+  it('online, nothing changes: a relay that cannot answer still refuses the move', async () => {
+    const me = S().identity.pubkey
+    vi.stubGlobal('navigator', { onLine: true })
+    try {
+      relay.answers = [null, null]
+      S().moveCursor(moveDirection(S().axes(), 'right'))
+      await S().commit()
+      expect(posted).toEqual([])
+      expect(S().proof.message).toBe(HEAD_UNCONFIRMED_MESSAGE)
+      expect(needsLookFirst(me)).toBe(false)
+    } finally {
+      vi.unstubAllGlobals()
+    }
   })
 })

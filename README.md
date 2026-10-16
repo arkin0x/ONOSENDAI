@@ -301,6 +301,20 @@ Cyberspace v1, whose movement model (proof-of-work drift and velocity over
 `DecimalVector3`) is precisely what v2 replaced. The two share constants but not
 semantics, so v1 code is cherry-picked deliberately rather than carried over.
 
+## Offline
+
+Open ONOSENDAI once while online and it works with no network afterwards, on an airplane for example. A service worker (`src/offline/sw.js`) keeps the whole build: every panel, the workers, the coastlines and the fonts. While online, pages and files still come from the network first, so you always get the latest deploy.
+
+With no network (the browser reports `navigator.onLine` false, as in airplane mode):
+
+- **Moves** are signed and kept on this device. The relay head check (the 2026-10-08 ruling) can't run offline, so before any of them is sent, the publisher always asks the relays first (`src/lib/lookFirst.ts`). If another device moved meanwhile, you get the choice between the two versions of your chain rather than a fork.
+- **Deploys** made while LIVE act as LOCAL: sealed and kept here, with BROADCAST on the row for when you are back.
+- **Signing** needs a signer that works offline: a key stored in ONOSENDAI or a browser extension. A remote signer (bunker) can't sign without a connection.
+
+Plane wifi you haven't paid for can report "online" while no relay is reachable. Turn wifi off, and the app knows it is offline.
+
+To take every browser off the service worker, revert this feature: the old `index.html` snippet unregisters it, and pages already come from the network first, so the revert reaches everyone on their next online visit. `sw.js` is served uncached (`vercel.json`), so a fixed worker also reaches browsers on their next visit.
+
 ## Tests
 
 ```sh

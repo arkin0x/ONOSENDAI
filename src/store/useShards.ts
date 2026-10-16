@@ -31,6 +31,7 @@
  * sealed as it is.
  */
 
+import { deviceOnline } from '../lib/lookFirst'
 import { clampUnit, normalizeStored } from 'sno-core/shards'
 import { snapOffered, wrapSpin } from '../lib/pose'
 import { create } from 'zustand'
@@ -1095,7 +1096,10 @@ export const useShards = create<ShardsState>((set, get) => {
           rk = await regionKeyOffThread(at, deployHeight, MAX_COMPUTE_HEIGHT)
         }
         set({ deployNote: 'Sealing and publishing' })
-        const live = cs.live
+        // Offline, a LIVE deploy is a LOCAL one: sealed and kept here, with
+        // BROADCAST on its row for when the relays are back, rather than a
+        // failure after the key was computed (lib/lookFirst.ts).
+        const live = cs.live && deviceOnline()
         // A large shard is hidden by reference (spec §7.6, DECK-0003 §3.2): it
         // becomes its own kind 33331 object sealed with the same key, and the
         // bag carries only a tag naming it. The object goes out first, so a

@@ -2,6 +2,7 @@ import { execSync } from 'node:child_process'
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import { resolveVersion, UNVERSIONED } from './src/lib/version'
+import { offlineShell } from './src/offline/shell'
 
 /** The subject of the commit being built: Vercel's variable, else git's. */
 function commitMessage(): string | null {
@@ -10,7 +11,8 @@ function commitMessage(): string | null {
 }
 
 export default defineConfig(async () => ({
-  plugins: [react()],
+  // offlineShell writes /sw.js, which lets the app open offline (src/offline/sw.js).
+  plugins: [react(), offlineShell()],
   define: {
     // Tests never reach the network for a number; the build and the dev
     // server ask GitHub once (see src/lib/version.ts).

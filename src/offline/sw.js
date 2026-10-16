@@ -88,7 +88,7 @@ async function network(request, timeoutMs) {
   const controller = new AbortController()
   const timer = timeoutMs ? setTimeout(() => controller.abort(), timeoutMs) : null
   try {
-    return await fetch(request, { signal: controller.signal, redirect: 'follow' })
+    return await fetch(request, { signal: controller.signal })
   } catch {
     return null
   } finally {
@@ -123,7 +123,10 @@ self.addEventListener('fetch', (event) => {
   if (request.mode === 'navigate') {
     event.respondWith((async () => {
       const res = await network(request, PAGE_TIMEOUT_MS)
-      if (res && res.ok) return res
+      // A redirect comes back opaque (a navigation's redirect mode is
+      // manual) and is handed on for the browser to follow itself; a
+      // followed one would be refused as the answer to a navigation.
+      if (res && (res.ok || res.type === 'opaqueredirect')) return res
       return (await cached('/index.html')) ?? res ?? Response.error()
     })())
     return

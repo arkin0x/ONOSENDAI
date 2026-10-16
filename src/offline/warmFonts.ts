@@ -20,7 +20,7 @@ export const LABEL_SYMBOLS = '·×—…₿▣⚷⚿'
 const FONT_CACHE = 'onosendai.fonts'
 
 /**
- * Once per device: when the cache already holds fonts, they are not fetched
+ * Once per device: when the cache already holds a font file, nothing is fetched
  * again, and a CDN that cannot be reached (captive wifi reporting online)
  * costs nothing but a failed fetch in troika's worker, which no caller here
  * can catch (review of #367).
@@ -28,7 +28,9 @@ const FONT_CACHE = 'onosendai.fonts'
 export async function warmLabelFonts(): Promise<void> {
   if (typeof navigator === 'undefined' || navigator.onLine === false) return
   try {
-    if (typeof caches !== 'undefined' && (await (await caches.open(FONT_CACHE)).keys()).length > 0) return
+    // A font file kept means a warm-up finished; index files alone mean one
+    // failed partway, and it runs again.
+    if (typeof caches !== 'undefined' && (await (await caches.open(FONT_CACHE)).keys()).some((r) => r.url.includes('/font-files/'))) return
     preloadFont({ font: WORLD_FONT, characters: LABEL_SYMBOLS }, () => {})
   } catch {
     // A font that will not load now is fetched again when a label needs it.

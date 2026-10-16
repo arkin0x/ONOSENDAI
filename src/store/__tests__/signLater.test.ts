@@ -127,4 +127,23 @@ describe('the saved chain with unsigned actions', () => {
     expect(saved.events[2].sig).toBe(signed.sig)
     expect(isUnsigned(saved.events[3])).toBe(true)
   })
+
+  it('a signed copy arriving from the relays (signed elsewhere) gives the unsigned action its signature (review of #368, S1)', async () => {
+    const S = await loadWith([spawn, hop1, hop2u, hop3u])
+    const hop2 = sign(templateOf(hop2u) as Parameters<typeof finalizeEvent>[0])
+    const hop3 = sign(templateOf(hop3u) as Parameters<typeof finalizeEvent>[0])
+    S().adoptChain([hop1, hop2, hop3])
+    expect(S().events.map((e) => e.sig)).toEqual([spawn.sig, hop1.sig, hop2.sig, hop3.sig])
+    const saved = JSON.parse(storage.getItem(`onosendai:chain:${pk}`)!) as { events: NostrEvent[] }
+    expect(saved.events.some((e) => isUnsigned(e))).toBe(false)
+  })
+
+  it('a copy whose signature does not verify is not taken', async () => {
+    const S = await loadWith([spawn, hop1, hop2u, hop3u])
+    const hop2 = sign(templateOf(hop2u) as Parameters<typeof finalizeEvent>[0])
+    // Through JSON, as off the wire: a spread would carry nostr-tools' cached "verified" mark.
+    const forged = JSON.parse(JSON.stringify({ ...hop2, sig: hop2.sig.replace(/^./, (c) => (c === '0' ? '1' : '0')) })) as NostrEvent
+    S().adoptChain([hop1, forged])
+    expect(isUnsigned(S().events[2])).toBe(true)
+  })
 })

@@ -451,3 +451,90 @@ describe('an action kept unsigned is signed before it is sent (signLater.ts)', (
     await idle()
   })
 })
+
+describe('an action signed later is sent only if it still may be, once the signer answers (review of #368, B1)', () => {
+  beforeAll(() => { startPublisher() })
+
+  /** Hold the signer's answer until `release()`, as a phone waiting for approval does. */
+  function slowSigner(): { release: () => void; restore: () => void; asked: () => boolean } {
+    const real = useCyberspace.getState().signEvent
+    let open!: () => void
+    const gate = new Promise<void>((r) => { open = r })
+    let asked = false
+    useCyberspace.setState({ signEvent: async (t, p) => { asked = true; await gate; return real(t, p) } })
+    return { release: () => open(), restore: () => useCyberspace.setState({ signEvent: real }), asked: () => asked }
+  }
+
+  function unsignedChain(): NostrEvent {
+    const me = useCyberspace.getState().identity.pubkey
+    const u = unsignedEvent({ kind: 3333, created_at: 4, tags: [['e', ev('a1').id, '', 'previous']], content: '' }, me)
+    useCyberspace.setState({ events: [ev('a1'), u], genesisId: ev('a1').id, prevEventId: u.id, published: { [ev('a1').id]: 'ok', [u.id]: 'queued' } })
+    return u
+  }
+
+  beforeEach(async () => {
+    useCyberspace.setState({ live: false, held: false, chainConflict: null })
+    await idle()
+    sent.length = 0
+    sentEvents.length = 0
+  })
+
+  it('LIVE switched off while the signer thought: nothing goes out', async () => {
+    const signer = slowSigner()
+    try {
+      const u = unsignedChain()
+      useCyberspace.setState({ live: true })
+      await idle()
+      append('b2')
+      await until(signer.asked)
+      useCyberspace.setState({ live: false })
+      signer.release()
+      await new Promise((r) => setTimeout(r, 50))
+      expect(sent).toEqual([])
+      expect(useCyberspace.getState().published[u.id]).toBe('queued')
+    } finally {
+      signer.release()
+      signer.restore()
+    }
+  })
+
+  it('another device\'s move arrived (a conflict) while the signer thought: nothing goes out', async () => {
+    const signer = slowSigner()
+    try {
+      unsignedChain()
+      useCyberspace.setState({ live: true })
+      await idle()
+      append('b2')
+      await until(signer.asked)
+      useCyberspace.setState({ chainConflict: { kind: 'branch', forkId: ev('a1').id, relayEvents: [], at: Date.now() } as never })
+      signer.release()
+      await new Promise((r) => setTimeout(r, 50))
+      expect(sent).toEqual([])
+    } finally {
+      signer.release()
+      signer.restore()
+      useCyberspace.setState({ live: false, chainConflict: null })
+      await idle()
+    }
+  })
+
+  it('the action left the chain while the signer thought (the relays\' version kept): it is never sent', async () => {
+    const signer = slowSigner()
+    try {
+      const u = unsignedChain()
+      useCyberspace.setState({ live: true })
+      await idle()
+      append('b2')
+      await until(signer.asked)
+      useCyberspace.setState({ events: [ev('a1')], prevEventId: ev('a1').id, published: { [ev('a1').id]: 'ok' } })
+      signer.release()
+      await new Promise((r) => setTimeout(r, 50))
+      expect(sent).not.toContain(u.id)
+    } finally {
+      signer.release()
+      signer.restore()
+      useCyberspace.setState({ live: false })
+      await idle()
+    }
+  })
+})

@@ -29,6 +29,7 @@
     "react-dom": "^18.3.1",
     "sno-core": "github:arkin0x/sno-core#v0.1.15",
     "three": "^0.169.0",
+    "troika-three-text": "^0.49.1",
     "zustand": "^4.5.5"
   },
   "devDependencies": {

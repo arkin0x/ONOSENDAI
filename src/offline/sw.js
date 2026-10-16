@@ -15,7 +15,7 @@
  * |---|---|
  * | a page (any navigation: /, /demo, /c/...) | the network, the cached index.html if the network fails or takes over 4 s |
  * | /assets/* (content-hashed, so never changes) | the cache, the network if missing |
- * | any other file of this site | the network, the cache if the network fails |
+ * | any other file of this site | the network, the cache if the network fails or takes over 4 s |
  * | a fallback font for 3D text (FONT_CDN) | the cache, else the network, kept |
  * | another site (relays, GitHub, Blossom, HOSAKA) | not touched: the app handles those itself |
  *
@@ -29,9 +29,11 @@
  * activate, caches older than the previous build are deleted, so a page
  * still open on the previous build can load its lazy chunks.
  *
- * Kill switch: /sw.js is served uncached (vercel.json) and registered with
- * updateViaCache 'none', so deploying a sw.js that unregisters itself takes
- * every browser off it on its next visit.
+ * Kill switch: revert the feature, and the old index.html snippet
+ * unregisters this worker; pages come from the network first, so the revert
+ * reaches every browser on its next online visit. /sw.js is served uncached
+ * (vercel.json) and registered with updateViaCache 'none', so a fixed worker
+ * reaches them on their next visit too.
  */
 
 /* global self, caches, fetch */
@@ -50,12 +52,21 @@ const PAGE_TIMEOUT_MS = 4000
 self.addEventListener('install', (event) => {
   event.waitUntil((async () => {
     const cache = await caches.open(CACHE)
-    // One file at a time, each a fresh fetch: a file the browser had cached
-    // under the old meta no-cache rules must not land here stale.
-    for (const path of FILES) {
-      const res = await fetch(path, { cache: 'reload' })
-      if (!res.ok) throw new Error(`precache ${path}: ${res.status}`)
-      await cache.put(path, res)
+    try {
+      // One file at a time, each a fresh fetch: a file the browser had cached
+      // under the old meta no-cache rules must not land here stale. A
+      // redirected response is refused, because a browser will not use one
+      // to answer a navigation.
+      for (const path of FILES) {
+        const res = await fetch(path, { cache: 'reload' })
+        if (!res.ok || res.redirected) throw new Error(`precache ${path}: ${res.status}`)
+        await cache.put(path, res)
+      }
+    } catch (err) {
+      // A half-filled cache would sort as the newest build and push out the
+      // one a page is really running (activate below).
+      await caches.delete(CACHE)
+      throw err
     }
     await self.skipWaiting()
   })())
@@ -77,7 +88,7 @@ async function network(request, timeoutMs) {
   const controller = new AbortController()
   const timer = timeoutMs ? setTimeout(() => controller.abort(), timeoutMs) : null
   try {
-    return await fetch(request, { signal: controller.signal })
+    return await fetch(request, { signal: controller.signal, redirect: 'follow' })
   } catch {
     return null
   } finally {
@@ -124,7 +135,7 @@ self.addEventListener('fetch', (event) => {
   }
 
   event.respondWith((async () => {
-    const res = await network(request, 0)
+    const res = await network(request, PAGE_TIMEOUT_MS)
     if (res && res.ok) return res
     return (await cached(url.pathname)) ?? res ?? Response.error()
   })())

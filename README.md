@@ -313,7 +313,7 @@ With no network (the browser reports `navigator.onLine` false, as in airplane mo
 
 Plane wifi you haven't paid for can report "online" while no relay is reachable. Turn wifi off, and the app knows it is offline.
 
-To take every browser off the service worker, deploy a `sw.js` that unregisters itself. It is served uncached (`vercel.json`), so browsers pick it up on their next visit.
+To take every browser off the service worker, revert this feature: the old `index.html` snippet unregisters it, and pages already come from the network first, so the revert reaches everyone on their next online visit. `sw.js` is served uncached (`vercel.json`), so a fixed worker also reaches browsers on their next visit.
 
 ## Tests
 

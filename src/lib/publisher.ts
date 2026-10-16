@@ -75,10 +75,17 @@ async function preflight(): Promise<boolean> {
   const lookedAt = Date.now()
   const events = await confirmChainEvents(pubkey, s.genesisId || undefined, s.events, { since: anchor?.created_at, anchorId: anchor?.id }).catch(() => null)
   if (events === null) return false
-  // The look answered, so whatever was signed offline has now been checked.
-  clearLookFirst(pubkey, lookedAt)
   const now = useCyberspace.getState()
-  if (now.identity.pubkey === pubkey && events.length > 0) now.adoptChain(events)
+  // An identity switch while the look was out: its answer is about a chain
+  // no longer in hand, and counting it would let the new identity's backlog
+  // go out unlooked (review of #367). The next pump looks again.
+  if (now.identity.pubkey !== pubkey) return false
+  if (events.length > 0) now.adoptChain(events)
+  // What was signed offline is checked only when the look found no other
+  // version of the chain. A conflict keeps the mark: the prompt lives in
+  // memory, and after a reload the mark is what makes the next send look
+  // again and raise it again (review of #367).
+  if (!useCyberspace.getState().chainConflict) clearLookFirst(pubkey, lookedAt)
   return true
 }
 

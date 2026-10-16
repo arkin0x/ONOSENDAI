@@ -32,12 +32,12 @@ vi.mock('../relay', async (importOriginal) => ({
 
 // The look at the relays before a backlog finds nothing here: no relay.
 // `canonical.answers` says whether the canonical relay answers it.
-const canonical = vi.hoisted(() => ({ answers: true, asked: 0 }))
+const canonical = vi.hoisted(() => ({ answers: true, asked: 0, onLook: null as (() => void) | null }))
 vi.mock('../chains', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../chains')>()),
   fetchChainEvents: () => Promise.resolve([]),
   askChainEvents: async () => [{ url: (await import('../../store/useRelays')).DEFAULT_RELAY, outcome: 'answered' as const, events: [] }],
-  confirmChainEvents: () => { canonical.asked++; return Promise.resolve(canonical.answers ? [] : null) },
+  confirmChainEvents: () => { canonical.asked++; canonical.onLook?.(); return Promise.resolve(canonical.answers ? [] : null) },
 }))
 
 // A retry needs window.setTimeout; nothing here fails, but a stub costs one
@@ -346,6 +346,52 @@ describe('a move signed offline is never sent before the relays are looked at (l
     expect(needsLookFirst(me)).toBe(false)
     useCyberspace.setState({ live: false })
     await idle()
+  })
+
+  it('a look that raised the choice between two chains keeps the mark, so a reload looks again before sending (review of #367)', async () => {
+    const me = useCyberspace.getState().identity.pubkey
+    canonical.onLook = () => { useCyberspace.setState({ chainConflict: { kind: 'held', relayEvents: [] } as never }) }
+    try {
+      setChain(['a1'], { [ev('a1').id]: 'ok' })
+      markLookFirst(me, Date.now() - 1000)
+      useCyberspace.setState({ live: true })
+      await idle()
+      append('b2')
+      await until(() => canonical.asked > 0)
+      await idle()
+      expect(sent).toEqual([])
+      expect(needsLookFirst(me)).toBe(true)
+    } finally {
+      canonical.onLook = null
+      useCyberspace.setState({ live: false, chainConflict: null })
+      await idle()
+      clearLookFirst(me, Date.now() + 1)
+    }
+  })
+
+  it('a look that crossed an identity switch counts for nobody: nothing is sent and the mark stays (review of #367)', async () => {
+    const me = useCyberspace.getState().identity.pubkey
+    const identity = useCyberspace.getState().identity
+    canonical.answers = false
+    try {
+      setChain(['a1'], { [ev('a1').id]: 'ok' })
+      markLookFirst(me, Date.now() - 1000)
+      useCyberspace.setState({ live: true })
+      await idle()
+      canonical.answers = true
+      canonical.onLook = () => { useCyberspace.setState({ identity: { ...identity, pubkey: 'd'.repeat(64) } }) }
+      append('b2')
+      await until(() => canonical.asked > 0)
+      await idle()
+      expect(sent).toEqual([])
+      expect(needsLookFirst(me)).toBe(true)
+    } finally {
+      canonical.onLook = null
+      canonical.answers = true
+      useCyberspace.setState({ live: false, identity })
+      await idle()
+      clearLookFirst(me, Date.now() + 1)
+    }
   })
 
   it('a mark set while the look was out survives it: that look never saw the move', () => {

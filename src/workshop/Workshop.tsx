@@ -983,7 +983,7 @@ export function Workshop(): JSX.Element | null {
         <button
           className="workshop__deploy"
           disabled={!hasContent}
-          onClick={() => { if (shard) { useShards.getState().startDeployShard(shard.id); w().closeWorkshop() } }}
+          onClick={() => { if (shard) { useShards.getState().startDeployShard(shard.id, 'workshop'); w().closeWorkshop() } }}
           title="Place this object in the world"
         >DEPLOY ▸</button>
         <button className="chip ws__icon" onClick={() => w().closeWorkshop()} title="Close the workshop (Esc)" aria-label="Close"><X size={15} strokeWidth={2.25} aria-hidden /></button>

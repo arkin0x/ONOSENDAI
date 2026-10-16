@@ -198,6 +198,15 @@ const WALL_CLOCK_WRAP = WALL_BREATH_SECONDS * 5
 const WALL_TIME = { value: 0 }
 
 /**
+ * Write the walls' clock for this frame. Every grid material shares it, so
+ * whatever draws a grid this frame (the WALK walls, the deploy region box)
+ * calls this, and two callers in one frame write the same value.
+ */
+export function tickWallClock(): void {
+  WALL_TIME.value = (performance.now() / 1000) % WALL_CLOCK_WRAP
+}
+
+/**
  * One wall's material, made once per walk and kept: a landing moves the box
  * and changes its numbers, and both are written in place (setGrid). Built
  * fresh on every landing, the old one's disposal released the program and
@@ -205,7 +214,7 @@ const WALL_TIME = { value: 0 }
  * step of a walk, which is what the walk's hitch at each landing measured
  * as (2026-10-13).
  */
-function gridMaterial(): ShaderMaterial {
+export function gridMaterial(): ShaderMaterial {
   return new ShaderMaterial({
     vertexShader: GRID_VERTEX,
     fragmentShader: GRID_FRAGMENT,
@@ -227,7 +236,7 @@ function gridMaterial(): ShaderMaterial {
 }
 
 /** A wall's numbers for its box: its ramp color, ceiling and grid pitch. */
-function setGrid(m: ShaderMaterial, color: string, opacity: number, height: number, corner: [number, number, number]): void {
+export function setGrid(m: ShaderMaterial, color: string, opacity: number, height: number, corner: [number, number, number]): void {
   ;(m.uniforms.color.value as Color).set(color)
   m.uniforms.opacity.value = Math.min(0.2, opacity)
   m.uniforms.period.value = gridPeriod(height)
@@ -235,7 +244,7 @@ function setGrid(m: ShaderMaterial, color: string, opacity: number, height: numb
 }
 
 /** The one box every wall is drawn from, scaled and placed by its mesh. */
-const UNIT_BOX = new BoxGeometry(1, 1, 1)
+export const UNIT_BOX = new BoxGeometry(1, 1, 1)
 
 interface Props {
   axes: ViewAxes
@@ -411,7 +420,7 @@ export function Rooms({ axes }: Props): JSX.Element {
   const shownWall = useRef<number | null>(null)
   useFrame(() => {
     if (materials.length === 0) { shownWall.current = null; return }
-    WALL_TIME.value = (performance.now() / 1000) % WALL_CLOCK_WRAP
+    tickWallClock()
     const pick = pickWall(levels.map((l) => ({ height: l.height, ...l.walls })), [walkEye.x, walkEye.y, walkEye.z], shownWall.current)
     shownWall.current = pick
     levels.forEach((l, i) => { const m = wallMeshes.current[i]; if (m) m.visible = l.height === pick })

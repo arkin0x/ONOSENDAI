@@ -68,7 +68,7 @@ import { useEffect, useMemo, type ReactNode } from 'react'
 import { noCallout, useRepeatable } from '../hooks/useRepeatable'
 import { MAX_UNIT } from 'sno-core/shards'
 import { formatCellSize } from 'sno-core/scale'
-import { LINK_PROTECTED, SCAN_MAX_HEIGHT, aimedOf, isProtected, ownBagIn, pendingEmpty, pendingName, regionOf, useShards } from '../store/useShards'
+import { LINK_PROTECTED, SCAN_MAX_HEIGHT, aimedOf, editingId, isProtected, ownBagIn, pendingEmpty, pendingName, positionOf, regionOf, useShards } from '../store/useShards'
 import { aimedPoint } from '../lib/chests'
 import { snapOffered } from '../lib/pose'
 import { MAX_RIDDLE_LENGTH } from '../lib/hidden'
@@ -117,6 +117,19 @@ export function DeployRow({ kind, label, hint, hintTitle, children }: { kind: st
 export function DeployBar({ pad = false }: { pad?: boolean }): JSX.Element | null {
   const pending = useShards((s) => s.pending)
   const shard = useShards((s) => (s.pending?.type === 'shard' ? s.pendingShard() : null))
+  // EDIT: a shard you hid, being moved. Its old region (a string, so the bar
+  // re-renders only when it changes) says whether the move leaves its bag,
+  // and whether it was published says where the move goes.
+  const moving = useShards((s) => editingId(s.pending) !== null)
+  const movedRegion = useShards((s) => {
+    const id = editingId(s.pending)
+    const d = id ? s.mine.find((m) => m.eventId === id) : undefined
+    return d ? regionOf(positionOf(d), d.plane, d.height) : null
+  })
+  const movedPublished = useShards((s) => {
+    const id = editingId(s.pending)
+    return !!id && !!s.mine.find((m) => m.eventId === id)?.published
+  })
   // A shard being aimed into a chest: signed where it stands, not hidden.
   const intoChest = useShards((s) => s.pending?.type === 'shard' && !!s.pending.intoChest)
   const chestName = useShards((s) => (s.pending?.type === 'shard' ? s.pending.intoChest?.draft.name ?? null : null))
@@ -215,14 +228,14 @@ export function DeployBar({ pad = false }: { pad?: boolean }): JSX.Element | nul
   useEscape('chip', pending !== null, () => {
     const s = useShards.getState()
     if (s.deployAsk) s.declineDeploy()
-    else s.cancelDeploy()
+    else s.cancelDeploy(true)
   })
 
   if (!pending) return null
 
   // A message, a key and a chest have no size or pose: only a shard gets those rows.
   const isMessage = pending.type !== 'shard'
-  const title = intoChest ? 'AIM' : pending.type === 'shard' ? 'DEPLOY' : `HIDE ${pending.type.toUpperCase()}`
+  const title = intoChest ? 'AIM' : moving ? 'EDIT' : pending.type === 'shard' ? 'DEPLOY' : `HIDE ${pending.type.toUpperCase()}`
   const name = pendingName(pending, shard)
   const empty = pendingEmpty(pending, shard)
   const working = status === 'working'
@@ -260,14 +273,19 @@ export function DeployBar({ pad = false }: { pad?: boolean }): JSX.Element | nul
             onClick={() => void useShards.getState().deploy()}
             {...noCallout}
           >
-            {empty ? `${pending.type.toUpperCase()} IS EMPTY` : working ? (note ? `${note.toUpperCase()}…` : 'HIDING…') : intoChest ? 'PUT IN CHEST' : route === 'cloud' ? 'HIDE VIA HOSAKA' : live ? 'HIDE & PUBLISH' : 'HIDE (LOCAL)'}
+            {empty ? `${pending.type.toUpperCase()} IS EMPTY` : working ? (note ? `${note.toUpperCase()}…` : 'HIDING…') : intoChest ? 'PUT IN CHEST' : moving ? (route === 'cloud' ? 'MOVE VIA HOSAKA' : live || movedPublished ? 'MOVE & PUBLISH' : 'MOVE (LOCAL)') : route === 'cloud' ? 'HIDE VIA HOSAKA' : live ? 'HIDE & PUBLISH' : 'HIDE (LOCAL)'}
           </button>
         )}
         {/* Once hiding, it finishes where it was placed: CANCEL would only pretend. */}
-        <button className="deploybar__cancel" disabled={working} title={working ? 'Already hiding; it finishes where you placed it' : undefined} onClick={() => useShards.getState().cancelDeploy()}>CANCEL</button>
+        <button className="deploybar__cancel" disabled={working} title={working ? 'Already hiding; it finishes where you placed it' : undefined} onClick={() => useShards.getState().cancelDeploy(true)}>CANCEL</button>
       </div>
 
       {error && <div className="deploybar__row notice">{error}</div>}
+      {/* Comments answer the bag, which is the region at its height: a move
+          out of it leaves them behind (reactions name the shard and follow). */}
+      {moving && movedRegion !== null && region !== movedRegion && (
+        <div className="deploybar__row deploybar__fitnote">Outside its old region: its comments stay at the old place. Reactions come with it.</div>
+      )}
       {/* The ask takes the button's place: the same green, now the yes, with
           the price and the wait on it, and a way to stand down beside it. */}
       {ask && (

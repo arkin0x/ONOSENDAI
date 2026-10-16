@@ -24,7 +24,8 @@ import { itemKind } from '../lib/comments'
 import { useProfile } from '../hooks/useProfile'
 import { profileLabel } from '../store/useProfiles'
 import { useCyberspace } from '../store/useCyberspace'
-import { useShards } from '../store/useShards'
+import { editable, useShards } from '../store/useShards'
+import { editPlaced } from '../store/useBuilder'
 import { useWorkshop } from '../store/useWorkshop'
 import { useEscape } from '../hooks/useEscape'
 import { findCashuToken, textWithoutToken } from '../lib/cashu'
@@ -53,6 +54,11 @@ export function SecretModal(): JSX.Element | null {
   const [confirming, setConfirming] = useState<'delete' | 'remove' | null>(null)
   // Whether this device hid it (it is among `mine`): only then is there a wire record to show.
   const deployed = useShards((s) => !!item && s.mine.some((d) => d.eventId === item.key))
+  // EDIT: a shard of yours this device can move (useShards editable).
+  const movable = useShards((s) => {
+    const d = item ? s.mine.find((m) => m.eventId === item.key) : undefined
+    return !!d && !item?.chestId && editable(d, me)
+  })
   // The chest a revealed thing came out of, by name, for the card's question.
   const chestName = useShards((s) => {
     const id = item?.chestId
@@ -162,12 +168,12 @@ export function SecretModal(): JSX.Element | null {
         {item.target?.id && item.target.public
           ? <Reactions target={{ id: item.target.id, pubkey: item.target.pubkey, kind: item.target.kind, address: item.target.address }} />
           : <Reactions
-              target={{ id: item.key, pubkey: item.target?.pubkey ?? author, kind: item.target?.kind ?? itemKind(item.type) }}
+              target={{ id: item.lineage ?? item.key, pubkey: item.target?.pubkey ?? author, kind: item.target?.kind ?? itemKind(item.type), address: item.target?.address }}
               alsoTell={[author]}
             />}
 
         {item.author && item.lookupId && (
-          <Comments subject={{ author: item.author, lookupId: item.lookupId, itemId: item.key, type: item.type, target: item.target, at: item.at, height: item.height }} />
+          <Comments subject={{ author: item.author, lookupId: item.lookupId, itemId: item.lineage ?? item.key, type: item.type, target: item.target, at: item.at, height: item.height }} />
         )}
 
         <div className="secret__actions">
@@ -194,6 +200,12 @@ export function SecretModal(): JSX.Element | null {
               and TEST DISCOVERY, for a thing this device hid. One tap further
               from here, now that tapping an item in a bag opens this modal
               instead of the record (arkinox, 2026-10-10). */}
+          {/* EDIT moves it: the deploy bar comes up with the ghost on it, the
+              shard itself breathing where it stands until the move lands
+              (arkinox, 2026-10-16). */}
+          {movable && (
+            <button className="secret__act" title="Move it: aim the ghost, then deploy. The old one is taken down and its comments and reactions stay with it" onClick={() => { close(); editPlaced(item.key) }}>EDIT</button>
+          )}
           {mine && !item.chestId && deployed && (
             <button className="secret__act" title="Relays, publishing and a discovery test for this item" onClick={() => { close(); useShards.getState().inspect(item.key) }}>WIRE RECORD</button>
           )}

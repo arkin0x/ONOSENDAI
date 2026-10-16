@@ -13,7 +13,7 @@
 
 import { useEffect, useState } from 'react'
 import { formatCellSize } from 'sno-core/scale'
-import { CHEST_KIND, KEY_KIND, MESSAGE_KIND, SHARD_KIND, messagePreview, shardRefusal } from '../lib/hidden'
+import { CHEST_KIND, KEY_KIND, MESSAGE_KIND, SHARD_KIND, itemLineage, messagePreview, shardRefusal } from '../lib/hidden'
 import { shortHex } from '../lib/time'
 import { ConfirmModal } from './ConfirmModal'
 import { Comments } from './Comments'
@@ -128,11 +128,11 @@ export function DeploymentDetail(): JSX.Element | null {
       {itemTargetOf(dep.inner, dep.ref)?.public
         ? <Reactions target={{ id: dep.inner.id, pubkey: dep.inner.pubkey, kind: dep.inner.kind, address: itemTargetOf(dep.inner, dep.ref)?.address }} />
         : <Reactions
-            target={{ id: dep.eventId, pubkey: itemTargetOf(dep.inner, dep.ref)?.pubkey ?? me, kind: itemTargetOf(dep.inner, dep.ref)?.kind ?? itemKind(dep.type) }}
+            target={{ id: (dep.ref ? null : itemLineage(dep.inner)) ?? dep.eventId, pubkey: itemTargetOf(dep.inner, dep.ref)?.pubkey ?? me, kind: itemTargetOf(dep.inner, dep.ref)?.kind ?? itemKind(dep.type), address: itemTargetOf(dep.inner, dep.ref)?.address }}
             alsoTell={[me]}
           />}
 
-      <Comments subject={{ author: me, lookupId: dep.lookupId, itemId: dep.eventId, type: dep.type, target: itemTargetOf(dep.inner, dep.ref), at: positionOf(dep), height: dep.height }} />
+      <Comments subject={{ author: me, lookupId: dep.lookupId, itemId: (dep.ref ? null : itemLineage(dep.inner)) ?? dep.eventId, type: dep.type, target: itemTargetOf(dep.inner, dep.ref), at: positionOf(dep), height: dep.height }} />
 
       <button className="detail__delete" onClick={() => setConfirm(true)}>DELETE FROM CYBERSPACE</button>
 

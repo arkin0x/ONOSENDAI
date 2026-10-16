@@ -275,6 +275,20 @@ export function deployPoint(cursor: Position, step: number, height: number): Pos
 }
 
 /**
+ * The cell a placed item was snapped to: the largest k, up to its height,
+ * whose deployPoint is the item's own point. Aiming EDIT at that step puts the
+ * ghost exactly on the item before anything moves; 0 (every gibson) always
+ * does, so there is always an answer.
+ */
+export function placedStep(at: Position, height: number): number {
+  for (let k = Math.max(0, height); k >= 1; k--) {
+    const p = deployPoint(at, k, height)
+    if (p.x === at.x && p.y === at.y && p.z === at.z) return k
+  }
+  return 0
+}
+
+/**
  * The cursor's two places: the grid cell it aims at, and the point its
  * coordinate is.
  *

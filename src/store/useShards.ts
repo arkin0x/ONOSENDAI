@@ -35,7 +35,7 @@ import { clampUnit, normalizeStored } from 'sno-core/shards'
 import { snapOffered, wrapSpin } from '../lib/pose'
 import { create } from 'zustand'
 import { MAX_COMPUTE_HEIGHT, useCyberspace } from './useCyberspace'
-import { publishMany, query, relaySet } from '../lib/relay'
+import { publishMany, query, queryEach, relaySet } from '../lib/relay'
 import { forgetReference, resolveReference } from '../lib/references'
 import { unbagRemembered } from '../lib/foundCache'
 import { itemTargetOf, type ItemTarget } from '../lib/comments'
@@ -56,6 +56,10 @@ import {
   entryKey,
   linkKey,
   objectTemplate,
+  OBJECT_KIND,
+  dOf,
+  editedTemplate,
+  itemLineage,
   referenceTo,
   wantsReference,
   type BagEntry,
@@ -122,6 +126,13 @@ export interface MyDeployment {
    * exactly what those bags carried.
    */
   bag?: BagSettings
+  /**
+   * A reference shard whose failed EDIT could not be put back: the old object
+   * signed again, which the relays must take before the old place opens again.
+   * Published first by the next EDIT, DELETE or BROADCAST of this row
+   * (review of #369).
+   */
+  putBack?: NostrEvent
 }
 
 /** Something placed in the world, ready to draw. */
@@ -145,6 +156,12 @@ export interface WorldItem {
   bagId?: string
   /** For an item hidden by reference: the event comments answer (lib/comments ItemTarget). */
   target?: ItemTarget
+  /**
+   * What comments and reactions name an inline item by: its first version's
+   * id, which EDIT carries forward (lib/hidden.ts itemLineage). Absent for an
+   * item hidden by reference, whose object's address does that.
+   */
+  lineage?: string
   /** The chest this was revealed from, when it came out of one: its hider takes it out with removeFromChest, not DELETE. */
   chestId?: string
 }
@@ -284,12 +301,57 @@ export type DeployPending =
    * signs it where it stands and hands the chest back with it inside, and
    * hides nothing (no key, no bag, no relay). The chest rides along so CANCEL
    * and BUILD mode ending both have it to give back.
+   *
+   * With `edit` it is a shard already hidden from here (`eventId`, among
+   * `mine`), being moved: the deploy hides it at the cursor and takes the old
+   * one out of its bag, and the new one keeps the old one's identity
+   * (lib/hidden.ts itemLineage), so its comments and reactions stay with it
+   * (arkinox, 2026-10-16). `shardId` is then that event id.
+   *
+   * `from` 'workshop': DEPLOY on the bench started it, and CANCEL goes back
+   * to the bench (arkinox, 2026-10-16), not to BUILD mode.
    */
-  | { type: 'shard'; shardId: string; object?: FeedObject; intoChest?: { draft: ChestDraft; contentIndex: number } }
+  | { type: 'shard'; shardId: string; object?: FeedObject; intoChest?: { draft: ChestDraft; contentIndex: number }; edit?: { eventId: string }; from?: 'workshop' }
   | { type: 'message'; text: string }
   /** A key forged in the composer: the keypair is made there, so its public key can be shown and sealed to before it is hidden. */
   | { type: 'key'; key: KeyItem }
   | ({ type: 'chest' } & ChestDraft)
+
+/**
+ * Whether a deployment can be moved with EDIT: a shard of yours, inline or
+ * hidden by reference as your own sealed object. A LIVE LINK names someone's
+ * public object, which is not yours to reseal, and a key, a message or a chest
+ * is not a shard.
+ */
+export function editable(d: Pick<MyDeployment, 'type' | 'shard' | 'ref' | 'inner'>, me: string): boolean {
+  if (d.type !== 'shard' || !d.shard || d.inner.pubkey !== me) return false
+  if (!d.ref) return true
+  return d.inner.kind === OBJECT_KIND && d.inner.tags.some((t) => t[0] === 'encrypted') && dOf(d.inner) !== ''
+}
+
+/** The event id of the deployment a pending EDIT is moving, or null. */
+export function editingId(pending: DeployPending | null): string | null {
+  return pending?.type === 'shard' ? pending.edit?.eventId ?? null : null
+}
+
+/** The `lineage` field of an inline item, as a spread: nothing for a reference. */
+function lineageOf(inner: NostrEvent | undefined, ref: Reference | undefined): { lineage?: string } {
+  const l = ref ? null : itemLineage(inner)
+  return l ? { lineage: l } : {}
+}
+
+/** Why an EDIT stopped: the shard it moves is no longer among your deployments here. */
+export const EDIT_GONE = 'That shard is no longer among what this device hid, so there is nothing to move.'
+/** Why an EDIT stopped: the shard was moved or changed since this device last saw it. */
+export const EDIT_STALE = 'This shard was moved or changed from another device since this one saw it. Find it where it stands now and edit it there.'
+/** Why an EDIT stopped, or what a failed move left: its old version is not back on any relay yet. */
+export const PUT_BACK_PENDING = 'No relay took the moved shard, and none has taken its old version back yet, so its old place may not open until one does. EDIT, DELETE or BROADCAST it again to put it back.'
+
+/** Waits before each retry of putting a failed move's old version back. */
+const PUT_BACK_RETRY_MS = [400, 1200]
+
+/** Why an EDIT stopped: no relay answered whether the shard is still as this device saw it. */
+export const EDIT_UNANSWERED = 'No relay answered, so this cannot tell whether the shard was moved from another device. Try again when one is reachable.'
 
 /** The name a pending deploy goes by in the bar and the ghost. */
 export function pendingName(pending: DeployPending, shard: ShardModel | null): string {
@@ -353,6 +415,13 @@ interface ShardsState {
   chestBack: ChestDraft | null
   /** The handed-back chest, taken: useBuilder owns it from here. */
   takeChestBack: () => ChestDraft | null
+  /**
+   * The workshop model a deploy from the bench was canceled on: useBuilder
+   * ends BUILD mode and reopens the workshop on it, the moment it is set.
+   */
+  workshopBack: string | null
+  /** The model to reopen, taken: useBuilder does the reopening. */
+  takeWorkshopBack: () => string | null
   deployHeight: number
   /**
    * The height follows the model: the smallest region that holds all of it
@@ -454,7 +523,10 @@ interface ShardsState {
   nearbyReturn: NearbyReturn | null
   setNearbyReturn: (r: NearbyReturn | null) => void
 
-  startDeployShard: (shardId: string) => void
+  /** Place a workshop model; `from` 'workshop' when the bench's DEPLOY did it, so CANCEL goes back there. */
+  startDeployShard: (shardId: string, from?: 'workshop') => void
+  /** Move a shard you hid (EDIT): the deploy starts at its place, height, size and pose. */
+  startEditShard: (eventId: string) => void
   startDeployMessage: (text: string) => void
   /** Hide a key the composer forged (B1 §3.1). */
   startDeployKey: (key: KeyItem) => void
@@ -489,10 +561,20 @@ interface ShardsState {
    * computed and the bag sealed, and it finishes where it was placed, so a
    * CANCEL then would only pretend (found in review, 2026-10-07).
    */
-  cancelDeploy: () => void
+  /**
+   * Stand the deploy down. `asked` is CANCEL (or Escape) itself, as opposed to
+   * BUILD mode ending under it: only then does a deploy from the workshop go
+   * back to the workshop.
+   */
+  cancelDeploy: (asked?: boolean) => void
   /** Hide the pending thing at the cursor. `confirmed` is the yes to a HOSAKA ask. */
   deploy: (confirmed?: boolean) => Promise<void>
-  deleteInstance: (eventId: string) => Promise<void>
+  /**
+   * Take one item out of its bag. `keepObject`: a shard hidden by reference
+   * whose object has just been resealed under the same `d` by an EDIT, so the
+   * object is the moved shard's now and must not be retracted.
+   */
+  deleteInstance: (eventId: string, opts?: { keepObject?: boolean }) => Promise<void>
   /**
    * Take one content out of a chest of yours that this device opened: the
    * chest is sealed again without it and the bag rewritten with the new chest
@@ -667,10 +749,75 @@ export const useShards = create<ShardsState>((set, get) => {
     await publishMany(relays, del)
   }
 
+  /**
+   * Whether the event at an object's address is still this very version, as
+   * the relays answer: false when they hold a newer one (the shard was moved
+   * by EDIT, here or from another device, and resealed under the same `d`),
+   * and false when no relay answers, since a retraction by address would
+   * delete whatever the address holds now (review of #369). Nothing seen
+   * at all is this version, unchallenged.
+   */
+  async function addressStillThis(object: NostrEvent): Promise<'this' | 'newer' | 'silent'> {
+    try {
+      const answers = (await queryEach({ kinds: [object.kind], authors: [object.pubkey], '#d': [dOf(object)] })).filter((a) => a.outcome === 'answered')
+      if (answers.length === 0) return 'silent'
+      return answers.some((a) => a.events.some((e) => e.id !== object.id && e.created_at >= object.created_at)) ? 'newer' : 'this'
+    } catch {
+      return 'silent'
+    }
+  }
+
+  /** Publish a signed event, retried after each of PUT_BACK_RETRY_MS while no relay takes it. */
+  async function publishRetried(event: NostrEvent): Promise<boolean> {
+    for (let i = 0; ; i++) {
+      const ok = await publishMany(relaySet(), event).then((r) => r.ok, () => false)
+      if (ok || i >= PUT_BACK_RETRY_MS.length) return ok
+      await new Promise((r) => setTimeout(r, PUT_BACK_RETRY_MS[i]))
+    }
+  }
+
+  /**
+   * The row now holds `back`, which the relays hold: its version of the
+   * shard, keyed by its id as a scan keys a sealed object, so a later EDIT
+   * or DELETE does not read it as moved from another device.
+   */
+  function rekeyTo(eventId: string, back: NostrEvent): MyDeployment | null {
+    let row: MyDeployment | null = null
+    const mine = get().mine.map((d) => {
+      if (d.eventId !== eventId) return d
+      const { putBack: _done, ...rest } = d
+      row = { ...rest, eventId: back.id, inner: back }
+      return row
+    })
+    // An EDIT lined up on this row follows it, in place, so the bar's MOVE
+    // still finds the shard and deploy's own pending checks still hold.
+    const pending = get().pending
+    if (pending?.type === 'shard' && pending.edit?.eventId === eventId) {
+      pending.edit.eventId = back.id
+      pending.shardId = back.id
+    }
+    const discovered = { ...get().discovered }
+    delete discovered[eventId]
+    set({ mine, discovered, inspecting: get().inspecting === eventId ? null : get().inspecting })
+    saveMine(mine)
+    return row
+  }
+
+  /** Put a failed move's old version back now (MyDeployment `putBack`): the row as it stands after, or null while no relay takes it. */
+  async function putBackNow(eventId: string): Promise<MyDeployment | null> {
+    const d = get().mine.find((m) => m.eventId === eventId)
+    if (!d?.putBack) return d ?? null
+    if (!(await publishRetried(d.putBack))) return null
+    return rekeyTo(eventId, d.putBack)
+  }
+
   /** Build and publish the region bag, with its settings; `place` is any point in the region, for a hint's base. */
-  async function publishBag(inners: BagEntry[], key: Uint8Array, lookupId: string, height: number, live: boolean, settings: BagSettings, place: { at: Position; plane: Plane }): Promise<{ event: NostrEvent; published: boolean }> {
+  async function publishBag(inners: BagEntry[], key: Uint8Array, lookupId: string, height: number, live: boolean, settings: BagSettings, place: { at: Position; plane: Plane }, beforeSend?: () => Promise<void>): Promise<{ event: NostrEvent; published: boolean }> {
     const createdAt = nextBagAt(lookupId)
     const event = await cyber().signEvent(await bagTemplate(inners, key, lookupId, height, createdAt, HIDDEN_KIND, settings, place))
+    // Anything that must go out only once the bag is signed (an EDIT's
+    // resealed object): a signer that refuses the bag stops it here.
+    if (beforeSend) await beforeSend()
     const result = live ? await publishMany(relaySet(), event) : { ok: true as const }
     return { event, published: live && result.ok }
   }
@@ -796,6 +943,12 @@ export const useShards = create<ShardsState>((set, get) => {
   return {
     pending: null,
     chestBack: null,
+    workshopBack: null,
+    takeWorkshopBack: () => {
+      const id = get().workshopBack
+      if (id !== null) set({ workshopBack: null })
+      return id
+    },
     takeChestBack: () => {
       const draft = get().chestBack
       if (draft) set({ chestBack: null })
@@ -832,8 +985,8 @@ export const useShards = create<ShardsState>((set, get) => {
 
     // A new deploy starts at the shard's own size, so the last deploy's choice
     // never carries silently into this one.
-    startDeployShard: (shardId) => set({
-      pending: { type: 'shard', shardId },
+    startDeployShard: (shardId, from) => set({
+      pending: { type: 'shard', shardId, ...(from ? { from } : {}) },
       deployLink: false,
       deployHeightAuto: true,
       deployUnit: useWorkshop.getState().shards.find((s) => s.id === shardId)?.unit ?? 0,
@@ -850,6 +1003,30 @@ export const useShards = create<ShardsState>((set, get) => {
       deployStatus: 'idle',
       deployError: null,
     }),
+    // A move starts exactly as the shard stands: its height (held, not
+    // fitted, so the shard stays in its bag and keeps its comments unless
+    // you change it), its size, its pose and its bag's settings.
+    startEditShard: (eventId) => {
+      const d = get().mine.find((m) => m.eventId === eventId)
+      if (!d?.shard || !editable(d, cyber().identity.pubkey) || get().deployStatus === 'working') return
+      set({
+        pending: { type: 'shard', shardId: eventId, edit: { eventId } },
+        deployLink: false,
+        deployHeight: d.height,
+        deployHeightAuto: false,
+        deployUnit: d.shard.unit,
+        deployUp: d.shard.up ?? false,
+        deploySpin: d.shard.spin ?? 0,
+        deployTurn: [0, 0, 0],
+        deployFollow: false,
+        deployBag: d.bag ?? DEFAULT_BAG_SETTINGS,
+        deployBagFrom: ownBagIn(get().mine, regionOf(positionOf(d), d.plane, d.height)),
+        deployStatus: 'idle',
+        deployError: null,
+        deployNote: null,
+        deployAsk: null,
+      })
+    },
     startDeployObject: (object) => set({
       pending: { type: 'shard', shardId: object.address, object },
       // A copy, as B1 rules; LIVE LINK is the deploy bar's choice.
@@ -939,13 +1116,15 @@ export const useShards = create<ShardsState>((set, get) => {
       const cs = cyber()
       return deployCeiling({ localMax: localKeyCeiling(), cloudMode: cs.cloudPrefs.mode, cloudCap: cs.cloud.limits?.max_hop_height ?? null })
     },
-    cancelDeploy: () => {
+    cancelDeploy: (asked = false) => {
       if (get().deployStatus === 'working') return
       // A shard being aimed into a chest gives the chest back as it was: the
       // composer reopens with the draft intact and that shard as before.
       const { pending } = get()
       const chestBack = pending?.type === 'shard' && pending.intoChest ? pending.intoChest.draft : null
-      set({ pending: null, deployStatus: 'idle', deployError: null, deployNote: null, deployAsk: null, chestBack })
+      // From the workshop, CANCEL goes back to the workshop (useBuilder).
+      const workshopBack = asked && pending?.type === 'shard' && pending.from === 'workshop' ? pending.shardId : null
+      set({ pending: null, deployStatus: 'idle', deployError: null, deployNote: null, deployAsk: null, chestBack, ...(workshopBack ? { workshopBack } : {}) })
     },
     confirmDeploy: () => { set({ deployAsk: null }); void get().deploy(true) },
     declineDeploy: () => set({ deployAsk: null }),
@@ -979,6 +1158,25 @@ export const useShards = create<ShardsState>((set, get) => {
       // for it, so no route and no HOSAKA ask (its height is only the cell
       // its point is centered in, as for any shard).
       const intoChest = pending.type === 'shard' ? pending.intoChest : undefined
+      // EDIT: the deployment being moved. It must still be here to move.
+      const editId = editingId(pending)
+      let was = editId ? get().mine.find((d) => d.eventId === editId) : undefined
+      if (editId && (!was?.shard || !editable(was, cs.identity.pubkey))) {
+        set({ deployStatus: 'error', deployError: EDIT_GONE })
+        return
+      }
+      // An earlier move of it that could not be put back is put back first.
+      if (was?.putBack) {
+        // Working from here, so a second tap waits as for any hide.
+        set({ deployStatus: 'working', deployError: null, deployNote: 'Putting the old version back' })
+        const back = await putBackNow(was.eventId)
+        if (!back) {
+          set({ deployStatus: 'error', deployNote: null, deployError: PUT_BACK_PENDING })
+          return
+        }
+        set({ deployStatus: 'idle', deployNote: null })
+        was = back
+      }
 
       // Where the key comes from. Above this machine's ceiling it is HOSAKA's,
       // priced as a hop at that height, and the Cloud compute panel's mode says
@@ -1009,7 +1207,7 @@ export const useShards = create<ShardsState>((set, get) => {
       const object = pending.type === 'shard' ? pending.object : undefined
       const link = !!object && deployLink
       if (pending.type === 'shard') {
-        const model = object ? object.shard : useWorkshop.getState().shards.find((s) => s.id === pending.shardId)
+        const model = was ? was.shard : object ? object.shard : useWorkshop.getState().shards.find((s) => s.id === pending.shardId)
         // An object of parts alone is an object (DECK-0003 §1.9 rule 13).
         if (!model || (model.vertices.length === 0 && (model.parts?.length ?? 0) === 0)) return
         // The deploy carries its own size. A unit the deploy bar changed makes
@@ -1038,8 +1236,11 @@ export const useShards = create<ShardsState>((set, get) => {
         }
         // A copy names what it copies: a feed object its author's address, a
         // remixed model the original it was remixed from (sno-core creditTags).
-        const credit: Credit | undefined = object ? { address: object.address, relay: object.seen?.[0] } : creditOf(model)
+        // A move keeps every tag the old version carried, its credit among
+        // them, and its identity (lib/hidden.ts editedTemplate).
+        const credit: Credit | undefined = was ? undefined : object ? { address: object.address, relay: object.seen?.[0] } : creditOf(model)
         innerTemplate = shardInnerTemplate(shard, at, plane, createdAt, credit)
+        if (was) innerTemplate = editedTemplate(innerTemplate, was.inner)
       } else if (pending.type === 'key') {
         if (!pending.key.name.trim()) return
         key = { ...pending.key, name: pending.key.name.trim(), about: pending.key.about.trim() }
@@ -1095,13 +1296,19 @@ export const useShards = create<ShardsState>((set, get) => {
           rk = await regionKeyOffThread(at, deployHeight, MAX_COMPUTE_HEIGHT)
         }
         set({ deployNote: 'Sealing and publishing' })
-        const live = cs.live
+        // A move of something already on the relays goes to the relays, LOCAL
+        // or not, as a DELETE does: leaving the old version up while the new
+        // one stays here would show it in two places, or in the old one only.
+        const live = cs.live || (was?.published ?? false)
         // A large shard is hidden by reference (spec §7.6, DECK-0003 §3.2): it
         // becomes its own kind 33331 object sealed with the same key, and the
         // bag carries only a tag naming it. The object goes out first, so a
         // published bag never names something the relay does not have.
         let inner: NostrEvent
         let ref: Reference | undefined
+        // EDIT of a reference shard: the old object signed again, for a failed move to put back.
+        let rollback: NostrEvent | undefined
+        let objectSent = false
         if (link && object) {
           // LIVE LINK: the bag names the author's own object, signed by them;
           // nothing new is signed for the item. A finder looks it up on their
@@ -1124,9 +1331,29 @@ export const useShards = create<ShardsState>((set, get) => {
             hint = copy.hint
           }
           ref = referenceTo(inner, at, plane, hint)
-        } else if (pending.type === 'shard' && shard && wantsReference(shard)) {
-          inner = await cs.signEvent(await objectTemplate(shard, rk.key, placementId(), createdAt))
-          if (live) {
+        } else if (pending.type === 'shard' && shard && (was ? !!was.ref : wantsReference(shard))) {
+          // A move reseals the same object under its own `d`, which replaces
+          // it on the relays and keeps its address, the thing its comments
+          // and reactions name (arkinox, 2026-10-16).
+          // A row from before a move made elsewhere would reseal the old
+          // model over the moved one: refused (review of #369).
+          if (was && live) {
+            const still = await addressStillThis(was.inner)
+            if (still !== 'this') throw new Error(still === 'newer' ? EDIT_STALE : EDIT_UNANSWERED)
+          }
+          // Newer than the version it replaces even within the same second
+          // (a retry right after a rollback), or relays would keep that one.
+          const objectAt = was ? Math.max(createdAt, was.inner.created_at + 1) : createdAt
+          inner = await cs.signEvent(await objectTemplate(shard, rk.key, was ? dOf(was.inner) : placementId(), objectAt))
+          if (was && live) {
+            // A move publishes nothing until everything is signed: the
+            // object goes out after the bag is signed (publishBag's
+            // beforeSend), and the old version, signed again a second newer,
+            // is what goes back if the new bag reaches no relay, so a failed
+            // move never leaves the old place unreadable (review of #369).
+            // Only while live: LOCAL publishes nothing, so there is nothing to put back.
+            rollback = await cs.signEvent({ kind: was.inner.kind, created_at: objectAt + 1, content: was.inner.content, tags: was.inner.tags })
+          } else if (live) {
             const sent = await publishMany(relaySet(), inner)
             if (!sent.ok) throw new Error('No relay took the shard. Try again when one is reachable.')
           }
@@ -1141,7 +1368,9 @@ export const useShards = create<ShardsState>((set, get) => {
         let settings: BagSettings
         try {
           const existing = await gatherInners(rk.lookupId, rk.key, live, deployHeight)
-          const allInners = mergeEntries(existing.entries, [ref ?? inner])
+          // A move inside its own bag replaces the old entry in the same rewrite.
+          const gone = was && was.lookupId === rk.lookupId ? entryKey(entryOf(was)) : null
+          const allInners = mergeEntries(gone ? existing.entries.filter((e) => entryKey(e) !== gone) : existing.entries, [ref ?? inner])
           // What you changed in the deploy bar wins; what you left as it was
           // takes the bag's current value, which may be newer than what the
           // bar showed (resolveBagSettings). The controls were seeded from
@@ -1149,12 +1378,40 @@ export const useShards = create<ShardsState>((set, get) => {
           const region = regionOf(at, plane, deployHeight)
           const base = deployBagFrom?.region === region ? deployBagFrom.settings : DEFAULT_BAG_SETTINGS
           settings = resolveBagSettings(deployBag, base, existing.settings, deployHeight)
-          ;({ event, published } = await publishBag(allInners, rk.key, rk.lookupId, deployHeight, live, settings, { at, plane }))
+          const sendObject = was && rollback && live
+            ? async () => {
+              const sent = await publishMany(relaySet(), inner)
+              if (!sent.ok) throw new Error('No relay took the moved shard. It stays where it was.')
+              objectSent = true
+            }
+            : undefined
+          ;({ event, published } = await publishBag(allInners, rk.key, rk.lookupId, deployHeight, live, settings, { at, plane }, sendObject))
+          // A move whose new bag no relay took has not happened: the old
+          // copy stays, and is never taken down (review of #369).
+          if (was && live && !published) throw new Error('No relay took the moved shard. It stays where it was.')
         } catch (err) {
+          // Put back, the row follows: the relays now hold the rollback, so it
+          // is this device's version of the shard, keyed by its id as a scan
+          // keys a sealed object, or every later EDIT and DELETE of it would
+          // read as stale (review of #369).
+          // If no relay takes it even after retries, the row keeps it to put
+          // back on its next EDIT, DELETE or BROADCAST, and says so.
+          if (objectSent && rollback && was) {
+            const back = rollback
+            if (await publishRetried(back)) rekeyTo(was.eventId, back)
+            else {
+              const id = was.eventId
+              const mine = get().mine.map((d) => (d.eventId === id ? { ...d, putBack: back } : d))
+              set({ mine })
+              saveMine(mine)
+              throw new Error(PUT_BACK_PENDING)
+            }
+          }
           // The object went out but no bag names it: take it back rather than
           // leave a preview on the relay that nothing will ever clean up.
           // Only an object this deploy published; never the author's, for a LIVE LINK.
-          if (ref && live && !link) await retractObject(inner).catch(() => undefined)
+          // Never after a move: the object under that `d` is the only one.
+          if (ref && live && !link && !was) await retractObject(inner).catch(() => undefined)
           throw err
         }
 
@@ -1186,14 +1443,35 @@ export const useShards = create<ShardsState>((set, get) => {
         for (const f of forgedInside) useInventory.getState().holdForged(f.event, f.key, place)
         // Every item now in this region's bag shares its new envelope, status and settings.
         const mine = [
-          ...get().mine.map((d) => (d.lookupId === rk.lookupId ? { ...d, bagId: event.id, published, bag: settings } : d)),
+          ...get().mine
+            // Moved inside its bag: the old version left with the rewrite above.
+            .filter((d) => !(was && was.lookupId === rk.lookupId && d.eventId === was.eventId))
+            .map((d) => (d.lookupId === rk.lookupId ? { ...d, bagId: event.id, published, bag: settings } : d)),
           item,
         ]
+        set({ mine })
+        saveMine(mine)
+        // Moved to another bag: the old one is taken out of its own bag, as
+        // DELETE would, except that a resealed object is the moved shard's
+        // now and stays. Before the deploy counts as done, so the old one
+        // never lingers after the bar says it moved.
+        let moveError: string | null = null
+        if (was) {
+          if (was.lookupId !== rk.lookupId) {
+            set({ deployNote: 'Taking it from the old place' })
+            try { await get().deleteInstance(was.eventId, { keepObject: !!was.ref }) } catch (err) { moveError = err instanceof Error ? err.message : String(err) }
+          } else {
+            const deleted = { ...get().deleted, [was.eventId]: true as const }
+            const discovered = { ...get().discovered }
+            delete discovered[was.eventId]
+            set({ deleted, discovered })
+            saveDeleted(deleted)
+          }
+        }
         // Only this deploy is finished. One lined up since (a DEPLOY from the
         // workshop while this was hiding) is a deploy of its own, and stays.
-        if (get().pending === pending) set({ mine, deployStatus: 'done', pending: null, deployNote: null })
-        else set({ mine })
-        saveMine(mine)
+        if (get().pending === pending) set({ deployStatus: 'done', pending: null, deployNote: null })
+        if (moveError) useToast.getState().show({ label: 'MOVED, OLD COPY STAYED', meta: `It stands at the new place; the old one could not be taken down (${moveError}). Tap it and DELETE it.`, mark: 'build' })
       } catch (err) {
         const reason = err instanceof Error ? err.message : String(err)
         if (get().pending === pending) set({ deployStatus: 'error', deployNote: null, deployError: reason })
@@ -1226,6 +1504,9 @@ export const useShards = create<ShardsState>((set, get) => {
      */
     broadcast: async (lookupId) => {
       if (get().broadcasting) return false
+      for (const d of get().mine.filter((m) => m.lookupId === lookupId && m.putBack)) {
+        if (!(await putBackNow(d.eventId))) { set({ broadcastError: PUT_BACK_PENDING }); return false }
+      }
       const items = get().mine.filter((d) => d.lookupId === lookupId)
       if (items.length === 0) return false
       set({ broadcasting: lookupId, broadcastError: null })
@@ -1309,7 +1590,13 @@ export const useShards = create<ShardsState>((set, get) => {
       }
     },
 
-    deleteInstance: async (eventId) => {
+    deleteInstance: async (eventId, opts) => {
+      // A failed move's old version goes back first, so the retraction
+      // below is judged against what the relays really hold.
+      if (get().mine.find((d) => d.eventId === eventId)?.putBack) {
+        const back = await putBackNow(eventId)
+        if (back) eventId = back.eventId
+      }
       const item = get().mine.find((d) => d.eventId === eventId)
       if (!item) return
       const cs = cyber()
@@ -1368,7 +1655,10 @@ export const useShards = create<ShardsState>((set, get) => {
       // sealed, but its preview would otherwise sit on the relay for good.
       // Only once the relays hold a bag that no longer names it: retracting it
       // while the old bag still does would leave that bag with a hole.
-      if (item.ref && item.inner.pubkey === me && wasPublic && unnamed) {
+      // Never by address while the address holds something newer: after an
+      // EDIT the object under this `d` is the moved shard's (review of #369).
+      const sharedHere = !!item.ref && get().mine.some((d) => d.eventId !== eventId && d.ref?.[1] === item.ref?.[1])
+      if (item.ref && item.inner.pubkey === me && wasPublic && unnamed && !opts?.keepObject && !sharedHere && (await addressStillThis(item.inner)) === 'this') {
         try { await retractObject(item.inner, item.relays ?? relaySet()) } catch { /* best effort */ }
         forgetReference(item.ref)
       }
@@ -1532,6 +1822,7 @@ export const useShards = create<ShardsState>((set, get) => {
     pendingShard: () => {
       const { pending } = get()
       if (pending?.type !== 'shard') return null
+      if (pending.edit) return get().mine.find((d) => d.eventId === pending.edit?.eventId)?.shard ?? null
       return pending.object?.shard ?? useWorkshop.getState().shards.find((s) => s.id === pending.shardId) ?? null
     },
 
@@ -1553,11 +1844,11 @@ export const useShards = create<ShardsState>((set, get) => {
     const me = useCyberspace.getState().identity.pubkey
     for (const d of state.mine) {
       seen.add(d.eventId)
-      out.push({ key: d.eventId, type: d.type, at: positionOf(d), plane: d.plane, height: d.height, mine: true, author: me, shard: d.shard, text: d.text, keyItem: d.key, chest: d.chest, createdAt: d.createdAt, lookupId: d.lookupId, bagId: d.bagId, target: itemTargetOf(d.inner, d.ref) })
+      out.push({ key: d.eventId, type: d.type, at: positionOf(d), plane: d.plane, height: d.height, mine: true, author: me, shard: d.shard, text: d.text, keyItem: d.key, chest: d.chest, createdAt: d.createdAt, lookupId: d.lookupId, bagId: d.bagId, target: itemTargetOf(d.inner, d.ref), ...lineageOf(d.inner, d.ref) })
     }
     for (const h of Object.values(state.discovered)) {
       if (seen.has(h.eventId)) continue
-      out.push({ key: h.eventId, type: h.type, at: h.at, plane: h.plane, height: h.height, mine: false, author: h.author, shard: h.shard, text: h.text, keyItem: h.key, chest: h.chest, createdAt: h.createdAt, lookupId: h.lookupId, bagId: h.bagId, target: itemTargetOf(h.inner, h.ref), chestId: h.chestId })
+      out.push({ key: h.eventId, type: h.type, at: h.at, plane: h.plane, height: h.height, mine: false, author: h.author, shard: h.shard, text: h.text, keyItem: h.key, chest: h.chest, createdAt: h.createdAt, lookupId: h.lookupId, bagId: h.bagId, target: itemTargetOf(h.inner, h.ref), chestId: h.chestId, ...lineageOf(h.inner, h.ref) })
     }
     return out
   }

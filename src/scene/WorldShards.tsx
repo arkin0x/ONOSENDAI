@@ -9,11 +9,13 @@
  */
 
 import { useMemo, useRef } from 'react'
-import type { Group } from 'three'
+import { useFrame } from '@react-three/fiber'
+import type { Group, Material, Object3D } from 'three'
 import { GRID_RADIUS, itemCentre, type Position, type ViewAxes } from '../lib/space'
 import { alignedOrigin, useCyberspace } from '../store/useCyberspace'
 import { useCeremony } from '../store/useCeremony'
-import { useShards, type WorldItem } from '../store/useShards'
+import { editingId, useShards, type WorldItem } from '../store/useShards'
+import { WALL_BREATH_SECONDS } from './Rooms'
 import { ShardMesh } from './ShardMesh'
 import { regionBox } from '../lib/clip'
 import { placedPose, type Pose } from '../lib/pose'
@@ -23,6 +25,45 @@ import { TapTarget, farCullDoublings } from './TapTarget'
 const REACH = GRID_RADIUS * 8
 /** Past this many doublings out from its unit, a shard with no placed objects can never be seen (TapTarget farCullDoublings). */
 const FAR_CULL = farCullDoublings()
+
+/**
+ * A shard being moved by EDIT stays where it stands while the ghost shows
+ * where it is going, breathing between these opacities on the WALK walls'
+ * cycle (Rooms.tsx WALL_BREATH_SECONDS), so the two are never confused
+ * (arkinox, 2026-10-16: "fades in and out slowly, same speed as grid during
+ * WALK mode").
+ */
+const MOVING_LOW = 0.08
+/** ShardMesh's opacity for a ghost, which the moving shard is drawn as. */
+const GHOST_OPACITY = 0.45
+const MOVING_HIGH = 0.7
+
+/** This frame's opacity for the moving shard, read by `breathe`. */
+let breath = MOVING_HIGH
+
+/** One object of the moving shard at this frame's breath; hoisted, so a frame allocates nothing. */
+function breathe(obj: Object3D): void {
+  const m = (obj as { material?: Material | Material[] }).material
+  if (!m) return
+  if (Array.isArray(m)) m.forEach(breatheOne)
+  else breatheOne(m)
+}
+
+function breatheOne(one: Material): void {
+  // The points' disc shader has its own opacity uniform (pointDisc.ts),
+  // dimmer for the dots on a solid or lined shard: that ratio is kept.
+  const u = (one as { uniforms?: Record<string, { value: unknown }> }).uniforms?.uOpacity
+  if (u) {
+    one.userData.baseOpacity ??= u.value as number
+    u.value = breath * ((one.userData.baseOpacity as number) / GHOST_OPACITY)
+  } else one.opacity = breath
+}
+
+/** The moving shard's opacity at `seconds`: a raised cosine, as the walls breathe. */
+export function movingOpacity(seconds: number): number {
+  const breath = 0.5 - 0.5 * Math.cos((2 * Math.PI * seconds) / WALL_BREATH_SECONDS)
+  return MOVING_LOW + (MOVING_HIGH - MOVING_LOW) * breath
+}
 
 interface Props {
   axes: ViewAxes
@@ -83,6 +124,7 @@ export function WorldShards({ axes }: Props): JSX.Element | null {
   // The tour's district shows only its curators' things (DemoScene.curated).
   const curated = useShards((s) => s.curated)
   const births = useCeremony((s) => s.births)
+  const moving = useShards((s) => editingId(s.pending))
 
   const placed = useMemo(() => {
     const origin = alignedOrigin(anchor, scaleExp)
@@ -101,7 +143,7 @@ export function WorldShards({ axes }: Props): JSX.Element | null {
 
   return (
     <>
-      {placed.map((w) => <PlacedShard key={w.key} w={w} birth={births[w.key]} />)}
+      {placed.map((w) => <PlacedShard key={w.key} w={w} birth={births[w.key]} moving={w.key === moving} />)}
     </>
   )
 }
@@ -111,14 +153,23 @@ export function WorldShards({ axes }: Props): JSX.Element | null {
  * measured from the drawn group, and off while it is too small to see
  * (TapTarget; arkinox, 2026-09-30).
  */
-function PlacedShard({ w, birth }: { w: PlacedShardDraw; birth: number | undefined }): JSX.Element {
+function PlacedShard({ w, birth, moving }: { w: PlacedShardDraw; birth: number | undefined; moving: boolean }): JSX.Element {
   const drawn = useRef<Group>(null)
+  // Moving (EDIT): drawn as a ghost is, with ordinary blending, since a world
+  // face writes its colour opaque whatever its opacity (ShardMesh TAG_BLEND),
+  // and every material's opacity follows the breath each frame.
+  useFrame((state) => {
+    if (!moving || !drawn.current) return
+    breath = movingOpacity(state.clock.elapsedTime)
+    drawn.current.traverse(breathe)
+  })
   return (
     <group position={w.centre}>
       <group ref={drawn}>
-        <ShardMesh shard={w.shard} scale={w.scale} birth={birth} world clip={w.clip} pose={w.pose} />
+        <ShardMesh shard={w.shard} scale={w.scale} birth={birth} world ghost={moving} clip={w.clip} pose={w.pose} />
       </group>
-      <TapTarget measure={drawn} onTap={() => useShards.getState().selectSecret(w.key)} />
+      {/* Not tappable while it moves: the ghost is the one being aimed. */}
+      {!moving && <TapTarget measure={drawn} onTap={() => useShards.getState().selectSecret(w.key)} />}
     </group>
   )
 }

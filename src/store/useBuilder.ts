@@ -93,7 +93,9 @@
 
 import { create } from 'zustand'
 import { samePosition, useCyberspace } from './useCyberspace'
-import { useShards, type DeployPending } from './useShards'
+import { positionOf, useShards, type DeployPending } from './useShards'
+import { useWorkshop } from './useWorkshop'
+import { placedStep } from '../lib/space'
 import { useHyperspace } from './useHyperspace'
 import { useToast } from './useToast'
 import { useStash } from '../hud/stash'
@@ -416,11 +418,45 @@ useShards.subscribe((s, prev) => {
   // A new deploy, not only the first: one lined up while an earlier one is
   // still hiding after the mode ended starts the mode again too.
   if (s.pending !== null && s.pending !== prev.pending && !useBuilder.getState().active) useBuilder.getState().enter('deploy')
+  // CANCEL on a deploy from the workshop goes back to the workshop, not to
+  // BUILD mode and then the view (arkinox, 2026-10-16): the mode the deploy
+  // turned on ends with it, wherever the cursor went, and the bench reopens
+  // on the model. A BUILD session you started yourself stays on under it.
+  if (s.workshopBack !== null && s.workshopBack !== prev.workshopBack) {
+    const id = useShards.getState().takeWorkshopBack()
+    const w = useBuilder.getState()
+    if (w.active && w.via === 'deploy') w.exit()
+    if (id) useWorkshop.getState().openWorkshop(id)
+    return
+  }
   // A DEPLOY that never left your avatar was only ever a deploy at your
   // avatar: when it ends, hidden or canceled, so does the mode.
   const b = useBuilder.getState()
   if (s.pending === null && prev.pending !== null && b.active && b.via === 'deploy' && !b.leftAvatar) b.exit()
 })
+
+/**
+ * EDIT on a shard you hid (SecretModal): BUILD mode on the shard itself, its
+ * deploy lined up as it stands (useShards startEditShard), so the ghost sits
+ * exactly on it until you move it. The view goes to the shard first, at the
+ * zoom it was placed at or its own size, whichever is coarser, and BUILD
+ * starts on what the view frames (`enter`); the STEP is the cell it was
+ * snapped to (lib/space.ts placedStep), so nothing shifts before you aim. A
+ * BUILD session already on is ended first: its cursor is somewhere else.
+ */
+export function editPlaced(eventId: string): void {
+  const shards = useShards.getState()
+  const d = shards.mine.find((m) => m.eventId === eventId)
+  if (!d?.shard || shards.pending) return
+  const b = useBuilder.getState()
+  if (b.active) b.exit()
+  const at = positionOf(d)
+  const step = placedStep(at, d.height)
+  const zoom = Math.max(d.shard.unit, step)
+  useCyberspace.getState().focusItem(at, d.plane, d.shard.name || 'shard', zoom)
+  shards.startEditShard(eventId)
+  if (step < useCyberspace.getState().scaleExp) useCyberspace.getState().setBuildStep(step)
+}
 
 /**
  * Go to action `index` of the chain on show, from the CHAIN chip, [ ] Home

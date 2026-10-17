@@ -411,6 +411,39 @@ export function shardInnerTemplate(shard: ShardModel, at: Position, plane: Plane
   }
 }
 
+/**
+ * The identity an item keeps across EDIT (arkinox, 2026-10-16: "keep the d
+ * tag so comments and reactions aren't lost"). An item carried inline is a
+ * regular event, so moving it signs a new one with a new id; the new one
+ * carries `["d", <first version's id>]`, and comments and reactions name that
+ * id, whichever version they were made on. The tag is sealed in the bag like
+ * the rest of the item, so it says nothing to a relay. An item with no `d` is
+ * its own first version. A shard hidden by reference is a kind 33331 object
+ * with a `d` of its own, which EDIT keeps, so it needs nothing here (null).
+ */
+export function itemLineage(inner: Pick<NostrEvent, 'id' | 'kind' | 'tags'> | undefined): string | null {
+  if (!inner || inner.kind === OBJECT_KIND) return null
+  // Only an event id: a `d` of any other shape is not a lineage, and is ignored.
+  return inner.tags.find((t) => t[0] === 'd' && /^[0-9a-f]{64}$/.test(t[1] ?? ''))?.[1] ?? inner.id
+}
+
+/**
+ * An edited item's template: the new place (`C`, from `next`) and the
+ * lineage `d`, then every other tag the version it replaces carried (a
+ * credit, a picture), so a move changes only where it is.
+ */
+export function editedTemplate(next: EventTemplate, previous: Pick<NostrEvent, 'id' | 'kind' | 'tags'>): EventTemplate {
+  const at = next.tags.find((t) => t[0] === 'C')
+  const lineage = itemLineage(previous) ?? previous.id
+  const kept = previous.tags.filter((t) => t[0] !== 'C' && t[0] !== 'd')
+  return { ...next, tags: [...(at ? [at] : []), ['d', lineage], ...kept] }
+}
+
+/** The `d` of an addressable event, or ''. */
+export function dOf(ev: Pick<NostrEvent, 'tags'>): string {
+  return ev.tags.find((t) => t[0] === 'd')?.[1] ?? ''
+}
+
 /** The inner message event template (kind 1), signed by the author. */
 export function messageInnerTemplate(text: string, at: Position, plane: Plane, createdAt: number): EventTemplate {
   return {

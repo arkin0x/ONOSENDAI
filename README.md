@@ -166,7 +166,19 @@ coordinate and plane are AES-256-GCM encrypted to the region key
 `sha256(region_bytes)`, and only the `lookup_id = sha256(key)` is public, so
 the coordinate never leaves in the clear. The derivation is spec section 7.2
 exactly, so a shard hidden here is one the reference CLI can find and open. The
-events go to `wss://cyberspace.nostr1.com` alongside movement.
+events go to `wss://cyberspace.nostr1.com` alongside movement. CANCEL on a
+deploy started from the bench goes back to the bench. The green box is the
+region it will be found in; one too big for the view is drawn clipped around
+the cursor, with ZOOM OUT walls on the faces it continues through.
+
+**Moving a shard.** EDIT on a shard of yours (tap it in the world) is the same
+deploy, started where the shard stands: its height, size and pose, the ghost on
+it. The shard itself stays, breathing on the WALK walls' cycle, until the move
+lands; then the new version is hidden and the old one leaves its bag. The new
+version carries `d` = the first version's id, which its comments and reactions
+name, so they stay with it. Comments also answer the bag, so they stay with it
+only while it stays in its region at its height; the bar says when a move
+leaves it. A shard hidden by reference keeps its object's own `d` instead.
 
 **Discovery.** A background scan derives the region keys for heights 0 to 12 at
 wherever the scene is anchored (in a worker, since that is the O(2^h) work the

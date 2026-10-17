@@ -29,6 +29,8 @@ vi.mock('../../lib/relay', () => ({
     return { ok: true }
   }),
   query: vi.fn(async () => relayBags),
+  // What the relay holds at an address: the objects it took.
+  queryEach: vi.fn(async (f: { kinds: number[]; '#d': string[] }) => [{ url: 'wss://relay.test', outcome: 'answered', events: sent.filter((e) => f.kinds.includes(e.kind) && e.tags.some((t) => t[0] === 'd' && f['#d'].includes(t[1]))) }]),
   queryAny: vi.fn(async () => []),
   relaySet: () => ['wss://relay.test'],
 }))

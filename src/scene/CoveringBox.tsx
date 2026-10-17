@@ -17,67 +17,19 @@
  * shown and the thing you paid for are visibly the same object.
  */
 
-import { useEffect, useMemo, useRef } from 'react'
-import { useFrame } from '@react-three/fiber'
-import {
-  AddEquation, BoxGeometry, CustomBlending, DoubleSide, EqualStencilFunc, FrontSide, Group, MeshBasicMaterial,
-  NotEqualStencilFunc, OneFactor, OneMinusSrcAlphaFactor, PlaneGeometry, SrcAlphaFactor, ZeroFactor,
-} from 'three'
+import { useEffect, useMemo } from 'react'
+import { BoxGeometry, FrontSide } from 'three'
 import { GRID_RADIUS, formatOps, placeCentre, type ViewAxes } from '../lib/space'
 import { estimateHopCost } from 'cyberspace-core'
 import { boxEdges, coveringBox } from '../lib/covering'
 import { ACCENT, DANGER } from '../lib/palette'
 import { MAX_COMPUTE_HEIGHT, alignedOrigin, useCyberspace } from '../store/useCyberspace'
 import { WorldLabel } from './WorldLabel'
-import { FACE_TAG_STENCIL } from './ShardMesh'
+import { ClipWalls, OFF_FACES, OVER_FACES, type ClipFace } from './ClipWalls'
 import { useUiHints } from '../store/useUiHints'
 
 /** Clamp on the drawn extent; the reported cost is never clamped. */
 const MAX_CELLS = GRID_RADIUS * 3
-
-/** Seconds one outward breath of a clipped wall takes. */
-const WALL_CYCLE = 1.6
-
-/**
- * Peak opacity of a breathing wall, well above the box fill's ceiling (0.09).
- * The fill only whispers "this is a volume"; a breathing wall is the one active
- * message in the scene, "the region continues past this face", and at fill
- * strength it would read as a rendering artifact rather than a signal.
- */
-const WALL_OPACITY = 0.25
-
-/**
- * The box's translucent planes, drawn in two halves split by the stencil.
- *
- * Off the shard faces: exactly as before, ordinary blending, so the box reads
- * the same against the dark and the lattice and blooms as it always has.
- *
- * Over a shard face: the same color blend, but the alpha under it is left as
- * it was. The face's alpha is its tag, the thing that keeps the bloom off it
- * (Scene.tsx WorldBloom), and ordinary blending overwrote it with the box's
- * own opacity: the bloom then saw a white face as light and blew it out into
- * a glowing blob wherever the box covered it, which is exactly where your own
- * avatar always sits (arkinox, 2026-10-12). The face still takes the box's
- * tint; it just stays a face.
- */
-const OFF_FACES = { stencilWrite: true, stencilRef: FACE_TAG_STENCIL, stencilFunc: NotEqualStencilFunc } as const
-const OVER_FACES = {
-  stencilWrite: true, stencilRef: FACE_TAG_STENCIL, stencilFunc: EqualStencilFunc,
-  blending: CustomBlending, blendEquation: AddEquation,
-  blendSrc: SrcAlphaFactor, blendDst: OneMinusSrcAlphaFactor, blendSrcAlpha: ZeroFactor, blendDstAlpha: OneFactor,
-} as const
-
-/** One face of the drawn box that the true region extends beyond. */
-interface Wall {
-  /** Render axis the face is perpendicular to: 0 right, 1 up, 2 out. */
-  slot: number
-  /** Which of the pair: +1 breathes toward +axis, -1 toward -axis. */
-  sign: 1 | -1
-  geometry: PlaneGeometry
-  rotation: [number, number, number]
-  /** Face centre at rest, in cells; each breath departs from here. */
-  base: [number, number, number]
-}
 
 interface Props {
   axes: ViewAxes
@@ -200,80 +152,21 @@ export function CoveringBox({ axes }: Props): JSX.Element | null {
   // hint on with no covering box left to clear it.
   useEffect(() => () => useUiHints.getState().setCoveringClipped(false), [])
 
-  // Walls that breathe outward on the clipped axes.
-  //
-  // A clipped box is drawn as a bracket around the endpoints, which is honest
-  // about where the region is and silent about how far it goes, and that
-  // silence was read as "small and broken" rather than "bigger than the view".
-  // So each wall perpendicular to a clipped axis repeatedly slides one cell
-  // outward while fading, then snaps back: motion pointing out of the box, on
-  // exactly the faces the true region continues through. The axis mapping is
-  // the box's own: coveringBox lays world axes out through [right, up, out],
-  // so a clipped world axis animates along the render slot that claimed it.
-  const walls = useMemo<Wall[]>(() => {
+  // Walls that breathe outward on the clipped axes (ClipWalls): both faces
+  // of each, since the bracket stands in for the region on both sides. The
+  // axis mapping is the box's own: coveringBox lays world axes out through
+  // [right, up, out], so a clipped world axis breathes along the render slot
+  // that claimed it.
+  const faces = useMemo<ClipFace[]>(() => {
     if (!box || !box.clipped) return []
     const slots = [axes.right, axes.up, axes.out]
-    const out: Wall[] = []
+    const out: ClipFace[] = []
     for (const axis of box.clippedAxes) {
-      const slot = slots.findIndex((a) => a.axis === axis)
-      // PlaneGeometry faces +Z; rotate it to face the slot's render axis. Its
-      // extents are the face's own two render axes, so the plane is exactly
-      // the wall it stands in for.
-      const rotation: [number, number, number] =
-        slot === 0 ? [0, Math.PI / 2, 0] : slot === 1 ? [Math.PI / 2, 0, 0] : [0, 0, 0]
-      const w = slot === 0 ? box.size[2] : box.size[0]
-      const h = slot === 1 ? box.size[2] : box.size[1]
-      for (const sign of [1, -1] as const) {
-        const base: [number, number, number] = [box.centre[0], box.centre[1], box.centre[2]]
-        base[slot] += (sign * box.size[slot]) / 2
-        out.push({ slot, sign, geometry: new PlaneGeometry(w, h), rotation, base })
-      }
+      const slot = slots.findIndex((a) => a.axis === axis) as 0 | 1 | 2
+      out.push({ slot, sign: 1 }, { slot, sign: -1 })
     }
     return out
   }, [box, axes])
-
-  useEffect(() => () => { for (const w of walls) w.geometry.dispose() }, [walls])
-
-  // One material for all walls: every wall shares one phase, so they share one
-  // opacity, and the frame loop then touches a single object (a pair, now, one
-  // per half of the stencil split; see OFF_FACES, arkinox, 2026-10-12). DoubleSide,
-  // unlike the fill, because a breath that carries a wall past the camera
-  // still has to be readable from behind; depthWrite off, like the fill, so a
-  // translucent plane never punches a hole in what sits behind it.
-  const wallMaterials = useMemo(() => [OFF_FACES, OVER_FACES].map((split) => new MeshBasicMaterial({
-    color: ACCENT,
-    transparent: true,
-    opacity: WALL_OPACITY,
-    side: DoubleSide,
-    // One pass, not three's back-then-front pair (see ShardMesh).
-    forceSinglePass: true,
-    depthWrite: false,
-    toneMapped: false,
-    ...split,
-  })), [])
-  useEffect(() => () => { for (const m of wallMaterials) m.dispose() }, [wallMaterials])
-
-  const wallMeshes = useRef<Array<Group | null>>([])
-
-  useFrame((state) => {
-    if (walls.length === 0) return
-    // Free-running phase rather than a start time: the breath is a state, not
-    // an event, and a cycle restarted on every cursor step would stutter.
-    const t = (state.clock.elapsedTime % WALL_CYCLE) / WALL_CYCLE
-    // Ease-out: the wall departs briskly and decelerates as it fades, which
-    // reads as emanating from the box rather than drifting off it.
-    const eased = 1 - (1 - t) ** 3
-    for (const m of wallMaterials) m.opacity = WALL_OPACITY * (1 - eased)
-    for (let i = 0; i < walls.length; i++) {
-      const mesh = wallMeshes.current[i]
-      if (!mesh) continue
-      const w = walls[i]
-      mesh.position.set(w.base[0], w.base[1], w.base[2])
-      // One cell exactly: the breath's reach names the lattice unit, so it
-      // reads as "at least one more cell that way", not as vague drift.
-      mesh.position.setComponent(w.slot, w.base[w.slot] + w.sign * eased)
-    }
-  })
 
   // WALK has no cursor to line up: each press is its own step, and the
   // walls you would pay for are striped on the rooms instead (Rooms.tsx).
@@ -309,18 +202,7 @@ export function CoveringBox({ axes }: Props): JSX.Element | null {
           opacity={box.clipped ? 0.4 : 0.85}
         />
       </lineSegments>
-      {walls.map((w, i) => (
-        <group key={`${w.slot}${w.sign}`}>
-          <group ref={(g) => { wallMeshes.current[i] = g }} position={w.base}>
-            {wallMaterials.map((m, k) => (
-              <mesh key={k} geometry={w.geometry} material={m} rotation={w.rotation} frustumCulled={false} />
-            ))}
-          </group>
-          {/* The remedy, written on the thing asking for it. Small and the
-              box's own blue: an instruction, not an alert. */}
-          <WorldLabel text="ZOOM OUT" color={ACCENT} at={w.base} px={11} align="center" />
-        </group>
-      ))}
+      <ClipWalls centre={box.centre} size={box.size} faces={faces} color={ACCENT} />
       {!focused && <WorldLabel text={box.label} color={box.color} at={box.at} offset={[1.5, -1.3, 0]} px={13} />}
     </group>
   )

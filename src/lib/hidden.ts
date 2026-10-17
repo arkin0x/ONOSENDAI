@@ -423,7 +423,8 @@ export function shardInnerTemplate(shard: ShardModel, at: Position, plane: Plane
  */
 export function itemLineage(inner: Pick<NostrEvent, 'id' | 'kind' | 'tags'> | undefined): string | null {
   if (!inner || inner.kind === OBJECT_KIND) return null
-  return inner.tags.find((t) => t[0] === 'd' && t[1])?.[1] ?? inner.id
+  // Only an event id: a `d` of any other shape is not a lineage, and is ignored.
+  return inner.tags.find((t) => t[0] === 'd' && /^[0-9a-f]{64}$/.test(t[1] ?? ''))?.[1] ?? inner.id
 }
 
 /**

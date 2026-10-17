@@ -51,11 +51,16 @@ describe('drawnRegion', () => {
     expect(r.faces).toEqual([{ slot: 0, sign: -1 }, { slot: 1, sign: 1 }, { slot: 2, sign: -1 }])
   })
 
-  it('is still drawn at the top of the space', () => {
-    const top: Position = { x: (1n << 85n) - 1n, y: 3n, z: 1n << 84n }
-    const r = drawnRegion(top, alignedOrigin(top, 0), 84, 0, AXES, 30)
-    expect(r).not.toBeNull()
-    expect(r!.size.every((s) => s >= 1 && s <= 31)).toBe(true)
+  it('holds the cursor near the top face of a huge region, with no wall there', () => {
+    // 3 cells below the top of a 2^56 and a 2^85 region: floats cancelled here.
+    for (const height of [54, 56, 70, 84]) {
+      const top = (1n << BigInt(height)) * 3n
+      const near: Position = { x: top - 3n, y: top - 3n, z: top - 3n }
+      const r = drawnRegion(near, alignedOrigin(near, 0), height, 0, AXES, 30)!
+      expect(r.size).toEqual([18, 18, 18])
+      expect(r.centre).toEqual([-6.5, -6.5, -6.5])
+      expect(r.faces).toEqual([{ slot: 0, sign: -1 }, { slot: 1, sign: -1 }, { slot: 2, sign: -1 }])
+    }
   })
 
   it('draws a region smaller than a cell as a fraction of it, without a grid', () => {

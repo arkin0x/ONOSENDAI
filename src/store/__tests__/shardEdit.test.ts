@@ -18,20 +18,25 @@ if (typeof localStorage === 'undefined') {
   }
 }
 
-const sent: { kind: number; tags: string[][]; id: string }[] = []
+const sent: { kind: number; tags: string[][]; id: string; content?: string; created_at?: number }[] = []
+/** Kinds every relay refuses in the current test. */
+const refused = new Set<number>()
 vi.mock('../../lib/relay', () => ({
   publishMany: vi.fn(async (_relays: string[], ev: { kind: number; tags: string[][]; id: string }) => {
+    if (refused.has(ev.kind)) return { ok: false }
     sent.push(ev)
     return { ok: true }
   }),
   query: vi.fn(async () => []),
+  // What the relay holds at an address: the objects it took.
+  queryEach: vi.fn(async (f: { kinds: number[]; '#d': string[] }) => [{ url: 'wss://relay.test', outcome: 'answered', events: sent.filter((e) => f.kinds.includes(e.kind) && e.tags.some((t) => t[0] === 'd' && f['#d'].includes(t[1]))) }]),
   queryAny: vi.fn(async () => []),
   relaySet: () => ['wss://relay.test'],
 }))
 
 import { newShard, type ShardModel } from 'sno-core/shards'
 import { useCyberspace } from '../useCyberspace'
-import { editable, useShards } from '../useShards'
+import { EDIT_STALE, editable, useShards, type MyDeployment } from '../useShards'
 import { useWorkshop } from '../useWorkshop'
 import { useBuilder } from '../useBuilder'
 import { bagEntries, dOf, HIDDEN_KIND, OBJECT_KIND } from '../../lib/hidden'
@@ -80,8 +85,12 @@ async function move(eventId: string, p: Position): Promise<void> {
 const lastBag = () => [...sent].reverse().find((e) => e.kind === HIDDEN_KIND) as unknown as NostrEvent
 const tag = (ev: { tags: string[][] }, name: string) => ev.tags.find((t) => t[0] === name)?.[1]
 
+const realSign = useCyberspace.getState().signEvent
+
 beforeEach(() => {
   sent.length = 0
+  refused.clear()
+  useCyberspace.setState({ signEvent: realSign })
   useShards.setState({ mine: [], deleted: {}, discovered: {}, pending: null, deployHeight: 0, deployUnit: 0, deployStatus: 'idle', deployError: null, workshopBack: null })
   useCyberspace.setState({ live: true, scaleExp: 0, buildStep: null })
   useBuilder.setState({ active: false, via: null, leftAvatar: false })
@@ -201,5 +210,66 @@ describe('CANCEL on a deploy from the workshop', () => {
     useShards.getState().startDeployShard(shard.id)
     useShards.getState().cancelDeploy(true)
     expect(useWorkshop.getState().open).toBe(false)
+  })
+})
+
+describe('the review of #369', () => {
+  /** A move that fails: the deploy reports why, and nothing of the old copy changed. */
+  async function failedMove(eventId: string, p: Position): Promise<string | null> {
+    useShards.getState().startEditShard(eventId)
+    aim(p)
+    await useShards.getState().deploy()
+    expect(useShards.getState().deployStatus).toBe('error')
+    return useShards.getState().deployError
+  }
+
+  it('a stale row of a moved reference shard never retracts its address, and cannot be edited', async () => {
+    const first = await hide(3000, at(1n))
+    const stale: MyDeployment = { ...useShards.getState().mine[0] }
+    await move(first, at(9n))
+    const moved = useShards.getState().mine[0]
+    // The row another device kept from before the move.
+    useShards.setState({ mine: [...useShards.getState().mine, stale], deleted: {} })
+    // Marked, not cleared: the fake relay is what was sent.
+    const mark = sent.length
+    await useShards.getState().deleteInstance(stale.eventId)
+    expect(sent.slice(mark).some((e) => e.kind === 5 && e.tags.some((t) => t[0] === 'a' && t[1] === moved.ref?.[1]))).toBe(false)
+    // And from a device that has only the stale row, EDIT refuses.
+    useShards.setState({ mine: [stale], deleted: {} })
+    expect(await failedMove(stale.eventId, at(17n))).toBe(EDIT_STALE)
+  })
+
+  it('a reference move whose bag the signer refuses publishes nothing', async () => {
+    const first = await hide(3000, at(1n))
+    const before = useShards.getState().mine
+    sent.length = 0
+    useCyberspace.setState({ signEvent: async (t) => { if (t.kind === HIDDEN_KIND) throw new Error('declined'); return realSign(t) } })
+    expect(await failedMove(first, at(9n))).toMatch(/declined/)
+    expect(sent).toEqual([])
+    expect(useShards.getState().mine).toEqual(before)
+  })
+
+  it('a move whose new bag no relay takes keeps the old copy, and puts a reference shard back', async () => {
+    const first = await hide(3000, at(1n))
+    const old = useShards.getState().mine[0]
+    sent.length = 0
+    refused.add(HIDDEN_KIND)
+    expect(await failedMove(first, at(9n))).toMatch(/stays where it was/)
+    expect(useShards.getState().mine.map((d) => d.eventId)).toEqual([first])
+    expect(sent.some((e) => e.kind === 5)).toBe(false)
+    // The resealed object went out, then the old one again, a second newer.
+    const objects = sent.filter((e) => e.kind === OBJECT_KIND)
+    expect(objects).toHaveLength(2)
+    expect(objects[1].content).toBe(old.inner.content)
+    expect(objects[1].created_at).toBeGreaterThan(objects[0].created_at!)
+  })
+
+  it('an inline move whose new bag no relay takes keeps the old copy', async () => {
+    const first = await hide(3, at(1n))
+    sent.length = 0
+    refused.add(HIDDEN_KIND)
+    await failedMove(first, at(9n))
+    expect(useShards.getState().mine.map((d) => d.eventId)).toEqual([first])
+    expect(sent).toEqual([])
   })
 })

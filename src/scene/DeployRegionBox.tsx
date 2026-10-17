@@ -93,9 +93,12 @@ export function drawnRegion(
   const half = Math.floor(maxCells / 2)
   slots.forEach((a, i) => {
     const base = (cursor[a.axis] >> h) << h
-    // The region's first and last cell, by index from the render origin.
+    // The region's first and last cell, by index from the render origin,
+    // each from its own bigint: `lo + side - 1` in floats cancels once the
+    // region is 2^56 cells or more, and cut the box short of a cursor near
+    // its top (review of #369).
     const lo = cellDelta(base, origin[a.axis], scaleExp)
-    const hi = lo + side - 1
+    const hi = cellDelta(base + (1n << h) - (1n << BigInt(scaleExp)), origin[a.axis], scaleExp)
     let from = lo
     let to = hi
     if (side > maxCells) {

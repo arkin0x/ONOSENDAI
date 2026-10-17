@@ -35,7 +35,7 @@ import { clampUnit, normalizeStored } from 'sno-core/shards'
 import { snapOffered, wrapSpin } from '../lib/pose'
 import { create } from 'zustand'
 import { MAX_COMPUTE_HEIGHT, useCyberspace } from './useCyberspace'
-import { publishMany, query, relaySet } from '../lib/relay'
+import { publishMany, query, queryEach, relaySet } from '../lib/relay'
 import { forgetReference, resolveReference } from '../lib/references'
 import { unbagRemembered } from '../lib/foundCache'
 import { itemTargetOf, type ItemTarget } from '../lib/comments'
@@ -335,6 +335,8 @@ function lineageOf(inner: NostrEvent | undefined, ref: Reference | undefined): {
 
 /** Why an EDIT stopped: the shard it moves is no longer among your deployments here. */
 export const EDIT_GONE = 'That shard is no longer among what this device hid, so there is nothing to move.'
+/** Why an EDIT stopped: the shard was moved or changed since this device last saw it. */
+export const EDIT_STALE = 'This shard was moved or changed from another device since this one saw it. Find it where it stands now and edit it there.'
 
 /** The name a pending deploy goes by in the bar and the ghost. */
 export function pendingName(pending: DeployPending, shard: ShardModel | null): string {
@@ -732,10 +734,31 @@ export const useShards = create<ShardsState>((set, get) => {
     await publishMany(relays, del)
   }
 
+  /**
+   * Whether the event at an object's address is still this very version, as
+   * the relays answer: false when they hold a newer one (the shard was moved
+   * by EDIT, here or from another device, and resealed under the same `d`),
+   * and false when no relay answers, since a retraction by address would
+   * delete whatever the address holds now (review of #369). Nothing seen
+   * at all is this version, unchallenged.
+   */
+  async function addressStillThis(object: NostrEvent): Promise<boolean> {
+    try {
+      const answers = (await queryEach({ kinds: [object.kind], authors: [object.pubkey], '#d': [dOf(object)] })).filter((a) => a.outcome === 'answered')
+      if (answers.length === 0) return false
+      return !answers.some((a) => a.events.some((e) => e.id !== object.id && e.created_at >= object.created_at))
+    } catch {
+      return false
+    }
+  }
+
   /** Build and publish the region bag, with its settings; `place` is any point in the region, for a hint's base. */
-  async function publishBag(inners: BagEntry[], key: Uint8Array, lookupId: string, height: number, live: boolean, settings: BagSettings, place: { at: Position; plane: Plane }): Promise<{ event: NostrEvent; published: boolean }> {
+  async function publishBag(inners: BagEntry[], key: Uint8Array, lookupId: string, height: number, live: boolean, settings: BagSettings, place: { at: Position; plane: Plane }, beforeSend?: () => Promise<void>): Promise<{ event: NostrEvent; published: boolean }> {
     const createdAt = nextBagAt(lookupId)
     const event = await cyber().signEvent(await bagTemplate(inners, key, lookupId, height, createdAt, HIDDEN_KIND, settings, place))
+    // Anything that must go out only once the bag is signed (an EDIT's
+    // resealed object): a signer that refuses the bag stops it here.
+    if (beforeSend) await beforeSend()
     const result = live ? await publishMany(relaySet(), event) : { ok: true as const }
     return { event, published: live && result.ok }
   }
@@ -1212,6 +1235,9 @@ export const useShards = create<ShardsState>((set, get) => {
         // published bag never names something the relay does not have.
         let inner: NostrEvent
         let ref: Reference | undefined
+        // EDIT of a reference shard: the old object signed again, for a failed move to put back.
+        let rollback: NostrEvent | undefined
+        let objectSent = false
         if (link && object) {
           // LIVE LINK: the bag names the author's own object, signed by them;
           // nothing new is signed for the item. A finder looks it up on their
@@ -1238,8 +1264,18 @@ export const useShards = create<ShardsState>((set, get) => {
           // A move reseals the same object under its own `d`, which replaces
           // it on the relays and keeps its address, the thing its comments
           // and reactions name (arkinox, 2026-10-16).
+          // A row from before a move made elsewhere would reseal the old
+          // model over the moved one: refused (review of #369).
+          if (was && live && !(await addressStillThis(was.inner))) throw new Error(EDIT_STALE)
           inner = await cs.signEvent(await objectTemplate(shard, rk.key, was ? dOf(was.inner) : placementId(), createdAt))
-          if (live) {
+          if (was) {
+            // A move publishes nothing until everything is signed: the
+            // object goes out after the bag is signed (publishBag's
+            // beforeSend), and the old version, signed again a second newer,
+            // is what goes back if the new bag reaches no relay, so a failed
+            // move never leaves the old place unreadable (review of #369).
+            rollback = await cs.signEvent({ kind: was.inner.kind, created_at: createdAt + 1, content: was.inner.content, tags: was.inner.tags })
+          } else if (live) {
             const sent = await publishMany(relaySet(), inner)
             if (!sent.ok) throw new Error('No relay took the shard. Try again when one is reachable.')
           }
@@ -1264,8 +1300,19 @@ export const useShards = create<ShardsState>((set, get) => {
           const region = regionOf(at, plane, deployHeight)
           const base = deployBagFrom?.region === region ? deployBagFrom.settings : DEFAULT_BAG_SETTINGS
           settings = resolveBagSettings(deployBag, base, existing.settings, deployHeight)
-          ;({ event, published } = await publishBag(allInners, rk.key, rk.lookupId, deployHeight, live, settings, { at, plane }))
+          const sendObject = was && rollback && live
+            ? async () => {
+              const sent = await publishMany(relaySet(), inner)
+              if (!sent.ok) throw new Error('No relay took the moved shard. It stays where it was.')
+              objectSent = true
+            }
+            : undefined
+          ;({ event, published } = await publishBag(allInners, rk.key, rk.lookupId, deployHeight, live, settings, { at, plane }, sendObject))
+          // A move whose new bag no relay took has not happened: the old
+          // copy stays, and is never taken down (review of #369).
+          if (was && live && !published) throw new Error('No relay took the moved shard. It stays where it was.')
         } catch (err) {
+          if (objectSent && rollback) await publishMany(relaySet(), rollback).catch(() => undefined)
           // The object went out but no bag names it: take it back rather than
           // leave a preview on the relay that nothing will ever clean up.
           // Only an object this deploy published; never the author's, for a LIVE LINK.
@@ -1505,7 +1552,10 @@ export const useShards = create<ShardsState>((set, get) => {
       // sealed, but its preview would otherwise sit on the relay for good.
       // Only once the relays hold a bag that no longer names it: retracting it
       // while the old bag still does would leave that bag with a hole.
-      if (item.ref && item.inner.pubkey === me && wasPublic && unnamed && !opts?.keepObject) {
+      // Never by address while the address holds something newer: after an
+      // EDIT the object under this `d` is the moved shard's (review of #369).
+      const sharedHere = !!item.ref && get().mine.some((d) => d.eventId !== eventId && d.ref?.[1] === item.ref?.[1])
+      if (item.ref && item.inner.pubkey === me && wasPublic && unnamed && !opts?.keepObject && !sharedHere && await addressStillThis(item.inner)) {
         try { await retractObject(item.inner, item.relays ?? relaySet()) } catch { /* best effort */ }
         forgetReference(item.ref)
       }

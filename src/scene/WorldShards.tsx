@@ -10,7 +10,7 @@
 
 import { useMemo, useRef } from 'react'
 import { useFrame } from '@react-three/fiber'
-import type { Group, Material } from 'three'
+import type { Group, Material, Object3D } from 'three'
 import { GRID_RADIUS, itemCentre, type Position, type ViewAxes } from '../lib/space'
 import { alignedOrigin, useCyberspace } from '../store/useCyberspace'
 import { useCeremony } from '../store/useCeremony'
@@ -37,6 +37,27 @@ const MOVING_LOW = 0.08
 /** ShardMesh's opacity for a ghost, which the moving shard is drawn as. */
 const GHOST_OPACITY = 0.45
 const MOVING_HIGH = 0.7
+
+/** This frame's opacity for the moving shard, read by `breathe`. */
+let breath = MOVING_HIGH
+
+/** One object of the moving shard at this frame's breath; hoisted, so a frame allocates nothing. */
+function breathe(obj: Object3D): void {
+  const m = (obj as { material?: Material | Material[] }).material
+  if (!m) return
+  if (Array.isArray(m)) m.forEach(breatheOne)
+  else breatheOne(m)
+}
+
+function breatheOne(one: Material): void {
+  // The points' disc shader has its own opacity uniform (pointDisc.ts),
+  // dimmer for the dots on a solid or lined shard: that ratio is kept.
+  const u = (one as { uniforms?: Record<string, { value: unknown }> }).uniforms?.uOpacity
+  if (u) {
+    one.userData.baseOpacity ??= u.value as number
+    u.value = breath * ((one.userData.baseOpacity as number) / GHOST_OPACITY)
+  } else one.opacity = breath
+}
 
 /** The moving shard's opacity at `seconds`: a raised cosine, as the walls breathe. */
 export function movingOpacity(seconds: number): number {
@@ -139,20 +160,8 @@ function PlacedShard({ w, birth, moving }: { w: PlacedShardDraw; birth: number |
   // and every material's opacity follows the breath each frame.
   useFrame((state) => {
     if (!moving || !drawn.current) return
-    const o = movingOpacity(state.clock.elapsedTime)
-    drawn.current.traverse((obj) => {
-      const m = (obj as { material?: Material | Material[] }).material
-      if (!m) return
-      for (const one of Array.isArray(m) ? m : [m]) {
-        // The points' disc shader has its own opacity uniform (pointDisc.ts),
-        // dimmer for the dots on a solid or lined shard: that ratio is kept.
-        const u = (one as { uniforms?: Record<string, { value: unknown }> }).uniforms?.uOpacity
-        if (u) {
-          one.userData.baseOpacity ??= u.value as number
-          u.value = o * ((one.userData.baseOpacity as number) / GHOST_OPACITY)
-        } else one.opacity = o
-      }
-    })
+    breath = movingOpacity(state.clock.elapsedTime)
+    drawn.current.traverse(breathe)
   })
   return (
     <group position={w.centre}>

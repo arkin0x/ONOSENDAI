@@ -789,6 +789,13 @@ export const useShards = create<ShardsState>((set, get) => {
       row = { ...rest, eventId: back.id, inner: back }
       return row
     })
+    // An EDIT lined up on this row follows it, in place, so the bar's MOVE
+    // still finds the shard and deploy's own pending checks still hold.
+    const pending = get().pending
+    if (pending?.type === 'shard' && pending.edit?.eventId === eventId) {
+      pending.edit.eventId = back.id
+      pending.shardId = back.id
+    }
     const discovered = { ...get().discovered }
     delete discovered[eventId]
     set({ mine, discovered, inspecting: get().inspecting === eventId ? null : get().inspecting })
@@ -1160,11 +1167,14 @@ export const useShards = create<ShardsState>((set, get) => {
       }
       // An earlier move of it that could not be put back is put back first.
       if (was?.putBack) {
+        // Working from here, so a second tap waits as for any hide.
+        set({ deployStatus: 'working', deployError: null, deployNote: 'Putting the old version back' })
         const back = await putBackNow(was.eventId)
         if (!back) {
-          set({ deployStatus: 'error', deployError: PUT_BACK_PENDING })
+          set({ deployStatus: 'error', deployNote: null, deployError: PUT_BACK_PENDING })
           return
         }
+        set({ deployStatus: 'idle', deployNote: null })
         was = back
       }
 

@@ -329,4 +329,16 @@ describe('the review of #369', () => {
     expect(moved[0].putBack).toBeUndefined()
     expect(moved[0].lookupId).not.toBe(old.lookupId)
   }, 15_000)
+
+  it('MOVE again from the same bar after a rolled-back move moves it', async () => {
+    const first = await hide(3000, at(1n))
+    refused.add(HIDDEN_KIND)
+    await failedMove(first, at(9n))
+    refused.clear()
+    // No CANCEL: the same bar, the same pending EDIT.
+    await useShards.getState().deploy()
+    expect(useShards.getState().deployError).toBeNull()
+    expect(useShards.getState().deployStatus).toBe('done')
+    expect(useShards.getState().mine).toHaveLength(1)
+  })
 })

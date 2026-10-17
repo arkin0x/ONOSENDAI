@@ -337,6 +337,8 @@ function lineageOf(inner: NostrEvent | undefined, ref: Reference | undefined): {
 export const EDIT_GONE = 'That shard is no longer among what this device hid, so there is nothing to move.'
 /** Why an EDIT stopped: the shard was moved or changed since this device last saw it. */
 export const EDIT_STALE = 'This shard was moved or changed from another device since this one saw it. Find it where it stands now and edit it there.'
+/** Why an EDIT stopped: no relay answered whether the shard is still as this device saw it. */
+export const EDIT_UNANSWERED = 'No relay answered, so this cannot tell whether the shard was moved from another device. Try again when one is reachable.'
 
 /** The name a pending deploy goes by in the bar and the ghost. */
 export function pendingName(pending: DeployPending, shard: ShardModel | null): string {
@@ -742,13 +744,13 @@ export const useShards = create<ShardsState>((set, get) => {
    * delete whatever the address holds now (review of #369). Nothing seen
    * at all is this version, unchallenged.
    */
-  async function addressStillThis(object: NostrEvent): Promise<boolean> {
+  async function addressStillThis(object: NostrEvent): Promise<'this' | 'newer' | 'silent'> {
     try {
       const answers = (await queryEach({ kinds: [object.kind], authors: [object.pubkey], '#d': [dOf(object)] })).filter((a) => a.outcome === 'answered')
-      if (answers.length === 0) return false
-      return !answers.some((a) => a.events.some((e) => e.id !== object.id && e.created_at >= object.created_at))
+      if (answers.length === 0) return 'silent'
+      return answers.some((a) => a.events.some((e) => e.id !== object.id && e.created_at >= object.created_at)) ? 'newer' : 'this'
     } catch {
-      return false
+      return 'silent'
     }
   }
 
@@ -1266,15 +1268,22 @@ export const useShards = create<ShardsState>((set, get) => {
           // and reactions name (arkinox, 2026-10-16).
           // A row from before a move made elsewhere would reseal the old
           // model over the moved one: refused (review of #369).
-          if (was && live && !(await addressStillThis(was.inner))) throw new Error(EDIT_STALE)
-          inner = await cs.signEvent(await objectTemplate(shard, rk.key, was ? dOf(was.inner) : placementId(), createdAt))
-          if (was) {
+          if (was && live) {
+            const still = await addressStillThis(was.inner)
+            if (still !== 'this') throw new Error(still === 'newer' ? EDIT_STALE : EDIT_UNANSWERED)
+          }
+          // Newer than the version it replaces even within the same second
+          // (a retry right after a rollback), or relays would keep that one.
+          const objectAt = was ? Math.max(createdAt, was.inner.created_at + 1) : createdAt
+          inner = await cs.signEvent(await objectTemplate(shard, rk.key, was ? dOf(was.inner) : placementId(), objectAt))
+          if (was && live) {
             // A move publishes nothing until everything is signed: the
             // object goes out after the bag is signed (publishBag's
             // beforeSend), and the old version, signed again a second newer,
             // is what goes back if the new bag reaches no relay, so a failed
             // move never leaves the old place unreadable (review of #369).
-            rollback = await cs.signEvent({ kind: was.inner.kind, created_at: createdAt + 1, content: was.inner.content, tags: was.inner.tags })
+            // Only while live: LOCAL publishes nothing, so there is nothing to put back.
+            rollback = await cs.signEvent({ kind: was.inner.kind, created_at: objectAt + 1, content: was.inner.content, tags: was.inner.tags })
           } else if (live) {
             const sent = await publishMany(relaySet(), inner)
             if (!sent.ok) throw new Error('No relay took the shard. Try again when one is reachable.')
@@ -1312,7 +1321,21 @@ export const useShards = create<ShardsState>((set, get) => {
           // copy stays, and is never taken down (review of #369).
           if (was && live && !published) throw new Error('No relay took the moved shard. It stays where it was.')
         } catch (err) {
-          if (objectSent && rollback) await publishMany(relaySet(), rollback).catch(() => undefined)
+          // Put back, the row follows: the relays now hold the rollback, so it
+          // is this device's version of the shard, keyed by its id as a scan
+          // keys a sealed object, or every later EDIT and DELETE of it would
+          // read as stale (review of #369).
+          if (objectSent && rollback && was) {
+            const back = rollback
+            const ok = await publishMany(relaySet(), back).then((r) => r.ok, () => false)
+            if (ok) {
+              const mine = get().mine.map((d) => (d.eventId === was.eventId ? { ...d, eventId: back.id, inner: back } : d))
+              const discovered = { ...get().discovered }
+              delete discovered[was.eventId]
+              set({ mine, discovered, inspecting: get().inspecting === was.eventId ? null : get().inspecting })
+              saveMine(mine)
+            }
+          }
           // The object went out but no bag names it: take it back rather than
           // leave a preview on the relay that nothing will ever clean up.
           // Only an object this deploy published; never the author's, for a LIVE LINK.
@@ -1555,7 +1578,7 @@ export const useShards = create<ShardsState>((set, get) => {
       // Never by address while the address holds something newer: after an
       // EDIT the object under this `d` is the moved shard's (review of #369).
       const sharedHere = !!item.ref && get().mine.some((d) => d.eventId !== eventId && d.ref?.[1] === item.ref?.[1])
-      if (item.ref && item.inner.pubkey === me && wasPublic && unnamed && !opts?.keepObject && !sharedHere && await addressStillThis(item.inner)) {
+      if (item.ref && item.inner.pubkey === me && wasPublic && unnamed && !opts?.keepObject && !sharedHere && (await addressStillThis(item.inner)) === 'this') {
         try { await retractObject(item.inner, item.relays ?? relaySet()) } catch { /* best effort */ }
         forgetReference(item.ref)
       }

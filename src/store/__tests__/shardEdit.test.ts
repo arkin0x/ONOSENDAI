@@ -21,6 +21,8 @@ if (typeof localStorage === 'undefined') {
 const sent: { kind: number; tags: string[][]; id: string; content?: string; created_at?: number }[] = []
 /** Kinds every relay refuses in the current test. */
 const refused = new Set<number>()
+/** No relay answers a query while set. */
+let silent = false
 vi.mock('../../lib/relay', () => ({
   publishMany: vi.fn(async (_relays: string[], ev: { kind: number; tags: string[][]; id: string }) => {
     if (refused.has(ev.kind)) return { ok: false }
@@ -29,14 +31,14 @@ vi.mock('../../lib/relay', () => ({
   }),
   query: vi.fn(async () => []),
   // What the relay holds at an address: the objects it took.
-  queryEach: vi.fn(async (f: { kinds: number[]; '#d': string[] }) => [{ url: 'wss://relay.test', outcome: 'answered', events: sent.filter((e) => f.kinds.includes(e.kind) && e.tags.some((t) => t[0] === 'd' && f['#d'].includes(t[1]))) }]),
+  queryEach: vi.fn(async (f: { kinds: number[]; '#d': string[] }) => silent ? [{ url: 'wss://relay.test', outcome: 'unreachable', reason: 'down', events: [] }] : [{ url: 'wss://relay.test', outcome: 'answered', events: sent.filter((e) => f.kinds.includes(e.kind) && e.tags.some((t) => t[0] === 'd' && f['#d'].includes(t[1]))) }]),
   queryAny: vi.fn(async () => []),
   relaySet: () => ['wss://relay.test'],
 }))
 
 import { newShard, type ShardModel } from 'sno-core/shards'
 import { useCyberspace } from '../useCyberspace'
-import { EDIT_STALE, editable, useShards, type MyDeployment } from '../useShards'
+import { EDIT_STALE, EDIT_UNANSWERED, editable, useShards, type MyDeployment } from '../useShards'
 import { useWorkshop } from '../useWorkshop'
 import { useBuilder } from '../useBuilder'
 import { bagEntries, dOf, HIDDEN_KIND, OBJECT_KIND } from '../../lib/hidden'
@@ -90,6 +92,7 @@ const realSign = useCyberspace.getState().signEvent
 beforeEach(() => {
   sent.length = 0
   refused.clear()
+  silent = false
   useCyberspace.setState({ signEvent: realSign })
   useShards.setState({ mine: [], deleted: {}, discovered: {}, pending: null, deployHeight: 0, deployUnit: 0, deployStatus: 'idle', deployError: null, workshopBack: null })
   useCyberspace.setState({ live: true, scaleExp: 0, buildStep: null })
@@ -255,13 +258,17 @@ describe('the review of #369', () => {
     sent.length = 0
     refused.add(HIDDEN_KIND)
     expect(await failedMove(first, at(9n))).toMatch(/stays where it was/)
-    expect(useShards.getState().mine.map((d) => d.eventId)).toEqual([first])
     expect(sent.some((e) => e.kind === 5)).toBe(false)
     // The resealed object went out, then the old one again, a second newer.
     const objects = sent.filter((e) => e.kind === OBJECT_KIND)
     expect(objects).toHaveLength(2)
     expect(objects[1].content).toBe(old.inner.content)
     expect(objects[1].created_at).toBeGreaterThan(objects[0].created_at!)
+    // The one row, still where it was, now keyed by what the relays hold.
+    const rows = useShards.getState().mine
+    expect(rows).toHaveLength(1)
+    expect(rows[0].eventId).toBe(objects[1].id)
+    expect(rows[0].lookupId).toBe(old.lookupId)
   })
 
   it('an inline move whose new bag no relay takes keeps the old copy', async () => {
@@ -271,5 +278,33 @@ describe('the review of #369', () => {
     await failedMove(first, at(9n))
     expect(useShards.getState().mine.map((d) => d.eventId)).toEqual([first])
     expect(sent).toEqual([])
+  })
+
+  it('after a rolled-back move the shard is this device\'s again: a retry moves it', async () => {
+    const first = await hide(3000, at(1n))
+    refused.add(HIDDEN_KIND)
+    await failedMove(first, at(9n))
+    const row = useShards.getState().mine[0]
+    expect(row.eventId).not.toBe(first)
+    refused.clear()
+    await move(row.eventId, at(9n))
+    const moved = useShards.getState().mine
+    expect(moved).toHaveLength(1)
+    expect(moved[0].inner.created_at).toBeGreaterThan(row.inner.created_at)
+  })
+
+  it('says no relay answered, not that it moved, when the relays are silent', async () => {
+    const first = await hide(3000, at(1n))
+    silent = true
+    expect(await failedMove(first, at(9n))).toBe(EDIT_UNANSWERED)
+  })
+
+  it('asks for no rollback signature while LOCAL', async () => {
+    useCyberspace.setState({ live: false })
+    const first = await hide(3000, at(1n))
+    const kinds: number[] = []
+    useCyberspace.setState({ signEvent: async (t) => { kinds.push(t.kind); return realSign(t) } })
+    await move(first, at(9n))
+    expect(kinds.filter((k) => k === OBJECT_KIND)).toHaveLength(1)
   })
 })

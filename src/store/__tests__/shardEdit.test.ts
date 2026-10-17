@@ -23,9 +23,11 @@ const sent: { kind: number; tags: string[][]; id: string; content?: string; crea
 const refused = new Set<number>()
 /** No relay answers a query while set. */
 let silent = false
+/** Events every relay refuses in the current test, by a rule. */
+let refuseIf: ((ev: { kind: number }) => boolean) | null = null
 vi.mock('../../lib/relay', () => ({
   publishMany: vi.fn(async (_relays: string[], ev: { kind: number; tags: string[][]; id: string }) => {
-    if (refused.has(ev.kind)) return { ok: false }
+    if (refused.has(ev.kind) || refuseIf?.(ev)) return { ok: false }
     sent.push(ev)
     return { ok: true }
   }),
@@ -38,7 +40,7 @@ vi.mock('../../lib/relay', () => ({
 
 import { newShard, type ShardModel } from 'sno-core/shards'
 import { useCyberspace } from '../useCyberspace'
-import { EDIT_STALE, EDIT_UNANSWERED, editable, useShards, type MyDeployment } from '../useShards'
+import { EDIT_STALE, EDIT_UNANSWERED, PUT_BACK_PENDING, editable, useShards, type MyDeployment } from '../useShards'
 import { useWorkshop } from '../useWorkshop'
 import { useBuilder } from '../useBuilder'
 import { bagEntries, dOf, HIDDEN_KIND, OBJECT_KIND } from '../../lib/hidden'
@@ -93,6 +95,7 @@ beforeEach(() => {
   sent.length = 0
   refused.clear()
   silent = false
+  refuseIf = null
   useCyberspace.setState({ signEvent: realSign })
   useShards.setState({ mine: [], deleted: {}, discovered: {}, pending: null, deployHeight: 0, deployUnit: 0, deployStatus: 'idle', deployError: null, workshopBack: null })
   useCyberspace.setState({ live: true, scaleExp: 0, buildStep: null })
@@ -307,4 +310,23 @@ describe('the review of #369', () => {
     await move(first, at(9n))
     expect(kinds.filter((k) => k === OBJECT_KIND)).toHaveLength(1)
   })
+
+  it('a move whose old version no relay takes back says so, and the next EDIT puts it back first', async () => {
+    const first = await hide(3000, at(1n))
+    const old = useShards.getState().mine[0]
+    // The moved object is taken; the bag and every later object are refused.
+    let objects = 0
+    refuseIf = (ev) => ev.kind === HIDDEN_KIND || (ev.kind === OBJECT_KIND && ++objects > 1)
+    expect(await failedMove(first, at(9n))).toBe(PUT_BACK_PENDING)
+    const row = useShards.getState().mine[0]
+    expect(row.eventId).toBe(first)
+    expect(row.putBack?.content).toBe(old.inner.content)
+    // Relays back: EDIT puts the old version back, then moves it.
+    refuseIf = null
+    await move(first, at(9n))
+    const moved = useShards.getState().mine
+    expect(moved).toHaveLength(1)
+    expect(moved[0].putBack).toBeUndefined()
+    expect(moved[0].lookupId).not.toBe(old.lookupId)
+  }, 15_000)
 })

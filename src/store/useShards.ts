@@ -126,6 +126,13 @@ export interface MyDeployment {
    * exactly what those bags carried.
    */
   bag?: BagSettings
+  /**
+   * A reference shard whose failed EDIT could not be put back: the old object
+   * signed again, which the relays must take before the old place opens again.
+   * Published first by the next EDIT, DELETE or BROADCAST of this row
+   * (review of #369).
+   */
+  putBack?: NostrEvent
 }
 
 /** Something placed in the world, ready to draw. */
@@ -337,6 +344,12 @@ function lineageOf(inner: NostrEvent | undefined, ref: Reference | undefined): {
 export const EDIT_GONE = 'That shard is no longer among what this device hid, so there is nothing to move.'
 /** Why an EDIT stopped: the shard was moved or changed since this device last saw it. */
 export const EDIT_STALE = 'This shard was moved or changed from another device since this one saw it. Find it where it stands now and edit it there.'
+/** Why an EDIT stopped, or what a failed move left: its old version is not back on any relay yet. */
+export const PUT_BACK_PENDING = 'No relay took the moved shard, and none has taken its old version back yet, so its old place may not open until one does. EDIT, DELETE or BROADCAST it again to put it back.'
+
+/** Waits before each retry of putting a failed move's old version back. */
+const PUT_BACK_RETRY_MS = [400, 1200]
+
 /** Why an EDIT stopped: no relay answered whether the shard is still as this device saw it. */
 export const EDIT_UNANSWERED = 'No relay answered, so this cannot tell whether the shard was moved from another device. Try again when one is reachable.'
 
@@ -754,6 +767,43 @@ export const useShards = create<ShardsState>((set, get) => {
     }
   }
 
+  /** Publish a signed event, retried after each of PUT_BACK_RETRY_MS while no relay takes it. */
+  async function publishRetried(event: NostrEvent): Promise<boolean> {
+    for (let i = 0; ; i++) {
+      const ok = await publishMany(relaySet(), event).then((r) => r.ok, () => false)
+      if (ok || i >= PUT_BACK_RETRY_MS.length) return ok
+      await new Promise((r) => setTimeout(r, PUT_BACK_RETRY_MS[i]))
+    }
+  }
+
+  /**
+   * The row now holds `back`, which the relays hold: its version of the
+   * shard, keyed by its id as a scan keys a sealed object, so a later EDIT
+   * or DELETE does not read it as moved from another device.
+   */
+  function rekeyTo(eventId: string, back: NostrEvent): MyDeployment | null {
+    let row: MyDeployment | null = null
+    const mine = get().mine.map((d) => {
+      if (d.eventId !== eventId) return d
+      const { putBack: _done, ...rest } = d
+      row = { ...rest, eventId: back.id, inner: back }
+      return row
+    })
+    const discovered = { ...get().discovered }
+    delete discovered[eventId]
+    set({ mine, discovered, inspecting: get().inspecting === eventId ? null : get().inspecting })
+    saveMine(mine)
+    return row
+  }
+
+  /** Put a failed move's old version back now (MyDeployment `putBack`): the row as it stands after, or null while no relay takes it. */
+  async function putBackNow(eventId: string): Promise<MyDeployment | null> {
+    const d = get().mine.find((m) => m.eventId === eventId)
+    if (!d?.putBack) return d ?? null
+    if (!(await publishRetried(d.putBack))) return null
+    return rekeyTo(eventId, d.putBack)
+  }
+
   /** Build and publish the region bag, with its settings; `place` is any point in the region, for a hint's base. */
   async function publishBag(inners: BagEntry[], key: Uint8Array, lookupId: string, height: number, live: boolean, settings: BagSettings, place: { at: Position; plane: Plane }, beforeSend?: () => Promise<void>): Promise<{ event: NostrEvent; published: boolean }> {
     const createdAt = nextBagAt(lookupId)
@@ -1103,10 +1153,19 @@ export const useShards = create<ShardsState>((set, get) => {
       const intoChest = pending.type === 'shard' ? pending.intoChest : undefined
       // EDIT: the deployment being moved. It must still be here to move.
       const editId = editingId(pending)
-      const was = editId ? get().mine.find((d) => d.eventId === editId) : undefined
+      let was = editId ? get().mine.find((d) => d.eventId === editId) : undefined
       if (editId && (!was?.shard || !editable(was, cs.identity.pubkey))) {
         set({ deployStatus: 'error', deployError: EDIT_GONE })
         return
+      }
+      // An earlier move of it that could not be put back is put back first.
+      if (was?.putBack) {
+        const back = await putBackNow(was.eventId)
+        if (!back) {
+          set({ deployStatus: 'error', deployError: PUT_BACK_PENDING })
+          return
+        }
+        was = back
       }
 
       // Where the key comes from. Above this machine's ceiling it is HOSAKA's,
@@ -1325,15 +1384,17 @@ export const useShards = create<ShardsState>((set, get) => {
           // is this device's version of the shard, keyed by its id as a scan
           // keys a sealed object, or every later EDIT and DELETE of it would
           // read as stale (review of #369).
+          // If no relay takes it even after retries, the row keeps it to put
+          // back on its next EDIT, DELETE or BROADCAST, and says so.
           if (objectSent && rollback && was) {
             const back = rollback
-            const ok = await publishMany(relaySet(), back).then((r) => r.ok, () => false)
-            if (ok) {
-              const mine = get().mine.map((d) => (d.eventId === was.eventId ? { ...d, eventId: back.id, inner: back } : d))
-              const discovered = { ...get().discovered }
-              delete discovered[was.eventId]
-              set({ mine, discovered, inspecting: get().inspecting === was.eventId ? null : get().inspecting })
+            if (await publishRetried(back)) rekeyTo(was.eventId, back)
+            else {
+              const id = was.eventId
+              const mine = get().mine.map((d) => (d.eventId === id ? { ...d, putBack: back } : d))
+              set({ mine })
               saveMine(mine)
+              throw new Error(PUT_BACK_PENDING)
             }
           }
           // The object went out but no bag names it: take it back rather than
@@ -1433,6 +1494,9 @@ export const useShards = create<ShardsState>((set, get) => {
      */
     broadcast: async (lookupId) => {
       if (get().broadcasting) return false
+      for (const d of get().mine.filter((m) => m.lookupId === lookupId && m.putBack)) {
+        if (!(await putBackNow(d.eventId))) { set({ broadcastError: PUT_BACK_PENDING }); return false }
+      }
       const items = get().mine.filter((d) => d.lookupId === lookupId)
       if (items.length === 0) return false
       set({ broadcasting: lookupId, broadcastError: null })
@@ -1517,6 +1581,12 @@ export const useShards = create<ShardsState>((set, get) => {
     },
 
     deleteInstance: async (eventId, opts) => {
+      // A failed move's old version goes back first, so the retraction
+      // below is judged against what the relays really hold.
+      if (get().mine.find((d) => d.eventId === eventId)?.putBack) {
+        const back = await putBackNow(eventId)
+        if (back) eventId = back.eventId
+      }
       const item = get().mine.find((d) => d.eventId === eventId)
       if (!item) return
       const cs = cyber()

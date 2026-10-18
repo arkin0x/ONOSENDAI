@@ -20,19 +20,18 @@ import { TRAIL_INK } from './PathTrail'
 
 /** After the avatars' glide (priority 0), before the composer draws (1). */
 const TRAIL_PRIORITY = 0.9
+/** Every trail's material, shared: a line is rebuilt on every step, its material need not be (review of #381). */
+const TRAIL_MATERIAL = new LineBasicMaterial({ color: TRAIL_INK.own, toneMapped: false })
 
 export function TvTrail({ pubkey, path, place }: { pubkey: string; path: Position[]; place: (p: Position) => [number, number, number] }): JSX.Element {
   const line = useMemo(() => {
     const geometry = new BufferGeometry()
     geometry.setAttribute('position', new Float32BufferAttribute(path.flatMap((p) => place(p)), 3))
-    const l = new Line(geometry, new LineBasicMaterial({ color: TRAIL_INK.own, toneMapped: false }))
+    const l = new Line(geometry, TRAIL_MATERIAL)
     l.frustumCulled = false
     return l
   }, [path, place])
-  useEffect(() => () => {
-    line.geometry.dispose()
-    ;(line.material as LineBasicMaterial).dispose()
-  }, [line])
+  useEffect(() => () => line.geometry.dispose(), [line])
 
   const at = useMemo(() => new Vector3(), [])
   useFrame(() => {

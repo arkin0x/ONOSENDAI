@@ -500,7 +500,7 @@ function beginShot(shot: Shot, now: number, id: number): void {
     status: 'playing',
     ...(continues ? {} : { cutAt: now }),
     // Facing kept across the cut: from where it was last seen, or as it was.
-    avatars: { ...s.avatars, [shot.pubkey]: { born: shot.beats[0]?.action.type === 'spawn' ? Infinity : bornAfter(was), position: opening.position, plane: opening.plane, at: shot.start, from: was && was.plane === opening.plane && (was.position.x !== opening.position.x || was.position.y !== opening.position.y || was.position.z !== opening.position.z) ? was.position : was?.from, path: continues ? pathAfter(was, opening.position, opening.plane) : [opening.position] } },
+    avatars: { ...s.avatars, [shot.pubkey]: { born: shot.beats[0]?.action.type === 'spawn' ? Infinity : bornAfter(was), position: opening.position, plane: opening.plane, at: shot.start, from: was && was.plane === opening.plane && (was.position.x !== opening.position.x || was.position.y !== opening.position.y || was.position.z !== opening.position.z) ? was.position : was?.from, path: continues && shot.beats[0]?.action.type !== 'spawn' ? pathAfter(was, opening.position, opening.plane) : [opening.position] } },
   })
   shotBegan = now
   frame(opening.position, opening.plane, scaleExp)

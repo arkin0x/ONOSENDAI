@@ -13,6 +13,10 @@
  * glide included), eased, and carries a change of render frame whole as the
  * Rig does, so a re-anchor is not a lurch. Your own orbit and zoom stand down
  * while TV is on; there is nothing to steer.
+ *
+ * With the Chain trail switch on, each avatar draws the line behind it of
+ * where the tape has shown it go (TvTrail), as your own chain's trail is
+ * drawn outside TV.
  */
 
 import { useEffect, useMemo, useRef } from 'react'
@@ -32,6 +36,7 @@ import { AVATAR_RED } from './tvPainter'
 import { TvBoxes } from './TvBoxes'
 import { SpawnMarker } from './SpawnMarker'
 import { TvJump } from './TvJump'
+import { TvTrail } from './TvTrail'
 
 const REACH = GRID_RADIUS * 8
 /** An avatar not seen on tape for this long (tape time) is not drawn. */
@@ -179,6 +184,7 @@ export function TvLayer({ axes }: { axes: ViewAxes }): JSX.Element {
   const anchorPlane = useCyberspace((s) => s.anchorPlane)
   const scaleExp = useCyberspace((s) => s.scaleExp)
   const lining = useTv((s) => s.jump?.phase === 'line')
+  const showTrail = useCyberspace((s) => s.showTrail)
 
   const place = useMemo(() => {
     const origin = alignedOrigin(anchor, scaleExp)
@@ -208,6 +214,7 @@ export function TvLayer({ axes }: { axes: ViewAxes }): JSX.Element {
       {/* Each avatar's spawn point, where it is in range (SpawnMarker culls
           itself): where a chain begins (arkinox, 2026-10-18). */}
       {near.map((p) => <SpawnMarker key={`spawn-${p.pk}`} pubkey={p.pk} axes={axes} />)}
+      {showTrail && near.map((p) => (p.a.path && p.a.path.length > 1 ? <TvTrail key={`trail-${p.pk}`} pubkey={p.pk} path={p.a.path} place={place} /> : null))}
       {near.map((p) => (
         <TapeAvatar key={p.pk} pubkey={p.pk} centre={p.centre} position={p.a.position} from={p.a.from} born={p.a.born} place={place} subject={shot?.kind === 'trip' && p.pk === shot.pubkey} />
       ))}

@@ -46,6 +46,13 @@ export interface TvAvatar {
    * (TvLayer); Infinity while a shot opening with its spawn waits to play it.
    */
   born?: number
+  /**
+   * Where it has been on tape, oldest first, ending where it is: the trail
+   * drawn behind it while the Chain trail switch is on (scene/TvTrail). Only
+   * what TV played, in one plane: a cut starts a new one, so no line is drawn
+   * across history the tape skipped.
+   */
+  path?: Position[]
 }
 
 export type TvStatus = 'tuning' | 'playing' | 'end' | 'no-signal'
@@ -150,6 +157,17 @@ export function fitScale(beats: Beat[]): number {
   let exp = 0
   while ((extent >> BigInt(exp)) > BigInt(FIT_CELLS) && exp < MAX_SCALE_EXP) exp++
   return exp
+}
+
+/** How many places an avatar's trail keeps; the oldest go first. */
+const TRAIL_KEPT = 256
+
+/** An avatar's path after it steps to `position`: on from where it was in the same plane, else starting there. */
+export function pathAfter(was: TvAvatar | undefined, position: Position, plane: number): Position[] {
+  if (!was?.path?.length || was.plane !== plane) return [position]
+  const last = was.path[was.path.length - 1]
+  if (last.x === position.x && last.y === position.y && last.z === position.z) return was.path
+  return [...was.path, position].slice(-TRAIL_KEPT)
 }
 
 function cells(a: Position, b: Position, scaleExp: number): number {
@@ -306,7 +324,7 @@ function arrive(shot: Shot): void {
   const b = shot.beats[0]
   useTv.setState({
     arrivals: [...s.arrivals, { pubkey: b.pubkey, at: b.at }].slice(-ARRIVALS_KEPT),
-    avatars: { ...s.avatars, [b.pubkey]: { position: b.action.position, plane: b.action.plane, at: b.at, born: performance.now() } },
+    avatars: { ...s.avatars, [b.pubkey]: { position: b.action.position, plane: b.action.plane, at: b.at, born: performance.now(), path: [b.action.position] } },
   })
 }
 
@@ -401,7 +419,7 @@ function land(shot: Shot, now: number): void {
     scaleExp,
     framing: shotFraming(shot.id),
     cutAt: now,
-    avatars: { ...s.avatars, [shot.pubkey]: { position: opening.position, plane: opening.plane, at: shot.start, from: was && was.plane === opening.plane ? was.position : undefined, born: bornAfter(was) } },
+    avatars: { ...s.avatars, [shot.pubkey]: { position: opening.position, plane: opening.plane, at: shot.start, from: was && was.plane === opening.plane ? was.position : undefined, born: bornAfter(was), path: [opening.position] } },
   })
   frame(opening.position, opening.plane, scaleExp)
 }
@@ -483,7 +501,7 @@ function beginShot(shot: Shot, now: number, id: number): void {
     status: 'playing',
     ...(continues ? {} : { cutAt: now }),
     // Facing kept across the cut: from where it was last seen, or as it was.
-    avatars: { ...s.avatars, [shot.pubkey]: { born: shot.beats[0]?.action.type === 'spawn' ? Infinity : bornAfter(was), position: opening.position, plane: opening.plane, at: shot.start, from: was && was.plane === opening.plane && (was.position.x !== opening.position.x || was.position.y !== opening.position.y || was.position.z !== opening.position.z) ? was.position : was?.from } },
+    avatars: { ...s.avatars, [shot.pubkey]: { born: shot.beats[0]?.action.type === 'spawn' ? Infinity : bornAfter(was), position: opening.position, plane: opening.plane, at: shot.start, from: was && was.plane === opening.plane && (was.position.x !== opening.position.x || was.position.y !== opening.position.y || was.position.z !== opening.position.z) ? was.position : was?.from, path: continues && shot.beats[0]?.action.type !== 'spawn' ? pathAfter(was, opening.position, opening.plane) : [opening.position] } },
   })
   shotBegan = now
   frame(opening.position, opening.plane, scaleExp)
@@ -526,7 +544,7 @@ function tick(id: number): void {
     const b = s.shot.beats[played]
     const was = avatars[b.pubkey]
     const spawned = b.action.type === 'spawn'
-    avatars = { ...avatars, [b.pubkey]: { position: b.action.position, plane: b.action.plane, at: b.at, from: !spawned && was && was.plane === b.action.plane ? was.position : undefined, born: spawned ? performance.now() : was?.born } }
+    avatars = { ...avatars, [b.pubkey]: { position: b.action.position, plane: b.action.plane, at: b.at, from: !spawned && was && was.plane === b.action.plane ? was.position : undefined, born: spawned ? performance.now() : was?.born, path: spawned ? [b.action.position] : pathAfter(was, b.action.position, b.action.plane) } }
     tapeTime = b.at
     played++
   }

@@ -174,7 +174,7 @@ export function TvSegment(): JSX.Element | null {
 
 /** What the chiron says a segment's author did. */
 export function segmentDoing(item: TapeItem): string {
-  if (item.kind === 'bag') return item.hint ? 'SEALED A BAG · HINT BOX PUBLIC' : 'SEALED A BAG'
+  if (item.kind === 'bag') return placeable(item.hint) ? 'SEALED A BAG · HINT BOX PUBLIC' : 'SEALED A BAG'
   if (item.kind === 'object') return 'PUBLISHED AN OBJECT'
   return item.on === 'bag' ? 'COMMENTED ON A BAG' : 'COMMENTED ON A MOVE'
 }

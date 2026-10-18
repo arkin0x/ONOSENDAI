@@ -157,7 +157,12 @@ describe('Cyberspace TV', () => {
     useTv.getState().start()
     await run(2000)
     usePersonCard.getState().open(B)
+    // Never empty on the way back: a view's watchers read that as RETURN.
+    let emptied = false
+    const off = useCyberspace.subscribe((st) => { if (st.focus === null) emptied = true })
     useTv.getState().stop()
+    off()
+    expect(emptied).toBe(false)
     const now = useCyberspace.getState()
     expect(now.focus).toEqual(was.focus)
     expect(now.cursor).toEqual(was.cursor)
@@ -177,8 +182,8 @@ describe('Cyberspace TV', () => {
   })
 
   it('frames a shot that opens with a jump on where it lands', () => {
-    const jump = beatOf({ ...hop(B, T0, 0n, 1n << 59n), tags: [['A', 'hyperjump'], ['e', '0'.repeat(64), '', 'genesis'], ['e', '0'.repeat(64), '', 'previous'], ['c', at(0n)], ['C', at(1n << 59n)], ['proof', 'a'.repeat(64)]] })
-    if (!jump) return
+    const jump = beatOf({ ...hop(B, T0, 0n, 1n << 59n), tags: [['A', 'hyperjump'], ['e', '0'.repeat(64), '', 'genesis'], ['e', '0'.repeat(64), '', 'previous'], ['c', at(0n)], ['C', at(1n << 59n)], ['proof', 'a'.repeat(64)], ['from_height', '100'], ['B', '200'], ['mp', 'x']] })!
+    expect(jump.action.type).toBe('hyperjump')
     const hops = [hop(B, T0 + 2, 1n << 59n, (1n << 59n) + 1n), hop(B, T0 + 4, (1n << 59n) + 1n, (1n << 59n) + 2n)].map((e) => beatOf(e)!)
     const shot = { beats: [jump, ...hops] } as unknown as Shot
     expect(fitScale(shot.beats)).toBeLessThan(4)

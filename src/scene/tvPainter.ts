@@ -66,6 +66,14 @@ const MONEY_SPLASH: SplashLook = { fill: '#ffc21a', edge: '#ff7a00', words: ['CA
 /** The minimap's turn, radians a second: about once round in forty seconds. */
 const MAP_TURN = 0.15
 const ACCENT = '#00e5ff'
+/** NOW PLAYING's progress, purple to pink (arkinox, 2026-10-18: "make the progress something cool like a gradient from purple to pink"). */
+const MUSIC_PURPLE = '#8a2be2'
+const MUSIC_PINK = '#ff2d95'
+/** NOW PLAYING's height, CSS px, and as one line where there is no room for it. */
+const NOW_PLAYING_PX = 76
+const NOW_PLAYING_LINE_PX = 34
+/** The chiron's height, CSS px: wide, and on a phone. */
+const CHIRON_PX = [62, 88] as const
 const REGION = '#52e39f'
 const MONTHS = ['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC']
 
@@ -126,7 +134,27 @@ export interface TvAssets {
   segmentShard: ShardModel | null
   /** A colour for someone, for a picture that is not there. */
   color: (pubkey: string) => string
+  /** The music playing under the picture (store/useTvMusic), for NOW PLAYING; none when nothing is. */
+  music?: TvMusic | null
 }
+
+/** What NOW PLAYING shows. */
+export interface TvMusic {
+  title: string
+  artist: string
+  /** The cover, once loaded, else null. */
+  art: CanvasImageSource | null
+  /** How far into the track, 0 to 1. */
+  progress: number
+  /** The browser is holding the sound back until a tap. */
+  blocked: boolean
+  /** How loud, 0 to 1, and whether it is muted: the line down its right side. */
+  volume: number
+  muted: boolean
+}
+
+/** A rectangle on the flat frame, CSS px. */
+export interface FlatRect { x: number; y: number; w: number; h: number }
 
 /** The words on the marquee as of the moment on tape. */
 export function tickerItems(p: TvPicture, name: (pk: string) => string): string[] {
@@ -233,11 +261,21 @@ export class TvPainter {
   private lastScale = 1
   /** Where the minimap's dot was last: a segment shows no avatar, and the dot stays where it was. */
   private lastDot: Position | null = null
+  /** Where NOW PLAYING was last painted, canvas px, and the canvas px per CSS px then. */
+  private npRect: FlatRect | null = null
+  private cardScale = 1
 
   /** `canvas` for tests; a new one otherwise. */
   constructor(canvas?: HTMLCanvasElement) {
     this.canvas = canvas ?? document.createElement('canvas')
     this.ctx = this.canvas.getContext('2d')!
+  }
+
+  /** Where NOW PLAYING is on the flat frame, CSS px, for a tap or a drag on it; null when it is not up. */
+  get musicCard(): FlatRect | null {
+    const c = this.npRect
+    const k = this.cardScale
+    return c ? { x: c.x / k, y: c.y / k, w: c.w / k, h: c.h / k } : null
   }
 
   /** What the marquee shows now, left to right: for tests. */
@@ -433,13 +471,32 @@ export class TvPainter {
     // short of the right side (arkinox, 2026-10-18).
     if (p.shot && p.status === 'playing') chironTop = this.chiron(p, a, MX, tickY - 10 * s, W - 2 * MX, s, narrow)
 
+    // NOW PLAYING, bottom right above the chiron (arkinox, 2026-10-18). As
+    // wide as the logo's column over it, so the panels, which keep left of
+    // that column, never meet it; the whole width on a phone. It stands
+    // where the chiron's top is when there is one, so it never jumps as the
+    // chiron comes and goes, and a tap finds it where it was. Where it would
+    // reach the clock (and on a phone the minimap) it is one line; where even
+    // that would, it is not shown, and the music plays on.
+    const npW = narrow ? W - 2 * MX : lw + 16 * s
+    const npBottom = tickY - 10 * s - CHIRON_PX[narrow ? 1 : 0] * s - 10 * s
+    const ceiling = (narrow ? Math.max(cy, MY + mapSize) : cy) + 10 * s
+    const npLook = !a.music ? null : npBottom - NOW_PLAYING_PX * s >= ceiling ? 'full' : npBottom - NOW_PLAYING_LINE_PX * s >= ceiling ? 'line' : null
+    const npTop = a.music && npLook ? this.nowPlaying(a.music, W - MX - npW, npBottom, npW, s, now, reduced, npLook === 'line') : chironTop
+    this.npRect = a.music && npLook ? { x: W - MX - npW, y: npTop, w: npW, h: npBottom - npTop } : null
+    this.cardScale = scale
+    // What sits at the centre above the chiron stops above NOW PLAYING too
+    // when it is wide enough to reach it.
+    const centreW = Math.min(760 * s, W - 2 * MX)
+    const floor = this.npRect && (narrow || (W + centreW) / 2 > W - MX - npW) ? Math.min(chironTop, npTop - 6 * s) : chironTop
+
     // A segment's panel at the centre.
     const item = p.shot?.item
     const inset = item !== undefined && !(item.kind === 'bag' && placeable(item.hint))
-    if (item && inset && p.status === 'playing') this.segment(item, p.shot!.length, a, W, cy + 14 * s, chironTop - 50 * s, MX, MY, W - MX - lw - 16 * s, MX + mapSize + 16 * s, s, narrow, now)
+    if (item && inset && p.status === 'playing') this.segment(item, p.shot!.length, a, W, cy + 14 * s, floor - 50 * s, chironTop - 50 * s, MX, MY, W - MX - lw - 16 * s, MX + mapSize + 16 * s, s, narrow, now)
 
     // LATER and MEANWHILE, after the cut's transition; under an inset's panel.
-    this.card(p, W, s, narrow, inset ? chironTop - 34 * s : H * 0.34, now)
+    this.card(p, W, s, narrow, inset ? floor - 34 * s : H * 0.34, now)
 
     // TUNING, END OF TAPE, NO SIGNAL.
     if (p.status !== 'playing') {
@@ -522,7 +579,7 @@ export class TvPainter {
   private chiron(p: TvPicture, a: TvAssets, x: number, bottom: number, w: number, s: number, narrow: boolean): number {
     const ctx = this.ctx
     const shot = p.shot!
-    const h = (narrow ? 88 : 62) * s
+    const h = CHIRON_PX[narrow ? 1 : 0] * s
     const y = bottom - h
     const grad = ctx.createLinearGradient(x, 0, x + w, 0)
     grad.addColorStop(0, 'rgba(0, 60, 80, 0.88)')
@@ -578,6 +635,130 @@ export class TvPainter {
     ctx.fillText(`1 CELL = ${formatCellSize(scaleExp).toUpperCase()}`, x + w, y + 18 * s)
   }
 
+  /**
+   * NOW PLAYING, bottom edge at `bottom`: the cover, the track's name, its
+   * artist under that and the progress under that, filling purple to pink.
+   * Its top.
+   */
+  private nowPlaying(m: TvMusic, x: number, bottom: number, w: number, s: number, now: number, reduced: boolean, line: boolean): number {
+    const ctx = this.ctx
+    const h = (line ? NOW_PLAYING_LINE_PX : NOW_PLAYING_PX) * s
+    const y = bottom - h
+    const grad = ctx.createLinearGradient(x, 0, x + w, 0)
+    grad.addColorStop(0, 'rgba(26, 4, 44, 0.55)')
+    grad.addColorStop(1, 'rgba(20, 2, 34, 0.86)')
+    ctx.fillStyle = grad
+    ctx.fillRect(x, y, w, h)
+    ctx.fillStyle = 'rgba(255, 45, 149, 0.45)'
+    ctx.fillRect(x, y, w, Math.max(1, s))
+    // The cover, or a square of the bar's colours with a note on it.
+    const pad = (line ? 6 : 10) * s
+    const art = h - 2 * pad
+    const ax = x + pad
+    const ay = y + pad
+    if (m.art) {
+      ctx.drawImage(m.art, ax, ay, art, art)
+    } else {
+      const g = ctx.createLinearGradient(ax, ay, ax + art, ay + art)
+      g.addColorStop(0, MUSIC_PURPLE)
+      g.addColorStop(1, MUSIC_PINK)
+      ctx.fillStyle = g
+      ctx.fillRect(ax, ay, art, art)
+      ctx.fillStyle = FG
+      ctx.font = `700 ${art * 0.5}px ${TV_FONT}`
+      ctx.textAlign = 'center'
+      ctx.fillText('♪', ax + art / 2, ay + art * 0.68)
+    }
+    const tx = ax + art + (line ? 8 : 12) * s
+    const tw = x + w - pad - tx
+    ctx.textAlign = 'left'
+    this.volumeLine(m, x + w - 3 * s, y + (line ? 5 : 8) * s, h - (line ? 10 : 16) * s, s)
+    if (line) {
+      // One line: the name and the artist, the progress under them.
+      ctx.fillStyle = m.muted ? 'rgba(242, 251, 255, 0.55)' : FG
+      ctx.font = `700 ${11 * s}px ${TV_FONT}`
+      const words = `${m.muted ? '♪ MUTED · ' : ''}${m.title}${m.artist ? ` · ${m.artist}` : ''}`.toUpperCase()
+      ctx.fillText(fit(ctx, words, tw), tx, y + 17 * s)
+      this.musicBar(m, tx, y + h - pad - 3 * s, tw, 3 * s, s, now, reduced)
+      return y
+    }
+    ctx.fillStyle = m.muted ? 'rgba(255, 45, 149, 0.55)' : MUSIC_PINK
+    ctx.font = `700 ${9 * s}px ${TV_FONT}`
+    ctx.fillText(m.muted ? '♪ MUTED' : '♪ NOW PLAYING', tx, y + 19 * s)
+    ctx.fillStyle = FG
+    ctx.font = `700 ${14 * s}px ${TV_FONT}`
+    ctx.fillText(fit(ctx, m.title.toUpperCase(), tw), tx, y + 37 * s)
+    if (m.artist) {
+      ctx.fillStyle = 'rgba(214, 196, 255, 0.9)'
+      ctx.font = `${11 * s}px ${TV_FONT}`
+      ctx.fillText(fit(ctx, m.artist.toUpperCase(), tw), tx, y + 52 * s)
+    }
+    this.musicBar(m, tx, y + h - pad - 4 * s, tw, 4 * s, s, now, reduced)
+    return y
+  }
+
+  /**
+   * The progress: the gradient runs the whole width, so it turns pinker as
+   * it fills. While the browser holds the sound back, TAP FOR SOUND in its place.
+   */
+  private musicBar(m: TvMusic, x: number, y: number, w: number, bh: number, s: number, now: number, reduced: boolean): void {
+    const ctx = this.ctx
+    if (m.blocked) {
+      ctx.globalAlpha = reduced ? 1 : 0.55 + 0.45 * (Math.floor(now / 700) % 2)
+      ctx.fillStyle = MUSIC_PINK
+      ctx.font = `700 ${9 * s}px ${TV_FONT}`
+      ctx.textAlign = 'left'
+      ctx.fillText('▶ TAP FOR SOUND', x, y + bh)
+      ctx.globalAlpha = 1
+      return
+    }
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.14)'
+    ctx.fillRect(x, y, w, bh)
+    const filled = w * Math.min(1, Math.max(0, m.progress))
+    if (filled <= 0) return
+    const bar = ctx.createLinearGradient(x, 0, x + w, 0)
+    bar.addColorStop(0, MUSIC_PURPLE)
+    bar.addColorStop(1, MUSIC_PINK)
+    ctx.save()
+    ctx.fillStyle = bar
+    ctx.shadowColor = MUSIC_PINK
+    ctx.shadowBlur = 8 * s
+    ctx.fillRect(x, y, filled, bh)
+    // A bright head where it has got to.
+    ctx.fillStyle = '#ffd6ee'
+    ctx.beginPath()
+    ctx.arc(x + filled, y + bh / 2, Math.max(2, bh * 0.85), 0, Math.PI * 2)
+    ctx.fill()
+    ctx.restore()
+  }
+
+  /**
+   * How loud: a thin line down the card's right side, filled from the
+   * bottom, purple to pink like the progress; grey while muted.
+   */
+  private volumeLine(m: TvMusic, x: number, top: number, h: number, s: number): void {
+    const ctx = this.ctx
+    const lw = Math.max(1, 2 * s)
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.14)'
+    ctx.fillRect(x - lw / 2, top, lw, h)
+    const filled = h * Math.min(1, Math.max(0, m.volume))
+    if (filled <= 0) return
+    if (m.muted) {
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.32)'
+      ctx.fillRect(x - lw / 2, top + h - filled, lw, filled)
+      return
+    }
+    const g = ctx.createLinearGradient(0, top + h, 0, top)
+    g.addColorStop(0, MUSIC_PURPLE)
+    g.addColorStop(1, MUSIC_PINK)
+    ctx.save()
+    ctx.fillStyle = g
+    ctx.shadowColor = MUSIC_PINK
+    ctx.shadowBlur = 6 * s
+    ctx.fillRect(x - lw / 2, top + h - filled, lw, filled)
+    ctx.restore()
+  }
+
   /** Someone's picture in a circle, or their colour and initial when there is none to paint. */
   private disc(a: TvAssets, pubkey: string, cx: number, cy: number, r: number): void {
     const ctx = this.ctx
@@ -618,7 +799,7 @@ export class TvPainter {
   }
 
   /** The panel of a segment shown in an inset: a sealed bag, an object, a new avatar, a comment. */
-  private segment(item: TapeItem, shotLength: number, a: TvAssets, W: number, top: number, bottom: number, MX: number, MY: number, sideRight: number, sideLeft: number, s: number, narrow: boolean, now: number): void {
+  private segment(item: TapeItem, shotLength: number, a: TvAssets, W: number, top: number, bottom: number, sideBottom: number, MX: number, MY: number, sideRight: number, sideLeft: number, s: number, narrow: boolean, now: number): void {
     const ctx = this.ctx
     // Seconds since the segment came on, after its cut, by the shot's own
     // clock (the shot's length, which is the item's unless a test cued it longer).
@@ -682,7 +863,9 @@ export class TvPainter {
     if (fitted.ph > room || fitted.cut) {
       // Between the minimap and the logo's column.
       const sideW = Math.min(760 * s, sideRight - sideLeft)
-      const sideRoom = Math.max(0, bottom - MY)
+      // Beside the clock, left of the logo's column: never under NOW
+      // PLAYING, so the chiron is its floor (review of #382).
+      const sideRoom = Math.max(0, sideBottom - MY)
       const beside = fitPanel(sideW, false, sideRoom)
       const better = fitted.cut
         ? beside.ph <= sideRoom && beside.lines.length > fitted.lines.length

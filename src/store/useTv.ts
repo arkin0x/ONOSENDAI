@@ -31,6 +31,7 @@ import { useShards } from './useShards'
 import { useDemo } from './useDemo'
 import { useCoordRoute } from './useCoordRoute'
 import { usePersonCard } from './usePersonCard'
+import { startMusic, stopMusic } from './useTvMusic'
 
 /** Where an avatar stands on the tape, and since when. */
 export interface TvAvatar {
@@ -650,6 +651,8 @@ export const useTv = create<TvState>((set, get) => ({
     if (cs.spectate) stopSpectating()
     run++
     set({ on: true })
+    // In the tap that turned TV on, where a browser lets sound start.
+    startMusic()
     const id = run
     timer = setInterval(() => tick(id), TICK_MS) as unknown as number
     void tune(id)
@@ -671,6 +674,7 @@ export const useTv = create<TvState>((set, get) => ({
     director = null
     queue = []
     asked.clear()
+    stopMusic()
     set({ on: false, shot: null, played: 0, tapeTime: null, avatars: {}, arrivals: [], reactions: [], chains: {}, boxes: [], jump: null, status: 'tuning' })
     // A tap on an avatar during TV is not a request for its card afterwards.
     usePersonCard.getState().close()

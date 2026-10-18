@@ -153,13 +153,14 @@ export function shotProgress(): number {
 }
 
 /**
- * Play a tape item next, cutting the shot on screen short: for tests and the
- * smoke probe, which cannot wait for a random start to land on one.
+ * Play a tape item next, cutting the shot on screen short, for `length`
+ * seconds when given: for tests and the smoke probe, which cannot wait for a
+ * random start to land on one.
  */
-export function cueItem(item: TapeItem): void {
+export function cueItem(item: TapeItem, length?: number): void {
   const d = new Director()
   d.addItem(item)
-  queue.unshift(...d.release(Infinity))
+  queue.unshift(...d.release(Infinity).map((shot) => (length === undefined ? shot : { ...shot, length })))
   shotBegan = -Infinity
 }
 
@@ -313,7 +314,9 @@ function tick(id: number): void {
     if (failures >= NO_SIGNAL_AFTER && s.status === 'playing') useTv.setState({ status: 'no-signal' })
     if (reader?.caughtUp && readingTape !== t && s.status !== 'end') {
       useTv.setState({ status: 'end', shot: null, cutAt: now })
-      setTimeout(() => { if (live(id, t)) void tune(id) }, END_HOLD_MS)
+      // Only if END OF TAPE is still what is on screen: anything played since
+      // (a cued item) is not cut off by a retune.
+      setTimeout(() => { if (live(id, t) && useTv.getState().status === 'end') void tune(id) }, END_HOLD_MS)
     }
     return
   }

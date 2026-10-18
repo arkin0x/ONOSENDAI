@@ -36,7 +36,7 @@ const STAMP_AT = 2.0
 const STAMP_GAP = 0.22
 const STAMP_S = 0.18
 const SIDES_OUT = [4.2, 5.4]
-const SIDES_OPACITY = 0.2
+const SIDES_OPACITY = 0.07
 
 const ramp = (t: number, [a, b]: number[]): number => Math.min(1, Math.max(0, (t - a) / (b - a)))
 

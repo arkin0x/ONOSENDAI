@@ -9359,7 +9359,8 @@ a.feed__act { text-decoration: none; }
 
 .tv__card {
   position: absolute;
-  top: 34%;
+  /* Above a segment's panel (TvSegments), which sits at the centre. */
+  top: 16%;
   left: 50%;
   transform: translateX(-50%);
   padding: 6px 14px;

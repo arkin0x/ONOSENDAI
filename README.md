@@ -218,6 +218,15 @@ on tape (avatars, bags, objects, their chain, their bags). Watching only:
 nothing is signed or published, and OFF or Escape puts the view back.
 `scripts/tv-smoke.mjs` plays a recorded tape offline.
 
+The tape carries more than moves, each as a segment in its place by time. A
+bag sealed with a public hint box is shown there: its outline draws, its sides
+fill, a key stamps onto each side, the sides fade, and the outline stays for
+the rest of the tape. A bag without one is never placed (where it is, is the
+hunt): it plays on a cube in an inset, LOCATION SECRET. A public object gets
+a product shot. A comment on a move or a bag gets the news desk: the
+commenter as a photograph, the quote printing out; one sealed to a bag's
+region prints as redaction.
+
 **The spawn marker.** v1's spawn model (`public/spawn.glb`: three hexagonal
 rings, a hollow cube, six radiating bars) stands at the pubkey coordinate,
 sized in cells like the avatar so it marks the spawn cell at any scale.

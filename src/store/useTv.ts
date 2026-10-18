@@ -54,6 +54,8 @@ export interface RideEnd {
   position: Position
   plane: number
   height: number
+  /** Whether `position` is the block's own: false for A before the stop index has it, which is where the rider stood instead. */
+  exact: boolean
 }
 
 /**
@@ -341,19 +343,25 @@ const WARP_FRAMING: Framing = { from: 7, to: 5, polar: 1.25, name: 'close', view
 const LINE_FRAMING: Framing = { from: 16, to: 26, polar: 0.75, name: 'wide', view: 'above', sun: false, spin: 1 }
 
 /**
- * A hyperjump's two blocks. B is where it landed, from its own `C`. A is its
- * `from_height` block, exact from the stop index once that height is loaded;
- * before then, where the rider stood (`c`), which on a chained ride is A's
- * coordinate itself and on a first ride the spot it boarded from.
+ * A hyperjump's two blocks. B is where it landed, from its own `C`, always
+ * exact. A is its `from_height` block: B itself on a ride to the block it
+ * left (review of #379); else exact from the stop index once that height is
+ * loaded; before then, where the rider stood (`c`), which on a chained ride
+ * is A's coordinate itself and on a first ride the spot it boarded from.
+ * Which of the two cannot be told from the event: `as_of` should mark a
+ * first ride, but older clients put it on every ride (18 of the 19 on the
+ * relay carry it), so a `c` is never named as block A.
  */
 export function rideEnds(b: Beat): { from: RideEnd; to: RideEnd } {
   const a = b.action
+  const to: RideEnd = { position: a.position, plane: a.plane, height: a.toHeight ?? 0, exact: true }
+  if (a.fromHeight === a.toHeight) return { from: to, to }
   const stop = a.fromHeight !== undefined ? getStopByHeight(a.fromHeight) : undefined
   const at = stop ? coordToXyz(stopCoordExact(stop)) : null
-  return {
-    from: { position: at ? { x: at.x, y: at.y, z: at.z } : b.from.position, plane: at ? at.plane : b.from.plane, height: a.fromHeight ?? 0 },
-    to: { position: a.position, plane: a.plane, height: a.toHeight ?? 0 },
-  }
+  const from: RideEnd = at
+    ? { position: { x: at.x, y: at.y, z: at.z }, plane: at.plane, height: a.fromHeight ?? 0, exact: true }
+    : { position: b.from.position, plane: b.from.plane, height: a.fromHeight ?? 0, exact: false }
+  return { from, to }
 }
 
 /** The zoom that holds both blocks within FIT_CELLS, and the point halfway between them. */

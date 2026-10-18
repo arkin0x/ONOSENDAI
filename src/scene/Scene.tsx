@@ -806,7 +806,8 @@ export const Scene = memo(function Scene(): JSX.Element {
       <ScreenAxes />
       <World />
       {/* Camera-pinned, so it lives outside the world group: hyperspace is a
-          state, not a place. Mounts only while riding or browsing the line. */}
+          state, not a place. Mounts only while riding, or while Cyberspace
+          TV shows a hyperjump's ride (its warp). */}
       <HyperspaceCone />
       {/*
         Bloom is what makes line geometry read as emitted light, and it is also

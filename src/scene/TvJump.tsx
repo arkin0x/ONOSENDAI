@@ -43,6 +43,11 @@ const RIDER_PX = 14
 const SPIN = 0.7
 /** How fast the colours run along the line, in hue turns a second (TourLine's pace). */
 const CYCLE = 1.6
+/**
+ * Sized from the camera of the frame they are drawn in: after TV's camera
+ * (0.5), before the composer (1), as WorldLabel is.
+ */
+const RIDE_PRIORITY = 0.9
 
 /** How far along the line the rider is at `elapsed` seconds into the shot, 0 to 1: eased in and out. */
 export function rideAlong(elapsed: number): number {
@@ -161,7 +166,7 @@ function Ride({ jump, axes }: { jump: Jump; axes: ViewAxes }): JSX.Element {
     }
     if (t > 0 && departed === null) setDeparted(performance.now())
     if (t >= 1 && arrived === null) setArrived(performance.now())
-  })
+  }, RIDE_PRIORITY)
 
   return (
     <>
@@ -177,8 +182,10 @@ function Ride({ jump, axes }: { jump: Jump; axes: ViewAxes }): JSX.Element {
       <group ref={head}>
         <lineSegments geometry={rider.geometry} material={rider.material} />
       </group>
-      {(one ? [{ at: a, height: jump.from.height }] : [{ at: a, height: jump.from.height }, { at: b, height: jump.to.height }]).map((l) => (
-        <WorldLabel key={l.height} text={`BLOCK ${l.height}`} color={BLOCK_COLOR} at={l.at} clear={{ trueSide: gibson, minPx: DEST_CUBE_PX }} align="center" px={12} opacity={0.95} />
+      {/* A before the stop index has it is where the rider stood, which may
+          not be the block: it says so rather than naming the block. */}
+      {(one ? [jump.to] : [jump.from, jump.to]).map((end, i) => ({ at: i === 0 ? a : b, text: end.exact ? `BLOCK ${end.height}` : 'FROM HERE' })).map((l) => (
+        <WorldLabel key={l.text} text={l.text} color={BLOCK_COLOR} at={l.at} clear={{ trueSide: gibson, minPx: DEST_CUBE_PX }} align="center" px={12} opacity={0.95} />
       ))}
       {departed !== null && <BurstLines centre={a} bornAt={departed} />}
       {arrived !== null && <BurstLines centre={b} bornAt={arrived} />}

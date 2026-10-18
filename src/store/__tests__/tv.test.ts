@@ -29,7 +29,7 @@ import type { Filter } from 'nostr-tools'
 import type { RelayAnswer } from '../../lib/relayOutcome'
 import { positionHex, type NostrEvent } from '../../lib/events'
 import { V2_EPOCH } from '../../lib/tv/tape'
-import { READ_STUCK_MS, TV_FOCUS_LABEL, fitScale, placeable, rideView, setTvAsk, shotOpening, useTv, type TvJump } from '../useTv'
+import { READ_STUCK_MS, TV_FOCUS_LABEL, fitScale, placeable, rideEnds, rideView, setTvAsk, shotOpening, useTv, type TvJump } from '../useTv'
 import { useCyberspace } from '../useCyberspace'
 import { useBuilder } from '../useBuilder'
 import { usePersonCard } from '../usePersonCard'
@@ -236,6 +236,20 @@ describe('Cyberspace TV', () => {
       expect(published).toEqual([])
     } finally {
       tape.pop()
+    }
+  })
+
+  it('a ride\'s block A: B itself on a ride to the same block, else the rider\'s `c`, never named as A', () => {
+    const ride = (from: string, to: string, extra: string[][] = []) => beatOf({ ...hop(B, T0, 1000n, 1n << 59n), tags: [['A', 'hyperjump'], ['e', '0'.repeat(64), '', 'genesis'], ['e', '0'.repeat(64), '', 'previous'], ['c', at(1000n)], ['C', at(1n << 59n)], ['proof', 'a'.repeat(64)], ['from_height', from], ['B', to], ['mp', 'x'], ...extra] })!
+    // No stop index here: A is never looked up.
+    const same = rideEnds(ride('300', '300'))
+    expect(same.from.position.x).toBe(1n << 59n)
+    expect(same.from.exact).toBe(true)
+    // Without the index, where the rider stood: A on a chained ride, the
+    // boarding spot on a first one, and `as_of` cannot tell which.
+    for (const r of [ride('100', '200'), ride('100', '90', [['as_of', '100']])]) {
+      expect(rideEnds(r).from.position.x).toBe(1000n)
+      expect(rideEnds(r).from.exact).toBe(false)
     }
   })
 

@@ -4,7 +4,7 @@
  *
  * - A bag sealed somewhere no public hint names plays in an inset, on a cube
  *   that stands for it and nowhere: outlines, then sides, a key stamped on
- *   each side, the sides fading, LOCATION SECRET. A bag whose hint box is
+ *   each side, the sides fading, LOCATION UNKNOWN. A bag whose hint box is
  *   public plays in the world instead (scene/TvBoxes).
  * - An object published: an advertisement, NOW AVAILABLE!, the object
  *   turning, its name and who made it ("lets add the tv events for when new

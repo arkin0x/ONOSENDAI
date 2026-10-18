@@ -225,7 +225,7 @@ The tape carries more than moves, each as a segment in its place by time. A
 bag sealed with a public hint box is shown there: its outline draws, its sides
 fill, a key stamps onto each side, the sides fade, and the outline stays for
 the rest of the tape. A bag without one is never placed (where it is, is the
-hunt): it plays on a cube in an inset, LOCATION SECRET. A public object gets
+hunt): it plays on a cube in an inset, LOCATION UNKNOWN. A public object gets
 an advertisement: NOW AVAILABLE!, the model turning in the middle. A comment on a move or a bag gets the news desk: the
 commenter as a photograph, the quote printing out; one sealed to a bag's
 region prints as redaction. A new avatar gets the product shot too (NEW

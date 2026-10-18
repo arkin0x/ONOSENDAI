@@ -710,7 +710,7 @@ export class TvPainter {
       this.cube(sx + (stacked ? (pw - 2 * pad - stage) / 2 : 0), sy, stage, t, s)
       // What its author said is inside, when they said; else how big a region.
       const inside = contentsWords(item.counts)
-      this.caption(tx, ty + (narrow ? 0 : stage / 2 - 40 * s), textW, 'A BAG IS SEALED', 'LOCATION SECRET', inside ?? (item.height !== null ? `A REGION 2^${item.height} GIBSONS ACROSS` : null), s)
+      this.caption(tx, ty + (narrow ? 0 : stage / 2 - 40 * s), textW, 'A BAG IS SEALED', 'LOCATION UNKNOWN', inside ?? (item.height !== null ? `A REGION 2^${item.height} GIBSONS ACROSS` : null), s)
       // Money inside: hyped, on the cube's corner (arkinox, 2026-10-18).
       if (item.money) this.splash(sx + (stacked ? (pw - 2 * pad - stage) / 2 : 0) + stage * 0.9, sy + stage * 0.12, stage * 0.28, t, s, MONEY_SPLASH)
     } else if (item.kind === 'object') {

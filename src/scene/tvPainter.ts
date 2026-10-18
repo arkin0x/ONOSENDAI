@@ -267,6 +267,18 @@ export class TvPainter {
     // The logo, top right: the margins everything else takes.
     const lw = Math.min(LOGO_PX * s, W * LOGO_SHARE)
     const lh = lw * LOGO_ASPECT
+    // Under heavy snow (tuning, no signal, a bag with no public place) the
+    // logo and the clock get a soft dark backing, to read against the noise.
+    const snowy = p.status === 'tuning' || p.status === 'no-signal' || (p.shot?.item?.kind === 'bag' && !placeable(p.shot.item.hint))
+    if (snowy) {
+      const bx = W - MX - lw - 18 * s
+      const by = MY - 14 * s
+      const back = ctx.createRadialGradient(W - MX - lw / 2, MY + lh, 0, W - MX - lw / 2, MY + lh, lw * 0.9)
+      back.addColorStop(0, 'rgba(0, 0, 0, 0.72)')
+      back.addColorStop(1, 'rgba(0, 0, 0, 0)')
+      ctx.fillStyle = back
+      ctx.fillRect(bx, by, lw + 36 * s, lh + 130 * s)
+    }
     if (a.logo) {
       ctx.globalAlpha = 0.96
       ctx.drawImage(a.logo, W - MX - lw, MY, lw, lh)
@@ -496,15 +508,19 @@ export class TvPainter {
     // NOW AVAILABLE shows the rotating model in the center of the layout,
     // text can go under"). Everything else stacks only on a phone.
     const ad = item.kind === 'object'
-    const layout = (stage: number, pw: number, stacked: boolean): { stage: number; pw: number; stacked: boolean; textX: number; textW: number; lines: string[]; quoteSize: number; ph: number } => {
+    const layout = (stage: number, pw: number, stacked: boolean, size?: number, maxLines?: number): { stage: number; pw: number; stacked: boolean; textX: number; textW: number; lines: string[]; quoteSize: number; ph: number } => {
       const textX = stacked ? 0 : stage + 28 * s
       const textW = stacked ? pw - 2 * pad : pw - 2 * pad - textX
       let lines: string[] = []
       let quoteSize = 0
       if (item.kind === 'comment') {
-        quoteSize = (narrow ? 15 : 20) * s
+        quoteSize = size ?? (narrow ? 15 : 20) * s
         ctx.font = `${quoteSize}px ${TV_FONT}`
         lines = wrap(ctx, `“${quoteOf(item)}”`, textW)
+        if (maxLines !== undefined && lines.length > maxLines) {
+          lines = lines.slice(0, Math.max(1, maxLines))
+          lines[lines.length - 1] = fit(ctx, `${lines[lines.length - 1]}…`, textW)
+        }
       }
       const captionH = item.kind === 'comment' ? lines.length * quoteSize * 1.45 + 30 * s : 96 * s
       const ph = stacked ? stage + 18 * s + captionH + 2 * pad : Math.max(stage, captionH) + 2 * pad
@@ -513,7 +529,18 @@ export class TvPainter {
     // The model gives up size first, the words never.
     const fitPanel = (pw: number, stacked: boolean, room: number): ReturnType<typeof layout> => {
       const first = layout((ad ? (narrow ? 170 : 250) : narrow ? 140 : 210) * s, pw, stacked)
-      return first.ph <= room ? first : layout(Math.max(60 * s, first.stage - (first.ph - room)), pw, stacked)
+      if (first.ph <= room) return first
+      // The model gives up size first.
+      let f = layout(Math.max(60 * s, first.stage - (first.ph - room)), pw, stacked)
+      if (f.ph <= room || item.kind !== 'comment') return f
+      // Then a long quote's type, down to 12 px, and then its last lines,
+      // cut with an ellipsis: on a phone on its side the words covered the
+      // chiron and the marquee (review of #375).
+      for (let size = f.quoteSize - s; size >= 12 * s && f.ph > room; size -= s) f = layout(f.stage, pw, stacked, size)
+      if (f.ph <= room) return f
+      const over = f.ph - room
+      const keep = f.lines.length - Math.ceil(over / (f.quoteSize * 1.45))
+      return layout(f.stage, pw, stacked, f.quoteSize, keep)
     }
     // Where the panel goes: between the clock and the chiron (and a card's
     // room above the chiron), so it covers neither and the date can be read

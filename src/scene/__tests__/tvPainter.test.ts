@@ -16,7 +16,7 @@ import { useTv } from '../../store/useTv'
 
 /** A 2D context that measures every character as 7 px and draws nothing. */
 function fakeCanvas(): HTMLCanvasElement {
-  const ctx = new Proxy({ measureText: (t: string) => ({ width: Array.from(t).length * 7 }), createLinearGradient: () => ({ addColorStop: () => {} }) } as Record<string, unknown>, {
+  const ctx = new Proxy({ measureText: (t: string) => ({ width: Array.from(t).length * 7 }), createLinearGradient: () => ({ addColorStop: () => {} }), createRadialGradient: () => ({ addColorStop: () => {} }) } as Record<string, unknown>, {
     get: (target, key) => (key in target ? target[key as string] : () => {}),
     set: () => true,
   })
@@ -67,7 +67,7 @@ describe('the sealed bag', () => {
   /** A canvas that counts the line segments drawn on it. */
   function counting(): { canvas: HTMLCanvasElement; lines: () => number } {
     let n = 0
-    const ctx = new Proxy({ measureText: (t: string) => ({ width: Array.from(t).length * 7 }), createLinearGradient: () => ({ addColorStop: () => {} }), lineTo: () => { n++ } } as Record<string, unknown>, {
+    const ctx = new Proxy({ measureText: (t: string) => ({ width: Array.from(t).length * 7 }), createLinearGradient: () => ({ addColorStop: () => {} }), createRadialGradient: () => ({ addColorStop: () => {} }), lineTo: () => { n++ } } as Record<string, unknown>, {
       get: (target, key) => (key in target ? target[key as string] : () => {}),
       set: () => true,
     })
@@ -91,5 +91,28 @@ describe('the sealed bag', () => {
     const before = drawnAt(0.5)
     expect(drawnAt(3.4) - before).toBeGreaterThan(100)
     expect(drawnAt(6.5)).toBe(before)
+  })
+})
+
+describe('a long comment on a phone on its side', () => {
+  it('keeps clear of the chiron: the type steps down and the quote is cut', () => {
+    vi.spyOn(performance, 'now').mockReturnValue(1e12)
+    const text = 'word '.repeat(88).trim()
+    const item = { kind: 'comment' as const, id: 'c'.repeat(64), pubkey: 'p', at: 1, text, on: 'move' as const, about: null }
+    const shot = { id: item.id, kind: 'comment' as const, item, pubkey: 'p', beats: [], start: 1, end: 1, offsets: [], length: 10 }
+    useTv.setState({ shot, status: 'playing' })
+    const rects: number[][] = []
+    const ctx = new Proxy({ measureText: (t: string) => ({ width: Array.from(t).length * 7 }), createLinearGradient: () => ({ addColorStop: () => {} }), createRadialGradient: () => ({ addColorStop: () => {} }), strokeRect: (...r: number[]) => { rects.push(r) } } as Record<string, unknown>, {
+      get: (target, key) => (key in target ? target[key as string] : () => {}),
+      set: () => true,
+    })
+    const p = new TvPainter({ width: 0, height: 0, getContext: () => ctx } as unknown as HTMLCanvasElement)
+    p.size(915, 412, 1)
+    p.paint(picture({ shot }), assets, 1e12, 1, false)
+    vi.restoreAllMocks()
+    // The panel's border is the first rectangle stroked; the chiron's top, on
+    // this frame, is at 412 - 35 (margin) - 25.2 (marquee) - 9 - 55.8 = 287.
+    const [, y, , h] = rects[0]
+    expect(y + h).toBeLessThanOrEqual(287)
   })
 })

@@ -32,4 +32,7 @@ export const PLAYLIST: Track[] = [
   { url: 'https://media.basspistol.com/panix/autumn-leaves/1-hot-ears.mp3' },
   { url: 'https://media.basspistol.com/panix/autumn-leaves/2-bonjour-tristesse.mp3' },
   { url: 'https://media.basspistol.com/panix/autumn-leaves/4-jappjapp.mp3' },
+  { url: 'https://media.basspistol.com/panix/2012-grab-bag/1-lauantai.mp3' },
+  { url: 'https://media.basspistol.com/panix/2012-grab-bag/11-verbophobia.mp3' },
+  { url: 'https://media.basspistol.com/panix/2012-grab-bag/3-mandaak.mp3' },
 ]

@@ -60,13 +60,19 @@ function loadMuted(): boolean {
   try { return localStorage.getItem(MUTED_KEY) === '1' } catch { return false }
 }
 
-export const useTvMusic = create<MusicState>(() => ({ track: null, blocked: false, volume: loadVolume(), muted: loadMuted() }))
+/** At or under this the volume is silence, and silence is muted: a card that says NOW PLAYING plays. */
+const SILENT = 0.01
+/** What unmuting a volume turned all the way down comes back at. */
+const UNMUTE_TO = 0.5
 
-/** Set the volume, 0 to 1; turning it up unmutes. */
+const startVolume = loadVolume()
+export const useTvMusic = create<MusicState>(() => ({ track: null, blocked: false, volume: startVolume, muted: loadMuted() || startVolume <= SILENT }))
+
+/** Set the volume, 0 to 1; turning it up unmutes, and all the way down mutes. */
 export function setMusicVolume(volume: number): void {
   const v = Math.min(1, Math.max(0, volume))
   const s = useTvMusic.getState()
-  const muted = s.muted && v <= s.volume
+  const muted = v <= SILENT || (s.muted && v <= s.volume)
   useTvMusic.setState({ volume: v, muted })
   apply()
   try {
@@ -77,10 +83,16 @@ export function setMusicVolume(volume: number): void {
 
 /** Mute, or unmute. */
 export function toggleMusicMute(): void {
-  const muted = !useTvMusic.getState().muted
-  useTvMusic.setState({ muted })
+  const s = useTvMusic.getState()
+  const muted = !s.muted
+  // Unmuting silence would still be silence.
+  const volume = !muted && s.volume <= SILENT ? UNMUTE_TO : s.volume
+  useTvMusic.setState({ muted, volume })
   apply()
-  try { localStorage.setItem(MUTED_KEY, muted ? '1' : '0') } catch { /* kept for this visit only */ }
+  try {
+    localStorage.setItem(MUTED_KEY, muted ? '1' : '0')
+    localStorage.setItem(VOLUME_KEY, volume.toFixed(3))
+  } catch { /* kept for this visit only */ }
 }
 
 function apply(): void {
@@ -212,7 +224,11 @@ function fail(list: Track[]): void {
     // Nothing on the list will play: try it all again later.
     reading?.abort()
     useTvMusic.setState({ track: null })
-    audio?.removeAttribute('src')
+    if (audio) {
+      audio.removeAttribute('src')
+      // Stops a download still trickling in, which could otherwise start playing with no card up.
+      audio.load()
+    }
     const mine = ++session
     retry = setTimeout(() => { if (mine === session) { failures = 0; advance(list) } }, RETRY_MS)
     return
@@ -234,10 +250,22 @@ function advance(list: Track[]): void {
   clearStall()
   useTvMusic.setState({ track: { url: track.url, title: track.title ?? nameFromUrl(track.url), artist: track.artist ?? '', art: null } })
   a.src = track.url
-  // A link that answers and then sends nothing would hold the list on it.
-  stall = setTimeout(() => { if (mine === session && audio === a) fail(list) }, STALL_MS)
-  play(a, mine)
+  armStall(list)
+  play(a, mine, list)
   void describe(track, mine)
+}
+
+/**
+ * A link that answers and then sends nothing would hold the list on it.
+ * Only while the sound may play: a browser holding it back until a tap may
+ * not fetch the track either, and every track would look broken
+ * (review of #382, round 2).
+ */
+function armStall(list: Track[]): void {
+  clearStall()
+  const mine = session
+  const a = audio
+  stall = setTimeout(() => { if (mine === session && audio === a) fail(list) }, STALL_MS)
 }
 
 /** What a tap on a control is for: the control, not the sound. */
@@ -246,9 +274,10 @@ function onControl(e: Event): boolean {
   return typeof t?.closest === 'function' && t.closest('button, a, input, select, textarea, [role="button"]') !== null
 }
 
-function play(a: HTMLAudioElement, mine: number): void {
+function play(a: HTMLAudioElement, mine: number, list: Track[]): void {
   a.play().catch((e: unknown) => {
     if (mine !== session || (e as { name?: string })?.name !== 'NotAllowedError') return
+    clearStall()
     useTvMusic.setState({ blocked: true })
     if (unblock) return
     // The browser lets sound start in the end of a tap (a finger's touch
@@ -256,7 +285,10 @@ function play(a: HTMLAudioElement, mine: number): void {
     // a try the browser refuses waits for the next.
     const go = (e: Event): void => {
       if (onControl(e) || (e.type === 'keydown' && (e as { key?: string }).key === 'Escape')) return
-      if (audio) void audio.play().catch(() => {})
+      if (!audio) return
+      // Allowed now, perhaps: the track has its 20 s again to send something.
+      armStall(list)
+      void audio.play().catch(() => { clearStall() })
     }
     const kinds = ['pointerup', 'touchend', 'click', 'keydown'] as const
     for (const k of kinds) window.addEventListener(k, go, { capture: true })

@@ -106,6 +106,21 @@ describe('TV music', () => {
     expect(audio().plays).toBe(before + 2)
   })
 
+  it('never skips a track for sending nothing while the sound is held back', async () => {
+    FakeAudio.refuse = true
+    startMusic(list)
+    await flush()
+    const first = audio().src
+    vi.advanceTimersByTime(5 * 60_000)
+    expect(audio().src).toBe(first)
+    expect(useTvMusic.getState().track).not.toBeNull()
+    // Once a tap lets it play, it has its 20 s to send something.
+    FakeAudio.refuse = false
+    window.dispatchEvent(new Event('pointerup'))
+    vi.advanceTimersByTime(21_000)
+    expect(audio().src).not.toBe(first)
+  })
+
   it('a tap on a control, or Escape, is not the tap for sound', async () => {
     FakeAudio.refuse = true
     startMusic(list)
@@ -203,6 +218,17 @@ describe('the volume and mute', () => {
     toggleMusicMute()
     toggleMusicMute()
     expect(useTvMusic.getState().muted).toBe(false)
+  })
+
+  it('all the way down is muted, and unmuting it comes back to be heard', () => {
+    startMusic(list)
+    setMusicVolume(0)
+    expect(useTvMusic.getState().muted).toBe(true)
+    expect(audio().muted).toBe(true)
+    toggleMusicMute()
+    expect(useTvMusic.getState()).toMatchObject({ muted: false, volume: 0.5 })
+    expect(audio().volume).toBe(0.5)
+    expect(store.get('onosendai:tvVolume')).toBe('0.500')
   })
 
   it('a new track starts at the volume and mute it was left at', () => {

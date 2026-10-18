@@ -250,6 +250,9 @@ export function TvScreenEffect(): JSX.Element {
   useEffect(() => {
     const el = gl.domElement
     let drag: { id: number; y: number; volume: number; moved: boolean } | null = null
+    // The click a browser sends after a tap or a drag on the card is the
+    // card's too, not a tap on whatever the scene has under it.
+    let swallowUntil = 0
     const down = (e: PointerEvent): void => {
       const m = useTvMusic.getState()
       // While the browser holds the sound back, a tap is for the sound.
@@ -275,13 +278,21 @@ export function TvScreenEffect(): JSX.Element {
       if (!drag || e.pointerId !== drag.id) return
       if (!drag.moved && e.type === 'pointerup') toggleMusicMute()
       drag = null
+      swallowUntil = performance.now() + 500
+      e.stopPropagation()
+    }
+    const click = (e: MouseEvent): void => {
+      if (performance.now() > swallowUntil) return
+      swallowUntil = 0
       e.stopPropagation()
     }
     el.addEventListener('pointerdown', down)
     el.addEventListener('pointermove', move)
     el.addEventListener('pointerup', end)
     el.addEventListener('pointercancel', end)
+    el.addEventListener('click', click)
     return () => {
+      el.removeEventListener('click', click)
       el.removeEventListener('pointerdown', down)
       el.removeEventListener('pointermove', move)
       el.removeEventListener('pointerup', end)

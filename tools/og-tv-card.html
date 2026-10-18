@@ -1,0 +1,257 @@
+<!doctype html>
+<!--
+  og-tv-card.html - the link preview for onosendai.tech/tv, at public/og-tv.png.
+
+  Cyberspace TV's own card (arkinox, 2026-10-18: "a cool opengraph card just
+  for the /tv route? use the same crt effects, the onosendai logo, and some
+  lime green grid lines at a steep angle"). The flat frame is drawn on a 2D
+  canvas: a lime grid floor falling away steeply under a tilted camera, the
+  wordmark, CYBERSPACE TV, and the broadcast's furniture. Then it goes
+  through the tube: the same shader Cyberspace TV draws with
+  (src/scene/TvScreenEffect.tsx), so the card looks like the thing it links
+  to: bent glass in a black surround, colour fringing growing to the edges,
+  scanlines, vignette and grain.
+
+  Rendered at exactly 1200x630, as og-card.html is:
+
+    node -e "const{chromium}=require('playwright');(async()=>{
+      const b=await chromium.launch({args:['--allow-file-access-from-files','--use-gl=angle','--use-angle=swiftshader','--enable-unsafe-swiftshader']});
+      const p=await b.newPage({viewport:{width:1200,height:630}});
+      await p.goto('file://'+process.cwd()+'/tools/og-tv-card.html');
+      await p.waitForFunction(()=>window.__done===true);
+      await p.screenshot({path:'public/og-tv.png'});await b.close();})()"
+
+  The typeface is the TV's own file from public/fonts (Monaspace Argon).
+  The grain is seeded, so the same file always renders the same card.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<style>
+  @font-face {
+    font-family: 'Monaspace Argon';
+    src: url('../public/fonts/MonaspaceArgon-Regular.woff2') format('woff2');
+    font-weight: 400;
+    font-display: block;
+  }
+  @font-face {
+    font-family: 'Monaspace Argon';
+    src: url('../public/fonts/MonaspaceArgon-Bold.woff2') format('woff2');
+    font-weight: 700;
+    font-display: block;
+  }
+  * { margin: 0; padding: 0; }
+  html, body { width: 1200px; height: 630px; background: #000; overflow: hidden; }
+  canvas { display: block; }
+</style>
+</head>
+<body>
+<canvas id="tube" width="1200" height="630"></canvas>
+<script>
+const W = 1200
+const H = 630
+const LIME = '#a8ff3e'
+const FONT = "'Monaspace Argon', ui-monospace, monospace"
+
+/** The flat frame: what the tube shows before it bends it. */
+function flat(logo) {
+  const c = document.createElement('canvas')
+  c.width = W
+  c.height = H
+  const g = c.getContext('2d')
+  // Night, a little blue toward the horizon.
+  const sky = g.createLinearGradient(0, 0, 0, H)
+  sky.addColorStop(0, '#02040a')
+  sky.addColorStop(0.55, '#06101c')
+  sky.addColorStop(1, '#010205')
+  g.fillStyle = sky
+  g.fillRect(0, 0, W, H)
+
+  // The grid floor, seen from above at a steep angle, the camera rolled:
+  // lines run from under the viewer to a horizon high in the frame.
+  const pitch = 0.62 // radians down from level
+  const roll = -0.21
+  const height = 2.2
+  const f = 760
+  const cx = W * 0.5
+  const cy = H * 0.5
+  const project = (x, z) => {
+    // Camera at (0, height, 0), looking along +z, pitched down, rolled.
+    const y = -height
+    const yc = y * Math.cos(pitch) + z * Math.sin(pitch)
+    const zc = -y * Math.sin(pitch) + z * Math.cos(pitch)
+    if (zc <= 0.05) return null
+    const sx = (x / zc) * f
+    const sy = (-yc / zc) * f
+    return [cx + sx * Math.cos(roll) - sy * Math.sin(roll), cy + sx * Math.sin(roll) + sy * Math.cos(roll), zc]
+  }
+  const line = (a, b, alpha, width) => {
+    if (!a || !b) return
+    g.globalAlpha = alpha
+    g.lineWidth = width
+    g.beginPath()
+    g.moveTo(a[0], a[1])
+    g.lineTo(b[0], b[1])
+    g.stroke()
+  }
+  g.strokeStyle = LIME
+  g.shadowColor = LIME
+  g.shadowBlur = 16
+  const far = 42
+  const step = 1
+  // Along the floor, toward the horizon, faded by distance in short pieces.
+  for (let x = -40; x <= 40; x += step) {
+    for (let z = 0.4; z < far; z += 0.5) {
+      const a = project(x, z)
+      const b = project(x, z + 0.5)
+      if (!a || !b) continue
+      line(a, b, Math.min(1, Math.max(0, 1.15 - z / far)) * (x % 4 === 0 ? 1 : 0.7), x % 4 === 0 ? 3.2 : 1.8)
+    }
+  }
+  // Across it.
+  for (let z = 0.5; z < far; z += step) {
+    const fade = Math.min(1, Math.max(0, 1.15 - z / far))
+    for (let x = -40; x < 40; x += 2) line(project(x, z), project(x + 2, z), fade * (z % 4 < 1 ? 1 : 0.7), z % 4 < 1 ? 3.2 : 1.8)
+  }
+  g.globalAlpha = 1
+  g.shadowBlur = 0
+
+  // A dark band behind the words, so the grid reads under them and not through them.
+  const band = g.createLinearGradient(0, H * 0.18, 0, H * 0.7)
+  band.addColorStop(0, 'rgba(1, 3, 8, 0)')
+  band.addColorStop(0.35, 'rgba(1, 3, 8, 0.72)')
+  band.addColorStop(0.75, 'rgba(1, 3, 8, 0.72)')
+  band.addColorStop(1, 'rgba(1, 3, 8, 0)')
+  g.fillStyle = band
+  g.fillRect(0, H * 0.18, W, H * 0.52)
+
+  // The wordmark, then the channel.
+  const lw = 560
+  const lh = lw * 354 / 1871
+  g.drawImage(logo, (W - lw) / 2, H * 0.24, lw, lh)
+  g.textAlign = 'center'
+  g.fillStyle = '#f2fbff'
+  g.shadowColor = LIME
+  g.shadowBlur = 18
+  g.font = `700 66px ${FONT}`
+  g.fillText('CYBERSPACE', W / 2 - 62, H * 0.6)
+  g.font = `700 66px ${FONT}`
+  const tvX = W / 2 + 248
+  g.fillText('TV', tvX, H * 0.6)
+  g.shadowBlur = 0
+  g.strokeStyle = '#f2fbff'
+  g.lineWidth = 4
+  const tw = g.measureText('TV').width
+  g.beginPath()
+  g.roundRect(tvX - tw / 2 - 14, H * 0.6 - 58, tw + 28, 74, 10)
+  g.stroke()
+  g.font = `400 20px ${FONT}`
+  g.fillStyle = LIME
+  g.fillText('EVERYTHING THAT EVER HAPPENED IN CYBERSPACE, ON TAPE', W / 2, H * 0.6 + 52)
+
+  // The furniture: the tape's clock, top right; a marquee along the bottom.
+  g.textAlign = 'right'
+  g.fillStyle = '#f2fbff'
+  g.font = `700 15px ${FONT}`
+  g.fillText('▶ PLAY', W - 96, 84)
+  g.font = `700 20px ${FONT}`
+  g.fillText('AUG 23 2026', W - 96, 110)
+  g.fillText('03:26:47', W - 96, 134)
+  const my = H - 92
+  g.fillStyle = 'rgba(0, 0, 0, 0.62)'
+  g.fillRect(84, my, W - 168, 30)
+  g.fillStyle = 'rgba(168, 255, 62, 0.5)'
+  g.fillRect(84, my, W - 168, 1.5)
+  g.fillRect(84, my + 28.5, W - 168, 1.5)
+  g.textAlign = 'left'
+  g.font = `700 14px ${FONT}`
+  g.fillStyle = '#f2fbff'
+  g.fillText('CYBERSPACE', 96, my + 20)
+  g.strokeStyle = '#f2fbff'
+  g.lineWidth = 1.5
+  g.beginPath()
+  g.roundRect(196, my + 6, 30, 18, 3)
+  g.stroke()
+  g.fillText('TV', 201, my + 20)
+  g.font = `400 14px ${FONT}`
+  g.fillText('NOW AVAILABLE   ◆   WATCH ANY MOMENT FROM AUG 23   ◆   ONOSENDAI.TECH/TV   ◆   NEW ARRIVALS', 244, my + 20)
+  return c
+}
+
+const FRAG = `
+precision highp float;
+uniform sampler2D uFrame;
+uniform vec2 uSize;
+varying vec2 vUv;
+float tvNoise(vec2 p) { return fract(sin(dot(p, vec2(12.9898, 78.233))) * 43758.5453); }
+void main() {
+  vec2 c = vUv * 2.0 - 1.0;
+  c *= 1.1;
+  c *= 1.0 + 0.045 * dot(c.yx, c.yx);
+  vec2 q = abs(c) - vec2(0.86);
+  float edge = length(max(q, 0.0)) + min(max(q.x, q.y), 0.0) - 0.14;
+  vec2 w = c * 0.5 + 0.5;
+  if (edge > 0.012 || w.x < 0.0 || w.x > 1.0 || w.y < 0.0 || w.y > 1.0) { gl_FragColor = vec4(0.0, 0.0, 0.0, 1.0); return; }
+  float r2 = dot(c, c);
+  vec2 ca = c * (0.0015 + 0.0045 * r2);
+  vec3 col = vec3(texture2D(uFrame, w + ca).r, texture2D(uFrame, w).g, texture2D(uFrame, w - ca).b);
+  vec2 px = vUv * uSize;
+  col *= 0.82 + 0.18 * sin(px.y * 2.0944);
+  col *= 0.93 + 0.07 * sin(px.x * 2.0944);
+  col *= smoothstep(1.55, 0.55, length(c * vec2(0.92, 1.0)));
+  col *= 1.0 - smoothstep(-0.02, 0.012, edge);
+  float g = tvNoise(floor(px / 2.0));
+  col += (g - 0.5) * 0.05;
+  gl_FragColor = vec4(col, 1.0);
+}`
+const VERT = `
+attribute vec2 aPos;
+varying vec2 vUv;
+void main() { vUv = aPos * 0.5 + 0.5; gl_Position = vec4(aPos, 0.0, 1.0); }`
+
+function tube(frame) {
+  const canvas = document.getElementById('tube')
+  const gl = canvas.getContext('webgl', { preserveDrawingBuffer: true })
+  const shader = (type, src) => {
+    const s = gl.createShader(type)
+    gl.shaderSource(s, src)
+    gl.compileShader(s)
+    if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) throw new Error(gl.getShaderInfoLog(s))
+    return s
+  }
+  const prog = gl.createProgram()
+  gl.attachShader(prog, shader(gl.VERTEX_SHADER, VERT))
+  gl.attachShader(prog, shader(gl.FRAGMENT_SHADER, FRAG))
+  gl.linkProgram(prog)
+  gl.useProgram(prog)
+  const buf = gl.createBuffer()
+  gl.bindBuffer(gl.ARRAY_BUFFER, buf)
+  gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 1, -1, -1, 1, 1, 1]), gl.STATIC_DRAW)
+  const loc = gl.getAttribLocation(prog, 'aPos')
+  gl.enableVertexAttribArray(loc)
+  gl.vertexAttribPointer(loc, 2, gl.FLOAT, false, 0, 0)
+  const tex = gl.createTexture()
+  gl.bindTexture(gl.TEXTURE_2D, tex)
+  gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, true)
+  gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, frame)
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR)
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR)
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE)
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE)
+  gl.uniform2f(gl.getUniformLocation(prog, 'uSize'), W, H)
+  gl.viewport(0, 0, W, H)
+  gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4)
+}
+
+;(async () => {
+  await document.fonts.load(`700 66px ${FONT}`)
+  await document.fonts.load(`400 20px ${FONT}`)
+  const logo = new Image()
+  logo.src = '../public/logo.png'
+  await logo.decode()
+  tube(flat(logo))
+  window.__done = true
+})()
+</script>
+</body>
+</html>

@@ -16,7 +16,6 @@
  */
 
 import { useEffect, useMemo, useState } from 'react'
-import { KeyRound } from 'lucide-react'
 import { useAvatarShard } from '../store/useAvatars'
 import { useTv } from '../store/useTv'
 import { useProfile } from '../hooks/useProfile'
@@ -25,6 +24,7 @@ import { objectsOf } from '../workshop/ObjectPicker'
 import type { TapeItem } from '../lib/tv/director'
 import { ShardSpin } from '../scene/ShardSpin'
 import { ProfilePic } from './ProfileBadge'
+import { ItemIcon } from './ItemIcon'
 import { STATIC_MS } from '../scene/TvScreenEffect'
 
 /** Seconds per character as a quote prints, and how long before it starts. */
@@ -76,7 +76,7 @@ function BagInset({ item }: { item: Extract<TapeItem, { kind: 'bag' }> }): JSX.E
         <div className="tvbag">
           {['front', 'back', 'left', 'right', 'top', 'bottom'].map((f, i) => (
             <div key={f} className={`tvbag__face tvbag__face--${f}`} style={{ ['--i' as string]: i }}>
-              <KeyRound className="tvbag__key" aria-hidden />
+              <ItemIcon type="key" size={52} className="tvbag__key" />
             </div>
           ))}
         </div>

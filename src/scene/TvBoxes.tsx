@@ -137,7 +137,7 @@ function Box({ hint, live }: { hint: HintBox; live: boolean }): JSX.Element | nu
       </lineSegments>
       {live && (
         <mesh geometry={sides} scale={[sx, sy, sz]} frustumCulled={false}>
-          <meshBasicMaterial ref={fill} color={REGION} toneMapped={false} transparent opacity={0} side={DoubleSide} depthWrite={false} />
+          <meshBasicMaterial ref={fill} color={REGION} toneMapped={false} transparent opacity={0} side={DoubleSide} forceSinglePass depthWrite={false} />
         </mesh>
       )}
       {live && key && FACES.map((f, i) => {
@@ -149,7 +149,7 @@ function Box({ hint, live }: { hint: HintBox; live: boolean }): JSX.Element | nu
           <group key={i} position={pos} rotation={rot}>
             <mesh ref={(m) => { stamps.current[i] = m }} frustumCulled={false}>
               <planeGeometry args={[across, across]} />
-              <meshBasicMaterial map={key} color={REGION} toneMapped={false} transparent opacity={0} side={DoubleSide} depthWrite={false} />
+              <meshBasicMaterial map={key} color={REGION} toneMapped={false} transparent opacity={0} side={DoubleSide} forceSinglePass depthWrite={false} />
             </mesh>
           </group>
         )

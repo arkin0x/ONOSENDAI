@@ -26,6 +26,7 @@ import { alignedOrigin, useCyberspace } from '../store/useCyberspace'
 import { shotProgress, useTv } from '../store/useTv'
 import { useProfile } from '../hooks/useProfile'
 import { OtherAvatar } from './OtherAvatar'
+import { tvName } from '../lib/tv/text'
 import { TvBoxes } from './TvBoxes'
 
 const REACH = GRID_RADIUS * 8
@@ -40,10 +41,13 @@ const TV_CAMERA_PRIORITY = 0.5
 /** How quickly its distance and angle settle, seconds: slow, so the push-in reads as a move. */
 const TV_CAMERA_TAU = 0.8
 
-function TapeAvatar({ pubkey, centre, position, place, subject }: { pubkey: string; centre: [number, number, number]; position: Position; place: (p: Position) => [number, number, number]; subject: boolean }): JSX.Element {
+function TapeAvatar({ pubkey, centre, position, from, place, subject }: { pubkey: string; centre: [number, number, number]; position: Position; from?: Position; place: (p: Position) => [number, number, number]; subject: boolean }): JSX.Element {
   const profile = useProfile(pubkey)
-  const text = (profile?.name ?? `${pubkey.slice(0, 8)}…`).toUpperCase()
-  const turn = useMemo(() => avatarTurn(useCyberspace.getState().axes(), null), [])
+  const text = tvName(pubkey, profile?.name)
+  // Facing the way it went, from where it was to where it is, as every
+  // avatar does after a move (lib/facing.ts; arkinox, 2026-10-18: "when my
+  // avatar moves, it always faces the same direction").
+  const turn = useMemo(() => avatarTurn(useCyberspace.getState().axes(), from ? [from, position] : null), [from, position])
   return <OtherAvatar pubkey={pubkey} color={targetColor(pubkey)} center={centre} position={position} place={place} turn={turn} label={text} labelOpacity={subject ? 0.9 : 0.5} tappable={false} />
 }
 
@@ -139,7 +143,7 @@ export function TvLayer({ axes }: { axes: ViewAxes }): JSX.Element {
       <TvCamera axes={axes} />
       <TvBoxes />
       {near.map((p) => (
-        <TapeAvatar key={p.pk} pubkey={p.pk} centre={p.centre} position={p.a.position} place={place} subject={shot?.kind === 'trip' && p.pk === shot.pubkey} />
+        <TapeAvatar key={p.pk} pubkey={p.pk} centre={p.centre} position={p.a.position} from={p.a.from} place={place} subject={shot?.kind === 'trip' && p.pk === shot.pubkey} />
       ))}
     </>
   )

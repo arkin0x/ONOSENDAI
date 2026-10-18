@@ -1,7 +1,7 @@
 /**
  * WorldLabel.tsx — text that lives in the scene but reads like HUD.
  *
- * Billboarded so it always faces you, and rescaled from view depth every frame
+ * Turned to face the camera, and rescaled from view depth every frame
  * so it holds a constant pixel height. Without that second part a label shrinks
  * to nothing as you pull the camera out, which is exactly when you most want to
  * read it.
@@ -13,11 +13,18 @@
  */
 
 import { useMemo, useRef } from 'react'
-import { Billboard, Text } from '@react-three/drei'
+import { Text } from '@react-three/drei'
 import { useFrame, type RootState } from '@react-three/fiber'
-import { Group, Vector3 } from 'three'
+import { Group, Quaternion, Vector3 } from 'three'
 import { WORLD_FONT } from '../lib/font'
 import { labelLiftPx, projScaleOf } from '../lib/markerSize'
+
+/**
+ * When in the frame a label turns to the camera and sizes itself: after the
+ * camera rig (0) and Cyberspace TV's camera (0.5) have moved it, before the
+ * composer draws (1). Any earlier and the label answers last frame's camera.
+ */
+const LABEL_PRIORITY = 0.9
 
 /**
  * How much smaller labels are drawn on a narrow screen.
@@ -101,7 +108,9 @@ export function WorldLabel({
 }: Props): JSX.Element {
   const group = useRef<Group>(null)
   const inner = useRef<Group>(null)
+  const facing = useRef<Group>(null)
   const scratch = useMemo(() => new Vector3(), [])
+  const parentTurn = useMemo(() => new Quaternion(), [])
 
   useFrame((state: RootState) => {
     const g = group.current
@@ -122,14 +131,26 @@ export function WorldLabel({
     if (clear && inner.current) {
       inner.current.position.y = labelLiftPx(clear.trueSide, clear.minPx, depth, projScale, unitPx) / unitPx + offsetPx[1] / px
     }
-  })
+    // Face the camera exactly as it is drawn: the camera's own turn, undone
+    // by whatever turns the label's parents. drei's Billboard did this at
+    // the start of the frame, before the camera rig moved the camera, so on
+    // a moving camera (Cyberspace TV's orbit and cuts) a label faced where
+    // the camera had been and swung about (arkinox, 2026-10-18: "the title
+    // floating above avatars acts strangely and tries to rotate in weird
+    // directions ... the label should just face the camera viewing it").
+    const f = facing.current
+    if (f?.parent) {
+      f.parent.getWorldQuaternion(parentTurn).invert()
+      f.quaternion.copy(parentTurn).multiply(state.camera.quaternion)
+    }
+  }, LABEL_PRIORITY)
 
   // One unit inside the billboard is one `px`, so a pixel offset divides by it.
   const nudge: [number, number, number] = [offsetPx[0] / px, offsetPx[1] / px, 0]
 
   return (
     <group ref={group}>
-      <Billboard>
+      <group ref={facing}>
        <group ref={inner} position={nudge}>
         <Text
           font={WORLD_FONT}
@@ -177,7 +198,7 @@ export function WorldLabel({
           </Text>
         )}
        </group>
-      </Billboard>
+      </group>
     </group>
   )
 }

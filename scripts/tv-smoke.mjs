@@ -6,11 +6,11 @@
  * read-only), so the TV plays real history and nothing reaches a real relay.
  * LOCAL from the first frame; the run fails if the page sends any EVENT.
  *
- * Checks, at phone and desktop sizes: the menu's CYBERSPACE TV button puts
- * the address on /tv and turns the set on; a shot plays (the chiron names an
- * avatar, the clock reads a v2 date); the tube pass runs (the frame is not
- * the bare scene); Escape turns it off and leaves /tv. Screenshots go to the
- * out dir.
+ * Checks, at phone and desktop sizes: the menu's TV button puts the address
+ * on /tv and turns the set on; a shot plays from v2's tape and the numbers
+ * are read (what is painted on the tube is read from the store, since it is
+ * pixels now); Escape and OFF turn it off and leave /tv. Screenshots go to
+ * the out dir.
  *
  * Usage: start a FRESH dev server (`npx vite --port 5231`), then
  *   PLAYWRIGHT_BROWSERS_PATH=/data/claude/ms-playwright \
@@ -31,41 +31,37 @@ async function run(phone) {
   const { browser, page, stats, errors } = await launch({ phone, url: base, seed })
   const check = (name, ok, note = '') => { results.push({ size, name, ok, note }); console.log(`${ok ? 'PASS' : 'FAIL'} ${size} ${name}${note ? `: ${note}` : ''}`) }
   try {
+    const tv = (expr) => page.evaluate(async (expr) => { const m = await import('/src/store/useTv.ts'); return new Function('s', `return (${expr})`)(m.useTv.getState()) }, expr)
+    const until = async (expr, ms) => { const end = Date.now() + ms; while (Date.now() < end) { if (await tv(expr)) return true; await page.waitForTimeout(500) } return false }
     await page.goto(base, { waitUntil: 'domcontentloaded' })
     await page.waitForSelector('canvas', { timeout: 60_000 })
     await page.waitForTimeout(4000)
-    // The compass opens the view menu; CYBERSPACE TV is in it.
-    const compass = page.locator('[aria-label="View controls"]').first()
-    await compass.click({ timeout: 15_000 })
-    const button = page.getByRole('button', { name: /CYBERSPACE TV/ })
-    await button.dispatchEvent('pointerdown')
+    // CYBERSPACE TV is at the right of the question under the wordmark, in the menu.
+    if (phone) await page.locator('.hamburger-menu').click()
+    await page.locator('.ask-tv').click({ timeout: 15_000 })
     await page.waitForTimeout(500)
     check('button puts the address on /tv', new URL(page.url()).pathname === '/tv', page.url())
-    await page.waitForSelector('.tv', { timeout: 10_000 })
-    check('the set is on', true)
-    await page.waitForSelector('.tv__chiron-name', { timeout: 45_000 }).catch(() => {})
-    const name = await page.locator('.tv__chiron-name').textContent().catch(() => null)
-    check('a shot plays and the chiron names its avatar', !!name, name ?? 'no chiron')
-    const clock = await page.locator('.tv__clock').innerText().catch(() => '')
-    check('the clock reads a v2 date', /(AUG|SEP|OCT) \d\d 2026/.test(clock), clock.replace(/\n/g, ' '))
-    const ticker = await page.locator('.tv__ticker').getAttribute('aria-label').catch(() => null)
-    check('the ticker has numbers', !!ticker && /AVATARS IN CYBERSPACE/.test(ticker), (ticker ?? '').slice(0, 160))
+    check('the set is on', await tv('s.on'))
+    check('a shot plays', await until("s.status === 'playing' && s.shot !== null", 60_000))
+    const at = await tv('s.tapeTime')
+    check('the tape is v2', typeof at === 'number' && at >= 1787455607, String(at))
+    check('the numbers are read', await until('s.census !== null', 30_000))
     await page.waitForTimeout(3000)
     await page.screenshot({ path: path.join(out, `${size}-tv-1.png`) })
     await page.waitForTimeout(6000)
     await page.screenshot({ path: path.join(out, `${size}-tv-2.png`) })
-    const doing = await page.locator('.tv__chiron-doing').textContent().catch(() => null)
-    check('the chiron says what they did', !!doing, doing ?? '')
     await page.keyboard.press('Escape')
     await page.waitForTimeout(800)
-    check('Escape turns it off', (await page.locator('.tv').count()) === 0)
+    check('Escape turns it off', !(await tv('s.on')))
     check('and leaves /tv', new URL(page.url()).pathname !== '/tv', page.url())
-    await page.screenshot({ path: path.join(out, `${size}-after.png`) })
     // Straight onto /tv, as a link or a screen left running would open it.
     await page.goto(`${base}/tv`, { waitUntil: 'domcontentloaded' })
-    await page.waitForSelector('.tv__chiron-name', { timeout: 60_000 }).catch(() => {})
-    check('/tv opens straight onto the tape', (await page.locator('.tv__chiron-name').count()) > 0)
+    await page.waitForSelector('canvas', { timeout: 60_000 })
+    check('/tv opens straight onto the tape', await until("s.on && s.status === 'playing'", 60_000))
     await page.screenshot({ path: path.join(out, `${size}-direct.png`) })
+    await page.locator('.tv__off').click()
+    await page.waitForTimeout(500)
+    check('OFF turns it off', !(await tv('s.on')))
   } catch (e) {
     check('run', false, String(e).slice(0, 300))
   } finally {

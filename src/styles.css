@@ -5636,22 +5636,34 @@ kbd {
   background: rgba(104, 45, 181, 0.2);
 }
 
-/* CYBERSPACE TV: the tape, in a tube's warm phosphor amber. */
-.hyper__btn--tv {
+/* CYBERSPACE TV, at the right of the question under the wordmark (arkinox,
+   2026-10-18: "the button for cyberspace tv can be moved to float right of
+   the face at the top of the menu"), in a tube's warm phosphor amber. */
+.ask-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.ask-row .ask { flex: 1 1 auto; min-width: 0; }
+.ask-tv {
+  pointer-events: auto;
+  flex: none;
   display: inline-flex;
   align-items: center;
-  justify-content: center;
   gap: 6px;
-  width: 100%;
-  margin-top: 6px;
+  margin-top: 12px;
+  padding: 7px 10px;
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: 0.12em;
   color: #ffb54a;
-  border-color: rgba(255, 160, 40, 0.5);
+  border: 1px solid rgba(255, 160, 40, 0.5);
+  border-radius: 8px;
   background: rgba(255, 160, 40, 0.07);
+  cursor: pointer;
 }
-
-.hyper__btn--tv:hover:not(:disabled) {
-  background: rgba(255, 160, 40, 0.18);
-}
+.ask-tv:hover:not(:disabled) { background: rgba(255, 160, 40, 0.18); }
+.ask-tv:disabled { opacity: 0.35; cursor: default; }
 
 /* VIEW NEAREST STOP: one full-width action under the station readout, in the
    station's bitcoin orange so it reads as part of that group. */
@@ -9269,421 +9281,51 @@ a.feed__act { text-decoration: none; }
 }
 .ask:hover .ask__bubble { border-color: rgba(0, 229, 255, 0.55); }
 
-/* Cyberspace TV (hud/TvScreen.tsx): a broadcast's furniture over the tube.
-   Everything carries the same red/cyan fringe the tube puts on the picture,
-   and none of it takes a tap except OFF and RETRY. */
+/* Cyberspace TV (hud/TvScreen.tsx). Everything on the picture is painted
+   into the tube (scene/tvPainter.ts); what is here takes a tap, or is off
+   screen for the painter to copy. */
+@font-face {
+  font-family: 'Monaspace Argon';
+  src: url('/fonts/MonaspaceArgon-Regular.woff2') format('woff2');
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'Monaspace Argon';
+  src: url('/fonts/MonaspaceArgon-Bold.woff2') format('woff2');
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+}
+
 .tv {
   position: fixed;
   inset: 0;
   z-index: 200;
   pointer-events: none;
-  font-family: var(--mono);
-  color: #f2fbff;
-  text-shadow: -1px 0 rgba(255, 40, 80, 0.55), 1px 0 rgba(0, 229, 255, 0.55), 0 0 6px rgba(200, 245, 255, 0.35);
-  letter-spacing: 0.08em;
 }
 
 .tv button { pointer-events: auto; }
 
-.tv__bug {
-  position: absolute;
-  top: max(18px, env(safe-area-inset-top));
-  left: 22px;
-  font-size: 12px;
-  font-weight: 700;
-  letter-spacing: 0.22em;
-  opacity: 0.8;
-}
-
-.tv__bug b {
-  margin-left: 6px;
-  padding: 1px 5px;
-  border: 1px solid currentColor;
-  border-radius: 3px;
-}
-
-.tv__clock {
-  position: absolute;
-  /* Under the logo the tube draws in the corner (TvScreenEffect LOGO_*). */
-  top: calc(8.5vh + min(260px, 42vw) * 0.19 + 36px);
-  right: 6vw;
-  display: flex;
-  flex-direction: column;
-  align-items: flex-end;
-  gap: 2px;
-  font-size: 15px;
-  font-weight: 700;
-  letter-spacing: 0.12em;
-}
-
-.tv__play { font-size: 11px; opacity: 0.85; }
-
-.tv__off,
-.tv__retry {
-  font-family: inherit;
-  font-size: 10px;
-  letter-spacing: 0.14em;
-  color: var(--fg);
-  background: rgba(6, 14, 22, 0.7);
-  border: 1px solid rgba(200, 245, 255, 0.4);
-  border-radius: 6px;
-  padding: 6px 9px;
-  cursor: pointer;
-}
-
+/* The workshop's own round close button, top left (arkinox, 2026-10-18). */
 .tv__off {
   position: absolute;
-  top: max(14px, env(safe-area-inset-top));
-  left: 196px;
+  top: max(12px, env(safe-area-inset-top));
+  left: 12px;
 }
 
-.tv__retry { margin-top: 14px; }
-
-.tv__status {
+.tv__retry {
   position: absolute;
-  inset: 0;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  font-size: 26px;
-  font-weight: 700;
-  letter-spacing: 0.3em;
-  animation: tv-blink 1.4s steps(2, jump-none) infinite;
-}
-
-@keyframes tv-blink {
-  0% { opacity: 1; }
-  100% { opacity: 0.35; }
-}
-
-.tv__card {
-  position: absolute;
-  top: 34%;
   left: 50%;
+  top: calc(50% + 34px);
   transform: translateX(-50%);
-  padding: 6px 14px;
-  font-size: 18px;
-  font-weight: 700;
-  letter-spacing: 0.24em;
-  white-space: nowrap;
-  background: rgba(0, 0, 0, 0.45);
-  opacity: 0;
-  animation-name: tv-card;
-  animation-fill-mode: forwards;
-  animation-timing-function: linear;
 }
 
-/* Under a segment's panel (TvSegments), which holds the centre; clear of
-   the clock on every screen. */
-.tv__card--low { top: auto; bottom: calc(max(16px, env(safe-area-inset-bottom)) + 120px); }
-
-@keyframes tv-card {
-  0% { opacity: 0; }
-  8%, 80% { opacity: 1; }
-  100% { opacity: 0; }
-}
-
-.tv__lower {
-  position: absolute;
-  left: 0;
-  right: 0;
-  bottom: max(16px, env(safe-area-inset-bottom));
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  padding: 0 16px;
-}
-
-.tv__chiron {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  max-width: 640px;
-  padding: 8px 14px 8px 8px;
-  border-left: 3px solid var(--accent);
-  /* Scanlines on the furniture too, so it sits on the same glass. */
-  background-image:
-    repeating-linear-gradient(0deg, rgba(0, 0, 0, 0.18) 0 1px, transparent 1px 3px),
-    linear-gradient(90deg, rgba(0, 60, 80, 0.85), rgba(0, 30, 44, 0.7) 70%, rgba(0, 30, 44, 0));
-}
-
-.tv__chiron-pic { flex: none; display: flex; }
-
-.tv__chiron-text {
-  display: flex;
-  flex-direction: column;
-  gap: 3px;
-  min-width: 0;
-  flex: 1;
-}
-
-.tv__chiron-name {
-  font-size: 20px;
-  font-weight: 700;
-  letter-spacing: 0.06em;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.tv__chiron-doing {
-  font-size: 11px;
-  letter-spacing: 0.18em;
-  color: var(--accent);
-}
-
-.tv__zoom {
-  flex: none;
-  display: grid;
-  grid-template-columns: auto 1fr;
-  align-items: center;
-  column-gap: 8px;
-  row-gap: 3px;
-  width: 170px;
-  font-size: 9px;
-  letter-spacing: 0.14em;
-}
-
-.tv__zoom-label { opacity: 0.7; }
-
-.tv__zoom-rail {
-  position: relative;
-  height: 8px;
-  border-bottom: 1px solid rgba(200, 245, 255, 0.5);
-}
-
-.tv__zoom-tick {
-  position: absolute;
-  bottom: 0;
-  width: 1px;
-  height: 6px;
-  background: rgba(200, 245, 255, 0.55);
-}
-
-.tv__zoom-here {
-  position: absolute;
-  bottom: -4px;
-  width: 7px;
-  height: 7px;
-  margin-left: -3px;
-  border-radius: 50%;
-  background: var(--accent);
-  box-shadow: 0 0 6px var(--accent);
-  transition: left 0.6s ease-out;
-}
-
-.tv__zoom-value { grid-column: 1 / -1; text-align: right; opacity: 0.85; }
-
-.tv__ticker {
-  display: flex;
-  align-items: stretch;
-  height: 26px;
-  font-size: 12px;
-  letter-spacing: 0.12em;
-  background: rgba(0, 0, 0, 0.6);
-  border-top: 1px solid rgba(0, 229, 255, 0.35);
-  border-bottom: 1px solid rgba(0, 229, 255, 0.35);
-  overflow: hidden;
-}
-
-.tv__ticker-tag {
-  flex: none;
-  display: flex;
-  align-items: center;
-  padding: 0 10px;
-  font-weight: 700;
-  color: #021015;
-  text-shadow: none;
-  background: var(--accent);
-}
-
-.tv__ticker-window {
-  flex: 1;
-  overflow: hidden;
-  display: flex;
-  align-items: center;
-}
-
-.tv__ticker-run {
-  white-space: pre;
-  animation: tv-ticker 60s linear infinite;
-}
-
-@keyframes tv-ticker {
-  from { transform: translateX(0); }
-  to { transform: translateX(-50%); }
-}
-
-@media (max-width: 600px) {
-  .tv__clock { font-size: 12px; }
-  .tv__bug { font-size: 10px; left: 16px; }
-  .tv__off { left: 162px; }
-  .tv__chiron { flex-wrap: wrap; }
-  .tv__chiron-name { font-size: 16px; }
-  .tv__zoom { width: 100%; }
-  .tv__card { font-size: 14px; }
-  /* The phone's chiron is taller (the zoom gauge wraps under the name). */
-  .tv__card--low { bottom: calc(max(16px, env(safe-area-inset-bottom)) + 175px); }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .tv__ticker-run { animation-duration: 180s; }
-  .tv__status { animation: none; }
-}
-
-/* Cyberspace TV segments (hud/TvSegments.tsx): an inset over the picture,
-   on the same glass as the rest of the furniture. */
-.tvseg {
-  position: absolute;
-  left: 50%;
-  top: 46%;
-  transform: translate(-50%, -50%);
-  display: flex;
-  align-items: center;
-  gap: 28px;
-  padding: 22px 28px;
-  width: min(760px, calc(100vw - 32px));
-  box-sizing: border-box;
-  background-image:
-    repeating-linear-gradient(0deg, rgba(0, 0, 0, 0.22) 0 1px, transparent 1px 3px),
-    linear-gradient(135deg, rgba(0, 40, 56, 0.9), rgba(2, 12, 20, 0.9));
-  border: 1px solid rgba(0, 229, 255, 0.35);
-  box-shadow: 0 0 30px rgba(0, 229, 255, 0.15);
-  animation: tvseg-in 0.5s ease-out both;
-  animation-delay: 0.42s;
-}
-
-@keyframes tvseg-in {
-  from { opacity: 0; transform: translate(-50%, -46%); }
-  to { opacity: 1; transform: translate(-50%, -50%); }
-}
-
-.tvseg__stage {
-  flex: none;
-  width: 220px;
-  height: 220px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  perspective: 700px;
-}
-
-.tvseg__caption { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
-.tvseg__kicker { font-size: 11px; letter-spacing: 0.24em; color: var(--accent); }
-.tvseg__title { font-size: 26px; font-weight: 700; letter-spacing: 0.08em; overflow-wrap: anywhere; }
-.tvseg__note { font-size: 10px; letter-spacing: 0.16em; opacity: 0.75; }
-
-/* The sealed bag, standing for itself and nowhere: outlines, sides, a key
-   stamped on each side, sides fading, outlines kept (scene/TvBoxes's timing). */
-.tvbag {
-  position: relative;
-  width: 110px;
-  height: 110px;
-  transform-style: preserve-3d;
-  animation: tvbag-turn 9s linear infinite;
-}
-
-@keyframes tvbag-turn {
-  from { transform: rotateX(-24deg) rotateY(0deg); }
-  to { transform: rotateX(-24deg) rotateY(360deg); }
-}
-
-.tvbag__face {
-  position: absolute;
-  inset: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  border: 2px solid rgba(82, 227, 159, 0);
-  background: rgba(82, 227, 159, 0);
-  animation: tvbag-edges 1s ease-out 0.4s forwards, tvbag-sides 5.4s linear 0.4s forwards;
-}
-
-@keyframes tvbag-edges { to { border-color: rgba(82, 227, 159, 0.95); } }
-@keyframes tvbag-sides {
-  0%, 18% { background: rgba(82, 227, 159, 0); }
-  33%, 78% { background: rgba(82, 227, 159, 0.22); }
-  100% { background: rgba(82, 227, 159, 0); }
-}
-
-.tvbag__face--front { transform: translateZ(55px); }
-.tvbag__face--back { transform: rotateY(180deg) translateZ(55px); }
-.tvbag__face--left { transform: rotateY(-90deg) translateZ(55px); }
-.tvbag__face--right { transform: rotateY(90deg) translateZ(55px); }
-.tvbag__face--top { transform: rotateX(90deg) translateZ(55px); }
-.tvbag__face--bottom { transform: rotateX(-90deg) translateZ(55px); }
-
-.tvbag__key {
-  width: 52px;
-  height: 52px;
-  color: #52e39f;
-  opacity: 0;
-  animation: tvbag-stamp 3.4s linear forwards;
-  animation-delay: calc(2.4s + var(--i) * 0.22s);
-}
-
-@keyframes tvbag-stamp {
-  0% { opacity: 0; transform: scale(1.8); }
-  6% { opacity: 1; transform: scale(1); }
-  60% { opacity: 1; transform: scale(1); }
-  100% { opacity: 0; transform: scale(1); }
-}
-
-/* The news desk: the commenter as a photograph, the quote printing. */
-.tvseg--comment { align-items: stretch; }
-
-.tvdesk__photo {
-  flex: 0 0 32%;
-  margin: 0;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 10px;
-  padding: 12px;
-  background: rgba(0, 0, 0, 0.5);
-  border: 6px solid rgba(230, 240, 245, 0.85);
-  filter: saturate(0.6) contrast(1.1);
-}
-
-.tvdesk__photo figcaption { font-size: 10px; letter-spacing: 0.16em; text-align: center; overflow-wrap: anywhere; }
-
-.tvdesk__quote {
-  flex: 1;
-  margin: 0;
-  display: flex;
-  flex-direction: column;
-  justify-content: space-between;
-  gap: 14px;
-  min-width: 0;
-}
-
-.tvdesk__quote p {
-  margin: 0;
-  font-size: 20px;
-  line-height: 1.45;
-  letter-spacing: 0.02em;
-  overflow-wrap: anywhere;
-}
-
-.tvdesk__text { position: relative; }
-.tvdesk__ghost { visibility: hidden; }
-.tvdesk__typed { position: absolute; inset: 0; }
-
-.tvdesk__quote--sealed p { letter-spacing: 0; color: #9fb4bf; }
-.tvdesk__mark { color: var(--accent); font-size: 1.4em; line-height: 0; }
-.tvdesk__caret { animation: tv-blink 0.8s steps(2, jump-none) infinite; }
-.tvdesk__quote footer { font-size: 10px; letter-spacing: 0.16em; color: var(--accent); }
-
-@media (max-width: 600px) {
-  .tvseg { flex-direction: column; gap: 14px; padding: 16px; top: 42%; }
-  .tvseg__stage { width: 160px; height: 160px; }
-  .tvseg__title { font-size: 20px; }
-  .tvdesk__photo { flex-basis: auto; width: 60%; }
-  .tvdesk__quote p { font-size: 15px; }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .tvbag { animation: none; transform: rotateX(-24deg) rotateY(30deg); }
+/* The segment's turning shard, rendered off screen for the painter. */
+.tv__spinhost {
+  position: fixed;
+  left: -10000px;
+  top: 0;
+  pointer-events: none;
 }

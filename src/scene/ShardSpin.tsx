@@ -55,12 +55,13 @@ function Spinning({ shard }: { shard: ShardModel }): JSX.Element | null {
   )
 }
 
-export function ShardSpin({ shard, size = 160 }: { shard: ShardModel; size?: number }): JSX.Element {
+/** `preserve` keeps the last frame in the canvas, for a reader that copies it (Cyberspace TV's panels). */
+export function ShardSpin({ shard, size = 160, preserve = false }: { shard: ShardModel; size?: number; preserve?: boolean }): JSX.Element {
   return (
     <div className="shardspin" style={{ width: size, height: size }} aria-label={`${shard.name}, turning`} role="img">
       <Canvas
         dpr={[1, 2]}
-        gl={{ alpha: true, antialias: true }}
+        gl={{ alpha: true, antialias: true, preserveDrawingBuffer: preserve }}
         camera={{ fov: FOV, near: 0.01, far: 100000 }}
         style={{ width: size, height: size, pointerEvents: 'none' }}
       >

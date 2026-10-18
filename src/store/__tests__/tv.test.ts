@@ -29,7 +29,7 @@ import type { Filter } from 'nostr-tools'
 import type { RelayAnswer } from '../../lib/relayOutcome'
 import { positionHex, type NostrEvent } from '../../lib/events'
 import { V2_EPOCH } from '../../lib/tv/tape'
-import { TV_FOCUS_LABEL, fitScale, placeable, setTvAsk, shotOpening, useTv } from '../useTv'
+import { READ_STUCK_MS, TV_FOCUS_LABEL, fitScale, placeable, setTvAsk, shotOpening, useTv } from '../useTv'
 import { useCyberspace } from '../useCyberspace'
 import { useBuilder } from '../useBuilder'
 import { usePersonCard } from '../usePersonCard'
@@ -274,6 +274,29 @@ describe('Cyberspace TV', () => {
     } finally {
       tape.splice(tape.length - 2, 2)
     }
+  })
+
+  it('remembers where an avatar came from, to face along its move', async () => {
+    useTv.getState().start()
+    await run(9000)
+    const b = useTv.getState().avatars[B]
+    expect(b?.position.x).toBe(1003n)
+    expect(b?.from?.x).toBe(1002n)
+  })
+
+  it('gives up on a read that never comes back, and reads on without doubling', async () => {
+    useTv.getState().start()
+    await run(500)
+    // Every question from now on hangs, as a dead socket's would.
+    let hang = true
+    setTvAsk((f) => (hang ? new Promise(() => {}) : ask(f)))
+    useTv.getState().retune()
+    await run(1000)
+    hang = false
+    await run(READ_STUCK_MS + 12_000)
+    const s = useTv.getState()
+    expect(s.status === 'playing' || s.status === 'end').toBe(true)
+    setTvAsk(ask)
   })
 
   it('turns off when another view takes the camera', async () => {

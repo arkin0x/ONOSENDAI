@@ -18,7 +18,7 @@ import { create } from 'zustand'
 import { queryEach } from '../lib/relay'
 import { Director, MAX_SHOT_S, isJump, shotFraming, type Beat, type Framing, type Shot, type TapeItem } from '../lib/tv/director'
 import type { HintBox } from '../lib/hint'
-import { TapeReader, V2_EPOCH, randomStart, type Ask } from '../lib/tv/tape'
+import { TapeReader, V2_EPOCH, randomStart, type Ask, TapeUnanswered } from '../lib/tv/tape'
 import { loadCensus, loadChainTimes, type Census, type ChainTimes } from '../lib/tv/stats'
 import { MAX_SCALE_EXP, type Position } from '../lib/space'
 import { useCyberspace } from './useCyberspace'
@@ -35,6 +35,8 @@ export interface TvAvatar {
   plane: number
   /** Tape time it got there. */
   at: number
+  /** Where it came from, on its last move: what it faces along (TvLayer). */
+  from?: Position
 }
 
 export type TvStatus = 'tuning' | 'playing' | 'end' | 'no-signal'
@@ -138,6 +140,25 @@ let readingTape = -1
 let shotBegan = 0
 let timer: number | null = null
 let ask: Ask = (f) => queryEach(f)
+
+/** How long one question may take before it counts as unanswered. */
+export const READ_STUCK_MS = 25_000
+
+/**
+ * Every question the tape asks, with a deadline: one that never comes back
+ * (a socket that died while the app was in the background, a sign-in
+ * waiting on a signer app that never answers) used to hold the tape still
+ * for good (arkinox, 2026-10-18: "i did get the tv to get stuck when i
+ * switched away from the pwa to another android app and then back"). Past
+ * READ_STUCK_MS it is taken as no relay answering, which is asked again,
+ * never skipped; whatever it brings back late is dropped.
+ */
+function askWithin(f: Parameters<Ask>[0]): ReturnType<Ask> {
+  return new Promise((resolve, reject) => {
+    const late = setTimeout(() => reject(new TapeUnanswered()), READ_STUCK_MS)
+    ask(f).then((a) => { clearTimeout(late); resolve(a) }, (e) => { clearTimeout(late); reject(e) })
+  })
+}
 /** When the reader may ask again after no relay answered, and how many times in a row that has happened. */
 let retryAt = 0
 let failures = 0
@@ -176,27 +197,47 @@ async function readMore(id: number, t: number): Promise<void> {
   const r = reader
   const d = director
   readingTape = t
+  const current = (): boolean => live(id, t) && r === reader
   try {
-    while (live(id, t) && queue.length < QUEUE_LOW && !r.caughtUp) {
+    while (current() && queue.length < QUEUE_LOW && !r.caughtUp) {
       const { beats, items } = await r.read()
-      if (!live(id, t)) return
+      if (!current()) return
       failures = 0
       for (const b of beats) d.add(b)
       for (const item of items) d.addItem(item)
       queue.push(...d.release(r.readTo - 1))
     }
-    if (live(id, t) && r.caughtUp) queue.push(...d.release(Infinity))
+    if (current() && r.caughtUp) queue.push(...d.release(Infinity))
   } catch {
     // No relay answered: the same window is asked again, later. It is never
     // taken for an empty stretch of history.
-    if (!live(id, t)) return
+    if (!current()) return
     failures++
     retryAt = performance.now() + Math.min(RETRY_MAX_MS, RETRY_MS * 2 ** (failures - 1))
     if (failures >= NO_SIGNAL_AFTER && queue.length === 0 && useTv.getState().shot === null) useTv.setState({ status: 'no-signal' })
     // A shot still on screen says NO SIGNAL from tick, once it has played out.
   } finally {
-    if (readingTape === t) readingTape = -1
+    if (readingTape === t && r === reader) readingTape = -1
   }
+}
+
+// Back from the background: the shot picks up where it was, not as far on
+// as the time away, and the reader may ask again at once.
+let hidden: { shot: Shot | null; elapsed: number } | null = null
+if (typeof document !== 'undefined') {
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'hidden') {
+      hidden = { shot: useTv.getState().shot, elapsed: performance.now() - shotBegan }
+      return
+    }
+    const was = hidden
+    hidden = null
+    if (!was || !useTv.getState().on) return
+    // Only the shot that was on screen: one the throttled timer began while
+    // away keeps its own start.
+    if (was.shot !== null && useTv.getState().shot === was.shot) shotBegan = performance.now() - was.elapsed
+    retryAt = 0
+  })
 }
 
 function frame(position: Position, plane: number, scaleExp: number): void {
@@ -225,7 +266,7 @@ const asked = new Set<string>()
 function needChain(pubkey: string, id: number): void {
   if (useTv.getState().chains[pubkey] || asked.has(pubkey)) return
   asked.add(pubkey)
-  loadChainTimes(pubkey, ask).then((c) => {
+  loadChainTimes(pubkey, askWithin).then((c) => {
     if (id === run) useTv.setState({ chains: { ...useTv.getState().chains, [pubkey]: c } })
   }, () => { asked.delete(pubkey) })
 }
@@ -346,7 +387,8 @@ function tick(id: number): void {
   let tapeTime = s.tapeTime
   while (played < s.shot.beats.length && s.shot.offsets[played] <= elapsed) {
     const b = s.shot.beats[played]
-    avatars = { ...avatars, [b.pubkey]: { position: b.action.position, plane: b.action.plane, at: b.at } }
+    const was = avatars[b.pubkey]
+    avatars = { ...avatars, [b.pubkey]: { position: b.action.position, plane: b.action.plane, at: b.at, from: was && was.plane === b.action.plane ? was.position : undefined } }
     tapeTime = b.at
     played++
   }
@@ -371,7 +413,7 @@ async function tune(id: number): Promise<void> {
   let from: number | null = null
   for (let attempt = 0; from === null; attempt++) {
     try {
-      from = await randomStart(V2_EPOCH, ask)
+      from = await randomStart(V2_EPOCH, askWithin)
       if (from === null) break
     } catch {
       // No relay answered: try again, and say so after a few.
@@ -386,7 +428,7 @@ async function tune(id: number): Promise<void> {
   useTv.setState({ status: 'tuning' })
   // From a shot's length before the event, so the trip it belongs to is
   // seen from its start rather than joined in the middle.
-  reader = new TapeReader(Math.max(V2_EPOCH, from - MAX_SHOT_S), ask)
+  reader = new TapeReader(Math.max(V2_EPOCH, from - MAX_SHOT_S), askWithin)
   void readMore(id, t)
 }
 
@@ -453,7 +495,7 @@ export const useTv = create<TvState>((set, get) => ({
     const id = run
     timer = setInterval(() => tick(id), TICK_MS) as unknown as number
     void tune(id)
-    if (!get().census) loadCensus(ask).then((census) => { if (id === run) set({ census }) }, () => {})
+    if (!get().census) loadCensus(askWithin).then((census) => { if (id === run) set({ census }) }, () => {})
     return true
   },
 

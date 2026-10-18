@@ -190,6 +190,7 @@ async function readMore(id: number, t: number): Promise<void> {
     failures++
     retryAt = performance.now() + Math.min(RETRY_MAX_MS, RETRY_MS * 2 ** (failures - 1))
     if (failures >= NO_SIGNAL_AFTER && queue.length === 0 && useTv.getState().shot === null) useTv.setState({ status: 'no-signal' })
+    // A shot still on screen says NO SIGNAL from tick, once it has played out.
   } finally {
     if (readingTape === t) readingTape = -1
   }
@@ -307,6 +308,9 @@ function tick(id: number): void {
     // Arrivals take no screen time: each is a line on the ticker.
     while (next?.kind === 'arrival') { arrive(next); next = queue.shift() }
     if (next) { beginShot(next, now, id); return }
+    // The relays stopped answering mid-tape: say so over the last picture
+    // rather than holding on it in silence. A read that answers plays on.
+    if (failures >= NO_SIGNAL_AFTER && s.status === 'playing') useTv.setState({ status: 'no-signal' })
     if (reader?.caughtUp && readingTape !== t && s.status !== 'end') {
       useTv.setState({ status: 'end', shot: null, cutAt: now })
       setTimeout(() => { if (live(id, t)) void tune(id) }, END_HOLD_MS)
@@ -447,22 +451,27 @@ export const useTv = create<TvState>((set, get) => ({
     // A tap on an avatar during TV is not a request for its card afterwards.
     usePersonCard.getState().close()
     const cs = useCyberspace.getState()
-    if (cs.focus?.label === TV_FOCUS_LABEL) cs.clearFocus()
     const was = before
     before = null
-    if (was) {
-      if (was.spectating) void spectate(was.spectating)
-      else {
-        const keepView = was.focus !== null || was.exploreIndex !== null
+    const tvFocus = cs.focus?.label === TV_FOCUS_LABEL
+    if (was && (was.focus !== null || was.exploreIndex !== null) && !was.spectating) {
+      // A view or a place in history: put back whole, in one write. Ending
+      // TV's view first (clearFocus) left the focus empty for a moment, and
+      // a view's own watchers took that for RETURN: the Nearby list popped
+      // open and lost its way back (review of #370, round 2).
+      if (tvFocus) {
         useCyberspace.setState({
-          pin: was.pin,
-          cursor: was.cursor,
-          scaleExp: was.scaleExp,
-          focusReturnScale: was.focusReturnScale,
-          // At your head, the anchor is wherever your head is now (clearFocus
-          // put it there); a view or a place in history is put back whole.
-          ...(keepView ? { focus: was.focus, anchor: was.anchor, anchorPlane: was.anchorPlane, exploreIndex: was.exploreIndex } : {}),
+          focus: was.focus, anchor: was.anchor, anchorPlane: was.anchorPlane, exploreIndex: was.exploreIndex,
+          pin: was.pin, cursor: was.cursor, scaleExp: was.scaleExp, focusReturnScale: was.focusReturnScale,
         })
+      }
+    } else {
+      // At your head (or spectating): the anchor is wherever your head is
+      // now, which clearFocus works out.
+      if (tvFocus) cs.clearFocus()
+      if (was) {
+        useCyberspace.setState({ pin: was.pin, cursor: was.cursor, scaleExp: was.scaleExp, focusReturnScale: was.focusReturnScale })
+        if (was.spectating) void spectate(was.spectating)
       }
     }
     try {

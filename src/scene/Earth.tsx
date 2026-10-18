@@ -20,6 +20,7 @@
  * there, and until you do this draws nothing.
  */
 
+import { useTv } from '../store/useTv'
 import { useEffect, useMemo } from 'react'
 import { markSceneTapHandled } from '../hooks/useCanvasTap'
 import { BackSide, BufferGeometry, Float32BufferAttribute } from 'three'
@@ -178,7 +179,8 @@ export function Earth({ axes }: Props): JSX.Element | null {
             means the centre. */}
         <mesh
           onClick={(e) => {
-            if (e.delta > 8) return
+            // Cyberspace TV is watching only: the globe takes no click.
+            if (e.delta > 8 || useTv.getState().on) return
             e.stopPropagation()
             markSceneTapHandled()
             ownHyperspaceView()

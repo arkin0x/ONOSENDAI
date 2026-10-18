@@ -161,6 +161,22 @@ export function ChatDock(): JSX.Element {
   const noMention = typing === null
   useEffect(() => { if (noMention) setDismissed(null) }, [noMention])
 
+  // The arrows keep the lit row in view (arkinox, 2026-10-18). The list shows
+  // up to four rows and scrolls the rest, so before this, ArrowDown past the
+  // fourth lit a row nobody could see. Only the list's own scroll moves: a
+  // scrollIntoView would also pan the page and, with a phone's keyboard up,
+  // the visual viewport, and the line being typed in could slide away.
+  const picker = useRef<HTMLUListElement>(null)
+  useEffect(() => {
+    const box = picker.current
+    const row = box?.querySelector<HTMLElement>('[aria-selected="true"]')
+    if (!box || !row) return
+    const b = box.getBoundingClientRect()
+    const r = row.getBoundingClientRect()
+    if (r.top < b.top) box.scrollTop -= b.top - r.top
+    else if (r.bottom > b.bottom) box.scrollTop += r.bottom - b.bottom
+  }, [highlight, picking, matches])
+
   // The region a line would go to right now: its size is the room's name.
   const key = useMemo(() => sendKey(), [current])
   const room = key ? `2^${key.height} · ${formatCellSize(key.height)}` : 'no region yet'
@@ -241,7 +257,9 @@ export function ChatDock(): JSX.Element {
   }
 
   return (
-    <section className="chatdock" aria-label="Chat">
+    // is-picking: while the @ list is open the log gives up its height to it,
+    // never the list to the log (styles.css, .chatdock.is-picking).
+    <section className={`chatdock ${picking ? 'is-picking' : ''}`} aria-label="Chat">
       <header className="chatdock__head">
         <span className="chatdock__title">
           <MessageSquare size={12} strokeWidth={2.25} aria-hidden /> CHAT
@@ -279,7 +297,7 @@ export function ChatDock(): JSX.Element {
       </ul>
 
       {picking && (
-        <ul className="chat__picker" role="listbox" aria-label="Mention someone nearby">
+        <ul className="chat__picker" ref={picker} role="listbox" aria-label="Mention someone nearby">
           {matches.length === 0 && <li className="chat__pickempty"><AtSign size={11} strokeWidth={2.25} aria-hidden /> NO ONE NEARBY BY THAT NAME</li>}
           {matches.map((c, i) => <PickRow key={c.pubkey} c={c} active={i === highlight} onPick={pickMention} />)}
         </ul>

@@ -38,4 +38,5 @@ export const PLAYLIST: Track[] = [
   { url: 'https://media.basspistol.com/panix/2012-grab-bag/9-skithink.mp3' },
   { url: 'https://media.basspistol.com/panix/bamegoy/1-nebelwerfer.mp3' },
   { url: 'https://media.basspistol.com/panix/br-tbients/1-br-tbient.mp3' },
+  { url: 'https://media.basspistol.com/panix/br-tbients/2-br-tbient-too.mp3' },
 ]

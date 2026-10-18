@@ -29,7 +29,7 @@
  */
 
 import { useEffect, useMemo, useRef } from 'react'
-import { useFrame } from '@react-three/fiber'
+import { useFrame, useThree } from '@react-three/fiber'
 import { BlendFunction, Effect, EffectAttribute } from 'postprocessing'
 import { CanvasTexture, LinearFilter, SRGBColorSpace, Uniform } from 'three'
 import { placeable, useTv } from '../store/useTv'
@@ -39,8 +39,8 @@ import { tvName } from '../lib/tv/text'
 import { objectsOf } from '../workshop/ObjectPicker'
 import { avatarFromEvent } from '../lib/avatar'
 import { tvSpin } from '../hud/TvSegments'
-import { CUT_MS, TV_FONT, TvPainter, type TvAssets, type TvMusic } from './tvPainter'
-import { musicProgress, useTvMusic } from '../store/useTvMusic'
+import { CUT_MS, TV_FONT, TvPainter, type FlatRect, type TvAssets, type TvMusic } from './tvPainter'
+import { musicProgress, setMusicVolume, toggleMusicMute, useTvMusic } from '../store/useTvMusic'
 import type { ShardModel } from 'sno-core/shards'
 
 /** Kept for what still names the old static: a cut's transition, ms. */
@@ -179,10 +179,36 @@ function pictureFor(url: string | null | undefined): HTMLImageElement | null {
   return null
 }
 
+/** How far a drag on NOW PLAYING goes from silent to full, CSS px. */
+const VOLUME_DRAG_PX = 160
+/** How far a finger may wander and still be a tap, CSS px. */
+const TAP_SLOP_PX = 6
+/** How far outside NOW PLAYING a tap still lands on it, CSS px: a fingertip's slack. */
+const CARD_SLACK_PX = 8
+
+/**
+ * Where a point on the screen shows on the flat frame the furniture is
+ * painted on, CSS px: the glass's bend (FRAGMENT's first lines), so a tap
+ * lands on what is seen there. y down, as the screen's is: the bend is the
+ * same either way up.
+ */
+export function flatPoint(x: number, y: number, w: number, h: number): [number, number] {
+  let cx = (x / w) * 2 - 1
+  let cy = (y / h) * 2 - 1
+  cx *= 1.1
+  cy *= 1.1
+  const k = 1 + 0.045 * (cx * cx + cy * cy)
+  return [((cx * k) * 0.5 + 0.5) * w, ((cy * k) * 0.5 + 0.5) * h]
+}
+
+function within(r: FlatRect, x: number, y: number, slack: number): boolean {
+  return x >= r.x - slack && x <= r.x + r.w + slack && y >= r.y - slack && y <= r.y + r.h + slack
+}
+
 /** NOW PLAYING's words, cover and progress, while there is music. */
 function nowPlaying(): TvMusic | null {
-  const { track, blocked } = useTvMusic.getState()
-  return track ? { title: track.title, artist: track.artist, art: track.art, progress: musicProgress(), blocked } : null
+  const { track, blocked, volume, muted } = useTvMusic.getState()
+  return track ? { title: track.title, artist: track.artist, art: track.art, progress: musicProgress(), blocked, volume, muted } : null
 }
 
 export function TvScreenEffect(): JSX.Element {
@@ -216,6 +242,52 @@ export function TvScreenEffect(): JSX.Element {
   // The segment's shard, parsed once per segment rather than on every paint.
   const segment = useRef<{ id: string | undefined; shard: ShardModel | null }>({ id: undefined, shard: null })
   const reduced = useMemo(() => typeof window !== 'undefined' && window.matchMedia?.('(prefers-reduced-motion: reduce)').matches === true, [])
+
+  // NOW PLAYING takes a tap to mute and a drag up or down for the volume
+  // (arkinox, 2026-10-18). On the canvas, ahead of the scene's own pointer
+  // handling, and only on the card: a tap anywhere else is not the music's.
+  const gl = useThree((s) => s.gl)
+  useEffect(() => {
+    const el = gl.domElement
+    let drag: { id: number; y: number; volume: number; moved: boolean } | null = null
+    const down = (e: PointerEvent): void => {
+      const m = useTvMusic.getState()
+      // While the browser holds the sound back, a tap is for the sound.
+      if (!useTv.getState().on || !m.track || m.blocked) return
+      const card = painter.musicCard
+      const r = el.getBoundingClientRect()
+      if (!card || r.width <= 0 || r.height <= 0) return
+      const [x, y] = flatPoint(e.clientX - r.left, e.clientY - r.top, r.width, r.height)
+      if (!within(card, x, y, CARD_SLACK_PX)) return
+      drag = { id: e.pointerId, y: e.clientY, volume: m.volume, moved: false }
+      try { el.setPointerCapture(e.pointerId) } catch { /* the drag still works while over the canvas */ }
+      e.stopPropagation()
+    }
+    const move = (e: PointerEvent): void => {
+      if (!drag || e.pointerId !== drag.id) return
+      const up = drag.y - e.clientY
+      if (!drag.moved && Math.abs(up) < TAP_SLOP_PX) return
+      drag.moved = true
+      setMusicVolume(drag.volume + up / VOLUME_DRAG_PX)
+      e.stopPropagation()
+    }
+    const end = (e: PointerEvent): void => {
+      if (!drag || e.pointerId !== drag.id) return
+      if (!drag.moved && e.type === 'pointerup') toggleMusicMute()
+      drag = null
+      e.stopPropagation()
+    }
+    el.addEventListener('pointerdown', down)
+    el.addEventListener('pointermove', move)
+    el.addEventListener('pointerup', end)
+    el.addEventListener('pointercancel', end)
+    return () => {
+      el.removeEventListener('pointerdown', down)
+      el.removeEventListener('pointermove', move)
+      el.removeEventListener('pointerup', end)
+      el.removeEventListener('pointercancel', end)
+    }
+  }, [gl, painter])
 
   useFrame((state) => {
     const tv = useTv.getState()

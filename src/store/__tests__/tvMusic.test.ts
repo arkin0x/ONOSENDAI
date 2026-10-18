@@ -5,12 +5,13 @@
  * the browser held the sound back.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { besideUrls, musicProgress, nameFromUrl, shuffled, startMusic, stopMusic, useTvMusic } from '../useTvMusic'
+import { besideUrls, musicProgress, nameFromUrl, setMusicVolume, shuffled, startMusic, stopMusic, toggleMusicMute, useTvMusic } from '../useTvMusic'
 
 class FakeAudio extends EventTarget {
   static made: FakeAudio[] = []
   static refuse = false
   crossOrigin = ''
+  muted = false
   preload = ''
   volume = 1
   currentTime = 0
@@ -113,6 +114,49 @@ describe('TV music', () => {
     audio().duration = 200
     audio().currentTime = 50
     expect(musicProgress()).toBe(0.25)
+  })
+})
+
+describe('the volume and mute', () => {
+  const store = new Map<string, string>()
+  beforeEach(() => {
+    store.clear()
+    vi.stubGlobal('localStorage', { getItem: (k: string) => store.get(k) ?? null, setItem: (k: string, v: string) => { store.set(k, v) } })
+    useTvMusic.setState({ volume: 0.8, muted: false })
+  })
+
+  it('sets the playing track, within 0 to 1, and keeps it on this device', () => {
+    startMusic(list)
+    setMusicVolume(0.3)
+    expect(audio().volume).toBe(0.3)
+    setMusicVolume(4)
+    expect(useTvMusic.getState().volume).toBe(1)
+    setMusicVolume(-1)
+    expect(useTvMusic.getState().volume).toBe(0)
+    expect(store.get('onosendai:tvVolume')).toBe('0.000')
+  })
+
+  it('mutes and unmutes with a tap, and turning it up unmutes', () => {
+    startMusic(list)
+    toggleMusicMute()
+    expect(audio().muted).toBe(true)
+    expect(store.get('onosendai:tvMuted')).toBe('1')
+    // Down while muted stays muted; up unmutes.
+    setMusicVolume(0.5)
+    expect(useTvMusic.getState().muted).toBe(true)
+    setMusicVolume(0.7)
+    expect(useTvMusic.getState().muted).toBe(false)
+    expect(audio().muted).toBe(false)
+    toggleMusicMute()
+    toggleMusicMute()
+    expect(useTvMusic.getState().muted).toBe(false)
+  })
+
+  it('a new track starts at the volume and mute it was left at', () => {
+    useTvMusic.setState({ volume: 0.25, muted: true })
+    startMusic(list)
+    expect(audio().volume).toBe(0.25)
+    expect(audio().muted).toBe(true)
   })
 })
 

@@ -27,4 +27,6 @@ export const PLAYLIST: Track[] = [
   // Its tag says only "Chasing Devils"; its file has the whole name.
   { url: 'https://media.basspistol.com/sethybowoy.basspistol.com/Acid%20Alert%20EP/4_Sethy%20Bowoy-Chasing%20Devils%20Out%20Of%20Space.mp3', title: 'Chasing Devils Out Of Space' },
   { url: 'https://media.basspistol.com/sethybowoy.basspistol.com/acid-in-my-lounge/1-acid-in-my-lounge.mp3' },
+  { url: 'https://media.basspistol.com/panix/andra-stuk/1-distanser.mp3' },
+  { url: 'https://media.basspistol.com/panix/andra-stuk/2-brustabletter.mp3' },
 ]

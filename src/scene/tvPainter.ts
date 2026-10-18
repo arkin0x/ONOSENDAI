@@ -143,7 +143,13 @@ export interface TvMusic {
   progress: number
   /** The browser is holding the sound back until a tap. */
   blocked: boolean
+  /** How loud, 0 to 1, and whether it is muted: the line down its right side. */
+  volume: number
+  muted: boolean
 }
+
+/** A rectangle on the flat frame, CSS px. */
+export interface FlatRect { x: number; y: number; w: number; h: number }
 
 /** The words on the marquee as of the moment on tape. */
 export function tickerItems(p: TvPicture, name: (pk: string) => string): string[] {
@@ -250,11 +256,21 @@ export class TvPainter {
   private lastScale = 1
   /** Where the minimap's dot was last: a segment shows no avatar, and the dot stays where it was. */
   private lastDot: Position | null = null
+  /** Where NOW PLAYING was last painted, canvas px, and the canvas px per CSS px then. */
+  private npRect: FlatRect | null = null
+  private cardScale = 1
 
   /** `canvas` for tests; a new one otherwise. */
   constructor(canvas?: HTMLCanvasElement) {
     this.canvas = canvas ?? document.createElement('canvas')
     this.ctx = this.canvas.getContext('2d')!
+  }
+
+  /** Where NOW PLAYING is on the flat frame, CSS px, for a tap or a drag on it; null when it is not up. */
+  get musicCard(): FlatRect | null {
+    const c = this.npRect
+    const k = this.cardScale
+    return c ? { x: c.x / k, y: c.y / k, w: c.w / k, h: c.h / k } : null
   }
 
   /** What the marquee shows now, left to right: for tests. */
@@ -455,6 +471,8 @@ export class TvPainter {
     // that column, never meet it; the whole width on a phone.
     const npW = narrow ? W - 2 * MX : lw + 16 * s
     const npTop = a.music ? this.nowPlaying(a.music, W - MX - npW, chironTop - 10 * s, npW, s, now, reduced) : chironTop
+    this.npRect = a.music ? { x: W - MX - npW, y: npTop, w: npW, h: chironTop - 10 * s - npTop } : null
+    this.cardScale = scale
     // What sits at the centre above the chiron stops above NOW PLAYING too
     // when it is wide enough to reach it.
     const centreW = Math.min(760 * s, W - 2 * MX)
@@ -642,9 +660,10 @@ export class TvPainter {
     const tx = ax + art + 12 * s
     const tw = x + w - pad - tx
     ctx.textAlign = 'left'
-    ctx.fillStyle = MUSIC_PINK
+    ctx.fillStyle = m.muted ? 'rgba(255, 45, 149, 0.55)' : MUSIC_PINK
     ctx.font = `700 ${9 * s}px ${TV_FONT}`
-    ctx.fillText('♪ NOW PLAYING', tx, y + 19 * s)
+    ctx.fillText(m.muted ? '♪ MUTED' : '♪ NOW PLAYING', tx, y + 19 * s)
+    this.volumeLine(m, x + w - 3 * s, y + 8 * s, h - 16 * s, s)
     ctx.fillStyle = FG
     ctx.font = `700 ${14 * s}px ${TV_FONT}`
     ctx.fillText(fit(ctx, m.title.toUpperCase(), tw), tx, y + 37 * s)
@@ -685,6 +704,33 @@ export class TvPainter {
       ctx.restore()
     }
     return y
+  }
+
+  /**
+   * How loud: a thin line down the card's right side, filled from the
+   * bottom, purple to pink like the progress; grey while muted.
+   */
+  private volumeLine(m: TvMusic, x: number, top: number, h: number, s: number): void {
+    const ctx = this.ctx
+    const lw = Math.max(1, 2 * s)
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.14)'
+    ctx.fillRect(x - lw / 2, top, lw, h)
+    const filled = h * Math.min(1, Math.max(0, m.volume))
+    if (filled <= 0) return
+    if (m.muted) {
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.32)'
+      ctx.fillRect(x - lw / 2, top + h - filled, lw, filled)
+      return
+    }
+    const g = ctx.createLinearGradient(0, top + h, 0, top)
+    g.addColorStop(0, MUSIC_PURPLE)
+    g.addColorStop(1, MUSIC_PINK)
+    ctx.save()
+    ctx.fillStyle = g
+    ctx.shadowColor = MUSIC_PINK
+    ctx.shadowBlur = 6 * s
+    ctx.fillRect(x - lw / 2, top + h - filled, lw, filled)
+    ctx.restore()
   }
 
   /** Someone's picture in a circle, or their colour and initial when there is none to paint. */

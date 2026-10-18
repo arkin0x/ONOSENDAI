@@ -12,6 +12,10 @@
  * browser holds the sound back: NOW PLAYING says TAP FOR SOUND, and the first
  * tap or key anywhere plays it.
  *
+ * Tap NOW PLAYING to mute, drag it up or down for the volume (arkinox,
+ * 2026-10-18: "keep them subtle. maybe tap the NOW PLAYING to mute? Drag the
+ * player up and down to change volume?"). Both are kept on this device.
+ *
  * What NOW PLAYING shows comes from the track itself: the name and artist
  * in its tag, the cover inside it, else the picture of the same name beside
  * it (lib/tv/id3), else the name of its file.
@@ -33,12 +37,58 @@ interface MusicState {
   track: NowPlaying | null
   /** The browser is holding the sound back until a tap. */
   blocked: boolean
+  /** How loud, 0 to 1, muted or not. */
+  volume: number
+  muted: boolean
 }
 
-export const useTvMusic = create<MusicState>(() => ({ track: null, blocked: false }))
-
-/** How loud, under the picture. */
+const VOLUME_KEY = 'onosendai:tvVolume'
+const MUTED_KEY = 'onosendai:tvMuted'
+/** How loud, under the picture, until the volume is changed. */
 const VOLUME = 0.8
+
+function loadVolume(): number {
+  try {
+    const v = Number(localStorage.getItem(VOLUME_KEY))
+    return localStorage.getItem(VOLUME_KEY) !== null && Number.isFinite(v) ? Math.min(1, Math.max(0, v)) : VOLUME
+  } catch {
+    return VOLUME
+  }
+}
+
+function loadMuted(): boolean {
+  try { return localStorage.getItem(MUTED_KEY) === '1' } catch { return false }
+}
+
+export const useTvMusic = create<MusicState>(() => ({ track: null, blocked: false, volume: loadVolume(), muted: loadMuted() }))
+
+/** Set the volume, 0 to 1; turning it up unmutes. */
+export function setMusicVolume(volume: number): void {
+  const v = Math.min(1, Math.max(0, volume))
+  const s = useTvMusic.getState()
+  const muted = s.muted && v <= s.volume
+  useTvMusic.setState({ volume: v, muted })
+  apply()
+  try {
+    localStorage.setItem(VOLUME_KEY, v.toFixed(3))
+    localStorage.setItem(MUTED_KEY, muted ? '1' : '0')
+  } catch { /* kept for this visit only */ }
+}
+
+/** Mute, or unmute. */
+export function toggleMusicMute(): void {
+  const muted = !useTvMusic.getState().muted
+  useTvMusic.setState({ muted })
+  apply()
+  try { localStorage.setItem(MUTED_KEY, muted ? '1' : '0') } catch { /* kept for this visit only */ }
+}
+
+function apply(): void {
+  if (!audio) return
+  const s = useTvMusic.getState()
+  audio.volume = s.volume
+  audio.muted = s.muted
+}
 /** How long to wait before trying the list again when no track would load, ms. */
 const RETRY_MS = 60_000
 
@@ -94,7 +144,8 @@ export function startMusic(list: Track[] = PLAYLIST): void {
   const a = new Audio()
   a.crossOrigin = 'anonymous'
   a.preload = 'auto'
-  a.volume = VOLUME
+  a.volume = useTvMusic.getState().volume
+  a.muted = useTvMusic.getState().muted
   a.addEventListener('ended', () => advance(list))
   a.addEventListener('error', () => {
     if (audio !== a || !a.getAttribute('src')) return

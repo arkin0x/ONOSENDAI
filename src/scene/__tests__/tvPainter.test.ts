@@ -11,7 +11,7 @@ if (typeof localStorage === 'undefined') {
 }
 vi.mock('../../lib/relay', () => ({ query: async () => [], queryEach: async () => [], queryAny: async () => [], publish: async () => ({ ok: true }), publishMany: async () => ({ ok: true }), relaySet: () => [] }))
 import { TvPainter, tickerItems, wrap, type TvAssets, type TvPicture } from '../tvPainter'
-import { cutKind } from '../TvScreenEffect'
+import { cutKind, flatPoint } from '../TvScreenEffect'
 import { useTv } from '../../store/useTv'
 
 /** A 2D context that measures every character as 7 px and draws nothing. */
@@ -148,7 +148,24 @@ describe('NOW PLAYING', () => {
     })
     return { canvas: { width: 0, height: 0, getContext: () => ctx } as unknown as HTMLCanvasElement, words }
   }
-  const music = { title: 'Saturn Day', artist: 'Sethy Bowoy', art: null, progress: 0.4, blocked: false }
+  const music = { title: 'Saturn Day', artist: 'Sethy Bowoy', art: null, progress: 0.4, blocked: false, volume: 0.8, muted: false }
+
+  it('says MUTED while muted, and knows where it is for a tap', () => {
+    const { canvas, words } = writing()
+    const p = new TvPainter(canvas)
+    p.size(1400, 800, 2)
+    p.paint(picture({}), { ...assets, music: { ...music, muted: true } }, 1000, 2, false)
+    expect(words).toContain('♪ MUTED')
+    expect(words).not.toContain('♪ NOW PLAYING')
+    // In CSS px, bottom right, inside the margins.
+    const c = p.musicCard!
+    expect(c.x + c.w).toBeCloseTo(1400 * (1 - 0.06), 0)
+    expect(c.w).toBeGreaterThan(200)
+    expect(c.h).toBeGreaterThan(60)
+    expect(c.y + c.h).toBeLessThan(800)
+    p.paint(picture({}), assets, 1040, 2, false)
+    expect(p.musicCard).toBeNull()
+  })
 
   it('shows the track and its artist while music plays, and nothing without it', () => {
     const { canvas, words } = writing()
@@ -167,5 +184,14 @@ describe('NOW PLAYING', () => {
     p.size(412, 915, 1)
     p.paint(picture({}), { ...assets, music: { ...music, blocked: true } }, 1000, 1, true)
     expect(words).toContain('▶ TAP FOR SOUND')
+  })
+})
+
+describe('a tap on the glass', () => {
+  it('lands where the picture shows it: the centre stays, the edges bend outward', () => {
+    expect(flatPoint(500, 300, 1000, 600)).toEqual([500, 300])
+    const [x, y] = flatPoint(900, 540, 1000, 600)
+    expect(x).toBeGreaterThan(900)
+    expect(y).toBeGreaterThan(540)
   })
 })

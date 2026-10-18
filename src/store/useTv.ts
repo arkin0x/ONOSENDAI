@@ -414,8 +414,11 @@ export const useTv = create<TvState>((set, get) => ({
     } else {
       // At your head (or spectating): the anchor is wherever your head is
       // now, which clearFocus works out.
+      // Only while TV's own view is still up: a view that ended TV (Back onto
+      // the tour, say) keeps the zoom and the cursor it chose (review of
+      // #370, round 3).
       if (tvFocus) cs.clearFocus()
-      if (was) {
+      if (was && tvFocus) {
         useCyberspace.setState({ pin: was.pin, cursor: was.cursor, scaleExp: was.scaleExp, focusReturnScale: was.focusReturnScale })
         if (was.spectating) void spectate(was.spectating)
       }

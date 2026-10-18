@@ -31,6 +31,7 @@ import { LANDMARKS } from '../hud/ScaleLadder'
 import { CUT_MS, quoteOf, segmentDoing, typePace, TYPE_DELAY_S } from '../hud/TvSegments'
 import { placeable, shotProgress, type TvAvatar } from '../store/useTv'
 import type { Census, ChainTimes } from '../lib/tv/stats'
+import type { Position } from '../lib/space'
 
 /** The face every word on the tube is set in. */
 export const TV_FONT = "'Monaspace Argon', ui-monospace, monospace"
@@ -49,6 +50,16 @@ export const CARD_MS = 2600
 const TICKER_PX_S = 70
 
 const FG = '#f2fbff'
+/** Every avatar's red, as your own is drawn (scene/Avatar.tsx). */
+export const AVATAR_RED = '#ff2323'
+/** The minimap's lattices: the CYBERSPACE view's colours (lib/lattice.ts), lifted to read small. */
+const MAP_TOP = '#2f7dff'
+const MAP_BOTTOM = '#c4207e'
+const MAP_CENTRE = '#8a5cff'
+const MAP_SUN = '#b45cff'
+const MAP_DIVISIONS = 8
+/** The minimap's turn, radians a second: about once round in forty seconds. */
+const MAP_TURN = 0.15
 const ACCENT = '#00e5ff'
 const REGION = '#52e39f'
 const MONTHS = ['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC']
@@ -212,6 +223,8 @@ export class TvPainter {
   private feedAt = 0
   private lastPaint = 0
   private lastScale = 1
+  /** Where the minimap's dot was last: a segment shows no avatar, and the dot stays where it was. */
+  private lastDot: Position | null = null
 
   /** `canvas` for tests; a new one otherwise. */
   constructor(canvas?: HTMLCanvasElement) {
@@ -234,6 +247,102 @@ export class TvPainter {
     this.run = []
     this.runX = null
     return true
+  }
+
+  /**
+   * All of cyberspace in miniature, turning slowly about its up: the top and
+   * bottom lattices as the CYBERSPACE view draws them, the avatar on screen
+   * as a red dot where it is in the cube, and the black sun past the +Z side,
+   * always drawn, fainter when the cube is in front of it, so which way is
+   * forward can always be read (arkinox, 2026-10-18).
+   */
+  private minimap(p: TvPicture, x: number, y: number, size: number, s: number, now: number, reduced: boolean): void {
+    const ctx = this.ctx
+    const subject = p.shot && p.shot.kind === 'trip' ? p.avatars[p.shot.pubkey] : undefined
+    if (subject) this.lastDot = subject.position
+    // A new tape starts with no dot: the last one belonged to another.
+    if (p.status === 'tuning') this.lastDot = null
+    const turn = reduced ? 0.6 : (now / 1000) * MAP_TURN
+    const tilt = -0.62
+    const cx = x + size / 2
+    const cy = y + size / 2
+    const project = (vx: number, vy: number, vz: number): { x: number; y: number; z: number } => {
+      const x1 = vx * Math.cos(turn) - vz * Math.sin(turn)
+      const z1 = vx * Math.sin(turn) + vz * Math.cos(turn)
+      const y2 = vy * Math.cos(tilt) - z1 * Math.sin(tilt)
+      const z2 = vy * Math.sin(tilt) + z1 * Math.cos(tilt)
+      const k = 4.2 / (4.2 + z2)
+      return { x: cx + x1 * size * 0.32 * k, y: cy - y2 * size * 0.32 * k, z: z2 }
+    }
+    // A soft dark ground, so the lattices read over whatever the scene has behind them.
+    const ground = ctx.createRadialGradient(cx, cy, 0, cx, cy, size * 0.62)
+    ground.addColorStop(0, 'rgba(0, 0, 0, 0.6)')
+    ground.addColorStop(1, 'rgba(0, 0, 0, 0)')
+    ctx.fillStyle = ground
+    ctx.fillRect(x - size * 0.15, y - size * 0.15, size * 1.3, size * 1.3)
+    const sunAt = project(0, 0, 1.75)
+    const sunBehind = sunAt.z > project(0, 0, 0).z
+    const sun = (alpha: number): void => {
+      ctx.save()
+      ctx.globalAlpha = alpha
+      ctx.strokeStyle = MAP_SUN
+      ctx.shadowColor = MAP_SUN
+      ctx.shadowBlur = 8 * s
+      ctx.lineWidth = 3 * s
+      ctx.beginPath()
+      ctx.arc(sunAt.x, sunAt.y, size * 0.075, 0, Math.PI * 2)
+      ctx.stroke()
+      ctx.restore()
+    }
+    const grid = (vy: number, colour: string): void => {
+      ctx.save()
+      ctx.shadowColor = colour
+      ctx.shadowBlur = 6 * s
+      ctx.lineWidth = Math.max(1, 1.1 * s)
+      // One path per colour, so a phone blurs two strokes, not eighteen.
+      for (const centre of [false, true]) {
+        ctx.strokeStyle = centre ? MAP_CENTRE : colour
+        ctx.beginPath()
+        for (let i = 0; i <= MAP_DIVISIONS; i++) {
+          if ((i === MAP_DIVISIONS / 2) !== centre) continue
+          const v = -1 + (2 * i) / MAP_DIVISIONS
+          for (const [a0, a1] of [[project(v, vy, -1), project(v, vy, 1)], [project(-1, vy, v), project(1, vy, v)]]) {
+            ctx.moveTo(a0.x, a0.y)
+            ctx.lineTo(a1.x, a1.y)
+          }
+        }
+        ctx.stroke()
+      }
+      ctx.restore()
+    }
+    if (sunBehind) sun(0.45)
+    grid(-1, MAP_BOTTOM)
+    if (this.lastDot) {
+      // Where it is, 0 to 1 on each axis of the whole cube, as -1 to 1.
+      const unit = (v: bigint): number => (Number(v >> 53n) / 2 ** 32) * 2 - 1
+      const d = project(unit(this.lastDot.x), unit(this.lastDot.y), unit(this.lastDot.z))
+      const floor = project(unit(this.lastDot.x), -1, unit(this.lastDot.z))
+      ctx.save()
+      ctx.globalAlpha = 0.45
+      ctx.strokeStyle = AVATAR_RED
+      ctx.lineWidth = Math.max(1, s)
+      ctx.setLineDash([3 * s, 3 * s])
+      ctx.beginPath()
+      ctx.moveTo(d.x, d.y)
+      ctx.lineTo(floor.x, floor.y)
+      ctx.stroke()
+      ctx.restore()
+      ctx.save()
+      ctx.fillStyle = AVATAR_RED
+      ctx.shadowColor = AVATAR_RED
+      ctx.shadowBlur = 10 * s
+      ctx.beginPath()
+      ctx.arc(d.x, d.y, 4 * s, 0, Math.PI * 2)
+      ctx.fill()
+      ctx.restore()
+    }
+    grid(1, MAP_TOP)
+    if (!sunBehind) sun(0.95)
   }
 
   /** Measure the marquee again: what is on it was measured in the face that was there before the TV's own loaded. */
@@ -300,6 +409,11 @@ export class TvPainter {
       ctx.fillText(stamp.time, W - MX, cy)
     }
 
+    // The minimap, top left, on the logo's margins: all of cyberspace, and
+    // where the avatar on screen is in it.
+    const mapSize = Math.min(200 * s, W * 0.3, H * 0.34)
+    this.minimap(p, MX, MY, mapSize, s, now, reduced)
+
     // The marquee along the bottom margin, the CYBERSPACE TV bug at its head.
     const tickH = 28 * s
     const tickY = H - MY - tickH
@@ -314,7 +428,7 @@ export class TvPainter {
     // A segment's panel at the centre.
     const item = p.shot?.item
     const inset = item !== undefined && !(item.kind === 'bag' && placeable(item.hint))
-    if (item && inset && p.status === 'playing') this.segment(item, p.shot!.length, a, W, cy + 14 * s, chironTop - 50 * s, MX, MY, W - MX - lw - 16 * s, s, narrow, now)
+    if (item && inset && p.status === 'playing') this.segment(item, p.shot!.length, a, W, cy + 14 * s, chironTop - 50 * s, MX, MY, W - MX - lw - 16 * s, MX + mapSize + 16 * s, s, narrow, now)
 
     // LATER and MEANWHILE, after the cut's transition; under an inset's panel.
     this.card(p, W, s, narrow, inset ? chironTop - 34 * s : H * 0.34, now)
@@ -496,7 +610,7 @@ export class TvPainter {
   }
 
   /** The panel of a segment shown in an inset: a sealed bag, an object, a new avatar, a comment. */
-  private segment(item: TapeItem, shotLength: number, a: TvAssets, W: number, top: number, bottom: number, MX: number, MY: number, sideRight: number, s: number, narrow: boolean, now: number): void {
+  private segment(item: TapeItem, shotLength: number, a: TvAssets, W: number, top: number, bottom: number, MX: number, MY: number, sideRight: number, sideLeft: number, s: number, narrow: boolean, now: number): void {
     const ctx = this.ctx
     // Seconds since the segment came on, after its cut, by the shot's own
     // clock (the shot's length, which is the item's unless a test cued it longer).
@@ -508,23 +622,25 @@ export class TvPainter {
     // NOW AVAILABLE shows the rotating model in the center of the layout,
     // text can go under"). Everything else stacks only on a phone.
     const ad = item.kind === 'object'
-    const layout = (stage: number, pw: number, stacked: boolean, size?: number, maxLines?: number): { stage: number; pw: number; stacked: boolean; textX: number; textW: number; lines: string[]; quoteSize: number; ph: number } => {
+    const layout = (stage: number, pw: number, stacked: boolean, size?: number, maxLines?: number): { stage: number; pw: number; stacked: boolean; textX: number; textW: number; lines: string[]; quoteSize: number; ph: number; cut: boolean } => {
       const textX = stacked ? 0 : stage + 28 * s
       const textW = stacked ? pw - 2 * pad : pw - 2 * pad - textX
       let lines: string[] = []
       let quoteSize = 0
+      let cut = false
       if (item.kind === 'comment') {
         quoteSize = size ?? (narrow ? 15 : 20) * s
         ctx.font = `${quoteSize}px ${TV_FONT}`
         lines = wrap(ctx, `“${quoteOf(item)}”`, textW)
         if (maxLines !== undefined && lines.length > maxLines) {
+          cut = true
           lines = lines.slice(0, Math.max(1, maxLines))
           lines[lines.length - 1] = fit(ctx, `${lines[lines.length - 1]}…`, textW)
         }
       }
       const captionH = item.kind === 'comment' ? lines.length * quoteSize * 1.45 + 30 * s : 96 * s
       const ph = stacked ? stage + 18 * s + captionH + 2 * pad : Math.max(stage, captionH) + 2 * pad
-      return { stage, pw, stacked, textX, textW, lines, quoteSize, ph }
+      return { stage, pw, stacked, textX, textW, lines, quoteSize, ph, cut }
     }
     // The model gives up size first, the words never.
     const fitPanel = (pw: number, stacked: boolean, room: number): ReturnType<typeof layout> => {
@@ -553,11 +669,17 @@ export class TvPainter {
     let fitted = fitPanel(fullW, narrow || ad, room)
     let px = (W - fullW) / 2
     let top0 = top
-    if (fitted.ph > room) {
-      const sideW = Math.min(760 * s, sideRight - MX)
+    // Also when it only fit by cutting the quote: side by side may show all
+    // of it (review of #375: one line at 915x412, seven at 844x390).
+    if (fitted.ph > room || fitted.cut) {
+      // Between the minimap and the logo's column.
+      const sideW = Math.min(760 * s, sideRight - sideLeft)
       const sideRoom = Math.max(0, bottom - MY)
       const beside = fitPanel(sideW, false, sideRoom)
-      if (beside.ph <= sideRoom || beside.ph < fitted.ph) { fitted = beside; px = MX; room = sideRoom; top0 = MY }
+      const better = fitted.cut
+        ? beside.ph <= sideRoom && beside.lines.length > fitted.lines.length
+        : beside.ph <= sideRoom || beside.ph < fitted.ph
+      if (better) { fitted = beside; px = sideLeft; room = sideRoom; top0 = MY }
     }
     const { stage, pw, stacked, textX, textW, lines, quoteSize, ph } = fitted
     const py = top0 + Math.max(0, (room - ph) / 2)

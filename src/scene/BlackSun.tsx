@@ -24,7 +24,6 @@
  */
 
 import { useMemo, useRef } from 'react'
-import { Billboard } from '@react-three/drei'
 import { useFrame } from '@react-three/fiber'
 import { DoubleSide, Group } from 'three'
 import { BLACK_SUN } from '../lib/palette'
@@ -59,6 +58,9 @@ const DISTANCE = 4000
  * unlit space showing through, and the corona is the only thing emitted. Bloom
  * runs at a threshold near zero, so the ring glows and the hole stays black.
  */
+/** When in the frame the sun is placed and faced: after the camera has moved (0, 0.5), before the composer draws (1). */
+const SUN_PRIORITY = 0.9
+
 const OUTER = 450
 const INNER = 372
 
@@ -68,6 +70,7 @@ interface Props {
 
 export function BlackSun({ axes }: Props): JSX.Element {
   const group = useRef<Group>(null)
+  const face = useRef<Group>(null)
   // +Z_cs in render space. Changes only when the view frame does, which is what
   // makes the sun rotate with the scene rather than sticking to the screen.
   const dir = useMemo(() => renderDirection(axes, 'z'), [axes])
@@ -75,6 +78,12 @@ export function BlackSun({ axes }: Props): JSX.Element {
   // Per frame rather than per render: the camera moves continuously under orbit
   // and under the rig's eased follow, neither of which React sees. A sun that
   // updated on render would swim against the world by a frame.
+  //
+  // Late in the frame, after every camera mover (the rig at 0, Cyberspace
+  // TV's camera at 0.5), and turned to the camera here rather than by drei's
+  // Billboard at the frame's start: placed and faced a frame behind a moving
+  // camera, the ring was seen a little from the side and seemed to tip and
+  // turn, flat, through a TV shot's move (arkinox, 2026-10-18).
   useFrame((state) => {
     const g = group.current
     if (!g) return
@@ -84,11 +93,12 @@ export function BlackSun({ axes }: Props): JSX.Element {
       c.y + dir[1] * DISTANCE,
       c.z + dir[2] * DISTANCE,
     )
-  })
+    if (face.current) face.current.quaternion.copy(state.camera.quaternion)
+  }, SUN_PRIORITY)
 
   return (
     <group ref={group}>
-      <Billboard>
+      <group ref={face}>
         <mesh>
           <ringGeometry args={[INNER, OUTER, 96]} />
           {/*
@@ -106,7 +116,7 @@ export function BlackSun({ axes }: Props): JSX.Element {
             forceSinglePass
           />
         </mesh>
-      </Billboard>
+      </group>
       <WorldLabel
         text={`BLACK SUN\n+Z`}
         color={BLACK_SUN}

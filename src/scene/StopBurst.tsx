@@ -136,8 +136,8 @@ function makeBurstGeometry(): BufferGeometry {
   return geo
 }
 
-/** The one-shot: a block was just chosen as the destination. */
-function BurstLines({
+/** The one-shot: a block was just chosen as the destination (and, on Cyberspace TV, a ride's two ends: TvJump). */
+export function BurstLines({
   centre,
   bornAt,
   onDone,

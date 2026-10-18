@@ -21,6 +21,11 @@
  * - A cross-space jump (a hyperjump, or any step further than JUMP_CELLS at
  *   the shot's zoom) starts a new shot: there is no fly-over across the
  *   universe, only a cut.
+ * - A shot that opens with a hyperjump plays the ride first, JUMP_S of it
+ *   before its first beat: the rainbow tunnel, then the line from block A to
+ *   block B with only those two blocks drawn (arkinox, 2026-10-18: "we
+ *   should see the rainbow tunnel effect, and perhaps zoom out and show the
+ *   line slowly traveling between point a and b").
  * - An arrival that goes nowhere (a spawn with nothing after it) is not a
  *   shot. Over half of v2's trips are exactly that, visitors who opened the
  *   page once (census, 2026-10-18: 648 of 1,145), and cutting across the
@@ -52,6 +57,10 @@ export const MIN_STEP_S = 0.7
 export const MAX_STEP_S = 3
 /** Screen time before a shot's first action, to see the avatar where it stood. */
 export const LEAD_S = 1.2
+/** A hyperjump's ride, before its shot's first beat: the tunnel, then the line from A to B. */
+export const JUMP_WARP_S = 2.4
+export const JUMP_LINE_S = 6.2
+export const JUMP_S = JUMP_WARP_S + JUMP_LINE_S
 
 /** One action on the tape. */
 export interface Beat {
@@ -119,6 +128,8 @@ export interface Shot {
   offsets: number[]
   /** Screen length of the whole shot, the hold included. */
   length: number
+  /** Seconds played before the first beat's lead: a hyperjump's ride (JUMP_S), or none. */
+  prelude?: number
 }
 
 /** When each beat of a shot plays, from its first: the real gaps, clamped. */
@@ -133,7 +144,8 @@ export function beatOffsets(beats: Beat[]): number[] {
 }
 
 function shotOf(beats: Beat[]): Shot {
-  const offsets = beatOffsets(beats)
+  const prelude = beats[0].action.type === 'hyperjump' ? JUMP_S : 0
+  const offsets = beatOffsets(beats).map((o) => o + prelude)
   return {
     id: beats[0].id,
     kind: beats.length === 1 && beats[0].action.type === 'spawn' ? 'arrival' : 'trip',
@@ -143,6 +155,7 @@ function shotOf(beats: Beat[]): Shot {
     end: beats[beats.length - 1].at,
     offsets,
     length: offsets[offsets.length - 1] + HOLD_S,
+    ...(prelude > 0 ? { prelude } : {}),
   }
 }
 

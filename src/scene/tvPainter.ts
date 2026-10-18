@@ -546,7 +546,8 @@ export class TvPainter {
       if (a.spin) ctx.drawImage(a.spin, ox, sy, stage, stage)
       const title = (a.segmentShard?.name ?? 'AN OBJECT').toUpperCase()
       this.caption(px + pw / 2, ty, textW, 'NEW IN CYBERSPACE', title, `FROM ${a.name(item.pubkey)}`, s, 'center')
-      this.splash(ox + stage * 0.92, sy + stage * 0.14, stage * 0.3, t, s)
+      // On the model's left (arkinox, 2026-10-18: "move the now available to the left side").
+      this.splash(ox + stage * 0.08, sy + stage * 0.14, stage * 0.3, t, s)
     } else if (item.kind === 'avatar') {
       const ox = sx + (stacked ? (pw - 2 * pad - stage) / 2 : 0)
       if (a.spin) ctx.drawImage(a.spin, ox, sy, stage, stage)

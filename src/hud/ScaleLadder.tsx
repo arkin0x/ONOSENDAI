@@ -25,7 +25,7 @@ import { useCyberspace } from '../store/useCyberspace'
  * 2^56.6 gibsons. Marking it at 56.6 rather than rounding keeps the ladder
  * honest about the fact that physical objects do not land on binary boundaries.
  */
-const LANDMARKS: Array<{ h: number; name: string }> = [
+export const LANDMARKS: Array<{ h: number; name: string }> = [
   { h: 0, name: 'gibson' },
   { h: 30, name: 'sector' },
   { h: 34, name: 'human' },

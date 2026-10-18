@@ -79,6 +79,9 @@ import { StepBox } from './StepBox'
 import { ChatRoomBox } from './ChatRoomBox'
 import { TargetProjector } from './TargetProjector'
 import { Travel } from './Travel'
+import { TvLayer } from './TvLayer'
+import { TvScreenEffect } from './TvScreenEffect'
+import { useTv } from '../store/useTv'
 import { CAMERA_NEAR, FOV } from './camera'
 
 /** Starting distance from the cursor, in cells. Orbit takes over from here. */
@@ -149,6 +152,25 @@ function World(): JSX.Element {
   const dotsIdle = hyperView || !dotsOn
   const volume = useTerrainVolume(win, axes, dotsIdle)
   const targets = useTargets()
+  // Cyberspace TV draws the tape, not today: the space itself stays, and
+  // everything that is about now (you, your cursor, the people here, what
+  // you have found) steps aside for the avatars on tape (TvLayer).
+  const tv = useTv((s) => s.on)
+
+  if (tv) {
+    return (
+      <group>
+        <FrameCommit />
+        <BlackSun axes={axes} />
+        {!dotsIdle && <ShaderPointField volume={volume} win={win} />}
+        {boxesOn && <Rooms axes={axes} />}
+        <SectorBox axes={axes} />
+        <Earth axes={axes} />
+        <CyberspaceLattice axes={axes} />
+        <TvLayer axes={axes} />
+      </group>
+    )
+  }
 
   return (
     <group>
@@ -757,7 +779,8 @@ export const Scene = memo(function Scene(): JSX.Element {
   // which live for the session, so every old pass stayed reachable, two per
   // render of this component, with their scenes, cameras and materials
   // (measured 2026-10-13: 406 EffectMaterials kept over 200 hops).
-  const bloom = useMemo(() => <WorldBloom />, [])
+  // Cyberspace TV's tube rides last, skipped while TV is off (TvScreenEffect).
+  const bloom = useMemo(() => <><WorldBloom /><TvScreenEffect /></>, [])
   return (
     <Canvas
       camera={{ fov: FOV, position: [0, 0, START_DISTANCE], near: CAMERA_NEAR, far: 6000 }}

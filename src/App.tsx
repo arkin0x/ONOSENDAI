@@ -23,6 +23,8 @@ import { GoalChip } from './hud/GoalChip'
 import { watchNearbyReturn } from './lib/nearbyReturn'
 import { startCoordRoute } from './store/useCoordRoute'
 import { DemoCoach } from './hud/DemoCoach'
+import { TvScreen } from './hud/TvScreen'
+import { isTvPath, useTv } from './store/useTv'
 import { parseDemoRoute } from './lib/demoRoute'
 import { restoreAfterUnfinishedTour, useDemo } from './store/useDemo'
 import { ToastChip } from './hud/ToastChip'
@@ -107,6 +109,24 @@ export default function App(): JSX.Element {
       const d = useDemo.getState()
       if (at === null && d.active) d.exit()
       else if (at !== null && !d.active) d.start(at || undefined)
+    }
+    window.addEventListener('popstate', onPop)
+    return () => window.removeEventListener('popstate', onPop)
+  }, [])
+  // onosendai.tech/tv: Cyberspace TV (store/useTv.ts). Back off /tv turns
+  // it off, Forward onto /tv turns it on, as loading that address would.
+  useEffect(() => {
+    // An address TV cannot open now (BUILD, a deploy, the tour) is put
+    // back to /, so it never says /tv over a scene that is not TV.
+    const open = (): void => {
+      if (!useTv.getState().start()) { try { window.history.replaceState(null, '', '/') } catch { /* no history here */ } }
+    }
+    if (isTvPath(window.location.pathname)) open()
+    const onPop = (): void => {
+      const at = isTvPath(window.location.pathname)
+      const tv = useTv.getState()
+      if (!at && tv.on) tv.stop()
+      else if (at && !tv.on) open()
     }
     window.addEventListener('popstate', onPop)
     return () => window.removeEventListener('popstate', onPop)
@@ -259,7 +279,20 @@ export default function App(): JSX.Element {
     // With the chat open over the controls, this folds the chat (usePad).
     tapScene()
   }, [viewMenuOpen])
-  useCanvasTap(onSceneTap, !crowded)
+  // Cyberspace TV has the screen to itself: the panels, chips, pad and
+  // modals are about you, and the picture is not. A tap on the picture
+  // does nothing (it used to fold the hidden pad: review of #370).
+  const tv = useTv((s) => s.on)
+  useCanvasTap(onSceneTap, !crowded && !tv)
+
+  if (tv) {
+    return (
+      <div className="app">
+        <Scene />
+        <TvScreen />
+      </div>
+    )
+  }
 
   return (
     <div className="app">

@@ -66,6 +66,9 @@ const MONEY_SPLASH: SplashLook = { fill: '#ffc21a', edge: '#ff7a00', words: ['CA
 /** The minimap's turn, radians a second: about once round in forty seconds. */
 const MAP_TURN = 0.15
 const ACCENT = '#00e5ff'
+/** NOW PLAYING's progress, purple to pink (arkinox, 2026-10-18: "make the progress something cool like a gradient from purple to pink"). */
+const MUSIC_PURPLE = '#8a2be2'
+const MUSIC_PINK = '#ff2d95'
 const REGION = '#52e39f'
 const MONTHS = ['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC']
 
@@ -126,6 +129,20 @@ export interface TvAssets {
   segmentShard: ShardModel | null
   /** A colour for someone, for a picture that is not there. */
   color: (pubkey: string) => string
+  /** The music playing under the picture (store/useTvMusic), for NOW PLAYING; none when nothing is. */
+  music?: TvMusic | null
+}
+
+/** What NOW PLAYING shows. */
+export interface TvMusic {
+  title: string
+  artist: string
+  /** The cover, once loaded, else null. */
+  art: HTMLImageElement | null
+  /** How far into the track, 0 to 1. */
+  progress: number
+  /** The browser is holding the sound back until a tap. */
+  blocked: boolean
 }
 
 /** The words on the marquee as of the moment on tape. */
@@ -433,13 +450,23 @@ export class TvPainter {
     // short of the right side (arkinox, 2026-10-18).
     if (p.shot && p.status === 'playing') chironTop = this.chiron(p, a, MX, tickY - 10 * s, W - 2 * MX, s, narrow)
 
+    // NOW PLAYING, bottom right above the chiron (arkinox, 2026-10-18). As
+    // wide as the logo's column over it, so the panels, which keep left of
+    // that column, never meet it; the whole width on a phone.
+    const npW = narrow ? W - 2 * MX : lw + 16 * s
+    const npTop = a.music ? this.nowPlaying(a.music, W - MX - npW, chironTop - 10 * s, npW, s, now, reduced) : chironTop
+    // What sits at the centre above the chiron stops above NOW PLAYING too
+    // when it is wide enough to reach it.
+    const centreW = Math.min(760 * s, W - 2 * MX)
+    const floor = a.music && (narrow || (W + centreW) / 2 > W - MX - npW) ? Math.min(chironTop, npTop - 6 * s) : chironTop
+
     // A segment's panel at the centre.
     const item = p.shot?.item
     const inset = item !== undefined && !(item.kind === 'bag' && placeable(item.hint))
-    if (item && inset && p.status === 'playing') this.segment(item, p.shot!.length, a, W, cy + 14 * s, chironTop - 50 * s, MX, MY, W - MX - lw - 16 * s, MX + mapSize + 16 * s, s, narrow, now)
+    if (item && inset && p.status === 'playing') this.segment(item, p.shot!.length, a, W, cy + 14 * s, floor - 50 * s, MX, MY, W - MX - lw - 16 * s, MX + mapSize + 16 * s, s, narrow, now)
 
     // LATER and MEANWHILE, after the cut's transition; under an inset's panel.
-    this.card(p, W, s, narrow, inset ? chironTop - 34 * s : H * 0.34, now)
+    this.card(p, W, s, narrow, inset ? floor - 34 * s : H * 0.34, now)
 
     // TUNING, END OF TAPE, NO SIGNAL.
     if (p.status !== 'playing') {
@@ -576,6 +603,88 @@ export class TvPainter {
     ctx.textAlign = 'right'
     ctx.fillStyle = 'rgba(242, 251, 255, 0.85)'
     ctx.fillText(`1 CELL = ${formatCellSize(scaleExp).toUpperCase()}`, x + w, y + 18 * s)
+  }
+
+  /**
+   * NOW PLAYING, bottom edge at `bottom`: the cover, the track's name, its
+   * artist under that and the progress under that, filling purple to pink.
+   * Its top.
+   */
+  private nowPlaying(m: TvMusic, x: number, bottom: number, w: number, s: number, now: number, reduced: boolean): number {
+    const ctx = this.ctx
+    const h = 76 * s
+    const y = bottom - h
+    const grad = ctx.createLinearGradient(x, 0, x + w, 0)
+    grad.addColorStop(0, 'rgba(26, 4, 44, 0.55)')
+    grad.addColorStop(1, 'rgba(20, 2, 34, 0.86)')
+    ctx.fillStyle = grad
+    ctx.fillRect(x, y, w, h)
+    ctx.fillStyle = 'rgba(255, 45, 149, 0.45)'
+    ctx.fillRect(x, y, w, Math.max(1, s))
+    // The cover, or a square of the bar's colours with a note on it.
+    const pad = 10 * s
+    const art = h - 2 * pad
+    const ax = x + pad
+    const ay = y + pad
+    if (m.art) {
+      ctx.drawImage(m.art, ax, ay, art, art)
+    } else {
+      const g = ctx.createLinearGradient(ax, ay, ax + art, ay + art)
+      g.addColorStop(0, MUSIC_PURPLE)
+      g.addColorStop(1, MUSIC_PINK)
+      ctx.fillStyle = g
+      ctx.fillRect(ax, ay, art, art)
+      ctx.fillStyle = FG
+      ctx.font = `700 ${art * 0.5}px ${TV_FONT}`
+      ctx.textAlign = 'center'
+      ctx.fillText('♪', ax + art / 2, ay + art * 0.68)
+    }
+    const tx = ax + art + 12 * s
+    const tw = x + w - pad - tx
+    ctx.textAlign = 'left'
+    ctx.fillStyle = MUSIC_PINK
+    ctx.font = `700 ${9 * s}px ${TV_FONT}`
+    ctx.fillText('♪ NOW PLAYING', tx, y + 19 * s)
+    ctx.fillStyle = FG
+    ctx.font = `700 ${14 * s}px ${TV_FONT}`
+    ctx.fillText(fit(ctx, m.title.toUpperCase(), tw), tx, y + 37 * s)
+    if (m.artist) {
+      ctx.fillStyle = 'rgba(214, 196, 255, 0.9)'
+      ctx.font = `${11 * s}px ${TV_FONT}`
+      ctx.fillText(fit(ctx, m.artist.toUpperCase(), tw), tx, y + 52 * s)
+    }
+    const by = y + h - pad - 4 * s
+    if (m.blocked) {
+      // No sound until a tap: say so where the progress would be.
+      ctx.globalAlpha = reduced ? 1 : 0.55 + 0.45 * (Math.floor(now / 700) % 2)
+      ctx.fillStyle = MUSIC_PINK
+      ctx.font = `700 ${9 * s}px ${TV_FONT}`
+      ctx.fillText('▶ TAP FOR SOUND', tx, by + 4 * s)
+      ctx.globalAlpha = 1
+      return y
+    }
+    // The bar: the gradient runs the whole width, so it turns pinker as it fills.
+    const bh = 4 * s
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.14)'
+    ctx.fillRect(tx, by, tw, bh)
+    const filled = tw * Math.min(1, Math.max(0, m.progress))
+    if (filled > 0) {
+      const bar = ctx.createLinearGradient(tx, 0, tx + tw, 0)
+      bar.addColorStop(0, MUSIC_PURPLE)
+      bar.addColorStop(1, MUSIC_PINK)
+      ctx.save()
+      ctx.fillStyle = bar
+      ctx.shadowColor = MUSIC_PINK
+      ctx.shadowBlur = 8 * s
+      ctx.fillRect(tx, by, filled, bh)
+      // A bright head where it has got to.
+      ctx.fillStyle = '#ffd6ee'
+      ctx.beginPath()
+      ctx.arc(tx + filled, by + bh / 2, 3.5 * s, 0, Math.PI * 2)
+      ctx.fill()
+      ctx.restore()
+    }
+    return y
   }
 
   /** Someone's picture in a circle, or their colour and initial when there is none to paint. */

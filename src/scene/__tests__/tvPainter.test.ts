@@ -137,3 +137,35 @@ describe('the minimap', () => {
     expect(arcs.length).toBeGreaterThan(alone)
   })
 })
+
+describe('NOW PLAYING', () => {
+  /** A canvas that keeps every word it is asked to write. */
+  function writing(): { canvas: HTMLCanvasElement; words: string[] } {
+    const words: string[] = []
+    const ctx = new Proxy({ measureText: (t: string) => ({ width: Array.from(t).length * 7 }), createLinearGradient: () => ({ addColorStop: () => {} }), createRadialGradient: () => ({ addColorStop: () => {} }), fillText: (t: string) => { words.push(t) } } as Record<string, unknown>, {
+      get: (target, key) => (key in target ? target[key as string] : () => {}),
+      set: () => true,
+    })
+    return { canvas: { width: 0, height: 0, getContext: () => ctx } as unknown as HTMLCanvasElement, words }
+  }
+  const music = { title: 'Saturn Day', artist: 'Sethy Bowoy', art: null, progress: 0.4, blocked: false }
+
+  it('shows the track and its artist while music plays, and nothing without it', () => {
+    const { canvas, words } = writing()
+    const p = new TvPainter(canvas)
+    p.size(1400, 800, 1)
+    p.paint(picture({}), { ...assets, music }, 1000, 1, false)
+    expect(words).toEqual(expect.arrayContaining(['♪ NOW PLAYING', 'SATURN DAY', 'SETHY BOWOY']))
+    words.length = 0
+    p.paint(picture({}), assets, 1040, 1, false)
+    expect(words).not.toContain('♪ NOW PLAYING')
+  })
+
+  it('says TAP FOR SOUND in place of the bar while the browser holds the sound back', () => {
+    const { canvas, words } = writing()
+    const p = new TvPainter(canvas)
+    p.size(412, 915, 1)
+    p.paint(picture({}), { ...assets, music: { ...music, blocked: true } }, 1000, 1, true)
+    expect(words).toContain('▶ TAP FOR SOUND')
+  })
+})

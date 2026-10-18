@@ -1,0 +1,134 @@
+/**
+ * tvMusic.test.ts: TV's music plays the playlist through, skips a track that
+ * will not load (arkinox, 2026-10-18: "a broken link = just skip the track"),
+ * waits rather than spins when none will, and plays on the first tap when
+ * the browser held the sound back.
+ */
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { besideUrls, musicProgress, nameFromUrl, shuffled, startMusic, stopMusic, useTvMusic } from '../useTvMusic'
+
+class FakeAudio extends EventTarget {
+  static made: FakeAudio[] = []
+  static refuse = false
+  crossOrigin = ''
+  preload = ''
+  volume = 1
+  currentTime = 0
+  duration = NaN
+  private source = ''
+  plays = 0
+  constructor() { super(); FakeAudio.made.push(this) }
+  get src(): string { return this.source }
+  set src(v: string) { this.source = v }
+  getAttribute(n: string): string | null { return n === 'src' && this.source ? this.source : null }
+  removeAttribute(): void { this.source = '' }
+  load(): void {}
+  pause(): void {}
+  play(): Promise<void> {
+    this.plays++
+    if (FakeAudio.refuse) return Promise.reject(Object.assign(new Error('no'), { name: 'NotAllowedError' }))
+    return Promise.resolve()
+  }
+  fire(type: string): void { this.dispatchEvent(new Event(type)) }
+}
+
+const list = [{ url: 'https://h/a/1-one.mp3' }, { url: 'https://h/a/2-two.mp3' }, { url: 'https://h/a/3-three.mp3' }]
+const audio = (): FakeAudio => FakeAudio.made[FakeAudio.made.length - 1]
+const flush = async (): Promise<void> => { for (let i = 0; i < 5; i++) await Promise.resolve() }
+
+beforeEach(() => {
+  FakeAudio.made = []
+  FakeAudio.refuse = false
+  vi.useFakeTimers()
+  vi.stubGlobal('Audio', FakeAudio)
+  vi.stubGlobal('fetch', async () => new Response('', { status: 404 }))
+  vi.stubGlobal('window', new EventTarget())
+})
+
+afterEach(() => {
+  stopMusic()
+  vi.useRealTimers()
+  vi.unstubAllGlobals()
+})
+
+describe('TV music', () => {
+  it('plays the list through, every track once, then again', () => {
+    startMusic(list)
+    const heard = [audio().src]
+    for (let i = 0; i < 2; i++) { audio().fire('ended'); heard.push(audio().src) }
+    expect([...heard].sort()).toEqual(list.map((t) => t.url).sort())
+    audio().fire('ended')
+    // A new shuffle, not opening on the track that just played.
+    expect(audio().src).not.toBe(heard[2])
+    expect(useTvMusic.getState().track?.url).toBe(audio().src)
+  })
+
+  it('skips a track that will not load', () => {
+    startMusic(list)
+    const first = audio().src
+    audio().fire('error')
+    expect(audio().src).not.toBe(first)
+    expect(useTvMusic.getState().track?.url).toBe(audio().src)
+  })
+
+  it('waits when no track will load, and tries the list again', () => {
+    startMusic(list)
+    for (let i = 0; i < 3; i++) audio().fire('error')
+    expect(useTvMusic.getState().track).toBeNull()
+    vi.advanceTimersByTime(59_000)
+    expect(useTvMusic.getState().track).toBeNull()
+    vi.advanceTimersByTime(2_000)
+    expect(useTvMusic.getState().track).not.toBeNull()
+    expect(audio().src).not.toBe('')
+  })
+
+  it('says TAP FOR SOUND when the browser holds it back, and plays on the first tap', async () => {
+    FakeAudio.refuse = true
+    startMusic(list)
+    await flush()
+    expect(useTvMusic.getState().blocked).toBe(true)
+    FakeAudio.refuse = false
+    const before = audio().plays
+    window.dispatchEvent(new Event('pointerdown'))
+    expect(audio().plays).toBe(before + 1)
+    audio().fire('playing')
+    expect(useTvMusic.getState().blocked).toBe(false)
+  })
+
+  it('stops, and forgets the track', () => {
+    startMusic(list)
+    const a = audio()
+    stopMusic()
+    expect(useTvMusic.getState().track).toBeNull()
+    expect(a.src).toBe('')
+    // An error from the stopped element plays nothing.
+    a.fire('error')
+    expect(FakeAudio.made).toHaveLength(1)
+    expect(useTvMusic.getState().track).toBeNull()
+  })
+
+  it('knows how far in it is', () => {
+    startMusic(list)
+    expect(musicProgress()).toBe(0)
+    audio().duration = 200
+    audio().currentTime = 50
+    expect(musicProgress()).toBe(0.25)
+  })
+})
+
+describe('a track from its link', () => {
+  it('names it from its file until its tag is read', () => {
+    expect(nameFromUrl('https://media.basspistol.com/x/inflating-saturn/1-commersens-temperatur.mp3')).toBe('Commersens Temperatur')
+    expect(nameFromUrl('https://h/Acid%20Alert%20EP/2_Sethy%20Bowoy-Acid%20Bench.mp3')).toBe('Sethy Bowoy Acid Bench')
+  })
+
+  it('finds the picture beside it by name', () => {
+    expect(besideUrls('https://h/a/2-saturn-day.mp3')).toEqual(['https://h/a/2-saturn-day.jpeg', 'https://h/a/2-saturn-day.jpg'])
+  })
+
+  it('shuffles without opening on the last track', () => {
+    const order = shuffled(list, list[2].url, () => 0.999)
+    expect(order[0].url).not.toBe(list[2].url)
+    expect([...order].map((t) => t.url).sort()).toEqual(list.map((t) => t.url).sort())
+  })
+})

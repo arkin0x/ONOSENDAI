@@ -39,7 +39,8 @@ import { tvName } from '../lib/tv/text'
 import { objectsOf } from '../workshop/ObjectPicker'
 import { avatarFromEvent } from '../lib/avatar'
 import { tvSpin } from '../hud/TvSegments'
-import { CUT_MS, TV_FONT, TvPainter, type TvAssets } from './tvPainter'
+import { CUT_MS, TV_FONT, TvPainter, type TvAssets, type TvMusic } from './tvPainter'
+import { musicProgress, useTvMusic } from '../store/useTvMusic'
 import type { ShardModel } from 'sno-core/shards'
 
 /** Kept for what still names the old static: a cut's transition, ms. */
@@ -178,6 +179,12 @@ function pictureFor(url: string | null | undefined): HTMLImageElement | null {
   return null
 }
 
+/** NOW PLAYING's words, cover and progress, while there is music. */
+function nowPlaying(): TvMusic | null {
+  const { track, blocked } = useTvMusic.getState()
+  return track ? { title: track.title, artist: track.artist, art: track.art, progress: musicProgress(), blocked } : null
+}
+
 export function TvScreenEffect(): JSX.Element {
   const painter = useMemo(() => new TvPainter(), [])
   useEffect(() => { if (import.meta.env.DEV) (window as unknown as { __tvPainter?: TvPainter }).__tvPainter = painter }, [painter])
@@ -249,6 +256,7 @@ export function TvScreenEffect(): JSX.Element {
       spin: tvSpin.canvas,
       segmentShard: segment.current.shard,
       color: targetColor,
+      music: nowPlaying(),
     }
     painter.paint(tv, assets, now, scale, reduced)
     overlay.needsUpdate = true

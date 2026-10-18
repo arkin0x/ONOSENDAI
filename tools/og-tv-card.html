@@ -1,6 +1,6 @@
 <!doctype html>
 <!--
-  og-tv-card.html - the link preview for onosendai.tech/tv, at public/og-tv.png.
+  og-tv-card.html - the link preview for onosendai.tech/tv, at public/og-tv.jpg.
 
   Cyberspace TV's own card (arkinox, 2026-10-18: "a cool opengraph card just
   for the /tv route? use the same crt effects, the onosendai logo, and some
@@ -19,7 +19,7 @@
       const p=await b.newPage({viewport:{width:1200,height:630}});
       await p.goto('file://'+process.cwd()+'/tools/og-tv-card.html');
       await p.waitForFunction(()=>window.__done===true);
-      await p.screenshot({path:'public/og-tv.png'});await b.close();})()"
+      await p.screenshot({path:'public/og-tv.jpg',type:'jpeg',quality:82});await b.close();})()"
 
   The typeface is the TV's own file from public/fonts (Monaspace Argon).
   The grain is seeded, so the same file always renders the same card.

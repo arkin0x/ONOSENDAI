@@ -16,15 +16,19 @@ export interface RouteCard {
   title: string
   description: string
   image: string
+  imageType: string
   imageAlt: string
 }
 
-/** Cyberspace TV's card (tools/og-tv-card.html renders public/og-tv.png). */
+/** Cyberspace TV's card (tools/og-tv-card.html renders public/og-tv.jpg). */
 export const TV_CARD: RouteCard = {
   url: 'https://onosendai.tech/tv',
   title: 'CYBERSPACE TV · ONOSENDAI',
   description: 'Everything that ever happened in cyberspace, played back as a broadcast: every move, every hidden bag, every new object, from a random moment since v2 began.',
-  image: 'https://onosendai.tech/og-tv.png',
+  // A JPEG: the grain makes a PNG of 800 KB, more than some chat apps
+  // fetch for a preview (review of #376).
+  image: 'https://onosendai.tech/og-tv.jpg',
+  imageType: 'image/jpeg',
   imageAlt: 'CYBERSPACE TV and the ONOSENDAI wordmark on a curved CRT screen over a lime grid falling away at a steep angle.',
 }
 
@@ -36,19 +40,24 @@ const escape = (s: string): string => s.replace(/&/g, '&amp;').replace(/"/g, '&q
  * index.html cannot quietly ship a route with the home page's card.
  */
 export function withCard(html: string, card: RouteCard): string {
-  const swaps: Array<[RegExp, string]> = [
-    [/<title>[^<]*<\/title>/, `<title>${escape(card.title)}</title>`],
-    [/(<meta name="description" content=")[^"]*(")/, `$1${escape(card.description)}$2`],
-    [/(<meta property="og:url" content=")[^"]*(")/, `$1${escape(card.url)}$2`],
-    [/(<meta property="og:title" content=")[^"]*(")/, `$1${escape(card.title)}$2`],
-    [/(<meta property="og:description" content=")[^"]*(")/, `$1${escape(card.description)}$2`],
-    [/(<meta property="og:image" content=")[^"]*(")/, `$1${escape(card.image)}$2`],
-    [/(<meta property="og:image:alt" content=")[^"]*(")/, `$1${escape(card.imageAlt)}$2`],
+  // Replaced through functions, so a `$` in a card's words is just a `$`
+  // (a replacement string would read `$1` as the match: review of #376).
+  const attr = (name: string, value: string): [RegExp, (m: string, open: string, close: string) => string] =>
+    [new RegExp(`(<meta ${name} content=")[^"]*(")`), (_m, open, close) => `${open}${escape(value)}${close}`]
+  const swaps: Array<[RegExp, (...args: string[]) => string]> = [
+    [/<title>[^<]*<\/title>/, () => `<title>${escape(card.title)}</title>`],
+    attr('name="description"', card.description),
+    attr('property="og:url"', card.url),
+    attr('property="og:title"', card.title),
+    attr('property="og:description"', card.description),
+    attr('property="og:image"', card.image),
+    attr('property="og:image:type"', card.imageType),
+    attr('property="og:image:alt"', card.imageAlt),
   ]
   let out = html
   for (const [find, put] of swaps) {
     if (!find.test(out)) throw new Error(`routeCard: index.html has no ${find.source}`)
-    out = out.replace(find, put)
+    out = out.replace(find, put as (substring: string, ...args: string[]) => string)
   }
   return out
 }

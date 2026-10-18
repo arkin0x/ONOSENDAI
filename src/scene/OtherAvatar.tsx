@@ -45,9 +45,11 @@ interface Props {
   turn: Quaternion
   label: string
   labelOpacity: number
+  /** Whether a tap opens their card; false on Cyberspace TV, where nothing on screen takes a tap. */
+  tappable?: boolean
 }
 
-export function OtherAvatar({ pubkey, color, center, position, place, turn, label, labelOpacity }: Props): JSX.Element {
+export function OtherAvatar({ pubkey, color, center, position, place, turn, label, labelOpacity, tappable = true }: Props): JSX.Element {
   const drawn = useRef<Group>(null)
   const placed = useRef<Group>(null)
   const lerp = useRef(new AvatarLerp())
@@ -88,7 +90,7 @@ export function OtherAvatar({ pubkey, color, center, position, place, turn, labe
       <group ref={drawn} quaternion={turn}>
         <AvatarShape pubkey={pubkey} color={color} />
       </group>
-      <TapTarget measure={drawn} onTap={() => usePersonCard.getState().open(pubkey)} />
+      {tappable && <TapTarget measure={drawn} onTap={() => usePersonCard.getState().open(pubkey)} />}
       <WorldLabel text={label} color={color} at={[0, 0.9, 0]} align="center" px={11} opacity={labelOpacity} />
     </group>
   )

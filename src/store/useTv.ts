@@ -15,13 +15,18 @@
  */
 
 import { create } from 'zustand'
-import { query } from '../lib/relay'
-import { Director, MAX_SHOT_S, shotFraming, type Beat, type Framing, type Shot } from '../lib/tv/director'
+import { queryEach } from '../lib/relay'
+import { Director, MAX_SHOT_S, isJump, shotFraming, type Beat, type Framing, type Shot } from '../lib/tv/director'
 import { TapeReader, V2_EPOCH, randomStart, type Ask } from '../lib/tv/tape'
 import { loadCensus, loadChainTimes, type Census, type ChainTimes } from '../lib/tv/stats'
 import { MAX_SCALE_EXP, type Position } from '../lib/space'
 import { useCyberspace } from './useCyberspace'
-import { stopSpectating } from '../lib/spectator'
+import { spectate, stopSpectating } from '../lib/spectator'
+import { useBuilder } from './useBuilder'
+import { useShards } from './useShards'
+import { useDemo } from './useDemo'
+import { useCoordRoute } from './useCoordRoute'
+import { usePersonCard } from './usePersonCard'
 
 /** Where an avatar stands on the tape, and since when. */
 export interface TvAvatar {
@@ -59,7 +64,10 @@ interface TvState {
   census: Census | null
   /** Each on-screen avatar's chain, for its length at tape time. */
   chains: Record<string, ChainTimes>
-  start: () => void
+  /** Turn the set on; false when something else owns the camera (tvBlocked). */
+  start: () => boolean
+  /** A new random start, the set staying on (RETRY). */
+  retune: () => void
   stop: () => void
 }
 
@@ -81,14 +89,20 @@ export const TV_FOCUS_LABEL = 'CYBERSPACE TV'
 export const TV_PATH = '/tv'
 const PUSHED = 'onosendaiTv'
 
-/** The zoom that shows every place in `beats` (and where they started) within FIT_CELLS. */
+/**
+ * The zoom that shows every place in `beats` (and where they started) within
+ * FIT_CELLS. A first beat that is a jump is a cut (shotOpening): where it
+ * jumped from is not in the shot, and fitting it in framed three one-gibson
+ * hops after a hyperjump at 2^59 (review of #370).
+ */
 export function fitScale(beats: Beat[]): number {
   let extent = 0n
   for (const axis of ['x', 'y', 'z'] as const) {
     let lo: bigint | null = null
     let hi: bigint | null = null
-    for (const b of beats) {
-      for (const v of [b.from.position[axis], b.action.position[axis]]) {
+    for (const [i, b] of beats.entries()) {
+      const places = i === 0 && isJump(b) ? [b.action.position[axis]] : [b.from.position[axis], b.action.position[axis]]
+      for (const v of places) {
         if (lo === null || v < lo) lo = v
         if (hi === null || v > hi) hi = v
       }
@@ -106,15 +120,27 @@ function cells(a: Position, b: Position, scaleExp: number): number {
   return m > 1_000_000n ? Infinity : Number(m)
 }
 
-// The engine: one tape at a time.
+// The engine: one tape at a time. `run` changes when TV is turned on or off,
+// `tape` on every new random start within a run: a read or a timer from an
+// old tape checks both, so nothing of it reaches the next (review of #370).
 let run = 0
+let tape = 0
 let reader: TapeReader | null = null
 let director: Director | null = null
 let queue: Shot[] = []
-let reading = false
+/** The tape a read is under way for, or -1: a read stuck on an old tape never holds up a new one. */
+let readingTape = -1
 let shotBegan = 0
 let timer: number | null = null
-let ask: Ask = query
+let ask: Ask = (f) => queryEach(f)
+/** When the reader may ask again after no relay answered, and how many times in a row that has happened. */
+let retryAt = 0
+let failures = 0
+/** How long to wait after no relay answered, doubling to the most. */
+const RETRY_MS = 2000
+const RETRY_MAX_MS = 30_000
+/** Unanswered reads in a row, with nothing left to play, before the screen says NO SIGNAL. */
+const NO_SIGNAL_AFTER = 3
 
 /** How far through the shot on screen the tape is, 0 to 1. */
 export function shotProgress(): number {
@@ -126,21 +152,31 @@ export function shotProgress(): number {
 /** Swap the relay read, for tests. */
 export function setTvAsk(fn: Ask): void { ask = fn }
 
-async function readMore(id: number): Promise<void> {
-  if (reading || !reader || !director) return
-  reading = true
+const live = (id: number, t: number): boolean => id === run && t === tape
+
+async function readMore(id: number, t: number): Promise<void> {
+  if (readingTape === t || !reader || !director || performance.now() < retryAt) return
+  const r = reader
+  const d = director
+  readingTape = t
   try {
-    while (id === run && queue.length < QUEUE_LOW && !reader.caughtUp) {
-      const beats = await reader.next()
-      if (id !== run) return
-      for (const b of beats) director.add(b)
-      queue.push(...director.release(reader.readTo - 1))
+    while (live(id, t) && queue.length < QUEUE_LOW && !r.caughtUp) {
+      const beats = await r.next()
+      if (!live(id, t)) return
+      failures = 0
+      for (const b of beats) d.add(b)
+      queue.push(...d.release(r.readTo - 1))
     }
-    if (id === run && reader.caughtUp) queue.push(...director.release(Infinity))
+    if (live(id, t) && r.caughtUp) queue.push(...d.release(Infinity))
   } catch {
-    if (id === run && queue.length === 0) useTv.setState({ status: 'no-signal' })
+    // No relay answered: the same window is asked again, later. It is never
+    // taken for an empty stretch of history.
+    if (!live(id, t)) return
+    failures++
+    retryAt = performance.now() + Math.min(RETRY_MAX_MS, RETRY_MS * 2 ** (failures - 1))
+    if (failures >= NO_SIGNAL_AFTER && queue.length === 0 && useTv.getState().shot === null) useTv.setState({ status: 'no-signal' })
   } finally {
-    reading = false
+    if (readingTape === t) readingTape = -1
   }
 }
 
@@ -168,17 +204,27 @@ function needChain(pubkey: string, id: number): void {
   }, () => { asked.delete(pubkey) })
 }
 
+/**
+ * Where a shot's avatar is first seen: where it stood before its first
+ * action, or, when that action is a jump (a hyperjump, a spawn, a change of
+ * plane), where it lands. A jump is a cut, never a fly-over (review of #370).
+ */
+export function shotOpening(shot: Shot): { position: Position; plane: number } {
+  const first = shot.beats[0]
+  return isJump(first) ? { position: first.action.position, plane: first.action.plane } : first.from
+}
+
 function beginShot(shot: Shot, now: number, id: number): void {
   needChain(shot.pubkey, id)
   const s = useTv.getState()
-  const first = shot.beats[0]
+  const opening = shotOpening(shot)
   const scaleExp = fitScale(shot.beats)
   const before = s.shot
   // Straight on from the shot before: the same avatar, picking up where it
   // stopped, at the same zoom. Anything else is a cut, with static.
   const was = s.avatars[shot.pubkey]
   const continues = before !== null && before.pubkey === shot.pubkey && was !== undefined &&
-    was.plane === first.from.plane && cells(was.position, first.from.position, scaleExp) <= 1 && scaleExp === s.scaleExp
+    was.plane === opening.plane && cells(was.position, opening.position, scaleExp) <= 1 && scaleExp === s.scaleExp
   const skipped = before && shot.start > before.end ? shot.start - before.end : 0
   useTv.setState({
     shot,
@@ -191,32 +237,34 @@ function beginShot(shot: Shot, now: number, id: number): void {
     meanwhile: before !== null && !continues && shot.start < before.end,
     status: 'playing',
     ...(continues ? {} : { cutAt: now }),
-    avatars: { ...s.avatars, [shot.pubkey]: { position: first.from.position, plane: first.from.plane, at: shot.start } },
+    avatars: { ...s.avatars, [shot.pubkey]: { position: opening.position, plane: opening.plane, at: shot.start } },
   })
   shotBegan = now
-  frame(first.from.position, first.from.plane, scaleExp)
+  frame(opening.position, opening.plane, scaleExp)
 }
 
 function tick(id: number): void {
   if (id !== run) return
+  const t = tape
   const now = performance.now()
   const s = useTv.getState()
-  if (queue.length < QUEUE_LOW) void readMore(id)
+  if (queue.length < QUEUE_LOW) void readMore(id, t)
   if (s.shot === null || (now - shotBegan) / 1000 >= s.shot.length) {
     let next = queue.shift()
     // Arrivals take no screen time: each is a line on the ticker.
     while (next?.kind === 'arrival') { arrive(next); next = queue.shift() }
     if (next) { beginShot(next, now, id); return }
-    if (reader?.caughtUp && !reading) {
-      if (s.status !== 'end') { useTv.setState({ status: 'end', shot: null, cutAt: now }); setTimeout(() => { if (id === run) void tune(id) }, END_HOLD_MS) }
+    if (reader?.caughtUp && readingTape !== t && s.status !== 'end') {
+      useTv.setState({ status: 'end', shot: null, cutAt: now })
+      setTimeout(() => { if (live(id, t)) void tune(id) }, END_HOLD_MS)
     }
     return
   }
-  const t = (now - shotBegan) / 1000
+  const elapsed = (now - shotBegan) / 1000
   let played = s.played
   let avatars = s.avatars
   let tapeTime = s.tapeTime
-  while (played < s.shot.beats.length && s.shot.offsets[played] <= t) {
+  while (played < s.shot.beats.length && s.shot.offsets[played] <= elapsed) {
     const b = s.shot.beats[played]
     avatars = { ...avatars, [b.pubkey]: { position: b.action.position, plane: b.action.plane, at: b.at } }
     tapeTime = b.at
@@ -230,22 +278,66 @@ function tick(id: number): void {
   if (at && (at.plane !== cs.anchorPlane || cells(at.position, cs.anchor, s.scaleExp) > REANCHOR_CELLS)) frame(at.position, at.plane, s.scaleExp)
 }
 
-/** Pick a random event, and play from it. */
+/** Pick a random event, and play from it: a new tape, nothing of the last one kept. */
 async function tune(id: number): Promise<void> {
   if (id !== run) return
-  useTv.setState({ status: 'tuning', shot: null, played: 0, tapeTime: null, avatars: {}, arrivals: [], skipped: 0, cutAt: performance.now() })
-  queue = []
+  const t = ++tape
+  reader = null
   director = new Director()
+  queue = []
+  retryAt = 0
+  failures = 0
+  useTv.setState({ status: 'tuning', shot: null, played: 0, tapeTime: null, avatars: {}, arrivals: [], skipped: 0, cutAt: performance.now() })
   let from: number | null = null
-  try {
-    from = await randomStart(V2_EPOCH, ask)
-  } catch { from = null }
-  if (id !== run) return
+  for (let attempt = 0; from === null; attempt++) {
+    try {
+      from = await randomStart(V2_EPOCH, ask)
+      if (from === null) break
+    } catch {
+      // No relay answered: try again, and say so after a few.
+      if (!live(id, t)) return
+      if (attempt + 1 >= NO_SIGNAL_AFTER) useTv.setState({ status: 'no-signal' })
+      await new Promise((r) => setTimeout(r, Math.min(RETRY_MAX_MS, RETRY_MS * 2 ** attempt)))
+      if (!live(id, t)) return
+    }
+  }
+  if (!live(id, t)) return
   if (from === null) { useTv.setState({ status: 'no-signal' }); return }
+  useTv.setState({ status: 'tuning' })
   // From a shot's length before the event, so the trip it belongs to is
   // seen from its start rather than joined in the middle.
   reader = new TapeReader(Math.max(V2_EPOCH, from - MAX_SHOT_S), ask)
-  void readMore(id)
+  void readMore(id, t)
+}
+
+/**
+ * Where you were before TV took the camera, put back when it ends (review of
+ * #370): the view, its anchor and zoom, the cursor, the pin, a place in a
+ * chain's history, and whom you were spectating.
+ */
+interface Before {
+  focus: CyberspaceSnapshot['focus']
+  anchor: Position
+  anchorPlane: CyberspaceSnapshot['anchorPlane']
+  cursor: Position
+  pin: CyberspaceSnapshot['pin']
+  exploreIndex: number | null
+  scaleExp: number
+  focusReturnScale: CyberspaceSnapshot['focusReturnScale']
+  spectating: string | null
+}
+type CyberspaceSnapshot = ReturnType<typeof useCyberspace.getState>
+let before: Before | null = null
+
+/** Why TV will not start now, or null when it can: each of these owns the camera or the screen. */
+export function tvBlocked(): string | null {
+  const cs = useCyberspace.getState()
+  if (cs.walking) return 'WALK'
+  if (cs.transit !== null) return 'hyperspace'
+  if (useBuilder.getState().active) return 'BUILD'
+  if (useShards.getState().pending) return 'deploying'
+  if (useDemo.getState().active) return 'the tour'
+  return null
 }
 
 export const useTv = create<TvState>((set, get) => ({
@@ -265,9 +357,14 @@ export const useTv = create<TvState>((set, get) => ({
   chains: {},
 
   start: () => {
-    if (get().on) return
+    if (get().on) return true
+    if (tvBlocked() !== null) return false
     const cs = useCyberspace.getState()
-    if (cs.walking) return
+    before = {
+      focus: cs.focus, anchor: { ...cs.anchor }, anchorPlane: cs.anchorPlane, cursor: { ...cs.cursor }, pin: cs.pin,
+      exploreIndex: cs.exploreIndex, scaleExp: cs.scaleExp, focusReturnScale: cs.focusReturnScale,
+      spectating: cs.spectate?.pubkey ?? null,
+    }
     if (cs.spectate) stopSpectating()
     run++
     set({ on: true })
@@ -275,11 +372,17 @@ export const useTv = create<TvState>((set, get) => ({
     timer = setInterval(() => tick(id), TICK_MS) as unknown as number
     void tune(id)
     if (!get().census) loadCensus(ask).then((census) => { if (id === run) set({ census }) }, () => {})
+    return true
+  },
+
+  retune: () => {
+    if (get().on) void tune(run)
   },
 
   stop: () => {
     if (!get().on) return
     run++
+    tape++
     if (timer !== null) clearInterval(timer)
     timer = null
     reader = null
@@ -287,9 +390,29 @@ export const useTv = create<TvState>((set, get) => ({
     queue = []
     asked.clear()
     set({ on: false, shot: null, played: 0, tapeTime: null, avatars: {}, arrivals: [], chains: {}, status: 'tuning' })
-    if (useCyberspace.getState().focus?.label === TV_FOCUS_LABEL) useCyberspace.getState().clearFocus()
+    // A tap on an avatar during TV is not a request for its card afterwards.
+    usePersonCard.getState().close()
+    const cs = useCyberspace.getState()
+    if (cs.focus?.label === TV_FOCUS_LABEL) cs.clearFocus()
+    const was = before
+    before = null
+    if (was) {
+      if (was.spectating) void spectate(was.spectating)
+      else {
+        const keepView = was.focus !== null || was.exploreIndex !== null
+        useCyberspace.setState({
+          pin: was.pin,
+          cursor: was.cursor,
+          scaleExp: was.scaleExp,
+          focusReturnScale: was.focusReturnScale,
+          // At your head, the anchor is wherever your head is now (clearFocus
+          // put it there); a view or a place in history is put back whole.
+          ...(keepView ? { focus: was.focus, anchor: was.anchor, anchorPlane: was.anchorPlane, exploreIndex: was.exploreIndex } : {}),
+        })
+      }
+    }
     try {
-      if (window.location.pathname.toLowerCase() === TV_PATH) {
+      if (isTvPath(window.location.pathname)) {
         if ((window.history.state as Record<string, unknown> | null)?.[PUSHED]) window.history.back()
         else window.history.replaceState(null, '', '/')
       }
@@ -299,8 +422,12 @@ export const useTv = create<TvState>((set, get) => ({
 
 /** TV from a button: on a new history entry of its own, so Back leaves it. */
 export function startTvInPlace(): void {
+  // A /C/ link's view ends first, as the tour's start does (useDemo
+  // startTourInPlace): its ending puts / in place of its own address, which
+  // after the push would be TV's entry.
+  if (useCoordRoute.getState().label !== null && useCyberspace.getState().focus) useCyberspace.getState().clearFocus(true)
+  if (!useTv.getState().start()) return
   try { window.history.pushState({ [PUSHED]: 1 }, '', TV_PATH) } catch { /* no history here */ }
-  useTv.getState().start()
 }
 
 /** Whether an address is TV's. */

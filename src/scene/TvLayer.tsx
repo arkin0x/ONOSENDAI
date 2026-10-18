@@ -43,7 +43,7 @@ function TapeAvatar({ pubkey, centre, position, place, subject }: { pubkey: stri
   const profile = useProfile(pubkey)
   const text = (profile?.name ?? `${pubkey.slice(0, 8)}…`).toUpperCase()
   const turn = useMemo(() => avatarTurn(useCyberspace.getState().axes(), null), [])
-  return <OtherAvatar pubkey={pubkey} color={targetColor(pubkey)} center={centre} position={position} place={place} turn={turn} label={text} labelOpacity={subject ? 0.9 : 0.5} />
+  return <OtherAvatar pubkey={pubkey} color={targetColor(pubkey)} center={centre} position={position} place={place} turn={turn} label={text} labelOpacity={subject ? 0.9 : 0.5} tappable={false} />
 }
 
 function TvCamera({ axes }: { axes: ViewAxes }): null {

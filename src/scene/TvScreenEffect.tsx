@@ -17,8 +17,9 @@
  * One pass after the bloom, so the glow is on the tube rather than in the
  * world. It is in the composer for the whole session and skipped while TV is
  * off: the composer's children are made once (Scene.tsx), and adding or
- * removing an effect would rebuild its passes. A skipped effect costs
- * nothing; the pass then only copies the frame to the screen.
+ * removing an effect would rebuild its passes. Skipped, the pass is one
+ * full-screen copy to the screen (postprocessing still renders a skipped pass
+ * that renders to screen), and the picture is unchanged.
  */
 
 import { useEffect, useMemo } from 'react'

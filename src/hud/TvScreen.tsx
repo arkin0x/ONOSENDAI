@@ -172,7 +172,7 @@ function Status(): JSX.Element | null {
       {status === 'no-signal' && (
         <>
           NO SIGNAL
-          <button className="tv__retry" onClick={() => { const tv = useTv.getState(); tv.stop(); tv.start() }}>RETRY</button>
+          <button className="tv__retry" onClick={() => useTv.getState().retune()}>RETRY</button>
         </>
       )}
     </div>

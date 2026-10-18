@@ -26,10 +26,15 @@ vi.mock('../../lib/relay', () => ({
 }))
 
 import type { Filter } from 'nostr-tools'
+import type { RelayAnswer } from '../../lib/relayOutcome'
 import { positionHex, type NostrEvent } from '../../lib/events'
 import { V2_EPOCH } from '../../lib/tv/tape'
-import { TV_FOCUS_LABEL, setTvAsk, useTv } from '../useTv'
+import { TV_FOCUS_LABEL, fitScale, setTvAsk, shotOpening, useTv } from '../useTv'
 import { useCyberspace } from '../useCyberspace'
+import { useBuilder } from '../useBuilder'
+import { usePersonCard } from '../usePersonCard'
+import { beatOf } from '../../lib/tv/tape'
+import type { Shot } from '../../lib/tv/director'
 
 const A = '1'.repeat(64)
 const B = '2'.repeat(64)
@@ -52,14 +57,22 @@ const tape: NostrEvent[] = [
   hop(B, T0 + 104, 1002n, 1003n),
 ]
 
-function ask(f: Filter): Promise<NostrEvent[]> {
-  return Promise.resolve(tape
+/** Questions no relay answers, from now on, while above zero. */
+let down = 0
+/** How long the relay takes to answer, ms (fake time). */
+let lag = 0
+async function ask(f: Filter): Promise<RelayAnswer[]> {
+  if (lag > 0) await new Promise((r) => setTimeout(r, lag))
+  if (down > 0) { down--; return [{ url: 'wss://relay.test', outcome: 'unreachable', reason: 'down', events: [] }] }
+  return [{ url: 'wss://relay.test', outcome: 'answered', events: tape
     .filter((e) => (!f.kinds || f.kinds.includes(e.kind)) && (f.since === undefined || e.created_at >= f.since) && (f.until === undefined || e.created_at <= f.until) && (!f.authors || f.authors.includes(e.pubkey)))
     .sort((a, b) => b.created_at - a.created_at)
-    .slice(0, f.limit ?? Infinity))
+    .slice(0, f.limit ?? Infinity) }]
 }
 
 beforeEach(() => {
+  down = 0
+  lag = 0
   vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval', 'setTimeout', 'clearTimeout', 'performance'] })
   // The random moment lands before the tape, and the random pick is the
   // oldest event after it (relays answer newest first): the tape's first.
@@ -106,6 +119,70 @@ describe('Cyberspace TV', () => {
     expect(useTv.getState().status).toBe('end')
     await run(5000)
     expect(useTv.getState().status).toBe('playing')
+  })
+
+  it('a slow new tape after the end is not cut short, and END does not loop', async () => {
+    useTv.getState().start()
+    await run(9000)
+    expect(useTv.getState().status).toBe('end')
+    lag = 3000
+    const states: string[] = []
+    const off = useTv.subscribe((s) => { states.push(s.status) })
+    await run(25000)
+    off()
+    // Tuning once, then playing; never END again inside the new tape's first shot.
+    const i = states.indexOf('tuning')
+    expect(i).toBeGreaterThanOrEqual(0)
+    expect(states.slice(i).includes('playing')).toBe(true)
+    expect(states.slice(i, states.indexOf('playing', i))).not.toContain('end')
+  })
+
+  it('says NO SIGNAL only after reads keep failing, and RETRY keeps the set on', async () => {
+    down = 1000
+    useTv.getState().start()
+    await run(20000)
+    expect(useTv.getState().status).toBe('no-signal')
+    down = 0
+    useTv.getState().retune()
+    await run(3000)
+    expect(useTv.getState().on).toBe(true)
+    expect(useTv.getState().status).toBe('playing')
+  })
+
+  it('puts the view back as it was: a view, its cursor, the pin, the zoom', async () => {
+    const cs = useCyberspace.getState()
+    cs.focusOn({ x: 5000n, y: 6n, z: 7n }, 0, 'VIEW', 3, true)
+    useCyberspace.setState({ pin: { position: { x: 1n, y: 2n, z: 3n }, plane: 0, label: 'PIN', scaleExp: 4 } as never })
+    const was = useCyberspace.getState()
+    useTv.getState().start()
+    await run(2000)
+    usePersonCard.getState().open(B)
+    useTv.getState().stop()
+    const now = useCyberspace.getState()
+    expect(now.focus).toEqual(was.focus)
+    expect(now.cursor).toEqual(was.cursor)
+    expect(now.anchor).toEqual(was.anchor)
+    expect(now.scaleExp).toBe(was.scaleExp)
+    expect(now.pin).toEqual(was.pin)
+    expect(usePersonCard.getState().pubkey).toBeNull()
+    useCyberspace.getState().clearFocus()
+    useCyberspace.setState({ pin: null })
+  })
+
+  it('will not start while BUILD owns the camera', () => {
+    useBuilder.setState({ active: true })
+    expect(useTv.getState().start()).toBe(false)
+    expect(useTv.getState().on).toBe(false)
+    useBuilder.setState({ active: false })
+  })
+
+  it('frames a shot that opens with a jump on where it lands', () => {
+    const jump = beatOf({ ...hop(B, T0, 0n, 1n << 59n), tags: [['A', 'hyperjump'], ['e', '0'.repeat(64), '', 'genesis'], ['e', '0'.repeat(64), '', 'previous'], ['c', at(0n)], ['C', at(1n << 59n)], ['proof', 'a'.repeat(64)]] })
+    if (!jump) return
+    const hops = [hop(B, T0 + 2, 1n << 59n, (1n << 59n) + 1n), hop(B, T0 + 4, (1n << 59n) + 1n, (1n << 59n) + 2n)].map((e) => beatOf(e)!)
+    const shot = { beats: [jump, ...hops] } as unknown as Shot
+    expect(fitScale(shot.beats)).toBeLessThan(4)
+    expect(shotOpening(shot).position.x).toBe(1n << 59n)
   })
 
   it('turns off when another view takes the camera', async () => {

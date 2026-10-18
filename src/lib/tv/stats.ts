@@ -10,7 +10,8 @@
  * v2 is small enough to hold whole (census 2026-10-18: 648 spawns, 82 bags,
  * 73 objects, the longest chain 703 actions), so the counts are kept as lists
  * of times and counted by binary search: three questions when TV starts, and
- * one per avatar the first time it is on screen, for its chain.
+ * one per avatar the first time it is on screen, for its chain, each paged
+ * back in time while a relay's answer may have been capped (tape.ts askAll).
  *
  * Bags and objects are addressable: relays keep only each one's newest
  * version, so a bag counts from when it was last changed, not from when it
@@ -20,7 +21,7 @@
 
 import { ACTION_KIND, type NostrEvent } from '../events'
 import { HIDDEN_KIND, OBJECT_KIND } from '../hidden'
-import type { Ask } from './tape'
+import { askAll, type Ask } from './tape'
 
 /** Times in ascending order, and how many are at or before `t`. */
 export function countTo(times: number[], t: number): number {
@@ -52,9 +53,9 @@ function isV2Spawn(e: NostrEvent): boolean {
 
 export async function loadCensus(ask: Ask): Promise<Census> {
   const [spawns, bags, objects] = await Promise.all([
-    ask({ kinds: [ACTION_KIND], '#A': ['spawn'], limit: 10000 }),
-    ask({ kinds: [HIDDEN_KIND], limit: 10000 }),
-    ask({ kinds: [OBJECT_KIND], limit: 10000 }),
+    askAll(ask, { kinds: [ACTION_KIND], '#A': ['spawn'] }),
+    askAll(ask, { kinds: [HIDDEN_KIND] }),
+    askAll(ask, { kinds: [OBJECT_KIND] }),
   ])
   const first = new Map<string, number>()
   for (const e of spawns) if (isV2Spawn(e)) first.set(e.pubkey, Math.min(first.get(e.pubkey) ?? Infinity, e.created_at))
@@ -81,7 +82,7 @@ export interface ChainTimes {
 }
 
 export async function loadChainTimes(pubkey: string, ask: Ask): Promise<ChainTimes> {
-  const events = await ask({ kinds: [ACTION_KIND], authors: [pubkey], limit: 10000 })
+  const events = await askAll(ask, { kinds: [ACTION_KIND], authors: [pubkey] })
   const v2 = events.filter((e) => !e.tags.some((t) => t[0] === 'version'))
   return {
     spawns: sorted(v2.filter(isV2Spawn).map((e) => e.created_at)),

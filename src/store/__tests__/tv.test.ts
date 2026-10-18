@@ -28,8 +28,9 @@ vi.mock('../../lib/relay', () => ({
 import type { Filter } from 'nostr-tools'
 import type { RelayAnswer } from '../../lib/relayOutcome'
 import { positionHex, type NostrEvent } from '../../lib/events'
+import { coordToXyz } from 'cyberspace-core'
 import { V2_EPOCH } from '../../lib/tv/tape'
-import { READ_STUCK_MS, TV_FOCUS_LABEL, fitScale, placeable, rideEnds, rideView, setTvAsk, shotOpening, useTv, type TvJump } from '../useTv'
+import { READ_STUCK_MS, TV_FOCUS_LABEL, fitScale, pathAfter, placeable, rideEnds, rideView, setTvAsk, shotOpening, useTv, type TvJump } from '../useTv'
 import { useCyberspace } from '../useCyberspace'
 import { useBuilder } from '../useBuilder'
 import { usePersonCard } from '../usePersonCard'
@@ -332,6 +333,52 @@ describe('Cyberspace TV', () => {
     const b = useTv.getState().avatars[B]
     expect(b?.position.x).toBe(1003n)
     expect(b?.from?.x).toBe(1002n)
+  })
+
+  it('keeps the path an avatar walked on tape, for its trail', async () => {
+    useTv.getState().start()
+    await run(9000)
+    // From where the trip opened, through each hop it played.
+    expect(useTv.getState().avatars[B]?.path?.map((p) => p.x)).toEqual([1000n, 1001n, 1002n, 1003n])
+    // The arrival that went nowhere has a path of one place: no line.
+    expect(useTv.getState().avatars[A]?.path).toHaveLength(1)
+  })
+
+  it('a respawn starts a new trail, never one ending on an avatar not yet grown', async () => {
+    // Back to its spawn point straight after its own trip, at the same zoom:
+    // a shot that follows straight on, but opening with a spawn.
+    const D = '4'.repeat(64)
+    const s0 = coordToXyz(BigInt('0x' + D))
+    const near = (dx: bigint) => positionHex({ x: s0.x + dx, y: s0.y, z: s0.z }, s0.plane as 0 | 1)
+    const step = (t: number, a: bigint, b: bigint): NostrEvent => ({ ...hop(D, t, 0n, 0n), tags: [['A', 'hop'], ['e', '0'.repeat(64), '', 'genesis'], ['e', '0'.repeat(64), '', 'previous'], ['c', near(a)], ['C', near(b)], ['proof', 'a'.repeat(64)]] })
+    const added = [spawnOf(D, T0 + 300), step(T0 + 302, 0n, 1n), spawnOf(D, T0 + 306), step(T0 + 308, 0n, 1n)]
+    tape.push(...added)
+    try {
+      useTv.getState().start()
+      const unborn: number[] = []
+      const off = useTv.subscribe((s) => { const d = s.avatars[D]; if (d?.born === Infinity) unborn.push(d.path?.length ?? 0) })
+      await run(40000)
+      off()
+      expect(unborn.length).toBeGreaterThan(0)
+      expect(unborn.every((n) => n === 1)).toBe(true)
+    } finally {
+      tape.splice(tape.length - added.length, added.length)
+    }
+  })
+
+  it('a path goes on in its plane, starts again in the other, and keeps its newest places', () => {
+    const p = (x: bigint) => ({ x, y: 0n, z: 0n })
+    const was = { position: p(2n), plane: 0, at: 0, path: [p(1n), p(2n)] }
+    expect(pathAfter(was, p(3n), 0).map((q) => q.x)).toEqual([1n, 2n, 3n])
+    // Standing still adds nothing.
+    expect(pathAfter(was, p(2n), 0)).toBe(was.path)
+    // Across the planes the two places are not a line.
+    expect(pathAfter(was, p(3n), 1)).toEqual([p(3n)])
+    expect(pathAfter(undefined, p(3n), 0)).toEqual([p(3n)])
+    let long = { ...was, path: [p(0n)] }
+    for (let i = 1n; i <= 300n; i++) long = { ...long, path: pathAfter(long, p(i), 0) }
+    expect(long.path).toHaveLength(256)
+    expect(long.path[255].x).toBe(300n)
   })
 
   it('gives up on a read that never comes back, and reads on without doubling', async () => {

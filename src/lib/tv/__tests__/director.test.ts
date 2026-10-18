@@ -83,6 +83,19 @@ describe('arrivals', () => {
   })
 })
 
+describe('segments', () => {
+  it('a tape item is a shot of its own, played in its place by when it was signed', () => {
+    const d = new Director()
+    d.add(beat('a', 0))
+    d.add(beat('a', 4))
+    d.addItem({ kind: 'comment', id: 'f'.repeat(64), pubkey: 'b', at: 2, text: 'hello', on: 'move', about: 'a' })
+    d.addItem({ kind: 'bag', id: 'e'.repeat(64), pubkey: 'c', at: 50, hint: null, height: 7 })
+    const shots = d.release(Infinity)
+    expect(shots.map((s) => s.kind)).toEqual(['trip', 'comment', 'bag'])
+    expect(shots[1].length).toBeGreaterThan(4)
+  })
+})
+
 describe('beatOffsets', () => {
   it('keeps the real gaps between the minimum and the maximum, after a lead', () => {
     const o = beatOffsets([beat('a', 0), beat('a', 0), beat('a', 2), beat('a', 600)])

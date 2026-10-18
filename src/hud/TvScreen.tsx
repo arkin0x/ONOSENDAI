@@ -24,10 +24,11 @@ import { chainLengthAt, countTo } from '../lib/tv/stats'
 import { safeNpub } from '../lib/npub'
 import { useEscape } from '../hooks/useEscape'
 import { useProfile } from '../hooks/useProfile'
-import { useTv } from '../store/useTv'
+import { placeable, useTv } from '../store/useTv'
 import { LANDMARKS } from './ScaleLadder'
 import { ProfilePic } from './ProfileBadge'
 import { STATIC_MS } from '../scene/TvScreenEffect'
+import { TvSegment, segmentDoing } from './TvSegments'
 
 /** How long LATER and MEANWHILE stay up after a cut, ms. */
 const CARD_MS = 2600
@@ -90,7 +91,7 @@ function Chiron(): JSX.Element | null {
   if (!shot) return null
   const last = played > 0 ? shot.beats[played - 1] : null
   const trip = shot.beats.length
-  const doing = last
+  const doing = shot.item ? segmentDoing(shot.item) : last
     ? `${actionLabel(last.action)}${trip > 1 ? ` · ${played} OF ${trip}` : ''}`
     : trip > 1 ? `${trip} ACTIONS COMING UP` : 'ABOUT TO MOVE'
   return (
@@ -155,11 +156,13 @@ function Card(): JSX.Element | null {
   const skipped = useTv((s) => s.skipped)
   const meanwhile = useTv((s) => s.meanwhile)
   const status = useTv((s) => s.status)
+  // A segment shown in an inset holds the centre: the card goes under it.
+  const inset = useTv((s) => s.shot?.item !== undefined && !(s.shot.item.kind === 'bag' && placeable(s.shot.item.hint)))
   if (status !== 'playing') return null
   // Mounted again on every cut (key), so its CSS fade starts with the shot.
   const text = meanwhile ? '◀◀ MEANWHILE' : skipped >= 60 ? `▶▶ ${skipWords(skipped)} LATER` : null
   if (!text) return null
-  return <div key={cutAt} className="tv__card" style={{ animationDuration: `${CARD_MS}ms`, animationDelay: `${STATIC_MS}ms` }}>{text}</div>
+  return <div key={cutAt} className={`tv__card${inset ? ' tv__card--low' : ''}`} style={{ animationDuration: `${CARD_MS}ms`, animationDelay: `${STATIC_MS}ms` }}>{text}</div>
 }
 
 function Status(): JSX.Element | null {
@@ -195,6 +198,7 @@ export function TvScreen(): JSX.Element | null {
       </div>
       <button className="tv__off" onClick={() => useTv.getState().stop()} aria-label="Turn Cyberspace TV off">⏻ OFF</button>
       <Status />
+      <TvSegment />
       <Card />
       <div className="tv__lower">
         <Chiron />

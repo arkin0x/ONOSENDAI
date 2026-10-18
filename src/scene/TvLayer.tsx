@@ -26,6 +26,7 @@ import { alignedOrigin, useCyberspace } from '../store/useCyberspace'
 import { shotProgress, useTv } from '../store/useTv'
 import { useProfile } from '../hooks/useProfile'
 import { OtherAvatar } from './OtherAvatar'
+import { TvBoxes } from './TvBoxes'
 
 const REACH = GRID_RADIUS * 8
 /** An avatar not seen on tape for this long (tape time) is not drawn. */
@@ -61,13 +62,15 @@ function TvCamera({ axes }: { axes: ViewAxes }): null {
     return () => { controls.enabled = true }
   }, [controls])
 
-  useFrame((_, dt) => {
+  useFrame((state, dt) => {
     const c = controls
     if (!c) return
     const tv = useTv.getState()
     const s = useCyberspace.getState()
     const origin = alignedOrigin(committedAnchor() ?? s.anchor, s.scaleExp)
-    const subject = tv.shot ? drawnAvatars[tv.shot.pubkey] : undefined
+    // A trip follows its avatar; a segment looks at the view's own point
+    // (a located bag's box, or wherever the last shot left it).
+    const subject = tv.shot?.kind === 'trip' ? drawnAvatars[tv.shot.pubkey] : undefined
     if (subject) subject.getWorldPosition(at)
     else at.set(...s.cursorOffset())
     const before = was.current
@@ -94,7 +97,11 @@ function TvCamera({ axes }: { axes: ViewAxes }): null {
     dist.current = (dist.current ?? wantDist) + (wantDist - (dist.current ?? wantDist)) * kc
     polar.current = (polar.current ?? tv.framing.polar) + (tv.framing.polar - (polar.current ?? tv.framing.polar)) * kc
     theta.current += dt * TV_ORBIT_SPEED
-    const r = dist.current
+    // A bag's box on a portrait screen: stand back so its sides stay in (it
+    // overflowed a phone, review of #371). Only for the box: a close-up of
+    // an avatar on a phone stays close.
+    const aspect = (state.camera as { aspect?: number }).aspect ?? 1
+    const r = dist.current * (tv.shot?.kind === 'bag' ? Math.max(1, 1 / (aspect * 1.4)) : 1)
     const ph = polar.current
     c.target.copy(smooth.current)
     c.object.position.set(
@@ -123,15 +130,16 @@ export function TvLayer({ axes }: { axes: ViewAxes }): JSX.Element {
   }, [anchor, scaleExp, axes])
 
   const near = useMemo(() => Object.entries(avatars)
-    .filter(([pk, a]) => a.plane === anchorPlane && (pk === shot?.pubkey || tapeTime === null || Math.abs(tapeTime - a.at) <= STALE_S))
+    .filter(([pk, a]) => a.plane === anchorPlane && ((shot?.kind === 'trip' && pk === shot.pubkey) || tapeTime === null || Math.abs(tapeTime - a.at) <= STALE_S))
     .map(([pk, a]) => ({ pk, a, centre: place(a.position) }))
     .filter((p) => Math.hypot(...p.centre) <= REACH), [avatars, anchorPlane, shot, tapeTime, place])
 
   return (
     <>
       <TvCamera axes={axes} />
+      <TvBoxes />
       {near.map((p) => (
-        <TapeAvatar key={p.pk} pubkey={p.pk} centre={p.centre} position={p.a.position} place={place} subject={p.pk === shot?.pubkey} />
+        <TapeAvatar key={p.pk} pubkey={p.pk} centre={p.centre} position={p.a.position} place={place} subject={shot?.kind === 'trip' && p.pk === shot.pubkey} />
       ))}
     </>
   )

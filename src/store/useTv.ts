@@ -16,7 +16,8 @@
 
 import { create } from 'zustand'
 import { queryEach } from '../lib/relay'
-import { Director, MAX_SHOT_S, isJump, shotFraming, type Beat, type Framing, type Shot } from '../lib/tv/director'
+import { Director, MAX_SHOT_S, isJump, shotFraming, type Beat, type Framing, type Shot, type TapeItem } from '../lib/tv/director'
+import type { HintBox } from '../lib/hint'
 import { TapeReader, V2_EPOCH, randomStart, type Ask } from '../lib/tv/tape'
 import { loadCensus, loadChainTimes, type Census, type ChainTimes } from '../lib/tv/stats'
 import { MAX_SCALE_EXP, type Position } from '../lib/space'
@@ -64,6 +65,8 @@ interface TvState {
   census: Census | null
   /** Each on-screen avatar's chain, for its length at tape time. */
   chains: Record<string, ChainTimes>
+  /** The hint boxes of the bags the tape has shown, whose outlines stay in the world (TvLayer). */
+  boxes: Array<{ id: string; hint: HintBox }>
   /** Turn the set on; false when something else owns the camera (tvBlocked). */
   start: () => boolean
   /** A new random start, the set staying on (RETRY). */
@@ -149,6 +152,18 @@ export function shotProgress(): number {
   return Math.min(1, Math.max(0, (performance.now() - shotBegan) / 1000 / shot.length))
 }
 
+/**
+ * Play a tape item next, cutting the shot on screen short, for `length`
+ * seconds when given: for tests and the smoke probe, which cannot wait for a
+ * random start to land on one.
+ */
+export function cueItem(item: TapeItem, length?: number): void {
+  const d = new Director()
+  d.addItem(item)
+  queue.unshift(...d.release(Infinity).map((shot) => (length === undefined ? shot : { ...shot, length })))
+  shotBegan = -Infinity
+}
+
 /** Swap the relay read, for tests. */
 export function setTvAsk(fn: Ask): void { ask = fn }
 
@@ -161,10 +176,11 @@ async function readMore(id: number, t: number): Promise<void> {
   readingTape = t
   try {
     while (live(id, t) && queue.length < QUEUE_LOW && !r.caughtUp) {
-      const beats = await r.next()
+      const { beats, items } = await r.read()
       if (!live(id, t)) return
       failures = 0
       for (const b of beats) d.add(b)
+      for (const item of items) d.addItem(item)
       queue.push(...d.release(r.readTo - 1))
     }
     if (live(id, t) && r.caughtUp) queue.push(...d.release(Infinity))
@@ -215,7 +231,55 @@ export function shotOpening(shot: Shot): { position: Position; plane: number } {
   return isJump(first) ? { position: first.action.position, plane: first.action.plane } : first.from
 }
 
+/** How many bag outlines stay in the world at once; the oldest go first. */
+const BOXES_KEPT = 12
+/** A located bag's box is framed this many powers of two under its own size: about 8 cells across. */
+const BOX_FIT = 3
+
+/**
+ * Whether a hint box can be shown in the world: one box too uneven to frame
+ * (a side more than 2^5 times another) plays in the inset instead, as a bag
+ * with no hint does (review of #371).
+ */
+export function placeable(hint: HintBox | null): hint is HintBox {
+  if (!hint) return false
+  return Math.max(...hint.heights) - Math.min(...hint.heights) <= 5
+}
+
+/** The centre of a hint box: its base plus half of each side. */
+export function boxCentre(hint: HintBox): Position {
+  const half = (h: number): bigint => (h === 0 ? 0n : 1n << BigInt(h - 1))
+  return { x: hint.base.x + half(hint.heights[0]), y: hint.base.y + half(hint.heights[1]), z: hint.base.z + half(hint.heights[2]) }
+}
+
+/**
+ * A segment for a tape item (director TapeItem). A bag whose hint box says
+ * where it is is shown there, the camera out far enough to hold the box; one
+ * that does not is never placed (its region is the secret), and plays in an
+ * inset over the last picture, as an object and a comment do (TvScreen).
+ */
+function beginSegment(shot: Shot, now: number): void {
+  const s = useTv.getState()
+  const item = shot.item
+  const located = item?.kind === 'bag' && placeable(item.hint) ? item.hint : null
+  const scaleExp = located ? Math.max(0, Math.max(...located.heights) - BOX_FIT) : s.scaleExp
+  useTv.setState({
+    shot,
+    played: 0,
+    tapeTime: shot.start,
+    scaleExp,
+    skipped: s.shot && shot.start > s.shot.end ? shot.start - s.shot.end : 0,
+    meanwhile: s.shot !== null && shot.start < s.shot.end,
+    status: 'playing',
+    cutAt: now,
+    ...(located ? { framing: { from: 26, to: 18, polar: 0.6, name: 'wide' as const }, boxes: [...s.boxes.filter((b) => b.id !== shot.id), { id: shot.id, hint: located }].slice(-BOXES_KEPT) } : {}),
+  })
+  shotBegan = now
+  if (located) frame(boxCentre(located), located.plane, scaleExp)
+}
+
 function beginShot(shot: Shot, now: number, id: number): void {
+  if (shot.item) { beginSegment(shot, now); return }
   needChain(shot.pubkey, id)
   const s = useTv.getState()
   const opening = shotOpening(shot)
@@ -224,7 +288,8 @@ function beginShot(shot: Shot, now: number, id: number): void {
   // Straight on from the shot before: the same avatar, picking up where it
   // stopped, at the same zoom. Anything else is a cut, with static.
   const was = s.avatars[shot.pubkey]
-  const continues = before !== null && before.pubkey === shot.pubkey && was !== undefined &&
+  // Only after a trip: a segment's author is not where its camera was (review of #371).
+  const continues = before !== null && before.kind === 'trip' && before.pubkey === shot.pubkey && was !== undefined &&
     was.plane === opening.plane && cells(was.position, opening.position, scaleExp) <= 1 && scaleExp === s.scaleExp
   const skipped = before && shot.start > before.end ? shot.start - before.end : 0
   useTv.setState({
@@ -260,7 +325,9 @@ function tick(id: number): void {
     if (failures >= NO_SIGNAL_AFTER && s.status === 'playing') useTv.setState({ status: 'no-signal' })
     if (reader?.caughtUp && readingTape !== t && s.status !== 'end') {
       useTv.setState({ status: 'end', shot: null, cutAt: now })
-      setTimeout(() => { if (live(id, t)) void tune(id) }, END_HOLD_MS)
+      // Only if END OF TAPE is still what is on screen: anything played since
+      // (a cued item) is not cut off by a retune.
+      setTimeout(() => { if (live(id, t) && useTv.getState().status === 'end') void tune(id) }, END_HOLD_MS)
     }
     return
   }
@@ -291,7 +358,7 @@ async function tune(id: number): Promise<void> {
   queue = []
   retryAt = 0
   failures = 0
-  useTv.setState({ status: 'tuning', shot: null, played: 0, tapeTime: null, avatars: {}, arrivals: [], skipped: 0, cutAt: performance.now() })
+  useTv.setState({ status: 'tuning', shot: null, played: 0, tapeTime: null, avatars: {}, arrivals: [], boxes: [], skipped: 0, cutAt: performance.now() })
   let from: number | null = null
   for (let attempt = 0; from === null; attempt++) {
     try {
@@ -359,6 +426,7 @@ export const useTv = create<TvState>((set, get) => ({
   arrivals: [],
   census: null,
   chains: {},
+  boxes: [],
 
   start: () => {
     if (get().on) return true
@@ -393,7 +461,7 @@ export const useTv = create<TvState>((set, get) => ({
     director = null
     queue = []
     asked.clear()
-    set({ on: false, shot: null, played: 0, tapeTime: null, avatars: {}, arrivals: [], chains: {}, status: 'tuning' })
+    set({ on: false, shot: null, played: 0, tapeTime: null, avatars: {}, arrivals: [], chains: {}, boxes: [], status: 'tuning' })
     // A tap on an avatar during TV is not a request for its card afterwards.
     usePersonCard.getState().close()
     const cs = useCyberspace.getState()

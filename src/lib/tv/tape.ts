@@ -19,7 +19,11 @@ import { coordToXyz, hexToCoord } from 'cyberspace-core'
 import { ACTION_KIND, parseAction, type NostrEvent } from '../events'
 import type { Filter } from 'nostr-tools'
 import { mergeAnswers, type RelayAnswer } from '../relayOutcome'
-import type { Beat } from './director'
+import { HIDDEN_KIND, OBJECT_KIND, heightHint } from '../hidden'
+import { fromPayload } from 'sno-core/shards'
+import { parseHint } from '../hint'
+import { COMMENT_KIND, PLACEHOLDER, parseComment } from '../comments'
+import type { Beat, TapeItem } from './director'
 
 /**
  * The first second of Cyberspace v2 on the relays: the earliest v2 spawn on
@@ -96,6 +100,43 @@ export function beatOf(ev: NostrEvent): Beat | null {
   return { id: ev.id, pubkey: ev.pubkey, at: ev.created_at, action, from }
 }
 
+/**
+ * The kinds a comment on the tape answers: a move (kind 3333, public words)
+ * or a bag (33330, words sealed to its region). The relay holds comments of
+ * every other app as well (2026-10-18: 23 on moves and 19 on bags of 855),
+ * which are not cyberspace's to show.
+ */
+export const COMMENTED_KINDS = [String(ACTION_KIND), String(HIDDEN_KIND)]
+
+/** A bag, a public object or a cyberspace comment as a tape item; null for anything else. */
+export function itemOf(ev: NostrEvent): TapeItem | null {
+  const base = { id: ev.id, pubkey: ev.pubkey, at: ev.created_at }
+  if (ev.kind === HIDDEN_KIND) {
+    const h = heightHint(ev)
+    const height = h !== null && h <= 85 ? h : null
+    return { kind: 'bag', ...base, height, hint: parseHint(ev.tags, height ?? 0) }
+  }
+  if (ev.kind === OBJECT_KIND) {
+    // A sealed object (hidden by reference, or for sale) is not public.
+    if (ev.tags.some((t) => t[0] === 'encrypted')) return null
+    const d = ev.tags.find((t) => t[0] === 'd')?.[1]
+    if (!d || d === 'avatar') return null
+    // One that does not read as a shard would be a product shot of nothing.
+    try { if (!fromPayload(JSON.parse(ev.content), `${ev.pubkey}:${d}`)) return null } catch { return null }
+    return { kind: 'object', ...base, event: ev }
+  }
+  if (ev.kind === COMMENT_KIND) {
+    const k = ev.tags.find((t) => t[0] === 'K')?.[1]
+    if (!k || !COMMENTED_KINDS.includes(k)) return null
+    const c = parseComment(ev)
+    if (!c) return null
+    const sealed = c.ciphertext !== null || c.preview === PLACEHOLDER
+    const about = ev.tags.find((t) => t[0] === 'P')?.[1] ?? null
+    return { kind: 'comment', ...base, on: k === String(ACTION_KIND) ? 'move' : 'bag', text: sealed ? null : c.preview, about }
+  }
+  return null
+}
+
 /** Signing order, ties by id, so two readers of the same tape agree. */
 export function bySigning(a: { at: number; id: string }, b: { at: number; id: string }): number {
   return a.at - b.at || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0)
@@ -116,19 +157,40 @@ export class TapeReader {
   caughtUp = false
   private span = FIRST_WINDOW_S
 
-  constructor(from: number, private ask: Ask, private now: () => number = () => Math.floor(Date.now() / 1000)) {
+  private kinds: number[]
+
+  /** `withItems` false reads moves only. */
+  constructor(from: number, private ask: Ask, private now: () => number = () => Math.floor(Date.now() / 1000), private withItems = true) {
     this.readTo = from
+    this.kinds = withItems ? [ACTION_KIND, HIDDEN_KIND, OBJECT_KIND] : [ACTION_KIND]
   }
 
   /** The next window's beats. Throws TapeUnanswered, without moving on, when no relay answered. */
   async next(): Promise<Beat[]> {
-    if (this.caughtUp) return []
+    return (await this.read()).beats
+  }
+
+  /**
+   * The next window: its moves as beats and its bags, objects and comments
+   * as items, each in signing order. Two questions per window, the second
+   * for comments on cyberspace's kinds only. Throws TapeUnanswered, without
+   * moving on, when no relay answered either.
+   */
+  async read(): Promise<{ beats: Beat[]; items: TapeItem[] }> {
+    if (this.caughtUp) return { beats: [], items: [] }
     for (;;) {
       const since = this.readTo
       const now = this.now()
       const until = Math.min(now, since + this.span - 1)
-      if (until < since) { this.caughtUp = true; return [] }
-      const { events, full } = readAnswers(await this.ask({ kinds: [ACTION_KIND], since, until, limit: WINDOW_LIMIT }))
+      if (until < since) { this.caughtUp = true; return { beats: [], items: [] } }
+      const [things, comments] = await Promise.all([
+        this.ask({ kinds: this.kinds, since, until, limit: WINDOW_LIMIT }),
+        this.withItems ? this.ask({ kinds: [COMMENT_KIND], '#K': COMMENTED_KINDS, since, until, limit: WINDOW_LIMIT }) : Promise.resolve(null),
+      ])
+      const a = readAnswers(things)
+      const b = comments ? readAnswers(comments) : { events: [], full: false }
+      const events = [...a.events, ...b.events]
+      const full = a.full || b.full
       if (full && this.span > MIN_WINDOW_S) {
         // Full: the relay may have left some out. Ask for half the time.
         this.span = Math.max(MIN_WINDOW_S, Math.floor(this.span / 2))
@@ -138,12 +200,15 @@ export class TapeReader {
       if (until >= now) this.caughtUp = true
       if (events.length < CAP_SUSPECT / 4) this.span = Math.min(MAX_WINDOW_S, this.span * 2)
       const beats: Beat[] = []
+      const items: TapeItem[] = []
       // Windows never overlap, so no event comes back twice.
       for (const ev of events) {
-        const b = beatOf(ev)
-        if (b) beats.push(b)
+        const beat = beatOf(ev)
+        if (beat) { beats.push(beat); continue }
+        const item = this.withItems ? itemOf(ev) : null
+        if (item) items.push(item)
       }
-      return beats.sort(bySigning)
+      return { beats: beats.sort(bySigning), items: items.sort(bySigning) }
     }
   }
 }

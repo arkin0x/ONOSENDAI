@@ -29,7 +29,7 @@ import type { Filter } from 'nostr-tools'
 import type { RelayAnswer } from '../../lib/relayOutcome'
 import { positionHex, type NostrEvent } from '../../lib/events'
 import { V2_EPOCH } from '../../lib/tv/tape'
-import { TV_FOCUS_LABEL, fitScale, setTvAsk, shotOpening, useTv } from '../useTv'
+import { TV_FOCUS_LABEL, fitScale, placeable, setTvAsk, shotOpening, useTv } from '../useTv'
 import { useCyberspace } from '../useCyberspace'
 import { useBuilder } from '../useBuilder'
 import { usePersonCard } from '../usePersonCard'
@@ -201,6 +201,64 @@ describe('Cyberspace TV', () => {
     const shot = { beats: [jump, ...hops] } as unknown as Shot
     expect(fitScale(shot.beats)).toBeLessThan(4)
     expect(shotOpening(shot).position.x).toBe(1n << 59n)
+  })
+
+  it('a bag with a public hint box is shown at its box, which stays; one without is never placed', async () => {
+    const hint = '3129509e23d3a6125e1451a5912dbe01099e1517200000000000000000000000'
+    tape.push(
+      { id: id(), pubkey: A, created_at: T0 + 200, kind: 33330, tags: [['d', 'a'.repeat(64)], ['h', '7'], ['hint', hint, '30', '30', '30']], content: '', sig: '' },
+      { id: id(), pubkey: A, created_at: T0 + 300, kind: 33330, tags: [['d', 'b'.repeat(64)], ['h', '7']], content: '', sig: '' },
+    )
+    try {
+      useTv.getState().start()
+      const seen: Array<{ kind: string; scale: number; boxes: number; focusAfter?: bigint }> = []
+      const off = useTv.subscribe((s, prev) => {
+        // Where the view stands when a shot ends: what that shot framed.
+        if (prev.shot && s.shot !== prev.shot && seen.length > 0) seen[seen.length - 1].focusAfter ??= useCyberspace.getState().focus?.position.x
+        if (s.shot && s.shot !== prev.shot) seen.push({ kind: s.shot.kind, scale: s.scaleExp, boxes: s.boxes.length })
+      })
+      await run(30000)
+      off()
+      const bags = seen.filter((x) => x.kind === 'bag')
+      expect(bags.length).toBe(2)
+      // The located one: framed on its box (2^30 a side, so 2^27 a cell), and its outline kept.
+      expect(bags[0].scale).toBe(27)
+      expect(bags[0].boxes).toBe(1)
+      // The other: no box added, and the camera not moved to anywhere of its own.
+      expect(bags[1].boxes).toBe(1)
+      expect(bags[1].focusAfter).toBe(bags[0].focusAfter)
+    } finally {
+      tape.splice(tape.length - 2, 2)
+    }
+  })
+
+  it('a hint box too uneven to frame plays in the inset', () => {
+    expect(placeable({ base: { x: 0n, y: 0n, z: 0n }, plane: 0, heights: [30, 30, 30] })).toBe(true)
+    expect(placeable({ base: { x: 0n, y: 0n, z: 0n }, plane: 0, heights: [30, 30, 20] })).toBe(false)
+    expect(placeable(null)).toBe(false)
+  })
+
+  it('a trip after a segment is a cut, never a continuation', async () => {
+    // B's trip, then A's comment on it, then A's own trip.
+    tape.push(
+      { id: id(), pubkey: A, created_at: T0 + 105, kind: 1111, tags: [['E', 'b'.repeat(64)], ['K', '3333'], ['e', 'b'.repeat(64)], ['k', '3333'], ['P', B]], content: 'nice', sig: '' },
+      hop(A, T0 + 110, 1003n, 1004n),
+    )
+    try {
+      useTv.getState().start()
+      const cuts: Array<{ kind: string; cut: boolean }> = []
+      let lastCut = -1
+      const off = useTv.subscribe((s, prev) => {
+        if (s.shot && s.shot !== prev.shot) { cuts.push({ kind: s.shot.kind, cut: s.cutAt !== lastCut }); lastCut = s.cutAt }
+      })
+      await run(30000)
+      off()
+      const i = cuts.findIndex((c) => c.kind === 'comment')
+      expect(i).toBeGreaterThanOrEqual(0)
+      expect(cuts[i + 1]).toEqual({ kind: 'trip', cut: true })
+    } finally {
+      tape.splice(tape.length - 2, 2)
+    }
   })
 
   it('turns off when another view takes the camera', async () => {

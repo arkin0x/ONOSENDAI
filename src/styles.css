@@ -9374,6 +9374,10 @@ a.feed__act { text-decoration: none; }
   animation-timing-function: linear;
 }
 
+/* Under a segment's panel (TvSegments), which holds the centre; clear of
+   the clock on every screen. */
+.tv__card--low { top: auto; bottom: calc(max(16px, env(safe-area-inset-bottom)) + 120px); }
+
 @keyframes tv-card {
   0% { opacity: 0; }
   8%, 80% { opacity: 1; }
@@ -9519,9 +9523,167 @@ a.feed__act { text-decoration: none; }
   .tv__chiron-name { font-size: 16px; }
   .tv__zoom { width: 100%; }
   .tv__card { font-size: 14px; }
+  /* The phone's chiron is taller (the zoom gauge wraps under the name). */
+  .tv__card--low { bottom: calc(max(16px, env(safe-area-inset-bottom)) + 175px); }
 }
 
 @media (prefers-reduced-motion: reduce) {
   .tv__ticker-run { animation-duration: 180s; }
   .tv__status { animation: none; }
+}
+
+/* Cyberspace TV segments (hud/TvSegments.tsx): an inset over the picture,
+   on the same glass as the rest of the furniture. */
+.tvseg {
+  position: absolute;
+  left: 50%;
+  top: 46%;
+  transform: translate(-50%, -50%);
+  display: flex;
+  align-items: center;
+  gap: 28px;
+  padding: 22px 28px;
+  width: min(760px, calc(100vw - 32px));
+  box-sizing: border-box;
+  background-image:
+    repeating-linear-gradient(0deg, rgba(0, 0, 0, 0.22) 0 1px, transparent 1px 3px),
+    linear-gradient(135deg, rgba(0, 40, 56, 0.9), rgba(2, 12, 20, 0.9));
+  border: 1px solid rgba(0, 229, 255, 0.35);
+  box-shadow: 0 0 30px rgba(0, 229, 255, 0.15);
+  animation: tvseg-in 0.5s ease-out both;
+  animation-delay: 0.42s;
+}
+
+@keyframes tvseg-in {
+  from { opacity: 0; transform: translate(-50%, -46%); }
+  to { opacity: 1; transform: translate(-50%, -50%); }
+}
+
+.tvseg__stage {
+  flex: none;
+  width: 220px;
+  height: 220px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  perspective: 700px;
+}
+
+.tvseg__caption { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.tvseg__kicker { font-size: 11px; letter-spacing: 0.24em; color: var(--accent); }
+.tvseg__title { font-size: 26px; font-weight: 700; letter-spacing: 0.08em; overflow-wrap: anywhere; }
+.tvseg__note { font-size: 10px; letter-spacing: 0.16em; opacity: 0.75; }
+
+/* The sealed bag, standing for itself and nowhere: outlines, sides, a key
+   stamped on each side, sides fading, outlines kept (scene/TvBoxes's timing). */
+.tvbag {
+  position: relative;
+  width: 110px;
+  height: 110px;
+  transform-style: preserve-3d;
+  animation: tvbag-turn 9s linear infinite;
+}
+
+@keyframes tvbag-turn {
+  from { transform: rotateX(-24deg) rotateY(0deg); }
+  to { transform: rotateX(-24deg) rotateY(360deg); }
+}
+
+.tvbag__face {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 2px solid rgba(82, 227, 159, 0);
+  background: rgba(82, 227, 159, 0);
+  animation: tvbag-edges 1s ease-out 0.4s forwards, tvbag-sides 5.4s linear 0.4s forwards;
+}
+
+@keyframes tvbag-edges { to { border-color: rgba(82, 227, 159, 0.95); } }
+@keyframes tvbag-sides {
+  0%, 18% { background: rgba(82, 227, 159, 0); }
+  33%, 78% { background: rgba(82, 227, 159, 0.22); }
+  100% { background: rgba(82, 227, 159, 0); }
+}
+
+.tvbag__face--front { transform: translateZ(55px); }
+.tvbag__face--back { transform: rotateY(180deg) translateZ(55px); }
+.tvbag__face--left { transform: rotateY(-90deg) translateZ(55px); }
+.tvbag__face--right { transform: rotateY(90deg) translateZ(55px); }
+.tvbag__face--top { transform: rotateX(90deg) translateZ(55px); }
+.tvbag__face--bottom { transform: rotateX(-90deg) translateZ(55px); }
+
+.tvbag__key {
+  width: 52px;
+  height: 52px;
+  color: #52e39f;
+  opacity: 0;
+  animation: tvbag-stamp 3.4s linear forwards;
+  animation-delay: calc(2.4s + var(--i) * 0.22s);
+}
+
+@keyframes tvbag-stamp {
+  0% { opacity: 0; transform: scale(1.8); }
+  6% { opacity: 1; transform: scale(1); }
+  60% { opacity: 1; transform: scale(1); }
+  100% { opacity: 0; transform: scale(1); }
+}
+
+/* The news desk: the commenter as a photograph, the quote printing. */
+.tvseg--comment { align-items: stretch; }
+
+.tvdesk__photo {
+  flex: 0 0 32%;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 12px;
+  background: rgba(0, 0, 0, 0.5);
+  border: 6px solid rgba(230, 240, 245, 0.85);
+  filter: saturate(0.6) contrast(1.1);
+}
+
+.tvdesk__photo figcaption { font-size: 10px; letter-spacing: 0.16em; text-align: center; overflow-wrap: anywhere; }
+
+.tvdesk__quote {
+  flex: 1;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  gap: 14px;
+  min-width: 0;
+}
+
+.tvdesk__quote p {
+  margin: 0;
+  font-size: 20px;
+  line-height: 1.45;
+  letter-spacing: 0.02em;
+  overflow-wrap: anywhere;
+}
+
+.tvdesk__text { position: relative; }
+.tvdesk__ghost { visibility: hidden; }
+.tvdesk__typed { position: absolute; inset: 0; }
+
+.tvdesk__quote--sealed p { letter-spacing: 0; color: #9fb4bf; }
+.tvdesk__mark { color: var(--accent); font-size: 1.4em; line-height: 0; }
+.tvdesk__caret { animation: tv-blink 0.8s steps(2, jump-none) infinite; }
+.tvdesk__quote footer { font-size: 10px; letter-spacing: 0.16em; color: var(--accent); }
+
+@media (max-width: 600px) {
+  .tvseg { flex-direction: column; gap: 14px; padding: 16px; top: 42%; }
+  .tvseg__stage { width: 160px; height: 160px; }
+  .tvseg__title { font-size: 20px; }
+  .tvdesk__photo { flex-basis: auto; width: 60%; }
+  .tvdesk__quote p { font-size: 15px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tvbag { animation: none; transform: rotateX(-24deg) rotateY(30deg); }
 }

@@ -6,7 +6,17 @@ import { describe, expect, it } from 'vitest'
 import type { Filter } from 'nostr-tools'
 import type { NostrEvent } from '../../events'
 import type { RelayAnswer } from '../../relayOutcome'
-import { CAP_SUSPECT, FIRST_WINDOW_S, TapeReader, TapeUnanswered, askAll, beatOf, randomStart } from '../tape'
+import { CAP_SUSPECT, FIRST_WINDOW_S, TapeReader, TapeUnanswered, askAll, beatOf, itemOf, randomStart } from '../tape'
+import { PLACEHOLDER } from '../../comments'
+import { newShard, toPayload } from 'sno-core/shards'
+
+/** A real object payload, as the workshop publishes it. */
+const OBJECT_PAYLOAD = (() => {
+  const s = newShard('tower')
+  s.vertices = [{ p: [0, 0, 0], c: [0, 0.9, 1] }, { p: [1, 0, 0], c: [0, 0.9, 1] }, { p: [0, 1, 0], c: [0, 0.9, 1] }]
+  s.faces = [[0, 1, 2]]
+  return JSON.stringify(toPayload(s))
+})()
 
 const PK = 'e8ed3798c6ffebffa08501ac39e271662bfd160f688f94c45d692d8767dd345a'
 
@@ -28,7 +38,9 @@ function relay(events: NostrEvent[], { cap = Infinity, down = 0 } = {}): { ask: 
     ask: async (f) => {
       asked.push(f)
       if (failing > 0) { failing--; return [{ url: 'wss://relay.test', outcome: 'unreachable', reason: 'down', events: [] }] }
+      const ks = (f as { '#K'?: string[] })['#K']
       const got = events
+        .filter((e) => (!f.kinds || f.kinds.includes(e.kind)) && (!ks || e.tags.some((t) => t[0] === 'K' && ks.includes(t[1]))))
         .filter((e) => (f.since === undefined || e.created_at >= f.since) && (f.until === undefined || e.created_at <= f.until))
         .sort((a, b) => b.created_at - a.created_at)
         .slice(0, Math.min(cap, f.limit ?? Infinity))
@@ -84,6 +96,44 @@ describe('TapeReader', () => {
     now = 5000
     expect(await reader.next()).toEqual([])
     expect(r.asked.length).toBe(asked)
+  })
+})
+
+function ev(kind: number, at: number, tags: string[][], content = ''): NostrEvent {
+  return { id: (n++).toString(16).padStart(64, '0'), pubkey: PK, created_at: at, kind, tags, content, sig: '' }
+}
+
+describe('itemOf', () => {
+  it('reads a bag, with its hint box only when it has one', () => {
+    const hinted = itemOf(ev(33330, 5, [['d', 'a'.repeat(64)], ['h', '7'], ['hint', '3129509e23d3a6125e1451a5912dbe01099e1517200000000000000000000000', '30', '30', '30']]))
+    expect(hinted?.kind).toBe('bag')
+    expect(hinted?.kind === 'bag' && hinted.hint?.heights).toEqual([30, 30, 30])
+    const bare = itemOf(ev(33330, 5, [['d', 'a'.repeat(64)]]))
+    expect(bare?.kind === 'bag' && bare.hint).toBeNull()
+  })
+
+  it('reads a public object and skips a sealed one and an avatar', () => {
+    expect(itemOf(ev(33331, 5, [['d', 'x']], OBJECT_PAYLOAD))?.kind).toBe('object')
+    // One that does not read as a shard would be a product shot of nothing.
+    expect(itemOf(ev(33331, 5, [['d', 'x']], '{}'))).toBeNull()
+    expect(itemOf(ev(33331, 5, [['d', 'x'], ['encrypted', 'aes-256-gcm', 'zz']]))).toBeNull()
+    expect(itemOf(ev(33331, 5, [['d', 'avatar']], '{}'))).toBeNull()
+  })
+
+  it('reads comments on moves and bags only, words public or sealed', () => {
+    const onMove = itemOf(ev(1111, 5, [['E', 'b'.repeat(64)], ['K', '3333'], ['e', 'b'.repeat(64)], ['k', '3333'], ['P', 'c'.repeat(64)]], 'nice hop'))
+    expect(onMove).toMatchObject({ kind: 'comment', on: 'move', text: 'nice hop', about: 'c'.repeat(64) })
+    const onBag = itemOf(ev(1111, 5, [['A', `33330:${PK}:x`], ['K', '33330'], ['e', 'b'.repeat(64)], ['k', '3330'], ['encrypted', 'aes-256-gcm', 'zz']], PLACEHOLDER))
+    expect(onBag).toMatchObject({ kind: 'comment', on: 'bag', text: null })
+    expect(itemOf(ev(1111, 5, [['A', '34550:x:y'], ['K', '34550'], ['e', 'b'.repeat(64)], ['k', '1']], 'not ours'))).toBeNull()
+  })
+
+  it('a window gives its items beside its beats', async () => {
+    const r = relay([spawn(100), ev(33330, 150, [['d', 'a'.repeat(64)]]), ev(1111, 160, [['E', 'b'.repeat(64)], ['K', '3333'], ['e', 'b'.repeat(64)], ['k', '3333']], 'hi')])
+    const reader = new TapeReader(0, r.ask, () => 1000)
+    const got = await reader.read()
+    expect(got.beats.map((b) => b.at)).toEqual([100])
+    expect(got.items.map((i) => i.kind)).toEqual(['bag', 'comment'])
   })
 })
 

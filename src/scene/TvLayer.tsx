@@ -26,6 +26,7 @@ import { alignedOrigin, useCyberspace } from '../store/useCyberspace'
 import { shotProgress, useTv } from '../store/useTv'
 import { useProfile } from '../hooks/useProfile'
 import { OtherAvatar } from './OtherAvatar'
+import { TvBoxes } from './TvBoxes'
 
 const REACH = GRID_RADIUS * 8
 /** An avatar not seen on tape for this long (tape time) is not drawn. */
@@ -67,7 +68,9 @@ function TvCamera({ axes }: { axes: ViewAxes }): null {
     const tv = useTv.getState()
     const s = useCyberspace.getState()
     const origin = alignedOrigin(committedAnchor() ?? s.anchor, s.scaleExp)
-    const subject = tv.shot ? drawnAvatars[tv.shot.pubkey] : undefined
+    // A trip follows its avatar; a segment looks at the view's own point
+    // (a located bag's box, or wherever the last shot left it).
+    const subject = tv.shot?.kind === 'trip' ? drawnAvatars[tv.shot.pubkey] : undefined
     if (subject) subject.getWorldPosition(at)
     else at.set(...s.cursorOffset())
     const before = was.current
@@ -130,6 +133,7 @@ export function TvLayer({ axes }: { axes: ViewAxes }): JSX.Element {
   return (
     <>
       <TvCamera axes={axes} />
+      <TvBoxes />
       {near.map((p) => (
         <TapeAvatar key={p.pk} pubkey={p.pk} centre={p.centre} position={p.a.position} place={place} subject={p.pk === shot?.pubkey} />
       ))}

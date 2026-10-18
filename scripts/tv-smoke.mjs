@@ -2,7 +2,7 @@
  * tv-smoke.mjs: Cyberspace TV, end to end, offline (2026-10-18).
  *
  * Every relay is smoke-lib's in-process relay, seeded with a recorded tape
- * (a JSONL file of real public events, kinds 3333, 33330 and 33331, fetched
+ * (a JSONL file of real public events, kinds 3333, 33330, 33331 and 1111, fetched
  * read-only), so the TV plays real history and nothing reaches a real relay.
  * LOCAL from the first frame; the run fails if the page sends any EVENT.
  *
@@ -23,7 +23,7 @@ import { launch } from './smoke-lib.mjs'
 const [base, tapeFile, out, which = 'both'] = process.argv.slice(2)
 fs.mkdirSync(out, { recursive: true })
 const seed = fs.readFileSync(tapeFile, 'utf8').trim().split('\n').map((l) => JSON.parse(l))
-  .filter((e) => [3333, 33330, 33331].includes(e.kind))
+  .filter((e) => [3333, 33330, 33331, 1111].includes(e.kind))
 
 const results = []
 async function run(phone) {

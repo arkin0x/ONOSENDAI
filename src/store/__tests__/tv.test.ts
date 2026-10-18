@@ -185,6 +185,35 @@ describe('Cyberspace TV', () => {
     expect(shotOpening(shot).position.x).toBe(1n << 59n)
   })
 
+  it('a bag with a public hint box is shown at its box, which stays; one without is never placed', async () => {
+    const hint = '3129509e23d3a6125e1451a5912dbe01099e1517200000000000000000000000'
+    tape.push(
+      { id: id(), pubkey: A, created_at: T0 + 200, kind: 33330, tags: [['d', 'a'.repeat(64)], ['h', '7'], ['hint', hint, '30', '30', '30']], content: '', sig: '' },
+      { id: id(), pubkey: A, created_at: T0 + 300, kind: 33330, tags: [['d', 'b'.repeat(64)], ['h', '7']], content: '', sig: '' },
+    )
+    try {
+      useTv.getState().start()
+      const seen: Array<{ kind: string; scale: number; boxes: number; focusAfter?: bigint }> = []
+      const off = useTv.subscribe((s, prev) => {
+        // Where the view stands when a shot ends: what that shot framed.
+        if (prev.shot && s.shot !== prev.shot && seen.length > 0) seen[seen.length - 1].focusAfter ??= useCyberspace.getState().focus?.position.x
+        if (s.shot && s.shot !== prev.shot) seen.push({ kind: s.shot.kind, scale: s.scaleExp, boxes: s.boxes.length })
+      })
+      await run(30000)
+      off()
+      const bags = seen.filter((x) => x.kind === 'bag')
+      expect(bags.length).toBe(2)
+      // The located one: framed on its box (2^30 a side, so 2^27 a cell), and its outline kept.
+      expect(bags[0].scale).toBe(27)
+      expect(bags[0].boxes).toBe(1)
+      // The other: no box added, and the camera not moved to anywhere of its own.
+      expect(bags[1].boxes).toBe(1)
+      expect(bags[1].focusAfter).toBe(bags[0].focusAfter)
+    } finally {
+      tape.splice(tape.length - 2, 2)
+    }
+  })
+
   it('turns off when another view takes the camera', async () => {
     useTv.getState().start()
     await run(1500)

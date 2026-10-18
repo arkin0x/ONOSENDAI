@@ -35,7 +35,8 @@
  * plays the shots it releases.
  */
 
-import type { ActionEvent } from '../events'
+import type { ActionEvent, NostrEvent } from '../events'
+import type { HintBox } from '../hint'
 import type { Position } from '../space'
 
 /** Longest pause inside one trip; a longer one ends the shot. 30 s covers a hop's proof on a slow phone. */
@@ -62,11 +63,43 @@ export interface Beat {
   from: { position: Position; plane: number }
 }
 
+/**
+ * Something on the tape other than a move: each is a shot of its own, a
+ * segment with its own graphics (arkinox, 2026-10-18), played in its place
+ * among the trips by when it was signed.
+ */
+export type TapeItem =
+  /** A bag sealed (its newest version: relays keep only that). Where it is, only when its hint box says so. */
+  | { kind: 'bag'; id: string; pubkey: string; at: number; hint: HintBox | null; height: number | null }
+  /** A public SNO object published. */
+  | { kind: 'object'; id: string; pubkey: string; at: number; event: NostrEvent }
+  /** A comment on a move or on a bag: its words when they are public, null when sealed to a region. */
+  | { kind: 'comment'; id: string; pubkey: string; at: number; text: string | null; on: 'move' | 'bag'; about: string | null }
+
+/** How long each kind of segment stays on screen, seconds. A comment's grows with its words. */
+export const BAG_S = 7
+export const OBJECT_S = 7
+export const COMMENT_BASE_S = 4
+export const COMMENT_PER_CHAR_S = 0.05
+export const COMMENT_MAX_S = 16
+
+export function itemLength(item: TapeItem): number {
+  if (item.kind === 'bag') return BAG_S
+  if (item.kind === 'object') return OBJECT_S
+  const chars = item.text?.length ?? 60
+  return Math.min(COMMENT_MAX_S, COMMENT_BASE_S + chars * COMMENT_PER_CHAR_S)
+}
+
 export interface Shot {
   /** The first beat's id: stable across reloads of the same tape. */
   id: string
-  /** A trip, or an arrival: a spawn and nothing after it, which plays as a ticker line, not a shot. */
-  kind: 'trip' | 'arrival'
+  /**
+   * A trip; an arrival (a spawn and nothing after it, which plays as a
+   * ticker line, not a shot); or a segment for a tape item.
+   */
+  kind: 'trip' | 'arrival' | TapeItem['kind']
+  /** The segment's item, for a bag, an object or a comment. */
+  item?: TapeItem
   pubkey: string
   beats: Beat[]
   /** Tape time of the first and last beat. */
@@ -125,6 +158,11 @@ export const JUMP_GIBSONS = 1n << 40n
 export class Director {
   private open = new Map<string, Beat[]>()
   private closed: Shot[] = []
+
+  /** A tape item: a shot of its own at once, nothing to wait for. */
+  addItem(item: TapeItem): void {
+    this.closed.push({ id: item.id, kind: item.kind, item, pubkey: item.pubkey, beats: [], start: item.at, end: item.at, offsets: [], length: itemLength(item) })
+  }
 
   add(b: Beat): void {
     const run = this.open.get(b.pubkey)

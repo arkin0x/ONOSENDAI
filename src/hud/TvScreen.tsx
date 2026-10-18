@@ -28,6 +28,7 @@ import { useTv } from '../store/useTv'
 import { LANDMARKS } from './ScaleLadder'
 import { ProfilePic } from './ProfileBadge'
 import { STATIC_MS } from '../scene/TvScreenEffect'
+import { TvSegment, segmentDoing } from './TvSegments'
 
 /** How long LATER and MEANWHILE stay up after a cut, ms. */
 const CARD_MS = 2600
@@ -90,7 +91,7 @@ function Chiron(): JSX.Element | null {
   if (!shot) return null
   const last = played > 0 ? shot.beats[played - 1] : null
   const trip = shot.beats.length
-  const doing = last
+  const doing = shot.item ? segmentDoing(shot.item) : last
     ? `${actionLabel(last.action)}${trip > 1 ? ` · ${played} OF ${trip}` : ''}`
     : trip > 1 ? `${trip} ACTIONS COMING UP` : 'ABOUT TO MOVE'
   return (
@@ -195,6 +196,7 @@ export function TvScreen(): JSX.Element | null {
       </div>
       <button className="tv__off" onClick={() => useTv.getState().stop()} aria-label="Turn Cyberspace TV off">⏻ OFF</button>
       <Status />
+      <TvSegment />
       <Card />
       <div className="tv__lower">
         <Chiron />

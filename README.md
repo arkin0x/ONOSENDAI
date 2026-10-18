@@ -225,7 +225,8 @@ the rest of the tape. A bag without one is never placed (where it is, is the
 hunt): it plays on a cube in an inset, LOCATION SECRET. A public object gets
 a product shot. A comment on a move or a bag gets the news desk: the
 commenter as a photograph, the quote printing out; one sealed to a bag's
-region prints as redaction.
+region prints as redaction. A new avatar gets the product shot too (NEW
+LOOK), and a reaction to a shard or a move is a line on the ticker.
 
 **The spawn marker.** v1's spawn model (`public/spawn.glb`: three hexagonal
 rings, a hollow cube, six radiating bars) stands at the pubkey coordinate,

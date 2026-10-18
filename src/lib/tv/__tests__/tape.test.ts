@@ -8,6 +8,16 @@ import type { NostrEvent } from '../../events'
 import type { RelayAnswer } from '../../relayOutcome'
 import { CAP_SUSPECT, FIRST_WINDOW_S, TapeReader, TapeUnanswered, askAll, beatOf, itemOf, randomStart } from '../tape'
 import { PLACEHOLDER } from '../../comments'
+import { avatarTemplate } from '../../avatar'
+import { newShard } from 'sno-core/shards'
+
+/** A real avatar payload, as the app writes it. */
+const AVATAR_PAYLOAD = (() => {
+  const s = newShard('me')
+  s.vertices = [{ p: [0, 0, 0], c: [0, 0.9, 1] }, { p: [1, 0, 0], c: [0, 0.9, 1] }, { p: [0, 1, 0], c: [0, 0.9, 1] }]
+  s.faces = [[0, 1, 2]]
+  return avatarTemplate(s, 1).content
+})()
 
 const PK = 'e8ed3798c6ffebffa08501ac39e271662bfd160f688f94c45d692d8767dd345a'
 
@@ -115,6 +125,15 @@ describe('itemOf', () => {
     const onBag = itemOf(ev(1111, 5, [['A', `33330:${PK}:x`], ['K', '33330'], ['e', 'b'.repeat(64)], ['k', '3330'], ['encrypted', 'aes-256-gcm', 'zz']], PLACEHOLDER))
     expect(onBag).toMatchObject({ kind: 'comment', on: 'bag', text: null })
     expect(itemOf(ev(1111, 5, [['A', '34550:x:y'], ['K', '34550'], ['e', 'b'.repeat(64)], ['k', '1']], 'not ours'))).toBeNull()
+  })
+
+  it('reads a new avatar, and reactions to shards and moves only', () => {
+    // A real avatar payload, as the app writes it.
+    expect(itemOf(ev(11333, 5, [], AVATAR_PAYLOAD))?.kind).toBe('avatar')
+    expect(itemOf(ev(11333, 5, [], ''))).toBeNull()
+    expect(itemOf(ev(7, 5, [['e', 'b'.repeat(64)], ['k', '3330']], '👍'))).toMatchObject({ kind: 'reaction', content: '👍', on: 'shard' })
+    expect(itemOf(ev(7, 5, [['e', 'b'.repeat(64)], ['k', '3333']], '+'))).toMatchObject({ kind: 'reaction', content: '♥', on: 'move' })
+    expect(itemOf(ev(7, 5, [['e', 'b'.repeat(64)], ['k', '1']], '+'))).toBeNull()
   })
 
   it('a window gives its items beside its beats', async () => {

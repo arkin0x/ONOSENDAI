@@ -75,10 +75,15 @@ export type TapeItem =
   | { kind: 'object'; id: string; pubkey: string; at: number; event: NostrEvent }
   /** A comment on a move or on a bag: its words when they are public, null when sealed to a region. */
   | { kind: 'comment'; id: string; pubkey: string; at: number; text: string | null; on: 'move' | 'bag'; about: string | null }
+  /** A new avatar: the shape its owner chose (kind 11333; relays keep only the newest). */
+  | { kind: 'avatar'; id: string; pubkey: string; at: number; event: NostrEvent }
+  /** A reaction to a shard or a move: a line on the ticker, no screen time of its own, as an arrival. */
+  | { kind: 'reaction'; id: string; pubkey: string; at: number; content: string; on: 'shard' | 'move' }
 
 /** How long each kind of segment stays on screen, seconds. A comment's grows with its words. */
 export const BAG_S = 7
 export const OBJECT_S = 7
+export const AVATAR_S = 6
 export const COMMENT_BASE_S = 4
 export const COMMENT_PER_CHAR_S = 0.05
 export const COMMENT_MAX_S = 16
@@ -86,6 +91,8 @@ export const COMMENT_MAX_S = 16
 export function itemLength(item: TapeItem): number {
   if (item.kind === 'bag') return BAG_S
   if (item.kind === 'object') return OBJECT_S
+  if (item.kind === 'avatar') return AVATAR_S
+  if (item.kind === 'reaction') return 0
   const chars = item.text?.length ?? 60
   return Math.min(COMMENT_MAX_S, COMMENT_BASE_S + chars * COMMENT_PER_CHAR_S)
 }

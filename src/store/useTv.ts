@@ -61,6 +61,8 @@ interface TvState {
   meanwhile: boolean
   /** The newest arrivals on tape (spawns that went nowhere), newest last, for the ticker. */
   arrivals: Array<{ pubkey: string; at: number }>
+  /** The newest reactions on tape to shards and moves, newest last, for the ticker. */
+  reactions: Array<{ pubkey: string; at: number; content: string; on: 'shard' | 'move' }>
   /** The ticker's counts (lib/tv/stats.ts), once read. */
   census: Census | null
   /** Each on-screen avatar's chain, for its length at tape time. */
@@ -210,6 +212,13 @@ function arrive(shot: Shot): void {
   })
 }
 
+function react(shot: Shot): void {
+  const r = shot.item
+  if (r?.kind !== 'reaction') return
+  const s = useTv.getState()
+  useTv.setState({ reactions: [...s.reactions, { pubkey: r.pubkey, at: r.at, content: r.content, on: r.on }].slice(-ARRIVALS_KEPT) })
+}
+
 /** The avatars whose chain has been asked for, this session. */
 const asked = new Set<string>()
 
@@ -306,8 +315,8 @@ function tick(id: number): void {
   if (queue.length < QUEUE_LOW) void readMore(id, t)
   if (s.shot === null || (now - shotBegan) / 1000 >= s.shot.length) {
     let next = queue.shift()
-    // Arrivals take no screen time: each is a line on the ticker.
-    while (next?.kind === 'arrival') { arrive(next); next = queue.shift() }
+    // Arrivals and reactions take no screen time: each is a line on the ticker.
+    while (next?.kind === 'arrival' || next?.kind === 'reaction') { if (next.kind === 'arrival') arrive(next); else react(next); next = queue.shift() }
     if (next) { beginShot(next, now, id); return }
     // The relays stopped answering mid-tape: say so over the last picture
     // rather than holding on it in silence. A read that answers plays on.
@@ -347,7 +356,7 @@ async function tune(id: number): Promise<void> {
   queue = []
   retryAt = 0
   failures = 0
-  useTv.setState({ status: 'tuning', shot: null, played: 0, tapeTime: null, avatars: {}, arrivals: [], boxes: [], skipped: 0, cutAt: performance.now() })
+  useTv.setState({ status: 'tuning', shot: null, played: 0, tapeTime: null, avatars: {}, arrivals: [], reactions: [], boxes: [], skipped: 0, cutAt: performance.now() })
   let from: number | null = null
   for (let attempt = 0; from === null; attempt++) {
     try {
@@ -413,6 +422,7 @@ export const useTv = create<TvState>((set, get) => ({
   framing: shotFraming(''),
   meanwhile: false,
   arrivals: [],
+  reactions: [],
   census: null,
   chains: {},
   boxes: [],
@@ -450,7 +460,7 @@ export const useTv = create<TvState>((set, get) => ({
     director = null
     queue = []
     asked.clear()
-    set({ on: false, shot: null, played: 0, tapeTime: null, avatars: {}, arrivals: [], chains: {}, boxes: [], status: 'tuning' })
+    set({ on: false, shot: null, played: 0, tapeTime: null, avatars: {}, arrivals: [], reactions: [], chains: {}, boxes: [], status: 'tuning' })
     // A tap on an avatar during TV is not a request for its card afterwards.
     usePersonCard.getState().close()
     const cs = useCyberspace.getState()

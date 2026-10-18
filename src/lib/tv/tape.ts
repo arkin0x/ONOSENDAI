@@ -22,6 +22,8 @@ import { mergeAnswers, type RelayAnswer } from '../relayOutcome'
 import { HIDDEN_KIND, OBJECT_KIND } from '../hidden'
 import { parseHint } from '../hint'
 import { COMMENT_KIND, PLACEHOLDER, parseComment } from '../comments'
+import { AVATAR_KIND, avatarFromEvent } from '../avatar'
+import { REACTION_KIND, parseReaction } from '../social'
 import type { Beat, TapeItem } from './director'
 
 /**
@@ -107,7 +109,14 @@ export function beatOf(ev: NostrEvent): Beat | null {
  */
 export const COMMENTED_KINDS = [String(ACTION_KIND), String(HIDDEN_KIND)]
 
-/** A bag, a public object or a cyberspace comment as a tape item; null for anything else. */
+/**
+ * The kinds a reaction on the tape answers: a shard item inside a bag (3330,
+ * which only those who found it could react to) or a move. The relay's
+ * reactions are almost all other apps' (2026-10-18: 8 of 3,544 on shards).
+ */
+export const REACTED_KINDS = ['3330', String(ACTION_KIND)]
+
+/** A bag, a public object, a cyberspace comment, a new avatar or a reaction to a shard or a move as a tape item; null for anything else. */
 export function itemOf(ev: NostrEvent): TapeItem | null {
   const base = { id: ev.id, pubkey: ev.pubkey, at: ev.created_at }
   if (ev.kind === HIDDEN_KIND) {
@@ -121,6 +130,17 @@ export function itemOf(ev: NostrEvent): TapeItem | null {
     const d = ev.tags.find((t) => t[0] === 'd')?.[1]
     if (!d || d === 'avatar') return null
     return { kind: 'object', ...base, event: ev }
+  }
+  if (ev.kind === AVATAR_KIND) {
+    // An empty avatar clears it: nothing to show.
+    return avatarFromEvent(ev) ? { kind: 'avatar', ...base, event: ev } : null
+  }
+  if (ev.kind === REACTION_KIND) {
+    const r = parseReaction(ev)
+    if (!r || r.targetKind === null || !REACTED_KINDS.includes(String(r.targetKind))) return null
+    // A custom emoji's code reads as a word; anything long is cut.
+    const content = r.content === '+' ? '♥' : r.content.slice(0, 16)
+    return { kind: 'reaction', ...base, content, on: r.targetKind === ACTION_KIND ? 'move' : 'shard' }
   }
   if (ev.kind === COMMENT_KIND) {
     const k = ev.tags.find((t) => t[0] === 'K')?.[1]
@@ -159,7 +179,7 @@ export class TapeReader {
   /** `withItems` false reads moves only. */
   constructor(from: number, private ask: Ask, private now: () => number = () => Math.floor(Date.now() / 1000), private withItems = true) {
     this.readTo = from
-    this.kinds = withItems ? [ACTION_KIND, HIDDEN_KIND, OBJECT_KIND] : [ACTION_KIND]
+    this.kinds = withItems ? [ACTION_KIND, HIDDEN_KIND, OBJECT_KIND, AVATAR_KIND] : [ACTION_KIND]
   }
 
   /** The next window's beats. Throws TapeUnanswered, without moving on, when no relay answered. */
@@ -180,14 +200,16 @@ export class TapeReader {
       const now = this.now()
       const until = Math.min(now, since + this.span - 1)
       if (until < since) { this.caughtUp = true; return { beats: [], items: [] } }
-      const [things, comments] = await Promise.all([
+      const [things, comments, reactions] = await Promise.all([
         this.ask({ kinds: this.kinds, since, until, limit: WINDOW_LIMIT }),
         this.withItems ? this.ask({ kinds: [COMMENT_KIND], '#K': COMMENTED_KINDS, since, until, limit: WINDOW_LIMIT }) : Promise.resolve(null),
+        this.withItems ? this.ask({ kinds: [REACTION_KIND], '#k': REACTED_KINDS, since, until, limit: WINDOW_LIMIT }) : Promise.resolve(null),
       ])
       const a = readAnswers(things)
       const b = comments ? readAnswers(comments) : { events: [], full: false }
-      const events = [...a.events, ...b.events]
-      const full = a.full || b.full
+      const c = reactions ? readAnswers(reactions) : { events: [], full: false }
+      const events = [...a.events, ...b.events, ...c.events]
+      const full = a.full || b.full || c.full
       if (full && this.span > MIN_WINDOW_S) {
         // Full: the relay may have left some out. Ask for half the time.
         this.span = Math.max(MIN_WINDOW_S, Math.floor(this.span / 2))

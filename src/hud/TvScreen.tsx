@@ -113,6 +113,7 @@ function Ticker(): JSX.Element | null {
   const census = useTv((s) => s.census)
   const chains = useTv((s) => s.chains)
   const arrivals = useTv((s) => s.arrivals)
+  const reactions = useTv((s) => s.reactions)
   const profile = useProfile(shot?.pubkey)
   const items = useMemo(() => {
     if (tapeTime === null) return []
@@ -136,8 +137,9 @@ function Ticker(): JSX.Element | null {
       }
     }
     for (const a of [...arrivals].reverse()) out.push(`NEW ARRIVAL ${nameOf(a.pubkey, undefined)}`)
+    for (const r of [...reactions].reverse()) out.push(`${r.content} FROM ${nameOf(r.pubkey, undefined)} ON A ${r.on === 'shard' ? 'SHARD' : 'MOVE'}`)
     return out
-  }, [shot, played, tapeTime, census, chains, arrivals, profile])
+  }, [shot, played, tapeTime, census, chains, arrivals, reactions, profile])
   if (items.length === 0) return null
   const line = items.join('   ◆   ')
   return (

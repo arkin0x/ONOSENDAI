@@ -232,6 +232,21 @@ describe('Cyberspace TV', () => {
     }
   })
 
+  it('a reaction is a ticker line, never a shot', async () => {
+    tape.push({ id: id(), pubkey: A, created_at: T0 + 101, kind: 7, tags: [['e', 'b'.repeat(64)], ['k', '3333']], content: '🔥', sig: '' })
+    try {
+      useTv.getState().start()
+      const kinds: string[] = []
+      const off = useTv.subscribe((s, prev) => { if (s.shot && s.shot !== prev.shot) kinds.push(s.shot.kind) })
+      await run(9000)
+      off()
+      expect(kinds).not.toContain('reaction')
+      expect(useTv.getState().reactions.map((r) => r.content)).toEqual(['🔥'])
+    } finally {
+      tape.pop()
+    }
+  })
+
   it('turns off when another view takes the camera', async () => {
     useTv.getState().start()
     await run(1500)

@@ -260,6 +260,8 @@ export class TvPainter {
     const ctx = this.ctx
     const subject = p.shot && p.shot.kind === 'trip' ? p.avatars[p.shot.pubkey] : undefined
     if (subject) this.lastDot = subject.position
+    // A new tape starts with no dot: the last one belonged to another.
+    if (p.status === 'tuning') this.lastDot = null
     const turn = reduced ? 0.6 : (now / 1000) * MAP_TURN
     const tilt = -0.62
     const cx = x + size / 2
@@ -297,15 +299,19 @@ export class TvPainter {
       ctx.shadowColor = colour
       ctx.shadowBlur = 6 * s
       ctx.lineWidth = Math.max(1, 1.1 * s)
-      for (let i = 0; i <= MAP_DIVISIONS; i++) {
-        const v = -1 + (2 * i) / MAP_DIVISIONS
-        ctx.strokeStyle = i === MAP_DIVISIONS / 2 ? MAP_CENTRE : colour
-        for (const [a0, a1] of [[project(v, vy, -1), project(v, vy, 1)], [project(-1, vy, v), project(1, vy, v)]]) {
-          ctx.beginPath()
-          ctx.moveTo(a0.x, a0.y)
-          ctx.lineTo(a1.x, a1.y)
-          ctx.stroke()
+      // One path per colour, so a phone blurs two strokes, not eighteen.
+      for (const centre of [false, true]) {
+        ctx.strokeStyle = centre ? MAP_CENTRE : colour
+        ctx.beginPath()
+        for (let i = 0; i <= MAP_DIVISIONS; i++) {
+          if ((i === MAP_DIVISIONS / 2) !== centre) continue
+          const v = -1 + (2 * i) / MAP_DIVISIONS
+          for (const [a0, a1] of [[project(v, vy, -1), project(v, vy, 1)], [project(-1, vy, v), project(1, vy, v)]]) {
+            ctx.moveTo(a0.x, a0.y)
+            ctx.lineTo(a1.x, a1.y)
+          }
         }
+        ctx.stroke()
       }
       ctx.restore()
     }

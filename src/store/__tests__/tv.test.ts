@@ -174,6 +174,19 @@ describe('Cyberspace TV', () => {
     useCyberspace.setState({ pin: null })
   })
 
+  it('OFF before the first shot still puts the view back', async () => {
+    lag = 3000
+    const zoom = useCyberspace.getState().scaleExp
+    useCyberspace.setState({ scaleExp: zoom + 2 })
+    useTv.getState().start()
+    await run(1000)
+    expect(useTv.getState().shot).toBeNull()
+    useTv.getState().stop()
+    expect(useCyberspace.getState().scaleExp).toBe(zoom + 2)
+    expect(useCyberspace.getState().focus).toBeNull()
+    useCyberspace.setState({ scaleExp: zoom })
+  })
+
   it('will not start while BUILD owns the camera', () => {
     useBuilder.setState({ active: true })
     expect(useTv.getState().start()).toBe(false)

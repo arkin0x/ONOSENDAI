@@ -287,8 +287,13 @@ function play(a: HTMLAudioElement, mine: number, list: Track[]): void {
       if (onControl(e) || (e.type === 'keydown' && (e as { key?: string }).key === 'Escape')) return
       if (!audio) return
       // Allowed now, perhaps: the track has its 20 s again to send something.
+      const tried = session
       armStall(list)
-      void audio.play().catch(() => { clearStall() })
+      // Only this track's refusal stands its stall down: a play cut short by
+      // the next track (AbortError) must not clear that track's (review of #382, round 3).
+      void audio.play().catch((err: unknown) => {
+        if (tried === session && (err as { name?: string })?.name === 'NotAllowedError') clearStall()
+      })
     }
     const kinds = ['pointerup', 'touchend', 'click', 'keydown'] as const
     for (const k of kinds) window.addEventListener(k, go, { capture: true })

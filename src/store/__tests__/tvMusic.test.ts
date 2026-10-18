@@ -10,6 +10,9 @@ import { besideUrls, musicProgress, nameFromUrl, setMusicVolume, shuffled, start
 class FakeAudio extends EventTarget {
   static made: FakeAudio[] = []
   static refuse = false
+  /** Plays wait for data that never comes, and a new source cuts them off, as a real element's do. */
+  static hang = false
+  private pending: Array<(e: Error) => void> = []
   crossOrigin = ''
   muted = false
   preload = ''
@@ -20,7 +23,12 @@ class FakeAudio extends EventTarget {
   plays = 0
   constructor() { super(); FakeAudio.made.push(this) }
   get src(): string { return this.source }
-  set src(v: string) { this.source = v }
+  set src(v: string) {
+    this.source = v
+    const cut = this.pending
+    this.pending = []
+    queueMicrotask(() => { for (const reject of cut) reject(Object.assign(new Error('cut off'), { name: 'AbortError' })) })
+  }
   getAttribute(n: string): string | null { return n === 'src' && this.source ? this.source : null }
   removeAttribute(): void { this.source = '' }
   load(): void {}
@@ -28,6 +36,7 @@ class FakeAudio extends EventTarget {
   play(): Promise<void> {
     this.plays++
     if (FakeAudio.refuse) return Promise.reject(Object.assign(new Error('no'), { name: 'NotAllowedError' }))
+    if (FakeAudio.hang) return new Promise((_, reject) => { this.pending.push(reject) })
     return Promise.resolve()
   }
   fire(type: string): void { this.dispatchEvent(new Event(type)) }
@@ -40,6 +49,7 @@ const flush = async (): Promise<void> => { for (let i = 0; i < 5; i++) await Pro
 beforeEach(() => {
   FakeAudio.made = []
   FakeAudio.refuse = false
+  FakeAudio.hang = false
   vi.useFakeTimers()
   vi.stubGlobal('Audio', FakeAudio)
   vi.stubGlobal('fetch', async () => new Response('', { status: 404 }))
@@ -119,6 +129,23 @@ describe('TV music', () => {
     window.dispatchEvent(new Event('pointerup'))
     vi.advanceTimersByTime(21_000)
     expect(audio().src).not.toBe(first)
+  })
+
+  it('after a tap lets it play, silent links one after another are each skipped', async () => {
+    FakeAudio.refuse = true
+    startMusic(list)
+    await flush()
+    FakeAudio.refuse = false
+    FakeAudio.hang = true
+    window.dispatchEvent(new Event('pointerup'))
+    const heard = [audio().src]
+    for (let i = 0; i < 2; i++) {
+      vi.advanceTimersByTime(21_000)
+      // The play the skip cut off is refused now, and must not stand the next track's stall down.
+      await flush()
+      heard.push(audio().src)
+    }
+    expect(new Set(heard).size).toBe(3)
   })
 
   it('a tap on a control, or Escape, is not the tap for sound', async () => {

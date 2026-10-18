@@ -9523,6 +9523,8 @@ a.feed__act { text-decoration: none; }
   .tv__chiron-name { font-size: 16px; }
   .tv__zoom { width: 100%; }
   .tv__card { font-size: 14px; }
+  /* The phone's chiron is taller (the zoom gauge wraps under the name). */
+  .tv__card--low { bottom: calc(max(16px, env(safe-area-inset-bottom)) + 175px); }
 }
 
 @media (prefers-reduced-motion: reduce) {

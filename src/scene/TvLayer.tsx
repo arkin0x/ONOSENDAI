@@ -97,10 +97,11 @@ function TvCamera({ axes }: { axes: ViewAxes }): null {
     dist.current = (dist.current ?? wantDist) + (wantDist - (dist.current ?? wantDist)) * kc
     polar.current = (polar.current ?? tv.framing.polar) + (tv.framing.polar - (polar.current ?? tv.framing.polar)) * kc
     theta.current += dt * TV_ORBIT_SPEED
-    // A portrait screen is narrower than the shot was framed for: stand back
-    // so the sides stay in (a bag's box overflowed a phone, review of #371).
+    // A bag's box on a portrait screen: stand back so its sides stay in (it
+    // overflowed a phone, review of #371). Only for the box: a close-up of
+    // an avatar on a phone stays close.
     const aspect = (state.camera as { aspect?: number }).aspect ?? 1
-    const r = dist.current * Math.max(1, 1 / (aspect * 1.4))
+    const r = dist.current * (tv.shot?.kind === 'bag' ? Math.max(1, 1 / (aspect * 1.4)) : 1)
     const ph = polar.current
     c.target.copy(smooth.current)
     c.object.position.set(

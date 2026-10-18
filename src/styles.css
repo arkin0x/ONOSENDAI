@@ -7095,7 +7095,12 @@ kbd {
      them was under 480px, and the dock ran under the controls and the menu
      button (from 641px, and on a desktop up to about 1370px). */
   max-width: 480px;
-  max-height: 33vh;
+  /* The dock's height cap, a variable so the phone rule below and the @ list
+     rule (.chatdock.is-picking) read the same number (arkinox, 2026-10-18).
+     dvh like the other HUD panels: on a phone browser with its URL bar
+     showing, vh is the larger viewport and the dock ran taller than a third. */
+  --chatdock-cap: 33dvh;
+  max-height: var(--chatdock-cap);
   z-index: 101;
   display: flex;
   flex-direction: column;
@@ -7252,7 +7257,35 @@ kbd {
   box-shadow: inset 2px 0 0 var(--accent, #00e5ff);
 }
 
-/* The @ list: above the line, a few rows tall, big enough to tap. */
+/* The @ list: above the line, a few rows tall, big enough to tap.
+ *
+ * The log gives up its height to the list, never the other way round
+ * (arkinox, 2026-10-18: on the Fold with the keyboard up, "@xor" opened the
+ * list as a strip about 30px tall between the log and the line, the chip cut
+ * in half and no way to scroll it into view). The dock is a flex column with
+ * a capped height, and both the log and the list used to shrink with the
+ * default weight. Flexbox shrinks each child in proportion to its size, so a
+ * log hundreds of pixels long took a few pixels of the cut and the list,
+ * at most 168px, took the rest; and a scroll box has no floor of its own, so
+ * the list went down to a strip while the log kept its 48px minimum.
+ *
+ * Now, while the list is open, the log's shrink weight is a thousand times
+ * the list's and its floor is gone: the log empties first, down to nothing if
+ * it must, and only then does the list give up rows, never below one whole
+ * row (34px button, 3px padding top and bottom, the border). Up to four rows
+ * show; the rest scroll, and the arrows keep the lit row in view (ChatDock).
+ * The dock itself may grow past its cap while picking, to hold one row
+ * whatever the height and four where the screen has room (100dvh less 200px:
+ * the phone dock's 80px off the bottom and the chips stacked top left, which
+ * end about 115px down and would cover the dock's header), so a short
+ * viewport, the keyboard up or a phone on its side, still shows a name. */
+.chatdock.is-picking {
+  max-height: max(var(--chatdock-cap), 140px, min(272px, 100dvh - 200px));
+}
+.chatdock.is-picking .chat__list {
+  flex: 1 1000 auto;
+  min-height: 0;
+}
 .chat__picker {
   list-style: none;
   margin: 0;
@@ -7260,6 +7293,8 @@ kbd {
   display: flex;
   flex-direction: column;
   gap: 2px;
+  flex: 0 1 auto;
+  min-height: 42px;
   max-height: 168px;
   overflow-y: auto;
   border: 1px solid var(--border);
@@ -7307,7 +7342,7 @@ kbd {
     bottom: 80px;
     width: auto;
     max-width: none;
-    max-height: 38vh;
+    --chatdock-cap: 38dvh;
   }
 }
 

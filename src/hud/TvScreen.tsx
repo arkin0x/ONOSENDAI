@@ -24,7 +24,7 @@ import { chainLengthAt, countTo } from '../lib/tv/stats'
 import { safeNpub } from '../lib/npub'
 import { useEscape } from '../hooks/useEscape'
 import { useProfile } from '../hooks/useProfile'
-import { useTv } from '../store/useTv'
+import { placeable, useTv } from '../store/useTv'
 import { LANDMARKS } from './ScaleLadder'
 import { ProfilePic } from './ProfileBadge'
 import { STATIC_MS } from '../scene/TvScreenEffect'
@@ -158,11 +158,13 @@ function Card(): JSX.Element | null {
   const skipped = useTv((s) => s.skipped)
   const meanwhile = useTv((s) => s.meanwhile)
   const status = useTv((s) => s.status)
+  // A segment shown in an inset holds the centre: the card goes under it.
+  const inset = useTv((s) => s.shot?.item !== undefined && !(s.shot.item.kind === 'bag' && placeable(s.shot.item.hint)))
   if (status !== 'playing') return null
   // Mounted again on every cut (key), so its CSS fade starts with the shot.
   const text = meanwhile ? '◀◀ MEANWHILE' : skipped >= 60 ? `▶▶ ${skipWords(skipped)} LATER` : null
   if (!text) return null
-  return <div key={cutAt} className="tv__card" style={{ animationDuration: `${CARD_MS}ms`, animationDelay: `${STATIC_MS}ms` }}>{text}</div>
+  return <div key={cutAt} className={`tv__card${inset ? ' tv__card--low' : ''}`} style={{ animationDuration: `${CARD_MS}ms`, animationDelay: `${STATIC_MS}ms` }}>{text}</div>
 }
 
 function Status(): JSX.Element | null {

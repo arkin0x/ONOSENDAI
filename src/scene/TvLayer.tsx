@@ -62,7 +62,7 @@ function TvCamera({ axes }: { axes: ViewAxes }): null {
     return () => { controls.enabled = true }
   }, [controls])
 
-  useFrame((_, dt) => {
+  useFrame((state, dt) => {
     const c = controls
     if (!c) return
     const tv = useTv.getState()
@@ -97,7 +97,10 @@ function TvCamera({ axes }: { axes: ViewAxes }): null {
     dist.current = (dist.current ?? wantDist) + (wantDist - (dist.current ?? wantDist)) * kc
     polar.current = (polar.current ?? tv.framing.polar) + (tv.framing.polar - (polar.current ?? tv.framing.polar)) * kc
     theta.current += dt * TV_ORBIT_SPEED
-    const r = dist.current
+    // A portrait screen is narrower than the shot was framed for: stand back
+    // so the sides stay in (a bag's box overflowed a phone, review of #371).
+    const aspect = (state.camera as { aspect?: number }).aspect ?? 1
+    const r = dist.current * Math.max(1, 1 / (aspect * 1.4))
     const ph = polar.current
     c.target.copy(smooth.current)
     c.object.position.set(
@@ -126,7 +129,7 @@ export function TvLayer({ axes }: { axes: ViewAxes }): JSX.Element {
   }, [anchor, scaleExp, axes])
 
   const near = useMemo(() => Object.entries(avatars)
-    .filter(([pk, a]) => a.plane === anchorPlane && (pk === shot?.pubkey || tapeTime === null || Math.abs(tapeTime - a.at) <= STALE_S))
+    .filter(([pk, a]) => a.plane === anchorPlane && ((shot?.kind === 'trip' && pk === shot.pubkey) || tapeTime === null || Math.abs(tapeTime - a.at) <= STALE_S))
     .map(([pk, a]) => ({ pk, a, centre: place(a.position) }))
     .filter((p) => Math.hypot(...p.centre) <= REACH), [avatars, anchorPlane, shot, tapeTime, place])
 
@@ -135,7 +138,7 @@ export function TvLayer({ axes }: { axes: ViewAxes }): JSX.Element {
       <TvCamera axes={axes} />
       <TvBoxes />
       {near.map((p) => (
-        <TapeAvatar key={p.pk} pubkey={p.pk} centre={p.centre} position={p.a.position} place={place} subject={p.pk === shot?.pubkey} />
+        <TapeAvatar key={p.pk} pubkey={p.pk} centre={p.centre} position={p.a.position} place={place} subject={shot?.kind === 'trip' && p.pk === shot.pubkey} />
       ))}
     </>
   )

@@ -29,7 +29,7 @@ import type { Filter } from 'nostr-tools'
 import type { RelayAnswer } from '../../lib/relayOutcome'
 import { positionHex, type NostrEvent } from '../../lib/events'
 import { V2_EPOCH } from '../../lib/tv/tape'
-import { TV_FOCUS_LABEL, fitScale, setTvAsk, shotOpening, useTv } from '../useTv'
+import { TV_FOCUS_LABEL, fitScale, placeable, setTvAsk, shotOpening, useTv } from '../useTv'
 import { useCyberspace } from '../useCyberspace'
 import { useBuilder } from '../useBuilder'
 import { usePersonCard } from '../usePersonCard'
@@ -244,6 +244,35 @@ describe('Cyberspace TV', () => {
       expect(useTv.getState().reactions.map((r) => r.content)).toEqual(['🔥'])
     } finally {
       tape.pop()
+    }
+  })
+
+  it('a hint box too uneven to frame plays in the inset', () => {
+    expect(placeable({ base: { x: 0n, y: 0n, z: 0n }, plane: 0, heights: [30, 30, 30] })).toBe(true)
+    expect(placeable({ base: { x: 0n, y: 0n, z: 0n }, plane: 0, heights: [30, 30, 20] })).toBe(false)
+    expect(placeable(null)).toBe(false)
+  })
+
+  it('a trip after a segment is a cut, never a continuation', async () => {
+    // B's trip, then A's comment on it, then A's own trip.
+    tape.push(
+      { id: id(), pubkey: A, created_at: T0 + 105, kind: 1111, tags: [['E', 'b'.repeat(64)], ['K', '3333'], ['e', 'b'.repeat(64)], ['k', '3333'], ['P', B]], content: 'nice', sig: '' },
+      hop(A, T0 + 110, 1003n, 1004n),
+    )
+    try {
+      useTv.getState().start()
+      const cuts: Array<{ kind: string; cut: boolean }> = []
+      let lastCut = -1
+      const off = useTv.subscribe((s, prev) => {
+        if (s.shot && s.shot !== prev.shot) { cuts.push({ kind: s.shot.kind, cut: s.cutAt !== lastCut }); lastCut = s.cutAt }
+      })
+      await run(30000)
+      off()
+      const i = cuts.findIndex((c) => c.kind === 'comment')
+      expect(i).toBeGreaterThanOrEqual(0)
+      expect(cuts[i + 1]).toEqual({ kind: 'trip', cut: true })
+    } finally {
+      tape.splice(tape.length - 2, 2)
     }
   })
 

@@ -245,6 +245,16 @@ const BOXES_KEPT = 12
 /** A located bag's box is framed this many powers of two under its own size: about 8 cells across. */
 const BOX_FIT = 3
 
+/**
+ * Whether a hint box can be shown in the world: one box too uneven to frame
+ * (a side more than 2^5 times another) plays in the inset instead, as a bag
+ * with no hint does (review of #371).
+ */
+export function placeable(hint: HintBox | null): hint is HintBox {
+  if (!hint) return false
+  return Math.max(...hint.heights) - Math.min(...hint.heights) <= 5
+}
+
 /** The centre of a hint box: its base plus half of each side. */
 export function boxCentre(hint: HintBox): Position {
   const half = (h: number): bigint => (h === 0 ? 0n : 1n << BigInt(h - 1))
@@ -260,7 +270,7 @@ export function boxCentre(hint: HintBox): Position {
 function beginSegment(shot: Shot, now: number): void {
   const s = useTv.getState()
   const item = shot.item
-  const located = item?.kind === 'bag' && item.hint !== null ? item.hint : null
+  const located = item?.kind === 'bag' && placeable(item.hint) ? item.hint : null
   const scaleExp = located ? Math.max(0, Math.max(...located.heights) - BOX_FIT) : s.scaleExp
   useTv.setState({
     shot,
@@ -287,7 +297,8 @@ function beginShot(shot: Shot, now: number, id: number): void {
   // Straight on from the shot before: the same avatar, picking up where it
   // stopped, at the same zoom. Anything else is a cut, with static.
   const was = s.avatars[shot.pubkey]
-  const continues = before !== null && before.pubkey === shot.pubkey && was !== undefined &&
+  // Only after a trip: a segment's author is not where its camera was (review of #371).
+  const continues = before !== null && before.kind === 'trip' && before.pubkey === shot.pubkey && was !== undefined &&
     was.plane === opening.plane && cells(was.position, opening.position, scaleExp) <= 1 && scaleExp === s.scaleExp
   const skipped = before && shot.start > before.end ? shot.start - before.end : 0
   useTv.setState({

@@ -9359,8 +9359,7 @@ a.feed__act { text-decoration: none; }
 
 .tv__card {
   position: absolute;
-  /* Above a segment's panel (TvSegments), which sits at the centre. */
-  top: 16%;
+  top: 34%;
   left: 50%;
   transform: translateX(-50%);
   padding: 6px 14px;
@@ -9374,6 +9373,10 @@ a.feed__act { text-decoration: none; }
   animation-fill-mode: forwards;
   animation-timing-function: linear;
 }
+
+/* Under a segment's panel (TvSegments), which holds the centre; clear of
+   the clock on every screen. */
+.tv__card--low { top: auto; bottom: calc(max(16px, env(safe-area-inset-bottom)) + 120px); }
 
 @keyframes tv-card {
   0% { opacity: 0; }
@@ -9660,9 +9663,11 @@ a.feed__act { text-decoration: none; }
   line-height: 1.45;
   letter-spacing: 0.02em;
   overflow-wrap: anywhere;
-  max-height: 11em;
-  overflow: hidden;
 }
+
+.tvdesk__text { position: relative; }
+.tvdesk__ghost { visibility: hidden; }
+.tvdesk__typed { position: absolute; inset: 0; }
 
 .tvdesk__quote--sealed p { letter-spacing: 0; color: #9fb4bf; }
 .tvdesk__mark { color: var(--accent); font-size: 1.4em; line-height: 0; }

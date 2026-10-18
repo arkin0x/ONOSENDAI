@@ -16,11 +16,14 @@
 
 import { create } from 'zustand'
 import { queryEach } from '../lib/relay'
-import { Director, MAX_SHOT_S, isJump, shotFraming, type Beat, type Framing, type Shot, type TapeItem } from '../lib/tv/director'
+import { Director, JUMP_LINE_S, JUMP_S, JUMP_WARP_S, MAX_SHOT_S, isJump, shotFraming, type Beat, type Framing, type Shot, type TapeItem } from '../lib/tv/director'
 import type { HintBox } from '../lib/hint'
 import { TapeReader, V2_EPOCH, randomStart, type Ask, TapeUnanswered } from '../lib/tv/tape'
 import { loadCensus, loadChainTimes, type Census, type ChainTimes } from '../lib/tv/stats'
 import { MAX_SCALE_EXP, type Position } from '../lib/space'
+import { coordToXyz } from 'cyberspace-core'
+import { stopCoordExact } from '../lib/hyperspace/stops'
+import { getStopByHeight } from './useHyperspace'
 import { useCyberspace } from './useCyberspace'
 import { spectate, stopSpectating } from '../lib/spectator'
 import { useBuilder } from './useBuilder'
@@ -45,6 +48,26 @@ export interface TvAvatar {
 }
 
 export type TvStatus = 'tuning' | 'playing' | 'end' | 'no-signal'
+
+/** One end of a hyperjump's ride: a block, and where it is. */
+export interface RideEnd {
+  position: Position
+  plane: number
+  height: number
+  /** Whether `position` is the block's own: false for A before the stop index has it, which is where the rider stood instead. */
+  exact: boolean
+}
+
+/**
+ * A hyperjump's ride on screen, before its shot's first beat: the tunnel
+ * (warp), then the line from block A to block B with only those two drawn
+ * (line; scene/TvJump).
+ */
+export interface TvJump {
+  phase: 'warp' | 'line'
+  from: RideEnd
+  to: RideEnd
+}
 
 interface TvState {
   on: boolean
@@ -76,6 +99,8 @@ interface TvState {
   chains: Record<string, ChainTimes>
   /** The hint boxes of the bags the tape has shown, whose outlines stay in the world (TvLayer). */
   boxes: Array<{ id: string; hint: HintBox }>
+  /** The hyperjump being ridden on screen, or null. */
+  jump: TvJump | null
   /** Turn the set on; false when something else owns the camera (tvBlocked). */
   start: () => boolean
   /** A new random start, the set staying on (RETRY). */
@@ -180,6 +205,24 @@ export function shotProgress(): number {
   return Math.min(1, Math.max(0, (performance.now() - shotBegan) / 1000 / shot.length))
 }
 
+/** Seconds since the shot on screen began. */
+export function shotElapsed(): number {
+  return (performance.now() - shotBegan) / 1000
+}
+
+/**
+ * How far through its framing the camera is, 0 to 1, for the push-in: the
+ * shot's, or, in a hyperjump's ride, the phase's (the tunnel, the line, then
+ * what is left of the shot after it).
+ */
+export function framingProgress(): number {
+  const s = useTv.getState()
+  if (!s.shot) return 0
+  const prelude = s.shot.prelude ?? 0
+  const [from, length] = s.jump?.phase === 'warp' ? [0, JUMP_WARP_S] : s.jump ? [JUMP_WARP_S, JUMP_LINE_S] : [prelude, s.shot.length - prelude]
+  return Math.min(1, Math.max(0, (shotElapsed() - from) / length))
+}
+
 /**
  * Play a tape item next, cutting the shot on screen short, for `length`
  * seconds when given: for tests and the smoke probe, which cannot wait for a
@@ -189,6 +232,14 @@ export function cueItem(item: TapeItem, length?: number): void {
   const d = new Director()
   d.addItem(item)
   queue.unshift(...d.release(Infinity).map((shot) => (length === undefined ? shot : { ...shot, length })))
+  shotBegan = -Infinity
+}
+
+/** Play a run of beats next as the director would cut them, for the smoke probe: a hyperjump, say. */
+export function cueBeats(beats: Beat[]): void {
+  const d = new Director()
+  for (const b of beats) d.add(b)
+  queue.unshift(...d.release(Infinity))
   shotBegan = -Infinity
 }
 
@@ -286,6 +337,74 @@ export function shotOpening(shot: Shot): { position: Position; plane: number } {
   return isJump(first) ? { position: first.action.position, plane: first.action.plane } : first.from
 }
 
+/** The tunnel's camera: close beside the rider, the streaks all round it. */
+const WARP_FRAMING: Framing = { from: 7, to: 5, polar: 1.25, name: 'close', view: 'side', sun: false, spin: 1 }
+/** The line's camera: over the two blocks, pulling back as the rider goes ("zoom out"). */
+const LINE_FRAMING: Framing = { from: 16, to: 26, polar: 0.75, name: 'wide', view: 'above', sun: false, spin: 1 }
+
+/**
+ * A hyperjump's two blocks. B is where it landed, from its own `C`, always
+ * exact. A is its `from_height` block: B itself on a ride to the block it
+ * left (review of #379); else exact from the stop index once that height is
+ * loaded; before then, where the rider stood (`c`), which on a chained ride
+ * is A's coordinate itself and on a first ride the spot it boarded from.
+ * Which of the two cannot be told from the event: `as_of` should mark a
+ * first ride, but older clients put it on every ride (18 of the 19 on the
+ * relay carry it), so a `c` is never named as block A.
+ */
+export function rideEnds(b: Beat): { from: RideEnd; to: RideEnd } {
+  const a = b.action
+  const to: RideEnd = { position: a.position, plane: a.plane, height: a.toHeight ?? 0, exact: true }
+  if (a.fromHeight === a.toHeight) return { from: to, to }
+  const stop = a.fromHeight !== undefined ? getStopByHeight(a.fromHeight) : undefined
+  const at = stop ? coordToXyz(stopCoordExact(stop)) : null
+  const from: RideEnd = at
+    ? { position: { x: at.x, y: at.y, z: at.z }, plane: at.plane, height: a.fromHeight ?? 0, exact: true }
+    : { position: b.from.position, plane: b.from.plane, height: a.fromHeight ?? 0, exact: false }
+  return { from, to }
+}
+
+/** The zoom that holds both blocks within FIT_CELLS, and the point halfway between them. */
+export function rideView(from: Position, to: Position): { centre: Position; scaleExp: number } {
+  const span = (u: bigint, v: bigint): bigint => (u > v ? u - v : v - u)
+  const extent = [span(from.x, to.x), span(from.y, to.y), span(from.z, to.z)].reduce((p, q) => (q > p ? q : p))
+  let exp = 0
+  while ((extent >> BigInt(exp)) > BigInt(FIT_CELLS) && exp < MAX_SCALE_EXP) exp++
+  return { centre: { x: (from.x + to.x) / 2n, y: (from.y + to.y) / 2n, z: (from.z + to.z) / 2n }, scaleExp: exp }
+}
+
+/** The tunnel is over: cut to the two blocks and the line between them. */
+function lineUp(jump: TvJump, now: number): void {
+  const { centre, scaleExp } = rideView(jump.from.position, jump.to.position)
+  useTv.setState({ jump: { ...jump, phase: 'line' }, scaleExp, framing: LINE_FRAMING, cutAt: now })
+  frame(centre, jump.to.plane, scaleExp)
+}
+
+/**
+ * When an avatar was born, for a shot that does not open with its spawn: as
+ * it was, except a spawn that never played (its shot cut short before it, by
+ * a cue) leaves it whole rather than held at nothing for good.
+ */
+function bornAfter(was: TvAvatar | undefined): number | undefined {
+  return was?.born === Infinity ? undefined : was?.born
+}
+
+/** The ride is over: cut to the rider at B, for the rest of the shot. */
+function land(shot: Shot, now: number): void {
+  const s = useTv.getState()
+  const opening = shotOpening(shot)
+  const scaleExp = fitScale(shot.beats)
+  const was = s.avatars[shot.pubkey]
+  useTv.setState({
+    jump: null,
+    scaleExp,
+    framing: shotFraming(shot.id),
+    cutAt: now,
+    avatars: { ...s.avatars, [shot.pubkey]: { position: opening.position, plane: opening.plane, at: shot.start, from: was && was.plane === opening.plane ? was.position : undefined, born: bornAfter(was) } },
+  })
+  frame(opening.position, opening.plane, scaleExp)
+}
+
 /** How many bag outlines stay in the world at once; the oldest go first. */
 const BOXES_KEPT = 12
 /** A located bag's box is framed this many powers of two under its own size: about 8 cells across. */
@@ -327,6 +446,7 @@ function beginSegment(shot: Shot, now: number): void {
     meanwhile: s.shot !== null && shot.start < s.shot.end,
     status: 'playing',
     cutAt: now,
+    jump: null,
     ...(located ? { framing: { from: 26, to: 18, polar: 0.6, name: 'wide' as const, view: 'above' as const, sun: false, spin: 1 as const }, boxes: [...s.boxes.filter((b) => b.id !== shot.id), { id: shot.id, hint: located }].slice(-BOXES_KEPT) } : {}),
   })
   shotBegan = now
@@ -337,14 +457,16 @@ function beginShot(shot: Shot, now: number, id: number): void {
   if (shot.item) { beginSegment(shot, now); return }
   needChain(shot.pubkey, id)
   const s = useTv.getState()
-  const opening = shotOpening(shot)
+  // A hyperjump's ride opens where the rider stood, in the tunnel (tick plays the rest).
+  const ride = shot.prelude ? rideEnds(shot.beats[0]) : null
+  const opening = ride ? shot.beats[0].from : shotOpening(shot)
   const scaleExp = fitScale(shot.beats)
   const before = s.shot
   // Straight on from the shot before: the same avatar, picking up where it
   // stopped, at the same zoom. Anything else is a cut, with static.
   const was = s.avatars[shot.pubkey]
   // Only after a trip: a segment's author is not where its camera was (review of #371).
-  const continues = before !== null && before.kind === 'trip' && before.pubkey === shot.pubkey && was !== undefined &&
+  const continues = ride === null && before !== null && before.kind === 'trip' && before.pubkey === shot.pubkey && was !== undefined &&
     was.plane === opening.plane && cells(was.position, opening.position, scaleExp) <= 1 && scaleExp === s.scaleExp
   const skipped = before && shot.start > before.end ? shot.start - before.end : 0
   useTv.setState({
@@ -353,13 +475,14 @@ function beginShot(shot: Shot, now: number, id: number): void {
     tapeTime: shot.start,
     scaleExp,
     // A shot that follows straight on keeps its camera: a new framing would be a cut.
-    framing: continues ? { ...s.framing, from: s.framing.to } : shotFraming(shot.id),
+    framing: ride ? WARP_FRAMING : continues ? { ...s.framing, from: s.framing.to } : shotFraming(shot.id),
+    jump: ride ? { phase: 'warp', ...ride } : null,
     skipped: continues ? 0 : skipped,
     meanwhile: before !== null && !continues && shot.start < before.end,
     status: 'playing',
     ...(continues ? {} : { cutAt: now }),
     // Facing kept across the cut: from where it was last seen, or as it was.
-    avatars: { ...s.avatars, [shot.pubkey]: { born: shot.beats[0]?.action.type === 'spawn' ? Infinity : was?.born, position: opening.position, plane: opening.plane, at: shot.start, from: was && was.plane === opening.plane && (was.position.x !== opening.position.x || was.position.y !== opening.position.y || was.position.z !== opening.position.z) ? was.position : was?.from } },
+    avatars: { ...s.avatars, [shot.pubkey]: { born: shot.beats[0]?.action.type === 'spawn' ? Infinity : bornAfter(was), position: opening.position, plane: opening.plane, at: shot.start, from: was && was.plane === opening.plane && (was.position.x !== opening.position.x || was.position.y !== opening.position.y || was.position.z !== opening.position.z) ? was.position : was?.from } },
   })
   shotBegan = now
   frame(opening.position, opening.plane, scaleExp)
@@ -380,7 +503,7 @@ function tick(id: number): void {
     // rather than holding on it in silence. A read that answers plays on.
     if (failures >= NO_SIGNAL_AFTER && s.status === 'playing') useTv.setState({ status: 'no-signal' })
     if (reader?.caughtUp && readingTape !== t && s.status !== 'end') {
-      useTv.setState({ status: 'end', shot: null, cutAt: now })
+      useTv.setState({ status: 'end', shot: null, jump: null, cutAt: now })
       // Only if END OF TAPE is still what is on screen: anything played since
       // (a cued item) is not cut off by a retune.
       setTimeout(() => { if (live(id, t) && useTv.getState().status === 'end') void tune(id) }, END_HOLD_MS)
@@ -388,6 +511,13 @@ function tick(id: number): void {
     return
   }
   const elapsed = (now - shotBegan) / 1000
+  // A hyperjump's ride: the tunnel, the line, then the rider at B. No beat
+  // plays during it (the director put them all after it).
+  if (s.jump) {
+    if (s.jump.phase === 'warp' && elapsed >= JUMP_WARP_S) lineUp(s.jump, now)
+    else if (s.jump.phase === 'line' && elapsed >= JUMP_S) land(s.shot, now)
+    return
+  }
   let played = s.played
   let avatars = s.avatars
   let tapeTime = s.tapeTime
@@ -416,7 +546,7 @@ async function tune(id: number): Promise<void> {
   queue = []
   retryAt = 0
   failures = 0
-  useTv.setState({ status: 'tuning', shot: null, played: 0, tapeTime: null, avatars: {}, arrivals: [], reactions: [], boxes: [], skipped: 0, cutAt: performance.now() })
+  useTv.setState({ status: 'tuning', shot: null, played: 0, tapeTime: null, avatars: {}, arrivals: [], reactions: [], boxes: [], jump: null, skipped: 0, cutAt: performance.now() })
   let from: number | null = null
   for (let attempt = 0; from === null; attempt++) {
     try {
@@ -488,6 +618,7 @@ export const useTv = create<TvState>((set, get) => ({
   census: null,
   chains: {},
   boxes: [],
+  jump: null,
 
   start: () => {
     if (get().on) return true
@@ -522,7 +653,7 @@ export const useTv = create<TvState>((set, get) => ({
     director = null
     queue = []
     asked.clear()
-    set({ on: false, shot: null, played: 0, tapeTime: null, avatars: {}, arrivals: [], reactions: [], chains: {}, boxes: [], status: 'tuning' })
+    set({ on: false, shot: null, played: 0, tapeTime: null, avatars: {}, arrivals: [], reactions: [], chains: {}, boxes: [], jump: null, status: 'tuning' })
     // A tap on an avatar during TV is not a request for its card afterwards.
     usePersonCard.getState().close()
     const cs = useCyberspace.getState()

@@ -5,7 +5,7 @@
  */
 import { describe, expect, it } from 'vitest'
 import type { ActionEvent } from '../../events'
-import { Director, shotFraming, HOLD_S, LEAD_S, MAX_SHOT_S, MAX_STEP_S, MIN_STEP_S, TRIP_GAP_S, beatOffsets, isJump, type Beat, type Shot } from '../director'
+import { Director, shotFraming, HOLD_S, JUMP_S, LEAD_S, MAX_SHOT_S, MAX_STEP_S, MIN_STEP_S, TRIP_GAP_S, beatOffsets, isJump, type Beat, type Shot } from '../director'
 
 let n = 0
 function beat(pubkey: string, at: number, opts: { type?: ActionEvent['type']; x?: bigint; fromX?: bigint; plane?: number } = {}): Beat {
@@ -57,6 +57,16 @@ describe('Director', () => {
   it('cuts at a hyperjump and at a change of plane', () => {
     const shots = play([beat('a', 0), beat('a', 2, { type: 'hyperjump' }), beat('a', 4), beat('a', 6, { plane: 1 })])
     expect(shots.map((s) => s.beats.length)).toEqual([1, 2, 1])
+  })
+
+  it('plays a hyperjump\'s ride before the shot it opens, and only that shot', () => {
+    const [before, ride] = play([beat('a', 0), beat('a', 2, { type: 'hyperjump' }), beat('a', 4)])
+    expect(before.prelude).toBeUndefined()
+    expect(ride.prelude).toBe(JUMP_S)
+    // Every beat after the ride, at its usual spacing; the hold after the last.
+    expect(ride.offsets[0]).toBeCloseTo(JUMP_S + LEAD_S)
+    expect(ride.offsets[1]).toBeCloseTo(JUMP_S + LEAD_S + 2)
+    expect(ride.length).toBeCloseTo(ride.offsets[1] + HOLD_S)
   })
 
   it('holds a shot back while an earlier-started trip is still open', () => {

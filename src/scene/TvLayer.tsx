@@ -24,13 +24,14 @@ import { drawnAvatars } from '../lib/targets'
 import { avatarTurn } from '../lib/facing'
 import { committedAnchor } from '../lib/renderFrame'
 import { alignedOrigin, useCyberspace } from '../store/useCyberspace'
-import { shotProgress, useTv } from '../store/useTv'
+import { framingProgress, useTv } from '../store/useTv'
 import { useProfile } from '../hooks/useProfile'
 import { OtherAvatar } from './OtherAvatar'
 import { tvName } from '../lib/tv/text'
 import { AVATAR_RED } from './tvPainter'
 import { TvBoxes } from './TvBoxes'
 import { SpawnMarker } from './SpawnMarker'
+import { TvJump } from './TvJump'
 
 const REACH = GRID_RADIUS * 8
 /** An avatar not seen on tape for this long (tape time) is not drawn. */
@@ -123,13 +124,15 @@ function TvCamera({ axes }: { axes: ViewAxes }): null {
     const s = useCyberspace.getState()
     const origin = alignedOrigin(committedAnchor() ?? s.anchor, s.scaleExp)
     // A trip follows its avatar; a segment looks at the view's own point
-    // (a located bag's box, or wherever the last shot left it).
-    const subject = tv.shot?.kind === 'trip' ? drawnAvatars[tv.shot.pubkey] : undefined
+    // (a located bag's box, or wherever the last shot left it), and so does
+    // a hyperjump's line (halfway between its two blocks).
+    const lining = tv.jump?.phase === 'line'
+    const subject = tv.shot?.kind === 'trip' && !lining ? drawnAvatars[tv.shot.pubkey] : undefined
     if (subject) subject.getWorldPosition(at)
     else at.set(...s.cursorOffset())
     const before = was.current
     // The push-in: from the framing's start distance to its end, eased out.
-    const p = shotProgress()
+    const p = framingProgress()
     const wantDist = tv.framing.from + (tv.framing.to - tv.framing.from) * (1 - (1 - p) ** 2)
     if (!smooth.current || !before || before.scaleExp !== s.scaleExp || before.cutAt !== tv.cutAt) {
       // A cut or a new zoom: no path between the two framings, so no glide.
@@ -153,11 +156,12 @@ function TvCamera({ axes }: { axes: ViewAxes }): null {
     framingDirection(tv.framing, theta.current, sunDir, want)
     if (!look.current) look.current = want.clone()
     else look.current.lerp(want, kc).normalize()
-    // A bag's box on a portrait screen: stand back so its sides stay in (it
-    // overflowed a phone, review of #371). Only for the box: a close-up of
-    // an avatar on a phone stays close.
+    // A bag's box or a ride's two blocks on a portrait screen: stand back so
+    // they stay in (a box overflowed a phone, review of #371). Only for
+    // those: a close-up of an avatar on a phone stays close.
     const aspect = (state.camera as { aspect?: number }).aspect ?? 1
-    const r = dist.current * (tv.shot?.kind === 'bag' ? Math.max(1, 1 / (aspect * 1.4)) : 1)
+    // A ride's two blocks lie across the frame, so they stand back further.
+    const r = dist.current * (lining ? Math.max(1, 1 / aspect) : tv.shot?.kind === 'bag' ? Math.max(1, 1 / (aspect * 1.4)) : 1)
     c.target.copy(smooth.current)
     c.object.position.copy(smooth.current).addScaledVector(look.current, r)
     c.update()
@@ -174,6 +178,7 @@ export function TvLayer({ axes }: { axes: ViewAxes }): JSX.Element {
   const anchor = useCyberspace((s) => s.anchor)
   const anchorPlane = useCyberspace((s) => s.anchorPlane)
   const scaleExp = useCyberspace((s) => s.scaleExp)
+  const lining = useTv((s) => s.jump?.phase === 'line')
 
   const place = useMemo(() => {
     const origin = alignedOrigin(anchor, scaleExp)
@@ -184,6 +189,17 @@ export function TvLayer({ axes }: { axes: ViewAxes }): JSX.Element {
     .filter(([pk, a]) => a.plane === anchorPlane && ((shot?.kind === 'trip' && pk === shot.pubkey) || tapeTime === null || Math.abs(tapeTime - a.at) <= STALE_S))
     .map(([pk, a]) => ({ pk, a, centre: place(a.position) }))
     .filter((p) => Math.hypot(...p.centre) <= REACH), [avatars, anchorPlane, shot, tapeTime, place])
+
+  // A hyperjump's line: only its two blocks and its rider, everything else
+  // stepped aside ("all the other blocks not involved can be hidden").
+  if (lining) {
+    return (
+      <>
+        <TvCamera axes={axes} />
+        <TvJump axes={axes} />
+      </>
+    )
+  }
 
   return (
     <>

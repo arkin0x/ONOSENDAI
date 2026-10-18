@@ -161,6 +161,9 @@ export function tickerItems(p: TvPicture, name: (pk: string) => string): string[
 export function chironDoing(shot: Shot, played: number): string {
   if (shot.item) return segmentDoing(shot.item)
   const last = played > 0 ? shot.beats[played - 1] : null
+  // A hyperjump's ride, before it lands: which blocks.
+  const ride = shot.prelude ? shot.beats[0].action : null
+  if (!last && ride?.fromHeight !== undefined && ride.toHeight !== undefined) return `HYPERJUMP · BLOCK ${ride.fromHeight} → BLOCK ${ride.toHeight}`
   const trip = shot.beats.length
   if (last) return `${actionLabel(last.action)}${trip > 1 ? ` · ${played} OF ${trip}` : ''}`
   return trip > 1 ? `${trip} ACTIONS COMING UP` : 'ABOUT TO MOVE'

@@ -25,6 +25,7 @@ import {
 } from 'three'
 import { useCyberspace } from '../store/useCyberspace'
 import { useRideRun } from '../hud/HyperspacePanel'
+import { useTv } from '../store/useTv'
 
 /** How many streaks; one draw call regardless. */
 const STREAKS = 420
@@ -33,6 +34,12 @@ const RANGE = 2200
 /** The streak ring: clear in the middle so the world stays legible. */
 const R_MIN = 120
 const R_MAX = 520
+/**
+ * The streaks' turn in the frame: after every camera has moved (the Rig at 0,
+ * Cyberspace TV's at 0.5) and before the composer draws (1), so they are
+ * pinned to the camera of the frame they are drawn in, never the last one.
+ */
+const CONE_PRIORITY = 0.8
 
 const vertexShader = /* glsl */ `
   attribute float aSeed;
@@ -90,7 +97,11 @@ export function HyperspaceCone(): JSX.Element | null {
   // not yet arrived. Browsing the line gets per-block bursts (StopBurst)
   // instead, so the streaks read as living inside the blocks and boarding
   // puts you among them.
-  const active = useCyberspace((s) => s.transit) !== null
+  // Cyberspace TV shows a hyperjump's ride in it too, at full tilt (TvJump's
+  // warp phase; arkinox, 2026-10-18: "we should see the rainbow tunnel
+  // effect"). TV never runs while you are boarded (tvBlocked).
+  const tvWarp = useTv((s) => s.on && s.jump?.phase === 'warp')
+  const active = useCyberspace((s) => s.transit) !== null || tvWarp
 
   const geometry = useMemo(() => {
     const seeds = new Float32Array(STREAKS * 2)
@@ -148,11 +159,15 @@ export function HyperspaceCone(): JSX.Element | null {
     // Strength follows the ride: a quarter on the first leaf so starting is
     // felt, the rest with completion, eased so leaves landing out of order
     // never make the sky flicker.
+    // On TV, the whole ride at once: it builds from nothing over the tunnel.
     const p = useRideRun.getState().progress
-    const target = p ? (p.total > 0 ? 0.25 + 0.75 * (p.done / p.total) : 1) : 0
+    const target = tvWarp ? 1 : p ? (p.total > 0 ? 0.25 + 0.75 * (p.done / p.total) : 1) : 0
     const u = material.uniforms.uBoost
     u.value += (target - u.value) * Math.min(1, dt * 2.5)
-  })
+  }, CONE_PRIORITY)
+
+  // Each time it shows, from a drift: a TV ride builds up again from nothing.
+  useEffect(() => { if (!active) material.uniforms.uBoost.value = 0 }, [active, material])
 
   if (!active) return null
   return (

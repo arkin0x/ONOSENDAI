@@ -29,7 +29,7 @@ import type { Filter } from 'nostr-tools'
 import type { RelayAnswer } from '../../lib/relayOutcome'
 import { positionHex, type NostrEvent } from '../../lib/events'
 import { V2_EPOCH } from '../../lib/tv/tape'
-import { READ_STUCK_MS, TV_FOCUS_LABEL, fitScale, placeable, setTvAsk, shotOpening, useTv } from '../useTv'
+import { READ_STUCK_MS, TV_FOCUS_LABEL, fitScale, placeable, rideEnds, rideView, setTvAsk, shotOpening, useTv, type TvJump } from '../useTv'
 import { useCyberspace } from '../useCyberspace'
 import { useBuilder } from '../useBuilder'
 import { usePersonCard } from '../usePersonCard'
@@ -201,6 +201,56 @@ describe('Cyberspace TV', () => {
     const shot = { beats: [jump, ...hops] } as unknown as Shot
     expect(fitScale(shot.beats)).toBeLessThan(4)
     expect(shotOpening(shot).position.x).toBe(1n << 59n)
+  })
+
+  it('rides a hyperjump on screen: the tunnel, the line between its two blocks, then the rider at B', async () => {
+    const C = '3'.repeat(64)
+    const far = 1n << 59n
+    tape.push({ ...hop(C, T0 + 200, 1000n, far), tags: [['A', 'hyperjump'], ['e', '0'.repeat(64), '', 'genesis'], ['e', '0'.repeat(64), '', 'previous'], ['c', at(1000n)], ['C', at(far)], ['proof', 'a'.repeat(64)], ['from_height', '100'], ['B', '200'], ['mp', 'x']] })
+    try {
+      useTv.getState().start()
+      const seen: Array<{ phase: TvJump['phase'] | null; scaleExp: number; x: bigint | undefined; focusX: bigint | undefined }> = []
+      const off = useTv.subscribe((s) => {
+        if (s.shot?.pubkey !== C) return
+        const last = seen[seen.length - 1]
+        const phase = s.jump?.phase ?? null
+        if (!last || last.phase !== phase) seen.push({ phase, scaleExp: s.scaleExp, x: s.avatars[C]?.position.x, focusX: undefined })
+      })
+      // Where the view looks, once each phase has framed it.
+      const offFocus = useCyberspace.subscribe((cs) => { const last = seen[seen.length - 1]; if (last && last.focusX === undefined) last.focusX = cs.focus?.position.x })
+      await run(40000)
+      off()
+      offFocus()
+      // The first time through (the tape ends and tunes in again after it).
+      expect(seen.slice(0, 3).map((p) => p.phase)).toEqual(['warp', 'line', null])
+      // The tunnel where the rider stood (no stop index here: its `c`).
+      expect(seen[0].x).toBe(1000n)
+      // The line: both blocks in frame, from halfway between them.
+      const view = rideView({ x: 1000n, y: 5n, z: 7n }, { x: far, y: 5n, z: 7n })
+      expect(seen[1].scaleExp).toBe(view.scaleExp)
+      expect(view.scaleExp).toBeGreaterThan(50)
+      expect(seen[1].focusX).toBe((1000n + far) / 2n)
+      // Then the rider at B, close up.
+      expect(seen[2].x).toBe(far)
+      expect(seen[2].scaleExp).toBeLessThan(4)
+      expect(published).toEqual([])
+    } finally {
+      tape.pop()
+    }
+  })
+
+  it('a ride\'s block A: B itself on a ride to the same block, else the rider\'s `c`, never named as A', () => {
+    const ride = (from: string, to: string, extra: string[][] = []) => beatOf({ ...hop(B, T0, 1000n, 1n << 59n), tags: [['A', 'hyperjump'], ['e', '0'.repeat(64), '', 'genesis'], ['e', '0'.repeat(64), '', 'previous'], ['c', at(1000n)], ['C', at(1n << 59n)], ['proof', 'a'.repeat(64)], ['from_height', from], ['B', to], ['mp', 'x'], ...extra] })!
+    // No stop index here: A is never looked up.
+    const same = rideEnds(ride('300', '300'))
+    expect(same.from.position.x).toBe(1n << 59n)
+    expect(same.from.exact).toBe(true)
+    // Without the index, where the rider stood: A on a chained ride, the
+    // boarding spot on a first one, and `as_of` cannot tell which.
+    for (const r of [ride('100', '200'), ride('100', '90', [['as_of', '100']])]) {
+      expect(rideEnds(r).from.position.x).toBe(1000n)
+      expect(rideEnds(r).from.exact).toBe(false)
+    }
   })
 
   it('a bag with a public hint box is shown at its box, which stays; one without is never placed', async () => {

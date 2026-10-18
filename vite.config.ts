@@ -1,7 +1,22 @@
 import { execSync } from 'node:child_process'
-import { defineConfig } from 'vite'
+import { defineConfig, type Plugin } from 'vite'
 import react from '@vitejs/plugin-react'
 import { resolveVersion, UNVERSIONED } from './src/lib/version'
+import { TV_CARD, withCard } from './src/lib/routeCard'
+
+/** tv.html: the built page with Cyberspace TV's link preview, served at /tv (src/lib/routeCard.ts). */
+function routeCards(): Plugin {
+  return {
+    name: 'onosendai-route-cards',
+    apply: 'build',
+    enforce: 'post',
+    generateBundle(_, bundle) {
+      const page = bundle['index.html']
+      if (!page || page.type !== 'asset') throw new Error('routeCards: no index.html in the bundle')
+      this.emitFile({ type: 'asset', fileName: 'tv.html', source: withCard(String(page.source), TV_CARD) })
+    },
+  }
+}
 
 /** The subject of the commit being built: Vercel's variable, else git's. */
 function commitMessage(): string | null {
@@ -10,7 +25,7 @@ function commitMessage(): string | null {
 }
 
 export default defineConfig(async () => ({
-  plugins: [react()],
+  plugins: [react(), routeCards()],
   define: {
     // Tests never reach the network for a number; the build and the dev
     // server ask GitHub once (see src/lib/version.ts).

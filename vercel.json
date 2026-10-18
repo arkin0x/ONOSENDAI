@@ -4,8 +4,8 @@
     { "source": "/c/:path*", "destination": "/index.html" },
     { "source": "/demo", "destination": "/index.html" },
     { "source": "/demo/:path*", "destination": "/index.html" },
-    { "source": "/tv", "destination": "/index.html" },
-    { "source": "/tv/", "destination": "/index.html" },
-    { "source": "/TV", "destination": "/index.html" }
+    { "source": "/tv", "destination": "/tv.html" },
+    { "source": "/tv/", "destination": "/tv.html" },
+    { "source": "/TV", "destination": "/tv.html" }
   ]
 }

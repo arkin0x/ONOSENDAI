@@ -13,6 +13,10 @@
 import { Tv, X } from 'lucide-react'
 import { useEscape } from '../hooks/useEscape'
 import { startTvInPlace, tvBlocked, useTv } from '../store/useTv'
+import { useCyberspace } from '../store/useCyberspace'
+import { useBuilder } from '../store/useBuilder'
+import { useShards } from '../store/useShards'
+import { useDemo } from '../store/useDemo'
 import { TvSpinHost } from './TvSegments'
 
 export function TvScreen(): JSX.Element | null {
@@ -38,6 +42,14 @@ export function TvScreen(): JSX.Element | null {
  * deploy, the tour, a ride): read on each render of the menu.
  */
 export function TvButton(): JSX.Element {
+  // Each of what can block it, subscribed, so the button is current while
+  // the menu stays open: it read tvBlocked() only when the menu happened to
+  // render, and sat enabled through WALK doing nothing (review of #375).
+  useCyberspace((s) => s.walking)
+  useCyberspace((s) => s.transit !== null)
+  useBuilder((s) => s.active)
+  useShards((s) => s.pending !== null)
+  useDemo((s) => s.active)
   const not = tvBlocked()
   return (
     <button className="ask-tv" disabled={not !== null} title={not !== null ? `Not during ${not}` : 'Everything that happened here, played back'} onClick={() => startTvInPlace()}>

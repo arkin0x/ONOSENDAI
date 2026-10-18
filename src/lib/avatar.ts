@@ -129,3 +129,20 @@ export function avatarDraw(shard: ShardModel, scaleExp: number): { mesh: number 
   if (scaleExp > 0 && half < AVATAR_MARKER_HALF) return 'marker'
   return { mesh: avatarScale(shard) * zoom }
 }
+
+/**
+ * The same, never the marker: once the mesh would be smaller than the marker,
+ * the mesh at the marker's size instead (`markerScale` is the marker's own
+ * shrink at the top of the ladder, spectatorScale). For Cyberspace TV, which
+ * frames each shot at the zoom that fits its trip: one avatar was its own
+ * shape in one shot and the white marker in the next (arkinox, 2026-10-18:
+ * "i just saw a tv segment where i was moving with my custom avatar and the
+ * very next shot my avatar was a white dodecahedron"). On TV who it is
+ * matters more than its true size.
+ */
+export function avatarDrawKept(shard: ShardModel, scaleExp: number, markerScale: number): { mesh: number } {
+  const draw = avatarDraw(shard, scaleExp)
+  if (draw !== 'marker') return draw
+  const radius = Math.max(1e-9, Math.min(shardRadius(shard), MAX_AVATAR_RADIUS))
+  return { mesh: (avatarScale(shard) * AVATAR_MARKER_HALF * markerScale) / radius }
+}

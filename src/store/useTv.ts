@@ -37,6 +37,11 @@ export interface TvAvatar {
   at: number
   /** Where it came from, on its last move: what it faces along (TvLayer). */
   from?: Position
+  /**
+   * When it spawned on screen (performance.now()), so it grows from a point
+   * (TvLayer); Infinity while a shot opening with its spawn waits to play it.
+   */
+  born?: number
 }
 
 export type TvStatus = 'tuning' | 'playing' | 'end' | 'no-signal'
@@ -249,7 +254,7 @@ function arrive(shot: Shot): void {
   const b = shot.beats[0]
   useTv.setState({
     arrivals: [...s.arrivals, { pubkey: b.pubkey, at: b.at }].slice(-ARRIVALS_KEPT),
-    avatars: { ...s.avatars, [b.pubkey]: { position: b.action.position, plane: b.action.plane, at: b.at } },
+    avatars: { ...s.avatars, [b.pubkey]: { position: b.action.position, plane: b.action.plane, at: b.at, born: performance.now() } },
   })
 }
 
@@ -322,7 +327,7 @@ function beginSegment(shot: Shot, now: number): void {
     meanwhile: s.shot !== null && shot.start < s.shot.end,
     status: 'playing',
     cutAt: now,
-    ...(located ? { framing: { from: 26, to: 18, polar: 0.6, name: 'wide' as const }, boxes: [...s.boxes.filter((b) => b.id !== shot.id), { id: shot.id, hint: located }].slice(-BOXES_KEPT) } : {}),
+    ...(located ? { framing: { from: 26, to: 18, polar: 0.6, name: 'wide' as const, view: 'above' as const, sun: false, spin: 1 as const }, boxes: [...s.boxes.filter((b) => b.id !== shot.id), { id: shot.id, hint: located }].slice(-BOXES_KEPT) } : {}),
   })
   shotBegan = now
   if (located) frame(boxCentre(located), located.plane, scaleExp)
@@ -353,7 +358,8 @@ function beginShot(shot: Shot, now: number, id: number): void {
     meanwhile: before !== null && !continues && shot.start < before.end,
     status: 'playing',
     ...(continues ? {} : { cutAt: now }),
-    avatars: { ...s.avatars, [shot.pubkey]: { position: opening.position, plane: opening.plane, at: shot.start } },
+    // Facing kept across the cut: from where it was last seen, or as it was.
+    avatars: { ...s.avatars, [shot.pubkey]: { born: shot.beats[0]?.action.type === 'spawn' ? Infinity : was?.born, position: opening.position, plane: opening.plane, at: shot.start, from: was && was.plane === opening.plane && (was.position.x !== opening.position.x || was.position.y !== opening.position.y || was.position.z !== opening.position.z) ? was.position : was?.from } },
   })
   shotBegan = now
   frame(opening.position, opening.plane, scaleExp)
@@ -388,7 +394,8 @@ function tick(id: number): void {
   while (played < s.shot.beats.length && s.shot.offsets[played] <= elapsed) {
     const b = s.shot.beats[played]
     const was = avatars[b.pubkey]
-    avatars = { ...avatars, [b.pubkey]: { position: b.action.position, plane: b.action.plane, at: b.at, from: was && was.plane === b.action.plane ? was.position : undefined } }
+    const spawned = b.action.type === 'spawn'
+    avatars = { ...avatars, [b.pubkey]: { position: b.action.position, plane: b.action.plane, at: b.at, from: !spawned && was && was.plane === b.action.plane ? was.position : undefined, born: spawned ? performance.now() : was?.born } }
     tapeTime = b.at
     played++
   }
@@ -429,6 +436,8 @@ async function tune(id: number): Promise<void> {
   // From a shot's length before the event, so the trip it belongs to is
   // seen from its start rather than joined in the middle.
   reader = new TapeReader(Math.max(V2_EPOCH, from - MAX_SHOT_S), askWithin)
+  // The numbers, again, if they did not come the first time.
+  if (!useTv.getState().census) loadCensus(askWithin).then((census) => { if (live(id, t)) useTv.setState({ census }) }, () => {})
   void readMore(id, t)
 }
 

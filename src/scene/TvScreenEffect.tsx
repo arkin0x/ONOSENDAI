@@ -98,9 +98,20 @@ void mainImage(const in vec4 inputColor, const in vec2 uv, out vec4 outputColor)
   vec3 col = vec3(texture(inputBuffer, pw + ca).r, texture(inputBuffer, pw).g, texture(inputBuffer, pw - ca).b);
   col *= 1.0 - bar;
 
-  // Snow: chunky (blocks of three CSS pixels), at a film's frame rate, dark.
-  vec2 block = floor(gl_FragCoord.xy / (3.0 * uPx));
-  float n = tvNoise(block + floor(uTime * 24.0) * vec2(17.0, 31.0));
+  // Snow: chunky (about three CSS pixels a grain), at a film's frame rate,
+  // dark, and soft: each grain blends into the next, as a tube's do, where
+  // square blocks read as pixels (arkinox, 2026-10-18: "on a CRT it would be
+  // blurry").
+  // A new field each frame, from a small offset: large coordinates break
+  // the hash into diagonal stripes.
+  float frame = mod(floor(uTime * 24.0), 64.0);
+  vec2 sp = gl_FragCoord.xy / (3.0 * uPx) + vec2(tvNoise(vec2(frame, 1.0)), tvNoise(vec2(frame, 2.0))) * 97.0;
+  vec2 si = floor(sp);
+  vec2 sf = fract(sp);
+  sf = sf * sf * (3.0 - 2.0 * sf);
+  float n = mix(mix(tvNoise(si), tvNoise(si + vec2(1.0, 0.0)), sf.x), mix(tvNoise(si + vec2(0.0, 1.0)), tvNoise(si + vec2(1.0, 1.0)), sf.x), sf.y);
+  // Blending pulls toward grey: stretch it back out.
+  n = clamp(0.5 + (n - 0.5) * 1.6, 0.0, 1.0);
   float snow = uSnow;
   if (uCutKind > 1.5 && uCut < 1.0) snow = max(snow, (1.0 - uCut) * 0.95);
   col = mix(col, vec3(n * 0.5), snow);
@@ -186,7 +197,14 @@ export function TvScreenEffect(): JSX.Element {
     return img
   }, [])
   // The face the tube writes in, asked for before the first word is painted.
-  useEffect(() => { void document.fonts?.load(`16px ${TV_FONT}`).catch(() => {}); void document.fonts?.load(`700 16px ${TV_FONT}`).catch(() => {}) }, [])
+  useEffect(() => {
+    void document.fonts?.load(`16px ${TV_FONT}`).catch(() => {})
+    void document.fonts?.load(`700 16px ${TV_FONT}`).catch(() => {})
+    // What the marquee measured in the fallback face is measured again in this one.
+    const again = (): void => painter.remeasure()
+    document.fonts?.addEventListener('loadingdone', again)
+    return () => document.fonts?.removeEventListener('loadingdone', again)
+  }, [painter])
   const lastPaint = useRef(0)
   // The segment's shard, parsed once per segment rather than on every paint.
   const segment = useRef<{ id: string | undefined; shard: ShardModel | null }>({ id: undefined, shard: null })
@@ -216,7 +234,11 @@ export function TvScreenEffect(): JSX.Element {
     lastPaint.current = now
     const { width, height } = state.size
     const scale = Math.min(PAINT_SCALE, state.gl.getPixelRatio(), Math.sqrt(PAINT_MAX_PIXELS / Math.max(1, width * height)))
-    painter.size(width, height, scale)
+    // A new size needs a new texture: three.js keeps the storage it first
+    // made, and copying a larger canvas into it fails on the GPU, which left
+    // the furniture frozen after a rotation or the phone's address bar
+    // moving (review of #375).
+    if (painter.size(width, height, scale)) overlay.dispose()
     const profiles = useProfiles.getState()
     const item = tv.shot?.item
     if (item?.id !== segment.current.id) segment.current = { id: item?.id, shard: item?.kind === 'object' ? (objectsOf([item.event])[0]?.shard ?? null) : item?.kind === 'avatar' ? avatarFromEvent(item.event) : null }

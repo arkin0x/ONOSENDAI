@@ -233,7 +233,24 @@ export interface Framing {
   /** The angle down from straight overhead, radians. */
   polar: number
   name: 'close' | 'medium' | 'wide'
+  /** Where the camera stands: above the avatar, level with it, or below looking up. */
+  view: 'above' | 'side' | 'below'
+  /** With the black sun in frame: the camera on the far side of the avatar from it. */
+  sun: boolean
+  /** Which way the camera goes round: 1 or -1. */
+  spin: 1 | -1
 }
+
+/**
+ * The share of shots taken some other way than from above: from the side,
+ * close up, or from below (arkinox, 2026-10-18: "some could be randomly
+ * from the side, closeup, or from below 20% of the time").
+ */
+export const VARIATION_SHARE = 0.2
+/** The share of shots with the black sun in frame ("lets lean toward that angle 60% of the time"). */
+export const SUN_SHARE = 0.6
+/** A close-up variation's distance, in cells: nearer than any ordinary close shot. */
+const CLOSE_UP = 4
 
 const FRAMINGS: Array<{ name: Framing['name']; share: number; distance: number }> = [
   { name: 'close', share: 0.4, distance: 6 },
@@ -258,7 +275,25 @@ export function shotFraming(id: string): Framing {
     acc += f.share
     if (pick < acc) { chosen = f; break }
   }
-  // Between nearly overhead (0.35) and low over the shoulder (1.05).
-  const polar = 0.35 + idFraction(id, 1) * 0.7
-  return { from: chosen.distance * PUSH, to: chosen.distance, polar, name: chosen.name }
+  // From above: between nearly overhead (0.35) and low over the shoulder (1.05).
+  let polar = 0.35 + idFraction(id, 1) * 0.7
+  let view: Framing['view'] = 'above'
+  let distance = chosen.distance
+  let name = chosen.name
+  if (idFraction(id, 2) < VARIATION_SHARE) {
+    const which = Math.floor(idFraction(id, 3) * 3)
+    if (which === 0) { view = 'side'; polar = 1.4 + idFraction(id, 1) * 0.2 }
+    else if (which === 1) { view = 'below'; polar = 2.0 + idFraction(id, 1) * 0.45 }
+    else { name = 'close'; distance = CLOSE_UP }
+  }
+  return {
+    from: distance * PUSH,
+    to: distance,
+    polar,
+    name,
+    view,
+    sun: idFraction(id, 4) < SUN_SHARE,
+    // Either way round ("allow orbit in both directions").
+    spin: idFraction(id, 5) < 0.5 ? 1 : -1,
+  }
 }

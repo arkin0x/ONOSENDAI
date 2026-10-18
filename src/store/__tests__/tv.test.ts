@@ -299,6 +299,23 @@ describe('Cyberspace TV', () => {
     setTvAsk(ask)
   })
 
+  it('an avatar that spawns on screen is born when its spawn plays, not before', async () => {
+    const C = '3'.repeat(64)
+    tape.push(spawnOf(C, T0 + 200), hop(C, T0 + 202, 5000n, 5001n))
+    try {
+      useTv.getState().start()
+      const seen: Array<number | undefined> = []
+      const off = useTv.subscribe((s) => { if (s.shot?.pubkey === C) seen.push(s.avatars[C]?.born) })
+      await run(20000)
+      off()
+      // Held at nothing while the shot opens, then born at a real moment.
+      expect(seen[0]).toBe(Infinity)
+      expect(seen.some((b) => b !== undefined && Number.isFinite(b))).toBe(true)
+    } finally {
+      tape.splice(tape.length - 2, 2)
+    }
+  })
+
   it('turns off when another view takes the camera', async () => {
     useTv.getState().start()
     await run(1500)

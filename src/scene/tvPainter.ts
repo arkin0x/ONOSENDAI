@@ -198,25 +198,6 @@ function roundRect(ctx: CanvasRenderingContext2D, x: number, y: number, w: numbe
   ctx.closePath()
 }
 
-/** A key, drawn: a ring for the bow, a shaft, two teeth; `size` across. */
-function drawKey(ctx: CanvasRenderingContext2D, cx: number, cy: number, size: number): void {
-  const u = size / 128
-  ctx.save()
-  ctx.translate(cx - 64 * u, cy - 64 * u)
-  ctx.lineWidth = 12 * u
-  ctx.lineCap = 'round'
-  ctx.beginPath()
-  ctx.arc(38 * u, 64 * u, 20 * u, 0, Math.PI * 2)
-  ctx.moveTo(58 * u, 64 * u)
-  ctx.lineTo(112 * u, 64 * u)
-  ctx.moveTo(96 * u, 64 * u)
-  ctx.lineTo(96 * u, 84 * u)
-  ctx.moveTo(110 * u, 64 * u)
-  ctx.lineTo(110 * u, 80 * u)
-  ctx.stroke()
-  ctx.restore()
-}
-
 const CUBE: Array<[number, number, number]> = [[-1, -1, -1], [1, -1, -1], [1, 1, -1], [-1, 1, -1], [-1, -1, 1], [1, -1, 1], [1, 1, 1], [-1, 1, 1]]
 const CUBE_EDGES: Array<[number, number]> = [[0, 1], [1, 2], [2, 3], [3, 0], [4, 5], [5, 6], [6, 7], [7, 4], [0, 4], [1, 5], [2, 6], [3, 7]]
 const CUBE_FACES: number[][] = [[0, 1, 2, 3], [4, 5, 6, 7], [0, 1, 5, 4], [3, 2, 6, 7], [0, 3, 7, 4], [1, 2, 6, 5]]
@@ -230,6 +211,7 @@ export class TvPainter {
   private feed: string[] = []
   private feedAt = 0
   private lastPaint = 0
+  private lastScale = 1
 
   /** `canvas` for tests; a new one otherwise. */
   constructor(canvas?: HTMLCanvasElement) {
@@ -242,16 +224,24 @@ export class TvPainter {
     return this.run.map((r) => r.text)
   }
 
-  /** Size the canvas: `w` by `h` CSS px at `s` canvas px each. */
-  size(w: number, h: number, s: number): void {
+  /** Size the canvas: `w` by `h` CSS px at `s` canvas px each. True when that changed it. */
+  size(w: number, h: number, s: number): boolean {
     const W = Math.max(2, Math.round(w * s))
     const H = Math.max(2, Math.round(h * s))
-    if (this.canvas.width !== W || this.canvas.height !== H) {
-      this.canvas.width = W
-      this.canvas.height = H
-      this.run = []
-      this.runX = null
-    }
+    if (this.canvas.width === W && this.canvas.height === H) return false
+    this.canvas.width = W
+    this.canvas.height = H
+    this.run = []
+    this.runX = null
+    return true
+  }
+
+  /** Measure the marquee again: what is on it was measured in the face that was there before the TV's own loaded. */
+  remeasure(): void {
+    const ctx = this.ctx
+    const s = this.lastScale
+    ctx.font = `${12 * s}px ${TV_FONT}`
+    for (const r of this.run) r.w = ctx.measureText(r.text).width
   }
 
   /**
@@ -262,6 +252,7 @@ export class TvPainter {
   paint(p: TvPicture, a: TvAssets, now: number, scale: number, reduced: boolean): void {
     const cssW = this.canvas.width / scale
     const s = scale * Math.min(1.35, Math.max(0.9, cssW / 1400))
+    this.lastScale = s
     const dt = this.lastPaint ? Math.min(0.25, (now - this.lastPaint) / 1000) : 0
     this.lastPaint = now
     const ctx = this.ctx
@@ -304,12 +295,14 @@ export class TvPainter {
 
     // The chiron above it.
     let chironTop = tickY
-    if (p.shot && p.status === 'playing') chironTop = this.chiron(p, a, MX, tickY - 10 * s, Math.min(640 * s, W - 2 * MX), s, narrow)
+    // As wide as the marquee under it: it faded out a third of the way
+    // short of the right side (arkinox, 2026-10-18).
+    if (p.shot && p.status === 'playing') chironTop = this.chiron(p, a, MX, tickY - 10 * s, W - 2 * MX, s, narrow)
 
     // A segment's panel at the centre.
     const item = p.shot?.item
     const inset = item !== undefined && !(item.kind === 'bag' && placeable(item.hint))
-    if (item && inset && p.status === 'playing') this.segment(item, p.shot!.length, a, W, H, MX, s, narrow, now)
+    if (item && inset && p.status === 'playing') this.segment(item, p.shot!.length, a, W, cy + 14 * s, chironTop - 50 * s, MX, MY, W - MX - lw - 16 * s, s, narrow, now)
 
     // LATER and MEANWHILE, after the cut's transition; under an inset's panel.
     this.card(p, W, s, narrow, inset ? chironTop - 34 * s : H * 0.34, now)
@@ -399,8 +392,8 @@ export class TvPainter {
     const y = bottom - h
     const grad = ctx.createLinearGradient(x, 0, x + w, 0)
     grad.addColorStop(0, 'rgba(0, 60, 80, 0.88)')
-    grad.addColorStop(0.7, 'rgba(0, 30, 44, 0.72)')
-    grad.addColorStop(1, 'rgba(0, 30, 44, 0)')
+    grad.addColorStop(0.85, 'rgba(0, 34, 50, 0.78)')
+    grad.addColorStop(1, 'rgba(0, 30, 44, 0.45)')
     ctx.fillStyle = grad
     ctx.fillRect(x, y, w, h)
     // The picture.
@@ -491,36 +484,56 @@ export class TvPainter {
   }
 
   /** The panel of a segment shown in an inset: a sealed bag, an object, a new avatar, a comment. */
-  private segment(item: TapeItem, shotLength: number, a: TvAssets, W: number, H: number, MX: number, s: number, narrow: boolean, now: number): void {
+  private segment(item: TapeItem, shotLength: number, a: TvAssets, W: number, top: number, bottom: number, MX: number, MY: number, sideRight: number, s: number, narrow: boolean, now: number): void {
     const ctx = this.ctx
     // Seconds since the segment came on, after its cut, by the shot's own
     // clock (the shot's length, which is the item's unless a test cued it longer).
     const length = itemLength(item)
     const t = Math.max(0, shotProgress() * shotLength - CUT_MS / 1000)
-    const pw = Math.min(760 * s, W - 2 * MX)
     const pad = (narrow ? 16 : 24) * s
     // An advertisement is the product first: the model in the middle, the
     // words under it, on every screen (arkinox, 2026-10-18: "make sure the
     // NOW AVAILABLE shows the rotating model in the center of the layout,
     // text can go under"). Everything else stacks only on a phone.
     const ad = item.kind === 'object'
-    const stacked = narrow || ad
-    const stage = (ad ? (narrow ? 170 : 250) : narrow ? 140 : 210) * s
-    const textX = stacked ? 0 : stage + 28 * s
-    const textW = stacked ? pw - 2 * pad : pw - 2 * pad - textX
-
-    // The words first: the panel is as tall as what it holds, fixed from the first frame.
-    let lines: string[] = []
-    let quoteSize = 0
-    if (item.kind === 'comment') {
-      quoteSize = (narrow ? 15 : 20) * s
-      ctx.font = `${quoteSize}px ${TV_FONT}`
-      lines = wrap(ctx, `“${quoteOf(item)}”`, textW)
+    const layout = (stage: number, pw: number, stacked: boolean): { stage: number; pw: number; stacked: boolean; textX: number; textW: number; lines: string[]; quoteSize: number; ph: number } => {
+      const textX = stacked ? 0 : stage + 28 * s
+      const textW = stacked ? pw - 2 * pad : pw - 2 * pad - textX
+      let lines: string[] = []
+      let quoteSize = 0
+      if (item.kind === 'comment') {
+        quoteSize = (narrow ? 15 : 20) * s
+        ctx.font = `${quoteSize}px ${TV_FONT}`
+        lines = wrap(ctx, `“${quoteOf(item)}”`, textW)
+      }
+      const captionH = item.kind === 'comment' ? lines.length * quoteSize * 1.45 + 30 * s : 96 * s
+      const ph = stacked ? stage + 18 * s + captionH + 2 * pad : Math.max(stage, captionH) + 2 * pad
+      return { stage, pw, stacked, textX, textW, lines, quoteSize, ph }
     }
-    const captionH = item.kind === 'comment' ? lines.length * quoteSize * 1.45 + 30 * s : 96 * s
-    const ph = stacked ? stage + 18 * s + captionH + 2 * pad : Math.max(stage, captionH) + 2 * pad
-    const px = (W - pw) / 2
-    const py = Math.max(MX, H * 0.46 - ph / 2)
+    // The model gives up size first, the words never.
+    const fitPanel = (pw: number, stacked: boolean, room: number): ReturnType<typeof layout> => {
+      const first = layout((ad ? (narrow ? 170 : 250) : narrow ? 140 : 210) * s, pw, stacked)
+      return first.ph <= room ? first : layout(Math.max(60 * s, first.stage - (first.ph - room)), pw, stacked)
+    }
+    // Where the panel goes: between the clock and the chiron (and a card's
+    // room above the chiron), so it covers neither and the date can be read
+    // (arkinox, 2026-10-18: "the date is obscured so we dont know when it
+    // happened"). On a short screen (a phone on its side) that strip is too
+    // narrow: the panel goes up beside the clock instead, short of the
+    // logo's column, side by side.
+    const fullW = Math.min(760 * s, W - 2 * MX)
+    let room = Math.max(0, bottom - top)
+    let fitted = fitPanel(fullW, narrow || ad, room)
+    let px = (W - fullW) / 2
+    let top0 = top
+    if (fitted.ph > room) {
+      const sideW = Math.min(760 * s, sideRight - MX)
+      const sideRoom = Math.max(0, bottom - MY)
+      const beside = fitPanel(sideW, false, sideRoom)
+      if (beside.ph <= sideRoom || beside.ph < fitted.ph) { fitted = beside; px = MX; room = sideRoom; top0 = MY }
+    }
+    const { stage, pw, stacked, textX, textW, lines, quoteSize, ph } = fitted
+    const py = top0 + Math.max(0, (room - ph) / 2)
     ctx.globalAlpha = ramp(t, 0, 0.5)
     const grad = ctx.createLinearGradient(px, py, px + pw, py + ph)
     grad.addColorStop(0, 'rgba(0, 40, 56, 0.92)')
@@ -542,10 +555,13 @@ export class TvPainter {
     } else if (item.kind === 'object') {
       // An advertisement: the product turning in the middle, NOW AVAILABLE!
       // slammed on its corner, the words centred under it.
-      const ox = px + (pw - stage) / 2
+      // Beside the clock on a short screen it lies side by side: the model
+      // left, the words beside it.
+      const ox = stacked ? px + (pw - stage) / 2 : sx
       if (a.spin) ctx.drawImage(a.spin, ox, sy, stage, stage)
       const title = (a.segmentShard?.name ?? 'AN OBJECT').toUpperCase()
-      this.caption(px + pw / 2, ty, textW, 'NEW IN CYBERSPACE', title, `FROM ${a.name(item.pubkey)}`, s, 'center')
+      if (stacked) this.caption(px + pw / 2, ty, textW, 'NEW IN CYBERSPACE', title, `FROM ${a.name(item.pubkey)}`, s, 'center')
+      else this.caption(tx, ty + stage / 2 - 40 * s, textW, 'NEW IN CYBERSPACE', title, `FROM ${a.name(item.pubkey)}`, s)
       // On the model's left (arkinox, 2026-10-18: "move the now available to the left side").
       this.splash(ox + stage * 0.08, sy + stage * 0.14, stage * 0.3, t, s)
     } else if (item.kind === 'avatar') {
@@ -659,37 +675,59 @@ export class TvPainter {
     const ctx = this.ctx
     const turn = t * 0.7
     const tilt = -0.42
-    const proj = CUBE.map(([vx, vy, vz]) => {
+    // Cube space to the panel: turned, tilted, in perspective.
+    const project = (vx: number, vy: number, vz: number): { x: number; y: number; z: number } => {
       const x1 = vx * Math.cos(turn) + vz * Math.sin(turn)
       const z1 = -vx * Math.sin(turn) + vz * Math.cos(turn)
       const y2 = vy * Math.cos(tilt) - z1 * Math.sin(tilt)
       const z2 = vy * Math.sin(tilt) + z1 * Math.cos(tilt)
       const k = 4 / (4 + z2)
       return { x: x + size / 2 + x1 * size * 0.27 * k, y: y + size / 2 - y2 * size * 0.27 * k, z: z2 }
-    })
+    }
+    const proj = CUBE.map(([vx, vy, vz]) => project(vx, vy, vz))
     const edges = ramp(t, 0.4, 1.4)
     const sides = ramp(t, 1.4, 2.2) * (1 - ramp(t, 4.6, 5.8))
     ctx.save()
     ctx.strokeStyle = REGION
     ctx.fillStyle = REGION
-    CUBE_FACES.forEach((f, i) => {
-      const [a0, a1, a2] = f.map((n) => proj[n])
-      // Toward the viewer: the face's winding on screen.
-      const facing = (a1.x - a0.x) * (a2.y - a0.y) - (a1.y - a0.y) * (a2.x - a0.x)
+    ctx.lineCap = 'round'
+    ctx.lineJoin = 'round'
+    CUBE_FACES.forEach((f) => {
       ctx.globalAlpha = 0.14 * sides
       ctx.beginPath()
       f.forEach((n, j) => (j === 0 ? ctx.moveTo(proj[n].x, proj[n].y) : ctx.lineTo(proj[n].x, proj[n].y)))
       ctx.closePath()
       ctx.fill()
-      if (Math.abs(facing) < 1) return
+    })
+    // A key stamped on each side, lying on it: drawn in the face's own plane
+    // and turned with the box, as the keys on the CSS cube were (arkinox,
+    // 2026-10-18: "they stuck to the sides of the box which is what I
+    // wanted"). The far sides show through the box, fainter.
+    FACE_PLANES.forEach(({ n, u, v }, i) => {
       const start = 2.4 + i * 0.22
       const k = ramp(t, start, start + 0.18)
       if (k <= 0) return
-      const cx = f.reduce((sum, n) => sum + proj[n].x, 0) / 4
-      const cy = f.reduce((sum, n) => sum + proj[n].y, 0) / 4
-      const across = Math.sqrt(Math.abs(facing)) * 0.55
-      ctx.globalAlpha = k * (1 - ramp(t, 4.6, 5.8))
-      drawKey(ctx, cx, cy, across * (1.8 - 0.8 * k))
+      const away = project(n[0] * 2, n[1] * 2, n[2] * 2).z > project(0, 0, 0).z
+      // Lands from large, as a stamp comes down, within the face.
+      const scale = 0.62 * (1.8 - 0.8 * k)
+      const at = (gx: number, gy: number): { x: number; y: number } => {
+        const lx = ((gx - 64) / 64) * scale
+        const ly = (-(gy - 64) / 64) * scale
+        return project(n[0] + u[0] * lx + v[0] * ly, n[1] + u[1] * lx + v[1] * ly, n[2] + u[2] * lx + v[2] * ly)
+      }
+      const alpha = k * (1 - ramp(t, 4.6, 5.8)) * (away ? 0.4 : 1)
+      if (alpha <= 0) return
+      ctx.globalAlpha = alpha
+      ctx.lineWidth = 2.4 * s
+      ctx.beginPath()
+      for (const stroke of KEY_STROKES) {
+        stroke.forEach(([gx, gy], j) => {
+          const p = at(gx, gy)
+          if (j === 0) ctx.moveTo(p.x, p.y)
+          else ctx.lineTo(p.x, p.y)
+        })
+      }
+      ctx.stroke()
     })
     ctx.globalAlpha = 0.95 * edges
     ctx.lineWidth = 2 * s
@@ -702,5 +740,23 @@ export class TvPainter {
     ctx.restore()
   }
 }
+
+/** The six sides of the cube: each one's outward normal, and its across and up in its own plane. */
+const FACE_PLANES: Array<{ n: [number, number, number]; u: [number, number, number]; v: [number, number, number] }> = [
+  { n: [0, 0, 1], u: [1, 0, 0], v: [0, 1, 0] },
+  { n: [0, 0, -1], u: [-1, 0, 0], v: [0, 1, 0] },
+  { n: [1, 0, 0], u: [0, 0, -1], v: [0, 1, 0] },
+  { n: [-1, 0, 0], u: [0, 0, 1], v: [0, 1, 0] },
+  { n: [0, 1, 0], u: [1, 0, 0], v: [0, 0, -1] },
+  { n: [0, -1, 0], u: [1, 0, 0], v: [0, 0, 1] },
+]
+
+/** The key (drawKey's), as strokes on a 128 grid: the bow's ring, the shaft, two teeth. */
+const KEY_STROKES: Array<Array<[number, number]>> = [
+  Array.from({ length: 25 }, (_, i): [number, number] => [38 + 20 * Math.cos((i / 24) * Math.PI * 2), 64 + 20 * Math.sin((i / 24) * Math.PI * 2)]),
+  [[58, 64], [112, 64]],
+  [[96, 64], [96, 84]],
+  [[110, 64], [110, 80]],
+]
 
 export { CUT_MS }

@@ -8,6 +8,15 @@ import type { NostrEvent } from '../../events'
 import type { RelayAnswer } from '../../relayOutcome'
 import { CAP_SUSPECT, FIRST_WINDOW_S, TapeReader, TapeUnanswered, askAll, beatOf, itemOf, randomStart } from '../tape'
 import { PLACEHOLDER } from '../../comments'
+import { newShard, toPayload } from 'sno-core/shards'
+
+/** A real object payload, as the workshop publishes it. */
+const OBJECT_PAYLOAD = (() => {
+  const s = newShard('tower')
+  s.vertices = [{ p: [0, 0, 0], c: [0, 0.9, 1] }, { p: [1, 0, 0], c: [0, 0.9, 1] }, { p: [0, 1, 0], c: [0, 0.9, 1] }]
+  s.faces = [[0, 1, 2]]
+  return JSON.stringify(toPayload(s))
+})()
 
 const PK = 'e8ed3798c6ffebffa08501ac39e271662bfd160f688f94c45d692d8767dd345a'
 
@@ -104,7 +113,9 @@ describe('itemOf', () => {
   })
 
   it('reads a public object and skips a sealed one and an avatar', () => {
-    expect(itemOf(ev(33331, 5, [['d', 'x']], '{}'))?.kind).toBe('object')
+    expect(itemOf(ev(33331, 5, [['d', 'x']], OBJECT_PAYLOAD))?.kind).toBe('object')
+    // One that does not read as a shard would be a product shot of nothing.
+    expect(itemOf(ev(33331, 5, [['d', 'x']], '{}'))).toBeNull()
     expect(itemOf(ev(33331, 5, [['d', 'x'], ['encrypted', 'aes-256-gcm', 'zz']]))).toBeNull()
     expect(itemOf(ev(33331, 5, [['d', 'avatar']], '{}'))).toBeNull()
   })

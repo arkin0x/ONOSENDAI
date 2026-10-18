@@ -26,7 +26,7 @@ import { useEffect, useMemo } from 'react'
 import { useFrame } from '@react-three/fiber'
 import { BlendFunction, Effect, EffectAttribute } from 'postprocessing'
 import { SRGBColorSpace, TextureLoader, Uniform, Vector4, type Texture } from 'three'
-import { useTv } from '../store/useTv'
+import { placeable, useTv } from '../store/useTv'
 
 /** How long the static of a cut lasts, ms. */
 export const STATIC_MS = 420
@@ -129,7 +129,12 @@ export function TvScreenEffect(): JSX.Element {
     const top = 1 - LOGO_MARGIN_Y
     ;(effect.uniforms.get('uLogoRect')!.value as Vector4).set(right - w, top - h, right, top)
     const since = performance.now() - tv.cutAt
-    effect.uniforms.get('uStatic')!.value = since < 0 || since > STATIC_MS ? (tv.status === 'tuning' || tv.status === 'no-signal' ? 0.9 : 0) : 1 - since / STATIC_MS
+    // A bag with no public place plays over static: the last picture behind
+    // its inset is often its author's own trip, which would hint at where
+    // it was hidden (review of #371).
+    const secret = tv.shot?.item?.kind === 'bag' && !placeable(tv.shot.item.hint) ? 0.85 : 0
+    const held = tv.status === 'tuning' || tv.status === 'no-signal' ? 0.9 : secret
+    effect.uniforms.get('uStatic')!.value = since < 0 || since > STATIC_MS ? held : Math.max(held, 1 - since / STATIC_MS)
   })
   return <primitive object={effect} />
 }

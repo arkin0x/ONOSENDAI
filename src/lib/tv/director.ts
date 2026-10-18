@@ -82,11 +82,13 @@ export const OBJECT_S = 7
 export const COMMENT_BASE_S = 4
 export const COMMENT_PER_CHAR_S = 0.05
 export const COMMENT_MAX_S = 16
+/** The longest quote the desk prints; a longer one is cut with an ellipsis, so it always finishes in its shot. */
+export const QUOTE_MAX = 240
 
 export function itemLength(item: TapeItem): number {
   if (item.kind === 'bag') return BAG_S
   if (item.kind === 'object') return OBJECT_S
-  const chars = item.text?.length ?? 60
+  const chars = Math.min(QUOTE_MAX + 1, item.text?.length ?? 64)
   return Math.min(COMMENT_MAX_S, COMMENT_BASE_S + chars * COMMENT_PER_CHAR_S)
 }
 

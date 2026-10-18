@@ -19,7 +19,8 @@ import { coordToXyz, hexToCoord } from 'cyberspace-core'
 import { ACTION_KIND, parseAction, type NostrEvent } from '../events'
 import type { Filter } from 'nostr-tools'
 import { mergeAnswers, type RelayAnswer } from '../relayOutcome'
-import { HIDDEN_KIND, OBJECT_KIND } from '../hidden'
+import { HIDDEN_KIND, OBJECT_KIND, heightHint } from '../hidden'
+import { fromPayload } from 'sno-core/shards'
 import { parseHint } from '../hint'
 import { COMMENT_KIND, PLACEHOLDER, parseComment } from '../comments'
 import type { Beat, TapeItem } from './director'
@@ -111,8 +112,8 @@ export const COMMENTED_KINDS = [String(ACTION_KIND), String(HIDDEN_KIND)]
 export function itemOf(ev: NostrEvent): TapeItem | null {
   const base = { id: ev.id, pubkey: ev.pubkey, at: ev.created_at }
   if (ev.kind === HIDDEN_KIND) {
-    const h = Number(ev.tags.find((t) => t[0] === 'h')?.[1])
-    const height = Number.isInteger(h) && h >= 0 && h <= 85 ? h : null
+    const h = heightHint(ev)
+    const height = h !== null && h <= 85 ? h : null
     return { kind: 'bag', ...base, height, hint: parseHint(ev.tags, height ?? 0) }
   }
   if (ev.kind === OBJECT_KIND) {
@@ -120,6 +121,8 @@ export function itemOf(ev: NostrEvent): TapeItem | null {
     if (ev.tags.some((t) => t[0] === 'encrypted')) return null
     const d = ev.tags.find((t) => t[0] === 'd')?.[1]
     if (!d || d === 'avatar') return null
+    // One that does not read as a shard would be a product shot of nothing.
+    try { if (!fromPayload(JSON.parse(ev.content), `${ev.pubkey}:${d}`)) return null } catch { return null }
     return { kind: 'object', ...base, event: ev }
   }
   if (ev.kind === COMMENT_KIND) {

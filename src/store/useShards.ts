@@ -1021,7 +1021,7 @@ export const useShards = create<ShardsState>((set, get) => {
         deploySpin: d.shard.spin ?? 0,
         deployTurn: [0, 0, 0],
         deployFollow: false,
-        deployBag: d.bag ?? DEFAULT_BAG_SETTINGS,
+        deployBag: { ...DEFAULT_BAG_SETTINGS, ...(d.bag ?? {}) },
         deployBagFrom: ownBagIn(get().mine, regionOf(positionOf(d), d.plane, d.height)),
         deployStatus: 'idle',
         deployError: null,

@@ -603,8 +603,12 @@ export function bagContentsTags(inners: readonly (BagEntry | ChatRumor)[], setti
   return c.cashu > 0 ? [['contents', 'cashu']] : []
 }
 
-/** What a bag's public tags say it holds: whether money, and the counts when they are given (null when not). */
-export function readBagContents(tags: string[][]): { money: boolean; counts: Partial<BagContents> | null } {
+/**
+ * What a bag's public tags say it holds: whether money is inside (any cashu
+ * row, for display), whether the money-alone hint was chosen (a cashu row
+ * with no count, for the bag's settings), and the counts when given.
+ */
+export function readBagContents(tags: string[][]): { money: boolean; moneyAlone: boolean; counts: Partial<BagContents> | null } {
   const rows = tags.filter((t) => t[0] === 'contents' && (CONTENTS_KINDS as readonly string[]).includes(t[1] ?? ''))
   const counts: Partial<BagContents> = {}
   let counted = false
@@ -612,7 +616,7 @@ export function readBagContents(tags: string[][]): { money: boolean; counts: Par
     const n = t[2] === undefined ? NaN : Number(t[2])
     if (Number.isInteger(n) && n > 0 && n < 1_000_000) { counts[t[1] as keyof BagContents] = n; counted = true }
   }
-  return { money: rows.some((t) => t[1] === 'cashu'), counts: counted ? counts : null }
+  return { money: rows.some((t) => t[1] === 'cashu'), moneyAlone: rows.some((t) => t[1] === 'cashu' && t[2] === undefined), counts: counted ? counts : null }
 }
 
 function sameHint(a: HintHeights | null, b: HintHeights | null): boolean {
@@ -651,7 +655,10 @@ export function bagSettingsOf(ev: NostrEvent, height: number): BagSettings {
   const h = heightHint(ev)
   const hint = parseHint(ev.tags, h ?? height)
   const said = readBagContents(ev.tags)
-  return { heightTag: h !== null, hint: hint ? hint.heights : null, riddle: ev.content.slice(0, MAX_RIDDLE_LENGTH), contents: said.counts !== null, money: said.money }
+  // Money as a setting only in its own form: a counted cashu row is the
+  // contents hint speaking, and reading it as money left a bag announcing
+  // cashu after contents was turned off (review of #378).
+  return { heightTag: h !== null, hint: hint ? hint.heights : null, riddle: ev.content.slice(0, MAX_RIDDLE_LENGTH), contents: said.counts !== null, money: said.moneyAlone }
 }
 
 /** Where a bag's region is, for a hint's base: any point inside the region will do (lib/hint.ts). */

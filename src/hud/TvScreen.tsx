@@ -21,7 +21,7 @@ import { formatCellSize } from 'sno-core/scale'
 import { actionLabel } from '../lib/events'
 import { MAX_SCALE_EXP } from '../lib/space'
 import { chainLengthAt, countTo } from '../lib/tv/stats'
-import { safeNpub } from '../lib/npub'
+import { tvName } from '../lib/tv/text'
 import { useEscape } from '../hooks/useEscape'
 import { useProfile } from '../hooks/useProfile'
 import { placeable, useTv } from '../store/useTv'
@@ -61,11 +61,7 @@ export function skipWords(seconds: number): string {
   return parts.join(' ')
 }
 
-function nameOf(pubkey: string, profileName: string | null | undefined): string {
-  if (profileName) return profileName.toUpperCase()
-  const npub = safeNpub(pubkey)
-  return npub ? `${npub.slice(0, 12)}…` : `${pubkey.slice(0, 8)}…`
-}
+const nameOf = tvName
 
 function ZoomGauge({ scaleExp }: { scaleExp: number }): JSX.Element {
   const top = MAX_SCALE_EXP + 1
@@ -113,6 +109,7 @@ function Ticker(): JSX.Element | null {
   const census = useTv((s) => s.census)
   const chains = useTv((s) => s.chains)
   const arrivals = useTv((s) => s.arrivals)
+  const reactions = useTv((s) => s.reactions)
   const profile = useProfile(shot?.pubkey)
   const items = useMemo(() => {
     if (tapeTime === null) return []
@@ -136,8 +133,9 @@ function Ticker(): JSX.Element | null {
       }
     }
     for (const a of [...arrivals].reverse()) out.push(`NEW ARRIVAL ${nameOf(a.pubkey, undefined)}`)
+    for (const r of [...reactions].reverse()) out.push(`${r.content} FROM ${nameOf(r.pubkey, undefined)} ON A ${r.on === 'shard' ? 'SHARD' : 'MOVE'}`)
     return out
-  }, [shot, played, tapeTime, census, chains, arrivals, profile])
+  }, [shot, played, tapeTime, census, chains, arrivals, reactions, profile])
   if (items.length === 0) return null
   const line = items.join('   ◆   ')
   return (

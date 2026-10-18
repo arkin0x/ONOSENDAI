@@ -7,6 +7,7 @@
  *   stamped on each side, the sides fading, LOCATION SECRET. A bag whose
  *   hint box is public plays in the world instead (scene/TvBoxes).
  * - An object published: the product shot, the object turning, its name.
+ * - A new avatar: the same product shot, NEW LOOK, the owner's name.
  * - A comment: the news desk. "on the left third the avatar was displayed
  *   like a photograph and the right 2/3 was a box with the comment as a
  *   Quote that prints out like words being transcribed in real time". A
@@ -19,8 +20,9 @@ import { useEffect, useMemo, useState } from 'react'
 import { useAvatarShard } from '../store/useAvatars'
 import { placeable, shotProgress, useTv } from '../store/useTv'
 import { useProfile } from '../hooks/useProfile'
-import { safeNpub } from '../lib/npub'
+import { tvName } from '../lib/tv/text'
 import { objectsOf } from '../workshop/ObjectPicker'
+import { avatarFromEvent } from '../lib/avatar'
 import { QUOTE_MAX, itemLength, type TapeItem } from '../lib/tv/director'
 import { ShardSpin } from '../scene/ShardSpin'
 import { ProfilePic } from './ProfileBadge'
@@ -35,11 +37,7 @@ const TYPE_DONE_BEFORE_S = 1.5
 /** The spinning pictures, at most: smaller on a phone, where the panel stacks. */
 const spinSize = (wide: number, narrow: number): number => (typeof window !== 'undefined' && window.innerWidth < 600 ? narrow : wide)
 
-function nameOf(pubkey: string, profileName: string | null | undefined): string {
-  if (profileName) return profileName.toUpperCase()
-  const npub = safeNpub(pubkey)
-  return npub ? `${npub.slice(0, 12)}…` : `${pubkey.slice(0, 8)}…`
-}
+const nameOf = tvName
 
 /**
  * Seconds since the segment came on (after its static), by the shot's own
@@ -124,6 +122,21 @@ function ObjectSpot({ item }: { item: Extract<TapeItem, { kind: 'object' }> }): 
   )
 }
 
+function AvatarSpot({ item }: { item: Extract<TapeItem, { kind: 'avatar' }> }): JSX.Element | null {
+  const profile = useProfile(item.pubkey)
+  const shard = useMemo(() => avatarFromEvent(item.event), [item.event])
+  if (!shard) return null
+  return (
+    <div className="tvseg tvseg--object" key={item.id}>
+      <div className="tvseg__stage"><ShardSpin shard={shard} size={spinSize(220, 150)} /></div>
+      <div className="tvseg__caption">
+        <span className="tvseg__kicker">NEW LOOK</span>
+        <span className="tvseg__title">{nameOf(item.pubkey, profile?.name)}</span>
+      </div>
+    </div>
+  )
+}
+
 function CommentDesk({ item }: { item: Extract<TapeItem, { kind: 'comment' }> }): JSX.Element {
   const profile = useProfile(item.pubkey)
   const about = useProfile(item.about ?? undefined)
@@ -168,13 +181,17 @@ export function TvSegment(): JSX.Element | null {
   if (!item) return null
   if (item.kind === 'bag') return placeable(item.hint) ? null : <BagInset key={item.id} item={item} />
   if (item.kind === 'object') return <ObjectSpot key={item.id} item={item} />
+  if (item.kind === 'avatar') return <AvatarSpot key={item.id} item={item} />
   // Keyed, so a comment straight after another starts its own clock.
-  return <CommentDesk key={item.id} item={item} />
+  if (item.kind === 'comment') return <CommentDesk key={item.id} item={item} />
+  return null
 }
 
 /** What the chiron says a segment's author did. */
 export function segmentDoing(item: TapeItem): string {
   if (item.kind === 'bag') return placeable(item.hint) ? 'SEALED A BAG · HINT BOX PUBLIC' : 'SEALED A BAG'
   if (item.kind === 'object') return 'PUBLISHED AN OBJECT'
+  if (item.kind === 'avatar') return 'NEW AVATAR'
+  if (item.kind === 'reaction') return 'REACTED'
   return item.on === 'bag' ? 'COMMENTED ON A BAG' : 'COMMENTED ON A MOVE'
 }

@@ -12,12 +12,17 @@
 
 import { safeNpub } from '../npub'
 
-/** Control and format characters, except the zero-width joiner. */
-const UNSAFE = /(?!‍)[\p{Cc}\p{Cf}]/gu
+/**
+ * Control and format characters, except the zero-width joiner and the tag
+ * characters a regional flag is spelled with (a black flag + tags = Scotland).
+ */
+const UNSAFE = /(?![\u200D\u{E0020}-\u{E007F}])[\p{Cc}\p{Cf}]/gu
+/** Line breaks and tabs, which read as a space (as the page shows them), not as nothing. */
+const SPACES = /[\t\n\v\f\r\u0085\u2028\u2029]+/g
 
 /** `text` without control or format characters, cut to `max` whole characters (with an ellipsis) when given. */
 export function cleanText(text: string, max?: number): string {
-  const clean = text.replace(UNSAFE, '').trim()
+  const clean = text.replace(SPACES, ' ').replace(UNSAFE, '').trim()
   if (max === undefined) return clean
   const chars = Array.from(clean)
   return chars.length > max ? `${chars.slice(0, max).join('').trimEnd()}…` : clean

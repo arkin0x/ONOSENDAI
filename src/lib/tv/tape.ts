@@ -154,7 +154,10 @@ export function itemOf(ev: NostrEvent): TapeItem | null {
     if (!c) return null
     const sealed = c.ciphertext !== null || c.preview === PLACEHOLDER
     const about = ev.tags.find((t) => t[0] === 'P')?.[1] ?? null
-    return { kind: 'comment', ...base, on: k === String(ACTION_KIND) ? 'move' : 'bag', text: sealed ? null : cleanText(c.preview) || null, about }
+    const text = sealed ? null : cleanText(c.preview)
+    // Public words that were all invisible: nothing to print, and not sealed.
+    if (text === '') return null
+    return { kind: 'comment', ...base, on: k === String(ACTION_KIND) ? 'move' : 'bag', text, about }
   }
   return null
 }

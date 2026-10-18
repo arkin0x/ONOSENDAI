@@ -10,6 +10,15 @@ describe('cleanText', () => {
     expect(cleanText('ab‮cd\u0007e​f')).toBe('abcdef')
   })
 
+  it('reads line breaks and tabs as a space, not as nothing', () => {
+    expect(cleanText('line one.\n\nLine two\tand\r\nthree')).toBe('line one. Line two and three')
+  })
+
+  it('keeps a regional flag whole', () => {
+    const scotland = '\u{1F3F4}\u{E0067}\u{E0062}\u{E0073}\u{E0063}\u{E0074}\u{E007F}'
+    expect(cleanText(scotland)).toBe(scotland)
+  })
+
   it('keeps an emoji built with a zero-width joiner whole', () => {
     expect(cleanText('👩‍💻')).toBe('👩‍💻')
   })

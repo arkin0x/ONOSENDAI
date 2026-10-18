@@ -116,3 +116,24 @@ describe('a long comment on a phone on its side', () => {
     expect(y + h).toBeLessThanOrEqual(287)
   })
 })
+
+describe('the minimap', () => {
+  it('draws the sun and, once there is an avatar on screen, its dot', () => {
+    const arcs: number[][] = []
+    const ctx = new Proxy({ measureText: (t: string) => ({ width: Array.from(t).length * 7 }), createLinearGradient: () => ({ addColorStop: () => {} }), createRadialGradient: () => ({ addColorStop: () => {} }), arc: (...a: number[]) => { arcs.push(a) } } as Record<string, unknown>, {
+      get: (target, key) => (key in target ? target[key as string] : () => {}),
+      set: () => true,
+    })
+    const p = new TvPainter({ width: 0, height: 0, getContext: () => ctx } as unknown as HTMLCanvasElement)
+    p.size(1280, 720, 1)
+    p.paint(picture({ status: 'tuning' }), assets, 1000, 1, false)
+    const alone = arcs.length
+    const mid = 1n << 84n
+    const shot = { id: 'a'.repeat(64), kind: 'trip' as const, pubkey: 'p', beats: [], start: 1, end: 1, offsets: [], length: 5 }
+    arcs.length = 0
+    p.paint(picture({ shot, avatars: { p: { position: { x: mid, y: mid, z: mid }, plane: 0, at: 1 } } }), assets, 2000, 1, false)
+    // One more circle than with nobody on screen: the dot.
+    expect(alone).toBeGreaterThanOrEqual(1)
+    expect(arcs.length).toBeGreaterThan(alone)
+  })
+})

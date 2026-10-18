@@ -20,7 +20,7 @@ import { useFrame, useThree } from '@react-three/fiber'
 import { Vector3 } from 'three'
 import { GRID_RADIUS, originShift, placeCentre, renderDirection, type Position, type ViewAxes } from '../lib/space'
 import type { Framing } from '../lib/tv/director'
-import { targetColor, drawnAvatars } from '../lib/targets'
+import { drawnAvatars } from '../lib/targets'
 import { avatarTurn } from '../lib/facing'
 import { committedAnchor } from '../lib/renderFrame'
 import { alignedOrigin, useCyberspace } from '../store/useCyberspace'
@@ -28,6 +28,7 @@ import { shotProgress, useTv } from '../store/useTv'
 import { useProfile } from '../hooks/useProfile'
 import { OtherAvatar } from './OtherAvatar'
 import { tvName } from '../lib/tv/text'
+import { AVATAR_RED } from './tvPainter'
 import { TvBoxes } from './TvBoxes'
 import { SpawnMarker } from './SpawnMarker'
 
@@ -62,7 +63,10 @@ function TapeAvatar({ pubkey, centre, position, from, born, place, subject }: { 
   // avatar does after a move (lib/facing.ts; arkinox, 2026-10-18: "when my
   // avatar moves, it always faces the same direction").
   const turn = useMemo(() => avatarTurn(useCyberspace.getState().axes(), from ? [from, position] : null), [from, position])
-  return <OtherAvatar pubkey={pubkey} color={targetColor(pubkey)} center={centre} position={position} place={place} turn={turn} label={text} labelOpacity={subject ? 0.9 : 0.5} tappable={false} keepShape size={() => grownAt(born, performance.now())} />
+  // Every plain avatar in the standard red, as your own is drawn: a hue per
+  // person bloomed to white on the tube (arkinox, 2026-10-18: "i want all
+  // avatar dodecahedrons to be the standard red color, not white").
+  return <OtherAvatar pubkey={pubkey} color={AVATAR_RED} center={centre} position={position} place={place} turn={turn} label={text} labelOpacity={subject ? 0.9 : 0.5} tappable={false} keepShape size={() => grownAt(born, performance.now())} />
 }
 
 /** How high a sun shot's camera stands for each view, as a share of up: above, level, below. */

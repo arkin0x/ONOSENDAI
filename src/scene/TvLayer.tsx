@@ -56,10 +56,17 @@ function TvCamera({ axes }: { axes: ViewAxes }): null {
   const was = useRef<{ origin: ReturnType<typeof alignedOrigin>; scaleExp: number; cutAt: number } | null>(null)
   const at = useMemo(() => new Vector3(), [])
 
+  // Your own orbit, put back when TV ends: the angle and distance you were
+  // looking from, not TV's last shot (review of #370).
   useEffect(() => {
     if (!controls) return
     controls.enabled = false
-    return () => { controls.enabled = true }
+    const yours = controls.object.position.clone().sub(controls.target)
+    return () => {
+      controls.object.position.copy(controls.target).add(yours)
+      controls.enabled = true
+      controls.update()
+    }
   }, [controls])
 
   useFrame((_, dt) => {

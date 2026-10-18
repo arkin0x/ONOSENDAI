@@ -38,11 +38,11 @@ describe('bagTemplate writes exactly the tags each combination asks for', () => 
   const sector = hintTags(at, 0, SECTOR_HINT)
   const cases: [string, BagSettings, string[], string][] = [
     ['defaults: h, no hint, no riddle', DEFAULT_BAG_SETTINGS, ['d', 'encrypted', 'version', 'h'], ''],
-    ['h off', { heightTag: false, hint: null, riddle: '' }, ['d', 'encrypted', 'version'], ''],
-    ['sector hint', { heightTag: true, hint: SECTOR_HINT, riddle: '' }, ['d', 'encrypted', 'version', 'h', 'hint', 'X', 'Y', 'Z', 'S'], ''],
-    ['sector hint, h off', { heightTag: false, hint: SECTOR_HINT, riddle: '' }, ['d', 'encrypted', 'version', 'hint', 'X', 'Y', 'Z', 'S'], ''],
-    ['riddle only', { heightTag: true, hint: null, riddle: '  where the black sun sets ' }, ['d', 'encrypted', 'version', 'h'], 'where the black sun sets'],
-    ['everything', { heightTag: true, hint: SECTOR_HINT, riddle: 'look up' }, ['d', 'encrypted', 'version', 'h', 'hint', 'X', 'Y', 'Z', 'S'], 'look up'],
+    ['h off', { heightTag: false, hint: null, riddle: '', contents: false, money: false }, ['d', 'encrypted', 'version'], ''],
+    ['sector hint', { heightTag: true, hint: SECTOR_HINT, riddle: '', contents: false, money: false }, ['d', 'encrypted', 'version', 'h', 'hint', 'X', 'Y', 'Z', 'S'], ''],
+    ['sector hint, h off', { heightTag: false, hint: SECTOR_HINT, riddle: '', contents: false, money: false }, ['d', 'encrypted', 'version', 'hint', 'X', 'Y', 'Z', 'S'], ''],
+    ['riddle only', { heightTag: true, hint: null, riddle: '  where the black sun sets ', contents: false, money: false }, ['d', 'encrypted', 'version', 'h'], 'where the black sun sets'],
+    ['everything', { heightTag: true, hint: SECTOR_HINT, riddle: 'look up', contents: false, money: false }, ['d', 'encrypted', 'version', 'h', 'hint', 'X', 'Y', 'Z', 'S'], 'look up'],
   ]
   for (const [label, settings, tagNames, content] of cases) {
     it(label, async () => {
@@ -51,12 +51,12 @@ describe('bagTemplate writes exactly the tags each combination asks for', () => 
       expect(ev.content).toBe(content)
       if (settings.heightTag) expect(ev.tags).toContainEqual(['h', String(HEIGHT)])
       if (settings.hint) for (const t of sector) expect(ev.tags).toContainEqual(t)
-      expect(bagSettingsOf(ev, HEIGHT)).toEqual({ ...settings, riddle: content })
+      expect(bagSettingsOf(ev, HEIGHT)).toEqual({ ...settings, riddle: content, contents: false, money: false })
     })
   }
 
   it('caps the riddle', async () => {
-    const ev = await bagWith({ ...DEFAULT_BAG_SETTINGS, riddle: 'x'.repeat(MAX_RIDDLE_LENGTH + 50) })
+    const ev = await bagWith({ ...DEFAULT_BAG_SETTINGS, riddle: 'x'.repeat(MAX_RIDDLE_LENGTH + 50), contents: false, money: false })
     expect(ev.content).toHaveLength(MAX_RIDDLE_LENGTH)
   })
 
@@ -70,12 +70,12 @@ describe('bagTemplate writes exactly the tags each combination asks for', () => 
 
 describe('a bag without h (spec §8.6: optional)', () => {
   it('opens at the height of the key that opened it, with its settings on every item', async () => {
-    const ev = await bagWith({ heightTag: false, hint: SECTOR_HINT, riddle: 'cold' })
+    const ev = await bagWith({ heightTag: false, hint: SECTOR_HINT, riddle: 'cold', contents: false, money: false })
     const found = await unbag(ev, rk.key, undefined, undefined, HEIGHT)
     expect(found).toHaveLength(1)
     expect(found[0].height).toBe(HEIGHT)
     expect(found[0].text).toBe('under the bridge')
-    expect(found[0].bag).toEqual({ heightTag: false, hint: SECTOR_HINT, riddle: 'cold' })
+    expect(found[0].bag).toEqual({ heightTag: false, hint: SECTOR_HINT, riddle: 'cold', contents: false, money: false })
   })
 
   it('without a known height still opens, at 0, as before', async () => {
@@ -92,25 +92,25 @@ describe('a bag without h (spec §8.6: optional)', () => {
 })
 
 describe('resolveBagSettings: what you changed wins, what you left takes the bag\'s current value', () => {
-  const seed: BagSettings = { heightTag: true, hint: null, riddle: 'old riddle' }
+  const seed: BagSettings = { heightTag: true, hint: null, riddle: 'old riddle', contents: false, money: false }
 
   it('carries forward a riddle and hint written elsewhere since the controls were seeded', () => {
-    const current: BagSettings = { heightTag: true, hint: SECTOR_HINT, riddle: 'newer riddle' }
+    const current: BagSettings = { heightTag: true, hint: SECTOR_HINT, riddle: 'newer riddle', contents: false, money: false }
     expect(resolveBagSettings(seed, seed, current, HEIGHT)).toEqual(current)
   })
 
   it('keeps a change you made, including clearing the riddle on purpose', () => {
-    const chosen: BagSettings = { heightTag: false, hint: null, riddle: '' }
-    expect(resolveBagSettings(chosen, seed, { ...seed, hint: SECTOR_HINT }, HEIGHT)).toEqual({ heightTag: false, hint: SECTOR_HINT, riddle: '' })
+    const chosen: BagSettings = { heightTag: false, hint: null, riddle: '', contents: false, money: false }
+    expect(resolveBagSettings(chosen, seed, { ...seed, hint: SECTOR_HINT }, HEIGHT)).toEqual({ heightTag: false, hint: SECTOR_HINT, riddle: '', contents: false, money: false })
   })
 
   it('takes the choices as they are for a region with no bag yet', () => {
-    const chosen: BagSettings = { heightTag: false, hint: SECTOR_HINT, riddle: 'new' }
+    const chosen: BagSettings = { heightTag: false, hint: SECTOR_HINT, riddle: 'new', contents: false, money: false }
     expect(resolveBagSettings(chosen, DEFAULT_BAG_SETTINGS, null, HEIGHT)).toEqual(chosen)
   })
 
   it('never lets defaults overwrite an existing bag the controls were not seeded from', () => {
-    const current: BagSettings = { heightTag: false, hint: [11, 11, 11], riddle: 'kept' }
+    const current: BagSettings = { heightTag: false, hint: [11, 11, 11], riddle: 'kept', contents: false, money: false }
     expect(resolveBagSettings(DEFAULT_BAG_SETTINGS, DEFAULT_BAG_SETTINGS, current, HEIGHT)).toEqual(current)
   })
 

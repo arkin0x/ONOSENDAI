@@ -5,7 +5,7 @@
 import { describe, expect, it } from 'vitest'
 import { itemLength, QUOTE_MAX } from '../../lib/tv/director'
 import { STATIC_MS } from '../../scene/TvScreenEffect'
-import { TYPE_S, quoteOf, redaction, typePace } from '../TvSegments'
+import { TYPE_S, contentsWords, quoteOf, redaction, segmentDoing, typePace } from '../TvSegments'
 
 const comment = (text: string | null) => ({ kind: 'comment' as const, id: 'ab'.repeat(32), pubkey: 'p', at: 1, text, on: 'move' as const, about: null })
 
@@ -29,5 +29,17 @@ describe('the news desk', () => {
   it('prints a sealed quote as redaction of one length, whatever was written', () => {
     expect(quoteOf(comment(null))).toBe(redaction('ab'.repeat(32)))
     expect(quoteOf(comment(null)).replace(/[█ ]/g, '')).toBe('')
+  })
+})
+
+describe('a bag on the chiron', () => {
+  const bag = { kind: 'bag' as const, id: 'b'.repeat(64), pubkey: 'p', at: 1, hint: null, height: 3 }
+  it('says what is inside when its author published that', () => {
+    expect(contentsWords({ shard: 3, message: 1, cashu: 1 })).toBe('3 SHARDS · 1 MESSAGE · 1 CASHU TOKEN')
+    expect(segmentDoing({ ...bag, money: true, counts: { shard: 3, message: 1, cashu: 1 } })).toBe('SEALED A BAG · 3 SHARDS · 1 MESSAGE · 1 CASHU TOKEN')
+  })
+  it('says money is inside when only that was published, and nothing more when nothing was', () => {
+    expect(segmentDoing({ ...bag, money: true, counts: null })).toBe('SEALED A BAG · CASHU INSIDE')
+    expect(segmentDoing({ ...bag, money: false, counts: null })).toBe('SEALED A BAG')
   })
 })

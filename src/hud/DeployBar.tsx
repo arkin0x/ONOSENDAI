@@ -426,7 +426,7 @@ export function DeployBar({ pad = false }: { pad?: boolean }): JSX.Element | nul
         </div>
       )}
 
-      {!intoChest && <BagControls height={height} bag={bag} existing={existing?.count ?? 0} />}
+      {!intoChest && <BagControls height={height} bag={bag} existing={existing?.count ?? 0} cashu={(pending.type === 'message' && findCashuToken(pending.text) !== null) || (existing?.cashu ?? false)} />}
       </div>
 
     </div>
@@ -443,7 +443,7 @@ function Pow({ e }: { e: number }): JSX.Element {
  * messages alike. `existing` is how many of your things the cursor's region
  * already holds: the settings are that bag's, and the bar says so.
  */
-function BagControls({ height, bag, existing }: { height: number; bag: ReturnType<typeof useShards.getState>['deployBag']; existing: number }): JSX.Element {
+function BagControls({ height, bag, existing, cashu }: { height: number; bag: ReturnType<typeof useShards.getState>['deployBag']; existing: number; cashu: boolean }): JSX.Element {
   const set = (patch: Partial<typeof bag>): void => useShards.getState().setDeployBag(patch)
   // A hint must be at least the bag's height (spec §7.7); a sector is 2^30.
   const sectorFits = height <= SECTOR_HEIGHT
@@ -482,6 +482,19 @@ function BagControls({ height, bag, existing }: { height: number; bag: ReturnTyp
           onCheckedChange={(v) => set({ hint: v ? SECTOR_HINT : null })}
         />
       </Field>
+
+      {/* What is inside, by kind and count, on the bag's face; and, when a
+          cashu token is inside, money alone (arkinox, 2026-10-18: bags with
+          "a little more personality", hyped on Cyberspace TV). Worked out
+          from the bag each time it is sealed (lib/hidden.ts bagContentsTags). */}
+      <Field id="deploy-contents-hint" label="Publish contents" hint="Tells seekers what is inside: how many shards, messages, keys, chests and cashu tokens. Not where, and not what they say.">
+        <Switch id="deploy-contents-hint" checked={bag.contents} onCheckedChange={(v) => set({ contents: v })} />
+      </Field>
+      {cashu && !bag.contents && (
+        <Field id="deploy-money-hint" label="Publish that money is inside" hint="Tells seekers there is cashu in this bag, without saying how much.">
+          <Switch id="deploy-money-hint" checked={bag.money} onCheckedChange={(v) => set({ money: v })} />
+        </Field>
+      )}
 
       <div className="deploybar__riddle">
         <label className="ui-field__text" htmlFor="deploy-riddle">

@@ -19,7 +19,7 @@ import { coordToXyz, hexToCoord } from 'cyberspace-core'
 import { ACTION_KIND, parseAction, type NostrEvent } from '../events'
 import type { Filter } from 'nostr-tools'
 import { mergeAnswers, type RelayAnswer } from '../relayOutcome'
-import { HIDDEN_KIND, OBJECT_KIND, heightHint } from '../hidden'
+import { HIDDEN_KIND, OBJECT_KIND, heightHint, readBagContents } from '../hidden'
 import { fromPayload } from 'sno-core/shards'
 import { parseHint } from '../hint'
 import { COMMENT_KIND, PLACEHOLDER, parseComment } from '../comments'
@@ -124,7 +124,9 @@ export function itemOf(ev: NostrEvent): TapeItem | null {
   if (ev.kind === HIDDEN_KIND) {
     const h = heightHint(ev)
     const height = h !== null && h <= 85 ? h : null
-    return { kind: 'bag', ...base, height, hint: parseHint(ev.tags, height ?? 0) }
+    // What its author chose to say is inside (lib/hidden.ts bagContentsTags).
+    const said = readBagContents(ev.tags)
+    return { kind: 'bag', ...base, height, hint: parseHint(ev.tags, height ?? 0), money: said.money, counts: said.counts }
   }
   if (ev.kind === OBJECT_KIND) {
     // A sealed object (hidden by reference, or for sale) is not public.

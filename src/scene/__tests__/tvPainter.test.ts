@@ -76,7 +76,7 @@ describe('the sealed bag', () => {
   /** The bag's panel painted at `t` seconds into it (its shot over, so the clock reads its length). */
   function drawnAt(t: number): number {
     vi.spyOn(performance, 'now').mockReturnValue(1e12)
-    const bag = { kind: 'bag' as const, id: 'b'.repeat(64), pubkey: 'p', at: 1, hint: null, height: 3 }
+    const bag = { kind: 'bag' as const, id: 'b'.repeat(64), pubkey: 'p', at: 1, hint: null, height: 3, money: false, counts: null }
     const shot = { id: bag.id, kind: 'bag' as const, item: bag, pubkey: 'p', beats: [], start: 1, end: 1, offsets: [], length: t + 0.7 }
     useTv.setState({ shot, status: 'playing' })
     const c = counting()

@@ -31,6 +31,7 @@
  * sealed as it is.
  */
 
+import { findCashuToken } from '../lib/cashu'
 import { clampUnit, normalizeStored } from 'sno-core/shards'
 import { snapOffered, wrapSpin } from '../lib/pose'
 import { create } from 'zustand'
@@ -75,6 +76,7 @@ import {
   type Hidden,
   type HiddenType,
   type KeyItem,
+  MESSAGE_KIND,
 } from '../lib/hidden'
 import { retractionTemplate } from '../lib/published'
 import { openWithSecret, openWithSigner, openerFor, readContents, resealWithout, revealedIn, sealEntries, type OpeningKey } from '../lib/chests'
@@ -384,7 +386,7 @@ export function regionOf(at: Position, plane: Plane, height: number): string {
 }
 
 /** Your bag in a region, as this device knows it: its settings and how many of your things it holds. */
-export interface OwnBag { region: string; settings: BagSettings; count: number }
+export interface OwnBag { region: string; settings: BagSettings; count: number; /** A cashu token is written in one of its messages. */ cashu: boolean }
 
 /**
  * Your bag in this region, from `mine`, or null when this device knows of none.
@@ -395,7 +397,7 @@ export function ownBagIn(mine: MyDeployment[], region: string): OwnBag | null {
   const items = mine.filter((d) => regionOf(positionOf(d), d.plane, d.height) === region)
   if (items.length === 0) return null
   const newest = items.reduce((a, b) => (b.createdAt > a.createdAt ? b : a))
-  return { region, settings: newest.bag ?? DEFAULT_BAG_SETTINGS, count: items.length }
+  return { region, settings: { ...DEFAULT_BAG_SETTINGS, ...(newest.bag ?? {}) }, count: items.length, cashu: items.some((d) => d.inner.kind === MESSAGE_KIND && findCashuToken(d.inner.content) !== null) }
 }
 
 /** The realistic ceiling for interactive scanning (spec §7.3 says 0..16). */

@@ -28,7 +28,7 @@ import { MAX_SCALE_EXP } from '../lib/space'
 import { chainLengthAt, countTo } from '../lib/tv/stats'
 import { itemLength, type Shot, type TapeItem } from '../lib/tv/director'
 import { LANDMARKS } from '../hud/ScaleLadder'
-import { CUT_MS, quoteOf, segmentDoing, typePace, TYPE_DELAY_S } from '../hud/TvSegments'
+import { CUT_MS, contentsWords, quoteOf, segmentDoing, typePace, TYPE_DELAY_S } from '../hud/TvSegments'
 import { placeable, shotProgress, type TvAvatar } from '../store/useTv'
 import type { Census, ChainTimes } from '../lib/tv/stats'
 import type { Position } from '../lib/space'
@@ -58,6 +58,11 @@ const MAP_BOTTOM = '#c4207e'
 const MAP_CENTRE = '#8a5cff'
 const MAP_SUN = '#b45cff'
 const MAP_DIVISIONS = 8
+
+/** A starburst's colours and its two lines of words. */
+interface SplashLook { fill: string; edge: string; words: [string, string] }
+const AD_SPLASH: SplashLook = { fill: '#ffd23f', edge: '#ff2d7a', words: ['NOW', 'AVAILABLE!'] }
+const MONEY_SPLASH: SplashLook = { fill: '#ffc21a', edge: '#ff7a00', words: ['CASHU', 'INSIDE!'] }
 /** The minimap's turn, radians a second: about once round in forty seconds. */
 const MAP_TURN = 0.15
 const ACCENT = '#00e5ff'
@@ -700,7 +705,11 @@ export class TvPainter {
 
     if (item.kind === 'bag') {
       this.cube(sx + (stacked ? (pw - 2 * pad - stage) / 2 : 0), sy, stage, t, s)
-      this.caption(tx, ty + (narrow ? 0 : stage / 2 - 40 * s), textW, 'A BAG IS SEALED', 'LOCATION SECRET', item.height !== null ? `A REGION 2^${item.height} GIBSONS ACROSS` : null, s)
+      // What its author said is inside, when they said; else how big a region.
+      const inside = contentsWords(item.counts)
+      this.caption(tx, ty + (narrow ? 0 : stage / 2 - 40 * s), textW, 'A BAG IS SEALED', 'LOCATION SECRET', inside ?? (item.height !== null ? `A REGION 2^${item.height} GIBSONS ACROSS` : null), s)
+      // Money inside: hyped, on the cube's corner (arkinox, 2026-10-18).
+      if (item.money) this.splash(sx + (stacked ? (pw - 2 * pad - stage) / 2 : 0) + stage * 0.9, sy + stage * 0.12, stage * 0.28, t, s, MONEY_SPLASH)
     } else if (item.kind === 'object') {
       // An advertisement: the product turning in the middle, NOW AVAILABLE!
       // slammed on its corner, the words centred under it.
@@ -712,7 +721,7 @@ export class TvPainter {
       if (stacked) this.caption(px + pw / 2, ty, textW, 'NEW IN CYBERSPACE', title, `FROM ${a.name(item.pubkey)}`, s, 'center')
       else this.caption(tx, ty + stage / 2 - 40 * s, textW, 'NEW IN CYBERSPACE', title, `FROM ${a.name(item.pubkey)}`, s)
       // On the model's left (arkinox, 2026-10-18: "move the now available to the left side").
-      this.splash(ox + stage * 0.08, sy + stage * 0.14, stage * 0.3, t, s)
+      this.splash(ox + stage * 0.08, sy + stage * 0.14, stage * 0.3, t, s, AD_SPLASH)
     } else if (item.kind === 'avatar') {
       const ox = sx + (stacked ? (pw - 2 * pad - stage) / 2 : 0)
       if (a.spin) ctx.drawImage(a.spin, ox, sy, stage, stage)
@@ -766,7 +775,7 @@ export class TvPainter {
    * lands from large (a stamp), then sways and breathes for the rest of the
    * segment.
    */
-  private splash(cx: number, cy: number, r: number, t: number, s: number): void {
+  private splash(cx: number, cy: number, r: number, t: number, s: number, look: SplashLook): void {
     const ctx = this.ctx
     const land = ramp(t, 0.6, 0.9)
     if (land <= 0) return
@@ -784,17 +793,17 @@ export class TvPainter {
       else ctx.lineTo(Math.cos(a) * rr, Math.sin(a) * rr)
     }
     ctx.closePath()
-    ctx.fillStyle = '#ffd23f'
+    ctx.fillStyle = look.fill
     ctx.fill()
     ctx.lineWidth = 2 * s
-    ctx.strokeStyle = '#ff2d7a'
+    ctx.strokeStyle = look.edge
     ctx.stroke()
     ctx.fillStyle = '#1a0610'
     ctx.textAlign = 'center'
     ctx.font = `700 ${size * 0.3}px ${TV_FONT}`
-    ctx.fillText('NOW', 0, -size * 0.08)
+    ctx.fillText(look.words[0], 0, -size * 0.08)
     ctx.font = `700 ${size * 0.2}px ${TV_FONT}`
-    ctx.fillText('AVAILABLE!', 0, size * 0.22)
+    ctx.fillText(look.words[1], 0, size * 0.22)
     ctx.restore()
   }
 

@@ -16,6 +16,7 @@ import { useBuilder } from '../store/useBuilder'
 import { shortHex } from '../lib/time'
 import { ProfilePic } from './ProfileBadge'
 import { AskBubble } from './AskBubble'
+import { TvButton } from './TvScreen'
 import { useProfile } from '../hooks/useProfile'
 import { profileLabel } from '../store/useProfiles'
 import { LoginModal } from './LoginModal'
@@ -56,7 +57,10 @@ function Brand(): JSX.Element {
           even a cold cache cannot shift the layout under the pointer. */}
       <img src="/logo.png" alt="ONOSENDAI" width={1871} height={354} decoding="async" />
       <p>Cyberspace Protocol v2 spatial explorer</p>
-      <AskBubble />
+      <div className="ask-row">
+        <AskBubble />
+        <TvButton />
+      </div>
     </header>
   )
 }

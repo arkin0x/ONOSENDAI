@@ -204,11 +204,14 @@ history, and points a YOU marker back at your own avatar. The panels lock, the
 movement controls stand down, the compass and view controls stay, and END
 SPECTATION brings you home.
 
-**Cyberspace TV.** CYBERSPACE TV in the view menu (tap the compass), or
+**Cyberspace TV.** TV, at the right of the question under the wordmark, or
 `onosendai.tech/tv`, plays v2's history back as a broadcast: from a random
 event since v2 began (2026-08-23), every movement action in the order it was
-signed, on a curved, fringed, scanlined picture tube with the ONOSENDAI logo
-in its corner. Each avatar's run of actions is one shot, framed close, medium
+signed, on a curved, fringed, scanlined picture tube set in a black surround,
+with the ONOSENDAI logo in its corner. Everything on the picture (the logo,
+clock, chiron, marquee and segment panels) is painted into the tube in
+Monaspace Argon, so it bends and fringes with it; cuts are a dip, a roll or a
+burst of dark snow. Each avatar's run of actions is one shot, framed close, medium
 or wide from above with a slow push-in; shots play in the order they started,
 so someone who moved at the same time is shown next, from their own start
 (MEANWHILE), and nothing is dropped. Dead air is skipped (LATER), and a spawn
@@ -223,7 +226,7 @@ bag sealed with a public hint box is shown there: its outline draws, its sides
 fill, a key stamps onto each side, the sides fade, and the outline stays for
 the rest of the tape. A bag without one is never placed (where it is, is the
 hunt): it plays on a cube in an inset, LOCATION SECRET. A public object gets
-a product shot. A comment on a move or a bag gets the news desk: the
+an advertisement: NOW AVAILABLE!, the model turning in the middle. A comment on a move or a bag gets the news desk: the
 commenter as a photograph, the quote printing out; one sealed to a bag's
 region prints as redaction. A new avatar gets the product shot too (NEW
 LOOK), and a reaction to a shard or a move is a line on the ticker.

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { AVATAR_KIND, AVATAR_MARKER_HALF, SPECTATOR_SCALE_MIN_EXP, avatarDraw, avatarFromEvent, avatarScale, avatarTemplate, spectatorScale } from '../avatar'
+import { AVATAR_KIND, AVATAR_MARKER_HALF, SPECTATOR_SCALE_MIN_EXP, avatarDraw, avatarDrawKept, avatarFromEvent, avatarScale, avatarTemplate, spectatorScale } from '../avatar'
 import { newShard, ticksOf } from 'sno-core/shards'
 
 const built = () => {
@@ -114,5 +114,18 @@ describe('spectatorScale', () => {
 
   it('never reaches zero, so the avatar is always something', () => {
     expect(spectatorScale(84)).toBeGreaterThan(0)
+  })
+})
+
+describe('avatarDrawKept (Cyberspace TV)', () => {
+  it('is avatarDraw while the mesh reads, and the mesh at the marker size where avatarDraw gives up', () => {
+    const shard = built()
+    expect(avatarDrawKept(shard, 0, 1)).toEqual(avatarDraw(shard, 0))
+    const far = 20
+    expect(avatarDraw(shard, far)).toBe('marker')
+    const kept = avatarDrawKept(shard, far, 1)
+    expect(kept.mesh).toBeGreaterThan(0)
+    // Never smaller as the zoom goes on out: it holds the marker's size.
+    expect(avatarDrawKept(shard, far + 10, 1).mesh).toBeCloseTo(kept.mesh)
   })
 })

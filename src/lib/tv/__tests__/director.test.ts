@@ -119,19 +119,38 @@ describe('isJump', () => {
 })
 
 describe('shotFraming', () => {
-  it('varies the framing between shots, mostly close and medium, and never changes for one shot', () => {
+  const ids = Array.from({ length: 2000 }, (_, i) => {
+    let h = ''
+    let x = (i + 1) * 2654435761
+    for (let k = 0; k < 8; k++) { x = (x * 1103515245 + 12345) % 2 ** 32; h += x.toString(16).padStart(8, '0') }
+    return h
+  })
+  const all = ids.map(shotFraming)
+
+  it('varies the distance between shots, mostly close and medium, and never changes for one shot', () => {
     const names: Record<string, number> = {}
-    for (let i = 0; i < 400; i++) {
-      const id = (i * 2654435761 % 2 ** 32).toString(16).padStart(8, '0') + (i * 40503 % 2 ** 32).toString(16).padStart(8, '0') + '0'.repeat(48)
-      const f = shotFraming(id)
+    for (const [i, f] of all.entries()) {
       names[f.name] = (names[f.name] ?? 0) + 1
       expect(f.from).toBeGreaterThan(f.to)
-      expect(f.polar).toBeGreaterThanOrEqual(0.35)
-      expect(f.polar).toBeLessThanOrEqual(1.05)
-      expect(shotFraming(id)).toEqual(f)
+      expect(shotFraming(ids[i])).toEqual(f)
     }
     expect(names.close).toBeGreaterThan(names.wide)
     expect(names.medium).toBeGreaterThan(0)
-    expect(names.wide).toBeGreaterThan(0)
+  })
+
+  it('is from above mostly; from the side, close up or from below a fifth of the time', () => {
+    const varied = all.filter((f) => f.view !== 'above' || f.to === 4).length / all.length
+    expect(varied).toBeGreaterThan(0.15)
+    expect(varied).toBeLessThan(0.25)
+    expect(all.some((f) => f.view === 'side' && f.polar > 1.3 && f.polar < 1.7)).toBe(true)
+    expect(all.some((f) => f.view === 'below' && f.polar > 1.9)).toBe(true)
+    for (const f of all.filter((g) => g.view === 'above')) expect(f.polar).toBeLessThanOrEqual(1.05)
+  })
+
+  it('puts the black sun in frame about six times in ten, and goes round either way', () => {
+    const sun = all.filter((f) => f.sun).length / all.length
+    expect(sun).toBeGreaterThan(0.55)
+    expect(sun).toBeLessThan(0.65)
+    expect(new Set(all.map((f) => f.spin))).toEqual(new Set([1, -1]))
   })
 })

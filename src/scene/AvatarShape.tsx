@@ -17,7 +17,7 @@
 
 import { useMemo } from 'react'
 import { EdgesGeometry, IcosahedronGeometry } from 'three'
-import { avatarDraw, spectatorScale } from '../lib/avatar'
+import { avatarDraw, avatarDrawKept, spectatorScale } from '../lib/avatar'
 import { useAvatarShard } from '../store/useAvatars'
 import { useCyberspace } from '../store/useCyberspace'
 import { ShardMesh } from './ShardMesh'
@@ -36,14 +36,16 @@ interface Props {
   firstPerson?: boolean
   /** A faint outline of the icosahedron whatever the avatar is: where you really stand while WALK runs ahead. */
   outline?: boolean
+  /** Its own shape at any zoom, never the marker (Cyberspace TV: avatarDrawKept). */
+  keepShape?: boolean
 }
 
-export function AvatarShape({ pubkey, color, renderOrder = 0, depthTest = true, firstPerson = false, outline = false }: Props): JSX.Element | null {
+export function AvatarShape({ pubkey, color, renderOrder = 0, depthTest = true, firstPerson = false, outline = false, keepShape = false }: Props): JSX.Element | null {
   const shard = useAvatarShard(pubkey)
   const scaleExp = useCyberspace((s) => s.scaleExp)
   const spectator = spectatorScale(scaleExp)
   const geometry = useMemo(() => new EdgesGeometry(new IcosahedronGeometry(0.5, 1)), [])
-  const draw = !outline && shard && shard.vertices.length > 0 ? avatarDraw(shard, scaleExp) : 'marker'
+  const draw = !outline && shard && shard.vertices.length > 0 ? (keepShape ? avatarDrawKept(shard, scaleExp, spectator) : avatarDraw(shard, scaleExp)) : 'marker'
   if (shard && draw !== 'marker') {
     const k = draw.mesh
     return (

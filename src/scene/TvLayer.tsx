@@ -18,7 +18,8 @@
 import { useEffect, useMemo, useRef } from 'react'
 import { useFrame, useThree } from '@react-three/fiber'
 import { Vector3 } from 'three'
-import { GRID_RADIUS, originShift, placeCentre, type Position, type ViewAxes } from '../lib/space'
+import { GRID_RADIUS, originShift, placeCentre, renderDirection, type Position, type ViewAxes } from '../lib/space'
+import type { Framing } from '../lib/tv/director'
 import { targetColor, drawnAvatars } from '../lib/targets'
 import { avatarTurn } from '../lib/facing'
 import { committedAnchor } from '../lib/renderFrame'
@@ -26,7 +27,9 @@ import { alignedOrigin, useCyberspace } from '../store/useCyberspace'
 import { shotProgress, useTv } from '../store/useTv'
 import { useProfile } from '../hooks/useProfile'
 import { OtherAvatar } from './OtherAvatar'
+import { tvName } from '../lib/tv/text'
 import { TvBoxes } from './TvBoxes'
+import { SpawnMarker } from './SpawnMarker'
 
 const REACH = GRID_RADIUS * 8
 /** An avatar not seen on tape for this long (tape time) is not drawn. */
@@ -40,11 +43,55 @@ const TV_CAMERA_PRIORITY = 0.5
 /** How quickly its distance and angle settle, seconds: slow, so the push-in reads as a move. */
 const TV_CAMERA_TAU = 0.8
 
-function TapeAvatar({ pubkey, centre, position, place, subject }: { pubkey: string; centre: [number, number, number]; position: Position; place: (p: Position) => [number, number, number]; subject: boolean }): JSX.Element {
+/** How long a spawning avatar takes to grow from a point to its size, ms. */
+const GROW_MS = 900
+
+/** A spawned avatar's size at `now`: from nothing, eased out, to whole. */
+export function grownAt(born: number | undefined, now: number): number {
+  if (born === undefined) return 1
+  const t = (now - born) / GROW_MS
+  if (t <= 0) return 0
+  if (t >= 1) return 1
+  return 1 - (1 - t) ** 3
+}
+
+function TapeAvatar({ pubkey, centre, position, from, born, place, subject }: { pubkey: string; centre: [number, number, number]; position: Position; from?: Position; born?: number; place: (p: Position) => [number, number, number]; subject: boolean }): JSX.Element {
   const profile = useProfile(pubkey)
-  const text = (profile?.name ?? `${pubkey.slice(0, 8)}…`).toUpperCase()
-  const turn = useMemo(() => avatarTurn(useCyberspace.getState().axes(), null), [])
-  return <OtherAvatar pubkey={pubkey} color={targetColor(pubkey)} center={centre} position={position} place={place} turn={turn} label={text} labelOpacity={subject ? 0.9 : 0.5} tappable={false} />
+  const text = tvName(pubkey, profile?.name)
+  // Facing the way it went, from where it was to where it is, as every
+  // avatar does after a move (lib/facing.ts; arkinox, 2026-10-18: "when my
+  // avatar moves, it always faces the same direction").
+  const turn = useMemo(() => avatarTurn(useCyberspace.getState().axes(), from ? [from, position] : null), [from, position])
+  return <OtherAvatar pubkey={pubkey} color={targetColor(pubkey)} center={centre} position={position} place={place} turn={turn} label={text} labelOpacity={subject ? 0.9 : 0.5} tappable={false} keepShape size={() => grownAt(born, performance.now())} />
+}
+
+/** How high a sun shot's camera stands for each view, as a share of up: above, level, below. */
+const SUN_ELEVATION = { above: 0.45, side: 0.08, below: -0.45 } as const
+/** How far a sun shot sways either side of facing the sun, radians, so the sun stays in frame. */
+const SUN_SWAY = 0.35
+
+/**
+ * The camera's direction from what it looks at, for a framing at orbit angle
+ * `theta`, into `out`. An ordinary shot circles at the framing's angle from
+ * overhead, either way round. A sun shot stands on the far side of the
+ * subject from the black sun, so the sun is behind it in the picture
+ * (arkinox, 2026-10-18: "i really like it when the black sun is in frame"),
+ * and sways rather than circling, which would turn the sun out of shot.
+ */
+export function framingDirection(f: Framing, theta: number, sun: Vector3, out: Vector3): Vector3 {
+  if (!f.sun) {
+    return out.set(Math.sin(f.polar) * Math.sin(theta), Math.cos(f.polar), Math.sin(f.polar) * Math.cos(theta))
+  }
+  out.copy(sun).negate()
+  out.y += SUN_ELEVATION[f.view]
+  // The sway: a turn about up, either way.
+  const a = SUN_SWAY * Math.sin(theta * 2)
+  const x = out.x * Math.cos(a) + out.z * Math.sin(a)
+  const z = -out.x * Math.sin(a) + out.z * Math.cos(a)
+  out.set(x, out.y, z)
+  // Never straight up or down, where the camera's own up is undefined.
+  if (Math.abs(out.y) > 0.96 * out.length()) out.x += 0.3
+  return out.normalize()
 }
 
 function TvCamera({ axes }: { axes: ViewAxes }): null {
@@ -52,7 +99,10 @@ function TvCamera({ axes }: { axes: ViewAxes }): null {
   const smooth = useRef<Vector3 | null>(null)
   const theta = useRef(0)
   const dist = useRef<number | null>(null)
-  const polar = useRef<number | null>(null)
+  /** The camera's direction from what it looks at, unit, eased between framings. */
+  const look = useRef<Vector3 | null>(null)
+  const want = useMemo(() => new Vector3(), [])
+  const sunDir = useMemo(() => new Vector3(...renderDirection(axes, 'z')), [axes])
   const was = useRef<{ origin: ReturnType<typeof alignedOrigin>; scaleExp: number; cutAt: number } | null>(null)
   const at = useMemo(() => new Vector3(), [])
 
@@ -81,7 +131,7 @@ function TvCamera({ axes }: { axes: ViewAxes }): null {
       // A cut or a new zoom: no path between the two framings, so no glide.
       smooth.current = at.clone()
       dist.current = wantDist
-      polar.current = tv.framing.polar
+      look.current = null
     } else {
       // A change of frame moves everything at once, the camera with it (zero when the anchor stayed).
       const [x, y, z] = originShift(before.origin, origin, s.scaleExp, axes)
@@ -95,20 +145,17 @@ function TvCamera({ axes }: { axes: ViewAxes }): null {
     // A shot that follows straight on keeps its camera and eases to any change.
     const kc = 1 - Math.exp(-dt / TV_CAMERA_TAU)
     dist.current = (dist.current ?? wantDist) + (wantDist - (dist.current ?? wantDist)) * kc
-    polar.current = (polar.current ?? tv.framing.polar) + (tv.framing.polar - (polar.current ?? tv.framing.polar)) * kc
-    theta.current += dt * TV_ORBIT_SPEED
+    theta.current += dt * TV_ORBIT_SPEED * tv.framing.spin
+    framingDirection(tv.framing, theta.current, sunDir, want)
+    if (!look.current) look.current = want.clone()
+    else look.current.lerp(want, kc).normalize()
     // A bag's box on a portrait screen: stand back so its sides stay in (it
     // overflowed a phone, review of #371). Only for the box: a close-up of
     // an avatar on a phone stays close.
     const aspect = (state.camera as { aspect?: number }).aspect ?? 1
     const r = dist.current * (tv.shot?.kind === 'bag' ? Math.max(1, 1 / (aspect * 1.4)) : 1)
-    const ph = polar.current
     c.target.copy(smooth.current)
-    c.object.position.set(
-      smooth.current.x + r * Math.sin(ph) * Math.sin(theta.current),
-      smooth.current.y + r * Math.cos(ph),
-      smooth.current.z + r * Math.sin(ph) * Math.cos(theta.current),
-    )
+    c.object.position.copy(smooth.current).addScaledVector(look.current, r)
     c.update()
     // After the Rig (priority 0), which would otherwise aim the camera back
     // at the shot's first place, and before the composer draws (priority 1).
@@ -138,8 +185,11 @@ export function TvLayer({ axes }: { axes: ViewAxes }): JSX.Element {
     <>
       <TvCamera axes={axes} />
       <TvBoxes />
+      {/* Each avatar's spawn point, where it is in range (SpawnMarker culls
+          itself): where a chain begins (arkinox, 2026-10-18). */}
+      {near.map((p) => <SpawnMarker key={`spawn-${p.pk}`} pubkey={p.pk} axes={axes} />)}
       {near.map((p) => (
-        <TapeAvatar key={p.pk} pubkey={p.pk} centre={p.centre} position={p.a.position} place={place} subject={shot?.kind === 'trip' && p.pk === shot.pubkey} />
+        <TapeAvatar key={p.pk} pubkey={p.pk} centre={p.centre} position={p.a.position} from={p.a.from} born={p.a.born} place={place} subject={shot?.kind === 'trip' && p.pk === shot.pubkey} />
       ))}
     </>
   )

@@ -47,9 +47,13 @@ interface Props {
   labelOpacity: number
   /** Whether a tap opens their card; false on Cyberspace TV, where nothing on screen takes a tap. */
   tappable?: boolean
+  /** The shape's size, read each frame, 0 to 1: Cyberspace TV grows a spawning avatar from a point. */
+  size?: () => number
+  /** Its own shape at any zoom, never the marker (Cyberspace TV). */
+  keepShape?: boolean
 }
 
-export function OtherAvatar({ pubkey, color, center, position, place, turn, label, labelOpacity, tappable = true }: Props): JSX.Element {
+export function OtherAvatar({ pubkey, color, center, position, place, turn, label, labelOpacity, tappable = true, size, keepShape = false }: Props): JSX.Element {
   const drawn = useRef<Group>(null)
   const placed = useRef<Group>(null)
   const lerp = useRef(new AvatarLerp())
@@ -74,6 +78,7 @@ export function OtherAvatar({ pubkey, color, center, position, place, turn, labe
     if (!g) return
     const o = lerp.current.offset(performance.now(), out.current)
     g.position.set(center[0] + o[0], center[1] + o[1], center[2] + o[2])
+    if (size && drawn.current) drawn.current.scale.setScalar(Math.max(1e-4, size()))
   }
   // On every commit as well as every frame, so the group is never left at
   // the origin or at a stale center between a render and the next frame.
@@ -88,7 +93,7 @@ export function OtherAvatar({ pubkey, color, center, position, place, turn, labe
   return (
     <group ref={placed}>
       <group ref={drawn} quaternion={turn}>
-        <AvatarShape pubkey={pubkey} color={color} />
+        <AvatarShape pubkey={pubkey} color={color} keepShape={keepShape} />
       </group>
       {tappable && <TapTarget measure={drawn} onTap={() => usePersonCard.getState().open(pubkey)} />}
       <WorldLabel text={label} color={color} at={[0, 0.9, 0]} align="center" px={11} opacity={labelOpacity} />

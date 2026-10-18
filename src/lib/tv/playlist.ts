@@ -29,4 +29,7 @@ export const PLAYLIST: Track[] = [
   { url: 'https://media.basspistol.com/sethybowoy.basspistol.com/acid-in-my-lounge/1-acid-in-my-lounge.mp3' },
   { url: 'https://media.basspistol.com/panix/andra-stuk/1-distanser.mp3' },
   { url: 'https://media.basspistol.com/panix/andra-stuk/2-brustabletter.mp3' },
+  { url: 'https://media.basspistol.com/panix/autumn-leaves/1-hot-ears.mp3' },
+  { url: 'https://media.basspistol.com/panix/autumn-leaves/2-bonjour-tristesse.mp3' },
+  { url: 'https://media.basspistol.com/panix/autumn-leaves/4-jappjapp.mp3' },
 ]

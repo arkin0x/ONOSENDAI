@@ -178,6 +178,23 @@ describe('NOW PLAYING', () => {
     expect(words).not.toContain('♪ NOW PLAYING')
   })
 
+  it('stands still whether or not the chiron is up, so a tap finds it where it was', () => {
+    const p = new TvPainter(fakeCanvas())
+    p.size(1400, 800, 1)
+    p.paint(picture({ status: 'tuning' }), { ...assets, music }, 1000, 1, false)
+    const tuning = p.musicCard
+    const trip = { id: 't', kind: 'trip' as const, pubkey: 'ann', beats: [], start: 1, end: 2, offsets: [], length: 5 }
+    p.paint(picture({ shot: trip as never }), { ...assets, music }, 1040, 1, false)
+    expect(p.musicCard).toEqual(tuning)
+  })
+
+  it('is left off a screen too short for it, and the music plays on', () => {
+    const p = new TvPainter(fakeCanvas())
+    p.size(568, 320, 1)
+    p.paint(picture({}), { ...assets, music }, 1000, 1, false)
+    expect(p.musicCard).toBeNull()
+  })
+
   it('says TAP FOR SOUND in place of the bar while the browser holds the sound back', () => {
     const { canvas, words } = writing()
     const p = new TvPainter(canvas)

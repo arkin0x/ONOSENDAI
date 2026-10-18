@@ -88,12 +88,65 @@ describe('TV music', () => {
     startMusic(list)
     await flush()
     expect(useTvMusic.getState().blocked).toBe(true)
-    FakeAudio.refuse = false
     const before = audio().plays
+    // A finger's touch down is not a gesture the browser lets sound start in.
     window.dispatchEvent(new Event('pointerdown'))
+    expect(audio().plays).toBe(before)
+    // The end of a tap is; a try the browser still refuses waits for the next.
+    window.dispatchEvent(new Event('pointerup'))
     expect(audio().plays).toBe(before + 1)
+    await flush()
+    FakeAudio.refuse = false
+    window.dispatchEvent(new Event('touchend'))
+    expect(audio().plays).toBe(before + 2)
     audio().fire('playing')
     expect(useTvMusic.getState().blocked).toBe(false)
+    // Once playing, a tap is just a tap.
+    window.dispatchEvent(new Event('click'))
+    expect(audio().plays).toBe(before + 2)
+  })
+
+  it('a tap on a control, or Escape, is not the tap for sound', async () => {
+    FakeAudio.refuse = true
+    startMusic(list)
+    await flush()
+    const before = audio().plays
+    const button = { closest: (s: string) => (s.includes('button') ? {} : null) }
+    const onButton = new Event('click')
+    Object.defineProperty(onButton, 'target', { value: button })
+    window.dispatchEvent(onButton)
+    expect(audio().plays).toBe(before)
+    class Key extends Event { constructor(public key: string) { super('keydown') } }
+    window.dispatchEvent(new Key('Escape'))
+    expect(audio().plays).toBe(before)
+    window.dispatchEvent(new Key('m'))
+    expect(audio().plays).toBe(before + 1)
+  })
+
+  it('skips a link that answers and then sends nothing', () => {
+    startMusic(list)
+    const first = audio().src
+    vi.advanceTimersByTime(19_000)
+    expect(audio().src).toBe(first)
+    vi.advanceTimersByTime(2_000)
+    expect(audio().src).not.toBe(first)
+    // A track that sent something is not skipped for being long.
+    const second = audio().src
+    audio().fire('canplay')
+    vi.advanceTimersByTime(60_000)
+    expect(audio().src).toBe(second)
+  })
+
+  it('stops reading a track\'s tag when the track changes', () => {
+    const signals: AbortSignal[] = []
+    vi.stubGlobal('fetch', (_u: string, init?: { signal?: AbortSignal }) => { if (init?.signal) signals.push(init.signal); return new Promise(() => {}) })
+    startMusic(list)
+    audio().fire('ended')
+    expect(signals).toHaveLength(2)
+    expect(signals[0].aborted).toBe(true)
+    expect(signals[1].aborted).toBe(false)
+    stopMusic()
+    expect(signals[1].aborted).toBe(true)
   })
 
   it('stops, and forgets the track', () => {
@@ -163,11 +216,12 @@ describe('the volume and mute', () => {
 describe('a track from its link', () => {
   it('names it from its file until its tag is read', () => {
     expect(nameFromUrl('https://media.basspistol.com/x/inflating-saturn/1-commersens-temperatur.mp3')).toBe('Commersens Temperatur')
-    expect(nameFromUrl('https://h/Acid%20Alert%20EP/2_Sethy%20Bowoy-Acid%20Bench.mp3')).toBe('Sethy Bowoy Acid Bench')
+    // Named artist then title: the title.
+    expect(nameFromUrl('https://h/Acid%20Alert%20EP/2_Sethy%20Bowoy-Acid%20Bench.mp3')).toBe('Acid Bench')
   })
 
   it('finds the picture beside it by name', () => {
-    expect(besideUrls('https://h/a/2-saturn-day.mp3')).toEqual(['https://h/a/2-saturn-day.jpeg', 'https://h/a/2-saturn-day.jpg'])
+    expect(besideUrls('https://h/a/2-saturn-day.mp3')).toEqual(['https://h/a/2-saturn-day.jpeg', 'https://h/a/2-saturn-day.jpg', 'https://h/a/2-saturn-day.png'])
   })
 
   it('shuffles without opening on the last track', () => {

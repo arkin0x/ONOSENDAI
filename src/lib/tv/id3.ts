@@ -16,7 +16,7 @@ export interface TrackTags {
   picture?: { mime: string; data: Uint8Array }
 }
 
-/** The most of a file read for its tag: a cover larger than this is not worth the wait. */
+/** The most of a file read for its tag: past this, what came before it is read (the name and artist come first) and the rest is not waited for. */
 const MAX_TAG = 4 * 1024 * 1024
 
 const syncsafe = (b: Uint8Array, i: number): number => ((b[i] & 0x7f) << 21) | ((b[i + 1] & 0x7f) << 14) | ((b[i + 2] & 0x7f) << 7) | (b[i + 3] & 0x7f)
@@ -38,7 +38,7 @@ function resync(b: Uint8Array): Uint8Array {
   return Uint8Array.from(out)
 }
 
-const ENCODINGS = ['latin1', 'utf-16', 'utf-16be', 'utf-8'] as const
+const ENCODINGS = ['latin1', 'utf-16le', 'utf-16be', 'utf-8'] as const
 
 /** Where a string in `enc` that starts at `from` ends: its terminator, or the end. */
 function terminator(b: Uint8Array, from: number, enc: number): { end: number; next: number } {
@@ -50,11 +50,29 @@ function terminator(b: Uint8Array, from: number, enc: number): { end: number; ne
 }
 
 function decode(b: Uint8Array, enc: number): string {
+  let label: string = ENCODINGS[enc] ?? 'latin1'
+  // UTF-16 with a byte order mark, which may be either way round.
+  if (enc === 1) {
+    if (b[0] === 0xfe && b[1] === 0xff) { label = 'utf-16be'; b = b.subarray(2) }
+    else if (b[0] === 0xff && b[1] === 0xfe) b = b.subarray(2)
+  }
   try {
-    return new TextDecoder(ENCODINGS[enc] ?? 'latin1').decode(b).replace(/\0+$/, '').trim()
+    // 2.4 separates several values with a NUL.
+    return new TextDecoder(label).decode(b).replace(/\0+$/, '').replace(/\0/g, ' / ').trim()
   } catch {
     return ''
   }
+}
+
+/** Whether a frame could start at `i`: four capitals or digits, or the padding after the last. */
+function frameAt(b: Uint8Array, i: number): boolean {
+  if (i >= b.length || b[i] === 0) return true
+  if (i + 4 > b.length) return false
+  for (let k = 0; k < 4; k++) {
+    const c = b[i + k]
+    if (!((c >= 0x41 && c <= 0x5a) || (c >= 0x30 && c <= 0x39))) return false
+  }
+  return true
 }
 
 /** The name, artist and cover in an ID3v2 tag (2.2, 2.3 or 2.4): whatever of them it has. */
@@ -74,14 +92,24 @@ export function parseId3(bytes: Uint8Array): TrackTags {
   let cover: TrackTags['picture'] & { front: boolean } | undefined
   while (i + headLen <= body.length && body[i] !== 0) {
     const id = String.fromCharCode(...body.subarray(i, i + idLen))
-    const size = short ? (body[i + 3] << 16) | (body[i + 4] << 8) | body[i + 5] : version === 4 ? syncsafe(body, i + 4) : be32(body, i + 4)
+    let size = short ? (body[i + 3] << 16) | (body[i + 4] << 8) | body[i + 5] : version === 4 ? syncsafe(body, i + 4) : be32(body, i + 4)
+    // Some 2.4 writers (iTunes) give frame sizes as plain numbers, not
+    // syncsafe: when only the plain reading lands on a frame, it is that.
+    if (version === 4) {
+      const plain = be32(body, i + 4)
+      if (plain !== size && !frameAt(body, i + headLen + size) && frameAt(body, i + headLen + plain)) size = plain
+    }
     const frameFlags = short ? 0 : body[i + 9]
+    if (size <= 0) break
+    // A frame the read was cut off in the middle of (past MAX_TAG) is not read.
+    if (i + headLen + size > body.length) break
     let frame = body.subarray(i + headLen, i + headLen + size)
     i += headLen + size
-    if (size <= 0) break
     if (version === 4 && frameFlags & 0x02) frame = resync(frame)
     // A compressed or encrypted frame is not read.
     if (!short && frameFlags & (version === 4 ? 0x0c : 0xc0)) continue
+    // A grouped frame starts with its group's byte.
+    if (!short && frameFlags & (version === 4 ? 0x40 : 0x20)) frame = frame.subarray(1)
     // 2.4 may put a data length before the frame.
     if (version === 4 && frameFlags & 0x01) frame = frame.subarray(4)
     if (id === 'TIT2' || id === 'TT2') out.title = decode(frame.subarray(1), frame[0])
@@ -112,8 +140,8 @@ export function parseId3(bytes: Uint8Array): TrackTags {
 }
 
 /** Read a file's tag: its head, as far as the tag goes, and no further. */
-export async function readTags(url: string, fetcher: typeof fetch = fetch): Promise<TrackTags> {
-  const res = await fetcher(url)
+export async function readTags(url: string, fetcher: typeof fetch = fetch, signal?: AbortSignal): Promise<TrackTags> {
+  const res = await fetcher(url, signal ? { signal } : undefined)
   if (!res.ok || !res.body) return {}
   const reader = res.body.getReader()
   const chunks: Uint8Array[] = []
@@ -128,8 +156,8 @@ export async function readTags(url: string, fetcher: typeof fetch = fetch): Prom
       if (want === 10 && have >= 10) {
         const head = join(chunks, have)
         const length = id3Length(head)
-        if (length === null || length > MAX_TAG) return {}
-        want = length
+        if (length === null) return {}
+        want = Math.min(length, MAX_TAG)
       }
     }
   } finally {

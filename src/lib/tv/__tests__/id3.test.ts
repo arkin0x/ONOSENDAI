@@ -48,6 +48,29 @@ describe('reading an ID3 tag', () => {
     expect(parseId3(Uint8Array.from([0xff, 0xfb, 0x90]))).toEqual({})
   })
 
+  it('reads UTF-16 either way round, several values, and a grouped frame', () => {
+    const be16 = (t: string): number[] => [0xfe, 0xff, ...Array.from(t).flatMap((c) => [0, c.charCodeAt(0)])]
+    const grouped = [...latin1('TPE1'), ...be(9), 0, 0x20, 7, 0, ...latin1('Grouped')]
+    expect(parseId3(tag(3, [frame(3, 'TIT2', [1, ...be16('Saturn')]), grouped]))).toEqual({ title: 'Saturn', artist: 'Grouped' })
+    const both = tag(4, [frame(4, 'TPE1', [3, ...latin1('A'), 0, ...latin1('B')])])
+    expect(parseId3(both).artist).toBe('A / B')
+  })
+
+  it('reads a 2.4 tag whose frame sizes are plain numbers, as iTunes writes them', () => {
+    const cover = new Array(300).fill(7)
+    const plain = (id: string, body: number[]): number[] => [...latin1(id), ...be(body.length), 0, 0, ...body]
+    const t = tag(4, [plain('APIC', [0, ...latin1('image/jpeg'), 0, 3, 0, ...cover]), plain('TIT2', [0, ...latin1('Hot Ears')])])
+    const out = parseId3(t)
+    expect(out.title).toBe('Hot Ears')
+    expect(out.picture?.data.length).toBe(300)
+  })
+
+  it('keeps what came before a frame the read was cut off in', () => {
+    const t = tag(3, [frame(3, 'TIT2', [0, ...latin1('Distanser')]), frame(3, 'APIC', [0, ...latin1('image/jpeg'), 0, 3, 0, ...new Array(400).fill(1)])])
+    const out = parseId3(t.subarray(0, 60))
+    expect(out).toEqual({ title: 'Distanser' })
+  })
+
   it('stops reading at the end of the tag', async () => {
     const t = tag(3, [frame(3, 'TIT2', [0, ...latin1('Saturn Day')])])
     const audio = new Uint8Array(1_000_000)

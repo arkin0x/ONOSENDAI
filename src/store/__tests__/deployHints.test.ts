@@ -75,28 +75,28 @@ describe('the deploy writes the bag settings', () => {
   })
 
   it('h off, sector hint on, riddle: exactly those tags and that content', async () => {
-    await hide('two', { heightTag: false, hint: SECTOR_HINT, riddle: 'under the black sun' })
+    await hide('two', { heightTag: false, hint: SECTOR_HINT, riddle: 'under the black sun', contents: false, money: false })
     const bag = lastBag()
     const dep = useShards.getState().mine[0]
     const at = { x: BigInt(dep.at.x), y: BigInt(dep.at.y), z: BigInt(dep.at.z) }
     expect(tagNames(bag)).toEqual(['d', 'encrypted', 'version', 'hint', 'X', 'Y', 'Z', 'S', 'client'])
     expect(bag.tags.slice(3, -1)).toEqual(hintTags(at, dep.plane, SECTOR_HINT))
     expect(bag.content).toBe('under the black sun')
-    expect(dep.bag).toEqual({ heightTag: false, hint: SECTOR_HINT, riddle: 'under the black sun' })
+    expect(dep.bag).toEqual({ heightTag: false, hint: SECTOR_HINT, riddle: 'under the black sun', contents: false, money: false })
   })
 })
 
 describe('a second deploy into the same region', () => {
   it('starts from the first bag\'s settings and keeps them', async () => {
-    await hide('first', { heightTag: false, hint: SECTOR_HINT, riddle: 'cold' })
+    await hide('first', { heightTag: false, hint: SECTOR_HINT, riddle: 'cold', contents: false, money: false })
     const first = lastBag()
     useShards.getState().startDeployMessage('second')
     useShards.getState().setDeployHeight(HEIGHT)
     const cs = useCyberspace.getState()
     const own = ownBagIn(useShards.getState().mine, regionOf(deployPoint(cs.cursor, cs.scaleExp, HEIGHT), cs.plane, HEIGHT))
-    expect(own).toMatchObject({ count: 1, settings: { heightTag: false, hint: SECTOR_HINT, riddle: 'cold' } })
+    expect(own).toMatchObject({ count: 1, settings: { heightTag: false, hint: SECTOR_HINT, riddle: 'cold', contents: false, money: false } })
     useShards.getState().seedDeployBag(own)
-    expect(useShards.getState().deployBag).toEqual({ heightTag: false, hint: SECTOR_HINT, riddle: 'cold' })
+    expect(useShards.getState().deployBag).toEqual({ heightTag: false, hint: SECTOR_HINT, riddle: 'cold', contents: false, money: false })
 
     relayBags = [first]
     await useShards.getState().deploy()
@@ -109,10 +109,10 @@ describe('a second deploy into the same region', () => {
   })
 
   it('carries forward a riddle another device wrote since, when you did not touch it', async () => {
-    await hide('first', { riddle: 'mine' })
+    await hide('first', { riddle: 'mine', contents: false, money: false })
     const dep = useShards.getState().mine[0]
     // The relay's newest copy of this bag was rewritten elsewhere with a new riddle and a hint.
-    const elsewhere = await useCyberspace.getState().signEvent(await bagTemplate([dep.inner], hexToBytes(dep.keyHex), dep.lookupId, HEIGHT, Math.floor(Date.now() / 1000) + 50, HIDDEN_KIND, { heightTag: true, hint: SECTOR_HINT, riddle: 'theirs' }, { at: { x: BigInt(dep.at.x), y: BigInt(dep.at.y), z: BigInt(dep.at.z) }, plane: dep.plane }))
+    const elsewhere = await useCyberspace.getState().signEvent(await bagTemplate([dep.inner], hexToBytes(dep.keyHex), dep.lookupId, HEIGHT, Math.floor(Date.now() / 1000) + 50, HIDDEN_KIND, { heightTag: true, hint: SECTOR_HINT, riddle: 'theirs', contents: false, money: false }, { at: { x: BigInt(dep.at.x), y: BigInt(dep.at.y), z: BigInt(dep.at.z) }, plane: dep.plane }))
     relayBags = [elsewhere]
     await hide('second')
     expect(lastBag().content).toBe('theirs')
@@ -120,16 +120,16 @@ describe('a second deploy into the same region', () => {
   })
 
   it('a riddle you cleared stays cleared', async () => {
-    await hide('first', { riddle: 'gone soon' })
+    await hide('first', { riddle: 'gone soon', contents: false, money: false })
     relayBags = [lastBag()]
-    await hide('second', { riddle: '' })
+    await hide('second', { riddle: '', contents: false, money: false })
     expect(lastBag().content).toBe('')
   })
 })
 
 describe('rewrites that are not deploys keep the settings', () => {
   it('delete rewrites the bag with its riddle and hint', async () => {
-    await hide('a', { hint: SECTOR_HINT, riddle: 'stay' })
+    await hide('a', { hint: SECTOR_HINT, riddle: 'stay', contents: false, money: false })
     relayBags = [lastBag()]
     await hide('b')
     relayBags = [lastBag()]
@@ -141,7 +141,7 @@ describe('rewrites that are not deploys keep the settings', () => {
 
   it('broadcast from LOCAL publishes the settings it was hidden with', async () => {
     useCyberspace.setState({ live: false })
-    await hide('quiet', { heightTag: false, riddle: 'later' })
+    await hide('quiet', { heightTag: false, riddle: 'later', contents: false, money: false })
     expect(sent).toHaveLength(0)
     const dep = useShards.getState().mine[0]
     expect(await useShards.getState().broadcast(dep.lookupId)).toBe(true)
@@ -164,10 +164,10 @@ describe('the sector hint and the height', () => {
   it('moving from your bag\'s region to an empty one resets the controls, between empty ones keeps them', () => {
     const s = useShards.getState()
     s.startDeployMessage('x')
-    s.setDeployBag({ riddle: 'typed' })
+    s.setDeployBag({ riddle: 'typed', contents: false, money: false })
     s.seedDeployBag(null)
     expect(useShards.getState().deployBag.riddle).toBe('typed')
-    s.seedDeployBag({ region: 'r1', settings: { heightTag: false, hint: null, riddle: 'bag riddle' }, count: 2 })
+    s.seedDeployBag({ region: 'r1', settings: { heightTag: false, hint: null, riddle: 'bag riddle', contents: false, money: false }, count: 2, cashu: false })
     expect(useShards.getState().deployBag.riddle).toBe('bag riddle')
     s.seedDeployBag(null)
     expect(useShards.getState().deployBag).toEqual(DEFAULT_BAG_SETTINGS)

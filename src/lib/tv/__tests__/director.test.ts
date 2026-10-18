@@ -89,7 +89,7 @@ describe('segments', () => {
     d.add(beat('a', 0))
     d.add(beat('a', 4))
     d.addItem({ kind: 'comment', id: 'f'.repeat(64), pubkey: 'b', at: 2, text: 'hello', on: 'move', about: 'a' })
-    d.addItem({ kind: 'bag', id: 'e'.repeat(64), pubkey: 'c', at: 50, hint: null, height: 7 })
+    d.addItem({ kind: 'bag', id: 'e'.repeat(64), pubkey: 'c', at: 50, hint: null, height: 7, money: false, counts: null })
     const shots = d.release(Infinity)
     expect(shots.map((s) => s.kind)).toEqual(['trip', 'comment', 'bag'])
     expect(shots[1].length).toBeGreaterThan(4)

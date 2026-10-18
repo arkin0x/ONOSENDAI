@@ -27,6 +27,7 @@ import { placeable, useTv } from '../store/useTv'
 import { objectsOf } from '../workshop/ObjectPicker'
 import { avatarFromEvent } from '../lib/avatar'
 import { QUOTE_MAX, type TapeItem } from '../lib/tv/director'
+import type { BagContents } from '../lib/hidden'
 import { ShardSpin } from '../scene/ShardSpin'
 
 /** How long a cut's transition takes, ms (scene/TvScreenEffect): a segment's clock starts after it. */
@@ -66,9 +67,20 @@ export function typePace(chars: number, shotLength: number): number {
   return Math.min(TYPE_S, Math.max(0.005, room / Math.max(1, chars)))
 }
 
+/** A bag's published contents in words: 3 SHARDS · 1 MESSAGE · 1 CASHU TOKEN; null when it published none. */
+export function contentsWords(counts: Partial<BagContents> | null): string | null {
+  if (!counts) return null
+  const names: Array<[keyof BagContents, string, string]> = [['shard', 'SHARD', 'SHARDS'], ['message', 'MESSAGE', 'MESSAGES'], ['key', 'KEY', 'KEYS'], ['chest', 'CHEST', 'CHESTS'], ['cashu', 'CASHU TOKEN', 'CASHU TOKENS']]
+  const words = names.filter(([k]) => (counts[k] ?? 0) > 0).map(([k, one, many]) => `${counts[k]} ${counts[k] === 1 ? one : many}`)
+  return words.length > 0 ? words.join(' · ') : null
+}
+
 /** What the chiron says a segment's author did. */
 export function segmentDoing(item: TapeItem): string {
-  if (item.kind === 'bag') return placeable(item.hint) ? 'SEALED A BAG · HINT BOX PUBLIC' : 'SEALED A BAG'
+  if (item.kind === 'bag') {
+    const inside = contentsWords(item.counts) ?? (item.money ? 'CASHU INSIDE' : null)
+    return ['SEALED A BAG', placeable(item.hint) ? 'HINT BOX PUBLIC' : null, inside].filter(Boolean).join(' · ')
+  }
   if (item.kind === 'object') return 'PUBLISHED AN OBJECT'
   if (item.kind === 'avatar') return 'NEW AVATAR'
   if (item.kind === 'reaction') return 'REACTED'

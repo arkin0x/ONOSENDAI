@@ -46,6 +46,7 @@ import { hintFits, hintTags, parseHint, type HintHeights } from './hint'
 import { imetaTag, pictureOf, type PictureDim } from './itemPicture'
 import type { Position } from './space'
 import { mentionTags } from './mentions'
+import { cashuTokensAsWritten } from './cashu'
 
 /** The location-encrypted envelope (spec §8.6). */
 export const HIDDEN_KIND = 33330
@@ -555,10 +556,68 @@ export interface BagSettings {
   heightTag: boolean
   hint: HintHeights | null
   riddle: string
+  /** Publish what is inside, by kind and count (`contents` tags; bagContentsTags). */
+  contents: boolean
+  /** Publish that money is inside, when a cashu token is (a `contents` tag for cashu alone). */
+  money: boolean
 }
 
-/** A bag as this client always wrote one before the choices existed: `h`, no hint, no riddle. */
-export const DEFAULT_BAG_SETTINGS: BagSettings = { heightTag: true, hint: null, riddle: '' }
+/** A bag as this client always wrote one before the choices existed: `h`, no hint, no riddle, nothing said of its contents. */
+export const DEFAULT_BAG_SETTINGS: BagSettings = { heightTag: true, hint: null, riddle: '', contents: false, money: false }
+
+/**
+ * What a bag holds, by kind: shards (in the bag or by reference), messages,
+ * keys, chests, and the cashu tokens written in its messages.
+ */
+export interface BagContents { shard: number; message: number; key: number; chest: number; cashu: number }
+
+export function bagContents(inners: readonly (BagEntry | ChatRumor)[]): BagContents {
+  const out: BagContents = { shard: 0, message: 0, key: 0, chest: 0, cashu: 0 }
+  for (const e of inners) {
+    if (isReference(e)) { out.shard++; continue }
+    if (e.kind === SHARD_KIND) out.shard++
+    else if (e.kind === MESSAGE_KIND) { out.message++; out.cashu += cashuTokensAsWritten(e.content).length }
+    else if (e.kind === KEY_KIND) out.key++
+    else if (e.kind === CHEST_KIND) out.chest++
+  }
+  return out
+}
+
+/** The order a bag's `contents` tags are written in, and read in. */
+export const CONTENTS_KINDS = ['shard', 'message', 'key', 'chest', 'cashu'] as const
+
+/**
+ * The public tags a bag's contents settings write (arkinox, 2026-10-18:
+ * "a hint type that indicates money is hidden" and "an optional contents
+ * hint toggle that advertises what is in the bag"). Worked out from what is
+ * in the bag each time it is sealed, so they are never stale: with
+ * `contents`, one `["contents", kind, count]` per kind present, cashu
+ * tokens included; with `money` alone, `["contents", "cashu"]` while a
+ * token is inside, and nothing once none is. ONOSENDAI's, not in the spec
+ * yet (onosendai/kinds.md, 33330).
+ */
+export function bagContentsTags(inners: readonly (BagEntry | ChatRumor)[], settings: Pick<BagSettings, 'contents' | 'money'>): string[][] {
+  if (!settings.contents && !settings.money) return []
+  const c = bagContents(inners)
+  if (settings.contents) return CONTENTS_KINDS.filter((k) => c[k] > 0).map((k) => ['contents', k, String(c[k])])
+  return c.cashu > 0 ? [['contents', 'cashu']] : []
+}
+
+/**
+ * What a bag's public tags say it holds: whether money is inside (any cashu
+ * row, for display), whether the money-alone hint was chosen (a cashu row
+ * with no count, for the bag's settings), and the counts when given.
+ */
+export function readBagContents(tags: string[][]): { money: boolean; moneyAlone: boolean; counts: Partial<BagContents> | null } {
+  const rows = tags.filter((t) => t[0] === 'contents' && (CONTENTS_KINDS as readonly string[]).includes(t[1] ?? ''))
+  const counts: Partial<BagContents> = {}
+  let counted = false
+  for (const t of rows) {
+    const n = t[2] === undefined ? NaN : Number(t[2])
+    if (Number.isInteger(n) && n > 0 && n < 1_000_000) { counts[t[1] as keyof BagContents] = n; counted = true }
+  }
+  return { money: rows.some((t) => t[1] === 'cashu'), moneyAlone: rows.some((t) => t[1] === 'cashu' && t[2] === undefined), counts: counted ? counts : null }
+}
 
 function sameHint(a: HintHeights | null, b: HintHeights | null): boolean {
   return a === null ? b === null : b !== null && a.every((h, i) => h === b[i])
@@ -582,6 +641,8 @@ export function resolveBagSettings(chosen: BagSettings, seed: BagSettings, curre
     heightTag: chosen.heightTag !== seed.heightTag ? chosen.heightTag : now.heightTag,
     hint: hint && hintFits(hint, height) ? hint : null,
     riddle: (chosen.riddle !== seed.riddle ? chosen.riddle : now.riddle).trim().slice(0, MAX_RIDDLE_LENGTH),
+    contents: chosen.contents !== seed.contents ? chosen.contents : now.contents,
+    money: chosen.money !== seed.money ? chosen.money : now.money,
   }
 }
 
@@ -593,7 +654,11 @@ export function resolveBagSettings(chosen: BagSettings, seed: BagSettings, curre
 export function bagSettingsOf(ev: NostrEvent, height: number): BagSettings {
   const h = heightHint(ev)
   const hint = parseHint(ev.tags, h ?? height)
-  return { heightTag: h !== null, hint: hint ? hint.heights : null, riddle: ev.content.slice(0, MAX_RIDDLE_LENGTH) }
+  const said = readBagContents(ev.tags)
+  // Money as a setting only in its own form: a counted cashu row is the
+  // contents hint speaking, and reading it as money left a bag announcing
+  // cashu after contents was turned off (review of #378).
+  return { heightTag: h !== null, hint: hint ? hint.heights : null, riddle: ev.content.slice(0, MAX_RIDDLE_LENGTH), contents: said.counts !== null, money: said.moneyAlone }
 }
 
 /** Where a bag's region is, for a hint's base: any point inside the region will do (lib/hint.ts). */
@@ -629,6 +694,7 @@ export async function bagTemplate(inners: readonly (BagEntry | ChatRumor)[], reg
     if (!hintFits(settings.hint, height)) throw new Error(`A hint box of heights ${settings.hint.join(', ')} cannot contain a height ${height} region.`)
     tags.push(...hintTags(place.at, place.plane, settings.hint))
   }
+  tags.push(...bagContentsTags(inners, settings))
   return { kind, created_at: createdAt, content: settings.riddle.trim().slice(0, MAX_RIDDLE_LENGTH), tags }
 }
 

@@ -5636,6 +5636,23 @@ kbd {
   background: rgba(104, 45, 181, 0.2);
 }
 
+/* CYBERSPACE TV: the tape, in a tube's warm phosphor amber. */
+.hyper__btn--tv {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  width: 100%;
+  margin-top: 6px;
+  color: #ffb54a;
+  border-color: rgba(255, 160, 40, 0.5);
+  background: rgba(255, 160, 40, 0.07);
+}
+
+.hyper__btn--tv:hover:not(:disabled) {
+  background: rgba(255, 160, 40, 0.18);
+}
+
 /* VIEW NEAREST STOP: one full-width action under the station readout, in the
    station's bitcoin orange so it reads as part of that group. */
 .hyper__btn--view {
@@ -9251,3 +9268,260 @@ a.feed__act { text-decoration: none; }
   border-bottom: 1px solid rgba(0, 229, 255, 0.3);
 }
 .ask:hover .ask__bubble { border-color: rgba(0, 229, 255, 0.55); }
+
+/* Cyberspace TV (hud/TvScreen.tsx): a broadcast's furniture over the tube.
+   Everything carries the same red/cyan fringe the tube puts on the picture,
+   and none of it takes a tap except OFF and RETRY. */
+.tv {
+  position: fixed;
+  inset: 0;
+  z-index: 200;
+  pointer-events: none;
+  font-family: var(--mono);
+  color: #f2fbff;
+  text-shadow: -1px 0 rgba(255, 40, 80, 0.55), 1px 0 rgba(0, 229, 255, 0.55), 0 0 6px rgba(200, 245, 255, 0.35);
+  letter-spacing: 0.08em;
+}
+
+.tv button { pointer-events: auto; }
+
+.tv__bug {
+  position: absolute;
+  top: max(18px, env(safe-area-inset-top));
+  left: 22px;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.22em;
+  opacity: 0.8;
+}
+
+.tv__bug b {
+  margin-left: 6px;
+  padding: 1px 5px;
+  border: 1px solid currentColor;
+  border-radius: 3px;
+}
+
+.tv__clock {
+  position: absolute;
+  /* Under the logo the tube draws in the corner (TvScreenEffect LOGO_*). */
+  top: calc(8.5vh + min(260px, 42vw) * 0.19 + 36px);
+  right: 6vw;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 2px;
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+}
+
+.tv__play { font-size: 11px; opacity: 0.85; }
+
+.tv__off,
+.tv__retry {
+  font-family: inherit;
+  font-size: 10px;
+  letter-spacing: 0.14em;
+  color: var(--fg);
+  background: rgba(6, 14, 22, 0.7);
+  border: 1px solid rgba(200, 245, 255, 0.4);
+  border-radius: 6px;
+  padding: 6px 9px;
+  cursor: pointer;
+}
+
+.tv__off {
+  position: absolute;
+  top: max(14px, env(safe-area-inset-top));
+  left: 196px;
+}
+
+.tv__retry { margin-top: 14px; }
+
+.tv__status {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  font-size: 26px;
+  font-weight: 700;
+  letter-spacing: 0.3em;
+  animation: tv-blink 1.4s steps(2, jump-none) infinite;
+}
+
+@keyframes tv-blink {
+  0% { opacity: 1; }
+  100% { opacity: 0.35; }
+}
+
+.tv__card {
+  position: absolute;
+  top: 34%;
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 6px 14px;
+  font-size: 18px;
+  font-weight: 700;
+  letter-spacing: 0.24em;
+  white-space: nowrap;
+  background: rgba(0, 0, 0, 0.45);
+  opacity: 0;
+  animation-name: tv-card;
+  animation-fill-mode: forwards;
+  animation-timing-function: linear;
+}
+
+@keyframes tv-card {
+  0% { opacity: 0; }
+  8%, 80% { opacity: 1; }
+  100% { opacity: 0; }
+}
+
+.tv__lower {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: max(16px, env(safe-area-inset-bottom));
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 0 16px;
+}
+
+.tv__chiron {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  max-width: 640px;
+  padding: 8px 14px 8px 8px;
+  border-left: 3px solid var(--accent);
+  /* Scanlines on the furniture too, so it sits on the same glass. */
+  background-image:
+    repeating-linear-gradient(0deg, rgba(0, 0, 0, 0.18) 0 1px, transparent 1px 3px),
+    linear-gradient(90deg, rgba(0, 60, 80, 0.85), rgba(0, 30, 44, 0.7) 70%, rgba(0, 30, 44, 0));
+}
+
+.tv__chiron-pic { flex: none; display: flex; }
+
+.tv__chiron-text {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+  flex: 1;
+}
+
+.tv__chiron-name {
+  font-size: 20px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tv__chiron-doing {
+  font-size: 11px;
+  letter-spacing: 0.18em;
+  color: var(--accent);
+}
+
+.tv__zoom {
+  flex: none;
+  display: grid;
+  grid-template-columns: auto 1fr;
+  align-items: center;
+  column-gap: 8px;
+  row-gap: 3px;
+  width: 170px;
+  font-size: 9px;
+  letter-spacing: 0.14em;
+}
+
+.tv__zoom-label { opacity: 0.7; }
+
+.tv__zoom-rail {
+  position: relative;
+  height: 8px;
+  border-bottom: 1px solid rgba(200, 245, 255, 0.5);
+}
+
+.tv__zoom-tick {
+  position: absolute;
+  bottom: 0;
+  width: 1px;
+  height: 6px;
+  background: rgba(200, 245, 255, 0.55);
+}
+
+.tv__zoom-here {
+  position: absolute;
+  bottom: -4px;
+  width: 7px;
+  height: 7px;
+  margin-left: -3px;
+  border-radius: 50%;
+  background: var(--accent);
+  box-shadow: 0 0 6px var(--accent);
+  transition: left 0.6s ease-out;
+}
+
+.tv__zoom-value { grid-column: 1 / -1; text-align: right; opacity: 0.85; }
+
+.tv__ticker {
+  display: flex;
+  align-items: stretch;
+  height: 26px;
+  font-size: 12px;
+  letter-spacing: 0.12em;
+  background: rgba(0, 0, 0, 0.6);
+  border-top: 1px solid rgba(0, 229, 255, 0.35);
+  border-bottom: 1px solid rgba(0, 229, 255, 0.35);
+  overflow: hidden;
+}
+
+.tv__ticker-tag {
+  flex: none;
+  display: flex;
+  align-items: center;
+  padding: 0 10px;
+  font-weight: 700;
+  color: #021015;
+  text-shadow: none;
+  background: var(--accent);
+}
+
+.tv__ticker-window {
+  flex: 1;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+}
+
+.tv__ticker-run {
+  white-space: pre;
+  animation: tv-ticker 60s linear infinite;
+}
+
+@keyframes tv-ticker {
+  from { transform: translateX(0); }
+  to { transform: translateX(-50%); }
+}
+
+@media (max-width: 600px) {
+  .tv__clock { font-size: 12px; }
+  .tv__bug { font-size: 10px; left: 16px; }
+  .tv__off { left: 162px; }
+  .tv__chiron { flex-wrap: wrap; }
+  .tv__chiron-name { font-size: 16px; }
+  .tv__zoom { width: 100%; }
+  .tv__card { font-size: 14px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tv__ticker-run { animation-duration: 180s; }
+  .tv__status { animation: none; }
+}

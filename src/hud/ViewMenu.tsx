@@ -14,7 +14,8 @@
  * needs no label.
  */
 
-import { Box, Earth } from 'lucide-react'
+import { Box, Earth, Tv } from 'lucide-react'
+import { startTvInPlace } from '../store/useTv'
 import { useCyberspace } from '../store/useCyberspace'
 import { viewCyberspace, viewEarth } from './HyperspacePanel'
 import type { RotateDirection } from '../lib/space'
@@ -28,6 +29,7 @@ export function ViewMenu({ onClose }: Props): JSX.Element {
   // The plane on show: yours at your head, the view's in a view (D-SPACE flips that one).
   const plane = useCyberspace((s) => (s.atHead() ? s.plane : s.anchorPlane))
   const canGoBack = useCyberspace((s) => s.viewHistory.length > 0)
+  const walking = useCyberspace((s) => s.walking)
   // Mounted only while open, so it is a chip on the Escape stack for as long
   // as it lives (arkinox, 2026-10-01).
   useEscape('chip', true, onClose)
@@ -92,6 +94,15 @@ export function ViewMenu({ onClose }: Props): JSX.Element {
         onContextMenu={noCallout.onContextMenu}
         onPointerDown={press(() => { onClose(); viewCyberspace() })}
       ><Box size={12} strokeWidth={2.25} aria-hidden /> CYBERSPACE</button>
+      {/* Everything that ever happened here, played back from a random
+          moment (store/useTv.ts; arkinox, 2026-10-18). Not while walking:
+          WALK owns the camera. */}
+      <button
+        className="hyper__btn hyper__btn--tv"
+        disabled={walking}
+        onContextMenu={noCallout.onContextMenu}
+        onPointerDown={press(() => { onClose(); startTvInPlace() })}
+      ><Tv size={12} strokeWidth={2.25} aria-hidden /> CYBERSPACE TV</button>
     </div>
   )
 }

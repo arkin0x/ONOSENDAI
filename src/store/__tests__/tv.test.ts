@@ -1,0 +1,117 @@
+/**
+ * tv.test.ts: Cyberspace TV plays the tape: a random start, each trip as a
+ * shot framed on its avatar, arrivals on the ticker, and the view put back
+ * when it is turned off. Nothing is published.
+ */
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+
+if (typeof localStorage === 'undefined') {
+  const mem = new Map<string, string>()
+  ;(globalThis as { localStorage?: unknown }).localStorage = {
+    getItem: (k: string) => mem.get(k) ?? null,
+    setItem: (k: string, v: string) => { mem.set(k, String(v)) },
+    removeItem: (k: string) => { mem.delete(k) },
+    clear: () => { mem.clear() },
+  }
+}
+
+const published: unknown[] = []
+vi.mock('../../lib/relay', () => ({
+  publish: vi.fn(async (ev: unknown) => { published.push(ev); return { ok: true } }),
+  publishMany: vi.fn(async (_r: string[], ev: unknown) => { published.push(ev); return { ok: true } }),
+  query: vi.fn(async () => []),
+  queryEach: vi.fn(async () => []),
+  queryAny: vi.fn(async () => []),
+  relaySet: () => ['wss://relay.test'],
+}))
+
+import type { Filter } from 'nostr-tools'
+import { positionHex, type NostrEvent } from '../../lib/events'
+import { V2_EPOCH } from '../../lib/tv/tape'
+import { TV_FOCUS_LABEL, setTvAsk, useTv } from '../useTv'
+import { useCyberspace } from '../useCyberspace'
+
+const A = '1'.repeat(64)
+const B = '2'.repeat(64)
+let n = 0
+const id = (): string => (n++).toString(16).padStart(64, 'f')
+const at = (x: bigint) => positionHex({ x, y: 5n, z: 7n }, 0)
+
+function spawnOf(pubkey: string, t: number): NostrEvent {
+  return { id: id(), pubkey, created_at: t, kind: 3333, tags: [['A', 'spawn'], ['C', pubkey]], content: '', sig: '' }
+}
+function hop(pubkey: string, t: number, from: bigint, to: bigint): NostrEvent {
+  return { id: id(), pubkey, created_at: t, kind: 3333, tags: [['A', 'hop'], ['e', '0'.repeat(64), '', 'genesis'], ['e', '0'.repeat(64), '', 'previous'], ['c', at(from)], ['C', at(to)], ['proof', 'a'.repeat(64)]], content: '', sig: '' }
+}
+
+const T0 = V2_EPOCH + 1000
+const tape: NostrEvent[] = [
+  spawnOf(A, T0),
+  hop(B, T0 + 100, 1000n, 1001n),
+  hop(B, T0 + 102, 1001n, 1002n),
+  hop(B, T0 + 104, 1002n, 1003n),
+]
+
+function ask(f: Filter): Promise<NostrEvent[]> {
+  return Promise.resolve(tape
+    .filter((e) => (!f.kinds || f.kinds.includes(e.kind)) && (f.since === undefined || e.created_at >= f.since) && (f.until === undefined || e.created_at <= f.until) && (!f.authors || f.authors.includes(e.pubkey)))
+    .sort((a, b) => b.created_at - a.created_at)
+    .slice(0, f.limit ?? Infinity))
+}
+
+beforeEach(() => {
+  vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval', 'setTimeout', 'clearTimeout', 'performance'] })
+  // The random moment lands before the tape, and the random pick is the
+  // oldest event after it (relays answer newest first): the tape's first.
+  let calls = 0
+  vi.spyOn(Math, 'random').mockImplementation(() => (calls++ % 2 === 0 ? 0 : 0.999))
+  setTvAsk(ask)
+})
+
+afterEach(() => {
+  useTv.getState().stop()
+  vi.useRealTimers()
+  vi.restoreAllMocks()
+})
+
+async function run(ms: number): Promise<void> {
+  for (let t = 0; t < ms; t += 100) await vi.advanceTimersByTimeAsync(100)
+}
+
+describe('Cyberspace TV', () => {
+  it('plays a trip as one shot framed on its avatar, with the arrival on the ticker', async () => {
+    const zoomBefore = useCyberspace.getState().scaleExp
+    useTv.getState().start()
+    await run(1500)
+    const s = useTv.getState()
+    expect(s.on).toBe(true)
+    expect(s.arrivals.map((a) => a.pubkey)).toEqual([A])
+    expect(s.shot?.pubkey).toBe(B)
+    expect(useCyberspace.getState().focus?.label).toBe(TV_FOCUS_LABEL)
+    // The whole trip plays: three hops, the avatar where the last one put it.
+    await run(8000)
+    const end = useTv.getState()
+    expect(end.avatars[B]?.position.x).toBe(1003n)
+    expect(end.tapeTime).toBe(T0 + 104)
+    useTv.getState().stop()
+    expect(useCyberspace.getState().focus).toBeNull()
+    expect(useCyberspace.getState().scaleExp).toBe(zoomBefore)
+    expect(published).toEqual([])
+  })
+
+  it('ends the tape at now, says so, and tunes in again', async () => {
+    useTv.getState().start()
+    // The shot ends a little after 8 s; END OF TAPE holds, then a new random start.
+    await run(11000)
+    expect(useTv.getState().status).toBe('end')
+    await run(5000)
+    expect(useTv.getState().status).toBe('playing')
+  })
+
+  it('turns off when another view takes the camera', async () => {
+    useTv.getState().start()
+    await run(1500)
+    useCyberspace.getState().focusOn({ x: 1n, y: 1n, z: 1n }, 0, 'VIEW')
+    expect(useTv.getState().on).toBe(false)
+  })
+})

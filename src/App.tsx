@@ -23,6 +23,8 @@ import { GoalChip } from './hud/GoalChip'
 import { watchNearbyReturn } from './lib/nearbyReturn'
 import { startCoordRoute } from './store/useCoordRoute'
 import { DemoCoach } from './hud/DemoCoach'
+import { TvScreen } from './hud/TvScreen'
+import { isTvPath, useTv } from './store/useTv'
 import { parseDemoRoute } from './lib/demoRoute'
 import { restoreAfterUnfinishedTour, useDemo } from './store/useDemo'
 import { ToastChip } from './hud/ToastChip'
@@ -107,6 +109,19 @@ export default function App(): JSX.Element {
       const d = useDemo.getState()
       if (at === null && d.active) d.exit()
       else if (at !== null && !d.active) d.start(at || undefined)
+    }
+    window.addEventListener('popstate', onPop)
+    return () => window.removeEventListener('popstate', onPop)
+  }, [])
+  // onosendai.tech/tv: Cyberspace TV (store/useTv.ts). Back off /tv turns
+  // it off, Forward onto /tv turns it on, as loading that address would.
+  useEffect(() => {
+    if (isTvPath(window.location.pathname)) useTv.getState().start()
+    const onPop = (): void => {
+      const at = isTvPath(window.location.pathname)
+      const tv = useTv.getState()
+      if (!at && tv.on) tv.stop()
+      else if (at && !tv.on) tv.start()
     }
     window.addEventListener('popstate', onPop)
     return () => window.removeEventListener('popstate', onPop)
@@ -260,6 +275,18 @@ export default function App(): JSX.Element {
     tapScene()
   }, [viewMenuOpen])
   useCanvasTap(onSceneTap, !crowded)
+
+  // Cyberspace TV has the screen to itself: the panels, chips, pad and
+  // modals are about you, and the picture is not.
+  const tv = useTv((s) => s.on)
+  if (tv) {
+    return (
+      <div className="app">
+        <Scene />
+        <TvScreen />
+      </div>
+    )
+  }
 
   return (
     <div className="app">

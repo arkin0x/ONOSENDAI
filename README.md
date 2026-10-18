@@ -204,6 +204,20 @@ history, and points a YOU marker back at your own avatar. The panels lock, the
 movement controls stand down, the compass and view controls stay, and END
 SPECTATION brings you home.
 
+**Cyberspace TV.** CYBERSPACE TV in the view menu (tap the compass), or
+`onosendai.tech/tv`, plays v2's history back as a broadcast: from a random
+event since v2 began (2026-08-23), every movement action in the order it was
+signed, on a curved, fringed, scanlined picture tube with the ONOSENDAI logo
+in its corner. Each avatar's run of actions is one shot, framed close, medium
+or wide from above with a slow push-in; shots play in the order they started,
+so someone who moved at the same time is shown next, from their own start
+(MEANWHILE), and nothing is dropped. Dead air is skipped (LATER), and a spawn
+that went nowhere is a line on the ticker rather than a shot. The chiron says
+who and what, with a zoom gauge; the ticker gives the counts as of the moment
+on tape (avatars, bags, objects, their chain, their bags). Watching only:
+nothing is signed or published, and OFF or Escape puts the view back.
+`scripts/tv-smoke.mjs` plays a recorded tape offline.
+
 **The spawn marker.** v1's spawn model (`public/spawn.glb`: three hexagonal
 rings, a hollow cube, six radiating bars) stands at the pubkey coordinate,
 sized in cells like the avatar so it marks the spawn cell at any scale.

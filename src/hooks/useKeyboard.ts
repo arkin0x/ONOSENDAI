@@ -15,6 +15,7 @@ import { useEffect } from 'react'
 import { escapeTop } from './useEscape'
 import { useCyberspace } from '../store/useCyberspace'
 import { closeScrubber, useHyperspace } from '../store/useHyperspace'
+import { useTv } from '../store/useTv'
 import { useWorkshop } from '../store/useWorkshop'
 import { useShards } from '../store/useShards'
 import { stepChain, useBuilder, walkChain } from '../store/useBuilder'
@@ -78,6 +79,8 @@ export function useKeyboard(): void {
       // smoke test, 2026-10-16). A field that uses Escape itself (the chat
       // line's mention list) says so with preventDefault, and keeps it.
       if (escapeKey(event)) return
+      // Cyberspace TV is watching only: no key moves, zooms or commits.
+      if (useTv.getState().on) return
       // Typing into a field, or building on the bench: not ours.
       const tag = (event.target as HTMLElement | null)?.tagName
       if (tag === 'INPUT' || tag === 'TEXTAREA') return

@@ -175,7 +175,12 @@ export function ChatDock(): JSX.Element {
     const r = row.getBoundingClientRect()
     if (r.top < b.top) box.scrollTop -= b.top - r.top
     else if (r.bottom > b.bottom) box.scrollTop += r.bottom - b.bottom
-  }, [highlight, picking, matches])
+    // On the lit row or the query changing, not on the list being rebuilt:
+    // it is rebuilt whenever anyone nearby moves or a row's picture loads,
+    // and a list scrolled by hand on a touch screen snapped back to the lit
+    // row each time (review of #374).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [highlight, picking, typing?.query])
 
   // The region a line would go to right now: its size is the room's name.
   const key = useMemo(() => sendKey(), [current])

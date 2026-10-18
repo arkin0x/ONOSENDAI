@@ -21,7 +21,7 @@ import { formatCellSize } from 'sno-core/scale'
 import { actionLabel } from '../lib/events'
 import { MAX_SCALE_EXP } from '../lib/space'
 import { chainLengthAt, countTo } from '../lib/tv/stats'
-import { safeNpub } from '../lib/npub'
+import { tvName } from '../lib/tv/text'
 import { useEscape } from '../hooks/useEscape'
 import { useProfile } from '../hooks/useProfile'
 import { placeable, useTv } from '../store/useTv'
@@ -61,11 +61,7 @@ export function skipWords(seconds: number): string {
   return parts.join(' ')
 }
 
-function nameOf(pubkey: string, profileName: string | null | undefined): string {
-  if (profileName) return profileName.toUpperCase()
-  const npub = safeNpub(pubkey)
-  return npub ? `${npub.slice(0, 12)}…` : `${pubkey.slice(0, 8)}…`
-}
+const nameOf = tvName
 
 function ZoomGauge({ scaleExp }: { scaleExp: number }): JSX.Element {
   const top = MAX_SCALE_EXP + 1

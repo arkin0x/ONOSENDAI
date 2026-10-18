@@ -26,6 +26,7 @@ import { COMMENT_KIND, PLACEHOLDER, parseComment } from '../comments'
 import { AVATAR_KIND, avatarFromEvent } from '../avatar'
 import { REACTION_KIND, parseReaction } from '../social'
 import type { Beat, TapeItem } from './director'
+import { cleanText } from './text'
 
 /**
  * The first second of Cyberspace v2 on the relays: the earliest v2 spawn on
@@ -141,8 +142,9 @@ export function itemOf(ev: NostrEvent): TapeItem | null {
   if (ev.kind === REACTION_KIND) {
     const r = parseReaction(ev)
     if (!r || r.targetKind === null || !REACTED_KINDS.includes(String(r.targetKind))) return null
-    // A custom emoji's code reads as a word; anything long is cut.
-    const content = r.content === '+' ? '♥' : r.content.slice(0, 16)
+    // A custom emoji's code reads as a word; anything long is cut, by whole
+    // characters, and nothing invisible gets through (lib/tv/text.ts).
+    const content = r.content === '+' ? '♥' : cleanText(r.content, 16) || '♥'
     return { kind: 'reaction', ...base, content, on: r.targetKind === ACTION_KIND ? 'move' : 'shard' }
   }
   if (ev.kind === COMMENT_KIND) {
@@ -152,7 +154,7 @@ export function itemOf(ev: NostrEvent): TapeItem | null {
     if (!c) return null
     const sealed = c.ciphertext !== null || c.preview === PLACEHOLDER
     const about = ev.tags.find((t) => t[0] === 'P')?.[1] ?? null
-    return { kind: 'comment', ...base, on: k === String(ACTION_KIND) ? 'move' : 'bag', text: sealed ? null : c.preview, about }
+    return { kind: 'comment', ...base, on: k === String(ACTION_KIND) ? 'move' : 'bag', text: sealed ? null : cleanText(c.preview) || null, about }
   }
   return null
 }

@@ -40,4 +40,5 @@ export const PLAYLIST: Track[] = [
   { url: 'https://media.basspistol.com/panix/br-tbients/1-br-tbient.mp3' },
   { url: 'https://media.basspistol.com/panix/br-tbients/2-br-tbient-too.mp3' },
   { url: 'https://media.basspistol.com/panix/br-tbients/3-broet-igen.mp3' },
+  { url: 'https://media.basspistol.com/die_nmi_/total_disko_destruction/2026-Total%20Club%20Destruction-01%20Goin%27%20Offline.mp3' },
 ]

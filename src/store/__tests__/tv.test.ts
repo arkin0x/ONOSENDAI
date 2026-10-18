@@ -29,7 +29,7 @@ import type { Filter } from 'nostr-tools'
 import type { RelayAnswer } from '../../lib/relayOutcome'
 import { positionHex, type NostrEvent } from '../../lib/events'
 import { V2_EPOCH } from '../../lib/tv/tape'
-import { READ_STUCK_MS, TV_FOCUS_LABEL, fitScale, placeable, rideEnds, rideView, setTvAsk, shotOpening, useTv, type TvJump } from '../useTv'
+import { READ_STUCK_MS, TV_FOCUS_LABEL, fitScale, pathAfter, placeable, rideEnds, rideView, setTvAsk, shotOpening, useTv, type TvJump } from '../useTv'
 import { useCyberspace } from '../useCyberspace'
 import { useBuilder } from '../useBuilder'
 import { usePersonCard } from '../usePersonCard'
@@ -332,6 +332,30 @@ describe('Cyberspace TV', () => {
     const b = useTv.getState().avatars[B]
     expect(b?.position.x).toBe(1003n)
     expect(b?.from?.x).toBe(1002n)
+  })
+
+  it('keeps the path an avatar walked on tape, for its trail', async () => {
+    useTv.getState().start()
+    await run(9000)
+    // From where the trip opened, through each hop it played.
+    expect(useTv.getState().avatars[B]?.path?.map((p) => p.x)).toEqual([1000n, 1001n, 1002n, 1003n])
+    // The arrival that went nowhere has a path of one place: no line.
+    expect(useTv.getState().avatars[A]?.path).toHaveLength(1)
+  })
+
+  it('a path goes on in its plane, starts again in the other, and keeps its newest places', () => {
+    const p = (x: bigint) => ({ x, y: 0n, z: 0n })
+    const was = { position: p(2n), plane: 0, at: 0, path: [p(1n), p(2n)] }
+    expect(pathAfter(was, p(3n), 0).map((q) => q.x)).toEqual([1n, 2n, 3n])
+    // Standing still adds nothing.
+    expect(pathAfter(was, p(2n), 0)).toBe(was.path)
+    // Across the planes the two places are not a line.
+    expect(pathAfter(was, p(3n), 1)).toEqual([p(3n)])
+    expect(pathAfter(undefined, p(3n), 0)).toEqual([p(3n)])
+    let long = { ...was, path: [p(0n)] }
+    for (let i = 1n; i <= 300n; i++) long = { ...long, path: pathAfter(long, p(i), 0) }
+    expect(long.path).toHaveLength(256)
+    expect(long.path[255].x).toBe(300n)
   })
 
   it('gives up on a read that never comes back, and reads on without doubling', async () => {

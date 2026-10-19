@@ -45,6 +45,7 @@ import { avatarFromEvent } from '../lib/avatar'
 import { tvSpin } from '../hud/TvSegments'
 import { CUT_MS, TV_FONT, TvPainter, type FlatRect, type TvAssets, type TvMusic } from './tvPainter'
 import { musicProgress, setMusicVolume, toggleMusicMute, useTvMusic } from '../store/useTvMusic'
+import { useTvWatching } from '../store/useTvWatching'
 import { CALM, GlitchDirector } from '../lib/tv/glitch'
 import type { ShardModel } from 'sno-core/shards'
 
@@ -443,6 +444,7 @@ export function TvScreenEffect(): JSX.Element {
       segmentShard: segment.current.shard,
       color: targetColor,
       music: nowPlaying(),
+      watching: useTvWatching.getState().count,
       hosaka: !tv.ad ? null : hosaka && hosaka.readyState >= 2 ? hosaka : pictureFor('/hosaka-poster.jpg'),
       hosakaMark: tv.ad ? pictureFor('/hosaka-mark.png') : null,
     }

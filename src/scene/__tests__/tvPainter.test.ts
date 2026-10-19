@@ -289,6 +289,27 @@ describe('the chiron and NOW PLAYING', () => {
     expect(d.words.some((w) => w.text === 'ZOOM')).toBe(false)
   })
 
+  it('says how many are watching after the CYBERSPACE TV bug, and the marquee runs after it', () => {
+    const d = drawing()
+    const p = new TvPainter(d.canvas)
+    p.size(1400, 800, 1)
+    p.paint(picture({ shot: trip as never, arrivals: [{ pubkey: 'zed', at: 50 }] }), { ...assets, music, watching: 3 }, 1000, 1, false)
+    const tv = d.words.find((w) => w.text === 'TV')!
+    const watching = d.words.find((w) => w.text === '3 WATCHING')!
+    expect(watching).toBeDefined()
+    expect(watching.x).toBeGreaterThan(tv.x)
+    // The run's first words start right of the count's end.
+    const run = d.words.filter((w) => w.y === tv.y && w.x > tv.x && w.text !== '3 WATCHING' && w.text !== '◆')
+    expect(run.length).toBeGreaterThan(0)
+    for (const w of run) expect(w.x).toBeGreaterThan(watching.x + '3 WATCHING'.length * 7)
+    // Without a count yet, no words for it.
+    const e = drawing()
+    const q = new TvPainter(e.canvas)
+    q.size(1400, 800, 1)
+    q.paint(picture({ shot: trip as never }), { ...assets, music }, 1000, 1, false)
+    expect(e.words.some((w) => w.text.endsWith('WATCHING'))).toBe(false)
+  })
+
   it('the HOSAKA end card draws the menu button after its last line', () => {
     const end = HOSAKA_1.scenes[HOSAKA_1.scenes.length - 1]
     expect(end.icon).toBe('menu')

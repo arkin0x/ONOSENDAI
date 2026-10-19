@@ -65,7 +65,9 @@ async function run(phone) {
   } catch (e) {
     check('run', false, String(e).slice(0, 300))
   } finally {
-    check('nothing published', stats.events === 0, `${stats.events} EVENT, ${stats.nonGetAborted} non-GET aborted`)
+    // Nothing but the set's anonymous watching pings (lib/tv/watching.ts), and only to the offline relay.
+    const pings = stats.kinds[23334] ?? 0
+    check('nothing published but watching pings', stats.events === pings, `${stats.events} EVENT (${pings} pings), ${stats.nonGetAborted} non-GET aborted`)
     const real = errors.filter((e) => !/Failed to load resource|net::ERR/.test(e))
     check('no page errors', real.length === 0, real.slice(0, 3).join(' | '))
     await browser.close()

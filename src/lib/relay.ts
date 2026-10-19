@@ -197,6 +197,24 @@ export async function publishMany(relays: string[], event: NostrEvent): Promise<
   return publishOnce(relays, event)
 }
 
+/**
+ * Send something that does not matter if it is lost: one try, to the
+ * canonical relay only, over a socket that is already open and not waiting
+ * on an AUTH. Never drops a socket, never retries, never asks the signer to
+ * AUTH, so it cannot disturb the feeds (review of #396: a ping in flight as
+ * the tab came back, through publishMany, dropped the sockets resumeLive had
+ * just opened, and every feed reconnected and signed in again). Only the
+ * canonical relay: every set listens there, it is always configured, and a
+ * relay of the viewer's own has no use for it. Cyberspace TV's watching ping
+ * (store/useTvWatching) is the one caller. Whether it was sent.
+ */
+export async function publishLight(event: NostrEvent): Promise<boolean> {
+  const url = normalizeURL(CYBERSPACE_RELAY)
+  if (!pool?.listConnectionStatus().get(url) || authPending(url)) return false
+  const [result] = await Promise.allSettled(getPool().publish([url], event, { maxWait: MAX_WAIT_MS }))
+  return result?.status === 'fulfilled' && !String(result.value).startsWith(CONNECTION_FAILURE)
+}
+
 /** Send one event to every configured relay. */
 export function publish(event: NostrEvent): Promise<PublishResult> {
   return publishMany(relaySet(), event)

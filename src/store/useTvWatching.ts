@@ -5,15 +5,19 @@
  * every PING_EVERY_MS while the tab is in front (a hidden tab is not
  * watching), and the count read again every COUNT_EVERY_MS. The ping's key is
  * made when the set comes on and forgotten when it goes off; it signs nothing
- * else. A ping the relay refuses is let go: the count then says only this set.
+ * else, and the viewer's own signer is never asked. A ping goes by
+ * publishLight, one try that never disturbs the feeds; one refused or lost is
+ * let go, and the count then says only this set.
  */
 import { create } from 'zustand'
-import { publish, subscribe } from '../lib/relay'
+import { publishLight, subscribe } from '../lib/relay'
 import { randomSigner, type Signer } from '../lib/signers'
-import { PING_EVERY_MS, WATCHING_KIND, SKEW_S, Watchers, pingTemplate } from '../lib/tv/watching'
+import { PING_EVERY_MS, WATCHING_KIND, WATCHING_TAG, SKEW_S, Watchers, pingTemplate } from '../lib/tv/watching'
 
 /** How often the count is read again, ms. */
 const COUNT_EVERY_MS = 5_000
+/** Back in front sooner than this after the last ping, ms, and it does not ping again: an alt-tab is not a new viewer. */
+const PING_AGAIN_MS = PING_EVERY_MS / 2
 
 export const useTvWatching = create<{ count: number }>(() => ({ count: 0 }))
 
@@ -23,6 +27,8 @@ interface Running {
   unsubscribe: () => void
   timers: number[]
   onVisible: () => void
+  /** When this set last sent a ping (performance.now()), or -Infinity. */
+  pinged: number
 }
 let running: Running | null = null
 
@@ -31,15 +37,16 @@ function visible(): boolean {
 }
 
 function recount(r: Running): void {
-  useTvWatching.setState({ count: r.watchers.count(Date.now(), r.signer.pubkey) })
+  useTvWatching.setState({ count: r.watchers.count(performance.now(), r.signer.pubkey) })
 }
 
 async function ping(r: Running): Promise<void> {
   if (!visible() || running !== r) return
+  r.pinged = performance.now()
   try {
     const ev = await r.signer.signEvent(pingTemplate(Math.floor(Date.now() / 1000)))
-    if (running === r) await publish(ev)
-  } catch { /* refused or offline: the count says this set alone */ }
+    if (running === r) await publishLight(ev)
+  } catch { /* lost: the count says this set alone */ }
 }
 
 /** The set came on: listen, say so, and count. */
@@ -50,11 +57,12 @@ export function startWatching(): void {
     watchers: new Watchers(),
     unsubscribe: () => {},
     timers: [],
-    onVisible: () => { if (visible()) void ping(r) },
+    onVisible: () => { if (visible() && performance.now() - r.pinged >= PING_AGAIN_MS) void ping(r) },
+    pinged: -Infinity,
   }
   running = r
-  r.unsubscribe = subscribe({ kinds: [WATCHING_KIND], since: Math.floor(Date.now() / 1000) - SKEW_S }, (ev) => {
-    if (running === r && r.watchers.hear(ev, Date.now())) recount(r)
+  r.unsubscribe = subscribe({ kinds: [WATCHING_KIND], '#t': [WATCHING_TAG], since: Math.floor(Date.now() / 1000) - SKEW_S }, (ev) => {
+    if (running === r && r.watchers.hear(ev, performance.now(), Date.now() / 1000)) recount(r)
   })
   r.timers.push(setInterval(() => void ping(r), PING_EVERY_MS) as unknown as number)
   r.timers.push(setInterval(() => recount(r), COUNT_EVERY_MS) as unknown as number)

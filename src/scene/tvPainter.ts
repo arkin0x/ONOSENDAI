@@ -84,6 +84,8 @@ const NOW_PLAYING_LINE_PX = 34
  */
 const CHIRON_PX = [NOW_PLAYING_PX, 62] as const
 const REGION = '#52e39f'
+/** A marquee narrower than this, CSS px, says how many are watching with the number alone. */
+const NARROW_MARQUEE_PX = 480
 /** A commercial's button after its last line: its room, in ems of the type, the gap before it included. */
 const ICON_EM = 1.75
 const MONTHS = ['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC']
@@ -580,9 +582,15 @@ export class TvPainter {
     // How many are watching, after the bug, the run after it (2026-10-19:
     // "a little "X watching" to the right of Cyberspace TV in the bottom
     // left? Then the marquee will be to the right of this").
+    // Its room is kept as wide as three digits' worth, so the run does not
+    // jump sideways as the count goes from 9 to 10 (review of #396); on a
+    // narrow marquee, the number alone after the dot.
     if (a.watching && a.watching > 0) {
       ctx.font = `700 ${10 * s}px ${TV_FONT}`
-      const words = watchingWords(a.watching)
+      const short = x1 - x0 < NARROW_MARQUEE_PX * s
+      const say = (n: number): string => (short ? n.toLocaleString('en-US') : watchingWords(n))
+      const words = say(a.watching)
+      const room = Math.max(ctx.measureText(words).width, ctx.measureText(say(999)).width)
       const dot = 3 * s
       ctx.fillStyle = REGION
       ctx.beginPath()
@@ -590,7 +598,7 @@ export class TvPainter {
       ctx.fill()
       ctx.fillStyle = 'rgba(242, 251, 255, 0.85)'
       ctx.fillText(words, startX + dot * 2 + 6 * s, base - 0.5 * s)
-      startX += dot * 2 + 6 * s + ctx.measureText(words).width + 16 * s
+      startX += dot * 2 + 6 * s + room + 16 * s
     }
     ctx.fillStyle = 'rgba(0, 229, 255, 0.4)'
     ctx.fillRect(startX - 8 * s, y + 5 * s, Math.max(1, s), h - 10 * s)

@@ -429,8 +429,28 @@ describe('Cyberspace TV', () => {
     expect(ads.length).toBeGreaterThanOrEqual(1)
     expect(ads[0].shot).toBeNull()
     expect(tapeMovedDuringAd).toBe(false)
-    // It ends after AD_S, with a cut, and the tape picks up.
+    // It ends with a cut, and the tape picks up.
     expect(useTv.getState().ad).toBeNull()
+  })
+
+  it('goes back to the tape in one cut, and never says NO SIGNAL over the commercial', async () => {
+    useTv.getState().start()
+    await run(AD_EVERY_MS + 30_000)
+    const cuts: number[] = []
+    const statuses = new Set<string>()
+    let ended = false
+    const off = useTv.subscribe((s, prev) => {
+      if (s.ad) statuses.add(s.status)
+      if (prev.ad && !s.ad) { ended = true; cuts.length = 0 }
+      if (ended && s.cutAt !== prev.cutAt) cuts.push(s.cutAt)
+    })
+    // Every read fails from here: NO SIGNAL waits until the commercial is over.
+    down = 1_000
+    await run(AD_EVERY_MS)
+    off()
+    down = 0
+    expect(statuses.has('no-signal')).toBe(false)
+    expect(new Set(cuts.slice(0, 2)).size).toBeLessThanOrEqual(1)
   })
 
   it('turns off when another view takes the camera', async () => {

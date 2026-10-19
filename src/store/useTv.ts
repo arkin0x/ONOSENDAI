@@ -16,7 +16,7 @@
 
 import { create } from 'zustand'
 import { queryEach } from '../lib/relay'
-import { AD_EVERY_MS, AD_S } from '../lib/tv/hosakaAd'
+import { AD_EVERY_MS, adById, adLength, nextAd } from '../lib/tv/hosakaAd'
 import { Director, JUMP_LINE_S, JUMP_S, JUMP_WARP_S, MAX_SHOT_S, isJump, shotFraming, type Beat, type Framing, type Shot, type TapeItem } from '../lib/tv/director'
 import type { HintBox } from '../lib/hint'
 import { TapeReader, V2_EPOCH, randomStart, type Ask, TapeUnanswered } from '../lib/tv/tape'
@@ -111,10 +111,10 @@ interface TvState {
   /** The hyperjump being ridden on screen, or null. */
   jump: TvJump | null
   /**
-   * The commercial on screen (lib/tv/hosakaAd), since `at` (performance.now()),
-   * or null. Nothing from the tape plays under it.
+   * The commercial on screen (lib/tv/hosakaAd): which spot, since `at`
+   * (performance.now()), or null. Nothing from the tape plays under it.
    */
-  ad: { at: number } | null
+  ad: { at: number; id: string } | null
   /** Turn the set on; false when something else owns the camera (tvBlocked). */
   start: () => boolean
   /** A new random start, the set staying on (RETRY). */
@@ -195,6 +195,8 @@ let readingTape = -1
 let shotBegan = 0
 /** When the next commercial is due (performance.now()): AD_EVERY_MS after TV came on, and after each break. */
 let adDue = Infinity
+/** The spot played last, so the breaks take them in turn. */
+let lastAd: string | null = null
 let timer: number | null = null
 let ask: Ask = (f) => queryEach(f)
 
@@ -297,7 +299,8 @@ async function readMore(id: number, t: number): Promise<void> {
     if (!current()) return
     failures++
     retryAt = performance.now() + Math.min(RETRY_MAX_MS, RETRY_MS * 2 ** (failures - 1))
-    if (failures >= NO_SIGNAL_AFTER && queue.length === 0 && useTv.getState().shot === null) useTv.setState({ status: 'no-signal' })
+    // Not over a commercial, which has no shot either (review of #384).
+    if (failures >= NO_SIGNAL_AFTER && queue.length === 0 && useTv.getState().shot === null && useTv.getState().ad === null) useTv.setState({ status: 'no-signal' })
     // A shot still on screen says NO SIGNAL from tick, once it has played out.
   } finally {
     if (readingTape === t && r === reader) readingTape = -1
@@ -519,22 +522,24 @@ function tick(id: number): void {
   if (id !== run) return
   const t = tape
   const now = performance.now()
-  const s = useTv.getState()
+  let s = useTv.getState()
   if (queue.length < QUEUE_LOW) void readMore(id, t)
   // A commercial on screen: nothing from the tape plays under it ("No
   // cyberspace actions play in the bg while the hosaka ad plays"). The tape
   // picks up where it was, after a cut.
   if (s.ad) {
-    if (now - s.ad.at >= AD_S * 1000) {
-      adDue = now + AD_EVERY_MS
-      useTv.setState({ ad: null, cutAt: now })
-    }
-    return
+    if (now - s.ad.at < adLength(adById(s.ad.id)) * 1000) return
+    // Over: the next shot starts in this same tick, so the way back is one cut, not two.
+    adDue = now + AD_EVERY_MS
+    useTv.setState({ ad: null, shot: null, cutAt: now })
+    s = useTv.getState()
   }
   if (s.shot === null || (now - shotBegan) / 1000 >= s.shot.length) {
     // A break, when one is due: between shots, never across one.
     if (now >= adDue && s.status === 'playing') {
-      useTv.setState({ ad: { at: now }, shot: null, jump: null, played: 0, cutAt: now })
+      const spot = nextAd(lastAd)
+      lastAd = spot.id
+      useTv.setState({ ad: { at: now, id: spot.id }, shot: null, jump: null, played: 0, cutAt: now })
       return
     }
     let next = queue.shift()
@@ -588,6 +593,8 @@ async function tune(id: number): Promise<void> {
   queue = []
   retryAt = 0
   failures = 0
+  // A retune cutting a commercial short counts as one played: the next is ten minutes on.
+  if (useTv.getState().ad) adDue = performance.now() + AD_EVERY_MS
   useTv.setState({ status: 'tuning', shot: null, played: 0, tapeTime: null, avatars: {}, arrivals: [], reactions: [], boxes: [], jump: null, ad: null, skipped: 0, cutAt: performance.now() })
   let from: number | null = null
   for (let attempt = 0; from === null; attempt++) {

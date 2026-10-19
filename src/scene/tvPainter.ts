@@ -30,7 +30,7 @@ import { itemLength, type Shot, type TapeItem } from '../lib/tv/director'
 import { LANDMARKS } from '../hud/ScaleLadder'
 import { CUT_MS, contentsWords, quoteOf, segmentDoing, typePace, TYPE_DELAY_S } from '../hud/TvSegments'
 import { placeable, shotProgress, type TvAvatar } from '../store/useTv'
-import { AD_LINES, AD_SUBTITLE } from '../lib/tv/hosakaAd'
+import { AD_SUBTITLE, adById, type AdTheme } from '../lib/tv/hosakaAd'
 import type { Census, ChainTimes } from '../lib/tv/stats'
 import type { Position } from '../lib/space'
 
@@ -70,6 +70,12 @@ const ACCENT = '#00e5ff'
 /** NOW PLAYING's progress, purple to pink (arkinox, 2026-10-18: "make the progress something cool like a gradient from purple to pink"). */
 const MUSIC_PURPLE = '#8a2be2'
 const MUSIC_PINK = '#ff2d95'
+/** The commercial's colours: the HOSAKA banner's teal, its mark's magenta, and the night between. */
+const AD_THEMES: Record<AdTheme, { deep: string; stripe: string; accent: string }> = {
+  teal: { deep: '#03343a', stripe: 'rgba(29, 233, 182, 0.12)', accent: '#1de9b6' },
+  magenta: { deep: '#3a0322', stripe: 'rgba(255, 45, 149, 0.14)', accent: '#ff2d95' },
+  night: { deep: '#14052a', stripe: 'rgba(138, 92, 255, 0.12)', accent: '#ff2d95' },
+}
 /** NOW PLAYING's height, CSS px, and as one line where there is no room for it. */
 const NOW_PLAYING_PX = 76
 const NOW_PLAYING_LINE_PX = 34
@@ -119,8 +125,8 @@ export interface TvPicture {
   arrivals: Array<{ pubkey: string; at: number }>
   reactions: Array<{ pubkey: string; at: number; content: string; on: 'shard' | 'move' }>
   avatars: Record<string, TvAvatar>
-  /** The commercial on screen, since `at` (performance.now()), or null (lib/tv/hosakaAd). */
-  ad?: { at: number } | null
+  /** The commercial on screen, which spot and since `at` (performance.now()), or null (lib/tv/hosakaAd). */
+  ad?: { at: number; id: string } | null
 }
 
 /** What the painter needs from outside the store. */
@@ -141,6 +147,8 @@ export interface TvAssets {
   music?: TvMusic | null
   /** The HOSAKA banner, playing, for the commercial; null until it has a frame. */
   hosaka?: CanvasImageSource | null
+  /** The HOSAKA mark alone (public/hosaka-mark.png), for the commercial's cards; null until loaded. */
+  hosakaMark?: CanvasImageSource | null
 }
 
 /** What NOW PLAYING shows. */
@@ -438,7 +446,7 @@ export class TvPainter {
 
     // A commercial owns the picture: nothing of the tape under it.
     if (p.ad) {
-      this.commercial(p.ad.at, p, a, W, H, MX, MY, s, narrow, now, reduced, dt, scale)
+      this.commercial(p.ad, p, a, W, H, MX, MY, s, narrow, now, reduced, dt, scale)
       return
     }
 
@@ -659,96 +667,141 @@ export class TvPainter {
   }
 
   /**
-   * The HOSAKA commercial (lib/tv/hosakaAd): the banner, bouncing, its name's
-   * long form under it, and the lines coming up one by one, over a dark
-   * ground that hides the world. The channel stays round it: the logo, the
-   * marquee and NOW PLAYING.
+   * The HOSAKA commercial (lib/tv/hosakaAd), cut as a TV spot: the banner as
+   * big as the tube holds, then one card at a time slamming in over speed
+   * stripes in the brand's colours, then the end card with the mark. Over a
+   * ground that hides the world; NOW PLAYING and the marquee stay, with an
+   * ADVERTISEMENT tag in the corner, as a channel marks its breaks.
    */
-  private commercial(at: number, p: TvPicture, a: TvAssets, W: number, H: number, MX: number, MY: number, s: number, narrow: boolean, now: number, reduced: boolean, dt: number, scale: number): void {
+  private commercial(ad: { at: number; id: string }, p: TvPicture, a: TvAssets, W: number, H: number, MX: number, MY: number, s: number, narrow: boolean, now: number, reduced: boolean, dt: number, scale: number): void {
     const ctx = this.ctx
-    const t = Math.max(0, (now - at) / 1000 - CUT_MS / 1000)
-    const ground = ctx.createRadialGradient(W / 2, H * 0.42, 0, W / 2, H * 0.42, Math.max(W, H) * 0.75)
-    ground.addColorStop(0, '#1a0630')
+    const t = Math.max(0, (now - ad.at) / 1000 - CUT_MS / 1000)
+    const scenes = adById(ad.id).scenes
+    const scene = scenes.find((sc) => t >= sc.from && t < sc.to) ?? scenes[scenes.length - 1]
+    const tc = t - scene.from
+    const theme = AD_THEMES[scene.theme]
+    // In over the cut's own length, so the cut into the break shows (review of #384).
+    const enter = clamp01((now - ad.at) / CUT_MS)
+    ctx.save()
+    ctx.globalAlpha = enter
+
+    // The ground, and speed stripes running across it.
+    const ground = ctx.createLinearGradient(0, 0, W, H)
+    ground.addColorStop(0, theme.deep)
     ground.addColorStop(1, '#030008')
     ctx.fillStyle = ground
     ctx.fillRect(0, 0, W, H)
+    if (scene.kind !== 'banner') this.stripes(theme.stripe, W, H, s, reduced ? 0 : t)
 
-    const lw = Math.min(LOGO_PX * s, W * LOGO_SHARE)
-    const lh = lw * LOGO_ASPECT
-    if (a.logo) {
-      ctx.globalAlpha = 0.96
-      ctx.drawImage(a.logo, W - MX - lw, MY, lw, lh)
-      ctx.globalAlpha = 1
-    }
     const tickH = 28 * s
     const tickY = H - MY - tickH
-    this.marquee(p, a, MX, tickY, W - MX, tickH, s, dt)
-    const npW = narrow ? W - 2 * MX : lw + 16 * s
+    const npW = narrow ? W - 2 * MX : Math.min(LOGO_PX * s, W * LOGO_SHARE) + 16 * s
     const npBottom = tickY - 10 * s - CHIRON_PX[narrow ? 1 : 0] * s - 10 * s
-    const npTop = a.music && npBottom - NOW_PLAYING_PX * s >= MY + lh + 10 * s ? this.nowPlaying(a.music, W - MX - npW, npBottom, npW, s, now, reduced, false) : null
+    const npRoom = npBottom - NOW_PLAYING_PX * s >= MY + 40 * s
+    // The words and pictures keep clear of NOW PLAYING's corner.
+    const top = MY + 26 * s
+    const bottom = (a.music && npRoom ? npBottom - NOW_PLAYING_PX * s : tickY) - 14 * s
+
+    // A card comes in hard: big, then down to size, with a jolt as it lands.
+    const k = reduced ? 1 : clamp01(tc / 0.22)
+    const zoom = 1 + 0.35 * (1 - k) * (1 - k)
+    const jolt = reduced ? 0 : Math.sin(tc * 70) * 4 * s * (1 - clamp01((tc - 0.22) / 0.2)) * (tc > 0.22 ? 1 : 0)
+    // And goes with a quick fade into the next.
+    const out = reduced ? 1 : clamp01((scene.to - t) / 0.15)
+
+    ctx.save()
+    ctx.globalAlpha = (reduced ? 1 : clamp01(tc / 0.1)) * out
+    ctx.translate(W / 2 + jolt, (top + bottom) / 2)
+    ctx.scale(zoom, zoom)
+    ctx.textAlign = 'center'
+    if (scene.kind === 'banner') {
+      // "bombastically huge": as big as the tube holds.
+      const bw = Math.min(W - MX, (bottom - top + 2 * MY) * 1.6)
+      const bh = bw / 1.6
+      if (a.hosaka) ctx.drawImage(a.hosaka, -bw / 2, -bh / 2, bw, bh)
+    } else {
+      const mark = scene.mark && a.hosakaMark ? a.hosakaMark : null
+      const room = bottom - top
+      const markH = mark ? Math.min(room * (scene.kind === 'end' ? 0.55 : 0.32), (scene.kind === 'end' ? 300 : 170) * s) : 0
+      const markW = markH * (308 / 334)
+      // The type as big as the widest line allows, and the lines allow in height.
+      const maxW = W - 2 * MX - 20 * s
+      let size = (scene.kind === 'end' ? (narrow ? 13 : 20) : narrow ? 40 : 96) * s
+      ctx.font = `700 ${size}px ${TV_FONT}`
+      const widest = Math.max(...scene.lines.map((l) => ctx.measureText(l).width))
+      if (widest > maxW) size *= maxW / widest
+      const textRoom = room - markH - (markH ? 18 * s : 0) - (scene.kind === 'end' ? 40 * s : 0)
+      size = Math.min(size, textRoom / (scene.lines.length * 1.12))
+      ctx.font = `700 ${size}px ${TV_FONT}`
+      const subSize = (narrow ? 8.5 : 11) * s
+      const blockH = markH + (markH ? 18 * s : 0) + scene.lines.length * size * 1.12 + (scene.kind === 'end' ? 40 * s : 0)
+      let y = -blockH / 2
+      if (mark) {
+        ctx.drawImage(mark, -markW / 2, y, markW, markH)
+        y += markH + 18 * s
+      }
+      if (scene.kind === 'end') {
+        // The name's long form, subtly, under the mark.
+        ctx.font = `${subSize}px ${TV_FONT}`
+        ctx.fillStyle = 'rgba(242, 221, 255, 0.6)'
+        for (const line of wrap(ctx, AD_SUBTITLE.toUpperCase(), maxW)) { y += subSize * 1.4; ctx.fillText(line, 0, y) }
+        y += 26 * s - subSize * 1.4 * (wrap(ctx, AD_SUBTITLE.toUpperCase(), maxW).length - 1)
+        ctx.font = `700 ${size}px ${TV_FONT}`
+      }
+      scene.lines.forEach((line, i) => {
+        y += size * 1.12
+        const accent = i === scene.accent
+        ctx.save()
+        ctx.fillStyle = accent ? theme.accent : FG
+        ctx.shadowColor = accent ? theme.accent : 'rgba(0, 0, 0, 0.8)'
+        ctx.shadowBlur = (accent ? 18 : 10) * s
+        // The end card's call blinks, slowly.
+        if (scene.kind === 'end' && !reduced) ctx.globalAlpha *= 0.6 + 0.4 * (Math.floor(now / 600) % 2)
+        ctx.fillText(line, 0, y - size * 0.18)
+        ctx.restore()
+      })
+    }
+    ctx.restore()
+    ctx.restore()
+
+    // The channel round it.
+    ctx.save()
+    ctx.font = `700 ${9 * s}px ${TV_FONT}`
+    ctx.textAlign = 'left'
+    const tag = 'ADVERTISEMENT'
+    const tw = ctx.measureText(tag).width
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.55)'
+    ctx.fillRect(MX, MY, tw + 14 * s, 18 * s)
+    ctx.strokeStyle = 'rgba(242, 251, 255, 0.6)'
+    ctx.lineWidth = Math.max(1, s)
+    ctx.strokeRect(MX + 0.5, MY + 0.5, tw + 14 * s - 1, 18 * s - 1)
+    ctx.fillStyle = 'rgba(242, 251, 255, 0.85)'
+    ctx.fillText(tag, MX + 7 * s, MY + 12.5 * s)
+    ctx.restore()
+    this.marquee(p, a, MX, tickY, W - MX, tickH, s, dt)
+    const npTop = a.music && npRoom ? this.nowPlaying(a.music, W - MX - npW, npBottom, npW, s, now, reduced, false) : null
     this.npRect = a.music && npTop !== null ? { x: W - MX - npW, y: npTop, w: npW, h: npBottom - npTop } : null
     this.cardScale = scale
+  }
 
-    // The words first, measured, so the banner takes what room is left.
-    const textW = Math.min(820 * s, W - 2 * MX)
-    const looks = {
-      lead: { size: (narrow ? 14 : 21) * s, weight: 700, color: FG },
-      hero: { size: (narrow ? 26 : 40) * s, weight: 700, color: MUSIC_PINK },
-      riff: { size: (narrow ? 12 : 16) * s, weight: 400, color: 'rgba(242, 251, 255, 0.9)' },
-      call: { size: (narrow ? 11 : 13) * s, weight: 700, color: ACCENT },
-    } as const
-    const blocks = AD_LINES.map((l) => {
-      const look = looks[l.look]
-      ctx.font = `${look.weight} ${look.size}px ${TV_FONT}`
-      const lines = wrap(ctx, l.text, textW)
-      const gapAbove = l.look === 'hero' ? 10 * s : l.look === 'riff' ? 6 * s : l.look === 'call' ? 18 * s : 0
-      return { ...l, look, lines, gapAbove, h: gapAbove + lines.length * look.size * 1.3 }
-    })
-    const textH = blocks.reduce((sum, b) => sum + b.h, 0)
-    const subSize = (narrow ? 8.5 : 10) * s
-    ctx.font = `${subSize}px ${TV_FONT}`
-    const subLines = wrap(ctx, AD_SUBTITLE.toUpperCase(), textW)
-    const subH = subLines.length * subSize * 1.4 + 8 * s
-    const top = MY + lh + 12 * s
-    const bottom = (npTop ?? tickY) - 14 * s
-    const room = bottom - top
-    // The banner, 8:5, as big as fits beside the words, and never bigger than it reads well.
-    let bw = Math.min(560 * s, W - 2 * MX, Math.max(0, room - textH - subH - 18 * s) * 1.6)
-    if (bw < 90 * s) bw = 0
-    const bh = bw / 1.6
-    let y = top + Math.max(0, (room - (bh + (bw ? subH + 18 * s : 0) + textH)) / 2)
-    ctx.textAlign = 'center'
-    if (bw) {
-      const bx = (W - bw) / 2
-      ctx.globalAlpha = ramp(t, 0, 0.6)
-      if (a.hosaka) ctx.drawImage(a.hosaka, bx, y, bw, bh)
-      else { ctx.fillStyle = '#05070d'; ctx.fillRect(bx, y, bw, bh) }
-      ctx.strokeStyle = 'rgba(255, 45, 149, 0.55)'
-      ctx.lineWidth = Math.max(1, s)
-      ctx.strokeRect(bx + 0.5, y + 0.5, bw - 1, bh - 1)
-      y += bh + 8 * s
-      // The subtitle, subtly: the long form of the name.
-      ctx.fillStyle = 'rgba(214, 196, 255, 0.55)'
-      ctx.font = `${subSize}px ${TV_FONT}`
-      for (const line of subLines) { y += subSize * 1.4; ctx.fillText(line, W / 2, y - subSize * 0.3) }
-      y += 18 * s
-      ctx.globalAlpha = 1
+  /** Diagonal bands running across the frame, as a spot's fast cut has. */
+  private stripes(colour: string, W: number, H: number, s: number, t: number): void {
+    const ctx = this.ctx
+    const gap = 120 * s
+    const band = 34 * s
+    const run = (t * 420 * s) % gap
+    ctx.save()
+    ctx.fillStyle = colour
+    ctx.beginPath()
+    for (let x = -H - gap + run; x < W + gap; x += gap) {
+      ctx.moveTo(x, H)
+      ctx.lineTo(x + H * 0.6, 0)
+      ctx.lineTo(x + H * 0.6 + band, 0)
+      ctx.lineTo(x + band, H)
+      ctx.closePath()
     }
-    for (const b of blocks) {
-      y += b.gapAbove
-      const on = reduced ? (t >= b.at ? 1 : 0) : ramp(t, b.at, b.at + 0.45)
-      ctx.font = `${b.look.weight} ${b.look.size}px ${TV_FONT}`
-      ctx.fillStyle = b.look.color
-      ctx.globalAlpha = on
-      if (b.look === looks.hero && on > 0) {
-        ctx.save()
-        ctx.shadowColor = MUSIC_PINK
-        ctx.shadowBlur = 16 * s
-      }
-      for (const line of b.lines) { y += b.look.size * 1.3; if (on > 0) ctx.fillText(line, W / 2, y - b.look.size * 0.3) }
-      if (b.look === looks.hero && on > 0) ctx.restore()
-      ctx.globalAlpha = 1
-    }
+    ctx.fill()
+    ctx.restore()
   }
 
   /**

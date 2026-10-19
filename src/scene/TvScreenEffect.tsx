@@ -276,18 +276,22 @@ export function TvScreenEffect(): JSX.Element {
   const reduced = useMemo(() => typeof window !== 'undefined' && window.matchMedia?.('(prefers-reduced-motion: reduce)').matches === true, [])
   const glitches = useMemo(() => new GlitchDirector(performance.now()), [])
   const wasOn = useRef(false)
+  const hosakaFor = useRef<number | null>(null)
   // The HOSAKA banner for the commercial (lib/tv/hosakaAd), drawn into the
-  // tube frame by frame: the bounce cut, forward then back, so its loop has
-  // no seam. Its file is asked for only once TV is on.
+  // tube frame by frame: it opens the spot and plays once through. Its file
+  // is asked for only once TV is on.
   const hosaka = useMemo(() => {
     if (typeof document === 'undefined') return null
     const v = document.createElement('video')
     v.muted = true
-    v.loop = true
+    v.loop = false
     v.playsInline = true
     v.preload = 'auto'
+    // A browser that says it plays AV1 and then cannot gets the VP9 cut.
+    v.addEventListener('error', () => { if (v.getAttribute('src') === '/hosaka.webm') v.src = '/hosaka-vp9.webm' })
     return v
   }, [])
+  useEffect(() => () => { if (hosaka) { hosaka.pause(); hosaka.removeAttribute('src'); hosaka.load() } }, [hosaka])
   useEffect(() => { if (import.meta.env.DEV) (window as unknown as { __tvGlitches?: GlitchDirector }).__tvGlitches = glitches }, [glitches])
 
   // NOW PLAYING takes a tap to mute and a drag up or down for the volume
@@ -364,12 +368,13 @@ export function TvScreenEffect(): JSX.Element {
     // The glitches' clocks start when TV comes on: time with it off is not a backlog.
     if (tv.on && !wasOn.current) {
       glitches.reset(now)
-      if (hosaka && !hosaka.getAttribute('src')) hosaka.src = hosaka.canPlayType('video/webm; codecs=av01') ? '/hosaka-bounce.webm' : '/hosaka-bounce-vp9.webm'
+      if (hosaka && !hosaka.getAttribute('src')) hosaka.src = hosaka.canPlayType('video/webm; codecs=av01') ? '/hosaka.webm' : '/hosaka-vp9.webm'
     }
     wasOn.current = tv.on
     // The banner runs only while the commercial is on.
     if (hosaka) {
-      if (tv.on && tv.ad && hosaka.paused) { hosaka.currentTime = 0; void hosaka.play().catch(() => {}) }
+      // From its start once per spot, then left on its last frame.
+      if (tv.on && tv.ad && hosakaFor.current !== tv.ad.at) { hosakaFor.current = tv.ad.at; hosaka.currentTime = 0; void hosaka.play().catch(() => {}) }
       else if (!(tv.on && tv.ad) && !hosaka.paused) hosaka.pause()
     }
     if (!tv.on) return
@@ -386,7 +391,8 @@ export function TvScreenEffect(): JSX.Element {
     u.get('uSnow')!.value = tv.status === 'tuning' || tv.status === 'no-signal' ? 0.7 : secret ? 0.85 : 0
     // Now and then the set acts up (lib/tv/glitch.ts): never over a cut, the
     // tunnel or tuning, and never with reduced motion asked for.
-    const held = since < CUT_MS || tv.jump?.phase === 'warp' || tv.status !== 'playing'
+    // Nor over a commercial: the sponsor's spot plays clean.
+    const held = since < CUT_MS || tv.jump?.phase === 'warp' || tv.status !== 'playing' || tv.ad !== null
     const g = reduced ? CALM : glitches.levels(now, held)
     u.get('uAberr')!.value = g.aberration
     u.get('uTear')!.value = g.tear
@@ -414,6 +420,7 @@ export function TvScreenEffect(): JSX.Element {
       color: targetColor,
       music: nowPlaying(),
       hosaka: !tv.ad ? null : hosaka && hosaka.readyState >= 2 ? hosaka : pictureFor('/hosaka-poster.jpg'),
+      hosakaMark: tv.ad ? pictureFor('/hosaka-mark.png') : null,
     }
     painter.paint(tv, assets, now, scale, reduced)
     overlay.needsUpdate = true

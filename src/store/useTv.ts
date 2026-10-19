@@ -32,7 +32,7 @@ import { useShards } from './useShards'
 import { useDemo } from './useDemo'
 import { useCoordRoute } from './useCoordRoute'
 import { usePersonCard } from './usePersonCard'
-import { startMusic, stopMusic } from './useTvMusic'
+import { holdMusicForAd, startMusic, stopMusic } from './useTvMusic'
 import { SCAN_MAX_HEIGHT } from './useShards'
 import { TvScanner, scanHeights, type OpenedBag, type ScanDeps, type ScanPlace } from '../lib/tv/scan'
 import { regionKeyWorker, type RegionKeyWorker } from '../lib/regionKeyOffThread'
@@ -742,6 +742,8 @@ function tick(id: number): void {
     if (now - s.ad.at < AD_IN_MS + adLength(adById(s.ad.id)) * 1000) return
     // Over: the next shot starts in this same tick, so the way back is one cut, not two.
     adDue = now + AD_EVERY_MS
+    // The music back first, so whatever watches the store sees the two together.
+    holdMusicForAd(false)
     useTv.setState({ ad: null, shot: null, cutAt: now })
     s = useTv.getState()
   }
@@ -751,6 +753,7 @@ function tick(id: number): void {
     if (now >= adDue && s.status === 'playing') {
       const spot = nextAd(lastAd)
       lastAd = spot.id
+      holdMusicForAd(true)
       useTv.setState({ ad: { at: now, id: spot.id }, shot: null, jump: null, played: 0, cutAt: now })
       return
     }
@@ -810,6 +813,8 @@ async function tune(id: number): Promise<void> {
   // A new tape shows only what it opens itself: the scan's memory stays, what it showed goes.
   looked = null
   prepared.clear()
+  // The music comes back with the break cut short, before the store says so.
+  holdMusicForAd(false)
   useTv.setState({ status: 'tuning', shot: null, played: 0, tapeTime: null, avatars: {}, arrivals: [], reactions: [], boxes: [], jump: null, ad: null, skipped: 0, cutAt: performance.now(), found: {}, finds: [] })
   let from: number | null = null
   for (let attempt = 0; from === null; attempt++) {

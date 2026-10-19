@@ -128,7 +128,9 @@ void mainImage(const in vec4 inputColor, const in vec2 uv, out vec4 outputColor)
   // Turning slowly: the split grows and shrinks, it does not swing about
   // (2026-10-19: "it fluctuates too much").
   float turn = uTime * 0.35;
-  vec2 drift = vec2(cos(turn), 0.35 * sin(turn * 1.3)) * 0.0028 * (uAberr - 1.0);
+  // Of one length all the way round, so only the glitch sets how far it
+  // pulls (review of #391: the bare vector swung threefold by itself).
+  vec2 drift = normalize(vec2(cos(turn), 0.35 * sin(turn * 1.3))) * 0.0028 * (uAberr - 1.0);
   vec2 ca = c * (0.0015 + 0.0045 * r2) * uAberr + drift;
   vec3 col = vec3(picture(pw + ca).r, picture(pw).g, picture(pw - ca).b);
   // A ghost of the picture further along the split: an avatar's red is all in

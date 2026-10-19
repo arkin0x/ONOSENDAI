@@ -108,6 +108,16 @@ describe('TV glitches', () => {
     expect(came).toBeLessThanOrEqual(120_000 + hitches * 1_500 + 1_600)
   })
 
+  it('a glitch on when the set is left a while ends, rather than coming back at its height', () => {
+    // The aberration due at 25 s, 3 s long; a minute away a second in.
+    const d = new GlitchDirector(0, () => 0)
+    for (let t = 0; t <= 26_000; t += 50) d.levels(t, false)
+    expect(d.current).toEqual(['aberration'])
+    expect(d.levels(86_000, false)).toEqual(CALM)
+    // And the next is a whole wait off, not due at once.
+    for (let t = 86_050; t < 110_900; t += 50) expect(d.levels(t, false)).toEqual(CALM)
+  })
+
   it('a glitch on through a stall carries on where it was', () => {
     // The aberration due at 25 s, 3 s long; a 2 s stall a second in.
     const d = new GlitchDirector(0, () => 0)
@@ -155,6 +165,9 @@ describe('TV glitches', () => {
         const during = sample(length).filter(([t]) => t > 0 && t < creep)
         for (let k = 1; k < during.length; k++) expect(during[k][1]).toBeGreaterThanOrEqual(during[k - 1][1])
         expect(Math.max(...during.map(([, v]) => v))).toBeLessThanOrEqual(CREEP_LEVEL)
+        // A creep: a seventh of the way at most, over a second or so.
+        expect(CREEP_LEVEL).toBeLessThanOrEqual(0.15)
+        expect(creep).toBeGreaterThanOrEqual(0.75)
         expect(slip(creep * 0.5, length, timing)).toBeGreaterThan(0)
       }
     })
@@ -162,8 +175,9 @@ describe('TV glitches', () => {
     it('slips most of the way in a tenth of a second', () => {
       for (const length of [3, 5.5, 8]) {
         const creep = Math.min(timing.rise, length * 0.25)
-        expect(slip(creep - 0.001, length, timing)).toBeLessThanOrEqual(CREEP_LEVEL)
-        expect(slip(creep + SLIP_S, length, timing)).toBeGreaterThanOrEqual(SLIP_LEVEL - 1e-9)
+        expect(slip(creep - 0.001, length, timing)).toBeLessThanOrEqual(0.15)
+        expect(slip(creep + 0.1, length, timing)).toBeGreaterThanOrEqual(0.7)
+        expect(SLIP_S).toBeLessThanOrEqual(0.15)
       }
     })
 
@@ -192,8 +206,8 @@ describe('TV glitches', () => {
         const changes = on.filter((x, k) => k > 0 && x !== on[k - 1]).length
         expect(on[0]).toBe(false)
         expect(changes).toBe(2)
-        // The blink back holds a tenth of a second at least.
-        expect(on.filter(Boolean).length * 0.002).toBeGreaterThanOrEqual(0.1)
+        // The blink back is plainly there, and holds a tenth of a second at least.
+        expect(tail.filter(([, v]) => v >= 0.4).length * 0.002).toBeGreaterThanOrEqual(0.1)
         expect(slip(length, length, timing)).toBe(0)
       }
     })

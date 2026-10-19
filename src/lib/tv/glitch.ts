@@ -62,6 +62,9 @@ interface Timing {
 }
 
 export const GLITCH_TIMING: Record<GlitchKind, Timing> = {
+  // 3 s at least, not the 1 s first asked for: the creep, the slip, a slow
+  // swell and the flicker need it (slip()); shorter, the blink back squeezes
+  // under a tenth of a second and the swell is no longer slow.
   aberration: { gap: [25, 180], length: [3, 8], rise: 1.2, fall: 0.45 },
   tear: { gap: [120, 360], length: [0.4, 1.5], rise: 0.08, fall: 0.15 },
   dropout: { gap: [120, 360], length: [5, 12], rise: 3.5, fall: 4.5 },
@@ -72,6 +75,8 @@ export const PEAK_ABERRATION = 8
 const KINDS: GlitchKind[] = ['aberration', 'tear', 'dropout']
 /** A gap between frames this long, ms, is time away (a hidden tab, a hitch): the clocks stop for it. */
 const STALL_MS = 1000
+/** A gap this long, ms, is time truly away: a glitch on then ends rather than coming back mid-way, at its height. */
+const AWAY_MS = 10_000
 /** Seconds a glitch due during a cut or the tunnel is put off past it, at least and at most. */
 const DEFER_S: [number, number] = [2, 12]
 /** How long each pattern of a tear's bands holds, ms: under three changes a second (WCAG 2.3.1). */
@@ -89,7 +94,7 @@ export class GlitchDirector {
     this.reset(now)
   }
 
-  /** Start every clock again from `now`, with nothing on: TV coming on, or back from time away. */
+  /** Start every clock again from `now`, with nothing on: TV coming on. */
   reset(now: number): void {
     for (const k of KINDS) {
       this.due[k] = now + this.gap(k)
@@ -98,12 +103,21 @@ export class GlitchDirector {
     this.last = now
   }
 
-  /** Hold every clock still for `ms` of time away: what was due is still as far off, what was on carries on. */
-  private stop(ms: number): void {
+  /**
+   * Hold every clock still for `ms` of time away: what was due is still as
+   * far off, and what was on carries on through a hitch. After longer away
+   * it ends instead, and the next of its kind is a new while off: back to
+   * the set, it would otherwise be at its height on the first frame (review
+   * of #391).
+   */
+  private stop(now: number, ms: number): void {
     for (const k of KINDS) {
       this.due[k] += ms
       const live = this.live[k]
-      if (live) live.start += ms
+      if (live && ms > AWAY_MS) {
+        this.live[k] = null
+        this.due[k] = now + this.gap(k)
+      } else if (live) live.start += ms
     }
   }
 
@@ -125,7 +139,7 @@ export class GlitchDirector {
    * aberration carried into the spot smeared its words unreadable).
    */
   levels(now: number, held: boolean, clear = false): GlitchLevels {
-    if (now - this.last > STALL_MS) this.stop(now - this.last)
+    if (now - this.last > STALL_MS) this.stop(now, now - this.last)
     this.last = now
     const out = { ...CALM }
     for (const kind of KINDS) {

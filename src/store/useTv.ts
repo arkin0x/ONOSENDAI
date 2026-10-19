@@ -33,6 +33,7 @@ import { useDemo } from './useDemo'
 import { useCoordRoute } from './useCoordRoute'
 import { usePersonCard } from './usePersonCard'
 import { holdMusicForAd, startMusic, stopMusic } from './useTvMusic'
+import { startWatching, stopWatching } from './useTvWatching'
 import { SCAN_MAX_HEIGHT } from './useShards'
 import { TvScanner, scanHeights, type OpenedBag, type ScanDeps, type ScanPlace } from '../lib/tv/scan'
 import { regionKeyWorker, type RegionKeyWorker } from '../lib/regionKeyOffThread'
@@ -908,6 +909,7 @@ export const useTv = create<TvState>((set, get) => ({
     adDue = performance.now() + AD_EVERY_MS
     // In the tap that turned TV on, where a browser lets sound start.
     startMusic()
+    startWatching()
     const id = run
     timer = setInterval(() => tick(id), TICK_MS) as unknown as number
     void tune(id)
@@ -936,6 +938,7 @@ export const useTv = create<TvState>((set, get) => ({
     prepared.clear()
     keptBags.clear()
     stopMusic()
+    stopWatching()
     set({ on: false, shot: null, played: 0, tapeTime: null, avatars: {}, arrivals: [], reactions: [], found: {}, finds: [], chains: {}, boxes: [], jump: null, ad: null, status: 'tuning' })
     // A tap on an avatar during TV is not a request for its card afterwards.
     usePersonCard.getState().close()

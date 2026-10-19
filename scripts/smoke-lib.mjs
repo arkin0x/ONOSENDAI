@@ -22,7 +22,7 @@ export async function launch({ phone, url, sk = generateSecretKey(), seed = [] }
   const ctx = await browser.newContext(phone
     ? { viewport: { width: 412, height: 915 }, deviceScaleFactor: process.env.SMOKE_DPR ? dpr : 1, isMobile: true, hasTouch: true }
     : { viewport: { width: 1920, height: 1080 }, deviceScaleFactor: process.env.SMOKE_DPR ? dpr : 1 })
-  const stats = { sockets: 0, events: 0, auths: 0, nonGetAborted: 0, leaked: 0 }
+  const stats = { sockets: 0, events: 0, auths: 0, nonGetAborted: 0, leaked: 0, kinds: {} }
   const store = [...seed]
   const subs = new Set()
   await ctx.route((u) => !/^https?:\/\/(localhost|127\.0\.0\.1)/.test(u.toString()), (r) => {
@@ -45,6 +45,7 @@ export async function launch({ phone, url, sk = generateSecretKey(), seed = [] }
       else if (m[0] === 'EVENT') {
         stats.events++
         const ev = m[1]; store.push(ev)
+        stats.kinds[ev.kind] = (stats.kinds[ev.kind] ?? 0) + 1
         ws.send(JSON.stringify(['OK', ev.id, true, '']))
         for (const s of subs) if (s.filters.some((f) => matchFilter(f, ev))) s.ws.send(JSON.stringify(['EVENT', s.id, ev]))
       } else if (m[0] === 'AUTH') { stats.auths++; ws.send(JSON.stringify(['OK', m[1].id, true, ''])) }

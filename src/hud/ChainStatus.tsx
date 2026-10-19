@@ -182,7 +182,7 @@ function WaitingExplanation({ status }: { status: Extract<ChainStatus, { kind: '
       <li>The live subscriptions reconnect on their own, waiting a little longer after each failed attempt, and every connection is replaced as soon as the browser reports that the network is back.</li>
       <li>A send that failed is retried while LIVE, first after 4 seconds and then after twice as long each time, up to once a minute.</li>
     </ul>
-    <p><b>What happens next:</b> once a relay can be reached, the waiting events are sent oldest first, so every part of the chain a relay holds starts at the spawn and reads in order. If this page was reloaded since the last send, nothing is sent until your next action taken while LIVE: a reload never publishes by itself, and that action then carries every waiting event with it.</p>
+    <p><b>What happens next:</b> once a relay can be reached, the waiting events are sent oldest first, so every part of the chain a relay holds starts at the spawn and reads in order. If this page was reloaded since the last send, nothing is sent until your next action taken while LIVE: a reload never publishes your chain by itself, and that action then carries every waiting event with it.</p>
     <p><b>What you can do:</b></p>
     <ul>
       <li>Reconnect this device, or check the Relays panel for a relay address that is wrong.</li>

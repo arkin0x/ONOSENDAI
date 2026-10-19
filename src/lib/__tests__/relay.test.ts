@@ -40,12 +40,46 @@ vi.mock('nostr-tools/abstract-pool', () => ({
     }
     close(relays: string[]): void { calls.closed.push(relays) }
     subscribe(): { close: () => void } { return { close: () => {} } }
+    listConnectionStatus(): Map<string, boolean> { return new Map(openSockets.map((u) => [u, true])) }
   },
 }))
+/** The relays the fake pool says it has an open socket to, normalized. */
+let openSockets: string[] = []
 
-import { publishMany, queryEach } from '../relay'
+import { CYBERSPACE_RELAY, getPool, publishLight, publishMany, queryEach } from '../relay'
+import { normalizeURL } from 'nostr-tools/utils'
 
 const event = { id: 'a', pubkey: 'b', created_at: 1, kind: 1, tags: [], content: '', sig: 'c' } as never
+
+describe('publishLight (the TV\'s watching ping)', () => {
+  beforeEach(() => { calls.publish = []; calls.closed = []; answers = []; openSockets = []; getPool() })
+
+  it('sends nothing, and opens nothing, without an open socket to the canonical relay', async () => {
+    expect(await publishLight(event)).toBe(false)
+    expect(calls.publish).toEqual([])
+  })
+
+  it('sends once, to the canonical relay alone', async () => {
+    openSockets = [normalizeURL(CYBERSPACE_RELAY)]
+    expect(await publishLight(event)).toBe(true)
+    expect(calls.publish).toEqual([[normalizeURL(CYBERSPACE_RELAY)]])
+  })
+
+  it('on a failure that is not a refusal, neither drops a socket nor tries again', async () => {
+    openSockets = [normalizeURL(CYBERSPACE_RELAY)]
+    answers = [new Error('relay connection closed by us')]
+    expect(await publishLight(event)).toBe(false)
+    expect(calls.publish).toHaveLength(1)
+    expect(calls.closed).toEqual([])
+  })
+
+  it('does not count a send that could not connect', async () => {
+    openSockets = [normalizeURL(CYBERSPACE_RELAY)]
+    answers = ['unreachable']
+    expect(await publishLight(event)).toBe(false)
+    expect(calls.closed).toEqual([])
+  })
+})
 
 describe('publishMany', () => {
   beforeEach(() => { calls.publish = []; calls.closed = []; answers = [] })

@@ -28,7 +28,7 @@ const seed = fs.readFileSync(tapeFile, 'utf8').trim().split('\n').map((l) => JSO
 const results = []
 async function run(phone) {
   const size = phone ? 'phone' : 'desktop'
-  const { browser, page, stats, errors } = await launch({ phone, url: base, seed })
+  const { browser, page, stats, errors, pk, store } = await launch({ phone, url: base, seed })
   const check = (name, ok, note = '') => { results.push({ size, name, ok, note }); console.log(`${ok ? 'PASS' : 'FAIL'} ${size} ${name}${note ? `: ${note}` : ''}`) }
   try {
     const tv = (expr) => page.evaluate(async (expr) => { const m = await import('/src/store/useTv.ts'); return new Function('s', `return (${expr})`)(m.useTv.getState()) }, expr)
@@ -65,7 +65,11 @@ async function run(phone) {
   } catch (e) {
     check('run', false, String(e).slice(0, 300))
   } finally {
-    check('nothing published', stats.events === 0, `${stats.events} EVENT, ${stats.nonGetAborted} non-GET aborted`)
+    // Nothing but the set's anonymous watching pings (lib/tv/watching.ts), and only to the offline relay.
+    const pings = stats.kinds[23334] ?? 0
+    check('nothing published but watching pings', stats.events === pings, `${stats.events} EVENT (${pings} pings), ${stats.nonGetAborted} non-GET aborted`)
+    // And never one under the viewer's own key.
+    check('no ping signed by the viewer', store.every((e) => e.kind !== 23334 || e.pubkey !== pk), `${pings} pings`)
     const real = errors.filter((e) => !/Failed to load resource|net::ERR/.test(e))
     check('no page errors', real.length === 0, real.slice(0, 3).join(' | '))
     await browser.close()

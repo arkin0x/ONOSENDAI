@@ -8,7 +8,8 @@
  * itself. A key is held and a bag kept only when TV shows the whole bag. No
  * place is recorded and no chip raised. Nothing is scanned under a sealed
  * bag's segment or a hyperjump's line. The bags here are made and sealed in
- * the test with the real region keys; nothing is published.
+ * the test with the real region keys; nothing is published but the set's
+ * anonymous watching ping (lib/tv/watching.ts).
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -39,6 +40,7 @@ vi.mock('../../lib/relay', () => ({
   }),
   queryAny: vi.fn(async () => []),
   relaySet: () => ['wss://relay.test'],
+  subscribe: vi.fn(() => () => {}),
 }))
 
 import type { Filter } from 'nostr-tools'
@@ -194,7 +196,7 @@ describe('TV opens bags where its avatars stand', () => {
     expect(useCeremony.getState().chip).toBeNull()
     // A line on the ticker instead.
     expect(tickerItems(s, () => 'X')).toContain('FOUND: RELIC')
-    expect(published).toEqual([])
+    expect(published.filter((e) => (e as { kind?: number }).kind !== 23334)).toEqual([])
   })
 
   it('keeps a bag it shows whole as watched, and holds no region key, so RESCAN ALL and SCAN reach nothing it found', async () => {

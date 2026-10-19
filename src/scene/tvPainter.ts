@@ -28,6 +28,7 @@ import { itemLength, type Shot, type TapeItem } from '../lib/tv/director'
 import { CUT_MS, contentsWords, quoteOf, segmentDoing, typePace, TYPE_DELAY_S } from '../hud/TvSegments'
 import { findLines, placeable, shotProgress, type TvAvatar, type TvFindLine } from '../store/useTv'
 import { AD_SUBTITLE, adById, type AdScene, type AdTheme } from '../lib/tv/hosakaAd'
+import { watchingWords } from '../lib/tv/watching'
 import type { Census, ChainTimes } from '../lib/tv/stats'
 import type { Position } from '../lib/space'
 
@@ -91,6 +92,8 @@ const CHIRON_PX = [NOW_PLAYING_PX, 62] as const
  */
 const ROW_MIN_H = 500
 const REGION = '#52e39f'
+/** A marquee narrower than this, CSS px, says how many are watching with the number alone. */
+const NARROW_MARQUEE_PX = 480
 /** A commercial's button after its last line, in ems of the type: the gap before it, its radius, and its room, the gap included. */
 const ICON_GAP_EM = 0.35
 const ICON_R_EM = 0.62
@@ -160,6 +163,8 @@ export interface TvAssets {
   color: (pubkey: string) => string
   /** The music playing under the picture (store/useTvMusic), for NOW PLAYING; none when nothing is. */
   music?: TvMusic | null
+  /** How many sets are on now, this one among them (store/useTvWatching); none before it knows. */
+  watching?: number
   /** The HOSAKA banner, playing, for the commercial; null until it has a frame. */
   hosaka?: CanvasImageSource | null
   /** The HOSAKA mark alone (public/hosaka-mark.png), for the commercial's cards; null until loaded. */
@@ -589,7 +594,28 @@ export class TvPainter {
     roundRect(ctx, bx - 4 * s, y + 6 * s, tw + 8 * s, h - 12 * s, 3 * s)
     ctx.stroke()
     ctx.fillText('TV', bx, base)
-    const startX = bx + tw + 16 * s
+    let startX = bx + tw + 16 * s
+    // How many are watching, after the bug, the run after it (2026-10-19:
+    // "a little "X watching" to the right of Cyberspace TV in the bottom
+    // left? Then the marquee will be to the right of this").
+    // Its room is kept as wide as three digits' worth, so the run does not
+    // jump sideways as the count goes from 9 to 10 (review of #396); on a
+    // narrow marquee, the number alone after the dot.
+    if (a.watching && a.watching > 0) {
+      ctx.font = `700 ${10 * s}px ${TV_FONT}`
+      const short = x1 - x0 < NARROW_MARQUEE_PX * s
+      const say = (n: number): string => (short ? n.toLocaleString('en-US') : watchingWords(n))
+      const words = say(a.watching)
+      const room = Math.max(ctx.measureText(words).width, ctx.measureText(say(999)).width)
+      const dot = 3 * s
+      ctx.fillStyle = REGION
+      ctx.beginPath()
+      ctx.arc(startX + dot, y + h / 2, dot, 0, Math.PI * 2)
+      ctx.fill()
+      ctx.fillStyle = 'rgba(242, 251, 255, 0.85)'
+      ctx.fillText(words, startX + dot * 2 + 6 * s, base - 0.5 * s)
+      startX += dot * 2 + 6 * s + room + 16 * s
+    }
     ctx.fillStyle = 'rgba(0, 229, 255, 0.4)'
     ctx.fillRect(startX - 8 * s, y + 5 * s, Math.max(1, s), h - 10 * s)
 

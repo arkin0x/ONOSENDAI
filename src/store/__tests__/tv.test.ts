@@ -1,7 +1,8 @@
 /**
  * tv.test.ts: Cyberspace TV plays the tape: a random start, each trip as a
  * shot framed on its avatar, arrivals on the ticker, and the view put back
- * when it is turned off. Nothing is published.
+ * when it is turned off. Nothing is published but the set's anonymous
+ * "watching" ping (lib/tv/watching.ts), never under the viewer's key.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -23,7 +24,13 @@ vi.mock('../../lib/relay', () => ({
   queryEach: vi.fn(async () => []),
   queryAny: vi.fn(async () => []),
   relaySet: () => ['wss://relay.test'],
+  subscribe: vi.fn(() => () => {}),
 }))
+
+/** What TV published other than its watching pings: always nothing. */
+function publishedBesidesPings(): unknown[] {
+  return published.filter((e) => (e as { kind?: number }).kind !== 23334)
+}
 
 import type { Filter } from 'nostr-tools'
 import type { RelayAnswer } from '../../lib/relayOutcome'
@@ -112,7 +119,7 @@ describe('Cyberspace TV', () => {
     useTv.getState().stop()
     expect(useCyberspace.getState().focus).toBeNull()
     expect(useCyberspace.getState().scaleExp).toBe(zoomBefore)
-    expect(published).toEqual([])
+    expect(publishedBesidesPings()).toEqual([])
   })
 
   it('ends the tape at now, says so, and tunes in again', async () => {
@@ -236,7 +243,7 @@ describe('Cyberspace TV', () => {
       // Then the rider at B, close up.
       expect(seen[2].x).toBe(far)
       expect(seen[2].scaleExp).toBeLessThan(4)
-      expect(published).toEqual([])
+      expect(publishedBesidesPings()).toEqual([])
     } finally {
       tape.pop()
     }

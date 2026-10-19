@@ -355,6 +355,59 @@ describe('the chiron and NOW PLAYING', () => {
     expect(d.words.some((w) => w.text === 'ZOOM')).toBe(false)
   })
 
+  it('says how many are watching after the CYBERSPACE TV bug, and the marquee runs after it', () => {
+    const d = drawing()
+    const p = new TvPainter(d.canvas)
+    p.size(1400, 800, 1)
+    p.paint(picture({ shot: trip as never, arrivals: [{ pubkey: 'zed', at: 50 }] }), { ...assets, music, watching: 3 }, 1000, 1, false)
+    const tv = d.words.find((w) => w.text === 'TV')!
+    const watching = d.words.find((w) => w.text === '3 WATCHING')!
+    expect(watching).toBeDefined()
+    expect(watching.x).toBeGreaterThan(tv.x)
+    // The run's first words start right of the count's end.
+    const run = d.words.filter((w) => w.y === tv.y && w.x > tv.x && w.text !== '3 WATCHING' && w.text !== '◆')
+    expect(run.length).toBeGreaterThan(0)
+    for (const w of run) expect(w.x).toBeGreaterThan(watching.x + '3 WATCHING'.length * 7)
+    // Without a count yet, no words for it.
+    const e = drawing()
+    const q = new TvPainter(e.canvas)
+    q.size(1400, 800, 1)
+    q.paint(picture({ shot: trip as never }), { ...assets, music }, 1000, 1, false)
+    expect(e.words.some((w) => w.text.endsWith('WATCHING'))).toBe(false)
+  })
+
+  it('keeps the run where it was as the count gains a digit', () => {
+    const d = drawing()
+    const p = new TvPainter(d.canvas)
+    p.size(1400, 800, 1)
+    const pic = picture({ shot: trip as never, arrivals: [{ pubkey: 'zed', at: 50 }] })
+    const runAt = (): number => d.words.find((w) => w.text.startsWith('NEW ARRIVAL'))!.x
+    // The same moment painted twice, so the run itself has not moved.
+    p.paint(pic, { ...assets, music, watching: 9 }, 1000, 1, false)
+    const at9 = runAt()
+    d.words.length = 0
+    p.paint(pic, { ...assets, music, watching: 10 }, 1000, 1, false)
+    expect(runAt()).toBeCloseTo(at9, 5)
+  })
+
+  it('on a 320 px phone says the number alone, and leaves the run room', () => {
+    const d = drawing()
+    const p = new TvPainter(d.canvas)
+    p.size(320, 568, 1)
+    p.paint(picture({ shot: trip as never, arrivals: [{ pubkey: 'zed', at: 50 }] }), { ...assets, music, watching: 12 }, 1000, 1, false)
+    const tv = d.words.find((w) => w.text === 'TV')!
+    const count = d.words.find((w) => w.text === '12' && Math.abs(w.y - tv.y) < 2)!
+    expect(count).toBeDefined()
+    expect(d.words.some((w) => w.text.endsWith('WATCHING'))).toBe(false)
+    expect(count.x).toBeGreaterThan(tv.x)
+    // The run starts after the count, and has at least a third of the marquee.
+    const run = d.words.filter((w) => w.y === tv.y && w.text.startsWith('NEW ARRIVAL'))
+    expect(run.length).toBeGreaterThan(0)
+    const MX = Math.round(320 * 0.06)
+    const startOfRun = count.x + 3 * 7 + 16
+    expect(320 - MX - startOfRun).toBeGreaterThan((320 - 2 * MX) / 3)
+  })
+
   it('the HOSAKA end card draws the menu button after its last line', () => {
     const end = HOSAKA_1.scenes[HOSAKA_1.scenes.length - 1]
     expect(end.icon).toBe('menu')

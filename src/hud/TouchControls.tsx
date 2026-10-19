@@ -51,7 +51,7 @@ import { useWalk } from '../store/useWalk'
  * breaks and the leading space on the first bullet survive to the screen.
  */
 export const GO_LIVE_BODY = [
-  'LIVE means actions you take and things you hide in cyberspace are published to relays so others can see them. LOCAL holds all the data on this device privately.',
+  'LIVE means actions you take and things you hide in cyberspace are published to relays so others can see them. LOCAL holds your chain and what you hide on this device privately.',
   '',
   'If you switch to LIVE,',
   ' - your next movement action will be published as well as your entire chain history',

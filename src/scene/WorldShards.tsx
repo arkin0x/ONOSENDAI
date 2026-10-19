@@ -8,9 +8,9 @@
  * the honest picture. Culled past the same reach as Earth and the spawn mark.
  */
 
-import { useMemo, useRef } from 'react'
+import { useMemo, useRef, useState } from 'react'
 import { useFrame } from '@react-three/fiber'
-import type { Group, Material, Object3D } from 'three'
+import type { Camera, Group, Material, Object3D } from 'three'
 import { GRID_RADIUS, itemCentre, type Position, type ViewAxes } from '../lib/space'
 import { alignedOrigin, useCyberspace } from '../store/useCyberspace'
 import { useCeremony } from '../store/useCeremony'
@@ -114,6 +114,23 @@ export function placeShard(
   return { key: w.key, shard, centre, scale, clip, pose }
 }
 
+/**
+ * The shards of `items` that can be drawn from here: in the view's plane, not
+ * too small to show a pixel at any distance, and in reach. Placed in the
+ * render frame anchored at `anchor`. Cyberspace TV draws its own finds with
+ * this (TvFinds).
+ */
+export function drawableShards(items: Array<Pick<WorldItem, 'key' | 'type' | 'at' | 'height' | 'plane'> & { shard?: ShardModel }>, anchor: Position, plane: number, scaleExp: number, axes: ViewAxes): PlacedShardDraw[] {
+  const origin = alignedOrigin(anchor, scaleExp)
+  return items
+    .filter((w) => w.type === 'shard' && w.shard && w.plane === plane)
+    // Not drawn at all once it cannot show a pixel at any distance; a shard
+    // with placed objects is exempt, since they can be far larger than it.
+    .filter((w) => (w.shard!.parts?.length ?? 0) > 0 || scaleExp - w.shard!.unit < FAR_CULL)
+    .map((w) => placeShard(w, origin, scaleExp, axes))
+    .filter((w) => Number.isFinite(w.scale) && Math.hypot(...w.centre) <= REACH)
+}
+
 export function WorldShards({ axes }: Props): JSX.Element | null {
   const anchor = useCyberspace((s) => s.anchor)
   const anchorPlane = useCyberspace((s) => s.anchorPlane)
@@ -127,14 +144,7 @@ export function WorldShards({ axes }: Props): JSX.Element | null {
   const moving = useShards((s) => editingId(s.pending))
 
   const placed = useMemo(() => {
-    const origin = alignedOrigin(anchor, scaleExp)
-    return useShards.getState().worldItems()
-      .filter((w) => w.type === 'shard' && w.shard && w.plane === anchorPlane)
-      // Not drawn at all once it cannot show a pixel at any distance; a shard
-      // with placed objects is exempt, since they can be far larger than it.
-      .filter((w) => (w.shard!.parts?.length ?? 0) > 0 || scaleExp - w.shard!.unit < FAR_CULL)
-      .map((w) => placeShard(w, origin, scaleExp, axes))
-      .filter((w) => Number.isFinite(w.scale) && Math.hypot(...w.centre) <= REACH)
+    return drawableShards(useShards.getState().worldItems(), anchor, anchorPlane, scaleExp, axes)
     // mine and discovered are what worldShards reads.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [anchor, anchorPlane, scaleExp, axes, mine, discovered, curated])
@@ -148,28 +158,49 @@ export function WorldShards({ axes }: Props): JSX.Element | null {
   )
 }
 
+/** How far a faded shard goes: still there, and the avatar behind it plain to see. */
+const FADED = 0.12
+/** How quickly a shard fades out of the way and back, seconds. */
+const FADE_TAU = 0.25
+
 /**
  * One shard in the world, and the tap target that is exactly what it draws:
  * measured from the drawn group, and off while it is too small to see
- * (TapTarget; arkinox, 2026-09-30).
+ * (TapTarget; arkinox, 2026-09-30). Cyberspace TV's have no tap target, and
+ * fade while `fades` says they cover the shot's avatar (TvFinds).
  */
-function PlacedShard({ w, birth, moving }: { w: PlacedShardDraw; birth: number | undefined; moving: boolean }): JSX.Element {
+export function PlacedShard({ w, birth, moving = false, tappable = true, fades }: { w: PlacedShardDraw; birth: number | undefined; moving?: boolean; tappable?: boolean; fades?: (drawn: Group, camera: Camera) => boolean }): JSX.Element {
   const drawn = useRef<Group>(null)
+  const level = useRef(1)
+  const [faded, setFaded] = useState(false)
   // Moving (EDIT): drawn as a ghost is, with ordinary blending, since a world
   // face writes its colour opaque whatever its opacity (ShardMesh TAG_BLEND),
-  // and every material's opacity follows the breath each frame.
-  useFrame((state) => {
-    if (!moving || !drawn.current) return
-    breath = movingOpacity(state.clock.elapsedTime)
-    drawn.current.traverse(breathe)
+  // and every material's opacity follows the breath each frame. Fading out
+  // of the way is drawn the same way, at its own opacity.
+  useFrame((state, dt) => {
+    const g = drawn.current
+    if (!g) return
+    if (moving) {
+      breath = movingOpacity(state.clock.elapsedTime)
+      g.traverse(breathe)
+      return
+    }
+    if (!fades) return
+    const want = fades(g, state.camera) ? FADED : 1
+    level.current += (want - level.current) * (1 - Math.exp(-dt / FADE_TAU))
+    const ghost = level.current < 0.98
+    if (ghost !== faded) setFaded(ghost)
+    if (!ghost) return
+    breath = level.current
+    g.traverse(breathe)
   })
   return (
     <group position={w.centre}>
       <group ref={drawn}>
-        <ShardMesh shard={w.shard} scale={w.scale} birth={birth} world ghost={moving} clip={w.clip} pose={w.pose} />
+        <ShardMesh shard={w.shard} scale={w.scale} birth={birth} world ghost={moving || faded} clip={w.clip} pose={w.pose} />
       </group>
       {/* Not tappable while it moves: the ghost is the one being aimed. */}
-      {!moving && <TapTarget measure={drawn} onTap={() => useShards.getState().selectSecret(w.key)} />}
+      {!moving && tappable && <TapTarget measure={drawn} onTap={() => useShards.getState().selectSecret(w.key)} />}
     </group>
   )
 }

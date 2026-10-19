@@ -25,7 +25,7 @@ import { MAX_SCALE_EXP, type Position } from '../lib/space'
 import { coordToXyz } from 'cyberspace-core'
 import { stopCoordExact } from '../lib/hyperspace/stops'
 import { getStopByHeight } from './useHyperspace'
-import { useCyberspace } from './useCyberspace'
+import { MAX_COMPUTE_HEIGHT, useCyberspace } from './useCyberspace'
 import { spectate, stopSpectating } from '../lib/spectator'
 import { useBuilder } from './useBuilder'
 import { useShards } from './useShards'
@@ -33,6 +33,17 @@ import { useDemo } from './useDemo'
 import { useCoordRoute } from './useCoordRoute'
 import { usePersonCard } from './usePersonCard'
 import { startMusic, stopMusic } from './useTvMusic'
+import { SCAN_MAX_HEIGHT } from './useShards'
+import { useSecrets, type HeldKey } from './useSecrets'
+import { TvScanner, scanHeights, type OpenedBag, type ScanDeps, type ScanPlace } from '../lib/tv/scan'
+import { regionKeyWorker, type RegionKeyWorker } from '../lib/regionKeyOffThread'
+import { query } from '../lib/relay'
+import { HIDDEN_KIND, hiddenLabel, type Hidden } from '../lib/hidden'
+import { rememberBag, unbagRecording } from '../lib/foundCache'
+import { resolveReference } from '../lib/references'
+import { hexToBytes } from '../lib/events'
+import { RESCAN_BATCH } from '../lib/secrets/rescan'
+import { cleanText } from '../lib/tv/text'
 
 /** Where an avatar stands on the tape, and since when. */
 export interface TvAvatar {
@@ -57,6 +68,13 @@ export interface TvAvatar {
 }
 
 export type TvStatus = 'tuning' | 'playing' | 'end' | 'no-signal'
+
+/** Something TV's own scan opened and shows (lib/tv/scan.ts): the item, and when it was opened on screen, for its decode. */
+export interface TvFound {
+  item: Hidden
+  /** performance.now() when TV showed it first, which runs the decode (ShardMesh birth). */
+  birth: number
+}
 
 /** One end of a hyperjump's ride: a block, and where it is. */
 export interface RideEnd {
@@ -102,6 +120,14 @@ interface TvState {
   arrivals: Array<{ pubkey: string; at: number }>
   /** The newest reactions on tape to shards and moves, newest last, for the ticker. */
   reactions: Array<{ pubkey: string; at: number; content: string; on: 'shard' | 'move' }>
+  /**
+   * What TV's scan has opened at the places its avatars stood, as of the
+   * moment on tape, this tape only: everything TV draws of the bags, and
+   * nothing you found anywhere else (arkinox, 2026-10-19). By item id.
+   */
+  found: Record<string, TvFound>
+  /** The newest of those, newest last, for the ticker (FOUND: ...). */
+  finds: Array<{ label: string; at: number }>
   /** The ticker's counts (lib/tv/stats.ts), once read. */
   census: Census | null
   /** Each on-screen avatar's chain, for its length at tape time. */
@@ -276,6 +302,137 @@ export function cueBeats(beats: Beat[]): void {
 export function setTvAsk(fn: Ask): void { ask = fn }
 
 const live = (id: number, t: number): boolean => id === run && t === tape
+
+/** An avatar not seen on tape for this long (tape time) is not drawn (TvLayer), and not scanned at. */
+export const STALE_S = 30 * 60
+
+/**
+ * The avatars on screen, by the tape: in the plane the view is in, and seen
+ * on tape lately, or the shot's own. TvLayer draws these (those in reach),
+ * and TV's scan looks where they stand.
+ */
+export function shownAvatars(s: Pick<TvState, 'avatars' | 'shot' | 'tapeTime'>, plane: number): Array<[string, TvAvatar]> {
+  return Object.entries(s.avatars).filter(([pk, a]) => a.plane === plane &&
+    ((s.shot?.kind === 'trip' && pk === s.shot.pubkey) || s.tapeTime === null || Math.abs(s.tapeTime - a.at) <= STALE_S))
+}
+
+// The scan (lib/tv/scan.ts): TV opens bags where its avatars stand, as a
+// spectator does, and only to SCAN_MAX_HEIGHT: TV never reaches further
+// than a player (arkinox, 2026-10-19). One scanner a run, so a region is
+// derived and asked about once however often TV comes back to it; what it
+// shows is this tape's alone.
+/** The heights TV derives at every place: those a player scans, and no more. */
+export const TV_SCAN_HEIGHTS = scanHeights(SCAN_MAX_HEIGHT)
+/** How many shots after the one on screen are scanned ahead. */
+const SCAN_AHEAD = 3
+/** How many finds the ticker keeps. */
+const FINDS_KEPT = 4
+let scanner: TvScanner | null = null
+let keyWorker: RegionKeyWorker | null = null
+/** The shots whose places were handed to the scanner, this run. */
+const prepared = new Set<string>()
+/** The lookup ids held for you (useSecrets hold) and the bags kept as finds (rememberBag), this run: once each. */
+const heldLookups = new Set<string>()
+const keptBags = new Set<string>()
+/** What the last look at the scan was made of: nothing changed, no look. */
+let looked: { avatars: TvState['avatars']; tapeTime: number | null; version: number; plane: number; scanner: TvScanner } | null = null
+/** Replacements for the scan's reads, for tests. */
+let scanOverride: Partial<ScanDeps> | null = null
+
+/** Swap the scan's key derivation, relay read or opening, for tests (null puts them back). */
+export function setTvScan(deps: Partial<ScanDeps> | null): void { scanOverride = deps }
+
+function newScanner(): TvScanner {
+  keyWorker = regionKeyWorker()
+  const w = keyWorker
+  return new TvScanner({
+    derive: (at, heights) => w.keys(at, heights, MAX_COMPUTE_HEIGHT),
+    query: (ids) => query({ kinds: [HIDDEN_KIND], '#d': ids }),
+    open: (bag, key) => unbagRecording(bag, hexToBytes(key.keyHex), resolveReference, { at: key.base, plane: key.plane as 0 | 1 }, key.height),
+    batch: RESCAN_BATCH,
+    ...scanOverride,
+    // Whatever a test swaps, never a height past a player's.
+    heights: TV_SCAN_HEIGHTS,
+  })
+}
+
+/** Where a shot puts an avatar on screen: where it opens (where a ride boards), then every action's place. */
+function shotPlaces(shot: Shot): ScanPlace[] {
+  const first = shot.prelude ? shot.beats[0].from : shotOpening(shot)
+  return [first, ...shot.beats.map((b) => ({ position: b.action.position, plane: b.action.plane }))]
+}
+
+/**
+ * The scan, from the engine's tick: the next shots' places handed over
+ * ahead, then a look at what is open where the avatars on screen stand,
+ * as of the moment on tape. Never during a commercial (tick does not get
+ * here under one), and nothing during a hyperjump's line, which shows only
+ * its two blocks.
+ */
+function scanTick(s: TvState): void {
+  const sc = scanner
+  if (!sc) return
+  const places: ScanPlace[] = []
+  for (const shot of [s.shot, ...queue.slice(0, SCAN_AHEAD)]) {
+    if (!shot || shot.item || shot.beats.length === 0 || prepared.has(shot.id)) continue
+    prepared.add(shot.id)
+    places.push(...shotPlaces(shot))
+  }
+  if (places.length > 0) void sc.prepare(places)
+  if (s.tapeTime === null || s.jump?.phase === 'line') return
+  const plane = useCyberspace.getState().anchorPlane
+  if (looked && looked.scanner === sc && looked.avatars === s.avatars && looked.tapeTime === s.tapeTime && looked.version === sc.version && looked.plane === plane) return
+  looked = { avatars: s.avatars, tapeTime: s.tapeTime, version: sc.version, plane, scanner: sc }
+  const opened: OpenedBag[] = []
+  for (const [, a] of shownAvatars(s, plane)) opened.push(...sc.at(a.position, s.tapeTime))
+  reveal(s, opened)
+}
+
+/**
+ * Show what the scan opened, and add it to your finds as spectating does
+ * (arkinox, 2026-10-19: "add to your finds. My rationale: this encourages
+ * users to watch tv to find new stuff"): the items, and the keys that opened
+ * them held. Only what TV shows, a shard, a key or a chest: a message or a
+ * coin in the same bag is neither shown nor added. No place is recorded, since
+ * TV is not somewhere you stood, and no chip is raised over the tube; the
+ * ticker says FOUND instead.
+ */
+function reveal(s: TvState, opened: OpenedBag[]): void {
+  const now = performance.now()
+  const fresh: Hidden[] = []
+  const keys: HeldKey[] = []
+  const seen = new Set<string>()
+  for (const o of opened) {
+    for (const h of o.items) {
+      if (s.found[h.eventId] || seen.has(h.eventId)) continue
+      seen.add(h.eventId)
+      fresh.push(h)
+    }
+    if (!heldLookups.has(o.key.lookupId)) {
+      heldLookups.add(o.key.lookupId)
+      keys.push({
+        lookupId: o.key.lookupId, keyHex: o.key.keyHex, height: o.key.height,
+        base: { x: String(o.key.base.x), y: String(o.key.base.y), z: String(o.key.base.z) },
+        plane: o.key.plane as 0 | 1, source: 'scan', at: Math.floor(Date.now() / 1000),
+      })
+    }
+    // Kept across a reload only when TV shows the whole bag: a kept bag
+    // opens again whole (useFound), and a message in it would become a find.
+    if (o.whole && !keptBags.has(o.bag.id)) {
+      keptBags.add(o.bag.id)
+      rememberBag(o.bag, hexToBytes(o.key.keyHex), o.items, o.refs, o.key.height, { at: o.key.base, plane: o.key.plane as 0 | 1 })
+    }
+  }
+  if (fresh.length > 0) {
+    const found = { ...s.found }
+    for (const h of fresh) found[h.eventId] = { item: h, birth: now }
+    const labels = [...new Set(fresh.map((h) => cleanText(hiddenLabel(h, 40), 40).toUpperCase()))]
+    const finds = [...s.finds.filter((f) => !labels.includes(f.label)), ...labels.map((label) => ({ label, at: s.tapeTime ?? 0 }))].slice(-FINDS_KEPT)
+    useTv.setState({ found, finds })
+    useShards.getState().addDiscovered(fresh)
+  }
+  if (keys.length > 0) useSecrets.getState().hold(keys)
+}
 
 async function readMore(id: number, t: number): Promise<void> {
   if (readingTape === t || !reader || !director || performance.now() < retryAt) return
@@ -535,6 +692,7 @@ function tick(id: number): void {
     useTv.setState({ ad: null, shot: null, cutAt: now })
     s = useTv.getState()
   }
+  scanTick(s)
   if (s.shot === null || (now - shotBegan) / 1000 >= s.shot.length) {
     // A break, when one is due: between shots, never across one.
     if (now >= adDue && s.status === 'playing') {
@@ -596,7 +754,9 @@ async function tune(id: number): Promise<void> {
   failures = 0
   // A retune cutting a commercial short counts as one played: the next is AD_EVERY_MS on.
   if (useTv.getState().ad) adDue = performance.now() + AD_EVERY_MS
-  useTv.setState({ status: 'tuning', shot: null, played: 0, tapeTime: null, avatars: {}, arrivals: [], reactions: [], boxes: [], jump: null, ad: null, skipped: 0, cutAt: performance.now() })
+  // A new tape shows only what it opens itself: the scan's memory stays, what it showed goes.
+  looked = null
+  useTv.setState({ status: 'tuning', shot: null, played: 0, tapeTime: null, avatars: {}, arrivals: [], reactions: [], boxes: [], jump: null, ad: null, skipped: 0, cutAt: performance.now(), found: {}, finds: [] })
   let from: number | null = null
   for (let attempt = 0; from === null; attempt++) {
     try {
@@ -665,6 +825,8 @@ export const useTv = create<TvState>((set, get) => ({
   meanwhile: false,
   arrivals: [],
   reactions: [],
+  found: {},
+  finds: [],
   census: null,
   chains: {},
   boxes: [],
@@ -682,6 +844,7 @@ export const useTv = create<TvState>((set, get) => ({
     }
     if (cs.spectate) stopSpectating()
     run++
+    scanner = newScanner()
     set({ on: true })
     adDue = performance.now() + AD_EVERY_MS
     // In the tap that turned TV on, where a browser lets sound start.
@@ -707,8 +870,15 @@ export const useTv = create<TvState>((set, get) => ({
     director = null
     queue = []
     asked.clear()
+    keyWorker?.close()
+    keyWorker = null
+    scanner = null
+    looked = null
+    prepared.clear()
+    heldLookups.clear()
+    keptBags.clear()
     stopMusic()
-    set({ on: false, shot: null, played: 0, tapeTime: null, avatars: {}, arrivals: [], reactions: [], chains: {}, boxes: [], jump: null, ad: null, status: 'tuning' })
+    set({ on: false, shot: null, played: 0, tapeTime: null, avatars: {}, arrivals: [], reactions: [], found: {}, finds: [], chains: {}, boxes: [], jump: null, ad: null, status: 'tuning' })
     // A tap on an avatar during TV is not a request for its card afterwards.
     usePersonCard.getState().close()
     const cs = useCyberspace.getState()

@@ -155,7 +155,7 @@ export function ChainPanel(): JSX.Element {
           <dt>Sats spent</dt>
           <dd>{spentMsats === 0 ? '0' : `${Math.ceil(spentMsats / 1000).toLocaleString()} (local)`}</dd>
         </div>
-        <div title="Live publishes nothing by itself. A chain still queued here goes out whole the next time you take an action while Live.">
+        <div title="Live publishes nothing of your chain by itself. A chain still queued here goes out whole the next time you take an action while Live.">
           <dt>Published</dt>
           <dd>
             {sent} / {events.length}{' '}

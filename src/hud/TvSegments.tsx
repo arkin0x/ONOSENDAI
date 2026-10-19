@@ -97,6 +97,17 @@ const SPIN_PX = 256
  * The segment's shard, turning, off screen: an object's, a new avatar's, or a
  * commenter's own avatar. Its canvas keeps its last frame (preserve) so the
  * painter can copy it whenever it paints.
+ *
+ * One canvas for as long as the set is on, each segment's shard swapped into
+ * it (2026-10-19: "I've been running cyberspace tv for 30 minutes and now the
+ * visuals have stopped (frozen) and only the music is playing", in Brave on
+ * Windows). It was a new canvas per segment: a WebGL context made, and
+ * force-lost eight seconds later, for every object, avatar or comment, up to
+ * about eight a minute (measured offline, on Linux). Few were ever alive at
+ * once, so not the browser's cap on contexts; churn like that wearing out
+ * the GPU process (ANGLE over D3D11) is the likely cause of the freeze, not
+ * a proven one, and the freeze was not reproduced. lib/glContext now says in
+ * the console when the main view's context is lost.
  */
 export function TvSpinHost(): JSX.Element | null {
   const item = useTv((s) => s.shot?.item)
@@ -109,19 +120,26 @@ export function TvSpinHost(): JSX.Element | null {
     return null
   }, [item, avatar])
   const host = useRef<HTMLDivElement>(null)
+  const canvas = useRef<HTMLCanvasElement | null>(null)
   useEffect(() => {
-    if (!shard) { tvSpin.canvas = null; return }
-    // The canvas appears once the spin has mounted its renderer.
+    // The canvas appears once the spin has mounted its renderer: once.
     const find = window.setInterval(() => {
       const c = host.current?.querySelector('canvas') ?? null
-      if (c) { tvSpin.canvas = c; window.clearInterval(find) }
+      if (c) { canvas.current = c; window.clearInterval(find) }
     }, 50)
-    return () => { window.clearInterval(find); tvSpin.canvas = null }
+    return () => { window.clearInterval(find); canvas.current = null; tvSpin.canvas = null }
+  }, [])
+  // The painter copies it only while there is a shard in it.
+  useEffect(() => {
+    if (!shard) { tvSpin.canvas = null; return }
+    const show = window.setInterval(() => {
+      if (canvas.current) { tvSpin.canvas = canvas.current; window.clearInterval(show) }
+    }, 50)
+    return () => { window.clearInterval(show); tvSpin.canvas = null }
   }, [shard])
-  if (!shard) return null
   return (
     <div ref={host} className="tv__spinhost" aria-hidden="true">
-      <ShardSpin key={item?.id} shard={shard} size={SPIN_PX} preserve />
+      <ShardSpin shard={shard} size={SPIN_PX} preserve />
     </div>
   )
 }

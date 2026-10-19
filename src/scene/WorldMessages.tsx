@@ -158,7 +158,7 @@ export function WorldMessages({ axes }: Props): JSX.Element | null {
       .map((w) => ({
         key: w.key,
         type: w.type,
-        text: w.type === 'message' ? w.text! : w.type === 'key' ? `⚷ ${w.keyItem?.name ?? 'key'}` : `▣ ${w.chest?.name ?? 'chest'}`,
+        text: w.type === 'message' ? w.text! : itemMarkText(w),
         mine: w.mine,
         author: w.author ?? '',
         coin: w.type === 'message' && findCashuToken(w.text!) !== null,
@@ -180,14 +180,28 @@ export function WorldMessages({ axes }: Props): JSX.Element | null {
         // A key or a chest: the cube and its short name, as before.
         return (
           <group key={w.key}>
-            <WorldMark kind="note" at={w.centre} />
-            <WorldLabel text={w.text} color={NOTE} at={w.centre} align="center" px={13} sub={author(w)} subColor={ACCENT} />
+            <ItemMark text={w.text} sub={author(w)} at={w.centre} />
             {/* The mark is a fixed size on screen at any zoom, so its target is
                 too: a fingertip over the mark (TapTarget). */}
             <TapTarget px={TAP_PX} at={w.centre} onTap={open} />
           </group>
         )
       })}
+    </>
+  )
+}
+
+/** What a key or a chest is called in the world: its glyph and its name. */
+export function itemMarkText(w: { type: string; keyItem?: { name?: string }; chest?: { name?: string } }): string {
+  return w.type === 'key' ? `⚷ ${w.keyItem?.name ?? 'key'}` : `▣ ${w.chest?.name ?? 'chest'}`
+}
+
+/** A key's or a chest's mark: the note's cube, its short name, and under it who left it. Cyberspace TV's fade (TvFinds). */
+export function ItemMark({ text, sub, at, opacity = 1 }: { text: string; sub: string; at: [number, number, number]; opacity?: number }): JSX.Element {
+  return (
+    <>
+      <WorldMark kind="note" at={at} opacity={opacity} />
+      <WorldLabel text={text} color={NOTE} at={at} align="center" px={13} sub={sub} subColor={ACCENT} opacity={opacity} />
     </>
   )
 }
@@ -300,7 +314,7 @@ const MARK_LOOK: Record<MarkKind, { color: string; opacity: number }> = {
  * like everything else in the scene, and held to a constant size on screen so
  * a note is the same size to the eye wherever it is.
  */
-function WorldMark({ kind, at }: { kind: MarkKind; at: [number, number, number] }): JSX.Element {
+function WorldMark({ kind, at, opacity = 1 }: { kind: MarkKind; at: [number, number, number]; opacity?: number }): JSX.Element {
   const group = useRef<Group>(null)
   const geometry = useMemo(
     () => new EdgesGeometry(kind === 'note' ? new BoxGeometry(0.72, 0.72, 0.72) : new OctahedronGeometry(0.5)),
@@ -330,7 +344,7 @@ function WorldMark({ kind, at }: { kind: MarkKind; at: [number, number, number] 
   return (
     <group key={kind} ref={group} position={at}>
       <lineSegments geometry={geometry} frustumCulled={false}>
-        <lineBasicMaterial color={look.color} toneMapped={false} transparent opacity={look.opacity} depthWrite={false} />
+        <lineBasicMaterial color={look.color} toneMapped={false} transparent opacity={look.opacity * opacity} depthWrite={false} />
       </lineSegments>
     </group>
   )

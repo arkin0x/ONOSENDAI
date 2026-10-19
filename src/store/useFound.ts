@@ -93,16 +93,40 @@ function enforceBudget(d: IDBDatabase, budget = FOUND_BUDGET_BYTES): Promise<voi
   return deleteFound(d, evict)
 }
 
+/**
+ * Bags Cyberspace TV kept before this identity's rows were read: held back
+ * until they are, since only then does `remember` know whether the bag is
+ * already a played row, which TV must never make watched (review of #390,
+ * round 2).
+ */
+let waiting: Array<{ owner: string; args: Parameters<typeof remember> }> = []
+
+/** Write what TV held back, now the rows are read; another identity's is dropped. */
+function rememberWaiting(owner: string): void {
+  const held = waiting
+  waiting = []
+  for (const w of held) if (w.owner === owner) remember(...w.args)
+}
+
 /** A bag that opened: kept, unless the row already holds this or a newer version seen recently. */
-function remember(outer: NostrEvent, keyHex: string, items: Hidden[], refs: Record<string, NostrEvent>, height: number | undefined, origin: RegionOrigin | undefined): void {
+function remember(outer: NostrEvent, keyHex: string, items: Hidden[], refs: Record<string, NostrEvent>, height: number | undefined, origin: RegionOrigin | undefined, watched: boolean): void {
   const owner = useCyberspace.getState().identity.pubkey
+  const state = useFound.getState()
+  if (watched && (state.owner !== owner || state.storage === 'loading')) {
+    waiting.push({ owner, args: [outer, keyHex, items, refs, height, origin, watched] })
+    return
+  }
   const key = rowKeyOf(owner, outer)
   if (!key) return
   const loaded = useFound.getState().owner === owner
   const had = loaded ? rows.get(key) : undefined
   if (had && had.outer.id !== outer.id && keepsOver(had.outer, outer)) return
-  if (had && had.outer.id === outer.id && now() - had.seenAt < RESEEN_SECONDS && Object.keys(refs).every((k) => had.refs[k]?.id === refs[k].id)) return
-  const row = foundRow(owner, outer, keyHex, items, had && had.outer.id === outer.id ? { ...had.refs, ...refs } : refs, height ?? had?.height, origin, now())
+  // A bag kept by TV and now found in play is rewritten at once, as played.
+  const nowPlayed = had?.watched === true && !watched
+  if (!nowPlayed && had && had.outer.id === outer.id && now() - had.seenAt < RESEEN_SECONDS && Object.keys(refs).every((k) => had.refs[k]?.id === refs[k].id)) return
+  // Watched only while nothing found it in play: TV never makes a played row watched.
+  const stillWatched = watched && (!had || had.watched === true)
+  const row = foundRow(owner, outer, keyHex, items, had && had.outer.id === outer.id ? { ...had.refs, ...refs } : refs, height ?? had?.height, origin, now(), stillWatched)
   if (!row) return
   if (!origin && had?.origin) row.origin = had.origin
   if (loaded) { rows.set(key, row); opened.set(key, items) }
@@ -177,15 +201,17 @@ export const useFound = create<FoundState>((set, get) => ({
     if (owner !== get().owner) { rows.clear(); opened.clear(); set({ owner, storage: 'loading' }) }
     const d = await database()
     if (get().owner !== owner) return
-    if (!d) { set({ storage: 'memory' }); return }
+    if (!d) { set({ storage: 'memory' }); rememberWaiting(owner); return }
     let stored: FoundBag[]
     try { stored = await readFound(d, owner) } catch (err) {
       console.warn(`[found] could not read finds: ${err instanceof Error ? err.message : String(err)}`)
       set({ storage: 'memory' })
+      rememberWaiting(owner)
       return
     }
     if (get().owner !== owner) return
     const found: Hidden[] = []
+    const watchedFinds: Hidden[] = []
     const bad: string[] = []
     for (const row of stored) {
       const items = await openRow(row)
@@ -196,13 +222,17 @@ export const useFound = create<FoundState>((set, get) => ({
       if (now && keepsOver(now.outer, row.outer)) continue
       rows.set(row.rowKey, row)
       opened.set(row.rowKey, items)
-      found.push(...items)
+      if (row.watched) watchedFinds.push(...items)
+      else found.push(...items)
     }
     if (bad.length > 0) void serial((db) => deleteFound(db, bad))
     set({ storage: 'indexeddb' })
+    rememberWaiting(owner)
     // Through the same door as a scan's finds: deletions you made are
     // honored, keys inside are held, chests a held key opens are opened.
     if (found.length > 0) useShards.getState().addDiscovered(found)
+    // Kept by TV: back as TV's finds are, no chest in them opening by itself.
+    if (watchedFinds.length > 0) useShards.getState().addDiscovered(watchedFinds, { watched: true })
     void pruneDeletions(owner, [...rows.values()])
   },
 }))
@@ -212,6 +242,7 @@ export function resetFoundForTests(): void {
   db = null
   rows.clear()
   opened.clear()
+  waiting = []
   writes = Promise.resolve()
   useFound.setState({ owner: '', storage: 'loading' })
 }

@@ -29,7 +29,7 @@ import { chainLengthAt, countTo } from '../lib/tv/stats'
 import { itemLength, type Shot, type TapeItem } from '../lib/tv/director'
 import { LANDMARKS } from '../hud/ScaleLadder'
 import { CUT_MS, contentsWords, quoteOf, segmentDoing, typePace, TYPE_DELAY_S } from '../hud/TvSegments'
-import { placeable, shotProgress, type TvAvatar } from '../store/useTv'
+import { findLines, placeable, shotProgress, type TvAvatar, type TvFindLine } from '../store/useTv'
 import { AD_SUBTITLE, adById, type AdScene, type AdTheme } from '../lib/tv/hosakaAd'
 import type { Census, ChainTimes } from '../lib/tv/stats'
 import type { Position } from '../lib/space'
@@ -127,6 +127,8 @@ export interface TvPicture {
   avatars: Record<string, TvAvatar>
   /** The commercial on screen, which spot and since `at` (performance.now()), or null (lib/tv/hosakaAd). */
   ad?: { at: number; id: string } | null
+  /** What TV's scan just opened, newest last, for the ticker (store/useTv finds, findLines). */
+  finds?: TvFindLine[]
 }
 
 /** What the painter needs from outside the store. */
@@ -196,6 +198,8 @@ export function tickerItems(p: TvPicture, name: (pk: string) => string): string[
   }
   for (const a of [...p.arrivals].reverse()) out.push(`NEW ARRIVAL ${name(a.pubkey)}`)
   for (const r of [...p.reactions].reverse()) out.push(`${r.content} FROM ${name(r.pubkey)} ON A ${r.on === 'shard' ? 'SHARD' : 'MOVE'}`)
+  // What the scan opened where the avatars stood (store/useTv reveal): a line, not a chip over the tube.
+  for (const f of [...findLines(p.finds, t, p.shot)].reverse()) out.push(`FOUND: ${f.label}`)
   return out
 }
 

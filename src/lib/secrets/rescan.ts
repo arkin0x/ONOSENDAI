@@ -314,7 +314,8 @@ export async function askAndOpen(
   return out
 }
 
-const askRelays: Ask = (ids, { until, limit }) =>
+/** The relays asked for the bags under these lookup ids; Cyberspace TV's scan asks the same way (store/useTv.ts). */
+export const askRelays: Ask = (ids, { until, limit }) =>
   queryEach({ kinds: [HIDDEN_KIND], '#d': ids, limit, ...(until !== undefined ? { until } : {}) })
 
 /** A held box key has no height of its own; your own deployment there may say it. */

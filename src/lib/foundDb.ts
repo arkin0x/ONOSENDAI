@@ -54,6 +54,12 @@ export interface FoundBag {
   itemIds: string[]
   /** Unix seconds when this bag was last found or opened. Eviction takes the oldest first. */
   seenAt: number
+  /**
+   * Kept by Cyberspace TV, not found in play: its finds come back as TV's do,
+   * a chest in it never opening by itself (useShards addDiscovered `watched`).
+   * Gone once the bag is found in play.
+   */
+  watched?: true
 }
 
 export function openFoundDb(timeoutMs: number = OPEN_TIMEOUT_MS): Promise<IDBDatabase> {

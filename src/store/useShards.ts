@@ -595,7 +595,11 @@ interface ShardsState {
   inspect: (eventId: string | null) => void
   selectSecret: (eventId: string | null) => void
   /** File what a scan opened. A find this identity wrote joins `mine` as well, whichever device placed it. */
-  addDiscovered: (items: Hidden[]) => void
+  /**
+   * Add finds. `watched`: found by Cyberspace TV, not in play, so no chest
+   * among them opens by itself and its keys are held as watched (review of #390).
+   */
+  addDiscovered: (items: Hidden[], how?: { watched?: boolean }) => void
   /**
    * The items among these that earn the reveal and the toast: never opened on
    * this device before, not this identity's own, not deleted. The scan and a
@@ -1746,7 +1750,8 @@ export const useShards = create<ShardsState>((set, get) => {
 
     selectSecret: (eventId) => set({ selectedSecret: eventId }),
 
-    addDiscovered: (items) => {
+    addDiscovered: (items, how) => {
+      const watched = how?.watched === true
       if (items.length === 0) return
       const { deleted } = get()
       const discovered = { ...get().discovered }
@@ -1764,9 +1769,11 @@ export const useShards = create<ShardsState>((set, get) => {
       // appears where the door stands the moment its key is in ITEMS, on
       // every scan, and a key inside opens the next chest in the same pass.
       // A chest sealed to this identity waits for OPEN in the record, since a
-      // signer may have to be asked.
-      const keys: OpeningKey[] = openingKeys(useInventory.getState().items)
-      const queue = items.filter((h) => h.type === 'chest' && h.chest)
+      // signer may have to be asked. So does one Cyberspace TV showed, and a
+      // key TV showed opens nothing by itself: watching is not playing, and a
+      // chest may hold the messages and coins TV never shows (review of #390).
+      const keys: OpeningKey[] = openingKeys(useInventory.getState().items, true)
+      const queue = watched ? [] : items.filter((h) => h.type === 'chest' && h.chest)
       const revealed: Hidden[] = []
       while (queue.length > 0) {
         const door = queue.shift()!
@@ -1789,7 +1796,7 @@ export const useShards = create<ShardsState>((set, get) => {
       claimOwn(all)
       // Reading a key is holding it (B1 §2.1): every key a scan opened goes
       // into the inventory, once, whoever hid it.
-      useInventory.getState().holdFinds(all)
+      useInventory.getState().holdFinds(all, watched)
       // What a door revealed gets the find ceremony, as a scan's finds do.
       if (revealed.length > 0) useCeremony.getState().mark(revealed)
     },

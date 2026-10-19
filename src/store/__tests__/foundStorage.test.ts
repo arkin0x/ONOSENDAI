@@ -18,6 +18,8 @@ const OTHER = 'dd'.repeat(32)
 let identity = ME
 let discovered: Record<string, Hidden> = {}
 const added: Hidden[][] = []
+/** How each addDiscovered was asked: watched (by Cyberspace TV) or played. */
+const addedHow: Array<{ watched?: boolean } | undefined> = []
 let relayAnswers: (filter: unknown) => NostrEvent[] = () => []
 let held: Record<string, { id: string }> = {}
 let starred: Array<{ input: string; plane: number }> = []
@@ -32,7 +34,7 @@ vi.mock('../useShards', () => ({
   useShards: {
     getState: () => ({
       discovered,
-      addDiscovered: (items: Hidden[]) => { added.push(items); for (const h of items) discovered[h.eventId] = h },
+      addDiscovered: (items: Hidden[], how?: { watched?: boolean }) => { added.push(items); addedHow.push(how); for (const h of items) discovered[h.eventId] = h },
     }),
     setState: (s: { discovered: Record<string, Hidden> }) => { discovered = s.discovered },
   },
@@ -76,6 +78,7 @@ beforeEach(() => {
   identity = ME
   discovered = {}
   added.length = 0
+  addedHow.length = 0
   relayAnswers = () => []
   held = {}
   starred = []
@@ -192,3 +195,66 @@ describe('the budget', () => {
     expect(texts()).toEqual(['held', 'starred'])
   })
 })
+
+describe('a bag Cyberspace TV kept', () => {
+  /** TV shows this bag whole, and keeps it as watched (store/useTv reveal). */
+  async function watch(cache: Cache, found: Mod, outer: NostrEvent): Promise<void> {
+    const { items, refs } = await cache.unbagRecording(outer, rk.key, undefined, undefined, 6)
+    cache.rememberBag(outer, rk.key, items, refs, 6, undefined, true)
+    await found.flushFound()
+  }
+
+  it('comes back on the next load as watched, so no chest in it opens by itself', async () => {
+    const a = await boot()
+    await watch(a.cache, a.found, await bagOf('seen on TV'))
+    discovered = {}
+    addedHow.length = 0
+    const b = await boot()
+    expect(texts()).toEqual(['seen on TV'])
+    expect(addedHow).toEqual([{ watched: true }])
+    expect(b.found.loadedRows()[0].watched).toBe(true)
+  })
+
+  it('is played from the moment the same bag is found in play, at once', async () => {
+    const a = await boot()
+    const outer = await bagOf('then walked to')
+    await watch(a.cache, a.found, outer)
+    await find(a.cache, a.found, outer)
+    discovered = {}
+    addedHow.length = 0
+    const b = await boot()
+    expect(addedHow).toEqual([undefined])
+    expect(b.found.loadedRows()[0].watched).toBeUndefined()
+  })
+
+  it('never makes a bag found in play watched', async () => {
+    const a = await boot()
+    const outer = await bagOf('walked to first')
+    await find(a.cache, a.found, outer)
+    await watch(a.cache, a.found, outer)
+    discovered = {}
+    addedHow.length = 0
+    await boot()
+    expect(addedHow).toEqual([undefined])
+  })
+
+  it('waits for the rows to be read, so a played row is never made watched', async () => {
+    const a = await boot()
+    const outer = await bagOf('walked to, then on TV')
+    await find(a.cache, a.found, outer)
+    // A new page: TV keeps the same bag before the rows have been read.
+    vi.resetModules()
+    const found = await import('../useFound')
+    const cache = await import('../../lib/foundCache')
+    const loading = found.useFound.getState().load(ME)
+    const { items, refs } = await cache.unbagRecording(outer, rk.key, undefined, undefined, 6)
+    cache.rememberBag(outer, rk.key, items, refs, 6, undefined, true)
+    await loading
+    await found.flushFound()
+    discovered = {}
+    addedHow.length = 0
+    await boot()
+    expect(addedHow).toEqual([undefined])
+  })
+})
+

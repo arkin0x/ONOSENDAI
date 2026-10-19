@@ -8,7 +8,7 @@
  * the honest picture. Culled past the same reach as Earth and the spawn mark.
  */
 
-import { useMemo, useRef } from 'react'
+import { useCallback, useMemo, useRef } from 'react'
 import { useFrame } from '@react-three/fiber'
 import type { Group, Material, Object3D } from 'three'
 import { GRID_RADIUS, itemCentre, type Position, type ViewAxes } from '../lib/space'
@@ -114,6 +114,23 @@ export function placeShard(
   return { key: w.key, shard, centre, scale, clip, pose }
 }
 
+/**
+ * The shards of `items` that can be drawn from here: in the view's plane, not
+ * too small to show a pixel at any distance, and in reach. Placed in the
+ * render frame anchored at `anchor`. Cyberspace TV draws its own finds with
+ * this (TvFinds).
+ */
+export function drawableShards(items: Array<Pick<WorldItem, 'key' | 'type' | 'at' | 'height' | 'plane'> & { shard?: ShardModel }>, anchor: Position, plane: number, scaleExp: number, axes: ViewAxes): PlacedShardDraw[] {
+  const origin = alignedOrigin(anchor, scaleExp)
+  return items
+    .filter((w) => w.type === 'shard' && w.shard && w.plane === plane)
+    // Not drawn at all once it cannot show a pixel at any distance; a shard
+    // with placed objects is exempt, since they can be far larger than it.
+    .filter((w) => (w.shard!.parts?.length ?? 0) > 0 || scaleExp - w.shard!.unit < FAR_CULL)
+    .map((w) => placeShard(w, origin, scaleExp, axes))
+    .filter((w) => Number.isFinite(w.scale) && Math.hypot(...w.centre) <= REACH)
+}
+
 export function WorldShards({ axes }: Props): JSX.Element | null {
   const anchor = useCyberspace((s) => s.anchor)
   const anchorPlane = useCyberspace((s) => s.anchorPlane)
@@ -127,14 +144,7 @@ export function WorldShards({ axes }: Props): JSX.Element | null {
   const moving = useShards((s) => editingId(s.pending))
 
   const placed = useMemo(() => {
-    const origin = alignedOrigin(anchor, scaleExp)
-    return useShards.getState().worldItems()
-      .filter((w) => w.type === 'shard' && w.shard && w.plane === anchorPlane)
-      // Not drawn at all once it cannot show a pixel at any distance; a shard
-      // with placed objects is exempt, since they can be far larger than it.
-      .filter((w) => (w.shard!.parts?.length ?? 0) > 0 || scaleExp - w.shard!.unit < FAR_CULL)
-      .map((w) => placeShard(w, origin, scaleExp, axes))
-      .filter((w) => Number.isFinite(w.scale) && Math.hypot(...w.centre) <= REACH)
+    return drawableShards(useShards.getState().worldItems(), anchor, anchorPlane, scaleExp, axes)
     // mine and discovered are what worldShards reads.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [anchor, anchorPlane, scaleExp, axes, mine, discovered, curated])
@@ -151,10 +161,12 @@ export function WorldShards({ axes }: Props): JSX.Element | null {
 /**
  * One shard in the world, and the tap target that is exactly what it draws:
  * measured from the drawn group, and off while it is too small to see
- * (TapTarget; arkinox, 2026-09-30).
+ * (TapTarget; arkinox, 2026-09-30). Cyberspace TV's have no tap target, and
+ * hand their drawn group to TV, which sets how they look each frame (TvFinds).
  */
-function PlacedShard({ w, birth, moving }: { w: PlacedShardDraw; birth: number | undefined; moving: boolean }): JSX.Element {
-  const drawn = useRef<Group>(null)
+export function PlacedShard({ w, birth, moving = false, tappable = true, drawnRef }: { w: PlacedShardDraw; birth: number | undefined; moving?: boolean; tappable?: boolean; drawnRef?: (g: Group | null) => void }): JSX.Element {
+  const drawn = useRef<Group | null>(null)
+  const setDrawn = useCallback((g: Group | null) => { drawn.current = g; drawnRef?.(g) }, [drawnRef])
   // Moving (EDIT): drawn as a ghost is, with ordinary blending, since a world
   // face writes its colour opaque whatever its opacity (ShardMesh TAG_BLEND),
   // and every material's opacity follows the breath each frame.
@@ -165,11 +177,11 @@ function PlacedShard({ w, birth, moving }: { w: PlacedShardDraw; birth: number |
   })
   return (
     <group position={w.centre}>
-      <group ref={drawn}>
+      <group ref={setDrawn}>
         <ShardMesh shard={w.shard} scale={w.scale} birth={birth} world ghost={moving} clip={w.clip} pose={w.pose} />
       </group>
       {/* Not tappable while it moves: the ghost is the one being aimed. */}
-      {!moving && <TapTarget measure={drawn} onTap={() => useShards.getState().selectSecret(w.key)} />}
+      {!moving && tappable && <TapTarget measure={drawn} onTap={() => useShards.getState().selectSecret(w.key)} />}
     </group>
   )
 }

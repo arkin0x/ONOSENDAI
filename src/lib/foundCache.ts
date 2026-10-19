@@ -74,10 +74,10 @@ function originIn(o: FoundOrigin | undefined): RegionOrigin | undefined {
 }
 
 /** The row for a bag that opened to `items`. */
-export function foundRow(owner: string, outer: NostrEvent, keyHex: string, items: Hidden[], refs: Record<string, NostrEvent>, height: number | undefined, origin: RegionOrigin | undefined, seenAt: number): FoundBag | null {
+export function foundRow(owner: string, outer: NostrEvent, keyHex: string, items: Hidden[], refs: Record<string, NostrEvent>, height: number | undefined, origin: RegionOrigin | undefined, seenAt: number, watched = false): FoundBag | null {
   const rowKey = rowKeyOf(owner, outer)
   if (!rowKey) return null
-  return { rowKey, owner, outer, keyHex, ...(height !== undefined ? { height } : {}), ...(origin ? { origin: originOut(origin) } : {}), refs, itemIds: items.map((h) => h.eventId), seenAt }
+  return { rowKey, owner, outer, keyHex, ...(height !== undefined ? { height } : {}), ...(origin ? { origin: originOut(origin) } : {}), refs, itemIds: items.map((h) => h.eventId), seenAt, ...(watched ? { watched: true as const } : {}) }
 }
 
 /**
@@ -143,16 +143,16 @@ export function toEvict(rows: FoundBag[], budget: number, exempt: (row: FoundBag
 }
 
 /** Where a bag that opened goes: set by store/useFound.ts, and nothing until it is. */
-export type FoundSink = (outer: NostrEvent, keyHex: string, items: Hidden[], refs: Record<string, NostrEvent>, height: number | undefined, origin: RegionOrigin | undefined) => void
+export type FoundSink = (outer: NostrEvent, keyHex: string, items: Hidden[], refs: Record<string, NostrEvent>, height: number | undefined, origin: RegionOrigin | undefined, watched: boolean) => void
 let sink: FoundSink | null = null
 export function setFoundSink(fn: FoundSink | null): void { sink = fn }
 
 /**
- * unbag, and the bag kept when it opened: the events its references resolved
- * to are recorded on the way through, so the row can be opened again later
- * without asking anyone for them.
+ * unbag, with the events its references resolved to recorded on the way
+ * through, so the row can be opened again later without asking anyone for
+ * them. Nothing is kept yet: rememberBag does that.
  */
-export async function unbagRemembered(outer: NostrEvent, regionKey: Uint8Array, resolve?: ResolveReference, origin?: RegionOrigin, height?: number): Promise<Hidden[]> {
+export async function unbagRecording(outer: NostrEvent, regionKey: Uint8Array, resolve?: ResolveReference, origin?: RegionOrigin, height?: number): Promise<{ items: Hidden[]; refs: Record<string, NostrEvent> }> {
   const refs: Record<string, NostrEvent> = {}
   const recording: ResolveReference | undefined = resolve
     ? async (ref) => {
@@ -162,8 +162,22 @@ export async function unbagRemembered(outer: NostrEvent, regionKey: Uint8Array, 
     }
     : undefined
   const items = await unbag(outer, regionKey, recording, origin, height)
-  if (items.length > 0 && sink) {
-    try { sink(outer, bytesToHex(regionKey), items, refs, height, origin) } catch { /* a cache that fails never fails a find */ }
-  }
+  return { items, refs }
+}
+
+/**
+ * Keep a bag that opened to `items`: at once for a scan (unbagRemembered),
+ * and for Cyberspace TV only once it shows the bag, since TV opens bags
+ * ahead of the moment on tape that shows them (lib/tv/scan.ts).
+ */
+export function rememberBag(outer: NostrEvent, regionKey: Uint8Array, items: Hidden[], refs: Record<string, NostrEvent>, height: number | undefined, origin: RegionOrigin | undefined, watched = false): void {
+  if (items.length === 0 || !sink) return
+  try { sink(outer, bytesToHex(regionKey), items, refs, height, origin, watched) } catch { /* a cache that fails never fails a find */ }
+}
+
+/** unbag, and the bag kept when it opened. */
+export async function unbagRemembered(outer: NostrEvent, regionKey: Uint8Array, resolve?: ResolveReference, origin?: RegionOrigin, height?: number): Promise<Hidden[]> {
+  const { items, refs } = await unbagRecording(outer, regionKey, resolve, origin, height)
+  rememberBag(outer, regionKey, items, refs, height, origin)
   return items
 }

@@ -22,6 +22,7 @@ import { useCeremony } from '../store/useCeremony'
 import { SCAN_MAX_HEIGHT, useShards } from '../store/useShards'
 import { resolveReference } from '../lib/references'
 import { useSecrets, type CurrentKey } from '../store/useSecrets'
+import { useTv } from '../store/useTv'
 import type { RegionRequest, RegionResponse } from '../workers/region.worker'
 
 /** The aligned base of a value at a height: what decides "same region". */
@@ -39,6 +40,7 @@ function regionSignature(x: bigint, y: bigint, z: bigint): string {
 export function useDiscovery(): void {
   const anchor = useCyberspace((s) => s.anchor)
   const plane = useCyberspace((s) => s.anchorPlane)
+  const tvOn = useTv((s) => s.on)
   const worker = useRef<Worker | null>(null)
   const lastSig = useRef<string | null>(null)
   const reqId = useRef(0)
@@ -59,6 +61,20 @@ export function useDiscovery(): void {
   }, [])
 
   useEffect(() => {
+    // Cyberspace TV points the anchor at its shots, its bag boxes and the
+    // middle of a hyperjump's line, none of them where an avatar stood at
+    // that moment on tape, and a scan here would add messages and coins and
+    // bags newer than the moment shown. TV scans for itself, where its
+    // avatars stand and as of tape time (lib/tv/scan.ts; arkinox,
+    // 2026-10-19). A scan cut off by TV starting never finishes, so it is
+    // forgotten, as a terminated worker's is above: the view TV puts back is
+    // scanned again.
+    if (tvOn) {
+      lastSig.current = null
+      reqId.current++
+      useShards.getState().setScanning(false)
+      return
+    }
     const sig = regionSignature(anchor.x, anchor.y, anchor.z)
     if (sig === lastSig.current) return
     lastSig.current = sig
@@ -189,5 +205,5 @@ export function useDiscovery(): void {
     w.postMessage(request)
 
     return () => w.removeEventListener('message', onMessage)
-  }, [anchor])
+  }, [anchor, tvOn])
 }

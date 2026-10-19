@@ -76,6 +76,13 @@ export interface HeldItem {
    * came out of still says TAKEN and it cannot be taken a second time.
    */
   cleared?: number
+  /**
+   * Found by watching Cyberspace TV, not in play: it opens a chest only when
+   * you OPEN it, never by itself in a scan (openingKeys `auto`), so nothing
+   * TV showed unlocks a message or a coin on its own (review of #390). Gone
+   * once the same key is found in play.
+   */
+  watched?: true
 }
 
 export function rowKeyOf(owner: string, id: string): string {
@@ -113,10 +120,11 @@ function row(owner: string, event: NostrEvent, body: ItemBody, verified: boolean
  * for anything that is not a key with its event: the ceremony's preview items
  * come out of no bag and carry none.
  */
-export function heldFromFind(owner: string, h: Hidden, at: number): HeldItem | null {
+export function heldFromFind(owner: string, h: Hidden, at: number, watched = false): HeldItem | null {
   if (h.type !== 'key' || !h.key || !h.inner) return null
   // A bag's items are verified against the bag's author before they are found at all (hidden.ts fromInner).
-  return row(owner, h.inner, { type: 'key', key: h.key }, true, 'found', placeOf(h), null, at)
+  const held = row(owner, h.inner, { type: 'key', key: h.key }, true, 'found', placeOf(h), null, at)
+  return watched ? { ...held, watched: true } : held
 }
 
 /** A key the identity forged and hid, held at once so chests can be sealed to it (B1 §3.1). */
@@ -194,10 +202,13 @@ export function parseKeyText(text: string): { event: NostrEvent; key: KeyItem; v
   return key ? { event, key, verified: signed } : null
 }
 
-/** The held keys as the opener needs them (lib/chests.ts openerFor). */
-export function openingKeys(items: Record<string, HeldItem>): OpeningKey[] {
+/**
+ * The held keys as the opener needs them (lib/chests.ts openerFor). For a
+ * chest opening by itself in a scan (`auto`), not a key found by watching TV.
+ */
+export function openingKeys(items: Record<string, HeldItem>, auto = false): OpeningKey[] {
   const out: OpeningKey[] = []
-  for (const it of Object.values(items)) if (it.type === 'key' && it.key) out.push({ id: it.id, itemPubkey: it.key.itemPubkey, secretHex: it.key.secretHex })
+  for (const it of Object.values(items)) if (it.type === 'key' && it.key && !(auto && it.watched)) out.push({ id: it.id, itemPubkey: it.key.itemPubkey, secretHex: it.key.secretHex })
   return out
 }
 

@@ -3,7 +3,7 @@
  *
  * The avatars are the tape's, not today's: everyone the tape has shown, where
  * it last saw them, drawn as every other avatar is (OtherAvatar, gliding on
- * each move). Someone not seen on tape for STALE_S is left out, so a crowd
+ * each move). Someone not seen on tape for STALE_S (store/useTv) is left out, so a crowd
  * from last week does not stand around this afternoon's shot.
  *
  * The camera orbits the shot's avatar from above, slowly, "so it looks like it
@@ -28,7 +28,7 @@ import { drawnAvatars } from '../lib/targets'
 import { avatarTurn } from '../lib/facing'
 import { committedAnchor } from '../lib/renderFrame'
 import { alignedOrigin, useCyberspace } from '../store/useCyberspace'
-import { framingProgress, useTv } from '../store/useTv'
+import { framingProgress, shownAvatars, useTv } from '../store/useTv'
 import { useProfile } from '../hooks/useProfile'
 import { OtherAvatar } from './OtherAvatar'
 import { tvName } from '../lib/tv/text'
@@ -37,10 +37,9 @@ import { TvBoxes } from './TvBoxes'
 import { SpawnMarker } from './SpawnMarker'
 import { TvJump } from './TvJump'
 import { TvTrail } from './TvTrail'
+import { TvFinds } from './TvFinds'
 
 const REACH = GRID_RADIUS * 8
-/** An avatar not seen on tape for this long (tape time) is not drawn. */
-const STALE_S = 30 * 60
 /** The orbit's turn, radians a second: a full circle in a little under two minutes. */
 const TV_ORBIT_SPEED = 0.06
 /** How quickly the camera catches up with the avatar, seconds. */
@@ -198,8 +197,7 @@ export function TvLayer({ axes }: { axes: ViewAxes }): JSX.Element {
     return (p: Position) => placeCentre(p, origin, scaleExp, axes)
   }, [anchor, scaleExp, axes])
 
-  const near = useMemo(() => Object.entries(avatars)
-    .filter(([pk, a]) => a.plane === anchorPlane && ((shot?.kind === 'trip' && pk === shot.pubkey) || tapeTime === null || Math.abs(tapeTime - a.at) <= STALE_S))
+  const near = useMemo(() => shownAvatars({ avatars, shot, tapeTime }, anchorPlane)
     .map(([pk, a]) => ({ pk, a, centre: place(a.position) }))
     .filter((p) => Math.hypot(...p.centre) <= REACH), [avatars, anchorPlane, shot, tapeTime, place])
 
@@ -222,6 +220,8 @@ export function TvLayer({ axes }: { axes: ViewAxes }): JSX.Element {
     <>
       <TvCamera axes={axes} />
       <TvBoxes />
+      {/* What TV's own scan opened where its avatars stood (lib/tv/scan.ts). */}
+      <TvFinds axes={axes} />
       {/* Each avatar's spawn point, where it is in range (SpawnMarker culls
           itself): where a chain begins (arkinox, 2026-10-18). */}
       {near.map((p) => <SpawnMarker key={`spawn-${p.pk}`} pubkey={p.pk} axes={axes} />)}

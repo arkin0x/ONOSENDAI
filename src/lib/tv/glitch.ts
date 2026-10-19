@@ -8,8 +8,10 @@
  * every few minutes").
  *
  * Three kinds, each on its own random clock:
- *   aberration: the colours pull far apart and come back, 1 to 7 s, every
- *     25 s to 3 min;
+ *   aberration: the colours pull far apart and come back, 3 to 8 s, every
+ *     25 s to 3 min: a slow creep, a sudden slip most of the way, one slow
+ *     swell and back, and a flicker off (2026-10-19: "it slowly then suddenly
+ *     slips on, grows and shrinks slowly, then flickers off suddenly");
  *   tear: bands of the picture slip sideways, as a tape losing tracking,
  *     under a second and a half, every 2 to 6 min;
  *   dropout: the signal fades, as if drifting out of range: a slow swell of
@@ -21,8 +23,11 @@
  * timers so they can seem random and overlap"). None starts over a cut or a
  * hyperjump's tunnel (effects of their own): one due then is put off a few
  * seconds past it, so it does not read as part of the cut. The clocks start
- * again each time TV comes on, and after any long stall in the frames (a
- * hidden tab), so time spent away is never a backlog. The tube
+ * again each time TV comes on, and stop through any stall in the frames (a
+ * hidden tab, or a hitch loading the next chain), so time spent away is
+ * never a backlog. They used to start again after a stall instead, and a
+ * hitch every minute or two kept the snow, whose wait is minutes, from ever
+ * coming (2026-10-19: "i don't see the subtle snow happening at all"). The tube
  * (TvScreenEffect) reads the levels each frame; with reduced motion asked
  * for it never asks.
  */
@@ -48,13 +53,19 @@ interface Timing {
   gap: [number, number]
   /** Seconds it lasts, at least and at most. */
   length: [number, number]
-  /** Seconds to come on and to go off, at most (a short one is quicker). */
+  /**
+   * Seconds to come on and to go off, at most (a short one is quicker). An
+   * aberration's rise is its creep before the slip, and its fall the flicker.
+   */
   rise: number
   fall: number
 }
 
 export const GLITCH_TIMING: Record<GlitchKind, Timing> = {
-  aberration: { gap: [25, 180], length: [1, 7], rise: 0.6, fall: 1 },
+  // 3 s at least, not the 1 s first asked for: the creep, the slip, a slow
+  // swell and the flicker need it (slip()); shorter, the blink back squeezes
+  // under a tenth of a second and the swell is no longer slow.
+  aberration: { gap: [25, 180], length: [3, 8], rise: 1.2, fall: 0.45 },
   tear: { gap: [120, 360], length: [0.4, 1.5], rise: 0.08, fall: 0.15 },
   dropout: { gap: [120, 360], length: [5, 12], rise: 3.5, fall: 4.5 },
 }
@@ -62,8 +73,10 @@ export const GLITCH_TIMING: Record<GlitchKind, Timing> = {
 /** The colours' split at the height of an aberration: "a very high amount". */
 export const PEAK_ABERRATION = 8
 const KINDS: GlitchKind[] = ['aberration', 'tear', 'dropout']
-/** A gap between frames this long, ms, is time away (a hidden tab): the clocks start again. */
+/** A gap between frames this long, ms, is time away (a hidden tab, a hitch): the clocks stop for it. */
 const STALL_MS = 1000
+/** A gap this long, ms, is time truly away: a glitch on then ends rather than coming back mid-way, at its height. */
+const AWAY_MS = 10_000
 /** Seconds a glitch due during a cut or the tunnel is put off past it, at least and at most. */
 const DEFER_S: [number, number] = [2, 12]
 /** How long each pattern of a tear's bands holds, ms: under three changes a second (WCAG 2.3.1). */
@@ -81,13 +94,31 @@ export class GlitchDirector {
     this.reset(now)
   }
 
-  /** Start every clock again from `now`, with nothing on: TV coming on, or back from time away. */
+  /** Start every clock again from `now`, with nothing on: TV coming on. */
   reset(now: number): void {
     for (const k of KINDS) {
       this.due[k] = now + this.gap(k)
       this.live[k] = null
     }
     this.last = now
+  }
+
+  /**
+   * Hold every clock still for `ms` of time away: what was due is still as
+   * far off, and what was on carries on through a hitch. After longer away
+   * it ends instead, and the next of its kind is a new while off: back to
+   * the set, it would otherwise be at its height on the first frame (review
+   * of #391).
+   */
+  private stop(now: number, ms: number): void {
+    for (const k of KINDS) {
+      this.due[k] += ms
+      const live = this.live[k]
+      if (live && ms > AWAY_MS) {
+        this.live[k] = null
+        this.due[k] = now + this.gap(k)
+      } else if (live) live.start += ms
+    }
   }
 
   private gap(kind: GlitchKind): number {
@@ -108,7 +139,7 @@ export class GlitchDirector {
    * aberration carried into the spot smeared its words unreadable).
    */
   levels(now: number, held: boolean, clear = false): GlitchLevels {
-    if (now - this.last > STALL_MS) this.reset(now)
+    if (now - this.last > STALL_MS) this.stop(now, now - this.last)
     this.last = now
     const out = { ...CALM }
     for (const kind of KINDS) {
@@ -130,14 +161,12 @@ export class GlitchDirector {
       }
       if (!live) continue
       const t = (now - live.start) / 1000
-      const env = envelope(t, live.length / 1000, GLITCH_TIMING[kind])
       if (kind === 'aberration') {
-        // A little unsteady at its height, as a set's is: slowly, under three
-        // swings a second, since the words now move with it (WCAG 2.3.1;
-        // review of #388).
-        const shake = 0.85 + 0.15 * Math.sin(t * 11) * Math.sin(t * 4.3)
-        out.aberration = 1 + (PEAK_ABERRATION - 1) * env * shake
-      } else if (kind === 'tear') {
+        out.aberration = 1 + (PEAK_ABERRATION - 1) * slip(t, live.length / 1000, GLITCH_TIMING.aberration)
+        continue
+      }
+      const env = envelope(t, live.length / 1000, GLITCH_TIMING[kind])
+      if (kind === 'tear') {
         out.tear = env
         out.tearSeed = 1 + (Math.floor(now / TEAR_STEP_MS) % 97)
       } else {
@@ -147,6 +176,40 @@ export class GlitchDirector {
     }
     return out
   }
+}
+
+/** How far an aberration has crept before it slips, of its height. */
+export const CREEP_LEVEL = 0.12
+/** How far the slip takes it, of its height: the swell grows from here to all of it and back. */
+export const SLIP_LEVEL = 0.75
+/** Seconds the slip takes: sudden. */
+export const SLIP_S = 0.1
+/** The flicker off, in seconds into it: gone, back once, gone (one and a half flashes, under WCAG 2.3.1's three a second). */
+const BLINK: [number, number] = [0.15, 0.27]
+/** How far the blink back comes, of its height. */
+const BLINK_LEVEL = 0.6
+
+/**
+ * An aberration's shape, 0 to 1, `t` s into one `length` s long: it creeps
+ * up a little over `rise` s, slips most of the way in a tenth of a second,
+ * swells once slowly to all of it and back, then flickers off over the last
+ * `fall` s. No wobble: between the slip and the flicker it only breathes.
+ */
+export function slip(t: number, length: number, timing: Pick<Timing, 'rise' | 'fall'>): number {
+  if (t <= 0 || t >= length) return 0
+  const creep = Math.min(timing.rise, length * 0.25)
+  const flicker = Math.min(timing.fall, length * 0.15)
+  const ease = (x: number): number => x * x * (3 - 2 * x)
+  if (t < creep) return CREEP_LEVEL * ease(t / creep)
+  if (t < creep + SLIP_S) return CREEP_LEVEL + (SLIP_LEVEL - CREEP_LEVEL) * Math.sin(((t - creep) / SLIP_S) * Math.PI / 2)
+  const off = length - flicker
+  if (t < off) {
+    const swell = (t - creep - SLIP_S) / (off - creep - SLIP_S)
+    return SLIP_LEVEL + (1 - SLIP_LEVEL) * Math.sin(swell * Math.PI) ** 2
+  }
+  // In the flicker's own seconds, as if it were the whole `fall` long.
+  const into = ((t - off) / flicker) * timing.fall
+  return into >= BLINK[0] && into < BLINK[1] ? BLINK_LEVEL : 0
 }
 
 /** Up, held, and down, eased: 0 to 1 over a glitch `length` s long, `t` s in. */

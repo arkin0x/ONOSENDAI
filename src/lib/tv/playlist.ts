@@ -37,4 +37,13 @@ export const PLAYLIST: Track[] = [
   { url: 'https://media.basspistol.com/panix/2012-grab-bag/3-mandaak.mp3' },
   { url: 'https://media.basspistol.com/panix/2012-grab-bag/9-skithink.mp3' },
   { url: 'https://media.basspistol.com/panix/bamegoy/1-nebelwerfer.mp3' },
+  { url: 'https://media.basspistol.com/panix/br-tbients/1-br-tbient.mp3' },
+  { url: 'https://media.basspistol.com/panix/br-tbients/2-br-tbient-too.mp3' },
+  { url: 'https://media.basspistol.com/panix/br-tbients/3-broet-igen.mp3' },
+  { url: 'https://media.basspistol.com/die_nmi_/total_disko_destruction/2026-Total%20Club%20Destruction-01%20Goin%27%20Offline.mp3' },
+  { url: 'https://media.basspistol.com/die_nmi_/total_disko_destruction/2026-Total%20Club%20Destruction-03%20Da%20Mighty%20Roland%20Kaiser.mp3' },
+  { url: 'https://media.basspistol.com/die_nmi_/total_disko_destruction/2026-Total%20Club%20Destruction-05%20Andy%20Borg%20Collective.mp3' },
+  { url: 'https://media.basspistol.com/die_nmi_/total_disko_destruction/2026-Total%20Club%20Destruction-14%20Sour%20Sgreen%20Lickarr.mp3' },
+  { url: 'https://media.basspistol.com/setto.basspistol.com/darkweb/3-swipe-instrumental-.mp3' },
+  { url: 'https://media.basspistol.com/setto.basspistol.com/darkweb/4-darkweb-instrumental-.mp3' },
 ]

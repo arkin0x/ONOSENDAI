@@ -112,9 +112,9 @@ describe('a long comment on a phone on its side', () => {
     p.paint(picture({ shot }), assets, 1e12, 1, false)
     vi.restoreAllMocks()
     // The panel's border is the first rectangle stroked; the chiron's top, on
-    // this frame, is at 412 - 35 (margin) - 25.2 (marquee) - 9 - 55.8 = 287.
+    // this frame, is at 412 - 35 (margin) - 25.2 (marquee) - 9 - 68.4 = 274.4.
     const [, y, , h] = rects[0]
-    expect(y + h).toBeLessThanOrEqual(287)
+    expect(y + h).toBeLessThanOrEqual(274.4)
   })
 })
 
@@ -206,7 +206,7 @@ describe('NOW PLAYING', () => {
 
   it('is left off a screen too short for it, and the music plays on', () => {
     const p = new TvPainter(fakeCanvas())
-    p.size(568, 320, 1)
+    p.size(568, 280, 1)
     p.paint(picture({}), { ...assets, music }, 1000, 1, false)
     expect(p.musicCard).toBeNull()
   })
@@ -217,6 +217,94 @@ describe('NOW PLAYING', () => {
     p.size(412, 915, 1)
     p.paint(picture({}), { ...assets, music: { ...music, blocked: true } }, 1000, 1, true)
     expect(words).toContain('▶ TAP FOR SOUND')
+  })
+})
+
+describe('the chiron and NOW PLAYING', () => {
+  /** A canvas that keeps its rectangles with their fill, its words with where they went, and its arcs. */
+  function drawing(): { canvas: HTMLCanvasElement; rects: Array<{ x: number; y: number; w: number; h: number; fill: unknown }>; words: Array<{ text: string; x: number; y: number }>; arcs: number[][] } {
+    const rects: Array<{ x: number; y: number; w: number; h: number; fill: unknown }> = []
+    const words: Array<{ text: string; x: number; y: number }> = []
+    const arcs: number[][] = []
+    const state: Record<string, unknown> = { globalAlpha: 1, fillStyle: '#000' }
+    const ctx = new Proxy({
+      measureText: (t: string) => ({ width: Array.from(t).length * 7 }),
+      createLinearGradient: () => ({ addColorStop: () => {} }),
+      createRadialGradient: () => ({ addColorStop: () => {} }),
+      fillRect: (x: number, y: number, w: number, h: number) => { rects.push({ x, y, w, h, fill: state.fillStyle }) },
+      fillText: (text: string, x: number, y: number) => { words.push({ text, x, y }) },
+      arc: (...a: number[]) => { arcs.push(a) },
+    } as Record<string, unknown>, {
+      get: (target, key) => (key in target ? target[key as string] : key in state ? state[key as string] : () => {}),
+      set: (_t, key, v) => { state[key as string] = v; return true },
+    })
+    return { canvas: { width: 0, height: 0, getContext: () => ctx } as unknown as HTMLCanvasElement, rects, words, arcs }
+  }
+  const music = { title: 'Saturn Day', artist: 'Sethy Bowoy', art: null, progress: 0.4, blocked: false, volume: 0.8, muted: false }
+  const trip = { id: 't', kind: 'trip' as const, pubkey: 'ann', beats: [], start: 1, end: 2, offsets: [], length: 5 }
+  const RULE = 'rgba(0, 229, 255, 0.45)'
+
+  it('stand side by side on a wide screen, the chiron on the left, the same height, a blue rule on its top', () => {
+    const d = drawing()
+    const p = new TvPainter(d.canvas)
+    p.size(1400, 800, 1)
+    p.paint(picture({ shot: trip as never, scaleExp: 33 }), { ...assets, music }, 1000, 1, false)
+    const card = p.musicCard!
+    const rule = d.rects.find((r) => r.fill === RULE)!
+    expect(rule).toBeDefined()
+    // The chiron's rule ends before NOW PLAYING begins, on the same top.
+    expect(rule.x + rule.w).toBeLessThan(card.x)
+    expect(rule.y).toBeCloseTo(card.y, 5)
+    expect(rule.h).toBeLessThanOrEqual(1.35)
+    // And reaches most of the way across.
+    expect(rule.w).toBeGreaterThan(1400 * 0.5)
+  })
+
+  it('shows the zoom as 2 to the power of the shot\'s, boxed at the far right, and no scale bar', () => {
+    const d = drawing()
+    const p = new TvPainter(d.canvas)
+    p.size(1400, 800, 1)
+    p.paint(picture({ shot: trip as never, scaleExp: 33 }), { ...assets, music }, 1000, 1, false)
+    const two = d.words.find((w) => w.text === '2')!
+    const exp = d.words.find((w) => w.text === '33')!
+    expect(two).toBeDefined()
+    expect(exp).toBeDefined()
+    // Raised, after the 2, and right of the name.
+    expect(exp.x).toBeGreaterThan(two.x)
+    expect(exp.y).toBeLessThan(two.y)
+    expect(two.x).toBeGreaterThan(d.words.find((w) => w.text === 'ANN')!.x + 400)
+    expect(d.words.some((w) => w.text === 'ZOOM' || w.text.startsWith('1 CELL'))).toBe(false)
+  })
+
+  it('on a phone: the chiron the whole width under NOW PLAYING, its zoom boxed too', () => {
+    const d = drawing()
+    const p = new TvPainter(d.canvas)
+    p.size(412, 915, 1)
+    p.paint(picture({ shot: trip as never, scaleExp: 12 }), { ...assets, music }, 1000, 1, false)
+    const card = p.musicCard!
+    const rule = d.rects.find((r) => r.fill === RULE)!
+    expect(rule.y).toBeGreaterThan(card.y + card.h)
+    expect(rule.w).toBeCloseTo(card.w, 0)
+    expect(d.words.some((w) => w.text === '12')).toBe(true)
+    expect(d.words.some((w) => w.text === 'ZOOM')).toBe(false)
+  })
+
+  it('the HOSAKA end card draws the menu button after its last line', () => {
+    const end = HOSAKA_1.scenes[HOSAKA_1.scenes.length - 1]
+    expect(end.icon).toBe('menu')
+    const d = drawing()
+    const p = new TvPainter(d.canvas)
+    p.size(1400, 800, 1)
+    p.paint(picture({ shot: trip as never, ad: { at: 0, id: HOSAKA_1.id } }), { ...assets, music }, 700 + ((end.from + end.to) / 2) * 1000, 1, false)
+    const line = d.words.find((w) => w.text === 'IN THE ONOSENDAI MENU')!
+    expect(line).toBeDefined()
+    // A disc to the right of the line's middle (the line is centred with it, so shifted left of 0).
+    expect(line.x).toBeLessThan(0)
+    const disc = d.arcs.find((a) => a[0] > line.x + ('IN THE ONOSENDAI MENU'.length * 7) / 2)
+    expect(disc).toBeDefined()
+    // Its three bars, in the accent.
+    const bars = d.rects.filter((r) => r.fill === '#00e5ff' && Math.abs(r.x + r.w / 2 - disc![0]) < 0.01)
+    expect(bars).toHaveLength(3)
   })
 })
 
@@ -317,7 +405,7 @@ describe('the HOSAKA commercial', () => {
     const end = HOSAKA_1.scenes[HOSAKA_1.scenes.length - 1]
     const { words, images } = at((end.from + end.to) / 2)
     expect(images).toContain(mark)
-    expect(words).toContain('LOOK FOR OFFLOAD IN ONOSENDAI')
+    expect(words).toEqual(expect.arrayContaining(['SEE THE CLOUD COMPUTE PANEL', 'IN THE ONOSENDAI MENU']))
     expect(words.some((w) => w.includes('HIGH-AVAILABILITY OFFLOAD SERVICE'))).toBe(true)
   })
 })

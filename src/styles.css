@@ -3626,6 +3626,9 @@ kbd {
 .pubswitch__go:not(:disabled) { color: var(--accent); cursor: pointer; }
 .pubswitch__go:not(:disabled):hover { background: rgba(0, 229, 255, 0.12); }
 .pubswitch__go.is-on { color: var(--bg); background: #52e39f; }
+/* The publish confirmation's note for a bag any view finds on its own
+   (PublishSwitch PublishBody, lib/shallowBag.ts). */
+.pubswitch__shallow { color: var(--warn); letter-spacing: 0.08em; }
 
 /* The line under an offload estimate that says how much of the work HOSAKA
    already had. Green, because it is money and time you are not spending. */

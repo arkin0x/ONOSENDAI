@@ -86,6 +86,7 @@ import { ratioOf, useExperience } from '../lib/experience'
 import { cloudKeyQuote, deployCeiling, deployRoute, localKeySeconds, needsAsk, waitLabel } from '../lib/deployPlan'
 import { useEscape } from '../hooks/useEscape'
 import { fitCause, fitHeight, fitHeightAll, outsideAt, type FitPoint } from '../lib/deployFit'
+import { SHALLOW_WARN, shallowBag, shallowExplain } from '../lib/shallowBag'
 
 /**
  * The bar's classes. `pad` is whether the controls pad is on screen: with it,
@@ -115,28 +116,21 @@ export function DeployRow({ kind, label, hint, hintTitle, children }: { kind: st
 }
 
 /**
- * A bag discovery opens on its own (arkinox, 2026-10-19: "i think when hiding
- * a bag we need a clear warning if the depth is <13"). Discovery opens every
- * height from 0 to SCAN_MAX_HEIGHT wherever a view stands, and the view
- * follows spectating and walking a chain, and soon every avatar Cyberspace TV
- * shows, so a bag at those heights opens for anyone watching a path that
- * passes through its region. Above SCAN_MAX_HEIGHT only someone who computes the region finds
- * it. It warns and never blocks: a shallow bag can be the point.
+ * The height's two warnings, one or the other for every hide (arkinox,
+ * 2026-10-19): at SCAN_MAX_HEIGHT or less any view that stops in the region
+ * finds the bag (lib/shallowBag.ts), a chip with its explanation the tooltip;
+ * past it, discovery never surfaces it. An aim into a chest has no height of
+ * its own, so neither. `localMax` is this machine's own key ceiling, which
+ * says whether going deeper needs HOSAKA.
  */
-export function shallowBag(height: number): boolean {
-  return height <= SCAN_MAX_HEIGHT
-}
-
-/** The warning's line: short, in view. */
-export const SHALLOW_WARN = '⚠ SPECTATORS AND TV CAN OPEN THIS'
-
-/** Its explanation: the tooltip, not a paragraph (the standing rule). */
-export const SHALLOW_EXPLAIN = `At height ${SCAN_MAX_HEIGHT} or less, discovery opens a bag for any view that passes through its region: spectating, walking a chain, or Cyberspace TV. Hide at height ${SCAN_MAX_HEIGHT + 1} or more to keep it from them.`
-
-/** The warning at a hide's height, or nothing when discovery will not open it. */
-export function ShallowWarn({ height }: { height: number }): JSX.Element | null {
-  if (!shallowBag(height)) return null
-  return <div className="deploybar__row deploybar__shallow" role="note" title={SHALLOW_EXPLAIN}>{SHALLOW_WARN}</div>
+export function HeightWarnings({ height, intoChest, localMax }: { height: number; intoChest: boolean; localMax: number }): JSX.Element | null {
+  if (intoChest) return null
+  if (shallowBag(height)) return <div className="deploybar__row deploybar__shallow" role="note" title={shallowExplain(localMax)}>{SHALLOW_WARN}</div>
+  return (
+    <div className="deploybar__row deploybar__warn">
+      ⚠ Past height {SCAN_MAX_HEIGHT}, discovery will not surface this automatically. Only someone who already knows this spot and height can compute the region and open it.
+    </div>
+  )
 }
 
 export function DeployBar({ pad = false }: { pad?: boolean }): JSX.Element | null {
@@ -434,14 +428,7 @@ export function DeployBar({ pad = false }: { pad?: boolean }): JSX.Element | nul
           tight"): how aiming works is in the Builder's EXPLAIN, and how far
           away it can be found is on the height row itself. */}
 
-      {/* At or under SCAN_MAX_HEIGHT the other warning: discovery opens it
-          for whoever watches this region, so one or the other always shows. */}
-      {!intoChest && <ShallowWarn height={height} />}
-      {!intoChest && height > SCAN_MAX_HEIGHT && (
-        <div className="deploybar__row deploybar__warn">
-          ⚠ Past height {SCAN_MAX_HEIGHT}, discovery will not surface this automatically. Only someone who already knows this spot and height can compute the region and open it.
-        </div>
-      )}
+      <HeightWarnings height={height} intoChest={intoChest} localMax={inputs.localMax} />
 
       {/* What HOSAKA's key costs, its time and price, and whether the mode
           will ask first. This machine's time is the button's tooltip. An aim

@@ -19,9 +19,31 @@
 import { useState } from 'react'
 import { ConfirmModal } from './ConfirmModal'
 import { useShards } from '../store/useShards'
+import { SHALLOW_WARN, shallowBag } from '../lib/shallowBag'
+
+/**
+ * What the confirmation says. A bag at a height any view finds on its own
+ * says so in the warning's own short line (lib/shallowBag.ts, arkinox,
+ * 2026-10-19): computing the region undersells a bag nobody has to compute.
+ * `height` is null when this identity holds no deployment for the bag.
+ */
+export function PublishBody({ height }: { height: number | null }): JSX.Element {
+  return (
+    <>
+      This one hidden thing goes to the relays now. Everything else stays
+      where it is: your movement chain and every other thing you have
+      hidden are untouched, and LOCAL stays LOCAL.
+      <br /><br />
+      Anyone who computes the region it is hidden in can find it and open
+      it. A relay cannot unsee a bag, so this cannot be taken back.
+      {height !== null && shallowBag(height) && <><br /><br /><span className="pubswitch__shallow">{SHALLOW_WARN}</span></>}
+    </>
+  )
+}
 
 export function PublishSwitch({ lookupId, published }: { lookupId: string; published: boolean }): JSX.Element {
   const busy = useShards((s) => s.broadcasting === lookupId)
+  const height = useShards((s) => s.mine.find((m) => m.lookupId === lookupId)?.height ?? null)
   // Asked before it happens, because it cannot be asked afterwards: a relay
   // cannot unsee a bag, so this is the only moment the answer matters.
   const [asking, setAsking] = useState(false)
@@ -40,14 +62,7 @@ export function PublishSwitch({ lookupId, published }: { lookupId: string; publi
       {asking && (
         <ConfirmModal
           title="Publish this to cyberspace?"
-          body={<>
-            This one hidden thing goes to the relays now. Everything else stays
-            where it is: your movement chain and every other thing you have
-            hidden are untouched, and LOCAL stays LOCAL.
-            <br /><br />
-            Anyone who computes the region it is hidden in can find it and open
-            it. A relay cannot unsee a bag, so this cannot be taken back.
-          </>}
+          body={<PublishBody height={height} />}
           confirmLabel="PUBLISH"
           cancelLabel="KEEP IT LOCAL"
           danger={false}

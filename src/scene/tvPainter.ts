@@ -177,8 +177,7 @@ export function tickerItems(p: TvPicture, name: (pk: string) => string): string[
   if (t === null) return []
   const out: string[] = []
   const shot = p.shot
-  const last = shot && shot.beats.length > 0 ? shot.beats[Math.max(0, p.played - 1)] : null
-  if (last?.action.sector) out.push(`SECTOR ${last.action.sector}`)
+  // No sector: a sector id is a long number that tells a viewer nothing (2026-10-19: "the sector printed in the marquee is not helpful. remove that.").
   if (p.census) {
     out.push(`${countTo(p.census.arrivals, t).toLocaleString()} AVATARS IN CYBERSPACE`)
     out.push(`${countTo(p.census.bags, t).toLocaleString()} BAGS HIDDEN`)

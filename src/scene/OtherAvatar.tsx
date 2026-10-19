@@ -51,9 +51,11 @@ interface Props {
   size?: () => number
   /** Its own shape at any zoom, never the marker (Cyberspace TV). */
   keepShape?: boolean
+  /** The name label's size, CSS px before labelShrink: larger on Cyberspace TV, read from across a room. */
+  labelPx?: number
 }
 
-export function OtherAvatar({ pubkey, color, center, position, place, turn, label, labelOpacity, tappable = true, size, keepShape = false }: Props): JSX.Element {
+export function OtherAvatar({ pubkey, color, center, position, place, turn, label, labelOpacity, tappable = true, size, keepShape = false, labelPx = 11 }: Props): JSX.Element {
   const drawn = useRef<Group>(null)
   const placed = useRef<Group>(null)
   const lerp = useRef(new AvatarLerp())
@@ -96,7 +98,7 @@ export function OtherAvatar({ pubkey, color, center, position, place, turn, labe
         <AvatarShape pubkey={pubkey} color={color} keepShape={keepShape} />
       </group>
       {tappable && <TapTarget measure={drawn} onTap={() => usePersonCard.getState().open(pubkey)} />}
-      <WorldLabel text={label} color={color} at={[0, 0.9, 0]} align="center" px={11} opacity={labelOpacity} />
+      <WorldLabel text={label} color={color} at={[0, 0.9, 0]} align="center" px={labelPx} opacity={labelOpacity} />
     </group>
   )
 }

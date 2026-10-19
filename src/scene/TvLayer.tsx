@@ -72,8 +72,14 @@ function TapeAvatar({ pubkey, centre, position, from, born, place, subject }: { 
   // Every plain avatar in the standard red, as your own is drawn: a hue per
   // person bloomed to white on the tube (arkinox, 2026-10-18: "i want all
   // avatar dodecahedrons to be the standard red color, not white").
-  return <OtherAvatar pubkey={pubkey} color={AVATAR_RED} center={centre} position={position} place={place} turn={turn} label={text} labelOpacity={subject ? 0.9 : 0.5} tappable={false} keepShape size={() => grownAt(born, performance.now())} />
+  // Names half again the size of ONOSENDAI's 11 px (2026-10-19: "the name
+  // label above the avatar is a little too small"): the tube's bend and a
+  // phone's labelShrink both take some off.
+  return <OtherAvatar pubkey={pubkey} color={AVATAR_RED} center={centre} position={position} place={place} turn={turn} label={text} labelOpacity={subject ? 0.9 : 0.5} tappable={false} keepShape size={() => grownAt(born, performance.now())} labelPx={TV_LABEL_PX} />
 }
+
+/** The avatars' name labels on TV, CSS px before labelShrink. */
+const TV_LABEL_PX = 16
 
 /** How high a sun shot's camera stands for each view, as a share of up: above, level, below. */
 const SUN_ELEVATION = { above: 0.45, side: 0.08, below: -0.45 } as const

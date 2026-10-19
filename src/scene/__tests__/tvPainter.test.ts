@@ -313,7 +313,8 @@ describe('the HOSAKA commercial', () => {
   })
 
   it('ends on the mark, the name in full, and where to find it', () => {
-    const { words, images } = at(15)
+    const end = HOSAKA_1.scenes[HOSAKA_1.scenes.length - 1]
+    const { words, images } = at((end.from + end.to) / 2)
     expect(images).toContain(mark)
     expect(words).toContain('LOOK FOR OFFLOAD IN ONOSENDAI')
     expect(words.some((w) => w.includes('HIGH-AVAILABILITY OFFLOAD SERVICE'))).toBe(true)

@@ -438,11 +438,13 @@ describe('Cyberspace TV', () => {
     await run(AD_EVERY_MS + 30_000)
     const cuts: number[] = []
     const statuses = new Set<string>()
-    let ended = false
+    let ended: number | null = null
     const off = useTv.subscribe((s, prev) => {
       if (s.ad) statuses.add(s.status)
-      if (prev.ad && !s.ad) { ended = true; cuts.length = 0 }
-      if (ended && s.cutAt !== prev.cutAt) cuts.push(s.cutAt)
+      if (prev.ad && !s.ad) { ended = performance.now(); cuts.length = 0 }
+      // The cuts as it comes out of the break. A later one is the set's own
+      // business (a retune when the tape has run out), not a second cut back.
+      if (ended !== null && s.cutAt !== prev.cutAt && performance.now() - ended < 3000) cuts.push(s.cutAt)
     })
     // Every read fails from here: NO SIGNAL waits until the commercial is over.
     down = 1_000

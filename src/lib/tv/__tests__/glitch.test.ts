@@ -40,26 +40,63 @@ describe('TV glitches', () => {
     let calls = 0
     const d = new GlitchDirector(0, () => (calls++ === 0 ? 0 : 0.5))
     let peak = 1
-    for (let t = 25_000; t <= 29_100; t += 20) peak = Math.max(peak, d.levels(t, false).aberration)
+    for (let t = 0; t <= 29_100; t += 20) peak = Math.max(peak, d.levels(t, false).aberration)
     expect(peak).toBeGreaterThan(PEAK_ABERRATION * 0.8)
-    expect(d.levels(29_200, false).aberration).toBe(1)
+    expect(d.levels(29_120, false).aberration).toBe(1)
   })
 
-  it('runs each on its own clock, so they can land together', () => {
-    // Every clock due at once (the shortest gaps) and the longest lengths.
-    let calls = 0
-    const d = new GlitchDirector(0, () => (calls++ < 3 ? 0 : 0.999))
-    d.levels(120_000, false)
-    d.levels(120_100, false)
-    expect(d.current.sort()).toEqual(['aberration', 'dropout', 'tear'])
+  it('runs each on its own clock, so they land together now and then, never all at once on cue', () => {
+    // Six hours of watching, seeded: the clocks are independent, so some
+    // glitches overlap, but no two start on the same frame.
+    let seed = 7
+    const random = (): number => { seed = (seed * 1103515245 + 12345) % 2 ** 31; return seed / 2 ** 31 }
+    const seen = run(new GlitchDirector(0, random), 6 * 3600_000)
+    const overlaps = seen.filter((a, i) => seen.some((b, k) => k !== i && a.kind !== b.kind && a.at < b.at + b.ms && b.at < a.at + a.ms))
+    expect(overlaps.length).toBeGreaterThan(0)
+    const starts = seen.map((x) => x.at)
+    expect(new Set(starts).size).toBe(starts.length)
   })
 
-  it('waits out a cut: none starts while held, and one due starts after', () => {
+  it('starts its clocks again when TV comes on, so time away is no backlog', () => {
+    // Made when the page opened; TV comes on ten minutes later.
+    const d = new GlitchDirector(0, () => 0)
+    d.reset(600_000)
+    for (let t = 600_000; t < 624_900; t += 50) d.levels(t, false)
+    expect(d.current).toEqual([])
+    for (let t = 624_900; t <= 625_100; t += 50) d.levels(t, false)
+    expect(d.current).toEqual(['aberration'])
+  })
+
+  it('starts again after a stall in the frames, as a hidden tab makes', () => {
+    const d = new GlitchDirector(0, () => 0)
+    d.levels(1_000, false)
+    // Back eight minutes later: everything was due long ago, and nothing fires.
+    d.levels(481_000, false)
+    expect(d.current).toEqual([])
+  })
+
+  it('puts off one due during a cut a few seconds past it, so it is not part of the cut', () => {
     const d = new GlitchDirector(0, () => 0)
     const held = (t: number) => t >= 20_000 && t < 40_000
     const seen = run(d, 45_000, held)
-    expect(seen.every((s) => !held(s.at))).toBe(true)
-    expect(seen.find((s) => s.kind === 'aberration')?.at).toBe(40_000)
+    expect(seen.every((x) => !held(x.at))).toBe(true)
+    // Not on the cut's end, where it would read as part of the cut.
+    expect(seen.find((x) => x.kind === 'aberration')!.at).toBeGreaterThan(40_000 + 500)
+  })
+
+  it('holds each pattern of a tear\'s bands a third of a second at least: under three changes a second', () => {
+    // The tear due at 120 s (its gap the shortest), lasting its longest.
+    let calls = 0
+    const d = new GlitchDirector(0, () => (calls++ === 1 ? 0 : 0.999))
+    const changedAt: number[] = []
+    let last = -1
+    for (let t = 0; t < 121_600; t += 10) {
+      const l = d.levels(t, false)
+      if (l.tear > 0 && last >= 0 && l.tearSeed !== last) changedAt.push(t)
+      if (l.tear > 0) last = l.tearSeed
+    }
+    expect(changedAt.length).toBeGreaterThan(0)
+    for (let k = 1; k < changedAt.length; k++) expect(changedAt[k] - changedAt[k - 1]).toBeGreaterThanOrEqual(340)
   })
 
   it('is calm between glitches', () => {

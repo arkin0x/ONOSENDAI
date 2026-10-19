@@ -184,6 +184,7 @@ export function TvLayer({ axes }: { axes: ViewAxes }): JSX.Element {
   const anchorPlane = useCyberspace((s) => s.anchorPlane)
   const scaleExp = useCyberspace((s) => s.scaleExp)
   const lining = useTv((s) => s.jump?.phase === 'line')
+  const commercial = useTv((s) => s.ad !== null)
   const showTrail = useCyberspace((s) => s.showTrail)
 
   const place = useMemo(() => {
@@ -195,6 +196,10 @@ export function TvLayer({ axes }: { axes: ViewAxes }): JSX.Element {
     .filter(([pk, a]) => a.plane === anchorPlane && ((shot?.kind === 'trip' && pk === shot.pubkey) || tapeTime === null || Math.abs(tapeTime - a.at) <= STALE_S))
     .map(([pk, a]) => ({ pk, a, centre: place(a.position) }))
     .filter((p) => Math.hypot(...p.centre) <= REACH), [avatars, anchorPlane, shot, tapeTime, place])
+
+  // A commercial: nothing of the tape in the world under it ("No cyberspace
+  // actions play in the bg while the hosaka ad plays"); the camera holds.
+  if (commercial) return <TvCamera axes={axes} />
 
   // A hyperjump's line: only its two blocks and its rider, everything else
   // stepped aside ("all the other blocks not involved can be hidden").

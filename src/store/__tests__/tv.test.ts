@@ -35,6 +35,7 @@ import { useCyberspace } from '../useCyberspace'
 import { useBuilder } from '../useBuilder'
 import { usePersonCard } from '../usePersonCard'
 import { beatOf } from '../../lib/tv/tape'
+import { AD_EVERY_MS } from '../../lib/tv/hosakaAd'
 import type { Shot } from '../../lib/tv/director'
 
 const A = '1'.repeat(64)
@@ -411,6 +412,25 @@ describe('Cyberspace TV', () => {
     } finally {
       tape.splice(tape.length - 2, 2)
     }
+  })
+
+  it('breaks for the HOSAKA commercial every ten minutes, between shots, with nothing from the tape under it', async () => {
+    useTv.getState().start()
+    const ads: Array<{ at: number; shot: unknown; tapeTime: number | null }> = []
+    let tapeMovedDuringAd = false
+    const off = useTv.subscribe((s, prev) => {
+      if (s.ad && !prev.ad) ads.push({ at: performance.now(), shot: s.shot, tapeTime: s.tapeTime })
+      if (s.ad && prev.ad && s.played !== prev.played) tapeMovedDuringAd = true
+    })
+    await run(AD_EVERY_MS - 1000)
+    expect(ads).toHaveLength(0)
+    await run(60_000)
+    off()
+    expect(ads.length).toBeGreaterThanOrEqual(1)
+    expect(ads[0].shot).toBeNull()
+    expect(tapeMovedDuringAd).toBe(false)
+    // It ends after AD_S, with a cut, and the tape picks up.
+    expect(useTv.getState().ad).toBeNull()
   })
 
   it('turns off when another view takes the camera', async () => {

@@ -227,3 +227,40 @@ describe('a tap on the glass', () => {
     expect(y).toBeGreaterThan(540)
   })
 })
+
+describe('the HOSAKA commercial', () => {
+  it('fills the picture with the banner and its lines, the channel round it, no chiron', () => {
+    const words: string[] = []
+    const ctx = new Proxy({ measureText: (t: string) => ({ width: Array.from(t).length * 7 }), createLinearGradient: () => ({ addColorStop: () => {} }), createRadialGradient: () => ({ addColorStop: () => {} }), fillText: (t: string) => { words.push(t) } } as Record<string, unknown>, {
+      get: (target, key) => (key in target ? target[key as string] : () => {}),
+      set: () => true,
+    })
+    const p = new TvPainter({ width: 0, height: 0, getContext: () => ctx } as unknown as HTMLCanvasElement)
+    p.size(1400, 800, 1)
+    const trip = { id: 't', kind: 'trip' as const, pubkey: 'ann', beats: [], start: 1, end: 2, offsets: [], length: 5 }
+    const music = { title: 'Saturn Day', artist: 'Sethy Bowoy', art: null, progress: 0.4, blocked: false, volume: 0.8, muted: false }
+    // Fourteen seconds in: every line is up.
+    p.paint(picture({ shot: trip as never, ad: { at: 0 } }), { ...assets, music }, 14_000, 1, false)
+    expect(words).toEqual(expect.arrayContaining(['HOSAKA CAN HELP.', 'LOOK FOR OFFLOAD IN ONOSENDAI', 'SATURN DAY']))
+    expect(words.some((w) => w.includes('CYBERDECK'))).toBe(true)
+    expect(words.some((w) => w.includes('HIGH-AVAILABILITY OFFLOAD SERVICE'))).toBe(true)
+    // The chiron's name line is not there.
+    expect(words).not.toContain('ANN')
+    expect(p.musicCard).not.toBeNull()
+  })
+
+  it('brings its lines up one by one', () => {
+    const words: string[] = []
+    const state: Record<string, unknown> = { globalAlpha: 1 }
+    const ctx = new Proxy({ measureText: (t: string) => ({ width: Array.from(t).length * 7 }), createLinearGradient: () => ({ addColorStop: () => {} }), createRadialGradient: () => ({ addColorStop: () => {} }), fillText: (t: string) => { if ((state.globalAlpha as number) > 0) words.push(t) } } as Record<string, unknown>, {
+      get: (target, key) => (key in target ? target[key as string] : key in state ? state[key as string] : () => {}),
+      set: (_t, key, v) => { state[key as string] = v; return true },
+    })
+    const p = new TvPainter({ width: 0, height: 0, getContext: () => ctx } as unknown as HTMLCanvasElement)
+    p.size(1400, 800, 1)
+    // Two seconds after the cut: the first line, not the second.
+    p.paint(picture({ ad: { at: 0 } }), assets, 700 + 2_000, 1, false)
+    expect(words.some((w) => w.includes('CYBERDECK'))).toBe(true)
+    expect(words).not.toContain('HOSAKA CAN HELP.')
+  })
+})

@@ -17,7 +17,10 @@
  * Each runs on its own clock, so they come at no pattern and may land
  * together ("the delay parameters can be different and run on distinct
  * timers so they can seem random and overlap"). None starts over a cut or a
- * hyperjump's tunnel (effects of their own): one due then waits. The tube
+ * hyperjump's tunnel (effects of their own): one due then is put off a few
+ * seconds past it, so it does not read as part of the cut. The clocks start
+ * again each time TV comes on, and after any long stall in the frames (a
+ * hidden tab), so time spent away is never a backlog. The tube
  * (TvScreenEffect) reads the levels each frame; with reduced motion asked
  * for it never asks.
  */
@@ -57,17 +60,32 @@ export const GLITCH_TIMING: Record<GlitchKind, Timing> = {
 /** The colours' split at the height of an aberration: "a very high amount". */
 export const PEAK_ABERRATION = 8
 const KINDS: GlitchKind[] = ['aberration', 'tear', 'dropout']
+/** A gap between frames this long, ms, is time away (a hidden tab): the clocks start again. */
+const STALL_MS = 1000
+/** Seconds a glitch due during a cut or the tunnel is put off past it, at least and at most. */
+const DEFER_S: [number, number] = [2, 12]
+/** How long each pattern of a tear's bands holds, ms: under three changes a second (WCAG 2.3.1). */
+const TEAR_STEP_MS = 350
 
 interface Live { start: number; length: number }
 
 export class GlitchDirector {
-  private due: Record<GlitchKind, number>
+  private due: Record<GlitchKind, number> = { aberration: 0, tear: 0, dropout: 0 }
   private live: Record<GlitchKind, Live | null> = { aberration: null, tear: null, dropout: null }
+  private last = 0
 
   /** `now` in ms. */
   constructor(now: number, private random: () => number = Math.random) {
-    this.due = { aberration: 0, tear: 0, dropout: 0 }
-    for (const k of KINDS) this.due[k] = now + this.gap(k)
+    this.reset(now)
+  }
+
+  /** Start every clock again from `now`, with nothing on: TV coming on, or back from time away. */
+  reset(now: number): void {
+    for (const k of KINDS) {
+      this.due[k] = now + this.gap(k)
+      this.live[k] = null
+    }
+    this.last = now
   }
 
   private gap(kind: GlitchKind): number {
@@ -86,6 +104,8 @@ export class GlitchDirector {
    * already on plays out.
    */
   levels(now: number, held: boolean): GlitchLevels {
+    if (now - this.last > STALL_MS) this.reset(now)
+    this.last = now
     const out = { ...CALM }
     for (const kind of KINDS) {
       let live = this.live[kind]
@@ -93,6 +113,11 @@ export class GlitchDirector {
       if (live && now >= live.start + live.length) {
         this.due[kind] = now + this.gap(kind)
         live = this.live[kind] = null
+      }
+      // Due during a cut or the tunnel: a few seconds past it instead.
+      if (!live && held && now >= this.due[kind]) {
+        const [lo, hi] = DEFER_S
+        this.due[kind] = now + (lo + (hi - lo) * this.random()) * 1000
       }
       if (!live && !held && now >= this.due[kind]) {
         const [lo, hi] = GLITCH_TIMING[kind].length
@@ -107,7 +132,7 @@ export class GlitchDirector {
         out.aberration = 1 + (PEAK_ABERRATION - 1) * env * shake
       } else if (kind === 'tear') {
         out.tear = env
-        out.tearSeed = 1 + (Math.floor(now / 120) % 97)
+        out.tearSeed = 1 + (Math.floor(now / TEAR_STEP_MS) % 97)
       } else {
         out.dropout = env
       }

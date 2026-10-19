@@ -21,12 +21,16 @@ import { useEscape } from '../hooks/useEscape'
 
 const MODES: CloudMode[] = ['auto', 'ask', 'off']
 
-/** The looping banner, AV1 first and VP9 for the rest; a still where video is off. */
+/**
+ * The looping banner, AV1 first and VP9 for the rest; a still where video is
+ * off. The bounce cut, forward then back, so the loop has no seam (arkinox,
+ * 2026-10-19: "bounce animate the hosaka banner so it doesnt cut").
+ */
 export function HosakaBanner({ className = '' }: { className?: string }): JSX.Element {
   return (
     <video className={`hosaka-banner ${className}`} autoPlay muted loop playsInline poster="/hosaka-poster.jpg" aria-hidden="true">
-      <source src="/hosaka.webm" type="video/webm; codecs=av01" />
-      <source src="/hosaka-vp9.webm" type="video/webm; codecs=vp9" />
+      <source src="/hosaka-bounce.webm" type="video/webm; codecs=av01" />
+      <source src="/hosaka-bounce-vp9.webm" type="video/webm; codecs=vp9" />
     </video>
   )
 }

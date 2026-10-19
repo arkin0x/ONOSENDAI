@@ -73,6 +73,13 @@ float tvNoise(vec2 p) {
   return fract(sin(dot(p, vec2(12.9898, 78.233))) * 43758.5453);
 }
 
+// The picture at a point of the flat frame; black off its edge, where a
+// tear or a wide aberration reaches (rather than the edge smeared across).
+vec3 picture(vec2 p) {
+  if (p.x < 0.0 || p.x > 1.0 || p.y < 0.0 || p.y > 1.0) return vec3(0.0);
+  return texture(inputBuffer, p).rgb;
+}
+
 // The furniture, painted flat, over a colour at a point of the flat frame.
 vec3 withOverlay(vec3 col, vec2 p) {
   if (p.x < 0.0 || p.x > 1.0 || p.y < 0.0 || p.y > 1.0) return col;
@@ -113,7 +120,7 @@ void mainImage(const in vec4 inputColor, const in vec2 uv, out vec4 outputColor)
   float r2 = dot(c, c);
   // uAberr: an aberration glitch pulls them far further apart (lib/tv/glitch.ts).
   vec2 ca = c * (0.0015 + 0.0045 * r2) * uAberr;
-  vec3 col = vec3(texture(inputBuffer, pw + ca).r, texture(inputBuffer, pw).g, texture(inputBuffer, pw - ca).b);
+  vec3 col = vec3(picture(pw + ca).r, picture(pw).g, picture(pw - ca).b);
   col *= 1.0 - bar;
 
   // Snow: chunky (about three CSS pixels a grain), at a film's frame rate,
@@ -141,7 +148,9 @@ void mainImage(const in vec4 inputColor, const in vec2 uv, out vec4 outputColor)
   // The furniture, on top of all that, fringed as the picture is, a little
   // less: words have to stay readable at the edges.
   vec3 base = col;
-  vec2 oca = ca * 0.6;
+  // An aberration glitch splits the words less than the picture: at most
+  // three times the usual, so the channel stays readable through it.
+  vec2 oca = ca * 0.6 * min(uAberr, 3.0) / max(uAberr, 1.0);
   col.r = withOverlay(base, w + oca).r;
   col.g = withOverlay(base, w).g;
   col.b = withOverlay(base, w - oca).b;
@@ -266,6 +275,19 @@ export function TvScreenEffect(): JSX.Element {
   const segment = useRef<{ id: string | undefined; shard: ShardModel | null }>({ id: undefined, shard: null })
   const reduced = useMemo(() => typeof window !== 'undefined' && window.matchMedia?.('(prefers-reduced-motion: reduce)').matches === true, [])
   const glitches = useMemo(() => new GlitchDirector(performance.now()), [])
+  const wasOn = useRef(false)
+  // The HOSAKA banner for the commercial (lib/tv/hosakaAd), drawn into the
+  // tube frame by frame: the bounce cut, forward then back, so its loop has
+  // no seam. Its file is asked for only once TV is on.
+  const hosaka = useMemo(() => {
+    if (typeof document === 'undefined') return null
+    const v = document.createElement('video')
+    v.muted = true
+    v.loop = true
+    v.playsInline = true
+    v.preload = 'auto'
+    return v
+  }, [])
   useEffect(() => { if (import.meta.env.DEV) (window as unknown as { __tvGlitches?: GlitchDirector }).__tvGlitches = glitches }, [glitches])
 
   // NOW PLAYING takes a tap to mute and a drag up or down for the volume
@@ -338,8 +360,19 @@ export function TvScreenEffect(): JSX.Element {
     // mounts (a page opened on /tv), and a missed change left the tube off.
     const want = tv.on ? BlendFunction.SET : BlendFunction.SKIP
     if (effect.blendMode.blendFunction !== want) effect.blendMode.blendFunction = want
-    if (!tv.on) return
     const now = performance.now()
+    // The glitches' clocks start when TV comes on: time with it off is not a backlog.
+    if (tv.on && !wasOn.current) {
+      glitches.reset(now)
+      if (hosaka && !hosaka.getAttribute('src')) hosaka.src = hosaka.canPlayType('video/webm; codecs=av01') ? '/hosaka-bounce.webm' : '/hosaka-bounce-vp9.webm'
+    }
+    wasOn.current = tv.on
+    // The banner runs only while the commercial is on.
+    if (hosaka) {
+      if (tv.on && tv.ad && hosaka.paused) { hosaka.currentTime = 0; void hosaka.play().catch(() => {}) }
+      else if (!(tv.on && tv.ad) && !hosaka.paused) hosaka.pause()
+    }
+    if (!tv.on) return
     const u = effect.uniforms
     u.get('uTime')!.value = state.clock.elapsedTime
     u.get('uPx')!.value = state.gl.getPixelRatio()
@@ -380,6 +413,7 @@ export function TvScreenEffect(): JSX.Element {
       segmentShard: segment.current.shard,
       color: targetColor,
       music: nowPlaying(),
+      hosaka: !tv.ad ? null : hosaka && hosaka.readyState >= 2 ? hosaka : pictureFor('/hosaka-poster.jpg'),
     }
     painter.paint(tv, assets, now, scale, reduced)
     overlay.needsUpdate = true

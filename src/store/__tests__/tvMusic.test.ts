@@ -39,11 +39,14 @@ class FakeAudio extends EventTarget {
   load(): void {}
   paused = true
   pauses = 0
+  /** Loaded enough to play (HAVE_CURRENT_DATA and up) unless a test says not. */
+  readyState = 4
   pause(): void { this.pauses++; this.paused = true }
   play(): Promise<void> {
     this.plays++
-    this.paused = false
+    // A play the browser refuses leaves the element paused, as a real one does.
     if (FakeAudio.refuse) return Promise.reject(Object.assign(new Error('no'), { name: 'NotAllowedError' }))
+    this.paused = false
     if (FakeAudio.hang) return new Promise((_, reject) => { this.pending.push(reject) })
     return Promise.resolve()
   }
@@ -143,14 +146,105 @@ describe('TV music in a commercial break', () => {
     expect(audio().plays).toBe(plays)
   })
 
-  it('is let go when the set goes off: the next start plays', () => {
+  it('is let go when the set goes off mid-fade: the next start plays at its level, and stays there', () => {
     startMusic(list)
+    setMusicVolume(0.8)
     holdMusicForAd(true)
+    vi.advanceTimersByTime(300)
     stopMusic()
     expect(musicHeldForAd()).toBe(false)
     startMusic(list)
+    // The old fade must not go on turning the new track down.
+    vi.advanceTimersByTime(1000)
     expect(audio().plays).toBeGreaterThan(0)
-    expect(audio().volume).toBeGreaterThan(0)
+    expect(audio().volume).toBeCloseTo(0.8, 5)
+    expect(audio().paused).toBe(false)
+  })
+
+  it('a tap in the break does not start a held-back track under the ad; one after it does', async () => {
+    for (const ios of [false, true]) {
+      stopMusic()
+      FakeAudio.fixedVolume = ios
+      FakeAudio.refuse = true
+      startMusic(list)
+      await flush()
+      expect(useTvMusic.getState().blocked).toBe(true)
+      holdMusicForAd(true)
+      FakeAudio.refuse = false
+      const plays = audio().plays
+      window.dispatchEvent(new Event('click'))
+      await flush()
+      expect(audio().plays).toBe(plays)
+      expect(audio().paused).toBe(true)
+      // It was not playing when the break began: the end of the break does not start it either.
+      holdMusicForAd(false)
+      expect(audio().plays).toBe(plays)
+      window.dispatchEvent(new Event('click'))
+      await flush()
+      expect(audio().plays).toBe(plays + 1)
+    }
+  })
+
+  it('a break over the wait for a retry leaves the next track at the viewer\'s level', () => {
+    startMusic(list)
+    setMusicVolume(0.8)
+    // Every track fails: the list waits a minute.
+    for (let i = 0; i < list.length; i++) audio().fire('error')
+    expect(audio().getAttribute('src')).toBeNull()
+    holdMusicForAd(true)
+    vi.advanceTimersByTime(700)
+    holdMusicForAd(false)
+    vi.advanceTimersByTime(60_000)
+    expect(audio().getAttribute('src')).not.toBeNull()
+    expect(audio().volume).toBeCloseTo(0.8, 5)
+  })
+
+  it('a track that had not loaded when the break began has its stall wait after it', () => {
+    startMusic(list)
+    const first = audio().src
+    audio().readyState = 0
+    holdMusicForAd(true)
+    vi.advanceTimersByTime(700)
+    holdMusicForAd(false)
+    vi.advanceTimersByTime(21_000)
+    expect(audio().src).not.toBe(first)
+  })
+
+  it('a track taken up in the break has its stall wait after it', () => {
+    startMusic(list)
+    holdMusicForAd(true)
+    vi.advanceTimersByTime(700)
+    audio().fire('ended')
+    const taken = audio().src
+    vi.advanceTimersByTime(30_000)
+    expect(audio().src).toBe(taken)
+    holdMusicForAd(false)
+    vi.advanceTimersByTime(21_000)
+    expect(audio().src).not.toBe(taken)
+  })
+
+  it('a track the viewer paused stays paused after the break', () => {
+    startMusic(list)
+    audio().pause()
+    const plays = audio().plays
+    holdMusicForAd(true)
+    vi.advanceTimersByTime(700)
+    holdMusicForAd(false)
+    vi.advanceTimersByTime(1100)
+    expect(audio().plays).toBe(plays)
+  })
+
+  it('a break cut short before the track paused fades back from where it got to', () => {
+    startMusic(list)
+    setMusicVolume(0.8)
+    holdMusicForAd(true)
+    vi.advanceTimersByTime(300)
+    const mid = audio().volume
+    expect(mid).toBeGreaterThan(0)
+    holdMusicForAd(false)
+    expect(audio().volume).toBeCloseTo(mid, 5)
+    vi.advanceTimersByTime(1100)
+    expect(audio().volume).toBeCloseTo(0.8, 5)
   })
 })
 

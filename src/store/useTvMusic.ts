@@ -129,21 +129,41 @@ export function holdMusicForAd(on: boolean): void {
   if (on === held) return
   held = on
   const a = audio
-  if (!a) return
   if (on) {
+    // Back after only what was playing, or about to: a track the viewer
+    // paused, or one the browser holds back for a tap, stays as it was
+    // (review of #395).
+    resumeAfter = a !== null && !a.paused
+    armAfter = false
+    if (!a) return
     clearStall()
     if (!volumeWorks) { a.pause(); return }
     fadeTo(0, AD_FADE_OUT_MS, () => { if (held && audio === a) a.pause() })
     return
   }
-  if (!a.getAttribute('src')) return
-  if (volumeWorks) { gain = 0; apply() }
+  // Whatever happens next, the fade out is over and the level is the
+  // viewer's again: a break over the list's wait for a retry left the next
+  // track at nothing (review of #395).
+  if (fading !== null) clearInterval(fading)
+  fading = null
+  if (!a || !a.getAttribute('src') || !resumeAfter) { gain = 1; apply(); return }
+  // From where the fade out got to: a break cut short before the track
+  // paused does not drop to nothing first.
+  if (volumeWorks && a.paused) gain = 0
+  apply()
+  // A track taken up in the break, or one that had not loaded when it
+  // began, has its 20 s to send something from now (review of #395).
+  if (armAfter || a.readyState < 2) armStall(currentList)
   play(a, session, currentList)
   if (volumeWorks) fadeTo(1, AD_FADE_IN_MS)
 }
 
 /** Whether the music has stepped out for a commercial. */
 let held = false
+/** Whether to play again after the break: it was playing when the break began, or a track was taken up in it. */
+let resumeAfter = false
+/** Whether the track was taken up in the break, so its stall wait starts after it. */
+let armAfter = false
 /** Whether the music has stepped out for a commercial: for tests. */
 export function musicHeldForAd(): boolean {
   return held
@@ -293,6 +313,8 @@ export function stopMusic(): void {
   if (fading !== null) clearInterval(fading)
   fading = null
   held = false
+  resumeAfter = false
+  armAfter = false
   gain = 1
   if (audio) {
     audio.pause()
@@ -346,6 +368,9 @@ function advance(list: Track[]): void {
   if (!held) {
     armStall(list)
     play(a, mine, list)
+  } else {
+    resumeAfter = true
+    armAfter = true
   }
   void describe(track, mine)
 }
@@ -380,7 +405,10 @@ function play(a: HTMLAudioElement, mine: number, list: Track[]): void {
     // a try the browser refuses waits for the next.
     const go = (e: Event): void => {
       if (onControl(e) || (e.type === 'keydown' && (e as { key?: string }).key === 'Escape')) return
-      if (!audio) return
+      // Not under the commercial: a tap in the break waits, and the one
+      // after it starts the music (review of #395; on iOS that is a second
+      // tap, the browser's allowance being spent on the first).
+      if (!audio || held) return
       // Allowed now, perhaps: the track has its 20 s again to send something.
       const tried = session
       armStall(list)

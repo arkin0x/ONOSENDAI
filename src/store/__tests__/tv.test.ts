@@ -439,6 +439,20 @@ describe('Cyberspace TV', () => {
     expect(musicHeldForAd()).toBe(false)
   })
 
+  it('lets the music go when a retune cuts the break short, or the set goes off in it', async () => {
+    for (const end of ['retune', 'stop'] as const) {
+      useTv.getState().start()
+      await run(AD_EVERY_MS - 1000)
+      for (let i = 0; i < 120 && !useTv.getState().ad; i++) await run(500)
+      expect(useTv.getState().ad).not.toBeNull()
+      expect(musicHeldForAd()).toBe(true)
+      if (end === 'retune') useTv.getState().retune()
+      else useTv.getState().stop()
+      expect(musicHeldForAd()).toBe(false)
+      useTv.getState().stop()
+    }
+  })
+
   it('goes back to the tape in one cut, and never says NO SIGNAL over the commercial', async () => {
     useTv.getState().start()
     await run(AD_EVERY_MS - 1000)

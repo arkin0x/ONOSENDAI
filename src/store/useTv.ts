@@ -813,9 +813,9 @@ async function tune(id: number): Promise<void> {
   // A new tape shows only what it opens itself: the scan's memory stays, what it showed goes.
   looked = null
   prepared.clear()
-  useTv.setState({ status: 'tuning', shot: null, played: 0, tapeTime: null, avatars: {}, arrivals: [], reactions: [], boxes: [], jump: null, ad: null, skipped: 0, cutAt: performance.now(), found: {}, finds: [] })
-  // The music comes back with the break cut short.
+  // The music comes back with the break cut short, before the store says so.
   holdMusicForAd(false)
+  useTv.setState({ status: 'tuning', shot: null, played: 0, tapeTime: null, avatars: {}, arrivals: [], reactions: [], boxes: [], jump: null, ad: null, skipped: 0, cutAt: performance.now(), found: {}, finds: [] })
   let from: number | null = null
   for (let attempt = 0; from === null; attempt++) {
     try {

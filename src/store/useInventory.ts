@@ -51,7 +51,7 @@ interface InventoryState {
   /** Resolves once every write so far has reached the database, or failed and been said. */
   flush: () => Promise<void>
   /** Hold every key among a scan's finds (B1 §2.1: reading a key is holding it). */
-  holdFinds: (finds: Hidden[]) => HeldItem[]
+  holdFinds: (finds: Hidden[], watched?: boolean) => HeldItem[]
   /** Hold a key this identity forged and hid, at once (B1 §3.1). */
   holdForged: (event: NostrEvent, key: KeyItem, place: HeldPlace) => HeldItem
   /** TAKE: hold contents out of an opened chest. */
@@ -150,13 +150,25 @@ export const useInventory = create<InventoryState>((set, get) => {
 
   flush: () => writes,
 
-  holdFinds: (finds) => {
+  holdFinds: (finds, watched = false) => {
     const owner = ownerNow()
     const at = now()
     const rows: HeldItem[] = []
     for (const h of finds) {
-      const r = heldFromFind(owner, h, at)
+      const r = heldFromFind(owner, h, at, watched)
       if (r) rows.push(r)
+    }
+    // A key TV showed, now found in play: an ordinary key from here on.
+    const held = get().items
+    const played = watched ? [] : rows.filter((r) => held[r.id]?.watched).map((r) => {
+      const { watched: _, ...rest } = held[r.id]
+      return rest
+    })
+    if (played.length > 0) {
+      const items = { ...held }
+      for (const r of played) items[r.id] = r
+      set({ items })
+      void persist(played)
     }
     return rows.length > 0 ? get().add(rows) : []
   },

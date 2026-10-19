@@ -8,9 +8,9 @@
  * the honest picture. Culled past the same reach as Earth and the spawn mark.
  */
 
-import { useMemo, useRef, useState } from 'react'
+import { useCallback, useMemo, useRef } from 'react'
 import { useFrame } from '@react-three/fiber'
-import type { Camera, Group, Material, Object3D } from 'three'
+import type { Group, Material, Object3D } from 'three'
 import { GRID_RADIUS, itemCentre, type Position, type ViewAxes } from '../lib/space'
 import { alignedOrigin, useCyberspace } from '../store/useCyberspace'
 import { useCeremony } from '../store/useCeremony'
@@ -158,46 +158,27 @@ export function WorldShards({ axes }: Props): JSX.Element | null {
   )
 }
 
-/** How far a faded shard goes: still there, and the avatar behind it plain to see. */
-const FADED = 0.12
-/** How quickly a shard fades out of the way and back, seconds. */
-const FADE_TAU = 0.25
-
 /**
  * One shard in the world, and the tap target that is exactly what it draws:
  * measured from the drawn group, and off while it is too small to see
  * (TapTarget; arkinox, 2026-09-30). Cyberspace TV's have no tap target, and
- * fade while `fades` says they cover the shot's avatar (TvFinds).
+ * hand their drawn group to TV, which sets how they look each frame (TvFinds).
  */
-export function PlacedShard({ w, birth, moving = false, tappable = true, fades }: { w: PlacedShardDraw; birth: number | undefined; moving?: boolean; tappable?: boolean; fades?: (drawn: Group, camera: Camera) => boolean }): JSX.Element {
-  const drawn = useRef<Group>(null)
-  const level = useRef(1)
-  const [faded, setFaded] = useState(false)
+export function PlacedShard({ w, birth, moving = false, tappable = true, drawnRef }: { w: PlacedShardDraw; birth: number | undefined; moving?: boolean; tappable?: boolean; drawnRef?: (g: Group | null) => void }): JSX.Element {
+  const drawn = useRef<Group | null>(null)
+  const setDrawn = useCallback((g: Group | null) => { drawn.current = g; drawnRef?.(g) }, [drawnRef])
   // Moving (EDIT): drawn as a ghost is, with ordinary blending, since a world
   // face writes its colour opaque whatever its opacity (ShardMesh TAG_BLEND),
-  // and every material's opacity follows the breath each frame. Fading out
-  // of the way is drawn the same way, at its own opacity.
-  useFrame((state, dt) => {
-    const g = drawn.current
-    if (!g) return
-    if (moving) {
-      breath = movingOpacity(state.clock.elapsedTime)
-      g.traverse(breathe)
-      return
-    }
-    if (!fades) return
-    const want = fades(g, state.camera) ? FADED : 1
-    level.current += (want - level.current) * (1 - Math.exp(-dt / FADE_TAU))
-    const ghost = level.current < 0.98
-    if (ghost !== faded) setFaded(ghost)
-    if (!ghost) return
-    breath = level.current
-    g.traverse(breathe)
+  // and every material's opacity follows the breath each frame.
+  useFrame((state) => {
+    if (!moving || !drawn.current) return
+    breath = movingOpacity(state.clock.elapsedTime)
+    drawn.current.traverse(breathe)
   })
   return (
     <group position={w.centre}>
-      <group ref={drawn}>
-        <ShardMesh shard={w.shard} scale={w.scale} birth={birth} world ghost={moving || faded} clip={w.clip} pose={w.pose} />
+      <group ref={setDrawn}>
+        <ShardMesh shard={w.shard} scale={w.scale} birth={birth} world ghost={moving} clip={w.clip} pose={w.pose} />
       </group>
       {/* Not tappable while it moves: the ghost is the one being aimed. */}
       {!moving && tappable && <TapTarget measure={drawn} onTap={() => useShards.getState().selectSecret(w.key)} />}

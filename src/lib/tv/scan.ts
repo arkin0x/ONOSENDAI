@@ -107,7 +107,12 @@ export interface ScanDeps {
   open: (bag: NostrEvent, key: ScanKey) => Promise<{ items: Hidden[]; refs: Record<string, NostrEvent> }>
   /** The most lookup ids in one relay question. */
   batch: number
+  /** The most regions remembered; past it the oldest go, with their bags, and are asked about again if TV comes back. */
+  maxCells?: number
 }
+
+/** How many regions a scanner remembers by default: hours of TV, a few megabytes. */
+export const SCAN_MAX_CELLS = 20_000
 
 /**
  * The scan's memory for one run of TV: every region it has derived, every
@@ -179,6 +184,22 @@ export class TvScanner {
         opened = true
       }
       if (opened) this.version++
+    }
+    this.trim()
+  }
+
+  /** How many regions it remembers now, for tests. */
+  get size(): number { return this.cells.size }
+
+  /** Forget the oldest regions past the cap, and the bags only they held. */
+  private trim(): void {
+    const cap = this.deps.maxCells ?? SCAN_MAX_CELLS
+    for (const [cell, key] of this.cells) {
+      if (this.cells.size <= cap) break
+      this.cells.delete(cell)
+      this.deriving.delete(cell)
+      this.asked.delete(key.lookupId)
+      this.bags.delete(key.lookupId)
     }
   }
 

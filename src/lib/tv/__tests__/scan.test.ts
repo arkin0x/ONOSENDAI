@@ -99,6 +99,21 @@ describe('TvScanner', () => {
     expect(s.at(P(1008n), 600)).toEqual([])
   })
 
+  it('remembers at most maxCells regions, the oldest going first with their bags', async () => {
+    const region = `L${cellOf(P(1000n), 0)}`
+    const d = deps({ maxCells: 20, query: vi.fn(async (ids: string[]) => (ids.includes(region) ? [bag(region, 1)] : [])) })
+    const s = new TvScanner(d)
+    await s.prepare([{ position: P(1000n), plane: 0 }])
+    expect(s.at(P(1000n), 10)).toHaveLength(1)
+    // Far away: 13 new regions, past the cap; the first place's go, its bag with them.
+    await s.prepare([{ position: P(1n << 40n), plane: 0 }])
+    expect(s.size).toBeLessThanOrEqual(20)
+    expect(s.at(P(1000n), 10)).toEqual([])
+    // Back there: derived and asked about again.
+    await s.prepare([{ position: P(1000n), plane: 0 }])
+    expect(s.at(P(1000n), 10)).toHaveLength(1)
+  })
+
   it('keeps nothing of a bag with only messages in it', async () => {
     const region = `L${cellOf(P(1000n), 0)}`
     const d = deps({

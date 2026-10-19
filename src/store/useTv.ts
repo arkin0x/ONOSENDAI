@@ -37,12 +37,11 @@ import { SCAN_MAX_HEIGHT } from './useShards'
 import { useSecrets, type HeldKey } from './useSecrets'
 import { TvScanner, scanHeights, type OpenedBag, type ScanDeps, type ScanPlace } from '../lib/tv/scan'
 import { regionKeyWorker, type RegionKeyWorker } from '../lib/regionKeyOffThread'
-import { query } from '../lib/relay'
-import { HIDDEN_KIND, hiddenLabel, type Hidden } from '../lib/hidden'
+import { hiddenLabel, type Hidden } from '../lib/hidden'
 import { rememberBag, unbagRecording } from '../lib/foundCache'
 import { resolveReference } from '../lib/references'
-import { hexToBytes } from '../lib/events'
-import { RESCAN_BATCH } from '../lib/secrets/rescan'
+import { hexToBytes, type NostrEvent } from '../lib/events'
+import { RESCAN_BATCH, askAll, askRelays, type Ask as RescanAsk } from '../lib/secrets/rescan'
 import { cleanText } from '../lib/tv/text'
 
 /** Where an avatar stands on the tape, and since when. */
@@ -74,6 +73,38 @@ export interface TvFound {
   item: Hidden
   /** performance.now() when TV showed it first, which runs the decode (ShardMesh birth). */
   birth: number
+  /**
+   * When its bag was signed: it is drawn only while the tape is at or past
+   * that, so a MEANWHILE that goes back before it does not show it (TvFinds).
+   */
+  bagAt: number
+}
+
+/** What TV draws of its finds at `tapeTime`: only those whose bag was signed by then (found only grows; a MEANWHILE goes back). */
+export function foundAsOf(found: Record<string, TvFound>, tapeTime: number | null): TvFound[] {
+  return tapeTime === null ? [] : Object.values(found).filter((f) => f.bagAt <= tapeTime)
+}
+
+/** A FOUND line on the ticker: what, when on tape it was found, and when its bag was signed. */
+export interface TvFindLine { label: string; at: number; bagAt: number }
+
+/** How long a FOUND line stays on the ticker, seconds of tape time. */
+export const FIND_LINE_S = 10 * 60
+
+/** The FOUND lines to show at `tapeTime`: not before their bag, not long after they were found, none over a sealed bag. */
+export function findLines(finds: TvFindLine[] | undefined, tapeTime: number, shot: Shot | null): TvFindLine[] {
+  if (!finds || sealedSegment(shot)) return []
+  return finds.filter((f) => f.bagAt <= tapeTime && tapeTime - f.at <= FIND_LINE_S)
+}
+
+/**
+ * Whether a shot is a bag sealed with no place to show (the LOCATION UNKNOWN
+ * segment, over static). Nothing is scanned under it and no FOUND line
+ * shows: a find appearing then would tie that sealed bag to the place on
+ * screen (review of #390). The segment itself is as it was.
+ */
+export function sealedSegment(shot: Shot | null): boolean {
+  return shot?.item?.kind === 'bag' && !placeable(shot.item.hint)
 }
 
 /** One end of a hyperjump's ride: a block, and where it is. */
@@ -126,8 +157,8 @@ interface TvState {
    * nothing you found anywhere else (arkinox, 2026-10-19). By item id.
    */
   found: Record<string, TvFound>
-  /** The newest of those, newest last, for the ticker (FOUND: ...). */
-  finds: Array<{ label: string; at: number }>
+  /** The newest of those, newest last, for the ticker (FOUND: ..., findLines). */
+  finds: TvFindLine[]
   /** The ticker's counts (lib/tv/stats.ts), once read. */
   census: Census | null
   /** Each on-screen avatar's chain, for its length at tape time. */
@@ -347,13 +378,32 @@ function newScanner(): TvScanner {
   const w = keyWorker
   return new TvScanner({
     derive: (at, heights) => w.keys(at, heights, MAX_COMPUTE_HEIGHT),
-    query: (ids) => query({ kinds: [HIDDEN_KIND], '#d': ids }),
+    query: askBags,
     open: (bag, key) => unbagRecording(bag, hexToBytes(key.keyHex), resolveReference, { at: key.base, plane: key.plane as 0 | 1 }, key.height),
     batch: RESCAN_BATCH,
     ...scanOverride,
     // Whatever a test swaps, never a height past a player's.
     heights: TV_SCAN_HEIGHTS,
   })
+}
+
+/**
+ * The bags under these lookup ids, as RESCAN asks: with a limit, and an
+ * answer that may be a relay's silent cap (strfry's 500) asked again in
+ * halves and paged back (lib/secrets/rescan askAll), so no bag is dropped.
+ * When no relay answered at all it throws, so the scan asks again later
+ * rather than taking silence for an empty region.
+ */
+async function askBags(ids: string[]): Promise<NostrEvent[]> {
+  let answered = false
+  const ask: RescanAsk = async (some, opts) => {
+    const answers = await askRelays(some, opts)
+    if (answers.some((a) => a.outcome === 'answered')) answered = true
+    return answers
+  }
+  const got = await askAll(ids, ask)
+  if (!answered) throw new Error('No relay answered.')
+  return got.events
 }
 
 /** Where a shot puts an avatar on screen: where it opens (where a ride boards), then every action's place. */
@@ -371,7 +421,7 @@ function shotPlaces(shot: Shot): ScanPlace[] {
  */
 function scanTick(s: TvState): void {
   const sc = scanner
-  if (!sc) return
+  if (!sc || sealedSegment(s.shot)) return
   const places: ScanPlace[] = []
   for (const shot of [s.shot, ...queue.slice(0, SCAN_AHEAD)]) {
     if (!shot || shot.item || shot.beats.length === 0 || prepared.has(shot.id)) continue
@@ -399,16 +449,19 @@ function scanTick(s: TvState): void {
  */
 function reveal(s: TvState, opened: OpenedBag[]): void {
   const now = performance.now()
-  const fresh: Hidden[] = []
+  const fresh: Array<{ h: Hidden; bagAt: number }> = []
   const keys: HeldKey[] = []
   const seen = new Set<string>()
   for (const o of opened) {
     for (const h of o.items) {
       if (s.found[h.eventId] || seen.has(h.eventId)) continue
       seen.add(h.eventId)
-      fresh.push(h)
+      fresh.push({ h, bagAt: o.bag.created_at })
     }
-    if (!heldLookups.has(o.key.lookupId)) {
+    // Only for a bag TV shows whole, as keeping it is: a held key is scanned
+    // again later (RESCAN), and there it would open the bag's messages and
+    // coins too (review of #390).
+    if (o.whole && !heldLookups.has(o.key.lookupId)) {
       heldLookups.add(o.key.lookupId)
       keys.push({
         lookupId: o.key.lookupId, keyHex: o.key.keyHex, height: o.key.height,
@@ -420,16 +473,22 @@ function reveal(s: TvState, opened: OpenedBag[]): void {
     // opens again whole (useFound), and a message in it would become a find.
     if (o.whole && !keptBags.has(o.bag.id)) {
       keptBags.add(o.bag.id)
-      rememberBag(o.bag, hexToBytes(o.key.keyHex), o.items, o.refs, o.key.height, { at: o.key.base, plane: o.key.plane as 0 | 1 })
+      rememberBag(o.bag, hexToBytes(o.key.keyHex), o.items, o.refs, o.key.height, { at: o.key.base, plane: o.key.plane as 0 | 1 }, true)
     }
   }
   if (fresh.length > 0) {
     const found = { ...s.found }
-    for (const h of fresh) found[h.eventId] = { item: h, birth: now }
-    const labels = [...new Set(fresh.map((h) => cleanText(hiddenLabel(h, 40), 40).toUpperCase()))]
-    const finds = [...s.finds.filter((f) => !labels.includes(f.label)), ...labels.map((label) => ({ label, at: s.tapeTime ?? 0 }))].slice(-FINDS_KEPT)
+    for (const { h, bagAt } of fresh) found[h.eventId] = { item: h, birth: now, bagAt }
+    const lines = new Map<string, TvFindLine>()
+    for (const { h, bagAt } of fresh) {
+      const label = cleanText(hiddenLabel(h, 40), 40).toUpperCase()
+      lines.set(label, { label, at: s.tapeTime ?? 0, bagAt: Math.max(bagAt, lines.get(label)?.bagAt ?? 0) })
+    }
+    const finds = [...s.finds.filter((f) => !lines.has(f.label)), ...lines.values()].slice(-FINDS_KEPT)
     useTv.setState({ found, finds })
-    useShards.getState().addDiscovered(fresh)
+    // Watched, not played: no chest among them opens by itself, and their
+    // keys open nothing by themselves (useShards addDiscovered).
+    useShards.getState().addDiscovered(fresh.map(({ h }) => h), { watched: true })
   }
   if (keys.length > 0) useSecrets.getState().hold(keys)
 }
@@ -756,6 +815,7 @@ async function tune(id: number): Promise<void> {
   if (useTv.getState().ad) adDue = performance.now() + AD_EVERY_MS
   // A new tape shows only what it opens itself: the scan's memory stays, what it showed goes.
   looked = null
+  prepared.clear()
   useTv.setState({ status: 'tuning', shot: null, played: 0, tapeTime: null, avatars: {}, arrivals: [], reactions: [], boxes: [], jump: null, ad: null, skipped: 0, cutAt: performance.now(), found: {}, finds: [] })
   let from: number | null = null
   for (let attempt = 0; from === null; attempt++) {

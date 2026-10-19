@@ -108,11 +108,68 @@ function apply(): void {
   const s = useTvMusic.getState()
   if (volumeWorks) {
     audio.muted = false
-    audio.volume = s.muted ? 0 : s.volume
+    audio.volume = s.muted ? 0 : s.volume * gain
   } else {
     audio.volume = s.volume
     audio.muted = s.muted
   }
+}
+
+/**
+ * The commercial break (lib/tv/hosakaAd): the track steps out for it and
+ * comes back after, where it was, so no one's track plays under an ad
+ * (2026-10-19: "add the fade music"; its licence is non-commercial). Out with
+ * the cut into the break, in after it, faded where the page may set the
+ * volume; elsewhere (iOS) a plain pause and play. Nothing plays under the
+ * spot for now. A sponsor's own music for its spot, if one is ever made
+ * ("In the future I may want to insert my own music for the hosaka ad"),
+ * would start and stop here, on the same two calls.
+ */
+export function holdMusicForAd(on: boolean): void {
+  if (on === held) return
+  held = on
+  const a = audio
+  if (!a) return
+  if (on) {
+    clearStall()
+    if (!volumeWorks) { a.pause(); return }
+    fadeTo(0, AD_FADE_OUT_MS, () => { if (held && audio === a) a.pause() })
+    return
+  }
+  if (!a.getAttribute('src')) return
+  if (volumeWorks) { gain = 0; apply() }
+  play(a, session, currentList)
+  if (volumeWorks) fadeTo(1, AD_FADE_IN_MS)
+}
+
+/** Whether the music has stepped out for a commercial. */
+let held = false
+/** Whether the music has stepped out for a commercial: for tests. */
+export function musicHeldForAd(): boolean {
+  return held
+}
+/** What the volume is multiplied by: 1, but for a fade in or out of a break. */
+let gain = 1
+let fading: ReturnType<typeof setInterval> | null = null
+/** How long the track takes to go, ms: inside the cut into the break (AD_IN_MS). */
+const AD_FADE_OUT_MS = 600
+/** How long it takes to come back after, ms. */
+const AD_FADE_IN_MS = 1000
+const FADE_STEP_MS = 30
+
+function fadeTo(target: number, ms: number, done?: () => void): void {
+  if (fading !== null) clearInterval(fading)
+  const from = gain
+  const began = Date.now()
+  fading = setInterval(() => {
+    const k = Math.min(1, (Date.now() - began) / ms)
+    gain = from + (target - from) * k
+    apply()
+    if (k < 1) return
+    if (fading !== null) clearInterval(fading)
+    fading = null
+    done?.()
+  }, FADE_STEP_MS)
 }
 
 /** Whether this browser lets the page set the volume: not iOS, where it stays at 1. */
@@ -125,6 +182,8 @@ const RESUME_MS = 1500
 const RETRY_MS = 60_000
 
 let audio: HTMLAudioElement | null = null
+/** The list playing, for a track taken up again after a break. */
+let currentList: Track[] = PLAYLIST
 let order: Track[] = []
 let at = -1
 /** Tracks that failed in a row: the whole list failing means wait, not spin. */
@@ -197,7 +256,7 @@ export function startMusic(list: Track[] = PLAYLIST): void {
   // A browser that pauses the track as it is muted or unmuted: play on. Any
   // other pause (the phone's own controls) stands.
   a.addEventListener('pause', () => {
-    if (audio === a && !a.ended && a.getAttribute('src') && Date.now() - mutedAt < RESUME_MS) void a.play().catch(() => {})
+    if (audio === a && !held && !a.ended && a.getAttribute('src') && Date.now() - mutedAt < RESUME_MS) void a.play().catch(() => {})
   })
   a.addEventListener('error', () => { if (audio === a && a.getAttribute('src')) fail(list) })
   // Something arrived: the link is not broken.
@@ -212,6 +271,9 @@ export function startMusic(list: Track[] = PLAYLIST): void {
     if (useTvMusic.getState().blocked) useTvMusic.setState({ blocked: false })
   })
   audio = a
+  currentList = list
+  held = false
+  gain = 1
   apply()
   order = []
   at = -1
@@ -228,6 +290,10 @@ export function stopMusic(): void {
   unblock?.()
   reading?.abort()
   reading = null
+  if (fading !== null) clearInterval(fading)
+  fading = null
+  held = false
+  gain = 1
   if (audio) {
     audio.pause()
     audio.removeAttribute('src')
@@ -276,8 +342,11 @@ function advance(list: Track[]): void {
   clearStall()
   useTvMusic.setState({ track: { url: track.url, title: track.title ?? nameFromUrl(track.url), artist: track.artist ?? '', art: null } })
   a.src = track.url
-  armStall(list)
-  play(a, mine, list)
+  // One that ends in a break waits, ready, for the break to end.
+  if (!held) {
+    armStall(list)
+    play(a, mine, list)
+  }
   void describe(track, mine)
 }
 

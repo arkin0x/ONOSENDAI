@@ -36,6 +36,7 @@ import { useBuilder } from '../useBuilder'
 import { usePersonCard } from '../usePersonCard'
 import { beatOf } from '../../lib/tv/tape'
 import { AD_EVERY_MS } from '../../lib/tv/hosakaAd'
+import { musicHeldForAd } from '../useTvMusic'
 import type { Shot } from '../../lib/tv/director'
 
 const A = '1'.repeat(64)
@@ -418,9 +419,12 @@ describe('Cyberspace TV', () => {
     useTv.getState().start()
     const ads: Array<{ at: number; shot: unknown; tapeTime: number | null }> = []
     let tapeMovedDuringAd = false
+    // The music steps out for the break and comes back after it.
+    const held: boolean[] = []
     const off = useTv.subscribe((s, prev) => {
-      if (s.ad && !prev.ad) ads.push({ at: performance.now(), shot: s.shot, tapeTime: s.tapeTime })
+      if (s.ad && !prev.ad) { ads.push({ at: performance.now(), shot: s.shot, tapeTime: s.tapeTime }); held.push(musicHeldForAd()) }
       if (s.ad && prev.ad && s.played !== prev.played) tapeMovedDuringAd = true
+      if (!s.ad && prev.ad) held.push(musicHeldForAd())
     })
     await run(AD_EVERY_MS - 1000)
     expect(ads).toHaveLength(0)
@@ -431,6 +435,8 @@ describe('Cyberspace TV', () => {
     expect(tapeMovedDuringAd).toBe(false)
     // It ends with a cut, and the tape picks up.
     expect(useTv.getState().ad).toBeNull()
+    expect(held.slice(0, 2)).toEqual([true, false])
+    expect(musicHeldForAd()).toBe(false)
   })
 
   it('goes back to the tape in one cut, and never says NO SIGNAL over the commercial', async () => {

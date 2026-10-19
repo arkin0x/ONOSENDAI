@@ -24,8 +24,6 @@ export const PLAYLIST: Track[] = [
   { url: 'https://media.basspistol.com/sethybowoy.basspistol.com/Acid%20Alert%20EP/1_Sethy%20Bowoy-Acid%20Alert.mp3' },
   { url: 'https://media.basspistol.com/sethybowoy.basspistol.com/Acid%20Alert%20EP/2_Sethy%20Bowoy-Acid%20Bench.mp3' },
   { url: 'https://media.basspistol.com/sethybowoy.basspistol.com/Acid%20Alert%20EP/3_Sethy%20Bowoy-Acid%20Ocean.mp3' },
-  // Its tag says only "Chasing Devils"; its file has the whole name.
-  { url: 'https://media.basspistol.com/sethybowoy.basspistol.com/Acid%20Alert%20EP/4_Sethy%20Bowoy-Chasing%20Devils%20Out%20Of%20Space.mp3', title: 'Chasing Devils Out Of Space' },
   { url: 'https://media.basspistol.com/sethybowoy.basspistol.com/acid-in-my-lounge/1-acid-in-my-lounge.mp3' },
   { url: 'https://media.basspistol.com/panix/andra-stuk/1-distanser.mp3' },
   { url: 'https://media.basspistol.com/panix/andra-stuk/2-brustabletter.mp3' },
@@ -46,4 +44,6 @@ export const PLAYLIST: Track[] = [
   { url: 'https://media.basspistol.com/die_nmi_/total_disko_destruction/2026-Total%20Club%20Destruction-14%20Sour%20Sgreen%20Lickarr.mp3' },
   { url: 'https://media.basspistol.com/setto.basspistol.com/darkweb/3-swipe-instrumental-.mp3' },
   { url: 'https://media.basspistol.com/setto.basspistol.com/darkweb/4-darkweb-instrumental-.mp3' },
+  { url: 'https://media.basspistol.com/setto.basspistol.com/little-bug-ep/1-ding-ding-world.mp3' },
+  { url: 'https://media.basspistol.com/setto.basspistol.com/little-bug-ep/2-little-bug.mp3' },
 ]

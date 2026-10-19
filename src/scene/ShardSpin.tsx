@@ -13,7 +13,7 @@
  */
 
 import { Canvas, useFrame, useThree } from '@react-three/fiber'
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import type { Group } from 'three'
 import type { ShardModel } from 'sno-core/shards'
 import { ShardMesh } from './ShardMesh'
@@ -62,6 +62,12 @@ function Spinning({ shard }: { shard: ShardModel | null }): JSX.Element | null {
  * context, rather than a new one each time (TvSpinHost).
  */
 export function ShardSpin({ shard, size = 160, preserve = false }: { shard: ShardModel | null; size?: number; preserve?: boolean }): JSX.Element {
+  // A new turn for each shard, inside the same canvas: one shard straight
+  // after another would otherwise be built once on the last one's framing,
+  // then again on its own (review of #394). Not keyed on the shard's id: an
+  // avatar's is its owner's, the same for every version of it.
+  const turns = useRef(0)
+  const turn = useMemo(() => ++turns.current, [shard])
   return (
     <div className="shardspin" style={{ width: size, height: size }} aria-label={shard ? `${shard.name}, turning` : undefined} role={shard ? 'img' : undefined}>
       <Canvas
@@ -69,10 +75,12 @@ export function ShardSpin({ shard, size = 160, preserve = false }: { shard: Shar
         gl={{ alpha: true, antialias: true, preserveDrawingBuffer: preserve }}
         camera={{ fov: FOV, near: 0.01, far: 100000 }}
         style={{ width: size, height: size, pointerEvents: 'none' }}
+        // Nothing to draw between shards: no frames spent on an empty canvas.
+        frameloop={shard ? 'always' : 'never'}
       >
         {/* Lit as on the bench, near the world's full color (shardLight.tsx; arkinox, 2026-10-12). */}
         <ShardLights />
-        <Spinning shard={shard} />
+        <Spinning key={turn} shard={shard} />
       </Canvas>
     </div>
   )

@@ -100,10 +100,14 @@ const SPIN_PX = 256
  *
  * One canvas for as long as the set is on, each segment's shard swapped into
  * it (2026-10-19: "I've been running cyberspace tv for 30 minutes and now the
- * visuals have stopped (frozen) and only the music is playing"). It was a
- * new canvas per segment, so a new WebGL context each time; a browser keeps
- * about sixteen alive, and past that it drops the oldest, which is the
- * tube's own: the picture stopped, and the music, an audio element, played on.
+ * visuals have stopped (frozen) and only the music is playing", in Brave on
+ * Windows). It was a new canvas per segment: a WebGL context made, and
+ * force-lost eight seconds later, for every object, avatar or comment, up to
+ * about eight a minute (measured offline, on Linux). Few were ever alive at
+ * once, so not the browser's cap on contexts; churn like that wearing out
+ * the GPU process (ANGLE over D3D11) is the likely cause of the freeze, not
+ * a proven one, and the freeze was not reproduced. lib/glContext now says in
+ * the console when the main view's context is lost.
  */
 export function TvSpinHost(): JSX.Element | null {
   const item = useTv((s) => s.shot?.item)

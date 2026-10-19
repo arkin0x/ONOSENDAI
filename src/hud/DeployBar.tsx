@@ -86,6 +86,7 @@ import { ratioOf, useExperience } from '../lib/experience'
 import { cloudKeyQuote, deployCeiling, deployRoute, localKeySeconds, needsAsk, waitLabel } from '../lib/deployPlan'
 import { useEscape } from '../hooks/useEscape'
 import { fitCause, fitHeight, fitHeightAll, outsideAt, type FitPoint } from '../lib/deployFit'
+import { SHALLOW_WARN, shallowBag, shallowExplain } from '../lib/shallowBag'
 
 /**
  * The bar's classes. `pad` is whether the controls pad is on screen: with it,
@@ -111,6 +112,24 @@ export function DeployRow({ kind, label, hint, hintTitle, children }: { kind: st
       </div>
       {hint ? <div className={`deploybar__radius deploybar__hint deploybar__hint--${kind}`} title={hintTitle}>{hint}</div> : null}
     </>
+  )
+}
+
+/**
+ * The height's two warnings, one or the other for every hide (arkinox,
+ * 2026-10-19): at SCAN_MAX_HEIGHT or less any view that stops in the region
+ * finds the bag (lib/shallowBag.ts), a chip with its explanation the tooltip;
+ * past it, discovery never surfaces it. An aim into a chest has no height of
+ * its own, so neither. `localMax` is this machine's own key ceiling, which
+ * says whether going deeper needs HOSAKA.
+ */
+export function HeightWarnings({ height, intoChest, localMax }: { height: number; intoChest: boolean; localMax: number }): JSX.Element | null {
+  if (intoChest) return null
+  if (shallowBag(height)) return <div className="deploybar__row deploybar__shallow" role="note" title={shallowExplain(localMax)}>{SHALLOW_WARN}</div>
+  return (
+    <div className="deploybar__row deploybar__warn">
+      ⚠ Past height {SCAN_MAX_HEIGHT}, discovery will not surface this automatically. Only someone who already knows this spot and height can compute the region and open it.
+    </div>
   )
 }
 
@@ -409,11 +428,7 @@ export function DeployBar({ pad = false }: { pad?: boolean }): JSX.Element | nul
           tight"): how aiming works is in the Builder's EXPLAIN, and how far
           away it can be found is on the height row itself. */}
 
-      {!intoChest && height > SCAN_MAX_HEIGHT && (
-        <div className="deploybar__row deploybar__warn">
-          ⚠ Past height {SCAN_MAX_HEIGHT}, discovery will not surface this automatically. Only someone who already knows this spot and height can compute the region and open it.
-        </div>
-      )}
+      <HeightWarnings height={height} intoChest={intoChest} localMax={inputs.localMax} />
 
       {/* What HOSAKA's key costs, its time and price, and whether the mode
           will ask first. This machine's time is the button's tooltip. An aim

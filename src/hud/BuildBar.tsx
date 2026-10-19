@@ -20,6 +20,7 @@
 import { formatCellSize, formatDistance } from 'sno-core/scale'
 import { samePosition, useCyberspace } from '../store/useCyberspace'
 import { useBuilder } from '../store/useBuilder'
+import { SCAN_MAX_HEIGHT } from '../store/useShards'
 import { buildPlane, moveUnderWay } from '../lib/buildCursor'
 import { axisDistance } from '../lib/nearby'
 import { shortAxis } from '../lib/viewAt'
@@ -86,6 +87,9 @@ export function BuildBar(): JSX.Element | null {
           <li>Move it with the pad or W A S D (R and F for depth). + and − (Q and E on a keyboard) make the cells bigger or smaller. VIEW in the Position panel jumps it anywhere; P switches the plane.</li>
           <li>CHAIN aims it too: each step along a chain, yours or a spectated avatar's ([ ] Home End), puts it on that action. Spectating keeps build mode on.</li>
           <li>When you place something, its ghost shows where it lands and the green box is the region someone must compute to find it; the height you hide it at sets that box.</li>
+          {/* The cutoff in words a touch screen shows: the deploy bar's chip
+              explains itself only in a tooltip (arkinox, 2026-10-19). */}
+          <li>At height {SCAN_MAX_HEIGHT} or less, any view that stops inside that box finds it; at {SCAN_MAX_HEIGHT + 1} or more, only someone who knows the spot and height.</li>
           <li>While placing, STEP (, and . on a keyboard) moves and snaps it in smaller steps inside the cube, shown by the small white box, without moving the camera.</li>
           <li>Building never moves your avatar and signs no move.{onAvatar ? '' : ` Your avatar is ${formatDistance(axisDistance(cursor, position))} away.`}</li>
           <li>EXIT, Esc or B leaves build mode; the view stays where it is.</li>

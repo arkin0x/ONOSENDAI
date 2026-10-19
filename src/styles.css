@@ -2512,6 +2512,21 @@ kbd {
   color: var(--warn);
 }
 
+/* A bag discovery opens on its own, at SCAN_MAX_HEIGHT or less (DeployBar
+   ShallowWarn): the BAG chip's shape in the warning color, its explanation
+   the tooltip. */
+.deploybar__shallow {
+  align-self: flex-start;
+  padding: 1px 6px;
+  border: 1px solid currentColor;
+  border-radius: 3px;
+  font-size: 9px;
+  line-height: 1.5;
+  letter-spacing: 0.08em;
+  color: var(--warn);
+  cursor: help;
+}
+
 .deploybar__deploy {
   margin-top: 2px;
   font-family: inherit;
@@ -3611,6 +3626,9 @@ kbd {
 .pubswitch__go:not(:disabled) { color: var(--accent); cursor: pointer; }
 .pubswitch__go:not(:disabled):hover { background: rgba(0, 229, 255, 0.12); }
 .pubswitch__go.is-on { color: var(--bg); background: #52e39f; }
+/* The publish confirmation's note for a bag any view finds on its own
+   (PublishSwitch PublishBody, lib/shallowBag.ts). */
+.pubswitch__shallow { color: var(--warn); letter-spacing: 0.08em; }
 
 /* The line under an offload estimate that says how much of the work HOSAKA
    already had. Green, because it is money and time you are not spending. */

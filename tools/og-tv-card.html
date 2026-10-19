@@ -147,7 +147,8 @@ function flat(logo) {
   g.stroke()
   g.font = `400 20px ${FONT}`
   g.fillStyle = LIME
-  g.fillText('EVERYTHING THAT EVER HAPPENED IN CYBERSPACE, ON TAPE', W / 2, H * 0.6 + 52)
+  // arkinox, 2026-10-19: "Always On. Everywhere. ™".
+  g.fillText('Always On. Everywhere. \u2122', W / 2, H * 0.6 + 52)
 
   // The furniture: the tape's clock, top right; a marquee along the bottom.
   g.textAlign = 'right'

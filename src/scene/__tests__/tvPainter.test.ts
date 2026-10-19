@@ -260,9 +260,10 @@ describe('the HOSAKA commercial', () => {
     expect(words).toContain('ADVERTISEMENT')
     expect(words).not.toContain('ANN')
     expect(words).not.toContain('HOSAKA')
-    // The music's card stays, for its mute.
-    expect(words).toContain('SATURN DAY')
-    expect(p.musicCard).not.toBeNull()
+    // No music card over the spot ("gotta hide the music player during the hosaka ad"), nor its tap.
+    expect(words).not.toContain('SATURN DAY')
+    expect(words).not.toContain('♪ NOW PLAYING')
+    expect(p.musicCard).toBeNull()
   })
 
   it('then one card at a time: the banner gone, the mark over HOSAKA CAN HELP.', () => {

@@ -1,3 +1,4 @@
+import { bigintBitLimit, movementCapabilityIssue } from '../lib/proofCapability'
 /**
  * useCyberspace.ts - the single source of truth for who you are, where you
  * are, where your uncommitted cursor is, and what the movement chain has cost.
@@ -2244,6 +2245,17 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
       cloud: { ...get().cloud, status: 'quoting', quote: null, invoice: null, invoiceOpen: false, job: null, progress: null, message: 'Asking HOSAKA for a quote.', startedAt: Date.now() },
     })
     const client = cloudClient(cloudPrefs.apiUrl)
+    if (Number.isFinite(bigintBitLimit())) {
+      let cur = position
+      for (let n = 0; n < 100_000; n++) {
+        const step = nextStep(cur, plan.target, plan.ceilings)
+        if (!step) break
+        const issue = movementCapabilityIssue(step.kind, step.from, step.to, plane, step.source === 'cloud' ? 'cloud' : 'local')
+        if (issue) { routeFail(issue); return }
+        cur = step.to
+        if (n === 99_999) { routeFail('This route is too long to check for browser compatibility. Choose a closer destination.'); return }
+      }
+    }
     const steps = cloudStepsOf(position, plan)
     let total = 0
     let tallest = 0
@@ -2382,6 +2394,8 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
    */
   const startCloudStep = async (step: PlanStep, id: number): Promise<void> => {
     const { plane, prevEventId, identity, cloudPrefs } = get()
+    const issue = movementCapabilityIssue(step.kind, step.from, step.to, plane, 'cloud')
+    if (issue) { routeFail(issue); return }
     const client = cloudClient(cloudPrefs.apiUrl)
     set({
       pendingTarget: step.to,
@@ -3046,6 +3060,11 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
       ceiling,
     )
     if (!estimate.exceedsLimit) {
+      const issue = movementCapabilityIssue('hop', position, cursor, plane)
+      if (issue) {
+        set({ proof: { ...IDLE_PROOF, status: 'infeasible', message: issue } })
+        return
+      }
       const to = { ...cursor }
       const id = ++requestId
       set({
@@ -4990,6 +5009,15 @@ function startPlanStep(): void {
       plan: { ...plan, status: 'failed', message: noMove, awaiting: null },
       pendingTarget: null,
       proof: { ...IDLE_PROOF, status: 'infeasible', message: noMove },
+    })
+    return
+  }
+  const issue = movementCapabilityIssue(plan.step.kind, plan.step.from, plan.step.to, s.plane, plan.step.source === 'cloud' ? 'cloud' : 'local')
+  if (issue) {
+    useCyberspace.setState({
+      plan: { ...plan, status: 'failed', message: issue, awaiting: null },
+      pendingTarget: null,
+      proof: { ...IDLE_PROOF, status: 'infeasible', message: issue },
     })
     return
   }

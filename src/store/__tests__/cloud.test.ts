@@ -1,3 +1,4 @@
+import * as proofCapability from '../../lib/proofCapability'
 /**
  * cloud.test.ts - a commit beyond this machine becomes a route whose paid
  * steps go to HOSAKA, funded once, and come back as signed events.
@@ -121,6 +122,24 @@ const S = useCyberspace.getState
 const idle = (): Promise<void> => vi.waitFor(() => { expect(S().cloud.status).toBe('idle') }, { timeout: 5000 })
 
 describe('cloud routes', () => {
+  it('refuses an unverifiable cloud route before quoting, funding, or submitting', async () => {
+    lineUpH13()
+    const bitLimit = vi.spyOn(proofCapability, 'bigintBitLimit').mockReturnValue(1_048_576)
+    const issue = vi.spyOn(proofCapability, 'movementCapabilityIssue').mockReturnValue('This browser cannot verify this movement proof. Use Chrome or Chromium.')
+    try {
+      await S().commit()
+      expect(S().proof.status).toBe('infeasible')
+      expect(S().proof.message).toContain('cannot verify')
+      expect(fake.quote).not.toHaveBeenCalled()
+      expect(fake.submitHop).not.toHaveBeenCalled()
+      expect(fake.balance).not.toHaveBeenCalled()
+      expect(postProof).not.toHaveBeenCalled()
+    } finally {
+      bitLimit.mockRestore()
+      issue.mockRestore()
+    }
+  })
+
   // A chain to route on: the page no longer signs a spawn on load.
   beforeAll(placeSpawn)
   beforeEach(() => {

@@ -73,6 +73,7 @@ export function setMusicVolume(volume: number): void {
   const v = Math.min(1, Math.max(0, volume))
   const s = useTvMusic.getState()
   const muted = v <= SILENT || (s.muted && v <= s.volume)
+  if (muted !== s.muted) mutedAt = Date.now()
   useTvMusic.setState({ volume: v, muted })
   apply()
   try {
@@ -87,6 +88,7 @@ export function toggleMusicMute(): void {
   const muted = !s.muted
   // Unmuting silence would still be silence.
   const volume = !muted && s.volume <= SILENT ? UNMUTE_TO : s.volume
+  mutedAt = Date.now()
   useTvMusic.setState({ muted, volume })
   apply()
   try {
@@ -95,12 +97,30 @@ export function toggleMusicMute(): void {
   } catch { /* kept for this visit only */ }
 }
 
+/**
+ * Muting keeps the track playing (arkinox, 2026-10-19: "muting the track
+ * shouldnt pause it in tv"). Where the page may set the volume, muted is
+ * volume 0, so the browser never sees muted media it might pause; only where
+ * it may not (iOS: the volume is the phone's) is the element muted.
+ */
 function apply(): void {
   if (!audio) return
   const s = useTvMusic.getState()
-  audio.volume = s.volume
-  audio.muted = s.muted
+  if (volumeWorks) {
+    audio.muted = false
+    audio.volume = s.muted ? 0 : s.volume
+  } else {
+    audio.volume = s.volume
+    audio.muted = s.muted
+  }
 }
+
+/** Whether this browser lets the page set the volume: not iOS, where it stays at 1. */
+let volumeWorks = true
+/** When the music was last muted or unmuted (Date.now()): a pause just after is the browser's, and is undone. */
+let mutedAt = -Infinity
+/** How soon after a mute or unmute a pause the page did not ask for is taken back, ms. */
+const RESUME_MS = 1500
 /** How long to wait before trying the list again when no track would load, ms. */
 const RETRY_MS = 60_000
 
@@ -171,9 +191,14 @@ export function startMusic(list: Track[] = PLAYLIST): void {
   // skip a track from a host that plays fine but does not send it.
   const a = new Audio()
   a.preload = 'auto'
-  a.volume = useTvMusic.getState().volume
-  a.muted = useTvMusic.getState().muted
+  a.volume = 0.5
+  volumeWorks = a.volume === 0.5
   a.addEventListener('ended', () => { if (audio === a) advance(list) })
+  // A browser that pauses the track as it is muted or unmuted: play on. Any
+  // other pause (the phone's own controls) stands.
+  a.addEventListener('pause', () => {
+    if (audio === a && !a.ended && a.getAttribute('src') && Date.now() - mutedAt < RESUME_MS) void a.play().catch(() => {})
+  })
   a.addEventListener('error', () => { if (audio === a && a.getAttribute('src')) fail(list) })
   // Something arrived: the link is not broken.
   const arrived = (): void => { if (audio === a) clearStall() }
@@ -187,6 +212,7 @@ export function startMusic(list: Track[] = PLAYLIST): void {
     if (useTvMusic.getState().blocked) useTvMusic.setState({ blocked: false })
   })
   audio = a
+  apply()
   order = []
   at = -1
   failures = 0

@@ -12,8 +12,10 @@
  *     25 s to 3 min;
  *   tear: bands of the picture slip sideways, as a tape losing tracking,
  *     under a second and a half, every 2 to 6 min;
- *   dropout: the signal goes, the picture sinking into snow, half a second
- *     to 2 s, every 2 to 6 min.
+ *   dropout: the signal fades, as if drifting out of range: a slow swell of
+ *     snow to about two fifths and away again, wavering, 5 to 12 s, every 2
+ *     to 6 min (2026-10-19: "it should fade in slowly and subtly ... and then
+ *     fade away. it should take 5-12 seconds to resolve").
  * Each runs on its own clock, so they come at no pattern and may land
  * together ("the delay parameters can be different and run on distinct
  * timers so they can seem random and overlap"). None starts over a cut or a
@@ -54,7 +56,7 @@ interface Timing {
 export const GLITCH_TIMING: Record<GlitchKind, Timing> = {
   aberration: { gap: [25, 180], length: [1, 7], rise: 0.6, fall: 1 },
   tear: { gap: [120, 360], length: [0.4, 1.5], rise: 0.08, fall: 0.15 },
-  dropout: { gap: [120, 360], length: [0.5, 2], rise: 0.25, fall: 0.35 },
+  dropout: { gap: [120, 360], length: [5, 12], rise: 3.5, fall: 4.5 },
 }
 
 /** The colours' split at the height of an aberration: "a very high amount". */
@@ -134,7 +136,8 @@ export class GlitchDirector {
         out.tear = env
         out.tearSeed = 1 + (Math.floor(now / TEAR_STEP_MS) % 97)
       } else {
-        out.dropout = env
+        // Not a clean ramp: reception comes and goes a little as it fades.
+        out.dropout = env * (0.85 + 0.15 * Math.sin(t * 1.9) * Math.sin(t * 0.7 + 1))
       }
     }
     return out

@@ -125,7 +125,9 @@ void mainImage(const in vec4 inputColor, const in vec2 uv, out vec4 outputColor)
   // including the text"). The radial part alone left the middle, where the
   // camera holds the avatar, all but still.
   float glitch = clamp((uAberr - 1.0) / 7.0, 0.0, 1.0);
-  float turn = uTime * 0.7;
+  // Turning slowly: the split grows and shrinks, it does not swing about
+  // (2026-10-19: "it fluctuates too much").
+  float turn = uTime * 0.35;
   vec2 drift = vec2(cos(turn), 0.35 * sin(turn * 1.3)) * 0.0028 * (uAberr - 1.0);
   vec2 ca = c * (0.0015 + 0.0045 * r2) * uAberr + drift;
   vec3 col = vec3(picture(pw + ca).r, picture(pw).g, picture(pw - ca).b);

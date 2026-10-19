@@ -330,6 +330,13 @@ export class TvPainter {
     const sunBehind = sunAt.z > project(0, 0, 0).z
     const sun = (alpha: number): void => {
       ctx.save()
+      // A black sun, not a ring: its face is solid black whichever side of
+      // the cube it is on (arkinox, 2026-10-19: "the center should be 100%
+      // opaque black"); only its glowing rim fades behind the cube.
+      ctx.fillStyle = '#000'
+      ctx.beginPath()
+      ctx.arc(sunAt.x, sunAt.y, size * 0.075, 0, Math.PI * 2)
+      ctx.fill()
       ctx.globalAlpha = alpha
       ctx.strokeStyle = MAP_SUN
       ctx.shadowColor = MAP_SUN

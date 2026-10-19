@@ -138,6 +138,21 @@ describe('the minimap', () => {
   })
 })
 
+describe('the minimap\'s black sun', () => {
+  it('has a solid black face, not a see-through ring', () => {
+    const fills: Array<{ style: unknown; alpha: unknown }> = []
+    const state: Record<string, unknown> = { globalAlpha: 1, fillStyle: '' }
+    const ctx = new Proxy({ measureText: (t: string) => ({ width: Array.from(t).length * 7 }), createLinearGradient: () => ({ addColorStop: () => {} }), createRadialGradient: () => ({ addColorStop: () => {} }), fill: () => { fills.push({ style: state.fillStyle, alpha: state.globalAlpha }) } } as Record<string, unknown>, {
+      get: (target, key) => (key in target ? target[key as string] : key in state ? state[key as string] : () => {}),
+      set: (_t, key, v) => { state[key as string] = v; return true },
+    })
+    const p = new TvPainter({ width: 0, height: 0, getContext: () => ctx } as unknown as HTMLCanvasElement)
+    p.size(1280, 720, 1)
+    p.paint(picture({ status: 'tuning' }), assets, 1000, 1, false)
+    expect(fills).toContainEqual({ style: '#000', alpha: 1 })
+  })
+})
+
 describe('NOW PLAYING', () => {
   /** A canvas that keeps every word it is asked to write. */
   function writing(): { canvas: HTMLCanvasElement; words: string[] } {

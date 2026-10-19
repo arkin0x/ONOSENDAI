@@ -29,7 +29,7 @@ describe('TV commercials', () => {
     expect(nextAd(null)).toBe(ADS[0])
     expect(nextAd(ADS[ADS.length - 1].id)).toBe(ADS[0])
     expect(adById('hosaka-0-gone')).toBe(ADS[0])
-    expect(AD_EVERY_MS).toBe(600_000)
+    expect(AD_EVERY_MS).toBe(300_000)
   })
 
   it('starts a spot\'s clock after the cut into it, which is TV\'s own cut', () => {

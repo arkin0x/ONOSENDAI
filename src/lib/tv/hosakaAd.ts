@@ -20,8 +20,8 @@
  * tube's painter (tvPainter) draws it. Everything it says is here.
  */
 
-/** How often, ms of TV on: one after the first ten minutes, and every ten after. */
-export const AD_EVERY_MS = 10 * 60_000
+/** How often, ms of TV on: one after the first five minutes, and every five after (2026-10-19: "play the hosaka ad every 5 minutes"; it was ten). */
+export const AD_EVERY_MS = 5 * 60_000
 
 export const AD_SUBTITLE = 'High-availability Offload Service for Advanced Kinematic Actions'
 
@@ -70,10 +70,13 @@ export const HOSAKA_1: TvAd = {
     { from: 0, to: 5, kind: 'banner', lines: [], accent: -1, theme: 'night' },
     { from: 5, to: 7, kind: 'card', lines: ['WHEN YOUR', 'CYBERDECK', "DOESN'T HAVE", 'WHAT IT TAKES...'], accent: 1, theme: 'teal' },
     { from: 7, to: 8.9, kind: 'card', lines: ['HOSAKA', 'CAN HELP.'], accent: 0, theme: 'magenta', mark: true },
-    { from: 8.9, to: 10.5, kind: 'card', lines: ['THAT JUMP YOUR RIG', "CAN'T CRUNCH?", 'HAND IT OFF.'], accent: 2, theme: 'night' },
-    { from: 10.5, to: 12.1, kind: 'card', lines: ['YOUR CYBERDECK', 'TAPS OUT.', "HOSAKA DOESN'T."], accent: 2, theme: 'teal' },
-    { from: 12.1, to: 13.7, kind: 'card', lines: ['PAY IN SATS.', 'PROOF BACK', 'IN MINUTES.'], accent: 0, theme: 'magenta' },
-    { from: 13.7, to: 17, kind: 'end', lines: ['LOOK FOR OFFLOAD IN ONOSENDAI'], accent: 0, theme: 'night', mark: true },
+    // The three-line cards and the end card are held long enough to read
+    // through (2026-10-19: "the last few screens of text disappeared before i
+    // could read them fully, so slow those down a bit").
+    { from: 8.9, to: 11.5, kind: 'card', lines: ['THAT JUMP YOUR RIG', "CAN'T CRUNCH?", 'HAND IT OFF.'], accent: 2, theme: 'night' },
+    { from: 11.5, to: 14.1, kind: 'card', lines: ['YOUR CYBERDECK', 'TAPS OUT.', "HOSAKA DOESN'T."], accent: 2, theme: 'teal' },
+    { from: 14.1, to: 16.7, kind: 'card', lines: ['PAY IN SATS.', 'PROOF BACK', 'IN MINUTES.'], accent: 0, theme: 'magenta' },
+    { from: 16.7, to: 21.2, kind: 'end', lines: ['LOOK FOR OFFLOAD IN ONOSENDAI'], accent: 0, theme: 'night', mark: true },
   ],
 }
 

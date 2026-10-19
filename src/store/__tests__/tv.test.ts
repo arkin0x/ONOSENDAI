@@ -414,7 +414,7 @@ describe('Cyberspace TV', () => {
     }
   })
 
-  it('breaks for the HOSAKA commercial every ten minutes, between shots, with nothing from the tape under it', async () => {
+  it('breaks for the HOSAKA commercial every AD_EVERY_MS, between shots, with nothing from the tape under it', async () => {
     useTv.getState().start()
     const ads: Array<{ at: number; shot: unknown; tapeTime: number | null }> = []
     let tapeMovedDuringAd = false
@@ -435,20 +435,27 @@ describe('Cyberspace TV', () => {
 
   it('goes back to the tape in one cut, and never says NO SIGNAL over the commercial', async () => {
     useTv.getState().start()
-    await run(AD_EVERY_MS + 30_000)
+    await run(AD_EVERY_MS - 1000)
     const cuts: number[] = []
     const statuses = new Set<string>()
-    let ended = false
+    let began = false
+    let ended: number | null = null
     const off = useTv.subscribe((s, prev) => {
+      // Every read fails from the moment the break starts: NO SIGNAL waits until it is over.
+      if (s.ad && !prev.ad) { began = true; down = 1_000 }
       if (s.ad) statuses.add(s.status)
-      if (prev.ad && !s.ad) { ended = true; cuts.length = 0 }
-      if (ended && s.cutAt !== prev.cutAt) cuts.push(s.cutAt)
+      if (prev.ad && !s.ad) { ended = performance.now(); cuts.length = 0 }
+      // The cuts as it comes out of the break. A later one is the set's own
+      // business (a retune when the tape has run out), not a second cut back.
+      if (ended !== null && s.cutAt !== prev.cutAt && performance.now() - ended < 3000) cuts.push(s.cutAt)
     })
-    // Every read fails from here: NO SIGNAL waits until the commercial is over.
-    down = 1_000
-    await run(AD_EVERY_MS)
+    await run(60_000)
     off()
     down = 0
+    // Not vacuous: a break was watched from its start to its end.
+    expect(began).toBe(true)
+    expect(ended).not.toBeNull()
+    expect(statuses.size).toBeGreaterThan(0)
     expect(statuses.has('no-signal')).toBe(false)
     expect(new Set(cuts.slice(0, 2)).size).toBeLessThanOrEqual(1)
   })

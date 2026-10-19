@@ -594,7 +594,7 @@ async function tune(id: number): Promise<void> {
   queue = []
   retryAt = 0
   failures = 0
-  // A retune cutting a commercial short counts as one played: the next is ten minutes on.
+  // A retune cutting a commercial short counts as one played: the next is AD_EVERY_MS on.
   if (useTv.getState().ad) adDue = performance.now() + AD_EVERY_MS
   useTv.setState({ status: 'tuning', shot: null, played: 0, tapeTime: null, avatars: {}, arrivals: [], reactions: [], boxes: [], jump: null, ad: null, skipped: 0, cutAt: performance.now() })
   let from: number | null = null

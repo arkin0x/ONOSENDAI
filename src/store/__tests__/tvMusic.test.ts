@@ -306,6 +306,18 @@ describe('the volume and mute', () => {
     await flush()
     expect(audio().plays).toBe(before + 1)
   })
+
+  it('a stop just after a mute stays stopped', async () => {
+    startMusic(list)
+    await flush()
+    const a = audio()
+    const before = a.plays
+    toggleMusicMute()
+    stopMusic()
+    a.fire('pause')
+    await flush()
+    expect(a.plays).toBe(before)
+  })
 })
 
 describe('a track from its link', () => {

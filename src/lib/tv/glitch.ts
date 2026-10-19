@@ -103,13 +103,16 @@ export class GlitchDirector {
   /**
    * The levels at `now` (ms). `held` is a moment no glitch may start in (a
    * cut, the tunnel, tuning): one that is due waits for it to pass. One
-   * already on plays out.
+   * already on plays out, unless `clear`: the HOSAKA spot and the tunnel end
+   * it there and then, under the cut into them (review of #388: an
+   * aberration carried into the spot smeared its words unreadable).
    */
-  levels(now: number, held: boolean): GlitchLevels {
+  levels(now: number, held: boolean, clear = false): GlitchLevels {
     if (now - this.last > STALL_MS) this.reset(now)
     this.last = now
     const out = { ...CALM }
     for (const kind of KINDS) {
+      if (clear && this.live[kind]) this.live[kind] = { start: now - 1, length: 0 }
       let live = this.live[kind]
       // Over: the next of its kind is a new while away, from now.
       if (live && now >= live.start + live.length) {
@@ -129,8 +132,10 @@ export class GlitchDirector {
       const t = (now - live.start) / 1000
       const env = envelope(t, live.length / 1000, GLITCH_TIMING[kind])
       if (kind === 'aberration') {
-        // A little unsteady at its height, as a set's is.
-        const shake = 0.85 + 0.15 * Math.sin(t * 23) * Math.sin(t * 7.3)
+        // A little unsteady at its height, as a set's is: slowly, under three
+        // swings a second, since the words now move with it (WCAG 2.3.1;
+        // review of #388).
+        const shake = 0.85 + 0.15 * Math.sin(t * 11) * Math.sin(t * 4.3)
         out.aberration = 1 + (PEAK_ABERRATION - 1) * env * shake
       } else if (kind === 'tear') {
         out.tear = env

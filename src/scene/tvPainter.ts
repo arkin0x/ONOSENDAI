@@ -671,8 +671,9 @@ export class TvPainter {
    * The HOSAKA commercial (lib/tv/hosakaAd), cut as a TV spot: the banner as
    * big as the tube holds, then one card at a time slamming in over speed
    * stripes in the brand's colours, then the end card with the mark. Over a
-   * ground that hides the world; NOW PLAYING and the marquee stay, with an
-   * ADVERTISEMENT tag in the corner, as a channel marks its breaks.
+   * ground that hides the world; the marquee stays, with an ADVERTISEMENT tag
+   * in the corner, as a channel marks its breaks, and NOW PLAYING steps away
+   * while the music plays on.
    */
   private commercial(ad: { at: number; id: string }, p: TvPicture, a: TvAssets, W: number, H: number, MX: number, MY: number, s: number, narrow: boolean, now: number, reduced: boolean, dt: number, scale: number): void {
     const ctx = this.ctx
@@ -714,7 +715,7 @@ export class TvPainter {
     ctx.globalAlpha = (reduced ? 1 : clamp01(tc / 0.1)) * out
     ctx.textAlign = 'center'
     if (scene.kind === 'banner') {
-      // "bombastically huge": the tube's whole height; NOW PLAYING may sit on its corner.
+      // "bombastically huge": the tube's whole height.
       const h = floorY - top
       const bw = Math.min(W - MX, h * 1.6)
       const bh = bw / 1.6

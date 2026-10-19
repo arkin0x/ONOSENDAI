@@ -131,7 +131,7 @@ void mainImage(const in vec4 inputColor, const in vec2 uv, out vec4 outputColor)
   vec3 col = vec3(picture(pw + ca).r, picture(pw).g, picture(pw - ca).b);
   // A ghost of the picture further along the split: an avatar's red is all in
   // one channel, so a split alone only moves it; the ghost doubles it.
-  col = max(col, picture(pw + ca * 2.5) * 0.45 * glitch);
+  if (glitch > 0.0) col = max(col, picture(pw + ca * 2.5) * 0.45 * glitch);
   col *= 1.0 - bar;
 
   // Snow: chunky (about three CSS pixels a grain), at a film's frame rate,
@@ -410,7 +410,8 @@ export function TvScreenEffect(): JSX.Element {
     // tunnel or tuning, and never with reduced motion asked for.
     // Nor over a commercial: the sponsor's spot plays clean.
     const held = since < CUT_MS || tv.jump?.phase === 'warp' || tv.status !== 'playing' || tv.ad !== null
-    const g = reduced ? CALM : glitches.levels(now, held)
+    // And one already on ends as the spot or the tunnel comes in, not over them.
+    const g = reduced ? CALM : glitches.levels(now, held, tv.ad !== null || tv.jump?.phase === 'warp')
     u.get('uAberr')!.value = g.aberration
     u.get('uTear')!.value = g.tear
     u.get('uTearSeed')!.value = g.tearSeed

@@ -278,7 +278,8 @@ describe('the HOSAKA commercial', () => {
 
   it('on short screens with music, every word stays readable and clear of NOW PLAYING, and the name is said in full', () => {
     for (const [w, h] of [[844, 390], [1024, 400], [640, 300], [568, 320], [740, 340]]) {
-      for (const t of [5.5, 7.6, 9.5, 11, 12.8, 15]) {
+      // Every scene after the banner, at its middle, so a retimed spot is still covered to its end card.
+      for (const t of HOSAKA_1.scenes.slice(1).map((sc) => (sc.from + sc.to) / 2)) {
         // A canvas that keeps each word with its type size and where it lands, through saves and moves.
         type St = { font: string; dx: number; dy: number; k: number; globalAlpha: number }
         let st: St = { font: '', dx: 0, dy: 0, k: 1, globalAlpha: 1 }

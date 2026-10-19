@@ -46,4 +46,5 @@ export const PLAYLIST: Track[] = [
   { url: 'https://media.basspistol.com/die_nmi_/total_disko_destruction/2026-Total%20Club%20Destruction-14%20Sour%20Sgreen%20Lickarr.mp3' },
   { url: 'https://media.basspistol.com/setto.basspistol.com/darkweb/3-swipe-instrumental-.mp3' },
   { url: 'https://media.basspistol.com/setto.basspistol.com/darkweb/4-darkweb-instrumental-.mp3' },
+  { url: 'https://media.basspistol.com/setto.basspistol.com/little-bug-ep/1-ding-ding-world.mp3' },
 ]

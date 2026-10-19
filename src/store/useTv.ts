@@ -16,7 +16,7 @@
 
 import { create } from 'zustand'
 import { queryEach } from '../lib/relay'
-import { AD_EVERY_MS, adById, adLength, nextAd } from '../lib/tv/hosakaAd'
+import { AD_EVERY_MS, AD_IN_MS, adById, adLength, nextAd } from '../lib/tv/hosakaAd'
 import { Director, JUMP_LINE_S, JUMP_S, JUMP_WARP_S, MAX_SHOT_S, isJump, shotFraming, type Beat, type Framing, type Shot, type TapeItem } from '../lib/tv/director'
 import type { HintBox } from '../lib/hint'
 import { TapeReader, V2_EPOCH, randomStart, type Ask, TapeUnanswered } from '../lib/tv/tape'
@@ -528,7 +528,8 @@ function tick(id: number): void {
   // cyberspace actions play in the bg while the hosaka ad plays"). The tape
   // picks up where it was, after a cut.
   if (s.ad) {
-    if (now - s.ad.at < adLength(adById(s.ad.id)) * 1000) return
+    // The spot's own clock starts after the cut into it (review of #384).
+    if (now - s.ad.at < AD_IN_MS + adLength(adById(s.ad.id)) * 1000) return
     // Over: the next shot starts in this same tick, so the way back is one cut, not two.
     adDue = now + AD_EVERY_MS
     useTv.setState({ ad: null, shot: null, cutAt: now })

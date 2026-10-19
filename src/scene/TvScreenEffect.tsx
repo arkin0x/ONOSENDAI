@@ -276,10 +276,10 @@ export function TvScreenEffect(): JSX.Element {
   const reduced = useMemo(() => typeof window !== 'undefined' && window.matchMedia?.('(prefers-reduced-motion: reduce)').matches === true, [])
   const glitches = useMemo(() => new GlitchDirector(performance.now()), [])
   const wasOn = useRef(false)
-  const hosakaFor = useRef<number | null>(null)
   // The HOSAKA banner for the commercial (lib/tv/hosakaAd), drawn into the
   // tube frame by frame: it opens the spot and plays once through. Its file
   // is asked for only once TV is on.
+  const hosakaFor = useRef<number | null>(null)
   const hosaka = useMemo(() => {
     if (typeof document === 'undefined') return null
     const v = document.createElement('video')
@@ -288,7 +288,8 @@ export function TvScreenEffect(): JSX.Element {
     v.playsInline = true
     v.preload = 'auto'
     // A browser that says it plays AV1 and then cannot gets the VP9 cut.
-    v.addEventListener('error', () => { if (v.getAttribute('src') === '/hosaka.webm') v.src = '/hosaka-vp9.webm' })
+    // Played again from the start if a spot is on (review of #384).
+    v.addEventListener('error', () => { if (v.getAttribute('src') === '/hosaka.webm') { v.src = '/hosaka-vp9.webm'; hosakaFor.current = null } })
     return v
   }, [])
   useEffect(() => () => { if (hosaka) { hosaka.pause(); hosaka.removeAttribute('src'); hosaka.load() } }, [hosaka])
@@ -373,8 +374,9 @@ export function TvScreenEffect(): JSX.Element {
     wasOn.current = tv.on
     // The banner runs only while the commercial is on.
     if (hosaka) {
-      // From its start once per spot, then left on its last frame.
-      if (tv.on && tv.ad && hosakaFor.current !== tv.ad.at) { hosakaFor.current = tv.ad.at; hosaka.currentTime = 0; void hosaka.play().catch(() => {}) }
+      // From its start once per spot, when the spot's own clock starts
+      // (after the cut into it), then left on its last frame.
+      if (tv.on && tv.ad && hosakaFor.current !== tv.ad.at && now - tv.ad.at >= CUT_MS) { hosakaFor.current = tv.ad.at; hosaka.currentTime = 0; void hosaka.play().catch(() => {}) }
       else if (!(tv.on && tv.ad) && !hosaka.paused) hosaka.pause()
     }
     if (!tv.on) return

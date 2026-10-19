@@ -52,6 +52,12 @@ export interface TvAd {
   scenes: AdScene[]
 }
 
+/**
+ * How long the cut into a break takes, ms: hud/TvSegments CUT_MS, here so
+ * the store needs nothing from the HUD. A spot's clock starts after it.
+ */
+export const AD_IN_MS = 700
+
 /** How long a spot runs, seconds: to its last scene's end. */
 export function adLength(ad: TvAd): number {
   return ad.scenes[ad.scenes.length - 1].to

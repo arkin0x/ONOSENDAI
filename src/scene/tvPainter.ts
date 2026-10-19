@@ -30,7 +30,7 @@ import { itemLength, type Shot, type TapeItem } from '../lib/tv/director'
 import { LANDMARKS } from '../hud/ScaleLadder'
 import { CUT_MS, contentsWords, quoteOf, segmentDoing, typePace, TYPE_DELAY_S } from '../hud/TvSegments'
 import { placeable, shotProgress, type TvAvatar } from '../store/useTv'
-import { AD_SUBTITLE, adById, type AdTheme } from '../lib/tv/hosakaAd'
+import { AD_SUBTITLE, adById, type AdScene, type AdTheme } from '../lib/tv/hosakaAd'
 import type { Census, ChainTimes } from '../lib/tv/stats'
 import type { Position } from '../lib/space'
 
@@ -168,6 +168,8 @@ export interface TvMusic {
 
 /** A rectangle on the flat frame, CSS px. */
 export interface FlatRect { x: number; y: number; w: number; h: number }
+/** A rectangle on the canvas, canvas px. */
+type Region = FlatRect
 
 /** The words on the marquee as of the moment on tape. */
 export function tickerItems(p: TvPicture, name: (pk: string) => string): string[] {
@@ -697,10 +699,20 @@ export class TvPainter {
     const tickY = H - MY - tickH
     const npW = narrow ? W - 2 * MX : Math.min(LOGO_PX * s, W * LOGO_SHARE) + 16 * s
     const npBottom = tickY - 10 * s - CHIRON_PX[narrow ? 1 : 0] * s - 10 * s
-    const npRoom = npBottom - NOW_PLAYING_PX * s >= MY + 40 * s
-    // The words and pictures keep clear of NOW PLAYING's corner.
+    // NOW PLAYING stays where the spot's words keep room beside or above it;
+    // on a screen too short for both it steps aside, as it does on the tape,
+    // and the music plays on.
+    const npRoom = npBottom - NOW_PLAYING_PX * s - 14 * s - (MY + 26 * s) >= (narrow ? 110 : 60) * s
+    // Where the spot can draw: the whole picture over NOW PLAYING's top, or,
+    // beside it on a wide screen, the full height to its left; whichever
+    // gives the words more size (review of #384: fenced above it across the
+    // whole width, a landscape phone's call came out at 1.6 px).
     const top = MY + 26 * s
-    const bottom = (a.music && npRoom ? npBottom - NOW_PLAYING_PX * s : tickY) - 14 * s
+    const floorY = tickY - 14 * s
+    const npTopY = npBottom - NOW_PLAYING_PX * s
+    const music = a.music !== undefined && a.music !== null && npRoom
+    const regions: Region[] = [{ x: MX, y: top, w: W - 2 * MX, h: (music ? npTopY : floorY + 14 * s) - 14 * s - top }]
+    if (music && !narrow) regions.push({ x: MX, y: top, w: W - MX - npW - 14 * s - MX, h: floorY - top })
 
     // A card comes in hard: big, then down to size, with a jolt as it lands.
     const k = reduced ? 1 : clamp01(tc / 0.22)
@@ -711,43 +723,39 @@ export class TvPainter {
 
     ctx.save()
     ctx.globalAlpha = (reduced ? 1 : clamp01(tc / 0.1)) * out
-    ctx.translate(W / 2 + jolt, (top + bottom) / 2)
-    ctx.scale(zoom, zoom)
     ctx.textAlign = 'center'
     if (scene.kind === 'banner') {
-      // "bombastically huge": as big as the tube holds.
-      const bw = Math.min(W - MX, (bottom - top + 2 * MY) * 1.6)
+      // "bombastically huge": the tube's whole height; NOW PLAYING may sit on its corner.
+      const h = floorY - top
+      const bw = Math.min(W - MX, h * 1.6)
       const bh = bw / 1.6
+      ctx.translate(W / 2 + jolt, top + h / 2)
+      ctx.scale(zoom, zoom)
       if (a.hosaka) ctx.drawImage(a.hosaka, -bw / 2, -bh / 2, bw, bh)
     } else {
       const mark = scene.mark && a.hosakaMark ? a.hosakaMark : null
-      const room = bottom - top
-      const markH = mark ? Math.min(room * (scene.kind === 'end' ? 0.55 : 0.32), (scene.kind === 'end' ? 300 : 170) * s) : 0
+      const fits = regions.map((r) => this.fitCard(scene, r, mark !== null, s, narrow))
+      const best = fits.reduce((b, f) => (f.size > b.size + 0.5 ? f : b))
+      const { region: r, size, markH, subLines, subSize } = best
       const markW = markH * (308 / 334)
-      // The type as big as the widest line allows, and the lines allow in height.
-      const maxW = W - 2 * MX - 20 * s
-      let size = (scene.kind === 'end' ? (narrow ? 13 : 20) : narrow ? 40 : 96) * s
-      ctx.font = `700 ${size}px ${TV_FONT}`
-      const widest = Math.max(...scene.lines.map((l) => ctx.measureText(l).width))
-      if (widest > maxW) size *= maxW / widest
-      const textRoom = room - markH - (markH ? 18 * s : 0) - (scene.kind === 'end' ? 40 * s : 0)
-      size = Math.min(size, textRoom / (scene.lines.length * 1.12))
-      ctx.font = `700 ${size}px ${TV_FONT}`
-      const subSize = (narrow ? 8.5 : 11) * s
-      const blockH = markH + (markH ? 18 * s : 0) + scene.lines.length * size * 1.12 + (scene.kind === 'end' ? 40 * s : 0)
+      const gap = markH ? 18 * s : 0
+      const subH = scene.kind === 'end' ? subLines.length * subSize * 1.4 + 22 * s : 0
+      const blockH = markH + gap + subH + scene.lines.length * size * 1.12
+      ctx.translate(r.x + r.w / 2 + jolt, r.y + r.h / 2)
+      ctx.scale(zoom, zoom)
       let y = -blockH / 2
-      if (mark) {
+      if (mark && markH) {
         ctx.drawImage(mark, -markW / 2, y, markW, markH)
-        y += markH + 18 * s
+        y += markH + gap
       }
       if (scene.kind === 'end') {
         // The name's long form, subtly, under the mark.
         ctx.font = `${subSize}px ${TV_FONT}`
         ctx.fillStyle = 'rgba(242, 221, 255, 0.6)'
-        for (const line of wrap(ctx, AD_SUBTITLE.toUpperCase(), maxW)) { y += subSize * 1.4; ctx.fillText(line, 0, y) }
-        y += 26 * s - subSize * 1.4 * (wrap(ctx, AD_SUBTITLE.toUpperCase(), maxW).length - 1)
-        ctx.font = `700 ${size}px ${TV_FONT}`
+        for (const line of subLines) { y += subSize * 1.4; ctx.fillText(line, 0, y) }
+        y += 22 * s
       }
+      ctx.font = `700 ${size}px ${TV_FONT}`
       scene.lines.forEach((line, i) => {
         y += size * 1.12
         const accent = i === scene.accent
@@ -782,6 +790,32 @@ export class TvPainter {
     const npTop = a.music && npRoom ? this.nowPlaying(a.music, W - MX - npW, npBottom, npW, s, now, reduced, false) : null
     this.npRect = a.music && npTop !== null ? { x: W - MX - npW, y: npTop, w: npW, h: npBottom - npTop } : null
     this.cardScale = scale
+  }
+
+  /**
+   * How a card fits `r`: the type as big as the widest line and the height
+   * allow, the mark giving way first and going altogether before the type
+   * goes under its floor (18 px a punch line, 12 the end card's call).
+   */
+  private fitCard(scene: AdScene, r: Region, withMark: boolean, s: number, narrow: boolean): { region: Region; size: number; markH: number; subLines: string[]; subSize: number } {
+    const ctx = this.ctx
+    const end = scene.kind === 'end'
+    const maxW = Math.max(40 * s, r.w - 20 * s)
+    const floor = (end ? 12 : 18) * s
+    let size = (end ? (narrow ? 13 : 20) : narrow ? 40 : 96) * s
+    ctx.font = `700 ${size}px ${TV_FONT}`
+    const widest = Math.max(...scene.lines.map((l) => ctx.measureText(l).width))
+    if (widest > maxW) size *= maxW / widest
+    const subSize = (narrow ? 8.5 : 11) * s
+    ctx.font = `${subSize}px ${TV_FONT}`
+    const subLines = end ? wrap(ctx, AD_SUBTITLE.toUpperCase(), maxW) : []
+    const subH = end ? subLines.length * subSize * 1.4 + 22 * s : 0
+    const lineH = (sz: number): number => scene.lines.length * sz * 1.12
+    // The mark takes what the words leave it at their floor, up to its own share.
+    let markH = withMark ? Math.min(r.h * (end ? 0.55 : 0.32), (end ? 300 : 170) * s, r.h - subH - lineH(Math.min(size, Math.max(floor, size * 0.6))) - 18 * s) : 0
+    if (markH < 36 * s) markH = 0
+    size = Math.min(size, (r.h - markH - (markH ? 18 * s : 0) - subH) / (scene.lines.length * 1.12))
+    return { region: r, size: Math.max(floor, size), markH, subLines, subSize }
   }
 
   /** Diagonal bands running across the frame, as a spot's fast cut has. */

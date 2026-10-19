@@ -3,7 +3,8 @@
  * its scenes back to back, the banner first and the end card last.
  */
 import { describe, expect, it } from 'vitest'
-import { ADS, AD_EVERY_MS, adById, adLength, nextAd } from '../hosakaAd'
+import { ADS, AD_EVERY_MS, AD_IN_MS, adById, adLength, nextAd } from '../hosakaAd'
+import { CUT_MS } from '../../../hud/TvSegments'
 
 describe('TV commercials', () => {
   it('are versioned, each id unique', () => {
@@ -29,5 +30,9 @@ describe('TV commercials', () => {
     expect(nextAd(ADS[ADS.length - 1].id)).toBe(ADS[0])
     expect(adById('hosaka-0-gone')).toBe(ADS[0])
     expect(AD_EVERY_MS).toBe(600_000)
+  })
+
+  it('starts a spot\'s clock after the cut into it, which is TV\'s own cut', () => {
+    expect(AD_IN_MS).toBe(CUT_MS)
   })
 })

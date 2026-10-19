@@ -276,23 +276,39 @@ describe('the HOSAKA commercial', () => {
     expect(second.images).toContain(mark)
   })
 
-  it('keeps every word clear of NOW PLAYING on a phone on its side, and still says its name in full', () => {
-    for (const t of [5.5, 7.6, 9.5, 11, 12.8, 15]) {
-      const ys: Array<{ text: string; y: number }> = []
-      const state: Record<string, unknown> = { globalAlpha: 1 }
-      let dy = 0
-      let k = 1
-      const ctx = new Proxy({ measureText: (x: string) => ({ width: Array.from(x).length * 7 }), createLinearGradient: () => ({ addColorStop: () => {} }), createRadialGradient: () => ({ addColorStop: () => {} }), translate: (_x: number, y: number) => { dy += y }, scale: (_x: number, y: number) => { k *= y }, save: () => {}, restore: () => {}, fillText: (x: string, _a: number, y: number) => { ys.push({ text: x, y: dy + y * k }) } } as Record<string, unknown>, {
-        get: (target, key) => (key in target ? target[key as string] : key in state ? state[key as string] : () => {}),
-        set: (_t, key, v) => { state[key as string] = v; return true },
-      })
-      const p = new TvPainter({ width: 0, height: 0, getContext: () => ctx } as unknown as HTMLCanvasElement)
-      p.size(844, 390, 1)
-      p.paint(picture({ ad: { at: 0, id: HOSAKA_1.id } }), { ...assets, music, hosaka: banner as never, hosakaMark: mark as never }, 700 + t * 1000 + 300, 1, false)
-      const card = p.musicCard!
-      const spot = HOSAKA_1.scenes.flatMap((sc) => sc.lines)
-      for (const w of ys.filter((x) => spot.includes(x.text) || x.text.includes('HIGH-AVAILABILITY'))) expect(w.y).toBeLessThan(card.y)
-      if (t === 15) expect(ys.some((x) => x.text.includes('HIGH-AVAILABILITY'))).toBe(true)
+  it('on short screens with music, every word stays readable and clear of NOW PLAYING, and the name is said in full', () => {
+    for (const [w, h] of [[844, 390], [1024, 400], [640, 300], [568, 320], [740, 340]]) {
+      for (const t of [5.5, 7.6, 9.5, 11, 12.8, 15]) {
+        // A canvas that keeps each word with its type size and where it lands, through saves and moves.
+        type St = { font: string; dx: number; dy: number; k: number; globalAlpha: number }
+        let st: St = { font: '', dx: 0, dy: 0, k: 1, globalAlpha: 1 }
+        const stack: St[] = []
+        const seen: Array<{ text: string; px: number; x: number; y: number }> = []
+        const ctx = new Proxy({
+          measureText: (x: string) => ({ width: Array.from(x).length * Number(/([\d.]+)px/.exec(st.font)?.[1] ?? 10) * 0.62 }),
+          createLinearGradient: () => ({ addColorStop: () => {} }), createRadialGradient: () => ({ addColorStop: () => {} }),
+          save: () => { stack.push({ ...st }) }, restore: () => { st = stack.pop() ?? st },
+          translate: (x: number, y: number) => { st.dx += x * st.k; st.dy += y * st.k }, scale: (_x: number, y: number) => { st.k *= y },
+          fillText: (x: string, a: number, y: number) => { seen.push({ text: x, px: Number(/([\d.]+)px/.exec(st.font)?.[1] ?? 0) * st.k, x: st.dx + a * st.k, y: st.dy + y * st.k }) },
+        } as Record<string, unknown>, {
+          get: (target, key) => (key in target ? target[key as string] : key in st ? st[key as keyof St] : () => {}),
+          set: (_t, key, v) => { (st as Record<string, unknown>)[key as string] = v; return true },
+        })
+        const p = new TvPainter({ width: 0, height: 0, getContext: () => ctx } as unknown as HTMLCanvasElement)
+        p.size(w, h, 1.5)
+        p.paint(picture({ ad: { at: 0, id: HOSAKA_1.id } }), { ...assets, music, hosaka: banner as never, hosakaMark: mark as never }, 700 + t * 1000 + 300, 1.5, false)
+        const s = 1.5 * Math.min(1.35, Math.max(0.9, w / 1400))
+        const card = p.musicCard
+        const scene = HOSAKA_1.scenes.find((sc) => t >= sc.from && t < sc.to)!
+        for (const line of scene.lines) {
+          const word = seen.find((x) => x.text === line)
+          expect(word, `${w}x${h} ${t}s ${line}`).toBeDefined()
+          expect(word!.px, `${w}x${h} ${t}s ${line}`).toBeGreaterThanOrEqual((scene.kind === 'end' ? 12 : 18) * s - 0.01)
+          // Above NOW PLAYING, or to its left.
+          if (card) expect(word!.y < card.y * 1.5 || word!.x + (word!.px * 0.62 * line.length) / 2 < card.x * 1.5, `${w}x${h} ${t}s ${line} over NOW PLAYING`).toBe(true)
+        }
+        if (scene.kind === 'end') expect(seen.some((x) => x.text.includes('HIGH-AVAILABILITY')), `${w}x${h} subtitle`).toBe(true)
+      }
     }
   })
 

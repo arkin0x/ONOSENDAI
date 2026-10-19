@@ -21,13 +21,10 @@
  * ("the marquee seems to jump or reset when the scene changes").
  */
 
-import { formatCellSize } from 'sno-core/scale'
 import type { ShardModel } from 'sno-core/shards'
 import { actionLabel } from '../lib/events'
-import { MAX_SCALE_EXP } from '../lib/space'
 import { chainLengthAt, countTo } from '../lib/tv/stats'
 import { itemLength, type Shot, type TapeItem } from '../lib/tv/director'
-import { LANDMARKS } from '../hud/ScaleLadder'
 import { CUT_MS, contentsWords, quoteOf, segmentDoing, typePace, TYPE_DELAY_S } from '../hud/TvSegments'
 import { findLines, placeable, shotProgress, type TvAvatar, type TvFindLine } from '../store/useTv'
 import { AD_SUBTITLE, adById, type AdScene, type AdTheme } from '../lib/tv/hosakaAd'
@@ -79,9 +76,25 @@ const AD_THEMES: Record<AdTheme, { deep: string; stripe: string; accent: string 
 /** NOW PLAYING's height, CSS px, and as one line where there is no room for it. */
 const NOW_PLAYING_PX = 76
 const NOW_PLAYING_LINE_PX = 34
-/** The chiron's height, CSS px: wide, and on a phone. */
-const CHIRON_PX = [62, 88] as const
+/**
+ * The chiron's height, CSS px: side by side with NOW PLAYING, and stacked
+ * under it. Side by side, NOW PLAYING's own height (2026-10-19: "have the
+ * music player sit side by side with the chiron on the right of it").
+ */
+const CHIRON_PX = [NOW_PLAYING_PX, 62] as const
+/**
+ * Under this height, CSS px, the chiron and NOW PLAYING stack as on a phone,
+ * however wide: a phone on its side, or a short window, is not the
+ * "non-mobile" the row is for (2026-10-19: "shorten the width of the chiron
+ * on non-mobile devices"), and the row's taller chiron would leave a
+ * segment's panel no room (review of #393).
+ */
+const ROW_MIN_H = 500
 const REGION = '#52e39f'
+/** A commercial's button after its last line, in ems of the type: the gap before it, its radius, and its room, the gap included. */
+const ICON_GAP_EM = 0.35
+const ICON_R_EM = 0.62
+const ICON_EM = ICON_GAP_EM + 2 * ICON_R_EM
 const MONTHS = ['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC']
 
 /** The tape's clock: the date and the time, local, as a camcorder stamps them. */
@@ -501,35 +514,42 @@ export class TvPainter {
     const tickY = H - MY - tickH
     this.marquee(p, a, MX, tickY, W - MX, tickH, s, dt)
 
-    // The chiron above it.
-    let chironTop = tickY
-    // As wide as the marquee under it: it faded out a third of the way
-    // short of the right side (arkinox, 2026-10-18).
-    if (p.shot && p.status === 'playing') chironTop = this.chiron(p, a, MX, tickY - 10 * s, W - 2 * MX, s, narrow)
-
-    // NOW PLAYING, bottom right above the chiron (arkinox, 2026-10-18). As
-    // wide as the logo's column over it, so the panels, which keep left of
-    // that column, never meet it; the whole width on a phone. It stands
-    // where the chiron's top is when there is one, so it never jumps as the
-    // chiron comes and goes, and a tap finds it where it was. Where it would
-    // reach the clock (and on a phone the minimap) it is one line; where even
-    // that would, it is not shown, and the music plays on.
+    // The chiron above it, and NOW PLAYING: side by side on one row, the
+    // chiron on the left, wide (2026-10-19: "shorten the width of the chiron
+    // on non-mobile devices and have the music player sit side by side with
+    // the chiron on the right of it"); on a phone, NOW PLAYING over the
+    // chiron, each the whole width. NOW PLAYING is as wide as the logo's
+    // column over it, so the panels, which keep left of that column, never
+    // meet it. It stands in its place whether or not the chiron is up, so it
+    // never jumps as the chiron comes and goes, and a tap finds it where it
+    // was. Where it would reach the clock (and on a phone the minimap) it is
+    // one line; where even that would, it is not shown, and the music plays on.
+    const rowBottom = tickY - 10 * s
+    const row = !narrow && H / scale >= ROW_MIN_H
     const npW = narrow ? W - 2 * MX : lw + 16 * s
-    const npBottom = tickY - 10 * s - CHIRON_PX[narrow ? 1 : 0] * s - 10 * s
+    const chironW = row ? W - 2 * MX - npW - 10 * s : W - 2 * MX
+    let chironTop = tickY
+    if (p.shot && p.status === 'playing') chironTop = this.chiron(p, a, MX, rowBottom, chironW, s, narrow, row)
+    const npBottom = row ? rowBottom : rowBottom - CHIRON_PX[1] * s - 10 * s
     const ceiling = (narrow ? Math.max(cy, MY + mapSize) : cy) + 10 * s
     const npLook = !a.music ? null : npBottom - NOW_PLAYING_PX * s >= ceiling ? 'full' : npBottom - NOW_PLAYING_LINE_PX * s >= ceiling ? 'line' : null
     const npTop = a.music && npLook ? this.nowPlaying(a.music, W - MX - npW, npBottom, npW, s, now, reduced, npLook === 'line') : chironTop
     this.npRect = a.music && npLook ? { x: W - MX - npW, y: npTop, w: npW, h: npBottom - npTop } : null
     this.cardScale = scale
     // What sits at the centre above the chiron stops above NOW PLAYING too
-    // when it is wide enough to reach it.
+    // when it is wide enough to reach it: stacked, NOW PLAYING stands over the
+    // chiron; side by side, it shares the chiron's top, and this only keeps a
+    // hair clear of it.
     const centreW = Math.min(760 * s, W - 2 * MX)
     const floor = this.npRect && (narrow || (W + centreW) / 2 > W - MX - npW) ? Math.min(chironTop, npTop - 6 * s) : chironTop
 
     // A segment's panel at the centre.
     const item = p.shot?.item
     const inset = item !== undefined && !(item.kind === 'bag' && placeable(item.hint))
-    if (item && inset && p.status === 'playing') this.segment(item, p.shot!.length, a, W, cy + 14 * s, floor - 50 * s, chironTop - 50 * s, MX, MY, W - MX - lw - 16 * s, MX + mapSize + 16 * s, s, narrow, now)
+    // Beside the clock it keeps off the chiron, and on a phone, where NOW
+    // PLAYING spans the width over the chiron, off that too (review of #393).
+    const sideBottom = narrow && this.npRect ? Math.min(chironTop - 50 * s, npTop - 6 * s) : chironTop - 50 * s
+    if (item && inset && p.status === 'playing') this.segment(item, p.shot!.length, a, W, cy + 14 * s, floor - 50 * s, sideBottom, MX, MY, W - MX - lw - 16 * s, MX + mapSize + 16 * s, s, narrow, now)
 
     // LATER and MEANWHILE, after the cut's transition; under an inset's panel.
     this.card(p, W, s, narrow, inset ? floor - 34 * s : H * 0.34, now)
@@ -612,10 +632,10 @@ export class TvPainter {
   }
 
   /** The chiron, bottom edge at `bottom`; its top. */
-  private chiron(p: TvPicture, a: TvAssets, x: number, bottom: number, w: number, s: number, narrow: boolean): number {
+  private chiron(p: TvPicture, a: TvAssets, x: number, bottom: number, w: number, s: number, narrow: boolean, row: boolean): number {
     const ctx = this.ctx
     const shot = p.shot!
-    const h = CHIRON_PX[narrow ? 1 : 0] * s
+    const h = CHIRON_PX[row ? 0 : 1] * s
     const y = bottom - h
     const grad = ctx.createLinearGradient(x, 0, x + w, 0)
     grad.addColorStop(0, 'rgba(0, 60, 80, 0.88)')
@@ -623,15 +643,23 @@ export class TvPainter {
     grad.addColorStop(1, 'rgba(0, 30, 44, 0.45)')
     ctx.fillStyle = grad
     ctx.fillRect(x, y, w, h)
+    // A rule along the top as NOW PLAYING has, in the accent its left border
+    // once was (2026-10-19: "add one with appropriate blue color to the top
+    // of the chiron in the same style. This will create a design unity").
+    ctx.fillStyle = 'rgba(0, 229, 255, 0.45)'
+    ctx.fillRect(x, y, w, Math.max(1, s))
     // The picture.
     const r = 22 * s
     const pcx = x + 10 * s + r
-    const pcy = y + (narrow ? 10 * s + r : h / 2)
+    const pcy = y + h / 2
     this.disc(a, shot.pubkey, pcx, pcy, r)
+    // How far out, at the far right, in place of the zoom's scale bar
+    // (2026-10-19: "a rectangle that contains "2^X" where X is the current
+    // zoom level of the shot").
+    const zoomW = this.zoomBox(p.scaleExp, x + w - 12 * s, pcy, s, narrow)
     // Who and what.
     const tx = pcx + r + 12 * s
-    const gaugeW = 170 * s
-    const textW = (narrow ? w - (tx - x) : w - (tx - x) - gaugeW - 16 * s) - 8 * s
+    const textW = w - (tx - x) - zoomW - 12 * s - 16 * s
     ctx.textAlign = 'left'
     ctx.fillStyle = FG
     ctx.font = `700 ${(narrow ? 16 : 20) * s}px ${TV_FONT}`
@@ -639,36 +667,40 @@ export class TvPainter {
     ctx.fillStyle = ACCENT
     ctx.font = `${11 * s}px ${TV_FONT}`
     ctx.fillText(fit(ctx, chironDoing(shot, p.played), textW), tx, pcy + 14 * s)
-    // How far out: the scale ladder's landmarks, the zoom on it.
-    const gx = narrow ? x + 10 * s : x + w - gaugeW - 12 * s
-    const gy = narrow ? y + h - 26 * s : y + 20 * s
-    const gw = narrow ? w - 20 * s : gaugeW
-    this.gauge(p.scaleExp, gx, gy, gw, s)
     return y
   }
 
-  private gauge(scaleExp: number, x: number, y: number, w: number, s: number): void {
+  /** The zoom as a power of two, 2 and its exponent raised, boxed, its right edge at `right`, centred on `cy`; its width. */
+  private zoomBox(scaleExp: number, right: number, cy: number, s: number, narrow: boolean): number {
     const ctx = this.ctx
-    const top = MAX_SCALE_EXP + 1
-    ctx.font = `${9 * s}px ${TV_FONT}`
-    ctx.textAlign = 'left'
-    ctx.fillStyle = 'rgba(242, 251, 255, 0.7)'
-    ctx.fillText('ZOOM', x, y + 3 * s)
-    const rx = x + ctx.measureText('ZOOM').width + 8 * s
-    const rw = x + w - rx
-    ctx.fillStyle = 'rgba(200, 245, 255, 0.5)'
-    ctx.fillRect(rx, y + 4 * s, rw, Math.max(1, s))
-    for (const l of LANDMARKS) {
-      if (l.h > MAX_SCALE_EXP) continue
-      ctx.fillRect(rx + (l.h / top) * rw, y - 2 * s, Math.max(1, s), 6 * s)
-    }
-    ctx.fillStyle = ACCENT
-    ctx.beginPath()
-    ctx.arc(rx + (scaleExp / top) * rw, y + 4 * s, 3.5 * s, 0, Math.PI * 2)
+    const base = (narrow ? 16 : 20) * s
+    const sup = (narrow ? 10 : 12) * s
+    const exp = String(Math.round(scaleExp))
+    ctx.font = `700 ${base}px ${TV_FONT}`
+    const bw = ctx.measureText('2').width
+    ctx.font = `700 ${sup}px ${TV_FONT}`
+    const ew = ctx.measureText(exp).width
+    const pad = 10 * s
+    const w = pad + bw + 2 * s + ew + pad
+    const h = (narrow ? 32 : 38) * s
+    const x = right - w
+    const y = cy - h / 2
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.35)'
+    roundRect(ctx, x, y, w, h, 3 * s)
     ctx.fill()
-    ctx.textAlign = 'right'
-    ctx.fillStyle = 'rgba(242, 251, 255, 0.85)'
-    ctx.fillText(`1 CELL = ${formatCellSize(scaleExp).toUpperCase()}`, x + w, y + 18 * s)
+    ctx.strokeStyle = 'rgba(0, 229, 255, 0.6)'
+    ctx.lineWidth = Math.max(1, s)
+    roundRect(ctx, x, y, w, h, 3 * s)
+    ctx.stroke()
+    ctx.textAlign = 'left'
+    ctx.fillStyle = FG
+    ctx.font = `700 ${base}px ${TV_FONT}`
+    const baseline = cy + base * 0.36
+    ctx.fillText('2', x + pad, baseline)
+    ctx.fillStyle = ACCENT
+    ctx.font = `700 ${sup}px ${TV_FONT}`
+    ctx.fillText(exp, x + pad + bw + 2 * s, baseline - base * 0.45)
+    return w
   }
 
   /**
@@ -760,7 +792,14 @@ export class TvPainter {
         ctx.shadowBlur = (accent ? 18 : 10) * s
         // The end card's call blinks, slowly.
         if (scene.kind === 'end' && !reduced) ctx.globalAlpha *= 0.6 + 0.4 * (Math.floor(now / 600) % 2)
-        ctx.fillText(line, 0, y - size * 0.18)
+        if (scene.icon && i === scene.lines.length - 1) {
+          // The line and its button, centred together on what is inked.
+          const tw = ctx.measureText(line).width
+          const left = -(tw + size * ICON_EM) / 2
+          ctx.fillText(line, left + tw / 2, y - size * 0.18)
+          ctx.shadowBlur = 0
+          this.menuButton(left + tw + size * (ICON_GAP_EM + ICON_R_EM), y - size * 0.5, size * ICON_R_EM)
+        } else ctx.fillText(line, 0, y - size * 0.18)
         ctx.restore()
       })
     }
@@ -798,7 +837,9 @@ export class TvPainter {
     const floor = (end ? 12 : 18) * s
     let size = (end ? (narrow ? 13 : 20) : narrow ? 40 : 96) * s
     ctx.font = `700 ${size}px ${TV_FONT}`
-    const widest = Math.max(...scene.lines.map((l) => ctx.measureText(l).width))
+    // The icon after the last line is as tall as the type: its room, in ems.
+    const last = scene.lines.length - 1
+    const widest = Math.max(...scene.lines.map((l, i) => ctx.measureText(l).width + (scene.icon && i === last ? size * ICON_EM : 0)))
     if (widest > maxW) size *= maxW / widest
     const subSize = (narrow ? 8.5 : 11) * s
     ctx.font = `${subSize}px ${TV_FONT}`
@@ -810,6 +851,34 @@ export class TvPainter {
     if (markH < 36 * s) markH = 0
     size = Math.min(size, (r.h - markH - (markH ? 18 * s : 0) - subH) / (scene.lines.length * 1.12))
     return { region: r, size: Math.max(floor, size), markH, subLines, subSize }
+  }
+
+  /**
+   * The menu button as the app draws it (src/styles.css .hamburger-menu): a
+   * dark disc, a fine ring, three accent bars with round ends, in its
+   * proportions (a 56 px disc, bars 24 by 2 px, 7 px apart).
+   */
+  private menuButton(cx: number, cy: number, r: number): void {
+    const ctx = this.ctx
+    ctx.beginPath()
+    ctx.arc(cx, cy, r, 0, Math.PI * 2)
+    ctx.fillStyle = 'rgba(6, 14, 22, 0.85)'
+    ctx.fill()
+    ctx.strokeStyle = 'rgba(0, 229, 255, 0.22)'
+    ctx.lineWidth = Math.max(1, r / 28)
+    ctx.stroke()
+    const bw = r * (24 / 28)
+    const bh = Math.max(1, r * (2 / 28))
+    ctx.fillStyle = ACCENT
+    for (const k of [-1, 0, 1]) {
+      // A bar is a rectangle with half-circle ends.
+      const y = cy + k * r * (7 / 28)
+      ctx.beginPath()
+      ctx.arc(cx - bw / 2 + bh / 2, y, bh / 2, Math.PI / 2, Math.PI * 1.5)
+      ctx.arc(cx + bw / 2 - bh / 2, y, bh / 2, -Math.PI / 2, Math.PI / 2)
+      ctx.closePath()
+      ctx.fill()
+    }
   }
 
   /** Diagonal bands running across the frame, as a spot's fast cut has. */
@@ -1028,18 +1097,24 @@ export class TvPainter {
       const ph = stacked ? stage + 18 * s + captionH + 2 * pad : Math.max(stage, captionH) + 2 * pad
       return { stage, pw, stacked, textX, textW, lines, quoteSize, ph, cut }
     }
+    // Whether a panel `ph` tall fits `room`: within a float's width, since a
+    // stage shrunk to exactly the room can come back that much over it, and
+    // failing that sent a bag's panel from beside the clock down over the
+    // chiron (review of #393: 176.40000001 against 176.4 at 844x390). No
+    // more than that: half a pixel of slack let panels touch the LATER card.
+    const fits = (ph: number, room: number): boolean => ph <= room + 1e-6
     // The model gives up size first, the words never.
     const fitPanel = (pw: number, stacked: boolean, room: number): ReturnType<typeof layout> => {
       const first = layout((ad ? (narrow ? 170 : 250) : narrow ? 140 : 210) * s, pw, stacked)
-      if (first.ph <= room) return first
+      if (fits(first.ph, room)) return first
       // The model gives up size first.
       let f = layout(Math.max(60 * s, first.stage - (first.ph - room)), pw, stacked)
-      if (f.ph <= room || item.kind !== 'comment') return f
+      if (fits(f.ph, room) || item.kind !== 'comment') return f
       // Then a long quote's type, down to 12 px, and then its last lines,
       // cut with an ellipsis: on a phone on its side the words covered the
       // chiron and the marquee (review of #375).
-      for (let size = f.quoteSize - s; size >= 12 * s && f.ph > room; size -= s) f = layout(f.stage, pw, stacked, size)
-      if (f.ph <= room) return f
+      for (let size = f.quoteSize - s; size >= 12 * s && !fits(f.ph, room); size -= s) f = layout(f.stage, pw, stacked, size)
+      if (fits(f.ph, room)) return f
       const over = f.ph - room
       const keep = f.lines.length - Math.ceil(over / (f.quoteSize * 1.45))
       return layout(f.stage, pw, stacked, f.quoteSize, keep)
@@ -1057,16 +1132,18 @@ export class TvPainter {
     let top0 = top
     // Also when it only fit by cutting the quote: side by side may show all
     // of it (review of #375: one line at 915x412, seven at 844x390).
-    if (fitted.ph > room || fitted.cut) {
+    if (!fits(fitted.ph, room) || fitted.cut) {
       // Between the minimap and the logo's column.
       const sideW = Math.min(760 * s, sideRight - sideLeft)
       // Beside the clock, left of the logo's column: never under NOW
-      // PLAYING, so the chiron is its floor (review of #382).
+      // PLAYING, so the chiron is its floor (review of #382), or on a phone,
+      // where NOW PLAYING spans the width over the chiron, NOW PLAYING
+      // (sideBottom; review of #393).
       const sideRoom = Math.max(0, sideBottom - MY)
       const beside = fitPanel(sideW, false, sideRoom)
       const better = fitted.cut
-        ? beside.ph <= sideRoom && beside.lines.length > fitted.lines.length
-        : beside.ph <= sideRoom || beside.ph < fitted.ph
+        ? fits(beside.ph, sideRoom) && beside.lines.length > fitted.lines.length
+        : fits(beside.ph, sideRoom) || beside.ph < fitted.ph
       if (better) { fitted = beside; px = sideLeft; room = sideRoom; top0 = MY }
     }
     const { stage, pw, stacked, textX, textW, lines, quoteSize, ph } = fitted

@@ -39,6 +39,8 @@ export interface AdScene {
   theme: AdTheme
   /** The mark over the words. */
   mark?: boolean
+  /** A picture of a button after the last line: the menu's, as the app draws it. */
+  icon?: 'menu'
 }
 
 /**
@@ -76,7 +78,10 @@ export const HOSAKA_1: TvAd = {
     { from: 8.9, to: 11.5, kind: 'card', lines: ['THAT JUMP YOUR RIG', "CAN'T CRUNCH?", 'HAND IT OFF.'], accent: 2, theme: 'night' },
     { from: 11.5, to: 14.1, kind: 'card', lines: ['YOUR CYBERDECK', 'TAPS OUT.', "HOSAKA DOESN'T."], accent: 2, theme: 'teal' },
     { from: 14.1, to: 16.7, kind: 'card', lines: ['PAY IN SATS.', 'PROOF BACK', 'IN MINUTES.'], accent: 0, theme: 'magenta' },
-    { from: 16.7, to: 21.2, kind: 'end', lines: ['LOOK FOR OFFLOAD IN ONOSENDAI'], accent: 0, theme: 'night', mark: true },
+    // Where to find it, and the button to press (2026-10-19: "See the Cloud
+    // Compute panel in the ONOSENDAI menu <menu button for visually for
+    // reference>").
+    { from: 16.7, to: 21.2, kind: 'end', lines: ['SEE THE CLOUD COMPUTE PANEL', 'IN THE ONOSENDAI MENU'], accent: 0, theme: 'night', mark: true, icon: 'menu' },
   ],
 }
 

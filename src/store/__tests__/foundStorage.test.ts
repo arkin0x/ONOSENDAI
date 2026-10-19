@@ -237,5 +237,24 @@ describe('a bag Cyberspace TV kept', () => {
     await boot()
     expect(addedHow).toEqual([undefined])
   })
+
+  it('waits for the rows to be read, so a played row is never made watched', async () => {
+    const a = await boot()
+    const outer = await bagOf('walked to, then on TV')
+    await find(a.cache, a.found, outer)
+    // A new page: TV keeps the same bag before the rows have been read.
+    vi.resetModules()
+    const found = await import('../useFound')
+    const cache = await import('../../lib/foundCache')
+    const loading = found.useFound.getState().load(ME)
+    const { items, refs } = await cache.unbagRecording(outer, rk.key, undefined, undefined, 6)
+    cache.rememberBag(outer, rk.key, items, refs, 6, undefined, true)
+    await loading
+    await found.flushFound()
+    discovered = {}
+    addedHow.length = 0
+    await boot()
+    expect(addedHow).toEqual([undefined])
+  })
 })
 

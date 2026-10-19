@@ -39,6 +39,19 @@ import { ItemMark, itemMarkText } from './WorldMessages'
 const REACH = GRID_RADIUS * 8
 /** A find at rest: this much of its own brightness, below the avatars'. */
 export const REST = 0.6
+
+/**
+ * Dim a large find further, by how much of the screen it fills (review of
+ * #390, round 2): REST up to a quarter of the screen's height, down to 0.4
+ * of it when it fills the screen. Prepared and OFF until arkinox rules on
+ * it; the probe compares frames with it on and off.
+ */
+export const COVERAGE_DIM = false
+
+/** A find's resting level when its bounding sphere spans `c` of the screen's height (COVERAGE_DIM). */
+export function restingFor(c: number): number {
+  return REST * Math.min(1, Math.max(0.4, 1.25 - c))
+}
 /** A find in the way of the shot's avatar. */
 export const COVERING = 0.12
 /** How quickly a find fades out of the way and back, seconds. */
@@ -64,32 +77,48 @@ const OUT_OF_BLOOM = {
 
 type Lookable = Material & { color?: Color; uniforms?: Record<string, { value: unknown }> }
 
-/** One material at `level` of its brightness: colour scaled to REST where it has one, the rest as opacity. */
-function lookOne(m: Lookable, level: number): void {
+/**
+ * One material at `level` of its brightness: its colour scaled to its
+ * resting level where it has one, the rest as opacity. Faded, it writes no
+ * depth, so it never cuts a dark hole in a find behind it (review of #390,
+ * round 2); at rest it writes depth as it was made to.
+ */
+function lookOne(m: Lookable, level: number, rest: number, faded: boolean): void {
   const ud = m.userData
   const u = m.uniforms?.uOpacity
   if (ud.tvBase === undefined) {
     ud.tvBase = u ? (u.value as number) : m.opacity
-    if (m.color) { ud.tvColor = m.color.clone(); m.color.multiplyScalar(REST) }
+    if (m.color) ud.tvColor = m.color.clone()
+    ud.tvDepth = m.depthWrite
     Object.assign(m, OUT_OF_BLOOM)
     m.transparent = true
     m.needsUpdate = true
   }
   const base = ud.tvBase as number
+  if (m.color) m.color.copy(ud.tvColor as Color).multiplyScalar(rest)
   if (u) u.value = base * level
-  else m.opacity = base * (m.color ? level / REST : level)
+  else m.opacity = base * (m.color ? Math.min(1, level / rest) : level)
+  m.depthWrite = faded ? false : ud.tvDepth as boolean
 }
 
-/** Everything drawn under `obj` at `level`. Hoisted per call through `levelNow`, so a frame allocates nothing. */
+// The look of the group being walked, hoisted so a frame allocates nothing.
 let levelNow = REST
+let restNow = REST
+let fadedNow = false
 function lookObj(obj: Object3D): void {
+  // Faded, it draws after the finds at rest, over them.
+  obj.userData.tvOrder ??= obj.renderOrder
+  obj.renderOrder = (obj.userData.tvOrder as number) + (fadedNow ? 1 : 0)
   const m = (obj as { material?: Lookable | Lookable[] }).material
   if (!m) return
-  if (Array.isArray(m)) for (const one of m) lookOne(one, levelNow)
-  else lookOne(m, levelNow)
+  if (Array.isArray(m)) for (const one of m) lookOne(one, levelNow, restNow, fadedNow)
+  else lookOne(m, levelNow, restNow, fadedNow)
 }
-function look(obj: Object3D, level: number): void {
+/** Everything drawn under `obj` at `level`, resting at `rest`: faded below most of it. */
+export function look(obj: Object3D, level: number, rest: number): void {
   levelNow = level
+  restNow = rest
+  fadedNow = level < rest * 0.95
   obj.traverse(lookObj)
 }
 
@@ -169,7 +198,32 @@ function markInTheWay(mark: Object3D, camera: PerspectiveCamera, height: number)
   return coversSubject(eye, subjectAt, subject.radius, thingAt, r)
 }
 
-interface Drawn { group: Group; level: number; mark: boolean }
+interface Drawn {
+  group: Group
+  level: number
+  mark: boolean
+  /** Its resting level: REST, or less for a large one with COVERAGE_DIM on. */
+  rest: number
+  /** Its bounding sphere, measured every MEASURE_FRAMES frames for COVERAGE_DIM, and when. */
+  sphere: Sphere | null
+  measured: number
+}
+
+/** How often a find's size on screen is measured for COVERAGE_DIM, in frames. */
+const MEASURE_FRAMES = 20
+let frameNo = 0
+
+/** How much of the screen's height a find's bounding sphere spans, from the camera. */
+function coverage(d: Drawn, camera: PerspectiveCamera): number {
+  if (!d.sphere || frameNo - d.measured >= MEASURE_FRAMES) {
+    box.setFromObject(d.group)
+    d.sphere = box.isEmpty() ? null : box.getBoundingSphere(d.sphere ?? new Sphere())
+    d.measured = frameNo
+  }
+  if (!d.sphere) return 0
+  const dist = Math.max(1e-6, camera.position.distanceTo(d.sphere.center))
+  return d.sphere.radius / (dist * Math.tan((camera.fov * Math.PI) / 360))
+}
 
 /** A key or a chest TV opened: its mark, named as TV names people. */
 function TvMark({ text, author, at, register }: { text: string; author: string; at: [number, number, number]; register: (g: Group | null) => void }): JSX.Element {
@@ -214,7 +268,7 @@ export function TvFinds({ axes }: { axes: ViewAxes }): JSX.Element | null {
     let fn = registers.current.get(key)
     if (!fn) {
       fn = (g: Group | null) => {
-        if (g) drawn.current.set(key, { group: g, level: REST, mark })
+        if (g) drawn.current.set(key, { group: g, level: REST, mark, rest: REST, sphere: null, measured: -Infinity })
         else drawn.current.delete(key)
       }
       registers.current.set(key, fn)
@@ -224,14 +278,16 @@ export function TvFinds({ axes }: { axes: ViewAxes }): JSX.Element | null {
 
   useFrame((state, dt) => {
     if (drawn.current.size === 0) return
+    frameNo++
     const aimed = aim(state.camera)
     const k = 1 - Math.exp(-dt / FADE_TAU)
     let covering = 0
     for (const d of drawn.current.values()) {
       const inTheWay = aimed && (d.mark ? markInTheWay(d.group.children[0], state.camera as PerspectiveCamera, state.size.height) : shardInTheWay(d.group))
       if (inTheWay) covering++
-      d.level += ((inTheWay ? COVERING : REST) - d.level) * k
-      look(d.group, d.level)
+      if (COVERAGE_DIM && !d.mark) d.rest = restingFor(coverage(d, state.camera as PerspectiveCamera))
+      d.level += ((inTheWay ? COVERING : d.rest) - d.level) * k
+      look(d.group, d.level, d.rest)
     }
     if (import.meta.env.DEV) (window as unknown as { __tvFade?: unknown }).__tvFade = { drawn: drawn.current.size, covering, aimed }
   }, FINDS_PRIORITY)

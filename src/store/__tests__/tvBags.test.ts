@@ -52,10 +52,11 @@ import { bagTemplate, chestInnerTemplate, chestItemOf, keyInnerTemplate, message
 import { openerFor, sealEntries } from '../../lib/chests'
 import { heldFromPasted, openingKeys } from '../../lib/inventory'
 import { setFoundSink } from '../../lib/foundCache'
+import { rescanAll } from '../../lib/secrets/rescan'
 import { nextAd } from '../../lib/tv/hosakaAd'
 import { cueItem } from '../useTv'
 import { TvPainter, tickerItems, type TvAssets } from '../../scene/tvPainter'
-import { FIND_LINE_S, TV_SCAN_HEIGHTS, findLines, foundAsOf, sealedSegment, setTvAsk, setTvScan, useTv, type TvFound } from '../useTv'
+import { FIND_LINE_S, TV_SCAN_HEIGHTS, findLines, foundAsOf, sealedSegment, setTvAsk, setTvScan, tvScanBusy, useTv, type TvFound } from '../useTv'
 import { SCAN_MAX_HEIGHT, useShards } from '../useShards'
 import { useSecrets } from '../useSecrets'
 import { useCeremony } from '../useCeremony'
@@ -140,6 +141,8 @@ beforeEach(() => {
   hold = vi.spyOn(useSecrets.getState(), 'hold').mockImplementation(() => {})
   recordPlace = vi.spyOn(useSecrets.getState(), 'recordPlace').mockImplementation(async () => {})
   addDiscovered = vi.spyOn(useShards.getState(), 'addDiscovered')
+  // A spy made again keeps what it saw before; each test starts from none.
+  for (const spy of [hold, recordPlace, addDiscovered]) spy.mockClear()
 })
 
 afterEach(() => {
@@ -155,8 +158,10 @@ async function run(ms: number, seen?: Array<{ t: number | null; found: number }>
   for (let t = 0; t < ms; t += 100) {
     each?.()
     await vi.advanceTimersByTimeAsync(100)
-    // Opening a bag is WebCrypto, which answers on the real event loop, not the fake clock.
-    await new Promise((r) => setImmediate(r))
+    // Opening a bag is WebCrypto, which answers on the real event loop, not
+    // the fake clock: the tape is held still until the scan's work has
+    // landed, so it never plays on past a place before its bags are open.
+    for (let i = 0; i < 5000 && (i === 0 || tvScanBusy()); i++) await new Promise((r) => setImmediate(r))
     seen?.push({ t: useTv.getState().tapeTime, found: Object.keys(useTv.getState().found).length })
   }
 }
@@ -172,7 +177,7 @@ describe('TV opens bags where its avatars stand', () => {
     expect(Math.max(...heights)).toBe(SCAN_MAX_HEIGHT)
   })
 
-  it('shows a shard and adds it, but neither holds the key nor keeps a bag it shows only part of', async () => {
+  it('shows a shard and adds it, but holds no key and keeps no bag it shows only part of', async () => {
     const shard = shardIn()
     bags.push(await seal(2, T0, [shard, messageIn('a note'), messageIn(COIN)]))
     useTv.getState().start()
@@ -182,8 +187,8 @@ describe('TV opens bags where its avatars stand', () => {
     expect(Object.keys(s.found)).toEqual([shard.id])
     expect(Object.keys(useShards.getState().discovered)).toEqual([shard.id])
     for (const call of addDiscovered.mock.calls) for (const h of call[0] as Array<{ type: string }>) expect(h.type).not.toBe('message')
-    // A held key is scanned again later (RESCAN), and would open the note and the coin.
     expect(hold).not.toHaveBeenCalled()
+    // Kept, it would open whole on the next load, the note and the coin with it.
     expect(kept).toEqual([])
     expect(recordPlace).not.toHaveBeenCalled()
     expect(useCeremony.getState().chip).toBeNull()
@@ -192,18 +197,33 @@ describe('TV opens bags where its avatars stand', () => {
     expect(published).toEqual([])
   })
 
-  it('holds the key and keeps the bag, as watched, when TV shows the whole bag', async () => {
-    const shard = shardIn()
-    const bag = await seal(2, T0, [shard])
-    bags.push(bag)
+  it('keeps a bag it shows whole as watched, and holds no region key, so RESCAN ALL and SCAN reach nothing it found', async () => {
+    const { key, event: keyEvent } = keyIn('Wind Key')
+    const { event: chestEvent } = chestIn('Strongbox', key.itemPubkey, [messageIn('behind the door'), messageIn(COIN)])
+    const bag = await seal(2, T0, [keyEvent, chestEvent])
+    // Someone else's words and coin in the same region: a lookup id names a region, not a bag.
+    const other = generateSecretKey()
+    const rk = regionKeyAt(place, 2, 20)
+    const theirs = finalizeEvent(await bagTemplate([finalizeEvent(messageInnerTemplate(COIN, place, 0, T0), other) as NostrEvent], rk.key, rk.lookupId, 2, T0), other) as NostrEvent
+    bags.push(bag, theirs)
     useTv.getState().start()
     await run(9000)
-    expect(Object.keys(useTv.getState().found)).toEqual([shard.id])
-    const rk = regionKeyAt(place, 2, 20)
-    expect(hold).toHaveBeenCalledTimes(1)
-    expect(hold.mock.calls[0][0]).toEqual([expect.objectContaining({ lookupId: rk.lookupId, height: 2, source: 'scan', base: { x: '1000', y: '4', z: '4' } })])
+    expect(Object.keys(useTv.getState().found).sort()).toEqual([keyEvent.id, chestEvent.id].sort())
     expect(kept).toEqual([{ outer: bag, watched: true }])
+    // No region key held by TV, so none for the Secrets list to SCAN.
+    expect(hold).not.toHaveBeenCalled()
+    expect(Object.keys(useSecrets.getState().keys)).toEqual([])
     expect(recordPlace).not.toHaveBeenCalled()
+    useTv.getState().stop()
+
+    // RESCAN ALL, and SCAN on every row the Secrets list has: nothing TV found is asked about or opened.
+    const before = asked.length
+    const status = await rescanAll()
+    expect(status).toMatchObject({ asked: 0, found: 0, held: 0, error: null })
+    for (const k of Object.values(useSecrets.getState().keys)) await useShards.getState().rescan(k.lookupId, k.keyHex)
+    expect(asked.slice(before).flat()).not.toContain(rk.lookupId)
+    expect(Object.values(useShards.getState().discovered).some((h) => h.type === 'message')).toBe(false)
+    expect(useInventory.getState().items[keyEvent.id]?.watched).toBe(true)
     expect(useCeremony.getState().chip).toBeNull()
   })
 

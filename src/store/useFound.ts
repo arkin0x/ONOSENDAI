@@ -93,9 +93,29 @@ function enforceBudget(d: IDBDatabase, budget = FOUND_BUDGET_BYTES): Promise<voi
   return deleteFound(d, evict)
 }
 
+/**
+ * Bags Cyberspace TV kept before this identity's rows were read: held back
+ * until they are, since only then does `remember` know whether the bag is
+ * already a played row, which TV must never make watched (review of #390,
+ * round 2).
+ */
+let waiting: Array<{ owner: string; args: Parameters<typeof remember> }> = []
+
+/** Write what TV held back, now the rows are read; another identity's is dropped. */
+function rememberWaiting(owner: string): void {
+  const held = waiting
+  waiting = []
+  for (const w of held) if (w.owner === owner) remember(...w.args)
+}
+
 /** A bag that opened: kept, unless the row already holds this or a newer version seen recently. */
 function remember(outer: NostrEvent, keyHex: string, items: Hidden[], refs: Record<string, NostrEvent>, height: number | undefined, origin: RegionOrigin | undefined, watched: boolean): void {
   const owner = useCyberspace.getState().identity.pubkey
+  const state = useFound.getState()
+  if (watched && (state.owner !== owner || state.storage === 'loading')) {
+    waiting.push({ owner, args: [outer, keyHex, items, refs, height, origin, watched] })
+    return
+  }
   const key = rowKeyOf(owner, outer)
   if (!key) return
   const loaded = useFound.getState().owner === owner
@@ -181,11 +201,12 @@ export const useFound = create<FoundState>((set, get) => ({
     if (owner !== get().owner) { rows.clear(); opened.clear(); set({ owner, storage: 'loading' }) }
     const d = await database()
     if (get().owner !== owner) return
-    if (!d) { set({ storage: 'memory' }); return }
+    if (!d) { set({ storage: 'memory' }); rememberWaiting(owner); return }
     let stored: FoundBag[]
     try { stored = await readFound(d, owner) } catch (err) {
       console.warn(`[found] could not read finds: ${err instanceof Error ? err.message : String(err)}`)
       set({ storage: 'memory' })
+      rememberWaiting(owner)
       return
     }
     if (get().owner !== owner) return
@@ -206,6 +227,7 @@ export const useFound = create<FoundState>((set, get) => ({
     }
     if (bad.length > 0) void serial((db) => deleteFound(db, bad))
     set({ storage: 'indexeddb' })
+    rememberWaiting(owner)
     // Through the same door as a scan's finds: deletions you made are
     // honored, keys inside are held, chests a held key opens are opened.
     if (found.length > 0) useShards.getState().addDiscovered(found)
@@ -220,6 +242,7 @@ export function resetFoundForTests(): void {
   db = null
   rows.clear()
   opened.clear()
+  waiting = []
   writes = Promise.resolve()
   useFound.setState({ owner: '', storage: 'loading' })
 }

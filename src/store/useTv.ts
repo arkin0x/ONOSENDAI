@@ -34,7 +34,6 @@ import { useCoordRoute } from './useCoordRoute'
 import { usePersonCard } from './usePersonCard'
 import { startMusic, stopMusic } from './useTvMusic'
 import { SCAN_MAX_HEIGHT } from './useShards'
-import { useSecrets, type HeldKey } from './useSecrets'
 import { TvScanner, scanHeights, type OpenedBag, type ScanDeps, type ScanPlace } from '../lib/tv/scan'
 import { regionKeyWorker, type RegionKeyWorker } from '../lib/regionKeyOffThread'
 import { hiddenLabel, type Hidden } from '../lib/hidden'
@@ -362,13 +361,15 @@ let scanner: TvScanner | null = null
 let keyWorker: RegionKeyWorker | null = null
 /** The shots whose places were handed to the scanner, this run. */
 const prepared = new Set<string>()
-/** The lookup ids held for you (useSecrets hold) and the bags kept as finds (rememberBag), this run: once each. */
-const heldLookups = new Set<string>()
+/** The bags kept as finds (rememberBag), this run: once each. */
 const keptBags = new Set<string>()
 /** What the last look at the scan was made of: nothing changed, no look. */
 let looked: { avatars: TvState['avatars']; tapeTime: number | null; version: number; plane: number; scanner: TvScanner } | null = null
 /** Replacements for the scan's reads, for tests. */
 let scanOverride: Partial<ScanDeps> | null = null
+
+/** Whether the scan still has work under way, for tests: what it opens has not all landed. */
+export function tvScanBusy(): boolean { return (scanner?.busy ?? 0) > 0 }
 
 /** Swap the scan's key derivation, relay read or opening, for tests (null puts them back). */
 export function setTvScan(deps: Partial<ScanDeps> | null): void { scanOverride = deps }
@@ -441,33 +442,27 @@ function scanTick(s: TvState): void {
 /**
  * Show what the scan opened, and add it to your finds as spectating does
  * (arkinox, 2026-10-19: "add to your finds. My rationale: this encourages
- * users to watch tv to find new stuff"): the items, and the keys that opened
- * them held. Only what TV shows, a shard, a key or a chest: a message or a
- * coin in the same bag is neither shown nor added. No place is recorded, since
- * TV is not somewhere you stood, and no chip is raised over the tube; the
- * ticker says FOUND instead.
+ * users to watch tv to find new stuff"). Only what TV shows, a shard, a key
+ * or a chest: a message or a coin in the same bag is neither shown nor
+ * added. No place is recorded, since TV is not somewhere you stood, and no
+ * chip is raised over the tube; the ticker says FOUND instead.
+ *
+ * No region key is held, ever (review of #390, round 2). A held key is an
+ * ordinary key: RESCAN ALL and the Secrets list's SCAN open everything under
+ * it as played, which would turn TV's watched finds into played ones, open a
+ * chest sealed to a key TV showed, and open other people's messages and
+ * coins in the same region (a lookup id names a region, not a bag). What TV
+ * found is kept by the found cache instead, as watched.
  */
 function reveal(s: TvState, opened: OpenedBag[]): void {
   const now = performance.now()
   const fresh: Array<{ h: Hidden; bagAt: number }> = []
-  const keys: HeldKey[] = []
   const seen = new Set<string>()
   for (const o of opened) {
     for (const h of o.items) {
       if (s.found[h.eventId] || seen.has(h.eventId)) continue
       seen.add(h.eventId)
       fresh.push({ h, bagAt: o.bag.created_at })
-    }
-    // Only for a bag TV shows whole, as keeping it is: a held key is scanned
-    // again later (RESCAN), and there it would open the bag's messages and
-    // coins too (review of #390).
-    if (o.whole && !heldLookups.has(o.key.lookupId)) {
-      heldLookups.add(o.key.lookupId)
-      keys.push({
-        lookupId: o.key.lookupId, keyHex: o.key.keyHex, height: o.key.height,
-        base: { x: String(o.key.base.x), y: String(o.key.base.y), z: String(o.key.base.z) },
-        plane: o.key.plane as 0 | 1, source: 'scan', at: Math.floor(Date.now() / 1000),
-      })
     }
     // Kept across a reload only when TV shows the whole bag: a kept bag
     // opens again whole (useFound), and a message in it would become a find.
@@ -490,7 +485,6 @@ function reveal(s: TvState, opened: OpenedBag[]): void {
     // keys open nothing by themselves (useShards addDiscovered).
     useShards.getState().addDiscovered(fresh.map(({ h }) => h), { watched: true })
   }
-  if (keys.length > 0) useSecrets.getState().hold(keys)
 }
 
 async function readMore(id: number, t: number): Promise<void> {
@@ -935,7 +929,6 @@ export const useTv = create<TvState>((set, get) => ({
     scanner = null
     looked = null
     prepared.clear()
-    heldLookups.clear()
     keptBags.clear()
     stopMusic()
     set({ on: false, shot: null, played: 0, tapeTime: null, avatars: {}, arrivals: [], reactions: [], found: {}, finds: [], chains: {}, boxes: [], jump: null, ad: null, status: 'tuning' })

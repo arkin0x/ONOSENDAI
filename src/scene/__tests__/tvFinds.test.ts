@@ -13,8 +13,8 @@ if (typeof localStorage === 'undefined') {
 }
 vi.mock('../../lib/relay', () => ({ query: async () => [], queryEach: async () => [], queryAny: async () => [], publish: async () => ({ ok: true }), publishMany: async () => ({ ok: true }), relaySet: () => [] }))
 
-import { BoxGeometry, DoubleSide, Group, Mesh, MeshBasicMaterial, PlaneGeometry, Quaternion, Sphere, Vector3 } from 'three'
-import { aimRays, shardInTheWay } from '../TvFinds'
+import { BoxGeometry, DoubleSide, Group, Mesh, MeshBasicMaterial, OneFactor, PlaneGeometry, Quaternion, Sphere, Vector3, ZeroFactor } from 'three'
+import { COVERAGE_DIM, COVERING, REST, aimRays, look as lookFind, restingFor, shardInTheWay } from '../TvFinds'
 
 /** A shard as the scene draws it: a group holding a mesh of faces. */
 function shard(geometry: BoxGeometry | PlaneGeometry, at: [number, number, number], turn?: [number, number, number]): Group {
@@ -55,3 +55,35 @@ describe('a find in the way of the shot\'s avatar', () => {
     expect(shardInTheWay(shard(new BoxGeometry(0.2, 0.2, 0.2), [0.35, 2, 2]))).toBe(true)
   })
 })
+
+describe('how a find looks', () => {
+  it('at rest writes depth and draws in its own order; faded it writes none and draws after', () => {
+    const g = shard(new BoxGeometry(1, 1, 1), [0, 0, 0])
+    const mesh = g.children[0] as Mesh
+    const m = mesh.material as MeshBasicMaterial
+    lookFind(g, REST, REST)
+    expect(m.depthWrite).toBe(true)
+    expect(mesh.renderOrder).toBe(0)
+    expect(m.color.r).toBeCloseTo(REST)
+    lookFind(g, COVERING, REST)
+    expect(m.depthWrite).toBe(false)
+    expect(mesh.renderOrder).toBe(1)
+    expect(m.opacity).toBeCloseTo(COVERING / REST)
+    lookFind(g, REST, REST)
+    expect(m.depthWrite).toBe(true)
+    expect(mesh.renderOrder).toBe(0)
+    // Never lit into the bloom: the alpha already there is kept.
+    expect(m.blendSrcAlpha).toBe(ZeroFactor)
+    expect(m.blendDstAlpha).toBe(OneFactor)
+  })
+
+  it('dims a large find by how much of the screen it fills, when that is on (off until ruled)', () => {
+    expect(COVERAGE_DIM).toBe(false)
+    expect(restingFor(0.1)).toBeCloseTo(REST)
+    expect(restingFor(0.25)).toBeCloseTo(REST)
+    expect(restingFor(0.75)).toBeCloseTo(REST * 0.5)
+    expect(restingFor(1)).toBeCloseTo(0.24)
+    expect(restingFor(3)).toBeCloseTo(0.24)
+  })
+})
+

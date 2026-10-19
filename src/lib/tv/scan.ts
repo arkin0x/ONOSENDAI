@@ -130,6 +130,8 @@ export class TvScanner {
   version = 0
   /** How many relay questions it has asked, for tests. */
   questions = 0
+  /** How many prepares are under way: work still to land. */
+  busy = 0
 
   constructor(private readonly deps: ScanDeps) {}
 
@@ -139,6 +141,11 @@ export class TvScanner {
    * nothing it finds is shown from here.
    */
   async prepare(places: ScanPlace[]): Promise<void> {
+    this.busy++
+    try { await this.scan(places) } finally { this.busy-- }
+  }
+
+  private async scan(places: ScanPlace[]): Promise<void> {
     const { heights } = this.deps
     const jobs: Promise<void>[] = []
     for (const { position: p, plane } of places) {

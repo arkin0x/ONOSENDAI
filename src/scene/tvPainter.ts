@@ -30,6 +30,7 @@ import { itemLength, type Shot, type TapeItem } from '../lib/tv/director'
 import { LANDMARKS } from '../hud/ScaleLadder'
 import { CUT_MS, contentsWords, quoteOf, segmentDoing, typePace, TYPE_DELAY_S } from '../hud/TvSegments'
 import { placeable, shotProgress, type TvAvatar } from '../store/useTv'
+import { AD_SUBTITLE, adById, type AdScene, type AdTheme } from '../lib/tv/hosakaAd'
 import type { Census, ChainTimes } from '../lib/tv/stats'
 import type { Position } from '../lib/space'
 
@@ -69,6 +70,12 @@ const ACCENT = '#00e5ff'
 /** NOW PLAYING's progress, purple to pink (arkinox, 2026-10-18: "make the progress something cool like a gradient from purple to pink"). */
 const MUSIC_PURPLE = '#8a2be2'
 const MUSIC_PINK = '#ff2d95'
+/** The commercial's colours: the HOSAKA banner's teal, its mark's magenta, and the night between. */
+const AD_THEMES: Record<AdTheme, { deep: string; stripe: string; accent: string }> = {
+  teal: { deep: '#03343a', stripe: 'rgba(29, 233, 182, 0.12)', accent: '#1de9b6' },
+  magenta: { deep: '#3a0322', stripe: 'rgba(255, 45, 149, 0.14)', accent: '#ff2d95' },
+  night: { deep: '#14052a', stripe: 'rgba(138, 92, 255, 0.12)', accent: '#ff2d95' },
+}
 /** NOW PLAYING's height, CSS px, and as one line where there is no room for it. */
 const NOW_PLAYING_PX = 76
 const NOW_PLAYING_LINE_PX = 34
@@ -118,6 +125,8 @@ export interface TvPicture {
   arrivals: Array<{ pubkey: string; at: number }>
   reactions: Array<{ pubkey: string; at: number; content: string; on: 'shard' | 'move' }>
   avatars: Record<string, TvAvatar>
+  /** The commercial on screen, which spot and since `at` (performance.now()), or null (lib/tv/hosakaAd). */
+  ad?: { at: number; id: string } | null
 }
 
 /** What the painter needs from outside the store. */
@@ -136,6 +145,10 @@ export interface TvAssets {
   color: (pubkey: string) => string
   /** The music playing under the picture (store/useTvMusic), for NOW PLAYING; none when nothing is. */
   music?: TvMusic | null
+  /** The HOSAKA banner, playing, for the commercial; null until it has a frame. */
+  hosaka?: CanvasImageSource | null
+  /** The HOSAKA mark alone (public/hosaka-mark.png), for the commercial's cards; null until loaded. */
+  hosakaMark?: CanvasImageSource | null
 }
 
 /** What NOW PLAYING shows. */
@@ -155,6 +168,8 @@ export interface TvMusic {
 
 /** A rectangle on the flat frame, CSS px. */
 export interface FlatRect { x: number; y: number; w: number; h: number }
+/** A rectangle on the canvas, canvas px. */
+type Region = FlatRect
 
 /** The words on the marquee as of the moment on tape. */
 export function tickerItems(p: TvPicture, name: (pk: string) => string): string[] {
@@ -339,6 +354,18 @@ export class TvPainter {
       ctx.arc(sunAt.x, sunAt.y, size * 0.075, 0, Math.PI * 2)
       ctx.stroke()
       ctx.restore()
+      // A black sun, not a ring: its face is solid black whichever side of
+      // the cube it is on (arkinox, 2026-10-19: "the center should be 100%
+      // opaque black"), over the rim's glow, which would tint it purple on
+      // a phone's small map (review of #384); only the rim fades behind the cube.
+      ctx.save()
+      ctx.globalAlpha = 1
+      ctx.shadowBlur = 0
+      ctx.fillStyle = '#000'
+      ctx.beginPath()
+      ctx.arc(sunAt.x, sunAt.y, size * 0.075 - 1.5 * s, 0, Math.PI * 2)
+      ctx.fill()
+      ctx.restore()
     }
     const grid = (vy: number, colour: string): void => {
       ctx.save()
@@ -418,6 +445,12 @@ export class TvPainter {
     const MX = Math.round(W * MARGIN_X)
     const MY = Math.round(H * MARGIN_Y)
     const narrow = cssW < 600
+
+    // A commercial owns the picture: nothing of the tape under it.
+    if (p.ad) {
+      this.commercial(p.ad, p, a, W, H, MX, MY, s, narrow, now, reduced, dt, scale)
+      return
+    }
 
     // The logo, top right: the margins everything else takes.
     const lw = Math.min(LOGO_PX * s, W * LOGO_SHARE)
@@ -633,6 +666,176 @@ export class TvPainter {
     ctx.textAlign = 'right'
     ctx.fillStyle = 'rgba(242, 251, 255, 0.85)'
     ctx.fillText(`1 CELL = ${formatCellSize(scaleExp).toUpperCase()}`, x + w, y + 18 * s)
+  }
+
+  /**
+   * The HOSAKA commercial (lib/tv/hosakaAd), cut as a TV spot: the banner as
+   * big as the tube holds, then one card at a time slamming in over speed
+   * stripes in the brand's colours, then the end card with the mark. Over a
+   * ground that hides the world; NOW PLAYING and the marquee stay, with an
+   * ADVERTISEMENT tag in the corner, as a channel marks its breaks.
+   */
+  private commercial(ad: { at: number; id: string }, p: TvPicture, a: TvAssets, W: number, H: number, MX: number, MY: number, s: number, narrow: boolean, now: number, reduced: boolean, dt: number, scale: number): void {
+    const ctx = this.ctx
+    const t = Math.max(0, (now - ad.at) / 1000 - CUT_MS / 1000)
+    const scenes = adById(ad.id).scenes
+    const scene = scenes.find((sc) => t >= sc.from && t < sc.to) ?? scenes[scenes.length - 1]
+    const tc = t - scene.from
+    const theme = AD_THEMES[scene.theme]
+    // In over the cut's own length, so the cut into the break shows (review of #384).
+    const enter = clamp01((now - ad.at) / CUT_MS)
+    ctx.save()
+    ctx.globalAlpha = enter
+
+    // The ground, and speed stripes running across it.
+    const ground = ctx.createLinearGradient(0, 0, W, H)
+    ground.addColorStop(0, theme.deep)
+    ground.addColorStop(1, '#030008')
+    ctx.fillStyle = ground
+    ctx.fillRect(0, 0, W, H)
+    if (scene.kind !== 'banner') this.stripes(theme.stripe, W, H, s, reduced ? 0 : t)
+
+    const tickH = 28 * s
+    const tickY = H - MY - tickH
+    const npW = narrow ? W - 2 * MX : Math.min(LOGO_PX * s, W * LOGO_SHARE) + 16 * s
+    const npBottom = tickY - 10 * s - CHIRON_PX[narrow ? 1 : 0] * s - 10 * s
+    // NOW PLAYING stays where the spot's words keep room beside or above it;
+    // on a screen too short for both it steps aside, as it does on the tape,
+    // and the music plays on.
+    const npRoom = npBottom - NOW_PLAYING_PX * s - 14 * s - (MY + 26 * s) >= (narrow ? 110 : 60) * s
+    // Where the spot can draw: the whole picture over NOW PLAYING's top, or,
+    // beside it on a wide screen, the full height to its left; whichever
+    // gives the words more size (review of #384: fenced above it across the
+    // whole width, a landscape phone's call came out at 1.6 px).
+    const top = MY + 26 * s
+    const floorY = tickY - 14 * s
+    const npTopY = npBottom - NOW_PLAYING_PX * s
+    const music = a.music !== undefined && a.music !== null && npRoom
+    const regions: Region[] = [{ x: MX, y: top, w: W - 2 * MX, h: (music ? npTopY : floorY + 14 * s) - 14 * s - top }]
+    if (music && !narrow) regions.push({ x: MX, y: top, w: W - MX - npW - 14 * s - MX, h: floorY - top })
+
+    // A card comes in hard: big, then down to size, with a jolt as it lands.
+    const k = reduced ? 1 : clamp01(tc / 0.22)
+    const zoom = 1 + 0.35 * (1 - k) * (1 - k)
+    const jolt = reduced ? 0 : Math.sin(tc * 70) * 4 * s * (1 - clamp01((tc - 0.22) / 0.2)) * (tc > 0.22 ? 1 : 0)
+    // And goes with a quick fade into the next.
+    const out = reduced ? 1 : clamp01((scene.to - t) / 0.15)
+
+    ctx.save()
+    ctx.globalAlpha = (reduced ? 1 : clamp01(tc / 0.1)) * out
+    ctx.textAlign = 'center'
+    if (scene.kind === 'banner') {
+      // "bombastically huge": the tube's whole height; NOW PLAYING may sit on its corner.
+      const h = floorY - top
+      const bw = Math.min(W - MX, h * 1.6)
+      const bh = bw / 1.6
+      ctx.translate(W / 2 + jolt, top + h / 2)
+      ctx.scale(zoom, zoom)
+      if (a.hosaka) ctx.drawImage(a.hosaka, -bw / 2, -bh / 2, bw, bh)
+    } else {
+      const mark = scene.mark && a.hosakaMark ? a.hosakaMark : null
+      const fits = regions.map((r) => this.fitCard(scene, r, mark !== null, s, narrow))
+      const best = fits.reduce((b, f) => (f.size > b.size + 0.5 ? f : b))
+      const { region: r, size, markH, subLines, subSize } = best
+      const markW = markH * (308 / 334)
+      const gap = markH ? 18 * s : 0
+      const subH = scene.kind === 'end' ? subLines.length * subSize * 1.4 + 22 * s : 0
+      const blockH = markH + gap + subH + scene.lines.length * size * 1.12
+      ctx.translate(r.x + r.w / 2 + jolt, r.y + r.h / 2)
+      ctx.scale(zoom, zoom)
+      let y = -blockH / 2
+      if (mark && markH) {
+        ctx.drawImage(mark, -markW / 2, y, markW, markH)
+        y += markH + gap
+      }
+      if (scene.kind === 'end') {
+        // The name's long form, subtly, under the mark.
+        ctx.font = `${subSize}px ${TV_FONT}`
+        ctx.fillStyle = 'rgba(242, 221, 255, 0.6)'
+        for (const line of subLines) { y += subSize * 1.4; ctx.fillText(line, 0, y) }
+        y += 22 * s
+      }
+      ctx.font = `700 ${size}px ${TV_FONT}`
+      scene.lines.forEach((line, i) => {
+        y += size * 1.12
+        const accent = i === scene.accent
+        ctx.save()
+        ctx.fillStyle = accent ? theme.accent : FG
+        ctx.shadowColor = accent ? theme.accent : 'rgba(0, 0, 0, 0.8)'
+        ctx.shadowBlur = (accent ? 18 : 10) * s
+        // The end card's call blinks, slowly.
+        if (scene.kind === 'end' && !reduced) ctx.globalAlpha *= 0.6 + 0.4 * (Math.floor(now / 600) % 2)
+        ctx.fillText(line, 0, y - size * 0.18)
+        ctx.restore()
+      })
+    }
+    ctx.restore()
+    ctx.restore()
+
+    // The channel round it.
+    ctx.save()
+    ctx.font = `700 ${9 * s}px ${TV_FONT}`
+    ctx.textAlign = 'left'
+    const tag = 'ADVERTISEMENT'
+    const tw = ctx.measureText(tag).width
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.55)'
+    ctx.fillRect(MX, MY, tw + 14 * s, 18 * s)
+    ctx.strokeStyle = 'rgba(242, 251, 255, 0.6)'
+    ctx.lineWidth = Math.max(1, s)
+    ctx.strokeRect(MX + 0.5, MY + 0.5, tw + 14 * s - 1, 18 * s - 1)
+    ctx.fillStyle = 'rgba(242, 251, 255, 0.85)'
+    ctx.fillText(tag, MX + 7 * s, MY + 12.5 * s)
+    ctx.restore()
+    this.marquee(p, a, MX, tickY, W - MX, tickH, s, dt)
+    const npTop = a.music && npRoom ? this.nowPlaying(a.music, W - MX - npW, npBottom, npW, s, now, reduced, false) : null
+    this.npRect = a.music && npTop !== null ? { x: W - MX - npW, y: npTop, w: npW, h: npBottom - npTop } : null
+    this.cardScale = scale
+  }
+
+  /**
+   * How a card fits `r`: the type as big as the widest line and the height
+   * allow, the mark giving way first and going altogether before the type
+   * goes under its floor (18 px a punch line, 12 the end card's call).
+   */
+  private fitCard(scene: AdScene, r: Region, withMark: boolean, s: number, narrow: boolean): { region: Region; size: number; markH: number; subLines: string[]; subSize: number } {
+    const ctx = this.ctx
+    const end = scene.kind === 'end'
+    const maxW = Math.max(40 * s, r.w - 20 * s)
+    const floor = (end ? 12 : 18) * s
+    let size = (end ? (narrow ? 13 : 20) : narrow ? 40 : 96) * s
+    ctx.font = `700 ${size}px ${TV_FONT}`
+    const widest = Math.max(...scene.lines.map((l) => ctx.measureText(l).width))
+    if (widest > maxW) size *= maxW / widest
+    const subSize = (narrow ? 8.5 : 11) * s
+    ctx.font = `${subSize}px ${TV_FONT}`
+    const subLines = end ? wrap(ctx, AD_SUBTITLE.toUpperCase(), maxW) : []
+    const subH = end ? subLines.length * subSize * 1.4 + 22 * s : 0
+    const lineH = (sz: number): number => scene.lines.length * sz * 1.12
+    // The mark takes what the words leave it at their floor, up to its own share.
+    let markH = withMark ? Math.min(r.h * (end ? 0.55 : 0.32), (end ? 300 : 170) * s, r.h - subH - lineH(Math.min(size, Math.max(floor, size * 0.6))) - 18 * s) : 0
+    if (markH < 36 * s) markH = 0
+    size = Math.min(size, (r.h - markH - (markH ? 18 * s : 0) - subH) / (scene.lines.length * 1.12))
+    return { region: r, size: Math.max(floor, size), markH, subLines, subSize }
+  }
+
+  /** Diagonal bands running across the frame, as a spot's fast cut has. */
+  private stripes(colour: string, W: number, H: number, s: number, t: number): void {
+    const ctx = this.ctx
+    const gap = 120 * s
+    const band = 34 * s
+    const run = (t * 420 * s) % gap
+    ctx.save()
+    ctx.fillStyle = colour
+    ctx.beginPath()
+    for (let x = -H - gap + run; x < W + gap; x += gap) {
+      ctx.moveTo(x, H)
+      ctx.lineTo(x + H * 0.6, 0)
+      ctx.lineTo(x + H * 0.6 + band, 0)
+      ctx.lineTo(x + band, H)
+      ctx.closePath()
+    }
+    ctx.fill()
+    ctx.restore()
   }
 
   /**

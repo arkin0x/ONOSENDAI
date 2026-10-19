@@ -13,6 +13,7 @@ vi.mock('../../lib/relay', () => ({ query: async () => [], queryEach: async () =
 import { TvPainter, tickerItems, wrap, type TvAssets, type TvPicture } from '../tvPainter'
 import { cutKind, flatPoint } from '../TvScreenEffect'
 import { useTv } from '../../store/useTv'
+import { HOSAKA_1 } from '../../lib/tv/hosakaAd'
 
 /** A 2D context that measures every character as 7 px and draws nothing. */
 function fakeCanvas(): HTMLCanvasElement {
@@ -138,6 +139,21 @@ describe('the minimap', () => {
   })
 })
 
+describe('the minimap\'s black sun', () => {
+  it('has a solid black face, not a see-through ring', () => {
+    const fills: Array<{ style: unknown; alpha: unknown }> = []
+    const state: Record<string, unknown> = { globalAlpha: 1, fillStyle: '' }
+    const ctx = new Proxy({ measureText: (t: string) => ({ width: Array.from(t).length * 7 }), createLinearGradient: () => ({ addColorStop: () => {} }), createRadialGradient: () => ({ addColorStop: () => {} }), fill: () => { fills.push({ style: state.fillStyle, alpha: state.globalAlpha }) } } as Record<string, unknown>, {
+      get: (target, key) => (key in target ? target[key as string] : key in state ? state[key as string] : () => {}),
+      set: (_t, key, v) => { state[key as string] = v; return true },
+    })
+    const p = new TvPainter({ width: 0, height: 0, getContext: () => ctx } as unknown as HTMLCanvasElement)
+    p.size(1280, 720, 1)
+    p.paint(picture({ status: 'tuning' }), assets, 1000, 1, false)
+    expect(fills).toContainEqual({ style: '#000', alpha: 1 })
+  })
+})
+
 describe('NOW PLAYING', () => {
   /** A canvas that keeps every word it is asked to write. */
   function writing(): { canvas: HTMLCanvasElement; words: string[] } {
@@ -210,5 +226,96 @@ describe('a tap on the glass', () => {
     const [x, y] = flatPoint(900, 540, 1000, 600)
     expect(x).toBeGreaterThan(900)
     expect(y).toBeGreaterThan(540)
+  })
+})
+
+describe('the HOSAKA commercial', () => {
+  /** A canvas that keeps the words it writes and the pictures it draws. */
+  function recording(): { canvas: HTMLCanvasElement; words: string[]; images: unknown[] } {
+    const words: string[] = []
+    const images: unknown[] = []
+    const state: Record<string, unknown> = { globalAlpha: 1 }
+    const ctx = new Proxy({ measureText: (t: string) => ({ width: Array.from(t).length * 7 }), createLinearGradient: () => ({ addColorStop: () => {} }), createRadialGradient: () => ({ addColorStop: () => {} }), fillText: (t: string) => { if ((state.globalAlpha as number) > 0) words.push(t) }, drawImage: (img: unknown) => { images.push(img) } } as Record<string, unknown>, {
+      get: (target, key) => (key in target ? target[key as string] : key in state ? state[key as string] : () => {}),
+      set: (_t, key, v) => { state[key as string] = v; return true },
+    })
+    return { canvas: { width: 0, height: 0, getContext: () => ctx } as unknown as HTMLCanvasElement, words, images }
+  }
+  const banner = { banner: true }
+  const mark = { mark: true }
+  const music = { title: 'Saturn Day', artist: 'Sethy Bowoy', art: null, progress: 0.4, blocked: false, volume: 0.8, muted: false }
+  const trip = { id: 't', kind: 'trip' as const, pubkey: 'ann', beats: [], start: 1, end: 2, offsets: [], length: 5 }
+  /** Paint the spot `t` seconds in (after its cut). */
+  function at(t: number): { words: string[]; images: unknown[]; p: TvPainter } {
+    const r = recording()
+    const p = new TvPainter(r.canvas)
+    p.size(1400, 800, 1)
+    p.paint(picture({ shot: trip as never, ad: { at: 0, id: HOSAKA_1.id } }), { ...assets, music, hosaka: banner as never, hosakaMark: mark as never }, 700 + t * 1000, 1, false)
+    return { ...r, p }
+  }
+
+  it('opens on the banner, huge, marked as an advertisement, with no chiron', () => {
+    const { words, images, p } = at(2)
+    expect(images).toContain(banner)
+    expect(words).toContain('ADVERTISEMENT')
+    expect(words).not.toContain('ANN')
+    expect(words).not.toContain('HOSAKA')
+    // The music's card stays, for its mute.
+    expect(words).toContain('SATURN DAY')
+    expect(p.musicCard).not.toBeNull()
+  })
+
+  it('then one card at a time: the banner gone, the mark over HOSAKA CAN HELP.', () => {
+    const first = at(5.5)
+    expect(first.words).toContain('CYBERDECK')
+    expect(first.words).not.toContain('CAN HELP.')
+    expect(first.images).not.toContain(banner)
+    const second = at(7.6)
+    expect(second.words).toEqual(expect.arrayContaining(['HOSAKA', 'CAN HELP.']))
+    expect(second.words).not.toContain('CYBERDECK')
+    expect(second.images).toContain(mark)
+  })
+
+  it('on short screens with music, every word stays readable and clear of NOW PLAYING, and the name is said in full', () => {
+    for (const [w, h] of [[844, 390], [1024, 400], [640, 300], [568, 320], [740, 340]]) {
+      for (const t of [5.5, 7.6, 9.5, 11, 12.8, 15]) {
+        // A canvas that keeps each word with its type size and where it lands, through saves and moves.
+        type St = { font: string; dx: number; dy: number; k: number; globalAlpha: number }
+        let st: St = { font: '', dx: 0, dy: 0, k: 1, globalAlpha: 1 }
+        const stack: St[] = []
+        const seen: Array<{ text: string; px: number; x: number; y: number }> = []
+        const ctx = new Proxy({
+          measureText: (x: string) => ({ width: Array.from(x).length * Number(/([\d.]+)px/.exec(st.font)?.[1] ?? 10) * 0.62 }),
+          createLinearGradient: () => ({ addColorStop: () => {} }), createRadialGradient: () => ({ addColorStop: () => {} }),
+          save: () => { stack.push({ ...st }) }, restore: () => { st = stack.pop() ?? st },
+          translate: (x: number, y: number) => { st.dx += x * st.k; st.dy += y * st.k }, scale: (_x: number, y: number) => { st.k *= y },
+          fillText: (x: string, a: number, y: number) => { seen.push({ text: x, px: Number(/([\d.]+)px/.exec(st.font)?.[1] ?? 0) * st.k, x: st.dx + a * st.k, y: st.dy + y * st.k }) },
+        } as Record<string, unknown>, {
+          get: (target, key) => (key in target ? target[key as string] : key in st ? st[key as keyof St] : () => {}),
+          set: (_t, key, v) => { (st as Record<string, unknown>)[key as string] = v; return true },
+        })
+        const p = new TvPainter({ width: 0, height: 0, getContext: () => ctx } as unknown as HTMLCanvasElement)
+        p.size(w, h, 1.5)
+        p.paint(picture({ ad: { at: 0, id: HOSAKA_1.id } }), { ...assets, music, hosaka: banner as never, hosakaMark: mark as never }, 700 + t * 1000 + 300, 1.5, false)
+        const s = 1.5 * Math.min(1.35, Math.max(0.9, w / 1400))
+        const card = p.musicCard
+        const scene = HOSAKA_1.scenes.find((sc) => t >= sc.from && t < sc.to)!
+        for (const line of scene.lines) {
+          const word = seen.find((x) => x.text === line)
+          expect(word, `${w}x${h} ${t}s ${line}`).toBeDefined()
+          expect(word!.px, `${w}x${h} ${t}s ${line}`).toBeGreaterThanOrEqual((scene.kind === 'end' ? 12 : 18) * s - 0.01)
+          // Above NOW PLAYING, or to its left.
+          if (card) expect(word!.y < card.y * 1.5 || word!.x + (word!.px * 0.62 * line.length) / 2 < card.x * 1.5, `${w}x${h} ${t}s ${line} over NOW PLAYING`).toBe(true)
+        }
+        if (scene.kind === 'end') expect(seen.some((x) => x.text.includes('HIGH-AVAILABILITY')), `${w}x${h} subtitle`).toBe(true)
+      }
+    }
+  })
+
+  it('ends on the mark, the name in full, and where to find it', () => {
+    const { words, images } = at(15)
+    expect(images).toContain(mark)
+    expect(words).toContain('LOOK FOR OFFLOAD IN ONOSENDAI')
+    expect(words.some((w) => w.includes('HIGH-AVAILABILITY OFFLOAD SERVICE'))).toBe(true)
   })
 })

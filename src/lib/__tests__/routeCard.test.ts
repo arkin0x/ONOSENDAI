@@ -11,7 +11,7 @@ const index = readFileSync(new URL('../../../index.html', import.meta.url), 'utf
 describe('withCard', () => {
   it('puts the TV card in the page and leaves everything else as it was', () => {
     const tv = withCard(index, TV_CARD)
-    expect(tv).toContain('<meta property="og:image" content="https://onosendai.tech/og-tv.jpg"')
+    expect(tv).toContain('<meta property="og:image" content="https://onosendai.tech/og-tv.jpg?v=2"')
     expect(tv).toContain('<meta property="og:url" content="https://onosendai.tech/tv"')
     expect(tv).toContain('<title>CYBERSPACE TV · ONOSENDAI</title>')
     expect(tv).not.toContain('https://onosendai.tech/og.png')

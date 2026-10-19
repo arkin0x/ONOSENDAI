@@ -14,6 +14,10 @@
  * never hides it ("i dont like how the ONOSENDAI logo is obscured so much
  * when the screen is snowy").
  *
+ * Now and then, between cuts, the set acts up: the colours pull apart, a
+ * tear slips across the picture, or the signal goes for a moment
+ * (lib/tv/glitch.ts).
+ *
  * A cut between shots is one of three, in turn: a dip (cut to black, fade
  * up), a roll (the picture rolls in from above, as a set losing vertical
  * hold), or a short burst of dark, chunky snow. The bright white static it
@@ -41,6 +45,7 @@ import { avatarFromEvent } from '../lib/avatar'
 import { tvSpin } from '../hud/TvSegments'
 import { CUT_MS, TV_FONT, TvPainter, type FlatRect, type TvAssets, type TvMusic } from './tvPainter'
 import { musicProgress, setMusicVolume, toggleMusicMute, useTvMusic } from '../store/useTvMusic'
+import { CALM, GlitchDirector } from '../lib/tv/glitch'
 import type { ShardModel } from 'sno-core/shards'
 
 /** Kept for what still names the old static: a cut's transition, ms. */
@@ -58,10 +63,21 @@ uniform float uPx;
 uniform float uCut;
 uniform float uCutKind;
 uniform float uSnow;
+uniform float uAberr;
+uniform float uTear;
+uniform float uTearSeed;
+uniform float uDrop;
 uniform sampler2D uOverlay;
 
 float tvNoise(vec2 p) {
   return fract(sin(dot(p, vec2(12.9898, 78.233))) * 43758.5453);
+}
+
+// The picture at a point of the flat frame; black off its edge, where a
+// tear or a wide aberration reaches (rather than the edge smeared across).
+vec3 picture(vec2 p) {
+  if (p.x < 0.0 || p.x > 1.0 || p.y < 0.0 || p.y > 1.0) return vec3(0.0);
+  return texture(inputBuffer, p).rgb;
 }
 
 // The furniture, painted flat, over a colour at a point of the flat frame.
@@ -82,6 +98,13 @@ void mainImage(const in vec4 inputColor, const in vec2 uv, out vec4 outputColor)
   if (edge > 0.012) { outputColor = vec4(0.0, 0.0, 0.0, 1.0); return; }
   vec2 w = c * 0.5 + 0.5;
   if (w.x < 0.0 || w.x > 1.0 || w.y < 0.0 || w.y > 1.0) { outputColor = vec4(0.0, 0.0, 0.0, 1.0); return; }
+  // A tear (lib/tv/glitch.ts): some bands of the signal slip sideways, the
+  // words on it with them, as a tape losing its tracking.
+  if (uTear > 0.0) {
+    float band = floor(w.y * 22.0);
+    float slips = step(0.6, tvNoise(vec2(band, uTearSeed)));
+    w.x += (tvNoise(vec2(band * 1.7, uTearSeed + 3.0)) - 0.5) * 0.14 * uTear * slips;
+  }
 
   // The picture, rolled in on a roll cut.
   vec2 pw = w;
@@ -95,8 +118,9 @@ void mainImage(const in vec4 inputColor, const in vec2 uv, out vec4 outputColor)
   // Chromatic aberration, growing toward the edge of the tube: the centre
   // stays sharp, the edges split well apart.
   float r2 = dot(c, c);
-  vec2 ca = c * (0.0015 + 0.0045 * r2);
-  vec3 col = vec3(texture(inputBuffer, pw + ca).r, texture(inputBuffer, pw).g, texture(inputBuffer, pw - ca).b);
+  // uAberr: an aberration glitch pulls them far further apart (lib/tv/glitch.ts).
+  vec2 ca = c * (0.0015 + 0.0045 * r2) * uAberr;
+  vec3 col = vec3(picture(pw + ca).r, picture(pw).g, picture(pw - ca).b);
   col *= 1.0 - bar;
 
   // Snow: chunky (about three CSS pixels a grain), at a film's frame rate,
@@ -113,7 +137,9 @@ void mainImage(const in vec4 inputColor, const in vec2 uv, out vec4 outputColor)
   float n = mix(mix(tvNoise(si), tvNoise(si + vec2(1.0, 0.0)), sf.x), mix(tvNoise(si + vec2(0.0, 1.0)), tvNoise(si + vec2(1.0, 1.0)), sf.x), sf.y);
   // Blending pulls toward grey: stretch it back out.
   n = clamp(0.5 + (n - 0.5) * 1.6, 0.0, 1.0);
-  float snow = uSnow;
+  // The signal going (a dropout glitch): the picture sinks into the snow.
+  col *= 1.0 - 0.55 * uDrop;
+  float snow = max(uSnow, uDrop * 0.9);
   if (uCutKind > 1.5 && uCut < 1.0) snow = max(snow, (1.0 - uCut) * 0.95);
   col = mix(col, vec3(n * 0.5), snow);
   // A dip: from black, up.
@@ -122,7 +148,9 @@ void mainImage(const in vec4 inputColor, const in vec2 uv, out vec4 outputColor)
   // The furniture, on top of all that, fringed as the picture is, a little
   // less: words have to stay readable at the edges.
   vec3 base = col;
-  vec2 oca = ca * 0.6;
+  // An aberration glitch splits the words less than the picture: at most
+  // three times the usual, so the channel stays readable through it.
+  vec2 oca = ca * 0.6 * min(uAberr, 3.0) / max(uAberr, 1.0);
   col.r = withOverlay(base, w + oca).r;
   col.g = withOverlay(base, w).g;
   col.b = withOverlay(base, w - oca).b;
@@ -152,6 +180,10 @@ class CrtEffect extends Effect {
         ['uCut', new Uniform(1)],
         ['uCutKind', new Uniform(0)],
         ['uSnow', new Uniform(0)],
+        ['uAberr', new Uniform(1)],
+        ['uTear', new Uniform(0)],
+        ['uTearSeed', new Uniform(0)],
+        ['uDrop', new Uniform(0)],
         ['uOverlay', new Uniform(overlay)],
       ]),
     })
@@ -242,6 +274,26 @@ export function TvScreenEffect(): JSX.Element {
   // The segment's shard, parsed once per segment rather than on every paint.
   const segment = useRef<{ id: string | undefined; shard: ShardModel | null }>({ id: undefined, shard: null })
   const reduced = useMemo(() => typeof window !== 'undefined' && window.matchMedia?.('(prefers-reduced-motion: reduce)').matches === true, [])
+  const glitches = useMemo(() => new GlitchDirector(performance.now()), [])
+  const wasOn = useRef(false)
+  // The HOSAKA banner for the commercial (lib/tv/hosakaAd), drawn into the
+  // tube frame by frame: it opens the spot and plays once through. Its file
+  // is asked for only once TV is on.
+  const hosakaFor = useRef<number | null>(null)
+  const hosaka = useMemo(() => {
+    if (typeof document === 'undefined') return null
+    const v = document.createElement('video')
+    v.muted = true
+    v.loop = false
+    v.playsInline = true
+    v.preload = 'auto'
+    // A browser that says it plays AV1 and then cannot gets the VP9 cut.
+    // Played again from the start if a spot is on (review of #384).
+    v.addEventListener('error', () => { if (v.getAttribute('src') === '/hosaka.webm') { v.src = '/hosaka-vp9.webm'; hosakaFor.current = null } })
+    return v
+  }, [])
+  useEffect(() => () => { if (hosaka) { hosaka.pause(); hosaka.removeAttribute('src'); hosaka.load() } }, [hosaka])
+  useEffect(() => { if (import.meta.env.DEV) (window as unknown as { __tvGlitches?: GlitchDirector }).__tvGlitches = glitches }, [glitches])
 
   // NOW PLAYING takes a tap to mute and a drag up or down for the volume
   // (arkinox, 2026-10-18). On the canvas, ahead of the scene's own pointer
@@ -313,8 +365,21 @@ export function TvScreenEffect(): JSX.Element {
     // mounts (a page opened on /tv), and a missed change left the tube off.
     const want = tv.on ? BlendFunction.SET : BlendFunction.SKIP
     if (effect.blendMode.blendFunction !== want) effect.blendMode.blendFunction = want
-    if (!tv.on) return
     const now = performance.now()
+    // The glitches' clocks start when TV comes on: time with it off is not a backlog.
+    if (tv.on && !wasOn.current) {
+      glitches.reset(now)
+      if (hosaka && !hosaka.getAttribute('src')) hosaka.src = hosaka.canPlayType('video/webm; codecs=av01') ? '/hosaka.webm' : '/hosaka-vp9.webm'
+    }
+    wasOn.current = tv.on
+    // The banner runs only while the commercial is on.
+    if (hosaka) {
+      // From its start once per spot, when the spot's own clock starts
+      // (after the cut into it), then left on its last frame.
+      if (tv.on && tv.ad && hosakaFor.current !== tv.ad.at && now - tv.ad.at >= CUT_MS) { hosakaFor.current = tv.ad.at; hosaka.currentTime = 0; void hosaka.play().catch(() => {}) }
+      else if (!(tv.on && tv.ad) && !hosaka.paused) hosaka.pause()
+    }
+    if (!tv.on) return
     const u = effect.uniforms
     u.get('uTime')!.value = state.clock.elapsedTime
     u.get('uPx')!.value = state.gl.getPixelRatio()
@@ -326,6 +391,15 @@ export function TvScreenEffect(): JSX.Element {
     // author's own trip, which would hint at where it went).
     const secret = tv.shot?.item?.kind === 'bag' && !placeable(tv.shot.item.hint)
     u.get('uSnow')!.value = tv.status === 'tuning' || tv.status === 'no-signal' ? 0.7 : secret ? 0.85 : 0
+    // Now and then the set acts up (lib/tv/glitch.ts): never over a cut, the
+    // tunnel or tuning, and never with reduced motion asked for.
+    // Nor over a commercial: the sponsor's spot plays clean.
+    const held = since < CUT_MS || tv.jump?.phase === 'warp' || tv.status !== 'playing' || tv.ad !== null
+    const g = reduced ? CALM : glitches.levels(now, held)
+    u.get('uAberr')!.value = g.aberration
+    u.get('uTear')!.value = g.tear
+    u.get('uTearSeed')!.value = g.tearSeed
+    u.get('uDrop')!.value = g.dropout
 
     if (now - lastPaint.current < PAINT_MS) return
     lastPaint.current = now
@@ -347,6 +421,8 @@ export function TvScreenEffect(): JSX.Element {
       segmentShard: segment.current.shard,
       color: targetColor,
       music: nowPlaying(),
+      hosaka: !tv.ad ? null : hosaka && hosaka.readyState >= 2 ? hosaka : pictureFor('/hosaka-poster.jpg'),
+      hosakaMark: tv.ad ? pictureFor('/hosaka-mark.png') : null,
     }
     painter.paint(tv, assets, now, scale, reduced)
     overlay.needsUpdate = true

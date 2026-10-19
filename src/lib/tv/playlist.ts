@@ -47,4 +47,5 @@ export const PLAYLIST: Track[] = [
   { url: 'https://media.basspistol.com/setto.basspistol.com/darkweb/3-swipe-instrumental-.mp3' },
   { url: 'https://media.basspistol.com/setto.basspistol.com/darkweb/4-darkweb-instrumental-.mp3' },
   { url: 'https://media.basspistol.com/setto.basspistol.com/little-bug-ep/1-ding-ding-world.mp3' },
+  { url: 'https://media.basspistol.com/setto.basspistol.com/little-bug-ep/2-little-bug.mp3' },
 ]

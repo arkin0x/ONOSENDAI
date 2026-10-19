@@ -671,8 +671,9 @@ export class TvPainter {
    * The HOSAKA commercial (lib/tv/hosakaAd), cut as a TV spot: the banner as
    * big as the tube holds, then one card at a time slamming in over speed
    * stripes in the brand's colours, then the end card with the mark. Over a
-   * ground that hides the world; NOW PLAYING and the marquee stay, with an
-   * ADVERTISEMENT tag in the corner, as a channel marks its breaks.
+   * ground that hides the world; the marquee stays, with an ADVERTISEMENT tag
+   * in the corner, as a channel marks its breaks, and NOW PLAYING steps away
+   * while the music plays on.
    */
   private commercial(ad: { at: number; id: string }, p: TvPicture, a: TvAssets, W: number, H: number, MX: number, MY: number, s: number, narrow: boolean, now: number, reduced: boolean, dt: number, scale: number): void {
     const ctx = this.ctx
@@ -696,22 +697,12 @@ export class TvPainter {
 
     const tickH = 28 * s
     const tickY = H - MY - tickH
-    const npW = narrow ? W - 2 * MX : Math.min(LOGO_PX * s, W * LOGO_SHARE) + 16 * s
-    const npBottom = tickY - 10 * s - CHIRON_PX[narrow ? 1 : 0] * s - 10 * s
-    // NOW PLAYING stays where the spot's words keep room beside or above it;
-    // on a screen too short for both it steps aside, as it does on the tape,
-    // and the music plays on.
-    const npRoom = npBottom - NOW_PLAYING_PX * s - 14 * s - (MY + 26 * s) >= (narrow ? 110 : 60) * s
-    // Where the spot can draw: the whole picture over NOW PLAYING's top, or,
-    // beside it on a wide screen, the full height to its left; whichever
-    // gives the words more size (review of #384: fenced above it across the
-    // whole width, a landscape phone's call came out at 1.6 px).
+    // No NOW PLAYING over the spot (2026-10-19: "gotta hide the music player
+    // during the hosaka ad"): the music plays on under it, and the spot has
+    // the whole picture down to the marquee.
     const top = MY + 26 * s
     const floorY = tickY - 14 * s
-    const npTopY = npBottom - NOW_PLAYING_PX * s
-    const music = a.music !== undefined && a.music !== null && npRoom
-    const regions: Region[] = [{ x: MX, y: top, w: W - 2 * MX, h: (music ? npTopY : floorY + 14 * s) - 14 * s - top }]
-    if (music && !narrow) regions.push({ x: MX, y: top, w: W - MX - npW - 14 * s - MX, h: floorY - top })
+    const regions: Region[] = [{ x: MX, y: top, w: W - 2 * MX, h: floorY - top }]
 
     // A card comes in hard: big, then down to size, with a jolt as it lands.
     const k = reduced ? 1 : clamp01(tc / 0.22)
@@ -724,7 +715,7 @@ export class TvPainter {
     ctx.globalAlpha = (reduced ? 1 : clamp01(tc / 0.1)) * out
     ctx.textAlign = 'center'
     if (scene.kind === 'banner') {
-      // "bombastically huge": the tube's whole height; NOW PLAYING may sit on its corner.
+      // "bombastically huge": the tube's whole height.
       const h = floorY - top
       const bw = Math.min(W - MX, h * 1.6)
       const bh = bw / 1.6
@@ -786,8 +777,7 @@ export class TvPainter {
     ctx.fillText(tag, MX + 7 * s, MY + 12.5 * s)
     ctx.restore()
     this.marquee(p, a, MX, tickY, W - MX, tickH, s, dt)
-    const npTop = a.music && npRoom ? this.nowPlaying(a.music, W - MX - npW, npBottom, npW, s, now, reduced, false) : null
-    this.npRect = a.music && npTop !== null ? { x: W - MX - npW, y: npTop, w: npW, h: npBottom - npTop } : null
+    this.npRect = null
     this.cardScale = scale
   }
 

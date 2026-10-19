@@ -20,6 +20,16 @@ function run(d: GlitchDirector, ms: number, held: (t: number) => boolean = () =>
 }
 
 describe('TV glitches', () => {
+  it('one already on ends as the HOSAKA spot or the tunnel comes in, and none starts under it', () => {
+    // random 0: the aberration is due at 25 s and lasts 1 s; the others are minutes off.
+    const d = new GlitchDirector(0, () => 0)
+    for (let t = 0; t <= 25_300; t += 50) d.levels(t, false)
+    expect(d.current).toEqual(['aberration'])
+    expect(d.levels(25_350, true, true)).toEqual(CALM)
+    expect(d.current).toEqual([])
+    for (let t = 25_400; t <= 60_000; t += 50) expect(d.levels(t, true, true)).toEqual(CALM)
+  })
+
   it('each comes first within its own window, and lasts as long as asked', () => {
     for (const r of [0, 0.5, 0.999]) {
       const seen = run(new GlitchDirector(0, () => r), 400_000)

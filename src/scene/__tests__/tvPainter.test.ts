@@ -260,9 +260,10 @@ describe('the HOSAKA commercial', () => {
     expect(words).toContain('ADVERTISEMENT')
     expect(words).not.toContain('ANN')
     expect(words).not.toContain('HOSAKA')
-    // The music's card stays, for its mute.
-    expect(words).toContain('SATURN DAY')
-    expect(p.musicCard).not.toBeNull()
+    // No music card over the spot ("gotta hide the music player during the hosaka ad"), nor its tap.
+    expect(words).not.toContain('SATURN DAY')
+    expect(words).not.toContain('♪ NOW PLAYING')
+    expect(p.musicCard).toBeNull()
   })
 
   it('then one card at a time: the banner gone, the mark over HOSAKA CAN HELP.', () => {
@@ -276,7 +277,7 @@ describe('the HOSAKA commercial', () => {
     expect(second.images).toContain(mark)
   })
 
-  it('on short screens with music, every word stays readable and clear of NOW PLAYING, and the name is said in full', () => {
+  it('on short screens with music, every word stays readable, NOW PLAYING stays away, and the name is said in full', () => {
     for (const [w, h] of [[844, 390], [1024, 400], [640, 300], [568, 320], [740, 340]]) {
       // Every scene after the banner, at its middle, so a retimed spot is still covered to its end card.
       for (const t of HOSAKA_1.scenes.slice(1).map((sc) => (sc.from + sc.to) / 2)) {
@@ -299,14 +300,13 @@ describe('the HOSAKA commercial', () => {
         p.size(w, h, 1.5)
         p.paint(picture({ ad: { at: 0, id: HOSAKA_1.id } }), { ...assets, music, hosaka: banner as never, hosakaMark: mark as never }, 700 + t * 1000 + 300, 1.5, false)
         const s = 1.5 * Math.min(1.35, Math.max(0.9, w / 1400))
-        const card = p.musicCard
+        expect(p.musicCard, `${w}x${h} ${t}s`).toBeNull()
+        expect(seen.some((x) => x.text === '♪ NOW PLAYING'), `${w}x${h} ${t}s`).toBe(false)
         const scene = HOSAKA_1.scenes.find((sc) => t >= sc.from && t < sc.to)!
         for (const line of scene.lines) {
           const word = seen.find((x) => x.text === line)
           expect(word, `${w}x${h} ${t}s ${line}`).toBeDefined()
           expect(word!.px, `${w}x${h} ${t}s ${line}`).toBeGreaterThanOrEqual((scene.kind === 'end' ? 12 : 18) * s - 0.01)
-          // Above NOW PLAYING, or to its left.
-          if (card) expect(word!.y < card.y * 1.5 || word!.x + (word!.px * 0.62 * line.length) / 2 < card.x * 1.5, `${w}x${h} ${t}s ${line} over NOW PLAYING`).toBe(true)
         }
         if (scene.kind === 'end') expect(seen.some((x) => x.text.includes('HIGH-AVAILABILITY')), `${w}x${h} subtitle`).toBe(true)
       }

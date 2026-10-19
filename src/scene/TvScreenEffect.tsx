@@ -118,9 +118,20 @@ void mainImage(const in vec4 inputColor, const in vec2 uv, out vec4 outputColor)
   // Chromatic aberration, growing toward the edge of the tube: the centre
   // stays sharp, the edges split well apart.
   float r2 = dot(c, c);
-  // uAberr: an aberration glitch pulls them far further apart (lib/tv/glitch.ts).
-  vec2 ca = c * (0.0015 + 0.0045 * r2) * uAberr;
+  // uAberr: an aberration glitch pulls them far further apart (lib/tv/glitch.ts),
+  // and the whole screen with them, the middle too, along a slowly turning
+  // line (2026-10-19: "the chromatic abberation effect only seems to affect
+  // the black sun. I want it to dramatically affect everything on screen,
+  // including the text"). The radial part alone left the middle, where the
+  // camera holds the avatar, all but still.
+  float glitch = clamp((uAberr - 1.0) / 7.0, 0.0, 1.0);
+  float turn = uTime * 0.7;
+  vec2 drift = vec2(cos(turn), 0.35 * sin(turn * 1.3)) * 0.0028 * (uAberr - 1.0);
+  vec2 ca = c * (0.0015 + 0.0045 * r2) * uAberr + drift;
   vec3 col = vec3(picture(pw + ca).r, picture(pw).g, picture(pw - ca).b);
+  // A ghost of the picture further along the split: an avatar's red is all in
+  // one channel, so a split alone only moves it; the ghost doubles it.
+  if (glitch > 0.0) col = max(col, picture(pw + ca * 2.5) * 0.45 * glitch);
   col *= 1.0 - bar;
 
   // Snow: chunky (about three CSS pixels a grain), at a film's frame rate,
@@ -137,9 +148,12 @@ void mainImage(const in vec4 inputColor, const in vec2 uv, out vec4 outputColor)
   float n = mix(mix(tvNoise(si), tvNoise(si + vec2(1.0, 0.0)), sf.x), mix(tvNoise(si + vec2(0.0, 1.0)), tvNoise(si + vec2(1.0, 1.0)), sf.x), sf.y);
   // Blending pulls toward grey: stretch it back out.
   n = clamp(0.5 + (n - 0.5) * 1.6, 0.0, 1.0);
-  // The signal going (a dropout glitch): the picture sinks into the snow.
-  col *= 1.0 - 0.55 * uDrop;
-  float snow = max(uSnow, uDrop * 0.9);
+  // The signal going (a dropout glitch): the picture sinks a little into the
+  // snow, as if drifting out of range, never more than about two fifths
+  // (2026-10-19: "it should fade in slowly and subtly, only up to maybe 40%
+  // or less even, like you're moving out of range of the signal").
+  col *= 1.0 - 0.2 * uDrop;
+  float snow = max(uSnow, uDrop * 0.38);
   if (uCutKind > 1.5 && uCut < 1.0) snow = max(snow, (1.0 - uCut) * 0.95);
   col = mix(col, vec3(n * 0.5), snow);
   // A dip: from black, up.
@@ -148,12 +162,13 @@ void mainImage(const in vec4 inputColor, const in vec2 uv, out vec4 outputColor)
   // The furniture, on top of all that, fringed as the picture is, a little
   // less: words have to stay readable at the edges.
   vec3 base = col;
-  // An aberration glitch splits the words less than the picture: at most
-  // three times the usual, so the channel stays readable through it.
-  vec2 oca = ca * 0.6 * min(uAberr, 3.0) / max(uAberr, 1.0);
+  // At rest the words split a little less than the picture, to stay crisp;
+  // in an aberration glitch as much as it, ghost and all.
+  vec2 oca = ca * mix(0.6, 1.0, glitch);
   col.r = withOverlay(base, w + oca).r;
   col.g = withOverlay(base, w).g;
   col.b = withOverlay(base, w - oca).b;
+  if (glitch > 0.0) col = max(col, withOverlay(vec3(0.0), w + oca * 2.5) * 0.45 * glitch);
 
   // Scanlines, about every third device pixel, and a dim shadow mask.
   col *= 0.82 + 0.18 * sin(gl_FragCoord.y * 2.0944);
@@ -395,7 +410,8 @@ export function TvScreenEffect(): JSX.Element {
     // tunnel or tuning, and never with reduced motion asked for.
     // Nor over a commercial: the sponsor's spot plays clean.
     const held = since < CUT_MS || tv.jump?.phase === 'warp' || tv.status !== 'playing' || tv.ad !== null
-    const g = reduced ? CALM : glitches.levels(now, held)
+    // And one already on ends as the spot or the tunnel comes in, not over them.
+    const g = reduced ? CALM : glitches.levels(now, held, tv.ad !== null || tv.jump?.phase === 'warp')
     u.get('uAberr')!.value = g.aberration
     u.get('uTear')!.value = g.tear
     u.get('uTearSeed')!.value = g.tearSeed

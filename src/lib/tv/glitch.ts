@@ -12,8 +12,10 @@
  *     25 s to 3 min;
  *   tear: bands of the picture slip sideways, as a tape losing tracking,
  *     under a second and a half, every 2 to 6 min;
- *   dropout: the signal goes, the picture sinking into snow, half a second
- *     to 2 s, every 2 to 6 min.
+ *   dropout: the signal fades, as if drifting out of range: a slow swell of
+ *     snow to about two fifths and away again, wavering, 5 to 12 s, every 2
+ *     to 6 min (2026-10-19: "it should fade in slowly and subtly ... and then
+ *     fade away. it should take 5-12 seconds to resolve").
  * Each runs on its own clock, so they come at no pattern and may land
  * together ("the delay parameters can be different and run on distinct
  * timers so they can seem random and overlap"). None starts over a cut or a
@@ -54,7 +56,7 @@ interface Timing {
 export const GLITCH_TIMING: Record<GlitchKind, Timing> = {
   aberration: { gap: [25, 180], length: [1, 7], rise: 0.6, fall: 1 },
   tear: { gap: [120, 360], length: [0.4, 1.5], rise: 0.08, fall: 0.15 },
-  dropout: { gap: [120, 360], length: [0.5, 2], rise: 0.25, fall: 0.35 },
+  dropout: { gap: [120, 360], length: [5, 12], rise: 3.5, fall: 4.5 },
 }
 
 /** The colours' split at the height of an aberration: "a very high amount". */
@@ -101,13 +103,16 @@ export class GlitchDirector {
   /**
    * The levels at `now` (ms). `held` is a moment no glitch may start in (a
    * cut, the tunnel, tuning): one that is due waits for it to pass. One
-   * already on plays out.
+   * already on plays out, unless `clear`: the HOSAKA spot and the tunnel end
+   * it there and then, under the cut into them (review of #388: an
+   * aberration carried into the spot smeared its words unreadable).
    */
-  levels(now: number, held: boolean): GlitchLevels {
+  levels(now: number, held: boolean, clear = false): GlitchLevels {
     if (now - this.last > STALL_MS) this.reset(now)
     this.last = now
     const out = { ...CALM }
     for (const kind of KINDS) {
+      if (clear && this.live[kind]) this.live[kind] = { start: now - 1, length: 0 }
       let live = this.live[kind]
       // Over: the next of its kind is a new while away, from now.
       if (live && now >= live.start + live.length) {
@@ -127,14 +132,17 @@ export class GlitchDirector {
       const t = (now - live.start) / 1000
       const env = envelope(t, live.length / 1000, GLITCH_TIMING[kind])
       if (kind === 'aberration') {
-        // A little unsteady at its height, as a set's is.
-        const shake = 0.85 + 0.15 * Math.sin(t * 23) * Math.sin(t * 7.3)
+        // A little unsteady at its height, as a set's is: slowly, under three
+        // swings a second, since the words now move with it (WCAG 2.3.1;
+        // review of #388).
+        const shake = 0.85 + 0.15 * Math.sin(t * 11) * Math.sin(t * 4.3)
         out.aberration = 1 + (PEAK_ABERRATION - 1) * env * shake
       } else if (kind === 'tear') {
         out.tear = env
         out.tearSeed = 1 + (Math.floor(now / TEAR_STEP_MS) % 97)
       } else {
-        out.dropout = env
+        // Not a clean ramp: reception comes and goes a little as it fades.
+        out.dropout = env * (0.85 + 0.15 * Math.sin(t * 1.9) * Math.sin(t * 0.7 + 1))
       }
     }
     return out

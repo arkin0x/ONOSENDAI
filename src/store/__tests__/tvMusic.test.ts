@@ -14,9 +14,14 @@ class FakeAudio extends EventTarget {
   static hang = false
   private pending: Array<(e: Error) => void> = []
   crossOrigin = ''
+  /** iOS: the page cannot set the volume. */
+  static fixedVolume = false
   muted = false
   preload = ''
-  volume = 1
+  ended = false
+  private level = 1
+  get volume(): number { return this.level }
+  set volume(v: number) { if (!FakeAudio.fixedVolume) this.level = v }
   currentTime = 0
   duration = NaN
   private source = ''
@@ -44,12 +49,15 @@ class FakeAudio extends EventTarget {
 
 const list = [{ url: 'https://h/a/1-one.mp3' }, { url: 'https://h/a/2-two.mp3' }, { url: 'https://h/a/3-three.mp3' }]
 const audio = (): FakeAudio => FakeAudio.made[FakeAudio.made.length - 1]
+/** Whether nothing can be heard: volume 0, or muted where the volume cannot be set. */
+const silent = (): boolean => audio().muted || audio().volume === 0
 const flush = async (): Promise<void> => { for (let i = 0; i < 5; i++) await Promise.resolve() }
 
 beforeEach(() => {
   FakeAudio.made = []
   FakeAudio.refuse = false
   FakeAudio.hang = false
+  FakeAudio.fixedVolume = false
   vi.useFakeTimers()
   vi.stubGlobal('Audio', FakeAudio)
   vi.stubGlobal('fetch', async () => new Response('', { status: 404 }))
@@ -234,14 +242,15 @@ describe('the volume and mute', () => {
   it('mutes and unmutes with a tap, and turning it up unmutes', () => {
     startMusic(list)
     toggleMusicMute()
-    expect(audio().muted).toBe(true)
+    expect(silent()).toBe(true)
     expect(store.get('onosendai:tvMuted')).toBe('1')
     // Down while muted stays muted; up unmutes.
     setMusicVolume(0.5)
     expect(useTvMusic.getState().muted).toBe(true)
     setMusicVolume(0.7)
     expect(useTvMusic.getState().muted).toBe(false)
-    expect(audio().muted).toBe(false)
+    expect(silent()).toBe(false)
+    expect(audio().volume).toBe(0.7)
     toggleMusicMute()
     toggleMusicMute()
     expect(useTvMusic.getState().muted).toBe(false)
@@ -251,7 +260,7 @@ describe('the volume and mute', () => {
     startMusic(list)
     setMusicVolume(0)
     expect(useTvMusic.getState().muted).toBe(true)
-    expect(audio().muted).toBe(true)
+    expect(silent()).toBe(true)
     toggleMusicMute()
     expect(useTvMusic.getState()).toMatchObject({ muted: false, volume: 0.5 })
     expect(audio().volume).toBe(0.5)
@@ -261,8 +270,53 @@ describe('the volume and mute', () => {
   it('a new track starts at the volume and mute it was left at', () => {
     useTvMusic.setState({ volume: 0.25, muted: true })
     startMusic(list)
+    expect(silent()).toBe(true)
+    toggleMusicMute()
     expect(audio().volume).toBe(0.25)
+  })
+
+  it('mutes by volume where it can, so the browser never sees muted media to pause', () => {
+    startMusic(list)
+    toggleMusicMute()
+    expect(audio()).toMatchObject({ muted: false, volume: 0 })
+    toggleMusicMute()
+    expect(audio()).toMatchObject({ muted: false, volume: 0.8 })
+  })
+
+  it('mutes the element where the volume cannot be set (iOS)', () => {
+    FakeAudio.fixedVolume = true
+    startMusic(list)
+    toggleMusicMute()
     expect(audio().muted).toBe(true)
+    toggleMusicMute()
+    expect(audio().muted).toBe(false)
+  })
+
+  it('plays on through a pause the browser makes as it is muted, and leaves any later pause alone', async () => {
+    startMusic(list)
+    await flush()
+    const before = audio().plays
+    toggleMusicMute()
+    audio().fire('pause')
+    await flush()
+    expect(audio().plays).toBe(before + 1)
+    // The phone's own controls, a while later: that pause stands.
+    vi.advanceTimersByTime(5000)
+    audio().fire('pause')
+    await flush()
+    expect(audio().plays).toBe(before + 1)
+  })
+
+  it('a stop just after a mute stays stopped', async () => {
+    startMusic(list)
+    await flush()
+    const a = audio()
+    const before = a.plays
+    toggleMusicMute()
+    stopMusic()
+    a.fire('pause')
+    await flush()
+    expect(a.plays).toBe(before)
   })
 })
 

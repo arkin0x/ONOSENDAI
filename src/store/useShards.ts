@@ -77,9 +77,11 @@ import {
   type HiddenType,
   type KeyItem,
   MESSAGE_KIND,
+  CHEST_KIND,
+  isReference,
 } from '../lib/hidden'
 import { retractionTemplate } from '../lib/published'
-import { openWithSecret, openWithSigner, openerFor, readContents, resealWithout, revealedIn, sealEntries, type OpeningKey } from '../lib/chests'
+import { openWithSecret, openWithSigner, openerFor, readContents, resealWithout, revealedIn, sealEntries, sealedInside, type OpeningKey } from '../lib/chests'
 import { openingKeys, type HeldPlace } from '../lib/inventory'
 import { useInventory } from './useInventory'
 import { creditOf, useWorkshop } from './useWorkshop'
@@ -819,10 +821,29 @@ export const useShards = create<ShardsState>((set, get) => {
     return rekeyTo(eventId, d.putBack)
   }
 
-  /** Build and publish the region bag, with its settings; `place` is any point in the region, for a hint's base. */
+  /**
+   * Build and publish the region bag, with its settings; `place` is any point in the region, for a hint's base.
+   *
+   * Never with a chest's contents beside it (arkinox, 2026-10-20: "I saw my
+   * shards encrypted in my chest appear visibly ... chest contents should
+   * not be shown on TV"). An entry that is sealed inside a chest in this
+   * bag is left out, whichever rewrite brought it (a hide, DELETE, a move,
+   * BROADCAST, taking something out of the chest): as a plain entry it is
+   * sealed to the region alone, and anyone with the region key reads it,
+   * every viewer of Cyberspace TV among them. The hider's own scans used to
+   * claim a chest's contents as deployments (claimOwn), so this also mends
+   * a record or a relay copy written that way. What is inside is known from
+   * the keys held here (lib/chests.ts sealedInside) and from what this
+   * session revealed out of those chests; a chest nothing here opens adds
+   * nothing to leave out.
+   */
   async function publishBag(inners: BagEntry[], key: Uint8Array, lookupId: string, height: number, live: boolean, settings: BagSettings, place: { at: Position; plane: Plane }, beforeSend?: () => Promise<void>): Promise<{ event: NostrEvent; published: boolean }> {
+    const inside = sealedInside(inners, openingKeys(useInventory.getState().items))
+    const chests = new Set(inners.filter((e): e is NostrEvent => !isReference(e) && e.kind === CHEST_KIND).map((e) => e.id))
+    for (const h of Object.values(get().discovered)) if (h.chestId && chests.has(h.chestId)) inside.add(h.eventId)
+    const entries = inside.size > 0 ? inners.filter((e) => !inside.has(entryKey(e))) : inners
     const createdAt = nextBagAt(lookupId)
-    const event = await cyber().signEvent(await bagTemplate(inners, key, lookupId, height, createdAt, HIDDEN_KIND, settings, place))
+    const event = await cyber().signEvent(await bagTemplate(entries, key, lookupId, height, createdAt, HIDDEN_KIND, settings, place))
     // Anything that must go out only once the bag is signed (an EDIT's
     // resealed object): a signer that refuses the bag stops it here.
     if (beforeSend) await beforeSend()
@@ -884,6 +905,11 @@ export const useShards = create<ShardsState>((set, get) => {
       return { ...d, inner: h.inner, shard: h.shard ?? d.shard }
     })
     for (const h of items) {
+      // What came out of a chest is the chest's, not an entry of the bag:
+      // claimed, it was written into the bag beside the chest at the next
+      // rewrite, readable by anyone with the region key (arkinox,
+      // 2026-10-20: "chest contents should not be shown on TV").
+      if (h.chestId) continue
       if (h.author !== me || !h.inner || !h.keyHex || have.has(h.eventId) || deleted[h.eventId]) continue
       have.add(h.eventId)
       own.push({

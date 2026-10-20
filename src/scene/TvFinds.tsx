@@ -5,7 +5,9 @@
  * Only what TV opened at the places its avatars stood on this tape, never
  * what you found anywhere else, so TV is the same picture for everyone who
  * watches (arkinox, 2026-10-19). Only shards, keys and chests, which the
- * scan alone lets through, and only once the tape is at or past the moment
+ * scan alone lets through, a chest drawn shut and never what is inside it,
+ * whoever watches (arkinox, 2026-10-20: "chest contents should not be shown
+ * on TV"), and only once the tape is at or past the moment
  * each one's bag was signed, so a MEANWHILE that goes back hides it again.
  * Drawn as the world draws them (WorldShards' PlacedShard, WorldMessages'
  * ItemMark), in the same render frame as TV's avatars, with nothing to tap.

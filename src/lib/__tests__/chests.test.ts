@@ -15,7 +15,7 @@ import { bytesToHex } from '../events'
 import { regionKeyAt } from '../shardCrypto'
 import { getEventHash } from 'nostr-tools/pure'
 import {
-  NIP44_MAX_PLAINTEXT, aimedPoint, isLockPubkey, openWithSecret, openWithSigner, openerFor, parseChestPlaintext, placeOf, plaintextBytes, readContents, requiresLabel, resealWithout, sealEntries, sizeRefusal, revealedIn } from '../chests'
+  NIP44_MAX_PLAINTEXT, aimedPoint, isLockPubkey, openWithSecret, openWithSigner, openerFor, parseChestPlaintext, placeOf, plaintextBytes, readContents, requiresLabel, resealWithout, sealEntries, sealedInside, sizeRefusal, revealedIn } from '../chests'
 import {
   CHEST_KIND, KEY_KIND, bagTemplate, chestInnerTemplate, chestItemOf, keyInnerTemplate, keyItemOf, messageInnerTemplate, shardInnerTemplate, unbag, type BagEntry, type ChestItem, type KeyItem,
 } from '../hidden'
@@ -388,5 +388,51 @@ describe('taking a content out of a chest (resealWithout)', () => {
     const emptied = resealWithout(c.item, raw, keep.id)
     expect(emptied!.left).toEqual([])
     expect(openWithSecret(emptied!.chest, lock.secretHex)).toEqual([])
+  })
+})
+
+describe('what is sealed inside the chests of a bag (sealedInside), so no rewrite carries it beside them (arkinox, 2026-10-20)', () => {
+  const lock = forge('Outer Key')
+  const msg = (text: string, t: number) => finalizeEvent(messageInnerTemplate(text, at, 0, t), hider)
+  const asKey = (k: KeyItem) => ({ id: 'held', itemPubkey: k.itemPubkey, secretHex: k.secretHex })
+
+  it('names every content of a chest a held key opens, and nothing of the bag besides', () => {
+    const inside = msg('inside', 1)
+    const beside = msg('beside', 2)
+    const c = chest('Box', lock.itemPubkey, [inside])
+    const out = sealedInside([c.event, beside], [asKey(lock)])
+    expect([...out]).toEqual([inside.id])
+  })
+
+  it('names nothing when no held key opens the chest', () => {
+    const c = chest('Box', lock.itemPubkey, [msg('inside', 1)])
+    expect(sealedInside([c.event], [asKey(forge('Wrong'))]).size).toBe(0)
+    expect(sealedInside([c.event], []).size).toBe(0)
+  })
+
+  it('goes into chests inside chests, and a key found inside one opens another in the bag, in either order', () => {
+    const second = forge('Second Key')
+    const secondKey = finalizeEvent(keyInnerTemplate(second, at, 0, 3), hider)
+    const deep = msg('deep', 4)
+    const nested = chest('Nested', lock.itemPubkey, [deep])
+    const outer = chest('Outer', lock.itemPubkey, [nested.event, secondKey])
+    const far = msg('far', 5)
+    const other = chest('Other', second.itemPubkey, [far])
+    for (const entries of [[other.event, outer.event], [outer.event, other.event]]) {
+      const out = sealedInside(entries, [asKey(lock)])
+      expect(out.has(nested.event.id)).toBe(true)
+      expect(out.has(secondKey.id)).toBe(true)
+      expect(out.has(deep.id)).toBe(true)
+      expect(out.has(far.id)).toBe(true)
+      expect(out.has(outer.event.id)).toBe(false)
+      expect(out.has(other.event.id)).toBe(false)
+    }
+  })
+
+  it('names nothing for an empty chest or a reference entry', () => {
+    const sealed = sealEntries([], lock.itemPubkey)
+    const bad: ChestItem = { name: 'Odd', lockPubkey: lock.itemPubkey, senderPubkey: sealed.senderPubkey, requires: '', payload: sealed.payload }
+    const odd = finalizeEvent(chestInnerTemplate(bad, at, 0, 10), hider)
+    expect(sealedInside([odd, ['e', 'a'.repeat(64)] as BagEntry], [asKey(lock)]).size).toBe(0)
   })
 })

@@ -80,17 +80,25 @@ export function blockKey(x: bigint, y: bigint, z: bigint, plane: Plane): string 
 export function readK(
   x: bigint, y: bigint, z: bigint, plane: Plane,
 ): number | undefined {
-  return cache.get(blockKey(x, y, z, plane))
+  return readKey(blockKey(x, y, z, plane))
 }
 
-function writeK(
-  x: bigint, y: bigint, z: bigint, plane: Plane, k: number,
-): void {
+/**
+ * The K under a key blockKey made earlier. A caller that reads the same blocks
+ * again and again (the volume, on every flush) keeps their keys rather than
+ * writing them out each time: a key built fresh is a new string, hashed again
+ * on every lookup, and that was most of a rescan's cost (2026-10-20).
+ */
+export function readKey(key: string): number | undefined {
+  return cache.get(key)
+}
+
+function writeKey(key: string, k: number): void {
   if (cache.size >= MAX_ENTRIES) {
     const oldest = cache.keys().next()
     if (!oldest.done) cache.delete(oldest.value)
   }
-  cache.set(blockKey(x, y, z, plane), k)
+  cache.set(key, k)
 }
 
 export function cacheSize(): number {
@@ -128,7 +136,11 @@ function* runCells(spec: RunSpec): Generator<[bigint, bigint, bigint]> {
 let nextRunId = 0
 const inflight = new Set<string>()
 const pendingBlocks = new Set<string>()
-const runsById = new Map<number, RunSpec>()
+// Each run's own key and the block key of each of its cells, worked out once
+// when it is asked for, so folding its answer in builds no keys: writing the
+// three coordinates out again for the run's key alone was most of what an
+// answer cost (2026-10-20).
+const runsById = new Map<number, { key: string; keys: readonly string[] }>()
 const listeners = new Set<() => void>()
 let attached = false
 
@@ -142,7 +154,12 @@ export function onTerrainData(listener: () => void): () => void {
 export function isPending(
   x: bigint, y: bigint, z: bigint, plane: Plane,
 ): boolean {
-  return pendingBlocks.has(blockKey(x, y, z, plane))
+  return isKeyPending(blockKey(x, y, z, plane))
+}
+
+/** isPending, for a key blockKey made earlier. */
+export function isKeyPending(key: string): boolean {
+  return pendingBlocks.has(key)
 }
 
 function attachOnce(): void {
@@ -152,15 +169,14 @@ function attachOnce(): void {
   for (const worker of getTerrainWorkers()) {
     worker.addEventListener('message', (event: MessageEvent<RunResponse>) => {
       const { id, values } = event.data
-      const spec = runsById.get(id)
-      if (!spec) return
+      const run = runsById.get(id)
+      if (!run) return
       runsById.delete(id)
-      inflight.delete(runKey(spec))
+      inflight.delete(run.key)
 
-      let i = 0
-      for (const [x, y, z] of runCells(spec)) {
-        writeK(x, y, z, spec.plane, values[i++])
-        pendingBlocks.delete(blockKey(x, y, z, spec.plane))
+      for (let i = 0; i < run.keys.length; i++) {
+        writeKey(run.keys[i], values[i])
+        pendingBlocks.delete(run.keys[i])
       }
 
       for (const listener of listeners) listener()
@@ -168,20 +184,25 @@ function attachOnce(): void {
   }
 }
 
-/** Queue a run, unless an identical one is already in flight. */
-export function requestRun(spec: RunSpec): void {
+/**
+ * Queue a run, unless an identical one is already in flight.
+ *
+ * `keys`, when given, is blockKey of each of the run's cells in order, from a
+ * caller that already has them; it is kept, not copied. Without it they are
+ * worked out here.
+ */
+export function requestRun(spec: RunSpec, keys?: readonly string[]): void {
   attachOnce()
 
   const key = runKey(spec)
   if (inflight.has(key)) return
   inflight.add(key)
 
-  for (const [x, y, z] of runCells(spec)) {
-    pendingBlocks.add(blockKey(x, y, z, spec.plane))
-  }
+  const cellKeys = keys ?? Array.from(runCells(spec), ([x, y, z]) => blockKey(x, y, z, spec.plane))
+  for (const k of cellKeys) pendingBlocks.add(k)
 
   const id = ++nextRunId
-  runsById.set(id, spec)
+  runsById.set(id, { key, keys: cellKeys })
   postRun({ id, ...spec } as RunRequest)
 }
 

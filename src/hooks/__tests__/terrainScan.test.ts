@@ -1,10 +1,11 @@
 /**
- * terrainScan.test.ts: the volume scan steps along its rows and lets the
- * cells of one block share an answer (useTerrainVolume scanVolume,
- * 2026-10-20). It must fill exactly the cells, and ask for exactly the runs,
- * that a cell-by-cell scan does: checked here against that scan, kept below
- * as it was, over many places, turns, zooms and states of the cache, with
- * each run marking its blocks asked for, as the real one does.
+ * terrainScan.test.ts: the volume is laid out once per place, zoom, turn and
+ * plane, and read again on each terrain flush (useTerrainVolume layoutVolume
+ * and readVolume, 2026-10-20). Every read must fill exactly the cells, and ask
+ * for exactly the runs, that a cell-by-cell scan of the same cache does:
+ * checked here against that scan, kept below as it was, over many places,
+ * turns and zooms, and over flushes in which asked-for blocks become known,
+ * others arrive from elsewhere, and some answers are outside the universe.
  */
 
 import { describe, expect, it, vi } from 'vitest'
@@ -15,35 +16,65 @@ const fake = vi.hoisted(() => {
   // The terrain worker's module, where UNKNOWN lives, installs its message
   // handler on `self` when imported.
   ;(globalThis as { self?: unknown }).self ??= globalThis
-  return { seed: 0, runs: [] as unknown[], pending: new Set<string>() }
+  return {
+    seed: 0,
+    runs: [] as unknown[],
+    /** Runs whose keys were not blockKey of their cells, in order. */
+    badKeys: 0,
+    /** The cache: blocks known, with their K, and blocks asked for. */
+    known: new Map<string, number>(),
+    pending: new Set<string>(),
+    /** Blocks whose first state has been rolled. */
+    seen: new Set<string>(),
+  }
 })
+
+/** A block's hash under the current seed, plus a salt. */
+function roll(key: string, salt = 0): number {
+  let h = fake.seed ^ salt
+  for (let i = 0; i < key.length; i++) h = (Math.imul(h, 31) + key.charCodeAt(i)) | 0
+  return h >>> 0
+}
+
+/** A block's state the first time anything looks at it: known, asked for, or neither. */
+function firstLook(key: string): void {
+  if (fake.seen.has(key)) return
+  fake.seen.add(key)
+  const r = roll(key) % 997
+  if (r % 3 === 0) fake.known.set(key, kFor(key))
+  else if (r % 3 === 1) fake.pending.add(key)
+}
+
+/** K for a block; now and then 255, which is what a cell outside the universe comes back as. */
+function kFor(key: string): number {
+  const r = roll(key, 0x5bd1e995)
+  return r % 23 === 0 ? 255 : r % 200
+}
 
 vi.mock('../../lib/terrainCache', async (original) => {
   const real = await original<typeof import('../../lib/terrainCache')>()
-  // A block's state from its key: known (with a K), asked for, or neither.
-  const roll = (key: string): number => {
-    let h = fake.seed
-    for (let i = 0; i < key.length; i++) h = (Math.imul(h, 31) + key.charCodeAt(i)) | 0
-    return (h >>> 0) % 997
-  }
+  const readKey = (key: string): number | undefined => { firstLook(key); return fake.known.get(key) }
+  const isKeyPending = (key: string): boolean => { firstLook(key); return fake.pending.has(key) }
   return {
     ...real,
-    readK: (x: bigint, y: bigint, z: bigint, plane: Plane) => { const r = roll(real.blockKey(x, y, z, plane)); return r % 3 === 0 ? r % 200 : undefined },
-    isPending: (x: bigint, y: bigint, z: bigint, plane: Plane) => {
-      const key = real.blockKey(x, y, z, plane)
-      return fake.pending.has(key) || roll(key) % 3 === 1
-    },
+    readKey,
+    isKeyPending,
+    readK: (x: bigint, y: bigint, z: bigint, plane: Plane) => readKey(real.blockKey(x, y, z, plane)),
+    isPending: (x: bigint, y: bigint, z: bigint, plane: Plane) => isKeyPending(real.blockKey(x, y, z, plane)),
     // As the real one does, a run marks its blocks asked for, so a later row
-    // of the same scan sees them pending.
-    requestRun: (spec: { originX: bigint; originY: bigint; originZ: bigint; axis: AxisName; step: bigint; count: number; plane: Plane }) => {
+    // of the same scan sees them pending. Keys handed in must be the cells'.
+    requestRun: (spec: { originX: bigint; originY: bigint; originZ: bigint; axis: AxisName; step: bigint; count: number; plane: Plane }, keys?: readonly string[]) => {
       fake.runs.push(spec)
       const at = { x: spec.originX, y: spec.originY, z: spec.originZ }
-      for (let i = 0; i < spec.count; i++, at[spec.axis] += spec.step) fake.pending.add(real.blockKey(at.x, at.y, at.z, spec.plane))
+      const want: string[] = []
+      for (let i = 0; i < spec.count; i++, at[spec.axis] += spec.step) want.push(real.blockKey(at.x, at.y, at.z, spec.plane))
+      if (keys && JSON.stringify(keys) !== JSON.stringify(want)) fake.badKeys++
+      for (const k of want) fake.pending.add(k)
     },
   }
 })
 
-const { scanVolume, VOLUME_RADIUS, VOLUME_SIZE } = await import('../useTerrainVolume')
+const { layoutVolume, readVolume, VOLUME_RADIUS, VOLUME_SIZE } = await import('../useTerrainVolume')
 const { BLOCK_BITS, BLOCK_SIZE, blockKey, isPending, readK, requestRun } = await import('../../lib/terrainCache')
 const { UNKNOWN } = await import('../../workers/terrain.worker')
 
@@ -119,7 +150,55 @@ function centreFor(i: number): Position {
   return { x: v(0), y: v(1), z: v(2) }
 }
 
-describe('scanVolume', () => {
+function resetCache(seed: number): void {
+  fake.seed = seed
+  fake.runs = []
+  fake.badKeys = 0
+  fake.known = new Map()
+  fake.pending = new Set()
+  fake.seen = new Set()
+}
+
+/**
+ * Between flushes: about half the blocks asked for come back, and now and
+ * then one never asked for arrives anyway (asked for by another view).
+ */
+function deliver(epoch: number): void {
+  for (const key of [...fake.pending]) {
+    if (roll(key, epoch) % 2 === 0) { fake.pending.delete(key); fake.known.set(key, kFor(key)) }
+  }
+  for (const key of fake.seen) {
+    if (!fake.known.has(key) && !fake.pending.has(key) && roll(key, epoch * 7 + 1) % 5 === 0) fake.known.set(key, kFor(key))
+  }
+}
+
+/**
+ * Read `layout` and check it against the cell-by-cell scan of the same cache:
+ * the same cells, the same runs in the same order, and the same blocks left
+ * asked for. The scan runs on a copy of the cache; the read's cache is kept.
+ */
+function checkRead(layout: ReturnType<typeof layoutVolume>, centre: Position, axes: ViewAxes, scaleExp: number, plane: Plane): Uint8Array {
+  const known = new Map(fake.known), pending = new Set(fake.pending), seen = new Set(fake.seen)
+  fake.runs = []
+  const want = referenceScan(centre, axes, scaleExp, plane)
+  const wantRuns = fake.runs
+  const wantPending = [...fake.pending].sort()
+  fake.known = known; fake.pending = pending; fake.seen = seen
+  fake.runs = []
+  const got = readVolume(layout)
+  expect(got).toEqual(want)
+  expect(fake.runs).toEqual(wantRuns)
+  expect([...fake.pending].sort()).toEqual(wantPending)
+  expect(fake.badKeys).toBe(0)
+  return got
+}
+
+function axesFor(i: number, dir: 1 | -1): ViewAxes {
+  const [r, u, o] = AXES[i % AXES.length]
+  return { right: { axis: r, dir }, up: { axis: u, dir: i % 3 ? 1 : -1 }, out: { axis: o, dir: i % 5 ? -1 : 1 } }
+}
+
+describe('readVolume', () => {
   it('fills the same cells and asks for the same runs as a cell-by-cell scan', () => {
     let cases = 0
     // Every scale against every axis order and both right-axis directions:
@@ -132,16 +211,8 @@ describe('scanVolume', () => {
           const axes: ViewAxes = { right: { axis: r, dir }, up: { axis: u, dir: i % 3 ? 1 : -1 }, out: { axis: o, dir: i % 5 ? -1 : 1 } }
           const centre = centreFor(i)
           const plane = (Math.floor(i / 2) % 2) as Plane
-          fake.seed = i * 7919
-          fake.runs = []
-          fake.pending = new Set()
-          const want = referenceScan(centre, axes, scaleExp, plane)
-          const wantRuns = fake.runs
-          fake.runs = []
-          fake.pending = new Set()
-          const got = scanVolume(centre, axes, scaleExp, plane)
-          expect(got).toEqual(want)
-          expect(fake.runs).toEqual(wantRuns)
+          resetCache(i * 7919)
+          checkRead(layoutVolume(centre, axes, scaleExp, plane), centre, axes, scaleExp, plane)
           cases++
         }
       }
@@ -149,6 +220,58 @@ describe('scanVolume', () => {
     expect(cases).toBe(72)
     // 144 full scans: generous, for a suite run on a busy machine.
   }, 120_000)
+
+  it('stays equal to a fresh scan across flushes, moves, zooms, turns and planes', () => {
+    let same = 0, renewed = 0, reads = 0
+    for (let i = 0; i < 10; i++) {
+      resetCache(i * 104729 + 1)
+      let centre = centreFor(i)
+      let scaleExp = [0, 2, 3, 11, 1][i % 5]
+      let axes = axesFor(i, i % 2 ? 1 : -1)
+      let plane = (i % 2) as Plane
+      let epoch = i * 1000
+
+      // Each view: laid out once, then read on a few flushes, as the hook does.
+      const view = (): void => {
+        const layout = layoutVolume(centre, axes, scaleExp, plane)
+        let prev = checkRead(layout, centre, axes, scaleExp, plane)
+        reads++
+        for (let f = 0; f < 3; f++) {
+          const before = prev.slice()
+          deliver(++epoch)
+          const got = checkRead(layout, centre, axes, scaleExp, plane)
+          reads++
+          // An array handed out is never written to again, and the same one
+          // comes back only when nothing in it has changed.
+          expect(prev).toEqual(before)
+          if (got === prev) { expect(got).toEqual(before); same++ } else renewed++
+          prev = got
+        }
+        // A flush with nothing new: the same array.
+        expect(readVolume(layout)).toBe(prev)
+      }
+
+      view()
+      // One cell along each axis: the new volume shares most of its blocks.
+      for (const a of ['x', 'y', 'z'] as const) {
+        centre = { ...centre, [a]: centre[a] + (1n << BigInt(scaleExp)) }
+        view()
+      }
+      // Zoom out and back in, turn, and cross to the other plane.
+      scaleExp += 1
+      view()
+      scaleExp -= 1
+      view()
+      axes = axesFor(i + 1, i % 2 ? -1 : 1)
+      view()
+      plane = (1 - plane) as Plane
+      view()
+    }
+    expect(reads).toBe(10 * 8 * 4)
+    // Both outcomes happened, so neither identity check passed vacuously.
+    expect(same).toBeGreaterThan(0)
+    expect(renewed).toBeGreaterThan(0)
+  }, 240_000)
 })
 
 describe('blockKey', () => {

@@ -12,10 +12,17 @@
  * Otherwise red would mean "whatever is on the right" rather than X.
  *
  * Text labels project from the rotated arrow tips to screen space.
+ *
+ * It draws a frame only when something it shows has changed: the pose, the
+ * axes or its size. The camera rests far more than it turns, and a frame the
+ * same as the last was a render, a context switch in the GPU process and a
+ * composite spent on nothing, every display refresh, on a canvas of its own
+ * (arkinox, 2026-10-20: /tv and the main view chug on his Windows laptop).
+ * A canvas nobody draws to keeps showing its last frame.
  */
 
 import { Canvas, useFrame, useThree } from '@react-three/fiber'
-import { useCallback, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Quaternion, Vector3 } from 'three'
 import { useCyberspace } from '../store/useCyberspace'
 import { cameraPose } from '../lib/cameraPose'
@@ -68,10 +75,62 @@ function Arrow({ dir, color }: { dir: Vector3; color: string }): JSX.Element {
 
 type Dirs = Record<'x' | 'y' | 'z', Vector3>
 
+/** What the compass's last frame was drawn from. */
+export interface Drawn {
+  pose: [number, number, number, number]
+  dirs: Dirs | null
+  /** CSS pixels, which place the labels. */
+  size: [number, number]
+  /** The drawing buffer, which a resize clears. */
+  buffer: [number, number]
+  /** The labels are to be placed once more, from the camera as last drawn. */
+  labelsDue: boolean
+}
+
+/** Nothing drawn yet: the first frame is always drawn. */
+export function nothingDrawn(): Drawn {
+  return { pose: [NaN, NaN, NaN, NaN], dirs: null, size: [0, 0], buffer: [0, 0], labelsDue: false }
+}
+
+/**
+ * What this pass of the loop does, `drawn` brought up to date: 'draw' a frame
+ * and place the labels, when a frame from these inputs would differ from the
+ * last one drawn; 'labels' alone, in the pass after a drawn frame; otherwise
+ * nothing. The pose is compared exactly, so a frame is skipped only when it
+ * would be the same frame. The directions are compared by identity: they are
+ * rebuilt whenever the view's axes change, and the workshop's are constant.
+ *
+ * The labels are projected through the camera as three last drew it (it
+ * brings the camera's matrices up to date in render), so a frame behind the
+ * arrows. Drawn every frame, as it was, the next frame put them right; the
+ * pass after a drawn frame does that now, so they land where they always did.
+ */
+export function compassStep(drawn: Drawn, pose: Quaternion, dirs: Dirs, width: number, height: number, bufferWidth: number, bufferHeight: number): 'draw' | 'labels' | null {
+  const p = drawn.pose
+  if (
+    p[0] === pose.x && p[1] === pose.y && p[2] === pose.z && p[3] === pose.w &&
+    drawn.dirs === dirs &&
+    drawn.size[0] === width && drawn.size[1] === height &&
+    drawn.buffer[0] === bufferWidth && drawn.buffer[1] === bufferHeight
+  ) {
+    if (!drawn.labelsDue) return null
+    drawn.labelsDue = false
+    return 'labels'
+  }
+  p[0] = pose.x; p[1] = pose.y; p[2] = pose.z; p[3] = pose.w
+  drawn.dirs = dirs
+  drawn.size[0] = width; drawn.size[1] = height
+  drawn.buffer[0] = bufferWidth; drawn.buffer[1] = bufferHeight
+  drawn.labelsDue = true
+  return 'draw'
+}
+
 function CompassScene({ onLabelsUpdate, pose, given }: { onLabelsUpdate: (labels: LabelPosition[]) => void; pose: Quaternion; given?: Dirs }): JSX.Element {
   const view = useCyberspace((s) => s.view)
   const axes = useMemo(() => useCyberspace.getState().axes(), [view])
-  const { camera, size } = useThree()
+  const camera = useThree((s) => s.camera)
+  const size = useThree((s) => s.size)
+  const gl = useThree((s) => s.gl)
 
   const dirs = useMemo<Dirs>(() => given ?? {
     x: localDir(axes, 'x'),
@@ -79,9 +138,26 @@ function CompassScene({ onLabelsUpdate, pose, given }: { onLabelsUpdate: (labels
     z: localDir(axes, 'z'),
   }, [axes, given])
 
-  useFrame(() => {
-    camera.quaternion.copy(pose)
-    camera.position.copy(new Vector3(0, 0, CAMERA_DISTANCE).applyQuaternion(pose))
+  const drawn = useRef(nothingDrawn())
+  // A restored context starts blank: draw again.
+  useEffect(() => {
+    const canvas = gl.domElement
+    const again = (): void => { drawn.current = nothingDrawn() }
+    canvas.addEventListener('webglcontextrestored', again)
+    return () => canvas.removeEventListener('webglcontextrestored', again)
+  }, [gl])
+
+  // Priority 1 takes the drawing from R3F, so a frame is drawn here or not at
+  // all. The pose is read at the same point in the loop as before, so a turn
+  // shows on the compass in the same frame as it did.
+  useFrame(({ scene }) => {
+    const canvas = gl.domElement
+    const step = compassStep(drawn.current, pose, dirs, size.width, size.height, canvas.width, canvas.height)
+    if (!step) return
+    if (step === 'draw') {
+      camera.quaternion.copy(pose)
+      camera.position.copy(new Vector3(0, 0, CAMERA_DISTANCE).applyQuaternion(pose))
+    }
 
     const labels: LabelPosition[] = (['x', 'y', 'z'] as const).map((axis) => {
       const world = dirs[axis].clone().multiplyScalar(ARROW_LENGTH + LABEL_OFFSET)
@@ -95,7 +171,8 @@ function CompassScene({ onLabelsUpdate, pose, given }: { onLabelsUpdate: (labels
       }
     })
     onLabelsUpdate(labels)
-  })
+    if (step === 'draw') gl.render(scene, camera)
+  }, 1)
 
   return (
     <group>

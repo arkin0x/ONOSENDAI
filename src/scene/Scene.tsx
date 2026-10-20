@@ -780,7 +780,7 @@ export const Scene = memo(function Scene(): JSX.Element {
   // which live for the session, so every old pass stayed reachable, two per
   // render of this component, with their scenes, cameras and materials
   // (measured 2026-10-13: 406 EffectMaterials kept over 200 hops).
-  // Cyberspace TV's tube rides last, skipped while TV is off (TvScreenEffect).
+  // Cyberspace TV's tube rides last, its pass switched off while TV is off (TvScreenEffect).
   const bloom = useMemo(() => <><WorldBloom /><TvScreenEffect /></>, [])
   return (
     <Canvas

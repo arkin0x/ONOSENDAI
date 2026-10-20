@@ -25,16 +25,21 @@
  * overly aggressive"); with reduced motion asked for, every cut is a dip.
  *
  * One pass after the bloom, so the glow is on the tube rather than in the
- * world. It is in the composer for the whole session and skipped while TV is
- * off: the composer's children are made once (Scene.tsx), and adding or
- * removing an effect would rebuild its passes. Skipped, the pass is one
- * full-screen copy to the screen (postprocessing still renders a skipped pass
- * that renders to screen), and the picture is unchanged.
+ * world. It is in the composer for the whole session, since the composer's
+ * children are made once (Scene.tsx) and adding or removing an effect would
+ * rebuild its passes, but with TV off its pass is switched off and the bloom
+ * draws to the screen itself, as it did before TV. Merely skipped, the pass
+ * cost every frame of the main view a full-screen copy, and the bloom, no
+ * longer last, drew into the composer's spare multisampled buffer and had it
+ * resolved: about half again the GPU time per frame, and on a Windows laptop
+ * the world chugged from the first frame (arkinox, 2026-10-20: "it's barely
+ * usable"; smooth on his Android).
  */
 
-import { useEffect, useMemo, useRef } from 'react'
+import { useContext, useEffect, useMemo, useRef } from 'react'
 import { useFrame, useThree } from '@react-three/fiber'
-import { BlendFunction, Effect, EffectAttribute } from 'postprocessing'
+import { BlendFunction, Effect, EffectAttribute, type Pass } from 'postprocessing'
+import { EffectComposerContext } from '@react-three/postprocessing'
 import { CanvasTexture, LinearFilter, SRGBColorSpace, Uniform } from 'three'
 import { placeable, useTv } from '../store/useTv'
 import { useProfiles } from '../store/useProfiles'
@@ -212,6 +217,21 @@ class CrtEffect extends Effect {
   }
 }
 
+/**
+ * The tube's pass runs only while TV is on; while it is off, the pass before
+ * it (the bloom) is the last one and draws to the screen. Found again each
+ * frame, so a rebuilt composer is set right too, and changed only when it
+ * differs: a pass's screen switch rebuilds its material.
+ */
+function tubeOnly(passes: Pass[] | undefined, effect: Effect, on: boolean): void {
+  if (!passes) return
+  const at = passes.findIndex((p) => (p as unknown as { effects?: Effect[] }).effects?.includes(effect))
+  if (at < 1 || at !== passes.length - 1) return
+  const tube = passes[at], before = passes[at - 1]
+  if (tube.enabled !== on) tube.enabled = on
+  if (before.renderToScreen === on) before.renderToScreen = !on
+}
+
 /** Which of the three cuts a cut is: dip, roll, snow, in turn; always a dip with reduced motion. */
 export function cutKind(cutAt: number, reduced: boolean): number {
   if (reduced) return 0
@@ -321,6 +341,7 @@ export function TvScreenEffect(): JSX.Element {
   // (arkinox, 2026-10-18). On the canvas, ahead of the scene's own pointer
   // handling, and only on the card: a tap anywhere else is not the music's.
   const gl = useThree((s) => s.gl)
+  const composer = useContext(EffectComposerContext)?.composer
   useEffect(() => {
     const el = gl.domElement
     let drag: { id: number; y: number; volume: number; moved: boolean } | null = null
@@ -387,6 +408,7 @@ export function TvScreenEffect(): JSX.Element {
     // mounts (a page opened on /tv), and a missed change left the tube off.
     const want = tv.on ? BlendFunction.SET : BlendFunction.SKIP
     if (effect.blendMode.blendFunction !== want) effect.blendMode.blendFunction = want
+    tubeOnly(composer?.passes, effect, tv.on)
     const now = performance.now()
     // The glitches' clocks start when TV comes on: time with it off is not a backlog.
     if (tv.on && !wasOn.current) {

@@ -6,10 +6,10 @@
 
 import { describe, expect, it, vi } from 'vitest'
 import {
-  BufferGeometry, Group, InstancedMesh, Line, LineBasicMaterial, LineLoop, LineSegments, Mesh, MeshBasicMaterial,
-  PerspectiveCamera, Points, Scene, ShaderMaterial, Sprite, SpriteMaterial, Texture, type Camera, type Material, type Object3D, type WebGLRenderer,
+  BatchedMesh, BufferGeometry, Group, InstancedMesh, SkinnedMesh, Line, LineBasicMaterial, LineLoop, LineSegments, Mesh, MeshBasicMaterial,
+  PerspectiveCamera, Points, Scene, ShaderMaterial, Sprite, SpriteMaterial, Texture, UniformsGroup, type Camera, type Material, type Object3D, type WebGLRenderer,
 } from 'three'
-import { KEEP_MAX, keep, keepPrograms, keepSources, standIn, type Counted, type Sources } from '../keepPrograms'
+import { KEEP_MAX, copyable, keep, keepPrograms, keepSources, standIn, type Counted, type Sources } from '../keepPrograms'
 
 /** Three's own rule (WebGLPrograms.releaseProgram): a program goes when its last user does. */
 function release(programs: Counted[], p: Counted): void {
@@ -98,12 +98,24 @@ describe('standIn', () => {
     expect(sprite.material).toBe(m)
   })
 
-  it('is nothing for an instanced mesh, whose program depends on more', () => {
+  it('is nothing for an instanced, skinned or batched mesh, whose program depends on more', () => {
     expect(standIn(new InstancedMesh(g, m, 4), m)).toBeNull()
+    expect(standIn(new SkinnedMesh(g, m), m)).toBeNull()
+    expect(standIn(new BatchedMesh(4, 64, 64, m), m)).toBeNull()
   })
 
   it('is nothing for what is not drawn', () => {
     expect(standIn(new Group(), m)).toBeNull()
+  })
+})
+
+describe('copyable', () => {
+  it('is a plain ShaderMaterial, not one with lights or its own compile hook or key', () => {
+    expect(copyable(disc())).toBe(true)
+    const lit = disc(); lit.lights = true
+    const hooked = disc(); hooked.onBeforeCompile = () => {}
+    const keyed = disc(); keyed.customProgramCacheKey = () => 'mine'
+    for (const m of [lit, hooked, keyed]) expect(copyable(m)).toBe(false)
   })
 })
 
@@ -157,6 +169,54 @@ describe('keepSources', () => {
     // Drawn later, it is kept then.
     keepSources(gl, scene, camera, sources, () => true)
     expect(compiled).toHaveLength(1)
+  })
+
+  it('leaves to three a material a copy could not stand in for, without counting its source kept', () => {
+    const { gl, compiled } = fakeGl()
+    const scene = new Scene()
+    const lit = disc(); lit.lights = true
+    scene.add(new Points(new BufferGeometry(), lit))
+    const sources: Sources = new Map()
+    keepSources(gl, scene, camera, sources, () => true)
+    expect(compiled).toHaveLength(0)
+    expect(sources.size).toBe(0)
+  })
+
+  it('counts a source kept only once a stand-in is made: first seen instanced, kept when drawn plainer', () => {
+    const { gl, compiled } = fakeGl()
+    const scene = new Scene()
+    const a = disc()
+    scene.add(new InstancedMesh(new BufferGeometry(), a, 4))
+    const sources: Sources = new Map()
+    keepSources(gl, scene, camera, sources, () => true)
+    expect(compiled).toHaveLength(0)
+    scene.add(new Points(new BufferGeometry(), disc()))
+    keepSources(gl, scene, camera, sources, () => true)
+    expect(compiled).toHaveLength(1)
+  })
+
+  it('the copy holds no uniform groups either', () => {
+    const { gl, compiled } = fakeGl()
+    const scene = new Scene()
+    const m = disc()
+    m.uniformsGroups = [new UniformsGroup()]
+    scene.add(new Points(new BufferGeometry(), m))
+    keepSources(gl, scene, camera, new Map(), () => true)
+    expect(((compiled[0].object as Points).material as ShaderMaterial).uniformsGroups).toEqual([])
+    expect(m.uniformsGroups).toHaveLength(1)
+  })
+
+  it('says so when a copy compiled a program of its own', () => {
+    const { gl, programs } = fakeGl()
+    const scene = new Scene()
+    scene.add(new Points(new BufferGeometry(), disc()), new Points(new BufferGeometry(), disc(FRAG_B)))
+    let n = 0
+    vi.spyOn(gl, 'compile').mockImplementation(() => { if (n++ === 0) programs.push({ usedTimes: 1 }); return new Set() as never })
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    keepSources(gl, scene, camera, new Map(), () => true)
+    expect(warn).toHaveBeenCalledTimes(1)
+    expect(String(warn.mock.calls[0][2])).toContain('compiled a program of its own')
+    warn.mockRestore()
   })
 
   it('reads every material of an object that has several', () => {
@@ -228,6 +288,21 @@ describe('keepPrograms', () => {
     const shown = disc(), culled = disc(FRAG_B)
     scene.add(new Points(new BufferGeometry(), shown), new Points(new BufferGeometry(), culled))
     drawWith(shown, { usedTimes: 1 })
+    render(scene, gl)
+    expect(compiled).toHaveLength(1)
+    expect(((compiled[0].object as Points).material as ShaderMaterial).fragmentShader).toBe(FRAG_A)
+  })
+
+  it('in the frame the bound is reached, copies the material whose program it kept and not the one past it', () => {
+    const { gl, compiled, programs, drawWith } = fakeGl()
+    const scene = new Scene()
+    keepPrograms(gl, scene)
+    for (let i = 0; i < KEEP_MAX - 1; i++) programs.push({ usedTimes: 1 })
+    render(scene, gl)
+    const inside = disc(), past = disc(FRAG_B)
+    scene.add(new Points(new BufferGeometry(), inside), new Points(new BufferGeometry(), past))
+    drawWith(inside, { usedTimes: 1 })
+    drawWith(past, { usedTimes: 1 })
     render(scene, gl)
     expect(compiled).toHaveLength(1)
     expect(((compiled[0].object as Points).material as ShaderMaterial).fragmentShader).toBe(FRAG_A)

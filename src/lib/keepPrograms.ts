@@ -32,7 +32,7 @@
  * holds on to no texture or data.
  */
 
-import { Line, LineLoop, LineSegments, Mesh, Points, Sprite, type Camera, type Material, type Object3D, type Scene, type ShaderMaterial, type WebGLRenderer } from 'three'
+import { Line, LineLoop, LineSegments, Material, Mesh, Points, Sprite, type Camera, type Object3D, type Scene, type ShaderMaterial, type WebGLRenderer } from 'three'
 
 /** At most this many programs kept on one renderer. Measured: at most 20 on /tv, all of it. */
 export const KEEP_MAX = 96
@@ -75,6 +75,19 @@ export function standIn(o: Object3D, m: Material): Object3D | null {
 }
 
 /**
+ * Whether a copy of `s` takes the original's program. Not for one with lights,
+ * whose copy three would wire the lights into (its uniforms are left out),
+ * nor for one with its own compile hook or key, which a copy does not carry
+ * (Material.copy), so it would compile a program of its own. None of these is
+ * in the app; they are left to three, as before.
+ */
+export function copyable(s: ShaderMaterial): boolean {
+  return !s.lights &&
+    s.onBeforeCompile === Material.prototype.onBeforeCompile &&
+    s.customProgramCacheKey === Material.prototype.customProgramCacheKey
+}
+
+/**
  * For each ShaderMaterial in `scene` drawn with a kept program, and with a
  * source not in `sources`, makes a copy ready with `gl` and keeps it, never
  * disposed. `drawn` says whether a material's program is one of the kept.
@@ -87,20 +100,32 @@ export function keepSources(gl: WebGLRenderer, scene: Scene, camera: Camera, sou
     if (!ms) return
     for (const m of Array.isArray(ms) ? ms : [ms]) {
       const s = m as ShaderMaterial
-      if (!s.isShaderMaterial) continue
+      if (!s.isShaderMaterial || !copyable(s)) continue
       const fragments = sources.get(s.vertexShader)
       if (fragments?.has(s.fragmentShader)) continue
       if (!drawn(m)) continue
+      // Only a source a copy can stand in for counts as kept: one first seen
+      // on an instanced mesh is kept when it is drawn on something plainer.
+      const o2 = standIn(o, s)
+      if (!o2) continue
       if (fragments) fragments.add(s.fragmentShader)
       else sources.set(s.vertexShader, new Set([s.fragmentShader]))
       try {
         const copy = s.clone()
         copy.uniforms = {}
-        const o2 = standIn(o, copy)
-        if (o2) gl.compile(o2, camera, scene)
+        copy.uniformsGroups = []
+        ;(o2 as Mesh).material = copy
+        const before = gl.info.programs?.length ?? 0
+        gl.compile(o2, camera, scene)
+        // The copy is meant to take the original's program. If it made one of
+        // its own, what three reads to choose a program has changed under
+        // this (a three upgrade, say), and the copy only adds a program.
+        if (import.meta.env.DEV && (gl.info.programs?.length ?? 0) > before) {
+          console.warn('[onosendai] keepPrograms: the copy of', s.name || s.type, 'compiled a program of its own')
+        }
       } catch (e) {
-        // Never a reason to lose a frame: the source is compiled again when
-        // next needed, as before.
+        // Never a reason to lose a frame. The source is not tried again; at
+        // worst it is compiled again later, as before.
         console.warn('[onosendai] keepPrograms: could not keep a copy of', s.name || s.type, e)
       }
     }

@@ -246,6 +246,19 @@ describe('TV music back from the background (arkinox, 2026-10-20)', () => {
     expect(audio().plays).toBe(plays + 1)
   })
 
+  it('a tap in a break is a mute, never a play: nothing plays under the ad', async () => {
+    startMusic(list)
+    await flush()
+    holdMusicForAd(true)
+    vi.advanceTimersByTime(700)
+    expect(audio().paused).toBe(true)
+    const plays = audio().plays
+    tapMusic()
+    expect(audio().plays).toBe(plays)
+    expect(audio().paused).toBe(true)
+    expect(useTvMusic.getState().muted).toBe(true)
+  })
+
   it('a pause the page did not make stands against coming back and a break, and a tap on NOW PLAYING plays it again', async () => {
     startMusic(list)
     await flush()

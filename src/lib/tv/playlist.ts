@@ -48,4 +48,5 @@ export const PLAYLIST: Track[] = [
   { url: 'https://media.basspistol.com/setto.basspistol.com/little-bug-ep/2-little-bug.mp3' },
   { url: 'https://media.basspistol.com/basspistol.com/dust-and-soda/1-the-all-new-american-holocaust.mp3' },
   { url: 'https://media.basspistol.com/basspistol.com/dust-and-soda/2-microchip-babies.mp3' },
+  { url: 'https://media.basspistol.com/basspistol.com/dust-and-soda/3-the-golden-bank.mp3' },
 ]

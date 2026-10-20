@@ -15,7 +15,7 @@
  */
 
 import { Canvas, useFrame, useThree } from '@react-three/fiber'
-import { useMemo, useState } from 'react'
+import { useCallback, useMemo, useRef, useState } from 'react'
 import { Quaternion, Vector3 } from 'three'
 import { useCyberspace } from '../store/useCyberspace'
 import { cameraPose } from '../lib/cameraPose'
@@ -25,6 +25,9 @@ interface LabelPosition {
   axis: 'x' | 'y' | 'z'
   screen: { x: number; y: number }
 }
+
+/** The labels, in the order they are drawn. */
+const AXES = ['x', 'y', 'z'] as const
 
 const CAMERA_DISTANCE = 5
 const ARROW_LENGTH = 1.2
@@ -113,22 +116,54 @@ function CompassScene({ onLabelsUpdate, pose, given }: { onLabelsUpdate: (labels
  * takes the compass out of its fixed spot so the corner can hold it.
  */
 export function Compass3D({ onTap, pose = cameraPose, dirs, bench = false }: { onTap?: () => void; pose?: Quaternion; dirs?: Dirs; bench?: boolean } = {}): JSX.Element {
-  const [labels, setLabels] = useState<LabelPosition[]>([])
+  // The labels follow the arrows every frame the camera turns, so they are
+  // moved by hand rather than through state: as state, every frame of an
+  // orbit re-rendered this component and, through its Canvas, the whole
+  // compass scene (arkinox, 2026-10-20: the laptop "still isn't great";
+  // React commits counted during a drag). State changes once, when the first
+  // positions arrive, which is when the labels first appear, as before. Only
+  // these writes place the spans: React renders them with no position of its
+  // own, so a render can never put back an older one.
+  const placed = useRef<LabelPosition[]>([])
+  const spans = useRef<Partial<Record<LabelPosition['axis'], HTMLSpanElement | null>>>({})
+  const [shown, setShown] = useState(false)
 
-  const handleLabelsUpdate = (newLabels: LabelPosition[]) => {
-    setLabels((prev) => {
-      if (
-        prev.length === newLabels.length &&
-        prev.every((p, i) =>
-          Math.abs(p.screen.x - newLabels[i].screen.x) < 0.5 &&
-          Math.abs(p.screen.y - newLabels[i].screen.y) < 0.5
-        )
-      ) {
-        return prev
-      }
-      return newLabels
-    })
-  }
+  /** Puts one label where the arrows last were, if its span is there. */
+  const place = useCallback((axis: LabelPosition['axis']): void => {
+    const span = spans.current[axis]
+    const at = placed.current.find((l) => l.axis === axis)
+    if (!span || !at) return
+    span.style.left = `${at.screen.x}px`
+    span.style.top = `${at.screen.y}px`
+  }, [])
+  // A span placed as it arrives: positions that came in between the render
+  // and its arrival are not lost.
+  const attach = useMemo(() => {
+    const one = (axis: LabelPosition['axis']) => (span: HTMLSpanElement | null): void => {
+      spans.current[axis] = span
+      place(axis)
+    }
+    return { x: one('x'), y: one('y'), z: one('z') }
+  }, [place])
+
+  const handleLabelsUpdate = useCallback((newLabels: LabelPosition[]) => {
+    const prev = placed.current
+    if (
+      prev.length === newLabels.length &&
+      prev.every((p, i) =>
+        Math.abs(p.screen.x - newLabels[i].screen.x) < 0.5 &&
+        Math.abs(p.screen.y - newLabels[i].screen.y) < 0.5
+      )
+    ) {
+      return
+    }
+    placed.current = newLabels
+    if (prev.length === 0) {
+      setShown(true)
+      return
+    }
+    for (const { axis } of newLabels) place(axis)
+  }, [place])
 
   return (
     <div
@@ -146,15 +181,8 @@ export function Compass3D({ onTap, pose = cameraPose, dirs, bench = false }: { o
         <pointLight position={[5, 5, 5]} intensity={0.8} />
         <CompassScene onLabelsUpdate={handleLabelsUpdate} pose={pose} given={dirs} />
       </Canvas>
-      {labels.map(({ axis, screen }) => (
-        <span
-          key={axis}
-          className={`compass-label compass-label--${axis}`}
-          style={{
-            left: `${screen.x}px`,
-            top: `${screen.y}px`,
-          }}
-        >
+      {shown && AXES.map((axis) => (
+        <span key={axis} ref={attach[axis]} className={`compass-label compass-label--${axis}`}>
           {axis.toUpperCase()}
         </span>
       ))}

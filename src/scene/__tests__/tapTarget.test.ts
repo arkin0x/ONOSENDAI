@@ -6,7 +6,8 @@
 
 import { describe, expect, it } from 'vitest'
 import { MAX_EXTENT } from 'sno-core/shards'
-import { MAX_SCREENS, MAX_VIEWPORT_PX, MIN_TARGET_PX, MIN_VISIBLE_PX, farCullDoublings, pxPerUnit, targetSpan, yieldsTap } from '../TapTarget'
+import { BoxGeometry, Group, Mesh, MeshBasicMaterial, PerspectiveCamera, Raycaster, Scene, Vector2, Vector3 } from 'three'
+import { MAX_SCREENS, MAX_VIEWPORT_PX, MIN_TARGET_PX, MIN_VISIBLE_PX, farCullDoublings, pxPerUnit, tapRaycast, targetSpan, yieldsTap, type TapSpec, type TapView } from '../TapTarget'
 import { CAMERA_NEAR, FOV } from '../camera'
 
 describe('pxPerUnit', () => {
@@ -72,5 +73,81 @@ describe('yieldsTap: your own avatar takes only the taps nothing else wants (ark
   it('leaves a tap to a shard, a stop, the planet or another avatar under the same ray, nearer or farther', () => {
     expect(yieldsTap([{ object: self }, { object: { name: 'shard' } }], self)).toBe(true)
     expect(yieldsTap([{ object: { name: 'stop cube' } }, { object: self }], self)).toBe(true)
+  })
+})
+
+describe('tapRaycast: a target is placed when a ray asks (2026-10-20)', () => {
+  /** A shard (a 2-unit box) and its target as siblings under one placed group, a camera looking down -z. */
+  function world(spec: (drawn: Group) => TapSpec) {
+    const scene = new Scene()
+    const holder = new Group()
+    holder.position.set(0, 0, -10)
+    // Built off its origin, as a model can be: the target has to move to it.
+    const drawn = new Group()
+    drawn.position.set(2, 0, 0)
+    drawn.add(new Mesh(new BoxGeometry(2, 2, 2), new MeshBasicMaterial()))
+    const target = new Mesh(new BoxGeometry(1, 1, 1), new MeshBasicMaterial())
+    holder.add(drawn, target)
+    scene.add(holder)
+    const camera = new PerspectiveCamera(FOV, 1, CAMERA_NEAR, 6000)
+    scene.updateMatrixWorld(true)
+    camera.updateMatrixWorld(true)
+    const last: { current: Event | null } = { current: null }
+    const view = (): TapView => ({ camera, size: { width: 800, height: 800 }, internal: { lastEvent: last } })
+    const out = { across: 0, perPxWorld: 0 }
+    target.raycast = tapRaycast(view, { current: spec(drawn) }, out)
+    const hits = (x: number, y: number): number => {
+      const ray = new Raycaster()
+      ray.setFromCamera(new Vector2(x, y), camera)
+      return ray.intersectObject(target).length
+    }
+    return { scene, holder, drawn, target, camera, last, out, hits }
+  }
+
+  it('is placed on what is drawn and hit there, with no frame rendered in between', () => {
+    const w = world((drawn) => ({ measure: { current: drawn } }))
+    // Never placed by a frame: the target starts at its parent's origin, unit size, beside the box.
+    const at = new Vector3(2, 0, -10).project(w.camera)
+    expect(w.hits(at.x, at.y)).toBeGreaterThan(0)
+    expect(w.target.getWorldPosition(new Vector3()).distanceTo(new Vector3(2, 0, -10))).toBeLessThan(1e-9)
+    expect(w.out.across).toBeGreaterThan(0)
+    // The parent's origin, where the target started, is clear of the box: no hit.
+    expect(w.hits(0, 0)).toBe(0)
+  })
+
+  it('follows the shard as last drawn: moved and drawn again, the next tap finds it there', () => {
+    const w = world((drawn) => ({ measure: { current: drawn } }))
+    w.holder.position.set(3, 0, -10)
+    w.scene.updateMatrixWorld(true)
+    const now = new Vector3(5, 0, -10).project(w.camera)
+    const before = new Vector3(2, 0, -10).project(w.camera)
+    expect(w.hits(now.x, now.y)).toBeGreaterThan(0)
+    expect(w.hits(before.x, before.y)).toBe(0)
+  })
+
+  it('takes no wheel ray: a wheel turn is a zoom, and nothing is measured for it', () => {
+    const w = world((drawn) => ({ measure: { current: drawn } }))
+    w.last.current = { type: 'wheel' } as Event
+    const at = new Vector3(2, 0, -10).project(w.camera)
+    expect(w.hits(at.x, at.y)).toBe(0)
+    w.last.current = { type: 'pointerdown' } as Event
+    expect(w.hits(at.x, at.y)).toBeGreaterThan(0)
+  })
+
+  it('takes no taps when what is drawn is a speck', () => {
+    const w = world((drawn) => ({ measure: { current: drawn } }))
+    w.drawn.scale.setScalar(1e-9)
+    w.scene.updateMatrixWorld(true)
+    const at = new Vector3(2e-9, 0, -10).project(w.camera)
+    expect(w.hits(at.x, at.y)).toBe(0)
+    expect(w.hits(0, 0)).toBe(0)
+  })
+
+  it('a mark is a fixed number of pixels across, and is marked to win over a shard', () => {
+    const w = world(() => ({ px: MIN_TARGET_PX, at: [0, 0, 0] }))
+    expect(w.hits(0, 0)).toBeGreaterThan(0)
+    expect(w.target.userData.tapPriority).toBe('mark')
+    // MIN_TARGET_PX across at 10 units: its world size is that many pixels' worth.
+    expect(w.target.scale.x * pxPerUnit(FOV, 800, 10)).toBeCloseTo(MIN_TARGET_PX)
   })
 })

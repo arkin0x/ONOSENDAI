@@ -98,6 +98,52 @@ export function toggleMusicMute(): void {
 }
 
 /**
+ * A tap on NOW PLAYING. While the track sounds, a mute or an unmute. While
+ * nothing sounds (paused by the browser, the system or the viewer, or a play
+ * never answered), the tap is for the sound: it plays the track, unmuted,
+ * since a tap is one the browser lets sound start in (arkinox, 2026-10-20:
+ * "Tapping to mute and unmute does not trigger playback."). Under a
+ * commercial it is a mute, as ever.
+ */
+export function tapMusic(): void {
+  const a = audio
+  if (a && !held && a.getAttribute('src') && !a.ended && (a.paused || !sounding)) {
+    if (useTvMusic.getState().muted) toggleMusicMute()
+    armStall(currentList)
+    play(a, session, currentList)
+    return
+  }
+  toggleMusicMute()
+}
+
+/**
+ * Play the track if it should be playing and is not, when TV comes back
+ * from the background. A play asked for in a background tab can be held by
+ * the browser and never answered, and the list then moves on to tracks that
+ * never start either (arkinox, 2026-10-20: "After the hosaka ad is done,
+ * even if I bring it in the foreground, the music will load the next
+ * track, but it won't start playing."). Not under a commercial, and not a
+ * track the viewer paused.
+ */
+export function resumeMusic(): void {
+  const a = audio
+  if (!a || held) return
+  // The list waiting after every track failed: failed in the background,
+  // perhaps, where a browser may not fetch them at all. Again now.
+  if (retry !== null && !a.getAttribute('src')) {
+    clearTimeout(retry)
+    retry = null
+    failures = 0
+    advance(currentList)
+    return
+  }
+  // A play still waiting on the browser is not paused, and is not sounding either.
+  if (!wanted || (!a.paused && sounding) || a.ended || !a.getAttribute('src')) return
+  armStall(currentList)
+  play(a, session, currentList)
+}
+
+/**
  * Muting keeps the track playing (arkinox, 2026-10-19: "muting the track
  * shouldnt pause it in tv"). Where the page may set the volume, muted is
  * volume 0, so the browser never sees muted media it might pause; only where
@@ -133,12 +179,13 @@ export function holdMusicForAd(on: boolean): void {
     // Back after only what was playing, or about to: a track the viewer
     // paused, or one the browser holds back for a tap, stays as it was
     // (review of #395).
-    resumeAfter = a !== null && !a.paused
+    // A track whose play failed is still wanted, and comes back after too.
+    resumeAfter = a !== null && (!a.paused || (wanted && !useTvMusic.getState().blocked))
     armAfter = false
     if (!a) return
     clearStall()
-    if (!volumeWorks) { a.pause(); return }
-    fadeTo(0, AD_FADE_OUT_MS, () => { if (held && audio === a) a.pause() })
+    if (!volumeWorks) { pauseForAd(a); return }
+    fadeTo(0, AD_FADE_OUT_MS, () => { if (held && audio === a) pauseForAd(a) })
     return
   }
   // Whatever happens next, the fade out is over and the level is the
@@ -158,8 +205,20 @@ export function holdMusicForAd(on: boolean): void {
   if (volumeWorks) fadeTo(1, AD_FADE_IN_MS)
 }
 
+/**
+ * The break's own pause. Told by the element a moment later, by when the
+ * break may be over (a background tab's timers run late and together), so
+ * it is marked: the viewer's pause is any other.
+ */
+function pauseForAd(a: HTMLAudioElement): void {
+  if (!a.paused) ownPause = true
+  a.pause()
+}
+
 /** Whether the music has stepped out for a commercial. */
 let held = false
+/** Whether the next pause the element tells of is the break's own. */
+let ownPause = false
 /** Whether to play again after the break: it was playing when the break began, or a track was taken up in it. */
 let resumeAfter = false
 /** Whether the track was taken up in the break, so its stall wait starts after it. */
@@ -196,6 +255,10 @@ function fadeTo(target: number, ms: number, done?: () => void): void {
 let volumeWorks = true
 /** When the music was last muted or unmuted (Date.now()): a pause just after is the browser's, and is undone. */
 let mutedAt = -Infinity
+/** Whether the music is meant to be playing: from the page's play until the viewer's own pause or TV's stop. */
+let wanted = false
+/** Whether the track is sounding: from its 'playing' until a pause or the next play. */
+let sounding = false
 /** How soon after a mute or unmute a pause the page did not ask for is taken back, ms. */
 const RESUME_MS = 1500
 /** How long to wait before trying the list again when no track would load, ms. */
@@ -274,9 +337,17 @@ export function startMusic(list: Track[] = PLAYLIST): void {
   volumeWorks = a.volume === 0.5
   a.addEventListener('ended', () => { if (audio === a) advance(list) })
   // A browser that pauses the track as it is muted or unmuted: play on. Any
-  // other pause (the phone's own controls) stands.
+  // other pause stands, and the music is no longer wanted: the phone's own
+  // controls, a key, or the lock screen's, which is the viewer's even with
+  // TV out of sight.
   a.addEventListener('pause', () => {
-    if (audio === a && !held && !a.ended && a.getAttribute('src') && Date.now() - mutedAt < RESUME_MS) void a.play().catch(() => {})
+    if (audio !== a) return
+    sounding = false
+    const own = ownPause
+    ownPause = false
+    if (own || held || a.ended || !a.getAttribute('src')) return
+    if (Date.now() - mutedAt < RESUME_MS) { void a.play().catch(() => {}); return }
+    wanted = false
   })
   a.addEventListener('error', () => { if (audio === a && a.getAttribute('src')) fail(list) })
   // Something arrived: the link is not broken.
@@ -285,6 +356,7 @@ export function startMusic(list: Track[] = PLAYLIST): void {
   a.addEventListener('canplay', arrived)
   a.addEventListener('playing', () => {
     if (audio !== a) return
+    sounding = true
     clearStall()
     failures = 0
     unblock?.()
@@ -315,6 +387,11 @@ export function stopMusic(): void {
   held = false
   resumeAfter = false
   armAfter = false
+  wanted = false
+  sounding = false
+  ownPause = false
+  // A mute in the last session does not make the next one's pauses the browser's.
+  mutedAt = -Infinity
   gain = 1
   if (audio) {
     audio.pause()
@@ -344,7 +421,7 @@ function fail(list: Track[]): void {
       audio.load()
     }
     const mine = ++session
-    retry = setTimeout(() => { if (mine === session) { failures = 0; advance(list) } }, RETRY_MS)
+    retry = setTimeout(() => { if (mine === session) { retry = null; failures = 0; advance(list) } }, RETRY_MS)
     return
   }
   advance(list)
@@ -364,6 +441,7 @@ function advance(list: Track[]): void {
   clearStall()
   useTvMusic.setState({ track: { url: track.url, title: track.title ?? nameFromUrl(track.url), artist: track.artist ?? '', art: null } })
   a.src = track.url
+  sounding = false
   // One that ends in a break waits, ready, for the break to end.
   if (!held) {
     armStall(list)
@@ -385,7 +463,14 @@ function armStall(list: Track[]): void {
   clearStall()
   const mine = session
   const a = audio
-  stall = setTimeout(() => { if (mine === session && audio === a) fail(list) }, STALL_MS)
+  stall = setTimeout(() => {
+    if (mine !== session || audio !== a) return
+    // Not in the background, where a browser may hold the track back
+    // unfetched and every link would look broken: its 20 s start again
+    // when TV is seen (resumeMusic, or here if it is seen first).
+    if (typeof document !== 'undefined' && document.visibilityState === 'hidden') { armStall(list); return }
+    fail(list)
+  }, STALL_MS)
 }
 
 /** What a tap on a control is for: the control, not the sound. */
@@ -395,6 +480,9 @@ function onControl(e: Event): boolean {
 }
 
 function play(a: HTMLAudioElement, mine: number, list: Track[]): void {
+  wanted = true
+  // Playing already, it says so no more (no 'playing' comes): it sounds on.
+  if (a.paused) sounding = false
   a.play().catch((e: unknown) => {
     if (mine !== session || (e as { name?: string })?.name !== 'NotAllowedError') return
     clearStall()

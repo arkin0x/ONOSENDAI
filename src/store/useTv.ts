@@ -32,7 +32,7 @@ import { useShards } from './useShards'
 import { useDemo } from './useDemo'
 import { useCoordRoute } from './useCoordRoute'
 import { usePersonCard } from './usePersonCard'
-import { holdMusicForAd, startMusic, stopMusic } from './useTvMusic'
+import { holdMusicForAd, resumeMusic, startMusic, stopMusic } from './useTvMusic'
 import { startWatching, stopWatching } from './useTvWatching'
 import { SCAN_MAX_HEIGHT } from './useShards'
 import { TvScanner, scanHeights, type OpenedBag, type ScanDeps, type ScanPlace } from '../lib/tv/scan'
@@ -534,6 +534,8 @@ if (typeof document !== 'undefined') {
     // away keeps its own start.
     if (was.shot !== null && useTv.getState().shot === was.shot) shotBegan = performance.now() - was.elapsed
     retryAt = 0
+    // A play the browser held while away is asked for again.
+    resumeMusic()
   })
 }
 

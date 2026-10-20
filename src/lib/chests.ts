@@ -29,7 +29,7 @@ import { generateSecretKey, getEventHash, getPublicKey, verifyEvent } from 'nost
 import { bytesToHex, hexToBytes, type EventTemplate, type NostrEvent } from './events'
 import { coordToXyz, hexToCoord, type Plane } from 'cyberspace-core'
 import { fromPayload } from 'sno-core/shards'
-import { entryKey, isReference, readItem, type BagEntry, type ChestItem, type Hidden, type ItemBody, type KeyItem } from './hidden'
+import { MESSAGE_KIND, entryKey, isReference, readItem, type BagEntry, type ChestItem, type Hidden, type ItemBody, type KeyItem } from './hidden'
 import { reachGibsons, type FitPoint } from './deployFit'
 import type { Position } from './space'
 
@@ -43,10 +43,11 @@ export function forgeKey(name: string, about = ''): KeyItem {
  * How many bytes a chest's contents will be once signed, before they are:
  * each template as the event it becomes, with the id, pubkey and signature
  * at their fixed lengths, so the composer's meter reads what the seal will
- * see, give or take nothing.
+ * see, give or take nothing. A message goes in as a rumor, with no
+ * signature (lib/hidden.ts messageInnerTemplate).
  */
 export function templateBytes(templates: EventTemplate[], pubkey: string): number {
-  const events = templates.map((t) => ({ id: '0'.repeat(64), pubkey, created_at: t.created_at, kind: t.kind, tags: t.tags, content: t.content, sig: '0'.repeat(128) }))
+  const events = templates.map((t) => ({ id: '0'.repeat(64), pubkey, created_at: t.created_at, kind: t.kind, tags: t.tags, content: t.content, ...(t.kind === MESSAGE_KIND ? {} : { sig: '0'.repeat(128) }) }))
   return new TextEncoder().encode(JSON.stringify(events)).length
 }
 
@@ -120,7 +121,11 @@ export interface ChestEntry {
   id: string
   /** The event as it sits in the chest; its pubkey is a claim unless `verified`. */
   event: NostrEvent
-  /** The event carried a signature and it checked out (spec §7.6: an unsigned item is allowed, and its author is then a claim). */
+  /**
+   * Its author is a fact, not a claim: it carried a signature that checked
+   * out, or it is a rumor vouched for by the chest (readContents). Otherwise
+   * spec §7.6 allows it, and its author is a claim.
+   */
   verified: boolean
   body: ItemBody
 }
@@ -138,22 +143,29 @@ function wellFormed(ev: Partial<NostrEvent>): ev is NostrEvent {
  * One entry of an opened chest, readable, or null: not well formed, signed
  * but failing to verify, or a kind this client does not read. Anything that
  * throws on the way (a signature that is not even hex) is null too, so one
- * malformed entry never blocks the chest.
+ * malformed entry never blocks the chest. `sealer` as readContents says.
  */
-function readEntry(e: BagEntry): ChestEntry | null {
+function readEntry(e: BagEntry, sealer: string | undefined): ChestEntry | null {
   try {
     if (isReference(e) || !wellFormed(e as Partial<NostrEvent>)) return null
-    const ev = e
-    const signed = typeof ev.sig === 'string' && ev.sig.length > 0
+    const ev = e as NostrEvent
+    // Unsigned is no `sig`, or an empty one (spec 7.6 Rumors), as the bag
+    // reader has it (hidden.ts innerAuthentic).
+    const signed = ev.sig !== undefined && ev.sig !== ''
     // The fields alone, as a plain copy: nostr-tools remembers a verification
     // on the object itself, and a copy made in memory would inherit it.
     const plain = { pubkey: ev.pubkey, created_at: ev.created_at, kind: ev.kind, tags: ev.tags, content: ev.content }
     if (signed && !verifyEvent({ ...plain, id: ev.id, sig: ev.sig })) return null
     // An unsigned entry's id is its hash, whatever it claims: a claimed id
     // could otherwise stand in for a real item's in the inventory.
-    const id = signed ? ev.id : getEventHash(plain)
-    const body = readItem({ ...plain, id })
-    return body ? { id, event: { ...plain, id, sig: signed ? ev.sig : '' }, verified: signed, body } : null
+    const hash = signed ? ev.id : getEventHash(plain)
+    // A message sealed as a rumor, whose own id is that hash and whose author
+    // sealed the chest: the chest's signature covers it, as a bag's covers
+    // its messages. Only a message is ever written as a rumor; any other
+    // unsigned kind stays a claim, as it would be dropped from a bag.
+    const vouched = !signed && ev.kind === MESSAGE_KIND && sealer !== undefined && ev.pubkey === sealer && ev.id === hash
+    const body = readItem({ ...plain, id: hash })
+    return body ? { id: hash, event: { ...plain, id: hash, sig: signed ? ev.sig : '' }, verified: signed || vouched, body } : null
   } catch {
     return null
   }
@@ -161,19 +173,50 @@ function readEntry(e: BagEntry): ChestEntry | null {
 
 /**
  * The readable contents of an opened chest. A signed item that fails to
- * verify is dropped, and only that item; an unsigned item is kept with its
- * author marked as a claim (spec §7.6); a reference is skipped, because B1
+ * verify is dropped, and only that item; a reference is skipped, because B1
  * produces none and following one is a relay query a chest should not make
  * on its own; a kind this client does not read, or an entry that is not an
  * event at all, is skipped as §7.6 says.
+ *
+ * An unsigned item is kept. Its author is a fact when it is a message
+ * written as a rumor by the chest's own signer: `sealer` is the chest's pubkey, given only when the
+ * chest itself was verified (signed, inside a bag whose signer it is, or
+ * vouched for in its turn), and the rumor's `pubkey` is that key and its
+ * `id` its hash. A message is sealed into a chest this way (arkinox,
+ * 2026-10-20), so it keeps its author without carrying a signature a finder
+ * could republish. Any other unsigned item's author is a claim (spec §7.6).
  */
-export function readContents(entries: BagEntry[]): ChestEntry[] {
+export function readContents(entries: BagEntry[], sealer?: string): ChestEntry[] {
   const out: ChestEntry[] = []
   for (const e of entries) {
-    const entry = readEntry(e)
+    const entry = readEntry(e, sealer)
     if (entry) out.push(entry)
   }
   return out
+}
+
+/**
+ * Who vouches for the rumors inside a chest that has been found: the
+ * chest's own author, when it is a fact (readContents `sealer`). A chest
+ * read out of a bag was checked against the bag's signer (lib/hidden.ts
+ * innerAuthentic); one revealed from inside another chest is a fact only
+ * when that chest's reading said so (`claim` is absent).
+ */
+export function sealerOf(chest: Pick<Hidden, 'inner' | 'claim'>): string | undefined {
+  return chest.inner && !chest.claim ? chest.inner.pubkey : undefined
+}
+
+/**
+ * The sealer a chest's card opens it with (ItemRows ChestBlock): the one it
+ * was given (the chest event's own pubkey, when that is a fact), else the
+ * chest as this device found it (sealerOf), else as this device hid it (its
+ * own deployment's inner event). Never the bag's author, which a chest
+ * inside a chest need not share. Undefined: rumors inside read as claims.
+ */
+export function chestSealer(given: string | undefined, found: Pick<Hidden, 'inner' | 'claim'> | undefined, own: { pubkey: string } | undefined): string | undefined {
+  if (given !== undefined) return given
+  if (found) return sealerOf(found)
+  return own?.pubkey
 }
 
 /**
@@ -348,6 +391,7 @@ export function revealedIn(chest: Pick<Hidden, 'eventId' | 'bagId' | 'lookupId' 
       createdAt: e.event.created_at,
       // The chest it came out of, so it can be taken out again (resealWithout).
       chestId: chest.eventId,
+      ...(e.verified ? {} : { claim: true as const }),
       ...e.body,
     })
   }

@@ -195,7 +195,7 @@ function TakenRow({ item }: { item: HeldItem }): JSX.Element {
     <li className="secrets__row held__row">
       <ItemIcon className={`chest__glyph chest__glyph--${coin ? 'cashu' : item.type}`} type={item.type} coin={coin} />
       {item.type === 'chest' && item.chest
-        ? <ChestBlock id={item.id} chest={item.chest} author={item.author} verified={item.verified} place={item.place} />
+        ? <ChestBlock id={item.id} chest={item.chest} author={item.author} verified={item.verified} place={item.place} sealer={item.verified ? item.event.pubkey : undefined} />
         : (
           <span className="item__line">
             <span className="item__name" title={label}>{label}</span>

@@ -22,7 +22,7 @@
 import { useMemo, useState } from 'react'
 import { useProfile } from '../hooks/useProfile'
 import { cashuLabel, readCashuToken } from '../lib/cashu'
-import { openWithSecret, openWithSigner, openerFor, readContents, requiresLabel, revealedIn, type ChestEntry } from '../lib/chests'
+import { chestSealer, openWithSecret, openWithSigner, openerFor, readContents, requiresLabel, revealedIn, type ChestEntry } from '../lib/chests'
 import { positionOf, useShards } from '../store/useShards'
 import { hiddenLabel, type ChestItem } from '../lib/hidden'
 import { ItemFace } from './ItemIcon'
@@ -68,13 +68,20 @@ export function entryLabel(entry: ChestEntry): { label: string; coin: boolean } 
  * A chest: its name, what opens it, OPEN when you hold it, and its contents
  * once open. `id` is the chest's event id, `author` its hider (a claim unless
  * `verified`), `place` where it was found (null for a chest held in ITEMS
- * with no place of its own).
+ * with no place of its own). `sealer` is the chest event's own pubkey when
+ * its author is a fact, which vouches for the rumors inside (lib/chests.ts
+ * readContents); without it, the chest is looked up among this device's
+ * finds and deployments by `id`, and rumors read as claims if it is not
+ * there. Never the bag's author: a chest inside a chest may be another's.
  */
-export function ChestBlock({ id, chest, author, verified, place }: { id: string; chest: ChestItem; author: string; verified: boolean; place: HeldPlace | null }): JSX.Element {
+export function ChestBlock({ id, chest, author, verified, place, sealer: given }: { id: string; chest: ChestItem; author: string; verified: boolean; place: HeldPlace | null; sealer?: string }): JSX.Element {
   const items = useInventory((s) => s.items)
   const me = useCyberspace((s) => s.identity.pubkey)
   const keys = useMemo(() => openingKeys(items), [items])
   const opener = useMemo(() => openerFor(chest, keys, me), [chest, keys, me])
+  const found = useShards((s) => s.discovered[id])
+  const ownInner = useShards((s) => s.mine.find((d) => d.eventId === id)?.inner)
+  const sealer = chestSealer(given, found, ownInner)
   const [entries, setEntries] = useState<ChestEntry[] | null>(null)
   const [status, setStatus] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
@@ -87,7 +94,7 @@ export function ChestBlock({ id, chest, author, verified, place }: { id: string;
     setStatus(null)
     try {
       const raw = opener.by === 'key' ? openWithSecret(chest, opener.key.secretHex) : await openWithSigner(chest, useCyberspace.getState().decryptSealed)
-      const contents = readContents(raw)
+      const contents = readContents(raw, sealer)
       setEntries(contents)
       // A key read is held, wherever it was read (B1 §2.1).
       useInventory.getState().take(contents.filter((e) => e.body.type === 'key'), from, place)
@@ -140,7 +147,7 @@ function ContentRow({ entry, from, place }: { entry: ChestEntry; from: HeldFrom;
     <li className="chest__row">
       <ItemFace className={`chest__glyph chest__glyph--${coin ? 'cashu' : type}`} type={type} coin={coin} image={entry.body.key?.image} />
       {type === 'chest' && entry.body.chest
-        ? <ChestBlock id={entry.id} chest={entry.body.chest} author={entry.event.pubkey} verified={entry.verified} place={place} />
+        ? <ChestBlock id={entry.id} chest={entry.body.chest} author={entry.event.pubkey} verified={entry.verified} place={place} sealer={entry.verified ? entry.event.pubkey : undefined} />
         : (
           <span className="item__line">
             <span className="item__name" title={label}>{label}</span>

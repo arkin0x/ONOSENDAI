@@ -42,11 +42,15 @@ export function shownEvent(ev: NostrEvent): { event: NostrEvent; hidden: boolean
   return { event: { ...ev, tags, content: legacy ? HIDDEN_SECRET : ev.content }, hidden }
 }
 
-/** The event as JSON in NIP-01's field order, one tag to a line. */
-export function eventJson(ev: NostrEvent): string {
+/**
+ * The event as JSON in NIP-01's field order, one tag to a line. A rumor (a
+ * hidden message, lib/hidden.ts rumorOf) has no `sig`, and none is shown.
+ */
+export function eventJson(ev: Omit<NostrEvent, 'sig'> & { sig?: string }): string {
   const s = JSON.stringify
   const tags = ev.tags.length === 0 ? '[]' : `[\n${ev.tags.map((t) => `    ${s(t)}`).join(',\n')}\n  ]`
-  return `{\n  "id": ${s(ev.id)},\n  "pubkey": ${s(ev.pubkey)},\n  "created_at": ${s(ev.created_at)},\n  "kind": ${s(ev.kind)},\n  "tags": ${tags},\n  "content": ${s(ev.content)},\n  "sig": ${s(ev.sig)}\n}`
+  const sig = ev.sig ? `,\n  "sig": ${s(ev.sig)}` : ''
+  return `{\n  "id": ${s(ev.id)},\n  "pubkey": ${s(ev.pubkey)},\n  "created_at": ${s(ev.created_at)},\n  "kind": ${s(ev.kind)},\n  "tags": ${tags},\n  "content": ${s(ev.content)}${sig}\n}`
 }
 
 /** How long COPIED stays, as on the other copies. */

@@ -194,7 +194,8 @@ export function useTerrainVolume(win: ViewWindow, axes: ViewAxes, suspend = fals
   // that re-anchors the frame (and carries the window with it, useViewWindow)
   // keeps this key and rescans nothing.
   const centre = cellAt(alignedOrigin(position, scaleExp), axes, stepFor(scaleExp), win.right, win.up, win.out)
-  const centreKey = `${centre.x},${centre.y},${centre.z}`
+  // In hex, which Chromium writes out far faster than decimal (terrainCache, blockKey).
+  const centreKey = `${centre.x.toString(16)},${centre.y.toString(16)},${centre.z.toString(16)}`
 
   // Suspended (an Earth or hyperspace view): drop any queued terrain work so
   // the pool goes quiet, and hand back an empty volume. The memo below keys

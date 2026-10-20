@@ -153,7 +153,8 @@ describe('scanVolume', () => {
 
 describe('blockKey', () => {
   it('is the block of each axis and the plane, whatever was keyed before it', () => {
-    const plain = (x: bigint, y: bigint, z: bigint, plane: number): string => `${x >> BLOCK_BITS},${y >> BLOCK_BITS},${z >> BLOCK_BITS},${plane}`
+    const hex = (n: bigint): string => (n >> BLOCK_BITS).toString(16)
+    const plain = (x: bigint, y: bigint, z: bigint, plane: number): string => `${hex(x)},${hex(y)},${hex(z)},${plane}`
     for (let i = 0; i < 400; i++) {
       // Axes repeating and changing in every combination, as rows and runs do.
       const x = sample(i % 7), y = sample(100 + (i % 3)), z = i % 2 ? sample(200 + i) : sample(200)
@@ -161,5 +162,12 @@ describe('blockKey', () => {
       expect(blockKey(x, y, z, plane)).toBe(plain(x, y, z, plane))
       expect(blockKey(x + 1n, y, z, plane)).toBe(plain(x + 1n, y, z, plane))
     }
+  })
+
+  it('tells every block apart, either side of zero and on both planes', () => {
+    const keys = new Set<string>()
+    const near = [-2n, -1n, 0n, 1n, 2n].map((b) => b * BLOCK_SIZE)
+    for (const x of near) for (const y of near) for (const z of near) for (const plane of [0, 1] as Plane[]) keys.add(blockKey(x, y, z, plane))
+    expect(keys.size).toBe(5 * 5 * 5 * 2)
   })
 })

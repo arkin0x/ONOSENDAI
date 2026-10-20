@@ -56,17 +56,24 @@ const cache = new Map<string, number>()
 
 // Each axis's last block and its text. A volume scan walks rows, along which
 // two of the three axes stay fixed, and a run walks one axis; writing an
-// 85-bit bigint out in decimal is most of a key's cost, so the axis that did
-// not change is not written out again (2026-10-20).
+// 85-bit bigint out is most of a key's cost, so the axis that did not change
+// is not written out again (2026-10-20).
+//
+// The text is hex, not decimal. Chromium writes a bigint of this size out in
+// decimal about 70 times slower than in hex (5.3 us against 0.07 us per block
+// in headless Chromium 151; Node is fast at both, so a Node bench hides it),
+// and the volume writes out thousands at every step of a walk. The key only
+// has to be the same for the same block, and hex is as exact as decimal
+// (2026-10-20).
 let lastX: bigint | null = null, lastY: bigint | null = null, lastZ: bigint | null = null
 let textX = '', textY = '', textZ = ''
 
 /** The cache key of the block holding (x, y, z): every cell of a block has the same K. */
 export function blockKey(x: bigint, y: bigint, z: bigint, plane: Plane): string {
   const bx = x >> BLOCK_BITS, by = y >> BLOCK_BITS, bz = z >> BLOCK_BITS
-  if (bx !== lastX) { lastX = bx; textX = `${bx}` }
-  if (by !== lastY) { lastY = by; textY = `${by}` }
-  if (bz !== lastZ) { lastZ = bz; textZ = `${bz}` }
+  if (bx !== lastX) { lastX = bx; textX = bx.toString(16) }
+  if (by !== lastY) { lastY = by; textY = by.toString(16) }
+  if (bz !== lastZ) { lastZ = bz; textZ = bz.toString(16) }
   return `${textX},${textY},${textZ},${plane}`
 }
 
@@ -102,8 +109,9 @@ export interface RunSpec {
   plane: Plane
 }
 
+/** In hex for the reason blockKey's text is. */
 function runKey(r: RunSpec): string {
-  return `${r.originX},${r.originY},${r.originZ},${r.axis},${r.step},${r.count},${r.plane}`
+  return `${r.originX.toString(16)},${r.originY.toString(16)},${r.originZ.toString(16)},${r.axis},${r.step.toString(16)},${r.count},${r.plane}`
 }
 
 /** Walk a run's cells, so we can mark and later resolve the blocks it covers. */

@@ -470,6 +470,9 @@ export function TvScreenEffect(): JSX.Element {
       hosaka: !tv.ad ? null : hosaka && hosaka.readyState >= 2 ? hosaka : pictureFor('/hosaka-poster.jpg'),
       hosakaMark: tv.ad ? pictureFor('/hosaka-mark.png') : null,
     }
+    // The turning shard's next frame, for the next paint: this one copies the
+    // last (TvSegments tvSpin).
+    tvSpin.next?.()
     painter.paint(tv, assets, now, scale, reduced)
     overlay.needsUpdate = true
   })

@@ -15,12 +15,21 @@
  * anybody is.
  */
 
-import { useMemo } from 'react'
 import { EdgesGeometry, IcosahedronGeometry } from 'three'
 import { avatarDraw, avatarDrawKept, spectatorScale } from '../lib/avatar'
 import { useAvatarShard } from '../store/useAvatars'
 import { useCyberspace } from '../store/useCyberspace'
 import { ShardMesh } from './ShardMesh'
+
+/**
+ * The marker's edges, one for every avatar for as long as the page is open.
+ * Each avatar made its own, passed as a prop, and r3f disposes only what it
+ * made: none was ever freed, and the renderer kept each one's buffers and
+ * vertex state. Cyberspace TV mounts the tape's avatars afresh at most cuts,
+ * so a long watch added one for every avatar at every cut (arkinox,
+ * 2026-10-20: "the perf on /tv on my laptop is not satisfactory").
+ */
+const MARKER_EDGES = new EdgesGeometry(new IcosahedronGeometry(0.5, 1))
 
 interface Props {
   pubkey: string
@@ -44,7 +53,6 @@ export function AvatarShape({ pubkey, color, renderOrder = 0, depthTest = true, 
   const shard = useAvatarShard(pubkey)
   const scaleExp = useCyberspace((s) => s.scaleExp)
   const spectator = spectatorScale(scaleExp)
-  const geometry = useMemo(() => new EdgesGeometry(new IcosahedronGeometry(0.5, 1)), [])
   const draw = !outline && shard && shard.vertices.length > 0 ? (keepShape ? avatarDrawKept(shard, scaleExp, spectator) : avatarDraw(shard, scaleExp)) : 'marker'
   if (shard && draw !== 'marker') {
     const k = draw.mesh
@@ -57,7 +65,7 @@ export function AvatarShape({ pubkey, color, renderOrder = 0, depthTest = true, 
   if (firstPerson) return null
   return (
     <group scale={[spectator, spectator, spectator]}>
-      <lineSegments geometry={geometry} frustumCulled={false} renderOrder={renderOrder}>
+      <lineSegments geometry={MARKER_EDGES} frustumCulled={false} renderOrder={renderOrder}>
         <lineBasicMaterial color={color} toneMapped={false} depthTest={depthTest} {...(outline ? { transparent: true, opacity: 0.3 } : {})} />
       </lineSegments>
     </group>

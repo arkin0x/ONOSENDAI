@@ -55,13 +55,31 @@ function Spinning({ shard }: { shard: ShardModel | null }): JSX.Element | null {
   )
 }
 
+/** Hands the canvas's invalidate to `pace` while it is mounted. */
+function Pacer({ pace }: { pace: (invalidate: (() => void) | null) => void }): null {
+  const invalidate = useThree((s) => s.invalidate)
+  useEffect(() => {
+    pace(() => invalidate())
+    return () => pace(null)
+  }, [invalidate, pace])
+  return null
+}
+
 /**
  * `preserve` keeps the last frame in the canvas, for a reader that copies it
  * (Cyberspace TV's panels). With no shard the canvas stays, empty: a reader
  * that shows one shard after another keeps one canvas, and so one WebGL
  * context, rather than a new one each time (TvSpinHost).
+ *
+ * `pace`, for a reader that copies the canvas at its own rate: the canvas
+ * draws a frame only when asked, through the function handed to `pace`,
+ * rather than at the display's rate. Cyberspace TV copies it about thirty
+ * times a second; drawn at sixty, or at a laptop's 144, most of its frames
+ * were never seen (arkinox, 2026-10-20: "the perf on /tv on my laptop is not
+ * satisfactory"). The turn keeps its pace either way: each frame turns by
+ * the time since the last.
  */
-export function ShardSpin({ shard, size = 160, preserve = false }: { shard: ShardModel | null; size?: number; preserve?: boolean }): JSX.Element {
+export function ShardSpin({ shard, size = 160, preserve = false, pace }: { shard: ShardModel | null; size?: number; preserve?: boolean; pace?: (invalidate: (() => void) | null) => void }): JSX.Element {
   // A new turn for each shard, inside the same canvas: one shard straight
   // after another would otherwise be built once on the last one's framing,
   // then again on its own (review of #394). Not keyed on the shard's id: an
@@ -76,8 +94,9 @@ export function ShardSpin({ shard, size = 160, preserve = false }: { shard: Shar
         camera={{ fov: FOV, near: 0.01, far: 100000 }}
         style={{ width: size, height: size, pointerEvents: 'none' }}
         // Nothing to draw between shards: no frames spent on an empty canvas.
-        frameloop={shard ? 'always' : 'never'}
+        frameloop={!shard ? 'never' : pace ? 'demand' : 'always'}
       >
+        {pace && <Pacer pace={pace} />}
         {/* Lit as on the bench, near the world's full color (shardLight.tsx; arkinox, 2026-10-12). */}
         <ShardLights />
         <Spinning key={turn} shard={shard} />

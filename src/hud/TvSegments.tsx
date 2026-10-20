@@ -87,8 +87,17 @@ export function segmentDoing(item: TapeItem): string {
   return item.on === 'bag' ? 'COMMENTED ON A BAG' : 'COMMENTED ON A MOVE'
 }
 
-/** The canvas the segment's turning shard is drawn in, for the painter; null when there is none. */
-export const tvSpin: { canvas: HTMLCanvasElement | null } = { canvas: null }
+/**
+ * The canvas the segment's turning shard is drawn in, for the painter; null
+ * when there is none. And how to ask it for its next frame: it draws only
+ * when the painter is about to want one (ShardSpin pace).
+ */
+export const tvSpin: { canvas: HTMLCanvasElement | null; next: (() => void) | null } = { canvas: null, next: null }
+
+/** Where ShardSpin hands its invalidate (pace). */
+function paceSpin(invalidate: (() => void) | null): void {
+  tvSpin.next = invalidate
+}
 
 /** The size the turning shard is rendered at, CSS px: copied, scaled, into the panel. */
 const SPIN_PX = 256
@@ -139,7 +148,7 @@ export function TvSpinHost(): JSX.Element | null {
   }, [shard])
   return (
     <div ref={host} className="tv__spinhost" aria-hidden="true">
-      <ShardSpin shard={shard} size={SPIN_PX} preserve />
+      <ShardSpin shard={shard} size={SPIN_PX} preserve pace={paceSpin} />
     </div>
   )
 }

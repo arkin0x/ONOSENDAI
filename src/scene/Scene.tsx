@@ -772,14 +772,21 @@ function WorldBloom(): JSX.Element {
  * faces' stencil tag does its work inside that draw, ShardMesh
  * FACE_TAG_STENCIL), so resolving them was pure cost, and on Windows a
  * heavy one: Direct3D 11 cannot resolve a multisampled stencil on the GPU,
- * so ANGLE draws it out, copies it to a staging texture, waits for the GPU
- * to read it back, repacks it pixel by pixel on the CPU and uploads it
- * again, every frame (three.js #27799; ANGLE Blit11::resolveStencil). On an
- * Android phone the same resolve is one blit on the GPU, which is why the
- * main view was smooth there and laboured on a Windows laptop (arkinox,
- * 2026-10-20: "on my laptop the perf has improved but it still isn't
- * great"). Both buffers, since TV's tube makes the bloom draw into the
- * second one. A ref, so a composer made again is set again.
+ * so ANGLE draws it (and the depth with it) out, copies it to a staging
+ * texture, waits for the GPU to read it back, repacks it pixel by pixel on
+ * the CPU and uploads it again, every frame (three.js #27799; ANGLE
+ * Blit11::resolveStencil). On an Android phone the same resolve is one blit
+ * on the GPU, likely why the main view was smooth there and laboured on a
+ * Windows laptop (arkinox, 2026-10-20: "on my laptop the perf has improved
+ * but it still isn't great"). Both buffers, since TV's tube makes the bloom
+ * draw into the second one.
+ *
+ * An effect that reads depth (depth of field, SSAO, a normal pass, anything
+ * with EffectAttribute.DEPTH) would get the composer's depth from the plain
+ * buffer, which this leaves unresolved: it would need resolveDepthBuffer
+ * back on. A ref, so a composer made again is set again: the wrapper hands
+ * its ref the composer itself (useImperativeHandle, @react-three/
+ * postprocessing 2.16), which a wrapper upgrade should check.
  */
 function resolveColourOnly(composer: PostComposer | null): void {
   if (!composer) return

@@ -1248,10 +1248,13 @@ export class TvPainter {
         left -= chars.length
         ly += quoteSize * 1.45
       }
-      const on = item.on === 'bag' ? 'ON A SEALED BAG' : item.about && item.about !== item.pubkey ? `ON ${a.name(item.about)}'S MOVE` : 'ON A MOVE'
+      // Plain words for what it answers (arkinox, 2026-10-20: "on a sealed bag
+      // - sealed to its region" read as redundant): a comment it cannot read
+      // already prints as a redaction, so the line says no more about that.
+      const on = item.on === 'bag' ? 'ON A BAG ENCRYPTED TO A LOCATION' : item.about && item.about !== item.pubkey ? `ON ${a.name(item.about)}'S MOVE` : 'ON A MOVE'
       ctx.font = `${10 * s}px ${TV_FONT}`
       ctx.fillStyle = ACCENT
-      ctx.fillText(fit(ctx, `${a.name(item.pubkey)} · ${on}${item.text === null ? ' · SEALED TO ITS REGION' : ''}`, textW), tx, ty + lines.length * quoteSize * 1.45 + 18 * s)
+      ctx.fillText(fit(ctx, `${a.name(item.pubkey)} · ${on}`, textW), tx, ty + lines.length * quoteSize * 1.45 + 18 * s)
     }
     ctx.globalAlpha = 1
   }

@@ -507,6 +507,7 @@ export function TvScreenEffect(): JSX.Element {
     if (item?.id !== segment.current.id) segment.current = { id: item?.id, shard: item?.kind === 'object' ? (objectsOf([item.event])[0]?.shard ?? null) : item?.kind === 'avatar' ? avatarFromEvent(item.event) : null }
     const assets: TvAssets = {
       name: (pk) => { if (profiles.profiles[pk] === undefined) profiles.request(pk); return tvName(pk, profiles.profiles[pk]?.name) },
+      bot: (pk) => profiles.profiles[pk]?.bot === true,
       picture: (pk) => pictureFor(profiles.profiles[pk]?.picture),
       logo: logo.complete && logo.naturalWidth > 0 ? logo : null,
       spin: tvSpin.canvas,

@@ -30,11 +30,42 @@ interface Props {
   targets: CyberTarget[]
 }
 
+/** One marker's elements, found once, and the values last written to them. */
+interface Written {
+  el: HTMLElement
+  body: HTMLElement | null
+  arrow: HTMLElement | null
+  ring: HTMLElement | null
+  dist: HTMLElement | null
+  last: {
+    transform?: string
+    mode?: string
+    under?: string
+    top?: string
+    arrow?: string
+    ring?: string
+    dist?: string
+  }
+}
+
 export function Targets({ targets }: Props): JSX.Element {
   const host = useRef<HTMLDivElement>(null)
+  // Each marker's elements and what it was last given, so a frame writes
+  // only what changed. Every write used to happen every frame, the distance
+  // text included: replacing a text node is a layout and a repaint of that
+  // marker's layer (each is its own, will-change: transform), so a still
+  // view with forty people in it re-rastered forty markers a frame
+  // (arkinox, 2026-10-20: the laptop "still isn't great"; a Chrome trace of
+  // a loaded scene). Kept across the effect's runs: the target list is
+  // rebuilt whenever anyone nearby moves, and starting over then would
+  // rewrite every marker each time.
+  const written = useRef(new Map<string, Written>())
 
   useEffect(() => {
     let raf = 0
+    const kept = written.current
+    const ids = new Set(targets.map((t) => t.id))
+    for (const id of kept.keys()) if (!ids.has(id)) kept.delete(id)
     const tick = (): void => {
       raf = requestAnimationFrame(tick)
       const root = host.current
@@ -43,9 +74,23 @@ export function Targets({ targets }: Props): JSX.Element {
       const h = root.clientHeight
 
       for (const t of targets) {
-        const el = root.querySelector<HTMLElement>(`[data-target="${t.id}"]`)
         const s = targetScreens[t.id]
-        if (!el || !s) continue
+        if (!s) continue
+        let m = kept.get(t.id)
+        if (!m || !m.el.isConnected) {
+          const el = root.querySelector<HTMLElement>(`[data-target="${t.id}"]`)
+          if (!el) continue
+          m = {
+            el,
+            body: el.querySelector<HTMLElement>('.target__body'),
+            arrow: el.querySelector<HTMLElement>('.target__arrow'),
+            ring: el.querySelector<HTMLElement>('.target__ring'),
+            dist: el.querySelector<HTMLElement>('.target__dist'),
+            last: {},
+          }
+          kept.set(t.id, m)
+        }
+        const { el, body, arrow, ring, dist, last } = m
 
         // The avatar as drawn, when it is drawn and on screen: the marker sits
         // on its middle and the name and picture hang under its lowest point
@@ -78,26 +123,55 @@ export function Targets({ targets }: Props): JSX.Element {
           py = cy + dy * t
         }
 
-        el.style.transform = `translate(${px}px, ${py}px)`
-        el.dataset.mode = s.onScreen || under ? 'on' : 'off'
-        el.dataset.under = under ? 'yes' : 'no'
-        const body = el.querySelector<HTMLElement>('.target__body')
-        if (body) body.style.top = under && a ? `${labelDrop(a, h, RING_MIN / 2)}px` : ''
-        const arrow = el.querySelector<HTMLElement>('.target__arrow')
-        if (arrow) arrow.style.transform = `rotate(${angle}rad)`
-        const ring = el.querySelector<HTMLElement>('.target__ring')
+        const transform = `translate(${px}px, ${py}px)`
+        if (last.transform !== transform) {
+          last.transform = transform
+          el.style.transform = transform
+        }
+        const mode = s.onScreen || under ? 'on' : 'off'
+        if (last.mode !== mode) {
+          last.mode = mode
+          el.dataset.mode = mode
+        }
+        const underText = under ? 'yes' : 'no'
+        if (last.under !== underText) {
+          last.under = underText
+          el.dataset.under = underText
+        }
+        if (body) {
+          const top = under && a ? `${labelDrop(a, h, RING_MIN / 2)}px` : ''
+          if (last.top !== top) {
+            last.top = top
+            body.style.top = top
+          }
+        }
+        if (arrow) {
+          const turn = `rotate(${angle}rad)`
+          if (last.arrow !== turn) {
+            last.arrow = turn
+            arrow.style.transform = turn
+          }
+        }
         if (ring) {
           // Hints at extent without standing in for it. Earth is already drawn
           // as a globe when you are near enough to see one, so a reticle scaled
           // to its true screen size was a 400px circle tracing something you can
           // see perfectly well, sweeping across the panels on its way. A marker
           // marks; the geometry is what shows size.
-          const d = Math.max(RING_MIN, Math.min(RING_MAX, s.px * 2))
-          ring.style.width = `${d}px`
-          ring.style.height = `${d}px`
+          const d = `${Math.max(RING_MIN, Math.min(RING_MAX, s.px * 2))}px`
+          if (last.ring !== d) {
+            last.ring = d
+            ring.style.width = d
+            ring.style.height = d
+          }
         }
-        const dist = el.querySelector<HTMLElement>('.target__dist')
-        if (dist) dist.textContent = formatDistance(s.distance)
+        if (dist) {
+          const text = formatDistance(s.distance)
+          if (last.dist !== text) {
+            last.dist = text
+            dist.textContent = text
+          }
+        }
       }
     }
     raf = requestAnimationFrame(tick)
@@ -115,8 +189,9 @@ export function Targets({ targets }: Props): JSX.Element {
 
 /**
  * One marker. Its position, distance, ring and chevron are driven imperatively
- * by the parent's animation frame (which finds it by data-target and reaches
- * the spans by class), so those stay in the DOM exactly where the loop expects.
+ * by the parent's animation frame, which finds it by data-target and reaches
+ * the spans by class once per marker element, then keeps them: so those spans
+ * are always rendered and never replaced while the marker stands.
  * The name and face are the reactive part: the profile arrives from the cache,
  * so a target that started as a wall of hex becomes a person without a reload.
  */

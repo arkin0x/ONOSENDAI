@@ -4825,7 +4825,7 @@ kbd {
 /* A circle that stays legible over any terrain: its own ring in the target's
  * color and a dark halo. */
 /* Under an avatar drawn in the field: centered on it, just below its lowest
- * point (Targets.tsx sets the top per frame; arkinox, 2026-10-11). */
+ * point (Targets.tsx sets the top when it changes; arkinox, 2026-10-11). */
 .target[data-under='yes'] .target__body {
   left: 0;
   translate: -50% 0;

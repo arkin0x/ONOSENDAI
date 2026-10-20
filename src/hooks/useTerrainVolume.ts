@@ -18,8 +18,8 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { stepFor, type AxisName, type ViewAxes } from '../lib/space'
 import { alignedOrigin, useCyberspace } from '../store/useCyberspace'
 import {
-  BLOCK_BITS, BLOCK_SIZE, cacheSize, inflightRuns, isPending,
-  onTerrainData, readK, requestRun,
+  BLOCK_BITS, BLOCK_SIZE, blockKey, cacheSize, inflightRuns, isKeyPending,
+  onTerrainData, readKey, requestRun,
 } from '../lib/terrainCache'
 import { clearRunQueue } from '../lib/workers'
 import { UNKNOWN } from '../workers/terrain.worker'
@@ -72,24 +72,53 @@ function cellAt(
   return p
 }
 
+/** The volume's blocks and their cache keys around one centre, and what has been read of them so far. */
+export interface VolumeLayout {
+  plane: Plane
+  /** The axis rows run along. */
+  right: AxisName
+  /** The gap between two neighbouring blocks' samples on that axis. */
+  stride: bigint
+  /** True when a row's segments come in ascending order on the right axis. */
+  ascending: boolean
+  /** Row r's segments are rowFirst[r] up to rowFirst[r + 1], in scan order. */
+  rowFirst: Int32Array
+  /** A point on each row's line, for the other two axes of the runs it asks for; its right-axis value is not used. */
+  rowCell: Position[]
+  /** Per segment: its block's cache key, the block on the right axis, and its cells in `values`. */
+  keys: string[]
+  blocks: bigint[]
+  at: Int32Array
+  cells: Uint8Array
+  /** Segments already read as known, and the values read so far. Carried from one read to the next. */
+  known: Uint8Array
+  values: Uint8Array
+}
+
 /**
- * The K values of the VOLUME_SIZE^3 cells around `centre`, from the cache,
- * asking the workers for every block not yet known or asked for. Rescanned
- * on every move, zoom, turn and terrain flush.
+ * Where every block of the volume sits, and its cache key: worked out once per
+ * place, zoom, turn and plane, then read again on every terrain flush.
  *
  * Along a row only the right axis moves, so a row's first cell is worked out
  * once and stepped from, and the cells of one block (consecutive along the
- * row, since the row is monotonic) share its answer: a cell in the same block
- * as the one before it takes that cell's value and asks for nothing more.
+ * row, since the row is monotonic) are one segment that shares its answer.
  * Building a coordinate and two cache keys for every one of the 6,859 cells
  * made a rescan a long task: 254 ms at worst at one boot on a loaded dev
  * machine (2026-10-20, spectating on the smoke seed; numbers in #404).
+ *
+ * Even by block, every flush wrote out and hashed the same keys as the last,
+ * every known block was looked up again, and each answer from the workers
+ * wrote its keys out twice more. So the keys are written out here, once, a
+ * flush only looks up the blocks it does not have yet, and the runs it asks
+ * for carry their keys to the cache. Replaying sixteen /tv cuts in headless
+ * Chromium with the real workers, this halved the terrain's main-thread time
+ * again after hex keys (570 ms to 311 ms; flushes 70 ms to 17 ms), and the
+ * volumes came out byte for byte the same (2026-10-20, numbers in the PR).
  */
-export function scanVolume(centre: Position, axes: ViewAxes, scaleExp: number, plane: Plane): Uint8Array {
+export function layoutVolume(centre: Position, axes: ViewAxes, scaleExp: number, plane: Plane): VolumeLayout {
   const R = VOLUME_RADIUS
   const N = VOLUME_SIZE
   const step = stepFor(scaleExp)
-  const values = new Uint8Array(N * N * N).fill(UNKNOWN)
   const right = axes.right.axis
   const rightStep = step * BigInt(axes.right.dir)
 
@@ -101,48 +130,108 @@ export function scanVolume(centre: Position, axes: ViewAxes, scaleExp: number, p
   // resolves before its shell.
   const order = Array.from({ length: N }, (_, i) => i - R).sort((a, b) => Math.abs(a) - Math.abs(b))
 
+  // Sized for the worst case, a segment per cell, so nothing grows; this is
+  // laid out on every step of a walk and should cost no more than a scan did.
+  const rowFirst = new Int32Array(N * N + 1)
+  const rowCell: Position[] = []
+  const keys: string[] = []
+  const blocks: bigint[] = []
+  const at = new Int32Array(N * N * N)
+  const cells = new Uint8Array(N * N * N)
+  let segments = 0
+
   for (const depth of order) {
     for (const row of order) {
-      const samples: bigint[] = []
+      rowFirst[rowCell.length] = segments
       const p = cellAt(centre, axes, step, -R, row, depth)
-      const at = ((depth + R) * N + (row + R)) * N + R
+      const first = ((depth + R) * N + (row + R)) * N
       let lastBlock: bigint | null = null
-      let lastK: number | undefined
 
-      for (let col = -R; col <= R; col++, p[right] += rightStep) {
-        // One sample per block per pass, or a block is asked for once per
-        // cell it contains while the first answer is still in flight.
+      for (let col = 0; col < N; col++, p[right] += rightStep) {
         const block = p[right] >> BLOCK_BITS
-        if (block !== lastBlock) {
-          lastBlock = block
-          lastK = readK(p.x, p.y, p.z, plane)
-          if (lastK === undefined && !isPending(p.x, p.y, p.z, plane)) samples.push(block << BLOCK_BITS)
+        if (block === lastBlock) {
+          cells[segments - 1]++
+          continue
         }
-        if (lastK !== undefined) values[at + col] = lastK
+        lastBlock = block
+        keys.push(blockKey(p.x, p.y, p.z, plane))
+        blocks.push(block)
+        at[segments] = first + col
+        cells[segments++] = 1
       }
+      rowCell.push({ ...p })
+    }
+  }
+  rowFirst[rowCell.length] = segments
 
-      if (samples.length === 0) continue
-      samples.sort((a, b) => (a < b ? -1 : a > b ? 1 : 0))
+  return {
+    plane, right, stride, ascending: axes.right.dir > 0, rowFirst, rowCell,
+    keys, blocks, at, cells,
+    known: new Uint8Array(segments),
+    values: new Uint8Array(N * N * N).fill(UNKNOWN),
+  }
+}
 
-      let start = 0
-      for (let i = 1; i <= samples.length; i++) {
-        if (i === samples.length || samples[i] - samples[i - 1] !== stride) {
-          // The row's other two axes, with the run's first sample on this one.
-          const q: Position = { ...p }
-          q[right] = samples[start]
-          requestRun({
-            originX: q.x, originY: q.y, originZ: q.z,
-            axis: right,
-            step: stride,
-            count: i - start,
-            plane,
-          })
-          start = i
+/**
+ * The K values of the volume's cells, from the cache, asking the workers for
+ * every block not yet known or asked for. The array is a new one when
+ * something has become known since the last read and the same one when
+ * nothing has, so an empty flush can rebuild nothing downstream. An array
+ * once returned is never written to again.
+ *
+ * A segment once known is not looked up again. K is a pure function of the
+ * coordinate, so the value read then is the value any later read would give;
+ * the one difference is a block evicted from the cache while on screen, which
+ * stays drawn here rather than going dark and being asked for again.
+ */
+export function readVolume(layout: VolumeLayout): Uint8Array {
+  const { keys, blocks, at, cells, known, rowFirst, stride, right, plane } = layout
+  let values: Uint8Array | null = null
+
+  for (let r = 0; r + 1 < rowFirst.length; r++) {
+    const wanted: number[] = []
+    for (let s = rowFirst[r]; s < rowFirst[r + 1]; s++) {
+      if (known[s]) continue
+      const k = readKey(keys[s])
+      if (k !== undefined) {
+        known[s] = 1
+        if (!values) {
+          // Copied before the first write, so an array already handed out
+          // never changes, and kept on the layout at once, so the segment
+          // marked known above is never without its value.
+          values = layout.values.slice()
+          layout.values = values
         }
+        values.fill(k, at[s], at[s] + cells[s])
+      } else if (!isKeyPending(keys[s])) {
+        // Neither known nor already asked for: into this row's runs below.
+        wanted.push(s)
+      }
+    }
+
+    if (wanted.length === 0) continue
+    // Runs ascend along the axis, whichever way the row is read.
+    if (!layout.ascending) wanted.reverse()
+
+    let start = 0
+    for (let i = 1; i <= wanted.length; i++) {
+      if (i === wanted.length || (blocks[wanted[i]] - blocks[wanted[i - 1]]) << BLOCK_BITS !== stride) {
+        // The row's other two axes, with the run's first sample on this one.
+        const q: Position = { ...layout.rowCell[r] }
+        q[right] = blocks[wanted[start]] << BLOCK_BITS
+        requestRun({
+          originX: q.x, originY: q.y, originZ: q.z,
+          axis: right,
+          step: stride,
+          count: i - start,
+          plane,
+        }, wanted.slice(start, i).map((w) => keys[w]))
+        start = i
       }
     }
   }
-  return values
+
+  return layout.values
 }
 
 export function useTerrainVolume(win: ViewWindow, axes: ViewAxes, suspend = false): TerrainVolume {
@@ -194,7 +283,8 @@ export function useTerrainVolume(win: ViewWindow, axes: ViewAxes, suspend = fals
   // that re-anchors the frame (and carries the window with it, useViewWindow)
   // keeps this key and rescans nothing.
   const centre = cellAt(alignedOrigin(position, scaleExp), axes, stepFor(scaleExp), win.right, win.up, win.out)
-  const centreKey = `${centre.x},${centre.y},${centre.z}`
+  // In hex, which Chromium writes out far faster than decimal (terrainCache, blockKey).
+  const centreKey = `${centre.x.toString(16)},${centre.y.toString(16)},${centre.z.toString(16)}`
 
   // Suspended (an Earth or hyperspace view): drop any queued terrain work so
   // the pool goes quiet, and hand back an empty volume. The memo below keys
@@ -203,29 +293,54 @@ export function useTerrainVolume(win: ViewWindow, axes: ViewAxes, suspend = fals
     if (suspend) clearRunQueue()
   }, [suspend])
 
+  // How long the layout took, so the DEV timing below covers a whole rescan
+  // after a move as it did before the layout was split out.
+  const layoutMs = useRef(0)
+  // The keys of every block around the centre, written out once per place,
+  // zoom, turn and plane; each flush below only reads them.
+  const layout = useMemo(
+    () => {
+      if (suspend) return null
+      const t0 = performance.now()
+      const built = layoutVolume(centre, axes, scaleExp, plane)
+      layoutMs.current = performance.now() - t0
+      return built
+    },
+    // centreKey stands in for centre, whose identity changes on every render.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [centreKey, scaleExp, plane, axes, suspend],
+  )
+  const last = useRef<TerrainVolume | null>(null)
+
   return useMemo(() => {
-    if (suspend) {
+    if (!layout) {
       return { values: new Uint8Array(VOLUME_SIZE ** 3).fill(UNKNOWN), radius: VOLUME_RADIUS, centre, axes, scaleExp }
     }
     const t0 = performance.now()
     const R = VOLUME_RADIUS
     const N = VOLUME_SIZE
-    const values = scanVolume(centre, axes, scaleExp, plane)
+    const values = readVolume(layout)
 
     if (import.meta.env.DEV) {
       let known = 0
       for (let i = 0; i < values.length; i++) if (values[i] !== UNKNOWN) known++
       const w = window as unknown as { __terrain?: { scans?: number[] } & Record<string, unknown> }
       const scans = w.__terrain?.scans ?? []
-      scans.push(Math.round((performance.now() - t0) * 100) / 100)
+      scans.push(Math.round((performance.now() - t0 + layoutMs.current) * 100) / 100)
+      layoutMs.current = 0
       w.__terrain = {
         known, total: N * N * N, cache: cacheSize(), inflight: inflightRuns(), scaleExp,
         scans: scans.slice(-40),
       }
     }
 
-    return { values, radius: R, centre, axes, scaleExp }
-    // centreKey stands in for centre, whose identity changes on every render.
+    // Nothing new since the last read of this layout: the same volume, so the
+    // point field is not rebuilt for a flush that changed none of it.
+    if (last.current?.values === values) return last.current
+    last.current = { values, radius: R, centre, axes, scaleExp }
+    return last.current
+    // The layout carries the place, zoom, turn and plane; centre, axes and
+    // scaleExp only go along with it.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [centreKey, scaleExp, plane, axes, dataVersion, suspend])
+  }, [layout, dataVersion])
 }

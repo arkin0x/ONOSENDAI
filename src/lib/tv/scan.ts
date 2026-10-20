@@ -22,6 +22,16 @@
  * Only shards, keys and chests (arkinox, 2026-10-19: draw only those, NEVER
  * a message or a coin). A bag's other items are opened with it, since one
  * key opens the whole bag, and never leave this file.
+ *
+ * A chest is shown as a chest, never what is inside it, whether or not the
+ * viewer holds the key it is sealed to (arkinox, 2026-10-20: "I think chest
+ * contents should not be shown on TV"). TV never opens a chest (it opens
+ * bags with unbag, which reads a chest as sealed, and adds its finds as
+ * watched), and nothing revealed out of one (a Hidden with `chestId`) is
+ * shown even if an opener hands it over. The shards the owner saw were
+ * plain entries of his bag: his own client had written his chest's
+ * contents there beside it (useShards publishBag explains, and now leaves
+ * them out), so every viewer saw them, key or no key.
  */
 
 import type { NostrEvent } from '../events'
@@ -33,9 +43,9 @@ import type { RegionKeyOut } from '../../workers/region.worker'
 /** The kinds of item TV draws and adds to your finds. */
 export const TV_ITEM_TYPES: ReadonlyArray<Hidden['type']> = ['shard', 'key', 'chest']
 
-/** Whether TV shows this item: a shard, a key or a chest, never a message (a coin is a message). */
-export function tvShows(h: Pick<Hidden, 'type'>): boolean {
-  return TV_ITEM_TYPES.includes(h.type)
+/** Whether TV shows this item: a shard, a key or a chest that is an entry of its bag, never a message (a coin is a message), and never anything out of a chest. */
+export function tvShows(h: Pick<Hidden, 'type' | 'chestId'>): boolean {
+  return TV_ITEM_TYPES.includes(h.type) && !h.chestId
 }
 
 /** The heights a scan derives, 0 up to `max`, the most a player scans. */

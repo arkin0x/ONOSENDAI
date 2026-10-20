@@ -1,3 +1,4 @@
+import * as proofCapability from '../../lib/proofCapability'
 /**
  * movePlan.test.ts - a commit beyond the ceiling takes exactly one step of the
  * way there, one signature, pausing on a declined signature; the next commit
@@ -44,6 +45,18 @@ async function land(): Promise<void> {
 }
 
 describe('a commit beyond the ceiling', () => {
+  it('shows an allocation-limit explanation without starting the proof worker', async () => {
+    const state = useCyberspace.getState()
+    const base = (state.position.x >> 4n) << 4n
+    useCyberspace.setState({ position: { ...state.position, x: base + 4n }, cursor: { ...state.position, x: base + 5n } })
+    const issue = vi.spyOn(proofCapability, 'movementCapabilityIssue').mockReturnValue('This browser cannot compute this movement proof. Use Chrome or Chromium.')
+    try {
+      await useCyberspace.getState().commit()
+      expect(posted).toHaveLength(0)
+      expect(useCyberspace.getState().proof).toMatchObject({ status: 'infeasible', message: expect.stringContaining('cannot compute') })
+    } finally { issue.mockRestore() }
+  })
+
   beforeEach(async () => {
     posted.length = 0
     // These routes are this machine's alone: the cloud stays off.

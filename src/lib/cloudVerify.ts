@@ -1,3 +1,4 @@
+import { axisComputeCeiling, movementCapabilityIssue } from './proofCapability'
 /**
  * cloudVerify.ts - what this client checks before it signs a cloud proof.
  *
@@ -96,6 +97,9 @@ export function verifyCloudHop(result: CloudHopResult, move: CloudMove, localCei
   const failed: string[] = []
   if (!result || typeof result !== 'object') return ['result']
   const { from, to, plane, prevEventId } = move
+  const issue = movementCapabilityIssue('hop', from, to, plane, 'cloud')
+  if (issue) throw new Error(issue)
+  localCeiling = axisComputeCeiling(localCeiling)
 
   const K = terrainK(to.x, to.y, to.z, plane)
   if (result.K !== K) failed.push('K')
@@ -147,6 +151,8 @@ export function verifyCloudSidestep(result: CloudSidestepResult, move: CloudMove
   const failed: string[] = []
   if (!result || typeof result !== 'object') return ['result']
   const { from, to, plane, prevEventId } = move
+  const issue = movementCapabilityIssue('sidestep', from, to, plane, 'cloud')
+  if (issue) throw new Error(issue)
   const prevId = hexToBytes(prevEventId)
 
   const heights: number[] = []

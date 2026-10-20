@@ -1,3 +1,4 @@
+import { movementCapabilityIssue } from '../lib/proofCapability'
 /**
  * ProofPanel.tsx - live movement proof telemetry.
  *
@@ -88,6 +89,14 @@ export function ProofPanel(): JSX.Element {
   // Live preview of the action the cursor is lining up: the same data the
   // route overlay above the controls shows (routePreview.ts).
   const preview = useRoutePreview()
+  const position = useCyberspace((s) => s.position)
+  const cursor = useCyberspace((s) => s.cursor)
+  const plane = useCyberspace((s) => s.plane)
+  const firstStep = preview?.steps?.[0]
+  const capabilityIssue = preview ? movementCapabilityIssue(
+    firstStep?.kind ?? 'hop', firstStep?.from ?? position, firstStep?.to ?? cursor,
+    plane, firstStep?.source === 'cloud' ? 'cloud' : 'local',
+  ) : null
   // A broken chain refuses every move (store whyNoMove). Said here whatever
   // the panel is showing, since a preview of a move that cannot be signed
   // would otherwise stand in for the reason, with the way to the notice.
@@ -108,7 +117,7 @@ export function ProofPanel(): JSX.Element {
       : proof.status === 'computing'
         ? proof.mode === 'sidestep' ? 'hashing' : 'computing'
         : previewing
-          ? refusedWhileAimed ? 'infeasible'
+          ? refusedWhileAimed || capabilityIssue ? 'infeasible'
             : preview.route ? (preview.route.infeasibleAt !== null ? 'infeasible' : preview.route.cloudSteps > 0 ? 'cloud-route-ready' : 'route-ready') : 'uncommitted'
           : proof.status
 
@@ -132,6 +141,8 @@ export function ProofPanel(): JSX.Element {
           style={{ width: `${Math.round(proof.progress * 100)}%` }}
         />
       </div>
+
+      {previewing && capabilityIssue && capabilityIssue !== aimedNotice && <p className="notice" role="status">{capabilityIssue}</p>}
 
       {aimedNotice && <p className="notice" role="status">{aimedNotice}</p>}
 

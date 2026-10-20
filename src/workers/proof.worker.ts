@@ -1,3 +1,4 @@
+import { movementCapabilityIssue } from '../lib/proofCapability'
 /**
  * proof.worker.ts - computes movement proofs off the main thread.
  *
@@ -111,6 +112,8 @@ self.onmessage = (event: MessageEvent<ProofRequest>) => {
   }
 
   try {
+    const issue = movementCapabilityIssue(mode, from, to, plane)
+    if (issue) throw new Error(issue)
     if (mode === 'sidestep') {
       const estimate = estimateSidestepCost(
         from.x, from.y, from.z,

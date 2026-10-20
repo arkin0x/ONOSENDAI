@@ -1,3 +1,4 @@
+import { axisComputeCeiling } from '../lib/proofCapability'
 /**
  * calibrate.worker.ts - a quiet one-shot movement benchmark.
  *
@@ -58,6 +59,7 @@ function breathe(): Promise<void> {
 self.onmessage = async (event: MessageEvent<CalibrateRequest>) => {
   const { id } = event.data
   try {
+    const safeCeiling = axisComputeCeiling(BENCH_MAX_COMPUTE_HEIGHT)
     const cantorMsByHeight: Record<number, number> = {}
     let total = 0
     const measure = (h: number): void => {
@@ -71,6 +73,7 @@ self.onmessage = async (event: MessageEvent<CalibrateRequest>) => {
     }
 
     for (const h of BASE_HEIGHTS) {
+      if (h > safeCeiling) break
       measure(h)
       await breathe()
     }
@@ -78,7 +81,7 @@ self.onmessage = async (event: MessageEvent<CalibrateRequest>) => {
     let prev = BASE_HEIGHTS[BASE_HEIGHTS.length - 2]
     let last = BASE_HEIGHTS[BASE_HEIGHTS.length - 1]
     for (const h of CLIMB_HEIGHTS) {
-      if (total >= TOTAL_BUDGET_MS) break
+      if (h > safeCeiling || total >= TOTAL_BUDGET_MS) break
       // Project the next step from the last two timings. Coarse timers can
       // report ~0 ms at low heights; clamping keeps the ratio finite.
       const msPrev = Math.max(cantorMsByHeight[prev], 0.5)

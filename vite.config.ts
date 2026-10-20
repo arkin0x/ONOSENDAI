@@ -18,6 +18,33 @@ function routeCards(): Plugin {
   }
 }
 
+/**
+ * The composer's WebGL2 check, answered without a throwaway context.
+ * @react-three/postprocessing's EffectComposer asks three-stdlib's
+ * isWebGL2Available() whether it may multisample, and that creates a canvas
+ * and a whole second WebGL2 context just to ask, then loses it: a long task
+ * at boot (about 300 ms in a headless profile; on Windows a context is an
+ * ANGLE/D3D device). The answer is already known when it asks: three r163 and
+ * later render with WebGL2 only, and the composer mounts inside a running
+ * renderer. Build only; the dev server pre-bundles the package, so it keeps
+ * the check, which costs nothing there worth saving (2026-10-20).
+ */
+function composerKnowsWebGL2(): Plugin {
+  const CALL = 'const webGL2Available = isWebGL2Available();'
+  return {
+    name: 'onosendai-composer-webgl2',
+    apply: 'build',
+    transform(code, id) {
+      if (!/@react-three[\\/]postprocessing[\\/]dist[\\/]EffectComposer\.js$/.test(id)) return null
+      if (!code.includes(CALL)) {
+        this.warn('composerKnowsWebGL2: EffectComposer no longer calls isWebGL2Available() as expected; the throwaway WebGL2 context is back')
+        return null
+      }
+      return { code: code.replace(CALL, 'const webGL2Available = true;'), map: null }
+    },
+  }
+}
+
 /** The subject of the commit being built: Vercel's variable, else git's. */
 function commitMessage(): string | null {
   if (process.env.VERCEL_GIT_COMMIT_MESSAGE) return process.env.VERCEL_GIT_COMMIT_MESSAGE
@@ -25,7 +52,7 @@ function commitMessage(): string | null {
 }
 
 export default defineConfig(async () => ({
-  plugins: [react(), routeCards()],
+  plugins: [react(), routeCards(), composerKnowsWebGL2()],
   define: {
     // Tests never reach the network for a number; the build and the dev
     // server ask GitHub once (see src/lib/version.ts).

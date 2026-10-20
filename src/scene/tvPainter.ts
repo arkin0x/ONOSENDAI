@@ -31,6 +31,7 @@ import { AD_SUBTITLE, adById, type AdScene, type AdTheme } from '../lib/tv/hosak
 import { watchingWords } from '../lib/tv/watching'
 import type { Census, ChainTimes } from '../lib/tv/stats'
 import type { Position } from '../lib/space'
+import { trackDrawing, type DirtyRect, type DrawTracker } from './drawTracker'
 
 /** The face every word on the tube is set in. */
 export const TV_FONT = "'Monaspace Argon', ui-monospace, monospace"
@@ -300,11 +301,24 @@ export class TvPainter {
   /** Where NOW PLAYING was last painted, canvas px, and the canvas px per CSS px then. */
   private npRect: FlatRect | null = null
   private cardScale = 1
+  /** Every call on the canvas, followed part by part, for what each paint changed (drawTracker). */
+  private track: DrawTracker
+  /** What the last paint changed, canvas px; null for all of it. */
+  private changed: DirtyRect[] | null = null
 
   /** `canvas` for tests; a new one otherwise. */
   constructor(canvas?: HTMLCanvasElement) {
     this.canvas = canvas ?? document.createElement('canvas')
-    this.ctx = this.canvas.getContext('2d')!
+    this.track = trackDrawing(this.canvas.getContext('2d')!)
+    this.ctx = this.track.ctx
+  }
+
+  /**
+   * What the last paint changed on the canvas, canvas px, for the tube to
+   * copy only that much (TvScreenEffect); null when it is all of it.
+   */
+  get dirty(): DirtyRect[] | null {
+    return this.changed
   }
 
   /** Where NOW PLAYING is on the flat frame, CSS px, for a tap or a drag on it; null when it is not up. */
@@ -328,6 +342,7 @@ export class TvPainter {
     this.canvas.height = H
     this.run = []
     this.runX = null
+    this.track.reset()
     return true
   }
 
@@ -441,6 +456,8 @@ export class TvPainter {
 
   /** Measure the marquee again: what is on it was measured in the face that was there before the TV's own loaded. */
   remeasure(): void {
+    // What was painted in the face before it is on the GPU still: all of it goes up again.
+    this.track.reset()
     const ctx = this.ctx
     const s = this.lastScale
     ctx.font = `${12 * s}px ${TV_FONT}`
@@ -453,6 +470,14 @@ export class TvPainter {
    * 1920 px tube read as fine print.
    */
   paint(p: TvPicture, a: TvAssets, now: number, scale: number, reduced: boolean): void {
+    this.track.begin()
+    this.paintParts(p, a, now, scale, reduced)
+    this.changed = this.track.end(this.canvas.width, this.canvas.height)
+  }
+
+  /** The paint itself, each part of the furniture named as it goes (drawTracker part). */
+  private paintParts(p: TvPicture, a: TvAssets, now: number, scale: number, reduced: boolean): void {
+    const part = (name: string): void => this.track.part(name)
     const cssW = this.canvas.width / scale
     const s = scale * Math.min(1.35, Math.max(0.9, cssW / 1400))
     this.lastScale = s
@@ -474,6 +499,7 @@ export class TvPainter {
     }
 
     // The logo, top right: the margins everything else takes.
+    part('logo')
     const lw = Math.min(LOGO_PX * s, W * LOGO_SHARE)
     const lh = lw * LOGO_ASPECT
     // Under heavy snow (tuning, no signal, a bag with no public place) the
@@ -495,6 +521,7 @@ export class TvPainter {
     }
 
     // The clock, under the logo, on the logo's right edge.
+    part('clock')
     ctx.fillStyle = FG
     ctx.textAlign = 'right'
     let cy = MY + lh + 18 * s
@@ -512,11 +539,13 @@ export class TvPainter {
     // The minimap, top left, on the logo's margins: all of cyberspace, and
     // where the avatar on screen is in it.
     const mapSize = Math.min(200 * s, W * 0.3, H * 0.34)
+    part('minimap')
     this.minimap(p, MX, MY, mapSize, s, now, reduced)
 
     // The marquee along the bottom margin, the CYBERSPACE TV bug at its head.
     const tickH = 28 * s
     const tickY = H - MY - tickH
+    part('marquee')
     this.marquee(p, a, MX, tickY, W - MX, tickH, s, dt)
 
     // The chiron above it, and NOW PLAYING: side by side on one row, the
@@ -534,10 +563,12 @@ export class TvPainter {
     const npW = narrow ? W - 2 * MX : lw + 16 * s
     const chironW = row ? W - 2 * MX - npW - 10 * s : W - 2 * MX
     let chironTop = tickY
+    part('chiron')
     if (p.shot && p.status === 'playing') chironTop = this.chiron(p, a, MX, rowBottom, chironW, s, narrow, row)
     const npBottom = row ? rowBottom : rowBottom - CHIRON_PX[1] * s - 10 * s
     const ceiling = (narrow ? Math.max(cy, MY + mapSize) : cy) + 10 * s
     const npLook = !a.music ? null : npBottom - NOW_PLAYING_PX * s >= ceiling ? 'full' : npBottom - NOW_PLAYING_LINE_PX * s >= ceiling ? 'line' : null
+    part('nowPlaying')
     const npTop = a.music && npLook ? this.nowPlaying(a.music, W - MX - npW, npBottom, npW, s, now, reduced, npLook === 'line') : chironTop
     this.npRect = a.music && npLook ? { x: W - MX - npW, y: npTop, w: npW, h: npBottom - npTop } : null
     this.cardScale = scale
@@ -554,12 +585,15 @@ export class TvPainter {
     // Beside the clock it keeps off the chiron, and on a phone, where NOW
     // PLAYING spans the width over the chiron, off that too (review of #393).
     const sideBottom = narrow && this.npRect ? Math.min(chironTop - 50 * s, npTop - 6 * s) : chironTop - 50 * s
+    part('segment')
     if (item && inset && p.status === 'playing') this.segment(item, p.shot!.length, a, W, cy + 14 * s, floor - 50 * s, sideBottom, MX, MY, W - MX - lw - 16 * s, MX + mapSize + 16 * s, s, narrow, now)
 
     // LATER and MEANWHILE, after the cut's transition; under an inset's panel.
+    part('card')
     this.card(p, W, s, narrow, inset ? floor - 34 * s : H * 0.34, now)
 
     // TUNING, END OF TAPE, NO SIGNAL.
+    part('status')
     if (p.status !== 'playing') {
       const label = p.status === 'tuning' ? 'TUNING' : p.status === 'end' ? 'END OF TAPE' : 'NO SIGNAL'
       ctx.globalAlpha = reduced ? 1 : 0.55 + 0.45 * (Math.floor(now / 700) % 2)
@@ -747,6 +781,7 @@ export class TvPainter {
     const theme = AD_THEMES[scene.theme]
     // In over the cut's own length, so the cut into the break shows (review of #384).
     const enter = clamp01((now - ad.at) / CUT_MS)
+    this.track.part('ad')
     ctx.save()
     ctx.globalAlpha = enter
 
@@ -833,6 +868,7 @@ export class TvPainter {
     ctx.restore()
 
     // The channel round it.
+    this.track.part('adTag')
     ctx.save()
     ctx.font = `700 ${9 * s}px ${TV_FONT}`
     ctx.textAlign = 'left'
@@ -846,6 +882,7 @@ export class TvPainter {
     ctx.fillStyle = 'rgba(242, 251, 255, 0.85)'
     ctx.fillText(tag, MX + 7 * s, MY + 12.5 * s)
     ctx.restore()
+    this.track.part('marquee')
     this.marquee(p, a, MX, tickY, W - MX, tickH, s, dt)
     this.npRect = null
     this.cardScale = scale

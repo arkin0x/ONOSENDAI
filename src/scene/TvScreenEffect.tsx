@@ -48,6 +48,7 @@ import { tvName } from '../lib/tv/text'
 import { objectsOf } from '../workshop/ObjectPicker'
 import { avatarFromEvent } from '../lib/avatar'
 import { tvSpin } from '../hud/TvSegments'
+import { uploadRegions } from './drawTracker'
 import { CUT_MS, TV_FONT, TvPainter, type FlatRect, type TvAssets, type TvMusic } from './tvPainter'
 import { musicProgress, setMusicVolume, toggleMusicMute, useTvMusic } from '../store/useTvMusic'
 import { useTvWatching } from '../store/useTvWatching'
@@ -62,6 +63,13 @@ const PAINT_MS = 33
 /** The painted canvas's pixels per CSS pixel, at most, and its size, at most. */
 const PAINT_SCALE = 1.5
 const PAINT_MAX_PIXELS = 2_400_000
+/**
+ * However little a paint changed, all of the furniture goes up at least this
+ * often, ms: what can change on the canvas without any call on it changing
+ * (a fallback face for a glyph arriving a moment later, say) is put right
+ * within this, for about a thirtieth of what uploading it all every paint cost.
+ */
+const FULL_UPLOAD_MS = 1000
 
 const FRAGMENT = `
 uniform float uTime;
@@ -87,9 +95,11 @@ vec3 picture(vec2 p) {
 }
 
 // The furniture, painted flat, over a colour at a point of the flat frame.
+// Its texture is the canvas's rows top down, as they are copied (no flip on
+// upload, so a part of it copies to the same place: TvScreenEffect).
 vec3 withOverlay(vec3 col, vec2 p) {
   if (p.x < 0.0 || p.x > 1.0 || p.y < 0.0 || p.y > 1.0) return col;
-  vec4 o = texture(uOverlay, p);
+  vec4 o = texture(uOverlay, vec2(p.x, 1.0 - p.y));
   return mix(col, o.rgb, o.a);
 }
 
@@ -293,6 +303,9 @@ export function TvScreenEffect(): JSX.Element {
     t.colorSpace = SRGBColorSpace
     t.minFilter = LinearFilter
     t.generateMipmaps = false
+    // Rows as the canvas has them, top first: a part of the canvas copied
+    // into it then lands where it is (the shader reads it upside down).
+    t.flipY = false
     return t
   }, [painter])
   useEffect(() => () => overlay.dispose(), [overlay])
@@ -313,6 +326,7 @@ export function TvScreenEffect(): JSX.Element {
     return () => document.fonts?.removeEventListener('loadingdone', again)
   }, [painter])
   const lastPaint = useRef(0)
+  const lastFull = useRef(-Infinity)
   // The segment's shard, parsed once per segment rather than on every paint.
   const segment = useRef<{ id: string | undefined; shard: ShardModel | null }>({ id: undefined, shard: null })
   const reduced = useMemo(() => typeof window !== 'undefined' && window.matchMedia?.('(prefers-reduced-motion: reduce)').matches === true, [])
@@ -454,7 +468,8 @@ export function TvScreenEffect(): JSX.Element {
     // made, and copying a larger canvas into it fails on the GPU, which left
     // the furniture frozen after a rotation or the phone's address bar
     // moving (review of #375).
-    if (painter.size(width, height, scale)) overlay.dispose()
+    const resized = painter.size(width, height, scale)
+    if (resized) overlay.dispose()
     const profiles = useProfiles.getState()
     const item = tv.shot?.item
     if (item?.id !== segment.current.id) segment.current = { id: item?.id, shard: item?.kind === 'object' ? (objectsOf([item.event])[0]?.shard ?? null) : item?.kind === 'avatar' ? avatarFromEvent(item.event) : null }
@@ -471,7 +486,17 @@ export function TvScreenEffect(): JSX.Element {
       hosakaMark: tv.ad ? pictureFor('/hosaka-mark.png') : null,
     }
     painter.paint(tv, assets, now, scale, reduced)
-    overlay.needsUpdate = true
+    // Only what the paint changed goes to the GPU (drawTracker): the marquee,
+    // the minimap and NOW PLAYING's progress move on every paint, and the
+    // rest, most of the canvas, mostly sits still until a cut. It was all of
+    // it, some ten megabytes a paint at a laptop's size, thirty times a
+    // second (arkinox, 2026-10-20: "the perf on /tv on my laptop is not
+    // satisfactory").
+    const dirty = painter.dirty
+    if (resized || dirty === null || now - lastFull.current >= FULL_UPLOAD_MS) {
+      overlay.needsUpdate = true
+      lastFull.current = now
+    } else uploadRegions(state.gl, overlay, dirty)
   })
   return <primitive object={effect} />
 }

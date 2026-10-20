@@ -21,18 +21,19 @@ import { useEffect } from 'react'
  * controls away. Scene handlers call stopPropagation, but that is R3F's own
  * event and says nothing to a window listener, so they say it here instead.
  *
- * A timestamp rather than a flag: the scene handler runs during the click
- * that this hook is also watching, so the mark only has to outlive one event,
- * and one that is never cleared cannot strand the gesture after it.
+ * A flag, not a time: the scene handler runs during the click this hook
+ * also watches, and React can render what it opened (a card, with a turning
+ * shard's own canvas) between the two listeners, which took longer than the
+ * 50 ms a timestamp allowed: the controls flipped under a shard's card again
+ * (review of #398). The click that the handler claimed uses the flag up, and
+ * every press clears it, so a claim on a click this hook never heard cannot
+ * outlive its gesture.
  */
-let handledAt = 0
+let handled = false
 
 export function markSceneTapHandled(): void {
-  handledAt = performance.now()
+  handled = true
 }
-
-/** How long a scene handler's claim on the gesture lasts, in milliseconds. */
-const HANDLED_MS = 50
 
 /** How far a press may wander and still count as a tap, in CSS pixels. */
 const SLOP = 12
@@ -82,7 +83,7 @@ export function installCanvasTap(
   // card), clears what an earlier lift left: heard in the capture phase. It
   // only clears; a press starts a tap below, in the bubbling phase, so one
   // that was stopped never does (review of #398).
-  const reset = (): void => { tracking = false; liftedAt = 0 }
+  const reset = (): void => { tracking = false; liftedAt = 0; handled = false }
 
   const down = (ev: Event): void => {
     const e = ev as PointerEvent
@@ -109,10 +110,12 @@ export function installCanvasTap(
 
   const click = (e: Event): void => {
     const lifted = liftedAt
+    const claimed = handled
     liftedAt = 0
+    handled = false
     if (!lifted || now() - lifted > CLICK_WITHIN_MS) return
     if (!onCanvas(e)) return
-    if (now() - handledAt < HANDLED_MS) return
+    if (claimed) return
     onTap()
   }
 

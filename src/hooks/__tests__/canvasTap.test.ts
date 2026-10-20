@@ -82,6 +82,21 @@ describe('scene tap: the controls toggle only when nothing in the scene took the
     expect(onTap).toHaveBeenCalledTimes(1)
   })
 
+  it('a claim holds however long the card it opened takes to render (review of #398)', () => {
+    const { onTap, tap } = setup()
+    tap({ scene: () => { markSceneTapHandled(); clock += 200 } })
+    expect(onTap).not.toHaveBeenCalled()
+    tap()
+    expect(onTap).toHaveBeenCalledTimes(1)
+  })
+
+  it('a claim on a click this hook never heard is gone by the next press', () => {
+    const { onTap, tap } = setup()
+    markSceneTapHandled()
+    tap()
+    expect(onTap).toHaveBeenCalledTimes(1)
+  })
+
   it('nothing is decided at the lift: no toggle before the click comes', () => {
     const { win, onTap } = setup()
     win.dispatchEvent(ev('pointerdown', canvas, 100, 100, 0))

@@ -2253,7 +2253,7 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
         const issue = movementCapabilityIssue(step.kind, step.from, step.to, plane, step.source === 'cloud' ? 'cloud' : 'local')
         if (issue) { routeFail(issue); return }
         cur = step.to
-        if (n === 99_999) { routeFail('This route is too long to check for browser compatibility. Choose a closer destination.'); return }
+        if (n === 99_999) { routeFail('Too long a route to check for this browser: choose a closer destination.'); return }
       }
     }
     const steps = cloudStepsOf(position, plan)

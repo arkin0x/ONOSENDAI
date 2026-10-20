@@ -31,8 +31,6 @@ export function axisComputeCeiling(ceiling: number, limit = bigintBitLimit()): n
   return ceiling
 }
 
-export const BROWSER_PROOF_WARNING = 'This browser has a BigInt size limit that prevents some movement proofs. Unsupported moves are checked before computing or paying. Use Chrome or Chromium if a move is blocked.'
-
 /** Cloud hops return hashed envelopes, but their temporal root is still
  * recomputed locally. Sidesteps also combine that root with the Merkle roots.
  * Use the full 85-bit seed bound: later route steps have not been signed yet. */
@@ -50,6 +48,6 @@ export function movementCapabilityIssue(
   }
   if (bits <= limit) return null
   return source === 'cloud'
-    ? 'This browser cannot verify this movement proof because it exceeds its BigInt size limit. Cloud compute cannot complete this move here. Use Chrome or Chromium.'
-    : 'This browser cannot compute this movement proof because it exceeds its BigInt size limit. Use Chrome or Chromium. A shorter hop may work, but terrain can also cause this limit.'
+    ? 'This browser cannot verify this cloud proof (BigInt limit): use Chrome.'
+    : 'This browser cannot compute this proof (BigInt limit): try a nearer cursor, or Chrome.'
 }

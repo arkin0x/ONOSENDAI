@@ -1,4 +1,4 @@
-import { bigintBitLimit, BROWSER_PROOF_WARNING, movementCapabilityIssue } from '../lib/proofCapability'
+import { movementCapabilityIssue } from '../lib/proofCapability'
 /**
  * ProofPanel.tsx - live movement proof telemetry.
  *
@@ -127,8 +127,6 @@ export function ProofPanel(): JSX.Element {
         <h2>Movement proof</h2>
         <StatusLabel status={status} />
       </header>
-
-      {Number.isFinite(bigintBitLimit()) && <p className="notice" role="status">{BROWSER_PROOF_WARNING}</p>}
 
       {broken && (
         <p className="notice">

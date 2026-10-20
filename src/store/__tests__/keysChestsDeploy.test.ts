@@ -164,3 +164,26 @@ describe('hiding a message (arkinox, 2026-10-20)', () => {
     sign.mockRestore()
   })
 })
+
+describe('what your own chest holds stays in the chest (review of #409)', () => {
+  it('a second device that finds your chest and holds its lock files the contents as finds, never as deployments a rewrite would carry out of the chest', async () => {
+    const lock = forgeKey('Lock')
+    S().startDeployKey(lock)
+    await S().deploy()
+    S().startDeployChest({ name: 'C', lock: { pubkey: lock.itemPubkey, label: 'Lock' }, requires: 'Lock', contents: [{ kind: 'message', text: 'secret msg' }, { kind: 'key', key: forgeKey('Inner Key') }] })
+    await S().deploy()
+    expect(S().deployError).toBeNull()
+    // The second device: no rows of its own yet, the scan finds the bag's two items.
+    const finds = S().mine.map((d) => ({ eventId: d.eventId, inner: d.inner, keyHex: d.keyHex, bagId: d.bagId, lookupId: d.lookupId, author: d.inner.pubkey, at: { x: BigInt(d.at.x), y: BigInt(d.at.y), z: BigInt(d.at.z) }, plane: d.plane, height: d.height, createdAt: d.createdAt, type: d.type, key: d.key, chest: d.chest, text: d.text, bag: d.bag }) as Hidden)
+    useShards.setState({ mine: [] })
+    S().addDiscovered(finds)
+    // The chest opened with the held lock: its message and key are found, in place...
+    const revealed = Object.values(S().discovered).filter((h) => h.chestId)
+    expect(revealed.map((h) => h.type).sort()).toEqual(['key', 'message'])
+    // ...vouched for by the chest, so none is a claim...
+    expect(revealed.every((h) => !h.claim)).toBe(true)
+    // ...and only the bag's own two items became this device's deployments.
+    expect(S().mine.map((d) => d.type).sort()).toEqual(['chest', 'key'])
+    expect(S().mine.every((d) => d.inner.kind !== MESSAGE_KIND)).toBe(true)
+  })
+})

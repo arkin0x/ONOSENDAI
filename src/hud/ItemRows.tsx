@@ -22,7 +22,7 @@
 import { useMemo, useState } from 'react'
 import { useProfile } from '../hooks/useProfile'
 import { cashuLabel, readCashuToken } from '../lib/cashu'
-import { openWithSecret, openWithSigner, openerFor, readContents, requiresLabel, revealedIn, sealerOf, type ChestEntry } from '../lib/chests'
+import { chestSealer, openWithSecret, openWithSigner, openerFor, readContents, requiresLabel, revealedIn, type ChestEntry } from '../lib/chests'
 import { positionOf, useShards } from '../store/useShards'
 import { hiddenLabel, type ChestItem } from '../lib/hidden'
 import { ItemFace } from './ItemIcon'
@@ -81,7 +81,7 @@ export function ChestBlock({ id, chest, author, verified, place, sealer: given }
   const opener = useMemo(() => openerFor(chest, keys, me), [chest, keys, me])
   const found = useShards((s) => s.discovered[id])
   const ownInner = useShards((s) => s.mine.find((d) => d.eventId === id)?.inner)
-  const sealer = given ?? (found ? sealerOf(found) : ownInner?.pubkey)
+  const sealer = chestSealer(given, found, ownInner)
   const [entries, setEntries] = useState<ChestEntry[] | null>(null)
   const [status, setStatus] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)

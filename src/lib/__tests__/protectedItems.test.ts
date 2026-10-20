@@ -21,7 +21,8 @@ import {
   CHAT_BAG_KIND, MESSAGE_KIND, OBJECT_KIND, SHARD_KIND, bagInners, bagTemplate, chatInnerTemplate, chatRumor, chestInnerTemplate, chestItemOf, editedTemplate,
   innerAuthentic, isProtectedTags, keyInnerTemplate, messageInnerTemplate, objectTemplate, rumorOf, shardInnerTemplate, unbag, type ChestItem, type KeyItem, type Rumor,
 } from '../hidden'
-import { openWithSecret, readContents, revealedIn, sealEntries, sealerOf, templateBytes } from '../chests'
+import { chestSealer, openWithSecret, readContents, revealedIn, sealEntries, sealerOf, templateBytes } from '../chests'
+import { heldFromFind } from '../inventory'
 
 const sk = generateSecretKey()
 const pk = getPublicKey(sk)
@@ -196,6 +197,29 @@ describe('rule 2 in a chest: the chest signer vouches for its rumors', () => {
     expect(found.map((f) => f.claim)).toEqual([undefined, true])
     expect(sealerOf({ inner: c.event, claim: true })).toBeUndefined()
     expect(sealerOf({})).toBeUndefined()
+  })
+
+  it('only a message is vouched for: an unsigned key of the chest signer stays a claim, as a bag would drop it', () => {
+    const k = rumorOf(keyInnerTemplate(forge('loose key'), at, 0, 5), pk)
+    const c = chestOf([k], lock.itemPubkey)
+    const [entry] = readContents(openWithSecret(c.item, lock.secretHex), pk)
+    expect(entry.body.type).toBe('key')
+    expect(entry.verified).toBe(false)
+    // Found that way, the key is held with its author as a claim.
+    const door = { eventId: c.event.id, bagId: 'bag', lookupId: 'look', author: pk, at, plane: 0 as const, height: 6, inner: c.event }
+    const [found] = revealedIn(door, [entry])
+    expect(found.claim).toBe(true)
+    expect(heldFromFind('me', found, 1)?.verified).toBe(false)
+    expect(heldFromFind('me', { ...found, claim: undefined }, 1)?.verified).toBe(true)
+  })
+
+  it('a chest card opens with the sealer it is given, else the chest as found, else as hidden here; never anything else', () => {
+    const c = chestOf([], lock.itemPubkey)
+    expect(chestSealer('ab'.repeat(32), { inner: c.event, claim: true }, { pubkey: 'cd'.repeat(32) })).toBe('ab'.repeat(32))
+    expect(chestSealer(undefined, { inner: c.event }, { pubkey: 'cd'.repeat(32) })).toBe(pk)
+    expect(chestSealer(undefined, { inner: c.event, claim: true }, { pubkey: 'cd'.repeat(32) })).toBeUndefined()
+    expect(chestSealer(undefined, undefined, { pubkey: 'cd'.repeat(32) })).toBe('cd'.repeat(32))
+    expect(chestSealer(undefined, undefined, undefined)).toBeUndefined()
   })
 
   it('a rumor is sealed into a chest at its true size: no signature bytes counted', () => {

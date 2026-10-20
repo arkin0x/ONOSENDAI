@@ -129,9 +129,10 @@ function row(owner: string, event: NostrEvent, body: ItemBody, verified: boolean
 export function heldFromFind(owner: string, h: Hidden, at: number, watched = false): HeldItem | null {
   if (h.type !== 'key' || !h.key || !h.inner) return null
   // A bag's items are verified against the bag's author before they are found
-  // at all (hidden.ts innerAuthentic), and a key is never a rumor there: only
-  // a message may go without a signature.
-  const held = row(owner, h.inner as NostrEvent, { type: 'key', key: h.key }, true, 'found', placeOf(h), null, at)
+  // at all (hidden.ts innerAuthentic), and a key is never a rumor there. One
+  // revealed from a chest is a fact unless its reading said it is a claim
+  // (chests.ts revealedIn `claim`).
+  const held = row(owner, h.inner as NostrEvent, { type: 'key', key: h.key }, !h.claim, 'found', placeOf(h), null, at)
   return watched ? { ...held, watched: true } : held
 }
 

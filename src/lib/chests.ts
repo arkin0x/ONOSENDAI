@@ -157,9 +157,11 @@ function readEntry(e: BagEntry, sealer: string | undefined): ChestEntry | null {
     // An unsigned entry's id is its hash, whatever it claims: a claimed id
     // could otherwise stand in for a real item's in the inventory.
     const hash = signed ? ev.id : getEventHash(plain)
-    // A rumor whose own id is that hash and whose author sealed the chest:
-    // the chest's signature covers it, as a bag's covers its items.
-    const vouched = !signed && sealer !== undefined && ev.pubkey === sealer && ev.id === hash
+    // A message sealed as a rumor, whose own id is that hash and whose author
+    // sealed the chest: the chest's signature covers it, as a bag's covers
+    // its messages. Only a message is ever written as a rumor; any other
+    // unsigned kind stays a claim, as it would be dropped from a bag.
+    const vouched = !signed && ev.kind === MESSAGE_KIND && sealer !== undefined && ev.pubkey === sealer && ev.id === hash
     const body = readItem({ ...plain, id: hash })
     return body ? { id: hash, event: { ...plain, id: hash, sig: signed ? ev.sig : '' }, verified: signed || vouched, body } : null
   } catch {
@@ -174,8 +176,8 @@ function readEntry(e: BagEntry, sealer: string | undefined): ChestEntry | null {
  * on its own; a kind this client does not read, or an entry that is not an
  * event at all, is skipped as §7.6 says.
  *
- * An unsigned item is kept. Its author is a fact when it is a rumor of the
- * chest's own signer: `sealer` is the chest's pubkey, given only when the
+ * An unsigned item is kept. Its author is a fact when it is a message
+ * written as a rumor by the chest's own signer: `sealer` is the chest's pubkey, given only when the
  * chest itself was verified (signed, inside a bag whose signer it is, or
  * vouched for in its turn), and the rumor's `pubkey` is that key and its
  * `id` its hash. A message is sealed into a chest this way (arkinox,
@@ -200,6 +202,19 @@ export function readContents(entries: BagEntry[], sealer?: string): ChestEntry[]
  */
 export function sealerOf(chest: Pick<Hidden, 'inner' | 'claim'>): string | undefined {
   return chest.inner && !chest.claim ? chest.inner.pubkey : undefined
+}
+
+/**
+ * The sealer a chest's card opens it with (ItemRows ChestBlock): the one it
+ * was given (the chest event's own pubkey, when that is a fact), else the
+ * chest as this device found it (sealerOf), else as this device hid it (its
+ * own deployment's inner event). Never the bag's author, which a chest
+ * inside a chest need not share. Undefined: rumors inside read as claims.
+ */
+export function chestSealer(given: string | undefined, found: Pick<Hidden, 'inner' | 'claim'> | undefined, own: { pubkey: string } | undefined): string | undefined {
+  if (given !== undefined) return given
+  if (found) return sealerOf(found)
+  return own?.pubkey
 }
 
 /**

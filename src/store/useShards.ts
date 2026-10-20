@@ -902,7 +902,11 @@ export const useShards = create<ShardsState>((set, get) => {
       return { ...d, inner: h.inner, shard: h.shard ?? d.shard }
     })
     for (const h of items) {
-      if (h.author !== me || !h.inner || !h.keyHex || have.has(h.eventId) || deleted[h.eventId]) continue
+      // What a chest of yours holds is not a deployment: it is sealed inside
+      // the chest, and as a row of its own the next rewrite of the bag would
+      // carry it out of the chest to the top of the bag, where the region
+      // key alone opens it (review of #409).
+      if (h.chestId || h.author !== me || !h.inner || !h.keyHex || have.has(h.eventId) || deleted[h.eventId]) continue
       have.add(h.eventId)
       own.push({
         eventId: h.eventId, inner: h.inner, ref: h.ref, bagId: h.bagId, type: h.type, shard: h.shard, text: h.text, key: h.key, chest: h.chest,

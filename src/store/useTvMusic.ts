@@ -162,14 +162,13 @@ function apply(): void {
 }
 
 /**
- * The commercial break (lib/tv/hosakaAd): the track steps out for it and
- * comes back after, where it was, so no one's track plays under an ad
- * (2026-10-19: "add the fade music"; its licence is non-commercial). Out with
- * the cut into the break, in after it, faded where the page may set the
- * volume; elsewhere (iOS) a plain pause and play. Nothing plays under the
- * spot for now. A sponsor's own music for its spot, if one is ever made
- * ("In the future I may want to insert my own music for the hosaka ad"),
- * would start and stop here, on the same two calls.
+ * The track steps out and comes back after, where it was: out faded where
+ * the page may set the volume, elsewhere (iOS) a plain pause and play.
+ * The HOSAKA commercial no longer calls it: the music plays on under the
+ * spot (2026-10-20: "setto of basspistol says we don't have to mute the
+ * music while my hosaka ad plays"). Kept for a spot's own music, if one is
+ * ever made ("maybe later I'll have my own music to add to the hosaka ad"),
+ * which would start and stop here, on the same two calls.
  */
 export function holdMusicForAd(on: boolean): void {
   if (on === held) return

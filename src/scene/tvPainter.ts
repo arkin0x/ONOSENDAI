@@ -769,8 +769,7 @@ export class TvPainter {
    * stripes in the brand's colours, then the end card with the mark. Over a
    * ground that hides the world; the marquee stays, with an ADVERTISEMENT tag
    * in the corner, as a channel marks its breaks, and NOW PLAYING steps away
-   * with the music, which steps out for the break (store/useTvMusic
-   * holdMusicForAd).
+   * while the music plays on under the spot.
    */
   private commercial(ad: { at: number; id: string }, p: TvPicture, a: TvAssets, W: number, H: number, MX: number, MY: number, s: number, narrow: boolean, now: number, reduced: boolean, dt: number, scale: number): void {
     const ctx = this.ctx
@@ -796,8 +795,8 @@ export class TvPainter {
     const tickH = 28 * s
     const tickY = H - MY - tickH
     // No NOW PLAYING over the spot (2026-10-19: "gotta hide the music player
-    // during the hosaka ad"): the music steps out for the break
-    // (holdMusicForAd), and the spot has the whole picture down to the marquee.
+    // during the hosaka ad"): the music plays on under it, and the spot has
+    // the whole picture down to the marquee.
     const top = MY + 26 * s
     const floorY = tickY - 14 * s
     const regions: Region[] = [{ x: MX, y: top, w: W - 2 * MX, h: floorY - top }]

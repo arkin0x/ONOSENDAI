@@ -256,6 +256,64 @@ export function openerFor(chest: Pick<ChestItem, 'lockPubkey'>, keys: OpeningKey
 }
 
 /**
+ * Everything sealed inside the chests among a bag's entries that these keys
+ * open, by entry key (lib/hidden.ts entryKey), chests inside chests included
+ * and a key found inside one used for the rest. A chest no key here opens
+ * adds nothing.
+ *
+ * What it is for: a bag must never carry, as a plain entry beside a chest,
+ * something that is sealed inside that chest (arkinox, 2026-10-20: "I saw my
+ * shards encrypted in my chest appear visibly ... chest contents should not
+ * be shown on TV"). A plain entry is sealed to the region alone, so anyone
+ * with the region key reads it, TV's viewers among them. The hider's client
+ * once put a chest's contents there itself (useShards claimOwn), so every
+ * rewrite of a bag leaves out what this returns (useShards publishBag), which
+ * also mends a bag that was written that way. An unsigned entry is counted
+ * under its claimed id and its hash both, since either may be what a record
+ * or a bag files it under. A reference inside a chest is not counted.
+ */
+export function sealedInside(entries: BagEntry[], keys: OpeningKey[]): Set<string> {
+  const out = new Set<string>()
+  const held = [...keys]
+  const doors: ChestItem[] = []
+  const read = (e: BagEntry): void => {
+    if (isReference(e) || !e || typeof e !== 'object' || Array.isArray(e)) return
+    try {
+      const body = readItem(e as NostrEvent)
+      if (body?.type === 'chest' && body.chest) doors.push(body.chest)
+    } catch { /* not an item this client reads: no chest to look in */ }
+  }
+  for (const e of entries) read(e)
+  const opened = new Set<ChestItem>()
+  // Until a pass opens nothing new: a key inside a later chest may open an earlier one.
+  for (let progress = true; progress;) {
+    progress = false
+    for (const door of doors) {
+      if (opened.has(door)) continue
+      const key = held.find((k) => k.itemPubkey === door.lockPubkey)
+      if (!key) continue
+      opened.add(door)
+      progress = true
+      let raw: BagEntry[]
+      try { raw = openWithSecret(door, key.secretHex) } catch { continue }
+      // Events only: a reference inside a chest is never followed (readContents),
+      // and the same reference beside the chest names an object, not this chest's copy.
+      for (const e of raw) {
+        if (isReference(e)) continue
+        const k = entryKey(e)
+        if (typeof k === 'string') out.add(k)
+        read(e)
+      }
+      for (const c of readContents(raw)) {
+        out.add(c.id)
+        if (c.body.type === 'key' && c.body.key) held.push({ id: c.id, itemPubkey: c.body.key.itemPubkey, secretHex: c.body.key.secretHex })
+      }
+    }
+  }
+  return out
+}
+
+/**
  * What a reader who cannot open a chest is told. The label is the hider's
  * own (`requires`), so it may say more; without one, only that an item is
  * needed, never which.

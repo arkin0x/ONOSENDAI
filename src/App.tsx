@@ -8,7 +8,6 @@ import { LineScrubber } from './hud/LineScrubber'
 import { SpectateBar } from './hud/SpectateBar'
 import { Workshop } from './workshop/Workshop'
 import { DeployBar } from './hud/DeployBar'
-import { DeploymentDetail } from './hud/DeploymentDetail'
 import { StashModals } from './hud/StashModals'
 import { SecretModal } from './hud/SecretModal'
 import { FocusBar } from './hud/FocusBar'
@@ -177,19 +176,11 @@ export default function App(): JSX.Element {
   const [panelsOpen, setPanelsOpen] = useState(!isMobile)
   const showPanels = panelsOpen && !spectating
 
-  // Opening a deployment's wire record flies the scene to the shard, and on a
-  // phone that overlay sits along the bottom over the hamburger. So tapping a
-  // deployment closes the panels: the shard is what you asked to look at, the
-  // overlay is how you act on it, and EXIT frees the hamburger again. Only on a
-  // phone, where the two fight for the space; a desktop shows both at once.
-  const inspecting = useShards((s) => s.inspecting !== null)
-  useEffect(() => {
-    if (inspecting && isMobile) setPanelsOpen(false)
-  }, [inspecting, isMobile])
-
   // Reading a hidden thing owns the screen: the top-aligned modal sits where
   // the instrument stack lives, so the stack stands aside and the hamburger
-  // folds instead of layering underneath it.
+  // folds instead of layering underneath it. This is also what closes the
+  // panels when a Stash row opens your own thing: the wire record that did
+  // it on a phone is part of this card now (arkinox, 2026-10-20).
   const secretOpen = useShards((s) => s.selectedSecret !== null)
   useEffect(() => { if (secretOpen) setPanelsOpen(false) }, [secretOpen])
   // Deploying is the same kind of thing: the bar sits at the top, the panels
@@ -380,7 +371,6 @@ export default function App(): JSX.Element {
       {/* One boundary for the record and its neighbors: a crash in one modal
           shows its error where the modal was, and the scene stays up. */}
       <CrashNote where="a modal">
-        <DeploymentDetail />
         <StashModals />
         <SecretModal />
         <ActionModal />

@@ -61,9 +61,10 @@ export function depName(d: MyDeployment): string {
  * Fly the scene to one deployment and open it as a tap on it in the scene
  * would: the item modal (SecretModal), which names its kind correctly and
  * stands at the top of the screen (arkinox, 2026-10-10: the record called a
- * key a shard and sat at the bottom). The wire record (DeploymentDetail) is
- * one tap further, WIRE RECORD in that modal. The bag modal closes so the
- * item modal is what is seen.
+ * key a shard and sat at the bottom). Its wire facts, relays, LOCAL / LIVE
+ * and TEST DISCOVERY, are in that modal's event data (arkinox, 2026-10-20:
+ * the separate wire record folded into it). The bag modal closes so the item
+ * modal is what is seen.
  */
 export function goToDeployment(d: MyDeployment): void {
   const unit = d.type === 'shard' ? d.shard?.unit ?? 0 : 0

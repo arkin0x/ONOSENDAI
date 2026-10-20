@@ -12,12 +12,18 @@
  * screenshot or a pasted event would hand that to whoever saw it (review of
  * #399). The field shows the event with the secret hidden, and says that
  * the event shown will not verify.
+ *
+ * Its kind is named too, and for a thing this device hid the card passes
+ * the wire facts (WireData) as children, between these fields and the JSON:
+ * the wire record folded into this section (arkinox, 2026-10-20: "kind,
+ * coord, relays, published status, and test discovery button could be added
+ * to our metadata section ... then we can have these unified").
  */
 
-import { useMemo, useState } from 'react'
+import { useMemo, useRef, useState, type ReactNode } from 'react'
 import type { NostrEvent } from 'nostr-tools'
 import { formatStamp } from '../lib/time'
-import { KEY_KIND } from '../lib/hidden'
+import { CHEST_KIND, KEY_KIND, MESSAGE_KIND, OBJECT_KIND, SHARD_KIND } from '../lib/hidden'
 
 /** What stands in for a hidden secret. */
 export const HIDDEN_SECRET = '(hidden)'
@@ -50,38 +56,65 @@ export function eventJson(ev: Omit<NostrEvent, 'sig'> & { sig?: string }): strin
 /** How long COPIED stays, as on the other copies. */
 const COPIED_MS = 1400
 
-export function EventData({ event: raw }: { event: NostrEvent }): JSX.Element {
-  const [copied, setCopied] = useState<string | null>(null)
+/**
+ * What a kind is to a reader, as the wire record named it (arkinox,
+ * 2026-10-10: a key item is an item, never a shard). An object of kind
+ * 33331 in a bag is a shard hidden by reference. Null for any other kind.
+ */
+export function kindName(kind: number): string | null {
+  switch (kind) {
+    case SHARD_KIND: return 'shard'
+    case OBJECT_KIND: return 'shard, by reference'
+    case MESSAGE_KIND: return 'message'
+    case KEY_KIND: return 'item'
+    case CHEST_KIND: return 'chest'
+    default: return null
+  }
+}
+
+/** One value a tap copies, with COPIED in its place for a moment. `shown` is what reads, when it is not the value itself. */
+export function CopyValue({ value, title, shown }: { value: string; title: string; shown?: string }): JSX.Element {
+  const [copied, setCopied] = useState(false)
+  // The latest tap's timer, so an earlier one never clears a newer COPIED.
+  const timer = useRef(0)
+  const copy = (): void => {
+    // Refused (no permission, an insecure page): nothing to undo, the words stay to select.
+    navigator.clipboard?.writeText(value).catch(() => {})
+    setCopied(true)
+    window.clearTimeout(timer.current)
+    timer.current = window.setTimeout(() => setCopied(false), COPIED_MS)
+  }
+  return <button className="eventdata__value" title={title} onClick={copy}>{copied ? 'COPIED' : shown ?? value}</button>
+}
+
+export function EventData({ event: raw, children }: { event: NostrEvent; children?: ReactNode }): JSX.Element {
   // Once per event: a card re-renders on every store change, and a shard's event runs to tens of KB.
   const { event, hidden } = useMemo(() => shownEvent(raw), [raw])
   const json = useMemo(() => eventJson(event), [event])
-  const copy = (what: string, value: string): void => {
-    // Refused (no permission, an insecure page): nothing to undo, the words stay to select.
-    navigator.clipboard?.writeText(value).catch(() => {})
-    setCopied(what)
-    window.setTimeout(() => setCopied((c) => (c === what ? null : c)), COPIED_MS)
-  }
   const d = event.tags.find((t) => t[0] === 'd')?.[1]
-  const props: [string, string | undefined, string][] = [
+  const name = kindName(event.kind)
+  const props: [string, string | undefined, string, string?][] = [
     ['event ID', event.id, 'Tap to copy the event id'],
     ['d tag', d || undefined, 'Tap to copy the d tag'],
     ['pubkey', event.pubkey, 'Tap to copy the pubkey (hex)'],
     ['created_at', String(event.created_at), formatStamp(event.created_at)],
+    ['kind', String(event.kind), 'Tap to copy the kind', name ? `${event.kind} (${name})` : undefined],
   ]
   return (
     <section className="eventdata" aria-label="Event data">
       <dl className="eventdata__props">
-        {props.map(([label, value, title]) => (
+        {props.map(([label, value, title, shown]) => (
           <div key={label}>
             <dt>{label}</dt>
             <dd>
               {value === undefined
                 ? <span className="eventdata__none">none</span>
-                : <button className="eventdata__value" title={title} onClick={() => copy(label, value)}>{copied === label ? 'COPIED' : value}</button>}
+                : <CopyValue value={value} title={title} shown={shown} />}
             </dd>
           </div>
         ))}
       </dl>
+      {children}
       {hidden && <p className="eventdata__note">The key's secret is hidden here, so the event shown will not verify.</p>}
       <div className="eventdata__json">
         <pre>{json}</pre>

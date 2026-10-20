@@ -7,13 +7,15 @@
  * where their content sits. Your own also offers to delete it, after a
  * confirmation.
  *
- * This is the "who is this and what do I do about them" view. The CREATE
- * panel's deployment detail is the "manage my own on the wire" view; the two
- * are reached differently and answer different questions.
+ * One card for everyone's things and your own (arkinox, 2026-10-20: "then
+ * we can have these unified"): for a thing this device hid, the wire facts
+ * that the separate wire record (DeploymentDetail) used to show, its relays,
+ * the LOCAL / LIVE switch and TEST DISCOVERY, are in the event data at the
+ * bottom (WireData).
  */
 
 import { useEffect, useState } from 'react'
-import { Copy, CopyPlus, Rotate3d, Target, TvMinimal } from 'lucide-react'
+import { Copy, CopyPlus, Move3d, Rotate3d, Target, TvMinimal } from 'lucide-react'
 import { nip19 } from 'nostr-tools'
 import { regionLabel } from '../lib/loot'
 import { formatAgo, formatStamp, shortHex } from '../lib/time'
@@ -37,6 +39,7 @@ import { ConfirmModal } from './ConfirmModal'
 import { ItemFace } from './ItemIcon'
 import { ShardSpin } from '../scene/ShardSpin'
 import { EventData } from './EventData'
+import { WireData } from './WireData'
 
 const ICON = 12
 
@@ -56,13 +59,12 @@ export function SecretModal(): JSX.Element | null {
   // The confirmation card over this modal, for DELETE or REMOVE FROM CHEST
   // (arkinox, 2026-10-10: "we need a confirmation step").
   const [confirming, setConfirming] = useState<'delete' | 'remove' | null>(null)
-  // Whether this device hid it (it is among `mine`): only then is there a wire record to show.
-  const deployed = useShards((s) => !!item && s.mine.some((d) => d.eventId === item.key))
+  // The row this device hid it as (it is among `mine`): only then are there
+  // wire facts to show. Never for a thing revealed from a chest, which is in
+  // the chest's sealed contents and not a bag entry of its own.
+  const wire = useShards((s) => (item && !item.chestId ? s.mine.find((d) => d.eventId === item.key) ?? null : null))
   // EDIT: a shard of yours this device can move (useShards editable).
-  const movable = useShards((s) => {
-    const d = item ? s.mine.find((m) => m.eventId === item.key) : undefined
-    return !!d && !item?.chestId && editable(d, me)
-  })
+  const movable = !!wire && editable(wire, me)
   // The chest a revealed thing came out of, by name, for the card's question.
   const chestName = useShards((s) => {
     const id = item?.chestId
@@ -205,18 +207,11 @@ export function SecretModal(): JSX.Element | null {
               2026-10-10). */}
           {/* Both destructive buttons open the confirmation card below first;
               the work itself runs from the card's confirm. */}
-          {/* The wire record (DeploymentDetail): relays, the publish switch
-              and TEST DISCOVERY, for a thing this device hid. One tap further
-              from here, now that tapping an item in a bag opens this modal
-              instead of the record (arkinox, 2026-10-10). */}
           {/* EDIT moves it: the deploy bar comes up with the ghost on it, the
               shard itself breathing where it stands until the move lands
               (arkinox, 2026-10-16). */}
           {movable && (
-            <button className="secret__act" title="Move it: aim the ghost, then deploy. The old one is taken down and its comments and reactions stay with it" onClick={() => { close(); editPlaced(item.key) }}>EDIT</button>
-          )}
-          {mine && !item.chestId && deployed && (
-            <button className="secret__act" title="Relays, publishing and a discovery test for this item" onClick={() => { close(); useShards.getState().inspect(item.key) }}>WIRE RECORD</button>
+            <button className="secret__act" title="Move it: aim the ghost, then deploy. The old one is taken down and its comments and reactions stay with it" onClick={() => { close(); editPlaced(item.key) }}><Move3d size={ICON} strokeWidth={2.25} aria-hidden />EDIT</button>
           )}
           {mine && !item.chestId && (
             <button
@@ -239,7 +234,10 @@ export function SecretModal(): JSX.Element | null {
         {item.event && (
           <>
             <hr className="secret__rule" />
-            <EventData event={item.event} />
+            <EventData event={item.event}>
+              {/* Keyed by the row, so a test result never carries over to another item. */}
+              {wire && <WireData key={wire.eventId} dep={wire} />}
+            </EventData>
           </>
         )}
 

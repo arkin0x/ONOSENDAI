@@ -94,6 +94,8 @@ export const AVATAR_SIGN_PATIENCE_MS = 120_000
 interface AvatarsState {
   /** By pubkey: the shard, null for the dodecahedron; absent until asked. */
   shards: Record<string, ShardModel | null>
+  /** By pubkey: the avatar event the relay answered with this session (the avatar card's event data). */
+  events: Record<string, NostrEvent>
   /** When each pubkey was last asked for, so the relay is not asked per frame. */
   asked: Record<string, number>
   /** The job in progress, for the workshop's row. */
@@ -123,6 +125,7 @@ interface AvatarsState {
 export const useAvatars = create<AvatarsState>((set, get) => ({
   // Kept shapes first; `asked` stays empty, so each is still refreshed.
   shards: loadAvatarCache(),
+  events: {},
   asked: {},
   mining: null,
   mineEvent: null,
@@ -146,7 +149,7 @@ export const useAvatars = create<AvatarsState>((set, get) => ({
           return
         }
         const shard = paidShard(newest)
-        set({ shards: { ...get().shards, [pubkey]: shard } })
+        set({ shards: { ...get().shards, [pubkey]: shard }, events: { ...get().events, [pubkey]: newest } })
         const mine = pubkey === useCyberspace.getState().identity.pubkey
         // Yours is kept whole under MINE_KEY; everyone else's here, a
         // dodecahedron included, so a dropped shape is not drawn from the cache.

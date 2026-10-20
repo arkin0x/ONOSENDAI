@@ -166,6 +166,8 @@ export interface WorldItem {
   lineage?: string
   /** The chest this was revealed from, when it came out of one: its hider takes it out with removeFromChest, not DELETE. */
   chestId?: string
+  /** The signed event itself: the inner item, or for a LIVE LINK the public object (the modal's event data). */
+  event?: NostrEvent
 }
 
 /** Why a LIVE LINK was not hidden: its author protected it (NIP-70), so only they may republish it. */
@@ -1853,11 +1855,11 @@ export const useShards = create<ShardsState>((set, get) => {
     const me = useCyberspace.getState().identity.pubkey
     for (const d of state.mine) {
       seen.add(d.eventId)
-      out.push({ key: d.eventId, type: d.type, at: positionOf(d), plane: d.plane, height: d.height, mine: true, author: me, shard: d.shard, text: d.text, keyItem: d.key, chest: d.chest, createdAt: d.createdAt, lookupId: d.lookupId, bagId: d.bagId, target: itemTargetOf(d.inner, d.ref), ...lineageOf(d.inner, d.ref) })
+      out.push({ key: d.eventId, type: d.type, at: positionOf(d), plane: d.plane, height: d.height, mine: true, author: me, shard: d.shard, text: d.text, keyItem: d.key, chest: d.chest, createdAt: d.createdAt, lookupId: d.lookupId, bagId: d.bagId, target: itemTargetOf(d.inner, d.ref), event: d.inner, ...lineageOf(d.inner, d.ref) })
     }
     for (const h of Object.values(state.discovered)) {
       if (seen.has(h.eventId)) continue
-      out.push({ key: h.eventId, type: h.type, at: h.at, plane: h.plane, height: h.height, mine: false, author: h.author, shard: h.shard, text: h.text, keyItem: h.key, chest: h.chest, createdAt: h.createdAt, lookupId: h.lookupId, bagId: h.bagId, target: itemTargetOf(h.inner, h.ref), chestId: h.chestId, ...lineageOf(h.inner, h.ref) })
+      out.push({ key: h.eventId, type: h.type, at: h.at, plane: h.plane, height: h.height, mine: false, author: h.author, shard: h.shard, text: h.text, keyItem: h.key, chest: h.chest, createdAt: h.createdAt, lookupId: h.lookupId, bagId: h.bagId, target: itemTargetOf(h.inner, h.ref), chestId: h.chestId, event: h.inner, ...lineageOf(h.inner, h.ref) })
     }
     return out
   }

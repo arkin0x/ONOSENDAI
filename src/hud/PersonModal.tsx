@@ -23,14 +23,15 @@
 
 import { useState, type ComponentType } from 'react'
 import { nip19 } from 'nostr-tools'
-import { Bot, Copy, Crosshair, Eye, Box, MessageSquare } from 'lucide-react'
+import { Bot, Copy, CopyPlus, MessageSquare, Target, TvMinimal } from 'lucide-react'
+import type { NostrEvent } from 'nostr-tools'
 import type { ShardModel } from 'sno-core/shards'
 import { ProfilePic } from './ProfileBadge'
 import { useProfile } from '../hooks/useProfile'
 import { useEscape } from '../hooks/useEscape'
 import { profileLabel } from '../store/useProfiles'
 import { useCyberspace } from '../store/useCyberspace'
-import { useAvatarShard } from '../store/useAvatars'
+import { useAvatarShard, useAvatars } from '../store/useAvatars'
 import { copyAvatarToWorkshop, usePersonCard } from '../store/usePersonCard'
 import { spectate } from '../lib/spectator'
 import { shortHex } from '../lib/time'
@@ -38,6 +39,7 @@ import { ShardSpin } from '../scene/ShardSpin'
 import { sendKey, useChat } from '../store/useChat'
 import { useSecrets } from '../store/useSecrets'
 import { setTalking } from '../store/useAgentDms'
+import { EventData } from './EventData'
 
 /** How long COPIED stays on a button, as on a hidden item's card. */
 const COPIED_MS = 1400
@@ -56,19 +58,30 @@ export function PersonModal(): JSX.Element | null {
 /** The card with the avatar this client draws for `pubkey` (useAvatars). */
 function PersonCardLive({ pubkey, onClose }: { pubkey: string; onClose: () => void }): JSX.Element {
   const shard = useAvatarShard(pubkey)
-  return <PersonCard pubkey={pubkey} shard={shard} onClose={onClose} />
+  const me = useCyberspace((s) => s.identity.pubkey)
+  // Yours: the newer of what this device signed and what the relay answered
+  // (an avatar adopted on another device is only the latter).
+  const event = useAvatars((s) => {
+    const fetched = s.events[pubkey] ?? null
+    if (pubkey !== me) return fetched
+    const kept = s.mineEvent
+    return !kept ? fetched : !fetched || kept.created_at >= fetched.created_at ? kept : fetched
+  })
+  return <PersonCard pubkey={pubkey} shard={shard} event={event} onClose={onClose} />
 }
 
 interface CardProps {
   pubkey: string
   /** Their avatar shard, or null for the default dodecahedron. */
   shard: ShardModel | null
+  /** Their avatar event (kind 11333), when this session has it: the card's event data. */
+  event?: NostrEvent | null
   onClose: () => void
   /** What draws the turning avatar; a test stands in a plain one. */
   Preview?: ComponentType<{ shard: ShardModel }>
 }
 
-export function PersonCard({ pubkey, shard, onClose, Preview = ShardSpin }: CardProps): JSX.Element {
+export function PersonCard({ pubkey, shard, event = null, onClose, Preview = ShardSpin }: CardProps): JSX.Element {
   const profile = useProfile(pubkey)
   const operator = profile?.bot ? profile.operator ?? null : null
   const operatorProfile = useProfile(operator)
@@ -153,21 +166,28 @@ export function PersonCard({ pubkey, shard, onClose, Preview = ShardSpin }: Card
         <div className="secret__actions person__actions">
           {hasShard && (
             <button className="secret__act" onClick={copyShard} title="Copy this avatar into your workshop, credited to its author">
-              <Box size={ICON} strokeWidth={2.25} aria-hidden />{copied === 'shard' ? 'COPIED' : 'COPY TO WORKSHOP'}
+              <CopyPlus size={ICON} strokeWidth={2.25} aria-hidden />{copied === 'shard' ? 'COPIED' : 'COPY TO WORKSHOP'}
             </button>
           )}
           {!mine && (
             <>
               <button className={`secret__act ${targeted ? 'is-on' : ''}`} onClick={target}>
-                <Crosshair size={ICON} strokeWidth={2.25} aria-hidden />{targeted ? 'TARGETED' : 'TARGET'}
+                <Target size={ICON} strokeWidth={2.25} aria-hidden />{targeted ? 'TARGETED' : 'TARGET'}
               </button>
-              <button className="secret__act" onClick={watch}><Eye size={ICON} strokeWidth={2.25} aria-hidden />SPECTATE</button>
+              <button className="secret__act" onClick={watch}><TvMinimal size={ICON} strokeWidth={2.25} aria-hidden />SPECTATE</button>
               <button className="secret__act" onClick={chat} disabled={noChat !== null} title={noChat ?? `Talk to ${name} in local chat, tagged`}>
                 <MessageSquare size={ICON} strokeWidth={2.25} aria-hidden />CHAT
               </button>
             </>
           )}
         </div>
+
+        {event && (
+          <>
+            <hr className="secret__rule" />
+            <EventData event={event} />
+          </>
+        )}
       </div>
     </div>
   )

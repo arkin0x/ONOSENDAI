@@ -3,7 +3,8 @@
  * cells of one block share an answer (useTerrainVolume scanVolume,
  * 2026-10-20). It must fill exactly the cells, and ask for exactly the runs,
  * that a cell-by-cell scan does: checked here against that scan, kept below
- * as it was, over many places, turns, zooms and states of the cache.
+ * as it was, over many places, turns, zooms and states of the cache, with
+ * each run marking its blocks asked for, as the real one does.
  */
 
 import { describe, expect, it, vi } from 'vitest'
@@ -14,7 +15,7 @@ const fake = vi.hoisted(() => {
   // The terrain worker's module, where UNKNOWN lives, installs its message
   // handler on `self` when imported.
   ;(globalThis as { self?: unknown }).self ??= globalThis
-  return { seed: 0, runs: [] as unknown[] }
+  return { seed: 0, runs: [] as unknown[], pending: new Set<string>() }
 })
 
 vi.mock('../../lib/terrainCache', async (original) => {
@@ -28,8 +29,17 @@ vi.mock('../../lib/terrainCache', async (original) => {
   return {
     ...real,
     readK: (x: bigint, y: bigint, z: bigint, plane: Plane) => { const r = roll(real.blockKey(x, y, z, plane)); return r % 3 === 0 ? r % 200 : undefined },
-    isPending: (x: bigint, y: bigint, z: bigint, plane: Plane) => roll(real.blockKey(x, y, z, plane)) % 3 === 1,
-    requestRun: (spec: unknown) => { fake.runs.push(spec) },
+    isPending: (x: bigint, y: bigint, z: bigint, plane: Plane) => {
+      const key = real.blockKey(x, y, z, plane)
+      return fake.pending.has(key) || roll(key) % 3 === 1
+    },
+    // As the real one does, a run marks its blocks asked for, so a later row
+    // of the same scan sees them pending.
+    requestRun: (spec: { originX: bigint; originY: bigint; originZ: bigint; axis: AxisName; step: bigint; count: number; plane: Plane }) => {
+      fake.runs.push(spec)
+      const at = { x: spec.originX, y: spec.originY, z: spec.originZ }
+      for (let i = 0; i < spec.count; i++, at[spec.axis] += spec.step) fake.pending.add(real.blockKey(at.x, at.y, at.z, spec.plane))
+    },
   }
 })
 
@@ -41,7 +51,7 @@ const { UNKNOWN } = await import('../../workers/terrain.worker')
 function referenceScan(centre: Position, axes: ViewAxes, scaleExp: number, plane: Plane): Uint8Array {
   const cellAt = (origin: Position, step: bigint, col: number, row: number, depth: number): Position => {
     const p: Position = { ...origin }
-    const put = (a: AxisName, n: number, dir: number): void => { p[a] = origin[a] + BigInt(Math.round(n)) * step * BigInt(dir) }
+    const put = (a: AxisName, n: number, dir: number): void => { p[a] = origin[a] + BigInt(Number.isFinite(n) ? Math.round(n) : 0) * step * BigInt(dir) }
     put(axes.right.axis, col, axes.right.dir)
     put(axes.up.axis, row, axes.up.dir)
     put(axes.out.axis, depth, axes.out.dir)
@@ -93,28 +103,52 @@ function sample(i: number): bigint {
   return ((a * a) >> 7n) & ((1n << 85n) - 1n)
 }
 
+const EDGE = 1n << 85n
+
+/** A centre: spread out, at the origin (rows cross into negatives), negative, or at and past the 2^85 edge. */
+function centreFor(i: number): Position {
+  const v = (k: number): bigint => {
+    switch (i % 5) {
+      case 0: return sample(3 * i + k)
+      case 1: return BigInt(k * 3 - 4)
+      case 2: return -sample(3 * i + k)
+      case 3: return EDGE - BigInt(5 + k)
+      default: return EDGE + BigInt(7 * k)
+    }
+  }
+  return { x: v(0), y: v(1), z: v(2) }
+}
+
 describe('scanVolume', () => {
   it('fills the same cells and asks for the same runs as a cell-by-cell scan', () => {
     let cases = 0
-    for (let i = 0; i < 48; i++) {
-      const [r, u, o] = AXES[i % 6]
-      const axes: ViewAxes = { right: { axis: r, dir: i % 2 ? 1 : -1 }, up: { axis: u, dir: i % 3 ? 1 : -1 }, out: { axis: o, dir: i % 5 ? -1 : 1 } }
-      const centre: Position = { x: sample(3 * i), y: sample(3 * i + 1), z: sample(3 * i + 2) }
-      const scaleExp = [0, 1, 2, 3, 4, 7, 12, 30][i % 8]
-      const plane = (i % 2) as Plane
-      fake.seed = i * 7919
-      fake.runs = []
-      const want = referenceScan(centre, axes, scaleExp, plane)
-      const wantRuns = fake.runs
-      fake.runs = []
-      const got = scanVolume(centre, axes, scaleExp, plane)
-      expect(got).toEqual(want)
-      expect(fake.runs).toEqual(wantRuns)
-      cases++
+    // Every scale against every axis order and both right-axis directions:
+    // below 2^3, where cells share blocks, is where the scan differs most.
+    for (const scaleExp of [0, 1, 2, 3, 4, 30]) {
+      for (let a = 0; a < AXES.length; a++) {
+        for (const dir of [1, -1] as const) {
+          const i = cases
+          const [r, u, o] = AXES[a]
+          const axes: ViewAxes = { right: { axis: r, dir }, up: { axis: u, dir: i % 3 ? 1 : -1 }, out: { axis: o, dir: i % 5 ? -1 : 1 } }
+          const centre = centreFor(i)
+          const plane = (Math.floor(i / 2) % 2) as Plane
+          fake.seed = i * 7919
+          fake.runs = []
+          fake.pending = new Set()
+          const want = referenceScan(centre, axes, scaleExp, plane)
+          const wantRuns = fake.runs
+          fake.runs = []
+          fake.pending = new Set()
+          const got = scanVolume(centre, axes, scaleExp, plane)
+          expect(got).toEqual(want)
+          expect(fake.runs).toEqual(wantRuns)
+          cases++
+        }
+      }
     }
-    expect(cases).toBe(48)
-    // 96 full scans: generous, for a suite run on a busy machine.
-  }, 60_000)
+    expect(cases).toBe(72)
+    // 144 full scans: generous, for a suite run on a busy machine.
+  }, 120_000)
 })
 
 describe('blockKey', () => {

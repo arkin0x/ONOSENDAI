@@ -82,8 +82,8 @@ function cellAt(
  * row, since the row is monotonic) share its answer: a cell in the same block
  * as the one before it takes that cell's value and asks for nothing more.
  * Building a coordinate and two cache keys for every one of the 6,859 cells
- * made a rescan a long task, worst 254 ms at one boot here (2026-10-20,
- * spectating on the smoke seed).
+ * made a rescan a long task: 254 ms at worst at one boot on a loaded dev
+ * machine (2026-10-20, spectating on the smoke seed; numbers in #404).
  */
 export function scanVolume(centre: Position, axes: ViewAxes, scaleExp: number, plane: Plane): Uint8Array {
   const R = VOLUME_RADIUS
@@ -99,11 +99,10 @@ export function scanVolume(centre: Position, axes: ViewAxes, scaleExp: number, p
 
   // Nearest slice first, then nearest row, so the middle of the volume
   // resolves before its shell.
-  const order = (n: number): number[] =>
-    Array.from({ length: n }, (_, i) => i - R).sort((a, b) => Math.abs(a) - Math.abs(b))
+  const order = Array.from({ length: N }, (_, i) => i - R).sort((a, b) => Math.abs(a) - Math.abs(b))
 
-  for (const depth of order(N)) {
-    for (const row of order(N)) {
+  for (const depth of order) {
+    for (const row of order) {
       const samples: bigint[] = []
       const p = cellAt(centre, axes, step, -R, row, depth)
       const at = ((depth + R) * N + (row + R)) * N + R

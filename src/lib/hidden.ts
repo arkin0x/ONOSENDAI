@@ -1,11 +1,12 @@
 /**
  * hidden.ts — content hidden at a location.
  *
- * A hidden thing is a full signed nostr event, wrapped: the inner event is
- * serialized, encrypted to the region key for where it sits (spec §7), and
- * carried inside a kind:33330 envelope (spec §8.6) whose only public parts are
- * the lookup id and a height hint. Discovery decrypts the envelope, verifies
- * the inner signature, and renders by the inner kind. Nothing about where the
+ * A hidden thing is a nostr event, wrapped: the inner event is serialized,
+ * encrypted to the region key for where it sits (spec §7), and carried inside
+ * a kind:33330 envelope (spec §8.6) whose only public parts are the lookup id
+ * and a height hint. Discovery decrypts the envelope, checks the inner event
+ * against the envelope's signer (innerAuthentic: a signature, or for a
+ * message a rumor's id), and renders by the inner kind. Nothing about where the
  * thing is, or what it is, leaks: the coordinate lives inside the ciphertext.
  *
  * A bag is a list of entries (spec §7.6). An entry that is an event is an
@@ -17,9 +18,13 @@
  *   - a chest, kind 3341: a list of entries sealed with NIP-44 v2 to a public
  *     key, an item's or a person's (B1 §2.2). The sealing and opening live in
  *     lib/chests.ts; here the chest is read as an item like any other.
- * All four carry their coordinate in a `C` tag, decoded on discovery. Keys and
- * chests only ever live inside bags: a key carries the NIP-70 `-` tag so no
- * finder can republish it under the hider's name.
+ * All four carry their coordinate in a `C` tag, decoded on discovery, and the
+ * NIP-70 `-` tag (arkinox, 2026-10-20): they only ever live inside bags, and
+ * a relay that honours `-` accepts the event only from its author, so no
+ * finder can republish one under the hider's name. A message goes further
+ * and is sealed as a rumor (rumorOf): an id and no signature, so a copy of it
+ * is not a note its hider ever signed. Who wrote it is vouched for by the
+ * envelope, which the hider does sign (innerAuthentic).
  *
  * An entry that is an array is a reference: `["a", "<kind>:<pubkey>:<d>",
  * relay, coord]` or `["e", id, relay, coord]`, naming an event published on
@@ -29,8 +34,8 @@
  * it is. A large shard is hidden this way, as a kind 33331 object (DECK-0003
  * §3.2, §3.4), so one big shard does not make the whole bag big.
  *
- * The envelope carries the NIP-70 `-` tag: a relay that honours it will accept
- * the event only from its author, so no one else can republish your chalk.
+ * The envelope does not carry NIP-70's `-` (bagTemplate says why); the items
+ * inside it do.
  *
  * Pure: signing happens in the store, which holds the key. This sees templates
  * and finished events only.
@@ -94,8 +99,14 @@ export const REFERENCE_THRESHOLD_BYTES = 16_384
 
 /** A reference entry (spec §7.6): ["a" | "e", target, relay hint, coord hex]. */
 export type Reference = string[]
-/** One entry of a bag's list: an inline item, or a reference. */
-export type BagEntry = NostrEvent | Reference
+/**
+ * An event as a bag or a chest carries it: signed, or a rumor with no `sig`
+ * (a chat line, and a message since 2026-10-20). A signed event is one of
+ * these too.
+ */
+export type Rumor = Omit<NostrEvent, 'sig'> & { sig?: string }
+/** One entry of a bag's list: an inline item, signed or a rumor, or a reference. */
+export type BagEntry = NostrEvent | Rumor | Reference
 /** Fetches the event a reference names, or null. Injected so this file stays pure. */
 export type ResolveReference = (ref: Reference) => Promise<NostrEvent | null>
 
@@ -334,12 +345,13 @@ export interface Hidden {
    */
   eventId: string
   /**
-   * The signed inner event itself, verified, and the region key that opened
-   * its bag, as hex. Together they let a find of your own become a deployment
+   * The inner event itself, verified (innerAuthentic: a message is a rumor
+   * with no `sig`, vouched for by the bag's signature), and the region key
+   * that opened its bag, as hex. Together they let a find of your own become a deployment
    * on this device: enough to rebuild, broadcast or delete the bag from here.
    * Absent on the ceremony's preview items, which came out of no bag.
    */
-  inner?: NostrEvent
+  inner?: Rumor
   keyHex?: string
   /** The envelope (bag) currently holding it; changes when the bag is rewritten. */
   bagId: string
@@ -382,6 +394,13 @@ export interface Hidden {
    * removeFromChest), never rewriting the bag's entries directly.
    */
   chestId?: string
+  /**
+   * Set when this was revealed from inside a chest and its author is a
+   * claim (lib/chests.ts readContents): unsigned, and not a rumor of the
+   * chest's signer. Never set on a bag's own items, which are checked
+   * against the bag's signer or dropped.
+   */
+  claim?: true
 }
 
 /**
@@ -400,7 +419,21 @@ export function shardRefusal(shard: ShardModel): string | null {
   return null
 }
 
-/** The inner shard event template (kind 3330), signed by the author. */
+/**
+ * NIP-70's protected tag. Every item sealed in a bag or a chest carries it
+ * (arkinox, 2026-10-20): a relay that honours it accepts the event only from
+ * its author, so a finder cannot republish the hider's item. Never on what
+ * is published on its own (a kind 33331 object, which others place by
+ * reference), never on the envelope, never on chat.
+ */
+export const PROTECTED_TAG: readonly string[] = ['-']
+
+/** Whether a list of tags carries NIP-70's `-`. */
+export function isProtectedTags(tags: readonly (readonly string[])[]): boolean {
+  return tags.some((t) => Array.isArray(t) && t[0] === '-')
+}
+
+/** The inner shard event template (kind 3330), signed by the author, with NIP-70's `-`. */
 export function shardInnerTemplate(shard: ShardModel, at: Position, plane: Plane, createdAt: number, credit?: Credit): EventTemplate {
   return {
     kind: SHARD_KIND,
@@ -408,7 +441,7 @@ export function shardInnerTemplate(shard: ShardModel, at: Position, plane: Plane
     content: JSON.stringify(toPayload(shard)),
     // A copy of someone else's object credits it (sno-core creditTags). The
     // item is sealed in the bag, so the credit is as private as the item.
-    tags: [['C', positionHex(at, plane)], ...(credit ? creditTags(credit) : [])],
+    tags: [['C', positionHex(at, plane)], ...(credit ? creditTags(credit) : []), [...PROTECTED_TAG]],
   }
 }
 
@@ -431,13 +464,16 @@ export function itemLineage(inner: Pick<NostrEvent, 'id' | 'kind' | 'tags'> | un
 /**
  * An edited item's template: the new place (`C`, from `next`) and the
  * lineage `d`, then every other tag the version it replaces carried (a
- * credit, a picture), so a move changes only where it is.
+ * credit, a picture), so a move changes only where it is. NIP-70's `-` goes
+ * out when `next` carries it, so an item hidden before every item carried
+ * it gains it on its first move, and never twice.
  */
 export function editedTemplate(next: EventTemplate, previous: Pick<NostrEvent, 'id' | 'kind' | 'tags'>): EventTemplate {
   const at = next.tags.find((t) => t[0] === 'C')
   const lineage = itemLineage(previous) ?? previous.id
   const kept = previous.tags.filter((t) => t[0] !== 'C' && t[0] !== 'd')
-  return { ...next, tags: [...(at ? [at] : []), ['d', lineage], ...kept] }
+  const protect = isProtectedTags(next.tags) && !isProtectedTags(kept) ? [[...PROTECTED_TAG]] : []
+  return { ...next, tags: [...(at ? [at] : []), ['d', lineage], ...kept, ...protect] }
 }
 
 /** The `d` of an addressable event, or ''. */
@@ -445,13 +481,19 @@ export function dOf(ev: Pick<NostrEvent, 'tags'>): string {
   return ev.tags.find((t) => t[0] === 'd')?.[1] ?? ''
 }
 
-/** The inner message event template (kind 1), signed by the author. */
+/**
+ * The inner message event template (kind 1), with NIP-70's `-`. It is
+ * sealed as a rumor (rumorOf), never signed: a signed kind 1 lifted out of
+ * the bag would show anywhere as the hider's own public note, with the exact
+ * coordinate it was hidden at, and a rumor proves nothing once copied
+ * (arkinox, 2026-10-20). This holds in a chest as in a bag.
+ */
 export function messageInnerTemplate(text: string, at: Position, plane: Plane, createdAt: number): EventTemplate {
   return {
     kind: MESSAGE_KIND,
     created_at: createdAt,
     content: text.slice(0, MAX_MESSAGE_LENGTH),
-    tags: [['C', positionHex(at, plane)]],
+    tags: [['C', positionHex(at, plane)], [...PROTECTED_TAG]],
   }
 }
 
@@ -481,14 +523,16 @@ export function keyInnerTemplate(key: KeyItem, at: Position, plane: Plane, creat
  * The inner chest event template (kind 3341), signed by the hider (B1 §2.2).
  * The content is the sealed payload (lib/chests.ts sealEntries); `lock` names
  * the public key it is sealed to and the one-time sender's public key, and
- * `requires` is the hider's label of what opens it.
+ * `requires` is the hider's label of what opens it. `-` is NIP-70, as on
+ * every item. A chest stays signed: its signature is what vouches for the
+ * messages sealed inside it, which are rumors (lib/chests.ts readContents).
  */
 export function chestInnerTemplate(chest: ChestItem, at: Position, plane: Plane, createdAt: number): EventTemplate {
   return {
     kind: CHEST_KIND,
     created_at: createdAt,
     content: chest.payload,
-    tags: [['C', positionHex(at, plane)], ['title', chest.name.slice(0, MAX_ITEM_NAME)], ['lock', chest.lockPubkey, chest.senderPubkey], ['requires', chest.requires]],
+    tags: [['C', positionHex(at, plane)], ['title', chest.name.slice(0, MAX_ITEM_NAME)], ['lock', chest.lockPubkey, chest.senderPubkey], ['requires', chest.requires], [...PROTECTED_TAG]],
   }
 }
 
@@ -522,12 +566,50 @@ export function chatInnerTemplate(text: string, at: Position, plane: Plane, crea
  * said it is vouched for by the envelope, which the speaker does sign
  * (chatInners requires the two pubkeys to match).
  */
-export type ChatRumor = Omit<NostrEvent, 'sig'> & { sig?: string }
+export type ChatRumor = Rumor
 
-/** Seal-ready rumor of a chat template, said by `pubkey`. */
-export function chatRumor(template: EventTemplate, pubkey: string): ChatRumor {
+/**
+ * Seal-ready rumor of a template, by `pubkey`: its id computed as NIP-01
+ * computes it, and no signature. A chat line and a message are sealed this
+ * way; `pubkey` must be the key that signs the envelope (or the chest) that
+ * carries it, or no reader will accept it.
+ */
+export function rumorOf(template: EventTemplate, pubkey: string): Rumor {
   const unsigned = { kind: template.kind, created_at: template.created_at, tags: template.tags, content: template.content, pubkey }
   return { ...unsigned, id: getEventHash(unsigned) }
+}
+
+/** Seal-ready rumor of a chat template, said by `pubkey`. */
+export const chatRumor: (template: EventTemplate, pubkey: string) => ChatRumor = rumorOf
+
+/**
+ * Whether a rumor is what it says: its fields have their types and its `id`
+ * is the hash of them (NIP-01). Says nothing of who wrote it; that is the
+ * signer of whatever carries it.
+ */
+export function rumorHolds(ev: Partial<Rumor>): boolean {
+  if (typeof ev.kind !== 'number' || typeof ev.created_at !== 'number' || typeof ev.content !== 'string' || typeof ev.pubkey !== 'string' || typeof ev.id !== 'string') return false
+  if (!Array.isArray(ev.tags) || !ev.tags.every((t) => Array.isArray(t) && t.every((v) => typeof v === 'string'))) return false
+  try {
+    return getEventHash({ kind: ev.kind, created_at: ev.created_at, tags: ev.tags, content: ev.content, pubkey: ev.pubkey }) === ev.id
+  } catch { return false }
+}
+
+/**
+ * Whether an inline item of a bag is authentic for the key that signed the
+ * bag (arkinox, 2026-10-20). Its `pubkey` must be the bag's signer, always:
+ * an envelope carrying someone else's event is not theirs to place. Then:
+ *   - a message (kind 1) with no `sig` is a rumor, accepted when its id is
+ *     its hash (rumorHolds), and its author is the bag's signer, whose
+ *     signature over the bag covers it;
+ *   - anything that carries a `sig` must verify: a signed message from a
+ *     client before 2026-10-20 still reads;
+ *   - any other kind without a `sig` is dropped, as it always was here.
+ */
+export function innerAuthentic(inner: Partial<Rumor>, signer: string): boolean {
+  if (!inner || typeof inner !== 'object' || Array.isArray(inner) || typeof inner.kind !== 'number' || inner.pubkey !== signer) return false
+  if (inner.sig === undefined) return inner.kind === MESSAGE_KIND && rumorHolds(inner)
+  try { return verifyEvent(inner as NostrEvent) } catch { return false }
 }
 
 /**
@@ -698,7 +780,7 @@ export async function bagTemplate(inners: readonly (BagEntry | ChatRumor)[], reg
   return { kind, created_at: createdAt, content: settings.riddle.trim().slice(0, MAX_RIDDLE_LENGTH), tags }
 }
 
-function tag(ev: NostrEvent, name: string): string | undefined {
+function tag(ev: Pick<NostrEvent, 'tags'>, name: string): string | undefined {
   return ev.tags.find((t) => t[0] === name)?.[1]
 }
 
@@ -726,11 +808,10 @@ export function heightHint(ev: NostrEvent): number | null {
 interface BagFacts { height: number; bag: BagSettings }
 
 /** One inner event of a bag -> a Hidden, or null if it does not verify. `keyHex` is the key that opened the bag. */
-function fromInner(inner: NostrEvent, outer: NostrEvent, keyHex: string, facts: BagFacts): Hidden | null {
-  // The inner event must be genuinely signed, and by the same key that wrapped
-  // it: an envelope carrying someone else's event is not theirs to place.
-  if (!inner || typeof inner.kind !== 'number' || inner.pubkey !== outer.pubkey) return null
-  if (!verifyEvent(inner)) return null
+function fromInner(inner: Rumor, outer: NostrEvent, keyHex: string, facts: BagFacts): Hidden | null {
+  // By the same key that wrapped it, and signed, or a message sealed as a
+  // rumor (innerAuthentic).
+  if (!innerAuthentic(inner, outer.pubkey)) return null
 
   const coordHex = tag(inner, 'C')
   if (!coordHex) return null
@@ -808,7 +889,7 @@ export async function unbag(outer: NostrEvent, regionKey: Uint8Array, resolve?: 
   const keyHex = bytesToHex(regionKey)
   const regionHeight = height ?? heightHint(outer) ?? 0
   const facts: BagFacts = { height: regionHeight, bag: bagSettingsOf(outer, regionHeight) }
-  const out: (Hidden | null)[] = entries.map((entry) => (Array.isArray(entry) ? null : fromInner(entry as NostrEvent, outer, keyHex, facts)))
+  const out: (Hidden | null)[] = entries.map((entry) => (Array.isArray(entry) ? null : fromInner(entry as Rumor, outer, keyHex, facts)))
   // References are fetched a few at a time, and only so many per bag; an
   // entry that cannot be fetched or opened is a missing entry, dropped like
   // an item that fails to verify.
@@ -945,14 +1026,14 @@ export async function bagEntries(outer: NostrEvent, regionKey: Uint8Array): Prom
   } catch { return [] }
 }
 
-/** The signed inner events currently in an envelope's bag (unverified passthrough). */
-export async function bagInners(outer: NostrEvent, regionKey: Uint8Array): Promise<NostrEvent[]> {
+/** The inner events currently in an envelope's bag that are authentic for its signer (innerAuthentic), whether or not this client can read them. */
+export async function bagInners(outer: NostrEvent, regionKey: Uint8Array): Promise<Rumor[]> {
   const ct = ciphertextOf(outer)
   if (!ct) return []
   const json = await decryptForRegion(regionKey, ct)
   if (!json) return []
   try {
     const arr = JSON.parse(json)
-    return Array.isArray(arr) ? (arr as NostrEvent[]).filter((e) => e && e.pubkey === outer.pubkey && verifyEvent(e)) : []
+    return Array.isArray(arr) ? (arr as Rumor[]).filter((e) => innerAuthentic(e, outer.pubkey)) : []
   } catch { return [] }
 }

@@ -58,7 +58,13 @@ export interface HeldItem {
   event: NostrEvent
   /** Who made it: the event's pubkey (the hider, for a key they forged). A claim unless `verified`. */
   author: string
-  /** The event carried a signature that checked out (spec §7.6: an unsigned item's author is a claim, never a fact). */
+  /**
+   * Its author was a fact when it was read: it carried a signature that
+   * checked out, or it was a rumor vouched for by the signed chest it was
+   * taken from (lib/chests.ts readContents). Otherwise its author is a claim,
+   * never a fact (spec §7.6). A rumor's copy proves nothing to anyone else:
+   * this is what this device saw, not something it can show.
+   */
   verified: boolean
   source: HeldSource
   /** Where it was found, or null for a key pasted from another device. */
@@ -122,8 +128,10 @@ function row(owner: string, event: NostrEvent, body: ItemBody, verified: boolean
  */
 export function heldFromFind(owner: string, h: Hidden, at: number, watched = false): HeldItem | null {
   if (h.type !== 'key' || !h.key || !h.inner) return null
-  // A bag's items are verified against the bag's author before they are found at all (hidden.ts fromInner).
-  const held = row(owner, h.inner, { type: 'key', key: h.key }, true, 'found', placeOf(h), null, at)
+  // A bag's items are verified against the bag's author before they are found
+  // at all (hidden.ts innerAuthentic), and a key is never a rumor there: only
+  // a message may go without a signature.
+  const held = row(owner, h.inner as NostrEvent, { type: 'key', key: h.key }, true, 'found', placeOf(h), null, at)
   return watched ? { ...held, watched: true } : held
 }
 

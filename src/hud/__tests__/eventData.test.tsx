@@ -71,4 +71,13 @@ describe('the event as JSON', () => {
     expect(json).toContain('\n    ["d","my-shard"],\n    ["client","ONOSENDAI"]\n  ]')
     expect(JSON.parse(eventJson({ ...ev, tags: [] })).tags).toEqual([])
   })
+
+  it('shows no sig for a rumor (a hidden message, 2026-10-20), never "undefined"', () => {
+    const { sig: _sig, ...rumor } = ev
+    const json = eventJson({ ...rumor, kind: 1 })
+    expect(json).not.toContain('sig')
+    expect(json).not.toContain('undefined')
+    expect(Object.keys(JSON.parse(json))).toEqual(['id', 'pubkey', 'created_at', 'kind', 'tags', 'content'])
+    expect(eventJson({ ...ev, sig: '' })).not.toContain('sig')
+  })
 })

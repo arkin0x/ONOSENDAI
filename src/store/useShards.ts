@@ -65,9 +65,11 @@ import {
   wantsReference,
   type BagEntry,
   type Reference,
+  type Rumor,
   chestInnerTemplate,
   keyInnerTemplate,
   messageInnerTemplate,
+  rumorOf,
   messagePreview,
   shardInnerTemplate,
   shardRefusal,
@@ -79,7 +81,7 @@ import {
   MESSAGE_KIND,
 } from '../lib/hidden'
 import { retractionTemplate } from '../lib/published'
-import { openWithSecret, openWithSigner, openerFor, readContents, resealWithout, revealedIn, sealEntries, type OpeningKey } from '../lib/chests'
+import { openWithSecret, openWithSigner, openerFor, readContents, resealWithout, revealedIn, sealEntries, sealerOf, type OpeningKey } from '../lib/chests'
 import { openingKeys, type HeldPlace } from '../lib/inventory'
 import { useInventory } from './useInventory'
 import { creditOf, useWorkshop } from './useWorkshop'
@@ -99,11 +101,12 @@ export interface MyDeployment {
   /** The item's stable identity: its signed inner event id. */
   eventId: string
   /**
-   * The signed inner event, so the region bag can be rebuilt from here. For a
-   * shard hidden by reference it is the signed kind 33331 object, which is
-   * what `broadcast` republishes beside the bag.
+   * The inner event, so the region bag can be rebuilt from here: signed, or
+   * for a message a rumor with no `sig` (lib/hidden.ts rumorOf). For a shard
+   * hidden by reference it is the signed kind 33331 object, which is what
+   * `broadcast` republishes beside the bag.
    */
-  inner: NostrEvent
+  inner: Rumor
   /** Set when the item is hidden by reference: the entry the bag carries instead of `inner` (spec §7.6). */
   ref?: Reference
   /** The envelope currently holding it; changes when the bag is rewritten. */
@@ -166,7 +169,11 @@ export interface WorldItem {
   lineage?: string
   /** The chest this was revealed from, when it came out of one: its hider takes it out with removeFromChest, not DELETE. */
   chestId?: string
-  /** The signed event itself: the inner item, or for a LIVE LINK the public object (the modal's event data). */
+  /**
+   * The event itself: the inner item, or for a LIVE LINK the public object
+   * (the modal's event data). A message's is a rumor with no `sig`, and the
+   * event data shows none (EventData eventJson).
+   */
   event?: NostrEvent
 }
 
@@ -339,7 +346,18 @@ export function editingId(pending: DeployPending | null): string | null {
 }
 
 /** The `lineage` field of an inline item, as a spread: nothing for a reference. */
-function lineageOf(inner: NostrEvent | undefined, ref: Reference | undefined): { lineage?: string } {
+/**
+ * The event a reference entry names, as the signed event it always is: an
+ * object hidden by reference, or a LIVE LINK's public object, is published
+ * on its own, so it was signed here or verified with its signature when it
+ * was read (lib/hidden.ts fromReference). Only an item carried inline, a
+ * message, is ever a rumor. For a row with `ref` only.
+ */
+function referenced(inner: Rumor): NostrEvent {
+  return inner as NostrEvent
+}
+
+function lineageOf(inner: Rumor | undefined, ref: Reference | undefined): { lineage?: string } {
   const l = ref ? null : itemLineage(inner)
   return l ? { lineage: l } : {}
 }
@@ -915,13 +933,15 @@ export const useShards = create<ShardsState>((set, get) => {
   async function sealChest(draft: ChestDraft, at: Position, plane: Plane, createdAt: number): Promise<{ chest: ChestItem; forged: Array<{ event: NostrEvent; key: KeyItem }> }> {
     const cs = cyber()
     if (!draft.lock) throw new Error('The chest has no lock.')
-    const signed: NostrEvent[] = []
+    const signed: Rumor[] = []
     const forged: Array<{ event: NostrEvent; key: KeyItem }> = []
     for (const c of draft.contents) {
       if (c.kind === 'message') {
         const text = c.text.trim()
         if (!text) continue
-        signed.push(await cs.signEvent(messageInnerTemplate(text, at, plane, createdAt)))
+        // A rumor, never signed, in a chest as in a bag: the chest's
+        // signature vouches for it (lib/chests.ts readContents).
+        signed.push(rumorOf(messageInnerTemplate(text, at, plane, createdAt), cs.identity.pubkey))
       } else if (c.kind === 'shard') {
         // Aimed, it was signed where it should stand (startDeployIntoChest),
         // at its own size and pose: that event goes in as it is, so long as
@@ -1346,7 +1366,7 @@ export const useShards = create<ShardsState>((set, get) => {
           // A row from before a move made elsewhere would reseal the old
           // model over the moved one: refused (review of #369).
           if (was && live) {
-            const still = await addressStillThis(was.inner)
+            const still = await addressStillThis(referenced(was.inner))
             if (still !== 'this') throw new Error(still === 'newer' ? EDIT_STALE : EDIT_UNANSWERED)
           }
           // Newer than the version it replaces even within the same second
@@ -1369,7 +1389,12 @@ export const useShards = create<ShardsState>((set, get) => {
           forgetReference(ref)
         } else {
           if (!innerTemplate) throw new Error('Nothing to hide.')
-          inner = await cs.signEvent(innerTemplate)
+          // A message is sealed as a rumor and never goes to the signer: a
+          // signed one lifted out of the bag would show anywhere as your own
+          // public note (arkinox, 2026-10-20). The bag's signature vouches for it.
+          // Typed as the signed event the rest of this path carries; a rumor
+          // only ever goes into the bag as its entry, never out on its own.
+          inner = pending.type === 'message' ? rumorOf(innerTemplate, cs.identity.pubkey) as NostrEvent : await cs.signEvent(innerTemplate)
         }
         let event: NostrEvent
         let published: boolean
@@ -1535,7 +1560,7 @@ export const useShards = create<ShardsState>((set, get) => {
           }
           // A bag naming an object no relay holds would be a permanent hole
           // for everyone, carried forward by every later rewrite. Stop here.
-          const took = await republish(d.inner)
+          const took = await republish(referenced(d.inner))
           if (!took) {
             set({ broadcasting: null, broadcastError: 'No relay took a shard this bag names. Try again when one is reachable.' })
             return false
@@ -1666,8 +1691,8 @@ export const useShards = create<ShardsState>((set, get) => {
       // Never by address while the address holds something newer: after an
       // EDIT the object under this `d` is the moved shard's (review of #369).
       const sharedHere = !!item.ref && get().mine.some((d) => d.eventId !== eventId && d.ref?.[1] === item.ref?.[1])
-      if (item.ref && item.inner.pubkey === me && wasPublic && unnamed && !opts?.keepObject && !sharedHere && (await addressStillThis(item.inner)) === 'this') {
-        try { await retractObject(item.inner, item.relays ?? relaySet()) } catch { /* best effort */ }
+      if (item.ref && item.inner.pubkey === me && wasPublic && unnamed && !opts?.keepObject && !sharedHere && (await addressStillThis(referenced(item.inner))) === 'this') {
+        try { await retractObject(referenced(item.inner), item.relays ?? relaySet()) } catch { /* best effort */ }
         forgetReference(item.ref)
       }
 
@@ -1782,7 +1807,7 @@ export const useShards = create<ShardsState>((set, get) => {
         const opener = openerFor(door.chest!, keys, '')
         if (!opener || opener.by !== 'key') continue
         let inside: Hidden[]
-        try { inside = revealedIn(door, readContents(openWithSecret(door.chest!, opener.key.secretHex))) } catch { continue }
+        try { inside = revealedIn(door, readContents(openWithSecret(door.chest!, opener.key.secretHex), sealerOf(door))) } catch { continue }
         for (const r of inside) {
           if (deleted[r.eventId] || discovered[r.eventId]) continue
           discovered[r.eventId] = r
@@ -1855,11 +1880,11 @@ export const useShards = create<ShardsState>((set, get) => {
     const me = useCyberspace.getState().identity.pubkey
     for (const d of state.mine) {
       seen.add(d.eventId)
-      out.push({ key: d.eventId, type: d.type, at: positionOf(d), plane: d.plane, height: d.height, mine: true, author: me, shard: d.shard, text: d.text, keyItem: d.key, chest: d.chest, createdAt: d.createdAt, lookupId: d.lookupId, bagId: d.bagId, target: itemTargetOf(d.inner, d.ref), event: d.inner, ...lineageOf(d.inner, d.ref) })
+      out.push({ key: d.eventId, type: d.type, at: positionOf(d), plane: d.plane, height: d.height, mine: true, author: me, shard: d.shard, text: d.text, keyItem: d.key, chest: d.chest, createdAt: d.createdAt, lookupId: d.lookupId, bagId: d.bagId, target: itemTargetOf(d.inner, d.ref), event: d.inner as NostrEvent, ...lineageOf(d.inner, d.ref) })
     }
     for (const h of Object.values(state.discovered)) {
       if (seen.has(h.eventId)) continue
-      out.push({ key: h.eventId, type: h.type, at: h.at, plane: h.plane, height: h.height, mine: false, author: h.author, shard: h.shard, text: h.text, keyItem: h.key, chest: h.chest, createdAt: h.createdAt, lookupId: h.lookupId, bagId: h.bagId, target: itemTargetOf(h.inner, h.ref), chestId: h.chestId, event: h.inner, ...lineageOf(h.inner, h.ref) })
+      out.push({ key: h.eventId, type: h.type, at: h.at, plane: h.plane, height: h.height, mine: false, author: h.author, shard: h.shard, text: h.text, keyItem: h.key, chest: h.chest, createdAt: h.createdAt, lookupId: h.lookupId, bagId: h.bagId, target: itemTargetOf(h.inner, h.ref), chestId: h.chestId, event: h.inner as NostrEvent | undefined, ...lineageOf(h.inner, h.ref) })
     }
     return out
   }

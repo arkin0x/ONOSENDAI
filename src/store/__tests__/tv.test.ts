@@ -426,7 +426,8 @@ describe('Cyberspace TV', () => {
     useTv.getState().start()
     const ads: Array<{ at: number; shot: unknown; tapeTime: number | null }> = []
     let tapeMovedDuringAd = false
-    // The music steps out for the break and comes back after it.
+    // The music plays on under the break (2026-10-20: "we don't have to
+    // mute the music while my hosaka ad plays").
     const held: boolean[] = []
     const off = useTv.subscribe((s, prev) => {
       if (s.ad && !prev.ad) { ads.push({ at: performance.now(), shot: s.shot, tapeTime: s.tapeTime }); held.push(musicHeldForAd()) }
@@ -442,17 +443,17 @@ describe('Cyberspace TV', () => {
     expect(tapeMovedDuringAd).toBe(false)
     // It ends with a cut, and the tape picks up.
     expect(useTv.getState().ad).toBeNull()
-    expect(held.slice(0, 2)).toEqual([true, false])
+    expect(held.slice(0, 2)).toEqual([false, false])
     expect(musicHeldForAd()).toBe(false)
   })
 
-  it('lets the music go when a retune cuts the break short, or the set goes off in it', async () => {
+  it('never holds the music, through a break, a retune that cuts it short, or the set going off in it', async () => {
     for (const end of ['retune', 'stop'] as const) {
       useTv.getState().start()
       await run(AD_EVERY_MS - 1000)
       for (let i = 0; i < 120 && !useTv.getState().ad; i++) await run(500)
       expect(useTv.getState().ad).not.toBeNull()
-      expect(musicHeldForAd()).toBe(true)
+      expect(musicHeldForAd()).toBe(false)
       if (end === 'retune') useTv.getState().retune()
       else useTv.getState().stop()
       expect(musicHeldForAd()).toBe(false)

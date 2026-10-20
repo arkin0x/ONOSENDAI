@@ -102,8 +102,8 @@ export function toggleMusicMute(): void {
  * nothing sounds (paused by the browser, the system or the viewer, or a play
  * never answered), the tap is for the sound: it plays the track, unmuted,
  * since a tap is one the browser lets sound start in (arkinox, 2026-10-20:
- * "Tapping to mute and unmute does not trigger playback."). Under a
- * commercial it is a mute, as ever.
+ * "Tapping to mute and unmute does not trigger playback."). While the
+ * music is held (holdMusicForAd) it is a mute, as ever.
  */
 export function tapMusic(): void {
   const a = audio
@@ -122,8 +122,8 @@ export function tapMusic(): void {
  * the browser and never answered, and the list then moves on to tracks that
  * never start either (arkinox, 2026-10-20: "After the hosaka ad is done,
  * even if I bring it in the foreground, the music will load the next
- * track, but it won't start playing."). Not under a commercial, and not a
- * track the viewer paused.
+ * track, but it won't start playing."). Not while the music is held, and
+ * not a track the viewer paused.
  */
 export function resumeMusic(): void {
   const a = audio
@@ -162,14 +162,13 @@ function apply(): void {
 }
 
 /**
- * The commercial break (lib/tv/hosakaAd): the track steps out for it and
- * comes back after, where it was, so no one's track plays under an ad
- * (2026-10-19: "add the fade music"; its licence is non-commercial). Out with
- * the cut into the break, in after it, faded where the page may set the
- * volume; elsewhere (iOS) a plain pause and play. Nothing plays under the
- * spot for now. A sponsor's own music for its spot, if one is ever made
- * ("In the future I may want to insert my own music for the hosaka ad"),
- * would start and stop here, on the same two calls.
+ * The track steps out and comes back after, where it was: out faded where
+ * the page may set the volume, elsewhere (iOS) a plain pause and play.
+ * The HOSAKA commercial no longer calls it: the music plays on under the
+ * spot (2026-10-20: "setto of basspistol says we don't have to mute the
+ * music while my hosaka ad plays"). Kept for a spot's own music, if one is
+ * ever made ("maybe later I'll have my own music to add to the hosaka ad"),
+ * which would start and stop here, on the same two calls.
  */
 export function holdMusicForAd(on: boolean): void {
   if (on === held) return
@@ -442,7 +441,7 @@ function advance(list: Track[]): void {
   useTvMusic.setState({ track: { url: track.url, title: track.title ?? nameFromUrl(track.url), artist: track.artist ?? '', art: null } })
   a.src = track.url
   sounding = false
-  // One that ends in a break waits, ready, for the break to end.
+  // One that ends while the music is held waits, ready, for the hold to end.
   if (!held) {
     armStall(list)
     play(a, mine, list)
@@ -493,8 +492,8 @@ function play(a: HTMLAudioElement, mine: number, list: Track[]): void {
     // a try the browser refuses waits for the next.
     const go = (e: Event): void => {
       if (onControl(e) || (e.type === 'keydown' && (e as { key?: string }).key === 'Escape')) return
-      // Not under the commercial: a tap in the break waits, and the one
-      // after it starts the music (review of #395; on iOS that is a second
+      // Not while the music is held: a tap then waits, and the one after
+      // the hold starts the music (review of #395; on iOS that is a second
       // tap, the browser's allowance being spent on the first).
       if (!audio || held) return
       // Allowed now, perhaps: the track has its 20 s again to send something.

@@ -853,8 +853,19 @@ export const Scene = memo(function Scene(): JSX.Element {
         downsampling that a normal pass feeds, and there is no normal pass,
         so the 0.25 that stood here did nothing. The bloom's blur runs from
         half resolution down on its own (mipmapBlur).
+
+        Four samples, not the wrapper's default eight. The scene buffer is
+        half float with a depth-stencil beside it, so every sample costs 12
+        bytes: at eight, a 2560x1440 view holds about 350 MB of samples (on
+        an integrated GPU, taken from system memory), and the resolve reads
+        up to 240 MB of colour samples every frame. Four halves both. Most phone GPUs offer
+        no more than four (MAX_SAMPLES), so four is very likely what the
+        phone has drawn all along, where the view looks right and runs
+        smoothly (arkinox, 2026-10-20). What the samples smooth is the edge
+        of a line, and the bloom over it softens what a fifth to eighth
+        sample would add.
       */}
-      <EffectComposer ref={resolveColourOnly} stencilBuffer>
+      <EffectComposer ref={resolveColourOnly} stencilBuffer multisampling={4}>
         {bloom}
       </EffectComposer>
     </Canvas>

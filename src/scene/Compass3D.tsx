@@ -15,7 +15,7 @@
  */
 
 import { Canvas, useFrame, useThree } from '@react-three/fiber'
-import { useMemo, useState } from 'react'
+import { useCallback, useMemo, useRef, useState } from 'react'
 import { Quaternion, Vector3 } from 'three'
 import { useCyberspace } from '../store/useCyberspace'
 import { cameraPose } from '../lib/cameraPose'
@@ -113,22 +113,39 @@ function CompassScene({ onLabelsUpdate, pose, given }: { onLabelsUpdate: (labels
  * takes the compass out of its fixed spot so the corner can hold it.
  */
 export function Compass3D({ onTap, pose = cameraPose, dirs, bench = false }: { onTap?: () => void; pose?: Quaternion; dirs?: Dirs; bench?: boolean } = {}): JSX.Element {
-  const [labels, setLabels] = useState<LabelPosition[]>([])
+  // The labels follow the arrows every frame the camera turns, so they are
+  // moved by hand rather than through state: as state, every frame of an
+  // orbit re-rendered this component and, through its Canvas, the whole
+  // compass scene (2026-10-20, React commits counted during a drag). State
+  // changes once, when the first positions arrive, which is when the labels
+  // first appear, as before.
+  const placed = useRef<LabelPosition[]>([])
+  const spans = useRef<Partial<Record<LabelPosition['axis'], HTMLSpanElement | null>>>({})
+  const [shown, setShown] = useState(false)
 
-  const handleLabelsUpdate = (newLabels: LabelPosition[]) => {
-    setLabels((prev) => {
-      if (
-        prev.length === newLabels.length &&
-        prev.every((p, i) =>
-          Math.abs(p.screen.x - newLabels[i].screen.x) < 0.5 &&
-          Math.abs(p.screen.y - newLabels[i].screen.y) < 0.5
-        )
-      ) {
-        return prev
-      }
-      return newLabels
-    })
-  }
+  const handleLabelsUpdate = useCallback((newLabels: LabelPosition[]) => {
+    const prev = placed.current
+    if (
+      prev.length === newLabels.length &&
+      prev.every((p, i) =>
+        Math.abs(p.screen.x - newLabels[i].screen.x) < 0.5 &&
+        Math.abs(p.screen.y - newLabels[i].screen.y) < 0.5
+      )
+    ) {
+      return
+    }
+    placed.current = newLabels
+    if (prev.length === 0) {
+      setShown(true)
+      return
+    }
+    for (const { axis, screen } of newLabels) {
+      const span = spans.current[axis]
+      if (!span) continue
+      span.style.left = `${screen.x}px`
+      span.style.top = `${screen.y}px`
+    }
+  }, [])
 
   return (
     <div
@@ -146,9 +163,19 @@ export function Compass3D({ onTap, pose = cameraPose, dirs, bench = false }: { o
         <pointLight position={[5, 5, 5]} intensity={0.8} />
         <CompassScene onLabelsUpdate={handleLabelsUpdate} pose={pose} given={dirs} />
       </Canvas>
-      {labels.map(({ axis, screen }) => (
+      {shown && placed.current.map(({ axis, screen }) => (
         <span
           key={axis}
+          ref={(span) => {
+            spans.current[axis] = span
+            // Where the arrows are now: positions that came in between the
+            // render and the span's arrival are not lost.
+            const now = placed.current.find((l) => l.axis === axis)
+            if (span && now) {
+              span.style.left = `${now.screen.x}px`
+              span.style.top = `${now.screen.y}px`
+            }
+          }}
           className={`compass-label compass-label--${axis}`}
           style={{
             left: `${screen.x}px`,

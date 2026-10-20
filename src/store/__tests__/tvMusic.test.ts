@@ -5,7 +5,7 @@
  * the browser held the sound back.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { besideUrls, holdMusicForAd, musicHeldForAd, musicProgress, nameFromUrl, resumeMusic, setMusicVolume, shuffled, startMusic, stopMusic, toggleMusicMute, useTvMusic } from '../useTvMusic'
+import { besideUrls, holdMusicForAd, musicHeldForAd, musicProgress, nameFromUrl, resumeMusic, setMusicVolume, shuffled, startMusic, stopMusic, tapMusic, toggleMusicMute, useTvMusic } from '../useTvMusic'
 
 class FakeAudio extends EventTarget {
   static made: FakeAudio[] = []
@@ -32,6 +32,8 @@ class FakeAudio extends EventTarget {
   get src(): string { return this.source }
   set src(v: string) {
     this.source = v
+    // A new source stops the element, as a real one's load does, without a pause event.
+    this.paused = true
     const cut = this.pending
     this.pending = []
     queueMicrotask(() => { for (const reject of cut) reject(Object.assign(new Error('cut off'), { name: 'AbortError' })) })
@@ -48,6 +50,10 @@ class FakeAudio extends EventTarget {
     this.pauses++
     if (this.paused) return
     this.paused = true
+    // A play still waiting is cut off, as a real one's is.
+    const cut = this.pending
+    this.pending = []
+    queueMicrotask(() => { for (const reject of cut) reject(Object.assign(new Error('paused'), { name: 'AbortError' })) })
     queueMicrotask(() => this.fire('pause'))
   }
   play(): Promise<void> {
@@ -55,9 +61,11 @@ class FakeAudio extends EventTarget {
     // A play the browser refuses leaves the element paused, as a real one does.
     if (FakeAudio.refuse) return Promise.reject(Object.assign(new Error('no'), { name: 'NotAllowedError' }))
     if (FakeAudio.fails) return Promise.reject(Object.assign(new Error('no'), { name: FakeAudio.fails }))
+    const was = this.paused
     this.paused = false
     if (FakeAudio.hang) return new Promise((_, reject) => { this.pending.push(reject) })
-    queueMicrotask(() => { if (!this.paused) this.fire('playing') })
+    // Only a start from paused says 'playing': a play while playing says nothing.
+    if (was) queueMicrotask(() => { if (!this.paused) this.fire('playing') })
     return Promise.resolve()
   }
   fire(type: string): void { this.dispatchEvent(new Event(type)) }
@@ -123,12 +131,56 @@ describe('TV music back from the background (arkinox, 2026-10-20)', () => {
     await flush()
     FakeAudio.fails = null
     const plays = audio().plays
-    toggleMusicMute()
+    tapMusic()
     expect(audio().plays).toBe(plays + 1)
+    // Heard: the tap that starts the sound does not mute it.
+    expect(useTvMusic.getState().muted).toBe(false)
     await flush()
     // Sounding now: the next tap is only a mute.
-    toggleMusicMute()
+    tapMusic()
     expect(audio().plays).toBe(plays + 1)
+    expect(useTvMusic.getState().muted).toBe(true)
+  })
+
+  it('a tap that starts a stopped track while muted unmutes it, so it is heard', async () => {
+    startMusic(list)
+    await flush()
+    toggleMusicMute()
+    vi.advanceTimersByTime(5000)
+    FakeAudio.fails = 'AbortError'
+    holdMusicForAd(true)
+    vi.advanceTimersByTime(700)
+    holdMusicForAd(false)
+    await flush()
+    FakeAudio.fails = null
+    expect(audio().paused).toBe(true)
+    tapMusic()
+    expect(audio().paused).toBe(false)
+    expect(useTvMusic.getState().muted).toBe(false)
+    // Once the break's fade in is over.
+    vi.advanceTimersByTime(1100)
+    expect(silent()).toBe(false)
+  })
+
+  it('a break cut short while the track still sounds leaves it sounding: coming back does not skip it', async () => {
+    startMusic(list)
+    await flush()
+    const first = audio().src
+    // Over before the fade out paused it: the track plays on, and its play says no 'playing'.
+    holdMusicForAd(true)
+    vi.advanceTimersByTime(300)
+    holdMusicForAd(false)
+    await flush()
+    expect(audio().paused).toBe(false)
+    away()
+    back()
+    vi.advanceTimersByTime(25_000)
+    expect(audio().src).toBe(first)
+    // And a tap on it is a mute, not a play.
+    const plays = audio().plays
+    tapMusic()
+    expect(audio().plays).toBe(plays)
+    expect(useTvMusic.getState().muted).toBe(true)
   })
 
   it('a play the browser holds and never answers is asked for again by a tap', async () => {
@@ -141,7 +193,7 @@ describe('TV music back from the background (arkinox, 2026-10-20)', () => {
     await flush()
     expect(audio().paused).toBe(false)
     const plays = audio().plays
-    toggleMusicMute()
+    tapMusic()
     expect(audio().plays).toBe(plays + 1)
   })
 
@@ -188,17 +240,58 @@ describe('TV music back from the background (arkinox, 2026-10-20)', () => {
     await flush()
     FakeAudio.fails = null
     const plays = audio().plays
-    toggleMusicMute()
+    // Still wanted: coming back plays it.
+    away()
+    back()
     expect(audio().plays).toBe(plays + 1)
   })
 
-  it('the viewer\'s own pause stands: neither a tap on NOW PLAYING nor coming back plays it', async () => {
+  it('a pause the page did not make stands against coming back and a break, and a tap on NOW PLAYING plays it again', async () => {
     startMusic(list)
     await flush()
     audio().pause()
     await flush()
     const plays = audio().plays
-    toggleMusicMute()
+    away()
+    back()
+    holdMusicForAd(true)
+    vi.advanceTimersByTime(700)
+    holdMusicForAd(false)
+    expect(audio().plays).toBe(plays)
+    tapMusic()
+    expect(audio().plays).toBe(plays + 1)
+    expect(audio().paused).toBe(false)
+  })
+
+  it('a break over a paused track does not mark a pause, so the viewer\'s next one still counts', async () => {
+    startMusic(list)
+    await flush()
+    audio().pause()
+    await flush()
+    holdMusicForAd(true)
+    vi.advanceTimersByTime(700)
+    holdMusicForAd(false)
+    tapMusic()
+    await flush()
+    audio().pause()
+    await flush()
+    const plays = audio().plays
+    away()
+    back()
+    expect(audio().plays).toBe(plays)
+  })
+
+  it('a break\'s pause still to be told when TV goes off does not carry into the next start', async () => {
+    startMusic(list)
+    await flush()
+    holdMusicForAd(true)
+    vi.advanceTimersByTime(700)
+    stopMusic()
+    startMusic(list)
+    await flush()
+    audio().pause()
+    await flush()
+    const plays = audio().plays
     away()
     back()
     expect(audio().plays).toBe(plays)
@@ -230,6 +323,9 @@ describe('TV music back from the background (arkinox, 2026-10-20)', () => {
     back()
     expect(audio().getAttribute('src')).not.toBe(null)
     expect(useTvMusic.getState().track).not.toBe(null)
+    // A fresh go at the list: one more failure moves on to the next track, not back to waiting.
+    audio().fire('error')
+    expect(audio().getAttribute('src')).not.toBe(null)
   })
 })
 

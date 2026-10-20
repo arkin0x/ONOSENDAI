@@ -50,7 +50,7 @@ import { avatarFromEvent } from '../lib/avatar'
 import { tvSpin } from '../hud/TvSegments'
 import { uploadRegions } from './drawTracker'
 import { CUT_MS, TV_FONT, TvPainter, type FlatRect, type TvAssets, type TvMusic } from './tvPainter'
-import { musicProgress, setMusicVolume, toggleMusicMute, useTvMusic } from '../store/useTvMusic'
+import { musicProgress, setMusicVolume, tapMusic, useTvMusic } from '../store/useTvMusic'
 import { useTvWatching } from '../store/useTvWatching'
 import { CALM, GlitchDirector } from '../lib/tv/glitch'
 import type { ShardModel } from 'sno-core/shards'
@@ -428,7 +428,7 @@ export function TvScreenEffect(): JSX.Element {
     const click = (e: MouseEvent): void => {
       if (performance.now() > swallowUntil) return
       swallowUntil = 0
-      if (tapped) toggleMusicMute()
+      if (tapped) tapMusic()
       tapped = false
       e.stopPropagation()
     }

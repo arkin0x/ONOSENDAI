@@ -95,20 +95,35 @@ export function toggleMusicMute(): void {
     localStorage.setItem(MUTED_KEY, muted ? '1' : '0')
     localStorage.setItem(VOLUME_KEY, volume.toFixed(3))
   } catch { /* kept for this visit only */ }
-  // A tap is one the browser lets sound start in: a track that should be
-  // playing and is not starts here, muted or not.
-  resumeMusic()
 }
 
 /**
- * Play the track if it should be playing and is not: from a tap on NOW
- * PLAYING, and when TV comes back from the background. A play asked for in
- * a background tab can be held by the browser and never answered, and the
- * list then moves on to tracks that never start either (arkinox, 2026-10-20:
- * "After the hosaka ad is done, even if I bring it in the foreground, the
- * music will load the next track, but it won't start playing. Tapping to
- * mute and unmute does not trigger playback."). Not under a commercial, and
- * not a track the viewer paused.
+ * A tap on NOW PLAYING. While the track sounds, a mute or an unmute. While
+ * nothing sounds (paused by the browser, the system or the viewer, or a play
+ * never answered), the tap is for the sound: it plays the track, unmuted,
+ * since a tap is one the browser lets sound start in (arkinox, 2026-10-20:
+ * "Tapping to mute and unmute does not trigger playback."). Under a
+ * commercial it is a mute, as ever.
+ */
+export function tapMusic(): void {
+  const a = audio
+  if (a && !held && a.getAttribute('src') && !a.ended && (a.paused || !sounding)) {
+    if (useTvMusic.getState().muted) toggleMusicMute()
+    armStall(currentList)
+    play(a, session, currentList)
+    return
+  }
+  toggleMusicMute()
+}
+
+/**
+ * Play the track if it should be playing and is not, when TV comes back
+ * from the background. A play asked for in a background tab can be held by
+ * the browser and never answered, and the list then moves on to tracks that
+ * never start either (arkinox, 2026-10-20: "After the hosaka ad is done,
+ * even if I bring it in the foreground, the music will load the next
+ * track, but it won't start playing."). Not under a commercial, and not a
+ * track the viewer paused.
  */
 export function resumeMusic(): void {
   const a = audio
@@ -164,8 +179,7 @@ export function holdMusicForAd(on: boolean): void {
     // Back after only what was playing, or about to: a track the viewer
     // paused, or one the browser holds back for a tap, stays as it was
     // (review of #395).
-    // A track whose play failed (resumeMusic) is still wanted, and comes
-    // back after too.
+    // A track whose play failed is still wanted, and comes back after too.
     resumeAfter = a !== null && (!a.paused || (wanted && !useTvMusic.getState().blocked))
     armAfter = false
     if (!a) return
@@ -407,7 +421,7 @@ function fail(list: Track[]): void {
       audio.load()
     }
     const mine = ++session
-    retry = setTimeout(() => { if (mine === session) { failures = 0; advance(list) } }, RETRY_MS)
+    retry = setTimeout(() => { if (mine === session) { retry = null; failures = 0; advance(list) } }, RETRY_MS)
     return
   }
   advance(list)
@@ -467,7 +481,8 @@ function onControl(e: Event): boolean {
 
 function play(a: HTMLAudioElement, mine: number, list: Track[]): void {
   wanted = true
-  sounding = false
+  // Playing already, it says so no more (no 'playing' comes): it sounds on.
+  if (a.paused) sounding = false
   a.play().catch((e: unknown) => {
     if (mine !== session || (e as { name?: string })?.name !== 'NotAllowedError') return
     clearStall()

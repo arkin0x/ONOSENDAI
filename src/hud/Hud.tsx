@@ -21,7 +21,7 @@ import { useProfile } from '../hooks/useProfile'
 import { profileLabel } from '../store/useProfiles'
 import { LoginModal } from './LoginModal'
 import { NotificationsButton } from './Notifications'
-import { ProfileModal } from './ProfileModal'
+import { useProfileView } from '../store/useProfileView'
 import { AvatarsPanel } from './AvatarsPanel'
 import { AgentsPanel } from './AgentsPanel'
 import { DiscoveredPanel, HiddenPanel } from './DiscoveredPanel'
@@ -92,7 +92,6 @@ function IdentityPanel(): JSX.Element {
   const live = useCyberspace((s) => s.live)
   const profile = useProfile(identity.pubkey)
   const [loginOpen, setLoginOpen] = useState(false)
-  const [profileOpen, setProfileOpen] = useState(false)
 
   const name = profileLabel(profile, identity.npub)
 
@@ -111,7 +110,7 @@ function IdentityPanel(): JSX.Element {
           <span className="secret__npub" title={identity.npub}>{shortHex(identity.npub, 14, 8)}</span>
         </div>
         <div className="identity__acts">
-          <button className="identity__change" onClick={() => setProfileOpen(true)}>PROFILE</button>
+          <button className="identity__change" onClick={() => useProfileView.getState().edit()}>PROFILE</button>
           <button className="identity__change" onClick={() => setLoginOpen(true)}>CHANGE</button>
         </div>
       </div>
@@ -127,7 +126,6 @@ function IdentityPanel(): JSX.Element {
       </Explanation>
 
       {loginOpen && <LoginModal onClose={() => setLoginOpen(false)} />}
-      {profileOpen && <ProfileModal onClose={() => setProfileOpen(false)} />}
     </section>
   )
 }

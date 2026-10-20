@@ -42,6 +42,9 @@ import { useDiscovery } from './hooks/useDiscovery'
 import { Hud } from './hud/Hud'
 import { Targets } from './hud/Targets'
 import { PersonModal } from './hud/PersonModal'
+import { ProfileView } from './hud/ProfileView'
+import { ProfileModal } from './hud/ProfileModal'
+import { useProfileView } from './store/useProfileView'
 import { TouchControls } from './hud/TouchControls'
 import { SyncWarning } from './hud/SyncWarning'
 import { RouteOverlay } from './hud/RouteOverlay'
@@ -377,6 +380,9 @@ export default function App(): JSX.Element {
         <NearbyLootModal />
         <StarredPlaceCard />
         <PersonModal />
+        {/* Last, so a profile opened from any card above sits over it. */}
+        <ProfileView />
+        <ProfileEditor />
       </CrashNote>
       <HosakaOffer hidden={crowded || secretOpen} />
       {/* While the panels are open the job is on screen in Cloud compute; the pulse is for when it is not. */}
@@ -406,4 +412,10 @@ export default function App(): JSX.Element {
       </button>
     </div>
   )
+}
+
+/** Your own profile's editor, from the Identity panel's PROFILE or a profile's EDIT PROFILE (useProfileView). */
+function ProfileEditor(): JSX.Element | null {
+  const editing = useProfileView((s) => s.editing)
+  return editing ? <ProfileModal onClose={() => useProfileView.getState().stopEditing()} /> : null
 }

@@ -135,7 +135,7 @@ export function TargetsPanel(): JSX.Element {
         {list.map((t) => (
           <li key={t.pubkey} className="targets__row">
             <span className="targets__dot" style={{ background: targetColor(t.pubkey), boxShadow: `0 0 6px ${targetColor(t.pubkey)}` }} />
-            <ProfileBadge pubkey={t.pubkey} fallbackName={t.name} />
+            <ProfileBadge pubkey={t.pubkey} fallbackName={t.name} tappable />
             <span className={`targets__status targets__status--${t.status}`} title={t.status === 'partial' ? 'The relays are missing part of their chain, so they are placed where it reaches before the gap, which may not be where they are.' : t.lastActive ? formatStamp(t.lastActive) : undefined}>
               {t.status === 'partial' ? 'PART OF CHAIN'
                 : t.status === 'live' && t.lastActive ? formatAgo(t.lastActive, now)
@@ -167,7 +167,7 @@ export function TargetsPanel(): JSX.Element {
               const on = !!targets[c.pubkey]
               return (
                 <li key={c.pubkey} className="targets__row targets__row--contact">
-                  <ProfileBadge pubkey={c.pubkey} fallbackName={c.name} />
+                  <ProfileBadge pubkey={c.pubkey} fallbackName={c.name} tappable />
                   <button
                     className={`targets__toggle ${on ? 'is-on' : ''}`}
                     style={on ? { color: targetColor(c.pubkey), borderColor: targetColor(c.pubkey) } : undefined}

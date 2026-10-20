@@ -58,7 +58,7 @@ export function AvatarsPanel(): JSX.Element {
     const on = !!targets[a.pubkey]
     return (
       <li key={a.pubkey} className="avatars__row">
-        <ProfileBadge pubkey={a.pubkey} />
+        <ProfileBadge pubkey={a.pubkey} tappable />
         <span className={`avatars__type avatars__type--${actionKind(a)}`}>{actionLabel(a)}</span>
         <span className="avatars__when" title={formatStamp(a.createdAt)}>{formatAgo(a.createdAt, now)}</span>
         {you ? (

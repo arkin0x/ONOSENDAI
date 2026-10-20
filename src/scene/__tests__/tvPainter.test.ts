@@ -11,7 +11,8 @@ if (typeof localStorage === 'undefined') {
 }
 vi.mock('../../lib/relay', () => ({ query: async () => [], queryEach: async () => [], queryAny: async () => [], publish: async () => ({ ok: true }), publishMany: async () => ({ ok: true }), relaySet: () => [] }))
 import { TvPainter, tickerItems, wrap, type TvAssets, type TvPicture } from '../tvPainter'
-import { cutKind, flatPoint } from '../TvScreenEffect'
+import { cutKind, flatPoint, tubeDrift, tubeFlicker } from '../TvScreenEffect'
+import { Vector2 } from 'three'
 import { useTv } from '../../store/useTv'
 import { HOSAKA_1 } from '../../lib/tv/hosakaAd'
 
@@ -53,6 +54,28 @@ describe('cuts', () => {
     const kinds = new Set([0, 7, 14, 21, 28, 35].map((t) => cutKind(t, false)))
     expect([...kinds].sort()).toEqual([0, 1, 2])
     expect(cutKind(14, true)).toBe(0)
+  })
+})
+
+describe('the tube\'s once-a-frame terms', () => {
+  // Worked out on every pixel before (2026-10-20); the same numbers once a frame.
+  it('drift is the turning unit split the shader worked out per pixel', () => {
+    const out = new Vector2()
+    for (const t of [0, 1.7, 9.2, 33.3, 600.5, 7200.25]) {
+      tubeDrift(t, out)
+      const x = Math.cos(t * 0.35), y = 0.6 * Math.sin(t * 0.35), l = Math.hypot(x, y)
+      expect(out.length()).toBeCloseTo(1, 12)
+      expect(out.x).toBeCloseTo(x / l, 12)
+      expect(out.y).toBeCloseTo(y / l, 12)
+    }
+  })
+  it('flicker stays within two and a half per cent either side of 0.975', () => {
+    for (let t = 0; t < 10; t += 0.013) {
+      const f = tubeFlicker(t)
+      expect(f).toBeGreaterThanOrEqual(0.95)
+      expect(f).toBeLessThanOrEqual(1)
+      expect(f).toBeCloseTo(0.975 + 0.025 * Math.sin(t * 57), 12)
+    }
   })
 })
 

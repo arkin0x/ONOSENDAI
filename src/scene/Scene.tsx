@@ -28,6 +28,7 @@ import { memo, useEffect, useLayoutEffect, useMemo, useRef } from 'react'
 import { useFrame } from '@react-three/fiber'
 import { Vector3 } from 'three'
 import { watchContext } from '../lib/glContext'
+import { keepPrograms } from '../lib/keepPrograms'
 import { BG } from '../lib/palette'
 import { GRID_RADIUS, cellDelta, claimScreenAxes, originShift, type Position } from '../lib/space'
 import { carryOrbit } from '../lib/zoomOrbit'
@@ -829,8 +830,9 @@ export const Scene = memo(function Scene(): JSX.Element {
       gl={{ antialias: false, powerPreference: 'high-performance' }}
       style={{ background: BG }}
       frameloop={covered ? 'never' : 'always'}
-      // A lost context is said in the console (lib/glContext).
-      onCreated={({ gl }) => { watchContext(gl.domElement, 'main view') }}
+      // A lost context is said in the console (lib/glContext). Shader
+      // programs are compiled once, not again at every cut (lib/keepPrograms).
+      onCreated={({ gl, scene }) => { watchContext(gl.domElement, 'main view'); keepPrograms(gl, scene) }}
     >
       <ClockKeeper />
       {/* Fog to pure black: the only distance cue in an otherwise empty field. */}

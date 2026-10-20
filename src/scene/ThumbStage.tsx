@@ -15,6 +15,7 @@ import { useEffect, useRef, useState } from 'react'
 import type { ShardModel } from 'sno-core/shards'
 import { placedBounds, resolveParts, type Placed } from 'sno-core/parts'
 import { fetchRef } from '../lib/parts'
+import { keepPrograms } from '../lib/keepPrograms'
 import { ShardMesh } from './ShardMesh'
 import { ShardLights } from './shardLight'
 import { useThumbs, type ThumbJob } from '../store/useThumbs'
@@ -117,6 +118,8 @@ export function ThumbStage(): JSX.Element {
         gl={{ preserveDrawingBuffer: true, alpha: true, antialias: true }}
         camera={{ fov: FOV, near: 0.01, far: 100000 }}
         style={{ width: THUMB_PX, height: THUMB_PX }}
+        // One shard after another on the same canvas: compiled once (lib/keepPrograms).
+        onCreated={({ gl, scene }) => keepPrograms(gl, scene)}
       >
         {/* Lit as on the bench, near the world's full color (shardLight.tsx; arkinox, 2026-10-12). */}
         <ShardLights />

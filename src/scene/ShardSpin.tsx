@@ -18,6 +18,7 @@ import type { Group } from 'three'
 import type { ShardModel } from 'sno-core/shards'
 import { ShardMesh } from './ShardMesh'
 import { ShardLights } from './shardLight'
+import { keepPrograms } from '../lib/keepPrograms'
 import { frameOf, framedDistance, type ThumbFrame } from './ThumbStage'
 
 /** The camera's field of view, in degrees, as for the feed's pictures. */
@@ -105,6 +106,8 @@ export function ShardSpin({ shard, size = 160, preserve = false, pace }: { shard
         style={{ width: size, height: size, pointerEvents: 'none' }}
         // Nothing to draw between shards: no frames spent on an empty canvas.
         frameloop={!shard ? 'never' : pace ? 'demand' : 'always'}
+        // One shard after another on the same canvas: compiled once (lib/keepPrograms).
+        onCreated={({ gl, scene }) => keepPrograms(gl, scene)}
       >
         {pace && <Pacer pace={pace} />}
         {/* Lit as on the bench, near the world's full color (shardLight.tsx; arkinox, 2026-10-12). */}

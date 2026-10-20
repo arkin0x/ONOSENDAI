@@ -23,24 +23,30 @@ function routeCards(): Plugin {
  * @react-three/postprocessing's EffectComposer asks three-stdlib's
  * isWebGL2Available() whether it may multisample, and that creates a canvas
  * and a whole second WebGL2 context just to ask, then loses it: a long task
- * at boot (about 300 ms in a headless profile; on Windows a context is an
- * ANGLE/D3D device). The answer is already known when it asks: three r163 and
- * later render with WebGL2 only, and the composer mounts inside a running
- * renderer. Build only; the dev server pre-bundles the package, so it keeps
- * the check, which costs nothing there worth saving (2026-10-20).
+ * at boot (about 300 ms in an earlier headless profile; on Windows a context
+ * is an ANGLE/D3D context). The answer is already known when it asks: three
+ * r163 and later render with WebGL2 only, and the composer mounts inside a
+ * running renderer (arkinox, 2026-10-20: the laptop "still isn't great").
+ *
+ * Build only: in dev the package is pre-bundled, out of reach of transforms,
+ * and one probe per page load is fine there. A dependency upgrade that moves
+ * or changes the line only warns, deliberately: it costs speed, never
+ * correctness, so it should not block a deploy.
  */
 function composerKnowsWebGL2(): Plugin {
   const CALL = 'const webGL2Available = isWebGL2Available();'
+  let replaced = false
   return {
     name: 'onosendai-composer-webgl2',
     apply: 'build',
     transform(code, id) {
       if (!/@react-three[\\/]postprocessing[\\/]dist[\\/]EffectComposer\.js$/.test(id)) return null
-      if (!code.includes(CALL)) {
-        this.warn('composerKnowsWebGL2: EffectComposer no longer calls isWebGL2Available() as expected; the throwaway WebGL2 context is back')
-        return null
-      }
+      if (!code.includes(CALL)) return null
+      replaced = true
       return { code: code.replace(CALL, 'const webGL2Available = true;'), map: null }
+    },
+    buildEnd() {
+      if (!replaced) this.warn('composerKnowsWebGL2: never found isWebGL2Available() in @react-three/postprocessing\'s EffectComposer.js; the throwaway WebGL2 context is back. Update or remove this plugin.')
     },
   }
 }

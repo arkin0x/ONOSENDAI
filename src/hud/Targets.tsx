@@ -37,21 +37,35 @@ interface Written {
   arrow: HTMLElement | null
   ring: HTMLElement | null
   dist: HTMLElement | null
-  last: { transform?: string; mode?: string; under?: string; top?: string; arrow?: string; ring?: string; dist?: string }
+  last: {
+    transform?: string
+    mode?: string
+    under?: string
+    top?: string
+    arrow?: string
+    ring?: string
+    dist?: string
+  }
 }
 
 export function Targets({ targets }: Props): JSX.Element {
   const host = useRef<HTMLDivElement>(null)
+  // Each marker's elements and what it was last given, so a frame writes
+  // only what changed. Every write used to happen every frame, the distance
+  // text included: replacing a text node is a layout and a repaint of that
+  // marker's layer (each is its own, will-change: transform), so a still
+  // view with forty people in it re-rastered forty markers a frame
+  // (arkinox, 2026-10-20: the laptop "still isn't great"; a Chrome trace of
+  // a loaded scene). Kept across the effect's runs: the target list is
+  // rebuilt whenever anyone nearby moves, and starting over then would
+  // rewrite every marker each time.
+  const written = useRef(new Map<string, Written>())
 
   useEffect(() => {
     let raf = 0
-    // Each marker's elements and what it was last given, so a frame writes
-    // only what changed. Every write used to happen every frame, the distance
-    // text included: replacing a text node is a layout and a repaint of that
-    // marker's layer (each is its own, will-change: transform), so a still
-    // view with forty people in it re-rastered forty markers a frame
-    // (2026-10-20, a Chrome trace of a loaded scene).
-    const written = new Map<string, Written>()
+    const kept = written.current
+    const ids = new Set(targets.map((t) => t.id))
+    for (const id of kept.keys()) if (!ids.has(id)) kept.delete(id)
     const tick = (): void => {
       raf = requestAnimationFrame(tick)
       const root = host.current
@@ -62,7 +76,7 @@ export function Targets({ targets }: Props): JSX.Element {
       for (const t of targets) {
         const s = targetScreens[t.id]
         if (!s) continue
-        let m = written.get(t.id)
+        let m = kept.get(t.id)
         if (!m || !m.el.isConnected) {
           const el = root.querySelector<HTMLElement>(`[data-target="${t.id}"]`)
           if (!el) continue
@@ -74,7 +88,7 @@ export function Targets({ targets }: Props): JSX.Element {
             dist: el.querySelector<HTMLElement>('.target__dist'),
             last: {},
           }
-          written.set(t.id, m)
+          kept.set(t.id, m)
         }
         const { el, body, arrow, ring, dist, last } = m
 
@@ -110,18 +124,33 @@ export function Targets({ targets }: Props): JSX.Element {
         }
 
         const transform = `translate(${px}px, ${py}px)`
-        if (last.transform !== transform) el.style.transform = last.transform = transform
+        if (last.transform !== transform) {
+          last.transform = transform
+          el.style.transform = transform
+        }
         const mode = s.onScreen || under ? 'on' : 'off'
-        if (last.mode !== mode) el.dataset.mode = last.mode = mode
+        if (last.mode !== mode) {
+          last.mode = mode
+          el.dataset.mode = mode
+        }
         const underText = under ? 'yes' : 'no'
-        if (last.under !== underText) el.dataset.under = last.under = underText
+        if (last.under !== underText) {
+          last.under = underText
+          el.dataset.under = underText
+        }
         if (body) {
           const top = under && a ? `${labelDrop(a, h, RING_MIN / 2)}px` : ''
-          if (last.top !== top) body.style.top = last.top = top
+          if (last.top !== top) {
+            last.top = top
+            body.style.top = top
+          }
         }
         if (arrow) {
           const turn = `rotate(${angle}rad)`
-          if (last.arrow !== turn) arrow.style.transform = last.arrow = turn
+          if (last.arrow !== turn) {
+            last.arrow = turn
+            arrow.style.transform = turn
+          }
         }
         if (ring) {
           // Hints at extent without standing in for it. Earth is already drawn
@@ -138,7 +167,10 @@ export function Targets({ targets }: Props): JSX.Element {
         }
         if (dist) {
           const text = formatDistance(s.distance)
-          if (last.dist !== text) dist.textContent = last.dist = text
+          if (last.dist !== text) {
+            last.dist = text
+            dist.textContent = text
+          }
         }
       }
     }
@@ -157,8 +189,9 @@ export function Targets({ targets }: Props): JSX.Element {
 
 /**
  * One marker. Its position, distance, ring and chevron are driven imperatively
- * by the parent's animation frame (which finds it by data-target and reaches
- * the spans by class), so those stay in the DOM exactly where the loop expects.
+ * by the parent's animation frame, which finds it by data-target and reaches
+ * the spans by class once per marker element, then keeps them: so those spans
+ * are always rendered and never replaced while the marker stands.
  * The name and face are the reactive part: the profile arrives from the cache,
  * so a target that started as a wall of hex becomes a person without a reload.
  */

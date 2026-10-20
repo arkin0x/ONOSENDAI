@@ -1964,6 +1964,24 @@ kbd {
 }
 .eventdata__value:hover { color: var(--accent); }
 .eventdata__none { color: var(--dim); }
+/* A thing this device hid, on the wire (WireData): what is read, not copied. */
+.eventdata__plain {
+  font-family: 'Monaspace Krypton', var(--mono);
+  font-size: 10px;
+  line-height: 1.4;
+  word-break: break-all;
+  color: var(--fg);
+}
+.eventdata__line { display: block; }
+/* TEST DISCOVERY, the width of the section, its result in its color. */
+.eventdata__test { width: 100%; }
+.eventdata__test:disabled { opacity: 0.6; cursor: default; }
+.eventdata__test--testing { color: var(--warn); border-color: var(--warn); }
+.eventdata__test--found,
+.eventdata__test--found:hover { color: #05070d; background: var(--ok); border-color: var(--ok); font-weight: 700; }
+.eventdata__test--missing,
+.eventdata__test--refused { color: var(--danger); border-color: var(--danger); }
+.eventdata__refusal { margin: 0; font-size: 10px; line-height: 1.5; color: var(--danger); overflow-wrap: anywhere; }
 .eventdata__json {
   position: relative;
   border: 1px solid var(--border);
@@ -1988,156 +2006,6 @@ kbd {
   color: var(--danger);
   border-color: rgba(255, 59, 107, 0.5);
   background: rgba(255, 59, 107, 0.08);
-}
-
-/* ---------- Deployment detail overlay ----------
- *
- * The wire record of a deployed shard, up while the scene is flown to it. Left
- * of the panels on a desktop, along the bottom on a phone.
- */
-.detail {
-  position: fixed;
-  left: 14px;
-  top: 14px;
-  z-index: 101;
-  width: min(320px, calc(100vw - 28px));
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  padding: 10px 12px 12px;
-  border-radius: 10px;
-  color: var(--fg);
-  background: rgba(6, 14, 22, 0.92);
-  border: 1px solid rgba(0, 229, 255, 0.4);
-  box-shadow: 0 0 18px rgba(0, 229, 255, 0.15);
-  backdrop-filter: blur(10px);
-  font-size: 10px;
-  /* Never taller than the screen; the record scrolls inside and EXIT stays put. */
-  max-height: calc(100vh - 28px);
-  max-height: calc(100dvh - 28px);
-  overflow-y: auto;
-}
-/*
- * Nothing in the record shrinks to fit: the panel scrolls instead. A flex
- * child that scrolls on its own may shrink to nothing, and on a phone's
- * quarter-screen sheet the message did, to one clipped line (arkinox,
- * 2026-10-02: "cant read the message because its too small").
- */
-.detail > * { flex-shrink: 0; }
-
-/* Pinned while the rest scrolls, so EXIT is always where the hand left it.
-   The negative margins run the head's background out to the card's edges. */
-.detail__head {
-  position: sticky;
-  top: -10px;
-  z-index: 1;
-  margin: -10px -12px 0;
-  padding: 10px 12px 8px;
-  background: rgba(6, 14, 22, 0.97);
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.detail__eye { color: var(--accent); }
-
-.detail__title {
-  flex: 1;
-  letter-spacing: 0.1em;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.detail__title strong { color: var(--accent); }
-
-.detail__exit {
-  font-family: inherit;
-  font-size: 8px;
-  letter-spacing: 0.14em;
-  height: 28px;
-  padding: 0 12px;
-  border-radius: 6px;
-  color: #05070d;
-  background: var(--accent);
-  border: 1px solid var(--accent);
-  font-weight: 700;
-  cursor: pointer;
-}
-
-.detail__grid {
-  display: flex;
-  flex-direction: column;
-  gap: 5px;
-}
-
-.detail__field {
-  display: grid;
-  grid-template-columns: 48px 1fr;
-  align-items: baseline;
-  gap: 8px;
-}
-
-.detail__field--relays { align-items: start; }
-
-.detail__field .pubswitch { justify-self: start; }
-
-.detail__key {
-  font-size: 8px;
-  letter-spacing: 0.14em;
-  color: var(--dim);
-  text-transform: uppercase;
-}
-
-.detail__val {
-  font-family: inherit;
-  font-size: 10px;
-  text-align: left;
-  color: var(--fg);
-  background: transparent;
-  border: 0;
-  padding: 0;
-  cursor: pointer;
-  overflow-wrap: anywhere;
-}
-
-.detail__val:hover { color: var(--accent); }
-
-.detail__plain {
-  font-size: 10px;
-  color: var(--fg);
-  line-height: 1.5;
-  overflow-wrap: anywhere;
-}
-
-.detail__delete {
-  margin-top: 2px;
-  font-family: inherit;
-  font-size: 9px;
-  letter-spacing: 0.14em;
-  height: 34px;
-  border-radius: 7px;
-  color: var(--danger);
-  background: rgba(255, 59, 107, 0.08);
-  border: 1px solid rgba(255, 59, 107, 0.5);
-  cursor: pointer;
-}
-
-.detail__delete:hover {
-  background: rgba(255, 59, 107, 0.18);
-}
-
-@media (max-width: 1100px) {
-  .detail {
-    top: auto;
-    left: 14px;
-    right: 14px;
-    bottom: 14px;
-    width: auto;
-    /* A sheet, not a wall: the bottom quarter of the screen, scrolling inside. */
-    max-height: 25vh;
-    max-height: 25dvh;
-  }
 }
 
 /* ---------- Shards panel sections ---------- */
@@ -2244,52 +2112,6 @@ kbd {
   width: 100%;
 }
 
-/* ---------- Deployment detail: message + test ---------- */
-.detail__message {
-  font-size: 11px;
-  line-height: 1.5;
-  color: #ffd27d;
-  padding: 6px 8px;
-  border-radius: 5px;
-  background: rgba(255, 210, 125, 0.08);
-  border-left: 2px solid #ffd27d;
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
-  /* No scroll of its own: the panel is the one thing that scrolls. */
-}
-
-.detail__test {
-  font-family: inherit;
-  font-size: 9px;
-  letter-spacing: 0.12em;
-  height: 32px;
-  border-radius: 7px;
-  color: var(--accent);
-  background: rgba(0, 229, 255, 0.06);
-  border: 1px solid rgba(0, 229, 255, 0.4);
-  cursor: pointer;
-}
-
-.detail__test:disabled { opacity: 0.6; cursor: default; }
-.detail__test--testing { color: var(--warn); border-color: var(--warn); }
-.detail__test--found {
-  color: #05070d;
-  background: var(--ok);
-  border-color: var(--ok);
-  font-weight: 700;
-}
-.detail__test--missing { color: var(--danger); border-color: var(--danger); }
-.detail__test--refused { color: var(--danger); border-color: var(--danger); }
-.detail__refusal {
-  margin: 0;
-  font-size: 10px;
-  line-height: 1.5;
-  color: var(--danger);
-  overflow-wrap: anywhere;
-}
-
-.detail__eye--cashu { color: #f7931a; }
-
 /* ---------- Cashu card ----------
  *
  * A hidden message's Cashu token, in the MESSAGE and VIEWING panels: what it
@@ -2311,9 +2133,6 @@ kbd {
   border-left: 3px solid #f7931a;
   border-radius: 3px;
 }
-
-/* The VIEWING panel spaces its children with a gap of its own. */
-.detail .cashucard { margin: 0; }
 
 .cashucard--redeemed {
   background: rgba(255, 59, 107, 0.07);
@@ -5956,13 +5775,12 @@ kbd {
    wheel, trackpad and touch; on Windows the classic bar no longer takes width.
    Plain CSS, since this project does not use Tailwind: scrollbar-width covers
    Firefox and current Chromium, the WebKit pseudo-element covers the rest. */
-.hud, .hud *, .modal, .modal *, .detail, .detail *, .workshop, .workshop *, .instruments, .instruments * {
+.hud, .hud *, .modal, .modal *, .workshop, .workshop *, .instruments, .instruments * {
   scrollbar-width: none;
   -ms-overflow-style: none;
 }
 .hud::-webkit-scrollbar, .hud *::-webkit-scrollbar,
 .modal::-webkit-scrollbar, .modal *::-webkit-scrollbar,
-.detail::-webkit-scrollbar, .detail *::-webkit-scrollbar,
 .workshop::-webkit-scrollbar, .workshop *::-webkit-scrollbar,
 .instruments::-webkit-scrollbar, .instruments *::-webkit-scrollbar {
   display: none;

@@ -512,7 +512,6 @@ interface ShardsState {
   deleted: Record<string, true>
   /** Bags taken down from here, by `author:lookupId`: what the public LOOT list matches on. */
   deletedBags: Record<string, true>
-  inspecting: string | null
   scanning: boolean
   /** The region whose bag is being sent to the relays right now, by lookup id. */
   broadcasting: string | null
@@ -594,7 +593,6 @@ interface ShardsState {
    * there, because a bag need not carry `h` (spec §8.6).
    */
   rescan: (lookupId: string, keyHex: string) => Promise<number>
-  inspect: (eventId: string | null) => void
   selectSecret: (eventId: string | null) => void
   /** File what a scan opened. A find this identity wrote joins `mine` as well, whichever device placed it. */
   /**
@@ -806,7 +804,10 @@ export const useShards = create<ShardsState>((set, get) => {
     }
     const discovered = { ...get().discovered }
     delete discovered[eventId]
-    set({ mine, discovered, inspecting: get().inspecting === eventId ? null : get().inspecting })
+    // The item card open on this row follows it to its new id, so PUBLISH
+    // (broadcast puts a failed move back first) does not close the card it
+    // was tapped on (arkinox, 2026-10-20: the wire record folded into it).
+    set({ mine, discovered, selectedSecret: get().selectedSecret === eventId ? back.id : get().selectedSecret })
     saveMine(mine)
     return row
   }
@@ -981,7 +982,6 @@ export const useShards = create<ShardsState>((set, get) => {
     curated: null,
     deleted: loadDeleted(),
     deletedBags: loadDeletedBags(),
-    inspecting: null,
     scanning: false,
     broadcasting: null,
     broadcastError: null,
@@ -1674,14 +1674,12 @@ export const useShards = create<ShardsState>((set, get) => {
       const deleted = { ...get().deleted, [eventId]: true as const }
       const discovered = { ...get().discovered }
       delete discovered[eventId]
-      const wasInspecting = get().inspecting === eventId
       // The whole bag is gone only when nothing of ours is left in it. The
       // public list is a list of bags, so that is the grain it forgets at.
       const deletedBags = left.length > 0
         ? get().deletedBags
         : { ...get().deletedBags, [`${me}:${item.lookupId}`]: true as const }
-      set({ mine, deleted, deletedBags, discovered, inspecting: wasInspecting ? null : get().inspecting })
-      if (wasInspecting) cs.clearFocus()
+      set({ mine, deleted, deletedBags, discovered })
       saveMine(mine); saveDeleted(deleted)
       if (left.length === 0) saveDeletedBags(deletedBags)
     },
@@ -1747,8 +1745,6 @@ export const useShards = create<ShardsState>((set, get) => {
       saveMine(mine); saveDeleted(deleted)
       return null
     },
-
-    inspect: (eventId) => set({ inspecting: eventId }),
 
     selectSecret: (eventId) => set({ selectedSecret: eventId }),
 

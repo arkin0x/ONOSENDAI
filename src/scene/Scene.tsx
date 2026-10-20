@@ -865,12 +865,13 @@ export const Scene = memo(function Scene(): JSX.Element {
         half float with a depth-stencil beside it, so every sample costs 12
         bytes: at eight, a 2560x1440 view holds about 350 MB of samples (on
         an integrated GPU, taken from system memory), and the resolve reads
-        up to 240 MB of colour samples every frame. Four halves both. Most phone GPUs offer
-        no more than four (MAX_SAMPLES), so four is very likely what the
-        phone has drawn all along, where the view looks right and runs
-        smoothly (arkinox, 2026-10-20). What the samples smooth is the edge
-        of a line, and the bloom over it softens what a fifth to eighth
-        sample would add.
+        up to 240 MB of colour samples every frame. Four halves both. Most
+        phone GPUs offer no more than four (MAX_SAMPLES), so four is very
+        likely what the phone has drawn all along, where the view looks
+        right and runs smoothly (arkinox, 2026-10-20). What the samples
+        smooth is the edge of a line; the bloom over it is expected to hide
+        most of what a fifth to eighth sample adds, to be judged on the
+        Windows laptop, which draws eight today.
       */}
       <EffectComposer ref={resolveColourOnly} stencilBuffer multisampling={4}>
         {bloom}

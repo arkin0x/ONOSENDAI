@@ -23,7 +23,7 @@ import { useProfile } from '../hooks/useProfile'
 import { profileLabel } from '../store/useProfiles'
 import { useCyberspace } from '../store/useCyberspace'
 import { Explanation } from './Explanation'
-import { ProfilePic } from './ProfileBadge'
+import { ProfilePic, ProfileTap } from './ProfileBadge'
 
 function Composer({ placeholder, busy, onPost, onCancel }: { placeholder: string; busy: boolean; onPost: (text: string) => Promise<boolean>; onCancel?: () => void }): JSX.Element {
   const [text, setText] = useState('')
@@ -54,8 +54,8 @@ function Author({ pubkey, mine }: { pubkey: string; mine: boolean }): JSX.Elemen
   try { npub = nip19.npubEncode(pubkey) } catch { /* shown as hex */ }
   return (
     <span className="comment__author">
-      <ProfilePic pubkey={pubkey} size={18} />
-      <span className="comment__name">{profileLabel(profile, npub)}{mine ? ' (you)' : ''}</span>
+      <ProfileTap pubkey={pubkey}><ProfilePic pubkey={pubkey} size={18} /></ProfileTap>
+      <ProfileTap pubkey={pubkey} className="comment__name">{profileLabel(profile, npub)}{mine ? ' (you)' : ''}</ProfileTap>
     </span>
   )
 }

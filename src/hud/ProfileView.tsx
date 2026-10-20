@@ -22,7 +22,7 @@ import { isHttpUrl, newest, parseContent } from '../lib/profileEdit'
 import { shortHex } from '../lib/time'
 import { useProfile } from '../hooks/useProfile'
 import { useEscape } from '../hooks/useEscape'
-import { profileLabel } from '../store/useProfiles'
+import { operatorOf, profileLabel } from '../store/useProfiles'
 import { useCyberspace } from '../store/useCyberspace'
 import { useProfileView } from '../store/useProfileView'
 import { ProfilePic, ProfileTap } from './ProfileBadge'
@@ -56,8 +56,9 @@ function ProfileCard({ pubkey, onClose }: { pubkey: string; onClose: () => void 
   const [event, setEvent] = useState<NostrEvent | null>(null)
   const [loading, setLoading] = useState(true)
   const [copied, setCopied] = useState<string | null>(null)
-  const [brokenPic, setBrokenPic] = useState(false)
-  const [brokenBanner, setBrokenBanner] = useState(false)
+  // The URL that failed, not a flag: a newer picture from the relays is still tried.
+  const [brokenPic, setBrokenPic] = useState<string | null>(null)
+  const [brokenBanner, setBrokenBanner] = useState<string | null>(null)
 
   useEffect(() => {
     let alive = true
@@ -79,8 +80,10 @@ function ProfileCard({ pubkey, onClose }: { pubkey: string; onClose: () => void 
   const nip05 = (field(content, 'nip05') ?? cached?.nip05 ?? '').replace(/^_@/, '') || null
   const website = field(content, 'website')
   const lightning = field(content, 'lud16') ?? field(content, 'lud06')
-  const bot = content?.bot === true || cached?.bot === true
-  const operator = bot ? cached?.operator ?? null : null
+  // From the fresh kind 0 once it is here; the cached profile until then.
+  const bot = event ? content?.bot === true : cached?.bot === true
+  const operator = bot ? (event ? operatorOf(event.tags) : cached?.operator ?? null) : null
+  const showBanner = banner !== null && isHttpUrl(banner) && brokenBanner !== banner
   const operatorProfile = useProfile(operator)
   const mine = pubkey === me
 
@@ -100,13 +103,13 @@ function ProfileCard({ pubkey, onClose }: { pubkey: string; onClose: () => void 
           <button className="secret__close" onClick={onClose} aria-label="Close">✕</button>
         </div>
 
-        {banner && isHttpUrl(banner) && !brokenBanner && (
-          <img className="profilev__banner" src={banner} alt="" referrerPolicy="no-referrer" onError={() => setBrokenBanner(true)} />
+        {showBanner && (
+          <img className="profilev__banner" src={banner} alt="" referrerPolicy="no-referrer" onError={() => setBrokenBanner(banner)} />
         )}
 
-        <div className={`profilev__who ${banner && !brokenBanner ? 'profilev__who--under-banner' : ''}`}>
-          {picture && isHttpUrl(picture) && !brokenPic
-            ? <img className="pfp profilev__pic" src={picture} alt="" referrerPolicy="no-referrer" onError={() => setBrokenPic(true)} />
+        <div className={`profilev__who ${showBanner ? 'profilev__who--under-banner' : ''}`}>
+          {picture && isHttpUrl(picture) && brokenPic !== picture
+            ? <img className="pfp profilev__pic" src={picture} alt="" referrerPolicy="no-referrer" onError={() => setBrokenPic(picture)} />
             : <span className="profilev__pic-fallback"><ProfilePic pubkey={pubkey} size={72} /></span>}
           <div className="profilev__names">
             <span className="profilev__name">{name}{mine ? ' (you)' : ''}</span>

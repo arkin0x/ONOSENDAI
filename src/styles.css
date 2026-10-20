@@ -9436,11 +9436,13 @@ a.feed__act { text-decoration: none; }
 
 /* A picture or a name that opens the profile (ProfileTap): looks as it did,
    reads as tappable. */
+/* Inherits at no specificity, so a class beside it (.secret__name,
+   .person__operator-name, .comment__name) keeps its own size and colour
+   wherever it sits in this file (review of #401). */
+:where(.profile-tap) { font: inherit; color: inherit; }
 .profile-tap {
   padding: 0;
   margin: 0;
-  font: inherit;
-  color: inherit;
   text-align: left;
   background: transparent;
   border: 0;
@@ -9471,7 +9473,8 @@ a.feed__act { text-decoration: none; }
 .profilev__who--under-banner .profilev__names { margin-top: 38px; }
 .profilev__names { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
 .profilev__name { font-size: 15px; color: var(--fg); overflow-wrap: anywhere; }
-.profilev__handle { font-size: 10px; color: var(--dim); }
+.profilev__handle { font-size: 10px; color: var(--dim); overflow-wrap: anywhere; }
+.profilev__names .secret__nip05 { overflow-wrap: anywhere; }
 .profilev__about {
   margin: 12px 0 0;
   font-size: 11px;

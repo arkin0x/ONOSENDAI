@@ -42,12 +42,12 @@ export function ProfilePic({ pubkey, size = 22 }: { pubkey: string; size?: numbe
 }
 
 /** A picture or a name that opens the person's profile (ProfileView) when tapped. */
-export function ProfileTap({ pubkey, className = '', children }: { pubkey: string; className?: string; children: ReactNode }): JSX.Element {
+export function ProfileTap({ pubkey, className = '', title, children }: { pubkey: string; className?: string; title?: string; children: ReactNode }): JSX.Element {
   return (
     <button
       type="button"
       className={`profile-tap ${className}`}
-      title="View profile"
+      title={title ? `${title}\nTap to view profile` : 'View profile'}
       onClick={(e) => { e.stopPropagation(); useProfileView.getState().open(pubkey) }}
     >{children}</button>
   )
@@ -73,6 +73,6 @@ export function ProfileBadge({ pubkey, fallbackName, size = 22, className = '', 
       <span className="badge__name">{name}</span>
     </>
   )
-  if (tappable) return <ProfileTap pubkey={pubkey} className={`badge ${className}`}>{face}</ProfileTap>
+  if (tappable) return <ProfileTap pubkey={pubkey} className={`badge ${className}`} title={npub ?? pubkey}>{face}</ProfileTap>
   return <span className={`badge ${className}`} title={npub ?? pubkey}>{face}</span>
 }

@@ -116,7 +116,7 @@ export function PersonCard({ pubkey, shard, event = null, onClose, Preview = Sha
   const hasShard = !!shard && shard.vertices.length > 0
 
   return (
-    <div className="modal modal--top" role="dialog" aria-modal="true" aria-label={`${name}, profile`} onPointerDown={onClose}>
+    <div className="modal modal--top" role="dialog" aria-modal="true" aria-label={`${name}, avatar`} onPointerDown={onClose}>
       <div className="modal__card secret person" onPointerDown={(e) => e.stopPropagation()}>
         <div className="secret__head">
           <span className="secret__badge">AVATAR</span>

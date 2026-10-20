@@ -15,6 +15,7 @@
 
 import { useEffect, useState } from 'react'
 import { createPortal } from 'react-dom'
+import { Target } from 'lucide-react'
 import { useRecentAvatars, type RecentAvatars } from '../hooks/useRecentAvatars'
 import { parsePubkey } from '../lib/chains'
 import { actionKind, actionLabel } from '../lib/events'
@@ -70,7 +71,7 @@ export function AvatarsPanel(): JSX.Element {
               aria-pressed={on}
               title={on ? 'Stop targeting' : 'Target'}
               onClick={() => useCyberspace.getState().toggleTarget(a.pubkey)}
-            >◎</button>
+            ><Target size={12} strokeWidth={2.25} aria-hidden /></button>
             <button className="avatars__spectate" onClick={() => go(a.pubkey)}>SPECTATE</button>
           </span>
         )}

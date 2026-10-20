@@ -13,6 +13,7 @@
  */
 
 import { useEffect, useState } from 'react'
+import { Copy, CopyPlus, Rotate3d, Target, TvMinimal } from 'lucide-react'
 import { nip19 } from 'nostr-tools'
 import { regionLabel } from '../lib/loot'
 import { formatAgo, formatStamp, shortHex } from '../lib/time'
@@ -35,6 +36,9 @@ import { ChestBlock, KeyLine } from './ItemRows'
 import { ConfirmModal } from './ConfirmModal'
 import { ItemFace } from './ItemIcon'
 import { ShardSpin } from '../scene/ShardSpin'
+import { EventData } from './EventData'
+
+const ICON = 12
 
 export function SecretModal(): JSX.Element | null {
   const selected = useShards((s) => s.selectedSecret)
@@ -176,17 +180,22 @@ export function SecretModal(): JSX.Element | null {
           <Comments subject={{ author: item.author, lookupId: item.lookupId, itemId: item.lineage ?? item.key, type: item.type, target: item.target, at: item.at, height: item.height }} />
         )}
 
+        {/* The actions between two rules: the comments above, the event data
+            below (arkinox, 2026-10-20). */}
+        <hr className="secret__rule" />
+
         <div className="secret__actions">
-          <button className="secret__act" onClick={goTo}>GO TO IT</button>
+          <button className="secret__act" onClick={goTo} title="Go to it"><Rotate3d size={ICON} strokeWidth={2.25} aria-hidden />VIEW</button>
           {(item.type === 'shard' || item.type === 'message') && (!coin || words) && (
             <button className="secret__act" onClick={copy} title={item.type === 'shard' ? 'Copy this model into your workshop' : coin ? 'Copy the words around the token' : 'Copy the text'}>
+              {item.type === 'shard' ? <CopyPlus size={ICON} strokeWidth={2.25} aria-hidden /> : <Copy size={ICON} strokeWidth={2.25} aria-hidden />}
               {copied ? 'COPIED' : item.type === 'shard' ? 'COPY TO WORKSHOP' : 'COPY TEXT'}
             </button>
           )}
           {!mine && (
             <>
-              <button className={`secret__act ${targeted ? 'is-on' : ''}`} onClick={target}>{targeted ? 'TARGETED' : 'TARGET'} CREATOR</button>
-              <button className="secret__act" onClick={watch}>SPECTATE</button>
+              <button className={`secret__act ${targeted ? 'is-on' : ''}`} onClick={target}><Target size={ICON} strokeWidth={2.25} aria-hidden />{targeted ? 'TARGETED' : 'TARGET'} CREATOR</button>
+              <button className="secret__act" onClick={watch}><TvMinimal size={ICON} strokeWidth={2.25} aria-hidden />SPECTATE</button>
             </>
           )}
           {/* A thing revealed from a chest of yours is part of that chest's
@@ -226,6 +235,13 @@ export function SecretModal(): JSX.Element | null {
           )}
         </div>
         {refusal && <p className="secret__status" role="status">{refusal}</p>}
+
+        {item.event && (
+          <>
+            <hr className="secret__rule" />
+            <EventData event={item.event} />
+          </>
+        )}
 
         {/* The card sits over this modal, which stays up behind it: CANCEL,
             Escape and a tap on its backdrop come back here unchanged. It is

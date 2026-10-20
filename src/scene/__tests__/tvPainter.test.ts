@@ -638,7 +638,9 @@ describe('the chiron', () => {
   })
 
   it('does not tag anyone else', () => {
-    expect(paintChiron('ann', false).texts.some((t) => t.text === 'AGENT')).toBe(false)
+    const { texts } = paintChiron('ann', false)
+    expect(texts.some((t) => t.text === 'ANN')).toBe(true)
+    expect(texts.some((t) => t.text === 'AGENT')).toBe(false)
   })
 
   it('cuts a long name short so the tag still fits where the name would have ended', () => {

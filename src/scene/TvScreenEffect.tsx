@@ -40,7 +40,7 @@ import { useContext, useEffect, useMemo, useRef } from 'react'
 import { useFrame, useThree } from '@react-three/fiber'
 import { BlendFunction, Effect, EffectAttribute, type Pass } from 'postprocessing'
 import { EffectComposerContext } from '@react-three/postprocessing'
-import { CanvasTexture, LinearFilter, SRGBColorSpace, Uniform } from 'three'
+import { CanvasTexture, LinearFilter, SRGBColorSpace, Uniform, Vector2 } from 'three'
 import { placeable, useTv } from '../store/useTv'
 import { useProfiles } from '../store/useProfiles'
 import { targetColor } from '../lib/targets'
@@ -73,6 +73,8 @@ uniform float uAberr;
 uniform float uTear;
 uniform float uTearSeed;
 uniform float uDrop;
+uniform float uFlicker;
+uniform vec2 uDrift;
 uniform sampler2D uOverlay;
 
 float tvNoise(vec2 p) {
@@ -131,14 +133,9 @@ void mainImage(const in vec4 inputColor, const in vec2 uv, out vec4 outputColor)
   // including the text"). The radial part alone left the middle, where the
   // camera holds the avatar, all but still.
   float glitch = clamp((uAberr - 1.0) / 7.0, 0.0, 1.0);
-  // Turning slowly: the split grows and shrinks, it does not swing about
-  // (2026-10-19: "it fluctuates too much").
-  float turn = uTime * 0.35;
-  // Of one length all the way round, and turning steadily, so only the
-  // glitch sets how far it pulls (review of #391: the bare vector swung
-  // threefold by itself, and normalised with its second frequency it now
-  // and then spun half round in under half a second). Mostly sideways.
-  vec2 drift = normalize(vec2(cos(turn), 0.6 * sin(turn))) * 0.0028 * (uAberr - 1.0);
+  // Turning slowly, of one length all the way round (uDrift, set once a
+  // frame: tubeDrift).
+  vec2 drift = uDrift * 0.0028 * (uAberr - 1.0);
   vec2 ca = c * (0.0015 + 0.0045 * r2) * uAberr + drift;
   vec3 col = vec3(picture(pw + ca).r, picture(pw).g, picture(pw - ca).b);
   // A ghost of the picture further along the split: an avatar's red is all in
@@ -146,20 +143,6 @@ void mainImage(const in vec4 inputColor, const in vec2 uv, out vec4 outputColor)
   if (glitch > 0.0) col = max(col, picture(pw + ca * 2.5) * 0.45 * glitch);
   col *= 1.0 - bar;
 
-  // Snow: chunky (about three CSS pixels a grain), at a film's frame rate,
-  // dark, and soft: each grain blends into the next, as a tube's do, where
-  // square blocks read as pixels (arkinox, 2026-10-18: "on a CRT it would be
-  // blurry").
-  // A new field each frame, from a small offset: large coordinates break
-  // the hash into diagonal stripes.
-  float frame = mod(floor(uTime * 24.0), 64.0);
-  vec2 sp = gl_FragCoord.xy / (3.0 * uPx) + vec2(tvNoise(vec2(frame, 1.0)), tvNoise(vec2(frame, 2.0))) * 97.0;
-  vec2 si = floor(sp);
-  vec2 sf = fract(sp);
-  sf = sf * sf * (3.0 - 2.0 * sf);
-  float n = mix(mix(tvNoise(si), tvNoise(si + vec2(1.0, 0.0)), sf.x), mix(tvNoise(si + vec2(0.0, 1.0)), tvNoise(si + vec2(1.0, 1.0)), sf.x), sf.y);
-  // Blending pulls toward grey: stretch it back out.
-  n = clamp(0.5 + (n - 0.5) * 1.6, 0.0, 1.0);
   // The signal going (a dropout glitch): the picture sinks a little into the
   // snow, as if drifting out of range, never more than about two fifths
   // (2026-10-19: "it should fade in slowly and subtly, only up to maybe 40%
@@ -167,7 +150,29 @@ void mainImage(const in vec4 inputColor, const in vec2 uv, out vec4 outputColor)
   col *= 1.0 - 0.2 * uDrop;
   float snow = max(uSnow, uDrop * 0.38);
   if (uCutKind > 1.5 && uCut < 1.0) snow = max(snow, (1.0 - uCut) * 0.95);
-  col = mix(col, vec3(n * 0.5), snow);
+  // Only worked out when there is some: most of the time there is none, and
+  // its six hashes, a sine each, were half of the twelve sines the tube took
+  // on every pixel of every frame (2026-10-20: "the perf on /tv on my laptop
+  // is not satisfactory"; the three that hang on the time alone, flicker and
+  // drift, are worked out once a frame now). The same for the whole frame,
+  // so every pixel takes the same way and the branch is cheap.
+  if (snow > 0.0) {
+    // Snow: chunky (about three CSS pixels a grain), at a film's frame rate,
+    // dark, and soft: each grain blends into the next, as a tube's do, where
+    // square blocks read as pixels (arkinox, 2026-10-18: "on a CRT it would
+    // be blurry").
+    // A new field each frame, from a small offset: large coordinates break
+    // the hash into diagonal stripes.
+    float frame = mod(floor(uTime * 24.0), 64.0);
+    vec2 sp = gl_FragCoord.xy / (3.0 * uPx) + vec2(tvNoise(vec2(frame, 1.0)), tvNoise(vec2(frame, 2.0))) * 97.0;
+    vec2 si = floor(sp);
+    vec2 sf = fract(sp);
+    sf = sf * sf * (3.0 - 2.0 * sf);
+    float n = mix(mix(tvNoise(si), tvNoise(si + vec2(1.0, 0.0)), sf.x), mix(tvNoise(si + vec2(0.0, 1.0)), tvNoise(si + vec2(1.0, 1.0)), sf.x), sf.y);
+    // Blending pulls toward grey: stretch it back out.
+    n = clamp(0.5 + (n - 0.5) * 1.6, 0.0, 1.0);
+    col = mix(col, vec3(n * 0.5), snow);
+  }
   // A dip: from black, up.
   if (uCutKind < 0.5 && uCut < 1.0) col *= smoothstep(0.15, 1.0, uCut);
 
@@ -188,9 +193,9 @@ void mainImage(const in vec4 inputColor, const in vec2 uv, out vec4 outputColor)
   // Corners into the dark, as a tube's are, and the glass's own edge soft.
   col *= smoothstep(1.55, 0.55, length(c * vec2(0.92, 1.0)));
   col *= 1.0 - smoothstep(-0.02, 0.012, edge);
-  // Flicker and grain.
+  // Flicker (uFlicker, set once a frame: tubeFlicker) and grain.
   float g = tvNoise(gl_FragCoord.xy + fract(uTime) * 917.0);
-  col *= 0.975 + 0.025 * sin(uTime * 57.0);
+  col *= uFlicker;
   col += (g - 0.5) * 0.03;
   outputColor = vec4(col, 1.0);
 }`
@@ -211,6 +216,8 @@ class CrtEffect extends Effect {
         ['uTear', new Uniform(0)],
         ['uTearSeed', new Uniform(0)],
         ['uDrop', new Uniform(0)],
+        ['uFlicker', new Uniform(1)],
+        ['uDrift', new Uniform(new Vector2(1, 0))],
         ['uOverlay', new Uniform(overlay)],
       ]),
     })
@@ -230,6 +237,25 @@ function tubeOnly(passes: Pass[] | undefined, effect: Effect, on: boolean): void
   const tube = passes[at], before = passes[at - 1]
   if (tube.enabled !== on) tube.enabled = on
   if (before.renderToScreen === on) before.renderToScreen = !on
+}
+
+/**
+ * The aberration's drift at `t` seconds, into `out`: turning slowly, so the
+ * split grows and shrinks rather than swinging about (2026-10-19: "it
+ * fluctuates too much"); of one length all the way round, and turning
+ * steadily, so only the glitch sets how far it pulls (review of #391: the
+ * bare vector swung threefold by itself, and normalised with its second
+ * frequency it now and then spun half round in under half a second). Mostly
+ * sideways. Worked out once a frame here rather than on every pixel.
+ */
+export function tubeDrift(t: number, out: Vector2): Vector2 {
+  const turn = t * 0.35
+  return out.set(Math.cos(turn), 0.6 * Math.sin(turn)).normalize()
+}
+
+/** The tube's flicker at `t` seconds, a factor on the picture: once a frame here rather than on every pixel. */
+export function tubeFlicker(t: number): number {
+  return 0.975 + 0.025 * Math.sin(t * 57)
 }
 
 /** Which of the three cuts a cut is: dip, roll, snow, in turn; always a dip with reduced motion. */
@@ -426,6 +452,8 @@ export function TvScreenEffect(): JSX.Element {
     if (!tv.on) return
     const u = effect.uniforms
     u.get('uTime')!.value = state.clock.elapsedTime
+    u.get('uFlicker')!.value = tubeFlicker(state.clock.elapsedTime)
+    tubeDrift(state.clock.elapsedTime, u.get('uDrift')!.value as Vector2)
     u.get('uPx')!.value = state.gl.getPixelRatio()
     const since = now - tv.cutAt
     u.get('uCut')!.value = Math.min(1, Math.max(0, since / CUT_MS))

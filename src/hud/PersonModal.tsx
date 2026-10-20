@@ -26,7 +26,7 @@ import { nip19 } from 'nostr-tools'
 import { Bot, Copy, CopyPlus, MessageSquare, Target, TvMinimal } from 'lucide-react'
 import type { NostrEvent } from 'nostr-tools'
 import type { ShardModel } from 'sno-core/shards'
-import { ProfilePic } from './ProfileBadge'
+import { ProfilePic, ProfileTap } from './ProfileBadge'
 import { useProfile } from '../hooks/useProfile'
 import { useEscape } from '../hooks/useEscape'
 import { profileLabel } from '../store/useProfiles'
@@ -116,7 +116,7 @@ export function PersonCard({ pubkey, shard, event = null, onClose, Preview = Sha
   const hasShard = !!shard && shard.vertices.length > 0
 
   return (
-    <div className="modal modal--top" role="dialog" aria-modal="true" aria-label={`${name}, profile`} onPointerDown={onClose}>
+    <div className="modal modal--top" role="dialog" aria-modal="true" aria-label={`${name}, avatar`} onPointerDown={onClose}>
       <div className="modal__card secret person" onPointerDown={(e) => e.stopPropagation()}>
         <div className="secret__head">
           <span className="secret__badge">AVATAR</span>
@@ -127,9 +127,9 @@ export function PersonCard({ pubkey, shard, event = null, onClose, Preview = Sha
 
         <div className="secret__creator">
           <div className="secret__person">
-            <ProfilePic pubkey={pubkey} size={40} />
+            <ProfileTap pubkey={pubkey}><ProfilePic pubkey={pubkey} size={40} /></ProfileTap>
             <div className="secret__person-text">
-              <span className="secret__name">{name}</span>
+              <ProfileTap pubkey={pubkey} className="secret__name">{name}</ProfileTap>
               {profile?.nip05 && <span className="secret__nip05">{profile.nip05.replace(/^_@/, '')}</span>}
               <span className="person__npub">
                 <span className="secret__npub" title={npub}>{shortHex(npub, 14, 8)}</span>
@@ -142,8 +142,8 @@ export function PersonCard({ pubkey, shard, event = null, onClose, Preview = Sha
           {operator && (
             <div className="person__operator">
               <span className="secret__label">Operator</span>
-              <ProfilePic pubkey={operator} size={16} />
-              <span className="person__operator-name" title={nip19.npubEncode(operator)}>{profileLabel(operatorProfile, nip19.npubEncode(operator))}{operator === me ? ' (you)' : ''}</span>
+              <ProfileTap pubkey={operator}><ProfilePic pubkey={operator} size={16} /></ProfileTap>
+              <ProfileTap pubkey={operator} className="person__operator-name">{profileLabel(operatorProfile, nip19.npubEncode(operator))}{operator === me ? ' (you)' : ''}</ProfileTap>
               {/* Your own agent: straight to its private conversation, as the
                   AGENTS panel's TALK does (arkinox, 2026-10-14). */}
               {operator === me && (

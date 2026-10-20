@@ -9433,3 +9433,63 @@ a.feed__act { text-decoration: none; }
   top: 0;
   pointer-events: none;
 }
+
+/* A picture or a name that opens the profile (ProfileTap): looks as it did,
+   reads as tappable. */
+/* Inherits at no specificity, so a class beside it (.secret__name,
+   .person__operator-name, .comment__name) keeps its own size and colour
+   wherever it sits in this file (review of #401). */
+:where(.profile-tap) { font: inherit; color: inherit; }
+.profile-tap {
+  padding: 0;
+  margin: 0;
+  text-align: left;
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+  align-self: flex-start;
+  min-width: 0;
+}
+.profile-tap:hover .badge__name,
+.profile-tap.secret__name:hover,
+.profile-tap.person__operator-name:hover { color: var(--accent); }
+.profile-tap:focus-visible { outline: 1px solid var(--accent); outline-offset: 2px; border-radius: 4px; }
+
+/* Someone's profile, read whole (ProfileView), over the card that opened it. */
+.modal--profile { z-index: 320; }
+.profilev__banner {
+  display: block;
+  width: 100%;
+  height: 110px;
+  object-fit: cover;
+  border-radius: 6px;
+  margin-bottom: 10px;
+  background: rgba(0, 229, 255, 0.06);
+}
+.profilev__who { display: flex; align-items: center; gap: 12px; }
+.profilev__who--under-banner { margin-top: -38px; padding-left: 10px; }
+.profilev__pic { width: 72px; height: 72px; min-width: 72px; border: 2px solid #05070d; }
+.profilev__pic-fallback { display: inline-flex; border-radius: 50%; border: 2px solid #05070d; }
+.profilev__who--under-banner .profilev__names { margin-top: 38px; }
+.profilev__names { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.profilev__name { font-size: 15px; color: var(--fg); overflow-wrap: anywhere; }
+.profilev__handle { font-size: 10px; color: var(--dim); overflow-wrap: anywhere; }
+.profilev__names .secret__nip05 { overflow-wrap: anywhere; }
+.profilev__about {
+  margin: 12px 0 0;
+  font-size: 11px;
+  line-height: 1.55;
+  color: var(--fg);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  max-height: 220px;
+  overflow: auto;
+}
+.profilev__facts { display: grid; gap: 6px; margin: 12px 0 0; }
+.profilev__facts > div { display: grid; grid-template-columns: 72px 1fr; gap: 8px; align-items: baseline; }
+.profilev__facts dt { font-size: 8px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--dim); }
+.profilev__facts dd { margin: 0; min-width: 0; font-size: 11px; color: var(--fg); overflow-wrap: anywhere; }
+.profilev__facts a { color: var(--accent); }
+.profilev__operator { display: inline-flex; align-items: center; gap: 6px; }
+.profilev__status { margin: 12px 0 0; font-size: 9px; letter-spacing: 0.12em; color: var(--dim); }
+.profilev__actions { margin-top: 14px; }

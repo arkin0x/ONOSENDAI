@@ -4,7 +4,7 @@
  */
 
 import { describe, expect, it, vi } from 'vitest'
-import { finalizeEvent, generateSecretKey, getPublicKey } from 'nostr-tools/pure'
+import { finalizeEvent, generateSecretKey, getEventHash, getPublicKey, verifiedSymbol } from 'nostr-tools/pure'
 
 const checks = vi.hoisted(() => ({ n: 0 }))
 vi.mock('nostr-tools/pure', async (original) => {
@@ -49,6 +49,26 @@ describe('verifyRelayEvent', () => {
     expect(checks.n).toBe(before + 2)
     // The good one is still good afterwards.
     expect(verifyRelayEvent(copy(ev))).toBe(true)
+  })
+
+  it('an event with no signature, or not a string one, is refused, however right its id (review of #405)', () => {
+    type Ev = Parameters<typeof verifyRelayEvent>[0]
+    const fields = { kind: 3333, created_at: 1_760_000_001, tags: [['A', 'hop']], content: 'forged', pubkey: getPublicKey(generateSecretKey()) }
+    const id = getEventHash(fields as Parameters<typeof getEventHash>[0])
+    const unsigned = { ...fields, id } as unknown as Ev
+    expect(verifyRelayEvent(unsigned)).toBe(false)
+    expect((unsigned as unknown as Record<symbol, unknown>)[verifiedSymbol]).not.toBe(true)
+    // Again, in case the first refusal left anything behind.
+    expect(verifyRelayEvent({ ...fields, id } as unknown as Ev)).toBe(false)
+    expect(verifyRelayEvent({ ...fields, id, sig: null } as unknown as Ev)).toBe(false)
+    expect(verifyRelayEvent({ ...fields, id, sig: 7 } as unknown as Ev)).toBe(false)
+    // A real event, checked once, then sent again with its signature taken away or its id not a string.
+    const ev = signed('stripped')
+    expect(verifyRelayEvent(copy(ev))).toBe(true)
+    const { sig: _gone, ...bare } = copy(ev)
+    expect(verifyRelayEvent(bare as unknown as Ev)).toBe(false)
+    expect(verifyRelayEvent({ ...copy(ev), sig: undefined } as unknown as Ev)).toBe(false)
+    expect(verifyRelayEvent({ ...copy(ev), id: 42 } as unknown as Ev)).toBe(false)
   })
 
   it('another signature over the same id is checked in full', () => {

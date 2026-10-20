@@ -65,22 +65,31 @@ function authSign(template: EventTemplate): Promise<VerifiedEvent> {
 }
 
 /**
- * The signatures this page has already checked, by event id: the signature
- * that passed. The pool drops a repeat only within one subscription, so the
- * same event asked for again by a later one (a chain fetched for the chain
- * view, then for a spectation, then by the presence sweep) had its Schnorr
- * check run again each time, about a millisecond apiece on the main thread:
- * 417 of the 1,156 checks at one boot were repeats (2026-10-20, spectating on
- * the smoke seed). A repeat still has its id recomputed, which commits to the
- * pubkey and every other field, so only a signature already checked against
- * that exact id and pubkey is taken on trust.
+ * The signatures this page has already checked, as `id:sig`, the store's own
+ * form for its saved chain (useCyberspace verifiedSigs). The pool drops a
+ * repeat only within one subscription, so the same event asked for again by a
+ * later one (a chain fetched for the chain view, then for a spectation, then
+ * by the presence sweep) had its Schnorr check run again each time, about a
+ * millisecond apiece on the main thread: 408 of the 1,144 checks at one boot
+ * were repeats (arkinox, 2026-10-20: the laptop "still isn't great"; counted
+ * spectating on the smoke seed). A repeat still has its id recomputed, which
+ * commits to the pubkey and every other field, so only a signature already
+ * checked against that exact id and pubkey is taken on trust. Only a string
+ * id and sig are ever looked up or kept: an event with no signature must not
+ * match an id that was never checked (review of #405).
  */
 const VERIFIED_KEPT = 10_000
-const verifiedSigs = new Map<string, string>()
+const verifiedSigs = new Set<string>()
 
-/** verifyEvent, skipping the Schnorr check for a signature already checked here (verifiedSigs). */
+/**
+ * verifyEvent, skipping the Schnorr check for a signature already checked
+ * here (verifiedSigs). For events freshly parsed off a relay socket, as the
+ * pool hands them over: verifyEvent trusts a verdict already marked on the
+ * object, and an object marked and then changed would be remembered as it is.
+ */
 export function verifyRelayEvent(ev: NostrEvent): boolean {
-  if (verifiedSigs.get(ev.id) === ev.sig) {
+  const key = typeof ev.id === 'string' && typeof ev.sig === 'string' ? `${ev.id}:${ev.sig}` : null
+  if (key !== null && verifiedSigs.has(key)) {
     let same = false
     try { same = getEventHash(ev) === ev.id } catch { same = false }
     if (same) {
@@ -90,10 +99,10 @@ export function verifyRelayEvent(ev: NostrEvent): boolean {
     }
   }
   const ok = verifyEvent(ev as unknown as VerifiedEvent)
-  if (ok) {
-    // Oldest first out: a map keeps insertion order.
-    if (verifiedSigs.size >= VERIFIED_KEPT) verifiedSigs.delete(verifiedSigs.keys().next().value as string)
-    verifiedSigs.set(ev.id, ev.sig)
+  if (ok && key !== null && !verifiedSigs.has(key)) {
+    // Oldest first out: a set keeps insertion order.
+    if (verifiedSigs.size >= VERIFIED_KEPT) verifiedSigs.delete(verifiedSigs.values().next().value as string)
+    verifiedSigs.add(key)
   }
   return ok
 }

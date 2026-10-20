@@ -64,10 +64,7 @@ export function SecretModal(): JSX.Element | null {
   // the chest's sealed contents and not a bag entry of its own.
   const wire = useShards((s) => (item && !item.chestId ? s.mine.find((d) => d.eventId === item.key) ?? null : null))
   // EDIT: a shard of yours this device can move (useShards editable).
-  const movable = useShards((s) => {
-    const d = item ? s.mine.find((m) => m.eventId === item.key) : undefined
-    return !!d && !item?.chestId && editable(d, me)
-  })
+  const movable = !!wire && editable(wire, me)
   // The chest a revealed thing came out of, by name, for the card's question.
   const chestName = useShards((s) => {
     const id = item?.chestId

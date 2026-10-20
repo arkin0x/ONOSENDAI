@@ -3,9 +3,9 @@
  *
  * GO TO IT on a hidden thing, VIEW on a loot item, or tapping one of your
  * deployments flies the scene to a point that is not your avatar: the store's
- * `focus` is set and the controls stand down. Spectating has SpectateBar
- * and hyperspace views have HyperspaceBar, but a focus reached any other way
- * had no exit at all: on a keyboard Escape worked, on a phone nothing did. This bar is that
+ * `focus` is set and the controls stand down. Spectating has SpectateBar and
+ * hyperspace views have HyperspaceBar, but a focus reached any other way had
+ * no exit at all: on a keyboard Escape worked, on a phone nothing did. This bar is that
  * exit. It shows whenever a focus is standing and no other bar owns it, and
  * RETURN puts the anchor back on your avatar at the zoom you left.
  */

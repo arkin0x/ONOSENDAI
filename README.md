@@ -144,8 +144,8 @@ render as billboarded notes at their coordinate with a marker of who left them.
 **Test discovery.** The card of a thing you hid has TEST DISCOVERY in its event
 data, once it is LIVE: it derives the region key fresh from the coordinate, as a
 stranger would, asks the relay, and opens what comes back, proving the whole
-round-trip independent of local state. A SCANNING / N NEAR indicator on the Shards panel shows the background
-scan working.
+round-trip independent of local state. A SCANNING / N NEAR indicator on the
+Shards panel shows the background scan working.
 
 **Models vs instances.** A **model** is a named design that lives on this
 device (the Shards panel's Models section). A deployed **instance** is one copy

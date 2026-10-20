@@ -42,6 +42,8 @@ export function relayNames(dep: Pick<MyDeployment, 'published' | 'relays'>): str
 
 export function WireData({ dep, initialTest = 'idle' }: { dep: MyDeployment; initialTest?: TestState }): JSX.Element {
   const [test, setTest] = useState<TestState>(initialTest)
+  // Why this bag's LIVE did not go, when it did not: only its own reason.
+  const failed = useShards((s) => (!dep.published && s.broadcastFailed === dep.lookupId ? s.broadcastError : null))
   const at = positionOf(dep)
   const coord = positionHex(at, dep.plane)
   const relays = relayNames(dep)
@@ -81,6 +83,7 @@ export function WireData({ dep, initialTest = 'idle' }: { dep: MyDeployment; ini
           <dd><PublishSwitch lookupId={dep.lookupId} published={dep.published} /></dd>
         </div>
       </dl>
+      {failed && <p className="eventdata__refusal" role="status">{failed}</p>}
       {dep.published && (
         <button
           className={`secret__act eventdata__test eventdata__test--${test}`}
@@ -89,7 +92,8 @@ export function WireData({ dep, initialTest = 'idle' }: { dep: MyDeployment; ini
             : 'Derive the region key from the coordinate, as a stranger would, ask the relay, and open what comes back'}
           onClick={() => void runTest()}
           disabled={test === 'testing'}
-        ><Radar size={12} strokeWidth={2.25} aria-hidden />{TEST_WORDS[test]}</button>
+        >{/* One mark to a state: the radar until there is a result, then its ✓ or ✗. */}
+          {(test === 'idle' || test === 'testing') && <Radar size={12} strokeWidth={2.25} aria-hidden />}{TEST_WORDS[test]}</button>
       )}
       {refusal && <p className="eventdata__refusal" role="status">{refusal}</p>}
     </>

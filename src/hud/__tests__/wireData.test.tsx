@@ -91,6 +91,26 @@ describe('the wire facts (WireData)', () => {
     expect(Object.values(TEST_WORDS).join('')).not.toContain(String.fromCharCode(0x2014))
   })
 
+  it('says why its own LIVE did not go, and never another bag\'s reason', async () => {
+    const dep = await deployment()
+    const render = (): string => { Object.assign(useShards.getInitialState(), useShards.getState()); return renderToStaticMarkup(<WireData dep={dep} />) }
+    useShards.setState({ broadcastError: 'No relay took the bag. Try again when one is reachable.', broadcastFailed: LOOKUP })
+    expect(render()).toContain('No relay took the bag.')
+    useShards.setState({ broadcastFailed: 'cd'.repeat(32) })
+    expect(render()).not.toContain('No relay took the bag.')
+    useShards.setState({ broadcastError: null, broadcastFailed: null })
+  })
+
+  it('says which bag a failed broadcast was', async () => {
+    const dep = await deployment()
+    useShards.setState({ mine: [dep], broadcasting: null, broadcastError: null, broadcastFailed: null })
+    const { publishMany } = await import('../../lib/relay')
+    vi.mocked(publishMany).mockResolvedValueOnce({ ok: false } as never)
+    expect(await useShards.getState().broadcast(LOOKUP)).toBe(false)
+    expect(useShards.getState().broadcastFailed).toBe(LOOKUP)
+    expect(useShards.getState().broadcastError).toMatch(/No relay/)
+  })
+
   it('never shows the region key', async () => {
     const html = renderToStaticMarkup(<WireData dep={await deployment({ published: true, relays: ['wss://relay.test'] })} />)
     expect(html).not.toContain(REGION_KEY)

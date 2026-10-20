@@ -20,7 +20,7 @@
  * to our metadata section ... then we can have these unified").
  */
 
-import { useMemo, useState, type ReactNode } from 'react'
+import { useMemo, useRef, useState, type ReactNode } from 'react'
 import type { NostrEvent } from 'nostr-tools'
 import { formatStamp } from '../lib/time'
 import { CHEST_KIND, KEY_KIND, MESSAGE_KIND, OBJECT_KIND, SHARD_KIND } from '../lib/hidden'
@@ -71,11 +71,14 @@ export function kindName(kind: number): string | null {
 /** One value a tap copies, with COPIED in its place for a moment. `shown` is what reads, when it is not the value itself. */
 export function CopyValue({ value, title, shown }: { value: string; title: string; shown?: string }): JSX.Element {
   const [copied, setCopied] = useState(false)
+  // The latest tap's timer, so an earlier one never clears a newer COPIED.
+  const timer = useRef(0)
   const copy = (): void => {
     // Refused (no permission, an insecure page): nothing to undo, the words stay to select.
     navigator.clipboard?.writeText(value).catch(() => {})
     setCopied(true)
-    window.setTimeout(() => setCopied(false), COPIED_MS)
+    window.clearTimeout(timer.current)
+    timer.current = window.setTimeout(() => setCopied(false), COPIED_MS)
   }
   return <button className="eventdata__value" title={title} onClick={copy}>{copied ? 'COPIED' : shown ?? value}</button>
 }

@@ -1976,11 +1976,14 @@ kbd {
 /* TEST DISCOVERY, the width of the section, its result in its color. */
 .eventdata__test { width: 100%; }
 .eventdata__test:disabled { opacity: 0.6; cursor: default; }
-.eventdata__test--testing { color: var(--warn); border-color: var(--warn); }
+.eventdata__test--testing,
+.eventdata__test--testing:hover { color: var(--warn); border-color: var(--warn); background: rgba(255, 176, 32, 0.06); }
 .eventdata__test--found,
 .eventdata__test--found:hover { color: #05070d; background: var(--ok); border-color: var(--ok); font-weight: 700; }
 .eventdata__test--missing,
-.eventdata__test--refused { color: var(--danger); border-color: var(--danger); }
+.eventdata__test--missing:hover,
+.eventdata__test--refused,
+.eventdata__test--refused:hover { color: var(--danger); border-color: var(--danger); background: rgba(255, 59, 107, 0.08); }
 .eventdata__refusal { margin: 0; font-size: 10px; line-height: 1.5; color: var(--danger); overflow-wrap: anywhere; }
 .eventdata__json {
   position: relative;

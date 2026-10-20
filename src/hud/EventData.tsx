@@ -2,19 +2,20 @@
  * EventData.tsx: the nostr event behind a modal, at the bottom of it, under
  * the actions (arkinox, 2026-10-20): its id, `d` tag, pubkey and created_at,
  * each copied by a tap with COPIED in its place for a moment, and below them
- * the whole event as JSON in Monaspace Krypton, with COPY in the field's top
- * right corner.
+ * the whole event as JSON in Monaspace Krypton. The field has no COPY
+ * (arkinox, 2026-10-20: "we don't have to have a full event copy ... if
+ * someone wants to copy, they can manually do it"): its text can still be
+ * selected.
  *
  * A key item's secret is never shown or copied (lib/chests: "The secret is
  * shown to nobody"): it opens every chest sealed to the key, and a
  * screenshot or a pasted event would hand that to whoever saw it (review of
  * #399). The field shows the event with the secret hidden, and says that
- * this copy will not verify.
+ * the event shown will not verify.
  */
 
 import { useMemo, useState } from 'react'
 import type { NostrEvent } from 'nostr-tools'
-import { Check, Copy } from 'lucide-react'
 import { formatStamp } from '../lib/time'
 import { KEY_KIND } from '../lib/hidden'
 
@@ -44,7 +45,6 @@ export function eventJson(ev: NostrEvent): string {
 
 /** How long COPIED stays, as on the other copies. */
 const COPIED_MS = 1400
-const ICON = 11
 
 export function EventData({ event: raw }: { event: NostrEvent }): JSX.Element {
   const [copied, setCopied] = useState<string | null>(null)
@@ -78,12 +78,8 @@ export function EventData({ event: raw }: { event: NostrEvent }): JSX.Element {
           </div>
         ))}
       </dl>
-      {hidden && <p className="eventdata__note">The key's secret is hidden here, so this copy of the event will not verify.</p>}
+      {hidden && <p className="eventdata__note">The key's secret is hidden here, so the event shown will not verify.</p>}
       <div className="eventdata__json">
-        <button className="eventdata__copy" onClick={() => copy('event', json)} title="Copy the whole event">
-          {copied === 'event' ? <Check size={ICON} strokeWidth={2.25} aria-hidden /> : <Copy size={ICON} strokeWidth={2.25} aria-hidden />}
-          {copied === 'event' ? 'COPIED' : 'COPY'}
-        </button>
         <pre>{json}</pre>
       </div>
     </section>

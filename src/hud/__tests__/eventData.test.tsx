@@ -31,13 +31,11 @@ describe('EventData', () => {
     expect(html).toContain('<span class="eventdata__none">none</span>')
   })
 
-  it('shows the whole event as JSON, with COPY above it', () => {
+  it('shows the whole event as JSON, with no COPY for it (copied by hand if wanted)', () => {
     const html = renderToStaticMarkup(<EventData event={ev} />)
-    const copy = html.indexOf('eventdata__copy')
-    const pre = html.indexOf('<pre>')
-    expect(copy).toBeGreaterThan(-1)
-    expect(pre).toBeGreaterThan(copy)
     expect(html).toContain('&quot;sig&quot;: &quot;' + ev.sig + '&quot;')
+    expect(html).not.toContain('eventdata__copy')
+    expect(html).not.toContain('>COPY<')
   })
 })
 
@@ -45,7 +43,7 @@ describe('a key item never shows its secret (review of #399)', () => {
   const secret = 'f'.repeat(64)
   const key = { ...ev, kind: 3340, tags: [['C', 'x'], ['title', 'Vapor Key'], ['item', 'd'.repeat(64)], ['secret', secret], ['-']], content: 'opens the vault' }
 
-  it('hides the secret tag in the field and in what COPY copies, and says so', () => {
+  it('hides the secret tag in the field, and says so', () => {
     const html = renderToStaticMarkup(<EventData event={key} />)
     expect(html).not.toContain(secret)
     expect(eventJson(shownEvent(key).event)).not.toContain(secret)

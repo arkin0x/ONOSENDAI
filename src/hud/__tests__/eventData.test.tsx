@@ -1,7 +1,7 @@
 /**
  * The event behind a card, under its actions (arkinox, 2026-10-20): event
  * ID, d tag, pubkey and created_at, each a tap to copy, then the whole
- * event in its own field with COPY in the corner.
+ * event in its own field, selectable but with no COPY of its own.
  */
 import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it } from 'vitest'

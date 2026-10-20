@@ -152,6 +152,8 @@ export interface TvPicture {
 export interface TvAssets {
   /** Someone's name, as TV writes it (lib/tv/text tvName). */
   name: (pubkey: string) => string
+  /** Whether their kind 0 says they are a bot (NIP-24 `bot: true`), for the chiron's AGENT tag. */
+  bot?: (pubkey: string) => boolean
   /** Their picture, once loaded and safe to paint (CORS), else null. */
   picture: (pubkey: string) => HTMLImageElement | null
   /** The logo, once loaded. */
@@ -721,13 +723,42 @@ export class TvPainter {
     const tx = pcx + r + 12 * s
     const textW = w - (tx - x) - zoomW - 12 * s - 16 * s
     ctx.textAlign = 'left'
+    // A bot says so after its name, as the app's AGENT badge does, whoever
+    // it is (2026-10-20: "it should work the same for all bots. add to
+    // chiron").
+    const tagW = a.bot?.(shot.pubkey) ? this.agentTag(s, narrow) : 0
     ctx.fillStyle = FG
     ctx.font = `700 ${(narrow ? 16 : 20) * s}px ${TV_FONT}`
-    ctx.fillText(fit(ctx, a.name(shot.pubkey), textW), tx, pcy - 3 * s)
+    const name = fit(ctx, a.name(shot.pubkey), textW - (tagW ? tagW + 8 * s : 0))
+    ctx.fillText(name, tx, pcy - 3 * s)
+    if (tagW) this.agentTag(s, narrow, tx + ctx.measureText(name).width + 8 * s, pcy - 3 * s)
     ctx.fillStyle = ACCENT
     ctx.font = `${11 * s}px ${TV_FONT}`
     ctx.fillText(fit(ctx, chironDoing(shot, p.played), textW), tx, pcy + 14 * s)
     return y
+  }
+
+  /**
+   * The AGENT tag: dark letters on the accent, as the app's badge
+   * (.person__bot). Its width; drawn too when given where, its left edge at
+   * `x` and sitting on the name's `baseline`.
+   */
+  private agentTag(s: number, narrow: boolean, x?: number, baseline?: number): number {
+    const ctx = this.ctx
+    const size = (narrow ? 9 : 10) * s
+    const pad = 5 * s
+    ctx.font = `700 ${size}px ${TV_FONT}`
+    const label = 'AGENT'
+    const w = pad + ctx.measureText(label).width + pad
+    if (x === undefined || baseline === undefined) return w
+    const h = size + 6 * s
+    const y = baseline - h + 1 * s
+    ctx.fillStyle = ACCENT
+    roundRect(ctx, x, y, w, h, 3 * s)
+    ctx.fill()
+    ctx.fillStyle = '#05070d'
+    ctx.fillText(label, x + pad, y + h / 2 + size * 0.36)
+    return w
   }
 
   /** The zoom as a power of two, 2 and its exponent raised, boxed, its right edge at `right`, centred on `cy`; its width. */

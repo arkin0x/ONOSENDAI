@@ -597,3 +597,59 @@ describe('the HOSAKA commercial', () => {
     expect(words.some((w) => w.includes('HIGH-AVAILABILITY OFFLOAD SERVICE'))).toBe(true)
   })
 })
+
+describe('the chiron', () => {
+  /** A canvas that keeps each line of text drawn, and where. */
+  function textCanvas(): { canvas: HTMLCanvasElement; texts: Array<{ text: string; x: number; y: number }> } {
+    const texts: Array<{ text: string; x: number; y: number }> = []
+    const ctx = new Proxy({
+      measureText: (t: string) => ({ width: Array.from(t).length * 7 }),
+      createLinearGradient: () => ({ addColorStop: () => {} }),
+      createRadialGradient: () => ({ addColorStop: () => {} }),
+      fillText: (text: string, x: number, y: number) => { texts.push({ text, x, y }) },
+    } as Record<string, unknown>, {
+      get: (target, key) => (key in target ? target[key as string] : () => {}),
+      set: () => true,
+    })
+    return { canvas: { width: 0, height: 0, getContext: () => ctx } as unknown as HTMLCanvasElement, texts }
+  }
+
+  function paintChiron(pubkey: string, bot: boolean): { texts: Array<{ text: string; x: number; y: number }>; name: string } {
+    vi.spyOn(performance, 'now').mockReturnValue(1e12)
+    const item = { kind: 'comment' as const, id: 'c'.repeat(64), pubkey, at: 1, text: 'hi', on: 'move' as const, about: null }
+    const shot = { id: item.id, kind: 'comment' as const, item, pubkey, beats: [], start: 1, end: 1, offsets: [], length: 10 }
+    useTv.setState({ shot, status: 'playing' })
+    const d = textCanvas()
+    const p = new TvPainter(d.canvas)
+    p.size(1200, 700, 1)
+    p.paint(picture({ shot }), { ...assets, bot: () => bot }, 1e12, 1, false)
+    vi.restoreAllMocks()
+    return { texts: d.texts, name: pubkey.toUpperCase() }
+  }
+
+  it('tags any bot AGENT, after its name and on its line (arkinox, 2026-10-20)', () => {
+    const { texts, name } = paintChiron('xor', true)
+    const shown = texts.find((t) => t.text === name)!
+    const tag = texts.find((t) => t.text === 'AGENT')!
+    expect(shown).toBeDefined()
+    expect(tag).toBeDefined()
+    expect(tag.x).toBeGreaterThan(shown.x + name.length * 7)
+    expect(Math.abs(tag.y - shown.y)).toBeLessThan(12)
+  })
+
+  it('does not tag anyone else', () => {
+    const { texts } = paintChiron('ann', false)
+    expect(texts.some((t) => t.text === 'ANN')).toBe(true)
+    expect(texts.some((t) => t.text === 'AGENT')).toBe(false)
+  })
+
+  it('cuts a long name short so the tag still fits where the name would have ended', () => {
+    const long = 'n'.repeat(400)
+    const plain = paintChiron(long, false).texts.find((t) => t.text.startsWith('NNN'))!
+    const { texts } = paintChiron(long, true)
+    const shown = texts.find((t) => t.text.startsWith('NNN'))!
+    const tag = texts.find((t) => t.text === 'AGENT')!
+    expect(shown.text.length).toBeLessThan(plain.text.length)
+    expect(tag.x + 'AGENT'.length * 7).toBeLessThanOrEqual(plain.x + Array.from(plain.text).length * 7 + 20)
+  })
+})

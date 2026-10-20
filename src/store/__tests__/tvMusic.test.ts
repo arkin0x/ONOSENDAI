@@ -5,11 +5,13 @@
  * the browser held the sound back.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { besideUrls, holdMusicForAd, musicHeldForAd, musicProgress, nameFromUrl, setMusicVolume, shuffled, startMusic, stopMusic, toggleMusicMute, useTvMusic } from '../useTvMusic'
+import { besideUrls, holdMusicForAd, musicHeldForAd, musicProgress, nameFromUrl, resumeMusic, setMusicVolume, shuffled, startMusic, stopMusic, toggleMusicMute, useTvMusic } from '../useTvMusic'
 
 class FakeAudio extends EventTarget {
   static made: FakeAudio[] = []
   static refuse = false
+  /** A play that fails some other way than for want of a tap, leaving the element paused. */
+  static fails: string | null = null
   /** Plays wait for data that never comes, and a new source cuts them off, as a real element's do. */
   static hang = false
   private pending: Array<(e: Error) => void> = []
@@ -41,13 +43,21 @@ class FakeAudio extends EventTarget {
   pauses = 0
   /** Loaded enough to play (HAVE_CURRENT_DATA and up) unless a test says not. */
   readyState = 4
-  pause(): void { this.pauses++; this.paused = true }
+  /** A pause of a playing element is told, a moment later, as a real one's is. */
+  pause(): void {
+    this.pauses++
+    if (this.paused) return
+    this.paused = true
+    queueMicrotask(() => this.fire('pause'))
+  }
   play(): Promise<void> {
     this.plays++
     // A play the browser refuses leaves the element paused, as a real one does.
     if (FakeAudio.refuse) return Promise.reject(Object.assign(new Error('no'), { name: 'NotAllowedError' }))
+    if (FakeAudio.fails) return Promise.reject(Object.assign(new Error('no'), { name: FakeAudio.fails }))
     this.paused = false
     if (FakeAudio.hang) return new Promise((_, reject) => { this.pending.push(reject) })
+    queueMicrotask(() => { if (!this.paused) this.fire('playing') })
     return Promise.resolve()
   }
   fire(type: string): void { this.dispatchEvent(new Event(type)) }
@@ -62,6 +72,7 @@ const flush = async (): Promise<void> => { for (let i = 0; i < 5; i++) await Pro
 beforeEach(() => {
   FakeAudio.made = []
   FakeAudio.refuse = false
+  FakeAudio.fails = null
   FakeAudio.hang = false
   FakeAudio.fixedVolume = false
   vi.useFakeTimers()
@@ -74,6 +85,152 @@ afterEach(() => {
   stopMusic()
   vi.useRealTimers()
   vi.unstubAllGlobals()
+})
+
+describe('TV music back from the background (arkinox, 2026-10-20)', () => {
+  // Where TV is seen or not: the store's own visibility handler calls resumeMusic on the way back.
+  const page = { visibilityState: 'visible' }
+  beforeEach(() => { page.visibilityState = 'visible'; vi.stubGlobal('document', page) })
+  // A tap here mutes as well: the tests after these start unmuted.
+  afterEach(() => { useTvMusic.setState({ muted: false }) })
+  const away = (): void => { page.visibilityState = 'hidden' }
+  const back = (): void => { page.visibilityState = 'visible'; resumeMusic() }
+
+  it('a play after the break that failed while away is asked for again on the way back', async () => {
+    startMusic(list)
+    await flush()
+    away()
+    holdMusicForAd(true)
+    vi.advanceTimersByTime(700)
+    FakeAudio.fails = 'AbortError'
+    holdMusicForAd(false)
+    await flush()
+    expect(audio().paused).toBe(true)
+    FakeAudio.fails = null
+    const plays = audio().plays
+    back()
+    expect(audio().plays).toBe(plays + 1)
+    expect(audio().paused).toBe(false)
+  })
+
+  it('a tap on NOW PLAYING plays a track that should be playing and is not', async () => {
+    startMusic(list)
+    await flush()
+    FakeAudio.fails = 'AbortError'
+    holdMusicForAd(true)
+    vi.advanceTimersByTime(700)
+    holdMusicForAd(false)
+    await flush()
+    FakeAudio.fails = null
+    const plays = audio().plays
+    toggleMusicMute()
+    expect(audio().plays).toBe(plays + 1)
+    await flush()
+    // Sounding now: the next tap is only a mute.
+    toggleMusicMute()
+    expect(audio().plays).toBe(plays + 1)
+  })
+
+  it('a play the browser holds and never answers is asked for again by a tap', async () => {
+    startMusic(list)
+    await flush()
+    holdMusicForAd(true)
+    vi.advanceTimersByTime(700)
+    FakeAudio.hang = true
+    holdMusicForAd(false)
+    await flush()
+    expect(audio().paused).toBe(false)
+    const plays = audio().plays
+    toggleMusicMute()
+    expect(audio().plays).toBe(plays + 1)
+  })
+
+  it('a pause while away stands too: the lock screen\'s controls are the viewer\'s', async () => {
+    startMusic(list)
+    await flush()
+    away()
+    audio().pause()
+    await flush()
+    const plays = audio().plays
+    back()
+    holdMusicForAd(true)
+    vi.advanceTimersByTime(700)
+    holdMusicForAd(false)
+    expect(audio().plays).toBe(plays)
+  })
+
+  it('a track whose play failed before the break comes back after it', async () => {
+    startMusic(list)
+    await flush()
+    // One break's way back fails, and nothing has taken it up again yet.
+    holdMusicForAd(true)
+    vi.advanceTimersByTime(700)
+    FakeAudio.fails = 'AbortError'
+    holdMusicForAd(false)
+    await flush()
+    FakeAudio.fails = null
+    expect(audio().paused).toBe(true)
+    holdMusicForAd(true)
+    vi.advanceTimersByTime(700)
+    const plays = audio().plays
+    holdMusicForAd(false)
+    expect(audio().plays).toBe(plays + 1)
+  })
+
+  it('the break\'s own pause, told after the break is over, is not taken for the viewer\'s', async () => {
+    startMusic(list)
+    await flush()
+    holdMusicForAd(true)
+    // The fade's end and the break's end in one go, as a background tab's late timers run.
+    vi.advanceTimersByTime(700)
+    FakeAudio.fails = 'AbortError'
+    holdMusicForAd(false)
+    await flush()
+    FakeAudio.fails = null
+    const plays = audio().plays
+    toggleMusicMute()
+    expect(audio().plays).toBe(plays + 1)
+  })
+
+  it('the viewer\'s own pause stands: neither a tap on NOW PLAYING nor coming back plays it', async () => {
+    startMusic(list)
+    await flush()
+    audio().pause()
+    await flush()
+    const plays = audio().plays
+    toggleMusicMute()
+    away()
+    back()
+    expect(audio().plays).toBe(plays)
+  })
+
+  it('does not skip tracks as broken while away, and gives the track its 20 s again from the way back', async () => {
+    FakeAudio.hang = true
+    startMusic(list)
+    const first = audio().src
+    away()
+    // Every stall's length, so a skip is seen before the list can come round to the same track again.
+    for (let i = 0; i < 6; i++) {
+      vi.advanceTimersByTime(21_000)
+      expect(audio().src).toBe(first)
+    }
+    back()
+    vi.advanceTimersByTime(19_000)
+    expect(audio().src).toBe(first)
+    vi.advanceTimersByTime(2_000)
+    expect(audio().src).not.toBe(first)
+  })
+
+  it('the list waiting after every track failed tries again at once on the way back', () => {
+    startMusic(list)
+    for (let i = 0; i < list.length; i++) audio().fire('error')
+    expect(audio().getAttribute('src')).toBe(null)
+    expect(useTvMusic.getState().track).toBe(null)
+    away()
+    back()
+    expect(audio().getAttribute('src')).not.toBe(null)
+    expect(useTvMusic.getState().track).not.toBe(null)
+  })
 })
 
 describe('TV music in a commercial break', () => {
@@ -223,9 +380,11 @@ describe('TV music in a commercial break', () => {
     expect(audio().src).not.toBe(taken)
   })
 
-  it('a track the viewer paused stays paused after the break', () => {
+  it('a track the viewer paused stays paused after the break', async () => {
     startMusic(list)
+    await flush()
     audio().pause()
+    await flush()
     const plays = audio().plays
     holdMusicForAd(true)
     vi.advanceTimersByTime(700)

@@ -42,7 +42,7 @@ vi.mock('../../lib/relay', () => ({
 }))
 
 import { newShard, type ShardModel } from 'sno-core/shards'
-import { forgeKey } from '../../lib/chests'
+import { forgeKey, openWithSecret, readContents } from '../../lib/chests'
 import { HIDDEN_KIND, bagTemplate, type Hidden } from '../../lib/hidden'
 import { hexToBytes, type NostrEvent } from '../../lib/events'
 import { unbagRecording } from '../../lib/foundCache'
@@ -178,6 +178,60 @@ describe('a bag or a record written before the fix', () => {
     await S().deploy()
     const chest = S().mine.find((d) => d.type === 'chest')!
     expect((await entriesOf(lastBag(chest.lookupId), chest.keyHex)).map((h) => h.type).sort()).toEqual(['chest', 'shard'])
+  })
+})
+
+describe('the rewrites that take a chest out of a bag written the old way (review of #407)', () => {
+  /** The leaked bag on the relay: the chest and its contents side by side, newer than anything here. */
+  async function leakedOnRelay(): Promise<{ chestLookup: string; chestKey: string; shardId: string }> {
+    const r = await hiderWithOpenedChest()
+    const chest = S().mine.find((d) => d.type === 'chest')!
+    const inside = Object.values(S().discovered).filter((h) => h.chestId === chest.eventId)
+    relayBags.push(await useCyberspace.getState().signEvent(await bagTemplate([chest.inner, ...inside.map((h) => h.inner!)], hexToBytes(r.chestKey), r.chestLookup, 3, Math.floor(Date.now() / 1000) + 60)))
+    return { ...r, shardId: inside.find((h) => h.type === 'shard')!.eventId }
+  }
+
+  it('DELETE of the chest publishes none of what was inside it, loose', async () => {
+    const { chestLookup, chestKey } = await leakedOnRelay()
+    S().startDeployMessage('stays')
+    useShards.setState({ deployHeight: 3 })
+    await S().deploy()
+    relayBags.push(lastBag(chestLookup))
+    const chest = S().mine.find((d) => d.type === 'chest')!
+    await S().deleteInstance(chest.eventId)
+    const items = await entriesOf(lastBag(chestLookup), chestKey)
+    expect(items.map((h) => h.type)).toEqual(['message'])
+    expect(items[0].text).toBe('stays')
+  })
+
+  it('taking a content out leaves the chest alone in the bag, and none of its contents beside it', async () => {
+    const { chestLookup, chestKey, shardId } = await leakedOnRelay()
+    expect(await S().removeFromChest(shardId)).toBeNull()
+    const items = await entriesOf(lastBag(chestLookup), chestKey)
+    expect(items.map((h) => h.type)).toEqual(['chest'])
+  })
+
+  it('a scan of the leaked copy after a reload claims nothing out of the chest, and drops what an old record claimed', async () => {
+    const { chestLookup, chestKey } = await leakedOnRelay()
+    const chest = S().mine.find((d) => d.type === 'chest')!
+    // The record as the old client left it, and a fresh session: nothing found yet.
+    const inside = Object.values(S().discovered).filter((h) => h.chestId === chest.eventId)
+    useShards.setState({ mine: [...S().mine, ...inside.map((h) => ({ ...chest, eventId: h.eventId, inner: h.inner!, type: h.type, shard: h.shard, text: h.text, chest: undefined }))], discovered: {} })
+    S().addDiscovered(await entriesOf(relayBags.at(-1)!, chestKey))
+    expect(S().mine.filter((d) => d.lookupId === chestLookup).map((d) => d.type)).toEqual(['chest'])
+    // Listed as the chest's, so DELETE takes it out of the chest rather than rewriting the bag's entries.
+    for (const h of inside) expect(S().discovered[h.eventId]?.chestId).toBe(chest.eventId)
+  })
+
+  it('taking a content out of a clean chest still works as it did', async () => {
+    const { chestLookup, chestKey } = await hiderWithOpenedChest()
+    const message = Object.values(S().discovered).find((h) => h.chestId && h.type === 'message')!
+    expect(await S().removeFromChest(message.eventId)).toBeNull()
+    const items = await entriesOf(lastBag(chestLookup), chestKey)
+    expect(items.map((h) => h.type)).toEqual(['chest'])
+    const lock = Object.values(useInventory.getState().items).find((it) => it.key?.name === 'Wind Key')!.key!
+    const left = readContents(openWithSecret(items[0].chest!, lock.secretHex))
+    expect(left.map((c) => c.body.type)).toEqual(['shard'])
   })
 })
 

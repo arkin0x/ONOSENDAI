@@ -227,7 +227,7 @@ export function openerFor(chest: Pick<ChestItem, 'lockPubkey'>, keys: OpeningKey
  * rewrite of a bag leaves out what this returns (useShards publishBag), which
  * also mends a bag that was written that way. An unsigned entry is counted
  * under its claimed id and its hash both, since either may be what a record
- * or a bag files it under.
+ * or a bag files it under. A reference inside a chest is not counted.
  */
 export function sealedInside(entries: BagEntry[], keys: OpeningKey[]): Set<string> {
   const out = new Set<string>()
@@ -253,7 +253,10 @@ export function sealedInside(entries: BagEntry[], keys: OpeningKey[]): Set<strin
       progress = true
       let raw: BagEntry[]
       try { raw = openWithSecret(door, key.secretHex) } catch { continue }
+      // Events only: a reference inside a chest is never followed (readContents),
+      // and the same reference beside the chest names an object, not this chest's copy.
       for (const e of raw) {
+        if (isReference(e)) continue
         const k = entryKey(e)
         if (typeof k === 'string') out.add(k)
         read(e)

@@ -832,16 +832,29 @@ export const useShards = create<ShardsState>((set, get) => {
    * sealed to the region alone, and anyone with the region key reads it,
    * every viewer of Cyberspace TV among them. The hider's own scans used to
    * claim a chest's contents as deployments (claimOwn), so this also mends
-   * a record or a relay copy written that way. What is inside is known from
+   * a record or a relay copy written that way, and a row that names
+   * something left out goes from the record. What is inside is known from
    * the keys held here (lib/chests.ts sealedInside) and from what this
    * session revealed out of those chests; a chest nothing here opens adds
    * nothing to leave out.
+   *
+   * `before` is the bag as it stood before this rewrite (gatherInners), for
+   * a rewrite that takes a chest out: DELETE of the chest, or taking
+   * something out of it, which puts a new chest in the old one's place.
+   * What was sealed in the old chest stays out of the bag too (review of
+   * #407): otherwise a bag written the old way would keep it beside the new
+   * chest, or carry it loose with no chest at all.
    */
-  async function publishBag(inners: BagEntry[], key: Uint8Array, lookupId: string, height: number, live: boolean, settings: BagSettings, place: { at: Position; plane: Plane }, beforeSend?: () => Promise<void>): Promise<{ event: NostrEvent; published: boolean }> {
-    const inside = sealedInside(inners, openingKeys(useInventory.getState().items))
-    const chests = new Set(inners.filter((e): e is NostrEvent => !isReference(e) && e.kind === CHEST_KIND).map((e) => e.id))
+  async function publishBag(inners: BagEntry[], key: Uint8Array, lookupId: string, height: number, live: boolean, settings: BagSettings, place: { at: Position; plane: Plane }, beforeSend?: () => Promise<void>, before: BagEntry[] = []): Promise<{ event: NostrEvent; published: boolean }> {
+    const looked = [...inners, ...before]
+    const inside = sealedInside(looked, openingKeys(useInventory.getState().items))
+    const chests = new Set(looked.filter((e): e is NostrEvent => !isReference(e) && e.kind === CHEST_KIND).map((e) => e.id))
     for (const h of Object.values(get().discovered)) if (h.chestId && chests.has(h.chestId)) inside.add(h.eventId)
     const entries = inside.size > 0 ? inners.filter((e) => !inside.has(entryKey(e))) : inners
+    if (entries.length < inners.length) {
+      const mine = get().mine.filter((d) => !(d.lookupId === lookupId && inside.has(entryKey(entryOf(d)))))
+      if (mine.length < get().mine.length) { set({ mine }); saveMine(mine) }
+    }
     const createdAt = nextBagAt(lookupId)
     const event = await cyber().signEvent(await bagTemplate(entries, key, lookupId, height, createdAt, HIDDEN_KIND, settings, place))
     // Anything that must go out only once the bag is signed (an EDIT's
@@ -1419,7 +1432,7 @@ export const useShards = create<ShardsState>((set, get) => {
               objectSent = true
             }
             : undefined
-          ;({ event, published } = await publishBag(allInners, rk.key, rk.lookupId, deployHeight, live, settings, { at, plane }, sendObject))
+          ;({ event, published } = await publishBag(allInners, rk.key, rk.lookupId, deployHeight, live, settings, { at, plane }, sendObject, existing.entries))
           // A move whose new bag no relay took has not happened: the old
           // copy stays, and is never taken down (review of #369).
           if (was && live && !published) throw new Error('No relay took the moved shard. It stays where it was.')
@@ -1578,7 +1591,7 @@ export const useShards = create<ShardsState>((set, get) => {
         const keep = existing.entries.filter((e) => !fresh.some((d) => d.ref && entryKey(e) === entryKey(d.ref)))
         const allInners = mergeEntries(keep, fresh.map(entryOf))
         const settings = existing.settings ?? DEFAULT_BAG_SETTINGS
-        const { event, published } = await publishBag(allInners, key, lookupId, items[0].height, true, settings, { at: positionOf(items[0]), plane: items[0].plane })
+        const { event, published } = await publishBag(allInners, key, lookupId, items[0].height, true, settings, { at: positionOf(items[0]), plane: items[0].plane }, undefined, existing.entries)
         if (!published) {
           set({ broadcasting: null, broadcastError: 'No relay took the bag. Try again when one is reachable.' })
           return false
@@ -1663,7 +1676,7 @@ export const useShards = create<ShardsState>((set, get) => {
         // Rewrite the region bag without this item; the newer bag replaces it,
         // with the bag's settings as they stand.
         const settings = gathered.settings ?? DEFAULT_BAG_SETTINGS
-        const { event, published } = await publishBag(left, key, item.lookupId, item.height, wasPublic, settings, { at: positionOf(item), plane: item.plane })
+        const { event, published } = await publishBag(left, key, item.lookupId, item.height, wasPublic, settings, { at: positionOf(item), plane: item.plane }, undefined, gathered.entries)
         unnamed = published
         mine = get().mine
           .filter((d) => d.eventId !== eventId)
@@ -1751,7 +1764,7 @@ export const useShards = create<ShardsState>((set, get) => {
         ? gathered.entries.map((e) => (entryKey(e) === was ? inner : e))
         : [...gathered.entries, inner]
       const settings = gathered.settings ?? chest.bag ?? DEFAULT_BAG_SETTINGS
-      const { event, published } = await publishBag(entries, key, chest.lookupId, chest.height, wasPublic, settings, { at, plane: chest.plane })
+      const { event, published } = await publishBag(entries, key, chest.lookupId, chest.height, wasPublic, settings, { at, plane: chest.plane }, undefined, gathered.entries)
       // The chest is a new inner event now: the deployment, its record among
       // the finds and everything revealed from it follow the new id, and the
       // whole region's items follow the new envelope.
@@ -1803,6 +1816,11 @@ export const useShards = create<ShardsState>((set, get) => {
       const keys: OpeningKey[] = openingKeys(useInventory.getState().items, true)
       const queue = watched ? [] : items.filter((h) => h.type === 'chest' && h.chest)
       const revealed: Hidden[] = []
+      // What came out of this identity's own chests here, by id, with the
+      // region it was in: none of it is claimed as a deployment of the bag,
+      // whatever copy of it was seen first.
+      const me = cyber().identity.pubkey
+      const sealed = new Map<string, string>()
       while (queue.length > 0) {
         const door = queue.shift()!
         const opener = openerFor(door.chest!, keys, '')
@@ -1810,7 +1828,16 @@ export const useShards = create<ShardsState>((set, get) => {
         let inside: Hidden[]
         try { inside = revealedIn(door, readContents(openWithSecret(door.chest!, opener.key.secretHex))) } catch { continue }
         for (const r of inside) {
-          if (deleted[r.eventId] || discovered[r.eventId]) continue
+          if (deleted[r.eventId]) continue
+          if (door.author === me) sealed.set(r.eventId, door.lookupId)
+          const held = discovered[r.eventId]
+          // A plain copy, in the same bag, of what is sealed in this chest: a
+          // bag written by a client that put a chest's contents beside it
+          // (publishBag). The chest's copy replaces it, so it is listed,
+          // deleted and taken out as the chest's (removeFromChest), never as
+          // an entry of the bag.
+          if (held && !held.chestId && held.bagId === r.bagId) { discovered[r.eventId] = r; changed = true; continue }
+          if (held) continue
           discovered[r.eventId] = r
           revealed.push(r)
           changed = true
@@ -1821,7 +1848,15 @@ export const useShards = create<ShardsState>((set, get) => {
       if (changed) set({ discovered })
       const all = [...items, ...revealed]
       remember(all.map((h) => h.eventId))
-      claimOwn(all)
+      // What this device once claimed out of a chest goes from the record:
+      // it was never an entry of the bag (arkinox, 2026-10-20).
+      const claimedOut = (x: { eventId: string; lookupId: string }): boolean => sealed.get(x.eventId) === x.lookupId
+      if (get().mine.some(claimedOut)) {
+        const mine = get().mine.filter((d) => !claimedOut(d))
+        set({ mine })
+        saveMine(mine)
+      }
+      claimOwn(all.filter((h) => !claimedOut(h)))
       // Reading a key is holding it (B1 §2.1): every key a scan opened goes
       // into the inventory, once, whoever hid it.
       useInventory.getState().holdFinds(all, watched)

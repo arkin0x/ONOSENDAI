@@ -38,6 +38,14 @@ const HANDLED_MS = 50
 const SLOP = 12
 /** How long it may last, in milliseconds. */
 const MAX_MS = 400
+/**
+ * Canvases that are not the scene: the compass, the workshop's bench, the
+ * thumbnail stage, a card's turning shard. A press on one is that control's
+ * business, as a press on a button is (review of #398: a click on the
+ * workshop's compass flipped the hidden pad).
+ */
+const NOT_SCENE = '.compass-3d, .workshop, .thumbstage, .shardspin, .modal'
+
 /** How long after the lift its click may come and still be the tap's, in milliseconds. */
 const CLICK_WITHIN_MS = 1000
 
@@ -65,7 +73,16 @@ export function installCanvasTap(
   /** When the last lift that qualified as a tap happened (now()), or 0. */
   let liftedAt = 0
 
-  const onCanvas = (e: Event): boolean => (e.target as HTMLElement | null)?.tagName === 'CANVAS'
+  const onCanvas = (e: Event): boolean => {
+    const t = e.target as HTMLElement | null
+    return t?.tagName === 'CANVAS' && !t.closest?.(NOT_SCENE)
+  }
+
+  // Every press, even one a control stops on its way (the compass, a modal's
+  // card), clears what an earlier lift left: heard in the capture phase. It
+  // only clears; a press starts a tap below, in the bubbling phase, so one
+  // that was stopped never does (review of #398).
+  const reset = (): void => { tracking = false; liftedAt = 0 }
 
   const down = (ev: Event): void => {
     const e = ev as PointerEvent
@@ -101,14 +118,14 @@ export function installCanvasTap(
 
   const cancel = (): void => { tracking = false; liftedAt = 0 }
 
-  // In the capture phase: a press that a control stops on its way (the
-  // compass, a modal's card) still clears a lift that got no click.
-  win.addEventListener('pointerdown', down, { capture: true, passive: true })
+  win.addEventListener('pointerdown', reset, { capture: true, passive: true })
+  win.addEventListener('pointerdown', down, { passive: true })
   win.addEventListener('pointerup', up, { passive: true })
   win.addEventListener('click', click, { passive: true })
   win.addEventListener('pointercancel', cancel, { passive: true })
   return () => {
-    win.removeEventListener('pointerdown', down, { capture: true })
+    win.removeEventListener('pointerdown', reset, { capture: true })
+    win.removeEventListener('pointerdown', down)
     win.removeEventListener('pointerup', up)
     win.removeEventListener('click', click)
     win.removeEventListener('pointercancel', cancel)

@@ -1831,15 +1831,17 @@ export const useShards = create<ShardsState>((set, get) => {
           if (deleted[r.eventId]) continue
           if (door.author === me) sealed.set(r.eventId, door.lookupId)
           const held = discovered[r.eventId]
-          // A plain copy, in the same bag, of what is sealed in this chest: a
-          // bag written by a client that put a chest's contents beside it
-          // (publishBag). The chest's copy replaces it, so it is listed,
-          // deleted and taken out as the chest's (removeFromChest), never as
-          // an entry of the bag.
-          if (held && !held.chestId && held.bagId === r.bagId) { discovered[r.eventId] = r; changed = true; continue }
-          if (held) continue
+          // A plain copy, in the same region and by the same hider, of what is
+          // sealed in this chest: a bag written by a client that put a chest's
+          // contents beside it (publishBag), in this version of the bag or an
+          // older one. The chest's copy replaces it, so it is listed, deleted
+          // and taken out as the chest's (removeFromChest), never as an entry
+          // of the bag; it was found already, so no second ceremony, but a key
+          // or a chest in it still opens what it opens in this pass.
+          const plain = !!held && !held.chestId && held.lookupId === r.lookupId && held.author === r.author
+          if (held && !plain) continue
           discovered[r.eventId] = r
-          revealed.push(r)
+          if (!plain) revealed.push(r)
           changed = true
           if (r.type === 'chest' && r.chest) queue.push(r)
           if (r.type === 'key' && r.key) keys.push({ id: r.eventId, itemPubkey: r.key.itemPubkey, secretHex: r.key.secretHex })
@@ -1856,7 +1858,15 @@ export const useShards = create<ShardsState>((set, get) => {
         set({ mine })
         saveMine(mine)
       }
-      claimOwn(all.filter((h) => !claimedOut(h)))
+      // Watched finds open no chest, so what is sealed in one of this
+      // identity's own chests cannot be told from a plain entry beside it.
+      // So from TV (and TV's kept bags on a reload) nothing of this
+      // identity's beside its own chest is claimed: a played scan claims
+      // what really is a bag entry, and a leaked copy never comes back into
+      // the record (review of #407). Nor is anything listed as a chest's.
+      const ownChestBags = new Set(items.filter((h) => h.type === 'chest' && h.author === me).map((h) => h.bagId))
+      const now = get().discovered
+      claimOwn(all.filter((h) => !claimedOut(h) && !now[h.eventId]?.chestId && !(watched && h.type !== 'chest' && h.author === me && ownChestBags.has(h.bagId))))
       // Reading a key is holding it (B1 §2.1): every key a scan opened goes
       // into the inventory, once, whoever hid it.
       useInventory.getState().holdFinds(all, watched)

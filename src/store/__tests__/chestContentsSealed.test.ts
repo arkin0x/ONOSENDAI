@@ -223,6 +223,33 @@ describe('the rewrites that take a chest out of a bag written the old way (revie
     for (const h of inside) expect(S().discovered[h.eventId]?.chestId).toBe(chest.eventId)
   })
 
+  it('watching TV over the leaked bag claims nothing out of the chest back into the record', async () => {
+    const { chestLookup, chestKey } = await leakedOnRelay()
+    S().addDiscovered(await entriesOf(relayBags.at(-1)!, chestKey), { watched: true })
+    expect(S().mine.filter((d) => d.lookupId === chestLookup).map((d) => d.type)).toEqual(['chest'])
+  })
+
+  it('after a reload, TV\'s kept copy first and a played scan of the mended bag later: nothing claimed, and listed as the chest\'s', async () => {
+    const { chestLookup, chestKey } = await leakedOnRelay()
+    const chest = S().mine.find((d) => d.type === 'chest')!
+    const leaked = relayBags.at(-1)!
+    // A fresh session: TV's kept bag comes back first, as watched (useFound).
+    useShards.setState({ discovered: {} })
+    S().addDiscovered(await entriesOf(leaked, chestKey), { watched: true })
+    expect(S().mine.filter((d) => d.lookupId === chestLookup).map((d) => d.type)).toEqual(['chest'])
+    // A hide mends the bag; a played scan of the new version lists the contents as the chest's.
+    S().startDeployMessage('later')
+    useShards.setState({ deployHeight: 3 })
+    await S().deploy()
+    const mended = lastBag(chestLookup)
+    expect(mended.id).not.toBe(leaked.id)
+    S().addDiscovered(await entriesOf(mended, chestKey))
+    const inside = Object.values(S().discovered).filter((h) => h.chestId === chest.eventId)
+    expect(inside.map((h) => h.type).sort()).toEqual(['message', 'shard'])
+    expect(S().mine.filter((d) => d.lookupId === chestLookup).map((d) => d.type).sort()).toEqual(['chest', 'message'])
+    expect(S().mine.find((d) => d.type === 'message')?.text).toBe('later')
+  })
+
   it('taking a content out of a clean chest still works as it did', async () => {
     const { chestLookup, chestKey } = await hiderWithOpenedChest()
     const message = Object.values(S().discovered).find((h) => h.chestId && h.type === 'message')!

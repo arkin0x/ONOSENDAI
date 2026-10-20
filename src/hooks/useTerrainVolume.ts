@@ -293,11 +293,11 @@ export function useTerrainVolume(win: ViewWindow, axes: ViewAxes, suspend = fals
     if (suspend) clearRunQueue()
   }, [suspend])
 
-  // The keys of every block around the centre, written out once per place,
-  // zoom, turn and plane; each flush below only reads them.
   // How long the layout took, so the DEV timing below covers a whole rescan
   // after a move as it did before the layout was split out.
   const layoutMs = useRef(0)
+  // The keys of every block around the centre, written out once per place,
+  // zoom, turn and plane; each flush below only reads them.
   const layout = useMemo(
     () => {
       if (suspend) return null

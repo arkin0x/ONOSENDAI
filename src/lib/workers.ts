@@ -27,6 +27,20 @@ const terrainWorkers: Worker[] = []
  */
 const terrainIdle: boolean[] = []
 const runQueue: RunRequest[] = []
+/** The id of the run each worker is on, so a worker that throws can say which run it lost. */
+const terrainRunning: (number | null)[] = []
+
+/**
+ * Told the ids of runs that will never be answered: dropped from the queue
+ * before any worker started them, or lost when a worker threw. The caller
+ * marked their blocks as asked for, and those marks have to go with the runs,
+ * or the blocks are never asked for again (2026-10-20).
+ */
+let runDropHandler: ((ids: number[]) => void) | null = null
+
+export function setRunDropHandler(handler: ((ids: number[]) => void) | null): void {
+  runDropHandler = handler
+}
 
 export function setProofHandler(handler: ((msg: ProofResponse) => void) | null): void {
   proofHandler = handler
@@ -54,6 +68,7 @@ export function getTerrainWorkers(): Worker[] {
       // job is already in flight while the result is being folded into cache.
       worker.addEventListener('message', () => {
         terrainIdle[slot] = true
+        terrainRunning[slot] = null
         pumpRunQueue()
       })
       // A worker that throws never posts back, so without this its slot stays
@@ -61,11 +76,15 @@ export function getTerrainWorkers(): Worker[] {
       // pool wedges completely and no result ever arrives again.
       worker.addEventListener('error', (event) => {
         tlog(`[workers] w${slot} FAILED:`, event.message)
+        const lost = terrainRunning[slot]
         terrainIdle[slot] = true
+        terrainRunning[slot] = null
         pumpRunQueue()
+        if (lost !== null) runDropHandler?.([lost])
       })
       terrainWorkers.push(worker)
       terrainIdle.push(true)
+      terrainRunning.push(null)
     }
   }
   return terrainWorkers
@@ -75,8 +94,10 @@ export function getTerrainWorkers(): Worker[] {
 function pumpRunQueue(): void {
   for (let i = 0; i < terrainWorkers.length && runQueue.length > 0; i++) {
     if (!terrainIdle[i]) continue
+    const run = runQueue.shift()!
     terrainIdle[i] = false
-    terrainWorkers[i].postMessage(runQueue.shift())
+    terrainRunning[i] = run.id
+    terrainWorkers[i].postMessage(run)
   }
 }
 
@@ -97,9 +118,13 @@ export function postRun(request: RunRequest): void {
 }
 
 /** Drop everything not yet started. Used when the view moves and stale work
- * would otherwise sit ahead of what is now on screen. */
+ * would otherwise sit ahead of what is now on screen. Runs already on a
+ * worker carry on, and their answers are kept. */
 export function clearRunQueue(): void {
+  if (runQueue.length === 0) return
+  const dropped = runQueue.map((run) => run.id)
   runQueue.length = 0
+  runDropHandler?.(dropped)
 }
 
 export function queuedRuns(): number {

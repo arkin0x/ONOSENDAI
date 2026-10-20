@@ -289,6 +289,8 @@ export function useTerrainVolume(win: ViewWindow, axes: ViewAxes, suspend = fals
   // Suspended (an Earth or hyperspace view): drop any queued terrain work so
   // the pool goes quiet, and hand back an empty volume. The memo below keys
   // on `suspend`, so leaving the view rebuilds and rescans automatically.
+  // Dropping a run gives its blocks back as not yet asked for (terrainCache,
+  // setRunDropHandler), so that rescan asks for them again.
   useEffect(() => {
     if (suspend) clearRunQueue()
   }, [suspend])

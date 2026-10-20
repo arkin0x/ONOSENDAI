@@ -18,6 +18,7 @@ const fake = vi.hoisted(() => ({
 vi.mock('../workers', () => ({
   getTerrainWorkers: () => [{ addEventListener: (_: string, listener: (event: { data: unknown }) => void) => { fake.listeners.push(listener) } }],
   postRun: (request: { id: number; count: number }) => { fake.posted.push(request) },
+  setRunDropHandler: () => {},
 }))
 
 const { BLOCK_SIZE, blockKey, inflightRuns, isKeyPending, isPending, readK, readKey, requestRun } = await import('../terrainCache')

@@ -160,12 +160,16 @@ function resetCache(seed: number): void {
 }
 
 /**
- * Between flushes: about half the blocks asked for come back, and now and
- * then one never asked for arrives anyway (asked for by another view).
+ * Between flushes: about half the blocks asked for come back, now and then
+ * one never asked for arrives anyway (asked for by another view), and now and
+ * then one asked for is given back unanswered, as a run dropped from the queue
+ * or lost to a worker that threw is (terrainCache, setRunDropHandler).
  */
 function deliver(epoch: number): void {
   for (const key of [...fake.pending]) {
-    if (roll(key, epoch) % 2 === 0) { fake.pending.delete(key); fake.known.set(key, kFor(key)) }
+    const r = roll(key, epoch)
+    if (r % 2 === 0) { fake.pending.delete(key); fake.known.set(key, kFor(key)) }
+    else if (r % 7 === 1) fake.pending.delete(key)
   }
   for (const key of fake.seen) {
     if (!fake.known.has(key) && !fake.pending.has(key) && roll(key, epoch * 7 + 1) % 5 === 0) fake.known.set(key, kFor(key))

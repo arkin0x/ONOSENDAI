@@ -110,7 +110,7 @@ function ProfileCard({ pubkey, onClose }: { pubkey: string; onClose: () => void 
             : <span className="profilev__pic-fallback"><ProfilePic pubkey={pubkey} size={72} /></span>}
           <div className="profilev__names">
             <span className="profilev__name">{name}{mine ? ' (you)' : ''}</span>
-            {handle && handle !== displayName && <span className="profilev__handle">@{handle}</span>}
+            {displayName && handle && handle !== displayName && <span className="profilev__handle">@{handle}</span>}
             {nip05 && <span className="secret__nip05">{nip05}</span>}
             <span className="person__npub">
               <span className="secret__npub" title={npub}>{shortHex(npub, 14, 8)}</span>

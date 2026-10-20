@@ -171,9 +171,10 @@ function attachOnce(): void {
   // in one live run at most, since a read never asks for a block already
   // asked for, so clearing its mark here cannot strand another run's block.
   // Nothing is asked for from here. Leaving the main view drops the volume,
-  // and coming back lays it out and reads it afresh; after a worker throws,
-  // the next flush asks again. Asking at once would retry a run that throws
-  // every time in a tight loop (2026-10-20).
+  // and coming back lays it out and reads it afresh. After a worker throws,
+  // the next read asks again: the next answer's flush, or, if that run was the
+  // last one out, the next move, zoom or turn. Asking at once would retry a
+  // run that throws every time in a loop (2026-10-20).
   setRunDropHandler((ids) => {
     for (const id of ids) {
       const run = runsById.get(id)

@@ -69,6 +69,16 @@ describe('the tube\'s once-a-frame terms', () => {
       expect(out.y).toBeCloseTo(y / l, 12)
     }
   })
+  it('are what the shader worked out at known points', () => {
+    const out = new Vector2()
+    // turn = t * 0.35: none at 0, a quarter turn at pi / 0.7.
+    expect(tubeDrift(0, out).toArray()).toEqual([1, 0])
+    tubeDrift(Math.PI / 0.7, out)
+    expect(out.x).toBeCloseTo(0, 12)
+    expect(out.y).toBeCloseTo(1, 12)
+    expect(tubeFlicker(0)).toBe(0.975)
+    expect(tubeFlicker(Math.PI / 114)).toBeCloseTo(1, 12)
+  })
   it('flicker stays within two and a half per cent either side of 0.975', () => {
     for (let t = 0; t < 10; t += 0.013) {
       const f = tubeFlicker(t)

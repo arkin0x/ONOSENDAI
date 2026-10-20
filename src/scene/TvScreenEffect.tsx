@@ -143,10 +143,6 @@ void mainImage(const in vec4 inputColor, const in vec2 uv, out vec4 outputColor)
   if (glitch > 0.0) col = max(col, picture(pw + ca * 2.5) * 0.45 * glitch);
   col *= 1.0 - bar;
 
-  // Snow: chunky (about three CSS pixels a grain), at a film's frame rate,
-  // dark, and soft: each grain blends into the next, as a tube's do, where
-  // square blocks read as pixels (arkinox, 2026-10-18: "on a CRT it would be
-  // blurry").
   // The signal going (a dropout glitch): the picture sinks a little into the
   // snow, as if drifting out of range, never more than about two fifths
   // (2026-10-19: "it should fade in slowly and subtly, only up to maybe 40%
@@ -159,8 +155,12 @@ void mainImage(const in vec4 inputColor, const in vec2 uv, out vec4 outputColor)
   // on every pixel of every frame (2026-10-20: "the perf on /tv on my laptop
   // is not satisfactory"; the three that hang on the time alone, flicker and
   // drift, are worked out once a frame now). The same for the whole frame,
-  // so the branch costs nothing.
+  // so every pixel takes the same way and the branch is cheap.
   if (snow > 0.0) {
+    // Snow: chunky (about three CSS pixels a grain), at a film's frame rate,
+    // dark, and soft: each grain blends into the next, as a tube's do, where
+    // square blocks read as pixels (arkinox, 2026-10-18: "on a CRT it would
+    // be blurry").
     // A new field each frame, from a small offset: large coordinates break
     // the hash into diagonal stripes.
     float frame = mod(floor(uTime * 24.0), 64.0);

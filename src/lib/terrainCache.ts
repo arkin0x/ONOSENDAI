@@ -54,8 +54,20 @@ const MAX_ENTRIES = 150_000
 
 const cache = new Map<string, number>()
 
-function blockKey(x: bigint, y: bigint, z: bigint, plane: Plane): string {
-  return `${x >> BLOCK_BITS},${y >> BLOCK_BITS},${z >> BLOCK_BITS},${plane}`
+// Each axis's last block and its text. A volume scan walks rows, along which
+// two of the three axes stay fixed, and a run walks one axis; writing an
+// 85-bit bigint out in decimal is most of a key's cost, so the axis that did
+// not change is not written out again (2026-10-20).
+let lastX: bigint | null = null, lastY: bigint | null = null, lastZ: bigint | null = null
+let textX = '', textY = '', textZ = ''
+
+/** The cache key of the block holding (x, y, z): every cell of a block has the same K. */
+export function blockKey(x: bigint, y: bigint, z: bigint, plane: Plane): string {
+  const bx = x >> BLOCK_BITS, by = y >> BLOCK_BITS, bz = z >> BLOCK_BITS
+  if (bx !== lastX) { lastX = bx; textX = `${bx}` }
+  if (by !== lastY) { lastY = by; textY = `${by}` }
+  if (bz !== lastZ) { lastZ = bz; textZ = `${bz}` }
+  return `${textX},${textY},${textZ},${plane}`
 }
 
 export function readK(

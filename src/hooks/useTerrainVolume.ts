@@ -72,6 +72,80 @@ function cellAt(
   return p
 }
 
+/**
+ * The K values of the VOLUME_SIZE^3 cells around `centre`, from the cache,
+ * asking the workers for every block not yet known or asked for. Rescanned
+ * on every move, zoom, turn and terrain flush.
+ *
+ * Along a row only the right axis moves, so a row's first cell is worked out
+ * once and stepped from, and the cells of one block (consecutive along the
+ * row, since the row is monotonic) share its answer: a cell in the same block
+ * as the one before it takes that cell's value and asks for nothing more.
+ * Building a coordinate and two cache keys for every one of the 6,859 cells
+ * made a rescan a long task, worst 254 ms at one boot here (2026-10-20,
+ * spectating on the smoke seed).
+ */
+export function scanVolume(centre: Position, axes: ViewAxes, scaleExp: number, plane: Plane): Uint8Array {
+  const R = VOLUME_RADIUS
+  const N = VOLUME_SIZE
+  const step = stepFor(scaleExp)
+  const values = new Uint8Array(N * N * N).fill(UNKNOWN)
+  const right = axes.right.axis
+  const rightStep = step * BigInt(axes.right.dir)
+
+  // Below the block size consecutive cells share a block, so step by the
+  // block and let one sample serve them all.
+  const stride = step >= BLOCK_SIZE ? step : BLOCK_SIZE
+
+  // Nearest slice first, then nearest row, so the middle of the volume
+  // resolves before its shell.
+  const order = (n: number): number[] =>
+    Array.from({ length: n }, (_, i) => i - R).sort((a, b) => Math.abs(a) - Math.abs(b))
+
+  for (const depth of order(N)) {
+    for (const row of order(N)) {
+      const samples: bigint[] = []
+      const p = cellAt(centre, axes, step, -R, row, depth)
+      const at = ((depth + R) * N + (row + R)) * N + R
+      let lastBlock: bigint | null = null
+      let lastK: number | undefined
+
+      for (let col = -R; col <= R; col++, p[right] += rightStep) {
+        // One sample per block per pass, or a block is asked for once per
+        // cell it contains while the first answer is still in flight.
+        const block = p[right] >> BLOCK_BITS
+        if (block !== lastBlock) {
+          lastBlock = block
+          lastK = readK(p.x, p.y, p.z, plane)
+          if (lastK === undefined && !isPending(p.x, p.y, p.z, plane)) samples.push(block << BLOCK_BITS)
+        }
+        if (lastK !== undefined) values[at + col] = lastK
+      }
+
+      if (samples.length === 0) continue
+      samples.sort((a, b) => (a < b ? -1 : a > b ? 1 : 0))
+
+      let start = 0
+      for (let i = 1; i <= samples.length; i++) {
+        if (i === samples.length || samples[i] - samples[i - 1] !== stride) {
+          // The row's other two axes, with the run's first sample on this one.
+          const q: Position = { ...p }
+          q[right] = samples[start]
+          requestRun({
+            originX: q.x, originY: q.y, originZ: q.z,
+            axis: right,
+            step: stride,
+            count: i - start,
+            plane,
+          })
+          start = i
+        }
+      }
+    }
+  }
+  return values
+}
+
 export function useTerrainVolume(win: ViewWindow, axes: ViewAxes, suspend = false): TerrainVolume {
   // The anchor: the terrain is around whoever the scene is anchored on.
   const position = useCyberspace((s) => s.anchor)
@@ -137,64 +211,7 @@ export function useTerrainVolume(win: ViewWindow, axes: ViewAxes, suspend = fals
     const t0 = performance.now()
     const R = VOLUME_RADIUS
     const N = VOLUME_SIZE
-    const step = stepFor(scaleExp)
-    const values = new Uint8Array(N * N * N).fill(UNKNOWN)
-
-    // Below the block size consecutive cells share a block, so step by the
-    // block and let one sample serve them all.
-    const stride = step >= BLOCK_SIZE ? step : BLOCK_SIZE
-
-    // Nearest slice first, then nearest row, so the middle of the volume
-    // resolves before its shell.
-    const order = (n: number): number[] =>
-      Array.from({ length: n }, (_, i) => i - R).sort((a, b) => Math.abs(a) - Math.abs(b))
-
-    for (const depth of order(N)) {
-      for (const row of order(N)) {
-        const samples: bigint[] = []
-        const seen = new Set<bigint>()
-        let rowCell: Position | null = null
-
-        for (let col = -R; col <= R; col++) {
-          const p = cellAt(centre, axes, step, col, row, depth)
-
-          const known = readK(p.x, p.y, p.z, plane)
-          if (known !== undefined) {
-            values[((depth + R) * N + (row + R)) * N + (col + R)] = known
-            continue
-          }
-          if (isPending(p.x, p.y, p.z, plane)) continue
-
-          // One sample per block per pass, or a block is asked for once per
-          // cell it contains while the first answer is still in flight.
-          const block = p[axes.right.axis] >> BLOCK_BITS
-          if (seen.has(block)) continue
-          seen.add(block)
-
-          rowCell = p
-          samples.push(block << BLOCK_BITS)
-        }
-
-        if (!rowCell || samples.length === 0) continue
-        samples.sort((a, b) => (a < b ? -1 : a > b ? 1 : 0))
-
-        let start = 0
-        for (let i = 1; i <= samples.length; i++) {
-          if (i === samples.length || samples[i] - samples[i - 1] !== stride) {
-            const p: Position = { ...rowCell }
-            p[axes.right.axis] = samples[start]
-            requestRun({
-              originX: p.x, originY: p.y, originZ: p.z,
-              axis: axes.right.axis,
-              step: stride,
-              count: i - start,
-              plane,
-            })
-            start = i
-          }
-        }
-      }
-    }
+    const values = scanVolume(centre, axes, scaleExp, plane)
 
     if (import.meta.env.DEV) {
       let known = 0

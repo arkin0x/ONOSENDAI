@@ -21,8 +21,9 @@
  * old box and its new one. Those boxes are all that needs uploading.
  *
  * It errs toward uploading everything: a call it does not know, a blend
- * other than source-over, a filter, a part that leaves a save or a clip
- * open, or a draw outside a paint all make the next upload the whole canvas.
+ * other than source-over, a filter, a Path2D, a part that leaves a save or a
+ * clip open, a path used outside the part that began it, or a draw outside a
+ * paint all make the next upload the whole canvas.
  */
 
 import type { Texture, WebGLRenderer } from 'three'
@@ -123,10 +124,16 @@ export function trackDrawing(real: CanvasRenderingContext2D): DrawTracker {
   // most calls need not ask the context for it.
   let identity = true
   const identityStack: boolean[] = []
-  // The current path's box, canvas px, from where it was built.
+  // The current path's box, canvas px, from where it was built; the part
+  // that began it; and its current point and subpath start, user space.
   let path: Box | null = null
+  let pathPart: string | null = null
   let lastX = 0
   let lastY = 0
+  let startX = 0
+  let startY = 0
+  // The transform, asked for once until a call changes it.
+  let cached: DOMMatrix | null = null
 
   const mixNum = (n: number): void => {
     if (!cur) return
@@ -166,7 +173,8 @@ export function trackDrawing(real: CanvasRenderingContext2D): DrawTracker {
   /** Grow the current part's box by `b`. */
   const ink = (b: Box | null): void => {
     if (!painting) { unknown('a draw outside a paint'); return }
-    if (!cur || !b) return
+    // A call with a coordinate that is not a number draws nothing.
+    if (!cur || !b || !(Number.isFinite(b[0]) && Number.isFinite(b[1]) && Number.isFinite(b[2]) && Number.isFinite(b[3]))) return
     if (!cur.box) cur.box = [b[0], b[1], b[2], b[3]]
     else {
       if (b[0] < cur.box[0]) cur.box[0] = b[0]
@@ -178,8 +186,9 @@ export function trackDrawing(real: CanvasRenderingContext2D): DrawTracker {
 
   /** The context's transform; null, and everything changed, where it cannot say (a stand-in context in a test). */
   const matrix = (): DOMMatrix | null => {
+    if (cached) return cached
     const m = real.getTransform?.() as DOMMatrix | undefined
-    if (m && typeof m.a === 'number') return m
+    if (m && typeof m.a === 'number') return (cached = m)
     unknown('no transform to read')
     return null
   }
@@ -203,6 +212,7 @@ export function trackDrawing(real: CanvasRenderingContext2D): DrawTracker {
     return 2 * blur + Math.max(ox, oy) + 2
   }
   const pathPoint = (x: number, y: number, r = 0): void => {
+    if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(r)) return
     const b = toCanvas(x, y, x, y, r)
     if (!path) path = b
     else {
@@ -214,9 +224,13 @@ export function trackDrawing(real: CanvasRenderingContext2D): DrawTracker {
   }
   const strokeHalf = (): number => {
     const lw = real.lineWidth || 1
-    // A mitred corner can reach miterLimit half widths out.
-    return (real.lineJoin === 'miter' ? Math.max(1, real.miterLimit || 10) : 1) * lw / 2 + 1
+    // A mitred corner can reach miterLimit half widths out, a square cap's corner a root two.
+    return Math.max(real.lineJoin === 'miter' ? Math.max(1, real.miterLimit || 10) : 1, real.lineCap === 'square' ? Math.SQRT2 : 1) * lw / 2 + 1
   }
+  /** The current point moves to x, y (user space). */
+  const to = (x: number, y: number): void => { lastX = x; lastY = y }
+  /** A path is filled, stroked or clipped: in the part that began it, or the tracker cannot say whose it is. */
+  const used = (): void => { if (pathPart !== curName) unknown('a path used outside the part that began it') }
 
   const textBox = (text: string, x: number, y: number): Box => {
     const m = real.measureText(text)
@@ -234,20 +248,42 @@ export function trackDrawing(real: CanvasRenderingContext2D): DrawTracker {
   }
 
   const handlers: Record<string, (args: unknown[]) => void> = {
-    beginPath: () => { path = null },
-    moveTo: (a) => { lastX = a[0] as number; lastY = a[1] as number; pathPoint(lastX, lastY) },
-    lineTo: (a) => { lastX = a[0] as number; lastY = a[1] as number; pathPoint(lastX, lastY) },
-    arc: (a) => { pathPoint(a[0] as number, a[1] as number, Math.abs(a[2] as number)) },
-    ellipse: (a) => { pathPoint(a[0] as number, a[1] as number, Math.max(Math.abs(a[2] as number), Math.abs(a[3] as number))) },
-    // Within the corner the two points make with where the path was.
-    arcTo: (a) => { pathPoint(a[0] as number, a[1] as number); pathPoint(a[2] as number, a[3] as number); lastX = a[2] as number; lastY = a[3] as number },
-    quadraticCurveTo: (a) => { pathPoint(a[0] as number, a[1] as number); pathPoint(a[2] as number, a[3] as number) },
-    bezierCurveTo: (a) => { pathPoint(a[0] as number, a[1] as number); pathPoint(a[2] as number, a[3] as number); pathPoint(a[4] as number, a[5] as number) },
-    rect: (a) => { const [x, y, w, h] = a as number[]; pathPoint(x, y); pathPoint(x + w, y + h) },
-    roundRect: (a) => { const [x, y, w, h] = a as number[]; pathPoint(x, y); pathPoint(x + w, y + h) },
-    closePath: () => {},
-    fill: () => { if (path) { const p = 1 + shadowPad(); ink([path[0] - p, path[1] - p, path[2] + p, path[3] + p]) } },
-    stroke: () => { if (path) { const p = strokeHalf() * scaleOf() + shadowPad(); ink([path[0] - p, path[1] - p, path[2] + p, path[3] + p]) } },
+    beginPath: () => { path = null; pathPart = curName },
+    moveTo: (a) => { const [x, y] = a as number[]; startX = x; startY = y; to(x, y); pathPoint(x, y) },
+    lineTo: (a) => { const [x, y] = a as number[]; to(x, y); pathPoint(x, y) },
+    arc: (a) => {
+      const [x, y, r, , end] = a as number[]
+      pathPoint(x, y, Math.abs(r))
+      to(x + r * Math.cos(end), y + r * Math.sin(end))
+    },
+    ellipse: (a) => {
+      const [x, y, rx, ry, turn, , end] = a as number[]
+      pathPoint(x, y, Math.max(Math.abs(rx), Math.abs(ry)))
+      const ex = rx * Math.cos(end), ey = ry * Math.sin(end)
+      to(x + ex * Math.cos(turn) - ey * Math.sin(turn), y + ex * Math.sin(turn) + ey * Math.cos(turn))
+    },
+    // The arc lies in the triangle of its two tangent points and the corner
+    // (review of #415: the tangent points can lie well past the second point).
+    arcTo: (a) => {
+      const [x1, y1, x2, y2, r] = a as number[]
+      const ux = lastX - x1, uy = lastY - y1, vx = x2 - x1, vy = y2 - y1
+      const lu = Math.hypot(ux, uy), lv = Math.hypot(vx, vy)
+      const cos = lu > 0 && lv > 0 ? (ux * vx + uy * vy) / (lu * lv) : 1
+      if (!(r > 0) || lu === 0 || lv === 0 || Math.abs(cos) >= 1 - 1e-12) { pathPoint(x1, y1); to(x1, y1); return }
+      const d = r / Math.tan(Math.acos(cos) / 2)
+      pathPoint(x1 + (ux / lu) * d, y1 + (uy / lu) * d)
+      pathPoint(x1, y1)
+      const tx = x1 + (vx / lv) * d, ty = y1 + (vy / lv) * d
+      pathPoint(tx, ty)
+      to(tx, ty)
+    },
+    quadraticCurveTo: (a) => { const [cx, cy, x, y] = a as number[]; pathPoint(cx, cy); pathPoint(x, y); to(x, y) },
+    bezierCurveTo: (a) => { const [ax, ay, bx, by, x, y] = a as number[]; pathPoint(ax, ay); pathPoint(bx, by); pathPoint(x, y); to(x, y) },
+    rect: (a) => { const [x, y, w, h] = a as number[]; pathPoint(x, y); pathPoint(x + w, y + h); startX = x; startY = y; to(x, y) },
+    roundRect: (a) => { const [x, y, w, h] = a as number[]; pathPoint(x, y); pathPoint(x + w, y + h); startX = x; startY = y; to(x, y) },
+    closePath: () => { to(startX, startY) },
+    fill: () => { used(); if (path) { const p = 1 + shadowPad(); ink([path[0] - p, path[1] - p, path[2] + p, path[3] + p]) } },
+    stroke: () => { used(); if (path) { const p = strokeHalf() * scaleOf() + shadowPad(); ink([path[0] - p, path[1] - p, path[2] + p, path[3] + p]) } },
     fillRect: (a) => { const [x, y, w, h] = a as number[]; ink(toCanvas(x, y, x + w, y + h, 1, shadowPad())) },
     strokeRect: (a) => { const [x, y, w, h] = a as number[]; ink(toCanvas(x, y, x + w, y + h, strokeHalf(), shadowPad())) },
     clearRect: (a) => { const [x, y, w, h] = a as number[]; ink(toCanvas(x, y, x + w, y + h, 1)) },
@@ -269,15 +305,17 @@ export function trackDrawing(real: CanvasRenderingContext2D): DrawTracker {
     },
     save: () => { depth++; identityStack.push(identity) },
     // One more restore than saves would undo the paint's own save (begin).
-    restore: () => { if (depth > 0) depth--; else unknown('a restore with no save'); identity = identityStack.pop() ?? true },
-    translate: () => { identity = false },
-    rotate: () => { identity = false },
-    scale: () => { identity = false },
-    transform: () => { identity = false },
-    setTransform: () => { identity = false },
-    resetTransform: () => { identity = true },
+    restore: () => { if (depth > 0) depth--; else unknown('a restore with no save'); identity = identityStack.pop() ?? true; cached = null },
+    translate: () => { identity = false; cached = null },
+    rotate: () => { identity = false; cached = null },
+    scale: () => { identity = false; cached = null },
+    transform: () => { identity = false; cached = null },
+    setTransform: () => { identity = false; cached = null },
+    resetTransform: () => { identity = true; cached = null },
     setLineDash: () => {},
-    clip: () => {},
+    // A clip outside a save of the part's own clips the parts after it,
+    // which their hashes would not show (review of #415).
+    clip: () => { used(); if (depth === curDepth) unknown('a clip left open') },
   }
 
   /** The transform's largest stretch, for a line's width in canvas px. */
@@ -379,7 +417,9 @@ export function trackDrawing(real: CanvasRenderingContext2D): DrawTracker {
       depth = 0
       identity = true
       identityStack.length = 0
+      cached = null
       path = null
+      pathPart = null
       openPart('')
     },
     part(name: string) {
@@ -450,14 +490,16 @@ export function dirtyRects(boxes: Array<[number, number, number, number]>, width
 /**
  * Copy `rects` of a canvas texture's canvas into its texture on the GPU,
  * the rest left as it was. three's own copyTextureToTexture reads five
- * pixel-store settings back first (getParameter), and in Chrome each read
- * waits for the GPU to finish everything before it: measured offline, the
- * main thread spent most of every second waiting there. This sets what it
+ * pixel-store settings back first (getParameter), a round trip to the GPU
+ * process: in headless Chromium (SwiftShader) the main thread spent most of
+ * every second waiting there. This sets what it
  * needs and puts back three's defaults (no skip, no row length) without
  * asking. The texture is uploaded whole first if it never was, or was made
  * again since.
  */
 export function uploadRegions(renderer: WebGLRenderer, texture: Texture, rects: DirtyRect[]): void {
+  // Upside down, a part would land elsewhere: all of it then.
+  if (texture.flipY) { texture.needsUpdate = true; return }
   renderer.initTexture(texture)
   const webgl = (renderer.properties.get(texture) as { __webglTexture?: WebGLTexture }).__webglTexture
   const image = texture.image as TexImageSource & { width: number }
@@ -467,14 +509,15 @@ export function uploadRegions(renderer: WebGLRenderer, texture: Texture, rects: 
   gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, texture.flipY)
   gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, texture.premultiplyAlpha)
   gl.pixelStorei(gl.UNPACK_ALIGNMENT, texture.unpackAlignment)
+  // As three uploads an sRGB canvas texture: its primaries are the working
+  // space's, so no conversion (WebGLTextures uploadTexture).
   gl.pixelStorei(gl.UNPACK_COLORSPACE_CONVERSION_WEBGL, gl.NONE)
-  gl.pixelStorei(gl.UNPACK_ROW_LENGTH, image.width)
+  // The part of the canvas to copy (a picture's row length is its own width).
   for (const r of rects) {
     gl.pixelStorei(gl.UNPACK_SKIP_PIXELS, r.x)
     gl.pixelStorei(gl.UNPACK_SKIP_ROWS, r.y)
     gl.texSubImage2D(gl.TEXTURE_2D, 0, r.x, r.y, r.w, r.h, gl.RGBA, gl.UNSIGNED_BYTE, image)
   }
-  gl.pixelStorei(gl.UNPACK_ROW_LENGTH, 0)
   gl.pixelStorei(gl.UNPACK_SKIP_PIXELS, 0)
   gl.pixelStorei(gl.UNPACK_SKIP_ROWS, 0)
   renderer.state.unbindTexture()

@@ -1226,6 +1226,10 @@ export class TvPainter {
     const tx = stacked ? px + pad : sx + textX
     const ty = stacked ? sy + stage + 18 * s : sy
 
+    // What turns (the cube, a shard copied from its own canvas) and what
+    // sways (a splash) are parts of their own, so the panel round them and
+    // its words are not uploaded with them on every paint (review of #415).
+    this.track.part('stage')
     if (item.kind === 'bag') {
       this.cube(sx + (stacked ? (pw - 2 * pad - stage) / 2 : 0), sy, stage, t, s)
       // What its author said is inside, when they said; else how big a region.
@@ -1264,6 +1268,7 @@ export class TvPainter {
       ctx.fillStyle = FG
       ctx.fillText(fit(ctx, a.name(item.pubkey), stage - 20 * s), ox + stage / 2, sy + stage - 14 * s)
       // The quote, printing.
+      this.track.part('caption')
       const quote = quoteOf(item)
       const pace = typePace(Array.from(quote).length, length)
       const shown = Math.max(0, Math.floor((t - TYPE_DELAY_S) / pace))
@@ -1302,6 +1307,7 @@ export class TvPainter {
    * segment.
    */
   private splash(cx: number, cy: number, r: number, t: number, s: number, look: SplashLook): void {
+    this.track.part('splash')
     const ctx = this.ctx
     const land = ramp(t, 0.6, 0.9)
     if (land <= 0) return
@@ -1334,6 +1340,7 @@ export class TvPainter {
   }
 
   private caption(x: number, y: number, w: number, kicker: string, title: string, note: string | null, s: number, align: 'left' | 'center' = 'left'): void {
+    this.track.part('caption')
     const ctx = this.ctx
     ctx.textAlign = align
     ctx.fillStyle = ACCENT

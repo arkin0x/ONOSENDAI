@@ -64,12 +64,15 @@ const PAINT_MS = 33
 const PAINT_SCALE = 1.5
 const PAINT_MAX_PIXELS = 2_400_000
 /**
- * However little a paint changed, all of the furniture goes up at least this
- * often, ms: what can change on the canvas without any call on it changing
- * (a fallback face for a glyph arriving a moment later, say) is put right
- * within this, for about a thirtieth of what uploading it all every paint cost.
+ * However little a paint changed, a band of the canvas this share of its
+ * height goes up with it, the next band at the next paint, so all of it is
+ * renewed every thirty paints, about a second: what can change on the canvas
+ * without any call on it changing (a scaled picture's filtering settling, a
+ * glyph's fallback face arriving) is put right within that. A band each
+ * paint rather than all of it once a second, which would be a hitch a second
+ * (review of #415).
  */
-const FULL_UPLOAD_MS = 1000
+const REFRESH_BANDS = 30
 
 const FRAGMENT = `
 uniform float uTime;
@@ -326,7 +329,7 @@ export function TvScreenEffect(): JSX.Element {
     return () => document.fonts?.removeEventListener('loadingdone', again)
   }, [painter])
   const lastPaint = useRef(0)
-  const lastFull = useRef(-Infinity)
+  const band = useRef(0)
   // The segment's shard, parsed once per segment rather than on every paint.
   const segment = useRef<{ id: string | undefined; shard: ShardModel | null }>({ id: undefined, shard: null })
   const reduced = useMemo(() => typeof window !== 'undefined' && window.matchMedia?.('(prefers-reduced-motion: reduce)').matches === true, [])
@@ -493,10 +496,13 @@ export function TvScreenEffect(): JSX.Element {
     // second (arkinox, 2026-10-20: "the perf on /tv on my laptop is not
     // satisfactory").
     const dirty = painter.dirty
-    if (resized || dirty === null || now - lastFull.current >= FULL_UPLOAD_MS) {
-      overlay.needsUpdate = true
-      lastFull.current = now
-    } else uploadRegions(state.gl, overlay, dirty)
+    if (resized || dirty === null) overlay.needsUpdate = true
+    else {
+      const W = painter.canvas.width, H = painter.canvas.height
+      const bh = Math.ceil(H / REFRESH_BANDS)
+      const y = (band.current++ % REFRESH_BANDS) * bh
+      uploadRegions(state.gl, overlay, y < H ? [...dirty, { x: 0, y, w: W, h: Math.min(bh, H - y) }] : dirty)
+    }
   })
   return <primitive object={effect} />
 }

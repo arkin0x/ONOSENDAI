@@ -5,7 +5,8 @@
  * "catch places where we are bogging things down unnecessarily").
  */
 import { afterEach, describe, expect, it } from 'vitest'
-import { dirtyRects, trackDrawing, type DirtyRect } from '../drawTracker'
+import { dirtyRects, trackDrawing, uploadRegions, type DirtyRect } from '../drawTracker'
+import { TvPainter, type TvAssets, type TvPicture } from '../tvPainter'
 
 /** A 2D context that keeps its state and transform, measures each character as 10 px, and draws nothing. */
 function fakeContext(): CanvasRenderingContext2D {
@@ -23,9 +24,10 @@ function fakeContext(): CanvasRenderingContext2D {
     translate: (x: number, y: number) => { m = { ...m, e: m.e + m.a * x + m.c * y, f: m.f + m.b * x + m.d * y } },
     scale: (x: number, y: number) => { m = { ...m, a: m.a * x, b: m.b * x, c: m.c * y, d: m.d * y } },
     rotate: () => {},
-    beginPath: () => {}, moveTo: () => {}, lineTo: () => {}, arc: () => {}, closePath: () => {}, rect: () => {},
+    beginPath: () => {}, moveTo: () => {}, lineTo: () => {}, arc: () => {}, arcTo: () => {}, closePath: () => {}, rect: () => {},
     fill: () => {}, stroke: () => {}, fillRect: () => {}, strokeRect: () => {}, clearRect: () => {}, fillText: () => {}, drawImage: () => {}, clip: () => {}, setLineDash: () => {},
     createLinearGradient: () => ({ addColorStop: () => {} }),
+    createRadialGradient: () => ({ addColorStop: () => {} }),
     putImageData: () => {},
   }
   return ctx as unknown as CanvasRenderingContext2D
@@ -138,3 +140,88 @@ describe('dirtyRects', () => {
     expect(dirtyRects([[0, 0, 900, 900]], 1000, 1000)).toBeNull()
   })
 })
+
+describe('what the tracker cannot follow (review of #415)', () => {
+  it('is all of it when a clip is left open for the parts after', () => {
+    const p = painter()
+    const later = box(0, 0, 500, 500)
+    p.paint([['a', (c) => { c.beginPath(); c.rect(0, 0, 10, 10); c.clip() }], ['b', later]])
+    p.paint([['a', (c) => { c.beginPath(); c.rect(0, 0, 10, 10); c.clip() }], ['b', later]])
+    expect(p.paint([['a', (c) => { c.beginPath(); c.rect(0, 0, 400, 400); c.clip() }], ['b', later]])).toBeNull()
+  })
+  it('is all of it when a path is filled in a part that did not begin it', () => {
+    const p = painter()
+    p.paint([['a', (c) => { c.beginPath(); c.rect(100, 100, 10, 10) }], ['b', (c) => c.fill()]])
+    expect(p.paint([['a', (c) => { c.beginPath(); c.rect(600, 600, 10, 10) }], ['b', (c) => c.fill()]])).toBeNull()
+  })
+  it('skips a call with a coordinate that is not a number, and still follows the rest', () => {
+    const p = painter()
+    p.paint([['a', (c) => { c.fillRect(NaN, 0, 10, 10); c.fillRect(100, 100, 10, 10) }]])
+    p.paint([['a', (c) => { c.fillRect(NaN, 0, 10, 10); c.fillRect(100, 100, 10, 10) }]])
+    const d = p.paint([['a', (c) => { c.fillRect(NaN, 0, 10, 10); c.fillRect(300, 300, 10, 10) }]])!
+    expect(d.some((r) => holds(r, 100, 100, 110, 110))).toBe(true)
+    expect(d.some((r) => holds(r, 300, 300, 310, 310))).toBe(true)
+  })
+  it('holds an arcTo whose tangent points lie past its second point', () => {
+    const p = painter()
+    const arc = (y: number) => (c: CanvasRenderingContext2D) => { c.beginPath(); c.moveTo(0, y); c.arcTo(100, y, 100, y + 10, 50); c.stroke() }
+    p.paint([['a', arc(0)]])
+    p.paint([['a', arc(0)]])
+    const d = p.paint([['a', arc(400)]])!
+    // The arc runs from (50, 0) round to (100, 50).
+    expect(d.some((r) => holds(r, 50, 0, 100, 50))).toBe(true)
+  })
+  it('reaches a square cap\'s corners', () => {
+    const p = painter()
+    const line = (x: number) => (c: CanvasRenderingContext2D) => { c.lineWidth = 20; c.lineCap = 'square'; c.lineJoin = 'round'; c.beginPath(); c.moveTo(x, 100); c.lineTo(x + 100, 100); c.stroke() }
+    p.paint([['a', line(100)]])
+    p.paint([['a', line(100)]])
+    const d = p.paint([['a', line(500)]])!
+    expect(d.some((r) => holds(r, 86, 86, 214, 114))).toBe(true)
+  })
+})
+
+describe('TV\'s painter through the tracker', () => {
+  it('follows every call it makes: a paint like the last uploads nothing', () => {
+    const ctx = fakeContext()
+    const canvas = { width: 0, height: 0, getContext: () => ctx } as unknown as HTMLCanvasElement
+    const tv = new TvPainter(canvas)
+    tv.size(1400, 800, 1)
+    const assets: TvAssets = { name: (pk) => pk.toUpperCase(), picture: () => null, logo: null, spin: null, segmentShard: null, color: () => '#fff', music: { title: 'SATURN DAY', artist: 'SETHY BOWOY', art: null, progress: 0.4, blocked: false, volume: 0.8, muted: false }, watching: 3 }
+    const p: TvPicture = { status: 'playing', shot: { id: 't', kind: 'trip', pubkey: 'ann', beats: [], start: 1, end: 2, offsets: [], length: 5 } as never, played: 0, tapeTime: 100, scaleExp: 2, cutAt: 0, skipped: 0, meanwhile: false, census: null, chains: {}, arrivals: [{ pubkey: 'bob', at: 1 }], reactions: [], avatars: {} }
+    tv.paint(p, assets, 5000, 1, true)
+    tv.paint(p, assets, 5000, 1, true)
+    tv.paint(p, assets, 5000, 1, true)
+    const report = (tv as unknown as { track: { report: () => { full: string | null } } }).track.report()
+    expect(report.full).toBeNull()
+    expect(tv.dirty).toEqual([])
+  })
+})
+
+describe('uploadRegions', () => {
+  function renderer(): { calls: string[]; r: never } {
+    const calls: string[] = []
+    const gl = new Proxy({} as Record<string, unknown>, {
+      get: (_t, k) => (typeof k === 'string' && /^[A-Z][A-Z0-9_]*$/.test(k) ? k : (...a: unknown[]) => { calls.push(`${String(k)}(${a.map((x) => (typeof x === 'object' ? 'img' : String(x))).join(',')})`) }),
+    })
+    const r = { initTexture: () => { calls.push('init') }, properties: { get: () => ({ __webglTexture: {} }) }, getContext: () => gl, state: { bindTexture: () => { calls.push('bind') }, unbindTexture: () => { calls.push('unbind') } } }
+    return { calls, r: r as never }
+  }
+  it('copies each rectangle at its own place and leaves no skip behind, asking the GPU for nothing', () => {
+    const { calls, r } = renderer()
+    const t = { flipY: false, premultiplyAlpha: false, unpackAlignment: 4, image: { width: 100, height: 50 }, needsUpdate: false }
+    uploadRegions(r, t as never, [{ x: 10, y: 20, w: 30, h: 5 }])
+    expect(calls).toContain('texSubImage2D(TEXTURE_2D,0,10,20,30,5,RGBA,UNSIGNED_BYTE,img)')
+    expect(calls).toContain('pixelStorei(UNPACK_SKIP_PIXELS,10)')
+    expect(calls.slice(-3)).toEqual(['pixelStorei(UNPACK_SKIP_PIXELS,0)', 'pixelStorei(UNPACK_SKIP_ROWS,0)', 'unbind'])
+    expect(calls.some((c) => c.startsWith('getParameter'))).toBe(false)
+  })
+  it('uploads all of it instead when the texture is upside down', () => {
+    const { calls, r } = renderer()
+    const t = { flipY: true, image: { width: 100, height: 50 }, needsUpdate: false }
+    uploadRegions(r, t as never, [{ x: 0, y: 0, w: 1, h: 1 }])
+    expect(t.needsUpdate).toBe(true)
+    expect(calls).toEqual([])
+  })
+})
+

@@ -190,6 +190,9 @@ describe('rule 2 in a chest: the chest signer vouches for its rumors', () => {
     expect(innerAuthentic({ ...r, sig: '' }, pk)).toBe(true)
     expect(innerAuthentic({ ...r, sig: '00'.repeat(64) }, pk)).toBe(false)
     expect(await unbag(await bagOf([{ ...r, sig: '' }]), rk.key)).toHaveLength(1)
+    // Any other value is a signature, and must verify: null is dropped, never vouched for.
+    const odd = chestOf([{ ...r, sig: null } as unknown as Rumor], lock.itemPubkey)
+    expect(readContents(openWithSecret(odd.item, lock.secretHex), pk)).toHaveLength(0)
   })
 
   it('a signed message from an older client is verified by its own signature, sealer or not', () => {

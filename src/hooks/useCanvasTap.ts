@@ -101,12 +101,14 @@ export function installCanvasTap(
 
   const cancel = (): void => { tracking = false; liftedAt = 0 }
 
-  win.addEventListener('pointerdown', down, { passive: true })
+  // In the capture phase: a press that a control stops on its way (the
+  // compass, a modal's card) still clears a lift that got no click.
+  win.addEventListener('pointerdown', down, { capture: true, passive: true })
   win.addEventListener('pointerup', up, { passive: true })
   win.addEventListener('click', click, { passive: true })
   win.addEventListener('pointercancel', cancel, { passive: true })
   return () => {
-    win.removeEventListener('pointerdown', down)
+    win.removeEventListener('pointerdown', down, { capture: true })
     win.removeEventListener('pointerup', up)
     win.removeEventListener('click', click)
     win.removeEventListener('pointercancel', cancel)

@@ -45,8 +45,9 @@ function composerKnowsWebGL2(): Plugin {
       replaced = true
       return { code: code.replace(CALL, 'const webGL2Available = true;'), map: null }
     },
-    buildEnd() {
-      if (!replaced) this.warn('composerKnowsWebGL2: never found isWebGL2Available() in @react-three/postprocessing\'s EffectComposer.js; the throwaway WebGL2 context is back. Update or remove this plugin.')
+    buildEnd(error) {
+      // A build that failed before reaching the composer has a real error to read.
+      if (!error && !replaced) this.warn('composerKnowsWebGL2: never found isWebGL2Available() in @react-three/postprocessing\'s EffectComposer.js; the throwaway WebGL2 context is back. Update or remove this plugin.')
     },
   }
 }

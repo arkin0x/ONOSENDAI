@@ -51,4 +51,5 @@ export const PLAYLIST: Track[] = [
   { url: 'https://media.basspistol.com/basspistol.com/dust-and-soda/3-the-golden-bank.mp3' },
   { url: 'https://media.basspistol.com/basspistol.com/dust-and-soda/4-chemtrail-zombie.mp3' },
   { url: 'https://media.basspistol.com/basspistol.com/dust-and-soda/5-planned-obsolescence.mp3' },
+  { url: 'https://media.basspistol.com/basspistol.com/headcleaner/1-radius.mp3' },
 ]

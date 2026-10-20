@@ -28,9 +28,9 @@
  * show MIN_VISIBLE_PX at any camera distance, so it is not drawn at all.
  */
 
-import { useMemo, useRef, type RefObject } from 'react'
+import { useLayoutEffect, useMemo, useRef, type RefObject } from 'react'
 import { useThree, type ThreeEvent } from '@react-three/fiber'
-import { Box3, Mesh, PerspectiveCamera, Raycaster, Vector3, type Intersection, type Object3D } from 'three'
+import { Box3, Mesh, PerspectiveCamera, Raycaster, Vector3, type Camera, type Intersection, type Object3D } from 'three'
 import { MAX_EXTENT } from 'sno-core/shards'
 import { CAMERA_NEAR, FOV } from './camera'
 import { markSceneTapHandled } from '../hooks/useCanvasTap'
@@ -149,90 +149,128 @@ export function yieldsTap(intersections: ReadonlyArray<{ object: unknown }>, sel
   return intersections.some((i) => i.object !== self)
 }
 
-export function TapTarget({ onTap, measure, px, at, yields = false }: Props): JSX.Element {
-  const hit = useRef<Mesh>(null)
-  const get = useThree((s) => s.get)
-  const box = useRef(new Box3())
-  const centre = useRef(new Vector3())
-  const size = useRef(new Vector3())
-  // How wide the shard is on screen as last drawn, and the world size of a
-  // pixel at its distance: what the tap needs to decide whether it must hit
-  // the geometry itself.
-  const across = useRef(0)
-  const perPxWorld = useRef(0)
-  const precise = useRef(new Raycaster())
-  // What the measurement reads, current for the raycast below, which is made once.
-  const live = useRef({ measure, px, at })
-  live.current = { measure, px, at }
+/** The view a target is placed for: R3F's store, as `get()` hands it over. */
+export interface TapView {
+  camera: Camera
+  size: { width: number; height: number }
+  internal?: { lastEvent: { current: Event | null } }
+}
 
-  // The target is placed when a ray asks for it, not every frame. Only taps
-  // raycast it (R3F raycasts a target with no hover handler on press, release,
-  // click and wheel, never on a plain pointer move), so measuring every shard
-  // and every avatar every frame was work for a tap that mostly never came:
-  // with forty people and forty shards in view it was 81 bounding boxes a
-  // frame (2026-10-20). Asked at the tap, the measurement is of the geometry
-  // as last drawn, which is what the eye is aiming at.
-  const raycast = useMemo(() => {
-    /** Places and sizes the target `m` for the view as last drawn; false when it takes no taps. */
-    const place = (m: Mesh): boolean => {
-      if (!m.parent) return false
-      const { camera, size: view } = get()
-      const cam = camera as PerspectiveCamera
-      const fov = cam.fov ?? 50
-      const { measure, px, at } = live.current
+/** What a target is measured from: its props. */
+export interface TapSpec {
+  measure?: RefObject<Object3D>
+  px?: number
+  at?: [number, number, number]
+}
 
-      if (px !== undefined) {
-        if (at) centre.current.set(at[0], at[1], at[2]); else centre.current.set(0, 0, 0)
-        m.parent.localToWorld(centre.current)
-        const perPx = 1 / pxPerUnit(fov, view.height, cam.position.distanceTo(centre.current))
-        if (at) m.position.set(at[0], at[1], at[2]); else m.position.set(0, 0, 0)
-        m.scale.setScalar(px * perPx)
-        // A mark (a message or a coin) is a deliberate, fixed-size target, and
-        // wins over a shard's box when a tap passes through both.
-        m.userData.tapPriority = 'mark'
-        m.updateWorldMatrix(false, false)
-        return true
-      }
+/**
+ * What placing a target leaves for its tap handler: how wide the shard is on
+ * screen as last drawn, and the world size of a pixel at its distance, which
+ * decide whether a tap must hit the geometry itself.
+ */
+export interface TapMeasure {
+  across: number
+  perPxWorld: number
+}
 
-      const drawn = measure?.current
-      if (!drawn) return false
-      // Measured at every tap, from the geometry as it is drawn now: a shard
-      // clipped to its region changes shape with the zoom, and a measurement
-      // even a few frames old kept a target alive over nothing (arkinox,
-      // 2026-10-01: still tappable at 2^9 after vanishing at 2^5). The cost is
-      // one cached bounding box per child geometry.
-      box.current.setFromObject(drawn)
-      if (box.current.isEmpty()) return false
-      // Inside the shard: it surrounds the view, so it is not a thing to tap.
-      if (box.current.containsPoint(cam.position)) return false
-      box.current.getCenter(centre.current)
-      box.current.getSize(size.current)
-      // How wide the box really is on screen, from its eight corners: the
-      // distance to its centre understates a large box, whose near face is
-      // much closer than its middle. A corner behind the camera means the box
-      // reaches round the view, which is too big to tap.
-      const wide = screenAcross(box.current, cam, view.width, view.height)
-      if (wide === null) return false
-      const viewport = Math.max(view.width, view.height)
-      const perWorld = pxPerUnit(fov, view.height, cam.position.distanceTo(centre.current))
-      across.current = wide
-      perPxWorld.current = 1 / perWorld
-      // targetSpan's rule, worked in place: this runs per target per tap, for
-      // every target in the scene, so it allocates nothing (2026-10-14).
-      const s = size.current
-      const largest = Math.max(s.x, s.y, s.z) * perWorld
-      if (wide > MAX_SCREENS * viewport || !(largest >= MIN_VISIBLE_PX)) return false
-      const floor = MIN_TARGET_PX / perWorld
-      // The box is measured in world space; the target lives in its parent's.
-      m.position.copy(m.parent.worldToLocal(scratch.copy(centre.current)))
-      m.scale.set(Math.max(s.x, floor), Math.max(s.y, floor), Math.max(s.z, floor))
+/**
+ * A target's raycast: it places and sizes the target for the view as last
+ * drawn, then raycasts it, or takes no ray when the target takes no taps.
+ *
+ * The target is placed when a ray asks for it, not every frame. R3F raycasts
+ * a target with no hover handler on press, release, click, right click,
+ * double click and wheel, never on a plain pointer move, so measuring every
+ * shard and every avatar every frame was work for a tap that mostly never
+ * came: with forty people and forty-one shards in view it was 81 bounding
+ * boxes a frame (arkinox, 2026-10-20: the laptop "still isn't great"). A wheel
+ * turn is a zoom, never a tap, and no target has a wheel handler, so a wheel
+ * ray is refused before anything is measured. Asked at the tap, the
+ * measurement is of the geometry and camera as last drawn, which is what the
+ * eye is aiming at; a mark whose place a render has just changed answers
+ * there, at most one frame ahead of its picture.
+ */
+export function tapRaycast(view: () => TapView, spec: { current: TapSpec }, out: TapMeasure): (this: Mesh, raycaster: Raycaster, intersects: Intersection[]) => void {
+  const box = new Box3()
+  const centre = new Vector3()
+  const size = new Vector3()
+
+  /** Places and sizes the target `m`; false when it takes no taps. */
+  const place = (m: Mesh): boolean => {
+    if (!m.parent) return false
+    const { camera, size: screen } = view()
+    const cam = camera as PerspectiveCamera
+    const fov = cam.fov ?? 50
+    const { measure, px, at } = spec.current
+
+    if (px !== undefined) {
+      if (at) centre.set(at[0], at[1], at[2]); else centre.set(0, 0, 0)
+      m.parent.localToWorld(centre)
+      const perPx = 1 / pxPerUnit(fov, screen.height, cam.position.distanceTo(centre))
+      if (at) m.position.set(at[0], at[1], at[2]); else m.position.set(0, 0, 0)
+      m.scale.setScalar(px * perPx)
+      // A mark (a message or a coin) is a deliberate, fixed-size target, and
+      // wins over a shard's box when a tap passes through both.
+      m.userData.tapPriority = 'mark'
       m.updateWorldMatrix(false, false)
       return true
     }
-    return function tapRaycast(this: Mesh, raycaster: Raycaster, intersects: Intersection[]): void {
-      if (place(this)) Mesh.prototype.raycast.call(this, raycaster, intersects)
-    }
-  }, [get])
+
+    const drawn = measure?.current
+    if (!drawn) return false
+    // Measured at every tap, from the geometry as it is drawn now: a shard
+    // clipped to its region changes shape with the zoom, and a measurement
+    // even a few frames old kept a target alive over nothing (arkinox,
+    // 2026-10-01: still tappable at 2^9 after vanishing at 2^5). The cost is
+    // one cached bounding box per child geometry.
+    box.setFromObject(drawn)
+    if (box.isEmpty()) return false
+    // Inside the shard: it surrounds the view, so it is not a thing to tap.
+    if (box.containsPoint(cam.position)) return false
+    box.getCenter(centre)
+    box.getSize(size)
+    // How wide the box really is on screen, from its eight corners: the
+    // distance to its centre understates a large box, whose near face is
+    // much closer than its middle. A corner behind the camera means the box
+    // reaches round the view, which is too big to tap.
+    const wide = screenAcross(box, cam, screen.width, screen.height)
+    if (wide === null) return false
+    const viewport = Math.max(screen.width, screen.height)
+    const perWorld = pxPerUnit(fov, screen.height, cam.position.distanceTo(centre))
+    out.across = wide
+    out.perPxWorld = 1 / perWorld
+    // targetSpan's rule, worked in place: it once ran per shard per frame,
+    // and the arrays targetSpan returns were a steady stream of garbage
+    // (2026-10-14); it now runs for every target at every tap.
+    const largest = Math.max(size.x, size.y, size.z) * perWorld
+    if (wide > MAX_SCREENS * viewport || !(largest >= MIN_VISIBLE_PX)) return false
+    const floor = MIN_TARGET_PX / perWorld
+    // The box is measured in world space; the target lives in its parent's.
+    m.position.copy(m.parent.worldToLocal(scratch.copy(centre)))
+    m.scale.set(Math.max(size.x, floor), Math.max(size.y, floor), Math.max(size.z, floor))
+    m.updateWorldMatrix(false, false)
+    return true
+  }
+
+  return function raycast(this: Mesh, raycaster: Raycaster, intersects: Intersection[]): void {
+    if (view().internal?.lastEvent.current?.type === 'wheel') return
+    if (place(this)) Mesh.prototype.raycast.call(this, raycaster, intersects)
+  }
+}
+
+export function TapTarget({ onTap, measure, px, at, yields = false }: Props): JSX.Element {
+  const hit = useRef<Mesh>(null)
+  const get = useThree((s) => s.get)
+  const precise = useRef(new Raycaster())
+  // What the measurement reads, kept to the committed props: the raycast
+  // below is made once, and a render React throws away must not move it.
+  const spec = useRef<TapSpec>({ measure, px, at })
+  useLayoutEffect(() => {
+    spec.current.measure = measure
+    spec.current.px = px
+    spec.current.at = at
+  })
+  const measured = useRef<TapMeasure>({ across: 0, perPxWorld: 0 })
+  const raycast = useMemo(() => tapRaycast(get as () => TapView, spec, measured.current), [get])
 
   const tap = (e: ThreeEvent<MouseEvent>): void => {
     if (e.delta > TAP_SLOP_PX) return
@@ -246,10 +284,10 @@ export function TapTarget({ onTap, measure, px, at, yields = false }: Props): JS
       // A large shard is hit only where it draws, so the air inside its box
       // lets the tap through to whatever is behind.
       const drawn = measure.current
-      if (drawn && across.current > PRECISE_ABOVE_PX) {
+      if (drawn && measured.current.across > PRECISE_ABOVE_PX) {
         const ray = precise.current
         ray.set(e.ray.origin, e.ray.direction)
-        const slop = PRECISE_SLOP_PX * perPxWorld.current
+        const slop = PRECISE_SLOP_PX * measured.current.perPxWorld
         ray.params.Points = { threshold: slop }
         ray.params.Line = { threshold: slop }
         if (ray.intersectObject(drawn, true).length === 0) return

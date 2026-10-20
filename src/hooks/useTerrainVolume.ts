@@ -72,26 +72,7 @@ function cellAt(
   return p
 }
 
-/**
- * Where every block of the volume sits, and its cache key: worked out once per
- * place, zoom, turn and plane, then read again on every terrain flush.
- *
- * Along a row only the right axis moves, so a row's first cell is worked out
- * once and stepped from, and the cells of one block (consecutive along the
- * row, since the row is monotonic) are one segment that shares its answer.
- * Building a coordinate and two cache keys for every one of the 6,859 cells
- * made a rescan a long task: 254 ms at worst at one boot on a loaded dev
- * machine (2026-10-20, spectating on the smoke seed; numbers in #404).
- *
- * Even by block, every flush wrote out and hashed the same keys as the last,
- * every known block was looked up again, and each answer from the workers
- * wrote its keys out twice more. So the keys are written out here, once, a
- * flush only looks up the blocks it does not have yet, and the runs it asks
- * for carry their keys to the cache. Replaying sixteen /tv cuts in headless
- * Chromium with the real workers, this halved the terrain's main-thread time
- * again after hex keys (570 ms to 311 ms; flushes 70 ms to 17 ms), and the
- * volumes came out byte for byte the same (2026-10-20, numbers in the PR).
- */
+/** The volume's blocks and their cache keys around one centre, and what has been read of them so far. */
 export interface VolumeLayout {
   plane: Plane
   /** The axis rows run along. */
@@ -114,6 +95,26 @@ export interface VolumeLayout {
   values: Uint8Array
 }
 
+/**
+ * Where every block of the volume sits, and its cache key: worked out once per
+ * place, zoom, turn and plane, then read again on every terrain flush.
+ *
+ * Along a row only the right axis moves, so a row's first cell is worked out
+ * once and stepped from, and the cells of one block (consecutive along the
+ * row, since the row is monotonic) are one segment that shares its answer.
+ * Building a coordinate and two cache keys for every one of the 6,859 cells
+ * made a rescan a long task: 254 ms at worst at one boot on a loaded dev
+ * machine (2026-10-20, spectating on the smoke seed; numbers in #404).
+ *
+ * Even by block, every flush wrote out and hashed the same keys as the last,
+ * every known block was looked up again, and each answer from the workers
+ * wrote its keys out twice more. So the keys are written out here, once, a
+ * flush only looks up the blocks it does not have yet, and the runs it asks
+ * for carry their keys to the cache. Replaying sixteen /tv cuts in headless
+ * Chromium with the real workers, this halved the terrain's main-thread time
+ * again after hex keys (570 ms to 311 ms; flushes 70 ms to 17 ms), and the
+ * volumes came out byte for byte the same (2026-10-20, numbers in the PR).
+ */
 export function layoutVolume(centre: Position, axes: ViewAxes, scaleExp: number, plane: Plane): VolumeLayout {
   const R = VOLUME_RADIUS
   const N = VOLUME_SIZE
@@ -194,11 +195,16 @@ export function readVolume(layout: VolumeLayout): Uint8Array {
       const k = readKey(keys[s])
       if (k !== undefined) {
         known[s] = 1
-        values ??= layout.values.slice()
+        if (!values) {
+          // Copied before the first write, so an array already handed out
+          // never changes, and kept on the layout at once, so the segment
+          // marked known above is never without its value.
+          values = layout.values.slice()
+          layout.values = values
+        }
         values.fill(k, at[s], at[s] + cells[s])
       } else if (!isKeyPending(keys[s])) {
-        // One sample per block per pass, or a block is asked for once per
-        // cell it contains while the first answer is still in flight.
+        // Neither known nor already asked for: into this row's runs below.
         wanted.push(s)
       }
     }
@@ -225,7 +231,6 @@ export function readVolume(layout: VolumeLayout): Uint8Array {
     }
   }
 
-  if (values) layout.values = values
   return layout.values
 }
 
@@ -290,8 +295,17 @@ export function useTerrainVolume(win: ViewWindow, axes: ViewAxes, suspend = fals
 
   // The keys of every block around the centre, written out once per place,
   // zoom, turn and plane; each flush below only reads them.
+  // How long the layout took, so the DEV timing below covers a whole rescan
+  // after a move as it did before the layout was split out.
+  const layoutMs = useRef(0)
   const layout = useMemo(
-    () => (suspend ? null : layoutVolume(centre, axes, scaleExp, plane)),
+    () => {
+      if (suspend) return null
+      const t0 = performance.now()
+      const built = layoutVolume(centre, axes, scaleExp, plane)
+      layoutMs.current = performance.now() - t0
+      return built
+    },
     // centreKey stands in for centre, whose identity changes on every render.
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [centreKey, scaleExp, plane, axes, suspend],
@@ -312,7 +326,8 @@ export function useTerrainVolume(win: ViewWindow, axes: ViewAxes, suspend = fals
       for (let i = 0; i < values.length; i++) if (values[i] !== UNKNOWN) known++
       const w = window as unknown as { __terrain?: { scans?: number[] } & Record<string, unknown> }
       const scans = w.__terrain?.scans ?? []
-      scans.push(Math.round((performance.now() - t0) * 100) / 100)
+      scans.push(Math.round((performance.now() - t0 + layoutMs.current) * 100) / 100)
+      layoutMs.current = 0
       w.__terrain = {
         known, total: N * N * N, cache: cacheSize(), inflight: inflightRuns(), scaleExp,
         scans: scans.slice(-40),

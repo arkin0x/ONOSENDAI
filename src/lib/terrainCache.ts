@@ -35,7 +35,7 @@
  */
 
 import { DEFAULT_CELL_BITS } from 'cyberspace-core'
-import { getTerrainWorkers, postRun } from './workers'
+import { getTerrainWorkers, postRun, setRunDropHandler } from './workers'
 import type { AxisName } from './space'
 import type { Plane } from 'cyberspace-core'
 import type { RunRequest, RunResponse } from '../workers/terrain.worker'
@@ -165,6 +165,24 @@ export function isKeyPending(key: string): boolean {
 function attachOnce(): void {
   if (attached) return
   attached = true
+
+  // A run that will never be answered gives back its marks, so the next read
+  // of a volume that still wants its blocks asks for them again. Each block is
+  // in one live run at most, since a read never asks for a block already
+  // asked for, so clearing its mark here cannot strand another run's block.
+  // Nothing is asked for from here. Leaving the main view drops the volume,
+  // and coming back lays it out and reads it afresh; after a worker throws,
+  // the next flush asks again. Asking at once would retry a run that throws
+  // every time in a tight loop (2026-10-20).
+  setRunDropHandler((ids) => {
+    for (const id of ids) {
+      const run = runsById.get(id)
+      if (!run) continue
+      runsById.delete(id)
+      inflight.delete(run.key)
+      for (const k of run.keys) pendingBlocks.delete(k)
+    }
+  })
 
   for (const worker of getTerrainWorkers()) {
     worker.addEventListener('message', (event: MessageEvent<RunResponse>) => {

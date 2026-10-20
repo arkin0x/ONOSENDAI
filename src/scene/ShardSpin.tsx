@@ -55,12 +55,22 @@ function Spinning({ shard }: { shard: ShardModel | null }): JSX.Element | null {
   )
 }
 
-/** Hands the canvas's invalidate to `pace` while it is mounted. */
-function Pacer({ pace }: { pace: (invalidate: (() => void) | null) => void }): null {
+/** How a reader asks for frames: given the asking function on mount, and null, with the same function, on unmount. */
+export type Pace = (next: (() => void) | null, mine: () => void) => void
+
+/**
+ * Hands `pace` a function that asks the canvas for one frame, while it is
+ * mounted. The ask waits for a microtask: r3f 8 takes an invalidate made
+ * while any canvas's useFrame callbacks are running as a wish for two frames,
+ * and TV asks from inside its own (review of #414: at 60 Hz the spin still
+ * drew every frame). After them, it is one.
+ */
+function Pacer({ pace }: { pace: Pace }): null {
   const invalidate = useThree((s) => s.invalidate)
   useEffect(() => {
-    pace(() => invalidate())
-    return () => pace(null)
+    const mine = (): void => queueMicrotask(() => invalidate())
+    pace(mine, mine)
+    return () => pace(null, mine)
   }, [invalidate, pace])
   return null
 }
@@ -79,7 +89,7 @@ function Pacer({ pace }: { pace: (invalidate: (() => void) | null) => void }): n
  * satisfactory"). The turn keeps its pace either way: each frame turns by
  * the time since the last.
  */
-export function ShardSpin({ shard, size = 160, preserve = false, pace }: { shard: ShardModel | null; size?: number; preserve?: boolean; pace?: (invalidate: (() => void) | null) => void }): JSX.Element {
+export function ShardSpin({ shard, size = 160, preserve = false, pace }: { shard: ShardModel | null; size?: number; preserve?: boolean; pace?: Pace }): JSX.Element {
   // A new turn for each shard, inside the same canvas: one shard straight
   // after another would otherwise be built once on the last one's framing,
   // then again on its own (review of #394). Not keyed on the shard's id: an

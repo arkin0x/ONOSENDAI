@@ -28,7 +28,7 @@ import { objectsOf } from '../workshop/ObjectPicker'
 import { avatarFromEvent } from '../lib/avatar'
 import { QUOTE_MAX, type TapeItem } from '../lib/tv/director'
 import type { BagContents } from '../lib/hidden'
-import { ShardSpin } from '../scene/ShardSpin'
+import { ShardSpin, type Pace } from '../scene/ShardSpin'
 
 /** How long a cut's transition takes, ms (scene/TvScreenEffect): a segment's clock starts after it. */
 export const CUT_MS = 700
@@ -94,9 +94,14 @@ export function segmentDoing(item: TapeItem): string {
  */
 export const tvSpin: { canvas: HTMLCanvasElement | null; next: (() => void) | null } = { canvas: null, next: null }
 
-/** Where ShardSpin hands its invalidate (pace). */
-function paceSpin(invalidate: (() => void) | null): void {
-  tvSpin.next = invalidate
+/**
+ * Where ShardSpin hands its ask for a frame (pace). A canvas going away
+ * clears it only if it is still its own: one going away late, after the next
+ * one came, must not leave the next one never asked (review of #414).
+ */
+export const paceSpin: Pace = (next, mine) => {
+  if (next) tvSpin.next = next
+  else if (tvSpin.next === mine) tvSpin.next = null
 }
 
 /** The size the turning shard is rendered at, CSS px: copied, scaled, into the panel. */

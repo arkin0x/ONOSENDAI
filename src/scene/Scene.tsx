@@ -23,7 +23,7 @@
 import { Canvas, useThree } from '@react-three/fiber'
 import { OrbitControls } from '@react-three/drei'
 import { EffectComposer, Bloom } from '@react-three/postprocessing'
-import { BlendFunction, Effect, type BloomEffect } from 'postprocessing'
+import { BlendFunction, Effect, type BloomEffect, type EffectComposer as PostComposer } from 'postprocessing'
 import { memo, useEffect, useLayoutEffect, useMemo, useRef } from 'react'
 import { useFrame } from '@react-three/fiber'
 import { Vector3 } from 'three'
@@ -764,6 +764,32 @@ function WorldBloom(): JSX.Element {
 }
 
 /**
+ * The composer's buffers hand on their colour only.
+ *
+ * The scene is drawn into a multisampled buffer, and before the bloom can
+ * read it, three resolves it into a plain one: by default the depth and the
+ * stencil too. Nothing after the scene's own draw reads either (the shard
+ * faces' stencil tag does its work inside that draw, ShardMesh
+ * FACE_TAG_STENCIL), so resolving them was pure cost, and on Windows a
+ * heavy one: Direct3D 11 cannot resolve a multisampled stencil on the GPU,
+ * so ANGLE draws it out, copies it to a staging texture, waits for the GPU
+ * to read it back, repacks it pixel by pixel on the CPU and uploads it
+ * again, every frame (three.js #27799; ANGLE Blit11::resolveStencil). On an
+ * Android phone the same resolve is one blit on the GPU, which is why the
+ * main view was smooth there and laboured on a Windows laptop (arkinox,
+ * 2026-10-20: "on my laptop the perf has improved but it still isn't
+ * great"). Both buffers, since TV's tube makes the bloom draw into the
+ * second one. A ref, so a composer made again is set again.
+ */
+function resolveColourOnly(composer: PostComposer | null): void {
+  if (!composer) return
+  for (const buffer of [composer.inputBuffer, composer.outputBuffer]) {
+    buffer.resolveDepthBuffer = false
+    buffer.resolveStencilBuffer = false
+  }
+}
+
+/**
  * The canvas, rendered only when what it reads changes (memo): it takes no
  * props, so a render of App, which happens on every store change it reads,
  * has nothing to say to it.
@@ -821,8 +847,14 @@ export const Scene = memo(function Scene(): JSX.Element {
 
         A stencil on the composer's buffers carries the shard faces' tag past
         translucent overlays (ShardMesh FACE_TAG_STENCIL) (arkinox, 2026-10-12).
+        It is never resolved out of the multisampled buffer (resolveColourOnly).
+
+        No resolutionScale: on the composer it only sizes the depth
+        downsampling that a normal pass feeds, and there is no normal pass,
+        so the 0.25 that stood here did nothing. The bloom's blur runs from
+        half resolution down on its own (mipmapBlur).
       */}
-      <EffectComposer resolutionScale={0.25} stencilBuffer>
+      <EffectComposer ref={resolveColourOnly} stencilBuffer>
         {bloom}
       </EffectComposer>
     </Canvas>

@@ -149,6 +149,8 @@ function readEntry(e: BagEntry, sealer: string | undefined): ChestEntry | null {
   try {
     if (isReference(e) || !wellFormed(e as Partial<NostrEvent>)) return null
     const ev = e as NostrEvent
+    // Unsigned is no `sig`, or an empty one (spec 7.6 Rumors), as the bag
+    // reader has it (hidden.ts innerAuthentic).
     const signed = typeof ev.sig === 'string' && ev.sig.length > 0
     // The fields alone, as a plain copy: nostr-tools remembers a verification
     // on the object itself, and a copy made in memory would inherit it.

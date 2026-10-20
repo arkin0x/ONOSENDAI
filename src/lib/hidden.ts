@@ -599,7 +599,7 @@ export function rumorHolds(ev: Partial<Rumor>): boolean {
  * Whether an inline item of a bag is authentic for the key that signed the
  * bag (arkinox, 2026-10-20). Its `pubkey` must be the bag's signer, always:
  * an envelope carrying someone else's event is not theirs to place. Then:
- *   - a message (kind 1) with no `sig` is a rumor, accepted when its id is
+ *   - a message (kind 1) with no `sig` (or an empty one) is a rumor, accepted when its id is
  *     its hash (rumorHolds), and its author is the bag's signer, whose
  *     signature over the bag covers it;
  *   - anything that carries a `sig` must verify: a signed message from a
@@ -608,7 +608,8 @@ export function rumorHolds(ev: Partial<Rumor>): boolean {
  */
 export function innerAuthentic(inner: Partial<Rumor>, signer: string): boolean {
   if (!inner || typeof inner !== 'object' || Array.isArray(inner) || typeof inner.kind !== 'number' || inner.pubkey !== signer) return false
-  if (inner.sig === undefined) return inner.kind === MESSAGE_KIND && rumorHolds(inner)
+  // No `sig`, or an empty one, is unsigned (spec 7.6), as the chest reader has it.
+  if (inner.sig === undefined || inner.sig === '') return inner.kind === MESSAGE_KIND && rumorHolds(inner)
   try { return verifyEvent(inner as NostrEvent) } catch { return false }
 }
 

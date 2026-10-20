@@ -181,6 +181,17 @@ describe('rule 2 in a chest: the chest signer vouches for its rumors', () => {
     expect(vouched[2].id).not.toBe('ee'.repeat(32))
   })
 
+  it('an empty sig is no sig, in a chest as in a bag: the rumor reads, vouched for, and a non-empty bad one is dropped', async () => {
+    const r = rumor('empty sig')
+    const c = chestOf([{ ...r, sig: '' }, { ...r, sig: '00'.repeat(64) }], lock.itemPubkey)
+    const read = readContents(openWithSecret(c.item, lock.secretHex), pk)
+    expect(read).toHaveLength(1)
+    expect(read[0].verified).toBe(true)
+    expect(innerAuthentic({ ...r, sig: '' }, pk)).toBe(true)
+    expect(innerAuthentic({ ...r, sig: '00'.repeat(64) }, pk)).toBe(false)
+    expect(await unbag(await bagOf([{ ...r, sig: '' }]), rk.key)).toHaveLength(1)
+  })
+
   it('a signed message from an older client is verified by its own signature, sealer or not', () => {
     const legacy = finalizeEvent(messageInnerTemplate('signed', at, 0, 5), sk)
     const c = chestOf([legacy], lock.itemPubkey)

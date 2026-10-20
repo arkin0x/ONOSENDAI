@@ -18,7 +18,7 @@ import { nip19 } from 'nostr-tools'
 import { regionLabel } from '../lib/loot'
 import { formatAgo, formatStamp, shortHex } from '../lib/time'
 import { spectate } from '../lib/spectator'
-import { ProfilePic } from './ProfileBadge'
+import { ProfilePic, ProfileTap } from './ProfileBadge'
 import { Comments } from './Comments'
 import { Reactions } from './Reactions'
 import { itemKind } from '../lib/comments'
@@ -148,9 +148,9 @@ export function SecretModal(): JSX.Element | null {
         <div className="secret__creator">
           <span className="secret__label">Left by</span>
           <div className="secret__person">
-            <ProfilePic pubkey={author} size={40} />
+            <ProfileTap pubkey={author}><ProfilePic pubkey={author} size={40} /></ProfileTap>
             <div className="secret__person-text">
-              <span className="secret__name">{name}{mine ? ' (you)' : ''}</span>
+              <ProfileTap pubkey={author} className="secret__name">{name}{mine ? ' (you)' : ''}</ProfileTap>
               {profile?.nip05 && <span className="secret__nip05">{profile.nip05.replace(/^_@/, '')}</span>}
               <span className="secret__npub" title={npub}>{shortHex(npub, 14, 8)}</span>
             </div>

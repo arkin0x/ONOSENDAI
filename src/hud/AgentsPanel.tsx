@@ -151,7 +151,7 @@ export function AgentsPanel(): JSX.Element {
           const fresh = unread.byAgent[pubkey] ?? 0
           return (
             <li key={pubkey} className="avatars__row agents__row">
-              <ProfileBadge pubkey={pubkey} />
+              <ProfileBadge pubkey={pubkey} tappable />
               <button className="copy agents__npub" onClick={() => copy(pubkey, npub)} title={`${npub}\nTap to copy`}>
                 {copied === pubkey ? 'COPIED' : shortHex(npub, 12, 6)}
               </button>

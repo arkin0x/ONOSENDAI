@@ -30,7 +30,7 @@ import { useCyberspace } from '../store/useCyberspace'
 import { useLootView } from '../store/useLootView'
 import { profileLabel } from '../store/useProfiles'
 import { useShards, positionOf } from '../store/useShards'
-import { ProfilePic } from './ProfileBadge'
+import { ProfilePic, ProfileTap } from './ProfileBadge'
 import { ChestBlock, KeyLine } from './ItemRows'
 import { useEscape } from '../hooks/useEscape'
 import { useBagReading } from '../hooks/useBagReadings'
@@ -189,9 +189,9 @@ export function LootDetail(): JSX.Element | null {
         <div className="secret__creator">
           <span className="secret__label">Hidden by</span>
           <div className="secret__person">
-            <ProfilePic pubkey={item.author} size={40} />
+            <ProfileTap pubkey={item.author}><ProfilePic pubkey={item.author} size={40} /></ProfileTap>
             <div className="secret__person-text">
-              <span className="secret__name">{name}{yours ? ' (you)' : ''}</span>
+              <ProfileTap pubkey={item.author} className="secret__name">{name}{yours ? ' (you)' : ''}</ProfileTap>
               {profile?.nip05 && <span className="secret__nip05">{profile.nip05.replace(/^_@/, '')}</span>}
               <span className="secret__npub" title={npub}>{shortHex(npub, 14, 8)}</span>
             </div>

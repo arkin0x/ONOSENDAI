@@ -5,9 +5,14 @@
  * initial) and the name, or a shortened npub until the profile arrives. One
  * component so every list — follows, avatars, targets, a secret's creator —
  * shows a person the same way.
+ *
+ * A picture or a name is also a way in to the person: ProfileTap (and a
+ * `tappable` badge) opens their whole profile, ProfileView (arkinox,
+ * 2026-10-20).
  */
 
-import { useState } from 'react'
+import { useState, type ReactNode } from 'react'
+import { useProfileView } from '../store/useProfileView'
 import { npubOf } from '../lib/npub'
 import { targetColor } from '../lib/targets'
 import { profileLabel } from '../store/useProfiles'
@@ -36,22 +41,38 @@ export function ProfilePic({ pubkey, size = 22 }: { pubkey: string; size?: numbe
   )
 }
 
+/** A picture or a name that opens the person's profile (ProfileView) when tapped. */
+export function ProfileTap({ pubkey, className = '', children }: { pubkey: string; className?: string; children: ReactNode }): JSX.Element {
+  return (
+    <button
+      type="button"
+      className={`profile-tap ${className}`}
+      title="View profile"
+      onClick={(e) => { e.stopPropagation(); useProfileView.getState().open(pubkey) }}
+    >{children}</button>
+  )
+}
+
 interface BadgeProps {
   pubkey: string
   /** A petname from a contact list, shown when the profile has no name yet. */
   fallbackName?: string | null
   size?: number
   className?: string
+  /** Open the profile when tapped. */
+  tappable?: boolean
 }
 
-export function ProfileBadge({ pubkey, fallbackName, size = 22, className = '' }: BadgeProps): JSX.Element {
+export function ProfileBadge({ pubkey, fallbackName, size = 22, className = '', tappable = false }: BadgeProps): JSX.Element {
   const profile = useProfile(pubkey)
   const npub = safeNpub(pubkey)
   const name = profile?.name ?? fallbackName ?? (npub ? profileLabel(profile, npub) : pubkey.slice(0, 8))
-  return (
-    <span className={`badge ${className}`} title={npub ?? pubkey}>
+  const face = (
+    <>
       <ProfilePic pubkey={pubkey} size={size} />
       <span className="badge__name">{name}</span>
-    </span>
+    </>
   )
+  if (tappable) return <ProfileTap pubkey={pubkey} className={`badge ${className}`}>{face}</ProfileTap>
+  return <span className={`badge ${className}`} title={npub ?? pubkey}>{face}</span>
 }

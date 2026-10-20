@@ -18,6 +18,7 @@ import { useFrame, type RootState } from '@react-three/fiber'
 import { Group, Quaternion, Vector3 } from 'three'
 import { WORLD_FONT } from '../lib/font'
 import { labelLiftPx, projScaleOf } from '../lib/markerSize'
+import { bearingDepth } from '../lib/bearing'
 
 /**
  * When in the frame a label turns to the camera and sizes itself: after the
@@ -131,9 +132,7 @@ export function WorldLabel({
 
     const cam = state.camera as unknown as { fov?: number; position: Vector3 }
     if (cam.fov === undefined) return
-    const depth = Math.max(0.001, fromCamera
-      ? Math.hypot(fromCamera[0] + g.position.x, fromCamera[1] + g.position.y, fromCamera[2] + g.position.z)
-      : cam.position.distanceTo(g.getWorldPosition(scratch)))
+    const depth = Math.max(0.001, fromCamera ? bearingDepth(fromCamera, g.position) : cam.position.distanceTo(g.getWorldPosition(scratch)))
     const projScale = projScaleOf(state.size.height, cam.fov)
     const unitPx = px * labelShrink(state.size.width)
     g.scale.setScalar((unitPx * depth) / projScale)

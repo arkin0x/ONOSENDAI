@@ -75,9 +75,8 @@ export function BlackSun({ axes }: Props): JSX.Element {
   // +Z_cs in render space. Changes only when the view frame does, which is what
   // makes the sun rotate with the scene rather than sticking to the screen.
   const dir = useMemo(() => renderDirection(axes, 'z'), [axes])
-  // Where the sun stands from the camera. One vector for the life of the
-  // sun, set again whenever the bearing changes, because the meshes under it
-  // read it on every draw (lib/bearing.ts).
+  // Where the sun stands from the camera, read by the meshes under it on
+  // every draw (lib/bearing.ts).
   const offset = useMemo(() => new Vector3(), [])
   const fromCamera = useMemo(() => dir.map((v) => v * DISTANCE) as [number, number, number], [dir])
 

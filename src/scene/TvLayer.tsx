@@ -120,43 +120,98 @@ export function framingDirection(f: Framing, theta: number, sun: Vector3, out: V
 export const TV_CARRY_MAX_CELLS = 300
 
 /**
- * A point the store places against its own anchor, `live`, carried into the
- * frame the scene on screen was drawn against, `drawn`, which a cut moves a
- * commit later (lib/renderFrame.ts). The Rig does the same for its target.
- */
-export function inDrawnFrame(live: [number, number, number], anchor: Position, drawn: Position, scaleExp: number, axes: ViewAxes): [number, number, number] {
-  if (drawn === anchor) return live
-  const lag = originShift(alignedOrigin(anchor, scaleExp), alignedOrigin(drawn, scaleExp), scaleExp, axes)
-  return [live[0] + lag[0], live[1] + lag[1], live[2] + lag[2]]
-}
-
-/**
  * Move the camera's eased point, `smooth`, with a change of render frame by
  * `shift`, so the world does not lurch under it. Too far to carry, it is put
- * on what the camera looks at, `at`, instead: a cut. Returns whether it cut.
+ * on what the camera looks at, `at`, instead: a cut.
  */
-export function carryAcross(smooth: Vector3, shift: [number, number, number], at: Vector3): boolean {
+export function carryAcross(smooth: Vector3, shift: [number, number, number], at: Vector3): void {
   if (Math.max(Math.abs(shift[0]), Math.abs(shift[1]), Math.abs(shift[2])) >= TV_CARRY_MAX_CELLS) {
     smooth.copy(at)
-    return true
+    return
   }
   smooth.x += shift[0]
   smooth.y += shift[1]
   smooth.z += shift[2]
-  return false
+}
+
+/** What TV's camera follows, kept from one frame to the next. */
+export interface TvFollow {
+  /** The eased point it looks at, in the frame the scene is drawn in; null before the first frame. */
+  smooth: Vector3 | null
+  /** The frame, zoom and cut that point was last taken in. */
+  was: { origin: Position; scaleExp: number; cutAt: number } | null
+}
+
+/** One frame's reading of the store and the scene, for followStep. */
+export interface TvFollowFrame {
+  /** The store's anchor, which cursorOffset works against. */
+  anchor: Position
+  /** The anchor the scene on screen was drawn against (lib/renderFrame.ts). */
+  drawn: Position
+  scaleExp: number
+  cutAt: number
+  /** The view's point, against the store's anchor: cursorOffset. */
+  live: [number, number, number]
+  /** The shot's avatar where its mesh is drawn, for a trip; null otherwise. */
+  subject: Vector3 | null
+}
+
+/**
+ * One frame of what TV's camera follows: the point to look at into `at`, and
+ * the eased point in `f`, moved toward it by `k`. Returns 'cut' when the
+ * framing starts again (a cut or a new zoom), 'follow' otherwise, and 'hold'
+ * when this frame is not to be drawn from a new place at all.
+ *
+ * Everything here is in the frame the scene was drawn in. A cut moves the
+ * store's anchor a commit before the scene's, and taking cursorOffset as it
+ * came put the point in the new frame while the origin noted was the old one,
+ * so the commit's shift was added on the next frame to a point that already
+ * had it: the camera stood 4.4e24 cells out, the world beyond its far plane,
+ * and eased back for the rest of the shot with only the black sun on screen
+ * (measured 2026-10-20, in five TV runs of six).
+ *
+ * A frame drawn inside that gap, when the gap is a cut across the universe,
+ * is held: there is nothing of the new place drawn yet to look at, and in the
+ * old frame the new place is 1e24 cells out, where the eye and what it looks
+ * at round to one point. The orbit was lost there, the camera faced straight
+ * down -z, and the sun flashed in the middle of the picture for a frame, in
+ * plain view under a roll cut (review of #421). The commit lands on the next
+ * frame or so, and the cut is taken then, in the new frame.
+ */
+export function followStep(f: TvFollow, frame: TvFollowFrame, axes: ViewAxes, k: number, at: Vector3): 'hold' | 'cut' | 'follow' {
+  const origin = alignedOrigin(frame.drawn, frame.scaleExp)
+  const lag = frame.drawn === frame.anchor ? null : originShift(alignedOrigin(frame.anchor, frame.scaleExp), origin, frame.scaleExp, axes)
+  if (lag && Math.max(Math.abs(lag[0]), Math.abs(lag[1]), Math.abs(lag[2])) >= TV_CARRY_MAX_CELLS) return 'hold'
+  if (frame.subject) at.copy(frame.subject)
+  else at.set(frame.live[0] + (lag ? lag[0] : 0), frame.live[1] + (lag ? lag[1] : 0), frame.live[2] + (lag ? lag[2] : 0))
+  const before = f.was
+  let step: 'cut' | 'follow' = 'follow'
+  if (!f.smooth || !before || before.scaleExp !== frame.scaleExp || before.cutAt !== frame.cutAt) {
+    // A cut or a new zoom: no path between the two framings, so no glide.
+    f.smooth = at.clone()
+    step = 'cut'
+  } else {
+    // A change of frame moves everything at once, the camera with it (zero when the anchor stayed).
+    carryAcross(f.smooth, originShift(before.origin, origin, frame.scaleExp, axes), at)
+  }
+  f.was = { origin, scaleExp: frame.scaleExp, cutAt: frame.cutAt }
+  f.smooth.lerp(at, k)
+  return step
 }
 
 function TvCamera({ axes }: { axes: ViewAxes }): null {
   const controls = useThree((s) => s.controls) as unknown as { enabled: boolean; target: Vector3; object: { position: Vector3 }; update: () => void } | null
-  const smooth = useRef<Vector3 | null>(null)
+  const follow = useRef<TvFollow>({ smooth: null, was: null })
+  /** Where the camera stood and looked on the last frame drawn, for a held one. */
+  const pose = useRef<{ position: Vector3; target: Vector3 } | null>(null)
   const theta = useRef(0)
   const dist = useRef<number | null>(null)
   /** The camera's direction from what it looks at, unit, eased between framings. */
   const look = useRef<Vector3 | null>(null)
   const want = useMemo(() => new Vector3(), [])
   const sunDir = useMemo(() => new Vector3(...renderDirection(axes, 'z')), [axes])
-  const was = useRef<{ origin: ReturnType<typeof alignedOrigin>; scaleExp: number; cutAt: number } | null>(null)
   const at = useMemo(() => new Vector3(), [])
+  const subjectAt = useMemo(() => new Vector3(), [])
 
   useEffect(() => {
     if (!controls) return
@@ -169,39 +224,37 @@ function TvCamera({ axes }: { axes: ViewAxes }): null {
     if (!c) return
     const tv = useTv.getState()
     const s = useCyberspace.getState()
-    const drawn = committedAnchor() ?? s.anchor
-    const origin = alignedOrigin(drawn, s.scaleExp)
     // A trip follows its avatar; a segment looks at the view's own point
     // (a located bag's box, or wherever the last shot left it), and so does
     // a hyperjump's line (halfway between its two blocks).
     const lining = tv.jump?.phase === 'line'
     const subject = tv.shot?.kind === 'trip' && !lining ? drawnAvatars[tv.shot.pubkey] : undefined
-    // Both in the frame the scene was drawn in. The avatar's mesh is placed
-    // there; cursorOffset works against the store's anchor, which a cut
-    // moves first. Taken as it was, the point was in the new frame while the
-    // origin noted below was the old one, so the commit's shift, on the next
-    // frame, was added to a point that already had it: the camera stood
-    // 4.4e24 cells out, the world beyond its far plane, and eased back for
-    // the rest of the shot with only the black sun on screen (measured
-    // 2026-10-20, in five TV runs of six).
-    if (subject) subject.getWorldPosition(at)
-    else at.set(...inDrawnFrame(s.cursorOffset(), s.anchor, drawn, s.scaleExp, axes))
-    const before = was.current
     // The push-in: from the framing's start distance to its end, eased out.
     const p = framingProgress()
     const wantDist = tv.framing.from + (tv.framing.to - tv.framing.from) * (1 - (1 - p) ** 2)
-    if (!smooth.current || !before || before.scaleExp !== s.scaleExp || before.cutAt !== tv.cutAt) {
-      // A cut or a new zoom: no path between the two framings, so no glide.
-      smooth.current = at.clone()
+    const step = followStep(follow.current, {
+      anchor: s.anchor,
+      drawn: committedAnchor() ?? s.anchor,
+      scaleExp: s.scaleExp,
+      cutAt: tv.cutAt,
+      live: s.cursorOffset(),
+      subject: subject ? subject.getWorldPosition(subjectAt) : null,
+    }, axes, 1 - Math.exp(-dt / TV_FOLLOW_TAU), at)
+    // Held: the last frame's camera again, undoing whatever the Rig did
+    // with this one.
+    if (step === 'hold') {
+      if (pose.current) {
+        c.target.copy(pose.current.target)
+        c.object.position.copy(pose.current.position)
+        c.update()
+      }
+      return
+    }
+    const smooth = follow.current.smooth as Vector3
+    if (step === 'cut') {
       dist.current = wantDist
       look.current = null
-    } else {
-      // A change of frame moves everything at once, the camera with it (zero when the anchor stayed).
-      carryAcross(smooth.current, originShift(before.origin, origin, s.scaleExp, axes), at)
     }
-    was.current = { origin, scaleExp: s.scaleExp, cutAt: tv.cutAt }
-    const k = 1 - Math.exp(-dt / TV_FOLLOW_TAU)
-    smooth.current.lerp(at, k)
     // A shot that follows straight on keeps its camera and eases to any change.
     const kc = 1 - Math.exp(-dt / TV_CAMERA_TAU)
     dist.current = (dist.current ?? wantDist) + (wantDist - (dist.current ?? wantDist)) * kc
@@ -215,9 +268,12 @@ function TvCamera({ axes }: { axes: ViewAxes }): null {
     const aspect = (state.camera as { aspect?: number }).aspect ?? 1
     // A ride's two blocks lie across the frame, so they stand back further.
     const r = dist.current * (lining ? Math.max(1, 1 / aspect) : tv.shot?.kind === 'bag' ? Math.max(1, 1 / (aspect * 1.4)) : 1)
-    c.target.copy(smooth.current)
-    c.object.position.copy(smooth.current).addScaledVector(look.current, r)
+    c.target.copy(smooth)
+    c.object.position.copy(smooth).addScaledVector(look.current, r)
     c.update()
+    pose.current ??= { position: new Vector3(), target: new Vector3() }
+    pose.current.position.copy(c.object.position)
+    pose.current.target.copy(c.target)
     // After the Rig (priority 0), which would otherwise aim the camera back
     // at the shot's first place, and before the composer draws (priority 1).
   }, TV_CAMERA_PRIORITY)

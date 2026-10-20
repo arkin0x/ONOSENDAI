@@ -47,34 +47,49 @@ export function bearingModelView(out: Matrix4, viewInverse: Matrix4, offset: Vec
   return out.copy(work)
 }
 
-/** The meshes already drawn from the camera. */
-const held = new WeakSet<Object3D>()
+/** Each held mesh's root and offset, set again on every call. */
+const held = new WeakMap<Object3D, { root: Object3D; offset: Vector3 }>()
 
 /**
- * Draw every mesh under `root` from the camera, at `offset` from it, read on
- * every draw (so the caller changes the vector, never replaces it).
+ * Draw every mesh under `root` from the camera, at `offset` from it.
  *
  * The renderer works out a mesh's model-view in one place, a multiplyMatrices
  * call on that mesh's own matrix, just before it draws, and that call is
  * answered here instead. Every other route was worse: the mesh's
  * onBeforeRender runs before the product and is overwritten by it, and a
  * material hook would mean reaching into the label's text materials, which
- * troika makes and remakes itself.
+ * troika makes and remakes itself. The test pins the renderer's call, so a
+ * three upgrade that moves it fails there rather than on screen.
  *
  * Frustum culling is off for the same reason: it tests the world position,
  * and far out that sits on the camera, so the sun was culled on some frames
  * and drawn on others. It is one ring and one label; drawing them when they
- * are behind you costs nothing worth measuring, and the GPU clips them.
+ * are behind you costs a few draw calls, and the GPU clips them.
  *
- * Called every frame. A mesh mounted later (a label's text arrives after its
- * font) is caught on the frame it appears.
+ * Called every frame, with whatever root and offset are current: a mesh
+ * mounted later (a label's text arrives after its font) is caught on the
+ * frame it appears, and a new offset vector (a remount, a hot reload) is
+ * picked up rather than the first one kept.
  */
 export function holdAtBearing(root: Object3D, offset: Vector3): void {
   root.traverse((o) => {
-    if (held.has(o) || !(o as Mesh).isMesh) return
-    held.add(o)
+    if (!(o as Mesh).isMesh) return
+    const was = held.get(o)
+    if (was) { was.root = root; was.offset = offset; return }
+    const hold = { root, offset }
+    held.set(o, hold)
     o.frustumCulled = false
     const mv = o.modelViewMatrix
-    mv.multiplyMatrices = ((viewInverse: Matrix4) => bearingModelView(mv, viewInverse, offset, root, o)) as Matrix4['multiplyMatrices']
+    mv.multiplyMatrices = ((viewInverse: Matrix4) => bearingModelView(mv, viewInverse, hold.offset, hold.root, o)) as Matrix4['multiplyMatrices']
   })
+}
+
+/**
+ * How far from the camera a point `local` from the held root is: the root's
+ * offset plus its own place, for a root with no turn or scale. What a label
+ * on the sun sizes itself from, where a subtraction of world positions would
+ * cancel to nothing (WorldLabel `fromCamera`).
+ */
+export function bearingDepth(offset: readonly [number, number, number], local: Vector3): number {
+  return Math.hypot(offset[0] + local.x, offset[1] + local.y, offset[2] + local.z)
 }

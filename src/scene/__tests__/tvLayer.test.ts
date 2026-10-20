@@ -4,7 +4,7 @@
  */
 import { describe, expect, it } from 'vitest'
 import { Vector3 } from 'three'
-import { carryAcross, framingDirection, grownAt, inDrawnFrame, TV_CARRY_MAX_CELLS } from '../TvLayer'
+import { carryAcross, followStep, framingDirection, grownAt, TV_CARRY_MAX_CELLS, type TvFollow, type TvFollowFrame } from '../TvLayer'
 import { originShift, type Position, type ViewAxes } from '../../lib/space'
 import { alignedOrigin } from '../../store/useCyberspace'
 
@@ -51,37 +51,71 @@ describe('the TV camera across a cut', () => {
   const A: Position = { x: 1000n, y: 2000n, z: 3000n }
   // Where the new shot's point is, against the new anchor: the store's cursorOffset.
   const live: [number, number, number] = [0.4338, 0.1526, 0.4331]
+  const K = 0.05
 
-  // A cut as it plays: one frame drawn before React commits the new anchor
-  // (the store at B, the scene still at A), on which the camera's point is
-  // put on what it looks at; then the commit, which moves the frame.
-  function cutTo(B: Position): Vector3 {
-    const smooth = new Vector3(...inDrawnFrame(live, B, A, 0, AXES))
-    const shift = originShift(alignedOrigin(A, 0), alignedOrigin(B, 0), 0, AXES)
-    carryAcross(smooth, shift, new Vector3(...inDrawnFrame(live, B, B, 0, AXES)))
-    return smooth
+  /** A camera settled on a shot at A, cut 1. */
+  function settled(): TvFollow {
+    return { smooth: new Vector3(3, 1, 2), was: { origin: alignedOrigin(A, 0), scaleExp: 0, cutAt: 1 } }
+  }
+  const frame = (anchor: Position, drawn: Position, extra: Partial<TvFollowFrame> = {}): TvFollowFrame =>
+    ({ anchor, drawn, scaleExp: 0, cutAt: 2, live, subject: null, ...extra })
+
+  // A cut as it plays: frames drawn before React commits the new anchor (the
+  // store at B, the scene still at A), then the commit.
+  function cutTo(B: Position, lagged: number): { f: TvFollow; steps: string[]; farthest: number } {
+    const f = settled()
+    const at = new Vector3()
+    const steps: string[] = []
+    let farthest = 0
+    const run = (fr: TvFollowFrame): void => {
+      steps.push(followStep(f, fr, AXES, K, at))
+      farthest = Math.max(farthest, f.smooth!.length())
+    }
+    for (let i = 0; i < lagged; i++) run(frame(B, A))
+    run(frame(B, B))
+    return { f, steps, farthest }
   }
 
-  it('lands on the new place after a short cut, which is carried', () => {
-    const smooth = cutTo({ x: A.x + 50n, y: A.y - 20n, z: A.z + 7n })
-    expect(smooth.distanceTo(new Vector3(...live))).toBeLessThan(1e-9)
-  })
-
-  it('lands on the new place after a cut across the universe, which is cut, not carried', () => {
+  it('holds through the frames drawn before a cut across the universe commits, then cuts onto the new place', () => {
     const far = 1n << 80n
-    const smooth = cutTo({ x: A.x + far, y: A.y - far, z: A.z + far })
-    expect(smooth.toArray()).toEqual(live)
+    const { f, steps, farthest } = cutTo({ x: A.x + far, y: A.y - far, z: A.z + far }, 2)
+    expect(steps).toEqual(['hold', 'hold', 'cut'])
+    expect(f.smooth!.toArray()).toEqual(live)
+    // Never out where the eye and what it looks at round to one point.
+    expect(farthest).toBeLessThan(TV_CARRY_MAX_CELLS)
   })
 
-  it('carries a re-anchor inside a shot whole, and cuts from the bound up', () => {
+  it('takes a short cut drawn before its commit in the drawn frame, and carries it to the new place', () => {
+    const { f, steps } = cutTo({ x: A.x + 50n, y: A.y - 20n, z: A.z + 7n }, 1)
+    expect(steps).toEqual(['cut', 'follow'])
+    expect(f.smooth!.distanceTo(new Vector3(...live))).toBeLessThan(1e-9)
+  })
+
+  it('carries a re-anchor inside a shot whole, the camera kept where it was against the world', () => {
+    const f = settled()
+    const B: Position = { x: A.x + 120n, y: A.y, z: A.z - 40n }
+    const shift = originShift(alignedOrigin(A, 0), alignedOrigin(B, 0), 0, AXES)
+    // The avatar it follows, drawn in the new frame.
+    const subject = new Vector3(-117, 0.5, 41)
+    const step = followStep(f, frame(B, B, { cutAt: 1, subject }), AXES, 0, new Vector3())
+    expect(step).toBe('follow')
+    expect(f.smooth!.toArray()).toEqual([3 + shift[0], 1 + shift[1], 2 + shift[2]])
+  })
+
+  it('cuts onto what it looks at when the frame moves too far to carry, cut or not', () => {
+    const f = settled()
+    const far = 1n << 70n
+    const B: Position = { x: A.x - far, y: A.y, z: A.z + far }
+    const step = followStep(f, frame(B, B, { cutAt: 1 }), AXES, 0, new Vector3())
+    expect(step).toBe('follow')
+    expect(f.smooth!.toArray()).toEqual(live)
+  })
+
+  it('carries a shift short of the bound and cuts from it', () => {
     const smooth = new Vector3(5, 0, -2)
-    expect(carryAcross(smooth, [-16, 0, 3], new Vector3())).toBe(false)
-    expect(smooth.toArray()).toEqual([-11, 0, 1])
-    expect(carryAcross(smooth, [0, TV_CARRY_MAX_CELLS, 0], new Vector3(1, 2, 3))).toBe(true)
+    carryAcross(smooth, [-(TV_CARRY_MAX_CELLS - 1), 0, 3], new Vector3(9, 9, 9))
+    expect(smooth.toArray()).toEqual([5 - (TV_CARRY_MAX_CELLS - 1), 0, 1])
+    carryAcross(smooth, [0, TV_CARRY_MAX_CELLS, 0], new Vector3(1, 2, 3))
     expect(smooth.toArray()).toEqual([1, 2, 3])
-  })
-
-  it('leaves a point alone when the scene is already drawn at the store\'s anchor', () => {
-    expect(inDrawnFrame(live, A, A, 0, AXES)).toBe(live)
   })
 })

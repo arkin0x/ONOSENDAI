@@ -9,8 +9,11 @@
  * three's own product has no large numbers to lose and is exact.
  */
 import { describe, expect, it } from 'vitest'
+import { readFileSync } from 'node:fs'
+import { createRequire } from 'node:module'
+import { dirname, join } from 'node:path'
 import { Group, Matrix4, Mesh, PerspectiveCamera, Quaternion, Vector3 } from 'three'
-import { holdAtBearing } from '../bearing'
+import { bearingDepth, holdAtBearing } from '../bearing'
 
 const OFFSET = new Vector3(0, 0, 4000)
 const TURN = new Quaternion().setFromAxisAngle(new Vector3(0.3, 1, 0.2).normalize(), 0.7)
@@ -98,6 +101,14 @@ describe('holdAtBearing', () => {
     expect(t.distanceTo(new Vector3(4000, 0, 0).applyQuaternion(TURN.clone().invert()))).toBeLessThan(1e-9)
   })
 
+  it('takes up a new offset vector on the next call, as after a remount or a hot reload', () => {
+    const s = build(far(1e25))
+    holdAtBearing(s.root, OFFSET.clone())
+    holdAtBearing(s.root, new Vector3(4000, 0, 0))
+    const t = new Vector3().setFromMatrixPosition(drawn(s.ring, s.camera))
+    expect(t.distanceTo(new Vector3(4000, 0, 0).applyQuaternion(TURN.clone().invert()))).toBeLessThan(1e-9)
+  })
+
   it('stops culling what it holds, and holds a mesh mounted after the first frame', () => {
     const s = build(far(1e25))
     holdAtBearing(s.root, OFFSET)
@@ -109,5 +120,26 @@ describe('holdAtBearing', () => {
     holdAtBearing(s.root, OFFSET)
     expect(late.frustumCulled).toBe(false)
     expect(gap(drawn(late, s.camera), ringExact)).toBeLessThan(1e-9)
+  })
+})
+
+describe('bearingDepth', () => {
+  it('is the label\'s distance from the camera, however far out the camera is', () => {
+    const local = new Vector3(0, -450.4, 0)
+    const want = exact.camera.position.distanceTo(local.clone().add(OFFSET))
+    expect(bearingDepth([OFFSET.x, OFFSET.y, OFFSET.z], local)).toBeCloseTo(want, 9)
+  })
+})
+
+describe('the renderer this relies on', () => {
+  it('still places a mesh with one multiplyMatrices call on its modelViewMatrix, just before drawing it', () => {
+    // The build vite serves; resolved from three's own entry, since its package.json is not exported.
+    const entry = createRequire(import.meta.url).resolve('three')
+    const src = readFileSync(join(dirname(entry), 'three.module.js'), 'utf8')
+    const body = src.slice(src.indexOf('function renderObject( object, scene, camera, geometry, material, group )'))
+    expect(body.length).toBeLessThan(src.length)
+    const call = body.indexOf('object.modelViewMatrix.multiplyMatrices( camera.matrixWorldInverse, object.matrixWorld );')
+    expect(call).toBeGreaterThan(0)
+    expect(call).toBeLessThan(body.indexOf('renderBufferDirect'))
   })
 })

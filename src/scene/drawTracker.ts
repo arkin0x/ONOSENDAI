@@ -492,9 +492,8 @@ export function dirtyRects(boxes: Array<[number, number, number, number]>, width
  * the rest left as it was. three's own copyTextureToTexture reads five
  * pixel-store settings back first (getParameter), a round trip to the GPU
  * process: in headless Chromium (SwiftShader) the main thread spent most of
- * every second waiting there. This sets what it
- * needs and puts back three's defaults (no skip, no row length) without
- * asking. The texture is uploaded whole first if it never was, or was made
+ * every second waiting there. This sets what it needs and puts the skips
+ * back to three's defaults (none) without asking. The texture is uploaded whole first if it never was, or was made
  * again since.
  */
 export function uploadRegions(renderer: WebGLRenderer, texture: Texture, rects: DirtyRect[]): void {

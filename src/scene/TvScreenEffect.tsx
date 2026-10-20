@@ -66,7 +66,8 @@ const PAINT_MAX_PIXELS = 2_400_000
 /**
  * However little a paint changed, a band of the canvas this share of its
  * height goes up with it, the next band at the next paint, so all of it is
- * renewed every thirty paints, about a second: what can change on the canvas
+ * renewed every thirty paints (about a second at full pace, longer on a set
+ * that paints slower): what can change on the canvas
  * without any call on it changing (a scaled picture's filtering settling, a
  * glyph's fallback face arriving) is put right within that. A band each
  * paint rather than all of it once a second, which would be a hitch a second

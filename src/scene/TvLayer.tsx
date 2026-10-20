@@ -109,6 +109,43 @@ export function framingDirection(f: Framing, theta: number, sun: Vector3, out: V
   return out.normalize()
 }
 
+/**
+ * Past this many cells a change of render frame is not carried by TV's camera
+ * but cut across, the bound the Rig keeps for the same reason (Scene.tsx
+ * GLIDE_MAX_CELLS). Inside a shot the frame moves by the REANCHOR_CELLS or so
+ * it takes to keep the avatar near the anchor, far below it; a cut moves it
+ * across the universe, where a double cannot carry the camera's few cells
+ * through the shift and back (at 1e24 neighbouring values are 1.3e8 apart).
+ */
+export const TV_CARRY_MAX_CELLS = 300
+
+/**
+ * A point the store places against its own anchor, `live`, carried into the
+ * frame the scene on screen was drawn against, `drawn`, which a cut moves a
+ * commit later (lib/renderFrame.ts). The Rig does the same for its target.
+ */
+export function inDrawnFrame(live: [number, number, number], anchor: Position, drawn: Position, scaleExp: number, axes: ViewAxes): [number, number, number] {
+  if (drawn === anchor) return live
+  const lag = originShift(alignedOrigin(anchor, scaleExp), alignedOrigin(drawn, scaleExp), scaleExp, axes)
+  return [live[0] + lag[0], live[1] + lag[1], live[2] + lag[2]]
+}
+
+/**
+ * Move the camera's eased point, `smooth`, with a change of render frame by
+ * `shift`, so the world does not lurch under it. Too far to carry, it is put
+ * on what the camera looks at, `at`, instead: a cut. Returns whether it cut.
+ */
+export function carryAcross(smooth: Vector3, shift: [number, number, number], at: Vector3): boolean {
+  if (Math.max(Math.abs(shift[0]), Math.abs(shift[1]), Math.abs(shift[2])) >= TV_CARRY_MAX_CELLS) {
+    smooth.copy(at)
+    return true
+  }
+  smooth.x += shift[0]
+  smooth.y += shift[1]
+  smooth.z += shift[2]
+  return false
+}
+
 function TvCamera({ axes }: { axes: ViewAxes }): null {
   const controls = useThree((s) => s.controls) as unknown as { enabled: boolean; target: Vector3; object: { position: Vector3 }; update: () => void } | null
   const smooth = useRef<Vector3 | null>(null)
@@ -132,14 +169,23 @@ function TvCamera({ axes }: { axes: ViewAxes }): null {
     if (!c) return
     const tv = useTv.getState()
     const s = useCyberspace.getState()
-    const origin = alignedOrigin(committedAnchor() ?? s.anchor, s.scaleExp)
+    const drawn = committedAnchor() ?? s.anchor
+    const origin = alignedOrigin(drawn, s.scaleExp)
     // A trip follows its avatar; a segment looks at the view's own point
     // (a located bag's box, or wherever the last shot left it), and so does
     // a hyperjump's line (halfway between its two blocks).
     const lining = tv.jump?.phase === 'line'
     const subject = tv.shot?.kind === 'trip' && !lining ? drawnAvatars[tv.shot.pubkey] : undefined
+    // Both in the frame the scene was drawn in. The avatar's mesh is placed
+    // there; cursorOffset works against the store's anchor, which a cut
+    // moves first. Taken as it was, the point was in the new frame while the
+    // origin noted below was the old one, so the commit's shift, on the next
+    // frame, was added to a point that already had it: the camera stood
+    // 4.4e24 cells out, the world beyond its far plane, and eased back for
+    // the rest of the shot with only the black sun on screen (measured
+    // 2026-10-20, in five TV runs of six).
     if (subject) subject.getWorldPosition(at)
-    else at.set(...s.cursorOffset())
+    else at.set(...inDrawnFrame(s.cursorOffset(), s.anchor, drawn, s.scaleExp, axes))
     const before = was.current
     // The push-in: from the framing's start distance to its end, eased out.
     const p = framingProgress()
@@ -151,10 +197,7 @@ function TvCamera({ axes }: { axes: ViewAxes }): null {
       look.current = null
     } else {
       // A change of frame moves everything at once, the camera with it (zero when the anchor stayed).
-      const [x, y, z] = originShift(before.origin, origin, s.scaleExp, axes)
-      smooth.current.x += x
-      smooth.current.y += y
-      smooth.current.z += z
+      carryAcross(smooth.current, originShift(before.origin, origin, s.scaleExp, axes), at)
     }
     was.current = { origin, scaleExp: s.scaleExp, cutAt: tv.cutAt }
     const k = 1 - Math.exp(-dt / TV_FOLLOW_TAU)

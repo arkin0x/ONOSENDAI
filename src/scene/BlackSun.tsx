@@ -25,7 +25,8 @@
 
 import { useMemo, useRef } from 'react'
 import { useFrame } from '@react-three/fiber'
-import { DoubleSide, Group } from 'three'
+import { DoubleSide, Group, Vector3 } from 'three'
+import { holdAtBearing } from '../lib/bearing'
 import { BLACK_SUN } from '../lib/palette'
 import { renderDirection, type ViewAxes } from '../lib/space'
 import { WorldLabel } from './WorldLabel'
@@ -74,6 +75,11 @@ export function BlackSun({ axes }: Props): JSX.Element {
   // +Z_cs in render space. Changes only when the view frame does, which is what
   // makes the sun rotate with the scene rather than sticking to the screen.
   const dir = useMemo(() => renderDirection(axes, 'z'), [axes])
+  // Where the sun stands from the camera. One vector for the life of the
+  // sun, set again whenever the bearing changes, because the meshes under it
+  // read it on every draw (lib/bearing.ts).
+  const offset = useMemo(() => new Vector3(), [])
+  const fromCamera = useMemo(() => dir.map((v) => v * DISTANCE) as [number, number, number], [dir])
 
   // Per frame rather than per render: the camera moves continuously under orbit
   // and under the rig's eased follow, neither of which React sees. A sun that
@@ -84,16 +90,22 @@ export function BlackSun({ axes }: Props): JSX.Element {
   // Billboard at the frame's start: placed and faced a frame behind a moving
   // camera, the ring was seen a little from the side and seemed to tip and
   // turn, flat, through a TV shot's move (arkinox, 2026-10-18).
+  //
+  // The world position below is only what the renderer sorts by. Where the
+  // sun is drawn comes from the camera's turn and the offset alone
+  // (holdAtBearing), because the camera can be so far from the render origin
+  // that adding 4000 to its position changes nothing. Measured at 4.4e24
+  // after a far cut in TV: the sun sat on the eye, culled on some frames and
+  // drawn on others, which is the flicker arkinox saw in TV and after a
+  // recall from a far cursor at 2^0 (2026-10-20).
   useFrame((state) => {
     const g = group.current
     if (!g) return
+    offset.set(fromCamera[0], fromCamera[1], fromCamera[2])
     const c = state.camera.position
-    g.position.set(
-      c.x + dir[0] * DISTANCE,
-      c.y + dir[1] * DISTANCE,
-      c.z + dir[2] * DISTANCE,
-    )
+    g.position.set(c.x + offset.x, c.y + offset.y, c.z + offset.z)
     if (face.current) face.current.quaternion.copy(state.camera.quaternion)
+    holdAtBearing(g, offset)
   }, SUN_PRIORITY)
 
   return (
@@ -125,6 +137,7 @@ export function BlackSun({ axes }: Props): JSX.Element {
         offset={[0, -0.4, 0]}
         px={11}
         opacity={0.75}
+        fromCamera={fromCamera}
       />
     </group>
   )

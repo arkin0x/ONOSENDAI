@@ -100,11 +100,19 @@ interface Props {
    * recomputed every frame from depth; `offsetPx` is added on top.
    */
   clear?: { trueSide: number; minPx: number }
+  /**
+   * Where the label's parent stands from the camera, for a parent that is
+   * always at the same offset from it and carries no turn or scale: the
+   * black sun. The depth the label is sized from is then that offset plus
+   * the label's own place, rather than a subtraction of world positions,
+   * which far from the render origin cancels to nothing (lib/bearing.ts).
+   */
+  fromCamera?: [number, number, number]
 }
 
 export function WorldLabel({
   text, color, at, follow, offset = [0, 0, 0], offsetPx = [0, 0], px = 14, opacity = 1, align = 'left',
-  small, smallScale = 0.68, sub, subScale = 0.72, subColor, subOpacity = 0.7, clear,
+  small, smallScale = 0.68, sub, subScale = 0.72, subColor, subOpacity = 0.7, clear, fromCamera,
 }: Props): JSX.Element {
   const group = useRef<Group>(null)
   const inner = useRef<Group>(null)
@@ -123,7 +131,9 @@ export function WorldLabel({
 
     const cam = state.camera as unknown as { fov?: number; position: Vector3 }
     if (cam.fov === undefined) return
-    const depth = Math.max(0.001, cam.position.distanceTo(g.getWorldPosition(scratch)))
+    const depth = Math.max(0.001, fromCamera
+      ? Math.hypot(fromCamera[0] + g.position.x, fromCamera[1] + g.position.y, fromCamera[2] + g.position.z)
+      : cam.position.distanceTo(g.getWorldPosition(scratch)))
     const projScale = projScaleOf(state.size.height, cam.fov)
     const unitPx = px * labelShrink(state.size.width)
     g.scale.setScalar((unitPx * depth) / projScale)

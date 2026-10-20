@@ -15,6 +15,7 @@
 import { cashuLabel, readCashuToken } from '../lib/cashu'
 import type { Plane } from 'cyberspace-core'
 import { useState } from 'react'
+import { Rotate3d, Target, TvMinimal } from 'lucide-react'
 import { useProfile } from '../hooks/useProfile'
 import type { ShardModel } from 'sno-core/shards'
 import { useWorkshop } from '../store/useWorkshop'
@@ -231,7 +232,7 @@ export function LootDetail(): JSX.Element | null {
                     ? <ChestBlock id={o.eventId} chest={o.chest} author={item.author} verified place={o.place} />
                     : <span className="lootd__item-label" title={o.label}>{o.label}</span>}
                 <span className="lootd__acts">
-                  <button className="secret__act lootd__view" onClick={() => view(o)}>VIEW</button>
+                  <button className="secret__act lootd__view" onClick={() => view(o)}><Rotate3d size={12} strokeWidth={2.25} aria-hidden />VIEW</button>
                   {(o.type === 'shard' || o.type === 'message') && (
                     <>
                       <button className="secret__act lootd__view" onClick={() => details(o)}>DETAILS</button>
@@ -267,8 +268,8 @@ export function LootDetail(): JSX.Element | null {
 
         {!yours && (
           <div className="secret__actions">
-            <button className={`secret__act ${targeted ? 'is-on' : ''}`} onClick={target}>{targeted ? 'TARGETED' : 'TARGET'} HIDER</button>
-            <button className="secret__act" onClick={watch}>SPECTATE HIDER</button>
+            <button className={`secret__act ${targeted ? 'is-on' : ''}`} onClick={target}><Target size={12} strokeWidth={2.25} aria-hidden />{targeted ? 'TARGETED' : 'TARGET'} HIDER</button>
+            <button className="secret__act" onClick={watch}><TvMinimal size={12} strokeWidth={2.25} aria-hidden />SPECTATE HIDER</button>
           </div>
         )}
       </div>

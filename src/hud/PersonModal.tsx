@@ -59,7 +59,14 @@ export function PersonModal(): JSX.Element | null {
 function PersonCardLive({ pubkey, onClose }: { pubkey: string; onClose: () => void }): JSX.Element {
   const shard = useAvatarShard(pubkey)
   const me = useCyberspace((s) => s.identity.pubkey)
-  const event = useAvatars((s) => (pubkey === me ? s.mineEvent : s.events[pubkey] ?? null))
+  // Yours: the newer of what this device signed and what the relay answered
+  // (an avatar adopted on another device is only the latter).
+  const event = useAvatars((s) => {
+    const fetched = s.events[pubkey] ?? null
+    if (pubkey !== me) return fetched
+    const kept = s.mineEvent
+    return !kept ? fetched : !fetched || kept.created_at >= fetched.created_at ? kept : fetched
+  })
   return <PersonCard pubkey={pubkey} shard={shard} event={event} onClose={onClose} />
 }
 

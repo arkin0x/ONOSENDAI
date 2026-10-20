@@ -1943,8 +1943,9 @@ kbd {
 /* The event behind a card (EventData): copyable fields, then the whole event. */
 .eventdata { display: grid; gap: 10px; }
 .eventdata__props { display: grid; gap: 6px; margin: 0; }
-.eventdata__props > div { display: grid; grid-template-columns: 72px 1fr; gap: 8px; align-items: baseline; }
-.eventdata__props dt { font-size: 9px; letter-spacing: 0.06em; color: var(--dim); }
+.eventdata__props > div { display: grid; grid-template-columns: 72px 1fr; gap: 8px; align-items: start; }
+.eventdata__note { margin: 0; font-size: 9px; color: var(--dim); }
+.eventdata__props dt { font-size: 9px; line-height: 14px; letter-spacing: 0.06em; color: var(--dim); }
 .eventdata__props dd { margin: 0; min-width: 0; }
 .eventdata__value,
 .eventdata__none {
@@ -1971,8 +1972,9 @@ kbd {
 }
 .eventdata__json pre {
   margin: 0;
-  padding: 32px 10px 10px;
+  padding: 10px;
   max-height: 260px;
+  user-select: text;
   overflow: auto;
   font-family: 'Monaspace Krypton', var(--mono);
   font-size: 10px;
@@ -1980,23 +1982,6 @@ kbd {
   white-space: pre-wrap;
   word-break: break-all;
   color: var(--fg);
-}
-.eventdata__copy {
-  position: absolute;
-  top: 6px;
-  right: 6px;
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  padding: 4px 8px;
-  font-family: inherit;
-  font-size: 9px;
-  letter-spacing: 0.12em;
-  color: var(--accent);
-  background: rgba(5, 7, 13, 0.9);
-  border: 1px solid rgba(0, 229, 255, 0.4);
-  border-radius: 4px;
-  cursor: pointer;
 }
 
 .secret__act--danger {

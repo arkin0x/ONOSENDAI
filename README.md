@@ -141,11 +141,11 @@ anyone who can decrypt can re-sign identical content as themselves regardless.
 text, then aim and place at a height, exactly like a shard. Discovered messages
 render as billboarded notes at their coordinate with a marker of who left them.
 
-**Test discovery.** A deployment's detail overlay has TEST DISCOVERY: it derives
-the region key fresh from the coordinate, as a stranger would, asks the relay,
-and opens what comes back — proving the whole round-trip independent of local
-state. A SCANNING / N NEAR indicator on the Shards panel shows the background
-scan working.
+**Test discovery.** The card of a thing you hid has TEST DISCOVERY in its event
+data, once it is LIVE: it derives the region key fresh from the coordinate, as a
+stranger would, asks the relay, and opens what comes back, proving the whole
+round-trip independent of local state. A SCANNING / N NEAR indicator on the
+Shards panel shows the background scan working.
 
 **Models vs instances.** A **model** is a named design that lives on this
 device (the Shards panel's Models section). A deployed **instance** is one copy
@@ -153,8 +153,9 @@ of it placed at a coordinate and published (the Deployed section). One model can
 have many instances. Deleting a model (behind a modal) removes it from this
 device and leaves its instances alone; deleting an instance sends a NIP-09
 deletion to the relays it is on and leaves the model alone. Tapping a deployment
-flies the scene to it and opens its wire record: event id, relays, lookup id,
-coordinate, and the height it is hidden at.
+flies the scene to it and opens its card, whose event data at the bottom has
+the wire facts: event id, kind, lookup id, coordinate, the height it is hidden
+at, the relays that hold it, and its LOCAL / LIVE switch.
 
 **Deploying a shard.** DEPLOY on the bench, or from the Shards panel, enters
 deploy mode: aim the movement cursor at where it should go (it ghosts there at

@@ -3,10 +3,9 @@
  *
  * GO TO IT on a hidden thing, VIEW on a loot item, or tapping one of your
  * deployments flies the scene to a point that is not your avatar: the store's
- * `focus` is set and the controls stand down. Spectating has SpectateBar,
- * hyperspace views have HyperspaceBar, and your own deployments have the
- * deployment detail's EXIT, but a focus reached any other way had no exit at
- * all: on a keyboard Escape worked, on a phone nothing did. This bar is that
+ * `focus` is set and the controls stand down. Spectating has SpectateBar and
+ * hyperspace views have HyperspaceBar, but a focus reached any other way had
+ * no exit at all: on a keyboard Escape worked, on a phone nothing did. This bar is that
  * exit. It shows whenever a focus is standing and no other bar owns it, and
  * RETURN puts the anchor back on your avatar at the zoom you left.
  */
@@ -14,7 +13,6 @@
 import { shortAxis } from '../lib/viewAt'
 import { useCyberspace } from '../store/useCyberspace'
 import { useHyperspace } from '../store/useHyperspace'
-import { useShards } from '../store/useShards'
 import { useEscape } from '../hooks/useEscape'
 import { useBuilder } from '../store/useBuilder'
 
@@ -29,11 +27,10 @@ export function FocusBar(): JSX.Element | null {
     : focus.label
   const spectating = useCyberspace((s) => s.spectate !== null)
   const viewOwned = useHyperspace((s) => s.viewOwned)
-  const inspecting = useShards((s) => s.inspecting !== null)
   // BUILD mode rides the free view and has its own bar (BuildBar), with its
   // own EXIT and RETURN TO AVATAR; this one comes back when the mode ends.
   const building = useBuilder((s) => s.active)
-  const shown = !(focusLabel === null || spectating || viewOwned || inspecting || building)
+  const shown = !(focusLabel === null || spectating || viewOwned || building)
   // Escape is RETURN while this bar stands, a chip on the Escape stack
   // (arkinox, 2026-10-01); it used to be a fallback in the keyboard hook.
   useEscape('chip', shown, () => useCyberspace.getState().clearFocus())

@@ -512,12 +512,18 @@ interface ShardsState {
   deleted: Record<string, true>
   /** Bags taken down from here, by `author:lookupId`: what the public LOOT list matches on. */
   deletedBags: Record<string, true>
-  inspecting: string | null
   scanning: boolean
   /** The region whose bag is being sent to the relays right now, by lookup id. */
   broadcasting: string | null
   /** Why the last broadcast failed, for the row that asked for it. */
   broadcastError: string | null
+  /**
+   * The region whose broadcast that was, by lookup id: the item card says
+   * why its own LIVE did not go, and never another bag's reason (review of
+   * #403: the switch moved onto the card, where the Shards panel's note is
+   * out of sight).
+   */
+  broadcastFailed: string | null
   /** A world item clicked open, by its inner event id. */
   selectedSecret: string | null
   /** Whether the Nearby Loot list is on screen: what is decrypted where you stand. */
@@ -594,7 +600,6 @@ interface ShardsState {
    * there, because a bag need not carry `h` (spec §8.6).
    */
   rescan: (lookupId: string, keyHex: string) => Promise<number>
-  inspect: (eventId: string | null) => void
   selectSecret: (eventId: string | null) => void
   /** File what a scan opened. A find this identity wrote joins `mine` as well, whichever device placed it. */
   /**
@@ -806,7 +811,10 @@ export const useShards = create<ShardsState>((set, get) => {
     }
     const discovered = { ...get().discovered }
     delete discovered[eventId]
-    set({ mine, discovered, inspecting: get().inspecting === eventId ? null : get().inspecting })
+    // The item card open on this row follows it to its new id, so PUBLISH
+    // (broadcast puts a failed move back first) does not close the card it
+    // was tapped on (arkinox, 2026-10-20: the wire record folded into it).
+    set({ mine, discovered, selectedSecret: get().selectedSecret === eventId ? back.id : get().selectedSecret })
     saveMine(mine)
     return row
   }
@@ -981,10 +989,10 @@ export const useShards = create<ShardsState>((set, get) => {
     curated: null,
     deleted: loadDeleted(),
     deletedBags: loadDeletedBags(),
-    inspecting: null,
     scanning: false,
     broadcasting: null,
     broadcastError: null,
+    broadcastFailed: null,
     selectedSecret: null,
     nearbyOpen: false,
     nearbyReturn: null,
@@ -1513,11 +1521,11 @@ export const useShards = create<ShardsState>((set, get) => {
     broadcast: async (lookupId) => {
       if (get().broadcasting) return false
       for (const d of get().mine.filter((m) => m.lookupId === lookupId && m.putBack)) {
-        if (!(await putBackNow(d.eventId))) { set({ broadcastError: PUT_BACK_PENDING }); return false }
+        if (!(await putBackNow(d.eventId))) { set({ broadcastError: PUT_BACK_PENDING, broadcastFailed: lookupId }); return false }
       }
       const items = get().mine.filter((d) => d.lookupId === lookupId)
       if (items.length === 0) return false
-      set({ broadcasting: lookupId, broadcastError: null })
+      set({ broadcasting: lookupId, broadcastError: null, broadcastFailed: null })
       try {
         const key = hexToBytes(items[0].keyHex)
         const existing = await gatherInners(lookupId, key, true, items[0].height)
@@ -1530,14 +1538,14 @@ export const useShards = create<ShardsState>((set, get) => {
           if (!d.ref) continue
           const foreign = d.inner.pubkey !== me
           if (foreign && (isProtected({ event: d.inner }) || await authorDeleted({ pubkey: d.inner.pubkey, address: d.ref[1], id: d.inner.id, createdAt: d.inner.created_at }))) {
-            set({ broadcasting: null, broadcastError: isProtected({ event: d.inner }) ? LINK_PROTECTED : LINK_DELETED })
+            set({ broadcasting: null, broadcastError: isProtected({ event: d.inner }) ? LINK_PROTECTED : LINK_DELETED, broadcastFailed: lookupId })
             return false
           }
           // A bag naming an object no relay holds would be a permanent hole
           // for everyone, carried forward by every later rewrite. Stop here.
           const took = await republish(d.inner)
           if (!took) {
-            set({ broadcasting: null, broadcastError: 'No relay took a shard this bag names. Try again when one is reachable.' })
+            set({ broadcasting: null, broadcastError: 'No relay took a shard this bag names. Try again when one is reachable.', broadcastFailed: lookupId })
             return false
           }
           // A LIVE LINK hidden while LOCAL named your first relay; now it names one that took the object.
@@ -1554,7 +1562,7 @@ export const useShards = create<ShardsState>((set, get) => {
         const settings = existing.settings ?? DEFAULT_BAG_SETTINGS
         const { event, published } = await publishBag(allInners, key, lookupId, items[0].height, true, settings, { at: positionOf(items[0]), plane: items[0].plane })
         if (!published) {
-          set({ broadcasting: null, broadcastError: 'No relay took the bag. Try again when one is reachable.' })
+          set({ broadcasting: null, broadcastError: 'No relay took the bag. Try again when one is reachable.', broadcastFailed: lookupId })
           return false
         }
         const relays = relaySet()
@@ -1563,7 +1571,7 @@ export const useShards = create<ShardsState>((set, get) => {
         saveMine(mine)
         return true
       } catch (err) {
-        set({ broadcasting: null, broadcastError: err instanceof Error ? err.message : String(err) })
+        set({ broadcasting: null, broadcastError: err instanceof Error ? err.message : String(err), broadcastFailed: lookupId })
         return false
       }
     },
@@ -1674,14 +1682,12 @@ export const useShards = create<ShardsState>((set, get) => {
       const deleted = { ...get().deleted, [eventId]: true as const }
       const discovered = { ...get().discovered }
       delete discovered[eventId]
-      const wasInspecting = get().inspecting === eventId
       // The whole bag is gone only when nothing of ours is left in it. The
       // public list is a list of bags, so that is the grain it forgets at.
       const deletedBags = left.length > 0
         ? get().deletedBags
         : { ...get().deletedBags, [`${me}:${item.lookupId}`]: true as const }
-      set({ mine, deleted, deletedBags, discovered, inspecting: wasInspecting ? null : get().inspecting })
-      if (wasInspecting) cs.clearFocus()
+      set({ mine, deleted, deletedBags, discovered })
       saveMine(mine); saveDeleted(deleted)
       if (left.length === 0) saveDeletedBags(deletedBags)
     },
@@ -1747,8 +1753,6 @@ export const useShards = create<ShardsState>((set, get) => {
       saveMine(mine); saveDeleted(deleted)
       return null
     },
-
-    inspect: (eventId) => set({ inspecting: eventId }),
 
     selectSecret: (eventId) => set({ selectedSecret: eventId }),
 

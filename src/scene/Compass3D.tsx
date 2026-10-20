@@ -17,8 +17,9 @@
  * axes or its size. The camera rests far more than it turns, and a frame the
  * same as the last was a render, a context switch in the GPU process and a
  * composite spent on nothing, every display refresh, on a canvas of its own
- * (arkinox, 2026-10-20: /tv and the main view chug on his Windows laptop).
- * A canvas nobody draws to keeps showing its last frame.
+ * (arkinox, 2026-10-20: /tv and the main view chug on his Windows laptop; the
+ * compass is not shown on /tv, so this is the main view's and the
+ * workshop's part). A canvas nobody draws to keeps showing its last frame.
  */
 
 import { Canvas, useFrame, useThree } from '@react-three/fiber'

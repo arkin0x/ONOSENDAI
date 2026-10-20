@@ -29,7 +29,9 @@ describe('compassStep', () => {
     expect(compassStep(d, pose.clone(), dirsA, 100, 100, 200, 200)).toBeNull()
   })
 
-  it('draws the first frame even from the identity pose at size zero', () => {
+  // The first frame is drawn because no axes have been drawn yet (dirs null),
+  // whatever the pose and size.
+  it('draws the first frame whatever the pose and size, even the identity at size zero', () => {
     expect(compassStep(nothingDrawn(), new Quaternion(), dirsA, 0, 0, 0, 0)).toBe('draw')
   })
 

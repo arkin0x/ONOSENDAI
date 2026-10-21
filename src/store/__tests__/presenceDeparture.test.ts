@@ -309,6 +309,46 @@ describe('ingest', () => {
   })
 })
 
+describe('a chain read that fails', () => {
+  it('leaves the far action to the next sweep, not ten minutes later', async () => {
+    const { CONFIRM_AFTER_S, sweep } = await import('../usePresence')
+    // Last confirmed long enough ago that the next sweep asks about him.
+    usePresence.setState({ people: {} })
+    usePresence.getState().ingest(enterHyperspace, Math.floor(Date.now() / 1000) - CONFIRM_AFTER_S - 1)
+    await drainChainChecks()
+    // The read for his hyperjump comes back with nothing.
+    known.delete(hyperjump.id)
+    usePresence.getState().ingest(hyperjump)
+    await drainChainChecks()
+    expect(xor()).toMatchObject({ actionId: hyperjump.id, position: here })
+    byAuthor = [hop, enterHyperspace, hyperjump]
+    await sweep()
+    expect(xor()).toBeUndefined()
+  })
+
+  it('reads a far action ahead of the reads a backfill queued', async () => {
+    const { pendingChainChecks } = await import('../usePresence')
+    usePresence.setState({ people: {} })
+    usePresence.getState().ingest(enterHyperspace)
+    await drainChainChecks()
+    // A backfill queues a read for each person it brings; then XOR's
+    // hyperjump arrives, last in line.
+    const others = Array.from({ length: 3 }, (_, i) => hopBy(generateSecretKey(), { ...here, y: here.y + BigInt(i + 1) }, enterHyperspace.created_at + i))
+    for (const ev of others) usePresence.getState().ingest(ev)
+    usePresence.getState().ingest(hyperjump)
+    expect(pendingChainChecks().map(([pk]) => pk)).toEqual([...others.map((e) => e.pubkey), XOR])
+    // Each read placed as it lands: XOR's goes first and drops him.
+    const settled: string[] = []
+    const stop = usePresence.subscribe((st, prev) => {
+      for (const pk of Object.keys(prev.people)) if (st.people[pk] !== prev.people[pk]) settled.push(pk)
+    })
+    await drainChainChecks()
+    stop()
+    expect(settled[0]).toBe(XOR)
+    expect(xor()).toBeUndefined()
+  })
+})
+
 describe('following someone who left', () => {
   it('finds XOR at block 101 when you go there too, though he left your old neighborhood on that very hop', async () => {
     startPresence()

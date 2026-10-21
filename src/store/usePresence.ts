@@ -245,11 +245,13 @@ export const usePresence = create<PresenceState>((set, get) => ({
       // frozen where it broke, which may be here, so the read decides
       // (applyVerdict): they stay where they are, showing this action,
       // until it says they left or froze. Someone not here is not added.
+      // `checkedAt` stays as it was: should the read fail, the sweep still
+      // settles them when it is due, not ten minutes from now.
       if (!have) return
       set({ people: { ...get().people, [action.pubkey]: {
-        ...have, lastActive: action.createdAt, type: action.type, checkedAt: now, actionId: action.id,
+        ...have, lastActive: action.createdAt, type: action.type, actionId: action.id,
       } } })
-      queueChainCheck(action.pubkey, action.id)
+      queueChainCheck(action.pubkey, action.id, true)
       return
     }
     // Someone new, after the backfill: an arrival. During the backfill every
@@ -324,11 +326,20 @@ function standing(action: ActionEvent, have: Person | undefined): { position: Po
 
 /** Chains waiting to be read: the newest action id each person was last seen at. */
 const chainChecks = new Map<string, string>()
+/** Of those, the people whose action lands elsewhere: read first, since they may have left. */
+const urgentChecks = new Set<string>()
 let checking = false
 
-/** Read someone's chain after a newest action of theirs that has no verdict yet. */
-function queueChainCheck(pubkey: string, actionId: string): void {
+/**
+ * Read someone's chain after a newest action of theirs that has no verdict
+ * yet. `urgent`: the action lands outside the neighborhood, so the read
+ * says whether they are still drawn here at all, and it goes ahead of the
+ * reads a backfill queued.
+ */
+function queueChainCheck(pubkey: string, actionId: string, urgent = false): void {
   chainChecks.set(pubkey, actionId)
+  if (urgent) urgentChecks.add(pubkey)
+  else urgentChecks.delete(pubkey)
   if (started) void drainChainChecks()
 }
 
@@ -343,8 +354,12 @@ export async function drainChainChecks(): Promise<void> {
   checking = true
   try {
     while (chainChecks.size > 0) {
-      const [pubkey, actionId] = chainChecks.entries().next().value as [string, string]
+      const first = urgentChecks.values().next()
+      const pubkey = first.done ? (chainChecks.keys().next().value as string) : first.value
+      const actionId = chainChecks.get(pubkey)
       chainChecks.delete(pubkey)
+      urgentChecks.delete(pubkey)
+      if (actionId === undefined) continue
       try {
         const v = await readChain(pubkey, actionId)
         if (v) applyVerdict(pubkey, v)
@@ -640,6 +655,7 @@ export function stopPresence(): void {
   started = false
   generation++
   chainChecks.clear()
+  urgentChecks.clear()
   departed.clear()
   forgetNeighborChains()
   usePresence.setState({ people: {}, sector: null, loading: false, arrivals: 0, lastArrivalAt: null })

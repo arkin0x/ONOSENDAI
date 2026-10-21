@@ -329,7 +329,9 @@ function flat(logo) {
   g.fillStyle = shade
   g.fillRect(-W, -H * 3, W * 2, H * 6)
   g.restore()
-  g.drawImage(logo, (W - lw) / 2, ly, lw, lh)
+  // The letters centred, lw wide; the ™ after them (logo.png's last 98 of
+  // its 1969 columns) hangs past them, as a hanging mark does.
+  g.drawImage(logo, (W - lw) / 2, ly, lw * 1969 / 1871, lh)
 
   // The channel.
   const w = words()

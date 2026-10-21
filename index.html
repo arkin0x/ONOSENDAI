@@ -16,14 +16,16 @@
       The link preview. og:image has to be absolute, so it names the production
       host: a preview deployment therefore shows production's card, which is
       the right trade, because a relative URL shows no card anywhere. The card
-      itself is generated from tools/og-card.html.
+      itself is generated from tools/og-card.html. Versioned: previews are
+      cached by the image's address, so a new card needs a new one (2: the
+      ™ on the wordmark, 2026-10-21).
     -->
     <meta property="og:type" content="website" />
     <meta property="og:url" content="https://onosendai.tech/" />
     <meta property="og:site_name" content="ONOSENDAI" />
     <meta property="og:title" content="ONOSENDAI" />
     <meta property="og:description" content="Cyberspace is the digital fabric of reality. Encrypt data to a location, build your digital world, find hidden treasures and visit real places on Earth." />
-    <meta property="og:image" content="https://onosendai.tech/og.png" />
+    <meta property="og:image" content="https://onosendai.tech/og.png?v=2" />
     <meta property="og:image:type" content="image/png" />
     <meta property="og:image:width" content="1200" />
     <meta property="og:image:height" content="630" />

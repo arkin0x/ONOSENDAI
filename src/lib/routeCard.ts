@@ -29,8 +29,9 @@ export const TV_CARD: RouteCard = {
   // fetch for a preview (review of #376).
   // Versioned: previews are cached by the image's address, so a new card
   // needs a new one (2: "Always On. Everywhere. ™", 2026-10-19; 3: the
-  // Cyberspace TV logo's bright grids, 2026-10-21).
-  image: 'https://onosendai.tech/og-tv.jpg?v=3',
+  // Cyberspace TV logo's bright grids, 2026-10-21; 4: the ™ on the ONOSENDAI
+  // wordmark, 2026-10-21).
+  image: 'https://onosendai.tech/og-tv.jpg?v=4',
   imageType: 'image/jpeg',
   imageAlt: 'CYBERSPACE サイバースペース TV and the ONOSENDAI wordmark on a curved CRT screen, between a glowing teal, blue and purple grid floor and ceiling.',
 }

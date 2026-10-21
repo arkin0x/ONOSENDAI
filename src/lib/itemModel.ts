@@ -152,11 +152,13 @@ export interface MotionPose { lift: number; turnY: number; turnX: number }
  */
 export function motionAt(seconds: number, animation: readonly ItemAnimation[], phase: number, amplitude: number, still: boolean, out: MotionPose): MotionPose {
   if (still || animation.length === 0) { out.lift = 0; out.turnY = 0; out.turnX = 0; return out }
-  const rates = spinRates(animation)
+  // spinRates' rule, worked in place: this runs per item per frame, and an object a call is garbage a call.
+  const y = animation.includes('spin-y')
+  const x = animation.includes('spin-x')
   const t = seconds + phase * BOB_PERIOD_S
   out.lift = animation.includes('bob') ? amplitude * Math.sin((2 * Math.PI * t) / BOB_PERIOD_S) : 0
-  out.turnY = rates.y * t
-  out.turnX = rates.x * t
+  out.turnY = y ? (x ? SPIN_RAD_PER_S / GOLDEN : SPIN_RAD_PER_S) * t : 0
+  out.turnX = x ? SPIN_RAD_PER_S * t : 0
   return out
 }
 

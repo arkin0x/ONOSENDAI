@@ -225,6 +225,16 @@ describe('the motion', () => {
     expect(out.turnX).toBeCloseTo(12 * SPIN_RAD_PER_S)
   })
 
+  it('turns in motionAt exactly as spinRates says, both together', () => {
+    const out = { lift: 0, turnY: 0, turnX: 0 }
+    const both: ItemAnimation[] = ['spin-y', 'spin-x']
+    motionAt(10, both, 0, 0, false, out)
+    const r = spinRates(both)
+    expect(out.turnY).toBeCloseTo(r.y * 10, 12)
+    expect(out.turnX).toBeCloseTo(r.x * 10, 12)
+    expect(out.turnX / out.turnY).toBeCloseTo(GOLDEN, 12)
+  })
+
   it('staggers items by their ids', () => {
     expect(phaseOf('a')).not.toBe(phaseOf('b'))
     expect(phaseOf('a')).toBeGreaterThanOrEqual(0)

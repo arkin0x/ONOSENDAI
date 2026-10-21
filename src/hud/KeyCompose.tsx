@@ -27,7 +27,7 @@
 
 import { useEffect, useRef, useState } from 'react'
 import { primeRef } from '../lib/parts'
-import { ANIMATIONS, type ItemAnimation } from '../lib/itemModel'
+import { ANIMATIONS, isModelAddress, type ItemAnimation } from '../lib/itemModel'
 import { useItemModel } from '../hooks/useItemModel'
 import { useThumbs } from '../store/useThumbs'
 import { ThumbStage } from '../scene/ThumbStage'
@@ -91,6 +91,9 @@ const MOTION_LABEL: Record<ItemAnimation, { label: string; hint: string }> = {
   'spin-x': { label: 'Rotate X', hint: 'Turns end over end' },
 }
 
+/** No motion: one array, so the preview's box is not worked out again at every keystroke. */
+const NO_MOTION: readonly ItemAnimation[] = []
+
 /** The thumbnail key a model's icon is drawn under (useThumbs). */
 const iconKey = (address: string): string => `item-model:${address}`
 
@@ -143,6 +146,9 @@ export function KeyCompose({ onDone }: { onDone: () => void }): JSX.Element {
     })
   }
   const pickModel = (o: FeedObject): void => {
+    // An address the tag would not carry (lib/itemModel.ts isModelAddress) would show here and be gone once placed.
+    if (!isModelAddress(o.address)) { setPictureNote('That object’s address cannot ride in an item.'); return }
+    setPictureNote(null)
     // The feed already holds the object: answer the fetch from it, so the
     // preview needs no second trip to a relay.
     try { primeRef(['a', o.address], JSON.parse(o.event.content)) } catch { /* fetched instead */ }
@@ -245,7 +251,7 @@ export function KeyCompose({ onDone }: { onDone: () => void }): JSX.Element {
       {key.model && !picking && (
         <div className="itemmodel">
           {model
-            ? <ItemModelPreview model={model} animation={key.animation ?? []} />
+            ? <ItemModelPreview model={model} animation={key.animation ?? NO_MOTION} />
             : <span className="itemmodel__preview itemmodel__wait" title={key.model.address}>LOADING</span>}
           <div className="itemmodel__side">
             <span className="itemmodel__name" title={key.model.address}>{model?.shard.name ?? 'MODEL'}</span>

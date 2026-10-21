@@ -167,12 +167,14 @@ export function ItemModelMark({ id, model, animation, at, region, axes, minPx, o
 
   const atTrue = useMemo(() => trueScale(unit, scaleExp), [unit, scaleExp])
   const longest = Math.max(...boxShape(cut.box).size)
-  // The label clears the box's top on screen at the same scale the box is
-  // drawn at: WorldLabel lifts by a marker's side times CUBE_REACH, so the
-  // side handed over is the top's height over that, at true size and at
-  // the floor alike (modelScale).
-  const top = useMemo(() => Math.max(0, turnBox(cut.box, turn.elements).max[1]), [cut.box, turn])
-  const clear = useMemo(() => ({ trueSide: (top * atTrue) / CUBE_REACH, minPx: longest > 0 ? (top * minPx) / longest / CUBE_REACH : minPx }), [top, atTrue, longest, minPx])
+  // The label clears the box on screen from any side, at the same scale the
+  // box is drawn at: WorldLabel lifts by a marker's side times CUBE_REACH
+  // (half a cube's space diagonal, the cube's rule for any view), so the
+  // side handed over is this box's half diagonal about the place over that,
+  // at true size and at the floor alike (modelScale). Its top alone sat the
+  // label on the box from a camera looking down (review of #439).
+  const reach = useMemo(() => Math.hypot(...[0, 1, 2].map((k) => Math.max(Math.abs(cut.box.min[k]), Math.abs(cut.box.max[k])))), [cut.box])
+  const clear = useMemo(() => ({ trueSide: (reach * atTrue) / CUBE_REACH, minPx: longest > 0 ? (reach * minPx) / longest / CUBE_REACH : minPx }), [reach, atTrue, longest, minPx])
   const outer = useRef<Group>(null)
   const frame = useRef<Group | null>(null)
   useFrame((state) => {

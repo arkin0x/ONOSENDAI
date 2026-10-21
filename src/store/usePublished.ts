@@ -29,6 +29,7 @@ import { SNO_KIND, objectAddress } from 'sno-core/feed'
 import { publishMany, relaySet } from '../lib/relay'
 import { shardRefusal } from '../lib/hidden'
 import { forgetRef } from '../lib/parts'
+import { forgetItemModel } from '../hooks/useItemModel'
 import type { NostrEvent } from '../lib/events'
 import {
   fingerprint, forget, loadLedger, noteSeen, noteSent, publicObjectTemplate, retractionTemplate, saveLedger, type Ledger,
@@ -140,6 +141,8 @@ export const usePublished = create<PublishedState>((set, get) => ({
       set({ ledger })
       // Every object placing this one draws the new version on its next fetch.
       forgetRef(['a', objectAddress(signed.pubkey, shard.id)])
+      // An item wearing it is drawn as the new version too (lib/itemModel.ts).
+      forgetItemModel(objectAddress(signed.pubkey, shard.id))
       const took = result.accepted?.length ?? relays.length
       say(`"${shard.name}" is published to ${took} of ${relays.length} relays.`)
       refreshFeed()
@@ -176,6 +179,7 @@ export const usePublished = create<PublishedState>((set, get) => ({
       saveLedger(ledger)
       set({ ledger })
       forgetRef(['a', objectAddress(me, shard.id)])
+      forgetItemModel(objectAddress(me, shard.id))
       const took = result.accepted?.length ?? relays.length
       say(`"${shard.name}" is retracted: the deletion went to ${took} of ${relays.length} relays. Relays that honor it drop the object. PUBLISH puts it back.`)
       refreshFeed()

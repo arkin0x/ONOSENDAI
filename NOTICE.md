@@ -1,12 +1,18 @@
 # Notice
 
-ONOSENDAI has three parts, and they are covered differently.
+ONOSENDAI has three parts, and they are covered differently: the code, the brand artwork, and the names.
 
 **The code** is licensed under Creative Commons Attribution-ShareAlike 4.0 International (CC BY-SA 4.0). The full legal code is in `LICENSE`. The code may be copied, shared, remixed, and monetized, but it must keep this license so others can do likewise with it.
 
-**The ONOSENDAI logo** and its recognizable variations are © 2023-2026 arkinox (npub1arkn0xxxll4llgy9qxkrncn3vc4l69s0dz8ef3zadykcwe7ax3dqrrh43w), licensed under Creative Commons Attribution-NonCommercial-NoDerivatives 4.0 International (CC BY-NC-ND 4.0): https://creativecommons.org/licenses/by-nc-nd/4.0/legalcode. It may be copied and shared, but not modified or monetized by anyone other than arkinox.
+**The brand artwork** is © 2023-2026 arkinox (npub1arkn0xxxll4llgy9qxkrncn3vc4l69s0dz8ef3zadykcwe7ax3dqrrh43w), licensed under Creative Commons Attribution-NonCommercial-NoDerivatives 4.0 International (CC BY-NC-ND 4.0): https://creativecommons.org/licenses/by-nc-nd/4.0/legalcode. It may be copied and shared, but not modified or monetized by anyone other than arkinox. The brand artwork is, with their recognizable variations:
 
-**The ONOSENDAI name** identifies this project and its author. A name is not covered by copyright, and Creative Commons licenses grant no trademark rights (CC BY-SA 4.0, section 2(b)(2)), so the code license gives no permission to use it. A fork or derivative may describe itself as based on ONOSENDAI, but must not present itself as ONOSENDAI, and if the code is monetized it must not use the ONOSENDAI name or logo.
+- the ONOSENDAI logo (`public/logo.png`);
+- the HOSAKA logo, mark, banner and commercial artwork (`public/hosaka-mark.png`, `public/hosaka-poster.jpg`, and the `public/hosaka*.webm` videos);
+- the Cyberspace TV logo and its preview card (`public/og-tv.jpg`).
+
+These files are excluded from the code license.
+
+**The names** ONOSENDAI, HOSAKA and CYBERSPACE TV, and the logos above, are trademarks of arkinox. They identify this project, its services and its author. A name is not covered by copyright, and Creative Commons licenses grant no trademark rights (CC BY-SA 4.0 and CC BY-NC-ND 4.0, section 2(b)(2)), so neither license gives any permission to use them. A fork or derivative may describe itself as based on ONOSENDAI, but must not present itself as ONOSENDAI, HOSAKA or CYBERSPACE TV, and if the code is monetized it must not use these names or logos.
 
 The legal code of each license supersedes any summary given here.
 

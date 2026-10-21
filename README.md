@@ -354,4 +354,4 @@ vectors shared with the Python implementation.
 
 The code is [CC BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0/). The full legal code is in `LICENSE`.
 
-The ONOSENDAI logo is © 2023-2026 arkinox, licensed under [CC BY-NC-ND 4.0](https://creativecommons.org/licenses/by-nc-nd/4.0/). The ONOSENDAI name is not covered by the code license: a fork must not present itself as ONOSENDAI, and monetized code must not use the name or logo. See `NOTICE.md`.
+The ONOSENDAI, HOSAKA and Cyberspace TV logos and brand artwork are © 2023-2026 arkinox, licensed under [CC BY-NC-ND 4.0](https://creativecommons.org/licenses/by-nc-nd/4.0/). ONOSENDAI™, HOSAKA™ and CYBERSPACE TV™ are trademarks of arkinox and are not covered by either license: a fork must not present itself under these names, and monetized code must not use the names or logos. See `NOTICE.md`.

@@ -6106,6 +6106,15 @@ kbd {
   color: var(--cloud, #ffd27d);
   border-bottom: 1px solid var(--cloud, #ffd27d);
 }
+/* The ™: small, at the top of the caps, and tucked back over the title's
+   letter spacing so it sits against the last A. */
+.offer__tm {
+  margin-left: -0.14em;
+  font-size: 0.5em;
+  letter-spacing: 0;
+  line-height: 0;
+  vertical-align: 0.7em;
+}
 .offer__lead { margin: 0; font-size: 0.8rem; line-height: 1.45; }
 .offer__reach { margin: 0; display: grid; gap: 2px; font-size: 0.72rem; }
 .offer__reach div { display: flex; justify-content: space-between; gap: 8px; }

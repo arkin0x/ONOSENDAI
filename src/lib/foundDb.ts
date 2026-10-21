@@ -44,7 +44,7 @@ export interface FoundBag {
   outer: NostrEvent
   /** The region key that opened it, hex. */
   keyHex: string
-  /** The region's height as the finder knew it, when it did (a bag may omit `h`). */
+  /** The region's height as the finder knew it, when it did (a bag may omit its `H` tag). */
   height?: number
   /** Where references without their own point are drawn. */
   origin?: FoundOrigin

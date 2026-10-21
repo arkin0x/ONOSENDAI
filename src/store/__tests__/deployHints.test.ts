@@ -66,11 +66,12 @@ beforeEach(() => {
 })
 
 describe('the deploy writes the bag settings', () => {
-  it('defaults: h, no hint, no riddle, as every bag before', async () => {
+  it('defaults: H, no hint, no riddle, as every bag before', async () => {
     await hide('one')
     const bag = lastBag()
-    expect(tagNames(bag)).toEqual(['d', 'encrypted', 'version', 'h', 'client'])
-    expect(bag.tags).toContainEqual(['h', String(HEIGHT)])
+    expect(tagNames(bag)).toEqual(['d', 'encrypted', 'version', 'H', 'client'])
+    expect(bag.tags).toContainEqual(['H', String(HEIGHT)])
+    expect(bag.tags.some((t) => t[0] === 'h')).toBe(false)
     expect(bag.content).toBe('')
   })
 
@@ -136,7 +137,7 @@ describe('rewrites that are not deploys keep the settings', () => {
     sent.length = 0
     await useShards.getState().deleteInstance(useShards.getState().mine[0].eventId)
     expect(lastBag().content).toBe('stay')
-    expect(tagNames(lastBag())).toEqual(['d', 'encrypted', 'version', 'h', 'hint', 'X', 'Y', 'Z', 'S', 'client'])
+    expect(tagNames(lastBag())).toEqual(['d', 'encrypted', 'version', 'H', 'hint', 'X', 'Y', 'Z', 'S', 'client'])
   })
 
   it('broadcast from LOCAL publishes the settings it was hidden with', async () => {

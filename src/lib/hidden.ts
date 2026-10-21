@@ -58,11 +58,20 @@ export const HIDDEN_KIND = 33330
 /**
  * The same envelope in the ephemeral range: a relay hands it to whoever is
  * subscribed at that moment and keeps nothing. Chat lives here. A 23330 is a
- * 33330 in every respect but the kind: same `d`, same `encrypted`, same `h`.
+ * 33330 in every respect but the kind: same `d`, same `encrypted`, same `H`.
  */
 export const CHAT_BAG_KIND = 23330
 /** A chat line, inside the ephemeral envelope; the kind other clients use for ephemeral chat. */
 export const CHAT_KIND = 23333
+
+/**
+ * The bag's height tag (spec §8.6): `["H", "<height>"]` on a 33330 bag and a
+ * 23330 chat envelope. Uppercase since 2026-10-21 (arkinox), because NIP-29
+ * claims `h` on every kind as a group id. `h` is read only on events written
+ * before then (heightHint) and never written.
+ */
+export const HEIGHT_TAG = 'H'
+export const LEGACY_HEIGHT_TAG = 'h'
 /** Longest chat line. Short on purpose: it is a room, not a wall. */
 export const MAX_CHAT_LENGTH = 500
 /** A shard, inside the envelope (v1's shard kind). */
@@ -158,7 +167,7 @@ export function wantsReference(shard: ShardModel): boolean {
  * chooses. The caller passes a fresh random `d` for every placement, because
  * 33331 is addressable: two placements of one shard under one `d` would
  * replace each other on the relay, and each is sealed to a different place.
- * No `name`, `C`, `h`, hint or sector tag: nothing that could say where.
+ * No `name`, `C`, height (`H`), hint or sector tag: nothing that could say where.
  */
 export async function objectTemplate(shard: ShardModel, regionKey: Uint8Array, d: string, createdAt: number): Promise<EventTemplate> {
   const ciphertext = await encryptForRegion(regionKey, JSON.stringify(toPayload(shard)))
@@ -363,12 +372,13 @@ export interface Hidden {
   plane: Plane
   /**
    * The height of the bag's region, the discovery radius: the height of the
-   * key that opened it when the reader knows it, else the bag's `h` tag, which
-   * is optional (spec §8.6). A bag that omits `h` still has a height.
+   * key that opened it when the reader knows it, else the bag's height tag
+   * (`H`, or a legacy `h`; heightHint), which is optional (spec §8.6). A bag
+   * that omits it still has a height.
    */
   height: number
   /**
-   * What the bag says in public: its `h`, its hint, its riddle (BagSettings),
+   * What the bag says in public: its `H`, its hint, its riddle (BagSettings),
    * shared by every item in it. Absent on the ceremony's preview items, which
    * came out of no bag.
    */
@@ -628,7 +638,7 @@ export const MAX_RIDDLE_LENGTH = 280
  * BAG, not to any one item: a bag is one addressable event per author and
  * region holding everything hidden there (spec §7.6), so every rewrite of it
  * carries them forward.
- *   - `heightTag`: whether the bag carries its `h` tag (spec §8.6, optional),
+ *   - `heightTag`: whether the bag carries its `H` tag (spec §8.6, optional),
  *     which tells seekers what height to compute to.
  *   - `hint`: the hint box's heights (spec §7.7), or null for no hint. The
  *     deploy bar offers the sector hint, 30 on every axis; a finer box another
@@ -645,7 +655,7 @@ export interface BagSettings {
   money: boolean
 }
 
-/** A bag as this client always wrote one before the choices existed: `h`, no hint, no riddle, nothing said of its contents. */
+/** A bag as this client always wrote one before the choices existed: its height, no hint, no riddle, nothing said of its contents. */
 export const DEFAULT_BAG_SETTINGS: BagSettings = { heightTag: true, hint: null, riddle: '', contents: false, money: false }
 
 /**
@@ -732,7 +742,9 @@ export function resolveBagSettings(chosen: BagSettings, seed: BagSettings, curre
 /**
  * The settings a published bag carries. `height` is the region height the
  * reader knows the bag's key belongs to, used to judge a hint when the bag
- * itself omits `h`; a hint the spec calls malformed is read as absent (§7.7).
+ * itself states no height; a hint the spec calls malformed is read as absent
+ * (§7.7). A bag read by a legacy `h` reads as `heightTag: true`, so rewriting
+ * it carries its height forward as `H`.
  */
 export function bagSettingsOf(ev: NostrEvent, height: number): BagSettings {
   const h = heightHint(ev)
@@ -756,13 +768,15 @@ export interface BagPlace { at: Position; plane: Plane }
  * accumulates content without a tag per item. The caller signs and publishes.
  * `createdAt` must exceed the previous bag's, so the relay keeps the newer.
  *
- * `settings` are the bag's public face (BagSettings above). `h` goes out
- * unless the hider turned it off. A hint needs `place`, a point in the region,
- * because the hint names the aligned base of its box; it writes the `hint` tag
- * and its sector tags (lib/hint.ts), and a hint smaller than the region could
- * not contain it, so one whose heights are below `height` is refused here
- * rather than published as a claim no reader would accept. The riddle is the
- * `content`, trimmed and capped at MAX_RIDDLE_LENGTH.
+ * `settings` are the bag's public face (BagSettings above). The height goes
+ * out as `H` (HEIGHT_TAG) unless the hider turned it off, and never as `h`;
+ * chat envelopes (23330) are written here too, so they carry `H` as well.
+ * A hint needs `place`, a point in the region, because the hint names the
+ * aligned base of its box; it writes the `hint` tag and its sector tags
+ * (lib/hint.ts), and a hint smaller than the region could not contain it,
+ * so one whose heights are below `height` is refused here rather than
+ * published as a claim no reader would accept. The riddle is the `content`,
+ * trimmed and capped at MAX_RIDDLE_LENGTH.
  *
  * No NIP-70 `-` (protected) tag: it is only accepted from the authenticated
  * author on relays that support it, is refused outright on ones that do not,
@@ -771,7 +785,7 @@ export interface BagPlace { at: Position; plane: Plane }
  */
 export async function bagTemplate(inners: readonly (BagEntry | ChatRumor)[], regionKey: Uint8Array, lookupId: string, height: number, createdAt: number, kind: number = HIDDEN_KIND, settings: BagSettings = DEFAULT_BAG_SETTINGS, place?: BagPlace): Promise<EventTemplate> {
   const tags: string[][] = [['d', lookupId], ['encrypted', ALGO, await encryptForRegion(regionKey, JSON.stringify(inners))], ['version', '2']]
-  if (settings.heightTag) tags.push(['h', String(height)])
+  if (settings.heightTag) tags.push([HEIGHT_TAG, String(height)])
   if (settings.hint) {
     if (!place) throw new Error('A hint needs the place it points to.')
     if (!hintFits(settings.hint, height)) throw new Error(`A hint box of heights ${settings.hint.join(', ')} cannot contain a height ${height} region.`)
@@ -794,13 +808,24 @@ export function ciphertextOf(ev: NostrEvent): string | null {
 }
 
 /**
- * The bag's `h` tag, or null when it carries none or a malformed one. `h` is
- * optional (spec §8.6): a hider may keep the height to themselves (arkinox,
+ * The bag's height tag (spec §8.6), or null when it states no height. The tag
+ * is optional: a hider may keep the height to themselves (arkinox,
  * 2026-10-01), and a reader that opened the bag knows the height anyway,
  * because it is the height of the key it derived (unbag's `height`).
+ *
+ * The tag is `H` since 2026-10-21. It was `h`, which NIP-29 reads on an event
+ * of any kind as the group the event is posted to, so a NIP-29 relay refused
+ * bags and chat envelopes or filed them into a group. The rule (spec §8.6):
+ * an event that carries any `H` tag is read by `H` alone, and its `h` tags
+ * are ignored; an event without `H` is read by a legacy `h`. The tag read
+ * MUST appear exactly once with a canonical decimal value; more than one, or
+ * a malformed value, and the bag states no height (it is not invalid).
  */
-export function heightHint(ev: NostrEvent): number | null {
-  const h = tag(ev, 'h')
+export function heightHint(ev: Pick<NostrEvent, 'tags'>): number | null {
+  const name = ev.tags.some((t) => t[0] === HEIGHT_TAG) ? HEIGHT_TAG : LEGACY_HEIGHT_TAG
+  const found = ev.tags.filter((t) => t[0] === name)
+  if (found.length !== 1) return null
+  const h = found[0][1]
   if (h === undefined || !/^(0|[1-9][0-9]*)$/.test(h)) return null
   return Number(h)
 }
@@ -843,9 +868,10 @@ function fromInner(inner: Rumor, outer: NostrEvent, keyHex: string, facts: BagFa
  *
  * `height` is the height of the region `regionKey` was derived for, when the
  * caller knows it, as every scan does. It is the truth about the bag's region
- * (the key opened it), so it wins over the bag's `h` tag, and it is what keeps
- * a bag whose hider left `h` off (arkinox, 2026-10-01) from reading as a
- * single gibson. Without it the `h` tag is used, and 0 when there is none.
+ * (the key opened it), so it wins over the bag's height tag, and it is what
+ * keeps a bag whose hider left the height off (arkinox, 2026-10-01) from
+ * reading as a single gibson. Without it the height tag is used (heightHint),
+ * and 0 when there is none.
  */
 /**
  * What opening a bag found, by bag id: how many entries it held and how many

@@ -7,7 +7,7 @@
  * (cyberspace-cli's --hint does this, and so does ONOSENDAI's deploy bar).
  * Where it is stays hidden unless the hider published a hint (spec §7.7): the
  * lookup id reveals nothing (spec §7.2). A sector hint names the sector, which
- * the row shows; the height may be withheld too, since `h` is optional (§8.6).
+ * the row shows; the height may be withheld too, since `H` is optional (§8.6).
  */
 
 import type { NostrEvent } from './events'
@@ -24,7 +24,7 @@ export interface LootItem {
   lookupId: string
   /**
    * The height hint: the region height the bag is discoverable from, or null
-   * when the hider did not publish it (`h` is optional, spec §8.6).
+   * when the hider did not publish it (`H` is optional, spec §8.6).
    */
   height: number | null
   createdAt: number

@@ -28,10 +28,11 @@ export const TV_CARD: RouteCard = {
   // A JPEG: the grain makes a PNG of 800 KB, more than some chat apps
   // fetch for a preview (review of #376).
   // Versioned: previews are cached by the image's address, so a new card
-  // needs a new one (2: "Always On. Everywhere. ™", 2026-10-19).
-  image: 'https://onosendai.tech/og-tv.jpg?v=2',
+  // needs a new one (2: "Always On. Everywhere. ™", 2026-10-19; 3: the
+  // Cyberspace TV logo's bright grids, 2026-10-21).
+  image: 'https://onosendai.tech/og-tv.jpg?v=3',
   imageType: 'image/jpeg',
-  imageAlt: 'CYBERSPACE TV and the ONOSENDAI wordmark on a curved CRT screen over a lime grid falling away at a steep angle.',
+  imageAlt: 'CYBERSPACE サイバースペース TV and the ONOSENDAI wordmark on a curved CRT screen, between a glowing teal, blue and purple grid floor and ceiling.',
 }
 
 const escape = (s: string): string => s.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;')

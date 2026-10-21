@@ -366,6 +366,9 @@ export function startMusic(list: Track[] = PLAYLIST): void {
     ownPause = false
     if (own || held || a.ended || !a.getAttribute('src')) return
     if (Date.now() - mutedAt < RESUME_MS) { void a.play().catch(() => {}); return }
+    // Nobody pauses the stream (lib/tv/broadcast): a pause there is the
+    // browser's or a device's, and the music plays on.
+    if (isBroadcast()) { void a.play().catch(() => {}); return }
     wanted = false
   })
   a.addEventListener('error', () => { if (audio === a && a.getAttribute('src')) fail(list) })

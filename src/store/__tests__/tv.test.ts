@@ -463,7 +463,31 @@ describe('Cyberspace TV', () => {
       expect(ads).toHaveLength(1)
       expect(ads[0]).toBeGreaterThanOrEqual(BROADCAST_AD_EVERY_MS)
     } finally {
+      setBroadcastForTest(false)
       useTv.getState().stop()
+      setBroadcastForTest(null)
+    }
+  })
+
+  it('on the 24/7 stream, going off keeps the address and reloads onto TV (review of #436)', async () => {
+    setBroadcastForTest(true)
+    const replace = vi.fn()
+    const replaceState = vi.fn()
+    const back = vi.fn()
+    vi.stubGlobal('window', Object.assign(new EventTarget(), {
+      location: { pathname: '/tv', search: '?broadcast=1', replace },
+      history: { state: null, replaceState, back, pushState: vi.fn() },
+    }))
+    try {
+      useTv.getState().start()
+      await run(1000)
+      useTv.getState().stop()
+      expect(replaceState).not.toHaveBeenCalled()
+      expect(back).not.toHaveBeenCalled()
+      await run(10)
+      expect(replace).toHaveBeenCalledWith('/tv?broadcast=1')
+    } finally {
+      vi.unstubAllGlobals()
       setBroadcastForTest(null)
     }
   })

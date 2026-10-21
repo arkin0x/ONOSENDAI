@@ -818,6 +818,17 @@ describe('the music on the 24/7 stream (lib/tv/broadcast)', () => {
     expect(store.get('onosendai:tvVolume')).toBe('0.200')
   })
 
+  it('plays on through a pause it did not ask for: nobody pauses the stream (review of #436)', async () => {
+    startMusic(list)
+    await flush()
+    expect(audio().paused).toBe(false)
+    const plays = audio().plays
+    audio().pause()
+    await flush()
+    expect(audio().plays).toBe(plays + 1)
+    expect(audio().paused).toBe(false)
+  })
+
   it('never asks for a tap, even where the browser holds the sound back', async () => {
     FakeAudio.refuse = true
     startMusic(list)

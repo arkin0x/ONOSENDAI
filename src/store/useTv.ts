@@ -17,7 +17,7 @@
 import { create } from 'zustand'
 import { queryEach } from '../lib/relay'
 import { AD_IN_MS, adById, adEveryMs, adLength, nextAd } from '../lib/tv/hosakaAd'
-import { isBroadcast } from '../lib/tv/broadcast'
+import { isBroadcast, reloadBroadcast } from '../lib/tv/broadcast'
 import { Director, JUMP_LINE_S, JUMP_S, JUMP_WARP_S, MAX_SHOT_S, isJump, shotFraming, type Beat, type Framing, type Shot, type TapeItem } from '../lib/tv/director'
 import type { HintBox } from '../lib/hint'
 import { TapeReader, V2_EPOCH, randomStart, type Ask, TapeUnanswered } from '../lib/tv/tape'
@@ -971,6 +971,8 @@ export const useTv = create<TvState>((set, get) => ({
         if (was.spectating) void spectate(was.spectating)
       }
     }
+    // The stream keeps its address: it reloads onto TV (below), never onto the app.
+    if (isBroadcast()) return
     try {
       if (isTvPath(window.location.pathname)) {
         if ((window.history.state as Record<string, unknown> | null)?.[PUSHED]) window.history.back()
@@ -1000,4 +1002,10 @@ export function isTvPath(pathname: string): boolean {
 useCyberspace.subscribe((st, prev) => {
   if (!useTv.getState().on || st.focus === prev.focus) return
   if (st.focus?.label !== TV_FOCUS_LABEL) useTv.getState().stop()
+})
+
+// The stream is TV or nothing (lib/tv/broadcast): TV going off there, for
+// whatever reason, reloads it onto TV again.
+useTv.subscribe((st, prev) => {
+  if (prev.on && !st.on && isBroadcast()) reloadBroadcast()
 })

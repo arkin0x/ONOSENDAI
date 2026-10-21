@@ -24,6 +24,7 @@ import { startCoordRoute } from './store/useCoordRoute'
 import { DemoCoach } from './hud/DemoCoach'
 import { TvScreen } from './hud/TvScreen'
 import { isTvPath, useTv } from './store/useTv'
+import { isBroadcast, reloadBroadcast } from './lib/tv/broadcast'
 import { parseDemoRoute } from './lib/demoRoute'
 import { restoreAfterUnfinishedTour, useDemo } from './store/useDemo'
 import { ToastChip } from './hud/ToastChip'
@@ -121,7 +122,10 @@ export default function App(): JSX.Element {
     // An address TV cannot open now (BUILD, a deploy, the tour) is put
     // back to /, so it never says /tv over a scene that is not TV.
     const open = (): void => {
-      if (!useTv.getState().start()) { try { window.history.replaceState(null, '', '/') } catch { /* no history here */ } }
+      if (useTv.getState().start()) return
+      // The stream waits and tries again (lib/tv/broadcast); it never leaves /tv.
+      if (isBroadcast()) { reloadBroadcast(); return }
+      try { window.history.replaceState(null, '', '/') } catch { /* no history here */ }
     }
     if (isTvPath(window.location.pathname)) open()
     const onPop = (): void => {

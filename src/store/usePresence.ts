@@ -195,8 +195,11 @@ interface PresenceState {
   arrivals: number
   /** When the last arrival was noticed, ms since the epoch, or null. */
   lastArrivalAt: number | null
-  /** Take an action event in: the newest per author wins. */
-  ingest: (ev: NostrEvent, now?: number) => void
+  /**
+   * Take an action event in: the newest per author wins. `quiet`: someone
+   * first seen this way is not an arrival (a spectated chain's head).
+   */
+  ingest: (ev: NostrEvent, now?: number, opts?: { quiet?: boolean }) => void
   /** Drop someone; the sweep does this when their newest action is elsewhere. */
   forget: (pubkey: string) => void
   /** Everyone here who is not you and not already a target. */
@@ -210,7 +213,7 @@ export const usePresence = create<PresenceState>((set, get) => ({
   arrivals: 0,
   lastArrivalAt: null,
 
-  ingest: (ev, now = Math.floor(Date.now() / 1000)) => {
+  ingest: (ev, now = Math.floor(Date.now() / 1000), opts = {}) => {
     const action = parseAction(ev)
     if (!action) return
     // An enter-virtual's sector tags are where it appears inside the game,
@@ -224,7 +227,7 @@ export const usePresence = create<PresenceState>((set, get) => ({
     // read by author answers newest first, so their hyperjump out comes
     // before the hop they made here, and that hop must not bring them back.
     const gone = departed.get(action.pubkey)
-    if (gone !== undefined && gone >= action.createdAt) return
+    if (gone !== undefined && gone.createdAt >= action.createdAt) return
     const have = get().people[action.pubkey]
     if (have && have.lastActive >= action.createdAt) return
     const at = standing(action, have)
@@ -236,13 +239,23 @@ export const usePresence = create<PresenceState>((set, get) => ({
     // and such an action is how someone leaves (arkinox, 2026-10-21: XOR
     // hyperjumped away and stayed drawn where he boarded).
     if (!inNeighborhood(at.position, useCyberspace.getState().position)) {
-      leave(action.pubkey, action.createdAt)
+      // Their chain says so: they have gone.
+      if (at.known) { leave(action.pubkey, action.createdAt, at.position); return }
+      // Not read there yet. A chain that broke before this action stands
+      // frozen where it broke, which may be here, so the read decides
+      // (applyVerdict): they stay where they are, showing this action,
+      // until it says they left or froze. Someone not here is not added.
+      if (!have) return
+      set({ people: { ...get().people, [action.pubkey]: {
+        ...have, lastActive: action.createdAt, type: action.type, checkedAt: now, actionId: action.id,
+      } } })
+      queueChainCheck(action.pubkey, action.id)
       return
     }
     // Someone new, after the backfill: an arrival. During the backfill every
     // person is new and none of them just arrived. Your targets are not
     // arrivals either; you already know where they are.
-    const arrived = !have && !get().loading && !useCyberspace.getState().targets[action.pubkey]
+    const arrived = !have && !opts.quiet && !get().loading && !useCyberspace.getState().targets[action.pubkey]
     set({
       people: { ...get().people, [action.pubkey]: {
         pubkey: action.pubkey, position: at.position, plane: at.plane,
@@ -270,25 +283,28 @@ export const usePresence = create<PresenceState>((set, get) => ({
 
 let stopLive: (() => void) | null = null
 let started = false
+/** Bumped when presence stops, so a read still in flight is not applied to what comes after. */
+let generation = 0
 let sweepHandle: ReturnType<typeof setInterval> | null = null
 
 /** Most departures remembered, the most recent kept. */
 export const DEPARTED_KEPT = 500
 /**
- * Per pubkey, created_at of the newest action known to stand outside this
- * neighborhood. Forgotten when you enter another one: there, that same
- * action may be what puts them beside you.
+ * Per pubkey, the newest action known to stand outside the neighborhood:
+ * when, and where it stands. Entering another neighborhood forgets those
+ * whose place is inside it, since that same action may put them beside you.
  */
-const departed = new Map<string, number>()
+const departed = new Map<string, { createdAt: number; position: Position }>()
 
 /**
- * `pubkey`'s action of `createdAt` stands outside the neighborhood: drop
- * them, and remember when, so none of their older actions puts them back.
+ * `pubkey`'s action of `createdAt` stands at `position`, outside the
+ * neighborhood: drop them, and remember it, so none of their older actions
+ * puts them back.
  */
-function leave(pubkey: string, createdAt: number): void {
+function leave(pubkey: string, createdAt: number, position: Position): void {
   const was = departed.get(pubkey)
   departed.delete(pubkey)
-  departed.set(pubkey, Math.max(was ?? createdAt, createdAt))
+  departed.set(pubkey, was && was.createdAt > createdAt ? was : { createdAt, position })
   while (departed.size > DEPARTED_KEPT) departed.delete(departed.keys().next().value as string)
   if (usePresence.getState().people[pubkey]) usePresence.getState().forget(pubkey)
 }
@@ -349,7 +365,7 @@ export async function drainChainChecks(): Promise<void> {
 function applyVerdict(pubkey: string, v: ChainVerdict): void {
   const person = usePresence.getState().people[pubkey]
   if (!person || person.actionId !== v.actionId) return
-  if (!inNeighborhood(v.stand.position, useCyberspace.getState().position)) { leave(pubkey, person.lastActive); return }
+  if (!inNeighborhood(v.stand.position, useCyberspace.getState().position)) { leave(pubkey, person.lastActive, v.stand.position); return }
   usePresence.setState((s) => ({ people: { ...s.people, [pubkey]: { ...s.people[pubkey], position: v.stand.position, plane: v.stand.plane, frozen: v.frozen } } }))
 }
 
@@ -367,11 +383,14 @@ async function enter(at: Position): Promise<void> {
   if (usePresence.getState().sector === key) return
   stopLive?.()
   stopLive = null
-  departed.clear()
+  for (const [pk, d] of departed) if (inNeighborhood(d.position, at)) departed.delete(pk)
   // Seeded from the device, so the people last seen here are drawn before
   // the relay answers; the backfill and the live feed refresh them.
   const seeded = loadPresenceCache(useCyberspace.getState().identity.pubkey, at)
   usePresence.setState({ sector: key, people: seeded, loading: true })
+  // The watch on them starts now, not when the set of people next changes:
+  // after a reload that finds the same people, it never would.
+  watchPeople()
   const filter = neighborhoodFilter(at)
   // Listen from a minute back before the fetch, so nothing lands in the gap.
   const since = Math.floor(Date.now() / 1000) - 60
@@ -420,41 +439,68 @@ export function watchedPubkeys(people: Record<string, Person>, me: string): stri
     .sort()
 }
 
+/** Most batched reads one confirmation makes before asking about the rest one at a time. */
+export const CONFIRM_PAGES = 4
+
 /**
- * Confirm everyone here in one read by author: their placing actions since
- * the oldest newest action among them, newest first, up to CONFIRM_LIMIT.
- * Each newer action is taken in, so someone who moved within the
- * neighborhood moves and someone who left is dropped (ingest). Someone the
- * read cannot speak for, because it was cut at the limit before reaching
- * them, is asked about alone, as the sweep asks; with no relay answering,
- * nobody is dropped and the sweep asks again later.
+ * Confirm everyone here by author, in batched reads: their placing actions
+ * since the oldest newest action among them, newest first, up to
+ * CONFIRM_LIMIT. A read that came back whole speaks for everyone it asked
+ * about. One cut at the limit speaks only for the people it names (it holds
+ * each one's newest action), so the people it did not name are asked again
+ * in a read of their own, up to CONFIRM_PAGES reads; one busy neighbor
+ * filling the limit costs one more read, not one per person. Whoever is
+ * still unconfirmed after that is asked about alone, as the sweep asks.
+ * Every newer action is then taken in, newest first across the relays, so
+ * someone who moved within the neighborhood moves and someone who left is
+ * dropped (ingest). With no relay answering, nobody is dropped and the
+ * sweep asks again later.
  */
 export async function confirmPresent(): Promise<void> {
-  const people = usePresence.getState().people
+  const gen = generation
   const me = useCyberspace.getState().identity.pubkey
-  const pubkeys = watchedPubkeys(people, me)
-  if (pubkeys.length === 0) return
-  let since = Infinity
-  for (const pk of pubkeys) since = Math.min(since, people[pk].lastActive)
-  let answers
-  try {
-    answers = await queryEach({ ...peopleFilter(pubkeys, since), limit: CONFIRM_LIMIT })
-  } catch {
-    return
+  let remaining = watchedPubkeys(usePresence.getState().people, me)
+  const events: NostrEvent[] = []
+  const covered: string[] = []
+  for (let page = 0; page < CONFIRM_PAGES && remaining.length > 0; page++) {
+    const people = usePresence.getState().people
+    remaining = remaining.filter((pk) => people[pk])
+    if (remaining.length === 0) break
+    let since = Infinity
+    for (const pk of remaining) since = Math.min(since, people[pk].lastActive)
+    let answers
+    try {
+      answers = await queryEach({ ...peopleFilter(remaining, since), limit: CONFIRM_LIMIT })
+    } catch {
+      break
+    }
+    if (gen !== generation) return
+    const answered = answers.filter((a) => a.outcome === 'answered')
+    if (answered.length === 0) break
+    for (const a of answered) events.push(...a.events)
+    // A relay that answered with fewer than the limit gave every one of
+    // their actions since `since`: whoever it did not name has done nothing
+    // since.
+    if (answered.some((a) => a.events.length < CONFIRM_LIMIT)) { covered.push(...remaining); remaining = []; break }
+    const named = new Set(answered.flatMap((a) => a.events.map((e) => e.pubkey)))
+    covered.push(...remaining.filter((pk) => named.has(pk)))
+    remaining = remaining.filter((pk) => !named.has(pk))
   }
-  const answered = answers.filter((a) => a.outcome === 'answered')
-  if (answered.length === 0) return
-  const events = answered.flatMap((a) => a.events)
+  if (gen !== generation) return
   const now = Math.floor(Date.now() / 1000)
-  for (const ev of events) usePresence.getState().ingest(ev, now)
-  // A relay that answered with fewer than the limit gave every one of their
-  // actions since `since`: whoever it did not name has done nothing since.
-  // One cut at the limit holds only the newest, so the people absent from
-  // it are asked about one at a time.
-  if (answered.some((a) => a.events.length < CONFIRM_LIMIT)) return
-  const named = new Set(events.map((e) => e.pubkey))
-  const left = pubkeys.filter((pk) => !named.has(pk)).map((pk) => usePresence.getState().people[pk]).filter((p): p is Person => !!p)
-  await confirmEach(left)
+  // Newest first across every relay: one relay missing someone's newest
+  // action must not have its older one taken first.
+  const seen = new Set<string>()
+  const ordered = events.filter((e) => !seen.has(e.id) && seen.add(e.id)).sort((a, b) => b.created_at - a.created_at)
+  for (const ev of ordered) usePresence.getState().ingest(ev, now)
+  // Confirmed unchanged is confirmed: the sweep need not ask about them.
+  usePresence.setState((st) => {
+    const people = { ...st.people }
+    for (const pk of covered) if (people[pk]) people[pk] = { ...people[pk], checkedAt: now }
+    return { people }
+  })
+  const left = remaining.map((pk) => usePresence.getState().people[pk]).filter((p): p is Person => !!p)
+  if (left.length > 0) await confirmEach(left)
 }
 
 /**
@@ -490,7 +536,7 @@ async function confirmEach(persons: Person[]): Promise<void> {
       // Frozen on a broken chain: still there until a spawn says otherwise,
       // and the chain is read again at the new action all the same.
       const at = standing(action, person)
-      if (!inNeighborhood(at.position, here)) { leave(person.pubkey, action.createdAt); continue }
+      if (!inNeighborhood(at.position, here)) { leave(person.pubkey, action.createdAt, at.position); continue }
       usePresence.setState((s) => ({ people: { ...s.people, [person.pubkey]: {
         ...s.people[person.pubkey], position: at.position, plane: at.plane, lastActive: action.createdAt, type: action.type, checkedAt: now, actionId: action.id, frozen: at.frozen,
       } } }))
@@ -543,7 +589,7 @@ function watchPeople(): void {
 function takeSpectated(sp: SpectateState): void {
   const head = sp.actions[sp.actions.length - 1]
   const ev = head ? sp.events.find((e) => e.id === head.id) : undefined
-  if (ev) usePresence.getState().ingest(ev)
+  if (ev) usePresence.getState().ingest(ev, undefined, { quiet: true })
 }
 
 let stopFollowing: (() => void) | null = null
@@ -552,7 +598,6 @@ let stopFollowing: (() => void) | null = null
 export function startPresence(): void {
   if (started) return
   started = true
-  void enter(useCyberspace.getState().position)
   stopFollowing = useCyberspace.subscribe((s, prev) => {
     if (s.position !== prev.position) void enter(s.position)
     if (s.spectate && s.spectate.actions !== prev.spectate?.actions) takeSpectated(s.spectate)
@@ -570,6 +615,8 @@ export function startPresence(): void {
       savePresenceCache(useCyberspace.getState().identity.pubkey, usePresence.getState().people)
     }, SAVE_AFTER_MS)
   })
+  // Entered last, so every change it makes is heard by the listeners above.
+  void enter(useCyberspace.getState().position)
 }
 
 /** How long after a change the neighbors are written to the device. */
@@ -591,6 +638,7 @@ export function stopPresence(): void {
   watch?.close()
   watch = null
   started = false
+  generation++
   chainChecks.clear()
   departed.clear()
   forgetNeighborChains()

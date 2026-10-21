@@ -11,6 +11,10 @@
  * hop there. The hyperjump lands in another sector, so the neighborhood's
  * sector filter never delivers it; presence kept the enter-hyperspace as his
  * newest action, and every backfill brought him back at it.
+ *
+ * His real chain is valid through all four (buildChain finds no break), so
+ * the chain read is stood in for by one that places each action where it
+ * says, unless a test freezes someone.
  */
 
 import { beforeEach, describe, expect, it, vi } from 'vitest'
@@ -24,6 +28,10 @@ let backfill: NostrEvent[] = []
 let byAuthor: NostrEvent[] | null = []
 /** Every one-shot read by author, its filter. */
 const authorReads: Filter[] = []
+/** Every event the chain read knows, by id. */
+const known = new Map<string, NostrEvent>()
+/** By pubkey: the event their chain froze at, for a broken chain. */
+const frozenAt = new Map<string, NostrEvent>()
 
 vi.mock('../../lib/relay', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../../lib/relay')>()),
@@ -46,11 +54,19 @@ vi.mock('../../lib/relay', async (importOriginal) => ({
     return [{ url: 'wss://relay.test/', outcome: 'answered' as const, events }]
   },
 }))
-// The chain reads presence queues: nothing on the relays, so no verdict.
-vi.mock('../../lib/chains', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('../../lib/chains')>()),
-  fetchChainEvents: async () => [],
-}))
+vi.mock('../../lib/neighborChains', async (importOriginal) => {
+  const orig = await importOriginal<typeof import('../../lib/neighborChains')>()
+  return {
+    ...orig,
+    readChain: async (pubkey: string, actionId: string) => {
+      const ev = known.get(actionId)
+      if (!ev) return null
+      const froze = frozenAt.get(pubkey)
+      const a = parseAction(froze ?? ev)!
+      return { actionId, spawnId: 's'.repeat(64), stand: { coordHex: a.coordHex, position: a.position, plane: a.plane, sector: a.sector }, frozen: !!froze }
+    },
+  }
+})
 
 if (typeof localStorage === 'undefined') {
   const mem = new Map<string, string>()
@@ -62,12 +78,15 @@ if (typeof localStorage === 'undefined') {
   }
 }
 
-import { generateSecretKey, getPublicKey } from 'nostr-tools/pure'
+import { finalizeEvent, generateSecretKey, getPublicKey } from 'nostr-tools/pure'
 import { Quaternion } from 'three'
 import { nip19 } from 'nostr-tools'
-import { parseAction, type ActionEvent, type NostrEvent } from '../../lib/events'
+import { hopTemplate, parseAction, positionHex, type ActionEvent, type NostrEvent } from '../../lib/events'
+import type { Position } from '../../lib/space'
 import { useCyberspace } from '../useCyberspace'
-import { MAX_TAG_FILTERS, inNeighborhood, startPresence, stopPresence, usePresence } from '../usePresence'
+import {
+  CONFIRM_LIMIT, MAX_TAG_FILTERS, drainChainChecks, inNeighborhood, savePresenceCache, startPresence, stopPresence, usePresence,
+} from '../usePresence'
 import xorTail from '../fixtures/xor-hyperjump-2026-10-21.json'
 
 const [hop, enterHyperspace, hyperjump, hopThere] = xorTail as NostrEvent[]
@@ -75,15 +94,27 @@ const XOR = hop.pubkey
 const act = (ev: NostrEvent): ActionEvent => parseAction(ev)!
 /** Where arkinox stood: where XOR boarded. */
 const here = act(enterHyperspace).position
+const plane = act(enterHyperspace).plane
+
+/** A hop by `sk` to `to` at `createdAt`: the parser checks its shape, not its proof. */
+function hopBy(sk: Uint8Array, to: Position, createdAt: number): NostrEvent {
+  const ev = finalizeEvent(hopTemplate({ createdAt, genesisId: 'a'.repeat(64), previousId: 'b'.repeat(64), prevCoordHex: positionHex(to, plane), to, plane, proofHash: 'c'.repeat(64) }), sk) as NostrEvent
+  known.set(ev.id, ev)
+  return ev
+}
 
 /** The live subscription over the people here, by author: the one that can hear a departure. */
 const peopleWatch = () => subs.filter((s) => s.open && s.filter.authors?.length)
+const xor = () => usePresence.getState().people[XOR]
 
 beforeEach(() => {
   stopPresence()
   localStorage.clear()
   subs.length = 0
   authorReads.length = 0
+  known.clear()
+  frozenAt.clear()
+  for (const ev of xorTail as NostrEvent[]) known.set(ev.id, ev)
   backfill = [hop, enterHyperspace]
   byAuthor = [hop, enterHyperspace]
   const me = getPublicKey(generateSecretKey())
@@ -103,7 +134,7 @@ describe('the fixture', () => {
 describe('a departure is heard while you are there', () => {
   it('watches the people here by author, so their next action arrives wherever it lands', async () => {
     startPresence()
-    await vi.waitFor(() => expect(usePresence.getState().people[XOR]?.actionId).toBe(enterHyperspace.id))
+    await vi.waitFor(() => expect(xor()?.actionId).toBe(enterHyperspace.id))
     await vi.waitFor(() => expect(peopleWatch().length).toBe(1))
     const f = peopleWatch()[0].filter
     expect(f.authors).toEqual([XOR])
@@ -111,27 +142,47 @@ describe('a departure is heard while you are there', () => {
     expect(Object.keys(f).filter((k) => k.startsWith('#')).length).toBeLessThanOrEqual(MAX_TAG_FILTERS)
   })
 
-  it('drops XOR the moment his hyperjump arrives, instead of drawing him where he boarded', async () => {
+  it('drops XOR once his hyperjump arrives and his chain holds it, instead of drawing him where he boarded', async () => {
     startPresence()
+    await vi.waitFor(() => expect(xor()?.actionId).toBe(enterHyperspace.id))
     await vi.waitFor(() => expect(peopleWatch().length).toBe(1))
-    expect(usePresence.getState().people[XOR]).toBeDefined()
     peopleWatch()[0].onEvent(hyperjump)
-    expect(usePresence.getState().people[XOR]).toBeUndefined()
+    await vi.waitFor(() => expect(xor()).toBeUndefined())
   })
 
-  it('takes a move within the neighborhood from the same watch', async () => {
+  it('opens the watch after a reload that finds exactly the people it remembered', async () => {
+    // Kept on the device a minute ago; the relays hold nothing newer.
+    usePresence.getState().ingest(enterHyperspace, Math.floor(Date.now() / 1000) - 60)
+    savePresenceCache(useCyberspace.getState().identity.pubkey, usePresence.getState().people)
+    usePresence.setState({ people: {} })
     startPresence()
+    await vi.waitFor(() => expect(authorReads.length).toBeGreaterThan(0))
     await vi.waitFor(() => expect(peopleWatch().length).toBe(1))
+    expect(xor()?.actionId).toBe(enterHyperspace.id)
+    peopleWatch()[0].onEvent(hyperjump)
+    await vi.waitFor(() => expect(xor()).toBeUndefined())
+  })
+
+  it('moves someone who moves within the neighborhood, through the same watch', async () => {
+    const sk = generateSecretKey()
+    const pk = getPublicKey(sk)
+    const first = hopBy(sk, here, hopThere.created_at + 10)
+    const next = hopBy(sk, { ...here, x: here.x + 3n }, hopThere.created_at + 20)
+    backfill = [hop, enterHyperspace, first]
+    byAuthor = [hop, enterHyperspace, first]
+    startPresence()
+    await vi.waitFor(() => expect(peopleWatch()[0]?.filter.authors).toEqual([XOR, pk].sort()))
+    peopleWatch()[0].onEvent(next)
+    expect(usePresence.getState().people[pk]).toMatchObject({ actionId: next.id, position: { x: here.x + 3n } })
     // An older action is not news.
     peopleWatch()[0].onEvent(hop)
-    expect(usePresence.getState().people[XOR].actionId).toBe(enterHyperspace.id)
+    expect(xor().actionId).toBe(enterHyperspace.id)
   })
 
   it('reissues the watch only when the set of people changes, not on every move', async () => {
     startPresence()
     await vi.waitFor(() => expect(peopleWatch().length).toBe(1))
     const opened = subs.length
-    // A newer action of someone already watched changes their entry, not the set.
     usePresence.setState((s) => ({ people: { ...s.people, [XOR]: { ...s.people[XOR], checkedAt: s.people[XOR].checkedAt + 1 } } }))
     await new Promise((r) => setTimeout(r, 400))
     expect(subs.length).toBe(opened)
@@ -140,12 +191,24 @@ describe('a departure is heard while you are there', () => {
   })
 })
 
+describe('a frozen chain still stands where it froze', () => {
+  it('keeps a neighbor whose chain broke here, though their newer broken hop lands far away', async () => {
+    // XOR's chain, as if it broke at the enter-hyperspace: from there on he
+    // stands where it froze, beside you, whatever his hyperjump says.
+    frozenAt.set(XOR, enterHyperspace)
+    byAuthor = [hop, enterHyperspace, hyperjump, hopThere]
+    startPresence()
+    await vi.waitFor(() => expect(authorReads.length).toBeGreaterThan(0))
+    await vi.waitFor(() => expect(xor()).toMatchObject({ actionId: hopThere.id, frozen: true, position: here }))
+  })
+})
+
 describe('a departure that happened before you arrived (a reload, a sector crossing)', () => {
   it('is found right after the backfill, in one read by author, and XOR is not drawn', async () => {
     byAuthor = [hop, enterHyperspace, hyperjump, hopThere]
     startPresence()
     await vi.waitFor(() => expect(authorReads.length).toBeGreaterThan(0))
-    await vi.waitFor(() => expect(usePresence.getState().people[XOR]).toBeUndefined())
+    await vi.waitFor(() => expect(xor()).toBeUndefined())
     expect(authorReads).toHaveLength(1)
     expect(authorReads[0].authors).toEqual([XOR])
     expect(Object.keys(authorReads[0]).filter((k) => k.startsWith('#')).length).toBeLessThanOrEqual(MAX_TAG_FILTERS)
@@ -156,31 +219,36 @@ describe('a departure that happened before you arrived (a reload, a sector cross
     startPresence()
     await vi.waitFor(() => expect(authorReads.length).toBeGreaterThan(0))
     await new Promise((r) => setTimeout(r, 50))
-    expect(usePresence.getState().people[XOR]?.actionId).toBe(enterHyperspace.id)
+    expect(xor()?.actionId).toBe(enterHyperspace.id)
   })
 
   it('is found from the device cache too, before the backfill can bring him back', async () => {
-    // Seen here before the reload, kept on the device, confirmed a minute ago.
-    const now = Math.floor(Date.now() / 1000)
-    usePresence.setState({ people: {} })
-    usePresence.getState().ingest(enterHyperspace, now - 60)
-    const kept = usePresence.getState().people
-    const { savePresenceCache } = await import('../usePresence')
-    savePresenceCache(useCyberspace.getState().identity.pubkey, kept)
+    usePresence.getState().ingest(enterHyperspace, Math.floor(Date.now() / 1000) - 60)
+    savePresenceCache(useCyberspace.getState().identity.pubkey, usePresence.getState().people)
     usePresence.setState({ people: {} })
     byAuthor = [hop, enterHyperspace, hyperjump, hopThere]
     startPresence()
     // Drawn from the device at once, then dropped by the confirmation.
-    expect(usePresence.getState().people[XOR]?.actionId).toBe(enterHyperspace.id)
+    expect(xor()?.actionId).toBe(enterHyperspace.id)
     await vi.waitFor(() => expect(authorReads.length).toBeGreaterThan(0))
-    await vi.waitFor(() => expect(usePresence.getState().people[XOR]).toBeUndefined())
+    await vi.waitFor(() => expect(xor()).toBeUndefined())
+  })
+
+  it('marks everyone a whole read covered as confirmed, so the sweep does not ask about them alone', async () => {
+    const longAgo = Math.floor(Date.now() / 1000) - 20 * 60
+    usePresence.getState().ingest(enterHyperspace, longAgo)
+    savePresenceCache(useCyberspace.getState().identity.pubkey, usePresence.getState().people)
+    usePresence.setState({ people: {} })
+    startPresence()
+    await vi.waitFor(() => expect(authorReads.length).toBeGreaterThan(0))
+    await vi.waitFor(() => expect(xor().checkedAt).toBeGreaterThan(longAgo))
   })
 })
 
 describe('ending a spectation', () => {
   it('leaves XOR at his newest action, not where presence last saw him', async () => {
     startPresence()
-    await vi.waitFor(() => expect(usePresence.getState().people[XOR]?.actionId).toBe(enterHyperspace.id))
+    await vi.waitFor(() => expect(xor()?.actionId).toBe(enterHyperspace.id))
     // Spectating fetches his chain by author: it has the hyperjump.
     const events = [hop, enterHyperspace, hyperjump, hopThere]
     useCyberspace.setState({ spectate: {
@@ -188,32 +256,56 @@ describe('ending a spectation', () => {
       lastActive: hopThere.created_at, status: 'live', returnView: new Quaternion(),
     } })
     useCyberspace.getState().endSpectate()
-    expect(usePresence.getState().people[XOR]).toBeUndefined()
+    await vi.waitFor(() => expect(xor()).toBeUndefined())
+  })
+
+  it('does not count someone first seen through a spectation as an arrival', async () => {
+    startPresence()
+    await vi.waitFor(() => expect(usePresence.getState().loading).toBe(false))
+    const before = usePresence.getState().arrivals
+    const sk = generateSecretKey()
+    const pk = getPublicKey(sk)
+    const theirs = hopBy(sk, here, hopThere.created_at + 10)
+    useCyberspace.setState({ spectate: {
+      pubkey: pk, npub: nip19.npubEncode(pk), events: [theirs], actions: [act(theirs)],
+      lastActive: theirs.created_at, status: 'live', returnView: new Quaternion(),
+    } })
+    expect(usePresence.getState().people[pk]).toBeDefined()
+    expect(usePresence.getState().arrivals).toBe(before)
   })
 })
 
 describe('ingest', () => {
-  it('drops someone whose newest action stands outside the neighborhood, whichever feed it came by', () => {
+  it('drops someone whose newest action stands outside the neighborhood, once their chain holds it', async () => {
     usePresence.setState({ people: {} })
     usePresence.getState().ingest(enterHyperspace)
-    expect(usePresence.getState().people[XOR]).toBeDefined()
+    await drainChainChecks()
+    expect(xor()).toBeDefined()
     usePresence.getState().ingest(hyperjump)
-    expect(usePresence.getState().people[XOR]).toBeUndefined()
+    // Until the chain is read there, he stays where he was.
+    expect(xor()).toMatchObject({ actionId: hyperjump.id, position: here })
+    await drainChainChecks()
+    expect(xor()).toBeUndefined()
   })
 
-  it('never adds someone whose newest action is elsewhere', () => {
+  it('never adds someone whose newest action is elsewhere', async () => {
     usePresence.setState({ people: {} })
     usePresence.getState().ingest(hopThere)
-    expect(usePresence.getState().people[XOR]).toBeUndefined()
+    await drainChainChecks()
+    expect(xor()).toBeUndefined()
   })
 
-  it('does not bring someone back on an action older than the one that took them away', () => {
+  it('does not bring someone back on an action older than the one that took them away', async () => {
     // A read by author answers newest first: the hop there, the hyperjump,
     // then the enter-hyperspace he made here.
     usePresence.setState({ people: {} })
     usePresence.getState().ingest(enterHyperspace)
+    await drainChainChecks()
     for (const ev of [hopThere, hyperjump, enterHyperspace, hop]) usePresence.getState().ingest(ev)
-    expect(usePresence.getState().people[XOR]).toBeUndefined()
+    await drainChainChecks()
+    expect(xor()).toBeUndefined()
+    for (const ev of [enterHyperspace, hop]) usePresence.getState().ingest(ev)
+    expect(xor()).toBeUndefined()
   })
 })
 
@@ -222,33 +314,38 @@ describe('following someone who left', () => {
     startPresence()
     await vi.waitFor(() => expect(peopleWatch().length).toBe(1))
     peopleWatch()[0].onEvent(hyperjump)
-    peopleWatch()[0].onEvent(hopThere)
-    expect(usePresence.getState().people[XOR]).toBeUndefined()
+    await vi.waitFor(() => expect(xor()).toBeUndefined())
     // You ride to the same block: his newest action is now beside you.
     backfill = [hyperjump, hopThere]
     byAuthor = [hop, enterHyperspace, hyperjump, hopThere]
     useCyberspace.setState({ position: act(hopThere).position })
-    await vi.waitFor(() => expect(usePresence.getState().people[XOR]?.actionId).toBe(hopThere.id))
+    await vi.waitFor(() => expect(xor()?.actionId).toBe(hopThere.id))
   })
 })
 
 describe('a confirmation cut at its limit', () => {
-  it('asks alone about whoever the cut read did not name, and drops them if they left', async () => {
-    const { CONFIRM_LIMIT } = await import('../usePresence')
-    // Someone busy here fills the read to its limit with newer actions.
+  it('asks again in one batched read for the people it did not name, not one read per person', async () => {
+    // Someone busy here fills the read to its limit with newer actions;
+    // five more neighbors are idle, and XOR has left.
     const busySk = generateSecretKey()
     const busy = getPublicKey(busySk)
-    const { finalizeEvent } = await import('nostr-tools/pure')
-    const { hopTemplate, positionHex } = await import('../../lib/events')
-    const busyHop = (t: number) => finalizeEvent(hopTemplate({ createdAt: t, genesisId: 'a'.repeat(64), previousId: 'b'.repeat(64), prevCoordHex: positionHex(here, act(enterHyperspace).plane), to: here, plane: act(enterHyperspace).plane, proofHash: 'c'.repeat(64) }), busySk) as NostrEvent
-    const busyHops = Array.from({ length: CONFIRM_LIMIT + 5 }, (_, i) => busyHop(hopThere.created_at + 10 + i))
-    backfill = [hop, enterHyperspace, busyHops[0]]
-    byAuthor = [hop, enterHyperspace, hyperjump, hopThere, ...busyHops]
+    const busyHops = Array.from({ length: CONFIRM_LIMIT + 5 }, (_, i) => hopBy(busySk, here, hopThere.created_at + 10 + i))
+    const idle = Array.from({ length: 5 }, (_, i) => {
+      const sk = generateSecretKey()
+      return hopBy(sk, { ...here, z: here.z + BigInt(i + 1) }, enterHyperspace.created_at - 1000 - i)
+    })
+    backfill = [hop, enterHyperspace, busyHops[0], ...idle]
+    byAuthor = [hop, enterHyperspace, hyperjump, hopThere, ...busyHops, ...idle]
     startPresence()
     await vi.waitFor(() => expect(authorReads).toHaveLength(2))
-    await vi.waitFor(() => expect(usePresence.getState().people[XOR]).toBeUndefined())
+    await vi.waitFor(() => expect(xor()).toBeUndefined())
     expect(usePresence.getState().people[busy]).toBeDefined()
-    // One batched read, then one read about XOR alone.
-    expect(authorReads.map((f) => f.authors)).toEqual([[busy, XOR].sort(), [XOR]])
+    for (const ev of idle) expect(usePresence.getState().people[ev.pubkey]).toBeDefined()
+    // Both batched: everyone, then everyone but the busy one.
+    expect(authorReads[0].authors).toHaveLength(7)
+    expect(authorReads[1].authors).toEqual([XOR, ...idle.map((e) => e.pubkey)].sort())
+    expect(authorReads[1].limit).toBe(CONFIRM_LIMIT)
+    await new Promise((r) => setTimeout(r, 50))
+    expect(authorReads).toHaveLength(2)
   })
 })

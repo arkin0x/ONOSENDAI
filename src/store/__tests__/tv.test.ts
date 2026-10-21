@@ -42,7 +42,8 @@ import { useCyberspace } from '../useCyberspace'
 import { useBuilder } from '../useBuilder'
 import { usePersonCard } from '../usePersonCard'
 import { beatOf } from '../../lib/tv/tape'
-import { AD_EVERY_MS } from '../../lib/tv/hosakaAd'
+import { AD_EVERY_MS, BROADCAST_AD_EVERY_MS } from '../../lib/tv/hosakaAd'
+import { setBroadcastForTest } from '../../lib/tv/broadcast'
 import { musicHeldForAd } from '../useTvMusic'
 import type { Shot } from '../../lib/tv/director'
 
@@ -445,6 +446,26 @@ describe('Cyberspace TV', () => {
     expect(useTv.getState().ad).toBeNull()
     expect(held.slice(0, 2)).toEqual([false, false])
     expect(musicHeldForAd()).toBe(false)
+  })
+
+  it('on the 24/7 stream, breaks every BROADCAST_AD_EVERY_MS instead (arkinox, 2026-10-21)', async () => {
+    setBroadcastForTest(true)
+    try {
+      useTv.getState().start()
+      const ads: number[] = []
+      const t0 = performance.now()
+      const off = useTv.subscribe((s, prev) => { if (s.ad && !prev.ad) ads.push(performance.now() - t0) })
+      // Past the site's five minutes, and past ten: no break yet.
+      await run(BROADCAST_AD_EVERY_MS - 1000)
+      expect(ads).toHaveLength(0)
+      await run(60_000)
+      off()
+      expect(ads).toHaveLength(1)
+      expect(ads[0]).toBeGreaterThanOrEqual(BROADCAST_AD_EVERY_MS)
+    } finally {
+      useTv.getState().stop()
+      setBroadcastForTest(null)
+    }
   })
 
   it('never holds the music, through a break, a retune that cuts it short, or the set going off in it', async () => {

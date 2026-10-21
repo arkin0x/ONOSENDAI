@@ -28,6 +28,7 @@ import { memo, useEffect, useLayoutEffect, useMemo, useRef } from 'react'
 import { useFrame } from '@react-three/fiber'
 import { Vector3 } from 'three'
 import { watchContext } from '../lib/glContext'
+import { isBroadcast, recoverLostContext } from '../lib/tv/broadcast'
 import { keepPrograms } from '../lib/keepPrograms'
 import { BG } from '../lib/palette'
 import { GRID_RADIUS, cellDelta, claimScreenAxes, originShift, type Position } from '../lib/space'
@@ -819,7 +820,8 @@ export const Scene = memo(function Scene(): JSX.Element {
   return (
     <Canvas
       camera={{ fov: FOV, position: [0, 0, START_DISTANCE], near: CAMERA_NEAR, far: 6000 }}
-      dpr={[1, 2]}
+      // The stream draws at 1:1 (lib/tv/broadcast): a predictable picture and cost.
+      dpr={isBroadcast() ? 1 : [1, 2]}
       // high-performance: ask for the discrete GPU and against power-save
       // clocking, so a visually quiet frame still ships on time.
       // No antialias on the canvas itself: every frame is drawn by the
@@ -832,7 +834,8 @@ export const Scene = memo(function Scene(): JSX.Element {
       frameloop={covered ? 'never' : 'always'}
       // A lost context is said in the console (lib/glContext). Shader
       // programs are compiled once, not again at every cut (lib/keepPrograms).
-      onCreated={({ gl, scene }) => { watchContext(gl.domElement, 'main view'); keepPrograms(gl, scene) }}
+      // On the stream, a loss that does not come back reloads (lib/tv/broadcast).
+      onCreated={({ gl, scene }) => { watchContext(gl.domElement, 'main view'); recoverLostContext(gl.domElement); keepPrograms(gl, scene) }}
     >
       <ClockKeeper />
       {/* Fog to pure black: the only distance cue in an otherwise empty field. */}

@@ -23,6 +23,14 @@
 /** How often, ms of TV on: one after the first five minutes, and every five after (2026-10-19: "play the hosaka ad every 5 minutes"; it was ten). */
 export const AD_EVERY_MS = 5 * 60_000
 
+/** How often in broadcast mode (lib/tv/broadcast), ms: the 24/7 stream (arkinox, 2026-10-21: "on the streamer, the hosaka ad can play every 15 minutes"). */
+export const BROADCAST_AD_EVERY_MS = 15 * 60_000
+
+/** How often a spot plays, ms: on the site, or on the stream. */
+export function adEveryMs(broadcast: boolean): number {
+  return broadcast ? BROADCAST_AD_EVERY_MS : AD_EVERY_MS
+}
+
 export const AD_SUBTITLE = 'High-availability Offload Service for Advanced Kinematic Actions'
 
 /** A card's colours: the banner's teal, the mark's magenta, or the night between. */
@@ -91,6 +99,31 @@ export const ADS: TvAd[] = [HOSAKA_1]
 /** A spot by its id; the first if there is no such one (an old id after a release). */
 export function adById(id: string): TvAd {
   return ADS.find((a) => a.id === id) ?? ADS[0]
+}
+
+/**
+ * The end card's last line on the stream, where the viewer is not in the
+ * app and needs the address (arkinox, 2026-10-21: "change onosendai to
+ * ONOSENDAI.TECH on the end text"). The site keeps its own words.
+ */
+const BROADCAST_END_LINE: Record<string, string> = { 'IN THE ONOSENDAI MENU': 'IN THE ONOSENDAI.TECH MENU' }
+
+const forStream = new WeakMap<TvAd, TvAd>()
+
+/** A spot as the stream plays it: the end card names ONOSENDAI.TECH. Made once per spot. */
+export function broadcastCut(ad: TvAd): TvAd {
+  let cut = forStream.get(ad)
+  if (!cut) {
+    cut = { ...ad, scenes: ad.scenes.map((sc) => (sc.kind === 'end' ? { ...sc, lines: sc.lines.map((l) => BROADCAST_END_LINE[l] ?? l) } : sc)) }
+    forStream.set(ad, cut)
+  }
+  return cut
+}
+
+/** A spot by its id, as the site or the stream plays it. */
+export function adFor(id: string, broadcast: boolean): TvAd {
+  const ad = adById(id)
+  return broadcast ? broadcastCut(ad) : ad
 }
 
 /** The spot after `last`, round the list. */

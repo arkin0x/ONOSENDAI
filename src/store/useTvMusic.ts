@@ -24,6 +24,7 @@
 import { create } from 'zustand'
 import { PLAYLIST, type Track } from '../lib/tv/playlist'
 import { readTags } from '../lib/tv/id3'
+import { isBroadcast } from '../lib/tv/broadcast'
 
 export interface NowPlaying {
   url: string
@@ -68,8 +69,19 @@ const UNMUTE_TO = 0.5
 const startVolume = loadVolume()
 export const useTvMusic = create<MusicState>(() => ({ track: null, blocked: false, volume: startVolume, muted: loadMuted() || startVolume <= SILENT }))
 
+/**
+ * Whether NOW PLAYING should say TAP FOR SOUND: the browser holds the sound
+ * back, and someone could tap. Never on the stream (lib/tv/broadcast), where
+ * nobody can, and the encoder's browser allows the sound anyway.
+ */
+export function askForTap(): boolean {
+  return useTvMusic.getState().blocked && !isBroadcast()
+}
+
 /** Set the volume, 0 to 1; turning it up unmutes, and all the way down mutes. */
 export function setMusicVolume(volume: number): void {
+  // The stream is always at full volume (lib/tv/broadcast).
+  if (isBroadcast()) return
   const v = Math.min(1, Math.max(0, volume))
   const s = useTvMusic.getState()
   const muted = v <= SILENT || (s.muted && v <= s.volume)
@@ -84,6 +96,7 @@ export function setMusicVolume(volume: number): void {
 
 /** Mute, or unmute. */
 export function toggleMusicMute(): void {
+  if (isBroadcast()) return
   const s = useTvMusic.getState()
   const muted = !s.muted
   // Unmuting silence would still be silence.
@@ -152,6 +165,13 @@ export function resumeMusic(): void {
 function apply(): void {
   if (!audio) return
   const s = useTvMusic.getState()
+  // The stream: unmuted, full volume, whatever this browser kept from a
+  // viewer; only a break's fade (gain) changes it (lib/tv/broadcast).
+  if (isBroadcast()) {
+    audio.muted = false
+    audio.volume = gain
+    return
+  }
   if (volumeWorks) {
     audio.muted = false
     audio.volume = s.muted ? 0 : s.volume * gain
@@ -365,6 +385,8 @@ export function startMusic(list: Track[] = PLAYLIST): void {
   currentList = list
   held = false
   gain = 1
+  // What NOW PLAYING's card shows on the stream: full and unmuted.
+  if (isBroadcast()) useTvMusic.setState({ volume: 1, muted: false })
   apply()
   order = []
   at = -1

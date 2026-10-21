@@ -5,7 +5,8 @@
  * the browser held the sound back.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { besideUrls, holdMusicForAd, musicHeldForAd, musicProgress, nameFromUrl, resumeMusic, setMusicVolume, shuffled, startMusic, stopMusic, tapMusic, toggleMusicMute, useTvMusic } from '../useTvMusic'
+import { setBroadcastForTest } from '../../lib/tv/broadcast'
+import { askForTap, besideUrls, holdMusicForAd, musicHeldForAd, musicProgress, nameFromUrl, resumeMusic, setMusicVolume, shuffled, startMusic, stopMusic, tapMusic, toggleMusicMute, useTvMusic } from '../useTvMusic'
 
 class FakeAudio extends EventTarget {
   static made: FakeAudio[] = []
@@ -781,5 +782,49 @@ describe('a track from its link', () => {
     const order = shuffled(list, list[2].url, () => 0.999)
     expect(order[0].url).not.toBe(list[2].url)
     expect([...order].map((t) => t.url).sort()).toEqual(list.map((t) => t.url).sort())
+  })
+})
+
+describe('the music on the 24/7 stream (lib/tv/broadcast)', () => {
+  const store = new Map<string, string>()
+  beforeEach(() => {
+    store.clear()
+    // What a viewer once kept in this browser: muted, and turned down.
+    store.set('onosendai:tvMuted', '1')
+    store.set('onosendai:tvVolume', '0.200')
+    vi.stubGlobal('localStorage', { getItem: (k: string) => store.get(k) ?? null, setItem: (k: string, v: string) => { store.set(k, v) } })
+    useTvMusic.setState({ volume: 0.2, muted: true })
+    setBroadcastForTest(true)
+  })
+  afterEach(() => {
+    setBroadcastForTest(null)
+    useTvMusic.setState({ volume: 0.8, muted: false })
+  })
+
+  it('plays unmuted at full volume, whatever was kept here', () => {
+    startMusic(list)
+    expect(audio().muted).toBe(false)
+    expect(audio().volume).toBe(1)
+    expect(useTvMusic.getState()).toMatchObject({ volume: 1, muted: false })
+  })
+
+  it('cannot be muted or turned down, and keeps nothing on the device', () => {
+    startMusic(list)
+    toggleMusicMute()
+    setMusicVolume(0.1)
+    expect(audio().muted).toBe(false)
+    expect(audio().volume).toBe(1)
+    expect(store.get('onosendai:tvMuted')).toBe('1')
+    expect(store.get('onosendai:tvVolume')).toBe('0.200')
+  })
+
+  it('never asks for a tap, even where the browser holds the sound back', async () => {
+    FakeAudio.refuse = true
+    startMusic(list)
+    await flush()
+    expect(useTvMusic.getState().blocked).toBe(true)
+    expect(askForTap()).toBe(false)
+    setBroadcastForTest(false)
+    expect(askForTap()).toBe(true)
   })
 })

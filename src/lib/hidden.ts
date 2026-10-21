@@ -979,8 +979,9 @@ async function fromReference(ref: Reference, outer: NostrEvent, regionKey: Uint8
  * is said by the key that signed the envelope, and whose id is its own hash.
  * A line is a rumor (chatRumor) and carries no signature; a line from an
  * older client that does carry one must verify (accepted both ways while
- * clients catch up). Anything else in the bag is not chat and is left where
- * it is.
+ * clients catch up). A `sig` that is the empty string is no signature
+ * (DECK-0005 §3.2 rule 5, spec §7.6 Rumors), so that line is read as a
+ * rumor. Anything else in the bag is not chat and is left where it is.
  */
 export async function chatInners(outer: NostrEvent, regionKey: Uint8Array): Promise<ChatRumor[]> {
   if (outer.kind !== CHAT_BAG_KIND) return []
@@ -1004,7 +1005,9 @@ function isChatLine(e: unknown, speaker: string): boolean {
   try {
     if (getEventHash({ kind: ev.kind, created_at: ev.created_at, tags: ev.tags, content: ev.content, pubkey: ev.pubkey }) !== ev.id) return false
   } catch { return false }
-  return ev.sig === undefined || verifyEvent(ev as NostrEvent)
+  // No `sig`, or an empty one, is unsigned (DECK-0005 §3.2 rule 5), as innerAuthentic has it.
+  if (ev.sig === undefined || ev.sig === '') return true
+  try { return verifyEvent(ev as NostrEvent) } catch { return false }
 }
 
 /**

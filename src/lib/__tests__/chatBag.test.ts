@@ -91,6 +91,39 @@ describe('the ephemeral envelope', () => {
     expect(lines[0].id).toBe(inner.id)
   })
 
+  it('reads a line whose sig is the empty string as a rumor (DECK-0005 §3.2 rule 5)', async () => {
+    const sk = generateSecretKey()
+    const inner = { ...chatRumor(chatInnerTemplate('empty is none', at, 0, 1, 'aa'.repeat(32)), getPublicKey(sk)), sig: '' }
+    const outer = finalizeEvent(await bagTemplate([inner], key, 'aa'.repeat(32), 12, 1, CHAT_BAG_KIND), sk)
+    const lines = await chatInners(outer, key)
+    expect(lines).toHaveLength(1)
+    expect(lines[0].id).toBe(inner.id)
+    expect(lines[0].pubkey).toBe(outer.pubkey)
+  })
+
+  it('still refuses an empty-sig line whose id is not its own hash', async () => {
+    const sk = generateSecretKey()
+    const inner = { ...chatRumor(chatInnerTemplate('forged', at, 0, 1, 'aa'.repeat(32)), getPublicKey(sk)), id: 'ff'.repeat(32), sig: '' }
+    const outer = finalizeEvent(await bagTemplate([inner], key, 'aa'.repeat(32), 12, 1, CHAT_BAG_KIND), sk)
+    expect(await chatInners(outer, key)).toHaveLength(0)
+  })
+
+  it('still refuses an empty-sig line wrapped by someone who did not say it', async () => {
+    const speaker = generateSecretKey()
+    const inner = { ...chatRumor(chatInnerTemplate('not mine', at, 0, 1, 'aa'.repeat(32)), getPublicKey(speaker)), sig: '' }
+    const outer = finalizeEvent(await bagTemplate([inner], key, 'aa'.repeat(32), 12, 1, CHAT_BAG_KIND), generateSecretKey())
+    expect(await chatInners(outer, key)).toHaveLength(0)
+  })
+
+  it('refuses a line whose sig is present but not a string', async () => {
+    const sk = generateSecretKey()
+    for (const sig of [null, 0, false]) {
+      const inner = { ...chatRumor(chatInnerTemplate('odd sig', at, 0, 1, 'aa'.repeat(32)), getPublicKey(sk)), sig }
+      const outer = finalizeEvent(await bagTemplate([inner as never], key, 'aa'.repeat(32), 12, 1, CHAT_BAG_KIND), sk)
+      expect(await chatInners(outer, key)).toHaveLength(0)
+    }
+  })
+
   it('refuses a signed line whose signature does not hold', async () => {
     const sk = generateSecretKey()
     const signed = finalizeEvent(chatInnerTemplate('tampered', at, 0, 1, 'aa'.repeat(32)), sk)

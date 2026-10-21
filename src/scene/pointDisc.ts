@@ -48,9 +48,14 @@ const vertexShader = /* glsl */ `
   varying vec3 vColor;
   varying float vPx;
 
+  #include <clipping_planes_pars_vertex>
+
   void main() {
     vColor = aColor;
     vec4 mv = modelViewMatrix * vec4(position, 1.0);
+    // The name three's clipping chunk reads; with no planes it is unused.
+    vec4 mvPosition = mv;
+    #include <clipping_planes_vertex>
 
     // The perspective scale three's own attenuated points use, in drawing-buffer
     // pixels: half the buffer's height times the projection's vertical scale,
@@ -71,7 +76,10 @@ const fragmentShader = /* glsl */ `
   varying vec3 vColor;
   varying float vPx;
 
+  #include <clipping_planes_pars_fragment>
+
   void main() {
+    #include <clipping_planes_fragment>
     // 0 at the centre, 1 at the sprite's rim.
     float d = length(gl_PointCoord - vec2(0.5)) * 2.0;
 
@@ -108,6 +116,10 @@ export function createDiscMaterial(profile: DiscProfile, opacity: number): Shade
     },
     transparent: true,
     depthWrite: false,
+    // Cut at a region's walls when a caller gives it planes (an item's
+    // model in motion, scene/ItemModel.tsx); with none the chunks above
+    // compile to nothing, so every other shard's program is as it was.
+    clipping: true,
   })
 }
 

@@ -50,6 +50,10 @@ import { profileLabel } from '../store/useProfiles'
 import { coinKind, markShown, type MarkKind } from '../lib/worldMarks'
 import { useCashu } from '../hud/useCashu'
 import { TapTarget } from './TapTarget'
+import { regionBox, type Box } from '../lib/clip'
+import { useItemModel } from '../hooks/useItemModel'
+import type { ItemAnimation, ItemModelRef } from '../lib/itemModel'
+import { ItemModelMark } from './ItemModel'
 
 /** A message's tap target, in CSS pixels: a fingertip over the mark, at any zoom. */
 const TAP_PX = 44
@@ -67,6 +71,8 @@ const SPENT = '#7f8891'
  * than the note: it is a whole object in itself, where the cube is a backing.
  * It was 51 until 2026-10-09; smaller reads less like a billboard (arkinox). */
 const MARK_PX = { coin: 40, spent: 40, note: 34 } as const
+/** The note's cube's edge (0.72 of its mark), CSS pixels: the smallest an item's model box is drawn (ItemModel). */
+export const NOTE_EDGE_PX = 0.72 * MARK_PX.note
 /** The ₿ on a coin, in CSS pixels. */
 const COIN_PX = 31
 
@@ -158,6 +164,9 @@ export function WorldMessages({ axes }: Props): JSX.Element | null {
       .map((w) => ({
         key: w.key,
         type: w.type,
+        // The SNO a key wears, and its region's walls about it (ItemModel).
+        wears: w.type === 'key' && w.keyItem?.model ? { model: w.keyItem.model, animation: w.keyItem.animation ?? NO_MOTION } : undefined,
+        region: w.type === 'key' && w.keyItem?.model ? regionBox(w.at, w.height, 0, axes) : null,
         text: w.type === 'message' ? w.text! : itemMarkText(w),
         mine: w.mine,
         author: w.author ?? '',
@@ -180,7 +189,7 @@ export function WorldMessages({ axes }: Props): JSX.Element | null {
         // A key or a chest: the cube and its short name, as before.
         return (
           <group key={w.key}>
-            <ItemMark text={w.text} sub={author(w)} at={w.centre} />
+            <ItemMark id={w.key} text={w.text} sub={author(w)} at={w.centre} wears={w.wears} region={w.region} axes={axes} onTap={open} />
             {/* The mark is a fixed size on screen at any zoom, so its target is
                 too: a fingertip over the mark (TapTarget). */}
             <TapTarget px={TAP_PX} at={w.centre} onTap={open} />
@@ -196,12 +205,51 @@ export function itemMarkText(w: { type: string; keyItem?: { name?: string }; che
   return w.type === 'key' ? `⚷ ${w.keyItem?.name ?? 'key'}` : `▣ ${w.chest?.name ?? 'chest'}`
 }
 
-/** A key's or a chest's mark: the note's cube, its short name, and under it who left it. Cyberspace TV's fade (TvFinds). */
-export function ItemMark({ text, sub, at, opacity = 1 }: { text: string; sub: string; at: [number, number, number]; opacity?: number }): JSX.Element {
+/** The SNO a key wears and how it moves (lib/itemModel.ts). */
+export interface ItemWears { model: ItemModelRef; animation: readonly ItemAnimation[] }
+
+/**
+ * What an item's mark draws: its model once it is in hand (and the view's
+ * axes are known), else the note's cube, as every item was drawn before
+ * (arkinox, 2026-10-21: the cube while a model loads, and if it fails).
+ */
+export function itemMarkShape(model: unknown, axes: ViewAxes | undefined): 'model' | 'cube' {
+  return model && axes ? 'model' : 'cube'
+}
+
+/** No motion: one array, so a key with a model and no `animate` tag keeps one identity across renders. */
+const NO_MOTION: readonly ItemAnimation[] = []
+
+/**
+ * A key's or a chest's mark: the note's cube, its short name, and under it
+ * who left it. Cyberspace TV's fade (TvFinds). A key that wears a SNO is
+ * drawn as that model in its blue box instead of the cube (ItemModel), once
+ * the model is in hand; while it loads, and if it never does, the cube.
+ */
+export function ItemMark({ id, text, sub, at, opacity = 1, wears, region = null, axes, onTap }: {
+  id?: string
+  text: string
+  sub: string
+  at: [number, number, number]
+  opacity?: number
+  wears?: ItemWears
+  /** The region's walls about the item, gibsons, render frame (regionBox at unit 0). */
+  region?: Box | null
+  axes?: ViewAxes
+  onTap?: () => void
+}): JSX.Element {
+  const model = useItemModel(wears?.model)
+  // A model's faces would hide a label at its middle, so its label stands
+  // just above its box instead (ItemModelMark `label`); the cube's is
+  // drawn through, as before.
+  const label = { text, color: NOTE, sub, subColor: ACCENT }
+  if (model && axes && itemMarkShape(model, axes) === 'model') {
+    return <ItemModelMark id={id ?? text} model={model} animation={wears?.animation ?? NO_MOTION} at={at} region={region} axes={axes} minPx={NOTE_EDGE_PX} opacity={opacity} onTap={onTap} label={label} />
+  }
   return (
     <>
       <WorldMark kind="note" at={at} opacity={opacity} />
-      <WorldLabel text={text} color={NOTE} at={at} align="center" px={13} sub={sub} subColor={ACCENT} opacity={opacity} />
+      <WorldLabel text={label.text} color={label.color} at={at} align="center" px={13} sub={label.sub} subColor={label.subColor} opacity={opacity} />
     </>
   )
 }

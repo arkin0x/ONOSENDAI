@@ -9330,3 +9330,23 @@ a.feed__act { text-decoration: none; }
 .profilev__operator { display: inline-flex; align-items: center; gap: 6px; }
 .profilev__status { margin: 12px 0 0; font-size: 9px; letter-spacing: 0.12em; color: var(--dim); }
 .profilev__actions { margin-top: 14px; }
+
+/* An item's MODEL in its composer (arkinox, 2026-10-21): the preview, moving
+   inside its blue box, and beside it the name, the three motions and ICON
+   FROM MODEL. The feed opens in place of both while a model is picked. */
+.itemmodel { display: flex; gap: 10px; align-items: flex-start; flex-wrap: wrap; }
+.itemmodel__preview {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 6px;
+  background: rgba(0, 229, 255, 0.05);
+  border: 1px solid rgba(74, 163, 255, 0.25);
+}
+.itemmodel__wait { width: 132px; height: 132px; font-size: 9px; letter-spacing: 0.14em; color: var(--dim); }
+.itemmodel__side { display: flex; flex-direction: column; gap: 2px; flex: 1 1 140px; min-width: 0; }
+.itemmodel__side .ui-field { margin: 4px 0; }
+.itemmodel__side .chest__act { align-self: flex-start; margin-top: 4px; }
+.itemmodel__name { font-size: 11px; letter-spacing: 0.06em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.itemmodel__pick .feed__list { max-height: 40vh; max-height: 40dvh; }

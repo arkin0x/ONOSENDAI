@@ -31,6 +31,7 @@ import {
   LineBasicMaterial,
   Matrix4,
   ReplaceStencilOp,
+  type Plane,
 } from 'three'
 import { easeOutCubic, hash01, scrambleOffset, seedOf, SHARD_DECODE_MS } from '../lib/decode'
 import { MAX_UNIT, expandFaceColors, flatten, posed, ticksOf, toRender, type Part, type ShardModel } from 'sno-core/shards'
@@ -84,6 +85,14 @@ interface Props {
    * region-encrypted.
    */
   clip?: Box
+  /**
+   * Planes in world space to cut the faces, lines and points at, on the GPU,
+   * for a shape that moves inside walls that do not (an item's model in
+   * motion, scene/ItemModel.tsx): `clip` cuts the geometry once, where it
+   * stands, and a turning shape would carry that cut round with it. The
+   * caller keeps the planes current; the materials hold the same array.
+   */
+  clipPlanes?: Plane[]
   /**
    * The turn applied to every vertex before the render mapping (lib/pose.ts
    * placedPose). In the world it is always given, because it carries the
@@ -155,7 +164,7 @@ const TAG_BLEND = {
   stencilWrite: true, stencilRef: FACE_TAG_STENCIL, stencilZPass: ReplaceStencilOp,
 } as const
 
-export function ShardMesh({ shard: given, scale = 1, ghost = false, birth, onFaceClick, world = false, lit = false, clip, pose, nested, onPartClick, selectedParts, cull = false }: Props): JSX.Element | null {
+export function ShardMesh({ shard: given, scale = 1, ghost = false, birth, onFaceClick, world = false, lit = false, clip, clipPlanes, pose, nested, onPartClick, selectedParts, cull = false }: Props): JSX.Element | null {
   // The objects this one places, fetched once for the whole app; a part's own
   // parts come resolved from its parent instead.
   const resolved = useResolved(nested ? null : given)
@@ -229,6 +238,7 @@ export function ShardMesh({ shard: given, scale = 1, ghost = false, birth, onFac
     return createDiscMaterial(shard.mode === 'points' ? SHARD_POINTS : SHARD_DOTS, shard.mode === 'points' ? seen : seen * 0.55)
   }, [shard.mode, ghost])
   useEffect(() => () => pointMaterial.dispose(), [pointMaterial])
+  useEffect(() => { pointMaterial.clippingPlanes = clipPlanes ?? null }, [pointMaterial, clipPlanes])
 
   /**
    * LINES mode: every edge of every face, each drawn once.
@@ -262,6 +272,9 @@ export function ShardMesh({ shard: given, scale = 1, ghost = false, birth, onFac
   useEffect(() => () => { indexed.dispose() }, [indexed])
   useEffect(() => () => { inside?.dispose() }, [inside])
   useEffect(() => () => { line.material.dispose() }, [line])
+  useEffect(() => { (line.material as LineBasicMaterial).clippingPlanes = clipPlanes ?? null }, [line, clipPlanes])
+  // Spread into each JSX material: nothing at all when there are no planes, so those materials are as they were.
+  const cut = clipPlanes ? { clippingPlanes: clipPlanes } : {}
 
   // The scrambled start: each vertex thrown somewhere in the model's extent.
   const noise = useMemo(() => {
@@ -333,14 +346,14 @@ export function ShardMesh({ shard: given, scale = 1, ghost = false, birth, onFac
                 keep the two passes for cleaner self-overlap: there are few
                 (arkinox's 10 GB Windows tabs, 2026-10-14). */}
             {lit
-              ? <meshLambertMaterial vertexColors flatShading side={FrontSide} toneMapped={SHARD_FACES_TONE_MAPPED} transparent opacity={opacity} />
-              : <meshBasicMaterial vertexColors side={cull ? FrontSide : DoubleSide} forceSinglePass={!ghost} toneMapped={SHARD_FACES_TONE_MAPPED} transparent opacity={opacity} {...(world && !ghost ? TAG_BLEND : {})} />}
+              ? <meshLambertMaterial vertexColors flatShading side={FrontSide} toneMapped={SHARD_FACES_TONE_MAPPED} transparent opacity={opacity} {...cut} />
+              : <meshBasicMaterial vertexColors side={cull ? FrontSide : DoubleSide} forceSinglePass={!ghost} toneMapped={SHARD_FACES_TONE_MAPPED} transparent opacity={opacity} {...(world && !ghost ? TAG_BLEND : {})} {...cut} />}
           </mesh>
           {lit && inside && (
             <mesh geometry={inside} frustumCulled={false} {...pick}>
               {/* The inside of a face: lit like the outside, darker by a multiplier so it still reads as inside.
                   The multiplier and the light are shardLight's (arkinox, 2026-10-12). */}
-              <meshLambertMaterial vertexColors flatShading color={BACK_SHADE_COLOR} side={FrontSide} toneMapped={SHARD_FACES_TONE_MAPPED} transparent opacity={opacity} />
+              <meshLambertMaterial vertexColors flatShading color={BACK_SHADE_COLOR} side={FrontSide} toneMapped={SHARD_FACES_TONE_MAPPED} transparent opacity={opacity} {...cut} />
             </mesh>
           )}
         </group>
@@ -353,7 +366,7 @@ export function ShardMesh({ shard: given, scale = 1, ghost = false, birth, onFac
           what arkinox still saw with the backs culled (2026-10-13). */}
       {shard.mode === 'lines' && outline && !cull && (
         <lineSegments geometry={outline} frustumCulled={false}>
-          <lineBasicMaterial vertexColors toneMapped={false} transparent opacity={opacity} />
+          <lineBasicMaterial vertexColors toneMapped={false} transparent opacity={opacity} {...cut} />
         </lineSegments>
       )}
       {shard.mode === 'lines' && !outline && !cull && shard.vertices.length > 1 && <primitive object={line} />}
@@ -365,7 +378,7 @@ export function ShardMesh({ shard: given, scale = 1, ghost = false, birth, onFac
 }
 
 /** A unit cube's twelve edges, centred on the origin: the placeholder (§1.10). */
-const CUBE_EDGES = new EdgesGeometry(new BoxGeometry(1, 1, 1))
+export const CUBE_EDGES = new EdgesGeometry(new BoxGeometry(1, 1, 1))
 
 /**
  * Each placed object where its placement stands, or a placeholder there: a

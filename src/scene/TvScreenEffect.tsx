@@ -50,7 +50,8 @@ import { avatarFromEvent } from '../lib/avatar'
 import { tvSpin } from '../hud/TvSegments'
 import { uploadRegions } from './drawTracker'
 import { CUT_MS, TV_FONT, TvPainter, type FlatRect, type TvAssets, type TvMusic } from './tvPainter'
-import { musicProgress, setMusicVolume, tapMusic, useTvMusic } from '../store/useTvMusic'
+import { askForTap, musicProgress, setMusicVolume, tapMusic, useTvMusic } from '../store/useTvMusic'
+import { countTvFrame } from '../lib/tv/broadcast'
 import { useTvWatching } from '../store/useTvWatching'
 import { CALM, GlitchDirector } from '../lib/tv/glitch'
 import type { ShardModel } from 'sno-core/shards'
@@ -321,8 +322,8 @@ function within(r: FlatRect, x: number, y: number, slack: number): boolean {
 
 /** NOW PLAYING's words, cover and progress, while there is music. */
 function nowPlaying(): TvMusic | null {
-  const { track, blocked, volume, muted } = useTvMusic.getState()
-  return track ? { title: track.title, artist: track.artist, art: track.art, progress: musicProgress(), blocked, volume, muted } : null
+  const { track, volume, muted } = useTvMusic.getState()
+  return track ? { title: track.title, artist: track.artist, art: track.art, progress: musicProgress(), blocked: askForTap(), volume, muted } : null
 }
 
 export function TvScreenEffect(): JSX.Element {
@@ -468,6 +469,8 @@ export function TvScreenEffect(): JSX.Element {
       else if (!(tv.on && tv.ad) && !hosaka.paused) hosaka.pause()
     }
     if (!tv.on) return
+    // The encoder's watchdog reads this (lib/tv/broadcast); nothing off the stream.
+    countTvFrame()
     const u = effect.uniforms
     u.get('uTime')!.value = state.clock.elapsedTime
     u.get('uFlicker')!.value = tubeFlicker(state.clock.elapsedTime)

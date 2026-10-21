@@ -16,7 +16,8 @@
 
 import { create } from 'zustand'
 import { queryEach } from '../lib/relay'
-import { AD_EVERY_MS, AD_IN_MS, adById, adLength, nextAd } from '../lib/tv/hosakaAd'
+import { AD_IN_MS, adById, adEveryMs, adLength, nextAd } from '../lib/tv/hosakaAd'
+import { isBroadcast, reloadBroadcast } from '../lib/tv/broadcast'
 import { Director, JUMP_LINE_S, JUMP_S, JUMP_WARP_S, MAX_SHOT_S, isJump, shotFraming, type Beat, type Framing, type Shot, type TapeItem } from '../lib/tv/director'
 import type { HintBox } from '../lib/hint'
 import { TapeReader, V2_EPOCH, randomStart, type Ask, TapeUnanswered } from '../lib/tv/tape'
@@ -250,7 +251,7 @@ let queue: Shot[] = []
 /** The tape a read is under way for, or -1: a read stuck on an old tape never holds up a new one. */
 let readingTape = -1
 let shotBegan = 0
-/** When the next commercial is due (performance.now()): AD_EVERY_MS after TV came on, and after each break. */
+/** When the next commercial is due (performance.now()): adEveryMs (5 min, 15 on the stream) after TV came on, and after each break. */
 let adDue = Infinity
 /** The spot played last, so the breaks take them in turn. */
 let lastAd: string | null = null
@@ -744,7 +745,7 @@ function tick(id: number): void {
     // The spot's own clock starts after the cut into it (review of #384).
     if (now - s.ad.at < AD_IN_MS + adLength(adById(s.ad.id)) * 1000) return
     // Over: the next shot starts in this same tick, so the way back is one cut, not two.
-    adDue = now + AD_EVERY_MS
+    adDue = now + adEveryMs(isBroadcast())
     useTv.setState({ ad: null, shot: null, cutAt: now })
     s = useTv.getState()
   }
@@ -811,8 +812,8 @@ async function tune(id: number): Promise<void> {
   queue = []
   retryAt = 0
   failures = 0
-  // A retune cutting a commercial short counts as one played: the next is AD_EVERY_MS on.
-  if (useTv.getState().ad) adDue = performance.now() + AD_EVERY_MS
+  // A retune cutting a commercial short counts as one played: the next is adEveryMs on.
+  if (useTv.getState().ad) adDue = performance.now() + adEveryMs(isBroadcast())
   // A new tape shows only what it opens itself: the scan's memory stays, what it showed goes.
   looked = null
   prepared.clear()
@@ -906,7 +907,7 @@ export const useTv = create<TvState>((set, get) => ({
     run++
     scanner = newScanner()
     set({ on: true })
-    adDue = performance.now() + AD_EVERY_MS
+    adDue = performance.now() + adEveryMs(isBroadcast())
     // In the tap that turned TV on, where a browser lets sound start.
     startMusic()
     startWatching()
@@ -970,6 +971,8 @@ export const useTv = create<TvState>((set, get) => ({
         if (was.spectating) void spectate(was.spectating)
       }
     }
+    // The stream keeps its address: it reloads onto TV (below), never onto the app.
+    if (isBroadcast()) return
     try {
       if (isTvPath(window.location.pathname)) {
         if ((window.history.state as Record<string, unknown> | null)?.[PUSHED]) window.history.back()
@@ -999,4 +1002,10 @@ export function isTvPath(pathname: string): boolean {
 useCyberspace.subscribe((st, prev) => {
   if (!useTv.getState().on || st.focus === prev.focus) return
   if (st.focus?.label !== TV_FOCUS_LABEL) useTv.getState().stop()
+})
+
+// The stream is TV or nothing (lib/tv/broadcast): TV going off there, for
+// whatever reason, reloads it onto TV again.
+useTv.subscribe((st, prev) => {
+  if (prev.on && !st.on && isBroadcast()) reloadBroadcast()
 })

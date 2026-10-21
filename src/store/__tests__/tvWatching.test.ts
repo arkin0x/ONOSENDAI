@@ -27,6 +27,7 @@ vi.mock('../useCyberspace', () => ({
 }))
 
 import { startWatching, stopWatching, useTvWatching } from '../useTvWatching'
+import { setBroadcastForTest } from '../../lib/tv/broadcast'
 import { PING_EVERY_MS, WATCHING_KIND } from '../../lib/tv/watching'
 import { verifyEvent } from 'nostr-tools/pure'
 
@@ -142,5 +143,32 @@ describe('the watching count', () => {
     // The new subscription hearing it counts it as someone else, which it is.
     handlers[1](late!)
     expect(useTvWatching.getState().count).toBe(2)
+  })
+})
+
+describe('the watching count on the 24/7 stream (lib/tv/broadcast)', () => {
+  beforeEach(() => setBroadcastForTest(true))
+  afterEach(() => setBroadcastForTest(null))
+
+  it('never pings, and does not count itself', async () => {
+    startWatching()
+    await vi.advanceTimersByTimeAsync(PING_EVERY_MS * 3)
+    expect(published).toHaveLength(0)
+    expect(useTvWatching.getState().count).toBe(0)
+  })
+
+  it('still listens, and counts the viewers it hears', async () => {
+    startWatching()
+    expect(filters[0]).toMatchObject({ kinds: [WATCHING_KIND], '#t': ['cyberspace-tv'] })
+    handlers[0](ping('a'.repeat(64)))
+    handlers[0](ping('b'.repeat(64)))
+    expect(useTvWatching.getState().count).toBe(2)
+    // Back in front is no reason to ping either.
+    hidden = true
+    document.dispatchEvent(new Event('visibilitychange'))
+    hidden = false
+    document.dispatchEvent(new Event('visibilitychange'))
+    await vi.advanceTimersByTimeAsync(10)
+    expect(published).toHaveLength(0)
   })
 })

@@ -9249,6 +9249,13 @@ a.feed__act { text-decoration: none; }
 
 .tv button { pointer-events: auto; }
 
+/* The 24/7 stream (/tv?broadcast=1, lib/tv/broadcast.ts): no pointer drawn
+   over the picture, and the page held to the window (1280x720 on the encoder). */
+html.tv-broadcast,
+html.tv-broadcast * { cursor: none !important; }
+html.tv-broadcast,
+html.tv-broadcast body { overflow: hidden; }
+
 /* The workshop's own round close button, top left (arkinox, 2026-10-18). */
 .tv__off {
   position: absolute;

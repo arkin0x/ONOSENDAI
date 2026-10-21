@@ -27,7 +27,8 @@ import { chainLengthAt, countTo } from '../lib/tv/stats'
 import { itemLength, type Shot, type TapeItem } from '../lib/tv/director'
 import { CUT_MS, contentsWords, quoteOf, segmentDoing, typePace, TYPE_DELAY_S } from '../hud/TvSegments'
 import { findLines, placeable, shotProgress, type TvAvatar, type TvFindLine } from '../store/useTv'
-import { AD_SUBTITLE, adById, type AdScene, type AdTheme } from '../lib/tv/hosakaAd'
+import { AD_SUBTITLE, adFor, type AdScene, type AdTheme } from '../lib/tv/hosakaAd'
+import { isBroadcast } from '../lib/tv/broadcast'
 import { watchingWords } from '../lib/tv/watching'
 import type { Census, ChainTimes } from '../lib/tv/stats'
 import type { Position } from '../lib/space'
@@ -812,7 +813,8 @@ export class TvPainter {
   private commercial(ad: { at: number; id: string }, p: TvPicture, a: TvAssets, W: number, H: number, MX: number, MY: number, s: number, narrow: boolean, now: number, reduced: boolean, dt: number, scale: number): void {
     const ctx = this.ctx
     const t = Math.max(0, (now - ad.at) / 1000 - CUT_MS / 1000)
-    const scenes = adById(ad.id).scenes
+    // The stream's cut names ONOSENDAI.TECH on the end card (lib/tv/broadcast).
+    const scenes = adFor(ad.id, isBroadcast()).scenes
     const scene = scenes.find((sc) => t >= sc.from && t < sc.to) ?? scenes[scenes.length - 1]
     const tc = t - scene.from
     const theme = AD_THEMES[scene.theme]

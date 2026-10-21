@@ -8,11 +8,15 @@
  * else, and the viewer's own signer is never asked. A ping goes by
  * publishLight, one try that never disturbs the feeds; one refused or lost is
  * let go, and the count then says only this set.
+ *
+ * The broadcast (lib/tv/broadcast) listens and counts, but never pings and
+ * never counts itself: the encoder is not a viewer.
  */
 import { create } from 'zustand'
 import { publishLight, subscribe } from '../lib/relay'
 import { randomSigner, type Signer } from '../lib/signers'
 import { PING_EVERY_MS, WATCHING_KIND, WATCHING_TAG, SKEW_S, Watchers, pingTemplate } from '../lib/tv/watching'
+import { isBroadcast } from '../lib/tv/broadcast'
 
 /** How often the count is read again, ms. */
 const COUNT_EVERY_MS = 5_000
@@ -29,6 +33,8 @@ interface Running {
   onVisible: () => void
   /** When this set last sent a ping (performance.now()), or -Infinity. */
   pinged: number
+  /** The broadcast (lib/tv/broadcast): it never pings, and counts only the others. */
+  quiet: boolean
 }
 let running: Running | null = null
 
@@ -37,11 +43,11 @@ function visible(): boolean {
 }
 
 function recount(r: Running): void {
-  useTvWatching.setState({ count: r.watchers.count(performance.now(), r.signer.pubkey) })
+  useTvWatching.setState({ count: r.watchers.count(performance.now(), r.quiet ? null : r.signer.pubkey) })
 }
 
 async function ping(r: Running): Promise<void> {
-  if (!visible() || running !== r) return
+  if (r.quiet || !visible() || running !== r) return
   r.pinged = performance.now()
   try {
     const ev = await r.signer.signEvent(pingTemplate(Math.floor(Date.now() / 1000)))
@@ -59,6 +65,7 @@ export function startWatching(): void {
     timers: [],
     onVisible: () => { if (visible() && performance.now() - r.pinged >= PING_AGAIN_MS) void ping(r) },
     pinged: -Infinity,
+    quiet: isBroadcast(),
   }
   running = r
   r.unsubscribe = subscribe({ kinds: [WATCHING_KIND], '#t': [WATCHING_TAG], since: Math.floor(Date.now() / 1000) - SKEW_S }, (ev) => {

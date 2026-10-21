@@ -15,6 +15,7 @@ import { cutKind, flatPoint, tubeDrift, tubeFlicker } from '../TvScreenEffect'
 import { Vector2 } from 'three'
 import { useTv } from '../../store/useTv'
 import { HOSAKA_1 } from '../../lib/tv/hosakaAd'
+import { setBroadcastForTest } from '../../lib/tv/broadcast'
 
 /** A 2D context that measures every character as 7 px and draws nothing. */
 function fakeCanvas(): HTMLCanvasElement {
@@ -492,6 +493,64 @@ describe('the HOSAKA end card on a phone', () => {
       const right = disc[0] + disc[2]
       expect(Math.abs(left + right), `${w}x${h} centred`).toBeLessThan(0.5)
       expect(right - left, `${w}x${h} fits`).toBeLessThanOrEqual(w * (1 - 2 * 0.06))
+    }
+  })
+})
+
+describe('the HOSAKA end card on the 24/7 stream (arkinox, 2026-10-21)', () => {
+  /** Paint the end card at w x h; each line written, its type size and where it starts, and the discs. */
+  function endCard(w: number, h: number): { words: Array<{ text: string; x: number; font: string }>; arcs: number[][] } {
+    const end = HOSAKA_1.scenes[HOSAKA_1.scenes.length - 1]
+    const trip = { id: 't', kind: 'trip' as const, pubkey: 'ann', beats: [], start: 1, end: 2, offsets: [], length: 5 }
+    const words: Array<{ text: string; x: number; font: string }> = []
+    const arcs: number[][] = []
+    const state: Record<string, unknown> = { globalAlpha: 1, font: '' }
+    const ctx = new Proxy({
+      measureText: (t: string) => ({ width: Array.from(t).length * parseFloat(String(state.font).replace(/^700 /, '')) * 0.6 }),
+      createLinearGradient: () => ({ addColorStop: () => {} }),
+      createRadialGradient: () => ({ addColorStop: () => {} }),
+      fillText: (text: string, x: number) => { words.push({ text, x, font: String(state.font) }) },
+      arc: (...a: number[]) => { arcs.push(a) },
+    } as Record<string, unknown>, {
+      get: (target, key) => (key in target ? target[key as string] : key in state ? state[key as string] : () => {}),
+      set: (_t, key, v) => { state[key as string] = v; return true },
+    })
+    const p = new TvPainter({ width: 0, height: 0, getContext: () => ctx } as unknown as HTMLCanvasElement)
+    p.size(w, h, 1)
+    p.paint(picture({ shot: trip as never, ad: { at: 0, id: HOSAKA_1.id } }), assets, 700 + ((end.from + end.to) / 2) * 1000, 1, false)
+    return { words, arcs }
+  }
+
+  it('says ONOSENDAI.TECH, inside the frame at 1280x720 with its button, the type at least the floor', () => {
+    setBroadcastForTest(true)
+    try {
+      const { words, arcs } = endCard(1280, 720)
+      expect(words.some((x) => x.text === 'IN THE ONOSENDAI MENU')).toBe(false)
+      const line = words.find((x) => x.text === 'IN THE ONOSENDAI.TECH MENU')!
+      expect(line).toBeDefined()
+      expect(words.some((x) => x.text === 'SEE THE CLOUD COMPUTE PANEL')).toBe(true)
+      const size = parseFloat(line.font.replace(/^700 /, ''))
+      expect(size).toBeGreaterThanOrEqual(12)
+      const tw = line.text.length * size * 0.6
+      const disc = arcs.filter((a) => a[0] > line.x).sort((a, b) => b[2] - a[2])[0]
+      expect(disc).toBeDefined()
+      const left = line.x - tw / 2
+      const right = disc[0] + disc[2]
+      expect(Math.abs(left + right)).toBeLessThan(0.5)
+      expect(right - left).toBeLessThanOrEqual(1280 * (1 - 2 * 0.06))
+    } finally {
+      setBroadcastForTest(null)
+    }
+  })
+
+  it('the site keeps its own words', () => {
+    setBroadcastForTest(false)
+    try {
+      const { words } = endCard(1280, 720)
+      expect(words.some((x) => x.text === 'IN THE ONOSENDAI MENU')).toBe(true)
+      expect(words.some((x) => x.text.includes('ONOSENDAI.TECH'))).toBe(false)
+    } finally {
+      setBroadcastForTest(null)
     }
   })
 })

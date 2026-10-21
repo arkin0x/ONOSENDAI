@@ -10,7 +10,7 @@
  * gibson; higher hides it across a wider aligned cube that costs more to find.
  *
  * A bag also says three things in public, chosen in the deploy bar: whether
- * it carries its height (`h`), a sector hint, and a riddle (lib/hidden.ts
+ * it carries its height (`H`), a sector hint, and a riddle (lib/hidden.ts
  * BagSettings). They belong to the bag, so deploying into a region that
  * already holds your bag starts from that bag's settings and every rewrite
  * carries them forward (arkinox, 2026-10-01).
@@ -491,7 +491,7 @@ interface ShardsState {
    */
   deployLink: boolean
   /**
-   * The bag settings the deploy bar shows and the deploy writes: `h`, the
+   * The bag settings the deploy bar shows and the deploy writes: `H`, the
    * hint, the riddle (lib/hidden.ts BagSettings). They are the bag's, so they
    * start at your existing bag's settings when the cursor's region holds one
    * (seedDeployBag) and at the defaults when it does not.
@@ -617,7 +617,7 @@ interface ShardsState {
   /**
    * Ask the relay what is hidden in one region you hold the key to, and open
    * it. The region's height comes from the held key or your own deployment
-   * there, because a bag need not carry `h` (spec §8.6).
+   * there, because a bag need not carry `H` (spec §8.6).
    */
   rescan: (lookupId: string, keyHex: string) => Promise<number>
   selectSecret: (eventId: string | null) => void
@@ -1649,9 +1649,9 @@ export const useShards = create<ShardsState>((set, get) => {
       set({ scanning: true })
       try {
         const events = await query({ kinds: [HIDDEN_KIND], '#d': [lookupId] })
-        // The region's height, so a bag without `h` reads at its true size: a
+        // The region's height, so a bag without `H` reads at its true size: a
         // held cube's height, or your own deployment's. A box key (one height
-        // per axis) is not a cube and says nothing here; `h` then decides.
+        // per axis) is not a cube and says nothing here; `H` then decides.
         const held = useSecrets.getState().keys[lookupId]
         const cube = held && (!held.heights || (held.heights.x === held.heights.y && held.heights.y === held.heights.z)) ? held.height : undefined
         const height = cube ?? get().mine.find((d) => d.lookupId === lookupId)?.height

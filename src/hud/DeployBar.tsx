@@ -30,7 +30,7 @@
  * Three more choices belong to the BAG rather than to this item, because a bag
  * is one event per author and region holding everything hidden there (spec
  * §7.6) (arkinox, 2026-10-01):
- *   - PUBLISH HEIGHT HINT: whether the bag carries its `h` tag (spec §8.6, optional).
+ *   - PUBLISH HEIGHT HINT: whether the bag carries its `H` tag (spec §8.6, optional).
  *   - PUBLISH SECTOR HINT: a hint naming the bag's sector, heights of 30 on
  *     every axis, with its X, Y, Z and S sector tags (spec §7.7, §10). A hint
  *     must be at least the bag's height, so it is off above height 30.

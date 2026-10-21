@@ -13,7 +13,9 @@ import {
   HIDDEN_KIND,
   bagInners,
   bagReading,
+  bagSettingsOf,
   bagTemplate,
+  heightHint,
   messageInnerTemplate,
   shardInnerTemplate,
   shardRefusal,
@@ -33,14 +35,57 @@ async function bag(inners: ReturnType<typeof finalizeEvent>[], key = rk.key): Pr
 }
 
 describe('the envelope (spec 8.6)', () => {
-  it('is kind 33330, keyed by d = lookup_id, with encrypted, version and h', async () => {
+  it('is kind 33330, keyed by d = lookup_id, with encrypted, version and H', async () => {
     const outer = await bagTemplate([finalizeEvent(shardInnerTemplate(shard, at, 0, 1), sk)], rk.key, rk.lookupId, 6, 100)
     expect(outer.kind).toBe(HIDDEN_KIND)
     expect(outer.tags.find((t) => t[0] === 'd')).toEqual(['d', rk.lookupId])
     expect(outer.tags.find((t) => t[0] === 'encrypted')?.[1]).toBe('aes-256-gcm')
-    expect(outer.tags.find((t) => t[0] === 'h')).toEqual(['h', '6'])
+    expect(outer.tags.find((t) => t[0] === 'H')).toEqual(['H', '6'])
+    // Never the NIP-29 group tag.
+    expect(outer.tags.some((t) => t[0] === 'h')).toBe(false)
     // No NIP-70 protected tag.
     expect(outer.tags.some((t) => t[0] === '-')).toBe(false)
+  })
+})
+
+describe('the height tag: H, read with a fallback to a legacy h (spec 8.6)', () => {
+  const ev = (...height: string[][]) => ({ tags: [['d', rk.lookupId], ['version', '2'], ...height] })
+
+  it('reads H', () => {
+    expect(heightHint(ev(['H', '6']))).toBe(6)
+  })
+
+  it('reads a legacy h when there is no H', () => {
+    expect(heightHint(ev(['h', '7']))).toBe(7)
+  })
+
+  it('reads H alone when both are present, whatever h says', () => {
+    expect(heightHint(ev(['h', '7'], ['H', '6']))).toBe(6)
+    expect(heightHint(ev(['H', '6'], ['h', '7']))).toBe(6)
+    // H wins even when it is malformed: the bag then states no height.
+    expect(heightHint(ev(['H', '06'], ['h', '7']))).toBeNull()
+    expect(heightHint(ev(['H'], ['h', '7']))).toBeNull()
+  })
+
+  it('states no height when there is neither', () => {
+    expect(heightHint(ev())).toBeNull()
+  })
+
+  it('states no height when the tag it reads appears more than once', () => {
+    expect(heightHint(ev(['H', '6'], ['H', '6']))).toBeNull()
+    expect(heightHint(ev(['h', '7'], ['h', '7']))).toBeNull()
+  })
+
+  it('a bag that said its height with h is rewritten with H', async () => {
+    const ct = await encryptForRegion(rk.key, JSON.stringify([m0()]))
+    const old = finalizeEvent({ kind: HIDDEN_KIND, created_at: 100, content: '', tags: [['d', rk.lookupId], ['encrypted', 'aes-256-gcm', ct], ['version', '2'], ['h', '6']] }, sk)
+    const settings = bagSettingsOf(old, 6)
+    expect(settings.heightTag).toBe(true)
+    const items = await unbag(old, rk.key)
+    expect(items[0].height).toBe(6)
+    const next = await bagTemplate(await bagInners(old, rk.key), rk.key, rk.lookupId, 6, 101, HIDDEN_KIND, settings)
+    expect(next.tags).toContainEqual(['H', '6'])
+    expect(next.tags.some((t) => t[0] === 'h')).toBe(false)
   })
 })
 

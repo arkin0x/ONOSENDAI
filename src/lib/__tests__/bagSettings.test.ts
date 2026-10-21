@@ -37,19 +37,19 @@ const names = (tags: string[][]): string[] => tags.map((t) => t[0])
 describe('bagTemplate writes exactly the tags each combination asks for', () => {
   const sector = hintTags(at, 0, SECTOR_HINT)
   const cases: [string, BagSettings, string[], string][] = [
-    ['defaults: h, no hint, no riddle', DEFAULT_BAG_SETTINGS, ['d', 'encrypted', 'version', 'h'], ''],
-    ['h off', { heightTag: false, hint: null, riddle: '', contents: false, money: false }, ['d', 'encrypted', 'version'], ''],
-    ['sector hint', { heightTag: true, hint: SECTOR_HINT, riddle: '', contents: false, money: false }, ['d', 'encrypted', 'version', 'h', 'hint', 'X', 'Y', 'Z', 'S'], ''],
-    ['sector hint, h off', { heightTag: false, hint: SECTOR_HINT, riddle: '', contents: false, money: false }, ['d', 'encrypted', 'version', 'hint', 'X', 'Y', 'Z', 'S'], ''],
-    ['riddle only', { heightTag: true, hint: null, riddle: '  where the black sun sets ', contents: false, money: false }, ['d', 'encrypted', 'version', 'h'], 'where the black sun sets'],
-    ['everything', { heightTag: true, hint: SECTOR_HINT, riddle: 'look up', contents: false, money: false }, ['d', 'encrypted', 'version', 'h', 'hint', 'X', 'Y', 'Z', 'S'], 'look up'],
+    ['defaults: H, no hint, no riddle', DEFAULT_BAG_SETTINGS, ['d', 'encrypted', 'version', 'H'], ''],
+    ['H off', { heightTag: false, hint: null, riddle: '', contents: false, money: false }, ['d', 'encrypted', 'version'], ''],
+    ['sector hint', { heightTag: true, hint: SECTOR_HINT, riddle: '', contents: false, money: false }, ['d', 'encrypted', 'version', 'H', 'hint', 'X', 'Y', 'Z', 'S'], ''],
+    ['sector hint, H off', { heightTag: false, hint: SECTOR_HINT, riddle: '', contents: false, money: false }, ['d', 'encrypted', 'version', 'hint', 'X', 'Y', 'Z', 'S'], ''],
+    ['riddle only', { heightTag: true, hint: null, riddle: '  where the black sun sets ', contents: false, money: false }, ['d', 'encrypted', 'version', 'H'], 'where the black sun sets'],
+    ['everything', { heightTag: true, hint: SECTOR_HINT, riddle: 'look up', contents: false, money: false }, ['d', 'encrypted', 'version', 'H', 'hint', 'X', 'Y', 'Z', 'S'], 'look up'],
   ]
   for (const [label, settings, tagNames, content] of cases) {
     it(label, async () => {
       const ev = await bagWith(settings)
       expect(names(ev.tags)).toEqual(tagNames)
       expect(ev.content).toBe(content)
-      if (settings.heightTag) expect(ev.tags).toContainEqual(['h', String(HEIGHT)])
+      if (settings.heightTag) expect(ev.tags).toContainEqual(['H', String(HEIGHT)])
       if (settings.hint) for (const t of sector) expect(ev.tags).toContainEqual(t)
       expect(bagSettingsOf(ev, HEIGHT)).toEqual({ ...settings, riddle: content, contents: false, money: false })
     })

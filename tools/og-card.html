@@ -107,8 +107,10 @@
     text-transform: uppercase;
   }
 
-  /* The wordmark itself, not typeset: those offset bands are the identity. */
-  .mark { width: 520px; height: auto; display: block; filter: drop-shadow(0 0 26px rgba(0, 229, 255, 0.28)); }
+  /* The wordmark itself, not typeset: those offset bands are the identity.
+     Its letters 520px wide: logo.png is 1969 wide, the ™ after the 1871
+     columns of letters, so the ™ hangs past them and moves nothing. */
+  .mark { width: calc(520px * 1969 / 1871); height: auto; display: block; filter: drop-shadow(0 0 26px rgba(0, 229, 255, 0.28)); }
 
   /* The two lines of copy sit closer to each other than to the wordmark and
      the rule, so they read as one statement and its invitation. */

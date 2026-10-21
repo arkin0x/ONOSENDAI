@@ -39,10 +39,17 @@ export const TV_FONT = "'Monaspace Argon', ui-monospace, monospace"
 /** The logo's margins from the sides and from the top, as shares of the frame: everyone's margins. */
 export const MARGIN_X = 0.06
 export const MARGIN_Y = 0.085
-/** The logo's width, CSS px, and at most this share of the frame's; public/logo.png's proportions. */
+/** The wordmark's width, CSS px, and at most this share of the frame's. */
 const LOGO_PX = 260
 const LOGO_SHARE = 0.42
+/**
+ * public/logo.png is 1969 x 354: the wordmark's letters in its first 1871
+ * columns and the ™ after them. Widths above measure the letters, which end
+ * on the logo's right edge as everything under them does; the ™ hangs past
+ * that edge into the margin, as a hanging mark does, so it moves nothing.
+ */
 const LOGO_ASPECT = 354 / 1871
+const LOGO_FILE_W = 1969 / 1871
 
 /** How long a cut's LATER or MEANWHILE stays up, ms, after the cut's own transition. */
 export const CARD_MS = 2600
@@ -518,7 +525,7 @@ export class TvPainter {
     }
     if (a.logo) {
       ctx.globalAlpha = 0.96
-      ctx.drawImage(a.logo, W - MX - lw, MY, lw, lh)
+      ctx.drawImage(a.logo, W - MX - lw, MY, lw * LOGO_FILE_W, lh)
       ctx.globalAlpha = 1
     }
 

@@ -59,7 +59,10 @@ body {
 .brand img {
   display: block;
   width: 100%;
-  max-width: 290px;
+  /* The letters at 290px: logo.png is 1969 wide, the ™ after the wordmark's
+     1871 columns of letters. Where the column is narrower (a small phone) the
+     whole mark, ™ and all, shrinks to fit it. */
+  max-width: calc(290px * 1969 / 1871);
   margin: 0 auto;
   /* The width/height ATTRIBUTES exist to hand the browser the intrinsic
      aspect ratio before the file arrives (no layout shift). Without an

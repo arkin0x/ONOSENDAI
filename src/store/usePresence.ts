@@ -14,12 +14,19 @@
  * listing your sector and its two neighbors, returns every action landing in
  * the 27 sectors around you. One filter, reissued when you cross a sector.
  *
- * Each author's newest action in the neighborhood says where they are: the
- * position it leaves them at, which for an enter-virtual is where they
- * entered a game from (spec §8.11). Someone
- * who leaves does not announce it here (their next action lands outside the
- * filter), so people not heard from in a while are confirmed by asking the
- * relay for their newest action and dropped if it is elsewhere.
+ * Each author's newest action says where they are: the position it leaves
+ * them at, which for an enter-virtual is where they entered a game from
+ * (spec §8.11). Someone who leaves does not announce it on the
+ * neighborhood's filter: their next action lands outside it. So the people
+ * here are also watched by author (watchPeople, one live filter over all of
+ * them), which hears a hop, a sidestep or a hyperjump out the moment it is
+ * published, and someone whose newest action stands elsewhere is dropped
+ * (arkinox, 2026-10-21: "I told XOR to go to a different block location,
+ * but his avatar stays in its last local position near me"). A backfill
+ * only says what someone last did HERE, not that it is still their newest
+ * action, so everyone present after one is confirmed by one read by author
+ * (confirmPresent). The sweep still asks about anyone quiet for a while, in
+ * case a feed missed something.
  *
  * A newest action says where someone is only if their chain is valid up to
  * it. An invalid chain stands at its last valid position, frozen until a
@@ -42,7 +49,7 @@ import { PLACING_ACTIONS } from '../lib/chains'
 import { cachedVerdict, forgetNeighborChains, forgetNeighborEvents, readChain, type ChainVerdict } from '../lib/neighborChains'
 import { query, queryEach, subscribe } from '../lib/relay'
 import type { Position } from '../lib/space'
-import { useCyberspace } from './useCyberspace'
+import { useCyberspace, type SpectateState } from './useCyberspace'
 import { useChat } from './useChat'
 import { chime } from '../lib/chime'
 
@@ -213,16 +220,23 @@ export const usePresence = create<PresenceState>((set, get) => ({
     if (action.declared && !inNeighborhood(action.position, useCyberspace.getState().position)) return
     const me = useCyberspace.getState().identity.pubkey
     if (action.pubkey === me) return
+    // An action no newer than the one that took them away is not news: a
+    // read by author answers newest first, so their hyperjump out comes
+    // before the hop they made here, and that hop must not bring them back.
+    const gone = departed.get(action.pubkey)
+    if (gone !== undefined && gone >= action.createdAt) return
     const have = get().people[action.pubkey]
     if (have && have.lastActive >= action.createdAt) return
     const at = standing(action, have)
     // One rule for where anyone stands (lib/neighborChains.ts): where their
     // chain puts the action they show, and not here when that is not in the
-    // neighborhood. An action placed by itself came through the
-    // neighborhood's own filter; a place from a chain read or a freeze is
-    // checked here, as applyVerdict and the sweep check theirs.
-    if ((at.known || at.frozen) && !inNeighborhood(at.position, useCyberspace.getState().position)) {
-      if (have) get().forget(action.pubkey)
+    // neighborhood. Checked for every action, whatever feed brought it: the
+    // watch on the people here (watchPeople), the confirmation after a
+    // backfill and a spectated chain all carry actions that land elsewhere,
+    // and such an action is how someone leaves (arkinox, 2026-10-21: XOR
+    // hyperjumped away and stayed drawn where he boarded).
+    if (!inNeighborhood(at.position, useCyberspace.getState().position)) {
+      leave(action.pubkey, action.createdAt)
       return
     }
     // Someone new, after the backfill: an arrival. During the backfill every
@@ -257,6 +271,27 @@ export const usePresence = create<PresenceState>((set, get) => ({
 let stopLive: (() => void) | null = null
 let started = false
 let sweepHandle: ReturnType<typeof setInterval> | null = null
+
+/** Most departures remembered, the most recent kept. */
+export const DEPARTED_KEPT = 500
+/**
+ * Per pubkey, created_at of the newest action known to stand outside this
+ * neighborhood. Forgotten when you enter another one: there, that same
+ * action may be what puts them beside you.
+ */
+const departed = new Map<string, number>()
+
+/**
+ * `pubkey`'s action of `createdAt` stands outside the neighborhood: drop
+ * them, and remember when, so none of their older actions puts them back.
+ */
+function leave(pubkey: string, createdAt: number): void {
+  const was = departed.get(pubkey)
+  departed.delete(pubkey)
+  departed.set(pubkey, Math.max(was ?? createdAt, createdAt))
+  while (departed.size > DEPARTED_KEPT) departed.delete(departed.keys().next().value as string)
+  if (usePresence.getState().people[pubkey]) usePresence.getState().forget(pubkey)
+}
 
 /**
  * Where someone stands on their newest action, before or without a chain
@@ -314,7 +349,7 @@ export async function drainChainChecks(): Promise<void> {
 function applyVerdict(pubkey: string, v: ChainVerdict): void {
   const person = usePresence.getState().people[pubkey]
   if (!person || person.actionId !== v.actionId) return
-  if (!inNeighborhood(v.stand.position, useCyberspace.getState().position)) { usePresence.getState().forget(pubkey); return }
+  if (!inNeighborhood(v.stand.position, useCyberspace.getState().position)) { leave(pubkey, person.lastActive); return }
   usePresence.setState((s) => ({ people: { ...s.people, [pubkey]: { ...s.people[pubkey], position: v.stand.position, plane: v.stand.plane, frozen: v.frozen } } }))
 }
 
@@ -332,6 +367,7 @@ async function enter(at: Position): Promise<void> {
   if (usePresence.getState().sector === key) return
   stopLive?.()
   stopLive = null
+  departed.clear()
   // Seeded from the device, so the people last seen here are drawn before
   // the relay answers; the backfill and the live feed refresh them.
   const seeded = loadPresenceCache(useCyberspace.getState().identity.pubkey, at)
@@ -352,23 +388,93 @@ async function enter(at: Position): Promise<void> {
   } finally {
     if (usePresence.getState().sector === key) usePresence.setState({ loading: false })
   }
-  // Someone seeded from the device whose newest action is older than the
-  // backfill reached is confirmed now rather than at the next sweep, so a
-  // person who has left is not kept for minutes on the strength of a cache.
-  if (Object.keys(seeded).length > 0 && usePresence.getState().sector === key) void sweep()
+  // Everyone here now came from the device or from the backfill, and
+  // neither says their action is still their newest: someone who left
+  // since would be drawn where they last stood until the sweep reached
+  // them, minutes later, on every reload (arkinox, 2026-10-21).
+  if (usePresence.getState().sector === key) await confirmPresent()
+}
+
+/** Most events the confirmation after a backfill asks for. */
+export const CONFIRM_LIMIT = 200
+
+/**
+ * The people here by author, from `since` on: each one's own placing
+ * actions, wherever they land. One tag filter (`#A`), so the relay takes it
+ * (MAX_TAG_FILTERS).
+ */
+export function peopleFilter(pubkeys: string[], since: number): Filter {
+  return { kinds: [ACTION_KIND], authors: pubkeys, '#A': PLACING_ACTIONS, since }
+}
+
+/** Most people the watch and the confirmation name in one filter, the most recently active first. */
+export const WATCH_MAX = 200
+
+/** Who the watch covers: everyone here but you, the most recently active first, at most WATCH_MAX, sorted. */
+export function watchedPubkeys(people: Record<string, Person>, me: string): string[] {
+  return Object.values(people)
+    .filter((p) => p.pubkey !== me)
+    .sort((a, b) => b.lastActive - a.lastActive)
+    .slice(0, WATCH_MAX)
+    .map((p) => p.pubkey)
+    .sort()
+}
+
+/**
+ * Confirm everyone here in one read by author: their placing actions since
+ * the oldest newest action among them, newest first, up to CONFIRM_LIMIT.
+ * Each newer action is taken in, so someone who moved within the
+ * neighborhood moves and someone who left is dropped (ingest). Someone the
+ * read cannot speak for, because it was cut at the limit before reaching
+ * them, is asked about alone, as the sweep asks; with no relay answering,
+ * nobody is dropped and the sweep asks again later.
+ */
+export async function confirmPresent(): Promise<void> {
+  const people = usePresence.getState().people
+  const me = useCyberspace.getState().identity.pubkey
+  const pubkeys = watchedPubkeys(people, me)
+  if (pubkeys.length === 0) return
+  let since = Infinity
+  for (const pk of pubkeys) since = Math.min(since, people[pk].lastActive)
+  let answers
+  try {
+    answers = await queryEach({ ...peopleFilter(pubkeys, since), limit: CONFIRM_LIMIT })
+  } catch {
+    return
+  }
+  const answered = answers.filter((a) => a.outcome === 'answered')
+  if (answered.length === 0) return
+  const events = answered.flatMap((a) => a.events)
+  const now = Math.floor(Date.now() / 1000)
+  for (const ev of events) usePresence.getState().ingest(ev, now)
+  // A relay that answered with fewer than the limit gave every one of their
+  // actions since `since`: whoever it did not name has done nothing since.
+  // One cut at the limit holds only the newest, so the people absent from
+  // it are asked about one at a time.
+  if (answered.some((a) => a.events.length < CONFIRM_LIMIT)) return
+  const named = new Set(events.map((e) => e.pubkey))
+  const left = pubkeys.filter((pk) => !named.has(pk)).map((pk) => usePresence.getState().people[pk]).filter((p): p is Person => !!p)
+  await confirmEach(left)
 }
 
 /**
  * Confirm the quiet ones. A person's newest action in the neighborhood is
  * where they are only until they act somewhere else, and that action never
- * arrives here. Ask the relay for their newest action of any kind; keep them
- * if it is still in the neighborhood, at its position, or drop them.
+ * arrives on the neighborhood's filter; the watch by author hears it, and
+ * this is for anything a feed missed. Ask the relay for their newest action
+ * of any kind; keep them if it is still in the neighborhood, at its
+ * position, or drop them.
  */
 export async function sweep(): Promise<void> {
   const now = Math.floor(Date.now() / 1000)
+  await confirmEach(Object.values(usePresence.getState().people).filter((p) => now - p.checkedAt >= CONFIRM_AFTER_S))
+}
+
+/** Ask about each of `persons` alone, by their newest placing action. */
+async function confirmEach(persons: Person[]): Promise<void> {
+  const now = Math.floor(Date.now() / 1000)
   const here = useCyberspace.getState().position
-  const quiet = Object.values(usePresence.getState().people).filter((p) => now - p.checkedAt >= CONFIRM_AFTER_S)
-  for (const person of quiet) {
+  for (const person of persons) {
     try {
       // Only an answer can say someone has gone (arkinox, 2026-10-12: XOR
       // vanished after the app came back from the background and returned
@@ -384,7 +490,7 @@ export async function sweep(): Promise<void> {
       // Frozen on a broken chain: still there until a spawn says otherwise,
       // and the chain is read again at the new action all the same.
       const at = standing(action, person)
-      if (!inNeighborhood(at.position, here)) { usePresence.getState().forget(person.pubkey); continue }
+      if (!inNeighborhood(at.position, here)) { leave(person.pubkey, action.createdAt); continue }
       usePresence.setState((s) => ({ people: { ...s.people, [person.pubkey]: {
         ...s.people[person.pubkey], position: at.position, plane: at.plane, lastActive: action.createdAt, type: action.type, checkedAt: now, actionId: action.id, frozen: at.frozen,
       } } }))
@@ -395,18 +501,70 @@ export async function sweep(): Promise<void> {
   }
 }
 
+/** How long after the set of people changes the watch on them is reissued. */
+export const WATCH_AFTER_MS = 250
+/** Seconds back a reissued watch starts from, so nothing falls between the old one and the new. */
+const WATCH_OVERLAP_S = 60
+/** The watch on the people here: its closer, and the pubkeys it names, joined. */
+let watch: { close: () => void; key: string } | null = null
+let watchHandle: ReturnType<typeof setTimeout> | null = null
+
+/**
+ * Watch the people here by author, one live filter over all of them
+ * (peopleFilter), so whatever they do next arrives wherever it lands: a
+ * move within the neighborhood moves them, one out of it drops them
+ * (ingest). Reissued only when the set of people changes, the new one
+ * opened before the old one closes.
+ */
+function watchPeople(): void {
+  const pubkeys = watchedPubkeys(usePresence.getState().people, useCyberspace.getState().identity.pubkey)
+  const key = pubkeys.join(',')
+  if (key === (watch?.key ?? '')) return
+  const old = watch
+  watch = null
+  if (pubkeys.length > 0) {
+    const since = Math.floor(Date.now() / 1000) - WATCH_OVERLAP_S
+    const close = subscribe(peopleFilter(pubkeys, since), (ev) => {
+      if (watch?.key !== key) return
+      usePresence.getState().ingest(ev)
+    })
+    watch = { close, key }
+  }
+  old?.close()
+}
+
+/**
+ * The newest action of the avatar you spectate, taken in as presence's own.
+ * Spectating reads their chain by author, so it knows where they are even
+ * when they left the neighborhood before the watch began; ending the
+ * spectation must not draw them back where presence last saw them
+ * (arkinox, 2026-10-21).
+ */
+function takeSpectated(sp: SpectateState): void {
+  const head = sp.actions[sp.actions.length - 1]
+  const ev = head ? sp.events.find((e) => e.id === head.id) : undefined
+  if (ev) usePresence.getState().ingest(ev)
+}
+
+let stopFollowing: (() => void) | null = null
+
 /** Idempotent. Follows your avatar from sector to sector for the life of the page. */
 export function startPresence(): void {
   if (started) return
   started = true
   void enter(useCyberspace.getState().position)
-  useCyberspace.subscribe((s, prev) => {
+  stopFollowing = useCyberspace.subscribe((s, prev) => {
     if (s.position !== prev.position) void enter(s.position)
+    if (s.spectate && s.spectate.actions !== prev.spectate?.actions) takeSpectated(s.spectate)
   })
   sweepHandle = setInterval(() => { void sweep() }, SWEEP_EVERY_MS)
   // Kept on the device a moment after each change, not on every ingest.
   stopSaving = usePresence.subscribe((st, prev) => {
-    if (st.people === prev.people || saveHandle !== null) return
+    if (st.people === prev.people) return
+    if (watchHandle === null) {
+      watchHandle = setTimeout(() => { watchHandle = null; watchPeople() }, WATCH_AFTER_MS)
+    }
+    if (saveHandle !== null) return
     saveHandle = setTimeout(() => {
       saveHandle = null
       savePresenceCache(useCyberspace.getState().identity.pubkey, usePresence.getState().people)
@@ -426,9 +584,15 @@ export function stopPresence(): void {
   if (sweepHandle) { clearInterval(sweepHandle); sweepHandle = null }
   stopSaving?.()
   stopSaving = null
+  stopFollowing?.()
+  stopFollowing = null
   if (saveHandle) { clearTimeout(saveHandle); saveHandle = null }
+  if (watchHandle) { clearTimeout(watchHandle); watchHandle = null }
+  watch?.close()
+  watch = null
   started = false
   chainChecks.clear()
+  departed.clear()
   forgetNeighborChains()
   usePresence.setState({ people: {}, sector: null, loading: false, arrivals: 0, lastArrivalAt: null })
 }

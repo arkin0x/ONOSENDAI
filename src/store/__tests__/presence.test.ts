@@ -62,7 +62,8 @@ describe('the neighborhood', () => {
 })
 
 describe('taking people in', () => {
-  beforeEach(() => { usePresence.setState({ people: {}, sector: null, loading: false }) })
+  // You stand where they act: an action outside your neighborhood places nobody.
+  beforeEach(() => { usePresence.setState({ people: {}, sector: null, loading: false }); useCyberspace.setState({ position: here }) })
 
   it('keeps the newest action per author', () => {
     const sk = generateSecretKey()
@@ -98,7 +99,7 @@ describe('taking people in', () => {
 })
 
 describe('arrivals', () => {
-  beforeEach(() => { usePresence.setState({ people: {}, sector: null, loading: false, arrivals: 0, lastArrivalAt: null }) })
+  beforeEach(() => { usePresence.setState({ people: {}, sector: null, loading: false, arrivals: 0, lastArrivalAt: null }); useCyberspace.setState({ position: here }) })
 
   it('someone first seen after the backfill is an arrival', () => {
     usePresence.getState().ingest(spawnAt(here, 100))

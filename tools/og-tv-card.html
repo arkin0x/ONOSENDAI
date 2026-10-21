@@ -4,30 +4,59 @@
 
   Cyberspace TV's own card (arkinox, 2026-10-18: "a cool opengraph card just
   for the /tv route? use the same crt effects, the onosendai logo, and some
-  lime green grid lines at a steep angle"). The flat frame is drawn on a 2D
-  canvas: a lime grid floor falling away steeply under a tilted camera, the
-  wordmark, CYBERSPACE TV, and the broadcast's furniture. Then it goes
-  through the tube: the same shader Cyberspace TV draws with
-  (src/scene/TvScreenEffect.tsx), so the card looks like the thing it links
-  to: bent glass in a black surround, colour fringing growing to the edges,
-  scanlines, vignette and grain.
+  lime green grid lines at a steep angle"), redrawn in the Cyberspace TV
+  logo's style (arkinox, 2026-10-21: "redesign the OG card for /tv with the
+  grid style from the cyberspace tv logo ... I like these bright grids better
+  than the dark green grid").
+
+  The flat frame is drawn on a 2D canvas: two bright grid planes, a floor and
+  a ceiling, meeting at a glowing purple horizon, bloomed; the ONOSENDAI
+  wordmark; CYBERSPACE with サイバースペース under it and a boxed TV, white
+  over the logo's stacked plum, blue and teal layers; the tagline and the
+  broadcast's furniture. Then it goes through the tube: the same shader
+  Cyberspace TV draws with (src/scene/TvScreenEffect.tsx), so the card looks
+  like the thing it links to: bent glass in a black surround, colour fringing
+  growing to the edges, scanlines, vignette and grain.
 
   Rendered at exactly 1200x630, as og-card.html is:
 
     node -e "const{chromium}=require('playwright');(async()=>{
       const b=await chromium.launch({args:['--allow-file-access-from-files','--use-gl=angle','--use-angle=swiftshader','--enable-unsafe-swiftshader']});
       const p=await b.newPage({viewport:{width:1200,height:630}});
+      await p.route('**/*',(r)=>r.request().url().startsWith('file://')?r.continue():r.abort());
       await p.goto('file://'+process.cwd()+'/tools/og-tv-card.html');
       await p.waitForFunction(()=>window.__done===true);
-      await p.screenshot({path:'public/og-tv.jpg',type:'jpeg',quality:82});await b.close();})()"
+      await p.screenshot({path:'public/og-tv.jpg',type:'jpeg',quality:85});await b.close();})()"
 
-  The typeface is the TV's own file from public/fonts (Monaspace Argon).
+  Add ?flat=1 to see the frame before the tube bends it.
+
+  Type: Goldman Bold for the title, as the logo is set (tools/fonts, OFL);
+  サイバースペース in Noto Sans JP Regular, cut down to its seven glyphs
+  (tools/fonts/NotoSansJP-Regular-kana.woff2, 2 KB, OFL; the full font is
+  9.6 MB); the furniture in the TV's own Monaspace Argon from public/fonts.
   The grain is seeded, so the same file always renders the same card.
+
+  Colours, as the logo's (youtube-logo/logo.html):
+    the logo's own layers (public/logo.png): plum #78004e, blue #0062cd, teal #06a4a4
+    lifted to glow on black: purple #8a5cff, blue #2f7dff, teal #00e5ff
+    type: #f2fbff; night: #02040a to #06101c
 -->
 <html lang="en">
 <head>
 <meta charset="utf-8">
 <style>
+  @font-face {
+    font-family: 'Goldman';
+    src: url('fonts/Goldman-Bold.ttf') format('truetype');
+    font-weight: 700;
+    font-display: block;
+  }
+  @font-face {
+    font-family: 'NotoJP';
+    src: url('fonts/NotoSansJP-Regular-kana.woff2') format('woff2');
+    font-weight: 400;
+    font-display: block;
+  }
   @font-face {
     font-family: 'Monaspace Argon';
     src: url('../public/fonts/MonaspaceArgon-Regular.woff2') format('woff2');
@@ -50,131 +79,315 @@
 <script>
 const W = 1200
 const H = 630
-const LIME = '#a8ff3e'
-const FONT = "'Monaspace Argon', ui-monospace, monospace"
+const TITLE = "'Goldman'"
+const MONO = "'Monaspace Argon', ui-monospace, monospace"
+const FG = '#f2fbff'
+const TEAL = '#00e5ff'
+const BLUE = '#2f7dff'
+const PURPLE = '#8a5cff'
+const LOGO = { plum: '#78004e', blue: '#0062cd', teal: '#06a4a4' }
+const FLAT = new URLSearchParams(location.search).get('flat') === '1'
 
-/** The flat frame: what the tube shows before it bends it. */
-function flat(logo) {
+/** The horizon's height: the planes meet behind the title. */
+const HY = 300
+
+const hex = (h) => [1, 3, 5].map((i) => parseInt(h.slice(i, i + 2), 16))
+/** A colour along stops [[t, '#hex'], ...], t from 0 to 1. */
+function ramp(stops, t) {
+  t = Math.min(1, Math.max(0, t))
+  for (let i = 1; i < stops.length; i++) {
+    if (t <= stops[i][0]) {
+      const [t0, c0] = stops[i - 1]
+      const [t1, c1] = stops[i]
+      const k = (t - t0) / (t1 - t0)
+      const a = hex(c0), b = hex(c1)
+      return `rgb(${a.map((v, j) => Math.round(v + (b[j] - v) * k)).join(',')})`
+    }
+  }
+  return stops[stops.length - 1][1]
+}
+
+function canvas() {
   const c = document.createElement('canvas')
   c.width = W
   c.height = H
+  return c
+}
+
+/**
+ * One grid plane, seen from a camera at `height` above it, pitched by
+ * `pitch` radians toward it and rolled by `roll`. `side` 1 is a floor, -1 a
+ * ceiling (the same plane mirrored about the horizon). Colours run along the
+ * depth through `stops`: near to far.
+ */
+function plane(g, { pitch, roll, height, f, cx, cy, far, stops, side = 1, major = 4, width = 1.25 }) {
+  const project = (x, z) => {
+    const y = -height
+    const yc = y * Math.cos(pitch) + z * Math.sin(pitch)
+    const zc = -y * Math.sin(pitch) + z * Math.cos(pitch)
+    if (zc <= 0.05) return null
+    const sx = (x / zc) * f
+    const sy = side * (-yc / zc) * f
+    return [cx + sx * Math.cos(roll) - sy * Math.sin(roll), cy + sx * Math.sin(roll) + sy * Math.cos(roll)]
+  }
+  const seg = (a, b, colour, alpha, w) => {
+    if (!a || !b) return
+    g.globalAlpha = alpha
+    g.strokeStyle = colour
+    g.lineWidth = w
+    g.beginPath()
+    g.moveTo(a[0], a[1])
+    g.lineTo(b[0], b[1])
+    g.stroke()
+  }
+  // Smoothly to nothing at the far edge: no hard line where the grid stops, and
+  // the dense far lines thin out before they turn to moire.
+  const fade = (z) => Math.pow(Math.min(1, Math.max(0, 1 - z / far)), 1.4)
+  g.lineCap = 'round'
+  // Along the plane, toward the horizon, in short pieces so the colour runs.
+  for (let x = -64; x <= 64; x += 1) {
+    const isMajor = x % major === 0
+    for (let z = 0.2; z < far; z += 0.4) {
+      seg(project(x, z), project(x, z + 0.4), ramp(stops, z / far), fade(z) * (isMajor ? 1 : 0.75), (isMajor ? 4.2 : 2.4) * width)
+    }
+  }
+  // Across it.
+  for (let z = 0.5; z < far; z += 1) {
+    const isMajor = Math.round(z - 0.5) % major === 0
+    for (let x = -64; x < 64; x += 2) {
+      seg(project(x, z), project(x + 2, z), ramp(stops, z / far), fade(z) * (isMajor ? 1 : 0.75), (isMajor ? 4.2 : 2.4) * width)
+    }
+  }
+  g.globalAlpha = 1
+}
+
+/** Lines drawn on `lines`, bloomed onto `g`: a wide soft glow, a tight one, then the lines. */
+function bloom(g, lines) {
+  g.save()
+  g.globalCompositeOperation = 'lighter'
+  g.filter = 'blur(22px)'
+  g.drawImage(lines, 0, 0)
+  g.filter = 'blur(6px)'
+  g.drawImage(lines, 0, 0)
+  g.filter = 'none'
+  g.drawImage(lines, 0, 0)
+  g.restore()
+}
+
+/** A copy of the white mask `m`, tinted. */
+function tint(m, colour) {
+  const c = canvas()
   const g = c.getContext('2d')
-  // Night, a little blue toward the horizon.
+  g.drawImage(m, 0, 0)
+  g.globalCompositeOperation = 'source-in'
+  g.fillStyle = colour
+  g.fillRect(0, 0, W, H)
+  return c
+}
+
+/**
+ * The title as a white mask, on one line for the wide frame: CYBERSPACE,
+ * room under it for サイバースペース, and a boxed TV standing a little
+ * taller than the two together, the logo's hero. Returns the mask and where CYBERSPACE sits, which the
+ * katakana and the layers' step are measured from.
+ */
+function words() {
+  const c = canvas()
+  const g = c.getContext('2d')
+  g.fillStyle = '#fff'
+  g.strokeStyle = '#fff'
+  g.textBaseline = 'alphabetic'
+  const size = 94
+  g.font = `700 ${size}px ${TITLE}`
+  const cm = g.measureText('CYBERSPACE')
+  const cw = cm.width
+  const cap = cm.actualBoundingBoxAscent
+  const step = Math.max(4, cap * 0.105)
+  // The katakana's line: its tops ride over the bottom of the layers.
+  const kanaSize = size * 0.46
+  const kanaBottom = cap + 1.6 * step + kanaSize * 0.86
+  // The box overhangs CYBERSPACE's cap and the katakana's foot by `over`;
+  // TV, its stroke and its padding in the logo's proportions (270, 20, 40, 30, 26).
+  const over = 16
+  const boxH = kanaBottom + over * 2
+  const tvSize = boxH / 1.016
+  g.font = `700 ${tvSize}px ${TITLE}`
+  const tm = g.measureText('TV')
+  const lw = tvSize * 20 / 270
+  const padX = tvSize * 40 / 270
+  const padY = (boxH - lw - tm.actualBoundingBoxAscent) / 2
+  const boxW = tm.width + padX * 2
+  const gap = size * 0.4
+  const total = cw + gap + boxW + lw
+  const left = (W - total) / 2
+  const top = HY - kanaBottom / 2 - 6
+  const base1 = top + cap
+  g.textAlign = 'left'
+  g.font = `700 ${size}px ${TITLE}`
+  g.fillText('CYBERSPACE', left, base1)
+  const bx = left + cw + gap + lw / 2
+  const by = top - over + lw / 2
+  g.font = `700 ${tvSize}px ${TITLE}`
+  g.textAlign = 'center'
+  g.fillText('TV', bx + boxW / 2, by + lw / 2 + padY + tm.actualBoundingBoxAscent)
+  g.lineWidth = lw
+  g.beginPath()
+  g.roundRect(bx, by, boxW, boxH - lw, tvSize * 26 / 270)
+  g.stroke()
+  return { mask: c, cap, step, left, right: left + cw, base1, kanaSize, bottom: top + kanaBottom + over }
+}
+
+/**
+ * The words over the grid, as the logo sets them: a dark halo so the grid
+ * reads round them and not through them, the stacked layers under them
+ * (plum, blue, teal, as public/logo.png steps them down), then the white
+ * face with a little teal light.
+ */
+function type(g, { mask, step }, layers) {
+  g.save()
+  g.filter = 'blur(26px)'
+  g.globalAlpha = 0.95
+  const dark = tint(mask, '#010208')
+  for (let i = 0; i < 3; i++) g.drawImage(dark, 0, step * 2)
+  g.filter = 'blur(8px)'
+  g.drawImage(dark, 0, step * 2)
+  g.restore()
+  for (let i = layers.length; i >= 1; i--) {
+    g.drawImage(tint(mask, layers[i - 1]), 0, step * i)
+  }
+  g.save()
+  g.filter = 'blur(10px)'
+  g.globalAlpha = 0.55
+  g.drawImage(tint(mask, TEAL), 0, 0)
+  g.restore()
+  g.drawImage(tint(mask, FG), 0, 0)
+}
+
+/**
+ * サイバースペース under CYBERSPACE as the ONOSENDAI logo sets オノセンダイ
+ * under its name: plain white, spread so the first glyph starts at the
+ * word's left edge and the last ends at its right, its tops riding over the
+ * bottom of the stacked layers. A soft dark shadow only so it reads over
+ * the grid.
+ */
+function katakana(g, { left, right, base1, step, kanaSize }) {
+  const text = Array.from('サイバースペース')
+  g.save()
+  g.font = `400 ${kanaSize}px 'NotoJP'`
+  g.textBaseline = 'alphabetic'
+  g.textAlign = 'left'
+  const widths = text.map((t) => g.measureText(t).width)
+  const gap = (right - left - widths.reduce((a, b) => a + b, 0)) / (text.length - 1)
+  const base = base1 + 1.6 * step + g.measureText('サ').actualBoundingBoxAscent
+  g.shadowColor = 'rgba(1, 2, 8, 0.9)'
+  g.shadowBlur = 10
+  g.fillStyle = '#ffffff'
+  let x = left
+  text.forEach((t, i) => { g.fillText(t, x, base); x += widths[i] + gap })
+  g.restore()
+}
+
+/** The flat frame: what the tube shows before it bends it. */
+function flat(logo) {
+  const c = canvas()
+  const g = c.getContext('2d')
+  // Night, and the horizon's purple glow, wider than it is tall.
   const sky = g.createLinearGradient(0, 0, 0, H)
   sky.addColorStop(0, '#02040a')
   sky.addColorStop(0.55, '#06101c')
   sky.addColorStop(1, '#010205')
   g.fillStyle = sky
   g.fillRect(0, 0, W, H)
+  g.save()
+  g.translate(W / 2, HY)
+  g.scale(1, 0.55)
+  const glow = g.createRadialGradient(0, 0, 0, 0, 0, W * 0.6)
+  glow.addColorStop(0, 'rgba(138, 92, 255, 0.4)')
+  glow.addColorStop(1, 'rgba(0, 0, 0, 0)')
+  g.fillStyle = glow
+  g.fillRect(-W, -H * 2, W * 2, H * 4)
+  g.restore()
 
-  // The grid floor, seen from above at a steep angle, the camera rolled:
-  // lines run from under the viewer to a horizon high in the frame.
-  const pitch = 0.62 // radians down from level
-  const roll = -0.21
-  const height = 2.2
-  const f = 760
-  const cx = W * 0.5
-  const cy = H * 0.5
-  const project = (x, z) => {
-    // Camera at (0, height, 0), looking along +z, pitched down, rolled.
-    const y = -height
-    const yc = y * Math.cos(pitch) + z * Math.sin(pitch)
-    const zc = -y * Math.sin(pitch) + z * Math.cos(pitch)
-    if (zc <= 0.05) return null
-    const sx = (x / zc) * f
-    const sy = (-yc / zc) * f
-    return [cx + sx * Math.cos(roll) - sy * Math.sin(roll), cy + sx * Math.sin(roll) + sy * Math.cos(roll), zc]
-  }
-  const line = (a, b, alpha, width) => {
-    if (!a || !b) return
-    g.globalAlpha = alpha
-    g.lineWidth = width
-    g.beginPath()
-    g.moveTo(a[0], a[1])
-    g.lineTo(b[0], b[1])
-    g.stroke()
-  }
-  g.strokeStyle = LIME
-  g.shadowColor = LIME
-  g.shadowBlur = 16
-  const far = 42
-  const step = 1
-  // Along the floor, toward the horizon, faded by distance in short pieces.
-  for (let x = -40; x <= 40; x += step) {
-    for (let z = 0.4; z < far; z += 0.5) {
-      const a = project(x, z)
-      const b = project(x, z + 0.5)
-      if (!a || !b) continue
-      line(a, b, Math.min(1, Math.max(0, 1.15 - z / far)) * (x % 4 === 0 ? 1 : 0.7), x % 4 === 0 ? 3.2 : 1.8)
-    }
-  }
-  // Across it.
-  for (let z = 0.5; z < far; z += step) {
-    const fade = Math.min(1, Math.max(0, 1.15 - z / far))
-    for (let x = -40; x < 40; x += 2) line(project(x, z), project(x + 2, z), fade * (z % 4 < 1 ? 1 : 0.7), z % 4 < 1 ? 3.2 : 1.8)
-  }
-  g.globalAlpha = 1
-  g.shadowBlur = 0
+  // The tunnel: a floor and a ceiling, teal near and purple far, rolled a little.
+  const lines = canvas()
+  const lg = lines.getContext('2d')
+  const common = { pitch: 0.0, roll: -0.09, height: 1.6, f: 470, cx: W / 2, cy: HY, far: 22 }
+  plane(lg, { ...common, side: 1, stops: [[0, TEAL], [0.5, BLUE], [1, PURPLE]] })
+  plane(lg, { ...common, side: -1, stops: [[0, PURPLE], [0.5, BLUE], [1, PURPLE]] })
+  bloom(g, lines)
 
-  // A dark band behind the words, so the grid reads under them and not through them.
-  const band = g.createLinearGradient(0, H * 0.18, 0, H * 0.7)
-  band.addColorStop(0, 'rgba(1, 3, 8, 0)')
-  band.addColorStop(0.35, 'rgba(1, 3, 8, 0.72)')
-  band.addColorStop(0.75, 'rgba(1, 3, 8, 0.72)')
-  band.addColorStop(1, 'rgba(1, 3, 8, 0)')
-  g.fillStyle = band
-  g.fillRect(0, H * 0.18, W, H * 0.52)
-
-  // The wordmark, then the channel.
-  const lw = 560
+  // The ONOSENDAI wordmark over a soft dark patch, so the ceiling reads round it.
+  const lw = 404
   const lh = lw * 354 / 1871
-  g.drawImage(logo, (W - lw) / 2, H * 0.24, lw, lh)
+  const ly = 56
+  g.save()
+  g.translate(W / 2, ly + lh / 2)
+  g.scale(1, 0.4)
+  const shade = g.createRadialGradient(0, 0, 0, 0, 0, lw * 0.75)
+  shade.addColorStop(0, 'rgba(1, 2, 8, 0.85)')
+  shade.addColorStop(1, 'rgba(1, 2, 8, 0)')
+  g.fillStyle = shade
+  g.fillRect(-W, -H * 3, W * 2, H * 6)
+  g.restore()
+  g.drawImage(logo, (W - lw) / 2, ly, lw, lh)
+
+  // The channel.
+  const w = words()
+  type(g, w, [LOGO.plum, LOGO.blue, LOGO.teal])
+  katakana(g, w)
+
+  // arkinox, 2026-10-19: "Always On. Everywhere. ™". Over a soft dark
+  // patch, as the title's halo, so the floor reads round it.
+  const ty = w.bottom + 3 * w.step + 58
+  g.save()
   g.textAlign = 'center'
-  g.fillStyle = '#f2fbff'
-  g.shadowColor = LIME
-  g.shadowBlur = 18
-  g.font = `700 66px ${FONT}`
-  g.fillText('CYBERSPACE', W / 2 - 62, H * 0.6)
-  g.font = `700 66px ${FONT}`
-  const tvX = W / 2 + 248
-  g.fillText('TV', tvX, H * 0.6)
-  g.shadowBlur = 0
-  g.strokeStyle = '#f2fbff'
-  g.lineWidth = 4
-  const tw = g.measureText('TV').width
-  g.beginPath()
-  g.roundRect(tvX - tw / 2 - 14, H * 0.6 - 58, tw + 28, 74, 10)
-  g.stroke()
-  g.font = `400 20px ${FONT}`
-  g.fillStyle = LIME
-  // arkinox, 2026-10-19: "Always On. Everywhere. ™".
-  g.fillText('Always On. Everywhere. \u2122', W / 2, H * 0.6 + 52)
+  g.font = `700 30px ${MONO}`
+  const tw = g.measureText('Always On. Everywhere. ™').width
+  g.save()
+  g.translate(W / 2, ty - 10)
+  g.scale(1, 0.16)
+  const patch = g.createRadialGradient(0, 0, 0, 0, 0, tw * 0.62)
+  patch.addColorStop(0, 'rgba(1, 2, 8, 0.92)')
+  patch.addColorStop(0.7, 'rgba(1, 2, 8, 0.75)')
+  patch.addColorStop(1, 'rgba(1, 2, 8, 0)')
+  g.fillStyle = patch
+  g.fillRect(-W, -H * 6, W * 2, H * 12)
+  g.restore()
+  g.shadowColor = TEAL
+  g.shadowBlur = 12
+  g.fillStyle = TEAL
+  g.fillText('Always On. Everywhere. ™', W / 2, ty)
+  g.restore()
 
   // The furniture: the tape's clock, top right; a marquee along the bottom.
   g.textAlign = 'right'
-  g.fillStyle = '#f2fbff'
-  g.font = `700 15px ${FONT}`
+  g.fillStyle = FG
+  g.shadowColor = 'rgba(1, 2, 8, 0.9)'
+  g.shadowBlur = 8
+  g.font = `700 15px ${MONO}`
   g.fillText('▶ PLAY', W - 96, 84)
-  g.font = `700 20px ${FONT}`
+  g.font = `700 20px ${MONO}`
   g.fillText('AUG 23 2026', W - 96, 110)
   g.fillText('03:26:47', W - 96, 134)
+  g.shadowBlur = 0
   const my = H - 92
-  g.fillStyle = 'rgba(0, 0, 0, 0.62)'
+  g.fillStyle = 'rgba(1, 2, 8, 0.78)'
   g.fillRect(84, my, W - 168, 30)
-  g.fillStyle = 'rgba(168, 255, 62, 0.5)'
+  g.fillStyle = 'rgba(0, 229, 255, 0.6)'
   g.fillRect(84, my, W - 168, 1.5)
+  g.fillStyle = 'rgba(138, 92, 255, 0.7)'
   g.fillRect(84, my + 28.5, W - 168, 1.5)
   g.textAlign = 'left'
-  g.font = `700 14px ${FONT}`
-  g.fillStyle = '#f2fbff'
+  g.font = `700 14px ${MONO}`
+  g.fillStyle = FG
   g.fillText('CYBERSPACE', 96, my + 20)
-  g.strokeStyle = '#f2fbff'
+  g.strokeStyle = FG
   g.lineWidth = 1.5
   g.beginPath()
   g.roundRect(196, my + 6, 30, 18, 3)
   g.stroke()
   g.fillText('TV', 201, my + 20)
-  g.font = `400 14px ${FONT}`
+  g.font = `400 14px ${MONO}`
   g.fillText('NOW AVAILABLE   ◆   WATCH ANY MOMENT FROM AUG 23   ◆   ONOSENDAI.TECH/TV   ◆   NEW ARRIVALS', 244, my + 20)
   return c
 }
@@ -245,12 +458,22 @@ function tube(frame) {
 }
 
 ;(async () => {
-  await document.fonts.load(`700 66px ${FONT}`)
-  await document.fonts.load(`400 20px ${FONT}`)
+  // A silent fallback would change every width here: fail instead.
+  const need = [[`700 100px ${TITLE}`, 'CYBERSPACE TV'], [`400 40px 'NotoJP'`, 'サイバースペース'], [`700 26px ${MONO}`, 'Always'], [`400 14px ${MONO}`, 'NOW']]
+  for (const [font, text] of need) {
+    await document.fonts.load(font, text)
+    if (!document.fonts.check(font, text)) throw new Error(`${font} did not load`)
+  }
   const logo = new Image()
   logo.src = '../public/logo.png'
   await logo.decode()
-  tube(flat(logo))
+  const frame = flat(logo)
+  if (FLAT) {
+    const out = document.getElementById('tube')
+    out.getContext('2d').drawImage(frame, 0, 0)
+  } else {
+    tube(frame)
+  }
   window.__done = true
 })()
 </script>

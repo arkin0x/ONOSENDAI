@@ -22,7 +22,7 @@
  * look at dataspace, as with every hidden item.
  */
 
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useMemo, useRef } from 'react'
 import { useFrame } from '@react-three/fiber'
 import { Billboard } from '@react-three/drei'
 import { AdditiveBlending, BufferGeometry, CanvasTexture, Float32BufferAttribute, Shape, ShapeGeometry, type Group, type Mesh, type MeshBasicMaterial, type PerspectiveCamera } from 'three'
@@ -32,6 +32,7 @@ import { alignedOrigin, useCyberspace } from '../store/useCyberspace'
 import { useStarred } from '../store/useStarred'
 import { WorldLabel } from './WorldLabel'
 import { TapTarget } from './TapTarget'
+import { useReducedMotion } from '../hooks/useReducedMotion'
 
 /** The reach the hidden messages are drawn to, in cells. The pin reads it
  * to know whether a star stands under it (EarthPin.tsx starNamesPin). */
@@ -96,19 +97,6 @@ function sharedGeometry(): NonNullable<typeof shared> {
   } catch { /* no canvas: the star goes without its glow */ }
   shared = { fill: new ShapeGeometry(shape), edge, glow }
   return shared
-}
-
-/** Whether the person asked for less motion, kept current. */
-function useReducedMotion(): boolean {
-  const query = useMemo(() => { try { return window.matchMedia('(prefers-reduced-motion: reduce)') } catch { return null } }, [])
-  const [reduced, setReduced] = useState(() => query?.matches ?? false)
-  useEffect(() => {
-    if (!query) return
-    const on = (): void => setReduced(query.matches)
-    query.addEventListener?.('change', on)
-    return () => query.removeEventListener?.('change', on)
-  }, [query])
-  return reduced
 }
 
 function phaseOf(key: string): number {

@@ -36,9 +36,13 @@ import { alignedOrigin, useCyberspace } from '../store/useCyberspace'
 import { foundAsOf, useTv } from '../store/useTv'
 import { useProfile } from '../hooks/useProfile'
 import { PlacedShard, drawableShards } from './WorldShards'
-import { ItemMark, itemMarkText } from './WorldMessages'
+import { ItemMark, itemMarkText, type ItemWears } from './WorldMessages'
+import { regionBox, type Box } from '../lib/clip'
+import { useItemModel } from '../hooks/useItemModel'
 
 const REACH = GRID_RADIUS * 8
+/** No motion, one array (WorldMessages NO_MOTION). */
+const NO_MOTION: ItemWears['animation'] = []
 /** A find at rest: this much of its own brightness, below the avatars'. */
 export const REST = 0.6
 
@@ -227,13 +231,17 @@ function coverage(d: Drawn, camera: PerspectiveCamera): number {
   return d.sphere.radius / (dist * Math.tan((camera.fov * Math.PI) / 360))
 }
 
-/** A key or a chest TV opened: its mark, named as TV names people. */
-function TvMark({ text, author, at, register }: { text: string; author: string; at: [number, number, number]; register: (g: Group | null) => void }): JSX.Element {
+/** A key or a chest TV opened: its mark, named as TV names people. A key that wears a SNO is drawn as it, as the world draws it (ItemModel). */
+function TvMark({ id, text, author, at, wears, region, axes, register }: { id: string; text: string; author: string; at: [number, number, number]; wears?: ItemWears; region: Box | null; axes: ViewAxes; register: (key: string, mark: boolean) => (g: Group | null) => void }): JSX.Element {
   const profile = useProfile(author)
+  // A key drawn as its model is as large as the model, not a mark of fixed
+  // size: it is measured as a shard is, for the fade and the dim (review of
+  // #439). The same fetch ItemMark draws from (useItemModel caches it).
+  const model = useItemModel(wears?.model)
   return (
-    <group ref={register}>
+    <group ref={register(id, !model)}>
       <group position={at} />
-      <ItemMark text={text} sub={tvName(author, profile?.name)} at={at} />
+      <ItemMark id={id} text={text} sub={tvName(author, profile?.name)} at={at} wears={wears} region={region} axes={axes} />
     </group>
   )
 }
@@ -260,20 +268,29 @@ export function TvFinds({ axes }: { axes: ViewAxes }): JSX.Element | null {
     const origin = alignedOrigin(anchor, scaleExp)
     return shown
       .filter(({ item: h }) => (h.type === 'key' || h.type === 'chest') && h.plane === plane)
-      .map(({ item: h }) => ({ key: h.eventId, text: itemMarkText({ type: h.type, keyItem: h.key, chest: h.chest }), author: h.author, centre: itemCentre(h.at, origin, scaleExp, axes) }))
+      .map(({ item: h }) => ({
+        key: h.eventId,
+        text: itemMarkText({ type: h.type, keyItem: h.key, chest: h.chest }),
+        author: h.author,
+        centre: itemCentre(h.at, origin, scaleExp, axes),
+        wears: h.type === 'key' && h.key?.model ? { model: h.key.model, animation: h.key.animation ?? NO_MOTION } : undefined,
+        region: h.type === 'key' && h.key?.model ? regionBox(h.at, h.height, 0, axes) : null,
+      }))
       .filter((m) => Math.hypot(...m.centre) <= REACH)
   }, [shown, anchor, plane, scaleExp, axes])
 
   const drawn = useRef(new Map<string, Drawn>())
   const registers = useRef(new Map<string, (g: Group | null) => void>())
   const register = useCallback((key: string, mark: boolean) => {
-    let fn = registers.current.get(key)
+    // One per key and kind, so a key whose model arrives registers again, measured as a shard.
+    const slot = `${key}|${mark ? 'mark' : 'drawn'}`
+    let fn = registers.current.get(slot)
     if (!fn) {
       fn = (g: Group | null) => {
         if (g) drawn.current.set(key, { group: g, level: REST, mark, rest: REST, sphere: null, measured: -Infinity })
         else drawn.current.delete(key)
       }
-      registers.current.set(key, fn)
+      registers.current.set(slot, fn)
     }
     return fn
   }, [])
@@ -298,7 +315,7 @@ export function TvFinds({ axes }: { axes: ViewAxes }): JSX.Element | null {
   return (
     <>
       {shards.map((w) => <PlacedShard key={w.key} w={w} birth={found[w.key]?.birth} tappable={false} drawnRef={register(w.key, false)} />)}
-      {marks.map((m) => <TvMark key={m.key} text={m.text} author={m.author} at={m.centre} register={register(m.key, true)} />)}
+      {marks.map((m) => <TvMark key={m.key} id={m.key} text={m.text} author={m.author} at={m.centre} wears={m.wears} region={m.region} axes={axes} register={register} />)}
     </>
   )
 }

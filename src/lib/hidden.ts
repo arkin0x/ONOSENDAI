@@ -49,6 +49,7 @@ import { creditTags, type Credit } from 'sno-core/feed'
 import { ALGO, decryptForRegion, encryptForRegion } from './shardCrypto'
 import { hintFits, hintTags, parseHint, type HintHeights } from './hint'
 import { imetaTag, pictureOf, type PictureDim } from './itemPicture'
+import { animationOf, modelOf, modelTags, type ItemAnimation, type ItemModelRef } from './itemModel'
 import type { Position } from './space'
 import { mentionTags } from './mentions'
 import { cashuTokensAsWritten } from './cashu'
@@ -215,6 +216,14 @@ export interface KeyItem {
    */
   image?: string
   imageDim?: PictureDim
+  /**
+   * The SNO the item wears in cyberspace, by its address, and how it moves
+   * (lib/itemModel.ts, arkinox, 2026-10-21). Optional; an item without a
+   * model is drawn as the note's cube. `animation` is only read or written
+   * with a model, and is absent when the model stands still.
+   */
+  model?: ItemModelRef
+  animation?: ItemAnimation[]
 }
 
 /** What a chest item carries, read out of its event (B1 §2.2); the payload is still sealed. */
@@ -283,7 +292,17 @@ export function keyItemOf(ev: Pick<NostrEvent, 'kind' | 'content' | 'tags'>): Ke
   // URI, at most 32 a side (lib/itemPicture pictureOf, and why). An imeta tag
   // that says anything else is passed over, and the item reads as one without.
   const picture = pictureOf(ev.tags)
-  return { name: nameOf(ev.tags, 'key'), about, itemPubkey, secretHex, ...(picture ? { image: picture.image, imageDim: picture.dim } : {}) }
+  // The model and its motions, when the item names a SNO this client can
+  // fetch (lib/itemModel.ts); motions with no model move nothing, and are
+  // not read.
+  const model = modelOf(ev.tags)
+  const animation = model ? animationOf(ev.tags) : []
+  return {
+    name: nameOf(ev.tags, 'key'), about, itemPubkey, secretHex,
+    ...(picture ? { image: picture.image, imageDim: picture.dim } : {}),
+    ...(model ? { model } : {}),
+    ...(animation.length > 0 ? { animation } : {}),
+  }
 }
 
 /** A chest item out of its event, or null when its lock tag or payload is malformed. */
@@ -520,12 +539,16 @@ export function messageInnerTemplate(text: string, at: Position, plane: Plane, c
  * size (lib/itemPicture.ts, arkinox, 2026-10-10). The tag is optional and a
  * reader that does not know it skips it, so an item with a picture reads the
  * same as one without on a client that only knows the tags above (the MCP
- * server among them).
+ * server among them). The model and its motions ride the same way, in a
+ * `model` and an `animate` tag (lib/itemModel.ts, arkinox, 2026-10-21).
  */
 export function keyInnerTemplate(key: KeyItem, at: Position, plane: Plane, createdAt: number): EventTemplate {
   const tags: string[][] = [['C', positionHex(at, plane)], ['title', key.name.slice(0, MAX_ITEM_NAME)], ['item', key.itemPubkey], ['secret', key.secretHex], ['-']]
   const picture = key.image && key.imageDim ? imetaTag(key.image, key.imageDim) : null
   if (picture) tags.push(picture)
+  // The SNO it wears and how it moves (lib/itemModel.ts): optional, and
+  // skipped by a reader that does not know them, as the picture is.
+  tags.push(...modelTags(key.model, key.animation))
   return { kind: KEY_KIND, created_at: createdAt, content: key.about.slice(0, MAX_ABOUT), tags }
 }
 

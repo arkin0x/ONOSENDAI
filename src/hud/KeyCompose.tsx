@@ -16,9 +16,25 @@
  * its aspect (never upscaled) and exported as a PNG data URI, which rides in
  * the item's imeta tag (lib/itemPicture.ts has the fit, the tag and why only
  * a data URI). The canvas work lives here, the pure parts there.
+ *
+ * MODEL (arkinox, 2026-10-21): a published SNO from the Shard Feed for the
+ * item to wear in cyberspace in place of the cube, and any of three motions,
+ * BOB, ROTATE Y and ROTATE X, stacked (lib/itemModel.ts has the tags, the
+ * motions and the box). The preview shows it moving inside the box it will
+ * get. ICON FROM MODEL draws the model the way the feed's pictures are drawn
+ * (ThumbStage) and fits that into the 32 by 32 picture, as a chosen file is.
  */
 
 import { useEffect, useRef, useState } from 'react'
+import { primeRef } from '../lib/parts'
+import { ANIMATIONS, isModelAddress, type ItemAnimation } from '../lib/itemModel'
+import { useItemModel } from '../hooks/useItemModel'
+import { useThumbs } from '../store/useThumbs'
+import { ThumbStage } from '../scene/ThumbStage'
+import { ItemModelPreview } from '../scene/ItemModelPreview'
+import { FeedList } from './FeedList'
+import { Field, Switch } from './ui/Switch'
+import type { FeedObject } from 'sno-core/feed'
 import { Explanation } from './Explanation'
 import { nip19 } from 'nostr-tools'
 import { forgeKey } from '../lib/chests'
@@ -39,27 +55,47 @@ const PICTURE_TYPES = 'image/png,image/jpeg,image/webp,image/gif'
 async function pictureFrom(file: File): Promise<{ image: string; imageDim: PictureDim }> {
   const url = URL.createObjectURL(file)
   try {
-    const img = await new Promise<HTMLImageElement>((resolve, reject) => {
-      const el = new Image()
-      el.onload = () => resolve(el)
-      el.onerror = () => reject(new Error('That file could not be read as a picture.'))
-      el.src = url
-    })
-    if (!(img.naturalWidth > 0) || !(img.naturalHeight > 0)) throw new Error('That picture has no size.')
-    const imageDim = fitWithin(img.naturalWidth, img.naturalHeight)
-    const canvas = document.createElement('canvas')
-    canvas.width = imageDim.w
-    canvas.height = imageDim.h
-    const ctx = canvas.getContext('2d')
-    if (!ctx) throw new Error('This browser cannot draw the picture.')
-    ctx.drawImage(img, 0, 0, imageDim.w, imageDim.h)
-    const image = canvas.toDataURL('image/png')
-    if (image.length > MAX_PICTURE_URI) throw new Error(`That picture is ${image.length.toLocaleString('en-US')} characters as a PNG; the most an item carries is ${MAX_PICTURE_URI.toLocaleString('en-US')}.`)
-    return { image, imageDim }
+    return await pictureFromUrl(url)
   } finally {
     URL.revokeObjectURL(url)
   }
 }
+
+/** A picture at `url` (an object URL, or a drawn data URL) as the picture an item carries, or a sentence why not. */
+async function pictureFromUrl(url: string): Promise<{ image: string; imageDim: PictureDim }> {
+  const img = await new Promise<HTMLImageElement>((resolve, reject) => {
+    const el = new Image()
+    el.onload = () => resolve(el)
+    el.onerror = () => reject(new Error('That file could not be read as a picture.'))
+    el.src = url
+  })
+  if (!(img.naturalWidth > 0) || !(img.naturalHeight > 0)) throw new Error('That picture has no size.')
+  const imageDim = fitWithin(img.naturalWidth, img.naturalHeight)
+  const canvas = document.createElement('canvas')
+  canvas.width = imageDim.w
+  canvas.height = imageDim.h
+  const ctx = canvas.getContext('2d')
+  if (!ctx) throw new Error('This browser cannot draw the picture.')
+  // A model's icon comes down from the feed picture's 160 to 32: smoothed, not sampled.
+  ctx.imageSmoothingQuality = 'high'
+  ctx.drawImage(img, 0, 0, imageDim.w, imageDim.h)
+  const image = canvas.toDataURL('image/png')
+  if (image.length > MAX_PICTURE_URI) throw new Error(`That picture is ${image.length.toLocaleString('en-US')} characters as a PNG; the most an item carries is ${MAX_PICTURE_URI.toLocaleString('en-US')}.`)
+  return { image, imageDim }
+}
+
+/** Each motion as the composer labels it, with the few words under it. */
+const MOTION_LABEL: Record<ItemAnimation, { label: string; hint: string }> = {
+  bob: { label: 'Bob', hint: 'Floats up and down' },
+  'spin-y': { label: 'Rotate Y', hint: 'Turns about its upright' },
+  'spin-x': { label: 'Rotate X', hint: 'Turns end over end' },
+}
+
+/** No motion: one array, so the preview's box is not worked out again at every keystroke. */
+const NO_MOTION: readonly ItemAnimation[] = []
+
+/** The thumbnail key a model's icon is drawn under (useThumbs). */
+const iconKey = (address: string): string => `item-model:${address}`
 
 /** `onDone` runs on CANCEL and once the item has been handed to the deploy. */
 export function KeyCompose({ onDone }: { onDone: () => void }): JSX.Element {
@@ -78,6 +114,13 @@ export function KeyCompose({ onDone }: { onDone: () => void }): JSX.Element {
   const fileRef = useRef<HTMLInputElement>(null)
   const [pictureNote, setPictureNote] = useState<string | null>(null)
   const npub = nip19.npubEncode(key.itemPubkey)
+  // MODEL: the feed open to pick from, the model in hand (a cube until it
+  // loads), and the icon being drawn from it.
+  const [picking, setPicking] = useState(false)
+  const model = useItemModel(key.model)
+  const [iconWanted, setIconWanted] = useState(false)
+  const iconUrl = useThumbs((s) => (key.model ? s.urls[iconKey(key.model.address)] : undefined))
+  const iconQueued = useThumbs((s) => (key.model ? s.queue.some((j) => j.key === iconKey(key.model!.address)) : false))
 
   const copy = (what: string, text: string): void => {
     void navigator.clipboard?.writeText(text).then(() => {
@@ -102,6 +145,54 @@ export function KeyCompose({ onDone }: { onDone: () => void }): JSX.Element {
       return next
     })
   }
+  const pickModel = (o: FeedObject): void => {
+    // An address the tag would not carry (lib/itemModel.ts isModelAddress) would show here and be gone once placed.
+    if (!isModelAddress(o.address)) { setPictureNote('That object’s address cannot ride in an item.'); return }
+    setPictureNote(null)
+    // The feed already holds the object: answer the fetch from it, so the
+    // preview needs no second trip to a relay.
+    try { primeRef(['a', o.address], JSON.parse(o.event.content)) } catch { /* fetched instead */ }
+    setPicking(false)
+    setIconWanted(false)
+    setKey((k) => ({ ...k, model: { address: o.address, ...(o.seen?.[0] ? { relay: o.seen[0] } : {}) } }))
+  }
+  const removeModel = (): void => {
+    setIconWanted(false)
+    setKey((k) => {
+      const next = { ...k }
+      delete next.model
+      delete next.animation
+      return next
+    })
+  }
+  const toggleMotion = (a: ItemAnimation, on: boolean): void => {
+    setKey((k) => {
+      const now = new Set(k.animation ?? [])
+      if (on) now.add(a); else now.delete(a)
+      const animation = ANIMATIONS.filter((m) => now.has(m))
+      const next: KeyItem = { ...k, animation }
+      if (animation.length === 0) delete next.animation
+      return next
+    })
+  }
+  const drawIcon = (): void => {
+    if (!model || !key.model) return
+    setPictureNote(null)
+    setIconWanted(true)
+    useThumbs.getState().request(iconKey(key.model.address), model.shard)
+  }
+  // The drawn model, once it is in hand, fitted into the picture.
+  useEffect(() => {
+    if (!iconWanted) return
+    // The stage gave up on it (useThumbs fail): nothing came, and nothing will.
+    if (!iconUrl && !iconQueued) { setIconWanted(false); setPictureNote('The model could not be drawn.'); return }
+    if (!iconUrl) return
+    setIconWanted(false)
+    pictureFromUrl(iconUrl).then(
+      (picture) => setKey((k) => ({ ...k, ...picture })),
+      (err: unknown) => setPictureNote(err instanceof Error ? err.message : String(err)),
+    )
+  }, [iconWanted, iconUrl, iconQueued])
   const place = (): void => {
     const name = key.name.trim()
     if (!name) return
@@ -147,6 +238,34 @@ export function KeyCompose({ onDone }: { onDone: () => void }): JSX.Element {
         {key.image && <button className="chest__act" onClick={removePicture} title="Forge the item without a picture">REMOVE</button>}
       </div>
       {pictureNote && <span className="shards__compose-note shards__compose-note--warn" role="status">{pictureNote}</span>}
+      {/* MODEL: the SNO it wears in cyberspace, from the Shard Feed. */}
+      <div className="compose__row">
+        <button className="chest__act" aria-expanded={picking} onClick={() => setPicking((p) => !p)} title="A published SNO from the Shard Feed for the item to wear in cyberspace, in place of the cube">{key.model ? 'CHANGE MODEL' : 'MODEL'}</button>
+        {key.model && <button className="chest__act" onClick={removeModel} title="Show the item as the cube">REMOVE MODEL</button>}
+      </div>
+      {picking && (
+        <div className="itemmodel__pick">
+          <FeedList onPick={pickModel} />
+        </div>
+      )}
+      {key.model && !picking && (
+        <div className="itemmodel">
+          {model
+            ? <ItemModelPreview model={model} animation={key.animation ?? NO_MOTION} />
+            : <span className="itemmodel__preview itemmodel__wait" title={key.model.address}>LOADING</span>}
+          <div className="itemmodel__side">
+            <span className="itemmodel__name" title={key.model.address}>{model?.shard.name ?? 'MODEL'}</span>
+            {ANIMATIONS.map((a) => (
+              <Field key={a} id={`item-motion-${a}`} label={MOTION_LABEL[a].label} hint={MOTION_LABEL[a].hint}>
+                <Switch id={`item-motion-${a}`} checked={key.animation?.includes(a) ?? false} onCheckedChange={(v) => toggleMotion(a, v)} />
+              </Field>
+            ))}
+            <button className="chest__act" disabled={!model || iconWanted} onClick={drawIcon} title={`Draw the model as the item's ${MAX_PICTURE_SIDE} by ${MAX_PICTURE_SIDE} picture`}>{iconWanted ? 'DRAWING' : 'ICON FROM MODEL'}</button>
+          </div>
+          {/* The one canvas that draws the icon, there only while it is asked for. */}
+          {iconWanted && <ThumbStage />}
+        </div>
+      )}
       <div className="shards__actions">
         <button className="avatars__go" onClick={onDone}>CANCEL</button>
         <button className="avatars__go" disabled={!key.name.trim()} onClick={place} title="Aim it at the build cursor; the item goes into your ITEMS when it is hidden">PLACE ITEM ▸</button>

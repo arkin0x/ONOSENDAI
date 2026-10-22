@@ -25,7 +25,7 @@ import type { Shot } from './director'
 export const DWELL_MAX_S = 60
 /** How long it then rests, seconds of screen time: its shots are passed over meanwhile. */
 export const DWELL_REST_S = 10 * 60
-/** Shots of resting pubkeys held while the tape is read ahead for someone else; past this many, the resting play on. */
+/** Shots of resting pubkeys held while the tape is read ahead for someone else; past this many, it is read no further. */
 export const DWELL_HELD_MAX = 200
 
 /** The limits, for the site's TV or the stream (lib/tv/broadcast): the one place to make them differ. */
@@ -50,12 +50,14 @@ export class Dwell {
 
   /**
    * A shot comes on screen, `pubkey`'s; null for a break (a commercial, a new
-   * tape), which ends anyone's run. One that had its time rests from now, when
-   * TV moves away from it: playing on alone, with no one else to show, used
-   * none of its rest.
+   * tape), which ends anyone's run. One that had its time, or was resting
+   * and on only for want of anyone else, rests from now, when TV moves away
+   * from it: playing on, however briefly, spends none of its rest (review of
+   * #448: a play-on of under a minute came out of it).
    */
   onScreen(pubkey: string | null, now: number): void {
-    if (this.subject !== null && pubkey !== this.subject && now - this.since >= this.limits.maxMs) this.rests.set(this.subject, now + this.limits.restMs)
+    const leaving = this.subject !== null && pubkey !== this.subject
+    if (leaving && (now - this.since >= this.limits.maxMs || this.resting(this.subject!, now))) this.rests.set(this.subject!, now + this.limits.restMs)
     if (pubkey !== this.subject || pubkey === null) this.since = now
     this.subject = pubkey
   }

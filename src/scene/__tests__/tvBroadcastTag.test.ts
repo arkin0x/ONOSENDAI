@@ -1,8 +1,8 @@
 /**
  * tvBroadcastTag.test.ts: the 24/7 stream says WWW.ONOSENDAI.TECH under the
- * clock, top right, for good (arkinox, 2026-10-22), and nowhere else: not on
- * the site's own TV, not over the HOSAKA spot. At the stream's 1280x720 it
- * keeps clear of everything else TV paints, and it changes nothing else's place.
+ * clock, top right, for good (arkinox, 2026-10-22), and over the HOSAKA spot
+ * in the band the spot keeps clear; never on the site's own TV. It keeps clear
+ * of everything else TV paints, and it changes nothing else's place.
  */
 import { afterEach, describe, expect, it, vi } from 'vitest'
 

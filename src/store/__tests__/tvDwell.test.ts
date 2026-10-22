@@ -156,6 +156,37 @@ describe('the dwell rule (lib/tv/dwell)', () => {
     expect(d.resting('c', 1331 * S)).toBe(false)
   })
 
+  it('playing on as the rested one for under a minute spends none of its rest: ten minutes from the last cut (review of #448)', () => {
+    // Cut at 100 s; on again alone 300 to 330 s, cut again.
+    const d = new Dwell()
+    d.onScreen('a', 0)
+    d.over(60 * S)
+    d.onScreen('b', 100 * S)
+    d.onScreen('a', 300 * S)
+    d.onScreen('b', 330 * S)
+    expect(d.resting('a', 929 * S)).toBe(true)
+    expect(d.resting('a', 930 * S)).toBe(false)
+    // A break, then on alone 120 to 170 s: rests from 170 s.
+    const e = new Dwell()
+    e.onScreen('a', 0)
+    e.over(60 * S)
+    e.onScreen(null, 90 * S)
+    e.onScreen('a', 120 * S)
+    e.onScreen('b', 170 * S)
+    expect(e.resting('a', 769 * S)).toBe(true)
+    expect(e.resting('a', 770 * S)).toBe(false)
+    // On alone 61 s rests from its cut just the same: no jump at the minute.
+    const f = new Dwell()
+    f.onScreen('a', 0)
+    f.over(60 * S)
+    f.onScreen(null, 90 * S)
+    f.onScreen('a', 120 * S)
+    f.over(181 * S)
+    f.onScreen('b', 181 * S)
+    expect(f.resting('a', 780 * S)).toBe(true)
+    expect(f.resting('a', 781 * S)).toBe(false)
+  })
+
   it('a shot cued on purpose plays whoever it is', () => {
     const d = new Dwell()
     d.onScreen('a', 0)
@@ -245,7 +276,7 @@ afterEach(() => {
   vi.restoreAllMocks()
 })
 
-type Seen = { t: number; pk: string | null; ad?: boolean; held?: boolean; tape?: number }
+type Seen = { t: number; pk: string | null; ad?: boolean; held?: boolean; tape?: number; el?: number; len?: number }
 /**
  * Run TV for `ms` of fake time, noting every 100 ms whose shot is on screen
  * (null: none, or a break), and whether the picture is held: playing, no
@@ -256,7 +287,7 @@ async function watch(ms: number, seen: Seen[]): Promise<void> {
     await vi.advanceTimersByTimeAsync(100)
     const s = useTv.getState()
     const held = s.ad === null && s.status === 'playing' && (s.shot === null || shotElapsed() > s.shot.length + 0.2)
-    seen.push({ t: performance.now(), pk: s.ad ? null : s.shot?.pubkey ?? null, ad: s.ad !== null, held, tape: s.tapeTime ?? 0 })
+    seen.push({ t: performance.now(), pk: s.ad ? null : s.shot?.pubkey ?? null, ad: s.ad !== null, held, tape: s.tapeTime ?? 0, el: shotElapsed(), len: s.shot?.length ?? 0 })
   }
 }
 /** The longest the picture was held, ms, after `from`. */
@@ -347,9 +378,8 @@ describe('Cyberspace TV moves on after a minute of one pubkey', () => {
   })
 
   it('plays the rested one on while slow relays are read ahead for someone else, and cuts the moment they come (arkinox, 2026-10-22)', async () => {
-    const crawl: NostrEvent[] = []
-    for (let k = 0; k * 5 < 1700; k++) crawl.push(hop(A, T0 + k * 5, 1000n + BigInt(k), 1001n + BigInt(k)))
-    load([...crawl, ...visitors(2100, 2400, 60)])
+    // A hop every 2 s: shots of some 46 s on screen, so a cut at a shot's end would show.
+    load([...crawler(A, 900), ...visitors(1300, 1500, 60)])
     lag = 3000
     useTv.getState().start()
     const seen: Seen[] = []
@@ -361,8 +391,10 @@ describe('Cyberspace TV moves on after a minute of one pubkey', () => {
     expect(onA[onA.length - 1].t - onA[0].t).toBeGreaterThan(DWELL_MAX_S * 1000 + 2000)
     const playing = seen.find((x) => x.pk !== null)!.t
     expect(longestHold(seen, playing)).toBeLessThanOrEqual(1000)
-    // and gave way the tick a visitor was read in.
-    expect(visit.t - onA[onA.length - 1].t).toBeLessThanOrEqual(200)
+    // and gave way the tick a visitor was read in: mid-shot, not at its end.
+    const lastA = onA[onA.length - 1]
+    expect(visit.t - lastA.t).toBeLessThanOrEqual(200)
+    expect(lastA.len! - lastA.el!).toBeGreaterThan(2)
   })
 
   it('keeps its rest across a new tape', async () => {

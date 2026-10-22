@@ -98,7 +98,7 @@ describe('fit', () => {
     expect(fit(ctx, 'abcdefghijkl', 50)).toBe('abcd…')
     measured.length = 0
     expect(fit(ctx, `${'9'.repeat(100_000)} SHARDS`, 200)).toBe(`${'9'.repeat(19)}…`)
-    expect(Math.max(...measured)).toBeLessThanOrEqual(513)
+    expect(Math.max(...measured)).toBeLessThanOrEqual(2049)
   })
 })
 

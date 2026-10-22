@@ -43,9 +43,13 @@ export interface NftLink {
  * (`link:https://...`), a backtick, or an en or em dash (written as escapes
  * here). Letters, digits and the URL marks `/`, `=`, `&`, `%`, `#`, `.`, `@`
  * and `?` are not allowed, so `xhttps://` and most links inside another
- * link's path or query (`/https://`, `=https://`) are not this link; the
- * rest are left out by insideUrl. Written as a captured group rather than a
- * lookbehind, which older Safari cannot parse.
+ * link's path or query (`/https://`, `=https://`) are not this link. A few
+ * allowed marks can sit inside a URL (`;`, `,`), so
+ * `https://a.example/?b=1;https://nonfungible.cash/...` is read as a link;
+ * that is harmless for a card, because the card always rebuilds the link to
+ * nonfungible.cash from its id and key and opens nothing else, but such a
+ * link is not counted (countNftLinks). Written as a captured group rather
+ * than a lookbehind, which older Safari cannot parse.
  */
 const BEFORE = '(^|[\\s\\u200b(\\[{<"\'\\u201c\\u2018*>|,;:\\u0060\\u2013\\u2014])'
 
@@ -68,31 +72,12 @@ const AFTER = String.raw`(?![A-Za-z0-9_\-=+/%&#])`
 
 const PATTERN = new RegExp(`${BEFORE}${LINK}${AFTER}`, 'g')
 
-/** A character a URL may be written with (RFC 3986: unreserved, reserved but `[` and `]`, and `%`). */
-const URL_CHAR = /[A-Za-z0-9\-._~:/?#@!$&'()*+,;=%]/
-
-/**
- * Whether a link whose text starts at `at` stands inside another URL, so it
- * is not counted (spec 7.7 Contents): the URL characters right before it,
- * back to the first one a URL cannot hold, contain `://`. A mark that may
- * come before a link in words may also sit inside a URL's path, query or
- * fragment (`,` `;` `:` `(` `'` `*`), so `https://a.example/?b=1;https://nonfungible.cash/...`
- * holds no link, and `see;https://nonfungible.cash/...` and
- * `[a page](https://nonfungible.cash/...)` each hold one.
- */
-function insideUrl(text: string, at: number): boolean {
-  let i = at
-  while (i > 0 && URL_CHAR.test(text[i - 1])) i--
-  return text.slice(i, at).includes('://')
-}
-
 /** Every claim link in a text, in order, once each. A text with none gives an empty list. */
 export function findNftLinks(text: string | null | undefined): NftLink[] {
   if (!text) return []
   const out: NftLink[] = []
   const seen = new Set<string>()
   for (const m of text.matchAll(PATTERN)) {
-    if (insideUrl(text, m.index! + m[1].length)) continue
     const id = m[2], key = m[3]
     const url = nftClaimUrl(id, key)
     if (seen.has(url)) continue
@@ -100,6 +85,40 @@ export function findNftLinks(text: string | null | undefined): NftLink[] {
     out.push({ id, key, url })
   }
   return out
+}
+
+/** A character a URL may be written with (RFC 3986: unreserved, reserved but `[` and `]`, and `%`). */
+const URL_CHAR = /[A-Za-z0-9\-._~:/?#@!$&'()*+,;=%]/
+
+/**
+ * How many claim links a text carries for a bag's `nft` count (spec 7.7
+ * Contents), each distinct link once. A link that stands inside another
+ * URL's path or query is not counted: the URL characters right before it,
+ * back to the first one a URL cannot hold, contain a `://` with no `#`
+ * after it. So `https://a.example/?b=1;https://nonfungible.cash/...` counts
+ * none, and `see;https://nonfungible.cash/...`, `[a page](https://nonfungible.cash/...)`
+ * and two links joined by a comma (the second is in the first one's
+ * fragment, not its path or query) count every link. Text with no scheme
+ * before it (`a.example/?b=1;`) is not a URL here, and a character outside
+ * RFC 3986 (`é`) ends one. One pass over the text, however many links.
+ * Cards read every link findNftLinks finds, counted or not.
+ */
+export function countNftLinks(text: string | null | undefined): number {
+  if (!text) return 0
+  const seen = new Set<string>()
+  // The run of URL characters before position `i`: where its last `://` is (-1 for none), and whether a `#` came after that.
+  let i = 0, scheme = -1, fragment = false
+  for (const m of text.matchAll(PATTERN)) {
+    const at = m.index! + m[1].length
+    for (; i < at; i++) {
+      const c = text[i]
+      if (!URL_CHAR.test(c)) { scheme = -1; fragment = false }
+      else if (c === ':' && text[i + 1] === '/' && text[i + 2] === '/') { scheme = i; fragment = false }
+      else if (c === '#') fragment = true
+    }
+    if (scheme === -1 || fragment) seen.add(`${m[2]}#${m[3]}`)
+  }
+  return seen.size
 }
 
 /** Whether a text carries a claim link. */
@@ -112,12 +131,7 @@ export function nftClaimUrl(id: string, key: string): string {
   return `${NFT_SITE}/claim/${id}#${key}`
 }
 
-/**
- * A text with every claim link in it replaced by `by`, and nothing else
- * changed, for a row, a title or the scene. A link inside another URL is
- * replaced too, though it is not one (insideUrl): this hides keys from
- * sight, and hiding one more costs nothing.
- */
+/** A text with every claim link in it replaced by `by`, and nothing else changed. */
 export function replaceNftLinks(text: string, by: string): string {
   return text.replace(PATTERN, (_whole, before: string) => `${before}${by}`)
 }
@@ -126,8 +140,7 @@ export function replaceNftLinks(text: string, by: string): string {
  * A text with every claim link's key replaced by `mask`, each link written
  * as the site writes it, so the id stays readable and the key does not. By
  * the pattern, never by the canonical link: a link written in another case
- * (`Https://NonFungible.Cash/...`) is masked too (review of #440), and so
- * is one inside another URL, as replaceNftLinks has it.
+ * (`Https://NonFungible.Cash/...`) is masked too (review of #440).
  */
 export function maskNftKeys(text: string, mask: string): string {
   return text.replace(PATTERN, (_whole, before: string, id: string) => `${before}${NFT_SITE}/claim/${id}#${mask}`)
@@ -136,12 +149,11 @@ export function maskNftKeys(text: string, mask: string): string {
 /**
  * What a message says once its links are taken out, tidied as a Cashu
  * token's words are (lib/cashu textWithoutToken): line breaks kept, the
- * spaces a link leaves behind closed up. Only the links findNftLinks finds,
- * the ones its cards show, so a link inside another URL stays in the words.
+ * spaces a link leaves behind closed up.
  */
 export function textWithoutNftLinks(text: string | null | undefined): string {
   if (!text) return ''
-  return text.replace(PATTERN, (whole: string, before: string, _id: string, _key: string, at: number) => (insideUrl(text, at + before.length) ? whole : before))
+  return replaceNftLinks(text, '')
     .replace(/\r\n?/g, '\n')
     .split('\n')
     .map((line) => line.replace(/[^\S\n]+/g, ' ').trim())

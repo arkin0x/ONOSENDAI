@@ -4,7 +4,7 @@
  * found anywhere in a message, every one of them, and never a look-alike.
  */
 import { describe, expect, it, vi } from 'vitest'
-import { checkNftLink, findNftLinks, hasNftLink, NFT_LINK_API, readNftLinkAnswer, replaceNftLinks, textWithoutNftLinks } from '../nftLink'
+import { checkNftLink, countNftLinks, findNftLinks, hasNftLink, NFT_LINK_API, readNftLinkAnswer, replaceNftLinks, textWithoutNftLinks } from '../nftLink'
 import { messagePreview } from '../hidden'
 import { messageName } from '../deleteWords'
 import { messageBillboard } from '../../scene/WorldMessages'
@@ -119,35 +119,51 @@ describe('findNftLinks: look-alikes', () => {
 })
 
 // Spec 7.7 Contents: "A link glued to the end of a word, or standing inside another URL's path or query, is not counted."
-describe('findNftLinks: inside another URL', () => {
-  it('refuses a link right after a mark that sits inside another URL', () => {
+describe('countNftLinks: a bag\'s nft count', () => {
+  it('does not count a link inside another URL\'s path or query, after any mark a URL may hold', () => {
     for (const before of [';', ',', ':', '(', "'", '*']) {
-      for (const url of ['https://a.example/?b=1', 'https://a.example/x', 'https://a.example/#top', 'HTTPS://A.EXAMPLE/x', 'ftp://a.example/x']) {
+      for (const url of ['https://a.example/?b=1', 'https://a.example/x', 'HTTPS://A.EXAMPLE/x', 'ftp://a.example/x', 'https://a.example/#top;https://b.example/?q']) {
         const text = `${url}${before}${LINK}`
-        expect(findNftLinks(text), text).toEqual([])
-        expect(findNftLinks(`see ${text} now`), text).toEqual([])
-        expect(hasNftLink(text), text).toBe(false)
+        expect(countNftLinks(text), text).toBe(0)
+        expect(countNftLinks(`see ${text} now`), text).toBe(0)
       }
     }
-    // The spec's own example, and a link glued to a link.
-    expect(findNftLinks(`https://a.example/?b=1;${LINK}`)).toEqual([])
-    expect(findNftLinks(`${LINK},${LINK2}`).map((l) => l.id)).toEqual([ID])
+    // The spec's own example.
+    expect(countNftLinks(`https://a.example/?b=1;${LINK}`)).toBe(0)
   })
 
-  it('still finds a link after those marks in words, and after a URL that ended', () => {
-    for (const text of [`see;${LINK}`, `one,${LINK}`, `(${LINK})`, `'${LINK}'`, `*${LINK}*`, `link:${LINK}`, `a.example/?b=1;${LINK}`,
+  it('counts a link after those marks in words, in a fragment, and after a URL that ended', () => {
+    for (const text of [LINK, `see;${LINK}`, `one,${LINK}`, `(${LINK})`, `'${LINK}'`, `*${LINK}*`, `link:${LINK}`, `a.example/?b=1;${LINK}`,
       `[https://a.example](${LINK})`, `https://a.example/x ${LINK}`, `https://a.example/x, ${LINK}`, `<https://a.example/>;${LINK}`, `"https://a.example/";${LINK}`,
-      `https://a.example/x\u2014${LINK}`, `https://a.example/x|${LINK}`]) {
-      expect(findNftLinks(text).map((l) => l.id), text).toEqual([ID])
+      `https://a.example/x\u2014${LINK}`, `https://a.example/x|${LINK}`, `https://a.example/#top;${LINK}`, `https://a.example/\u00e9;${LINK}`]) {
+      expect(countNftLinks(text), text).toBe(1)
     }
-    expect(findNftLinks(`${LINK}, ${LINK2}`).map((l) => l.id)).toEqual([ID, ID2])
-    expect(findNftLinks(`https://a.example/?b=1;${LINK2} and ${LINK}`).map((l) => l.id)).toEqual([ID])
+    // Two links joined by a mark: the second is in the first one's fragment, so both count.
+    for (const mark of [',', ';', ':', '(']) expect(countNftLinks(`${LINK}${mark}${LINK2}`), mark).toBe(2)
+    expect(countNftLinks(`${LINK}, ${LINK2} and ${LINK}`)).toBe(2)
+    expect(countNftLinks(`https://a.example/?b=1;${LINK2} and ${LINK}`)).toBe(1)
+    expect(countNftLinks('')).toBe(0)
+    expect(countNftLinks(null)).toBe(0)
   })
 
-  it('leaves a link inside another URL in the words beside the cards, and hides its key from rows and the scene', () => {
+  it('counts what findNftLinks finds wherever no other URL is in the way', () => {
+    const text = `one ${LINK} two ${LINK2} and the first again ${LINK}, ${'x'.repeat(50)}`
+    expect(countNftLinks(text)).toBe(findNftLinks(text).length)
+  })
+
+  it('one pass over the text, however many links are joined into one run', () => {
+    const many = Array.from({ length: 2000 }, () => LINK).join(',')
+    const t0 = performance.now()
+    // The first is in the query; the `#` in its key starts the outer URL's fragment, so the rest (one link, repeated) counts once.
+    expect(countNftLinks(`https://a.example/?b=1;${many}`)).toBe(1)
+    expect(performance.now() - t0).toBeLessThan(500)
+  })
+
+  it('still makes a card of a link inside another URL, and keeps its key out of the words, rows and the scene', () => {
     const text = `see https://a.example/?b=1;${LINK} and ${LINK2}`
-    expect(textWithoutNftLinks(text)).toBe(`see https://a.example/?b=1;${LINK} and`)
-    for (const shown of [messagePreview(text, 400), messageBillboard(text)]) expect(shown, shown).not.toContain(KEY)
+    expect(findNftLinks(text).map((l) => l.id)).toEqual([ID, ID2])
+    expect(hasNftLink(`https://a.example/?b=1;${LINK}`)).toBe(true)
+    for (const shown of [textWithoutNftLinks(text), messagePreview(text, 400), messageName(text), messageBillboard(text)]) expect(shown, shown).not.toContain(KEY)
   })
 })
 

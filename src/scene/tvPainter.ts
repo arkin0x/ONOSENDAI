@@ -255,7 +255,7 @@ const ramp = (t: number, a: number, b: number): number => clamp01((t - a) / (b -
  * to thousands of characters (a bag's count has no cap, spec 7.7) costs no
  * more to paint than a line that fills the panel.
  */
-const FIT_CHARS = 512
+const FIT_CHARS = 2048
 
 /** The longest start of `text` that fits `max`, with an ellipsis when cut. */
 export function fit(ctx: Pick<CanvasRenderingContext2D, 'measureText'>, text: string, max: number): string {

@@ -25,6 +25,12 @@ describe('bagContents', () => {
     const c = bagContents([ev(1, two), ev(1, `see ${LINK.split('#')[0]}`), ev(1, `${TOKEN} ${LINK}`)])
     expect(c).toMatchObject({ message: 3, cashu: 1, nft: 3 })
   })
+
+  it('does not count a link inside another URL\'s path or query (spec 7.7)', () => {
+    expect(bagContents([ev(1, `https://a.example/?b=1;${LINK}`)])).toMatchObject({ message: 1, nft: 0 })
+    expect(bagContents([ev(1, `${LINK},${LINK2}`)])).toMatchObject({ message: 1, nft: 2 })
+    expect(bagContentsTags([ev(1, `https://a.example/?b=1;${LINK}`)], { contents: true, money: false })).toEqual([['contents', 'message', '1']])
+  })
 })
 
 describe('bagContentsTags', () => {

@@ -53,7 +53,7 @@ import { animationOf, modelOf, modelTags, type ItemAnimation, type ItemModelRef 
 import type { Position } from './space'
 import { mentionTags } from './mentions'
 import { cashuTokensAsWritten } from './cashu'
-import { findNftLinks, NFT_WORDS, replaceNftLinks } from './nftLink'
+import { countNftLinks, NFT_WORDS, replaceNftLinks } from './nftLink'
 
 /** The location-encrypted envelope (spec §8.6). */
 export const HIDDEN_KIND = 33330
@@ -698,7 +698,7 @@ export function bagContents(inners: readonly (BagEntry | ChatRumor)[]): BagConte
   for (const e of inners) {
     if (isReference(e)) { out.shard++; continue }
     if (e.kind === SHARD_KIND) out.shard++
-    else if (e.kind === MESSAGE_KIND) { out.message++; out.cashu += cashuTokensAsWritten(e.content).length; out.nft += findNftLinks(e.content).length }
+    else if (e.kind === MESSAGE_KIND) { out.message++; out.cashu += cashuTokensAsWritten(e.content).length; out.nft += countNftLinks(e.content) }
     else if (e.kind === KEY_KIND) out.key++
     else if (e.kind === CHEST_KIND) out.chest++
   }

@@ -17,21 +17,29 @@ import { HOSAKA_1 } from '../../lib/tv/hosakaAd'
 import { BROADCAST_TAG, setBroadcastForTest } from '../../lib/tv/broadcast'
 
 interface Box { x0: number; y0: number; x1: number; y1: number }
-interface Text { text: string; x: number; y: number; size: number; align: string; box: Box }
+/** The drawing state a call inked with: the font, the ink, how opaque, the shadow. */
+interface Look { font: string; ink: string; alpha: number; shadow: string }
+interface Text { text: string; x: number; y: number; size: number; align: string; box: Box; look: Look }
 
 /** A canvas that keeps each text, rectangle and translation it is given, as boxes on the frame; type measures 0.6 em a character. */
-function recording(): { canvas: HTMLCanvasElement; texts: Text[]; rects: Array<Box & { radial: boolean }>; spots: Array<{ x: number; y: number }> } {
+function recording(): { canvas: HTMLCanvasElement; texts: Text[]; rects: Array<Box & { radial: boolean; look: Look }>; spots: Array<{ x: number; y: number }> } {
   const texts: Text[] = []
-  const rects: Array<Box & { radial: boolean }> = []
+  const rects: Array<Box & { radial: boolean; look: Look }> = []
   const spots: Array<{ x: number; y: number }> = []
-  const state: Record<string, unknown> = { globalAlpha: 1, font: '10px x', textAlign: 'start', fillStyle: '#000' }
+  const state: Record<string, unknown> = { globalAlpha: 1, font: '10px x', textAlign: 'start', fillStyle: '#000', shadowColor: 'rgba(0, 0, 0, 0)', shadowBlur: 0 }
   const stack: Array<{ dx: number; dy: number; st: Record<string, unknown> }> = []
   let dx = 0
   let dy = 0
+  const look = (): Look => ({
+    font: String(state.font),
+    ink: typeof state.fillStyle === 'string' ? state.fillStyle : 'gradient',
+    alpha: Number(state.globalAlpha),
+    shadow: `${String(state.shadowColor ?? '')} ${String(state.shadowBlur ?? 0)}`,
+  })
   const size = (): number => Number(/([\d.]+)px/.exec(String(state.font))?.[1] ?? 10)
   const width = (t: string): number => Array.from(t).length * size() * 0.6
   const rect = (x: number, y: number, w: number, h: number): void => {
-    rects.push({ x0: dx + Math.min(x, x + w), y0: dy + Math.min(y, y + h), x1: dx + Math.max(x, x + w), y1: dy + Math.max(y, y + h), radial: (state.fillStyle as { radial?: boolean })?.radial === true })
+    rects.push({ x0: dx + Math.min(x, x + w), y0: dy + Math.min(y, y + h), x1: dx + Math.max(x, x + w), y1: dy + Math.max(y, y + h), radial: (state.fillStyle as { radial?: boolean })?.radial === true, look: look() })
   }
   const ctx = new Proxy({
     measureText: (t: string) => ({ width: width(t) }),
@@ -41,7 +49,7 @@ function recording(): { canvas: HTMLCanvasElement; texts: Text[]; rects: Array<B
       const w = width(text)
       const align = String(state.textAlign)
       const left = dx + (align === 'right' ? x - w : align === 'center' ? x - w / 2 : x)
-      texts.push({ text, x: dx + x, y: dy + y, size: size(), align, box: { x0: left, y0: dy + y - size(), x1: left + w, y1: dy + y + size() * 0.3 } })
+      texts.push({ text, x: dx + x, y: dy + y, size: size(), align, box: { x0: left, y0: dy + y - size(), x1: left + w, y1: dy + y + size() * 0.3 }, look: look() })
     },
     fillRect: rect,
     strokeRect: rect,
@@ -72,18 +80,18 @@ const comment = { kind: 'comment' as const, id: 'c'.repeat(64), pubkey: 'ann', a
 const segmentShot = (item: typeof bag | typeof object | typeof comment) => ({ id: item.id, kind: item.kind, item, pubkey: 'ann', beats: [], start: 1, end: 1, offsets: [], length: 30 })
 
 /** Paint once at `w` x `h`, well into the shot (the panels faded in, the splashes landed). */
-function paintAt(p: TvPicture, w = 1280, h = 720): ReturnType<typeof recording> {
-  vi.spyOn(performance, 'now').mockReturnValue(1e12)
+function paintAt(p: TvPicture, w = 1280, h = 720, now = 1e12): ReturnType<typeof recording> {
+  vi.spyOn(performance, 'now').mockReturnValue(now)
   if (p.shot) useTv.setState({ shot: p.shot, status: p.status })
   const rec = recording()
   const painter = new TvPainter(rec.canvas)
   painter.size(w, h, 1)
   // Two paints, as the set paints on: the marquee has its run by the second.
-  painter.paint(p, assets, 1e12 - 33, 1, false)
+  painter.paint(p, assets, now - 33, 1, false)
   rec.texts.length = 0
   rec.rects.length = 0
   rec.spots.length = 0
-  painter.paint(p, assets, 1e12, 1, false)
+  painter.paint(p, assets, now, 1, false)
   vi.restoreAllMocks()
   return rec
 }
@@ -117,6 +125,12 @@ describe('WWW.ONOSENDAI.TECH on the 24/7 stream (arkinox, 2026-10-22)', () => {
     // Under the top band where YouTube shows its title and buttons on hover.
     expect(tag.box.y0).toBeGreaterThan(Math.round(720 * MARGIN_Y) + 80)
     expect(tag.size).toBeGreaterThanOrEqual(10.5)
+    // In the chiron's accent, a little dim, with a dark edge: subtle, and it reads.
+    expect(tag.look.ink).toBe('#00e5ff')
+    expect(tag.look.alpha).toBeGreaterThanOrEqual(0.8)
+    expect(tag.look.alpha).toBeLessThan(1)
+    expect(tag.look.shadow).toMatch(/^rgba\(0, 0, 0, /)
+    expect(tag.look.font).toMatch(/^700 [\d.]+px 'Monaspace Argon'/)
   })
 
   it('stands still: the same place tuning, with no signal, on a trip and in a segment', () => {
@@ -127,7 +141,10 @@ describe('WWW.ONOSENDAI.TECH on the 24/7 stream (arkinox, 2026-10-22)', () => {
       picture({ shot: trip as never }),
       picture({ shot: segmentShot(bag) as never }),
     ].map((p) => paintAt(p).texts.find((t) => t.text === BROADCAST_TAG)!)
-    for (const t of at) expect({ x: t.x, y: t.y, size: t.size }).toEqual({ x: at[0].x, y: at[0].y, size: at[0].size })
+    for (const t of at) expect({ x: t.x, y: t.y, size: t.size, look: t.look }).toEqual({ x: at[0].x, y: at[0].y, size: at[0].size, look: at[0].look })
+    // And over time: no blink, no fade, frame after frame.
+    const over = [0, 250, 500, 700, 1300, 4000, 61_000].map((ms) => paintAt(picture({ shot: trip as never }), 1280, 720, 1e12 + ms).texts.find((t) => t.text === BROADCAST_TAG)!)
+    for (const t of over) expect({ x: t.x, y: t.y, look: t.look }).toEqual({ x: over[0].x, y: over[0].y, look: over[0].look })
   })
 
   it('meets nothing else TV paints at 1280x720: the clock, the chiron, NOW PLAYING, the marquee, the minimap, a panel or its INSIDE stamps', () => {
@@ -143,13 +160,14 @@ describe('WWW.ONOSENDAI.TECH on the 24/7 stream (arkinox, 2026-10-22)', () => {
     }
   })
 
-  it('moves nothing else at 1280x720: every other word and panel is where the site\'s TV has it', () => {
+  it('moves nothing else at 1280x720: every other word and panel is where, and as, the site\'s TV has it', () => {
     for (const shot of [trip, segmentShot(bag), segmentShot(object), segmentShot(comment)]) {
       setBroadcastForTest(false)
       const site = paintAt(picture({ shot: shot as never }))
       setBroadcastForTest(true)
       const stream = paintAt(picture({ shot: shot as never }))
-      const where = (r: ReturnType<typeof recording>): unknown => ({ texts: r.texts.filter((t) => t.text !== BROADCAST_TAG).map((t) => [t.text, t.x, t.y]), rects: r.rects })
+      // Where, and how: the tag leaves nothing of its ink, alpha or shadow on what comes after it.
+      const where = (r: ReturnType<typeof recording>): unknown => ({ texts: r.texts.filter((t) => t.text !== BROADCAST_TAG).map((t) => [t.text, t.x, t.y, t.look]), rects: r.rects })
       expect(where(stream), shot.kind).toEqual(where(site))
     }
   })

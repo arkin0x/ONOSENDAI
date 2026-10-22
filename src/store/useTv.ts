@@ -18,6 +18,7 @@ import { create } from 'zustand'
 import { queryEach } from '../lib/relay'
 import { AD_IN_MS, adById, adEveryMs, adLength, nextAd } from '../lib/tv/hosakaAd'
 import { isBroadcast, reloadBroadcast } from '../lib/tv/broadcast'
+import { Dwell, dwellLimits, onAir } from '../lib/tv/dwell'
 import { Director, JUMP_LINE_S, JUMP_S, JUMP_WARP_S, MAX_SHOT_S, isJump, shotFraming, type Beat, type Framing, type Shot, type TapeItem } from '../lib/tv/director'
 import type { HintBox } from '../lib/hint'
 import { TapeReader, V2_EPOCH, randomStart, type Ask, TapeUnanswered } from '../lib/tv/tape'
@@ -248,6 +249,8 @@ let tape = 0
 let reader: TapeReader | null = null
 let director: Director | null = null
 let queue: Shot[] = []
+/** How long the pubkey on screen has held it, and who is resting (lib/tv/dwell). New each time TV comes on. */
+let dwell = new Dwell()
 /** The tape a read is under way for, or -1: a read stuck on an old tape never holds up a new one. */
 let readingTape = -1
 let shotBegan = 0
@@ -292,6 +295,11 @@ export function shotProgress(): number {
   return Math.min(1, Math.max(0, (performance.now() - shotBegan) / 1000 / shot.length))
 }
 
+/** Whose run on screen it is and since when (lib/tv/dwell), for tests. */
+export function tvDwellRun(): { pubkey: string | null; since: number } {
+  return dwell.run
+}
+
 /** Seconds since the shot on screen began. */
 export function shotElapsed(): number {
   return (performance.now() - shotBegan) / 1000
@@ -318,6 +326,7 @@ export function framingProgress(): number {
 export function cueItem(item: TapeItem, length?: number): void {
   const d = new Director()
   d.addItem(item)
+  dwell.free(item.pubkey)
   queue.unshift(...d.release(Infinity).map((shot) => (length === undefined ? shot : { ...shot, length })))
   shotBegan = -Infinity
 }
@@ -325,7 +334,7 @@ export function cueItem(item: TapeItem, length?: number): void {
 /** Play a run of beats next as the director would cut them, for the smoke probe: a hyperjump, say. */
 export function cueBeats(beats: Beat[]): void {
   const d = new Director()
-  for (const b of beats) d.add(b)
+  for (const b of beats) { d.add(b); dwell.free(b.pubkey) }
   queue.unshift(...d.release(Infinity))
   shotBegan = -Infinity
 }
@@ -496,7 +505,7 @@ async function readMore(id: number, t: number): Promise<void> {
   readingTape = t
   const current = (): boolean => live(id, t) && r === reader
   try {
-    while (current() && queue.length < QUEUE_LOW && !r.caughtUp) {
+    while (current() && dwell.playable(queue, performance.now()) < QUEUE_LOW && !r.caughtUp) {
       const { beats, items } = await r.read()
       if (!current()) return
       failures = 0
@@ -698,6 +707,7 @@ function beginSegment(shot: Shot, now: number): void {
 }
 
 function beginShot(shot: Shot, now: number, id: number): void {
+  dwell.onScreen(shot.pubkey, now)
   if (shot.item) { beginSegment(shot, now); return }
   needChain(shot.pubkey, id)
   const s = useTv.getState()
@@ -737,7 +747,7 @@ function tick(id: number): void {
   const t = tape
   const now = performance.now()
   let s = useTv.getState()
-  if (queue.length < QUEUE_LOW) void readMore(id, t)
+  if (dwell.playable(queue, now) < QUEUE_LOW) void readMore(id, t)
   // A commercial on screen: nothing from the tape plays under it ("No
   // cyberspace actions play in the bg while the hosaka ad plays"). The tape
   // picks up where it was, after a cut.
@@ -750,7 +760,10 @@ function tick(id: number): void {
     s = useTv.getState()
   }
   scanTick(s)
-  if (s.shot === null || (now - shotBegan) / 1000 >= s.shot.length) {
+  // One pubkey has held the screen its time (lib/tv/dwell): on to someone
+  // else's shot now, cutting this one short, when the tape has one ready.
+  const moveOn = s.shot !== null && dwell.over(now) && dwell.someoneElse(queue, now)
+  if (s.shot === null || (now - shotBegan) / 1000 >= s.shot.length || moveOn) {
     // A break, when one is due: between shots, never across one.
     if (now >= adDue && s.status === 'playing') {
       const spot = nextAd(lastAd)
@@ -759,11 +772,17 @@ function tick(id: number): void {
       // says we don't have to mute the music while my hosaka ad plays").
       // holdMusicForAd is kept for a spot's own music, if one is ever made.
       useTv.setState({ ad: { at: now, id: spot.id }, shot: null, jump: null, played: 0, cutAt: now })
+      dwell.onScreen(null, now)
       return
     }
-    let next = queue.shift()
-    // Arrivals and reactions take no screen time: each is a line on the ticker.
-    while (next?.kind === 'arrival' || next?.kind === 'reaction') { if (next.kind === 'arrival') arrive(next); else react(next); next = queue.shift() }
+    // Arrivals and reactions take no screen time: each is a line on the
+    // ticker. A resting pubkey's shots are passed over (lib/tv/dwell), and
+    // while the tape is read on for someone else, the picture holds.
+    const pick = dwell.pick(queue, now, reader !== null && !reader.caughtUp && failures < NO_SIGNAL_AFTER)
+    const taken = 'wait' in pick ? queue.splice(0, Math.max(0, queue.findIndex(onAir))) : queue.splice(0, 'play' in pick ? pick.play + 1 : queue.length)
+    const next = 'play' in pick ? taken.pop() : undefined
+    for (const q of taken) { if (q.kind === 'arrival') arrive(q); else if (q.kind === 'reaction') react(q) }
+    if ('wait' in pick) return
     if (next) { beginShot(next, now, id); return }
     // The relays stopped answering mid-tape: say so over the last picture
     // rather than holding on it in silence. A read that answers plays on.
@@ -816,6 +835,7 @@ async function tune(id: number): Promise<void> {
   if (useTv.getState().ad) adDue = performance.now() + adEveryMs(isBroadcast())
   // A new tape shows only what it opens itself: the scan's memory stays, what it showed goes.
   looked = null
+  dwell.onScreen(null, performance.now())
   prepared.clear()
   useTv.setState({ status: 'tuning', shot: null, played: 0, tapeTime: null, avatars: {}, arrivals: [], reactions: [], boxes: [], jump: null, ad: null, skipped: 0, cutAt: performance.now(), found: {}, finds: [] })
   let from: number | null = null
@@ -906,6 +926,7 @@ export const useTv = create<TvState>((set, get) => ({
     if (cs.spectate) stopSpectating()
     run++
     scanner = newScanner()
+    dwell = new Dwell(dwellLimits(isBroadcast()))
     set({ on: true })
     adDue = performance.now() + adEveryMs(isBroadcast())
     // In the tap that turned TV on, where a browser lets sound start.

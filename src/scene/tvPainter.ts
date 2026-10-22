@@ -608,8 +608,11 @@ export class TvPainter {
     // chiron; side by side, it shares the chiron's top, and this only keeps a
     // hair clear of it.
     const centreW = Math.min(760 * s, W - 2 * MX)
-    // A centre panel keeps under the address only where it reaches across to it.
-    const segmentTop = tag && (W + centreW) / 2 > tag.left - 8 * s ? clockBottom : cy
+    // A centre panel keeps under the address only where it reaches across to
+    // it; on the stream, and under the minimap where it reaches under that (a
+    // square frame, where it is as wide as the frame).
+    const underMap = tag && (W - centreW) / 2 < MX + mapSize ? MY + mapSize : 0
+    const segmentTop = Math.max(tag && (W + centreW) / 2 > tag.left - 8 * s ? clockBottom : cy, underMap)
     const floor = this.npRect && (narrow || (W + centreW) / 2 > W - MX - npW) ? Math.min(chironTop, npTop - 6 * s) : chironTop
 
     // A segment's panel at the centre.
@@ -618,8 +621,12 @@ export class TvPainter {
     // Beside the clock it keeps off the chiron, and on a phone, where NOW
     // PLAYING spans the width over the chiron, off that too (review of #393).
     const sideBottom = narrow && this.npRect ? Math.min(chironTop - 50 * s, npTop - 6 * s) : chironTop - 50 * s
+    // A panel under the minimap (on a square stream), its room the less for
+    // it, keeps clear of a LATER or MEANWHILE card's backing too, which
+    // starts 56 px over the floor (review of #447: a comment's panel reached 50).
+    const segmentFloor = floor - (underMap ? 60 : 50) * s
     part('segment')
-    if (item && inset && p.status === 'playing') this.segment(item, p.shot!.length, a, W, segmentTop + 14 * s, floor - 50 * s, sideBottom, MX, MY, W - MX - lw - 16 * s, MX + mapSize + 16 * s, s, narrow, now)
+    if (item && inset && p.status === 'playing') this.segment(item, p.shot!.length, a, W, segmentTop + 14 * s, segmentFloor, sideBottom, MX, MY, W - MX - lw - 16 * s, MX + mapSize + 16 * s, s, narrow, now)
 
     // LATER and MEANWHILE, after the cut's transition; under an inset's panel.
     part('card')

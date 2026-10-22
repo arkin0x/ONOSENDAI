@@ -28,7 +28,7 @@ import { memo, useEffect, useLayoutEffect, useMemo, useRef } from 'react'
 import { useFrame } from '@react-three/fiber'
 import { Vector3 } from 'three'
 import { watchContext } from '../lib/glContext'
-import { isBroadcast, recoverLostContext } from '../lib/tv/broadcast'
+import { broadcastDpr, isBroadcast, recoverLostContext } from '../lib/tv/broadcast'
 import { keepPrograms } from '../lib/keepPrograms'
 import { BG } from '../lib/palette'
 import { GRID_RADIUS, cellDelta, claimScreenAxes, originShift, type Position } from '../lib/space'
@@ -820,8 +820,8 @@ export const Scene = memo(function Scene(): JSX.Element {
   return (
     <Canvas
       camera={{ fov: FOV, position: [0, 0, START_DISTANCE], near: CAMERA_NEAR, far: 6000 }}
-      // The stream draws at 1:1 (lib/tv/broadcast): a predictable picture and cost.
-      dpr={isBroadcast() ? 1 : [1, 2]}
+      // The stream draws at the capture's ratio, 1 to 1.5 (lib/tv/broadcast): a predictable picture and cost.
+      dpr={isBroadcast() ? broadcastDpr() : [1, 2]}
       // high-performance: ask for the discrete GPU and against power-save
       // clocking, so a visually quiet frame still ships on time.
       // No antialias on the canvas itself: every frame is drawn by the

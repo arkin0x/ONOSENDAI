@@ -20,7 +20,11 @@
  *   - WWW.ONOSENDAI.TECH stands under the clock, top right, for good, so a
  *     viewer always knows where to go (BROADCAST_TAG; scene/tvPainter;
  *     arkinox, 2026-10-22). Not over the HOSAKA spot, which owns the picture.
- *   - The pixel ratio is 1 (scene/Scene).
+ *   - The pixel ratio is the capture's, 1 to 1.5 (broadcastDpr; scene/Scene):
+ *     1 for the 1280x720 and 720x720 captures, 1.5 for the 1080x1080 one,
+ *     which is the 720x720 layout drawn sharp rather than stretched.
+ *   - In a square frame, a segment's panel, as wide as the frame there,
+ *     keeps under the minimap as it does under the address (scene/tvPainter).
  *   - Each rendered TV frame adds one to window.__tvFrames, and each lost
  *     WebGL context to window.__tvCtxLost, for the encoder's watchdog.
  *   - A lost WebGL context not back within CONTEXT_WAIT_MS reloads the page,
@@ -34,6 +38,14 @@ export const BROADCAST_PARAM = 'broadcast'
 
 /** The stream's address, on the picture for good (arkinox, 2026-10-22: exactly this). */
 export const BROADCAST_TAG = 'WWW.ONOSENDAI.TECH'
+
+/** The most pixels per CSS pixel the stream draws at: the 1080x1080 capture's (arkinox, 2026-10-22). */
+export const BROADCAST_MAX_DPR = 1.5
+
+/** The stream's pixel ratio: the capture's own, from 1 to BROADCAST_MAX_DPR, so its cost stays known. */
+export function broadcastDpr(device: number = typeof window === 'undefined' ? 1 : window.devicePixelRatio): number {
+  return Number.isFinite(device) && device > 1 ? Math.min(BROADCAST_MAX_DPR, device) : 1
+}
 
 /** How long a lost WebGL context has to come back before the page reloads, ms. */
 export const CONTEXT_WAIT_MS = 5_000

@@ -26,7 +26,11 @@ describe('withCard', () => {
     const page = withCard(index, WORKSHOP_CARD)
     expect(page).toContain('<meta property="og:url" content="https://onosendai.tech/workshop"')
     expect(page).toContain('<title>SHARD WORKSHOP · ONOSENDAI</title>')
-    expect(page).toContain('<meta property="og:image" content="https://onosendai.tech/og.png?v=2"')
+    // The home page's picture, read from index.html, so a new home card cannot leave this one behind.
+    const tag = (prop: string) => new RegExp(`<meta property="${prop}" content="([^"]*)"`).exec(index)?.[1]
+    expect(WORKSHOP_CARD.image).toBe(tag('og:image'))
+    expect(WORKSHOP_CARD.imageType).toBe(tag('og:image:type'))
+    expect(WORKSHOP_CARD.imageAlt).toBe(tag('og:image:alt'))
     expect(page).toContain(`<meta property="og:description" content="${WORKSHOP_CARD.description}"`)
     const strip = (h: string) => h.replace(/<title>[^<]*<\/title>/, '').replace(/<meta (name="description"|property="og:[^"]*") content="[^"]*"/g, '')
     expect(strip(page)).toBe(strip(index))

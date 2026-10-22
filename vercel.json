@@ -9,6 +9,7 @@
     { "source": "/TV", "destination": "/tv.html" },
     { "source": "/workshop", "destination": "/workshop.html" },
     { "source": "/workshop/", "destination": "/workshop.html" },
-    { "source": "/WORKSHOP", "destination": "/workshop.html" }
+    { "source": "/WORKSHOP", "destination": "/workshop.html" },
+    { "source": "/Workshop", "destination": "/workshop.html" }
   ]
 }

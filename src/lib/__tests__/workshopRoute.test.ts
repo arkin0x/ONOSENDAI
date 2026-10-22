@@ -110,6 +110,17 @@ describe('startWorkshopRoute', () => {
     stop()
   })
 
+  it('closed from the link, a workshop the menu opens later is not Back\'s to close (review of #445)', () => {
+    const { loc, pop, stop } = page('/workshop', '?from=stream')
+    w().closeWorkshop()
+    // The tour pushes /demo (a push fires no popstate); the workshop is opened from the menu there.
+    loc.pathname = '/demo'
+    w().openWorkshop()
+    pop('/')
+    expect(w().open).toBe(true)
+    stop()
+  })
+
   it('stops following the address once stopped', () => {
     const { pop, replaceState, stop } = page('/workshop')
     stop()
@@ -123,7 +134,7 @@ describe('startWorkshopRoute', () => {
 describe('vercel.json', () => {
   it('serves /workshop its own page, the one the build writes (vite.config.ts routeCards)', () => {
     const { rewrites } = JSON.parse(readFileSync(new URL('../../../vercel.json', import.meta.url), 'utf8')) as { rewrites: Array<{ source: string; destination: string }> }
-    for (const source of ['/workshop', '/workshop/', '/WORKSHOP']) {
+    for (const source of ['/workshop', '/workshop/', '/WORKSHOP', '/Workshop']) {
       expect(rewrites.find((r) => r.source === source)?.destination).toBe('/workshop.html')
     }
   })

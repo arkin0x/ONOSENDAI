@@ -36,9 +36,13 @@ export function startWorkshopRoute(
   let wasAt = isWorkshopPath(loc.pathname)
 
   // Closed while the address still says /workshop: the root, with whatever
-  // query and fragment the link carried, as a /C/ link's ending does.
+  // query and fragment the link carried, as a /C/ link's ending does. Closed
+  // at all, the address has no workshop of its own any more: one opened from
+  // the menu later is not Back's to close (review of #445).
   const unsubscribe = useWorkshop.subscribe((s, prev) => {
-    if (!prev.open || s.open || !isWorkshopPath(loc.pathname)) return
+    if (!prev.open || s.open) return
+    wasAt = false
+    if (!isWorkshopPath(loc.pathname)) return
     try { history.replaceState(null, '', `/${loc.search}${loc.hash}`) } catch { /* no history here */ }
   })
 

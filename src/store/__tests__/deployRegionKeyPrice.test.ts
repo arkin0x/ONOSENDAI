@@ -116,7 +116,11 @@ describe('every place a region key is priced', () => {
 
   it('and a bought region key waits by the region key ladder too', () => {
     const cs = src('store', 'useCyberspace.ts')
-    const buyRegionKey = cs.slice(cs.indexOf('  buyRegionKey: async'), cs.indexOf('  rideViaHosaka: async'))
+    const start = cs.indexOf('  buyRegionKey: async')
+    const end = cs.indexOf('\n  },\n', start)
+    expect(start).toBeGreaterThan(-1)
+    expect(end).toBeGreaterThan(start)
+    const buyRegionKey = cs.slice(start, end)
     expect(buyRegionKey).toContain('regionKeyQuote(height, get().cloud.provider)')
     expect(buyRegionKey).not.toContain('pricing?.hop')
   })

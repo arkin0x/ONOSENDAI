@@ -153,7 +153,7 @@ export interface HosakaQuote {
   tier: string | null
   est_time: string | null
   /** The wait in seconds, so a route's steps can be added up; older servers omit it. */
-  est_seconds?: number
+  est_seconds?: number | null
   hint: string | null
   /**
    * Axis trees HOSAKA already holds and will not build again, by name, as in
@@ -284,7 +284,7 @@ export interface HosakaRideQuote {
   within_cap: boolean
   max_blocks?: number
   max_block_height?: number
-  est_seconds?: number
+  est_seconds?: number | null
   /** A human reading of est_seconds, such as "~10 min". */
   est_time?: string | null
   refusal?: { error?: string; hint?: string } | null

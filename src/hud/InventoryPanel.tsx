@@ -162,6 +162,13 @@ export const MOVED_NOTICE_MS = 5000
 
 /** Whether a message's text is a Cashu coin: money, so it is never cleared with the rest. */
 const isCoin = (text: string | undefined): boolean => readCashuToken(text ?? null).raw !== null
+/**
+ * What CLEAR ALL leaves: coins, and messages holding a nonfungible.cash claim
+ * link. A cleared row can never be taken again, so an unclaimed NFT swept up
+ * with the rest would be out of reach for good (review of #440). An NFT row
+ * keeps its own X, since whether it was claimed is never known here.
+ */
+const keptFromAll = (text: string | undefined): boolean => isCoin(text) || hasNftLink(text)
 
 /**
  * Something taken out of a chest: a coin, a shard, a message or a chest,
@@ -272,7 +279,7 @@ export function InventoryPanel(): JSX.Element {
         <div className="shards__section">
           <span className="held__takenhead">
             <span className="legend__label">Taken</span>
-            <button className="tag tag--tap" onClick={() => useInventory.getState().clearTaken(taken.filter((t) => clearsWithAll(t, isCoin)).map((t) => t.id))} title="Clear everything from TAKEN except coins, which are cleared one at a time once redeemed">CLEAR ALL</button>
+            <button className="tag tag--tap" onClick={() => useInventory.getState().clearTaken(taken.filter((t) => clearsWithAll(t, keptFromAll)).map((t) => t.id))} title="Clear everything from TAKEN except coins and NFT links, which are cleared one at a time">CLEAR ALL</button>
           </span>
           <ul className="secrets__list held__list">
             {taken.map((t) => <TakenRow key={t.id} item={t} />)}

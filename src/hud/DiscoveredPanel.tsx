@@ -28,6 +28,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { useLoot } from '../hooks/useLoot'
 import { bagReading, messagePreview } from '../lib/hidden'
+import { NFT_WORDS, replaceNftLinks } from '../lib/nftLink'
 import { useBagReadingsVersion } from '../hooks/useBagReadings'
 import { formatBytes, regionLabel, type LootItem } from '../lib/loot'
 import { CYBERSPACE_RELAY } from '../lib/relay'
@@ -143,7 +144,7 @@ function BagList({ mode }: { mode: Mode }): JSX.Element {
           {it.height !== null && <>h{it.height} · </>}
           {regionLabel(it.height)} · {formatBytes(it.bytes)}
         </div>
-        {it.riddle && <div className="loot__riddle" title={it.riddle}>“{messagePreview(it.riddle, 90)}”</div>}
+        {it.riddle && <div className="loot__riddle" title={replaceNftLinks(it.riddle, NFT_WORDS)}>“{messagePreview(it.riddle, 90)}”</div>}
       </button>
     </li>
   )

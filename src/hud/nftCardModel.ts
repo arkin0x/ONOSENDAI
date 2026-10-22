@@ -8,8 +8,8 @@
  * and CLAIM, which opens the link on nonfungible.cash. The card never claims.
  *
  * Asking follows useCashu: once a minute at most per link, shared by every
- * card showing it, and a link the site has called claimed or cancelled is
- * never asked about again. While lib/nftLink NFT_LINK_API is null (the site
+ * card showing it, and a link the site has called claimed is never asked
+ * about again. While lib/nftLink NFT_LINK_API is null (the site
  * sends no CORS headers, so a browser here cannot read its answer) nothing
  * is asked and every card reads CHECK ON SITE.
  */
@@ -20,8 +20,12 @@ import { checkNftLink, NFT_LINK_API, UNKNOWN_LINK, type NftLink, type NftLinkInf
 const RECHECK_MS = 60_000
 const cache = new Map<string, { info: NftLinkInfo; at: number; pending: Promise<NftLinkInfo> | null }>()
 
-/** Claimed and cancelled never change back, so they are never asked about again. */
-const final = (s: NftLinkState): boolean => s === 'claimed' || s === 'cancelled'
+/**
+ * Only claimed never changes back, so only it is never asked about again.
+ * The site also reports a link as void for a moment while a claim is going
+ * through (portfolio_links.py Links.get), so cancelled is asked again.
+ */
+const final = (s: NftLinkState): boolean => s === 'claimed'
 
 /**
  * Ask `api` about a link, no more than once a minute, and never again once it
@@ -48,15 +52,22 @@ export function forgetNftAnswers(): void { cache.clear() }
 export type NftView = NftLinkInfo['state'] | 'checking'
 
 /** What the site has said about a link, asked only when `api` is set. */
-export function useNftLink(link: NftLink, api: string | null = NFT_LINK_API): { state: NftView; info: NftLinkInfo } {
-  const [info, setInfo] = useState<NftLinkInfo | null>(() => (api ? cache.get(link.id)?.info ?? null : UNKNOWN_LINK))
+export function useNftLink(link: NftLink, api: string | null = NFT_LINK_API): { state: NftView; info: NftLinkInfo; asked: boolean } {
+  const known = (): NftLinkInfo | null => (api ? cache.get(link.id)?.info ?? null : UNKNOWN_LINK)
+  // The answer is kept with the link it is about, so a card handed another
+  // link never shows the last one's answer, even for a frame (review of #440).
+  const [held, setHeld] = useState<{ id: string; info: NftLinkInfo | null }>(() => ({ id: link.id, info: known() }))
   useEffect(() => {
-    if (!api) { setInfo(UNKNOWN_LINK); return }
+    setHeld({ id: link.id, info: known() })
+    if (!api) return
     let live = true
-    void infoOf(link.id, api).then((i) => { if (live) setInfo(i) })
+    void infoOf(link.id, api).then((i) => { if (live) setHeld({ id: link.id, info: i }) })
     return () => { live = false }
+    // known reads only link.id and api.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [link.id, api])
-  return info ? { state: info.state, info } : { state: 'checking', info: UNKNOWN_LINK }
+  const info = held.id === link.id ? held.info : known()
+  return info ? { state: info.state, info, asked: api !== null } : { state: 'checking', info: UNKNOWN_LINK, asked: api !== null }
 }
 
 export interface NftCardModel {
@@ -76,13 +87,13 @@ export interface NftCardModel {
   openTip: string
 }
 
-/** The card's words for a link, in each state. */
-export function nftCardModel(state: NftView, info: NftLinkInfo): NftCardModel {
+/** The card's words for a link, in each state. `asked` is whether the site was asked at all (NFT_LINK_API is set). */
+export function nftCardModel(state: NftView, info: NftLinkInfo, asked = false): NftCardModel {
   const gone = state === 'claimed' || state === 'cancelled' || state === 'missing'
   return {
     title: info.title,
     status: STATUS[state],
-    statusTip: TIP[state],
+    statusTip: state === 'unknown' && asked ? 'nonfungible.cash could not be reached. Open it there to see if it is still unclaimed' : TIP[state],
     tone: state,
     password: info.password === true,
     open: gone ? 'OPEN ON SITE' : 'CLAIM',

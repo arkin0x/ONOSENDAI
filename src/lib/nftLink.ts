@@ -37,20 +37,30 @@ export interface NftLink {
 }
 
 /**
- * What may come right before a link: the start of the text, a space, or an
- * opening mark ( `(`, `[`, `<`, a quote, `*`). Anything else means the text is
- * not this link: `xhttps://`, a link inside another link's path or query
- * (`/https://`, `=https://`), and so on. Written as a captured group rather
- * than a lookbehind, which older Safari cannot parse at all.
+ * What may come right before a link: the start of the text, a space (a
+ * zero-width one too), or a mark people put before a link: an opening
+ * bracket or curly quote, a straight quote, `*`, `>`, `|`, `,`, `;`, `:`
+ * (`link:https://...`), a backtick, or an en or em dash (written as escapes
+ * here). Letters, digits and the URL marks `/`, `=`, `&`, `%`, `#`, `.`, `@`
+ * and `?` are not allowed, so `xhttps://` and most links inside another
+ * link's path or query (`/https://`, `=https://`) are not this link. A few
+ * allowed marks can sit inside a URL (`;`, `,`), so
+ * `https://a.example/?b=1;https://nonfungible.cash/...` is read as a link;
+ * that is harmless, because the card always rebuilds the link to
+ * nonfungible.cash from its id and key and opens nothing else. Written as a
+ * captured group rather than a lookbehind, which older Safari cannot parse.
  */
-const BEFORE = String.raw`(^|[\s(\[{<"'“‘*>|,;])`
+const BEFORE = '(^|[\\s\\u200b(\\[{<"\'\\u201c\\u2018*>|,;:\\u0060\\u2013\\u2014])'
 
 /**
- * The link itself. The key's last character is one of sixteen, since 32
- * bytes fill only 256 of the 258 bits 43 base64 characters hold, and the
- * site's encoder always leaves the last two at zero.
+ * The link itself. The scheme and host are read in any case, as browsers
+ * read them (a phone may capitalize `Https`); the id and key are exact. The
+ * key's last character is one of sixteen, since 32 bytes fill only 256 of
+ * the 258 bits 43 base64 characters hold, and the site's encoder always
+ * leaves the last two at zero.
  */
-const LINK = String.raw`https://nonfungible\.cash/claim/([0-9a-f]{32})#([A-Za-z0-9_-]{42}[AEIMQUYcgkosw048])`
+const anyCase = (word: string): string => word.replace(/[a-z]/g, (c) => `[${c}${c.toUpperCase()}]`).replace(/\./g, '\\.')
+const LINK = String.raw`${anyCase('https')}://${anyCase('nonfungible.cash')}/claim/([0-9a-f]{32})#([A-Za-z0-9_-]{42}[AEIMQUYcgkosw048])`
 
 /**
  * What may not come right after: more key characters (a key longer than 43
@@ -170,7 +180,9 @@ export function readNftLinkAnswer(body: unknown): NftLinkInfo {
 export async function checkNftLink(id: string, api: string, fetchFn: typeof fetch = fetch): Promise<NftLinkInfo> {
   if (!/^[0-9a-f]{32}$/.test(id)) return UNKNOWN_LINK
   try {
-    const r = await fetchFn(`${api.replace(/\/+$/, '')}/${id}`, { credentials: 'omit', referrerPolicy: 'no-referrer', cache: 'no-store' })
+    // A site that never answers is unknown after ten seconds, not CHECKING for the session.
+    const signal = typeof AbortSignal !== 'undefined' && 'timeout' in AbortSignal ? AbortSignal.timeout(10_000) : undefined
+    const r = await fetchFn(`${api.replace(/\/+$/, '')}/${id}`, { credentials: 'omit', referrerPolicy: 'no-referrer', cache: 'no-store', signal })
     if (r.status === 404) return { ...UNKNOWN_LINK, state: 'missing' }
     if (!r.ok) return UNKNOWN_LINK
     return readNftLinkAnswer(await r.json())

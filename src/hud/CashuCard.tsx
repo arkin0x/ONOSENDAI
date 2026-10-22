@@ -45,7 +45,8 @@ export function MessageText({ text, words, tags }: { text: string; words: (text:
     <>
       {rest && words(rest)}
       {tokens.map((t, i) => <CashuCard key={i} token={t} />)}
-      {links.map((l, i) => <NftCard key={i} link={l} picture={picture} />)}
+      {/* Keyed by place and id, never by the link, which holds the key: a card's state never carries over to another link (review of #440). */}
+      {links.map((l, i) => <NftCard key={`${i}:${l.id}`} link={l} picture={picture} />)}
     </>
   )
 }

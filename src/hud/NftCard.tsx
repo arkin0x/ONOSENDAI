@@ -29,10 +29,11 @@ import { Explanation } from './Explanation'
  * where to ask about the link, defaulting to NFT_LINK_API.
  */
 export function NftCard({ link, picture, api }: { link: NftLink; picture?: string; api?: string | null }): JSX.Element {
-  const { state, info } = useNftLink(link, api === undefined ? NFT_LINK_API : api)
-  const card = nftCardModel(state, info)
+  const { state, info, asked } = useNftLink(link, api === undefined ? NFT_LINK_API : api)
+  const card = nftCardModel(state, info, asked)
   const [copy, setCopy] = useState<'idle' | 'copied' | 'failed'>('idle')
-  const [full, setFull] = useState(false)
+  // Which picture was tapped for, by its hash: a tap on one NFT never loads another's (review of #440).
+  const [tapped, setTapped] = useState<string | null>(null)
 
   const flash = (to: 'copied' | 'failed'): void => {
     setCopy(to)
@@ -43,11 +44,11 @@ export function NftCard({ link, picture, api }: { link: NftLink; picture?: strin
     navigator.clipboard.writeText(link.url).then(() => flash('copied'), () => flash('failed'))
   }
 
-  const fullPicture = full && info.picture ? nftPictureUrl(info.picture) : null
+  const fullPicture = info.picture && tapped === info.picture ? nftPictureUrl(info.picture) : null
   const thumb = picture
     ? <img className="nftcard__thumb" src={picture} alt="" />
     : info.picture
-      ? <button type="button" className="nftcard__thumb nftcard__thumb--tap" onClick={() => setFull(true)} title="Load its picture from nonfungible.cash" aria-label="Load its picture from nonfungible.cash"><Gem size={16} strokeWidth={2} aria-hidden /></button>
+      ? <button type="button" className="nftcard__thumb nftcard__thumb--tap" onClick={() => setTapped(info.picture)} title="Load its picture from nonfungible.cash" aria-label="Load its picture from nonfungible.cash"><Gem size={16} strokeWidth={2} aria-hidden /></button>
       : <span className="nftcard__thumb" title="Its picture is on nonfungible.cash"><Gem size={16} strokeWidth={2} aria-hidden /></span>
 
   return (

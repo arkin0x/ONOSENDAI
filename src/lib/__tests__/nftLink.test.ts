@@ -52,6 +52,19 @@ describe('findNftLinks: real links', () => {
     expect(findNftLinks(text).map((l) => l.id)).toEqual([ID, ID2])
   })
 
+  it('finds a link after the marks people put before one', () => {
+    for (const before of ['link:', '\u0060', '\u2014', '\u2013', ' \u2014 ', '\u200b', '> ', '| ']) {
+      expect(findNftLinks(`claim ${before}${LINK}`).map((l) => l.id), JSON.stringify(before)).toEqual([ID])
+    }
+    expect(findNftLinks('\u0060' + LINK + '\u0060').map((l) => l.id)).toEqual([ID])
+  })
+
+  it('reads the scheme and host in any case, and opens the link as the site writes it', () => {
+    const shouted = `Https://NonFungible.Cash/claim/${ID}#${KEY}`
+    expect(findNftLinks(shouted)).toEqual([{ id: ID, key: KEY, url: LINK }])
+    expect(textWithoutNftLinks(`see ${shouted}`)).toBe('see')
+  })
+
   it('finds two links with only a space between them', () => {
     expect(findNftLinks(`${LINK} ${LINK2}`).map((l) => l.id)).toEqual([ID, ID2])
   })

@@ -185,6 +185,23 @@ describe('asking, as useCashu asks a mint', () => {
     clock.mockRestore()
   })
 
+  it('asks again about a cancelled link, which the site also reports for a moment mid-claim', async () => {
+    const f = answer('void')
+    const now = Date.now()
+    const clock = vi.spyOn(Date, 'now')
+    clock.mockReturnValue(now)
+    await infoOf(ID, '/x', f as unknown as typeof fetch)
+    clock.mockReturnValue(now + 2 * 60_000)
+    await infoOf(ID, '/x', f as unknown as typeof fetch)
+    expect(f).toHaveBeenCalledTimes(2)
+    clock.mockRestore()
+  })
+
+  it('a site that could not be reached says so in the tooltip, once the check is on', () => {
+    expect(nftCardModel('unknown', UNKNOWN_LINK, true).statusTip).toMatch(/could not be reached/)
+    expect(nftCardModel('unknown', UNKNOWN_LINK, false).statusTip).toMatch(/does not ask/)
+  })
+
   it('an unknown answer never overwrites a definite one', async () => {
     const now = Date.now()
     const clock = vi.spyOn(Date, 'now')

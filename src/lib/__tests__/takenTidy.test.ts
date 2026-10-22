@@ -9,6 +9,7 @@ import { describe, expect, it } from 'vitest'
 import { newShard, vertexAt } from 'sno-core/shards'
 import type { ShardModel } from 'sno-core/shards'
 import { clearsWithAll, holdsModel, modelPrint, splitPanels, type HeldItem } from '../inventory'
+import { hasNftLink } from '../nftLink'
 
 const column = (name: string, id: string, x = 0): ShardModel => ({
   ...newShard(name),
@@ -46,5 +47,10 @@ describe('leaving the TAKEN list', () => {
     expect(clearsWithAll({ type: 'message', text: 'cashuBo2F0...' }, coin)).toBe(false)
     expect(clearsWithAll({ type: 'message', text: 'hello' }, coin)).toBe(true)
     expect(clearsWithAll({ type: 'shard', text: undefined }, coin)).toBe(true)
+    // An unclaimed NFT swept up by CLEAR ALL could never be taken again (review of #440).
+    const kept = (t: string | undefined): boolean => coin(t) || hasNftLink(t)
+    const nft = `for you https://nonfungible.cash/claim/${'6f'.repeat(16)}#${'A'.repeat(43)}`
+    expect(clearsWithAll({ type: 'message', text: nft }, kept)).toBe(false)
+    expect(clearsWithAll({ type: 'message', text: 'hello' }, kept)).toBe(true)
   })
 })

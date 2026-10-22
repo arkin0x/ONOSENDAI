@@ -102,6 +102,16 @@ export function replaceNftLinks(text: string, by: string): string {
 }
 
 /**
+ * A text with every claim link's key replaced by `mask`, each link written
+ * as the site writes it, so the id stays readable and the key does not. By
+ * the pattern, never by the canonical link: a link written in another case
+ * (`Https://NonFungible.Cash/...`) is masked too (review of #440).
+ */
+export function maskNftKeys(text: string, mask: string): string {
+  return text.replace(PATTERN, (_whole, before: string, id: string) => `${before}${NFT_SITE}/claim/${id}#${mask}`)
+}
+
+/**
  * What a message says once its links are taken out, tidied as a Cashu
  * token's words are (lib/cashu textWithoutToken): line breaks kept, the
  * spaces a link leaves behind closed up.

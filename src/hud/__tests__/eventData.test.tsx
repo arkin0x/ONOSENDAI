@@ -96,6 +96,13 @@ describe('a message never shows a claim link\'s key', () => {
     expect(shownEvent(msg).which).toBe('nft')
   })
 
+  it('hides the key of a link written in any case', () => {
+    const shouted = { ...msg, content: `look Https://NonFungible.Cash/claim/${id}#${k} now` }
+    const html = renderToStaticMarkup(<EventData event={shouted} />)
+    expect(html).not.toContain(k)
+    expect(shownEvent(shouted).event.content).toBe(`look https://nonfungible.cash/claim/${id}#${HIDDEN_SECRET} now`)
+  })
+
   it('leaves a message without a link as it is', () => {
     const plain = { ...msg, content: `see https://nonfungible.cash/claim/${id}` }
     expect(shownEvent(plain)).toEqual({ event: plain, hidden: false })

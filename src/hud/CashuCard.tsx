@@ -14,6 +14,9 @@
 import { useState } from 'react'
 import { Copy, Wallet } from 'lucide-react'
 import { cashuTokensAsWritten, cashuWalletHref, textWithoutToken } from '../lib/cashu'
+import { findNftLinks, textWithoutNftLinks } from '../lib/nftLink'
+import { pictureOf } from '../lib/itemPicture'
+import { NftCard } from './NftCard'
 import { useCashu } from './useCashu'
 import { cashuCardModel } from './cashuCardModel'
 import { Explanation } from './Explanation'
@@ -21,18 +24,29 @@ import { ItemIcon } from './ItemIcon'
 
 /**
  * A hidden message's full text, as a panel shows it. `words` draws text the
- * way the panel always has (a quote, a block); for a message with a token it
- * draws only the words around the token, and is skipped when there are none.
- * Each token gets a card of its own, so none of them is hidden by another.
+ * way the panel always has (a quote, a block); for a message with a token or
+ * a nonfungible.cash claim link it draws only the words around them, and is
+ * skipped when there are none. Each token and each link gets a card of its
+ * own, so none of them is hidden by another.
+ *
+ * `tags` are the message's own tags, when the panel has its event: a
+ * message that holds one claim link may carry that NFT's picture under the
+ * item-picture rule (lib/itemPicture pictureOf, a data URI that fetches
+ * nothing), and its card shows it. With several links, which picture goes
+ * with which is not said, so none is shown.
  */
-export function MessageText({ text, words }: { text: string; words: (text: string) => JSX.Element }): JSX.Element {
+export function MessageText({ text, words, tags }: { text: string; words: (text: string) => JSX.Element; tags?: string[][] }): JSX.Element {
   const tokens = cashuTokensAsWritten(text)
-  if (tokens.length === 0) return words(text)
-  const rest = textWithoutToken(text)
+  const links = findNftLinks(text)
+  if (tokens.length === 0 && links.length === 0) return words(text)
+  const rest = textWithoutToken(textWithoutNftLinks(text))
+  const picture = links.length === 1 && Array.isArray(tags) ? pictureOf(tags)?.image : undefined
   return (
     <>
       {rest && words(rest)}
       {tokens.map((t, i) => <CashuCard key={i} token={t} />)}
+      {/* Keyed by place and id, never by the link, which holds the key: a card's state never carries over to another link (review of #440). */}
+      {links.map((l, i) => <NftCard key={`${i}:${l.id}`} link={l} picture={picture} />)}
     </>
   )
 }

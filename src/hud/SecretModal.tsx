@@ -32,6 +32,7 @@ import { editPlaced } from '../store/useBuilder'
 import { useWorkshop } from '../store/useWorkshop'
 import { useEscape } from '../hooks/useEscape'
 import { findCashuToken, textWithoutToken } from '../lib/cashu'
+import { hasNftLink, textWithoutNftLinks } from '../lib/nftLink'
 import { deleteWords, removeWords } from '../lib/deleteWords'
 import { MessageText } from './CashuCard'
 import { ChestBlock, KeyLine } from './ItemRows'
@@ -95,8 +96,10 @@ export function SecretModal(): JSX.Element | null {
   // A message with a Cashu token in it copies only the words around the
   // token: the token has its own COPY TOKEN on the card, and a message that
   // is nothing but a token has no words, so it offers no COPY TEXT at all.
+  // A nonfungible.cash claim link is the same: COPY LINK is on its card.
   const coin = item.type === 'message' && findCashuToken(item.text) !== null
-  const words = coin ? textWithoutToken(item.text) : item.text ?? ''
+  const nft = item.type === 'message' && hasNftLink(item.text)
+  const words = coin || nft ? textWithoutToken(textWithoutNftLinks(item.text)) : item.text ?? ''
   // A shard copies into your workshop as a model; a message copies its text.
   const copy = (): void => {
     if (item.type === 'shard' && item.shard) useWorkshop.getState().importShard(item.shard)
@@ -129,7 +132,7 @@ export function SecretModal(): JSX.Element | null {
         </div>
 
         {item.type === 'message' ? (
-          <MessageText text={item.text ?? ''} words={(t) => <blockquote className="secret__message">{t}</blockquote>} />
+          <MessageText text={item.text ?? ''} tags={item.event?.tags} words={(t) => <blockquote className="secret__message">{t}</blockquote>} />
         ) : item.type === 'key' && item.keyItem ? (
           <div className="secret__shard"><KeyLine name={item.keyItem.name} author={author} /></div>
         ) : item.type === 'chest' && item.chest ? (
@@ -188,8 +191,8 @@ export function SecretModal(): JSX.Element | null {
 
         <div className="secret__actions">
           <button className="secret__act" onClick={goTo} title="Go to it"><Rotate3d size={ICON} strokeWidth={2.25} aria-hidden />VIEW</button>
-          {(item.type === 'shard' || item.type === 'message') && (!coin || words) && (
-            <button className="secret__act" onClick={copy} title={item.type === 'shard' ? 'Copy this model into your workshop' : coin ? 'Copy the words around the token' : 'Copy the text'}>
+          {(item.type === 'shard' || item.type === 'message') && (!(coin || nft) || words) && (
+            <button className="secret__act" onClick={copy} title={item.type === 'shard' ? 'Copy this model into your workshop' : coin ? 'Copy the words around the token' : nft ? 'Copy the words around the NFT link' : 'Copy the text'}>
               {item.type === 'shard' ? <CopyPlus size={ICON} strokeWidth={2.25} aria-hidden /> : <Copy size={ICON} strokeWidth={2.25} aria-hidden />}
               {copied ? 'COPIED' : item.type === 'shard' ? 'COPY TO WORKSHOP' : 'COPY TEXT'}
             </button>

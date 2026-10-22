@@ -11,6 +11,7 @@
 
 import type { WorldItem } from '../store/useShards'
 import { textWithoutToken } from './cashu'
+import { textWithoutNftLinks } from './nftLink'
 
 /** What the card says: a question for its title, then the short lines under it. */
 export interface ConfirmWords {
@@ -26,11 +27,12 @@ export const MESSAGE_NAME_CHARS = 40
 
 /**
  * The first words of a message, on one line, cut at MESSAGE_NAME_CHARS with
- * an ellipsis. A Cashu token is not words, so it is left out, and a message
- * that was nothing but a token has no name at all.
+ * an ellipsis. A Cashu token is not words, so it is left out, as is a
+ * nonfungible.cash claim link, and a message that was nothing but a token or
+ * a link has no name at all.
  */
 export function messageName(text: string | null | undefined): string {
-  const words = textWithoutToken(text).replace(/\s+/g, ' ').trim()
+  const words = textWithoutToken(textWithoutNftLinks(text)).replace(/\s+/g, ' ').trim()
   if (words.length <= MESSAGE_NAME_CHARS) return words
   return `${words.slice(0, MESSAGE_NAME_CHARS).trimEnd()}…`
 }

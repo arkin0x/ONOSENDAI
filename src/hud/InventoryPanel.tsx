@@ -25,6 +25,7 @@ import { useItemFeed } from '../store/useItemFeed'
 import { X } from 'lucide-react'
 import { useProfile } from '../hooks/useProfile'
 import { cashuLabel, readCashuToken } from '../lib/cashu'
+import { hasNftLink } from '../lib/nftLink'
 import { ItemFace, ItemIcon } from './ItemIcon'
 import { chestsOpenedBy, clearsWithAll, keyText, splitPanels, type HeldItem } from '../lib/inventory'
 import { regionLabel } from '../lib/loot'
@@ -161,6 +162,13 @@ export const MOVED_NOTICE_MS = 5000
 
 /** Whether a message's text is a Cashu coin: money, so it is never cleared with the rest. */
 const isCoin = (text: string | undefined): boolean => readCashuToken(text ?? null).raw !== null
+/**
+ * What CLEAR ALL leaves: coins, and messages holding a nonfungible.cash claim
+ * link. A cleared row can never be taken again, so an unclaimed NFT swept up
+ * with the rest would be out of reach for good (review of #440). An NFT row
+ * keeps its own X, since whether it was claimed is never known here.
+ */
+const keptFromAll = (text: string | undefined): boolean => isCoin(text) || hasNftLink(text)
 
 /**
  * Something taken out of a chest: a coin, a shard, a message or a chest,
@@ -208,7 +216,7 @@ function TakenRow({ item }: { item: HeldItem }): JSX.Element {
         )}
       <span className="held__acts">
         {item.type === 'shard' && <button className="chest__act" onClick={moveToWorkshop} title="Move this model into your workshop">MOVE TO WORKSHOP</button>}
-        {item.type === 'message' && <button className={`chest__act ${open ? 'is-on' : ''}`} onClick={() => setOpen((o) => !o)} aria-expanded={open}>{coin ? 'CARD' : 'READ'}</button>}
+        {item.type === 'message' && <button className={`chest__act ${open ? 'is-on' : ''}`} onClick={() => setOpen((o) => !o)} aria-expanded={open}>{coin || hasNftLink(item.text) ? 'CARD' : 'READ'}</button>}
         {clearable && (
           <button className="held__clear" onClick={() => useInventory.getState().clearTaken([item.id])} title="Clear it from TAKEN" aria-label={`Clear ${label} from TAKEN`}>
             <X size={14} aria-hidden />
@@ -217,7 +225,7 @@ function TakenRow({ item }: { item: HeldItem }): JSX.Element {
       </span>
       {open && item.type === 'message' && (
         <div className="held__details">
-          <MessageText text={item.text ?? ''} words={(t) => <blockquote className="secret__message">{t}</blockquote>} />
+          <MessageText text={item.text ?? ''} tags={item.event?.tags} words={(t) => <blockquote className="secret__message">{t}</blockquote>} />
         </div>
       )}
     </li>
@@ -271,7 +279,7 @@ export function InventoryPanel(): JSX.Element {
         <div className="shards__section">
           <span className="held__takenhead">
             <span className="legend__label">Taken</span>
-            <button className="tag tag--tap" onClick={() => useInventory.getState().clearTaken(taken.filter((t) => clearsWithAll(t, isCoin)).map((t) => t.id))} title="Clear everything from TAKEN except coins, which are cleared one at a time once redeemed">CLEAR ALL</button>
+            <button className="tag tag--tap" onClick={() => useInventory.getState().clearTaken(taken.filter((t) => clearsWithAll(t, keptFromAll)).map((t) => t.id))} title="Clear everything from TAKEN except coins and NFT links, which are cleared one at a time">CLEAR ALL</button>
           </span>
           <ul className="secrets__list held__list">
             {taken.map((t) => <TakenRow key={t.id} item={t} />)}

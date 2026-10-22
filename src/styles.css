@@ -2286,6 +2286,154 @@ kbd {
   .cashucard__status--checking { animation: none; }
 }
 
+/* ---------- NFT card ----------
+ *
+ * A nonfungible.cash claim link in a hidden message, beside the Cashu card
+ * and built the same way, in violet so an NFT never reads as money. The
+ * thumb is the message's own sealed picture or a placeholder, 32px, drawn
+ * pixelated as item pictures are. CLAIMED and CANCELLED turn the edge and
+ * status red, as REDEEMED does on a coin. Buttons are 44px tall for a thumb,
+ * and nothing is wider than the card.
+ */
+.nftcard {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+  margin: 0 0 14px;
+  padding: 10px 12px 12px;
+  color: var(--fg);
+  background: rgba(176, 124, 255, 0.08);
+  border-left: 3px solid #b07cff;
+  border-radius: 3px;
+}
+
+.nftcard--claimed, .nftcard--cancelled, .nftcard--missing {
+  background: rgba(255, 59, 107, 0.07);
+  border-left-color: var(--danger);
+}
+
+.nftcard__head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.nftcard__thumb {
+  flex: 0 0 32px;
+  width: 32px;
+  height: 32px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  font-family: inherit;
+  color: #b07cff;
+  background: rgba(176, 124, 255, 0.12);
+  border: 1px solid rgba(176, 124, 255, 0.5);
+  border-radius: 3px;
+  image-rendering: pixelated;
+  object-fit: contain;
+}
+
+.nftcard__thumb--tap { cursor: pointer; }
+.nftcard__thumb--tap:hover { background: rgba(176, 124, 255, 0.24); }
+
+.nftcard__name {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.nftcard__title {
+  font-size: 10px;
+  letter-spacing: 0.16em;
+  color: #b07cff;
+}
+
+.nftcard__label {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--fg);
+  overflow-wrap: anywhere;
+}
+
+.nftcard__picture {
+  max-width: 100%;
+  max-height: 320px;
+  align-self: flex-start;
+  border-radius: 3px;
+}
+
+.nftcard__state {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.nftcard__status {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.16em;
+  padding: 3px 8px;
+  border-radius: 3px;
+  border: 1px solid currentColor;
+}
+
+.nftcard__status--unclaimed { color: #05070d; background: var(--ok); border-color: var(--ok); }
+.nftcard__status--claimed, .nftcard__status--cancelled, .nftcard__status--missing { color: #05070d; background: var(--danger); border-color: var(--danger); }
+.nftcard__status--unknown { color: var(--fg); border-color: var(--dim); }
+.nftcard__status--password { color: var(--warn); }
+.nftcard__status--checking {
+  color: var(--dim);
+  animation: scan-pulse 1.4s ease-in-out infinite;
+}
+
+.nftcard__acts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.nftcard__act {
+  flex: 1 1 140px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 44px;
+  padding: 0 10px;
+  font-family: inherit;
+  font-size: 10px;
+  letter-spacing: 0.12em;
+  color: #b07cff;
+  text-decoration: none;
+  background: rgba(176, 124, 255, 0.08);
+  border: 1px solid rgba(176, 124, 255, 0.5);
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.nftcard__act:hover { background: rgba(176, 124, 255, 0.18); }
+
+.nftcard__act.is-on {
+  color: #05070d;
+  background: #b07cff;
+  font-weight: 700;
+}
+
+.nftcard .explain { margin-top: 0; }
+
+@media (prefers-reduced-motion: reduce) {
+  .nftcard__status--checking { animation: none; }
+}
+
 /* ---------- Deploy bar ----------
 
 /* ---------- Deploy bar ----------

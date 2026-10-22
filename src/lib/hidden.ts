@@ -53,6 +53,7 @@ import { animationOf, modelOf, modelTags, type ItemAnimation, type ItemModelRef 
 import type { Position } from './space'
 import { mentionTags } from './mentions'
 import { cashuTokensAsWritten } from './cashu'
+import { NFT_WORDS, replaceNftLinks } from './nftLink'
 
 /** The location-encrypted envelope (spec §8.6). */
 export const HIDDEN_KIND = 33330
@@ -351,9 +352,13 @@ export function readItem(inner: Pick<NostrEvent, 'kind' | 'content' | 'tags' | '
   return null
 }
 
-/** A short one-line look at a message, for a title or a row. */
+/**
+ * A short one-line look at a message, for a title or a row. A nonfungible.cash
+ * claim link reads as "NFT link": its key is what claims, so no row, title or
+ * label ever shows it (lib/nftLink).
+ */
 export function messagePreview(text: string, max = 32): string {
-  const t = text.trim().replace(/\s+/g, ' ')
+  const t = replaceNftLinks(text, NFT_WORDS).trim().replace(/\s+/g, ' ')
   return t.length > max ? `${t.slice(0, max)}…` : t || 'empty'
 }
 

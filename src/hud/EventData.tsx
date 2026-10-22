@@ -11,7 +11,9 @@
  * shown to nobody"): it opens every chest sealed to the key, and a
  * screenshot or a pasted event would hand that to whoever saw it (review of
  * #399). The field shows the event with the secret hidden, and says that
- * the event shown will not verify.
+ * the event shown will not verify. A message's nonfungible.cash claim link
+ * is the same kind of thing: its key, after the `#`, claims the NFT, so the
+ * key is hidden here too, and the link's id is left to read (lib/nftLink).
  *
  * Its kind is named too, and for a thing this device hid the card passes
  * the wire facts (WireData) as children, between these fields and the JSON:
@@ -24,12 +26,21 @@ import { useMemo, useRef, useState, type ReactNode } from 'react'
 import type { NostrEvent } from 'nostr-tools'
 import { formatStamp } from '../lib/time'
 import { CHEST_KIND, KEY_KIND, MESSAGE_KIND, OBJECT_KIND, SHARD_KIND } from '../lib/hidden'
+import { hasNftLink, maskNftKeys } from '../lib/nftLink'
 
 /** What stands in for a hidden secret. */
 export const HIDDEN_SECRET = '(hidden)'
 
-/** The event as shown: a key item's secret, in its tag or (keys forged before 2026-10-09) as the content, hidden. */
-export function shownEvent(ev: NostrEvent): { event: NostrEvent; hidden: boolean } {
+/**
+ * The event as shown: a key item's secret, in its tag or (keys forged before
+ * 2026-10-09) as the content, hidden, and a message's claim-link keys hidden.
+ * `which` says which, when anything was.
+ */
+export function shownEvent(ev: NostrEvent): { event: NostrEvent; hidden: boolean; which?: 'key' | 'nft' } {
+  if (ev.kind === MESSAGE_KIND && typeof ev.content === 'string') {
+    if (!hasNftLink(ev.content)) return { event: ev, hidden: false }
+    return { event: { ...ev, content: maskNftKeys(ev.content, HIDDEN_SECRET) }, hidden: true, which: 'nft' }
+  }
   if (ev.kind !== KEY_KIND) return { event: ev, hidden: false }
   let hidden = false
   const tags = ev.tags.map((t) => {
@@ -39,7 +50,7 @@ export function shownEvent(ev: NostrEvent): { event: NostrEvent; hidden: boolean
   })
   const legacy = /^[0-9a-f]{64}$/i.test(ev.content.trim())
   if (legacy) hidden = true
-  return { event: { ...ev, tags, content: legacy ? HIDDEN_SECRET : ev.content }, hidden }
+  return hidden ? { event: { ...ev, tags, content: legacy ? HIDDEN_SECRET : ev.content }, hidden, which: 'key' } : { event: { ...ev, tags, content: ev.content }, hidden }
 }
 
 /**
@@ -89,7 +100,7 @@ export function CopyValue({ value, title, shown }: { value: string; title: strin
 
 export function EventData({ event: raw, children }: { event: NostrEvent; children?: ReactNode }): JSX.Element {
   // Once per event: a card re-renders on every store change, and a shard's event runs to tens of KB.
-  const { event, hidden } = useMemo(() => shownEvent(raw), [raw])
+  const { event, which } = useMemo(() => shownEvent(raw), [raw])
   const json = useMemo(() => eventJson(event), [event])
   const d = event.tags.find((t) => t[0] === 'd')?.[1]
   const name = kindName(event.kind)
@@ -115,7 +126,8 @@ export function EventData({ event: raw, children }: { event: NostrEvent; childre
         ))}
       </dl>
       {children}
-      {hidden && <p className="eventdata__note">The key's secret is hidden here, so the event shown will not verify.</p>}
+      {which === 'key' && <p className="eventdata__note">The key's secret is hidden here, so the event shown will not verify.</p>}
+      {which === 'nft' && <p className="eventdata__note">The NFT link's key is hidden here, so the event shown will not verify.</p>}
       <div className="eventdata__json">
         <pre>{json}</pre>
       </div>

@@ -6,6 +6,10 @@
     { "source": "/demo/:path*", "destination": "/index.html" },
     { "source": "/tv", "destination": "/tv.html" },
     { "source": "/tv/", "destination": "/tv.html" },
-    { "source": "/TV", "destination": "/tv.html" }
+    { "source": "/TV", "destination": "/tv.html" },
+    { "source": "/workshop", "destination": "/workshop.html" },
+    { "source": "/workshop/", "destination": "/workshop.html" },
+    { "source": "/WORKSHOP", "destination": "/workshop.html" },
+    { "source": "/Workshop", "destination": "/workshop.html" }
   ]
 }

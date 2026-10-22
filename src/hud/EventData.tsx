@@ -26,7 +26,7 @@ import { useMemo, useRef, useState, type ReactNode } from 'react'
 import type { NostrEvent } from 'nostr-tools'
 import { formatStamp } from '../lib/time'
 import { CHEST_KIND, KEY_KIND, MESSAGE_KIND, OBJECT_KIND, SHARD_KIND } from '../lib/hidden'
-import { hasNftLink, maskNftKeys } from '../lib/nftLink'
+import { maskNftKeys } from '../lib/nftLink'
 
 /** What stands in for a hidden secret. */
 export const HIDDEN_SECRET = '(hidden)'
@@ -38,8 +38,10 @@ export const HIDDEN_SECRET = '(hidden)'
  */
 export function shownEvent(ev: NostrEvent): { event: NostrEvent; hidden: boolean; which?: 'key' | 'nft' } {
   if (ev.kind === MESSAGE_KIND && typeof ev.content === 'string') {
-    if (!hasNftLink(ev.content)) return { event: ev, hidden: false }
-    return { event: { ...ev, content: maskNftKeys(ev.content, HIDDEN_SECRET) }, hidden: true, which: 'nft' }
+    // By the mask, not hasNftLink: a key inside another URL is not a link (spec 7.7) but is hidden too.
+    const content = maskNftKeys(ev.content, HIDDEN_SECRET)
+    if (content === ev.content) return { event: ev, hidden: false }
+    return { event: { ...ev, content }, hidden: true, which: 'nft' }
   }
   if (ev.kind !== KEY_KIND) return { event: ev, hidden: false }
   let hidden = false

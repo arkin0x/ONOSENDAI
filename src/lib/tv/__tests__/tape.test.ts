@@ -115,8 +115,16 @@ function ev(kind: number, at: number, tags: string[][], content = ''): NostrEven
 describe('itemOf', () => {
   it('carries a bag\'s published nft count to the TV, as its cashu', () => {
     const item = itemOf(ev(33330, 5, [['d', 'a'.repeat(64)], ['contents', 'message', '1'], ['contents', 'nft', '1']]))
-    expect(item).toMatchObject({ kind: 'bag', money: false, nft: true, counts: { message: 1, nft: 1 } })
+    expect(item).toMatchObject({ kind: 'bag', money: false, nft: true, counts: { message: '1', nft: '1' } })
     expect(itemOf(ev(33330, 5, [['d', 'a'.repeat(64)], ['contents', 'cashu']]))).toMatchObject({ money: true, nft: false })
+  })
+  // Spec 7.7 "Reading contents": CASHU INSIDE! and NFT INSIDE! only from rows a reader keeps.
+  it('shows no money or NFT on TV for a row whose count is not a count, and any size of count', () => {
+    const bag = (...rows: string[][]) => itemOf(ev(33330, 5, [['d', 'a'.repeat(64)], ...rows]))
+    expect(bag(['contents', 'cashu', '0'])).toMatchObject({ money: false, nft: false, counts: null })
+    expect(bag(['contents', 'cashu', 'lots'])).toMatchObject({ money: false, counts: null })
+    expect(bag(['contents', 'nft', '+1'])).toMatchObject({ nft: false, counts: null })
+    expect(bag(['contents', 'cashu', '1000000'], ['contents', 'nft', '2000000'])).toMatchObject({ money: true, nft: true, counts: { cashu: '1000000', nft: '2000000' } })
   })
   it('reads a bag, with its hint box only when it has one', () => {
     const hinted = itemOf(ev(33330, 5, [['d', 'a'.repeat(64)], ['h', '7'], ['hint', '3129509e23d3a6125e1451a5912dbe01099e1517200000000000000000000000', '30', '30', '30']]))

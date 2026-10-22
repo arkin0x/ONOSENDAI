@@ -716,8 +716,7 @@ export const CONTENTS_KINDS = ['shard', 'message', 'key', 'chest', 'cashu', 'nft
  * `contents`, one `["contents", kind, count]` per kind present, cashu
  * tokens and NFTs included (arkinox, 2026-10-22: an `nft` count, as the
  * `cashu` one); with `money` alone, `["contents", "cashu"]` while a
- * token is inside, and nothing once none is. ONOSENDAI's, not in the spec
- * yet (onosendai/kinds.md, 33330).
+ * token is inside, and nothing once none is. Spec §7.7 "Contents" (#75).
  */
 export function bagContentsTags(inners: readonly (BagEntry | ChatRumor)[], settings: Pick<BagSettings, 'contents' | 'money'>): string[][] {
   if (!settings.contents && !settings.money) return []
@@ -727,20 +726,38 @@ export function bagContentsTags(inners: readonly (BagEntry | ChatRumor)[], setti
 }
 
 /**
- * What a bag's public tags say it holds: whether money is inside (any cashu
- * row, for display), whether the money-alone hint was chosen (a cashu row
- * with no count, for the bag's settings), whether an NFT is (a counted nft
- * row; there is no NFT-alone form), and the counts when given.
+ * A count as spec §7.7 writes one: a positive integer in decimal, with no
+ * sign and no leading zeros (the rules of §10), and no cap. "03", "+3",
+ * "1e2" and "0" are not counts.
  */
-export function readBagContents(tags: string[][]): { money: boolean; moneyAlone: boolean; nft: boolean; counts: Partial<BagContents> | null } {
-  const rows = tags.filter((t) => t[0] === 'contents' && (CONTENTS_KINDS as readonly string[]).includes(t[1] ?? ''))
-  const counts: Partial<BagContents> = {}
+const CONTENTS_COUNT = /^[1-9][0-9]*$/
+
+/** A bag's published counts by kind, each exactly as written (CONTENTS_COUNT), so a count of any size reads as it was written. */
+export type ContentsCounts = Partial<Record<keyof BagContents, string>>
+
+/**
+ * What a bag's public tags say it holds (spec §7.7 "Reading contents"). A
+ * row of a kind this client does not know is ignored, and so is a row whose
+ * count is there but is not a count (CONTENTS_COUNT). What is left: whether
+ * money is inside (a counted cashu row, or the cashu row with no count, the
+ * one form that says only that), whether the money-alone form was chosen
+ * (for the bag's settings), whether an NFT is (a counted nft row; there is
+ * no NFT-alone form), and the counts when given. A claim, for display only:
+ * what the bag holds is its plaintext.
+ */
+export function readBagContents(tags: string[][]): { money: boolean; moneyAlone: boolean; nft: boolean; counts: ContentsCounts | null } {
+  const counts: ContentsCounts = {}
   let counted = false
-  for (const t of rows) {
-    const n = t[2] === undefined ? NaN : Number(t[2])
-    if (Number.isInteger(n) && n > 0 && n < 1_000_000) { counts[t[1] as keyof BagContents] = n; counted = true }
+  let moneyAlone = false
+  for (const t of tags) {
+    if (t[0] !== 'contents' || !(CONTENTS_KINDS as readonly string[]).includes(t[1] ?? '')) continue
+    const kind = t[1] as keyof BagContents
+    if (t[2] === undefined) { if (kind === 'cashu') moneyAlone = true; continue }
+    if (typeof t[2] !== 'string' || !CONTENTS_COUNT.test(t[2])) continue
+    counts[kind] = t[2]
+    counted = true
   }
-  return { money: rows.some((t) => t[1] === 'cashu'), moneyAlone: rows.some((t) => t[1] === 'cashu' && t[2] === undefined), nft: (counts.nft ?? 0) > 0, counts: counted ? counts : null }
+  return { money: moneyAlone || counts.cashu !== undefined, moneyAlone, nft: counts.nft !== undefined, counts: counted ? counts : null }
 }
 
 function sameHint(a: HintHeights | null, b: HintHeights | null): boolean {

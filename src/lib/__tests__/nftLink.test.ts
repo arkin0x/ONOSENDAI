@@ -118,6 +118,39 @@ describe('findNftLinks: look-alikes', () => {
   })
 })
 
+// Spec 7.7 Contents: "A link glued to the end of a word, or standing inside another URL's path or query, is not counted."
+describe('findNftLinks: inside another URL', () => {
+  it('refuses a link right after a mark that sits inside another URL', () => {
+    for (const before of [';', ',', ':', '(', "'", '*']) {
+      for (const url of ['https://a.example/?b=1', 'https://a.example/x', 'https://a.example/#top', 'HTTPS://A.EXAMPLE/x', 'ftp://a.example/x']) {
+        const text = `${url}${before}${LINK}`
+        expect(findNftLinks(text), text).toEqual([])
+        expect(findNftLinks(`see ${text} now`), text).toEqual([])
+        expect(hasNftLink(text), text).toBe(false)
+      }
+    }
+    // The spec's own example, and a link glued to a link.
+    expect(findNftLinks(`https://a.example/?b=1;${LINK}`)).toEqual([])
+    expect(findNftLinks(`${LINK},${LINK2}`).map((l) => l.id)).toEqual([ID])
+  })
+
+  it('still finds a link after those marks in words, and after a URL that ended', () => {
+    for (const text of [`see;${LINK}`, `one,${LINK}`, `(${LINK})`, `'${LINK}'`, `*${LINK}*`, `link:${LINK}`, `a.example/?b=1;${LINK}`,
+      `[https://a.example](${LINK})`, `https://a.example/x ${LINK}`, `https://a.example/x, ${LINK}`, `<https://a.example/>;${LINK}`, `"https://a.example/";${LINK}`,
+      `https://a.example/x\u2014${LINK}`, `https://a.example/x|${LINK}`]) {
+      expect(findNftLinks(text).map((l) => l.id), text).toEqual([ID])
+    }
+    expect(findNftLinks(`${LINK}, ${LINK2}`).map((l) => l.id)).toEqual([ID, ID2])
+    expect(findNftLinks(`https://a.example/?b=1;${LINK2} and ${LINK}`).map((l) => l.id)).toEqual([ID])
+  })
+
+  it('leaves a link inside another URL in the words beside the cards, and hides its key from rows and the scene', () => {
+    const text = `see https://a.example/?b=1;${LINK} and ${LINK2}`
+    expect(textWithoutNftLinks(text)).toBe(`see https://a.example/?b=1;${LINK} and`)
+    for (const shown of [messagePreview(text, 400), messageBillboard(text)]) expect(shown, shown).not.toContain(KEY)
+  })
+})
+
 describe('taking links out of words', () => {
   it('leaves the words, with their line breaks, and closes the gap', () => {
     expect(textWithoutNftLinks(`for the winner ${LINK} good luck`)).toBe('for the winner good luck')

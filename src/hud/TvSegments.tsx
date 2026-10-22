@@ -27,7 +27,7 @@ import { placeable, useTv } from '../store/useTv'
 import { objectsOf } from '../workshop/ObjectPicker'
 import { avatarFromEvent } from '../lib/avatar'
 import { QUOTE_MAX, type TapeItem } from '../lib/tv/director'
-import type { BagContents } from '../lib/hidden'
+import type { BagContents, ContentsCounts } from '../lib/hidden'
 import { ShardSpin, type Pace } from '../scene/ShardSpin'
 
 /** How long a cut's transition takes, ms (scene/TvScreenEffect): a segment's clock starts after it. */
@@ -67,18 +67,19 @@ export function typePace(chars: number, shotLength: number): number {
   return Math.min(TYPE_S, Math.max(0.005, room / Math.max(1, chars)))
 }
 
-/** A bag's published contents in words: 3 SHARDS · 1 MESSAGE · 1 CASHU TOKEN · 1 NFT; null when it published none. */
-export function contentsWords(counts: Partial<BagContents> | null): string | null {
+/** A bag's published contents in words: 3 SHARDS · 1 MESSAGE · 1 CASHU TOKEN · 1 NFT, each count as written; null when it published none. */
+export function contentsWords(counts: ContentsCounts | null): string | null {
   if (!counts) return null
   const names: Array<[keyof BagContents, string, string]> = [['shard', 'SHARD', 'SHARDS'], ['message', 'MESSAGE', 'MESSAGES'], ['key', 'KEY', 'KEYS'], ['chest', 'CHEST', 'CHESTS'], ['cashu', 'CASHU TOKEN', 'CASHU TOKENS'], ['nft', 'NFT', 'NFTS']]
-  const words = names.filter(([k]) => (counts[k] ?? 0) > 0).map(([k, one, many]) => `${counts[k]} ${counts[k] === 1 ? one : many}`)
+  const words = names.flatMap(([k, one, many]) => (counts[k] === undefined ? [] : [`${counts[k]} ${counts[k] === '1' ? one : many}`]))
   return words.length > 0 ? words.join(' · ') : null
 }
 
 /** What the chiron says a segment's author did. */
 export function segmentDoing(item: TapeItem): string {
   if (item.kind === 'bag') {
-    const inside = contentsWords(item.counts) ?? (item.money ? 'CASHU INSIDE' : null)
+    // Money said alone beside counted rows of other kinds is still said (spec 7.7: a reader keeps both).
+    const inside = [contentsWords(item.counts), item.money && item.counts?.cashu === undefined ? 'CASHU INSIDE' : null].filter(Boolean).join(' · ') || null
     return ['SEALED A BAG', placeable(item.hint) ? 'HINT BOX PUBLIC' : null, inside].filter(Boolean).join(' · ')
   }
   if (item.kind === 'object') return 'PUBLISHED AN OBJECT'

@@ -46,9 +46,10 @@ export interface NftLink {
  * link's path or query (`/https://`, `=https://`) are not this link. A few
  * allowed marks can sit inside a URL (`;`, `,`), so
  * `https://a.example/?b=1;https://nonfungible.cash/...` is read as a link;
- * that is harmless, because the card always rebuilds the link to
- * nonfungible.cash from its id and key and opens nothing else. Written as a
- * captured group rather than a lookbehind, which older Safari cannot parse.
+ * that is harmless for a card, because the card always rebuilds the link to
+ * nonfungible.cash from its id and key and opens nothing else, but such a
+ * link is not counted (countNftLinks). Written as a captured group rather
+ * than a lookbehind, which older Safari cannot parse.
  */
 const BEFORE = '(^|[\\s\\u200b(\\[{<"\'\\u201c\\u2018*>|,;:\\u0060\\u2013\\u2014])'
 
@@ -84,6 +85,40 @@ export function findNftLinks(text: string | null | undefined): NftLink[] {
     out.push({ id, key, url })
   }
   return out
+}
+
+/** A character a URL may be written with (RFC 3986: unreserved, reserved but `[` and `]`, and `%`). */
+const URL_CHAR = /[A-Za-z0-9\-._~:/?#@!$&'()*+,;=%]/
+
+/**
+ * How many claim links a text carries for a bag's `nft` count (spec 7.7
+ * Contents), each distinct link once. A link that stands inside another
+ * URL's path or query is not counted: the URL characters right before it,
+ * back to the first one a URL cannot hold, contain a `://` with no `#`
+ * after it. So `https://a.example/?b=1;https://nonfungible.cash/...` counts
+ * none, and `see;https://nonfungible.cash/...`, `[a page](https://nonfungible.cash/...)`
+ * and two links joined by a comma (the second is in the first one's
+ * fragment, not its path or query) count every link. Text with no scheme
+ * before it (`a.example/?b=1;`) is not a URL here, and a character outside
+ * RFC 3986 (`é`) ends one. One pass over the text, however many links.
+ * Cards read every link findNftLinks finds, counted or not.
+ */
+export function countNftLinks(text: string | null | undefined): number {
+  if (!text) return 0
+  const seen = new Set<string>()
+  // The run of URL characters before position `i`: where its last `://` is (-1 for none), and whether a `#` came after that.
+  let i = 0, scheme = -1, fragment = false
+  for (const m of text.matchAll(PATTERN)) {
+    const at = m.index! + m[1].length
+    for (; i < at; i++) {
+      const c = text[i]
+      if (!URL_CHAR.test(c)) { scheme = -1; fragment = false }
+      else if (c === ':' && text[i + 1] === '/' && text[i + 2] === '/') { scheme = i; fragment = false }
+      else if (c === '#') fragment = true
+    }
+    if (scheme === -1 || fragment) seen.add(`${m[2]}#${m[3]}`)
+  }
+  return seen.size
 }
 
 /** Whether a text carries a claim link. */

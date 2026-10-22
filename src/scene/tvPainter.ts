@@ -249,10 +249,19 @@ export function chironDoing(shot: Shot, played: number): string {
 const clamp01 = (x: number): number => Math.min(1, Math.max(0, x))
 const ramp = (t: number, a: number, b: number): number => clamp01((t - a) / (b - a))
 
+/**
+ * More characters than any panel is wide, at the smallest type the painter
+ * draws. A longer text is cut there before it is measured, so one that runs
+ * to thousands of characters (a bag's count has no cap, spec 7.7) costs no
+ * more to paint than a line that fills the panel.
+ */
+const FIT_CHARS = 2048
+
 /** The longest start of `text` that fits `max`, with an ellipsis when cut. */
-function fit(ctx: CanvasRenderingContext2D, text: string, max: number): string {
-  if (ctx.measureText(text).width <= max) return text
-  const chars = Array.from(text)
+export function fit(ctx: Pick<CanvasRenderingContext2D, 'measureText'>, text: string, max: number): string {
+  const all = Array.from(text)
+  if (all.length <= FIT_CHARS && ctx.measureText(text).width <= max) return text
+  const chars = all.slice(0, FIT_CHARS)
   let lo = 0
   let hi = chars.length
   while (lo < hi) {

@@ -25,6 +25,12 @@ describe('bagContents', () => {
     const c = bagContents([ev(1, two), ev(1, `see ${LINK.split('#')[0]}`), ev(1, `${TOKEN} ${LINK}`)])
     expect(c).toMatchObject({ message: 3, cashu: 1, nft: 3 })
   })
+
+  it('does not count a link inside another URL\'s path or query (spec 7.7)', () => {
+    expect(bagContents([ev(1, `https://a.example/?b=1;${LINK}`)])).toMatchObject({ message: 1, nft: 0 })
+    expect(bagContents([ev(1, `${LINK},${LINK2}`)])).toMatchObject({ message: 1, nft: 2 })
+    expect(bagContentsTags([ev(1, `https://a.example/?b=1;${LINK}`)], { contents: true, money: false })).toEqual([['contents', 'message', '1']])
+  })
 })
 
 describe('bagContentsTags', () => {
@@ -50,16 +56,54 @@ describe('bagContentsTags', () => {
 
 describe('readBagContents', () => {
   it('reads back what was written, and a bag that says nothing as nothing', () => {
-    expect(readBagContents([['contents', 'shard', '3'], ['contents', 'cashu', '1']])).toEqual({ money: true, moneyAlone: false, nft: false, counts: { shard: 3, cashu: 1 } })
+    expect(readBagContents([['contents', 'shard', '3'], ['contents', 'cashu', '1']])).toEqual({ money: true, moneyAlone: false, nft: false, counts: { shard: '3', cashu: '1' } })
     expect(readBagContents([['contents', 'cashu']])).toEqual({ money: true, moneyAlone: true, nft: false, counts: null })
     expect(readBagContents([['contents', 'gold', '5'], ['contents', 'shard', '-2']])).toEqual({ money: false, moneyAlone: false, nft: false, counts: null })
-    expect(readBagContents([['contents', 'message', '1'], ['contents', 'nft', '2']])).toEqual({ money: false, moneyAlone: false, nft: true, counts: { message: 1, nft: 2 } })
+    expect(readBagContents([['contents', 'message', '1'], ['contents', 'nft', '2']])).toEqual({ money: false, moneyAlone: false, nft: true, counts: { message: '1', nft: '2' } })
     expect(readBagContents([['contents', 'nft']]).nft).toBe(false)
     expect(readBagContents([['contents', 'nft', '0']]).nft).toBe(false)
   })
+  // Spec 7.7 "Reading contents": a row whose count is there but is not a positive integer is ignored.
+  it('reads money only from a counted cashu row or the cashu row with no count', () => {
+    for (const count of ['0', '00', '-1', 'x', '', ' 1', '1.5', 'NaN', 'Infinity']) {
+      expect(readBagContents([['contents', 'cashu', count]]), JSON.stringify(count)).toEqual({ money: false, moneyAlone: false, nft: false, counts: null })
+    }
+    expect(readBagContents([['contents', 'cashu', '0'], ['contents', 'shard', '2']]).money).toBe(false)
+    // The money-alone form still says money, alone or beside counted rows of other kinds.
+    expect(readBagContents([['contents', 'cashu']])).toMatchObject({ money: true, moneyAlone: true })
+    expect(readBagContents([['contents', 'shard', '2'], ['contents', 'cashu']])).toEqual({ money: true, moneyAlone: true, nft: false, counts: { shard: '2' } })
+    expect(readBagContents([['contents', 'cashu', '1']])).toMatchObject({ money: true, moneyAlone: false })
+  })
+
+  it('reads a count of any size, exactly as written', () => {
+    const huge = '9'.repeat(400)
+    expect(readBagContents([['contents', 'shard', '1000000']]).counts).toEqual({ shard: '1000000' })
+    expect(readBagContents([['contents', 'message', '9007199254740993']]).counts).toEqual({ message: '9007199254740993' })
+    expect(readBagContents([['contents', 'nft', huge]])).toEqual({ money: false, moneyAlone: false, nft: true, counts: { nft: huge } })
+    expect(readBagContents([['contents', 'cashu', '1000000']]).money).toBe(true)
+  })
+
+  it('ignores a count with a sign, a leading zero, an exponent or anything else a decimal count is not', () => {
+    for (const count of ['03', '+3', '1e2', '0x3', '3.0', '3 ', '\u0663', '1_000']) {
+      expect(readBagContents([['contents', 'shard', count]]).counts, JSON.stringify(count)).toBeNull()
+      expect(readBagContents([['contents', 'nft', count]]).nft, JSON.stringify(count)).toBe(false)
+    }
+    // A count that is not a string at all is not a decimal string.
+    expect(readBagContents([['contents', 'shard', 3 as unknown as string]]).counts).toBeNull()
+  })
+
+  it('a bare row says nothing for any kind but cashu', () => {
+    for (const kind of ['shard', 'message', 'key', 'chest', 'nft']) expect(readBagContents([['contents', kind]])).toEqual({ money: false, moneyAlone: false, nft: false, counts: null })
+  })
+
   it('carries into a bag\'s settings, so a rewrite keeps the choice', () => {
     const bag = { ...ev(33330), tags: [['d', 'x'], ['contents', 'shard', '1']] }
     expect(bagSettingsOf(bag, 3)).toMatchObject({ contents: true, money: false })
+    const settingsOf = (rows: string[][]) => bagSettingsOf({ ...ev(33330), tags: [['d', 'x'], ...rows] }, 3)
+    expect(settingsOf([['contents', 'shard', '1000000']])).toMatchObject({ contents: true, money: false })
+    expect(settingsOf([['contents', 'shard', '03']])).toMatchObject({ contents: false, money: false })
+    expect(settingsOf([['contents', 'cashu', '0']])).toMatchObject({ contents: false, money: false })
+    expect(settingsOf([['contents', 'cashu']])).toMatchObject({ contents: false, money: true })
   })
 })
 

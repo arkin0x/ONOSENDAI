@@ -96,6 +96,12 @@ describe('a message never shows a claim link\'s key', () => {
     expect(shownEvent(msg).which).toBe('nft')
   })
 
+  it('hides the key of a link inside another URL too, which is not a link that counts (spec 7.7)', () => {
+    const inside = { ...msg, content: `see https://a.example/?b=1;https://nonfungible.cash/claim/${id}#${k}` }
+    expect(shownEvent(inside).which).toBe('nft')
+    expect(JSON.stringify(shownEvent(inside).event)).not.toContain(k)
+  })
+
   it('hides the key of a link written in any case', () => {
     const shouted = { ...msg, content: `look Https://NonFungible.Cash/claim/${id}#${k} now` }
     const html = renderToStaticMarkup(<EventData event={shouted} />)

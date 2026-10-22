@@ -42,7 +42,7 @@
 
 import type { ActionEvent, NostrEvent } from '../events'
 import type { HintBox } from '../hint'
-import type { BagContents } from '../hidden'
+import type { ContentsCounts } from '../hidden'
 import type { Position } from '../space'
 
 /** Longest pause inside one trip; a longer one ends the shot. 30 s covers a hop's proof on a slow phone. */
@@ -80,7 +80,7 @@ export interface Beat {
  */
 export type TapeItem =
   /** A bag sealed (its newest version: relays keep only that). Where it is, only when its hint box says so. */
-  | { kind: 'bag'; id: string; pubkey: string; at: number; hint: HintBox | null; height: number | null; money: boolean; nft?: boolean; counts: Partial<BagContents> | null }
+  | { kind: 'bag'; id: string; pubkey: string; at: number; hint: HintBox | null; height: number | null; money: boolean; nft?: boolean; counts: ContentsCounts | null }
   /** A public SNO object published. */
   | { kind: 'object'; id: string; pubkey: string; at: number; event: NostrEvent }
   /** A comment on a move or on a bag: its words when they are public, null when sealed to a region. */

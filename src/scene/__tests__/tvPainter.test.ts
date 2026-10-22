@@ -10,7 +10,7 @@ if (typeof localStorage === 'undefined') {
   ;(globalThis as { localStorage?: unknown }).localStorage = { getItem: (k: string) => mem.get(k) ?? null, setItem: (k: string, v: string) => { mem.set(k, String(v)) }, removeItem: (k: string) => { mem.delete(k) }, clear: () => mem.clear() }
 }
 vi.mock('../../lib/relay', () => ({ query: async () => [], queryEach: async () => [], queryAny: async () => [], publish: async () => ({ ok: true }), publishMany: async () => ({ ok: true }), relaySet: () => [] }))
-import { TvPainter, tickerItems, wrap, type TvAssets, type TvPicture } from '../tvPainter'
+import { TvPainter, fit, tickerItems, wrap, type TvAssets, type TvPicture } from '../tvPainter'
 import { cutKind, flatPoint, tubeDrift, tubeFlicker } from '../TvScreenEffect'
 import { Vector2 } from 'three'
 import { useTv } from '../../store/useTv'
@@ -87,6 +87,18 @@ describe('the tube\'s once-a-frame terms', () => {
       expect(f).toBeLessThanOrEqual(1)
       expect(f).toBeCloseTo(0.975 + 0.025 * Math.sin(t * 57), 12)
     }
+  })
+})
+
+describe('fit', () => {
+  it('cuts with an ellipsis, and measures a very long text (a bag count has no cap, spec 7.7) only as far as a panel could show', () => {
+    const measured: number[] = []
+    const ctx = { measureText: (t: string) => { measured.push(t.length); return { width: t.length * 10 } } } as unknown as CanvasRenderingContext2D
+    expect(fit(ctx, 'short', 100)).toBe('short')
+    expect(fit(ctx, 'abcdefghijkl', 50)).toBe('abcd…')
+    measured.length = 0
+    expect(fit(ctx, `${'9'.repeat(100_000)} SHARDS`, 200)).toBe(`${'9'.repeat(19)}…`)
+    expect(Math.max(...measured)).toBeLessThanOrEqual(2049)
   })
 })
 

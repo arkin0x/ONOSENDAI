@@ -18,7 +18,7 @@ import { create } from 'zustand'
 import { queryEach } from '../lib/relay'
 import { AD_IN_MS, adById, adEveryMs, adLength, nextAd } from '../lib/tv/hosakaAd'
 import { isBroadcast, reloadBroadcast } from '../lib/tv/broadcast'
-import { Dwell, dwellLimits } from '../lib/tv/dwell'
+import { Dwell, dwellLimits, onAir } from '../lib/tv/dwell'
 import { Director, JUMP_LINE_S, JUMP_S, JUMP_WARP_S, MAX_SHOT_S, isJump, shotFraming, type Beat, type Framing, type Shot, type TapeItem } from '../lib/tv/director'
 import type { HintBox } from '../lib/hint'
 import { TapeReader, V2_EPOCH, randomStart, type Ask, TapeUnanswered } from '../lib/tv/tape'
@@ -293,6 +293,11 @@ export function shotProgress(): number {
   const shot = useTv.getState().shot
   if (!shot) return 0
   return Math.min(1, Math.max(0, (performance.now() - shotBegan) / 1000 / shot.length))
+}
+
+/** Whose shots with screen time are queued, in order, for tests. */
+export function tvQueued(): string[] {
+  return queue.filter(onAir).map((s) => s.pubkey)
 }
 
 /** Whose run on screen it is and since when (lib/tv/dwell), for tests. */

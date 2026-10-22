@@ -502,7 +502,7 @@ function BagControls({ height, bag, existing, cashu }: { height: number; bag: Re
           cashu token is inside, money alone (arkinox, 2026-10-18: bags with
           "a little more personality", hyped on Cyberspace TV). Worked out
           from the bag each time it is sealed (lib/hidden.ts bagContentsTags). */}
-      <Field id="deploy-contents-hint" label="Publish contents" hint="Tells seekers what is inside: how many shards, messages, keys, chests and cashu tokens. Not where, and not what they say.">
+      <Field id="deploy-contents-hint" label="Publish contents" hint="Tells seekers what is inside: how many shards, messages, keys, chests, cashu tokens and NFTs. Not where, and not what they say.">
         <Switch id="deploy-contents-hint" checked={bag.contents} onCheckedChange={(v) => set({ contents: v })} />
       </Field>
       {cashu && !bag.contents && (

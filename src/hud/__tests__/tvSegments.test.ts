@@ -42,4 +42,10 @@ describe('a bag on the chiron', () => {
     expect(segmentDoing({ ...bag, money: true, counts: null })).toBe('SEALED A BAG · CASHU INSIDE')
     expect(segmentDoing({ ...bag, money: false, counts: null })).toBe('SEALED A BAG')
   })
+
+  it('counts NFTs on the chiron, after cashu tokens', () => {
+    expect(contentsWords({ message: 2, cashu: 1, nft: 1 })).toBe('2 MESSAGES · 1 CASHU TOKEN · 1 NFT')
+    expect(contentsWords({ message: 2, nft: 2 })).toBe('2 MESSAGES · 2 NFTS')
+    expect(segmentDoing({ ...bag, money: false, nft: true, counts: { message: 1, nft: 1 } })).toBe('SEALED A BAG · 1 MESSAGE · 1 NFT')
+  })
 })

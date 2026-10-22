@@ -129,6 +129,55 @@ describe('the sealed bag', () => {
   })
 })
 
+describe('the sealed bag\'s splashes', () => {
+  /** The words filled on the canvas, and where (after translate), while the bag's panel is painted. */
+  function splashes(item: { money: boolean; nft?: boolean }): Array<{ text: string; x: number }> {
+    vi.spyOn(performance, 'now').mockReturnValue(1e12)
+    const bag = { kind: 'bag' as const, id: 'b'.repeat(64), pubkey: 'p', at: 1, hint: null, height: 3, counts: null, ...item }
+    const shot = { id: bag.id, kind: 'bag' as const, item: bag, pubkey: 'p', beats: [], start: 1, end: 1, offsets: [], length: 10.7 }
+    useTv.setState({ shot, status: 'playing' })
+    const out: Array<{ text: string; x: number }> = []
+    let tx = 0
+    const ctx = new Proxy({
+      measureText: (t: string) => ({ width: Array.from(t).length * 7 }),
+      createLinearGradient: () => ({ addColorStop: () => {} }),
+      createRadialGradient: () => ({ addColorStop: () => {} }),
+      save: () => {}, restore: () => { tx = 0 },
+      translate: (x: number) => { tx = x },
+      fillText: (text: string, x: number) => { out.push({ text, x: tx + x }) },
+    } as Record<string, unknown>, {
+      get: (target, key) => (key in target ? target[key as string] : () => {}),
+      set: () => true,
+    })
+    const p = new TvPainter({ width: 0, height: 0, getContext: () => ctx } as unknown as HTMLCanvasElement)
+    p.size(412, 915, 1)
+    p.paint(picture({ shot }), assets, 1e12, 1, false)
+    vi.restoreAllMocks()
+    return out
+  }
+  const at = (words: Array<{ text: string; x: number }>, text: string): number[] => words.filter((w) => w.text === text).map((w) => w.x)
+
+  it('hypes an NFT inside as it hypes money: NFT INSIDE!', () => {
+    const words = splashes({ money: false, nft: true })
+    expect(at(words, 'NFT')).toHaveLength(1)
+    expect(at(words, 'INSIDE!')).toHaveLength(1)
+    expect(at(words, 'CASHU')).toHaveLength(0)
+  })
+
+  it('with money too, both splashes, on different corners of the cube', () => {
+    const words = splashes({ money: true, nft: true })
+    const [cashu] = at(words, 'CASHU')
+    const [nft] = at(words, 'NFT')
+    expect(cashu).toBeDefined()
+    expect(nft).toBeDefined()
+    expect(Math.abs(cashu - nft)).toBeGreaterThan(40)
+  })
+
+  it('no NFT, no NFT splash', () => {
+    expect(at(splashes({ money: true }), 'NFT')).toHaveLength(0)
+  })
+})
+
 /** The chiron's top rule's fill (tvPainter chiron). */
 const RULE = 'rgba(0, 229, 255, 0.45)'
 

@@ -67,10 +67,10 @@ export function typePace(chars: number, shotLength: number): number {
   return Math.min(TYPE_S, Math.max(0.005, room / Math.max(1, chars)))
 }
 
-/** A bag's published contents in words: 3 SHARDS · 1 MESSAGE · 1 CASHU TOKEN; null when it published none. */
+/** A bag's published contents in words: 3 SHARDS · 1 MESSAGE · 1 CASHU TOKEN · 1 NFT; null when it published none. */
 export function contentsWords(counts: Partial<BagContents> | null): string | null {
   if (!counts) return null
-  const names: Array<[keyof BagContents, string, string]> = [['shard', 'SHARD', 'SHARDS'], ['message', 'MESSAGE', 'MESSAGES'], ['key', 'KEY', 'KEYS'], ['chest', 'CHEST', 'CHESTS'], ['cashu', 'CASHU TOKEN', 'CASHU TOKENS']]
+  const names: Array<[keyof BagContents, string, string]> = [['shard', 'SHARD', 'SHARDS'], ['message', 'MESSAGE', 'MESSAGES'], ['key', 'KEY', 'KEYS'], ['chest', 'CHEST', 'CHESTS'], ['cashu', 'CASHU TOKEN', 'CASHU TOKENS'], ['nft', 'NFT', 'NFTS']]
   const words = names.filter(([k]) => (counts[k] ?? 0) > 0).map(([k, one, many]) => `${counts[k]} ${counts[k] === 1 ? one : many}`)
   return words.length > 0 ? words.join(' · ') : null
 }

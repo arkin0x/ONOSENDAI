@@ -53,7 +53,7 @@ import { animationOf, modelOf, modelTags, type ItemAnimation, type ItemModelRef 
 import type { Position } from './space'
 import { mentionTags } from './mentions'
 import { cashuTokensAsWritten } from './cashu'
-import { NFT_WORDS, replaceNftLinks } from './nftLink'
+import { findNftLinks, NFT_WORDS, replaceNftLinks } from './nftLink'
 
 /** The location-encrypted envelope (spec §8.6). */
 export const HIDDEN_KIND = 33330
@@ -688,16 +688,17 @@ export const DEFAULT_BAG_SETTINGS: BagSettings = { heightTag: true, hint: null, 
 
 /**
  * What a bag holds, by kind: shards (in the bag or by reference), messages,
- * keys, chests, and the cashu tokens written in its messages.
+ * keys, chests, and the cashu tokens and nonfungible.cash claim links (NFTs,
+ * lib/nftLink) written in its messages.
  */
-export interface BagContents { shard: number; message: number; key: number; chest: number; cashu: number }
+export interface BagContents { shard: number; message: number; key: number; chest: number; cashu: number; nft: number }
 
 export function bagContents(inners: readonly (BagEntry | ChatRumor)[]): BagContents {
-  const out: BagContents = { shard: 0, message: 0, key: 0, chest: 0, cashu: 0 }
+  const out: BagContents = { shard: 0, message: 0, key: 0, chest: 0, cashu: 0, nft: 0 }
   for (const e of inners) {
     if (isReference(e)) { out.shard++; continue }
     if (e.kind === SHARD_KIND) out.shard++
-    else if (e.kind === MESSAGE_KIND) { out.message++; out.cashu += cashuTokensAsWritten(e.content).length }
+    else if (e.kind === MESSAGE_KIND) { out.message++; out.cashu += cashuTokensAsWritten(e.content).length; out.nft += findNftLinks(e.content).length }
     else if (e.kind === KEY_KIND) out.key++
     else if (e.kind === CHEST_KIND) out.chest++
   }
@@ -705,7 +706,7 @@ export function bagContents(inners: readonly (BagEntry | ChatRumor)[]): BagConte
 }
 
 /** The order a bag's `contents` tags are written in, and read in. */
-export const CONTENTS_KINDS = ['shard', 'message', 'key', 'chest', 'cashu'] as const
+export const CONTENTS_KINDS = ['shard', 'message', 'key', 'chest', 'cashu', 'nft'] as const
 
 /**
  * The public tags a bag's contents settings write (arkinox, 2026-10-18:
@@ -713,7 +714,8 @@ export const CONTENTS_KINDS = ['shard', 'message', 'key', 'chest', 'cashu'] as c
  * hint toggle that advertises what is in the bag"). Worked out from what is
  * in the bag each time it is sealed, so they are never stale: with
  * `contents`, one `["contents", kind, count]` per kind present, cashu
- * tokens included; with `money` alone, `["contents", "cashu"]` while a
+ * tokens and NFTs included (arkinox, 2026-10-22: an `nft` count, as the
+ * `cashu` one); with `money` alone, `["contents", "cashu"]` while a
  * token is inside, and nothing once none is. ONOSENDAI's, not in the spec
  * yet (onosendai/kinds.md, 33330).
  */
@@ -727,9 +729,10 @@ export function bagContentsTags(inners: readonly (BagEntry | ChatRumor)[], setti
 /**
  * What a bag's public tags say it holds: whether money is inside (any cashu
  * row, for display), whether the money-alone hint was chosen (a cashu row
- * with no count, for the bag's settings), and the counts when given.
+ * with no count, for the bag's settings), whether an NFT is (a counted nft
+ * row; there is no NFT-alone form), and the counts when given.
  */
-export function readBagContents(tags: string[][]): { money: boolean; moneyAlone: boolean; counts: Partial<BagContents> | null } {
+export function readBagContents(tags: string[][]): { money: boolean; moneyAlone: boolean; nft: boolean; counts: Partial<BagContents> | null } {
   const rows = tags.filter((t) => t[0] === 'contents' && (CONTENTS_KINDS as readonly string[]).includes(t[1] ?? ''))
   const counts: Partial<BagContents> = {}
   let counted = false
@@ -737,7 +740,7 @@ export function readBagContents(tags: string[][]): { money: boolean; moneyAlone:
     const n = t[2] === undefined ? NaN : Number(t[2])
     if (Number.isInteger(n) && n > 0 && n < 1_000_000) { counts[t[1] as keyof BagContents] = n; counted = true }
   }
-  return { money: rows.some((t) => t[1] === 'cashu'), moneyAlone: rows.some((t) => t[1] === 'cashu' && t[2] === undefined), counts: counted ? counts : null }
+  return { money: rows.some((t) => t[1] === 'cashu'), moneyAlone: rows.some((t) => t[1] === 'cashu' && t[2] === undefined), nft: (counts.nft ?? 0) > 0, counts: counted ? counts : null }
 }
 
 function sameHint(a: HintHeights | null, b: HintHeights | null): boolean {

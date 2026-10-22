@@ -2,12 +2,13 @@
  * deployPlan.ts — where a hide's key gets computed, what it costs, how long.
  *
  * A hide at height h is sealed with the region key at h, which is three
- * Cantor axis trees of 2^h leaves: a hop's work at that height. Below this
- * machine's ceiling the key is computed here, in the region worker. Above it,
- * HOSAKA sells exactly this key at its hop cap, and the Cloud compute panel's
- * mode says whether to ask first: `auto` goes without asking up to its cap in
- * sats (a cap of 0 asks every time), `ask` always asks, `off` never leaves the
- * machine, so the ceiling stays local.
+ * Cantor axis trees of 2^h leaves. Below this machine's ceiling the key is
+ * computed here, in the region worker. Above it, HOSAKA sells exactly this
+ * key up to its hop cap (from /limits), at the price on its region key ladder
+ * (regionKeyLadder), and the Cloud compute panel's mode says whether to ask
+ * first: `auto` goes without asking up to its cap in sats (a cap of 0 asks
+ * every time), `ask` always asks, `off` never leaves the machine, so the
+ * ceiling stays local.
  *
  * Pure: the store hands in what it knows and gets a decision and two numbers.
  */
@@ -15,6 +16,7 @@
 import { projectCantorMs, recommendedHopHeight } from './calibration'
 import { parseEstTime } from './crossover'
 import type { CloudMode } from './cloud'
+import type { HosakaPriceTier, HosakaProvider } from './hosaka'
 
 export type DeployRoute = 'local' | 'cloud'
 
@@ -66,14 +68,36 @@ export interface CloudQuote {
   seconds: number | null
 }
 
+type Ladder = Array<Pick<HosakaPriceTier, 'max_height' | 'sats'> & Partial<Pick<HosakaPriceTier, 'est_time' | 'est_seconds'>>>
+
+/**
+ * The ladder a region key is priced from. A region key is not a hop of its
+ * height: three trees and two composes, cheaper than the hop's rung at some
+ * heights and dearer at others, so a provider that prices it on its own
+ * publishes `pricing.region_key` (hosaka-api#30) and that is the ladder. A
+ * provider that predates it has only the hop ladder, which is read as before.
+ * A region key ladder that is present never falls back to the hop ladder for
+ * a height it does not cover: that price is unknown, and an unknown price asks.
+ */
+export function regionKeyLadder(provider: Pick<HosakaProvider, 'pricing'> | null | undefined): Ladder | null {
+  const own = provider?.pricing?.region_key
+  if (Array.isArray(own) && own.length > 0) return own
+  return provider?.pricing?.hop ?? null
+}
+
 /** HOSAKA's price and time for the key at this height, from its ladder. */
-export function cloudKeyQuote(height: number, ladder: Array<{ max_height: number; sats: number; est_time?: string; est_seconds?: number | null }> | null | undefined, experience = 1): CloudQuote | null {
+export function cloudKeyQuote(height: number, ladder: Ladder | null | undefined, experience = 1): CloudQuote | null {
   if (!ladder || ladder.length === 0) return null
   const band = [...ladder].sort((a, b) => a.max_height - b.max_height).find((b) => height <= b.max_height)
   if (!band) return null
   const seconds = typeof band.est_seconds === 'number' && band.est_seconds > 0 ? band.est_seconds : parseEstTime(band.est_time)
   // The provider's estimate, corrected by what its jobs have taken here.
   return { sats: band.sats, seconds: seconds === null ? null : seconds * experience }
+}
+
+/** HOSAKA's price and time for the region key at this height, from the provider's own region key ladder when it has one. */
+export function regionKeyQuote(height: number, provider: Pick<HosakaProvider, 'pricing'> | null | undefined, experience = 1): CloudQuote | null {
+  return cloudKeyQuote(height, regionKeyLadder(provider), experience)
 }
 
 /** Whether the Cloud compute mode wants a confirmation before this price. */

@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import { cloudKeyQuote, deployCeiling, deployRoute, localKeyCeiling, localKeySeconds, needsAsk, waitLabel } from '../deployPlan'
+import { cloudKeyQuote, deployCeiling, deployRoute, localKeyCeiling, localKeySeconds, needsAsk, regionKeyLadder, regionKeyQuote, waitLabel } from '../deployPlan'
+import type { HosakaProvider } from '../hosaka'
 import { useCalibration } from '../calibration'
 
 const ladder = [{ max_height: 24, sats: 60, est_time: 'about 3 min' }, { max_height: 27, sats: 200, est_time: 'about 9 min' }]
@@ -57,5 +58,63 @@ describe('this machine\'s limit', () => {
   it('never passes the protocol\'s cap of 20', () => {
     useCalibration.setState({ hopHeight: 20 })
     expect(localKeyCeiling()).toBe(20)
+  })
+})
+
+// GET /api/v1/provider's pricing as hosaka-api#30 shapes it: a hop ladder and,
+// beside it, a region key ladder on the same rungs that is cheaper than the hop
+// at the low rungs and dearer at the top ones. The numbers are this fixture's;
+// the test reads whatever ladder it is handed and assumes no cap.
+const hop = [
+  { max_height: 25, sats: 120, est_time: 'about 4 min', est_seconds: 240 },
+  { max_height: 27, sats: 300, est_time: 'about 9 min', est_seconds: 540 },
+  { max_height: 28, sats: 700, est_time: 'about 20 min', est_seconds: 1200 },
+  { max_height: 30, sats: 9000, est_time: 'about 1.5 hr', est_seconds: 5400 },
+]
+const regionKey = [
+  { max_height: 25, sats: 90, est_time: 'about 5 min', est_seconds: 300 },
+  { max_height: 27, sats: 250, est_time: 'about 11 min', est_seconds: 660 },
+  { max_height: 28, sats: 1500, est_time: 'about 30 min', est_seconds: 1800 },
+  { max_height: 30, sats: 20000, est_time: 'about 2.5 hr', est_seconds: 9000 },
+]
+const withRegionKey: Pick<HosakaProvider, 'pricing'> = { pricing: { reference: true, hop, region_key: regionKey } }
+const hopOnly: Pick<HosakaProvider, 'pricing'> = { pricing: { reference: true, hop } }
+
+describe('the region key price', () => {
+  it('comes from the region key ladder when the provider publishes one', () => {
+    expect(regionKeyLadder(withRegionKey)).toBe(regionKey)
+    // Cheaper than the hop's rung below the top, dearer at the top: never the hop's number.
+    expect(regionKeyQuote(26, withRegionKey)).toEqual({ sats: 250, seconds: 660 })
+    expect(regionKeyQuote(28, withRegionKey)).toEqual({ sats: 1500, seconds: 1800 })
+    expect(regionKeyQuote(30, withRegionKey)).toEqual({ sats: 20000, seconds: 9000 })
+    for (const h of [21, 26, 28, 29, 30]) {
+      expect(regionKeyQuote(h, withRegionKey)?.sats).not.toBe(cloudKeyQuote(h, hop)?.sats)
+    }
+  })
+
+  it('falls back to the hop ladder on a provider that predates it, as before', () => {
+    expect(regionKeyLadder(hopOnly)).toBe(hop)
+    expect(regionKeyQuote(26, hopOnly)).toEqual({ sats: 300, seconds: 540 })
+    expect(regionKeyQuote(30, hopOnly)).toEqual({ sats: 9000, seconds: 5400 })
+    // An empty region key ladder is no ladder: the hop ladder stands.
+    expect(regionKeyQuote(26, { pricing: { hop, region_key: [] } })).toEqual({ sats: 300, seconds: 540 })
+  })
+
+  it('is unknown past the top of the region key ladder, rather than read from the hop ladder', () => {
+    const shortKey = { pricing: { hop, region_key: regionKey.slice(0, 2) } }
+    expect(regionKeyQuote(28, shortKey)).toBeNull()
+    expect(regionKeyQuote(31, withRegionKey)).toBeNull()
+    expect(regionKeyQuote(31, hopOnly)).toBeNull()
+  })
+
+  it('is unknown with no provider or no pricing, and an unknown price asks', () => {
+    expect(regionKeyLadder(null)).toBeNull()
+    expect(regionKeyLadder({})).toBeNull()
+    expect(regionKeyQuote(26, undefined)).toBeNull()
+    expect(needsAsk('auto', regionKeyQuote(26, {})?.sats ?? null, 1_000_000)).toBe(true)
+  })
+
+  it('carries the experience correction like any cloud quote', () => {
+    expect(regionKeyQuote(26, withRegionKey, 2)).toEqual({ sats: 250, seconds: 1320 })
   })
 })

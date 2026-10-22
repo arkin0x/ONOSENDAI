@@ -1,7 +1,10 @@
 import { describe, expect, it } from 'vitest'
 import { buildMovePlan, nextStep, planSummary, routeNeedsCloud, type Ceilings } from '../movePlan'
 
-/** This machine hops to 2^18 and sidesteps to 2^23; HOSAKA hops to 2^27. */
+/**
+ * This machine hops to 2^18 and sidesteps to 2^23. The cloud ceilings are this
+ * fixture's, not HOSAKA's: the real caps come from its /limits.
+ */
 const base = { hop: 18, sidestep: 23, cloudHop: 27, cloudSidestep: 29 }
 const cheapest: Ceilings = { ...base, offloadFrom: Infinity }
 // Measured for this machine and this provider (lib/crossover): from h21 up.
@@ -62,9 +65,10 @@ describe('the route profile', () => {
   })
 
   it('a boundary above HOSAKA’s hop is walked to and sidestepped across, either way', () => {
-    // h28: past this machine entirely and past HOSAKA's hop cap of 27, so no
-    // one can hop it. Both profiles walk to the wall and pay for the crossing.
-    const over = at((1n << 84n) ^ (1n << 28n))
+    // One above the fixture's cloud hop ceiling (base.cloudHop) and within its
+    // sidestep ceiling: past this machine entirely and past the cloud's hop,
+    // so no one can hop it. Both profiles walk to the wall and pay for the crossing.
+    const over = at((1n << 84n) ^ (1n << BigInt(base.cloudHop + 1)))
     for (const c of [cheapest, fastest]) {
       expect(nextStep(from, over, c)?.source).toBe('local')
       const summary = planSummary(from, over, c)

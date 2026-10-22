@@ -219,8 +219,9 @@ interface SecretsState {
   /**
    * Buy the key to the aligned cube of side 2^height around a coordinate.
    *
-   * The work is three axis subtrees at that height, which is a hop's work and
-   * is priced as one; this machine can do the small ones for itself as it
+   * The work is three axis subtrees at that height, priced from the
+   * provider's region key ladder (lib/deployPlan.ts regionKeyLadder); this
+   * machine can do the small ones for itself as it
    * moves, so this is for the heights it cannot. Paid from the HOSAKA balance:
    * with nothing in it the purchase stops and says so, since topping up is the
    * Cloud panel's business and not a thing to do behind a modal.

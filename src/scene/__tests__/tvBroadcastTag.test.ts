@@ -14,7 +14,7 @@ vi.mock('../../lib/relay', () => ({ query: async () => [], queryEach: async () =
 import { MARGIN_X, MARGIN_Y, TvPainter, type TvAssets, type TvPicture } from '../tvPainter'
 import { useTv } from '../../store/useTv'
 import { HOSAKA_1 } from '../../lib/tv/hosakaAd'
-import { BROADCAST_TAG, setBroadcastForTest } from '../../lib/tv/broadcast'
+import { BROADCAST_MAX_DPR, BROADCAST_TAG, broadcastDpr, setBroadcastForTest } from '../../lib/tv/broadcast'
 
 interface Box { x0: number; y0: number; x1: number; y1: number }
 /** The drawing state a call inked with: the font, the ink, how opaque, the shadow. */
@@ -80,18 +80,18 @@ const comment = { kind: 'comment' as const, id: 'c'.repeat(64), pubkey: 'ann', a
 const segmentShot = (item: typeof bag | typeof object | typeof comment) => ({ id: item.id, kind: item.kind, item, pubkey: 'ann', beats: [], start: 1, end: 1, offsets: [], length: 30 })
 
 /** Paint once at `w` x `h`, well into the shot (the panels faded in, the splashes landed). */
-function paintAt(p: TvPicture, w = 1280, h = 720, now = 1e12): ReturnType<typeof recording> {
+function paintAt(p: TvPicture, w = 1280, h = 720, now = 1e12, scale = 1): ReturnType<typeof recording> {
   vi.spyOn(performance, 'now').mockReturnValue(now)
   if (p.shot) useTv.setState({ shot: p.shot, status: p.status })
   const rec = recording()
   const painter = new TvPainter(rec.canvas)
-  painter.size(w, h, 1)
+  painter.size(w, h, scale)
   // Two paints, as the set paints on: the marquee has its run by the second.
-  painter.paint(p, assets, now - 33, 1, false)
+  painter.paint(p, assets, now - 33, scale, false)
   rec.texts.length = 0
   rec.rects.length = 0
   rec.spots.length = 0
-  painter.paint(p, assets, now, 1, false)
+  painter.paint(p, assets, now, scale, false)
   vi.restoreAllMocks()
   return rec
 }
@@ -199,5 +199,68 @@ describe('WWW.ONOSENDAI.TECH on the 24/7 stream (arkinox, 2026-10-22)', () => {
         for (const r of rects) if (!r.radial) expect(meets(tag, r), `${item.kind} ${w}x${h}: ${JSON.stringify(r)}`).toBe(false)
       }
     }
+  })
+})
+
+describe('the stream in a square frame (arkinox, 2026-10-22: 720x720, and 1080x1080 at 1.5)', () => {
+  /** The minimap's square on the canvas, as the painter sizes it. */
+  function minimapBox(w: number, h: number, scale: number): Box {
+    const s = scale * Math.min(1.35, Math.max(0.9, w / 1400))
+    const W = w * scale
+    const H = h * scale
+    const size = Math.min(200 * s, W * 0.3, H * 0.34)
+    const MX = Math.round(W * MARGIN_X)
+    const MY = Math.round(H * MARGIN_Y)
+    return { x0: MX, y0: MY, x1: MX + size, y1: MY + size }
+  }
+  const kinds = [trip, segmentShot(bag), segmentShot(object), segmentShot(comment)]
+
+  it('everything fits: nothing meets the address, no panel meets the minimap, every word inside the frame', () => {
+    setBroadcastForTest(true)
+    for (const scale of [1, 1.5]) {
+      const W = 720 * scale
+      const map = minimapBox(720, 720, scale)
+      for (const shot of kinds) {
+        const { texts, rects, spots } = paintAt(picture({ shot: shot as never }), 720, 720, 1e12, scale)
+        const at = `${shot.kind} at ${scale}`
+        const tag = texts.find((t) => t.text === BROADCAST_TAG)!.box
+        for (const t of texts) if (t.text !== BROADCAST_TAG) expect(meets(tag, t.box), `${at}: "${t.text}"`).toBe(false)
+        for (const r of rects) if (!r.radial) expect(meets(tag, r), `${at}: ${JSON.stringify(r)}`).toBe(false)
+        for (const c of spots) expect(meets(tag, { x0: c.x - 100 * scale, y0: c.y - 100 * scale, x1: c.x + 100 * scale, y1: c.y + 100 * scale }), `${at}: stamp`).toBe(false)
+        // A segment's panel (its gradient ground) keeps under the minimap.
+        for (const r of rects) if (r.look.ink === 'gradient' && !r.radial && r.y0 > map.y0) expect(meets(map, r), `${at}: panel ${JSON.stringify(r)}`).toBe(false)
+        for (const t of texts) {
+          expect(t.box.x0, `${at}: "${t.text}"`).toBeGreaterThanOrEqual(0)
+          expect(t.box.x1, `${at}: "${t.text}"`).toBeLessThanOrEqual(W)
+        }
+      }
+    }
+  })
+
+  it('the HOSAKA end card, ONOSENDAI.TECH and all, fits the square', () => {
+    setBroadcastForTest(true)
+    const end = HOSAKA_1.scenes[HOSAKA_1.scenes.length - 1]
+    for (const scale of [1, 1.5]) {
+      const { texts } = paintAt(picture({ shot: trip as never, ad: { at: 1e12 - 700 - ((end.from + end.to) / 2) * 1000, id: HOSAKA_1.id } }), 720, 720, 1e12, scale)
+      const line = texts.find((t) => t.text === 'IN THE ONOSENDAI.TECH MENU')!
+      expect(line, `${scale}`).toBeDefined()
+      for (const t of texts) {
+        expect(t.box.x0, `${scale}: "${t.text}"`).toBeGreaterThanOrEqual(0)
+        expect(t.box.x1, `${scale}: "${t.text}"`).toBeLessThanOrEqual(720 * scale)
+      }
+    }
+  })
+
+  it('the site\'s TV in a square window is as it was: its panel is placed under the clock alone', () => {
+    setBroadcastForTest(false)
+    const map = minimapBox(720, 720, 1)
+    const { rects } = paintAt(picture({ shot: segmentShot(object) as never }), 720, 720)
+    const panel = rects.find((r) => r.look.ink === 'gradient' && !r.radial && r.y0 > map.y0 && r.x1 - r.x0 > 400)!
+    expect(panel.y0).toBeLessThan(map.y1)
+  })
+
+  it('draws at the capture\'s pixel ratio, 1 to 1.5', () => {
+    expect(BROADCAST_MAX_DPR).toBe(1.5)
+    expect([1, 1.25, 1.5, 2, 3, 0.5, 0, Number.NaN].map((d) => broadcastDpr(d))).toEqual([1, 1.25, 1.5, 1.5, 1.5, 1, 1, 1])
   })
 })

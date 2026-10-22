@@ -608,8 +608,11 @@ export class TvPainter {
     // chiron; side by side, it shares the chiron's top, and this only keeps a
     // hair clear of it.
     const centreW = Math.min(760 * s, W - 2 * MX)
-    // A centre panel keeps under the address only where it reaches across to it.
-    const segmentTop = tag && (W + centreW) / 2 > tag.left - 8 * s ? clockBottom : cy
+    // A centre panel keeps under the address only where it reaches across to
+    // it; on the stream, and under the minimap where it reaches under that (a
+    // square frame, where it is as wide as the frame).
+    const underMap = tag && (W - centreW) / 2 < MX + mapSize ? MY + mapSize : 0
+    const segmentTop = Math.max(tag && (W + centreW) / 2 > tag.left - 8 * s ? clockBottom : cy, underMap)
     const floor = this.npRect && (narrow || (W + centreW) / 2 > W - MX - npW) ? Math.min(chironTop, npTop - 6 * s) : chironTop
 
     // A segment's panel at the centre.

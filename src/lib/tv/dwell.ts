@@ -10,8 +10,10 @@
  * its trips and its segments, one after another. Past the limit it moves on
  * to the next shot of anyone else the tape has, cutting the shot on screen
  * short, and that pubkey rests: its shots are passed over until the rest is
- * up. With no one else to show (the tape caught up, or nobody else for a
- * long way ahead), it plays on: a lone avatar is better than a still picture.
+ * up. With no one else queued, it plays on while TV reads the tape ahead for
+ * someone, and the cut comes the moment someone is (arkinox, 2026-10-22: no
+ * still picture while it reads); with no one else on the tape at all, it
+ * plays on for good. Playing on uses none of its rest: that starts at the cut.
  *
  * The limits are in one place (dwellLimits), the same on the site and on the
  * stream for now; screen time, not tape time, since TV skips dead air.
@@ -36,8 +38,8 @@ export function onAir(shot: Shot): boolean {
   return shot.kind !== 'arrival' && shot.kind !== 'reaction'
 }
 
-/** What to do next: play the shot at `index` (the ones before it are passed), wait for more of the tape, or nothing is left. */
-export type DwellPick = { play: number } | { wait: true } | { none: true }
+/** What to do next: play the shot at `index` (the ones before it are passed), or nothing is left. */
+export type DwellPick = { play: number } | { none: true }
 
 export class Dwell {
   private subject: string | null = null
@@ -86,11 +88,10 @@ export class Dwell {
   /**
    * How many of `queue` can play now, for how far ahead to read: all but the
    * resting's shots. None while every shot with screen time is a resting
-   * one's, however many ticker lines wait with them: TV is waiting on the
-   * tape for someone else then, and must read on (review of #447: six
-   * arrivals held the read-ahead off, and the picture with it, until the
-   * rest ran out). With DWELL_HELD_MAX of theirs held, as good as full: the
-   * resting play on rather than the tape being read on and on.
+   * one's, however many ticker lines wait with them: TV wants someone else
+   * then, and reads on (review of #447: six arrivals held the read-ahead
+   * off until the rest ran out). With DWELL_HELD_MAX of theirs held, as good
+   * as full: the resting play on rather than the tape being read on and on.
    */
   playable(queue: Shot[], now: number): number {
     let n = 0
@@ -110,6 +111,17 @@ export class Dwell {
     this.rests.delete(pubkey)
   }
 
+  /**
+   * Whether to cut the shot on screen for someone else's now: its pubkey has
+   * had its minute, or is resting and on only for want of anyone else (after
+   * a break started its count again), and `queue` has someone else's shot.
+   */
+  moveOn(queue: Shot[], now: number): boolean {
+    if (this.subject === null) return false
+    const due = this.over(now) || this.resting(this.subject, now)
+    return due && this.someoneElse(queue, now)
+  }
+
   /** Whether `queue` has a shot that can go on now, someone's not resting. */
   someoneElse(queue: Shot[], now: number): boolean {
     return queue.some((s) => onAir(s) && !this.resting(s.pubkey, now))
@@ -117,21 +129,18 @@ export class Dwell {
 
   /**
    * The next shot to put on: the first in `queue` with screen time whose
-   * pubkey is not resting. When all of them are resting: wait while `more`
-   * of the tape can be read and fewer than DWELL_HELD_MAX are held, else
-   * play the first anyway.
+   * pubkey is not resting; when all of them are resting, the first anyway,
+   * while the tape is read on for someone else (playable), so the picture
+   * never holds.
    */
-  pick(queue: Shot[], now: number, more: boolean): DwellPick {
+  pick(queue: Shot[], now: number): DwellPick {
     let first = -1
-    let held = 0
     for (let i = 0; i < queue.length; i++) {
       const s = queue[i]
       if (!onAir(s)) continue
       if (!this.resting(s.pubkey, now)) return { play: i }
       if (first < 0) first = i
-      held++
     }
-    if (first < 0) return { none: true }
-    return more && held < DWELL_HELD_MAX ? { wait: true } : { play: first }
+    return first < 0 ? { none: true } : { play: first }
   }
 }

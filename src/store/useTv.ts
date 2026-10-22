@@ -18,7 +18,7 @@ import { create } from 'zustand'
 import { queryEach } from '../lib/relay'
 import { AD_IN_MS, adById, adEveryMs, adLength, nextAd } from '../lib/tv/hosakaAd'
 import { isBroadcast, reloadBroadcast } from '../lib/tv/broadcast'
-import { Dwell, dwellLimits, onAir } from '../lib/tv/dwell'
+import { Dwell, dwellLimits } from '../lib/tv/dwell'
 import { Director, JUMP_LINE_S, JUMP_S, JUMP_WARP_S, MAX_SHOT_S, isJump, shotFraming, type Beat, type Framing, type Shot, type TapeItem } from '../lib/tv/director'
 import type { HintBox } from '../lib/hint'
 import { TapeReader, V2_EPOCH, randomStart, type Ask, TapeUnanswered } from '../lib/tv/tape'
@@ -762,7 +762,7 @@ function tick(id: number): void {
   scanTick(s)
   // One pubkey has held the screen its time (lib/tv/dwell): on to someone
   // else's shot now, cutting this one short, when the tape has one ready.
-  const moveOn = s.shot !== null && dwell.over(now) && dwell.someoneElse(queue, now)
+  const moveOn = s.shot !== null && dwell.moveOn(queue, now)
   if (s.shot === null || (now - shotBegan) / 1000 >= s.shot.length || moveOn) {
     // A break, when one is due: between shots, never across one.
     if (now >= adDue && s.status === 'playing') {
@@ -776,13 +776,12 @@ function tick(id: number): void {
       return
     }
     // Arrivals and reactions take no screen time: each is a line on the
-    // ticker. A resting pubkey's shots are passed over (lib/tv/dwell), and
-    // while the tape is read on for someone else, the picture holds.
-    const pick = dwell.pick(queue, now, reader !== null && !reader.caughtUp && failures < NO_SIGNAL_AFTER)
-    const taken = 'wait' in pick ? queue.splice(0, Math.max(0, queue.findIndex(onAir))) : queue.splice(0, 'play' in pick ? pick.play + 1 : queue.length)
+    // ticker. A resting pubkey's shots are passed over (lib/tv/dwell), or,
+    // with no one else queued, play on while the tape is read for someone.
+    const pick = dwell.pick(queue, now)
+    const taken = queue.splice(0, 'play' in pick ? pick.play + 1 : queue.length)
     const next = 'play' in pick ? taken.pop() : undefined
     for (const q of taken) { if (q.kind === 'arrival') arrive(q); else if (q.kind === 'reaction') react(q) }
-    if ('wait' in pick) return
     if (next) { beginShot(next, now, id); return }
     // The relays stopped answering mid-tape: say so over the last picture
     // rather than holding on it in silence. A read that answers plays on.

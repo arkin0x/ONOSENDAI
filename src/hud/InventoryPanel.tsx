@@ -25,6 +25,7 @@ import { useItemFeed } from '../store/useItemFeed'
 import { X } from 'lucide-react'
 import { useProfile } from '../hooks/useProfile'
 import { cashuLabel, readCashuToken } from '../lib/cashu'
+import { hasNftLink } from '../lib/nftLink'
 import { ItemFace, ItemIcon } from './ItemIcon'
 import { chestsOpenedBy, clearsWithAll, keyText, splitPanels, type HeldItem } from '../lib/inventory'
 import { regionLabel } from '../lib/loot'
@@ -208,7 +209,7 @@ function TakenRow({ item }: { item: HeldItem }): JSX.Element {
         )}
       <span className="held__acts">
         {item.type === 'shard' && <button className="chest__act" onClick={moveToWorkshop} title="Move this model into your workshop">MOVE TO WORKSHOP</button>}
-        {item.type === 'message' && <button className={`chest__act ${open ? 'is-on' : ''}`} onClick={() => setOpen((o) => !o)} aria-expanded={open}>{coin ? 'CARD' : 'READ'}</button>}
+        {item.type === 'message' && <button className={`chest__act ${open ? 'is-on' : ''}`} onClick={() => setOpen((o) => !o)} aria-expanded={open}>{coin || hasNftLink(item.text) ? 'CARD' : 'READ'}</button>}
         {clearable && (
           <button className="held__clear" onClick={() => useInventory.getState().clearTaken([item.id])} title="Clear it from TAKEN" aria-label={`Clear ${label} from TAKEN`}>
             <X size={14} aria-hidden />
@@ -217,7 +218,7 @@ function TakenRow({ item }: { item: HeldItem }): JSX.Element {
       </span>
       {open && item.type === 'message' && (
         <div className="held__details">
-          <MessageText text={item.text ?? ''} words={(t) => <blockquote className="secret__message">{t}</blockquote>} />
+          <MessageText text={item.text ?? ''} tags={item.event?.tags} words={(t) => <blockquote className="secret__message">{t}</blockquote>} />
         </div>
       )}
     </li>

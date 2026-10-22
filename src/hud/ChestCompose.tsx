@@ -38,6 +38,7 @@ import { forgeKey, isLockPubkey, NIP44_MAX_PLAINTEXT, sizeRefusal, templateBytes
 import { attributed } from '../lib/client'
 import { MAX_ITEM_NAME, MAX_MESSAGE_LENGTH, keyInnerTemplate, messageInnerTemplate, shardInnerTemplate } from '../lib/hidden'
 import { findCashuToken } from '../lib/cashu'
+import { hasNftLink } from '../lib/nftLink'
 import { useBuilder } from '../store/useBuilder'
 import { useCyberspace } from '../store/useCyberspace'
 import { useInventory } from '../store/useInventory'
@@ -63,7 +64,7 @@ const SAMPLE_CREATED_AT = 1_700_000_000
 
 /** What a content row says. */
 function contentLabel(c: ChestContent, shardName: (id: string) => string): string {
-  if (c.kind === 'message') return findCashuToken(c.text) ? 'message with a cashu token' : c.text.trim().replace(/\s+/g, ' ').slice(0, 48)
+  if (c.kind === 'message') return findCashuToken(c.text) ? 'message with a cashu token' : hasNftLink(c.text) ? 'message with an NFT link' : c.text.trim().replace(/\s+/g, ' ').slice(0, 48)
   if (c.kind === 'shard') return shardName(c.shardId)
   return c.key.name
 }

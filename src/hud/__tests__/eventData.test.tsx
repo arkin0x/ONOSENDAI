@@ -81,3 +81,23 @@ describe('the event as JSON', () => {
     expect(eventJson({ ...ev, sig: '' })).not.toContain('sig')
   })
 })
+
+describe('a message never shows a claim link\'s key', () => {
+  const id = '6fa4292bb0367fd9330d289a9c002d99'
+  const k = 'AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8'
+  const msg = { ...ev, kind: 1, tags: [['-']], content: `under the floor https://nonfungible.cash/claim/${id}#${k} good luck` }
+
+  it('hides the key after the #, keeps the id and the words, and says the event will not verify', () => {
+    const html = renderToStaticMarkup(<EventData event={msg} />)
+    expect(html).not.toContain(k)
+    expect(html).toContain(`https://nonfungible.cash/claim/${id}#${HIDDEN_SECRET}`)
+    expect(html).toContain('under the floor')
+    expect(html).toContain('NFT link&#x27;s key is hidden')
+    expect(shownEvent(msg).which).toBe('nft')
+  })
+
+  it('leaves a message without a link as it is', () => {
+    const plain = { ...msg, content: `see https://nonfungible.cash/claim/${id}` }
+    expect(shownEvent(plain)).toEqual({ event: plain, hidden: false })
+  })
+})

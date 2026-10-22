@@ -45,6 +45,7 @@ import { alignedOrigin, useCyberspace } from '../store/useCyberspace'
 import { useShards } from '../store/useShards'
 import { WorldLabel } from './WorldLabel'
 import { findCashuToken } from '../lib/cashu'
+import { NFT_WORDS, replaceNftLinks } from '../lib/nftLink'
 import { useProfile } from '../hooks/useProfile'
 import { profileLabel } from '../store/useProfiles'
 import { coinKind, markShown, type MarkKind } from '../lib/worldMarks'
@@ -135,7 +136,8 @@ function wrap(text: string, width = 28): string {
 
 /** A message as it reads in the world: cut to PREVIEW_CHARS, then wrapped. */
 export function messageBillboard(text: string): string {
-  const trimmed = text.trim()
+  // A claim link's key is what claims it, so the scene never draws it (lib/nftLink).
+  const trimmed = replaceNftLinks(text, NFT_WORDS).trim()
   const cut = trimmed.length > PREVIEW_CHARS ? `${trimmed.slice(0, PREVIEW_CHARS)}…` : trimmed
   return wrap(cut)
 }

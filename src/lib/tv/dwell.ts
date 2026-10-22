@@ -46,8 +46,14 @@ export class Dwell {
 
   constructor(private limits: { maxMs: number; restMs: number } = dwellLimits(false)) {}
 
-  /** A shot comes on screen, `pubkey`'s; null for a break (a commercial, a new tape), which ends anyone's run. */
+  /**
+   * A shot comes on screen, `pubkey`'s; null for a break (a commercial, a new
+   * tape), which ends anyone's run. One that had its time rests from now, when
+   * TV moves away from it: playing on alone, with no one else to show, used
+   * none of its rest.
+   */
   onScreen(pubkey: string | null, now: number): void {
+    if (this.subject !== null && pubkey !== this.subject && now - this.since >= this.limits.maxMs) this.rests.set(this.subject, now + this.limits.restMs)
     if (pubkey !== this.subject || pubkey === null) this.since = now
     this.subject = pubkey
   }
@@ -78,14 +84,30 @@ export class Dwell {
   }
 
   /**
-   * How many of `queue` can play now: all but the resting's shots, for how
-   * far ahead to read. With DWELL_HELD_MAX of theirs held, as good as full:
-   * the resting play on rather than the tape being read on and on.
+   * How many of `queue` can play now, for how far ahead to read: all but the
+   * resting's shots. None while every shot with screen time is a resting
+   * one's, however many ticker lines wait with them: TV is waiting on the
+   * tape for someone else then, and must read on (review of #447: six
+   * arrivals held the read-ahead off, and the picture with it, until the
+   * rest ran out). With DWELL_HELD_MAX of theirs held, as good as full: the
+   * resting play on rather than the tape being read on and on.
    */
   playable(queue: Shot[], now: number): number {
     let n = 0
-    for (const s of queue) if (!onAir(s) || !this.resting(s.pubkey, now)) n++
-    return queue.length - n >= DWELL_HELD_MAX ? Infinity : n
+    let held = 0
+    let free = 0
+    for (const s of queue) {
+      if (!onAir(s)) n++
+      else if (this.resting(s.pubkey, now)) held++
+      else { n++; free++ }
+    }
+    if (held >= DWELL_HELD_MAX) return Infinity
+    return held > 0 && free === 0 ? 0 : n
+  }
+
+  /** `pubkey` rests no more: a shot cued on purpose (useTv cueItem, cueBeats) plays whoever it is. */
+  free(pubkey: string): void {
+    this.rests.delete(pubkey)
   }
 
   /** Whether `queue` has a shot that can go on now, someone's not resting. */

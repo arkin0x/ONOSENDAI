@@ -621,8 +621,12 @@ export class TvPainter {
     // Beside the clock it keeps off the chiron, and on a phone, where NOW
     // PLAYING spans the width over the chiron, off that too (review of #393).
     const sideBottom = narrow && this.npRect ? Math.min(chironTop - 50 * s, npTop - 6 * s) : chironTop - 50 * s
+    // A panel under the minimap (on a square stream), its room the less for
+    // it, keeps clear of a LATER or MEANWHILE card's backing too, which
+    // starts 56 px over the floor (review of #447: a comment's panel reached 50).
+    const segmentFloor = floor - (underMap ? 60 : 50) * s
     part('segment')
-    if (item && inset && p.status === 'playing') this.segment(item, p.shot!.length, a, W, segmentTop + 14 * s, floor - 50 * s, sideBottom, MX, MY, W - MX - lw - 16 * s, MX + mapSize + 16 * s, s, narrow, now)
+    if (item && inset && p.status === 'playing') this.segment(item, p.shot!.length, a, W, segmentTop + 14 * s, segmentFloor, sideBottom, MX, MY, W - MX - lw - 16 * s, MX + mapSize + 16 * s, s, narrow, now)
 
     // LATER and MEANWHILE, after the cut's transition; under an inset's panel.
     part('card')

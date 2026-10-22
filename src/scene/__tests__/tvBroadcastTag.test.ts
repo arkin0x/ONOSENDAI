@@ -237,6 +237,27 @@ describe('the stream in a square frame (arkinox, 2026-10-22: 720x720, and 1080x1
     }
   })
 
+  it('a LATER or MEANWHILE card never touches a segment\'s panel (review of #447)', () => {
+    setBroadcastForTest(true)
+    const silent = assets.music
+    try {
+      for (const music of [silent, null]) {
+        assets.music = music
+        for (const scale of [1, 1.5]) {
+          for (const item of [bag, object, comment]) {
+            const { rects } = paintAt(picture({ shot: segmentShot(item) as never, meanwhile: true, cutAt: 1e12 - 1500 }), 720, 720, 1e12, scale)
+            const card = rects.find((r) => r.look.ink === 'rgba(0, 0, 0, 0.5)')!
+            expect(card, `${item.kind} ${scale}`).toBeDefined()
+            const panels = rects.filter((r) => r.look.ink === 'gradient' && !r.radial && r.x1 - r.x0 > 300 * scale && r.y1 < card.y1)
+            for (const r of panels) expect(meets(card, r), `${item.kind} at ${scale}${music ? '' : ', no music'}: ${JSON.stringify(r)} vs ${JSON.stringify(card)}`).toBe(false)
+          }
+        }
+      }
+    } finally {
+      assets.music = silent
+    }
+  })
+
   it('the HOSAKA end card, ONOSENDAI.TECH and all, fits the square', () => {
     setBroadcastForTest(true)
     const end = HOSAKA_1.scenes[HOSAKA_1.scenes.length - 1]

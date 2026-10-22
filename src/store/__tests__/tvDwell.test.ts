@@ -31,7 +31,7 @@ import type { Filter } from 'nostr-tools'
 import type { RelayAnswer } from '../../lib/relayOutcome'
 import { positionHex, type NostrEvent } from '../../lib/events'
 import { V2_EPOCH } from '../../lib/tv/tape'
-import { setTvAsk, useTv } from '../useTv'
+import { setTvAsk, shotElapsed, tvDwellRun, useTv } from '../useTv'
 import { DWELL_HELD_MAX, DWELL_MAX_S, DWELL_REST_S, Dwell, dwellLimits } from '../../lib/tv/dwell'
 import type { Shot } from '../../lib/tv/director'
 
@@ -96,7 +96,11 @@ describe('the dwell rule (lib/tv/dwell)', () => {
     const queue = [shot('b', 'arrival'), shot('a'), shot('c', 'reaction')]
     expect(d.someoneElse(queue, 61 * S)).toBe(false)
     expect(d.pick(queue, 61 * S, true)).toEqual({ wait: true })
-    expect(d.playable(queue, 61 * S)).toBe(2)
+    // Waiting on the tape for someone else: nothing playable, however many lines wait too, so it reads on.
+    expect(d.playable(queue, 61 * S)).toBe(0)
+    expect(d.playable([...queue, ...Array.from({ length: 10 }, () => shot('f', 'arrival'))], 61 * S)).toBe(0)
+    // With someone else's shot there, the lines count as before.
+    expect(d.playable([...queue, shot('b')], 61 * S)).toBe(3)
     expect(d.pick([shot('b', 'arrival')], 61 * S, true)).toEqual({ none: true })
   })
 
@@ -112,6 +116,30 @@ describe('the dwell rule (lib/tv/dwell)', () => {
     expect(d.pick(many, 61 * S, true)).toEqual({ play: 0 })
     expect(d.playable(many, 61 * S)).toBe(Infinity)
     expect(d.playable(many.slice(1), 61 * S)).toBe(0)
+  })
+
+  it('rests ten minutes from when TV moves away from it, however long it played on alone (review of #447)', () => {
+    const d = new Dwell()
+    d.onScreen('a', 0)
+    expect(d.over(60 * S)).toBe(true)
+    // Alone on the tape: it plays on, past the end of its first rest.
+    for (const t of [100, 300, 540, 700]) { d.onScreen('a', t * S); d.over(t * S) }
+    d.onScreen('b', 705 * S)
+    const queue = [shot('a'), shot('c')]
+    for (const t of [706, 900, 1304]) expect(d.pick(queue, t * S, true), `${t} s`).toEqual({ play: 1 })
+    expect(d.pick(queue, 1305 * S, true)).toEqual({ play: 0 })
+    // Under its minute, moving away rests no one.
+    d.onScreen('c', 1305 * S)
+    d.onScreen('a', 1330 * S)
+    expect(d.resting('c', 1331 * S)).toBe(false)
+  })
+
+  it('a shot cued on purpose plays whoever it is', () => {
+    const d = new Dwell()
+    d.onScreen('a', 0)
+    d.over(60 * S)
+    d.free('a')
+    expect(d.pick([shot('a'), shot('b')], 61 * S, true)).toEqual({ play: 0 })
   })
 
   it('playing on alone, it stays over: the first shot of anyone else that comes is put on', () => {
@@ -156,6 +184,9 @@ function visitors(from: number, to: number, every: number, hops = 3): NostrEvent
   }
   return out
 }
+function spawnOf(pubkey: string, t: number): NostrEvent {
+  return { id: id(), pubkey, created_at: t, kind: 3333, tags: [['A', 'spawn'], ['C', pubkey]], content: '', sig: '' }
+}
 /** Under a relay's window (tape WINDOW_LIMIT), so the random start lands on the tape's first event. */
 function load(events: NostrEvent[]): void {
   expect(events.length).toBeLessThan(500)
@@ -163,7 +194,10 @@ function load(events: NostrEvent[]): void {
 }
 
 let tape: NostrEvent[] = []
+/** Questions no relay answers, from now on, while above zero. */
+let down = 0
 async function ask(f: Filter): Promise<RelayAnswer[]> {
+  if (down > 0) { down--; return [{ url: 'wss://relay.test', outcome: 'unreachable', reason: 'down', events: [] }] }
   return [{ url: 'wss://relay.test', outcome: 'answered', events: tape
     .filter((e) => (!f.kinds || f.kinds.includes(e.kind)) && (f.since === undefined || e.created_at >= f.since) && (f.until === undefined || e.created_at <= f.until) && (!f.authors || f.authors.includes(e.pubkey)))
     .sort((a, b) => b.created_at - a.created_at)
@@ -171,6 +205,7 @@ async function ask(f: Filter): Promise<RelayAnswer[]> {
 }
 
 beforeEach(() => {
+  down = 0
   vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval', 'setTimeout', 'clearTimeout', 'performance'] })
   // The random start lands on the tape's first event (as tv.test.ts).
   let calls = 0
@@ -184,13 +219,26 @@ afterEach(() => {
   vi.restoreAllMocks()
 })
 
-/** Run TV for `ms` of fake time, noting whose shot is on screen every 100 ms (null: none, or a break). */
-async function watch(ms: number, seen: Array<{ t: number; pk: string | null; ad?: boolean }>): Promise<void> {
+type Seen = { t: number; pk: string | null; ad?: boolean; held?: boolean; tape?: number }
+/**
+ * Run TV for `ms` of fake time, noting every 100 ms whose shot is on screen
+ * (null: none, or a break), and whether the picture is held: playing, no
+ * commercial, and no shot or one past its end.
+ */
+async function watch(ms: number, seen: Seen[]): Promise<void> {
   for (let t = 0; t < ms; t += 100) {
     await vi.advanceTimersByTimeAsync(100)
     const s = useTv.getState()
-    seen.push({ t: performance.now(), pk: s.ad ? null : s.shot?.pubkey ?? null, ad: s.ad !== null })
+    const held = s.ad === null && s.status === 'playing' && (s.shot === null || shotElapsed() > s.shot.length + 0.2)
+    seen.push({ t: performance.now(), pk: s.ad ? null : s.shot?.pubkey ?? null, ad: s.ad !== null, held, tape: s.tapeTime ?? 0 })
   }
+}
+/** The longest the picture was held, ms, after `from`. */
+function longestHold(seen: Seen[], from = 0): number {
+  let run = 0
+  let worst = 0
+  for (const x of seen) { if (x.t < from) continue; run = x.held ? run + 100 : 0; worst = Math.max(worst, run) }
+  return worst
 }
 
 describe('Cyberspace TV moves on after a minute of one pubkey', () => {
@@ -198,7 +246,7 @@ describe('Cyberspace TV moves on after a minute of one pubkey', () => {
     // Alone for its first 200 s of tape: without the rule, over three minutes of it on screen.
     load([...crawler(A, 600), ...visitors(200, 600, 30)])
     useTv.getState().start()
-    const seen: Array<{ t: number; pk: string | null; ad?: boolean }> = []
+    const seen: Seen[] = []
     await watch(80_000, seen)
     const onA = seen.filter((x) => x.pk === A)
     expect(onA[0].t).toBeLessThan(2000)
@@ -219,12 +267,8 @@ describe('Cyberspace TV moves on after a minute of one pubkey', () => {
     load([...crawler(A, 900), ...visitors(150, 900, 100, 15)])
     const lastVisit = Math.max(...tape.filter((e) => e.pubkey !== A).map((e) => e.created_at))
     useTv.getState().start()
-    const seen: Array<{ t: number; pk: string | null; ad?: boolean; tape?: number }> = []
-    for (let t = 0; t < 500_000; t += 100) {
-      await vi.advanceTimersByTimeAsync(100)
-      const s = useTv.getState()
-      seen.push({ t: performance.now(), pk: s.ad ? null : s.shot?.pubkey ?? null, ad: s.ad !== null, tape: s.tapeTime ?? 0 })
-    }
+    const seen: Seen[] = []
+    await watch(500_000, seen)
     const onA = seen.filter((x) => x.pk === A)
     const firstRunEnd = onA.find((x, i) => i > 0 && x.t - onA[i - 1].t > 100)?.t ?? Infinity
     const restFrom = onA.filter((x) => x.t < firstRunEnd).pop()!.t
@@ -248,17 +292,74 @@ describe('Cyberspace TV moves on after a minute of one pubkey', () => {
   it('plays on with a lone pubkey: the rest never leaves a still picture or ends the tape early', async () => {
     load(crawler(A, 600))
     useTv.getState().start()
-    const seen: Array<{ t: number; pk: string | null; ad?: boolean }> = []
+    const seen: Seen[] = []
     await watch(150_000, seen)
     const s = useTv.getState()
     expect(s.status).toBe('playing')
     // Still the crawler, well past its minute, and the tape has moved on with it.
     expect(seen.filter((x) => x.pk === A).length).toBeGreaterThan(1400)
     expect(s.tapeTime! - T0).toBeGreaterThan(120)
-    // No gap without a shot longer than a moment, but the HOSAKA spot.
-    let gap = 0
-    let worst = 0
-    for (const x of seen.slice(20)) { gap = x.pk === null && !x.ad ? gap + 100 : 0; worst = Math.max(worst, gap) }
-    expect(worst).toBeLessThanOrEqual(1000)
+    // Never a still picture (no shot, or one held past its end) longer than a moment, but the HOSAKA spot.
+    expect(longestHold(seen, 2000)).toBeLessThanOrEqual(1000)
   })
+  it('reads on past ticker lines for someone else: six arrivals behind the rested shots never hold the picture (review of #447)', async () => {
+    const crawl: NostrEvent[] = []
+    for (let k = 0; k * 5 < 1700; k++) crawl.push(hop(A, T0 + k * 5, 1000n + BigInt(k), 1001n + BigInt(k)))
+    const arrivals = Array.from({ length: 6 }, (_, k) => spawnOf(OTHERS[k % 4].slice(0, 63) + String(k), T0 + 400 + k * 5))
+    load([...crawl, ...arrivals, ...visitors(2100, 2400, 60)])
+    useTv.getState().start()
+    const seen: Seen[] = []
+    await watch(120_000, seen)
+    const onA = seen.filter((x) => x.pk === A)
+    expect(onA[onA.length - 1].t - onA[0].t).toBeLessThanOrEqual(DWELL_MAX_S * 1000 + 100)
+    // On to a visitor straight after the minute, the arrivals on the ticker on the way.
+    const visit = seen.find((x) => x.pk !== null && OTHERS.includes(x.pk))!
+    expect(visit.t - onA[onA.length - 1].t).toBeLessThanOrEqual(1000)
+    // The ticker keeps the newest four arrivals: the last of the six.
+    expect(useTv.getState().arrivals.map((x) => x.at)).toContain(T0 + 425)
+    expect(longestHold(seen, 2000)).toBeLessThanOrEqual(1000)
+  })
+
+  it('keeps its rest across a new tape', async () => {
+    load([...crawler(A, 600), ...visitors(200, 600, 30)])
+    useTv.getState().start()
+    const seen: Seen[] = []
+    await watch(70_000, seen)
+    expect(seen.at(-1)!.pk).not.toBe(A)
+    // A retune lands on the crawler's first hop again: still resting, so on to the others.
+    useTv.getState().retune()
+    const after: Seen[] = []
+    await watch(40_000, after)
+    expect(after.some((x) => x.pk !== null && OTHERS.includes(x.pk))).toBe(true)
+    expect(after.some((x) => x.pk === A)).toBe(false)
+  })
+
+  it('with the relays not answering while it waits for someone else, plays the rested one on rather than hold the picture', async () => {
+    load(crawler(A, 1490))
+    useTv.getState().start()
+    const seen: Seen[] = []
+    await watch(55_000, seen)
+    down = 1_000_000
+    await watch(60_000, seen)
+    down = 0
+    const late = seen.filter((x) => x.t > 75_000)
+    expect(late.filter((x) => x.pk === A).length).toBeGreaterThan(200)
+    // Held no longer than the reads take to fail three times, with their backoff.
+    expect(longestHold(seen, 2000)).toBeLessThanOrEqual(15_000)
+  })
+
+  it('a HOSAKA break ends the run: the minute starts again after it', async () => {
+    load(crawler(A, 1200))
+    useTv.getState().start()
+    const seen: Seen[] = []
+    // A break comes at the first cut after five minutes.
+    await watch(7 * 60_000, seen)
+    const ad = seen.find((x) => x.ad)
+    expect(ad).toBeDefined()
+    const back = seen.find((x) => x.t > ad!.t && !x.ad && x.pk === A)
+    expect(back).toBeDefined()
+    expect(tvDwellRun().pubkey).toBe(A)
+    expect(tvDwellRun().since).toBeGreaterThanOrEqual(ad!.t)
+  })
+
 })

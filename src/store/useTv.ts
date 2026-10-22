@@ -295,6 +295,11 @@ export function shotProgress(): number {
   return Math.min(1, Math.max(0, (performance.now() - shotBegan) / 1000 / shot.length))
 }
 
+/** Whose run on screen it is and since when (lib/tv/dwell), for tests. */
+export function tvDwellRun(): { pubkey: string | null; since: number } {
+  return dwell.run
+}
+
 /** Seconds since the shot on screen began. */
 export function shotElapsed(): number {
   return (performance.now() - shotBegan) / 1000
@@ -321,6 +326,7 @@ export function framingProgress(): number {
 export function cueItem(item: TapeItem, length?: number): void {
   const d = new Director()
   d.addItem(item)
+  dwell.free(item.pubkey)
   queue.unshift(...d.release(Infinity).map((shot) => (length === undefined ? shot : { ...shot, length })))
   shotBegan = -Infinity
 }
@@ -328,7 +334,7 @@ export function cueItem(item: TapeItem, length?: number): void {
 /** Play a run of beats next as the director would cut them, for the smoke probe: a hyperjump, say. */
 export function cueBeats(beats: Beat[]): void {
   const d = new Director()
-  for (const b of beats) d.add(b)
+  for (const b of beats) { d.add(b); dwell.free(b.pubkey) }
   queue.unshift(...d.release(Infinity))
   shotBegan = -Infinity
 }

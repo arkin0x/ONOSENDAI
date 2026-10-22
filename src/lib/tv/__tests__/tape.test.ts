@@ -113,6 +113,11 @@ function ev(kind: number, at: number, tags: string[][], content = ''): NostrEven
 }
 
 describe('itemOf', () => {
+  it('carries a bag\'s published nft count to the TV, as its cashu', () => {
+    const item = itemOf(ev(33330, 5, [['d', 'a'.repeat(64)], ['contents', 'message', '1'], ['contents', 'nft', '1']]))
+    expect(item).toMatchObject({ kind: 'bag', money: false, nft: true, counts: { message: 1, nft: 1 } })
+    expect(itemOf(ev(33330, 5, [['d', 'a'.repeat(64)], ['contents', 'cashu']]))).toMatchObject({ money: true, nft: false })
+  })
   it('reads a bag, with its hint box only when it has one', () => {
     const hinted = itemOf(ev(33330, 5, [['d', 'a'.repeat(64)], ['h', '7'], ['hint', '3129509e23d3a6125e1451a5912dbe01099e1517200000000000000000000000', '30', '30', '30']]))
     expect(hinted?.kind).toBe('bag')

@@ -126,7 +126,7 @@ export function itemOf(ev: NostrEvent): TapeItem | null {
     const height = h !== null && h <= 85 ? h : null
     // What its author chose to say is inside (lib/hidden.ts bagContentsTags).
     const said = readBagContents(ev.tags)
-    return { kind: 'bag', ...base, height, hint: parseHint(ev.tags, height ?? 0), money: said.money, counts: said.counts }
+    return { kind: 'bag', ...base, height, hint: parseHint(ev.tags, height ?? 0), money: said.money, nft: said.nft, counts: said.counts }
   }
   if (ev.kind === OBJECT_KIND) {
     // A sealed object (hidden by reference, or for sale) is not public.

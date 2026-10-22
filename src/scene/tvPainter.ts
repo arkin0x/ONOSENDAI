@@ -71,6 +71,8 @@ const MAP_DIVISIONS = 8
 interface SplashLook { fill: string; edge: string; words: [string, string] }
 const AD_SPLASH: SplashLook = { fill: '#ffd23f', edge: '#ff2d7a', words: ['NOW', 'AVAILABLE!'] }
 const MONEY_SPLASH: SplashLook = { fill: '#ffc21a', edge: '#ff7a00', words: ['CASHU', 'INSIDE!'] }
+/** An NFT inside, hyped as money is, in the NFT card's violet (arkinox, 2026-10-22). */
+const NFT_SPLASH: SplashLook = { fill: '#c9a6ff', edge: '#7a2dff', words: ['NFT', 'INSIDE!'] }
 /** The minimap's turn, radians a second: about once round in forty seconds. */
 const MAP_TURN = 0.15
 const ACCENT = '#00e5ff'
@@ -1274,8 +1276,12 @@ export class TvPainter {
       // What its author said is inside, when they said; else how big a region.
       const inside = contentsWords(item.counts)
       this.caption(tx, ty + (narrow ? 0 : stage / 2 - 40 * s), textW, 'A BAG IS SEALED', 'LOCATION UNKNOWN', inside ?? (item.height !== null ? `A REGION 2^${item.height} GIBSONS ACROSS` : null), s)
-      // Money inside: hyped, on the cube's corner (arkinox, 2026-10-18).
-      if (item.money) this.splash(sx + (stacked ? (pw - 2 * pad - stage) / 2 : 0) + stage * 0.9, sy + stage * 0.12, stage * 0.28, t, s, MONEY_SPLASH)
+      // Money inside: hyped, on the cube's corner (arkinox, 2026-10-18). An
+      // NFT inside is hyped the same way (2026-10-22): on that corner, or on
+      // the cube's other top corner when money is there too.
+      const cubeX = sx + (stacked ? (pw - 2 * pad - stage) / 2 : 0)
+      if (item.money) this.splash(cubeX + stage * 0.9, sy + stage * 0.12, stage * 0.28, t, s, MONEY_SPLASH)
+      if (item.nft) this.splash(cubeX + stage * (item.money ? 0.1 : 0.9), sy + stage * 0.12, stage * 0.28, t, s, NFT_SPLASH)
     } else if (item.kind === 'object') {
       // An advertisement: the product turning in the middle, NOW AVAILABLE!
       // slammed on its corner, the words centred under it.

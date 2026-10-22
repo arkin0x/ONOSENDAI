@@ -129,7 +129,7 @@ describe('WWW.ONOSENDAI.TECH on the 24/7 stream (arkinox, 2026-10-22)', () => {
     expect(tag.look.ink).toBe('#00e5ff')
     expect(tag.look.alpha).toBeGreaterThanOrEqual(0.8)
     expect(tag.look.alpha).toBeLessThan(1)
-    expect(tag.look.shadow).toMatch(/^rgba\(0, 0, 0, /)
+    expect(tag.look.shadow).toMatch(/^rgba\(0, 0, 0, 0\.[5-9]\d*\) [1-9]/)
     expect(tag.look.font).toMatch(/^700 [\d.]+px 'Monaspace Argon'/)
   })
 

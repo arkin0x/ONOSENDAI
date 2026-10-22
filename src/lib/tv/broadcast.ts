@@ -17,6 +17,9 @@
  *     zap.stream, not by us.
  *   - The HOSAKA spot plays every 15 minutes, not 5, and its end card says
  *     ONOSENDAI.TECH (lib/tv/hosakaAd; arkinox, 2026-10-21).
+ *   - WWW.ONOSENDAI.TECH stands under the clock, top right, for good, so a
+ *     viewer always knows where to go (BROADCAST_TAG; scene/tvPainter;
+ *     arkinox, 2026-10-22). Not over the HOSAKA spot, which owns the picture.
  *   - The pixel ratio is 1 (scene/Scene).
  *   - Each rendered TV frame adds one to window.__tvFrames, and each lost
  *     WebGL context to window.__tvCtxLost, for the encoder's watchdog.
@@ -28,6 +31,9 @@
 
 /** The query flag: /tv?broadcast=1. */
 export const BROADCAST_PARAM = 'broadcast'
+
+/** The stream's address, on the picture for good (arkinox, 2026-10-22: exactly this). */
+export const BROADCAST_TAG = 'WWW.ONOSENDAI.TECH'
 
 /** How long a lost WebGL context has to come back before the page reloads, ms. */
 export const CONTEXT_WAIT_MS = 5_000

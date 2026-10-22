@@ -28,7 +28,7 @@ import { itemLength, type Shot, type TapeItem } from '../lib/tv/director'
 import { CUT_MS, contentsWords, quoteOf, segmentDoing, typePace, TYPE_DELAY_S } from '../hud/TvSegments'
 import { findLines, placeable, shotProgress, type TvAvatar, type TvFindLine } from '../store/useTv'
 import { AD_SUBTITLE, adFor, type AdScene, type AdTheme } from '../lib/tv/hosakaAd'
-import { isBroadcast } from '../lib/tv/broadcast'
+import { BROADCAST_TAG, isBroadcast } from '../lib/tv/broadcast'
 import { watchingWords } from '../lib/tv/watching'
 import type { Census, ChainTimes } from '../lib/tv/stats'
 import type { Position } from '../lib/space'
@@ -79,6 +79,9 @@ const ACCENT = '#00e5ff'
 /** NOW PLAYING's progress, purple to pink (arkinox, 2026-10-18: "make the progress something cool like a gradient from purple to pink"). */
 const MUSIC_PURPLE = '#8a2be2'
 const MUSIC_PINK = '#ff2d95'
+/** The stream's address under the clock: its type, CSS px, and its baseline under the logo's bottom, CSS px (the time's, and a line). */
+const URL_TAG_PX = 13
+const URL_TAG_DROP = 82
 /** The commercial's colours: the HOSAKA banner's teal, its mark's magenta, and the night between. */
 const AD_THEMES: Record<AdTheme, { deep: string; stripe: string; accent: string }> = {
   teal: { deep: '#03343a', stripe: 'rgba(29, 233, 182, 0.12)', accent: '#1de9b6' },
@@ -557,6 +560,13 @@ export class TvPainter {
       ctx.fillText(stamp.time, W - MX, cy)
     }
 
+    // On the stream, its address under the clock, on the logo's right edge
+    // (lib/tv/broadcast BROADCAST_TAG). Where the time stands whether or not
+    // the tape has one yet, so it never moves.
+    part('urlTag')
+    const tag = isBroadcast() ? this.urlTag(W - MX, MY + lh + URL_TAG_DROP * s, s) : null
+    const clockBottom = tag ? Math.max(cy, tag.bottom) : cy
+
     // The minimap, top left, on the logo's margins: all of cyberspace, and
     // where the avatar on screen is in it.
     const mapSize = Math.min(200 * s, W * 0.3, H * 0.34)
@@ -587,7 +597,7 @@ export class TvPainter {
     part('chiron')
     if (p.shot && p.status === 'playing') chironTop = this.chiron(p, a, MX, rowBottom, chironW, s, narrow, row)
     const npBottom = row ? rowBottom : rowBottom - CHIRON_PX[1] * s - 10 * s
-    const ceiling = (narrow ? Math.max(cy, MY + mapSize) : cy) + 10 * s
+    const ceiling = (narrow ? Math.max(clockBottom, MY + mapSize) : clockBottom) + 10 * s
     const npLook = !a.music ? null : npBottom - NOW_PLAYING_PX * s >= ceiling ? 'full' : npBottom - NOW_PLAYING_LINE_PX * s >= ceiling ? 'line' : null
     part('nowPlaying')
     const npTop = a.music && npLook ? this.nowPlaying(a.music, W - MX - npW, npBottom, npW, s, now, reduced, npLook === 'line') : chironTop
@@ -598,6 +608,8 @@ export class TvPainter {
     // chiron; side by side, it shares the chiron's top, and this only keeps a
     // hair clear of it.
     const centreW = Math.min(760 * s, W - 2 * MX)
+    // A centre panel keeps under the address only where it reaches across to it.
+    const segmentTop = tag && (W + centreW) / 2 > tag.left - 8 * s ? clockBottom : cy
     const floor = this.npRect && (narrow || (W + centreW) / 2 > W - MX - npW) ? Math.min(chironTop, npTop - 6 * s) : chironTop
 
     // A segment's panel at the centre.
@@ -607,7 +619,7 @@ export class TvPainter {
     // PLAYING spans the width over the chiron, off that too (review of #393).
     const sideBottom = narrow && this.npRect ? Math.min(chironTop - 50 * s, npTop - 6 * s) : chironTop - 50 * s
     part('segment')
-    if (item && inset && p.status === 'playing') this.segment(item, p.shot!.length, a, W, cy + 14 * s, floor - 50 * s, sideBottom, MX, MY, W - MX - lw - 16 * s, MX + mapSize + 16 * s, s, narrow, now)
+    if (item && inset && p.status === 'playing') this.segment(item, p.shot!.length, a, W, segmentTop + 14 * s, floor - 50 * s, sideBottom, MX, MY, W - MX - lw - 16 * s, MX + mapSize + 16 * s, s, narrow, now)
 
     // LATER and MEANWHILE, after the cut's transition; under an inset's panel.
     part('card')
@@ -710,6 +722,27 @@ export class TvPainter {
       x += r.w + gap
     }
     ctx.restore()
+  }
+
+  /**
+   * The stream's address, its right edge at `right` and sitting on
+   * `baseline`, in the chiron's accent, a little dim, with a dark edge to
+   * read over a bright scene. Its left edge and its bottom.
+   */
+  private urlTag(right: number, baseline: number, s: number): { left: number; bottom: number } {
+    const ctx = this.ctx
+    const size = URL_TAG_PX * s
+    ctx.save()
+    ctx.font = `700 ${size}px ${TV_FONT}`
+    ctx.textAlign = 'right'
+    ctx.fillStyle = ACCENT
+    ctx.globalAlpha = 0.88
+    ctx.shadowColor = 'rgba(0, 0, 0, 0.9)'
+    ctx.shadowBlur = 6 * s
+    ctx.fillText(BROADCAST_TAG, right, baseline)
+    const w = ctx.measureText(BROADCAST_TAG).width
+    ctx.restore()
+    return { left: right - w, bottom: baseline + size * 0.3 }
   }
 
   /** The chiron, bottom edge at `bottom`; its top. */

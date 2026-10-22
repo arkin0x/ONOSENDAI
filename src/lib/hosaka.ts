@@ -83,6 +83,14 @@ export interface HosakaCoord {
   plane: Plane
 }
 
+/** One row of a /provider price ladder: the price and the wait for any height up to `max_height`. */
+export interface HosakaPriceTier {
+  max_height: number
+  sats: number
+  est_time: string
+  est_seconds?: number
+}
+
 /**
  * GET /api/v1/provider (hosaka-api#6): how the provider presents itself.
  * Read once per URL next to /limits; absent on providers that predate it,
@@ -101,7 +109,14 @@ export interface HosakaProvider {
    * `max_block_height` (the newest block HOSAKA can verify headers up to).
    */
   services?: Array<{ type: string; max_height?: number; max_blocks?: number; max_block_height?: number; min_msats?: number }>
-  pricing?: { reference?: boolean; hop?: Array<{ max_height: number; sats: number; est_time: string }>; sidestep?: Array<{ max_height: number; sats: number; est_time: string }> }
+  /**
+   * The reference price ladders, one row per height. `region_key` prices the
+   * key to one aligned cube as its own work, which is not a hop's price at
+   * that height (hosaka-api#30); a provider that predates it has only `hop`,
+   * and the region key is then read from the hop ladder (lib/deployPlan.ts
+   * regionKeyLadder).
+   */
+  pricing?: { reference?: boolean; hop?: HosakaPriceTier[]; region_key?: HosakaPriceTier[]; sidestep?: HosakaPriceTier[] }
   payments?: { methods?: string[]; deposit_min_msats?: number; deposit_max_msats?: number; invoice_ttl_seconds?: number }
   /**
    * Present on a provider that honors idempotency keys on priced submits
@@ -138,7 +153,7 @@ export interface HosakaQuote {
   tier: string | null
   est_time: string | null
   /** The wait in seconds, so a route's steps can be added up; older servers omit it. */
-  est_seconds?: number | null
+  est_seconds?: number
   hint: string | null
   /**
    * Axis trees HOSAKA already holds and will not build again, by name, as in
@@ -269,7 +284,7 @@ export interface HosakaRideQuote {
   within_cap: boolean
   max_blocks?: number
   max_block_height?: number
-  est_seconds?: number | null
+  est_seconds?: number
   /** A human reading of est_seconds, such as "~10 min". */
   est_time?: string | null
   refusal?: { error?: string; hint?: string } | null

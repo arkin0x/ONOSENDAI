@@ -43,7 +43,7 @@ import { itemTargetOf, type ItemTarget } from '../lib/comments'
 import { bytesToHex, hexToBytes, type EventTemplate, type NostrEvent } from '../lib/events'
 import { regionKeyAt } from '../lib/shardCrypto'
 import { regionKeyOffThread } from '../lib/regionKeyOffThread'
-import { cloudKeyQuote, deployCeiling, deployRoute, localKeyCeiling, needsAsk } from '../lib/deployPlan'
+import { deployCeiling, deployRoute, localKeyCeiling, needsAsk, regionKeyQuote } from '../lib/deployPlan'
 import { useSecrets } from './useSecrets'
 import {
   DEFAULT_BAG_SETTINGS,
@@ -1254,8 +1254,8 @@ export const useShards = create<ShardsState>((set, get) => {
       }
 
       // Where the key comes from. Above this machine's ceiling it is HOSAKA's,
-      // priced as a hop at that height, and the Cloud compute panel's mode says
-      // whether to ask first.
+      // priced from its region key ladder (lib/deployPlan.ts regionKeyLadder),
+      // and the Cloud compute panel's mode says whether to ask first.
       const inputs = { localMax: localKeyCeiling(), cloudMode: cs.cloudPrefs.mode, cloudCap: cs.cloud.limits?.max_hop_height ?? null }
       const route = deployRoute(deployHeight, inputs)
       if (route === 'cloud' && !intoChest) {
@@ -1263,7 +1263,7 @@ export const useShards = create<ShardsState>((set, get) => {
           set({ deployStatus: 'error', deployError: `Height ${deployHeight} is past what this machine computes, and cloud compute is off.` })
           return
         }
-        const quote = cloudKeyQuote(deployHeight, cs.cloud.provider?.pricing?.hop)
+        const quote = regionKeyQuote(deployHeight, cs.cloud.provider)
         if (!confirmed && needsAsk(cs.cloudPrefs.mode, quote?.sats ?? null, cs.cloudPrefs.autoMaxSats)) {
           set({ deployAsk: { sats: quote?.sats ?? null, seconds: quote?.seconds ?? null }, deployError: null })
           return

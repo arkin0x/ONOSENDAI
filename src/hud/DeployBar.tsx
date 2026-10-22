@@ -83,7 +83,7 @@ import { ItemIcon } from './ItemIcon'
 import { MAX_COMPUTE_HEIGHT, useCyberspace } from '../store/useCyberspace'
 import { useCalibration } from '../lib/calibration'
 import { ratioOf, useExperience } from '../lib/experience'
-import { cloudKeyQuote, deployCeiling, deployRoute, localKeySeconds, needsAsk, waitLabel } from '../lib/deployPlan'
+import { cloudKeyQuote, deployCeiling, deployRoute, localKeySeconds, needsAsk, regionKeyLadder, waitLabel } from '../lib/deployPlan'
 import { useEscape } from '../hooks/useEscape'
 import { fitCause, fitHeight, fitHeightAll, outsideAt, type FitPoint } from '../lib/deployFit'
 import { SHALLOW_WARN, shallowBag, shallowExplain } from '../lib/shallowBag'
@@ -162,7 +162,8 @@ export function DeployBar({ pad = false }: { pad?: boolean }): JSX.Element | nul
   const cloudMode = useCyberspace((s) => s.cloudPrefs.mode)
   const autoMaxSats = useCyberspace((s) => s.cloudPrefs.autoMaxSats)
   const cloudCap = useCyberspace((s) => s.cloud.limits?.max_hop_height ?? null)
-  const ladder = useCyberspace((s) => s.cloud.provider?.pricing?.hop)
+  // A hide's key is a region key: priced from the provider's region key ladder when it has one.
+  const ladder = useCyberspace((s) => regionKeyLadder(s.cloud.provider))
   // The plane the build cursor is in: the build view's (lib/buildCursor.ts).
   const plane = useCyberspace(buildPlane)
   const up = useShards((s) => s.deployUp)

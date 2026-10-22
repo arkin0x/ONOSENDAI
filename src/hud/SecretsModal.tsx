@@ -40,6 +40,7 @@ import { SCAN_MAX_HEIGHT, useShards } from '../store/useShards'
 import { ConfirmModal } from './ConfirmModal'
 import { Explanation } from './Explanation'
 import { useEscape } from '../hooks/useEscape'
+import { regionKeyQuote } from '../lib/deployPlan'
 
 const SORTS: Array<[SecretsSort, string]> = [['recent', 'MOST RECENT'], ['volume', 'LARGEST']]
 
@@ -83,12 +84,7 @@ export function SecretsModal({ onClose }: { onClose: () => void }): JSX.Element 
   const highest = limits?.max_hop_height ?? lowest
   const canBuy = !cloudOff && highest >= lowest
   const [buyHeight, setBuyHeight] = useState(Math.min(highest, lowest + 4))
-  const price = useMemo(() => {
-    const ladder = provider?.pricing?.hop
-    if (!ladder) return null
-    const band = [...ladder].sort((a, b) => a.max_height - b.max_height).find((x) => buyHeight <= x.max_height)
-    return band?.sats ?? null
-  }, [provider, buyHeight])
+  const price = useMemo(() => regionKeyQuote(buyHeight, provider)?.sats ?? null, [provider, buyHeight])
 
   const sort = useSecrets((s) => s.sort)
   const list = useMemo(() => heldList(keys, sort), [keys, sort])
@@ -202,7 +198,7 @@ export function SecretsModal({ onClose }: { onClose: () => void }): JSX.Element 
               </div>
               {buying
                 ? <span className="cloud__profile-note">HOSAKA is computing the 2^{buying.height} cube around you. It lands in this list when it is done.</span>
-                : <Explanation>Three axis trees at 2^{buyHeight}, which is a hop's work at that height and is priced as one. Paid from your HOSAKA balance.</Explanation>}
+                : <Explanation>Three axis trees at 2^{buyHeight}. Paid from your HOSAKA balance.</Explanation>}
               {buyError && <span className="secrets__error">{buyError}</span>}
             </div>
           )}

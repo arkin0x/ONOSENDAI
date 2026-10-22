@@ -18,7 +18,7 @@ import { bigintBitLimit, movementCapabilityIssue } from '../lib/proofCapability'
 
 import { create } from 'zustand'
 import { destinationHeights, holdCloudDestinationKeys, holdDestinationCubes } from '../lib/destinationKeys'
-import { localKeyCeiling } from '../lib/deployPlan'
+import { localKeyCeiling, regionKeyQuote } from '../lib/deployPlan'
 import { experienceRatio, recordJobExperience } from '../lib/experience'
 import { lineStateOf, rideStatsOf, zeroLengthRideRefusal } from '../lib/hyperspace/ride'
 import { verifyCloudRide } from '../lib/cloudRide'
@@ -4514,7 +4514,7 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
         from: wirePosition(at), to: wirePosition(at), plane, prevEventId: get().prevEventId ?? '',
         costMsats: typeof job.cost_msats === 'number' ? job.cost_msats : 0, createdAt: Date.now(),
         stage: paying ? 'awaiting_payment' : 'computing', deposit: paying && job.deposit ? invoiceOf(job.deposit) : null,
-        estSeconds: cloudSeconds(height, get().cloud.provider?.pricing?.hop ?? null) ?? undefined,
+        estSeconds: regionKeyQuote(height, get().cloud.provider)?.seconds ?? undefined,
       }
       set({ cloud: { ...get().cloud, job: record, message: null } })
       const outcome = await driveCloudJob(client, record, {

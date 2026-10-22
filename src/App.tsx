@@ -26,6 +26,7 @@ import { TvScreen } from './hud/TvScreen'
 import { isTvPath, useTv } from './store/useTv'
 import { isBroadcast, reloadBroadcast } from './lib/tv/broadcast'
 import { parseDemoRoute } from './lib/demoRoute'
+import { startWorkshopRoute } from './lib/workshopRoute'
 import { restoreAfterUnfinishedTour, useDemo } from './store/useDemo'
 import { ToastChip } from './hud/ToastChip'
 import { StarNickname } from './hud/StarNickname'
@@ -137,6 +138,8 @@ export default function App(): JSX.Element {
     window.addEventListener('popstate', onPop)
     return () => window.removeEventListener('popstate', onPop)
   }, [])
+  // onosendai.tech/workshop: the shard workshop, as OPEN WORKSHOP opens it (lib/workshopRoute.ts).
+  useEffect(() => startWorkshopRoute(), [])
   // The feeds that watch other people, the loot and the anchors are reissued
   // when the tab returns from a real absence or the network comes back; a
   // socket that died while the tab was away looks open and delivers nothing.

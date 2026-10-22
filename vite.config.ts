@@ -2,9 +2,9 @@ import { execSync } from 'node:child_process'
 import { defineConfig, type Plugin } from 'vite'
 import react from '@vitejs/plugin-react'
 import { resolveVersion, UNVERSIONED } from './src/lib/version'
-import { TV_CARD, withCard } from './src/lib/routeCard'
+import { ROUTE_PAGES, withCard } from './src/lib/routeCard'
 
-/** tv.html: the built page with Cyberspace TV's link preview, served at /tv (src/lib/routeCard.ts). */
+/** tv.html and workshop.html: the built page with each route's link preview, served at /tv and /workshop (src/lib/routeCard.ts). */
 function routeCards(): Plugin {
   return {
     name: 'onosendai-route-cards',
@@ -13,7 +13,7 @@ function routeCards(): Plugin {
     generateBundle(_, bundle) {
       const page = bundle['index.html']
       if (!page || page.type !== 'asset') throw new Error('routeCards: no index.html in the bundle')
-      this.emitFile({ type: 'asset', fileName: 'tv.html', source: withCard(String(page.source), TV_CARD) })
+      for (const [fileName, card] of ROUTE_PAGES) this.emitFile({ type: 'asset', fileName, source: withCard(String(page.source), card) })
     },
   }
 }

@@ -36,6 +36,26 @@ export const TV_CARD: RouteCard = {
   imageAlt: 'CYBERSPACE サイバースペース TV and the ONOSENDAI wordmark on a curved CRT screen, between a glowing teal, blue and purple grid floor and ceiling.',
 }
 
+/**
+ * The shard workshop's card (lib/workshopRoute.ts): its own words over the
+ * home page's image, so a link to /workshop says what it opens without a
+ * second picture to keep current.
+ */
+export const WORKSHOP_CARD: RouteCard = {
+  url: 'https://onosendai.tech/workshop',
+  title: 'SHARD WORKSHOP · ONOSENDAI',
+  description: 'Make a 3D object in your browser: stamp shapes, color the points, then deploy it to hide it in cyberspace at a place you choose.',
+  image: 'https://onosendai.tech/og.png?v=2',
+  imageType: 'image/png',
+  imageAlt: 'The ONOSENDAI wordmark and its yellow mark beside a scene from the app: the violet ring of the Black Sun, a cyan hyperjump beam with an avatar inside it, and a neon structure beyond.',
+}
+
+/** Each route's own page, written by the build beside index.html (vite.config.ts) and served by vercel.json. */
+export const ROUTE_PAGES: ReadonlyArray<readonly [fileName: string, card: RouteCard]> = [
+  ['tv.html', TV_CARD],
+  ['workshop.html', WORKSHOP_CARD],
+]
+
 const escape = (s: string): string => s.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;')
 
 /**

@@ -31,7 +31,7 @@ import type { Filter } from 'nostr-tools'
 import type { RelayAnswer } from '../../lib/relayOutcome'
 import { positionHex, type NostrEvent } from '../../lib/events'
 import { V2_EPOCH } from '../../lib/tv/tape'
-import { setTvAsk, shotElapsed, tvDwellRun, useTv } from '../useTv'
+import { setTvAsk, shotElapsed, tvDwellRun, tvQueued, useTv } from '../useTv'
 import { DWELL_HELD_MAX, DWELL_MAX_S, DWELL_REST_S, Dwell, dwellLimits } from '../../lib/tv/dwell'
 import type { Shot } from '../../lib/tv/director'
 
@@ -57,11 +57,11 @@ describe('the dwell rule (lib/tv/dwell)', () => {
     d.onScreen('a', 40 * S)
     expect(d.run).toEqual({ pubkey: 'a', since: 0 })
     expect(d.over(59.9 * S)).toBe(false)
-    expect(d.pick(queue, 59.9 * S, true)).toEqual({ play: 0 })
+    expect(d.pick(queue, 59.9 * S)).toEqual({ play: 0 })
     expect(d.over(60 * S)).toBe(true)
     expect(d.resting('a', 60 * S)).toBe(true)
     expect(d.someoneElse(queue, 60 * S)).toBe(true)
-    expect(d.pick(queue, 60 * S, true)).toEqual({ play: 2 })
+    expect(d.pick(queue, 60 * S)).toEqual({ play: 2 })
     // Someone else on: a new run.
     d.onScreen('b', 60 * S)
     expect(d.over(61 * S)).toBe(false)
@@ -72,9 +72,20 @@ describe('the dwell rule (lib/tv/dwell)', () => {
     d.onScreen('a', 0)
     d.over(60 * S)
     const queue = [shot('a'), shot('b')]
-    for (const t of [61, 200, 400, 659]) expect(d.pick(queue, t * S, true), `${t} s`).toEqual({ play: 1 })
+    for (const t of [61, 200, 400, 659]) expect(d.pick(queue, t * S), `${t} s`).toEqual({ play: 1 })
     expect(d.resting('a', 660 * S)).toBe(false)
-    expect(d.pick(queue, 660 * S, true)).toEqual({ play: 0 })
+    expect(d.pick(queue, 660 * S)).toEqual({ play: 0 })
+  })
+
+  it('playing on as the rested one after a break started its count again, it still gives way at once', () => {
+    const d = new Dwell()
+    d.onScreen('a', 0)
+    d.over(60 * S)
+    d.onScreen(null, 80 * S)
+    d.onScreen('a', 100 * S)
+    expect(d.over(110 * S)).toBe(false)
+    expect(d.moveOn([shot('a')], 110 * S)).toBe(false)
+    expect(d.moveOn([shot('a'), shot('b')], 110 * S)).toBe(true)
   })
 
   it('a break or anyone else in between ends a run', () => {
@@ -95,27 +106,38 @@ describe('the dwell rule (lib/tv/dwell)', () => {
     d.over(60 * S)
     const queue = [shot('b', 'arrival'), shot('a'), shot('c', 'reaction')]
     expect(d.someoneElse(queue, 61 * S)).toBe(false)
-    expect(d.pick(queue, 61 * S, true)).toEqual({ wait: true })
-    // Waiting on the tape for someone else: nothing playable, however many lines wait too, so it reads on.
+    // No one else queued: the rested one plays on, past the lines, while the tape is read on for someone.
+    expect(d.pick(queue, 61 * S)).toEqual({ play: 1 })
+    // Wanting someone else: nothing playable, however many lines wait too, so it reads on.
     expect(d.playable(queue, 61 * S)).toBe(0)
     expect(d.playable([...queue, ...Array.from({ length: 10 }, () => shot('f', 'arrival'))], 61 * S)).toBe(0)
     // With someone else's shot there, the lines count as before.
     expect(d.playable([...queue, shot('b')], 61 * S)).toBe(3)
-    expect(d.pick([shot('b', 'arrival')], 61 * S, true)).toEqual({ none: true })
+    expect(d.pick([shot('b', 'arrival')], 61 * S)).toEqual({ none: true })
   })
 
-  it('with only the rested pubkey on the tape: waits while more can be read, then plays it anyway', () => {
+  it('with only the rested pubkey queued: plays it on, reads on for someone else, and cuts to them when they come', () => {
     const d = new Dwell()
     d.onScreen('a', 0)
     d.over(60 * S)
     const queue = [shot('a'), shot('a')]
-    expect(d.pick(queue, 61 * S, true)).toEqual({ wait: true })
-    expect(d.pick(queue, 61 * S, false)).toEqual({ play: 0 })
-    // Held as far as DWELL_HELD_MAX, then it plays on rather than reading on and on.
+    expect(d.pick(queue, 61 * S)).toEqual({ play: 0 })
+    expect(d.playable(queue, 61 * S)).toBe(0)
+    expect(d.moveOn(queue, 61 * S)).toBe(false)
+    d.onScreen('a', 70 * S)
+    // Someone read in: cut now, and its rest is from the cut, the play-on unspent.
+    expect(d.moveOn([...queue, shot('b')], 95 * S)).toBe(true)
+    d.onScreen('b', 95 * S)
+    expect(d.resting('a', (95 + 599) * S)).toBe(true)
+    expect(d.resting('a', (95 + 600) * S)).toBe(false)
+    // Read as far as DWELL_HELD_MAX of its shots, then no further: it plays on.
+    const e = new Dwell()
+    e.onScreen('a', 0)
+    e.over(60 * S)
     const many = Array.from({ length: DWELL_HELD_MAX }, () => shot('a'))
-    expect(d.pick(many, 61 * S, true)).toEqual({ play: 0 })
-    expect(d.playable(many, 61 * S)).toBe(Infinity)
-    expect(d.playable(many.slice(1), 61 * S)).toBe(0)
+    expect(e.pick(many, 61 * S)).toEqual({ play: 0 })
+    expect(e.playable(many, 61 * S)).toBe(Infinity)
+    expect(e.playable(many.slice(1), 61 * S)).toBe(0)
   })
 
   it('rests ten minutes from when TV moves away from it, however long it played on alone (review of #447)', () => {
@@ -126,12 +148,43 @@ describe('the dwell rule (lib/tv/dwell)', () => {
     for (const t of [100, 300, 540, 700]) { d.onScreen('a', t * S); d.over(t * S) }
     d.onScreen('b', 705 * S)
     const queue = [shot('a'), shot('c')]
-    for (const t of [706, 900, 1304]) expect(d.pick(queue, t * S, true), `${t} s`).toEqual({ play: 1 })
-    expect(d.pick(queue, 1305 * S, true)).toEqual({ play: 0 })
+    for (const t of [706, 900, 1304]) expect(d.pick(queue, t * S), `${t} s`).toEqual({ play: 1 })
+    expect(d.pick(queue, 1305 * S)).toEqual({ play: 0 })
     // Under its minute, moving away rests no one.
     d.onScreen('c', 1305 * S)
     d.onScreen('a', 1330 * S)
     expect(d.resting('c', 1331 * S)).toBe(false)
+  })
+
+  it('playing on as the rested one for under a minute spends none of its rest: ten minutes from the last cut (review of #448)', () => {
+    // Cut at 100 s; on again alone 300 to 330 s, cut again.
+    const d = new Dwell()
+    d.onScreen('a', 0)
+    d.over(60 * S)
+    d.onScreen('b', 100 * S)
+    d.onScreen('a', 300 * S)
+    d.onScreen('b', 330 * S)
+    expect(d.resting('a', 929 * S)).toBe(true)
+    expect(d.resting('a', 930 * S)).toBe(false)
+    // A break, then on alone 120 to 170 s: rests from 170 s.
+    const e = new Dwell()
+    e.onScreen('a', 0)
+    e.over(60 * S)
+    e.onScreen(null, 90 * S)
+    e.onScreen('a', 120 * S)
+    e.onScreen('b', 170 * S)
+    expect(e.resting('a', 769 * S)).toBe(true)
+    expect(e.resting('a', 770 * S)).toBe(false)
+    // On alone 61 s rests from its cut just the same: no jump at the minute.
+    const f = new Dwell()
+    f.onScreen('a', 0)
+    f.over(60 * S)
+    f.onScreen(null, 90 * S)
+    f.onScreen('a', 120 * S)
+    f.over(181 * S)
+    f.onScreen('b', 181 * S)
+    expect(f.resting('a', 780 * S)).toBe(true)
+    expect(f.resting('a', 781 * S)).toBe(false)
   })
 
   it('a shot cued on purpose plays whoever it is', () => {
@@ -139,7 +192,7 @@ describe('the dwell rule (lib/tv/dwell)', () => {
     d.onScreen('a', 0)
     d.over(60 * S)
     d.free('a')
-    expect(d.pick([shot('a'), shot('b')], 61 * S, true)).toEqual({ play: 0 })
+    expect(d.pick([shot('a'), shot('b')], 61 * S)).toEqual({ play: 0 })
   })
 
   it('playing on alone, it stays over: the first shot of anyone else that comes is put on', () => {
@@ -151,7 +204,7 @@ describe('the dwell rule (lib/tv/dwell)', () => {
     // Its rest runs out while it plays on alone: it rests again.
     expect(d.over(700 * S)).toBe(true)
     expect(d.resting('a', 1250 * S)).toBe(true)
-    expect(d.pick([shot('a'), shot('b')], 700 * S, true)).toEqual({ play: 1 })
+    expect(d.pick([shot('a'), shot('b')], 700 * S)).toEqual({ play: 1 })
   })
 })
 
@@ -196,7 +249,10 @@ function load(events: NostrEvent[]): void {
 let tape: NostrEvent[] = []
 /** Questions no relay answers, from now on, while above zero. */
 let down = 0
+/** How long the relay takes to answer, ms (fake time). */
+let lag = 0
 async function ask(f: Filter): Promise<RelayAnswer[]> {
+  if (lag > 0) await new Promise((r) => setTimeout(r, lag))
   if (down > 0) { down--; return [{ url: 'wss://relay.test', outcome: 'unreachable', reason: 'down', events: [] }] }
   return [{ url: 'wss://relay.test', outcome: 'answered', events: tape
     .filter((e) => (!f.kinds || f.kinds.includes(e.kind)) && (f.since === undefined || e.created_at >= f.since) && (f.until === undefined || e.created_at <= f.until) && (!f.authors || f.authors.includes(e.pubkey)))
@@ -206,6 +262,7 @@ async function ask(f: Filter): Promise<RelayAnswer[]> {
 
 beforeEach(() => {
   down = 0
+  lag = 0
   vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval', 'setTimeout', 'clearTimeout', 'performance'] })
   // The random start lands on the tape's first event (as tv.test.ts).
   let calls = 0
@@ -219,7 +276,7 @@ afterEach(() => {
   vi.restoreAllMocks()
 })
 
-type Seen = { t: number; pk: string | null; ad?: boolean; held?: boolean; tape?: number }
+type Seen = { t: number; pk: string | null; ad?: boolean; held?: boolean; tape?: number; el?: number; len?: number; others?: boolean }
 /**
  * Run TV for `ms` of fake time, noting every 100 ms whose shot is on screen
  * (null: none, or a break), and whether the picture is held: playing, no
@@ -230,7 +287,7 @@ async function watch(ms: number, seen: Seen[]): Promise<void> {
     await vi.advanceTimersByTimeAsync(100)
     const s = useTv.getState()
     const held = s.ad === null && s.status === 'playing' && (s.shot === null || shotElapsed() > s.shot.length + 0.2)
-    seen.push({ t: performance.now(), pk: s.ad ? null : s.shot?.pubkey ?? null, ad: s.ad !== null, held, tape: s.tapeTime ?? 0 })
+    seen.push({ t: performance.now(), pk: s.ad ? null : s.shot?.pubkey ?? null, ad: s.ad !== null, held, tape: s.tapeTime ?? 0, el: shotElapsed(), len: s.shot?.length ?? 0, others: tvQueued().some((pk) => pk !== A) })
   }
 }
 /** The longest the picture was held, ms, after `from`. */
@@ -318,6 +375,43 @@ describe('Cyberspace TV moves on after a minute of one pubkey', () => {
     // The ticker keeps the newest four arrivals: the last of the six.
     expect(useTv.getState().arrivals.map((x) => x.at)).toContain(T0 + 425)
     expect(longestHold(seen, 2000)).toBeLessThanOrEqual(1000)
+  })
+
+  it('plays the rested one on while slow relays are read ahead for someone else: never a still picture (arkinox, 2026-10-22)', async () => {
+    // A hop every 5 s: shots of some 28 s, so the rested one's shots end while the reads go on.
+    const crawl: NostrEvent[] = []
+    for (let k = 0; k * 5 < 1700; k++) crawl.push(hop(A, T0 + k * 5, 1000n + BigInt(k), 1001n + BigInt(k)))
+    load([...crawl, ...visitors(2100, 2400, 60)])
+    lag = 3000
+    useTv.getState().start()
+    const seen: Seen[] = []
+    await watch(150_000, seen)
+    const visit = seen.find((x) => x.pk !== null && OTHERS.includes(x.pk))!
+    expect(visit).toBeDefined()
+    const onA = seen.filter((x) => x.pk === A && x.t < visit.t)
+    // It played on well past its minute while the reads came in,
+    expect(onA[onA.length - 1].t - onA[0].t).toBeGreaterThan(DWELL_MAX_S * 1000 + 5000)
+    // its shots following one another with no picture held between them.
+    expect(longestHold(seen, onA[0].t + DWELL_MAX_S * 1000)).toBeLessThanOrEqual(300)
+  })
+
+  it('cuts to someone else the tick they are queued, past the minute, mid-shot', async () => {
+    // A hop every 2 s: shots of some 46 s on screen, so a cut at a shot's end would show.
+    load([...crawler(A, 900), ...visitors(1300, 1500, 60)])
+    lag = 3000
+    useTv.getState().start()
+    const seen: Seen[] = []
+    await watch(150_000, seen)
+    const visit = seen.find((x) => x.pk !== null && OTHERS.includes(x.pk))!
+    expect(visit).toBeDefined()
+    const onA = seen.filter((x) => x.pk === A && x.t < visit.t)
+    const queued = seen.find((x) => x.others)!
+    // Due when both: the minute is up, and someone else is in the queue.
+    const due = Math.max(queued.t, onA[0].t + DWELL_MAX_S * 1000)
+    expect(visit.t - due).toBeLessThanOrEqual(200)
+    expect(visit.t - due).toBeGreaterThanOrEqual(0)
+    const lastA = onA[onA.length - 1]
+    expect(lastA.len! - lastA.el!).toBeGreaterThan(2)
   })
 
   it('keeps its rest across a new tape', async () => {

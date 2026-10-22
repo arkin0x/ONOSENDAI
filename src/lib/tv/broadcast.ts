@@ -19,7 +19,8 @@
  *     ONOSENDAI.TECH (lib/tv/hosakaAd; arkinox, 2026-10-21).
  *   - WWW.ONOSENDAI.TECH stands under the clock, top right, for good, so a
  *     viewer always knows where to go (BROADCAST_TAG; scene/tvPainter;
- *     arkinox, 2026-10-22). Not over the HOSAKA spot, which owns the picture.
+ *     arkinox, 2026-10-22), and over the HOSAKA spot too, top right in the
+ *     band the spot keeps clear, across from ADVERTISEMENT.
  *   - The pixel ratio is the capture's, 1 to 1.5 (broadcastDpr; scene/Scene):
  *     1 for the 1280x720 and 720x720 captures, 1.5 for the 1080x1080 one,
  *     which is the 720x720 layout drawn sharp rather than stretched.

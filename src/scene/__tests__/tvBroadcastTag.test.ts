@@ -1,8 +1,8 @@
 /**
  * tvBroadcastTag.test.ts: the 24/7 stream says WWW.ONOSENDAI.TECH under the
- * clock, top right, for good (arkinox, 2026-10-22), and nowhere else: not on
- * the site's own TV, not over the HOSAKA spot. At the stream's 1280x720 it
- * keeps clear of everything else TV paints, and it changes nothing else's place.
+ * clock, top right, for good (arkinox, 2026-10-22), and over the HOSAKA spot
+ * in the band the spot keeps clear; never on the site's own TV. It keeps clear
+ * of everything else TV paints, and it changes nothing else's place.
  */
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
@@ -19,17 +19,20 @@ import { BROADCAST_MAX_DPR, BROADCAST_TAG, broadcastDpr, setBroadcastForTest } f
 interface Box { x0: number; y0: number; x1: number; y1: number }
 /** The drawing state a call inked with: the font, the ink, how opaque, the shadow. */
 interface Look { font: string; ink: string; alpha: number; shadow: string }
-interface Text { text: string; x: number; y: number; size: number; align: string; box: Box; look: Look }
+interface Text { text: string; x: number; y: number; size: number; align: string; box: Box; look: Look; seq: number }
 
-/** A canvas that keeps each text, rectangle and translation it is given, as boxes on the frame; type measures 0.6 em a character. */
-function recording(): { canvas: HTMLCanvasElement; texts: Text[]; rects: Array<Box & { radial: boolean; look: Look }>; spots: Array<{ x: number; y: number }> } {
+/** A canvas that keeps each text, rectangle, picture and translation it is given, as boxes on the frame (through translate and scale); type measures 0.6 em a character. */
+function recording(): { canvas: HTMLCanvasElement; texts: Text[]; rects: Array<Box & { radial: boolean; look: Look; seq: number }>; spots: Array<{ x: number; y: number }> } {
   const texts: Text[] = []
-  const rects: Array<Box & { radial: boolean; look: Look }> = []
+  const rects: Array<Box & { radial: boolean; look: Look; seq: number }> = []
+  /** Each drawing call's place in the paint, for what is drawn over what. */
+  let seq = 0
   const spots: Array<{ x: number; y: number }> = []
   const state: Record<string, unknown> = { globalAlpha: 1, font: '10px x', textAlign: 'start', fillStyle: '#000', shadowColor: 'rgba(0, 0, 0, 0)', shadowBlur: 0 }
-  const stack: Array<{ dx: number; dy: number; st: Record<string, unknown> }> = []
+  const stack: Array<{ dx: number; dy: number; k: number; st: Record<string, unknown> }> = []
   let dx = 0
   let dy = 0
+  let k = 1
   const look = (): Look => ({
     font: String(state.font),
     ink: typeof state.fillStyle === 'string' ? state.fillStyle : 'gradient',
@@ -38,8 +41,9 @@ function recording(): { canvas: HTMLCanvasElement; texts: Text[]; rects: Array<B
   })
   const size = (): number => Number(/([\d.]+)px/.exec(String(state.font))?.[1] ?? 10)
   const width = (t: string): number => Array.from(t).length * size() * 0.6
+  const box = (x: number, y: number, w: number, h: number): Box => ({ x0: dx + k * Math.min(x, x + w), y0: dy + k * Math.min(y, y + h), x1: dx + k * Math.max(x, x + w), y1: dy + k * Math.max(y, y + h) })
   const rect = (x: number, y: number, w: number, h: number): void => {
-    rects.push({ x0: dx + Math.min(x, x + w), y0: dy + Math.min(y, y + h), x1: dx + Math.max(x, x + w), y1: dy + Math.max(y, y + h), radial: (state.fillStyle as { radial?: boolean })?.radial === true, look: look() })
+    rects.push({ ...box(x, y, w, h), radial: (state.fillStyle as { radial?: boolean })?.radial === true, look: look(), seq: seq++ })
   }
   const ctx = new Proxy({
     measureText: (t: string) => ({ width: width(t) }),
@@ -48,14 +52,16 @@ function recording(): { canvas: HTMLCanvasElement; texts: Text[]; rects: Array<B
     fillText: (text: string, x: number, y: number) => {
       const w = width(text)
       const align = String(state.textAlign)
-      const left = dx + (align === 'right' ? x - w : align === 'center' ? x - w / 2 : x)
-      texts.push({ text, x: dx + x, y: dy + y, size: size(), align, box: { x0: left, y0: dy + y - size(), x1: left + w, y1: dy + y + size() * 0.3 }, look: look() })
+      const left = align === 'right' ? x - w : align === 'center' ? x - w / 2 : x
+      texts.push({ text, x: dx + k * x, y: dy + k * y, size: size() * k, align, box: box(left, y - size(), w, size() * 1.3), look: look(), seq: seq++ })
     },
     fillRect: rect,
     strokeRect: rect,
-    translate: (x: number, y: number) => { dx += x; dy += y; spots.push({ x: dx, y: dy }) },
-    save: () => { stack.push({ dx, dy, st: { ...state } }) },
-    restore: () => { const top = stack.pop(); if (top) { dx = top.dx; dy = top.dy; Object.assign(state, top.st) } },
+    drawImage: (_img: unknown, x: number, y: number, w: number, h: number) => { rects.push({ ...box(x, y, w, h), radial: false, look: { ...look(), ink: 'image' }, seq: seq++ }) },
+    translate: (x: number, y: number) => { dx += k * x; dy += k * y; spots.push({ x: dx, y: dy }) },
+    scale: (a: number) => { k *= a },
+    save: () => { stack.push({ dx, dy, k, st: { ...state } }) },
+    restore: () => { const top = stack.pop(); if (top) { dx = top.dx; dy = top.dy; k = top.k; Object.assign(state, top.st) } },
   } as Record<string, unknown>, {
     get: (target, key) => (key in target ? target[key as string] : key in state ? state[key as string] : () => {}),
     set: (_t, key, v) => { state[key as string] = v; return true },
@@ -167,16 +173,80 @@ describe('WWW.ONOSENDAI.TECH on the 24/7 stream (arkinox, 2026-10-22)', () => {
       setBroadcastForTest(true)
       const stream = paintAt(picture({ shot: shot as never }))
       // Where, and how: the tag leaves nothing of its ink, alpha or shadow on what comes after it.
-      const where = (r: ReturnType<typeof recording>): unknown => ({ texts: r.texts.filter((t) => t.text !== BROADCAST_TAG).map((t) => [t.text, t.x, t.y, t.look]), rects: r.rects })
+      const where = (r: ReturnType<typeof recording>): unknown => ({ texts: r.texts.filter((t) => t.text !== BROADCAST_TAG).map((t) => [t.text, t.x, t.y, t.look]), rects: r.rects.map(({ seq: _seq, ...rest }) => rest) })
       expect(where(stream), shot.kind).toEqual(where(site))
     }
   })
 
-  it('is not over the HOSAKA spot, whose end card names ONOSENDAI.TECH itself', () => {
+  it('stays over the HOSAKA spot (arkinox, 2026-10-22), in the band it keeps clear, across from ADVERTISEMENT, at 1280x720 and in the square', () => {
     setBroadcastForTest(true)
-    for (const sc of HOSAKA_1.scenes) {
-      const { texts } = paintAt(picture({ shot: trip as never, ad: { at: 1e12 - 700 - ((sc.from + sc.to) / 2) * 1000, id: HOSAKA_1.id } }))
-      expect(texts.some((t) => t.text === BROADCAST_TAG), `${sc.kind} ${sc.from}`).toBe(false)
+    const was = { hosaka: assets.hosaka, hosakaMark: assets.hosakaMark }
+    Object.assign(assets, { hosaka: {} as never, hosakaMark: {} as never })
+    try {
+      for (const [w, h, scale] of [[1280, 720, 1], [720, 720, 1], [720, 720, 1.5]] as const) {
+        const W = w * scale
+        const s = scale * Math.min(1.35, Math.max(0.9, w / 1400))
+        const MX = Math.round(W * MARGIN_X)
+        const MY = Math.round(h * scale * MARGIN_Y)
+        const places = new Set<string>()
+        for (const sc of HOSAKA_1.scenes) {
+          // Landed (the middle of each scene, and as each card has just come in),
+          // and in the slam itself: for its first fifth of a second a card comes
+          // in big over the band, ADVERTISEMENT's too, and the address is drawn over it.
+          for (const into of [(sc.to - sc.from) / 2, 0.3, 0.1, 0.02]) {
+            const landed = into >= 0.3
+            const at = `${w}x${h}@${scale} ${sc.kind} ${sc.from}+${into}`
+            const { texts, rects } = paintAt(picture({ shot: trip as never, ad: { at: 1e12 - 700 - (sc.from + into) * 1000, id: HOSAKA_1.id } }), w, h, 1e12, scale)
+            const tags = texts.filter((t) => t.text === BROADCAST_TAG)
+            expect(tags, at).toHaveLength(1)
+            const tag = tags[0]
+            places.add(`${tag.x},${tag.y}`)
+            expect(tag.align).toBe('right')
+            expect(tag.x).toBe(W - MX)
+            // In the band over the spot's cards, ADVERTISEMENT's line.
+            expect(tag.box.y1, at).toBeLessThanOrEqual(MY + 26 * s)
+            const advert = texts.find((t) => t.text === 'ADVERTISEMENT')!
+            expect(Math.abs((tag.box.y0 + tag.box.y1) / 2 - (advert.box.y0 + advert.box.y1) / 2), at).toBeLessThan(4 * s)
+            for (const t of texts) {
+              if (t === tag) continue
+              if (landed) expect(meets(tag.box, t.box), `${at}: "${t.text}"`).toBe(false)
+              else if (meets(tag.box, t.box)) expect(t.seq, `${at}: "${t.text}" under it`).toBeLessThan(tag.seq)
+            }
+            for (const r of rects) {
+              if (r.x1 - r.x0 >= W) continue
+              if (landed) expect(meets(tag.box, r), `${at}: ${r.look.ink} ${JSON.stringify(r)}`).toBe(false)
+              else if (meets(tag.box, r)) expect(r.seq, `${at}: ${r.look.ink} under it`).toBeLessThan(tag.seq)
+            }
+          }
+        }
+        // Still: one place the whole spot.
+        expect(places.size, `${w}x${h}@${scale}`).toBe(1)
+      }
+      // The site's TV: no address over its spot.
+      setBroadcastForTest(false)
+      const { texts } = paintAt(picture({ shot: trip as never, ad: { at: 1e12 - 700 - 3000, id: HOSAKA_1.id } }))
+      expect(texts.some((t) => t.text.includes('ONOSENDAI.TECH'))).toBe(false)
+    } finally {
+      Object.assign(assets, was)
+    }
+  })
+
+  it('over the spot, it moves nothing of the spot: every other word and picture is where the site\'s TV has it', () => {
+    const was = { hosaka: assets.hosaka, hosakaMark: assets.hosakaMark }
+    Object.assign(assets, { hosaka: {} as never, hosakaMark: {} as never })
+    try {
+      // Not the end card, whose words the stream changes (lib/tv/hosakaAd broadcastCut).
+      for (const sc of HOSAKA_1.scenes.filter((x) => x.kind !== 'end')) {
+        const p = picture({ shot: trip as never, ad: { at: 1e12 - 700 - ((sc.from + sc.to) / 2) * 1000, id: HOSAKA_1.id } })
+        setBroadcastForTest(false)
+        const site = paintAt(p, 720, 720)
+        setBroadcastForTest(true)
+        const stream = paintAt(p, 720, 720)
+        const where = (r: ReturnType<typeof recording>): unknown => ({ texts: r.texts.filter((t) => t.text !== BROADCAST_TAG).map((t) => [t.text, t.x, t.y, t.look]), rects: r.rects.map(({ seq: _seq, ...rest }) => rest) })
+        expect(where(stream), `${sc.kind} ${sc.from}`).toEqual(where(site))
+      }
+    } finally {
+      Object.assign(assets, was)
     }
   })
 

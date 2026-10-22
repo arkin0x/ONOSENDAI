@@ -972,6 +972,12 @@ export class TvPainter {
     ctx.fillStyle = 'rgba(242, 251, 255, 0.85)'
     ctx.fillText(tag, MX + 7 * s, MY + 12.5 * s)
     ctx.restore()
+    // On the stream, its address stays over the spot too (arkinox,
+    // 2026-10-22), across the band from ADVERTISEMENT and on its line: the
+    // band the spot keeps clear of its cards, which in a square frame reach
+    // where the address stands under the clock.
+    this.track.part('urlTag')
+    if (isBroadcast()) this.urlTag(W - MX, MY + 9 * s + URL_TAG_PX * s * 0.36, s)
     this.track.part('marquee')
     this.marquee(p, a, MX, tickY, W - MX, tickH, s, dt)
     this.npRect = null

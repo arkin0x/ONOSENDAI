@@ -255,19 +255,49 @@ describe('switching, canceling and leaving', () => {
     expect(useWorkshop.getState().open).toBe(false)
   })
 
-  it('leaving works as before once the copy is stood down, and the next session starts fresh', async () => {
+  it('leaving right after a placement works as before: EXIT (and B) stand the copy down and leave', async () => {
     const { lantern } = bench()
     useStash.getState().deployModel(lantern.id)
     await S().deploy()
-    // EXIT is refused while anything is lined up, a copy too.
-    B().exit()
-    expect(B().active).toBe(true)
-    S().cancelDeploy(true)
+    expect(S().pending).not.toBeNull()
     B().exit()
     expect(B().active).toBe(false)
-    expect(S().placedLast).toBeNull()
     expect(S().pending).toBeNull()
+    expect(S().placedLast).toBeNull()
     expect(againName(S())).toBeNull()
+    expect(useStash.getState().models).toBe(false)
+    expect(S().mine).toHaveLength(1)
+
+    // B is the same call.
+    B().enter('build')
+    up(1)
+    useStash.getState().deployModel(lantern.id)
+    await S().deploy()
+    B().toggle()
+    expect(B().active).toBe(false)
+    expect(S().pending).toBeNull()
+  })
+
+  it('a deploy not yet placed still holds EXIT, as before', () => {
+    const { lantern } = bench()
+    useStash.getState().deployModel(lantern.id)
+    B().exit()
+    expect(B().active).toBe(true)
+    expect(S().pending).not.toBeNull()
+  })
+
+  it('the mode ending under a copy keeps no draft and says nothing was kept', async () => {
+    S().startDeployMessage('you are here')
+    await S().deploy()
+    expect(S().pending).not.toBeNull()
+    // A tap on the globe.
+    C().focusOn(C().position, 0, 'EARTH · 1, 2')
+    expect(B().active).toBe(false)
+    expect(S().pending).toBeNull()
+    expect(B().messageDraft).toBeNull()
+    const meta = useToast.getState().toast?.meta ?? ''
+    expect(meta).not.toMatch(/kept|canceled/)
+    expect(S().mine).toHaveLength(1)
   })
 
   it('a DEPLOY that never left your avatar still ends with its placement, nothing lined up', async () => {
@@ -305,6 +335,32 @@ describe('switching, canceling and leaving', () => {
     const placed = S().mine[0].eventId
     editPlaced(placed)
     expect(S().pending).toMatchObject({ type: 'shard', edit: { eventId: placed } })
+  })
+})
+
+describe('the bag controls are the bag\'s', () => {
+  it('a copy is seeded from the bag just written; PLACE AGAIN into another region never carries the riddle', async () => {
+    const { lantern } = bench()
+    useStash.getState().deployModel(lantern.id)
+    useShards.setState({ deployHeightAuto: false })
+    S().setDeployHeight(2)
+    S().setDeployBag({ riddle: 'under the oak' })
+    await S().deploy()
+    const first = S().mine[0]
+    expect(first.bag?.riddle).toBe('under the oak')
+    // Lined up again: the controls are that bag's now.
+    expect(S().deployBagFrom?.region).toBeDefined()
+    expect(S().deployBag.riddle).toBe('under the oak')
+
+    S().cancelDeploy(true)
+    up(3)
+    expect(S().placeAgain()).toBe(true)
+    expect(S().deployBag.riddle).toBe('')
+    expect(S().deployBagFrom).toBeNull()
+    await S().deploy()
+    const second = S().mine.find((d) => d.lookupId !== first.lookupId)
+    expect(second).toBeDefined()
+    expect(second?.bag?.riddle ?? '').toBe('')
   })
 })
 

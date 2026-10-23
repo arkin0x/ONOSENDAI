@@ -39,6 +39,7 @@ import { moveDirection, type MoveName } from '../lib/moves'
 import { MAX_SCALE_EXP } from '../lib/space'
 import { EARTH_SCALE_EXP } from '../lib/hyperspace/interest'
 import { useShards } from '../store/useShards'
+import { useAtLastSpot } from './DeployBar'
 import { ACTION_LABEL, useNextAction, useOffer } from '../store/useOffer'
 import { useUiHints } from '../store/useUiHints'
 import { noCallout, useRepeatable } from '../hooks/useRepeatable'
@@ -72,6 +73,8 @@ export function TouchControls(): JSX.Element {
   // Null, and not drawn, when there is nothing to report.
   const chainStatus = useChainStatus()
   const deploying = useShards((s) => s.pending !== null)
+  // A copy on the spot the last one landed on: PLACE is refused there.
+  const placedHere = useAtLastSpot()
   const bind = useRepeatable()
   // Open only while going LOCAL to LIVE. The switch itself is not moved until
   // the confirm, so a cancel, a tap on the backdrop, or the component going
@@ -272,8 +275,8 @@ export function TouchControls(): JSX.Element {
         ) : (
         <button
           className={`touchops__commit ${deploying ? 'is-armed' : computing ? 'is-busy' : tooFar ? 'is-too-far' : offload ? 'is-offload' : armed ? 'is-armed' : ''}`}
-          disabled={(!deploying && !armed && !computing) || tooFar}
-          title={deploying ? 'Place shard here' : tooFar ? 'Higher than anyone computes: bring the cursor nearer, or ride hyperspace' : offload ? 'This step needs HOSAKA: see the offer (Space)' : action === 'hop-to-boundary' ? 'Hop to the boundary on the way (Space)' : action === 'sidestep' ? 'Sidestep one gibson through the boundary (Space)' : 'Commit hop (Space)'}
+          disabled={(!deploying && !armed && !computing) || tooFar || (deploying && placedHere)}
+          title={deploying ? (placedHere ? 'The last one stands here. Move to place another' : 'Place shard here') : tooFar ? 'Higher than anyone computes: bring the cursor nearer, or ride hyperspace' : offload ? 'This step needs HOSAKA: see the offer (Space)' : action === 'hop-to-boundary' ? 'Hop to the boundary on the way (Space)' : action === 'sidestep' ? 'Sidestep one gibson through the boundary (Space)' : 'Commit hop (Space)'}
           {...noCallout}
           onPointerDown={(e) => {
             e.preventDefault(); e.stopPropagation()
@@ -282,7 +285,7 @@ export function TouchControls(): JSX.Element {
             else useCyberspace.getState().commit()
           }}
         >
-          {deploying ? 'PLACE' : computing ? `${Math.round(proof.progress * 100)}%` : action ? ACTION_LABEL[action] : 'COMMIT'}
+          {deploying ? (placedHere ? 'PLACED' : 'PLACE') : computing ? `${Math.round(proof.progress * 100)}%` : action ? ACTION_LABEL[action] : 'COMMIT'}
         </button>
         )}
         {/* Whether a commit leaves the device. Under COMMIT because that is the

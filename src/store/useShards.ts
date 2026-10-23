@@ -417,8 +417,13 @@ export function spotOf(at: Position, plane: Plane, s: Pick<DeploySettings, 'depl
   return [plane, at.x, at.y, at.z, s.deployHeight, s.deployUnit, s.deployTurn.join('.'), s.deployUp ? s.deploySpin : 'flat', s.deployLink ? 'link' : 'copy'].join(':')
 }
 
-/** Every placement setting the deploy bar holds, kept whole from one placement to the next. */
-export type DeploySettings = Pick<ShardsState, 'deployHeight' | 'deployHeightAuto' | 'deployUnit' | 'deployUp' | 'deploySpin' | 'deployTurn' | 'deployFollow' | 'deployLink' | 'deployBag' | 'deployBagFrom'>
+/**
+ * The placement settings the deploy bar holds for the thing itself, kept
+ * whole from one placement to the next. The bag controls are not among
+ * them: they are the bag's, seeded from the bag under the cursor
+ * (seedDeployBag), so a riddle never follows into another bag.
+ */
+export type DeploySettings = Pick<ShardsState, 'deployHeight' | 'deployHeightAuto' | 'deployUnit' | 'deployUp' | 'deploySpin' | 'deployTurn' | 'deployFollow' | 'deployLink'>
 
 /** The last placement BUILD mode can line up again, with everything it went out with. */
 export interface PlacedLast {
@@ -433,12 +438,21 @@ export interface PlacedLast {
   count: number
 }
 
-/** The settings out of the store, for PlacedLast. */
-function settingsOf(s: DeploySettings): DeploySettings {
-  return {
-    deployHeight: s.deployHeight, deployHeightAuto: s.deployHeightAuto, deployUnit: s.deployUnit, deployUp: s.deployUp, deploySpin: s.deploySpin,
-    deployTurn: [...s.deployTurn] as Turns, deployFollow: s.deployFollow, deployLink: s.deployLink, deployBag: s.deployBag, deployBagFrom: s.deployBagFrom,
-  }
+/**
+ * Only a copy is lined up: the last placement again (`placedLast`), not
+ * hiding. It is no work of yours to lose, so leaving BUILD mode, EDIT and
+ * the mode ending under it stand it down quietly rather than waiting on it
+ * or keeping it as a draft.
+ */
+export function copyLinedUp(s: { pending: DeployPending | null; placedLast: PlacedLast | null; deployStatus: DeployStatus }): boolean {
+  return s.pending !== null && s.pending === s.placedLast?.pending && s.deployStatus !== 'working'
+}
+
+/** A copy lined up on the very spot, and with the very settings, the last one went out at: placing it is refused. */
+export function atLastSpot(s: Pick<ShardsState, 'pending' | 'placedLast' | 'deployHeight' | 'deployUnit' | 'deployUp' | 'deploySpin' | 'deployTurn' | 'deployLink'>, cs: ReturnType<typeof useCyberspace.getState>): boolean {
+  if (s.pending === null || s.placedLast?.pending !== s.pending) return false
+  const { position, plane } = buildCursorOf(cs)
+  return s.placedLast.spot === spotOf(deployPoint(position, buildStepOf(cs), s.deployHeight), plane, s)
 }
 
 /** The name of what PLACE AGAIN would line up, or null when there is nothing to place again (a model since deleted). */
@@ -449,6 +463,12 @@ export function againName(s: { placedLast: PlacedLast | null }): string | null {
   if (p.type !== 'shard') return pendingName(p, null)
   if (p.object) return p.object.shard.name || 'shard'
   return useWorkshop.getState().shards.find((m) => m.id === p.shardId)?.name ?? null
+}
+
+/** againName, current with the workshop too, so a model renamed or deleted since shows at once. */
+export function useAgainName(): string | null {
+  useWorkshop((w) => w.shards)
+  return useShards(againName)
 }
 
 /** The `lineage` field of an inline item, as a spread: nothing for a reference. */
@@ -1165,7 +1185,9 @@ export const useShards = create<ShardsState>((set, get) => {
       const s = get()
       const last = s.placedLast
       if (!last || s.pending || s.deployStatus === 'working' || againName(s) === null) return false
-      set({ pending: last.pending, ...last.settings, deployTurn: [...last.settings.deployTurn] as Turns, deployStatus: 'idle', deployError: null, deployNote: null, deployAsk: null })
+      // The bag controls start at the defaults and are seeded from the bag
+      // under the cursor, as for any new deploy: they are that bag's.
+      set({ pending: last.pending, ...last.settings, deployTurn: [...last.settings.deployTurn] as Turns, deployBag: DEFAULT_BAG_SETTINGS, deployBagFrom: null, deployStatus: 'idle', deployError: null, deployNote: null, deployAsk: null })
       cyber().setBuildStep(last.step)
       return true
     },
@@ -1695,12 +1717,21 @@ export const useShards = create<ShardsState>((set, get) => {
         // as it is, so nothing in between reads the deploy as over (useBuilder
         // stands it down where the mode ends with the placement).
         if (get().pending === pending) {
+          // What is recorded is what this one went out with, read when it
+          // started, as its spot was; the bar itself is left as it stands.
+          // The bag controls are the bag's just written here, so moving into
+          // a region with no bag of yours resets them (seedDeployBag).
           const again = repeatable(pending) ? againOf(pending) : null
           const s = get()
           const placedLast: PlacedLast | null = again
-            ? { pending: again, settings: settingsOf(s), step: cyber().buildStep, spot, count: s.placedLast?.pending === pending ? s.placedLast.count + 1 : 1 }
+            ? {
+              pending: again,
+              settings: { deployHeight, deployHeightAuto: s.deployHeightAuto, deployUnit, deployUp, deploySpin, deployTurn: [...deployTurn] as Turns, deployFollow: s.deployFollow, deployLink },
+              step: cs.buildStep, spot, count: s.placedLast?.pending === pending ? s.placedLast.count + 1 : 1,
+            }
             : s.placedLast
-          set({ deployStatus: 'done', pending: again, deployNote: null, deployAsk: null, placedLast })
+          const bag = again ? { deployBag: settings, deployBagFrom: ownBagIn(s.mine, regionOf(at, plane, deployHeight)) } : {}
+          set({ deployStatus: 'done', pending: again, deployNote: null, deployAsk: null, placedLast, ...bag })
         }
         if (moveError) useToast.getState().show({ label: 'MOVED, OLD COPY STAYED', meta: `It stands at the new place; the old one could not be taken down (${moveError}). Tap it and DELETE it.`, mark: 'build' })
       } catch (err) {

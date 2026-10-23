@@ -103,7 +103,7 @@
 
 import { create } from 'zustand'
 import { samePosition, useCyberspace } from './useCyberspace'
-import { positionOf, useShards, type DeployPending } from './useShards'
+import { copyLinedUp, positionOf, useShards, type DeployPending } from './useShards'
 import { useWorkshop } from './useWorkshop'
 import { placedStep } from '../lib/space'
 import { useHyperspace } from './useHyperspace'
@@ -169,7 +169,8 @@ export interface BuilderState {
   /**
    * Leave BUILD mode. The view stays where it is (R6). Refused while a deploy
    * is lined up: leaving would cancel it, which is CANCEL's (or Escape's) to
-   * do, so the B key, EXIT BUILD and EXIT all agree.
+   * do, so the B key, EXIT BUILD and EXIT all agree. A copy lined up after a
+   * placement (useShards `copyLinedUp`) is stood down instead.
    */
   exit: () => void
   /** On, or off. The B key and the BUILD control. */
@@ -291,6 +292,11 @@ export const useBuilder = create<BuilderState>((set, get) => ({
   },
 
   exit: () => {
+    if (!get().active) return
+    // A copy lined up after a placement is not a deploy to wait on: leaving
+    // stands it down, so B, Esc and EXIT end the mode right after a
+    // placement as they always did.
+    if (copyLinedUp(useShards.getState())) useShards.getState().cancelDeploy()
     if (!get().active || useShards.getState().pending) return
     const scrub = get().scrub
     // Off first, so the view change below is not read as the view ending
@@ -334,7 +340,12 @@ export const useBuilder = create<BuilderState>((set, get) => ({
  * why the mode ended and where the work is.
  */
 function endUnder(reason: BuildEndReason): void {
+  // A copy lined up after a placement was placed already: asked before the
+  // mode goes off, which forgets `placedLast`. It stands down quietly, with
+  // no draft kept and nothing said about it.
+  const copy = copyLinedUp(useShards.getState())
   useBuilder.setState({ active: false, via: null, leftAvatar: false, scrub: null })
+  if (copy) useShards.getState().cancelDeploy()
   const shards = useShards.getState()
   const pending = shards.pending
   let kept = ''
@@ -473,7 +484,7 @@ export function editPlaced(eventId: string): void {
   // A copy lined up again after a placement (useShards `placedLast`) is no
   // work of yours to lose: EDIT stands it down, as CANCEL would. Any other
   // deploy lined up still refuses.
-  if (shards.pending !== null && shards.pending === shards.placedLast?.pending && shards.deployStatus !== 'working') {
+  if (copyLinedUp(shards)) {
     shards.cancelDeploy()
     shards = useShards.getState()
   }

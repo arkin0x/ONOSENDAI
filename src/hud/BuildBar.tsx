@@ -20,7 +20,7 @@
 import { formatCellSize, formatDistance } from 'sno-core/scale'
 import { samePosition, useCyberspace } from '../store/useCyberspace'
 import { useBuilder } from '../store/useBuilder'
-import { SCAN_MAX_HEIGHT, againName, useShards } from '../store/useShards'
+import { SCAN_MAX_HEIGHT, useAgainName, useShards } from '../store/useShards'
 import { buildPlane, moveUnderWay } from '../lib/buildCursor'
 import { axisDistance } from '../lib/nearby'
 import { shortAxis } from '../lib/viewAt'
@@ -46,7 +46,7 @@ export function BuildBar(): JSX.Element | null {
   // says so, with a STOP, since the pad's STOP is not shown while building.
   const moving = useCyberspace(moveUnderWay)
   // The last placement, for PLACE AGAIN after a CANCEL: its name, or null.
-  const again = useShards(againName)
+  const again = useAgainName()
   const againType = useShards((s) => s.placedLast?.pending.type ?? 'shard')
   if (!active) return null
 
@@ -94,7 +94,7 @@ export function BuildBar(): JSX.Element | null {
           {/* The cutoff in words a touch screen shows: the deploy bar's chip
               explains itself only in a tooltip (arkinox, 2026-10-19). */}
           <li>At height {SCAN_MAX_HEIGHT} or less, any view that stops inside that box finds it; at {SCAN_MAX_HEIGHT + 1} or more, only someone who knows the spot and height.</li>
-          <li>What you place stays lined up, same settings, for the next one. CANCEL stops; PLACE OBJECT switches.</li>
+          <li>After a placement, PLACE AGAIN lines it up with the same settings.</li>
           <li>While placing, STEP (, and . on a keyboard) moves and snaps it in smaller steps inside the cube, shown by the small white box, without moving the camera.</li>
           <li>Building never moves your avatar and signs no move.{onAvatar ? '' : ` Your avatar is ${formatDistance(axisDistance(cursor, position))} away.`}</li>
           <li>EXIT, Esc or B leaves build mode; the view stays where it is.</li>

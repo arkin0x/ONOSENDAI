@@ -9,8 +9,8 @@
  * forgets that this device heard the one-shot fire (lib/audioTrigger), so
  * leaving its sphere and entering again plays it once more.
  *
- * `moderation` is the row under the actions where MUTE AUDIO and BLOCK
- * AUTHOR go (NIP-51 mute lists, built separately); absent, nothing is drawn.
+ * `moderation` is the row under the actions where MUTE THIS AUDIO and
+ * BLOCK AUTHOR go (SecretModal, store/useMutes); absent, nothing is drawn.
  *
  * Until the world plays sources by itself (the next step), the card's play
  * stops when the card closes, so nothing sounds with no way to stop it.
@@ -101,7 +101,7 @@ export function AudioCard({ id, triggerId, audio, moderation }: {
         )}
       </div>
       {status && <p className="secret__status" role="status">{status}</p>}
-      {/* MUTE AUDIO and BLOCK AUTHOR (NIP-51 kind 10000 lists) go in this row. */}
+      {/* MUTE THIS AUDIO and BLOCK AUTHOR (NIP-51 kind 10000) go in this row. */}
       {moderation && <div className="secret__actions audio__moderation">{moderation}</div>}
     </div>
   )

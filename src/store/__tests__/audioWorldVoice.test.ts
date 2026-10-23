@@ -32,7 +32,7 @@ import type { AudioItem } from '../../lib/audioItem'
 import { sha256Hex } from '../../lib/blossom'
 import { forgetAudioContext } from '../../lib/audioContext'
 import { toneWav } from '../../lib/__tests__/audioFixture'
-import { DECODE_WHOLE_BYTES, DECODE_WHOLE_MAX_PCM, decodeWholeOk, decodedFits, isPcmWav, startWorld, stopAllAudio, useHiddenAudio, worldFailed, worldFailure, worldKey } from '../useHiddenAudio'
+import { DECODE_WHOLE_BYTES, DECODE_WHOLE_MAX_PCM, decodeWholeOk, decodedFits, isPcmWav, wavDecodedBytes, startWorld, stopAllAudio, useHiddenAudio, worldFailed, worldFailure, worldKey } from '../useHiddenAudio'
 
 /** Any Web Audio node or param: every property is another, every call returns another, numbers are 0. */
 function anything(): unknown {
@@ -186,6 +186,21 @@ describe('a short loop, decoded whole', () => {
     expect(decodeWholeOk(mp3ish, 64 * 1024 + 1)).toBe(false)
     expect(decodeWholeOk(wav, 1024 * 1024)).toBe(true)
     expect(decodeWholeOk(wav, 1024 * 1024 + 1)).toBe(false)
+    // The WAV's own fmt is the hider's too: decoded size is computed from it, and out-of-range rates are refused.
+    expect(wavDecodedBytes(wav, 8000)).toBe(8000 * 4)
+    expect(wavDecodedBytes(wav, 48_000)).toBe(48_000 * 4)
+    const slow = wav.slice()
+    new DataView(slow.buffer).setUint32(24, 2000, true)
+    expect(isPcmWav(slow)).toBe(false)
+    // 1 MB of 8-bit mono at 8 kHz decodes past the budget at 96 kHz: it streams.
+    const big = new Uint8Array(44 + 1000 * 1000)
+    big.set(wav.subarray(0, 44))
+    const v = new DataView(big.buffer)
+    v.setUint16(34, 8, true); v.setUint16(32, 1, true); v.setUint32(28, 8000, true); v.setUint32(40, 1000 * 1000, true)
+    expect(wavDecodedBytes(big, 96_000)).toBeGreaterThan(DECODE_WHOLE_MAX_PCM)
+    expect(decodeWholeOk(big, big.length, 96_000)).toBe(false)
+    // A faster context shrinks the compressed cap.
+    expect(decodeWholeOk(mp3ish, 40 * 1024, 96_000)).toBe(false)
     // The worst case the size cap allows: 6 kbps, 48 kHz, stereo float.
     const worstSeconds = (DECODE_WHOLE_BYTES * 8) / 6000
     expect(worstSeconds * 48_000 * 2 * 4).toBeLessThan(DECODE_WHOLE_MAX_PCM)

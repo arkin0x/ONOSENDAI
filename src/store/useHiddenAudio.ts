@@ -370,7 +370,7 @@ export async function startWorld(itemKey: string, audio: AudioItem, onStarted?: 
     // seam, and a buffer needs no tap of its own once sound is out. Short by
     // a size whose worst case is bounded (DECODE_WHOLE_BYTES): no header can
     // be trusted to say how long a file is (review of #468).
-    const buffer = audio.loop && blob.size <= DECODE_WHOLE_WAV_BYTES && decodeWholeOk(new Uint8Array(await blob.arrayBuffer()), blob.size) ? await shortLoopBuffer(blob) : null
+    const buffer = audio.loop && blob.size <= DECODE_WHOLE_WAV_BYTES && decodeWholeOk(new Uint8Array(await blob.arrayBuffer()), blob.size, audioContext()?.sampleRate || 48_000) ? await shortLoopBuffer(blob) : null
     if (sessions.get(key) !== mine) return
     if (buffer) {
       const node = new PositionalAudio(l)
@@ -438,36 +438,63 @@ export async function startWorld(itemKey: string, audio: AudioItem, onStarted?: 
  * DECODE_WHOLE_MAX_PCM bytes is still let go and streamed.
  */
 export const DECODE_WHOLE_BYTES = 64 * 1024
-/** PCM WAV grows at most about 24x when decoded (8-bit mono at 8 kHz to float stereo at 48 kHz), so 1 MB of it is bounded too. */
+/** An uncompressed WAV up to this size is decoded whole when its exact decoded size, read from its own `fmt ` and `data` chunks, fits the budget. */
 export const DECODE_WHOLE_WAV_BYTES = 1024 * 1024
 export const DECODE_WHOLE_MAX_PCM = 40 * 1024 * 1024
 
 /**
- * Whether a file is uncompressed WAV by its own bytes, never by the `m`
- * tag a hider writes: a RIFF/WAVE file whose `fmt ` chunk says PCM (1) or
- * float (3). Its samples are its data, so it cannot decode to more than a
- * small multiple of its size; a WAV wrapping a compressed format (MP3 in
- * WAV is 0x55) is not one.
+ * How many bytes an uncompressed WAV decodes to on a context running at
+ * `ctxRate`, read from its own bytes (never the `m` tag a hider writes):
+ * a RIFF/WAVE file whose `fmt ` chunk says PCM (1) or float (3), at 8 to
+ * 192 kHz, 1 or 2 channels, 8 to 32 bits, with its `data` size. Its
+ * samples are its data, so this is exact: frames, resampled to the
+ * context's rate, by its channels, 4 bytes each. Null when it is not such
+ * a file (MP3 wrapped in WAV, 0x55, is not), or says anything out of range.
  */
-export function isPcmWav(b: Uint8Array): boolean {
-  const ascii = (at: number, s: string): boolean => [...s].every((c, i) => b[at + i] === c.charCodeAt(0))
-  if (b.length < 20 || !ascii(0, 'RIFF') || !ascii(8, 'WAVE')) return false
+export function wavDecodedBytes(b: Uint8Array, ctxRate: number): number | null {
+  const ascii = (at: number, t: string): boolean => [...t].every((c, k) => b[at + k] === c.charCodeAt(0))
+  const u16 = (at: number): number => b[at] | (b[at + 1] << 8)
+  const u32 = (at: number): number => (b[at] | (b[at + 1] << 8) | (b[at + 2] << 16) | (b[at + 3] << 24)) >>> 0
+  if (b.length < 20 || !ascii(0, 'RIFF') || !ascii(8, 'WAVE')) return null
+  let fmt: { channels: number; rate: number; bits: number } | null = null
   for (let at = 12; at + 8 <= b.length;) {
-    const size = b[at + 4] | (b[at + 5] << 8) | (b[at + 6] << 16) | (b[at + 7] << 24)
+    const size = u32(at + 4)
     if (ascii(at, 'fmt ')) {
-      if (at + 10 > b.length) return false
-      const format = b[at + 8] | (b[at + 9] << 8)
-      return format === 1 || format === 3
+      if (at + 24 > b.length) return null
+      const format = u16(at + 8)
+      const channels = u16(at + 10)
+      const rate = u32(at + 12)
+      const bits = u16(at + 22)
+      if ((format !== 1 && format !== 3) || channels < 1 || channels > 2 || rate < 8000 || rate > 192_000 || ![8, 16, 24, 32].includes(bits)) return null
+      fmt = { channels, rate, bits }
+    } else if (ascii(at, 'data')) {
+      if (!fmt) return null
+      // A data size past the file is read as the file's: what is there is all that can decode.
+      const data = Math.min(size, b.length - (at + 8))
+      const frames = Math.floor(data / ((fmt.bits / 8) * fmt.channels))
+      return Math.ceil(frames * (ctxRate / fmt.rate)) * fmt.channels * 4
     }
-    if (size < 0) return false
     at += 8 + size + (size & 1)
   }
-  return false
+  return null
 }
 
-/** Whether a file's worst case decoded fits the budget by its bytes alone: uncompressed WAV up to 1 MB, anything else up to 64 KB. */
-export function decodeWholeOk(file: Uint8Array, bytes: number): boolean {
-  return bytes <= (isPcmWav(file) ? DECODE_WHOLE_WAV_BYTES : DECODE_WHOLE_BYTES)
+/** Whether a file is uncompressed WAV by its own bytes (wavDecodedBytes reads it). */
+export function isPcmWav(b: Uint8Array): boolean {
+  return wavDecodedBytes(b, 48_000) !== null
+}
+
+/**
+ * Whether a file's worst case decoded fits the budget by its bytes alone,
+ * on a context at `ctxRate`: uncompressed WAV when its exact decoded size
+ * fits DECODE_WHOLE_MAX_PCM (and the file is at most 1 MB); anything else
+ * when it is at most 64 KB, less on a context faster than 48 kHz, whose
+ * worst case grows with the rate.
+ */
+export function decodeWholeOk(file: Uint8Array, bytes: number, ctxRate = 48_000): boolean {
+  const wav = wavDecodedBytes(file, ctxRate)
+  if (wav !== null) return bytes <= DECODE_WHOLE_WAV_BYTES && wav <= DECODE_WHOLE_MAX_PCM
+  return bytes <= DECODE_WHOLE_BYTES * Math.min(1, 48_000 / ctxRate)
 }
 
 /** Decodes run one at a time, so the peak is one decode, never MAX_VOICES at once. */

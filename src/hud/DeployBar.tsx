@@ -72,7 +72,8 @@
 import { useEffect, useMemo, type ReactNode } from 'react'
 import { noCallout, useRepeatable } from '../hooks/useRepeatable'
 import { MAX_UNIT } from 'sno-core/shards'
-import { formatCellSize } from 'sno-core/scale'
+import { formatCellSize, formatDistance } from 'sno-core/scale'
+import { fadeStep, inscribedRadius, sourceLocal } from '../lib/audioItem'
 import { LINK_PROTECTED, SCAN_MAX_HEIGHT, aimedOf, atLastSpot, copyLinedUp, editingId, isProtected, ownBagIn, pendingEmpty, pendingName, positionOf, regionOf, useShards } from '../store/useShards'
 import { aimedPoint } from '../lib/chests'
 import { snapOffered } from '../lib/pose'
@@ -206,6 +207,10 @@ export function DeployBar({ pad = false }: { pad?: boolean }): JSX.Element | nul
   // when the cursor crosses into another region and not on every step.
   const region = useCyberspace((s) => regionOf(deployPoint(s.cursor, buildStepOf(s), height), buildPlane(s), height))
   const existing = useMemo(() => ownBagIn(mine, region), [mine, region])
+  // Hidden audio's sphere (DECK-0007 §4.1): how far it may reach where it
+  // would land, the distance to the region's nearest wall, so the FADE row
+  // and the rings on the ghost never reach out of the hide region.
+  const fadeRoom = useCyberspace((s) => inscribedRadius(sourceLocal(deployPoint(s.cursor, buildStepOf(s), height), height), 2 ** height))
   // Hooks stay above the early return below. The controls take this region's
   // bag settings when the cursor's region changes (seedDeployBag decides).
   useEffect(() => {
@@ -384,6 +389,39 @@ export function DeployBar({ pad = false }: { pad?: boolean }): JSX.Element | nul
             ? <>No region up to 2^{ceiling} holds the chest and everything aimed inside it; what falls outside stands at the chest when it opens.</>
             : <>At this scale the model is larger than any region up to 2^{ceiling}; part of it will be cut off. Hide it at a smaller scale, or move the cursor.</>}</div>
       )}
+
+      {/* Hidden audio's sphere (arkinox, 2026-10-23): full volume inside it,
+          fading to silence at the region's walls; for a one-shot it is the
+          trigger zone. Blue rings on the ghost show it. Never past the
+          nearest wall: the stepper stops there, and the deploy clamps it to
+          where it really lands. */}
+      {pending.type === 'audio' && (() => {
+        const a = pending.audio
+        const oneShot = a.autoplay && !a.loop
+        // What the deploy writes (lib/audioItem fadeAt): whole gibsons, never
+        // past the room; AUTO is half the room, written as nothing.
+        const r = a.fade === undefined ? fadeRoom / 2 : Math.max(0, Math.min(Math.floor(a.fade), Math.floor(fadeRoom)))
+        const set = (dir: 1 | -1): void => {
+          const s = useShards.getState()
+          const p = s.pending
+          if (p?.type !== 'audio') return
+          const next = fadeStep(p.audio.fade ?? r, fadeRoom, dir)
+          if (next !== null) s.setDeployFade(next)
+        }
+        return (
+          <DeployRow
+            kind="fade"
+            label={oneShot ? 'TRIGGER ZONE' : 'FADE'}
+            hintTitle={oneShot ? 'Entering this sphere starts it; it fades to silence at the region’s walls' : 'Full volume inside this sphere, fading to silence at the region’s walls'}
+            hint={`${r < 1 ? 'no room here' : `${formatDistance(BigInt(Math.max(1, Math.round(r))))} radius`}${a.fade === undefined ? ' · auto' : ''}`}
+          >
+            <button className="deploybar__btn" {...bind(() => set(-1))} disabled={fadeRoom < 1 || r <= 1} aria-label="Smaller sphere">−</button>
+            <span className="deploybar__value">{r < 1 ? '0' : Math.round(r)}</span>
+            <button className="deploybar__btn" {...bind(() => set(1))} disabled={fadeRoom < 1 || r >= Math.floor(fadeRoom)} aria-label="Larger sphere">+</button>
+            {a.fade !== undefined && <button className="deploybar__toggle" onClick={() => useShards.getState().setDeployFade(undefined)} title="Half the way to the nearest wall" {...noCallout}>AUTO</button>}
+          </DeployRow>
+        )
+      })()}
 
       {/* Someone else's object from the Shard Feed: a copy that stays exactly
           as placed and credits its author, or LIVE LINK, a reference to their

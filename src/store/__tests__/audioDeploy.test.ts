@@ -35,6 +35,7 @@ import { useInventory } from '../useInventory'
 import { useBuilder } from '../useBuilder'
 import { useToast } from '../useToast'
 import { pendingEmpty, pendingName, useShards } from '../useShards'
+import { pendingSphereRadius } from '../../scene/AudioSphereGhost'
 
 const S = () => useShards.getState()
 
@@ -93,6 +94,29 @@ describe('hiding audio', () => {
     expect(useBuilder.getState().takeItemDraft('audio')).toEqual({ type: 'audio', audio })
     expect(useBuilder.getState().itemDraft).toBeNull()
     useCyberspace.getState().clearFocus()
+  })
+})
+
+describe('the FADE stepper (step 3)', () => {
+  it('sets the pending audio\'s sphere, AUTO clears it, and the deploy writes it clamped to where it lands', async () => {
+    S().startDeployAudio(audio)
+    S().setDeployFade(1_000_000)
+    expect(S().pending).toMatchObject({ type: 'audio', audio: { fade: 1_000_000 } })
+    S().setDeployFade(undefined)
+    const p = S().pending
+    expect(p?.type === 'audio' && 'fade' in p.audio).toBe(false)
+    S().setDeployFade(1_000_000)
+    useShards.setState({ deployHeight: 6, deployHeightAuto: false })
+    // What the rings show is what the deploy writes: whole gibsons, clamped to the room (never its n + 0.5).
+    const shown = pendingSphereRadius()
+    expect(Number.isInteger(shown)).toBe(true)
+    await S().deploy()
+    expect(S().mine.find((x) => x.type === 'audio')!.audio!.fade).toBe(shown)
+    expect(S().deployError).toBeNull()
+    const d = S().mine.find((x) => x.type === 'audio')!
+    // Never past the nearest wall of a 64-gibson region.
+    expect(d.audio!.fade).toBeLessThanOrEqual(32)
+    expect(d.inner.tags.find((t) => t[0] === 'fade')?.[1]).toBe(String(d.audio!.fade))
   })
 })
 

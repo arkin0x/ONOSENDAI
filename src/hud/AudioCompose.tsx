@@ -16,7 +16,7 @@
 
 import { useEffect, useRef, useState } from 'react'
 import { explainUpload } from '../lib/blossom'
-import { audioFileRefusal, audioTypeOf, sealAndUpload, type UploadedAudio } from '../lib/audioFile'
+import { audioFileRefusal, audioTypeOf, iphoneMayNotPlay, sealAndUpload, type UploadedAudio } from '../lib/audioFile'
 import { MAX_AUDIO_TITLE, titleFromFileName, type AudioItem } from '../lib/audioItem'
 import { useBuilder } from '../store/useBuilder'
 import { useCyberspace } from '../store/useCyberspace'
@@ -78,7 +78,8 @@ export function AudioUpload({ idPrefix, initial, submitLabel, onReady, onCancel 
     if (refusal) { setStatus({ tone: 'warn', text: refusal }); return }
     setFile(typed)
     setUploaded(null)
-    setStatus(null)
+    // Placed anyway if the hider wants: a warning, not a refusal.
+    setStatus(iphoneMayNotPlay(typed) ? { tone: 'warn', text: 'iPhones may not play ogg. mp3 or m4a play everywhere.' } : null)
     if (!title.trim()) setTitle(titleFromFileName(f.name))
   }
 

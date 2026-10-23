@@ -31,7 +31,10 @@ import { formatAgo, formatStamp, shortHex } from '../lib/time'
 import { useCyberspace } from '../store/useCyberspace'
 import { useLootView } from '../store/useLootView'
 import { profileLabel } from '../store/useProfiles'
-import { useShards, positionOf } from '../store/useShards'
+import { findHidden, useShards, positionOf } from '../store/useShards'
+import { useMutes } from '../store/useMutes'
+import type { Muted } from '../lib/muteList'
+import { BlockButton } from './BlockButton'
 import { ProfilePic, ProfileTap } from './ProfileBadge'
 import { ChestBlock, KeyLine } from './ItemRows'
 import { useEscape } from '../hooks/useEscape'
@@ -91,10 +94,11 @@ function labelOf(x: { type: HiddenType; text?: string; shard?: ShardModel; key?:
 }
 
 /** The bag's items this client can see: found by its scan, or its own. */
-function openedItems(item: LootItem, discovered: ReturnType<typeof useShards.getState>['discovered'], mine: ReturnType<typeof useShards.getState>['mine']): OpenedItem[] {
+function openedItems(item: LootItem, discovered: ReturnType<typeof useShards.getState>['discovered'], mine: ReturnType<typeof useShards.getState>['mine'], muted: Muted, me: string): OpenedItem[] {
   const out = new Map<string, OpenedItem>()
   for (const h of Object.values(discovered)) {
-    if (h.bagId !== item.bagId) continue
+    // A muted thing is not listed (store/useMutes); never one of yours, which come from `mine` below.
+    if (h.bagId !== item.bagId || findHidden(h, muted, me)) continue
     out.set(h.eventId, {
       eventId: h.eventId,
       type: h.type,
@@ -134,6 +138,7 @@ export function LootDetail(): JSX.Element | null {
   const targeted = useCyberspace((s) => (item ? !!s.targets[item.author] : false))
   const discovered = useShards((s) => s.discovered)
   const mine = useShards((s) => s.mine)
+  const muted = useMutes((s) => s.muted)
   const profile = useProfile(item?.author ?? null)
   // Which item's COPY just fired, for its brief COPIED label. Declared before
   // the early return below: hooks must run in the same order every render.
@@ -150,7 +155,7 @@ export function LootDetail(): JSX.Element | null {
   const npub = safeNpub(item.author)
   const name = profileLabel(profile, npub)
   const yours = item.author === me
-  const opened = openedItems(item, discovered, mine)
+  const opened = openedItems(item, discovered, mine, muted, me)
   const close = (): void => useLootView.getState().select(null)
 
   const view = (o: OpenedItem): void => {
@@ -271,6 +276,7 @@ export function LootDetail(): JSX.Element | null {
           <div className="secret__actions">
             <button className={`secret__act ${targeted ? 'is-on' : ''}`} onClick={target}><Target size={12} strokeWidth={2.25} aria-hidden />{targeted ? 'TARGETED' : 'TARGET'} HIDER</button>
             <button className="secret__act" onClick={watch}><TvMinimal size={12} strokeWidth={2.25} aria-hidden />SPECTATE HIDER</button>
+            <BlockButton pubkey={item.author} label="BLOCK HIDER" onBlocked={close} />
           </div>
         )}
       </div>

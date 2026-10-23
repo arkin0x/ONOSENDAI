@@ -24,7 +24,7 @@
  * this device as the line arrives and kept there (useNotifications).
  */
 
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { AtSign, MessageCircle, MessageSquare } from 'lucide-react'
 import { nip19 } from 'nostr-tools'
@@ -50,6 +50,8 @@ import { setTalking } from '../store/useAgentDms'
 import { useChat } from '../store/useChat'
 import { useProfiles } from '../store/useProfiles'
 import { previewText } from '../lib/mentions'
+import { useMutes } from '../store/useMutes'
+import { hidesThing, type Muted } from '../lib/muteList'
 
 /**
  * The glyph a notification leads with: the reaction itself, or for words the
@@ -87,8 +89,14 @@ export function useNotificationsLoop(): void {
 }
 
 /** The unread count, recomputed when the list or the seen mark moves. */
+/** Whether a notification is from someone blocked, or is itself muted (store/useMutes). */
+function mutedNote(n: Notification, muted: Muted): boolean {
+  return hidesThing(muted, { authors: [n.from], ids: [n.id] })
+}
+
 function useUnread(): number {
-  return useNotifications((s) => s.items.filter((n) => n.createdAt > s.lastSeen).length)
+  const muted = useMutes((s) => s.muted)
+  return useNotifications((s) => s.items.filter((n) => n.createdAt > s.lastSeen && !mutedNote(n, muted)).length)
 }
 
 /** NOTIFICATIONS, for the identity panel. */
@@ -109,7 +117,8 @@ export function NotificationsButton(): JSX.Element {
 /** Under XOR BITS while anything is unread: a message from one of your agents first, then reactions and comments. */
 export function NotificationsToast(): JSX.Element | null {
   const unread = useUnread()
-  const latest = useNotifications((s) => s.items.find((n) => n.createdAt > s.lastSeen) ?? null)
+  const muted = useMutes((s) => s.muted)
+  const latest = useNotifications((s) => s.items.find((n) => n.createdAt > s.lastSeen && !mutedNote(n, muted)) ?? null)
   const agentUnread = useAgentUnread()
   const agent = agentUnread.latest
   const profile = useProfile(agent ?? latest?.from ?? null)
@@ -240,7 +249,9 @@ function Row({ n, words }: { n: Notification; words?: string }): JSX.Element {
 /** Every notification, newest first; older ones load as the end of the list comes into view. */
 export function NotificationsModal(): JSX.Element | null {
   const open = useNotifications((s) => s.open)
-  const items = useNotifications((s) => s.items)
+  const all = useNotifications((s) => s.items)
+  const muted = useMutes((s) => s.muted)
+  const items = useMemo(() => (muted.pubkeys.size + muted.items.size === 0 ? all : all.filter((n) => !mutedNote(n, muted))), [all, muted])
   const opened = useNotifications((s) => s.opened)
   const loading = useNotifications((s) => s.loading)
   const done = useNotifications((s) => s.done)

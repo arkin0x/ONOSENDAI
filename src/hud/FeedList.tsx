@@ -26,6 +26,9 @@ import { useFeed } from '../store/useFeed'
 import { useProfile } from '../hooks/useProfile'
 import { profileLabel } from '../store/useProfiles'
 import { ShardThumb } from './ShardThumb'
+import { useMutes } from '../store/useMutes'
+import { useCyberspace } from '../store/useCyberspace'
+import { withoutMuted } from '../lib/muteList'
 
 /** A tile's picture, at the size a listing's GIF is shown. */
 function FeedThumb({ object }: { object: FeedObject }): JSX.Element {
@@ -106,8 +109,13 @@ export function ListingTile({ listing }: { listing: FeedListing }): JSX.Element 
 }
 
 export function FeedList({ onPick, actions }: { onPick?: (o: FeedObject) => void; actions?: (o: FeedObject) => ReactNode }): JSX.Element {
-  const objects = useFeed((s) => s.objects)
-  const listings = useFeed((s) => s.listings)
+  const allObjects = useFeed((s) => s.objects)
+  const allListings = useFeed((s) => s.listings)
+  // Less what the mute list hides: someone blocked, or one muted by its id (store/useMutes).
+  const muted = useMutes((s) => s.muted)
+  const me = useCyberspace((s) => s.identity.pubkey)
+  const objects = useMemo(() => withoutMuted(allObjects, muted, me), [allObjects, muted, me])
+  const listings = useMemo(() => withoutMuted(allListings, muted, me), [allListings, muted, me])
   // Objects and listings, newest first, merged once per change (not per render).
   const items = useMemo(() => feedItems({ objects, listings }), [objects, listings])
   const loading = useFeed((s) => s.loading)

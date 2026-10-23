@@ -12,6 +12,7 @@ import { nearbyItems } from '../lib/nearby'
 import { useCyberspace } from '../store/useCyberspace'
 import { useSecrets } from '../store/useSecrets'
 import { useShards, type WorldItem } from '../store/useShards'
+import { useMutes } from '../store/useMutes'
 
 export type NearbyItem = WorldItem & { distance: bigint }
 
@@ -23,10 +24,12 @@ export function useNearbyLoot(): NearbyItem[] {
   // The tour's district shows only its curators' things (DemoScene.curated).
   const curated = useShards((s) => s.curated)
   const keys = useSecrets((s) => s.keys)
+  // A block or a mute hides what it names (store/useMutes).
+  const muted = useMutes((s) => s.muted)
   return useMemo(() => {
     const held = Object.values(keys)
     return nearbyItems(useShards.getState().worldItems(), held, anchor, plane)
     // discovered and mine are what worldItems reads.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [anchor, plane, discovered, mine, keys, curated])
+  }, [anchor, plane, discovered, mine, keys, curated, muted])
 }

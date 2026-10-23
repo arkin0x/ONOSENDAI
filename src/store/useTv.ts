@@ -30,7 +30,7 @@ import { getStopByHeight } from './useHyperspace'
 import { MAX_COMPUTE_HEIGHT, useCyberspace } from './useCyberspace'
 import { spectate, stopSpectating } from '../lib/spectator'
 import { useBuilder } from './useBuilder'
-import { useShards } from './useShards'
+import { findHidden, useShards } from './useShards'
 import { useDemo } from './useDemo'
 import { useCoordRoute } from './useCoordRoute'
 import { usePersonCard } from './usePersonCard'
@@ -45,6 +45,8 @@ import { resolveReference } from '../lib/references'
 import { hexToBytes, type NostrEvent } from '../lib/events'
 import { RESCAN_BATCH, askAll, askRelays, type Ask as RescanAsk } from '../lib/secrets/rescan'
 import { cleanText } from '../lib/tv/text'
+import { useMutes } from './useMutes'
+import { withoutMuted } from '../lib/muteList'
 
 /** Where an avatar stands on the tape, and since when. */
 export interface TvAvatar {
@@ -474,9 +476,12 @@ function reveal(s: TvState, opened: OpenedBag[]): void {
   const now = performance.now()
   const fresh: Array<{ h: Hidden; bagAt: number }> = []
   const seen = new Set<string>()
+  // A find by someone blocked, or muted by its id, is not shown (store/useMutes).
+  const muted = useMutes.getState().muted
+  const me = useCyberspace.getState().identity.pubkey
   for (const o of opened) {
     for (const h of o.items) {
-      if (s.found[h.eventId] || seen.has(h.eventId)) continue
+      if (s.found[h.eventId] || seen.has(h.eventId) || findHidden(h, muted, me)) continue
       seen.add(h.eventId)
       fresh.push({ h, bagAt: o.bag.created_at })
     }
@@ -514,8 +519,11 @@ async function readMore(id: number, t: number): Promise<void> {
       const { beats, items } = await r.read()
       if (!current()) return
       failures = 0
-      for (const b of beats) d.add(b)
-      for (const item of items) d.addItem(item)
+      // Nothing by someone blocked, or muted by its id, goes on air (store/useMutes).
+      const muted = useMutes.getState().muted
+      const me = useCyberspace.getState().identity.pubkey
+      for (const b of withoutMuted(beats, muted, me)) d.add(b)
+      for (const item of withoutMuted(items, muted, me)) d.addItem(item)
       queue.push(...d.release(r.readTo - 1))
     }
     if (current() && r.caughtUp) queue.push(...d.release(Infinity))

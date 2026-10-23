@@ -13,7 +13,7 @@
 
 import { useCyberspace } from '../store/useCyberspace'
 import { useEffect } from 'react'
-import { Footprints, Goal, MapPin, Star, UserX, Wrench } from 'lucide-react'
+import { Ban, Footprints, Goal, MapPin, Star, UserX, Wrench } from 'lucide-react'
 import { toastClockMs, useToast } from '../store/useToast'
 
 export function ToastChip(): JSX.Element | null {
@@ -29,7 +29,7 @@ export function ToastChip(): JSX.Element | null {
 
   if (!toast) return null
   return (
-    <div className={`hyperbar hyperbar--found hyperbar--toast${toast.mark === 'build' ? ' hyperbar--buildtoast' : toast.mark === 'walk' ? ' hyperbar--buildtoast hyperbar--walktoast' : toast.mark === 'place' || toast.mark === 'goal' ? ' hyperbar--buildtoast' : toast.mark === 'signer' ? ' hyperbar--buildtoast hyperbar--signertoast' : ''}`} role="status" onClick={() => useToast.getState().dismiss()} title="Tap to dismiss">
+    <div className={`hyperbar hyperbar--found hyperbar--toast${toast.mark === 'build' ? ' hyperbar--buildtoast' : toast.mark === 'walk' ? ' hyperbar--buildtoast hyperbar--walktoast' : toast.mark === 'place' || toast.mark === 'goal' || toast.mark === 'block' ? ' hyperbar--buildtoast' : toast.mark === 'signer' ? ' hyperbar--buildtoast hyperbar--signertoast' : ''}`} role="status" onClick={() => useToast.getState().dismiss()} title="Tap to dismiss">
       {toast.mark === 'build'
         ? <Wrench className="toast__build" size={16} strokeWidth={2.25} aria-hidden />
         : toast.mark === 'walk'
@@ -38,6 +38,8 @@ export function ToastChip(): JSX.Element | null {
         ? <MapPin className="toast__build" size={16} strokeWidth={2.25} aria-hidden />
         : toast.mark === 'goal'
         ? <Goal className="toast__build" size={16} strokeWidth={2.25} aria-hidden />
+        : toast.mark === 'block'
+        ? <Ban className="toast__build" size={16} strokeWidth={2.25} aria-hidden />
         : toast.mark === 'signer'
         ? <UserX className="toast__build toast__signer" size={16} strokeWidth={2.25} aria-hidden />
         : toast.mark === 'star'

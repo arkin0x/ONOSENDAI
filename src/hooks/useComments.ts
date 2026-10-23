@@ -15,6 +15,8 @@ import type { NostrEvent } from '../lib/events'
 import { publish, query } from '../lib/relay'
 import { regionKeyAt } from '../lib/shardCrypto'
 import { MAX_COMPUTE_HEIGHT, useCyberspace } from '../store/useCyberspace'
+import { useMutes } from '../store/useMutes'
+import { withoutMuted } from '../lib/muteList'
 
 export interface CommentsState {
   comments: Comment[]
@@ -70,6 +72,9 @@ export function useComments(subject: CommentSubject | null): CommentsState {
     }
   }, [subject, regionKey])
 
-  const comments = subject ? threadComments(events, subject, opened) : []
+  // A comment by someone blocked is not shown, nor the replies under it (store/useMutes).
+  const muted = useMutes((s) => s.muted)
+  const me = useCyberspace((s) => s.identity.pubkey)
+  const comments = subject ? threadComments(withoutMuted(events, muted, me), subject, opened) : []
   return { comments, loading, error, posting, post, refresh: () => setTick((t) => t + 1) }
 }

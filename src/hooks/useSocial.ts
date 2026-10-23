@@ -16,6 +16,8 @@ import { actionCommentTemplate, deletedBy, groupReactions, reactionTemplate, unr
 import { COMMENT_KIND } from '../lib/comments'
 import { useCyberspace } from '../store/useCyberspace'
 import type { CommentsState } from './useComments'
+import { useMutes } from '../store/useMutes'
+import { withoutMuted } from '../lib/muteList'
 
 const now = (): number => Math.floor(Date.now() / 1000)
 
@@ -64,7 +66,10 @@ export function useReactions(target: SocialTarget | null, alsoTell: string[] = [
   }, [id, author, address])
 
   const authorOf = new Map(events.filter((e) => e.kind === REACTION_KIND).map((e) => [e.id, e.pubkey]))
-  const groups = id ? groupReactions(events, id, deletedBy(events, authorOf), address ?? undefined) : []
+  // Nobody blocked is counted among who reacted (store/useMutes).
+  const muted = useMutes((s) => s.muted)
+  const me = useCyberspace((s) => s.identity.pubkey)
+  const groups = id ? groupReactions(withoutMuted(events, muted, me), id, deletedBy(events, authorOf), address ?? undefined) : []
 
   const toggle = useCallback(async (content: string): Promise<void> => {
     if (!target) return
@@ -128,6 +133,9 @@ export function useActionComments(action: SocialTarget | null): CommentsState {
     }
   }, [action])
 
-  const comments = id ? threadUnder(events, id, id) : []
+  // A comment by someone blocked is not shown, nor the replies under it (store/useMutes).
+  const muted = useMutes((s) => s.muted)
+  const me = useCyberspace((s) => s.identity.pubkey)
+  const comments = id ? threadUnder(withoutMuted(events, muted, me), id, id) : []
   return { comments, loading, error, posting, post, refresh: () => setTick((t) => t + 1) }
 }

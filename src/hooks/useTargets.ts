@@ -12,6 +12,7 @@ import { EARTH } from '../lib/palette'
 import { targetColor, type CyberTarget } from '../lib/targets'
 import { usePresence } from '../store/usePresence'
 import { useCyberspace } from '../store/useCyberspace'
+import { useMutes } from '../store/useMutes'
 
 /** The avatar's own red, so the marker for you is the color you are drawn in. */
 const YOU = '#ff2323'
@@ -47,6 +48,8 @@ export function useTargets(): CyberTarget[] {
   const viewingEarth = useCyberspace((s) => onEarth(s.focus))
   const people = usePresence((s) => s.people)
   const me = useCyberspace((s) => s.identity.pubkey)
+  // Nobody blocked gets a marker, a target included (store/useMutes).
+  const blocked = useMutes((s) => s.muted.pubkeys)
 
   return useMemo(() => {
     const out: CyberTarget[] = []
@@ -55,7 +58,7 @@ export function useTargets(): CyberTarget[] {
     // Only targets in the plane the scene is showing: a coordinate in the
     // other plane is not a place in this one (§2.4).
     for (const t of useCyberspace.getState().targetList()) {
-      if (t.id === focus) continue
+      if (t.id === focus || blocked.has(t.id)) continue
       const tr = tracked[t.id]
       if (tr && tr.plane !== plane) continue
       out.push(t)
@@ -65,7 +68,7 @@ export function useTargets(): CyberTarget[] {
     // the field, and passing one without knowing stops being the normal case.
     // Same plane rule as a target; your targets and you are already covered.
     for (const p of Object.values(people)) {
-      if (p.pubkey === me || p.pubkey === focus || tracked[p.pubkey] || p.plane !== plane) continue
+      if (p.pubkey === me || p.pubkey === focus || tracked[p.pubkey] || p.plane !== plane || blocked.has(p.pubkey)) continue
       out.push({ id: p.pubkey, label: `${p.pubkey.slice(0, 8)}…`.toUpperCase(), color: targetColor(p.pubkey), at: p.position, presence: true })
     }
     // While the camera is anywhere you are not (someone else's eyes, a
@@ -86,5 +89,5 @@ export function useTargets(): CyberTarget[] {
     return out
     // tracked is what targetList reads; listed so the memo follows it.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [plane, headPlane, spectating, focused, position, tracked, focus, people, me, viewingEarth])
+  }, [plane, headPlane, spectating, focused, position, tracked, focus, people, me, viewingEarth, blocked])
 }

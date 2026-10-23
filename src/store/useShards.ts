@@ -98,6 +98,8 @@ import { buildCursorOf, buildPlane, buildStepOf } from '../lib/buildCursor'
 import type { NearbyReturn } from '../lib/nearbyReturn'
 import { turnShard, type Turns } from '../lib/turn'
 import { alignedBase, hintFits } from '../lib/hint'
+import { hidesThing, type Muted } from '../lib/muteList'
+import { useMutes } from './useMutes'
 
 /** One item this device hid. Its identity is its inner event id. */
 export interface MyDeployment {
@@ -178,6 +180,20 @@ export interface WorldItem {
    * event data shows none (EventData eventJson).
    */
   event?: NostrEvent
+}
+
+/**
+ * Whether the mute list hides a thing in the world: by the bag's signer, the
+ * object a LIVE LINK places, or the author a chest's entry claims, or by its
+ * own id or the lineage a moved item keeps. Never one of yours.
+ */
+export function worldItemHidden(w: Pick<WorldItem, 'mine' | 'author' | 'event' | 'target' | 'key' | 'lineage'>, muted: Muted, me: string): boolean {
+  return hidesThing(muted, { authors: [w.author, w.event?.pubkey, w.target?.pubkey], ids: [w.key, w.lineage, w.event?.id], mine: w.mine }, me)
+}
+
+/** The same for a find as the scan keeps it (`discovered`), for the lists that read those directly. */
+export function findHidden(h: Pick<Hidden, 'author' | 'inner' | 'ref' | 'eventId'>, muted: Muted, me: string): boolean {
+  return hidesThing(muted, { authors: [h.author, h.inner?.pubkey], ids: [h.eventId, lineageOf(h.inner, h.ref).lineage, h.inner?.id] }, me)
 }
 
 /** Why a LIVE LINK was not hidden: its author protected it (NIP-70), so only they may republish it. */
@@ -1962,8 +1978,12 @@ export const useShards = create<ShardsState>((set, get) => {
 
     worldItems: () => {
       const curated = get().curated
-      if (curated) return worldOf(get()).filter((w) => w.author !== undefined && curated.includes(w.author))
-      return worldOf(get())
+      // What the person's mute list hides (store/useMutes): never their own.
+      const muted = useMutes.getState().muted
+      const me = useCyberspace.getState().identity.pubkey
+      const shown = (w: WorldItem): boolean => !worldItemHidden(w, muted, me)
+      if (curated) return worldOf(get()).filter((w) => w.author !== undefined && curated.includes(w.author) && shown(w))
+      return worldOf(get()).filter(shown)
     },
 
     secretByEvent: (eventId) => get().worldItems().find((w) => w.key === eventId) ?? null,

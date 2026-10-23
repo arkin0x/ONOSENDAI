@@ -12,10 +12,17 @@ import { ChainGapError, fetchChainEvents, mergeEvents, watchAuthor } from './cha
 import { useCyberspace } from '../store/useCyberspace'
 import { useBuilder } from '../store/useBuilder'
 import type { NostrEvent } from './events'
+import { useMutes } from '../store/useMutes'
+import { BRIEF_TOAST_MS, useToast } from '../store/useToast'
 
 let current: { pubkey: string; close: () => void } | null = null
 
 export async function spectate(pubkey: string, seed: NostrEvent[] = []): Promise<void> {
+  // Someone blocked is not watched: their avatar and chain are what the block hides (store/useMutes).
+  if (useMutes.getState().muted.pubkeys.has(pubkey)) {
+    useToast.getState().show({ label: 'BLOCKED', meta: 'Unblock them to spectate.', mark: 'block', ms: BRIEF_TOAST_MS })
+    return
+  }
   // From one avatar to the next, only the old watch closes: the spectation
   // itself is replaced by beginSpectate, which carries the first one's
   // return view over. Ending it here first dropped that view in BUILD mode,
@@ -72,6 +79,24 @@ function closeWatch(): void {
 export function stopSpectating(): void {
   closeWatch()
   if (useCyberspace.getState().spectate) useCyberspace.getState().endSpectate()
+}
+
+let watchingBlocks = false
+
+/**
+ * A block of the person being spectated ends the spectation: their avatar
+ * and chain are what it hides (store/useMutes). Started from App, once every
+ * store has loaded: the mute store is imported by the stores this one
+ * imports, so a subscription made while this module loads could run first.
+ */
+export function watchBlockedSpectation(): void {
+  if (watchingBlocks) return
+  watchingBlocks = true
+  useMutes.subscribe((s, prev) => {
+    if (s.muted === prev.muted) return
+    const watched = useCyberspace.getState().spectate?.pubkey
+    if (watched && s.muted.pubkeys.has(watched)) stopSpectating()
+  })
 }
 
 // However a spectation ends (END SPECTATION, a view that replaces it, an

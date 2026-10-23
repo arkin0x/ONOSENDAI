@@ -15,7 +15,8 @@ import { hiddenLabel, type Hidden } from '../lib/hidden'
 import { regionLabel } from '../lib/loot'
 import { GRID_HALF, type ShardModel } from 'sno-core/shards'
 import { useCyberspace } from './useCyberspace'
-import { useShards } from './useShards'
+import { findHidden, useShards } from './useShards'
+import { useMutes } from './useMutes'
 
 export interface FoundChip {
   id: string
@@ -76,7 +77,10 @@ export const useCeremony = create<CeremonyState>((set, get) => ({
     // curated): a stranger's find there raises no chip, whose line is the
     // find's own text, and gets no decode (review of #364).
     const curated = useShards.getState().curated
-    const items = curated ? found.filter((h) => curated.includes(h.author)) : found
+    // Nor does anything the mute list hides (store/useMutes).
+    const muted = useMutes.getState().muted
+    const me = useCyberspace.getState().identity.pubkey
+    const items = (curated ? found.filter((h) => curated.includes(h.author)) : found).filter((h) => !findHidden(h, muted, me))
     if (items.length === 0) return
     const now = performance.now()
     const births = { ...get().births }

@@ -15,6 +15,7 @@ import { finalizeEvent, generateSecretKey, getPublicKey } from 'nostr-tools/pure
 import { schnorr } from '@noble/curves/secp256k1.js'
 import { nip19 } from 'nostr-tools'
 import { v2 as nip44 } from 'nostr-tools/nip44'
+import * as nip04 from 'nostr-tools/nip04'
 import * as nip46 from 'nostr-tools/nip46'
 import * as nip49 from 'nostr-tools/nip49'
 import { getPool } from './relay'
@@ -48,6 +49,14 @@ export interface Signer {
    */
   nip44Encrypt?: (recipientPubkey: string, plaintext: string) => Promise<string>
   /**
+   * The legacy NIP-04 pair. Used for one thing: a NIP-51 mute list whose
+   * private half another client sealed with NIP-04 (lib/muteList.ts), which
+   * is opened and sealed again the same way so that client still reads it.
+   * Absent when the signer lacks it.
+   */
+  nip04Decrypt?: (senderPubkey: string, payload: string) => Promise<string>
+  nip04Encrypt?: (recipientPubkey: string, plaintext: string) => Promise<string>
+  /**
    * Asks the signer, now, which account it holds: never an answer cached at
    * login. An extension or a bunker can switch accounts mid-visit, and a
    * restored Nostr Connect session is never asked at all, so this is what
@@ -74,6 +83,8 @@ interface WindowNostr {
   signEvent(event: EventTemplate): Promise<NostrEvent>
   /** NIP-07's optional NIP-44 pair; decrypt is what opens a chest sealed to this identity. */
   nip44?: { decrypt(pubkey: string, ciphertext: string): Promise<string>; encrypt?(pubkey: string, plaintext: string): Promise<string> }
+  /** NIP-07's optional legacy NIP-04 pair: a mute list sealed with it by another client. */
+  nip04?: { decrypt?(pubkey: string, ciphertext: string): Promise<string>; encrypt?(pubkey: string, plaintext: string): Promise<string> }
 }
 function windowNostr(): WindowNostr | null {
   return (window as unknown as { nostr?: WindowNostr }).nostr ?? null
@@ -84,6 +95,9 @@ export function hasNip07(): boolean {
 
 /** Why a chest sealed to this identity will not open: the signer offers no NIP-44 decrypt. */
 export const NIP44_UNAVAILABLE = 'Your signer offers no NIP-44 decrypt, so a chest sealed to you cannot be opened with it.'
+
+/** Why a mute list sealed with the legacy NIP-04 cannot be kept: the signer offers no NIP-04. */
+export const NIP04_UNAVAILABLE = 'Your signer offers no NIP-04, which the private part of your mute list is sealed with.'
 
 /** Why a private message cannot be sent: the signer offers no NIP-44 encrypt to seal it with. */
 export const NIP44_ENCRYPT_UNAVAILABLE = 'Your signer offers no NIP-44 encrypt, so a private message cannot be sealed with it.'
@@ -134,6 +148,8 @@ export function localSigner(secretKey: Uint8Array): Signer {
     signEvent: (template) => Promise.resolve(finalizeEvent(attributed(template), secretKey) as unknown as NostrEvent),
     nip44Decrypt: async (senderPubkey, payload) => nip44.decrypt(payload, nip44.utils.getConversationKey(secretKey, senderPubkey)),
     nip44Encrypt: async (recipientPubkey, plaintext) => nip44.encrypt(plaintext, nip44.utils.getConversationKey(secretKey, recipientPubkey)),
+    nip04Decrypt: async (senderPubkey, payload) => nip04.decrypt(secretKey, senderPubkey, payload),
+    nip04Encrypt: async (recipientPubkey, plaintext) => nip04.encrypt(secretKey, recipientPubkey, plaintext),
   }
 }
 
@@ -199,6 +215,8 @@ export async function nip07Signer(waitMs = 0): Promise<Signer> {
     ...(nip44Ext ? { nip44Decrypt: (pk: string, ct: string) => nip44Ext.decrypt(pk, ct) } : {}),
     // Encrypt is checked on its own: an extension could offer one half.
     ...(nip44Ext?.encrypt ? { nip44Encrypt: (pk: string, pt: string) => nip44Ext.encrypt!(pk, pt) } : {}),
+    ...(ext.nip04?.decrypt ? { nip04Decrypt: (pk: string, ct: string) => ext.nip04!.decrypt!(pk, ct) } : {}),
+    ...(ext.nip04?.encrypt ? { nip04Encrypt: (pk: string, pt: string) => ext.nip04!.encrypt!(pk, pt) } : {}),
   }
 }
 
@@ -222,6 +240,8 @@ export async function nip46Signer(bunkerUri: string, clientSecretKey?: Uint8Arra
     signEvent: (template) => bunker.signEvent(attributed(template)) as unknown as Promise<NostrEvent>,
     nip44Decrypt: (pk, ct) => bunker.nip44Decrypt(pk, ct),
     nip44Encrypt: (pk, pt) => bunker.nip44Encrypt(pk, pt),
+    nip04Decrypt: (pk, ct) => bunker.nip04Decrypt(pk, ct),
+    nip04Encrypt: (pk, pt) => bunker.nip04Encrypt(pk, pt),
     // Not bunker.getPublicKey(): nostr-tools keeps its first answer for good.
     heldPubkey: () => bunker.sendRequest('get_public_key', []),
     close: () => bunker.close(),
@@ -280,6 +300,8 @@ function wrapBunkerSigner(
     signEvent: (template) => bunker.signEvent(attributed(template)) as unknown as Promise<NostrEvent>,
     nip44Decrypt: (pk, ct) => bunker.nip44Decrypt(pk, ct),
     nip44Encrypt: (pk, pt) => bunker.nip44Encrypt(pk, pt),
+    nip04Decrypt: (pk, ct) => bunker.nip04Decrypt(pk, ct),
+    nip04Encrypt: (pk, pt) => bunker.nip04Encrypt(pk, pt),
     // Not bunker.getPublicKey(): nostr-tools keeps its first answer for good.
     heldPubkey: () => bunker.sendRequest('get_public_key', []),
     close: () => bunker.close(),
@@ -456,6 +478,14 @@ export function deferredReconnect(pref: SignerPref, onReady: (s: Signer) => void
     nip44Encrypt: (pk, pt) => ensure().then((s) => {
       if (!s.nip44Encrypt) throw new Error(NIP44_ENCRYPT_UNAVAILABLE)
       return s.nip44Encrypt(pk, pt)
+    }),
+    nip04Decrypt: (pk, ct) => ensure().then((s) => {
+      if (!s.nip04Decrypt) throw new Error(NIP04_UNAVAILABLE)
+      return s.nip04Decrypt(pk, ct)
+    }),
+    nip04Encrypt: (pk, pt) => ensure().then((s) => {
+      if (!s.nip04Encrypt) throw new Error(NIP04_UNAVAILABLE)
+      return s.nip04Encrypt(pk, pt)
     }),
     heldPubkey: () => ensure().then((s) => (s.heldPubkey ? s.heldPubkey() : s.pubkey)),
     reconnect: ensure,

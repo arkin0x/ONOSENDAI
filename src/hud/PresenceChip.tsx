@@ -19,6 +19,7 @@ import { formatDistance } from 'sno-core/scale'
 import type { Position } from '../lib/space'
 import type { Plane } from 'cyberspace-core'
 import { useEscape } from '../hooks/useEscape'
+import { useMutes } from '../store/useMutes'
 
 function ageLabel(at: number, now: number): string {
   const s = Math.max(0, now - at)
@@ -81,6 +82,8 @@ const ARRIVAL_MS = 4000
 
 export function PresenceChip(): JSX.Element | null {
   const people = usePresence((s) => s.people)
+  // Nobody blocked is counted or listed (store/useMutes).
+  const blocked = useMutes((s) => s.muted.pubkeys)
   const loading = usePresence((s) => s.loading)
   const lastArrivalAt = usePresence((s) => s.lastArrivalAt)
   const targets = useCyberspace((s) => s.targets)
@@ -103,7 +106,7 @@ export function PresenceChip(): JSX.Element | null {
     const t = window.setTimeout(() => setLit(false), ARRIVAL_MS)
     return () => window.clearTimeout(t)
   }, [lastArrivalAt])
-  const others = Object.values(people).filter((p) => p.pubkey !== me && !targets[p.pubkey]).sort((a, b) => b.lastActive - a.lastActive)
+  const others = Object.values(people).filter((p) => p.pubkey !== me && !targets[p.pubkey] && !blocked.has(p.pubkey)).sort((a, b) => b.lastActive - a.lastActive)
   // Gone when there is nothing to say and nobody is reading it. Open, it
   // stays until closed, whatever the scan does meanwhile.
   if (away) return null

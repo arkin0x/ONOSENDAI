@@ -22,6 +22,7 @@ import { regionBox } from '../lib/clip'
 import { placedPose, type Pose } from '../lib/pose'
 import type { ShardModel } from 'sno-core/shards'
 import { TapTarget, farCullDoublings } from './TapTarget'
+import { useMutes } from '../store/useMutes'
 
 const REACH = GRID_RADIUS * 8
 /** Past this many doublings out from its unit, a shard with no placed objects can never be seen (TapTarget farCullDoublings). */
@@ -160,6 +161,8 @@ export function WorldShards({ axes }: Props): JSX.Element | null {
   const discovered = useShards((s) => s.discovered)
   // The tour's district shows only its curators' things (DemoScene.curated).
   const curated = useShards((s) => s.curated)
+  // A block or a mute hides what it names (store/useMutes).
+  const muted = useMutes((s) => s.muted)
   const births = useCeremony((s) => s.births)
   const moving = useShards((s) => editingId(s.pending))
 
@@ -167,7 +170,7 @@ export function WorldShards({ axes }: Props): JSX.Element | null {
     return drawableShards(useShards.getState().worldItems(), anchor, anchorPlane, scaleExp, axes)
     // mine and discovered are what worldShards reads.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [anchor, anchorPlane, scaleExp, axes, mine, discovered, curated])
+  }, [anchor, anchorPlane, scaleExp, axes, mine, discovered, curated, muted])
 
   if (placed.length === 0) return null
 

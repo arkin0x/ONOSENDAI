@@ -37,6 +37,7 @@ import {
   nip07Signer,
   nip46Signer,
   NIP44_UNAVAILABLE,
+  NIP04_UNAVAILABLE,
   NIP44_ENCRYPT_UNAVAILABLE,
   SignerAccountMismatch,
   SignerUnconfirmed,
@@ -162,6 +163,7 @@ import { targetColor, type CyberTarget } from '../lib/targets'
 import { useSecrets } from './useSecrets'
 import { useToast } from './useToast'
 import { useChainUi } from './useChainUi'
+import type { SelfCrypto } from '../lib/muteList'
 
 /**
  * The explored chain, parsed once per events change rather than on every
@@ -957,6 +959,14 @@ export interface CyberspaceState {
    * Rejects, in words, only when the signer truly offers no NIP-44 encrypt.
    */
   encryptSealed: (recipientPubkey: string, plaintext: string) => Promise<string>
+  /**
+   * Encryption to and from this identity's own key, as the current signer
+   * offers it: what seals the private half of the NIP-51 mute list
+   * (lib/muteList.ts, store/useMutes.ts). A method is absent when the signer
+   * lacks it. A failed decrypt through a remote signer is checked as
+   * decryptSealed's is (SignerAccountMismatch, SignerUnconfirmed).
+   */
+  selfCrypto: () => SelfCrypto
 
   /** HOSAKA cloud compute: the flow in progress and its pending job. */
   cloud: CloudState
@@ -1518,6 +1528,7 @@ async function decryptRefusal(signer: Signer, err: unknown): Promise<unknown> {
   if (signer.kind === 'local') return err
   if (err instanceof SignerAccountMismatch) { otherAccount(signer.pubkey); return err }
   if (err instanceof Error && err.message === NIP44_UNAVAILABLE) return err
+  if (err instanceof Error && err.message === NIP04_UNAVAILABLE) return err
   const held = await heldBy(signer)
   if (held === signer.pubkey) return err
   if (held === null) return new SignerUnconfirmed()
@@ -4355,6 +4366,24 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
   encryptSealed: (recipientPubkey, plaintext) => {
     const seal = currentSigner.nip44Encrypt
     return seal ? seal(recipientPubkey, plaintext) : Promise.reject(new Error(NIP44_ENCRYPT_UNAVAILABLE))
+  },
+  selfCrypto: () => {
+    const signer = currentSigner
+    const me = signer.pubkey
+    const open = (f: Signer['nip44Decrypt']): ((payload: string) => Promise<string>) | undefined => f && (async (payload) => {
+      let plain: string
+      try { plain = await f(me, payload) }
+      catch (err) { throw await decryptRefusal(signer, err) }
+      if (signer.kind !== 'local') signerHome(signer)
+      return plain
+    })
+    const seal = (f: Signer['nip44Encrypt']): ((plaintext: string) => Promise<string>) | undefined => f && ((plaintext) => f(me, plaintext))
+    return {
+      nip44Decrypt: open(signer.nip44Decrypt),
+      nip44Encrypt: seal(signer.nip44Encrypt),
+      nip04Decrypt: open(signer.nip04Decrypt),
+      nip04Encrypt: seal(signer.nip04Encrypt),
+    }
   },
   useNsec: async (nsec) => { await login(() => signerFromNsec(nsec)) },
   useNcryptsec: async (ncryptsec, password) => { await login(() => signerFromNcryptsec(ncryptsec, password)) },

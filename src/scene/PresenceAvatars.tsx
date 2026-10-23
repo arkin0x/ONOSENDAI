@@ -17,6 +17,7 @@ import { presenceDrawn, usePresence, type Person as Present } from '../store/use
 import { useProfile } from '../hooks/useProfile'
 import { avatarTurn } from '../lib/facing'
 import { OtherAvatar } from './OtherAvatar'
+import { useMutes } from '../store/useMutes'
 
 const REACH = GRID_RADIUS * 8
 const AVATAR_SCALE_LIMIT = 10
@@ -37,6 +38,7 @@ function Person({ pubkey, center, position, place, turn }: PersonProps): JSX.Ele
 
 export function PresenceAvatars({ axes }: { axes: ViewAxes }): JSX.Element | null {
   const people = usePresence((s) => s.people)
+  const blocked = useMutes((s) => s.muted.pubkeys)
   const targets = useCyberspace((s) => s.targets)
   const me = useCyberspace((s) => s.identity.pubkey)
   // Whoever scene/Avatar draws: you, or the avatar you spectate.
@@ -54,10 +56,10 @@ export function PresenceAvatars({ axes }: { axes: ViewAxes }): JSX.Element | nul
 
   const near = useMemo(() => {
     if (scaleExp >= AVATAR_SCALE_LIMIT) return []
-    return presenceDrawn(people, { me, focus, targets, plane: anchorPlane })
+    return presenceDrawn(people, { me, focus, targets, plane: anchorPlane, muted: blocked })
       .map((p) => ({ ...p, centre: place(p.position) }))
       .filter((p) => Math.hypot(...p.centre) <= REACH)
-  }, [people, targets, me, focus, anchorPlane, scaleExp, place])
+  }, [people, targets, me, focus, anchorPlane, scaleExp, place, blocked])
 
   // Turned with the view like every shard and your own avatar, so a compass
   // turn that puts the world upside down puts them upside down with it.

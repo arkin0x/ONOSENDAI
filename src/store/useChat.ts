@@ -25,6 +25,8 @@ import { SCAN_MAX_HEIGHT } from './useShards'
 import { encodeMentions, freshMentions, prependMention, pTagged, type Mention } from '../lib/mentions'
 import { mentionNotification } from '../lib/notifications'
 import { useNotifications } from './useNotifications'
+import { useMutes } from './useMutes'
+import { hidesThing } from '../lib/muteList'
 
 export interface ChatLine {
   /** The inner event's id: the line's identity, what stops a repeat. */
@@ -241,7 +243,12 @@ export const useChat = create<ChatState>((set, get) => ({
     const inners = await chatInners(outer, hexToBytes(key.keyHex))
     if (inners.length === 0) return
     const me = useCyberspace.getState().identity.pubkey
-    const add = inners.map((e) => ({ id: e.id, from: e.pubkey, text: e.content.slice(0, MAX_CHAT_LENGTH), at: e.created_at, region, height: key.height, mine: e.pubkey === me, mentions: pTagged(e.tags) }))
+    // A line by someone blocked, or one muted by its id, never lands: no
+    // unfold, no unread, no chime, no mention (store/useMutes). Ephemeral, so
+    // an UNBLOCK shows only what is said after it.
+    const muted = useMutes.getState().muted
+    const add = inners.filter((e) => !hidesThing(muted, { authors: [e.pubkey], ids: [e.id] }, me)).map((e) => ({ id: e.id, from: e.pubkey, text: e.content.slice(0, MAX_CHAT_LENGTH), at: e.created_at, region, height: key.height, mine: e.pubkey === me, mentions: pTagged(e.tags) }))
+    if (add.length === 0) return
     const before = get().lines
     const lines = mergeLines(before, add)
     if (lines === before) return

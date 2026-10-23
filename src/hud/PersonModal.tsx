@@ -40,6 +40,7 @@ import { sendKey, useChat } from '../store/useChat'
 import { useSecrets } from '../store/useSecrets'
 import { setTalking } from '../store/useAgentDms'
 import { EventData } from './EventData'
+import { BlockButton } from './BlockButton'
 
 /** How long COPIED stays on a button, as on a hidden item's card. */
 const COPIED_MS = 1400
@@ -178,6 +179,8 @@ export function PersonCard({ pubkey, shard, event = null, onClose, Preview = Sha
               <button className="secret__act" onClick={chat} disabled={noChat !== null} title={noChat ?? `Talk to ${name} in local chat, tagged`}>
                 <MessageSquare size={ICON} strokeWidth={2.25} aria-hidden />CHAT
               </button>
+              {/* The card stays up, so the button turns to UNBLOCK at once. */}
+              <BlockButton pubkey={pubkey} label="BLOCK" />
             </>
           )}
         </div>

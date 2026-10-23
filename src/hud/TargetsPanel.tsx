@@ -22,6 +22,7 @@ import { useCyberspace } from '../store/useCyberspace'
 import { profileLabel, useProfiles } from '../store/useProfiles'
 import { ProfileBadge } from './ProfileBadge'
 import { Explanation } from './Explanation'
+import { useMutes } from '../store/useMutes'
 
 export function TargetsPanel(): JSX.Element {
   const targets = useCyberspace((s) => s.targets)
@@ -59,6 +60,8 @@ export function TargetsPanel(): JSX.Element {
   // all, so they are equally "nowhere" and fall to the name, which is what makes
   // a long list findable. Name is the profile name when it has arrived, else the
   // petname, else the key.
+  // Nobody blocked is listed among the follows (store/useMutes).
+  const blocked = useMutes((s) => s.muted.pubkeys)
   const sortedContacts = useMemo(() => {
     if (!contacts) return contacts
     const d2 = (p: Position): bigint => {
@@ -78,7 +81,7 @@ export function TargetsPanel(): JSX.Element {
       const bn = nameKey(b)
       return an < bn ? -1 : an > bn ? 1 : 0
     }
-    return [...contacts].sort((a, b) => {
+    return contacts.filter((c) => !blocked.has(c.pubkey)).sort((a, b) => {
       const pa = positions[a.pubkey]
       const pb = positions[b.pubkey]
       if (pa && pb) {
@@ -90,7 +93,7 @@ export function TargetsPanel(): JSX.Element {
       if (pb) return 1
       return byName(a, b)
     })
-  }, [contacts, positions, myPos, profiles])
+  }, [contacts, positions, myPos, profiles, blocked])
 
   const loadContacts = async (): Promise<void> => {
     if (!whoHex) return

@@ -32,6 +32,8 @@ import { safeNpub } from '../lib/npub'
 import { useCyberspace } from '../store/useCyberspace'
 import { useInventory } from '../store/useInventory'
 import { profileLabel } from '../store/useProfiles'
+import { useMutes } from '../store/useMutes'
+import { hidesThing, type Muted } from '../lib/muteList'
 
 /** The mark on an item that carries no signature: its author is a claim, never a fact (spec §7.6). */
 export function Unsigned(): JSX.Element {
@@ -88,6 +90,10 @@ export function ChestBlock({ id, chest, author, verified, place, sealer: given }
   const [busy, setBusy] = useState(false)
   const who = useWho(author)
   const from: HeldFrom = { chestId: id, chestName: chest.name }
+  // What the mute list hides is neither listed nor held (store/useMutes); never in a chest of yours.
+  const muted = useMutes((s) => s.muted)
+  const shownOf = (list: ChestEntry[], m: Muted): ChestEntry[] => list.filter((e) => !hidesThing(m, { authors: [author, e.event.pubkey], ids: [e.id] }, me))
+  const shown = entries ? shownOf(entries, muted) : null
 
   const open = async (): Promise<void> => {
     if (!opener || busy) return
@@ -98,7 +104,7 @@ export function ChestBlock({ id, chest, author, verified, place, sealer: given }
       const contents = readContents(raw, sealer)
       setEntries(contents)
       // A key read is held, wherever it was read (B1 §2.1).
-      useInventory.getState().take(contents.filter((e) => e.body.type === 'key'), from, place)
+      useInventory.getState().take(shownOf(contents, useMutes.getState().muted).filter((e) => e.body.type === 'key'), from, place)
       // What the chest held is found in place: the room behind the door is
       // drawn where the door stands, as a scan's finds are.
       if (place) {
@@ -128,9 +134,9 @@ export function ChestBlock({ id, chest, author, verified, place, sealer: given }
         )}
       </div>
       {status && <span className="chest__status" role="status">{status}</span>}
-      {entries && entries.length > 0 && (
+      {shown && shown.length > 0 && (
         <ul className="chest__contents">
-          {entries.map((e) => <ContentRow key={e.id} entry={e} from={from} place={place} />)}
+          {shown.map((e) => <ContentRow key={e.id} entry={e} from={from} place={place} />)}
         </ul>
       )}
     </div>

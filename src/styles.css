@@ -9756,3 +9756,16 @@ html.tv-broadcast body { overflow: hidden; }
 .sfold__new .login__act { flex: 0 0 auto; margin: 0; }
 /* The chest composer's + SHARD list (ChestCompose), the folder tree as everywhere else. */
 .compose__models { margin: 2px 0 4px; }
+
+/* BLOCKED beside NOTIFICATIONS, and the mute list it opens (store/useMutes). */
+.identity__row { gap: 6px; }
+.identity__blocked { flex: 0 0 auto; }
+.mutes__list { display: flex; flex-direction: column; gap: 2px; overflow-y: auto; margin: 0; padding: 0; list-style: none; }
+.mutes__row { display: flex; align-items: center; gap: 8px; padding: 5px 0; min-width: 0; }
+.mutes__row .badge { flex: 1; min-width: 0; }
+.mutes__row .identity__change { display: inline-flex; align-items: center; gap: 4px; }
+.mutes__item { flex: 1; min-width: 0; font-size: 10px; letter-spacing: 0.08em; color: var(--dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mutes__locked { flex: 1; font-size: 9px; letter-spacing: 0.12em; color: #ffb547; }
+.mutes__empty { font-size: 9px; letter-spacing: 0.14em; color: var(--dim); padding: 8px 0; }
+/* A refused block or mute, as a full row under the card's actions (BlockButton). */
+.block__refusal { flex-basis: 100%; }

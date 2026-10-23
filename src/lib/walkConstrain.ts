@@ -107,17 +107,83 @@ function mul(a: M4, b: M4): M4 {
 }
 
 /**
- * The faces that stop a walker, as triangles in the shard's render frame in
- * its own model units: what ShardMesh draws, before the scene's scale and
- * place. The shard's own come first (`own` of them), since only they are cut
- * at the region's walls; placed objects are not (ShardMesh Placements).
+ * One object's walls in its own render frame, model units: every corner once
+ * (`corners`, three numbers each) and every triangle as three corner indices
+ * (`tris`; a longer face as a fan). Made once per model and shared by every
+ * placement of it (2026-10-23): a room of a Maze Kit placed many times over
+ * holds its walls once, not once a placement.
+ */
+export interface ModelWalls {
+  corners: Float64Array
+  tris: Uint32Array
+  /** The corners some triangle uses, each once: what a placement's bounds are taken over. */
+  used: Uint32Array
+}
+
+const modelWalls = new WeakMap<ShardModel, ModelWalls>()
+
+/** The walls of `m` in its own frame, built once per model object. */
+export function wallsOf(m: ShardModel): ModelWalls {
+  const held = modelWalls.get(m)
+  if (held) return held
+  const n = m.vertices.length
+  const corners = new Float64Array(n * 3)
+  m.vertices.forEach((v, q) => {
+    const r = toRender(ticksOf(v))
+    corners[q * 3] = r[0]; corners[q * 3 + 1] = r[1]; corners[q * 3 + 2] = r[2]
+  })
+  let count = 0
+  for (const f of m.faces) for (let k = 1; k + 1 < f.length; k++) if (f[0] < n && f[k] < n && f[k + 1] < n) count++
+  const tris = new Uint32Array(count * 3)
+  const seen = new Uint8Array(n)
+  let t = 0
+  // A face is a triangle (§1.4); a longer one, should a reader meet it, as a fan.
+  // A corner that names no vertex leaves that triangle out, as it always has.
+  for (const f of m.faces) for (let k = 1; k + 1 < f.length; k++) {
+    const a = f[0], b = f[k], c = f[k + 1]
+    if (!(a < n && b < n && c < n)) continue
+    tris[t++] = a; tris[t++] = b; tris[t++] = c
+    seen[a] = 1; seen[b] = 1; seen[c] = 1
+  }
+  let u = 0
+  for (let q = 0; q < n; q++) u += seen[q]
+  const used = new Uint32Array(u)
+  u = 0
+  for (let q = 0; q < n; q++) if (seen[q]) used[u++] = q
+  const walls = { corners, tris, used }
+  modelWalls.set(m, walls)
+  return walls
+}
+
+/** A placed object's walls where it stands: its model's, through `f`, inside `min`..`max`. */
+export interface WallPlacement {
+  walls: ModelWalls
+  /** Column-major, from the model's render frame to the shard's. */
+  f: Float64Array
+  min: [number, number, number]
+  max: [number, number, number]
+}
+
+/**
+ * The faces that stop a walker, in the shard's render frame in its own model
+ * units: what ShardMesh draws, before the scene's scale and place. The
+ * shard's own triangles are held here (they are the only ones cut at the
+ * region's walls); each object it places is held as its model's shared walls
+ * and a placement, and its triangles are worked out only when a step comes
+ * near it (firstHit). Built that way, a world of rooms placed by reference
+ * costs a few numbers a placement, where it once cost every corner of every
+ * placement as an array of its own: entering WALK among Maze Kit rooms froze
+ * the tab and grew it by gigabytes (arkinox, 2026-10-23: "I was at 1.9GB and
+ * then I went into walk mode, it froze, and then I was suddenly at 6.9GB").
  */
 export interface WallMesh {
-  /** Nine numbers a triangle: three corners. */
+  /** The shard's own triangles: nine numbers a triangle, three corners. */
   tris: Float64Array
-  /** How many of the triangles, from the start, are the shard's own. */
+  /** How many triangles the shard's own are. */
   own: number
-  /** The corners' bounds, or null for no triangles. */
+  /** The objects it places, and theirs, each where it stands. */
+  placements: WallPlacement[]
+  /** The bounds of every corner of every triangle, own and placed, or null for no triangles. */
   min: [number, number, number] | null
   max: [number, number, number] | null
 }
@@ -129,19 +195,24 @@ export interface WallMesh {
  * stops nothing: it is a cube the scene draws for something it does not have.
  */
 export function wallMesh(shard: ShardModel, placed: readonly Placed[], pose?: Pose): WallMesh {
-  const out: number[] = []
-  // A face is a triangle (§1.4); a longer one, should a reader meet it, as a fan.
-  const push = (m: ShardModel, pts: Array<[number, number, number]>): void => {
-    for (const f of m.faces) {
-      for (let k = 1; k + 1 < f.length; k++) {
-        const a = pts[f[0]], b = pts[f[k]], c = pts[f[k + 1]]
-        if (a && b && c) out.push(a[0], a[1], a[2], b[0], b[1], b[2], c[0], c[1], c[2])
+  const min: [number, number, number] = [Infinity, Infinity, Infinity]
+  const max: [number, number, number] = [-Infinity, -Infinity, -Infinity]
+  // The shard's own corners take the pose through their ticks, as flatten does.
+  let tris = new Float64Array(0)
+  if (blocks(shard)) {
+    const pts = shard.vertices.map((v) => toRender(posed(ticksOf(v), pose)))
+    const own = wallsOf(shard).tris
+    tris = new Float64Array(own.length * 3)
+    for (let q = 0; q < own.length; q++) {
+      const p = pts[own[q]]
+      for (let k = 0; k < 3; k++) {
+        tris[q * 3 + k] = p[k]
+        if (p[k] < min[k]) min[k] = p[k]
+        if (p[k] > max[k]) max[k] = p[k]
       }
     }
   }
-  // The shard's own corners take the pose through their ticks, as flatten does.
-  if (blocks(shard)) push(shard, shard.vertices.map((v) => toRender(posed(ticksOf(v), pose))))
-  const own = out.length / 9
+  const placements: WallPlacement[] = []
   // Its parts, through the pose as a turn in the render frame (Placements' `turn`).
   const root = pose ? Array.from(renderPose(pose).elements) : IDENTITY
   const place = (parent: ShardModel, list: readonly Placed[], frame: M4): void => {
@@ -150,28 +221,34 @@ export function wallMesh(shard: ShardModel, placed: readonly Placed[], pose?: Po
       if (!m || m.unit + p.part.step < 0 || m.unit + p.part.step > MAX_UNIT) continue
       const f = mul(frame, partMatrix(p.part, parent.unit, m.unit))
       if (blocks(m)) {
-        push(m, m.vertices.map((v) => {
-          const r = toRender(ticksOf(v))
-          return [
-            f[0] * r[0] + f[4] * r[1] + f[8] * r[2] + f[12],
-            f[1] * r[0] + f[5] * r[1] + f[9] * r[2] + f[13],
-            f[2] * r[0] + f[6] * r[1] + f[10] * r[2] + f[14],
-          ]
-        }))
+        const walls = wallsOf(m)
+        if (walls.tris.length) {
+          const at = { walls, f: Float64Array.from(f), min: [Infinity, Infinity, Infinity] as [number, number, number], max: [-Infinity, -Infinity, -Infinity] as [number, number, number] }
+          const c = walls.corners
+          for (let u = 0; u < walls.used.length; u++) {
+            const q = walls.used[u] * 3
+            const r0 = c[q], r1 = c[q + 1], r2 = c[q + 2]
+            // The same arithmetic, in the same order, as the triangles firstHit makes from it.
+            const x = f[0] * r0 + f[4] * r1 + f[8] * r2 + f[12]
+            const y = f[1] * r0 + f[5] * r1 + f[9] * r2 + f[13]
+            const z = f[2] * r0 + f[6] * r1 + f[10] * r2 + f[14]
+            if (x < at.min[0]) at.min[0] = x
+            if (x > at.max[0]) at.max[0] = x
+            if (y < at.min[1]) at.min[1] = y
+            if (y > at.max[1]) at.max[1] = y
+            if (z < at.min[2]) at.min[2] = z
+            if (z > at.max[2]) at.max[2] = z
+          }
+          for (let k = 0; k < 3; k++) { if (at.min[k] < min[k]) min[k] = at.min[k]; if (at.max[k] > max[k]) max[k] = at.max[k] }
+          placements.push(at)
+        }
       }
       if (p.children.length) place(m, p.children, f)
     }
   }
   place(shard, placed, root)
-  const tris = Float64Array.from(out)
-  if (tris.length === 0) return { tris, own: 0, min: null, max: null }
-  const min: [number, number, number] = [Infinity, Infinity, Infinity]
-  const max: [number, number, number] = [-Infinity, -Infinity, -Infinity]
-  for (let i = 0; i < tris.length; i += 3) for (let k = 0; k < 3; k++) {
-    if (tris[i + k] < min[k]) min[k] = tris[i + k]
-    if (tris[i + k] > max[k]) max[k] = tris[i + k]
-  }
-  return { tris, own, min, max }
+  const any = tris.length > 0 || placements.length > 0
+  return { tris, own: tris.length / 9, placements, min: any ? min : null, max: any ? max : null }
 }
 
 /** Barycentric slack: a ray through an edge or a corner hits, so two triangles that share an edge leave no seam. */
@@ -185,6 +262,9 @@ const NEAR = 1e-9
  */
 const FLAT = 1e-12
 
+/** One placement's corners where it stands, written here a step at a time and reused: no step allocates. */
+let scratch = new Float64Array(0)
+
 /**
  * How far along a straight step the first blocking face is, in model units,
  * or null when nothing is in the way. The step starts at `o` (the shard's
@@ -193,36 +273,66 @@ const FLAT = 1e-12
  * and does not hold it: it can always step off. A face at exactly `maxT`
  * does: a step never lands on a wall. With `clip`, a hit on the shard's own
  * faces counts only inside the region box, where those faces are drawn.
+ *
+ * A placed object is passed by when the step's line misses its bounds, and
+ * otherwise its corners are put where it stands with exactly the arithmetic
+ * that once made its triangles ahead of time, so every hit is the same
+ * number to the last bit (walkConstrain.test.ts holds the old way beside the
+ * new one).
  */
 export function firstHit(mesh: WallMesh, o: readonly [number, number, number], i: 0 | 1 | 2, s: 1 | -1, maxT: number, minT: number, clip?: Box): number | null {
   const j = (i + 1) % 3, k = (i + 2) % 3
-  const t = mesh.tris
   const pj = o[j], pk = o[k], pi = o[i]
   let best: number | null = null
-  for (let n = 0; n < t.length; n += 9) {
-    const aj = t[n + j], ak = t[n + k], bj = t[n + 3 + j], bk = t[n + 3 + k], cj = t[n + 6 + j], ck = t[n + 6 + k]
+  // One triangle: the cheap rejects, then the exact test.
+  const test = (t: Float64Array, a: number, b: number, c: number, own: boolean): void => {
+    const aj = t[a + j], ak = t[a + k], bj = t[b + j], bk = t[b + k], cj = t[c + j], ck = t[c + k]
     // Cheap rejects first: the ray's line passes beside the triangle.
-    if (pj < Math.min(aj, bj, cj) - NEAR || pj > Math.max(aj, bj, cj) + NEAR) continue
-    if (pk < Math.min(ak, bk, ck) - NEAR || pk > Math.max(ak, bk, ck) + NEAR) continue
+    if (pj < Math.min(aj, bj, cj) - NEAR || pj > Math.max(aj, bj, cj) + NEAR) return
+    if (pk < Math.min(ak, bk, ck) - NEAR || pk > Math.max(ak, bk, ck) + NEAR) return
     const d = (bj - aj) * (ck - ak) - (bk - ak) * (cj - aj)
     const span = Math.max(Math.max(aj, bj, cj) - Math.min(aj, bj, cj), Math.max(ak, bk, ck) - Math.min(ak, bk, ck))
-    if (Math.abs(d) <= FLAT * span * span) continue
+    if (Math.abs(d) <= FLAT * span * span) return
     const wa = ((bj - pj) * (ck - pk) - (bk - pk) * (cj - pj)) / d
     const wb = ((cj - pj) * (ak - pk) - (ck - pk) * (aj - pj)) / d
     const wc = 1 - wa - wb
-    if (wa < -EDGE_SLACK || wb < -EDGE_SLACK || wc < -EDGE_SLACK) continue
-    const h = wa * t[n + i] + wb * t[n + 3 + i] + wc * t[n + 6 + i]
+    if (wa < -EDGE_SLACK || wb < -EDGE_SLACK || wc < -EDGE_SLACK) return
+    const h = wa * t[a + i] + wb * t[b + i] + wc * t[c + i]
     const along = (h - pi) * s
-    if (!(along > minT) || along > maxT) continue
-    if (best !== null && along >= best) continue
-    if (clip && n / 9 < mesh.own) {
+    if (!(along > minT) || along > maxT) return
+    if (best !== null && along >= best) return
+    if (clip && own) {
       const hit = [0, 0, 0]
       hit[i] = h; hit[j] = pj; hit[k] = pk
       let inside = true
       for (let q = 0; q < 3; q++) if (hit[q] < clip.min[q] - EDGE_SLACK || hit[q] > clip.max[q] + EDGE_SLACK) inside = false
-      if (!inside) continue
+      if (!inside) return
     }
     best = along
+  }
+  const t = mesh.tris
+  for (let n = 0; n < t.length; n += 9) test(t, n, n + 3, n + 6, true)
+  for (const p of mesh.placements) {
+    // The step's line beside the placement's bounds misses every one of its
+    // triangles (each lies inside them); NEAR as the triangle test has it.
+    if (pj < p.min[j] - NEAR || pj > p.max[j] + NEAR || pk < p.min[k] - NEAR || pk > p.max[k] + NEAR) continue
+    // Along the step: a hit is a mix of a triangle's corners with weights no
+    // further below zero than EDGE_SLACK, so it lies within the bounds widened
+    // by far less than `wide`.
+    const wide = NEAR + 1e-8 * (Math.abs(p.min[i]) + Math.abs(p.max[i]) + 1)
+    const near = s > 0 ? p.min[i] - wide - pi : pi - (p.max[i] + wide)
+    const far = s > 0 ? p.max[i] + wide - pi : pi - (p.min[i] - wide)
+    if (far <= minT || near > maxT || (best !== null && near >= best)) continue
+    const { corners, tris } = p.walls
+    const f = p.f
+    if (scratch.length < corners.length) scratch = new Float64Array(Math.max(corners.length, scratch.length * 2))
+    for (let q = 0; q < corners.length; q += 3) {
+      const r0 = corners[q], r1 = corners[q + 1], r2 = corners[q + 2]
+      scratch[q] = f[0] * r0 + f[4] * r1 + f[8] * r2 + f[12]
+      scratch[q + 1] = f[1] * r0 + f[5] * r1 + f[9] * r2 + f[13]
+      scratch[q + 2] = f[2] * r0 + f[6] * r1 + f[10] * r2 + f[14]
+    }
+    for (let n = 0; n < tris.length; n += 3) test(scratch, tris[n] * 3, tris[n + 1] * 3, tris[n + 2] * 3, false)
   }
   return best
 }

@@ -17,8 +17,8 @@
  */
 
 import { useEffect, useState } from 'react'
-import { parseAddress, refKey, resolveParts, type Placed } from 'sno-core/parts'
-import type { Ref, ShardModel } from 'sno-core/shards'
+import { MAX_PART_DEPTH, parseAddress, refKey, resolveParts, type Placed } from 'sno-core/parts'
+import { MAX_UNIT, fromPayload, type Ref, type ShardModel } from 'sno-core/shards'
 import { GENERAL_RELAYS } from './contacts'
 import { queryAny, relaySet } from './relay'
 
@@ -98,4 +98,61 @@ export function useResolved(shard: ShardModel | null): Map<string, Resolved> {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [key])
   return byRef
+}
+
+/**
+ * Payloads already read into models, by the payload object fetchRef keeps
+ * for its reference, then by the key the model was read under. A payload
+ * object is never changed after it is fetched, so the model read from it is
+ * the same every time; once read, it is read for everyone.
+ */
+const parsed = new WeakMap<object, Map<string, ShardModel | 'invalid'>>()
+
+function parseShared(payload: unknown, key: string): ShardModel | 'invalid' {
+  if (typeof payload !== 'object' || payload === null) return fromPayload(payload, key) ?? 'invalid'
+  let byKey = parsed.get(payload)
+  if (!byKey) parsed.set(payload, (byKey = new Map()))
+  let m = byKey.get(key)
+  if (m === undefined) byKey.set(key, (m = fromPayload(payload, key) ?? 'invalid'))
+  return m
+}
+
+/**
+ * sno-core resolveParts, rule for rule (§1.10: the depth, loops, scale,
+ * placeholders), except that each placed object is read from its payload
+ * once for the whole app rather than once a call. WALK resolves the parts of
+ * every shard around you on the way in (store/walkWalls.ts), and read once a
+ * call, a world of rooms placed by reference read every room again for
+ * every shard that places it, in one go: 160 MB of models made and thrown
+ * away for 24 small mazes, and the tab frozen while it happened (arkinox,
+ * 2026-10-23: "I was at 1.9GB and then I went into walk mode, it froze, and
+ * then I was suddenly at 6.9GB"). parts.test.ts holds the two side by side.
+ */
+export async function resolvePartsShared(model: ShardModel, fetch: (ref: Ref) => Promise<unknown> = fetchRef, self?: Ref): Promise<Placed[]> {
+  const cache = new Map<string, Promise<ShardModel | 'unreachable' | 'invalid'>>()
+  const load = (ref: Ref): Promise<ShardModel | 'unreachable' | 'invalid'> => {
+    const key = refKey(ref)
+    let got = cache.get(key)
+    if (!got) {
+      got = fetch(ref).then((payload) => (payload == null ? 'unreachable' : parseShared(payload, key)), () => 'unreachable' as const)
+      cache.set(key, got)
+    }
+    return got
+  }
+  const walk = async (m: ShardModel, depth: number, chain: Set<string>): Promise<Placed[]> => {
+    const refs = m.refs ?? []
+    return Promise.all((m.parts ?? []).map(async (part): Promise<Placed> => {
+      const ref = refs[part.ref]
+      const key = refKey(ref)
+      const miss = (missing: NonNullable<Placed['missing']>): Placed => ({ part, ref, model: null, missing, children: [] })
+      if (chain.has(key)) return miss('cycle')
+      if (depth > MAX_PART_DEPTH) return miss('deep')
+      const got = await load(ref)
+      if (typeof got === 'string') return miss(got)
+      if (got.unit + part.step < 0 || got.unit + part.step > MAX_UNIT) return miss('scale')
+      const children = got.parts ? await walk(got, depth + 1, new Set([...chain, key])) : []
+      return { part, ref, model: got, children }
+    }))
+  }
+  return walk(model, 1, new Set(self ? [refKey(self)] : []))
 }

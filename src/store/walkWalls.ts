@@ -13,14 +13,17 @@
  * region clip, with the objects it places. Each one's triangles are built
  * once and kept until its model changes; the objects a shard places are
  * resolved through the same fetch cache the scene draws them from
- * (lib/parts.ts), so nothing is fetched twice, and until they arrive only
- * the shard's own faces count. A box test in exact bigint gibsons skips every
+ * (lib/parts.ts), so nothing is fetched twice, and read from their payloads
+ * once for every shard (resolvePartsShared), so a room placed by a hundred
+ * shards is one model; until they arrive only the shard's own faces count.
+ * A placed object's triangles are its model's, shared, and worked out where
+ * it stands only when a step comes near it (lib/walkConstrain.ts). A box test in exact bigint gibsons skips every
  * shard the step cannot reach before any float is made.
  */
 
-import { resolveParts, type Placed } from 'sno-core/parts'
+import type { Placed } from 'sno-core/parts'
 import type { ShardModel } from 'sno-core/shards'
-import { fetchRef } from '../lib/parts'
+import { resolvePartsShared } from '../lib/parts'
 import { regionBox, type Box } from '../lib/clip'
 import { placedPose } from '../lib/pose'
 import type { AxisName, Position, ViewAxes } from '../lib/space'
@@ -102,7 +105,7 @@ const RETRY_MS = 30_000
  */
 function resolveInto(w: WallItem, e: Entry): void {
   if (!w.shard.parts?.length) return
-  void resolveParts(w.shard, fetchRef).then((placed) => {
+  void resolvePartsShared(w.shard).then((placed) => {
     if (entries.get(w.key) === e) entries.set(w.key, build(w, placed))
   }, () => { /* unreachable parts stop nothing */ })
 }

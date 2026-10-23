@@ -1,5 +1,5 @@
 /**
- * opacityStep.ts - the workshop's OPACITY stepper (DECK-0003 §1.11).
+ * opacityStep.ts - the workshop's OPACITY slider and stepper (DECK-0003 §1.11).
  *
  * An object's opacity is a whole percent; the stepper moves it in fives from
  * the floor (10, sno-core OPACITY_FLOOR) to 100, which is solid and is stored
@@ -26,6 +26,41 @@ export function stepOpacity(current: number | undefined, dir: -1 | 1): number {
   const at = opacityPercent(current)
   const next = dir > 0 ? Math.floor(at / OPACITY_STEP) * OPACITY_STEP + OPACITY_STEP : Math.ceil(at / OPACITY_STEP) * OPACITY_STEP - OPACITY_STEP
   return Math.min(100, Math.max(OPACITY_FLOOR, next))
+}
+
+/**
+ * A percent typed or slid to, as a whole percent between the floor and 100
+ * (the SHARD panel's slider and its #, arkinox 2026-10-23). Anything that is
+ * not a number is null, so a cleared field writes nothing.
+ */
+export function clampOpacity(percent: number): number | null {
+  if (!Number.isFinite(percent)) return null
+  return Math.min(100, Math.max(OPACITY_FLOOR, Math.round(percent)))
+}
+
+/** The whole percent at `t` along the slider, 0 at the floor and 1 at 100. */
+export function opacityAt(t: number): number {
+  const along = Math.min(1, Math.max(0, Number.isFinite(t) ? t : 0))
+  return Math.round(OPACITY_FLOOR + along * (100 - OPACITY_FLOOR))
+}
+
+/** Where `percent` sits along the slider: 0 at the floor, 1 at 100. */
+export function opacityFraction(percent: number): number {
+  return Math.min(1, Math.max(0, (percent - OPACITY_FLOOR) / (100 - OPACITY_FLOOR)))
+}
+
+/**
+ * The undo history after a slider drag, as one edit would have left it: the
+ * history from before the drag with the shard from before the drag on top.
+ * Every whole percent the drag passed was an edit of its own (useWorkshop
+ * edit), so `now` is that history with one entry per step, at most the
+ * store's cap long; this keeps the cap, so a drag at a full history drops the
+ * oldest entry, as one edit does.
+ */
+export function dragHistory<T>(before: readonly T[], shard: T, now: readonly T[]): T[] {
+  const past = [...before, shard]
+  if (past.length > Math.max(now.length, before.length)) past.shift()
+  return past
 }
 
 /**

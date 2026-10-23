@@ -1,5 +1,5 @@
 /**
- * usePublished.ts - PUBLISH and RETRACT in the workshop's MENU, and the
+ * usePublished.ts - PUBLISH and RETRACT in the workshop's SHARD panel, and the
  * ledger of what this browser has published (lib/published.ts).
  *
  * A publish signs the shard as a public kind 33331 (publicObjectTemplate),

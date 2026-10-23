@@ -19,7 +19,7 @@
 import { Fragment, useEffect, useMemo, useRef, useState, type DragEvent } from 'react'
 import { createPortal } from 'react-dom'
 import { ChevronDown, ChevronRight, Folder as FolderIcon, FolderInput, FolderPlus, Pencil, X } from 'lucide-react'
-import { buildTree, flatFolders, folderOf, isWithin, pathOf, type FolderNode, type FolderTree } from '../lib/shardFolders'
+import { buildTree, canonical, flatFolders, parentOf, folderOf, isWithin, pathOf, type FolderNode, type FolderTree } from '../lib/shardFolders'
 import { useShardFolders } from '../store/useShardFolders'
 import { useCyberspace } from '../store/useCyberspace'
 import { useEscape } from '../hooks/useEscape'
@@ -68,6 +68,12 @@ function readDrag(e: DragEvent): Dragged | null {
   return null
 }
 
+/**
+ * The folder being dragged, if one is: a drop target cannot read the drag's
+ * data until the drop, and it needs to know sooner whether to light up.
+ */
+let draggingFolder: string | null = null
+
 const ours = (e: DragEvent): boolean => Array.from(e.dataTransfer.types).includes(DRAG_TYPE)
 
 /** What the chooser is moving: shards, or one folder. */
@@ -96,16 +102,28 @@ export function ShardFolders<T>({ items, refOf, nameOf, row }: Props<T>): JSX.El
   const pickedNow = [...picked].filter((r) => present.has(r))
 
   const stopSelecting = (): void => { setSelecting(false); setPicked(new Set()) }
+  /** Open a folder and every folder above it, so what was moved there is in sight. */
+  const unfold = (id: string | null): void => {
+    const t = f().tree
+    for (let at = canonical(t, id), n = 0; at !== null && n < 64; at = parentOf(t, at), n += 1) if (t.collapsed[at]) f().setCollapsed(at, false)
+  }
 
   const newFolder = (parent: string | null): void => {
     const id = f().createFolder(`Folder ${Object.keys(f().tree.folders).length + 1}`, parent)
     if (!id) return
-    if (parent) f().setCollapsed(parent, false)
+    unfold(parent)
     setRenaming(id)
   }
 
   const dropOn = (folder: string | null) => ({
-    onDragOver: (e: DragEvent) => { if (!ours(e)) return; e.preventDefault(); e.dataTransfer.dropEffect = 'move'; if (over !== (folder ?? '')) setOver(folder ?? '') },
+    onDragOver: (e: DragEvent) => {
+      if (!ours(e)) return
+      // A folder is never dropped into itself or under itself: no highlight, no drop.
+      if (draggingFolder !== null && folder !== null && isWithin(f().tree, folder, draggingFolder)) return
+      e.preventDefault()
+      e.dataTransfer.dropEffect = 'move'
+      if (over !== (folder ?? '')) setOver(folder ?? '')
+    },
     onDragLeave: (e: DragEvent) => { if (!(e.currentTarget as Node).contains(e.relatedTarget as Node | null)) setOver(null) },
     onDrop: (e: DragEvent) => {
       if (!ours(e)) return
@@ -121,6 +139,7 @@ export function ShardFolders<T>({ items, refOf, nameOf, row }: Props<T>): JSX.El
 
   const startDrag = (e: DragEvent, d: Dragged): void => {
     e.stopPropagation()
+    draggingFolder = d.kind === 'folder' ? d.id : null
     e.dataTransfer.setData(DRAG_TYPE, JSON.stringify(d))
     e.dataTransfer.effectAllowed = 'move'
   }
@@ -145,7 +164,7 @@ export function ShardFolders<T>({ items, refOf, nameOf, row }: Props<T>): JSX.El
       drag: {
         draggable: true,
         onDragStart: (e) => startDrag(e, { kind: 'shards', refs: selecting && picked.has(ref) ? pickedNow : [ref] }),
-        onDragEnd: () => setOver(null),
+        onDragEnd: () => { draggingFolder = null; setOver(null) },
       },
       tool,
     }
@@ -163,7 +182,7 @@ export function ShardFolders<T>({ items, refOf, nameOf, row }: Props<T>): JSX.El
           className="sfold__head"
           draggable={drag && renaming !== folder.id ? true : undefined}
           onDragStart={drag ? (e) => startDrag(e, { kind: 'folder', id: folder.id }) : undefined}
-          onDragEnd={() => setOver(null)}
+          onDragEnd={() => { draggingFolder = null; setOver(null) }}
           {...dropOn(folder.id)}
         >
           {renaming === folder.id ? (
@@ -226,7 +245,7 @@ export function ShardFolders<T>({ items, refOf, nameOf, row }: Props<T>): JSX.El
           onPick={(to) => {
             if (moving.kind === 'shards') { f().assignToFolder(moving.refs, to); stopSelecting() }
             else f().moveFolder(moving.id, to)
-            if (to) f().setCollapsed(to, false)
+            unfold(to)
             setMoving(null)
           }}
           onClose={() => setMoving(null)}

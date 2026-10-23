@@ -129,9 +129,28 @@ export function pathOf(tree: FolderTree, id: string | null): string[] {
 
 /** The folders directly under `parent`, by name. */
 export function childrenOf(tree: FolderTree, parent: string | null): Folder[] {
-  return Object.values(tree.folders)
-    .filter((f) => parentOf(tree, f.id) === parent)
-    .sort(byName)
+  return childIndex(tree).get(parent) ?? []
+}
+
+/**
+ * Every folder's children, sorted, worked out once per tree: the lists ask
+ * for children folder by folder, and scanning every folder each time grew
+ * with the square of the folder count (review of PR 449).
+ */
+const indexes = new WeakMap<FolderTree, Map<string | null, Folder[]>>()
+function childIndex(tree: FolderTree): Map<string | null, Folder[]> {
+  let index = indexes.get(tree)
+  if (index) return index
+  index = new Map()
+  for (const f of Object.values(tree.folders)) {
+    const p = parentOf(tree, f.id)
+    const list = index.get(p)
+    if (list) list.push(f)
+    else index.set(p, [f])
+  }
+  for (const list of index.values()) list.sort(byName)
+  indexes.set(tree, index)
+  return index
 }
 
 function byName(a: Folder, b: Folder): number {
@@ -188,6 +207,13 @@ export function buildTree<T>(tree: FolderTree, items: readonly T[], refOf: (item
  * under itself).
  */
 export function applyOp(tree: FolderTree, op: FolderOp): FolderTree {
+  // An id createFolderPath handed out may be an alias of the folder it found:
+  // every op on a folder acts on that folder.
+  if (op.op === 'rename' || op.op === 'move' || op.op === 'delete' || op.op === 'collapse') {
+    const id = canonical(tree, op.id)
+    if (id === null) return tree
+    if (id !== op.id) return applyOp(tree, { ...op, id })
+  }
   switch (op.op) {
     case 'create': {
       const name = cleanName(op.name)
@@ -254,6 +280,8 @@ export function applyOp(tree: FolderTree, op: FolderOp): FolderTree {
     }
     case 'assign': {
       const to = canonical(tree, op.folder)
+      // A named folder that is not there is refused, not read as the top, as a move is.
+      if (op.folder !== null && to === null) return tree
       let assign = tree.assign
       for (const ref of op.refs) {
         if (!ref) continue
@@ -293,7 +321,8 @@ export function normalizeTree(raw: unknown): FolderTree {
       if (!f || typeof f !== 'object' || f.id !== id || typeof f.name !== 'string') continue
       const name = cleanName(f.name)
       if (!name) continue
-      folders[id] = { id, name, parent: typeof f.parent === 'string' ? f.parent : null, at: typeof f.at === 'number' ? f.at : 0 }
+      // Whatever a later build keeps on a folder is kept as it was.
+      folders[id] = { ...f, id, name, parent: typeof f.parent === 'string' ? f.parent : null, at: typeof f.at === 'number' ? f.at : 0 }
     }
   }
   const strings = (v: unknown): Record<string, string> => {

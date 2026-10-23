@@ -77,6 +77,49 @@ describe('shard folders in IndexedDB', () => {
     expect(a.createFolderPath(['  '])).toBeNull()
   })
 
+  it('finds an existing path without writing anything new', async () => {
+    const a = await boot()
+    const id = a.createFolderPath(['maze-kit', 'forest'])
+    for (let i = 0; i < 200; i += 1) expect(a.createFolderPath(['maze-kit', 'forest'])).toBe(id)
+    await a.useShardFolders.getState().flush()
+    const b = await boot()
+    const t = b.useShardFolders.getState().tree
+    expect(Object.keys(t.folders)).toHaveLength(2)
+    expect(Object.keys(t.alias)).toHaveLength(0)
+  })
+
+  it('an id handed out before the load answered still names the folder it found', async () => {
+    const a = await boot()
+    a.createFolderPath(['kit'])
+    await a.useShardFolders.getState().flush()
+    vi.resetModules()
+    const b: Mod = await import('../useShardFolders')
+    const early = b.createFolderPath(['kit'])!
+    await b.useShardFolders.getState().flush()
+    b.useShardFolders.getState().renameFolder(early, 'maze-kit')
+    b.useShardFolders.getState().setCollapsed(early, true)
+    b.assignToFolder('oak', early)
+    await b.useShardFolders.getState().flush()
+    const t = (await boot()).useShardFolders.getState().tree
+    const [only] = Object.values(t.folders)
+    expect(Object.keys(t.folders)).toHaveLength(1)
+    expect(only.name).toBe('maze-kit')
+    expect(t.collapsed[only.id]).toBe(true)
+    expect(folderOf(t, 'oak')).toBe(only.id)
+  })
+
+  it('files a shard where the user put it even when this tab had not seen another tab\'s filing', async () => {
+    const tabA = await boot()
+    const tabB = await boot()
+    const id = tabA.createFolderPath(['kit'])!
+    tabA.assignToFolder('oak', id)
+    await tabA.useShardFolders.getState().flush()
+    // Tab B still shows oak at the top, and takes it to the top.
+    tabB.assignToFolder('oak', null)
+    await tabB.useShardFolders.getState().flush()
+    expect(folderOf((await boot()).useShardFolders.getState().tree, 'oak')).toBeNull()
+  })
+
   it('shows a change at once, and keeps one made before the load answered', async () => {
     const a = await boot()
     a.createFolderPath(['stored'])
@@ -165,12 +208,18 @@ describe('shard folders in IndexedDB', () => {
     expect(Object.values(c.useShardFolders.getState().tree.folders).map((f) => f.name).sort()).toEqual(['from-a', 'from-b'])
   })
 
-  it('lasts the session in memory where IndexedDB cannot open', async () => {
+  it('lasts the session in memory where IndexedDB cannot open, per identity', async () => {
     ;(globalThis as { indexedDB?: unknown }).indexedDB = { open: () => { throw new Error('blocked') } }
     const a = await boot()
     expect(a.useShardFolders.getState().storage).toBe('memory')
     const id = a.createFolderPath(['kit'])!
     a.assignToFolder('oak', id)
+    await a.useShardFolders.getState().flush()
+    expect(folderOf(a.useShardFolders.getState().tree, 'oak')).toBe(id)
+    switchTo(OTHER)
+    await a.useShardFolders.getState().flush()
+    expect(Object.keys(a.useShardFolders.getState().tree.folders)).toHaveLength(0)
+    switchTo(ME)
     await a.useShardFolders.getState().flush()
     expect(folderOf(a.useShardFolders.getState().tree, 'oak')).toBe(id)
   })

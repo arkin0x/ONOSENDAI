@@ -150,9 +150,10 @@ describe('orphans and damage', () => {
     expect(buildTree(t, ['ghost', 'oak'], (s) => s).items).toEqual(['ghost'])
   })
 
-  it('files at the top when the folder named is gone', () => {
-    const t = applyOp(kit(), file(['oak'], 'gone'))
-    expect(folderOf(t, 'oak')).toBeNull()
+  it('refuses to file in a folder that is gone, as a move does', () => {
+    const t = kit()
+    expect(applyOp(t, file(['oak'], 'gone'))).toBe(t)
+    expect(folderOf(t, 'oak')).toBe('trees')
   })
 
   it('draws a folder whose parent is missing at the top', () => {
@@ -203,6 +204,19 @@ describe('createFolderPath (the path op)', () => {
     expect(Object.keys(t.folders).sort()).toEqual(['a1', 'a2'])
   })
 
+  it('lets every op on a folder use an id that became an alias', () => {
+    let t = applyOp(EMPTY_TREE, { op: 'path', ids: ['a1'], names: ['kit'], at: 1 })
+    t = applyOp(t, { op: 'path', ids: ['b1'], names: ['kit'], at: 2 })
+    expect(t.folders.b1).toBeUndefined()
+    t = applyOps(t, [{ op: 'rename', id: 'b1', name: 'maze-kit' }, { op: 'collapse', id: 'b1', collapsed: true }])
+    expect(t.folders.a1.name).toBe('maze-kit')
+    expect(t.collapsed.a1).toBe(true)
+    t = applyOps(t, [mk('top', 'top'), { op: 'move', id: 'b1', parent: 'top' }])
+    expect(t.folders.a1.parent).toBe('top')
+    t = applyOp(t, { op: 'delete', id: 'b1' })
+    expect(t.folders.a1).toBeUndefined()
+  })
+
   it('skips empty segments and changes nothing for an empty path', () => {
     const t = applyOp(EMPTY_TREE, { op: 'path', ids: ['1', '2', '3'], names: ['kit', ' ', 'forest'], at: 1 })
     expect(pathOf(t, '3')).toEqual(['kit', 'forest'])
@@ -229,5 +243,19 @@ describe('assign and collapse', () => {
     expect(applyOp(t, file(['oak'], 'trees'))).toBe(t)
     expect(applyOp(t, { op: 'collapse', id: 'kit', collapsed: false })).toBe(t)
     expect(applyOp(t, { op: 'collapse', id: 'nope', collapsed: true })).toBe(t)
+  })
+})
+
+describe('scale', () => {
+  it('draws a few hundred folders and a deep chain quickly', () => {
+    const ops: FolderOp[] = []
+    for (let i = 0; i < 400; i += 1) ops.push(mk(`w${i}`, `wide ${i}`, i % 20 === 0 ? null : `w${i - (i % 20)}`))
+    for (let i = 0; i < 200; i += 1) ops.push(mk(`d${i}`, `deep ${i}`, i === 0 ? null : `d${i - 1}`))
+    const t = applyOps(EMPTY_TREE, ops)
+    const started = performance.now()
+    const built = buildTree(t, ['x'], (s) => s)
+    flatFolders(t)
+    expect(performance.now() - started).toBeLessThan(500)
+    expect(built.folders).toHaveLength(21)
   })
 })

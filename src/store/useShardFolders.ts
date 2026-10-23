@@ -29,7 +29,7 @@
 
 import { create } from 'zustand'
 import { describeError } from '../lib/secrets/db'
-import { EMPTY_TREE, applyOp, canonical, cleanName, newFolderId, type FolderOp, type FolderTree } from '../lib/shardFolders'
+import { EMPTY_TREE, applyOp, canonical, childrenOf, cleanName, newFolderId, type Folder, type FolderOp, type FolderTree } from '../lib/shardFolders'
 import { commitOps, openShardFoldersDb, readTree } from '../lib/shardFoldersDb'
 import { useCyberspace } from './useCyberspace'
 
@@ -83,6 +83,8 @@ function database(): Promise<IDBDatabase | null> {
       // A newer build upgrading the database in another tab: step aside, and
       // open again on the next change.
       d.onversionchange = () => { d.close(); db = null }
+      // A connection the browser closed (a tab long in the background): open again next time.
+      d.onclose = () => { db = null }
       return d
     }).catch((err: unknown) => {
       console.warn(`[folders] IndexedDB unavailable, folders last this session only: ${describeError(err)}`)
@@ -107,12 +109,19 @@ function announce(owner: string): void {
 
 let watching = false
 
+/** Where IndexedDB cannot be opened: each identity's tree for the session. */
+const sessionTrees = new Map<string, FolderTree>()
+
 export const useShardFolders = create<ShardFoldersState>((set, get) => {
   /** Read the stored tree for `owner` and show it, if that is still whose tree is shown. */
   const reread = (owner: string): Promise<void> => then(async () => {
     const d = await database()
     if (get().owner !== owner) return
-    if (!d) { set({ storage: 'memory' }); return }
+    if (!d) {
+      const kept = sessionTrees.get(owner)
+      set(kept ? { storage: 'memory', tree: replay(kept, owner) } : { storage: 'memory' })
+      return
+    }
     let stored: FolderTree
     try { stored = await readTree(d, owner) } catch (err) {
       console.warn(`[folders] could not read folders: ${describeError(err)}`)
@@ -135,12 +144,15 @@ export const useShardFolders = create<ShardFoldersState>((set, get) => {
     const entry: Queued = { owner, op }
     const tree = applyOp(get().tree, op)
     // Refused or already so in the tree as loaded: nothing to write. While it
-    // loads, the stored tree may differ, so the op goes to it regardless.
-    if (tree === get().tree && get().storage !== 'loading') return tree
+    // loads, the stored tree may differ, so the op goes to it regardless; and
+    // a filing or a fold always goes, since another tab may have changed
+    // what this one still shows (review of PR 449).
+    if (tree === get().tree && get().storage !== 'loading' && op.op !== 'assign' && op.op !== 'collapse') return tree
     queued.push(entry)
     if (tree !== get().tree) set({ tree })
     void then(async () => {
       const d = await database()
+      let failed = false
       try {
         if (!d) return
         const stored = await commitOps(d, owner, [op])
@@ -149,10 +161,15 @@ export const useShardFolders = create<ShardFoldersState>((set, get) => {
         announce(owner)
       } catch (err) {
         console.warn(`[folders] could not save a folder change: ${describeError(err)}`)
+        // Show what is stored rather than a change that was not kept, and
+        // open the database again for the next one.
+        db = null
+        failed = true
       } finally {
         // Committed, failed, or memory only: either way it is not waiting any more.
         drop(entry)
       }
+      if (failed && get().owner === owner) void reread(owner)
     })
     return tree
   }
@@ -178,7 +195,11 @@ export const useShardFolders = create<ShardFoldersState>((set, get) => {
       }
       const who = owner ?? useCyberspace.getState().identity.pubkey
       // A new identity shows nothing of the old one's, from this moment.
-      if (who !== get().owner) set({ owner: who, tree: replay(EMPTY_TREE, who), storage: 'loading' })
+      if (who !== get().owner) {
+        // Without IndexedDB the old identity's folders wait here for it to come back.
+        if (get().storage === 'memory' && get().owner) sessionTrees.set(get().owner, get().tree)
+        set({ owner: who, tree: replay(EMPTY_TREE, who), storage: 'loading' })
+      }
       await reread(who)
     },
 
@@ -192,7 +213,16 @@ export const useShardFolders = create<ShardFoldersState>((set, get) => {
     createFolderPath: (path) => {
       const names = path.map(cleanName).filter((n) => n !== '')
       if (names.length === 0) return null
-      const ids = names.map(() => newFolderId())
+      // The folders already there go by their own ids, so finding a path
+      // writes no alias; only a segment this tab has not seen gets a new id
+      // (review of PR 449: 200 calls left 398 aliases).
+      const ids: string[] = []
+      let parent: string | null = null
+      let known = true
+      for (const name of names) {
+        const have: Folder | undefined = known ? childrenOf(get().tree, parent).find((f) => f.name === name) : undefined
+        if (have) { ids.push(have.id); parent = have.id } else { ids.push(newFolderId()); known = false }
+      }
       const tree = commit({ op: 'path', ids, names, at: Date.now() })
       return canonical(tree, ids[ids.length - 1])
     },

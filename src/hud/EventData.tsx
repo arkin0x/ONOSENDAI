@@ -34,10 +34,21 @@ export const HIDDEN_SECRET = '(hidden)'
 
 /**
  * The event as shown: a key item's secret, in its tag or (keys forged before
- * 2026-10-09) as the content, hidden, and a message's claim-link keys hidden.
- * `which` says which, when anything was.
+ * 2026-10-09) as the content, hidden, a message's claim-link keys hidden,
+ * and hidden audio's file key and nonce hidden (DECK-0007: the key is the
+ * file, and a screenshot of the card must not hand it out). `which` says
+ * which, when anything was.
  */
-export function shownEvent(ev: NostrEvent): { event: NostrEvent; hidden: boolean; which?: 'key' | 'nft' } {
+export function shownEvent(ev: NostrEvent): { event: NostrEvent; hidden: boolean; which?: 'key' | 'nft' | 'audio' } {
+  if (ev.kind === AUDIO_KIND) {
+    let masked = false
+    const tags = ev.tags.map((t) => {
+      if (t[0] !== 'decryption-key' && t[0] !== 'decryption-nonce') return t
+      masked = true
+      return [t[0], HIDDEN_SECRET, ...t.slice(2)]
+    })
+    return masked ? { event: { ...ev, tags }, hidden: true, which: 'audio' } : { event: ev, hidden: false }
+  }
   if (ev.kind === MESSAGE_KIND && typeof ev.content === 'string') {
     if (!hasNftLink(ev.content)) return { event: ev, hidden: false }
     return { event: { ...ev, content: maskNftKeys(ev.content, HIDDEN_SECRET) }, hidden: true, which: 'nft' }
@@ -130,6 +141,7 @@ export function EventData({ event: raw, children }: { event: NostrEvent; childre
       {children}
       {which === 'key' && <p className="eventdata__note">The key's secret is hidden here, so the event shown will not verify.</p>}
       {which === 'nft' && <p className="eventdata__note">The NFT link's key is hidden here, so the event shown will not verify.</p>}
+      {which === 'audio' && <p className="eventdata__note">The file's key is hidden here.</p>}
       <div className="eventdata__json">
         <pre>{json}</pre>
       </div>

@@ -91,6 +91,11 @@ describe('the item, read (DECK-0007 §2.2)', () => {
     expect(audioItemOf(without('url'))).toBeNull()
     expect(audioItemOf(replaced('url', 'http://blossom.test/a'))).toBeNull()
     expect(audioItemOf(replaced('url', 'javascript:alert(1)'))).toBeNull()
+    // Only a blob by its hash: never another endpoint on the server, or on the finder's network.
+    expect(audioItemOf(replaced('url', 'https://blossom.test/admin/delete?all=1'))).toBeNull()
+    expect(audioItemOf(replaced('url', 'https://192.168.1.1/' + 'cd'.repeat(32)))).toBeNull()
+    expect(audioItemOf(replaced('url', `https://cdn.test/media/${item.hash}.mp3`))?.url).toBe(`https://cdn.test/media/${item.hash}.mp3`)
+    expect(audioItemOf(replaced('url', `https://cdn.test/${item.hash}.toolongextension`))).toBeNull()
     expect(audioItemOf({ ...base, tags: 'nope' as unknown as string[][] })).toBeNull()
   })
 
@@ -108,8 +113,14 @@ describe('the item, read (DECK-0007 §2.2)', () => {
     expect(audioItemOf({ ...base, tags: [...base.tags, ['retrigger', 'auto']] })?.retrigger).toBe('once')
   })
 
-  it('fetches only over https, or http to this machine', () => {
+  it('fetches only over https (http to this machine only while developing, as tests run), and only by the hash', () => {
+    const h = 'ab'.repeat(32)
     expect(fetchableUrl('https://cdn.example/x')).toBe(true)
+    expect(fetchableUrl(`https://cdn.example/${h}`, h)).toBe(true)
+    expect(fetchableUrl(`https://cdn.example/${h.toUpperCase()}.MP3`, h)).toBe(true)
+    expect(fetchableUrl('https://cdn.example/x', h)).toBe(false)
+    expect(fetchableUrl(`https://cdn.example/${h}/x`, h)).toBe(false)
+    expect(import.meta.env.DEV).toBe(true)
     expect(fetchableUrl('http://localhost:3000/x')).toBe(true)
     expect(fetchableUrl('http://127.0.0.1/x')).toBe(true)
     expect(fetchableUrl('http://example.com/x')).toBe(false)
@@ -139,6 +150,8 @@ describe('the file (DECK-0007 §2.1)', () => {
     expect(audioFileName({ title: 'Temple / drone?', mime: 'audio/mpeg' })).toBe('Temple drone.mp3')
     expect(audioFileName({ title: '', mime: 'audio/x-unknown' })).toBe('audio.audio')
     expect(audioFileName({ title: 'water', mime: 'audio/ogg; codecs=opus' })).toBe('water.ogg')
+    // Bidirectional controls cannot dress a file up as another type.
+    expect(audioFileName({ title: 'song‮exe.', mime: 'audio/mpeg' })).toBe('song exe..mp3')
     expect(titleFromFileName('temple_drone  02.mp3')).toBe('temple drone 02')
   })
 })
@@ -153,10 +166,13 @@ describe('how loud it is (DECK-0007 §4)', () => {
     expect(sourceLocal(at, H)).toEqual([Number(at.x - base.x) + 0.5, Number(at.y - base.y) + 0.5, Number(at.z - base.z) + 0.5])
   })
 
-  it('a sphere never reaches past the nearest wall; without a fade it is as large as fits', () => {
+  it('a sphere never reaches past the nearest wall; without a fade it is half the way to it, so it fades every way', () => {
     const src: Local = [10.5, 32, 50]
     expect(inscribedRadius(src, side)).toBe(10.5)
-    expect(fadeRadius(undefined, src, H)).toBe(10.5)
+    expect(fadeRadius(undefined, src, H)).toBe(5.25)
+    // Toward the nearest wall too there is a fade: loud at the sphere, silent at the wall.
+    expect(audioGain(src, [10.5 - 5.25, 32, 50], side, 5.25)).toBe(1)
+    expect(audioGain(src, [10.5 - 7.875, 32, 50], side, 5.25)).toBeCloseTo(0.5, 10)
     expect(fadeRadius(4, src, H)).toBe(4)
     expect(fadeRadius(500, src, H)).toBe(10.5)
     expect(fadeRadius(-3, src, H)).toBe(0)
@@ -184,7 +200,7 @@ describe('how loud it is (DECK-0007 §4)', () => {
   it('ends at the wall the line from the source meets, whichever way that is', () => {
     // Off centre: the east wall is 54 away, the west one 10.
     const src: Local = [10, 32, 32]
-    const r = fadeRadius(undefined, src, H)
+    const r = fadeRadius(10, src, H)
     expect(r).toBe(10)
     expect(audioGain(src, [10 + 32, 32, 32], side, r)).toBeCloseTo(0.5, 10)
     expect(audioGain(src, [63.999, 32, 32], side, r)).toBeLessThan(1e-6)

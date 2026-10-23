@@ -126,7 +126,7 @@ export async function downloadAudio(audio: AudioItem): Promise<string | null> {
   }
 }
 
-/** Stop everything (tests, and an identity switch). */
+/** Stop everything (tests). */
 export function stopAllAudio(): void {
   for (const key of [...elements.keys(), ...Object.keys(useHiddenAudio.getState().entries)]) stopAudio(key)
 }

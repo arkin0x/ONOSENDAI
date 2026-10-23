@@ -8,7 +8,7 @@
 import { beforeEach, describe, expect, it } from 'vitest'
 import { finalizeEvent, generateSecretKey } from 'nostr-tools/pure'
 import { sha256Hex } from '../blossom'
-import { audioFileRefusal, forgetOpenedAudio, openAudio, sealAndUpload, AUDIO_UPLOAD_REASON } from '../audioFile'
+import { audioFileRefusal, audioTypeOf, forgetOpenedAudio, openAudio, sealAndUpload, AUDIO_UPLOAD_REASON, MAX_CIPHER_BYTES } from '../audioFile'
 import { decryptAudioFile, MAX_AUDIO_BYTES } from '../audioItem'
 import type { EventTemplate } from '../events'
 import { toneWav } from './audioFixture'
@@ -101,7 +101,47 @@ describe('opening', () => {
   })
 })
 
+describe('what a server can make a finder do', () => {
+  it('refuses a file larger than any this client hides, by its length or as it arrives, and one larger than its item says', async () => {
+    const server = mockServer()
+    const up = await sealAndUpload(new Blob([toneWav() as BlobPart], { type: 'audio/wav' }), 'https://blossom.test', sign, server.fetch)
+    const huge = async () => new Response(new Uint8Array(8), { status: 200, headers: { 'Content-Length': String(MAX_CIPHER_BYTES + 1) } })
+    await expect(openAudio(up, huge)).rejects.toThrow('larger than any')
+    forgetOpenedAudio()
+    // A body that never says its length, and runs past the cap, is cut off as it arrives.
+    const endless = async () => new Response(new ReadableStream({ pull(c) { c.enqueue(new Uint8Array(1024 * 1024)) } }), { status: 200 })
+    await expect(openAudio({ ...up, size: 0 }, endless)).rejects.toThrow('larger than any')
+    forgetOpenedAudio()
+    await expect(openAudio({ ...up, size: 10 }, server.fetch)).rejects.toThrow('larger than any')
+  })
+
+  it('never serves one item the file another item opened: the cache is by hash, key and nonce', async () => {
+    const server = mockServer()
+    const up = await sealAndUpload(new Blob([toneWav() as BlobPart], { type: 'audio/wav' }), 'https://blossom.test', sign, server.fetch)
+    await openAudio(up, server.fetch)
+    await expect(openAudio({ ...up, keyHex: '00'.repeat(32) }, server.fetch)).rejects.toThrow('does not open')
+  })
+
+  it('names the blob by the server and its hash when the server answers with an address no finder would fetch', async () => {
+    const server = mockServer()
+    const proxied = async (url: string, init?: RequestInit) => {
+      const res = await server.fetch(url, init)
+      if (init?.method !== 'PUT') return res
+      const d = await res.json() as { sha256: string }
+      return new Response(JSON.stringify({ ...d, url: `http://internal:8080/${d.sha256}` }), { status: 200 })
+    }
+    const up = await sealAndUpload(new Blob([toneWav() as BlobPart], { type: 'audio/wav' }), 'https://blossom.test', sign, proxied)
+    expect(up.url).toBe(`https://blossom.test/${up.hash}`)
+  })
+})
+
 describe('what the composer takes', () => {
+  it('types a file the system gave no type by its extension', () => {
+    expect(audioTypeOf('drone.FLAC')).toBe('audio/flac')
+    expect(audioTypeOf('bell.opus')).toBe('audio/ogg')
+    expect(audioTypeOf('notes.txt')).toBeNull()
+  })
+
   it('audio only, not empty, not past the cap', () => {
     expect(audioFileRefusal({ type: 'audio/mpeg', size: 1000 })).toBeNull()
     expect(audioFileRefusal({ type: 'image/png', size: 1000 })).toMatch('Not an audio file')

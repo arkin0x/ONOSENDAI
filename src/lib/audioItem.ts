@@ -68,7 +68,7 @@ export interface AudioItem {
   loop: boolean
   /** A one-shot's trigger: the first time only, or every time the sphere is entered. */
   retrigger: Retrigger
-  /** Radius in gibsons of the full-volume sphere about the source; absent: as large as fits in the region. */
+  /** Radius in gibsons of the full-volume sphere about the source; absent: half the way to the region's nearest wall. */
   fade?: number
   /** Heard only in first person (WALK mode). */
   walkOnly: boolean
@@ -95,12 +95,24 @@ function countOf(v: string | undefined): number | undefined {
   return Number.isSafeInteger(n) ? n : undefined
 }
 
-/** Whether a URL may be fetched for a file: https, or http to this machine (a local server). */
-export function fetchableUrl(url: string): boolean {
+/** Whether http to this machine is allowed: only while developing, never for a finder in use. */
+const LOCAL_HTTP = (() => { try { return import.meta.env?.DEV === true } catch { return false } })()
+
+/**
+ * Whether a URL may be fetched for a file (DECK-0007 §2.3): https (http to
+ * this machine only while developing), and, given the file's hash, a last
+ * path segment that is that hash, optionally with an extension, as a Blossom
+ * URL is (BUD-01). So a found item can only ever make a finder fetch a blob
+ * by its hash, never an arbitrary endpoint.
+ */
+export function fetchableUrl(url: string, hash?: string): boolean {
   try {
     const u = new URL(url)
     const local = u.hostname === 'localhost' || /^127\.\d+\.\d+\.\d+$/.test(u.hostname)
-    return u.protocol === 'https:' || (u.protocol === 'http:' && local)
+    if (!(u.protocol === 'https:' || (LOCAL_HTTP && u.protocol === 'http:' && local))) return false
+    if (hash === undefined) return true
+    const last = u.pathname.split('/').pop() ?? ''
+    return last.toLowerCase() === hash || (last.toLowerCase().startsWith(`${hash}.`) && /^[a-z0-9]{1,8}$/i.test(last.slice(hash.length + 1)))
   } catch {
     return false
   }
@@ -117,7 +129,7 @@ export function audioItemOf(ev: Pick<NostrEvent, 'kind' | 'content' | 'tags'>): 
   const url = tagValue(tags, 'url')?.trim()
   const mime = tagValue(tags, 'm')?.trim().toLowerCase()
   const hash = tagValue(tags, 'x')?.trim().toLowerCase()
-  if (!url || !fetchableUrl(url) || !mime || !mime.startsWith('audio/') || !hash || !HEX_64.test(hash)) return null
+  if (!url || !mime || !mime.startsWith('audio/') || !hash || !HEX_64.test(hash) || !fetchableUrl(url, hash)) return null
   if (tagValue(tags, 'encryption-algorithm') !== AUDIO_CIPHER) return null
   const keyHex = tagValue(tags, 'decryption-key')?.trim().toLowerCase() ?? ''
   const nonceHex = tagValue(tags, 'decryption-nonce')?.trim().toLowerCase() ?? ''
@@ -182,7 +194,7 @@ export function audioExtension(mime: string): string {
 
 /** A safe file name for a download: the title, then the extension its type has. */
 export function audioFileName(a: Pick<AudioItem, 'title' | 'mime'>): string {
-  const base = a.title.replace(/[\\/:*?"<>|\u0000-\u001f]+/g, ' ').trim().replace(/\s+/g, ' ').slice(0, MAX_AUDIO_TITLE) || 'audio'
+  const base = a.title.replace(/[\\/:*?"<>|\u0000-\u001f‎‏‪-‮⁦-⁩]+/g, ' ').trim().replace(/\s+/g, ' ').slice(0, MAX_AUDIO_TITLE) || 'audio'
   return `${base}.${audioExtension(a.mime)}`
 }
 
@@ -258,12 +270,14 @@ export function inscribedRadius(p: Local, side: number): number {
 
 /**
  * The full-volume sphere's radius (DECK-0007 §4.1): the hider's `fade`,
- * never past the region's nearest face from the source; without one, as
- * large as fits. This is also a one-shot's trigger zone (§5.2).
+ * never past the region's nearest wall from the source; without one, half
+ * the way to that wall, so the sound still fades toward it (D4: a smooth
+ * fade to silence, in every direction). This is also a one-shot's trigger
+ * zone (§5.2).
  */
 export function fadeRadius(fade: number | undefined, source: Local, height: number): number {
   const fits = inscribedRadius(source, 2 ** height)
-  return fade === undefined ? fits : Math.min(Math.max(0, fade), fits)
+  return fade === undefined ? fits / 2 : Math.min(Math.max(0, fade), fits)
 }
 
 /** How far from `from` along `dir` (not zero) to the region's walls: the ray's exit from the cube [0, side]^3. */

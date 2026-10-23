@@ -16,7 +16,7 @@
 
 import { useEffect, useRef, useState } from 'react'
 import { explainUpload } from '../lib/blossom'
-import { audioFileRefusal, sealAndUpload, type UploadedAudio } from '../lib/audioFile'
+import { audioFileRefusal, audioTypeOf, sealAndUpload, type UploadedAudio } from '../lib/audioFile'
 import { MAX_AUDIO_TITLE, titleFromFileName, type AudioItem } from '../lib/audioItem'
 import { useBuilder } from '../store/useBuilder'
 import { useCyberspace } from '../store/useCyberspace'
@@ -28,6 +28,12 @@ import { Field, Switch } from './ui/Switch'
 const UPLOAD_SIGN_PATIENCE_MS = 60_000
 
 type Status = { tone: 'ok' | 'warn' | 'note'; text: string }
+
+/** The file again, typed by its extension when the system gave it no type, or as it was. */
+function withType(f: File): File {
+  const type = audioTypeOf(f.name)
+  return type ? new File([f], f.name, { type, lastModified: f.lastModified }) : f
+}
 
 function sizeLabel(bytes: number): string {
   return bytes >= 1024 * 1024 ? `${(bytes / 1024 / 1024).toFixed(1)} MB` : `${Math.max(1, Math.round(bytes / 1024))} KB`
@@ -42,7 +48,8 @@ export function AudioUpload({ idPrefix, initial, submitLabel, onReady, onCancel 
   /** An item already uploaded (a kept draft): its choices can change, its file cannot. */
   initial?: AudioItem
   submitLabel: string
-  onReady: (audio: AudioItem) => void
+  /** The item, and the server it was uploaded to (absent for a kept draft that never said). */
+  onReady: (audio: AudioItem, server?: string) => void
   onCancel: () => void
 }): JSX.Element {
   const me = useCyberspace((s) => s.identity.pubkey)
@@ -57,12 +64,19 @@ export function AudioUpload({ idPrefix, initial, submitLabel, onReady, onCancel 
   const [walkOnly, setWalkOnly] = useState(initial?.walkOnly ?? DEFAULTS.walkOnly)
   const [busy, setBusy] = useState(false)
   const [status, setStatus] = useState<Status | null>(null)
+  // The form closed (Escape, a tap outside, the X) while an upload was going:
+  // what it uploaded is not lined up, since nobody is there to aim it.
+  const gone = useRef(false)
+  // Set on every mount, not only at creation: StrictMode mounts twice in development.
+  useEffect(() => { gone.current = false; return () => { gone.current = true } }, [])
 
   const choose = (f: File | undefined): void => {
     if (!f) return
-    const refusal = audioFileRefusal(f)
+    // A file the system gave no type (often .flac or .opus) is typed by its extension.
+    const typed = f.type ? f : withType(f)
+    const refusal = audioFileRefusal(typed)
     if (refusal) { setStatus({ tone: 'warn', text: refusal }); return }
-    setFile(f)
+    setFile(typed)
     setUploaded(null)
     setStatus(null)
     if (!title.trim()) setTitle(titleFromFileName(f.name))
@@ -90,14 +104,15 @@ export function AudioUpload({ idPrefix, initial, submitLabel, onReady, onCancel 
     setStatus({ tone: 'note', text: `Encrypting and uploading to ${host}. Your signer may ask.` })
     try {
       const u = await sealAndUpload(file, target, (t) => useCyberspace.getState().signEvent(t, UPLOAD_SIGN_PATIENCE_MS))
+      if (gone.current) return
       blossom.remember(target)
       setUploaded(u)
       setStatus({ tone: 'ok', text: `Uploaded, encrypted, to ${host}.` })
-      onReady(item(u))
+      onReady(item(u), target)
     } catch (e) {
-      setStatus({ tone: 'warn', text: explainUpload(e) })
+      if (!gone.current) setStatus({ tone: 'warn', text: explainUpload(e) })
     } finally {
-      setBusy(false)
+      if (!gone.current) setBusy(false)
     }
   }
 
@@ -116,7 +131,7 @@ export function AudioUpload({ idPrefix, initial, submitLabel, onReady, onCancel 
       <Field id={`${idPrefix}-autoplay`} label="Autoplay" hint="Plays by itself where it is heard">
         <Switch id={`${idPrefix}-autoplay`} checked={autoplay} onCheckedChange={setAutoplay} disabled={busy} />
       </Field>
-      <Field id={`${idPrefix}-loop`} label="Loop" hint="Off: plays once, on entering its sphere">
+      <Field id={`${idPrefix}-loop`} label="Loop" hint={autoplay ? 'Off: plays once, on entering its sphere' : 'Off: plays once through'}>
         <Switch id={`${idPrefix}-loop`} checked={loop} onCheckedChange={setLoop} disabled={busy} />
       </Field>
       {autoplay && !loop && (
@@ -139,21 +154,36 @@ export function AudioUpload({ idPrefix, initial, submitLabel, onReady, onCancel 
   )
 }
 
+/**
+ * How PLACE AUDIO lines the item up: a new file is a first copy, on the
+ * server it was just uploaded to; a kept draft stays what it was, a PLACE
+ * AGAIN copy still sealed afresh when placed, on the server its first copy
+ * went to, so it never goes out under the first placement's key.
+ */
+export function placeAudioOpts(audio: Pick<AudioItem, 'hash'>, server: string | undefined, kept: { audio: Pick<AudioItem, 'hash'>; reseal?: true; server?: string } | undefined): { server?: string; reseal: boolean } {
+  const same = !!kept && audio.hash === kept.audio.hash
+  const where = server ?? (same ? kept?.server : undefined)
+  return { ...(where ? { server: where } : {}), reseal: same && !!kept?.reseal }
+}
+
 /** PLACE AUDIO: the form, then the deploy at the build cursor. `onDone` runs on CANCEL and once it is handed over. */
 export function AudioCompose({ onDone }: { onDone: () => void }): JSX.Element {
   // A kept draft, read in the initializer and taken in an effect, as the
   // other composers do (React may run an initializer twice).
-  const [initial] = useState<AudioItem | undefined>(() => {
+  // A kept PLACE AGAIN copy stays one: it is sealed afresh when placed, so it
+  // never goes out under the first placement's key (review of #463).
+  const [kept] = useState(() => {
     const draft = useBuilder.getState().itemDraft
-    return draft?.type === 'audio' ? draft.audio : undefined
+    return draft?.type === 'audio' ? draft : undefined
   })
+  const initial = kept?.audio
   useEffect(() => { useBuilder.getState().takeItemDraft('audio') }, [])
   return (
     <AudioUpload
       idPrefix="audio"
       initial={initial}
       submitLabel="PLACE AUDIO ▸"
-      onReady={(audio) => { useShards.getState().startDeployAudio(audio); onDone() }}
+      onReady={(audio, server) => { useShards.getState().startDeployAudio(audio, placeAudioOpts(audio, server, kept)); onDone() }}
       onCancel={onDone}
     />
   )

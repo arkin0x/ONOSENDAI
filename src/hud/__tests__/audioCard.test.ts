@@ -19,6 +19,8 @@ if (typeof localStorage === 'undefined') {
 import { createElement } from 'react'
 import { renderToString } from 'react-dom/server'
 import { AudioCard, audioMarks } from '../AudioCard'
+import { eventJson, HIDDEN_SECRET, shownEvent } from '../EventData'
+import { audioInnerTemplate } from '../../lib/audioItem'
 import type { AudioItem } from '../../lib/audioItem'
 
 const audio: AudioItem = {
@@ -48,6 +50,18 @@ describe('the audio card', () => {
     expect(audioMarks({ ...audio, loop: false, walkOnly: true, size: 2048 })).toEqual(['ONE-SHOT', 'FIRST ENTRY', 'WALK ONLY', 'MP3', '2 KB'])
     expect(audioMarks({ ...audio, loop: false, retrigger: 'auto', size: 0 })).toEqual(['ONE-SHOT', 'EVERY ENTRY', 'MP3'])
     expect(audioMarks({ ...audio, autoplay: false, size: 0 })).toEqual(['LOOP', 'ON TAP', 'MP3'])
+  })
+
+  it('the event data never shows the file key or nonce: the key is the file', () => {
+    const t = audioInnerTemplate(audio, { x: 1n, y: 2n, z: 3n }, 0, 1)
+    const ev = { ...t, id: '00'.repeat(32), pubkey: '11'.repeat(32), sig: '' }
+    const shown = shownEvent(ev)
+    expect(shown.which).toBe('audio')
+    const json = eventJson(shown.event)
+    expect(json).not.toContain(audio.keyHex)
+    expect(json).not.toContain(audio.nonceHex)
+    expect(shown.event.tags.find((x) => x[0] === 'decryption-key')?.[1]).toBe(HIDDEN_SECRET)
+    expect(json).toContain(audio.url)
   })
 
   it('draws the moderation row only when given one: MUTE AUDIO and BLOCK AUTHOR go there', () => {

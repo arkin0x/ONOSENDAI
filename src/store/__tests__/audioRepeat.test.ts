@@ -32,6 +32,7 @@ import { sha256Hex } from '../../lib/blossom'
 import { moveDirection } from '../../lib/moves'
 import { toneWav } from '../../lib/__tests__/audioFixture'
 import { useBuilder } from '../useBuilder'
+import { placeAudioOpts } from '../../hud/AudioCompose'
 import { useCyberspace } from '../useCyberspace'
 import { useInventory } from '../useInventory'
 import { repeatable, useShards } from '../useShards'
@@ -91,11 +92,11 @@ describe('PLACE AGAIN for audio', () => {
       const first = await sealAndUpload(new Blob([tone as BlobPart], { type: 'audio/wav' }), 'https://blossom.test', async (t) => finalizeEvent(t, sk), server.fetch)
       const audio: AudioItem = { ...first, title: 'Drip', about: '', autoplay: true, loop: false, retrigger: 'once', walkOnly: false }
       expect(repeatable({ type: 'audio', audio })).toBe(true)
-      S().startDeployAudio(audio)
+      S().startDeployAudio(audio, { server: 'https://blossom.test' })
       await S().deploy()
       expect(S().deployError).toBeNull()
-      // Lined up again at once, marked to be sealed afresh when it is placed.
-      expect(S().pending).toMatchObject({ type: 'audio', reseal: true })
+      // Lined up again at once, marked to be sealed afresh when it is placed, on the server picked.
+      expect(S().pending).toMatchObject({ type: 'audio', reseal: true, server: 'https://blossom.test' })
       up(1)
       await S().deploy()
       expect(S().deployError).toBeNull()
@@ -114,6 +115,51 @@ describe('PLACE AGAIN for audio', () => {
       globalThis.fetch = realFetch
       S().cancelDeploy()
     }
+  })
+
+  it('a copy goes to the server the hider picked, even when the first copy is served from another host', async () => {
+    const server = mockBlossom()
+    const realFetch = globalThis.fetch
+    const seen: string[] = []
+    globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+      seen.push(`${init?.method ?? 'GET'} ${String(input)}`)
+      // The CDN serves what the API host stored.
+      return server.fetch(String(input).replace('https://cdn.test/', 'https://blossom.test/'), init)
+    }) as typeof fetch
+    try {
+      const sk = generateSecretKey()
+      const first = await sealAndUpload(new Blob([toneWav() as BlobPart], { type: 'audio/wav' }), 'https://blossom.test', async (t) => finalizeEvent(t, sk), server.fetch)
+      const onCdn: AudioItem = { ...first, url: `https://cdn.test/${first.hash}`, title: 'Bell', about: '', autoplay: true, loop: true, retrigger: 'once', walkOnly: false }
+      useShards.setState({ pending: { type: 'audio', audio: onCdn, reseal: true, server: 'https://blossom.test' } })
+      await S().deploy()
+      expect(S().deployError).toBeNull()
+      expect(seen).toContain('PUT https://blossom.test/upload')
+      expect(seen.some((s) => s.startsWith('PUT https://cdn.test'))).toBe(false)
+    } finally {
+      globalThis.fetch = realFetch
+      S().cancelDeploy()
+    }
+  })
+
+  it('a copy BUILD mode ends under is kept as a copy: PLACE AUDIO then seals it afresh, never under the first key', () => {
+    const a = { hash: 'aa'.repeat(32) }
+    const kept = { audio: a, reseal: true as const, server: 'https://blossom.test' }
+    expect(placeAudioOpts(a, undefined, kept)).toEqual({ server: 'https://blossom.test', reseal: true })
+    // A new file picked instead is a first copy, on the server it went to.
+    expect(placeAudioOpts({ hash: 'bb'.repeat(32) }, 'https://other.test', kept)).toEqual({ server: 'https://other.test', reseal: false })
+    // A kept first copy (never placed) is placed as it is.
+    expect(placeAudioOpts(a, undefined, { audio: a, server: 'https://blossom.test' })).toEqual({ server: 'https://blossom.test', reseal: false })
+    expect(placeAudioOpts(a, 'https://blossom.test', undefined)).toEqual({ server: 'https://blossom.test', reseal: false })
+  })
+
+  it('BUILD mode ending under a copy keeps it whole, reseal and server with it', () => {
+    const audio: AudioItem = { title: 'Bell', about: '', url: 'https://blossom.test/' + 'aa'.repeat(32), mime: 'audio/wav', hash: 'aa'.repeat(32), originalHash: '', size: 10, keyHex: '11'.repeat(32), nonceHex: '22'.repeat(12), autoplay: true, loop: true, retrigger: 'once', walkOnly: false }
+    useBuilder.setState({ itemDraft: null })
+    useShards.setState({ pending: { type: 'audio', audio, reseal: true, server: 'https://blossom.test' } })
+    C().focusOn(C().position, 0, 'EARTH · tap')
+    expect(useBuilder.getState().active).toBe(false)
+    expect(useBuilder.getState().itemDraft).toEqual({ type: 'audio', audio, reseal: true, server: 'https://blossom.test' })
+    C().clearFocus()
   })
 
   it('a copy whose file cannot be reached is refused in words, and nothing is hidden', async () => {

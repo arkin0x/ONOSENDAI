@@ -342,8 +342,10 @@ export type DeployPending =
    * (AudioCompose); the item is sealed as a rumor. With `reseal` it is PLACE
    * AGAIN's copy: the deploy seals the file again under a fresh key and
    * uploads it before it hides the item, so no two placements share a key.
+   * `server` is the Blossom server the hider picked for the first upload,
+   * where a copy goes too: a server may answer with a URL on another host.
    */
-  | { type: 'audio'; audio: AudioItem; reseal?: true }
+  | { type: 'audio'; audio: AudioItem; reseal?: true; server?: string }
 
 /**
  * Whether a deployment can be moved with EDIT: a shard of yours, inline or
@@ -424,7 +426,7 @@ export function repeatable(pending: DeployPending): boolean {
  */
 function againOf(pending: DeployPending): DeployPending {
   // Its file is sealed again under a fresh key when the copy is placed (repeatable).
-  if (pending.type === 'audio') return { type: 'audio', audio: pending.audio, reseal: true }
+  if (pending.type === 'audio') return { type: 'audio', audio: pending.audio, reseal: true, ...(pending.server ? { server: pending.server } : {}) }
   if (pending.type !== 'shard') return { ...pending }
   return { type: 'shard', shardId: pending.shardId, ...(pending.object ? { object: pending.object } : {}) }
 }
@@ -728,7 +730,7 @@ interface ShardsState {
   /** Hide a key the composer forged (B1 §3.1). */
   startDeployKey: (key: KeyItem) => void
   /** Hide audio the composer encrypted and uploaded (DECK-0007). */
-  startDeployAudio: (audio: AudioItem) => void
+  startDeployAudio: (audio: AudioItem, opts?: { server?: string; reseal?: boolean }) => void
   /** Hide a chest as the composer drafted it; its contents are signed (the aimed ones already are) and sealed when it is hidden. */
   startDeployChest: (draft: ChestDraft & { lock: ChestLock }) => void
   /**
@@ -1305,7 +1307,7 @@ export const useShards = create<ShardsState>((set, get) => {
     }),
     startDeployMessage: (text) => set({ pending: { type: 'message', text }, ...freshDeploy }),
     startDeployKey: (key) => set({ pending: { type: 'key', key }, ...freshDeploy }),
-    startDeployAudio: (audio) => set({ pending: { type: 'audio', audio }, ...freshDeploy }),
+    startDeployAudio: (audio, opts) => set({ pending: { type: 'audio', audio, ...(opts?.reseal ? { reseal: true as const } : {}), ...(opts?.server ? { server: opts.server } : {}) }, ...freshDeploy }),
     // With shards aimed inside, the height starts at the fit that holds them
     // all (DeployBar, lib/deployFit.ts fitHeightAll) and follows the cursor
     // until + or - is pressed, as a shard's own height does.
@@ -1560,7 +1562,7 @@ export const useShards = create<ShardsState>((set, get) => {
         if (pending.type === 'audio' && pending.reseal && audio) {
           // PLACE AGAIN's copy: its own key, its own ciphertext (repeatable).
           set({ deployNote: 'Encrypting a fresh copy of the file' })
-          audio = { ...audio, ...(await resealCopy(audio, (t) => cs.signEvent(t, AUDIO_SIGN_PATIENCE_MS))) }
+          audio = { ...audio, ...(await resealCopy(audio, (t) => cs.signEvent(t, AUDIO_SIGN_PATIENCE_MS), pending.server)) }
           innerTemplate = audioInnerTemplate(audio, at, plane, createdAt)
         }
         let rk: { key: Uint8Array; lookupId: string }

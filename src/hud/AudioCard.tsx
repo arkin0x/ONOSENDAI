@@ -39,8 +39,8 @@ export function audioMarks(a: Pick<AudioItem, 'autoplay' | 'loop' | 'retrigger' 
 
 /** What a mark says, for its tooltip. */
 const MARK_TIPS: Record<string, string> = {
-  LOOP: 'Plays over and over where it is hidden',
-  'ONE-SHOT': 'Plays once through, started by walking into its sphere',
+  LOOP: 'Plays over and over',
+  'ONE-SHOT': 'Plays once through each time it starts',
   AUTOPLAY: 'Plays by itself where it is heard',
   'EVERY ENTRY': 'Plays each time you enter its sphere',
   'FIRST ENTRY': 'Plays the first time you enter its sphere',

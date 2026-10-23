@@ -77,7 +77,7 @@ export interface HeldItem {
   chest?: ChestItem
   text?: string
   shard?: ShardModel
-  /** Hidden audio taken from a chest (DECK-0007): its file and key, so it can be played from here. */
+  /** Hidden audio taken from a chest (DECK-0007): its file and key, so ITEMS can play it and save it (LISTEN). */
   audio?: AudioItem
   /**
    * Unix seconds when it left the TAKEN list: moved into the workshop, or

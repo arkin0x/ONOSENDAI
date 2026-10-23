@@ -15,7 +15,7 @@
  */
 
 import { normalizeServer, sha256Hex, uploadBlob, type Sign } from './blossom'
-import { decryptAudioFile, encryptAudioFile, MAX_AUDIO_BYTES, type AudioItem } from './audioItem'
+import { decryptAudioFile, encryptAudioFile, fetchableUrl, MAX_AUDIO_BYTES, type AudioItem } from './audioItem'
 
 type FetchLike = (url: string, init?: RequestInit) => Promise<Response>
 
@@ -24,6 +24,16 @@ export type UploadedAudio = Pick<AudioItem, 'url' | 'mime' | 'hash' | 'originalH
 
 /** What the signer shows for the upload token. */
 export const AUDIO_UPLOAD_REASON = 'Upload an encrypted file from ONOSENDAI'
+
+/** The most bytes a reader takes from a file's server: the largest file this client hides, sealed (its 16-byte tag). */
+export const MAX_CIPHER_BYTES = MAX_AUDIO_BYTES + 16
+
+/** An audio type by a file's extension, for a file the system gave no type (often .flac, .opus), or null. */
+export function audioTypeOf(name: string): string | null {
+  const ext = name.toLowerCase().match(/\.([a-z0-9]+)$/)?.[1] ?? ''
+  const known: Record<string, string> = { mp3: 'audio/mpeg', m4a: 'audio/mp4', aac: 'audio/aac', ogg: 'audio/ogg', oga: 'audio/ogg', opus: 'audio/ogg', wav: 'audio/wav', flac: 'audio/flac', webm: 'audio/webm' }
+  return known[ext] ?? null
+}
 
 /** Why a file cannot be hidden as audio, or null when it can. */
 export function audioFileRefusal(file: Pick<File, 'type' | 'size'>): string | null {
@@ -40,7 +50,11 @@ export async function sealAndUpload(file: Blob, server: string, sign: Sign, fetc
   const blob = new Blob([sealed.cipher as BlobPart], { type: 'application/octet-stream' })
   const desc = await uploadBlob(server, blob, sign, fetchImpl as (url: string, init: RequestInit) => Promise<Response>, AUDIO_UPLOAD_REASON)
   return {
-    url: desc.url,
+    // The item must name a URL every finder will fetch (https, ending in the
+    // hash: lib/audioItem fetchableUrl). A server that answers with another
+    // (http behind a proxy, a path of its own) is named by its own address
+    // and the hash instead, which BUD-01 serves the blob at.
+    url: fetchableUrl(desc.url, desc.sha256) ? desc.url : `${server}/${desc.sha256}`,
     mime: (file.type || 'audio/mpeg').toLowerCase(),
     hash: desc.sha256,
     originalHash: sha256Hex(plain),
@@ -63,12 +77,16 @@ export function serverOf(url: string): string | null {
  * A fresh copy of an item's file for another placement (PLACE AGAIN): the
  * file opened with the old key (from memory when it was heard or placed
  * here), sealed again under a new key and nonce, and uploaded to the server
- * the first copy is on. Two placements never share a key, or even a
+ * the hider picked for the first copy (`chosen`), else the one its address
+ * names. Two placements never share a key, or even a
  * ciphertext, so a finder of one learns nothing about where the other is.
  */
-export async function resealCopy(a: Pick<AudioItem, 'url' | 'hash' | 'originalHash' | 'keyHex' | 'nonceHex' | 'mime'>, sign: Sign, fetchImpl: FetchLike = fetch): Promise<UploadedAudio> {
-  const server = serverOf(a.url)
-  if (!server) throw new AudioFetchError('The first copy’s server could not be read from its address.')
+export async function resealCopy(a: Pick<AudioItem, 'url' | 'hash' | 'originalHash' | 'keyHex' | 'nonceHex' | 'mime'>, sign: Sign, chosen?: string, fetchImpl: FetchLike = fetch): Promise<UploadedAudio> {
+  // The server the hider picked for the first copy; read from its address
+  // only for an item that came without one (a server may answer an upload
+  // with a URL on another host, a CDN beside its API).
+  const server = (chosen ? normalizeServer(chosen) : null) ?? serverOf(a.url)
+  if (!server) throw new AudioFetchError('There is no server to put the copy on.')
   const file = await openAudio(a, fetchImpl)
   return sealAndUpload(new Blob([await file.arrayBuffer()], { type: a.mime }), server, sign, fetchImpl)
 }
@@ -81,22 +99,63 @@ export class AudioFetchError extends Error {
   }
 }
 
-/** The few files heard last, decrypted, by their ciphertext's hash. */
-const opened = new Map<string, Promise<Blob>>()
-const KEEP = 6
+/**
+ * The few files heard last, decrypted: by the ciphertext's hash with the key
+ * and nonce, so an item that names a known hash with another key opens
+ * nothing it should not. Bounded by bytes, the oldest heard going first.
+ */
+const opened = new Map<string, { file: Promise<Blob>; bytes: number }>()
+const KEEP_BYTES = 64 * 1024 * 1024
+const cacheKey = (a: Pick<AudioItem, 'hash' | 'keyHex' | 'nonceHex' | 'originalHash' | 'mime'>): string => `${a.hash}:${a.keyHex}:${a.nonceHex}:${a.originalHash}:${a.mime}`
+
+function trim(): void {
+  let total = 0
+  for (const v of opened.values()) total += v.bytes
+  for (const [k, v] of opened) {
+    if (total <= KEEP_BYTES || opened.size <= 1) break
+    opened.delete(k)
+    total -= v.bytes
+  }
+}
+
+/** The body of a response, refused past `max` bytes (by its length when it says, else as it arrives). */
+async function readCapped(res: Response, max: number): Promise<Uint8Array> {
+  const said = Number(res.headers.get('Content-Length'))
+  if (Number.isFinite(said) && said > max) throw new AudioFetchError('The file is larger than any this client hides.')
+  if (!res.body) {
+    const all = new Uint8Array(await res.arrayBuffer())
+    if (all.byteLength > max) throw new AudioFetchError('The file is larger than any this client hides.')
+    return all
+  }
+  const reader = res.body.getReader()
+  const parts: Uint8Array[] = []
+  let got = 0
+  for (;;) {
+    const { done, value } = await reader.read()
+    if (done) break
+    got += value.byteLength
+    if (got > max) { void reader.cancel(); throw new AudioFetchError('The file is larger than any this client hides.') }
+    parts.push(value)
+  }
+  const out = new Uint8Array(got)
+  let at = 0
+  for (const p of parts) { out.set(p, at); at += p.byteLength }
+  return out
+}
 
 /**
  * The decrypted file of an item, as a Blob of its type. Fetched once and
  * kept for the few heard last; a failure is not kept, so a second tap tries
  * again.
  */
-export function openAudio(a: Pick<AudioItem, 'url' | 'hash' | 'originalHash' | 'keyHex' | 'nonceHex' | 'mime'>, fetchImpl: FetchLike = fetch): Promise<Blob> {
-  const held = opened.get(a.hash)
+export function openAudio(a: Pick<AudioItem, 'url' | 'hash' | 'originalHash' | 'keyHex' | 'nonceHex' | 'mime'> & { size?: number }, fetchImpl: FetchLike = fetch): Promise<Blob> {
+  const key = cacheKey(a)
+  const held = opened.get(key)
   if (held) {
     // Most recently heard last, so the oldest is the one dropped.
-    opened.delete(a.hash)
-    opened.set(a.hash, held)
-    return held
+    opened.delete(key)
+    opened.set(key, held)
+    return held.file
   }
   const p = (async (): Promise<Blob> => {
     let res: Response
@@ -106,16 +165,18 @@ export function openAudio(a: Pick<AudioItem, 'url' | 'hash' | 'originalHash' | '
       throw new AudioFetchError('The file’s server could not be reached.')
     }
     if (!res.ok) throw new AudioFetchError(`The file’s server answered HTTP ${res.status}.`)
-    const cipher = new Uint8Array(await res.arrayBuffer())
+    // Never more than the largest file this client hides, or the size the item says when it says one.
+    const cipher = await readCapped(res, a.size ? Math.min(a.size, MAX_CIPHER_BYTES) : MAX_CIPHER_BYTES)
     if (sha256Hex(cipher) !== a.hash) throw new AudioFetchError('The server sent other bytes than the ones hidden here.')
     const plain = await decryptAudioFile(cipher, a.keyHex, a.nonceHex)
     if (!plain) throw new AudioFetchError('The file does not open with the key hidden here.')
     if (a.originalHash && sha256Hex(plain) !== a.originalHash) throw new AudioFetchError('The file opened, but it is not the one hidden here.')
     return new Blob([plain as BlobPart], { type: a.mime })
   })()
-  opened.set(a.hash, p)
-  while (opened.size > KEEP) opened.delete(opened.keys().next().value as string)
-  p.catch(() => { if (opened.get(a.hash) === p) opened.delete(a.hash) })
+  const entry = { file: p, bytes: a.size || 0 }
+  opened.set(key, entry)
+  trim()
+  p.then((b) => { entry.bytes = b.size; trim() }, () => { if (opened.get(key) === entry) opened.delete(key) })
   return p
 }
 

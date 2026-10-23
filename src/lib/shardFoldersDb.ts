@@ -21,6 +21,11 @@ import { applyOps, normalizeTree, type FolderOp, type FolderTree } from './shard
  * same so a later sync, or a module both import, moves a tree between them
  * with nothing to translate. Settle the name before folders ship: renaming it
  * after would leave every tree behind.
+ *
+ * One difference: here the tree also carries `used` (when each shard was last
+ * deployed, lib/shardFolders.ts), which snocrash does not have, since it never
+ * places a shard in cyberspace. Its reader drops the field and its IndexedDB
+ * writer keeps what it does not read, so a stored tree it writes keeps it.
  */
 export const SHARD_FOLDERS_DB = 'sno:shard-folders'
 export const DB_VERSION = 1

@@ -14,7 +14,7 @@
  * after DOWNLOAD (or the other way round) fetches nothing twice.
  */
 
-import { sha256Hex, uploadBlob, type Sign } from './blossom'
+import { normalizeServer, sha256Hex, uploadBlob, type Sign } from './blossom'
 import { decryptAudioFile, encryptAudioFile, MAX_AUDIO_BYTES, type AudioItem } from './audioItem'
 
 type FetchLike = (url: string, init?: RequestInit) => Promise<Response>
@@ -48,6 +48,29 @@ export async function sealAndUpload(file: Blob, server: string, sign: Sign, fetc
     keyHex: sealed.keyHex,
     nonceHex: sealed.nonceHex,
   }
+}
+
+/**
+ * The server a Blossom URL is on: the URL without its last path segment
+ * (`https://host[/path]/<sha256>[.ext]`, BUD-01), or null.
+ */
+export function serverOf(url: string): string | null {
+  const cut = url.lastIndexOf('/')
+  return cut > 'https://'.length ? normalizeServer(url.slice(0, cut)) : null
+}
+
+/**
+ * A fresh copy of an item's file for another placement (PLACE AGAIN): the
+ * file opened with the old key (from memory when it was heard or placed
+ * here), sealed again under a new key and nonce, and uploaded to the server
+ * the first copy is on. Two placements never share a key, or even a
+ * ciphertext, so a finder of one learns nothing about where the other is.
+ */
+export async function resealCopy(a: Pick<AudioItem, 'url' | 'hash' | 'originalHash' | 'keyHex' | 'nonceHex' | 'mime'>, sign: Sign, fetchImpl: FetchLike = fetch): Promise<UploadedAudio> {
+  const server = serverOf(a.url)
+  if (!server) throw new AudioFetchError('The first copy’s server could not be read from its address.')
+  const file = await openAudio(a, fetchImpl)
+  return sealAndUpload(new Blob([await file.arrayBuffer()], { type: a.mime }), server, sign, fetchImpl)
 }
 
 /** Why a file could not be opened, for a person to read. */

@@ -123,3 +123,4 @@ describe('audio in a chest (a room behind a door)', () => {
     expect(revealed[0].claim).toBeUndefined()
   })
 })
+

@@ -2646,6 +2646,11 @@ kbd {
   letter-spacing: 0.08em;
   color: var(--ok);
 }
+/* The count of copies placed in a row, in the title row (useShards placedLast). */
+.deploybar__again {
+  align-self: center;
+  white-space: nowrap;
+}
 .deploybar__bag .ui-field {
   margin: 8px 0 0;
 }

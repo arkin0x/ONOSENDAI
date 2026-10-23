@@ -12,9 +12,14 @@
  * region's fade (lib/audioWorld), set on its gain. The listener is three's
  * AudioListener, moved to the camera every frame (scene/HiddenAudio).
  *
- * A world voice that would start while the browser still holds sound back
- * waits (phase `waiting`), and the TAP FOR SOUND chip says so; the first tap
- * or key anywhere lets them all out. A card's PLAY is itself a tap.
+ * A voice the browser will not let play waits (phase `waiting`): the
+ * context is still held back, or (Safari, iOS above all) the element may
+ * only start inside a tap. TAP FOR SOUND says so, and the next tap or key
+ * anywhere calls every waiting voice's play inside that gesture
+ * (letSoundOut). A voice a call or the lock screen paused waits the same
+ * way. A world voice that fails is not tried again at once: it waits out a
+ * growing pause (worldFailed), so a dead or hostile URL is not fetched over
+ * and over by everyone standing there.
  *
  * Where there is no Web Audio at all, a card still plays its file through
  * the element alone, and nothing sounds in the world.
@@ -28,6 +33,8 @@ import { audioContext, audioRunning, onAudioContext, resumeAudio, wantSound } fr
 import { hidesThing } from '../lib/muteList'
 import { useMutes } from './useMutes'
 import { useCyberspace } from './useCyberspace'
+import { duckMusic } from './useTvMusic'
+import { DUCKED } from '../lib/audioWorld'
 
 export type AudioPhase = 'loading' | 'waiting' | 'playing' | 'error'
 export type VoiceMode = 'card' | 'world'
@@ -58,7 +65,8 @@ interface Voice {
   el: HTMLAudioElement
   url: string
   node: ThreeAudio<GainNode | PannerNode> | null
-  offContext?: () => void
+  /** Try to play the element now; inside a gesture where a browser asks for one. */
+  play: () => void
 }
 
 const voices = new Map<string, Voice>()
@@ -88,25 +96,70 @@ export function stopMutedVoices(): string[] {
   return stopped
 }
 
-useMutes.subscribe((s, prev) => { if (s.muted !== prev.muted) stopMutedVoices() })
+const offMutes = useMutes.subscribe((s, prev) => { if (s.muted !== prev.muted) stopMutedVoices() })
 
-/**
- * World voices follow the context: one that sounded when the browser (or
- * the phone, for a call or the lock screen) suspended sound is waiting
- * again, so TAP FOR SOUND and NOW PLAYING say so, and the next tap lets it
- * out; resumed, what was still going reads as playing again.
- */
-export function syncVoicePhases(): void {
-  const running = audioRunning()
-  for (const [key, v] of voices) {
-    const e = useHiddenAudio.getState().entries[key]
-    if (!e || e.mode !== 'world') continue
-    if (!running && e.phase === 'playing') { setEntry(key, { ...e, phase: 'waiting' }); wantSound() }
-    else if (running && e.phase === 'waiting' && !v.el.paused) setEntry(key, { ...e, phase: 'playing' })
+/** Voices waiting to be let out: their play, to be called inside a tap. */
+const waitingPlays = new Set<string>()
+let gestureOff: (() => void) | null = null
+
+/** What a tap on a field is for: typing, not sound. */
+function onField(e: Event): boolean {
+  const t = e.target as { closest?: (s: string) => unknown } | null
+  return typeof t?.closest === 'function' && t.closest('input, select, textarea') !== null
+}
+
+/** Listen for the next tap or key while anything waits; stop once nothing does. */
+function armGesture(): void {
+  if (waitingPlays.size === 0) { gestureOff?.(); return }
+  if (gestureOff || typeof window === 'undefined') return
+  const go = (e: Event): void => { if (!onField(e)) letSoundOut() }
+  const kinds = ['pointerup', 'touchend', 'click', 'keydown'] as const
+  for (const k of kinds) window.addEventListener(k, go, { capture: true })
+  gestureOff = () => {
+    for (const k of kinds) window.removeEventListener(k, go, { capture: true })
+    gestureOff = null
   }
 }
 
-onAudioContext(syncVoicePhases)
+/** A voice waits for a tap: TAP FOR SOUND counts it, and the next tap plays it. */
+function waitForTap(key: string): void {
+  const e = useHiddenAudio.getState().entries[key]
+  if (e && e.phase !== 'waiting') setEntry(key, { ...e, phase: 'waiting' })
+  waitingPlays.add(key)
+  wantSound()
+  armGesture()
+}
+
+/**
+ * Let sound out, from inside a tap (TAP FOR SOUND, or any tap while
+ * something waits): resume the context, and call every waiting voice's play
+ * in the same gesture, as Safari asks.
+ */
+export function letSoundOut(): void {
+  resumeAudio()
+  for (const key of [...waitingPlays]) voices.get(key)?.play()
+}
+
+/**
+ * Voices follow the context: one that sounded when the browser (or the
+ * phone, for a call or the lock screen) suspended sound waits again; when
+ * sound is back, every waiting voice is tried, and one still refused waits
+ * on for a tap.
+ */
+export function syncVoicePhases(): void {
+  if (!audioRunning()) {
+    for (const key of voices.keys()) {
+      const e = useHiddenAudio.getState().entries[key]
+      if (e?.phase === 'playing') waitForTap(key)
+    }
+    return
+  }
+  for (const key of [...waitingPlays]) voices.get(key)?.play()
+}
+
+const offContext = onAudioContext(syncVoicePhases)
+// A reload in development leaves no second subscription behind.
+if (import.meta.hot) import.meta.hot.dispose(() => { offMutes(); offContext(); gestureOff?.() })
 /** Changes on every start and stop of a key: what an answer for an older one is ignored by. */
 const sessions = new Map<string, number>()
 
@@ -143,12 +196,18 @@ export function moveListener(camera: Camera): void {
 }
 
 function release(key: string): void {
+  waitingPlays.delete(key)
+  armGesture()
   const v = voices.get(key)
   if (!v) return
   voices.delete(key)
-  v.offContext?.()
   v.el.pause()
+  // three's disconnect parts the source only; its gain (and a panner) stay
+  // wired to the listener, so they are parted too, or every voice leaves
+  // live nodes in the graph.
   try { v.node?.disconnect() } catch { /* already apart */ }
+  try { (v.node?.getOutput() as AudioNode | undefined)?.disconnect() } catch { /* already apart */ }
+  try { v.node?.gain.disconnect() } catch { /* already apart */ }
   v.el.removeAttribute('src')
   v.el.load()
   URL.revokeObjectURL(v.url)
@@ -197,6 +256,33 @@ function element(key: string, mine: number, url: string, loop: boolean, title: s
 }
 
 /**
+ * A voice's play: start the element (inside a tap when called from one),
+ * then it sounds; refused for want of a tap, it waits for one; anything
+ * else is a failure. `onStarted` runs the first time it really sounds.
+ */
+function playerOf(key: string, mine: number, el: HTMLAudioElement, entry: Omit<AudioEntry, 'phase'>, routed: boolean, onStarted: (() => void) | undefined, onFailed: (err: unknown) => void): () => void {
+  let started = false
+  return () => {
+    if (sessions.get(key) !== mine) return
+    let p: Promise<void>
+    try { p = el.play() } catch (err) { onFailed(err); return }
+    void Promise.resolve(p).then(() => {
+      if (sessions.get(key) !== mine) return
+      waitingPlays.delete(key)
+      armGesture()
+      // An element playing into a context the browser still holds back is not heard.
+      if (routed && !audioRunning()) { waitForTap(key); return }
+      setEntry(key, { ...entry, phase: 'playing' })
+      if (!started) { started = true; onStarted?.() }
+    }, (err: unknown) => {
+      if (sessions.get(key) !== mine) return
+      if ((err as { name?: string })?.name === 'NotAllowedError') { waitForTap(key); return }
+      onFailed(err)
+    })
+  }
+}
+
+/**
  * Play an item from its card, from a tap: the file as it is, not placed in
  * space. Its file is fetched and decrypted the first time; a play already
  * going is started over. It plays on when the card closes; NOW PLAYING
@@ -225,9 +311,13 @@ export async function playAudio(itemKey: string, audio: AudioItem, who?: MuteSub
         node.setMediaElementSource(el)
       } catch { node = null }
     }
-    voices.set(key, { el, url, node })
-    setEntry(key, { phase: 'playing', title: audio.title, mode: 'card', itemKey })
-    await el.play()
+    const entry = { title: audio.title, mode: 'card' as const, itemKey }
+    const play = playerOf(key, mine, el, entry, node !== null, undefined, (err) => {
+      release(key)
+      setEntry(key, { ...entry, phase: 'error', error: failWith(err) })
+    })
+    voices.set(key, { el, url, node, play })
+    play()
   } catch (err) {
     if (sessions.get(key) !== mine) return
     release(key)
@@ -255,39 +345,54 @@ export async function startWorld(itemKey: string, audio: AudioItem, onStarted?: 
     const blob = await openAudio(audio)
     if (sessions.get(key) !== mine) return
     const url = URL.createObjectURL(blob)
-    const el = element(key, mine, url, audio.loop, audio.title, 'world', itemKey, () => stopVoice(key))
-    const node = new PositionalAudio(l)
-    // How loud is the region's fade, on the gain; the panner only places it.
-    node.setRolloffFactor(0)
-    node.setMediaElementSource(el)
-    node.setVolume(pendingGain.get(key) ?? 0)
-    const voice: Voice = { el, url, node }
-    voices.set(key, voice)
-    const go = (): void => {
-      if (sessions.get(key) !== mine || !audioRunning()) return
-      voice.offContext?.()
-      voice.offContext = undefined
-      setEntry(key, { phase: 'playing', title: audio.title, mode: 'world', itemKey })
-      void el.play().then(() => onStarted?.(), (err: unknown) => {
-        if (sessions.get(key) !== mine) return
-        // Still held back: wait for the next tap.
-        if ((err as { name?: string })?.name === 'NotAllowedError') { setEntry(key, { phase: 'waiting', title: audio.title, mode: 'world', itemKey }); wait() ; return }
-        release(key)
-        setEntry(key, { phase: 'error', title: audio.title, mode: 'world', itemKey, error: failWith(err) })
-      })
+    let el: HTMLAudioElement
+    let node: PositionalAudio
+    try {
+      el = element(key, mine, url, audio.loop, audio.title, 'world', itemKey, () => stopVoice(key))
+      node = new PositionalAudio(l)
+      // How loud is the region's fade, on the gain; the panner only places it.
+      node.setRolloffFactor(0)
+      node.setMediaElementSource(el)
+      node.setVolume(pendingGain.get(key) ?? 0)
+    } catch (err) {
+      URL.revokeObjectURL(url)
+      throw err
     }
-    const wait = (): void => {
-      wantSound()
-      voice.offContext?.()
-      voice.offContext = onAudioContext(go)
-    }
-    if (audioRunning()) go()
-    else { setEntry(key, { phase: 'waiting', title: audio.title, mode: 'world', itemKey }); wait() }
+    const entry = { title: audio.title, mode: 'world' as const, itemKey }
+    const play = playerOf(key, mine, el, entry, true, onStarted, (err) => worldFailure(itemKey, err))
+    voices.set(key, { el, url, node, play })
+    if (audioRunning()) play()
+    else waitForTap(key)
   } catch (err) {
     if (sessions.get(key) !== mine) return
-    release(key)
-    setEntry(key, { phase: 'error', title: audio.title, mode: 'world', itemKey, error: failWith(err) })
+    worldFailure(itemKey, err)
   }
+}
+
+/** Failed world items: how many times in a row, and until when they are not tried again (ms, performance clock). */
+const failures = new Map<string, { count: number; until: number }>()
+/** The first pause after a failure, ms; each further failure in a row waits four times as long, up to RETRY_MAX_MS. */
+const RETRY_MS = 15_000
+const RETRY_MAX_MS = 10 * 60_000
+
+function nowMs(): number {
+  return typeof performance !== 'undefined' ? performance.now() : Date.now()
+}
+
+/** A world voice failed: let it go, and do not try the item again for a while. */
+export function worldFailure(itemKey: string, err: unknown): void {
+  void err
+  const key = worldKey(itemKey)
+  const was = failures.get(itemKey)
+  const count = (was?.count ?? 0) + 1
+  failures.set(itemKey, { count, until: nowMs() + Math.min(RETRY_MAX_MS, RETRY_MS * 4 ** (count - 1)) })
+  stopVoice(key)
+}
+
+/** Whether a world item failed and is waiting out its pause: the scene does not plan it until then. */
+export function worldFailed(itemKey: string, now = nowMs()): boolean {
+  const f = failures.get(itemKey)
+  return !!f && now < f.until
 }
 
 /** The gain a voice still loading should start at. */
@@ -328,6 +433,29 @@ export function worldVoices(): Set<string> {
   return out
 }
 
+/** The items whose world voice has not sounded yet: still loading, or waiting for a tap. */
+export function worldPending(): Set<string> {
+  const out = new Set<string>()
+  for (const e of Object.values(useHiddenAudio.getState().entries)) if (e.mode === 'world' && (e.phase === 'loading' || e.phase === 'waiting')) out.add(e.itemKey)
+  return out
+}
+
+/** Whether the world wants TV's music stepped down (scene/HiddenAudio). */
+let worldDuck = false
+
+/** The world's half of TV ducking; a card's PLAY is the other, and ducks even with the scene away (TV on). */
+export function setWorldDuck(on: boolean): void {
+  worldDuck = on
+  duckFor()
+}
+
+function duckFor(): void {
+  duckMusic(worldDuck || cardSounding() ? DUCKED : 1)
+}
+
+const offDuck = useHiddenAudio.subscribe(duckFor)
+if (import.meta.hot) import.meta.hot.dispose(() => offDuck())
+
 /** Whether any card's PLAY is sounding. */
 export function cardSounding(): boolean {
   return Object.values(useHiddenAudio.getState().entries).some((e) => e.mode === 'card' && e.phase === 'playing')
@@ -357,4 +485,5 @@ export async function downloadAudio(audio: AudioItem): Promise<string | null> {
 export function stopAllAudio(): void {
   for (const key of [...voices.keys(), ...Object.keys(useHiddenAudio.getState().entries)]) stopVoice(key)
   pendingGain.clear()
+  failures.clear()
 }

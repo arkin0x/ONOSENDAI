@@ -86,11 +86,14 @@ export interface WorldPlan {
 
 /**
  * One tick. `playing` is every source with a voice (starting, waiting for a
- * tap, or sounding); `fired` reads this device's once-trigger record.
- * Sources not in `sources` any more (gone from the world, muted, another
- * plane, TV turned on) stop.
+ * tap, or sounding), and `pending` those of them that have not sounded yet;
+ * `fired` reads this device's once-trigger record. Sources not in `sources`
+ * any more (gone from the world, muted, another plane, TV turned on) stop.
+ * A one-shot that has not sounded yet stops when the listener leaves its
+ * sphere: a tap later must not start it out there, unheard, and spend its
+ * once-trigger.
  */
-export function planWorld(sources: readonly WorldSource[], playing: ReadonlySet<string>, fired: (lineage: string) => boolean, now: number, memory: WorldMemory): WorldPlan {
+export function planWorld(sources: readonly WorldSource[], playing: ReadonlySet<string>, fired: (lineage: string) => boolean, now: number, memory: WorldMemory, pending: ReadonlySet<string> = new Set()): WorldPlan {
   const plan: WorldPlan = { start: [], stop: [], gains: new Map() }
   const present = new Set<string>()
   for (const s of sources) {
@@ -115,8 +118,10 @@ export function planWorld(sources: readonly WorldSource[], playing: ReadonlySet<
     if (!hasTrigger(s.audio)) continue
     const step = stepTrigger(s.audio, memory.triggers.get(s.key) ?? TRIGGER_START, { inSphere: s.heard.inSphere, walking: true, fired: fired(s.lineage) })
     memory.triggers.set(s.key, step.state)
-    if (playing.has(s.key)) plan.gains.set(s.key, g)
-    else if (step.fire) {
+    if (playing.has(s.key)) {
+      if (pending.has(s.key) && !s.heard.inSphere) plan.stop.push(s.key)
+      else plan.gains.set(s.key, g)
+    } else if (step.fire) {
       plan.start.push({ key: s.key, oneShot: true, lineage: s.lineage })
       plan.gains.set(s.key, g)
     }

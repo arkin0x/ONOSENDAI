@@ -15,11 +15,10 @@
  * lets it out (lib/audioContext).
  */
 
-import { useState, useSyncExternalStore } from 'react'
+import { useState } from 'react'
 import { Volume2, X } from 'lucide-react'
 import { ItemIcon } from './ItemIcon'
-import { audioContextVersion, audioRunning, onAudioContext, resumeAudio } from '../lib/audioContext'
-import { stopVoice, useHiddenAudio, type AudioEntry } from '../store/useHiddenAudio'
+import { letSoundOut, stopVoice, useHiddenAudio, type AudioEntry } from '../store/useHiddenAudio'
 import { toggleMusicMute, useTvMusic } from '../store/useTvMusic'
 import { useShards } from '../store/useShards'
 import { useEscape } from '../hooks/useEscape'
@@ -42,7 +41,9 @@ export function playingRows(entries: Record<string, AudioEntry>, tv: { title: st
   const rows: PlayingRow[] = []
   for (const [key, e] of Object.entries(entries)) {
     if (e.phase !== 'playing' && e.phase !== 'loading') continue
-    rows.push({ key, title: e.title, meta: e.mode === 'world' ? 'here' : 'from its card', itemKey: e.itemKey, stoppable: e.mode === 'card' })
+    // A card played from ITEMS has no item in the world to open: its row only stops it.
+    const held = e.itemKey.startsWith('held:')
+    rows.push({ key, title: e.title, meta: e.mode === 'world' ? 'here' : held ? 'from ITEMS' : 'from its card', itemKey: held ? undefined : e.itemKey, stoppable: e.mode === 'card' })
   }
   if (tv) rows.push({ key: 'tv', title: tv.artist ? `${tv.title} · ${tv.artist}` : tv.title, meta: tvMuted ? 'Cyberspace TV · muted' : 'Cyberspace TV', stoppable: false })
   return rows
@@ -63,7 +64,8 @@ export function NowPlayingChip(): JSX.Element | null {
   if (rows.length === 0) return null
   const go = (r: PlayingRow): void => {
     if (r.key === 'tv') { toggleMusicMute(); return }
-    if (r.itemKey && useShards.getState().secretByEvent(r.itemKey)) { setOpen(false); useShards.getState().selectSecret(r.itemKey) }
+    if (r.itemKey && useShards.getState().secretByEvent(r.itemKey)) { setOpen(false); useShards.getState().selectSecret(r.itemKey); return }
+    if (r.stoppable) stopVoice(r.key)
   }
   return (
     <div className={`hyperbar presence nowplaying ${open ? 'is-open' : ''}`} role="status">
@@ -76,7 +78,7 @@ export function NowPlayingChip(): JSX.Element | null {
         <ul className="presence__list">
           {rows.map((r) => (
             <li key={r.key} className="presence__row nowplaying__row">
-              <button className="nowplaying__open" onClick={() => go(r)} title={r.key === 'tv' ? (tvMuted ? 'Unmute TV' : 'Mute TV') : 'Open its card'}>
+              <button className="nowplaying__open" onClick={() => go(r)} title={r.key === 'tv' ? (tvMuted ? 'Unmute TV' : 'Mute TV') : r.itemKey ? 'Open its card' : 'Stop it'}>
                 <span className="presence__who">
                   <span className="presence__name">{r.title}</span>
                   <span className="presence__meta">{r.meta}</span>
@@ -93,14 +95,17 @@ export function NowPlayingChip(): JSX.Element | null {
   )
 }
 
-/** TAP FOR SOUND: hidden audio here, held back by the browser until a tap. */
+/**
+ * TAP FOR SOUND: hidden audio here that the browser will not let play
+ * until a tap, whatever the context's state: Safari lets an element start
+ * only inside one. Its tap plays them all in that gesture (letSoundOut).
+ */
 export function SoundChip(): JSX.Element | null {
   const waiting = useHiddenAudio((s) => waitingCount(s.entries))
-  useSyncExternalStore(onAudioContext, audioContextVersion, audioContextVersion)
-  if (waiting === 0 || audioRunning()) return null
+  if (waiting === 0) return null
   return (
     <div className="hyperbar presence hyperbar--found" role="status">
-      <button className="presence__head" onClick={() => resumeAudio()} title="The browser holds sound back until a tap">
+      <button className="presence__head" onClick={() => letSoundOut()} title="The browser holds sound back until a tap">
         <Volume2 size={12} strokeWidth={2.25} aria-hidden />
         <span className="hyperbar__label">TAP FOR SOUND {waiting}</span>
       </button>

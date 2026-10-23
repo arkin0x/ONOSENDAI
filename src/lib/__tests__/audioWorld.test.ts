@@ -105,6 +105,16 @@ describe('one tick of the world', () => {
     expect(planWorld([source('s', shot, 1, true)], new Set(), rec, 600, m).start).toHaveLength(1)
   })
 
+  it('a one-shot that has not sounded yet (waiting for a tap) stops when the listener leaves its sphere, so its trigger is not spent unheard', () => {
+    const m = freshMemory()
+    expect(planWorld([source('s', shot, 1, true)], new Set(), () => false, 0, m).start).toHaveLength(1)
+    const waiting = new Set(['s'])
+    expect(planWorld([source('s', shot, 1, true)], waiting, () => false, 100, m, waiting).stop).toEqual([])
+    expect(planWorld([source('s', shot, 0.4, false)], waiting, () => false, 200, m, waiting).stop).toEqual(['s'])
+    // Once it sounds, it plays on wherever you go.
+    expect(planWorld([source('s', shot, 0, false)], new Set(['s']), () => false, 300, m, new Set()).stop).toEqual([])
+  })
+
   it('automatic mode fires on every entry; an entry while it still plays does not start it over', () => {
     const m = freshMemory()
     const auto = { ...shot, retrigger: 'auto' as const }

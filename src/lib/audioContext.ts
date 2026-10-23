@@ -37,6 +37,11 @@ export function audioContext(): AudioContext | null {
   } catch {
     return null
   }
+  // Safari: sound that plays as media, not as an effect, so the ringer switch does not silence it.
+  try {
+    const session = (navigator as unknown as { audioSession?: { type: string } }).audioSession
+    if (session) session.type = 'playback'
+  } catch { /* not this browser */ }
   ctx.addEventListener?.('statechange', notify)
   notify()
   return ctx

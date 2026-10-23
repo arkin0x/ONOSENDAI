@@ -43,14 +43,20 @@
 
 import { GRID_HALF, neededExtent, normalizeStored, type ShardModel } from 'sno-core/shards'
 import {
-  commit, fingerprint, localEntries, mergeLocal, noteReconciled, openWorkshopDb, readAll, readMigrated, readSome, verifyAndMark,
+  commit, databaseExists, fingerprint, localEntries, mergeLocal, noteReconciled, openWorkshopDb, readAll, readMigrated, readSome, verifyAndMark,
   type MigratedMeta, type ShardRecord,
 } from '../lib/workshopDb'
 
 /** The list as every build before this one kept it, and the backup from now on. */
 export const LOCAL_KEY = 'onosendai:shards'
-/** Set once the move has verified: at load, the backup is not read as the library. */
+/**
+ * Set once the move has verified, in two places that do not share a quota:
+ * this localStorage key, which may not fit beside a full backup, and a
+ * cookie. Either one says the backup is no longer the library, so a session
+ * whose database will not open saves nothing rather than writing localStorage.
+ */
 export const MOVED_KEY = 'onosendai:shards:moved'
+export const MOVED_COOKIE = 'onosendai_shards_moved'
 export const CHANNEL = 'onosendai:shards'
 
 export type ShardStorage = 'pending' | 'indexeddb' | 'local' | 'unavailable'
@@ -63,10 +69,14 @@ export interface StorageHost {
   report: (message: string | null) => void
   /** The shard on the bench, which another tab's delete does not take from under you. */
   protect: () => string | null
+  /** A line to show once. */
+  notice: (message: string) => void
 }
 
 const FULL = 'Workshop storage is full. Your latest changes are only in this tab until there is room.'
 const UNAVAILABLE = 'Your shards could not be opened from this browser\'s storage, so this is the copy kept before they moved, and changes are not saved. Reload to try again.'
+const MOVED_ELSEWHERE = 'Your shards moved to new storage in another tab. Reload this tab to keep saving.'
+const LOST = 'This browser cleared the storage your shards were in. The copy kept before they moved is back; anything made since is gone from this browser.'
 
 let host: StorageHost | null = null
 let mode: ShardStorage = 'pending'
@@ -84,6 +94,15 @@ let skipped = 0
 let persistAsked = false
 let channel: BroadcastChannel | null = null
 let hydrating: Promise<ShardStorage> | null = null
+/** A commit is being written now. */
+let inFlight = false
+/** The database was opened again after the first time: check it still holds the library before writing. */
+let reopened = false
+let opens = 0
+/** Ids other tabs committed while this one was still loading, read in once it has. */
+const heard = { put: new Set<string>(), del: new Set<string>() }
+/** Why nothing is saved while unavailable. */
+let offline = { message: UNAVAILABLE, reason: 'Workshop storage could not be opened' }
 let decided: () => void = () => {}
 const ready = new Promise<void>((resolve) => { decided = resolve })
 
@@ -119,15 +138,16 @@ export function loadLocal(): ShardModel[] {
 }
 
 function movedFlag(): boolean {
-  try { return !!localStorage.getItem(MOVED_KEY) } catch { return false }
+  try { if (localStorage.getItem(MOVED_KEY)) return true } catch { /* the cookie may say */ }
+  try { return typeof document !== 'undefined' && document.cookie.split(';').some((c) => c.trim().startsWith(`${MOVED_COOKIE}=`)) } catch { return false }
 }
 
 /**
  * The list the store starts with, and the storage it starts in. Without
- * IndexedDB at all, localStorage, decided now. Otherwise pending: the
- * localStorage list if it has not moved (what the move will carry), and
- * nothing if it has (the backup is not the library; the database is read
- * before the app draws, main.tsx).
+ * IndexedDB at all, localStorage, decided now. Otherwise pending, with
+ * nothing in it: the database is read before the app draws (main.tsx), and
+ * the localStorage list, which may be the backup by now, is never shown as
+ * the library before that read has said it is.
  */
 export function initialShards(): ShardModel[] {
   if (typeof indexedDB === 'undefined') {
@@ -136,7 +156,7 @@ export function initialShards(): ShardModel[] {
     return loadLocal()
   }
   mode = 'pending'
-  return movedFlag() ? [] : loadLocal()
+  return []
 }
 
 /** Hand the store over; called once, right after it is made. */
@@ -183,7 +203,7 @@ export function persist(list: readonly ShardModel[]): void {
   diff(list)
   if (mode === 'local') { writeLocal(list); return }
   if (mode === 'indexeddb') { void flush(); return }
-  if (mode === 'unavailable') report(UNAVAILABLE, 'Workshop storage could not be opened')
+  if (mode === 'unavailable') report(offline.message, offline.reason)
 }
 
 /** Resolves true once the list as it is now has committed; false when it could not be. */
@@ -192,7 +212,7 @@ export async function saveNow(): Promise<boolean> {
   if (!host) return false
   if (mode === 'local') return writeLocal(host.shards())
   diff(host.shards())
-  if (mode === 'unavailable') { report(UNAVAILABLE, 'Workshop storage could not be opened'); return false }
+  if (mode === 'unavailable') { report(offline.message, offline.reason); return false }
   return flush()
 }
 
@@ -227,6 +247,7 @@ async function database(): Promise<IDBDatabase> {
   if (db) return db
   const d = await openWorkshopDb()
   watch(d)
+  if (opens++ > 0) reopened = true
   db = d
   return d
 }
@@ -238,30 +259,66 @@ function watch(d: IDBDatabase): void {
   d.onclose = () => { if (db === d) db = null }
 }
 
+/**
+ * A database opened again mid-session (the browser closed the connection, or
+ * a newer build upgraded it) may not be the one the library was read from:
+ * storage pressure or a cleared site can take it away whole. Without its mark
+ * it holds nothing of ours, so every shard in this tab goes into the next
+ * write, and the mark is put back, before anything else is written.
+ */
+async function checkStillThere(d: IDBDatabase): Promise<void> {
+  if (!reopened) return
+  if (await readMigrated(d)) { reopened = false; return }
+  console.warn('[workshop] the database came back empty: writing every shard in this tab again')
+  for (const s of host?.shards() ?? []) if (!pending.has(s.id)) pending.set(s.id, s)
+  const raw = readLocalRaw()
+  await noteReconciled(d, metaFor(raw, host?.shards().length ?? 0))
+  reopened = false
+}
+
 async function commitPending(): Promise<boolean> {
   if (mode !== 'indexeddb') return false
   if (pending.size === 0) return true
-  const batch = new Map(pending)
-  const puts: ShardRecord[] = []
-  const deletes: string[] = []
+  inFlight = true
   try {
-    for (const [id, m] of batch) {
-      if (m) puts.push({ id, seq: seqFor(id), updatedAt: typeof m.updatedAt === 'number' && Number.isFinite(m.updatedAt) ? m.updatedAt : 0, json: JSON.stringify(m) })
-      else deletes.push(id)
+    // One more try, at once, when the connection was closed under the write:
+    // the database is opened again. Never more, and never on a timer.
+    for (let attempt = 0; ; attempt++) {
+      const batch = new Map<string, ShardModel | null>()
+      const puts: ShardRecord[] = []
+      const deletes: string[] = []
+      try {
+        const d = await database()
+        await checkStillThere(d)
+        for (const [id, m] of pending) batch.set(id, m)
+        for (const [id, m] of batch) {
+          if (m) puts.push({ id, seq: seqFor(id), updatedAt: typeof m.updatedAt === 'number' && Number.isFinite(m.updatedAt) ? m.updatedAt : 0, json: JSON.stringify(m) })
+          else deletes.push(id)
+        }
+        await commit(d, puts, deletes)
+      } catch (e) {
+        if (attempt === 0 && !isQuota(e)) {
+          console.warn(`[workshop] write failed, opening the database again for one more try: ${describe(e)}`)
+          const was = db
+          db = null
+          try { was?.close() } catch { /* already closed */ }
+          continue
+        }
+        console.warn(`[workshop] could not save ${batch.size} shard change(s), kept for the next save: ${describe(e)}`)
+        if (isQuota(e)) report(FULL, 'Workshop storage is full')
+        else report(`Your latest changes could not be saved (${describe(e)}). They are only in this tab for now.`, 'Workshop storage refused it')
+        return false
+      }
+      // What changed again while this was writing stays for the next one.
+      for (const [id, m] of batch) if (pending.get(id) === m) pending.delete(id)
+      if (failure) report(null, null)
+      askToPersist()
+      announce(puts.map((r) => r.id), deletes)
+      return true
     }
-    await commit(await database(), puts, deletes)
-  } catch (e) {
-    console.warn(`[workshop] could not save ${batch.size} shard change(s), kept to retry: ${describe(e)}`)
-    if (isQuota(e)) report(FULL, 'Workshop storage is full')
-    else report(`Your latest changes could not be saved (${describe(e)}). They are only in this tab for now.`, 'Workshop storage refused it')
-    return false
+  } finally {
+    inFlight = false
   }
-  // What changed again while this was writing stays for the next one.
-  for (const [id, m] of batch) if (pending.get(id) === m) pending.delete(id)
-  if (failure) report(null, null)
-  askToPersist()
-  announce(puts.map((r) => r.id), deletes)
-  return true
 }
 
 /**
@@ -286,16 +343,54 @@ function announce(put: string[], del: string[]): void {
   try { channel?.postMessage({ put, del }) } catch { /* closed */ }
 }
 
+/** Another tab marked the move: a tab still on localStorage stops writing it, at once. */
+function movedElsewhere(): void {
+  if (mode !== 'local') return
+  console.warn('[workshop] another tab moved the shards to IndexedDB: this tab stops saving to localStorage')
+  mode = 'unavailable'
+  offline = { message: MOVED_ELSEWHERE, reason: 'Your shards moved in another tab: reload' }
+  report(offline.message, offline.reason)
+}
+
+/**
+ * Hear the other tabs: opened before this tab reads the database, so a
+ * commit made while it reads is not missed (it is read in once this tab has
+ * its list), and the moment another tab marks the move.
+ */
 function listen(): void {
   if (channel || typeof BroadcastChannel === 'undefined') return
   try {
     channel = new BroadcastChannel(CHANNEL)
     channel.onmessage = (ev: MessageEvent) => {
-      const data = ev.data as { put?: unknown; del?: unknown } | null
+      const data = ev.data as { put?: unknown; del?: unknown; moved?: unknown } | null
+      if (data?.moved === true) { movedElsewhere(); return }
       const ids = (v: unknown): string[] => (Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string') : [])
+      if (mode === 'pending') {
+        for (const id of ids(data?.put)) heard.put.add(id)
+        for (const id of ids(data?.del)) heard.del.add(id)
+        return
+      }
       void refresh(ids(data?.put), ids(data?.del))
     }
   } catch { channel = null }
+  if (typeof window === 'undefined') return
+  try {
+    window.addEventListener('storage', (ev) => { if (ev.key === MOVED_KEY && ev.newValue) movedElsewhere() })
+    // A write still in hand when the tab closes would be lost: the browser asks first.
+    window.addEventListener('beforeunload', (ev) => {
+      if (mode === 'indexeddb' && (pending.size > 0 || inFlight)) { ev.preventDefault(); ev.returnValue = '' }
+    })
+  } catch { /* no window events */ }
+}
+
+/** What other tabs committed while this one loaded. */
+function replayHeard(): void {
+  if (!heard.put.size && !heard.del.size) return
+  const put = [...heard.put]
+  const del = [...heard.del]
+  heard.put.clear()
+  heard.del.clear()
+  void refresh(put, del)
 }
 
 /** Another tab committed these: read them back into this tab's list, unless this tab has its own change to them in hand. */
@@ -367,11 +462,13 @@ function withoutDatabase(why: unknown, moved: boolean): ShardStorage {
     // nothing over anything.
     console.warn(`[workshop] IndexedDB unavailable after the move, saving is off this session: ${describe(why)}`)
     become('unavailable', withPending(loadLocal()))
-    report(UNAVAILABLE, 'Workshop storage could not be opened')
+    report(offline.message, offline.reason)
     return mode
   }
   console.warn(`[workshop] staying on localStorage: ${describe(why)}`)
-  const list = host?.shards() ?? []
+  // The list starts empty while pending (initialShards): localStorage is the
+  // library after all, so it is read now, with any change made meanwhile.
+  const list = withPending(loadLocal())
   const changed = pending.size > 0
   pending.clear()
   become('local', list)
@@ -386,9 +483,12 @@ function metaFor(raw: string | null, count: number): MigratedMeta {
 }
 
 function flagMoved(): void {
-  // A flag of a few bytes: it may not fit beside a full backup, and then the
-  // next load reads the database's own mark instead (only slower).
-  try { localStorage.setItem(MOVED_KEY, new Date().toISOString()) } catch { /* the database's mark is the record */ }
+  // A flag of a few bytes: it may not fit beside a full backup, so the cookie
+  // says it too (cookies are not counted against localStorage's quota).
+  try { localStorage.setItem(MOVED_KEY, new Date().toISOString()) } catch { /* the cookie and the database's mark say it */ }
+  try {
+    if (typeof document !== 'undefined') document.cookie = `${MOVED_COOKIE}=1; max-age=315360000; path=/; SameSite=Lax`
+  } catch { /* the database's mark is the record */ }
 }
 
 /** Carry the localStorage list in, verify it, mark it. True when the database is the library now. */
@@ -403,6 +503,10 @@ async function move(d: IDBDatabase, raw: string | null): Promise<boolean> {
     return false
   }
   flagMoved()
+  // A tab still on localStorage stops writing it now; and a library worth
+  // moving is worth not being evicted.
+  try { channel?.postMessage({ moved: true }) } catch { /* closed */ }
+  askToPersist()
   return true
 }
 
@@ -426,20 +530,31 @@ export function hydrateWorkshop(): Promise<ShardStorage> {
 }
 
 async function decide(): Promise<ShardStorage> {
+  listen()
   let d: IDBDatabase
-  try { d = await database() } catch (e) { return withoutDatabase(e, movedFlag()) }
+  try { d = await database() } catch (e) {
+    // Moved, as far as anything can tell: then localStorage is only the
+    // backup and is not written. A database that exists at all counts.
+    return withoutDatabase(e, movedFlag() || (await databaseExists()) === true)
+  }
   let moved = false
   try {
     let meta = await readMigrated(d)
     moved = !!meta
     const raw = readLocalRaw()
     if (!meta) {
+      // Moved before, and the database holds no mark now: the browser cleared
+      // it. The backup is the only copy left, so it comes back in, and that
+      // is said rather than passed off as the library.
+      const lost = movedFlag()
       let ok = false
       try { ok = await move(d, raw) } catch (e) { console.warn(`[workshop] the move failed: ${describe(e)}`) }
+      moved = ok
       // Another tab may have marked it while this one was carrying.
       meta = await readMigrated(d)
-      if (!meta) return withoutDatabase(new Error(ok ? 'no mark after the move' : 'the move did not complete'), false)
+      if (!meta) return withoutDatabase(new Error(ok ? 'no mark after the move' : 'the move did not complete'), ok || lost)
       moved = true
+      if (lost) { console.warn('[workshop] the database was cleared since the move; restored the backup'); host?.notice(LOST) }
     } else if (raw !== null) {
       try { await rescue(d, raw, meta) } catch (e) { console.warn(`[workshop] could not check localStorage for later shards: ${describe(e)}`) }
     }
@@ -458,8 +573,8 @@ async function decide(): Promise<ShardStorage> {
       stored.push(m)
     }
     if (skipped) console.warn(`[workshop] ${skipped} stored shard(s) could not be read and were left as they are`)
-    listen()
     become('indexeddb', withPending(stored))
+    replayHeard()
     if (pending.size) void flush()
     return mode
   } catch (e) {

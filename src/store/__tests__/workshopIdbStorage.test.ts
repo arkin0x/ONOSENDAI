@@ -264,6 +264,146 @@ describe('the move from localStorage', () => {
   })
 })
 
+describe('review fixes: never back onto localStorage after the move', () => {
+  it('a moved flag that did not fit, then a database that will not open: saves nothing, and the backup is left alone', async () => {
+    const list = Array.from({ length: 70 }, (_, i) => bigShard(`piece ${i}`, 90, i))
+    const raw = seedLocal(list)
+    const first = await boot()
+    expect(mem.has(MOVED_KEY)).toBe(false)
+    first.ws.useWorkshop.getState().rename(list[0].id, 'after the move')
+    expect(await first.ws.useWorkshop.getState().saveNow()).toBe(true)
+    vi.spyOn(indexedDB, 'open').mockImplementation(() => { throw new DOMException('no', 'InvalidStateError') })
+    const { ws, st } = await boot()
+    expect(st.storageMode()).toBe('unavailable')
+    ws.useWorkshop.getState().remove(list[1].id)
+    expect(await ws.useWorkshop.getState().saveNow()).toBe(false)
+    expect(mem.get(LOCAL_KEY)).toBe(raw)
+    vi.restoreAllMocks()
+    const again = await boot()
+    expect(again.ws.useWorkshop.getState().shards.find((s) => s.id === list[0].id)!.name).toBe('after the move')
+    expect(again.ws.useWorkshop.getState().shards).toHaveLength(70)
+  }, 60_000)
+
+  it('the cookie says it moved when localStorage had no room and the browser cannot list its databases', async () => {
+    let jar = ''
+    ;(globalThis as { document?: unknown }).document = { get cookie() { return jar }, set cookie(v: string) { jar = v.split(';')[0] } }
+    try {
+      const raw = seedLocal(Array.from({ length: 70 }, (_, i) => bigShard(`piece ${i}`, 90, i)))
+      await boot()
+      expect(mem.has(MOVED_KEY)).toBe(false)
+      expect(jar).toBe('onosendai_shards_moved=1')
+      vi.spyOn(indexedDB, 'open').mockImplementation(() => { throw new DOMException('no', 'InvalidStateError') })
+      vi.spyOn(indexedDB, 'databases').mockImplementation(() => Promise.reject(new Error('no')))
+      const { ws, st } = await boot()
+      expect(st.storageMode()).toBe('unavailable')
+      ws.useWorkshop.getState().create('x')
+      expect(await ws.useWorkshop.getState().saveNow()).toBe(false)
+      expect(mem.get(LOCAL_KEY)).toBe(raw)
+    } finally { delete (globalThis as { document?: unknown }).document }
+  }, 60_000)
+
+  it('a database cleared under an open tab gets every shard in that tab written back, not the backup', async () => {
+    const list = [bigShard('a', 4, 1), bigShard('b', 4, 2)]
+    const raw = seedLocal(list)
+    const { ws } = await boot()
+    const w = () => ws.useWorkshop.getState()
+    const c = w().create('made after the move')
+    w().rename(list[0].id, 'a edited')
+    expect(await w().saveNow()).toBe(true)
+    // The browser clears the site's IndexedDB (storage pressure, or a person clearing it).
+    await new Promise<void>((resolve, reject) => { const r = indexedDB.deleteDatabase('onosendai:workshop'); r.onsuccess = () => resolve(); r.onerror = () => reject(r.error) })
+    w().rename(list[1].id, 'b edited')
+    expect(await w().saveNow()).toBe(true)
+    const again = await boot()
+    expect(again.st.storageMode()).toBe('indexeddb')
+    expect(again.ws.useWorkshop.getState().shards.map((s) => s.name).sort()).toEqual(['a edited', 'b edited', 'made after the move'])
+    expect(again.ws.useWorkshop.getState().shards.some((s) => s.id === c)).toBe(true)
+    expect(mem.get(LOCAL_KEY)).toBe(raw)
+  })
+
+  it('a database cleared while no tab was open brings the backup back, and says so', async () => {
+    const list = [bigShard('a', 4, 1)]
+    seedLocal(list)
+    await boot()
+    await new Promise<void>((resolve) => { const r = indexedDB.deleteDatabase('onosendai:workshop'); r.onsuccess = () => resolve() })
+    const { ws, st } = await boot()
+    expect(st.storageMode()).toBe('indexeddb')
+    expect(ws.useWorkshop.getState().shards.map((s) => s.id)).toEqual([list[0].id])
+    expect(ws.useWorkshop.getState().notice).toMatch(/cleared/)
+  })
+
+  it('a second tab carrying the old list after the first marked the move does not undo its delete', async () => {
+    const list = [bigShard('a', 4, 1), bigShard('b', 4, 2)]
+    const raw = seedLocal(list)
+    const first = await boot()
+    first.ws.useWorkshop.getState().remove(list[1].id)
+    expect(await first.ws.useWorkshop.getState().saveNow()).toBe(true)
+    // What the second tab does, having read "no mark" just before the first tab marked it.
+    const db = await import('../../lib/workshopDb')
+    const d = await db.openWorkshopDb()
+    await db.mergeLocal(d, db.localEntries(raw)!, false)
+    d.close()
+    const again = await boot()
+    expect(again.ws.useWorkshop.getState().shards.map((s) => s.name)).toEqual(['a'])
+  })
+
+  it('a tab left on localStorage stops writing it the moment another tab marks the move', async () => {
+    const list = [bigShard('a', 4, 1)]
+    seedLocal(list)
+    vi.doMock('../../lib/workshopDb', async (orig) => ({
+      ...(await orig<typeof import('../../lib/workshopDb')>()),
+      verifyAndMark: async () => ({ result: 'mismatch', bad: [list[0].id] }),
+    }))
+    const local = await boot()
+    expect(local.st.storageMode()).toBe('local')
+    vi.doUnmock('../../lib/workshopDb')
+    const moved = await boot()
+    expect(moved.st.storageMode()).toBe('indexeddb')
+    await vi.waitFor(() => expect(local.st.storageMode()).toBe('unavailable'))
+    const before = mem.get(LOCAL_KEY)
+    local.ws.useWorkshop.getState().rename(list[0].id, 'from the old tab')
+    expect(mem.get(LOCAL_KEY)).toBe(before)
+    expect(local.ws.useWorkshop.getState().storageError).toMatch(/another tab/)
+  })
+
+  it('a write that fails on a closed connection is tried once more, at once, and never again by itself', async () => {
+    let fails = 1
+    const calls = vi.fn()
+    vi.doMock('../../lib/workshopDb', async (orig) => {
+      const real = await orig<typeof import('../../lib/workshopDb')>()
+      return { ...real, commit: (...a: Parameters<typeof real.commit>) => { calls(); return fails-- > 0 ? Promise.reject(new DOMException('closing', 'InvalidStateError')) : real.commit(...a) } }
+    })
+    const { ws } = await boot()
+    ws.useWorkshop.getState().create('one')
+    expect(await ws.useWorkshop.getState().saveNow()).toBe(true)
+    expect(calls).toHaveBeenCalledTimes(2)
+    calls.mockClear()
+    fails = 99
+    ws.useWorkshop.getState().create('two')
+    expect(await ws.useWorkshop.getState().saveNow()).toBe(false)
+    expect(calls).toHaveBeenCalledTimes(2)
+    // Nothing more, on any clock.
+    await new Promise((r) => setTimeout(r, 300))
+    expect(calls).toHaveBeenCalledTimes(2)
+  })
+
+  it('a commit another tab makes while this one loads is read in', async () => {
+    const list = [bigShard('a', 4, 1)]
+    seedLocal(list)
+    await boot()
+    vi.resetModules()
+    const a = await import('../useWorkshop')
+    await a.hydrateWorkshop()
+    vi.resetModules()
+    const b = await import('../useWorkshop')
+    const loading = b.hydrateWorkshop()
+    a.useWorkshop.getState().rename(list[0].id, 'renamed while B loads')
+    expect(await a.useWorkshop.getState().saveNow()).toBe(true)
+    await loading
+    await vi.waitFor(() => expect(b.useWorkshop.getState().shards[0].name).toBe('renamed while B loads'))
+  })
+})
+
 describe('after the move', () => {
   it('add, replace and delete come back after a reload, and only changed shards are written', async () => {
     const { ws } = await boot()

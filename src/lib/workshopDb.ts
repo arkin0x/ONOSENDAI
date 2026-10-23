@@ -195,8 +195,14 @@ export function mergeLocal(db: IDBDatabase, entries: readonly LocalEntry[], move
     const written: string[] = []
     const allShards = shards.getAll()
     const allTombs = tombs.getAll()
-    // Requests in one transaction answer in the order they were made: both reads are in when the second answers.
-    allTombs.onsuccess = () => {
+    // Read inside this transaction: a tab that marked the move since this one
+    // looked makes this a rescue, with the database as the library, so a
+    // shard it deleted or edited meanwhile is not undone by this copy.
+    const mark = tx.objectStore(META_STORE).get(MIGRATED_KEY)
+    // Requests in one transaction answer in the order they were made: every read is in when the last answers.
+    mark.onsuccess = () => {
+      const marked = (mark.result as { value?: { at?: unknown } } | undefined)?.value
+      const asMoved = moved || (!!marked && typeof marked.at === 'number')
       const have = new Map<string, ShardRecord>()
       // seq for a shard new to the database: after everything already here, in the localStorage order.
       let base = 0
@@ -208,13 +214,13 @@ export function mergeLocal(db: IDBDatabase, entries: readonly LocalEntry[], move
       for (const e of entries) {
         const h = have.get(e.id)
         if (h) {
-          const takeLocal = e.updatedAt > h.updatedAt || (!moved && e.updatedAt === h.updatedAt && e.json !== h.json)
+          const takeLocal = e.updatedAt > h.updatedAt || (!asMoved && e.updatedAt === h.updatedAt && e.json !== h.json)
           if (!takeLocal) { expected.set(e.id, h.json); continue }
           shards.put({ id: e.id, seq: h.seq, updatedAt: e.updatedAt, json: e.json } satisfies ShardRecord)
         } else {
           const at = deletedAt.get(e.id)
           // Deleted here after this version was written: the delete stands.
-          if (moved && at !== undefined && e.updatedAt <= at) continue
+          if (asMoved && at !== undefined && e.updatedAt <= at) continue
           shards.put({ id: e.id, seq: base + e.index, updatedAt: e.updatedAt, json: e.json } satisfies ShardRecord)
           if (at !== undefined) tombs.delete(e.id)
         }
@@ -272,4 +278,20 @@ export function noteReconciled(db: IDBDatabase, meta: MigratedMeta): Promise<voi
     tx.onerror = () => reject(tx.error ?? new Error('IndexedDB write failed'))
     tx.onabort = () => reject(tx.error ?? new Error('IndexedDB write aborted'))
   })
+}
+
+/**
+ * Whether this browser has a workshop database at all, without opening it:
+ * for when opening fails, to tell a library that moved (so localStorage is
+ * only the backup now) from one that never did. Null when the browser cannot
+ * say (no indexedDB.databases(), or it does not answer in time).
+ */
+export async function databaseExists(timeoutMs = 2000): Promise<boolean | null> {
+  try {
+    if (typeof indexedDB === 'undefined' || typeof indexedDB.databases !== 'function') return null
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const late = new Promise<null>((resolve) => { timer = setTimeout(() => resolve(null), timeoutMs) })
+    const list = await Promise.race([indexedDB.databases(), late]).finally(() => clearTimeout(timer))
+    return list === null ? null : list.some((d) => d.name === WORKSHOP_DB)
+  } catch { return null }
 }

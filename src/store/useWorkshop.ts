@@ -1579,6 +1579,7 @@ attach({
   })),
   report: (message) => { if (useWorkshop.getState().storageError !== message) useWorkshop.setState({ storageError: message }) },
   protect: () => (useWorkshop.getState().open ? useWorkshop.getState().currentId : null),
+  notice: (message) => useWorkshop.setState({ notice: message }),
 })
 
 if (import.meta.env.DEV && typeof window !== 'undefined') {

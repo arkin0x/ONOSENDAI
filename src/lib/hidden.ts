@@ -18,12 +18,14 @@
  *   - a chest, kind 3341: a list of entries sealed with NIP-44 v2 to a public
  *     key, an item's or a person's (B1 §2.2). The sealing and opening live in
  *     lib/chests.ts; here the chest is read as an item like any other.
- * All four carry their coordinate in a `C` tag, decoded on discovery, and the
+ *   - hidden audio, kind 1063 (DECK-0007): a NIP-94 file event naming an
+ *     encrypted file on Blossom, with its key (lib/audioItem.ts).
+ * All five carry their coordinate in a `C` tag, decoded on discovery, and the
  * NIP-70 `-` tag (arkinox, 2026-10-20): they only ever live inside bags, and
  * a relay that honours `-` accepts the event only from its author, so no
  * finder can republish one under the hider's name. A message goes further
  * and is sealed as a rumor (rumorOf): an id and no signature, so a copy of it
- * is not a note its hider ever signed. Who wrote it is vouched for by the
+ * is not a note its hider ever signed; hidden audio is sealed the same way. Who wrote it is vouched for by the
  * envelope, which the hider does sign (innerAuthentic).
  *
  * An entry that is an array is a reference: `["a", "<kind>:<pubkey>:<d>",
@@ -54,6 +56,7 @@ import type { Position } from './space'
 import { mentionTags } from './mentions'
 import { cashuTokensAsWritten } from './cashu'
 import { countNftLinks, NFT_WORDS, replaceNftLinks } from './nftLink'
+import { AUDIO_KIND, audioItemOf, type AudioItem } from './audioItem'
 
 /** The location-encrypted envelope (spec §8.6). */
 export const HIDDEN_KIND = 33330
@@ -196,7 +199,7 @@ export function referenceTo(object: NostrEvent, at: Position, plane: Plane, rela
  */
 export const MAX_MESSAGE_LENGTH = 10_000
 
-export type HiddenType = 'shard' | 'message' | 'key' | 'chest'
+export type HiddenType = 'shard' | 'message' | 'key' | 'chest' | 'audio'
 
 /** What a key item carries, read out of its event (B1 §2.1). */
 export interface KeyItem {
@@ -322,6 +325,7 @@ export interface ItemBody {
   text?: string
   key?: KeyItem
   chest?: ChestItem
+  audio?: AudioItem
 }
 
 /**
@@ -349,6 +353,10 @@ export function readItem(inner: Pick<NostrEvent, 'kind' | 'content' | 'tags' | '
     const chest = chestItemOf(inner)
     return chest ? { type: 'chest', chest } : null
   }
+  if (inner.kind === AUDIO_KIND) {
+    const audio = audioItemOf(inner)
+    return audio ? { type: 'audio', audio } : null
+  }
   return null
 }
 
@@ -363,8 +371,9 @@ export function messagePreview(text: string, max = 32): string {
 }
 
 /** What a hidden thing is called in a row, a chip or a ghost: a message's preview, else its name. */
-export function hiddenLabel(h: Pick<ItemBody, 'type' | 'text' | 'shard' | 'key' | 'chest'>, max = 32): string {
+export function hiddenLabel(h: Pick<ItemBody, 'type' | 'text' | 'shard' | 'key' | 'chest' | 'audio'>, max = 32): string {
   if (h.type === 'message') return messagePreview(h.text ?? '', max)
+  if (h.type === 'audio') return h.audio?.title ?? 'audio'
   if (h.type === 'key') return h.key?.name ?? 'key'
   if (h.type === 'chest') return h.chest?.name ?? 'chest'
   return h.shard?.name ?? 'shard'
@@ -414,6 +423,7 @@ export interface Hidden {
   text?: string
   key?: KeyItem
   chest?: ChestItem
+  audio?: AudioItem
   /**
    * Set when the item was hidden by reference: the entry itself, which is what
    * a rewrite of the bag must carry forward. `inner` is then the referenced
@@ -634,12 +644,27 @@ export function rumorHolds(ev: Partial<Rumor>): boolean {
 }
 
 /**
+ * The kinds a writer seals as rumors, and so the only unsigned kinds a bag
+ * vouches for (spec §7.6 Rumors): a message (arkinox, 2026-10-20) and hidden
+ * audio (DECK-0007 §3, 2026-10-23). Both are kinds other clients show in a
+ * public feed, where a signed copy lifted out of the bag would read as the
+ * hider's own post.
+ */
+export const RUMOR_KINDS: ReadonlySet<number> = new Set([MESSAGE_KIND, AUDIO_KIND])
+
+/** Whether a kind is written as a rumor (RUMOR_KINDS). */
+export function sealedAsRumor(kind: number): boolean {
+  return RUMOR_KINDS.has(kind)
+}
+
+/**
  * Whether an inline item of a bag is authentic for the key that signed the
  * bag (arkinox, 2026-10-20). Its `pubkey` must be the bag's signer, always:
  * an envelope carrying someone else's event is not theirs to place. Then:
- *   - a message (kind 1) with no `sig` (or an empty one) is a rumor, accepted when its id is
- *     its hash (rumorHolds), and its author is the bag's signer, whose
- *     signature over the bag covers it;
+ *   - a message (kind 1) or hidden audio (kind 1063) with no `sig` (or an
+ *     empty one) is a rumor, accepted when its id is its hash (rumorHolds),
+ *     and its author is the bag's signer, whose signature over the bag
+ *     covers it (RUMOR_KINDS);
  *   - anything that carries a `sig` must verify: a signed message from a
  *     client before 2026-10-20 still reads;
  *   - any other kind without a `sig` is dropped, as it always was here.
@@ -647,7 +672,7 @@ export function rumorHolds(ev: Partial<Rumor>): boolean {
 export function innerAuthentic(inner: Partial<Rumor>, signer: string): boolean {
   if (!inner || typeof inner !== 'object' || Array.isArray(inner) || typeof inner.kind !== 'number' || inner.pubkey !== signer) return false
   // No `sig`, or an empty one, is unsigned (spec 7.6), as the chest reader has it.
-  if (inner.sig === undefined || inner.sig === '') return inner.kind === MESSAGE_KIND && rumorHolds(inner)
+  if (inner.sig === undefined || inner.sig === '') return sealedAsRumor(inner.kind) && rumorHolds(inner)
   try { return verifyEvent(inner as NostrEvent) } catch { return false }
 }
 
@@ -688,25 +713,30 @@ export const DEFAULT_BAG_SETTINGS: BagSettings = { heightTag: true, hint: null, 
 
 /**
  * What a bag holds, by kind: shards (in the bag or by reference), messages,
- * keys, chests, and the cashu tokens and nonfungible.cash claim links (NFTs,
+ * keys, chests, hidden audio, and the cashu tokens and nonfungible.cash claim links (NFTs,
  * lib/nftLink) written in its messages.
  */
-export interface BagContents { shard: number; message: number; key: number; chest: number; cashu: number; nft: number }
+export interface BagContents { shard: number; message: number; key: number; chest: number; cashu: number; nft: number; audio: number }
 
 export function bagContents(inners: readonly (BagEntry | ChatRumor)[]): BagContents {
-  const out: BagContents = { shard: 0, message: 0, key: 0, chest: 0, cashu: 0, nft: 0 }
+  const out: BagContents = { shard: 0, message: 0, key: 0, chest: 0, cashu: 0, nft: 0, audio: 0 }
   for (const e of inners) {
     if (isReference(e)) { out.shard++; continue }
     if (e.kind === SHARD_KIND) out.shard++
     else if (e.kind === MESSAGE_KIND) { out.message++; out.cashu += cashuTokensAsWritten(e.content).length; out.nft += countNftLinks(e.content) }
     else if (e.kind === KEY_KIND) out.key++
     else if (e.kind === CHEST_KIND) out.chest++
+    else if (e.kind === AUDIO_KIND) out.audio++
   }
   return out
 }
 
-/** The order a bag's `contents` tags are written in, and read in. */
-export const CONTENTS_KINDS = ['shard', 'message', 'key', 'chest', 'cashu', 'nft'] as const
+/**
+ * The order a bag's `contents` tags are written in, and read in. Hidden audio
+ * (DECK-0007) came last, after the money kinds, so every bag written before
+ * it keeps the order spec §7.7 gives.
+ */
+export const CONTENTS_KINDS = ['shard', 'message', 'key', 'chest', 'cashu', 'nft', 'audio'] as const
 
 /**
  * The public tags a bag's contents settings write (arkinox, 2026-10-18:

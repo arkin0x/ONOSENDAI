@@ -20,7 +20,8 @@ import { createPortal } from 'react-dom'
 import { GENERAL_RELAYS } from '../lib/contacts'
 import type { NostrEvent } from '../lib/events'
 import { publishMany, queryAny, relaySet } from '../lib/relay'
-import { DEFAULT_BLOSSOM_SERVERS, SERVER_LIST_KIND, explainUpload, normalizeServer, serversFromList, uploadBlob } from '../lib/blossom'
+import { SERVER_LIST_KIND, explainUpload, uploadBlob } from '../lib/blossom'
+import { BlossomServerPicker, useBlossomChoice } from './BlossomServer'
 import { fieldsOf, mergeProfile, newest, parseContent, profileProblems, profileTemplate, type ProfileField, type ProfileFields } from '../lib/profileEdit'
 import { shortHex } from '../lib/time'
 import { ProfilePic } from './ProfileBadge'
@@ -28,15 +29,12 @@ import { useCyberspace } from '../store/useCyberspace'
 import { useProfiles } from '../store/useProfiles'
 import { useEscape } from '../hooks/useEscape'
 
-const SERVER_KEY = 'onosendai:blossom-server'
 /** How long to wait on the general relays for the current kind 0 and server list. */
 const FETCH_WAIT_MS = 5000
 /** A person is reading the prompt, as for an avatar. */
 const SIGN_PATIENCE_MS = 120_000
 /** The upload token is small and the prompt says what it is for. */
 const UPLOAD_SIGN_PATIENCE_MS = 60_000
-/** The select's value for "type a server". */
-const CUSTOM = 'custom'
 
 const SIGNER_NOTE: Record<string, string> = {
   local: 'This profile belongs to the key generated on this device. Export the key (CHANGE) before you invest in it.',
@@ -71,14 +69,6 @@ function profileRelays(): string[] {
   return [...new Set([...GENERAL_RELAYS, ...relaySet()])]
 }
 
-function savedServer(): string | null {
-  try {
-    return normalizeServer(localStorage.getItem(SERVER_KEY) ?? '')
-  } catch {
-    return null
-  }
-}
-
 type Status = { kind: 'ok' | 'err' | 'note'; text: string }
 
 export function ProfileModal({ onClose }: { onClose: () => void }): JSX.Element {
@@ -88,9 +78,8 @@ export function ProfileModal({ onClose }: { onClose: () => void }): JSX.Element 
   const [existing, setExisting] = useState<NostrEvent | null>(null)
   const [loaded, setLoaded] = useState(false)
   const [fields, setFields] = useState<ProfileFields>({})
-  const [servers, setServers] = useState<string[]>(DEFAULT_BLOSSOM_SERVERS)
-  const [server, setServer] = useState<string>(() => savedServer() ?? DEFAULT_BLOSSOM_SERVERS[0])
-  const [custom, setCustom] = useState('')
+  // The server list comes with the kind 0 below, in one query (adopt).
+  const blossom = useBlossomChoice(identity.pubkey, false)
   const [uploading, setUploading] = useState<'picture' | 'banner' | null>(null)
   const [status, setStatus] = useState<Status | null>(null)
   const [busy, setBusy] = useState(false)
@@ -114,20 +103,17 @@ export function ProfileModal({ onClose }: { onClose: () => void }): JSX.Element 
       const kind0 = newest(events, me, 0)
       setExisting(kind0)
       setFields(fieldsOf(kind0 ? parseContent(kind0.content) : null))
-      const mine = serversFromList(newest(events, me, SERVER_LIST_KIND))
-      if (mine.length > 0) {
-        setServers([...mine, ...DEFAULT_BLOSSOM_SERVERS.filter((s) => !mine.includes(s))])
-        // Your own first server is the default unless this device already chose one.
-        if (!savedServer()) setServer(mine[0])
-      }
+      blossom.adopt(newest(events, me, SERVER_LIST_KIND))
       setLoaded(true)
     })()
     return () => { alive = false }
+    // blossom.adopt only sets the picker's state.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [identity.pubkey])
 
   const set = (f: ProfileField, v: string): void => setFields((prev) => ({ ...prev, [f]: v }))
 
-  const chosenServer = (): string | null => (server === CUSTOM ? normalizeServer(custom) : server)
+  const chosenServer = blossom.chosen
 
   const upload = async (field: 'picture' | 'banner', file: File | undefined): Promise<void> => {
     if (!file || uploading || busy) return
@@ -144,7 +130,7 @@ export function ProfileModal({ onClose }: { onClose: () => void }): JSX.Element 
       set(field, desc.url)
       if (field === 'picture') setPictureBroken(false)
       setStatus({ kind: 'ok', text: `Uploaded to ${host} (${Math.max(1, Math.round(file.size / 1024))} KB). Publish the profile to use it.` })
-      try { localStorage.setItem(SERVER_KEY, target) } catch { /* private mode */ }
+      blossom.remember(target)
     } catch (e) {
       setStatus({ kind: 'err', text: explainUpload(e) })
     } finally {
@@ -211,18 +197,7 @@ export function ProfileModal({ onClose }: { onClose: () => void }): JSX.Element 
 
         <p className="login__note">{SIGNER_NOTE[signerKind] ?? ''} Fields you leave alone stay as other clients wrote them.</p>
 
-        <div className="login__section">
-          <label className="login__label" htmlFor="profile-server">Where uploads go (a Blossom server)</label>
-          <div className="profile__server">
-            <select id="profile-server" className="avatars__input login__input profile__select" value={server} onChange={(e) => setServer(e.target.value)} disabled={locked}>
-              {servers.map((s) => <option key={s} value={s}>{s.replace(/^https?:\/\//, '')}{DEFAULT_BLOSSOM_SERVERS.includes(s) ? '' : ' (yours)'}</option>)}
-              <option value={CUSTOM}>Another server…</option>
-            </select>
-            {server === CUSTOM && (
-              <input className="avatars__input login__input" type="url" placeholder="https://blossom.example.com" value={custom} onChange={(e) => setCustom(e.target.value)} spellCheck={false} disabled={locked} />
-            )}
-          </div>
-        </div>
+        <BlossomServerPicker id="profile-server" choice={blossom} disabled={locked} />
 
         <div className="login__section profile__fields">
           <div>

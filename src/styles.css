@@ -9130,6 +9130,38 @@ a.feed__act { text-decoration: none; }
 .chest__glyph--message { color: #ffd27d; }
 .chest__glyph--cashu { color: #f7931a; }
 .secret__badge--key { color: #e8c547; }
+.secret__badge--audio { color: #9fd0ff; }
+.chest__glyph--audio, .shards__type--audio { color: #9fd0ff; }
+
+/* Hidden audio's card in the item modal (AudioCard, DECK-0007): the note's
+   blue where a message has its warm yellow. */
+.audio {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 14px;
+  padding: 10px 12px;
+  background: rgba(74, 163, 255, 0.07);
+  border-left: 3px solid #4aa3ff;
+  border-radius: 3px;
+}
+.audio__head { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.audio__glyph { display: inline-flex; color: #9fd0ff; }
+.audio__title { font-size: 14px; color: var(--fg); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.audio__about { font-size: 11px; line-height: 1.5; color: var(--dim); overflow-wrap: anywhere; }
+.audio__marks { display: flex; flex-wrap: wrap; gap: 4px; }
+.audio__mark {
+  font-size: 8px;
+  letter-spacing: 0.14em;
+  color: #9fd0ff;
+  border: 1px solid rgba(159, 208, 255, 0.35);
+  border-radius: 3px;
+  padding: 2px 5px;
+}
+.audio__acts { margin-top: 4px; }
+.audio__moderation { margin-top: 2px; }
+.audio-compose .ui-field { margin: 4px 0 2px; }
+.audio-compose__file { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; }
 .lootd__item--chest { align-items: flex-start; }
 /* The composers: a row of controls, the contents list, and the size meter. */
 .compose__row { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }

@@ -20,7 +20,7 @@ export interface ConfirmWords {
 }
 
 /** The thing the words are about: its kind and whatever names it. */
-export type NamedItem = Pick<WorldItem, 'type' | 'shard' | 'text' | 'keyItem' | 'chest'>
+export type NamedItem = Pick<WorldItem, 'type' | 'shard' | 'text' | 'keyItem' | 'chest' | 'audio'>
 
 /** How much of a message names it. */
 export const MESSAGE_NAME_CHARS = 40
@@ -44,7 +44,7 @@ export function messageName(text: string | null | undefined): string {
 export function itemLabel(item: NamedItem): string {
   const name = item.type === 'message'
     ? messageName(item.text)
-    : item.type === 'key' ? item.keyItem?.name ?? '' : item.type === 'chest' ? item.chest?.name ?? '' : item.shard?.name ?? ''
+    : item.type === 'key' ? item.keyItem?.name ?? '' : item.type === 'chest' ? item.chest?.name ?? '' : item.type === 'audio' ? item.audio?.title ?? '' : item.shard?.name ?? ''
   if (!name) return `this ${item.type}`
   return item.type === 'message' ? `the message “${name}”` : `the ${item.type} ${name}`
 }

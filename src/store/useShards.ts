@@ -83,6 +83,7 @@ import {
   isReference,
 } from '../lib/hidden'
 import { retractionTemplate } from '../lib/published'
+import { audioInnerTemplate, type AudioItem } from '../lib/audioItem'
 import { openWithSecret, openWithSigner, openerFor, readContents, resealWithout, revealedIn, sealEntries, sealedInside, sealerOf, type OpeningKey } from '../lib/chests'
 import { openingKeys, type HeldPlace } from '../lib/inventory'
 import { useInventory } from './useInventory'
@@ -119,6 +120,7 @@ export interface MyDeployment {
   text?: string
   key?: KeyItem
   chest?: ChestItem
+  audio?: AudioItem
   at: { x: string; y: string; z: string }
   plane: Plane
   height: number
@@ -157,6 +159,8 @@ export interface WorldItem {
   /** The key item, for a key (`key` above is the world item's own id). */
   keyItem?: KeyItem
   chest?: ChestItem
+  /** Hidden audio (DECK-0007): its file, key and how it is heard. */
+  audio?: AudioItem
   createdAt?: number
   /** The bag's lookup id, for anything addressed to the bag (comments). */
   lookupId?: string
@@ -272,6 +276,8 @@ export type ChestContent =
   | { kind: 'shard'; shardId: string; aimed?: AimedShard }
   /** A new key forged inline, for chaining: it is held by you the moment the chest is hidden. */
   | { kind: 'key'; key: KeyItem }
+  /** Hidden audio, its file already encrypted and uploaded (AudioCompose): sealed in at the chest's place. */
+  | { kind: 'audio'; audio: AudioItem }
 
 /** What a chest is sealed to, and how the composer named it. */
 export interface ChestLock {
@@ -330,6 +336,8 @@ export type DeployPending =
   /** A key forged in the composer: the keypair is made there, so its public key can be shown and sealed to before it is hidden. */
   | { type: 'key'; key: KeyItem }
   | ({ type: 'chest' } & ChestDraft)
+  /** Hidden audio (DECK-0007): the file is encrypted and on Blossom already (AudioCompose); the item is sealed as a rumor. */
+  | { type: 'audio'; audio: AudioItem }
 
 /**
  * Whether a deployment can be moved with EDIT: a shard of yours, inline or
@@ -399,6 +407,7 @@ export function pendingName(pending: DeployPending, shard: ShardModel | null): s
     case 'message': return messagePreview(pending.text)
     case 'key': return pending.key.name
     case 'chest': return pending.name
+    case 'audio': return pending.audio.title
     default: return shard?.name ?? 'shard'
   }
 }
@@ -409,6 +418,7 @@ export function pendingEmpty(pending: DeployPending, shard: ShardModel | null): 
     case 'message': return pending.text.trim().length === 0
     case 'key': return pending.key.name.trim().length === 0
     case 'chest': return pending.name.trim().length === 0 || pending.contents.length === 0
+    case 'audio': return !pending.audio.url
     default: return !shard || (shard.vertices.length === 0 && (shard.parts?.length ?? 0) === 0)
   }
 }
@@ -576,6 +586,8 @@ interface ShardsState {
   startDeployMessage: (text: string) => void
   /** Hide a key the composer forged (B1 §3.1). */
   startDeployKey: (key: KeyItem) => void
+  /** Hide audio the composer encrypted and uploaded (DECK-0007). */
+  startDeployAudio: (audio: AudioItem) => void
   /** Hide a chest as the composer drafted it; its contents are signed (the aimed ones already are) and sealed when it is hidden. */
   startDeployChest: (draft: ChestDraft & { lock: ChestLock }) => void
   /**
@@ -968,7 +980,7 @@ export const useShards = create<ShardsState>((set, get) => {
       if (h.author !== me || !h.inner || !h.keyHex || have.has(h.eventId) || deleted[h.eventId]) continue
       have.add(h.eventId)
       own.push({
-        eventId: h.eventId, inner: h.inner, ref: h.ref, bagId: h.bagId, type: h.type, shard: h.shard, text: h.text, key: h.key, chest: h.chest,
+        eventId: h.eventId, inner: h.inner, ref: h.ref, bagId: h.bagId, type: h.type, shard: h.shard, text: h.text, key: h.key, chest: h.chest, audio: h.audio,
         at: storedAt(h.at), plane: h.plane, height: h.height, lookupId: h.lookupId, keyHex: h.keyHex,
         relays: relaySet(), createdAt: h.createdAt, published: true, bag: h.bag,
       })
@@ -1020,6 +1032,9 @@ export const useShards = create<ShardsState>((set, get) => {
         const refusal = shardRefusal(model)
         if (refusal) throw new Error(refusal)
         signed.push(await cs.signEvent(shardInnerTemplate(model, at, plane, createdAt, creditOf(model))))
+      } else if (c.kind === 'audio') {
+        // A rumor, as in a bag (DECK-0007 §3): the chest's signature vouches for it.
+        signed.push(rumorOf(audioInnerTemplate(c.audio, at, plane, createdAt), cs.identity.pubkey))
       } else {
         const event = await cs.signEvent(keyInnerTemplate(c.key, at, plane, createdAt))
         signed.push(event)
@@ -1137,6 +1152,7 @@ export const useShards = create<ShardsState>((set, get) => {
     }),
     startDeployMessage: (text) => set({ pending: { type: 'message', text }, ...freshDeploy }),
     startDeployKey: (key) => set({ pending: { type: 'key', key }, ...freshDeploy }),
+    startDeployAudio: (audio) => set({ pending: { type: 'audio', audio }, ...freshDeploy }),
     // With shards aimed inside, the height starts at the fit that holds them
     // all (DeployBar, lib/deployFit.ts fitHeightAll) and follows the cursor
     // until + or - is pressed, as a shard's own height does.
@@ -1290,6 +1306,7 @@ export const useShards = create<ShardsState>((set, get) => {
       let text: string | undefined
       let key: KeyItem | undefined
       let chest: ChestItem | undefined
+      let audio: AudioItem | undefined
       // Keys forged inside a chest, held by the hider once the chest is hidden.
       let forgedInside: Array<{ event: NostrEvent; key: KeyItem }> = []
       let innerTemplate: EventTemplate | undefined
@@ -1340,6 +1357,10 @@ export const useShards = create<ShardsState>((set, get) => {
         // Signed and sealed inside the try below: the contents are signed by
         // the identity, which may be a remote signer, and the bar shows it.
         if (!pending.name.trim() || pending.contents.length === 0 || !pending.lock) return
+      } else if (pending.type === 'audio') {
+        if (!pending.audio.url) return
+        audio = { ...pending.audio, title: pending.audio.title.trim() || 'audio', about: pending.audio.about.trim() }
+        innerTemplate = audioInnerTemplate(audio, at, plane, createdAt)
       } else {
         text = pending.text.trim()
         if (!text) return
@@ -1454,10 +1475,12 @@ export const useShards = create<ShardsState>((set, get) => {
           if (!innerTemplate) throw new Error('Nothing to hide.')
           // A message is sealed as a rumor and never goes to the signer: a
           // signed one lifted out of the bag would show anywhere as your own
-          // public note (arkinox, 2026-10-20). The bag's signature vouches for it.
+          // public note (arkinox, 2026-10-20). Hidden audio is too, or a copy
+          // would show as your own file post with the key to play it
+          // (DECK-0007 §3). The bag's signature vouches for both.
           // Typed as the signed event the rest of this path carries; a rumor
           // only ever goes into the bag as its entry, never out on its own.
-          inner = pending.type === 'message' ? rumorOf(innerTemplate, cs.identity.pubkey) as NostrEvent : await cs.signEvent(innerTemplate)
+          inner = pending.type === 'message' || pending.type === 'audio' ? rumorOf(innerTemplate, cs.identity.pubkey) as NostrEvent : await cs.signEvent(innerTemplate)
         }
         let event: NostrEvent
         let published: boolean
@@ -1522,6 +1545,7 @@ export const useShards = create<ShardsState>((set, get) => {
           text,
           key,
           chest,
+          audio,
           at: storedAt(at),
           plane,
           height: deployHeight,
@@ -1976,11 +2000,11 @@ export const useShards = create<ShardsState>((set, get) => {
     const me = useCyberspace.getState().identity.pubkey
     for (const d of state.mine) {
       seen.add(d.eventId)
-      out.push({ key: d.eventId, type: d.type, at: positionOf(d), plane: d.plane, height: d.height, mine: true, author: me, shard: d.shard, text: d.text, keyItem: d.key, chest: d.chest, createdAt: d.createdAt, lookupId: d.lookupId, bagId: d.bagId, target: itemTargetOf(d.inner, d.ref), event: d.inner as NostrEvent, ...lineageOf(d.inner, d.ref) })
+      out.push({ key: d.eventId, type: d.type, at: positionOf(d), plane: d.plane, height: d.height, mine: true, author: me, shard: d.shard, text: d.text, keyItem: d.key, chest: d.chest, audio: d.audio, createdAt: d.createdAt, lookupId: d.lookupId, bagId: d.bagId, target: itemTargetOf(d.inner, d.ref), event: d.inner as NostrEvent, ...lineageOf(d.inner, d.ref) })
     }
     for (const h of Object.values(state.discovered)) {
       if (seen.has(h.eventId)) continue
-      out.push({ key: h.eventId, type: h.type, at: h.at, plane: h.plane, height: h.height, mine: false, author: h.author, shard: h.shard, text: h.text, keyItem: h.key, chest: h.chest, createdAt: h.createdAt, lookupId: h.lookupId, bagId: h.bagId, target: itemTargetOf(h.inner, h.ref), chestId: h.chestId, event: h.inner as NostrEvent | undefined, ...lineageOf(h.inner, h.ref) })
+      out.push({ key: h.eventId, type: h.type, at: h.at, plane: h.plane, height: h.height, mine: false, author: h.author, shard: h.shard, text: h.text, keyItem: h.key, chest: h.chest, audio: h.audio, createdAt: h.createdAt, lookupId: h.lookupId, bagId: h.bagId, target: itemTargetOf(h.inner, h.ref), chestId: h.chestId, event: h.inner as NostrEvent | undefined, ...lineageOf(h.inner, h.ref) })
     }
     return out
   }

@@ -29,7 +29,7 @@ import { generateSecretKey, getEventHash, getPublicKey, verifyEvent } from 'nost
 import { bytesToHex, hexToBytes, type EventTemplate, type NostrEvent } from './events'
 import { coordToXyz, hexToCoord, type Plane } from 'cyberspace-core'
 import { fromPayload } from 'sno-core/shards'
-import { MESSAGE_KIND, entryKey, isReference, readItem, type BagEntry, type ChestItem, type Hidden, type ItemBody, type KeyItem } from './hidden'
+import { entryKey, isReference, readItem, sealedAsRumor, type BagEntry, type ChestItem, type Hidden, type ItemBody, type KeyItem } from './hidden'
 import { reachGibsons, type FitPoint } from './deployFit'
 import type { Position } from './space'
 
@@ -43,11 +43,11 @@ export function forgeKey(name: string, about = ''): KeyItem {
  * How many bytes a chest's contents will be once signed, before they are:
  * each template as the event it becomes, with the id, pubkey and signature
  * at their fixed lengths, so the composer's meter reads what the seal will
- * see, give or take nothing. A message goes in as a rumor, with no
- * signature (lib/hidden.ts messageInnerTemplate).
+ * see, give or take nothing. A message and hidden audio go in as rumors,
+ * with no signature (lib/hidden.ts RUMOR_KINDS).
  */
 export function templateBytes(templates: EventTemplate[], pubkey: string): number {
-  const events = templates.map((t) => ({ id: '0'.repeat(64), pubkey, created_at: t.created_at, kind: t.kind, tags: t.tags, content: t.content, ...(t.kind === MESSAGE_KIND ? {} : { sig: '0'.repeat(128) }) }))
+  const events = templates.map((t) => ({ id: '0'.repeat(64), pubkey, created_at: t.created_at, kind: t.kind, tags: t.tags, content: t.content, ...(sealedAsRumor(t.kind) ? {} : { sig: '0'.repeat(128) }) }))
   return new TextEncoder().encode(JSON.stringify(events)).length
 }
 
@@ -159,11 +159,12 @@ function readEntry(e: BagEntry, sealer: string | undefined): ChestEntry | null {
     // An unsigned entry's id is its hash, whatever it claims: a claimed id
     // could otherwise stand in for a real item's in the inventory.
     const hash = signed ? ev.id : getEventHash(plain)
-    // A message sealed as a rumor, whose own id is that hash and whose author
-    // sealed the chest: the chest's signature covers it, as a bag's covers
-    // its messages. Only a message is ever written as a rumor; any other
-    // unsigned kind stays a claim, as it would be dropped from a bag.
-    const vouched = !signed && ev.kind === MESSAGE_KIND && sealer !== undefined && ev.pubkey === sealer && ev.id === hash
+    // A message or hidden audio sealed as a rumor, whose own id is that hash
+    // and whose author sealed the chest: the chest's signature covers it, as
+    // a bag's covers its messages. Only those kinds are ever written as
+    // rumors (RUMOR_KINDS); any other unsigned kind stays a claim, as it
+    // would be dropped from a bag.
+    const vouched = !signed && sealedAsRumor(ev.kind) && sealer !== undefined && ev.pubkey === sealer && ev.id === hash
     const body = readItem({ ...plain, id: hash })
     return body ? { id: hash, event: { ...plain, id: hash, sig: signed ? ev.sig : '' }, verified: signed || vouched, body } : null
   } catch {

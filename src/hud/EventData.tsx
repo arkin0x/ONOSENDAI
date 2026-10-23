@@ -26,6 +26,7 @@ import { useMemo, useRef, useState, type ReactNode } from 'react'
 import type { NostrEvent } from 'nostr-tools'
 import { formatStamp } from '../lib/time'
 import { CHEST_KIND, KEY_KIND, MESSAGE_KIND, OBJECT_KIND, SHARD_KIND } from '../lib/hidden'
+import { AUDIO_KIND } from '../lib/audioItem'
 import { hasNftLink, maskNftKeys } from '../lib/nftLink'
 
 /** What stands in for a hidden secret. */
@@ -79,6 +80,7 @@ export function kindName(kind: number): string | null {
     case MESSAGE_KIND: return 'message'
     case KEY_KIND: return 'item'
     case CHEST_KIND: return 'chest'
+    case AUDIO_KIND: return 'audio'
     default: return null
   }
 }

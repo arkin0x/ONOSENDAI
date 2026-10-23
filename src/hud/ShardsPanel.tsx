@@ -101,6 +101,12 @@ export function ShardsPanel(): JSX.Element {
         </div>
       </div>
 
+      {/* Hidden audio (DECK-0007): an encrypted file on Blossom, its key in the bag. */}
+      <div className="shards__section">
+        <span className="legend__label">Place hidden audio</span>
+        <button className="avatars__go shards__compose-open" onClick={() => useStash.getState().openAudio()} title="Hide an audio file, encrypted; only finders can play it"><ItemIcon type="audio" className="shards__build-icon" size={13} strokeWidth={2.5} /> PLACE AUDIO</button>
+      </div>
+
       {mine.length > 0 && (
         <div className="shards__section">
           <span className="legend__label">Deployed — hidden in cyberspace</span>

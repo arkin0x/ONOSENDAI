@@ -16,7 +16,21 @@
  */
 
 import { IMPORT_MAX_FILE_BYTES } from 'sno-core/mesh'
+import { IMPORT_ACCEPT } from 'sno-core/importFile'
 import type { ZipEntry } from './zipRead'
+
+/**
+ * The types a zip is labelled with: the registered one, then the ones Windows,
+ * older systems and some pickers give it. A picker that filters by type
+ * rather than by extension shows a zip only when its label is listed.
+ */
+export const ZIP_TYPES = ['application/zip', 'application/x-zip-compressed', 'application/x-zip', 'multipart/x-zip'] as const
+/** IMPORT's picker: the 3D files one object comes in by, and a zip by extension and by type. */
+export const IMPORT_PICKER_ACCEPT = [IMPORT_ACCEPT, '.zip', ...ZIP_TYPES].join(',')
+/** A zip by its name or by any type a zip is labelled with: bulk import, not one 3D file. */
+export function isZipFile(file: { name: string; type: string }): boolean {
+  return /\.zip$/i.test(file.name) || (ZIP_TYPES as readonly string[]).includes(file.type)
+}
 
 /** The zip itself, before a byte of it is read. */
 export const ZIP_MAX_BYTES = 100 * 1024 * 1024

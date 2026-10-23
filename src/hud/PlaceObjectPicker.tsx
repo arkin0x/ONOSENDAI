@@ -89,7 +89,7 @@ function ModelsSource({ toFeed }: { toFeed: () => void }): JSX.Element {
   }
   return (
     <>
-      <p className="login__note">Choose one of your models. You aim and place it next; CANCEL on the bar brings you back here.</p>
+      <p className="login__note">Choose one of your models. You aim and place it next; CANCEL before placing brings you back here.</p>
       <ul className="objpick__list">
         <ShardFolders items={list} refOf={modelRef} nameOf={modelName} row={(s, f) => {
           const empty = s.vertices.length === 0 && (s.parts?.length ?? 0) === 0

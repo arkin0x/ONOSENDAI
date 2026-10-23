@@ -45,6 +45,7 @@ import {
   type ShardModel,
   type ShardVertex, type Part, type Ref, cloneVertex, hexToRgb, rgbToHex } from 'sno-core/shards'
 import { withOpacity } from '../lib/opacityStep'
+import { withConstrain, type Constrain } from '../lib/walkConstrain'
 import { addPart, quarterTurnPart, removeParts } from 'sno-core/parts'
 import { FLOOR, MAX_SIZE, MIN_SIZE, stamp, type Facing, type StampKind, type WorkPlane } from 'sno-core/stamps'
 import { BUILT_IN, hexAt, remap, samePalette, snapHex, type Palette } from 'sno-core/snoPalette'
@@ -55,6 +56,7 @@ import { ConvexHull } from 'three/examples/jsm/math/ConvexHull.js'
 import { cornerAverage, weld } from '../lib/weld'
 import { subdivide, subdivideNotice } from '../lib/subdivide'
 import { withCredit, type Credit } from 'sno-core/feed'
+import { newestFirst } from '../lib/shardFolders'
 
 /** VIEW builds nothing: it is the tool you hold to look around. */
 export type Tool = 'view' | 'stamp' | 'add' | 'select' | 'face'
@@ -354,6 +356,12 @@ export interface WorkshopState {
    * anything else is kept between the floor (10) and 99. Undoable like MODE.
    */
   setOpacity: (percent: number) => void
+  /**
+   * Whether a walker can cross the shard in WALK (DECK-0003 §1.12,
+   * lib/walkConstrain.ts): off, all of its faces, or only while it draws
+   * solid and opaque. Off is stored as no field at all. Undoable like MODE.
+   */
+  setConstrain: (c: Constrain) => void
   setUnit: (unit: number) => void
   /** The build grid's half-width for the current shard, never below what its vertices need. */
   setExtent: (extent: number) => void
@@ -541,17 +549,28 @@ function load(): ShardModel[] {
 }
 
 /**
- * The object edited most recently. The workshop's list also counts a deploy
- * as an edit (hud/ShardFolders useNewestFirst), so its top may be another one.
+ * When each model was last deployed from here: the folder store hands it over
+ * (store/useShardFolders.ts). Importing that store here would close a cycle,
+ * useShardFolders, useCyberspace, lib/destinationKeys, useShards, useWorkshop,
+ * so this store imports no other. Until it does, nothing has been deployed.
+ */
+let lastUsed: () => Readonly<Record<string, number>> | undefined = () => undefined
+export function readLastUsedFrom(read: () => Readonly<Record<string, number>> | undefined): void {
+  lastUsed = read
+}
+
+/**
+ * The object first in the workshop list's order: edited or deployed most
+ * recently, by the sort every list uses (lib/shardFolders.ts newestFirst)
+ * (2026-10-23). That is the newest wherever it is filed, not the first row
+ * drawn: the list draws its folders first, and this one may be in one.
  *
  * The stored list is in the order objects were made, so its first entry is the
  * oldest, and opening that on every fresh load kept bringing back the same old
  * object (arkinox, 2026-09-27).
  */
-export function newestId(shards: ShardModel[]): string | null {
-  let best: ShardModel | null = null
-  for (const s of shards) if (!best || (s.updatedAt ?? 0) > (best.updatedAt ?? 0)) best = s
-  return best?.id ?? null
+export function newestId(shards: ShardModel[], used: Readonly<Record<string, number>> | undefined = lastUsed()): string | null {
+  return newestFirst(shards, (s) => s.id, (s) => s.updatedAt ?? 0, used)[0]?.id ?? null
 }
 
 /** Whether the list reached storage; false when it is full or refused (private mode). */
@@ -886,6 +905,8 @@ export const useWorkshop = create<WorkshopState>((set, get) => {
 
     setMode: (mode) => edit((s) => ({ ...s, mode })),
     setOpacity: (percent) => edit((s) => withOpacity(s, percent)),
+    // Already so: no edit, so no undo step that changes nothing.
+    setConstrain: (c) => edit((s) => { const next = withConstrain(s, c); return next === s ? null : next }),
     setUnit: (unit) => edit((s) => ({ ...s, unit: clampUnit(unit) })),
     // FACE works on corners it picks itself, and its panel only appears with
     // nothing else selected, so a point still held from SELECT hid FILL behind

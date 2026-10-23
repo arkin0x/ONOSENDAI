@@ -165,7 +165,13 @@ export const useStash = create<StashModals>((set) => ({
 // modal, returns to it; one that places, or any other ending, forgets. An
 // aim into a chest returns to the composer either way: it placed nothing
 // in the world, and the chest is still to be hidden.
+// A placement lined up again (useShards `placedLast`) has placed: it forgets
+// too, so a CANCEL on the copy does not bring the modal back.
 useShards.subscribe((s, prev) => {
+  if (s.pending !== null && s.deployStatus === 'done' && prev.deployStatus !== 'done') {
+    useStash.setState({ returnToModels: false, returnToFeed: false })
+    return
+  }
   if (prev.pending === null || s.pending !== null) return
   const { returnToModels, returnToFeed, returnToChest } = useStash.getState()
   if (returnToChest) { useStash.setState({ ...NONE_OPEN, returnToChest: false, chest: true }); return }

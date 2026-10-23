@@ -12,7 +12,7 @@
 
 import { useState } from 'react'
 import { useCyberspace } from '../store/useCyberspace'
-import { useShards } from '../store/useShards'
+import { copyLinedUp, useShards } from '../store/useShards'
 import { useWorkshop } from '../store/useWorkshop'
 import { useBuilder } from '../store/useBuilder'
 import { Explanation } from './Explanation'
@@ -32,7 +32,8 @@ export function ShardsPanel(): JSX.Element {
   const building = useBuilder((s) => s.active)
   // EXIT BUILD waits for a lined-up deploy to be hidden or canceled, as B
   // and the bar's EXIT do (useBuilder `exit`).
-  const deploying = useShards((s) => s.pending !== null)
+  // A copy lined up after a placement does not hold it: EXIT stands it down.
+  const deploying = useShards((s) => s.pending !== null && !copyLinedUp(s))
 
   const hiddenCount = mine.length
   const live = useCyberspace((s) => s.live)

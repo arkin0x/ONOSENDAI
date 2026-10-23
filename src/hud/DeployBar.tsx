@@ -27,6 +27,11 @@
  * lands. Both travel inside the encrypted payload, so a finder decrypts the
  * pose along with the shape and sees it as it was placed.
  *
+ * CONSTRAIN MOVEMENT IN WALK MODE (OFF / ALL / OPAQUE, DECK-0003 §1.12) is the
+ * shard's WALK setting for this deployment, seeded from the shard and written
+ * into what is hidden like SCALE; EDIT shows it too. Not for a LIVE LINK,
+ * whose setting is its author's (lib/walkConstrain.ts).
+ *
  * Three more choices belong to the BAG rather than to this item, because a bag
  * is one event per author and region holding everything hidden there (spec
  * §7.6) (arkinox, 2026-10-01):
@@ -68,7 +73,7 @@ import { useEffect, useMemo, type ReactNode } from 'react'
 import { noCallout, useRepeatable } from '../hooks/useRepeatable'
 import { MAX_UNIT } from 'sno-core/shards'
 import { formatCellSize } from 'sno-core/scale'
-import { LINK_PROTECTED, SCAN_MAX_HEIGHT, aimedOf, editingId, isProtected, ownBagIn, pendingEmpty, pendingName, positionOf, regionOf, useShards } from '../store/useShards'
+import { LINK_PROTECTED, SCAN_MAX_HEIGHT, aimedOf, atLastSpot, copyLinedUp, editingId, isProtected, ownBagIn, pendingEmpty, pendingName, positionOf, regionOf, useShards } from '../store/useShards'
 import { aimedPoint } from '../lib/chests'
 import { snapOffered } from '../lib/pose'
 import { MAX_RIDDLE_LENGTH } from '../lib/hidden'
@@ -87,6 +92,7 @@ import { cloudKeyQuote, deployCeiling, deployRoute, localKeySeconds, needsAsk, r
 import { useEscape } from '../hooks/useEscape'
 import { fitCause, fitHeight, fitHeightAll, outsideAt, type FitPoint } from '../lib/deployFit'
 import { SHALLOW_WARN, shallowBag, shallowExplain } from '../lib/shallowBag'
+import { CONSTRAINS, CONSTRAIN_TIPS } from '../lib/walkConstrain'
 
 /**
  * The bar's classes. `pad` is whether the controls pad is on screen: with it,
@@ -133,6 +139,18 @@ export function HeightWarnings({ height, intoChest, localMax }: { height: number
   )
 }
 
+/**
+ * A copy lined up on the spot the last one landed on, nothing changed, where
+ * a press is refused (useShards `atLastSpot`): the bar's button and the pad's
+ * PLACE both say so. Subscribed to both stores, since the cursor and the
+ * settings each change it.
+ */
+export function useAtLastSpot(): boolean {
+  const a = useShards((s) => atLastSpot(s, useCyberspace.getState()))
+  const b = useCyberspace((c) => atLastSpot(useShards.getState(), c))
+  return a && b
+}
+
 export function DeployBar({ pad = false }: { pad?: boolean }): JSX.Element | null {
   const pending = useShards((s) => s.pending)
   const shard = useShards((s) => (s.pending?.type === 'shard' ? s.pendingShard() : null))
@@ -169,6 +187,7 @@ export function DeployBar({ pad = false }: { pad?: boolean }): JSX.Element | nul
   const up = useShards((s) => s.deployUp)
   const spin = useShards((s) => s.deploySpin)
   const turn = useShards((s) => s.deployTurn)
+  const constrain = useShards((s) => s.deployConstrain)
   const follow = useShards((s) => s.deployFollow)
   // From the Shard Feed: a copy by default, LIVE LINK by reference (ruling B1).
   const fromFeed = useShards((s) => s.pending?.type === 'shard' && !!s.pending.object)
@@ -244,10 +263,17 @@ export function DeployBar({ pad = false }: { pad?: boolean }): JSX.Element | nul
   // at your head, and not while hiding (store/buildStep.ts stepOpen).
   const building = useBuilder((s) => s.active)
   const drivable = useCyberspace((s) => s.canDrive() && !s.atHead())
+  // A placement lined up again (useShards `placedLast`): how many are placed,
+  // and the spot the last one landed on, where an identical copy is refused.
+  const placed = useShards((s) => (s.pending !== null && s.placedLast?.pending === s.pending ? s.placedLast : null))
+  const here = useAtLastSpot()
 
+  // On a copy lined up after a placement, Escape leaves BUILD mode, as it
+  // did the moment a placement used to close the bar; CANCEL stays in it.
   useEscape('chip', pending !== null, () => {
     const s = useShards.getState()
     if (s.deployAsk) s.declineDeploy()
+    else if (copyLinedUp(s)) useBuilder.getState().exit()
     else s.cancelDeploy(true)
   })
 
@@ -285,19 +311,20 @@ export function DeployBar({ pad = false }: { pad?: boolean }): JSX.Element | nul
         <span className="deploybar__title">
           {title} <strong>{name}</strong>
         </span>
+        {placed && <span className="deploybar__scope deploybar__again" aria-label={`${placed.count} placed`} title={`${placed.count} placed. Lined up again with the same settings for the next one`}>×{placed.count}</span>}
         {!ask && (
           <button
             className="deploybar__deploy"
-            disabled={empty || working}
-            title={localEst}
+            disabled={empty || working || here}
+            title={here ? 'The last one stands here. Move, or change how it goes out, to place another' : localEst}
             onClick={() => void useShards.getState().deploy()}
             {...noCallout}
           >
-            {empty ? `${pending.type.toUpperCase()} IS EMPTY` : working ? (note ? `${note.toUpperCase()}…` : 'HIDING…') : intoChest ? 'PUT IN CHEST' : moving ? (route === 'cloud' ? 'MOVE VIA HOSAKA' : live || movedPublished ? 'MOVE & PUBLISH' : 'MOVE (LOCAL)') : route === 'cloud' ? 'HIDE VIA HOSAKA' : live ? 'HIDE & PUBLISH' : 'HIDE (LOCAL)'}
+            {empty ? `${pending.type.toUpperCase()} IS EMPTY` : here && !working ? 'PLACED HERE' : working ? (note ? `${note.toUpperCase()}…` : 'HIDING…') : intoChest ? 'PUT IN CHEST' : moving ? (route === 'cloud' ? 'MOVE VIA HOSAKA' : live || movedPublished ? 'MOVE & PUBLISH' : 'MOVE (LOCAL)') : route === 'cloud' ? 'HIDE VIA HOSAKA' : live ? 'HIDE & PUBLISH' : 'HIDE (LOCAL)'}
           </button>
         )}
         {/* Once hiding, it finishes where it was placed: CANCEL would only pretend. */}
-        <button className="deploybar__cancel" disabled={working} title={working ? 'Already hiding; it finishes where you placed it' : undefined} onClick={() => useShards.getState().cancelDeploy(true)}>CANCEL</button>
+        <button className="deploybar__cancel" disabled={working} title={working ? 'Already hiding; it finishes where you placed it' : placed ? 'Stop placing this one; Esc leaves build mode' : undefined} onClick={() => useShards.getState().cancelDeploy(true)}>CANCEL</button>
       </div>
 
       {error && <div className="deploybar__row notice">{error}</div>}
@@ -395,6 +422,26 @@ export function DeployBar({ pad = false }: { pad?: boolean }): JSX.Element | nul
             </button>
           ))}
           <button className="deploybar__btn deploybar__turn" disabled={turn.every((t) => t === 0)} onClick={() => useShards.getState().resetDeployTurn()} aria-label="Turn back to how it was built" {...noCallout}>RESET</button>
+        </DeployRow>
+      )}
+
+      {/* Whether a walker can cross it in WALK (DECK-0003 §1.12), for this
+          deployment, as SCALE is; the workshop's model keeps its own. Linked,
+          it is the author's. */}
+      {!isMessage && !link && (
+        <DeployRow kind="constrain" label="CONSTRAIN MOVEMENT IN WALK MODE">
+          <span className="deploybar__choices" role="group" aria-label="Constrain movement in WALK mode">
+          {CONSTRAINS.map((c) => (
+            <button
+              key={c}
+              className={`deploybar__toggle ${constrain === c ? 'is-on' : ''}`}
+              aria-pressed={constrain === c}
+              title={CONSTRAIN_TIPS[c]}
+              onClick={() => useShards.getState().setDeployConstrain(c)}
+              {...noCallout}
+            >{c.toUpperCase()}</button>
+          ))}
+          </span>
         </DeployRow>
       )}
 

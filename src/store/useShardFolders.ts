@@ -35,6 +35,7 @@ import { describeError } from '../lib/secrets/db'
 import { EMPTY_TREE, applyOp, canonical, childrenOf, cleanName, newFolderId, type Folder, type FolderOp, type FolderTree } from '../lib/shardFolders'
 import { commitOps, openShardFoldersDb, readTree } from '../lib/shardFoldersDb'
 import { useCyberspace } from './useCyberspace'
+import { readLastUsedFrom } from './useWorkshop'
 
 export type FolderStorage = 'loading' | 'indexeddb' | 'memory'
 
@@ -261,6 +262,9 @@ export const useShardFolders = create<ShardFoldersState>((set, get) => {
     flush: () => then(async () => undefined),
   }
 })
+
+// The workshop opens the top of its list, deploys counted (useWorkshop newestId).
+readLastUsedFrom(() => useShardFolders.getState().tree.used)
 
 /** Make or find a folder path from the top, for code outside React: returns the last folder's id. */
 export function createFolderPath(path: readonly string[]): string | null {

@@ -20,7 +20,7 @@
 import { formatCellSize, formatDistance } from 'sno-core/scale'
 import { samePosition, useCyberspace } from '../store/useCyberspace'
 import { useBuilder } from '../store/useBuilder'
-import { SCAN_MAX_HEIGHT } from '../store/useShards'
+import { SCAN_MAX_HEIGHT, useAgainName, useShards } from '../store/useShards'
 import { buildPlane, moveUnderWay } from '../lib/buildCursor'
 import { axisDistance } from '../lib/nearby'
 import { shortAxis } from '../lib/viewAt'
@@ -45,6 +45,9 @@ export function BuildBar(): JSX.Element | null {
   // waiting on you and moves nothing. It is not the Builder's, and the bar
   // says so, with a STOP, since the pad's STOP is not shown while building.
   const moving = useCyberspace(moveUnderWay)
+  // The last placement, for PLACE AGAIN after a CANCEL: its name, or null.
+  const again = useAgainName()
+  const againType = useShards((s) => s.placedLast?.pending.type ?? 'shard')
   if (!active) return null
 
   const stop = (): void => {
@@ -78,6 +81,7 @@ export function BuildBar(): JSX.Element | null {
       <div className="buildbar__acts">
         <button className="buildbar__act" onClick={() => useStash.getState().openModels()} title="Choose one of your models and place it at the build cursor"><ItemIcon type="shard" className="buildbar__icon" size={ICON} />PLACE OBJECT</button>
         <button className="buildbar__act" onClick={() => useStash.getState().openMessage()} title="Write a message and hide it at the build cursor"><ItemIcon type="message" className="buildbar__icon" size={ICON} />HIDE MESSAGE</button>
+        {again !== null && <button className="buildbar__act" onClick={() => useShards.getState().placeAgain()} title={`Place "${again}" again, with the same settings`}><ItemIcon type={againType} className="buildbar__icon" size={ICON} />PLACE AGAIN</button>}
         <button className="buildbar__act" disabled={onAvatar} onClick={() => useBuilder.getState().toAvatar()} title="Bring the build cursor and the view back to your avatar, still building (X)"><House className="buildbar__icon" size={ICON} strokeWidth={2.25} aria-hidden />RETURN TO AVATAR</button>
       </div>
 
@@ -90,6 +94,7 @@ export function BuildBar(): JSX.Element | null {
           {/* The cutoff in words a touch screen shows: the deploy bar's chip
               explains itself only in a tooltip (arkinox, 2026-10-19). */}
           <li>At height {SCAN_MAX_HEIGHT} or less, any view that stops inside that box finds it; at {SCAN_MAX_HEIGHT + 1} or more, only someone who knows the spot and height.</li>
+          <li>After a placement, PLACE AGAIN lines it up with the same settings.</li>
           <li>While placing, STEP (, and . on a keyboard) moves and snaps it in smaller steps inside the cube, shown by the small white box, without moving the camera.</li>
           <li>Building never moves your avatar and signs no move.{onAvatar ? '' : ` Your avatar is ${formatDistance(axisDistance(cursor, position))} away.`}</li>
           <li>EXIT, Esc or B leaves build mode; the view stays where it is.</li>

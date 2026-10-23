@@ -28,6 +28,7 @@ import { PaletteModal } from './PaletteModal'
 import { Explanation } from '../hud/Explanation'
 import { DIVISIONS, MAX_EXTENT, MAX_UNIT, MIN_EXTENT, MODES, OPACITY_FLOOR, TICKS_PER_UNIT, neededExtent, rgbToHex, ticksOf, toPayload, unitsLabel, type ShardMode , type ShardModel} from 'sno-core/shards'
 import { opacityPercent, stepOpacity } from '../lib/opacityStep'
+import { CONSTRAINS, CONSTRAIN_TIPS, constrainOf } from '../lib/walkConstrain'
 import { stepDivision } from './divisions'
 import { IMPORT_FORMATS_LABEL } from 'sno-core/importFile'
 import { IMPORT_PICKER_ACCEPT, isZipFile } from '../lib/shardZip'
@@ -750,6 +751,16 @@ export function Workshop(): JSX.Element | null {
             <span className="workshop__value">{opacityPercent(shard.opacity)}%</span>
             <button className="workshop__btn" {...bind(() => w().setOpacity(stepOpacity(w().current()?.opacity, 1)))} disabled={opacityPercent(shard.opacity) >= 100} aria-label="More solid" title="More solid">+</button>
             <span className="workshop__unit-size" title="Avatars always draw solid.">100% is solid</span>
+          </div>
+          {/* Whether a walker can cross it in WALK (DECK-0003 §1.12): three
+              buttons like DRAW's; OFF writes nothing (arkinox, 2026-10-23). */}
+          <div className="workshop__row">
+            <span className="workshop__label">CONSTRAIN MOVEMENT IN WALK MODE</span>
+            <div className="workshop__modes" role="group" aria-label="Constrain movement in WALK mode">
+              {CONSTRAINS.map((c) => (
+                <button key={c} className={`workshop__mode ${constrainOf(shard) === c ? 'is-on' : ''}`} aria-pressed={constrainOf(shard) === c} title={CONSTRAIN_TIPS[c]} onClick={() => w().setConstrain(c)}>{c.toUpperCase()}</button>
+              ))}
+            </div>
           </div>
           {/* A switch, as the avatar trail, hX and region key settings are,
               in the workshop's own green (arkinox, 2026-10-10). */}

@@ -68,7 +68,7 @@ import { useEffect, useMemo, type ReactNode } from 'react'
 import { noCallout, useRepeatable } from '../hooks/useRepeatable'
 import { MAX_UNIT } from 'sno-core/shards'
 import { formatCellSize } from 'sno-core/scale'
-import { LINK_PROTECTED, SCAN_MAX_HEIGHT, aimedOf, editingId, isProtected, ownBagIn, pendingEmpty, pendingName, positionOf, regionOf, useShards } from '../store/useShards'
+import { LINK_PROTECTED, SCAN_MAX_HEIGHT, aimedOf, atLastSpot, copyLinedUp, editingId, isProtected, ownBagIn, pendingEmpty, pendingName, positionOf, regionOf, useShards } from '../store/useShards'
 import { aimedPoint } from '../lib/chests'
 import { snapOffered } from '../lib/pose'
 import { MAX_RIDDLE_LENGTH } from '../lib/hidden'
@@ -131,6 +131,18 @@ export function HeightWarnings({ height, intoChest, localMax }: { height: number
       ⚠ Past height {SCAN_MAX_HEIGHT}, discovery will not surface this automatically. Only someone who already knows this spot and height can compute the region and open it.
     </div>
   )
+}
+
+/**
+ * A copy lined up on the spot the last one landed on, nothing changed, where
+ * a press is refused (useShards `atLastSpot`): the bar's button and the pad's
+ * PLACE both say so. Subscribed to both stores, since the cursor and the
+ * settings each change it.
+ */
+export function useAtLastSpot(): boolean {
+  const a = useShards((s) => atLastSpot(s, useCyberspace.getState()))
+  const b = useCyberspace((c) => atLastSpot(useShards.getState(), c))
+  return a && b
 }
 
 export function DeployBar({ pad = false }: { pad?: boolean }): JSX.Element | null {
@@ -244,10 +256,17 @@ export function DeployBar({ pad = false }: { pad?: boolean }): JSX.Element | nul
   // at your head, and not while hiding (store/buildStep.ts stepOpen).
   const building = useBuilder((s) => s.active)
   const drivable = useCyberspace((s) => s.canDrive() && !s.atHead())
+  // A placement lined up again (useShards `placedLast`): how many are placed,
+  // and the spot the last one landed on, where an identical copy is refused.
+  const placed = useShards((s) => (s.pending !== null && s.placedLast?.pending === s.pending ? s.placedLast : null))
+  const here = useAtLastSpot()
 
+  // On a copy lined up after a placement, Escape leaves BUILD mode, as it
+  // did the moment a placement used to close the bar; CANCEL stays in it.
   useEscape('chip', pending !== null, () => {
     const s = useShards.getState()
     if (s.deployAsk) s.declineDeploy()
+    else if (copyLinedUp(s)) useBuilder.getState().exit()
     else s.cancelDeploy(true)
   })
 
@@ -285,19 +304,20 @@ export function DeployBar({ pad = false }: { pad?: boolean }): JSX.Element | nul
         <span className="deploybar__title">
           {title} <strong>{name}</strong>
         </span>
+        {placed && <span className="deploybar__scope deploybar__again" aria-label={`${placed.count} placed`} title={`${placed.count} placed. Lined up again with the same settings for the next one`}>×{placed.count}</span>}
         {!ask && (
           <button
             className="deploybar__deploy"
-            disabled={empty || working}
-            title={localEst}
+            disabled={empty || working || here}
+            title={here ? 'The last one stands here. Move, or change how it goes out, to place another' : localEst}
             onClick={() => void useShards.getState().deploy()}
             {...noCallout}
           >
-            {empty ? `${pending.type.toUpperCase()} IS EMPTY` : working ? (note ? `${note.toUpperCase()}…` : 'HIDING…') : intoChest ? 'PUT IN CHEST' : moving ? (route === 'cloud' ? 'MOVE VIA HOSAKA' : live || movedPublished ? 'MOVE & PUBLISH' : 'MOVE (LOCAL)') : route === 'cloud' ? 'HIDE VIA HOSAKA' : live ? 'HIDE & PUBLISH' : 'HIDE (LOCAL)'}
+            {empty ? `${pending.type.toUpperCase()} IS EMPTY` : here && !working ? 'PLACED HERE' : working ? (note ? `${note.toUpperCase()}…` : 'HIDING…') : intoChest ? 'PUT IN CHEST' : moving ? (route === 'cloud' ? 'MOVE VIA HOSAKA' : live || movedPublished ? 'MOVE & PUBLISH' : 'MOVE (LOCAL)') : route === 'cloud' ? 'HIDE VIA HOSAKA' : live ? 'HIDE & PUBLISH' : 'HIDE (LOCAL)'}
           </button>
         )}
         {/* Once hiding, it finishes where it was placed: CANCEL would only pretend. */}
-        <button className="deploybar__cancel" disabled={working} title={working ? 'Already hiding; it finishes where you placed it' : undefined} onClick={() => useShards.getState().cancelDeploy(true)}>CANCEL</button>
+        <button className="deploybar__cancel" disabled={working} title={working ? 'Already hiding; it finishes where you placed it' : placed ? 'Stop placing this one; Esc leaves build mode' : undefined} onClick={() => useShards.getState().cancelDeploy(true)}>CANCEL</button>
       </div>
 
       {error && <div className="deploybar__row notice">{error}</div>}

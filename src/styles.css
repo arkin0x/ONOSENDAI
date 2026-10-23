@@ -3443,6 +3443,24 @@ kbd {
   background: rgba(6, 14, 22, 0.88);
   border: 1px solid rgba(0, 229, 255, 0.3);
 }
+/* Unsaved changes: below the toast, and it stays until saving works again. */
+.ws__storage {
+  position: absolute;
+  top: 96px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 4;
+  pointer-events: none;
+  max-width: min(360px, calc(100vw - 24px));
+  padding: 7px 10px;
+  border-radius: 9px;
+  text-align: center;
+  font-size: 9px;
+  letter-spacing: 0.1em;
+  color: var(--warn);
+  background: rgba(6, 14, 22, 0.92);
+  border: 1px solid rgba(255, 176, 32, 0.45);
+}
 /* Bottom left: TOOLS, its panel above the chip. */
 .ws__tools {
   position: absolute;

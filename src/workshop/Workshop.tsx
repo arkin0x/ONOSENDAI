@@ -110,6 +110,16 @@ function Toast(): JSX.Element | null {
 }
 
 /**
+ * Why the latest changes are not saved, for as long as they are not: the
+ * toast goes after a moment, and this must not (store/workshopStorage.ts).
+ */
+function StorageWarning(): JSX.Element | null {
+  const error = useWorkshop((s) => s.storageError)
+  if (!error) return null
+  return <div className="ws__storage" role="alert">{error}</div>
+}
+
+/**
  * The CONTROLS pad: the main pad's nine cells, for the selection. Arrows move
  * it a unit in screen directions (the sub-label says which world axis that is
  * right now), the corners CONNECT and DELETE, the hub counts the points and
@@ -696,6 +706,7 @@ export function Workshop(): JSX.Element | null {
       {dropping && <div className="workshop__drop" aria-hidden>DROP TO IMPORT</div>}
       <Intro />
       <Toast />
+      <StorageWarning />
       <ZipImport />
 
       {/* Top left: the three chips and the history in one row, wrapping on a phone,

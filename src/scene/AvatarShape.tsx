@@ -58,7 +58,8 @@ export function AvatarShape({ pubkey, color, renderOrder = 0, depthTest = true, 
     const k = draw.mesh
     return (
       <group scale={[k, k, k]}>
-        <ShardMesh shard={shard} world cull={firstPerson} />
+        {/* An avatar is opaque whatever its shard says (DECK-0003 §3.3). */}
+        <ShardMesh shard={shard} world cull={firstPerson} ignoreOpacity />
       </group>
     )
   }

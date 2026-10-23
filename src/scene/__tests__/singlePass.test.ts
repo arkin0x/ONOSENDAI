@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { readFileSync, readdirSync } from 'node:fs'
 import { join } from 'node:path'
+import { basicFaceProps } from '../shardFaces'
 
 /**
  * Every transparent DoubleSide material sets forceSinglePass.
@@ -41,5 +42,17 @@ describe('transparent DoubleSide materials draw in one pass', () => {
       }
     }
     expect(offenders).toEqual([])
+  })
+})
+
+describe('a see-through shard (DECK-0003 §1.11) draws in one pass too', () => {
+  // Its face material's props come from basicFaceProps, out of reach of the
+  // scan above, so it is asked directly: every opacity a real object can
+  // have, in the world and off it, is one pass. Only a ghost keeps two.
+  it('at every opacity from the floor to solid', () => {
+    for (let pct = 10; pct <= 100; pct += 5) {
+      for (const world of [true, false]) expect(basicFaceProps(pct / 100, { ghost: false, world }).forceSinglePass).toBe(true)
+    }
+    expect(basicFaceProps(0.45, { ghost: true, world: true }).forceSinglePass).toBe(false)
   })
 })

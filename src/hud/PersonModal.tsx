@@ -78,7 +78,7 @@ interface CardProps {
   event?: NostrEvent | null
   onClose: () => void
   /** What draws the turning avatar; a test stands in a plain one. */
-  Preview?: ComponentType<{ shard: ShardModel }>
+  Preview?: ComponentType<{ shard: ShardModel; ignoreOpacity?: boolean }>
 }
 
 export function PersonCard({ pubkey, shard, event = null, onClose, Preview = ShardSpin }: CardProps): JSX.Element {
@@ -157,7 +157,7 @@ export function PersonCard({ pubkey, shard, event = null, onClose, Preview = Sha
 
         {hasShard && shard && (
           <div className="person__avatar">
-            <Preview shard={shard} />
+            <Preview shard={shard} ignoreOpacity />
             <span className="secret__shard-name">{shard.name}</span>
             <span className="secret__shard-meta">{shard.vertices.length} v · {shard.faces.length} f · {shard.mode.toUpperCase()} · unit 2^{shard.unit}</span>
           </div>

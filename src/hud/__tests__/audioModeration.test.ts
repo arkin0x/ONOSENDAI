@@ -22,7 +22,7 @@ import { renderToString } from 'react-dom/server'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { AudioCard } from '../AudioCard'
-import { audioModeration } from '../SecretModal'
+import { audioModeration, muteIdOf } from '../SecretModal'
 import { useShards } from '../../store/useShards'
 import { useCyberspace } from '../../store/useCyberspace'
 import { useMutes } from '../../store/useMutes'
@@ -41,6 +41,8 @@ const find = (author: string): Hidden => ({ eventId: ID, bagId: 'bag', lookupId:
 const audioCard = (mine: boolean): string => renderToString(createElement(AudioCard, { id: ID, triggerId: ID, audio, moderation: audioModeration({ key: ID }, HIDER, mine, () => {}) }))
 const count = (html: string, s: string): number => html.split(s).length - 1
 const source = readFileSync(join(__dirname, '..', 'SecretModal.tsx'), 'utf8')
+const cardSource = readFileSync(join(__dirname, '..', 'AudioCard.tsx'), 'utf8')
+const itemsSource = readFileSync(join(__dirname, '..', 'InventoryPanel.tsx'), 'utf8')
 
 let identity: ReturnType<typeof useCyberspace.getState>['identity']
 beforeEach(() => {
@@ -78,7 +80,7 @@ describe('the audio card', () => {
     expect(source).toMatch(/item\.type !== 'audio' && <BlockButton/)
   })
 
-  it('a muted audio item leaves the world, so its card closes and its sound stops', () => {
+  it('a muted audio item leaves the world, so the item modal has nothing to show', () => {
     useShards.setState({ curated: null, discovered: { [ID]: find(HIDER) } })
     expect(useShards.getState().secretByEvent(ID)).not.toBeNull()
     useMutes.setState({ muted: { pubkeys: new Set(), items: new Set([ID]) } })
@@ -86,10 +88,29 @@ describe('the audio card', () => {
     expect(useShards.getState().secretByEvent(ID)).toBeNull()
   })
 
-  it('a blocked hider\'s audio leaves the world, so its card closes and its sound stops', () => {
+  it('a blocked hider\'s audio leaves the world, so the item modal has nothing to show', () => {
     useShards.setState({ curated: null, discovered: { [ID]: find(HIDER) } })
     useMutes.setState({ muted: { pubkeys: new Set([HIDER]), items: new Set() } })
     expect(useShards.getState().worldItems().some((w) => w.key === ID)).toBe(false)
     expect(useShards.getState().secretByEvent(ID)).toBeNull()
+  })
+
+  it('stops its sound when it closes, and both places it is shown drop it when hidden (source)', () => {
+    // The card's play ends with the card.
+    expect(cardSource).toMatch(/useEffect\(\(\) => \(\) => stopAudio\(id\), \[id\]\)/)
+    // The item modal renders nothing for an item worldItems no longer holds.
+    expect(source).toMatch(/useMutes\(\(s\) => s\.muted\)/)
+    expect(source).toMatch(/if \(!item \|\| !author\) return null/)
+    // ITEMS lists nothing the mute list hides, by id or lineage, and its audio card has the same row.
+    expect(itemsSource).toMatch(/hidesThing\(muted, \{ authors: \[it\.author\], ids: \[it\.id, itemLineage\(it\.event\)\] \}, self\)/)
+    expect(itemsSource).toMatch(/label="MUTE THIS AUDIO"/)
+  })
+
+  it('mutes a moved item by its lineage, so a move by its hider stays muted', () => {
+    const LINEAGE = '4'.repeat(64)
+    expect(muteIdOf({ key: ID, lineage: LINEAGE })).toBe(LINEAGE)
+    useShards.setState({ curated: null, discovered: { [ID]: { ...find(HIDER), inner: { id: ID, pubkey: HIDER, kind: 1063, created_at: 1, tags: [['d', LINEAGE]], content: '' } as never } } })
+    useMutes.setState({ muted: { pubkeys: new Set(), items: new Set([LINEAGE]) } })
+    expect(useShards.getState().worldItems().some((w) => w.key === ID)).toBe(false)
   })
 })

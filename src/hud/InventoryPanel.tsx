@@ -45,6 +45,7 @@ import { ChestBlock, Unsigned } from './ItemRows'
 import { useCashu, cashuStateLabel } from './useCashu'
 import { useMutes } from '../store/useMutes'
 import { hidesThing } from '../lib/muteList'
+import { BlockButton, MuteItemButton } from './BlockButton'
 
 /** How a held item came to be held, in a word for the row. */
 const SOURCE: Record<HeldItem['source'], string> = { forged: 'forged by you', found: 'found', taken: 'taken', pasted: 'pasted' }
@@ -184,6 +185,7 @@ const keptFromAll = (text: string | undefined): boolean => isCoin(text) || hasNf
  */
 function TakenRow({ item }: { item: HeldItem }): JSX.Element {
   const [open, setOpen] = useState(false)
+  const me = useCyberspace((s) => s.identity.pubkey)
   const [moved, setMoved] = useState(false)
   const { raw, token } = readCashuToken(item.type === 'message' ? item.text : null)
   const cashu = useCashu(raw ? item.text : null)
@@ -231,7 +233,17 @@ function TakenRow({ item }: { item: HeldItem }): JSX.Element {
       </span>
       {open && item.type === 'audio' && item.audio && (
         <div className="held__details">
-          <AudioCard id={`held:${item.id}`} triggerId={itemLineage(item.event) ?? item.id} audio={item.audio} />
+          <AudioCard
+            id={`held:${item.id}`}
+            triggerId={itemLineage(item.event) ?? item.id}
+            audio={item.audio}
+            moderation={item.author === me ? undefined : (
+              <>
+                <MuteItemButton id={itemLineage(item.event) ?? item.id} label="MUTE THIS AUDIO" onMuted={() => setOpen(false)} />
+                <BlockButton pubkey={item.author} onBlocked={() => setOpen(false)} />
+              </>
+            )}
+          />
         </div>
       )}
       {open && item.type === 'message' && (
@@ -251,7 +263,7 @@ export function InventoryPanel(): JSX.Element {
   const muted = useMutes((s) => s.muted)
   const self = useCyberspace((s) => s.identity.pubkey)
   const { keys, taken } = useMemo(
-    () => splitPanels([], Object.values(items).filter((it) => !hidesThing(muted, { authors: [it.author], ids: [it.id] }, self))).loot,
+    () => splitPanels([], Object.values(items).filter((it) => !hidesThing(muted, { authors: [it.author], ids: [it.id, itemLineage(it.event)] }, self))).loot,
     [items, muted, self],
   )
   // Which DISCOVERED chests each item opens, from the lock tags of chests seen.

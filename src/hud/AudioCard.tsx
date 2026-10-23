@@ -13,7 +13,10 @@
  * BLOCK AUTHOR go (SecretModal, store/useMutes); absent, nothing is drawn.
  *
  * Until the world plays sources by itself (the next step), the card's play
- * stops when the card closes, so nothing sounds with no way to stop it.
+ * stops when the card closes, so nothing sounds with no way to stop it. It
+ * is mounted in two places: the item modal (SecretModal) and a TAKEN row in
+ * ITEMS (InventoryPanel). Both drop it when the mute list hides the item, so
+ * a mute or a block stops its sound.
  */
 
 import { useEffect, useState, useSyncExternalStore, type ReactNode } from 'react'

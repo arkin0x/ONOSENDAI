@@ -53,6 +53,13 @@ class FakeContext extends EventTarget {
   createGain(): unknown { return anything() }
   createPanner(): unknown { return anything() }
   createMediaElementSource(): unknown { return anything() }
+  createBufferSource(): unknown { return anything() }
+  static decodable = true
+  decodeAudioData(_bytes: ArrayBuffer, ok: (b: unknown) => void, fail: () => void): Promise<unknown> {
+    if (FakeContext.decodable) ok(anything())
+    else fail()
+    return new Promise(() => {})
+  }
   async resume(): Promise<void> {}
 }
 
@@ -76,6 +83,7 @@ class FakeAudio extends EventTarget {
 }
 
 let audio: AudioItem
+let shortAudio: AudioItem
 const realFetch = globalThis.fetch
 const flush = async (): Promise<void> => { for (let i = 0; i < 6; i++) await Promise.resolve() }
 
@@ -85,6 +93,7 @@ beforeEach(async () => {
   vi.stubGlobal('window', w)
   vi.stubGlobal('Audio', FakeAudio)
   FakeAudio.allowed = false
+  FakeContext.decodable = true
   made.length = 0
   const blobs = new Map<string, Uint8Array>()
   globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -100,8 +109,11 @@ beforeEach(async () => {
     return b ? new Response(b as BodyInit, { status: 200 }) : new Response(null, { status: 404 })
   }) as typeof fetch
   forgetOpenedAudio()
-  const up = await sealAndUpload(new Blob([toneWav() as BlobPart], { type: 'audio/ogg' }), 'https://blossom.test', async (t) => finalizeEvent(t, generateSecretKey()))
+  // Long enough (over DECODE_WHOLE_BYTES) to stream from an element.
+  const up = await sealAndUpload(new Blob([toneWav(70) as BlobPart], { type: 'audio/ogg' }), 'https://blossom.test', async (t) => finalizeEvent(t, generateSecretKey()))
   audio = { ...up, title: 'Drone', about: '', autoplay: true, loop: true, retrigger: 'once', walkOnly: false }
+  const short = await sealAndUpload(new Blob([toneWav(1) as BlobPart], { type: 'audio/wav' }), 'https://blossom.test', async (t) => finalizeEvent(t, generateSecretKey()))
+  shortAudio = { ...short, title: 'Drip', about: '', autoplay: true, loop: true, retrigger: 'once', walkOnly: false }
 })
 
 afterEach(() => {
@@ -111,7 +123,24 @@ afterEach(() => {
   vi.unstubAllGlobals()
 })
 
-describe('a world voice', () => {
+describe('a short world file, decoded whole', () => {
+  it('plays from a buffer, with no element and no tap of its own once sound is out', async () => {
+    await startWorld('b1', shortAudio)
+    await flush()
+    expect(useHiddenAudio.getState().entries[worldKey('b1')]?.phase).toBe('playing')
+    expect(made).toHaveLength(0)
+  })
+
+  it('that this browser cannot decode is a failure of the item, and waits out its pause', async () => {
+    FakeContext.decodable = false
+    await startWorld('b2', shortAudio)
+    await flush()
+    expect(useHiddenAudio.getState().entries[worldKey('b2')]).toBeUndefined()
+    expect(worldFailed('b2')).toBe(true)
+  })
+})
+
+describe('a long world file, streamed', () => {
   it('that fails to decode while it waits for a tap is a failure of the item, and waits out its pause', async () => {
     await startWorld('w1', audio)
     await flush()

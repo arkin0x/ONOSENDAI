@@ -62,11 +62,14 @@ export const cardKey = (itemKey: string): string => `card:${itemKey}`
 export const worldKey = (itemKey: string): string => `world:${itemKey}`
 
 interface Voice {
-  el: HTMLAudioElement
-  url: string
+  /** The element a streamed voice plays from; absent for a file decoded whole (a short world file). */
+  el?: HTMLAudioElement
+  url?: string
   node: ThreeAudio<GainNode | PannerNode> | null
-  /** Try to play the element now; inside a gesture where a browser asks for one. */
+  /** Try to play now; inside a gesture where a browser asks for one. */
   play: () => void
+  /** Hold it where it is, to pick up there. */
+  pause: () => void
 }
 
 const voices = new Map<string, Voice>()
@@ -151,7 +154,7 @@ export function syncVoicePhases(): void {
     for (const key of voices.keys()) {
       const e = useHiddenAudio.getState().entries[key]
       // Paused where it is, so a one-shot does not run on unheard and is not over when sound is back.
-      if (e?.phase === 'playing') { voices.get(key)?.el.pause(); waitForTap(key) }
+      if (e?.phase === 'playing') { voices.get(key)?.pause(); waitForTap(key) }
     }
     return
   }
@@ -207,16 +210,20 @@ function release(key: string): void {
   const v = voices.get(key)
   if (!v) return
   voices.delete(key)
-  v.el.pause()
+  v.el?.pause()
+  // A file decoded whole plays from a buffer source, stopped here.
+  try { if (!v.el && v.node?.isPlaying) v.node.stop() } catch { /* already stopped */ }
   // three's disconnect parts the source only; its gain (and a panner) stay
   // wired to the listener, so they are parted too, or every voice leaves
   // live nodes in the graph.
   try { v.node?.disconnect() } catch { /* already apart */ }
   try { (v.node?.getOutput() as AudioNode | undefined)?.disconnect() } catch { /* already apart */ }
   try { v.node?.gain.disconnect() } catch { /* already apart */ }
-  v.el.removeAttribute('src')
-  v.el.load()
-  URL.revokeObjectURL(v.url)
+  if (v.el) {
+    v.el.removeAttribute('src')
+    v.el.load()
+  }
+  if (v.url) URL.revokeObjectURL(v.url)
 }
 
 /** Whether a voice is sounding, or about to. */
@@ -331,7 +338,7 @@ export async function playAudio(itemKey: string, audio: AudioItem, who?: MuteSub
       release(key)
       setEntry(key, { ...entry, phase: 'error', error: failWith(err) })
     })
-    voices.set(key, { el, url, node, play })
+    voices.set(key, { el, url, node, play, pause: () => el.pause() })
     play()
   } catch (err) {
     if (sessions.get(key) !== mine) return
@@ -359,6 +366,36 @@ export async function startWorld(itemKey: string, audio: AudioItem, onStarted?: 
   try {
     const blob = await openAudio(audio)
     if (sessions.get(key) !== mine) return
+    // A short file is decoded whole and played from a buffer: a loop then has
+    // no gap at its seam, and a buffer needs no tap of its own once sound is out.
+    if (blob.size <= DECODE_WHOLE_BYTES) {
+      const buffer = await decodeWhole(blob)
+      if (sessions.get(key) !== mine) return
+      const node = new PositionalAudio(l)
+      node.setRolloffFactor(0)
+      node.setBuffer(buffer)
+      node.setLoop(audio.loop)
+      node.setVolume(pendingGain.get(key) ?? 0)
+      // A one-shot that reaches its end is let go, as an element's 'ended' does.
+      const ended = node.onEnded.bind(node)
+      node.onEnded = () => { ended(); if (sessions.get(key) === mine) stopVoice(key) }
+      const entry = { title: audio.title, mode: 'world' as const, itemKey }
+      let started = false
+      const play = (): void => {
+        if (sessions.get(key) !== mine) return
+        if (!audioRunning()) { waitForTap(key); return }
+        if (!node.isPlaying) node.play()
+        waitingPlays.delete(key)
+        armGesture()
+        setEntry(key, { ...entry, phase: 'playing' })
+        failures.delete(itemKey)
+        if (!started) { started = true; onStarted?.() }
+      }
+      voices.set(key, { node, play, pause: () => { if (node.isPlaying) node.pause() } })
+      if (audioRunning()) play()
+      else waitForTap(key)
+      return
+    }
     const url = URL.createObjectURL(blob)
     let el: HTMLAudioElement
     let node: PositionalAudio
@@ -375,13 +412,31 @@ export async function startWorld(itemKey: string, audio: AudioItem, onStarted?: 
     }
     const entry = { title: audio.title, mode: 'world' as const, itemKey }
     const play = playerOf(key, mine, el, entry, true, onStarted, (err) => worldFailure(itemKey, err))
-    voices.set(key, { el, url, node, play })
+    voices.set(key, { el, url, node, play, pause: () => el.pause() })
     if (audioRunning()) play()
     else waitForTap(key)
   } catch (err) {
     if (sessions.get(key) !== mine) return
     worldFailure(itemKey, err)
   }
+}
+
+/**
+ * World files this size or smaller (decrypted) are decoded whole: about a
+ * minute of compressed audio, a few tens of MB once decoded, and at most
+ * MAX_VOICES of them at once (lib/audioWorld). Longer files stream.
+ */
+export const DECODE_WHOLE_BYTES = 1024 * 1024
+
+/** Decode a file into a buffer on the shared context; the callback form, which every Safari has. Throws when it cannot. */
+function decodeWhole(blob: Blob): Promise<AudioBuffer> {
+  const ctx = audioContext()
+  if (!ctx) return Promise.reject(new Error('No audio here.'))
+  return blob.arrayBuffer().then((bytes) => new Promise<AudioBuffer>((resolve, reject) => {
+    const p = ctx.decodeAudioData(bytes, resolve, () => reject(new Error('This browser cannot play this kind of file.')))
+    // Where it also answers with a promise, its refusal is the callback's.
+    if (p && typeof (p as Promise<AudioBuffer>).catch === 'function') (p as Promise<AudioBuffer>).catch(() => { /* told by the callback */ })
+  }))
 }
 
 /** Failed world items: how many times in a row, and until when they are not tried again (ms, performance clock). */

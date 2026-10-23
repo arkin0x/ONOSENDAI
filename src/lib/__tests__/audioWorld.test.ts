@@ -142,6 +142,51 @@ describe('one tick of the world', () => {
   })
 })
 
+describe('a file is fetched only inside its region', () => {
+  it('a source the ears are outside of, however near its wall, is never started, so its file is never asked for', () => {
+    const src = sourceLocal(at, H)
+    // Just past the region's low x wall, a gibson from the source's own wall.
+    const outside = hearSource({ ...loop, fade: 40 }, at, H, [-0.01, src[1], src[2]], false)
+    expect(outside.gain).toBe(0)
+    expect(planWorld([{ key: 'o', lineage: 'Lo', audio: loop, heard: outside }], new Set(), () => false, 0, freshMemory()).start).toEqual([])
+    const shotOutside = hearSource(shot, at, H, [-0.01, src[1], src[2]], true)
+    expect(planWorld([{ key: 'o', lineage: 'Lo', audio: shot, heard: shotOutside }], new Set(), () => false, 0, freshMemory()).start).toEqual([])
+  })
+})
+
+describe('the loudest few', () => {
+  it('only the loudest MAX_VOICES start; the rest wait silent, and a loop pushed out lets go after a while', () => {
+    const m = freshMemory()
+    const gains = [0.9, 0.2, 0.7, 0.5, 0.1, 0.8]
+    const sources = gains.map((g, i) => source(`s${i}`, loop, g))
+    const p = planWorld(sources, new Set(), () => false, 0, m, new Set(), 4)
+    expect(p.start.map((x) => x.key).sort()).toEqual(['s0', 's2', 's3', 's5'])
+    // s1 comes up loudest: s3 (now fifth) is heard as silent, and lets go after QUIET_MS.
+    const playing = new Set(['s0', 's2', 's3', 's5'])
+    const louder = sources.map((s) => (s.key === 's1' ? { ...s, heard: { gain: 0.95, inSphere: false } } : s))
+    const q = planWorld(louder, playing, () => false, 100, m, new Set(), 4)
+    expect(q.start.map((x) => x.key)).toEqual(['s1'])
+    expect(q.gains.get('s3')).toBe(0)
+    expect(planWorld(louder, playing, () => false, 100 + QUIET_MS, m, new Set(), 4).stop).toContain('s3')
+  })
+
+  it('a one-shot that is neither playing nor firing takes no slot: the loops get all four', () => {
+    const m = freshMemory()
+    const fired = () => true
+    const sources = [source('quiet-shot', shot, 1, true), ...[0, 1, 2, 3].map((i) => source(`l${i}`, loop, 0.5))]
+    // The one-shot already fired here (once mode): it will not sound, so it does not count.
+    planWorld(sources, new Set(), fired, 0, m, new Set(), 4)
+    const p = planWorld(sources.map((s) => (s.key === 'quiet-shot' ? s : s)), new Set(), fired, 100, m, new Set(), 4)
+    expect(p.start.map((x) => x.key).sort()).toEqual(['l0', 'l1', 'l2', 'l3'])
+  })
+
+  it('a one-shot that fires while out of the loudest few does not start', () => {
+    const m = freshMemory()
+    const p = planWorld([source('a', loop, 1), source('b', shot, 1, true)], new Set(), () => false, 0, m, new Set(), 1)
+    expect(p.start.map((x) => x.key)).toEqual(['a'])
+  })
+})
+
 describe('TV music steps down', () => {
   it('while any hidden audio is heard above a whisper, or a card plays', () => {
     expect(DUCKED).toBeLessThan(1)

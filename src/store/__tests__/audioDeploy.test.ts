@@ -96,6 +96,25 @@ describe('hiding audio', () => {
   })
 })
 
+describe('the FADE stepper (step 3)', () => {
+  it('sets the pending audio\'s sphere, AUTO clears it, and the deploy writes it clamped to where it lands', async () => {
+    S().startDeployAudio(audio)
+    S().setDeployFade(1_000_000)
+    expect(S().pending).toMatchObject({ type: 'audio', audio: { fade: 1_000_000 } })
+    S().setDeployFade(undefined)
+    const p = S().pending
+    expect(p?.type === 'audio' && 'fade' in p.audio).toBe(false)
+    S().setDeployFade(1_000_000)
+    useShards.setState({ deployHeight: 6, deployHeightAuto: false })
+    await S().deploy()
+    expect(S().deployError).toBeNull()
+    const d = S().mine.find((x) => x.type === 'audio')!
+    // Never past the nearest wall of a 64-gibson region.
+    expect(d.audio!.fade).toBeLessThanOrEqual(32)
+    expect(d.inner.tags.find((t) => t[0] === 'fade')?.[1]).toBe(String(d.audio!.fade))
+  })
+})
+
 describe('audio in a chest (a room behind a door)', () => {
   it('goes in as a rumor the chest vouches for, and is revealed in place when the chest opens', async () => {
     const lock = forgeKey('Door Key')

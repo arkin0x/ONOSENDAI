@@ -35,7 +35,7 @@ import { markShown } from '../lib/worldMarks'
 import { alignedOrigin, useCyberspace } from '../store/useCyberspace'
 import { foundAsOf, useTv } from '../store/useTv'
 import { useProfile } from '../hooks/useProfile'
-import { PlacedShard, drawableShards } from './WorldShards'
+import { PlacedShard, drawableShards, useSteadied } from './WorldShards'
 import { ItemMark, itemMarkText, type ItemWears } from './WorldMessages'
 import { regionBox, type Box } from '../lib/clip'
 import { useItemModel } from '../hooks/useItemModel'
@@ -261,10 +261,12 @@ export function TvFinds({ axes }: { axes: ViewAxes }): JSX.Element | null {
   const me = useCyberspace((s) => s.identity.pubkey)
   const shown = useMemo(() => foundAsOf(found, tapeTime).filter(({ item }) => !findHidden(item, muted, me)), [found, tapeTime, muted, me])
 
-  const shards = useMemo(() => drawableShards(
+  const placedNow = useMemo(() => drawableShards(
     shown.map(({ item: h }) => ({ key: h.eventId, type: h.type, at: h.at, height: h.height, plane: h.plane, shard: h.shard })),
     anchor, plane, scaleExp, axes,
   ), [shown, anchor, plane, scaleExp, axes])
+  // As the tape moves, each find keeps its cut and GPU buffers (WorldShards steadied).
+  const shards = useSteadied(placedNow)
 
   // Keys and chests at the zoom the world draws them at, and no further
   // out (lib/worldMarks markShown, as WorldMessages draws them).

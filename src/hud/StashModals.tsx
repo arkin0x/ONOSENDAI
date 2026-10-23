@@ -20,6 +20,7 @@ import { ItemIcon, distinctKinds } from './ItemIcon'
 import { PlaceObjectPicker } from './PlaceObjectPicker'
 import { FeedList } from './FeedList'
 import { Explanation } from './Explanation'
+import { ShardThumb } from './ShardThumb'
 import { GitFork, Pencil, Sparkles } from 'lucide-react'
 import type { FeedObject } from 'sno-core/feed'
 import { useWorkshop } from '../store/useWorkshop'
@@ -76,6 +77,7 @@ function ItemRow({ d, onGo }: { d: MyDeployment; onGo: () => void }): JSX.Elemen
   return (
     <li className="shards__row shards__row--deployed">
       <button className="shards__goto" onClick={onGo} title="Fly to it and see its record">
+        {d.shard && <ShardThumb shard={d.shard} />}
         <span className="avatars__who">
           <ItemIcon className={`shards__type shards__type--${coin ? 'cashu' : d.type}`} type={d.type} coin={coin} size={12} />
           {coin ? (cashu.token ? cashuLabel(cashu.token) : 'cashu token') : depName(d)}

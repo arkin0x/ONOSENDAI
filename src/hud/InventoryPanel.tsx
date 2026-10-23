@@ -27,6 +27,7 @@ import { useProfile } from '../hooks/useProfile'
 import { cashuLabel, readCashuToken } from '../lib/cashu'
 import { hasNftLink } from '../lib/nftLink'
 import { ItemFace, ItemIcon } from './ItemIcon'
+import { ShardThumb } from './ShardThumb'
 import { chestsOpenedBy, clearsWithAll, keyText, splitPanels, type HeldItem } from '../lib/inventory'
 import { regionLabel } from '../lib/loot'
 import { safeNpub } from '../lib/npub'
@@ -201,7 +202,7 @@ function TakenRow({ item }: { item: HeldItem }): JSX.Element {
   }
   return (
     <li className="secrets__row held__row">
-      <ItemIcon className={`chest__glyph chest__glyph--${coin ? 'cashu' : item.type}`} type={item.type} coin={coin} />
+      {item.type === 'shard' && item.shard ? <ShardThumb shard={item.shard} /> : <ItemIcon className={`chest__glyph chest__glyph--${coin ? 'cashu' : item.type}`} type={item.type} coin={coin} />}
       {item.type === 'chest' && item.chest
         ? <ChestBlock id={item.id} chest={item.chest} author={item.author} verified={item.verified} place={item.place} sealer={item.verified ? item.event.pubkey : undefined} />
         : (

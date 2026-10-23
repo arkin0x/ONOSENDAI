@@ -26,6 +26,7 @@ import { chestSealer, openWithSecret, openWithSigner, openerFor, readContents, r
 import { positionOf, useShards } from '../store/useShards'
 import { hiddenLabel, type ChestItem } from '../lib/hidden'
 import { ItemFace } from './ItemIcon'
+import { ShardThumb } from './ShardThumb'
 import { holdsModel, openingKeys, type HeldFrom, type HeldPlace } from '../lib/inventory'
 import { safeNpub } from '../lib/npub'
 import { useCyberspace } from '../store/useCyberspace'
@@ -145,7 +146,7 @@ function ContentRow({ entry, from, place }: { entry: ChestEntry; from: HeldFrom;
   const take = (): void => { useInventory.getState().take([entry], from, place) }
   return (
     <li className="chest__row">
-      <ItemFace className={`chest__glyph chest__glyph--${coin ? 'cashu' : type}`} type={type} coin={coin} image={entry.body.key?.image} />
+      {type === 'shard' && entry.body.shard ? <ShardThumb shard={entry.body.shard} /> : <ItemFace className={`chest__glyph chest__glyph--${coin ? 'cashu' : type}`} type={type} coin={coin} image={entry.body.key?.image} />}
       {type === 'chest' && entry.body.chest
         ? <ChestBlock id={entry.id} chest={entry.body.chest} author={entry.event.pubkey} verified={entry.verified} place={place} sealer={entry.verified ? entry.event.pubkey : undefined} />
         : (

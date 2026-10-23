@@ -7,7 +7,7 @@
  */
 
 import { describe, expect, it } from 'vitest'
-import { EMPTY_TREE, applyOp, applyOps, buildTree, canonical, flatFolders, folderOf, normalizeTree, pathOf, type FolderNode, type FolderOp, type FolderTree } from '../shardFolders'
+import { EMPTY_TREE, applyOp, applyOps, buildTree, canonical, flatFolders, folderOf, newestFirst, normalizeTree, pathOf, type FolderNode, type FolderOp, type FolderTree } from '../shardFolders'
 
 const mk = (id: string, name: string, parent: string | null = null): FolderOp => ({ op: 'create', id, name, parent, at: 1 })
 const file = (refs: string[], folder: string | null): FolderOp => ({ op: 'assign', refs, folder })
@@ -257,5 +257,30 @@ describe('scale', () => {
     flatFolders(t)
     expect(performance.now() - started).toBeLessThan(500)
     expect(built.folders).toHaveLength(21)
+  })
+})
+
+describe('a deploy counted as an edit (the use op, newestFirst)', () => {
+  it('keeps the later time, so the same op twice changes nothing', () => {
+    const t = applyOp(EMPTY_TREE, { op: 'use', refs: ['oak', ''], at: 50 })
+    expect(t.used).toEqual({ oak: 50 })
+    expect(applyOp(t, { op: 'use', refs: ['oak'], at: 50 })).toBe(t)
+    expect(applyOp(t, { op: 'use', refs: ['oak'], at: 10 })).toBe(t)
+    expect(applyOp(t, { op: 'use', refs: ['oak'], at: 90 }).used).toEqual({ oak: 90 })
+  })
+
+  it('survives a folder deleted, and a stored tree read back', () => {
+    const t = applyOps(EMPTY_TREE, [{ op: 'create', id: 'kit', name: 'kit', parent: null, at: 1 }, { op: 'use', refs: ['oak'], at: 7 }, { op: 'delete', id: 'kit' }])
+    expect(t.used).toEqual({ oak: 7 })
+    expect(normalizeTree({ used: { oak: 7, bad: 'x', inf: Infinity } }).used).toEqual({ oak: 7 })
+  })
+
+  it('sorts by the later of the edit and the deploy, ties in the order given', () => {
+    const items = [{ id: 'a', at: 30 }, { id: 'b', at: 20 }, { id: 'c', at: 10 }, { id: 'd', at: 10 }]
+    const order = (used?: Record<string, number>): string[] => newestFirst(items, (i) => i.id, (i) => i.at, used).map((i) => i.id)
+    expect(order(undefined)).toEqual(['a', 'b', 'c', 'd'])
+    expect(order({ d: 40 })).toEqual(['d', 'a', 'b', 'c'])
+    // A deploy older than the last edit changes nothing.
+    expect(order({ a: 5, c: 25 })).toEqual(['a', 'c', 'b', 'd'])
   })
 })

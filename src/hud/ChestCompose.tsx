@@ -33,7 +33,7 @@ import { Explanation } from './Explanation'
 import { ItemFeedPicker } from './ItemFeedPicker'
 import { lockFromListing } from '../lib/itemListing'
 import { ItemIcon } from './ItemIcon'
-import { ShardFolders, modelName, modelRef } from './ShardFolders'
+import { ShardFolders, modelEditedAt, modelName, modelRef, useNewestFirst } from './ShardFolders'
 import { ShardThumb } from './ShardThumb'
 import type { ShardModel } from 'sno-core/shards'
 import { nip19 } from 'nostr-tools'
@@ -89,8 +89,8 @@ export function ChestCompose({ onDone }: { onDone: () => void }): JSX.Element {
   const items = useInventory((s) => s.items)
   const keys = useMemo(() => Object.values(items).filter((it) => it.type === 'key' && it.key).sort((a, b) => b.at - a.at), [items])
   const models = useWorkshop((s) => s.shards)
-  // + SHARD's list: last edited first, as the workshop's (Workshop.tsx).
-  const byEdited = useMemo(() => [...models].sort((a, b) => (b.updatedAt ?? 0) - (a.updatedAt ?? 0)), [models])
+  // + SHARD's list: last edited or deployed first, as the workshop's (Workshop.tsx).
+  const byRecent = useNewestFirst(models, modelRef, modelEditedAt)
   const modelOf = (id: string): ShardModel | undefined => models.find((s) => s.id === id)
   const shardName = (id: string): string => modelOf(id)?.name ?? 'model'
 
@@ -236,7 +236,7 @@ export function ChestCompose({ onDone }: { onDone: () => void }): JSX.Element {
         <>
           {/* Your models in their folders, as every list of them is (hud/ShardFolders); a tap adds one. */}
           <ul className="objpick__list compose__models" aria-label="Model to seal">
-            <ShardFolders items={byEdited} refOf={modelRef} nameOf={modelName} row={(s, f) => (
+            <ShardFolders items={byRecent} refOf={modelRef} nameOf={modelName} row={(s, f) => (
               <li key={s.id} {...f.drag}>
                 <button className="objpick__row" onClick={() => add({ kind: 'shard', shardId: s.id })} title={`Seal "${s.name}" in the chest`}>
                   <ShardThumb shard={s} />

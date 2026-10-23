@@ -22,10 +22,11 @@ import { useCyberspace } from '../store/useCyberspace'
 import { useWorkshop, type StampObject } from '../store/useWorkshop'
 import { usePublished } from '../store/usePublished'
 import { useEscape } from '../hooks/useEscape'
-import { ShardFolders } from '../hud/ShardFolders'
+import { ShardFolders, useNewestFirst } from '../hud/ShardFolders'
 import { ShardThumb } from '../hud/ShardThumb'
 
 const OBJECT_KIND = 33331
+const NONE: Found[] = []
 const WAIT_MS = 5000
 
 interface Found { address: string; relay?: string; shard: ShardModel; at: number }
@@ -69,6 +70,8 @@ export function objectsOf(events: NostrEvent[]): Found[] {
  */
 export const foundRef = (o: Found): string => o.address.split(':').slice(2).join(':')
 const foundName = (o: Found): string => o.shard.name
+/** When a published object was last edited, ms: its event's time. */
+const foundEditedAt = (o: Found): number => o.at * 1000
 
 export function ObjectPicker({ onClose }: { onClose: () => void }): JSX.Element {
   const me = useCyberspace((s) => s.identity.pubkey)
@@ -90,6 +93,8 @@ export function ObjectPicker({ onClose }: { onClose: () => void }): JSX.Element 
       }, () => { if (live) setMine([]) })
     return () => { live = false }
   }, [me])
+  // Newest first, a deploy counted as an edit, as every list of your shards (hud/ShardFolders).
+  const byRecent = useNewestFirst(mine ?? NONE, foundRef, foundEditedAt)
 
   const choose = (o: StampObject): void => {
     useWorkshop.getState().setStampObject(o)
@@ -129,7 +134,7 @@ export function ObjectPicker({ onClose }: { onClose: () => void }): JSX.Element 
           {mine !== null && mine.length === 0 && <p className="login__note">No published objects under this key yet.</p>}
           {mine !== null && mine.length > 0 && (
             <ul className="objpick__list">
-              <ShardFolders items={mine} refOf={foundRef} nameOf={foundName} row={(o, f) => (
+              <ShardFolders items={byRecent} refOf={foundRef} nameOf={foundName} row={(o, f) => (
                 <li key={o.address} {...f.drag}>
                   <button className="objpick__row" onClick={() => choose({ ref: refOf(o.address), name: o.shard.name, shard: o.shard })}>
                     <ShardThumb shard={o.shard} />

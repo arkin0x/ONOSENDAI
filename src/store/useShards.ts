@@ -86,6 +86,7 @@ import { retractionTemplate } from '../lib/published'
 import { openWithSecret, openWithSigner, openerFor, readContents, resealWithout, revealedIn, sealEntries, sealedInside, sealerOf, type OpeningKey } from '../lib/chests'
 import { openingKeys, type HeldPlace } from '../lib/inventory'
 import { useInventory } from './useInventory'
+import { useShardFolders } from './useShardFolders'
 import { creditOf, useWorkshop } from './useWorkshop'
 import { deletionFilters, isDeleted, type Credit, type FeedObject } from 'sno-core/feed'
 import { useCeremony } from './useCeremony'
@@ -340,6 +341,21 @@ export function editable(d: Pick<MyDeployment, 'type' | 'shard' | 'ref' | 'inner
   if (d.type !== 'shard' || !d.shard || d.inner.pubkey !== me) return false
   if (!d.ref) return true
   return d.inner.kind === OBJECT_KIND && d.inner.tags.some((t) => t[0] === 'encrypted') && dOf(d.inner) !== ''
+}
+
+/**
+ * Your shards a deploy placed, by the ref the lists file them under (hud
+ * ShardFolders): a model, the models in a chest, or your own object from the
+ * feed. A deploy that went through moves them to the top of every list of
+ * your shards, inside their folders, as an edit does (arkinox, 2026-10-23).
+ * An aim into a chest places nothing until the chest is hidden, and a move
+ * (EDIT) is of a deployment, not of a model.
+ */
+export function deployedRefs(pending: DeployPending, me: string): string[] {
+  if (pending.type === 'chest') return pending.contents.flatMap((c) => (c.kind === 'shard' ? [c.shardId] : []))
+  if (pending.type !== 'shard' || pending.intoChest || pending.edit) return []
+  if (pending.object) return pending.object.pubkey === me ? [pending.object.d] : []
+  return [pending.shardId]
 }
 
 /** The event id of the deployment a pending EDIT is moving, or null. */
@@ -1531,6 +1547,11 @@ export const useShards = create<ShardsState>((set, get) => {
         ]
         set({ mine })
         saveMine(mine)
+        // Placed: first in your shard lists from now. Local, and never the
+        // deploy's failure; not for an identity switched to meanwhile.
+        if (cyber().identity.pubkey === cs.identity.pubkey) {
+          try { useShardFolders.getState().markUsed(deployedRefs(pending, cs.identity.pubkey)) } catch (err) { console.warn(`[shards] could not reorder the shard lists: ${err instanceof Error ? err.message : String(err)}`) }
+        }
         // Moved to another bag: the old one is taken out of its own bag, as
         // DELETE would, except that a resealed object is the moved shard's
         // now and stays. Before the deploy counts as done, so the old one

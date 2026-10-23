@@ -16,14 +16,14 @@
  * where a model is made and its DEPLOY brings you straight back.
  */
 
-import { useMemo, useState } from 'react'
+import { useState } from 'react'
 import type { ShardModel } from 'sno-core/shards'
 import { useWorkshop } from '../store/useWorkshop'
 import { useBuilder } from '../store/useBuilder'
 import { useStash } from './stash'
 import { FeedList } from './FeedList'
 import { Explanation } from './Explanation'
-import { ShardFolders, modelName, modelRef } from './ShardFolders'
+import { ShardFolders, modelEditedAt, modelName, modelRef, useNewestFirst } from './ShardFolders'
 import { ShardThumb } from './ShardThumb'
 
 /** Where objects to place come from. */
@@ -75,7 +75,7 @@ export function PlaceObjectPicker(): JSX.Element {
 
 function ModelsSource({ toFeed }: { toFeed: () => void }): JSX.Element {
   const shards = useWorkshop((s) => s.shards)
-  const list: ShardModel[] = useMemo(() => [...shards].sort((a, b) => (b.updatedAt ?? 0) - (a.updatedAt ?? 0)), [shards])
+  const list: ShardModel[] = useNewestFirst(shards, modelRef, modelEditedAt)
   if (list.length === 0) {
     return (
       <div className="objpick__empty">

@@ -55,7 +55,7 @@ import { Bench } from './Bench'
 import { benchPose, nudgeFor, nudgeLabel, orbitBy, planeAfter, requestView, useBenchView, type NudgeName } from './benchAxes'
 import { stackedSpots } from '../lib/weld'
 import { ObjectPicker } from './ObjectPicker'
-import { ShardFolders, modelName, modelRef } from '../hud/ShardFolders'
+import { ShardFolders, modelEditedAt, modelName, modelRef, useNewestFirst } from '../hud/ShardFolders'
 import { useEscape } from '../hooks/useEscape'
 import { ShardThumb } from '../hud/ShardThumb'
 
@@ -567,7 +567,7 @@ export function Workshop(): JSX.Element | null {
   // return for a day and opening the workshop threw React #310 (2026-09-24).
   const stacked = useMemo(() => (shard ? stackedSpots(shard) : { spots: 0, points: 0 }), [shard])
   // The SHARDS list's order (the list below says why).
-  const byEdited = useMemo(() => [...shards].sort((a, b) => (b.updatedAt ?? 0) - (a.updatedAt ?? 0)), [shards])
+  const byRecent = useNewestFirst(shards, modelRef, modelEditedAt)
   // The workshop is a modal over the scene, with arkinox's order inside it
   // (2026-10-01): its own modals (the palette sheet, the object picker, every
   // confirmation) open later and so close first; then the open panel, the
@@ -901,8 +901,9 @@ export function Workshop(): JSX.Element | null {
                 <button className="workshop__mini" title="Copy to the clipboard" aria-label="Copy your avatar to the clipboard" onClick={() => copyShard(myAvatar, 'Avatar copied.')}><ClipboardCopy size={13} strokeWidth={2.25} aria-hidden /></button>
               </li>
             )}
-            {/* Last edited first: updatedAt moves on every edit and never on opening (arkinox, 2026-09-26). */}
-            <ShardFolders items={byEdited} refOf={modelRef} nameOf={modelName} row={(s, f) => (
+            {/* Last edited first: updatedAt moves on every edit and never on opening (arkinox, 2026-09-26).
+                A deploy counts as an edit here, inside its folder (arkinox, 2026-10-23). */}
+            <ShardFolders items={byRecent} refOf={modelRef} nameOf={modelName} row={(s, f) => (
               <li key={s.id} className={s.id === shard.id ? 'is-current' : ''} {...f.drag}>
                 <button className="workshop__pick" onClick={() => w().select(s.id)}>
                   <ShardThumb shard={s} />

@@ -87,14 +87,21 @@ function sources(dir: string): string[] {
 describe('every list of your shards', () => {
   // arkinox, 2026-10-23: "the folders need to be available anywhere a list of our shards is shown."
   it('draws through ShardFolders wherever a component reads the workshop\'s models', () => {
-    const readers = sources(join(__dirname, '..', '..')).filter((p) => /useWorkshop\(\(s\) => s\.shards\)/.test(readFileSync(p, 'utf8')))
+    // Any spelling: a selector by any name, with or without parentheses, a filter after it, or getState().
+    const readers = sources(join(__dirname, '..', '..')).filter((p) => /useWorkshop[\s\S]{0,80}?\.shards\b/.test(readFileSync(p, 'utf8')) && /<[a-z]/i.test(readFileSync(p, 'utf8')))
+      .filter((p) => !/[\\/](scene|workshop[\\/]Bench)\b/.test(p) && /\.(map|filter)\(/.test(readFileSync(p, 'utf8')))
     expect(readers.length).toBeGreaterThanOrEqual(3)
     for (const p of readers) expect([p, readFileSync(p, 'utf8').includes('<ShardFolders')]).toEqual([p, true])
   })
 
   it('has no native select of models left', () => {
+    // A file that reads the models has no <option> at all; the chest's lock
+    // select (held keys) lives in ChestCompose, so there it is counted.
     for (const p of sources(join(__dirname, '..', '..'))) {
-      expect([p, /models\.map\(\(s\) => <option/.test(readFileSync(p, 'utf8'))]).toEqual([p, false])
+      const text = readFileSync(p, 'utf8')
+      if (!/useWorkshop[\s\S]{0,80}?\.shards\b/.test(text)) continue
+      const options = (text.match(/<option\s/g) ?? []).length
+      expect([p, options]).toEqual([p, p.endsWith('ChestCompose.tsx') ? 2 : 0])
     }
   })
 })

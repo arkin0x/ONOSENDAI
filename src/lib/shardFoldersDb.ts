@@ -14,7 +14,15 @@
 import { openDatabase, request } from './idb'
 import { applyOps, normalizeTree, type FolderOp, type FolderTree } from './shardFolders'
 
-export const SHARD_FOLDERS_DB = 'onosendai:shard-folders'
+/**
+ * Named for the format, not the app: snocrash keeps its folders in a database
+ * of this same name, schema and row shape (its src/lib/shardFoldersDb.ts).
+ * IndexedDB is per origin, so the two apps never share one; the shape is the
+ * same so a later sync, or a module both import, moves a tree between them
+ * with nothing to translate. Settle the name before folders ship: renaming it
+ * after would leave every tree behind.
+ */
+export const SHARD_FOLDERS_DB = 'sno:shard-folders'
 export const DB_VERSION = 1
 export const TREES_STORE = 'trees'
 

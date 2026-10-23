@@ -101,7 +101,7 @@ function then(step: () => Promise<void>): Promise<void> {
   return chain
 }
 
-const CHANNEL = 'onosendai:shard-folders'
+const CHANNEL = 'sno:shard-folders'
 let channel: BroadcastChannel | null = null
 function announce(owner: string): void {
   try { channel?.postMessage({ owner }) } catch { /* closed */ }

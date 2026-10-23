@@ -38,6 +38,8 @@ import { profileLabel } from '../store/useProfiles'
 import { useShards } from '../store/useShards'
 import { useWorkshop } from '../store/useWorkshop'
 import { MessageText } from './CashuCard'
+import { AudioCard } from './AudioCard'
+import { itemLineage } from '../lib/hidden'
 import { Explanation } from './Explanation'
 import { ChestBlock, Unsigned } from './ItemRows'
 import { useCashu, cashuStateLabel } from './useCashu'
@@ -220,12 +222,18 @@ function TakenRow({ item }: { item: HeldItem }): JSX.Element {
       <span className="held__acts">
         {item.type === 'shard' && <button className="chest__act" onClick={moveToWorkshop} title="Move this model into your workshop">MOVE TO WORKSHOP</button>}
         {item.type === 'message' && <button className={`chest__act ${open ? 'is-on' : ''}`} onClick={() => setOpen((o) => !o)} aria-expanded={open}>{coin || hasNftLink(item.text) ? 'CARD' : 'READ'}</button>}
+        {item.type === 'audio' && item.audio && <button className={`chest__act ${open ? 'is-on' : ''}`} onClick={() => setOpen((o) => !o)} aria-expanded={open} title="Play it or save it">LISTEN</button>}
         {clearable && (
           <button className="held__clear" onClick={() => useInventory.getState().clearTaken([item.id])} title="Clear it from TAKEN" aria-label={`Clear ${label} from TAKEN`}>
             <X size={14} aria-hidden />
           </button>
         )}
       </span>
+      {open && item.type === 'audio' && item.audio && (
+        <div className="held__details">
+          <AudioCard id={`held:${item.id}`} triggerId={itemLineage(item.event) ?? item.id} audio={item.audio} />
+        </div>
+      )}
       {open && item.type === 'message' && (
         <div className="held__details">
           <MessageText text={item.text ?? ''} tags={item.event?.tags} words={(t) => <blockquote className="secret__message">{t}</blockquote>} />

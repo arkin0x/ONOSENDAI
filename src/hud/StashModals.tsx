@@ -1,7 +1,7 @@
 /**
  * StashModals.tsx - the Stash's Models, Bags and Bag Contents modals, the
- * Builder's Hide a Message composer, and the Forge a Key and Seal a Chest
- * composers (Keys and Chests B1 §3.1).
+ * Builder's Hide a Message composer, the Forge a Key and Seal a Chest
+ * composers (Keys and Chests B1 §3.1), and Place Audio (DECK-0007).
  * State in hud/stash.ts; mounted once at the app root.
  */
 
@@ -16,6 +16,7 @@ import { useEscape } from '../hooks/useEscape'
 import { MessageCompose } from './MessageCompose'
 import { KeyCompose } from './KeyCompose'
 import { ChestCompose } from './ChestCompose'
+import { AudioCompose } from './AudioCompose'
 import { ItemIcon, distinctKinds } from './ItemIcon'
 import { PlaceObjectPicker } from './PlaceObjectPicker'
 import { FeedList } from './FeedList'
@@ -134,7 +135,7 @@ function FeedActions({ object }: { object: FeedObject }): JSX.Element {
 }
 
 export function StashModals(): JSX.Element | null {
-  const { models, bags, bag, message, key, chest, feed } = useStash()
+  const { models, bags, bag, message, key, chest, audio, feed } = useStash()
   const mine = useShards((s) => s.mine)
   const close = useStash.getState().close
   const all = bagsOf(mine)
@@ -197,6 +198,13 @@ export function StashModals(): JSX.Element | null {
     return (
       <Shell title="Seal a chest" onClose={close}>
         <ChestCompose onDone={close} />
+      </Shell>
+    )
+  }
+  if (audio) {
+    return (
+      <Shell title="Place audio" onClose={close}>
+        <AudioCompose onDone={close} />
       </Shell>
     )
   }

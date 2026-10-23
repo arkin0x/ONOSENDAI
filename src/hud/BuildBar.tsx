@@ -29,7 +29,7 @@ import { useStash } from './stash'
 import { House, Wrench } from 'lucide-react'
 import { ItemIcon } from './ItemIcon'
 
-/** The buttons' icons, one size for all three, matched to the 8px capitals beside them. */
+/** The buttons' icons, one size for all four, matched to the 8px capitals beside them. */
 const ICON = 12
 
 export function BuildBar(): JSX.Element | null {
@@ -81,6 +81,7 @@ export function BuildBar(): JSX.Element | null {
       <div className="buildbar__acts">
         <button className="buildbar__act" onClick={() => useStash.getState().openModels()} title="Choose one of your models and place it at the build cursor"><ItemIcon type="shard" className="buildbar__icon" size={ICON} />PLACE OBJECT</button>
         <button className="buildbar__act" onClick={() => useStash.getState().openMessage()} title="Write a message and hide it at the build cursor"><ItemIcon type="message" className="buildbar__icon" size={ICON} />HIDE MESSAGE</button>
+        <button className="buildbar__act" onClick={() => useStash.getState().openAudio()} title="Hide an audio file at the build cursor, encrypted; only finders can play it"><ItemIcon type="audio" className="buildbar__icon" size={ICON} />PLACE AUDIO</button>
         {again !== null && <button className="buildbar__act" onClick={() => useShards.getState().placeAgain()} title={`Place "${again}" again, with the same settings`}><ItemIcon type={againType} className="buildbar__icon" size={ICON} />PLACE AGAIN</button>}
         <button className="buildbar__act" disabled={onAvatar} onClick={() => useBuilder.getState().toAvatar()} title="Bring the build cursor and the view back to your avatar, still building (X)"><House className="buildbar__icon" size={ICON} strokeWidth={2.25} aria-hidden />RETURN TO AVATAR</button>
       </div>

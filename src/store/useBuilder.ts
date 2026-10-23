@@ -139,8 +139,9 @@ export interface BuilderState {
    */
   messageDraft: string | null
   /**
-   * A key or a chest whose deploy BUILD mode had to end, kept whole the way a
-   * message's text is: the composer that opens next starts from it.
+   * A key, a chest or hidden audio whose deploy BUILD mode had to end, kept
+   * whole the way a message's text is: the composer that opens next starts
+   * from it (audio's file is already uploaded, so it is not uploaded again).
    */
   itemDraft: DeployPending | null
   /**
@@ -179,8 +180,8 @@ export interface BuilderState {
   toAvatar: () => void
   /** The composer took the kept message. */
   takeMessageDraft: () => string | null
-  /** The kept key or chest draft of that type, taken: the composer owns it now. */
-  takeItemDraft: (type: 'key' | 'chest') => DeployPending | null
+  /** The kept key, chest or audio draft of that type, taken: the composer owns it now. */
+  takeItemDraft: (type: 'key' | 'chest' | 'audio') => DeployPending | null
 }
 
 /**
@@ -355,8 +356,8 @@ function endUnder(reason: BuildEndReason): void {
     // to say (found in review, 2026-10-07: it used to say "kept" and publish).
     kept = pending.type === 'message'
       ? ' Your message was already being hidden, and it finishes at the place you chose.'
-      : pending.type === 'key' || pending.type === 'chest'
-        ? ` Your ${pending.type === 'key' ? 'item' : 'chest'} was already being hidden, and it finishes at the place you chose.`
+      : pending.type === 'key' || pending.type === 'chest' || pending.type === 'audio'
+        ? ` Your ${pending.type === 'key' ? 'item' : pending.type} was already being hidden, and it finishes at the place you chose.`
         : ` "${shards.pendingShard()?.name ?? 'The object'}" was already being hidden, and it finishes at the place you chose.`
   } else if (pending) {
     // What was set for this one deploy goes with it; say so plainly.
@@ -370,6 +371,10 @@ function endUnder(reason: BuildEndReason): void {
       // Kept whole, as a message is: the item's pair, name and picture, or the chest's lock and contents.
       useBuilder.setState({ itemDraft: pending })
       kept = ` Your ${pending.type === 'key' ? 'item' : 'chest'} is kept: ${pending.type === 'key' ? 'FORGE AN ITEM' : 'SEAL A CHEST'} in CREATE opens it again.` + dropped
+    } else if (pending.type === 'audio') {
+      // The file is encrypted and uploaded already: the item is kept whole, so PLACE AUDIO starts from it.
+      useBuilder.setState({ itemDraft: pending })
+      kept = ' Your audio is kept: PLACE AUDIO in CREATE opens it again.' + dropped
     } else if (pending.intoChest) {
       // A shard being aimed into a chest: the chest comes back whole through
       // cancelDeploy (chestBack, moved into itemDraft below), that shard not

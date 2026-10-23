@@ -13,7 +13,7 @@ import { readdirSync, readFileSync, statSync } from 'node:fs'
 import { basename, join, relative } from 'node:path'
 import { createElement } from 'react'
 import { renderToString } from 'react-dom/server'
-import { Bitcoin, KeyRound, Pyramid, ScrollText, Vault } from 'lucide-react'
+import { Bitcoin, KeyRound, Music, Pyramid, ScrollText, Vault } from 'lucide-react'
 import { describe, expect, it } from 'vitest'
 import { ItemIcon, distinctKinds, itemIconOf } from '../ItemIcon'
 
@@ -24,6 +24,7 @@ describe('the icon each kind wears', () => {
     expect(itemIconOf('message', true)).toBe(Bitcoin)
     expect(itemIconOf('key')).toBe(KeyRound)
     expect(itemIconOf('chest')).toBe(Vault)
+    expect(itemIconOf('audio')).toBe(Music)
     // Only a message can be a coin; the flag means nothing on the others.
     expect(itemIconOf('shard', true)).toBe(Pyramid)
     expect(itemIconOf('key', true)).toBe(KeyRound)
@@ -76,7 +77,7 @@ const GLYPHS = ['\u25C7', '\u270E', '\u26B7', '\u25A3', '\u20BF']
 /** The lucide icons a kind used to wear on a button, beside a different glyph in its rows. */
 const RETIRED = ['Diamond', 'PencilLine']
 /** The icons a kind wears now. Only ItemIcon names them; a test may import them to compare. */
-const KIND_ICONS = ['Pyramid', 'ScrollText', 'Bitcoin', 'KeyRound', 'Vault']
+const KIND_ICONS = ['Pyramid', 'ScrollText', 'Bitcoin', 'KeyRound', 'Vault', 'Music']
 
 /** The names a file imports from lucide-react, aliases and `type` dropped. */
 export function lucideImports(text: string): string[] {

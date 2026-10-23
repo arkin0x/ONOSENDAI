@@ -119,12 +119,13 @@ export function ShardGhost({ axes }: Props): JSX.Element | null {
   })
 
 
-  // A message ghosts as a dim note that follows the cursor; a key and a chest
-  // ghost as their mark and name, the way the world draws them once hidden.
-  if (pending?.type === 'message' || pending?.type === 'key' || pending?.type === 'chest') {
+  // A message ghosts as a dim note that follows the cursor; a key, a chest
+  // and hidden audio ghost as their mark and name, the way the world draws
+  // them once hidden.
+  if (pending?.type === 'message' || pending?.type === 'key' || pending?.type === 'chest' || pending?.type === 'audio') {
     return (
       <WorldLabel
-        text={pending.type === 'message' ? messagePreview(pending.text, 40) : pending.type === 'key' ? `⚷ ${pending.key.name}` : `▣ ${pending.name}`}
+        text={pending.type === 'message' ? messagePreview(pending.text, 40) : pending.type === 'key' ? `⚷ ${pending.key.name}` : pending.type === 'audio' ? `AUDIO · ${pending.audio.title}` : `▣ ${pending.name}`}
         color="#ffd27d"
         follow={landingAt}
         align="center"

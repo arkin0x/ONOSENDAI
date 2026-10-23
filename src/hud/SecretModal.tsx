@@ -12,6 +12,10 @@
  * that the separate wire record (DeploymentDetail) used to show, its relays,
  * the LOCAL / LIVE switch and TEST DISCOVERY, are in the event data at the
  * bottom (WireData).
+ *
+ * Hidden audio opens here too, with its own body (AudioCard: PLAY,
+ * DOWNLOAD, RESET TRIGGER), and the creator, reactions, comments and
+ * actions every item has.
  */
 
 import { useEffect, useState } from 'react'
@@ -41,6 +45,7 @@ import { ItemFace } from './ItemIcon'
 import { ShardSpin } from '../scene/ShardSpin'
 import { EventData } from './EventData'
 import { WireData } from './WireData'
+import { AudioCard } from './AudioCard'
 import { BlockButton, MuteItemButton } from './BlockButton'
 import { useMutes } from '../store/useMutes'
 
@@ -97,7 +102,7 @@ export function SecretModal(): JSX.Element | null {
 
   const goTo = (): void => {
     close()
-    const label = item.type === 'message' ? name : item.type === 'key' ? item.keyItem?.name ?? 'key' : item.type === 'chest' ? item.chest?.name ?? 'chest' : item.shard?.name ?? 'shard'
+    const label = item.type === 'message' ? name : item.type === 'key' ? item.keyItem?.name ?? 'key' : item.type === 'chest' ? item.chest?.name ?? 'chest' : item.type === 'audio' ? item.audio?.title ?? 'audio' : item.shard?.name ?? 'shard'
     useCyberspace.getState().focusItem(item.at, item.plane, label, item.type === 'shard' ? item.shard?.unit ?? 0 : 0)
   }
   // Where it was found, for what is taken out of a chest here.
@@ -147,6 +152,9 @@ export function SecretModal(): JSX.Element | null {
           <div className="secret__shard"><KeyLine name={item.keyItem.name} author={author} /></div>
         ) : item.type === 'chest' && item.chest ? (
           <div className="secret__shard"><ChestBlock id={item.key} chest={item.chest} author={author} verified place={place} /></div>
+        ) : item.type === 'audio' && item.audio ? (
+          // MUTE THIS ITEM and BLOCK (#464) are in the card's actions below, as for every item.
+          <AudioCard id={item.key} triggerId={item.lineage ?? item.key} audio={item.audio} />
         ) : (
           <div className="secret__shard">
             <span className="secret__shard-name">{item.shard?.name}</span>

@@ -7,7 +7,8 @@
  * item you have never held; arkinox, 2026-10-13), or a pasted item public key
  * or npub, which seals it to a person. The contents are a message (which may hold a Cashu
  * token, checked at the mint as a hidden message is), one of your workshop
- * models, or a new item forged here, for chaining. The lock select is text
+ * models, a new item forged here, for chaining, or hidden audio (DECK-0007),
+ * encrypted and uploaded as PLACE AUDIO does (AudioUpload). The lock select is text
  * only: an <option> cannot hold an item's picture, so none is drawn there. Nothing is signed or sealed in the composer: the
  * deploy does that at the place it lands (useShards `deploy`). The meter
  * shows the sealed size against NIP-44's 65,535 bytes, and PLACE CHEST is
@@ -21,8 +22,8 @@
  * stash `aimIntoChest`). An aimed shard's signed event is what the seal takes,
  * and the chest's own height rises to hold where it stands (DeployBar), since
  * a content stands at its own point only inside the chest's region
- * (lib/chests.ts revealedIn). Messages and keys reveal at the chest and are
- * not aimed. CANCEL on the bar brings the draft back unchanged.
+ * (lib/chests.ts revealedIn). Messages, keys and audio reveal at the chest
+ * and are not aimed. CANCEL on the bar brings the draft back unchanged.
  *
  * Nested chests are read and opened wherever they are found, but not composed
  * here: a chest inside a chest would need this whole composer inside itself.
@@ -50,6 +51,8 @@ import { creditOf, useWorkshop } from '../store/useWorkshop'
 import { useStash } from './stash'
 import { composeVerdict, SETTLE_MS, useCashu } from './useCashu'
 import { useSettled } from './useSettled'
+import { AudioUpload } from './AudioCompose'
+import { audioInnerTemplate } from '../lib/audioItem'
 
 /** A pasted lock: an item's public key as hex, or a person's npub; either must name a point on the curve. */
 function parseLock(text: string): ChestLock | null {
@@ -69,6 +72,7 @@ const SAMPLE_CREATED_AT = 1_700_000_000
 function contentLabel(c: ChestContent, shardName: (id: string) => string): string {
   if (c.kind === 'message') return findCashuToken(c.text) ? 'message with a cashu token' : hasNftLink(c.text) ? 'message with an NFT link' : c.text.trim().replace(/\s+/g, ' ').slice(0, 48)
   if (c.kind === 'shard') return shardName(c.shardId)
+  if (c.kind === 'audio') return c.audio.title
   return c.key.name
 }
 
@@ -110,7 +114,7 @@ export function ChestCompose({ onDone }: { onDone: () => void }): JSX.Element {
   const [pasted, setPasted] = useState(kept && kept.label === 'a pasted key' && !keys.some((k) => k.key?.itemPubkey === kept.pubkey) ? kept.pubkey : kept?.label === 'a person' ? nip19.npubEncode(kept.pubkey) : '')
   const [contents, setContents] = useState<ChestContent[]>(draft?.contents ?? [])
   // What is being added: one editor open at a time.
-  const [adding, setAdding] = useState<'message' | 'shard' | 'key' | null>(null)
+  const [adding, setAdding] = useState<'message' | 'shard' | 'key' | 'audio' | null>(null)
   const [text, setText] = useState('')
   const [keyName, setKeyName] = useState('')
 
@@ -138,6 +142,7 @@ export function ChestCompose({ onDone }: { onDone: () => void }): JSX.Element {
     const templates = contents.map((c) => {
       if (c.kind === 'message') return attributed(messageInnerTemplate(c.text.trim(), at, 0, SAMPLE_CREATED_AT))
       if (c.kind === 'key') return attributed(keyInnerTemplate(c.key, at, 0, SAMPLE_CREATED_AT))
+      if (c.kind === 'audio') return attributed(audioInnerTemplate(c.audio, at, 0, SAMPLE_CREATED_AT))
       if (c.aimed) { const { kind, created_at, tags, content } = c.aimed.signed; return { kind, created_at, tags, content } }
       const model = models.find((s) => s.id === c.shardId)
       return attributed(model ? shardInnerTemplate(model, at, 0, SAMPLE_CREATED_AT, creditOf(model)) : messageInnerTemplate('', at, 0, SAMPLE_CREATED_AT))
@@ -222,7 +227,10 @@ export function ChestCompose({ onDone }: { onDone: () => void }): JSX.Element {
           <button className="chest__act" onClick={() => setAdding('message')} title="A message, which may hold a cashu token">+ MESSAGE</button>
           <button className="chest__act" onClick={() => setAdding('shard')} disabled={models.length === 0} title={models.length === 0 ? 'Nothing in your workshop yet' : 'One of your workshop models'}>+ SHARD</button>
           <button className="chest__act" onClick={() => setAdding('key')} title="A new item forged here, for the next chest">+ ITEM</button>
+          <button className="chest__act" onClick={() => setAdding('audio')} title="An audio file, encrypted and uploaded now">+ AUDIO</button>
         </div>
+      ) : adding === 'audio' ? (
+        <AudioUpload idPrefix="chest-audio" submitLabel="ADD" onReady={(audio) => add({ kind: 'audio', audio })} onCancel={() => setAdding(null)} />
       ) : adding === 'message' ? (
         <>
           <textarea className="shards__textarea" value={text} onChange={(e) => setText(e.target.value.slice(0, MAX_MESSAGE_LENGTH))} placeholder="A message, or a cashu token" rows={3} autoFocus aria-label="Message to seal" />
@@ -270,7 +278,7 @@ export function ChestCompose({ onDone }: { onDone: () => void }): JSX.Element {
         <button className="avatars__go" disabled={!ready} onClick={place} title={refusal ?? (!lock ? 'Pick an item or paste a public key to seal to' : contents.length === 0 ? 'Put something in it first' : 'Aim it at the build cursor; it is signed and sealed when hidden')}>PLACE CHEST ▸</button>
       </div>
       <Explanation>
-        A chest is sealed to an item from your ITEMS (forge one first), to a listed item from the ITEM FEED, or to a person&apos;s npub. Put a message, a cashu token, a shard or a new item inside, then PLACE it at the build cursor. AIM a shard to place it where it should stand when the chest opens; the chest hides at a height that holds it. Anyone who finds the chest sees what it requires; only a holder of that item, or that person, can open it and TAKE what is inside.
+        A chest is sealed to an item from your ITEMS (forge one first), to a listed item from the ITEM FEED, or to a person&apos;s npub. Put a message, a cashu token, a shard, a new item or audio inside, then PLACE it at the build cursor. AIM a shard to place it where it should stand when the chest opens; the chest hides at a height that holds it. Anyone who finds the chest sees what it requires; only a holder of that item, or that person, can open it and TAKE what is inside.
       </Explanation>
     </div>
   )

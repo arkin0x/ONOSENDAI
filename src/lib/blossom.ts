@@ -1,7 +1,8 @@
 /**
  * blossom.ts - putting a file on a public Blossom server.
  *
- * A profile picture has to live somewhere a stranger's client can fetch it,
+ * A profile picture has to live somewhere a stranger's client can fetch it
+ * (and hidden audio's encrypted file, DECK-0007),
  * and nostr has settled on Blossom for that (BUD-01, BUD-02): PUT the bytes
  * to `/upload`, signed with a kind 24242 event that names the file by its
  * sha256, and get back a URL that ends in that hash. Any Blossom server will
@@ -114,12 +115,16 @@ export class BlossomRefusal extends Error {
 export type Sign = (template: EventTemplate) => Promise<NostrEvent>
 type FetchLike = (url: string, init: RequestInit) => Promise<Response>
 
-/** Put one file on a server. Resolves to where it now lives; throws a BlossomRefusal or a network error. */
-export async function uploadBlob(server: string, file: Blob, sign: Sign, fetchImpl: FetchLike = fetch): Promise<BlobDescriptor> {
+/**
+ * Put one file on a server. Resolves to where it now lives; throws a
+ * BlossomRefusal or a network error. `reason` is the sentence the signer
+ * shows for the upload token (kind 24242 content).
+ */
+export async function uploadBlob(server: string, file: Blob, sign: Sign, fetchImpl: FetchLike = fetch, reason?: string): Promise<BlobDescriptor> {
   const bytes = new Uint8Array(await file.arrayBuffer())
   const hash = sha256Hex(bytes)
   const type = file.type || 'application/octet-stream'
-  const auth = await sign(uploadAuthTemplate(hash, Math.floor(Date.now() / 1000)))
+  const auth = await sign(uploadAuthTemplate(hash, Math.floor(Date.now() / 1000), reason))
   const headers: Record<string, string> = { Authorization: authHeader(auth), 'X-SHA-256': hash }
   const endpoint = `${server}/upload`
 

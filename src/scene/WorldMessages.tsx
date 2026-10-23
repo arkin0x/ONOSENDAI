@@ -31,13 +31,17 @@
  * always one tap away. The rule is markShown (lib/worldMarks). A spent coin
  * keeps its place as a still gray diamond, so a visitor sees that someone was
  * here and the coin is gone, rather than a coin.
+ *
+ * Hidden audio (DECK-0007) is a small music note inside the note's blue box
+ * (arkinox, 2026-10-23), its name under it, drawn when notes are; a tap opens
+ * its card, with PLAY and DOWNLOAD.
  */
 
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { nip19 } from 'nostr-tools'
 import { ACCENT } from '../lib/palette'
 import { useFrame } from '@react-three/fiber'
-import { BoxGeometry, EdgesGeometry, OctahedronGeometry, type Group, type PerspectiveCamera } from 'three'
+import { BoxGeometry, CircleGeometry, EdgesGeometry, OctahedronGeometry, PlaneGeometry, type Group, type PerspectiveCamera } from 'three'
 import { decodeText, seedOf, TEXT_DECODE_MS } from '../lib/decode'
 import { useCeremony } from '../store/useCeremony'
 import { GRID_RADIUS, itemCentre, type ViewAxes } from '../lib/space'
@@ -77,6 +81,8 @@ const MARK_PX = { coin: 40, spent: 40, note: 34 } as const
 export const NOTE_EDGE_PX = 0.72 * MARK_PX.note
 /** The ₿ on a coin, in CSS pixels. */
 const COIN_PX = 31
+/** The note's own color: the box's blue, lit. */
+const AUDIO_BLUE = '#9fd0ff'
 
 interface Props {
   axes: ViewAxes
@@ -165,14 +171,14 @@ export function WorldMessages({ axes }: Props): JSX.Element | null {
     // the item's name, so VIEW and GO TO IT have something to arrive at. What
     // they are and what they open is in the lists (ItemRows), one tap away.
     return useShards.getState().worldItems()
-      .filter((w) => ((w.type === 'message' && w.text) || w.type === 'key' || w.type === 'chest') && w.plane === anchorPlane)
+      .filter((w) => ((w.type === 'message' && w.text) || w.type === 'key' || w.type === 'chest' || (w.type === 'audio' && w.audio)) && w.plane === anchorPlane)
       .map((w) => ({
         key: w.key,
         type: w.type,
         // The SNO a key wears, and its region's walls about it (ItemModel).
         wears: w.type === 'key' && w.keyItem?.model ? { model: w.keyItem.model, animation: w.keyItem.animation ?? NO_MOTION } : undefined,
         region: w.type === 'key' && w.keyItem?.model ? regionBox(w.at, w.height, 0, axes) : null,
-        text: w.type === 'message' ? w.text! : itemMarkText(w),
+        text: w.type === 'message' ? w.text! : w.type === 'audio' ? w.audio!.title : itemMarkText(w),
         mine: w.mine,
         author: w.author ?? '',
         coin: w.type === 'message' && findCashuToken(w.text!) !== null,
@@ -191,6 +197,7 @@ export function WorldMessages({ axes }: Props): JSX.Element | null {
         const open = (): void => useShards.getState().selectSecret(w.key)
         if (w.coin) return <CoinItem key={w.key} text={w.text} at={w.centre} scaleExp={scaleExp} onTap={open} />
         if (w.type === 'message') return <NoteItem key={w.key} w={w} birth={births[w.key]} onTap={open} />
+        if (w.type === 'audio') return <AudioMark key={w.key} title={w.text} at={w.centre} onTap={open} />
         // A key or a chest: the cube and its short name, as before.
         return (
           <group key={w.key}>
@@ -290,6 +297,54 @@ function NoteItem({ w, birth, onTap }: { w: { key: string; text: string; mine: b
       {/* The mark is a fixed size on screen at any zoom, so its target is
           too: a fingertip over the mark (TapTarget). */}
       <TapTarget px={TAP_PX} at={w.centre} onTap={onTap} />
+    </group>
+  )
+}
+
+/**
+ * Hidden audio in the world: the note's blue box with a music note inside,
+ * and the audio's name under it, as a message has its hider's name.
+ */
+export function AudioMark({ title, at, opacity = 1, onTap }: { title: string; at: [number, number, number]; opacity?: number; onTap?: () => void }): JSX.Element {
+  return (
+    <group>
+      <WorldMark kind="note" at={at} opacity={opacity} />
+      <AudioNote at={at} opacity={opacity} />
+      <WorldLabel text={title} color={ACCENT} at={at} align="center" px={10} offsetPx={[0, -26]} opacity={opacity} />
+      {onTap && <TapTarget px={TAP_PX} at={at} onTap={onTap} />}
+    </group>
+  )
+}
+
+/**
+ * The music note inside the box: a tilted oval head, a stem and a flag, flat
+ * shapes turned to face the camera. Shapes, not a character: the scene's
+ * font has no music note, and troika would fetch a fallback font for one.
+ * Held to the box's size on screen (in the
+ * box's own units its edge is 0.72, so the note stands about half of it).
+ */
+function AudioNote({ at, opacity = 1 }: { at: [number, number, number]; opacity?: number }): JSX.Element {
+  const group = useRef<Group>(null)
+  const parts = useMemo(() => ({
+    head: new CircleGeometry(0.095, 20),
+    stem: new PlaneGeometry(0.035, 0.36),
+    flag: new PlaneGeometry(0.035, 0.16),
+  }), [])
+  useEffect(() => () => { parts.head.dispose(); parts.stem.dispose(); parts.flag.dispose() }, [parts])
+  useFrame((state) => {
+    const g = group.current
+    if (!g) return
+    const cam = state.camera as PerspectiveCamera
+    const perPixel = 2 * Math.tan((cam.fov * Math.PI) / 360) / state.size.height
+    g.scale.setScalar(Math.max(1e-5, cam.position.distanceTo(g.position) * perPixel * MARK_PX.note))
+    g.quaternion.copy(cam.quaternion)
+  })
+  const material = <meshBasicMaterial color={AUDIO_BLUE} toneMapped={false} transparent opacity={0.95 * opacity} depthWrite={false} />
+  return (
+    <group ref={group} position={at}>
+      <mesh geometry={parts.head} position={[-0.06, -0.15, 0]} rotation={[0, 0, 0.45]} scale={[1.35, 1, 1]} frustumCulled={false}>{material}</mesh>
+      <mesh geometry={parts.stem} position={[0.05, 0.02, 0]} frustumCulled={false}>{material}</mesh>
+      <mesh geometry={parts.flag} position={[0.11, 0.14, 0]} rotation={[0, 0, 0.9]} frustumCulled={false}>{material}</mesh>
     </group>
   )
 }

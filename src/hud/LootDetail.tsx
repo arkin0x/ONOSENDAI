@@ -241,6 +241,7 @@ export function LootDetail(): JSX.Element | null {
                     : <span className="lootd__item-label" title={o.label}>{o.label}</span>}
                 <span className="lootd__acts">
                   <button className="secret__act lootd__view" onClick={() => view(o)}><Rotate3d size={12} strokeWidth={2.25} aria-hidden />VIEW</button>
+                  {o.type === 'audio' && <button className="secret__act lootd__view" onClick={() => details(o)} title="Its card: PLAY and DOWNLOAD">DETAILS</button>}
                   {(o.type === 'shard' || o.type === 'message') && (
                     <>
                       <button className="secret__act lootd__view" onClick={() => details(o)}>DETAILS</button>

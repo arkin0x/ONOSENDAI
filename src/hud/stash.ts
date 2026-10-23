@@ -84,6 +84,8 @@ interface StashModals {
   key: boolean
   /** The SEAL A CHEST composer. */
   chest: boolean
+  /** The PLACE AUDIO composer (DECK-0007). */
+  audio: boolean
   /** The SHARD FEED window: everyone's published objects, outside the Builder. */
   feed: boolean
   /** A deploy was started from the Models modal: cancelling it reopens the modal. */
@@ -111,6 +113,8 @@ interface StashModals {
   openKey: () => void
   /** Seal a chest to hide at the build cursor. */
   openChest: () => void
+  /** Hide audio at the build cursor (DECK-0007). */
+  openAudio: () => void
   /** Browse the Shard Feed. */
   openFeed: () => void
   close: () => void
@@ -121,7 +125,7 @@ interface StashModals {
 }
 
 /** Every modal closed: what each open sets before opening its own. */
-const NONE_OPEN = { models: false, bags: false, bag: null, message: false, key: false, chest: false, feed: false }
+const NONE_OPEN = { models: false, bags: false, bag: null, message: false, key: false, chest: false, audio: false, feed: false }
 
 export const useStash = create<StashModals>((set) => ({
   models: false,
@@ -130,6 +134,7 @@ export const useStash = create<StashModals>((set) => ({
   message: false,
   key: false,
   chest: false,
+  audio: false,
   feed: false,
   returnToModels: false,
   returnToFeed: false,
@@ -141,6 +146,7 @@ export const useStash = create<StashModals>((set) => ({
   openMessage: () => set({ ...NONE_OPEN, message: true }),
   openKey: () => set({ ...NONE_OPEN, key: true }),
   openChest: () => set({ ...NONE_OPEN, chest: true }),
+  openAudio: () => set({ ...NONE_OPEN, audio: true }),
   openFeed: () => set({ ...NONE_OPEN, feed: true }),
   close: () => set(NONE_OPEN),
   deployModel: (id) => {

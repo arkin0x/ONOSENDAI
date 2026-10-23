@@ -9,8 +9,9 @@
  * screenshot: "Update it everywhere with the lucide pyramid icon. Replace the
  * message icon likewise with lucide scroll-text. I like the key icon in the
  * button better. Use that everywhere for keys."). Now a kind has one lucide
- * icon, named here and nowhere else: Pyramid, ScrollText, Bitcoin, KeyRound
- * and Vault are imported from lucide-react only by this file, and
+ * icon, named here and nowhere else: Pyramid, ScrollText, Bitcoin, KeyRound,
+ * Vault and Music (hidden audio, 2026-10-23) are imported from lucide-react
+ * only by this file, and
  * __tests__/itemIcon.test.ts reads the sources under src/hud to keep it so.
  *
  * The scene is not the HUD: WorldMessages and ShardGhost draw their labels
@@ -24,7 +25,7 @@
  * at 2.5) passes that instead.
  */
 
-import { Bitcoin, KeyRound, Pyramid, ScrollText, Vault, type LucideIcon } from 'lucide-react'
+import { Bitcoin, KeyRound, Music, Pyramid, ScrollText, Vault, type LucideIcon } from 'lucide-react'
 import type { HiddenType } from '../lib/hidden'
 import { isPictureUri } from '../lib/itemPicture'
 
@@ -39,6 +40,8 @@ export function itemIconOf(type: HiddenType, coin = false): LucideIcon {
   if (type === 'message') return coin ? Bitcoin : ScrollText
   if (type === 'key') return KeyRound
   if (type === 'chest') return Vault
+  // Hidden audio is a music note (arkinox, 2026-10-23), in the world inside the note's blue box.
+  if (type === 'audio') return Music
   return Pyramid
 }
 

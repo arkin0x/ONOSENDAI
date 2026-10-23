@@ -21,6 +21,7 @@ import { getEventHash, verifyEvent } from 'nostr-tools/pure'
 import { toPayload, type ShardModel } from 'sno-core/shards'
 import type { NostrEvent } from './events'
 import type { ChestEntry, OpeningKey } from './chests'
+import type { AudioItem } from './audioItem'
 import { KEY_KIND, hiddenLabel, keyItemOf, type ChestItem, type Hidden, type HiddenType, type ItemBody, type KeyItem } from './hidden'
 
 /** What a key looks like as text, for COPY and PASTE across devices. */
@@ -76,6 +77,8 @@ export interface HeldItem {
   chest?: ChestItem
   text?: string
   shard?: ShardModel
+  /** Hidden audio taken from a chest (DECK-0007): its file and key, so ITEMS can play it and save it (LISTEN). */
+  audio?: AudioItem
   /**
    * Unix seconds when it left the TAKEN list: moved into the workshop, or
    * cleared (arkinox, 2026-10-11). The row is kept, hidden, so the chest it
@@ -118,6 +121,7 @@ function row(owner: string, event: NostrEvent, body: ItemBody, verified: boolean
     ...(body.chest ? { chest: body.chest } : {}),
     ...(body.text !== undefined ? { text: body.text } : {}),
     ...(body.shard ? { shard: body.shard } : {}),
+    ...(body.audio ? { audio: body.audio } : {}),
   }
 }
 

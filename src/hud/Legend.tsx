@@ -86,6 +86,16 @@ const KEYS: Array<{ what: string; glyph: JSX.Element }> = [
     ),
   },
   {
+    what: 'Music note in a blue box: hidden audio you found. Tap it to play or download it',
+    glyph: (
+      <svg viewBox="0 0 20 20" aria-hidden="true">
+        <rect x="2.5" y="2.5" width="15" height="15" fill="none" stroke="#4aa3ff" strokeOpacity="0.8" strokeWidth="1.2" />
+        <ellipse cx="8.4" cy="13" rx="2.3" ry="1.7" transform="rotate(-25 8.4 13)" fill="#9fd0ff" />
+        <path d="M10.4 12.6 V5.6 L13.6 7.4" fill="none" stroke="#9fd0ff" strokeWidth="1.3" strokeLinejoin="round" strokeLinecap="round" />
+      </svg>
+    ),
+  },
+  {
     what: 'Wrench, and a white cube marked BUILD: build mode and its build cursor. The next object or message you place lands in the cube\'s cell. The movement controls move it and the zoom sets its size, and it is not your avatar: building never moves you',
     glyph: <Wrench size={16} strokeWidth={2} color="#f2f7ff" aria-hidden />,
   },

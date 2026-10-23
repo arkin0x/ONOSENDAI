@@ -8,7 +8,7 @@
 import { beforeEach, describe, expect, it } from 'vitest'
 import { finalizeEvent, generateSecretKey } from 'nostr-tools/pure'
 import { sha256Hex } from '../blossom'
-import { audioFileRefusal, audioTypeOf, forgetOpenedAudio, openAudio, sealAndUpload, AUDIO_UPLOAD_REASON, MAX_CIPHER_BYTES } from '../audioFile'
+import { audioFileRefusal, audioTypeOf, iphoneMayNotPlay, forgetOpenedAudio, openAudio, sealAndUpload, AUDIO_UPLOAD_REASON, MAX_CIPHER_BYTES } from '../audioFile'
 import { decryptAudioFile, MAX_AUDIO_BYTES } from '../audioItem'
 import type { EventTemplate } from '../events'
 import { toneWav } from './audioFixture'
@@ -136,6 +136,14 @@ describe('what a server can make a finder do', () => {
 })
 
 describe('what the composer takes', () => {
+  it('warns that iPhones may not play ogg or opus, and only those', () => {
+    expect(iphoneMayNotPlay({ type: 'audio/ogg', name: 'a.ogg' })).toBe(true)
+    expect(iphoneMayNotPlay({ type: 'audio/ogg; codecs=opus', name: 'x' })).toBe(true)
+    expect(iphoneMayNotPlay({ type: '', name: 'bell.OPUS' })).toBe(true)
+    expect(iphoneMayNotPlay({ type: 'audio/mpeg', name: 'a.mp3' })).toBe(false)
+    expect(iphoneMayNotPlay({ type: 'audio/mp4', name: 'a.m4a' })).toBe(false)
+  })
+
   it('types a file the system gave no type by its extension', () => {
     expect(audioTypeOf('drone.FLAC')).toBe('audio/flac')
     expect(audioTypeOf('bell.opus')).toBe('audio/ogg')

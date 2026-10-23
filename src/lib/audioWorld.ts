@@ -76,6 +76,17 @@ export function freshMemory(): WorldMemory {
 /** How long a loop may be silent before its voice is let go, ms: walking along a wall does not restart it. */
 export const QUIET_MS = 2000
 
+/**
+ * How many sources are heard at once (arkinox's step 3): the loudest few
+ * where you are. The rest are silent until they are among the loudest; a
+ * loop pushed out lets go after QUIET_MS, and a one-shot already playing
+ * plays on silent to its end, so at most a few more are held than heard.
+ */
+export const MAX_VOICES = 4
+
+/** How much louder a newcomer must be to take a playing voice's slot. */
+export const PLAYING_MARGIN = 1.1
+
 export interface WorldPlan {
   /** Start these now; a one-shot marked `fired` is the once-trigger that just fired. */
   start: Array<{ key: string; oneShot: boolean; lineage: string }>
@@ -93,13 +104,39 @@ export interface WorldPlan {
  * sphere: a tap later must not start it out there, unheard, and spend its
  * once-trigger.
  */
-export function planWorld(sources: readonly WorldSource[], playing: ReadonlySet<string>, fired: (lineage: string) => boolean, now: number, memory: WorldMemory, pending: ReadonlySet<string> = new Set()): WorldPlan {
+export function planWorld(sources: readonly WorldSource[], playing: ReadonlySet<string>, fired: (lineage: string) => boolean, now: number, memory: WorldMemory, pending: ReadonlySet<string> = new Set(), limit = MAX_VOICES): WorldPlan {
   const plan: WorldPlan = { start: [], stop: [], gains: new Map() }
   const present = new Set<string>()
+  // First, each one-shot's trigger, so it is known which want to sound: a
+  // one-shot that is neither playing nor firing does not take a slot.
+  const fires = new Map<string, boolean>()
   for (const s of sources) {
     if (!s.audio.autoplay) continue
     present.add(s.key)
-    const g = s.heard.gain
+    if (s.audio.loop || !hasTrigger(s.audio)) continue
+    const step = stepTrigger(s.audio, memory.triggers.get(s.key) ?? TRIGGER_START, { inSphere: s.heard.inSphere, walking: true, fired: fired(s.lineage) })
+    memory.triggers.set(s.key, step.state)
+    fires.set(s.key, step.fire)
+  }
+  // The loudest few of those that sound or would (MAX_VOICES); every other
+  // source is heard as silent this tick. A one-shot firing now comes first:
+  // its trigger is a moment, and losing it to a loop would spend its entry
+  // unheard. A voice already playing holds its slot against one only a
+  // little louder (PLAYING_MARGIN), so near-equals do not swap every tick;
+  // ties go by key.
+  const wants = (s: WorldSource): boolean => s.heard.gain > 0 && (s.audio.loop || playing.has(s.key) || fires.get(s.key) === true)
+  const firing = (s: WorldSource): number => (!s.audio.loop && fires.get(s.key) === true && !playing.has(s.key) ? 1 : 0)
+  const score = (s: WorldSource): number => s.heard.gain * (playing.has(s.key) ? PLAYING_MARGIN : 1)
+  const loudest = new Set(
+    sources.filter((s) => s.audio.autoplay && wants(s))
+      .sort((a, b) => firing(b) - firing(a) || score(b) - score(a) || (a.key < b.key ? -1 : a.key > b.key ? 1 : 0))
+      .slice(0, Math.max(0, limit))
+      .map((s) => s.key),
+  )
+  for (const s of sources) {
+    if (!s.audio.autoplay) continue
+    const heardHere = loudest.has(s.key)
+    const g = heardHere ? s.heard.gain : 0
     if (s.audio.loop) {
       if (g > 0) memory.quietSince.delete(s.key)
       if (playing.has(s.key)) {
@@ -116,12 +153,10 @@ export function planWorld(sources: readonly WorldSource[], playing: ReadonlySet<
       continue
     }
     if (!hasTrigger(s.audio)) continue
-    const step = stepTrigger(s.audio, memory.triggers.get(s.key) ?? TRIGGER_START, { inSphere: s.heard.inSphere, walking: true, fired: fired(s.lineage) })
-    memory.triggers.set(s.key, step.state)
     if (playing.has(s.key)) {
       if (pending.has(s.key) && !s.heard.inSphere) plan.stop.push(s.key)
       else plan.gains.set(s.key, g)
-    } else if (step.fire) {
+    } else if (fires.get(s.key) && heardHere) {
       plan.start.push({ key: s.key, oneShot: true, lineage: s.lineage })
       plan.gains.set(s.key, g)
     }

@@ -32,7 +32,7 @@ import type { AudioItem } from '../../lib/audioItem'
 import { sha256Hex } from '../../lib/blossom'
 import { forgetAudioContext } from '../../lib/audioContext'
 import { toneWav } from '../../lib/__tests__/audioFixture'
-import { startWorld, stopAllAudio, useHiddenAudio, worldFailed, worldFailure, worldKey } from '../useHiddenAudio'
+import { DECODE_WHOLE_BYTES, DECODE_WHOLE_MAX_PCM, decodeWholeOk, decodedFits, isPcmWav, wavDecodedBytes, startWorld, stopAllAudio, useHiddenAudio, worldFailed, worldFailure, worldKey } from '../useHiddenAudio'
 
 /** Any Web Audio node or param: every property is another, every call returns another, numbers are 0. */
 function anything(): unknown {
@@ -53,6 +53,15 @@ class FakeContext extends EventTarget {
   createGain(): unknown { return anything() }
   createPanner(): unknown { return anything() }
   createMediaElementSource(): unknown { return anything() }
+  createBufferSource(): unknown { return anything() }
+  static decodable = true
+  /** What a decode gives: a stand-in buffer, or one of a given size. */
+  static decoded: { length: number; numberOfChannels: number } | null = null
+  decodeAudioData(_bytes: ArrayBuffer, ok: (b: unknown) => void, fail: () => void): Promise<unknown> {
+    if (FakeContext.decodable) ok(FakeContext.decoded ?? Object.assign(Object.create(anything() as object), { length: 8000, numberOfChannels: 1 }))
+    else fail()
+    return new Promise(() => {})
+  }
   async resume(): Promise<void> {}
 }
 
@@ -60,10 +69,21 @@ const made: FakeAudio[] = []
 /** An element stand-in: refused outside a tap, and it can fail to decode. */
 class FakeAudio extends EventTarget {
   static allowed = false
+  /** The length metadata reports, in seconds; null: none comes. */
+  static metaSeconds: number | null = 1
   loop = false
   preload = ''
-  src = ''
   paused = true
+  duration = NaN
+  private source = ''
+  get src(): string { return this.source }
+  set src(v: string) {
+    this.source = v
+    if (v && this.preload === 'metadata' && FakeAudio.metaSeconds !== null) {
+      this.duration = FakeAudio.metaSeconds
+      queueMicrotask(() => this.dispatchEvent(new Event('loadedmetadata')))
+    }
+  }
   constructor() { super(); made.push(this) }
   play(): Promise<void> {
     if (!FakeAudio.allowed) return Promise.reject(Object.assign(new Error('no'), { name: 'NotAllowedError' }))
@@ -76,6 +96,7 @@ class FakeAudio extends EventTarget {
 }
 
 let audio: AudioItem
+let shortAudio: AudioItem
 const realFetch = globalThis.fetch
 const flush = async (): Promise<void> => { for (let i = 0; i < 6; i++) await Promise.resolve() }
 
@@ -85,6 +106,9 @@ beforeEach(async () => {
   vi.stubGlobal('window', w)
   vi.stubGlobal('Audio', FakeAudio)
   FakeAudio.allowed = false
+  FakeAudio.metaSeconds = 1
+  FakeContext.decodable = true
+  FakeContext.decoded = null
   made.length = 0
   const blobs = new Map<string, Uint8Array>()
   globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -100,8 +124,11 @@ beforeEach(async () => {
     return b ? new Response(b as BodyInit, { status: 200 }) : new Response(null, { status: 404 })
   }) as typeof fetch
   forgetOpenedAudio()
-  const up = await sealAndUpload(new Blob([toneWav() as BlobPart], { type: 'audio/ogg' }), 'https://blossom.test', async (t) => finalizeEvent(t, generateSecretKey()))
+  // Long enough (over DECODE_WHOLE_BYTES) to stream from an element.
+  const up = await sealAndUpload(new Blob([toneWav(70) as BlobPart], { type: 'audio/ogg' }), 'https://blossom.test', async (t) => finalizeEvent(t, generateSecretKey()))
   audio = { ...up, title: 'Drone', about: '', autoplay: true, loop: true, retrigger: 'once', walkOnly: false }
+  const short = await sealAndUpload(new Blob([toneWav(1) as BlobPart], { type: 'audio/wav' }), 'https://blossom.test', async (t) => finalizeEvent(t, generateSecretKey()))
+  shortAudio = { ...short, title: 'Drip', about: '', autoplay: true, loop: true, retrigger: 'once', walkOnly: false }
 })
 
 afterEach(() => {
@@ -111,7 +138,107 @@ afterEach(() => {
   vi.unstubAllGlobals()
 })
 
-describe('a world voice', () => {
+/** Elements made to stream a file (the length probe's are not). */
+const streaming = (): FakeAudio[] => made.filter((e) => e.preload === 'auto')
+
+describe('a short loop, decoded whole', () => {
+  it('plays from a buffer, with no streaming element and no tap of its own once sound is out', async () => {
+    await startWorld('b1', shortAudio)
+    await flush()
+    expect(useHiddenAudio.getState().entries[worldKey('b1')]?.phase).toBe('playing')
+    expect(streaming()).toHaveLength(0)
+  })
+
+  it('is decoded whole only when it is a loop, small enough that its worst case is bounded, and small once decoded; anything else streams', async () => {
+    FakeAudio.allowed = true
+    // A one-shot gains nothing from it.
+    await startWorld('o1', { ...shortAudio, loop: false })
+    await flush()
+    expect(streaming()).toHaveLength(1)
+    // A loop past DECODE_WHOLE_BYTES streams, whatever its headers say.
+    await startWorld('o2', audio)
+    await flush()
+    expect(streaming()).toHaveLength(2)
+    // Not WAV by its bytes, past 64 KB, labelled audio/wav by its hider: it streams.
+    const forged = await sealAndUpload(new Blob([new Uint8Array(200 * 1024).fill(0xff) as BlobPart], { type: 'audio/wav' }), 'https://blossom.test', async (t) => finalizeEvent(t, generateSecretKey()))
+    await startWorld('o3', { ...shortAudio, ...forged })
+    await flush()
+    expect(streaming()).toHaveLength(3)
+    // Small, but large once decoded, or more than two channels: it streams.
+    FakeContext.decoded = { length: DECODE_WHOLE_MAX_PCM, numberOfChannels: 1 }
+    await startWorld('o4', shortAudio)
+    await flush()
+    expect(streaming()).toHaveLength(4)
+    FakeContext.decoded = { length: 1000, numberOfChannels: 6 }
+    await startWorld('o5', shortAudio)
+    await flush()
+    expect(streaming()).toHaveLength(5)
+    expect(decodedFits({ length: 1000, numberOfChannels: 2 })).toBe(true)
+    const wav = toneWav(1)
+    const mp3ish = new Uint8Array([0xff, 0xfb, 0x90, 0x64, ...new Array(60).fill(0)])
+    expect(isPcmWav(wav)).toBe(true)
+    expect(isPcmWav(mp3ish)).toBe(false)
+    // MP3 inside a WAV (format 0x55) is compressed: not one.
+    const mp3InWav = wav.slice()
+    mp3InWav[20] = 0x55
+    expect(isPcmWav(mp3InWav)).toBe(false)
+    expect(decodeWholeOk(mp3ish, 64 * 1024)).toBe(true)
+    expect(decodeWholeOk(mp3ish, 64 * 1024 + 1)).toBe(false)
+    expect(decodeWholeOk(wav, 1024 * 1024)).toBe(true)
+    expect(decodeWholeOk(wav, 1024 * 1024 + 1)).toBe(false)
+    // The WAV's own fmt is the hider's too: decoded size is computed from it, and out-of-range rates are refused.
+    expect(wavDecodedBytes(wav, 8000)).toBe(8000 * 4)
+    expect(wavDecodedBytes(wav, 48_000)).toBe(48_000 * 4)
+    const slow = wav.slice()
+    new DataView(slow.buffer).setUint32(24, 2000, true)
+    expect(isPcmWav(slow)).toBe(false)
+    // 1 MB of 8-bit mono at 8 kHz decodes past the budget at 96 kHz: it streams.
+    const big = new Uint8Array(44 + 1000 * 1000)
+    big.set(wav.subarray(0, 44))
+    const v = new DataView(big.buffer)
+    v.setUint16(34, 8, true); v.setUint16(32, 1, true); v.setUint32(28, 8000, true); v.setUint32(40, 1000 * 1000, true)
+    expect(wavDecodedBytes(big, 96_000)).toBeGreaterThan(DECODE_WHOLE_MAX_PCM)
+    expect(decodeWholeOk(big, big.length, 96_000)).toBe(false)
+    // A faster context shrinks the compressed cap.
+    expect(decodeWholeOk(mp3ish, 40 * 1024, 96_000)).toBe(false)
+    // The worst case the size cap allows: 6 kbps, 48 kHz, stereo float.
+    const worstSeconds = (DECODE_WHOLE_BYTES * 8) / 6000
+    expect(worstSeconds * 48_000 * 2 * 4).toBeLessThan(DECODE_WHOLE_MAX_PCM)
+  })
+
+  it('decodes one file at a time: the peak is one decode, never several', async () => {
+    let inFlight = 0
+    let most = 0
+    const proto = FakeContext.prototype as unknown as { decodeAudioData: (b: ArrayBuffer, ok: (x: unknown) => void, fail: () => void) => Promise<unknown> }
+    const original = proto.decodeAudioData
+    proto.decodeAudioData = function (_b, ok) {
+      inFlight++
+      most = Math.max(most, inFlight)
+      setTimeout(() => { inFlight--; ok(Object.assign(Object.create(anything() as object), { length: 8000, numberOfChannels: 1 })) }, 20)
+      return new Promise(() => {})
+    }
+    try {
+      FakeAudio.allowed = true
+      await Promise.all(['d1', 'd2', 'd3', 'd4'].map((k) => startWorld(k, shortAudio)))
+      await new Promise((r) => setTimeout(r, 150))
+      await flush()
+      expect(most).toBe(1)
+      for (const k of ['d1', 'd2', 'd3', 'd4']) expect(useHiddenAudio.getState().entries[worldKey(k)]?.phase).toBe('playing')
+    } finally {
+      proto.decodeAudioData = original
+    }
+  })
+
+  it('that this browser cannot decode is a failure of the item, and waits out its pause', async () => {
+    FakeContext.decodable = false
+    await startWorld('b2', shortAudio)
+    await flush()
+    expect(useHiddenAudio.getState().entries[worldKey('b2')]).toBeUndefined()
+    expect(worldFailed('b2')).toBe(true)
+  })
+})
+
+describe('a long world file, streamed', () => {
   it('that fails to decode while it waits for a tap is a failure of the item, and waits out its pause', async () => {
     await startWorld('w1', audio)
     await flush()

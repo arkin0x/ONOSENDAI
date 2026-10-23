@@ -41,6 +41,15 @@ import { useFeed } from './useFeed'
 /** The fields of an event a sighting reads; a feed's FeedEvent and a relay's NostrEvent both have them. */
 export type SeenEvent = Pick<NostrEvent, 'id' | 'kind' | 'pubkey' | 'tags' | 'created_at'>
 
+/**
+ * How one send went. `message` is the sentence PUBLISH says; `detail` the
+ * short reason, a relay's own words when one refused (NIP-01 OK prefixes
+ * such as `rate-limited:`), for a row in a list.
+ */
+export type SendOutcome =
+  | { ok: true; took: number; of: number; message: string }
+  | { ok: false; message: string; detail: string }
+
 interface PublishedState {
   /** What this browser knows about which shards have been published. */
   ledger: Ledger
@@ -48,6 +57,14 @@ interface PublishedState {
   retracting: boolean
   /** Sign the shard as a public object and send it to your relays. True when one took it. */
   publish: (shard: ShardModel) => Promise<boolean>
+  /**
+   * PUBLISH's work without its toast or its one-at-a-time lock: sign, send,
+   * write the ledger. Bulk import (store/useShardImport) sends each shard
+   * through here, one after another, and reads the outcome per shard.
+   * `refresh` re-reads the Shard Feed after a success, as PUBLISH does; a
+   * batch does that once at the end instead.
+   */
+  send: (shard: ShardModel, refresh?: boolean) => Promise<SendOutcome>
   /** Send a deletion of the published object (NIP-09). True when a relay took it. */
   retract: (shard: ShardModel) => Promise<boolean>
   /** Note the public objects among these that this identity published, from any read of the relays. */
@@ -105,7 +122,7 @@ function say(notice: string): void {
 }
 
 /** The feed, read again from the newest, when it has been read at all this session. */
-function refreshFeed(): void {
+export function refreshFeed(): void {
   const feed = useFeed.getState()
   if (feed.started) feed.refresh()
 }
@@ -117,21 +134,30 @@ export const usePublished = create<PublishedState>((set, get) => ({
 
   publish: async (shard) => {
     if (get().publishing) return false
+    set({ publishing: true })
+    try {
+      const outcome = await get().send(shard, true)
+      say(outcome.message)
+      return outcome.ok
+    } finally {
+      set({ publishing: false })
+    }
+  },
+
+  send: async (shard, refresh = false) => {
     // The same round trip every reader makes, before the signature: an object
     // the format refuses would be listed by the feed and open as nothing.
     const refusal = shardRefusal(shard)
-    if (refusal) { say(refusal); return false }
+    if (refusal) return { ok: false, message: refusal, detail: refusal }
     const cs = useCyberspace.getState()
     const relays = relaySet()
-    set({ publishing: true })
     try {
       const template = publicObjectTemplate(shard, nextAt(shard.id, Math.max(get().ledger[shard.id]?.at ?? 0, retractedAt(shard.id))))
       const signed = await cs.signEvent(template)
       const result = await publishMany(relays, signed)
       if (!result.ok) {
         // The relay's own words: a refusal is the one thing worth reading.
-        say(`No relay took "${shard.name}": ${result.reason}`)
-        return false
+        return { ok: false, message: `No relay took "${shard.name}": ${result.reason}`, detail: result.reason }
       }
       // Written down here rather than asked of a relay later: an addressable
       // event keeps no memory of what it replaced, so this is the only record
@@ -144,14 +170,11 @@ export const usePublished = create<PublishedState>((set, get) => ({
       // An item wearing it is drawn as the new version too (lib/itemModel.ts).
       forgetItemModel(objectAddress(signed.pubkey, shard.id))
       const took = result.accepted?.length ?? relays.length
-      say(`"${shard.name}" is published to ${took} of ${relays.length} relays.`)
-      refreshFeed()
-      return true
+      if (refresh) refreshFeed()
+      return { ok: true, took, of: relays.length, message: `"${shard.name}" is published to ${took} of ${relays.length} relays.` }
     } catch (err) {
-      say(`Could not publish "${shard.name}": ${err instanceof Error ? err.message : String(err)}`)
-      return false
-    } finally {
-      set({ publishing: false })
+      const why = err instanceof Error ? err.message : String(err)
+      return { ok: false, message: `Could not publish "${shard.name}": ${why}`, detail: why }
     }
   },
 

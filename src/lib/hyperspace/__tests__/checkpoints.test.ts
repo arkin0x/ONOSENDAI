@@ -1,7 +1,8 @@
 /**
  * The embedded checkpoints are trust anchors: a typo here would make a real
  * blob fail (or, if it matched a forgery, pass one). These pin the list's
- * shape; every value was cross-checked against two explorers before pinning.
+ * shape. Each value was cross-checked against an explorer before pinning
+ * (blockstream.info for the 2026-08-24 entries; 971,999 against two).
  */
 import { describe, expect, it } from 'vitest'
 import { EMBEDDED_CHECKPOINTS, GENESIS_HASH } from '../checkpoints'

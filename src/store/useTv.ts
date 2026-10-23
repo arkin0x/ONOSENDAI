@@ -47,6 +47,7 @@ import { resolveReference } from '../lib/references'
 import { hexToBytes, type NostrEvent } from '../lib/events'
 import { RESCAN_BATCH, askAll, askRelays, type Ask as RescanAsk } from '../lib/secrets/rescan'
 import { cleanText } from '../lib/tv/text'
+import { FIT_CELLS, fitScale, scaleAt, zoomPlan, type ZoomStep } from '../lib/tv/zoom'
 import { useMutes } from './useMutes'
 import { withoutMuted } from '../lib/muteList'
 
@@ -189,8 +190,6 @@ interface TvState {
 const QUEUE_LOW = 6
 /** How often the engine looks at the clock. A beat is never late by more than this. */
 const TICK_MS = 100
-/** A shot is framed so its whole path fits in about this many cells across. */
-export const FIT_CELLS = 12
 /** How close the avatar may get to the edge of the frame's anchor before the view re-anchors on it. */
 const REANCHOR_CELLS = 16
 /** How many arrivals the ticker keeps. */
@@ -203,30 +202,8 @@ export const TV_FOCUS_LABEL = 'CYBERSPACE TV'
 export const TV_PATH = '/tv'
 const PUSHED = 'onosendaiTv'
 
-/**
- * The zoom that shows every place in `beats` (and where they started) within
- * FIT_CELLS. A first beat that is a jump is a cut (shotOpening): where it
- * jumped from is not in the shot, and fitting it in framed three one-gibson
- * hops after a hyperjump at 2^59 (review of #370).
- */
-export function fitScale(beats: Beat[]): number {
-  let extent = 0n
-  for (const axis of ['x', 'y', 'z'] as const) {
-    let lo: bigint | null = null
-    let hi: bigint | null = null
-    for (const [i, b] of beats.entries()) {
-      const places = i === 0 && isJump(b) ? [b.action.position[axis]] : [b.from.position[axis], b.action.position[axis]]
-      for (const v of places) {
-        if (lo === null || v < lo) lo = v
-        if (hi === null || v > hi) hi = v
-      }
-    }
-    if (lo !== null && hi !== null && hi - lo > extent) extent = hi - lo
-  }
-  let exp = 0
-  while ((extent >> BigInt(exp)) > BigInt(FIT_CELLS) && exp < MAX_SCALE_EXP) exp++
-  return exp
-}
+// Where they live now (lib/tv/zoom.ts); the tests and callers still find them here.
+export { FIT_CELLS, fitScale }
 
 /** How many places an avatar's trail keeps; the oldest go first. */
 const TRAIL_KEPT = 256
@@ -258,6 +235,8 @@ let dwell = new Dwell()
 /** The tape a read is under way for, or -1: a read stuck on an old tape never holds up a new one. */
 let readingTape = -1
 let shotBegan = 0
+/** The trip on screen's zoom over its clock (lib/tv/zoom.ts); empty for a segment. */
+let zoom: ZoomStep[] = []
 /** When the next commercial is due (performance.now()): adEveryMs (5 min, 15 on the stream) after TV came on, and after each break. */
 let adDue = Infinity
 /** The spot played last, so the breaks take them in turn. */
@@ -667,7 +646,8 @@ function bornAfter(was: TvAvatar | undefined): number | undefined {
 function land(shot: Shot, now: number): void {
   const s = useTv.getState()
   const opening = shotOpening(shot)
-  const scaleExp = fitScale(shot.beats)
+  // Where the zoom plan is when the ride ends, as it goes on from there.
+  const scaleExp = scaleAt(zoom, shot.prelude ?? 0) ?? fitScale(shot.beats)
   const was = s.avatars[shot.pubkey]
   useTv.setState({
     jump: null,
@@ -711,6 +691,7 @@ function beginSegment(shot: Shot, now: number): void {
   const item = shot.item
   const located = item?.kind === 'bag' && placeable(item.hint) ? item.hint : null
   const scaleExp = located ? Math.max(0, Math.max(...located.heights) - BOX_FIT) : s.scaleExp
+  zoom = []
   useTv.setState({
     shot,
     played: 0,
@@ -735,7 +716,9 @@ function beginShot(shot: Shot, now: number, id: number): void {
   // A hyperjump's ride opens where the rider stood, in the tunnel (tick plays the rest).
   const ride = shot.prelude ? rideEnds(shot.beats[0]) : null
   const opening = ride ? shot.beats[0].from : shotOpening(shot)
-  const scaleExp = fitScale(shot.beats)
+  // The zoom follows the moves (lib/tv/zoom.ts): it opens at the first span's.
+  zoom = zoomPlan(shot.beats, shot.offsets, shot.length, shot.prelude ?? 0)
+  const scaleExp = zoom[0]?.scaleExp ?? fitScale(shot.beats)
   const before = s.shot
   // Straight on from the shot before: the same avatar, picking up where it
   // stopped, at the same zoom. Anything else is a cut, with static.
@@ -854,12 +837,17 @@ function tick(id: number): void {
     tapeTime = b.at
     played++
   }
-  if (played === s.played) return
-  useTv.setState({ played, avatars, tapeTime })
+  // The zoom, where the plan has it now (lib/tv/zoom.ts): one power of two
+  // at a time, re-anchored on the avatar so it stays where render space is exact.
+  const want = s.shot.kind === 'trip' ? scaleAt(zoom, elapsed) : null
+  const zoomed = want !== null && want !== s.scaleExp
+  if (played === s.played && !zoomed) return
+  const scaleExp = zoomed ? want : s.scaleExp
+  useTv.setState(zoomed ? { played, avatars, tapeTime, scaleExp } : { played, avatars, tapeTime })
   // Keep the subject near the anchor: render space is only exact near it.
   const at = avatars[s.shot.pubkey]
   const cs = useCyberspace.getState()
-  if (at && (at.plane !== cs.anchorPlane || cells(at.position, cs.anchor, s.scaleExp) > REANCHOR_CELLS)) frame(at.position, at.plane, s.scaleExp)
+  if (at && (zoomed || at.plane !== cs.anchorPlane || cells(at.position, cs.anchor, scaleExp) > REANCHOR_CELLS)) frame(at.position, at.plane, scaleExp)
 }
 
 /** Pick a random event, and play from it: a new tape, nothing of the last one kept. */

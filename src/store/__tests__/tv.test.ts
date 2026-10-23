@@ -279,6 +279,48 @@ describe('Cyberspace TV', () => {
     }
   })
 
+  it('plays tiny moves at a fine zoom and steps out, one power of two at a time, before the big move (2026-10-23)', async () => {
+    const D = '4'.repeat(64)
+    const base = 1n << 30n
+    const tiny = Array.from({ length: 6 }, (_, i) => hop(D, T0 + 300 + i, base + BigInt(i) * 16n, base + BigInt(i + 1) * 16n))
+    const big = hop(D, T0 + 307, base + 96n, base + 96n + (1n << 17n))
+    tape.push(...tiny, big)
+    try {
+      useTv.getState().start()
+      const seen: Array<{ played: number; scaleExp: number; viewScale: number; focusX: bigint | undefined; x: bigint | undefined }> = []
+      // Read between ticks: within one, the badge is set a moment before the view.
+      for (let t = 0; t < 60000; t += 100) {
+        await vi.advanceTimersByTimeAsync(100)
+        const s = useTv.getState()
+        // The first time through only: the tape tunes in again after its end.
+        if (s.shot?.pubkey !== D) { if (seen.length > 0) break; continue }
+        const cs = useCyberspace.getState()
+        seen.push({ played: s.played, scaleExp: s.scaleExp, viewScale: cs.scaleExp, focusX: cs.focus?.position.x, x: s.avatars[D]?.position.x })
+      }
+      expect(seen.length).toBeGreaterThan(0)
+      // The badge and the view agree throughout.
+      for (const p of seen) expect(p.viewScale).toBe(p.scaleExp)
+      const first = seen.find((p) => p.played === 1)!
+      const last = seen.find((p) => p.played === 7)!
+      expect(first.scaleExp).toBeLessThan(4)
+      expect(last.scaleExp).toBe(fitScale([beatOf(big)!]))
+      // Out before the big move played: every step of the way while six moves had played.
+      const before = seen.filter((p) => p.played === 6)
+      expect(before[before.length - 1].scaleExp).toBe(last.scaleExp)
+      // A power of two at a time (the engine ticks every 100 ms, so now and
+      // then two land in one tick), in several steps, never back in.
+      const scales = seen.map((p) => p.scaleExp).filter((v, i, a) => i === 0 || v !== a[i - 1])
+      expect(scales.length).toBeGreaterThan(6)
+      scales.slice(1).forEach((v, i) => { expect(v - scales[i]).toBeGreaterThan(0); expect(v - scales[i]).toBeLessThanOrEqual(2) })
+      // Each step re-anchors on the avatar, where render space is exact.
+      const step = seen.find((p, i) => i > 0 && p.scaleExp !== seen[i - 1].scaleExp)!
+      expect(step.focusX).toBe(step.x)
+      expect(publishedBesidesPings()).toEqual([])
+    } finally {
+      tape.splice(tape.length - 7, 7)
+    }
+  })
+
   it('a ride\'s block A: B itself on a ride to the same block, else the rider\'s `c`, never named as A', () => {
     const ride = (from: string, to: string, extra: string[][] = []) => beatOf({ ...hop(B, T0, 1000n, 1n << 59n), tags: [['A', 'hyperjump'], ['e', '0'.repeat(64), '', 'genesis'], ['e', '0'.repeat(64), '', 'previous'], ['c', at(1000n)], ['C', at(1n << 59n)], ['proof', 'a'.repeat(64)], ['from_height', from], ['B', to], ['mp', 'x'], ...extra] })!
     // No stop index here: A is never looked up.

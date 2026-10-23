@@ -114,7 +114,9 @@ const FRAMES: Array<[number, number, number]> = [[1920, 1080, 1], [1280, 720, 1]
 const longComment = { ...comment, text: 'the sky above the port was the color of television, tuned to a dead channel and then some more words to run it past what any panel holds at this size' }
 const shortComment = { ...comment, id: 'd'.repeat(64), text: 'welcome to cyberspace! Let me know if you have any questions' }
 const KINDS = [trip, segmentShot(bag), segmentShot(object), segmentShot(longComment as never), segmentShot(shortComment as never)]
-const CARD = 'MEANWHILE'
+/** The cards a cut can bring: none, MEANWHILE, and the longest LATER there is. */
+const CARDS: Array<Partial<TvPicture>> = [{}, { meanwhile: true, cutAt: 1e12 - 1500 }, { skipped: 23 * 3600 + 59 * 60, cutAt: 1e12 - 1500 }]
+const isCard = (r: { look: Look }): boolean => r.look.ink === 'rgba(2, 12, 20, 0.94)' || r.look.ink === 'rgba(0, 0, 0, 0.5)'
 /** The splashes' words: stamped on a panel's corner, hanging over its edge as on the site. */
 const SPLASH = new Set(['NOW', 'AVAILABLE!', 'CASHU', 'NFT', 'INSIDE!'])
 
@@ -131,23 +133,40 @@ describe('the stream\'s text sizes', () => {
           for (const music of [silent, null]) {
             assets.music = music
             for (const shot of KINDS) {
-              for (const meanwhile of [false, true]) {
-                const at = `${size} ${w}x${h}@${scale} ${shot.kind}${music ? '' : ' no music'}${meanwhile ? ' + card' : ''}`
-                const { texts, rects } = paintAt(picture({ shot: shot as never, meanwhile, cutAt: meanwhile ? 1e12 - 1500 : 0 }), w, h, 1e12, scale)
+              for (const [ci, cardState] of CARDS.entries()) {
+                const at = `${size} ${w}x${h}@${scale} ${shot.kind}${music ? '' : ' no music'}${ci ? ` + card ${ci}` : ''}`
+                const { texts, rects } = paintAt(picture({ shot: shot as never, ...cardState }), w, h, 1e12, scale)
                 for (const t of texts) expect(inside(t.box, frame), `${at}: "${t.text}" ${JSON.stringify(t.box)}`).toBe(true)
                 // The segment's panel: the widest gradient ground above the chiron's.
                 const grounds = rects.filter((r) => r.look.ink === 'gradient' && !r.radial)
                 const chironGround = grounds.reduce((low, r) => (r.y1 > low.y1 ? r : low), grounds[0])
                 const panel = shot.kind === 'trip' ? undefined : grounds.filter((r) => r !== chironGround && r.y1 <= chironGround.y0 + 0.5 && r.x1 - r.x0 > 200 * scale).sort((a, b) => (b.x1 - b.x0) * (b.y1 - b.y0) - (a.x1 - a.x0) * (a.y1 - a.y0))[0]
                 if (shot.kind !== 'trip') expect(panel, `${at}: a panel`).toBeDefined()
-                const outside = texts.filter((t) => !SPLASH.has(t.text) && (!panel || !inside(t.box, panel)))
+                const cardSeq = rects.find(isCard)?.seq
+                const isCardWords = (t: Text): boolean => cardSeq !== undefined && t.seq === cardSeq + 1
+                const outside = texts.filter((t) => !SPLASH.has(t.text) && !isCardWords(t) && (!panel || !inside(t.box, panel)))
                 if (panel) {
-                  for (const t of outside) if (t.text !== CARD && !t.text.endsWith(CARD)) expect(meets(t.box, panel), `${at}: "${t.text}" meets the panel`).toBe(false)
+                  for (const t of outside) expect(meets(t.box, panel), `${at}: "${t.text}" meets the panel`).toBe(false)
                   // The panel keeps above the chiron and NOW PLAYING.
                   for (const r of grounds) if (r !== panel && r.y0 >= panel.y0 && !inside(r, panel)) expect(meets(r, panel), `${at}: ${JSON.stringify(r)} under ${JSON.stringify(panel)}`).toBe(false)
                 }
+                // A card meets neither the panel nor NOW PLAYING (review of #453:
+                // centred on the frame, it ran over NOW PLAYING), and holds its words.
+                const card = rects.find(isCard)
+                if (ci > 0 && shot.kind !== 'trip') expect(card, `${at}: a card`).toBeDefined()
+                if (card) {
+                  expect(inside(card, frame), `${at}: card ${JSON.stringify(card)}`).toBe(true)
+                  if (panel) expect(meets(card, panel), `${at}: card over the panel`).toBe(false)
+                  const npLabel = texts.find((t) => t.text.includes('NOW PLAYING'))
+                  const np = npLabel && grounds.find((r) => r.x0 <= npLabel.box.x0 && r.x1 >= npLabel.box.x0 && r.y0 <= npLabel.y && r.y1 >= npLabel.y)
+                  if (np) expect(meets(card, np), `${at}: card ${JSON.stringify(card)} over NOW PLAYING ${JSON.stringify(np)}`).toBe(false)
+                  // Its words: drawn straight after its ground (fitted to the chiron, they may end in an ellipsis).
+                  const words = texts.find((t) => t.seq === card.seq + 1)!
+                  expect(words, `${at}: card words`).toBeDefined()
+                  expect(inside(words.box, { ...card, y0: card.y0 - words.size, y1: card.y1 + words.size }), `${at}: card words`).toBe(true)
+                }
                 // Outside the panel, no word meets another (the card goes over the chiron, solid, with the larger text).
-                const rest = outside.filter((t) => !t.text.includes(CARD) && t.text !== '▌')
+                const rest = outside.filter((t) => t.text !== '▌')
                 for (let i = 0; i < rest.length; i++) {
                   for (let j = i + 1; j < rest.length; j++) {
                     const a = rest[i].box, b = rest[j].box
@@ -164,6 +183,31 @@ describe('the stream\'s text sizes', () => {
     } finally {
       assets.music = silent
     }
+  })
+
+  it('lays out as it says: NOW PLAYING wide, the row low, the minimap out of a panel\'s way, the run low in its band, the panel down to the chiron', () => {
+    setBroadcastForTest(true, 'large')
+    const s = 1.35 * 2.25
+    const H = 1080
+    const W = 1920
+    const MY = Math.round(H * 0.085)
+    const { texts, rects } = paintAt(picture({ shot: segmentShot(longComment as never) as never, arrivals: [{ pubkey: 'zed', at: 1 }] }), W, H, 1e12, 1)
+    const grounds = rects.filter((r) => r.look.ink === 'gradient' && !r.radial)
+    const npLabel = texts.find((t) => t.text.includes('NOW PLAYING'))!
+    const np = grounds.find((r) => r.x0 <= npLabel.box.x0 && r.x1 >= npLabel.box.x0 && r.y0 <= npLabel.y && r.y1 >= npLabel.y)!
+    expect(np.x1 - np.x0).toBeGreaterThanOrEqual(W * 0.32 - 0.5)
+    const chiron = grounds.filter((r) => r !== np).reduce((low, r) => (r.y1 > low.y1 ? r : low))
+    expect(chiron.y1 - chiron.y0).toBeCloseTo(62 * s, 6)
+    expect(np.y1 - np.y0).toBeCloseTo(62 * s, 6)
+    // No minimap (its ground is a radial gradient, top left) while the panel is up.
+    expect(rects.filter((r) => r.radial && r.x0 < W / 2)).toEqual([])
+    // The ticker's run sits in its band as its type is tall.
+    const run = texts.find((t) => t.text.startsWith('NEW ARRIVAL'))!
+    expect(run.y).toBeCloseTo(H - MY - 32 * s + 16 * s + 16 * s * 0.36, 6)
+    // The panel comes down past the band the card used to keep above the chiron.
+    const panel = grounds.filter((r) => r !== np && r !== chiron).sort((a, b) => (b.x1 - b.x0) * (b.y1 - b.y0) - (a.x1 - a.x0) * (a.y1 - a.y0))[0]
+    expect(panel.y1).toBeGreaterThan(chiron.y0 - 40 * s)
+    expect(panel.y1).toBeLessThanOrEqual(chiron.y0 - 14 * s + 0.5)
   })
 
   it('large sets a comment\'s words 2.25 times the site\'s at 1080p, so 9 px to a capital at 400 px wide', () => {

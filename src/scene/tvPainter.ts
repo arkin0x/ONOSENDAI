@@ -671,7 +671,10 @@ export class TvPainter {
     // LATER and MEANWHILE, after the cut's transition; under an inset's
     // panel, or with the stream's larger text across the chiron, solid.
     part('card')
-    this.card(p, W, s, narrow, bigInset && chironTop < tickY ? chironTop + chironH / 2 + 6 * s : inset ? floor - 34 * s : H * 0.34, now, bigInset)
+    // Across the chiron, it is centred on the chiron and kept within it: NOW
+    // PLAYING beside it stays clear (review of #453).
+    const onChiron = bigInset && chironTop < tickY
+    this.card(p, onChiron ? MX + chironW / 2 : W / 2, s, narrow, onChiron ? chironTop + chironH / 2 + 6 * s : inset ? floor - 34 * s : H * 0.34, now, onChiron ? chironW : null)
 
     // TUNING, END OF TAPE, NO SIGNAL.
     part('status')
@@ -1250,7 +1253,8 @@ export class TvPainter {
     ctx.restore()
   }
 
-  private card(p: TvPicture, W: number, s: number, narrow: boolean, y: number, now: number, solid = false): void {
+  /** LATER or MEANWHILE, centred on `cx`; given `within`, solid and no wider than that (across the chiron). */
+  private card(p: TvPicture, cx: number, s: number, narrow: boolean, y: number, now: number, within: number | null = null): void {
     if (p.status !== 'playing') return
     const text = p.meanwhile ? '◀◀ MEANWHILE' : p.skipped >= 60 ? `▶▶ ${skipWords(p.skipped)} LATER` : null
     if (!text) return
@@ -1260,11 +1264,12 @@ export class TvPainter {
     ctx.globalAlpha = t < 0.08 ? t / 0.08 : t > 0.8 ? (1 - t) / 0.2 : 1
     ctx.font = `700 ${(narrow ? 14 : 18) * s}px ${TV_FONT}`
     ctx.textAlign = 'center'
-    const tw = ctx.measureText(text).width
-    ctx.fillStyle = solid ? 'rgba(2, 12, 20, 0.94)' : 'rgba(0, 0, 0, 0.5)'
-    ctx.fillRect(W / 2 - tw / 2 - 14 * s, y - 22 * s, tw + 28 * s, 32 * s)
+    const words = within === null ? text : fit(ctx, text, within - 28 * s)
+    const tw = ctx.measureText(words).width
+    ctx.fillStyle = within !== null ? 'rgba(2, 12, 20, 0.94)' : 'rgba(0, 0, 0, 0.5)'
+    ctx.fillRect(cx - tw / 2 - 14 * s, y - 22 * s, tw + 28 * s, 32 * s)
     ctx.fillStyle = FG
-    ctx.fillText(text, W / 2, y)
+    ctx.fillText(words, cx, y)
     ctx.globalAlpha = 1
   }
 
@@ -1457,7 +1462,9 @@ export class TvPainter {
       const on = item.on === 'bag' ? 'ON A BAG ENCRYPTED TO A LOCATION' : item.about && item.about !== item.pubkey ? `ON ${a.name(item.about)}'S MOVE` : 'ON A MOVE'
       ctx.font = `${10 * s}px ${TV_FONT}`
       ctx.fillStyle = ACCENT
-      ctx.fillText(fit(ctx, `${a.name(item.pubkey)} · ${on}`, textW), tx, ty + lines.length * quoteSize * 1.45 + 18 * s)
+      // A name already cut ("…") and then cut again after it read "……" (review of #453).
+      const credit = fit(ctx, `${a.name(item.pubkey)} · ${on}`, textW)
+      ctx.fillText(this.big ? credit.replace(/…+$/u, '…') : credit, tx, ty + lines.length * quoteSize * 1.45 + 18 * s)
     }
     ctx.globalAlpha = 1
   }

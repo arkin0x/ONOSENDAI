@@ -10,10 +10,11 @@
  * standingOf).
  */
 
-import { useEffect } from 'react'
+import { useEffect, useMemo } from 'react'
 import type { ActionEvent } from '../lib/events'
 import { standingOf } from '../lib/neighborChains'
 import { refreshRoster, rosterStatus, startRoster, useRoster } from '../store/useRoster'
+import { useMutes } from '../store/useMutes'
 
 export interface RecentAvatars {
   avatars: ActionEvent[]
@@ -26,6 +27,8 @@ export function useRecentAvatars(): RecentAvatars {
   const list = useRoster((s) => s.list)
   const status = useRoster(rosterStatus)
   const updating = useRoster((s) => s.asking > 0)
+  // Nobody blocked is listed (store/useMutes); never yourself.
+  const blocked = useMutes((s) => s.muted.pubkeys)
 
   useEffect(() => {
     startRoster()
@@ -35,5 +38,6 @@ export function useRecentAvatars(): RecentAvatars {
   // Someone whose chain is known to be broken stands where it froze, by the
   // same cached chain reads presence makes (lib/neighborChains.ts); this list
   // never asks the relays for a chain itself.
-  return { avatars: list.map(standingOf), status, updating }
+  const shown = useMemo(() => (blocked.size === 0 ? list : list.filter((a) => !blocked.has(a.pubkey))), [list, blocked])
+  return { avatars: shown.map(standingOf), status, updating }
 }

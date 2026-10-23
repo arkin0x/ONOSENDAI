@@ -43,6 +43,8 @@ import { itemLineage } from '../lib/hidden'
 import { Explanation } from './Explanation'
 import { ChestBlock, Unsigned } from './ItemRows'
 import { useCashu, cashuStateLabel } from './useCashu'
+import { useMutes } from '../store/useMutes'
+import { hidesThing } from '../lib/muteList'
 
 /** How a held item came to be held, in a word for the row. */
 const SOURCE: Record<HeldItem['source'], string> = { forged: 'forged by you', found: 'found', taken: 'taken', pasted: 'pasted' }
@@ -245,7 +247,13 @@ export function InventoryPanel(): JSX.Element {
   const items = useInventory((s) => s.items)
   const storage = useInventory((s) => s.storage)
   const discovered = useShards((s) => s.discovered)
-  const { keys, taken } = useMemo(() => splitPanels([], Object.values(items)).loot, [items])
+  // Nothing by someone blocked, or muted by its id, is listed (store/useMutes); never what you forged.
+  const muted = useMutes((s) => s.muted)
+  const self = useCyberspace((s) => s.identity.pubkey)
+  const { keys, taken } = useMemo(
+    () => splitPanels([], Object.values(items).filter((it) => !hidesThing(muted, { authors: [it.author], ids: [it.id] }, self))).loot,
+    [items, muted, self],
+  )
   // Which DISCOVERED chests each item opens, from the lock tags of chests seen.
   const chests = useMemo(() => Object.values(discovered).filter((h) => h.type === 'chest' && h.chest).map((h) => ({ id: h.eventId, chest: h.chest! })), [discovered])
   const [paste, setPaste] = useState('')

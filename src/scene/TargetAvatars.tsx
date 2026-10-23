@@ -15,6 +15,7 @@ import { GRID_RADIUS, placeCentre, type Position, type ViewAxes } from '../lib/s
 import { alignedOrigin, useCyberspace } from '../store/useCyberspace'
 import { avatarTurn } from '../lib/facing'
 import { OtherAvatar } from './OtherAvatar'
+import { useMutes } from '../store/useMutes'
 
 /** Same cull as Earth and the spawn marker. */
 const REACH = GRID_RADIUS * 8
@@ -45,17 +46,19 @@ export function TargetAvatars({ axes }: Props): JSX.Element | null {
     return (p: Position) => placeCentre(p, origin, scaleExp, axes)
   }, [anchor, scaleExp, axes])
 
+  const blocked = useMutes((s) => s.muted.pubkeys)
   const near = useMemo(() => {
     if (scaleExp >= AVATAR_SCALE_LIMIT) return []
     const list = useCyberspace.getState().targetList()
     return list
       // Someone standing in the other plane is not here (§2.4).
-      .filter((t) => t.id !== focus && targets[t.id]?.plane === anchorPlane)
+      // Nor a target you blocked (store/useMutes).
+      .filter((t) => t.id !== focus && targets[t.id]?.plane === anchorPlane && !blocked.has(t.id))
       .map((t) => ({ ...t, centre: place(t.at) }))
       .filter((t) => Math.hypot(...t.centre) <= REACH)
     // targets is what targetList reads.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [targets, anchorPlane, scaleExp, focus, place])
+  }, [targets, anchorPlane, scaleExp, focus, place, blocked])
 
   // Turned with the view like every shard and your own avatar, so a compass
   // turn that puts the world upside down puts them upside down with it.

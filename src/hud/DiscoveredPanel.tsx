@@ -35,7 +35,9 @@ import { CYBERSPACE_RELAY } from '../lib/relay'
 import { formatAgo, formatStamp } from '../lib/time'
 import { useCyberspace } from '../store/useCyberspace'
 import { useLootView } from '../store/useLootView'
-import { useShards } from '../store/useShards'
+import { findHidden, useShards } from '../store/useShards'
+import { useMutes } from '../store/useMutes'
+import { hidesThing, NOTHING_MUTED, type Muted } from '../lib/muteList'
 import { ProfileBadge } from './ProfileBadge'
 import { Explanation } from './Explanation'
 import { ItemIcon, distinctKinds, type ItemKind } from './ItemIcon'
@@ -66,8 +68,9 @@ export function HiddenPanel(): JSX.Element {
  * only the curators' bags, here as in the scene: on a desktop these panels
  * stay open beside it, with each bag's author and riddle (review of #364).
  */
-export function shownBags(items: LootItem[], opened: ReadonlySet<string>, mode: Mode, curated: readonly string[] | null): LootItem[] {
-  return items.filter((it) => opened.has(it.bagId) === (mode === 'discovered') && (!curated || curated.includes(it.author)))
+export function shownBags(items: LootItem[], opened: ReadonlySet<string>, mode: Mode, curated: readonly string[] | null, muted: Muted = NOTHING_MUTED, me = ''): LootItem[] {
+  // A bag by someone blocked is not listed, nor one muted by its id (store/useMutes).
+  return items.filter((it) => opened.has(it.bagId) === (mode === 'discovered') && (!curated || curated.includes(it.author)) && !hidesThing(muted, { authors: [it.author], ids: [it.bagId] }, me))
 }
 
 /** The bags on the relay your keys have opened, where they stand. */
@@ -82,11 +85,14 @@ function BagList({ mode }: { mode: Mode }): JSX.Element {
   useEscape('modal', more, () => setMore(false))
   const me = useCyberspace((s) => s.identity.pubkey)
   const discovered = useShards((s) => s.discovered)
+  const muted = useMutes((s) => s.muted)
   // What each opened bag holds: how many items, and one icon per kind in it
   // (ItemIcon), the oldest item's kind first, a coin apart from a message.
   const kinds = useMemo(() => {
     const by = new Map<string, (ItemKind & { at: number })[]>()
     for (const h of Object.values(discovered)) {
+      // A muted thing is not counted; a bag with nothing else left still reads opened (below).
+      if (findHidden(h, muted, me)) continue
       const list = by.get(h.bagId) ?? []
       list.push({ at: h.createdAt, type: h.type, coin: h.type === 'message' && findCashuToken(h.text) !== null })
       by.set(h.bagId, list)
@@ -94,7 +100,7 @@ function BagList({ mode }: { mode: Mode }): JSX.Element {
     const out = new Map<string, { count: number; kinds: ItemKind[] }>()
     for (const [bag, list] of by) out.set(bag, { count: list.length, kinds: distinctKinds(list.sort((a, b) => a.at - b.at)) })
     return out
-  }, [discovered])
+  }, [discovered, muted, me])
   // A bag is opened when a key of ours decrypted it, whether or not anything in
   // it could be read: an opened bag with nothing readable is not hidden.
   const readingsVersion = useBagReadingsVersion()
@@ -107,7 +113,7 @@ function BagList({ mode }: { mode: Mode }): JSX.Element {
   const nearbyCount = useNearbyLoot().length
   // One state per panel: the opened bags here, the rest there.
   const curated = useShards((s) => s.curated)
-  const shown = useMemo(() => shownBags(items, opened, mode, curated), [items, opened, mode, curated])
+  const shown = useMemo(() => shownBags(items, opened, mode, curated, muted, me), [items, opened, mode, curated, muted, me])
   const [now, setNow] = useState(() => Date.now() / 1000)
   useEffect(() => {
     const t = window.setInterval(() => setNow(Date.now() / 1000), 10_000)

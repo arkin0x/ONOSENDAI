@@ -30,7 +30,7 @@ import { getStopByHeight } from './useHyperspace'
 import { MAX_COMPUTE_HEIGHT, useCyberspace } from './useCyberspace'
 import { spectate, stopSpectating } from '../lib/spectator'
 import { useBuilder } from './useBuilder'
-import { useShards } from './useShards'
+import { findHidden, useShards } from './useShards'
 import { useDemo } from './useDemo'
 import { useCoordRoute } from './useCoordRoute'
 import { usePersonCard } from './usePersonCard'
@@ -45,6 +45,8 @@ import { resolveReference } from '../lib/references'
 import { hexToBytes, type NostrEvent } from '../lib/events'
 import { RESCAN_BATCH, askAll, askRelays, type Ask as RescanAsk } from '../lib/secrets/rescan'
 import { cleanText } from '../lib/tv/text'
+import { useMutes } from './useMutes'
+import { withoutMuted } from '../lib/muteList'
 
 /** Where an avatar stands on the tape, and since when. */
 export interface TvAvatar {
@@ -474,9 +476,12 @@ function reveal(s: TvState, opened: OpenedBag[]): void {
   const now = performance.now()
   const fresh: Array<{ h: Hidden; bagAt: number }> = []
   const seen = new Set<string>()
+  // A find by someone blocked, or muted by its id, is not shown (store/useMutes).
+  const muted = useMutes.getState().muted
+  const me = useCyberspace.getState().identity.pubkey
   for (const o of opened) {
     for (const h of o.items) {
-      if (s.found[h.eventId] || seen.has(h.eventId)) continue
+      if (s.found[h.eventId] || seen.has(h.eventId) || findHidden(h, muted, me)) continue
       seen.add(h.eventId)
       fresh.push({ h, bagAt: o.bag.created_at })
     }
@@ -514,8 +519,11 @@ async function readMore(id: number, t: number): Promise<void> {
       const { beats, items } = await r.read()
       if (!current()) return
       failures = 0
-      for (const b of beats) d.add(b)
-      for (const item of items) d.addItem(item)
+      // Nothing by someone blocked, or muted by its id, goes on air (store/useMutes).
+      const muted = useMutes.getState().muted
+      const me = useCyberspace.getState().identity.pubkey
+      for (const b of withoutMuted(beats, muted, me)) d.add(b)
+      for (const item of withoutMuted(items, muted, me)) d.addItem(item)
       queue.push(...d.release(r.readTo - 1))
     }
     if (current() && r.caughtUp) queue.push(...d.release(Infinity))
@@ -765,10 +773,25 @@ function tick(id: number): void {
     s = useTv.getState()
   }
   scanTick(s)
+  // A block made while TV is on takes that person off the air at once:
+  // their queued shots, the shot on screen, their avatar and their ticker
+  // lines (review of #464, S6). Read every tick, since the tape was read
+  // before the block.
+  const blocked = useMutes.getState().muted.pubkeys
+  let offAir = false
+  if (blocked.size > 0) {
+    queue = queue.filter((q) => !blocked.has(q.pubkey))
+    offAir = s.shot !== null && blocked.has(s.shot.pubkey)
+    if (offAir || Object.keys(s.avatars).some((pk) => blocked.has(pk)) || s.arrivals.some((a) => blocked.has(a.pubkey)) || s.reactions.some((r) => blocked.has(r.pubkey))) {
+      const avatars = Object.fromEntries(Object.entries(s.avatars).filter(([pk]) => !blocked.has(pk)))
+      useTv.setState({ avatars, arrivals: s.arrivals.filter((a) => !blocked.has(a.pubkey)), reactions: s.reactions.filter((r) => !blocked.has(r.pubkey)) })
+      s = useTv.getState()
+    }
+  }
   // One pubkey has held the screen its time (lib/tv/dwell): on to someone
   // else's shot now, cutting this one short, when the tape has one ready.
   const moveOn = s.shot !== null && dwell.moveOn(queue, now)
-  if (s.shot === null || (now - shotBegan) / 1000 >= s.shot.length || moveOn) {
+  if (s.shot === null || offAir || (now - shotBegan) / 1000 >= s.shot.length || moveOn) {
     // A break, when one is due: between shots, never across one.
     if (now >= adDue && s.status === 'playing') {
       const spot = nextAd(lastAd)

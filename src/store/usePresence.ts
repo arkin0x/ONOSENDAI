@@ -52,6 +52,7 @@ import type { Position } from '../lib/space'
 import { useCyberspace, type SpectateState } from './useCyberspace'
 import { useChat } from './useChat'
 import { chime } from '../lib/chime'
+import { useMutes } from './useMutes'
 
 export interface Person {
   pubkey: string
@@ -128,10 +129,11 @@ export function inNeighborhood(p: Position, of: Position): boolean {
  */
 export function presenceDrawn(
   people: Record<string, Person>,
-  skip: { me: string; focus: string; targets: Record<string, unknown>; plane: Plane },
+  skip: { me: string; focus: string; targets: Record<string, unknown>; plane: Plane; muted?: ReadonlySet<string> },
 ): Person[] {
+  // Nor anyone blocked (store/useMutes): still tracked, so an UNBLOCK draws them at once.
   return Object.values(people).filter((p) =>
-    p.pubkey !== skip.me && p.pubkey !== skip.focus && !skip.targets[p.pubkey] && p.plane === skip.plane)
+    p.pubkey !== skip.me && p.pubkey !== skip.focus && !skip.targets[p.pubkey] && p.plane === skip.plane && !skip.muted?.has(p.pubkey))
 }
 
 /**
@@ -257,7 +259,8 @@ export const usePresence = create<PresenceState>((set, get) => ({
     // Someone new, after the backfill: an arrival. During the backfill every
     // person is new and none of them just arrived. Your targets are not
     // arrivals either; you already know where they are.
-    const arrived = !have && !opts.quiet && !get().loading && !useCyberspace.getState().targets[action.pubkey]
+    // Nor is anyone blocked: no count, no chime (store/useMutes).
+    const arrived = !have && !opts.quiet && !get().loading && !useCyberspace.getState().targets[action.pubkey] && !useMutes.getState().muted.pubkeys.has(action.pubkey)
     set({
       people: { ...get().people, [action.pubkey]: {
         pubkey: action.pubkey, position: at.position, plane: at.plane,
@@ -279,7 +282,8 @@ export const usePresence = create<PresenceState>((set, get) => ({
 
   others: () => {
     const { identity, targets } = useCyberspace.getState()
-    return Object.values(get().people).filter((p) => p.pubkey !== identity.pubkey && !targets[p.pubkey])
+    const blocked = useMutes.getState().muted.pubkeys
+    return Object.values(get().people).filter((p) => p.pubkey !== identity.pubkey && !targets[p.pubkey] && !blocked.has(p.pubkey))
   },
 }))
 

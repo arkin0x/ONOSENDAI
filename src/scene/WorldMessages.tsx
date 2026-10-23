@@ -59,6 +59,7 @@ import { regionBox, type Box } from '../lib/clip'
 import { useItemModel } from '../hooks/useItemModel'
 import type { ItemAnimation, ItemModelRef } from '../lib/itemModel'
 import { ItemModelMark } from './ItemModel'
+import { useMutes } from '../store/useMutes'
 
 /** A message's tap target, in CSS pixels: a fingertip over the mark, at any zoom. */
 const TAP_PX = 44
@@ -156,6 +157,8 @@ export function WorldMessages({ axes }: Props): JSX.Element | null {
   const discovered = useShards((s) => s.discovered)
   // The tour's district shows only its curators' things (DemoScene.curated).
   const curated = useShards((s) => s.curated)
+  // A block or a mute hides what it names (store/useMutes).
+  const muted = useMutes((s) => s.muted)
   const births = useCeremony((s) => s.births)
 
   const placed = useMemo(() => {
@@ -184,7 +187,7 @@ export function WorldMessages({ axes }: Props): JSX.Element | null {
       .filter((w) => (w.coin || notesShown) && Math.hypot(...w.centre) <= REACH)
     // mine and discovered are what worldItems reads.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [anchor, anchorPlane, scaleExp, axes, mine, discovered, curated])
+  }, [anchor, anchorPlane, scaleExp, axes, mine, discovered, curated, muted])
 
   if (placed.length === 0) return null
 

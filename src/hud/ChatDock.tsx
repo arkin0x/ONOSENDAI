@@ -45,6 +45,8 @@ import { usePresence } from '../store/usePresence'
 import { useProfiles, profileLabel } from '../store/useProfiles'
 import { useMyAgents } from '../hooks/useMyAgents'
 import { activeMention, buildCandidates, filterCandidates, insertMention, mentionsMe, segments, type Candidate } from '../lib/mentions'
+import { useMutes } from '../store/useMutes'
+import { hidesThing } from '../lib/muteList'
 
 /** How many lines the unfolded dock shows; the rest are a scroll away. */
 const SHOWN = 200
@@ -145,6 +147,8 @@ export function ChatDock(): JSX.Element {
   // list was dismissed with Escape, so the list stays shut until a new one.
   const me = useCyberspace((s) => s.identity.pubkey)
   const people = usePresence((s) => s.people)
+  const hidden = useMutes((s) => s.muted)
+  const blocked = hidden.pubkeys
   const profiles = useProfiles((s) => s.profiles)
   const { agents } = useMyAgents(me)
   const [caret, setCaret] = useState(0)
@@ -153,8 +157,8 @@ export function ChatDock(): JSX.Element {
   const typing = open ? activeMention(draft, caret) : null
   const picking = typing !== null && typing.start !== dismissed
   const candidates = useMemo(
-    () => buildCandidates(Object.keys(people), agents, (pk) => profiles[pk], (pk) => profileLabel(profiles[pk], nip19.npubEncode(pk))),
-    [people, agents, profiles],
+    () => buildCandidates(Object.keys(people).filter((pk) => !blocked.has(pk)), agents, (pk) => profiles[pk], (pk) => profileLabel(profiles[pk], nip19.npubEncode(pk))),
+    [people, agents, profiles, blocked],
   )
   const matches = useMemo(() => (picking ? filterCandidates(candidates, typing.query, me) : []), [picking, candidates, typing?.query, me])
   useEffect(() => { setHighlight(0) }, [typing?.query, typing?.start])
@@ -185,7 +189,8 @@ export function ChatDock(): JSX.Element {
   // The region a line would go to right now: its size is the room's name.
   const key = useMemo(() => sendKey(), [current])
   const room = key ? `2^${key.height} · ${formatCellSize(key.height)}` : 'no region yet'
-  const shown = lines.slice(-SHOWN)
+  // Lines kept from before a block are not shown either (store/useMutes).
+  const shown = useMemo(() => lines.filter((l) => !hidesThing(hidden, { authors: [l.from], ids: [l.id] }, me)).slice(-SHOWN), [lines, hidden, me])
 
   // Unfolding puts the caret in the line, and the newest line in view.
   useEffect(() => {

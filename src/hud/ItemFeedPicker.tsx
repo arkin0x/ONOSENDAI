@@ -18,6 +18,9 @@ import { formatAgo, formatStamp } from '../lib/time'
 import { profileLabel } from '../store/useProfiles'
 import { useItemFeed } from '../store/useItemFeed'
 import { ItemFace } from './ItemIcon'
+import { useMutes } from '../store/useMutes'
+import { hidesThing } from '../lib/muteList'
+import { useCyberspace } from '../store/useCyberspace'
 
 function Row({ listing, onPick }: { listing: ItemListing; onPick: (l: ItemListing) => void }): JSX.Element {
   const profile = useProfile(listing.lister)
@@ -44,7 +47,10 @@ export function ItemFeedPicker({ onPick, onClose }: { onPick: (l: ItemListing) =
   // Read fresh each time it opens: a listing published a minute ago belongs here.
   useEffect(() => { void useItemFeed.getState().load() }, [])
   useEscape('modal', true, onClose)
-  const shown = useMemo(() => searchListings(listings, q), [listings, q])
+  // Nothing listed by someone blocked, or muted by its id (store/useMutes).
+  const muted = useMutes((s) => s.muted)
+  const me = useCyberspace((s) => s.identity.pubkey)
+  const shown = useMemo(() => searchListings(listings, q).filter((l) => !hidesThing(muted, { authors: [l.lister], ids: [l.id] }, me)), [listings, q, muted, me])
   return (
     <div className="modal" role="dialog" aria-label="Item feed" aria-modal="true" onPointerDown={onClose}>
       <div className="modal__card secrets__box" onPointerDown={(e) => e.stopPropagation()}>

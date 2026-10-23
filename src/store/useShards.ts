@@ -100,6 +100,8 @@ import { buildCursorOf, buildPlane, buildStepOf } from '../lib/buildCursor'
 import type { NearbyReturn } from '../lib/nearbyReturn'
 import { turnShard, type Turns } from '../lib/turn'
 import { alignedBase, hintFits } from '../lib/hint'
+import { hidesThing, type Muted } from '../lib/muteList'
+import { useMutes } from './useMutes'
 import { constrainOf, readConstrain, withConstrain, type Constrain } from '../lib/walkConstrain'
 
 /** A workshop model's WALK setting, by id; off for one that is not there. */
@@ -195,6 +197,20 @@ export interface WorldItem {
    * event data shows none (EventData eventJson).
    */
   event?: NostrEvent
+}
+
+/**
+ * Whether the mute list hides a thing in the world: by the bag's signer, the
+ * object a LIVE LINK places, or the author a chest's entry claims, or by its
+ * own id or the lineage a moved item keeps. Never one of yours.
+ */
+export function worldItemHidden(w: Pick<WorldItem, 'mine' | 'author' | 'event' | 'target' | 'key' | 'lineage'>, muted: Muted, me: string): boolean {
+  return hidesThing(muted, { authors: [w.author, w.event?.pubkey, w.target?.pubkey], ids: [w.key, w.lineage, w.event?.id], mine: w.mine }, me)
+}
+
+/** The same for a find as the scan keeps it (`discovered`), for the lists that read those directly. */
+export function findHidden(h: Pick<Hidden, 'author' | 'inner' | 'ref' | 'eventId'>, muted: Muted, me: string): boolean {
+  return hidesThing(muted, { authors: [h.author, h.inner?.pubkey], ids: [h.eventId, lineageOf(h.inner, h.ref).lineage, h.inner?.id] }, me)
 }
 
 /** Why a LIVE LINK was not hidden: its author protected it (NIP-70), so only they may republish it. */
@@ -2136,7 +2152,8 @@ export const useShards = create<ShardsState>((set, get) => {
           if (!plain) revealed.push(r)
           changed = true
           if (r.type === 'chest' && r.chest) queue.push(r)
-          if (r.type === 'key' && r.key) keys.push({ id: r.eventId, itemPubkey: r.key.itemPubkey, secretHex: r.key.secretHex })
+          // A key by someone blocked opens nothing here (store/useMutes).
+          if (r.type === 'key' && r.key && !findHidden(r, useMutes.getState().muted, me)) keys.push({ id: r.eventId, itemPubkey: r.key.itemPubkey, secretHex: r.key.secretHex })
         }
       }
       if (changed) set({ discovered })
@@ -2160,8 +2177,10 @@ export const useShards = create<ShardsState>((set, get) => {
       const now = get().discovered
       claimOwn(all.filter((h) => !claimedOut(h) && !now[h.eventId]?.chestId && !(watched && h.type !== 'chest' && h.author === me && ownChestBags.has(h.bagId))))
       // Reading a key is holding it (B1 §2.1): every key a scan opened goes
-      // into the inventory, once, whoever hid it.
-      useInventory.getState().holdFinds(all, watched)
+      // into the inventory, once, whoever hid it, unless the mute list
+      // hides it (review of #464, S5).
+      const muted = useMutes.getState().muted
+      useInventory.getState().holdFinds(all.filter((h) => !findHidden(h, muted, me)), watched)
       // What a door revealed gets the find ceremony, as a scan's finds do.
       if (revealed.length > 0) useCeremony.getState().mark(revealed)
     },
@@ -2204,8 +2223,12 @@ export const useShards = create<ShardsState>((set, get) => {
 
     worldItems: () => {
       const curated = get().curated
-      if (curated) return worldOf(get()).filter((w) => w.author !== undefined && curated.includes(w.author))
-      return worldOf(get())
+      // What the person's mute list hides (store/useMutes): never their own.
+      const muted = useMutes.getState().muted
+      const me = useCyberspace.getState().identity.pubkey
+      const shown = (w: WorldItem): boolean => !worldItemHidden(w, muted, me)
+      if (curated) return worldOf(get()).filter((w) => w.author !== undefined && curated.includes(w.author) && shown(w))
+      return worldOf(get()).filter(shown)
     },
 
     secretByEvent: (eventId) => get().worldItems().find((w) => w.key === eventId) ?? null,

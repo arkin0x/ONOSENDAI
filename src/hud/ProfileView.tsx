@@ -27,6 +27,7 @@ import { useCyberspace } from '../store/useCyberspace'
 import { useProfileView } from '../store/useProfileView'
 import { ProfilePic, ProfileTap } from './ProfileBadge'
 import { EventData } from './EventData'
+import { BlockButton } from './BlockButton'
 
 /** How long to wait on the relays for the kind 0, as the editor does. */
 const FETCH_WAIT_MS = 5000
@@ -162,6 +163,11 @@ function ProfileCard({ pubkey, onClose }: { pubkey: string; onClose: () => void 
         {mine && (
           <div className="secret__actions profilev__actions">
             <button className="secret__act" onClick={() => useProfileView.getState().edit()}><Pencil size={12} strokeWidth={2.25} aria-hidden />EDIT PROFILE</button>
+          </div>
+        )}
+        {!mine && (
+          <div className="secret__actions profilev__actions">
+            <BlockButton pubkey={pubkey} label="BLOCK" />
           </div>
         )}
 

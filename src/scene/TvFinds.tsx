@@ -39,6 +39,8 @@ import { PlacedShard, drawableShards } from './WorldShards'
 import { ItemMark, itemMarkText, type ItemWears } from './WorldMessages'
 import { regionBox, type Box } from '../lib/clip'
 import { useItemModel } from '../hooks/useItemModel'
+import { useMutes } from '../store/useMutes'
+import { findHidden } from '../store/useShards'
 
 const REACH = GRID_RADIUS * 8
 /** No motion, one array (WorldMessages NO_MOTION). */
@@ -254,7 +256,10 @@ export function TvFinds({ axes }: { axes: ViewAxes }): JSX.Element | null {
   const scaleExp = useCyberspace((s) => s.scaleExp)
 
   // As of the moment on screen (review of #390): found only grows, the tape does not.
-  const shown = useMemo(() => foundAsOf(found, tapeTime), [found, tapeTime])
+  // Nor what a block or a mute made since hides (store/useMutes).
+  const muted = useMutes((s) => s.muted)
+  const me = useCyberspace((s) => s.identity.pubkey)
+  const shown = useMemo(() => foundAsOf(found, tapeTime).filter(({ item }) => !findHidden(item, muted, me)), [found, tapeTime, muted, me])
 
   const shards = useMemo(() => drawableShards(
     shown.map(({ item: h }) => ({ key: h.eventId, type: h.type, at: h.at, height: h.height, plane: h.plane, shard: h.shard })),

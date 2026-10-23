@@ -43,6 +43,8 @@ import { StarredPlaces } from './StarredPlaces'
 import { PanelSlot } from './PanelSlot'
 import { usePanelLayout, type Column, type PanelId } from '../store/usePanelLayout'
 import { jobInProgress } from '../lib/cloud'
+import { useMutes } from '../store/useMutes'
+import { MuteListModal } from './MuteListModal'
 
 const AXIS_LABEL: Record<string, string> = { x: 'X', y: 'Y', z: 'Z' }
 
@@ -92,6 +94,8 @@ function IdentityPanel(): JSX.Element {
   const live = useCyberspace((s) => s.live)
   const profile = useProfile(identity.pubkey)
   const [loginOpen, setLoginOpen] = useState(false)
+  const [mutesOpen, setMutesOpen] = useState(false)
+  const blocked = useMutes((s) => s.muted.pubkeys.size)
 
   const name = profileLabel(profile, identity.npub)
 
@@ -116,6 +120,9 @@ function IdentityPanel(): JSX.Element {
       </div>
       <div className="identity__row">
         <NotificationsButton />
+        <button className="identity__change identity__blocked" onClick={() => setMutesOpen(true)} title="Who you blocked and what you muted, on your nostr mute list">
+          BLOCKED{blocked > 0 ? ` (${blocked})` : ''}
+        </button>
       </div>
 
       <Explanation>
@@ -126,6 +133,7 @@ function IdentityPanel(): JSX.Element {
       </Explanation>
 
       {loginOpen && <LoginModal onClose={() => setLoginOpen(false)} />}
+      {mutesOpen && <MuteListModal onClose={() => setMutesOpen(false)} />}
     </section>
   )
 }

@@ -73,6 +73,7 @@ import { useCyberspace } from './store/useCyberspace'
 import { useHyperspace } from './store/useHyperspace'
 import { useSecrets, watchFocus } from './store/useSecrets'
 import { useInventory } from './store/useInventory'
+import { useShardFolders } from './store/useShardFolders'
 import { useFound } from './store/useFound'
 import { useAvatars } from './store/useAvatars'
 import { setSyncPriority } from './lib/hyperspace/anchors'
@@ -98,7 +99,7 @@ export default function App(): JSX.Element {
   useDiscovery()
   // The chain drains to the relay from here on, whenever Live is on, and the
   // targets' positions are kept current.
-  useEffect(() => { startPublisher(); startTracker(); startPresence(); startSelfSync(); startCalibration(); void useCyberspace.getState().initSigner(); useHyperspace.getState().startSync(); useAvatars.getState().loadMine(); void useSecrets.getState().load(); void useInventory.getState().load(); void useFound.getState().load(); watchFocus(); watchNearbyReturn() }, [])
+  useEffect(() => { startPublisher(); startTracker(); startPresence(); startSelfSync(); startCalibration(); void useCyberspace.getState().initSigner(); useHyperspace.getState().startSync(); useAvatars.getState().loadMine(); void useSecrets.getState().load(); void useInventory.getState().load(); void useShardFolders.getState().load(); void useFound.getState().load(); watchFocus(); watchNearbyReturn() }, [])
   // onosendai.tech/C/<hex>: a place or a region to open on (store/useCoordRoute.ts).
   useEffect(() => startCoordRoute(), [])
   // onosendai.tech/demo (or /demo/<step>): the guided tour (store/useDemo.ts).

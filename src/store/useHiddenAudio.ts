@@ -29,7 +29,7 @@ import { create } from 'zustand'
 import { Audio as ThreeAudio, AudioContext as ThreeAudioContext, AudioListener, PositionalAudio, type Camera } from 'three'
 import { openAudio } from '../lib/audioFile'
 import { audioFileName, type AudioItem } from '../lib/audioItem'
-import { audioContext, audioRunning, onAudioContext, resumeAudio, wantSound } from '../lib/audioContext'
+import { audioContext, audioRunning, onAudioContext, resumeAudio, setAudioSession, wantSound } from '../lib/audioContext'
 import { hidesThing } from '../lib/muteList'
 import { useMutes } from './useMutes'
 import { useCyberspace } from './useCyberspace'
@@ -150,16 +150,22 @@ export function syncVoicePhases(): void {
   if (!audioRunning()) {
     for (const key of voices.keys()) {
       const e = useHiddenAudio.getState().entries[key]
-      if (e?.phase === 'playing') waitForTap(key)
+      // Paused where it is, so a one-shot does not run on unheard and is not over when sound is back.
+      if (e?.phase === 'playing') { voices.get(key)?.el.pause(); waitForTap(key) }
     }
     return
   }
   for (const key of [...waitingPlays]) voices.get(key)?.play()
 }
 
+/** Safari's session follows what plays: `playback` while any hidden audio sounds, `auto` otherwise. */
+const offSession = useHiddenAudio.subscribe((s) => {
+  setAudioSession(Object.values(s.entries).some((e) => e.phase === 'playing') ? 'playback' : 'auto')
+})
+
 const offContext = onAudioContext(syncVoicePhases)
 // A reload in development leaves no second subscription behind.
-if (import.meta.hot) import.meta.hot.dispose(() => { offMutes(); offContext(); gestureOff?.() })
+if (import.meta.hot) import.meta.hot.dispose(() => { offMutes(); offContext(); offSession(); gestureOff?.() })
 /** Changes on every start and stop of a key: what an answer for an older one is ignored by. */
 const sessions = new Map<string, number>()
 
@@ -240,7 +246,12 @@ function failWith(err: unknown): string {
   return err instanceof Error && err.message ? err.message : 'The file could not be played.'
 }
 
-/** An element for a file, wired to end and fail as one voice. */
+/**
+ * An element for a file, wired to end and fail as one voice. A world
+ * voice's element that fails, at any moment (a file this browser cannot
+ * decode fails as it loads, even while the voice waits for a tap), is a
+ * failure of the item and waits out its pause (worldFailure).
+ */
 function element(key: string, mine: number, url: string, loop: boolean, title: string, mode: VoiceMode, itemKey: string, onEnded: () => void): HTMLAudioElement {
   const el = new Audio()
   el.loop = loop
@@ -249,6 +260,7 @@ function element(key: string, mine: number, url: string, loop: boolean, title: s
   el.addEventListener('ended', () => { if (sessions.get(key) === mine) onEnded() })
   el.addEventListener('error', () => {
     if (sessions.get(key) !== mine) return
+    if (mode === 'world') { worldFailure(itemKey, new Error('This browser cannot play this kind of file.')); return }
     release(key)
     setEntry(key, { phase: 'error', title, mode, itemKey, error: 'This browser cannot play this kind of file. DOWNLOAD it instead.' })
   })
@@ -270,9 +282,12 @@ function playerOf(key: string, mine: number, el: HTMLAudioElement, entry: Omit<A
       if (sessions.get(key) !== mine) return
       waitingPlays.delete(key)
       armGesture()
-      // An element playing into a context the browser still holds back is not heard.
-      if (routed && !audioRunning()) { waitForTap(key); return }
+      // An element playing into a context the browser still holds back is not
+      // heard: it is paused where it is, and picks up there when sound is back.
+      if (routed && !audioRunning()) { el.pause(); waitForTap(key); return }
       setEntry(key, { ...entry, phase: 'playing' })
+      // It sounds: whatever failed before is forgiven.
+      if (entry.mode === 'world') failures.delete(entry.itemKey)
       if (!started) { started = true; onStarted?.() }
     }, (err: unknown) => {
       if (sessions.get(key) !== mine) return

@@ -37,11 +37,7 @@ export function audioContext(): AudioContext | null {
   } catch {
     return null
   }
-  // Safari: sound that plays as media, not as an effect, so the ringer switch does not silence it.
-  try {
-    const session = (navigator as unknown as { audioSession?: { type: string } }).audioSession
-    if (session) session.type = 'playback'
-  } catch { /* not this browser */ }
+
   ctx.addEventListener?.('statechange', notify)
   notify()
   return ctx
@@ -98,6 +94,19 @@ export function wantSound(): void {
   // Running by another way (a card's PLAY): stop listening.
   const stop = (): void => { if (audioRunning()) { off(); ac.removeEventListener?.('statechange', stop) } }
   ac.addEventListener?.('statechange', stop)
+}
+
+/**
+ * Safari's audio session (iOS 17+): `playback` while hidden audio sounds,
+ * so the ringer switch does not silence it, and `auto` the rest of the
+ * time, since `playback` does not mix and would stop the person's own music
+ * or podcast for a chime (useHiddenAudio sets it from what plays).
+ */
+export function setAudioSession(type: 'playback' | 'auto'): void {
+  try {
+    const session = typeof navigator === 'undefined' ? undefined : (navigator as unknown as { audioSession?: { type: string } }).audioSession
+    if (session && session.type !== type) session.type = type
+  } catch { /* not this browser */ }
 }
 
 /** Forget the context (tests). */

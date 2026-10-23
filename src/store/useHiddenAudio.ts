@@ -370,7 +370,7 @@ export async function startWorld(itemKey: string, audio: AudioItem, onStarted?: 
     // seam, and a buffer needs no tap of its own once sound is out. Short by
     // a size whose worst case is bounded (DECODE_WHOLE_BYTES): no header can
     // be trusted to say how long a file is (review of #468).
-    const buffer = audio.loop && decodeWholeOk(audio.mime, blob.size) ? await shortLoopBuffer(blob) : null
+    const buffer = audio.loop && blob.size <= DECODE_WHOLE_WAV_BYTES && decodeWholeOk(new Uint8Array(await blob.arrayBuffer()), blob.size) ? await shortLoopBuffer(blob) : null
     if (sessions.get(key) !== mine) return
     if (buffer) {
       const node = new PositionalAudio(l)
@@ -425,7 +425,8 @@ export async function startWorld(itemKey: string, audio: AudioItem, onStarted?: 
 
 /**
  * When a loop is decoded whole: only when its file (decrypted) is at most
- * DECODE_WHOLE_BYTES, or DECODE_WHOLE_WAV_BYTES for PCM WAV (decodeWholeOk). Nothing in a file can be trusted to say how long it
+ * DECODE_WHOLE_BYTES, or DECODE_WHOLE_WAV_BYTES for uncompressed WAV by its
+ * own bytes (decodeWholeOk, isPcmWav; never by the `m` tag). Nothing in a file can be trusted to say how long it
  * is (a hider writes the headers), and decodeAudioData allocates the whole
  * buffer before anything can refuse it, so the bound is the file's size
  * against the lowest bitrate a decoder plays: 64 KB at 6 kbps (Opus's floor;
@@ -441,11 +442,32 @@ export const DECODE_WHOLE_BYTES = 64 * 1024
 export const DECODE_WHOLE_WAV_BYTES = 1024 * 1024
 export const DECODE_WHOLE_MAX_PCM = 40 * 1024 * 1024
 
-/** Whether a file's worst case decoded fits the budget by its size alone: PCM WAV up to 1 MB, any other format up to 64 KB. */
-export function decodeWholeOk(mime: string, bytes: number): boolean {
-  const m = mime.toLowerCase().split(';')[0].trim()
-  const wav = m === 'audio/wav' || m === 'audio/x-wav' || m === 'audio/wave'
-  return bytes <= (wav ? DECODE_WHOLE_WAV_BYTES : DECODE_WHOLE_BYTES)
+/**
+ * Whether a file is uncompressed WAV by its own bytes, never by the `m`
+ * tag a hider writes: a RIFF/WAVE file whose `fmt ` chunk says PCM (1) or
+ * float (3). Its samples are its data, so it cannot decode to more than a
+ * small multiple of its size; a WAV wrapping a compressed format (MP3 in
+ * WAV is 0x55) is not one.
+ */
+export function isPcmWav(b: Uint8Array): boolean {
+  const ascii = (at: number, s: string): boolean => [...s].every((c, i) => b[at + i] === c.charCodeAt(0))
+  if (b.length < 20 || !ascii(0, 'RIFF') || !ascii(8, 'WAVE')) return false
+  for (let at = 12; at + 8 <= b.length;) {
+    const size = b[at + 4] | (b[at + 5] << 8) | (b[at + 6] << 16) | (b[at + 7] << 24)
+    if (ascii(at, 'fmt ')) {
+      if (at + 10 > b.length) return false
+      const format = b[at + 8] | (b[at + 9] << 8)
+      return format === 1 || format === 3
+    }
+    if (size < 0) return false
+    at += 8 + size + (size & 1)
+  }
+  return false
+}
+
+/** Whether a file's worst case decoded fits the budget by its bytes alone: uncompressed WAV up to 1 MB, anything else up to 64 KB. */
+export function decodeWholeOk(file: Uint8Array, bytes: number): boolean {
+  return bytes <= (isPcmWav(file) ? DECODE_WHOLE_WAV_BYTES : DECODE_WHOLE_BYTES)
 }
 
 /** Decodes run one at a time, so the peak is one decode, never MAX_VOICES at once. */

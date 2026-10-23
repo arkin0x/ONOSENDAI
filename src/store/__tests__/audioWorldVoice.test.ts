@@ -32,7 +32,7 @@ import type { AudioItem } from '../../lib/audioItem'
 import { sha256Hex } from '../../lib/blossom'
 import { forgetAudioContext } from '../../lib/audioContext'
 import { toneWav } from '../../lib/__tests__/audioFixture'
-import { DECODE_WHOLE_BYTES, DECODE_WHOLE_MAX_PCM, decodeWholeOk, decodedFits, startWorld, stopAllAudio, useHiddenAudio, worldFailed, worldFailure, worldKey } from '../useHiddenAudio'
+import { DECODE_WHOLE_BYTES, DECODE_WHOLE_MAX_PCM, decodeWholeOk, decodedFits, isPcmWav, startWorld, stopAllAudio, useHiddenAudio, worldFailed, worldFailure, worldKey } from '../useHiddenAudio'
 
 /** Any Web Audio node or param: every property is another, every call returns another, numbers are 0. */
 function anything(): unknown {
@@ -159,20 +159,33 @@ describe('a short loop, decoded whole', () => {
     await startWorld('o2', audio)
     await flush()
     expect(streaming()).toHaveLength(2)
+    // Not WAV by its bytes, past 64 KB, labelled audio/wav by its hider: it streams.
+    const forged = await sealAndUpload(new Blob([new Uint8Array(200 * 1024).fill(0xff) as BlobPart], { type: 'audio/wav' }), 'https://blossom.test', async (t) => finalizeEvent(t, generateSecretKey()))
+    await startWorld('o3', { ...shortAudio, ...forged })
+    await flush()
+    expect(streaming()).toHaveLength(3)
     // Small, but large once decoded, or more than two channels: it streams.
     FakeContext.decoded = { length: DECODE_WHOLE_MAX_PCM, numberOfChannels: 1 }
     await startWorld('o4', shortAudio)
     await flush()
-    expect(streaming()).toHaveLength(3)
+    expect(streaming()).toHaveLength(4)
     FakeContext.decoded = { length: 1000, numberOfChannels: 6 }
     await startWorld('o5', shortAudio)
     await flush()
-    expect(streaming()).toHaveLength(4)
+    expect(streaming()).toHaveLength(5)
     expect(decodedFits({ length: 1000, numberOfChannels: 2 })).toBe(true)
-    expect(decodeWholeOk('audio/mpeg', 64 * 1024)).toBe(true)
-    expect(decodeWholeOk('audio/mpeg', 64 * 1024 + 1)).toBe(false)
-    expect(decodeWholeOk('audio/wav', 1024 * 1024)).toBe(true)
-    expect(decodeWholeOk('audio/x-wav; codecs=1', 1024 * 1024 + 1)).toBe(false)
+    const wav = toneWav(1)
+    const mp3ish = new Uint8Array([0xff, 0xfb, 0x90, 0x64, ...new Array(60).fill(0)])
+    expect(isPcmWav(wav)).toBe(true)
+    expect(isPcmWav(mp3ish)).toBe(false)
+    // MP3 inside a WAV (format 0x55) is compressed: not one.
+    const mp3InWav = wav.slice()
+    mp3InWav[20] = 0x55
+    expect(isPcmWav(mp3InWav)).toBe(false)
+    expect(decodeWholeOk(mp3ish, 64 * 1024)).toBe(true)
+    expect(decodeWholeOk(mp3ish, 64 * 1024 + 1)).toBe(false)
+    expect(decodeWholeOk(wav, 1024 * 1024)).toBe(true)
+    expect(decodeWholeOk(wav, 1024 * 1024 + 1)).toBe(false)
     // The worst case the size cap allows: 6 kbps, 48 kHz, stereo float.
     const worstSeconds = (DECODE_WHOLE_BYTES * 8) / 6000
     expect(worstSeconds * 48_000 * 2 * 4).toBeLessThan(DECODE_WHOLE_MAX_PCM)

@@ -26,7 +26,7 @@ import { GRID_RADIUS, originShift, placeCentre, renderDirection, type Position, 
 import type { Framing } from '../lib/tv/director'
 import { drawnAvatars } from '../lib/targets'
 import { avatarTurn } from '../lib/facing'
-import { committedAnchor } from '../lib/renderFrame'
+import { committedAnchor, committedScale } from '../lib/renderFrame'
 import { alignedOrigin, useCyberspace } from '../store/useCyberspace'
 import { broadcastScale } from '../lib/tv/broadcast'
 import { framingProgress, shownAvatars, useTv } from '../store/useTv'
@@ -62,7 +62,7 @@ export function grownAt(born: number | undefined, now: number): number {
   return 1 - (1 - t) ** 3
 }
 
-function TapeAvatar({ pubkey, centre, position, from, born, place, subject }: { pubkey: string; centre: [number, number, number]; position: Position; from?: Position; born?: number; place: (p: Position) => [number, number, number]; subject: boolean }): JSX.Element {
+function TapeAvatar({ pubkey, centre, position, from, born, place, subject, scaleExp }: { pubkey: string; centre: [number, number, number]; position: Position; from?: Position; born?: number; place: (p: Position) => [number, number, number]; subject: boolean; scaleExp: number }): JSX.Element {
   const profile = useProfile(pubkey)
   const text = tvName(pubkey, profile?.name)
   // Facing the way it went, from where it was to where it is, as every
@@ -78,7 +78,7 @@ function TapeAvatar({ pubkey, centre, position, from, born, place, subject }: { 
   // Names half again the size of ONOSENDAI's 11 px (2026-10-19: "the name
   // label above the avatar is a little too small"): the tube's bend and a
   // phone's labelShrink both take some off.
-  return <OtherAvatar pubkey={pubkey} color={AVATAR_RED} center={centre} position={position} place={place} turn={turn} label={text} labelOpacity={subject ? 0.9 : 0.5} tappable={false} keepShape size={() => grownAt(born, performance.now())} labelPx={labelPx} />
+  return <OtherAvatar pubkey={pubkey} color={AVATAR_RED} center={centre} position={position} place={place} turn={turn} label={text} labelOpacity={subject ? 0.9 : 0.5} tappable={false} keepShape size={() => grownAt(born, performance.now())} labelPx={labelPx} scaleExp={scaleExp} />
 }
 
 /** The avatars' name labels on TV, CSS px before labelShrink. */
@@ -142,8 +142,8 @@ export function carryAcross(smooth: Vector3, shift: [number, number, number], at
 export interface TvFollow {
   /** The eased point it looks at, in the frame the scene is drawn in; null before the first frame. */
   smooth: Vector3 | null
-  /** The frame, zoom and cut that point was last taken in. */
-  was: { origin: Position; scaleExp: number; cutAt: number } | null
+  /** The frame, zoom and cut that point was last taken in, and what it was following then. */
+  was: { origin: Position; scaleExp: number; cutAt: number; at?: [number, number, number] } | null
 }
 
 /** One frame's reading of the store and the scene, for followStep. */
@@ -152,6 +152,7 @@ export interface TvFollowFrame {
   anchor: Position
   /** The anchor the scene on screen was drawn against (lib/renderFrame.ts). */
   drawn: Position
+  /** The zoom the scene on screen was drawn at (lib/renderFrame.ts committedScale). */
   scaleExp: number
   cutAt: number
   /** The view's point, against the store's anchor: cursorOffset. */
@@ -163,8 +164,14 @@ export interface TvFollowFrame {
 /**
  * One frame of what TV's camera follows: the point to look at into `at`, and
  * the eased point in `f`, moved toward it by `k`. Returns 'cut' when the
- * framing starts again (a cut or a new zoom), 'follow' otherwise, and 'hold'
- * when this frame is not to be drawn from a new place at all.
+ * framing starts again (a cut), 'zoom' when only the zoom changed within a
+ * shot, 'follow' otherwise, and 'hold' when this frame is not to be drawn
+ * from a new place at all.
+ *
+ * A zoom within a shot (lib/tv/zoom.ts) is not a cut: the camera keeps its
+ * distance and angle, and the eased point keeps its lag behind what it
+ * follows, rescaled into the new zoom's cells, so a zoom step does not jerk
+ * the camera onto the avatar.
  *
  * Everything here is in the frame the scene was drawn in. A cut moves the
  * store's anchor a commit before the scene's, and taking cursorOffset as it
@@ -182,15 +189,20 @@ export interface TvFollowFrame {
  * plain view under a roll cut (review of #421). The commit lands on the next
  * frame or so, and the cut is taken then, in the new frame.
  */
-export function followStep(f: TvFollow, frame: TvFollowFrame, axes: ViewAxes, k: number, at: Vector3): 'hold' | 'cut' | 'follow' {
+export function followStep(f: TvFollow, frame: TvFollowFrame, axes: ViewAxes, k: number, at: Vector3): 'hold' | 'cut' | 'zoom' | 'follow' {
   const origin = alignedOrigin(frame.drawn, frame.scaleExp)
   const lag = frame.drawn === frame.anchor ? null : originShift(alignedOrigin(frame.anchor, frame.scaleExp), origin, frame.scaleExp, axes)
   if (lag && Math.max(Math.abs(lag[0]), Math.abs(lag[1]), Math.abs(lag[2])) >= TV_CARRY_MAX_CELLS) return 'hold'
   if (frame.subject) at.copy(frame.subject)
   else at.set(frame.live[0] + (lag ? lag[0] : 0), frame.live[1] + (lag ? lag[1] : 0), frame.live[2] + (lag ? lag[2] : 0))
   const before = f.was
-  let step: 'cut' | 'follow' = 'follow'
-  if (!f.smooth || !before || before.scaleExp !== frame.scaleExp || before.cutAt !== frame.cutAt) {
+  let step: 'cut' | 'zoom' | 'follow' = 'follow'
+  if (f.smooth && before && before.cutAt === frame.cutAt && before.scaleExp !== frame.scaleExp && before.at) {
+    // A zoom step: the same lag behind the subject, in the new zoom's cells.
+    const factor = 2 ** (before.scaleExp - frame.scaleExp)
+    f.smooth.set(at.x + (f.smooth.x - before.at[0]) * factor, at.y + (f.smooth.y - before.at[1]) * factor, at.z + (f.smooth.z - before.at[2]) * factor)
+    step = 'zoom'
+  } else if (!f.smooth || !before || before.scaleExp !== frame.scaleExp || before.cutAt !== frame.cutAt) {
     // A cut or a new zoom: no path between the two framings, so no glide.
     f.smooth = at.clone()
     step = 'cut'
@@ -198,7 +210,7 @@ export function followStep(f: TvFollow, frame: TvFollowFrame, axes: ViewAxes, k:
     // A change of frame moves everything at once, the camera with it (zero when the anchor stayed).
     carryAcross(f.smooth, originShift(before.origin, origin, frame.scaleExp, axes), at)
   }
-  f.was = { origin, scaleExp: frame.scaleExp, cutAt: frame.cutAt }
+  f.was = { origin, scaleExp: frame.scaleExp, cutAt: frame.cutAt, at: [at.x, at.y, at.z] }
   f.smooth.lerp(at, k)
   return step
 }
@@ -239,7 +251,7 @@ function TvCamera({ axes }: { axes: ViewAxes }): null {
     const step = followStep(follow.current, {
       anchor: s.anchor,
       drawn: committedAnchor() ?? s.anchor,
-      scaleExp: s.scaleExp,
+      scaleExp: committedScale() ?? s.scaleExp,
       cutAt: tv.cutAt,
       live: s.cursorOffset(),
       subject: subject ? subject.getWorldPosition(subjectAt) : null,
@@ -330,7 +342,7 @@ export function TvLayer({ axes }: { axes: ViewAxes }): JSX.Element {
       {near.map((p) => <SpawnMarker key={`spawn-${p.pk}`} pubkey={p.pk} axes={axes} />)}
       {showTrail && near.map((p) => (p.a.path && p.a.path.length > 1 ? <TvTrail key={`trail-${p.pk}`} pubkey={p.pk} path={p.a.path} place={place} /> : null))}
       {near.map((p) => (
-        <TapeAvatar key={p.pk} pubkey={p.pk} centre={p.centre} position={p.a.position} from={p.a.from} born={p.a.born} place={place} subject={shot?.kind === 'trip' && p.pk === shot.pubkey} />
+        <TapeAvatar key={p.pk} pubkey={p.pk} centre={p.centre} position={p.a.position} from={p.a.from} born={p.a.born} place={place} subject={shot?.kind === 'trip' && p.pk === shot.pubkey} scaleExp={scaleExp} />
       ))}
     </>
   )

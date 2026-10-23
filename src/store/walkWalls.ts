@@ -81,9 +81,10 @@ function build(w: WallItem, placed: readonly Placed[]): Entry {
 export function entryFor(w: WallItem): Entry {
   const held = entries.get(w.key)
   // A part a relay did not answer is asked for again after a while (lib/parts.ts does not keep a miss).
-  const stale = held?.missingAt != null && Date.now() - held.missingAt > RETRY_MS
-  if (held && held.shard === w.shard && held.where === whereOf(w) && !stale) return held
-  if (held && stale) { held.missingAt = null; resolveInto(w, held); return held }
+  if (held && held.shard === w.shard && held.where === whereOf(w)) {
+    if (held.missingAt !== null && Date.now() - held.missingAt > RETRY_MS) { held.missingAt = null; resolveInto(w, held) }
+    return held
+  }
   const e = build(w, [])
   entries.set(w.key, e)
   resolveInto(w, e)
@@ -150,8 +151,9 @@ function tolerance(e: Entry, g: number, length: bigint): number {
 /**
  * How far a WALK step from `from`, `length` gibsons along `axis` in direction
  * `dir`, may go among `items` before it would cross a blocking face. Stopped,
- * it lands on the last whole gibson short of the face, never on it; a face
- * within a gibson ahead leaves no room, and the step is refused (reach 0).
+ * it lands on the last whole gibson at least the measure's tolerance short of
+ * the face (one gibson short at small units and steps), never on it; a face
+ * with no room before it refuses the step (reach 0).
  */
 export function stepLimit(from: Position, axis: AxisName, dir: 1 | -1, length: bigint, items: readonly WallItem[]): WallStop {
   const keep = new Set<string>()
@@ -177,7 +179,11 @@ export function stepLimit(from: Position, axis: AxisName, dir: 1 | -1, length: b
     // Then the triangles, in the shard's own model units from its origin.
     const o: [number, number, number] = [Number(off.x) / g, Number(off.y) / g, -Number(off.z) / g]
     const s = (i === 2 ? -dir : dir) as 1 | -1
-    const minT = ON_FACE / g
+    // The face you stand on lets you go. Where the measure is coarser than
+    // that (a monument), a face ahead within the error holds you instead:
+    // §1.12 decides a touching case toward crossing, and only HOP can put a
+    // walker that near, since WALK stops at least `tol` short.
+    const minT = tol > ON_FACE ? 0 : ON_FACE / g
     // A step that would end within `tol` of a face meets it (tolerance).
     const t = firstHit(e.mesh, o, i, s, (Number(length) + tol) / g, minT, e.clip)
     if (t === null) continue
@@ -186,7 +192,8 @@ export function stepLimit(from: Position, axis: AxisName, dir: 1 | -1, length: b
   }
   for (const k of entries.keys()) if (!keep.has(k)) entries.delete(k)
   if (best === null) return { reach: length, by: null }
-  // The last whole gibson strictly short of the face, by the measure's error at least.
+  // The last whole gibson at least `tol` short of the face: one short at a
+  // fine zoom, further at a coarse one, where the measure is coarser too.
   const k = Math.max(0, Math.ceil(best - bestTol) - 1)
   const reach = BigInt(k) < length ? BigInt(k) : length
   return { reach, by }

@@ -31,9 +31,9 @@
  * Steps already signed stay on the chain: they are real moves.
  *
  * A shard can hold the walk (DECK-0003 §1.12, store/walkWalls.ts): a press
- * whose step would cross a face of a shard set to constrain WALK stops on the
- * last whole gibson short of the face, or, with no room left, does not step
- * at all. Only a press asks; HOP, VIEW and BUILD never do, and nothing about
+ * whose step would cross a face of a shard set to constrain WALK stops short
+ * of the face (one gibson short at a fine zoom, at least the measure's error
+ * at a coarse one), or, with no room left, does not step at all. Only a press asks; HOP, VIEW and BUILD never do, and nothing about
  * a move that is proved or signed changes.
  *
  * `behind` is the walk's lag: the closed segments not yet proven, the one
@@ -188,7 +188,7 @@ export const useWalk = create<WalkState>((set, get) => ({
     if (next[dir.axis] === from[dir.axis]) return
     const sign = dir.dir > 0 ? 1 : -1
     // A shard that constrains WALK (DECK-0003 §1.12, store/walkWalls.ts):
-    // the step stops on the last gibson short of its face, or does not go.
+    // the step stops short of its face (a gibson short at a fine zoom), or does not go.
     const length = sign > 0 ? next[dir.axis] - from[dir.axis] : from[dir.axis] - next[dir.axis]
     const wall = stepLimit(from, dir.axis, sign, length, wallItems(cs.plane))
     // One chip per wall: a held key's repeats do not churn the one toast slot.

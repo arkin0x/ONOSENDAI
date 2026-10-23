@@ -246,6 +246,32 @@ describe('setting it', () => {
     expect(JSON.parse(useShards.getState().mine[0].inner.content)).not.toHaveProperty('constrain')
   })
 
+  it('EDIT changes that placement only: another placement of the same shard keeps its own', async () => {
+    const bench = useWorkshop.getState().current()!
+    useShards.getState().startDeployShard(bench.id)
+    await useShards.getState().deploy()
+    // A second placement a few gibsons away (the same shard at the same point
+    // in the same second would be the same event).
+    const c = useCyberspace.getState().cursor
+    useCyberspace.setState({ cursor: { ...c, x: c.x + 5n } })
+    useShards.getState().startDeployShard(bench.id)
+    await useShards.getState().deploy()
+    expect(useShards.getState().mine).toHaveLength(2)
+    const [a, b] = useShards.getState().mine.map((d) => d.eventId)
+    useShards.getState().startEditShard(a)
+    useShards.getState().setDeployConstrain('all')
+    await useShards.getState().deploy()
+    expect(useShards.getState().deployStatus).toBe('done')
+    const rows = useShards.getState().mine
+    const other = rows.find((d) => d.eventId === b)!
+    const moved = rows.find((d) => d.eventId !== b)!
+    expect(constrainOf(moved.shard!)).toBe('all')
+    expect(constrainOf(other.shard!)).toBe('off')
+    expect(JSON.parse(other.inner.content)).not.toHaveProperty('constrain')
+    // The bench model is untouched too.
+    expect(constrainOf(useWorkshop.getState().current()!)).toBe('off')
+  })
+
   it('EDIT starts at the hidden shard\'s setting and writes the new one', async () => {
     const bench = useWorkshop.getState().current()!
     useShards.getState().startDeployShard(bench.id)

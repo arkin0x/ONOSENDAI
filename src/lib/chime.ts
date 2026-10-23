@@ -4,19 +4,15 @@
  * Two short sine notes a fifth apart, synthesised on the spot: no asset to
  * load, nothing to cache, and quiet enough to sit under whatever else the
  * machine is doing. Browsers keep audio silent until the page has been
- * touched, so the context is made lazily and resumed on each play; a play
+ * touched, so the shared context (lib/audioContext) is made lazily and
+ * resumed on each play; a play
  * that the browser refuses is simply a message that arrived without a sound.
  */
 
-let ctx: AudioContext | null = null
+import { audioContext } from './audioContext'
 
-function context(): AudioContext | null {
-  if (typeof window === 'undefined') return null
-  const Ctor = window.AudioContext ?? (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext
-  if (!Ctor) return null
-  if (!ctx) ctx = new Ctor()
-  return ctx
-}
+/** The one context every sound shares (lib/audioContext). */
+const context = audioContext
 
 /** Play the arrival chime. Safe to call anywhere; fails silent. */
 export function chime(): void {

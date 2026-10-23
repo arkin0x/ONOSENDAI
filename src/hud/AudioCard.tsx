@@ -12,19 +12,20 @@
  * `moderation` is the row under the actions where MUTE THIS AUDIO and
  * BLOCK AUTHOR go (SecretModal, store/useMutes); absent, nothing is drawn.
  *
- * Until the world plays sources by itself (the next step), the card's play
- * stops when the card closes, so nothing sounds with no way to stop it. It
- * is mounted in two places: the item modal (SecretModal) and a TAKEN row in
- * ITEMS (InventoryPanel). Both drop it when the mute list hides the item, so
- * a mute or a block stops its sound.
+ * The card's play goes on when the card closes: NOW PLAYING lists it, and
+ * stops it (hud/NowPlaying). It is mounted in two places: the item modal
+ * (SecretModal) and a TAKEN row in ITEMS (InventoryPanel). A mute or a block
+ * stops its sound wherever the card is, open or not, because the voice keeps
+ * its item's `who` and the mute list is watched (useHiddenAudio
+ * stopMutedVoices).
  */
 
-import { useEffect, useState, useSyncExternalStore, type ReactNode } from 'react'
+import { useState, useSyncExternalStore, type ReactNode } from 'react'
 import { Download, Play, RotateCcw, Square } from 'lucide-react'
 import type { AudioItem } from '../lib/audioItem'
 import { audioExtension } from '../lib/audioItem'
 import { hasTrigger, onTriggers, resetTrigger, triggerFired, triggersVersion } from '../lib/audioTrigger'
-import { downloadAudio, playAudio, stopAudio, useHiddenAudio } from '../store/useHiddenAudio'
+import { cardKey, downloadAudio, playAudio, stopAudio, useHiddenAudio, type MuteSubject } from '../store/useHiddenAudio'
 import { ItemIcon } from './ItemIcon'
 
 const ICON = 12
@@ -51,26 +52,26 @@ const MARK_TIPS: Record<string, string> = {
   'WALK ONLY': 'Heard only in first person (WALK mode)',
 }
 
-export function AudioCard({ id, triggerId, audio, moderation }: {
+export function AudioCard({ id, triggerId, audio, who, moderation }: {
   /** The world item's key: what its playback is filed under. */
   id: string
   /** What its trigger record is kept by: the item's lineage id. */
   triggerId: string
   audio: AudioItem
+  /** Who and what the mute list is asked about, so a mute stops this card's PLAY too. */
+  who?: MuteSubject
   moderation?: ReactNode
 }): JSX.Element {
-  const entry = useHiddenAudio((s) => s.entries[id])
+  const entry = useHiddenAudio((s) => s.entries[cardKey(id)])
   useSyncExternalStore(onTriggers, triggersVersion, triggersVersion)
   const fired = triggerFired(triggerId)
   const [saving, setSaving] = useState(false)
   const [saveError, setSaveError] = useState<string | null>(null)
-  // The card's play ends with the card, for now (see the header).
-  useEffect(() => () => stopAudio(id), [id])
 
   const sounding = entry?.phase === 'playing' || entry?.phase === 'loading'
   const toggle = (): void => {
     if (sounding) stopAudio(id)
-    else void playAudio(id, audio)
+    else void playAudio(id, audio, who)
   }
   const save = (): void => {
     setSaving(true)

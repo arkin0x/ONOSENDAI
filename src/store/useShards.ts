@@ -205,7 +205,12 @@ export interface WorldItem {
  * own id or the lineage a moved item keeps. Never one of yours.
  */
 export function worldItemHidden(w: Pick<WorldItem, 'mine' | 'author' | 'event' | 'target' | 'key' | 'lineage'>, muted: Muted, me: string): boolean {
-  return hidesThing(muted, { authors: [w.author, w.event?.pubkey, w.target?.pubkey], ids: [w.key, w.lineage, w.event?.id], mine: w.mine }, me)
+  return hidesThing(muted, muteSubject(w), me)
+}
+
+/** What the mute list is asked about a world item: who holds and made it, and every id it goes by. Kept with its sound, so a mute stops it (useHiddenAudio). */
+export function muteSubject(w: Pick<WorldItem, 'mine' | 'author' | 'event' | 'target' | 'key' | 'lineage'>): { authors: (string | undefined)[]; ids: (string | undefined)[]; mine: boolean } {
+  return { authors: [w.author, w.event?.pubkey, w.target?.pubkey], ids: [w.key, w.lineage, w.event?.id], mine: w.mine }
 }
 
 /** The same for a find as the scan keeps it (`discovered`), for the lists that read those directly. */

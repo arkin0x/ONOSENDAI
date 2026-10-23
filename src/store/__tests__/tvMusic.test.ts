@@ -6,7 +6,7 @@
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { setBroadcastForTest } from '../../lib/tv/broadcast'
-import { askForTap, besideUrls, holdMusicForAd, musicHeldForAd, musicProgress, nameFromUrl, resumeMusic, setMusicVolume, shuffled, startMusic, stopMusic, tapMusic, toggleMusicMute, useTvMusic } from '../useTvMusic'
+import { askForTap, besideUrls, duckMusic, musicDuck, holdMusicForAd, musicHeldForAd, musicProgress, nameFromUrl, resumeMusic, setMusicVolume, shuffled, startMusic, stopMusic, tapMusic, toggleMusicMute, useTvMusic } from '../useTvMusic'
 
 class FakeAudio extends EventTarget {
   static made: FakeAudio[] = []
@@ -684,6 +684,25 @@ describe('the volume and mute', () => {
     setMusicVolume(-1)
     expect(useTvMusic.getState().volume).toBe(0)
     expect(store.get('onosendai:tvVolume')).toBe('0.000')
+  })
+
+  it('steps down while hidden audio is heard, faded, and back up after (duckMusic)', () => {
+    vi.useFakeTimers()
+    try {
+      startMusic(list)
+      setMusicVolume(0.8)
+      duckMusic(0.3)
+      vi.advanceTimersByTime(600)
+      expect(musicDuck()).toBeCloseTo(0.3, 5)
+      expect(audio().volume).toBeCloseTo(0.24, 5)
+      // The viewer's own volume is untouched by the duck.
+      expect(useTvMusic.getState().volume).toBe(0.8)
+      duckMusic(1)
+      vi.advanceTimersByTime(600)
+      expect(audio().volume).toBeCloseTo(0.8, 5)
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   it('mutes and unmutes with a tap, and turning it up unmutes', () => {

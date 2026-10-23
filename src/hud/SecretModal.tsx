@@ -31,7 +31,7 @@ import { itemKind } from '../lib/comments'
 import { useProfile } from '../hooks/useProfile'
 import { profileLabel } from '../store/useProfiles'
 import { useCyberspace } from '../store/useCyberspace'
-import { editable, useShards, type WorldItem } from '../store/useShards'
+import { editable, muteSubject, useShards, type WorldItem } from '../store/useShards'
 import { editPlaced } from '../store/useBuilder'
 import { useWorkshop } from '../store/useWorkshop'
 import { useEscape } from '../hooks/useEscape'
@@ -169,12 +169,13 @@ export function SecretModal(): JSX.Element | null {
           <div className="secret__shard"><ChestBlock id={item.key} chest={item.chest} author={author} verified place={place} /></div>
         ) : item.type === 'audio' && item.audio ? (
           // MUTE THIS AUDIO and BLOCK AUTHOR in the card's own row, by PLAY
-          // (store/useMutes): muting closes this card, and the card's sound
-          // stops with it.
+          // (store/useMutes): muting closes this card, and the voice, which
+          // keeps who it is from, stops with it (useHiddenAudio stopMutedVoices).
           <AudioCard
             id={item.key}
             triggerId={item.lineage ?? item.key}
             audio={item.audio}
+            who={muteSubject(item)}
             moderation={audioModeration(item, author, mine, close)}
           />
         ) : (

@@ -9801,3 +9801,19 @@ html.tv-broadcast body { overflow: hidden; }
 .mutes__empty { font-size: 9px; letter-spacing: 0.14em; color: var(--dim); padding: 8px 0; }
 /* A refused block or mute, as a full row under the card's actions (BlockButton). */
 .block__refusal { flex-basis: 100%; }
+
+/* NOW PLAYING (hud/NowPlaying): a presence pill whose rows open what plays. */
+.nowplaying__row { gap: 6px; }
+.nowplaying__open {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  padding: 0;
+  font-family: inherit;
+  text-align: left;
+  color: inherit;
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+}

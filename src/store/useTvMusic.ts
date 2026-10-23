@@ -174,11 +174,45 @@ function apply(): void {
   }
   if (volumeWorks) {
     audio.muted = false
-    audio.volume = s.muted ? 0 : s.volume * gain
+    audio.volume = s.muted ? 0 : s.volume * gain * duck
   } else {
     audio.volume = s.volume
     audio.muted = s.muted
   }
+}
+
+/** What the volume is also multiplied by while hidden audio is heard: 1, or DUCKED (duckMusic). */
+let duck = 1
+let duckTarget = 1
+let ducking: ReturnType<typeof setInterval> | null = null
+const DUCK_MS = 500
+
+/**
+ * Step the music down while hidden audio is heard, and back up after
+ * (arkinox, 2026-10-23: TV ducking), faded over half a second. Where the
+ * page may not set the volume (iOS) the music plays on as it is: there is
+ * no step between full and muted there. Never on the stream.
+ */
+export function duckMusic(level: number): void {
+  const target = Math.min(1, Math.max(0, level))
+  if (target === duckTarget) return
+  duckTarget = target
+  if (ducking !== null) clearInterval(ducking)
+  const from = duck
+  const began = Date.now()
+  ducking = setInterval(() => {
+    const k = Math.min(1, (Date.now() - began) / DUCK_MS)
+    duck = from + (target - from) * k
+    apply()
+    if (k < 1) return
+    if (ducking !== null) clearInterval(ducking)
+    ducking = null
+  }, FADE_STEP_MS)
+}
+
+/** How far the music is stepped down now, 0 to 1: for tests. */
+export function musicDuck(): number {
+  return duck
 }
 
 /**

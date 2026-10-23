@@ -21,6 +21,7 @@ import {
 } from 'three'
 import { WorldLabel } from './WorldLabel'
 import { FACE_TAG_STENCIL } from './ShardMesh'
+import { OVERLAY_ORDER } from './shardFaces'
 
 /** Seconds one outward breath of a clipped wall takes. */
 const WALL_CYCLE = 1.6
@@ -158,7 +159,8 @@ export function ClipWalls({ centre, size, faces, color, hideNear = false }: Prop
         <group key={`${w.slot}${w.sign}`} ref={(g) => { shown.current[i] = g }}>
           <group ref={(g) => { meshes.current[i] = g }} position={w.base}>
             {materials.map((m, k) => (
-              <mesh key={k} geometry={w.geometry} material={m} rotation={w.rotation} frustumCulled={false} />
+              // OVERLAY_ORDER: over see-through shards, so their texels keep the bloom tag (shardFaces.ts).
+              <mesh key={k} geometry={w.geometry} material={m} rotation={w.rotation} frustumCulled={false} renderOrder={OVERLAY_ORDER} />
             ))}
           </group>
           {/* The remedy, written on the thing asking for it. Small and the

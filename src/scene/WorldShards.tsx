@@ -20,7 +20,7 @@ import { ShardMesh } from './ShardMesh'
 import { GHOST_OPACITY } from './shardFaces'
 import { regionBox } from '../lib/clip'
 import { placedPose, type Pose } from '../lib/pose'
-import type { ShardModel } from 'sno-core/shards'
+import { drawnOpacity, type ShardModel } from 'sno-core/shards'
 import { TapTarget, farCullDoublings } from './TapTarget'
 
 const REACH = GRID_RADIUS * 8
@@ -40,6 +40,8 @@ const MOVING_HIGH = 0.7
 
 /** This frame's opacity for the moving shard, read by `breathe`. */
 let breath = MOVING_HIGH
+/** The moving shard's own opacity (sno-core drawnOpacity), set with the breath each frame. */
+let share = 1
 
 /** One object of the moving shard at this frame's breath; hoisted, so a frame allocates nothing. */
 function breathe(obj: Object3D): void {
@@ -51,16 +53,18 @@ function breathe(obj: Object3D): void {
 
 function breatheOne(one: Material): void {
   // The points' disc shader has its own opacity uniform (pointDisc.ts),
-  // dimmer for the dots on a solid or lined shard: that ratio is kept. So is
-  // a see-through shard's own opacity (DECK-0003 §1.11), which the ghost's
-  // was multiplied by (shardFaces shardOpacity): it breathes at its own share.
+  // dimmer for the dots on a solid or lined shard: that ratio is kept. Its
+  // material is made again whenever the shard's opacity changes, so the
+  // ratio it holds is never stale.
   const u = (one as { uniforms?: Record<string, { value: unknown }> }).uniforms?.uOpacity
   if (u) {
     one.userData.baseOpacity ??= u.value as number
     u.value = breath * ((one.userData.baseOpacity as number) / GHOST_OPACITY)
   } else {
-    one.userData.baseOpacity ??= one.opacity
-    one.opacity = breath * ((one.userData.baseOpacity as number) / GHOST_OPACITY)
+    // The faces and lines keep their materials across edits, so nothing is
+    // cached on them: they breathe at the shard's own opacity (DECK-0003
+    // §1.11) as it is now, read each frame with the breath.
+    one.opacity = breath * share
   }
 }
 
@@ -178,6 +182,7 @@ export function PlacedShard({ w, birth, moving = false, tappable = true, drawnRe
   useFrame((state) => {
     if (!moving || !drawn.current) return
     breath = movingOpacity(state.clock.elapsedTime)
+    share = drawnOpacity(w.shard)
     drawn.current.traverse(breathe)
   })
   return (

@@ -8,7 +8,7 @@
 import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
 import { CustomBlending, OneFactor, OneMinusSrcAlphaFactor, ReplaceStencilOp, SrcAlphaFactor, ZeroFactor } from 'three'
-import { FACE_TAG_STENCIL, GHOST_OPACITY, SEE_THROUGH_BLEND, TAG_BLEND, TRANSLUCENT_ORDER, basicFaceProps, lineProps, litFaceProps, seeThrough, shardOpacity, shardOrder } from '../shardFaces'
+import { DOTS_ORDER, FACE_TAG_STENCIL, GHOST_OPACITY, OVERLAY_ORDER, SEE_THROUGH_BLEND, TAG_BLEND, TRANSLUCENT_ORDER, basicFaceProps, benchOrders, lineProps, litFaceProps, seeThrough, shardOpacity, shardOrder } from '../shardFaces'
 
 describe('what a shard is drawn at', () => {
   it('is its own opacity with the 10% floor, 1 when it has none', () => {
@@ -98,7 +98,11 @@ describe('where it is wired (ShardMesh and the avatar)', () => {
     expect(mesh).toMatch(/<meshBasicMaterial[^>]*transparent forceSinglePass=\{!ghost\} \{\.\.\.basicFaceProps\(opacity, \{ ghost, world \}\)\}/)
     expect((mesh.match(/litFaceProps\(opacity, ghost\)/g) ?? []).length).toBe(2)
     expect((mesh.match(/lineProps\(opacity, ghost\)/g) ?? []).length).toBe(2)
-    expect((mesh.match(/renderOrder=\{order\}/g) ?? []).length).toBe(4)
+    expect((mesh.match(/renderOrder=\{order\}/g) ?? []).length).toBe(1)
+    expect(mesh).toMatch(/name="shard-faces"[^>]*renderOrder=\{lit \? bench\.front : order\}/)
+    expect(mesh).toMatch(/geometry=\{inside\}[^>]*renderOrder=\{bench\.inside\}/)
+    expect(mesh).toMatch(/<points [^>]*renderOrder=\{DOTS_ORDER\}/)
+    expect(mesh).toMatch(/l\.renderOrder = shardOrder\(opacity, ghost\)/)
     expect(mesh).toMatch(/createDiscMaterial\([^)]*\? opacity : opacity \* 0\.55\)/)
   })
 
@@ -111,5 +115,43 @@ describe('where it is wired (ShardMesh and the avatar)', () => {
     expect(avatar).toMatch(/<ShardMesh shard=\{shard\} world cull=\{firstPerson\} ignoreOpacity \/>/)
     expect(readFileSync('src/hud/PersonModal.tsx', 'utf8')).toMatch(/<Preview shard=\{shard\} ignoreOpacity \/>/)
     expect(readFileSync('src/hud/TvSegments.tsx', 'utf8')).toMatch(/ignoreOpacity=\{item\?\.kind !== 'object'\}/)
+  })
+})
+
+describe('the draw order (review of #452)', () => {
+  it('opaque < see-through < bench front < dots < overlays', () => {
+    expect(0).toBeLessThan(TRANSLUCENT_ORDER)
+    expect(TRANSLUCENT_ORDER).toBeLessThan(benchOrders(0.5, false).front)
+    expect(benchOrders(0.5, false).front).toBeLessThan(DOTS_ORDER)
+    expect(DOTS_ORDER).toBeLessThan(OVERLAY_ORDER)
+    // Below the world's other marks (paths 4, cages 8, walls and cursor 10).
+    expect(OVERLAY_ORDER).toBeLessThan(4)
+  })
+
+  it('a see-through lit face draws its inside first, then its front; opaque stays at 0 for both', () => {
+    expect(benchOrders(0.5, false)).toEqual({ inside: TRANSLUCENT_ORDER, front: TRANSLUCENT_ORDER + 0.5 })
+    expect(benchOrders(1, false)).toEqual({ inside: 0, front: 0 })
+    expect(benchOrders(0.2, true)).toEqual({ inside: 0, front: 0 })
+  })
+
+  it('every translucent overlay drawn over shards draws at OVERLAY_ORDER', () => {
+    const box = readFileSync('src/scene/CoveringBox.tsx', 'utf8')
+    const walls = readFileSync('src/scene/ClipWalls.tsx', 'utf8')
+    const bench = readFileSync('src/workshop/Bench.tsx', 'utf8')
+    expect(box).toMatch(/geometry=\{box\.fill\}[^>]*renderOrder=\{OVERLAY_ORDER\}/)
+    expect(walls).toMatch(/material=\{m\}[^>]*renderOrder=\{OVERLAY_ORDER\}/)
+    // The face highlight's fill and edge, the halo, the pick loop and ADD's ghost.
+    expect(bench).toMatch(/<mesh geometry=\{lit\.g\} frustumCulled=\{false\} renderOrder=\{OVERLAY_ORDER\}>/)
+    expect(bench).toMatch(/edge\.renderOrder = OVERLAY_ORDER/)
+    expect(bench).toMatch(/LineBasicMaterial\(\{ color: WARN, toneMapped: false, transparent: true \}\)/)
+    expect(bench).toMatch(/<sprite [^>]*renderOrder=\{OVERLAY_ORDER\}>/)
+    expect(bench).toMatch(/l\.renderOrder = OVERLAY_ORDER/)
+    expect(bench).toMatch(/<mesh position=\{UP\(aim\)\} renderOrder=\{OVERLAY_ORDER\}>/)
+  })
+
+  it('a moving shard breathes at its own opacity as it is now, with nothing cached on its faces', () => {
+    const world = readFileSync('src/scene/WorldShards.tsx', 'utf8')
+    expect(world).toMatch(/share = drawnOpacity\(w\.shard\)/)
+    expect(world).toMatch(/one\.opacity = breath \* share/)
   })
 })

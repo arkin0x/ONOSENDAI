@@ -8,6 +8,8 @@ describe('the OPACITY stepper', () => {
   it('reads no opacity as solid', () => {
     expect(opacityPercent(undefined)).toBe(100)
     expect(opacityPercent(40)).toBe(40)
+    // A stored 1 to 9 reads as the floor it is drawn at.
+    expect(opacityPercent(5)).toBe(10)
   })
 
   it('steps in fives, and stops at the floor and at solid', () => {
@@ -21,7 +23,8 @@ describe('the OPACITY stepper', () => {
   it('takes a value off the fives to the next five in the direction asked', () => {
     expect(stepOpacity(33, 1)).toBe(35)
     expect(stepOpacity(33, -1)).toBe(30)
-    expect(stepOpacity(3, 1)).toBe(10)
+    expect(stepOpacity(3, 1)).toBe(15)
+    expect(stepOpacity(3, -1)).toBe(10)
   })
 })
 

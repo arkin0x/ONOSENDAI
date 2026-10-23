@@ -37,6 +37,7 @@ import { drawnDivision } from './divisions'
 import { benchAxes, benchPose, nudgeFor, orbitOffset, planeAfter, sameAxes, setOrbitSink, useBenchView, type NudgeName } from './benchAxes'
 import { landing, preview, type WorkPlane } from 'sno-core/stamps'
 import { ShardMesh, faceOfHit } from '../scene/ShardMesh'
+import { OVERLAY_ORDER } from '../scene/shardFaces'
 import { ShardLights } from '../scene/shardLight'
 import { nextSelection, ownAddress, useWorkshop, type Tool } from '../store/useWorkshop'
 import { partMatrix } from 'sno-core/parts'
@@ -206,7 +207,7 @@ function Ghost(): JSX.Element | null {
   }
   if (tool === 'add') {
     return (
-      <mesh position={UP(aim)}>
+      <mesh position={UP(aim)} renderOrder={OVERLAY_ORDER}>
         <sphereGeometry args={[0.1, 12, 12]} />
         <meshBasicMaterial color={rgbToHex(color)} transparent opacity={0.5} toneMapped={false} depthWrite={false} />
       </mesh>
@@ -335,7 +336,7 @@ function Handles(): JSX.Element | null {
             </mesh>
             {/* A halo, so a small selected handle still stands out. */}
             {(isSel || picked) && glow && (
-              <sprite scale={[HALO_PX, HALO_PX, 1]}>
+              <sprite scale={[HALO_PX, HALO_PX, 1]} renderOrder={OVERLAY_ORDER}>
                 <spriteMaterial map={glow} color={isSel ? WARN : ACCENT} transparent opacity={0.85} blending={AdditiveBlending} depthWrite={false} toneMapped={false} />
               </sprite>
             )}
@@ -364,6 +365,7 @@ function PickLoop(): JSX.Element | null {
     g.setAttribute('position', new Float32BufferAttribute(pts.flat(), 3))
     const l = new Line(g, new LineBasicMaterial({ color: ACCENT, transparent: true, opacity: 0.6, toneMapped: false }))
     l.frustumCulled = false
+    l.renderOrder = OVERLAY_ORDER
     return l
   }, [shard, facePick])
   useEffect(() => () => { line?.geometry.dispose(); line?.material.dispose() }, [line])
@@ -381,15 +383,19 @@ function FaceHighlight(): JSX.Element | null {
     // Four points: the mesh draws the first three as its one triangle, the line closes the loop.
     const g = new BufferGeometry()
     g.setAttribute('position', new Float32BufferAttribute([...pts, pts[0]].flat(), 3))
-    const edge = new Line(g, new LineBasicMaterial({ color: WARN, toneMapped: false }))
+    // Transparent, at OVERLAY_ORDER like the fill: both draw after a
+    // see-through shard's faces (order 1), or the face blends over them and
+    // the highlight vanishes on a see-through shard (shardFaces.ts).
+    const edge = new Line(g, new LineBasicMaterial({ color: WARN, toneMapped: false, transparent: true }))
     edge.frustumCulled = false
+    edge.renderOrder = OVERLAY_ORDER
     return { g, edge }
   }, [shard, face])
   useEffect(() => () => { lit?.g.dispose(); lit?.edge.material.dispose() }, [lit])
   if (!lit) return null
   return (
     <>
-      <mesh geometry={lit.g} frustumCulled={false}>
+      <mesh geometry={lit.g} frustumCulled={false} renderOrder={OVERLAY_ORDER}>
         <meshBasicMaterial color={WARN} transparent opacity={0.5} side={DoubleSide} forceSinglePass depthWrite={false} polygonOffset polygonOffsetFactor={-4} toneMapped={false} />
       </mesh>
       <primitive object={lit.edge} />

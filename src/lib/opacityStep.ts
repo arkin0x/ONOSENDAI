@@ -13,9 +13,12 @@ import { OPACITY_FLOOR, type ShardModel } from 'sno-core/shards'
 /** The stepper's step, in percent. */
 export const OPACITY_STEP = 5
 
-/** The percent a model is drawn at in the stepper's terms: 100 when it has none. */
+/**
+ * The percent a model is drawn at, as the stepper shows it: 100 when it has
+ * none, and never under the floor, so a stored 5 reads as the 10% it draws at.
+ */
 export function opacityPercent(opacity: number | undefined): number {
-  return opacity ?? 100
+  return Math.max(OPACITY_FLOOR, opacity ?? 100)
 }
 
 /** The next value from `current` one step in `dir` (-1 more see-through, +1 more solid), between the floor and 100. */

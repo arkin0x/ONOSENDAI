@@ -26,6 +26,7 @@ import { ACCENT, DANGER } from '../lib/palette'
 import { MAX_COMPUTE_HEIGHT, alignedOrigin, useCyberspace } from '../store/useCyberspace'
 import { WorldLabel } from './WorldLabel'
 import { ClipWalls, OFF_FACES, OVER_FACES, type ClipFace } from './ClipWalls'
+import { OVERLAY_ORDER } from './shardFaces'
 import { useUiHints } from '../store/useUiHints'
 
 /** Clamp on the drawn extent; the reported cost is never clamped. */
@@ -182,7 +183,8 @@ export function CoveringBox({ axes }: Props): JSX.Element | null {
           outline and the lattice are doing the work anyway. */}
       {/* Twice, split by the stencil: see OFF_FACES (arkinox, 2026-10-12). */}
       {[OFF_FACES, OVER_FACES].map((split, i) => (
-        <mesh key={i} geometry={box.fill} position={box.centre} frustumCulled={false}>
+        // OVERLAY_ORDER: over see-through shards, so their texels keep the bloom tag (shardFaces.ts).
+        <mesh key={i} geometry={box.fill} position={box.centre} frustumCulled={false} renderOrder={OVERLAY_ORDER}>
           <meshBasicMaterial
             color={box.color}
             toneMapped={false}

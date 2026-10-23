@@ -30,6 +30,19 @@
  *    own origin sorts level with the room: without the order it would be a
  *    coin toss whether the room painted over the water.
  *
+ * The draw order, low to high (each a renderOrder; three draws a lower order
+ * first, and sorts by distance within one):
+ *
+ *   0     opaque shard faces, lines and ghosts (depth decides, as always)
+ *   1     see-through faces (TRANSLUCENT_ORDER); on the bench, the inside
+ *         of a see-through lit face
+ *   1.5   on the bench, the front of a see-through lit face, over its inside
+ *   1.75  every shard's vertex dots (DOTS_ORDER)
+ *   2     translucent overlays drawn over shards (OVERLAY_ORDER): CoveringBox's
+ *         fill, ClipWalls, the bench's face highlight, halos, pick loop and
+ *         ADD ghost
+ *   4+    the world's other marks (paths, cursor, walls, cages), as before
+ *
  * And it keeps one pass for both sides (forceSinglePass). three draws a
  * transparent DoubleSide material in two passes by flipping `side` with
  * `needsUpdate` twice per object per frame, which was the 10 GB Windows tab
@@ -80,8 +93,34 @@ export const SEE_THROUGH_BLEND = {
   ...STENCIL_MARK,
 } as const
 
-/** Where a see-through shard draws: after every opaque shard face (0), before the overlays (4 and up). */
+/**
+ * Where a see-through shard draws: after every opaque shard face (0), before
+ * its vertex dots (DOTS_ORDER) and before the translucent overlays drawn over
+ * shards (OVERLAY_ORDER).
+ */
 export const TRANSLUCENT_ORDER = 1
+
+/**
+ * Where every shard's vertex dots draw: after see-through faces. The dots
+ * write no depth, so drawn first a dot in front of water would be painted
+ * over by it. Drawn after, a dot in front shows as it should, and a dot behind
+ * water shows untinted rather than through the tint: the lesser error, since
+ * the water is see-through anyway. Against opaque faces nothing changes:
+ * those write depth, so a dot behind one fails the depth test in either
+ * order. Above the bench's see-through front (TRANSLUCENT_ORDER + 0.5).
+ */
+export const DOTS_ORDER = 1.75
+
+/**
+ * Where a translucent overlay drawn over shards (CoveringBox's fill,
+ * ClipWalls) draws: after see-through faces and their dots. Drawn before a
+ * see-through face over the empty background, the overlay raises the alpha
+ * there, the face keeps it (its blend keeps the alpha under it), the texel
+ * loses its tag and the bloom blows it out, with the overlay's tint under the
+ * water rather than on it. Drawn after, the texel stays tagged and the tint
+ * lands on top (review of #452, measured: alpha 38 against 0).
+ */
+export const OVERLAY_ORDER = 2
 
 /** How see-through a ghost (a preview that is not yet real) is drawn, before its own opacity. */
 export const GHOST_OPACITY = 0.45
@@ -131,4 +170,14 @@ export function lineProps(opacity: number, ghost: boolean): Record<string, unkno
 /** The render order of a mesh or line drawn at `opacity`: after the opaque ones when see-through. */
 export function shardOrder(opacity: number, ghost: boolean): number {
   return seeThrough(opacity, ghost) ? TRANSLUCENT_ORDER : 0
+}
+
+/**
+ * The bench's two lit meshes, front and inside, which share every position:
+ * see-through, the inside draws first and the front over it, so the face
+ * reads as its front and not inside out. Opaque, both stay at 0 and depth
+ * decides, as before.
+ */
+export function benchOrders(opacity: number, ghost: boolean): { front: number; inside: number } {
+  return seeThrough(opacity, ghost) ? { front: TRANSLUCENT_ORDER + 0.5, inside: TRANSLUCENT_ORDER } : { front: 0, inside: 0 }
 }

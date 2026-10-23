@@ -86,9 +86,10 @@ describe('zoomPlan', () => {
     const fine = moveScale(shot.beats[1], false)!
     expect(plan[0].scaleExp).toBe(wide)
     expect(plan[plan.length - 1].scaleExp).toBe(fine)
-    // Nothing changes while the big move glides.
-    expect(plan[1].at).toBeGreaterThanOrEqual(shot.offsets[0] + GLIDE_S - 1e-9)
-    expect(scaleAt(plan, shot.offsets[0] + GLIDE_S - 0.01)).toBe(wide)
+    // Nothing changes while the big move glides, nor until the camera has caught up with it.
+    expect(plan[1].at).toBeGreaterThanOrEqual(shot.offsets[0] + WIDE_HOLD_S - 1e-9)
+    expect(WIDE_HOLD_S).toBeGreaterThanOrEqual(GLIDE_S)
+    expect(scaleAt(plan, shot.offsets[0] + WIDE_HOLD_S - 0.01)).toBe(wide)
     expect(reversals(plan)).toBe(0)
   })
 
@@ -116,6 +117,27 @@ describe('zoomPlan', () => {
     expect(run.offsets[4] - run.offsets[1]).toBeGreaterThan(MIN_HOLD_S)
     expect(scaleAt(plan, run.offsets[4])).toBe(moveScale(run.beats[4], false))
     expect(reversals(plan)).toBe(1)
+  })
+
+  it('shows even a short run of nudges before the big move fine: an opening is no pump (review of #470)', () => {
+    const shot = trip(chain('a', [{ at: 0, size: 1n }, { at: 1, size: 1n }, { at: 2, size: 1n }, { at: 3, size: BIG }]))
+    const plan = planOf(shot)
+    expect(plan[0].scaleExp).toBe(moveScale(shot.beats[0], true))
+    expect(scaleAt(plan, shot.offsets[3])).toBe(moveScale(shot.beats[3], false))
+    expect(reversals(plan)).toBe(0)
+  })
+
+  it('keeps each step of a widening staircase at its own zoom', () => {
+    const steps = [1n, 1n, 1n, 1n << 8n, 1n << 8n, 1n << 8n, 1n << 16n, 1n << 16n, 1n << 16n]
+    const shot = trip(chain('a', steps.map((size, i) => ({ at: i, size }))))
+    const plan = planOf(shot)
+    for (const i of [1, 4, 7]) expect(scaleAt(plan, shot.offsets[i])).toBe(moveScale(shot.beats[i], false))
+    expect(reversals(plan)).toBe(0)
+  })
+
+  it('does not zoom in for one last nudge after a big move', () => {
+    const shot = trip(chain('a', [{ at: 0, size: BIG }, { at: 3, size: BIG }, { at: 6, size: 1n }]))
+    expect(planOf(shot)).toEqual([{ at: 0, scaleExp: moveScale(shot.beats[0], true) }])
   })
 
   it('leaves a one-move trip at the zoom it always had', () => {

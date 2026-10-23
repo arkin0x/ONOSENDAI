@@ -170,8 +170,10 @@ export interface TvFollowFrame {
  *
  * A zoom within a shot (lib/tv/zoom.ts) is not a cut: the camera keeps its
  * distance and angle, and the eased point keeps its lag behind what it
- * follows, rescaled into the new zoom's cells, so a zoom step does not jerk
- * the camera onto the avatar.
+ * follows, so a zoom step does not jerk the camera onto the avatar. Zooming
+ * out, the lag shrinks with the world; zooming in it is kept as it was on
+ * screen, never grown: grown by 2 a step, faster than the easing takes it
+ * back, it threw the avatar out of the frame for a second (review of #470).
  *
  * Everything here is in the frame the scene was drawn in. A cut moves the
  * store's anchor a commit before the scene's, and taking cursorOffset as it
@@ -198,8 +200,9 @@ export function followStep(f: TvFollow, frame: TvFollowFrame, axes: ViewAxes, k:
   const before = f.was
   let step: 'cut' | 'zoom' | 'follow' = 'follow'
   if (f.smooth && before && before.cutAt === frame.cutAt && before.scaleExp !== frame.scaleExp && before.at) {
-    // A zoom step: the same lag behind the subject, in the new zoom's cells.
-    const factor = 2 ** (before.scaleExp - frame.scaleExp)
+    // A zoom step: the lag behind the subject, shrunk with the world going
+    // out, as it was on screen going in.
+    const factor = Math.min(1, 2 ** (before.scaleExp - frame.scaleExp))
     f.smooth.set(at.x + (f.smooth.x - before.at[0]) * factor, at.y + (f.smooth.y - before.at[1]) * factor, at.z + (f.smooth.z - before.at[2]) * factor)
     step = 'zoom'
   } else if (!f.smooth || !before || before.scaleExp !== frame.scaleExp || before.cutAt !== frame.cutAt) {

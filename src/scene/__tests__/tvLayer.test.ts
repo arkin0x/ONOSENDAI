@@ -139,6 +139,16 @@ describe('the TV camera across a zoom step', () => {
     expect(f.smooth!.toArray()).toEqual([-2, 0, 0])
   })
 
+  it('keeps its lag as it was on screen when zooming in, never grown (review of #470)', () => {
+    const f: TvFollow = { smooth: null, was: null }
+    const at = new Vector3()
+    followStep(f, frame(16, new Vector3(0, 0, 0)), AXES, 0, at)
+    followStep(f, frame(16, new Vector3(3, 0, 0)), AXES, 0, at)
+    // In six powers of two in a row: the eased point stays 3 cells behind, not 3 * 2^6.
+    for (let z = 15; z >= 10; z--) expect(followStep(f, frame(z, new Vector3(0, 0, 0)), AXES, 0, at)).toBe('zoom')
+    expect(f.smooth!.toArray()).toEqual([-3, 0, 0])
+  })
+
   it('still cuts when a new shot changes the zoom', () => {
     const f: TvFollow = { smooth: null, was: null }
     followStep(f, frame(4, new Vector3(5, 0, 0)), AXES, 0, new Vector3())

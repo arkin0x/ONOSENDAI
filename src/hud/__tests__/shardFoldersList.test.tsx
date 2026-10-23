@@ -100,7 +100,7 @@ describe('every list of your shards', () => {
     for (const p of sources(join(__dirname, '..', '..'))) {
       const text = readFileSync(p, 'utf8')
       if (!/useWorkshop[\s\S]{0,80}?\.shards\b/.test(text)) continue
-      const options = (text.match(/<option\s/g) ?? []).length
+      const options = (text.replace(/\/\*[\s\S]*?\*\//g, '').match(/<option\b/g) ?? []).length
       expect([p, options]).toEqual([p, p.endsWith('ChestCompose.tsx') ? 2 : 0])
     }
   })

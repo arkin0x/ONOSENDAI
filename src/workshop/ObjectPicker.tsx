@@ -22,6 +22,7 @@ import { useCyberspace } from '../store/useCyberspace'
 import { useWorkshop, type StampObject } from '../store/useWorkshop'
 import { usePublished } from '../store/usePublished'
 import { useEscape } from '../hooks/useEscape'
+import { ShardFolders } from '../hud/ShardFolders'
 
 const OBJECT_KIND = 33331
 const WAIT_MS = 5000
@@ -59,6 +60,14 @@ export function objectsOf(events: NostrEvent[]): Found[] {
   }
   return out.sort((a, b) => b.at - a.at)
 }
+
+/**
+ * A published object's folder ref is its `d`: an object published from the
+ * workshop has its model's id there, so it shows in the folder its model is
+ * in (hud/ShardFolders).
+ */
+export const foundRef = (o: Found): string => o.address.split(':').slice(2).join(':')
+const foundName = (o: Found): string => o.shard.name
 
 export function ObjectPicker({ onClose }: { onClose: () => void }): JSX.Element {
   const me = useCyberspace((s) => s.identity.pubkey)
@@ -119,14 +128,15 @@ export function ObjectPicker({ onClose }: { onClose: () => void }): JSX.Element 
           {mine !== null && mine.length === 0 && <p className="login__note">No published objects under this key yet.</p>}
           {mine !== null && mine.length > 0 && (
             <ul className="objpick__list">
-              {mine.map((o) => (
-                <li key={o.address}>
+              <ShardFolders items={mine} refOf={foundRef} nameOf={foundName} row={(o, f) => (
+                <li key={o.address} {...f.drag}>
                   <button className="objpick__row" onClick={() => choose({ ref: refOf(o.address), name: o.shard.name, shard: o.shard })}>
                     <span className="objpick__name">{o.shard.name}</span>
                     <span className="objpick__meta">{o.shard.vertices.length} v · {o.shard.faces.length} f{o.shard.parts?.length ? ` · ${o.shard.parts.length} obj` : ''}</span>
                   </button>
+                  {f.tool}
                 </li>
-              ))}
+              )} />
             </ul>
           )}
         </div>

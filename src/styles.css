@@ -9505,3 +9505,52 @@ html.tv-broadcast body { overflow: hidden; }
 .itemmodel__side .chest__act { align-self: flex-start; margin-top: 4px; }
 .itemmodel__name { font-size: 11px; letter-spacing: 0.06em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .itemmodel__pick .feed__list { max-height: 40vh; max-height: 40dvh; }
+
+/* ---------- Shard folders (hud/ShardFolders.tsx), in every shard list ---------- */
+.sfold__bar { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; padding: 4px 0; border-radius: 5px; }
+.workshop__list li.sfold__bar { border-top: 0; }
+.sfold__bar.is-over { outline: 1px dashed var(--accent); outline-offset: 1px; }
+.sfold__btn, .sfold__mini {
+  font-family: inherit; font-size: 9px; letter-spacing: 0.12em; height: 26px; padding: 0 8px; border-radius: 5px;
+  display: inline-flex; align-items: center; justify-content: center; gap: 4px; flex: 0 0 auto;
+  color: var(--fg); background: rgba(6, 14, 22, 0.8); border: 1px solid rgba(0, 229, 255, 0.25); cursor: pointer;
+  white-space: nowrap; -webkit-tap-highlight-color: transparent;
+}
+.sfold__btn:disabled { opacity: 0.35; cursor: default; }
+.sfold__mini { width: 30px; height: 30px; padding: 0; color: var(--dim); }
+.sfold__mini:hover { color: var(--fg); border-color: rgba(0, 229, 255, 0.5); }
+.sfold__mini--danger:hover { color: var(--danger); border-color: var(--danger); }
+.sfold__check { width: 18px; height: 18px; margin: 0 6px; flex: 0 0 auto; accent-color: var(--accent); cursor: pointer; }
+/* A folder is a head and, open, its list: the caller's row styles (flex rows) are not for it. */
+.workshop__list li.sfold, .objpick__list li.sfold, li.sfold { display: block; border-top: 1px solid rgba(0, 229, 255, 0.08); }
+.sfold.is-over > .sfold__head { background: rgba(0, 229, 255, 0.12); outline: 1px dashed var(--accent); }
+.sfold__head { display: flex; gap: 4px; align-items: center; min-width: 0; border-radius: 5px; }
+.sfold__toggle {
+  flex: 1 1 auto; min-width: 0; display: flex; align-items: center; gap: 5px; padding: 7px 4px;
+  font-family: inherit; font-size: 11px; color: var(--fg); background: transparent; border: 0; text-align: left; cursor: pointer;
+}
+.sfold__toggle svg { flex: 0 0 auto; color: var(--accent); }
+.sfold__name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sfold__count { font-size: 9px; letter-spacing: 0.08em; color: var(--dim); flex: 0 0 auto; }
+.sfold__rename {
+  flex: 1 1 auto; min-width: 0; font-family: inherit; font-size: 11px; padding: 6px 8px; border-radius: 5px;
+  color: var(--fg); background: rgba(0, 229, 255, 0.05); border: 1px solid var(--accent); outline: none;
+}
+.sfold__kids { list-style: none; margin: 0 0 4px 9px; padding: 0 0 0 8px; display: flex; flex-direction: column; gap: 4px; border-left: 1px solid rgba(0, 229, 255, 0.18); }
+.workshop__list ul.sfold__kids { margin: 0 0 4px 9px; }
+/* Rows inside a folder keep the caller's look; a STAMP or PLACE row makes room for its tool. */
+.objpick__list li:not(.sfold):not(.sfold__bar) { display: flex; gap: 4px; align-items: center; }
+.objpick__list li > .objpick__row { min-width: 0; }
+.modal__card.sfold__chooser { border-color: rgba(0, 229, 255, 0.5); max-width: 420px; max-height: calc(100dvh - 32px); display: flex; flex-direction: column; }
+.sfold__choices { list-style: none; margin: 0 0 10px; padding: 0; display: flex; flex-direction: column; gap: 3px; overflow-y: auto; min-height: 0; }
+.sfold__choice {
+  width: 100%; display: flex; align-items: center; gap: 6px; padding: 8px 10px; border-radius: 5px; font-family: inherit; font-size: 11px; text-align: left; cursor: pointer;
+  color: var(--fg); background: rgba(0, 229, 255, 0.05); border: 1px solid rgba(0, 229, 255, 0.18); overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.sfold__choice svg { flex: 0 0 auto; color: var(--accent); }
+.sfold__choice:hover:not(:disabled) { border-color: rgba(0, 229, 255, 0.5); }
+.sfold__choice:disabled { opacity: 0.4; cursor: default; }
+.sfold__choice.is-on { opacity: 0.6; border-style: dashed; }
+.sfold__new { display: flex; gap: 6px; align-items: stretch; }
+.sfold__new .login__input { flex: 1 1 auto; min-width: 0; margin: 0; }
+.sfold__new .login__act { flex: 0 0 auto; margin: 0; }

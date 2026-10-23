@@ -9,6 +9,7 @@ import { SpectateBar } from './hud/SpectateBar'
 import { Workshop } from './workshop/Workshop'
 import { DeployBar } from './hud/DeployBar'
 import { StashModals } from './hud/StashModals'
+import { ThumbHost } from './scene/ThumbStage'
 import { SecretModal } from './hud/SecretModal'
 import { FocusBar } from './hud/FocusBar'
 import { BuildBar } from './hud/BuildBar'
@@ -372,6 +373,8 @@ export default function App(): JSX.Element {
       <SyncWarning />
       {crowded && <div className="mobile-overlay" />}
       <Workshop />
+      {/* The one hidden canvas that draws every list's shard pictures, there only while it has some to draw. */}
+      <ThumbHost />
       {/* Docked in the lower left, a gap short of the pad while the pad is on
           screen (arkinox, 2026-10-12). */}
       <DeployBar pad={showPad && !offerUp && !modalUp} />

@@ -33,6 +33,8 @@ import { Explanation } from './Explanation'
 import { ItemFeedPicker } from './ItemFeedPicker'
 import { lockFromListing } from '../lib/itemListing'
 import { ItemIcon } from './ItemIcon'
+import { ShardThumb } from './ShardThumb'
+import type { ShardModel } from 'sno-core/shards'
 import { nip19 } from 'nostr-tools'
 import { forgeKey, isLockPubkey, NIP44_MAX_PLAINTEXT, sizeRefusal, templateBytes } from '../lib/chests'
 import { attributed } from '../lib/client'
@@ -86,7 +88,8 @@ export function ChestCompose({ onDone }: { onDone: () => void }): JSX.Element {
   const items = useInventory((s) => s.items)
   const keys = useMemo(() => Object.values(items).filter((it) => it.type === 'key' && it.key).sort((a, b) => b.at - a.at), [items])
   const models = useWorkshop((s) => s.shards)
-  const shardName = (id: string): string => models.find((s) => s.id === id)?.name ?? 'model'
+  const modelOf = (id: string): ShardModel | undefined => models.find((s) => s.id === id)
+  const shardName = (id: string): string => modelOf(id)?.name ?? 'model'
 
   const [name, setName] = useState(draft?.name ?? '')
   const [requires, setRequires] = useState(draft?.requires ?? '')
@@ -200,7 +203,7 @@ export function ChestCompose({ onDone }: { onDone: () => void }): JSX.Element {
         <ul className="compose__list">
           {contents.map((c, i) => (
             <li key={i} className="chest__row">
-              <ItemIcon className={`chest__glyph chest__glyph--${c.kind === 'message' && findCashuToken(c.text) ? 'cashu' : c.kind}`} type={c.kind} coin={c.kind === 'message' && !!findCashuToken(c.text)} />
+              {c.kind === 'shard' && modelOf(c.shardId) ? <ShardThumb shard={modelOf(c.shardId)!} /> : <ItemIcon className={`chest__glyph chest__glyph--${c.kind === 'message' && findCashuToken(c.text) ? 'cashu' : c.kind}`} type={c.kind} coin={c.kind === 'message' && !!findCashuToken(c.text)} />}
               <span className="item__name" title={contentLabel(c, shardName)}>{contentLabel(c, shardName)}</span>
               {/* Only a shard has a place of its own to aim; a message or key reveals at the chest. */}
               {c.kind === 'shard' && c.aimed && <span className="chest__aimed" title="Signed where it will stand when the chest opens, at this size">aimed · 2^{c.aimed.unit}</span>}

@@ -1,8 +1,10 @@
 /**
- * ThumbStage.tsx - the one hidden canvas that draws every feed picture.
+ * ThumbStage.tsx - the one hidden canvas that draws every shard picture.
  *
- * Mounted while a list of objects is on screen (the PLACE OBJECT picker's
- * FEED, the SHARD FEED window), off screen and small. It takes the first job
+ * Mounted once for the whole app by ThumbHost, off screen and small, and only
+ * while there are pictures to draw: every list of shards asks the same queue
+ * (store/useThumbs, hud/ShardThumb), so however many lists are open there is
+ * one canvas, and none at all once the queue has been empty a while. It takes the first job
  * in useThumbs' queue, draws that object with the same ShardMesh the world
  * uses, framed on its own bounds from a three-quarter view, waits a few
  * frames for the draw to settle, and keeps the frame as an image. Then the
@@ -11,7 +13,7 @@
  */
 
 import { Canvas, useFrame, useThree } from '@react-three/fiber'
-import { useEffect, useRef, useState } from 'react'
+import { Component, useEffect, useRef, useState, type ReactNode } from 'react'
 import type { ShardModel } from 'sno-core/shards'
 import { placedBounds, resolveParts, type Placed } from 'sno-core/parts'
 import { fetchRef } from '../lib/parts'
@@ -23,12 +25,23 @@ import { useThumbs, type ThumbJob } from '../store/useThumbs'
 /** The picture's size in pixels; tiles show it at about half that, so it stays sharp on a phone. */
 export const THUMB_PX = 160
 
-/** Frames drawn before the picture is taken: the decode and the first draw settle in this. */
-const SETTLE_FRAMES = 4
+/**
+ * Frames drawn before the picture is taken, for a shape with no parts. The
+ * stage draws each frame itself, then reads it straight back (Capture), so the
+ * first frame the shape is in is the picture: there is nothing to settle (no
+ * decode on the stage, and the point discs are sized before the draw). Four,
+ * at the display's rate, made every picture wait four frames.
+ */
+export const SETTLE_FRAMES = 1
 /** For an object that places others, once their payloads are in hand: ShardMesh resolves them again from the shared cache. */
 const PARTS_SETTLE_FRAMES = 12
 /** How long a composite object's parts get to arrive before it is drawn with what came (a placeholder for the rest). */
 const PARTS_WAIT_MS = 8000
+
+/** How long the canvas stays after the queue empties: a scroll that pauses does not make a new WebGL context. */
+export const IDLE_MS = 8000
+/** How long one picture may take before the stage is made again (a lost context draws nothing, ever). Past PARTS_WAIT_MS. */
+export const JOB_LIMIT_MS = 12000
 
 /** The camera's field of view, in degrees. */
 const FOV = 35
@@ -75,30 +88,40 @@ function Capture({ job }: { job: ThumbJob }): JSX.Element | null {
     return () => { live = false }
   }, [job.key, job.shard])
 
-  // A three-quarter view from above and to the right, far enough that the
-  // sphere around the object fits the frame with a little room, whatever its
-  // proportions.
-  useEffect(() => {
-    if (!frame) return
-    frames.current = 0
-    const d = framedDistance(frame.reach, FOV)
-    // The direction (0.62, 0.48, 0.62) normalized, times the distance.
-    const n = Math.hypot(0.62, 0.48, 0.62)
-    camera.position.set((d * 0.62) / n, (d * 0.48) / n, (d * 0.62) / n)
-    camera.lookAt(0, 0, 0)
-    camera.updateProjectionMatrix()
-  }, [frame, camera])
+  // The frame the camera was last placed for.
+  const placed = useRef<ThumbFrame | null>(null)
 
-  useFrame(() => {
+  // Priority 1: this canvas is drawn here and not by r3f, so the frame read
+  // back is the one just drawn, not the one before it. The camera is placed
+  // here too, before the draw: placed in an effect, it could still stand
+  // where the last picture had it when the first frame was drawn.
+  useFrame(({ scene }) => {
+    const t0 = import.meta.env.DEV ? performance.now() : 0
+    if (frame && placed.current !== frame) {
+      placed.current = frame
+      frames.current = 0
+      // A three-quarter view from above and to the right, far enough that the
+      // sphere around the object fits the frame with a little room, whatever
+      // its proportions: the direction (0.62, 0.48, 0.62) normalized, times
+      // the distance.
+      const d = framedDistance(frame.reach, FOV)
+      const n = Math.hypot(0.62, 0.48, 0.62)
+      camera.position.set((d * 0.62) / n, (d * 0.48) / n, (d * 0.62) / n)
+      camera.lookAt(0, 0, 0)
+      camera.updateProjectionMatrix()
+    }
+    gl.render(scene, camera)
     if (!frame) return
     frames.current += 1
     if (frames.current !== wait) return
     try {
-      useThumbs.getState().done(job.key, gl.domElement.toDataURL('image/png'))
+      const url = gl.domElement.toDataURL('image/png')
+      if (import.meta.env.DEV) measured(gl, job.key, performance.now() - t0)
+      useThumbs.getState().done(job.key, url)
     } catch {
       useThumbs.getState().fail(job.key)
     }
-  })
+  }, 1)
 
   if (!frame) return null
   return (
@@ -108,8 +131,30 @@ function Capture({ job }: { job: ThumbJob }): JSX.Element | null {
   )
 }
 
+/**
+ * In development only, for the browser smoke test: how long each picture took
+ * from the job reaching the stage to the image, the main thread spent on the
+ * frame that drew and read it, and what the renderer holds
+ * after it (window.__thumbs). Geometries and textures should come back to
+ * where they were: each picture's are let go when it unmounts.
+ */
+interface ThumbStats { started: Record<string, number>; ms: number[]; work: number[]; memory: Array<{ geometries: number; textures: number; programs: number }>; contexts: number }
+function stats(): ThumbStats {
+  const w = window as unknown as { __thumbs?: ThumbStats }
+  w.__thumbs ??= { started: {}, ms: [], work: [], memory: [], contexts: 0 }
+  return w.__thumbs
+}
+function measured(gl: { info: { memory: { geometries: number; textures: number }; programs: unknown[] | null } }, key: string, work: number): void {
+  const s = stats()
+  s.work.push(work)
+  const t0 = s.started[key]
+  if (t0 !== undefined) { s.ms.push(performance.now() - t0); delete s.started[key] }
+  s.memory.push({ geometries: gl.info.memory.geometries, textures: gl.info.memory.textures, programs: gl.info.programs?.length ?? 0 })
+}
+
 export function ThumbStage(): JSX.Element {
   const job = useThumbs((s) => s.queue[0] ?? null)
+  if (import.meta.env.DEV && job) stats().started[job.key] ??= performance.now()
   return (
     <div className="thumbstage" aria-hidden="true">
       <Canvas
@@ -119,7 +164,7 @@ export function ThumbStage(): JSX.Element {
         camera={{ fov: FOV, near: 0.01, far: 100000 }}
         style={{ width: THUMB_PX, height: THUMB_PX }}
         // One shard after another on the same canvas: compiled once (lib/keepPrograms).
-        onCreated={({ gl, scene }) => keepPrograms(gl, scene)}
+        onCreated={({ gl, scene }) => { keepPrograms(gl, scene); if (import.meta.env.DEV) stats().contexts++ }}
       >
         {/* Lit as on the bench, near the world's full color (shardLight.tsx; arkinox, 2026-10-12). */}
         <ShardLights />
@@ -127,4 +172,42 @@ export function ThumbStage(): JSX.Element {
       </Canvas>
     </div>
   )
+}
+
+/** Catches a canvas that cannot be made (no WebGL): every row shows its icon instead, for the session. */
+class StageBoundary extends Component<{ children: ReactNode }, { broken: boolean }> {
+  state = { broken: false }
+  static getDerivedStateFromError(): { broken: boolean } { return { broken: true } }
+  componentDidCatch(e: unknown): void {
+    console.warn('[onosendai] shard pictures: the drawing canvas could not be made', e)
+    useThumbs.getState().disable()
+  }
+  render(): ReactNode { return this.state.broken ? null : this.props.children }
+}
+
+/**
+ * The stage, mounted at the app's root (App.tsx): there while the queue has
+ * something in it and IDLE_MS after, so a list costs one WebGL context while
+ * its pictures are drawn and none once they are. A picture that takes longer
+ * than JOB_LIMIT_MS (a lost context never draws again) goes to the back of the
+ * queue, once (useThumbs stall), and the stage is made again.
+ */
+export function ThumbHost(): JSX.Element | null {
+  const busy = useThumbs((s) => s.queue.length > 0 && !s.disabled)
+  const head = useThumbs((s) => s.queue[0]?.key ?? null)
+  const [up, setUp] = useState(false)
+  const [made, setMade] = useState(0)
+  useEffect(() => {
+    if (busy) { setUp(true); return }
+    if (!up) return
+    const t = window.setTimeout(() => setUp(false), IDLE_MS)
+    return () => window.clearTimeout(t)
+  }, [busy, up])
+  useEffect(() => {
+    if (!head) return
+    const t = window.setTimeout(() => { useThumbs.getState().stall(head); setMade((n) => n + 1) }, JOB_LIMIT_MS)
+    return () => window.clearTimeout(t)
+  }, [head, made])
+  if (!up) return null
+  return <StageBoundary><ThumbStage key={made} /></StageBoundary>
 }

@@ -23,6 +23,7 @@ import { useBuilder } from '../store/useBuilder'
 import { useStash } from './stash'
 import { FeedList } from './FeedList'
 import { Explanation } from './Explanation'
+import { ShardThumb } from './ShardThumb'
 
 /** Where objects to place come from. */
 export type SourceId = 'mine' | 'feed'
@@ -94,6 +95,7 @@ function ModelsSource({ toFeed }: { toFeed: () => void }): JSX.Element {
           return (
             <li key={s.id}>
               <button className="objpick__row" disabled={empty} onClick={() => useStash.getState().deployModel(s.id)} title={empty ? 'Nothing in it to place yet' : `Place "${s.name}"`}>
+                <ShardThumb shard={s} />
                 <span className="objpick__name">{s.name}</span>
                 <span className="objpick__meta">{empty ? 'EMPTY' : `${s.vertices.length} v · ${s.faces.length} f${s.parts?.length ? ` · ${s.parts.length} obj` : ''}`}</span>
               </button>

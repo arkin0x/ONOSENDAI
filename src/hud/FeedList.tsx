@@ -6,8 +6,8 @@
  * Shared by the two places the feed is shown: the FEED tab of PLACE OBJECT,
  * where a tap lines the object up at the build cursor, and the SHARD FEED
  * window, where each tile carries DEPLOY AN INSTANCE and REMIX. The data is
- * useFeed's (sno-core's read); the pictures are useThumbs', drawn by the one
- * ThumbStage mounted here.
+ * useFeed's (sno-core's read); the pictures are ShardThumb's, as in every
+ * other list of shards.
  *
  * An object for sale (a listing) is a card of its own among them, newest
  * first with the rest: its preview picture, title, author, price, and
@@ -23,34 +23,13 @@ import { feedItems, isListing, type FeedListing, type FeedObject } from 'sno-cor
 import { domainShown, listingPictures, satsLabel } from '../lib/listing'
 import { useSellerLink } from '../hooks/useSellerLink'
 import { useFeed } from '../store/useFeed'
-import { useThumbs } from '../store/useThumbs'
 import { useProfile } from '../hooks/useProfile'
 import { profileLabel } from '../store/useProfiles'
-import { ThumbStage } from '../scene/ThumbStage'
+import { ShardThumb } from './ShardThumb'
 
-/**
- * A tile's picture, asked for once the tile is within 200 px of the list's
- * visible part. The list scrolls inside its own box, so that box is the
- * observer's root; against the page's viewport the margin did nothing.
- */
-function FeedThumb({ object, root }: { object: FeedObject; root: HTMLElement | null }): JSX.Element {
-  const url = useThumbs((s) => s.urls[object.id])
-  const box = useRef<HTMLDivElement>(null)
-  useEffect(() => {
-    if (url) return
-    const el = box.current
-    if (!el || typeof IntersectionObserver === 'undefined') { useThumbs.getState().request(object.id, object.shard); return }
-    const seen = new IntersectionObserver((entries) => {
-      if (entries.some((e) => e.isIntersecting)) { useThumbs.getState().request(object.id, object.shard); seen.disconnect() }
-    }, { root, rootMargin: '200px' })
-    seen.observe(el)
-    return () => seen.disconnect()
-  }, [url, object.id, object.shard, root])
-  return (
-    <div className="feed__thumb" ref={box}>
-      {url ? <img src={url} alt="" width={80} height={80} /> : <span className="feed__thumb-wait" aria-hidden="true" />}
-    </div>
-  )
+/** A tile's picture, at the size a listing's GIF is shown. */
+function FeedThumb({ object }: { object: FeedObject }): JSX.Element {
+  return <div className="feed__thumb"><ShardThumb shard={object.shard} size={80} /></div>
 }
 
 /** Who made it: their name from the profile cache, or their npub, shortened. */
@@ -59,11 +38,11 @@ function Author({ pubkey }: { pubkey: string }): JSX.Element {
   return <>{profileLabel(profile, nip19.npubEncode(pubkey))}</>
 }
 
-function Tile({ object, onPick, actions, root }: { object: FeedObject; onPick?: (o: FeedObject) => void; actions?: (o: FeedObject) => ReactNode; root: HTMLElement | null }): JSX.Element {
+function Tile({ object, onPick, actions }: { object: FeedObject; onPick?: (o: FeedObject) => void; actions?: (o: FeedObject) => ReactNode }): JSX.Element {
   const s = object.shard
   const body = (
     <>
-      <FeedThumb object={object} root={root} />
+      <FeedThumb object={object} />
       <span className="feed__text">
         <span className="feed__name">{s.name}</span>
         <span className="feed__by"><Author pubkey={object.pubkey} /></span>
@@ -156,11 +135,10 @@ export function FeedList({ onPick, actions }: { onPick?: (o: FeedObject) => void
 
   return (
     <div className="feed">
-      <ThumbStage />
       <ul className="feed__list" ref={setList}>
         {items.map((o) => isListing(o)
           ? <ListingTile key={o.address} listing={o} />
-          : <Tile key={o.address} object={o} onPick={onPick} actions={actions} root={list} />)}
+          : <Tile key={o.address} object={o} onPick={onPick} actions={actions} />)}
         <li className="feed__end" ref={end}>
           {loading || (items.length === 0 && !exhausted)
             ? 'Reading the relays…'

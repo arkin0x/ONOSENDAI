@@ -51,6 +51,7 @@ import { benchPose, nudgeFor, nudgeLabel, orbitBy, planeAfter, requestView, useB
 import { stackedSpots } from '../lib/weld'
 import { ObjectPicker } from './ObjectPicker'
 import { useEscape } from '../hooks/useEscape'
+import { ShardThumb } from '../hud/ShardThumb'
 
 const TOOLS: Tool[] = ['view', 'stamp', 'add', 'select', 'face']
 const TOOL_ICON: Record<Tool, LucideIcon> = { view: Eye, stamp: Stamp, add: Plus, select: MousePointer2, face: Triangle }
@@ -886,6 +887,7 @@ export function Workshop(): JSX.Element | null {
             {myAvatar && (
               <li className="workshop__list-avatar">
                 <span className="workshop__pick workshop__pick--static">
+                  <ShardThumb shard={myAvatar} />
                   <span className="workshop__pick-name">{myAvatar.name}</span>
                   <span className="workshop__pick-meta">{myAvatar.vertices.length} v · {myAvatar.faces.length} f · {myAvatar.mode}</span>
                 </span>
@@ -903,6 +905,7 @@ export function Workshop(): JSX.Element | null {
             {[...shards].sort((a, b) => (b.updatedAt ?? 0) - (a.updatedAt ?? 0)).map((s) => (
               <li key={s.id} className={s.id === shard.id ? 'is-current' : ''}>
                 <button className="workshop__pick" onClick={() => w().select(s.id)}>
+                  <ShardThumb shard={s} />
                   <span className="workshop__pick-name">{s.name}</span>
                   <span className="workshop__pick-meta">{s.vertices.length} v · {s.faces.length} f{s.parts?.length ? ` · ${s.parts.length} parts` : ''} · {s.mode}</span>
                 </button>

@@ -64,13 +64,25 @@ type WorkshopMod = typeof import('../useWorkshop')
 type StorageMod = typeof import('../workshopStorage')
 interface Tab { ws: WorkshopMod; st: StorageMod }
 
-/** A page load: the modules fresh, then the read before the app draws. */
-async function boot(): Promise<Tab> {
+/** Every tab a test opened, closed after it so none writes into the next test's database. */
+const openTabs: Tab[] = []
+/** A tab: the modules fresh, not yet loaded. */
+async function openTab(): Promise<Tab> {
   vi.resetModules()
   const ws = await import('../useWorkshop')
   const st = await import('../workshopStorage')
-  await ws.hydrateWorkshop()
-  return { ws, st }
+  const t = { ws, st }
+  openTabs.push(t)
+  return t
+}
+let lastTab: Tab | null = null
+/** A page load: the page before it gone (a reload closes it), the modules fresh, then the read before the app draws. */
+async function boot(): Promise<Tab> {
+  lastTab?.st.closeForTests()
+  const t = await openTab()
+  await t.ws.hydrateWorkshop()
+  lastTab = t
+  return t
 }
 
 /** A shard about `kb` KB as the workshop stores it. */
@@ -111,6 +123,8 @@ async function rawPut(rows: unknown[]): Promise<void> {
 }
 
 beforeEach(() => {
+  for (const t of openTabs.splice(0)) t.st.closeForTests()
+  lastTab = null
   ;(globalThis as { indexedDB: IDBFactory }).indexedDB = new IDBFactory()
   mem.clear()
   capOn = true
@@ -160,8 +174,7 @@ describe('the move from localStorage', () => {
     const raw = seedLocal(list)
     await boot()
     expect(mem.get(MOVED_KEY)).toBeTruthy()
-    vi.resetModules()
-    const ws = await import('../useWorkshop')
+    const { ws: ws } = await openTab()
     expect(ws.useWorkshop.getState().shards).toEqual([])
     await ws.hydrateWorkshop()
     expect(ws.useWorkshop.getState().shards.map((s) => s.id)).toEqual([list[0].id])
@@ -234,12 +247,8 @@ describe('the move from localStorage', () => {
   it('two tabs moving at once both end on the database, with every shard', async () => {
     const list = [bigShard('a', 4, 1), bigShard('b', 4, 2)]
     seedLocal(list)
-    vi.resetModules()
-    const a = await import('../useWorkshop')
-    const sa = await import('../workshopStorage')
-    vi.resetModules()
-    const b = await import('../useWorkshop')
-    const sb = await import('../workshopStorage')
+    const { ws: a, st: sa } = await openTab()
+    const { ws: b, st: sb } = await openTab()
     await Promise.all([a.hydrateWorkshop(), b.hydrateWorkshop()])
     expect(sa.storageMode()).toBe('indexeddb')
     expect(sb.storageMode()).toBe('indexeddb')
@@ -251,9 +260,7 @@ describe('the move from localStorage', () => {
     seedLocal(list)
     await boot()
     // The next load starts from nothing (the backup is not the library) until the database answers.
-    vi.resetModules()
-    const ws = await import('../useWorkshop')
-    const st = await import('../workshopStorage')
+    const { ws: ws, st: st } = await openTab()
     expect(st.storageMode()).toBe('pending')
     const early = ws.useWorkshop.getState().create('early')
     await ws.hydrateWorkshop()
@@ -330,8 +337,8 @@ describe('review fixes: never back onto localStorage after the move', () => {
       return { ...real, restoreInto: (...a: Parameters<typeof real.restoreInto>) => (full ? Promise.reject(new DOMException('full', 'QuotaExceededError')) : real.restoreInto(...a)) }
     })
     const { ws } = await boot()
-    await new Promise<void>((resolve) => { const r = indexedDB.deleteDatabase('onosendai:workshop'); r.onsuccess = () => resolve() })
     full = true
+    await new Promise<void>((resolve) => { const r = indexedDB.deleteDatabase('onosendai:workshop'); r.onsuccess = () => resolve() })
     ws.useWorkshop.getState().rename(list[0].id, 'edited')
     expect(await ws.useWorkshop.getState().saveNow()).toBe(false)
     expect(ws.useWorkshop.getState().storageError).toMatch(/full/)
@@ -345,24 +352,46 @@ describe('review fixes: never back onto localStorage after the move', () => {
     const a = bigShard('a', 4, 1)
     const b = bigShard('b', 4, 2)
     seedLocal([a, b])
-    vi.resetModules()
-    const one = await import('../useWorkshop')
+    const { ws: one } = await openTab()
     await one.hydrateWorkshop()
     const c = one.useWorkshop.getState().create('c, made after the move')
     one.useWorkshop.getState().rename(a.id, 'a edited')
     expect(await one.useWorkshop.getState().saveNow()).toBe(true)
     await new Promise<void>((resolve) => { const r = indexedDB.deleteDatabase('onosendai:workshop'); r.onsuccess = () => resolve() })
-    // A second tab loads: no mark, so the backup comes back and is marked.
-    vi.resetModules()
-    const two = await import('../useWorkshop')
+    // A second tab loads. Tab one puts its shards back as soon as the
+    // database is deleted; whichever lands first, nothing of tab one's is lost.
+    const { ws: two } = await openTab()
     await two.hydrateWorkshop()
-    expect(two.useWorkshop.getState().shards.map((s) => s.name)).toEqual(['a', 'b'])
     // The first tab saves next, with nothing new in hand: it is not "saved" until its work is back.
     expect(await one.useWorkshop.getState().saveNow()).toBe(true)
     const again = await boot()
     const names = again.ws.useWorkshop.getState().shards.map((s) => s.name).sort()
     expect(names).toEqual(['a edited', 'b', 'c, made after the move'])
     expect(again.ws.useWorkshop.getState().shards.some((s) => s.id === c)).toBe(true)
+  })
+
+  it('two tabs that read the same database both put their work back after it is cleared, even when one never heard the other', async () => {
+    const a = bigShard('a', 4, 1)
+    const b = bigShard('b', 4, 2)
+    seedLocal([a, b])
+    const realBC = globalThis.BroadcastChannel
+    const { ws: one } = await openTab()
+    await one.hydrateWorkshop()
+    // Tab three hears nothing from anyone: a missed broadcast.
+    ;(globalThis as { BroadcastChannel?: unknown }).BroadcastChannel = undefined
+    const { ws: three } = await openTab()
+    await three.hydrateWorkshop()
+    ;(globalThis as { BroadcastChannel?: unknown }).BroadcastChannel = realBC
+    const c = one.useWorkshop.getState().create('made in tab 1')
+    expect(await one.useWorkshop.getState().saveNow()).toBe(true)
+    expect(three.useWorkshop.getState().shards.some((s) => s.id === c)).toBe(false)
+    await new Promise<void>((resolve) => { const r = indexedDB.deleteDatabase('onosendai:workshop'); r.onsuccess = () => resolve() })
+    three.useWorkshop.getState().rename(a.id, 'a from tab 3')
+    expect(await three.useWorkshop.getState().saveNow()).toBe(true)
+    one.useWorkshop.getState().rename(b.id, 'b from tab 1')
+    expect(await one.useWorkshop.getState().saveNow()).toBe(true)
+    const again = await boot()
+    expect(again.ws.useWorkshop.getState().shards.map((s) => s.name).sort()).toEqual(['a from tab 3', 'b from tab 1', 'made in tab 1'])
   })
 
   it('a database cleared while no tab was open brings the backup back, and says so', async () => {
@@ -401,8 +430,11 @@ describe('review fixes: never back onto localStorage after the move', () => {
     const local = await boot()
     expect(local.st.storageMode()).toBe('local')
     vi.doUnmock('../../lib/workshopDb')
-    const moved = await boot()
-    expect(moved.st.storageMode()).toBe('indexeddb')
+    // A second tab, opened beside it (not a reload of it).
+    const movedTab = await openTab()
+    const movedStorage = movedTab.st
+    await movedTab.ws.hydrateWorkshop()
+    expect(movedStorage.storageMode()).toBe('indexeddb')
     await vi.waitFor(() => expect(local.st.storageMode()).toBe('unavailable'))
     const before = mem.get(LOCAL_KEY)
     local.ws.useWorkshop.getState().rename(list[0].id, 'from the old tab')
@@ -435,11 +467,9 @@ describe('review fixes: never back onto localStorage after the move', () => {
     const list = [bigShard('a', 4, 1)]
     seedLocal(list)
     await boot()
-    vi.resetModules()
-    const a = await import('../useWorkshop')
+    const { ws: a } = await openTab()
     await a.hydrateWorkshop()
-    vi.resetModules()
-    const b = await import('../useWorkshop')
+    const { ws: b } = await openTab()
     const loading = b.hydrateWorkshop()
     a.useWorkshop.getState().rename(list[0].id, 'renamed while B loads')
     expect(await a.useWorkshop.getState().saveNow()).toBe(true)
@@ -572,11 +602,9 @@ describe('two tabs', () => {
     const list = [bigShard('x', 4, 1), bigShard('y', 4, 2)]
     seedLocal(list)
     await boot()
-    vi.resetModules()
-    const a = await import('../useWorkshop')
+    const { ws: a } = await openTab()
     await a.hydrateWorkshop()
-    vi.resetModules()
-    const b = await import('../useWorkshop')
+    const { ws: b } = await openTab()
     await b.hydrateWorkshop()
     a.useWorkshop.getState().rename(list[0].id, 'x from A')
     b.useWorkshop.getState().rename(list[1].id, 'y from B')

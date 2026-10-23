@@ -257,8 +257,20 @@ async function database(): Promise<IDBDatabase> {
 function watch(d: IDBDatabase): void {
   // A newer build upgrading the database in another tab: step aside, and
   // open again on the next write. A connection the browser closed: the same.
-  d.onversionchange = () => { d.close(); if (db === d) db = null }
-  d.onclose = () => { if (db === d) db = null }
+  // Deleted (newVersion null) or closed by the browser: the database may be
+  // gone, so it is opened and checked at once, and this tab's shards put back
+  // if it was. Once per event, never on a timer. An upgrade by a newer build
+  // is left for the next write.
+  d.onversionchange = (ev) => {
+    d.close()
+    if (db === d) db = null
+    if (ev.newVersion === null) void recheck()
+  }
+  d.onclose = () => { if (db === d) { db = null; void recheck() } }
+}
+
+function recheck(): Promise<boolean> {
+  return mode === 'indexeddb' ? flush() : Promise.resolve(false)
 }
 
 /**
@@ -278,11 +290,17 @@ async function checkStillThere(d: IDBDatabase): Promise<boolean> {
   for (const [id, m] of pending) if (m === null) batch.set(id, null)
   const records = [...batch].filter(([, m]) => m).map(([id, m]) => recordOf(id, m!))
   const deletes = [...batch].filter(([, m]) => m === null).map(([id]) => id)
-  // The shards and, when there is none, the mark: one transaction.
-  gen = await restoreInto(d, records, deletes, { ...metaFor(readLocalRaw(), records.length), gen })
+  // The shards and, when there is none, the mark: one transaction. The mark
+  // is a fresh generation, so every other tab that read the cleared database
+  // puts its own shards back too. Its localStorage fingerprint matches
+  // nothing, so the next load checks localStorage for later shards again.
+  const res = await restoreInto(d, records, deletes, { ...metaFor(null, records.length), lsLength: -1 })
+  gen = res.gen
   for (const [id, m] of batch) if (pending.get(id) === m) pending.delete(id)
   reopened = false
   announce(records.map((r) => r.id), deletes)
+  // Where the database had a newer copy (another tab put it back first), this tab takes that one.
+  if (res.newer.length) await refresh(res.newer, [])
   return true
 }
 
@@ -604,4 +622,14 @@ async function decide(): Promise<ShardStorage> {
   } catch (e) {
     return withoutDatabase(e, moved || movedFlag())
   }
+}
+
+/** Tests only: this module as a tab that has been closed (its connection shut, nothing more written). */
+export function closeForTests(): void {
+  mode = 'unavailable'
+  const d = db
+  db = null
+  try { d?.close() } catch { /* already closed */ }
+  try { channel?.close() } catch { /* already closed */ }
+  channel = null
 }

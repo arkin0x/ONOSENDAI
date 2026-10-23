@@ -286,9 +286,12 @@ export function newGen(): string {
  * from the backup since): in ONE transaction, every shard it holds, each one
  * kept only where it is at least as new as what the database has, its own
  * deletes, and the mark when the database has none. The mark never lands
- * without the shards. Resolves with the generation the database carries now.
+ * without the shards. `mark` must carry a FRESH generation: another tab that
+ * read the cleared database must not take this one for it. Resolves with the
+ * generation the database carries now, and the ids it kept because its copy
+ * was newer than this tab's.
  */
-export function restoreInto(db: IDBDatabase, records: readonly ShardRecord[], deletes: readonly string[], mark: MigratedMeta): Promise<string> {
+export function restoreInto(db: IDBDatabase, records: readonly ShardRecord[], deletes: readonly string[], mark: MigratedMeta): Promise<{ gen: string; newer: string[] }> {
   return new Promise((resolve, reject) => {
     let tx: IDBTransaction
     try { tx = db.transaction([SHARDS_STORE, TOMBSTONES_STORE, META_STORE], 'readwrite', STRICT) } catch (e) { reject(e); return }
@@ -296,6 +299,7 @@ export function restoreInto(db: IDBDatabase, records: readonly ShardRecord[], de
     const tombs = tx.objectStore(TOMBSTONES_STORE)
     const metas = tx.objectStore(META_STORE)
     let gen = mark.gen
+    const newer: string[] = []
     const all = shards.getAll()
     const had = metas.get(MIGRATED_KEY)
     had.onsuccess = () => {
@@ -303,7 +307,7 @@ export function restoreInto(db: IDBDatabase, records: readonly ShardRecord[], de
       for (const r of all.result as unknown[]) if (isRecord(r)) have.set(r.id, r)
       for (const r of records) {
         const h = have.get(r.id)
-        if (h && h.updatedAt > r.updatedAt) continue
+        if (h && h.updatedAt > r.updatedAt) { newer.push(r.id); continue }
         // Its place stays where the database has it.
         shards.put(h ? { ...r, seq: h.seq } : r)
         tombs.delete(r.id)
@@ -314,7 +318,7 @@ export function restoreInto(db: IDBDatabase, records: readonly ShardRecord[], de
       if (v && typeof v.at === 'number' && typeof v.gen === 'string') gen = v.gen
       else metas.put({ key: MIGRATED_KEY, value: mark })
     }
-    tx.oncomplete = () => resolve(gen)
+    tx.oncomplete = () => resolve({ gen, newer })
     tx.onerror = () => reject(tx.error ?? new Error('IndexedDB write failed'))
     tx.onabort = () => reject(tx.error ?? new Error('IndexedDB write aborted'))
   })

@@ -71,7 +71,7 @@ export function ViewPanel(): JSX.Element {
     {
       id: 'view-walk-look',
       title: 'Look sphere in WALK',
-      hint: 'A ball in the bottom left to drag and look around.',
+      hint: 'A ball above the menu button to drag and look around.',
       on: walkLookSphere,
       set: (v) => useLayers.getState().setLayer('walkLookSphere', v),
     },

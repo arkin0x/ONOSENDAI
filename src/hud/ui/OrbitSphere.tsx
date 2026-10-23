@@ -49,6 +49,9 @@ export function OrbitSphere({ onTurn, onTap, label, title, ariaLabel, className 
     last.current = null
     if (!moved.current) onTap?.()
   }
+  // Capture lost with no release (the ball hidden mid-drag under a modal):
+  // the drag ends there, and it was no tap.
+  const lost = (): void => { last.current = null }
   return (
     <button
       className={className ? `benchorb ${className}` : 'benchorb'}
@@ -59,6 +62,7 @@ export function OrbitSphere({ onTurn, onTap, label, title, ariaLabel, className 
       onPointerMove={move}
       onPointerUp={up}
       onPointerCancel={up}
+      onLostPointerCapture={lost}
     >
       <span className="benchorb__sub">{label}</span>
     </button>

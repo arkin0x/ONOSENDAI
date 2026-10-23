@@ -88,7 +88,7 @@ const ROWS: Array<[string, string, string]> = [
   ['view-terrain-dots', 'Terrain dots', 'Terrain difficulty: warmer dots cost more work to hop to.'],
   ['view-hx-boxes', '<span class="view__hx">h</span>X boxes', 'The math barriers where moving costs increase.'],
   ['view-walk-avatar', 'Hide avatar in WALK', 'Walk without your own avatar around the camera.'],
-  ['view-walk-look', 'Look sphere in WALK', 'A ball in the bottom left to drag and look around.'],
+  ['view-walk-look', 'Look sphere in WALK', 'A ball above the menu button to drag and look around.'],
   ['view-chain-trail', 'Chain trail', 'The red line of your movement history.'],
   ['view-region-keys', 'Region keys', 'Green cages on the regions you hold keys for.'],
 ]

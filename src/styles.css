@@ -8768,6 +8768,43 @@ button.feed__pick:hover .feed__name { color: var(--accent); }
   animation: feed-spin 0.9s linear infinite;
 }
 @keyframes feed-spin { to { transform: rotate(360deg); } }
+/* A shard's picture in a row (ShardThumb), wherever shards are listed. */
+.shardthumb {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 4px;
+  background: rgba(0, 0, 0, 0.35);
+  overflow: hidden;
+  color: var(--accent);
+}
+.shardthumb img { width: 100%; height: 100%; display: block; object-fit: contain; }
+.shardthumb__wait {
+  width: 40%;
+  height: 40%;
+  border-radius: 3px;
+  background: rgba(0, 229, 255, 0.12);
+  animation: shardthumb-wait 1.4s ease-in-out infinite;
+}
+@keyframes shardthumb-wait { 50% { opacity: 0.35; } }
+@media (prefers-reduced-motion: reduce) { .shardthumb__wait { animation: none; } }
+/* A row that stacks a name over a line of facts takes its picture to the left of both. */
+.workshop__pick:has(> .shardthumb),
+.shards__goto:has(> .shardthumb) {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  column-gap: 8px;
+  row-gap: 2px;
+  align-items: center;
+  justify-items: start;
+}
+.workshop__pick > .shardthumb,
+.shards__goto > .shardthumb { grid-row: span 2; }
+.workshop__pick:has(> .shardthumb) { padding: 5px 4px; }
+/* PLACE OBJECT's MINE: picture, name, then the facts at the right. */
+.objpick__row:has(> .shardthumb) { align-items: center; padding: 6px 10px 6px 6px; }
+.objpick__row > .shardthumb + .objpick__name { flex: 1; min-width: 0; }
 .feed__text {
   display: flex;
   flex-direction: column;
@@ -9505,41 +9542,3 @@ html.tv-broadcast body { overflow: hidden; }
 .itemmodel__side .chest__act { align-self: flex-start; margin-top: 4px; }
 .itemmodel__name { font-size: 11px; letter-spacing: 0.06em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .itemmodel__pick .feed__list { max-height: 40vh; max-height: 40dvh; }
-
-/* A shard's picture in a row (ShardThumb), wherever shards are listed. */
-.shardthumb {
-  flex: none;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  border-radius: 4px;
-  background: rgba(0, 0, 0, 0.35);
-  overflow: hidden;
-  color: var(--accent);
-}
-.shardthumb img { width: 100%; height: 100%; display: block; object-fit: contain; }
-.shardthumb__wait {
-  width: 40%;
-  height: 40%;
-  border-radius: 3px;
-  background: rgba(0, 229, 255, 0.12);
-  animation: shardthumb-wait 1.4s ease-in-out infinite;
-}
-@keyframes shardthumb-wait { 50% { opacity: 0.35; } }
-@media (prefers-reduced-motion: reduce) { .shardthumb__wait { animation: none; } }
-/* A row that stacks a name over a line of facts takes its picture to the left of both. */
-.workshop__pick:has(> .shardthumb),
-.shards__goto:has(> .shardthumb) {
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr);
-  column-gap: 8px;
-  row-gap: 2px;
-  align-items: center;
-  justify-items: start;
-}
-.workshop__pick > .shardthumb,
-.shards__goto > .shardthumb { grid-row: span 2; }
-.workshop__pick:has(> .shardthumb) { padding: 5px 4px; }
-/* PLACE OBJECT's MINE: picture, name, then the facts at the right. */
-.objpick__row:has(> .shardthumb) { align-items: center; padding: 6px 10px 6px 6px; }
-.objpick__row > .shardthumb + .objpick__name { flex: 1; min-width: 0; }

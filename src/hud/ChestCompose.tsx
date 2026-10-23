@@ -33,6 +33,7 @@ import { Explanation } from './Explanation'
 import { ItemFeedPicker } from './ItemFeedPicker'
 import { lockFromListing } from '../lib/itemListing'
 import { ItemIcon } from './ItemIcon'
+import { ShardFolders, modelName, modelRef } from './ShardFolders'
 import { nip19 } from 'nostr-tools'
 import { forgeKey, isLockPubkey, NIP44_MAX_PLAINTEXT, sizeRefusal, templateBytes } from '../lib/chests'
 import { attributed } from '../lib/client'
@@ -86,6 +87,8 @@ export function ChestCompose({ onDone }: { onDone: () => void }): JSX.Element {
   const items = useInventory((s) => s.items)
   const keys = useMemo(() => Object.values(items).filter((it) => it.type === 'key' && it.key).sort((a, b) => b.at - a.at), [items])
   const models = useWorkshop((s) => s.shards)
+  // + SHARD's list: last edited first, as the workshop's (Workshop.tsx).
+  const byEdited = useMemo(() => [...models].sort((a, b) => (b.updatedAt ?? 0) - (a.updatedAt ?? 0)), [models])
   const shardName = (id: string): string => models.find((s) => s.id === id)?.name ?? 'model'
 
   const [name, setName] = useState(draft?.name ?? '')
@@ -106,7 +109,6 @@ export function ChestCompose({ onDone }: { onDone: () => void }): JSX.Element {
   // What is being added: one editor open at a time.
   const [adding, setAdding] = useState<'message' | 'shard' | 'key' | null>(null)
   const [text, setText] = useState('')
-  const [shardId, setShardId] = useState(models[0]?.id ?? '')
   const [keyName, setKeyName] = useState('')
 
   const heldLock = keys.find((k) => k.id === lockKeyId)
@@ -228,13 +230,23 @@ export function ChestCompose({ onDone }: { onDone: () => void }): JSX.Element {
           </div>
         </>
       ) : adding === 'shard' ? (
-        <div className="compose__row">
-          <select className="avatars__input compose__select" value={shardId} onChange={(e) => setShardId(e.target.value)} aria-label="Model to seal">
-            {models.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
-          </select>
-          <button className="chest__act" onClick={() => setAdding(null)}>CANCEL</button>
-          <button className="chest__act" disabled={!shardId} onClick={() => add({ kind: 'shard', shardId })}>ADD</button>
-        </div>
+        <>
+          {/* Your models in their folders, as every list of them is (hud/ShardFolders); a tap adds one. */}
+          <ul className="objpick__list compose__models" aria-label="Model to seal">
+            <ShardFolders items={byEdited} refOf={modelRef} nameOf={modelName} row={(s, f) => (
+              <li key={s.id} {...f.drag}>
+                <button className="objpick__row" onClick={() => add({ kind: 'shard', shardId: s.id })} title={`Seal "${s.name}" in the chest`}>
+                  <span className="objpick__name">{s.name}</span>
+                  <span className="objpick__meta">{s.vertices.length} v · {s.faces.length} f{s.parts?.length ? ` · ${s.parts.length} obj` : ''}</span>
+                </button>
+                {f.tool}
+              </li>
+            )} />
+          </ul>
+          <div className="compose__row">
+            <button className="chest__act" onClick={() => setAdding(null)}>CANCEL</button>
+          </div>
+        </>
       ) : (
         <div className="compose__row">
           <input className="avatars__input" value={keyName} onChange={(e) => setKeyName(e.target.value.slice(0, MAX_ITEM_NAME))} placeholder="Name the item inside" maxLength={MAX_ITEM_NAME} autoFocus aria-label="Item to seal" />

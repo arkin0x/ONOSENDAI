@@ -4,6 +4,8 @@
  * before the shards at the top; a shard filed in a folder that is gone is
  * drawn at the top; a folded folder hides its rows but still counts them.
  */
+import { readdirSync, readFileSync, statSync } from 'node:fs'
+import { join } from 'node:path'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { EMPTY_TREE, applyOps } from '../../lib/shardFolders'
@@ -72,3 +74,28 @@ describe('a shard list with folders', () => {
     expect(render()).not.toContain('\u2014')
   })
 })
+
+/** Every .tsx under src, tests left out. */
+function sources(dir: string): string[] {
+  return readdirSync(dir).flatMap((f) => {
+    const p = join(dir, f)
+    if (statSync(p).isDirectory()) return f === '__tests__' ? [] : sources(p)
+    return p.endsWith('.tsx') ? [p] : []
+  })
+}
+
+describe('every list of your shards', () => {
+  // arkinox, 2026-10-23: "the folders need to be available anywhere a list of our shards is shown."
+  it('draws through ShardFolders wherever a component reads the workshop\'s models', () => {
+    const readers = sources(join(__dirname, '..', '..')).filter((p) => /useWorkshop\(\(s\) => s\.shards\)/.test(readFileSync(p, 'utf8')))
+    expect(readers.length).toBeGreaterThanOrEqual(3)
+    for (const p of readers) expect([p, readFileSync(p, 'utf8').includes('<ShardFolders')]).toEqual([p, true])
+  })
+
+  it('has no native select of models left', () => {
+    for (const p of sources(join(__dirname, '..', '..'))) {
+      expect([p, /models\.map\(\(s\) => <option/.test(readFileSync(p, 'utf8'))]).toEqual([p, false])
+    }
+  })
+})
+

@@ -99,17 +99,34 @@ function countOf(v: string | undefined): number | undefined {
 const LOCAL_HTTP = (() => { try { return import.meta.env?.DEV === true } catch { return false } })()
 
 /**
- * Whether a URL may be fetched for a file (DECK-0007 §2.3): https (http to
- * this machine only while developing), and, given the file's hash, a last
- * path segment that is that hash, optionally with an extension, as a Blossom
- * URL is (BUD-01). So a found item can only ever make a finder fetch a blob
- * by its hash, never an arbitrary endpoint.
+ * A host a found item may never point a finder at: an IP literal (v4 or v6,
+ * which covers loopback, private and link-local addresses alike: a Blossom
+ * server has a name), `localhost`, a name with no dot, or a name under
+ * `.local`, `.localhost`, `.internal`, `.lan` or `.home.arpa`.
+ */
+function privateHost(hostname: string): boolean {
+  const h = hostname.toLowerCase().replace(/\.$/, '')
+  if (h.startsWith('[') || h.includes(':')) return true
+  if (/^\d+(\.\d+){0,3}$/.test(h) || /^0x[0-9a-f]+$/.test(h)) return true
+  if (!h.includes('.') || h === 'localhost') return true
+  return /\.(local|localhost|internal|lan|home\.arpa)$/.test(h)
+}
+
+/**
+ * Whether a URL may be fetched for a file (DECK-0007 §2.3): https to a
+ * public host name, with no user, query or fragment, and, given the file's
+ * hash, a last path segment that is that hash, optionally with an extension,
+ * as a Blossom URL is (BUD-01). So the item itself can only name a blob by
+ * its hash on a public server, never an endpoint with arguments or a machine
+ * on the finder's own network. (The server it names can still redirect;
+ * DECK-0007 §7.) http to this machine is allowed only while developing.
  */
 export function fetchableUrl(url: string, hash?: string): boolean {
   try {
     const u = new URL(url)
-    const local = u.hostname === 'localhost' || /^127\.\d+\.\d+\.\d+$/.test(u.hostname)
-    if (!(u.protocol === 'https:' || (LOCAL_HTTP && u.protocol === 'http:' && local))) return false
+    const localDev = LOCAL_HTTP && u.protocol === 'http:' && (u.hostname === 'localhost' || /^127\.\d+\.\d+\.\d+$/.test(u.hostname))
+    if (!localDev && (u.protocol !== 'https:' || privateHost(u.hostname))) return false
+    if (u.search !== '' || u.hash !== '' || u.username !== '' || u.password !== '' || /[?#]/.test(url)) return false
     if (hash === undefined) return true
     const last = u.pathname.split('/').pop() ?? ''
     return last.toLowerCase() === hash || (last.toLowerCase().startsWith(`${hash}.`) && /^[a-z0-9]{1,8}$/i.test(last.slice(hash.length + 1)))
@@ -194,7 +211,7 @@ export function audioExtension(mime: string): string {
 
 /** A safe file name for a download: the title, then the extension its type has. */
 export function audioFileName(a: Pick<AudioItem, 'title' | 'mime'>): string {
-  const base = a.title.replace(/[\\/:*?"<>|\u0000-\u001f‎‏‪-‮⁦-⁩]+/g, ' ').trim().replace(/\s+/g, ' ').slice(0, MAX_AUDIO_TITLE) || 'audio'
+  const base = a.title.replace(/[\\/:*?"<>|\u0000-\u001f\u200e\u200f\u202a-\u202e\u2066-\u2069]+/g, ' ').trim().replace(/\s+/g, ' ').slice(0, MAX_AUDIO_TITLE) || 'audio'
   return `${base}.${audioExtension(a.mime)}`
 }
 

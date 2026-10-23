@@ -39,6 +39,7 @@ import { useShards } from '../store/useShards'
 import { useWorkshop } from '../store/useWorkshop'
 import { MessageText } from './CashuCard'
 import { AudioCard } from './AudioCard'
+import { itemLineage } from '../lib/hidden'
 import { Explanation } from './Explanation'
 import { ChestBlock, Unsigned } from './ItemRows'
 import { useCashu, cashuStateLabel } from './useCashu'
@@ -228,7 +229,7 @@ function TakenRow({ item }: { item: HeldItem }): JSX.Element {
       </span>
       {open && item.type === 'audio' && item.audio && (
         <div className="held__details">
-          <AudioCard id={`held:${item.id}`} triggerId={item.id} audio={item.audio} />
+          <AudioCard id={`held:${item.id}`} triggerId={itemLineage(item.event) ?? item.id} audio={item.audio} />
         </div>
       )}
       {open && item.type === 'message' && (

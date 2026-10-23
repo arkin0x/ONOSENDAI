@@ -165,8 +165,10 @@ export function openAudio(a: Pick<AudioItem, 'url' | 'hash' | 'originalHash' | '
       throw new AudioFetchError('The file’s server could not be reached.')
     }
     if (!res.ok) throw new AudioFetchError(`The file’s server answered HTTP ${res.status}.`)
-    // Never more than the largest file this client hides, or the size the item says when it says one.
-    const cipher = await readCapped(res, a.size ? Math.min(a.size, MAX_CIPHER_BYTES) : MAX_CIPHER_BYTES)
+    // Never more than the largest file this client hides, nor more than the
+    // size the item says (with room for the tag, for a writer that gave the
+    // file's own size).
+    const cipher = await readCapped(res, a.size ? Math.min(a.size + 16, MAX_CIPHER_BYTES) : MAX_CIPHER_BYTES)
     if (sha256Hex(cipher) !== a.hash) throw new AudioFetchError('The server sent other bytes than the ones hidden here.')
     const plain = await decryptAudioFile(cipher, a.keyHex, a.nonceHex)
     if (!plain) throw new AudioFetchError('The file does not open with the key hidden here.')

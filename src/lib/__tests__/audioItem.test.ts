@@ -93,7 +93,12 @@ describe('the item, read (DECK-0007 §2.2)', () => {
     expect(audioItemOf(replaced('url', 'javascript:alert(1)'))).toBeNull()
     // Only a blob by its hash: never another endpoint on the server, or on the finder's network.
     expect(audioItemOf(replaced('url', 'https://blossom.test/admin/delete?all=1'))).toBeNull()
-    expect(audioItemOf(replaced('url', 'https://192.168.1.1/' + 'cd'.repeat(32)))).toBeNull()
+    for (const host of ['192.168.1.1', '10.0.0.1', '127.0.0.1', '[::1]', '[fe80::1]', '2130706433', 'router.local', 'printer', 'nas.lan', 'box.internal', 'localhost']) {
+      expect(audioItemOf(replaced('url', `https://${host}/${item.hash}`)), host).toBeNull()
+    }
+    for (const tail of ['?cmd=reboot', '#f', '?']) expect(audioItemOf(replaced('url', `${item.url}${tail}`)), tail).toBeNull()
+    expect(audioItemOf(replaced('url', `https://user:pw@blossom.test/${item.hash}`))).toBeNull()
+    expect(audioItemOf(replaced('url', `https://blossom.test/${item.hash}`))).not.toBeNull()
     expect(audioItemOf(replaced('url', `https://cdn.test/media/${item.hash}.mp3`))?.url).toBe(`https://cdn.test/media/${item.hash}.mp3`)
     expect(audioItemOf(replaced('url', `https://cdn.test/${item.hash}.toolongextension`))).toBeNull()
     expect(audioItemOf({ ...base, tags: 'nope' as unknown as string[][] })).toBeNull()
@@ -151,7 +156,7 @@ describe('the file (DECK-0007 §2.1)', () => {
     expect(audioFileName({ title: '', mime: 'audio/x-unknown' })).toBe('audio.audio')
     expect(audioFileName({ title: 'water', mime: 'audio/ogg; codecs=opus' })).toBe('water.ogg')
     // Bidirectional controls cannot dress a file up as another type.
-    expect(audioFileName({ title: 'song‮exe.', mime: 'audio/mpeg' })).toBe('song exe..mp3')
+    expect(audioFileName({ title: 'song\u202eexe.', mime: 'audio/mpeg' })).toBe('song exe..mp3')
     expect(titleFromFileName('temple_drone  02.mp3')).toBe('temple drone 02')
   })
 })

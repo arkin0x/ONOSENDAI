@@ -41,6 +41,8 @@ export type WallItem = Pick<WorldItem, 'key' | 'at' | 'height' | 'plane'> & { sh
 
 interface Entry {
   shard: ShardModel
+  /** When its parts were resolved with one unreachable: tried again after RETRY_MS. */
+  missingAt: number | null
   /** Where it was built for: a pose standing on the Earth depends on the place. */
   where: string
   mesh: WallMesh
@@ -71,23 +73,37 @@ function reachOf(mesh: WallMesh, unit: number): Entry['reach'] {
 function build(w: WallItem, placed: readonly Placed[]): Entry {
   const pose = placedPose(WALL_AXES, w.shard.up && w.plane === 0 ? { at: w.at, spin: w.shard.spin } : undefined)
   const mesh = wallMesh(w.shard, placed, pose)
-  return { shard: w.shard, where: whereOf(w), mesh, clip: regionBox(w.at, w.height, w.shard.unit, WALL_AXES), reach: reachOf(mesh, w.shard.unit) }
+  const missingAt = placed.some(function gone(p): boolean { return p.missing === 'unreachable' || p.children.some(gone) }) ? Date.now() : null
+  return { shard: w.shard, missingAt, where: whereOf(w), mesh, clip: regionBox(w.at, w.height, w.shard.unit, WALL_AXES), reach: reachOf(mesh, w.shard.unit) }
 }
 
 /** The walls of one placed shard, built now or kept from before; its parts follow when they resolve. */
 export function entryFor(w: WallItem): Entry {
   const held = entries.get(w.key)
-  if (held && held.shard === w.shard && held.where === whereOf(w)) return held
+  // A part a relay did not answer is asked for again after a while (lib/parts.ts does not keep a miss).
+  const stale = held?.missingAt != null && Date.now() - held.missingAt > RETRY_MS
+  if (held && held.shard === w.shard && held.where === whereOf(w) && !stale) return held
+  if (held && stale) { held.missingAt = null; resolveInto(w, held); return held }
   const e = build(w, [])
   entries.set(w.key, e)
-  // Its parts can stop a walk whatever its own setting says (each object
-  // keeps its own, §1.10), so they are resolved for every shard that has any.
-  if (w.shard.parts?.length) {
-    void resolveParts(w.shard, fetchRef).then((placed) => {
-      if (entries.get(w.key) === e) entries.set(w.key, build(w, placed))
-    }, () => { /* unreachable parts stop nothing */ })
-  }
+  resolveInto(w, e)
   return e
+}
+
+/** How long a part no relay answered stays a placeholder before it is asked for again. */
+const RETRY_MS = 30_000
+
+/**
+ * Resolve the objects `w` places and rebuild its walls with them, unless the
+ * entry has been replaced meanwhile. Its parts can stop a walk whatever its
+ * own setting says (each object keeps its own, §1.10), so they are resolved
+ * for every shard that has any.
+ */
+function resolveInto(w: WallItem, e: Entry): void {
+  if (!w.shard.parts?.length) return
+  void resolveParts(w.shard, fetchRef).then((placed) => {
+    if (entries.get(w.key) === e) entries.set(w.key, build(w, placed))
+  }, () => { /* unreachable parts stop nothing */ })
 }
 
 /**
@@ -116,6 +132,22 @@ export interface WallStop {
 const ON_FACE = 1e-6
 
 /**
+ * How far off, in gibsons, a measured distance to a face may be. A double
+ * holds 53 bits, so once a shard's reach passes 2^53 gibsons (a monument at a
+ * coarse unit) the measure is out by a gibson or more. Any step that gets past
+ * the box test is within the shard's reach plus the step's length of its
+ * origin, so 2^-48 of that sum leaves more than ten times the error (review
+ * of #461). The box is widened by it, a step stops at least this far short of
+ * a face, and a step that would end within it of a face meets the face, so no
+ * press ever starts too near a face to tell which side of it the walker is on.
+ */
+function tolerance(e: Entry, g: number, length: bigint): number {
+  const m = e.mesh
+  const reach = m.min && m.max ? Math.max(...m.min.map(Math.abs), ...m.max.map(Math.abs)) * g : 0
+  return Math.max(ON_FACE, (reach + Number(length)) * 2 ** -48)
+}
+
+/**
  * How far a WALK step from `from`, `length` gibsons along `axis` in direction
  * `dir`, may go among `items` before it would cross a blocking face. Stopped,
  * it lands on the last whole gibson short of the face, never on it; a face
@@ -124,32 +156,38 @@ const ON_FACE = 1e-6
 export function stepLimit(from: Position, axis: AxisName, dir: 1 | -1, length: bigint, items: readonly WallItem[]): WallStop {
   const keep = new Set<string>()
   let best: number | null = null
+  let bestTol = ON_FACE
   let by: WallItem | null = null
   const i = axis === 'x' ? 0 : axis === 'y' ? 1 : 2
   for (const w of items) {
     keep.add(w.key)
     const e = entryFor(w)
     if (!e.reach) continue
-    // Exact first: the step against the walls' box, in bigint gibsons.
+    // Exact first: the step against the walls' box, in bigint gibsons,
+    // widened by what the float test below may be off by.
+    const g = 2 ** w.shard.unit
+    const tol = tolerance(e, g, length)
+    const pad = BigInt(Math.ceil(tol))
+    const lo = e.reach.lo, hi = e.reach.hi
     const off = { x: from.x - w.at.x, y: from.y - w.at.y, z: from.z - w.at.z }
     const others = (['x', 'y', 'z'] as const).filter((a) => a !== axis)
-    if (others.some((a) => off[a] < e.reach!.lo[a] || off[a] > e.reach!.hi[a])) continue
-    const a0 = off[axis], a1 = off[axis] + BigInt(dir) * length
-    if ((a0 < e.reach.lo[axis] && a1 < e.reach.lo[axis]) || (a0 > e.reach.hi[axis] && a1 > e.reach.hi[axis])) continue
+    if (others.some((a) => off[a] < lo[a] - pad || off[a] > hi[a] + pad)) continue
+    const a0 = off[axis], a1 = off[axis] + BigInt(dir) * (length + pad)
+    if ((a0 < lo[axis] - pad && a1 < lo[axis] - pad) || (a0 > hi[axis] + pad && a1 > hi[axis] + pad)) continue
     // Then the triangles, in the shard's own model units from its origin.
-    const g = 2 ** w.shard.unit
     const o: [number, number, number] = [Number(off.x) / g, Number(off.y) / g, -Number(off.z) / g]
     const s = (i === 2 ? -dir : dir) as 1 | -1
     const minT = ON_FACE / g
-    const t = firstHit(e.mesh, o, i, s, Number(length) / g + minT, minT, e.clip)
+    // A step that would end within `tol` of a face meets it (tolerance).
+    const t = firstHit(e.mesh, o, i, s, (Number(length) + tol) / g, minT, e.clip)
     if (t === null) continue
     const gib = t * g
-    if (best === null || gib < best) { best = gib; by = w }
+    if (best === null || gib < best) { best = gib; bestTol = tol; by = w }
   }
   for (const k of entries.keys()) if (!keep.has(k)) entries.delete(k)
   if (best === null) return { reach: length, by: null }
-  // The last whole gibson strictly short of the face.
-  const k = Math.max(0, Math.ceil(best - ON_FACE) - 1)
+  // The last whole gibson strictly short of the face, by the measure's error at least.
+  const k = Math.max(0, Math.ceil(best - bestTol) - 1)
   const reach = BigInt(k) < length ? BigInt(k) : length
   return { reach, by }
 }

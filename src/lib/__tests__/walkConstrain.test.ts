@@ -5,7 +5,7 @@
  * makes walls, and the straight-ray test against them.
  */
 import { describe, expect, it } from 'vitest'
-import { fromPayload, newShard, normalizeStored, toPayload, type ShardModel } from 'sno-core/shards'
+import { PAYLOAD_FIELDS, fromPayload, newShard, normalizeStored, toPayload, type ShardModel } from 'sno-core/shards'
 import type { Placed } from 'sno-core/parts'
 import { blocks, constrainOf, firstHit, readConstrain, seeThrough, wallMesh, withConstrain, type Constrain } from '../walkConstrain'
 
@@ -31,6 +31,14 @@ describe('the field', () => {
     expect(readConstrain('all')).toBe('all')
     expect(readConstrain('opaque')).toBe('opaque')
     for (const v of [undefined, null, 'off', 'ALL', 'Opaque', ' all', 1, true, [], {}, 'solid']) expect(readConstrain(v)).toBe('off')
+  })
+
+  it('is a field sno-core does not know yet: the day it learns it, this fails and the writer here must follow', () => {
+    // A sno-core that knows `constrain` lifts it out of `extra` (liftKnown) and
+    // stops writing it from there, so withConstrain would silently write nothing.
+    expect(PAYLOAD_FIELDS as readonly string[]).not.toContain('constrain')
+    // The reader is ready either way: a top-level field is read first.
+    expect(constrainOf({ ...newShard('W'), constrain: 'all' } as ShardModel)).toBe('all')
   })
 
   it('writes off as no field at all, and keeps the other carried fields', () => {
@@ -127,6 +135,22 @@ describe('the ray', () => {
   it('a region clip lets a ray through where the shard is not drawn', () => {
     const clip = { min: [-10, -10, -10] as [number, number, number], max: [2, 10, 10] as [number, number, number] }
     expect(firstHit(mesh, [0, 0, 0], 0, 1, 10, 1e-6, clip)).toBeNull()
+  })
+})
+
+describe('a part far finer than its parent', () => {
+  it('is still a wall: the edge-on test is relative to the triangle', () => {
+    // A two-tick square at x = 3 ticks, placed in a parent 2^26 times coarser.
+    const tiny = wallMesh({ ...newShard('Fine'), mode: 'solid', vertices: [], faces: [], unit: 26 }, [{
+      part: { ref: 0, at: [0, 0, 0], turn: [0, 0, 0], step: 0 },
+      ref: ['a', `33331:${'a'.repeat(64)}:fine`],
+      model: withConstrain({ ...newShard('T'), unit: 0, mode: 'solid', vertices: [{ p: [0, 0, 0], t: [3, 0, 0], c: [1, 1, 1] }, { p: [0, 0, 0], t: [3, 2, 0], c: [1, 1, 1] }, { p: [0, 0, 0], t: [3, 2, 2], c: [1, 1, 1] }], faces: [[0, 1, 2]] }, 'all'),
+      children: [],
+    }])
+    const s = 2 ** -26
+    const hit = firstHit(tiny, [0, 1.5 / 120 * s, -0.5 / 120 * s], 0, 1, s, 1e-6 * s)
+    expect(hit).not.toBeNull()
+    expect(hit! / s).toBeCloseTo(3 / 120, 9)
   })
 })
 

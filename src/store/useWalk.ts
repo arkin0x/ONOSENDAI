@@ -191,7 +191,9 @@ export const useWalk = create<WalkState>((set, get) => ({
     // the step stops on the last gibson short of its face, or does not go.
     const length = sign > 0 ? next[dir.axis] - from[dir.axis] : from[dir.axis] - next[dir.axis]
     const wall = stepLimit(from, dir.axis, sign, length, wallItems(cs.plane))
-    if (wall.by) useToast.getState().show({ label: 'WALL', meta: wall.by.shard.name, mark: 'walk', ms: BRIEF_TOAST_MS })
+    // One chip per wall: a held key's repeats do not churn the one toast slot.
+    const shown = useToast.getState().toast
+    if (wall.by && !(shown?.label === 'WALL' && shown.meta === wall.by.shard.name)) useToast.getState().show({ label: 'WALL', meta: wall.by.shard.name, mark: 'walk', ms: BRIEF_TOAST_MS })
     if (wall.reach === 0n) return
     next[dir.axis] = from[dir.axis] + wall.reach * BigInt(sign)
     if (open && open.axis === dir.axis && open.dir === sign && segmentAffordable(open.from, next, cs.plane)) {

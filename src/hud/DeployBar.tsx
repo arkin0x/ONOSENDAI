@@ -410,6 +410,7 @@ export function DeployBar({ pad = false }: { pad?: boolean }): JSX.Element | nul
           it is the author's. */}
       {!isMessage && !link && (
         <DeployRow kind="constrain" label="CONSTRAIN MOVEMENT IN WALK MODE">
+          <span className="deploybar__choices" role="group" aria-label="Constrain movement in WALK mode">
           {CONSTRAINS.map((c) => (
             <button
               key={c}
@@ -420,6 +421,7 @@ export function DeployBar({ pad = false }: { pad?: boolean }): JSX.Element | nul
               {...noCallout}
             >{c.toUpperCase()}</button>
           ))}
+          </span>
         </DeployRow>
       )}
 

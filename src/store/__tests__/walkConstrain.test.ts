@@ -175,18 +175,32 @@ describe('WALK and a shard that constrains it', () => {
     for (let n = 0; n < 4; n++) useWalk.getState().press('right')
     expect(along(start)).toBe(2)
 
-    // The part is off, its parent ALL: through.
+    // The part is off, its parent ALL: through it, as far as a second part
+    // set to ALL further on, which proves the parts did resolve.
     useWalk.getState().exit()
     clearWalls()
     const ref2: Ref = ['a', `33331:${'b'.repeat(64)}:walk-water`]
+    const ref3: Ref = ['a', `33331:${'b'.repeat(64)}:walk-far-wall`]
     primeRef(ref2, toPayload(wallAcross(3, { opacity: 40 }, 'off')))
-    world(start, withConstrain({ ...room('all'), refs: [ref2] }, 'all'))
+    primeRef(ref3, toPayload(wallAcross(6, {}, 'all')))
+    const both = withConstrain({ ...newShard('Pool'), mode: 'solid', vertices: [], faces: [], refs: [ref2, ref3], parts: [{ ref: 0, at: [0, 0, 0], turn: [0, 0, 0], step: 0 }, { ref: 1, at: [0, 0, 0], turn: [0, 0, 0], step: 0 }] }, 'all')
+    world(start, both)
     useCyberspace.setState({ cursor: { ...useCyberspace.getState().position } })
     useWalk.getState().enter()
-    useWalk.getState().press('right')
     await new Promise((r) => setTimeout(r, 0))
-    for (let n = 0; n < 4; n++) useWalk.getState().press('right')
+    for (let n = 0; n < 8; n++) useWalk.getState().press('right')
     expect(along(start)).toBe(5)
+  })
+
+  it('a held key shows one WALL chip, not one a press', () => {
+    world(start, wallAcross(1, {}, 'all'))
+    useWalk.getState().enter()
+    useWalk.getState().press('right')
+    const first = useToast.getState().toast
+    expect(first?.label).toBe('WALL')
+    useWalk.getState().press('right')
+    useWalk.getState().press('right')
+    expect(useToast.getState().toast).toBe(first)
   })
 })
 

@@ -55,9 +55,15 @@ export function readConstrain(raw: unknown): Constrain {
   return raw === 'all' || raw === 'opaque' ? raw : 'off'
 }
 
-/** A model's setting, from the field sno-core carries for it. */
+/**
+ * A model's setting, from the field sno-core carries for it. A top-level
+ * `constrain` is read first, for a sno-core that has learned the field and
+ * lifted it out of `extra`; walkConstrain.test.ts fails the day that happens,
+ * so the writer here learns it too.
+ */
 export function constrainOf(s: Pick<ShardModel, 'extra'>): Constrain {
-  return readConstrain(s.extra?.[CONSTRAIN_FIELD])
+  const top = (s as { constrain?: unknown }).constrain
+  return top !== undefined ? readConstrain(top) : readConstrain(s.extra?.[CONSTRAIN_FIELD])
 }
 
 /**
@@ -170,9 +176,13 @@ export function wallMesh(shard: ShardModel, placed: readonly Placed[], pose?: Po
 
 /** Barycentric slack: a ray through an edge or a corner hits, so two triangles that share an edge leave no seam. */
 const EDGE_SLACK = 1e-9
-/** The box reject's slack, in model units: far below a tick (1/120), so it only ever lets a borderline triangle on to the exact test. */
+/** The box reject's slack, in model units: it only ever lets a borderline triangle on to the exact test, never decides a hit. */
 const NEAR = 1e-9
-/** Below this, a triangle seen edge-on along the ray: parallel to the step, never crossed. */
+/**
+ * Below this share of its own size squared, a triangle is seen edge-on along
+ * the ray: parallel to the step, never crossed. Relative, so a part placed far
+ * finer than its parent (a tick-sized tile at a unit 20 below) is still a wall.
+ */
 const FLAT = 1e-12
 
 /**
@@ -195,7 +205,8 @@ export function firstHit(mesh: WallMesh, o: readonly [number, number, number], i
     if (pj < Math.min(aj, bj, cj) - NEAR || pj > Math.max(aj, bj, cj) + NEAR) continue
     if (pk < Math.min(ak, bk, ck) - NEAR || pk > Math.max(ak, bk, ck) + NEAR) continue
     const d = (bj - aj) * (ck - ak) - (bk - ak) * (cj - aj)
-    if (Math.abs(d) <= FLAT) continue
+    const span = Math.max(Math.max(aj, bj, cj) - Math.min(aj, bj, cj), Math.max(ak, bk, ck) - Math.min(ak, bk, ck))
+    if (Math.abs(d) <= FLAT * span * span) continue
     const wa = ((bj - pj) * (ck - pk) - (bk - pk) * (cj - pj)) / d
     const wb = ((cj - pj) * (ak - pk) - (ck - pk) * (aj - pj)) / d
     const wc = 1 - wa - wb

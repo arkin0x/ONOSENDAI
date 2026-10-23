@@ -26,6 +26,12 @@
  *     which is the 720x720 layout drawn sharp rather than stretched.
  *   - In a square frame, a segment's panel, as wide as the frame there,
  *     keeps under the minimap as it does under the address (scene/tvPainter).
+ *   - Everything TV writes on the picture can be set larger for the
+ *     stream (text=large or text=xl; BROADCAST_TEXT, broadcastText): a 16:9
+ *     stream on a phone held upright is about 400 px wide, a fifth of the
+ *     1920 px frame, and the normal sizes are unreadable there (arkinox,
+ *     2026-10-23). Laid out again for it in scene/tvPainter. Off the stream
+ *     the flag is ignored.
  *   - Each rendered TV frame adds one to window.__tvFrames, and each lost
  *     WebGL context to window.__tvCtxLost, for the encoder's watchdog.
  *   - A lost WebGL context not back within CONTEXT_WAIT_MS reloads the page,
@@ -48,6 +54,28 @@ export function broadcastDpr(device: number = typeof window === 'undefined' ? 1 
   return Number.isFinite(device) && device > 1 ? Math.min(BROADCAST_MAX_DPR, device) : 1
 }
 
+/** The query naming the stream's text size: /tv?broadcast=1&text=large. */
+export const BROADCAST_TEXT_PARAM = 'text'
+
+/**
+ * Each text size the stream can ask for, as a factor on every size TV paints
+ * its words and panels at in the 1920 x 1080 frame (TEXT_FRAME_PX). Large is
+ * the smallest that reads on a phone held upright: a comment's words 9 px
+ * tall to the top of a capital with that frame shown 400 px wide.
+ */
+export const BROADCAST_TEXT = { normal: 1, large: 2.25, xl: 2.6 } as const
+export type BroadcastTextSize = keyof typeof BROADCAST_TEXT
+
+/** The text size an address asks for; normal for none or one not known. */
+export function parseBroadcastText(search: string): BroadcastTextSize {
+  try {
+    const v = new URLSearchParams(search).get(BROADCAST_TEXT_PARAM)
+    return v !== null && Object.prototype.hasOwnProperty.call(BROADCAST_TEXT, v) ? (v as BroadcastTextSize) : 'normal'
+  } catch {
+    return 'normal'
+  }
+}
+
 /** How long a lost WebGL context has to come back before the page reloads, ms. */
 export const CONTEXT_WAIT_MS = 5_000
 
@@ -62,6 +90,7 @@ export function parseBroadcast(pathname: string, search: string): boolean {
 }
 
 let mode: boolean | null = null
+let text: BroadcastTextSize = 'normal'
 /** The address the broadcast loaded on, kept: TV's own history writes cannot take the flag away from a reload. */
 let address = '/tv?broadcast=1'
 
@@ -73,14 +102,45 @@ let address = '/tv?broadcast=1'
 export function isBroadcast(): boolean {
   if (mode === null) {
     mode = typeof window !== 'undefined' && window.location !== undefined && parseBroadcast(window.location.pathname, window.location.search)
-    if (mode) address = window.location.pathname + window.location.search
+    if (mode) {
+      address = window.location.pathname + window.location.search
+      text = parseBroadcastText(window.location.search)
+    }
   }
   return mode
 }
 
+/**
+ * The factor on TV's sizes the stream asked for (BROADCAST_TEXT), read with
+ * the flag from the address the page loaded on; 1 off the stream, whatever
+ * the address says.
+ */
+export function broadcastText(): number {
+  return isBroadcast() ? BROADCAST_TEXT[text] : 1
+}
+
+/** The frame width, CSS px, BROADCAST_TEXT's factors are set for: the Wide 1080p capture's. */
+export const TEXT_FRAME_PX = 1920
+
+/**
+ * The factor on something TV draws `px` CSS px big in a frame `frameW` CSS px
+ * wide, and `refPx` in a TEXT_FRAME_PX frame, for the text size the stream
+ * asked for: it takes the share of the frame's width there that the factor
+ * gives it at 1080p, so a size reads the same on a phone whatever the
+ * capture (a square frame's words are already a larger share of it). Never
+ * below 1: the stream's words are never smaller than the site's. 1 off the
+ * stream.
+ */
+export function broadcastScale(px: number, frameW: number, refPx: number = px): number {
+  const k = broadcastText()
+  if (k === 1 || !(px > 0) || !(frameW > 0)) return 1
+  return Math.max(1, (k * refPx) / TEXT_FRAME_PX / (px / frameW))
+}
+
 /** For tests: set broadcast mode, or (null) read it from the address again. */
-export function setBroadcastForTest(on: boolean | null): void {
+export function setBroadcastForTest(on: boolean | null, size: BroadcastTextSize = 'normal'): void {
   mode = on
+  text = size
   reloading = false
   address = '/tv?broadcast=1'
 }

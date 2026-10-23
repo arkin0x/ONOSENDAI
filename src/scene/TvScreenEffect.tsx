@@ -51,7 +51,7 @@ import { tvSpin } from '../hud/TvSegments'
 import { uploadRegions } from './drawTracker'
 import { CUT_MS, TV_FONT, TvPainter, type FlatRect, type TvAssets, type TvMusic } from './tvPainter'
 import { askForTap, musicProgress, setMusicVolume, tapMusic, useTvMusic } from '../store/useTvMusic'
-import { countTvFrame } from '../lib/tv/broadcast'
+import { countTvFrame, isBroadcast } from '../lib/tv/broadcast'
 import { useTvWatching } from '../store/useTvWatching'
 import { CALM, GlitchDirector } from '../lib/tv/glitch'
 import type { ShardModel } from 'sno-core/shards'
@@ -76,6 +76,19 @@ const PAINT_MAX_PIXELS = 2_400_000
  */
 const REFRESH_BANDS = 30
 
+/**
+ * The glass: how far the frame is pulled in before it bulges (its middle is
+ * drawn at 1 / this), and where the corners' shade has darkened them
+ * altogether. On the stream, the glass comes nearer the frame's edges and
+ * the corners shade less: the bezel took about a tenth off each side, and a
+ * phone held upright shows the stream a fifth of its size (arkinox,
+ * 2026-10-23). The same tube, curve and rounded corners; on the site, as it was.
+ */
+export const GLASS = 1.1
+export const BROADCAST_GLASS = 1.02
+const SHADE = 1.55
+const BROADCAST_SHADE = 1.8
+
 const FRAGMENT = `
 uniform float uTime;
 uniform float uPx;
@@ -88,6 +101,8 @@ uniform float uTearSeed;
 uniform float uDrop;
 uniform float uFlicker;
 uniform vec2 uDrift;
+uniform float uGlass;
+uniform float uShade;
 uniform sampler2D uOverlay;
 
 float tvNoise(vec2 p) {
@@ -114,7 +129,7 @@ void mainImage(const in vec4 inputColor, const in vec2 uv, out vec4 outputColor)
   // The glass: set in from the screen's edges, bulging toward you, its
   // corners rounded, black all round it.
   vec2 c = uv * 2.0 - 1.0;
-  c *= 1.1;
+  c *= uGlass;
   c *= 1.0 + 0.045 * dot(c.yx, c.yx);
   vec2 q = abs(c) - vec2(0.86);
   float edge = length(max(q, 0.0)) + min(max(q.x, q.y), 0.0) - 0.14;
@@ -206,7 +221,7 @@ void mainImage(const in vec4 inputColor, const in vec2 uv, out vec4 outputColor)
   col *= 0.82 + 0.18 * sin(gl_FragCoord.y * 2.0944);
   col *= 0.93 + 0.07 * sin(gl_FragCoord.x * 2.0944);
   // Corners into the dark, as a tube's are, and the glass's own edge soft.
-  col *= smoothstep(1.55, 0.55, length(c * vec2(0.92, 1.0)));
+  col *= smoothstep(uShade, uShade - 1.0, length(c * vec2(0.92, 1.0)));
   col *= 1.0 - smoothstep(-0.02, 0.012, edge);
   // Flicker (uFlicker, set once a frame: tubeFlicker) and grain.
   float g = tvNoise(gl_FragCoord.xy + fract(uTime) * 917.0);
@@ -233,6 +248,8 @@ class CrtEffect extends Effect {
         ['uDrop', new Uniform(0)],
         ['uFlicker', new Uniform(1)],
         ['uDrift', new Uniform(new Vector2(1, 0))],
+        ['uGlass', new Uniform(isBroadcast() ? BROADCAST_GLASS : GLASS)],
+        ['uShade', new Uniform(isBroadcast() ? BROADCAST_SHADE : SHADE)],
         ['uOverlay', new Uniform(overlay)],
       ]),
     })
@@ -307,11 +324,11 @@ const CARD_SLACK_PX = 8
  * lands on what is seen there. y down, as the screen's is: the bend is the
  * same either way up.
  */
-export function flatPoint(x: number, y: number, w: number, h: number): [number, number] {
+export function flatPoint(x: number, y: number, w: number, h: number, glass: number = GLASS): [number, number] {
   let cx = (x / w) * 2 - 1
   let cy = (y / h) * 2 - 1
-  cx *= 1.1
-  cy *= 1.1
+  cx *= glass
+  cy *= glass
   const k = 1 + 0.045 * (cx * cx + cy * cy)
   return [((cx * k) * 0.5 + 0.5) * w, ((cy * k) * 0.5 + 0.5) * h]
 }
@@ -405,7 +422,7 @@ export function TvScreenEffect(): JSX.Element {
       const card = painter.musicCard
       const r = el.getBoundingClientRect()
       if (!card || r.width <= 0 || r.height <= 0) return
-      const [x, y] = flatPoint(e.clientX - r.left, e.clientY - r.top, r.width, r.height)
+      const [x, y] = flatPoint(e.clientX - r.left, e.clientY - r.top, r.width, r.height, effect.uniforms.get('uGlass')!.value as number)
       if (!within(card, x, y, CARD_SLACK_PX)) return
       drag = { id: e.pointerId, y: e.clientY, volume: m.volume, moved: false }
       try { el.setPointerCapture(e.pointerId) } catch { /* the drag still works while over the canvas */ }
@@ -445,7 +462,7 @@ export function TvScreenEffect(): JSX.Element {
       el.removeEventListener('pointerup', end)
       el.removeEventListener('pointercancel', end)
     }
-  }, [gl, painter])
+  }, [gl, painter, effect])
 
   useFrame((state) => {
     const tv = useTv.getState()

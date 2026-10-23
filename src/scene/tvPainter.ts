@@ -28,7 +28,7 @@ import { itemLength, type Shot, type TapeItem } from '../lib/tv/director'
 import { CUT_MS, contentsWords, quoteOf, segmentDoing, typePace, TYPE_DELAY_S } from '../hud/TvSegments'
 import { findLines, placeable, shotProgress, type TvAvatar, type TvFindLine } from '../store/useTv'
 import { AD_SUBTITLE, adFor, type AdScene, type AdTheme } from '../lib/tv/hosakaAd'
-import { BROADCAST_TAG, isBroadcast } from '../lib/tv/broadcast'
+import { BROADCAST_TAG, broadcastScale, isBroadcast } from '../lib/tv/broadcast'
 import { watchingWords } from '../lib/tv/watching'
 import type { Census, ChainTimes } from '../lib/tv/stats'
 import type { Position } from '../lib/space'
@@ -56,6 +56,11 @@ const LOGO_FILE_W = 1969 / 1871
 export const CARD_MS = 2600
 /** The marquee's pace, CSS px a second. */
 const TICKER_PX_S = 70
+/** The marquee's run of words, CSS px, and its height: as the site has them, and for a stream's larger text (lib/tv/broadcast), which reads the run first. */
+const TICKER_TEXT_PX = 12
+const TICKER_H_PX = 28
+const BIG_TICKER_TEXT_PX = 16
+const BIG_TICKER_H_PX = 32
 
 const FG = '#f2fbff'
 /** Every avatar's red, as your own is drawn (scene/Avatar.tsx). */
@@ -88,6 +93,8 @@ const AD_THEMES: Record<AdTheme, { deep: string; stripe: string; accent: string 
   magenta: { deep: '#3a0322', stripe: 'rgba(255, 45, 149, 0.14)', accent: '#ff2d95' },
   night: { deep: '#14052a', stripe: 'rgba(138, 92, 255, 0.12)', accent: '#ff2d95' },
 }
+/** NOW PLAYING's least share of the frame's width with the stream's larger text (lib/tv/broadcast). */
+const BIG_NOW_PLAYING_SHARE = 0.32
 /** NOW PLAYING's height, CSS px, and as one line where there is no room for it. */
 const NOW_PLAYING_PX = 76
 const NOW_PLAYING_LINE_PX = 34
@@ -319,7 +326,16 @@ export class TvPainter {
   private feed: string[] = []
   private feedAt = 0
   private lastPaint = 0
-  private lastScale = 1
+  /** The marquee's run of words, canvas px, as last painted. */
+  private tickPx = TICKER_TEXT_PX
+  /**
+   * The stream's text is larger than the site's (lib/tv/broadcast): the
+   * chiron's row is low and NOW PLAYING wide, a segment's panel takes the
+   * minimap's corner and keeps left of the whole clock column, its model
+   * leaves the words most of it, and a long quote loses lines rather than
+   * shrinking its type.
+   */
+  private big = false
   /** Where the minimap's dot was last: a segment shows no avatar, and the dot stays where it was. */
   private lastDot: Position | null = null
   /** Where NOW PLAYING was last painted, canvas px, and the canvas px per CSS px then. */
@@ -483,8 +499,7 @@ export class TvPainter {
     // What was painted in the face before it is on the GPU still: all of it goes up again.
     this.track.reset()
     const ctx = this.ctx
-    const s = this.lastScale
-    ctx.font = `${12 * s}px ${TV_FONT}`
+    ctx.font = `${this.tickPx}px ${TV_FONT}`
     for (const r of this.run) r.w = ctx.measureText(r.text).width
   }
 
@@ -503,8 +518,15 @@ export class TvPainter {
   private paintParts(p: TvPicture, a: TvAssets, now: number, scale: number, reduced: boolean): void {
     const part = (name: string): void => this.track.part(name)
     const cssW = this.canvas.width / scale
-    const s = scale * Math.min(1.35, Math.max(0.9, cssW / 1400))
-    this.lastScale = s
+    // s0: the sizes as the site has them; s: as large as the stream asked
+    // (lib/tv/broadcast), for the same share of the frame at any size; the
+    // same as s0 off the stream.
+    const grow = Math.min(1.35, Math.max(0.9, cssW / 1400))
+    const s0 = scale * grow
+    const s = s0 * broadcastScale(grow, cssW, 1.35)
+    const big = s > s0
+    this.big = big
+    this.tickPx = (big ? BIG_TICKER_TEXT_PX : TICKER_TEXT_PX) * s
     const dt = this.lastPaint ? Math.min(0.25, (now - this.lastPaint) / 1000) : 0
     this.lastPaint = now
     const ctx = this.ctx
@@ -524,7 +546,7 @@ export class TvPainter {
 
     // The logo, top right: the margins everything else takes.
     part('logo')
-    const lw = Math.min(LOGO_PX * s, W * LOGO_SHARE)
+    const lw = Math.min(LOGO_PX * s0, W * LOGO_SHARE)
     const lh = lw * LOGO_ASPECT
     // Under heavy snow (tuning, no signal, a bag with no public place) the
     // logo and the clock get a soft dark backing, to read against the noise.
@@ -551,6 +573,8 @@ export class TvPainter {
     let cy = MY + lh + 18 * s
     ctx.font = `700 ${11 * s}px ${TV_FONT}`
     ctx.fillText('▶ PLAY', W - MX, cy)
+    // The column's left edge, the logo's or the widest line's.
+    let colLeft = Math.min(W - MX - lw, W - MX - ctx.measureText('▶ PLAY').width)
     if (p.tapeTime !== null) {
       const stamp = tapeStamp(p.tapeTime)
       ctx.font = `700 ${(narrow ? 13 : 16) * s}px ${TV_FONT}`
@@ -558,6 +582,7 @@ export class TvPainter {
       ctx.fillText(stamp.date, W - MX, cy)
       cy += 20 * s
       ctx.fillText(stamp.time, W - MX, cy)
+      colLeft = Math.min(colLeft, W - MX - Math.max(ctx.measureText(stamp.date).width, ctx.measureText(stamp.time).width))
     }
 
     // On the stream, its address under the clock, on the logo's right edge
@@ -566,15 +591,24 @@ export class TvPainter {
     part('urlTag')
     const tag = isBroadcast() ? this.urlTag(W - MX, MY + lh + URL_TAG_DROP * s, s) : null
     const clockBottom = tag ? Math.max(cy, tag.bottom) : cy
+    if (tag) colLeft = Math.min(colLeft, tag.left)
+
+    // A segment's panel at the centre, or beside the clock.
+    const item = p.shot?.item
+    const inset = item !== undefined && !(item.kind === 'bag' && placeable(item.hint))
+    const panel = inset && p.status === 'playing'
+    // With the stream's larger text, a panel takes the minimap's corner while
+    // it is up: beside the clock, the minimap left it a few words a line.
+    const bigInset = big && panel
 
     // The minimap, top left, on the logo's margins: all of cyberspace, and
     // where the avatar on screen is in it.
-    const mapSize = Math.min(200 * s, W * 0.3, H * 0.34)
+    const mapSize = bigInset ? 0 : Math.min(200 * s0, W * 0.3, H * 0.34)
     part('minimap')
-    this.minimap(p, MX, MY, mapSize, s, now, reduced)
+    if (!bigInset) this.minimap(p, MX, MY, mapSize, s, now, reduced)
 
     // The marquee along the bottom margin, the CYBERSPACE TV bug at its head.
-    const tickH = 28 * s
+    const tickH = (big ? BIG_TICKER_H_PX : TICKER_H_PX) * s
     const tickY = H - MY - tickH
     part('marquee')
     this.marquee(p, a, MX, tickY, W - MX, tickH, s, dt)
@@ -591,16 +625,22 @@ export class TvPainter {
     // one line; where even that would, it is not shown, and the music plays on.
     const rowBottom = tickY - 10 * s
     const row = !narrow && H / scale >= ROW_MIN_H
-    const npW = narrow ? W - 2 * MX : lw + 16 * s
+    // The stream's larger text (lib/tv/broadcast) has NOW PLAYING wider than
+    // the logo's column over it: that was room for four letters of its name.
+    const npW = narrow ? W - 2 * MX : big ? Math.max(lw + 16 * s, W * BIG_NOW_PLAYING_SHARE) : lw + 16 * s
     const chironW = row ? W - 2 * MX - npW - 10 * s : W - 2 * MX
+    // With the stream's larger text the row is as low as the stacked chiron,
+    // NOW PLAYING with it: the row's own height left a panel one line.
+    const chironH = (row && !big ? CHIRON_PX[0] : CHIRON_PX[1]) * s
+    const npFullH = (big ? CHIRON_PX[1] : NOW_PLAYING_PX) * s
     let chironTop = tickY
     part('chiron')
-    if (p.shot && p.status === 'playing') chironTop = this.chiron(p, a, MX, rowBottom, chironW, s, narrow, row)
+    if (p.shot && p.status === 'playing') chironTop = this.chiron(p, a, MX, rowBottom, chironW, chironH, s, narrow)
     const npBottom = row ? rowBottom : rowBottom - CHIRON_PX[1] * s - 10 * s
     const ceiling = (narrow ? Math.max(clockBottom, MY + mapSize) : clockBottom) + 10 * s
-    const npLook = !a.music ? null : npBottom - NOW_PLAYING_PX * s >= ceiling ? 'full' : npBottom - NOW_PLAYING_LINE_PX * s >= ceiling ? 'line' : null
+    const npLook = !a.music ? null : npBottom - npFullH >= ceiling ? 'full' : npBottom - NOW_PLAYING_LINE_PX * s >= ceiling ? 'line' : null
     part('nowPlaying')
-    const npTop = a.music && npLook ? this.nowPlaying(a.music, W - MX - npW, npBottom, npW, s, now, reduced, npLook === 'line') : chironTop
+    const npTop = a.music && npLook ? this.nowPlaying(a.music, W - MX - npW, npBottom, npW, s, now, reduced, npLook === 'line', npFullH) : chironTop
     this.npRect = a.music && npLook ? { x: W - MX - npW, y: npTop, w: npW, h: npBottom - npTop } : null
     this.cardScale = scale
     // What sits at the centre above the chiron stops above NOW PLAYING too
@@ -615,22 +655,23 @@ export class TvPainter {
     const segmentTop = Math.max(tag && (W + centreW) / 2 > tag.left - 8 * s ? clockBottom : cy, underMap)
     const floor = this.npRect && (narrow || (W + centreW) / 2 > W - MX - npW) ? Math.min(chironTop, npTop - 6 * s) : chironTop
 
-    // A segment's panel at the centre.
-    const item = p.shot?.item
-    const inset = item !== undefined && !(item.kind === 'bag' && placeable(item.hint))
     // Beside the clock it keeps off the chiron, and on a phone, where NOW
     // PLAYING spans the width over the chiron, off that too (review of #393).
-    const sideBottom = narrow && this.npRect ? Math.min(chironTop - 50 * s, npTop - 6 * s) : chironTop - 50 * s
+    // With the stream's larger text, a LATER or MEANWHILE card goes over the
+    // chiron rather than above it, so the panel has that room too.
+    const cardRoom = (bigInset ? 14 : 50) * s
+    const sideBottom = (narrow || (big && !row)) && this.npRect ? Math.min(chironTop - cardRoom, npTop - 6 * s) : chironTop - cardRoom
     // A panel under the minimap (on a square stream), its room the less for
     // it, keeps clear of a LATER or MEANWHILE card's backing too, which
     // starts 56 px over the floor (review of #447: a comment's panel reached 50).
-    const segmentFloor = floor - (underMap ? 60 : 50) * s
+    const segmentFloor = floor - (bigInset ? 14 : underMap ? 60 : 50) * s
     part('segment')
-    if (item && inset && p.status === 'playing') this.segment(item, p.shot!.length, a, W, segmentTop + 14 * s, segmentFloor, sideBottom, MX, MY, W - MX - lw - 16 * s, MX + mapSize + 16 * s, s, narrow, now)
+    if (item && panel) this.segment(item, p.shot!.length, a, W, segmentTop + 14 * s, segmentFloor, sideBottom, MX, MY, (big ? colLeft : W - MX - lw) - 16 * s, bigInset ? MX : MX + mapSize + 16 * s, s, narrow, now)
 
-    // LATER and MEANWHILE, after the cut's transition; under an inset's panel.
+    // LATER and MEANWHILE, after the cut's transition; under an inset's
+    // panel, or with the stream's larger text across the chiron, solid.
     part('card')
-    this.card(p, W, s, narrow, inset ? floor - 34 * s : H * 0.34, now)
+    this.card(p, W, s, narrow, bigInset && chironTop < tickY ? chironTop + chironH / 2 + 6 * s : inset ? floor - 34 * s : H * 0.34, now, bigInset)
 
     // TUNING, END OF TAPE, NO SIGNAL.
     part('status')
@@ -694,7 +735,9 @@ export class TvPainter {
     ctx.fillRect(startX - 8 * s, y + 5 * s, Math.max(1, s), h - 10 * s)
 
     // The run: what is on screen stays as it was until it scrolls off.
-    ctx.font = `${12 * s}px ${TV_FONT}`
+    ctx.font = `${this.tickPx}px ${TV_FONT}`
+    // Set larger for the stream, it sits as low in the band as the bug's words.
+    const runBase = this.tickPx > TICKER_TEXT_PX * s ? y + h / 2 + this.tickPx * 0.36 : base
     const gap = ctx.measureText('   ◆   ').width
     const area = x1 - startX
     if (this.runX === null) this.runX = area * 0.25
@@ -723,9 +766,9 @@ export class TvPainter {
     let x = startX + this.runX
     for (const r of this.run) {
       ctx.fillStyle = FG
-      ctx.fillText(r.text, x, base)
+      ctx.fillText(r.text, x, runBase)
       ctx.fillStyle = ACCENT
-      ctx.fillText('◆', x + r.w + gap / 2 - ctx.measureText('◆').width / 2, base)
+      ctx.fillText('◆', x + r.w + gap / 2 - ctx.measureText('◆').width / 2, runBase)
       x += r.w + gap
     }
     ctx.restore()
@@ -753,10 +796,9 @@ export class TvPainter {
   }
 
   /** The chiron, bottom edge at `bottom`; its top. */
-  private chiron(p: TvPicture, a: TvAssets, x: number, bottom: number, w: number, s: number, narrow: boolean, row: boolean): number {
+  private chiron(p: TvPicture, a: TvAssets, x: number, bottom: number, w: number, h: number, s: number, narrow: boolean): number {
     const ctx = this.ctx
     const shot = p.shot!
-    const h = CHIRON_PX[row ? 0 : 1] * s
     const y = bottom - h
     const grad = ctx.createLinearGradient(x, 0, x + w, 0)
     grad.addColorStop(0, 'rgba(0, 60, 80, 0.88)')
@@ -883,7 +925,7 @@ export class TvPainter {
     ctx.fillRect(0, 0, W, H)
     if (scene.kind !== 'banner') this.stripes(theme.stripe, W, H, s, reduced ? 0 : t)
 
-    const tickH = 28 * s
+    const tickH = (this.big ? BIG_TICKER_H_PX : TICKER_H_PX) * s
     const tickY = H - MY - tickH
     // No NOW PLAYING over the spot (2026-10-19: "gotta hide the music player
     // during the hosaka ad"): the music plays on under it, and the spot has
@@ -1065,9 +1107,12 @@ export class TvPainter {
    * artist under that and the progress under that, filling purple to pink.
    * Its top.
    */
-  private nowPlaying(m: TvMusic, x: number, bottom: number, w: number, s: number, now: number, reduced: boolean, line: boolean): number {
+  private nowPlaying(m: TvMusic, x: number, bottom: number, w: number, s: number, now: number, reduced: boolean, line: boolean, fullH: number = NOW_PLAYING_PX * s): number {
     const ctx = this.ctx
-    const h = (line ? NOW_PLAYING_LINE_PX : NOW_PLAYING_PX) * s
+    const h = line ? NOW_PLAYING_LINE_PX * s : fullH
+    // Lower than its own height (the stream's larger text, beside the low
+    // chiron): its lines drawn up together, as much as it is lower.
+    const lift = line ? 0 : Math.min(0, fullH - NOW_PLAYING_PX * s) * 0.5
     const y = bottom - h
     const grad = ctx.createLinearGradient(x, 0, x + w, 0)
     grad.addColorStop(0, 'rgba(26, 4, 44, 0.55)')
@@ -1109,14 +1154,14 @@ export class TvPainter {
     }
     ctx.fillStyle = m.muted ? 'rgba(255, 45, 149, 0.55)' : MUSIC_PINK
     ctx.font = `700 ${9 * s}px ${TV_FONT}`
-    ctx.fillText(m.muted ? '♪ MUTED' : '♪ NOW PLAYING', tx, y + 19 * s)
+    ctx.fillText(m.muted ? '♪ MUTED' : '♪ NOW PLAYING', tx, y + 19 * s + lift * 0.5)
     ctx.fillStyle = FG
     ctx.font = `700 ${14 * s}px ${TV_FONT}`
-    ctx.fillText(fit(ctx, m.title.toUpperCase(), tw), tx, y + 37 * s)
+    ctx.fillText(fit(ctx, m.title.toUpperCase(), tw), tx, y + 37 * s + lift)
     if (m.artist) {
       ctx.fillStyle = 'rgba(214, 196, 255, 0.9)'
       ctx.font = `${11 * s}px ${TV_FONT}`
-      ctx.fillText(fit(ctx, m.artist.toUpperCase(), tw), tx, y + 52 * s)
+      ctx.fillText(fit(ctx, m.artist.toUpperCase(), tw), tx, y + 52 * s + lift * 1.5)
     }
     this.musicBar(m, tx, y + h - pad - 4 * s, tw, 4 * s, s, now, reduced)
     return y
@@ -1205,7 +1250,7 @@ export class TvPainter {
     ctx.restore()
   }
 
-  private card(p: TvPicture, W: number, s: number, narrow: boolean, y: number, now: number): void {
+  private card(p: TvPicture, W: number, s: number, narrow: boolean, y: number, now: number, solid = false): void {
     if (p.status !== 'playing') return
     const text = p.meanwhile ? '◀◀ MEANWHILE' : p.skipped >= 60 ? `▶▶ ${skipWords(p.skipped)} LATER` : null
     if (!text) return
@@ -1216,7 +1261,7 @@ export class TvPainter {
     ctx.font = `700 ${(narrow ? 14 : 18) * s}px ${TV_FONT}`
     ctx.textAlign = 'center'
     const tw = ctx.measureText(text).width
-    ctx.fillStyle = 'rgba(0, 0, 0, 0.5)'
+    ctx.fillStyle = solid ? 'rgba(2, 12, 20, 0.94)' : 'rgba(0, 0, 0, 0.5)'
     ctx.fillRect(W / 2 - tw / 2 - 14 * s, y - 22 * s, tw + 28 * s, 32 * s)
     ctx.fillStyle = FG
     ctx.fillText(text, W / 2, y)
@@ -1230,14 +1275,20 @@ export class TvPainter {
     // clock (the shot's length, which is the item's unless a test cued it longer).
     const length = itemLength(item)
     const t = Math.max(0, shotProgress() * shotLength - CUT_MS / 1000)
-    const pad = (narrow ? 16 : 24) * s
+    const pad = (narrow ? 16 : this.big ? 14 : 24) * s
+    // The words' gap from the model, and the model's largest: less of both
+    // with the stream's larger text, whose words need the width.
+    const gap = (this.big ? 16 : 28) * s
+    // Side by side, the model leaves the words most of the panel: a fifth of
+    // it (a photograph) or two fifths (an advertisement's product).
+    const stageMax = (pw: number, stacked: boolean): number => (!this.big || stacked ? Infinity : item.kind === 'object' ? pw * 0.4 : Math.min(90 * s, pw * 0.22))
     // An advertisement is the product first: the model in the middle, the
     // words under it, on every screen (arkinox, 2026-10-18: "make sure the
     // NOW AVAILABLE shows the rotating model in the center of the layout,
     // text can go under"). Everything else stacks only on a phone.
     const ad = item.kind === 'object'
     const layout = (stage: number, pw: number, stacked: boolean, size?: number, maxLines?: number): { stage: number; pw: number; stacked: boolean; textX: number; textW: number; lines: string[]; quoteSize: number; ph: number; cut: boolean } => {
-      const textX = stacked ? 0 : stage + 28 * s
+      const textX = stacked ? 0 : stage + gap
       const textW = stacked ? pw - 2 * pad : pw - 2 * pad - textX
       let lines: string[] = []
       let quoteSize = 0
@@ -1264,7 +1315,7 @@ export class TvPainter {
     const fits = (ph: number, room: number): boolean => ph <= room + 1e-6
     // The model gives up size first, the words never.
     const fitPanel = (pw: number, stacked: boolean, room: number): ReturnType<typeof layout> => {
-      const first = layout((ad ? (narrow ? 170 : 250) : narrow ? 140 : 210) * s, pw, stacked)
+      const first = layout(Math.min(stageMax(pw, stacked), (ad ? (narrow ? 170 : 250) : narrow ? 140 : 210) * s), pw, stacked)
       if (fits(first.ph, room)) return first
       // The model gives up size first.
       let f = layout(Math.max(60 * s, first.stage - (first.ph - room)), pw, stacked)
@@ -1272,7 +1323,8 @@ export class TvPainter {
       // Then a long quote's type, down to 12 px, and then its last lines,
       // cut with an ellipsis: on a phone on its side the words covered the
       // chiron and the marquee (review of #375).
-      for (let size = f.quoteSize - s; size >= 12 * s && !fits(f.ph, room); size -= s) f = layout(f.stage, pw, stacked, size)
+      // Not on a stream set to larger text: its size is what was asked for.
+      for (let size = f.quoteSize - s; size >= (this.big ? f.quoteSize : 12 * s) && !fits(f.ph, room); size -= s) f = layout(f.stage, pw, stacked, size)
       if (fits(f.ph, room)) return f
       const over = f.ph - room
       const keep = f.lines.length - Math.ceil(over / (f.quoteSize * 1.45))
@@ -1300,9 +1352,18 @@ export class TvPainter {
       // (sideBottom; review of #393).
       const sideRoom = Math.max(0, sideBottom - MY)
       const beside = fitPanel(sideW, false, sideRoom)
-      const better = fitted.cut
-        ? fits(beside.ph, sideRoom) && beside.lines.length > fitted.lines.length
-        : fits(beside.ph, sideRoom) || beside.ph < fitted.ph
+      // With the stream's larger text neither may fit: then the one that
+      // overflows least, and one that fits always over one that does not
+      // (the panel had stayed under the clock, over the chiron).
+      const fitsHere = fits(fitted.ph, room)
+      const fitsBeside = fits(beside.ph, sideRoom)
+      const better = this.big && fitsHere !== fitsBeside
+        ? fitsBeside
+        : this.big && !fitsHere
+          ? beside.ph - sideRoom < fitted.ph - room
+          : fitted.cut
+            ? fitsBeside && beside.lines.length > fitted.lines.length
+            : fitsBeside || beside.ph < fitted.ph
       if (better) { fitted = beside; px = sideLeft; room = sideRoom; top0 = MY }
     }
     const { stage, pw, stacked, textX, textW, lines, quoteSize, ph } = fitted
@@ -1445,7 +1506,7 @@ export class TvPainter {
     ctx.textAlign = align
     ctx.fillStyle = ACCENT
     ctx.font = `${11 * s}px ${TV_FONT}`
-    ctx.fillText(kicker, x, y + 12 * s)
+    ctx.fillText(this.big ? fit(this.ctx, kicker, w) : kicker, x, y + 12 * s)
     ctx.fillStyle = FG
     ctx.font = `700 ${24 * s}px ${TV_FONT}`
     ctx.fillText(fit(this.ctx, title, w), x, y + 44 * s)

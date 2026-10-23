@@ -28,6 +28,7 @@ import { drawnAvatars } from '../lib/targets'
 import { avatarTurn } from '../lib/facing'
 import { committedAnchor } from '../lib/renderFrame'
 import { alignedOrigin, useCyberspace } from '../store/useCyberspace'
+import { broadcastScale } from '../lib/tv/broadcast'
 import { framingProgress, shownAvatars, useTv } from '../store/useTv'
 import { useProfile } from '../hooks/useProfile'
 import { OtherAvatar } from './OtherAvatar'
@@ -68,13 +69,16 @@ function TapeAvatar({ pubkey, centre, position, from, born, place, subject }: { 
   // avatar does after a move (lib/facing.ts; arkinox, 2026-10-18: "when my
   // avatar moves, it always faces the same direction").
   const turn = useMemo(() => avatarTurn(useCyberspace.getState().axes(), from ? [from, position] : null), [from, position])
+  // As large as the stream's text asked, for its share of the frame (lib/tv/broadcast); as it is on the site.
+  const frameW = useThree((st) => st.size.width)
+  const labelPx = TV_LABEL_PX * broadcastScale(TV_LABEL_PX, frameW)
   // Every plain avatar in the standard red, as your own is drawn: a hue per
   // person bloomed to white on the tube (arkinox, 2026-10-18: "i want all
   // avatar dodecahedrons to be the standard red color, not white").
   // Names half again the size of ONOSENDAI's 11 px (2026-10-19: "the name
   // label above the avatar is a little too small"): the tube's bend and a
   // phone's labelShrink both take some off.
-  return <OtherAvatar pubkey={pubkey} color={AVATAR_RED} center={centre} position={position} place={place} turn={turn} label={text} labelOpacity={subject ? 0.9 : 0.5} tappable={false} keepShape size={() => grownAt(born, performance.now())} labelPx={TV_LABEL_PX} />
+  return <OtherAvatar pubkey={pubkey} color={AVATAR_RED} center={centre} position={position} place={place} turn={turn} label={text} labelOpacity={subject ? 0.9 : 0.5} tappable={false} keepShape size={() => grownAt(born, performance.now())} labelPx={labelPx} />
 }
 
 /** The avatars' name labels on TV, CSS px before labelShrink. */

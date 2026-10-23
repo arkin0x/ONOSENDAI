@@ -535,14 +535,17 @@ function Rig(): JSX.Element {
   // per screen width. OrbitControls turns nothing in WALK; it scaled a drag
   // by the screen's height and lost most of it (arkinox, 2026-10-23: "it
   // takes wayyyy to much dragging to look around while in WALK mode").
-  // One pointer at a time, as OrbitControls had it: a second finger ends
-  // the turn rather than jumping it.
+  // One pointer on the scene at a time, as OrbitControls had it: a second
+  // finger on the scene ends the turn rather than jumping it. A finger
+  // holding a pad key is not on the scene, so a thumb can walk while the
+  // other looks; that is why this does not ask for the primary pointer.
   const surface = useThree((s) => (s.events.connected as HTMLElement | null | undefined) ?? s.gl.domElement)
   useEffect(() => {
     let held: { id: number; x: number; y: number } | null = null
     const down = (e: PointerEvent): void => {
-      if (held) { held = null; return }
-      if (!useCyberspace.getState().walking || !e.isPrimary || (e.pointerType === 'mouse' && e.button !== 0)) return
+      // The same pointer down again means its release was missed: a new drag.
+      if (held && e.pointerId !== held.id) { held = null; return }
+      if (!useCyberspace.getState().walking || (e.pointerType === 'mouse' && e.button !== 0)) return
       held = { id: e.pointerId, x: e.clientX, y: e.clientY }
     }
     const move = (e: PointerEvent): void => {

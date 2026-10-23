@@ -6,7 +6,7 @@
  * scales a drag by the canvas HEIGHT and was updated twice a frame (by drei
  * and by the rig) while the rig put the line of sight back after one of them:
  * most of every drag was thrown away. Measured 2026-10-23, a drag across the
- * whole screen turned about 190 degrees on a 1920x1080 desktop and only 59 on
+ * whole screen turned about 199 degrees on a 1280x720 desktop and only 59 on
  * a 412x915 phone (arkinox: "it takes wayyyy to much dragging to look around
  * while in WALK mode. We need to turn up the sensitivity about 10x").
  *

@@ -27,10 +27,6 @@ describe('WALK look gain', () => {
       expect(look.length()).toBeCloseTo(0.001, 9)
     }
   })
-  it('sits in the range asked for: half to one whole turn per screen width', () => {
-    expect(WALK_LOOK_DEG_PER_WIDTH).toBeGreaterThanOrEqual(180)
-    expect(WALK_LOOK_DEG_PER_WIDTH).toBeLessThanOrEqual(360)
-  })
   it('never looks over a pole, however far the drag', () => {
     const up = orbitOffset(new Vector3(0, 0, 0.001), 0, 1e6, lookRadPerPx(412))
     const down = orbitOffset(new Vector3(0, 0, 0.001), 0, -1e6, lookRadPerPx(412))

@@ -36,5 +36,18 @@
 
 import type { Explainer } from './explainer'
 
-/** Every explainer, in the order they take turns. Empty: none plays until one is added. */
-export const EXPLAINERS: Explainer[] = []
+/** Every explainer, in the order they take turns. */
+export const EXPLAINERS: Explainer[] = [
+  // arkinox's first (2026-10-23), uploaded by him to nostr.build: not
+  // hash-addressed, so the hash is pinned here. Captions from his words,
+  // none over his own onosendai.tech -> WORKSHOP card (33.0 to 38.2 s).
+  {
+    id: '1-welcome-to-cyberspace',
+    title: 'Welcome to Cyberspace',
+    duration: 48.566,
+    files: [
+      { url: 'https://v.nostr.build/7fhEpkDbBuEd3QK5JXrCG5.mp4', type: 'video/mp4; codecs="avc1.640028, mp4a.40.2"', sha256: '0d47e296ef366848ac7d14ee4ab67a318fbdd18ab63db64bb88bbfafec289eb6' },
+    ],
+    captions: '/explainers/welcome-to-cyberspace.vtt',
+  },
+]

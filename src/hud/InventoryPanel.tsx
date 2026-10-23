@@ -177,13 +177,6 @@ const isCoin = (text: string | undefined): boolean => readCashuToken(text ?? nul
 const keptFromAll = (text: string | undefined): boolean => isCoin(text) || hasNftLink(text)
 
 /**
- * Something taken out of a chest: a coin, a shard, a message or a chest,
- * with what each can do. A shard MOVES into the workshop: the row turns
- * into MOVED INTO WORKSHOP for five seconds and then leaves the list
- * (arkinox, 2026-10-11). The X clears a row off the list; a coin has it
- * only once redeemed, since a cleared coin's card is out of reach.
- */
-/**
  * A taken audio's moderation row: MUTE THIS AUDIO always (its id is its own,
  * or its lineage), BLOCK AUTHOR only when its author is a fact. A chest's
  * unsigned entry names an author it may not be (review of #465): blocking
@@ -199,6 +192,13 @@ export function takenAudioModeration(item: Pick<HeldItem, 'id' | 'author' | 'ver
   )
 }
 
+/**
+ * Something taken out of a chest: a coin, a shard, a message or a chest,
+ * with what each can do. A shard MOVES into the workshop: the row turns
+ * into MOVED INTO WORKSHOP for five seconds and then leaves the list
+ * (arkinox, 2026-10-11). The X clears a row off the list; a coin has it
+ * only once redeemed, since a cleared coin's card is out of reach.
+ */
 function TakenRow({ item }: { item: HeldItem }): JSX.Element {
   const [open, setOpen] = useState(false)
   const me = useCyberspace((s) => s.identity.pubkey)

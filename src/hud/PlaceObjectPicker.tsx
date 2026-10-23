@@ -21,9 +21,9 @@ import type { ShardModel } from 'sno-core/shards'
 import { useWorkshop } from '../store/useWorkshop'
 import { useBuilder } from '../store/useBuilder'
 import { useStash } from './stash'
+import { ShardThumb } from './ShardThumb'
 import { FeedList } from './FeedList'
 import { Explanation } from './Explanation'
-import { ShardThumb } from './ShardThumb'
 
 /** Where objects to place come from. */
 export type SourceId = 'mine' | 'feed'

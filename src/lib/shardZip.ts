@@ -41,9 +41,19 @@ export const COMPANION_EXT = ['mtl', 'bin'] as const
 
 export type RowKind = 'sno' | 'mesh'
 
+/** An MTL or .bin: read only when a model in its folder names it, or shares its base name. */
+export interface Companion {
+  /** Its entry's key (see PlannedRow.key). */
+  key: string
+  /** Its file name, lower case, for matching what a model names. */
+  file: string
+  /** Stated size, inflated, in bytes. */
+  size: number
+}
+
 /** One shard to be. */
 export interface PlannedRow {
-  /** The entry's name as the zip wrote it: unique in the zip, the key to its bytes. */
+  /** The entry's place in the zip's directory: unique even where two entries share a name. */
   key: string
   /** The cleaned path, folders and file, for showing. */
   path: string
@@ -54,8 +64,6 @@ export interface PlannedRow {
   kind: RowKind
   /** Stated size, inflated, in bytes. */
   size: number
-  /** For a mesh: the companion files in its folder (an OBJ's MTL, a glTF's .bin), by entry key. */
-  companions: string[]
   /** Why it cannot come in, before a byte is read; null when it may. */
   error: string | null
 }
@@ -69,11 +77,15 @@ export interface SkippedFile {
 export interface ZipPlan {
   rows: PlannedRow[]
   skipped: SkippedFile[]
+  /** MTL and .bin files by folder path ('/' joined), for OBJ and glTF models there. */
+  companions: Record<string, Companion[]>
+  /** What the rows without an error state they inflate to, together. */
+  total: number
 }
 
 /** Characters no name keeps: C0 and C1 controls, and the bidi overrides and isolates that make text read as something else. */
 // eslint-disable-next-line no-control-regex
-const UNSAFE_CHARS = /[\u0000-\u001f\u007f-\u009f‎‏‪-‮⁦-⁩]/g
+const UNSAFE_CHARS = /[\u0000-\u001f\u007f-\u009f\u061c\u200e\u200f\u202a-\u202e\u2066-\u2069]/g
 
 const extOf = (file: string): string => {
   const dot = file.lastIndexOf('.')
@@ -101,8 +113,9 @@ export function splitPath(raw: string): PathVerdict {
   const parts = name.split('/').filter((s) => s !== '' && s !== '.')
   if (parts.length === 0) return { ok: false, reason: 'empty' }
   if (parts.some((s) => s === '..')) return { ok: false, reason: 'unsafe' }
-  if (parts.some((s) => s.startsWith('.') || s === '__MACOSX')) return { ok: false, reason: 'hidden' }
   const cleaned = parts.map(cleanSegment)
+  // Judged as written and as it will read: a dot behind a stripped character is still a dotfile.
+  if ([...parts, ...cleaned].some((s) => (s.startsWith('.') && s !== '.' && s !== '..') || s === '__MACOSX')) return { ok: false, reason: 'hidden' }
   if (cleaned.some((s) => s === '' || s === '.' || s === '..')) return { ok: false, reason: 'unsafe' }
   if (cleaned.length - 1 > ZIP_MAX_DEPTH) return { ok: false, reason: 'deep' }
   return { ok: true, folder: cleaned.slice(0, -1), file: cleaned[cleaned.length - 1] }
@@ -129,7 +142,8 @@ const REASON: Record<'hidden' | 'unsafe' | 'deep' | 'empty', string> = {
 export function planZip(entries: readonly ZipEntry[]): ZipPlan {
   const rows: PlannedRow[] = []
   const skipped: SkippedFile[] = []
-  const companions: Array<{ key: string; folder: string; path: string; used: boolean }> = []
+  const companions: Record<string, Companion[]> = {}
+  const companionPaths: Array<{ folder: string; path: string }> = []
   let total = 0
   for (const entry of entries) {
     if (entry.dir) continue
@@ -142,7 +156,9 @@ export function planZip(entries: readonly ZipEntry[]): ZipPlan {
     const path = [...split.folder, split.file].join('/')
     const ext = extOf(split.file)
     if ((COMPANION_EXT as readonly string[]).includes(ext)) {
-      companions.push({ key: entry.name, folder: split.folder.join('/'), path, used: false })
+      const folder = split.folder.join('/')
+      ;(companions[folder] ??= []).push({ key: String(entry.index), file: split.file.toLowerCase(), size: entry.size })
+      companionPaths.push({ folder, path })
       continue
     }
     const kind: RowKind | null = (SNO_EXT as readonly string[]).includes(ext) ? 'sno' : (MESH_EXT as readonly string[]).includes(ext) ? 'mesh' : null
@@ -156,16 +172,36 @@ export function planZip(entries: readonly ZipEntry[]): ZipPlan {
     else if (entry.size > ZIP_MAX_ENTRY_BYTES) error = `Over ${ZIP_MAX_ENTRY_BYTES / 1048576} MB`
     else if (total + entry.size > ZIP_MAX_TOTAL_BYTES) error = `Past ${ZIP_MAX_TOTAL_BYTES / 1048576} MB for the zip`
     if (!error) total += entry.size
-    rows.push({ key: entry.name, path, name, folder: split.folder, kind, size: entry.size, companions: [], error })
+    rows.push({ key: String(entry.index), path, name, folder: split.folder, kind, size: entry.size, error })
   }
-  // An OBJ's MTL and a glTF's .bin travel with the models in their own folder.
-  for (const row of rows) {
-    if (row.kind !== 'mesh' || !/\.(obj|gltf)$/i.test(row.path)) continue
-    const here = row.folder.join('/')
-    for (const c of companions) if (c.folder === here) { row.companions.push(c.key); c.used = true }
+  // An MTL or .bin is read with an OBJ or glTF in its own folder that names
+  // it (store/useShardImport), never on its own: one with no such model
+  // beside it is listed as skipped.
+  const users = new Set(rows.filter((r) => r.kind === 'mesh' && /\.(obj|gltf)$/i.test(r.path)).map((r) => r.folder.join('/')))
+  for (const c of companionPaths) if (!users.has(c.folder)) skipped.push({ path: c.path, reason: 'Not a shard file' })
+  return { rows, skipped, companions, total }
+}
+
+/**
+ * The companions a model reads: those it names (an OBJ's mtllib, a glTF's
+ * buffer URIs), matched by file name in its folder, one entry per name; else
+ * the one sharing its base name. Never every file in the folder, so a zip of
+ * a thousand aliases of one large MTL costs one read, not a thousand.
+ */
+export function companionsFor(modelFile: string, named: readonly string[], here: readonly Companion[]): Companion[] {
+  const pick = new Map<string, Companion>()
+  const wanted = named.map((n) => (n.replace(/\\/g, '/').split('/').pop() ?? n).trim().toLowerCase()).filter(Boolean)
+  for (const w of wanted) {
+    if (pick.has(w)) continue
+    const c = here.find((x) => x.file === w)
+    if (c) pick.set(w, c)
   }
-  for (const c of companions) if (!c.used) skipped.push({ path: c.path, reason: 'Not a shard file' })
-  return { rows, skipped }
+  if (wanted.length === 0) {
+    const base = modelFile.toLowerCase().replace(/\.[^.]+$/, '')
+    const c = here.find((x) => x.file.replace(/\.[^.]+$/, '') === base)
+    if (c) pick.set(c.file, c)
+  }
+  return [...pick.values()]
 }
 
 /** What happens to a shard whose name is already taken. */

@@ -493,17 +493,19 @@ export interface WorkshopState {
   /**
    * Bulk import's add (store/useShardImport): a deep copy of the model as a
    * new shard of yours under exactly `name`, nothing selected or opened. The
-   * caller has already decided what a taken name means. Its id.
+   * caller has already decided what a taken name means. Its id, and
+   * whether the list reached storage (false when storage is full: the shard
+   * is in the workshop for now, and gone on a reload).
    */
-  addShard: (model: ShardModel, name: string) => string
+  addShard: (model: ShardModel, name: string) => { id: string; saved: boolean }
   /**
    * Bulk import's UPDATE: the shard keeps its id, its name and its credit
    * and takes everything drawn from `model`, so PUBLISH AGAIN sends the new
    * version to the same address and every object placing it follows. On the
-   * bench, one UNDO brings the old version back. False when there is no such
-   * shard.
+   * bench, one UNDO brings the old version back. 'missing' when there is no
+   * such shard, 'unsaved' when storage refused the list.
    */
-  replaceShard: (id: string, model: ShardModel) => boolean
+  replaceShard: (id: string, model: ShardModel) => 'saved' | 'unsaved' | 'missing'
   current: () => ShardModel | null
 }
 
@@ -541,8 +543,9 @@ export function newestId(shards: ShardModel[]): string | null {
   return best?.id ?? null
 }
 
-function save(shards: ShardModel[]): void {
-  try { localStorage.setItem(STORAGE, JSON.stringify(shards)) } catch { /* quota or private mode */ }
+/** Whether the list reached storage; false when it is full or refused (private mode). */
+function save(shards: ShardModel[]): boolean {
+  try { localStorage.setItem(STORAGE, JSON.stringify(shards)); return true } catch { return false }
 }
 
 /**
@@ -1494,14 +1497,14 @@ export const useWorkshop = create<WorkshopState>((set, get) => {
     addShard: (model, name) => {
       const copy: ShardModel = { ...model, id: uuid(), name: name.slice(0, 64), vertices: model.vertices.map(cloneVertex), faces: model.faces.map((f) => [...f] as [number, number, number]), updatedAt: Date.now() }
       const list = [...get().shards, copy]
-      set({ shards: list }); save(list)
-      return copy.id
+      set({ shards: list })
+      return { id: copy.id, saved: save(list) }
     },
 
     replaceShard: (id, model) => {
       const { shards, currentId, past } = get()
       const i = shards.findIndex((s) => s.id === id)
-      if (i < 0) return false
+      if (i < 0) return 'missing'
       const old = shards[i]
       const { credit: _drop, ...drawn } = model as ShardModel & { credit?: unknown }
       const kept = (old as ShardModel & { credit?: unknown }).credit
@@ -1519,8 +1522,7 @@ export const useWorkshop = create<WorkshopState>((set, get) => {
       // On the bench it is an edit like any other: UNDO brings the old one back.
       if (id === currentId) set({ shards: list, past: [...past.slice(-(HISTORY - 1)), old], future: [], selection: [], partSel: [], selectedFace: null, facePick: [] })
       else set({ shards: list })
-      save(list)
-      return true
+      return save(list) ? 'saved' : 'unsaved'
     },
 
     current: () => get().shards.find((s) => s.id === get().currentId) ?? null,

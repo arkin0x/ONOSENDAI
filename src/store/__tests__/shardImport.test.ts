@@ -298,3 +298,106 @@ describe('folders', () => {
     expect(mine().filter((s) => s.name === 'hall-straight')).toHaveLength(2)
   })
 })
+
+describe('review fixes', () => {
+  it('reads an OBJ with only the MTL it names, never the other MTLs in its folder', async () => {
+    const obj = 'mtllib paint.mtl\nv 0 0 0\nv 1 0 0\nv 0 1 0\nv 0 0 1\nusemtl red\nf 1 2 3\nf 1 3 4\nf 1 4 2\nf 2 4 3\n'
+    const files: Record<string, Uint8Array> = {
+      'k/chair.obj': strToU8(obj),
+      'k/paint.mtl': strToU8('newmtl red\nKd 1 0 0\n'),
+    }
+    // Large, well compressed MTLs nothing names: reading them all was the bomb.
+    for (let i = 0; i < 20; i++) files[`k/alias${i}.mtl`] = new Uint8Array(4 * 1024 * 1024)
+    await imp().openZip(new File([zipSync(files)], 'obj.zip'))
+    expect(rowOf('chair').read).toBe('ok')
+    const colors = new Set(rowOf('chair').shard!.vertices.map((v) => v.c.join(',')))
+    expect([...colors].some((c) => c.startsWith('255,') || c.startsWith('1,'))).toBe(true)
+  })
+
+  it('imports both of two entries that share one name', async () => {
+    const twice = zipSync({ 'k/x.json': strToU8(sno('a')) })
+    // fflate keys files by name, so the second entry is spliced in by hand: a second central record for the same data.
+    const eocd = twice.length - 22
+    const cdOff = twice[eocd + 16] | (twice[eocd + 17] << 8) | (twice[eocd + 18] << 16) | (twice[eocd + 19] << 24)
+    const cd = twice.subarray(cdOff, eocd)
+    const out = new Uint8Array(twice.length + cd.length)
+    out.set(twice.subarray(0, eocd))
+    out.set(cd, eocd)
+    out.set(twice.subarray(eocd), eocd + cd.length)
+    const e = eocd + cd.length
+    out[e + 8] = 2; out[e + 10] = 2
+    const size = cd.length * 2
+    out[e + 12] = size & 255; out[e + 13] = (size >> 8) & 255
+    await imp().openZip(new File([out], 'twice.zip'))
+    expect(imp().rows).toHaveLength(2)
+    expect(imp().rows[0].key).not.toBe(imp().rows[1].key)
+    imp().setDupMode('copy')
+    await imp().start()
+    expect(mine().map((x) => x.name).sort()).toEqual(['x', 'x copy'])
+  })
+
+  it('an exception mid-run marks the row failed and leaves the modal closable', async () => {
+    vi.mocked(folderApi).mockReturnValue({ createFolderPath: () => { throw new Error('folder store broke') }, assignToFolder: () => {} })
+    await imp().openZip(kitZip())
+    await imp().start()
+    expect(imp().phase).toBe('done')
+    expect(rowOf('hall-straight').run).toBe('failed')
+    expect(rowOf('hall-straight').failure).toBe('folder store broke')
+    imp().close()
+    expect(imp().open).toBe(false)
+  })
+
+  it('a second zip waits while a run is going, and STOP still ends the wait', async () => {
+    useCyberspace.setState({ signEvent: () => new Promise(() => {}) })
+    await imp().openZip(kitZip())
+    const running = imp().start()
+    await vi.waitFor(() => expect(rowOf('hall-straight').run).toBe('working'))
+    await imp().openZip(new File([zipSync({ 'other.json': strToU8(sno('other')) })], 'other.zip'))
+    expect(imp().fileName).toBe('maze-kit.zip')
+    imp().stop()
+    await running
+    expect(rowOf('hall-straight').failure).toBe('Stopped')
+  })
+
+  it('a run that cannot save the workshop stops before publishing', async () => {
+    const setItem = localStorage.setItem.bind(localStorage)
+    const spy = vi.spyOn(localStorage, 'setItem').mockImplementation((k: string, v: string) => {
+      if (k === 'onosendai:shards') throw new DOMException('full', 'QuotaExceededError')
+      setItem(k, v)
+    })
+    try {
+      await imp().openZip(kitZip())
+      await imp().start()
+    } finally { spy.mockRestore() }
+    expect(rowOf('hall-straight').run).toBe('failed')
+    expect(rowOf('hall-straight').failure).toBe('Workshop storage is full')
+    expect(imp().stall).toMatch(/storage/)
+    expect(rowOf('rotunda').run).toBe('idle')
+    expect(sent()).toHaveLength(0)
+  })
+
+  it('a row SKIP left out comes back when the answer changes after a run', async () => {
+    useWorkshop.getState().importText(sno('hall-straight', 3))
+    await imp().openZip(kitZip())
+    await imp().start()
+    expect(rowOf('hall-straight').run).toBe('skipped')
+    imp().setDupMode('copy')
+    expect(rowOf('hall-straight').run).toBe('idle')
+    await imp().retry()
+    expect(rowOf('hall-straight').run).toBe('done')
+    expect(mine().map((x) => x.name)).toContain('hall-straight copy')
+  })
+
+  it('STOP ends a rate-limit wait at once', async () => {
+    timing.rateBackoffMs = 60_000
+    vi.mocked(publishMany).mockImplementation(async () => ({ ok: false, reason: 'rate-limited: slow down' }))
+    await imp().openZip(kitZip())
+    const running = imp().start()
+    await vi.waitFor(() => expect(vi.mocked(publishMany)).toHaveBeenCalled())
+    const t = Date.now()
+    imp().stop()
+    await running
+    expect(Date.now() - t).toBeLessThan(2000)
+    expect(imp().phase).toBe('done')
+  })
+})

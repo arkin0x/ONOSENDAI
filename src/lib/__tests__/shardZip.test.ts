@@ -15,11 +15,12 @@ import { describe, expect, it } from 'vitest'
 import type { ZipEntry } from '../zipRead'
 import {
   NAME_MAX, ZIP_MAX_DEPTH, ZIP_MAX_ENTRY_BYTES, ZIP_MAX_SHARDS, ZIP_MAX_TOTAL_BYTES,
-  cleanSegment, copyName, dupAction, dupKey, findDups, nameOf, planZip, splitPath,
+  cleanSegment, companionsFor, copyName, dupAction, dupKey, findDups, nameOf, planZip, splitPath,
 } from '../shardZip'
 
+let nextIndex = 0
 const entry = (name: string, size = 100, extra: Partial<ZipEntry> = {}): ZipEntry =>
-  ({ name, dir: name.endsWith('/'), method: 8, encrypted: false, compressedSize: size, size, offset: 0, ...extra })
+  ({ index: nextIndex++, name, dir: name.endsWith('/'), method: 8, encrypted: false, compressedSize: size, size, offset: 0, crc: 0, ...extra })
 
 describe('splitPath', () => {
   it('splits folders from the file, dropping empty and dot segments and reading backslashes', () => {
@@ -38,6 +39,11 @@ describe('splitPath', () => {
     for (const p of ['.DS_Store', 'kit/.hidden.json', '.git/config.json', '__MACOSX/kit/._a.json', 'kit/__MACOSX/a.json']) {
       expect(splitPath(p)).toEqual({ ok: false, reason: 'hidden' })
     }
+  })
+
+  it('judges a dotfile after cleaning too, so a stripped character cannot hide one', () => {
+    expect(splitPath(`${String.fromCharCode(0x202e)}.secret/x.json`)).toEqual({ ok: false, reason: 'hidden' })
+    expect(splitPath(`kit/${String.fromCharCode(0x061c)}.env.json`)).toEqual({ ok: false, reason: 'hidden' })
   })
 
   it('removes control and direction-override characters, and refuses a segment that is nothing after', () => {
@@ -98,12 +104,27 @@ describe('planZip', () => {
     ])
   })
 
-  it('attaches an MTL or .bin to the OBJ and glTF models in its own folder, and skips one nothing uses', () => {
-    const plan = planZip([entry('a/chair.obj'), entry('a/chair.mtl'), entry('b/lamp.gltf'), entry('b/lamp.bin'), entry('c/orphan.mtl'), entry('a/box.ply')])
-    expect(plan.rows.find((r) => r.name === 'chair')!.companions).toEqual(['a/chair.mtl'])
-    expect(plan.rows.find((r) => r.name === 'lamp')!.companions).toEqual(['b/lamp.bin'])
-    expect(plan.rows.find((r) => r.name === 'box')!.companions).toEqual([])
+  it('keeps MTL and .bin files by folder for the OBJ and glTF models there, and skips one with no such model', () => {
+    const plan = planZip([entry('a/chair.obj'), entry('a/Chair.MTL'), entry('b/lamp.gltf'), entry('b/lamp.bin'), entry('c/orphan.mtl'), entry('c/box.ply')])
+    expect(plan.companions.a.map((c) => c.file)).toEqual(['chair.mtl'])
+    expect(plan.companions.b.map((c) => c.file)).toEqual(['lamp.bin'])
     expect(plan.skipped).toEqual([{ path: 'c/orphan.mtl', reason: 'Not a shard file' }])
+    // Keys are directory places, unique even for two entries with one name.
+    const twice = planZip([entry('k/x.json'), entry('k/x.json')])
+    expect(new Set(twice.rows.map((r) => r.key)).size).toBe(2)
+  })
+
+  it('reads only the companions a model names, once each, else the one sharing its base name', () => {
+    const here = [
+      { key: '1', file: 'materials.mtl', size: 10 },
+      { key: '2', file: 'materials.mtl', size: 10 },
+      { key: '3', file: 'chair.mtl', size: 10 },
+      ...Array.from({ length: 500 }, (_, i) => ({ key: `x${i}`, file: `alias${i}.mtl`, size: 50 * 1024 * 1024 })),
+    ]
+    expect(companionsFor('chair.obj', ['materials.mtl', 'MATERIALS.mtl', 'sub\\materials.mtl'], here).map((c) => c.key)).toEqual(['1'])
+    expect(companionsFor('chair.obj', [], here).map((c) => c.key)).toEqual(['3'])
+    expect(companionsFor('stool.obj', [], here)).toEqual([])
+    expect(companionsFor('lamp.gltf', ['missing.bin'], here)).toEqual([])
   })
 
   it('marks rows over the per-file and per-zip size limits, encrypted ones and unknown compression, before reading', () => {

@@ -29,11 +29,11 @@ const MODES: Array<{ mode: DupMode; label: string; help: string }> = [
 
 const size = (n: number): string => (n < 1024 ? `${n} B` : n < 1048576 ? `${(n / 1024).toFixed(n < 10240 ? 1 : 0)} KB` : `${(n / 1048576).toFixed(1)} MB`)
 
-/** The key a row's picture is kept under: one zip's rows never meet another's. */
-const thumbKey = (fileName: string, key: string): string => `zip:${fileName}:${key}`
+/** The key a row's picture is kept under: per open, so a zip opened again (edited, same name) is drawn again. */
+const thumbKey = (openId: number, key: string): string => `zip:${openId}:${key}`
 
-function Thumb({ row, fileName }: { row: ImportRow; fileName: string }): JSX.Element {
-  const k = thumbKey(fileName, row.key)
+function Thumb({ row, openId }: { row: ImportRow; openId: number }): JSX.Element {
+  const k = thumbKey(openId, row.key)
   const url = useThumbs((s) => s.urls[k])
   useEffect(() => { if (row.shard && !url) useThumbs.getState().request(k, row.shard) }, [k, row.shard, url])
   return <span className="zipimport__thumb">{url ? <img src={url} alt="" width={40} height={40} /> : null}</span>
@@ -89,7 +89,7 @@ export function ZipImport(): JSX.Element | null {
   })()
 
   return createPortal(
-    <div className="modal" role="dialog" aria-modal="true" aria-label={`Import ${s.fileName}`} onPointerDown={() => { if (!running) s.close() }}>
+    <div className="modal" role="dialog" aria-modal="true" aria-label={`Import ${s.fileName}`} onPointerDown={() => { if (!running && !s.ran) s.close() }}>
       <ThumbStage />
       <div className="modal__card modal__card--list zipimport" onPointerDown={(e) => e.stopPropagation()}>
         <h2 className="modal__title zipimport__title">IMPORT {s.fileName.toUpperCase()}</h2>
@@ -118,7 +118,7 @@ export function ZipImport(): JSX.Element | null {
             return (
               <li key={r.key} className={`zipimport__row ${r.picked ? '' : 'is-off'}`}>
                 <Checkbox aria-label={`Import ${r.path}`} checked={r.picked} disabled={running || r.read === 'error' || r.run === 'done'} onCheckedChange={() => s.toggle(r.key)} />
-                <Thumb row={r} fileName={s.fileName} />
+                <Thumb row={r} openId={s.openId} />
                 <span className="zipimport__text">
                   <span className="zipimport__name">{r.name}</span>
                   <span className="zipimport__meta">

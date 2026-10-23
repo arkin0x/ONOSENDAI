@@ -674,6 +674,8 @@ export function Workshop(): JSX.Element | null {
   const importFromFiles = async (list: FileList | File[] | null): Promise<void> => {
     const files = list ? Array.from(list) : []
     // A zip is bulk import: every shard file in it a new shard of yours (workshop/ZipImport).
+    // While the import's list is open, a drop on it (React carries a portal's events here) changes nothing.
+    if (useShardImport.getState().open) return
     const zips = files.filter(isZip)
     if (zips.length) {
       if (zips.length > 1 || files.length > 1) { say('Import one zip at a time, on its own.'); return }

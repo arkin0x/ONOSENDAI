@@ -20,6 +20,8 @@ import { Inflate } from 'fflate'
 
 /** One entry in the central directory, as the zip states it. */
 export interface ZipEntry {
+  /** Its place in the central directory: unique, where a name need not be. */
+  index: number
   /** The name as written, '/' or '\' separated. */
   name: string
   /** Ends in a slash: a folder, with no bytes of its own. */
@@ -33,6 +35,8 @@ export interface ZipEntry {
   size: number
   /** Where the local header starts. */
   offset: number
+  /** CRC-32 of the inflated bytes, as stated. */
+  crc: number
 }
 
 export class ZipError extends Error {
@@ -80,6 +84,7 @@ export function listZip(bytes: Uint8Array, maxEntries: number): ZipEntry[] {
   for (let n = 0; n < count; n++) {
     if (p + 46 > e || u32(bytes, p) !== CENTRAL) throw new ZipError('That zip is damaged.')
     const flags = u16(bytes, p + 8)
+    const crc = u32(bytes, p + 16)
     const method = u16(bytes, p + 10)
     const compressedSize = u32(bytes, p + 20)
     const size = u32(bytes, p + 24)
@@ -92,10 +97,27 @@ export function listZip(bytes: Uint8Array, maxEntries: number): ZipEntry[] {
     const name = names.decode(bytes.subarray(p + 46, p + 46 + nameLen))
     const zip64 = compressedSize === 0xffffffff || size === 0xffffffff || offset === 0xffffffff
     if (zip64) throw new ZipError('That zip is in the zip64 format, which import does not read. Zip it again with a plain zip tool.')
-    out.push({ name, dir: /[\\/]$/.test(name), method, encrypted: (flags & 1) === 1, compressedSize, size, offset })
+    out.push({ index: n, name, dir: /[\\/]$/.test(name), method, encrypted: (flags & 1) === 1, compressedSize, size, offset, crc })
     p = end
   }
   return out
+}
+
+const CRC_TABLE = (() => {
+  const t = new Uint32Array(256)
+  for (let n = 0; n < 256; n++) {
+    let c = n
+    for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1
+    t[n] = c >>> 0
+  }
+  return t
+})()
+
+/** CRC-32 as zip writes it. */
+export function crc32(bytes: Uint8Array): number {
+  let c = 0xffffffff
+  for (let i = 0; i < bytes.length; i++) c = CRC_TABLE[(c ^ bytes[i]) & 0xff] ^ (c >>> 8)
+  return (c ^ 0xffffffff) >>> 0
 }
 
 /** Deflate's ceiling: one input byte inflates to at most about this many. */
@@ -120,7 +142,7 @@ export function readEntry(bytes: Uint8Array, entry: ZipEntry, cap: number): Uint
   if (stop > bytes.length) throw new ZipError('It is damaged.')
   const data = bytes.subarray(start, stop)
   if (entry.method === 0) {
-    if (data.length !== entry.size) throw new ZipError('It is damaged.')
+    if (data.length !== entry.size || crc32(data) !== entry.crc) throw new ZipError('It is damaged.')
     return data.slice()
   }
   if (entry.method !== 8) throw new ZipError('It is compressed in a way import does not read.')
@@ -135,7 +157,8 @@ export function readEntry(bytes: Uint8Array, entry: ZipEntry, cap: number): Uint
   })
   try {
     // Each push no larger than what is left of the allowance could inflate
-    // to, so one push never overshoots the cap by more than the cap itself.
+    // to, so one push overshoots it by at most the allowance, or by what
+    // MIN_CHUNK inflates to (about half a megabyte) near the end.
     let i = 0
     do {
       const n = Math.max(MIN_CHUNK, Math.min(MAX_CHUNK, Math.floor((limit - total) / MAX_RATIO)))
@@ -152,5 +175,6 @@ export function readEntry(bytes: Uint8Array, entry: ZipEntry, cap: number): Uint
   const out = new Uint8Array(total)
   let at = 0
   for (const part of parts) { out.set(part, at); at += part.length }
+  if (crc32(out) !== entry.crc) throw new ZipError('It is damaged.')
   return out
 }

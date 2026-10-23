@@ -93,6 +93,15 @@ describe('listZip and readEntry', () => {
     expect(() => readEntry(bytes, entry, MB)).toThrow(/damaged/)
   })
 
+  it('calls an entry damaged when its CRC does not match, stored or deflated', () => {
+    for (const level of [0, 6] as const) {
+      const bytes = zipSync({ 'a.json': [strToU8('{"v":2,"name":"hall"}'), { level }] })
+      const at = centralAt(bytes, 'a.json')
+      bytes[at + 16] ^= 0xff
+      expect(() => readEntry(bytes, listZip(bytes, 10)[0], MB)).toThrow(/damaged/)
+    }
+  })
+
   it('refuses encrypted entries, and other compression methods', () => {
     const bytes = zipSync({ 'a.json': strToU8('{}') })
     const at = centralAt(bytes, 'a.json')

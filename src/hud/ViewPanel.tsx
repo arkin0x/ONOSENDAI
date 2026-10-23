@@ -2,14 +2,16 @@
  * ViewPanel.tsx - VIEW: what the scene draws, one switch to a row.
  *
  * Four things drawn in the scene can be turned off: the terrain dots, the hX
- * boxes, the chain trail and the region key cages. Their switches were in
+ * boxes, the chain trail and the region key cages. Another switch shades the
+ * shards as if lit from your view, the headlamp (scene/headlamp.ts; arkinox,
+ * 2026-10-23: "add the toggle to the View panel in the menu"). Their switches were in
  * three places (two chips under Movement proof, a switch in Proof chain, a
  * checkbox inside the Region keys list) and are here only now, just above
  * the Legend that says what each one means (arkinox, 2026-10-09). Each row
  * is a title and a gray line under it, in the style the trail switch had.
  *
  * Every switch writes the same store flag its old control did, kept on this
- * device as before (store/useLayers.ts for the dots and boxes, useCyberspace
+ * device as before (store/useLayers.ts for the dots, boxes and headlamp, useCyberspace
  * showTrail and showSecrets for the other two). It is a view preference
  * only: nothing here changes a proof, a move, the cursor or the chain.
  */
@@ -33,6 +35,7 @@ export function ViewPanel(): JSX.Element {
   const boxes = useLayers((s) => s.boxes)
   const walkAvatarHidden = useLayers((s) => s.walkAvatarHidden)
   const walkLookSphere = useLayers((s) => s.walkLookSphere)
+  const headlamp = useLayers((s) => s.headlamp)
   const showTrail = useCyberspace((s) => s.showTrail)
   const showSecrets = useCyberspace((s) => s.showSecrets)
 
@@ -89,6 +92,15 @@ export function ViewPanel(): JSX.Element {
       on: showSecrets,
       set: (v) => useCyberspace.getState().setShowSecrets(v),
     },
+    // On by default. Off draws every shard face exactly its own color, as
+    // the world always had it (scene/headlamp.ts).
+    {
+      id: 'view-headlamp',
+      title: 'Headlamp',
+      hint: 'Light shards from your view so their shape and depth show.',
+      on: headlamp,
+      set: (v) => useLayers.getState().setLayer('headlamp', v),
+    },
   ]
 
   return (
@@ -115,7 +127,10 @@ export function ViewPanel(): JSX.Element {
         ball above the menu button while you walk: drag it to look around, as a
         drag on the scene does. Chain trail draws your
         movement history as a red line. Region keys draws a green cage around
-        each region you hold the key for.
+        each region you hold the key for. Headlamp lights shards from your view,
+        as a flashlight would: a face turned away from you, or far off, is
+        darker, so shapes of one color show their depth; off, every face is
+        exactly its own color.
       </Explanation>
     </section>
   )

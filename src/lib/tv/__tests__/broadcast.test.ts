@@ -5,7 +5,7 @@
  * page. Off it, none of that happens.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { CONTEXT_WAIT_MS, RELOAD_MAX_WAIT_MS, RELOADS_FREE, countTvFrame, isBroadcast, markBroadcastPage, parseBroadcast, recoverLostContext, reloadBroadcast, reloadWait, setBroadcastForTest } from '../broadcast'
+import { CONTEXT_WAIT_MS, RELOAD_MAX_WAIT_MS, RELOADS_FREE, broadcastText, countTvFrame, isBroadcast, markBroadcastPage, parseBroadcast, parseBroadcastText, recoverLostContext, reloadBroadcast, reloadWait, setBroadcastForTest } from '../broadcast'
 
 type Win = { location: { pathname: string; search: string }; __tvFrames?: number; __tvCtxLost?: number }
 let win: Win
@@ -48,6 +48,35 @@ describe('the broadcast flag', () => {
     vi.stubGlobal('window', undefined)
     setBroadcastForTest(null)
     expect(isBroadcast()).toBe(false)
+  })
+})
+
+describe('the text size (arkinox, 2026-10-23)', () => {
+  it('is normal, large or xl, and normal for anything else', () => {
+    expect(parseBroadcastText('?broadcast=1&text=large')).toBe('large')
+    expect(parseBroadcastText('?text=xl&broadcast=1')).toBe('xl')
+    expect(parseBroadcastText('?broadcast=1&text=normal')).toBe('normal')
+    expect(parseBroadcastText('?broadcast=1')).toBe('normal')
+    expect(parseBroadcastText('?broadcast=1&text=LARGE')).toBe('normal')
+    expect(parseBroadcastText('?broadcast=1&text=2')).toBe('normal')
+    expect(parseBroadcastText('?broadcast=1&text=toString')).toBe('normal')
+  })
+
+  it('is read with the flag from the address the page loaded on', () => {
+    win.location = { pathname: '/tv', search: '?broadcast=1&text=xl' }
+    setBroadcastForTest(null)
+    expect(broadcastText()).toBe(2.6)
+    win.location = { pathname: '/tv', search: '?broadcast=1&text=large' }
+    expect(broadcastText()).toBe(2.6)
+  })
+
+  it('does nothing off the stream, whatever the address says', () => {
+    win.location = { pathname: '/tv', search: '?text=xl' }
+    setBroadcastForTest(null)
+    expect(broadcastText()).toBe(1)
+    win.location = { pathname: '/', search: '?broadcast=1&text=xl' }
+    setBroadcastForTest(null)
+    expect(broadcastText()).toBe(1)
   })
 })
 

@@ -14,7 +14,7 @@
  */
 
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { useFrame } from '@react-three/fiber'
+import { useFrame, useThree } from '@react-three/fiber'
 import {
   AdditiveBlending, BufferAttribute, BufferGeometry, DynamicDrawUsage, EdgesGeometry, Group, IcosahedronGeometry,
   Line, LineBasicMaterial, ShaderMaterial, Vector3, type PerspectiveCamera,
@@ -28,6 +28,7 @@ import { CUT_MS } from '../hud/TvSegments'
 import { BURST_COLOR_GLSL, BurstLines } from './StopBurst'
 import { WorldLabel } from './WorldLabel'
 import { AVATAR_RED } from './tvPainter'
+import { broadcastScale } from '../lib/tv/broadcast'
 
 /** How long the rider takes from A to B, seconds: slow enough to watch it go. */
 export const TRAVEL_S = 4.2
@@ -82,6 +83,9 @@ export function TvJump({ axes }: { axes: ViewAxes }): JSX.Element | null {
 function Ride({ jump, axes }: { jump: Jump; axes: ViewAxes }): JSX.Element {
   const anchor = useCyberspace((s) => s.anchor)
   const scaleExp = useCyberspace((s) => s.scaleExp)
+  // The blocks' labels as large as the stream's text asked (lib/tv/broadcast); 12 px on the site.
+  const frameW = useThree((s) => s.size.width)
+  const labelPx = 12 * broadcastScale(12, frameW)
   const [a, b] = useMemo(() => {
     const origin = alignedOrigin(anchor, scaleExp)
     return [markerCentre(jump.from.position, origin, scaleExp, axes), markerCentre(jump.to.position, origin, scaleExp, axes)]
@@ -185,7 +189,7 @@ function Ride({ jump, axes }: { jump: Jump; axes: ViewAxes }): JSX.Element {
       {/* A before the stop index has it is where the rider stood, which may
           not be the block: it says so rather than naming the block. */}
       {(one ? [jump.to] : [jump.from, jump.to]).map((end, i) => ({ at: i === 0 ? a : b, text: end.exact ? `BLOCK ${end.height}` : 'FROM HERE' })).map((l) => (
-        <WorldLabel key={l.text} text={l.text} color={BLOCK_COLOR} at={l.at} clear={{ trueSide: gibson, minPx: DEST_CUBE_PX }} align="center" px={12} opacity={0.95} />
+        <WorldLabel key={l.text} text={l.text} color={BLOCK_COLOR} at={l.at} clear={{ trueSide: gibson, minPx: DEST_CUBE_PX }} align="center" px={labelPx} opacity={0.95} />
       ))}
       {departed !== null && <BurstLines centre={a} bornAt={departed} />}
       {arrived !== null && <BurstLines centre={b} bornAt={arrived} />}

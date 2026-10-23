@@ -27,6 +27,11 @@
  * lands. Both travel inside the encrypted payload, so a finder decrypts the
  * pose along with the shape and sees it as it was placed.
  *
+ * CONSTRAIN MOVEMENT IN WALK MODE (OFF / ALL / OPAQUE, DECK-0003 §1.12) is the
+ * shard's WALK setting for this deployment, seeded from the shard and written
+ * into what is hidden like SCALE; EDIT shows it too. Not for a LIVE LINK,
+ * whose setting is its author's (lib/walkConstrain.ts).
+ *
  * Three more choices belong to the BAG rather than to this item, because a bag
  * is one event per author and region holding everything hidden there (spec
  * §7.6) (arkinox, 2026-10-01):
@@ -87,6 +92,7 @@ import { cloudKeyQuote, deployCeiling, deployRoute, localKeySeconds, needsAsk, r
 import { useEscape } from '../hooks/useEscape'
 import { fitCause, fitHeight, fitHeightAll, outsideAt, type FitPoint } from '../lib/deployFit'
 import { SHALLOW_WARN, shallowBag, shallowExplain } from '../lib/shallowBag'
+import { CONSTRAINS, CONSTRAIN_TIPS } from '../lib/walkConstrain'
 
 /**
  * The bar's classes. `pad` is whether the controls pad is on screen: with it,
@@ -181,6 +187,7 @@ export function DeployBar({ pad = false }: { pad?: boolean }): JSX.Element | nul
   const up = useShards((s) => s.deployUp)
   const spin = useShards((s) => s.deploySpin)
   const turn = useShards((s) => s.deployTurn)
+  const constrain = useShards((s) => s.deployConstrain)
   const follow = useShards((s) => s.deployFollow)
   // From the Shard Feed: a copy by default, LIVE LINK by reference (ruling B1).
   const fromFeed = useShards((s) => s.pending?.type === 'shard' && !!s.pending.object)
@@ -415,6 +422,26 @@ export function DeployBar({ pad = false }: { pad?: boolean }): JSX.Element | nul
             </button>
           ))}
           <button className="deploybar__btn deploybar__turn" disabled={turn.every((t) => t === 0)} onClick={() => useShards.getState().resetDeployTurn()} aria-label="Turn back to how it was built" {...noCallout}>RESET</button>
+        </DeployRow>
+      )}
+
+      {/* Whether a walker can cross it in WALK (DECK-0003 §1.12), for this
+          deployment, as SCALE is; the workshop's model keeps its own. Linked,
+          it is the author's. */}
+      {!isMessage && !link && (
+        <DeployRow kind="constrain" label="CONSTRAIN MOVEMENT IN WALK MODE">
+          <span className="deploybar__choices" role="group" aria-label="Constrain movement in WALK mode">
+          {CONSTRAINS.map((c) => (
+            <button
+              key={c}
+              className={`deploybar__toggle ${constrain === c ? 'is-on' : ''}`}
+              aria-pressed={constrain === c}
+              title={CONSTRAIN_TIPS[c]}
+              onClick={() => useShards.getState().setDeployConstrain(c)}
+              {...noCallout}
+            >{c.toUpperCase()}</button>
+          ))}
+          </span>
         </DeployRow>
       )}
 

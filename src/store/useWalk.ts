@@ -30,6 +30,12 @@
  * comes back to where you really stand, so the view eases back with it.
  * Steps already signed stay on the chain: they are real moves.
  *
+ * A shard can hold the walk (DECK-0003 §1.12, store/walkWalls.ts): a press
+ * whose step would cross a face of a shard set to constrain WALK stops short
+ * of the face (one gibson short at a fine zoom, at least the measure's error
+ * at a coarse one), or, with no room left, does not step at all. Only a press asks; HOP, VIEW and BUILD never do, and nothing about
+ * a move that is proved or signed changes.
+ *
  * `behind` is the walk's lag: the closed segments not yet proven, the one
  * computing included, and never the open one, which is still being walked.
  * It is what the LOSING SYNC warning counts, so the warning comes up only for
@@ -44,6 +50,7 @@ import { moveDirection, type MoveName } from '../lib/moves'
 import { clampAxis, stepFor, type AxisName, type Position } from '../lib/space'
 import { MAX_COMPUTE_HEIGHT, samePosition, useCyberspace } from './useCyberspace'
 import { BRIEF_TOAST_MS, useToast } from './useToast'
+import { stepLimit, wallItems, warmWalls } from './walkWalls'
 
 /** What the LOSING SYNC warning waits for: this many moves not yet proven. */
 export const SYNC_WARN_AT = 3
@@ -137,6 +144,8 @@ export const useWalk = create<WalkState>((set, get) => ({
     if (!useCyberspace.getState().atHead()) return
     const { position } = useCyberspace.getState()
     useCyberspace.setState({ walking: true, cursor: { ...position } })
+    // The shards' walls, and the objects they place, ready before the first step.
+    warmWalls(useCyberspace.getState().plane)
     clearSettle()
     set({ queue: [], open: null, running: null, behind: 0 })
   },
@@ -178,6 +187,15 @@ export const useWalk = create<WalkState>((set, get) => ({
     // Against the axis wall: nowhere to step.
     if (next[dir.axis] === from[dir.axis]) return
     const sign = dir.dir > 0 ? 1 : -1
+    // A shard that constrains WALK (DECK-0003 §1.12, store/walkWalls.ts):
+    // the step stops short of its face (a gibson short at a fine zoom), or does not go.
+    const length = sign > 0 ? next[dir.axis] - from[dir.axis] : from[dir.axis] - next[dir.axis]
+    const wall = stepLimit(from, dir.axis, sign, length, wallItems(cs.plane))
+    // One chip per wall: a held key's repeats do not churn the one toast slot.
+    const shown = useToast.getState().toast
+    if (wall.by && !(shown?.label === 'WALL' && shown.meta === wall.by.shard.name)) useToast.getState().show({ label: 'WALL', meta: wall.by.shard.name, mark: 'walk', ms: BRIEF_TOAST_MS })
+    if (wall.reach === 0n) return
+    next[dir.axis] = from[dir.axis] + wall.reach * BigInt(sign)
     if (open && open.axis === dir.axis && open.dir === sign && segmentAffordable(open.from, next, cs.plane)) {
       // On the same way: the open segment grows.
       set({ open: { ...open, end: next } })

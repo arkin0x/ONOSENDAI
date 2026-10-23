@@ -331,3 +331,29 @@ export function audioGain(source: Local, listener: Local, side: number, radius: 
   const t = Math.min(1, Math.max(0, (d - radius) / (edge - radius)))
   return 1 - t * t * (3 - 2 * t)
 }
+
+/**
+ * The fade sphere's next radius on the deploy bar's FADE stepper, in whole
+ * gibsons: the next power of two up or down from where it is, never past
+ * `max` (the distance to the region's nearest wall from where it lands, so
+ * the sphere never pokes out of the hide region) and never under 1. Null
+ * when there is no room for a sphere at all.
+ */
+export function fadeStep(current: number, max: number, dir: 1 | -1): number | null {
+  const top = Math.floor(max)
+  if (top < 1) return null
+  if (dir > 0) {
+    let p = 1
+    while (p <= current) p *= 2
+    return Math.min(p, top)
+  }
+  let p = 1
+  while (p * 2 < current) p *= 2
+  return Math.max(1, Math.min(p, top))
+}
+
+/** The `fade` a deploy writes at its landing point: whole gibsons, clamped to the room it has there; absent stays absent. */
+export function fadeAt(fade: number | undefined, at: Position, height: number): number | undefined {
+  if (fade === undefined) return undefined
+  return Math.max(0, Math.min(Math.floor(fade), Math.floor(inscribedRadius(sourceLocal(at, height), 2 ** height))))
+}

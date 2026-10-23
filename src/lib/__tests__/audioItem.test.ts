@@ -6,7 +6,7 @@
 
 import { describe, expect, it } from 'vitest'
 import {
-  AUDIO_KIND, audioFileName, audioGain, audioInnerTemplate, audioItemOf, decryptAudioFile, encryptAudioFile, fadeRadius,
+  AUDIO_KIND, audioFileName, fadeAt, fadeStep, audioGain, audioInnerTemplate, audioItemOf, decryptAudioFile, encryptAudioFile, fadeRadius,
   fetchableUrl, inscribedRadius, insideRegion, regionBase, sourceLocal, titleFromFileName, type AudioItem, type Local,
 } from '../audioItem'
 import { positionHex } from '../events'
@@ -216,5 +216,26 @@ describe('how loud it is (DECK-0007 §4)', () => {
     expect(corner).toBeLessThan(1)
     expect(insideRegion([0, 0, 64], side)).toBe(true)
     expect(insideRegion([0, 0, 64.1], side)).toBe(false)
+  })
+})
+
+describe('the FADE stepper on the deploy bar (step 3)', () => {
+  it('steps by powers of two, never past the nearest wall, never under 1', () => {
+    expect(fadeStep(5, 40, 1)).toBe(8)
+    expect(fadeStep(8, 40, 1)).toBe(16)
+    expect(fadeStep(32, 40, 1)).toBe(40)
+    expect(fadeStep(40, 40.5, 1)).toBe(40)
+    expect(fadeStep(16, 40, -1)).toBe(8)
+    expect(fadeStep(9, 40, -1)).toBe(8)
+    expect(fadeStep(1, 40, -1)).toBe(1)
+    expect(fadeStep(3, 0.5, 1)).toBeNull()
+  })
+
+  it('a deploy writes it in whole gibsons, clamped to the room where it really lands', () => {
+    const at = { x: (1n << 70n) + 10n, y: (1n << 70n) + 32n, z: (1n << 70n) + 32n }
+    // 10 gibsons from the region's low x wall (10.5 from the gibson centre).
+    expect(fadeAt(undefined, at, 6)).toBeUndefined()
+    expect(fadeAt(4.7, at, 6)).toBe(4)
+    expect(fadeAt(30, at, 6)).toBe(10)
   })
 })

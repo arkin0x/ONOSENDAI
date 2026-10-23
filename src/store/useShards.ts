@@ -83,7 +83,7 @@ import {
   isReference,
 } from '../lib/hidden'
 import { retractionTemplate } from '../lib/published'
-import { audioInnerTemplate, type AudioItem } from '../lib/audioItem'
+import { audioInnerTemplate, fadeAt, type AudioItem } from '../lib/audioItem'
 import { resealCopy } from '../lib/audioFile'
 import { openWithSecret, openWithSigner, openerFor, readContents, resealWithout, revealedIn, sealEntries, sealedInside, sealerOf, type OpeningKey } from '../lib/chests'
 import { openingKeys, type HeldPlace } from '../lib/inventory'
@@ -773,6 +773,8 @@ interface ShardsState {
   startDeployKey: (key: KeyItem) => void
   /** Hide audio the composer encrypted and uploaded (DECK-0007). */
   startDeployAudio: (audio: AudioItem, opts?: { server?: string; reseal?: boolean }) => void
+  /** The FADE stepper: the pending audio's full-volume sphere (a one-shot's trigger zone), in gibsons; undefined for the default, half the way to the wall. */
+  setDeployFade: (fade: number | undefined) => void
   /** Hide a chest as the composer drafted it; its contents are signed (the aimed ones already are) and sealed when it is hidden. */
   startDeployChest: (draft: ChestDraft & { lock: ChestLock }) => void
   /**
@@ -1354,6 +1356,13 @@ export const useShards = create<ShardsState>((set, get) => {
     }),
     startDeployMessage: (text) => set({ pending: { type: 'message', text }, ...freshDeploy }),
     startDeployKey: (key) => set({ pending: { type: 'key', key }, ...freshDeploy }),
+    setDeployFade: (fade) => {
+      const p = get().pending
+      if (p?.type !== 'audio') return
+      const { fade: _drop, ...rest } = p.audio
+      void _drop
+      set({ pending: { ...p, audio: fade === undefined ? rest : { ...rest, fade } } })
+    },
     startDeployAudio: (audio, opts) => set({ pending: { type: 'audio', audio, ...(opts?.reseal ? { reseal: true as const } : {}), ...(opts?.server ? { server: opts.server } : {}) }, ...freshDeploy }),
     // With shards aimed inside, the height starts at the fit that holds them
     // all (DeployBar, lib/deployFit.ts fitHeightAll) and follows the cursor
@@ -1572,7 +1581,11 @@ export const useShards = create<ShardsState>((set, get) => {
         if (!pending.name.trim() || pending.contents.length === 0 || !pending.lock) return
       } else if (pending.type === 'audio') {
         if (!pending.audio.url) return
-        audio = { ...pending.audio, title: pending.audio.title.trim() || 'audio', about: pending.audio.about.trim() }
+        // The sphere is set at the ghost; where it really lands it is clamped to the room it has there (never out of the hide region).
+        const fade = fadeAt(pending.audio.fade, at, deployHeight)
+        const { fade: _old, ...rest } = pending.audio
+        void _old
+        audio = { ...rest, ...(fade !== undefined ? { fade } : {}), title: pending.audio.title.trim() || 'audio', about: pending.audio.about.trim() }
         // A copy's template waits for its fresh key, inside the try below.
         if (!pending.reseal) innerTemplate = audioInnerTemplate(audio, at, plane, createdAt)
       } else {

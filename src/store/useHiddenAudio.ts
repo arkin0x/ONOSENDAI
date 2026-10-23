@@ -62,11 +62,14 @@ export const cardKey = (itemKey: string): string => `card:${itemKey}`
 export const worldKey = (itemKey: string): string => `world:${itemKey}`
 
 interface Voice {
-  el: HTMLAudioElement
-  url: string
+  /** The element a streamed voice plays from; absent for a file decoded whole (a short world file). */
+  el?: HTMLAudioElement
+  url?: string
   node: ThreeAudio<GainNode | PannerNode> | null
-  /** Try to play the element now; inside a gesture where a browser asks for one. */
+  /** Try to play now; inside a gesture where a browser asks for one. */
   play: () => void
+  /** Hold it where it is, to pick up there. */
+  pause: () => void
 }
 
 const voices = new Map<string, Voice>()
@@ -151,7 +154,7 @@ export function syncVoicePhases(): void {
     for (const key of voices.keys()) {
       const e = useHiddenAudio.getState().entries[key]
       // Paused where it is, so a one-shot does not run on unheard and is not over when sound is back.
-      if (e?.phase === 'playing') { voices.get(key)?.el.pause(); waitForTap(key) }
+      if (e?.phase === 'playing') { voices.get(key)?.pause(); waitForTap(key) }
     }
     return
   }
@@ -207,16 +210,20 @@ function release(key: string): void {
   const v = voices.get(key)
   if (!v) return
   voices.delete(key)
-  v.el.pause()
+  v.el?.pause()
+  // A file decoded whole plays from a buffer source, stopped here.
+  try { if (!v.el && v.node?.isPlaying) v.node.stop() } catch { /* already stopped */ }
   // three's disconnect parts the source only; its gain (and a panner) stay
   // wired to the listener, so they are parted too, or every voice leaves
   // live nodes in the graph.
   try { v.node?.disconnect() } catch { /* already apart */ }
   try { (v.node?.getOutput() as AudioNode | undefined)?.disconnect() } catch { /* already apart */ }
   try { v.node?.gain.disconnect() } catch { /* already apart */ }
-  v.el.removeAttribute('src')
-  v.el.load()
-  URL.revokeObjectURL(v.url)
+  if (v.el) {
+    v.el.removeAttribute('src')
+    v.el.load()
+  }
+  if (v.url) URL.revokeObjectURL(v.url)
 }
 
 /** Whether a voice is sounding, or about to. */
@@ -331,7 +338,7 @@ export async function playAudio(itemKey: string, audio: AudioItem, who?: MuteSub
       release(key)
       setEntry(key, { ...entry, phase: 'error', error: failWith(err) })
     })
-    voices.set(key, { el, url, node, play })
+    voices.set(key, { el, url, node, play, pause: () => el.pause() })
     play()
   } catch (err) {
     if (sessions.get(key) !== mine) return
@@ -359,6 +366,38 @@ export async function startWorld(itemKey: string, audio: AudioItem, onStarted?: 
   try {
     const blob = await openAudio(audio)
     if (sessions.get(key) !== mine) return
+    // A short loop is decoded whole and played from a buffer: no gap at its
+    // seam, and a buffer needs no tap of its own once sound is out. Short by
+    // a size whose worst case is bounded (DECODE_WHOLE_BYTES): no header can
+    // be trusted to say how long a file is (review of #468).
+    const buffer = audio.loop && blob.size <= DECODE_WHOLE_WAV_BYTES && decodeWholeOk(new Uint8Array(await blob.arrayBuffer()), blob.size, audioContext()?.sampleRate || 48_000) ? await shortLoopBuffer(blob) : null
+    if (sessions.get(key) !== mine) return
+    if (buffer) {
+      const node = new PositionalAudio(l)
+      node.setRolloffFactor(0)
+      node.setBuffer(buffer)
+      node.setLoop(audio.loop)
+      node.setVolume(pendingGain.get(key) ?? 0)
+      // A one-shot that reaches its end is let go, as an element's 'ended' does.
+      const ended = node.onEnded.bind(node)
+      node.onEnded = () => { ended(); if (sessions.get(key) === mine) stopVoice(key) }
+      const entry = { title: audio.title, mode: 'world' as const, itemKey }
+      let started = false
+      const play = (): void => {
+        if (sessions.get(key) !== mine) return
+        if (!audioRunning()) { waitForTap(key); return }
+        if (!node.isPlaying) node.play()
+        waitingPlays.delete(key)
+        armGesture()
+        setEntry(key, { ...entry, phase: 'playing' })
+        failures.delete(itemKey)
+        if (!started) { started = true; onStarted?.() }
+      }
+      voices.set(key, { node, play, pause: () => { if (node.isPlaying) node.pause() } })
+      if (audioRunning()) play()
+      else waitForTap(key)
+      return
+    }
     const url = URL.createObjectURL(blob)
     let el: HTMLAudioElement
     let node: PositionalAudio
@@ -375,13 +414,117 @@ export async function startWorld(itemKey: string, audio: AudioItem, onStarted?: 
     }
     const entry = { title: audio.title, mode: 'world' as const, itemKey }
     const play = playerOf(key, mine, el, entry, true, onStarted, (err) => worldFailure(itemKey, err))
-    voices.set(key, { el, url, node, play })
+    voices.set(key, { el, url, node, play, pause: () => el.pause() })
     if (audioRunning()) play()
     else waitForTap(key)
   } catch (err) {
     if (sessions.get(key) !== mine) return
     worldFailure(itemKey, err)
   }
+}
+
+/**
+ * When a loop is decoded whole: only when its file (decrypted) is at most
+ * DECODE_WHOLE_BYTES, or DECODE_WHOLE_WAV_BYTES for uncompressed WAV by its
+ * own bytes (decodeWholeOk, isPcmWav; never by the `m` tag). Nothing in a file can be trusted to say how long it
+ * is (a hider writes the headers), and decodeAudioData allocates the whole
+ * buffer before anything can refuse it, so the bound is the file's size
+ * against the lowest bitrate a decoder plays: 64 KB at 6 kbps (Opus's floor;
+ * MP3's is 8) is about 87 s, which at 48 kHz in stereo float is about
+ * 33 MB. That is the most one decoded loop can hold, and at most MAX_VOICES
+ * sound at once. A loop that size at an ordinary bitrate is a few seconds:
+ * the water trickles and drones it is for. Longer loops stream, with a small
+ * seam where they wrap. After decoding, more than two channels or more than
+ * DECODE_WHOLE_MAX_PCM bytes is still let go and streamed.
+ */
+export const DECODE_WHOLE_BYTES = 64 * 1024
+/** An uncompressed WAV up to this size is decoded whole when its exact decoded size, read from its own `fmt ` and `data` chunks, fits the budget. */
+export const DECODE_WHOLE_WAV_BYTES = 1024 * 1024
+export const DECODE_WHOLE_MAX_PCM = 40 * 1024 * 1024
+
+/**
+ * How many bytes an uncompressed WAV decodes to on a context running at
+ * `ctxRate`, read from its own bytes (never the `m` tag a hider writes):
+ * a RIFF/WAVE file whose `fmt ` chunk says PCM (1) or float (3), at 8 to
+ * 192 kHz, 1 or 2 channels, 8 to 32 bits, with its `data` size. Its
+ * samples are its data, so this is exact: frames, resampled to the
+ * context's rate, by its channels, 4 bytes each. Null when it is not such
+ * a file (MP3 wrapped in WAV, 0x55, is not), or says anything out of range.
+ */
+export function wavDecodedBytes(b: Uint8Array, ctxRate: number): number | null {
+  const ascii = (at: number, t: string): boolean => [...t].every((c, k) => b[at + k] === c.charCodeAt(0))
+  const u16 = (at: number): number => b[at] | (b[at + 1] << 8)
+  const u32 = (at: number): number => (b[at] | (b[at + 1] << 8) | (b[at + 2] << 16) | (b[at + 3] << 24)) >>> 0
+  if (b.length < 20 || !ascii(0, 'RIFF') || !ascii(8, 'WAVE')) return null
+  let fmt: { channels: number; rate: number; bits: number } | null = null
+  for (let at = 12; at + 8 <= b.length;) {
+    const size = u32(at + 4)
+    if (ascii(at, 'fmt ')) {
+      if (at + 24 > b.length) return null
+      const format = u16(at + 8)
+      const channels = u16(at + 10)
+      const rate = u32(at + 12)
+      const bits = u16(at + 22)
+      if ((format !== 1 && format !== 3) || channels < 1 || channels > 2 || rate < 8000 || rate > 192_000 || ![8, 16, 24, 32].includes(bits)) return null
+      fmt = { channels, rate, bits }
+    } else if (ascii(at, 'data')) {
+      if (!fmt) return null
+      // Whatever the chunk claims (a decoder may read a size of 0, or any
+      // size, to the end of the file), the most that can decode is every
+      // byte left in the file: the bound is taken from that.
+      void size
+      const data = b.length - (at + 8)
+      const frames = Math.floor(data / ((fmt.bits / 8) * fmt.channels))
+      return Math.ceil(frames * (ctxRate / fmt.rate)) * fmt.channels * 4
+    }
+    at += 8 + size + (size & 1)
+  }
+  return null
+}
+
+/** Whether a file is uncompressed WAV by its own bytes (wavDecodedBytes reads it). */
+export function isPcmWav(b: Uint8Array): boolean {
+  return wavDecodedBytes(b, 48_000) !== null
+}
+
+/**
+ * Whether a file's worst case decoded fits the budget by its bytes alone,
+ * on a context at `ctxRate`: uncompressed WAV when its exact decoded size
+ * fits DECODE_WHOLE_MAX_PCM (and the file is at most 1 MB); anything else
+ * when it is at most 64 KB, less on a context faster than 48 kHz, whose
+ * worst case grows with the rate.
+ */
+export function decodeWholeOk(file: Uint8Array, bytes: number, ctxRate = 48_000): boolean {
+  const wav = wavDecodedBytes(file, ctxRate)
+  if (wav !== null) return bytes <= DECODE_WHOLE_WAV_BYTES && wav <= DECODE_WHOLE_MAX_PCM
+  return bytes <= DECODE_WHOLE_BYTES * Math.min(1, 48_000 / ctxRate)
+}
+
+/** Decodes run one at a time, so the peak is one decode, never MAX_VOICES at once. */
+let decoding: Promise<unknown> = Promise.resolve()
+
+/** Whether a decoded buffer is within budget: two channels at most, DECODE_WHOLE_MAX_PCM bytes at most. */
+export function decodedFits(b: Pick<AudioBuffer, 'length' | 'numberOfChannels'>): boolean {
+  return b.numberOfChannels <= 2 && b.length * b.numberOfChannels * 4 <= DECODE_WHOLE_MAX_PCM
+}
+
+/** A short loop's decoded buffer, or null to stream it. Throws when the browser cannot decode it at all. */
+function shortLoopBuffer(blob: Blob): Promise<AudioBuffer | null> {
+  const run = decoding.then(() => decodeWhole(blob)).then((buffer) => (decodedFits(buffer) ? buffer : null))
+  // The next decode waits for this one, whether it succeeds or not.
+  decoding = run.catch(() => undefined)
+  return run
+}
+
+/** Decode a file into a buffer on the shared context; the callback form, which every Safari has. Throws when it cannot. */
+function decodeWhole(blob: Blob): Promise<AudioBuffer> {
+  const ctx = audioContext()
+  if (!ctx) return Promise.reject(new Error('No audio here.'))
+  return blob.arrayBuffer().then((bytes) => new Promise<AudioBuffer>((resolve, reject) => {
+    const p = ctx.decodeAudioData(bytes, resolve, () => reject(new Error('This browser cannot play this kind of file.')))
+    // Where it also answers with a promise, its refusal is the callback's.
+    if (p && typeof (p as Promise<AudioBuffer>).catch === 'function') (p as Promise<AudioBuffer>).catch(() => { /* told by the callback */ })
+  }))
 }
 
 /** Failed world items: how many times in a row, and until when they are not tried again (ms, performance clock). */

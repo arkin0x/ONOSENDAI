@@ -6,6 +6,9 @@
  */
 import { readFileSync } from 'node:fs'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { newShard, type ShardModel } from 'sno-core/shards'
+import { EMPTY_TREE } from '../shardFolders'
+import { useShardFolders } from '../../store/useShardFolders'
 import { useWorkshop } from '../../store/useWorkshop'
 import { isWorkshopPath, startWorkshopRoute } from '../workshopRoute'
 
@@ -29,6 +32,7 @@ function page(pathname: string, search = '', hash = '') {
 }
 
 beforeEach(() => {
+  useShardFolders.setState({ tree: EMPTY_TREE, storage: 'loading' })
   useWorkshop.setState({ shards: [], currentId: null, open: false, selection: [], partSel: [], selectedFace: null, facePick: [], past: [], future: [], aim: null, notice: null })
 })
 
@@ -36,6 +40,46 @@ describe('isWorkshopPath', () => {
   it('is /workshop, with or without the slash, in any case, and nothing else', () => {
     for (const p of ['/workshop', '/workshop/', '/WORKSHOP', '/Workshop']) expect(isWorkshopPath(p)).toBe(true)
     for (const p of ['/', '/workshops', '/workshop/x', '/tv', '/demo', '/c/workshop', '/workshop//']) expect(isWorkshopPath(p)).toBe(false)
+  })
+})
+
+describe('the model a link opens, deploys counted (useWorkshop newestId)', () => {
+  const at = (id: string, updatedAt: number): ShardModel => ({ ...newShard(id), id, updatedAt })
+  const read = (used: Record<string, number>): void => useShardFolders.setState({ tree: { ...EMPTY_TREE, used }, storage: 'indexeddb' })
+
+  it('is the newest by deploy once the deploy times are read, when they already are', () => {
+    useWorkshop.setState({ shards: [at('lamp', 3_000), at('chair', 1_000)] })
+    read({ chair: 5_000 })
+    const { stop } = page('/workshop')
+    expect(w().currentId).toBe('chair')
+    stop()
+  })
+
+  it('opens at once by edit time while they are read, then moves to the newest by deploy', () => {
+    useWorkshop.setState({ shards: [at('lamp', 3_000), at('chair', 1_000)] })
+    const { stop } = page('/workshop')
+    expect(w().open).toBe(true)
+    expect(w().currentId).toBe('lamp')
+    read({ chair: 5_000 })
+    expect(w().currentId).toBe('chair')
+    stop()
+  })
+
+  it('stays where it is when something was done meanwhile: an edit, or the workshop closed', () => {
+    useWorkshop.setState({ shards: [at('lamp', 3_000), at('chair', 1_000)] })
+    const edited = page('/workshop')
+    useWorkshop.setState({ past: [at('lamp', 3_000)] })
+    read({ chair: 5_000 })
+    expect(w().currentId).toBe('lamp')
+    edited.stop()
+
+    useShardFolders.setState({ tree: EMPTY_TREE, storage: 'loading' })
+    useWorkshop.setState({ currentId: null, open: false, past: [] })
+    const closed = page('/workshop')
+    w().closeWorkshop()
+    read({ chair: 5_000 })
+    expect(w().currentId).toBe('lamp')
+    closed.stop()
   })
 })
 

@@ -2,8 +2,8 @@
  * workshopDefault.test.ts - which object the workshop opens when it is not
  * told one: the one edited most recently, the top of the list, never simply
  * the oldest one in storage (arkinox, 2026-09-27). A deploy counts as an edit
- * there as it does in the list (2026-10-23), so what opens is what the list
- * shows first.
+ * there as it does in the list (2026-10-23), so what opens is the first in
+ * the list's order.
  */
 
 import { beforeEach, describe, expect, it } from 'vitest'
@@ -64,11 +64,13 @@ describe('the object the workshop opens', () => {
     expect(w().currentId).toBe('pool')
   })
 
-  it('after deleting the open object, is the top of the list of the rest, deploys counted', () => {
-    used = { crucifix: 2_500 }
+  it('after deleting the open object, is the first of the rest in the list\'s order, deploys counted', () => {
+    // Not the first stored, nor the newest edited of the rest.
+    useWorkshop.setState({ shards: [at('crucifix', 1_000), at('pool', 3_000), at('lamp', 2_000), at('chair', 500)] })
+    used = { chair: 2_500 }
     w().openWorkshop('pool')
     w().remove('pool')
-    expect(w().currentId).toBe('crucifix')
+    expect(w().currentId).toBe('chair')
   })
 
   it('treats an object with no edit time as oldest, and an empty list as none', () => {

@@ -543,8 +543,9 @@ function load(): ShardModel[] {
 
 /**
  * When each model was last deployed from here: the folder store hands it over
- * (store/useShardFolders.ts), so this store imports no other and no cycle
- * forms. Until it does, nothing has been deployed.
+ * (store/useShardFolders.ts). Importing that store here would close a cycle,
+ * useShardFolders, useCyberspace, lib/destinationKeys, useShards, useWorkshop,
+ * so this store imports no other. Until it does, nothing has been deployed.
  */
 let lastUsed: () => Readonly<Record<string, number>> | undefined = () => undefined
 export function readLastUsedFrom(read: () => Readonly<Record<string, number>> | undefined): void {
@@ -552,9 +553,10 @@ export function readLastUsedFrom(read: () => Readonly<Record<string, number>> | 
 }
 
 /**
- * The object at the top of the workshop's list: edited or deployed most
- * recently, by the sort every list uses (lib/shardFolders.ts newestFirst), so
- * what opens is what the list shows first (2026-10-23).
+ * The object first in the workshop list's order: edited or deployed most
+ * recently, by the sort every list uses (lib/shardFolders.ts newestFirst)
+ * (2026-10-23). That is the newest wherever it is filed, not the first row
+ * drawn: the list draws its folders first, and this one may be in one.
  *
  * The stored list is in the order objects were made, so its first entry is the
  * oldest, and opening that on every fresh load kept bringing back the same old

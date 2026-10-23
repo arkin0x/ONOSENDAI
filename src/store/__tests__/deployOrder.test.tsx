@@ -60,7 +60,7 @@ function model(id: string, updatedAt: number): ShardModel {
   }
 }
 
-/** The order the lists draw: unfiled at the top, and each folder's own. */
+/** The order within each part of a list: the shards in no folder, and the folder's own. */
 function drawn(): { top: string[]; kit: string[] } {
   const list = newestFirst(useWorkshop.getState().shards, modelRef, modelEditedAt, F().tree.used)
   const built = buildTree(F().tree, list, modelRef)
@@ -113,7 +113,7 @@ describe('a deploy that goes through', () => {
     S().startDeployShard('D', 'workshop')
     await S().deploy()
     expect(drawn()).toEqual({ top: ['D', 'A'], kit: ['B', 'C'] })
-    // And the workshop opens it, as the top of its list (useWorkshop newestId).
+    // And the workshop opens it, the first in the list's order (useWorkshop newestId).
     expect(newestId(useWorkshop.getState().shards)).toBe('D')
     useWorkshop.setState({ currentId: null })
     useWorkshop.getState().openWorkshop()

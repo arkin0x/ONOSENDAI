@@ -10,9 +10,33 @@
  * or DEPLOY, leaves the app where it is and puts the address back to the
  * site's root, so a reload does not reopen it. Back off /workshop closes
  * it, Forward onto /workshop opens it, as loading that address would.
+ *
+ * The newest model counts deploys (useWorkshop newestId), which are read
+ * from IndexedDB as the app starts, in the same moment this opens. Opened
+ * before they are read, it opens by edit time, and once they are read moves
+ * to the newest by deploy too, unless something was done meanwhile (another
+ * model chosen, an edit, the workshop closed).
  */
 
-import { useWorkshop } from '../store/useWorkshop'
+import { newestId, useWorkshop } from '../store/useWorkshop'
+import { useShardFolders } from '../store/useShardFolders'
+
+/** Open the workshop for the address; returns what stops waiting on the deploy times, if anything waits. */
+function openFromAddress(): () => void {
+  const chosen = useWorkshop.getState().currentId
+  useWorkshop.getState().openWorkshop()
+  if (chosen !== null || useShardFolders.getState().storage !== 'loading') return () => undefined
+  const picked = useWorkshop.getState().currentId
+  const off = useShardFolders.subscribe((s) => {
+    if (s.storage === 'loading') return
+    off()
+    const ws = useWorkshop.getState()
+    if (!ws.open || ws.currentId !== picked || ws.past.length > 0) return
+    const top = newestId(ws.shards)
+    if (top && top !== picked) ws.select(top)
+  })
+  return off
+}
 
 /** Whether an address is the workshop's: /workshop or /workshop/, in any case. */
 export function isWorkshopPath(pathname: string): boolean {
@@ -32,7 +56,7 @@ export function startWorkshopRoute(
   history: Pick<History, 'replaceState'> = window.history,
   events: Events = window,
 ): () => void {
-  if (isWorkshopPath(loc.pathname)) useWorkshop.getState().openWorkshop()
+  const stopWaiting = isWorkshopPath(loc.pathname) ? openFromAddress() : () => undefined
   let wasAt = isWorkshopPath(loc.pathname)
 
   // Closed while the address still says /workshop: the root, with whatever
@@ -56,5 +80,5 @@ export function startWorkshopRoute(
     wasAt = at
   }
   events.addEventListener('popstate', onPop)
-  return () => { unsubscribe(); events.removeEventListener('popstate', onPop) }
+  return () => { stopWaiting(); unsubscribe(); events.removeEventListener('popstate', onPop) }
 }

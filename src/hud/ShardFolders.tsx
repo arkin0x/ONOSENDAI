@@ -79,6 +79,27 @@ const ours = (e: DragEvent): boolean => Array.from(e.dataTransfer.types).include
 /** What the chooser is moving: shards, or one folder. */
 type Moving = { kind: 'shards'; refs: string[]; label: string } | { kind: 'folder'; id: string; label: string }
 
+/** Open a folder and every folder above it, so a new folder is in sight to be named. */
+function unfold(id: string | null): void {
+  const f = useShardFolders.getState
+  const t = f().tree
+  for (let at = canonical(t, id), n = 0; at !== null && n < 64; at = parentOf(t, at), n += 1) if (t.collapsed[at]) f().setCollapsed(at, false)
+}
+
+/** Make a folder in `parent`, opening the way to it; its id, or null. */
+export function makeFolder(parent: string | null): string | null {
+  const f = useShardFolders.getState
+  const id = f().createFolder(`Folder ${Object.keys(f().tree.folders).length + 1}`, parent)
+  if (id) unfold(parent)
+  return id
+}
+
+/** Move what the chooser holds into `to`. A folded folder stays folded (arkinox, 2026-10-23). */
+export function moveTo(moving: Moving, to: string | null): void {
+  if (moving.kind === 'shards') useShardFolders.getState().assignToFolder(moving.refs, to)
+  else useShardFolders.getState().moveFolder(moving.id, to)
+}
+
 export function ShardFolders<T>({ items, refOf, nameOf, row }: Props<T>): JSX.Element {
   const me = useCyberspace((s) => s.identity.pubkey)
   const tree = useShardFolders((s) => s.tree)
@@ -102,17 +123,9 @@ export function ShardFolders<T>({ items, refOf, nameOf, row }: Props<T>): JSX.El
   const pickedNow = [...picked].filter((r) => present.has(r))
 
   const stopSelecting = (): void => { setSelecting(false); setPicked(new Set()) }
-  /** Open a folder and every folder above it, so what was moved there is in sight. */
-  const unfold = (id: string | null): void => {
-    const t = f().tree
-    for (let at = canonical(t, id), n = 0; at !== null && n < 64; at = parentOf(t, at), n += 1) if (t.collapsed[at]) f().setCollapsed(at, false)
-  }
-
   const newFolder = (parent: string | null): void => {
-    const id = f().createFolder(`Folder ${Object.keys(f().tree.folders).length + 1}`, parent)
-    if (!id) return
-    unfold(parent)
-    setRenaming(id)
+    const id = makeFolder(parent)
+    if (id) setRenaming(id)
   }
 
   const dropOn = (folder: string | null) => ({
@@ -243,9 +256,8 @@ export function ShardFolders<T>({ items, refOf, nameOf, row }: Props<T>): JSX.El
           moving={moving}
           current={moving.kind === 'folder' ? tree.folders[moving.id]?.parent ?? null : moving.refs.length === 1 ? folderOf(tree, moving.refs[0]) : undefined}
           onPick={(to) => {
-            if (moving.kind === 'shards') { f().assignToFolder(moving.refs, to); stopSelecting() }
-            else f().moveFolder(moving.id, to)
-            unfold(to)
+            moveTo(moving, to)
+            if (moving.kind === 'shards') stopSelecting()
             setMoving(null)
           }}
           onClose={() => setMoving(null)}

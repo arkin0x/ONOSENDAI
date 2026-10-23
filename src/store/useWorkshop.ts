@@ -1,7 +1,8 @@
 /**
  * useWorkshop.ts — the shards you are building, and the one on the bench.
  *
- * Everything here is local: shards persist in localStorage until deployed,
+ * Everything here is local: shards persist in this browser (IndexedDB, or
+ * localStorage where that cannot be used: store/workshopStorage.ts) until deployed,
  * and a deployed shard stays here too, so it can be deployed again somewhere
  * else or edited into a new one. The editing model is small and exact: stamp
  * a shape, place a vertex, select a point and nudge it a unit along an axis,
@@ -25,7 +26,6 @@ import {
   DIVISIONS,
   GRID_HALF,
   TICKS_PER_UNIT,
-  normalizeStored,
   ticksOf,
   vertexAt,
   type Division,
@@ -57,11 +57,13 @@ import { cornerAverage, weld } from '../lib/weld'
 import { subdivide, subdivideNotice } from '../lib/subdivide'
 import { withCredit, type Credit } from 'sno-core/feed'
 import { newestFirst } from '../lib/shardFolders'
+import { attach, initialShards, persist, saveNow as saveStored } from './workshopStorage'
+
+export { hydrateWorkshop, storageMode } from './workshopStorage'
 
 /** VIEW builds nothing: it is the tool you hold to look around. */
 export type Tool = 'view' | 'stamp' | 'add' | 'select' | 'face'
 
-const STORAGE = 'onosendai:shards'
 const PALETTE_STORAGE = 'onosendai:palette'
 const PALETTES_STORAGE = 'onosendai:palettes'
 
@@ -260,6 +262,11 @@ function connectedTo(s: ShardModel, selection: number[]): number[] {
 
 export interface WorkshopState {
   shards: ShardModel[]
+  /**
+   * Why the latest changes are not saved, while they are not: storage is
+   * full, or could not be opened. Null when everything is saved.
+   */
+  storageError: string | null
   currentId: string | null
   /** The workshop overlay is up. */
   open: boolean
@@ -509,21 +516,23 @@ export interface WorkshopState {
    * Bulk import's add (store/useShardImport): a deep copy of the model as a
    * new shard of yours under exactly `name`, nothing selected or opened, with
    * `id` when given (a kit piece's stable id) or a fresh one. The caller has
-   * already decided what a taken name means. Its id, and whether the list
-   * reached storage (false when storage is full: the shard is in the
-   * workshop for now, and gone on a reload); null when `id` is taken.
+   * already decided what a taken name means. Its id, and whether it reached
+   * storage, which resolves once it has committed (false when storage is
+   * full: the shard is in the workshop for now, and gone on a reload); null
+   * when `id` is taken.
    */
-  addShard: (model: ShardModel, name: string, id?: string) => { id: string; saved: boolean } | null
-  /** Write the shard list to storage again; whether it took. */
-  saveNow: () => boolean
+  addShard: (model: ShardModel, name: string, id?: string) => { id: string; saved: Promise<boolean> } | null
+  /** Write the shard list to storage again; resolves with whether every shard in it has committed. */
+  saveNow: () => Promise<boolean>
   /**
    * Bulk import's UPDATE: the shard keeps its id, its name and its credit
    * and takes everything drawn from `model`, so PUBLISH AGAIN sends the new
    * version to the same address and every object placing it follows. On the
    * bench, one UNDO brings the old version back. 'missing' when there is no
-   * such shard, 'unsaved' when storage refused the list.
+   * such shard, 'unsaved' when storage refused it. The list changes at once;
+   * the answer comes once the write has committed, or failed.
    */
-  replaceShard: (id: string, model: ShardModel) => 'saved' | 'unsaved' | 'missing'
+  replaceShard: (id: string, model: ShardModel) => Promise<'saved' | 'unsaved' | 'missing'>
   current: () => ShardModel | null
 }
 
@@ -536,17 +545,6 @@ export function shardFromText(text: string, id: string): ShardModel | null {
 
 /** Whose object a model was made from (REMIX): sno-core's, shared with snocrash. */
 export { creditOf } from 'sno-core/feed'
-
-function load(): ShardModel[] {
-  try {
-    const raw = localStorage.getItem(STORAGE)
-    if (!raw) return []
-    const list = JSON.parse(raw)
-    return Array.isArray(list)
-      ? list.filter((s) => s && typeof s.id === 'string' && Array.isArray(s.vertices)).map((s) => normalizeStored(s)).map((s) => ({ ...s, extent: Number.isInteger(s.extent) ? s.extent : Math.max(GRID_HALF, neededExtent(s)) }))
-      : []
-  } catch { return [] }
-}
 
 /**
  * When each model was last deployed from here: the folder store hands it over
@@ -573,9 +571,13 @@ export function newestId(shards: ShardModel[], used: Readonly<Record<string, num
   return newestFirst(shards, (s) => s.id, (s) => s.updatedAt ?? 0, used)[0]?.id ?? null
 }
 
-/** Whether the list reached storage; false when it is full or refused (private mode). */
-function save(shards: ShardModel[]): boolean {
-  try { localStorage.setItem(STORAGE, JSON.stringify(shards)); return true } catch { return false }
+/**
+ * Keep the list: only the shards that changed are written, through
+ * store/workshopStorage.ts, which says on the store (`storageError`) when a
+ * write fails. Whoever needs to know it landed awaits saveNow().
+ */
+function save(shards: ShardModel[]): void {
+  persist(shards)
 }
 
 /**
@@ -838,7 +840,8 @@ export const useWorkshop = create<WorkshopState>((set, get) => {
   }
 
   return {
-    shards: load(),
+    shards: initialShards(),
+    storageError: null,
     currentId: null,
     open: false,
     tool: 'view',
@@ -1532,15 +1535,16 @@ export const useWorkshop = create<WorkshopState>((set, get) => {
       const copy: ShardModel = { ...model, id: id ?? uuid(), name: name.slice(0, 64), vertices: model.vertices.map(cloneVertex), faces: model.faces.map((f) => [...f] as [number, number, number]), updatedAt: Date.now() }
       const list = [...get().shards, copy]
       set({ shards: list })
-      return { id: copy.id, saved: save(list) }
+      save(list)
+      return { id: copy.id, saved: saveStored() }
     },
 
-    saveNow: () => save(get().shards),
+    saveNow: () => saveStored(),
 
     replaceShard: (id, model) => {
       const { shards, currentId, past } = get()
       const i = shards.findIndex((s) => s.id === id)
-      if (i < 0) return 'missing'
+      if (i < 0) return Promise.resolve('missing')
       const old = shards[i]
       const { credit: _drop, ...drawn } = model as ShardModel & { credit?: unknown }
       const kept = (old as ShardModel & { credit?: unknown }).credit
@@ -1558,11 +1562,23 @@ export const useWorkshop = create<WorkshopState>((set, get) => {
       // On the bench it is an edit like any other: UNDO brings the old one back.
       if (id === currentId) set({ shards: list, past: [...past.slice(-(HISTORY - 1)), old], future: [], selection: [], partSel: [], selectedFace: null, facePick: [] })
       else set({ shards: list })
-      return save(list) ? 'saved' : 'unsaved'
+      save(list)
+      return saveStored().then((ok) => (ok ? 'saved' : 'unsaved'))
     },
 
     current: () => get().shards.find((s) => s.id === get().currentId) ?? null,
   }
+})
+
+attach({
+  shards: () => useWorkshop.getState().shards,
+  replace: (list) => useWorkshop.setState((s) => ({
+    shards: list,
+    // A shard that is gone cannot stay the one on the bench.
+    currentId: s.currentId !== null && !list.some((x) => x.id === s.currentId) ? null : s.currentId,
+  })),
+  report: (message) => { if (useWorkshop.getState().storageError !== message) useWorkshop.setState({ storageError: message }) },
+  protect: () => (useWorkshop.getState().open ? useWorkshop.getState().currentId : null),
 })
 
 if (import.meta.env.DEV && typeof window !== 'undefined') {

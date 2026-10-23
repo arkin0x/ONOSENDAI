@@ -24,8 +24,9 @@
  * A signer that does not answer cannot hold the run: each send has a
  * deadline past the signer's own patience, STOP stops waiting at once (a
  * rate limit's wait too), and two sends in a row with no answer pause the
- * run with the rest left for RETRY. Storage that refuses the workshop's list
- * stops the run before anything is published that would be gone on a reload.
+ * run with the rest left for RETRY. Storage that refuses a shard stops the
+ * run before anything is published that would be gone on a reload: each
+ * shard is published only once its write has committed.
  * A second zip waits until a run is over.
  */
 
@@ -47,6 +48,7 @@ import { publishState, shardFingerprint } from '../lib/published'
 import { queryEach } from '../lib/relay'
 import { SNO_KIND } from 'sno-core/feed'
 import { shardFromText, useWorkshop } from './useWorkshop'
+import { saveFailure } from './workshopStorage'
 import { refreshFeed, usePublished, type SendOutcome } from './usePublished'
 import { useCyberspace } from './useCyberspace'
 
@@ -286,6 +288,13 @@ export const useShardImport = create<ShardImportState>((set, get) => {
     return found ? { published: [...found], remote: 'checked', checkedFor: me } : { published: [], remote: 'unknown', checkedFor: me }
   }
 
+  /** Storage refused the shard in hand: it is not published, and the run stops. */
+  const refused = (key: string): void => {
+    const why = saveFailure() ?? 'Workshop storage is full'
+    patch(key, { run: 'failed', failure: why })
+    set({ stall: `${why}.` })
+  }
+
   const run = async (): Promise<void> => {
     const g = generation
     // Checked for another key (an account switched while the list was open): ask again for this one.
@@ -333,7 +342,8 @@ export const useShardImport = create<ShardImportState>((set, get) => {
         // Made once: a retry publishes the shard the first try made.
         let id = r.shardId && ws.shards.some((s) => s.id === r.shardId) ? r.shardId : null
         // Reused: it must be in storage before it goes out (a first try may have been refused).
-        if (id && !ws.saveNow()) { patch(key, { run: 'failed', failure: 'Workshop storage is full' }); set({ stall: 'Workshop storage is full.' }); inHand = null; break }
+        if (id && !(await ws.saveNow())) { refused(key); inHand = null; break }
+        if (g !== generation) return
         if (!id) {
           const missing = blocked.get(key)
           // Left out, not failed: a retry cannot help, a change of picks or answer can (setDupMode, toggle).
@@ -345,7 +355,7 @@ export const useShardImport = create<ShardImportState>((set, get) => {
           if (action.act === 'skip') { patch(key, { run: 'skipped', failure: dups[key]?.in === 'zip' ? 'Same name in this zip' : 'In your shards' }); inHand = null; continue }
           let saved: boolean
           if (action.act === 'update') {
-            const res = ws.replaceShard(action.id, model)
+            const res = await ws.replaceShard(action.id, model)
             if (res === 'missing') { patch(key, { run: 'failed', failure: 'Its namesake is gone' }); inHand = null; continue }
             id = action.id
             saved = res === 'saved'
@@ -356,13 +366,14 @@ export const useShardImport = create<ShardImportState>((set, get) => {
             const added = ws.addShard(model, fresh || action.copyName ? copyName(r.name) : r.name, fresh ? undefined : r.id)
             if (!added) { patch(key, { run: 'failed', failure: 'Its id is taken' }); inHand = null; continue }
             id = added.id
-            saved = added.saved
+            saved = await added.saved
             // An update keeps the folder it is in; a new shard goes in its own.
             placeInFolders(folders, [{ shardId: id, folder: r.folder }], made)
           }
           patch(key, { shardId: id, outcome: action.act === 'new' ? (action.copyName ? 'copy' : 'new') : action.act })
-          // Nothing goes out that a reload would lose here.
-          if (!saved) { patch(key, { run: 'failed', failure: 'Workshop storage is full' }); set({ stall: 'Workshop storage is full.' }); inHand = null; break }
+          // Nothing goes out that a reload would lose here: saved means committed (store/workshopStorage.ts).
+          if (!saved) { refused(key); inHand = null; break }
+          if (g !== generation) return
         }
         if (!publish) { patch(key, { run: 'done' }); inHand = null; continue }
         const shard = useWorkshop.getState().shards.find((s) => s.id === id)

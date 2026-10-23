@@ -377,12 +377,16 @@ export class TvPainter {
     return this.changed
   }
 
-  /** Where NOW PLAYING is on the flat frame, CSS px, for a tap or a drag on it; null when it is not up. */
   /** The marquee's top at the last paint, CSS px from the top; null before the first. */
   get marqueeTop(): number | null {
     return this.floorPx
   }
 
+  /**
+   * Where NOW PLAYING is on the flat frame, CSS px, for a tap or a drag on
+   * it; over an explainer, its title's tag, which takes the same tap and
+   * drag for the sound; null when neither is up.
+   */
   get musicCard(): FlatRect | null {
     const c = this.npRect
     const k = this.cardScale
@@ -717,7 +721,7 @@ export class TvPainter {
     }
 
     part('explainer')
-    if (ex) this.explainerParts(ex, W, scale, s, narrow, tickY)
+    if (ex) this.explainerParts(ex, a.music?.muted === true, W, scale, s, narrow, tickY)
   }
 
   /**
@@ -726,18 +730,22 @@ export class TvPainter {
    * video's foot, above the marquee. The live picture's own frame is the
    * tube's (scene/TvScreenEffect), drawn with it as it moves.
    */
-  private explainerParts(ex: TvExplainer, W: number, scale: number, s: number, narrow: boolean, floor: number): void {
+  private explainerParts(ex: TvExplainer, muted: boolean, W: number, scale: number, s: number, narrow: boolean, floor: number): void {
     const ctx = this.ctx
     ctx.save()
     // Only once the live picture is all but in its corner: the tag stands
     // where its corner ends, which the picture crosses on its way.
-    ctx.globalAlpha = clamp01((ex.mix - 0.8) / 0.2)
+    const alpha = clamp01((ex.mix - 0.8) / 0.2)
+    ctx.globalAlpha = alpha
     ctx.textAlign = 'left'
     ctx.font = `700 ${(narrow ? 9 : 10) * s}px ${TV_FONT}`
     const x = ex.pip.x * scale
     const y = (ex.pip.y + ex.pip.h) * scale + 8 * s
-    const label = fit(ctx, ex.title, Math.max(20 * s, ex.pip.w * scale - 14 * s))
+    // The sound is the viewer's to mute here too: a tap on the tag, as on
+    // NOW PLAYING, which steps away meanwhile (review of #471).
+    const label = fit(ctx, muted && !isBroadcast() ? `${ex.title} · MUTED` : ex.title, Math.max(20 * s, ex.pip.w * scale - 14 * s))
     const tw = ctx.measureText(label).width
+    this.npRect = alpha > 0 ? { x, y, w: tw + 14 * s, h: 18 * s } : null
     ctx.fillStyle = 'rgba(0, 0, 0, 0.55)'
     ctx.fillRect(x, y, tw + 14 * s, 18 * s)
     ctx.strokeStyle = 'rgba(0, 229, 255, 0.6)'

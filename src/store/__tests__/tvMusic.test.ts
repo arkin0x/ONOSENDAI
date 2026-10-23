@@ -939,6 +939,25 @@ describe('TV music steps out for an explainer at the end of the song (lib/tv/exp
     expect(audio().plays).toBe(plays + 1)
   })
 
+  it('released after the viewer paused the explainer, the song waits paused, and a tap plays it', async () => {
+    startMusic(list)
+    await flush()
+    holdMusicAtSongEnd()
+    audio().ended = true
+    audio().fire('ended')
+    // The next song's source is set: a real element is no longer ended.
+    audio().ended = false
+    const plays = audio().plays
+    releaseMusic(false)
+    expect(musicHeldForAd()).toBe(false)
+    expect(audio().plays).toBe(plays)
+    // Not taken for a play still wanted when TV is seen again.
+    resumeMusic()
+    expect(audio().plays).toBe(plays)
+    tapMusic()
+    expect(audio().plays).toBe(plays + 1)
+  })
+
   it('TV going off forgets the wait', async () => {
     startMusic(list)
     await flush()

@@ -465,7 +465,8 @@ export function TvScreenEffect(): JSX.Element {
       tapped = false
       const m = useTvMusic.getState()
       // While the browser holds the sound back, a tap is for the sound.
-      if (!useTv.getState().on || !m.track || m.blocked) return
+      // Over an explainer the card is its title's tag, for the sound, track or none.
+      if (!useTv.getState().on || (!m.track && !useTvExplainer.getState().showing) || m.blocked) return
       const card = painter.musicCard
       const r = el.getBoundingClientRect()
       if (!card || r.width <= 0 || r.height <= 0) return
@@ -532,7 +533,11 @@ export function TvScreenEffect(): JSX.Element {
       if (tv.on && tv.ad && hosakaFor.current !== tv.ad.at && now - tv.ad.at >= CUT_MS) { hosakaFor.current = tv.ad.at; hosaka.currentTime = 0; void hosaka.play().catch(() => {}) }
       else if (!(tv.on && tv.ad) && !hosaka.paused) hosaka.pause()
     }
-    if (!tv.on) return
+    if (!tv.on) {
+      // TV went off over an explainer: its texture goes with it.
+      if (videoTex.current) { effect.uniforms.get('uVideo')!.value = NO_VIDEO; effect.uniforms.get('uMix')!.value = 0; videoTex.current.dispose(); videoTex.current = null }
+      return
+    }
     // The encoder's watchdog reads this (lib/tv/broadcast); nothing off the stream.
     countTvFrame()
     const u = effect.uniforms
@@ -580,7 +585,10 @@ export function TvScreenEffect(): JSX.Element {
         videoTex.current = t
         videoAt.current = -1
       }
-      // A new frame only when the video has moved on: each is an upload.
+      // three's VideoTexture marks each new frame on the video's own frame
+      // callback; this marks it too, from the clock, for a browser that does
+      // not call back for a video outside the page. Either way it is one
+      // upload a frame at most (review of #471).
       if (ev.readyState >= 2 && ev.currentTime !== videoAt.current) { videoTex.current.needsUpdate = true; videoAt.current = ev.currentTime }
       const floor = painter.marqueeTop ?? height * (1 - MARGIN_Y) - 28
       const layout = explainerLayout(width, height, ev.videoWidth / ev.videoHeight, MARGIN_X, MARGIN_Y, floor)

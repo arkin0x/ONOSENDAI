@@ -15,8 +15,10 @@
  *   duration  its length, seconds: the guard that ends it if it never does
  *   files     the same video, in the order to try: each a link, its type
  *             with codecs (the first this browser plays is used), and its
- *             sha256 if the link does not end in it. A second link to the
- *             same file on another server is a mirror.
+ *             sha256 if the link does not end in it. A file with no hash is
+ *             never played. A second link to the same file on another
+ *             server is a mirror (not cdn.nostrcheck.me, which serves a
+ *             re-encoded file under the original hash: it would be skipped).
  *   captions  a WebVTT file's link, optional, painted on the tube
  *
  * For example:

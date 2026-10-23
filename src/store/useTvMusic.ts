@@ -278,9 +278,14 @@ export function holdMusicNow(): void {
   holdMusicForAd(true)
 }
 
-/** Bring the music back after an explainer, or stop waiting for the song's end. */
-export function releaseMusic(): void {
+/**
+ * Bring the music back after an explainer, or stop waiting for the song's
+ * end. With `resume` false (the viewer paused the explainer), it stays
+ * paused, as a song the viewer paused does, until a tap on NOW PLAYING.
+ */
+export function releaseMusic(resume: boolean = true): void {
   holdAtEnd = false
+  if (!resume && held) { resumeAfter = false; wanted = false }
   holdMusicForAd(false)
 }
 

@@ -801,7 +801,10 @@ describe('an explainer on the tube (lib/tv/explainer)', () => {
     expect(words).not.toContain('P')
     expect(words).not.toContain('♪ NOW PLAYING')
     expect(words.some((w) => w.includes('MEANWHILE'))).toBe(false)
-    expect(p.musicCard).toBeNull()
+    // The sound's tap and drag move to the title's tag (review of #471).
+    const tag = p.musicCard!
+    expect(tag.x).toBeCloseTo(explainer.pip.x, 5)
+    expect(tag.y).toBeGreaterThan(explainer.pip.y + explainer.pip.h)
     // The clock stays; the title and the caption are painted.
     expect(words).toContain('▶ PLAY')
     expect(words).toContain('WHAT IS CYBERSPACE?')
@@ -812,6 +815,16 @@ describe('an explainer on the tube (lib/tv/explainer)', () => {
     p.paint(picture({ shot }), { ...assets, music }, 1080, 1, false)
     expect(words).toContain('P')
     expect(p.musicCard).not.toBeNull()
+  })
+
+  it('says MUTED on the tag while muted, and has no tap target while the picture is still on its way in', () => {
+    const { canvas, words } = writing()
+    const p = new TvPainter(canvas)
+    p.size(1400, 800, 1)
+    p.paint(picture({ shot }), { ...assets, music: { ...music, muted: true }, explainer }, 1000, 1, false)
+    expect(words).toContain('WHAT IS CYBERSPACE? · MUTED')
+    p.paint(picture({ shot }), { ...assets, music, explainer: { ...explainer, mix: 0.5 } }, 1040, 1, false)
+    expect(p.musicCard).toBeNull()
   })
 
   it('over TUNING, says nothing in the middle of the video', () => {

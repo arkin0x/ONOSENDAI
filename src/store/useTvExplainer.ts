@@ -93,6 +93,14 @@ let guardAt = Infinity
 let progress = { t: -1, at: 0 }
 let failedOut = false
 let unlock: (() => void) | null = null
+/** The viewer's volume and mute followed while one is on screen (show), let go with it. */
+let follow: (() => void) | null = null
+/** The browser held the sound back: muted until a tap, whatever the viewer's level. */
+let policyMuted = false
+/** The next pause the video tells of is the page's own (goOut, the warm-up, dropVideo). */
+let ownPause = false
+/** Which load the captions arriving belong to: a late file from an earlier one is dropped. */
+let captionsFor: object | null = null
 
 /** The video playing, for the tube to draw; null when none is on screen. */
 export function explainerVideo(): HTMLVideoElement | null {
@@ -177,12 +185,18 @@ function skip(now: number): void {
 
 function show(ex: Explainer, now: number): void {
   const v = video
-  if (!v) { skip(now); return }
+  // The music is held for it already: given back here, as skip would have.
+  if (!v) { releaseMusic(); dropVideo(); due = now + EXPLAINER_RETRY_MS; return }
   guardAt = now + guardMs(ex)
   progress = { t: -1, at: now }
   failedOut = false
   try { v.currentTime = 0 } catch { /* from where it is */ }
+  policyMuted = false
+  ownPause = false
   setSound(v)
+  // A mute or a volume the viewer sets meanwhile is the video's too (review of #471).
+  follow?.()
+  follow = useTvMusic.subscribe((st, prev) => { if (video === v && (st.volume !== prev.volume || st.muted !== prev.muted)) setSound(v) })
   useTvExplainer.setState({ showing: { id: ex.id, title: ex.title, phase: 'in', at: now, outMs: EXPLAINER_OUT_MS } })
   const mine = gen
   v.play().catch((e: unknown) => {
@@ -190,6 +204,7 @@ function show(ex: Explainer, now: number): void {
     // The browser holds the sound back (no tap yet): the picture plays
     // without it, and the next tap brings it in.
     if ((e as { name?: string })?.name === 'NotAllowedError' && !v.muted) {
+      policyMuted = true
       v.muted = true
       v.play().then(() => soundOnTap(v), () => fail())
       return
@@ -204,7 +219,7 @@ function setSound(v: HTMLVideoElement): void {
   const { volume, muted } = useTvMusic.getState()
   v.volume = muted ? 0 : volume
   // Where the page cannot set the volume (iOS), muted is the element's own.
-  v.muted = muted && v.volume !== 0
+  v.muted = policyMuted || (muted && v.volume !== 0)
 }
 
 /** Sound held back by the browser comes in on the next tap or key, as the music's does. */
@@ -212,9 +227,9 @@ function soundOnTap(v: HTMLVideoElement): void {
   if (typeof window === 'undefined' || unlock) return
   const go = (): void => {
     if (video !== v || !useTvExplainer.getState().showing) { unlock?.(); return }
-    v.muted = false
+    policyMuted = false
     setSound(v)
-    void v.play().then(() => unlock?.(), () => { v.muted = true; void v.play().catch(() => {}) })
+    void v.play().then(() => unlock?.(), () => { policyMuted = true; v.muted = true; void v.play().catch(() => {}) })
   }
   const kinds = ['pointerup', 'touchend', 'click', 'keydown'] as const
   for (const k of kinds) window.addEventListener(k, go, { capture: true })
@@ -231,13 +246,15 @@ function fail(): void {
   if (s && s.phase !== 'out') goOut(performance.now(), EXPLAINER_FAIL_OUT_MS)
 }
 
-function goOut(now: number, ms: number): void {
+function goOut(now: number, ms: number, resume: boolean = true): void {
   const s = useTvExplainer.getState().showing
   if (!s) return
   // Its last frame holds, silent, as the picture grows back over it (a
   // guard's end cuts it there), and the next song comes in.
-  if (video && !video.paused) { try { video.pause() } catch { /* gone already */ } }
-  releaseMusic()
+  pauseOwn(video)
+  follow?.()
+  follow = null
+  releaseMusic(resume)
   useTvExplainer.setState({ showing: { ...s, phase: 'out', at: now, outMs: ms } })
 }
 
@@ -261,12 +278,36 @@ function onScreen(s: ExplainerShowing, now: number): void {
   if (s.phase === 'in' && now - s.at >= EXPLAINER_IN_MS) useTvExplainer.setState({ showing: { ...s, phase: 'play', at: now } })
 }
 
+/** Pause the video as the page's own pause, not the viewer's. */
+function pauseOwn(v: HTMLVideoElement | null): void {
+  if (!v || v.paused) return
+  ownPause = true
+  try { v.pause() } catch { /* gone already */ }
+}
+
+/**
+ * A pause the page did not make, while it plays: the viewer's (the lock
+ * screen's or the phone's own controls reach the video, the element making
+ * the sound). It ends the explainer and the music stays paused, as a pause of
+ * a song does (review of #471). Not on the stream, where nobody can pause:
+ * one there is the browser's, and the stall guard has it.
+ */
+function onPause(v: HTMLVideoElement): void {
+  if (ownPause) { ownPause = false; return }
+  const s = useTvExplainer.getState().showing
+  if (video !== v || !s || s.phase === 'out' || v.ended || isBroadcast()) return
+  goOut(performance.now(), EXPLAINER_FAIL_OUT_MS, false)
+}
+
 /** The video's element and its copy in memory, let go. */
 function dropVideo(): void {
   unlock?.()
+  follow?.()
+  follow = null
   cues = []
+  captionsFor = null
   if (video) {
-    try { video.pause() } catch { /* gone already */ }
+    pauseOwn(video)
     video.removeAttribute('src')
     try { video.load() } catch { /* nothing to stop */ }
   }
@@ -281,8 +322,25 @@ async function fetchBytes(url: string, signal: AbortSignal): Promise<Uint8Array>
   if (!res.ok) throw new Error(`HTTP ${res.status}`)
   const length = Number(res.headers.get('content-length'))
   if (Number.isFinite(length) && length > EXPLAINER_MAX_BYTES) throw new Error('too large')
-  const bytes = new Uint8Array(await res.arrayBuffer())
-  if (bytes.byteLength > EXPLAINER_MAX_BYTES) throw new Error('too large')
+  // Counted as it comes, so a host that sends no length cannot fill memory (review of #471).
+  const reader = res.body?.getReader()
+  if (!reader) {
+    const bytes = new Uint8Array(await res.arrayBuffer())
+    if (bytes.byteLength > EXPLAINER_MAX_BYTES) throw new Error('too large')
+    return bytes
+  }
+  const parts: Uint8Array[] = []
+  let total = 0
+  for (;;) {
+    const { done, value } = await reader.read()
+    if (done) break
+    total += value.byteLength
+    if (total > EXPLAINER_MAX_BYTES) { void reader.cancel().catch(() => {}); throw new Error('too large') }
+    parts.push(value)
+  }
+  const bytes = new Uint8Array(total)
+  let at = 0
+  for (const part of parts) { bytes.set(part, at); at += part.byteLength }
   return bytes
 }
 
@@ -309,7 +367,7 @@ function whenReady(v: HTMLVideoElement, signal: AbortSignal): Promise<void> {
     const no = (): void => done(false)
     // A browser that buffers nothing until asked to play (iOS) is asked,
     // silently, and stopped: the frames come, and it plays from the start later.
-    const warm = (): void => { if (v.readyState < 3) v.play().then(() => { if (!useTvExplainer.getState().showing) v.pause() }, () => {}) }
+    const warm = (): void => { if (v.readyState < 3) v.play().then(() => { if (!useTvExplainer.getState().showing) pauseOwn(v) }, () => {}) }
     v.addEventListener('loadedmetadata', warm, { once: true })
     v.addEventListener('canplay', yes)
     v.addEventListener('error', no)
@@ -327,15 +385,19 @@ async function load(p: Pending, mine: number): Promise<void> {
   v.playsInline = true
   v.preload = 'auto'
   v.muted = true
-  const files = playableFiles(p.ex.files, (t) => v.canPlayType(t)).filter((f) => !unplayable.has(f.url))
-  if (p.ex.captions) void loadCaptions(p.ex.captions, signal, mine)
+  v.addEventListener('pause', () => onPause(v))
+  // Only a file with a hash plays: the one in the lineup, byte for byte, or none.
+  const files = playableFiles(p.ex.files, (t) => v.canPlayType(t)).filter((f) => fileHash(f) !== null && !unplayable.has(f.url))
+  cues = []
+  const token = {}
+  captionsFor = token
+  if (p.ex.captions && files.length > 0) void loadCaptions(p.ex.captions, signal, token)
   for (const f of files) {
     let arrived = false
     try {
       const bytes = await fetchBytes(f.url, signal)
       arrived = true
-      const want = fileHash(f)
-      if (want !== null && (await hashOf(bytes)) !== want) throw new Error('hash mismatch')
+      if ((await hashOf(bytes)) !== fileHash(f)) throw new Error('hash mismatch')
       if (mine !== gen || pending !== p) return
       const url = URL.createObjectURL(new Blob([bytes as BlobPart], { type: f.type.split(';')[0].trim() }))
       blobUrl = url
@@ -355,12 +417,12 @@ async function load(p: Pending, mine: number): Promise<void> {
   if (mine === gen && pending === p) p.failed = true
 }
 
-async function loadCaptions(url: string, signal: AbortSignal, mine: number): Promise<void> {
+async function loadCaptions(url: string, signal: AbortSignal, token: object): Promise<void> {
   try {
     const res = await fetch(url, { signal, credentials: 'omit', referrerPolicy: 'no-referrer' })
     if (!res.ok) return
     const text = await res.text()
-    if (mine === gen) cues = parseVtt(text)
+    if (captionsFor === token) cues = parseVtt(text)
   } catch { /* no captions, then */ }
 }
 

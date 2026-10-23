@@ -6,14 +6,24 @@
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-const music = vi.hoisted(() => ({ held: false, atEnd: 0, now: 0, released: 0, volume: 0.8, muted: false }))
+const music = vi.hoisted(() => ({ held: false, atEnd: 0, now: 0, released: 0, resumed: [] as boolean[], volume: 0.8, muted: false, listeners: [] as Array<(s: { volume: number; muted: boolean }, p: { volume: number; muted: boolean }) => void> }))
 vi.mock('../useTvMusic', () => ({
   holdMusicAtSongEnd: () => { music.atEnd++ },
   holdMusicNow: () => { music.now++; music.held = true },
-  releaseMusic: () => { music.released++; music.held = false },
+  releaseMusic: (resume = true) => { music.released++; music.resumed.push(resume); music.held = false },
   musicHeldForAd: () => music.held,
-  useTvMusic: { getState: () => ({ volume: music.volume, muted: music.muted }) },
+  useTvMusic: {
+    getState: () => ({ volume: music.volume, muted: music.muted }),
+    subscribe: (fn: (s: { volume: number; muted: boolean }, p: { volume: number; muted: boolean }) => void) => { music.listeners.push(fn); return () => { music.listeners = music.listeners.filter((l) => l !== fn) } },
+  },
 }))
+/** The viewer changes the music's level, as NOW PLAYING or the tag's tap and drag do. */
+function setLevel(volume: number, muted: boolean): void {
+  const prev = { volume: music.volume, muted: music.muted }
+  music.volume = volume
+  music.muted = muted
+  for (const l of [...music.listeners]) l({ volume, muted }, prev)
+}
 
 import { sha256 } from '@noble/hashes/sha2.js'
 import { bytesToHex } from '../../lib/events'
@@ -55,7 +65,12 @@ class FakeVideo extends EventTarget {
   }
   removeAttribute(): void { this.source = '' }
   load(): void {}
-  pause(): void { this.paused = true }
+  /** A pause of a playing element is told a moment later, as a real one's is. */
+  pause(): void {
+    if (this.paused) return
+    this.paused = true
+    queueMicrotask(() => this.dispatchEvent(new Event('pause')))
+  }
   play(): Promise<void> {
     this.plays++
     if (FakeVideo.refuse === 'all' || (FakeVideo.refuse === 'sound' && !this.muted)) return Promise.reject(Object.assign(new Error('no'), { name: 'NotAllowedError' }))
@@ -94,7 +109,7 @@ beforeEach(() => {
   FakeVideo.canPlay = () => 'probably'
   FakeVideo.ready = true
   FakeVideo.refuse = 'none'
-  Object.assign(music, { held: false, atEnd: 0, now: 0, released: 0, volume: 0.8, muted: false })
+  Object.assign(music, { held: false, atEnd: 0, now: 0, released: 0, resumed: [], volume: 0.8, muted: false, listeners: [] })
   fetched = []
   fetchBody = () => new Response(bytes as BodyInit)
   vi.stubGlobal('document', { createElement: () => new FakeVideo() })
@@ -382,6 +397,81 @@ describe('Cyberspace TV explainers', () => {
     await run(EXPLAINER_FIRST_MS + 1000)
     expect(video().volume).toBe(1)
     expect(video().muted).toBe(false)
+  })
+
+  it("follows the viewer's mute and volume while it plays, and lets go after (review of #471)", async () => {
+    startExplainers(performance.now(), '')
+    music.held = true
+    await run(EXPLAINER_FIRST_MS + 1000)
+    expect(video().volume).toBeCloseTo(0.8)
+    setLevel(0.8, true)
+    expect(video().volume).toBe(0)
+    setLevel(0.3, false)
+    expect(video().volume).toBeCloseTo(0.3)
+    video().ended = true
+    await run(EXPLAINER_OUT_MS + 200)
+    expect(music.listeners).toHaveLength(0)
+  })
+
+  it('a viewer\'s pause (the lock screen) ends it, and the music stays paused', async () => {
+    startExplainers(performance.now(), '')
+    music.held = true
+    await run(EXPLAINER_FIRST_MS + 2000)
+    expect(phase()).toBe('play')
+    video().pause()
+    await run(100)
+    expect(phase()).toBe('out')
+    expect(music.resumed).toEqual([false])
+  })
+
+  it('its own pauses, at its end or a guard, give the music back as usual', async () => {
+    startExplainers(performance.now(), '')
+    music.held = true
+    await run(EXPLAINER_FIRST_MS + 1000)
+    await run(guardMs(one('1-a')))
+    expect(music.resumed).toEqual([true])
+  })
+
+  it('on the stream a pause is not a viewer\'s: the stall guard has it', async () => {
+    setBroadcastForTest(true)
+    startExplainers(performance.now(), '')
+    music.held = true
+    await run(EXPLAINER_FIRST_MS + 2000)
+    video().pause()
+    await run(1000, playing, false)
+    expect(phase()).toBe('play')
+    await run(EXPLAINER_STALL_MS, playing, false)
+    expect(phase()).not.toBe('play')
+    expect(music.resumed).toEqual([true])
+  })
+
+  it('a file with no hash is never fetched or played', async () => {
+    setExplainerLineupForTest([one('1-a', { files: [{ url: 'https://b.example/video.webm', type: 'video/webm' }], captions: 'https://b.example/c.vtt' })])
+    startExplainers(performance.now(), '')
+    music.held = true
+    await run(EXPLAINER_FIRST_MS + 1000)
+    expect(fetched).toEqual([])
+    expect(phase()).toBeNull()
+    expect(explainerBusy()).toBe(false)
+  })
+
+  it('captions that arrive late are never painted over a later explainer', async () => {
+    let lateCaptions: ((r: Response) => void) | null = null
+    setExplainerLineupForTest([one('1-a', { captions: 'https://b.example/a.vtt' }), one('2-b')])
+    fetchBody = (url) => url.endsWith('a.vtt') ? new Promise<Response>((r) => { lateCaptions = r }) : new Response(bytes as BodyInit)
+    startExplainers(performance.now(), '')
+    music.held = true
+    await run(EXPLAINER_FIRST_MS + 1000)
+    video().ended = true
+    await run(EXPLAINER_OUT_MS + 200)
+    expect(phase()).toBeNull()
+    // A's captions come after A is over.
+    lateCaptions!(new Response('WEBVTT\n\n00:00.000 --> 01:00.000\nFrom A'))
+    music.held = true
+    await run(EXPLAINER_EVERY_MS + 1000)
+    expect(useTvExplainer.getState().showing?.id).toBe('2-b')
+    video().currentTime = 5
+    expect(explainerCaption()).toBeNull()
   })
 
   it('TV going off ends it at once', async () => {

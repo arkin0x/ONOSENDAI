@@ -37,7 +37,7 @@ import type { RelayAnswer } from '../../lib/relayOutcome'
 import { positionHex, type NostrEvent } from '../../lib/events'
 import { coordToXyz } from 'cyberspace-core'
 import { V2_EPOCH } from '../../lib/tv/tape'
-import { READ_STUCK_MS, TV_FOCUS_LABEL, fitScale, pathAfter, placeable, rideEnds, rideView, setTvAsk, shotOpening, useTv, type TvJump } from '../useTv'
+import { READ_STUCK_MS, TV_FOCUS_LABEL, adEndedAtForTest, fitScale, pathAfter, placeable, rideEnds, rideView, setTvAsk, shotOpening, useTv, type TvJump } from '../useTv'
 import { useCyberspace } from '../useCyberspace'
 import { useBuilder } from '../useBuilder'
 import { usePersonCard } from '../usePersonCard'
@@ -99,6 +99,33 @@ afterEach(() => {
   vi.useRealTimers()
   vi.restoreAllMocks()
 })
+
+/** A video element that plays at the clock's pace, and a fetch of bytes the lineup's hash names (lib/tv/explainer). Returns that hash. */
+async function stubExplainerMedia(): Promise<string> {
+  // A video that plays at the clock's pace, from a fetch of bytes the lineup's hash names.
+  class ClockVideo extends EventTarget {
+    playsInline = false; preload = ''; muted = false; volume = 1; ended = false; error = null; readyState = 0
+    videoWidth = 1280; videoHeight = 720; paused = true
+    private t = 0; private from = 0; private source = ''
+    canPlayType(): string { return 'probably' }
+    get src(): string { return this.source }
+    set src(v: string) { this.source = v; queueMicrotask(() => { this.readyState = 4; this.dispatchEvent(new Event('canplay')) }) }
+    get currentTime(): number { return this.paused ? this.t : this.t + (performance.now() - this.from) / 1000 }
+    set currentTime(v: number) { this.t = v; this.from = performance.now() }
+    removeAttribute(): void { this.source = '' }
+    load(): void {}
+    pause(): void { this.t = this.currentTime; this.paused = true }
+    play(): Promise<void> { this.from = performance.now(); this.paused = false; return Promise.resolve() }
+  }
+  const body = new TextEncoder().encode('clip')
+  const { sha256 } = await import('@noble/hashes/sha2.js')
+  const { bytesToHex } = await import('../../lib/events')
+  vi.stubGlobal('document', { createElement: () => new ClockVideo(), addEventListener: () => {}, removeEventListener: () => {}, visibilityState: 'visible' })
+  vi.stubGlobal('fetch', async () => new Response(body as BodyInit))
+  const real = globalThis.crypto
+  vi.stubGlobal('crypto', { getRandomValues: <T extends ArrayBufferView>(a: T): T => real.getRandomValues(a as never) })
+  return bytesToHex(sha256(body))
+}
 
 async function run(ms: number): Promise<void> {
   for (let t = 0; t < ms; t += 100) await vi.advanceTimersByTimeAsync(100)
@@ -451,30 +478,9 @@ describe('Cyberspace TV', () => {
   })
 
   it('an explainer plays over the tape, the live picture going on under it; the spot waits for it and keeps its gap', async () => {
-    // A video that plays at the clock's pace, from a fetch of bytes the lineup's hash names.
-    class ClockVideo extends EventTarget {
-      playsInline = false; preload = ''; muted = false; volume = 1; ended = false; error = null; readyState = 0
-      videoWidth = 1280; videoHeight = 720; paused = true
-      private t = 0; private from = 0; private source = ''
-      canPlayType(): string { return 'probably' }
-      get src(): string { return this.source }
-      set src(v: string) { this.source = v; queueMicrotask(() => { this.readyState = 4; this.dispatchEvent(new Event('canplay')) }) }
-      get currentTime(): number { return this.paused ? this.t : this.t + (performance.now() - this.from) / 1000 }
-      set currentTime(v: number) { this.t = v; this.from = performance.now() }
-      removeAttribute(): void { this.source = '' }
-      load(): void {}
-      pause(): void { this.t = this.currentTime; this.paused = true }
-      play(): Promise<void> { this.from = performance.now(); this.paused = false; return Promise.resolve() }
-    }
-    const body = new TextEncoder().encode('clip')
-    const { sha256 } = await import('@noble/hashes/sha2.js')
-    const { bytesToHex } = await import('../../lib/events')
-    vi.stubGlobal('document', { createElement: () => new ClockVideo(), addEventListener: () => {}, removeEventListener: () => {}, visibilityState: 'visible' })
-    vi.stubGlobal('fetch', async () => new Response(body as BodyInit))
-    const real = globalThis.crypto
-    vi.stubGlobal('crypto', { getRandomValues: <T extends ArrayBufferView>(a: T): T => real.getRandomValues(a as never) })
+    const hash = await stubExplainerMedia()
     // Long enough to be on when the spot comes due: 2 minutes in, for its guard's 3.
-    setExplainerLineupForTest([{ id: '1-test', title: 'TEST', duration: 600, files: [{ url: `https://b.example/${bytesToHex(sha256(body))}.webm`, type: 'video/webm' }] }])
+    setExplainerLineupForTest([{ id: '1-test', title: 'TEST', duration: 600, files: [{ url: `https://b.example/${hash}.webm`, type: 'video/webm' }] }])
     try {
       useTv.getState().start()
       const t0 = performance.now()
@@ -509,6 +515,19 @@ describe('Cyberspace TV', () => {
       setExplainerLineupForTest(null)
       vi.unstubAllGlobals()
     }
+  })
+
+  it('a retune that cuts the spot short counts as its end, for the explainer\'s gap (review of #471)', async () => {
+    useTv.getState().start()
+    let retunedAt: number | null = null
+    const off = useTv.subscribe((s, prev) => {
+      // RETRY in the middle of the spot.
+      if (s.ad && !prev.ad) queueMicrotask(() => { retunedAt = performance.now(); useTv.getState().retune() })
+    })
+    await run(AD_EVERY_MS + 30_000)
+    off()
+    expect(retunedAt).not.toBeNull()
+    expect(adEndedAtForTest()).toBe(retunedAt)
   })
 
   it('on the 24/7 stream, breaks every BROADCAST_AD_EVERY_MS instead (arkinox, 2026-10-21)', async () => {

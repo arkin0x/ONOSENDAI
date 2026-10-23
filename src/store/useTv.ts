@@ -264,6 +264,10 @@ let adDue = Infinity
 let lastAd: string | null = null
 /** When the last spot ended (performance.now()): an explainer keeps EXPLAINER_AD_GAP_MS from it (lib/tv/explainer). */
 let adEndedAt = -Infinity
+/** When the last spot ended: for tests. */
+export function adEndedAtForTest(): number {
+  return adEndedAt
+}
 let timer: number | null = null
 let ask: Ask = (f) => queryEach(f)
 
@@ -868,7 +872,8 @@ async function tune(id: number): Promise<void> {
   retryAt = 0
   failures = 0
   // A retune cutting a commercial short counts as one played: the next is adEveryMs on.
-  if (useTv.getState().ad) adDue = performance.now() + adEveryMs(isBroadcast())
+  // And it ended: an explainer keeps its gap from it (review of #471).
+  if (useTv.getState().ad) { adDue = performance.now() + adEveryMs(isBroadcast()); adEndedAt = performance.now() }
   // A new tape shows only what it opens itself: the scan's memory stays, what it showed goes.
   looked = null
   dwell.onScreen(null, performance.now())

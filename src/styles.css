@@ -3586,6 +3586,36 @@ kbd {
   .benchorb { width: 120px; height: 120px; }
 }
 
+/* The same ball in WALK, to look around with (WalkLookSphere.tsx; arkinox,
+   2026-10-23). It stands on the menu button's left edge, a gap above it, in
+   the dock the route overlay uses outside WALK, so it moves with the button
+   from a phone's corner to a desktop's scene edge. Beneath the chat (101),
+   the instrument stack (102) and the pad (103), like the overlay: unfolded
+   over it, those win. */
+.benchorb.benchorb--walk {
+  position: fixed;
+  right: auto;
+  left: var(--menu-left);
+  bottom: calc(var(--menu-bottom) + var(--menu-size) + var(--routeov-gap));
+  z-index: 100;
+  width: 112px;
+  height: 112px;
+  padding-bottom: 10px;
+}
+/* Over the HOSAKA mark when a job computes in WALK, as the overlay stands. */
+.app:has(.hosaka-pulse) .benchorb--walk {
+  bottom: calc(var(--menu-bottom) + var(--menu-size) * (1 + 334 / 308) + 2 * var(--routeov-gap));
+}
+/* A short screen (a phone on its side) keeps the top left's chips clear:
+   a smaller ball, and beside the HOSAKA mark rather than over it. */
+@media (max-height: 520px) {
+  .benchorb.benchorb--walk { width: 88px; height: 88px; padding-bottom: 6px; }
+  .app:has(.hosaka-pulse) .benchorb--walk {
+    left: calc(var(--menu-left) + var(--menu-size) + var(--routeov-gap));
+    bottom: calc(var(--menu-bottom) + var(--menu-size) + var(--routeov-gap));
+  }
+}
+
 /* The clipboard row: first in the bottom-left column, so the pad, TURN and
    the color column in the other corner never stand on it. */
 .benchclip {

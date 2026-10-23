@@ -14,9 +14,27 @@ const H = 'a'.repeat(64)
 const ex = (id: string): Explainer => ({ id, title: id.toUpperCase(), duration: 40, files: [{ url: `https://b.example/${H}.webm`, type: 'video/webm' }] })
 
 describe('explainer lineup', () => {
-  it('ships empty: nothing changes on TV until one is added', () => {
-    expect(EXPLAINERS).toEqual([])
-    expect(nextExplainer(EXPLAINERS, null)).toBeNull()
+  it('an empty lineup plays nothing', () => {
+    expect(nextExplainer([], null)).toBeNull()
+  })
+
+  it('every entry in the lineup can play: a unique id, a hash for every file, a length, captions on the site or https', () => {
+    const ids = new Set<string>()
+    for (const e of EXPLAINERS) {
+      expect(ids.has(e.id)).toBe(false)
+      ids.add(e.id)
+      expect(e.id).toMatch(/^\d+-[a-z0-9-]+$/)
+      expect(e.title.length).toBeGreaterThan(0)
+      expect(e.duration).toBeGreaterThan(0)
+      expect(guardMs(e)).toBeLessThan(EXPLAINER_MAX_MS)
+      expect(e.files.length).toBeGreaterThan(0)
+      for (const f of e.files) {
+        expect(f.url).toMatch(/^https:\/\//)
+        expect(fileHash(f)).toMatch(/^[0-9a-f]{64}$/)
+        expect(f.type).toMatch(/^video\/(mp4|webm); codecs="/)
+      }
+      if (e.captions) expect(e.captions).toMatch(/^(https:\/\/|\/)/)
+    }
   })
 
   it('takes the lineup in turn, round, and a forced one first', () => {

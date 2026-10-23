@@ -43,7 +43,7 @@ import { useStash } from '../../hud/stash'
 import { useCyberspace } from '../useCyberspace'
 import { useShardFolders } from '../useShardFolders'
 import { useShards } from '../useShards'
-import { useWorkshop } from '../useWorkshop'
+import { newestId, useWorkshop } from '../useWorkshop'
 
 const S = () => useShards.getState()
 const F = () => useShardFolders.getState()
@@ -113,6 +113,12 @@ describe('a deploy that goes through', () => {
     S().startDeployShard('D', 'workshop')
     await S().deploy()
     expect(drawn()).toEqual({ top: ['D', 'A'], kit: ['B', 'C'] })
+    // And the workshop opens it, as the top of its list (useWorkshop newestId).
+    expect(newestId(useWorkshop.getState().shards)).toBe('D')
+    useWorkshop.setState({ currentId: null })
+    useWorkshop.getState().openWorkshop()
+    expect(useWorkshop.getState().currentId).toBe('D')
+    useWorkshop.getState().closeWorkshop()
   })
 
   it('shows in a list as drawn (PLACE OBJECT MINE)', async () => {
@@ -170,6 +176,27 @@ describe('a deploy that does not go through', () => {
     expect(S().deployStatus).toBe('done')
     expect(S().pending).toBeNull()
     expect(F().tree.used ?? {}).toEqual({})
+  })
+})
+
+describe('moving a placed shard (EDIT)', () => {
+  it('reorders nothing: it moves a deployment, not a model', async () => {
+    S().startDeployShard('C')
+    await S().deploy()
+    const placed = S().mine[S().mine.length - 1].eventId
+    await tick()
+    S().startDeployShard('B')
+    await S().deploy()
+    expect(drawn().kit).toEqual(['B', 'C'])
+    const before = { ...F().tree.used }
+    await tick()
+    S().startEditShard(placed)
+    expect(S().pending).toMatchObject({ type: 'shard', edit: { eventId: placed } })
+    await S().deploy()
+    expect(S().deployError).toBeNull()
+    expect(S().deployStatus).toBe('done')
+    expect(F().tree.used).toEqual(before)
+    expect(drawn().kit).toEqual(['B', 'C'])
   })
 })
 

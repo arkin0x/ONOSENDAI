@@ -45,6 +45,8 @@ import { beatOf } from '../../lib/tv/tape'
 import { AD_EVERY_MS, BROADCAST_AD_EVERY_MS } from '../../lib/tv/hosakaAd'
 import { setBroadcastForTest } from '../../lib/tv/broadcast'
 import { musicHeldForAd } from '../useTvMusic'
+import { setExplainerLineupForTest, useTvExplainer } from '../useTvExplainer'
+import { EXPLAINER_AD_GAP_MS, EXPLAINER_FIRST_MS } from '../../lib/tv/explainer'
 import type { Shot } from '../../lib/tv/director'
 
 const A = '1'.repeat(64)
@@ -446,6 +448,67 @@ describe('Cyberspace TV', () => {
     expect(useTv.getState().ad).toBeNull()
     expect(held.slice(0, 2)).toEqual([false, false])
     expect(musicHeldForAd()).toBe(false)
+  })
+
+  it('an explainer plays over the tape, the live picture going on under it; the spot waits for it and keeps its gap', async () => {
+    // A video that plays at the clock's pace, from a fetch of bytes the lineup's hash names.
+    class ClockVideo extends EventTarget {
+      playsInline = false; preload = ''; muted = false; volume = 1; ended = false; error = null; readyState = 0
+      videoWidth = 1280; videoHeight = 720; paused = true
+      private t = 0; private from = 0; private source = ''
+      canPlayType(): string { return 'probably' }
+      get src(): string { return this.source }
+      set src(v: string) { this.source = v; queueMicrotask(() => { this.readyState = 4; this.dispatchEvent(new Event('canplay')) }) }
+      get currentTime(): number { return this.paused ? this.t : this.t + (performance.now() - this.from) / 1000 }
+      set currentTime(v: number) { this.t = v; this.from = performance.now() }
+      removeAttribute(): void { this.source = '' }
+      load(): void {}
+      pause(): void { this.t = this.currentTime; this.paused = true }
+      play(): Promise<void> { this.from = performance.now(); this.paused = false; return Promise.resolve() }
+    }
+    const body = new TextEncoder().encode('clip')
+    const { sha256 } = await import('@noble/hashes/sha2.js')
+    const { bytesToHex } = await import('../../lib/events')
+    vi.stubGlobal('document', { createElement: () => new ClockVideo(), addEventListener: () => {}, removeEventListener: () => {}, visibilityState: 'visible' })
+    vi.stubGlobal('fetch', async () => new Response(body as BodyInit))
+    const real = globalThis.crypto
+    vi.stubGlobal('crypto', { getRandomValues: <T extends ArrayBufferView>(a: T): T => real.getRandomValues(a as never) })
+    // Long enough to be on when the spot comes due: 2 minutes in, for its guard's 3.
+    setExplainerLineupForTest([{ id: '1-test', title: 'TEST', duration: 600, files: [{ url: `https://b.example/${bytesToHex(sha256(body))}.webm`, type: 'video/webm' }] }])
+    try {
+      useTv.getState().start()
+      const t0 = performance.now()
+      let shownAt: number | null = null
+      let endedAt: number | null = null
+      let adAt: number | null = null
+      let playedUnder = 0
+      let overlap = false
+      const off = useTv.subscribe((s, prev) => {
+        if (s.ad && !prev.ad) adAt = performance.now()
+        if (useTvExplainer.getState().showing && s.played !== prev.played) playedUnder++
+        if (s.ad && useTvExplainer.getState().showing) overlap = true
+      })
+      const offEx = useTvExplainer.subscribe((e, prev) => {
+        if (e.showing && !prev.showing) shownAt = performance.now()
+        if (!e.showing && prev.showing) endedAt = performance.now()
+      })
+      await run(AD_EVERY_MS + 3 * 60_000)
+      off()
+      offEx()
+      expect(shownAt).not.toBeNull()
+      expect(shownAt! - t0).toBeGreaterThanOrEqual(EXPLAINER_FIRST_MS)
+      expect(endedAt).not.toBeNull()
+      // On through the spot's due time: the spot waited for it, and its gap.
+      expect(endedAt! - t0).toBeGreaterThan(AD_EVERY_MS)
+      expect(adAt).not.toBeNull()
+      expect(adAt! - endedAt!).toBeGreaterThanOrEqual(EXPLAINER_AD_GAP_MS)
+      expect(overlap).toBe(false)
+      // The tape played on in the corner.
+      expect(playedUnder).toBeGreaterThan(0)
+    } finally {
+      setExplainerLineupForTest(null)
+      vi.unstubAllGlobals()
+    }
   })
 
   it('on the 24/7 stream, breaks every BROADCAST_AD_EVERY_MS instead (arkinox, 2026-10-21)', async () => {

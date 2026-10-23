@@ -192,6 +192,20 @@ export interface TvAssets {
   hosaka?: CanvasImageSource | null
   /** The HOSAKA mark alone (public/hosaka-mark.png), for the commercial's cards; null until loaded. */
   hosakaMark?: CanvasImageSource | null
+  /** An explainer on screen (lib/tv/explainer), the live picture in its corner; none when none is. */
+  explainer?: TvExplainer | null
+}
+
+/** What the painter shows of an explainer on screen. */
+export interface TvExplainer {
+  title: string
+  /** How far into its corner the live picture is, 0 to 1 (explainerMix). */
+  mix: number
+  /** Where the live picture is when all the way in, and where the video is, CSS px on the flat frame. */
+  pip: FlatRect
+  video: FlatRect
+  /** The caption at this moment, or null. */
+  caption: string | null
 }
 
 /** What NOW PLAYING shows. */
@@ -340,6 +354,8 @@ export class TvPainter {
   private lastDot: Position | null = null
   /** Where NOW PLAYING was last painted, canvas px, and the canvas px per CSS px then. */
   private npRect: FlatRect | null = null
+  /** The marquee's top at the last paint, CSS px: where an explainer's video stops (lib/tv/explainer explainerLayout). */
+  private floorPx: number | null = null
   private cardScale = 1
   /** Every call on the canvas, followed part by part, for what each paint changed (drawTracker). */
   private track: DrawTracker
@@ -362,6 +378,11 @@ export class TvPainter {
   }
 
   /** Where NOW PLAYING is on the flat frame, CSS px, for a tap or a drag on it; null when it is not up. */
+  /** The marquee's top at the last paint, CSS px from the top; null before the first. */
+  get marqueeTop(): number | null {
+    return this.floorPx
+  }
+
   get musicCard(): FlatRect | null {
     const c = this.npRect
     const k = this.cardScale
@@ -605,11 +626,14 @@ export class TvPainter {
     // where the avatar on screen is in it.
     const mapSize = bigInset ? 0 : Math.min(200 * s0, W * 0.3, H * 0.34)
     part('minimap')
-    if (!bigInset) this.minimap(p, MX, MY, mapSize, s, now, reduced)
+    // An explainer's live picture takes the minimap's corner (lib/tv/explainer).
+    const ex = a.explainer && a.explainer.mix > 0 ? a.explainer : null
+    if (!bigInset && !ex) this.minimap(p, MX, MY, mapSize, s, now, reduced)
 
     // The marquee along the bottom margin, the CYBERSPACE TV bug at its head.
     const tickH = (big ? BIG_TICKER_H_PX : TICKER_H_PX) * s
     const tickY = H - MY - tickH
+    this.floorPx = tickY / scale
     part('marquee')
     this.marquee(p, a, MX, tickY, W - MX, tickH, s, dt)
 
@@ -635,10 +659,13 @@ export class TvPainter {
     const npFullH = (big ? CHIRON_PX[1] : NOW_PLAYING_PX) * s
     let chironTop = tickY
     part('chiron')
-    if (p.shot && p.status === 'playing') chironTop = this.chiron(p, a, MX, rowBottom, chironW, chironH, s, narrow)
+    // Over an explainer, the live picture's own words step away with the
+    // minimap: the chiron, NOW PLAYING (the music is out), the segment's
+    // panels, LATER and MEANWHILE, and TUNING and the like.
+    if (p.shot && p.status === 'playing' && !ex) chironTop = this.chiron(p, a, MX, rowBottom, chironW, chironH, s, narrow)
     const npBottom = row ? rowBottom : rowBottom - CHIRON_PX[1] * s - 10 * s
     const ceiling = (narrow ? Math.max(clockBottom, MY + mapSize) : clockBottom) + 10 * s
-    const npLook = !a.music ? null : npBottom - npFullH >= ceiling ? 'full' : npBottom - NOW_PLAYING_LINE_PX * s >= ceiling ? 'line' : null
+    const npLook = !a.music || ex ? null : npBottom - npFullH >= ceiling ? 'full' : npBottom - NOW_PLAYING_LINE_PX * s >= ceiling ? 'line' : null
     part('nowPlaying')
     const npTop = a.music && npLook ? this.nowPlaying(a.music, W - MX - npW, npBottom, npW, s, now, reduced, npLook === 'line', npFullH) : chironTop
     this.npRect = a.music && npLook ? { x: W - MX - npW, y: npTop, w: npW, h: npBottom - npTop } : null
@@ -666,7 +693,7 @@ export class TvPainter {
     // starts 56 px over the floor (review of #447: a comment's panel reached 50).
     const segmentFloor = floor - (bigInset ? 14 : underMap ? 60 : 50) * s
     part('segment')
-    if (item && panel) this.segment(item, p.shot!.length, a, W, segmentTop + 14 * s, segmentFloor, sideBottom, MX, MY, (big ? colLeft : W - MX - lw) - 16 * s, bigInset ? MX : MX + mapSize + 16 * s, s, narrow, now)
+    if (item && panel && !ex) this.segment(item, p.shot!.length, a, W, segmentTop + 14 * s, segmentFloor, sideBottom, MX, MY, (big ? colLeft : W - MX - lw) - 16 * s, bigInset ? MX : MX + mapSize + 16 * s, s, narrow, now)
 
     // LATER and MEANWHILE, after the cut's transition; under an inset's
     // panel, or with the stream's larger text across the chiron, solid.
@@ -675,11 +702,11 @@ export class TvPainter {
     // and kept within it: centred on the frame it reached NOW PLAYING, and
     // over a trip the clock or a square frame's minimap (review of #453).
     const onChiron = big && chironTop < tickY
-    this.card(p, onChiron ? MX + chironW / 2 : W / 2, s, narrow, onChiron ? chironTop + chironH / 2 + 6 * s : inset ? floor - 34 * s : H * 0.34, now, onChiron ? chironW : null)
+    if (!ex) this.card(p, onChiron ? MX + chironW / 2 : W / 2, s, narrow, onChiron ? chironTop + chironH / 2 + 6 * s : inset ? floor - 34 * s : H * 0.34, now, onChiron ? chironW : null)
 
     // TUNING, END OF TAPE, NO SIGNAL.
     part('status')
-    if (p.status !== 'playing') {
+    if (p.status !== 'playing' && !ex) {
       const label = p.status === 'tuning' ? 'TUNING' : p.status === 'end' ? 'END OF TAPE' : 'NO SIGNAL'
       ctx.globalAlpha = reduced ? 1 : 0.55 + 0.45 * (Math.floor(now / 700) % 2)
       ctx.font = `700 ${26 * s}px ${TV_FONT}`
@@ -688,6 +715,54 @@ export class TvPainter {
       ctx.fillText(label, W / 2, H / 2)
       ctx.globalAlpha = 1
     }
+
+    part('explainer')
+    if (ex) this.explainerParts(ex, W, scale, s, narrow, tickY)
+  }
+
+  /**
+   * What an explainer adds (lib/tv/explainer): its title in a tag under the
+   * live picture, as a channel marks what is on, and its captions over the
+   * video's foot, above the marquee. The live picture's own frame is the
+   * tube's (scene/TvScreenEffect), drawn with it as it moves.
+   */
+  private explainerParts(ex: TvExplainer, W: number, scale: number, s: number, narrow: boolean, floor: number): void {
+    const ctx = this.ctx
+    ctx.save()
+    // Only once the live picture is all but in its corner: the tag stands
+    // where its corner ends, which the picture crosses on its way.
+    ctx.globalAlpha = clamp01((ex.mix - 0.8) / 0.2)
+    ctx.textAlign = 'left'
+    ctx.font = `700 ${(narrow ? 9 : 10) * s}px ${TV_FONT}`
+    const x = ex.pip.x * scale
+    const y = (ex.pip.y + ex.pip.h) * scale + 8 * s
+    const label = fit(ctx, ex.title, Math.max(20 * s, ex.pip.w * scale - 14 * s))
+    const tw = ctx.measureText(label).width
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.55)'
+    ctx.fillRect(x, y, tw + 14 * s, 18 * s)
+    ctx.strokeStyle = 'rgba(0, 229, 255, 0.6)'
+    ctx.lineWidth = Math.max(1, s)
+    ctx.strokeRect(x + 0.5, y + 0.5, tw + 14 * s - 1, 18 * s - 1)
+    ctx.fillStyle = 'rgba(242, 251, 255, 0.9)'
+    ctx.fillText(label, x + 7 * s, y + 12.5 * s)
+    if (ex.caption) {
+      const size = (narrow ? 13 : 18) * s
+      ctx.font = `700 ${size}px ${TV_FONT}`
+      ctx.textAlign = 'center'
+      const cx = (ex.video.x + ex.video.w / 2) * scale
+      const lines = wrap(ctx, ex.caption, Math.min(ex.video.w * scale, W) * 0.84).slice(0, 3)
+      const lineH = size * 1.3
+      const bottom = Math.min((ex.video.y + ex.video.h) * scale - 12 * s, floor - 12 * s)
+      lines.forEach((line, i) => {
+        const base = bottom - (lines.length - 1 - i) * lineH
+        const lw = ctx.measureText(line).width
+        ctx.fillStyle = 'rgba(0, 0, 0, 0.7)'
+        ctx.fillRect(cx - lw / 2 - 8 * s, base - size * 1.02, lw + 16 * s, lineH)
+        ctx.fillStyle = FG
+        ctx.fillText(line, cx, base)
+      })
+    }
+    ctx.restore()
   }
 
   private marquee(p: TvPicture, a: TvAssets, x0: number, y: number, x1: number, h: number, s: number, dt: number): void {

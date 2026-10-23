@@ -40,7 +40,7 @@ import { useContext, useEffect, useMemo, useRef } from 'react'
 import { useFrame, useThree } from '@react-three/fiber'
 import { BlendFunction, Effect, EffectAttribute, type Pass } from 'postprocessing'
 import { EffectComposerContext } from '@react-three/postprocessing'
-import { CanvasTexture, LinearFilter, SRGBColorSpace, Uniform, Vector2 } from 'three'
+import { CanvasTexture, DataTexture, LinearFilter, SRGBColorSpace, Uniform, Vector2, Vector4, VideoTexture } from 'three'
 import { placeable, useTv } from '../store/useTv'
 import { useProfiles } from '../store/useProfiles'
 import { targetColor } from '../lib/targets'
@@ -49,11 +49,13 @@ import { objectsOf } from '../workshop/ObjectPicker'
 import { avatarFromEvent } from '../lib/avatar'
 import { tvSpin } from '../hud/TvSegments'
 import { uploadRegions } from './drawTracker'
-import { CUT_MS, TV_FONT, TvPainter, type FlatRect, type TvAssets, type TvMusic } from './tvPainter'
+import { CUT_MS, MARGIN_X, MARGIN_Y, TV_FONT, TvPainter, type FlatRect, type TvAssets, type TvExplainer, type TvMusic } from './tvPainter'
 import { askForTap, musicProgress, setMusicVolume, tapMusic, useTvMusic } from '../store/useTvMusic'
 import { countTvFrame, isBroadcast } from '../lib/tv/broadcast'
 import { useTvWatching } from '../store/useTvWatching'
 import { CALM, GlitchDirector } from '../lib/tv/glitch'
+import { explainerLayout, explainerMix, lerpRect, type Rect } from '../lib/tv/explainer'
+import { explainerCaption, explainerVideo, useTvExplainer } from '../store/useTvExplainer'
 import type { ShardModel } from 'sno-core/shards'
 
 /** Kept for what still names the old static: a cut's transition, ms. */
@@ -104,16 +106,39 @@ uniform vec2 uDrift;
 uniform float uGlass;
 uniform float uShade;
 uniform sampler2D uOverlay;
+uniform sampler2D uVideo;
+uniform float uMix;
+uniform vec4 uPip;
+uniform vec4 uVid;
 
 float tvNoise(vec2 p) {
   return fract(sin(dot(p, vec2(12.9898, 78.233))) * 43758.5453);
 }
 
+bool inside(vec2 s) {
+  return s.x >= 0.0 && s.x <= 1.0 && s.y >= 0.0 && s.y <= 1.0;
+}
+
 // The picture at a point of the flat frame; black off its edge, where a
 // tear or a wide aberration reaches (rather than the edge smeared across).
+// Over an explainer (lib/tv/explainer), the live picture made small in its
+// corner (uPip, x y w h, y up), its frame a fine line, and the video behind
+// it (uVid) coming up as the picture goes in (uMix), on this same glass.
 vec3 picture(vec2 p) {
   if (p.x < 0.0 || p.x > 1.0 || p.y < 0.0 || p.y > 1.0) return vec3(0.0);
-  return texture(inputBuffer, p).rgb;
+  if (uMix <= 0.0) return texture(inputBuffer, p).rgb;
+  vec2 s = (p - uPip.xy) / uPip.zw;
+  if (inside(s)) {
+    vec2 px = min(s, 1.0 - s) * uPip.zw / texelSize;
+    if (min(px.x, px.y) < 1.5 * uPx) return mix(texture(inputBuffer, s).rgb, vec3(0.0, 0.9, 1.0), 0.85 * uMix);
+    // Made small, four taps a quarter of a screen pixel's footprint apart,
+    // so the lattice's fine lines do not shimmer.
+    vec2 d = texelSize * 0.25 / uPip.zw;
+    return 0.25 * (texture(inputBuffer, s + vec2(-d.x, -d.y)).rgb + texture(inputBuffer, s + vec2(d.x, -d.y)).rgb
+      + texture(inputBuffer, s + vec2(-d.x, d.y)).rgb + texture(inputBuffer, s + vec2(d.x, d.y)).rgb);
+  }
+  vec2 v = (p - uVid.xy) / uVid.zw;
+  return inside(v) ? texture(uVideo, v).rgb * uMix : vec3(0.0);
 }
 
 // The furniture, painted flat, over a colour at a point of the flat frame.
@@ -178,7 +203,11 @@ void mainImage(const in vec4 inputColor, const in vec2 uv, out vec4 outputColor)
   // (2026-10-19: "it should fade in slowly and subtly, only up to maybe 40%
   // or less even, like you're moving out of range of the signal").
   col *= 1.0 - 0.2 * uDrop;
-  float snow = max(uSnow, uDrop * 0.38);
+  // The live picture's own snow (tuning, no signal, a bag with no public
+  // place) stays on it: over an explainer, only in its corner.
+  float shotSnow = uSnow;
+  if (uMix > 0.0 && !inside((pw - uPip.xy) / uPip.zw)) shotSnow = 0.0;
+  float snow = max(shotSnow, uDrop * 0.38);
   if (uCutKind > 1.5 && uCut < 1.0) snow = max(snow, (1.0 - uCut) * 0.95);
   // Only worked out when there is some: most of the time there is none, and
   // its six hashes, a sine each, were half of the twelve sines the tube took
@@ -230,6 +259,15 @@ void mainImage(const in vec4 inputColor, const in vec2 uv, out vec4 outputColor)
   outputColor = vec4(col, 1.0);
 }`
 
+/** What the tube samples for the video while none is on: one black texel. */
+const NO_VIDEO = new DataTexture(new Uint8Array([0, 0, 0, 255]), 1, 1)
+NO_VIDEO.needsUpdate = true
+
+/** A rectangle of the flat frame (CSS px, y down) as the shader takes it: shares of the frame, y up, into `out`. */
+export function glRect(r: Rect, w: number, h: number, out: Vector4): Vector4 {
+  return out.set(r.x / w, 1 - (r.y + r.h) / h, Math.max(1e-4, r.w / w), Math.max(1e-4, r.h / h))
+}
+
 class CrtEffect extends Effect {
   constructor(overlay: CanvasTexture) {
     super('CyberspaceTvTube', FRAGMENT, {
@@ -251,6 +289,10 @@ class CrtEffect extends Effect {
         ['uGlass', new Uniform(isBroadcast() ? BROADCAST_GLASS : GLASS)],
         ['uShade', new Uniform(isBroadcast() ? BROADCAST_SHADE : SHADE)],
         ['uOverlay', new Uniform(overlay)],
+        ['uVideo', new Uniform(NO_VIDEO)],
+        ['uMix', new Uniform(0)],
+        ['uPip', new Uniform(new Vector4(0, 0, 1, 1))],
+        ['uVid', new Uniform(new Vector4(0, 0, 1, 1))],
       ]),
     })
   }
@@ -398,6 +440,11 @@ export function TvScreenEffect(): JSX.Element {
   }, [])
   useEffect(() => () => { if (hosaka) { hosaka.pause(); hosaka.removeAttribute('src'); hosaka.load() } }, [hosaka])
   useEffect(() => { if (import.meta.env.DEV) (window as unknown as { __tvGlitches?: GlitchDirector }).__tvGlitches = glitches }, [glitches])
+  // An explainer's video, as the tube samples it (lib/tv/explainer): one
+  // texture per video, made when it comes on and let go when it goes.
+  const videoTex = useRef<VideoTexture | null>(null)
+  const videoAt = useRef(-1)
+  useEffect(() => () => { videoTex.current?.dispose(); videoTex.current = null }, [])
 
   // NOW PLAYING takes a tap to mute and a drag up or down for the volume
   // (arkinox, 2026-10-18). On the canvas, ahead of the scene's own pointer
@@ -494,7 +541,10 @@ export function TvScreenEffect(): JSX.Element {
     tubeDrift(state.clock.elapsedTime, u.get('uDrift')!.value as Vector2)
     u.get('uPx')!.value = state.gl.getPixelRatio()
     const since = now - tv.cutAt
-    u.get('uCut')!.value = Math.min(1, Math.max(0, since / CUT_MS))
+    // Over an explainer a cut in the live picture's corner is a plain cut: a
+    // dip, a roll or a burst of snow would take the whole tube, video and all.
+    const explaining = useTvExplainer.getState().showing !== null
+    u.get('uCut')!.value = explaining ? 1 : Math.min(1, Math.max(0, since / CUT_MS))
     u.get('uCutKind')!.value = cutKind(tv.cutAt, reduced)
     // Snow that stays: while tuning or without a signal, and under a bag
     // with no public place (the last picture behind its inset is often its
@@ -512,9 +562,41 @@ export function TvScreenEffect(): JSX.Element {
     u.get('uTearSeed')!.value = g.tearSeed
     u.get('uDrop')!.value = g.dropout
 
+    // An explainer (lib/tv/explainer): the live picture into its corner and
+    // the video behind it, both through this glass. Laid out every frame, so
+    // the picture's frame moves with it.
+    const { width, height } = state.size
+    const ex = useTvExplainer.getState().showing
+    const ev = explainerVideo()
+    const mix = ex && ev ? explainerMix(ex.phase, ex.at, now, ex.outMs) : 0
+    let explainer: TvExplainer | null = null
+    if (ex && ev && mix > 0) {
+      if (videoTex.current?.image !== ev) {
+        videoTex.current?.dispose()
+        const t = new VideoTexture(ev)
+        t.colorSpace = SRGBColorSpace
+        t.minFilter = LinearFilter
+        t.generateMipmaps = false
+        videoTex.current = t
+        videoAt.current = -1
+      }
+      // A new frame only when the video has moved on: each is an upload.
+      if (ev.readyState >= 2 && ev.currentTime !== videoAt.current) { videoTex.current.needsUpdate = true; videoAt.current = ev.currentTime }
+      const floor = painter.marqueeTop ?? height * (1 - MARGIN_Y) - 28
+      const layout = explainerLayout(width, height, ev.videoWidth / ev.videoHeight, MARGIN_X, MARGIN_Y, floor)
+      glRect(lerpRect({ x: 0, y: 0, w: width, h: height }, layout.pip, mix), width, height, u.get('uPip')!.value as Vector4)
+      glRect(layout.video, width, height, u.get('uVid')!.value as Vector4)
+      u.get('uVideo')!.value = videoTex.current
+      explainer = { title: ex.title, mix, pip: layout.pip, video: layout.video, caption: explainerCaption() }
+    } else if (videoTex.current) {
+      u.get('uVideo')!.value = NO_VIDEO
+      videoTex.current.dispose()
+      videoTex.current = null
+    }
+    u.get('uMix')!.value = mix
+
     if (now - lastPaint.current < PAINT_MS) return
     lastPaint.current = now
-    const { width, height } = state.size
     const scale = Math.min(PAINT_SCALE, state.gl.getPixelRatio(), Math.sqrt(PAINT_MAX_PIXELS / Math.max(1, width * height)))
     // A new size needs a new texture: three.js keeps the storage it first
     // made, and copying a larger canvas into it fails on the GPU, which left
@@ -537,6 +619,7 @@ export function TvScreenEffect(): JSX.Element {
       watching: useTvWatching.getState().count,
       hosaka: !tv.ad ? null : hosaka && hosaka.readyState >= 2 ? hosaka : pictureFor('/hosaka-poster.jpg'),
       hosakaMark: tv.ad ? pictureFor('/hosaka-mark.png') : null,
+      explainer,
     }
     // The turning shard's next frame, for the next paint: this one copies the
     // last (TvSegments tvSpin).

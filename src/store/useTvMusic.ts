@@ -259,6 +259,35 @@ export function holdMusicForAd(on: boolean): void {
 }
 
 /**
+ * Step the music out at the end of the song playing, for an explainer
+ * (lib/tv/explainer): the next song waits, loaded, until releaseMusic. A
+ * song is never cut off for one. With nothing sounding (no track yet, a
+ * track the viewer or the browser paused, the list waiting after every
+ * track failed), it steps out now. musicHeldForAd says when it has.
+ */
+export function holdMusicAtSongEnd(): void {
+  if (held) return
+  const a = audio
+  if (!a || !a.getAttribute('src') || a.paused || a.ended || !wanted) { holdAtEnd = false; holdMusicForAd(true); return }
+  holdAtEnd = true
+}
+
+/** Step the music out now, the song faded and paused where it is, to come back there (an explainer that waited long enough). */
+export function holdMusicNow(): void {
+  holdAtEnd = false
+  holdMusicForAd(true)
+}
+
+/** Bring the music back after an explainer, or stop waiting for the song's end. */
+export function releaseMusic(): void {
+  holdAtEnd = false
+  holdMusicForAd(false)
+}
+
+/** Whether the music steps out at the end of this song (holdMusicAtSongEnd). */
+let holdAtEnd = false
+
+/**
  * The break's own pause. Told by the element a moment later, by when the
  * break may be over (a background tab's timers run late and together), so
  * it is marked: the viewer's pause is any other.
@@ -443,6 +472,7 @@ export function stopMusic(): void {
   if (fading !== null) clearInterval(fading)
   fading = null
   held = false
+  holdAtEnd = false
   resumeAfter = false
   armAfter = false
   wanted = false
@@ -488,6 +518,13 @@ function fail(list: Track[]): void {
 function advance(list: Track[]): void {
   const a = audio
   if (!a) return
+  // Between songs: where an explainer waiting for one to end steps the music
+  // out (holdMusicAtSongEnd). The next is taken up below and waits, ready.
+  if (holdAtEnd && !held) {
+    holdAtEnd = false
+    held = true
+    clearStall()
+  }
   at++
   if (at >= order.length) {
     order = shuffled(list, order[order.length - 1]?.url)

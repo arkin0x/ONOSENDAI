@@ -293,6 +293,8 @@ export const useShardImport = create<ShardImportState>((set, get) => {
       const again = await checkRelays()
       if (g !== generation) return
       set(again)
+      // STOP while asking: nothing has started, so the run ends here.
+      if (get().stopAsked) { set({ phase: 'done', stopAsked: false }); return }
     }
     const me = useCyberspace.getState().identity.pubkey
     const publish = get().publish && !!me

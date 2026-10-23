@@ -606,4 +606,22 @@ describe('round 4', () => {
     expect(rowOf('shell').failure).toBe('Places maze-kit/forest/rotunda, which is not coming in')
     expect(mine().filter((x) => x.name.startsWith('shell'))).toHaveLength(1)
   })
+
+  it('STOP during the re-check for a switched key ends the run before anything starts', async () => {
+    const identity = useCyberspace.getState().identity
+    await imp().openZip(kitZip())
+    let answer: (() => void) | null = null
+    vi.mocked(queryEach).mockImplementation(() => new Promise((resolve) => { answer = () => resolve([{ url: 'wss://relay.test', outcome: 'answered', events: [] }]) }))
+    useCyberspace.setState({ identity: { ...identity, pubkey: 'f'.repeat(64) } })
+    try {
+      const running = imp().start()
+      await vi.waitFor(() => expect(answer).not.toBeNull())
+      imp().stop()
+      answer!()
+      await running
+    } finally { useCyberspace.setState({ identity }) }
+    expect(imp().phase).toBe('done')
+    expect(mine()).toHaveLength(0)
+    expect(sent()).toHaveLength(0)
+  })
 })

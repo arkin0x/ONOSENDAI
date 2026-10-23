@@ -283,17 +283,19 @@ export function blockedRows(rows: ReadonlyArray<{ key: string; id: string; refs?
  * relays). Kit-internal references name no real object yet, so their parts
  * are left out and their refs dropped, the rest renumbered; a join then
  * shows its own geometry, or the icon. References to anyone else's objects
- * stay, as in any list. The same object when there is nothing to leave out.
+ * stay, without the relay hint the zip wrote on them: a review is a preview
+ * of a file someone handed you, so no host the file chose is ever asked
+ * (your own relays are). The same object when there is nothing to change.
  */
 export function offlinePicture<S extends { refs?: Array<readonly unknown[]>; parts?: Array<{ ref: number }> }>(shard: S): S {
   const refs = shard.refs ?? []
-  if (!refs.some((r) => placeholderOf(r) !== null)) return shard
+  if (!refs.some((r) => placeholderOf(r) !== null || r.length > 2)) return shard
   const keep: number[] = []
   const index = new Map<number, number>()
   refs.forEach((r, i) => { if (placeholderOf(r) === null) { index.set(i, keep.length); keep.push(i) } })
   const parts = (shard.parts ?? []).filter((q) => index.has(q.ref)).map((q) => ({ ...q, ref: index.get(q.ref)! }))
   const { refs: _r, parts: _p, ...rest } = shard
-  return (keep.length && parts.length ? { ...rest, refs: keep.map((i) => refs[i]), parts } : rest) as S
+  return (keep.length && parts.length ? { ...rest, refs: keep.map((i) => refs[i].slice(0, 2)), parts } : rest) as S
 }
 
 /** The refs with each kit-internal one stripped of its relay hint (the kit's hint is not a relay anyone chose). */

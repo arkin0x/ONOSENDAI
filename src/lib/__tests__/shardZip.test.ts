@@ -204,10 +204,13 @@ describe('review pictures reach no relay about the kit', () => {
 
   it('leaves out kit-internal parts and refs, renumbering the rest; the same object when there are none', () => {
     const join = { name: 'j', refs: [P('k/door', 'wss://tracker.example'), other, P('k/room')], parts: [{ ref: 0, at: 1 }, { ref: 1, at: 2 }, { ref: 2, at: 3 }, { ref: 1, at: 4 }] }
-    expect(offlinePicture(join)).toEqual({ name: 'j', refs: [other], parts: [{ ref: 0, at: 2 }, { ref: 0, at: 4 }] })
+    // Someone else's object stays, without the host the zip chose for it.
+    expect(offlinePicture(join)).toEqual({ name: 'j', refs: [other.slice(0, 2)], parts: [{ ref: 0, at: 2 }, { ref: 0, at: 4 }] })
     const only = { name: 'k', refs: [P('k/door')], parts: [{ ref: 0 }] }
     expect(offlinePicture(only)).toEqual({ name: 'k' })
-    const plain = { name: 'p', refs: [other], parts: [{ ref: 0 }] }
+    const hinted = { name: 'h', refs: [other], parts: [{ ref: 0 }] }
+    expect(offlinePicture(hinted)).toEqual({ name: 'h', refs: [other.slice(0, 2)], parts: [{ ref: 0 }] })
+    const plain = { name: 'p', refs: [other.slice(0, 2)], parts: [{ ref: 0 }] }
     expect(offlinePicture(plain)).toBe(plain)
   })
 

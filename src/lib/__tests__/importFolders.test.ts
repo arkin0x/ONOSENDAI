@@ -9,7 +9,9 @@
  * folderOf and pathOf it reads a shard's folder path for duplicate matching.
  */
 import { describe, expect, it, vi } from 'vitest'
+import 'fake-indexeddb/auto'
 import { folderApi, placeInFolders } from '../importFolders'
+import { useShardFolders } from '../../store/useShardFolders'
 
 describe('folderApi', () => {
   it('is absent while there are no folders, and placing does nothing', () => {
@@ -18,10 +20,16 @@ describe('folderApi', () => {
     expect(placeInFolders(null, [{ shardId: 'a', folder: ['kit'] }])).toBe(false)
   })
 
-  it('finds nothing on a branch without the folders store', () => {
-    // On v2 before #449 the file does not exist; once it does this lights up.
+  it('lights up against the folders store (#449): files shards, reads their paths back, flushes', async () => {
     const api = folderApi()
-    expect(api === null || typeof api.createFolderPath === 'function').toBe(true)
+    expect(api).not.toBeNull()
+    expect(typeof api!.folderPathOf).toBe('function')
+    expect(typeof api!.flush).toBe('function')
+    placeInFolders(api, [{ shardId: 'kit/forest/a', folder: ['maze-kit', 'forest'] }, { shardId: 'kit/forest/b', folder: ['maze-kit', 'forest'] }, { shardId: 'kit/shared/c', folder: ['maze-kit', 'shared'] }])
+    expect(api!.folderPathOf!('kit/forest/a')).toEqual(['maze-kit', 'forest'])
+    expect(api!.folderPathOf!('kit/shared/c')).toEqual(['maze-kit', 'shared'])
+    expect(Object.keys(useShardFolders.getState().tree.folders)).toHaveLength(3)
+    await api!.flush!()
   })
 
   it('lights up with createFolderPath and assignToFolder, making each path once', () => {

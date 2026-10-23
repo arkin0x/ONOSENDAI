@@ -18,8 +18,7 @@ import { ThumbStage } from '../scene/ThumbStage'
 import { useThumbs } from '../store/useThumbs'
 import { useEscape } from '../hooks/useEscape'
 import { useCyberspace } from '../store/useCyberspace'
-import { plannedBlocks, useShardImport, type ImportRow } from '../store/useShardImport'
-import { useWorkshop } from '../store/useWorkshop'
+import { mineIds, plannedBlocks, useShardImport, type ImportRow } from '../store/useShardImport'
 import { dupAction, type Dup, type DupMode } from '../lib/shardZip'
 
 const MODES: Array<{ mode: DupMode; label: string; help: string }> = [
@@ -88,7 +87,7 @@ export function ZipImport(): JSX.Element | null {
 
   const ready = s.rows.filter((r) => r.read === 'ok')
   // Recomputed each render: picks and the answer to a taken name decide which pieces a shell can place.
-  const blocked = s.phase === 'review' || s.phase === 'done' ? plannedBlocks(s.rows, s.dups, s.dupMode, s.published, useWorkshop.getState().shards.map((x) => x.id)) : new Map<string, string>()
+  const blocked = s.phase === 'review' || s.phase === 'done' ? plannedBlocks(s.rows, s.dups, s.dupMode, s.published, mineIds()) : new Map<string, string>()
   // What IMPORT would do something with: a taken name under SKIP is left out, unless a first try already made its shard.
   const todo = ready.filter((r) => r.picked && r.run !== 'done' && r.run !== 'skipped' && !(r.shardId === null && blocked.has(r.key)) && (r.shardId !== null || dupAction(s.dups[r.key] ?? null, s.dupMode).act !== 'skip'))
   const errors = s.rows.filter((r) => r.read === 'error').length

@@ -144,6 +144,11 @@ const baseName = (path: string): string => path.split('/').pop() ?? path
 
 const blank = { open: false, fileName: '', phase: 'opening' as Phase, error: null, rows: [], skipped: [], dups: {}, dupMode: 'skip' as DupMode, publish: true, foldersOn: false, kit: '', published: [] as string[], remote: 'idle' as const, checkedFor: '', ran: false, stopAsked: false, stall: null }
 
+/** The ids of your shards, for what exists already (lib/shardZip blockedRows). */
+export function mineIds(): string[] {
+  return useWorkshop.getState().shards.map((x) => x.id)
+}
+
 /** Your shards as duplicate matching sees them. */
 function mine(): Array<{ id: string; name: string; folder: string[] | null }> {
   const api = folderApi()

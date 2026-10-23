@@ -44,6 +44,7 @@ import { orientShard } from 'sno-core/orient'
 import { faceEdges } from 'sno-core/outline'
 import { BACK_SHADE_COLOR, SHARD_FACES_TONE_MAPPED } from './shardLight'
 import { SHARD_DOTS, SHARD_POINTS, createDiscMaterial, sizeDisc, withDiscColors } from './pointDisc'
+import { HEADLAMP_FACES, HEADLAMP_LINES } from './headlamp'
 
 interface Props {
   shard: ShardModel
@@ -70,6 +71,14 @@ interface Props {
    * they always did. Not for a ghost, whose translucency needs real alpha.
    */
   world?: boolean
+  /**
+   * Shaded by the world's headlamp (scene/headlamp.ts): faces darker as they
+   * turn from the view, everything dimmer with distance, while the View
+   * panel's switch is on. For whatever the main scene draws unlit: on with
+   * `world`, and the placing ghost asks for it too. Never with `lit`, whose
+   * bench lights do the same work.
+   */
+  headlamp?: boolean
   /** performance.now() when this client opened the shard; runs the decode. */
   birth?: number
   /**
@@ -164,7 +173,7 @@ const TAG_BLEND = {
   stencilWrite: true, stencilRef: FACE_TAG_STENCIL, stencilZPass: ReplaceStencilOp,
 } as const
 
-export function ShardMesh({ shard: given, scale = 1, ghost = false, birth, onFaceClick, world = false, lit = false, clip, clipPlanes, pose, nested, onPartClick, selectedParts, cull = false }: Props): JSX.Element | null {
+export function ShardMesh({ shard: given, scale = 1, ghost = false, birth, onFaceClick, world = false, headlamp = world, lit = false, clip, clipPlanes, pose, nested, onPartClick, selectedParts, cull = false }: Props): JSX.Element | null {
   // The objects this one places, fetched once for the whole app; a part's own
   // parts come resolved from its parent instead.
   const resolved = useResolved(nested ? null : given)
@@ -235,8 +244,8 @@ export function ShardMesh({ shard: given, scale = 1, ghost = false, birth, onFac
   // with a bright core for the bloom, sized in pixels between a floor and a cap.
   const pointMaterial = useMemo(() => {
     const seen = ghost ? 0.45 : 1
-    return createDiscMaterial(shard.mode === 'points' ? SHARD_POINTS : SHARD_DOTS, shard.mode === 'points' ? seen : seen * 0.55)
-  }, [shard.mode, ghost])
+    return createDiscMaterial(shard.mode === 'points' ? SHARD_POINTS : SHARD_DOTS, shard.mode === 'points' ? seen : seen * 0.55, headlamp && !lit)
+  }, [shard.mode, ghost, headlamp, lit])
   useEffect(() => () => pointMaterial.dispose(), [pointMaterial])
   useEffect(() => { pointMaterial.clippingPlanes = clipPlanes ?? null }, [pointMaterial, clipPlanes])
 
@@ -261,10 +270,12 @@ export function ShardMesh({ shard: given, scale = 1, ghost = false, birth, onFac
   useEffect(() => () => { outline?.dispose() }, [outline])
 
   const line = useMemo(() => {
-    const l = new Line(plain, new LineBasicMaterial({ vertexColors: true, toneMapped: false, transparent: true, opacity: ghost ? 0.45 : 1 }))
+    const m = new LineBasicMaterial({ vertexColors: true, toneMapped: false, transparent: true, opacity: ghost ? 0.45 : 1 })
+    if (headlamp && !lit) Object.assign(m, HEADLAMP_LINES)
+    const l = new Line(plain, m)
     l.frustumCulled = false
     return l
-  }, [plain, ghost])
+  }, [plain, ghost, headlamp, lit])
 
   // A rebuild replaces these; nothing else lets the GPU buffers go. The line
   // is a primitive, which R3F never disposes, so its material is ours too.
@@ -275,6 +286,9 @@ export function ShardMesh({ shard: given, scale = 1, ghost = false, birth, onFac
   useEffect(() => { (line.material as LineBasicMaterial).clippingPlanes = clipPlanes ?? null }, [line, clipPlanes])
   // Spread into each JSX material: nothing at all when there are no planes, so those materials are as they were.
   const cut = clipPlanes ? { clippingPlanes: clipPlanes } : {}
+  // The same two functions on every world face and every world line: one program each (scene/headlamp.ts).
+  const lampFaces = headlamp ? HEADLAMP_FACES : {}
+  const lampLines = headlamp && !lit ? HEADLAMP_LINES : {}
 
   // The scrambled start: each vertex thrown somewhere in the model's extent.
   const noise = useMemo(() => {
@@ -321,7 +335,7 @@ export function ShardMesh({ shard: given, scale = 1, ghost = false, birth, onFac
   })
 
   const placements = (given.parts?.length ?? 0) > 0
-    ? <Placements shard={given} byRef={resolved} nested={nested} lit={lit} ghost={ghost} world={world} pose={pose} onPartClick={onPartClick} selected={selectedParts} cull={cull} />
+    ? <Placements shard={given} byRef={resolved} nested={nested} lit={lit} ghost={ghost} world={world} headlamp={headlamp} pose={pose} onPartClick={onPartClick} selected={selectedParts} cull={cull} />
     : null
   // An object may be nothing but the arrangement of others (§1.9 rule 13).
   if (shard.vertices.length === 0) return placements ? <group scale={scale}>{placements}</group> : null
@@ -347,7 +361,7 @@ export function ShardMesh({ shard: given, scale = 1, ghost = false, birth, onFac
                 (arkinox's 10 GB Windows tabs, 2026-10-14). */}
             {lit
               ? <meshLambertMaterial vertexColors flatShading side={FrontSide} toneMapped={SHARD_FACES_TONE_MAPPED} transparent opacity={opacity} {...cut} />
-              : <meshBasicMaterial vertexColors side={cull ? FrontSide : DoubleSide} forceSinglePass={!ghost} toneMapped={SHARD_FACES_TONE_MAPPED} transparent opacity={opacity} {...(world && !ghost ? TAG_BLEND : {})} {...cut} />}
+              : <meshBasicMaterial vertexColors side={cull ? FrontSide : DoubleSide} forceSinglePass={!ghost} toneMapped={SHARD_FACES_TONE_MAPPED} transparent opacity={opacity} {...(world && !ghost ? TAG_BLEND : {})} {...lampFaces} {...cut} />}
           </mesh>
           {lit && inside && (
             <mesh geometry={inside} frustumCulled={false} {...pick}>
@@ -366,7 +380,7 @@ export function ShardMesh({ shard: given, scale = 1, ghost = false, birth, onFac
           what arkinox still saw with the backs culled (2026-10-13). */}
       {shard.mode === 'lines' && outline && !cull && (
         <lineSegments geometry={outline} frustumCulled={false}>
-          <lineBasicMaterial vertexColors toneMapped={false} transparent opacity={opacity} {...cut} />
+          <lineBasicMaterial vertexColors toneMapped={false} transparent opacity={opacity} {...lampLines} {...cut} />
         </lineSegments>
       )}
       {shard.mode === 'lines' && !outline && !cull && shard.vertices.length > 1 && <primitive object={line} />}
@@ -388,13 +402,14 @@ export const CUBE_EDGES = new EdgesGeometry(new BoxGeometry(1, 1, 1))
  * flash cubes before its parts arrive. Parts are not clipped to the region:
  * a hidden object's parts are its author's to place.
  */
-function Placements({ shard, byRef, nested, lit, ghost, world, pose, onPartClick, selected, cull }: {
+function Placements({ shard, byRef, nested, lit, ghost, world, headlamp, pose, onPartClick, selected, cull }: {
   shard: ShardModel
   byRef: Map<string, Resolved>
   nested?: Placed[]
   lit: boolean
   ghost: boolean
   world: boolean
+  headlamp: boolean
   pose?: Pose
   onPartClick?: (e: ThreeEvent<MouseEvent>, part: number) => void
   selected?: number[]
@@ -410,7 +425,7 @@ function Placements({ shard, byRef, nested, lit, ghost, world, pose, onPartClick
     const model = r.model && r.model.unit + part.step >= 0 && r.model.unit + part.step <= MAX_UNIT ? r.model : null
     const matrix = new Matrix4().fromArray(partMatrix(part, shard.unit, model ? model.unit : shard.unit))
     let body: ReactNode = <lineSegments geometry={CUBE_EDGES}><lineBasicMaterial color={ACCENT} toneMapped={false} transparent opacity={ghost ? 0.45 : 0.8} /></lineSegments>
-    if (model) body = <ShardMesh shard={model} nested={r.children} lit={lit} ghost={ghost} world={world} cull={cull} />
+    if (model) body = <ShardMesh shard={model} nested={r.children} lit={lit} ghost={ghost} world={world} headlamp={headlamp} cull={cull} />
     // Selected: an amber box around what the placement draws, in its own frame so it turns with it.
     const box = selected?.includes(i) ? (model ? placedBounds(model, r.children) : null) ?? { min: [-0.5, -0.5, -0.5], max: [0.5, 0.5, 0.5] } : null
     return (

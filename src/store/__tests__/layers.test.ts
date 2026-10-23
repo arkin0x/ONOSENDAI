@@ -63,7 +63,7 @@ describe('scene layer switches', () => {
     useLayers.getState().toggleLayer('dots')
     expect(useLayers.getState().dots).toBe(false)
     expect(useLayers.getState().boxes).toBe(true)
-    expect(JSON.parse(storage.map.get(LAYERS_KEY) ?? 'null')).toEqual({ dots: false, boxes: true, walkAvatarHidden: false })
+    expect(JSON.parse(storage.map.get(LAYERS_KEY) ?? 'null')).toEqual({ dots: false, boxes: true, walkAvatarHidden: false, headlamp: true })
 
     // A reload: the store is created again from what was stored.
     const reloaded = await freshStore(storage)
@@ -73,7 +73,7 @@ describe('scene layer switches', () => {
     reloaded.useLayers.getState().toggleLayer('boxes')
     reloaded.useLayers.getState().toggleLayer('dots')
     expect(reloaded.useLayers.getState()).toMatchObject({ dots: true, boxes: false })
-    expect(JSON.parse(storage.map.get(LAYERS_KEY) ?? 'null')).toEqual({ dots: true, boxes: false, walkAvatarHidden: false })
+    expect(JSON.parse(storage.map.get(LAYERS_KEY) ?? 'null')).toEqual({ dots: true, boxes: false, walkAvatarHidden: false, headlamp: true })
   })
 
   it('keep WALK\'s avatar shown unless it is explicitly hidden', async () => {
@@ -85,12 +85,28 @@ describe('scene layer switches', () => {
     expect(odd.useLayers.getState().walkAvatarHidden).toBe(false)
   })
 
+  it('shade with the headlamp unless it is explicitly off, and remember turning it off', async () => {
+    const storage = memoryStorage()
+    const { useLayers, loadLayers, LAYERS_KEY } = await freshStore(storage)
+    expect(loadLayers().headlamp).toBe(true)
+    expect(useLayers.getState().headlamp).toBe(true)
+    useLayers.getState().setLayer('headlamp', false)
+    expect(JSON.parse(storage.map.get(LAYERS_KEY) ?? 'null')).toEqual({ dots: true, boxes: true, walkAvatarHidden: false, headlamp: false })
+    const reloaded = await freshStore(storage)
+    expect(reloaded.useLayers.getState()).toMatchObject({ dots: true, boxes: true, walkAvatarHidden: false, headlamp: false })
+    // A value stored before the switch existed, or an odd one, reads on.
+    for (const raw of [JSON.stringify({ dots: false, boxes: true, walkAvatarHidden: true }), JSON.stringify({ headlamp: 0 }), JSON.stringify({ headlamp: 'off' })]) {
+      const old = await freshStore(memoryStorage({ [LAYERS_KEY]: raw }))
+      expect(old.useLayers.getState().headlamp, raw).toBe(true)
+    }
+  })
+
   it('read both on, and still toggle, when storage throws', async () => {
     const { useLayers, loadLayers, saveLayers } = await freshStore(blockedStorage())
     expect(useLayers.getState().dots).toBe(true)
     expect(useLayers.getState().boxes).toBe(true)
     expect(() => loadLayers()).not.toThrow()
-    expect(() => saveLayers({ dots: false, boxes: false, walkAvatarHidden: false })).not.toThrow()
+    expect(() => saveLayers({ dots: false, boxes: false, walkAvatarHidden: false, headlamp: false })).not.toThrow()
     expect(() => useLayers.getState().toggleLayer('boxes')).not.toThrow()
     // Kept in memory for the visit.
     expect(useLayers.getState().boxes).toBe(false)

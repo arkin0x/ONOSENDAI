@@ -88,6 +88,7 @@ import { TvLayer } from './TvLayer'
 import { TvScreenEffect } from './TvScreenEffect'
 import { useTv } from '../store/useTv'
 import { CAMERA_NEAR, FOV } from './camera'
+import { headlampReach, headlampUniforms } from './headlamp'
 
 /** Starting distance from the cursor, in cells. Orbit takes over from here. */
 const START_DISTANCE = 26
@@ -306,6 +307,24 @@ function CellMetric(): null {
       lastCellPx.current = next
       document.documentElement.style.setProperty('--cell-px', next)
     }
+  })
+  return null
+}
+
+/**
+ * Keeps the world's headlamp (scene/headlamp.ts) in step: on or off with the
+ * View panel's switch, and its reach the camera's distance from what it looks
+ * at (the orbit's target, which Cyberspace TV's camera drives too). Two
+ * numbers written into the uniforms every headlamp material shares; nothing
+ * is allocated and no material is touched.
+ */
+function HeadlampRig(): null {
+  const on = useLayers((s) => s.headlamp)
+  useEffect(() => { headlampUniforms.uHeadlamp.value = on ? 1 : 0 }, [on])
+  const controls = useThree((s) => s.controls) as unknown as { target: Vector3 } | null
+  useFrame((state) => {
+    if (!controls) return
+    headlampUniforms.uHeadlampReach.value = headlampReach(state.camera.position.distanceTo(controls.target))
   })
   return null
 }
@@ -896,6 +915,7 @@ export const Scene = memo(function Scene(): JSX.Element {
       <ambientLight intensity={0.8} />
       <directionalLight position={[10, 10, 10]} intensity={1.2} />
       <Rig />
+      <HeadlampRig />
       <CellMetric />
       <ScreenAxes />
       <World />

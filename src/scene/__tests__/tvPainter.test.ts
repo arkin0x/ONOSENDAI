@@ -773,3 +773,67 @@ describe('the chiron', () => {
     expect(tag.x + 'AGENT'.length * 7).toBeLessThanOrEqual(plain.x + Array.from(plain.text).length * 7 + 20)
   })
 })
+
+describe('an explainer on the tube (lib/tv/explainer)', () => {
+  function writing(): { canvas: HTMLCanvasElement; words: string[] } {
+    const words: string[] = []
+    const ctx = new Proxy({ measureText: (t: string) => ({ width: Array.from(t).length * 7 }), createLinearGradient: () => ({ addColorStop: () => {} }), createRadialGradient: () => ({ addColorStop: () => {} }), fillText: (t: string) => { words.push(t) } } as Record<string, unknown>, {
+      get: (target, key) => (key in target ? target[key as string] : () => {}),
+      set: () => true,
+    })
+    return { canvas: { width: 0, height: 0, getContext: () => ctx } as unknown as HTMLCanvasElement, words }
+  }
+  const music = { title: 'Saturn Day', artist: 'Sethy Bowoy', art: null, progress: 0.4, blocked: false, volume: 0.8, muted: false }
+  const shot = { id: 'a'.repeat(64), kind: 'trip' as const, pubkey: 'p', beats: [], start: 1, end: 1, offsets: [], length: 5 }
+  const explainer = { title: 'WHAT IS CYBERSPACE?', mix: 1, pip: { x: 84, y: 68, w: 420, h: 236 }, video: { x: 0, y: 0, w: 1400, h: 787.5 }, caption: 'Every move is a proof of work.' }
+
+  it("steps the live picture's own words away, keeps the clock and the marquee, and paints its title and caption", () => {
+    const { canvas, words } = writing()
+    const p = new TvPainter(canvas)
+    p.size(1400, 800, 1)
+    p.paint(picture({ shot, cutAt: 999, meanwhile: true }), { ...assets, music }, 1000, 1, false)
+    expect(words).toContain('P')
+    expect(words).toContain('♪ NOW PLAYING')
+    expect(p.musicCard).not.toBeNull()
+    words.length = 0
+    p.paint(picture({ shot, cutAt: 999, meanwhile: true }), { ...assets, music, explainer }, 1040, 1, false)
+    // The chiron's name, NOW PLAYING (and its tap), and MEANWHILE are gone.
+    expect(words).not.toContain('P')
+    expect(words).not.toContain('♪ NOW PLAYING')
+    expect(words.some((w) => w.includes('MEANWHILE'))).toBe(false)
+    // The sound's tap and drag move to the title's tag (review of #471).
+    const tag = p.musicCard!
+    expect(tag.x).toBeCloseTo(explainer.pip.x, 5)
+    expect(tag.y).toBeGreaterThan(explainer.pip.y + explainer.pip.h)
+    // The clock stays; the title and the caption are painted.
+    expect(words).toContain('▶ PLAY')
+    expect(words).toContain('WHAT IS CYBERSPACE?')
+    expect(words).toContain('Every move is a proof of work.')
+    expect(p.marqueeTop).toBeGreaterThan(600)
+    // Gone again, all back.
+    words.length = 0
+    p.paint(picture({ shot }), { ...assets, music }, 1080, 1, false)
+    expect(words).toContain('P')
+    expect(p.musicCard).not.toBeNull()
+  })
+
+  it('says MUTED on the tag while muted, and has no tap target while the picture is still on its way in', () => {
+    const { canvas, words } = writing()
+    const p = new TvPainter(canvas)
+    p.size(1400, 800, 1)
+    p.paint(picture({ shot }), { ...assets, music: { ...music, muted: true }, explainer }, 1000, 1, false)
+    expect(words).toContain('WHAT IS CYBERSPACE? · MUTED')
+    p.paint(picture({ shot }), { ...assets, music, explainer: { ...explainer, soundHeld: true } }, 1020, 1, false)
+    expect(words).toContain('WHAT IS CYBERSPACE? · TAP FOR SOUND')
+    p.paint(picture({ shot }), { ...assets, music, explainer: { ...explainer, mix: 0.5 } }, 1040, 1, false)
+    expect(p.musicCard).toBeNull()
+  })
+
+  it('over TUNING, says nothing in the middle of the video', () => {
+    const { canvas, words } = writing()
+    const p = new TvPainter(canvas)
+    p.size(1400, 800, 1)
+    p.paint(picture({ status: 'tuning' }), { ...assets, explainer }, 1000, 1, false)
+    expect(words).not.toContain('TUNING')
+  })
+})

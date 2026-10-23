@@ -6,7 +6,7 @@
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { setBroadcastForTest } from '../../lib/tv/broadcast'
-import { askForTap, besideUrls, duckMusic, musicDuck, holdMusicForAd, musicHeldForAd, musicProgress, nameFromUrl, resumeMusic, setMusicVolume, shuffled, startMusic, stopMusic, tapMusic, toggleMusicMute, useTvMusic } from '../useTvMusic'
+import { askForTap, besideUrls, duckMusic, musicDuck, holdMusicAtSongEnd, holdMusicForAd, holdMusicNow, musicHeldForAd, musicProgress, nameFromUrl, releaseMusic, resumeMusic, setMusicVolume, shuffled, startMusic, stopMusic, tapMusic, toggleMusicMute, useTvMusic } from '../useTvMusic'
 
 class FakeAudio extends EventTarget {
   static made: FakeAudio[] = []
@@ -856,5 +856,117 @@ describe('the music on the 24/7 stream (lib/tv/broadcast)', () => {
     expect(askForTap()).toBe(false)
     setBroadcastForTest(false)
     expect(askForTap()).toBe(true)
+  })
+})
+
+describe('TV music steps out for an explainer at the end of the song (lib/tv/explainer)', () => {
+  it('plays the song to its end, then waits with the next one loaded until released', async () => {
+    startMusic(list)
+    await flush()
+    const first = audio().src
+    holdMusicAtSongEnd()
+    // The song plays on, untouched.
+    expect(musicHeldForAd()).toBe(false)
+    vi.advanceTimersByTime(5000)
+    expect(audio().paused).toBe(false)
+    expect(audio().volume).toBeCloseTo(0.8, 5)
+    const plays = audio().plays
+    audio().ended = true
+    audio().fire('ended')
+    expect(musicHeldForAd()).toBe(true)
+    expect(audio().src).not.toBe(first)
+    expect(audio().plays).toBe(plays)
+    // No stall counted against the waiting song.
+    vi.advanceTimersByTime(60_000)
+    expect(useTvMusic.getState().track?.url).toBe(audio().src)
+    releaseMusic()
+    expect(musicHeldForAd()).toBe(false)
+    expect(audio().plays).toBe(plays + 1)
+    vi.advanceTimersByTime(1100)
+    expect(audio().volume).toBeCloseTo(0.8, 5)
+  })
+
+  it('a song that fails while waiting is the boundary too', async () => {
+    startMusic(list)
+    await flush()
+    holdMusicAtSongEnd()
+    const plays = audio().plays
+    audio().fire('error')
+    expect(musicHeldForAd()).toBe(true)
+    expect(audio().plays).toBe(plays)
+    releaseMusic()
+    expect(audio().plays).toBe(plays + 1)
+  })
+
+  it('with nothing sounding, steps out at once', async () => {
+    FakeAudio.refuse = true
+    startMusic(list)
+    await flush()
+    holdMusicAtSongEnd()
+    expect(musicHeldForAd()).toBe(true)
+    releaseMusic()
+    expect(musicHeldForAd()).toBe(false)
+  })
+
+  it('a song that runs on too long fades out and comes back where it was', async () => {
+    startMusic(list)
+    await flush()
+    holdMusicAtSongEnd()
+    audio().currentTime = 42
+    holdMusicNow()
+    vi.advanceTimersByTime(700)
+    expect(audio().paused).toBe(true)
+    const src = audio().src
+    releaseMusic()
+    expect(audio().src).toBe(src)
+    expect(audio().currentTime).toBe(42)
+    expect(audio().paused).toBe(false)
+    // And the end of it is no longer a boundary to step out at.
+    audio().ended = true
+    audio().fire('ended')
+    expect(musicHeldForAd()).toBe(false)
+  })
+
+  it('released before the song ends, nothing steps out', async () => {
+    startMusic(list)
+    await flush()
+    holdMusicAtSongEnd()
+    releaseMusic()
+    const plays = audio().plays
+    audio().ended = true
+    audio().fire('ended')
+    expect(musicHeldForAd()).toBe(false)
+    expect(audio().plays).toBe(plays + 1)
+  })
+
+  it('released after the viewer paused the explainer, the song waits paused, and a tap plays it', async () => {
+    startMusic(list)
+    await flush()
+    holdMusicAtSongEnd()
+    audio().ended = true
+    audio().fire('ended')
+    // The next song's source is set: a real element is no longer ended.
+    audio().ended = false
+    const plays = audio().plays
+    releaseMusic(false)
+    expect(musicHeldForAd()).toBe(false)
+    expect(audio().plays).toBe(plays)
+    // Not taken for a play still wanted when TV is seen again.
+    resumeMusic()
+    expect(audio().plays).toBe(plays)
+    tapMusic()
+    expect(audio().plays).toBe(plays + 1)
+  })
+
+  it('TV going off forgets the wait', async () => {
+    startMusic(list)
+    await flush()
+    holdMusicAtSongEnd()
+    stopMusic()
+    startMusic(list)
+    await flush()
+    audio().ended = true
+    audio().fire('ended')
+    expect(musicHeldForAd()).toBe(false)
   })
 })

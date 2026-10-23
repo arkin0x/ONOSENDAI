@@ -68,7 +68,7 @@ import { useEffect, useMemo, type ReactNode } from 'react'
 import { noCallout, useRepeatable } from '../hooks/useRepeatable'
 import { MAX_UNIT } from 'sno-core/shards'
 import { formatCellSize } from 'sno-core/scale'
-import { LINK_PROTECTED, SCAN_MAX_HEIGHT, aimedOf, editingId, isProtected, ownBagIn, pendingEmpty, pendingName, positionOf, regionOf, useShards } from '../store/useShards'
+import { LINK_PROTECTED, SCAN_MAX_HEIGHT, aimedOf, editingId, isProtected, ownBagIn, pendingEmpty, pendingName, positionOf, regionOf, spotOf, useShards } from '../store/useShards'
 import { aimedPoint } from '../lib/chests'
 import { snapOffered } from '../lib/pose'
 import { MAX_RIDDLE_LENGTH } from '../lib/hidden'
@@ -244,6 +244,10 @@ export function DeployBar({ pad = false }: { pad?: boolean }): JSX.Element | nul
   // at your head, and not while hiding (store/buildStep.ts stepOpen).
   const building = useBuilder((s) => s.active)
   const drivable = useCyberspace((s) => s.canDrive() && !s.atHead())
+  // A placement lined up again (useShards `placedLast`): how many are placed,
+  // and the spot the last one landed on, where an identical copy is refused.
+  const placed = useShards((s) => (s.pending !== null && s.placedLast?.pending === s.pending ? s.placedLast : null))
+  const here = placed !== null && placed.spot === spotOf(deployPoint(cursor, step, height), plane, { deployHeight: height, deployUnit: unit, deployUp: up, deploySpin: spin, deployTurn: turn, deployLink: link })
 
   useEscape('chip', pending !== null, () => {
     const s = useShards.getState()
@@ -285,19 +289,20 @@ export function DeployBar({ pad = false }: { pad?: boolean }): JSX.Element | nul
         <span className="deploybar__title">
           {title} <strong>{name}</strong>
         </span>
+        {placed && <span className="deploybar__scope deploybar__again" aria-label={`${placed.count} placed`} title={`${placed.count} placed. Lined up again with the same settings for the next one`}>×{placed.count}</span>}
         {!ask && (
           <button
             className="deploybar__deploy"
-            disabled={empty || working}
-            title={localEst}
+            disabled={empty || working || here}
+            title={here ? 'The last one stands here. Move, or change how it goes out, to place another' : localEst}
             onClick={() => void useShards.getState().deploy()}
             {...noCallout}
           >
-            {empty ? `${pending.type.toUpperCase()} IS EMPTY` : working ? (note ? `${note.toUpperCase()}…` : 'HIDING…') : intoChest ? 'PUT IN CHEST' : moving ? (route === 'cloud' ? 'MOVE VIA HOSAKA' : live || movedPublished ? 'MOVE & PUBLISH' : 'MOVE (LOCAL)') : route === 'cloud' ? 'HIDE VIA HOSAKA' : live ? 'HIDE & PUBLISH' : 'HIDE (LOCAL)'}
+            {empty ? `${pending.type.toUpperCase()} IS EMPTY` : here && !working ? 'PLACED HERE' : working ? (note ? `${note.toUpperCase()}…` : 'HIDING…') : intoChest ? 'PUT IN CHEST' : moving ? (route === 'cloud' ? 'MOVE VIA HOSAKA' : live || movedPublished ? 'MOVE & PUBLISH' : 'MOVE (LOCAL)') : route === 'cloud' ? 'HIDE VIA HOSAKA' : live ? 'HIDE & PUBLISH' : 'HIDE (LOCAL)'}
           </button>
         )}
         {/* Once hiding, it finishes where it was placed: CANCEL would only pretend. */}
-        <button className="deploybar__cancel" disabled={working} title={working ? 'Already hiding; it finishes where you placed it' : undefined} onClick={() => useShards.getState().cancelDeploy(true)}>CANCEL</button>
+        <button className="deploybar__cancel" disabled={working} title={working ? 'Already hiding; it finishes where you placed it' : placed ? 'Stop placing this one (Esc)' : undefined} onClick={() => useShards.getState().cancelDeploy(true)}>CANCEL</button>
       </div>
 
       {error && <div className="deploybar__row notice">{error}</div>}

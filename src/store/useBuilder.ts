@@ -46,6 +46,16 @@
  *   and the phone's COMMIT and RECALL hidden until EXIT (found in review,
  *   2026-10-07). Once the cursor has left your avatar, you are building
  *   somewhere, and the mode stays for the next placement.
+ * - A placement lines the same thing up again (arkinox, 2026-10-23: "after I
+ *   place something, I'd actually like build to default to that same object
+ *   so I can place another one. Switching the object should be a choice"),
+ *   with every setting it went out with (useShards `placedLast`, which says
+ *   which types repeat and why the others do not). Move and press again for
+ *   the next copy. CANCEL stands it down where a placement used to leave
+ *   you, in BUILD mode with this bar, never back in the Models modal or the
+ *   workshop; PLACE OBJECT switches; PLACE AGAIN brings the last one back.
+ *   Where the mode ends with the placement (the DEPLOY above), nothing is
+ *   lined up again.
  * - Entering takes the camera back from a hyperspace view (EARTH, a stop, the
  *   scrubber), the way starting to spectate does, so the gibson field comes
  *   back and no second bar offers a RETURN that would end the mode.
@@ -411,6 +421,18 @@ useShards.subscribe((s, prev) => {
     const draft = useShards.getState().takeChestBack()
     if (draft) useBuilder.setState({ itemDraft: { type: 'chest', ...draft } })
   }
+  // A placement lines the same thing up again (useShards `placedLast`) only
+  // where BUILD mode goes on after it. Where the mode ends with the placement
+  // (a DEPLOY that never left your avatar), or already ended while it hid,
+  // the copy stands down as the placement used to leave it, and the rest of
+  // this reads that as the deploy ending.
+  if (s.pending !== null && s.deployStatus === 'done' && prev.deployStatus === 'working') {
+    const w = useBuilder.getState()
+    if (!w.active || (w.via === 'deploy' && !w.leftAvatar)) {
+      useShards.setState({ pending: null, placedLast: null })
+      return
+    }
+  }
   // Every deploy happens in BUILD mode (R5): one that starts with the mode
   // off turns it on, at the place you are looking or else your avatar, so
   // the deploy lands at the build cursor and never at a cursor lined up for
@@ -445,9 +467,17 @@ useShards.subscribe((s, prev) => {
  * BUILD session already on is ended first: its cursor is somewhere else.
  */
 export function editPlaced(eventId: string): void {
-  const shards = useShards.getState()
+  let shards = useShards.getState()
   const d = shards.mine.find((m) => m.eventId === eventId)
-  if (!d?.shard || shards.pending) return
+  if (!d?.shard) return
+  // A copy lined up again after a placement (useShards `placedLast`) is no
+  // work of yours to lose: EDIT stands it down, as CANCEL would. Any other
+  // deploy lined up still refuses.
+  if (shards.pending !== null && shards.pending === shards.placedLast?.pending && shards.deployStatus !== 'working') {
+    shards.cancelDeploy()
+    shards = useShards.getState()
+  }
+  if (shards.pending) return
   const b = useBuilder.getState()
   if (b.active) b.exit()
   const at = positionOf(d)
@@ -482,4 +512,6 @@ useBuilder.subscribe((s, prev) => {
   if (s.active === prev.active) return
   offEscape?.()
   offEscape = s.active ? registerEscape('chip', () => useBuilder.getState().exit()) : null
+  // What PLACE AGAIN would place belongs to one session: each starts fresh.
+  if (useShards.getState().placedLast !== null) useShards.setState({ placedLast: null })
 })

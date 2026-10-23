@@ -363,6 +363,94 @@ export function editingId(pending: DeployPending | null): string | null {
   return pending?.type === 'shard' ? pending.edit?.eventId ?? null : null
 }
 
+/**
+ * Whether a placement of this lines the same thing up again (arkinox,
+ * 2026-10-23: "after I place something, I'd actually like build to default
+ * to that same object so I can place another one"). Each type says so here,
+ * and a new type must too: the switch is exhaustive, so the compiler asks.
+ *
+ * - A shard repeats: a model, or a feed object as a copy or a LIVE LINK.
+ *   What must be unique per placement is made fresh by every deploy (its
+ *   signature and created_at, a large shard's object address, the region
+ *   key and bag).
+ * - A move (EDIT) does not: it moves one deployment, which then stands
+ *   where it was put. Nor does an aim into a chest: it signs into the chest,
+ *   which goes back to its composer.
+ * - A message repeats, unless a cashu token is written in it: a bearer token
+ *   hidden twice is the same money in two places, and only one finder
+ *   could ever redeem it.
+ * - A key does not: the item is its keypair, made once in the composer, and
+ *   a second copy would hide the same secret twice, opening the same chests.
+ * - A chest does not: its contents are signed and sealed once, and may hold
+ *   keys forged inside, shards aimed at their own points, or cashu.
+ */
+export function repeatable(pending: DeployPending): boolean {
+  switch (pending.type) {
+    case 'shard': return !pending.intoChest && !pending.edit
+    case 'message': return findCashuToken(pending.text) === null
+    case 'key': return false
+    case 'chest': return false
+    default: {
+      const unknown: never = pending
+      return unknown
+    }
+  }
+}
+
+/**
+ * The same thing, lined up again after a placement. Only what the first
+ * deploy began with is dropped: `from` 'workshop', since CANCEL on a copy
+ * stands down where a placement leaves you (BUILD mode), not on the bench.
+ */
+function againOf(pending: DeployPending): DeployPending {
+  if (pending.type !== 'shard') return { ...pending }
+  return { type: 'shard', shardId: pending.shardId, ...(pending.object ? { object: pending.object } : {}) }
+}
+
+/**
+ * Where and how a placement lands, as one string: its point, plane and
+ * height, and the size, turns, pose and link it went out with. A copy whose
+ * string is the last one's would land exactly on top of it, identical: a
+ * second press, or Space held, rather than a placement.
+ */
+export function spotOf(at: Position, plane: Plane, s: Pick<DeploySettings, 'deployHeight' | 'deployUnit' | 'deployUp' | 'deploySpin' | 'deployTurn' | 'deployLink'>): string {
+  return [plane, at.x, at.y, at.z, s.deployHeight, s.deployUnit, s.deployTurn.join('.'), s.deployUp ? s.deploySpin : 'flat', s.deployLink ? 'link' : 'copy'].join(':')
+}
+
+/** Every placement setting the deploy bar holds, kept whole from one placement to the next. */
+export type DeploySettings = Pick<ShardsState, 'deployHeight' | 'deployHeightAuto' | 'deployUnit' | 'deployUp' | 'deploySpin' | 'deployTurn' | 'deployFollow' | 'deployLink' | 'deployBag' | 'deployBagFrom'>
+
+/** The last placement BUILD mode can line up again, with everything it went out with. */
+export interface PlacedLast {
+  /** What is lined up again: the very object `pending` holds while it is. */
+  pending: DeployPending
+  settings: DeploySettings
+  /** The build STEP it was placed at (useCyberspace `buildStep`), null for the zoom. */
+  step: number | null
+  /** Where and how it landed (spotOf), so an identical copy on top of it is refused. */
+  spot: string
+  /** How many of it have been placed in a row. */
+  count: number
+}
+
+/** The settings out of the store, for PlacedLast. */
+function settingsOf(s: DeploySettings): DeploySettings {
+  return {
+    deployHeight: s.deployHeight, deployHeightAuto: s.deployHeightAuto, deployUnit: s.deployUnit, deployUp: s.deployUp, deploySpin: s.deploySpin,
+    deployTurn: [...s.deployTurn] as Turns, deployFollow: s.deployFollow, deployLink: s.deployLink, deployBag: s.deployBag, deployBagFrom: s.deployBagFrom,
+  }
+}
+
+/** The name of what PLACE AGAIN would line up, or null when there is nothing to place again (a model since deleted). */
+export function againName(s: { placedLast: PlacedLast | null }): string | null {
+  const p = s.placedLast?.pending
+  if (!p) return null
+  if (p.type === 'message') return messagePreview(p.text)
+  if (p.type !== 'shard') return pendingName(p, null)
+  if (p.object) return p.object.shard.name || 'shard'
+  return useWorkshop.getState().shards.find((m) => m.id === p.shardId)?.name ?? null
+}
+
 /** The `lineage` field of an inline item, as a spread: nothing for a reference. */
 /**
  * The event a reference entry names, as the signed event it always is: an
@@ -531,6 +619,22 @@ interface ShardsState {
    */
   seedDeployBag: (bag: OwnBag | null) => void
   deployStatus: DeployStatus
+  /**
+   * The last placement that repeats (`repeatable`). A placement lines it up
+   * again at once, with every setting as it went out and the STEP kept, so
+   * the next copy is one move and one press away (arkinox, 2026-10-23:
+   * "Maintain the scale and other settings from the previous placement so we
+   * don't have to readjust every time"). useBuilder stands the copy down
+   * where BUILD mode ends with the placement, and forgets this when the mode
+   * turns on or off. After a CANCEL it stays, for PLACE AGAIN.
+   */
+  placedLast: PlacedLast | null
+  /**
+   * PLACE AGAIN: line the last placement up again, with its settings and
+   * STEP. False, and nothing changes, while a deploy is up or hiding, or
+   * when there is nothing to place again (againName).
+   */
+  placeAgain: () => boolean
   /** What the deploy is doing right now, for the button: computing, buying, publishing. */
   deployNote: string | null
   /** A HOSAKA purchase waiting for a yes: the price and the wait. Null when not asking. */
@@ -1056,6 +1160,15 @@ export const useShards = create<ShardsState>((set, get) => {
     deployBag: DEFAULT_BAG_SETTINGS,
     deployBagFrom: null,
     deployStatus: 'idle',
+    placedLast: null,
+    placeAgain: () => {
+      const s = get()
+      const last = s.placedLast
+      if (!last || s.pending || s.deployStatus === 'working' || againName(s) === null) return false
+      set({ pending: last.pending, ...last.settings, deployTurn: [...last.settings.deployTurn] as Turns, deployStatus: 'idle', deployError: null, deployNote: null, deployAsk: null })
+      cyber().setBuildStep(last.step)
+      return true
+    },
     deployNote: null,
     deployAsk: null,
     deployError: null,
@@ -1075,7 +1188,8 @@ export const useShards = create<ShardsState>((set, get) => {
     setNearbyReturn: (r) => set({ nearbyReturn: r }),
 
     // A new deploy starts at the shard's own size, so the last deploy's choice
-    // never carries silently into this one.
+    // never carries silently into this one. Placing the same thing again is
+    // `placedLast`'s, which carries everything on purpose.
     startDeployShard: (shardId, from) => set({
       pending: { type: 'shard', shardId, ...(from ? { from } : {}) },
       deployLink: false,
@@ -1239,6 +1353,12 @@ export const useShards = create<ShardsState>((set, get) => {
       // (lib/buildCursor.ts buildStepOf, arkinox 2026-10-08).
       const { position: cursor, plane } = buildCursorOf(cs)
       const at: Position = deployPoint(cursor, buildStepOf(cs), deployHeight)
+      // A copy lined up again lands nowhere new until something changes: the
+      // place, or how it goes out. Exactly on top of the last one it would be
+      // a second, identical item, which is a second press or a held Space.
+      const spot = spotOf(at, plane, { deployHeight, deployUnit, deployUp, deploySpin, deployTurn, deployLink })
+      const last = get().placedLast
+      if (last && last.pending === pending && last.spot === spot) return
       const createdAt = Math.floor(Date.now() / 1000)
       if (deployBag.hint && !hintFits(deployBag.hint, deployHeight)) {
         set({ deployStatus: 'error', deployError: `A sector hint cannot contain a height ${deployHeight} region: a sector is 2^30 on a side. Turn the hint off or hide lower.` })
@@ -1571,7 +1691,17 @@ export const useShards = create<ShardsState>((set, get) => {
         }
         // Only this deploy is finished. One lined up since (a DEPLOY from the
         // workshop while this was hiding) is a deploy of its own, and stays.
-        if (get().pending === pending) set({ deployStatus: 'done', pending: null, deployNote: null })
+        // What repeats is lined up again in the same set, every setting left
+        // as it is, so nothing in between reads the deploy as over (useBuilder
+        // stands it down where the mode ends with the placement).
+        if (get().pending === pending) {
+          const again = repeatable(pending) ? againOf(pending) : null
+          const s = get()
+          const placedLast: PlacedLast | null = again
+            ? { pending: again, settings: settingsOf(s), step: cyber().buildStep, spot, count: s.placedLast?.pending === pending ? s.placedLast.count + 1 : 1 }
+            : s.placedLast
+          set({ deployStatus: 'done', pending: again, deployNote: null, deployAsk: null, placedLast })
+        }
         if (moveError) useToast.getState().show({ label: 'MOVED, OLD COPY STAYED', meta: `It stands at the new place; the old one could not be taken down (${moveError}). Tap it and DELETE it.`, mark: 'build' })
       } catch (err) {
         const reason = err instanceof Error ? err.message : String(err)
@@ -1987,10 +2117,13 @@ export const useShards = create<ShardsState>((set, get) => {
 })
 
 // The build STEP belongs to one deploy: when it ends, hidden or canceled, or
-// another is lined up in its place, the step goes back to the zoom.
+// another is lined up in its place, the step goes back to the zoom. A
+// placement lined up again (`placedLast`) keeps it, as it keeps every other
+// setting.
 useShards.subscribe((s, prev) => {
   const cs = useCyberspace.getState()
-  if (s.pending !== prev.pending && (cs.buildStep !== null || cs.buildSettle !== null)) cs.setBuildStep(null)
+  const again = s.pending !== null && s.pending === s.placedLast?.pending
+  if (s.pending !== prev.pending && !again && (cs.buildStep !== null || cs.buildSettle !== null)) cs.setBuildStep(null)
 })
 
 if (import.meta.env.DEV && typeof window !== 'undefined') {

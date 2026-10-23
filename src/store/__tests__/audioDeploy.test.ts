@@ -35,6 +35,7 @@ import { useInventory } from '../useInventory'
 import { useBuilder } from '../useBuilder'
 import { useToast } from '../useToast'
 import { pendingEmpty, pendingName, useShards } from '../useShards'
+import { pendingSphereRadius } from '../../scene/AudioSphereGhost'
 
 const S = () => useShards.getState()
 
@@ -106,7 +107,11 @@ describe('the FADE stepper (step 3)', () => {
     expect(p?.type === 'audio' && 'fade' in p.audio).toBe(false)
     S().setDeployFade(1_000_000)
     useShards.setState({ deployHeight: 6, deployHeightAuto: false })
+    // What the rings show is what the deploy writes: whole gibsons, clamped to the room (never its n + 0.5).
+    const shown = pendingSphereRadius()
+    expect(Number.isInteger(shown)).toBe(true)
     await S().deploy()
+    expect(S().mine.find((x) => x.type === 'audio')!.audio!.fade).toBe(shown)
     expect(S().deployError).toBeNull()
     const d = S().mine.find((x) => x.type === 'audio')!
     // Never past the nearest wall of a 64-gibson region.

@@ -14,7 +14,7 @@
 import { useEffect, useMemo, useRef } from 'react'
 import { useFrame } from '@react-three/fiber'
 import { BufferGeometry, Float32BufferAttribute, type Group } from 'three'
-import { fadeRadius, sourceLocal } from '../lib/audioItem'
+import { fadeAt, fadeRadius, sourceLocal } from '../lib/audioItem'
 import { deployPoint } from '../lib/space'
 import { buildStepOf } from '../lib/buildCursor'
 import { useCyberspace } from '../store/useCyberspace'
@@ -45,7 +45,9 @@ export function pendingSphereRadius(): number {
   if (p?.type !== 'audio') return 0
   const height = useShards.getState().deployHeight
   const at = deployPoint(useCyberspace.getState().cursor, buildStepOf(useCyberspace.getState()), height)
-  return fadeRadius(p.audio.fade, sourceLocal(at, height), height)
+  // An explicit sphere as the deploy will write it (whole gibsons, clamped
+  // to the room: fadeAt); AUTO as every reader reads an item without one.
+  return p.audio.fade === undefined ? fadeRadius(undefined, sourceLocal(at, height), height) : fadeAt(p.audio.fade, at, height) ?? 0
 }
 
 export function AudioSphereGhost({ landingAt }: { landingAt: () => [number, number, number] }): JSX.Element {

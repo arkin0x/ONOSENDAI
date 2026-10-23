@@ -398,8 +398,9 @@ export function DeployBar({ pad = false }: { pad?: boolean }): JSX.Element | nul
       {pending.type === 'audio' && (() => {
         const a = pending.audio
         const oneShot = a.autoplay && !a.loop
-        // As lib/audioItem fadeRadius has it, from the room where it would land.
-        const r = a.fade === undefined ? fadeRoom / 2 : Math.min(Math.max(0, a.fade), fadeRoom)
+        // What the deploy writes (lib/audioItem fadeAt): whole gibsons, never
+        // past the room; AUTO is half the room, written as nothing.
+        const r = a.fade === undefined ? fadeRoom / 2 : Math.max(0, Math.min(Math.floor(a.fade), Math.floor(fadeRoom)))
         const set = (dir: 1 | -1): void => {
           const s = useShards.getState()
           const p = s.pending

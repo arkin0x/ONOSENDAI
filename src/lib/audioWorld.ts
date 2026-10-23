@@ -77,12 +77,15 @@ export function freshMemory(): WorldMemory {
 export const QUIET_MS = 2000
 
 /**
- * How many sources sound at once (arkinox's step 3): the loudest few where
- * you are. A room full of hidden sound would otherwise be as many files in
- * memory, decoders and panners as there are items; the rest stay silent
- * until they are among the loudest, a loop letting go after QUIET_MS.
+ * How many sources are heard at once (arkinox's step 3): the loudest few
+ * where you are. The rest are silent until they are among the loudest; a
+ * loop pushed out lets go after QUIET_MS, and a one-shot already playing
+ * plays on silent to its end, so at most a few more are held than heard.
  */
 export const MAX_VOICES = 4
+
+/** How much louder a newcomer must be to take a playing voice's slot. */
+export const PLAYING_MARGIN = 1.1
 
 export interface WorldPlan {
   /** Start these now; a one-shot marked `fired` is the once-trigger that just fired. */
@@ -115,13 +118,18 @@ export function planWorld(sources: readonly WorldSource[], playing: ReadonlySet<
     memory.triggers.set(s.key, step.state)
     fires.set(s.key, step.fire)
   }
-  // The loudest few of those that sound or would (MAX_VOICES), ties by key so
-  // a tick does not flip between equals; every other source is heard as
-  // silent this tick.
+  // The loudest few of those that sound or would (MAX_VOICES); every other
+  // source is heard as silent this tick. A one-shot firing now comes first:
+  // its trigger is a moment, and losing it to a loop would spend its entry
+  // unheard. A voice already playing holds its slot against one only a
+  // little louder (PLAYING_MARGIN), so near-equals do not swap every tick;
+  // ties go by key.
   const wants = (s: WorldSource): boolean => s.heard.gain > 0 && (s.audio.loop || playing.has(s.key) || fires.get(s.key) === true)
+  const firing = (s: WorldSource): number => (!s.audio.loop && fires.get(s.key) === true && !playing.has(s.key) ? 1 : 0)
+  const score = (s: WorldSource): number => s.heard.gain * (playing.has(s.key) ? PLAYING_MARGIN : 1)
   const loudest = new Set(
     sources.filter((s) => s.audio.autoplay && wants(s))
-      .sort((a, b) => b.heard.gain - a.heard.gain || (a.key < b.key ? -1 : a.key > b.key ? 1 : 0))
+      .sort((a, b) => firing(b) - firing(a) || score(b) - score(a) || (a.key < b.key ? -1 : a.key > b.key ? 1 : 0))
       .slice(0, Math.max(0, limit))
       .map((s) => s.key),
   )

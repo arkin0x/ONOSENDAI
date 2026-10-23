@@ -32,7 +32,7 @@ import type { AudioItem } from '../../lib/audioItem'
 import { sha256Hex } from '../../lib/blossom'
 import { forgetAudioContext } from '../../lib/audioContext'
 import { toneWav } from '../../lib/__tests__/audioFixture'
-import { startWorld, stopAllAudio, useHiddenAudio, worldFailed, worldFailure, worldKey } from '../useHiddenAudio'
+import { DECODE_WHOLE_MAX_PCM, DECODE_WHOLE_SECONDS, decodedFits, startWorld, stopAllAudio, useHiddenAudio, worldFailed, worldFailure, worldKey } from '../useHiddenAudio'
 
 /** Any Web Audio node or param: every property is another, every call returns another, numbers are 0. */
 function anything(): unknown {
@@ -55,8 +55,10 @@ class FakeContext extends EventTarget {
   createMediaElementSource(): unknown { return anything() }
   createBufferSource(): unknown { return anything() }
   static decodable = true
+  /** What a decode gives: a stand-in buffer, or one of a given size. */
+  static decoded: { length: number; numberOfChannels: number } | null = null
   decodeAudioData(_bytes: ArrayBuffer, ok: (b: unknown) => void, fail: () => void): Promise<unknown> {
-    if (FakeContext.decodable) ok(anything())
+    if (FakeContext.decodable) ok(FakeContext.decoded ?? Object.assign(Object.create(anything() as object), { length: 8000, numberOfChannels: 1 }))
     else fail()
     return new Promise(() => {})
   }
@@ -67,10 +69,21 @@ const made: FakeAudio[] = []
 /** An element stand-in: refused outside a tap, and it can fail to decode. */
 class FakeAudio extends EventTarget {
   static allowed = false
+  /** The length metadata reports, in seconds; null: none comes. */
+  static metaSeconds: number | null = 1
   loop = false
   preload = ''
-  src = ''
   paused = true
+  duration = NaN
+  private source = ''
+  get src(): string { return this.source }
+  set src(v: string) {
+    this.source = v
+    if (v && this.preload === 'metadata' && FakeAudio.metaSeconds !== null) {
+      this.duration = FakeAudio.metaSeconds
+      queueMicrotask(() => this.dispatchEvent(new Event('loadedmetadata')))
+    }
+  }
   constructor() { super(); made.push(this) }
   play(): Promise<void> {
     if (!FakeAudio.allowed) return Promise.reject(Object.assign(new Error('no'), { name: 'NotAllowedError' }))
@@ -93,7 +106,9 @@ beforeEach(async () => {
   vi.stubGlobal('window', w)
   vi.stubGlobal('Audio', FakeAudio)
   FakeAudio.allowed = false
+  FakeAudio.metaSeconds = 1
   FakeContext.decodable = true
+  FakeContext.decoded = null
   made.length = 0
   const blobs = new Map<string, Uint8Array>()
   globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -123,13 +138,46 @@ afterEach(() => {
   vi.unstubAllGlobals()
 })
 
-describe('a short world file, decoded whole', () => {
-  it('plays from a buffer, with no element and no tap of its own once sound is out', async () => {
+/** Elements made to stream a file (the length probe's are not). */
+const streaming = (): FakeAudio[] => made.filter((e) => e.preload === 'auto')
+
+describe('a short loop, decoded whole', () => {
+  it('plays from a buffer, with no streaming element and no tap of its own once sound is out', async () => {
     await startWorld('b1', shortAudio)
     await flush()
     expect(useHiddenAudio.getState().entries[worldKey('b1')]?.phase).toBe('playing')
-    expect(made).toHaveLength(0)
+    expect(streaming()).toHaveLength(0)
   })
+
+  it('is decoded whole only when it is a loop, short in time by its own metadata, and small once decoded; anything else streams', async () => {
+    FakeAudio.allowed = true
+    // A one-shot gains nothing from it.
+    await startWorld('o1', { ...shortAudio, loop: false })
+    await flush()
+    expect(streaming()).toHaveLength(1)
+    // A tiny file can be a long one: past DECODE_WHOLE_SECONDS it streams.
+    FakeAudio.metaSeconds = DECODE_WHOLE_SECONDS + 1
+    await startWorld('o2', shortAudio)
+    await flush()
+    expect(streaming()).toHaveLength(2)
+    // Its length unknown, it streams.
+    FakeAudio.metaSeconds = null
+    await startWorld('o3', shortAudio)
+    await new Promise((r) => setTimeout(r, 3100))
+    await flush()
+    expect(streaming()).toHaveLength(3)
+    // Short by its metadata but large once decoded, or more than two channels: it streams.
+    FakeAudio.metaSeconds = 1
+    FakeContext.decoded = { length: DECODE_WHOLE_MAX_PCM, numberOfChannels: 1 }
+    await startWorld('o4', shortAudio)
+    await flush()
+    expect(streaming()).toHaveLength(4)
+    FakeContext.decoded = { length: 1000, numberOfChannels: 6 }
+    await startWorld('o5', shortAudio)
+    await flush()
+    expect(streaming()).toHaveLength(5)
+    expect(decodedFits({ length: 1000, numberOfChannels: 2 })).toBe(true)
+  }, 10_000)
 
   it('that this browser cannot decode is a failure of the item, and waits out its pause', async () => {
     FakeContext.decodable = false

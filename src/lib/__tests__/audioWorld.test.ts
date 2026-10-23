@@ -180,9 +180,26 @@ describe('the loudest few', () => {
     expect(p.start.map((x) => x.key).sort()).toEqual(['l0', 'l1', 'l2', 'l3'])
   })
 
-  it('a one-shot that fires while out of the loudest few does not start', () => {
+  it('a one-shot firing now comes before loops as loud, so four loops cannot spend its entry unheard', () => {
     const m = freshMemory()
-    const p = planWorld([source('a', loop, 1), source('b', shot, 1, true)], new Set(), () => false, 0, m, new Set(), 1)
+    const sources = [...[0, 1, 2, 3].map((i) => source(`a${i}`, loop, 1)), source('z-shot', shot, 1, true)]
+    const p = planWorld(sources, new Set(['a0', 'a1', 'a2', 'a3']), () => false, 0, m, new Set(), 4)
+    expect(p.start.map((x) => x.key)).toEqual(['z-shot'])
+  })
+
+  it('a voice already playing keeps its slot against one only a little louder, and gives it up to one clearly louder', () => {
+    const m = freshMemory()
+    const playing = new Set(['p'])
+    const near = planWorld([source('p', loop, 0.5), source('n', loop, 0.52)], playing, () => false, 0, m, new Set(), 1)
+    expect(near.start).toEqual([])
+    expect(near.gains.get('p')).toBe(0.5)
+    const far = planWorld([source('p', loop, 0.5), source('n', loop, 0.6)], playing, () => false, 100, m, new Set(), 1)
+    expect(far.start.map((x) => x.key)).toEqual(['n'])
+  })
+
+  it('with more one-shots firing than slots, only the first few start (ties by key)', () => {
+    const m = freshMemory()
+    const p = planWorld([source('a', shot, 1, true), source('b', shot, 1, true), source('c', loop, 1)], new Set(), () => false, 0, m, new Set(), 1)
     expect(p.start.map((x) => x.key)).toEqual(['a'])
   })
 })

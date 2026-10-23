@@ -337,7 +337,7 @@ export function ShardMesh({ shard: given, scale = 1, ghost = false, birth, onFac
                 basicFaceProps (shardFaces.ts), which sets forceSinglePass. */}
             {lit
               ? <meshLambertMaterial vertexColors flatShading side={FrontSide} toneMapped={SHARD_FACES_TONE_MAPPED} {...litFaceProps(opacity, ghost)} {...cut} />
-              : <meshBasicMaterial vertexColors side={cull ? FrontSide : DoubleSide} toneMapped={SHARD_FACES_TONE_MAPPED} {...basicFaceProps(opacity, { ghost, world })} forceSinglePass={!ghost} {...cut} />}
+              : <meshBasicMaterial vertexColors side={cull ? FrontSide : DoubleSide} toneMapped={SHARD_FACES_TONE_MAPPED} transparent forceSinglePass={!ghost} {...basicFaceProps(opacity, { ghost, world })} {...cut} />}
           </mesh>
           {lit && inside && (
             <mesh geometry={inside} frustumCulled={false} renderOrder={order} {...pick}>

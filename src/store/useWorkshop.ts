@@ -43,7 +43,8 @@ import {
   validPoint,
   type ShardMode,
   type ShardModel,
-  type ShardVertex, type Part, type Ref, cloneVertex, hexToRgb, rgbToHex, OPACITY_FLOOR } from 'sno-core/shards'
+  type ShardVertex, type Part, type Ref, cloneVertex, hexToRgb, rgbToHex } from 'sno-core/shards'
+import { withOpacity } from '../lib/opacityStep'
 import { addPart, quarterTurnPart, removeParts } from 'sno-core/parts'
 import { FLOOR, MAX_SIZE, MIN_SIZE, stamp, type Facing, type StampKind, type WorkPlane } from 'sno-core/stamps'
 import { BUILT_IN, hexAt, remap, samePalette, snapHex, type Palette } from 'sno-core/snoPalette'
@@ -856,11 +857,7 @@ export const useWorkshop = create<WorkshopState>((set, get) => {
     },
 
     setMode: (mode) => edit((s) => ({ ...s, mode })),
-    setOpacity: (percent) => edit((s) => {
-      const { opacity: _old, ...rest } = s
-      const p = Math.round(percent)
-      return Number.isFinite(p) && p < 100 ? { ...rest, opacity: Math.max(OPACITY_FLOOR, p) } : rest
-    }),
+    setOpacity: (percent) => edit((s) => withOpacity(s, percent)),
     setUnit: (unit) => edit((s) => ({ ...s, unit: clampUnit(unit) })),
     // FACE works on corners it picks itself, and its panel only appears with
     // nothing else selected, so a point still held from SELECT hid FILL behind

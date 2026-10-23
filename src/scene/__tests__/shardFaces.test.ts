@@ -93,6 +93,9 @@ describe('where it is wired (ShardMesh and the avatar)', () => {
   it('every face, line and point material takes the one opacity, and every mesh the one order', () => {
     expect(mesh).toMatch(/const opacity = shardOpacity\(given, \{ ghost, ignoreOpacity \}\)/)
     expect(mesh).toMatch(/basicFaceProps\(opacity, \{ ghost, world \}\)/)
+    // Written where singlePass.test.ts's scan reads it, so the guard still sees this material:
+    // before the spread, since the scan ends a declaration at its first "})".
+    expect(mesh).toMatch(/<meshBasicMaterial[^>]*transparent forceSinglePass=\{!ghost\} \{\.\.\.basicFaceProps\(opacity, \{ ghost, world \}\)\}/)
     expect((mesh.match(/litFaceProps\(opacity, ghost\)/g) ?? []).length).toBe(2)
     expect((mesh.match(/lineProps\(opacity, ghost\)/g) ?? []).length).toBe(2)
     expect((mesh.match(/renderOrder=\{order\}/g) ?? []).length).toBe(4)

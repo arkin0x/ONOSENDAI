@@ -1,7 +1,8 @@
 /** opacityStep.test.ts - the workshop's OPACITY stepper moves in fives between the floor and solid. */
 
 import { describe, expect, it } from 'vitest'
-import { opacityPercent, stepOpacity } from '../opacityStep'
+import { newShard, type ShardModel } from 'sno-core/shards'
+import { opacityPercent, stepOpacity, withOpacity } from '../opacityStep'
 
 describe('the OPACITY stepper', () => {
   it('reads no opacity as solid', () => {
@@ -21,5 +22,29 @@ describe('the OPACITY stepper', () => {
     expect(stepOpacity(33, 1)).toBe(35)
     expect(stepOpacity(33, -1)).toBe(30)
     expect(stepOpacity(3, 1)).toBe(10)
+  })
+})
+
+describe('setting an opacity (withOpacity)', () => {
+  const base: ShardModel = newShard('Water')
+
+  it('keeps a percent between the floor and 99, and stores solid as none', () => {
+    expect(withOpacity(base, 40).opacity).toBe(40)
+    expect(withOpacity(base, 3).opacity).toBe(10)
+    expect(withOpacity(withOpacity(base, 40), 100)).not.toHaveProperty('opacity')
+    expect(withOpacity(base, Number.NaN)).not.toHaveProperty('opacity')
+  })
+
+  it('drops an opacity an older sno-core carried in extra, and extra with it when it empties', () => {
+    const old: ShardModel = { ...base, extra: { opacity: 30 } }
+    expect(withOpacity(old, 60)).not.toHaveProperty('extra')
+    expect(withOpacity(old, 60).opacity).toBe(60)
+    expect(withOpacity(old, 100)).not.toHaveProperty('extra')
+    expect(withOpacity(old, 100)).not.toHaveProperty('opacity')
+  })
+
+  it('keeps every other carried field', () => {
+    const old: ShardModel = { ...base, extra: { opacity: 30, sheen: 2 } }
+    expect(withOpacity(old, 60).extra).toEqual({ sheen: 2 })
   })
 })

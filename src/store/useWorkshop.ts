@@ -45,6 +45,7 @@ import {
   type ShardModel,
   type ShardVertex, type Part, type Ref, cloneVertex, hexToRgb, rgbToHex } from 'sno-core/shards'
 import { withOpacity } from '../lib/opacityStep'
+import { withConstrain, type Constrain } from '../lib/walkConstrain'
 import { addPart, quarterTurnPart, removeParts } from 'sno-core/parts'
 import { FLOOR, MAX_SIZE, MIN_SIZE, stamp, type Facing, type StampKind, type WorkPlane } from 'sno-core/stamps'
 import { BUILT_IN, hexAt, remap, samePalette, snapHex, type Palette } from 'sno-core/snoPalette'
@@ -354,6 +355,12 @@ export interface WorkshopState {
    * anything else is kept between the floor (10) and 99. Undoable like MODE.
    */
   setOpacity: (percent: number) => void
+  /**
+   * Whether a walker can cross the shard in WALK (DECK-0003 §1.12,
+   * lib/walkConstrain.ts): off, all of its faces, or only while it draws
+   * solid and opaque. Off is stored as no field at all. Undoable like MODE.
+   */
+  setConstrain: (c: Constrain) => void
   setUnit: (unit: number) => void
   /** The build grid's half-width for the current shard, never below what its vertices need. */
   setExtent: (extent: number) => void
@@ -885,6 +892,8 @@ export const useWorkshop = create<WorkshopState>((set, get) => {
 
     setMode: (mode) => edit((s) => ({ ...s, mode })),
     setOpacity: (percent) => edit((s) => withOpacity(s, percent)),
+    // Already so: no edit, so no undo step that changes nothing.
+    setConstrain: (c) => edit((s) => { const next = withConstrain(s, c); return next === s ? null : next }),
     setUnit: (unit) => edit((s) => ({ ...s, unit: clampUnit(unit) })),
     // FACE works on corners it picks itself, and its panel only appears with
     // nothing else selected, so a point still held from SELECT hid FILL behind

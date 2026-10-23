@@ -97,6 +97,18 @@ import { buildCursorOf, buildPlane, buildStepOf } from '../lib/buildCursor'
 import type { NearbyReturn } from '../lib/nearbyReturn'
 import { turnShard, type Turns } from '../lib/turn'
 import { alignedBase, hintFits } from '../lib/hint'
+import { constrainOf, readConstrain, withConstrain, type Constrain } from '../lib/walkConstrain'
+
+/** A workshop model's WALK setting, by id; off for one that is not there. */
+function constrainOfId(shardId: string): Constrain {
+  const m = useWorkshop.getState().shards.find((s) => s.id === shardId)
+  return m ? constrainOf(m) : 'off'
+}
+
+/** The WALK setting a signed shard carries in its payload; off when it carries none or cannot be read. */
+function constrainOfSigned(ev: Pick<NostrEvent, 'content'>): Constrain {
+  try { return readConstrain((JSON.parse(ev.content) as { constrain?: unknown }).constrain) } catch { return 'off' }
+}
 
 /** One item this device hid. Its identity is its inner event id. */
 export interface MyDeployment {
@@ -473,6 +485,15 @@ interface ShardsState {
   deploySpin: number
   /** Quarter turns on X, Y and Z for this deployment only (lib/turn.ts); the model keeps its own. */
   deployTurn: Turns
+  /**
+   * Whether a walker can cross this deployment in WALK (DECK-0003 §1.12,
+   * lib/walkConstrain.ts). Seeded from the shard's own setting when the
+   * deploy or EDIT starts, and written into what is hidden, like SCALE; the
+   * workshop's model keeps its own. A LIVE LINK is its author's, so it is
+   * theirs too.
+   */
+  deployConstrain: Constrain
+  setDeployConstrain: (c: Constrain) => void
   /** One more quarter turn about an axis (0 X, 1 Y, 2 Z), wrapping at four. */
   turnDeploy: (axis: 0 | 1 | 2) => void
   resetDeployTurn: () => void
@@ -965,7 +986,7 @@ export const useShards = create<ShardsState>((set, get) => {
 
   /** The same fresh-deploy state every start shares: no pose, no link, the bag settings at their defaults. */
   const freshDeploy = {
-    deployLink: false, deployHeightAuto: false, deployUnit: 0, deployUp: false, deploySpin: 0, deployTurn: [0, 0, 0] as Turns, deployFollow: false,
+    deployLink: false, deployHeightAuto: false, deployUnit: 0, deployUp: false, deploySpin: 0, deployTurn: [0, 0, 0] as Turns, deployFollow: false, deployConstrain: 'off' as Constrain,
     deployBag: DEFAULT_BAG_SETTINGS, deployBagFrom: null, deployStatus: 'idle' as const, deployError: null,
   }
 
@@ -1036,6 +1057,7 @@ export const useShards = create<ShardsState>((set, get) => {
     deploySpin: 0,
     deployTurn: [0, 0, 0],
     deployFollow: false,
+    deployConstrain: 'off',
     deployLink: false,
     deployBag: DEFAULT_BAG_SETTINGS,
     deployBagFrom: null,
@@ -1065,6 +1087,8 @@ export const useShards = create<ShardsState>((set, get) => {
       deployLink: false,
       deployHeightAuto: true,
       deployUnit: useWorkshop.getState().shards.find((s) => s.id === shardId)?.unit ?? 0,
+      // The shard's own WALK setting, as its own size.
+      deployConstrain: constrainOfId(shardId),
       // Flat, aimed north, the camera not driving: the last deploy's pose no
       // more carries into this one than its size does.
       deployUp: false,
@@ -1090,6 +1114,7 @@ export const useShards = create<ShardsState>((set, get) => {
         deployHeight: d.height,
         deployHeightAuto: false,
         deployUnit: d.shard.unit,
+        deployConstrain: constrainOf(d.shard),
         deployUp: d.shard.up ?? false,
         deploySpin: d.shard.spin ?? 0,
         deployTurn: [0, 0, 0],
@@ -1108,6 +1133,7 @@ export const useShards = create<ShardsState>((set, get) => {
       deployLink: false,
       deployHeightAuto: true,
       deployUnit: object.shard.unit,
+      deployConstrain: constrainOf(object.shard),
       // The pose its author published goes with the copy (DECK-0003 §1.7);
       // the height decides whether the snap is offered (setDeployHeight).
       deployUp: object.shard.up ?? false,
@@ -1134,6 +1160,7 @@ export const useShards = create<ShardsState>((set, get) => {
         deployHeightAuto: true,
         // A re-aim starts at the size it was aimed at; a first aim at the model's own.
         deployUnit: c.aimed?.unit ?? useWorkshop.getState().shards.find((s) => s.id === c.shardId)?.unit ?? 0,
+        deployConstrain: c.aimed ? constrainOfSigned(c.aimed.signed) : constrainOfId(c.shardId),
         deployUp: false,
         deploySpin: 0,
         deployTurn: [0, 0, 0],
@@ -1168,6 +1195,7 @@ export const useShards = create<ShardsState>((set, get) => {
       set({ deployHeight: height, deployAsk: null, ...(offered ? {} : { deployUp: false, deployFollow: false }), ...(hintGone ? { deployBag: { ...bag, hint: null } } : {}) })
     },
     setDeployUnit: (unit) => set({ deployUnit: clampUnit(unit) }),
+    setDeployConstrain: (c) => set({ deployConstrain: c }),
     setDeployUp: (up) => set({ deployUp: up, ...(up ? {} : { deployFollow: false }) }),
     setDeploySpin: (spin) => set({ deploySpin: wrapSpin(spin) }),
     setDeployFollow: (follow) => set({ deployFollow: follow }),
@@ -1180,7 +1208,7 @@ export const useShards = create<ShardsState>((set, get) => {
       // LIVE LINK must do, so it goes out only as a copy.
       if (link && isProtected(object)) return
       set(link
-        ? { deployLink: true, deployUnit: object.shard.unit, deployTurn: [0, 0, 0], deployUp: false, deployFollow: false, deploySpin: 0, deployAsk: null }
+        ? { deployLink: true, deployUnit: object.shard.unit, deployTurn: [0, 0, 0], deployUp: false, deployFollow: false, deploySpin: 0, deployConstrain: constrainOf(object.shard), deployAsk: null }
         : { deployLink: false })
       // Copy on pick, while LIVE only (copyForLink).
       if (link && cyber().live) void copyForLink(object)
@@ -1205,7 +1233,7 @@ export const useShards = create<ShardsState>((set, get) => {
     declineDeploy: () => set({ deployAsk: null }),
 
     deploy: async (confirmed = false) => {
-      const { pending, deployHeight, deployUnit, deployUp, deploySpin, deployTurn, deployBag, deployBagFrom, deployLink } = get()
+      const { pending, deployHeight, deployUnit, deployUp, deploySpin, deployTurn, deployConstrain, deployBag, deployBagFrom, deployLink } = get()
       if (!pending) return
       // One hide at a time. Space (or a second tap) while the key is being
       // computed and the bag sealed used to start a second deploy of the same
@@ -1301,6 +1329,9 @@ export const useShards = create<ShardsState>((set, get) => {
         shard = link || (turned === model && model.unit === deployUnit && model.up === up && model.spin === spin)
           ? model
           : { ...turned, unit: deployUnit, up, spin }
+        // The WALK setting goes out like the size (DECK-0003 §1.12): the same
+        // object when it is unchanged, so an untouched deploy stays untouched.
+        if (!link) shard = withConstrain(shard, deployConstrain)
         // The same round trip every reader makes, before the seal: an item the
         // format refuses would deploy, show for its author from this device,
         // and open as nothing for everyone else (a 516-vertex floor, 2026-09-24).

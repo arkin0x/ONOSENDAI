@@ -28,7 +28,7 @@ import { PaletteModal } from './PaletteModal'
 import { Explanation } from '../hud/Explanation'
 import { DIVISIONS, MAX_EXTENT, MAX_UNIT, MIN_EXTENT, MODES, OPACITY_FLOOR, TICKS_PER_UNIT, neededExtent, rgbToHex, ticksOf, toPayload, unitsLabel, type ShardMode , type ShardModel} from 'sno-core/shards'
 import { opacityPercent, stepOpacity } from '../lib/opacityStep'
-import { CONSTRAINS, CONSTRAIN_TIPS, constrainOf } from '../lib/walkConstrain'
+import { CONSTRAINS, CONSTRAIN_TIPS, authoredConstrainOf, withAuthoredConstrain } from '../lib/walkConstrain'
 import { stepDivision } from './divisions'
 import { IMPORT_FORMATS_LABEL } from 'sno-core/importFile'
 import { IMPORT_PICKER_ACCEPT, isZipFile } from '../lib/shardZip'
@@ -493,7 +493,7 @@ export function Workshop(): JSX.Element | null {
     () => publishState(shard ? ledger[shard.id] : undefined, shard ? shardFingerprint(shard) : '', me),
     [shard, ledger, me],
   )
-  const wireBytes = useMemo(() => (shard ? new TextEncoder().encode(JSON.stringify(toPayload(shard))).length : 0), [shard])
+  const wireBytes = useMemo(() => (shard ? new TextEncoder().encode(JSON.stringify(toPayload(withAuthoredConstrain(shard)))).length : 0), [shard])
   // The moment the work is done: say so, because the signer's prompt may take a
   // while to appear and nothing else marks the end of the mining.
   const lastPhase = useRef<typeof phase>(null)
@@ -753,12 +753,13 @@ export function Workshop(): JSX.Element | null {
             <span className="workshop__unit-size" title="Avatars always draw solid.">100% is solid</span>
           </div>
           {/* Whether a walker can cross it in WALK (DECK-0003 §1.12): three
-              buttons like DRAW's; OFF writes nothing (arkinox, 2026-10-23). */}
+              buttons like DRAW's. A shard that never chose shows OPAQUE,
+              which is what it publishes as (arkinox, 2026-10-23). */}
           <div className="workshop__row">
             <span className="workshop__label">CONSTRAIN MOVEMENT IN WALK MODE</span>
             <div className="workshop__modes" role="group" aria-label="Constrain movement in WALK mode">
               {CONSTRAINS.map((c) => (
-                <button key={c} className={`workshop__mode ${constrainOf(shard) === c ? 'is-on' : ''}`} aria-pressed={constrainOf(shard) === c} title={CONSTRAIN_TIPS[c]} onClick={() => w().setConstrain(c)}>{c.toUpperCase()}</button>
+                <button key={c} className={`workshop__mode ${authoredConstrainOf(shard) === c ? 'is-on' : ''}`} aria-pressed={authoredConstrainOf(shard) === c} title={CONSTRAIN_TIPS[c]} onClick={() => w().setConstrain(c)}>{c.toUpperCase()}</button>
               ))}
             </div>
           </div>

@@ -5,6 +5,8 @@
  * held, a long step stops on the last gibson short of the face, and an
  * object placed by reference holds by its own setting. Also: the workshop
  * sets it undoably, and a deploy or EDIT writes it into what is hidden.
+ * A shard that never chose shows and publishes OPAQUE; OFF is written as
+ * "off" so it survives (arkinox, 2026-10-23, DECK-0003 §1.12).
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -43,7 +45,7 @@ import { useToast } from '../useToast'
 import { clearWalls } from '../walkWalls'
 import { moveDirection } from '../../lib/moves'
 import { primeRef } from '../../lib/parts'
-import { constrainOf, withConstrain, type Constrain } from '../../lib/walkConstrain'
+import { authoredConstrainOf, constrainOf, withConstrain, type Constrain } from '../../lib/walkConstrain'
 import type { AxisName, Position } from '../../lib/space'
 
 /** Which axis and way 'right' steps in this view. */
@@ -212,17 +214,45 @@ describe('setting it', () => {
     useCyberspace.setState({ live: false })
   })
 
-  it('the workshop sets it, undoably, and OFF writes nothing', () => {
+  it('a new workshop shard shows OPAQUE', () => {
+    useWorkshop.getState().create('Fresh')
+    expect(authoredConstrainOf(useWorkshop.getState().current()!)).toBe('opaque')
+  })
+
+  it('the workshop sets it, undoably, and OFF writes "off"', () => {
     const w = useWorkshop.getState()
     w.setConstrain('opaque')
     expect(constrainOf(useWorkshop.getState().current()!)).toBe('opaque')
     expect(toPayload(useWorkshop.getState().current()!)).toHaveProperty('constrain', 'opaque')
     useWorkshop.getState().undo()
     expect(useWorkshop.getState().current()).not.toHaveProperty('extra')
+    useWorkshop.getState().setConstrain('off')
+    expect(toPayload(useWorkshop.getState().current()!)).toHaveProperty('constrain', 'off')
+    expect(constrainOf(useWorkshop.getState().current()!)).toBe('off')
     // The same setting again is no edit, so no empty undo step.
     const past = useWorkshop.getState().past.length
     useWorkshop.getState().setConstrain('off')
     expect(useWorkshop.getState().past.length).toBe(past)
+  })
+
+  it('a deploy of a shard that never chose starts at OPAQUE and writes "opaque"; the bench is untouched', async () => {
+    const bench = useWorkshop.getState().current()!
+    useShards.getState().startDeployShard(bench.id)
+    expect(useShards.getState().deployConstrain).toBe('opaque')
+    await useShards.getState().deploy()
+    expect(useShards.getState().deployStatus).toBe('done')
+    expect(JSON.parse(useShards.getState().mine[0].inner.content)).toHaveProperty('constrain', 'opaque')
+    expect(useWorkshop.getState().current()).toBe(bench)
+  })
+
+  it('an explicit OFF deploys as "off", and a walker reads it as off', async () => {
+    useWorkshop.getState().setConstrain('off')
+    useShards.getState().startDeployShard(useWorkshop.getState().current()!.id)
+    expect(useShards.getState().deployConstrain).toBe('off')
+    await useShards.getState().deploy()
+    expect(useShards.getState().deployStatus).toBe('done')
+    expect(JSON.parse(useShards.getState().mine[0].inner.content)).toHaveProperty('constrain', 'off')
+    expect(constrainOf(useShards.getState().mine[0].shard!)).toBe('off')
   })
 
   it('a deploy starts at the shard\'s own setting and writes the chosen one; the bench keeps its own', async () => {
@@ -238,12 +268,13 @@ describe('setting it', () => {
     expect(constrainOf(useWorkshop.getState().current()!)).toBe('all')
   })
 
-  it('an untouched deploy is untouched', async () => {
+  it('an untouched deploy of a shard that chose is untouched', async () => {
+    useWorkshop.getState().setConstrain('all')
     const bench = useWorkshop.getState().current()!
     useShards.getState().startDeployShard(bench.id)
     await useShards.getState().deploy()
     expect(useShards.getState().mine[0].shard).toBe(bench)
-    expect(JSON.parse(useShards.getState().mine[0].inner.content)).not.toHaveProperty('constrain')
+    expect(JSON.parse(useShards.getState().mine[0].inner.content)).toHaveProperty('constrain', 'all')
   })
 
   it('EDIT changes that placement only: another placement of the same shard keeps its own', async () => {
@@ -266,10 +297,11 @@ describe('setting it', () => {
     const other = rows.find((d) => d.eventId === b)!
     const moved = rows.find((d) => d.eventId !== b)!
     expect(constrainOf(moved.shard!)).toBe('all')
-    expect(constrainOf(other.shard!)).toBe('off')
-    expect(JSON.parse(other.inner.content)).not.toHaveProperty('constrain')
-    // The bench model is untouched too.
-    expect(constrainOf(useWorkshop.getState().current()!)).toBe('off')
+    // The other placement went out at the default, and keeps it.
+    expect(constrainOf(other.shard!)).toBe('opaque')
+    expect(JSON.parse(other.inner.content)).toHaveProperty('constrain', 'opaque')
+    // The bench model is untouched too: it still never chose.
+    expect(useWorkshop.getState().current()).not.toHaveProperty('extra')
   })
 
   it('EDIT starts at the hidden shard\'s setting and writes the new one', async () => {
@@ -278,7 +310,7 @@ describe('setting it', () => {
     await useShards.getState().deploy()
     const id = useShards.getState().mine[0].eventId
     useShards.getState().startEditShard(id)
-    expect(useShards.getState().deployConstrain).toBe('off')
+    expect(useShards.getState().deployConstrain).toBe('opaque')
     useShards.getState().setDeployConstrain('all')
     await useShards.getState().deploy()
     expect(useShards.getState().deployStatus).toBe('done')

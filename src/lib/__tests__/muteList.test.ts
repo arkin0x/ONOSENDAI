@@ -185,6 +185,18 @@ describe('choosing and trusting a fetch', () => {
     expect(fetchRefusal(most, ctx({ writeRelays: w }))).toBeNull()
     expect(fetchRefusal(most, ctx({ writeRelays: w, found: false }))).toBe(WORDS.outboxSilent)
   })
+
+  it('counts the canonical relay when it is one of the person\'s own write relays (review of #464, round 2)', () => {
+    // Their list lives on the canonical relay, which is silent: one general relay saying "nothing" is not enough.
+    expect(fetchRefusal([ans(CANON, 'unreachable'), ans('wss://g1', 'answered')], ctx({ writeRelays: [CANON + '/'], found: false }))).toBe(WORDS.outboxSilent)
+    expect(fetchRefusal([ans(CANON, 'unreachable'), ans('wss://g1', 'answered'), ans('wss://g2', 'answered')], ctx({ writeRelays: ['WSS://Canon.Example/'], found: true }))).toBe(WORDS.outboxSilent)
+    // With a second write relay and no list found, both must answer.
+    expect(fetchRefusal([ans(CANON, 'unreachable'), ans('wss://w2', 'answered')], ctx({ writeRelays: [CANON, 'wss://w2'], found: false }))).toBe(WORDS.outboxSilent)
+    // Once it answers, it counts.
+    expect(fetchRefusal([ans(CANON, 'answered'), ans('wss://w2', 'answered')], ctx({ writeRelays: [CANON, 'wss://w2'], found: false }))).toBeNull()
+    // No relay to hear from at all is never enough.
+    expect(fetchRefusal([ans('wss://x', 'answered')], ctx({ general: [CANON] }))).toBe(WORDS.noAnswer)
+  })
 })
 
 describe('a thread less what is muted', () => {

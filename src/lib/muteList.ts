@@ -275,15 +275,21 @@ export interface FetchContext {
  */
 export function fetchRefusal(answers: readonly RelayAnswer[], ctx: FetchContext): string | null {
   const canon = norm(ctx.canonical)
-  const answered = new Set(answers.filter((a) => a.outcome === 'answered').map((a) => norm(a.url)).filter((u) => u !== canon))
+  const own = [...new Set(ctx.writeRelays.map(norm))]
+  // The canonical relay counts only when it is one of the person's own write
+  // relays: then other clients put the list there (review of #464, round 2).
+  const counts = (u: string): boolean => u !== canon || own.includes(canon)
+  const answered = new Set(answers.filter((a) => a.outcome === 'answered').map((a) => norm(a.url)).filter(counts))
   if (answered.size === 0) return WORDS.noAnswer
-  const pool = ctx.writeRelays.length > 0 ? ctx.writeRelays : ctx.general
-  const urls = [...new Set(pool.map(norm))].filter((u) => u !== canon)
-  if (urls.length === 0) return null
+  const general = [...new Set(ctx.general.map(norm))].filter((u) => u !== canon)
+  const byOwn = own.length > 0
+  const urls = byOwn ? own : general
+  // Nothing to hear from is never enough.
+  if (urls.length === 0) return WORDS.noAnswer
   const heard = urls.filter((u) => answered.has(u)).length
-  const need = !ctx.found ? urls.length : ctx.writeRelays.length > 0 ? Math.ceil(urls.length / 2) : Math.min(2, urls.length)
+  const need = !ctx.found ? urls.length : byOwn ? Math.ceil(urls.length / 2) : Math.min(2, urls.length)
   if (heard >= need) return null
-  return ctx.writeRelays.length > 0 ? WORDS.outboxSilent : WORDS.generalSilent
+  return byOwn ? WORDS.outboxSilent : WORDS.generalSilent
 }
 
 /** Whether an id or a pubkey is one: 64 lowercase hex. */

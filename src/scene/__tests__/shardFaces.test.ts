@@ -149,9 +149,10 @@ describe('the draw order (review of #452)', () => {
     expect(bench).toMatch(/<mesh position=\{UP\(aim\)\} renderOrder=\{OVERLAY_ORDER\}>/)
   })
 
-  it('a moving shard breathes at its own opacity as it is now, with nothing cached on its faces', () => {
-    const world = readFileSync('src/scene/WorldShards.tsx', 'utf8')
-    expect(world).toMatch(/share = drawnOpacity\(w\.shard\)/)
-    expect(world).toMatch(/one\.opacity = breath \* share/)
+  it('every one of a shard\'s own materials carries its own share, never a ghost\'s or its parent\'s', () => {
+    const mesh = readFileSync('src/scene/ShardMesh.tsx', 'utf8')
+    expect(mesh).toMatch(/const own = shardOpacity\(given, \{ ignoreOpacity \}\)/)
+    expect((mesh.match(/userData-share=\{own\}/g) ?? []).length).toBe(4)
+    expect(mesh).toMatch(/l\.material\.userData\.share = own/)
   })
 })

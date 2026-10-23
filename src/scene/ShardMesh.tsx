@@ -152,6 +152,12 @@ export function ShardMesh({ shard: given, scale = 1, ghost = false, birth, onFac
   // A placed object reaches here with its own model, so it never takes its
   // parent's (§1.10). See shardFaces.ts for how see-through faces blend.
   const opacity = shardOpacity(given, { ghost, ignoreOpacity })
+  // This shard's own share, without a ghost's, written on each of its own
+  // materials for whatever animates them by material (WorldShards' EDIT
+  // breath), which reaches placed parts too and must not give them ours.
+  // Set as one key (R3F's pierced `userData-share`), never by replacing
+  // userData: TV keeps its own state there (TvFinds lookOne).
+  const own = shardOpacity(given, { ignoreOpacity })
   const order = shardOrder(opacity, ghost)
   const bench = benchOrders(opacity, ghost)
   // The objects this one places, fetched once for the whole app; a part's own
@@ -252,8 +258,9 @@ export function ShardMesh({ shard: given, scale = 1, ghost = false, birth, onFac
     const l = new Line(plain, new LineBasicMaterial({ vertexColors: true, toneMapped: false, ...lineProps(opacity, ghost) }))
     l.frustumCulled = false
     l.renderOrder = shardOrder(opacity, ghost)
+    l.material.userData.share = own
     return l
-  }, [plain, opacity, ghost])
+  }, [plain, opacity, ghost, own])
 
   // A rebuild replaces these; nothing else lets the GPU buffers go. The line
   // is a primitive, which R3F never disposes, so its material is ours too.
@@ -337,15 +344,15 @@ export function ShardMesh({ shard: given, scale = 1, ghost = false, birth, onFac
                 (arkinox's 10 GB Windows tabs, 2026-10-14). The props are
                 basicFaceProps (shardFaces.ts), which sets forceSinglePass. */}
             {lit
-              ? <meshLambertMaterial vertexColors flatShading side={FrontSide} toneMapped={SHARD_FACES_TONE_MAPPED} {...litFaceProps(opacity, ghost)} {...cut} />
+              ? <meshLambertMaterial vertexColors flatShading side={FrontSide} toneMapped={SHARD_FACES_TONE_MAPPED} {...litFaceProps(opacity, ghost)} userData-share={own} {...cut} />
               // `transparent forceSinglePass` repeat basicFaceProps so singlePass.test.ts's source scan sees this material.
-              : <meshBasicMaterial vertexColors side={cull ? FrontSide : DoubleSide} toneMapped={SHARD_FACES_TONE_MAPPED} transparent forceSinglePass={!ghost} {...basicFaceProps(opacity, { ghost, world })} {...cut} />}
+              : <meshBasicMaterial vertexColors side={cull ? FrontSide : DoubleSide} toneMapped={SHARD_FACES_TONE_MAPPED} transparent forceSinglePass={!ghost} {...basicFaceProps(opacity, { ghost, world })} userData-share={own} {...cut} />}
           </mesh>
           {lit && inside && (
             <mesh geometry={inside} frustumCulled={false} renderOrder={bench.inside} {...pick}>
               {/* The inside of a face: lit like the outside, darker by a multiplier so it still reads as inside.
                   The multiplier and the light are shardLight's (arkinox, 2026-10-12). */}
-              <meshLambertMaterial vertexColors flatShading color={BACK_SHADE_COLOR} side={FrontSide} toneMapped={SHARD_FACES_TONE_MAPPED} {...litFaceProps(opacity, ghost)} {...cut} />
+              <meshLambertMaterial vertexColors flatShading color={BACK_SHADE_COLOR} side={FrontSide} toneMapped={SHARD_FACES_TONE_MAPPED} {...litFaceProps(opacity, ghost)} userData-share={own} {...cut} />
             </mesh>
           )}
         </group>
@@ -358,7 +365,7 @@ export function ShardMesh({ shard: given, scale = 1, ghost = false, birth, onFac
           what arkinox still saw with the backs culled (2026-10-13). */}
       {shard.mode === 'lines' && outline && !cull && (
         <lineSegments geometry={outline} frustumCulled={false} renderOrder={order}>
-          <lineBasicMaterial vertexColors toneMapped={false} {...lineProps(opacity, ghost)} {...cut} />
+          <lineBasicMaterial vertexColors toneMapped={false} {...lineProps(opacity, ghost)} userData-share={own} {...cut} />
         </lineSegments>
       )}
       {shard.mode === 'lines' && !outline && !cull && shard.vertices.length > 1 && <primitive object={line} />}

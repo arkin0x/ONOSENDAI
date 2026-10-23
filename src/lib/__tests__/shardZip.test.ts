@@ -9,9 +9,9 @@
  * glTF's .bin travel with the models in their folder; the size, count and
  * depth limits mark rows before a byte is read; and duplicate matching finds
  * your namesakes (in a folder when folders exist), an earlier row of the
- * zip before them, and turns SKIP, COPY and UPDATE into one action per row;
- * and IMPORT's picker lists a zip by its type as well as its extension, so a
- * picker that filters by type still shows it, beside every 3D format.
+ * zip before them, and turns SKIP, COPY and UPDATE into one action per row.
+ * IMPORT's picker lists a zip by its type as well as its extension, beside
+ * every 3D format, and only a real zip is read as one.
  */
 import { describe, expect, it } from 'vitest'
 import type { ZipEntry } from '../zipRead'
@@ -311,9 +311,13 @@ describe("IMPORT's picker", () => {
 
   it('reads as a zip any file the picker let through as one, and no 3D file', () => {
     for (const type of ZIP_TYPES) expect(isZipFile({ name: 'kit', type })).toBe(true)
+    expect(isZipFile({ name: 'kit', type: 'multipart/x-zip' })).toBe(true)
     expect(isZipFile({ name: 'Maze-Kit.ZIP', type: '' })).toBe(true)
     expect(isZipFile({ name: 'cube.ply', type: '' })).toBe(false)
     expect(isZipFile({ name: 'cube.glb', type: 'model/gltf-binary' })).toBe(false)
     expect(isZipFile({ name: 'scene.bin', type: 'application/octet-stream' })).toBe(false)
+    // Zip containers that are one 3D object, not a kit.
+    expect(isZipFile({ name: 'room.usdz', type: 'model/vnd.usdz+zip' })).toBe(false)
+    expect(isZipFile({ name: 'part.3mf', type: 'application/vnd.ms-package.3dmanufacturing-3dmodel+xml' })).toBe(false)
   })
 })

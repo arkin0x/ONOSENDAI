@@ -625,3 +625,18 @@ describe('round 4', () => {
     expect(sent()).toHaveLength(0)
   })
 })
+
+describe('review pictures', () => {
+  it('a join is pictured without its kit-internal parts, and its refs carry no kit relay hint', async () => {
+    const ZERO = '0'.repeat(64)
+    const shellJson = JSON.stringify({ v: 2, name: 's', unit: 0, mode: 'solid', vertices: [[0, 0, 0], [1, 0, 0], [0, 1, 0]], colors: [0, 0, 0], faces: [[0, 1, 2]], refs: [['a', `33331:${ZERO}:maze-kit/forest/rotunda`, 'wss://tracker.example']], parts: [[0, 0, 0, 0, 0, 0, 0, 0]] })
+    await imp().openZip(kitZip({ 'maze-kit/forest/shell.json': shellJson }))
+    const row = rowOf('shell')
+    expect(row.shard!.refs).toEqual([['a', `33331:${ZERO}:maze-kit/forest/rotunda`]])
+    expect(row.picture!.refs).toBeUndefined()
+    expect(row.picture!.parts).toBeUndefined()
+    expect(row.picture!.vertices).toHaveLength(3)
+    // A piece with no references is pictured as itself.
+    expect(rowOf('rotunda').picture).toBe(rowOf('rotunda').shard)
+  })
+})

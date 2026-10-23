@@ -37,7 +37,7 @@ import { BUILT_IN } from 'sno-core/snoPalette'
 import { listZip, readEntry, ZipError, type ZipEntry } from '../lib/zipRead'
 import {
   ZIP_MAX_BYTES, ZIP_MAX_ENTRIES, ZIP_MAX_ENTRY_BYTES, ZIP_MAX_TOTAL_BYTES, companionsFor, copyName, dupAction, findDups, planZip,
-  blockedRows, hasPlaceholders, refTargets, resolveRefs,
+  blockedRows, hasPlaceholders, offlinePicture, refTargets, resolveRefs, withoutPlaceholderHints,
   type Companion, type Dup, type DupMode, type PlannedRow, type SkippedFile,
 } from '../lib/shardZip'
 import { folderApi, placeInFolders } from '../lib/importFolders'
@@ -72,6 +72,8 @@ export interface ImportRow extends PlannedRow {
   read: ReadState
   /** The shard the file became, before it is one of yours. */
   shard: ShardModel | null
+  /** What its picture is drawn from: the shard without kit-internal parts, so drawing it reaches no relay about the kit (shardZip offlinePicture). */
+  picture: ShardModel | null
   /** IMPORT's line for a 3D file: "Imported 12 faces". */
   note: string | null
   picked: boolean
@@ -208,7 +210,7 @@ function namedFiles(file: string, bytes: Uint8Array): string[] {
 }
 
 /** One file of the zip as a shard named after it, through PASTE's or IMPORT's door. */
-async function readRow(row: ImportRow): Promise<{ shard: ShardModel; note: string | null } | { error: string }> {
+async function readRow(row: ImportRow): Promise<{ shard: ShardModel; picture: ShardModel; note: string | null } | { error: string }> {
   if (!zip) return { error: 'The zip is closed.' }
   const entry = zip.entries.get(row.key)
   if (!entry) return { error: 'Missing from the zip.' }
@@ -244,11 +246,12 @@ async function readRow(row: ImportRow): Promise<{ shard: ShardModel; note: strin
     shard = { ...res.shard, extent: Math.max(GRID_HALF, neededExtent(res.shard)) }
     note = res.report.summary
   }
-  shard = { ...shard, name: row.name }
+  // A kit's relay hint is never asked: not in review, not on import (resolveRefs drops it too).
+  shard = { ...shard, name: row.name, ...(shard.refs ? { refs: withoutPlaceholderHints(shard.refs) } : {}) }
   // What PUBLISH would refuse is refused now, where it can be read.
   const refusal = shardRefusal(shard)
   if (refusal) return { error: refusal }
-  return { shard, note }
+  return { shard, picture: offlinePicture(shard), note }
 }
 
 /** One send, or why not, never longer than timing.sendDeadlineMs, and over the moment this run's STOP is pressed. */
@@ -419,7 +422,7 @@ export const useShardImport = create<ShardImportState>((set, get) => {
       const plan = planZip(entries, file.name)
       zip = { bytes, entries: new Map(entries.map((e) => [String(e.index), e])), companions: plan.companions, budget: Math.max(0, ZIP_MAX_TOTAL_BYTES - plan.total) }
       const rows: ImportRow[] = plan.rows.map((p) => ({
-        ...p, read: p.error ? 'error' : 'waiting', shard: null, note: null, picked: !p.error, run: 'idle', shardId: null, outcome: null, failure: null,
+        ...p, read: p.error ? 'error' : 'waiting', shard: null, picture: null, note: null, picked: !p.error, run: 'idle', shardId: null, outcome: null, failure: null,
       }))
       if (rows.length === 0) set({ error: 'No shard files in that zip.' })
       set({ rows, skipped: plan.skipped, kit: plan.kit, phase: 'reading' })
@@ -431,7 +434,7 @@ export const useShardImport = create<ShardImportState>((set, get) => {
         const res = await readRow(r)
         if (g !== generation) return
         if ('error' in res) patch(key, { read: 'error', error: res.error, picked: false })
-        else patch(key, { read: 'ok', shard: res.shard, note: res.note })
+        else patch(key, { read: 'ok', shard: res.shard, picture: res.picture, note: res.note })
         // A breath between files, so the list paints as it fills.
         await sleep(0)
       }

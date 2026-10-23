@@ -120,7 +120,7 @@ export function ZipImport(): JSX.Element | null {
             return (
               <li key={r.key} className={`zipimport__row ${r.picked ? '' : 'is-off'}`}>
                 <Checkbox aria-label={`Import ${r.path}`} checked={r.picked} disabled={running || r.read === 'error' || r.run === 'done'} onCheckedChange={() => s.toggle(r.key)} />
-                <span className="zipimport__thumb">{r.shard ? <ShardThumb shard={r.shard} size={40} /> : null}</span>
+                <span className="zipimport__thumb">{r.picture ? <ShardThumb shard={r.picture} size={40} /> : null}</span>
                 <span className="zipimport__text">
                   <span className="zipimport__name">{r.name}</span>
                   <span className="zipimport__meta">

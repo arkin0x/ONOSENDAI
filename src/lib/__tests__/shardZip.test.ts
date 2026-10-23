@@ -15,7 +15,7 @@ import { describe, expect, it } from 'vitest'
 import type { ZipEntry } from '../zipRead'
 import {
   NAME_MAX, ZIP_MAX_DEPTH, ZIP_MAX_ENTRY_BYTES, ZIP_MAX_SHARDS, ZIP_MAX_TOTAL_BYTES,
-  PLACEHOLDER_PUBKEY, blockedRows, cleanSegment, hasPlaceholders, companionsFor, copyName, dupAction, dupKey, findDups, nameOf, planZip, refTargets, resolveRefs, splitPath, unresolved,
+  PLACEHOLDER_PUBKEY, blockedRows, cleanSegment, hasPlaceholders, offlinePicture, withoutPlaceholderHints, companionsFor, copyName, dupAction, dupKey, findDups, nameOf, planZip, refTargets, resolveRefs, splitPath, unresolved,
 } from '../shardZip'
 
 let nextIndex = 0
@@ -195,6 +195,24 @@ describe('ids and references', () => {
     // At the top of a zip, a reference may name the path without the zip-name prefix.
     const loose = planZip([entry('room.json')], 'k.zip')
     expect(resolveRefs([['a', `33331:${PLACEHOLDER_PUBKEY}:room`]], refTargets(loose.rows), me)).toEqual([['a', `33331:${me}:k/room`]])
+  })
+})
+
+describe('review pictures reach no relay about the kit', () => {
+  const P = (d: string, hint?: string) => (hint ? ['a', `33331:${PLACEHOLDER_PUBKEY}:${d}`, hint] : ['a', `33331:${PLACEHOLDER_PUBKEY}:${d}`])
+  const other = ['a', `33331:${'b'.repeat(64)}:theirs`, 'wss://theirs.example']
+
+  it('leaves out kit-internal parts and refs, renumbering the rest; the same object when there are none', () => {
+    const join = { name: 'j', refs: [P('k/door', 'wss://tracker.example'), other, P('k/room')], parts: [{ ref: 0, at: 1 }, { ref: 1, at: 2 }, { ref: 2, at: 3 }, { ref: 1, at: 4 }] }
+    expect(offlinePicture(join)).toEqual({ name: 'j', refs: [other], parts: [{ ref: 0, at: 2 }, { ref: 0, at: 4 }] })
+    const only = { name: 'k', refs: [P('k/door')], parts: [{ ref: 0 }] }
+    expect(offlinePicture(only)).toEqual({ name: 'k' })
+    const plain = { name: 'p', refs: [other], parts: [{ ref: 0 }] }
+    expect(offlinePicture(plain)).toBe(plain)
+  })
+
+  it('drops a kit\'s relay hint, never anyone else\'s', () => {
+    expect(withoutPlaceholderHints([P('k/door', 'wss://tracker.example'), other])).toEqual([P('k/door'), other])
   })
 })
 

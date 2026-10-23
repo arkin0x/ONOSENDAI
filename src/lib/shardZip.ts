@@ -277,6 +277,30 @@ export function blockedRows(rows: ReadonlyArray<{ key: string; id: string; refs?
   return out
 }
 
+/**
+ * What a review row may hand to anything that reads the network (a picture:
+ * ThumbStage resolves parts through fetchRef, hint first, then public
+ * relays). Kit-internal references name no real object yet, so their parts
+ * are left out and their refs dropped, the rest renumbered; a join then
+ * shows its own geometry, or the icon. References to anyone else's objects
+ * stay, as in any list. The same object when there is nothing to leave out.
+ */
+export function offlinePicture<S extends { refs?: Array<readonly unknown[]>; parts?: Array<{ ref: number }> }>(shard: S): S {
+  const refs = shard.refs ?? []
+  if (!refs.some((r) => placeholderOf(r) !== null)) return shard
+  const keep: number[] = []
+  const index = new Map<number, number>()
+  refs.forEach((r, i) => { if (placeholderOf(r) === null) { index.set(i, keep.length); keep.push(i) } })
+  const parts = (shard.parts ?? []).filter((q) => index.has(q.ref)).map((q) => ({ ...q, ref: index.get(q.ref)! }))
+  const { refs: _r, parts: _p, ...rest } = shard
+  return (keep.length && parts.length ? { ...rest, refs: keep.map((i) => refs[i]), parts } : rest) as S
+}
+
+/** The refs with each kit-internal one stripped of its relay hint (the kit's hint is not a relay anyone chose). */
+export function withoutPlaceholderHints<R extends readonly unknown[]>(refs: readonly R[] | undefined): R[] | undefined {
+  return refs?.map((r) => (placeholderOf(r) !== null && r.length > 2 ? ([r[0], r[1]] as unknown as R) : r))
+}
+
 /** The refs with each kit-internal one pointed at the importer's own piece (its relay hint dropped: the kit's hint is not the importer's relay); every other reference as it was. */
 export function resolveRefs<R extends readonly unknown[]>(refs: readonly R[] | undefined, targets: ReadonlyMap<string, string>, pubkey: string): R[] | undefined {
   if (!refs) return refs

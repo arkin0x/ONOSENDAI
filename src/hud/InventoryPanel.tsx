@@ -253,6 +253,7 @@ function TakenRow({ item }: { item: HeldItem }): JSX.Element {
             id={`held:${item.id}`}
             triggerId={itemLineage(item.event) ?? item.id}
             audio={item.audio}
+            who={{ authors: [item.author], ids: [item.id, itemLineage(item.event)] }}
             moderation={takenAudioModeration(item, me, () => setOpen(false))}
           />
         </div>

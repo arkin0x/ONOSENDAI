@@ -19,6 +19,7 @@ import { NotificationsModal, NotificationsToast, useNotificationsLoop } from './
 import { AgentTalkHost } from './hud/AgentTalk'
 import { useAgentDmWatch } from './hooks/useAgentDmWatch'
 import { NearbyChip } from './hud/NearbyChip'
+import { NowPlayingChip, SoundChip } from './hud/NowPlaying'
 import { GoalChip } from './hud/GoalChip'
 import { watchNearbyReturn } from './lib/nearbyReturn'
 import { startCoordRoute } from './store/useCoordRoute'
@@ -339,6 +340,9 @@ export default function App(): JSX.Element {
               <KeyFoundChip />
               <NearbyChip />
               <PresenceChip />
+              {/* Hidden audio held back until a tap, then what cyberspace is playing (DECK-0007). */}
+              <SoundChip />
+              <NowPlayingChip />
             </>,
             toast: <ToastChip />,
           }} />

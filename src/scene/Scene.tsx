@@ -77,6 +77,7 @@ import { TargetAvatars } from './TargetAvatars'
 import { PresenceAvatars } from './PresenceAvatars'
 import { WorldShards } from './WorldShards'
 import { WorldMessages } from './WorldMessages'
+import { HiddenAudio } from './HiddenAudio'
 import { StarredMarks } from './StarredMarks'
 import { ShardGhost } from './ShardGhost'
 import { DeployRegionBox } from './DeployRegionBox'
@@ -184,6 +185,8 @@ function World(): JSX.Element {
       {/* Runs before anything that reads travelOffset. */}
       <Travel axes={axes} />
       <TargetProjector axes={axes} targets={targets} />
+      {/* Hidden audio sounding where it is hidden, heard at the camera (DECK-0007). */}
+      <HiddenAudio axes={axes} />
       {/* At infinity, so it draws behind everything regardless of tree order. */}
       <BlackSun axes={axes} />
       {!dotsIdle && <ShaderPointField volume={volume} win={win} />}

@@ -312,6 +312,14 @@ function CellMetric(): null {
 }
 
 /**
+ * When HeadlampRig reads the camera: after everything that moves it (the Rig
+ * at 0, Cyberspace TV's camera at 0.5, TvLayer) and before the composer draws
+ * the frame at 1. At 0 it read TV's camera a frame late, so the first frame
+ * after every cut was shaded for the shot before it (review of #456).
+ */
+const HEADLAMP_PRIORITY = 0.75
+
+/**
  * Keeps the world's headlamp (scene/headlamp.ts) in step: on or off with the
  * View panel's switch, and its reach the camera's distance from what it looks
  * at (the orbit's target, which Cyberspace TV's camera drives too). Two
@@ -320,12 +328,13 @@ function CellMetric(): null {
  */
 function HeadlampRig(): null {
   const on = useLayers((s) => s.headlamp)
-  useEffect(() => { headlampUniforms.uHeadlamp.value = on ? 1 : 0 }, [on])
+  // In the commit, before any frame is drawn: a switch saved off never shows one frame on.
+  useLayoutEffect(() => { headlampUniforms.uHeadlamp.value = on ? 1 : 0 }, [on])
   const controls = useThree((s) => s.controls) as unknown as { target: Vector3 } | null
   useFrame((state) => {
     if (!controls) return
     headlampUniforms.uHeadlampReach.value = headlampReach(state.camera.position.distanceTo(controls.target))
-  })
+  }, HEADLAMP_PRIORITY)
   return null
 }
 

@@ -106,6 +106,8 @@ float headlampFacing(vec3 viewPosition) {
 `
 
 const MARK = '// headlamp'
+/** Said once: every material compiles through the patch, and one warning is enough. */
+let warned = false
 const VARYING = 'varying vec3 vHeadlamp;'
 
 /**
@@ -127,7 +129,8 @@ export function patchHeadlamp(shader: Pick<WebGLProgramParametersWithUniforms, '
     [shader.fragmentShader, '#include <opaque_fragment>'],
   ]
   if (!anchors.every(([src, a]) => once(src, a))) {
-    console.warn('[headlamp] three\'s basic shader is not the one expected; shards are drawn unshaded')
+    if (!warned) console.warn('[headlamp] three\'s basic shader is not the one expected; shards are drawn unshaded')
+    warned = true
     return false
   }
   shader.uniforms.uHeadlamp = headlampUniforms.uHeadlamp

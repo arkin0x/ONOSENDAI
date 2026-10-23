@@ -1423,7 +1423,8 @@ export const useWorkshop = create<WorkshopState>((set, get) => {
       if (!s || facePick.length < 3) return
       const tris = triangulate(facePick.map((i) => ticksOf(s.vertices[i])))
       if (!tris) { set({ notice: 'Those corners do not make a face. Pick them in order around its edge.' }); return }
-      edit((cur) => {
+      // Corners that already make faces add nothing; said, so the tap is not lost in silence.
+      const added = edit((cur) => {
         const have = new Set(cur.faces.map(faceKey))
         const faces = tris
           .map((t) => [facePick[t[0]], facePick[t[1]], facePick[t[2]]] as [number, number, number])
@@ -1433,7 +1434,7 @@ export const useWorkshop = create<WorkshopState>((set, get) => {
         const next = windAdded({ ...cur, faces: [...cur.faces, ...faces] }, cur.faces.length)
         return { ...next, mode: solidIfFirstFaces(cur, next).mode }
       }, solidIfFirstFaces(s, { ...s, faces: [[0, 0, 0]] }).notice)
-      set({ facePick: [] })
+      set(added ? { facePick: [] } : { facePick: [], notice: 'Those faces are already there.' })
     },
 
     fillSelection: () => {

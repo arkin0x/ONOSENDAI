@@ -8881,6 +8881,130 @@ a.feed__act { text-decoration: none; }
   height: 160px;
   pointer-events: none;
 }
+/* ---------- Bulk import: a zip's review list (workshop/ZipImport.tsx) ---------- */
+.modal__card.zipimport {
+  width: min(560px, 100%);
+  max-height: min(86vh, 760px);
+  max-height: min(86dvh, 760px);
+  gap: 8px;
+  padding: 16px 14px 14px;
+}
+/* In a card of capped height only the list gives way; the rest keep their size. */
+.modal__card.zipimport > * { flex-shrink: 0; }
+.modal__card.zipimport > .zipimport__list { flex-shrink: 1; }
+.zipimport__one { grid-template-columns: 1fr; }
+.zipimport__title {
+  margin: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.zipimport__line {
+  font-size: 10px;
+  letter-spacing: 0.12em;
+  color: var(--dim);
+}
+.zipimport__line.is-bad { color: var(--danger); }
+.zipimport__bar {
+  height: 3px;
+  border-radius: 2px;
+  background: rgba(0, 229, 255, 0.12);
+  overflow: hidden;
+}
+.zipimport__bar > span {
+  display: block;
+  height: 100%;
+  background: var(--accent);
+  transition: width 0.2s ease;
+}
+.zipimport__controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 14px;
+}
+.zipimport__controls .ui-field { margin: 0; }
+.zipimport__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  flex: 1 1 auto;
+  min-height: 80px;
+  overflow-y: auto;
+  border-top: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+}
+.zipimport__row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 2px;
+  border-bottom: 1px solid rgba(0, 229, 255, 0.07);
+}
+.zipimport__row:last-child { border-bottom: 0; }
+.zipimport__row.is-off .zipimport__text,
+.zipimport__row.is-off .zipimport__thumb { opacity: 0.45; }
+.zipimport__thumb {
+  flex: 0 0 40px;
+  width: 40px;
+  height: 40px;
+  border-radius: 4px;
+  background: rgba(0, 229, 255, 0.05);
+  overflow: hidden;
+}
+.zipimport__thumb img { display: block; width: 40px; height: 40px; }
+.zipimport__text {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.zipimport__name {
+  font-size: 12px;
+  color: var(--fg);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.zipimport__meta {
+  font-size: 10px;
+  color: var(--dim);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.zipimport__error {
+  font-size: 10px;
+  color: var(--danger);
+  overflow-wrap: anywhere;
+}
+.zipimport__skipped {
+  font-size: 10px;
+  letter-spacing: 0.08em;
+}
+.zipimport__skipped ul {
+  list-style: none;
+  margin: 6px 0 0;
+  padding: 0;
+  max-height: 120px;
+  overflow-y: auto;
+}
+.zipimport__skipped li {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 2px 0;
+  color: var(--fg);
+}
+.zipimport__skipped li > span:first-child {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.zipimport .explain { margin: 0; }
+
 /* PLACE OBJECT's empty state: FEED and OPEN WORKSHOP side by side. */
 .objpick__emptyacts {
   display: flex;
@@ -9505,127 +9629,3 @@ html.tv-broadcast body { overflow: hidden; }
 .itemmodel__side .chest__act { align-self: flex-start; margin-top: 4px; }
 .itemmodel__name { font-size: 11px; letter-spacing: 0.06em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .itemmodel__pick .feed__list { max-height: 40vh; max-height: 40dvh; }
-
-/* ---------- Bulk import: a zip's review list (workshop/ZipImport.tsx) ---------- */
-.modal__card.zipimport {
-  width: min(560px, 100%);
-  max-height: min(86vh, 760px);
-  max-height: min(86dvh, 760px);
-  gap: 8px;
-  padding: 16px 14px 14px;
-}
-/* In a card of capped height only the list gives way; the rest keep their size. */
-.modal__card.zipimport > * { flex-shrink: 0; }
-.modal__card.zipimport > .zipimport__list { flex-shrink: 1; }
-.zipimport__one { grid-template-columns: 1fr; }
-.zipimport__title {
-  margin: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.zipimport__line {
-  font-size: 10px;
-  letter-spacing: 0.12em;
-  color: var(--dim);
-}
-.zipimport__line.is-bad { color: var(--danger); }
-.zipimport__bar {
-  height: 3px;
-  border-radius: 2px;
-  background: rgba(0, 229, 255, 0.12);
-  overflow: hidden;
-}
-.zipimport__bar > span {
-  display: block;
-  height: 100%;
-  background: var(--accent);
-  transition: width 0.2s ease;
-}
-.zipimport__controls {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 8px 14px;
-}
-.zipimport__controls .ui-field { margin: 0; }
-.zipimport__list {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  flex: 1 1 auto;
-  min-height: 80px;
-  overflow-y: auto;
-  border-top: 1px solid var(--border);
-  border-bottom: 1px solid var(--border);
-}
-.zipimport__row {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 5px 2px;
-  border-bottom: 1px solid rgba(0, 229, 255, 0.07);
-}
-.zipimport__row:last-child { border-bottom: 0; }
-.zipimport__row.is-off .zipimport__text,
-.zipimport__row.is-off .zipimport__thumb { opacity: 0.45; }
-.zipimport__thumb {
-  flex: 0 0 40px;
-  width: 40px;
-  height: 40px;
-  border-radius: 4px;
-  background: rgba(0, 229, 255, 0.05);
-  overflow: hidden;
-}
-.zipimport__thumb img { display: block; width: 40px; height: 40px; }
-.zipimport__text {
-  flex: 1 1 auto;
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 1px;
-}
-.zipimport__name {
-  font-size: 12px;
-  color: var(--fg);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.zipimport__meta {
-  font-size: 10px;
-  color: var(--dim);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.zipimport__error {
-  font-size: 10px;
-  color: var(--danger);
-  overflow-wrap: anywhere;
-}
-.zipimport__skipped {
-  font-size: 10px;
-  letter-spacing: 0.08em;
-}
-.zipimport__skipped ul {
-  list-style: none;
-  margin: 6px 0 0;
-  padding: 0;
-  max-height: 120px;
-  overflow-y: auto;
-}
-.zipimport__skipped li {
-  display: flex;
-  justify-content: space-between;
-  gap: 10px;
-  padding: 2px 0;
-  color: var(--fg);
-}
-.zipimport__skipped li > span:first-child {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.zipimport .explain { margin: 0; }

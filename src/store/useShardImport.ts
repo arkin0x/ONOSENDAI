@@ -36,7 +36,7 @@ import {
   ZIP_MAX_BYTES, ZIP_MAX_ENTRIES, ZIP_MAX_ENTRY_BYTES, copyName, dupAction, findDups, planZip,
   type Dup, type DupMode, type PlannedRow, type SkippedFile,
 } from '../lib/shardZip'
-import { folderApi, placeInFolders } from '../lib/shardFolders'
+import { folderApi, placeInFolders } from '../lib/importFolders'
 import { importBytes } from '../lib/meshImport'
 import { shardRefusal } from '../lib/hidden'
 import { publishState, shardFingerprint } from '../lib/published'
@@ -124,7 +124,7 @@ const blank = { open: false, fileName: '', phase: 'opening' as Phase, error: nul
 /** Your shards as duplicate matching sees them. */
 function mine(): Array<{ id: string; name: string; folder: string[] | null }> {
   const api = folderApi()
-  return useWorkshop.getState().shards.map((s) => ({ id: s.id, name: s.name, folder: api?.folderPathOf?.(s.id) ?? null }))
+  return useWorkshop.getState().shards.map((s) => ({ id: s.id, name: s.name, folder: api?.folderPathOf ? api.folderPathOf(s.id) : null }))
 }
 
 function dupsFor(rows: readonly ImportRow[]): Record<string, Dup> {
@@ -198,7 +198,7 @@ export const useShardImport = create<ShardImportState>((set, get) => {
     const dups = dupsFor(get().rows)
     set({ phase: 'running', stopAsked: false, stall: null, dups })
     const folders = folderApi()
-    const made = new Map<string, string>()
+    const made = new Map<string, string | null>()
     let silent = 0
     let sent = 0
     for (const { key } of get().rows) {

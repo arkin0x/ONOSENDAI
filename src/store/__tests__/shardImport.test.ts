@@ -37,7 +37,13 @@ vi.mock('../../lib/relay', () => ({
   subscribeOne: vi.fn(() => ({ close: () => {} })),
 }))
 
+vi.mock('../../lib/importFolders', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../lib/importFolders')>()),
+  folderApi: vi.fn(() => null),
+}))
+
 import { strToU8, zipSync } from 'fflate'
+import { folderApi } from '../../lib/importFolders'
 import { publishMany } from '../../lib/relay'
 import { useCyberspace } from '../useCyberspace'
 import { useWorkshop } from '../useWorkshop'
@@ -105,9 +111,7 @@ beforeEach(() => {
 
 afterEach(() => {
   useCyberspace.setState({ signEvent: realSign })
-  const ws = useWorkshop.getState() as unknown as Record<string, unknown>
-  delete ws.createFolderPath
-  delete ws.assignToFolder
+  vi.mocked(folderApi).mockReturnValue(null)
 })
 
 describe('reading a zip', () => {
@@ -274,13 +278,23 @@ describe('failure and retry', () => {
 
 describe('folders', () => {
   it('puts each new shard in its zip folder once the workshop has folders', async () => {
-    const createFolderPath = vi.fn((path: string[]) => path.join('/'))
+    const createFolderPath = vi.fn((path: readonly string[]) => path.join('/'))
     const assignToFolder = vi.fn()
-    useWorkshop.setState({ createFolderPath, assignToFolder } as never)
+    vi.mocked(folderApi).mockReturnValue({ createFolderPath, assignToFolder })
     await imp().openZip(kitZip())
     expect(imp().foldersOn).toBe(true)
     await imp().start()
     expect(createFolderPath.mock.calls.map((c) => c[0].join('/')).sort()).toEqual(['maze-kit/forest', 'maze-kit/shared'])
     expect(assignToFolder).toHaveBeenCalledWith(rowOf('tetra').shardId, 'maze-kit/shared')
+  })
+
+  it('with folders, a name is taken only in its own folder', async () => {
+    useWorkshop.getState().importText(sno('hall-straight', 3))
+    const other = useWorkshop.getState().shards[0].id
+    vi.mocked(folderApi).mockReturnValue({ createFolderPath: (p) => p.join('/'), assignToFolder: () => {}, folderPathOf: (id) => (id === other ? ['elsewhere'] : []) })
+    await imp().openZip(kitZip())
+    expect(imp().dups[rowOf('hall-straight').key]).toBeNull()
+    await imp().start()
+    expect(mine().filter((s) => s.name === 'hall-straight')).toHaveLength(2)
   })
 })

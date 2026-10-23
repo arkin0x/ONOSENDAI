@@ -2,20 +2,19 @@
  * ZipImport.tsx - bulk import's review list and progress (store/useShardImport).
  *
  * One row per shard file: a box to untick, its picture once it is read
- * (useThumbs, drawn by a ThumbStage of its own while the list is open), its
+ * (hud/ShardThumb, as every list of shards shows one), its
  * name, folder, size, and what became of it. Above the list, what a taken
  * name means (SKIP, COPY, UPDATE) and whether to PUBLISH; below it, the
  * files that are not shards and why. Words in the list are labels and
  * reasons only; the rest is behind EXPLAIN.
  */
 
-import { useEffect, useRef, useState } from 'react'
+import { useState } from 'react'
 import { createPortal } from 'react-dom'
 import { Checkbox } from '../hud/ui/Checkbox'
 import { Field, Switch } from '../hud/ui/Switch'
 import { Explanation } from '../hud/Explanation'
-import { ThumbStage } from '../scene/ThumbStage'
-import { useThumbs } from '../store/useThumbs'
+import { ShardThumb } from '../hud/ShardThumb'
 import { useEscape } from '../hooks/useEscape'
 import { useCyberspace } from '../store/useCyberspace'
 import { mineIds, plannedBlocks, useShardImport, type ImportRow } from '../store/useShardImport'
@@ -28,30 +27,6 @@ const MODES: Array<{ mode: DupMode; label: string; help: string }> = [
 ]
 
 const size = (n: number): string => (n < 1024 ? `${n} B` : n < 1048576 ? `${(n / 1024).toFixed(n < 10240 ? 1 : 0)} KB` : `${(n / 1048576).toFixed(1)} MB`)
-
-/** The key a row's picture is kept under: per open, so a zip opened again (edited, same name) is drawn again. */
-const thumbKey = (openId: number, key: string): string => `zip:${openId}:${key}`
-
-/** Pictures asked for this open: each once, so one evicted from the shared cache (it keeps 200) is not drawn again and again. */
-const asked = new Set<string>()
-
-function Thumb({ row, openId, root }: { row: ImportRow; openId: number; root: HTMLElement | null }): JSX.Element {
-  const k = thumbKey(openId, row.key)
-  const url = useThumbs((s) => s.urls[k])
-  const box = useRef<HTMLSpanElement>(null)
-  // Asked for once the row is near the list's visible part, as the Shard Feed's tiles are.
-  useEffect(() => {
-    const shard = row.shard
-    if (!shard || url || asked.has(k)) return
-    const ask = (): void => { if (!asked.has(k)) { asked.add(k); useThumbs.getState().request(k, shard) } }
-    const el = box.current
-    if (!el || typeof IntersectionObserver === 'undefined') { ask(); return }
-    const seen = new IntersectionObserver((entries) => { if (entries.some((e) => e.isIntersecting)) { ask(); seen.disconnect() } }, { root, rootMargin: '120px' })
-    seen.observe(el)
-    return () => seen.disconnect()
-  }, [k, row.shard, url, root])
-  return <span className="zipimport__thumb" ref={box}>{url ? <img src={url} alt="" width={40} height={40} /> : null}</span>
-}
 
 /** The tag at a row's end: what is happening to it, or what will. */
 function status(row: ImportRow, mode: DupMode, dup: Dup, needs: string | undefined): { label: string; tone: string; title?: string } {
@@ -80,7 +55,6 @@ export function ZipImport(): JSX.Element | null {
   const me = useCyberspace((c) => c.identity.pubkey)
   const [showSkipped, setShowSkipped] = useState(false)
   const running = s.phase === 'running'
-  const [listEl, setListEl] = useState<HTMLUListElement | null>(null)
   // Like the backdrop: a list that holds a run's results closes only by its button.
   useEscape('modal', s.open, () => { if (!running && !s.ran) s.close() })
   if (!s.open) return null
@@ -119,7 +93,6 @@ export function ZipImport(): JSX.Element | null {
 
   return createPortal(
     <div className="modal" role="dialog" aria-modal="true" aria-label={`Import ${s.fileName}`} onPointerDown={() => { if (!running && !s.ran) s.close() }}>
-      <ThumbStage />
       <div className="modal__card modal__card--list zipimport" onPointerDown={(e) => e.stopPropagation()}>
         <h2 className="modal__title zipimport__title">IMPORT {s.fileName.toUpperCase()}</h2>
         <div className={`zipimport__line ${s.error || s.stall ? 'is-bad' : ''}`} aria-live="polite">{s.stall ? `${s.stall.toUpperCase()} ${line}` : line}</div>
@@ -139,7 +112,7 @@ export function ZipImport(): JSX.Element | null {
             </Field>
           </div>
         )}
-        <ul className="zipimport__list" ref={setListEl}>
+        <ul className="zipimport__list">
           {s.rows.map((r) => {
             const dup = s.dups[r.key] ?? null
             const tag = status(r, s.dupMode, dup, blocked.get(r.key))
@@ -147,7 +120,7 @@ export function ZipImport(): JSX.Element | null {
             return (
               <li key={r.key} className={`zipimport__row ${r.picked ? '' : 'is-off'}`}>
                 <Checkbox aria-label={`Import ${r.path}`} checked={r.picked} disabled={running || r.read === 'error' || r.run === 'done'} onCheckedChange={() => s.toggle(r.key)} />
-                <Thumb row={r} openId={s.openId} root={listEl} />
+                <span className="zipimport__thumb">{r.shard ? <ShardThumb shard={r.shard} size={40} /> : null}</span>
                 <span className="zipimport__text">
                   <span className="zipimport__name">{r.name}</span>
                   <span className="zipimport__meta">

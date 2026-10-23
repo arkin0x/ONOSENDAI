@@ -86,8 +86,6 @@ export interface ImportRow extends PlannedRow {
 
 export interface ShardImportState {
   open: boolean
-  /** Counts every zip opened, so what is kept per row (pictures) never carries over from an earlier one. */
-  openId: number
   fileName: string
   phase: Phase
   /** Why the zip as a whole cannot be read. */
@@ -403,13 +401,12 @@ export const useShardImport = create<ShardImportState>((set, get) => {
 
   return {
     ...blank,
-    openId: 0,
 
     openZip: async (file) => {
       if (get().phase === 'running') return
       const g = ++generation
       zip = null
-      set({ ...blank, open: true, openId: get().openId + 1, fileName: file.name, publish: get().publish, foldersOn: !!folderApi() })
+      set({ ...blank, open: true, fileName: file.name, publish: get().publish, foldersOn: !!folderApi() })
       if (file.size > ZIP_MAX_BYTES) { set({ error: `That zip is ${Math.round(file.size / 1048576)} MB. Import reads zips of up to ${ZIP_MAX_BYTES / 1048576} MB.`, phase: 'review' }); return }
       let bytes: Uint8Array
       try { bytes = new Uint8Array(await file.arrayBuffer()) } catch { if (g === generation) set({ error: 'That zip could not be opened.', phase: 'review' }); return }

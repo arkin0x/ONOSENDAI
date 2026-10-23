@@ -81,8 +81,7 @@ interface Props {
   birth?: number
   /**
    * A tap on a SOLID face, with the shard's own index for it; the workshop's
-   * FACE tool. Not `e.faceIndex`, which counts the triangles drawn: a shard
-   * cut at its region's walls draws the pieces of its faces, not the faces.
+   * FACE tool, through the face meshes' `faceOf` map (shardGeometry `drawn`).
    */
   onFaceClick?: (e: ThreeEvent<MouseEvent>, face: number) => void
   /**
@@ -142,13 +141,17 @@ const STATIC = [0, 0.9, 1] as const
 /**
  * What a shard draws: its points in the render mapping, and every one of its
  * faces (DECK-0003 §1.4: a reader draws them all, both sides, whatever their
- * winding). `drawn` maps each drawn triangle to the shard's own face.
+ * winding). `drawn` maps each drawn triangle to the shard's own face: the
+ * identity, since every face is drawn and faces are triangles, kept so a
+ * tap still lands on the right face if anything is ever left out again. On
+ * the clip path it maps the cut pieces to themselves, so a clipped shard's
+ * piece is not a face; nothing that clips takes taps.
  *
  * The bench once left out the faces sno-core's outward guess called buried
  * inside a join, by counting what rays from each face's middle crossed. That
  * count only holds for one closed solid, and a shard is seldom one: arkinox's
- * Stair run lost one triangle of each low riser, a whole riser above them,
- * and every face FILLed in such a spot was added and never seen
+ * Stair run lost one triangle of each of risers 2 and 3, three whole risers
+ * above them, and every face FILLed in such a spot was added and never seen
  * (2026-10-23). Every face is drawn now, on the bench as in the world.
  *
  * Cropped to its region (`clip`), the faces are cut at the walls, and the
@@ -171,8 +174,7 @@ export function shardGeometry(shard: ShardModel, clip?: Box, pose?: Pose): { pos
 /**
  * The shard's own face index for a ray's hit on either side of a face, or
  * null for a hit on anything else. Both face meshes carry `faceOf`, the map
- * from a drawn triangle to its face: a shard cut at its region's walls draws
- * pieces, so the triangle's index is not the face's. A face must answer a tap
+ * from a drawn triangle to its face (shardGeometry `drawn`). A face must answer a tap
  * from behind as well as from in front; each mesh is hit only on the
  * triangles that face the ray, so the outsides alone let a tap pass through
  * a face seen from behind to the next front beyond it (arkinox's Disco
@@ -203,11 +205,12 @@ export function ShardMesh({ shard: given, scale = 1, ghost = false, birth, onFac
   const resolved = useResolved(nested ? null : given)
   // A face that carries its own colour needs three corners of its own, or the
   // colour would bleed across every edge it shares. Expanded here and nowhere
-  // else, so the winding pass, the clipper and the face picker below never
-  // learn the feature exists.
+  // else, so the clipper and the face picker below never learn the feature
+  // exists.
   const shard = useMemo(() => expandFaceColors(given), [given])
   // Keyed on the points and faces rather than the whole model, so a parent
-  // that hands over a fresh copy of the same shard does not rebuild it.
+  // that hands over a fresh copy of the same shard does not rebuild it
+  // (unless it has face colours: the expansion above makes new arrays).
   // eslint-disable-next-line react-hooks/exhaustive-deps
   const { positions, colors, index, faces, drawn } = useMemo(() => shardGeometry(shard, clip, pose), [shard.vertices, shard.faces, clip, pose])
 

@@ -678,7 +678,15 @@ function group(s: Pick<ShardModel, 'vertices'>, index: number): number[] {
   return out
 }
 
-const faceKey = (f: [number, number, number]): string => [...f].sort((a, b) => a - b).join(',')
+/**
+ * A face as the three points it spans, order-free. By points, not vertex
+ * indices: two vertices can stand on one spot (a copy, a stamp's own
+ * corners), and FILL takes any vertex on a picked point, so by index the
+ * same face picked through a twin vertex looked new and landed on top of
+ * the old one, where the two fight to be seen.
+ */
+const faceKey = (s: Pick<ShardModel, 'vertices'>, f: [number, number, number]): string =>
+  f.map((i) => (s.vertices[i] ? pointKey(ticksOf(s.vertices[i])) : `#${i}`)).sort().join('|')
 
 type Tri = [number, number, number]
 type Tris = Tri[] & { hull?: boolean }
@@ -1425,10 +1433,10 @@ export const useWorkshop = create<WorkshopState>((set, get) => {
       if (!tris) { set({ notice: 'Those corners do not make a face. Pick them in order around its edge.' }); return }
       // Corners that already make faces add nothing; said, so the tap is not lost in silence.
       const added = edit((cur) => {
-        const have = new Set(cur.faces.map(faceKey))
+        const have = new Set(cur.faces.map((f) => faceKey(cur, f)))
         const faces = tris
           .map((t) => [facePick[t[0]], facePick[t[1]], facePick[t[2]]] as [number, number, number])
-          .filter((f) => validFace(f, cur.vertices.length) && !have.has(faceKey(f)))
+          .filter((f) => validFace(f, cur.vertices.length) && !have.has(faceKey(cur, f)))
         if (!faces.length) return null
         // Wound outward, or to agree with a face it closes onto (sno-core winding).
         const next = windAdded({ ...cur, faces: [...cur.faces, ...faces] }, cur.faces.length)
@@ -1451,10 +1459,10 @@ export const useWorkshop = create<WorkshopState>((set, get) => {
       if (!faces) { set({ notice: 'Those points do not make a face: they lie on one line.' }); return }
       const before = s.faces.length
       edit((cur) => {
-        const have = new Set(cur.faces.map(faceKey))
+        const have = new Set(cur.faces.map((f) => faceKey(cur, f)))
         const fresh = faces
           .map((t) => [idx[t[0]], idx[t[1]], idx[t[2]]] as [number, number, number])
-          .filter((f) => validFace(f, cur.vertices.length) && !have.has(faceKey(f)))
+          .filter((f) => validFace(f, cur.vertices.length) && !have.has(faceKey(cur, f)))
         if (!fresh.length) return null
         // Wound outward, on the wire where the front is read (DECK-0003 §1.4),
         // or to agree with a face it closes onto. Measured in model ticks, as

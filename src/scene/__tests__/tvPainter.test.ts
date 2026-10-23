@@ -823,6 +823,8 @@ describe('an explainer on the tube (lib/tv/explainer)', () => {
     p.size(1400, 800, 1)
     p.paint(picture({ shot }), { ...assets, music: { ...music, muted: true }, explainer }, 1000, 1, false)
     expect(words).toContain('WHAT IS CYBERSPACE? · MUTED')
+    p.paint(picture({ shot }), { ...assets, music, explainer: { ...explainer, soundHeld: true } }, 1020, 1, false)
+    expect(words).toContain('WHAT IS CYBERSPACE? · TAP FOR SOUND')
     p.paint(picture({ shot }), { ...assets, music, explainer: { ...explainer, mix: 0.5 } }, 1040, 1, false)
     expect(p.musicCard).toBeNull()
   })

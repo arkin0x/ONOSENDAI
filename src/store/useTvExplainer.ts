@@ -113,6 +113,11 @@ export function explainerCaption(): string | null {
   return v && cues.length ? cueAt(cues, v.currentTime) : null
 }
 
+/** Whether the browser holds the sound of the one on screen back until a tap (TAP FOR SOUND on its tag). */
+export function explainerSoundHeld(): boolean {
+  return policyMuted && useTvExplainer.getState().showing !== null
+}
+
 /** Whether one is being got ready or is on screen: the HOSAKA spot waits meanwhile. */
 export function explainerBusy(): boolean {
   return pending !== null || useTvExplainer.getState().showing !== null
@@ -164,7 +169,15 @@ export function explainerTick(now: number, tv: TvSide): void {
 
 /** Waiting on the video, then on the song to end, then on screen. */
 function getReady(p: Pending, now: number): void {
-  if (p.failed || (p.readyAt === null && now - p.began > EXPLAINER_LOAD_MS)) { skip(now); return }
+  if (p.failed) { skip(now); return }
+  if (p.readyAt === null && now - p.began > EXPLAINER_LOAD_MS) {
+    // Too slow to come on this connection: on the site, not tried again this
+    // visit, so a phone on a slow link does not fetch most of it every few
+    // minutes for nothing. The stream tries again (review of #471, round 2).
+    if (!isBroadcast()) for (const f of p.ex.files) unplayable.add(f.url)
+    skip(now)
+    return
+  }
   if (p.readyAt === null) return
   if (!p.asked) { p.asked = true; holdMusicAtSongEnd() }
   // A song that runs on too long fades out instead, and comes back where it was.
@@ -294,6 +307,9 @@ function pauseOwn(v: HTMLVideoElement | null): void {
  */
 function onPause(v: HTMLVideoElement): void {
   if (ownPause) { ownPause = false; return }
+  // Told late, by when it plays again (the warm-up's pause, after show's
+  // play): not a pause any more (review of #471, round 2).
+  if (!v.paused) return
   const s = useTvExplainer.getState().showing
   if (video !== v || !s || s.phase === 'out' || v.ended || isBroadcast()) return
   goOut(performance.now(), EXPLAINER_FAIL_OUT_MS, false)

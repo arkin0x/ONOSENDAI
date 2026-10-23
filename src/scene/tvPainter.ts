@@ -206,6 +206,8 @@ export interface TvExplainer {
   video: FlatRect
   /** The caption at this moment, or null. */
   caption: string | null
+  /** The browser holds its sound back until a tap. */
+  soundHeld?: boolean
 }
 
 /** What NOW PLAYING shows. */
@@ -743,7 +745,8 @@ export class TvPainter {
     const y = (ex.pip.y + ex.pip.h) * scale + 8 * s
     // The sound is the viewer's to mute here too: a tap on the tag, as on
     // NOW PLAYING, which steps away meanwhile (review of #471).
-    const label = fit(ctx, muted && !isBroadcast() ? `${ex.title} · MUTED` : ex.title, Math.max(20 * s, ex.pip.w * scale - 14 * s))
+    const state = isBroadcast() ? '' : ex.soundHeld ? ' · TAP FOR SOUND' : muted ? ' · MUTED' : ''
+    const label = fit(ctx, `${ex.title}${state}`, Math.max(20 * s, ex.pip.w * scale - 14 * s))
     const tw = ctx.measureText(label).width
     this.npRect = alpha > 0 ? { x, y, w: tw + 14 * s, h: 18 * s } : null
     ctx.fillStyle = 'rgba(0, 0, 0, 0.55)'

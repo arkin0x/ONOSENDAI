@@ -55,7 +55,7 @@ import { countTvFrame, isBroadcast } from '../lib/tv/broadcast'
 import { useTvWatching } from '../store/useTvWatching'
 import { CALM, GlitchDirector } from '../lib/tv/glitch'
 import { explainerLayout, explainerMix, lerpRect, type Rect } from '../lib/tv/explainer'
-import { explainerCaption, explainerVideo, useTvExplainer } from '../store/useTvExplainer'
+import { explainerCaption, explainerSoundHeld, explainerVideo, useTvExplainer } from '../store/useTvExplainer'
 import type { ShardModel } from 'sno-core/shards'
 
 /** Kept for what still names the old static: a cut's transition, ms. */
@@ -460,9 +460,13 @@ export function TvScreenEffect(): JSX.Element {
     // where iOS may not count the end of a touch as one.
     let swallowUntil = 0
     let tapped = false
+    // A tap that began while an explainer's sound was held back is for the
+    // sound alone (its own listener lets it in): never also a mute.
+    let forSound = false
     const down = (e: PointerEvent): void => {
       swallowUntil = 0
       tapped = false
+      forSound = explainerSoundHeld()
       const m = useTvMusic.getState()
       // While the browser holds the sound back, a tap is for the sound.
       // Over an explainer the card is its title's tag, for the sound, track or none.
@@ -494,7 +498,7 @@ export function TvScreenEffect(): JSX.Element {
     const click = (e: MouseEvent): void => {
       if (performance.now() > swallowUntil) return
       swallowUntil = 0
-      if (tapped) tapMusic()
+      if (tapped && !forSound) tapMusic()
       tapped = false
       e.stopPropagation()
     }
@@ -595,7 +599,7 @@ export function TvScreenEffect(): JSX.Element {
       glRect(lerpRect({ x: 0, y: 0, w: width, h: height }, layout.pip, mix), width, height, u.get('uPip')!.value as Vector4)
       glRect(layout.video, width, height, u.get('uVid')!.value as Vector4)
       u.get('uVideo')!.value = videoTex.current
-      explainer = { title: ex.title, mix, pip: layout.pip, video: layout.video, caption: explainerCaption() }
+      explainer = { title: ex.title, mix, pip: layout.pip, video: layout.video, caption: explainerCaption(), soundHeld: explainerSoundHeld() }
     } else if (videoTex.current) {
       u.get('uVideo')!.value = NO_VIDEO
       videoTex.current.dispose()

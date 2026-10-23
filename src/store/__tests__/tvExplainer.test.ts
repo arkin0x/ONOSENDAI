@@ -33,7 +33,7 @@ import {
 } from '../../lib/tv/explainer'
 import {
   explainerBusy, explainerDueForTest, explainerEndedAt, explainerTick, explainerVideo, setExplainerLineupForTest, startExplainers, stopExplainers,
-  useTvExplainer, explainerCaption,
+  useTvExplainer, explainerCaption, explainerSoundHeld,
 } from '../useTvExplainer'
 import { setBroadcastForTest } from '../../lib/tv/broadcast'
 
@@ -443,6 +443,49 @@ describe('Cyberspace TV explainers', () => {
     await run(EXPLAINER_STALL_MS, playing, false)
     expect(phase()).not.toBe('play')
     expect(music.resumed).toEqual([true])
+  })
+
+  it('a pause told late, after it plays again, is not the viewer\'s (review of #471, round 2)', async () => {
+    startExplainers(performance.now(), '')
+    music.held = true
+    await run(EXPLAINER_FIRST_MS + 1000)
+    expect(phase()).toBe('in')
+    // The warm-up's pause, arriving while the video plays on.
+    video().dispatchEvent(new Event('pause'))
+    await run(200)
+    expect(phase()).toBe('in')
+    expect(music.resumed).toEqual([])
+  })
+
+  it('on the site, one too slow to load is not fetched again this visit; the stream tries again', async () => {
+    FakeVideo.ready = false
+    startExplainers(performance.now(), '')
+    await run(EXPLAINER_FIRST_MS + EXPLAINER_LOAD_MS + 1000)
+    expect(fetched).toHaveLength(1)
+    await run(EXPLAINER_RETRY_MS + 1000)
+    expect(fetched).toHaveLength(1)
+    stopExplainers()
+    setExplainerLineupForTest([one('1-a')])
+    setBroadcastForTest(true)
+    fetched = []
+    startExplainers(performance.now(), '')
+    await run(EXPLAINER_FIRST_MS + EXPLAINER_LOAD_MS + 1000)
+    await run(EXPLAINER_RETRY_MS + 1000)
+    expect(fetched).toHaveLength(2)
+  })
+
+  it('says when the browser holds its sound back', async () => {
+    const win = new EventTarget()
+    vi.stubGlobal('window', win)
+    FakeVideo.refuse = 'sound'
+    startExplainers(performance.now(), '')
+    music.held = true
+    await run(EXPLAINER_FIRST_MS + 1000)
+    expect(explainerSoundHeld()).toBe(true)
+    FakeVideo.refuse = 'none'
+    win.dispatchEvent(new Event('pointerup'))
+    await run(100)
+    expect(explainerSoundHeld()).toBe(false)
   })
 
   it('a file with no hash is never fetched or played', async () => {

@@ -19,6 +19,7 @@
 import type { Plane } from 'cyberspace-core'
 import { getEventHash, verifyEvent } from 'nostr-tools/pure'
 import { toPayload, type ShardModel } from 'sno-core/shards'
+import { withAuthoredConstrain } from './walkConstrain'
 import type { NostrEvent } from './events'
 import type { ChestEntry, OpeningKey } from './chests'
 import type { AudioItem } from './audioItem'
@@ -288,7 +289,9 @@ export function splitPanels(discovered: Hidden[], held: HeldItem[]): { discovere
  * 2026-10-11: a chest's two identical Columns are one shard to take).
  */
 export function modelPrint(shard: ShardModel): string {
-  return JSON.stringify(toPayload({ ...shard, id: '', name: '' }))
+  // Taken as it publishes, so one hidden before the WALK default (no field)
+  // and one hidden after ("opaque") are the same model (DECK-0003 §1.12).
+  return JSON.stringify(toPayload(withAuthoredConstrain({ ...shard, id: '', name: '' })))
 }
 
 /** Whether a shard with this model is already held, cleared or not: taking it again would only duplicate it. */

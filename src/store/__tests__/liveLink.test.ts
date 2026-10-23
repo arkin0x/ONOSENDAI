@@ -101,6 +101,16 @@ beforeEach(() => {
 })
 
 describe('B1: a finder can follow it', () => {
+  it('a LIVE LINK of an object that never chose WALK writes nothing of it: the author\'s event goes out as it is (DECK-0003 §1.12)', async () => {
+    const o = version('Statue', 1_700_000_000)
+    expect(JSON.parse(o.event.content)).not.toHaveProperty('constrain')
+    await placeLinked(o)
+    expect(useShards.getState().deployStatus).toBe('done')
+    expect(sent[0].id).toBe(o.id)
+    expect(sent[0].content).toBe(o.event.content)
+    expect(useShards.getState().mine[0].ref).toBeDefined()
+  })
+
   it('puts the author\'s signed object on your relays before the bag, and hints one that took it', async () => {
     const o = version('Statue', 1_700_000_000)
     await placeLinked(o)

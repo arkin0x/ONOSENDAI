@@ -28,8 +28,9 @@
  * pose along with the shape and sees it as it was placed.
  *
  * CONSTRAIN MOVEMENT IN WALK MODE (OFF / ALL / OPAQUE, DECK-0003 §1.12) is the
- * shard's WALK setting for this deployment, seeded from the shard and written
- * into what is hidden like SCALE; EDIT shows it too. Not for a LIVE LINK,
+ * shard's WALK setting for this deployment, seeded from the shard (OPAQUE for
+ * one that never chose, as it publishes) and written into what is hidden like
+ * SCALE; EDIT shows it too. Not for a LIVE LINK,
  * whose setting is its author's (lib/walkConstrain.ts).
  *
  * Three more choices belong to the BAG rather than to this item, because a bag

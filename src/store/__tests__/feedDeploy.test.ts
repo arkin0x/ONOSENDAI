@@ -41,13 +41,13 @@ import { hexToBytes, type NostrEvent } from '../../lib/events'
 
 /** Someone else's published object, signed by them, as the feed reads it. */
 const AUTHOR = generateSecretKey()
-function published(name: string, vertexCount = 3, unit = 5): FeedObject {
+function published(name: string, vertexCount = 3, unit = 5, fields: Record<string, unknown> = {}): FeedObject {
   const shard: ShardModel = {
     id: name, name, unit, extent: 32, mode: 'points', up: false, spin: 0, updatedAt: 0,
     vertices: Array.from({ length: vertexCount }, (_, i) => ({ p: [i % 30, Math.floor(i / 30) % 30, Math.floor(i / 900)] as [number, number, number], c: [1, 0.5, 0] as [number, number, number] })),
     faces: [],
   }
-  const ev = finalizeEvent({ kind: OBJECT_KIND, created_at: 1_700_000_000, tags: [['d', name]], content: JSON.stringify(toPayload(shard)) }, AUTHOR)
+  const ev = finalizeEvent({ kind: OBJECT_KIND, created_at: 1_700_000_000, tags: [['d', name]], content: JSON.stringify({ ...toPayload(shard), ...fields }) }, AUTHOR)
   const o = objectFromEvent(ev)
   if (!o) throw new Error('not an object')
   return { ...o, seen: ['wss://feed.relay'] }
@@ -90,6 +90,21 @@ describe('a copy (the default)', () => {
     // there would point at a hidden placement).
     expect(dep.inner.tags.some((t) => t[0] === 'p')).toBe(false)
     expect(JSON.parse(dep.inner.content).name).toBe('Chair')
+  })
+
+  it('a copy of an object that never chose WALK shows OPAQUE and goes out "opaque"; one set to OFF stays "off" (DECK-0003 §1.12)', async () => {
+    useShards.getState().startDeployObject(published('Bench'))
+    expect(useShards.getState().deployConstrain).toBe('opaque')
+    await useShards.getState().deploy()
+    expect(useShards.getState().deployStatus).toBe('done')
+    expect(JSON.parse(useShards.getState().mine[0].inner.content)).toHaveProperty('constrain', 'opaque')
+    useShards.setState({ mine: [] })
+    useBuilder.getState().exit()
+    useShards.getState().startDeployObject(published('Curtain', 3, 5, { constrain: 'off' }))
+    expect(useShards.getState().deployConstrain).toBe('off')
+    await useShards.getState().deploy()
+    expect(useShards.getState().deployStatus).toBe('done')
+    expect(JSON.parse(useShards.getState().mine[0].inner.content)).toHaveProperty('constrain', 'off')
   })
 
   it('a large copy goes out as its own sealed object with no credit in plain view', async () => {

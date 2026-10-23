@@ -4,16 +4,30 @@
  *
  * A shard may say that a walker cannot cross it: `constrain` in its payload
  * (DECK-0003 §1.12), `all` for every face, `opaque` for the faces of an
- * object that is drawn solid and fully opaque. Absent, or anything else, is
- * off. sno-core 0.1.18 does not know the field, so it rides in the model's
- * `extra`, carried through every read, edit and write untouched; this module
- * is the only place that reads or writes it.
+ * object that is drawn solid and fully opaque, `off` for none. sno-core does
+ * not know the field, so it rides in the model's `extra`, carried through
+ * every read, edit and write untouched; this module is the only place that
+ * reads or writes it.
  *
  * | Setting | Which of this object's faces stop a WALK step |
  * |---|---|
- * | off (absent) | none |
+ * | off | none |
  * | all | every face, whatever the mode or opacity |
  * | opaque | every face when the object is SOLID and fully opaque; none when it is see-through (opacity below 100, or LINES or POINTS) |
+ *
+ * Two readings of one field (arkinox, 2026-10-23: "ALL shards should publish
+ * with the OPAQUE option on by default"):
+ *
+ * | The payload says | A walker meets (readConstrain, constrainOf) | The workshop shows and publishes (authoredConstrain) |
+ * |---|---|---|
+ * | `all` / `opaque` / `off` | that | that |
+ * | nothing | off: every shard published before the default keeps its meaning | opaque: the author has not chosen, so the default |
+ * | anything else | off | opaque: not a choice either |
+ *
+ * So OFF is written as `"off"`, never as no field, or the next publish would
+ * turn it to OPAQUE. Every SNO payload this app publishes goes through
+ * withAuthoredConstrain (lib/published.ts, lib/hidden.ts); an avatar does not,
+ * since every reader ignores the field there (§3.3).
  *
  * Each object is judged by its own setting, mode and opacity, and never by
  * its parent's (§1.10): a room placed in a parts-only object holds you by
@@ -37,6 +51,9 @@ import { renderPose, type Pose } from './pose'
 /** What a shard asks of a walker. */
 export type Constrain = 'off' | 'all' | 'opaque'
 
+/** What a shard whose author has not chosen publishes as (DECK-0003 §1.12). */
+export const CONSTRAIN_DEFAULT: Constrain = 'opaque'
+
 /** The three settings, in the order the controls show them. */
 export const CONSTRAINS: readonly Constrain[] = ['off', 'all', 'opaque']
 
@@ -50,9 +67,20 @@ export const CONSTRAIN_TIPS: Readonly<Record<Constrain, string>> = {
 /** The payload field (DECK-0003 §1.12). */
 export const CONSTRAIN_FIELD = 'constrain'
 
-/** A payload's `constrain`, read as §1.12 reads it: `all` or `opaque` exactly, and anything else, absent included, is off. */
+/** A payload's `constrain`, read as §1.12 has a walker read it: `all` or `opaque` exactly, and anything else, `off` and absent included, is off. */
 export function readConstrain(raw: unknown): Constrain {
   return raw === 'all' || raw === 'opaque' ? raw : 'off'
+}
+
+/** A payload's `constrain` as its author chose it: one of the three words exactly, and anything else, absent included, the default (§1.12). */
+export function authoredConstrain(raw: unknown): Constrain {
+  return raw === 'all' || raw === 'opaque' || raw === 'off' ? raw : CONSTRAIN_DEFAULT
+}
+
+/** The raw field, top level first (see constrainOf). */
+function rawConstrain(s: Pick<ShardModel, 'extra'>): unknown {
+  const top = (s as { constrain?: unknown }).constrain
+  return top !== undefined ? top : s.extra?.[CONSTRAIN_FIELD]
 }
 
 /**
@@ -62,24 +90,42 @@ export function readConstrain(raw: unknown): Constrain {
  * so the writer here learns it too.
  */
 export function constrainOf(s: Pick<ShardModel, 'extra'>): Constrain {
-  const top = (s as { constrain?: unknown }).constrain
-  return top !== undefined ? readConstrain(top) : readConstrain(s.extra?.[CONSTRAIN_FIELD])
+  return readConstrain(rawConstrain(s))
+}
+
+/** A model's setting as the workshop and the deploy bar show it, and as it publishes: OPAQUE when its author has not chosen. */
+export function authoredConstrainOf(s: Pick<ShardModel, 'extra'>): Constrain {
+  return authoredConstrain(rawConstrain(s))
+}
+
+/** The word a model's author chose, or undefined when nobody chose: absent, or a malformed value. */
+export function chosenConstrainOf(s: Pick<ShardModel, 'extra'>): Constrain | undefined {
+  const raw = rawConstrain(s)
+  return raw === 'all' || raw === 'opaque' || raw === 'off' ? raw : undefined
 }
 
 /**
- * `s` with its setting at `c`: off is written as no field at all, the
- * canonical form, and `extra` goes when nothing else is in it. The same
- * object when it already says exactly that, so an untouched deploy stays
- * untouched; a malformed value is cleaned away even when it already read as
- * off.
+ * `s` with its setting at `c`, written as the word itself: OFF is `"off"`,
+ * never no field, so a deliberate OFF survives the default (§1.12). The
+ * same object when it already says exactly that, so an untouched deploy
+ * stays untouched; a malformed value is replaced.
  */
 export function withConstrain<T extends ShardModel>(s: T, c: Constrain): T {
-  const raw = s.extra?.[CONSTRAIN_FIELD]
-  if (c === 'off' ? raw === undefined : raw === c) return s
+  if (s.extra?.[CONSTRAIN_FIELD] === c) return s
   const { extra, ...rest } = s
   const kept: Array<[string, unknown]> = extra ? Object.entries(extra).filter(([k]) => k !== CONSTRAIN_FIELD) : []
-  if (c !== 'off') kept.push([CONSTRAIN_FIELD, c])
-  return (kept.length ? { ...rest, extra: Object.fromEntries(kept) } : rest) as T
+  kept.push([CONSTRAIN_FIELD, c])
+  return { ...rest, extra: Object.fromEntries(kept) } as T
+}
+
+/**
+ * `s` as it publishes: its author's word kept, and OPAQUE written for a shard
+ * whose author never chose (a new one, one published before the default, a
+ * kit piece or an import without the field). The same object when it already
+ * carries a word. Never for an avatar (§3.3).
+ */
+export function withAuthoredConstrain<T extends ShardModel>(s: T): T {
+  return withConstrain(s, authoredConstrainOf(s))
 }
 
 /** Whether an object can be seen through: below full opacity, or drawn as points or lines (DECK-0003 §6). */

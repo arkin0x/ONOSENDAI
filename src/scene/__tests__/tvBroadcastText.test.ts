@@ -155,21 +155,22 @@ describe('the stream\'s text sizes', () => {
                 const card = rects.find(isCard)
                 if (ci > 0) expect(card, `${at}: a card`).toBeDefined()
                 if (card) {
-                  // Across the chiron, whatever the shot (review of #453: over a trip it ran into the clock or the minimap).
-                  expect(inside(card, chironGround), `${at}: card ${JSON.stringify(card)} off the chiron ${JSON.stringify(chironGround)}`).toBe(true)
+                  // At the top, never on the chiron (arkinox, 2026-10-23: "I don't like it appearing over the chiron"; scene/tvCard).
+                  expect(card.y1, `${at}: card ${JSON.stringify(card)} on the chiron ${JSON.stringify(chironGround)}`).toBeLessThan(chironGround.y0)
                   expect(inside(card, frame), `${at}: card ${JSON.stringify(card)}`).toBe(true)
-                  if (panel) expect(meets(card, panel), `${at}: card over the panel`).toBe(false)
+                  // Never over what a panel shows: at most on its top border, where the panel fills its room (scene/tvCard fitAbove).
+                  if (panel && meets(card, panel)) expect(card.y1, `${at}: card over the panel`).toBeLessThanOrEqual(panel.y0 + 14 * scale * Math.min(1.35, Math.max(0.9, w / 1400)) * broadcastScale(Math.min(1.35, Math.max(0.9, w / 1400)), w, 1.35) + 0.5)
                   const npLabel = texts.find((t) => t.text.includes('NOW PLAYING'))
                   const np = npLabel && grounds.find((r) => r.x0 <= npLabel.box.x0 && r.x1 >= npLabel.box.x0 && r.y0 <= npLabel.y && r.y1 >= npLabel.y)
                   if (np) expect(meets(card, np), `${at}: card ${JSON.stringify(card)} over NOW PLAYING ${JSON.stringify(np)}`).toBe(false)
-                  // Its words: drawn straight after its ground (fitted to the chiron, they may end in an ellipsis).
+                  // Its words: drawn straight after its ground.
                   const words = texts.find((t) => t.seq === card.seq + 1)!
                   expect(words, `${at}: card words`).toBeDefined()
                   expect(inside(words.box, { ...card, y0: card.y0 - words.size, y1: card.y1 + words.size }), `${at}: card words`).toBe(true)
                   // LATER keeps its word: its largest unit, never cut.
                   if (!cardState.meanwhile) expect(words.text, at).toMatch(/^▶▶ \d+ \w+( \d+ \w+)? LATER$/)
                 }
-                // Outside the panel, no word meets another (the card goes over the chiron, solid, with the larger text).
+                // Outside the panel, no word meets another.
                 const rest = outside.filter((t) => t.text !== '▌')
                 for (let i = 0; i < rest.length; i++) {
                   for (let j = i + 1; j < rest.length; j++) {

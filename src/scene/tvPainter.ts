@@ -33,6 +33,7 @@ import { watchingWords } from '../lib/tv/watching'
 import type { Census, ChainTimes } from '../lib/tv/stats'
 import type { Position } from '../lib/space'
 import { trackDrawing, type DirtyRect, type DrawTracker } from './drawTracker'
+import { CARD_CLEAR_PX, CARD_RISE, MAP_REACH, fitAbove, placeCard, type CardPlace } from './tvCard'
 
 /** The face every word on the tube is set in. */
 export const TV_FONT = "'Monaspace Argon', ui-monospace, monospace"
@@ -145,6 +146,19 @@ export function skipWords(seconds: number): string {
     }
   }
   return parts.join(' ')
+}
+
+/**
+ * What a cut's card says, if it has one: MEANWHILE, or LATER after a minute
+ * or more of dead air; and, where that is too long for its place, LATER with
+ * its largest unit only ("23 HOURS LATER"), never cut short of LATER.
+ */
+function cardText(p: TvPicture): { full: string; short: string } | null {
+  if (p.status !== 'playing') return null
+  if (p.meanwhile) return { full: '◀◀ MEANWHILE', short: '◀◀ MEANWHILE' }
+  if (p.skipped < 60) return null
+  const span = skipWords(p.skipped)
+  return { full: `▶▶ ${span} LATER`, short: `▶▶ ${span.split(' ').slice(0, 2).join(' ')} LATER` }
 }
 
 /** What the tube shows, read from the store and the profiles each paint. */
@@ -657,25 +671,48 @@ export class TvPainter {
 
     // Beside the clock it keeps off the chiron, and on a phone, where NOW
     // PLAYING spans the width over the chiron, off that too (review of #393).
-    // With the stream's larger text, a LATER or MEANWHILE card goes over the
-    // chiron rather than above it, so the panel has that room too.
+    // The room above the chiron was a LATER or MEANWHILE card's; the card is
+    // at the top now, and the room is kept so the panels lie as they did.
     const cardRoom = (bigInset ? 14 : 50) * s
     const sideBottom = (narrow || (big && !row)) && this.npRect ? Math.min(chironTop - cardRoom, npTop - 6 * s) : chironTop - cardRoom
     // A panel under the minimap (on a square stream), its room the less for
-    // it, keeps clear of a LATER or MEANWHILE card's backing too, which
-    // starts 56 px over the floor (review of #447: a comment's panel reached 50).
+    // it (review of #447: a comment's panel reached 50).
     const segmentFloor = floor - (bigInset ? 14 : underMap ? 60 : 50) * s
-    part('segment')
-    if (item && panel) this.segment(item, p.shot!.length, a, W, segmentTop + 14 * s, segmentFloor, sideBottom, MX, MY, (big ? colLeft : W - MX - lw) - 16 * s, bigInset ? MX : MX + mapSize + 16 * s, s, narrow, now)
 
-    // LATER and MEANWHILE, after the cut's transition; under an inset's
-    // panel, or with the stream's larger text across the chiron, solid.
+    // LATER and MEANWHILE: top centre, between the minimap and the logo's
+    // column, or just under them where that gap is too narrow (scene/tvCard;
+    // arkinox, 2026-10-23: "I don't like it appearing over the chiron").
+    // Placed for the whole shot that has one, so a panel keeps under it from
+    // the start and never moves when it goes. A panel gives the card no more
+    // than a smaller model: never fewer or smaller words.
+    const cardWords = cardText(p)
+    const mapReach = bigInset ? 0 : mapSize * (0.5 + MAP_REACH)
+    const cardAt = cardWords && placeCard(cardWords.full, cardWords.short, {
+      width: W,
+      left: bigInset ? MX : MX + mapReach,
+      right: colLeft,
+      top: MY,
+      rowBottom: Math.max(MY + mapReach, clockBottom),
+      margin: MX,
+      s,
+      px: (narrow ? 14 : 18) * s,
+    }, (text, px) => {
+      ctx.font = `700 ${px}px ${TV_FONT}`
+      return ctx.measureText(text).width
+    })
+    part('segment')
+    const shown = item && panel ? this.segment(item, p.shot!.length, a, W, segmentTop + 14 * s, segmentFloor, sideBottom, MX, MY, (big ? colLeft : W - MX - lw) - 16 * s, bigInset ? MX : MX + mapSize + 16 * s, s, narrow, now, cardAt ? cardAt.y + cardAt.h + CARD_CLEAR_PX * s : 0) : null
+
+    // The card itself, after the cut's transition. Over a panel that could
+    // not move down far enough to clear it (it fills its room: the stream's
+    // larger text, a phone on its side), the card rises into the top margin
+    // to end above the panel or, failing that, on its top border, never over
+    // what the panel shows; and only then shrinks (tvCard fitAbove).
     part('card')
-    // With the larger text, every card goes across the chiron, centred on it
-    // and kept within it: centred on the frame it reached NOW PLAYING, and
-    // over a trip the clock or a square frame's minimap (review of #453).
-    const onChiron = big && chironTop < tickY
-    this.card(p, onChiron ? MX + chironW / 2 : W / 2, s, narrow, onChiron ? chironTop + chironH / 2 + 6 * s : inset ? floor - 34 * s : H * 0.34, now, onChiron ? chironW : null)
+    const card = cardAt && shown && shown.x < cardAt.x + cardAt.w && cardAt.x < shown.x + shown.w
+      ? fitAbove(cardAt, [shown.y - CARD_CLEAR_PX * s, shown.y + shown.pad - 8 * s], cardAt.inRow ? MY * CARD_RISE : cardAt.y)
+      : cardAt
+    if (card) this.card(p, card, now)
 
     // TUNING, END OF TAPE, NO SIGNAL.
     part('status')
@@ -1254,31 +1291,31 @@ export class TvPainter {
     ctx.restore()
   }
 
-  /** LATER or MEANWHILE, centred on `cx`; given `within`, solid and no wider than that (across the chiron). */
-  private card(p: TvPicture, cx: number, s: number, narrow: boolean, y: number, now: number, within: number | null = null): void {
-    if (p.status !== 'playing') return
-    const text = p.meanwhile ? '◀◀ MEANWHILE' : p.skipped >= 60 ? `▶▶ ${skipWords(p.skipped)} LATER` : null
-    if (!text) return
+  /** LATER or MEANWHILE, where scene/tvCard put it; solid with the stream's larger text, as it was. */
+  private card(p: TvPicture, at: CardPlace, now: number): void {
     const t = (now - p.cutAt - CUT_MS) / CARD_MS
     if (t < 0 || t > 1) return
     const ctx = this.ctx
     ctx.globalAlpha = t < 0.08 ? t / 0.08 : t > 0.8 ? (1 - t) / 0.2 : 1
-    ctx.font = `700 ${(narrow ? 14 : 18) * s}px ${TV_FONT}`
+    ctx.font = `700 ${at.px}px ${TV_FONT}`
     ctx.textAlign = 'center'
-    // Too long for the chiron, LATER keeps its largest unit ("23 HOURS
-    // LATER") rather than lose the word LATER to an ellipsis.
-    const short = !p.meanwhile ? `▶▶ ${skipWords(p.skipped).split(' ').slice(0, 2).join(' ')} LATER` : text
-    const words = within === null || ctx.measureText(text).width <= within - 28 * s ? text : fit(ctx, short, within - 28 * s)
+    // Under the top row on a very narrow frame its words may still need cutting.
+    const words = at.inRow ? at.words : fit(ctx, at.words, at.maxWords)
     const tw = ctx.measureText(words).width
-    ctx.fillStyle = within !== null ? 'rgba(2, 12, 20, 0.94)' : 'rgba(0, 0, 0, 0.5)'
-    ctx.fillRect(cx - tw / 2 - 14 * s, y - 22 * s, tw + 28 * s, 32 * s)
+    ctx.fillStyle = this.big ? 'rgba(2, 12, 20, 0.94)' : 'rgba(0, 0, 0, 0.5)'
+    ctx.fillRect(at.cx - tw / 2 - at.pad, at.y, tw + 2 * at.pad, at.h)
     ctx.fillStyle = FG
-    ctx.fillText(words, cx, y)
+    ctx.fillText(words, at.cx, at.baseline)
     ctx.globalAlpha = 1
   }
 
-  /** The panel of a segment shown in an inset: a sealed bag, an object, a new avatar, a comment. */
-  private segment(item: TapeItem, shotLength: number, a: TvAssets, W: number, top: number, bottom: number, sideBottom: number, MX: number, MY: number, sideRight: number, sideLeft: number, s: number, narrow: boolean, now: number): void {
+  /**
+   * The panel of a segment shown in an inset: a sealed bag, an object, a new
+   * avatar, a comment; and where it went, with its padding. `keepUnder`: the
+   * bottom of a LATER or MEANWHILE card at the top (scene/tvCard), which it
+   * keeps under as that file says.
+   */
+  private segment(item: TapeItem, shotLength: number, a: TvAssets, W: number, top: number, bottom: number, sideBottom: number, MX: number, MY: number, sideRight: number, sideLeft: number, s: number, narrow: boolean, now: number, keepUnder = 0): FlatRect & { pad: number } {
     const ctx = this.ctx
     // Seconds since the segment came on, after its cut, by the shot's own
     // clock (the shot's length, which is the item's unless a test cued it longer).
@@ -1345,38 +1382,50 @@ export class TvPainter {
     // happened"). On a short screen (a phone on its side) that strip is too
     // narrow: the panel goes up beside the clock instead, short of the
     // logo's column, side by side.
-    const fullW = Math.min(760 * s, W - 2 * MX)
-    let room = Math.max(0, bottom - top)
-    let fitted = fitPanel(fullW, narrow || ad, room)
-    let px = (W - fullW) / 2
-    let top0 = top
-    // Also when it only fit by cutting the quote: side by side may show all
-    // of it (review of #375: one line at 915x412, seven at 844x390).
-    if (!fits(fitted.ph, room) || fitted.cut) {
-      // Between the minimap and the logo's column.
-      const sideW = Math.min(760 * s, sideRight - sideLeft)
-      // Beside the clock, left of the logo's column: never under NOW
-      // PLAYING, so the chiron is its floor (review of #382), or on a phone,
-      // where NOW PLAYING spans the width over the chiron, NOW PLAYING
-      // (sideBottom; review of #393).
-      const sideRoom = Math.max(0, sideBottom - MY)
-      const beside = fitPanel(sideW, false, sideRoom)
-      // With the stream's larger text neither may fit: then the one that
-      // overflows least, and one that fits always over one that does not
-      // (the panel had stayed under the clock, over the chiron).
-      const fitsHere = fits(fitted.ph, room)
-      const fitsBeside = fits(beside.ph, sideRoom)
-      const better = this.big && fitsHere !== fitsBeside
-        ? fitsBeside
-        : this.big && !fitsHere
-          ? beside.ph - sideRoom < fitted.ph - room
-          : fitted.cut
-            ? fitsBeside && beside.lines.length > fitted.lines.length
-            : fitsBeside || beside.ph < fitted.ph
-      if (better) { fitted = beside; px = sideLeft; room = sideRoom; top0 = MY }
+    const place = (top: number, MY: number): { fitted: ReturnType<typeof layout>; px: number; room: number; top0: number } => {
+      const fullW = Math.min(760 * s, W - 2 * MX)
+      let room = Math.max(0, bottom - top)
+      let fitted = fitPanel(fullW, narrow || ad, room)
+      let px = (W - fullW) / 2
+      let top0 = top
+      // Also when it only fit by cutting the quote: side by side may show all
+      // of it (review of #375: one line at 915x412, seven at 844x390).
+      if (!fits(fitted.ph, room) || fitted.cut) {
+        // Between the minimap and the logo's column.
+        const sideW = Math.min(760 * s, sideRight - sideLeft)
+        // Beside the clock, left of the logo's column: never under NOW
+        // PLAYING, so the chiron is its floor (review of #382), or on a phone,
+        // where NOW PLAYING spans the width over the chiron, NOW PLAYING
+        // (sideBottom; review of #393).
+        const sideRoom = Math.max(0, sideBottom - MY)
+        const beside = fitPanel(sideW, false, sideRoom)
+        // With the stream's larger text neither may fit: then the one that
+        // overflows least, and one that fits always over one that does not
+        // (the panel had stayed under the clock, over the chiron).
+        const fitsHere = fits(fitted.ph, room)
+        const fitsBeside = fits(beside.ph, sideRoom)
+        const better = this.big && fitsHere !== fitsBeside
+          ? fitsBeside
+          : this.big && !fitsHere
+            ? beside.ph - sideRoom < fitted.ph - room
+            : fitted.cut
+              ? fitsBeside && beside.lines.length > fitted.lines.length
+              : fitsBeside || beside.ph < fitted.ph
+        if (better) { fitted = beside; px = sideLeft; room = sideRoom; top0 = MY }
+      }
+      return { fitted, px, room, top0 }
     }
+    // A LATER or MEANWHILE card at the top (scene/tvCard): the panel keeps
+    // under it, in the room left under it, when it shows all it would
+    // without the card (a smaller model is fine, fewer or smaller words are
+    // not); else in its own room, as low as that lets it go (`py`), and the
+    // card gives way (tvCard fitAbove).
+    const free = place(top, MY)
+    const under = keepUnder > 0 ? place(Math.max(top, keepUnder), Math.max(MY, keepUnder)) : null
+    const keeps = under !== null && fits(under.fitted.ph, under.room) && under.fitted.lines.length >= free.fitted.lines.length && under.fitted.quoteSize >= free.fitted.quoteSize && !(under.fitted.cut && !free.fitted.cut)
+    const { fitted, px, room, top0 } = keeps ? under : free
     const { stage, pw, stacked, textX, textW, lines, quoteSize, ph } = fitted
-    const py = top0 + Math.max(0, (room - ph) / 2)
+    const py = Math.max(top0 + Math.max(0, (room - ph) / 2), Math.min(keepUnder, top0 + room - ph))
     ctx.globalAlpha = ramp(t, 0, 0.5)
     const grad = ctx.createLinearGradient(px, py, px + pw, py + ph)
     grad.addColorStop(0, 'rgba(0, 40, 56, 0.92)')
@@ -1471,6 +1520,7 @@ export class TvPainter {
       ctx.fillText(this.big ? credit.replace(/…+$/u, '…') : credit, tx, ty + lines.length * quoteSize * 1.45 + 18 * s)
     }
     ctx.globalAlpha = 1
+    return { x: px, y: py, w: pw, h: ph, pad }
   }
 
   /**

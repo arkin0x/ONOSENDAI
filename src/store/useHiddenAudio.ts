@@ -469,8 +469,11 @@ export function wavDecodedBytes(b: Uint8Array, ctxRate: number): number | null {
       fmt = { channels, rate, bits }
     } else if (ascii(at, 'data')) {
       if (!fmt) return null
-      // A data size past the file is read as the file's: what is there is all that can decode.
-      const data = Math.min(size, b.length - (at + 8))
+      // Whatever the chunk claims (a decoder may read a size of 0, or any
+      // size, to the end of the file), the most that can decode is every
+      // byte left in the file: the bound is taken from that.
+      void size
+      const data = b.length - (at + 8)
       const frames = Math.floor(data / ((fmt.bits / 8) * fmt.channels))
       return Math.ceil(frames * (ctxRate / fmt.rate)) * fmt.channels * 4
     }

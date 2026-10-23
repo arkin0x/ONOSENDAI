@@ -148,7 +148,8 @@ function childIndex(tree: FolderTree): Map<string | null, Folder[]> {
     if (list) list.push(f)
     else index.set(p, [f])
   }
-  for (const list of index.values()) list.sort(byName)
+  // Frozen: childrenOf hands these out, and they are shared by every caller of the same tree.
+  for (const [p, list] of index) index.set(p, Object.freeze(list.sort(byName)) as Folder[])
   indexes.set(tree, index)
   return index
 }

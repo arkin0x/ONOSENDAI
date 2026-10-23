@@ -69,6 +69,6 @@ describe('a shard list with folders', () => {
   })
 
   it('has no em dash in its copy', () => {
-    expect(render()).not.toContain('—')
+    expect(render()).not.toContain('\u2014')
   })
 })

@@ -145,9 +145,12 @@ export const useShardFolders = create<ShardFoldersState>((set, get) => {
     const tree = applyOp(get().tree, op)
     // Refused or already so in the tree as loaded: nothing to write. While it
     // loads, the stored tree may differ, so the op goes to it regardless; and
-    // a filing or a fold always goes, since another tab may have changed
-    // what this one still shows (review of PR 449).
-    if (tree === get().tree && get().storage !== 'loading' && op.op !== 'assign' && op.op !== 'collapse') return tree
+    // a path, a filing or a fold always goes, since another tab may have
+    // changed what this one still shows: a path this tab sees whole may have
+    // been deleted there, and goes to the stored tree to be made again under
+    // the same ids (review of PR 449).
+    const always = op.op === 'path' || op.op === 'assign' || op.op === 'collapse'
+    if (tree === get().tree && get().storage !== 'loading' && !(always && get().storage === 'indexeddb')) return tree
     queued.push(entry)
     if (tree !== get().tree) set({ tree })
     void then(async () => {
@@ -163,6 +166,7 @@ export const useShardFolders = create<ShardFoldersState>((set, get) => {
         console.warn(`[folders] could not save a folder change: ${describeError(err)}`)
         // Show what is stored rather than a change that was not kept, and
         // open the database again for the next one.
+        d?.close()
         db = null
         failed = true
       } finally {

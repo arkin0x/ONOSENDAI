@@ -120,6 +120,25 @@ describe('shard folders in IndexedDB', () => {
     expect(folderOf((await boot()).useShardFolders.getState().tree, 'oak')).toBeNull()
   })
 
+  it('makes a path again when another tab deleted it while this tab still showed it', async () => {
+    const tabA = await boot()
+    tabA.createFolderPath(['kit', 'forest'])
+    await tabA.useShardFolders.getState().flush()
+    const tabB = await boot()
+    const kit = Object.values(tabA.useShardFolders.getState().tree.folders).find((f) => f.name === 'kit')!.id
+    tabA.useShardFolders.getState().deleteFolder(kit)
+    const forest = Object.values(tabA.useShardFolders.getState().tree.folders).find((f) => f.name === 'forest')!.id
+    tabA.useShardFolders.getState().deleteFolder(forest)
+    await tabA.useShardFolders.getState().flush()
+    // Tab B has not reread: it still shows kit/forest, and files oak there.
+    const id = tabB.createFolderPath(['kit', 'forest'])!
+    tabB.assignToFolder('oak', id)
+    await tabB.useShardFolders.getState().flush()
+    const t = (await boot()).useShardFolders.getState().tree
+    expect(pathOf(t, folderOf(t, 'oak'))).toEqual(['kit', 'forest'])
+    expect(Object.keys(t.alias)).toHaveLength(0)
+  })
+
   it('shows a change at once, and keeps one made before the load answered', async () => {
     const a = await boot()
     a.createFolderPath(['stored'])

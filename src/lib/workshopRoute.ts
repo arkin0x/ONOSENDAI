@@ -25,6 +25,7 @@ import { useShardFolders } from '../store/useShardFolders'
 function openFromAddress(): () => void {
   const chosen = useWorkshop.getState().currentId
   useWorkshop.getState().openWorkshop()
+  // In development React starts the app twice (StrictMode): the second start finds a model open, so the move happens only in production.
   if (chosen !== null || useShardFolders.getState().storage !== 'loading') return () => undefined
   const picked = useWorkshop.getState().currentId
   const off = useShardFolders.subscribe((s) => {

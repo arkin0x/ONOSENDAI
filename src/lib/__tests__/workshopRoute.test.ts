@@ -81,6 +81,16 @@ describe('the model a link opens, deploys counted (useWorkshop newestId)', () =>
     expect(w().currentId).toBe('lamp')
     closed.stop()
   })
+
+  it('stays on another model chosen meanwhile', () => {
+    useWorkshop.setState({ shards: [at('lamp', 3_000), at('chair', 1_000), at('pot', 500)] })
+    const { stop } = page('/workshop')
+    expect(w().currentId).toBe('lamp')
+    w().select('pot')
+    read({ chair: 5_000 })
+    expect(w().currentId).toBe('pot')
+    stop()
+  })
 })
 
 describe('startWorkshopRoute', () => {

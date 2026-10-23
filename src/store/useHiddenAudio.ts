@@ -367,10 +367,10 @@ export async function startWorld(itemKey: string, audio: AudioItem, onStarted?: 
     const blob = await openAudio(audio)
     if (sessions.get(key) !== mine) return
     // A short loop is decoded whole and played from a buffer: no gap at its
-    // seam, and a buffer needs no tap of its own once sound is out. Short in
-    // TIME, not bytes: a tiny file can be a long one (review of #468), so its
-    // length is read first, and a decode that comes out large anyway streams.
-    const buffer = audio.loop && blob.size <= DECODE_WHOLE_BYTES ? await shortLoopBuffer(blob) : null
+    // seam, and a buffer needs no tap of its own once sound is out. Short by
+    // a size whose worst case is bounded (DECODE_WHOLE_BYTES): no header can
+    // be trusted to say how long a file is (review of #468).
+    const buffer = audio.loop && decodeWholeOk(audio.mime, blob.size) ? await shortLoopBuffer(blob) : null
     if (sessions.get(key) !== mine) return
     if (buffer) {
       const node = new PositionalAudio(l)
@@ -424,55 +424,44 @@ export async function startWorld(itemKey: string, audio: AudioItem, onStarted?: 
 }
 
 /**
- * When a loop is decoded whole (lib/audioWorld's loudest few sound at once,
- * each decoded loop held while it plays): its file at most this size
- * (decrypted), at most DECODE_WHOLE_SECONDS long by its own metadata, and
- * at most DECODE_WHOLE_MAX_PCM bytes and two channels once decoded. Anything
- * else streams. So the most a decoded loop can hold is the PCM budget, never
- * what a long, low-bitrate file would decode to.
+ * When a loop is decoded whole: only when its file (decrypted) is at most
+ * DECODE_WHOLE_BYTES, or DECODE_WHOLE_WAV_BYTES for PCM WAV (decodeWholeOk). Nothing in a file can be trusted to say how long it
+ * is (a hider writes the headers), and decodeAudioData allocates the whole
+ * buffer before anything can refuse it, so the bound is the file's size
+ * against the lowest bitrate a decoder plays: 64 KB at 6 kbps (Opus's floor;
+ * MP3's is 8) is about 87 s, which at 48 kHz in stereo float is about
+ * 33 MB. That is the most one decoded loop can hold, and at most MAX_VOICES
+ * sound at once. A loop that size at an ordinary bitrate is a few seconds:
+ * the water trickles and drones it is for. Longer loops stream, with a small
+ * seam where they wrap. After decoding, more than two channels or more than
+ * DECODE_WHOLE_MAX_PCM bytes is still let go and streamed.
  */
-export const DECODE_WHOLE_BYTES = 1024 * 1024
-export const DECODE_WHOLE_SECONDS = 60
-export const DECODE_WHOLE_MAX_PCM = 32 * 1024 * 1024
+export const DECODE_WHOLE_BYTES = 64 * 1024
+/** PCM WAV grows at most about 24x when decoded (8-bit mono at 8 kHz to float stereo at 48 kHz), so 1 MB of it is bounded too. */
+export const DECODE_WHOLE_WAV_BYTES = 1024 * 1024
+export const DECODE_WHOLE_MAX_PCM = 40 * 1024 * 1024
 
-/** How long a file is, by its metadata, read from an element (cheap: nothing is decoded); null when it cannot tell in a few seconds. */
-export function probeDuration(blob: Blob, waitMs = 3000): Promise<number | null> {
-  if (typeof Audio === 'undefined') return Promise.resolve(null)
-  const url = URL.createObjectURL(blob)
-  const el = new Audio()
-  return new Promise<number | null>((resolve) => {
-    let done = false
-    const finish = (d: number | null): void => {
-      if (done) return
-      done = true
-      clearTimeout(timer)
-      el.removeAttribute('src')
-      URL.revokeObjectURL(url)
-      resolve(d)
-    }
-    const timer = setTimeout(() => finish(null), waitMs)
-    el.addEventListener('loadedmetadata', () => finish(Number.isFinite(el.duration) ? el.duration : null))
-    el.addEventListener('error', () => finish(null))
-    el.preload = 'metadata'
-    el.src = url
-  })
+/** Whether a file's worst case decoded fits the budget by its size alone: PCM WAV up to 1 MB, any other format up to 64 KB. */
+export function decodeWholeOk(mime: string, bytes: number): boolean {
+  const m = mime.toLowerCase().split(';')[0].trim()
+  const wav = m === 'audio/wav' || m === 'audio/x-wav' || m === 'audio/wave'
+  return bytes <= (wav ? DECODE_WHOLE_WAV_BYTES : DECODE_WHOLE_BYTES)
 }
+
+/** Decodes run one at a time, so the peak is one decode, never MAX_VOICES at once. */
+let decoding: Promise<unknown> = Promise.resolve()
 
 /** Whether a decoded buffer is within budget: two channels at most, DECODE_WHOLE_MAX_PCM bytes at most. */
 export function decodedFits(b: Pick<AudioBuffer, 'length' | 'numberOfChannels'>): boolean {
   return b.numberOfChannels <= 2 && b.length * b.numberOfChannels * 4 <= DECODE_WHOLE_MAX_PCM
 }
 
-/**
- * A short loop's decoded buffer, or null to stream it: too long by its
- * metadata (or its length unknown), or too large once decoded. Throws when
- * the browser cannot decode it at all.
- */
-async function shortLoopBuffer(blob: Blob): Promise<AudioBuffer | null> {
-  const seconds = await probeDuration(blob)
-  if (seconds === null || seconds > DECODE_WHOLE_SECONDS) return null
-  const buffer = await decodeWhole(blob)
-  return decodedFits(buffer) ? buffer : null
+/** A short loop's decoded buffer, or null to stream it. Throws when the browser cannot decode it at all. */
+function shortLoopBuffer(blob: Blob): Promise<AudioBuffer | null> {
+  const run = decoding.then(() => decodeWhole(blob)).then((buffer) => (decodedFits(buffer) ? buffer : null))
+  // The next decode waits for this one, whether it succeeds or not.
+  decoding = run.catch(() => undefined)
+  return run
 }
 
 /** Decode a file into a buffer on the shared context; the callback form, which every Safari has. Throws when it cannot. */

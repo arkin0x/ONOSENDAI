@@ -32,7 +32,7 @@ import type { AudioItem } from '../../lib/audioItem'
 import { sha256Hex } from '../../lib/blossom'
 import { forgetAudioContext } from '../../lib/audioContext'
 import { toneWav } from '../../lib/__tests__/audioFixture'
-import { DECODE_WHOLE_MAX_PCM, DECODE_WHOLE_SECONDS, decodedFits, startWorld, stopAllAudio, useHiddenAudio, worldFailed, worldFailure, worldKey } from '../useHiddenAudio'
+import { DECODE_WHOLE_BYTES, DECODE_WHOLE_MAX_PCM, decodeWholeOk, decodedFits, startWorld, stopAllAudio, useHiddenAudio, worldFailed, worldFailure, worldKey } from '../useHiddenAudio'
 
 /** Any Web Audio node or param: every property is another, every call returns another, numbers are 0. */
 function anything(): unknown {
@@ -149,35 +149,57 @@ describe('a short loop, decoded whole', () => {
     expect(streaming()).toHaveLength(0)
   })
 
-  it('is decoded whole only when it is a loop, short in time by its own metadata, and small once decoded; anything else streams', async () => {
+  it('is decoded whole only when it is a loop, small enough that its worst case is bounded, and small once decoded; anything else streams', async () => {
     FakeAudio.allowed = true
     // A one-shot gains nothing from it.
     await startWorld('o1', { ...shortAudio, loop: false })
     await flush()
     expect(streaming()).toHaveLength(1)
-    // A tiny file can be a long one: past DECODE_WHOLE_SECONDS it streams.
-    FakeAudio.metaSeconds = DECODE_WHOLE_SECONDS + 1
-    await startWorld('o2', shortAudio)
+    // A loop past DECODE_WHOLE_BYTES streams, whatever its headers say.
+    await startWorld('o2', audio)
     await flush()
     expect(streaming()).toHaveLength(2)
-    // Its length unknown, it streams.
-    FakeAudio.metaSeconds = null
-    await startWorld('o3', shortAudio)
-    await new Promise((r) => setTimeout(r, 3100))
-    await flush()
-    expect(streaming()).toHaveLength(3)
-    // Short by its metadata but large once decoded, or more than two channels: it streams.
-    FakeAudio.metaSeconds = 1
+    // Small, but large once decoded, or more than two channels: it streams.
     FakeContext.decoded = { length: DECODE_WHOLE_MAX_PCM, numberOfChannels: 1 }
     await startWorld('o4', shortAudio)
     await flush()
-    expect(streaming()).toHaveLength(4)
+    expect(streaming()).toHaveLength(3)
     FakeContext.decoded = { length: 1000, numberOfChannels: 6 }
     await startWorld('o5', shortAudio)
     await flush()
-    expect(streaming()).toHaveLength(5)
+    expect(streaming()).toHaveLength(4)
     expect(decodedFits({ length: 1000, numberOfChannels: 2 })).toBe(true)
-  }, 10_000)
+    expect(decodeWholeOk('audio/mpeg', 64 * 1024)).toBe(true)
+    expect(decodeWholeOk('audio/mpeg', 64 * 1024 + 1)).toBe(false)
+    expect(decodeWholeOk('audio/wav', 1024 * 1024)).toBe(true)
+    expect(decodeWholeOk('audio/x-wav; codecs=1', 1024 * 1024 + 1)).toBe(false)
+    // The worst case the size cap allows: 6 kbps, 48 kHz, stereo float.
+    const worstSeconds = (DECODE_WHOLE_BYTES * 8) / 6000
+    expect(worstSeconds * 48_000 * 2 * 4).toBeLessThan(DECODE_WHOLE_MAX_PCM)
+  })
+
+  it('decodes one file at a time: the peak is one decode, never several', async () => {
+    let inFlight = 0
+    let most = 0
+    const proto = FakeContext.prototype as unknown as { decodeAudioData: (b: ArrayBuffer, ok: (x: unknown) => void, fail: () => void) => Promise<unknown> }
+    const original = proto.decodeAudioData
+    proto.decodeAudioData = function (_b, ok) {
+      inFlight++
+      most = Math.max(most, inFlight)
+      setTimeout(() => { inFlight--; ok(Object.assign(Object.create(anything() as object), { length: 8000, numberOfChannels: 1 })) }, 20)
+      return new Promise(() => {})
+    }
+    try {
+      FakeAudio.allowed = true
+      await Promise.all(['d1', 'd2', 'd3', 'd4'].map((k) => startWorld(k, shortAudio)))
+      await new Promise((r) => setTimeout(r, 150))
+      await flush()
+      expect(most).toBe(1)
+      for (const k of ['d1', 'd2', 'd3', 'd4']) expect(useHiddenAudio.getState().entries[worldKey(k)]?.phase).toBe('playing')
+    } finally {
+      proto.decodeAudioData = original
+    }
+  })
 
   it('that this browser cannot decode is a failure of the item, and waits out its pause', async () => {
     FakeContext.decodable = false

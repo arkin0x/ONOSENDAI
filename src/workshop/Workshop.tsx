@@ -29,7 +29,8 @@ import { Explanation } from '../hud/Explanation'
 import { DIVISIONS, MAX_EXTENT, MAX_UNIT, MIN_EXTENT, MODES, OPACITY_FLOOR, TICKS_PER_UNIT, neededExtent, rgbToHex, ticksOf, toPayload, unitsLabel, type ShardMode , type ShardModel} from 'sno-core/shards'
 import { opacityPercent, stepOpacity } from '../lib/opacityStep'
 import { stepDivision } from './divisions'
-import { IMPORT_ACCEPT, IMPORT_FORMATS_LABEL } from 'sno-core/importFile'
+import { IMPORT_FORMATS_LABEL } from 'sno-core/importFile'
+import { IMPORT_PICKER_ACCEPT, isZipFile } from '../lib/shardZip'
 import { importFitFor } from 'sno-core/meshToShard'
 import { BUILT_IN } from 'sno-core/snoPalette'
 import { importFiles } from '../lib/meshImport'
@@ -655,7 +656,7 @@ export function Workshop(): JSX.Element | null {
     // A zip is bulk import: every shard file in it a new shard of yours (workshop/ZipImport).
     // While the import's list is open, a drop on it (React carries a portal's events here) changes nothing.
     if (useShardImport.getState().open) return
-    const zips = files.filter(isZip)
+    const zips = files.filter(isZipFile)
     if (zips.length) {
       if (zips.length > 1 || files.length > 1) { say('Import one zip at a time, on its own.'); return }
       void useShardImport.getState().openZip(zips[0])
@@ -673,7 +674,6 @@ export function Workshop(): JSX.Element | null {
       setImporting(false)
     }
   }
-  const isZip = (f: File): boolean => /\.zip$/i.test(f.name) || f.type === 'application/zip' || f.type === 'application/x-zip-compressed'
   const draggingFiles = (e: React.DragEvent): boolean => Array.from(e.dataTransfer.types).includes('Files')
 
   const ToolIcon = TOOL_ICON[tool]
@@ -691,7 +691,7 @@ export function Workshop(): JSX.Element | null {
         <Bench />
       </div>
       {/* IMPORT's picker, kept mounted so a panel closing cannot drop its answer. */}
-      <input ref={fileInput} type="file" accept={`${IMPORT_ACCEPT},.zip`} multiple hidden aria-hidden tabIndex={-1} onChange={(e) => { const list = e.currentTarget.files; void importFromFiles(list ? Array.from(list) : null); e.currentTarget.value = '' }} />
+      <input ref={fileInput} type="file" accept={IMPORT_PICKER_ACCEPT} multiple hidden aria-hidden tabIndex={-1} onChange={(e) => { const list = e.currentTarget.files; void importFromFiles(list ? Array.from(list) : null); e.currentTarget.value = '' }} />
       {dropping && <div className="workshop__drop" aria-hidden>DROP TO IMPORT</div>}
       <Intro />
       <Toast />

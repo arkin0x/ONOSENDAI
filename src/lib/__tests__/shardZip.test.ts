@@ -10,12 +10,15 @@
  * depth limits mark rows before a byte is read; and duplicate matching finds
  * your namesakes (in a folder when folders exist), an earlier row of the
  * zip before them, and turns SKIP, COPY and UPDATE into one action per row.
+ * IMPORT's picker lists a zip by its type as well as its extension, beside
+ * every 3D format, and only a real zip is read as one.
  */
 import { describe, expect, it } from 'vitest'
 import type { ZipEntry } from '../zipRead'
+import { IMPORT_ACCEPT } from 'sno-core/importFile'
 import {
   NAME_MAX, ZIP_MAX_DEPTH, ZIP_MAX_ENTRY_BYTES, ZIP_MAX_SHARDS, ZIP_MAX_TOTAL_BYTES,
-  PLACEHOLDER_PUBKEY, blockedRows, cleanSegment, hasPlaceholders, offlinePicture, withoutPlaceholderHints, companionsFor, copyName, dupAction, dupKey, findDups, nameOf, planZip, refTargets, resolveRefs, splitPath, unresolved,
+  IMPORT_PICKER_ACCEPT, PLACEHOLDER_PUBKEY, ZIP_TYPES, blockedRows, cleanSegment, hasPlaceholders, offlinePicture, withoutPlaceholderHints, companionsFor, copyName, dupAction, dupKey, findDups, nameOf, planZip, refTargets, resolveRefs, splitPath, unresolved, isZipFile,
 } from '../shardZip'
 
 let nextIndex = 0
@@ -289,5 +292,32 @@ describe('duplicates', () => {
     expect(dupAction(pub, 'skip')).toEqual({ act: 'skip' })
     expect(dupAction(pub, 'update')).toEqual({ act: 'new', copyName: false })
     expect(dupAction(pub, 'copy')).toEqual({ act: 'copy' })
+  })
+})
+
+describe("IMPORT's picker", () => {
+  const accept = IMPORT_PICKER_ACCEPT.split(',')
+
+  it('lists a zip by extension and by every type a zip is labelled with', () => {
+    expect(accept).toContain('.zip')
+    for (const t of ['application/zip', 'application/x-zip-compressed', 'application/x-zip', 'multipart/x-zip']) expect(accept).toContain(t)
+  })
+
+  it('keeps every 3D format IMPORT reads, with nothing empty or repeated', () => {
+    for (const ext of IMPORT_ACCEPT.split(',')) expect(accept).toContain(ext)
+    expect(accept.every((t) => t.length > 0 && t === t.trim())).toBe(true)
+    expect(new Set(accept).size).toBe(accept.length)
+  })
+
+  it('reads as a zip any file the picker let through as one, and no 3D file', () => {
+    for (const type of ZIP_TYPES) expect(isZipFile({ name: 'kit', type })).toBe(true)
+    expect(isZipFile({ name: 'kit', type: 'multipart/x-zip' })).toBe(true)
+    expect(isZipFile({ name: 'Maze-Kit.ZIP', type: '' })).toBe(true)
+    expect(isZipFile({ name: 'cube.ply', type: '' })).toBe(false)
+    expect(isZipFile({ name: 'cube.glb', type: 'model/gltf-binary' })).toBe(false)
+    expect(isZipFile({ name: 'scene.bin', type: 'application/octet-stream' })).toBe(false)
+    // Zip containers that are one 3D object, not a kit.
+    expect(isZipFile({ name: 'room.usdz', type: 'model/vnd.usdz+zip' })).toBe(false)
+    expect(isZipFile({ name: 'part.3mf', type: 'application/vnd.ms-package.3dmanufacturing-3dmodel+xml' })).toBe(false)
   })
 })

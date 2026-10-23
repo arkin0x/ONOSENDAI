@@ -18,7 +18,7 @@
  * actions every item has.
  */
 
-import { useEffect, useState } from 'react'
+import { useEffect, useState, type ReactNode } from 'react'
 import { Copy, CopyPlus, Move3d, Rotate3d, Target, TvMinimal } from 'lucide-react'
 import { nip19 } from 'nostr-tools'
 import { regionLabel } from '../lib/loot'
@@ -55,6 +55,21 @@ const ICON = 12
 export function muteIdOf(item: Pick<WorldItem, 'lineage' | 'key' | 'event'>): string {
   const hex = (v: string | undefined): v is string => !!v && /^[0-9a-f]{64}$/.test(v)
   return hex(item.lineage) ? item.lineage : hex(item.key) ? item.key : item.event?.id ?? ''
+}
+
+/**
+ * The audio card's moderation row: MUTE THIS AUDIO and BLOCK AUTHOR, never
+ * on your own. Muting or blocking closes the card, and its sound stops with
+ * it (AudioCard).
+ */
+export function audioModeration(item: Pick<WorldItem, 'lineage' | 'key' | 'event'>, author: string, mine: boolean, close: () => void): ReactNode {
+  if (mine) return undefined
+  return (
+    <>
+      <MuteItemButton id={muteIdOf(item)} label="MUTE THIS AUDIO" onMuted={close} />
+      <BlockButton pubkey={author} onBlocked={close} />
+    </>
+  )
 }
 
 export function SecretModal(): JSX.Element | null {
@@ -153,8 +168,15 @@ export function SecretModal(): JSX.Element | null {
         ) : item.type === 'chest' && item.chest ? (
           <div className="secret__shard"><ChestBlock id={item.key} chest={item.chest} author={author} verified place={place} /></div>
         ) : item.type === 'audio' && item.audio ? (
-          // MUTE THIS ITEM and BLOCK (#464) are in the card's actions below, as for every item.
-          <AudioCard id={item.key} triggerId={item.lineage ?? item.key} audio={item.audio} />
+          // MUTE THIS AUDIO and BLOCK AUTHOR in the card's own row, by PLAY
+          // (store/useMutes): muting closes this card, and the card's sound
+          // stops with it.
+          <AudioCard
+            id={item.key}
+            triggerId={item.lineage ?? item.key}
+            audio={item.audio}
+            moderation={audioModeration(item, author, mine, close)}
+          />
         ) : (
           <div className="secret__shard">
             <span className="secret__shard-name">{item.shard?.name}</span>
@@ -223,8 +245,9 @@ export function SecretModal(): JSX.Element | null {
                   (a new id, the same d) stays muted; a LIVE LINK, whose key
                   names the bag and the entry, by the object's event id
                   (store/useMutes). */}
-              <MuteItemButton id={muteIdOf(item)} onMuted={close} />
-              <BlockButton pubkey={author} onBlocked={close} />
+              {/* Audio has them in its own card's row, above. */}
+              {item.type !== 'audio' && <MuteItemButton id={muteIdOf(item)} onMuted={close} />}
+              {item.type !== 'audio' && <BlockButton pubkey={author} onBlocked={close} />}
             </>
           )}
           {/* A thing revealed from a chest of yours is part of that chest's

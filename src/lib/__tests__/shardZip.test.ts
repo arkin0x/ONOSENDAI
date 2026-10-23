@@ -15,7 +15,7 @@ import { describe, expect, it } from 'vitest'
 import type { ZipEntry } from '../zipRead'
 import {
   NAME_MAX, ZIP_MAX_DEPTH, ZIP_MAX_ENTRY_BYTES, ZIP_MAX_SHARDS, ZIP_MAX_TOTAL_BYTES,
-  PLACEHOLDER_PUBKEY, cleanSegment, companionsFor, copyName, dupAction, dupKey, findDups, nameOf, planZip, refTargets, resolveRefs, splitPath, unresolved,
+  PLACEHOLDER_PUBKEY, blockedRows, cleanSegment, hasPlaceholders, companionsFor, copyName, dupAction, dupKey, findDups, nameOf, planZip, refTargets, resolveRefs, splitPath, unresolved,
 } from '../shardZip'
 
 let nextIndex = 0
@@ -163,6 +163,8 @@ describe('ids and references', () => {
     const loose = planZip([entry('hall.json'), entry('sub/tee.json')], 'My Kit.zip')
     expect(loose.kit).toBe('My Kit')
     expect(loose.rows.map((r) => r.id)).toEqual(['My Kit/hall', 'My Kit/sub/tee'])
+    // A second download keeps the kit.
+    expect(planZip([entry('hall.json')], 'My Kit (1).zip').rows[0].id).toBe('My Kit/hall')
     const two = planZip([entry('a/x.json'), entry('b/y.json')], 'pair.zip')
     expect(two.rows.map((r) => r.id)).toEqual(['pair/a/x', 'pair/b/y'])
   })
@@ -184,7 +186,8 @@ describe('ids and references', () => {
     ]
     expect(resolveRefs(refs, targets, me)).toEqual([
       ['a', `33331:${me}:maze-kit/forest/room`],
-      ['a', `33331:${me}:maze-kit/forest/water-high`, 'wss://hint'],
+      // The kit's relay hint is not the importer's relay: dropped.
+      ['a', `33331:${me}:maze-kit/forest/water-high`],
       ['a', other],
     ])
     expect(unresolved(refs, targets)).toEqual([])
@@ -192,6 +195,24 @@ describe('ids and references', () => {
     // At the top of a zip, a reference may name the path without the zip-name prefix.
     const loose = planZip([entry('room.json')], 'k.zip')
     expect(resolveRefs([['a', `33331:${PLACEHOLDER_PUBKEY}:room`]], refTargets(loose.rows), me)).toEqual([['a', `33331:${me}:k/room`]])
+  })
+})
+
+describe('pieces that will not exist', () => {
+  it('leaves out a row placing a piece that is not coming in, and any row placing that row, until nothing changes', () => {
+    const P = (d: string) => ['a', `33331:${PLACEHOLDER_PUBKEY}:${d}`]
+    const rows = [
+      { key: '1', id: 'k/shell', refs: [P('k/room')] },
+      { key: '2', id: 'k/room', refs: [P('k/door')] },
+      { key: '3', id: 'k/door' },
+      { key: '4', id: 'k/other', refs: [P('k/old')] },
+    ]
+    const targets = new Map([['k/shell', 'k/shell'], ['k/room', 'k/room'], ['k/door', 'k/door'], ['k/old', 'k/old']])
+    // The door is unticked: the room cannot come in, so neither can the shell. k/old is already yours.
+    const out = blockedRows(rows, targets, new Set(['k/old']), new Set(['k/shell', 'k/room', 'k/other']))
+    expect([...out]).toEqual([['2', 'k/door'], ['1', 'k/room']])
+    expect(hasPlaceholders(rows[0].refs)).toBe(true)
+    expect(hasPlaceholders([['a', `33331:${'b'.repeat(64)}:x`]])).toBe(false)
   })
 })
 
@@ -218,6 +239,8 @@ describe('duplicates', () => {
     expect(d.get('3')).toEqual({ in: 'name', ids: ['uuid-1'] })
     expect(d.get('4')).toBeNull()
     expect(d.get('5')).toEqual({ in: 'zip', first: '1' })
+    // An address your relays hold, with no shard of it here.
+    expect(findDups(rows, [], false, 'kit', new Set(['kit/forest/tee'])).get('3')).toEqual({ in: 'published', id: 'kit/forest/tee' })
   })
 
   it('with folders, a name is taken only in its own folder', () => {
@@ -241,5 +264,9 @@ describe('duplicates', () => {
     expect(dupAction(name, 'copy')).toEqual({ act: 'new', copyName: true })
     expect(dupAction(zip, 'update')).toEqual({ act: 'skip' })
     expect(dupAction(zip, 'copy')).toEqual({ act: 'copy' })
+    const pub = { in: 'published' as const, id: 'kit/x' }
+    expect(dupAction(pub, 'skip')).toEqual({ act: 'skip' })
+    expect(dupAction(pub, 'update')).toEqual({ act: 'new', copyName: false })
+    expect(dupAction(pub, 'copy')).toEqual({ act: 'copy' })
   })
 })

@@ -31,6 +31,7 @@ vi.mock('../../lib/relay', () => ({
   publishMany: vi.fn(async () => ({ ok: true, accepted: ['wss://relay.test'] })),
   query: vi.fn(async () => []),
   queryAny: vi.fn(async () => []),
+  queryEach: vi.fn(async () => [{ url: 'wss://relay.test', outcome: 'answered', events: [] }]),
   relaySet: () => ['wss://relay.test'],
   connectRelay: vi.fn(async () => true),
   authForRead: vi.fn(async () => {}),
@@ -44,7 +45,7 @@ vi.mock('../../lib/importFolders', async (importOriginal) => ({
 
 import { strToU8, zipSync } from 'fflate'
 import { folderApi } from '../../lib/importFolders'
-import { publishMany } from '../../lib/relay'
+import { publishMany, queryEach } from '../../lib/relay'
 import { useCyberspace } from '../useCyberspace'
 import { useWorkshop } from '../useWorkshop'
 import { usePublished } from '../usePublished'
@@ -102,6 +103,7 @@ beforeEach(() => {
   timing.sendDeadlineMs = 90_000
   vi.mocked(publishMany).mockClear()
   vi.mocked(publishMany).mockImplementation(async () => ({ ok: true, accepted: ['wss://relay.test'] }))
+  vi.mocked(queryEach).mockImplementation(async () => [{ url: 'wss://relay.test', outcome: 'answered', events: [] }])
   useCyberspace.setState({ signEvent: realSign })
   usePublished.setState({ ledger: {}, publishing: false, retracting: false })
   localStorage.removeItem('onosendai:published')
@@ -482,5 +484,87 @@ describe('stable ids and kit references', () => {
     expect(rowOf('Tri').error ?? null).toBeNull()
     expect(rowOf('Tri').read).toBe('ok')
     expect(rowOf('spaced').read).toBe('ok')
+  })
+})
+
+describe('addresses already yours on your relays', () => {
+  const ev = (d: string) => ({ id: 'e'.repeat(64), pubkey: useCyberspace.getState().identity.pubkey, kind: 33331, created_at: 1, tags: [['d', d]], content: '{}', sig: '' })
+
+  it('a piece whose address your relays hold is PUBLISHED: SKIP leaves it, UPDATE publishes over it', async () => {
+    vi.mocked(queryEach).mockImplementation(async () => [{ url: 'wss://relay.test', outcome: 'answered', events: [ev('maze-kit/forest/rotunda')] }])
+    await imp().openZip(kitZip())
+    expect(imp().remote).toBe('checked')
+    expect(imp().dups[rowOf('rotunda').key]).toEqual({ in: 'published', id: 'maze-kit/forest/rotunda' })
+    await imp().start()
+    expect(rowOf('rotunda').run).toBe('skipped')
+    expect(sent().map(dOf)).not.toContain('maze-kit/forest/rotunda')
+    imp().setDupMode('update')
+    await imp().retry()
+    expect(sent().map(dOf)).toContain('maze-kit/forest/rotunda')
+  })
+
+  it('when no relay answers, nothing new goes out over an unchecked address; with PUBLISH off it is still added', async () => {
+    vi.mocked(queryEach).mockImplementation(async () => [{ url: 'wss://relay.test', outcome: 'unreachable', reason: 'down', events: [] }])
+    await imp().openZip(kitZip())
+    expect(imp().remote).toBe('unknown')
+    await imp().start()
+    expect(rowOf('rotunda').run).toBe('failed')
+    expect(rowOf('rotunda').failure).toMatch(/Could not check/)
+    expect(sent()).toHaveLength(0)
+    imp().close()
+    await imp().openZip(kitZip())
+    imp().setPublish(false)
+    await imp().start()
+    expect(mine()).toHaveLength(3)
+    imp().setPublish(true)
+  })
+
+  it('another kit with the same folder name is matched by address, and SKIP (the default) leaves yours alone', async () => {
+    await imp().openZip(new File([zipSync({ 'models/chair.json': strToU8(sno('alice')) })], 'alice.zip'))
+    await imp().start()
+    imp().close()
+    vi.mocked(publishMany).mockClear()
+    await imp().openZip(new File([zipSync({ 'models/chair.json': strToU8(sno('bob', 4)) })], 'bob.zip'))
+    expect(imp().dups[rowOf('chair').key]).toEqual({ in: 'same', id: 'models/chair' })
+    await imp().start()
+    expect(sent()).toHaveLength(0)
+    expect(mine().find((x) => x.id === 'models/chair')!.vertices[1].p).toEqual([1, 0, 0])
+  })
+
+  it('a piece placing one that is unticked, or broken, does not come in', async () => {
+    const ZERO = '0'.repeat(64)
+    const shell = (targets: string[]) => JSON.stringify({ v: 2, name: 's', unit: 0, mode: 'solid', vertices: [], colors: [], faces: [], refs: targets.map((t) => ['a', `33331:${ZERO}:${t}`]), parts: targets.map((_, i) => [i, 0, 0, 0, 0, 0, 0, 0]) })
+    await imp().openZip(kitZip({ 'maze-kit/forest/a.json': shell(['maze-kit/forest/rotunda']), 'maze-kit/forest/b.json': shell(['maze-kit/extras/broken']) }))
+    expect(rowOf('b').read).toBe('error')
+    imp().toggle(rowOf('rotunda').key)
+    await imp().start()
+    expect(rowOf('a').run).toBe('skipped')
+    expect(rowOf('a').failure).toBe('Places maze-kit/forest/rotunda, which is not coming in')
+    // Ticking the rotunda again makes it a candidate.
+    imp().toggle(rowOf('rotunda').key)
+    expect(rowOf('a').run).toBe('idle')
+    expect(mine().some((x) => x.id === 'maze-kit/forest/a')).toBe(false)
+  })
+
+  it('logged out, plain pieces are still added with PUBLISH off', async () => {
+    const identity = useCyberspace.getState().identity
+    useCyberspace.setState({ identity: { ...identity, pubkey: '' } })
+    try {
+      await imp().openZip(kitZip())
+      imp().setPublish(false)
+      await imp().start()
+    } finally { useCyberspace.setState({ identity }); imp().setPublish(true) }
+    expect(mine()).toHaveLength(3)
+  })
+
+  it('stops when your key changes mid-run', async () => {
+    const identity = useCyberspace.getState().identity
+    vi.mocked(publishMany).mockImplementationOnce(async () => { useCyberspace.setState({ identity: { ...identity, pubkey: 'c'.repeat(64) } }); return { ok: true, accepted: ['wss://relay.test'] } })
+    try {
+      await imp().openZip(kitZip())
+      await imp().start()
+    } finally { useCyberspace.setState({ identity }) }
+    expect(imp().stall).toBe('Your key changed.')
+    expect(sent()).toHaveLength(1)
   })
 })

@@ -18,7 +18,8 @@ import { ThumbStage } from '../scene/ThumbStage'
 import { useThumbs } from '../store/useThumbs'
 import { useEscape } from '../hooks/useEscape'
 import { useCyberspace } from '../store/useCyberspace'
-import { useShardImport, type ImportRow } from '../store/useShardImport'
+import { plannedBlocks, useShardImport, type ImportRow } from '../store/useShardImport'
+import { useWorkshop } from '../store/useWorkshop'
 import { dupAction, type Dup, type DupMode } from '../lib/shardZip'
 
 const MODES: Array<{ mode: DupMode; label: string; help: string }> = [
@@ -54,7 +55,7 @@ function Thumb({ row, openId, root }: { row: ImportRow; openId: number; root: HT
 }
 
 /** The tag at a row's end: what is happening to it, or what will. */
-function status(row: ImportRow, mode: DupMode, dup: Dup): { label: string; tone: string; title?: string } {
+function status(row: ImportRow, mode: DupMode, dup: Dup, needs: string | undefined): { label: string; tone: string; title?: string } {
   if (row.read === 'waiting') return { label: 'WAITING', tone: 'tag--local' }
   if (row.read === 'reading') return { label: 'READING', tone: 'tag--sending' }
   if (row.read === 'error') return { label: 'ERROR', tone: 'tag--failed', title: row.error ?? undefined }
@@ -62,10 +63,14 @@ function status(row: ImportRow, mode: DupMode, dup: Dup): { label: string; tone:
   if (row.run === 'done') return { label: row.outcome === 'update' ? 'UPDATED' : row.outcome === 'copy' ? 'COPIED' : 'DONE', tone: 'tag--live' }
   if (row.run === 'failed') return { label: 'FAILED', tone: 'tag--failed', title: row.failure ?? undefined }
   if (row.run === 'skipped') return { label: 'SKIPPED', tone: 'tag--local', title: row.failure ?? undefined }
+  if (needs && row.run === 'idle' && row.picked) return { label: 'NEEDS', tone: 'tag--failed', title: `Places ${needs}, which is not coming in` }
   if (dup) {
     const act = dupAction(dup, mode).act
-    const title = dup.in === 'same' ? 'Imported from this kit before' : dup.in === 'name' ? 'One of your shards has this name' : 'Same path twice in this zip'
-    const label = act === 'skip' ? (dup.in === 'same' ? 'YOURS' : dup.in === 'name' ? 'TAKEN' : 'TWICE') : act === 'update' ? 'UPDATE' : 'AS COPY'
+    const title = dup.in === 'same' ? `One of your shards has this address: ${row.id}`
+      : dup.in === 'published' ? `Your relays already hold an object of yours at this address: ${row.id}`
+        : dup.in === 'name' ? 'One of your shards has this name' : 'Same path twice in this zip'
+    const label = act === 'skip' ? ({ same: 'YOURS', published: 'PUBLISHED', name: 'TAKEN', zip: 'TWICE' } as const)[dup.in]
+      : act === 'update' || (dup.in === 'published' && act === 'new') ? 'UPDATE' : 'AS COPY'
     return { label, tone: 'tag--sending', title }
   }
   return { label: 'NEW', tone: '' }
@@ -82,8 +87,10 @@ export function ZipImport(): JSX.Element | null {
   if (!s.open) return null
 
   const ready = s.rows.filter((r) => r.read === 'ok')
+  // Recomputed each render: picks and the answer to a taken name decide which pieces a shell can place.
+  const blocked = s.phase === 'review' || s.phase === 'done' ? plannedBlocks(s.rows, s.dups, s.dupMode, s.published, useWorkshop.getState().shards.map((x) => x.id)) : new Map<string, string>()
   // What IMPORT would do something with: a taken name under SKIP is left out, unless a first try already made its shard.
-  const todo = ready.filter((r) => r.picked && r.run !== 'done' && r.run !== 'skipped' && (r.shardId !== null || dupAction(s.dups[r.key] ?? null, s.dupMode).act !== 'skip'))
+  const todo = ready.filter((r) => r.picked && r.run !== 'done' && r.run !== 'skipped' && !(r.shardId === null && blocked.has(r.key)) && (r.shardId !== null || dupAction(s.dups[r.key] ?? null, s.dupMode).act !== 'skip'))
   const errors = s.rows.filter((r) => r.read === 'error').length
   const done = s.rows.filter((r) => r.run === 'done').length
   const failed = s.rows.filter((r) => r.run === 'failed').length
@@ -96,10 +103,10 @@ export function ZipImport(): JSX.Element | null {
   let line: string
   if (s.error) line = s.error
   else if (s.phase === 'opening') line = 'OPENING'
-  else if (s.phase === 'reading') line = `READING ${s.rows.length - reading} OF ${s.rows.length}`
+  else if (s.phase === 'reading') line = s.remote === 'checking' ? 'CHECKING YOUR RELAYS' : `READING ${s.rows.length - reading} OF ${s.rows.length}`
   else if (running) line = `${publish ? 'PUBLISHING' : 'ADDING'} ${Math.min(done + failed + 1, workTotal)} OF ${workTotal}`
   else if (s.phase === 'done') line = `${done} DONE${failed ? ` · ${failed} FAILED` : ''}`
-  else line = [`${ready.length} SHARD${ready.length === 1 ? '' : 'S'}`, errors ? `${errors} ERROR${errors === 1 ? '' : 'S'}` : '', s.skipped.length ? `${s.skipped.length} SKIPPED` : ''].filter(Boolean).join(' · ')
+  else line = [`${ready.length} SHARD${ready.length === 1 ? '' : 'S'}`, errors ? `${errors} ERROR${errors === 1 ? '' : 'S'}` : '', s.skipped.length ? `${s.skipped.length} SKIPPED` : '', publish && s.remote === 'unknown' ? 'RELAYS NOT CHECKED' : ''].filter(Boolean).join(' · ')
   const fraction = s.phase === 'reading' ? (s.rows.length - reading) / Math.max(1, s.rows.length) : running || s.phase === 'done' ? (done + failed) / Math.max(1, workTotal) : 0
 
   const primary = (() => {
@@ -134,7 +141,7 @@ export function ZipImport(): JSX.Element | null {
         <ul className="zipimport__list" ref={setListEl}>
           {s.rows.map((r) => {
             const dup = s.dups[r.key] ?? null
-            const tag = status(r, s.dupMode, dup)
+            const tag = status(r, s.dupMode, dup, blocked.get(r.key))
             const folder = r.folder.join('/')
             return (
               <li key={r.key} className={`zipimport__row ${r.picked ? '' : 'is-off'}`}>
@@ -167,7 +174,7 @@ export function ZipImport(): JSX.Element | null {
           your shards, named after its file, with its path in the zip as its address, so the same zip imported again
           finds the same pieces. A reference from one piece to another in the zip is pointed at yours. {s.foldersOn ? 'Its folders in the zip become folders here.' : 'Folders in the zip are kept for when the workshop has folders.'} Hidden
           files and __MACOSX are skipped. A 3D file is fitted to a new shard&apos;s grid, as IMPORT fits one. If one of your
-          shards has the name, or the piece is already yours: SKIP leaves it out, COPY adds a copy, UPDATE replaces a piece
+          shards has the name, or the address is already yours (here, or on your relays): SKIP leaves it out, COPY adds a copy, UPDATE replaces a piece
           imported before at the same address, so everything placing it draws the new one. A shard that only shares a
           name is never replaced. With PUBLISH on, each shard is signed and sent as PUBLISH
           sends one, one after another; a failed one can be tried again, and is sent to the same address, never twice.

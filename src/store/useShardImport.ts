@@ -37,13 +37,15 @@ import { BUILT_IN } from 'sno-core/snoPalette'
 import { listZip, readEntry, ZipError, type ZipEntry } from '../lib/zipRead'
 import {
   ZIP_MAX_BYTES, ZIP_MAX_ENTRIES, ZIP_MAX_ENTRY_BYTES, ZIP_MAX_TOTAL_BYTES, companionsFor, copyName, dupAction, findDups, planZip,
-  refTargets, resolveRefs, unresolved,
+  blockedRows, hasPlaceholders, refTargets, resolveRefs,
   type Companion, type Dup, type DupMode, type PlannedRow, type SkippedFile,
 } from '../lib/shardZip'
 import { folderApi, placeInFolders } from '../lib/importFolders'
 import { importBytes } from '../lib/meshImport'
 import { shardRefusal } from '../lib/hidden'
 import { publishState, shardFingerprint } from '../lib/published'
+import { queryEach } from '../lib/relay'
+import { SNO_KIND } from 'sno-core/feed'
 import { shardFromText, useWorkshop } from './useWorkshop'
 import { refreshFeed, usePublished, type SendOutcome } from './usePublished'
 import { useCyberspace } from './useCyberspace'
@@ -99,6 +101,14 @@ export interface ShardImportState {
   foldersOn: boolean
   /** The kit every id here is under (lib/shardZip kitIds). */
   kit: string
+  /** Ids of this zip that your relays already hold an object of yours at. */
+  published: string[]
+  /**
+   * Whether your relays were asked about those addresses: 'checked' when at
+   * least one answered every question, 'unknown' when none could (or you are
+   * not logged in). Nothing new is published over an unchecked address.
+   */
+  remote: 'idle' | 'checking' | 'checked' | 'unknown'
   /** Whether a run has happened on this zip: the list then holds what it did. */
   ran: boolean
   stopAsked: boolean
@@ -130,7 +140,7 @@ const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout
 const text = new TextDecoder('utf-8')
 const baseName = (path: string): string => path.split('/').pop() ?? path
 
-const blank = { open: false, fileName: '', phase: 'opening' as Phase, error: null, rows: [], skipped: [], dups: {}, dupMode: 'skip' as DupMode, publish: true, foldersOn: false, kit: '', ran: false, stopAsked: false, stall: null }
+const blank = { open: false, fileName: '', phase: 'opening' as Phase, error: null, rows: [], skipped: [], dups: {}, dupMode: 'skip' as DupMode, publish: true, foldersOn: false, kit: '', published: [] as string[], remote: 'idle' as const, ran: false, stopAsked: false, stall: null }
 
 /** Your shards as duplicate matching sees them. */
 function mine(): Array<{ id: string; name: string; folder: string[] | null }> {
@@ -138,9 +148,47 @@ function mine(): Array<{ id: string; name: string; folder: string[] | null }> {
   return useWorkshop.getState().shards.map((s) => ({ id: s.id, name: s.name, folder: api?.folderPathOf ? api.folderPathOf(s.id) : null }))
 }
 
-function dupsFor(rows: readonly ImportRow[], kit: string): Record<string, Dup> {
+function dupsFor(rows: readonly ImportRow[], kit: string, published: readonly string[]): Record<string, Dup> {
   const api = folderApi()
-  return Object.fromEntries(findDups(rows.filter((r) => r.read !== 'error'), mine(), !!api?.folderPathOf, kit))
+  return Object.fromEntries(findDups(rows.filter((r) => r.read !== 'error'), mine(), !!api?.folderPathOf, kit, new Set(published)))
+}
+
+/**
+ * The rows that would not come in under these picks and this answer to a
+ * taken name, because a piece they place would not exist; each with that
+ * piece. The run leaves them out, and the list says so before it starts.
+ */
+export function plannedBlocks(rows: readonly ImportRow[], dups: Record<string, Dup>, mode: DupMode, published: readonly string[], mineIds: readonly string[]): Map<string, string> {
+  const base = new Set([...mineIds, ...published])
+  const live = rows.filter((r) => r.picked && r.read === 'ok' && r.run !== 'skipped')
+  const coming = new Set(live.filter((r) => {
+    if (r.run === 'done') return true
+    const act = dupAction(dups[r.key] ?? null, mode).act
+    return act === 'new' || act === 'update'
+  }).map((r) => r.id))
+  return blockedRows(live.filter((r) => r.run !== 'done').map((r) => ({ key: r.key, id: r.id, refs: r.shard?.refs })), refTargets(rows), base, coming)
+}
+
+/** Addresses asked about per relay question. */
+const CHECK_CHUNK = 100
+
+/**
+ * Which of these ids your relays hold an object of yours at (kind 33331, any
+ * version, sealed ones too), or null when no relay answered a question: then
+ * nothing is known, and nothing new may go out over those addresses.
+ */
+async function publishedAt(me: string, ids: readonly string[]): Promise<Set<string> | null> {
+  const found = new Set<string>()
+  for (let i = 0; i < ids.length; i += CHECK_CHUNK) {
+    const answers = await queryEach({ kinds: [SNO_KIND], authors: [me], '#d': ids.slice(i, i + CHECK_CHUNK) })
+    if (!answers.some((a) => a.outcome === 'answered')) return null
+    for (const a of answers) for (const ev of a.events) {
+      if (ev.pubkey !== me || ev.kind !== SNO_KIND) continue
+      const d = ev.tags.find((t) => t[0] === 'd')?.[1]
+      if (d !== undefined) found.add(d)
+    }
+  }
+  return found
 }
 
 /** The files a model names beside it: an OBJ's mtllib, a .gltf's buffer URIs (not data: ones). */
@@ -217,6 +265,8 @@ export const useShardImport = create<ShardImportState>((set, get) => {
   const patch = (key: string, change: Partial<ImportRow>): void =>
     set({ rows: get().rows.map((r) => (r.key === key ? { ...r, ...change } : r)) })
   const row = (key: string): ImportRow | undefined => get().rows.find((r) => r.key === key)
+  /** A row left out for a piece it places: a candidate again once the picks change. */
+  const unskip = (): void => set({ rows: get().rows.map((r) => (r.run === 'skipped' && r.failure?.startsWith('Places ') ? { ...r, run: 'idle', failure: null } : r)) })
 
   const run = async (): Promise<void> => {
     const g = generation
@@ -229,9 +279,12 @@ export const useShardImport = create<ShardImportState>((set, get) => {
     const mineRun = { stopped, stop }
     current = mineRun
     // Matched again now: what is yours may have changed since the list was read.
-    const dups = dupsFor(get().rows, get().kit)
-    // Kit-internal references point at the importer's own pieces (lib/shardZip resolveRefs).
+    const dups = dupsFor(get().rows, get().kit, get().published)
+    // Kit-internal references point at the importer's own pieces (lib/shardZip resolveRefs),
+    // and only at pieces that will exist: yours, published by you, or coming in now at their own id.
     const targets = refTargets(get().rows)
+    const blocked = plannedBlocks(get().rows, dups, mode, get().published, useWorkshop.getState().shards.map((x) => x.id))
+    const remote = get().remote
     set({ phase: 'running', ran: true, stopAsked: false, stall: null, dups })
     const halted = (): boolean => g !== generation || get().stopAsked
     const pause = (ms: number): Promise<void> => Promise.race([sleep(ms), stopped])
@@ -247,14 +300,20 @@ export const useShardImport = create<ShardImportState>((set, get) => {
         if (!r || !r.picked || r.read !== 'ok' || !r.shard || r.run === 'done' || r.run === 'skipped') continue
         inHand = key
         patch(key, { run: 'working', failure: null })
+        // A key change mid-run would sign with one key what references name another.
+        if (useCyberspace.getState().identity.pubkey !== me) { patch(key, { run: 'idle' }); set({ stall: 'Your key changed.' }); inHand = null; break }
         const ws = useWorkshop.getState()
         // Made once: a retry publishes the shard the first try made.
         let id = r.shardId && ws.shards.some((s) => s.id === r.shardId) ? r.shardId : null
         // Reused: it must be in storage before it goes out (a first try may have been refused).
         if (id && !ws.saveNow()) { patch(key, { run: 'failed', failure: 'Workshop storage is full' }); set({ stall: 'Workshop storage is full.' }); inHand = null; break }
         if (!id) {
-          if (!me) { patch(key, { run: 'failed', failure: 'Log in first' }); inHand = null; continue }
-          const model: ShardModel = r.shard.refs ? { ...r.shard, refs: resolveRefs(r.shard.refs, targets, me) } : r.shard
+          const missing = blocked.get(key)
+          // Left out, not failed: a retry cannot help, a change of picks or answer can (setDupMode, toggle).
+          if (missing) { patch(key, { run: 'skipped', failure: `Places ${missing}, which is not coming in` }); inHand = null; continue }
+          // Only a piece placing others needs your key, to name yours.
+          if (!me && hasPlaceholders(r.shard.refs)) { patch(key, { run: 'failed', failure: 'Log in first' }); inHand = null; continue }
+          const model: ShardModel = r.shard.refs && me ? { ...r.shard, refs: resolveRefs(r.shard.refs, targets, me) } : r.shard
           const action = dupAction(dups[key] ?? null, mode)
           if (action.act === 'skip') { patch(key, { run: 'skipped', failure: dups[key]?.in === 'zip' ? 'Same name in this zip' : 'In your shards' }); inHand = null; continue }
           let saved: boolean
@@ -265,6 +324,8 @@ export const useShardImport = create<ShardImportState>((set, get) => {
             saved = res === 'saved'
           } else {
             const fresh = action.act === 'copy'
+            // A new address goes out only once your relays said nothing of yours is there.
+            if (!fresh && publish && remote !== 'checked') { patch(key, { run: 'failed', failure: 'Could not check this address on your relays' }); inHand = null; continue }
             const added = ws.addShard(model, fresh || action.copyName ? copyName(r.name) : r.name, fresh ? undefined : r.id)
             if (!added) { patch(key, { run: 'failed', failure: 'Its id is taken' }); inHand = null; continue }
             id = added.id
@@ -303,8 +364,10 @@ export const useShardImport = create<ShardImportState>((set, get) => {
     } finally {
       if (current === mineRun) current = null
       // The folders' filing, saved before DONE shows; never waited on past a few seconds.
-      const flush = folderApi()?.flush
-      if (flush) await Promise.race([flush().catch(() => undefined), sleep(5000)])
+      try {
+        const flush = folderApi()?.flush
+        if (flush) await Promise.race([flush().catch(() => undefined), sleep(5000)])
+      } catch { /* the filing is the folders store's to report */ }
       if (g === generation) {
         if (sent > 0) refreshFeed()
         set({ phase: 'done', stopAsked: false })
@@ -351,24 +414,36 @@ export const useShardImport = create<ShardImportState>((set, get) => {
       }
       if (g !== generation) return
       zip = null
-      // A reference to a piece of the kit that is not in the zip would draw as a placeholder.
+      // What your relays already hold at these addresses (another device, or another kit with this folder name).
+      const me = useCyberspace.getState().identity.pubkey
+      const fresh = get().rows.filter((r) => r.read === 'ok' && !useWorkshop.getState().shards.some((x) => x.id === r.id)).map((r) => r.id)
+      let published: string[] = []
+      let remote: ShardImportState['remote'] = 'unknown'
+      if (me && fresh.length) {
+        set({ remote: 'checking' })
+        const found = await publishedAt(me, fresh).catch(() => null)
+        if (g !== generation) return
+        if (found) { published = [...found]; remote = 'checked' }
+      } else if (me) remote = 'checked'
+      // A reference to a piece of the kit that will not exist would draw as a placeholder.
       const targets = refTargets(get().rows)
-      for (const r of get().rows) {
-        const missing = r.read === 'ok' ? unresolved(r.shard?.refs, targets) : []
-        if (missing.length) patch(r.key, { read: 'error', error: `Places ${missing[0]}, not in this zip`, picked: false })
-      }
-      set({ phase: 'review', dups: dupsFor(get().rows, get().kit) })
+      const ok = get().rows.filter((r) => r.read === 'ok')
+      const blocked = blockedRows(ok.map((r) => ({ key: r.key, id: r.id, refs: r.shard?.refs })), targets, new Set([...useWorkshop.getState().shards.map((x) => x.id), ...published]), new Set(ok.map((r) => r.id)))
+      for (const [key, missing] of blocked) patch(key, { read: 'error', error: `Places ${missing}, not in this zip`, picked: false })
+      set({ phase: 'review', published, remote, dups: dupsFor(get().rows, get().kit, published) })
     },
 
     toggle: (key) => {
       if (get().phase === 'running') return
       const r = row(key)
       if (r && r.read !== 'error' && r.run !== 'done') patch(key, { picked: !r.picked })
+      unskip()
     },
 
     pickAll: (on) => {
       if (get().phase === 'running') return
       set({ rows: get().rows.map((r) => (r.read === 'error' || r.run === 'done' ? r : { ...r, picked: on })) })
+      unskip()
     },
 
     setDupMode: (mode) => {

@@ -208,7 +208,9 @@ const stem = (path: string): string => path.replace(/\.[^./]+$/, '')
 export function kitIds(rows: PlannedRow[], zipName: string): string {
   const tops = new Set(rows.map((r) => (r.folder.length ? r.folder[0] : '')))
   const shared = tops.size === 1 && !tops.has('') ? [...tops][0] : null
-  const kit = shared ?? (nameOf(zipName.replace(/\\/g, '/').split('/').pop() ?? zipName).replace(/[:/]/g, '-') || 'kit')
+  // A browser saves a second download as "maze-kit (1).zip": the same kit.
+  const fromName = nameOf(zipName.replace(/\\/g, '/').split('/').pop() ?? zipName).replace(/\s*\(\d+\)$/, '').replace(/[:/]/g, '-')
+  const kit = shared ?? (fromName || 'kit')
   for (const r of rows) {
     r.id = shared ? stem(r.path) : `${kit}/${stem(r.path)}`
     if (r.id.includes(':') && !r.error) r.error = 'A colon in its path'
@@ -237,21 +239,50 @@ export function refTargets(rows: readonly Pick<PlannedRow, 'id' | 'path'>[]): Ma
   return out
 }
 
-/** The kit-internal references in a shard that name no piece of the zip. */
-export function unresolved(refs: readonly (readonly unknown[])[] | undefined, targets: ReadonlyMap<string, string>): string[] {
-  return (refs ?? []).map(placeholderOf).filter((d): d is string => d !== null && !targets.has(d))
+/** The kit-internal references in a shard that name no piece of the zip, or (with `exists`) none that will exist. */
+export function unresolved(refs: readonly (readonly unknown[])[] | undefined, targets: ReadonlyMap<string, string>, exists?: ReadonlySet<string>): string[] {
+  return (refs ?? []).map(placeholderOf).filter((d): d is string => {
+    if (d === null) return false
+    const id = targets.get(d)
+    return id === undefined || (exists !== undefined && !exists.has(id))
+  })
 }
 
-/** The refs with each kit-internal one pointed at the importer's own piece; every other reference as it was. */
+/** Whether a shard holds a kit-internal reference (and so needs the importer's key). */
+export function hasPlaceholders(refs: readonly (readonly unknown[])[] | undefined): boolean {
+  return (refs ?? []).some((r) => placeholderOf(r) !== null)
+}
+
+/**
+ * The rows that cannot come in because a piece they place will not exist,
+ * each with the first such piece. `base` is what exists already (yours, or
+ * published by you); `coming` the ids of the rows about to come in. A row
+ * left out takes its id out of `coming`, which may leave out a row placing
+ * it, so this repeats until nothing changes.
+ */
+export function blockedRows(rows: ReadonlyArray<{ key: string; id: string; refs?: readonly (readonly unknown[])[] }>, targets: ReadonlyMap<string, string>, base: ReadonlySet<string>, coming: ReadonlySet<string>): Map<string, string> {
+  const live = new Set(coming)
+  const out = new Map<string, string>()
+  for (let changed = true; changed;) {
+    changed = false
+    const exists = new Set([...base, ...live])
+    for (const r of rows) {
+      if (out.has(r.key) || !live.has(r.id)) continue
+      const missing = unresolved(r.refs, targets, exists)
+      if (missing.length) { out.set(r.key, missing[0]); if (!base.has(r.id)) live.delete(r.id); changed = true }
+    }
+  }
+  return out
+}
+
+/** The refs with each kit-internal one pointed at the importer's own piece (its relay hint dropped: the kit's hint is not the importer's relay); every other reference as it was. */
 export function resolveRefs<R extends readonly unknown[]>(refs: readonly R[] | undefined, targets: ReadonlyMap<string, string>, pubkey: string): R[] | undefined {
   if (!refs) return refs
   return refs.map((r) => {
     const d = placeholderOf(r)
     const id = d === null ? undefined : targets.get(d)
     if (id === undefined) return r
-    const out = [...r] as unknown as R
-    ;(out as unknown as unknown[])[1] = `33331:${pubkey}:${id}`
-    return out
+    return [r[0], `33331:${pubkey}:${id}`] as unknown as R
   })
 }
 
@@ -283,11 +314,13 @@ export function companionsFor(modelFile: string, named: readonly string[], here:
 export type DupMode = 'skip' | 'copy' | 'update'
 
 /**
- * A row's match. `same`: a shard of yours already has its id, so it is this
- * piece, imported before. `name`: an unrelated shard of yours has its name.
+ * A row's match. `same`: a shard of yours already has its address (its id).
+ * `published`: no shard here has it, but your relays hold an object of yours
+ * at that address (imported on another device, or another kit that chose the
+ * same folder name). `name`: an unrelated shard of yours has its name.
  * `zip`: an earlier row of this zip has its id.
  */
-export type Dup = { in: 'same'; id: string } | { in: 'name'; ids: string[] } | { in: 'zip'; first: string } | null
+export type Dup = { in: 'same'; id: string } | { in: 'published'; id: string } | { in: 'name'; ids: string[] } | { in: 'zip'; first: string } | null
 
 /** A shard of yours, as duplicate matching sees it. */
 export interface MineShard {
@@ -313,7 +346,7 @@ export function dupKey(name: string, folder: readonly string[] | null, foldersOn
  * `<kit>/`) is never a name match: a kit's forest and cistern halls are
  * meant to stand side by side. A row with an error matches nothing.
  */
-export function findDups(rows: readonly Pick<PlannedRow, 'key' | 'id' | 'name' | 'folder' | 'error'>[], mine: readonly MineShard[], foldersOn: boolean, kit: string): Map<string, Dup> {
+export function findDups(rows: readonly Pick<PlannedRow, 'key' | 'id' | 'name' | 'folder' | 'error'>[], mine: readonly MineShard[], foldersOn: boolean, kit: string, published: ReadonlySet<string> = new Set()): Map<string, Dup> {
   const ids = new Set(mine.map((s) => s.id))
   const byName = new Map<string, string[]>()
   for (const s of mine) {
@@ -327,7 +360,7 @@ export function findDups(rows: readonly Pick<PlannedRow, 'key' | 'id' | 'name' |
     if (row.error) { out.set(row.key, null); continue }
     const first = seen.get(row.id)
     const named = byName.get(dupKey(row.name, row.folder, foldersOn))
-    out.set(row.key, first ? { in: 'zip', first } : ids.has(row.id) ? { in: 'same', id: row.id } : named?.length ? { in: 'name', ids: named } : null)
+    out.set(row.key, first ? { in: 'zip', first } : ids.has(row.id) ? { in: 'same', id: row.id } : published.has(row.id) ? { in: 'published', id: row.id } : named?.length ? { in: 'name', ids: named } : null)
     if (!first) seen.set(row.id, row.key)
   }
   return out
@@ -338,7 +371,8 @@ export function findDups(rows: readonly Pick<PlannedRow, 'key' | 'id' | 'name' |
  * `copyName`, beside an unrelated namesake). `update`: your shard with its id
  * takes the new geometry and is published to the same address, so every
  * object placing it draws the new piece. `copy`: a separate copy under a
- * fresh id. `skip`: left out. An unrelated shard of yours is never replaced.
+ * fresh id. `skip`: left out. An unrelated shard of yours is never replaced,
+ * and nothing is published over an address of yours without UPDATE.
  */
 export type DupAction = { act: 'new'; copyName: boolean } | { act: 'copy' } | { act: 'update'; id: string } | { act: 'skip' }
 
@@ -346,6 +380,8 @@ export function dupAction(dup: Dup, mode: DupMode): DupAction {
   if (!dup) return { act: 'new', copyName: false }
   if (mode === 'skip') return { act: 'skip' }
   if (dup.in === 'same') return mode === 'update' ? { act: 'update', id: dup.id } : { act: 'copy' }
+  // UPDATE: brought in here at that address, and published over what is there.
+  if (dup.in === 'published') return mode === 'update' ? { act: 'new', copyName: false } : { act: 'copy' }
   if (dup.in === 'name') return { act: 'new', copyName: true }
   // A second row with one id: only a copy can come in beside the first.
   return mode === 'copy' ? { act: 'copy' } : { act: 'skip' }

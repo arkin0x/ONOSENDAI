@@ -105,8 +105,13 @@ describe('the deploy bar sets the size this deployment goes out at', () => {
     useShards.getState().startDeployShard(shard.id)
     await useShards.getState().deploy()
     expect(deployedPayload().unit).toBe(7)
-    // Untouched means untouched: the deployment holds the bench's own object.
-    expect(useShards.getState().mine[0].shard).toBe(shard)
+    // Untouched means untouched: the deployment holds the bench's own shape,
+    // with only the WALK default written for a shard that never chose
+    // (DECK-0003 §1.12), and the bench keeps its own object.
+    const { extra, ...rest } = useShards.getState().mine[0].shard!
+    expect(extra).toEqual({ constrain: 'opaque' })
+    expect(rest).toEqual(shard)
+    expect(useWorkshop.getState().shards[0]).toBe(shard)
   })
 
   it('resets to the shard\'s own unit when a new deploy begins', () => {

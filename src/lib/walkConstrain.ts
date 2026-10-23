@@ -98,6 +98,12 @@ export function authoredConstrainOf(s: Pick<ShardModel, 'extra'>): Constrain {
   return authoredConstrain(rawConstrain(s))
 }
 
+/** The word a model's author chose, or undefined when nobody chose: absent, or a malformed value. */
+export function chosenConstrainOf(s: Pick<ShardModel, 'extra'>): Constrain | undefined {
+  const raw = rawConstrain(s)
+  return raw === 'all' || raw === 'opaque' || raw === 'off' ? raw : undefined
+}
+
 /**
  * `s` with its setting at `c`, written as the word itself: OFF is `"off"`,
  * never no field, so a deliberate OFF survives the default (§1.12). The

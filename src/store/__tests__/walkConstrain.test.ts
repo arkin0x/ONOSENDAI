@@ -221,9 +221,13 @@ describe('setting it', () => {
 
   it('the workshop sets it, undoably, and OFF writes "off"', () => {
     const w = useWorkshop.getState()
+    // OPAQUE on a shard that never chose is what it already shows and publishes: no edit.
     w.setConstrain('opaque')
-    expect(constrainOf(useWorkshop.getState().current()!)).toBe('opaque')
-    expect(toPayload(useWorkshop.getState().current()!)).toHaveProperty('constrain', 'opaque')
+    expect(useWorkshop.getState().past).toHaveLength(0)
+    expect(useWorkshop.getState().current()).not.toHaveProperty('extra')
+    w.setConstrain('all')
+    expect(constrainOf(useWorkshop.getState().current()!)).toBe('all')
+    expect(toPayload(useWorkshop.getState().current()!)).toHaveProperty('constrain', 'all')
     useWorkshop.getState().undo()
     expect(useWorkshop.getState().current()).not.toHaveProperty('extra')
     useWorkshop.getState().setConstrain('off')

@@ -2,7 +2,7 @@
  * walkConstrain.test.ts - a shard's WALK setting (DECK-0003 §1.12): how it
  * is read by a walker (off unless exactly `all` or `opaque`), read by the
  * workshop (OPAQUE unless one of the three words), written (off is `"off"`),
- * carried by sno-core 0.1.18 as a field it does not know, which faces it
+ * carried by sno-core as a field it does not know, which faces it
  * makes walls, and the straight-ray test against them.
  */
 import { readFileSync } from 'node:fs'
@@ -12,6 +12,8 @@ import { PAYLOAD_FIELDS, fromPayload, newShard, normalizeStored, toPayload, type
 import type { Placed } from 'sno-core/parts'
 import { CONSTRAIN_DEFAULT, authoredConstrain, authoredConstrainOf, blocks, constrainOf, firstHit, readConstrain, seeThrough, wallMesh, withAuthoredConstrain, withConstrain, type Constrain } from '../walkConstrain'
 import { avatarTemplate } from '../avatar'
+import { objectTemplate } from '../hidden'
+import { decryptForRegion } from '../shardCrypto'
 
 /** A square wall two units across in the model's YZ plane at x = 3: two triangles. */
 function wall(extra: Partial<ShardModel> = {}, c: Constrain = 'all'): ShardModel {
@@ -99,10 +101,11 @@ describe('the field', () => {
     expect(authoredConstrainOf(normalizeStored(JSON.parse(JSON.stringify(back))))).toBe('off')
   })
 
-  it('an avatar is untouched: its event carries no default (DECK-0003 §3.3)', () => {
-    const s = wall()
-    const bare: ShardModel = { ...s, extra: undefined }
+  it('an avatar is untouched: its event carries no default, and a word it has rides as it is (DECK-0003 §3.3)', () => {
+    const bare = newShard('Me')
+    expect(bare).not.toHaveProperty('extra')
     expect(JSON.parse(avatarTemplate(bare, 1).content)).not.toHaveProperty('constrain')
+    expect(JSON.parse(avatarTemplate(withConstrain(newShard('Me'), 'off'), 1).content)).toHaveProperty('constrain', 'off')
   })
 
   it('rides through sno-core as a field it does not know: payload, read back, stored', () => {
@@ -230,12 +233,25 @@ describe('placed objects keep their own setting (§1.10)', () => {
   })
 })
 
+describe('a sealed object', () => {
+  it('a shard hidden as its own sealed event goes out "opaque" when it never chose, and keeps "off"', async () => {
+    const key = new Uint8Array(32).map((_, i) => i + 1)
+    for (const [s, want] of [[wall({}, 'all'), 'all'], [{ ...wall(), extra: undefined }, 'opaque'], [wall({}, 'off'), 'off']] as const) {
+      const ev = await objectTemplate(s, key, 'd1', 1)
+      const sealed = ev.tags.find((t) => t[0] === 'encrypted')![2]
+      const plain = await decryptForRegion(key, sealed)
+      expect(JSON.parse(plain!)).toHaveProperty('constrain', want)
+    }
+  })
+})
+
 describe('what the controls show', () => {
   it('the workshop row lights the setting a shard publishes as: OPAQUE for one that never chose', () => {
     const src = readFileSync(join(__dirname, '..', '..', 'workshop', 'Workshop.tsx'), 'utf8')
     const row = src.slice(src.indexOf('CONSTRAIN MOVEMENT IN WALK MODE'), src.indexOf('</div>', src.indexOf('CONSTRAIN MOVEMENT IN WALK MODE')))
     expect(row).toContain('authoredConstrainOf(shard) === c')
-    expect(row).not.toMatch(/[^d]constrainOf\(shard\)/)
+    // The walker's reading would light OFF for a shard that never chose.
+    expect(row).not.toMatch(/\bconstrainOf\(shard\)/)
     expect(authoredConstrainOf(newShard('Unset'))).toBe('opaque')
   })
 })

@@ -110,6 +110,13 @@ beforeEach(() => {
 })
 
 describe('the hider opening their own chest', () => {
+  it('a shard put in unaimed is signed at the chest with "opaque" when it never chose WALK (DECK-0003 §1.12)', async () => {
+    await hiderWithOpenedChest()
+    const h = Object.values(S().discovered).find((x) => x.type === 'shard')!
+    expect(h.inner).toBeDefined()
+    expect(JSON.parse(h.inner!.content)).toHaveProperty('constrain', 'opaque')
+  })
+
   it('does not make its contents deployments of the bag', async () => {
     const { chestLookup } = await hiderWithOpenedChest()
     expect(S().mine.filter((d) => d.lookupId === chestLookup).map((d) => d.type)).toEqual(['chest'])

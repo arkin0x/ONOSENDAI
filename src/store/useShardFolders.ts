@@ -18,6 +18,9 @@
  * writes it to that identity's tree and never shows it on the new one. Where
  * IndexedDB cannot be opened, folders last the session.
  *
+ * A deploy is kept here too (markUsed): when each shard was last deployed,
+ * which the lists sort by as they sort by an edit.
+ *
  * For code that files shards (the zip import): createFolderPath(['maze-kit',
  * 'forest']) makes or finds that path and returns the last folder's id, and
  * assignToFolder(ref, id) files a shard by its workshop model id. Both act at
@@ -54,6 +57,8 @@ interface ShardFoldersState {
   /** File shards (by ref) in a folder, or at the top with null. */
   assignToFolder: (ref: string | readonly string[], folder: string | null) => void
   setCollapsed: (id: string, collapsed: boolean) => void
+  /** A deploy of these shards (by ref) went through: every list puts them first in their folder (lib/shardFolders.ts newestFirst). */
+  markUsed: (ref: string | readonly string[], at?: number) => void
   /** Resolves once every change so far has reached the database, or failed and been said. */
   flush: () => Promise<void>
 }
@@ -247,6 +252,11 @@ export const useShardFolders = create<ShardFoldersState>((set, get) => {
     },
 
     setCollapsed: (id, collapsed) => { commit({ op: 'collapse', id, collapsed }) },
+
+    markUsed: (ref, at = Date.now()) => {
+      const refs = (typeof ref === 'string' ? [ref] : [...ref]).filter((r) => r !== '')
+      if (refs.length) commit({ op: 'use', refs, at })
+    },
 
     flush: () => then(async () => undefined),
   }

@@ -67,6 +67,17 @@ describe('shard folders in IndexedDB', () => {
     expect(t.collapsed[kit]).toBe(true)
   })
 
+  it('keeps when each shard was last deployed across a reload, per identity', async () => {
+    const a = await boot()
+    a.useShardFolders.getState().markUsed(['oak', ''], 42)
+    expect(a.useShardFolders.getState().tree.used).toEqual({ oak: 42 })
+    await a.useShardFolders.getState().flush()
+    const b = await boot()
+    expect(b.useShardFolders.getState().tree.used).toEqual({ oak: 42 })
+    const c = await boot(OTHER)
+    expect(c.useShardFolders.getState().tree.used ?? {}).toEqual({})
+  })
+
   it('returns the existing folder when the path is already there', async () => {
     const a = await boot()
     const one = a.createFolderPath(['maze-kit', 'water'])

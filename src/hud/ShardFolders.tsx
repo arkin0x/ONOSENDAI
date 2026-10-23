@@ -19,7 +19,7 @@
 import { Fragment, useEffect, useMemo, useRef, useState, type DragEvent } from 'react'
 import { createPortal } from 'react-dom'
 import { ChevronDown, ChevronRight, Folder as FolderIcon, FolderInput, FolderPlus, Pencil, X } from 'lucide-react'
-import { buildTree, canonical, flatFolders, parentOf, folderOf, isWithin, pathOf, type FolderNode, type FolderTree } from '../lib/shardFolders'
+import { buildTree, canonical, flatFolders, newestFirst, parentOf, folderOf, isWithin, pathOf, type FolderNode, type FolderTree } from '../lib/shardFolders'
 import { useShardFolders } from '../store/useShardFolders'
 import { useCyberspace } from '../store/useCyberspace'
 import { useEscape } from '../hooks/useEscape'
@@ -53,6 +53,17 @@ interface Props<T> {
 /** A workshop model's ref and name, for the lists of models (stable, so the tree is not rebuilt every render). */
 export const modelRef = (s: { id: string }): string => s.id
 export const modelName = (s: { name: string }): string => s.name
+export const modelEditedAt = (s: { updatedAt?: number }): number => s.updatedAt ?? 0
+
+/**
+ * A shard list in the order every one of them is drawn: last edited or last
+ * deployed first, whichever is later (lib/shardFolders.ts newestFirst), so
+ * the lists cannot drift apart. `refOf` and `editedAt` should be stable.
+ */
+export function useNewestFirst<T>(items: readonly T[], refOf: (item: T) => string, editedAt: (item: T) => number): T[] {
+  const used = useShardFolders((s) => s.tree.used)
+  return useMemo(() => newestFirst(items, refOf, editedAt, used), [items, refOf, editedAt, used])
+}
 
 /** Whether there is a mouse to drag with: phones get the tool alone, so a long press stays a press. */
 function canDrag(): boolean {

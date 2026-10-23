@@ -42,6 +42,12 @@ export interface FolderTree {
   collapsed: Record<string, true>
   /** A createFolderPath id that found its folder already made, to that folder. */
   alias: Record<string, string>
+  /**
+   * Shard ref to when it was last deployed from here, ms: the lists count a
+   * deploy as an edit (newestFirst; arkinox, 2026-10-23). Nothing is published
+   * and the shard's own event is not touched.
+   */
+  used?: Record<string, number>
 }
 
 export type FolderOp =
@@ -52,6 +58,7 @@ export type FolderOp =
   | { op: 'delete'; id: string }
   | { op: 'assign'; refs: string[]; folder: string | null }
   | { op: 'collapse'; id: string; collapsed: boolean }
+  | { op: 'use'; refs: string[]; at: number }
 
 /** The longest folder name kept, as a shard's name is capped (useWorkshop rename). */
 export const MAX_NAME = 64
@@ -277,7 +284,7 @@ export function applyOp(tree: FolderTree, op: FolderOp): FolderTree {
         else if (up !== null) alias[from] = up
       }
       const { [op.id]: _gone, ...collapsed } = tree.collapsed
-      return { folders, assign, collapsed, alias }
+      return { ...tree, folders, assign, collapsed, alias }
     }
     case 'assign': {
       const to = canonical(tree, op.folder)
@@ -300,7 +307,23 @@ export function applyOp(tree: FolderTree, op: FolderOp): FolderTree {
       const { [op.id]: _open, ...collapsed } = tree.collapsed
       return { ...tree, collapsed }
     }
+    case 'use': {
+      // The later time wins, so the same op landing twice (another tab, a replay) changes nothing.
+      let used = tree.used
+      for (const ref of op.refs) if (ref && Number.isFinite(op.at) && !((used?.[ref] ?? 0) >= op.at)) used = { ...used, [ref]: op.at }
+      return used === tree.used ? tree : { ...tree, used }
+    }
   }
+}
+
+/**
+ * A list of shards newest first, as every list of them is sorted: by when each
+ * was last edited or last deployed from here, whichever is later. Ties keep the
+ * order they came in. `editedAt` is in ms.
+ */
+export function newestFirst<T>(items: readonly T[], refOf: (item: T) => string, editedAt: (item: T) => number, used: Readonly<Record<string, number>> | undefined): T[] {
+  const at = (item: T): number => Math.max(editedAt(item) || 0, used?.[refOf(item)] ?? 0)
+  return items.map((item) => ({ item, at: at(item) })).sort((a, b) => b.at - a.at).map((x) => x.item)
 }
 
 /** The ops in order. */
@@ -310,7 +333,7 @@ export function applyOps(tree: FolderTree, ops: readonly FolderOp[]): FolderTree
 
 /**
  * A tree read back from storage, as this app can use it: anything that is
- * not a folder, a filing or a fold is dropped, never the whole tree.
+ * not a folder, a filing, a fold or a deploy time is dropped, never the whole tree.
  */
 export function normalizeTree(raw: unknown): FolderTree {
   const r = raw as Partial<Record<keyof FolderTree, unknown>> | null
@@ -333,5 +356,7 @@ export function normalizeTree(raw: unknown): FolderTree {
   }
   const collapsed: Record<string, true> = {}
   if (r.collapsed && typeof r.collapsed === 'object') for (const [k, v] of Object.entries(r.collapsed as Record<string, unknown>)) if (v === true) collapsed[k] = true
-  return { folders, assign: strings(r.assign), collapsed, alias: strings(r.alias) }
+  const used: Record<string, number> = {}
+  if (r.used && typeof r.used === 'object') for (const [k, v] of Object.entries(r.used as Record<string, unknown>)) if (typeof v === 'number' && Number.isFinite(v)) used[k] = v
+  return { folders, assign: strings(r.assign), collapsed, alias: strings(r.alias), used }
 }

@@ -153,8 +153,10 @@ describe('the stream\'s text sizes', () => {
                 // A card meets neither the panel nor NOW PLAYING (review of #453:
                 // centred on the frame, it ran over NOW PLAYING), and holds its words.
                 const card = rects.find(isCard)
-                if (ci > 0 && shot.kind !== 'trip') expect(card, `${at}: a card`).toBeDefined()
+                if (ci > 0) expect(card, `${at}: a card`).toBeDefined()
                 if (card) {
+                  // Across the chiron, whatever the shot (review of #453: over a trip it ran into the clock or the minimap).
+                  expect(inside(card, chironGround), `${at}: card ${JSON.stringify(card)} off the chiron ${JSON.stringify(chironGround)}`).toBe(true)
                   expect(inside(card, frame), `${at}: card ${JSON.stringify(card)}`).toBe(true)
                   if (panel) expect(meets(card, panel), `${at}: card over the panel`).toBe(false)
                   const npLabel = texts.find((t) => t.text.includes('NOW PLAYING'))
@@ -164,6 +166,8 @@ describe('the stream\'s text sizes', () => {
                   const words = texts.find((t) => t.seq === card.seq + 1)!
                   expect(words, `${at}: card words`).toBeDefined()
                   expect(inside(words.box, { ...card, y0: card.y0 - words.size, y1: card.y1 + words.size }), `${at}: card words`).toBe(true)
+                  // LATER keeps its word: its largest unit, never cut.
+                  if (!cardState.meanwhile) expect(words.text, at).toMatch(/^▶▶ \d+ \w+( \d+ \w+)? LATER$/)
                 }
                 // Outside the panel, no word meets another (the card goes over the chiron, solid, with the larger text).
                 const rest = outside.filter((t) => t.text !== '▌')

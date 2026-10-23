@@ -671,9 +671,10 @@ export class TvPainter {
     // LATER and MEANWHILE, after the cut's transition; under an inset's
     // panel, or with the stream's larger text across the chiron, solid.
     part('card')
-    // Across the chiron, it is centred on the chiron and kept within it: NOW
-    // PLAYING beside it stays clear (review of #453).
-    const onChiron = bigInset && chironTop < tickY
+    // With the larger text, every card goes across the chiron, centred on it
+    // and kept within it: centred on the frame it reached NOW PLAYING, and
+    // over a trip the clock or a square frame's minimap (review of #453).
+    const onChiron = big && chironTop < tickY
     this.card(p, onChiron ? MX + chironW / 2 : W / 2, s, narrow, onChiron ? chironTop + chironH / 2 + 6 * s : inset ? floor - 34 * s : H * 0.34, now, onChiron ? chironW : null)
 
     // TUNING, END OF TAPE, NO SIGNAL.
@@ -1264,7 +1265,10 @@ export class TvPainter {
     ctx.globalAlpha = t < 0.08 ? t / 0.08 : t > 0.8 ? (1 - t) / 0.2 : 1
     ctx.font = `700 ${(narrow ? 14 : 18) * s}px ${TV_FONT}`
     ctx.textAlign = 'center'
-    const words = within === null ? text : fit(ctx, text, within - 28 * s)
+    // Too long for the chiron, LATER keeps its largest unit ("23 HOURS
+    // LATER") rather than lose the word LATER to an ellipsis.
+    const short = !p.meanwhile ? `▶▶ ${skipWords(p.skipped).split(' ').slice(0, 2).join(' ')} LATER` : text
+    const words = within === null || ctx.measureText(text).width <= within - 28 * s ? text : fit(ctx, short, within - 28 * s)
     const tw = ctx.measureText(words).width
     ctx.fillStyle = within !== null ? 'rgba(2, 12, 20, 0.94)' : 'rgba(0, 0, 0, 0.5)'
     ctx.fillRect(cx - tw / 2 - 14 * s, y - 22 * s, tw + 28 * s, 32 * s)

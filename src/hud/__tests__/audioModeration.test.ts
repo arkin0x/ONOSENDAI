@@ -23,6 +23,7 @@ import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { AudioCard } from '../AudioCard'
 import { audioModeration, muteIdOf } from '../SecretModal'
+import { takenAudioModeration } from '../InventoryPanel'
 import { useShards } from '../../store/useShards'
 import { useCyberspace } from '../../store/useCyberspace'
 import { useMutes } from '../../store/useMutes'
@@ -103,7 +104,7 @@ describe('the audio card', () => {
     expect(source).toMatch(/if \(!item \|\| !author\) return null/)
     // ITEMS lists nothing the mute list hides, by id or lineage, and its audio card has the same row.
     expect(itemsSource).toMatch(/hidesThing\(muted, \{ authors: \[it\.author\], ids: \[it\.id, itemLineage\(it\.event\)\] \}, self\)/)
-    expect(itemsSource).toMatch(/label="MUTE THIS AUDIO"/)
+    expect(itemsSource).toMatch(/moderation=\{takenAudioModeration\(item, me, \(\) => setOpen\(false\)\)\}/)
   })
 
   it('mutes a moved item by its lineage, so a move by its hider stays muted', () => {
@@ -112,5 +113,22 @@ describe('the audio card', () => {
     useShards.setState({ curated: null, discovered: { [ID]: { ...find(HIDER), inner: { id: ID, pubkey: HIDER, kind: 1063, created_at: 1, tags: [['d', LINEAGE]], content: '' } as never } } })
     useMutes.setState({ muted: { pubkeys: new Set(), items: new Set([LINEAGE]) } })
     expect(useShards.getState().worldItems().some((w) => w.key === ID)).toBe(false)
+  })
+
+  it('in ITEMS, offers BLOCK AUTHOR only for an author who is a fact (review of #465)', () => {
+    const taken = (verified: boolean, author = HIDER): string => renderToString(createElement(AudioCard, {
+      id: 'held:x', triggerId: ID, audio,
+      moderation: takenAudioModeration({ id: ID, author, verified, event: { id: ID, pubkey: author, kind: 1063, created_at: 1, tags: [], content: '', sig: '' } }, ME, () => {}),
+    }))
+    // A claimed author (an unsigned chest entry) may be someone who never made it: mute only.
+    const claim = taken(false)
+    expect(count(claim, 'MUTE THIS AUDIO')).toBe(1)
+    expect(claim).not.toContain('BLOCK AUTHOR')
+    const fact = taken(true)
+    expect(count(fact, 'MUTE THIS AUDIO')).toBe(1)
+    expect(count(fact, 'BLOCK AUTHOR')).toBe(1)
+    const own = taken(true, ME)
+    expect(own).not.toContain('MUTE THIS AUDIO')
+    expect(own).not.toContain('BLOCK AUTHOR')
   })
 })

@@ -19,7 +19,7 @@
  * The confirmation says it cannot be taken back.
  */
 
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import { ConfirmModal } from './ConfirmModal'
 import { useItemFeed } from '../store/useItemFeed'
 import { X } from 'lucide-react'
@@ -183,6 +183,22 @@ const keptFromAll = (text: string | undefined): boolean => isCoin(text) || hasNf
  * (arkinox, 2026-10-11). The X clears a row off the list; a coin has it
  * only once redeemed, since a cleared coin's card is out of reach.
  */
+/**
+ * A taken audio's moderation row: MUTE THIS AUDIO always (its id is its own,
+ * or its lineage), BLOCK AUTHOR only when its author is a fact. A chest's
+ * unsigned entry names an author it may not be (review of #465): blocking
+ * that claim would block someone who never made it. Never on your own.
+ */
+export function takenAudioModeration(item: Pick<HeldItem, 'id' | 'author' | 'verified' | 'event'>, me: string, close: () => void): ReactNode {
+  if (item.author === me) return undefined
+  return (
+    <>
+      <MuteItemButton id={itemLineage(item.event) ?? item.id} label="MUTE THIS AUDIO" onMuted={close} />
+      {item.verified && <BlockButton pubkey={item.author} onBlocked={close} />}
+    </>
+  )
+}
+
 function TakenRow({ item }: { item: HeldItem }): JSX.Element {
   const [open, setOpen] = useState(false)
   const me = useCyberspace((s) => s.identity.pubkey)
@@ -237,12 +253,7 @@ function TakenRow({ item }: { item: HeldItem }): JSX.Element {
             id={`held:${item.id}`}
             triggerId={itemLineage(item.event) ?? item.id}
             audio={item.audio}
-            moderation={item.author === me ? undefined : (
-              <>
-                <MuteItemButton id={itemLineage(item.event) ?? item.id} label="MUTE THIS AUDIO" onMuted={() => setOpen(false)} />
-                <BlockButton pubkey={item.author} onBlocked={() => setOpen(false)} />
-              </>
-            )}
+            moderation={takenAudioModeration(item, me, () => setOpen(false))}
           />
         </div>
       )}

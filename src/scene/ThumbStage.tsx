@@ -238,11 +238,21 @@ export function ThumbHost(): JSX.Element | null {
     const t = window.setTimeout(() => { useThumbs.getState().stall(head); setMade((n) => n + 1) }, JOB_LIMIT_MS)
     return () => window.clearTimeout(t)
   }, [head, made, visible])
+  // A stage that threw is made again only for a job to draw: with none (a
+  // browser without WebGL, the queue emptied by the crash), making it again
+  // would only throw again, every frame (review of #451). It waits, broken,
+  // for the next job.
+  const [broken, setBroken] = useState(false)
   const crashed = (): void => {
     const first = useThumbs.getState().queue[0]?.key
     if (first) useThumbs.getState().crash(first)
-    setMade((n) => n + 1)
+    setBroken(true)
   }
+  useEffect(() => {
+    if (!broken || !head) return
+    setBroken(false)
+    setMade((n) => n + 1)
+  }, [broken, head])
   if (!up) return null
   return <StageBoundary key={made} onCrash={crashed}><ThumbStage /></StageBoundary>
 }

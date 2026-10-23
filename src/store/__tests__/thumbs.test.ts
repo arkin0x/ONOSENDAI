@@ -201,4 +201,15 @@ describe('the queue', () => {
     useThumbs.getState().crash('last')
     expect(useThumbs.getState().disabled).toBe(true)
   })
+
+  it('counts jobs, not stalls: one slow job stalling twice does not bring the stage near to off', () => {
+    const s = cube()
+    useThumbs.getState().request('slow', s)
+    useThumbs.getState().stall('slow')
+    useThumbs.getState().stall('slow')
+    expect(useThumbs.getState().failed.slow).toBe(true)
+    useThumbs.getState().request('next', s)
+    useThumbs.getState().stall('next')
+    expect(useThumbs.getState().disabled).toBe(false)
+  })
 })

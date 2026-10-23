@@ -64,8 +64,9 @@ export interface ThumbStore {
   fail: (key: string) => void
   /**
    * The stage took too long over the first job (a lost context, say): it goes
-   * to the back of the queue, once, then fails. Stalls in a row with nothing
-   * drawn between them mean the stage cannot draw here, and it stops.
+   * to the back of the queue, once, then fails. MAX_STALLS different jobs
+   * stalled or crashed with nothing drawn between mean the stage cannot draw
+   * here, and it stops.
    */
   stall: (key: string) => void
   /** The stage threw while drawing it: it fails. Crashes count with stalls toward MAX_STALLS. */
@@ -74,7 +75,7 @@ export interface ThumbStore {
   disable: () => void
 }
 
-/** Stalls in a row, with nothing drawn between, before the stage stops for the session. */
+/** Jobs stalled or crashed on, with nothing drawn between, before the stage stops for the session. */
 export const MAX_STALLS = 3
 /** Times one job may stall before it fails. */
 export const MAX_TRIES = 2
@@ -83,14 +84,17 @@ export const MAX_TRIES = 2
 const wants = new Map<string, number>()
 /** Keys being read from the device. */
 const reading = new Set<string>()
-/** Stalls since the last picture drawn. */
-let stalls = 0
+/**
+ * The jobs the stage stalled or crashed on since the last picture drawn. Jobs,
+ * not stalls: one slow job stalling twice says nothing about the stage.
+ */
+const troubled = new Set<string>()
 
 /** For tests: forget every want and read in flight. */
 export function resetThumbWants(): void {
   wants.clear()
   reading.clear()
-  stalls = 0
+  troubled.clear()
 }
 
 /** How many rows want `key` (tests, and the stage's measurements). */
@@ -144,7 +148,7 @@ export const useThumbs = create<ThumbStore>((set, get) => {
     },
 
     done: (key, url) => {
-      stalls = 0
+      troubled.clear()
       const job = get().queue.find((j) => j.key === key)
       remember(key, url)
       set({ queue: get().queue.filter((j) => j.key !== key) })
@@ -154,7 +158,8 @@ export const useThumbs = create<ThumbStore>((set, get) => {
     fail: (key) => set({ queue: get().queue.filter((j) => j.key !== key), failed: { ...get().failed, [key]: true } }),
 
     stall: (key) => {
-      if (++stalls >= MAX_STALLS) { get().disable(); return }
+      troubled.add(key)
+      if (troubled.size >= MAX_STALLS) { get().disable(); return }
       const { queue } = get()
       const job = queue.find((j) => j.key === key)
       if (!job) return
@@ -164,7 +169,8 @@ export const useThumbs = create<ThumbStore>((set, get) => {
     },
 
     crash: (key) => {
-      if (++stalls >= MAX_STALLS) { get().disable(); return }
+      troubled.add(key)
+      if (troubled.size >= MAX_STALLS) { get().disable(); return }
       get().fail(key)
     },
 

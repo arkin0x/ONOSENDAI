@@ -37,6 +37,7 @@ import { BUILT_IN } from 'sno-core/snoPalette'
 import { listZip, readEntry, ZipError, type ZipEntry } from '../lib/zipRead'
 import {
   ZIP_MAX_BYTES, ZIP_MAX_ENTRIES, ZIP_MAX_ENTRY_BYTES, ZIP_MAX_TOTAL_BYTES, companionsFor, copyName, dupAction, findDups, planZip,
+  refTargets, resolveRefs, unresolved,
   type Companion, type Dup, type DupMode, type PlannedRow, type SkippedFile,
 } from '../lib/shardZip'
 import { folderApi, placeInFolders } from '../lib/importFolders'
@@ -96,6 +97,8 @@ export interface ShardImportState {
   publish: boolean
   /** Whether the workshop has folders to put shards in (lib/importFolders). */
   foldersOn: boolean
+  /** The kit every id here is under (lib/shardZip kitIds). */
+  kit: string
   /** Whether a run has happened on this zip: the list then holds what it did. */
   ran: boolean
   stopAsked: boolean
@@ -127,7 +130,7 @@ const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout
 const text = new TextDecoder('utf-8')
 const baseName = (path: string): string => path.split('/').pop() ?? path
 
-const blank = { open: false, fileName: '', phase: 'opening' as Phase, error: null, rows: [], skipped: [], dups: {}, dupMode: 'skip' as DupMode, publish: true, foldersOn: false, ran: false, stopAsked: false, stall: null }
+const blank = { open: false, fileName: '', phase: 'opening' as Phase, error: null, rows: [], skipped: [], dups: {}, dupMode: 'skip' as DupMode, publish: true, foldersOn: false, kit: '', ran: false, stopAsked: false, stall: null }
 
 /** Your shards as duplicate matching sees them. */
 function mine(): Array<{ id: string; name: string; folder: string[] | null }> {
@@ -135,9 +138,9 @@ function mine(): Array<{ id: string; name: string; folder: string[] | null }> {
   return useWorkshop.getState().shards.map((s) => ({ id: s.id, name: s.name, folder: api?.folderPathOf ? api.folderPathOf(s.id) : null }))
 }
 
-function dupsFor(rows: readonly ImportRow[]): Record<string, Dup> {
+function dupsFor(rows: readonly ImportRow[], kit: string): Record<string, Dup> {
   const api = folderApi()
-  return Object.fromEntries(findDups(rows.filter((r) => r.read !== 'error'), mine(), !!api?.folderPathOf))
+  return Object.fromEntries(findDups(rows.filter((r) => r.read !== 'error'), mine(), !!api?.folderPathOf, kit))
 }
 
 /** The files a model names beside it: an OBJ's mtllib, a .gltf's buffer URIs (not data: ones). */
@@ -177,7 +180,8 @@ async function readRow(row: ImportRow): Promise<{ shard: ShardModel; note: strin
     for (const c of companionsFor(file, namedFiles(file, bytes), zip.companions[row.folder.join('/')] ?? [])) {
       const e = zip.entries.get(c.key)
       if (!e) continue
-      if (used + e.size > ZIP_MAX_ENTRY_BYTES || e.size > zip.budget) return { error: `Over ${ZIP_MAX_ENTRY_BYTES / 1048576} MB with ${c.file}` }
+      if (used + e.size > ZIP_MAX_ENTRY_BYTES) return { error: `Over ${ZIP_MAX_ENTRY_BYTES / 1048576} MB with ${c.file}` }
+      if (e.size > zip.budget) return { error: `Past ${ZIP_MAX_TOTAL_BYTES / 1048576} MB for the zip` }
       zip.budget -= e.size
       try { files.push({ name: c.file, bytes: readEntry(zip.bytes, e, ZIP_MAX_ENTRY_BYTES - used) }) } catch { continue /* a model without its MTL still comes in */ }
       used += e.size
@@ -225,7 +229,9 @@ export const useShardImport = create<ShardImportState>((set, get) => {
     const mineRun = { stopped, stop }
     current = mineRun
     // Matched again now: what is yours may have changed since the list was read.
-    const dups = dupsFor(get().rows)
+    const dups = dupsFor(get().rows, get().kit)
+    // Kit-internal references point at the importer's own pieces (lib/shardZip resolveRefs).
+    const targets = refTargets(get().rows)
     set({ phase: 'running', ran: true, stopAsked: false, stall: null, dups })
     const halted = (): boolean => g !== generation || get().stopAsked
     const pause = (ms: number): Promise<void> => Promise.race([sleep(ms), stopped])
@@ -244,23 +250,29 @@ export const useShardImport = create<ShardImportState>((set, get) => {
         const ws = useWorkshop.getState()
         // Made once: a retry publishes the shard the first try made.
         let id = r.shardId && ws.shards.some((s) => s.id === r.shardId) ? r.shardId : null
+        // Reused: it must be in storage before it goes out (a first try may have been refused).
+        if (id && !ws.saveNow()) { patch(key, { run: 'failed', failure: 'Workshop storage is full' }); set({ stall: 'Workshop storage is full.' }); inHand = null; break }
         if (!id) {
+          if (!me) { patch(key, { run: 'failed', failure: 'Log in first' }); inHand = null; continue }
+          const model: ShardModel = r.shard.refs ? { ...r.shard, refs: resolveRefs(r.shard.refs, targets, me) } : r.shard
           const action = dupAction(dups[key] ?? null, mode)
           if (action.act === 'skip') { patch(key, { run: 'skipped', failure: dups[key]?.in === 'zip' ? 'Same name in this zip' : 'In your shards' }); inHand = null; continue }
           let saved: boolean
           if (action.act === 'update') {
-            const res = ws.replaceShard(action.id, r.shard)
+            const res = ws.replaceShard(action.id, model)
             if (res === 'missing') { patch(key, { run: 'failed', failure: 'Its namesake is gone' }); inHand = null; continue }
             id = action.id
             saved = res === 'saved'
           } else {
-            const added = ws.addShard(r.shard, action.act === 'copy' ? copyName(r.name) : r.name)
+            const fresh = action.act === 'copy'
+            const added = ws.addShard(model, fresh || action.copyName ? copyName(r.name) : r.name, fresh ? undefined : r.id)
+            if (!added) { patch(key, { run: 'failed', failure: 'Its id is taken' }); inHand = null; continue }
             id = added.id
             saved = added.saved
             // An update keeps the folder it is in; a new shard goes in its own.
             placeInFolders(folders, [{ shardId: id, folder: r.folder }], made)
           }
-          patch(key, { shardId: id, outcome: action.act })
+          patch(key, { shardId: id, outcome: action.act === 'new' ? (action.copyName ? 'copy' : 'new') : action.act })
           // Nothing goes out that a reload would lose here.
           if (!saved) { patch(key, { run: 'failed', failure: 'Workshop storage is full' }); set({ stall: 'Workshop storage is full.' }); inHand = null; break }
         }
@@ -290,6 +302,9 @@ export const useShardImport = create<ShardImportState>((set, get) => {
       if (inHand && g === generation) patch(inHand, { run: 'failed', failure: e instanceof Error ? e.message : String(e) })
     } finally {
       if (current === mineRun) current = null
+      // The folders' filing, saved before DONE shows; never waited on past a few seconds.
+      const flush = folderApi()?.flush
+      if (flush) await Promise.race([flush().catch(() => undefined), sleep(5000)])
       if (g === generation) {
         if (sent > 0) refreshFeed()
         set({ phase: 'done', stopAsked: false })
@@ -315,13 +330,13 @@ export const useShardImport = create<ShardImportState>((set, get) => {
         set({ error: e instanceof ZipError ? e.message : 'That zip could not be read.', phase: 'review' })
         return
       }
-      const plan = planZip(entries)
+      const plan = planZip(entries, file.name)
       zip = { bytes, entries: new Map(entries.map((e) => [String(e.index), e])), companions: plan.companions, budget: Math.max(0, ZIP_MAX_TOTAL_BYTES - plan.total) }
       const rows: ImportRow[] = plan.rows.map((p) => ({
         ...p, read: p.error ? 'error' : 'waiting', shard: null, note: null, picked: !p.error, run: 'idle', shardId: null, outcome: null, failure: null,
       }))
       if (rows.length === 0) set({ error: 'No shard files in that zip.' })
-      set({ rows, skipped: plan.skipped, phase: 'reading' })
+      set({ rows, skipped: plan.skipped, kit: plan.kit, phase: 'reading' })
       for (const { key } of rows) {
         if (g !== generation) return
         const r = row(key)
@@ -336,7 +351,13 @@ export const useShardImport = create<ShardImportState>((set, get) => {
       }
       if (g !== generation) return
       zip = null
-      set({ phase: 'review', dups: dupsFor(get().rows) })
+      // A reference to a piece of the kit that is not in the zip would draw as a placeholder.
+      const targets = refTargets(get().rows)
+      for (const r of get().rows) {
+        const missing = r.read === 'ok' ? unresolved(r.shard?.refs, targets) : []
+        if (missing.length) patch(r.key, { read: 'error', error: `Places ${missing[0]}, not in this zip`, picked: false })
+      }
+      set({ phase: 'review', dups: dupsFor(get().rows, get().kit) })
     },
 
     toggle: (key) => {

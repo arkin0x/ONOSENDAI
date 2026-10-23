@@ -59,4 +59,11 @@ describe('folderApi', () => {
     expect(api!.folderPathOf!('s1')).toEqual(['maze-kit', 'forest'])
     expect(api!.folderPathOf!('nobody')).toEqual([])
   })
+
+  it('carries the store\'s flush, to wait for the filing to be saved', async () => {
+    const flush = vi.fn(async () => {})
+    const api = folderApi({ store: { createFolderPath: () => null, assignToFolder: () => {}, useShardFolders: { getState: () => ({ tree: {}, flush }) } } })
+    await api!.flush!()
+    expect(flush).toHaveBeenCalledTimes(1)
+  })
 })

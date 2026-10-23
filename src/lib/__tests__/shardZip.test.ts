@@ -15,7 +15,7 @@ import { describe, expect, it } from 'vitest'
 import type { ZipEntry } from '../zipRead'
 import {
   NAME_MAX, ZIP_MAX_DEPTH, ZIP_MAX_ENTRY_BYTES, ZIP_MAX_SHARDS, ZIP_MAX_TOTAL_BYTES,
-  cleanSegment, companionsFor, copyName, dupAction, dupKey, findDups, nameOf, planZip, splitPath,
+  PLACEHOLDER_PUBKEY, cleanSegment, companionsFor, copyName, dupAction, dupKey, findDups, nameOf, planZip, refTargets, resolveRefs, splitPath, unresolved,
 } from '../shardZip'
 
 let nextIndex = 0
@@ -106,7 +106,7 @@ describe('planZip', () => {
 
   it('keeps MTL and .bin files by folder for the OBJ and glTF models there, and skips one with no such model', () => {
     const plan = planZip([entry('a/chair.obj'), entry('a/Chair.MTL'), entry('b/lamp.gltf'), entry('b/lamp.bin'), entry('c/orphan.mtl'), entry('c/box.ply')])
-    expect(plan.companions.a.map((c) => c.file)).toEqual(['chair.mtl'])
+    expect(plan.companions.a.map((c) => [c.file, c.match])).toEqual([['Chair.MTL', 'chair.mtl']])
     expect(plan.companions.b.map((c) => c.file)).toEqual(['lamp.bin'])
     expect(plan.skipped).toEqual([{ path: 'c/orphan.mtl', reason: 'Not a shard file' }])
     // Keys are directory places, unique even for two entries with one name.
@@ -115,12 +115,15 @@ describe('planZip', () => {
   })
 
   it('reads only the companions a model names, once each, else the one sharing its base name', () => {
+    const c = (key: string, file: string, size = 10) => ({ key, file, match: file.toLowerCase(), size })
     const here = [
-      { key: '1', file: 'materials.mtl', size: 10 },
-      { key: '2', file: 'materials.mtl', size: 10 },
-      { key: '3', file: 'chair.mtl', size: 10 },
-      ...Array.from({ length: 500 }, (_, i) => ({ key: `x${i}`, file: `alias${i}.mtl`, size: 50 * 1024 * 1024 })),
+      c('1', 'materials.mtl'), c('2', 'materials.mtl'), c('3', 'chair.mtl'), c('4', 'Tri.bin'), c('5', 'my tri.bin'),
+      ...Array.from({ length: 500 }, (_, i) => c(`x${i}`, `alias${i}.mtl`, 50 * 1024 * 1024)),
     ]
+    // A glTF's URIs are matched as its reader decodes them, case aside.
+    expect(companionsFor('Tri.gltf', ['Tri.bin'], here).map((x) => x.file)).toEqual(['Tri.bin'])
+    expect(companionsFor('a.gltf', ['my%20tri.bin'], here).map((x) => x.file)).toEqual(['my tri.bin'])
+    expect(companionsFor('a.gltf', ['%E0%A4%A.bin'], here)).toEqual([])
     expect(companionsFor('chair.obj', ['materials.mtl', 'MATERIALS.mtl', 'sub\\materials.mtl'], here).map((c) => c.key)).toEqual(['1'])
     expect(companionsFor('chair.obj', [], here).map((c) => c.key)).toEqual(['3'])
     expect(companionsFor('stool.obj', [], here)).toEqual([])
@@ -152,49 +155,91 @@ describe('planZip', () => {
   })
 })
 
-describe('duplicates', () => {
-  const rows = [
-    { key: 'kit/forest/hall.json', name: 'hall', folder: ['kit', 'forest'], error: null },
-    { key: 'kit/cistern/hall.json', name: 'Hall', folder: ['kit', 'cistern'], error: null },
-    { key: 'kit/forest/tee.json', name: 'tee', folder: ['kit', 'forest'], error: null },
-    { key: 'kit/forest/bad.json', name: 'bad', folder: ['kit', 'forest'], error: 'Not an SNO object.' },
-  ]
-
-  it('without folders: a name taken anywhere in yours, or earlier in the zip, case and space aside', () => {
-    const d = findDups(rows, [{ id: 'm1', name: 'tee ', folder: null }, { id: 'm2', name: 'bad', folder: null }], false)
-    expect(d.get('kit/forest/hall.json')).toBeNull()
-    expect(d.get('kit/cistern/hall.json')).toEqual({ in: 'zip', first: 'kit/forest/hall.json' })
-    expect(d.get('kit/forest/tee.json')).toEqual({ in: 'mine', ids: ['m1'] })
-    expect(d.get('kit/forest/bad.json')).toBeNull()
+describe('ids and references', () => {
+  it('ids are paths without the extension under the kit folder, or under the zip name when files sit at the top', () => {
+    const kit = planZip([entry('maze-kit/forest/hall-straight.json'), entry('maze-kit/shared/plug.ply')], 'whatever.zip')
+    expect(kit.kit).toBe('maze-kit')
+    expect(kit.rows.map((r) => r.id)).toEqual(['maze-kit/forest/hall-straight', 'maze-kit/shared/plug'])
+    const loose = planZip([entry('hall.json'), entry('sub/tee.json')], 'My Kit.zip')
+    expect(loose.kit).toBe('My Kit')
+    expect(loose.rows.map((r) => r.id)).toEqual(['My Kit/hall', 'My Kit/sub/tee'])
+    const two = planZip([entry('a/x.json'), entry('b/y.json')], 'pair.zip')
+    expect(two.rows.map((r) => r.id)).toEqual(['pair/a/x', 'pair/b/y'])
   })
 
-  it('with folders: a name is taken only in its own folder', () => {
-    const mine = [{ id: 'm1', name: 'hall', folder: ['kit', 'forest'] }, { id: 'm2', name: 'tee', folder: ['elsewhere'] }]
-    const d = findDups(rows, mine, true)
-    expect(d.get('kit/forest/hall.json')).toEqual({ in: 'mine', ids: ['m1'] })
-    expect(d.get('kit/cistern/hall.json')).toBeNull()
-    expect(d.get('kit/forest/tee.json')).toBeNull()
+  it('a colon in a path is an error, since the id is an address part', () => {
+    const plan = planZip([entry('kit/a:b.json')], 'k.zip')
+    expect(plan.rows[0].error).toBe('A colon in its path')
+  })
+
+  it('points a kit-internal reference at the importer\'s piece, by id or by path in the zip, and leaves others alone', () => {
+    const plan = planZip([entry('maze-kit/forest/room.json'), entry('maze-kit/forest/water-high.json')], 'k.zip')
+    const targets = refTargets(plan.rows)
+    const me = 'a'.repeat(64)
+    const other = `33331:${'b'.repeat(64)}:theirs`
+    const refs: Array<['a' | 'e', string, string?]> = [
+      ['a', `33331:${PLACEHOLDER_PUBKEY}:maze-kit/forest/room`],
+      ['a', `33331:${PLACEHOLDER_PUBKEY}:maze-kit/forest/water-high`, 'wss://hint'],
+      ['a', other],
+    ]
+    expect(resolveRefs(refs, targets, me)).toEqual([
+      ['a', `33331:${me}:maze-kit/forest/room`],
+      ['a', `33331:${me}:maze-kit/forest/water-high`, 'wss://hint'],
+      ['a', other],
+    ])
+    expect(unresolved(refs, targets)).toEqual([])
+    expect(unresolved([['a', `33331:${PLACEHOLDER_PUBKEY}:maze-kit/hall-straight`]], targets)).toEqual(['maze-kit/hall-straight'])
+    // At the top of a zip, a reference may name the path without the zip-name prefix.
+    const loose = planZip([entry('room.json')], 'k.zip')
+    expect(resolveRefs([['a', `33331:${PLACEHOLDER_PUBKEY}:room`]], refTargets(loose.rows), me)).toEqual([['a', `33331:${me}:k/room`]])
+  })
+})
+
+describe('duplicates', () => {
+  const row = (key: string, id: string, name: string, folder: string[]) => ({ key, id, name, folder, error: null as string | null })
+  const rows = [
+    row('1', 'kit/forest/hall', 'hall', ['kit', 'forest']),
+    row('2', 'kit/cistern/hall', 'Hall', ['kit', 'cistern']),
+    row('3', 'kit/forest/tee', 'tee', ['kit', 'forest']),
+    { ...row('4', 'kit/forest/bad', 'bad', ['kit', 'forest']), error: 'Not an SNO object.' },
+    row('5', 'kit/forest/hall', 'hall', ['kit', 'forest']),
+  ]
+
+  it('a shard with the row\'s id is the same piece; an unrelated one with its name is a name match; a kit\'s own pieces never clash by name', () => {
+    const mine = [
+      { id: 'kit/forest/hall', name: 'hall', folder: null },
+      { id: 'uuid-1', name: 'tee ', folder: null },
+      { id: 'uuid-2', name: 'bad', folder: null },
+    ]
+    const d = findDups(rows, mine, false, 'kit')
+    expect(d.get('1')).toEqual({ in: 'same', id: 'kit/forest/hall' })
+    // The cistern hall shares a name only with a piece of the same kit.
+    expect(d.get('2')).toBeNull()
+    expect(d.get('3')).toEqual({ in: 'name', ids: ['uuid-1'] })
+    expect(d.get('4')).toBeNull()
+    expect(d.get('5')).toEqual({ in: 'zip', first: '1' })
+  })
+
+  it('with folders, a name is taken only in its own folder', () => {
+    const mine = [{ id: 'u1', name: 'hall', folder: ['kit', 'forest'] }, { id: 'u2', name: 'tee', folder: ['elsewhere'] }]
+    const d = findDups(rows.slice(0, 3), mine, true, 'other')
+    expect(d.get('1')).toEqual({ in: 'name', ids: ['u1'] })
+    expect(d.get('2')).toBeNull()
+    expect(d.get('3')).toBeNull()
     expect(dupKey('A', ['K'], true)).toBe(dupKey('a', ['k'], true))
   })
 
-  it('a repeat inside the zip is a zip duplicate even when yours has the name, so UPDATE never hits one shard twice', () => {
-    const d = findDups(rows.slice(0, 2), [{ id: 'm1', name: 'hall', folder: null }], false)
-    expect(d.get('kit/forest/hall.json')).toEqual({ in: 'mine', ids: ['m1'] })
-    expect(d.get('kit/cistern/hall.json')).toEqual({ in: 'zip', first: 'kit/forest/hall.json' })
-    expect(dupAction(d.get('kit/cistern/hall.json')!, 'update')).toEqual({ act: 'copy' })
-  })
-
-  it('turns each mode into one action', () => {
-    const one = { in: 'mine' as const, ids: ['m1'] }
-    const two = { in: 'mine' as const, ids: ['m1', 'm2'] }
-    const zip = { in: 'zip' as const, first: 'x' }
-    expect(dupAction(null, 'skip')).toEqual({ act: 'new' })
-    expect(dupAction(one, 'skip')).toEqual({ act: 'skip' })
-    expect(dupAction(zip, 'skip')).toEqual({ act: 'skip' })
-    expect(dupAction(one, 'copy')).toEqual({ act: 'copy' })
-    expect(dupAction(one, 'update')).toEqual({ act: 'update', id: 'm1' })
-    // Two of yours with the name: replacing one would be a guess.
-    expect(dupAction(two, 'update')).toEqual({ act: 'copy' })
-    expect(dupAction(zip, 'update')).toEqual({ act: 'copy' })
+  it('turns each mode into one action, and never replaces an unrelated shard', () => {
+    const same = { in: 'same' as const, id: 'kit/x' }
+    const name = { in: 'name' as const, ids: ['u1'] }
+    const zip = { in: 'zip' as const, first: '1' }
+    expect(dupAction(null, 'skip')).toEqual({ act: 'new', copyName: false })
+    for (const d of [same, name, zip]) expect(dupAction(d, 'skip')).toEqual({ act: 'skip' })
+    expect(dupAction(same, 'update')).toEqual({ act: 'update', id: 'kit/x' })
+    expect(dupAction(same, 'copy')).toEqual({ act: 'copy' })
+    expect(dupAction(name, 'update')).toEqual({ act: 'new', copyName: true })
+    expect(dupAction(name, 'copy')).toEqual({ act: 'new', copyName: true })
+    expect(dupAction(zip, 'update')).toEqual({ act: 'skip' })
+    expect(dupAction(zip, 'copy')).toEqual({ act: 'copy' })
   })
 })

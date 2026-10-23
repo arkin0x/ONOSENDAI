@@ -45,8 +45,10 @@ export type RowKind = 'sno' | 'mesh'
 export interface Companion {
   /** Its entry's key (see PlannedRow.key). */
   key: string
-  /** Its file name, lower case, for matching what a model names. */
+  /** Its file name as written (cleaned), which is what the model's reader looks it up by. */
   file: string
+  /** The same, lower case, for matching what a model names. */
+  match: string
   /** Stated size, inflated, in bytes. */
   size: number
 }
@@ -57,6 +59,13 @@ export interface PlannedRow {
   key: string
   /** The cleaned path, folders and file, for showing. */
   path: string
+  /**
+   * The shard's id, and so its published `d`: its path in the zip without the
+   * extension, under the kit's folder ("maze-kit/forest/hall-straight"). The
+   * same zip imported again names the same shards, so they are updated in
+   * place rather than doubled. See kitIds.
+   */
+  id: string
   /** The file's name without its extension. */
   name: string
   /** Folders from the zip's top, outermost first: ["maze-kit", "forest"]. */
@@ -81,6 +90,8 @@ export interface ZipPlan {
   companions: Record<string, Companion[]>
   /** What the rows without an error state they inflate to, together. */
   total: number
+  /** The kit: the first segment of every id. */
+  kit: string
 }
 
 /** Characters no name keeps: C0 and C1 controls, and the bidi overrides and isolates that make text read as something else. */
@@ -139,7 +150,7 @@ const REASON: Record<'hidden' | 'unsafe' | 'deep' | 'empty', string> = {
  * row and no skip; companions are attached to every model in their folder
  * and listed as skipped only if no model there uses them.
  */
-export function planZip(entries: readonly ZipEntry[]): ZipPlan {
+export function planZip(entries: readonly ZipEntry[], zipName = 'kit.zip'): ZipPlan {
   const rows: PlannedRow[] = []
   const skipped: SkippedFile[] = []
   const companions: Record<string, Companion[]> = {}
@@ -157,7 +168,7 @@ export function planZip(entries: readonly ZipEntry[]): ZipPlan {
     const ext = extOf(split.file)
     if ((COMPANION_EXT as readonly string[]).includes(ext)) {
       const folder = split.folder.join('/')
-      ;(companions[folder] ??= []).push({ key: String(entry.index), file: split.file.toLowerCase(), size: entry.size })
+      ;(companions[folder] ??= []).push({ key: String(entry.index), file: split.file, match: split.file.toLowerCase(), size: entry.size })
       companionPaths.push({ folder, path })
       continue
     }
@@ -172,14 +183,76 @@ export function planZip(entries: readonly ZipEntry[]): ZipPlan {
     else if (entry.size > ZIP_MAX_ENTRY_BYTES) error = `Over ${ZIP_MAX_ENTRY_BYTES / 1048576} MB`
     else if (total + entry.size > ZIP_MAX_TOTAL_BYTES) error = `Past ${ZIP_MAX_TOTAL_BYTES / 1048576} MB for the zip`
     if (!error) total += entry.size
-    rows.push({ key: String(entry.index), path, name, folder: split.folder, kind, size: entry.size, error })
+    rows.push({ key: String(entry.index), path, id: '', name, folder: split.folder, kind, size: entry.size, error })
   }
   // An MTL or .bin is read with an OBJ or glTF in its own folder that names
   // it (store/useShardImport), never on its own: one with no such model
   // beside it is listed as skipped.
   const users = new Set(rows.filter((r) => r.kind === 'mesh' && /\.(obj|gltf)$/i.test(r.path)).map((r) => r.folder.join('/')))
   for (const c of companionPaths) if (!users.has(c.folder)) skipped.push({ path: c.path, reason: 'Not a shard file' })
-  return { rows, skipped, companions, total }
+  const kit = kitIds(rows, zipName)
+  return { rows, skipped, companions, total, kit }
+}
+
+/** A path without its file's extension. */
+const stem = (path: string): string => path.replace(/\.[^./]+$/, '')
+
+/**
+ * Give each row its id. Every id is scoped to a kit, so it can never be the
+ * id of an unrelated shard of yours (those are UUIDs): when every file sits
+ * under one top folder, that folder is the kit and the id is the path without
+ * its extension; otherwise the zip's own name, cleaned, goes in front. An id
+ * with a colon would break the `kind:pubkey:d` address, so that row is an
+ * error. The kit, for the caller.
+ */
+export function kitIds(rows: PlannedRow[], zipName: string): string {
+  const tops = new Set(rows.map((r) => (r.folder.length ? r.folder[0] : '')))
+  const shared = tops.size === 1 && !tops.has('') ? [...tops][0] : null
+  const kit = shared ?? (nameOf(zipName.replace(/\\/g, '/').split('/').pop() ?? zipName).replace(/[:/]/g, '-') || 'kit')
+  for (const r of rows) {
+    r.id = shared ? stem(r.path) : `${kit}/${stem(r.path)}`
+    if (r.id.includes(':') && !r.error) r.error = 'A colon in its path'
+  }
+  return kit
+}
+
+/** The pubkey a kit writes in a reference to one of its own pieces: whoever imports it. */
+export const PLACEHOLDER_PUBKEY = '0'.repeat(64)
+const PLACEHOLDER = new RegExp(`^33331:${PLACEHOLDER_PUBKEY}:(.+)$`)
+
+/** The kit-internal piece a reference names (its `d`), or null for a reference to anything else. */
+export function placeholderOf(ref: readonly unknown[]): string | null {
+  if (ref[0] !== 'a' || typeof ref[1] !== 'string') return null
+  return PLACEHOLDER.exec(ref[1])?.[1] ?? null
+}
+
+/**
+ * Which id each name a kit may write in a reference stands for: a row's id,
+ * and its path in the zip without the extension (the same thing when the kit
+ * has a top folder).
+ */
+export function refTargets(rows: readonly Pick<PlannedRow, 'id' | 'path'>[]): Map<string, string> {
+  const out = new Map<string, string>()
+  for (const r of rows) { out.set(r.id, r.id); if (!out.has(stem(r.path))) out.set(stem(r.path), r.id) }
+  return out
+}
+
+/** The kit-internal references in a shard that name no piece of the zip. */
+export function unresolved(refs: readonly (readonly unknown[])[] | undefined, targets: ReadonlyMap<string, string>): string[] {
+  return (refs ?? []).map(placeholderOf).filter((d): d is string => d !== null && !targets.has(d))
+}
+
+/** The refs with each kit-internal one pointed at the importer's own piece; every other reference as it was. */
+export function resolveRefs<R extends readonly unknown[]>(refs: readonly R[] | undefined, targets: ReadonlyMap<string, string>, pubkey: string): R[] | undefined {
+  if (!refs) return refs
+  return refs.map((r) => {
+    const d = placeholderOf(r)
+    const id = d === null ? undefined : targets.get(d)
+    if (id === undefined) return r
+    const out = [...r] as unknown as R
+    ;(out as unknown as unknown[])[1] = `33331:${pubkey}:${id}`
+    return out
+  })
 }
 
 /**
@@ -190,25 +263,31 @@ export function planZip(entries: readonly ZipEntry[]): ZipPlan {
  */
 export function companionsFor(modelFile: string, named: readonly string[], here: readonly Companion[]): Companion[] {
   const pick = new Map<string, Companion>()
-  const wanted = named.map((n) => (n.replace(/\\/g, '/').split('/').pop() ?? n).trim().toLowerCase()).filter(Boolean)
+  // A glTF's URIs are URI-encoded ("my%20tri.bin"), as its reader decodes them.
+  const decode = (n: string): string => { try { return decodeURIComponent(n) } catch { return n } }
+  const wanted = named.map((n) => (decode(n).replace(/\\/g, '/').split('/').pop() ?? n).trim().toLowerCase()).filter(Boolean)
   for (const w of wanted) {
     if (pick.has(w)) continue
-    const c = here.find((x) => x.file === w)
+    const c = here.find((x) => x.match === w)
     if (c) pick.set(w, c)
   }
   if (wanted.length === 0) {
     const base = modelFile.toLowerCase().replace(/\.[^.]+$/, '')
-    const c = here.find((x) => x.file.replace(/\.[^.]+$/, '') === base)
-    if (c) pick.set(c.file, c)
+    const c = here.find((x) => x.match.replace(/\.[^.]+$/, '') === base)
+    if (c) pick.set(c.match, c)
   }
   return [...pick.values()]
 }
 
-/** What happens to a shard whose name is already taken. */
+/** What happens to a piece that is already yours, or whose name is taken. */
 export type DupMode = 'skip' | 'copy' | 'update'
 
-/** A row's namesake: shards of yours (by id), or an earlier row of this zip (by key). */
-export type Dup = { in: 'mine'; ids: string[] } | { in: 'zip'; first: string } | null
+/**
+ * A row's match. `same`: a shard of yours already has its id, so it is this
+ * piece, imported before. `name`: an unrelated shard of yours has its name.
+ * `zip`: an earlier row of this zip has its id.
+ */
+export type Dup = { in: 'same'; id: string } | { in: 'name'; ids: string[] } | { in: 'zip'; first: string } | null
 
 /** A shard of yours, as duplicate matching sees it. */
 export interface MineShard {
@@ -229,45 +308,47 @@ export function dupKey(name: string, folder: readonly string[] | null, foldersOn
 }
 
 /**
- * Each row's namesake: a row above it in the zip first, then your shards. A
- * row with an error is not matched and matches nothing.
+ * Each row's match: an earlier row with its id, then your shard with its id,
+ * then your shards with its name. A piece of the same kit (its id under
+ * `<kit>/`) is never a name match: a kit's forest and cistern halls are
+ * meant to stand side by side. A row with an error matches nothing.
  */
-export function findDups(rows: readonly Pick<PlannedRow, 'key' | 'name' | 'folder' | 'error'>[], mine: readonly MineShard[], foldersOn: boolean): Map<string, Dup> {
-  const byKey = new Map<string, string[]>()
+export function findDups(rows: readonly Pick<PlannedRow, 'key' | 'id' | 'name' | 'folder' | 'error'>[], mine: readonly MineShard[], foldersOn: boolean, kit: string): Map<string, Dup> {
+  const ids = new Set(mine.map((s) => s.id))
+  const byName = new Map<string, string[]>()
   for (const s of mine) {
+    if (s.id.startsWith(`${kit}/`)) continue
     const k = dupKey(s.name, s.folder, foldersOn)
-    byKey.set(k, [...(byKey.get(k) ?? []), s.id])
+    byName.set(k, [...(byName.get(k) ?? []), s.id])
   }
   const seen = new Map<string, string>()
   const out = new Map<string, Dup>()
   for (const row of rows) {
     if (row.error) { out.set(row.key, null); continue }
-    const k = dupKey(row.name, row.folder, foldersOn)
-    const ids = byKey.get(k)
-    const first = seen.get(k)
-    // An earlier row first: two rows updating one shard of yours would be one lost.
-    out.set(row.key, first ? { in: 'zip', first } : ids?.length ? { in: 'mine', ids } : null)
-    if (!first) seen.set(k, row.key)
+    const first = seen.get(row.id)
+    const named = byName.get(dupKey(row.name, row.folder, foldersOn))
+    out.set(row.key, first ? { in: 'zip', first } : ids.has(row.id) ? { in: 'same', id: row.id } : named?.length ? { in: 'name', ids: named } : null)
+    if (!first) seen.set(row.id, row.key)
   }
   return out
 }
 
 /**
- * What a row does under a duplicate mode: `new` adds it under its own name,
- * `copy` adds it as "<name> copy", `update` replaces the one shard of yours
- * that has its name (PUBLISH AGAIN then sends it to the same address, so
- * every object placing it draws the new version), `skip` leaves it out.
- * UPDATE needs exactly one namesake of yours; with two or more it is a copy,
- * since replacing one of them would be a guess. A namesake inside the zip
- * is never updated: it does not exist yet.
+ * What a row does. `new`: added under its own id (named "<name> copy" when
+ * `copyName`, beside an unrelated namesake). `update`: your shard with its id
+ * takes the new geometry and is published to the same address, so every
+ * object placing it draws the new piece. `copy`: a separate copy under a
+ * fresh id. `skip`: left out. An unrelated shard of yours is never replaced.
  */
-export type DupAction = { act: 'new' } | { act: 'copy' } | { act: 'update'; id: string } | { act: 'skip' }
+export type DupAction = { act: 'new'; copyName: boolean } | { act: 'copy' } | { act: 'update'; id: string } | { act: 'skip' }
 
 export function dupAction(dup: Dup, mode: DupMode): DupAction {
-  if (!dup) return { act: 'new' }
+  if (!dup) return { act: 'new', copyName: false }
   if (mode === 'skip') return { act: 'skip' }
-  if (mode === 'update' && dup.in === 'mine' && dup.ids.length === 1) return { act: 'update', id: dup.ids[0] }
-  return { act: 'copy' }
+  if (dup.in === 'same') return mode === 'update' ? { act: 'update', id: dup.id } : { act: 'copy' }
+  if (dup.in === 'name') return { act: 'new', copyName: true }
+  // A second row with one id: only a copy can come in beside the first.
+  return mode === 'copy' ? { act: 'copy' } : { act: 'skip' }
 }
 
 /** A copy's name, the way the workshop names one (useWorkshop importShard). */

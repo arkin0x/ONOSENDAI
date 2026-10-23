@@ -9,7 +9,7 @@
  * reasons only; the rest is behind EXPLAIN.
  */
 
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { Checkbox } from '../hud/ui/Checkbox'
 import { Field, Switch } from '../hud/ui/Switch'
@@ -19,12 +19,12 @@ import { useThumbs } from '../store/useThumbs'
 import { useEscape } from '../hooks/useEscape'
 import { useCyberspace } from '../store/useCyberspace'
 import { useShardImport, type ImportRow } from '../store/useShardImport'
-import { dupAction, type DupMode } from '../lib/shardZip'
+import { dupAction, type Dup, type DupMode } from '../lib/shardZip'
 
 const MODES: Array<{ mode: DupMode; label: string; help: string }> = [
-  { mode: 'skip', label: 'SKIP', help: 'Leave out a file whose name one of your shards already has' },
-  { mode: 'copy', label: 'COPY', help: 'Bring it in beside the one you have, named "<name> copy"' },
-  { mode: 'update', label: 'UPDATE', help: 'Replace the one you have and publish it to the same address, so every object placing it draws the new one' },
+  { mode: 'skip', label: 'SKIP', help: 'Leave out a piece you already have, and a file whose name one of your shards has' },
+  { mode: 'copy', label: 'COPY', help: 'Bring it in beside the one you have, as "<name> copy"' },
+  { mode: 'update', label: 'UPDATE', help: 'Replace a piece imported from this kit before, at the same address, so every object placing it draws the new one. A shard of yours that only shares a name is never replaced.' },
 ]
 
 const size = (n: number): string => (n < 1024 ? `${n} B` : n < 1048576 ? `${(n / 1024).toFixed(n < 10240 ? 1 : 0)} KB` : `${(n / 1048576).toFixed(1)} MB`)
@@ -32,15 +32,29 @@ const size = (n: number): string => (n < 1024 ? `${n} B` : n < 1048576 ? `${(n /
 /** The key a row's picture is kept under: per open, so a zip opened again (edited, same name) is drawn again. */
 const thumbKey = (openId: number, key: string): string => `zip:${openId}:${key}`
 
-function Thumb({ row, openId }: { row: ImportRow; openId: number }): JSX.Element {
+/** Pictures asked for this open: each once, so one evicted from the shared cache (it keeps 200) is not drawn again and again. */
+const asked = new Set<string>()
+
+function Thumb({ row, openId, root }: { row: ImportRow; openId: number; root: HTMLElement | null }): JSX.Element {
   const k = thumbKey(openId, row.key)
   const url = useThumbs((s) => s.urls[k])
-  useEffect(() => { if (row.shard && !url) useThumbs.getState().request(k, row.shard) }, [k, row.shard, url])
-  return <span className="zipimport__thumb">{url ? <img src={url} alt="" width={40} height={40} /> : null}</span>
+  const box = useRef<HTMLSpanElement>(null)
+  // Asked for once the row is near the list's visible part, as the Shard Feed's tiles are.
+  useEffect(() => {
+    const shard = row.shard
+    if (!shard || url || asked.has(k)) return
+    const ask = (): void => { if (!asked.has(k)) { asked.add(k); useThumbs.getState().request(k, shard) } }
+    const el = box.current
+    if (!el || typeof IntersectionObserver === 'undefined') { ask(); return }
+    const seen = new IntersectionObserver((entries) => { if (entries.some((e) => e.isIntersecting)) { ask(); seen.disconnect() } }, { root, rootMargin: '120px' })
+    seen.observe(el)
+    return () => seen.disconnect()
+  }, [k, row.shard, url, root])
+  return <span className="zipimport__thumb" ref={box}>{url ? <img src={url} alt="" width={40} height={40} /> : null}</span>
 }
 
 /** The tag at a row's end: what is happening to it, or what will. */
-function status(row: ImportRow, mode: DupMode, dupIn: 'mine' | 'zip' | null): { label: string; tone: string; title?: string } {
+function status(row: ImportRow, mode: DupMode, dup: Dup): { label: string; tone: string; title?: string } {
   if (row.read === 'waiting') return { label: 'WAITING', tone: 'tag--local' }
   if (row.read === 'reading') return { label: 'READING', tone: 'tag--sending' }
   if (row.read === 'error') return { label: 'ERROR', tone: 'tag--failed', title: row.error ?? undefined }
@@ -48,7 +62,12 @@ function status(row: ImportRow, mode: DupMode, dupIn: 'mine' | 'zip' | null): { 
   if (row.run === 'done') return { label: row.outcome === 'update' ? 'UPDATED' : row.outcome === 'copy' ? 'COPIED' : 'DONE', tone: 'tag--live' }
   if (row.run === 'failed') return { label: 'FAILED', tone: 'tag--failed', title: row.failure ?? undefined }
   if (row.run === 'skipped') return { label: 'SKIPPED', tone: 'tag--local', title: row.failure ?? undefined }
-  if (dupIn) return { label: mode === 'skip' ? 'TAKEN' : mode === 'copy' || dupIn === 'zip' ? 'AS COPY' : 'UPDATE', tone: 'tag--sending', title: dupIn === 'zip' ? 'Same name in this zip' : 'One of your shards has this name' }
+  if (dup) {
+    const act = dupAction(dup, mode).act
+    const title = dup.in === 'same' ? 'Imported from this kit before' : dup.in === 'name' ? 'One of your shards has this name' : 'Same path twice in this zip'
+    const label = act === 'skip' ? (dup.in === 'same' ? 'YOURS' : dup.in === 'name' ? 'TAKEN' : 'TWICE') : act === 'update' ? 'UPDATE' : 'AS COPY'
+    return { label, tone: 'tag--sending', title }
+  }
   return { label: 'NEW', tone: '' }
 }
 
@@ -57,7 +76,9 @@ export function ZipImport(): JSX.Element | null {
   const me = useCyberspace((c) => c.identity.pubkey)
   const [showSkipped, setShowSkipped] = useState(false)
   const running = s.phase === 'running'
-  useEscape('modal', s.open, () => { if (!running) s.close() })
+  const [listEl, setListEl] = useState<HTMLUListElement | null>(null)
+  // Like the backdrop: a list that holds a run's results closes only by its button.
+  useEscape('modal', s.open, () => { if (!running && !s.ran) s.close() })
   if (!s.open) return null
 
   const ready = s.rows.filter((r) => r.read === 'ok')
@@ -110,15 +131,15 @@ export function ZipImport(): JSX.Element | null {
             </Field>
           </div>
         )}
-        <ul className="zipimport__list">
+        <ul className="zipimport__list" ref={setListEl}>
           {s.rows.map((r) => {
             const dup = s.dups[r.key] ?? null
-            const tag = status(r, s.dupMode, dup?.in ?? null)
+            const tag = status(r, s.dupMode, dup)
             const folder = r.folder.join('/')
             return (
               <li key={r.key} className={`zipimport__row ${r.picked ? '' : 'is-off'}`}>
                 <Checkbox aria-label={`Import ${r.path}`} checked={r.picked} disabled={running || r.read === 'error' || r.run === 'done'} onCheckedChange={() => s.toggle(r.key)} />
-                <Thumb row={r} openId={s.openId} />
+                <Thumb row={r} openId={s.openId} root={listEl} />
                 <span className="zipimport__text">
                   <span className="zipimport__name">{r.name}</span>
                   <span className="zipimport__meta">
@@ -143,10 +164,12 @@ export function ZipImport(): JSX.Element | null {
         )}
         <Explanation>
           Every .json SNO object and 3D file ({'PLY, STL, OBJ with its MTL, glTF or GLB, VOX'}) in the zip becomes one of
-          your shards, named after its file. {s.foldersOn ? 'Its folders in the zip become folders here.' : 'Folders in the zip are kept for when the workshop has folders.'} Hidden
+          your shards, named after its file, with its path in the zip as its address, so the same zip imported again
+          finds the same pieces. A reference from one piece to another in the zip is pointed at yours. {s.foldersOn ? 'Its folders in the zip become folders here.' : 'Folders in the zip are kept for when the workshop has folders.'} Hidden
           files and __MACOSX are skipped. A 3D file is fitted to a new shard&apos;s grid, as IMPORT fits one. If one of your
-          shards has the name: SKIP leaves the file out, COPY adds it as a copy, UPDATE replaces yours and publishes it to the
-          same address, so everything placing it draws the new one. With PUBLISH on, each shard is signed and sent as PUBLISH
+          shards has the name, or the piece is already yours: SKIP leaves it out, COPY adds a copy, UPDATE replaces a piece
+          imported before at the same address, so everything placing it draws the new one. A shard that only shares a
+          name is never replaced. With PUBLISH on, each shard is signed and sent as PUBLISH
           sends one, one after another; a failed one can be tried again, and is sent to the same address, never twice.
         </Explanation>
         <div className={`modal__row ${primary ? '' : 'zipimport__one'}`}>

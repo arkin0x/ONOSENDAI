@@ -19,13 +19,15 @@ export interface FolderApi {
   assignToFolder: (shardId: string, folderId: string | null) => void
   /** The shard's folder path, outermost first; [] at the top. */
   folderPathOf?: (shardId: string) => string[]
+  /** Resolves once the filing has reached storage. */
+  flush?: () => Promise<void>
 }
 
 /** The shapes of #449's modules that are read here, all optional, since they may be absent or change. */
 interface FoldersStoreModule {
   createFolderPath?: unknown
   assignToFolder?: unknown
-  useShardFolders?: { getState?: () => { tree?: unknown } }
+  useShardFolders?: { getState?: () => { tree?: unknown; flush?: unknown } }
 }
 interface FoldersLibModule {
   folderOf?: unknown
@@ -56,6 +58,7 @@ export function folderApi(mods: FolderModules = found()): FolderApi | null {
     assignToFolder: (shardId, folderId) => (assign as (r: string, f: string | null) => void)(shardId, folderId),
   }
   const getState = store?.useShardFolders?.getState
+  if (typeof getState === 'function' && typeof getState().flush === 'function') api.flush = () => (getState().flush as () => Promise<void>)()
   const folderOf = lib?.folderOf
   const pathOf = lib?.pathOf
   if (typeof getState === 'function' && typeof folderOf === 'function' && typeof pathOf === 'function') {

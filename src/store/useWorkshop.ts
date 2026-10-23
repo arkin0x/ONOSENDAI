@@ -492,12 +492,15 @@ export interface WorkshopState {
   importShard: (model: ShardModel, credit?: Credit, id?: string) => string
   /**
    * Bulk import's add (store/useShardImport): a deep copy of the model as a
-   * new shard of yours under exactly `name`, nothing selected or opened. The
-   * caller has already decided what a taken name means. Its id, and
-   * whether the list reached storage (false when storage is full: the shard
-   * is in the workshop for now, and gone on a reload).
+   * new shard of yours under exactly `name`, nothing selected or opened, with
+   * `id` when given (a kit piece's stable id) or a fresh one. The caller has
+   * already decided what a taken name means. Its id, and whether the list
+   * reached storage (false when storage is full: the shard is in the
+   * workshop for now, and gone on a reload); null when `id` is taken.
    */
-  addShard: (model: ShardModel, name: string) => { id: string; saved: boolean }
+  addShard: (model: ShardModel, name: string, id?: string) => { id: string; saved: boolean } | null
+  /** Write the shard list to storage again; whether it took. */
+  saveNow: () => boolean
   /**
    * Bulk import's UPDATE: the shard keeps its id, its name and its credit
    * and takes everything drawn from `model`, so PUBLISH AGAIN sends the new
@@ -1494,12 +1497,15 @@ export const useWorkshop = create<WorkshopState>((set, get) => {
       return copy.id
     },
 
-    addShard: (model, name) => {
-      const copy: ShardModel = { ...model, id: uuid(), name: name.slice(0, 64), vertices: model.vertices.map(cloneVertex), faces: model.faces.map((f) => [...f] as [number, number, number]), updatedAt: Date.now() }
+    addShard: (model, name, id) => {
+      if (id !== undefined && get().shards.some((s) => s.id === id)) return null
+      const copy: ShardModel = { ...model, id: id ?? uuid(), name: name.slice(0, 64), vertices: model.vertices.map(cloneVertex), faces: model.faces.map((f) => [...f] as [number, number, number]), updatedAt: Date.now() }
       const list = [...get().shards, copy]
       set({ shards: list })
       return { id: copy.id, saved: save(list) }
     },
+
+    saveNow: () => save(get().shards),
 
     replaceShard: (id, model) => {
       const { shards, currentId, past } = get()

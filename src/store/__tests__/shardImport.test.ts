@@ -188,16 +188,14 @@ describe('a taken name', () => {
     expect(rowOf('hall-straight').outcome).toBe('copy')
   })
 
-  it('UPDATE replaces yours, keeping its id, and publishes it to the same address', async () => {
+  it('UPDATE never replaces an unrelated shard that shares the name: the piece comes in beside it', async () => {
     const before = mine()[0]
     await imp().openZip(kitZip())
     imp().setDupMode('update')
     await imp().start()
-    const after = mine().find((s) => s.id === before.id)!
-    expect(mine().filter((s) => s.name === 'hall-straight')).toHaveLength(1)
-    expect(after.vertices.map((v) => v.p)).not.toEqual(before.vertices.map((v) => v.p))
-    expect(rowOf('hall-straight').outcome).toBe('update')
-    expect(sent().some((e) => dOf(e) === before.id)).toBe(true)
+    expect(mine().find((x) => x.id === before.id)!.vertices).toEqual(before.vertices)
+    expect(rowOf('hall-straight').outcome).toBe('copy')
+    expect(mine().find((x) => x.id === 'maze-kit/forest/hall-straight')!.name).toBe('hall-straight copy')
   })
 })
 
@@ -399,5 +397,90 @@ describe('review fixes', () => {
     await running
     expect(Date.now() - t).toBeLessThan(2000)
     expect(imp().phase).toBe('done')
+  })
+})
+
+describe('stable ids and kit references', () => {
+  const ZERO = '0'.repeat(64)
+  const shell = (name: string, targets: string[]): string => JSON.stringify({
+    v: 2, name, unit: 0, mode: 'solid', vertices: [], colors: [], faces: [],
+    refs: targets.map((t) => ['a', `33331:${ZERO}:${t}`]),
+    parts: targets.map((_, i) => [i, 0, 0, 0, 0, 0, 0, 0]),
+  })
+
+  it('gives each piece its path as its id and published d', async () => {
+    await imp().openZip(kitZip())
+    await imp().start()
+    expect(mine().map((x) => x.id).sort()).toEqual(['maze-kit/forest/hall-straight', 'maze-kit/forest/rotunda', 'maze-kit/shared/tetra'])
+    expect(sent().map(dOf).sort()).toEqual(['maze-kit/forest/hall-straight', 'maze-kit/forest/rotunda', 'maze-kit/shared/tetra'])
+  })
+
+  it('the same zip again finds the same pieces: SKIP leaves them, UPDATE replaces them in place at the same address', async () => {
+    await imp().openZip(kitZip())
+    await imp().start()
+    imp().close()
+    vi.mocked(publishMany).mockClear()
+    await imp().openZip(kitZip({ 'maze-kit/forest/rotunda.json': sno('changed', 3) }))
+    expect(imp().dups[rowOf('rotunda').key]).toEqual({ in: 'same', id: 'maze-kit/forest/rotunda' })
+    await imp().start()
+    expect(mine()).toHaveLength(3)
+    expect(sent()).toHaveLength(0)
+    imp().setDupMode('update')
+    await imp().retry()
+    expect(mine()).toHaveLength(3)
+    expect(mine().find((x) => x.id === 'maze-kit/forest/rotunda')!.vertices[1].p).toEqual([3, 0, 0])
+    // Only the piece that changed goes out again: the others match what the ledger says was sent.
+    expect(sent().map(dOf)).toEqual(['maze-kit/forest/rotunda'])
+  })
+
+  it('points a piece placing others in the zip at the importer\'s own pieces', async () => {
+    const me = useCyberspace.getState().identity.pubkey
+    await imp().openZip(kitZip({ 'maze-kit/forest/flooded.json': shell('flooded', ['maze-kit/forest/rotunda', 'maze-kit/shared/tetra']) }))
+    expect(rowOf('flooded').read).toBe('ok')
+    await imp().start()
+    const flooded = mine().find((x) => x.id === 'maze-kit/forest/flooded')!
+    expect(flooded.refs!.map((r) => r[1])).toEqual([`33331:${me}:maze-kit/forest/rotunda`, `33331:${me}:maze-kit/shared/tetra`])
+    const ev = sent().find((e) => dOf(e) === 'maze-kit/forest/flooded')!
+    expect(JSON.parse(ev.content).refs.map((r: string[]) => r[1])).toEqual([`33331:${me}:maze-kit/forest/rotunda`, `33331:${me}:maze-kit/shared/tetra`])
+  })
+
+  it('a reference to a piece not in the zip is an error at review', async () => {
+    await imp().openZip(kitZip({ 'maze-kit/forest/flooded.json': shell('flooded', ['maze-kit/hall-straight']) }))
+    expect(rowOf('flooded').read).toBe('error')
+    expect(rowOf('flooded').error).toBe('Places maze-kit/hall-straight, not in this zip')
+  })
+
+  it('RETRY never publishes a shard storage still refuses', async () => {
+    const setItem = localStorage.setItem.bind(localStorage)
+    const spy = vi.spyOn(localStorage, 'setItem').mockImplementation((k: string, v: string) => {
+      if (k === 'onosendai:shards') throw new DOMException('full', 'QuotaExceededError')
+      setItem(k, v)
+    })
+    try {
+      await imp().openZip(kitZip())
+      await imp().start()
+      await imp().retry()
+      await imp().retry()
+    } finally { spy.mockRestore() }
+    expect(rowOf('hall-straight').run).toBe('failed')
+    expect(sent()).toHaveLength(0)
+  })
+
+  it('reads a glTF whose buffer is named in mixed case and URI-encoded', async () => {
+    const pos = new Float32Array([0, 0, 0, 1, 0, 0, 0, 1, 0])
+    const bin = new Uint8Array(pos.buffer)
+    const gltf = (uri: string): string => JSON.stringify({
+      asset: { version: '2.0' }, scene: 0, scenes: [{ nodes: [0] }], nodes: [{ mesh: 0 }],
+      meshes: [{ primitives: [{ attributes: { POSITION: 0 }, mode: 4 }] }],
+      buffers: [{ uri, byteLength: bin.length }], bufferViews: [{ buffer: 0, byteOffset: 0, byteLength: bin.length }],
+      accessors: [{ bufferView: 0, componentType: 5126, count: 3, type: 'VEC3', min: [0, 0, 0], max: [1, 1, 0] }],
+    })
+    await imp().openZip(new File([zipSync({
+      'k/Tri.gltf': strToU8(gltf('Tri.bin')), 'k/Tri.bin': bin,
+      'k/spaced.gltf': strToU8(gltf('my%20tri.bin')), 'k/my tri.bin': bin,
+    })], 'gltf.zip'))
+    expect(rowOf('Tri').error ?? null).toBeNull()
+    expect(rowOf('Tri').read).toBe('ok')
+    expect(rowOf('spaced').read).toBe('ok')
   })
 })

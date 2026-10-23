@@ -50,6 +50,8 @@ import { Bench } from './Bench'
 import { benchPose, nudgeFor, nudgeLabel, orbitBy, planeAfter, requestView, useBenchView, type NudgeName } from './benchAxes'
 import { stackedSpots } from '../lib/weld'
 import { ObjectPicker } from './ObjectPicker'
+import { ZipImport } from './ZipImport'
+import { useShardImport } from '../store/useShardImport'
 import { useEscape } from '../hooks/useEscape'
 
 const TOOLS: Tool[] = ['view', 'stamp', 'add', 'select', 'face']
@@ -671,6 +673,13 @@ export function Workshop(): JSX.Element | null {
    */
   const importFromFiles = async (list: FileList | File[] | null): Promise<void> => {
     const files = list ? Array.from(list) : []
+    // A zip is bulk import: every shard file in it a new shard of yours (workshop/ZipImport).
+    const zips = files.filter(isZip)
+    if (zips.length) {
+      if (zips.length > 1 || files.length > 1) { say('Import one zip at a time, on its own.'); return }
+      void useShardImport.getState().openZip(zips[0])
+      return
+    }
     const s = w().current()
     if (!files.length || importing || !s) return
     setImporting(true)
@@ -683,6 +692,7 @@ export function Workshop(): JSX.Element | null {
       setImporting(false)
     }
   }
+  const isZip = (f: File): boolean => /\.zip$/i.test(f.name) || f.type === 'application/zip' || f.type === 'application/x-zip-compressed'
   const draggingFiles = (e: React.DragEvent): boolean => Array.from(e.dataTransfer.types).includes('Files')
 
   const ToolIcon = TOOL_ICON[tool]
@@ -700,10 +710,11 @@ export function Workshop(): JSX.Element | null {
         <Bench />
       </div>
       {/* IMPORT's picker, kept mounted so a panel closing cannot drop its answer. */}
-      <input ref={fileInput} type="file" accept={IMPORT_ACCEPT} multiple hidden aria-hidden tabIndex={-1} onChange={(e) => { const list = e.currentTarget.files; void importFromFiles(list ? Array.from(list) : null); e.currentTarget.value = '' }} />
+      <input ref={fileInput} type="file" accept={`${IMPORT_ACCEPT},.zip`} multiple hidden aria-hidden tabIndex={-1} onChange={(e) => { const list = e.currentTarget.files; void importFromFiles(list ? Array.from(list) : null); e.currentTarget.value = '' }} />
       {dropping && <div className="workshop__drop" aria-hidden>DROP TO IMPORT</div>}
       <Intro />
       <Toast />
+      <ZipImport />
 
       {/* Top left: the three chips and the history in one row, wrapping on a phone,
           and the open panel under whatever the row wrapped to. */}
@@ -864,7 +875,7 @@ export function Workshop(): JSX.Element | null {
           <div className="workshop__list-row">
             <button className="workshop__new" onClick={() => w().create()}>+ NEW SHARD</button>
             <button className="workshop__btn" onClick={() => void paste()} title="An object copied from here or anywhere">PASTE</button>
-            <button className="workshop__btn" disabled={importing} onClick={() => fileInput.current?.click()} title={`A 3D file, fitted to the grid and put down here: ${IMPORT_FORMATS_LABEL}. Or drop one on the workshop.`}>{importing ? 'READING' : 'IMPORT'}</button>
+            <button className="workshop__btn" disabled={importing} onClick={() => fileInput.current?.click()} title={`A 3D file, fitted to the grid and put down here: ${IMPORT_FORMATS_LABEL}. Or a .zip of shards, each a new shard. Or drop one on the workshop.`}>{importing ? 'READING' : 'IMPORT'}</button>
           </div>
           {pasteOpen && (
             <div className="workshop__paste">

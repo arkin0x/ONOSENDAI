@@ -490,7 +490,28 @@ export interface WorkshopState {
    * beside it, as snocrash's adopt does (arkinox, 2026-10-10).
    */
   importShard: (model: ShardModel, credit?: Credit, id?: string) => string
+  /**
+   * Bulk import's add (store/useShardImport): a deep copy of the model as a
+   * new shard of yours under exactly `name`, nothing selected or opened. The
+   * caller has already decided what a taken name means. Its id.
+   */
+  addShard: (model: ShardModel, name: string) => string
+  /**
+   * Bulk import's UPDATE: the shard keeps its id, its name and its credit
+   * and takes everything drawn from `model`, so PUBLISH AGAIN sends the new
+   * version to the same address and every object placing it follows. On the
+   * bench, one UNDO brings the old version back. False when there is no such
+   * shard.
+   */
+  replaceShard: (id: string, model: ShardModel) => boolean
   current: () => ShardModel | null
+}
+
+/** A shard from wire form (DECK-0003 §1), as PASTE and bulk import read it; null if it is not one. */
+export function shardFromText(text: string, id: string): ShardModel | null {
+  let raw: unknown
+  try { raw = JSON.parse(text) } catch { return null }
+  return fromPayload(raw, id)
 }
 
 /** Whose object a model was made from (REMIX): sno-core's, shared with snocrash. */
@@ -1451,9 +1472,7 @@ export const useWorkshop = create<WorkshopState>((set, get) => {
     },
 
     importText: (text) => {
-      let raw: unknown
-      try { raw = JSON.parse(text) } catch { return null }
-      const s = fromPayload(raw, uuid())
+      const s = shardFromText(text, uuid())
       if (!s) return null
       const list = [...get().shards, s]
       set({ shards: list, currentId: s.id, selection: [], partSel: [], selectedFace: null, facePick: [], past: [], future: [], notice: null })
@@ -1470,6 +1489,38 @@ export const useWorkshop = create<WorkshopState>((set, get) => {
       const list = [...get().shards, copy]
       set({ shards: list }); save(list)
       return copy.id
+    },
+
+    addShard: (model, name) => {
+      const copy: ShardModel = { ...model, id: uuid(), name: name.slice(0, 64), vertices: model.vertices.map(cloneVertex), faces: model.faces.map((f) => [...f] as [number, number, number]), updatedAt: Date.now() }
+      const list = [...get().shards, copy]
+      set({ shards: list }); save(list)
+      return copy.id
+    },
+
+    replaceShard: (id, model) => {
+      const { shards, currentId, past } = get()
+      const i = shards.findIndex((s) => s.id === id)
+      if (i < 0) return false
+      const old = shards[i]
+      const { credit: _drop, ...drawn } = model as ShardModel & { credit?: unknown }
+      const kept = (old as ShardModel & { credit?: unknown }).credit
+      const next = {
+        ...drawn,
+        id: old.id,
+        name: old.name,
+        vertices: model.vertices.map(cloneVertex),
+        faces: model.faces.map((f) => [...f] as [number, number, number]),
+        updatedAt: Date.now(),
+        ...(kept !== undefined ? { credit: kept } : {}),
+      } as ShardModel
+      const list = shards.slice()
+      list[i] = next
+      // On the bench it is an edit like any other: UNDO brings the old one back.
+      if (id === currentId) set({ shards: list, past: [...past.slice(-(HISTORY - 1)), old], future: [], selection: [], partSel: [], selectedFace: null, facePick: [] })
+      else set({ shards: list })
+      save(list)
+      return true
     },
 
     current: () => get().shards.find((s) => s.id === get().currentId) ?? null,

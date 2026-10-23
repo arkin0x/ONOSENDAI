@@ -9,6 +9,7 @@ import { SpectateBar } from './hud/SpectateBar'
 import { Workshop } from './workshop/Workshop'
 import { DeployBar } from './hud/DeployBar'
 import { StashModals } from './hud/StashModals'
+import { ThumbHost } from './scene/ThumbStage'
 import { SecretModal } from './hud/SecretModal'
 import { FocusBar } from './hud/FocusBar'
 import { BuildBar } from './hud/BuildBar'
@@ -48,6 +49,7 @@ import { ProfileView } from './hud/ProfileView'
 import { ProfileModal } from './hud/ProfileModal'
 import { useProfileView } from './store/useProfileView'
 import { TouchControls } from './hud/TouchControls'
+import { WalkLookSphere } from './hud/WalkLookSphere'
 import { SyncWarning } from './hud/SyncWarning'
 import { RouteOverlay } from './hud/RouteOverlay'
 import { ViewMenu } from './hud/ViewMenu'
@@ -73,6 +75,7 @@ import { useCyberspace } from './store/useCyberspace'
 import { useHyperspace } from './store/useHyperspace'
 import { useSecrets, watchFocus } from './store/useSecrets'
 import { useInventory } from './store/useInventory'
+import { useShardFolders } from './store/useShardFolders'
 import { useFound } from './store/useFound'
 import { useAvatars } from './store/useAvatars'
 import { setSyncPriority } from './lib/hyperspace/anchors'
@@ -98,7 +101,7 @@ export default function App(): JSX.Element {
   useDiscovery()
   // The chain drains to the relay from here on, whenever Live is on, and the
   // targets' positions are kept current.
-  useEffect(() => { startPublisher(); startTracker(); startPresence(); startSelfSync(); startCalibration(); void useCyberspace.getState().initSigner(); useHyperspace.getState().startSync(); useAvatars.getState().loadMine(); void useSecrets.getState().load(); void useInventory.getState().load(); void useFound.getState().load(); watchFocus(); watchNearbyReturn() }, [])
+  useEffect(() => { startPublisher(); startTracker(); startPresence(); startSelfSync(); startCalibration(); void useCyberspace.getState().initSigner(); useHyperspace.getState().startSync(); useAvatars.getState().loadMine(); void useSecrets.getState().load(); void useInventory.getState().load(); void useShardFolders.getState().load(); void useFound.getState().load(); watchFocus(); watchNearbyReturn() }, [])
   // onosendai.tech/C/<hex>: a place or a region to open on (store/useCoordRoute.ts).
   useEffect(() => startCoordRoute(), [])
   // onosendai.tech/demo (or /demo/<step>): the guided tour (store/useDemo.ts).
@@ -355,6 +358,10 @@ export default function App(): JSX.Element {
             (arkinox, 2026-10-12), and placing moves no avatar, so there is
             no route to show. */}
         {showPad && !offerUp && !deploying && <RouteOverlay />}
+        {/* WALK's look ball, above the menu button (WalkLookSphere.tsx). Not
+            tied to the pad, which a tap on the scene folds; not while the
+            menu covers the scene or the deploy bar holds this corner. */}
+        {!crowded && !offerUp && !deploying && <WalkLookSphere />}
       </div>
       {/* Off-head too: tapping a block hides the pad like any scene tap, and
           without this there was no way to bring it back while viewing. */}
@@ -372,6 +379,8 @@ export default function App(): JSX.Element {
       <SyncWarning />
       {crowded && <div className="mobile-overlay" />}
       <Workshop />
+      {/* The one hidden canvas that draws every list's shard pictures, there only while it has some to draw. */}
+      <ThumbHost />
       {/* Docked in the lower left, a gap short of the pad while the pad is on
           screen (arkinox, 2026-10-12). */}
       <DeployBar pad={showPad && !offerUp && !modalUp} />

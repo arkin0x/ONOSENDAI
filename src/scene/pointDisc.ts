@@ -16,6 +16,7 @@
  */
 
 import { ShaderMaterial, type BufferAttribute, type BufferGeometry } from 'three'
+import { HEADLAMP_DISTANCE_GLSL, HEADLAMP_NEVER, headlampUniforms } from './headlamp'
 
 /** How a family of points looks. Sizes are diameters: world units, then CSS pixels. */
 export interface DiscProfile {
@@ -47,6 +48,7 @@ const vertexShader = /* glsl */ `
 
   varying vec3 vColor;
   varying float vPx;
+  varying float vHeadlampDistance;
 
   #include <clipping_planes_pars_vertex>
 
@@ -66,6 +68,7 @@ const vertexShader = /* glsl */ `
 
     gl_PointSize = vPx;
     gl_Position = projectionMatrix * mv;
+    vHeadlampDistance = length(mv.xyz);
   }
 `
 
@@ -75,7 +78,8 @@ const fragmentShader = /* glsl */ `
 
   varying vec3 vColor;
   varying float vPx;
-
+  varying float vHeadlampDistance;
+${HEADLAMP_DISTANCE_GLSL}
   #include <clipping_planes_pars_fragment>
 
   void main() {
@@ -92,6 +96,9 @@ const fragmentShader = /* glsl */ `
     // Brighter than the colour it was given, most at the centre: the bloom pass
     // keys off brightness, so this is where the glow comes from.
     vec3 color = vColor * (1.0 + uGlow * (1.0 - smoothstep(0.0, 0.8, d)));
+    // The world's headlamp, distance only: a point has no face to turn
+    // (scene/headlamp.ts). Off, and off the world, the colour is untouched.
+    if (uHeadlamp > 0.5) color *= headlampDistance(vHeadlampDistance);
 
     gl_FragColor = vec4(color, alpha);
   }
@@ -100,8 +107,11 @@ const fragmentShader = /* glsl */ `
 /**
  * A material for one family of points. The geometry must carry `aColor`;
  * `withDiscColors` puts it there beside the `color` every other material reads.
+ * With `headlamp`, the points dim with distance as the world's faces do
+ * (scene/headlamp.ts), through the uniforms every headlamp material shares;
+ * without it (the bench, the thumbnails) the same program, never dimmed.
  */
-export function createDiscMaterial(profile: DiscProfile, opacity: number): ShaderMaterial {
+export function createDiscMaterial(profile: DiscProfile, opacity: number, headlamp = false): ShaderMaterial {
   return new ShaderMaterial({
     vertexShader,
     fragmentShader,
@@ -113,6 +123,8 @@ export function createDiscMaterial(profile: DiscProfile, opacity: number): Shade
       uOpacity: { value: opacity },
       uDpr: { value: 1 },
       uBufferHeight: { value: 1000 },
+      uHeadlamp: headlamp ? headlampUniforms.uHeadlamp : HEADLAMP_NEVER,
+      uHeadlampReach: headlampUniforms.uHeadlampReach,
     },
     transparent: true,
     depthWrite: false,

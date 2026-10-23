@@ -4,9 +4,9 @@
  * chain trail toggle, not buttons. Each on its own row, each with a title and
  * short subtitle in gray", then moved together into a View panel).
  *
- * Five Field rows with a Switch each: Terrain dots, hX boxes, Hide avatar in
- * WALK, Chain trail and
- * Region keys. Each drives the flag its old control drove and is remembered
+ * Seven Field rows with a Switch each: Terrain dots, hX boxes, Hide avatar in
+ * WALK, Look sphere in WALK, Chain trail, Region keys and Headlamp. Each
+ * drives the flag its old control drove and is remembered
  * the same way. The old controls are gone: no chips under Movement proof, no
  * trail switch in Proof chain, no checkbox in the Region keys list.
  */
@@ -88,17 +88,19 @@ const ROWS: Array<[string, string, string]> = [
   ['view-terrain-dots', 'Terrain dots', 'Terrain difficulty: warmer dots cost more work to hop to.'],
   ['view-hx-boxes', '<span class="view__hx">h</span>X boxes', 'The math barriers where moving costs increase.'],
   ['view-walk-avatar', 'Hide avatar in WALK', 'Walk without your own avatar around the camera.'],
+  ['view-walk-look', 'Look sphere in WALK', 'A ball above the menu button to drag and look around.'],
   ['view-chain-trail', 'Chain trail', 'The red line of your movement history.'],
   ['view-region-keys', 'Region keys', 'Green cages on the regions you hold keys for.'],
+  ['view-headlamp', 'Headlamp', 'Light shards from your view so their shape and depth show.'],
 ]
 
 describe('the View panel', () => {
-  it('is a panel titled View with five switches, one to a row, each a title and a gray subtitle, in order', () => {
+  it('is a panel titled View with seven switches, one to a row, each a title and a gray subtitle, in order', () => {
     const html = view()
     expect(html).toMatch(/^<section class="panel panel--view">/)
     expect(html).toContain('<h2>View</h2>')
-    expect(html.match(/class="ui-field"/g)).toHaveLength(5)
-    expect(html.match(/role="switch"/g)).toHaveLength(5)
+    expect(html.match(/class="ui-field"/g)).toHaveLength(ROWS.length)
+    expect(html.match(/role="switch"/g)).toHaveLength(ROWS.length)
     let at = 0
     for (const [id, title, hint] of ROWS) {
       const label = `<label class="ui-field__text" for="${id}"><span class="ui-field__label">${title}</span><span class="ui-field__hint">${hint.replace("'", '&#x27;')}</span></label>`
@@ -115,14 +117,14 @@ describe('the View panel', () => {
 
     viewSwitch('view-terrain-dots').props.onCheckedChange(false)
     expect(useLayers.getState()).toMatchObject({ dots: false, boxes: true })
-    expect(JSON.parse(localStorage.getItem(LAYERS_KEY) ?? 'null')).toEqual({ dots: false, boxes: true, walkAvatarHidden: false })
+    expect(JSON.parse(localStorage.getItem(LAYERS_KEY) ?? 'null')).toEqual({ dots: false, boxes: true, walkAvatarHidden: false, walkLookSphere: true, headlamp: true })
     expect(switchTag(view(), 'view-terrain-dots')).toContain('aria-checked="false"')
     expect(switchTag(view(), 'view-hx-boxes')).toContain('aria-checked="true"')
 
     viewSwitch('view-hx-boxes').props.onCheckedChange(false)
     viewSwitch('view-terrain-dots').props.onCheckedChange(true)
     expect(useLayers.getState()).toMatchObject({ dots: true, boxes: false })
-    expect(JSON.parse(localStorage.getItem(LAYERS_KEY) ?? 'null')).toEqual({ dots: true, boxes: false, walkAvatarHidden: false })
+    expect(JSON.parse(localStorage.getItem(LAYERS_KEY) ?? 'null')).toEqual({ dots: true, boxes: false, walkAvatarHidden: false, walkLookSphere: true, headlamp: true })
     expect(viewSwitch('view-hx-boxes').props.checked).toBe(false)
 
     viewSwitch('view-hx-boxes').props.onCheckedChange(true)
@@ -138,6 +140,29 @@ describe('the View panel', () => {
     expect(switchTag(view(), 'view-walk-avatar')).toContain('aria-checked="true"')
     viewSwitch('view-walk-avatar').props.onCheckedChange(false)
     expect(useLayers.getState().walkAvatarHidden).toBe(false)
+  })
+
+  it('Look sphere in WALK starts on and drives the layer store, remembered on this device', () => {
+    expect(useLayers.getState().walkLookSphere).toBe(true)
+    expect(switchTag(view(), 'view-walk-look')).toContain('aria-checked="true"')
+    viewSwitch('view-walk-look').props.onCheckedChange(false)
+    expect(useLayers.getState().walkLookSphere).toBe(false)
+    expect(JSON.parse(localStorage.getItem(LAYERS_KEY) ?? 'null')).toMatchObject({ walkLookSphere: false })
+    expect(switchTag(view(), 'view-walk-look')).toContain('aria-checked="false"')
+    viewSwitch('view-walk-look').props.onCheckedChange(true)
+    expect(useLayers.getState().walkLookSphere).toBe(true)
+  })
+
+  it('Headlamp starts on and drives the layer store, remembered on this device', () => {
+    expect(useLayers.getState().headlamp).toBe(true)
+    expect(switchTag(view(), 'view-headlamp')).toContain('aria-checked="true"')
+    viewSwitch('view-headlamp').props.onCheckedChange(false)
+    expect(useLayers.getState().headlamp).toBe(false)
+    expect(JSON.parse(localStorage.getItem(LAYERS_KEY) ?? 'null')).toMatchObject({ headlamp: false })
+    expect(switchTag(view(), 'view-headlamp')).toContain('aria-checked="false"')
+    viewSwitch('view-headlamp').props.onCheckedChange(true)
+    expect(useLayers.getState().headlamp).toBe(true)
+    expect(JSON.parse(localStorage.getItem(LAYERS_KEY) ?? 'null')).toMatchObject({ headlamp: true })
   })
 
   it('Chain trail drives showTrail, remembered on this device', () => {

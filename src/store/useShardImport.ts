@@ -109,6 +109,8 @@ export interface ShardImportState {
    * not logged in). Nothing new is published over an unchecked address.
    */
   remote: 'idle' | 'checking' | 'checked' | 'unknown'
+  /** The key `remote` was checked for: another key's addresses were never asked about. */
+  checkedFor: string
   /** Whether a run has happened on this zip: the list then holds what it did. */
   ran: boolean
   stopAsked: boolean
@@ -140,7 +142,7 @@ const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout
 const text = new TextDecoder('utf-8')
 const baseName = (path: string): string => path.split('/').pop() ?? path
 
-const blank = { open: false, fileName: '', phase: 'opening' as Phase, error: null, rows: [], skipped: [], dups: {}, dupMode: 'skip' as DupMode, publish: true, foldersOn: false, kit: '', published: [] as string[], remote: 'idle' as const, ran: false, stopAsked: false, stall: null }
+const blank = { open: false, fileName: '', phase: 'opening' as Phase, error: null, rows: [], skipped: [], dups: {}, dupMode: 'skip' as DupMode, publish: true, foldersOn: false, kit: '', published: [] as string[], remote: 'idle' as const, checkedFor: '', ran: false, stopAsked: false, stall: null }
 
 /** Your shards as duplicate matching sees them. */
 function mine(): Array<{ id: string; name: string; folder: string[] | null }> {
@@ -161,12 +163,11 @@ function dupsFor(rows: readonly ImportRow[], kit: string, published: readonly st
 export function plannedBlocks(rows: readonly ImportRow[], dups: Record<string, Dup>, mode: DupMode, published: readonly string[], mineIds: readonly string[]): Map<string, string> {
   const base = new Set([...mineIds, ...published])
   const live = rows.filter((r) => r.picked && r.read === 'ok' && r.run !== 'skipped')
-  const coming = new Set(live.filter((r) => {
-    if (r.run === 'done') return true
-    const act = dupAction(dups[r.key] ?? null, mode).act
-    return act === 'new' || act === 'update'
-  }).map((r) => r.id))
-  return blockedRows(live.filter((r) => r.run !== 'done').map((r) => ({ key: r.key, id: r.id, refs: r.shard?.refs })), refTargets(rows), base, coming)
+  const act = (r: ImportRow) => dupAction(dups[r.key] ?? null, mode).act
+  const coming = new Set(live.filter((r) => r.run === 'done' || act(r) === 'new' || act(r) === 'update').map((r) => r.id))
+  // Every row that will come in is checked, a COPY under its fresh id too; one SKIP leaves out is not.
+  const entering = live.filter((r) => r.run !== 'done' && (r.shardId !== null || act(r) !== 'skip'))
+  return blockedRows(entering.map((r) => ({ key: r.key, id: r.id, refs: r.shard?.refs })), refTargets(rows), base, coming)
 }
 
 /** Addresses asked about per relay question. */
@@ -268,8 +269,26 @@ export const useShardImport = create<ShardImportState>((set, get) => {
   /** A row left out for a piece it places: a candidate again once the picks change. */
   const unskip = (): void => set({ rows: get().rows.map((r) => (r.run === 'skipped' && r.failure?.startsWith('Places ') ? { ...r, run: 'idle', failure: null } : r)) })
 
+  /** Ask your relays about the zip's addresses not already in your workshop, for the key signed in now. */
+  const checkRelays = async (): Promise<Pick<ShardImportState, 'published' | 'remote' | 'checkedFor'>> => {
+    const me = useCyberspace.getState().identity.pubkey
+    if (!me) return { published: [], remote: 'unknown', checkedFor: '' }
+    const fresh = get().rows.filter((r) => r.read === 'ok' && !useWorkshop.getState().shards.some((x) => x.id === r.id)).map((r) => r.id)
+    if (!fresh.length) return { published: [], remote: 'checked', checkedFor: me }
+    set({ remote: 'checking' })
+    const found = await publishedAt(me, fresh).catch(() => null)
+    return found ? { published: [...found], remote: 'checked', checkedFor: me } : { published: [], remote: 'unknown', checkedFor: me }
+  }
+
   const run = async (): Promise<void> => {
     const g = generation
+    // Checked for another key (an account switched while the list was open): ask again for this one.
+    if (get().publish && useCyberspace.getState().identity.pubkey && get().checkedFor !== useCyberspace.getState().identity.pubkey) {
+      set({ phase: 'running', ran: true, stall: null })
+      const again = await checkRelays()
+      if (g !== generation) return
+      set(again)
+    }
     const me = useCyberspace.getState().identity.pubkey
     const publish = get().publish && !!me
     const mode = get().dupMode
@@ -325,7 +344,7 @@ export const useShardImport = create<ShardImportState>((set, get) => {
           } else {
             const fresh = action.act === 'copy'
             // A new address goes out only once your relays said nothing of yours is there.
-            if (!fresh && publish && remote !== 'checked') { patch(key, { run: 'failed', failure: 'Could not check this address on your relays' }); inHand = null; continue }
+            if (!fresh && publish && (remote !== 'checked' || get().checkedFor !== me)) { patch(key, { run: 'failed', failure: 'Could not check this address on your relays' }); inHand = null; continue }
             const added = ws.addShard(model, fresh || action.copyName ? copyName(r.name) : r.name, fresh ? undefined : r.id)
             if (!added) { patch(key, { run: 'failed', failure: 'Its id is taken' }); inHand = null; continue }
             id = added.id
@@ -415,22 +434,14 @@ export const useShardImport = create<ShardImportState>((set, get) => {
       if (g !== generation) return
       zip = null
       // What your relays already hold at these addresses (another device, or another kit with this folder name).
-      const me = useCyberspace.getState().identity.pubkey
-      const fresh = get().rows.filter((r) => r.read === 'ok' && !useWorkshop.getState().shards.some((x) => x.id === r.id)).map((r) => r.id)
-      let published: string[] = []
-      let remote: ShardImportState['remote'] = 'unknown'
-      if (me && fresh.length) {
-        set({ remote: 'checking' })
-        const found = await publishedAt(me, fresh).catch(() => null)
-        if (g !== generation) return
-        if (found) { published = [...found]; remote = 'checked' }
-      } else if (me) remote = 'checked'
+      const { published, remote, checkedFor } = await checkRelays()
+      if (g !== generation) return
       // A reference to a piece of the kit that will not exist would draw as a placeholder.
       const targets = refTargets(get().rows)
       const ok = get().rows.filter((r) => r.read === 'ok')
       const blocked = blockedRows(ok.map((r) => ({ key: r.key, id: r.id, refs: r.shard?.refs })), targets, new Set([...useWorkshop.getState().shards.map((x) => x.id), ...published]), new Set(ok.map((r) => r.id)))
       for (const [key, missing] of blocked) patch(key, { read: 'error', error: `Places ${missing}, not in this zip`, picked: false })
-      set({ phase: 'review', published, remote, dups: dupsFor(get().rows, get().kit, published) })
+      set({ phase: 'review', published, remote, checkedFor, dups: dupsFor(get().rows, get().kit, published) })
     },
 
     toggle: (key) => {

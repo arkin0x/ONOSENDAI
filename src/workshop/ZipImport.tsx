@@ -100,13 +100,15 @@ export function ZipImport(): JSX.Element | null {
   const working = s.rows.filter((r) => r.run !== 'idle' && r.run !== 'skipped').length
   const workTotal = working + s.rows.filter((r) => r.run === 'idle' && r.picked && r.read === 'ok').length
 
+  const yours = ready.filter((r) => { const d = s.dups[r.key]; return d?.in === 'same' || d?.in === 'published' }).length
   let line: string
   if (s.error) line = s.error
   else if (s.phase === 'opening') line = 'OPENING'
   else if (s.phase === 'reading') line = s.remote === 'checking' ? 'CHECKING YOUR RELAYS' : `READING ${s.rows.length - reading} OF ${s.rows.length}`
+  else if (running && s.remote === 'checking') line = 'CHECKING YOUR RELAYS'
   else if (running) line = `${publish ? 'PUBLISHING' : 'ADDING'} ${Math.min(done + failed + 1, workTotal)} OF ${workTotal}`
   else if (s.phase === 'done') line = `${done} DONE${failed ? ` · ${failed} FAILED` : ''}`
-  else line = [`${ready.length} SHARD${ready.length === 1 ? '' : 'S'}`, errors ? `${errors} ERROR${errors === 1 ? '' : 'S'}` : '', s.skipped.length ? `${s.skipped.length} SKIPPED` : '', publish && s.remote === 'unknown' ? 'RELAYS NOT CHECKED' : ''].filter(Boolean).join(' · ')
+  else line = [`${ready.length} SHARD${ready.length === 1 ? '' : 'S'}`, yours ? `${yours} ALREADY YOURS` : '', errors ? `${errors} ERROR${errors === 1 ? '' : 'S'}` : '', s.skipped.length ? `${s.skipped.length} SKIPPED` : '', publish && s.remote === 'unknown' ? 'RELAYS NOT CHECKED' : ''].filter(Boolean).join(' · ')
   const fraction = s.phase === 'reading' ? (s.rows.length - reading) / Math.max(1, s.rows.length) : running || s.phase === 'done' ? (done + failed) / Math.max(1, workTotal) : 0
 
   const primary = (() => {

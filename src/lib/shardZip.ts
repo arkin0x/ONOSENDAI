@@ -255,10 +255,12 @@ export function hasPlaceholders(refs: readonly (readonly unknown[])[] | undefine
 
 /**
  * The rows that cannot come in because a piece they place will not exist,
- * each with the first such piece. `base` is what exists already (yours, or
- * published by you); `coming` the ids of the rows about to come in. A row
- * left out takes its id out of `coming`, which may leave out a row placing
- * it, so this repeats until nothing changes.
+ * each with the first such piece. `rows` are the rows about to come in,
+ * whatever id each gets (a COPY's is fresh, and still checked); `base` is
+ * what exists already (yours, or published by you); `coming` the ids the
+ * rows bring under their own id. A row left out takes its id out of
+ * `coming`, which may leave out a row placing it, so this repeats until
+ * nothing changes.
  */
 export function blockedRows(rows: ReadonlyArray<{ key: string; id: string; refs?: readonly (readonly unknown[])[] }>, targets: ReadonlyMap<string, string>, base: ReadonlySet<string>, coming: ReadonlySet<string>): Map<string, string> {
   const live = new Set(coming)
@@ -267,9 +269,9 @@ export function blockedRows(rows: ReadonlyArray<{ key: string; id: string; refs?
     changed = false
     const exists = new Set([...base, ...live])
     for (const r of rows) {
-      if (out.has(r.key) || !live.has(r.id)) continue
+      if (out.has(r.key)) continue
       const missing = unresolved(r.refs, targets, exists)
-      if (missing.length) { out.set(r.key, missing[0]); if (!base.has(r.id)) live.delete(r.id); changed = true }
+      if (missing.length) { out.set(r.key, missing[0]); if (live.has(r.id) && !base.has(r.id)) live.delete(r.id); changed = true }
     }
   }
   return out

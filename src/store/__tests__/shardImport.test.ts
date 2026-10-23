@@ -103,6 +103,7 @@ beforeEach(() => {
   timing.sendDeadlineMs = 90_000
   vi.mocked(publishMany).mockClear()
   vi.mocked(publishMany).mockImplementation(async () => ({ ok: true, accepted: ['wss://relay.test'] }))
+  vi.mocked(queryEach).mockClear()
   vi.mocked(queryEach).mockImplementation(async () => [{ url: 'wss://relay.test', outcome: 'answered', events: [] }])
   useCyberspace.setState({ signEvent: realSign })
   usePublished.setState({ ledger: {}, publishing: false, retracting: false })
@@ -566,5 +567,43 @@ describe('addresses already yours on your relays', () => {
     } finally { useCyberspace.setState({ identity }) }
     expect(imp().stall).toBe('Your key changed.')
     expect(sent()).toHaveLength(1)
+  })
+})
+
+describe('round 4', () => {
+  it('a key switched after review is checked again on its own relays before anything new goes out', async () => {
+    const identity = useCyberspace.getState().identity
+    await imp().openZip(kitZip())
+    expect(vi.mocked(queryEach)).toHaveBeenCalledTimes(1)
+    const other = 'd'.repeat(64)
+    // B's relays hold B's rotunda.
+    vi.mocked(queryEach).mockImplementation(async () => [{ url: 'wss://relay.test', outcome: 'answered', events: [{ id: 'e'.repeat(64), pubkey: other, kind: 33331, created_at: 1, tags: [['d', 'maze-kit/forest/rotunda']], content: '{}', sig: '' }] }])
+    useCyberspace.setState({ identity: { ...identity, pubkey: other } })
+    try {
+      await imp().start()
+    } finally { useCyberspace.setState({ identity }) }
+    expect(vi.mocked(queryEach).mock.calls.at(-1)![0]).toMatchObject({ authors: [other] })
+    expect(imp().checkedFor).toBe(other)
+    expect(rowOf('rotunda').run).toBe('skipped')
+  })
+
+  it('a COPY whose reference names a piece that will not exist does not come in', async () => {
+    const ZERO = '0'.repeat(64)
+    const shellJson = JSON.stringify({ v: 2, name: 's', unit: 0, mode: 'solid', vertices: [], colors: [], faces: [], refs: [['a', `33331:${ZERO}:maze-kit/forest/rotunda`]], parts: [[0, 0, 0, 0, 0, 0, 0, 0]] })
+    await imp().openZip(kitZip({ 'maze-kit/forest/shell.json': shellJson }))
+    await imp().start()
+    // The shell is yours; then the rotunda is deleted here (and was never published, as far as the relays say).
+    expect(mine().some((x) => x.id === 'maze-kit/forest/shell')).toBe(true)
+    useWorkshop.getState().remove('maze-kit/forest/rotunda')
+    imp().close()
+    vi.mocked(publishMany).mockClear()
+    await imp().openZip(kitZip({ 'maze-kit/forest/shell.json': shellJson }))
+    imp().setDupMode('copy')
+    imp().toggle(rowOf('rotunda').key)
+    await imp().start()
+    expect(imp().dups[rowOf('shell').key]).toEqual({ in: 'same', id: 'maze-kit/forest/shell' })
+    expect(rowOf('shell').run).toBe('skipped')
+    expect(rowOf('shell').failure).toBe('Places maze-kit/forest/rotunda, which is not coming in')
+    expect(mine().filter((x) => x.name.startsWith('shell'))).toHaveLength(1)
   })
 })

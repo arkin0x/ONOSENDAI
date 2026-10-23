@@ -54,4 +54,5 @@ export const PLAYLIST: Track[] = [
   { url: 'https://media.basspistol.com/basspistol.com/headcleaner/1-radius.mp3' },
   { url: 'https://media.basspistol.com/basspistol.com/headcleaner/2-headcleaner.mp3' },
   { url: 'https://media.basspistol.com/basspistol.com/kick-n-base-made-in-barcelona/1-larry.mp3' },
+  { url: 'https://media.basspistol.com/basspistol.com/kick-n-base-made-in-barcelona/2-night-ride.mp3' },
 ]

@@ -154,7 +154,7 @@ export function TvSpinHost(): JSX.Element | null {
   }, [shard])
   return (
     <div ref={host} className="tv__spinhost" aria-hidden="true">
-      <ShardSpin shard={shard} size={SPIN_PX} preserve pace={paceSpin} />
+      <ShardSpin shard={shard} size={SPIN_PX} preserve pace={paceSpin} ignoreOpacity={item?.kind !== 'object'} />
     </div>
   )
 }

@@ -26,7 +26,8 @@ import { Box, ChevronDown, ChevronUp, ClipboardCopy, ClipboardPaste, Copy, CopyP
 import { noCallout, useRepeatable } from '../hooks/useRepeatable'
 import { PaletteModal } from './PaletteModal'
 import { Explanation } from '../hud/Explanation'
-import { DIVISIONS, MAX_EXTENT, MAX_UNIT, MIN_EXTENT, MODES, TICKS_PER_UNIT, neededExtent, rgbToHex, ticksOf, toPayload, unitsLabel, type ShardMode , type ShardModel} from 'sno-core/shards'
+import { DIVISIONS, MAX_EXTENT, MAX_UNIT, MIN_EXTENT, MODES, OPACITY_FLOOR, TICKS_PER_UNIT, neededExtent, rgbToHex, ticksOf, toPayload, unitsLabel, type ShardMode , type ShardModel} from 'sno-core/shards'
+import { opacityPercent, stepOpacity } from '../lib/opacityStep'
 import { stepDivision } from './divisions'
 import { IMPORT_ACCEPT, IMPORT_FORMATS_LABEL } from 'sno-core/importFile'
 import { importFitFor } from 'sno-core/meshToShard'
@@ -749,6 +750,15 @@ export function Workshop(): JSX.Element | null {
                 <button key={m} className={`workshop__mode ${shard.mode === m ? 'is-on' : ''}`} aria-pressed={shard.mode === m} onClick={() => w().setMode(m)}>{m.toUpperCase()}</button>
               ))}
             </div>
+          </div>
+          {/* How solid the object draws (DECK-0003 §1.11): a stepper in
+              fives like the rows below it; 100 is solid and writes nothing. */}
+          <div className="workshop__row" role="group" aria-label="Opacity">
+            <span className="workshop__label">OPACITY</span>
+            <button className="workshop__btn" {...bind(() => w().setOpacity(stepOpacity(w().current()?.opacity, -1)))} disabled={opacityPercent(shard.opacity) <= OPACITY_FLOOR} aria-label="More see-through" title="More see-through">−</button>
+            <span className="workshop__value">{opacityPercent(shard.opacity)}%</span>
+            <button className="workshop__btn" {...bind(() => w().setOpacity(stepOpacity(w().current()?.opacity, 1)))} disabled={opacityPercent(shard.opacity) >= 100} aria-label="More solid" title="More solid">+</button>
+            <span className="workshop__unit-size" title="Avatars always draw solid.">100% is solid</span>
           </div>
           {/* A switch, as the avatar trail, hX and region key settings are,
               in the workshop's own green (arkinox, 2026-10-10). */}

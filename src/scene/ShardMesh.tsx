@@ -17,11 +17,7 @@
 import { useEffect, useMemo, useRef, type ReactNode } from 'react'
 import { useFrame, type ThreeEvent } from '@react-three/fiber'
 import {
-  AddEquation,
   FrontSide,
-  CustomBlending,
-  OneFactor,
-  ZeroFactor,
   BufferGeometry,
   DoubleSide,
   Float32BufferAttribute,
@@ -30,7 +26,6 @@ import {
   Line,
   LineBasicMaterial,
   Matrix4,
-  ReplaceStencilOp,
   type Plane,
 } from 'three'
 import { easeOutCubic, hash01, scrambleOffset, seedOf, SHARD_DECODE_MS } from '../lib/decode'
@@ -44,6 +39,9 @@ import { orientShard } from 'sno-core/orient'
 import { faceEdges } from 'sno-core/outline'
 import { BACK_SHADE_COLOR, SHARD_FACES_TONE_MAPPED } from './shardLight'
 import { SHARD_DOTS, SHARD_POINTS, createDiscMaterial, sizeDisc, withDiscColors } from './pointDisc'
+import { basicFaceProps, lineProps, litFaceProps, shardOpacity, shardOrder } from './shardFaces'
+
+export { FACE_TAG_STENCIL } from './shardFaces'
 
 interface Props {
   shard: ShardModel
@@ -121,6 +119,13 @@ interface Props {
    * both sides of an unlit face.
    */
   cull?: boolean
+  /**
+   * Draw it opaque whatever its own `opacity` says: an avatar (DECK-0003
+   * §3.3). Proof of work prices an avatar's size and detail, not how hard it
+   * is to see, and a near-invisible body is a stealth tool. Carried to its
+   * placed objects too, so no part of an avatar is see-through either.
+   */
+  ignoreOpacity?: boolean
 }
 
 const STATIC = [0, 0.9, 1] as const
@@ -141,30 +146,13 @@ export function faceOfHit(i: { object: { userData: { faceOf?: number[] } }; face
   return map && k != null && map[k] !== undefined ? map[k] : null
 }
 
-/**
- * The stencil value a tagged face leaves under every texel it draws.
- *
- * The tag lives in alpha, and anything translucent drawn over a face with
- * ordinary blending adds its own alpha and so erases it: the face then reads
- * to the bloom as bright light and blows out. The covering box did exactly
- * that to a white avatar inside it. Alpha alone cannot tell a tagged face
- * from the empty background (both are 0), so the face also marks the stencil,
- * and an overlay can draw over the mark without touching alpha (CoveringBox)
- * (arkinox, 2026-10-12).
- */
-export const FACE_TAG_STENCIL = 1
-
-/**
- * Colour written opaque, alpha written as 0: the tag. (Blending needs the
- * material transparent, which the face already is for its opacity.) The
- * stencil mark is the tag's second copy, for overlays (arkinox, 2026-10-12).
- */
-const TAG_BLEND = {
-  blending: CustomBlending, blendEquation: AddEquation, blendSrc: OneFactor, blendDst: ZeroFactor, blendSrcAlpha: ZeroFactor, blendDstAlpha: ZeroFactor,
-  stencilWrite: true, stencilRef: FACE_TAG_STENCIL, stencilZPass: ReplaceStencilOp,
-} as const
-
-export function ShardMesh({ shard: given, scale = 1, ghost = false, birth, onFaceClick, world = false, lit = false, clip, clipPlanes, pose, nested, onPartClick, selectedParts, cull = false }: Props): JSX.Element | null {
+export function ShardMesh({ shard: given, scale = 1, ghost = false, birth, onFaceClick, world = false, lit = false, clip, clipPlanes, pose, nested, onPartClick, selectedParts, cull = false, ignoreOpacity = false }: Props): JSX.Element | null {
+  // What everything below is drawn at: the object's own opacity (DECK-0003
+  // §1.11, with its 10% floor), times a ghost's; an avatar ignores its own.
+  // A placed object reaches here with its own model, so it never takes its
+  // parent's (§1.10). See shardFaces.ts for how see-through faces blend.
+  const opacity = shardOpacity(given, { ghost, ignoreOpacity })
+  const order = shardOrder(opacity, ghost)
   // The objects this one places, fetched once for the whole app; a part's own
   // parts come resolved from its parent instead.
   const resolved = useResolved(nested ? null : given)
@@ -234,9 +222,8 @@ export function ShardMesh({ shard: given, scale = 1, ghost = false, birth, onFac
   // The points, drawn as the terrain field draws its gibsons: a feathered disc
   // with a bright core for the bloom, sized in pixels between a floor and a cap.
   const pointMaterial = useMemo(() => {
-    const seen = ghost ? 0.45 : 1
-    return createDiscMaterial(shard.mode === 'points' ? SHARD_POINTS : SHARD_DOTS, shard.mode === 'points' ? seen : seen * 0.55)
-  }, [shard.mode, ghost])
+    return createDiscMaterial(shard.mode === 'points' ? SHARD_POINTS : SHARD_DOTS, shard.mode === 'points' ? opacity : opacity * 0.55)
+  }, [shard.mode, opacity])
   useEffect(() => () => pointMaterial.dispose(), [pointMaterial])
   useEffect(() => { pointMaterial.clippingPlanes = clipPlanes ?? null }, [pointMaterial, clipPlanes])
 
@@ -261,10 +248,11 @@ export function ShardMesh({ shard: given, scale = 1, ghost = false, birth, onFac
   useEffect(() => () => { outline?.dispose() }, [outline])
 
   const line = useMemo(() => {
-    const l = new Line(plain, new LineBasicMaterial({ vertexColors: true, toneMapped: false, transparent: true, opacity: ghost ? 0.45 : 1 }))
+    const l = new Line(plain, new LineBasicMaterial({ vertexColors: true, toneMapped: false, ...lineProps(opacity, ghost) }))
     l.frustumCulled = false
+    l.renderOrder = shardOrder(opacity, ghost)
     return l
-  }, [plain, ghost])
+  }, [plain, opacity, ghost])
 
   // A rebuild replaces these; nothing else lets the GPU buffers go. The line
   // is a primitive, which R3F never disposes, so its material is ours too.
@@ -321,11 +309,10 @@ export function ShardMesh({ shard: given, scale = 1, ghost = false, birth, onFac
   })
 
   const placements = (given.parts?.length ?? 0) > 0
-    ? <Placements shard={given} byRef={resolved} nested={nested} lit={lit} ghost={ghost} world={world} pose={pose} onPartClick={onPartClick} selected={selectedParts} cull={cull} />
+    ? <Placements shard={given} byRef={resolved} nested={nested} lit={lit} ghost={ghost} world={world} pose={pose} onPartClick={onPartClick} selected={selectedParts} cull={cull} ignoreOpacity={ignoreOpacity} />
     : null
   // An object may be nothing but the arrangement of others (§1.9 rule 13).
   if (shard.vertices.length === 0) return placements ? <group scale={scale}>{placements}</group> : null
-  const opacity = ghost ? 0.45 : 1
   // The nearest hit is on whichever side faces the tap; it answers and stops it there.
   const pick = { userData: { faceOf: drawn }, ...(onFaceClick ? { onClick: (e: ThreeEvent<MouseEvent>) => { const f = faceOfHit(e); if (f !== null) onFaceClick(e, f) } } : {}) }
 
@@ -334,7 +321,7 @@ export function ShardMesh({ shard: given, scale = 1, ghost = false, birth, onFac
       {placements}
       {shard.mode === 'solid' && index.length > 0 && (
         <group>
-          <mesh name="shard-faces" geometry={indexed} frustumCulled={false} {...pick}>
+          <mesh name="shard-faces" geometry={indexed} frustumCulled={false} renderOrder={order} {...pick}>
             {/* forceSinglePass: three draws a transparent DoubleSide material
                 in two passes, back then front, and to do it flips the side
                 and sets needsUpdate twice per object per frame. Each flip is
@@ -342,18 +329,21 @@ export function ShardMesh({ shard: given, scale = 1, ghost = false, birth, onFac
                 cache key join): ~106 KB of garbage a frame with 150 shards
                 around, which a 144 Hz desktop turns into about a gigabyte a
                 minute, and twice the draw calls. These faces write depth at
-                opacity 1, so one pass draws the same picture. Ghosts (0.45)
-                keep the two passes for cleaner self-overlap: there are few
-                (arkinox's 10 GB Windows tabs, 2026-10-14). */}
+                opacity 1, so one pass draws the same picture, and a
+                see-through shard (its own opacity) keeps one pass too: one
+                colour blends the same in either order. Ghosts (0.45) keep the
+                two passes for cleaner self-overlap: there are few
+                (arkinox's 10 GB Windows tabs, 2026-10-14). The props are
+                basicFaceProps (shardFaces.ts), which sets forceSinglePass. */}
             {lit
-              ? <meshLambertMaterial vertexColors flatShading side={FrontSide} toneMapped={SHARD_FACES_TONE_MAPPED} transparent opacity={opacity} {...cut} />
-              : <meshBasicMaterial vertexColors side={cull ? FrontSide : DoubleSide} forceSinglePass={!ghost} toneMapped={SHARD_FACES_TONE_MAPPED} transparent opacity={opacity} {...(world && !ghost ? TAG_BLEND : {})} {...cut} />}
+              ? <meshLambertMaterial vertexColors flatShading side={FrontSide} toneMapped={SHARD_FACES_TONE_MAPPED} {...litFaceProps(opacity, ghost)} {...cut} />
+              : <meshBasicMaterial vertexColors side={cull ? FrontSide : DoubleSide} toneMapped={SHARD_FACES_TONE_MAPPED} {...basicFaceProps(opacity, { ghost, world })} forceSinglePass={!ghost} {...cut} />}
           </mesh>
           {lit && inside && (
-            <mesh geometry={inside} frustumCulled={false} {...pick}>
+            <mesh geometry={inside} frustumCulled={false} renderOrder={order} {...pick}>
               {/* The inside of a face: lit like the outside, darker by a multiplier so it still reads as inside.
                   The multiplier and the light are shardLight's (arkinox, 2026-10-12). */}
-              <meshLambertMaterial vertexColors flatShading color={BACK_SHADE_COLOR} side={FrontSide} toneMapped={SHARD_FACES_TONE_MAPPED} transparent opacity={opacity} {...cut} />
+              <meshLambertMaterial vertexColors flatShading color={BACK_SHADE_COLOR} side={FrontSide} toneMapped={SHARD_FACES_TONE_MAPPED} {...litFaceProps(opacity, ghost)} {...cut} />
             </mesh>
           )}
         </group>
@@ -365,13 +355,13 @@ export function ShardMesh({ shard: given, scale = 1, ghost = false, birth, onFac
           dot and edge of your own body would sit across the view, which is
           what arkinox still saw with the backs culled (2026-10-13). */}
       {shard.mode === 'lines' && outline && !cull && (
-        <lineSegments geometry={outline} frustumCulled={false}>
-          <lineBasicMaterial vertexColors toneMapped={false} transparent opacity={opacity} {...cut} />
+        <lineSegments geometry={outline} frustumCulled={false} renderOrder={order}>
+          <lineBasicMaterial vertexColors toneMapped={false} {...lineProps(opacity, ghost)} {...cut} />
         </lineSegments>
       )}
       {shard.mode === 'lines' && !outline && !cull && shard.vertices.length > 1 && <primitive object={line} />}
       {!cull && (shard.mode === 'points' || shard.mode === 'solid' || shard.mode === 'lines') && (
-        <points geometry={plain} material={pointMaterial} frustumCulled={false} />
+        <points geometry={plain} material={pointMaterial} frustumCulled={false} renderOrder={order} />
       )}
     </group>
   )
@@ -388,7 +378,7 @@ export const CUBE_EDGES = new EdgesGeometry(new BoxGeometry(1, 1, 1))
  * flash cubes before its parts arrive. Parts are not clipped to the region:
  * a hidden object's parts are its author's to place.
  */
-function Placements({ shard, byRef, nested, lit, ghost, world, pose, onPartClick, selected, cull }: {
+function Placements({ shard, byRef, nested, lit, ghost, world, pose, onPartClick, selected, cull, ignoreOpacity }: {
   shard: ShardModel
   byRef: Map<string, Resolved>
   nested?: Placed[]
@@ -399,6 +389,7 @@ function Placements({ shard, byRef, nested, lit, ghost, world, pose, onPartClick
   onPartClick?: (e: ThreeEvent<MouseEvent>, part: number) => void
   selected?: number[]
   cull: boolean
+  ignoreOpacity: boolean
 }): JSX.Element | null {
   const list: Array<{ part: Part; r: Resolved | undefined }> = nested
     ? nested.map((p) => ({ part: p.part, r: p }))
@@ -410,7 +401,8 @@ function Placements({ shard, byRef, nested, lit, ghost, world, pose, onPartClick
     const model = r.model && r.model.unit + part.step >= 0 && r.model.unit + part.step <= MAX_UNIT ? r.model : null
     const matrix = new Matrix4().fromArray(partMatrix(part, shard.unit, model ? model.unit : shard.unit))
     let body: ReactNode = <lineSegments geometry={CUBE_EDGES}><lineBasicMaterial color={ACCENT} toneMapped={false} transparent opacity={ghost ? 0.45 : 0.8} /></lineSegments>
-    if (model) body = <ShardMesh shard={model} nested={r.children} lit={lit} ghost={ghost} world={world} cull={cull} />
+    // The part's own model, so its own opacity, never the parent's (§1.10).
+    if (model) body = <ShardMesh shard={model} nested={r.children} lit={lit} ghost={ghost} world={world} cull={cull} ignoreOpacity={ignoreOpacity} />
     // Selected: an amber box around what the placement draws, in its own frame so it turns with it.
     const box = selected?.includes(i) ? (model ? placedBounds(model, r.children) : null) ?? { min: [-0.5, -0.5, -0.5], max: [0.5, 0.5, 0.5] } : null
     return (

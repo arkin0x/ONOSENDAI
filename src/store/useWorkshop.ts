@@ -43,7 +43,7 @@ import {
   validPoint,
   type ShardMode,
   type ShardModel,
-  type ShardVertex, type Part, type Ref, cloneVertex, hexToRgb, rgbToHex } from 'sno-core/shards'
+  type ShardVertex, type Part, type Ref, cloneVertex, hexToRgb, rgbToHex, OPACITY_FLOOR } from 'sno-core/shards'
 import { addPart, quarterTurnPart, removeParts } from 'sno-core/parts'
 import { FLOOR, MAX_SIZE, MIN_SIZE, stamp, type Facing, type StampKind, type WorkPlane } from 'sno-core/stamps'
 import { BUILT_IN, hexAt, remap, samePalette, snapHex, type Palette } from 'sno-core/snoPalette'
@@ -347,6 +347,12 @@ export interface WorkshopState {
   duplicate: (id: string) => string
   remove: (id: string) => void
   setMode: (mode: ShardMode) => void
+  /**
+   * How solid the shard draws, a whole percent (DECK-0003 §1.11): 100 is
+   * solid and is stored as no opacity at all, the wire's canonical form;
+   * anything else is kept between the floor (10) and 99. Undoable like MODE.
+   */
+  setOpacity: (percent: number) => void
   setUnit: (unit: number) => void
   /** The build grid's half-width for the current shard, never below what its vertices need. */
   setExtent: (extent: number) => void
@@ -850,6 +856,11 @@ export const useWorkshop = create<WorkshopState>((set, get) => {
     },
 
     setMode: (mode) => edit((s) => ({ ...s, mode })),
+    setOpacity: (percent) => edit((s) => {
+      const { opacity: _old, ...rest } = s
+      const p = Math.round(percent)
+      return Number.isFinite(p) && p < 100 ? { ...rest, opacity: Math.max(OPACITY_FLOOR, p) } : rest
+    }),
     setUnit: (unit) => edit((s) => ({ ...s, unit: clampUnit(unit) })),
     // FACE works on corners it picks itself, and its panel only appears with
     // nothing else selected, so a point still held from SELECT hid FILL behind

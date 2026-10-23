@@ -26,7 +26,7 @@ const FOV = 35
 /** Radians a second: one turn in about twelve seconds. */
 const SPIN_PER_S = 0.5
 
-function Spinning({ shard }: { shard: ShardModel | null }): JSX.Element | null {
+function Spinning({ shard, ignoreOpacity }: { shard: ShardModel | null; ignoreOpacity: boolean }): JSX.Element | null {
   const { camera } = useThree()
   const turn = useRef<Group>(null)
   const [frame, setFrame] = useState<ThumbFrame | null>(null)
@@ -50,7 +50,7 @@ function Spinning({ shard }: { shard: ShardModel | null }): JSX.Element | null {
   return (
     <group ref={turn}>
       <group position={[-frame.centre[0], -frame.centre[1], -frame.centre[2]]}>
-        <ShardMesh shard={shard} lit />
+        <ShardMesh shard={shard} lit ignoreOpacity={ignoreOpacity} />
       </group>
     </group>
   )
@@ -90,7 +90,7 @@ function Pacer({ pace }: { pace: Pace }): null {
  * satisfactory"). The turn keeps its pace either way: each frame turns by
  * the time since the last.
  */
-export function ShardSpin({ shard, size = 160, preserve = false, pace }: { shard: ShardModel | null; size?: number; preserve?: boolean; pace?: Pace }): JSX.Element {
+export function ShardSpin({ shard, size = 160, preserve = false, pace, ignoreOpacity = false }: { shard: ShardModel | null; size?: number; preserve?: boolean; pace?: Pace; ignoreOpacity?: boolean }): JSX.Element {
   // A new turn for each shard, inside the same canvas: one shard straight
   // after another would otherwise be built once on the last one's framing,
   // then again on its own (review of #394). Not keyed on the shard's id: an
@@ -112,7 +112,8 @@ export function ShardSpin({ shard, size = 160, preserve = false, pace }: { shard
         {pace && <Pacer pace={pace} />}
         {/* Lit as on the bench, near the world's full color (shardLight.tsx; arkinox, 2026-10-12). */}
         <ShardLights />
-        <Spinning key={turn} shard={shard} />
+        {/* ignoreOpacity: an avatar's preview, opaque as the avatar is (DECK-0003 §3.3). */}
+        <Spinning key={turn} shard={shard} ignoreOpacity={ignoreOpacity} />
       </Canvas>
     </div>
   )

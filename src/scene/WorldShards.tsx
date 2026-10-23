@@ -17,6 +17,7 @@ import { useCeremony } from '../store/useCeremony'
 import { editingId, useShards, type WorldItem } from '../store/useShards'
 import { WALL_BREATH_SECONDS } from './Rooms'
 import { ShardMesh } from './ShardMesh'
+import { GHOST_OPACITY } from './shardFaces'
 import { regionBox } from '../lib/clip'
 import { placedPose, type Pose } from '../lib/pose'
 import type { ShardModel } from 'sno-core/shards'
@@ -35,7 +36,6 @@ const FAR_CULL = farCullDoublings()
  */
 const MOVING_LOW = 0.08
 /** ShardMesh's opacity for a ghost, which the moving shard is drawn as. */
-const GHOST_OPACITY = 0.45
 const MOVING_HIGH = 0.7
 
 /** This frame's opacity for the moving shard, read by `breathe`. */
@@ -51,12 +51,17 @@ function breathe(obj: Object3D): void {
 
 function breatheOne(one: Material): void {
   // The points' disc shader has its own opacity uniform (pointDisc.ts),
-  // dimmer for the dots on a solid or lined shard: that ratio is kept.
+  // dimmer for the dots on a solid or lined shard: that ratio is kept. So is
+  // a see-through shard's own opacity (DECK-0003 §1.11), which the ghost's
+  // was multiplied by (shardFaces shardOpacity): it breathes at its own share.
   const u = (one as { uniforms?: Record<string, { value: unknown }> }).uniforms?.uOpacity
   if (u) {
     one.userData.baseOpacity ??= u.value as number
     u.value = breath * ((one.userData.baseOpacity as number) / GHOST_OPACITY)
-  } else one.opacity = breath
+  } else {
+    one.userData.baseOpacity ??= one.opacity
+    one.opacity = breath * ((one.userData.baseOpacity as number) / GHOST_OPACITY)
+  }
 }
 
 /** The moving shard's opacity at `seconds`: a raised cosine, as the walls breathe. */

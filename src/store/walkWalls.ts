@@ -179,11 +179,12 @@ export function stepLimit(from: Position, axis: AxisName, dir: 1 | -1, length: b
     // Then the triangles, in the shard's own model units from its origin.
     const o: [number, number, number] = [Number(off.x) / g, Number(off.y) / g, -Number(off.z) / g]
     const s = (i === 2 ? -dir : dir) as 1 | -1
-    // The face you stand on lets you go. Where the measure is coarser than
-    // that (a monument), a face ahead within the error holds you instead:
-    // §1.12 decides a touching case toward crossing, and only HOP can put a
-    // walker that near, since WALK stops at least `tol` short.
-    const minT = tol > ON_FACE ? 0 : ON_FACE / g
+    // The face you stand on lets you go. WALK always stops at least `tol`
+    // short of a face, so a walker it brought here is never that near one. A
+    // walker HOPped to within the measure's error of a face on a monument (a
+    // shard past about 2^53 gibsons) may still cross it, which is accepted:
+    // holding it there would hold it stepping away from the face too.
+    const minT = ON_FACE / g
     // A step that would end within `tol` of a face meets it (tolerance).
     const t = firstHit(e.mesh, o, i, s, (Number(length) + tol) / g, minT, e.clip)
     if (t === null) continue

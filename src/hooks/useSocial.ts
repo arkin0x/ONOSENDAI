@@ -17,7 +17,7 @@ import { COMMENT_KIND } from '../lib/comments'
 import { useCyberspace } from '../store/useCyberspace'
 import type { CommentsState } from './useComments'
 import { useMutes } from '../store/useMutes'
-import { withoutMuted } from '../lib/muteList'
+import { pruneThread, withoutMuted } from '../lib/muteList'
 
 const now = (): number => Math.floor(Date.now() / 1000)
 
@@ -133,9 +133,9 @@ export function useActionComments(action: SocialTarget | null): CommentsState {
     }
   }, [action])
 
-  // A comment by someone blocked is not shown, nor the replies under it (store/useMutes).
+  // A comment by someone blocked is not shown, nor others' replies under it; yours stay (store/useMutes).
   const muted = useMutes((s) => s.muted)
   const me = useCyberspace((s) => s.identity.pubkey)
-  const comments = id ? threadUnder(withoutMuted(events, muted, me), id, id) : []
+  const comments = id ? pruneThread(threadUnder(events, id, id), muted, me) : []
   return { comments, loading, error, posting, post, refresh: () => setTick((t) => t + 1) }
 }

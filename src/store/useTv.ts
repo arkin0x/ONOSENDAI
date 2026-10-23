@@ -773,10 +773,25 @@ function tick(id: number): void {
     s = useTv.getState()
   }
   scanTick(s)
+  // A block made while TV is on takes that person off the air at once:
+  // their queued shots, the shot on screen, their avatar and their ticker
+  // lines (review of #464, S6). Read every tick, since the tape was read
+  // before the block.
+  const blocked = useMutes.getState().muted.pubkeys
+  let offAir = false
+  if (blocked.size > 0) {
+    queue = queue.filter((q) => !blocked.has(q.pubkey))
+    offAir = s.shot !== null && blocked.has(s.shot.pubkey)
+    if (offAir || Object.keys(s.avatars).some((pk) => blocked.has(pk)) || s.arrivals.some((a) => blocked.has(a.pubkey)) || s.reactions.some((r) => blocked.has(r.pubkey))) {
+      const avatars = Object.fromEntries(Object.entries(s.avatars).filter(([pk]) => !blocked.has(pk)))
+      useTv.setState({ avatars, arrivals: s.arrivals.filter((a) => !blocked.has(a.pubkey)), reactions: s.reactions.filter((r) => !blocked.has(r.pubkey)) })
+      s = useTv.getState()
+    }
+  }
   // One pubkey has held the screen its time (lib/tv/dwell): on to someone
   // else's shot now, cutting this one short, when the tape has one ready.
   const moveOn = s.shot !== null && dwell.moveOn(queue, now)
-  if (s.shot === null || (now - shotBegan) / 1000 >= s.shot.length || moveOn) {
+  if (s.shot === null || offAir || (now - shotBegan) / 1000 >= s.shot.length || moveOn) {
     // A break, when one is due: between shots, never across one.
     if (now >= adDue && s.status === 'playing') {
       const spot = nextAd(lastAd)

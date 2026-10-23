@@ -1910,7 +1910,8 @@ export const useShards = create<ShardsState>((set, get) => {
           if (!plain) revealed.push(r)
           changed = true
           if (r.type === 'chest' && r.chest) queue.push(r)
-          if (r.type === 'key' && r.key) keys.push({ id: r.eventId, itemPubkey: r.key.itemPubkey, secretHex: r.key.secretHex })
+          // A key by someone blocked opens nothing here (store/useMutes).
+          if (r.type === 'key' && r.key && !findHidden(r, useMutes.getState().muted, me)) keys.push({ id: r.eventId, itemPubkey: r.key.itemPubkey, secretHex: r.key.secretHex })
         }
       }
       if (changed) set({ discovered })
@@ -1934,8 +1935,10 @@ export const useShards = create<ShardsState>((set, get) => {
       const now = get().discovered
       claimOwn(all.filter((h) => !claimedOut(h) && !now[h.eventId]?.chestId && !(watched && h.type !== 'chest' && h.author === me && ownChestBags.has(h.bagId))))
       // Reading a key is holding it (B1 §2.1): every key a scan opened goes
-      // into the inventory, once, whoever hid it.
-      useInventory.getState().holdFinds(all, watched)
+      // into the inventory, once, whoever hid it, unless the mute list
+      // hides it (review of #464, S5).
+      const muted = useMutes.getState().muted
+      useInventory.getState().holdFinds(all.filter((h) => !findHidden(h, muted, me)), watched)
       // What a door revealed gets the find ceremony, as a scan's finds do.
       if (revealed.length > 0) useCeremony.getState().mark(revealed)
     },

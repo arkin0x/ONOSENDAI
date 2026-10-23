@@ -13,6 +13,7 @@ import {
   newestList,
   openPrivate,
   parsePrivate,
+  pruneThread,
   readList,
   schemeOf,
   writeRelaysOf,
@@ -58,11 +59,24 @@ describe('the private half', () => {
     await expect(openPrivate(sealed, { nip44Decrypt: async () => { throw new Error('bad mac') } })).rejects.toBeInstanceOf(MuteListUnreadable)
     await expect(openPrivate(nip44.encrypt('{"p":1}', ck), crypto)).rejects.toThrow(WORDS.malformed)
     expect(() => parsePrivate('not json')).toThrow(MuteListUnreadable)
+    expect(() => parsePrivate('{"a":1}')).toThrow(MuteListUnreadable)
   })
 
   it('passes a signer-on-another-account error through as it is', async () => {
     const err = Object.assign(new Error('other account'), { name: 'SignerAccountMismatch' })
     await expect(openPrivate(nip44.encrypt('[]', ck), { nip44Decrypt: async () => { throw err } })).rejects.toBe(err)
+  })
+})
+
+describe('entries this app cannot read', () => {
+  it('are kept as written through an edit, and never crash the reading', async () => {
+    const odd = [['p', A, null], { note: 1 }, 'x', ['p', B], [7, 'y']] as unknown as string[][]
+    const opened = await openPrivate(nip44.encrypt(JSON.stringify(odd), ck), crypto)
+    expect(opened.tags).toEqual(odd)
+    expect([...mutedBy(opened.tags, me).pubkeys]).toEqual([A, B])
+    const next = applyEdit({ publicTags: [], privateTags: opened.tags }, { op: 'add', tag: ['p', C], private: true })
+    expect(next.privateTags).toEqual([...odd, ['p', C]])
+    expect(applyEdit({ publicTags: [], privateTags: opened.tags }, { op: 'remove', tag: ['p', B] }).privateTags).toEqual([['p', A, null], { note: 1 }, 'x', [7, 'y']])
   })
 })
 
@@ -146,14 +160,43 @@ describe('choosing and trusting a fetch', () => {
     expect(writeRelaysOf({ tags: [['r', 'wss://w/'], ['r', 'wss://r', 'read'], ['r', 'wss://both'], ['r', 'ws://plain']] })).toEqual(['wss://w', 'wss://both'])
   })
 
-  it('refuses when no relay answered', () => {
-    expect(fetchRefusal([ans('wss://a', 'unreachable'), ans('wss://b', 'refused')], [])).toBe(WORDS.noAnswer)
-    expect(fetchRefusal([], [])).toBe(WORDS.noAnswer)
+  const G = ['wss://g1', 'wss://g2', 'wss://g3']
+  const CANON = 'wss://canon'
+  const ctx = (over: Partial<Parameters<typeof fetchRefusal>[1]> = {}) => ({ writeRelays: [], general: G, canonical: CANON, found: true, ...over })
+
+  it('refuses when no relay answered, and the canonical relay alone does not count', () => {
+    expect(fetchRefusal([ans('wss://g1', 'unreachable'), ans('wss://g2', 'refused')], ctx())).toBe(WORDS.noAnswer)
+    expect(fetchRefusal([], ctx())).toBe(WORDS.noAnswer)
+    expect(fetchRefusal([ans(CANON + '/', 'answered'), ans('wss://g1', 'unreachable')], ctx({ found: false }))).toBe(WORDS.noAnswer)
   })
 
-  it('refuses when the person names write relays and none of them answered', () => {
-    expect(fetchRefusal([ans('wss://general', 'answered'), ans('wss://mine', 'unreachable')], ['wss://mine/'])).toBe(WORDS.outboxSilent)
-    expect(fetchRefusal([ans('wss://general', 'unreachable'), ans('wss://MINE', 'answered')], ['wss://mine'])).toBeNull()
-    expect(fetchRefusal([ans('wss://general', 'answered')], [])).toBeNull()
+  it('with no write relays, needs two general relays, or all of them when no list was returned', () => {
+    expect(fetchRefusal([ans('wss://g1', 'answered'), ans('wss://g2', 'unreachable'), ans('wss://g3', 'unreachable')], ctx())).toBe(WORDS.generalSilent)
+    expect(fetchRefusal([ans('wss://g1', 'answered'), ans('wss://g2', 'answered'), ans('wss://g3', 'unreachable')], ctx())).toBeNull()
+    expect(fetchRefusal([ans('wss://g1', 'answered'), ans('wss://g2', 'answered'), ans('wss://g3', 'unreachable')], ctx({ found: false }))).toBe(WORDS.generalSilent)
+    expect(fetchRefusal(G.map((u) => ans(u, 'answered')), ctx({ found: false }))).toBeNull()
+  })
+
+  it('with write relays, needs most of them, or all of them when no list was returned', () => {
+    const w = ['wss://w1', 'wss://w2/', 'wss://w3']
+    const some = [ans('wss://g1', 'answered'), ans('wss://g2', 'answered'), ans('wss://w1', 'answered'), ans('wss://w2', 'unreachable'), ans('wss://w3', 'unreachable')]
+    expect(fetchRefusal(some, ctx({ writeRelays: w }))).toBe(WORDS.outboxSilent)
+    const most = [ans('wss://W1', 'answered'), ans('wss://w2', 'answered'), ans('wss://w3', 'unreachable')]
+    expect(fetchRefusal(most, ctx({ writeRelays: w }))).toBeNull()
+    expect(fetchRefusal(most, ctx({ writeRelays: w, found: false }))).toBe(WORDS.outboxSilent)
+  })
+})
+
+describe('a thread less what is muted', () => {
+  type C = { id: string; pubkey: string; replies: C[] }
+  const c = (id: string, pubkey: string, replies: C[] = []): C => ({ id, pubkey, replies })
+  const m = { pubkeys: new Set([B]), items: new Set<string>() }
+  it('drops a blocked comment and the others under it, and lifts your replies into its place', () => {
+    const roots = [c('1', A, [c('2', B, [c('3', me, [c('4', A)]), c('5', A)])]), c('6', B)]
+    expect(pruneThread(roots, m, me)).toEqual([c('1', A, [c('3', me, [c('4', A)])])])
+  })
+  it('is the same list when nothing is muted', () => {
+    const roots = [c('1', B)]
+    expect(pruneThread(roots, { pubkeys: new Set(), items: new Set() }, me)).toBe(roots)
   })
 })

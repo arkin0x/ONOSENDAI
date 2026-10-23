@@ -88,12 +88,12 @@ export function useNotificationsLoop(): void {
   }, [me])
 }
 
-/** The unread count, recomputed when the list or the seen mark moves. */
-/** Whether a notification is from someone blocked, or is itself muted (store/useMutes). */
+/** Whether a notification is from someone blocked, or is muted itself or by what it is on (store/useMutes). */
 function mutedNote(n: Notification, muted: Muted): boolean {
-  return hidesThing(muted, { authors: [n.from], ids: [n.id] })
+  return hidesThing(muted, { authors: [n.from], ids: [n.id, n.on.id] })
 }
 
+/** The unread count, recomputed when the list or the seen mark moves. */
 function useUnread(): number {
   const muted = useMutes((s) => s.muted)
   return useNotifications((s) => s.items.filter((n) => n.createdAt > s.lastSeen && !mutedNote(n, muted)).length)

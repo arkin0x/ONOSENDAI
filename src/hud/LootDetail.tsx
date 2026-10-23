@@ -14,7 +14,7 @@
 
 import { cashuLabel, readCashuToken } from '../lib/cashu'
 import type { Plane } from 'cyberspace-core'
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Rotate3d, Target, TvMinimal } from 'lucide-react'
 import { useProfile } from '../hooks/useProfile'
 import type { ShardModel } from 'sno-core/shards'
@@ -139,6 +139,8 @@ export function LootDetail(): JSX.Element | null {
   const discovered = useShards((s) => s.discovered)
   const mine = useShards((s) => s.mine)
   const muted = useMutes((s) => s.muted)
+  // A bag by someone blocked closes, wherever the block was made (review of #464, N8).
+  useEffect(() => { if (item && item.author !== me && muted.pubkeys.has(item.author)) useLootView.getState().select(null) }, [item, me, muted])
   const profile = useProfile(item?.author ?? null)
   // Which item's COPY just fired, for its brief COPIED label. Declared before
   // the early return below: hooks must run in the same order every render.

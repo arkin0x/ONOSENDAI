@@ -27,7 +27,7 @@ import { itemKind } from '../lib/comments'
 import { useProfile } from '../hooks/useProfile'
 import { profileLabel } from '../store/useProfiles'
 import { useCyberspace } from '../store/useCyberspace'
-import { editable, useShards } from '../store/useShards'
+import { editable, useShards, type WorldItem } from '../store/useShards'
 import { editPlaced } from '../store/useBuilder'
 import { useWorkshop } from '../store/useWorkshop'
 import { useEscape } from '../hooks/useEscape'
@@ -45,6 +45,12 @@ import { BlockButton, MuteItemButton } from './BlockButton'
 import { useMutes } from '../store/useMutes'
 
 const ICON = 12
+
+/** The id a MUTE THIS ITEM names: the lineage, else the item's own id, else (a LIVE LINK) the object's event id. */
+export function muteIdOf(item: Pick<WorldItem, 'lineage' | 'key' | 'event'>): string {
+  const hex = (v: string | undefined): v is string => !!v && /^[0-9a-f]{64}$/.test(v)
+  return hex(item.lineage) ? item.lineage : hex(item.key) ? item.key : item.event?.id ?? ''
+}
 
 export function SecretModal(): JSX.Element | null {
   const selected = useShards((s) => s.selectedSecret)
@@ -206,8 +212,10 @@ export function SecretModal(): JSX.Element | null {
               <button className={`secret__act ${targeted ? 'is-on' : ''}`} onClick={target}><Target size={ICON} strokeWidth={2.25} aria-hidden />{targeted ? 'TARGETED' : 'TARGET'} CREATOR</button>
               <button className="secret__act" onClick={watch}><TvMinimal size={ICON} strokeWidth={2.25} aria-hidden />SPECTATE</button>
               {/* Muted by its lineage when it has one, so a move by its hider
-                  (a new id, the same d) stays muted (store/useMutes). */}
-              <MuteItemButton id={item.lineage ?? item.key} onMuted={close} />
+                  (a new id, the same d) stays muted; a LIVE LINK, whose key
+                  names the bag and the entry, by the object's event id
+                  (store/useMutes). */}
+              <MuteItemButton id={muteIdOf(item)} onMuted={close} />
               <BlockButton pubkey={author} onBlocked={close} />
             </>
           )}

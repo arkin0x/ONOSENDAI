@@ -60,7 +60,7 @@ export function MuteListModal({ onClose }: { onClose: () => void }): JSX.Element
         {locked && (
           <div className="mutes__row">
             <span className="mutes__locked" title="Your signer could not open the private part. The last copy read on this device is used, and nothing can be changed until it opens.">PRIVATE PART LOCKED</span>
-            <button className="identity__change" onClick={() => void useMutes.getState().refresh()} disabled={busy} title="Ask your signer to open it again">
+            <button className="identity__change" onClick={() => void useMutes.getState().refresh({ retry: true })} disabled={busy} title="Ask your signer to open it again">
               <RefreshCw size={10} strokeWidth={2.25} aria-hidden /> RETRY
             </button>
           </div>

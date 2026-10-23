@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 if (typeof localStorage === 'undefined') {
   const mem = new Map<string, string>()
@@ -25,6 +25,8 @@ import { useChat } from '../useChat'
 import { useSecrets } from '../useSecrets'
 import { useCeremony } from '../useCeremony'
 import { useToast } from '../useToast'
+import { useInventory } from '../useInventory'
+import { muteIdOf } from '../../hud/SecretModal'
 
 const ME = '1'.repeat(64)
 const BLOCKED = 'b'.repeat(64)
@@ -164,5 +166,24 @@ describe('spectating', () => {
     await spectate(BLOCKED)
     expect(useCyberspace.getState().spectate).toBe(before)
     expect(useToast.getState().toast?.label).toBe('BLOCKED')
+  })
+})
+
+describe('MUTE THIS ITEM names an id something can hide by (review of #464, B2)', () => {
+  it('the lineage, else the item\'s own id, else a LIVE LINK\'s object id', () => {
+    expect(muteIdOf({ key: 'a'.repeat(64), lineage: LINEAGE })).toBe(LINEAGE)
+    expect(muteIdOf({ key: 'a'.repeat(64) })).toBe('a'.repeat(64))
+    expect(muteIdOf({ key: 'look/entry', event: { id: MUTED_ITEM } as never })).toBe(MUTED_ITEM)
+    expect(worldItemHidden({ key: 'look/entry', mine: false, author: FRIEND, event: { id: MUTED_ITEM, pubkey: FRIEND } as never }, muted, ME)).toBe(true)
+  })
+})
+
+describe('keys found in a bag (review of #464, S5)', () => {
+  afterEach(() => { useShards.setState({ discovered: {} }); vi.restoreAllMocks() })
+  it('a blocked hider\'s key is not held; another\'s is', () => {
+    const hold = vi.spyOn(useInventory.getState(), 'holdFinds').mockReturnValue([])
+    const key = (id: string, author: string): Hidden => find({ eventId: id, author, type: 'key', text: undefined, key: { name: 'k', about: '', itemPubkey: 'f'.repeat(64), secretHex: '1'.repeat(64) } as never })
+    useShards.getState().addDiscovered([key('7'.repeat(64), BLOCKED), key('6'.repeat(64), FRIEND)])
+    expect(hold.mock.calls.at(-1)?.[0].map((h: Hidden) => h.eventId)).toEqual(['6'.repeat(64)])
   })
 })

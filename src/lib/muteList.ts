@@ -76,26 +76,41 @@ export class MuteListUnreadable extends Error {
 /** Words the person sees when an edit is refused. Short: they land in a toast. */
 export const WORDS = {
   noAnswer: 'No relay answered, so your mute list was left as it is. Try again.',
-  outboxSilent: 'None of your own relays answered, so your mute list was left as it is. Try again.',
+  outboxSilent: 'Too few of your own relays answered, so your mute list was left as it is. Try again.',
+  generalSilent: 'Too few relays answered, so your mute list was left as it is. Try again.',
+  notAnItem: 'This one cannot be muted on its own. Nothing was changed.',
   cannotOpen: 'Your signer could not open the private part of your mute list, so it was left as it is.',
   noDecrypt: 'Your signer cannot decrypt, so the private part of your mute list cannot be kept. Nothing was changed.',
   noEncrypt: 'Your signer cannot encrypt, so a private entry cannot be written. Nothing was changed.',
   malformed: 'The private part of your mute list is not a list this app can read, so it was left as it is.',
 } as const
 
-/** A tag array as written: every element a string, at least a name. Anything else is dropped. */
-function isTag(t: unknown): t is Tag {
-  return Array.isArray(t) && t.length > 0 && t.every((x) => typeof x === 'string')
+/**
+ * An entry's name and value, when it reads as a tag (`[name, value, ...]`
+ * with two strings); null for anything else. Every element of a list is
+ * KEPT as written, whatever its shape (another client's `["p", pk, null]`,
+ * a stray object): only this reading of it is skipped, so a rewrite never
+ * drops what this app cannot read (review of #464, S4).
+ */
+function entryOf(t: unknown): { name: string; value: string } | null {
+  if (!Array.isArray(t) || typeof t[0] !== 'string' || typeof t[1] !== 'string') return null
+  return { name: t[0], value: t[1].trim().toLowerCase() }
 }
 
-/** The decrypted private half: a JSON array of tags. Throws MuteListUnreadable when it is not one. */
+/** A deep copy of an entry as written, whatever its shape. */
+function copyOf<T>(t: T): T {
+  return JSON.parse(JSON.stringify(t)) as T
+}
+
+/**
+ * The decrypted private half: a JSON array, every element kept as written.
+ * Throws MuteListUnreadable when it is not an array.
+ */
 export function parsePrivate(plain: string): Tag[] {
   let v: unknown
   try { v = JSON.parse(plain) } catch { throw new MuteListUnreadable(WORDS.malformed) }
   if (!Array.isArray(v)) throw new MuteListUnreadable(WORDS.malformed)
-  // A stray non-tag element is dropped rather than refusing the whole list:
-  // nothing could be done with it, and it is not an entry anyone wrote.
-  return v.filter(isTag).map((t) => [...t])
+  return v as Tag[]
 }
 
 /** Opens the private half with the scheme it was sealed with. Throws MuteListUnreadable when it cannot. */
@@ -118,7 +133,7 @@ export async function openPrivate(content: string, crypto: SelfCrypto): Promise<
 export async function readList(event: NostrEvent | null, crypto: SelfCrypto): Promise<ReadList> {
   if (!event) return { event: null, publicTags: [], privateTags: [], scheme: 'none' }
   const { tags, scheme } = await openPrivate(event.content, crypto)
-  return { event, publicTags: event.tags.filter(isTag).map((t) => [...t]), privateTags: tags, scheme }
+  return { event, publicTags: copyOf(event.tags), privateTags: tags, scheme }
 }
 
 /** What ONOSENDAI hides by: pubkeys (`p`) and single things (`e`). */
@@ -140,10 +155,10 @@ export function mutedBy(tags: readonly Tag[], self: string | null): Muted {
   const pubkeys = new Set<string>()
   const items = new Set<string>()
   for (const t of tags) {
-    const v = (t[1] ?? '').trim().toLowerCase()
-    if (!HEX64.test(v)) continue
-    if (t[0] === 'p' && v !== self) pubkeys.add(v)
-    else if (t[0] === 'e') items.add(v)
+    const e = entryOf(t)
+    if (!e || !HEX64.test(e.value)) continue
+    if (e.name === 'p' && e.value !== self) pubkeys.add(e.value)
+    else if (e.name === 'e') items.add(e.value)
   }
   return { pubkeys, items }
 }
@@ -153,8 +168,9 @@ export type MuteEdit =
   | { op: 'add'; tag: ['p' | 'e', string]; private: boolean }
   | { op: 'remove'; tag: ['p' | 'e', string] }
 
-function same(t: Tag, name: string, value: string): boolean {
-  return t[0] === name && (t[1] ?? '').trim().toLowerCase() === value
+function same(t: unknown, name: string, value: string): boolean {
+  const e = entryOf(t)
+  return !!e && e.name === name && e.value === value
 }
 
 /**
@@ -166,8 +182,8 @@ function same(t: Tag, name: string, value: string): boolean {
 export function applyEdit(list: Pick<ReadList, 'publicTags' | 'privateTags'>, edit: MuteEdit): { publicTags: Tag[]; privateTags: Tag[]; changed: boolean } {
   const [name, raw] = edit.tag
   const value = raw.trim().toLowerCase()
-  const publicTags = list.publicTags.map((t) => [...t])
-  const privateTags = list.privateTags.map((t) => [...t])
+  const publicTags = copyOf(list.publicTags)
+  const privateTags = copyOf(list.privateTags)
   if (edit.op === 'add') {
     if ([...publicTags, ...privateTags].some((t) => same(t, name, value))) return { publicTags, privateTags, changed: false }
     ;(edit.private ? privateTags : publicTags).push([name, value])
@@ -234,19 +250,45 @@ function norm(url: string): string {
   return url.trim().toLowerCase().replace(/\/+$/, '')
 }
 
+/** Where an edit asks, for fetchRefusal: the person's write relays, the general relays, the canonical relay. */
+export interface FetchContext {
+  writeRelays: readonly string[]
+  general: readonly string[]
+  /** The cyberspace relay: always asked, rarely holds a mute list, so its answer proves nothing. */
+  canonical: string
+  /** Whether any relay returned a list by this person (not this device's copy). */
+  found: boolean
+}
+
 /**
- * Whether the relays' answers are enough to edit on. At least one relay
- * must have answered (an EOSE, not a timeout); and when the person names
- * write relays of their own (NIP-65), one of THOSE must have answered,
- * since that is where other clients put the list. Null when it is enough,
- * else the words for why not.
+ * Whether the relays' answers are enough to edit on (review of #464, B1:
+ * one relay that never held the list answering "nothing" was enough, and a
+ * fresh device then wrote a list of one entry over the person's real one).
+ *
+ * The canonical relay's answer never counts. With write relays named in the
+ * person's NIP-65 list, where other clients put the list, most of them must
+ * answer; with none named, two of the general relays must. When no relay
+ * returned any list at all, the edit would start from nothing or from this
+ * device's copy, so every one of them must have answered: only then is "no
+ * list" an answer and not silence. Null when it is enough, else the words
+ * for why not.
  */
-export function fetchRefusal(answers: readonly RelayAnswer[], writeRelays: readonly string[]): string | null {
-  const answered = answers.filter((a) => a.outcome === 'answered')
-  if (answered.length === 0) return WORDS.noAnswer
-  if (writeRelays.length === 0) return null
-  const own = new Set(writeRelays.map(norm))
-  return answered.some((a) => own.has(norm(a.url))) ? null : WORDS.outboxSilent
+export function fetchRefusal(answers: readonly RelayAnswer[], ctx: FetchContext): string | null {
+  const canon = norm(ctx.canonical)
+  const answered = new Set(answers.filter((a) => a.outcome === 'answered').map((a) => norm(a.url)).filter((u) => u !== canon))
+  if (answered.size === 0) return WORDS.noAnswer
+  const pool = ctx.writeRelays.length > 0 ? ctx.writeRelays : ctx.general
+  const urls = [...new Set(pool.map(norm))].filter((u) => u !== canon)
+  if (urls.length === 0) return null
+  const heard = urls.filter((u) => answered.has(u)).length
+  const need = !ctx.found ? urls.length : ctx.writeRelays.length > 0 ? Math.ceil(urls.length / 2) : Math.min(2, urls.length)
+  if (heard >= need) return null
+  return ctx.writeRelays.length > 0 ? WORDS.outboxSilent : WORDS.generalSilent
+}
+
+/** Whether an id or a pubkey is one: 64 lowercase hex. */
+export function isHex64(v: string): boolean {
+  return HEX64.test(v)
 }
 
 /**
@@ -272,4 +314,25 @@ export function hidesThing(
 export function withoutMuted<T extends { pubkey: string; id: string }>(events: T[], muted: Muted, self?: string | null): T[] {
   if (muted.pubkeys.size === 0 && muted.items.size === 0) return events
   return events.filter((e) => e.pubkey === self || !hidesThing(muted, { authors: [e.pubkey], ids: [e.id] }, self))
+}
+
+/**
+ * A threaded list less what the mute list hides, done after threading so
+ * your own replies survive (review of #464, S2): a hidden comment goes, and
+ * of what sat under it only the branches holding a reply of yours stay, in
+ * its place. Replies by others to someone blocked go with them.
+ */
+export function pruneThread<T extends { pubkey: string; id: string; replies: T[] }>(roots: T[], muted: Muted, self?: string | null): T[] {
+  if (muted.pubkeys.size === 0 && muted.items.size === 0) return roots
+  const yours = (c: T): boolean => c.pubkey === self || c.replies.some(yours)
+  const walk = (list: T[]): T[] => {
+    const out: T[] = []
+    for (const c of list) {
+      const replies = walk(c.replies)
+      if (c.pubkey !== self && hidesThing(muted, { authors: [c.pubkey], ids: [c.id] }, self)) out.push(...replies.filter(yours))
+      else out.push({ ...c, replies })
+    }
+    return out
+  }
+  return walk(roots)
 }

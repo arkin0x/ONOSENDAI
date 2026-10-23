@@ -35,6 +35,8 @@ import { GRID_RADIUS, cellDelta, claimScreenAxes, originShift, type Position } f
 import { carryOrbit } from '../lib/zoomOrbit'
 import { AVATAR_LERP_MS, lerpRemaining } from '../lib/avatarLerp'
 import { walkEye } from '../lib/walkEye'
+import { clearWalkLook, lookRadPerPx, takeWalkLook, walkLookBy } from '../lib/walkLook'
+import { orbitOffset } from '../workshop/benchAxes'
 import { WalkProbe } from './WalkProbe'
 import { commitAnchor, committedAnchor } from '../lib/renderFrame'
 import { alignedOrigin, useCyberspace } from '../store/useCyberspace'
@@ -362,6 +364,7 @@ function Rig(): JSX.Element {
     update: () => void
     minDistance: number
     enableZoom: boolean
+    enableRotate: boolean
   } | null>(null)
   // WALK's first person (store/useWalk.ts): whether the last frame was
   // walking, and the eye's glide into the avatar or back out of it, as
@@ -527,7 +530,51 @@ function Rig(): JSX.Element {
     }
   }, [])
 
-  useFrame((_, dt) => {
+  // WALK's look is the rig's own (lib/walkLook.ts): a drag on the scene, by
+  // mouse, finger or pen, is spent on the line of sight below, at a gain set
+  // per screen width. OrbitControls turns nothing in WALK; it scaled a drag
+  // by the screen's height and lost most of it (arkinox, 2026-10-23: "it
+  // takes wayyyy to much dragging to look around while in WALK mode").
+  // One pointer on the scene at a time, as OrbitControls had it: a second
+  // finger on the scene ends the turn rather than jumping it. A finger
+  // holding a pad key is not on the scene, so a thumb can walk while the
+  // other looks; that is why this does not ask for the primary pointer.
+  const surface = useThree((s) => (s.events.connected as HTMLElement | null | undefined) ?? s.gl.domElement)
+  useEffect(() => {
+    let held: { id: number; x: number; y: number } | null = null
+    const down = (e: PointerEvent): void => {
+      // The same pointer down again means its release was missed: a new drag.
+      if (held && e.pointerId !== held.id) { held = null; return }
+      if (!useCyberspace.getState().walking || (e.pointerType === 'mouse' && e.button !== 0)) return
+      held = { id: e.pointerId, x: e.clientX, y: e.clientY }
+    }
+    const move = (e: PointerEvent): void => {
+      if (!held || e.pointerId !== held.id) return
+      // A release this listener never heard (the button let go off the page)
+      // must not leave a bare mouse turning the view.
+      if (!useCyberspace.getState().walking || (e.pointerType === 'mouse' && (e.buttons & 1) === 0)) { held = null; return }
+      walkLookBy(e.clientX - held.x, e.clientY - held.y)
+      held.x = e.clientX
+      held.y = e.clientY
+    }
+    const up = (e: PointerEvent): void => { if (held && e.pointerId === held.id) held = null }
+    surface.addEventListener('pointerdown', down)
+    // On the document, as OrbitControls listens: the drag keeps turning when
+    // it passes over the HUD, until the pointer lifts. In the capture phase,
+    // so no HUD handler that stops a release can strand the drag.
+    const doc = surface.ownerDocument
+    doc.addEventListener('pointermove', move, true)
+    doc.addEventListener('pointerup', up, true)
+    doc.addEventListener('pointercancel', up, true)
+    return () => {
+      surface.removeEventListener('pointerdown', down)
+      doc.removeEventListener('pointermove', move, true)
+      doc.removeEventListener('pointerup', up, true)
+      doc.removeEventListener('pointercancel', up, true)
+    }
+  }, [surface])
+
+  useFrame((state, dt) => {
     const c = controls.current
     if (!c) return
     const s = useCyberspace.getState()
@@ -648,6 +695,8 @@ function Rig(): JSX.Element {
       if (s.walking) outTo.current = from >= 2 ? from : START_DISTANCE
       eye.current = { from, to: s.walking ? WALK_EYE : outTo.current, t0: performance.now() }
       c.enableZoom = !s.walking
+      c.enableRotate = !s.walking
+      clearWalkLook()
       walkLook.current = null
     }
     if (eye.current) {
@@ -662,6 +711,10 @@ function Rig(): JSX.Element {
       // (arkinox, 2026-10-13).
       const along = s.walking && walkLook.current ? walkDir.copy(walkLook.current) : walkDir.copy(c.object.position).sub(smooth.current)
       if (along.lengthSq() === 0) along.set(0, 0, 1)
+      if (s.walking && walkLook.current) {
+        const [lx, ly] = takeWalkLook(dt)
+        if (lx !== 0 || ly !== 0) along.copy(orbitOffset(along, lx, ly, lookRadPerPx(state.size.width)))
+      }
       c.object.position.copy(smooth.current).addScaledVector(along.normalize(), d)
       c.minDistance = Math.min(ORBIT_MIN_DISTANCE, d * 0.5)
       locked.current = true

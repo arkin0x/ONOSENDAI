@@ -46,12 +46,14 @@ import { useShards } from '../store/useShards'
 import { usePublished } from '../store/usePublished'
 import { STATE_HELP, STATE_LABEL, STATE_TAG, publishState, shardFingerprint } from '../lib/published'
 import { ConfirmModal } from '../hud/ConfirmModal'
+import { OrbitSphere } from '../hud/ui/OrbitSphere'
 import { Bench } from './Bench'
 import { benchPose, nudgeFor, nudgeLabel, orbitBy, planeAfter, requestView, useBenchView, type NudgeName } from './benchAxes'
 import { stackedSpots } from '../lib/weld'
 import { ObjectPicker } from './ObjectPicker'
 import { ShardFolders, modelName, modelRef } from '../hud/ShardFolders'
 import { useEscape } from '../hooks/useEscape'
+import { ShardThumb } from '../hud/ShardThumb'
 
 const TOOLS: Tool[] = ['view', 'stamp', 'add', 'select', 'face']
 const TOOL_ICON: Record<Tool, LucideIcon> = { view: Eye, stamp: Stamp, add: Plus, select: MousePointer2, face: Triangle }
@@ -141,44 +143,17 @@ function LevelStack(): JSX.Element {
  * until it lifts. A tap, no drag, sends the view home. It works with any
  * tool, which is the point: in SELECT and FACE a one-finger drag on the bench
  * is the box (decision A, the same day), and this is how you orbit meanwhile.
+ * The ball itself is shared with WALK's look (hud/ui/OrbitSphere.tsx).
  */
-function OrbitSphere(): JSX.Element {
-  const last = useRef<{ x: number; y: number } | null>(null)
-  const moved = useRef(false)
-  const down = (e: React.PointerEvent<HTMLButtonElement>): void => {
-    if (!e.isPrimary) return
-    e.preventDefault()
-    e.currentTarget.setPointerCapture(e.pointerId)
-    last.current = { x: e.clientX, y: e.clientY }
-    moved.current = false
-  }
-  const move = (e: React.PointerEvent<HTMLButtonElement>): void => {
-    if (!last.current) return
-    const dx = e.clientX - last.current.x
-    const dy = e.clientY - last.current.y
-    if (dx === 0 && dy === 0) return
-    last.current = { x: e.clientX, y: e.clientY }
-    moved.current = true
-    orbitBy(dx, dy)
-  }
-  const up = (): void => {
-    if (!last.current) return
-    last.current = null
-    if (!moved.current) requestView({ kind: 'home' })
-  }
+function BenchOrbit(): JSX.Element {
   return (
-    <button
-      className="benchorb"
+    <OrbitSphere
+      onTurn={orbitBy}
+      onTap={() => requestView({ kind: 'home' })}
+      label="ORBIT"
       title="Drag to orbit the view; keep dragging past the ball. Tap to send the view home."
-      aria-label="Orbit the view. Drag to turn, tap for the home view."
-      {...noCallout}
-      onPointerDown={down}
-      onPointerMove={move}
-      onPointerUp={up}
-      onPointerCancel={up}
-    >
-      <span className="benchorb__sub">ORBIT</span>
-    </button>
+      ariaLabel="Orbit the view. Drag to turn, tap for the home view."
+    />
   )
 }
 
@@ -889,6 +864,7 @@ export function Workshop(): JSX.Element | null {
             {myAvatar && (
               <li className="workshop__list-avatar">
                 <span className="workshop__pick workshop__pick--static">
+                  <ShardThumb shard={myAvatar} />
                   <span className="workshop__pick-name">{myAvatar.name}</span>
                   <span className="workshop__pick-meta">{myAvatar.vertices.length} v · {myAvatar.faces.length} f · {myAvatar.mode}</span>
                 </span>
@@ -906,6 +882,7 @@ export function Workshop(): JSX.Element | null {
             <ShardFolders items={byEdited} refOf={modelRef} nameOf={modelName} row={(s, f) => (
               <li key={s.id} className={s.id === shard.id ? 'is-current' : ''} {...f.drag}>
                 <button className="workshop__pick" onClick={() => w().select(s.id)}>
+                  <ShardThumb shard={s} />
                   <span className="workshop__pick-name">{s.name}</span>
                   <span className="workshop__pick-meta">{s.vertices.length} v · {s.faces.length} f{s.parts?.length ? ` · ${s.parts.length} parts` : ''} · {s.mode}</span>
                 </button>
@@ -1106,7 +1083,7 @@ export function Workshop(): JSX.Element | null {
           last row first, where its height lifted every row by 152px. */}
       {/* Away while the TOOLS panel is open: the panel stands where the ball
           does, and the ball covered it (arkinox, 2026-10-10). */}
-      {panel !== 'tools' && <OrbitSphere />}
+      {panel !== 'tools' && <BenchOrbit />}
 
       {/* Bottom right: the color column. FILL for a set of points is on the
           clipboard row, and the FACE tool's actions on its own row there. */}

@@ -23,6 +23,7 @@ import { useWorkshop, type StampObject } from '../store/useWorkshop'
 import { usePublished } from '../store/usePublished'
 import { useEscape } from '../hooks/useEscape'
 import { ShardFolders } from '../hud/ShardFolders'
+import { ShardThumb } from '../hud/ShardThumb'
 
 const OBJECT_KIND = 33331
 const WAIT_MS = 5000
@@ -131,6 +132,7 @@ export function ObjectPicker({ onClose }: { onClose: () => void }): JSX.Element 
               <ShardFolders items={mine} refOf={foundRef} nameOf={foundName} row={(o, f) => (
                 <li key={o.address} {...f.drag}>
                   <button className="objpick__row" onClick={() => choose({ ref: refOf(o.address), name: o.shard.name, shard: o.shard })}>
+                    <ShardThumb shard={o.shard} />
                     <span className="objpick__name">{o.shard.name}</span>
                     <span className="objpick__meta">{o.shard.vertices.length} v · {o.shard.faces.length} f{o.shard.parts?.length ? ` · ${o.shard.parts.length} obj` : ''}</span>
                   </button>

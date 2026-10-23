@@ -8,6 +8,8 @@
  * always had. A third, walkAvatarHidden, hides your own avatar while WALK
  * puts the camera inside it (arkinox, 2026-10-13); it defaults off, so a
  * walk shows what sticks out of you until you say otherwise. A fourth,
+ * walkLookSphere, is the ball in the bottom left that WALK looks around with
+ * (hud/WalkLookSphere.tsx; arkinox, 2026-10-23); it defaults on. A fifth,
  * headlamp, shades the world's shards as if lit from the camera
  * (scene/headlamp.ts; arkinox, 2026-10-23); it defaults on, and off draws
  * them unlit, exactly as before. These are view
@@ -22,13 +24,13 @@
 
 import { create } from 'zustand'
 
-export type SceneLayer = 'dots' | 'boxes' | 'walkAvatarHidden' | 'headlamp'
+export type SceneLayer = 'dots' | 'boxes' | 'walkAvatarHidden' | 'walkLookSphere' | 'headlamp'
 
 export type SceneLayers = Record<SceneLayer, boolean>
 
 export const LAYERS_KEY = 'onosendai:layers'
 
-export const DEFAULT_LAYERS: SceneLayers = { dots: true, boxes: true, walkAvatarHidden: false, headlamp: true }
+export const DEFAULT_LAYERS: SceneLayers = { dots: true, boxes: true, walkAvatarHidden: false, walkLookSphere: true, headlamp: true }
 
 /** The stored choice, or the defaults when there is none or it cannot be read. */
 export function loadLayers(): SceneLayers {
@@ -42,6 +44,8 @@ export function loadLayers(): SceneLayers {
       boxes: p?.boxes !== false,
       // Off unless explicitly on.
       walkAvatarHidden: p?.walkAvatarHidden === true,
+      // On unless explicitly off, like the layers.
+      walkLookSphere: p?.walkLookSphere !== false,
       // On unless explicitly off, as the dots and boxes are.
       headlamp: p?.headlamp !== false,
     }
@@ -61,7 +65,7 @@ interface LayersState extends SceneLayers {
 
 export const useLayers = create<LayersState>((set, get) => {
   const put = (layer: SceneLayer, on: boolean): void => {
-    const next = { dots: get().dots, boxes: get().boxes, walkAvatarHidden: get().walkAvatarHidden, headlamp: get().headlamp, [layer]: on }
+    const next = { dots: get().dots, boxes: get().boxes, walkAvatarHidden: get().walkAvatarHidden, walkLookSphere: get().walkLookSphere, headlamp: get().headlamp, [layer]: on }
     set({ [layer]: on })
     saveLayers(next)
   }

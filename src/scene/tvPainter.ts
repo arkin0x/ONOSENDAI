@@ -33,7 +33,7 @@ import { watchingWords } from '../lib/tv/watching'
 import type { Census, ChainTimes } from '../lib/tv/stats'
 import type { Position } from '../lib/space'
 import { trackDrawing, type DirtyRect, type DrawTracker } from './drawTracker'
-import { CARD_CLEAR_PX, CARD_RISE, MAP_REACH, fitAbove, placeCard, type CardPlace } from './tvCard'
+import { CARD_CLEAR_PX, CARD_LINE_EM, CARD_RISE, MAP_REACH, clearOfPanel, placeCard, type Box, type CardFrame, type CardPlace, type PanelInk } from './tvCard'
 
 /** The face every word on the tube is set in. */
 export const TV_FONT = "'Monaspace Argon', ui-monospace, monospace"
@@ -671,48 +671,36 @@ export class TvPainter {
 
     // Beside the clock it keeps off the chiron, and on a phone, where NOW
     // PLAYING spans the width over the chiron, off that too (review of #393).
-    // The room above the chiron was a LATER or MEANWHILE card's; the card is
-    // at the top now, and the room is kept so the panels lie as they did.
+    // The room kept above the chiron was a LATER or MEANWHILE card's, and
+    // still is where the top has no room for it (scene/tvCard).
     const cardRoom = (bigInset ? 14 : 50) * s
     const sideBottom = (narrow || (big && !row)) && this.npRect ? Math.min(chironTop - cardRoom, npTop - 6 * s) : chironTop - cardRoom
     // A panel under the minimap (on a square stream), its room the less for
     // it (review of #447: a comment's panel reached 50).
     const segmentFloor = floor - (bigInset ? 14 : underMap ? 60 : 50) * s
-
-    // LATER and MEANWHILE: top centre, between the minimap and the logo's
-    // column, or just under them where that gap is too narrow (scene/tvCard;
-    // arkinox, 2026-10-23: "I don't like it appearing over the chiron").
-    // Placed for the whole shot that has one, so a panel keeps under it from
-    // the start and never moves when it goes. A panel gives the card no more
-    // than a smaller model: never fewer or smaller words.
-    const cardWords = cardText(p)
-    const mapReach = bigInset ? 0 : mapSize * (0.5 + MAP_REACH)
-    const cardAt = cardWords && placeCard(cardWords.full, cardWords.short, {
-      width: W,
-      left: bigInset ? MX : MX + mapReach,
-      right: colLeft,
-      top: MY,
-      rowBottom: Math.max(MY + mapReach, clockBottom),
-      margin: MX,
-      s,
-      px: (narrow ? 14 : 18) * s,
-    }, (text, px) => {
-      ctx.font = `700 ${px}px ${TV_FONT}`
-      return ctx.measureText(text).width
-    })
     part('segment')
-    const shown = item && panel ? this.segment(item, p.shot!.length, a, W, segmentTop + 14 * s, segmentFloor, sideBottom, MX, MY, (big ? colLeft : W - MX - lw) - 16 * s, bigInset ? MX : MX + mapSize + 16 * s, s, narrow, now, cardAt ? cardAt.y + cardAt.h + CARD_CLEAR_PX * s : 0) : null
+    const shown = !item || !panel ? null : this.segment(item, p.shot!.length, a, W, segmentTop + 14 * s, segmentFloor, sideBottom, MX, MY, (big ? colLeft : W - MX - lw) - 16 * s, bigInset ? MX : MX + mapSize + 16 * s, s, narrow, now)
 
-    // The card itself, after the cut's transition. Over a panel that could
-    // not move down far enough to clear it (it fills its room: the stream's
-    // larger text, a phone on its side), the card rises into the top margin
-    // to end above the panel or, failing that, on its top border, never over
-    // what the panel shows; and only then shrinks (tvCard fitAbove).
+    // LATER and MEANWHILE, after the cut's transition: top centre, between
+    // the minimap and the logo's column (arkinox, 2026-10-23: "I don't like
+    // it appearing over the chiron"), and off a segment's panel, which never
+    // moves for it (scene/tvCard). Solid with the stream's larger text.
     part('card')
-    const card = cardAt && shown && shown.x < cardAt.x + cardAt.w && cardAt.x < shown.x + shown.w
-      ? fitAbove(cardAt, [shown.y - CARD_CLEAR_PX * s, shown.y + shown.pad - 8 * s], cardAt.inRow ? MY * CARD_RISE : cardAt.y)
-      : cardAt
-    if (card) this.card(p, card, now)
+    const cardWords = cardText(p)
+    if (cardWords) {
+      const clear = CARD_CLEAR_PX * s
+      const reach = bigInset ? 0 : mapSize * (0.5 + MAP_REACH)
+      const blocks: Box[] = [{ x0: colLeft, y0: 0, x1: W, y1: clockBottom + 6 * s }]
+      if (!bigInset) blocks.push({ x0: MX + mapSize / 2 - mapSize * MAP_REACH, y0: MY + mapSize / 2 - mapSize * MAP_REACH, x1: MX + reach, y1: MY + reach })
+      if (this.npRect) blocks.push({ x0: this.npRect.x - clear, y0: this.npRect.y - clear, x1: this.npRect.x + this.npRect.w + clear, y1: this.npRect.y + this.npRect.h + clear })
+      const frame: CardFrame = { width: W, left: bigInset ? MX : MX + reach, right: colLeft, top: MY, rowBottom: Math.max(MY + reach, clockBottom), floor: chironTop - clear, blocks, margin: MX, s, px: (narrow ? 14 : 18) * s }
+      const measure = (text: string, px: number): number => {
+        ctx.font = `700 ${px}px ${TV_FONT}`
+        return ctx.measureText(text).width
+      }
+      const at = placeCard(cardWords.full, cardWords.short, frame, measure)
+      this.card(p, shown ? clearOfPanel(at, shown, frame, MY * CARD_RISE, measure) : at, now)
+    }
 
     // TUNING, END OF TAPE, NO SIGNAL.
     part('status')
@@ -1291,7 +1279,7 @@ export class TvPainter {
     ctx.restore()
   }
 
-  /** LATER or MEANWHILE, where scene/tvCard put it; solid with the stream's larger text, as it was. */
+  /** LATER or MEANWHILE, where scene/tvCard put it: a line or two; solid with the stream's larger text. */
   private card(p: TvPicture, at: CardPlace, now: number): void {
     const t = (now - p.cutAt - CUT_MS) / CARD_MS
     if (t < 0 || t > 1) return
@@ -1300,23 +1288,29 @@ export class TvPainter {
     ctx.font = `700 ${at.px}px ${TV_FONT}`
     ctx.textAlign = 'center'
     // Under the top row on a very narrow frame its words may still need cutting.
-    const words = at.inRow ? at.words : fit(ctx, at.words, at.maxWords)
-    const tw = ctx.measureText(words).width
+    const lines = at.inRow ? at.lines : at.lines.map((l) => fit(ctx, l, at.maxWords))
+    const tw = Math.max(...lines.map((l) => ctx.measureText(l).width))
     ctx.fillStyle = this.big ? 'rgba(2, 12, 20, 0.94)' : 'rgba(0, 0, 0, 0.5)'
     ctx.fillRect(at.cx - tw / 2 - at.pad, at.y, tw + 2 * at.pad, at.h)
     ctx.fillStyle = FG
-    ctx.fillText(words, at.cx, at.baseline)
+    lines.forEach((l, i) => ctx.fillText(l, at.cx, at.baseline + i * CARD_LINE_EM * at.px))
     ctx.globalAlpha = 1
   }
 
   /**
    * The panel of a segment shown in an inset: a sealed bag, an object, a new
-   * avatar, a comment; and where it went, with its padding. `keepUnder`: the
-   * bottom of a LATER or MEANWHILE card at the top (scene/tvCard), which it
-   * keeps under as that file says.
+   * avatar, a comment. Where it went, for a LATER or MEANWHILE card to keep
+   * off (scene/tvCard): its ground, what it shows under its top border, and
+   * its bursts at the largest they land.
    */
-  private segment(item: TapeItem, shotLength: number, a: TvAssets, W: number, top: number, bottom: number, sideBottom: number, MX: number, MY: number, sideRight: number, sideLeft: number, s: number, narrow: boolean, now: number, keepUnder = 0): FlatRect & { pad: number } {
+  private segment(item: TapeItem, shotLength: number, a: TvAssets, W: number, top: number, bottom: number, sideBottom: number, MX: number, MY: number, sideRight: number, sideLeft: number, s: number, narrow: boolean, now: number): PanelInk {
     const ctx = this.ctx
+    const bursts: Box[] = []
+    // A burst's reach: its points at their largest (1.9 times, and its wobble), and its edge.
+    const burst = (cx: number, cy: number, r: number): void => {
+      const R = r * 1.9 * 1.04 + 2 * s
+      bursts.push({ x0: cx - R, y0: cy - R, x1: cx + R, y1: cy + R })
+    }
     // Seconds since the segment came on, after its cut, by the shot's own
     // clock (the shot's length, which is the item's unless a test cued it longer).
     const length = itemLength(item)
@@ -1382,50 +1376,38 @@ export class TvPainter {
     // happened"). On a short screen (a phone on its side) that strip is too
     // narrow: the panel goes up beside the clock instead, short of the
     // logo's column, side by side.
-    const place = (top: number, MY: number): { fitted: ReturnType<typeof layout>; px: number; room: number; top0: number } => {
-      const fullW = Math.min(760 * s, W - 2 * MX)
-      let room = Math.max(0, bottom - top)
-      let fitted = fitPanel(fullW, narrow || ad, room)
-      let px = (W - fullW) / 2
-      let top0 = top
-      // Also when it only fit by cutting the quote: side by side may show all
-      // of it (review of #375: one line at 915x412, seven at 844x390).
-      if (!fits(fitted.ph, room) || fitted.cut) {
-        // Between the minimap and the logo's column.
-        const sideW = Math.min(760 * s, sideRight - sideLeft)
-        // Beside the clock, left of the logo's column: never under NOW
-        // PLAYING, so the chiron is its floor (review of #382), or on a phone,
-        // where NOW PLAYING spans the width over the chiron, NOW PLAYING
-        // (sideBottom; review of #393).
-        const sideRoom = Math.max(0, sideBottom - MY)
-        const beside = fitPanel(sideW, false, sideRoom)
-        // With the stream's larger text neither may fit: then the one that
-        // overflows least, and one that fits always over one that does not
-        // (the panel had stayed under the clock, over the chiron).
-        const fitsHere = fits(fitted.ph, room)
-        const fitsBeside = fits(beside.ph, sideRoom)
-        const better = this.big && fitsHere !== fitsBeside
-          ? fitsBeside
-          : this.big && !fitsHere
-            ? beside.ph - sideRoom < fitted.ph - room
-            : fitted.cut
-              ? fitsBeside && beside.lines.length > fitted.lines.length
-              : fitsBeside || beside.ph < fitted.ph
-        if (better) { fitted = beside; px = sideLeft; room = sideRoom; top0 = MY }
-      }
-      return { fitted, px, room, top0 }
+    const fullW = Math.min(760 * s, W - 2 * MX)
+    let room = Math.max(0, bottom - top)
+    let fitted = fitPanel(fullW, narrow || ad, room)
+    let px = (W - fullW) / 2
+    let top0 = top
+    // Also when it only fit by cutting the quote: side by side may show all
+    // of it (review of #375: one line at 915x412, seven at 844x390).
+    if (!fits(fitted.ph, room) || fitted.cut) {
+      // Between the minimap and the logo's column.
+      const sideW = Math.min(760 * s, sideRight - sideLeft)
+      // Beside the clock, left of the logo's column: never under NOW
+      // PLAYING, so the chiron is its floor (review of #382), or on a phone,
+      // where NOW PLAYING spans the width over the chiron, NOW PLAYING
+      // (sideBottom; review of #393).
+      const sideRoom = Math.max(0, sideBottom - MY)
+      const beside = fitPanel(sideW, false, sideRoom)
+      // With the stream's larger text neither may fit: then the one that
+      // overflows least, and one that fits always over one that does not
+      // (the panel had stayed under the clock, over the chiron).
+      const fitsHere = fits(fitted.ph, room)
+      const fitsBeside = fits(beside.ph, sideRoom)
+      const better = this.big && fitsHere !== fitsBeside
+        ? fitsBeside
+        : this.big && !fitsHere
+          ? beside.ph - sideRoom < fitted.ph - room
+          : fitted.cut
+            ? fitsBeside && beside.lines.length > fitted.lines.length
+            : fitsBeside || beside.ph < fitted.ph
+      if (better) { fitted = beside; px = sideLeft; room = sideRoom; top0 = MY }
     }
-    // A LATER or MEANWHILE card at the top (scene/tvCard): the panel keeps
-    // under it, in the room left under it, when it shows all it would
-    // without the card (a smaller model is fine, fewer or smaller words are
-    // not); else in its own room, as low as that lets it go (`py`), and the
-    // card gives way (tvCard fitAbove).
-    const free = place(top, MY)
-    const under = keepUnder > 0 ? place(Math.max(top, keepUnder), Math.max(MY, keepUnder)) : null
-    const keeps = under !== null && fits(under.fitted.ph, under.room) && under.fitted.lines.length >= free.fitted.lines.length && under.fitted.quoteSize >= free.fitted.quoteSize && !(under.fitted.cut && !free.fitted.cut)
-    const { fitted, px, room, top0 } = keeps ? under : free
     const { stage, pw, stacked, textX, textW, lines, quoteSize, ph } = fitted
-    const py = Math.max(top0 + Math.max(0, (room - ph) / 2), Math.min(keepUnder, top0 + room - ph))
+    const py = top0 + Math.max(0, (room - ph) / 2)
     ctx.globalAlpha = ramp(t, 0, 0.5)
     const grad = ctx.createLinearGradient(px, py, px + pw, py + ph)
     grad.addColorStop(0, 'rgba(0, 40, 56, 0.92)')
@@ -1454,8 +1436,8 @@ export class TvPainter {
       // NFT inside is hyped the same way (2026-10-22): on that corner, or on
       // the cube's other top corner when money is there too.
       const cubeX = sx + (stacked ? (pw - 2 * pad - stage) / 2 : 0)
-      if (item.money) this.splash(cubeX + stage * 0.9, sy + stage * 0.12, stage * 0.28, t, s, MONEY_SPLASH)
-      if (item.nft) this.splash(cubeX + stage * (item.money ? 0.1 : 0.9), sy + stage * 0.12, stage * 0.28, t, s, NFT_SPLASH)
+      if (item.money) { this.splash(cubeX + stage * 0.9, sy + stage * 0.12, stage * 0.28, t, s, MONEY_SPLASH); burst(cubeX + stage * 0.9, sy + stage * 0.12, stage * 0.28) }
+      if (item.nft) { this.splash(cubeX + stage * (item.money ? 0.1 : 0.9), sy + stage * 0.12, stage * 0.28, t, s, NFT_SPLASH); burst(cubeX + stage * (item.money ? 0.1 : 0.9), sy + stage * 0.12, stage * 0.28) }
     } else if (item.kind === 'object') {
       // An advertisement: the product turning in the middle, NOW AVAILABLE!
       // slammed on its corner, the words centred under it.
@@ -1468,6 +1450,7 @@ export class TvPainter {
       else this.caption(tx, ty + stage / 2 - 40 * s, textW, 'NEW IN CYBERSPACE', title, `FROM ${a.name(item.pubkey)}`, s)
       // On the model's left (arkinox, 2026-10-18: "move the now available to the left side").
       this.splash(ox + stage * 0.08, sy + stage * 0.14, stage * 0.3, t, s, AD_SPLASH)
+      burst(ox + stage * 0.08, sy + stage * 0.14, stage * 0.3)
     } else if (item.kind === 'avatar') {
       const ox = sx + (stacked ? (pw - 2 * pad - stage) / 2 : 0)
       if (a.spin) ctx.drawImage(a.spin, ox, sy, stage, stage)
@@ -1520,7 +1503,10 @@ export class TvPainter {
       ctx.fillText(this.big ? credit.replace(/…+$/u, '…') : credit, tx, ty + lines.length * quoteSize * 1.45 + 18 * s)
     }
     ctx.globalAlpha = 1
-    return { x: px, y: py, w: pw, h: ph, pad }
+    // What it shows starts under its padding; a sealed bag's caption, centred
+    // on a small model beside it, can stand up to 9 px into that.
+    const panelBox = { x0: px, y0: py, x1: px + pw, y1: py + ph }
+    return { panel: panelBox, content: { ...panelBox, y0: py + Math.max(0, pad - 10 * s) }, bursts }
   }
 
   /**

@@ -155,10 +155,10 @@ describe('the stream\'s text sizes', () => {
                 const card = rects.find(isCard)
                 if (ci > 0) expect(card, `${at}: a card`).toBeDefined()
                 if (card) {
-                  // At the top, never on the chiron (arkinox, 2026-10-23: "I don't like it appearing over the chiron"; scene/tvCard).
+                  // Never on the chiron (arkinox, 2026-10-23: "I don't like it appearing over the chiron"; scene/tvCard).
                   expect(card.y1, `${at}: card ${JSON.stringify(card)} on the chiron ${JSON.stringify(chironGround)}`).toBeLessThan(chironGround.y0)
                   expect(inside(card, frame), `${at}: card ${JSON.stringify(card)}`).toBe(true)
-                  // Never over what a panel shows: at most on its top border, where the panel fills its room (scene/tvCard fitAbove).
+                  // Never over what a panel shows: at most on its top border, where the panel fills its room (scene/tvCard clearOfPanel).
                   if (panel && meets(card, panel)) expect(card.y1, `${at}: card over the panel`).toBeLessThanOrEqual(panel.y0 + 14 * scale * Math.min(1.35, Math.max(0.9, w / 1400)) * broadcastScale(Math.min(1.35, Math.max(0.9, w / 1400)), w, 1.35) + 0.5)
                   const npLabel = texts.find((t) => t.text.includes('NOW PLAYING'))
                   const np = npLabel && grounds.find((r) => r.x0 <= npLabel.box.x0 && r.x1 >= npLabel.box.x0 && r.y0 <= npLabel.y && r.y1 >= npLabel.y)

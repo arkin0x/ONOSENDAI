@@ -541,7 +541,8 @@ function load(): ShardModel[] {
 }
 
 /**
- * The object edited most recently: the one at the top of the workshop's list.
+ * The object edited most recently. The workshop's list also counts a deploy
+ * as an edit (hud/ShardFolders useNewestFirst), so its top may be another one.
  *
  * The stored list is in the order objects were made, so its first entry is the
  * oldest, and opening that on every fresh load kept bringing back the same old

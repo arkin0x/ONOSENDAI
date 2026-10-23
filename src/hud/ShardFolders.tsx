@@ -1,8 +1,8 @@
 /**
  * ShardFolders.tsx - the folders every shard list is sorted into: the
- * workshop MENU's SHARDS, PLACE OBJECT's MINE and STAMP's objects. One
- * component over one store (store/useShardFolders.ts), so the three lists
- * show the same folders and behave the same.
+ * workshop MENU's SHARDS, PLACE OBJECT's MINE, the chest composer's + SHARD
+ * and STAMP's objects. One component over one store (store/useShardFolders.ts),
+ * so the lists show the same folders and behave the same.
  *
  * It renders into the caller's own <ul>: a bar (+ FOLDER, SELECT), then the
  * folders, then the shards in no folder. Each shard row is still the

@@ -2474,6 +2474,10 @@ kbd {
   color: var(--ok);
 }
 
+/* CONSTRAIN MOVEMENT IN WALK MODE: a long label, so the row wraps and its three choices stay together. */
+.deploybar__row--constrain { flex-wrap: wrap; }
+.deploybar__choices { display: inline-flex; gap: 6px; }
+
 .deploybar__title {
   flex: 1;
   letter-spacing: 0.12em;

@@ -52,7 +52,7 @@ export interface Explainer {
 }
 
 /** How often, ms of TV on: one every ten minutes. */
-export const EXPLAINER_EVERY_MS = 10 * 60_000
+export const EXPLAINER_EVERY_MS = 20 * 60_000
 /** The first, ms after TV comes on: a few shots in, before a short visit is over. */
 export const EXPLAINER_FIRST_MS = 2 * 60_000
 /** How long one waits for the song playing to end before fading it out instead, ms. */

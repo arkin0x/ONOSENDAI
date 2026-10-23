@@ -48,6 +48,7 @@ import { ProfileView } from './hud/ProfileView'
 import { ProfileModal } from './hud/ProfileModal'
 import { useProfileView } from './store/useProfileView'
 import { TouchControls } from './hud/TouchControls'
+import { WalkLookSphere } from './hud/WalkLookSphere'
 import { SyncWarning } from './hud/SyncWarning'
 import { RouteOverlay } from './hud/RouteOverlay'
 import { ViewMenu } from './hud/ViewMenu'
@@ -356,6 +357,10 @@ export default function App(): JSX.Element {
             (arkinox, 2026-10-12), and placing moves no avatar, so there is
             no route to show. */}
         {showPad && !offerUp && !deploying && <RouteOverlay />}
+        {/* WALK's look ball, above the menu button (WalkLookSphere.tsx). Not
+            tied to the pad, which a tap on the scene folds; not while the
+            menu covers the scene or the deploy bar holds this corner. */}
+        {!crowded && !offerUp && !deploying && <WalkLookSphere />}
       </div>
       {/* Off-head too: tapping a block hides the pad like any scene tap, and
           without this there was no way to bring it back while viewing. */}

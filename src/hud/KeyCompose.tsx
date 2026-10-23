@@ -30,7 +30,6 @@ import { primeRef } from '../lib/parts'
 import { ANIMATIONS, isModelAddress, type ItemAnimation } from '../lib/itemModel'
 import { useItemModel } from '../hooks/useItemModel'
 import { useThumbs } from '../store/useThumbs'
-import { ThumbStage } from '../scene/ThumbStage'
 import { ItemModelPreview } from '../scene/ItemModelPreview'
 import { FeedList } from './FeedList'
 import { Field, Switch } from './ui/Switch'
@@ -262,8 +261,6 @@ export function KeyCompose({ onDone }: { onDone: () => void }): JSX.Element {
             ))}
             <button className="chest__act" disabled={!model || iconWanted} onClick={drawIcon} title={`Draw the model as the item's ${MAX_PICTURE_SIDE} by ${MAX_PICTURE_SIDE} picture`}>{iconWanted ? 'DRAWING' : 'ICON FROM MODEL'}</button>
           </div>
-          {/* The one canvas that draws the icon, there only while it is asked for. */}
-          {iconWanted && <ThumbStage />}
         </div>
       )}
       <div className="shards__actions">

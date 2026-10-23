@@ -16,6 +16,7 @@ import { useProfile } from '../hooks/useProfile'
 import { findCashuToken } from '../lib/cashu'
 import { hiddenLabel, messagePreview } from '../lib/hidden'
 import { ItemIcon } from './ItemIcon'
+import { ShardThumb } from './ShardThumb'
 import type { HeldPlace } from '../lib/inventory'
 import { safeNpub } from '../lib/npub'
 import { formatDistance } from 'sno-core/scale'
@@ -51,7 +52,7 @@ function Row({ item, me, onView }: { item: NearbyItem; me: string; onView: (item
   const name = author === me ? 'you' : profileLabel(profile, safeNpub(author))
   return (
     <li className="secrets__row nearby__row">
-      <ItemIcon className="nearby__glyph" type={item.type} coin={item.type === 'message' && findCashuToken(item.text) !== null} size={14} />
+      {item.type === 'shard' && item.shard ? <ShardThumb shard={item.shard} /> : <ItemIcon className="nearby__glyph" type={item.type} coin={item.type === 'message' && findCashuToken(item.text) !== null} size={14} />}
       <div className="nearby__body">
         {item.type === 'key' && item.keyItem
           ? <KeyLine name={item.keyItem.name} author={author} />

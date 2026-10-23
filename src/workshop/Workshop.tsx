@@ -33,6 +33,8 @@ import { IMPORT_ACCEPT, IMPORT_FORMATS_LABEL } from 'sno-core/importFile'
 import { importFitFor } from 'sno-core/meshToShard'
 import { BUILT_IN } from 'sno-core/snoPalette'
 import { importFiles } from '../lib/meshImport'
+import { ZipImport } from './ZipImport'
+import { useShardImport } from '../store/useShardImport'
 import { formatCellSize } from 'sno-core/scale'
 import { FACED, FACING_LABEL, FLOOR, MAX_SIZE, MIN_SIZE, STAMPS, STAMP_HELP, type StampKind } from 'sno-core/stamps'
 import { useAvatars } from '../store/useAvatars'
@@ -47,11 +49,14 @@ import { useShards } from '../store/useShards'
 import { usePublished } from '../store/usePublished'
 import { STATE_HELP, STATE_LABEL, STATE_TAG, publishState, shardFingerprint } from '../lib/published'
 import { ConfirmModal } from '../hud/ConfirmModal'
+import { OrbitSphere } from '../hud/ui/OrbitSphere'
 import { Bench } from './Bench'
 import { benchPose, nudgeFor, nudgeLabel, orbitBy, planeAfter, requestView, useBenchView, type NudgeName } from './benchAxes'
 import { stackedSpots } from '../lib/weld'
 import { ObjectPicker } from './ObjectPicker'
+import { ShardFolders, modelName, modelRef } from '../hud/ShardFolders'
 import { useEscape } from '../hooks/useEscape'
+import { ShardThumb } from '../hud/ShardThumb'
 
 const TOOLS: Tool[] = ['view', 'stamp', 'add', 'select', 'face']
 const TOOL_ICON: Record<Tool, LucideIcon> = { view: Eye, stamp: Stamp, add: Plus, select: MousePointer2, face: Triangle }
@@ -141,44 +146,17 @@ function LevelStack(): JSX.Element {
  * until it lifts. A tap, no drag, sends the view home. It works with any
  * tool, which is the point: in SELECT and FACE a one-finger drag on the bench
  * is the box (decision A, the same day), and this is how you orbit meanwhile.
+ * The ball itself is shared with WALK's look (hud/ui/OrbitSphere.tsx).
  */
-function OrbitSphere(): JSX.Element {
-  const last = useRef<{ x: number; y: number } | null>(null)
-  const moved = useRef(false)
-  const down = (e: React.PointerEvent<HTMLButtonElement>): void => {
-    if (!e.isPrimary) return
-    e.preventDefault()
-    e.currentTarget.setPointerCapture(e.pointerId)
-    last.current = { x: e.clientX, y: e.clientY }
-    moved.current = false
-  }
-  const move = (e: React.PointerEvent<HTMLButtonElement>): void => {
-    if (!last.current) return
-    const dx = e.clientX - last.current.x
-    const dy = e.clientY - last.current.y
-    if (dx === 0 && dy === 0) return
-    last.current = { x: e.clientX, y: e.clientY }
-    moved.current = true
-    orbitBy(dx, dy)
-  }
-  const up = (): void => {
-    if (!last.current) return
-    last.current = null
-    if (!moved.current) requestView({ kind: 'home' })
-  }
+function BenchOrbit(): JSX.Element {
   return (
-    <button
-      className="benchorb"
+    <OrbitSphere
+      onTurn={orbitBy}
+      onTap={() => requestView({ kind: 'home' })}
+      label="ORBIT"
       title="Drag to orbit the view; keep dragging past the ball. Tap to send the view home."
-      aria-label="Orbit the view. Drag to turn, tap for the home view."
-      {...noCallout}
-      onPointerDown={down}
-      onPointerMove={move}
-      onPointerUp={up}
-      onPointerCancel={up}
-    >
-      <span className="benchorb__sub">ORBIT</span>
-    </button>
+      ariaLabel="Orbit the view. Drag to turn, tap for the home view."
+    />
   )
 }
 
@@ -587,6 +565,8 @@ export function Workshop(): JSX.Element | null {
   // changes which hooks run, and React counts them. This one sat after the
   // return for a day and opening the workshop threw React #310 (2026-09-24).
   const stacked = useMemo(() => (shard ? stackedSpots(shard) : { spots: 0, points: 0 }), [shard])
+  // The SHARDS list's order (the list below says why).
+  const byEdited = useMemo(() => [...shards].sort((a, b) => (b.updatedAt ?? 0) - (a.updatedAt ?? 0)), [shards])
   // The workshop is a modal over the scene, with arkinox's order inside it
   // (2026-10-01): its own modals (the palette sheet, the object picker, every
   // confirmation) open later and so close first; then the open panel, the
@@ -672,6 +652,15 @@ export function Workshop(): JSX.Element | null {
    */
   const importFromFiles = async (list: FileList | File[] | null): Promise<void> => {
     const files = list ? Array.from(list) : []
+    // A zip is bulk import: every shard file in it a new shard of yours (workshop/ZipImport).
+    // While the import's list is open, a drop on it (React carries a portal's events here) changes nothing.
+    if (useShardImport.getState().open) return
+    const zips = files.filter(isZip)
+    if (zips.length) {
+      if (zips.length > 1 || files.length > 1) { say('Import one zip at a time, on its own.'); return }
+      void useShardImport.getState().openZip(zips[0])
+      return
+    }
     const s = w().current()
     if (!files.length || importing || !s) return
     setImporting(true)
@@ -684,6 +673,7 @@ export function Workshop(): JSX.Element | null {
       setImporting(false)
     }
   }
+  const isZip = (f: File): boolean => /\.zip$/i.test(f.name) || f.type === 'application/zip' || f.type === 'application/x-zip-compressed'
   const draggingFiles = (e: React.DragEvent): boolean => Array.from(e.dataTransfer.types).includes('Files')
 
   const ToolIcon = TOOL_ICON[tool]
@@ -701,10 +691,11 @@ export function Workshop(): JSX.Element | null {
         <Bench />
       </div>
       {/* IMPORT's picker, kept mounted so a panel closing cannot drop its answer. */}
-      <input ref={fileInput} type="file" accept={IMPORT_ACCEPT} multiple hidden aria-hidden tabIndex={-1} onChange={(e) => { const list = e.currentTarget.files; void importFromFiles(list ? Array.from(list) : null); e.currentTarget.value = '' }} />
+      <input ref={fileInput} type="file" accept={`${IMPORT_ACCEPT},.zip`} multiple hidden aria-hidden tabIndex={-1} onChange={(e) => { const list = e.currentTarget.files; void importFromFiles(list ? Array.from(list) : null); e.currentTarget.value = '' }} />
       {dropping && <div className="workshop__drop" aria-hidden>DROP TO IMPORT</div>}
       <Intro />
       <Toast />
+      <ZipImport />
 
       {/* Top left: the three chips and the history in one row, wrapping on a phone,
           and the open panel under whatever the row wrapped to. */}
@@ -874,7 +865,7 @@ export function Workshop(): JSX.Element | null {
           <div className="workshop__list-row">
             <button className="workshop__new" onClick={() => w().create()}>+ NEW SHARD</button>
             <button className="workshop__btn" onClick={() => void paste()} title="An object copied from here or anywhere">PASTE</button>
-            <button className="workshop__btn" disabled={importing} onClick={() => fileInput.current?.click()} title={`A 3D file, fitted to the grid and put down here: ${IMPORT_FORMATS_LABEL}. Or drop one on the workshop.`}>{importing ? 'READING' : 'IMPORT'}</button>
+            <button className="workshop__btn" disabled={importing} onClick={() => fileInput.current?.click()} title={`A 3D file, fitted to the grid and put down here: ${IMPORT_FORMATS_LABEL}. Or a .zip of shards, each a new shard. Or drop one on the workshop.`}>{importing ? 'READING' : 'IMPORT'}</button>
           </div>
           {pasteOpen && (
             <div className="workshop__paste">
@@ -896,6 +887,7 @@ export function Workshop(): JSX.Element | null {
             {myAvatar && (
               <li className="workshop__list-avatar">
                 <span className="workshop__pick workshop__pick--static">
+                  <ShardThumb shard={myAvatar} />
                   <span className="workshop__pick-name">{myAvatar.name}</span>
                   <span className="workshop__pick-meta">{myAvatar.vertices.length} v · {myAvatar.faces.length} f · {myAvatar.mode}</span>
                 </span>
@@ -910,17 +902,19 @@ export function Workshop(): JSX.Element | null {
               </li>
             )}
             {/* Last edited first: updatedAt moves on every edit and never on opening (arkinox, 2026-09-26). */}
-            {[...shards].sort((a, b) => (b.updatedAt ?? 0) - (a.updatedAt ?? 0)).map((s) => (
-              <li key={s.id} className={s.id === shard.id ? 'is-current' : ''}>
+            <ShardFolders items={byEdited} refOf={modelRef} nameOf={modelName} row={(s, f) => (
+              <li key={s.id} className={s.id === shard.id ? 'is-current' : ''} {...f.drag}>
                 <button className="workshop__pick" onClick={() => w().select(s.id)}>
+                  <ShardThumb shard={s} />
                   <span className="workshop__pick-name">{s.name}</span>
                   <span className="workshop__pick-meta">{s.vertices.length} v · {s.faces.length} f{s.parts?.length ? ` · ${s.parts.length} parts` : ''} · {s.mode}</span>
                 </button>
                 <button className="workshop__mini" title="Duplicate" aria-label={`Duplicate ${s.name}`} onClick={() => w().duplicate(s.id)}><CopyPlus size={13} strokeWidth={2.25} aria-hidden /></button>
                 <button className="workshop__mini" title="Copy to the clipboard" aria-label={`Copy ${s.name} to the clipboard`} onClick={() => copy(s.id)}><ClipboardCopy size={13} strokeWidth={2.25} aria-hidden /></button>
+                {f.tool}
                 <button className="workshop__mini workshop__mini--danger workshop__mini--x" title="Delete" aria-label={`Delete ${s.name}`} onClick={() => { if (window.confirm(`Delete "${s.name}"? This cannot be undone.`)) w().remove(s.id) }}>×</button>
               </li>
-            ))}
+            )} />
           </ul>
           <div className="workshop__row">
             <button className="workshop__btn workshop__btn--danger" disabled={!hasContent} onClick={() => { if (window.confirm('Delete all vertices, faces and placed objects in the scene?')) w().clearShard() }} title="Empty this scene (undoable)">CLEAR THIS SCENE</button>
@@ -1112,7 +1106,7 @@ export function Workshop(): JSX.Element | null {
           last row first, where its height lifted every row by 152px. */}
       {/* Away while the TOOLS panel is open: the panel stands where the ball
           does, and the ball covered it (arkinox, 2026-10-10). */}
-      {panel !== 'tools' && <OrbitSphere />}
+      {panel !== 'tools' && <BenchOrbit />}
 
       {/* Bottom right: the color column. FILL for a set of points is on the
           clipboard row, and the FACE tool's actions on its own row there. */}

@@ -7,7 +7,8 @@
 
 import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
-import { CustomBlending, OneFactor, OneMinusSrcAlphaFactor, ReplaceStencilOp, SrcAlphaFactor, ZeroFactor } from 'three'
+import { CustomBlending, LineBasicMaterial, MeshBasicMaterial, OneFactor, OneMinusSrcAlphaFactor, ReplaceStencilOp, ShaderLib, SrcAlphaFactor, ZeroFactor, type LineBasicMaterialParameters, type MeshBasicMaterialParameters } from 'three'
+import { HEADLAMP_FACES, HEADLAMP_LINES, patchHeadlamp } from '../headlamp'
 import { DOTS_ORDER, FACE_TAG_STENCIL, GHOST_OPACITY, OVERLAY_ORDER, SEE_THROUGH_BLEND, TAG_BLEND, TRANSLUCENT_ORDER, basicFaceProps, benchOrders, lineProps, litFaceProps, seeThrough, shardOpacity, shardOrder } from '../shardFaces'
 
 describe('what a shard is drawn at', () => {
@@ -103,7 +104,7 @@ describe('where it is wired (ShardMesh and the avatar)', () => {
     expect(mesh).toMatch(/geometry=\{inside\}[^>]*renderOrder=\{bench\.inside\}/)
     expect(mesh).toMatch(/<points [^>]*renderOrder=\{DOTS_ORDER\}/)
     expect(mesh).toMatch(/l\.renderOrder = shardOrder\(opacity, ghost\)/)
-    expect(mesh).toMatch(/createDiscMaterial\([^)]*\? opacity : opacity \* 0\.55\)/)
+    expect(mesh).toMatch(/createDiscMaterial\([^)]*\? opacity : opacity \* 0\.55, headlamp && !lit\)/)
   })
 
   it('a placed object is drawn from its own model, never with its parent\'s opacity (§1.10)', () => {
@@ -154,5 +155,38 @@ describe('the draw order (review of #452)', () => {
     expect(mesh).toMatch(/const own = shardOpacity\(given, \{ ignoreOpacity \}\)/)
     expect((mesh.match(/userData-share=\{own\}/g) ?? []).length).toBe(4)
     expect(mesh).toMatch(/l\.material\.userData\.share = own/)
+  })
+})
+
+describe('the headlamp (#456) on see-through shards', () => {
+  const mesh = readFileSync('src/scene/ShardMesh.tsx', 'utf8')
+
+  it('a see-through world face wears the same headlamp props as an opaque one: one element for both', () => {
+    expect(mesh).toMatch(/\{\.\.\.basicFaceProps\(opacity, \{ ghost, world \}\)\} \{\.\.\.lampFaces\}/)
+    expect(mesh).toMatch(/const lampFaces = headlamp \? HEADLAMP_FACES : \{\}/)
+  })
+
+  it('see-through lines and dots wear it as opaque ones do', () => {
+    expect(mesh).toMatch(/\{\.\.\.lineProps\(opacity, ghost\)\} \{\.\.\.lampLines\}/)
+    expect(mesh).toMatch(/const lampLines = headlamp && !lit \? HEADLAMP_LINES : \{\}/)
+    expect(mesh).toMatch(/LineBasicMaterial\(\{ vertexColors: true, toneMapped: false, \.\.\.lineProps\(opacity, ghost\) \}\)\n\s*if \(headlamp && !lit\) Object\.assign\(m, HEADLAMP_LINES\)/)
+    expect(mesh).toMatch(/opacity : opacity \* 0\.55, headlamp && !lit\)/)
+  })
+
+  it('the see-through blend and the headlamp compose on one material: neither drops the other', () => {
+    const m = new MeshBasicMaterial({ ...basicFaceProps(0.5, { ghost: false, world: true }), ...HEADLAMP_FACES } as MeshBasicMaterialParameters)
+    expect(m.onBeforeCompile).toBe(HEADLAMP_FACES.onBeforeCompile)
+    expect(m.customProgramCacheKey()).toBe(HEADLAMP_FACES.customProgramCacheKey())
+    expect(m).toMatchObject({ blendSrcAlpha: ZeroFactor, blendDstAlpha: OneFactor, depthWrite: false, forceSinglePass: true, stencilWrite: true })
+    const l = new LineBasicMaterial({ ...lineProps(0.5, false), ...HEADLAMP_LINES } as LineBasicMaterialParameters)
+    expect(l.onBeforeCompile).toBe(HEADLAMP_LINES.onBeforeCompile)
+    expect(l.depthWrite).toBe(false)
+  })
+
+  it('the headlamp scales colour only, never alpha, so the alpha kept under a see-through face stays kept', () => {
+    const shader = { vertexShader: ShaderLib.basic.vertexShader, fragmentShader: ShaderLib.basic.fragmentShader, uniforms: {} }
+    expect(patchHeadlamp(shader, true)).toBe(true)
+    expect(shader.fragmentShader).toMatch(/gl_FragColor\.rgb \*= /)
+    expect(shader.fragmentShader).not.toMatch(/gl_FragColor\.a \*=|gl_FragColor \*= /)
   })
 })

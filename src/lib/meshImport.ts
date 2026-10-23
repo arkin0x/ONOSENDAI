@@ -62,5 +62,17 @@ export async function importFiles(files: File[], options: ImportRequest['options
   } catch {
     return { ok: false, error: 'That file could not be opened.' }
   }
-  return runImport({ files: read, options })
+  return importBytes(read, options)
+}
+
+/**
+ * Files already in memory (a model and its MTL or .bin out of a zip, for
+ * bulk import), through the same size check and the same worker as a picked
+ * file.
+ */
+export function importBytes(files: ImportFile[], options: ImportRequest['options']): Promise<ImportResponse> {
+  if (files.length === 0) return Promise.resolve({ ok: false, error: 'No file was picked.' })
+  const big = tooLarge(files.map((f) => ({ size: f.bytes.byteLength })))
+  if (big) return Promise.resolve({ ok: false, error: big })
+  return runImport({ files, options })
 }

@@ -51,6 +51,12 @@ export interface ShardRecord {
 }
 
 export interface MigratedMeta {
+  /**
+   * Which database this is: random, written with the mark. A tab remembers
+   * the one it loaded from, so a database cleared and marked again by
+   * another tab is never taken for the one it read.
+   */
+  gen: string
   at: number
   count: number
   /** Length and FNV-1a of the localStorage list this database was last reconciled with. */
@@ -266,6 +272,51 @@ export function verifyAndMark(db: IDBDatabase, expected: ReadonlyMap<string, str
     tx.oncomplete = () => resolve(out)
     tx.onerror = () => reject(tx.error ?? new Error('IndexedDB verify failed'))
     tx.onabort = () => reject(tx.error ?? new Error('IndexedDB verify aborted'))
+  })
+}
+
+/** A fresh generation id for a mark. */
+export function newGen(): string {
+  try { return crypto.randomUUID() } catch { return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}` }
+}
+
+/**
+ * A tab putting its whole library back into a database that is not the one
+ * it loaded from (cleared under it, and maybe marked again by another tab
+ * from the backup since): in ONE transaction, every shard it holds, each one
+ * kept only where it is at least as new as what the database has, its own
+ * deletes, and the mark when the database has none. The mark never lands
+ * without the shards. Resolves with the generation the database carries now.
+ */
+export function restoreInto(db: IDBDatabase, records: readonly ShardRecord[], deletes: readonly string[], mark: MigratedMeta): Promise<string> {
+  return new Promise((resolve, reject) => {
+    let tx: IDBTransaction
+    try { tx = db.transaction([SHARDS_STORE, TOMBSTONES_STORE, META_STORE], 'readwrite', STRICT) } catch (e) { reject(e); return }
+    const shards = tx.objectStore(SHARDS_STORE)
+    const tombs = tx.objectStore(TOMBSTONES_STORE)
+    const metas = tx.objectStore(META_STORE)
+    let gen = mark.gen
+    const all = shards.getAll()
+    const had = metas.get(MIGRATED_KEY)
+    had.onsuccess = () => {
+      const have = new Map<string, ShardRecord>()
+      for (const r of all.result as unknown[]) if (isRecord(r)) have.set(r.id, r)
+      for (const r of records) {
+        const h = have.get(r.id)
+        if (h && h.updatedAt > r.updatedAt) continue
+        // Its place stays where the database has it.
+        shards.put(h ? { ...r, seq: h.seq } : r)
+        tombs.delete(r.id)
+      }
+      const now = Date.now()
+      for (const id of deletes) { shards.delete(id); tombs.put({ id, at: now }) }
+      const v = (had.result as { value?: MigratedMeta } | undefined)?.value
+      if (v && typeof v.at === 'number' && typeof v.gen === 'string') gen = v.gen
+      else metas.put({ key: MIGRATED_KEY, value: mark })
+    }
+    tx.oncomplete = () => resolve(gen)
+    tx.onerror = () => reject(tx.error ?? new Error('IndexedDB write failed'))
+    tx.onabort = () => reject(tx.error ?? new Error('IndexedDB write aborted'))
   })
 }
 

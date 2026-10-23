@@ -43,7 +43,7 @@
 
 import { GRID_HALF, neededExtent, normalizeStored, type ShardModel } from 'sno-core/shards'
 import {
-  commit, databaseExists, fingerprint, localEntries, mergeLocal, noteReconciled, openWorkshopDb, readAll, readMigrated, readSome, verifyAndMark,
+  commit, databaseExists, fingerprint, localEntries, mergeLocal, newGen, noteReconciled, restoreInto, openWorkshopDb, readAll, readMigrated, readSome, verifyAndMark,
   type MigratedMeta, type ShardRecord,
 } from '../lib/workshopDb'
 
@@ -74,9 +74,9 @@ export interface StorageHost {
 }
 
 const FULL = 'Workshop storage is full. Your latest changes are only in this tab until there is room.'
-const UNAVAILABLE = 'Your shards could not be opened from this browser\'s storage, so this is the copy kept before they moved, and changes are not saved. Reload to try again.'
+const UNAVAILABLE = 'Your shards\' storage could not be opened, so saving is off for now and this is the copy kept in the older storage. Reload to try again.'
 const MOVED_ELSEWHERE = 'Your shards moved to new storage in another tab. Reload this tab to keep saving.'
-const LOST = 'This browser cleared the storage your shards were in. The copy kept before they moved is back; anything made since is gone from this browser.'
+const LOST = 'This browser cleared the storage your shards were in. The copy kept before they moved is back; a tab still open with newer work puts it back when it next saves.'
 
 let host: StorageHost | null = null
 let mode: ShardStorage = 'pending'
@@ -99,6 +99,8 @@ let inFlight = false
 /** The database was opened again after the first time: check it still holds the library before writing. */
 let reopened = false
 let opens = 0
+/** The generation of the database this tab loaded its list from (lib/workshopDb.ts MigratedMeta.gen). */
+let gen = ''
 /** Ids other tabs committed while this one was still loading, read in once it has. */
 const heard = { put: new Set<string>(), del: new Set<string>() }
 /** Why nothing is saved while unavailable. */
@@ -266,19 +268,34 @@ function watch(d: IDBDatabase): void {
  * it holds nothing of ours, so every shard in this tab goes into the next
  * write, and the mark is put back, before anything else is written.
  */
-async function checkStillThere(d: IDBDatabase): Promise<void> {
-  if (!reopened) return
-  if (await readMigrated(d)) { reopened = false; return }
-  console.warn('[workshop] the database came back empty: writing every shard in this tab again')
-  for (const s of host?.shards() ?? []) if (!pending.has(s.id)) pending.set(s.id, s)
-  const raw = readLocalRaw()
-  await noteReconciled(d, metaFor(raw, host?.shards().length ?? 0))
+async function checkStillThere(d: IDBDatabase): Promise<boolean> {
+  if (!reopened) return false
+  const mark = await readMigrated(d)
+  if (mark && mark.gen === gen) { reopened = false; return false }
+  console.warn('[workshop] the database is not the one this tab loaded from: putting every shard in this tab back')
+  const list = host?.shards() ?? []
+  const batch = new Map<string, ShardModel | null>(list.map((s) => [s.id, s]))
+  for (const [id, m] of pending) if (m === null) batch.set(id, null)
+  const records = [...batch].filter(([, m]) => m).map(([id, m]) => recordOf(id, m!))
+  const deletes = [...batch].filter(([, m]) => m === null).map(([id]) => id)
+  // The shards and, when there is none, the mark: one transaction.
+  gen = await restoreInto(d, records, deletes, { ...metaFor(readLocalRaw(), records.length), gen })
+  for (const [id, m] of batch) if (pending.get(id) === m) pending.delete(id)
   reopened = false
+  announce(records.map((r) => r.id), deletes)
+  return true
+}
+
+function recordOf(id: string, m: ShardModel): ShardRecord {
+  return { id, seq: seqFor(id), updatedAt: typeof m.updatedAt === 'number' && Number.isFinite(m.updatedAt) ? m.updatedAt : 0, json: JSON.stringify(m) }
 }
 
 async function commitPending(): Promise<boolean> {
   if (mode !== 'indexeddb') return false
-  if (pending.size === 0) return true
+  // Nothing in hand and the database still the one read: saved. A
+  // connection that was closed is opened and checked first, so "saved"
+  // never stands on a database that was cleared.
+  if (pending.size === 0 && db !== null && !reopened) return true
   inFlight = true
   try {
     // One more try, at once, when the connection was closed under the write:
@@ -292,10 +309,10 @@ async function commitPending(): Promise<boolean> {
         await checkStillThere(d)
         for (const [id, m] of pending) batch.set(id, m)
         for (const [id, m] of batch) {
-          if (m) puts.push({ id, seq: seqFor(id), updatedAt: typeof m.updatedAt === 'number' && Number.isFinite(m.updatedAt) ? m.updatedAt : 0, json: JSON.stringify(m) })
+          if (m) puts.push(recordOf(id, m))
           else deletes.push(id)
         }
-        await commit(d, puts, deletes)
+        if (batch.size) await commit(d, puts, deletes)
       } catch (e) {
         if (attempt === 0 && !isQuota(e)) {
           console.warn(`[workshop] write failed, opening the database again for one more try: ${describe(e)}`)
@@ -357,8 +374,21 @@ function movedElsewhere(): void {
  * commit made while it reads is not missed (it is read in once this tab has
  * its list), and the moment another tab marks the move.
  */
+let listening = false
 function listen(): void {
-  if (channel || typeof BroadcastChannel === 'undefined') return
+  if (listening) return
+  listening = true
+  if (typeof window !== 'undefined') {
+    try {
+      window.addEventListener('storage', (ev) => { if (ev.key === MOVED_KEY && ev.newValue) movedElsewhere() })
+      // A write still in hand when the tab closes would be lost: the browser
+      // asks first (where it lets a page ask: iOS Safari does not).
+      window.addEventListener('beforeunload', (ev) => {
+        if ((mode === 'indexeddb' || mode === 'pending') && (pending.size > 0 || inFlight)) { ev.preventDefault(); ev.returnValue = '' }
+      })
+    } catch { /* no window events */ }
+  }
+  if (typeof BroadcastChannel === 'undefined') return
   try {
     channel = new BroadcastChannel(CHANNEL)
     channel.onmessage = (ev: MessageEvent) => {
@@ -373,14 +403,6 @@ function listen(): void {
       void refresh(ids(data?.put), ids(data?.del))
     }
   } catch { channel = null }
-  if (typeof window === 'undefined') return
-  try {
-    window.addEventListener('storage', (ev) => { if (ev.key === MOVED_KEY && ev.newValue) movedElsewhere() })
-    // A write still in hand when the tab closes would be lost: the browser asks first.
-    window.addEventListener('beforeunload', (ev) => {
-      if (mode === 'indexeddb' && (pending.size > 0 || inFlight)) { ev.preventDefault(); ev.returnValue = '' }
-    })
-  } catch { /* no window events */ }
 }
 
 /** What other tabs committed while this one loaded. */
@@ -479,7 +501,7 @@ function withoutDatabase(why: unknown, moved: boolean): ShardStorage {
 }
 
 function metaFor(raw: string | null, count: number): MigratedMeta {
-  return { at: Date.now(), count, lsLength: raw?.length ?? 0, lsHash: raw === null ? 0 : fingerprint(raw) }
+  return { gen: newGen(), at: Date.now(), count, lsLength: raw?.length ?? 0, lsHash: raw === null ? 0 : fingerprint(raw) }
 }
 
 function flagMoved(): void {
@@ -558,6 +580,8 @@ async function decide(): Promise<ShardStorage> {
     } else if (raw !== null) {
       try { await rescue(d, raw, meta) } catch (e) { console.warn(`[workshop] could not check localStorage for later shards: ${describe(e)}`) }
     }
+    // The database this tab's list comes from: a later reopen is checked against it.
+    gen = typeof meta.gen === 'string' ? meta.gen : ''
     if (!movedFlag()) flagMoved()
     const { records, malformed } = await readAll(d)
     const stored: ShardModel[] = []

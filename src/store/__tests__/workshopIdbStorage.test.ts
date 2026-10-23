@@ -321,6 +321,50 @@ describe('review fixes: never back onto localStorage after the move', () => {
     expect(mem.get(LOCAL_KEY)).toBe(raw)
   })
 
+  it('a full disk while putting a cleared database back writes no mark, so the next load still restores the backup and says so', async () => {
+    const list = [bigShard('a', 4, 1)]
+    seedLocal(list)
+    let full = false
+    vi.doMock('../../lib/workshopDb', async (orig) => {
+      const real = await orig<typeof import('../../lib/workshopDb')>()
+      return { ...real, restoreInto: (...a: Parameters<typeof real.restoreInto>) => (full ? Promise.reject(new DOMException('full', 'QuotaExceededError')) : real.restoreInto(...a)) }
+    })
+    const { ws } = await boot()
+    await new Promise<void>((resolve) => { const r = indexedDB.deleteDatabase('onosendai:workshop'); r.onsuccess = () => resolve() })
+    full = true
+    ws.useWorkshop.getState().rename(list[0].id, 'edited')
+    expect(await ws.useWorkshop.getState().saveNow()).toBe(false)
+    expect(ws.useWorkshop.getState().storageError).toMatch(/full/)
+    vi.doUnmock('../../lib/workshopDb')
+    const again = await boot()
+    expect(again.ws.useWorkshop.getState().shards.map((s) => s.id)).toEqual([list[0].id])
+    expect(again.ws.useWorkshop.getState().notice).toMatch(/cleared/)
+  })
+
+  it('a tab whose database was cleared and marked again by another tab puts its newer work back', async () => {
+    const a = bigShard('a', 4, 1)
+    const b = bigShard('b', 4, 2)
+    seedLocal([a, b])
+    vi.resetModules()
+    const one = await import('../useWorkshop')
+    await one.hydrateWorkshop()
+    const c = one.useWorkshop.getState().create('c, made after the move')
+    one.useWorkshop.getState().rename(a.id, 'a edited')
+    expect(await one.useWorkshop.getState().saveNow()).toBe(true)
+    await new Promise<void>((resolve) => { const r = indexedDB.deleteDatabase('onosendai:workshop'); r.onsuccess = () => resolve() })
+    // A second tab loads: no mark, so the backup comes back and is marked.
+    vi.resetModules()
+    const two = await import('../useWorkshop')
+    await two.hydrateWorkshop()
+    expect(two.useWorkshop.getState().shards.map((s) => s.name)).toEqual(['a', 'b'])
+    // The first tab saves next, with nothing new in hand: it is not "saved" until its work is back.
+    expect(await one.useWorkshop.getState().saveNow()).toBe(true)
+    const again = await boot()
+    const names = again.ws.useWorkshop.getState().shards.map((s) => s.name).sort()
+    expect(names).toEqual(['a edited', 'b', 'c, made after the move'])
+    expect(again.ws.useWorkshop.getState().shards.some((s) => s.id === c)).toBe(true)
+  })
+
   it('a database cleared while no tab was open brings the backup back, and says so', async () => {
     const list = [bigShard('a', 4, 1)]
     seedLocal(list)

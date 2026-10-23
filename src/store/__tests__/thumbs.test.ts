@@ -185,4 +185,20 @@ describe('the queue', () => {
     useThumbs.getState().request('later', s)
     expect(useThumbs.getState().queue).toEqual([])
   })
+
+  it('fails only the shard the stage threw on, and stops after MAX_STALLS crashes with nothing drawn between', () => {
+    const s = cube()
+    useThumbs.getState().request('bad', s)
+    useThumbs.getState().request('good', s)
+    useThumbs.getState().crash('bad')
+    expect(useThumbs.getState().failed.bad).toBe(true)
+    expect(useThumbs.getState().disabled).toBe(false)
+    expect(useThumbs.getState().queue.map((j) => j.key)).toEqual(['good'])
+    useThumbs.getState().done('good', 'data:good')
+    for (let i = 0; i < MAX_STALLS - 1; i++) { useThumbs.getState().request(`c${i}`, s); useThumbs.getState().crash(`c${i}`) }
+    expect(useThumbs.getState().disabled).toBe(false)
+    useThumbs.getState().request('last', s)
+    useThumbs.getState().crash('last')
+    expect(useThumbs.getState().disabled).toBe(true)
+  })
 })

@@ -68,6 +68,8 @@ export interface ThumbStore {
    * drawn between them mean the stage cannot draw here, and it stops.
    */
   stall: (key: string) => void
+  /** The stage threw while drawing it: it fails. Crashes count with stalls toward MAX_STALLS. */
+  crash: (key: string) => void
   /** Draw nothing more this session. */
   disable: () => void
 }
@@ -159,6 +161,11 @@ export const useThumbs = create<ThumbStore>((set, get) => {
       const tries = (job.tries ?? 0) + 1
       if (tries >= MAX_TRIES) { get().fail(key); return }
       set({ queue: [...queue.filter((j) => j.key !== key), { ...job, tries }] })
+    },
+
+    crash: (key) => {
+      if (++stalls >= MAX_STALLS) { get().disable(); return }
+      get().fail(key)
     },
 
     disable: () => set({ disabled: true, queue: [] }),

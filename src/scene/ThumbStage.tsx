@@ -88,8 +88,9 @@ function Capture({ job }: { job: ThumbJob }): JSX.Element | null {
     return () => { live = false }
   }, [job.key, job.shard])
 
-  // The frame the camera was last placed for.
+  // The frame the camera was last placed for, and whether the picture is taken.
   const placed = useRef<ThumbFrame | null>(null)
+  const taken = useRef(false)
 
   // Priority 1: this canvas is drawn here and not by r3f, so the frame read
   // back is the one just drawn, not the one before it. The camera is placed
@@ -112,8 +113,16 @@ function Capture({ job }: { job: ThumbJob }): JSX.Element | null {
     }
     gl.render(scene, camera)
     if (!frame) return
+    // A lost context draws nothing and three says nothing (render returns
+    // early), yet the canvas still reads back, blank: kept, that blank would
+    // stand for the shape on this device for good (review of #451). So a
+    // frame counts only when the context is there and something was drawn
+    // in it; until then the job waits, and the watchdog (ThumbHost) makes the
+    // stage again.
+    if (gl.getContext().isContextLost() || gl.info.render.calls === 0) return
     frames.current += 1
-    if (frames.current !== wait) return
+    if (frames.current < wait || taken.current) return
+    taken.current = true
     try {
       const url = gl.domElement.toDataURL('image/png')
       if (import.meta.env.DEV) measured(gl, job.key, performance.now() - t0)
@@ -168,21 +177,39 @@ export function ThumbStage(): JSX.Element {
       >
         {/* Lit as on the bench, near the world's full color (shardLight.tsx; arkinox, 2026-10-12). */}
         <ShardLights />
-        {job && <Capture job={job} />}
+        {/* Keyed: each job starts with no frame, so none is drawn on the last one's framing. */}
+        {job && <Capture key={job.key} job={job} />}
       </Canvas>
     </div>
   )
 }
 
-/** Catches a canvas that cannot be made (no WebGL): every row shows its icon instead, for the session. */
-class StageBoundary extends Component<{ children: ReactNode }, { broken: boolean }> {
+/**
+ * Catches a stage that throws: the shard being drawn fails (its row shows the
+ * icon) and the stage is made again for the rest. One bad shard does not take
+ * every picture with it (review of #451); a canvas that cannot be made at all
+ * (no WebGL) throws every time, and after MAX_STALLS in a row the pictures
+ * stop for the session (useThumbs crash).
+ */
+class StageBoundary extends Component<{ children: ReactNode; onCrash: () => void }, { broken: boolean }> {
   state = { broken: false }
   static getDerivedStateFromError(): { broken: boolean } { return { broken: true } }
   componentDidCatch(e: unknown): void {
-    console.warn('[onosendai] shard pictures: the drawing canvas could not be made', e)
-    useThumbs.getState().disable()
+    console.warn('[onosendai] shard pictures: the drawing stage failed', e)
+    this.props.onCrash()
   }
   render(): ReactNode { return this.state.broken ? null : this.props.children }
+}
+
+/** Whether the page is on screen. A hidden page draws no frames, so nothing on the stage can finish. */
+function useVisible(): boolean {
+  const [visible, setVisible] = useState(() => typeof document === 'undefined' || document.visibilityState !== 'hidden')
+  useEffect(() => {
+    const on = (): void => setVisible(document.visibilityState !== 'hidden')
+    document.addEventListener('visibilitychange', on)
+    return () => document.removeEventListener('visibilitychange', on)
+  }, [])
+  return visible
 }
 
 /**
@@ -190,13 +217,16 @@ class StageBoundary extends Component<{ children: ReactNode }, { broken: boolean
  * something in it and IDLE_MS after, so a list costs one WebGL context while
  * its pictures are drawn and none once they are. A picture that takes longer
  * than JOB_LIMIT_MS (a lost context never draws again) goes to the back of the
- * queue, once (useThumbs stall), and the stage is made again.
+ * queue, once (useThumbs stall), and the stage is made again. Not while the
+ * page is hidden: a hidden page draws no frames, and counting that as stalls
+ * turned the pictures off for a tab left in the background (review of #451).
  */
 export function ThumbHost(): JSX.Element | null {
   const busy = useThumbs((s) => s.queue.length > 0 && !s.disabled)
   const head = useThumbs((s) => s.queue[0]?.key ?? null)
   const [up, setUp] = useState(false)
   const [made, setMade] = useState(0)
+  const visible = useVisible()
   useEffect(() => {
     if (busy) { setUp(true); return }
     if (!up) return
@@ -204,10 +234,15 @@ export function ThumbHost(): JSX.Element | null {
     return () => window.clearTimeout(t)
   }, [busy, up])
   useEffect(() => {
-    if (!head) return
+    if (!head || !visible) return
     const t = window.setTimeout(() => { useThumbs.getState().stall(head); setMade((n) => n + 1) }, JOB_LIMIT_MS)
     return () => window.clearTimeout(t)
-  }, [head, made])
+  }, [head, made, visible])
+  const crashed = (): void => {
+    const first = useThumbs.getState().queue[0]?.key
+    if (first) useThumbs.getState().crash(first)
+    setMade((n) => n + 1)
+  }
   if (!up) return null
-  return <StageBoundary><ThumbStage key={made} /></StageBoundary>
+  return <StageBoundary key={made} onCrash={crashed}><ThumbStage /></StageBoundary>
 }

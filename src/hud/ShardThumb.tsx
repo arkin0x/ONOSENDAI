@@ -81,6 +81,12 @@ export function ShardThumb({ shard, size = 36, className }: Props): JSX.Element 
   const key = thumbKeyOf(shard)
   const can = drawable(shard)
   const url = useThumbs((s) => s.urls[key])
+  // The last picture of this shard: an edited shape keeps it until its new
+  // one is drawn, rather than blinking to the wait. Only the same shard's: a
+  // row keyed by place can be handed another shard.
+  const last = useRef<{ id: string; url: string } | null>(null)
+  if (url) last.current = { id: shard.id, url }
+  const shown = url ?? (last.current?.id === shard.id ? last.current.url : undefined)
   const icon = useThumbs((s) => !can || s.disabled || !!s.failed[key])
   const box = useRef<HTMLSpanElement>(null)
   const [near, setNear] = useState(false)
@@ -105,10 +111,10 @@ export function ShardThumb({ shard, size = 36, className }: Props): JSX.Element 
 
   return (
     <span ref={box} className={className ? `shardthumb ${className}` : 'shardthumb'} style={{ width: size, height: size }} aria-hidden="true">
-      {url
-        ? <img src={url} alt="" width={size} height={size} draggable={false} />
-        : icon
-          ? <ItemIcon type="shard" size={Math.max(12, Math.round(size * 0.4))} />
+      {icon && !url
+        ? <ItemIcon type="shard" size={Math.max(12, Math.round(size * 0.4))} />
+        : shown
+          ? <img src={shown} alt="" width={size} height={size} draggable={false} />
           : <span className="shardthumb__wait" />}
     </span>
   )

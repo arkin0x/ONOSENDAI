@@ -21,6 +21,7 @@ import type { ShardModel } from 'sno-core/shards'
 import { useWorkshop } from '../store/useWorkshop'
 import { hiddenLabel, messagePreview, type ChestItem, type HiddenType, type KeyItem } from '../lib/hidden'
 import { ItemFace } from './ItemIcon'
+import { ShardThumb } from './ShardThumb'
 import { placeOf, type HeldPlace } from '../lib/inventory'
 import { formatBytes, hintBoxLabel, hintSearchExponent, regionLabel, type LootItem } from '../lib/loot'
 import { safeNpub } from '../lib/npub'
@@ -224,7 +225,7 @@ export function LootDetail(): JSX.Element | null {
           <ul className="lootd__items">
             {opened.map((o) => (
               <li key={o.eventId} className={`lootd__item ${o.type === 'chest' ? 'lootd__item--chest' : ''}`}>
-                <span className={`secret__badge secret__badge--${o.coin ? 'cashu' : o.type}`}><ItemFace type={o.type} coin={o.coin} image={o.key?.image} size={12} /></span>
+                {o.type === 'shard' && o.shard ? <ShardThumb shard={o.shard} /> : <span className={`secret__badge secret__badge--${o.coin ? 'cashu' : o.type}`}><ItemFace type={o.type} coin={o.coin} image={o.key?.image} size={12} /></span>}
                 {/* A keypair item says it is held, its picture in the badge when it has one; a chest opens here (ItemRows). Both keep VIEW, which flies to where they stand. */}
                 {o.type === 'key' && o.key
                   ? <KeyLine name={o.key.name} author={item.author} />

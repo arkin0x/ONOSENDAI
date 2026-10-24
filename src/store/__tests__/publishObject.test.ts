@@ -1,5 +1,5 @@
 /**
- * publishObject.test.ts - PUBLISH and RETRACT from the workshop's MENU
+ * publishObject.test.ts - PUBLISH and RETRACT from the workshop's SHARD panel
  * (store/usePublished.ts), against a fake relay.
  *
  * What these prove: a publish signs the shard as a public kind 33331 (the

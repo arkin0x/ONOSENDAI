@@ -106,10 +106,16 @@ export function explainerVideo(): HTMLVideoElement | null {
   return useTvExplainer.getState().showing ? video : null
 }
 
-/** The caption on screen now, if the one on screen has captions. */
+/**
+ * The caption on screen now, if the one on screen has captions. None once it
+ * is on its way out, whatever ended it: its last frame holds while the
+ * picture comes back, and a caption held over that frame outlived its
+ * moment (arkinox, 2026-10-24: "stuck captions").
+ */
 export function explainerCaption(): string | null {
   const v = explainerVideo()
-  return v && cues.length ? cueAt(cues, v.currentTime) : null
+  if (!v || cues.length === 0 || useTvExplainer.getState().showing?.phase === 'out') return null
+  return cueAt(cues, v.currentTime)
 }
 
 /** Whether the browser holds the sound of the one on screen back until a tap (TAP FOR SOUND on its tag). */

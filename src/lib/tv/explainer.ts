@@ -7,11 +7,13 @@
  *
  * The video plays through the same glass as the live picture
  * (scene/TvScreenEffect), so it is curved, fringed, scanlined and glitched
- * as the picture is. The logo, the clock and the URL tag stay; the marquee,
- * the chiron, NOW PLAYING and a segment's panels, which are all about the
- * live picture, step away while it plays (arkinox, 2026-10-24: "the pip
- * needs to go away... get rid of the marquee too"). When the video ends
- * they all come back.
+ * as the picture is. The marquee, the chiron, NOW PLAYING and a segment's
+ * panels, which are all about the live picture, step away while it plays
+ * (arkinox, 2026-10-24: "the pip needs to go away... get rid of the marquee
+ * too"), and so does the top-right block, the logo, the clock and the URL
+ * tag: the video is its own spot, its own logo burned in (arkinox,
+ * 2026-10-24: "right top corner should go away"). When the video ends they
+ * all come back. Its captions go as it starts out, whatever ended it.
  *
  * Before 2026-10-24 the live picture shrank into the corner (the PIP) and
  * kept playing there, behind the video. That stays in the code
@@ -49,7 +51,7 @@ export interface ExplainerFile {
 export interface Explainer {
   /** Stable, versioned: `<n>-<name>`. /tv?explainer=<id> plays it first. */
   id: string
-  /** What the tag under the live picture says. */
+  /** What its tag under the live picture says, with the PIP on; with it off, not shown (scene/tvPainter). */
   title: string
   /** Its length, seconds: what the guard allows it. */
   duration: number

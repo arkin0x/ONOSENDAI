@@ -945,7 +945,7 @@ describe('an explainer on the tube (lib/tv/explainer)', () => {
   const shot = { id: 'a'.repeat(64), kind: 'trip' as const, pubkey: 'p', beats: [], start: 1, end: 1, offsets: [], length: 5 }
   const explainer = { title: 'WHAT IS CYBERSPACE?', mix: 1, pip: { x: 84, y: 68, w: 420, h: 236 }, video: { x: 0, y: 0, w: 1400, h: 787.5 }, caption: 'Every move is a proof of work.' }
 
-  it("steps the live picture's own words away, keeps the clock and the marquee, and paints its title and caption", () => {
+  it("steps the live picture's own words and the top-right block away, and paints its title and caption", () => {
     const { canvas, words } = writing()
     const p = new TvPainter(canvas)
     p.size(1400, 800, 1)
@@ -959,32 +959,41 @@ describe('an explainer on the tube (lib/tv/explainer)', () => {
     expect(words).not.toContain('P')
     expect(words).not.toContain('♪ NOW PLAYING')
     expect(words.some((w) => w.includes('MEANWHILE'))).toBe(false)
-    // The sound's tap and drag move to the title's tag (review of #471).
-    const tag = p.musicCard!
-    expect(tag.x).toBeCloseTo(explainer.pip.x, 5)
-    expect(tag.y).toBeGreaterThan(explainer.pip.y + explainer.pip.h)
-    // The clock stays; the title and the caption are painted.
-    expect(words).toContain('▶ PLAY')
-    expect(words).toContain('WHAT IS CYBERSPACE?')
+    // With the PIP off, no title tag (arkinox, 2026-10-24: "inexplicable
+    // stuck captions"), and with the sound on, nothing to tap for it.
+    expect(p.musicCard).toBeNull()
+    expect(words).not.toContain('WHAT IS CYBERSPACE?')
+    // The top-right block steps aside too (arkinox, 2026-10-24: "right top
+    // corner should go away"); the caption is painted.
+    expect(words).not.toContain('▶ PLAY')
     expect(words).toContain('Every move is a proof of work.')
     expect(p.marqueeTop).toBeGreaterThan(600)
     // Gone again, all back.
     words.length = 0
     p.paint(picture({ shot }), { ...assets, music }, 1080, 1, false)
     expect(words).toContain('P')
+    expect(words).toContain('▶ PLAY')
     expect(p.musicCard).not.toBeNull()
   })
 
-  it('says MUTED on the tag while muted, and has no tap target while the picture is still on its way in', () => {
+  it('says MUTED on the tag while muted; under a PIP, no tap target while the picture is still on its way in', () => {
     const { canvas, words } = writing()
     const p = new TvPainter(canvas)
     p.size(1400, 800, 1)
-    p.paint(picture({ shot }), { ...assets, music: { ...music, muted: true }, explainer }, 1000, 1, false)
+    // Under a PIP (kept for later): the title, and the sound's state after it.
+    const pip = { ...explainer, pipShown: true }
+    p.paint(picture({ shot }), { ...assets, music: { ...music, muted: true }, explainer: pip }, 1000, 1, false)
     expect(words).toContain('WHAT IS CYBERSPACE? · MUTED')
-    p.paint(picture({ shot }), { ...assets, music, explainer: { ...explainer, soundHeld: true } }, 1020, 1, false)
+    p.paint(picture({ shot }), { ...assets, music, explainer: { ...pip, soundHeld: true } }, 1020, 1, false)
     expect(words).toContain('WHAT IS CYBERSPACE? · TAP FOR SOUND')
-    p.paint(picture({ shot }), { ...assets, music, explainer: { ...explainer, mix: 0.5 } }, 1040, 1, false)
+    p.paint(picture({ shot }), { ...assets, music, explainer: { ...pip, mix: 0.5 } }, 1040, 1, false)
     expect(p.musicCard).toBeNull()
+    // With the PIP off: the sound's state alone, a tap target from the start.
+    words.length = 0
+    p.paint(picture({ shot }), { ...assets, music: { ...music, muted: true }, explainer: { ...explainer, mix: 0.5 } }, 1060, 1, false)
+    expect(words).toContain('♪ MUTED')
+    expect(words.some((w) => w.includes('WHAT IS CYBERSPACE?'))).toBe(false)
+    expect(p.musicCard).not.toBeNull()
   })
 
   it('over TUNING, says nothing in the middle of the video', () => {

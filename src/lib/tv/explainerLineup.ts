@@ -11,7 +11,7 @@
  *
  * An entry:
  *   id        stable, versioned: `<n>-<name>`, for /tv?explainer=<id>
- *   title     what the tag under the live picture says, short
+ *   title     what its tag under the PIP says, short (shown only while the PIP is on)
  *   duration  its length, seconds: the guard that ends it if it never does
  *   files     the same video, in the order to try: each a link, its type
  *             with codecs (the first this browser plays is used), and its

@@ -64,4 +64,21 @@ describe('newestFirstKey', () => {
     expect(newestFirstKey(items, refOf, editedAt, { oak: 6 })).not.toBe(baseKey)
     expect(newestFirstKey(items, refOf, editedAt, undefined)).not.toBe(baseKey)
   })
+
+  it('does not collide when a ref contains the join characters: one item split wrong reads as two', () => {
+    // A ref is free text in general (a folder path, a found object's
+    // address): "a@1|b" joined on "@" and "|" reads exactly like two items
+    // "a" at 1 and "b" at 2, if the key is built by string concatenation
+    // rather than a structured encoding.
+    const oneOddRef: Item[] = [{ id: 'a@1|b', updatedAt: 2 }]
+    const twoPlainRefs: Item[] = [{ id: 'a', updatedAt: 1 }, { id: 'b', updatedAt: 2 }]
+    expect(newestFirstKey(oneOddRef, refOf, editedAt, undefined)).not.toBe(newestFirstKey(twoPlainRefs, refOf, editedAt, undefined))
+  })
+
+  it('does not collide when a used ref or key contains the join characters', () => {
+    const items: Item[] = [{ id: 'oak', updatedAt: 1 }]
+    const oneOddEntry = newestFirstKey(items, refOf, editedAt, { 'a:1,b': 2 })
+    const twoPlainEntries = newestFirstKey(items, refOf, editedAt, { a: 1, b: 2 })
+    expect(oneOddEntry).not.toBe(twoPlainEntries)
+  })
 })

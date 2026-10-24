@@ -60,10 +60,17 @@ export const modelEditedAt = (s: { updatedAt?: number }): number => s.updatedAt 
  * for two calls whose items carry the same ref and edited time in the same
  * order and whose `used` map holds the same entries, however different the
  * `items` array or the `used` object's own reference.
+ *
+ * JSON-encoded rather than joined with a plain separator: a ref is free text
+ * in general (a folder path, a found object's address), so a separator
+ * character inside one ref can read as the boundary between two items.
+ * `["a@1|b",2]` and `["a",1],["b",2]`, joined on `@`/`|`, both read back as
+ * `a@1|b@2`; JSON.stringify keeps the two apart because only it, not the
+ * ref text, ever contributes an unescaped `"`, `[` or `,`.
  */
 export function newestFirstKey<T>(items: readonly T[], refOf: (item: T) => string, editedAt: (item: T) => number, used: Readonly<Record<string, number>> | undefined): string {
-  const usedKey = used ? Object.keys(used).sort().map((k) => `${k}:${used[k]}`).join(',') : ''
-  return `${items.map((i) => `${refOf(i)}@${editedAt(i)}`).join('|')}#${usedKey}`
+  const usedKey = used ? Object.keys(used).sort().map((k) => [k, used[k]]) : []
+  return JSON.stringify([items.map((i) => [refOf(i), editedAt(i)]), usedKey])
 }
 
 /**

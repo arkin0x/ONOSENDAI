@@ -1058,8 +1058,8 @@ export class TvPainter {
         ctx.drawImage(mark, -markW / 2, y, markW, markH)
         y += markH + gap
       }
-      if (scene.kind === 'end') {
-        // The name's long form, subtly, under the mark.
+      if (subLines.length > 0) {
+        // The name's long form, subtly, under the mark: only where the spot has one (subH above).
         ctx.font = `${subSize}px ${TV_FONT}`
         ctx.fillStyle = 'rgba(242, 221, 255, 0.6)'
         for (const line of subLines) { y += subSize * 1.4; ctx.fillText(line, 0, y) }

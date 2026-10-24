@@ -27,7 +27,7 @@ import { chainLengthAt, countTo } from '../lib/tv/stats'
 import { itemLength, type Shot, type TapeItem } from '../lib/tv/director'
 import { CUT_MS, contentsWords, quoteOf, segmentDoing, typePace, TYPE_DELAY_S } from '../hud/TvSegments'
 import { findLines, placeable, shotProgress, type TvAvatar, type TvFindLine } from '../store/useTv'
-import { AD_SUBTITLE, adFor, type AdScene, type AdTheme } from '../lib/tv/hosakaAd'
+import { adFor, type AdScene, type AdTheme } from '../lib/tv/hosakaAd'
 import { BROADCAST_TAG, broadcastScale, isBroadcast } from '../lib/tv/broadcast'
 import { watchingWords } from '../lib/tv/watching'
 import type { Census, ChainTimes } from '../lib/tv/stats'
@@ -1049,7 +1049,7 @@ export class TvPainter {
       const { region: r, size, markH, subLines, subSize } = best
       const markW = markH * (308 / 334)
       const gap = markH ? 18 * s : 0
-      const subH = scene.kind === 'end' ? subLines.length * subSize * 1.4 + 22 * s : 0
+      const subH = subLines.length > 0 ? subLines.length * subSize * 1.4 + 22 * s : 0
       const blockH = markH + gap + subH + scene.lines.length * size * 1.12
       ctx.translate(r.x + r.w / 2 + jolt, r.y + r.h / 2)
       ctx.scale(zoom, zoom)
@@ -1058,8 +1058,8 @@ export class TvPainter {
         ctx.drawImage(mark, -markW / 2, y, markW, markH)
         y += markH + gap
       }
-      if (scene.kind === 'end') {
-        // The name's long form, subtly, under the mark.
+      if (subLines.length > 0) {
+        // The name's long form, subtly, under the mark: only where the spot has one (subH above).
         ctx.font = `${subSize}px ${TV_FONT}`
         ctx.fillStyle = 'rgba(242, 221, 255, 0.6)'
         for (const line of subLines) { y += subSize * 1.4; ctx.fillText(line, 0, y) }
@@ -1134,8 +1134,8 @@ export class TvPainter {
     if (widest > maxW) size *= maxW / widest
     const subSize = (narrow ? 8.5 : 11) * s
     ctx.font = `${subSize}px ${TV_FONT}`
-    const subLines = end ? wrap(ctx, AD_SUBTITLE.toUpperCase(), maxW) : []
-    const subH = end ? subLines.length * subSize * 1.4 + 22 * s : 0
+    const subLines = end && scene.subtitle ? wrap(ctx, scene.subtitle, maxW) : []
+    const subH = subLines.length > 0 ? subLines.length * subSize * 1.4 + 22 * s : 0
     const lineH = (sz: number): number => scene.lines.length * sz * 1.12
     // The mark takes what the words leave it at their floor, up to its own share.
     let markH = withMark ? Math.min(r.h * (end ? 0.55 : 0.32), (end ? 300 : 170) * s, r.h - subH - lineH(Math.min(size, Math.max(floor, size * 0.6))) - 18 * s) : 0

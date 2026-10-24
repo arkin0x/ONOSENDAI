@@ -17,8 +17,9 @@
  * after TV comes on, the lineup in turn. One waits for the song playing to
  * end, so none cuts a song off, and the next song waits for it; after
  * EXPLAINER_MUSIC_WAIT_MS of waiting the song fades out instead, and comes
- * back where it was. Never within EXPLAINER_AD_GAP_MS of the HOSAKA spot,
- * either side: a spot that comes due meanwhile waits for it.
+ * back where it was. Never within EXPLAINER_AD_GAP_MS of the ad break
+ * (lib/tv/hosakaAd; whichever spot is due), either side: a spot that comes
+ * due meanwhile waits for it.
  *
  * Nothing on screen changes until the video is loaded and ready: one that
  * will not load, or fails its hash, is skipped and TV plays on as it was. One

@@ -36,6 +36,13 @@
  * at a coarse one), or, with no room left, does not step at all. Only a press asks; HOP, VIEW and BUILD never do, and nothing about
  * a move that is proved or signed changes.
  *
+ * Standing on such a shard, a level press climbs a riser of up to 2
+ * gibsons and settles onto a floor up to 2 below (store/walkStep.ts, arkinox
+ * 2026-10-23), so a stair is one press per gibson forward. The segment is
+ * then one heading that rises and falls, still published as one straight
+ * hop: a flight of stairs is one event instead of one per turn, at the same
+ * work per axis (spec §4.8). Off a floor, nothing changes: this is not gravity.
+ *
  * `behind` is the walk's lag: the closed segments not yet proven, the one
  * computing included, and never the open one, which is still being walked.
  * It is what the LOSING SYNC warning counts, so the warning comes up only for
@@ -50,7 +57,8 @@ import { moveDirection, type MoveName } from '../lib/moves'
 import { clampAxis, stepFor, type AxisName, type Position } from '../lib/space'
 import { MAX_COMPUTE_HEIGHT, samePosition, useCyberspace } from './useCyberspace'
 import { BRIEF_TOAST_MS, useToast } from './useToast'
-import { stepLimit, wallItems, warmWalls } from './walkWalls'
+import { wallItems, warmWalls } from './walkWalls'
+import { walkStep } from './walkStep'
 
 /** What the LOSING SYNC warning waits for: this many moves not yet proven. */
 export const SYNC_WARN_AT = 3
@@ -69,6 +77,7 @@ export const WALK_SEGMENT_BUDGET_MS = HOP_AXIS_BUDGET_MS / 5
 
 /** The open segment: still being walked, not yet queued. */
 export interface WalkSegment {
+  /** Its heading. A level heading may rise and fall as it climbs or settles (store/walkStep.ts). */
   axis: AxisName
   dir: 1 | -1
   /** Where it starts: the end of the move before it, or your head. */
@@ -189,13 +198,17 @@ export const useWalk = create<WalkState>((set, get) => ({
     const sign = dir.dir > 0 ? 1 : -1
     // A shard that constrains WALK (DECK-0003 §1.12, store/walkWalls.ts):
     // the step stops short of its face (a gibson short at a fine zoom), or does not go.
+    // Standing on such a shard, a level step also climbs what is in its way
+    // (2 gibsons at most) and settles onto a floor up to 2 below (store/walkStep.ts).
     const length = sign > 0 ? next[dir.axis] - from[dir.axis] : from[dir.axis] - next[dir.axis]
-    const wall = stepLimit(from, dir.axis, sign, length, wallItems(cs.plane))
+    const step = walkStep(from, dir.axis, sign, length, wallItems(cs.plane))
     // One chip per wall: a held key's repeats do not churn the one toast slot.
     const shown = useToast.getState().toast
-    if (wall.by && !(shown?.label === 'WALL' && shown.meta === wall.by.shard.name)) useToast.getState().show({ label: 'WALL', meta: wall.by.shard.name, mark: 'walk', ms: BRIEF_TOAST_MS })
-    if (wall.reach === 0n) return
-    next[dir.axis] = from[dir.axis] + wall.reach * BigInt(sign)
+    if (step.by && !(shown?.label === 'WALL' && shown.meta === step.by.shard.name)) useToast.getState().show({ label: 'WALL', meta: step.by.shard.name, mark: 'walk', ms: BRIEF_TOAST_MS })
+    if (samePosition(step.to, from)) return
+    Object.assign(next, step.to)
+    // A segment is one heading: a step up or down a stair keeps it open, so
+    // a flight is one hop (the same work per axis as its steps, in fewer events).
     if (open && open.axis === dir.axis && open.dir === sign && segmentAffordable(open.from, next, cs.plane)) {
       // On the same way: the open segment grows.
       set({ open: { ...open, end: next } })

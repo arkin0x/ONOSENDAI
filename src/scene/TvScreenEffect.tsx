@@ -54,7 +54,7 @@ import { askForTap, musicProgress, setMusicVolume, tapMusic, useTvMusic } from '
 import { countTvFrame, isBroadcast } from '../lib/tv/broadcast'
 import { useTvWatching } from '../store/useTvWatching'
 import { CALM, GlitchDirector } from '../lib/tv/glitch'
-import { explainerLayout, explainerMix, lerpRect, type Rect } from '../lib/tv/explainer'
+import { EXPLAINER_PIP_ENABLED, explainerLayout, explainerMix, lerpRect, type Rect } from '../lib/tv/explainer'
 import { explainerCaption, explainerSoundHeld, explainerVideo, useTvExplainer } from '../store/useTvExplainer'
 import type { ShardModel } from 'sno-core/shards'
 
@@ -266,6 +266,27 @@ NO_VIDEO.needsUpdate = true
 /** A rectangle of the flat frame (CSS px, y down) as the shader takes it: shares of the frame, y up, into `out`. */
 export function glRect(r: Rect, w: number, h: number, out: Vector4): Vector4 {
   return out.set(r.x / w, 1 - (r.y + r.h) / h, Math.max(1e-4, r.w / w), Math.max(1e-4, r.h / h))
+}
+
+/**
+ * Off the flat frame entirely, however it is scaled: the shader's `inside`
+ * check (picture(), the fragment above) never matches it, so with
+ * EXPLAINER_PIP_ENABLED off the live picture never draws small in a corner;
+ * every point of the tube falls straight through to the video.
+ */
+const PIP_HIDDEN: Rect = { x: -1e6, y: -1e6, w: 0, h: 0 }
+
+/**
+ * Where the live picture sits while an explainer plays, `mix` of the way
+ * from the whole tube to `layout.pip` (lib/tv/explainer explainerLayout).
+ * With EXPLAINER_PIP_ENABLED off (the default since 2026-10-24: arkinox,
+ * "the pip needs to go away"), it never shows at all, PIP_HIDDEN, and the
+ * video alone fills the tube: the live picture simply steps away, as the
+ * marquee and the rest of its own furniture do.
+ */
+export function explainerPipRect(width: number, height: number, pip: Rect, mix: number, enabled: boolean = EXPLAINER_PIP_ENABLED): Rect {
+  if (!enabled) return PIP_HIDDEN
+  return lerpRect({ x: 0, y: 0, w: width, h: height }, pip, mix)
 }
 
 class CrtEffect extends Effect {
@@ -571,9 +592,11 @@ export function TvScreenEffect(): JSX.Element {
     u.get('uTearSeed')!.value = g.tearSeed
     u.get('uDrop')!.value = g.dropout
 
-    // An explainer (lib/tv/explainer): the live picture into its corner and
-    // the video behind it, both through this glass. Laid out every frame, so
-    // the picture's frame moves with it.
+    // An explainer (lib/tv/explainer): the video fills the tube, through
+    // this glass; with EXPLAINER_PIP_ENABLED (off by default) the live
+    // picture goes small into its corner behind it instead of away entirely
+    // (explainerPipRect, above). Laid out every frame, so a moving frame
+    // tracks it.
     const { width, height } = state.size
     const ex = useTvExplainer.getState().showing
     const ev = explainerVideo()
@@ -596,7 +619,7 @@ export function TvScreenEffect(): JSX.Element {
       if (ev.readyState >= 2 && ev.currentTime !== videoAt.current) { videoTex.current.needsUpdate = true; videoAt.current = ev.currentTime }
       const floor = painter.marqueeTop ?? height * (1 - MARGIN_Y) - 28
       const layout = explainerLayout(width, height, ev.videoWidth / ev.videoHeight, MARGIN_X, MARGIN_Y, floor)
-      glRect(lerpRect({ x: 0, y: 0, w: width, h: height }, layout.pip, mix), width, height, u.get('uPip')!.value as Vector4)
+      glRect(explainerPipRect(width, height, layout.pip, mix), width, height, u.get('uPip')!.value as Vector4)
       glRect(layout.video, width, height, u.get('uVid')!.value as Vector4)
       u.get('uVideo')!.value = videoTex.current
       explainer = { title: ex.title, mix, pip: layout.pip, video: layout.video, caption: explainerCaption(), soundHeld: explainerSoundHeld() }

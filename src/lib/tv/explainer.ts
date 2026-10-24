@@ -5,21 +5,28 @@
  * border, CRT effect, and other effects.) Once the tutorial video is over
  * (30s-1m) then the normal broadcast comes back to full picture.").
  *
- * The live picture shrinks into the top left corner, where the minimap
- * stands (it steps away meanwhile), and keeps playing there; the video
- * fills the tube behind it, through the same glass (scene/TvScreenEffect),
- * so it is curved, fringed, scanlined and glitched as the picture is. The
- * logo, the clock and the marquee stay; the chiron, NOW PLAYING and a
- * segment's panels, which are about the live picture, step away with the
- * minimap. When the video ends the picture grows back to the whole tube.
+ * The video plays through the same glass as the live picture
+ * (scene/TvScreenEffect), so it is curved, fringed, scanlined and glitched
+ * as the picture is. The logo, the clock and the URL tag stay; the marquee,
+ * the chiron, NOW PLAYING and a segment's panels, which are all about the
+ * live picture, step away while it plays (arkinox, 2026-10-24: "the pip
+ * needs to go away... get rid of the marquee too"). When the video ends
+ * they all come back.
+ *
+ * Before 2026-10-24 the live picture shrank into the corner (the PIP) and
+ * kept playing there, behind the video. That stays in the code
+ * (EXPLAINER_PIP_ENABLED, off by default) for a future entry or design that
+ * wants it back, but nothing turns it on today: with it off the live
+ * picture simply steps away, as the chiron and the rest of the live
+ * picture's own furniture already did.
  *
  * When (EXPLAINER_EVERY_MS): one every ten minutes of TV, the first a little
- * after TV comes on, the lineup in turn. One waits for the song playing to
- * end, so none cuts a song off, and the next song waits for it; after
- * EXPLAINER_MUSIC_WAIT_MS of waiting the song fades out instead, and comes
- * back where it was. Never within EXPLAINER_AD_GAP_MS of the ad break
- * (lib/tv/hosakaAd; whichever spot is due), either side: a spot that comes
- * due meanwhile waits for it.
+ * after TV comes on, the lineup in turn, on schedule: it does not wait for
+ * the song playing to end. The music plays on, ducked (EXPLAINER_DUCK, store
+ * useTvMusic duckMusicForExplainer, the same pattern as hidden audio's
+ * ducking), and comes back to its own level when the video goes. Never
+ * within EXPLAINER_AD_GAP_MS of the ad break (lib/tv/hosakaAd; whichever
+ * spot is due), either side: a spot that comes due meanwhile waits for it.
  *
  * Nothing on screen changes until the video is loaded and ready: one that
  * will not load, or fails its hash, is skipped and TV plays on as it was. One
@@ -56,8 +63,13 @@ export interface Explainer {
 export const EXPLAINER_EVERY_MS = 20 * 60_000
 /** The first, ms after TV comes on: a few shots in, before a short visit is over. */
 export const EXPLAINER_FIRST_MS = 2 * 60_000
-/** How long one waits for the song playing to end before fading it out instead, ms. */
-export const EXPLAINER_MUSIC_WAIT_MS = 4 * 60_000
+/**
+ * How far the music ducks while an explainer plays, of 1 (store/useTvMusic
+ * duckMusicForExplainer): the same DUCKED pattern hidden audio already steps
+ * the music down to (lib/audioWorld), at its own level (arkinox, 2026-10-24:
+ * "play the music during my explainer, just dim the volume by 50%").
+ */
+export const EXPLAINER_DUCK = 0.5
 /** How long the video may take to come and be ready, ms; then it is skipped. */
 export const EXPLAINER_LOAD_MS = 90_000
 /** How long after one that did not play the next is tried, ms. */
@@ -148,6 +160,17 @@ export function explainerMix(phase: ExplainerPhase | null, at: number, now: numb
 /** A rectangle on the flat frame, CSS px, top left. */
 export interface Rect { x: number; y: number; w: number; h: number }
 
+/**
+ * Whether the live picture shrinks into a corner PIP while an explainer
+ * plays, instead of stepping away like the rest of its own furniture
+ * (scene/TvScreenEffect explainerPipRect). Off since 2026-10-24 (arkinox:
+ * "the pip needs to go away. keep the code for future stuff."): the layout
+ * below (explainerLayout) still works out where that corner would be and
+ * sizes the video around it, so flipping this back to true is the whole
+ * change for a future entry or design that wants the PIP again.
+ */
+export const EXPLAINER_PIP_ENABLED = false
+
 /** The live picture's share of the tube's width in its corner: on a phone, a little more. */
 export const PIP_SHARE = 0.3
 export const NARROW_PIP_SHARE = 0.36
@@ -159,11 +182,14 @@ const PIP_GAP_PX = 36
  * flat frame `w` x `h` (CSS px), with the margins everything takes
  * (scene/tvPainter MARGIN_X, MARGIN_Y) and the marquee's top `floor` from
  * the top. The picture is the whole tube made small, top left. The video is
- * as large as the tube holds whole; where the tube is taller than the video
- * (a phone held upright), it sits under the picture rather than behind it,
- * and above the marquee, as far as there is room.
+ * as large as the tube holds whole, centred; with `pipEnabled` (off by
+ * default: EXPLAINER_PIP_ENABLED), where the tube is taller than the video
+ * (a phone held upright) it sits under the picture rather than behind it,
+ * and above the marquee, as far as there is room, rather than centred —
+ * pointless, and a waste of the room above it, with no picture there to
+ * clear (arkinox, 2026-10-24: "truly fullscreen").
  */
-export function explainerLayout(w: number, h: number, videoAspect: number, marginX: number, marginY: number, floor: number): { pip: Rect; video: Rect } {
+export function explainerLayout(w: number, h: number, videoAspect: number, marginX: number, marginY: number, floor: number, pipEnabled: boolean = EXPLAINER_PIP_ENABLED): { pip: Rect; video: Rect } {
   const share = w < 600 ? NARROW_PIP_SHARE : PIP_SHARE
   const pip: Rect = { x: Math.round(w * marginX), y: Math.round(h * marginY), w: w * share, h: h * share }
   const aspect = Number.isFinite(videoAspect) && videoAspect > 0 ? videoAspect : 16 / 9
@@ -171,7 +197,7 @@ export function explainerLayout(w: number, h: number, videoAspect: number, margi
   let vh = w / aspect
   if (vh > h) { vh = h; vw = h * aspect }
   let top = (h - vh) / 2
-  if (vh < h) {
+  if (pipEnabled && vh < h) {
     const under = pip.y + pip.h + PIP_GAP_PX
     const lowest = Math.max(top, floor - PIP_GAP_PX - vh)
     if (top < under) top = Math.min(under, lowest)

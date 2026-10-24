@@ -10,8 +10,8 @@ if (typeof localStorage === 'undefined') {
   ;(globalThis as { localStorage?: unknown }).localStorage = { getItem: (k: string) => mem.get(k) ?? null, setItem: (k: string, v: string) => { mem.set(k, String(v)) }, removeItem: (k: string) => { mem.delete(k) }, clear: () => mem.clear() }
 }
 vi.mock('../../lib/relay', () => ({ query: async () => [], queryEach: async () => [], queryAny: async () => [], publish: async () => ({ ok: true }), publishMany: async () => ({ ok: true }), relaySet: () => [] }))
-import { TvPainter, fit, tickerItems, wrap, type TvAssets, type TvPicture } from '../tvPainter'
-import { cutKind, flatPoint, tubeDrift, tubeFlicker } from '../TvScreenEffect'
+import { TvPainter, fit, tickerItems, wrap, type TvAssets, type TvExplainer, type TvPicture } from '../tvPainter'
+import { cutKind, explainerPipRect, flatPoint, tubeDrift, tubeFlicker } from '../TvScreenEffect'
 import { Vector2 } from 'three'
 import { useTv } from '../../store/useTv'
 import { CTV_ADVERTISE_1, HOSAKA_1 } from '../../lib/tv/hosakaAd'
@@ -48,6 +48,32 @@ describe('the marquee', () => {
     const census = { arrivals: [1, 50, 200], bags: [10], bagsBy: new Map(), objects: [] }
     expect(tickerItems(picture({ census, tapeTime: 60 }), (pk) => pk)).toContain('2 AVATARS IN CYBERSPACE')
   })
+
+  it('hides while an explainer plays, with the rest of its own furniture, and returns once the picture is back (arkinox, 2026-10-24)', () => {
+    const p = new TvPainter(fakeCanvas())
+    p.size(1200, 700, 1)
+    let now = 1000
+    p.paint(picture({ arrivals: [{ pubkey: 'ann', at: 1 }] }), assets, now, 1, false)
+    const before = p.marqueeRun
+    expect(before.length).toBeGreaterThan(0)
+    const explainer: TvExplainer = { title: 'TEST', mix: 0.5, pip: { x: 0, y: 0, w: 10, h: 10 }, video: { x: 0, y: 0, w: 100, h: 100 }, caption: null }
+    // Many frames, real elapsed time, a new arrival: the marquee stays
+    // exactly as it was while an explainer plays, never scrolling or taking it up.
+    for (let i = 0; i < 60; i++) {
+      now += 300
+      p.paint(picture({ arrivals: [{ pubkey: 'bob', at: 2 }] }), { ...assets, explainer }, now, 1, false)
+    }
+    expect(p.marqueeRun).toEqual(before)
+    // The picture is back (mix at 0, as it is once it has grown back to the
+    // whole tube): scrolling resumes, and it takes up what it missed.
+    let changed = false
+    for (let i = 0; i < 60 && !changed; i++) {
+      now += 300
+      p.paint(picture({ arrivals: [{ pubkey: 'bob', at: 2 }] }), assets, now, 1, false)
+      changed = JSON.stringify(p.marqueeRun) !== JSON.stringify(before)
+    }
+    expect(changed).toBe(true)
+  })
 })
 
 describe('cuts', () => {
@@ -55,6 +81,30 @@ describe('cuts', () => {
     const kinds = new Set([0, 7, 14, 21, 28, 35].map((t) => cutKind(t, false)))
     expect([...kinds].sort()).toEqual([0, 1, 2])
     expect(cutKind(14, true)).toBe(0)
+  })
+})
+
+describe('an explainer\'s live-picture PIP (EXPLAINER_PIP_ENABLED)', () => {
+  const pip = { x: 20, y: 30, w: 100, h: 60 }
+
+  it('enabled: shrinks from the whole tube to the corner as mix goes 0 to 1', () => {
+    expect(explainerPipRect(1280, 720, pip, 0, true)).toEqual({ x: 0, y: 0, w: 1280, h: 720 })
+    expect(explainerPipRect(1280, 720, pip, 1, true)).toEqual(pip)
+    expect(explainerPipRect(1280, 720, pip, 0.5, true)).toEqual({ x: 10, y: 15, w: 690, h: 390 })
+  })
+
+  it('off (the default since 2026-10-24): never the corner, whatever mix is, so the shader never draws it', () => {
+    const hidden = explainerPipRect(1280, 720, pip, 1, false)
+    // Off the flat frame on every side, however it is scaled: never inside 0..1 of it.
+    expect(hidden.x + hidden.w).toBeLessThan(0)
+    expect(hidden.y + hidden.h).toBeLessThan(0)
+    // The same rect whatever mix is: no corner to shrink into at all.
+    expect(explainerPipRect(1280, 720, pip, 0.01, false)).toEqual(hidden)
+    expect(explainerPipRect(1280, 720, pip, 1, false)).toEqual(hidden)
+  })
+
+  it('defaults to EXPLAINER_PIP_ENABLED (off)', () => {
+    expect(explainerPipRect(1280, 720, pip, 1)).toEqual(explainerPipRect(1280, 720, pip, 1, false))
   })
 })
 

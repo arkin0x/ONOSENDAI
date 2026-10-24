@@ -142,14 +142,25 @@ describe('explainer layout', () => {
     }
   })
 
-  it('on a phone held upright: the video under the live picture, above the marquee', () => {
+  it('on a phone held upright, with EXPLAINER_PIP_ENABLED: the video under the live picture, above the marquee', () => {
     const [w, h] = [390, 844]
-    const { pip, video } = explainerLayout(w, h, 16 / 9, MARGIN_X, MARGIN_Y, floorOf(h))
+    const { pip, video } = explainerLayout(w, h, 16 / 9, MARGIN_X, MARGIN_Y, floorOf(h), true)
     expect(pip.w).toBeCloseTo(w * 0.36, 5)
     expect(pip.x + pip.w).toBeLessThan(w - w * MARGIN_X - w * 0.42)
     expect(video.w).toBeCloseTo(w, 5)
     expect(video.y).toBeGreaterThanOrEqual(pip.y + pip.h)
     expect(video.y + video.h).toBeLessThanOrEqual(floorOf(h))
+  })
+
+  it("on a phone held upright, the default (EXPLAINER_PIP_ENABLED off): centred, not nudged down for a picture that is not there (arkinox, 2026-10-24: \"truly fullscreen\")", () => {
+    const [w, h] = [390, 844]
+    const { pip, video } = explainerLayout(w, h, 16 / 9, MARGIN_X, MARGIN_Y, floorOf(h))
+    expect(video.w).toBeCloseTo(w, 5)
+    expect(video.y).toBeCloseTo((h - video.h) / 2, 5)
+    // Centred puts it higher than the old nudge-down did, clear above the live picture's corner.
+    expect(video.y).toBeLessThan(pip.y + pip.h)
+    // Explicitly off is the same as the default.
+    expect(explainerLayout(w, h, 16 / 9, MARGIN_X, MARGIN_Y, floorOf(h), false)).toEqual({ pip, video })
   })
 
   it('a tall video in a wide tube is as tall as the tube, centred', () => {

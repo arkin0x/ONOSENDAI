@@ -17,6 +17,9 @@
  * | Space or R | up one cell |
  * | C or F | down one cell |
  *
+ * Under GRAVITY (store/useWalk.ts) up is a jump and down does nothing; Z,
+ * answered by the keyboard itself, turns gravity on and off.
+ *
  * There is no Ctrl: Ctrl+W closes the browser tab and no page can prevent
  * it, so "down, then forward" would cost the tab.
  */

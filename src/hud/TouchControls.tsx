@@ -97,7 +97,10 @@ export function TouchControls(): JSX.Element {
   const walking = useCyberspace((s) => s.walking)
   // Steps pressed in WALK and not yet proven, queued or still being walked:
   // STOP has something to stop.
-  const behind = useWalk((s) => s.behind + (s.open ? 1 : 0))
+  const behind = useWalk((s) => s.behind + (s.open ? 1 : 0) + (s.falling ? 1 : 0))
+  // GRAVITY in WALK (store/useWalk.ts): Up jumps, Down does nothing.
+  const gravity = useWalk((s) => s.gravity)
+  const fallen = walking && gravity
   const mode = walking ? 'walk' : viewing ? 'view' : 'hop'
 
   const computing = proof.status === 'computing'
@@ -134,7 +137,7 @@ export function TouchControls(): JSX.Element {
     // The keys in the titles are the mode's own: WALK's are first person
     // (lib/walkKeys.ts).
     { cell: 'away', glyph: '⊗', sub: 'FAR', title: walking ? 'Forward (W)' : 'Away from camera (R)', act: move('away') },
-    { cell: 'up', glyph: '▲', title: walking ? 'Up (Space or R)' : 'Up (W)', act: move('up') },
+    { cell: 'up', glyph: '▲', title: fallen ? 'Jump (Space or R)' : walking ? 'Up (Space or R)' : 'Up (W)', act: move('up') },
     { cell: 'toward', glyph: '⊙', sub: 'NEAR', title: walking ? 'Back (S)' : 'Toward camera (F)', act: move('toward') },
     { cell: 'left', glyph: '◀', title: 'Left (A)', act: move('left') },
     { cell: 'right', glyph: '▶', title: 'Right (D)', act: move('right') },
@@ -151,7 +154,7 @@ export function TouchControls(): JSX.Element {
     // would promise a remedy it cannot deliver.
     { cell: 'zoomout', glyph: '+', title: 'Coarser scale (Q)', act: scale(1), disabled: scaleExp >= MAX_SCALE_EXP,
       hint: coveringClipped && scaleExp < MAX_SCALE_EXP, scale: true },
-    { cell: 'down', glyph: '▼', title: walking ? 'Down (C or F)' : 'Down (S)', act: move('down') },
+    { cell: 'down', glyph: '▼', title: walking ? 'Down (C or F)' : 'Down (S)', act: move('down'), disabled: fallen },
     { cell: 'zoomin', glyph: '−', title: 'Finer scale (E)', act: scale(-1), disabled: scaleExp <= 0, scale: true },
   ]
 
@@ -190,6 +193,16 @@ export function TouchControls(): JSX.Element {
         <button className="touchpad__key touchpad__key--cube" title="Zoom all the way out (2^84)" aria-label="Zoom out to 2^84" {...noCallout} onPointerDown={(e) => { e.preventDefault(); e.stopPropagation(); useCyberspace.getState().adjustScale(MAX_SCALE_EXP) }}>
           <Box size={16} strokeWidth={2.25} aria-hidden />
         </button>
+        {walking && (
+          <button
+            className={`touchpad__key touchpad__key--gravity${gravity ? ' is-on' : ''}`}
+            aria-pressed={gravity}
+            title="Gravity (Z)"
+            aria-label="Gravity"
+            {...noCallout}
+            onPointerDown={(e) => { e.preventDefault(); e.stopPropagation(); useWalk.getState().setGravity(!gravity) }}
+          >GRAVITY</button>
+        )}
         {pad.map((b) => (
           <button
             key={b.cell}

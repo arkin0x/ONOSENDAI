@@ -6,9 +6,9 @@
  * with its own logo burned in (arkinox, 2026-10-24: "right top corner should
  * go away during ad"). Its title's tag no longer stands where the PIP used
  * to end, alone on the left of the picture ("left side has inexplicable
- * stuck captions"): with the PIP off there is none on the stream, and on the
- * site it takes the marquee's empty band, where a tap still reaches the
- * sound. Ad spots are unchanged.
+ * stuck captions"): with the PIP off there is no title at all; on the site
+ * only, while the sound waits on a tap or is muted, a short tag says so at
+ * the video's top left and takes the tap. Ad spots are unchanged.
  */
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
@@ -103,39 +103,50 @@ describe('the top-right block over an explainer (arkinox, 2026-10-24: "right top
 })
 
 describe('an explainer\'s title tag with the PIP off (arkinox, 2026-10-24: "inexplicable stuck captions")', () => {
-  it('on the stream: never drawn, wherever the PIP would have ended', () => {
+  it('on the stream: never drawn, wherever the PIP would have ended, nor any sound tag', () => {
     setBroadcastForTest(true, 'large')
     for (const mix of [0.5, 0.9, 1]) {
-      const { texts, painter } = paint(picture(), { ...assets, explainer: explainer(1920, 1080, mix) })
+      const { texts, painter } = paint(picture(), { ...assets, music: { ...assets.music!, muted: true }, explainer: explainer(1920, 1080, mix, { soundHeld: true }) })
+      expect(texts.some((t) => t.text.includes('SOUND') || t.text.includes('MUTED')), `mix ${mix}`).toBe(false)
       expect(texts.some((t) => t.text.includes('Welcome to Cyberspace')), `mix ${mix}`).toBe(false)
       expect(painter.musicCard, `mix ${mix}`).toBeNull()
     }
   })
 
-  it('on the site: in the marquee\'s empty band, bottom left, where a tap still reaches the sound', () => {
+  it('on the site: no title; only TAP FOR SOUND or ♪ MUTED, at the video\'s top left, taking the tap, at 1 and 2 canvas px per CSS px', () => {
     setBroadcastForTest(false)
-    const W = 1920
-    const H = 1080
-    const s = Math.min(1.35, Math.max(0.9, W / 1400))
-    const MX = Math.round(W * MARGIN_X)
-    const MY = Math.round(H * MARGIN_Y)
-    const bandTop = H - MY - 28 * s
-    const ex = explainer(W, H, 1)
-    const { texts, painter } = paint(picture(), { ...assets, explainer: ex })
-    const tag = texts.find((t) => t.text.startsWith('Welcome to Cyberspace'))
-    expect(tag).toBeDefined()
-    expect(tag!.y).toBeGreaterThan(bandTop)
-    expect(tag!.y).toBeLessThanOrEqual(H - MY)
-    expect(tag!.x).toBeLessThan(MX + 20 * s)
-    // Nowhere near the PIP's old corner.
-    expect(tag!.y).toBeGreaterThan(ex.pip.y + ex.pip.h + 100)
-    const card = painter.musicCard!
-    expect(card.y).toBeGreaterThanOrEqual(bandTop - 0.5)
-    expect(card.y + card.h).toBeLessThanOrEqual(H - MY + 0.5)
-    expect(card.x).toBe(MX)
-    // It still says when the sound waits on a tap.
-    const held = paint(picture(), { ...assets, explainer: { ...ex, soundHeld: true } })
-    expect(held.texts.some((t) => t.text.includes('TAP FOR SOUND'))).toBe(true)
+    for (const [w, h, k] of [[1920, 1080, 1], [390, 844, 2], [844, 390, 2]] as const) {
+      const at = `${w}x${h}@${k}`
+      const { pip, video } = explainerLayout(w, h, 16 / 9, MARGIN_X, MARGIN_Y, h * (1 - MARGIN_Y) - 32)
+      const ex: TvExplainer = { title: 'Welcome to Cyberspace', mix: 1, pip, video, caption: null, pipShown: false }
+      const paintK = (e: TvExplainer, muted = false): ReturnType<typeof paint> => {
+        const rec = recording()
+        const painter = new TvPainter(rec.canvas)
+        painter.size(w, h, k)
+        const a = { ...assets, music: { ...assets.music!, muted }, explainer: e }
+        painter.paint(picture(), a, 1e6 - 33, k, false)
+        rec.texts.length = 0
+        painter.paint(picture(), a, 1e6, k, false)
+        return { ...rec, painter }
+      }
+      // Sound on: nothing at all, and no tap target.
+      const on = paintK(ex)
+      expect(on.texts.some((t) => t.text.includes('Welcome')), at).toBe(false)
+      expect(on.painter.musicCard, at).toBeNull()
+      for (const [e, muted, word] of [[{ ...ex, soundHeld: true }, false, 'TAP FOR SOUND'], [ex, true, '♪ MUTED']] as const) {
+        const { texts, painter } = paintK(e, muted)
+        const tag = texts.find((t) => t.text === word)
+        expect(tag, `${at} ${word}`).toBeDefined()
+        expect(texts.some((t) => t.text.includes('Welcome')), at).toBe(false)
+        // On the video, at its top left (in CSS px for the tap).
+        const card = painter.musicCard!
+        expect(card.x, `${at} ${word}`).toBeGreaterThanOrEqual(video.x - 0.5)
+        expect(card.y, `${at} ${word}`).toBeGreaterThanOrEqual(video.y - 0.5)
+        expect(card.y + card.h, `${at} ${word}`).toBeLessThan(video.y + video.h / 3)
+        expect(card.x + card.w, `${at} ${word}`).toBeLessThanOrEqual(w)
+        expect(card.x, `${at} ${word}`).toBeLessThan(w / 3)
+      }
+    }
   })
 
   it('with the PIP on (kept for later): under the PIP, as before', () => {

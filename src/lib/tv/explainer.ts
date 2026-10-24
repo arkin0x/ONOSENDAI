@@ -51,7 +51,7 @@ export interface ExplainerFile {
 export interface Explainer {
   /** Stable, versioned: `<n>-<name>`. /tv?explainer=<id> plays it first. */
   id: string
-  /** What its tag says: under the live picture with the PIP on; with it off, the site's only (scene/tvPainter). */
+  /** What its tag under the live picture says, with the PIP on; with it off, not shown (scene/tvPainter). */
   title: string
   /** Its length, seconds: what the guard allows it. */
   duration: number

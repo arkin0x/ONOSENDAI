@@ -586,7 +586,8 @@ export class TvPainter {
     // time, the stream's address) steps aside the whole time it is on, as
     // the marquee and the chiron do, and comes back with the picture
     // (arkinox, 2026-10-24: "right top corner should go away during ad").
-    // Still laid out, so nothing else moves.
+    // Its sizes still set where everything else goes (the stream's address
+    // is not laid out meanwhile, but all that keeps clear of it is hidden too).
     const ex = a.explainer && a.explainer.mix > 0 ? a.explainer : null
 
     // The logo, top right: the margins everything else takes.
@@ -743,30 +744,33 @@ export class TvPainter {
     }
 
     part('explainer')
-    if (ex) this.explainerParts(ex, a.music?.muted === true, W, scale, s, narrow, MX, tickY, tickH)
+    if (ex) this.explainerParts(ex, a.music?.muted === true, W, scale, s, narrow, MX, MY, tickY)
   }
 
   /**
-   * What an explainer adds (lib/tv/explainer): its title in a tag, as a
-   * channel marks what is on, and its captions over the video's foot, above
-   * the marquee. The live picture's own frame is the tube's
-   * (scene/TvScreenEffect), drawn with it as it moves.
+   * What an explainer adds (lib/tv/explainer): a tag, and its captions over
+   * the video's foot, above the marquee. The live picture's own frame is the
+   * tube's (scene/TvScreenEffect), drawn with it as it moves.
    *
-   * The tag stands under the live picture where it shows small in its corner
-   * (pipShown). With the PIP off (the default since 2026-10-24) there is no
-   * picture to stand under, and a tag left at the PIP's old foot read as a
-   * stray caption on the left of the video (arkinox, 2026-10-24:
-   * "inexplicable stuck captions"): on the stream, where its only words are
-   * the title the video already shows, there is none; on the site, where a
-   * tap on it is the sound's (TAP FOR SOUND, MUTED), it takes the marquee's
-   * band, empty while the explainer plays, at its left.
+   * With the PIP on (pipShown), the tag is its title, under the live picture
+   * in its corner, as a channel marks what is on. With the PIP off (the
+   * default since 2026-10-24) there is no picture to stand under, and the
+   * title left at the PIP's old foot read as a stray caption on the left of
+   * the video (arkinox, 2026-10-24: "inexplicable stuck captions"). So the
+   * title is not shown; on the site only, while the sound waits on a tap or
+   * is muted, a short tag says so (TAP FOR SOUND, ♪ MUTED) and takes the tap,
+   * at the video's top left, where ADVERTISEMENT stands over a spot. The
+   * stream, which has no sound to tap for, shows none.
    */
-  private explainerParts(ex: TvExplainer, muted: boolean, W: number, scale: number, s: number, narrow: boolean, MX: number, floor: number, floorH: number): void {
+  private explainerParts(ex: TvExplainer, muted: boolean, W: number, scale: number, s: number, narrow: boolean, MX: number, MY: number, floor: number): void {
     const ctx = this.ctx
     ctx.save()
     const pipShown = ex.pipShown ?? EXPLAINER_PIP_ENABLED
     this.npRect = null
-    if (pipShown || !isBroadcast()) {
+    const site = !isBroadcast()
+    const sound = !site ? null : ex.soundHeld ? 'TAP FOR SOUND' : muted ? '♪ MUTED' : null
+    const words = pipShown ? `${ex.title}${sound ? ` · ${sound.replace('♪ ', '')}` : ''}` : sound
+    if (words) {
       // Under a PIP, only once the live picture is all but in its corner: the
       // tag stands where its corner ends, which the picture crosses on its way.
       const alpha = pipShown ? clamp01((ex.mix - 0.8) / 0.2) : 1
@@ -774,15 +778,14 @@ export class TvPainter {
       ctx.textAlign = 'left'
       ctx.font = `700 ${(narrow ? 9 : 10) * s}px ${TV_FONT}`
       const h = 18 * s
-      const x = pipShown ? ex.pip.x * scale : MX
-      const y = pipShown ? (ex.pip.y + ex.pip.h) * scale + 8 * s : floor + (floorH - h) / 2
+      const x = pipShown ? ex.pip.x * scale : Math.max(MX, ex.video.x * scale + 12 * s)
+      const y = pipShown ? (ex.pip.y + ex.pip.h) * scale + 8 * s : Math.max(MY, ex.video.y * scale + 12 * s)
       // The sound is the viewer's to mute here too: a tap on the tag, as on
       // NOW PLAYING, which steps away meanwhile (review of #471).
-      const state = isBroadcast() ? '' : ex.soundHeld ? ' · TAP FOR SOUND' : muted ? ' · MUTED' : ''
-      const room = pipShown ? ex.pip.w * scale : W / 2 - MX
-      const label = fit(ctx, `${ex.title}${state}`, Math.max(20 * s, room - 14 * s))
+      const room = pipShown ? ex.pip.w * scale : W - x - MX
+      const label = fit(ctx, words, Math.max(20 * s, room - 14 * s))
       const tw = ctx.measureText(label).width
-      this.npRect = alpha > 0 ? { x, y, w: tw + 14 * s, h } : null
+      this.npRect = alpha > 0 && site ? { x, y, w: tw + 14 * s, h } : null
       ctx.fillStyle = 'rgba(0, 0, 0, 0.55)'
       ctx.fillRect(x, y, tw + 14 * s, h)
       ctx.strokeStyle = 'rgba(0, 229, 255, 0.6)'

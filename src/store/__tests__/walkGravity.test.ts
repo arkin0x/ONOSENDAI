@@ -221,6 +221,9 @@ describe('the switch', () => {
     expect(useToast.getState().toast).toMatchObject({ label: 'GRAVITY', meta: 'ON' })
     walkKeyDown(key('KeyZ'))
     expect(useWalk.getState().gravity).toBe(false)
+    // A held Z switches once, not once per repeat.
+    expect(walkKeyDown(key('KeyZ', { repeat: true } as Partial<KeyboardEvent>))).toBe(true)
+    expect(useWalk.getState().gravity).toBe(false)
     // Ctrl+Z is the browser's (or a field's) undo.
     expect(walkKeyDown(key('KeyZ', { ctrlKey: true }))).toBe(false)
     expect(walkKeyDown(key('KeyZ', { metaKey: true }))).toBe(false)
@@ -356,6 +359,46 @@ describe('a fall', () => {
     expect(posted[2].from).toEqual(mid)
     expect(posted[2].to).toEqual(landing)
     expect(useCyberspace.getState().position).toEqual(landing)
+  })
+
+  it('(B) presses the same way in the air are one hop, as on the ground; a turn starts another', async () => {
+    world(start, [boxes('Ledge', 'all', [LEDGE, lowFloor(40)]), [0, -1, 0]])
+    walk(true)
+    useWalk.getState().press('away')
+    const off = { ...start, z: start.z - 1n }
+    // A held W: a press every 33 ms, from 0.3 s in.
+    frame(300)
+    for (let k = 0; k < 6; k++) { useWalk.getState().press('away'); frame(33) }
+    const held = { ...useCyberspace.getState().cursor }
+    expect(at(start, held)[2]).toBe(-7)
+    expect(fallState()!.waypoints).toEqual([held])
+    // A turn: its own hop.
+    useWalk.getState().press('left')
+    const turned = { ...useCyberspace.getState().cursor }
+    expect(fallState()!.waypoints).toEqual([held, turned])
+    fallOut()
+    const landing = { ...turned, y: start.y - 40n }
+    expect(useWalk.getState().queue).toEqual([off, held, turned, landing])
+    // Each a whole gibson the fall was at, and each hop within the walk's budget.
+    const plane = useCyberspace.getState().plane
+    expect(segmentAffordable(off, held, plane)).toBe(true)
+  })
+
+  it('another device moving your head mid-fall ends the fall: nothing of it is made', async () => {
+    world(start, [boxes('Ledge', 'all', [LEDGE, lowFloor(30)]), [0, -1, 0]])
+    walk(true)
+    useWalk.getState().press('away')
+    await vi.waitFor(() => expect(posted).toHaveLength(1))
+    await land()
+    frame(300)
+    // The head moves 500 along X, as a move folded in from another device does.
+    const there = { ...useCyberspace.getState().position, x: useCyberspace.getState().position.x + 500n }
+    useCyberspace.setState({ position: there })
+    expect(fallState()).toBeNull()
+    expect(useWalk.getState()).toMatchObject({ falling: false, queue: [], open: null, behind: 0 })
+    expect(useCyberspace.getState().cursor).toEqual(there)
+    fallOut()
+    expect(posted).toHaveLength(1)
   })
 
   it('(B) a mid-air press is held by a wall like any step', () => {
@@ -575,10 +618,21 @@ describe('a jump', () => {
     useWalk.getState().press('up')
     let peak = 0
     for (let t = 0; t < 2000 && fallState(); t += 16) { frame(16); if (walkFall.active) peak = Math.max(peak, walkFall.offset) }
-    // The ceiling's face is 2 over the walker: it rises 1, a gibson short of it.
-    expect(peak).toBeCloseTo(1, 6)
+    // The ceiling's face is 2 over the walker: it rises 1, a gibson short of it, and never past.
+    expect(peak).toBeGreaterThan(0.95)
+    expect(peak).toBeLessThanOrEqual(1)
     expect(useCyberspace.getState().cursor).toEqual(start)
     expect(posted).toHaveLength(0)
+  })
+
+  it('a long gap between frames never carries the eye past a ceiling', () => {
+    world(start, [boxes('Low room', 'all', [FLOOR, [[-10, 3, -10], [10, 4, 10]]]), [0, -1, 0]])
+    walk(true)
+    useWalk.getState().press('up')
+    // One frame 200 ms in: the arc met the ceiling at 53 ms and has fallen since.
+    frame(200)
+    expect(walkFall.offset).toBeLessThanOrEqual(1)
+    expect(walkFall.offset).toBeCloseTo(1 - WALK_GRAVITY * ((200 - 52.8) / 1000) ** 2 / 2, 1)
   })
 
   it('toggled off at the top: one hop to where you are', () => {

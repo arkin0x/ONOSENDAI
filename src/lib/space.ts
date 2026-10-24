@@ -610,14 +610,18 @@ export function levelQuaternion(q: Quaternion): Quaternion | null {
  * in the scene's local frame, as for claimScreenAxes, and are overwritten.
  */
 export function levelScreenAxes(right: Vector3, up: Vector3, out: Vector3, local: ViewAxes): ViewAxes {
-  const [ux, uy, uz] = renderDirection(local, 'y')
-  // Cyberspace +Y in the local frame, and the camera's basis laid flat on it.
-  const flat = (v: Vector3): Vector3 => v.addScaledVector(LEVEL_UP.set(ux, uy, uz), -(v.x * ux + v.y * uy + v.z * uz))
-  flat(right)
+  // Cyberspace +Y in the local frame: the slot that holds y, signed.
+  const slots = [local.right, local.up, local.out]
+  let j = 0
+  while (j < 2 && slots[j].axis !== 'y') j++
+  LEVEL_UP.set(0, 0, 0).setComponent(j, slots[j].dir)
+  // The camera's basis laid flat on it.
+  right.addScaledVector(LEVEL_UP, -right.dot(LEVEL_UP))
+  out.addScaledVector(LEVEL_UP, -out.dot(LEVEL_UP))
   // Looking straight along Y the camera's own up is the way it faces.
-  if (flat(out).lengthSq() < 1e-12) flat(out.copy(up)).negate()
+  if (out.lengthSq() < 1e-12) out.copy(up).addScaledVector(LEVEL_UP, -up.dot(LEVEL_UP)).negate()
   if (right.lengthSq() < 1e-12) right.crossVectors(LEVEL_UP, out)
-  return claimScreenAxes(right, up.set(ux, uy, uz), out, local)
+  return claimScreenAxes(right, up.copy(LEVEL_UP), out, local)
 }
 const LEVEL_UP = new Vector3()
 

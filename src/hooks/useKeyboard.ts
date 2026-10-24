@@ -77,7 +77,7 @@ export function escapeKey(event: Pick<KeyboardEvent, 'code' | 'defaultPrevented'
  * when the key was one of them. Only while walking, with the scene not
  * covered and the workshop shut, so the bench keeps its own Z (undo).
  */
-export function walkKeyDown(event: Pick<KeyboardEvent, 'code' | 'ctrlKey' | 'shiftKey' | 'altKey' | 'metaKey' | 'preventDefault'>): boolean {
+export function walkKeyDown(event: Pick<KeyboardEvent, 'code' | 'ctrlKey' | 'shiftKey' | 'altKey' | 'metaKey' | 'preventDefault'> & { repeat?: boolean }): boolean {
   if (!useCyberspace.getState().walking || menuCovering || useWorkshop.getState().open) return false
   const step = walkMove(event)
   if (step) {
@@ -88,9 +88,11 @@ export function walkKeyDown(event: Pick<KeyboardEvent, 'code' | 'ctrlKey' | 'shi
   // Space is WALK's up even when it is not a step (a modifier held):
   // never a commit, a scroll or a press of whatever has focus.
   if (event.code === 'Space') { event.preventDefault(); return true }
-  // GRAVITY on or off. A modifier makes it something else (Ctrl+Z).
+  // GRAVITY on or off. A modifier makes it something else (Ctrl+Z); a
+  // held Z switches it once, not once per repeat.
   if (event.code === 'KeyZ' && !event.ctrlKey && !event.metaKey && !event.altKey && !event.shiftKey) {
     event.preventDefault()
+    if (event.repeat) return true
     const walk = useWalk.getState()
     walk.setGravity(!walk.gravity)
     return true

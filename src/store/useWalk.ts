@@ -80,7 +80,7 @@ import { MAX_COMPUTE_HEIGHT, samePosition, useCyberspace } from './useCyberspace
 import { BRIEF_TOAST_MS, useToast } from './useToast'
 import { standing, walkStep } from './walkStep'
 import { stepLimit, wallItems, warmWalls, type WallItem } from './walkWalls'
-import { JUMP_SPEED, arcApex, arcHeight, arcPeak, arcSpeed, fallLimit, jumpRise, loadGravity, reachedHeight, saveGravity } from './walkGravity'
+import { JUMP_SPEED, WALK_GRAVITY, arcApex, arcHeight, arcPeak, arcSpeed, fallLimit, jumpRise, loadGravity, reachedHeight, saveGravity } from './walkGravity'
 import { walkFall } from '../lib/walkEye'
 
 /** What the LOSING SYNC warning waits for: this many moves not yet proven. */
@@ -322,9 +322,22 @@ interface Fall {
   lands: boolean
   /** The highest whole gibson it rises to. */
   peak: number
+  /** top, bottom, and the anchor's height above y0, as numbers: what a frame reads, so it does no bigint arithmetic. */
+  topN: number
+  bottomN: number
+  base: number
+  /** The last mid-air press's heading and where its hop starts: a press the same way after it grows that hop. */
+  air: { axis: AxisName; dir: 1 | -1; from: Position } | null
   /** The walls known when it began: the only geometry it meets. */
   items: WallItem[]
   plane: number
+}
+
+/** Keep a fall's numbers in step with its bigints. */
+function syncFall(f: Fall): void {
+  f.topN = Number(f.top)
+  f.bottomN = Number(f.bottom)
+  f.base = Number(f.anchor.y - f.y0)
 }
 
 let fall: Fall | null = null
@@ -349,7 +362,8 @@ function beginFall(from: Position, v0: number, top: bigint, bottom: bigint, land
   clearSettle()
   const hadOpen = useWalk.getState().open !== null
   if (hadOpen) closeOpen()
-  fall = { anchor: { ...from }, waypoints: [], y0: from.y, t0: nowMs(), v0, top, bottom, lands, peak: arcPeak(v0, Number(top)), items, plane }
+  fall = { anchor: { ...from }, waypoints: [], y0: from.y, t0: nowMs(), v0, top, bottom, lands, peak: arcPeak(v0, Number(top)), topN: 0, bottomN: 0, base: 0, air: null, items, plane }
+  syncFall(fall)
   walkFall.active = true
   walkFall.offset = 0
   useWalk.setState({ falling: true })
@@ -383,17 +397,37 @@ function jump(from: Position): void {
   beginFall(from, JUMP_SPEED, rise, -limit.drop, limit.lands, items, cs.plane)
 }
 
+/**
+ * A ceiling the arc has met by `now`: from the moment it met it, the arc
+ * starts again there, at rest. Worked out from the arc itself, not from the
+ * frames, so a long gap between frames never carries it past the ceiling.
+ */
+function meetCeiling(f: Fall, now: number): void {
+  if (f.v0 <= 0 || arcApex(f.v0) <= f.topN) return
+  // When the rise reaches the ceiling: v0 t - g t^2 / 2 = top.
+  const hit = (f.v0 - Math.sqrt(Math.max(0, f.v0 * f.v0 - 2 * WALK_GRAVITY * f.topN))) / WALK_GRAVITY
+  if ((now - f.t0) / 1000 < hit) return
+  f.y0 += f.top
+  f.bottom -= f.top
+  f.top = 0n
+  f.t0 += hit * 1000
+  f.v0 = 0
+  f.peak = 0
+  syncFall(f)
+}
+
 /** The arc's height `now`, held between its ceiling and its rest, and whether it is still rising. */
 function arcAt(f: Fall, now: number): { r: number; rising: boolean } {
   const t = Math.max(0, (now - f.t0) / 1000)
   const rising = arcSpeed(f.v0, t) > 0
   const r = arcHeight(f.v0, t)
-  if (rising) return { r: Math.min(r, Number(f.top)), rising }
-  return { r: Math.max(r, Number(f.bottom)), rising }
+  if (rising) return { r: Math.min(r, f.topN), rising }
+  return { r: Math.max(r, f.bottomN), rising }
 }
 
 /** The whole gibson the fall has actually been at, `now`: never one it is yet to reach. */
 function reachedPoint(f: Fall, now: number): Position {
+  meetCeiling(f, now)
   const { r, rising } = arcAt(f, now)
   let y = f.y0 + BigInt(reachedHeight(r, rising, f.peak))
   if (y < f.y0 + f.bottom) y = f.y0 + f.bottom
@@ -411,25 +445,15 @@ function reachedPoint(f: Fall, now: number): Position {
 export function tickFall(now: number = nowMs()): boolean {
   const f = fall
   if (!f) return false
-  let t = Math.max(0, (now - f.t0) / 1000)
-  let r = arcHeight(f.v0, t)
-  // A ceiling: the arc starts again from it, at rest.
-  if (arcSpeed(f.v0, t) > 0 && r >= Number(f.top)) {
-    f.y0 += f.top
-    f.bottom -= f.top
-    f.top = 0n
-    f.t0 = now
-    f.v0 = 0
-    f.peak = 0
-    t = 0
-    r = 0
-  }
-  if (t > 0 && arcSpeed(f.v0, t) <= 0 && r <= Number(f.bottom)) {
+  meetCeiling(f, now)
+  const t = Math.max(0, (now - f.t0) / 1000)
+  const r = Math.min(arcHeight(f.v0, t), f.topN)
+  if (t > 0 && arcSpeed(f.v0, t) <= 0 && r <= f.bottomN) {
     // (A) on the floor, or (C) at the last gibson a hop can afford.
     endFall({ ...f.anchor, y: f.y0 + f.bottom }, !f.lands)
     return true
   }
-  walkFall.offset = Number(f.y0 - f.anchor.y) + r
+  walkFall.offset = r - f.base
   return true
 }
 
@@ -437,6 +461,9 @@ export function tickFall(now: number = nowMs()): boolean {
  * (B) A level press in the air: one step from the whole gibson you have
  * been at, held by the walls as any step is. That point is a hop of its own
  * when the fall resolves, and the fall goes on from it as it was going.
+ * Presses the same way, one after another, make one hop, as they do on the
+ * ground (a held key's repeats are one move, not one each), while that hop
+ * stays within the walk's budget.
  */
 function airPress(f: Fall, axis: AxisName, sign: 1 | -1): void {
   const scaleExp = useCyberspace.getState().scaleExp
@@ -465,10 +492,18 @@ function airPress(f: Fall, axis: AxisName, sign: 1 | -1): void {
   }
   f.bottom = rel - limit.drop
   f.lands = limit.lands
-  f.waypoints.push(p)
+  const air = f.air
+  if (air && air.axis === axis && air.dir === sign && f.waypoints.length > 0 && segmentAffordable(air.from, p, f.plane)) {
+    // The same way again: the hop from where the last one started grows to here.
+    f.waypoints[f.waypoints.length - 1] = p
+  } else {
+    f.air = { axis, dir: sign, from: f.anchor }
+    f.waypoints.push(p)
+  }
   f.anchor = p
+  syncFall(f)
   // The eye stays where the arc is: its offset now counts from the new point, with the cursor.
-  walkFall.offset = Number(f.y0 - p.y) + r
+  walkFall.offset = r - f.base
   useCyberspace.setState({ cursor: { ...p } })
 }
 
@@ -495,7 +530,7 @@ function endFall(final: Position, hovering = false): void {
   const next = [...useWalk.getState().queue, ...hops]
   useWalk.setState({ falling: false, queue: next, behind: next.length })
   useCyberspace.setState({ cursor: { ...final } })
-  if (hovering) useToast.getState().show({ label: 'HOVERING', meta: 'a hop past here is over the walk budget', mark: 'walk', ms: BRIEF_TOAST_MS * 2 })
+  if (hovering && !standing(final, f.items)) useToast.getState().show({ label: 'HOVERING', meta: 'a hop past here is over the walk budget', mark: 'walk', ms: BRIEF_TOAST_MS * 2 })
   pump()
 }
 
@@ -600,9 +635,16 @@ useCyberspace.subscribe((s, prev) => {
   }
   // Under gravity the view stays level, whatever turned it.
   if (s.view !== prev.view && useWalk.getState().gravity) levelView()
+  const w = useWalk.getState()
+  // Your head moved mid-fall with none of the walk's own hops in flight:
+  // another device's move, or a chain cut short. The fall's hops would start
+  // from a place you never were, so it goes, with the walk, back to the head.
+  if (fall !== null && s.position !== prev.position && w.running === null) {
+    w.stop()
+    return
+  }
   // Your head moved with nothing of the walk's queued: another device's move
   // folded in (the fold leaves a walk's cursor alone). The eye goes to it.
-  const w = useWalk.getState()
   if (s.position !== prev.position && fall === null && w.queue.length === 0 && w.open === null && w.running === null && !samePosition(s.cursor, s.position)) {
     useCyberspace.setState({ cursor: { ...s.position } })
     return

@@ -37,6 +37,7 @@ import { watchingWords } from '../lib/tv/watching'
 import type { Census, ChainTimes } from '../lib/tv/stats'
 import type { Position } from '../lib/space'
 import { trackDrawing, type DirtyRect, type DrawTracker } from './drawTracker'
+import { CARD_CLEAR_PX, CARD_LINE_EM, CARD_RISE, MAP_REACH, clearOfPanel, placeCard, type Box, type CardFrame, type CardPlace, type PanelInk } from './tvCard'
 
 /** The face every word on the tube is set in. */
 export const TV_FONT = "'Monaspace Argon', ui-monospace, monospace"
@@ -154,6 +155,19 @@ export function skipWords(seconds: number): string {
     }
   }
   return parts.join(' ')
+}
+
+/**
+ * What a cut's card says, if it has one: MEANWHILE, or LATER after a minute
+ * or more of dead air; and, where that is too long for its place, LATER with
+ * its largest unit only ("23 HOURS LATER"), never cut short of LATER.
+ */
+function cardText(p: TvPicture): { full: string; short: string } | null {
+  if (p.status !== 'playing') return null
+  if (p.meanwhile) return { full: '◀◀ MEANWHILE', short: '◀◀ MEANWHILE' }
+  if (p.skipped < 60) return null
+  const span = skipWords(p.skipped)
+  return { full: `▶▶ ${span} LATER`, short: `▶▶ ${span.split(' ').slice(0, 2).join(' ')} LATER` }
 }
 
 /** What the tube shows, read from the store and the profiles each paint. */
@@ -721,25 +735,40 @@ export class TvPainter {
 
     // Beside the clock it keeps off the chiron, and on a phone, where NOW
     // PLAYING spans the width over the chiron, off that too (review of #393).
-    // With the stream's larger text, a LATER or MEANWHILE card goes over the
-    // chiron rather than above it, so the panel has that room too.
+    // The room kept above the chiron was a LATER or MEANWHILE card's, and
+    // still is where the top has no room for it (scene/tvCard).
     const cardRoom = (bigInset ? 14 : 50) * s
     const sideBottom = (narrow || (big && !row)) && this.npRect ? Math.min(chironTop - cardRoom, npTop - 6 * s) : chironTop - cardRoom
     // A panel under the minimap (on a square stream), its room the less for
-    // it, keeps clear of a LATER or MEANWHILE card's backing too, which
-    // starts 56 px over the floor (review of #447: a comment's panel reached 50).
+    // it (review of #447: a comment's panel reached 50).
     const segmentFloor = floor - (bigInset ? 14 : underMap ? 60 : 50) * s
     part('segment')
-    if (item && panel && !ex) this.segment(item, p.shot!.length, a, W, segmentTop + 14 * s, segmentFloor, sideBottom, MX, MY, (big ? colLeft : W - MX - lw) - 16 * s, bigInset ? MX : MX + mapSize + 16 * s, s, narrow, now)
+    const shown = !item || !panel || ex ? null : this.segment(item, p.shot!.length, a, W, segmentTop + 14 * s, segmentFloor, sideBottom, MX, MY, (big ? colLeft : W - MX - lw) - 16 * s, bigInset ? MX : MX + mapSize + 16 * s, s, narrow, now)
 
-    // LATER and MEANWHILE, after the cut's transition; under an inset's
-    // panel, or with the stream's larger text across the chiron, solid.
+    // LATER and MEANWHILE, after the cut's transition: top centre, between
+    // the minimap and the logo's column (arkinox, 2026-10-23: "I don't like
+    // it appearing over the chiron"), and off a segment's panel, which never
+    // moves for it (scene/tvCard). Solid with the stream's larger text. Not
+    // over an explainer, with the rest of the live picture's words (#485).
     part('card')
-    // With the larger text, every card goes across the chiron, centred on it
-    // and kept within it: centred on the frame it reached NOW PLAYING, and
-    // over a trip the clock or a square frame's minimap (review of #453).
-    const onChiron = big && chironTop < tickY
-    if (!ex) this.card(p, onChiron ? MX + chironW / 2 : W / 2, s, narrow, onChiron ? chironTop + chironH / 2 + 6 * s : inset ? floor - 34 * s : H * 0.34, now, onChiron ? chironW : null)
+    const cardWords = cardText(p)
+    // Placed only while it shows: placing measures its words a dozen times,
+    // and a shot plays on long after its card is gone (review of #469).
+    const cardT = (now - p.cutAt - CUT_MS) / CARD_MS
+    if (cardWords && !ex && cardT >= 0 && cardT <= 1) {
+      const clear = CARD_CLEAR_PX * s
+      const reach = bigInset ? 0 : mapSize * (0.5 + MAP_REACH)
+      const blocks: Box[] = [{ x0: colLeft, y0: 0, x1: W, y1: clockBottom + 6 * s }]
+      if (!bigInset) blocks.push({ x0: MX + mapSize / 2 - mapSize * MAP_REACH, y0: MY + mapSize / 2 - mapSize * MAP_REACH, x1: MX + reach, y1: MY + reach })
+      if (this.npRect) blocks.push({ x0: this.npRect.x - clear, y0: this.npRect.y - clear, x1: this.npRect.x + this.npRect.w + clear, y1: this.npRect.y + this.npRect.h + clear })
+      const frame: CardFrame = { width: W, left: bigInset ? MX : MX + reach, right: colLeft, top: MY, rowBottom: Math.max(MY + reach, clockBottom), floor: chironTop - clear, blocks, margin: MX, s, px: (narrow ? 14 : 18) * s }
+      const measure = (text: string, px: number): number => {
+        ctx.font = `700 ${px}px ${TV_FONT}`
+        return ctx.measureText(text).width
+      }
+      const at = placeCard(cardWords.full, cardWords.short, frame, measure)
+      this.card(p, shown ? clearOfPanel(at, shown, frame, MY * CARD_RISE, measure) : at, now)
+    }
 
     // TUNING, END OF TAPE, NO SIGNAL.
     part('status')
@@ -1395,32 +1424,38 @@ export class TvPainter {
     ctx.restore()
   }
 
-  /** LATER or MEANWHILE, centred on `cx`; given `within`, solid and no wider than that (across the chiron). */
-  private card(p: TvPicture, cx: number, s: number, narrow: boolean, y: number, now: number, within: number | null = null): void {
-    if (p.status !== 'playing') return
-    const text = p.meanwhile ? '◀◀ MEANWHILE' : p.skipped >= 60 ? `▶▶ ${skipWords(p.skipped)} LATER` : null
-    if (!text) return
+  /** LATER or MEANWHILE, where scene/tvCard put it: a line or two; solid with the stream's larger text. */
+  private card(p: TvPicture, at: CardPlace, now: number): void {
     const t = (now - p.cutAt - CUT_MS) / CARD_MS
     if (t < 0 || t > 1) return
     const ctx = this.ctx
     ctx.globalAlpha = t < 0.08 ? t / 0.08 : t > 0.8 ? (1 - t) / 0.2 : 1
-    ctx.font = `700 ${(narrow ? 14 : 18) * s}px ${TV_FONT}`
+    ctx.font = `700 ${at.px}px ${TV_FONT}`
     ctx.textAlign = 'center'
-    // Too long for the chiron, LATER keeps its largest unit ("23 HOURS
-    // LATER") rather than lose the word LATER to an ellipsis.
-    const short = !p.meanwhile ? `▶▶ ${skipWords(p.skipped).split(' ').slice(0, 2).join(' ')} LATER` : text
-    const words = within === null || ctx.measureText(text).width <= within - 28 * s ? text : fit(ctx, short, within - 28 * s)
-    const tw = ctx.measureText(words).width
-    ctx.fillStyle = within !== null ? 'rgba(2, 12, 20, 0.94)' : 'rgba(0, 0, 0, 0.5)'
-    ctx.fillRect(cx - tw / 2 - 14 * s, y - 22 * s, tw + 28 * s, 32 * s)
+    // Under the top row on a very narrow frame its words may still need cutting.
+    const lines = at.inRow ? at.lines : at.lines.map((l) => fit(ctx, l, at.maxWords))
+    const tw = Math.max(...lines.map((l) => ctx.measureText(l).width))
+    ctx.fillStyle = this.big ? 'rgba(2, 12, 20, 0.94)' : 'rgba(0, 0, 0, 0.5)'
+    ctx.fillRect(at.cx - tw / 2 - at.pad, at.y, tw + 2 * at.pad, at.h)
     ctx.fillStyle = FG
-    ctx.fillText(words, cx, y)
+    lines.forEach((l, i) => ctx.fillText(l, at.cx, at.baseline + i * CARD_LINE_EM * at.px))
     ctx.globalAlpha = 1
   }
 
-  /** The panel of a segment shown in an inset: a sealed bag, an object, a new avatar, a comment. */
-  private segment(item: TapeItem, shotLength: number, a: TvAssets, W: number, top: number, bottom: number, sideBottom: number, MX: number, MY: number, sideRight: number, sideLeft: number, s: number, narrow: boolean, now: number): void {
+  /**
+   * The panel of a segment shown in an inset: a sealed bag, an object, a new
+   * avatar, a comment. Where it went, for a LATER or MEANWHILE card to keep
+   * off (scene/tvCard): its ground, what it shows under its top border, and
+   * its bursts at the largest they land.
+   */
+  private segment(item: TapeItem, shotLength: number, a: TvAssets, W: number, top: number, bottom: number, sideBottom: number, MX: number, MY: number, sideRight: number, sideLeft: number, s: number, narrow: boolean, now: number): PanelInk {
     const ctx = this.ctx
+    const bursts: Box[] = []
+    // A burst's reach: its points at their largest (1.9 times, and its wobble), and its edge.
+    const burst = (cx: number, cy: number, r: number): void => {
+      const R = r * 1.9 * 1.04 + 2 * s
+      bursts.push({ x0: cx - R, y0: cy - R, x1: cx + R, y1: cy + R })
+    }
     // Seconds since the segment came on, after its cut, by the shot's own
     // clock (the shot's length, which is the item's unless a test cued it longer).
     const length = itemLength(item)
@@ -1546,8 +1581,8 @@ export class TvPainter {
       // NFT inside is hyped the same way (2026-10-22): on that corner, or on
       // the cube's other top corner when money is there too.
       const cubeX = sx + (stacked ? (pw - 2 * pad - stage) / 2 : 0)
-      if (item.money) this.splash(cubeX + stage * 0.9, sy + stage * 0.12, stage * 0.28, t, s, MONEY_SPLASH)
-      if (item.nft) this.splash(cubeX + stage * (item.money ? 0.1 : 0.9), sy + stage * 0.12, stage * 0.28, t, s, NFT_SPLASH)
+      if (item.money) { this.splash(cubeX + stage * 0.9, sy + stage * 0.12, stage * 0.28, t, s, MONEY_SPLASH); burst(cubeX + stage * 0.9, sy + stage * 0.12, stage * 0.28) }
+      if (item.nft) { this.splash(cubeX + stage * (item.money ? 0.1 : 0.9), sy + stage * 0.12, stage * 0.28, t, s, NFT_SPLASH); burst(cubeX + stage * (item.money ? 0.1 : 0.9), sy + stage * 0.12, stage * 0.28) }
     } else if (item.kind === 'object') {
       // An advertisement: the product turning in the middle, NOW AVAILABLE!
       // slammed on its corner, the words centred under it.
@@ -1560,6 +1595,7 @@ export class TvPainter {
       else this.caption(tx, ty + stage / 2 - 40 * s, textW, 'NEW IN CYBERSPACE', title, `FROM ${a.name(item.pubkey)}`, s)
       // On the model's left (arkinox, 2026-10-18: "move the now available to the left side").
       this.splash(ox + stage * 0.08, sy + stage * 0.14, stage * 0.3, t, s, AD_SPLASH)
+      burst(ox + stage * 0.08, sy + stage * 0.14, stage * 0.3)
     } else if (item.kind === 'avatar') {
       const ox = sx + (stacked ? (pw - 2 * pad - stage) / 2 : 0)
       if (a.spin) ctx.drawImage(a.spin, ox, sy, stage, stage)
@@ -1612,6 +1648,10 @@ export class TvPainter {
       ctx.fillText(this.big ? credit.replace(/…+$/u, '…') : credit, tx, ty + lines.length * quoteSize * 1.45 + 18 * s)
     }
     ctx.globalAlpha = 1
+    // What it shows starts under its padding; a sealed bag's caption, centred
+    // on a small model beside it, can stand up to 9 px into that.
+    const panelBox = { x0: px, y0: py, x1: px + pw, y1: py + ph }
+    return { panel: panelBox, content: { ...panelBox, y0: py + Math.max(0, pad - 10 * s) }, bursts }
   }
 
   /**

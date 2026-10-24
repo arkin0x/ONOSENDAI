@@ -1023,7 +1023,7 @@ export function Workshop(): JSX.Element | null {
           <div className="workshop__avatar" role="group" aria-label="My avatar">
             <div className="workshop__row">
               <span className="workshop__label">MY AVATAR</span>
-              {!myAvatar && <span className="workshop__value workshop__value--wide">dodecahedron</span>}
+              <span className="workshop__value workshop__value--wide">{myAvatar ? myAvatar.name : 'dodecahedron'}</span>
             </div>
             {/* The avatar is not one of these shards. It lives in its own store,
                 read back from the kind 11333 event you published, which is why
@@ -1040,6 +1040,7 @@ export function Workshop(): JSX.Element | null {
                     <span className="workshop__pick-name">{myAvatar.name}</span>
                     <span className="workshop__pick-meta">{myAvatar.vertices.length} v · {myAvatar.faces.length} f · {myAvatar.mode}</span>
                   </span>
+                  <span className="workshop__tag" title="The shape others see for you. Change it with USE THIS SHARD below.">AVATAR</span>
                   <button
                     className="workshop__mini"
                     title="Copy it into your objects, where you can edit it"

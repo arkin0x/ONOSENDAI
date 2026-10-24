@@ -63,6 +63,7 @@ const MOVED: Record<'shard' | 'avatar', string[]> = {
   avatar: [
     '<span className="workshop__label">MY AVATAR</span>',
     '<ShardThumb shard={myAvatar} />',
+    'className="workshop__tag"',
     'aria-label="Copy your avatar into your objects"',
     'aria-label="Copy your avatar to the clipboard"',
     'label="show default avatar ghost for scale"',

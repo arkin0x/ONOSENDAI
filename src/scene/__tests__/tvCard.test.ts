@@ -101,8 +101,9 @@ const bag = { kind: 'bag' as const, id: 'b'.repeat(64), pubkey: 'ann', at: 1, hi
 const object = { kind: 'object' as const, id: 'o'.repeat(64), pubkey: 'ann', at: 1, event: {} as never }
 const comment = { kind: 'comment' as const, id: 'c'.repeat(64), pubkey: 'ann', at: 1, text: 'the sky above the port was the color of television, tuned to a dead channel and then some more words to run it past what any panel holds at this size', on: 'move' as const, about: null }
 const shortComment = { ...comment, id: 'd'.repeat(64), text: 'welcome to cyberspace! Let me know if you have any questions' }
-const segmentShot = (item: typeof bag | typeof object | typeof comment) => ({ id: item.id, kind: item.kind, item, pubkey: 'ann', beats: [], start: 1, end: 1, offsets: [], length: 30 })
-const KINDS = [trip, segmentShot(bag), segmentShot(object), segmentShot(comment), segmentShot(shortComment)]
+const avatar = { kind: 'avatar' as const, id: 'v'.repeat(64), pubkey: 'ann', at: 1, event: {} as never }
+const segmentShot = (item: typeof bag | typeof object | typeof comment | typeof avatar) => ({ id: item.id, kind: item.kind, item, pubkey: 'ann', beats: [], start: 1, end: 1, offsets: [], length: 30 })
+const KINDS = [trip, segmentShot(bag), segmentShot(object), segmentShot(avatar), segmentShot(comment), segmentShot(shortComment)]
 
 /** Paint once at `w` x `h` and `now` (`into` ms into the shot for a segment), after a first paint as the set paints on, with `a`. */
 function paintAt(p: TvPicture, w: number, h: number, now = 1e12, scale = 1, into = 1500, a: TvAssets = assets): ReturnType<typeof recording> {

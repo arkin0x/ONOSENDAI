@@ -752,7 +752,10 @@ export class TvPainter {
     // over an explainer, with the rest of the live picture's words (#485).
     part('card')
     const cardWords = cardText(p)
-    if (cardWords && !ex) {
+    // Placed only while it shows: placing measures its words a dozen times,
+    // and a shot plays on long after its card is gone (review of #469).
+    const cardT = (now - p.cutAt - CUT_MS) / CARD_MS
+    if (cardWords && !ex && cardT >= 0 && cardT <= 1) {
       const clear = CARD_CLEAR_PX * s
       const reach = bigInset ? 0 : mapSize * (0.5 + MAP_REACH)
       const blocks: Box[] = [{ x0: colLeft, y0: 0, x1: W, y1: clockBottom + 6 * s }]

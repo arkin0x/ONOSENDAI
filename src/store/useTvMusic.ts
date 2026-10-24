@@ -25,6 +25,7 @@ import { create } from 'zustand'
 import { PLAYLIST, type Track } from '../lib/tv/playlist'
 import { readTags } from '../lib/tv/id3'
 import { isBroadcast } from '../lib/tv/broadcast'
+import { EXPLAINER_DUCK } from '../lib/tv/explainer'
 
 export interface NowPlaying {
   url: string
@@ -166,15 +167,17 @@ function apply(): void {
   if (!audio) return
   const s = useTvMusic.getState()
   // The stream: unmuted, full volume, whatever this browser kept from a
-  // viewer; only a break's fade (gain) changes it (lib/tv/broadcast).
+  // viewer; only a break's fade (gain) and an explainer's duck change it
+  // (lib/tv/broadcast; an explainer's own audio plays on the stream too, so
+  // it still needs the music stepped down under it).
   if (isBroadcast()) {
     audio.muted = false
-    audio.volume = gain
+    audio.volume = gain * explainerDuck
     return
   }
   if (volumeWorks) {
     audio.muted = false
-    audio.volume = s.muted ? 0 : s.volume * gain * duck
+    audio.volume = s.muted ? 0 : s.volume * gain * duck * explainerDuck
   } else {
     audio.volume = s.volume
     audio.muted = s.muted
@@ -213,6 +216,46 @@ export function duckMusic(level: number): void {
 /** How far the music is stepped down now, 0 to 1: for tests. */
 export function musicDuck(): number {
   return duck
+}
+
+/**
+ * What the volume is also multiplied by while an explainer plays: 1, or
+ * EXPLAINER_DUCK (duckMusicForExplainer). Its own multiplier, never the
+ * same one hidden audio steps (duck, above): the live world (hidden audio)
+ * plays on under TV, so both could want the music down at once, and one
+ * must not clobber the other's level (store/useTvExplainer).
+ */
+let explainerDuck = 1
+let explainerDuckTarget = 1
+let explainerDucking: ReturnType<typeof setInterval> | null = null
+
+/**
+ * Step the music down to EXPLAINER_DUCK while an explainer plays, and back
+ * up to its own level when it goes, faded over half a second, the same
+ * pattern as duckMusic (arkinox, 2026-10-24: "play the music during my
+ * explainer, just dim the volume by 50%"). On the stream too, where an
+ * explainer's own audio plays alongside the music.
+ */
+export function duckMusicForExplainer(on: boolean): void {
+  const target = on ? EXPLAINER_DUCK : 1
+  if (target === explainerDuckTarget) return
+  explainerDuckTarget = target
+  if (explainerDucking !== null) clearInterval(explainerDucking)
+  const from = explainerDuck
+  const began = Date.now()
+  explainerDucking = setInterval(() => {
+    const k = Math.min(1, (Date.now() - began) / DUCK_MS)
+    explainerDuck = from + (target - from) * k
+    apply()
+    if (k < 1) return
+    if (explainerDucking !== null) clearInterval(explainerDucking)
+    explainerDucking = null
+  }, FADE_STEP_MS)
+}
+
+/** How far the music is ducked for an explainer now, 0 to 1: for tests. */
+export function explainerMusicDuck(): number {
+  return explainerDuck
 }
 
 /**
@@ -259,11 +302,17 @@ export function holdMusicForAd(on: boolean): void {
 }
 
 /**
- * Step the music out at the end of the song playing, for an explainer
- * (lib/tv/explainer): the next song waits, loaded, until releaseMusic. A
- * song is never cut off for one. With nothing sounding (no track yet, a
- * track the viewer or the browser paused, the list waiting after every
- * track failed), it steps out now. musicHeldForAd says when it has.
+ * Step the music out at the end of the song playing: the next song waits,
+ * loaded, until releaseMusic. A song is never cut off for it. With nothing
+ * sounding (no track yet, a track the viewer or the browser paused, the
+ * list waiting after every track failed), it steps out now. musicHeldForAd
+ * says when it has.
+ *
+ * Nothing calls this today: an explainer (lib/tv/explainer) used to, before
+ * 2026-10-24, waiting for the song to end rather than ducking under it
+ * (store/useTvExplainer duckMusicForExplainer). Kept, with holdMusicNow and
+ * releaseMusic below, for a break that wants the old wait-and-pause rather
+ * than a duck.
  */
 export function holdMusicAtSongEnd(): void {
   if (held) return
@@ -272,16 +321,16 @@ export function holdMusicAtSongEnd(): void {
   holdAtEnd = true
 }
 
-/** Step the music out now, the song faded and paused where it is, to come back there (an explainer that waited long enough). */
+/** Step the music out now, the song faded and paused where it is, to come back there (holdMusicAtSongEnd waited long enough). */
 export function holdMusicNow(): void {
   holdAtEnd = false
   holdMusicForAd(true)
 }
 
 /**
- * Bring the music back after an explainer, or stop waiting for the song's
- * end. With `resume` false (the viewer paused the explainer), it stays
- * paused, as a song the viewer paused does, until a tap on NOW PLAYING.
+ * Bring the music back after holdMusicAtSongEnd or holdMusicNow, or stop
+ * waiting for the song's end. With `resume` false, it stays paused, as a
+ * song the viewer paused does, until a tap on NOW PLAYING.
  */
 export function releaseMusic(resume: boolean = true): void {
   holdAtEnd = false
@@ -486,6 +535,11 @@ export function stopMusic(): void {
   // A mute in the last session does not make the next one's pauses the browser's.
   mutedAt = -Infinity
   gain = 1
+  // TV going off mid-explainer must not leave the next session's music ducked.
+  if (explainerDucking !== null) clearInterval(explainerDucking)
+  explainerDucking = null
+  explainerDuck = 1
+  explainerDuckTarget = 1
   if (audio) {
     audio.pause()
     audio.removeAttribute('src')
@@ -523,8 +577,8 @@ function fail(list: Track[]): void {
 function advance(list: Track[]): void {
   const a = audio
   if (!a) return
-  // Between songs: where an explainer waiting for one to end steps the music
-  // out (holdMusicAtSongEnd). The next is taken up below and waits, ready.
+  // Between songs: where something steps the music out at a song's end
+  // (holdMusicAtSongEnd; nothing does today). The next is taken up below and waits, ready.
   if (holdAtEnd && !held) {
     holdAtEnd = false
     held = true

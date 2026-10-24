@@ -6,7 +6,8 @@
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { setBroadcastForTest } from '../../lib/tv/broadcast'
-import { askForTap, besideUrls, duckMusic, musicDuck, holdMusicAtSongEnd, holdMusicForAd, holdMusicNow, musicHeldForAd, musicProgress, nameFromUrl, releaseMusic, resumeMusic, setMusicVolume, shuffled, startMusic, stopMusic, tapMusic, toggleMusicMute, useTvMusic } from '../useTvMusic'
+import { askForTap, besideUrls, duckMusic, duckMusicForExplainer, explainerMusicDuck, musicDuck, holdMusicAtSongEnd, holdMusicForAd, holdMusicNow, musicHeldForAd, musicProgress, nameFromUrl, releaseMusic, resumeMusic, setMusicVolume, shuffled, startMusic, stopMusic, tapMusic, toggleMusicMute, useTvMusic } from '../useTvMusic'
+import { EXPLAINER_DUCK } from '../../lib/tv/explainer'
 
 class FakeAudio extends EventTarget {
   static made: FakeAudio[] = []
@@ -699,6 +700,68 @@ describe('the volume and mute', () => {
       expect(useTvMusic.getState().volume).toBe(0.8)
       duckMusic(1)
       vi.advanceTimersByTime(600)
+      expect(audio().volume).toBeCloseTo(0.8, 5)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('ducks to EXPLAINER_DUCK while an explainer plays, and back after (duckMusicForExplainer)', () => {
+    vi.useFakeTimers()
+    try {
+      startMusic(list)
+      setMusicVolume(0.8)
+      duckMusicForExplainer(true)
+      vi.advanceTimersByTime(600)
+      expect(explainerMusicDuck()).toBeCloseTo(EXPLAINER_DUCK, 5)
+      expect(audio().volume).toBeCloseTo(0.8 * EXPLAINER_DUCK, 5)
+      // The viewer's own volume is untouched by the duck.
+      expect(useTvMusic.getState().volume).toBe(0.8)
+      duckMusicForExplainer(false)
+      vi.advanceTimersByTime(600)
+      expect(explainerMusicDuck()).toBeCloseTo(1, 5)
+      expect(audio().volume).toBeCloseTo(0.8, 5)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it("an explainer's duck and hidden audio's duck multiply, neither clobbering the other", () => {
+    vi.useFakeTimers()
+    try {
+      startMusic(list)
+      setMusicVolume(1)
+      duckMusic(0.3)
+      vi.advanceTimersByTime(600)
+      expect(audio().volume).toBeCloseTo(0.3, 5)
+      // An explainer starting while hidden audio already ducks the music:
+      // both apply, not one in place of the other.
+      duckMusicForExplainer(true)
+      vi.advanceTimersByTime(600)
+      expect(audio().volume).toBeCloseTo(0.3 * EXPLAINER_DUCK, 5)
+      // Hidden audio letting go leaves the explainer's own duck in place.
+      duckMusic(1)
+      vi.advanceTimersByTime(600)
+      expect(audio().volume).toBeCloseTo(EXPLAINER_DUCK, 5)
+      duckMusicForExplainer(false)
+      vi.advanceTimersByTime(600)
+      expect(audio().volume).toBeCloseTo(1, 5)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('TV stopping mid-explainer does not leave the next session ducked', () => {
+    vi.useFakeTimers()
+    try {
+      startMusic(list)
+      duckMusicForExplainer(true)
+      vi.advanceTimersByTime(600)
+      expect(explainerMusicDuck()).toBeCloseTo(EXPLAINER_DUCK, 5)
+      stopMusic()
+      expect(explainerMusicDuck()).toBe(1)
+      startMusic(list)
+      setMusicVolume(0.8)
       expect(audio().volume).toBeCloseTo(0.8, 5)
     } finally {
       vi.useRealTimers()

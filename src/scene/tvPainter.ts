@@ -18,7 +18,10 @@
  *
  * The marquee scrolls in pixels and never rewrites what is on screen: new
  * numbers join the end of the line, so a cut no longer jumps it back
- * ("the marquee seems to jump or reset when the scene changes").
+ * ("the marquee seems to jump or reset when the scene changes"). It steps
+ * away while an explainer plays, with the rest of the live picture's own
+ * furniture, and comes back once the picture does (arkinox, 2026-10-24:
+ * "get rid of the marquee too").
  */
 
 import type { ShardModel } from 'sno-core/shards'
@@ -637,11 +640,14 @@ export class TvPainter {
     if (!bigInset && !ex) this.minimap(p, MX, MY, mapSize, s, now, reduced)
 
     // The marquee along the bottom margin, the CYBERSPACE TV bug at its head.
+    // Hidden while an explainer plays, with its own furniture (arkinox,
+    // 2026-10-24); the reserved band stays so the video and its captions
+    // keep clear of where it would be, and it returns once the picture does.
     const tickH = (big ? BIG_TICKER_H_PX : TICKER_H_PX) * s
     const tickY = H - MY - tickH
     this.floorPx = tickY / scale
     part('marquee')
-    this.marquee(p, a, MX, tickY, W - MX, tickH, s, dt)
+    if (!ex) this.marquee(p, a, MX, tickY, W - MX, tickH, s, dt)
 
     // The chiron above it, and NOW PLAYING: side by side on one row, the
     // chiron on the left, wide (2026-10-19: "shorten the width of the chiron

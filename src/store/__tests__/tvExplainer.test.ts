@@ -1,17 +1,14 @@
 /**
- * tvExplainer.test.ts: an explainer comes due, loads, waits for the song to
- * end, shrinks the live picture in, plays, and gives the picture back; and
- * one that will not load, fails its hash, stalls, errors or runs long never
- * leaves the tube black (store/useTvExplainer).
+ * tvExplainer.test.ts: an explainer comes due, loads, plays at once (never
+ * waiting on the song), ducking the music rather than pausing it, and gives
+ * the picture back; and one that will not load, fails its hash, stalls,
+ * errors or runs long never leaves the tube black (store/useTvExplainer).
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-const music = vi.hoisted(() => ({ held: false, atEnd: 0, now: 0, released: 0, resumed: [] as boolean[], volume: 0.8, muted: false, listeners: [] as Array<(s: { volume: number; muted: boolean }, p: { volume: number; muted: boolean }) => void> }))
+const music = vi.hoisted(() => ({ duckedOn: 0, duckedOff: 0, volume: 0.8, muted: false, listeners: [] as Array<(s: { volume: number; muted: boolean }, p: { volume: number; muted: boolean }) => void> }))
 vi.mock('../useTvMusic', () => ({
-  holdMusicAtSongEnd: () => { music.atEnd++ },
-  holdMusicNow: () => { music.now++; music.held = true },
-  releaseMusic: (resume = true) => { music.released++; music.resumed.push(resume); music.held = false },
-  musicHeldForAd: () => music.held,
+  duckMusicForExplainer: (on: boolean) => { if (on) music.duckedOn++; else music.duckedOff++ },
   useTvMusic: {
     getState: () => ({ volume: music.volume, muted: music.muted }),
     subscribe: (fn: (s: { volume: number; muted: boolean }, p: { volume: number; muted: boolean }) => void) => { music.listeners.push(fn); return () => { music.listeners = music.listeners.filter((l) => l !== fn) } },
@@ -29,7 +26,7 @@ import { sha256 } from '@noble/hashes/sha2.js'
 import { bytesToHex } from '../../lib/events'
 import {
   EXPLAINER_AD_GAP_MS, EXPLAINER_EVERY_MS, EXPLAINER_FAIL_OUT_MS, EXPLAINER_FIRST_MS, EXPLAINER_FORCED_MS, EXPLAINER_IN_MS, EXPLAINER_LOAD_MS,
-  EXPLAINER_MUSIC_WAIT_MS, EXPLAINER_OUT_MS, EXPLAINER_RETRY_MS, EXPLAINER_STALL_MS, guardMs, type Explainer,
+  EXPLAINER_OUT_MS, EXPLAINER_RETRY_MS, EXPLAINER_STALL_MS, guardMs, type Explainer,
 } from '../../lib/tv/explainer'
 import {
   explainerBusy, explainerDueForTest, explainerEndedAt, explainerTick, explainerVideo, setExplainerLineupForTest, startExplainers, stopExplainers,
@@ -109,7 +106,7 @@ beforeEach(() => {
   FakeVideo.canPlay = () => 'probably'
   FakeVideo.ready = true
   FakeVideo.refuse = 'none'
-  Object.assign(music, { held: false, atEnd: 0, now: 0, released: 0, resumed: [], volume: 0.8, muted: false, listeners: [] })
+  Object.assign(music, { duckedOn: 0, duckedOff: 0, volume: 0.8, muted: false, listeners: [] })
   fetched = []
   fetchBody = () => new Response(bytes as BodyInit)
   vi.stubGlobal('document', { createElement: () => new FakeVideo() })
@@ -137,7 +134,7 @@ describe('Cyberspace TV explainers', () => {
     await run(EXPLAINER_FIRST_MS + 30_000)
     expect(fetched).toEqual([])
     expect(explainerBusy()).toBe(false)
-    expect(music.atEnd + music.now).toBe(0)
+    expect(music.duckedOn + music.duckedOff).toBe(0)
   })
 
   it('a forced id with the lineup empty is nothing', () => {
@@ -146,23 +143,17 @@ describe('Cyberspace TV explainers', () => {
     expect(explainerDueForTest()).toBe(Infinity)
   })
 
-  it('comes due, loads, waits for the song to end, then shrinks in, plays, and gives the picture back', async () => {
+  it('comes due, loads, and plays at once, the music ducked rather than waited for', async () => {
     startExplainers(performance.now(), '')
     await run(EXPLAINER_FIRST_MS - 500)
     expect(fetched).toEqual([])
     await run(600)
     expect(fetched).toHaveLength(1)
     expect(explainerBusy()).toBe(true)
-    // Ready: the music is asked to step out at the song's end, and nothing shows until it has.
+    // Ready: on screen at once, the music ducked rather than waited for.
     await run(300)
-    expect(music.atEnd).toBe(1)
-    await run(60_000)
-    expect(phase()).toBeNull()
-    expect(music.now).toBe(0)
-    // The song ends.
-    music.held = true
-    await run(100)
     expect(phase()).toBe('in')
+    expect(music.duckedOn).toBe(1)
     expect(video().plays).toBe(1)
     expect(video().muted).toBe(false)
     expect(video().volume).toBeCloseTo(0.8)
@@ -171,13 +162,13 @@ describe('Cyberspace TV explainers', () => {
     expect(phase()).toBe('play')
     await run(20_000)
     expect(phase()).toBe('play')
-    expect(music.released).toBe(0)
-    // It ends: the picture grows back as the next song comes in.
+    expect(music.duckedOff).toBe(0)
+    // It ends: the picture comes back, and the music is given back.
     video().ended = true
     await run(100)
     expect(phase()).toBe('out')
     expect(useTvExplainer.getState().showing?.outMs).toBe(EXPLAINER_OUT_MS)
-    expect(music.released).toBe(1)
+    expect(music.duckedOff).toBe(1)
     await run(EXPLAINER_OUT_MS)
     expect(phase()).toBeNull()
     expect(explainerBusy()).toBe(false)
@@ -192,39 +183,31 @@ describe('Cyberspace TV explainers', () => {
     startExplainers(performance.now(), '')
     const ids: string[] = []
     const off = useTvExplainer.subscribe((s, p) => { if (s.showing && !p.showing) ids.push(s.showing.id) })
-    music.held = true
     for (let i = 0; i < 3; i++) {
       await run((i === 0 ? EXPLAINER_FIRST_MS : EXPLAINER_EVERY_MS) + 1000)
       video().ended = true
       await run(EXPLAINER_OUT_MS + 200)
-      music.held = true
     }
     off()
     expect(ids).toEqual(['1-a', '2-b', '1-a'])
   })
 
-  it('a song that runs on past EXPLAINER_MUSIC_WAIT_MS fades out instead', async () => {
+  it('shows as soon as the video is ready, never waiting on the song (arkinox, 2026-10-24)', async () => {
     startExplainers(performance.now(), '')
+    // Well inside what used to be the wait for the song to end: on screen already.
     await run(EXPLAINER_FIRST_MS + 500)
-    expect(music.atEnd).toBe(1)
-    await run(EXPLAINER_MUSIC_WAIT_MS - 1000)
-    expect(music.now).toBe(0)
-    expect(phase()).toBeNull()
-    await run(1200)
-    expect(music.now).toBe(1)
     expect(phase()).toBe('in')
+    expect(music.duckedOn).toBe(1)
   })
 
   it('/tv?explainer=<id> plays that one first, at once', async () => {
     startExplainers(performance.now(), '?explainer=2-b')
-    music.held = true
     await run(EXPLAINER_FORCED_MS + 500)
     expect(useTvExplainer.getState().showing?.id).toBe('2-b')
   })
 
   it('one asked for by name plays before the tape does (a look at it), but never over the spot', async () => {
     startExplainers(performance.now(), '?explainer=1-a')
-    music.held = true
     await run(EXPLAINER_FORCED_MS + 500, { playing: false, ad: true, adEndedAt: -Infinity })
     expect(fetched).toEqual([])
     await run(500, { playing: false, ad: false, adEndedAt: -Infinity })
@@ -248,13 +231,12 @@ describe('Cyberspace TV explainers', () => {
   it('a file that fails its hash is skipped: nothing shows, the music is never touched', async () => {
     fetchBody = () => new Response(new TextEncoder().encode('something else') as BodyInit)
     startExplainers(performance.now(), '')
-    music.held = true
     const t0 = performance.now()
     await run(EXPLAINER_FIRST_MS + 2000)
     expect(fetched).toHaveLength(1)
     expect(phase()).toBeNull()
     expect(explainerBusy()).toBe(false)
-    expect(music.atEnd + music.now + music.released).toBe(0)
+    expect(music.duckedOn + music.duckedOff).toBe(0)
     expect(explainerDueForTest()).toBeGreaterThan(t0 + EXPLAINER_FIRST_MS + EXPLAINER_RETRY_MS - 1000)
   })
 
@@ -277,7 +259,6 @@ describe('Cyberspace TV explainers', () => {
     await run(EXPLAINER_FIRST_MS + 1000)
     expect(fetched).toHaveLength(1)
     down = false
-    music.held = true
     await run(EXPLAINER_RETRY_MS + 1000)
     expect(fetched).toHaveLength(2)
     expect(phase()).not.toBeNull()
@@ -290,7 +271,6 @@ describe('Cyberspace TV explainers', () => {
     ] })])
     fetchBody = (url) => (url.startsWith('https://down') ? new Response('', { status: 404 }) : new Response(bytes as BodyInit))
     startExplainers(performance.now(), '')
-    music.held = true
     await run(EXPLAINER_FIRST_MS + 1000)
     expect(fetched).toEqual(['https://down.example/x.webm', `https://b.example/${HASH}.webm`])
     expect(phase()).toBe('in')
@@ -304,21 +284,19 @@ describe('Cyberspace TV explainers', () => {
     expect(explainerBusy()).toBe(false)
   })
 
-  it('one that never gets ready is given up after EXPLAINER_LOAD_MS, the music never held for it', async () => {
+  it('one that never gets ready is given up after EXPLAINER_LOAD_MS, the music never ducked for it', async () => {
     FakeVideo.ready = false
     startExplainers(performance.now(), '')
-    music.held = false
     await run(EXPLAINER_FIRST_MS + EXPLAINER_LOAD_MS - 1000)
     expect(explainerBusy()).toBe(true)
     await run(2000)
     expect(explainerBusy()).toBe(false)
     expect(phase()).toBeNull()
-    expect(music.atEnd + music.now).toBe(0)
+    expect(music.duckedOn + music.duckedOff).toBe(0)
   })
 
   it('a stall gives the picture straight back', async () => {
     startExplainers(performance.now(), '')
-    music.held = true
     await run(EXPLAINER_FIRST_MS + EXPLAINER_IN_MS + 3000)
     expect(phase()).toBe('play')
     await run(EXPLAINER_STALL_MS - 500, playing, false)
@@ -326,14 +304,13 @@ describe('Cyberspace TV explainers', () => {
     await run(700, playing, false)
     expect(phase()).toBe('out')
     expect(useTvExplainer.getState().showing?.outMs).toBe(EXPLAINER_FAIL_OUT_MS)
-    expect(music.released).toBe(1)
+    expect(music.duckedOff).toBe(1)
     await run(EXPLAINER_FAIL_OUT_MS + 100)
     expect(phase()).toBeNull()
   })
 
   it('an error gives the picture straight back', async () => {
     startExplainers(performance.now(), '')
-    music.held = true
     await run(EXPLAINER_FIRST_MS + 2000)
     video().error = { code: 3 }
     await run(100)
@@ -343,7 +320,6 @@ describe('Cyberspace TV explainers', () => {
 
   it('one that runs past its guard is ended, the video stopped', async () => {
     startExplainers(performance.now(), '')
-    music.held = true
     await run(EXPLAINER_FIRST_MS + 1000)
     expect(phase()).not.toBeNull()
     const v = video()
@@ -359,7 +335,6 @@ describe('Cyberspace TV explainers', () => {
     vi.stubGlobal('window', win)
     FakeVideo.refuse = 'sound'
     startExplainers(performance.now(), '')
-    music.held = true
     await run(EXPLAINER_FIRST_MS + 1000)
     expect(phase()).toBe('in')
     expect(video().muted).toBe(true)
@@ -376,19 +351,17 @@ describe('Cyberspace TV explainers', () => {
     const seen: Array<[string, number]> = []
     const off = useTvExplainer.subscribe((st) => { if (st.showing) seen.push([st.showing.phase, st.showing.outMs]) })
     startExplainers(performance.now(), '')
-    music.held = true
     await run(EXPLAINER_FIRST_MS + 1000)
     off()
     expect(seen.map(([p]) => p)).toEqual(['in', 'out'])
     expect(seen[1][1]).toBe(EXPLAINER_FAIL_OUT_MS)
     expect(phase()).toBeNull()
-    expect(music.released).toBe(1)
+    expect(music.duckedOff).toBe(1)
   })
 
   it("follows the viewer's mute on the site, and is always full on the stream", async () => {
     music.muted = true
     startExplainers(performance.now(), '')
-    music.held = true
     await run(EXPLAINER_FIRST_MS + 1000)
     expect(video().volume).toBe(0)
     stopExplainers()
@@ -401,7 +374,6 @@ describe('Cyberspace TV explainers', () => {
 
   it("follows the viewer's mute and volume while it plays, and lets go after (review of #471)", async () => {
     startExplainers(performance.now(), '')
-    music.held = true
     await run(EXPLAINER_FIRST_MS + 1000)
     expect(video().volume).toBeCloseTo(0.8)
     setLevel(0.8, true)
@@ -413,48 +385,44 @@ describe('Cyberspace TV explainers', () => {
     expect(music.listeners).toHaveLength(0)
   })
 
-  it('a viewer\'s pause (the lock screen) ends it, and the music stays paused', async () => {
+  it('a viewer\'s pause (the lock screen) ends it; the music is unducked, not paused', async () => {
     startExplainers(performance.now(), '')
-    music.held = true
     await run(EXPLAINER_FIRST_MS + 2000)
     expect(phase()).toBe('play')
     video().pause()
     await run(100)
     expect(phase()).toBe('out')
-    expect(music.resumed).toEqual([false])
+    expect(music.duckedOff).toBe(1)
   })
 
-  it('its own pauses, at its end or a guard, give the music back as usual', async () => {
+  it('its own pauses, at its end or a guard, duck the music back as usual', async () => {
     startExplainers(performance.now(), '')
-    music.held = true
     await run(EXPLAINER_FIRST_MS + 1000)
     await run(guardMs(one('1-a')))
-    expect(music.resumed).toEqual([true])
+    expect(music.duckedOff).toBe(1)
   })
 
   it('on the stream a pause is not a viewer\'s: the stall guard has it', async () => {
     setBroadcastForTest(true)
     startExplainers(performance.now(), '')
-    music.held = true
     await run(EXPLAINER_FIRST_MS + 2000)
     video().pause()
     await run(1000, playing, false)
     expect(phase()).toBe('play')
     await run(EXPLAINER_STALL_MS, playing, false)
     expect(phase()).not.toBe('play')
-    expect(music.resumed).toEqual([true])
+    expect(music.duckedOff).toBe(1)
   })
 
   it('a pause told late, after it plays again, is not the viewer\'s (review of #471, round 2)', async () => {
     startExplainers(performance.now(), '')
-    music.held = true
     await run(EXPLAINER_FIRST_MS + 1000)
     expect(phase()).toBe('in')
     // The warm-up's pause, arriving while the video plays on.
     video().dispatchEvent(new Event('pause'))
     await run(200)
     expect(phase()).toBe('in')
-    expect(music.resumed).toEqual([])
+    expect(music.duckedOff).toBe(0)
   })
 
   it('on the site, one too slow to load is not fetched again this visit; the stream tries again', async () => {
@@ -479,7 +447,6 @@ describe('Cyberspace TV explainers', () => {
     vi.stubGlobal('window', win)
     FakeVideo.refuse = 'sound'
     startExplainers(performance.now(), '')
-    music.held = true
     await run(EXPLAINER_FIRST_MS + 1000)
     expect(explainerSoundHeld()).toBe(true)
     FakeVideo.refuse = 'none'
@@ -491,7 +458,6 @@ describe('Cyberspace TV explainers', () => {
   it('a file with no hash is never fetched or played', async () => {
     setExplainerLineupForTest([one('1-a', { files: [{ url: 'https://b.example/video.webm', type: 'video/webm' }], captions: 'https://b.example/c.vtt' })])
     startExplainers(performance.now(), '')
-    music.held = true
     await run(EXPLAINER_FIRST_MS + 1000)
     expect(fetched).toEqual([])
     expect(phase()).toBeNull()
@@ -503,14 +469,12 @@ describe('Cyberspace TV explainers', () => {
     setExplainerLineupForTest([one('1-a', { captions: 'https://b.example/a.vtt' }), one('2-b')])
     fetchBody = (url) => url.endsWith('a.vtt') ? new Promise<Response>((r) => { lateCaptions = r }) : new Response(bytes as BodyInit)
     startExplainers(performance.now(), '')
-    music.held = true
     await run(EXPLAINER_FIRST_MS + 1000)
     video().ended = true
     await run(EXPLAINER_OUT_MS + 200)
     expect(phase()).toBeNull()
     // A's captions come after A is over.
     lateCaptions!(new Response('WEBVTT\n\n00:00.000 --> 01:00.000\nFrom A'))
-    music.held = true
     await run(EXPLAINER_EVERY_MS + 1000)
     expect(useTvExplainer.getState().showing?.id).toBe('2-b')
     video().currentTime = 5
@@ -519,7 +483,6 @@ describe('Cyberspace TV explainers', () => {
 
   it('TV going off ends it at once', async () => {
     startExplainers(performance.now(), '')
-    music.held = true
     await run(EXPLAINER_FIRST_MS + 1000)
     expect(phase()).not.toBeNull()
     stopExplainers()
@@ -533,7 +496,6 @@ describe('Cyberspace TV explainers', () => {
     setExplainerLineupForTest([one('1-a', { captions: 'https://b.example/c.vtt' })])
     fetchBody = (url) => new Response(url.endsWith('.vtt') ? 'WEBVTT\n\n00:00.000 --> 00:01.000\nHello\n\n00:01.000 --> 00:05.000\nThere' : bytes as BodyInit)
     startExplainers(performance.now(), '')
-    music.held = true
     await run(EXPLAINER_FIRST_MS + 500)
     expect(phase()).toBe('in')
     video().currentTime = 0.5

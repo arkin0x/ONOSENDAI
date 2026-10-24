@@ -5,11 +5,13 @@
  *
  * TV's engine (store/useTv) ticks this. When one is due, its video is
  * fetched whole, its sha256 checked, and played from the copy in memory, so
- * the file on screen is the file in the lineup. Once it is ready, the music
- * steps out at the end of the song (store/useTvMusic holdMusicAtSongEnd),
- * and then the live picture shrinks into its corner (in), the video plays
- * (play), and the picture grows back as the next song comes in (out). The
- * tube draws all of it (scene/TvScreenEffect, scene/tvPainter).
+ * the file on screen is the file in the lineup. Once it is ready, the
+ * picture goes straight on screen (in), the video plays (play), and the
+ * picture comes back (out). The music is never waited for: it plays on
+ * throughout, ducked (store/useTvMusic duckMusicForExplainer), and comes
+ * back to its own level when the picture does (arkinox, 2026-10-24: "can
+ * you play the music during my explainer, just dim the volume by 50%").
+ * The tube draws all of it (scene/TvScreenEffect, scene/tvPainter).
  *
  * Fail-safe: nothing on screen changes until the video is ready. A video
  * that will not load or fails its hash is skipped. One that errors or stops
@@ -22,12 +24,12 @@ import { sha256 } from '@noble/hashes/sha2.js'
 import { bytesToHex } from '../lib/events'
 import {
   EXPLAINER_AD_GAP_MS, EXPLAINER_EVERY_MS, EXPLAINER_FAIL_OUT_MS, EXPLAINER_FIRST_MS, EXPLAINER_FORCED_MS, EXPLAINER_IN_MS,
-  EXPLAINER_LOAD_MS, EXPLAINER_MAX_BYTES, EXPLAINER_MUSIC_WAIT_MS, EXPLAINER_OUT_MS, EXPLAINER_RETRY_MS, EXPLAINER_STALL_MS,
+  EXPLAINER_LOAD_MS, EXPLAINER_MAX_BYTES, EXPLAINER_OUT_MS, EXPLAINER_RETRY_MS, EXPLAINER_STALL_MS,
   cueAt, fileHash, forcedExplainer, guardMs, nextExplainer, parseVtt, playableFiles,
   type Cue, type Explainer, type ExplainerPhase,
 } from '../lib/tv/explainer'
 import { EXPLAINERS } from '../lib/tv/explainerLineup'
-import { holdMusicAtSongEnd, holdMusicNow, musicHeldForAd, releaseMusic, useTvMusic } from './useTvMusic'
+import { duckMusicForExplainer, useTvMusic } from './useTvMusic'
 import { isBroadcast } from '../lib/tv/broadcast'
 
 /** The explainer on screen. */
@@ -65,9 +67,6 @@ interface Pending {
   readyAt: number | null
   /** The video would not load: given up on at the next tick. */
   failed: boolean
-  /** The music was asked to step out, and whether it was faded out mid-song after waiting. */
-  asked: boolean
-  faded: boolean
   abort: AbortController | null
 }
 
@@ -163,11 +162,11 @@ export function explainerTick(now: number, tv: TvSide): void {
   if (!ex) return
   forced = null
   last = ex.id
-  pending = { ex, began: now, readyAt: null, failed: false, asked: false, faded: false, abort: null }
+  pending = { ex, began: now, readyAt: null, failed: false, abort: null }
   void load(pending, gen)
 }
 
-/** Waiting on the video, then on the song to end, then on screen. */
+/** Waiting on the video, then straight on screen: never on the song (arkinox, 2026-10-24). */
 function getReady(p: Pending, now: number): void {
   if (p.failed) { skip(now); return }
   if (p.readyAt === null && now - p.began > EXPLAINER_LOAD_MS) {
@@ -179,18 +178,13 @@ function getReady(p: Pending, now: number): void {
     return
   }
   if (p.readyAt === null) return
-  if (!p.asked) { p.asked = true; holdMusicAtSongEnd() }
-  // A song that runs on too long fades out instead, and comes back where it was.
-  if (!musicHeldForAd() && !p.faded && now - p.readyAt >= EXPLAINER_MUSIC_WAIT_MS) { p.faded = true; holdMusicNow() }
-  if (!musicHeldForAd()) return
   pending = null
   show(p.ex, now)
 }
 
-/** It did not play: the music back, and the next tried later. */
+/** It did not play: the next tried later. Nothing was asked of the music. */
 function skip(now: number): void {
   pending?.abort?.abort()
-  if (pending?.asked) releaseMusic()
   pending = null
   dropVideo()
   due = now + EXPLAINER_RETRY_MS
@@ -198,8 +192,7 @@ function skip(now: number): void {
 
 function show(ex: Explainer, now: number): void {
   const v = video
-  // The music is held for it already: given back here, as skip would have.
-  if (!v) { releaseMusic(); dropVideo(); due = now + EXPLAINER_RETRY_MS; return }
+  if (!v) { dropVideo(); due = now + EXPLAINER_RETRY_MS; return }
   guardAt = now + guardMs(ex)
   progress = { t: -1, at: now }
   failedOut = false
@@ -210,6 +203,8 @@ function show(ex: Explainer, now: number): void {
   // A mute or a volume the viewer sets meanwhile is the video's too (review of #471).
   follow?.()
   follow = useTvMusic.subscribe((st, prev) => { if (video === v && (st.volume !== prev.volume || st.muted !== prev.muted)) setSound(v) })
+  // The music plays on, ducked rather than paused or waited for (arkinox, 2026-10-24).
+  duckMusicForExplainer(true)
   useTvExplainer.setState({ showing: { id: ex.id, title: ex.title, phase: 'in', at: now, outMs: EXPLAINER_OUT_MS } })
   const mine = gen
   v.play().catch((e: unknown) => {
@@ -259,15 +254,17 @@ function fail(): void {
   if (s && s.phase !== 'out') goOut(performance.now(), EXPLAINER_FAIL_OUT_MS)
 }
 
-function goOut(now: number, ms: number, resume: boolean = true): void {
+function goOut(now: number, ms: number): void {
   const s = useTvExplainer.getState().showing
   if (!s) return
   // Its last frame holds, silent, as the picture grows back over it (a
-  // guard's end cuts it there), and the next song comes in.
+  // guard's end cuts it there).
   pauseOwn(video)
   follow?.()
   follow = null
-  releaseMusic(resume)
+  // The music was never paused for it, so there is nothing to resume: only
+  // step the duck back up, whatever ended the explainer (arkinox, 2026-10-24).
+  duckMusicForExplainer(false)
   useTvExplainer.setState({ showing: { ...s, phase: 'out', at: now, outMs: ms } })
 }
 
@@ -301,9 +298,11 @@ function pauseOwn(v: HTMLVideoElement | null): void {
 /**
  * A pause the page did not make, while it plays: the viewer's (the lock
  * screen's or the phone's own controls reach the video, the element making
- * the sound). It ends the explainer and the music stays paused, as a pause of
- * a song does (review of #471). Not on the stream, where nobody can pause:
- * one there is the browser's, and the stall guard has it.
+ * the sound). It ends the explainer; the music is its own, playing on
+ * ducked since before this, so there is nothing of its play state to keep
+ * (arkinox, 2026-10-24: before this it paused for the explainer, and so
+ * stayed paused here too; review of #471). Not on the stream, where nobody
+ * can pause: one there is the browser's, and the stall guard has it.
  */
 function onPause(v: HTMLVideoElement): void {
   if (ownPause) { ownPause = false; return }
@@ -312,7 +311,7 @@ function onPause(v: HTMLVideoElement): void {
   if (!v.paused) return
   const s = useTvExplainer.getState().showing
   if (video !== v || !s || s.phase === 'out' || v.ended || isBroadcast()) return
-  goOut(performance.now(), EXPLAINER_FAIL_OUT_MS, false)
+  goOut(performance.now(), EXPLAINER_FAIL_OUT_MS)
 }
 
 /** The video's element and its copy in memory, let go. */

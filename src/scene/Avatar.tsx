@@ -210,13 +210,18 @@ export function Avatar(): JSX.Element | null {
       </group>
     )}
     <group ref={group} position={[0, 0, 0]}>
-      {/* No depth test, drawn after the opaque pass: you must always be able
-          to find yourself. The selected block's solid cube is exactly one
-          cell, the icosahedron inscribes it exactly, and standing on your
-          own destination erased you; now the red edges composite on top of
-          whatever shares your gibson. */}
+      {/* No depth test, drawn after every shard face: you must always be
+          able to find yourself. The selected block's solid cube is exactly
+          one cell, the icosahedron inscribes it exactly, and standing on
+          your own destination erased you; now the red edges composite on
+          top of whatever shares your gibson. Last because the marker is in
+          three's transparent list with the shard faces, after them by render
+          order (AvatarShape markerMaterialProps): opaque, it was drawn before
+          them, and a floor behind it painted over it. 9.5, under the cursor's
+          ghost and the deploy box's walls at 10, so they lie over it on every
+          frame rather than by distance (review of #494). */}
       <group ref={drawn}>
-        {!(walking && hiddenInWalk) && <AvatarShape pubkey={pubkey} color="#ff2323" renderOrder={10} depthTest={false} firstPerson={walking} />}
+        {!(walking && hiddenInWalk) && <AvatarShape pubkey={pubkey} color="#ff2323" renderOrder={9.5} depthTest={false} firstPerson={walking} />}
       </group>
       {!walking && <TapTarget measure={drawn} yields onTap={() => usePersonCard.getState().open(pubkey)} />}
     </group>

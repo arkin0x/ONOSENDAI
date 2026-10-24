@@ -25,8 +25,8 @@
  * the song playing to end. The music plays on, ducked (EXPLAINER_DUCK, store
  * useTvMusic duckMusicForExplainer, the same pattern as hidden audio's
  * ducking), and comes back to its own level when the video goes. Never
- * within EXPLAINER_AD_GAP_MS of the HOSAKA spot, either side: a spot that
- * comes due meanwhile waits for it.
+ * within EXPLAINER_AD_GAP_MS of the ad break (lib/tv/hosakaAd; whichever
+ * spot is due), either side: a spot that comes due meanwhile waits for it.
  *
  * Nothing on screen changes until the video is loaded and ready: one that
  * will not load, or fails its hash, is skipped and TV plays on as it was. One

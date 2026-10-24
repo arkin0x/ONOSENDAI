@@ -14,7 +14,7 @@ import { TvPainter, fit, tickerItems, wrap, type TvAssets, type TvExplainer, typ
 import { cutKind, explainerPipRect, flatPoint, tubeDrift, tubeFlicker } from '../TvScreenEffect'
 import { Vector2 } from 'three'
 import { useTv } from '../../store/useTv'
-import { HOSAKA_1 } from '../../lib/tv/hosakaAd'
+import { CTV_ADVERTISE_1, HOSAKA_1 } from '../../lib/tv/hosakaAd'
 import { setBroadcastForTest } from '../../lib/tv/broadcast'
 
 /** A 2D context that measures every character as 7 px and draws nothing. */
@@ -765,6 +765,114 @@ describe('the HOSAKA commercial', () => {
     expect(images).toContain(mark)
     expect(words).toEqual(expect.arrayContaining(['SEE THE CLOUD COMPUTE PANEL', 'IN THE ONOSENDAI MENU']))
     expect(words.some((w) => w.includes('HIGH-AVAILABILITY OFFLOAD SERVICE'))).toBe(true)
+  })
+})
+
+describe('the house spot for the ad slot itself (CTV_ADVERTISE_1, arkinox 2026-10-24)', () => {
+  /** A canvas that keeps the words it writes and the pictures it draws. */
+  function recording(): { canvas: HTMLCanvasElement; words: string[]; images: unknown[] } {
+    const words: string[] = []
+    const images: unknown[] = []
+    const state: Record<string, unknown> = { globalAlpha: 1 }
+    const ctx = new Proxy({ measureText: (t: string) => ({ width: Array.from(t).length * 7 }), createLinearGradient: () => ({ addColorStop: () => {} }), createRadialGradient: () => ({ addColorStop: () => {} }), fillText: (t: string) => { if ((state.globalAlpha as number) > 0) words.push(t) }, drawImage: (img: unknown) => { images.push(img) } } as Record<string, unknown>, {
+      get: (target, key) => (key in target ? target[key as string] : key in state ? state[key as string] : () => {}),
+      set: (_t, key, v) => { state[key as string] = v; return true },
+    })
+    return { canvas: { width: 0, height: 0, getContext: () => ctx } as unknown as HTMLCanvasElement, words, images }
+  }
+  const banner = { banner: true }
+  const mark = { mark: true }
+  const trip = { id: 't', kind: 'trip' as const, pubkey: 'ann', beats: [], start: 1, end: 2, offsets: [], length: 5 }
+  /** Paint the spot `t` seconds in (after its cut), with the HOSAKA assets present too, to prove they are never drawn for this spot. */
+  function at(t: number): { words: string[]; images: unknown[] } {
+    const r = recording()
+    const p = new TvPainter(r.canvas)
+    p.size(1400, 800, 1)
+    p.paint(picture({ shot: trip as never, ad: { at: 0, id: CTV_ADVERTISE_1.id } }), { ...assets, hosaka: banner as never, hosakaMark: mark as never }, 700 + t * 1000, 1, false)
+    return r
+  }
+
+  it('opens straight on its first card, marked as an advertisement, with no banner and no mark drawn', () => {
+    const { words, images } = at(1)
+    expect(words).toContain('ADVERTISEMENT')
+    expect(words).toContain('THIS SPOT')
+    expect(words).toContain('IS OPEN.')
+    expect(images).not.toContain(banner)
+    expect(images).not.toContain(mark)
+  })
+
+  it('then the second card names Cyberspace TV', () => {
+    const { words, images } = at(3.5)
+    expect(words).toEqual(expect.arrayContaining(['ADVERTISE ON', 'CYBERSPACE TV.']))
+    expect(images).not.toContain(mark)
+  })
+
+  it('ends on the call and the address, verbatim, with no mark and no menu button', () => {
+    const end = CTV_ADVERTISE_1.scenes[CTV_ADVERTISE_1.scenes.length - 1]
+    const { words, images } = at((end.from + end.to) / 2)
+    expect(words).toContain('EMAIL TO CLAIM IT:')
+    // The address is given exactly as arkinox gave it: lower case, not re-cased like the ad's all-caps calls.
+    expect(words).toContain('aflutter_conjoined788@simplelogin.com')
+    expect(words.some((w) => w.includes('ALUTTER') || w.includes('SIMPLELOGIN.COM'))).toBe(false)
+    expect(images).not.toContain(mark)
+  })
+
+  it('the end card\'s lines land where a block with no mark and no subtitle should, not pushed down by a stray gap', () => {
+    // Regression: subH's 22*s gap used to be added below the subtitle loop
+    // whenever the scene was 'end', whether or not there was a subtitle to
+    // put it under (tvPainter commercial()), while blockH and fitCard's own
+    // sizing only ever budgeted that space when subLines was non-empty. For
+    // a spot with no subtitle (this one), that left the whole call shoved
+    // down by 22*s past where the centred layout placed it.
+    const end = CTV_ADVERTISE_1.scenes[CTV_ADVERTISE_1.scenes.length - 1]
+    expect(end.subtitle).toBeUndefined()
+    const seen: Array<{ text: string; y: number; size: number }> = []
+    const state: Record<string, unknown> = { globalAlpha: 1, font: '' }
+    const ctx = new Proxy({
+      measureText: (t: string) => ({ width: Array.from(t).length * parseFloat(String(state.font).replace(/^700 /, '')) * 0.6 }),
+      createLinearGradient: () => ({ addColorStop: () => {} }),
+      createRadialGradient: () => ({ addColorStop: () => {} }),
+      // Local coordinates, as commercial() passes them: no transform tracking needed,
+      // since every line here is drawn straight from the card's own centre (x=0).
+      fillText: (text: string, _x: number, y: number) => { seen.push({ text, y, size: parseFloat(String(state.font).replace(/^700 /, '')) }) },
+    } as Record<string, unknown>, {
+      get: (target, key) => (key in target ? target[key as string] : key in state ? state[key as string] : () => {}),
+      set: (_t, key, v) => { state[key as string] = v; return true },
+    })
+    const p = new TvPainter({ width: 0, height: 0, getContext: () => ctx } as unknown as HTMLCanvasElement)
+    p.size(1400, 800, 1)
+    const trip = { id: 't', kind: 'trip' as const, pubkey: 'ann', beats: [], start: 1, end: 2, offsets: [], length: 5 }
+    p.paint(picture({ shot: trip as never, ad: { at: 0, id: CTV_ADVERTISE_1.id } }), assets, 700 + ((end.from + end.to) / 2) * 1000, 1, false)
+    const lines = end.lines.map((text) => seen.find((s) => s.text === text))
+    expect(lines.every((l) => l !== undefined)).toBe(true)
+    const [first, last] = lines as Array<{ text: string; y: number; size: number }>
+    expect(first.size).toBe(last.size)
+    const size = first.size
+    const N = end.lines.length
+    // Independent of the painter's own code: with no mark and no subtitle,
+    // the block is just N lines stacked at size*1.12 apiece, centred on the
+    // card (blockH = N*size*1.12, top at -blockH/2), each line's baseline
+    // nudged up by 0.18*size off the bottom of its own slot.
+    const blockH = N * size * 1.12
+    const expectedY = (i: number): number => -blockH / 2 + (i + 1) * size * 1.12 - 0.18 * size
+    expect(first.y).toBeCloseTo(expectedY(0), 4)
+    expect(last.y).toBeCloseTo(expectedY(N - 1), 4)
+  })
+})
+
+describe('the ad break plays whichever spot the store hands it, by id', () => {
+  it('draws HOSAKA\'s card for its id, and the house spot\'s for its own, from the same paint path', () => {
+    for (const [id, atSeconds, line] of [[HOSAKA_1.id, 5.5, 'CYBERDECK'], [CTV_ADVERTISE_1.id, 1, 'IS OPEN.']] as const) {
+      const words: string[] = []
+      const ctx = new Proxy({ measureText: (t: string) => ({ width: Array.from(t).length * 7 }), createLinearGradient: () => ({ addColorStop: () => {} }), createRadialGradient: () => ({ addColorStop: () => {} }), fillText: (t: string) => { words.push(t) } } as Record<string, unknown>, {
+        get: (target, key) => (key in target ? target[key as string] : () => {}),
+        set: () => true,
+      })
+      const p = new TvPainter({ width: 0, height: 0, getContext: () => ctx } as unknown as HTMLCanvasElement)
+      p.size(1400, 800, 1)
+      p.paint(picture({ ad: { at: 0, id } }), assets, 700 + atSeconds * 1000, 1, false)
+      expect(words, id).toContain(line)
+    }
   })
 })
 

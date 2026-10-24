@@ -88,6 +88,11 @@ const ACCENT = '#00e5ff'
 /** NOW PLAYING's progress, purple to pink (arkinox, 2026-10-18: "make the progress something cool like a gradient from purple to pink"). */
 const MUSIC_PURPLE = '#8a2be2'
 const MUSIC_PINK = '#ff2d95'
+/**
+ * Where the site's OFF button ends, CSS px from the top and the left, and a
+ * gap (styles.css .tv__off: 38 px, 12 px in): what keeps clear of its tap.
+ */
+const OFF_CLEAR_PX = 12 + 38 + 10
 /** The stream's address under the clock: its type, CSS px, and its baseline under the logo's bottom, CSS px (the time's, and a line). */
 const URL_TAG_PX = 13
 const URL_TAG_DROP = 82
@@ -212,6 +217,11 @@ export interface TvExplainer {
   caption: string | null
   /** The browser holds its sound back until a tap. */
   soundHeld?: boolean
+  /**
+   * The viewer's music is muted (store/useTvMusic), which the explainer's
+   * sound follows whether or not a track is playing; NOW PLAYING's when not given.
+   */
+  muted?: boolean
   /**
    * Whether the live picture shows small in its corner (lib/tv/explainer
    * EXPLAINER_PIP_ENABLED, the default when not given). Without it the
@@ -744,7 +754,7 @@ export class TvPainter {
     }
 
     part('explainer')
-    if (ex) this.explainerParts(ex, a.music?.muted === true, W, scale, s, narrow, MX, MY, tickY)
+    if (ex) this.explainerParts(ex, ex.muted ?? a.music?.muted === true, W, scale, s, narrow, MX, MY, tickY)
   }
 
   /**
@@ -778,10 +788,15 @@ export class TvPainter {
       ctx.textAlign = 'left'
       ctx.font = `700 ${(narrow ? 9 : 10) * s}px ${TV_FONT}`
       const h = 18 * s
-      const x = pipShown ? ex.pip.x * scale : Math.max(MX, ex.video.x * scale + 12 * s)
+      let x = pipShown ? ex.pip.x * scale : Math.max(MX, ex.video.x * scale + 12 * s)
       const y = pipShown ? (ex.pip.y + ex.pip.h) * scale + 8 * s : Math.max(MY, ex.video.y * scale + 12 * s)
-      // The sound is the viewer's to mute here too: a tap on the tag, as on
-      // NOW PLAYING, which steps away meanwhile (review of #471).
+      // Clear of the site's OFF button (styles.css .tv__off), a page element
+      // that takes a tap first: on a small screen on its side the margins put
+      // the tag under it (review of #493).
+      if (!pipShown && y < OFF_CLEAR_PX * scale) x = Math.max(x, OFF_CLEAR_PX * scale)
+      // A tap on the tag is the sound's, as on NOW PLAYING, which steps away
+      // meanwhile (review of #471): to let it in, or to unmute it. With the PIP
+      // off there is no tag while the sound is on, so none to mute it by.
       const room = pipShown ? ex.pip.w * scale : W - x - MX
       const label = fit(ctx, words, Math.max(20 * s, room - 14 * s))
       const tw = ctx.measureText(label).width

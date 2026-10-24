@@ -115,7 +115,7 @@ describe('an explainer\'s title tag with the PIP off (arkinox, 2026-10-24: "inex
 
   it('on the site: no title; only TAP FOR SOUND or ♪ MUTED, at the video\'s top left, taking the tap, at 1 and 2 canvas px per CSS px', () => {
     setBroadcastForTest(false)
-    for (const [w, h, k] of [[1920, 1080, 1], [390, 844, 2], [844, 390, 2]] as const) {
+    for (const [w, h, k] of [[1920, 1080, 1], [390, 844, 2], [844, 390, 2], [667, 375, 2], [800, 450, 1], [568, 320, 2], [1080, 1080, 1.5]] as const) {
       const at = `${w}x${h}@${k}`
       const { pip, video } = explainerLayout(w, h, 16 / 9, MARGIN_X, MARGIN_Y, h * (1 - MARGIN_Y) - 32)
       const ex: TvExplainer = { title: 'Welcome to Cyberspace', mix: 1, pip, video, caption: null, pipShown: false }
@@ -145,8 +145,21 @@ describe('an explainer\'s title tag with the PIP off (arkinox, 2026-10-24: "inex
         expect(card.y + card.h, `${at} ${word}`).toBeLessThan(video.y + video.h / 3)
         expect(card.x + card.w, `${at} ${word}`).toBeLessThanOrEqual(w)
         expect(card.x, `${at} ${word}`).toBeLessThan(w / 3)
+        // Clear of the OFF button (styles.css .tv__off: 12 to 50 CSS px on both axes), which takes a tap first (review of #493).
+        const underOff = card.x < 50 && card.y < 50
+        expect(underOff, `${at} ${word} at ${card.x},${card.y}`).toBe(false)
       }
     }
+  })
+
+  it('on the site: ♪ MUTED, and its tap, whether or not a track is playing (the explainer follows the mute either way; review of #493)', () => {
+    setBroadcastForTest(false)
+    const { texts, painter } = paint(picture(), { ...assets, music: null, explainer: explainer(1920, 1080, 1, { muted: true }) })
+    expect(texts.some((t) => t.text === '♪ MUTED')).toBe(true)
+    expect(painter.musicCard).not.toBeNull()
+    // And the music's own state wins over NOW PLAYING's when given.
+    const on = paint(picture(), { ...assets, music: { ...assets.music!, muted: true }, explainer: explainer(1920, 1080, 1, { muted: false }) })
+    expect(on.texts.some((t) => t.text === '♪ MUTED')).toBe(false)
   })
 
   it('with the PIP on (kept for later): under the PIP, as before', () => {

@@ -622,7 +622,7 @@ export function TvScreenEffect(): JSX.Element {
       glRect(explainerPipRect(width, height, layout.pip, mix), width, height, u.get('uPip')!.value as Vector4)
       glRect(layout.video, width, height, u.get('uVid')!.value as Vector4)
       u.get('uVideo')!.value = videoTex.current
-      explainer = { title: ex.title, mix, pip: layout.pip, video: layout.video, caption: explainerCaption(), soundHeld: explainerSoundHeld(), pipShown: EXPLAINER_PIP_ENABLED }
+      explainer = { title: ex.title, mix, pip: layout.pip, video: layout.video, caption: explainerCaption(), soundHeld: explainerSoundHeld(), muted: useTvMusic.getState().muted, pipShown: EXPLAINER_PIP_ENABLED }
     } else if (videoTex.current) {
       u.get('uVideo')!.value = NO_VIDEO
       videoTex.current.dispose()

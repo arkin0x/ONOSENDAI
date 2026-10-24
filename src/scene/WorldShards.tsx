@@ -18,7 +18,7 @@ import { editingId, useShards, type WorldItem } from '../store/useShards'
 import { WALL_BREATH_SECONDS } from './Rooms'
 import { ShardMesh } from './ShardMesh'
 import { GHOST_OPACITY } from './shardFaces'
-import { regionBox } from '../lib/clip'
+import { regionBox, type Box } from '../lib/clip'
 import { placedPose, type Pose } from '../lib/pose'
 import type { ShardModel } from 'sno-core/shards'
 import { TapTarget, farCullDoublings } from './TapTarget'
@@ -152,6 +152,54 @@ export function drawableShards(items: Array<Pick<WorldItem, 'key' | 'type' | 'at
     .filter((w) => Number.isFinite(w.scale) && Math.hypot(...w.centre) <= REACH)
 }
 
+/** Two clip boxes that cut the same. */
+export function sameBox(a: Box, b: Box): boolean {
+  return a.min[0] === b.min[0] && a.min[1] === b.min[1] && a.min[2] === b.min[2] && a.max[0] === b.max[0] && a.max[1] === b.max[1] && a.max[2] === b.max[2]
+}
+
+/** Two poses that turn a shape the same. */
+export function samePose(a: Pose, b: Pose): boolean {
+  if (a === b) return true
+  for (let i = 0; i < 9; i++) if (a[i] !== b[i]) return false
+  return true
+}
+
+/**
+ * The placements again, each keeping the very clip box and pose it was given
+ * last time while they are the same in value (2026-10-23).
+ *
+ * Every move of your own (a WALK step, a HOP that lands, a spectated jump)
+ * changes the anchor, and placing the shards again made a new box and a new
+ * pose object for every one of them, equal to the old ones: neither depends on
+ * the anchor, only on where the shard sits and the view's axes. ShardMesh
+ * keys its cut (clipMesh), its winding and all its GPU buffers on those two
+ * objects, so every shard in reach was cut again and sent to the GPU again on
+ * every step: about 110 buffers and 0.8 MB a step among the Maze Kit rooms,
+ * with 150 to 450 ms of main thread stopped each time, and 218 KB of garbage
+ * a frame while walking (arkinox, 2026-10-23: "I'm getting some freezes
+ * intermittently while just navigating through onosendai"). Only where it is
+ * drawn (`centre`) follows the anchor, and that is a transform, not a cut.
+ */
+export function steadied(prev: ReadonlyMap<string, PlacedShardDraw>, fresh: readonly PlacedShardDraw[]): PlacedShardDraw[] {
+  return fresh.map((w) => {
+    const was = prev.get(w.key)
+    if (!was || was.shard !== w.shard) return w
+    const clip = sameBox(was.clip, w.clip) ? was.clip : w.clip
+    const pose = samePose(was.pose, w.pose) ? was.pose : w.pose
+    return clip === w.clip && pose === w.pose ? w : { ...w, clip, pose }
+  })
+}
+
+/** `steadied` against what this component placed last time. */
+export function useSteadied(fresh: readonly PlacedShardDraw[]): PlacedShardDraw[] {
+  const kept = useRef<ReadonlyMap<string, PlacedShardDraw>>(new Map())
+  return useMemo(() => {
+    const out = steadied(kept.current, fresh)
+    kept.current = new Map(out.map((w) => [w.key, w]))
+    return out
+  }, [fresh])
+}
+
 export function WorldShards({ axes }: Props): JSX.Element | null {
   const anchor = useCyberspace((s) => s.anchor)
   const anchorPlane = useCyberspace((s) => s.anchorPlane)
@@ -166,11 +214,13 @@ export function WorldShards({ axes }: Props): JSX.Element | null {
   const births = useCeremony((s) => s.births)
   const moving = useShards((s) => editingId(s.pending))
 
-  const placed = useMemo(() => {
+  const fresh = useMemo(() => {
     return drawableShards(useShards.getState().worldItems(), anchor, anchorPlane, scaleExp, axes)
     // mine and discovered are what worldShards reads.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [anchor, anchorPlane, scaleExp, axes, mine, discovered, curated, muted])
+  // A move keeps each shard's cut and GPU buffers: only its place changes (steadied).
+  const placed = useSteadied(fresh)
 
   if (placed.length === 0) return null
 

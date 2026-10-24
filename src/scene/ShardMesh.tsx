@@ -29,13 +29,12 @@ import {
   type Plane,
 } from 'three'
 import { easeOutCubic, hash01, scrambleOffset, seedOf, SHARD_DECODE_MS } from '../lib/decode'
-import { MAX_UNIT, expandFaceColors, flatten, posed, ticksOf, toRender, type Part, type ShardModel } from 'sno-core/shards'
+import { MAX_UNIT, expandFaceColors, flatten, type Part, type ShardModel } from 'sno-core/shards'
 import { partMatrix, placedBounds, refKey, type Placed } from 'sno-core/parts'
 import { useResolved, type Resolved } from '../lib/parts'
 import { ACCENT, WARN } from '../lib/palette'
 import { renderPose, type Pose } from '../lib/pose'
 import { boxContains, clipMesh, clipPoints, type Box } from '../lib/clip'
-import { orientShard } from 'sno-core/orient'
 import { faceEdges } from 'sno-core/outline'
 import { BACK_SHADE_COLOR, SHARD_FACES_TONE_MAPPED } from './shardLight'
 import { SHARD_DOTS, SHARD_POINTS, createDiscMaterial, sizeDisc, withDiscColors } from './pointDisc'
@@ -82,8 +81,7 @@ interface Props {
   birth?: number
   /**
    * A tap on a SOLID face, with the shard's own index for it; the workshop's
-   * FACE tool. Not `e.faceIndex`, which counts the triangles drawn, and the
-   * bench leaves out the faces buried in a join.
+   * FACE tool, through the face meshes' `faceOf` map (shardGeometry `drawn`).
    */
   onFaceClick?: (e: ThreeEvent<MouseEvent>, face: number) => void
   /**
@@ -141,10 +139,42 @@ interface Props {
 const STATIC = [0, 0.9, 1] as const
 
 /**
+ * What a shard draws: its points in the render mapping, and every one of its
+ * faces (DECK-0003 §1.4: a reader draws them all, both sides, whatever their
+ * winding). `drawn` maps each drawn triangle to the shard's own face: the
+ * identity, since every face is drawn and faces are triangles, kept so a
+ * tap still lands on the right face if anything is ever left out again. On
+ * the clip path it maps the cut pieces to themselves, so a clipped shard's
+ * piece is not a face; nothing that clips takes taps.
+ *
+ * The bench once left out the faces sno-core's outward guess called buried
+ * inside a join, by counting what rays from each face's middle crossed. That
+ * count only holds for one closed solid, and a shard is seldom one: arkinox's
+ * Stair run lost one triangle of each of risers 2 and 3, three whole risers
+ * above them, and every face FILLed in such a spot was added and never seen
+ * (2026-10-23). Every face is drawn now, on the bench as in the world.
+ *
+ * Cropped to its region (`clip`), the faces are cut at the walls, and the
+ * points that are left are the vertices of the cut faces, or, for a shard
+ * with no faces, its own points inside the walls.
+ */
+export function shardGeometry(shard: ShardModel, clip?: Box, pose?: Pose): { positions: Float32Array; colors: Float32Array; index: number[]; faces: number[][]; drawn: number[] } {
+  const f = flatten(shard, pose)
+  if (!clip || boxContains(clip, f.positions)) return { ...f, faces: shard.faces as number[][], drawn: shard.faces.map((_, i) => i) }
+  if (shard.faces.length === 0) {
+    const pts = clipPoints(f.positions, f.colors, clip)
+    return { positions: pts.positions, colors: pts.colors, index: [] as number[], faces: [] as number[][], drawn: [] as number[] }
+  }
+  const cut = clipMesh(f, clip)
+  const faces: number[][] = []
+  for (let t = 0; t + 2 < cut.index.length; t += 3) faces.push([cut.index[t], cut.index[t + 1], cut.index[t + 2]])
+  return { ...cut, faces, drawn: faces.map((_, i) => i) }
+}
+
+/**
  * The shard's own face index for a ray's hit on either side of a face, or
  * null for a hit on anything else. Both face meshes carry `faceOf`, the map
- * from a drawn triangle to its face: the bench leaves out faces buried in a
- * join, so the triangle's index is not the face's. A face must answer a tap
+ * from a drawn triangle to its face (shardGeometry `drawn`). A face must answer a tap
  * from behind as well as from in front; each mesh is hit only on the
  * triangles that face the ray, so the outsides alone let a tap pass through
  * a face seen from behind to the next front beyond it (arkinox's Disco
@@ -175,29 +205,14 @@ export function ShardMesh({ shard: given, scale = 1, ghost = false, birth, onFac
   const resolved = useResolved(nested ? null : given)
   // A face that carries its own colour needs three corners of its own, or the
   // colour would bleed across every edge it shares. Expanded here and nowhere
-  // else, so the winding pass, the clipper and the face picker below never
-  // learn the feature exists.
+  // else, so the clipper and the face picker below never learn the feature
+  // exists.
   const shard = useMemo(() => expandFaceColors(given), [given])
-  const { positions, colors, index, faces, drawn } = useMemo(() => {
-    const f = flatten(shard, pose)
-    // On the bench, without the faces buried inside a join, which would only
-    // fight the face they sit against (orient.ts). Their winding is kept.
-    const buried = lit ? orientShard(shard.vertices.map((v) => toRender(posed(ticksOf(v), pose))), shard.faces).interior : null
-    const drawn = shard.faces.map((_, i) => i).filter((i) => !buried?.[i])
-    const oriented = buried ? { ...f, index: drawn.flatMap((i) => shard.faces[i]) } : f
-    if (!clip || boxContains(clip, oriented.positions)) return { ...oriented, faces: shard.faces as number[][], drawn }
-    // Cropped to its region: the faces cut at the walls, and the points that
-    // are left are the vertices of the cut faces, or, for a shard with no
-    // faces, its own points inside the walls.
-    if (shard.faces.length === 0) {
-      const pts = clipPoints(oriented.positions, oriented.colors, clip)
-      return { positions: pts.positions, colors: pts.colors, index: [] as number[], faces: [] as number[][], drawn: [] as number[] }
-    }
-    const cut = clipMesh(oriented, clip)
-    const faces: number[][] = []
-    for (let t = 0; t + 2 < cut.index.length; t += 3) faces.push([cut.index[t], cut.index[t + 1], cut.index[t + 2]])
-    return { ...cut, faces, drawn: faces.map((_, i) => i) }
-  }, [shard.vertices, shard.faces, lit, clip, pose])
+  // Keyed on the points and faces rather than the whole model, so a parent
+  // that hands over a fresh copy of the same shard does not rebuild it
+  // (unless it has face colours: the expansion above makes new arrays).
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const { positions, colors, index, faces, drawn } = useMemo(() => shardGeometry(shard, clip, pose), [shard.vertices, shard.faces, clip, pose])
 
   // Live copies: the decode writes into these, the targets stay untouched.
   const posAttr = useMemo(() => new Float32BufferAttribute(positions.slice(), 3), [positions])

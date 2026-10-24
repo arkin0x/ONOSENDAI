@@ -26,16 +26,17 @@ import { EffectComposer, Bloom } from '@react-three/postprocessing'
 import { BlendFunction, Effect, type BloomEffect, type EffectComposer as PostComposer } from 'postprocessing'
 import { memo, useEffect, useLayoutEffect, useMemo, useRef } from 'react'
 import { useFrame } from '@react-three/fiber'
-import { Vector3 } from 'three'
+import { Quaternion, Vector3 } from 'three'
 import { watchContext } from '../lib/glContext'
 import { broadcastDpr, isBroadcast, recoverLostContext } from '../lib/tv/broadcast'
 import { keepPrograms } from '../lib/keepPrograms'
 import { BG } from '../lib/palette'
-import { GRID_RADIUS, cellDelta, claimScreenAxes, originShift, type Position } from '../lib/space'
+import { GRID_RADIUS, cellDelta, claimScreenAxes, levelScreenAxes, originShift, renderDirection, viewAxes, type Position } from '../lib/space'
 import { carryOrbit } from '../lib/zoomOrbit'
 import { AVATAR_LERP_MS, lerpRemaining } from '../lib/avatarLerp'
-import { walkEye } from '../lib/walkEye'
-import { clearWalkLook, lookRadPerPx, takeWalkLook, walkLookBy } from '../lib/walkLook'
+import { walkEye, walkFall } from '../lib/walkEye'
+import { carryLook, clearWalkLook, lookRadPerPx, takeKeepWalkLook, takeWalkLook, walkLookBy } from '../lib/walkLook'
+import { tickFall, useWalk } from '../store/useWalk'
 import { orbitOffset } from '../workshop/benchAxes'
 import { WalkProbe } from './WalkProbe'
 import { commitAnchor, committedAnchor } from '../lib/renderFrame'
@@ -259,8 +260,11 @@ function ScreenAxes(): null {
     state.camera.matrixWorld.extractBasis(right.current, up.current, out.current)
     // The permutation itself is claimScreenAxes, in space.ts, so the property
     // that makes it correct (three different axes for any camera angle) can be
-    // asserted without a camera.
-    const screen = claimScreenAxes(right.current, up.current, out.current, axes)
+    // asserted without a camera. Under GRAVITY in WALK the keys are level
+    // (levelScreenAxes): looking down a stair never turns W into down.
+    const screen = useCyberspace.getState().walking && useWalk.getState().gravity
+      ? levelScreenAxes(right.current, up.current, out.current, axes)
+      : claimScreenAxes(right.current, up.current, out.current, axes)
     useCyberspace.getState().setScreenAxes(screen)
     if (import.meta.env.DEV) {
       ;(window as unknown as { __screenAxes?: unknown }).__screenAxes = screen
@@ -359,6 +363,12 @@ const ORBIT_MIN_DISTANCE = 2
 const WALK_EYE = 0.001
 /** Scratch for the eye's line of sight, so the frame loop allocates nothing. */
 const walkDir = new Vector3()
+/** Where cyberspace +Y points in the render frame of a view: worked out once per view, for a fall. */
+let upFor: { view: Quaternion | null; dir: [number, number, number] } = { view: null, dir: [0, 1, 0] }
+function renderUp(view: Quaternion): [number, number, number] {
+  if (upFor.view !== view) upFor = { view, dir: renderDirection(viewAxes(view), 'y') }
+  return upFor.dir
+}
 
 function Rig(): JSX.Element {
   const view = useCyberspace((s) => s.view)
@@ -407,6 +417,8 @@ function Rig(): JSX.Element {
   const walkLook = useRef<Vector3 | null>(null)
   const eye = useRef<{ from: number; to: number; t0: number } | null>(null)
   const outTo = useRef(START_DISTANCE)
+  // The view the last frame was drawn in, for a look kept through a change of view (GRAVITY's level).
+  const drawnView = useRef<Quaternion | null>(null)
 
   // Locked means the camera travels with the cursor, so an axis-aligned view
   // stays framed on it as you drive. Aligning with Shift+WASD re-locks; orbiting
@@ -608,6 +620,9 @@ function Rig(): JSX.Element {
   useFrame((state, dt) => {
     const c = controls.current
     if (!c) return
+    // GRAVITY's fall (store/useWalk.ts) takes its frame first: it can land,
+    // which moves the cursor read below.
+    tickFall()
     const s = useCyberspace.getState()
     lastOffset.current.copy(c.object.position).sub(c.target)
     // The anchor, not the position: in history the scene is drawn from the
@@ -638,9 +653,19 @@ function Rig(): JSX.Element {
     // anchor, so it is carried back by however far that is ahead.
     const live = s.cursorOffset()
     const lag = drawnAnchor === s.anchor ? null : originShift(alignedOrigin(s.anchor, s.scaleExp), origin, s.scaleExp, s.axes())
-    const tx = live[0] + (lag ? lag[0] : 0)
-    const ty = live[1] + (lag ? lag[1] : 0)
-    const tz = live[2] + (lag ? lag[2] : 0)
+    let tx = live[0] + (lag ? lag[0] : 0)
+    let ty = live[1] + (lag ? lag[1] : 0)
+    let tz = live[2] + (lag ? lag[2] : 0)
+    // In a fall the eye is above or below the cursor (the point the fall
+    // left off from), along cyberspace Y, and follows that height exactly.
+    const falling = s.walking && walkFall.active
+    const up = falling ? renderUp(s.view) : null
+    if (up) {
+      const k = walkFall.offset / 2 ** s.scaleExp
+      tx += up[0] * k
+      ty += up[1] * k
+      tz += up[2] * k
+    }
     if (prevOrigin.current && prevScale.current === s.scaleExp) {
       const shift = originShift(prevOrigin.current, origin, s.scaleExp, s.axes())
       if (Math.max(Math.abs(shift[0]), Math.abs(shift[1]), Math.abs(shift[2])) >= GLIDE_MAX_CELLS) {
@@ -700,9 +725,15 @@ function Rig(): JSX.Element {
     // the selected stop instead of flicking.
     if (glideLeft.current > 0) glideLeft.current = Math.max(0, glideLeft.current - dt)
     const k = 1 - Math.exp(-dt / (glideLeft.current > 0 ? GLIDE_TAU : FOLLOW_TAU))
-    const dx = (tx - smooth.current.x) * k
-    const dy = (ty - smooth.current.y) * k
-    const dz = (tz - smooth.current.z) * k
+    let dx = (tx - smooth.current.x) * k
+    let dy = (ty - smooth.current.y) * k
+    let dz = (tz - smooth.current.z) * k
+    // Falling, the height is not eased: the eye is where the fall is.
+    if (up) {
+      if (up[0] !== 0) dx = tx - smooth.current.x
+      if (up[1] !== 0) dy = ty - smooth.current.y
+      if (up[2] !== 0) dz = tz - smooth.current.z
+    }
 
     // Locked, the camera moves with what it is framing, which preserves the
     // orbit offset exactly. Unlocked it stays put and only re-aims.
@@ -729,6 +760,12 @@ function Rig(): JSX.Element {
       c.enableRotate = !s.walking
       clearWalkLook()
       walkLook.current = null
+    }
+    // GRAVITY levelled the view: the look turns with it, so you face the
+    // same way in cyberspace (lib/walkLook.ts keepWalkLook).
+    if (drawnView.current !== s.view) {
+      if (takeKeepWalkLook() && drawnView.current && s.walking && walkLook.current) carryLook(walkLook.current, viewAxes(drawnView.current), viewAxes(s.view))
+      drawnView.current = s.view
     }
     if (eye.current) {
       const t = (performance.now() - eye.current.t0) / AVATAR_LERP_MS

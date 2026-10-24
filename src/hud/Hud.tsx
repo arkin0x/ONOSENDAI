@@ -387,6 +387,7 @@ const OFFICIAL: Array<{ href: string; name: string; what: string }> = [
   { href: 'https://cyberspace.international', name: 'cyberspace.international', what: 'education, proliferation, adoption of cyberspace' },
   { href: 'https://snocrash.art', name: 'SnoCrash', what: 'SNO format 3D model builder' },
   { href: 'https://github.com/arkin0x/ONOSENDAI/tree/v2', name: 'ONOSENDAI v2 Codebase', what: 'this client, on GitHub' },
+  { href: 'https://www.youtube.com/watch?v=e7uVFkwxKh8', name: 'Cyberspace TV', what: 'the 24/7 stream, live' },
 ]
 
 function LinksPanel(): JSX.Element {

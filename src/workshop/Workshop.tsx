@@ -3,10 +3,12 @@
  * controls as overlays on it, the way the main scene's instruments sit on
  * the world.
  *
- * Top left, a row of chips: MENU (the shard itself: name, mode, the list,
- * clear, explain) and GRID (the level the placing tools work on, the deploy
- * scale multiplier, and the grid's own size), each opening one panel below
- * the row; UNDO and REDO float beside them. Bottom left, TOOLS (STAMP, ADD,
+ * Top left, a row of chips: MENU (the shard list, NEW, PASTE and IMPORT,
+ * clear, explain), GRID (the level the placing tools work on, the deploy
+ * scale multiplier, and the grid's own size), SHARD (the open shard: name,
+ * the Shard Feed, its counts, DRAW, OPACITY, CONSTRAIN) and AVATAR (what you
+ * wear, the ghost for scale, SET AVATAR), each opening one panel below the
+ * row; UNDO and REDO float beside them. Bottom left, TOOLS (STAMP, ADD,
  * SELECT, FACE and each tool's options). Top right, DEPLOY and the way out. Bottom right,
  * the CONTROLS pad, present only while points are selected: the main pad's
  * shape, nudging the selection in screen directions, with CONNECT and DELETE
@@ -22,13 +24,13 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { Field, Switch } from '../hud/ui/Switch'
 import { Vector3 } from 'three'
 import { Compass3D } from '../scene/Compass3D'
-import { Box, ChevronDown, ChevronUp, ClipboardCopy, ClipboardPaste, Copy, CopyPlus, Eraser, Eye, FlipVertical2, Globe, Grid2x2Plus, Grid3x3, Link, Menu, Merge, MousePointer2, PaintBucket, Pickaxe, Pipette, Plus, Redo2, RotateCcw, RotateCw, Scissors, Stamp, Trash2, Triangle, type LucideIcon, Undo2, WandSparkles, Waypoints, X } from 'lucide-react'
+import { Box, ChevronDown, ChevronUp, ClipboardCopy, ClipboardPaste, Copy, CopyPlus, Eraser, Eye, FlipVertical2, Globe, Grid2x2Plus, Grid3x3, Hash, Link, Menu, Merge, MousePointer2, PaintBucket, Pickaxe, Pipette, Plus, Redo2, RotateCcw, RotateCw, Scissors, Stamp, Trash2, Triangle, type LucideIcon, Undo2, VenetianMask, WandSparkles, Waypoints, X } from 'lucide-react'
 import { noCallout, useRepeatable } from '../hooks/useRepeatable'
 import { PaletteModal } from './PaletteModal'
 import { Explanation } from '../hud/Explanation'
 import { DIVISIONS, MAX_EXTENT, MAX_UNIT, MIN_EXTENT, MODES, OPACITY_FLOOR, TICKS_PER_UNIT, neededExtent, rgbToHex, ticksOf, toPayload, unitsLabel, type ShardMode , type ShardModel} from 'sno-core/shards'
-import { opacityPercent, stepOpacity } from '../lib/opacityStep'
-import { CONSTRAINS, CONSTRAIN_TIPS, constrainOf } from '../lib/walkConstrain'
+import { clampOpacity, dragHistory, opacityAt, opacityFraction, opacityPercent, stepOpacity } from '../lib/opacityStep'
+import { CONSTRAINS, CONSTRAIN_TIPS, authoredConstrainOf, withAuthoredConstrain } from '../lib/walkConstrain'
 import { stepDivision } from './divisions'
 import { IMPORT_FORMATS_LABEL } from 'sno-core/importFile'
 import { IMPORT_PICKER_ACCEPT, isZipFile } from '../lib/shardZip'
@@ -74,7 +76,7 @@ const TOOL_HELP: Partial<Record<Tool, string>> = {
   face: 'Tap corners in order, then the first again or FILL. Tap a face to select it and move it with the pad. A dark face shows its back: FLIP turns it round, AUTO turns every face outward. One finger orbits, or drag the ORBIT ball.',
 }
 
-type Panel = 'menu' | 'tools' | 'grid'
+type Panel = 'menu' | 'tools' | 'grid' | 'shard' | 'avatar'
 
 const INTRO_KEY = 'onosendai:workshop-intro'
 
@@ -110,11 +112,144 @@ function Toast(): JSX.Element | null {
 }
 
 /**
+ * Why the latest changes are not saved, for as long as they are not: the
+ * toast goes after a moment, and this must not (store/workshopStorage.ts).
+ */
+function StorageWarning(): JSX.Element | null {
+  const error = useWorkshop((s) => s.storageError)
+  if (!error) return null
+  return <div className="ws__storage" role="alert">{error}</div>
+}
+
+/**
  * The CONTROLS pad: the main pad's nine cells, for the selection. Arrows move
  * it a unit in screen directions (the sub-label says which world axis that is
  * right now), the corners CONNECT and DELETE, the hub counts the points and
  * clears them.
  */
+/**
+ * OPACITY in SHARD (arkinox, 2026-10-23: "turn this into a slider with
+ * number entry like the hyperspace chip"): the hyperspace scrubber's rail,
+ * from the floor to 100 in whole percent, with − and + in fives either side
+ * as before, and # beside it to type a percent, as the block line has. 100
+ * is solid and writes nothing (lib/opacityStep).
+ *
+ * A drag is one edit: every whole percent it passes draws at once, and when
+ * the finger lifts the history keeps only the shard as it was before the
+ * drag, so one UNDO puts the whole drag back, as one press of − does.
+ */
+export function OpacityRow(): JSX.Element {
+  const percent = useWorkshop((s) => opacityPercent(s.current()?.opacity))
+  const bind = useRepeatable()
+  const w = useWorkshop.getState
+  const rail = useRef<HTMLDivElement>(null)
+  // The history and the shard as they were when the drag began.
+  const drag = useRef<{ id: string; past: ShardModel[]; before: ShardModel } | null>(null)
+  // The typed percent, open while # is pressed.
+  const [typing, setTyping] = useState<string | null>(null)
+  const setTo = (p: number | null): void => {
+    if (p === null || p === opacityPercent(w().current()?.opacity)) return
+    w().setOpacity(p)
+  }
+  const slideTo = (clientX: number): void => {
+    const r = rail.current?.getBoundingClientRect()
+    if (!r || r.width === 0) return
+    setTo(opacityAt((clientX - r.left) / r.width))
+  }
+  const endDrag = (): void => {
+    const d = drag.current
+    drag.current = null
+    const st = w()
+    const now = st.current()
+    if (!d || !now || st.currentId !== d.id || now === d.before) return
+    useWorkshop.setState({ past: dragHistory(d.past, d.before, st.past) })
+  }
+  // A drag the panel closed under (Esc) still ends as one edit.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => endDrag, [])
+  const typed = typing !== null && /^\d+$/.test(typing) ? clampOpacity(Number(typing)) : null
+  const goTyped = (): void => {
+    if (typed === null) return
+    setTo(typed)
+    setTyping(null)
+  }
+  const keyStep: Record<string, number | 'floor' | 'top'> = { ArrowLeft: -1, ArrowDown: -1, ArrowRight: 1, ArrowUp: 1, PageDown: -10, PageUp: 10, Home: 'floor', End: 'top' }
+  const fraction = opacityFraction(percent)
+  return (
+    <>
+      <div className="workshop__row" role="group" aria-label="Opacity">
+        <span className="workshop__label">OPACITY</span>
+        <button className="workshop__btn" {...bind(() => w().setOpacity(stepOpacity(w().current()?.opacity, -1)))} disabled={percent <= OPACITY_FLOOR} aria-label="More see-through" title="More see-through">−</button>
+        <div
+          className="explorer__rail ws__opacity-rail"
+          ref={rail}
+          role="slider"
+          tabIndex={0}
+          aria-label="Opacity"
+          aria-valuemin={OPACITY_FLOOR}
+          aria-valuemax={100}
+          aria-valuenow={percent}
+          aria-valuetext={`${percent}%`}
+          {...noCallout}
+          onPointerDown={(e) => {
+            e.preventDefault(); e.stopPropagation()
+            const st = w()
+            const s = st.current()
+            if (!s) return
+            drag.current = { id: s.id, past: st.past, before: s }
+            ;(e.currentTarget as HTMLElement).setPointerCapture(e.pointerId)
+            ;(e.currentTarget as HTMLElement).focus()
+            slideTo(e.clientX)
+          }}
+          onPointerMove={(e) => { if (drag.current) slideTo(e.clientX) }}
+          onPointerUp={endDrag}
+          onPointerCancel={endDrag}
+          onLostPointerCapture={endDrag}
+          onKeyDown={(e) => {
+            const k = keyStep[e.key]
+            if (k === undefined || e.metaKey || e.ctrlKey || e.altKey) return
+            // The bench nudges the selection with the arrows: these are the slider's.
+            e.preventDefault(); e.stopPropagation()
+            setTo(k === 'floor' ? OPACITY_FLOOR : k === 'top' ? 100 : clampOpacity(percent + k))
+          }}
+        >
+          <span className="explorer__line" />
+          <span className="explorer__walked" style={{ width: `${fraction * 100}%` }} />
+          <span className="explorer__mark" style={{ left: `${fraction * 100}%` }} />
+        </div>
+        <button className="workshop__btn" {...bind(() => w().setOpacity(stepOpacity(w().current()?.opacity, 1)))} disabled={percent >= 100} aria-label="More solid" title="More solid">+</button>
+        <span className="workshop__value">{percent}%</span>
+        <button
+          className={`workshop__btn linescrub__hash ${typing !== null ? 'is-on' : ''}`}
+          title="Type a percent"
+          aria-label="Type an opacity percent"
+          aria-expanded={typing !== null}
+          onClick={() => setTyping((t) => (t === null ? '' : null))}
+        ><Hash size={12} strokeWidth={2.5} aria-hidden /></button>
+        <span className="workshop__unit-size" title="Avatars always draw solid.">100% is solid</span>
+      </div>
+      {typing !== null && (
+        <form className="linescrub__goto" onSubmit={(e) => { e.preventDefault(); goTyped() }}>
+          <input
+            className="linescrub__goto-input"
+            inputMode="numeric"
+            pattern="[0-9]*"
+            maxLength={3}
+            autoFocus
+            placeholder={`${OPACITY_FLOOR} to 100`}
+            aria-label="Opacity percent"
+            value={typing}
+            onChange={(e) => setTyping(e.target.value.replace(/[^\d]/g, ''))}
+            // Escape puts the field away and nothing else; preventDefault keeps the panel open (useKeyboard).
+            onKeyDown={(e) => { if (e.key === 'Escape') { e.preventDefault(); setTyping(null) } }}
+          />
+          <button className="workshop__btn" type="submit" disabled={typed === null}>SET</button>
+        </form>
+      )}
+    </>
+  )
+}
+
 /**
  * The grid floor's LEVEL, raised and lowered from the top left on every tool
  * (arkinox, 2026-10-10): up, the level, down, stacked under the chip row. The
@@ -493,7 +628,7 @@ export function Workshop(): JSX.Element | null {
     () => publishState(shard ? ledger[shard.id] : undefined, shard ? shardFingerprint(shard) : '', me),
     [shard, ledger, me],
   )
-  const wireBytes = useMemo(() => (shard ? new TextEncoder().encode(JSON.stringify(toPayload(shard))).length : 0), [shard])
+  const wireBytes = useMemo(() => (shard ? new TextEncoder().encode(JSON.stringify(toPayload(withAuthoredConstrain(shard)))).length : 0), [shard])
   // The moment the work is done: say so, because the signer's prompt may take a
   // while to appear and nothing else marks the end of the mining.
   const lastPhase = useRef<typeof phase>(null)
@@ -696,6 +831,7 @@ export function Workshop(): JSX.Element | null {
       {dropping && <div className="workshop__drop" aria-hidden>DROP TO IMPORT</div>}
       <Intro />
       <Toast />
+      <StorageWarning />
       <ZipImport />
 
       {/* Top left: the three chips and the history in one row, wrapping on a phone,
@@ -708,8 +844,14 @@ export function Workshop(): JSX.Element | null {
         <button className={`chip ws__chip ${panel === 'grid' ? 'is-on' : ''}`} aria-pressed={panel === 'grid'} onClick={() => toggle('grid')}>
           <Grid3x3 size={12} strokeWidth={2.25} aria-hidden />GRID
         </button>
+        <button className={`chip ws__chip ${panel === 'shard' ? 'is-on' : ''}`} aria-pressed={panel === 'shard'} onClick={() => toggle('shard')}>
+          <Box size={12} strokeWidth={2.25} aria-hidden />SHARD
+        </button>
+        <button className={`chip ws__chip ${panel === 'avatar' ? 'is-on' : ''}`} aria-pressed={panel === 'avatar'} onClick={() => toggle('avatar')}>
+          <VenetianMask size={12} strokeWidth={2.25} aria-hidden />AVATAR
+        </button>
         {phase && (
-          <button className="chip ws__chip ws__chip--work" onClick={() => { if (panel !== 'menu') toggle('menu') }} title="Your avatar: see MENU" aria-live="polite">
+          <button className="chip ws__chip ws__chip--work" onClick={() => { if (panel !== 'avatar') toggle('avatar') }} title="Your avatar: see AVATAR" aria-live="polite">
             <Pickaxe size={12} strokeWidth={2.25} aria-hidden />
             {phase === 'mining' ? `MINING ${mining ? clock(mining.elapsedMs) : ''}` : phase === 'signing' ? 'SIGN IT' : 'PUBLISHING'}
           </button>
@@ -727,9 +869,120 @@ export function Workshop(): JSX.Element | null {
           while a panel is open, as undo and redo are: GRID has its own LEVEL
           row, and the others need the room. */}
       {!panel && shard && <LevelStack />}
+      {/* MENU (arkinox, 2026-10-23): the shard list and the ways in, NEW,
+          PASTE and IMPORT. The open shard's own settings are under SHARD,
+          and the avatar's under AVATAR. */}
       {panel === 'menu' && shard && (
         <div className="ws__panel" role="region" aria-label="Menu">
+          <div className="ws__panel-title">SHARDS ({shards.length})</div>
+          <div className="workshop__list-row">
+            <button className="workshop__new" onClick={() => w().create()}>+ NEW SHARD</button>
+            <button className="workshop__btn" onClick={() => void paste()} title="An object copied from here or anywhere">PASTE</button>
+            <button className="workshop__btn" disabled={importing} onClick={() => fileInput.current?.click()} title={`A 3D file, fitted to the grid and put down here: ${IMPORT_FORMATS_LABEL}. Or a .zip of shards, each a new shard. Or drop one on the workshop.`}>{importing ? 'READING' : 'IMPORT'}</button>
+          </div>
+          {pasteOpen && (
+            <div className="workshop__paste">
+              <textarea className="workshop__paste-box" value={pasteText} onChange={(e) => setPasteText(e.target.value)} placeholder='Paste an object here: {"v":2,"name":"…","vertices":[…],…}' aria-label="Object to import" spellCheck={false} />
+              <div className="workshop__list-row">
+                <button className="workshop__btn" disabled={!pasteText.trim()} onClick={() => importText(pasteText)}>IMPORT</button>
+                <button className="workshop__btn" onClick={() => { setPasteOpen(false); setPasteText('') }}>CANCEL</button>
+              </div>
+            </div>
+          )}
+          <ul className="workshop__list">
+            {/* Last edited first: updatedAt moves on every edit and never on opening (arkinox, 2026-09-26).
+                A deploy counts as an edit here, inside its folder (arkinox, 2026-10-23). */}
+            <ShardFolders items={byRecent} refOf={modelRef} nameOf={modelName} row={(s, f) => (
+              <li key={s.id} className={s.id === shard.id ? 'is-current' : ''} {...f.drag}>
+                <button className="workshop__pick" onClick={() => w().select(s.id)}>
+                  <ShardThumb shard={s} />
+                  <span className="workshop__pick-name">{s.name}</span>
+                  <span className="workshop__pick-meta">{s.vertices.length} v · {s.faces.length} f{s.parts?.length ? ` · ${s.parts.length} parts` : ''} · {s.mode}</span>
+                </button>
+                <button className="workshop__mini" title="Duplicate" aria-label={`Duplicate ${s.name}`} onClick={() => w().duplicate(s.id)}><CopyPlus size={13} strokeWidth={2.25} aria-hidden /></button>
+                <button className="workshop__mini" title="Copy to the clipboard" aria-label={`Copy ${s.name} to the clipboard`} onClick={() => copy(s.id)}><ClipboardCopy size={13} strokeWidth={2.25} aria-hidden /></button>
+                {f.tool}
+                <button className="workshop__mini workshop__mini--danger workshop__mini--x" title="Delete" aria-label={`Delete ${s.name}`} onClick={() => { if (window.confirm(`Delete "${s.name}"? This cannot be undone.`)) w().remove(s.id) }}>×</button>
+              </li>
+            )} />
+          </ul>
+          <div className="workshop__row">
+            <button className="workshop__btn workshop__btn--danger" disabled={!hasContent} onClick={() => { if (window.confirm('Delete all vertices, faces and placed objects in the scene?')) w().clearShard() }} title="Empty this scene (undoable)">CLEAR THIS SCENE</button>
+            <span className="workshop__gap" />
+            <Explanation>
+              An object is colored points on a grid of whole units, drawn SOLID (faces, colors blending
+              across them), POINTS (every point a light) or LINES (one line through the points in the
+              order they were made). STAMP places a whole shape; ADD one point; SELECT points, by tap
+              or by dragging a box, to move, color or delete them together, and CONNECT takes everything
+              faces join to them; FACE picks corners and FILL joins them, and a tap on a face selects it
+              for DELETE FACE. The chip at the bottom right opens all 256 colors, with the ones you
+              used most recently on top; the buttons over it put the color on the whole object, the
+              connected piece or the selected points, and the dropper takes a point's or face's color. Stamps keep their own corners even where they touch, so a red block against a
+              blue one keeps a crisp edge. Under GRID, LEVEL is the height the placing tools work at,
+              DEPLOY SCALE MULTIPLIER says how big one grid unit is in the world, from a picometre to
+              the width of a sector, and GRID SIZE is how far the grid reaches from the origin. DEPLOY shows
+              the object at true size before you place it. Under SHARD, PUBLISH puts the shard on your relays as a
+              public object: the Shard Feed lists it, anyone can place it, and PUBLISH AGAIN replaces it under the same
+              address; RETRACT asks the relays to drop it. That is separate from hiding, which seals a copy at a place.
+              Keys: 1 2 3 4 tools, Q turns a stamp, WASD and
+              RF or the arrows nudge the selection in screen directions, C selects what faces join, Del
+              deletes, Enter fills, [ ] change the level, Ctrl+Z undoes, Esc closes a panel, then
+              clears, then closes the workshop.
+            </Explanation>
+          </div>
+        </div>
+      )}
+
+      {/* SHARD (arkinox, 2026-10-23): the open shard itself, its name, the
+          Shard Feed, its counts, how it draws and whether it walls a walker. */}
+      {panel === 'shard' && shard && (
+        <div className="ws__panel" role="region" aria-label="Shard">
           <input className="workshop__name" value={shard.name} onChange={(e) => w().rename(shard.id, e.target.value)} aria-label="Object name" spellCheck={false} />
+          {/* PUBLISH: this shard as a public kind 33331 object, listed by the
+              Shard Feed and read by other apps (DECK-0003 §3.1), the way
+              snocrash.art publishes one (arkinox, 2026-10-10: "I want to make
+              steps, rivers, walls, and other pieces that should show up in the
+              shard feed instantly"). Hiding seals a copy at a place; this puts
+              the object itself on your relays for anyone to place. The tag is
+              the ledger's word (lib/published.ts), since no relay keeps one. */}
+          <div className="workshop__avatar" role="group" aria-label="Publishing">
+            <div className="workshop__row">
+              <span className="workshop__label">SHARD FEED</span>
+              <span className={`tag ${STATE_TAG[pubState]}`} title={STATE_HELP[pubState]}>{STATE_LABEL[pubState]}</span>
+              <span className="workshop__gap" />
+            </div>
+            <div className="workshop__list-row">
+              <button
+                className="workshop__btn workshop__btn--warn"
+                disabled={!hasContent || publishing || retracting || !me}
+                onClick={() => { void usePublished.getState().publish(shard) }}
+                title={!hasContent
+                  ? 'Nothing to publish yet: add points, or place objects'
+                  : pubState === 'other-key'
+                    ? STATE_HELP['other-key']
+                    : 'Publish this shard as a public object on your relays: the Shard Feed lists it and anyone can place it. PUBLISH AGAIN replaces it in place, same address.'}
+              >{publishing ? 'PUBLISHING' : pubState === 'published' || pubState === 'edited' ? 'PUBLISH AGAIN' : 'PUBLISH'}</button>
+              {(pubState === 'published' || pubState === 'edited') && (
+                <button
+                  className="workshop__btn workshop__btn--danger"
+                  disabled={publishing || retracting}
+                  onClick={() => setRetractAsk(shard.id)}
+                  title="Ask your relays to drop the published object (NIP-09). Copies others made stay theirs. The shard stays here."
+                >{retracting ? 'RETRACTING' : 'RETRACT'}</button>
+              )}
+            </div>
+            <span className="workshop__work">{wireBytes.toLocaleString('en-US')} BYTES ON THE WIRE · {shard.vertices.length} VERTICES + {shard.faces.length} FACES{shard.parts?.length ? ` + ${shard.parts.length} PLACED` : ''}</span>
+          </div>
+          {retractAsk === shard.id && (
+            <ConfirmModal
+              title={`Retract "${shard.name}"?`}
+              body={<>A deletion goes to your relays, naming the object&apos;s address (NIP-09). Relays that honor it drop the object and the Shard Feed stops listing it; a relay that does not may keep handing it out. Copies and LIVE LINKs others placed stay theirs. The shard stays in your workshop, and PUBLISH puts it back.</>}
+              confirmLabel="RETRACT"
+              busy={retracting}
+              onConfirm={() => { void usePublished.getState().retract(shard).then(() => setRetractAsk(null)) }}
+              onCancel={() => setRetractAsk(null)}
+            />
+          )}
           <div className="ws__stats">
             {shard.vertices.length} vertices · {shard.faces.length} faces · unit 2^{shard.unit} = {formatCellSize(shard.unit)}
             {shard.mode !== 'solid' && shard.faces.length > 0 && <> · faces draw in SOLID</>}
@@ -743,38 +996,73 @@ export function Workshop(): JSX.Element | null {
               ))}
             </div>
           </div>
-          {/* How solid the object draws (DECK-0003 §1.11): a stepper in
-              fives like the rows below it; 100 is solid and writes nothing. */}
-          <div className="workshop__row" role="group" aria-label="Opacity">
-            <span className="workshop__label">OPACITY</span>
-            <button className="workshop__btn" {...bind(() => w().setOpacity(stepOpacity(w().current()?.opacity, -1)))} disabled={opacityPercent(shard.opacity) <= OPACITY_FLOOR} aria-label="More see-through" title="More see-through">−</button>
-            <span className="workshop__value">{opacityPercent(shard.opacity)}%</span>
-            <button className="workshop__btn" {...bind(() => w().setOpacity(stepOpacity(w().current()?.opacity, 1)))} disabled={opacityPercent(shard.opacity) >= 100} aria-label="More solid" title="More solid">+</button>
-            <span className="workshop__unit-size" title="Avatars always draw solid.">100% is solid</span>
-          </div>
+          {/* How solid the object draws (DECK-0003 §1.11): a slider with a
+              number to type, as the hyperspace rail has (arkinox, 2026-10-23);
+              100 is solid and writes nothing. */}
+          <OpacityRow />
           {/* Whether a walker can cross it in WALK (DECK-0003 §1.12): three
-              buttons like DRAW's; OFF writes nothing (arkinox, 2026-10-23). */}
+              buttons like DRAW's. A shard that never chose shows OPAQUE,
+              which is what it publishes as (arkinox, 2026-10-23). */}
           <div className="workshop__row">
             <span className="workshop__label">CONSTRAIN MOVEMENT IN WALK MODE</span>
             <div className="workshop__modes" role="group" aria-label="Constrain movement in WALK mode">
               {CONSTRAINS.map((c) => (
-                <button key={c} className={`workshop__mode ${constrainOf(shard) === c ? 'is-on' : ''}`} aria-pressed={constrainOf(shard) === c} title={CONSTRAIN_TIPS[c]} onClick={() => w().setConstrain(c)}>{c.toUpperCase()}</button>
+                <button key={c} className={`workshop__mode ${authoredConstrainOf(shard) === c ? 'is-on' : ''}`} aria-pressed={authoredConstrainOf(shard) === c} title={CONSTRAIN_TIPS[c]} onClick={() => w().setConstrain(c)}>{c.toUpperCase()}</button>
               ))}
             </div>
           </div>
-          {/* A switch, as the avatar trail, hX and region key settings are,
-              in the workshop's own green (arkinox, 2026-10-10). */}
-          <div className="workshop__row">
-            <Field id="ws-avatar-ghost" label="Default avatar ghost" hint="The to-scale avatar at the grid's center, for size">
-              <Switch id="ws-avatar-ghost" className="ui-switch--ok" checked={showAvatar} onCheckedChange={(v) => w().setShowAvatar(v)} />
-            </Field>
-          </div>
+        </div>
+      )}
+
+      {/* AVATAR (arkinox, 2026-10-23): what you wear, the ghost for scale,
+          and the way to change it. */}
+      {panel === 'avatar' && shard && (
+        <div className="ws__panel" role="region" aria-label="Avatar">
           {/* The shape others see for you: this shard, published as kind 11333,
               drawn in the dodecahedron's cell wherever you are drawn. */}
           <div className="workshop__avatar" role="group" aria-label="My avatar">
             <div className="workshop__row">
               <span className="workshop__label">MY AVATAR</span>
               <span className="workshop__value workshop__value--wide">{myAvatar ? myAvatar.name : 'dodecahedron'}</span>
+            </div>
+            {/* The avatar is not one of these shards. It lives in its own store,
+                read back from the kind 11333 event you published, which is why
+                deleting the object it was built from leaves the avatar standing
+                (arkinox found this by doing it). It gets a row anyway so the
+                shape you are wearing is visible and can be copied back into the
+                workshop, and no row that would change it: the way to change an
+                avatar is USE THIS SHARD or DODECAHEDRON under SET AVATAR. */}
+            {myAvatar && (
+              <ul className="workshop__list">
+                <li className="workshop__list-avatar">
+                  <span className="workshop__pick workshop__pick--static">
+                    <ShardThumb shard={myAvatar} />
+                    <span className="workshop__pick-name">{myAvatar.name}</span>
+                    <span className="workshop__pick-meta">{myAvatar.vertices.length} v · {myAvatar.faces.length} f · {myAvatar.mode}</span>
+                  </span>
+                  <span className="workshop__tag" title="The shape others see for you. Change it with USE THIS SHARD below.">AVATAR</span>
+                  <button
+                    className="workshop__mini"
+                    title="Copy it into your objects, where you can edit it"
+                    aria-label="Copy your avatar into your objects"
+                    onClick={() => { const id = w().importShard(myAvatar); w().select(id); say(`"${myAvatar.name}" copied into your objects.`) }}
+                  ><CopyPlus size={13} strokeWidth={2.25} aria-hidden /></button>
+                  <button className="workshop__mini" title="Copy to the clipboard" aria-label="Copy your avatar to the clipboard" onClick={() => copyShard(myAvatar, 'Avatar copied.')}><ClipboardCopy size={13} strokeWidth={2.25} aria-hidden /></button>
+                </li>
+              </ul>
+            )}
+          </div>
+          {/* A switch, as the avatar trail, hX and region key settings are,
+              in the workshop's own green (arkinox, 2026-10-10). */}
+          <div className="workshop__row">
+            <Field id="ws-avatar-ghost" label="show default avatar ghost for scale">
+              <Switch id="ws-avatar-ghost" className="ui-switch--ok" checked={showAvatar} onCheckedChange={(v) => w().setShowAvatar(v)} />
+            </Field>
+          </div>
+          {/* SET AVATAR: this shard as the shape others see for you, or back to the default. */}
+          <div className="workshop__avatar" role="group" aria-label="Set avatar">
+            <div className="workshop__row">
+              <span className="workshop__label">SET AVATAR</span>
             </div>
             {/* The buttons take their own row and share it evenly, the way NEW
                 OBJECT and PASTE do. On the name's line a long object name pushed
@@ -826,131 +1114,6 @@ export function Workshop(): JSX.Element | null {
                       : `${adoptError ? `LAST ATTEMPT: ${adoptError.toUpperCase()} · ` : ''}WORK ${work.required} BITS · ${work.reach.toFixed(work.reach >= 10 ? 0 : 1)} GIBSON REACH · ${work.detail} VERTICES + FACES · ${sha256PerSec ? describeDuration(expectedTries(work.required) / triesPerSec(sha256PerSec, work.bytes, minerCount())).toUpperCase() + ' ON THIS DEVICE' : 'TIME UNKNOWN UNTIL CALIBRATED'}`}
               </span>
             )}
-          </div>
-          {/* PUBLISH: this shard as a public kind 33331 object, listed by the
-              Shard Feed and read by other apps (DECK-0003 §3.1), the way
-              snocrash.art publishes one (arkinox, 2026-10-10: "I want to make
-              steps, rivers, walls, and other pieces that should show up in the
-              shard feed instantly"). Hiding seals a copy at a place; this puts
-              the object itself on your relays for anyone to place. The tag is
-              the ledger's word (lib/published.ts), since no relay keeps one. */}
-          <div className="workshop__avatar" role="group" aria-label="Publishing">
-            <div className="workshop__row">
-              <span className="workshop__label">SHARD FEED</span>
-              <span className={`tag ${STATE_TAG[pubState]}`} title={STATE_HELP[pubState]}>{STATE_LABEL[pubState]}</span>
-              <span className="workshop__gap" />
-            </div>
-            <div className="workshop__list-row">
-              <button
-                className="workshop__btn workshop__btn--warn"
-                disabled={!hasContent || publishing || retracting || !me}
-                onClick={() => { void usePublished.getState().publish(shard) }}
-                title={!hasContent
-                  ? 'Nothing to publish yet: add points, or place objects'
-                  : pubState === 'other-key'
-                    ? STATE_HELP['other-key']
-                    : 'Publish this shard as a public object on your relays: the Shard Feed lists it and anyone can place it. PUBLISH AGAIN replaces it in place, same address.'}
-              >{publishing ? 'PUBLISHING' : pubState === 'published' || pubState === 'edited' ? 'PUBLISH AGAIN' : 'PUBLISH'}</button>
-              {(pubState === 'published' || pubState === 'edited') && (
-                <button
-                  className="workshop__btn workshop__btn--danger"
-                  disabled={publishing || retracting}
-                  onClick={() => setRetractAsk(shard.id)}
-                  title="Ask your relays to drop the published object (NIP-09). Copies others made stay theirs. The shard stays here."
-                >{retracting ? 'RETRACTING' : 'RETRACT'}</button>
-              )}
-            </div>
-            <span className="workshop__work">{wireBytes.toLocaleString('en-US')} BYTES ON THE WIRE · {shard.vertices.length} VERTICES + {shard.faces.length} FACES{shard.parts?.length ? ` + ${shard.parts.length} PLACED` : ''}</span>
-          </div>
-          {retractAsk === shard.id && (
-            <ConfirmModal
-              title={`Retract "${shard.name}"?`}
-              body={<>A deletion goes to your relays, naming the object&apos;s address (NIP-09). Relays that honor it drop the object and the Shard Feed stops listing it; a relay that does not may keep handing it out. Copies and LIVE LINKs others placed stay theirs. The shard stays in your workshop, and PUBLISH puts it back.</>}
-              confirmLabel="RETRACT"
-              busy={retracting}
-              onConfirm={() => { void usePublished.getState().retract(shard).then(() => setRetractAsk(null)) }}
-              onCancel={() => setRetractAsk(null)}
-            />
-          )}
-          <div className="ws__panel-title">SHARDS ({shards.length})</div>
-          <div className="workshop__list-row">
-            <button className="workshop__new" onClick={() => w().create()}>+ NEW SHARD</button>
-            <button className="workshop__btn" onClick={() => void paste()} title="An object copied from here or anywhere">PASTE</button>
-            <button className="workshop__btn" disabled={importing} onClick={() => fileInput.current?.click()} title={`A 3D file, fitted to the grid and put down here: ${IMPORT_FORMATS_LABEL}. Or a .zip of shards, each a new shard. Or drop one on the workshop.`}>{importing ? 'READING' : 'IMPORT'}</button>
-          </div>
-          {pasteOpen && (
-            <div className="workshop__paste">
-              <textarea className="workshop__paste-box" value={pasteText} onChange={(e) => setPasteText(e.target.value)} placeholder='Paste an object here: {"v":2,"name":"…","vertices":[…],…}' aria-label="Object to import" spellCheck={false} />
-              <div className="workshop__list-row">
-                <button className="workshop__btn" disabled={!pasteText.trim()} onClick={() => importText(pasteText)}>IMPORT</button>
-                <button className="workshop__btn" onClick={() => { setPasteOpen(false); setPasteText('') }}>CANCEL</button>
-              </div>
-            </div>
-          )}
-          <ul className="workshop__list">
-            {/* The avatar is not one of these shards. It lives in its own store,
-                read back from the kind 11333 event you published, which is why
-                deleting the object it was built from leaves the avatar standing
-                (arkinox found this by doing it). It gets a row anyway so the
-                shape you are wearing is visible and can be copied back into the
-                workshop, and no row that would change it: the way to change an
-                avatar is USE THIS SHARD or DODECAHEDRON above. */}
-            {myAvatar && (
-              <li className="workshop__list-avatar">
-                <span className="workshop__pick workshop__pick--static">
-                  <ShardThumb shard={myAvatar} />
-                  <span className="workshop__pick-name">{myAvatar.name}</span>
-                  <span className="workshop__pick-meta">{myAvatar.vertices.length} v · {myAvatar.faces.length} f · {myAvatar.mode}</span>
-                </span>
-                <span className="workshop__tag" title="The shape others see for you. Change it with USE THIS SHARD above.">AVATAR</span>
-                <button
-                  className="workshop__mini"
-                  title="Copy it into your objects, where you can edit it"
-                  aria-label="Copy your avatar into your objects"
-                  onClick={() => { const id = w().importShard(myAvatar); w().select(id); say(`"${myAvatar.name}" copied into your objects.`) }}
-                ><CopyPlus size={13} strokeWidth={2.25} aria-hidden /></button>
-                <button className="workshop__mini" title="Copy to the clipboard" aria-label="Copy your avatar to the clipboard" onClick={() => copyShard(myAvatar, 'Avatar copied.')}><ClipboardCopy size={13} strokeWidth={2.25} aria-hidden /></button>
-              </li>
-            )}
-            {/* Last edited first: updatedAt moves on every edit and never on opening (arkinox, 2026-09-26).
-                A deploy counts as an edit here, inside its folder (arkinox, 2026-10-23). */}
-            <ShardFolders items={byRecent} refOf={modelRef} nameOf={modelName} row={(s, f) => (
-              <li key={s.id} className={s.id === shard.id ? 'is-current' : ''} {...f.drag}>
-                <button className="workshop__pick" onClick={() => w().select(s.id)}>
-                  <ShardThumb shard={s} />
-                  <span className="workshop__pick-name">{s.name}</span>
-                  <span className="workshop__pick-meta">{s.vertices.length} v · {s.faces.length} f{s.parts?.length ? ` · ${s.parts.length} parts` : ''} · {s.mode}</span>
-                </button>
-                <button className="workshop__mini" title="Duplicate" aria-label={`Duplicate ${s.name}`} onClick={() => w().duplicate(s.id)}><CopyPlus size={13} strokeWidth={2.25} aria-hidden /></button>
-                <button className="workshop__mini" title="Copy to the clipboard" aria-label={`Copy ${s.name} to the clipboard`} onClick={() => copy(s.id)}><ClipboardCopy size={13} strokeWidth={2.25} aria-hidden /></button>
-                {f.tool}
-                <button className="workshop__mini workshop__mini--danger workshop__mini--x" title="Delete" aria-label={`Delete ${s.name}`} onClick={() => { if (window.confirm(`Delete "${s.name}"? This cannot be undone.`)) w().remove(s.id) }}>×</button>
-              </li>
-            )} />
-          </ul>
-          <div className="workshop__row">
-            <button className="workshop__btn workshop__btn--danger" disabled={!hasContent} onClick={() => { if (window.confirm('Delete all vertices, faces and placed objects in the scene?')) w().clearShard() }} title="Empty this scene (undoable)">CLEAR THIS SCENE</button>
-            <span className="workshop__gap" />
-            <Explanation>
-              An object is colored points on a grid of whole units, drawn SOLID (faces, colors blending
-              across them), POINTS (every point a light) or LINES (one line through the points in the
-              order they were made). STAMP places a whole shape; ADD one point; SELECT points, by tap
-              or by dragging a box, to move, color or delete them together, and CONNECT takes everything
-              faces join to them; FACE picks corners and FILL joins them, and a tap on a face selects it
-              for DELETE FACE. The chip at the bottom right opens all 256 colors, with the ones you
-              used most recently on top; the buttons over it put the color on the whole object, the
-              connected piece or the selected points, and the dropper takes a point's or face's color. Stamps keep their own corners even where they touch, so a red block against a
-              blue one keeps a crisp edge. Under GRID, LEVEL is the height the placing tools work at,
-              DEPLOY SCALE MULTIPLIER says how big one grid unit is in the world, from a picometre to
-              the width of a sector, and GRID SIZE is how far the grid reaches from the origin. DEPLOY shows
-              the object at true size before you place it. Under SHARD FEED, PUBLISH puts the shard on your relays as a
-              public object: the Shard Feed lists it, anyone can place it, and PUBLISH AGAIN replaces it under the same
-              address; RETRACT asks the relays to drop it. That is separate from hiding, which seals a copy at a place.
-              Keys: 1 2 3 4 tools, Q turns a stamp, WASD and
-              RF or the arrows nudge the selection in screen directions, C selects what faces join, Del
-              deletes, Enter fills, [ ] change the level, Ctrl+Z undoes, Esc closes a panel, then
-              clears, then closes the workshop.
-            </Explanation>
           </div>
         </div>
       )}

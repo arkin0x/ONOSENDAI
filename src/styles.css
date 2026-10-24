@@ -3443,6 +3443,24 @@ kbd {
   background: rgba(6, 14, 22, 0.88);
   border: 1px solid rgba(0, 229, 255, 0.3);
 }
+/* Unsaved changes: below the toast, and it stays until saving works again. */
+.ws__storage {
+  position: absolute;
+  top: 96px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 4;
+  pointer-events: none;
+  max-width: min(360px, calc(100vw - 24px));
+  padding: 7px 10px;
+  border-radius: 9px;
+  text-align: center;
+  font-size: 9px;
+  letter-spacing: 0.1em;
+  color: var(--warn);
+  background: rgba(6, 14, 22, 0.92);
+  border: 1px solid rgba(255, 176, 32, 0.45);
+}
 /* Bottom left: TOOLS, its panel above the chip. */
 .ws__tools {
   position: absolute;
@@ -4592,6 +4610,8 @@ kbd {
 /* HOP, the resting mode: blue words on the dark button, and nothing to do
    but turn VIEW on. */
 .touchops__commit.is-hop { color: var(--accent, #00e5ff); border-color: rgba(0, 229, 255, 0.45); }
+/* Under HOP: pressing it switches modes (HOP, VIEW, WALK). */
+.touchops__sub { display: block; margin-top: 2px; font-size: 7px; letter-spacing: 0.08em; opacity: 0.7; }
 /* WALK: first person, every press a step. Red, lit, while it is on. */
 .touchops__commit.is-walk.is-on {
   color: #05070d;
@@ -6548,6 +6568,20 @@ kbd {
 
 /* With undo and redo out of the way, the open panel sits right under its chip. */
 .ws__top--open { gap: 5px; }
+
+/* OPACITY in SHARD (Workshop OpacityRow): the hyperspace scrubber's rail, with
+   a ring while the keys have it, since its arrows move it. */
+.ws__opacity-rail { flex: 1 1 60px; min-width: 60px; }
+.ws__opacity-rail:focus { outline: none; }
+.ws__opacity-rail:focus-visible { outline: 1px solid var(--accent); outline-offset: 2px; border-radius: 4px; }
+
+/* MENU, GRID, SHARD and AVATAR share a phone's top edge with DEPLOY and the
+   way out (arkinox, 2026-10-23): a little closer set there, so the four stand
+   in one row at 390px. Narrower, the row wraps as it always has. */
+@media (max-width: 640px) {
+  .ws__chips { gap: 5px; }
+  .ws__chips .ws__chip { padding: 0 7px; gap: 4px; letter-spacing: 0.06em; }
+}
 
 /* The delete X, big enough to hit and to read. */
 .workshop__mini--x {
@@ -9399,6 +9433,29 @@ a.feed__act { text-decoration: none; }
   border-color: rgba(255, 59, 107, 0.4);
 }
 
+/* GRAVITY (store/useWalk.ts): a chip across the top of the WALK pad, lit
+ * while gravity is on. Its own row, so no key a hand knows moves. */
+.touchpad--mode-walk {
+  grid-template-rows: 22px repeat(4, 38px);
+  grid-template-areas:
+    "gravity gravity gravity"
+    "pin     earth   cube"
+    "away    up      toward"
+    "left    down    right"
+    "zoomout hub     zoomin";
+}
+.touchpad__key--gravity {
+  grid-area: gravity;
+  font-size: 9px;
+  letter-spacing: 0.14em;
+  color: var(--dim, #7fa6bd);
+}
+.touchpad--mode-walk .touchpad__key--gravity.is-on:not(:active) {
+  color: #fff;
+  background-image: linear-gradient(rgba(255, 59, 107, 0.55), rgba(255, 59, 107, 0.55));
+  border-color: rgba(255, 120, 150, 0.9);
+}
+
 /* ---------- LOSING SYNC ----------
  *
  * WALK three or more steps ahead of its proofs (hud/SyncWarning.tsx). Dead
@@ -9583,6 +9640,21 @@ a.feed__act { text-decoration: none; }
   background: var(--ask-bg);
   border: 1px solid rgba(0, 229, 255, 0.3);
   border-radius: 10px;
+}
+/* The decode noise (lib/decode.ts) draws from a wider glyph set than the
+   settled phrase, so a mid-decode frame can measure wider than the final
+   text. Never let that wrap the bubble to a second line and push the menu
+   below it down; a noise frame clips instead, for the ~250ms it's on screen.
+   This has to clip the text only, in its own inline-block, not the bubble
+   itself: ::before (the tail) deliberately sits partway outside the
+   bubble's box, and overflow: hidden on .ask__bubble would cut it off. */
+.ask__text {
+  display: inline-block;
+  max-width: 100%;
+  vertical-align: top;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: clip;
 }
 /* The bubble's tail, pointing at the face: a square turned on its corner,
    overlapping the bubble by a pixel so there is no gap, in the bubble's own

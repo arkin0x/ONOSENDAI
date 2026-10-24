@@ -1,9 +1,11 @@
 /**
  * hosakaAd.test.ts: the spots are versioned and taken in turn, and each runs
- * its scenes back to back, the banner first and the end card last.
+ * its scenes back to back, ending in the end card. Not every spot has a
+ * banner: HOSAKA's does (its logo animation); a spot with no sponsor's mark
+ * (CTV_ADVERTISE_1) goes straight to its cards.
  */
 import { describe, expect, it } from 'vitest'
-import { ADS, AD_EVERY_MS, AD_IN_MS, BROADCAST_AD_EVERY_MS, HOSAKA_1, adById, adEveryMs, adFor, adLength, broadcastCut, nextAd } from '../hosakaAd'
+import { ADS, AD_EVERY_MS, AD_IN_MS, BROADCAST_AD_EVERY_MS, CTV_ADVERTISE_1, HOSAKA_1, adById, adEveryMs, adFor, adLength, broadcastCut, nextAd } from '../hosakaAd'
 import { CUT_MS } from '../../../hud/TvSegments'
 
 describe('TV commercials', () => {
@@ -12,21 +14,28 @@ describe('TV commercials', () => {
     expect(new Set(ADS.map((a) => a.id)).size).toBe(ADS.length)
   })
 
-  it('run their scenes back to back, the banner first and the end card last', () => {
+  it('run their scenes back to back, ending in the end card', () => {
     for (const ad of ADS) {
       ad.scenes.forEach((sc, i) => {
         expect(sc.to).toBeGreaterThan(sc.from)
         if (i > 0) expect(sc.from).toBe(ad.scenes[i - 1].to)
+        else expect(sc.from).toBe(0)
       })
-      expect(ad.scenes[0]).toMatchObject({ from: 0, kind: 'banner' })
       expect(ad.scenes[ad.scenes.length - 1].kind).toBe('end')
       // Brief: well under a minute.
       expect(adLength(ad)).toBeLessThan(30)
     }
   })
 
+  it('HOSAKA\'s spot leads with its banner; the house spot has none to show', () => {
+    expect(HOSAKA_1.scenes[0]).toMatchObject({ kind: 'banner' })
+    expect(CTV_ADVERTISE_1.scenes.some((sc) => sc.kind === 'banner')).toBe(false)
+    expect(CTV_ADVERTISE_1.scenes.some((sc) => sc.mark)).toBe(false)
+  })
+
   it('take turns, and an id from an older release still plays a spot', () => {
     expect(nextAd(null)).toBe(ADS[0])
+    expect(nextAd(HOSAKA_1.id)).toBe(CTV_ADVERTISE_1)
     expect(nextAd(ADS[ADS.length - 1].id)).toBe(ADS[0])
     expect(adById('hosaka-0-gone')).toBe(ADS[0])
     expect(AD_EVERY_MS).toBe(300_000)

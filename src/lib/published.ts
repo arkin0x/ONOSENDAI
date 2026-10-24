@@ -58,6 +58,7 @@ import { toPayload, type ShardModel } from 'sno-core/shards'
 import { refTags } from 'sno-core/parts'
 import { SNO_KIND, creditAuthor, creditOf, creditTags, objectAddress, readCredit, type Credit } from 'sno-core/feed'
 import type { EventTemplate } from './events'
+import { withAuthoredConstrain } from './walkConstrain'
 
 const STORAGE = 'onosendai:published'
 
@@ -114,7 +115,8 @@ export function publicObjectTemplate(shard: ShardModel, createdAt: number): Even
       ...refTags(shard),
       ...(credit ? creditTags(credit, { notify: true }) : []),
     ],
-    content: JSON.stringify(toPayload(shard)),
+    // OPAQUE for a shard whose author never chose (DECK-0003 §1.12).
+    content: JSON.stringify(toPayload(withAuthoredConstrain(shard))),
   }
 }
 
@@ -246,7 +248,7 @@ export const STATE_HELP: Record<PublishState, string> = {
  * drifted, so the two can never disagree about what "the same object" means.
  */
 export function shardFingerprint(shard: ShardModel): string {
-  return fingerprint(JSON.stringify(toPayload(shard)))
+  return fingerprint(JSON.stringify(toPayload(withAuthoredConstrain(shard))))
 }
 
 /**

@@ -48,6 +48,7 @@ import { folderApi } from '../../lib/importFolders'
 import { publishMany, queryEach } from '../../lib/relay'
 import { useCyberspace } from '../useCyberspace'
 import { useWorkshop } from '../useWorkshop'
+import { withConstrain } from '../../lib/walkConstrain'
 import { usePublished } from '../usePublished'
 import { timing, useShardImport } from '../useShardImport'
 
@@ -638,5 +639,44 @@ describe('review pictures', () => {
     expect(row.picture!.vertices).toHaveLength(3)
     // A piece with no references is pictured as itself.
     expect(rowOf('rotunda').picture).toBe(rowOf('rotunda').shard)
+  })
+})
+
+describe('the WALK setting (DECK-0003 §1.12)', () => {
+  const withWord = (name: string, word: string, x = 1): string => JSON.stringify({ ...JSON.parse(sno(name, x)), constrain: word })
+  const wordSent = (d: string): unknown => JSON.parse(sent().find((e) => dOf(e) === d)!.content).constrain
+
+  it('a kit piece without the field publishes "opaque"; one with a word keeps it, on the bench and on the wire', async () => {
+    await imp().openZip(kitZip({ 'maze-kit/forest/curtain.json': withWord('curtain', 'off'), 'maze-kit/forest/wall.json': withWord('wall', 'all') }))
+    await imp().start()
+    expect(wordSent('maze-kit/forest/hall-straight')).toBe('opaque')
+    expect(wordSent('maze-kit/forest/curtain')).toBe('off')
+    expect(wordSent('maze-kit/forest/wall')).toBe('all')
+    expect(mine().find((x) => x.id === 'maze-kit/forest/curtain')!.extra).toEqual({ constrain: 'off' })
+    // The bench keeps what the file said: no field is written into it.
+    expect(mine().find((x) => x.id === 'maze-kit/forest/hall-straight')).not.toHaveProperty('extra')
+  })
+
+  it('UPDATE keeps the word the bench chose when the file says nothing, and a word in the file wins', async () => {
+    await imp().openZip(kitZip())
+    await imp().start()
+    imp().close()
+    const id = 'maze-kit/forest/rotunda'
+    useWorkshop.setState({ shards: mine().map((s) => (s.id === id ? withConstrain(s, 'off') : s)) })
+    vi.mocked(publishMany).mockClear()
+    await imp().openZip(kitZip({ 'maze-kit/forest/rotunda.json': sno('changed', 3) }))
+    imp().setDupMode('update')
+    await imp().start()
+    const after = mine().find((x) => x.id === id)!
+    expect(after.vertices[1].p).toEqual([3, 0, 0])
+    expect(after.extra).toEqual({ constrain: 'off' })
+    expect(wordSent(id)).toBe('off')
+    imp().close()
+    vi.mocked(publishMany).mockClear()
+    await imp().openZip(kitZip({ 'maze-kit/forest/rotunda.json': withWord('changed again', 'all', 4) }))
+    imp().setDupMode('update')
+    await imp().start()
+    expect(mine().find((x) => x.id === id)!.extra).toEqual({ constrain: 'all' })
+    expect(wordSent(id)).toBe('all')
   })
 })

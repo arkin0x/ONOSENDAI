@@ -39,7 +39,8 @@ describe('the public object event', () => {
     const ev = publicObjectTemplate(s, 1_800_000_000)
     expect(ev.kind).toBe(33331)
     expect(ev.created_at).toBe(1_800_000_000)
-    expect(JSON.parse(ev.content)).toEqual(toPayload(s))
+    // The payload, with OPAQUE written for a shard whose author never chose (DECK-0003 §1.12).
+    expect(JSON.parse(ev.content)).toEqual({ ...toPayload(s), constrain: 'opaque' })
     // The tags, in snocrash's order: d, name, alt, then one per placed object.
     expect(ev.tags).toEqual([
       ['d', 'step-1'],

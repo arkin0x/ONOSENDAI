@@ -85,7 +85,7 @@ export function ObjectPicker({ onClose }: { onClose: () => void }): JSX.Element 
     setMine(null)
     void queryAny([...new Set([...relaySet(), ...GENERAL_RELAYS])], { kinds: [OBJECT_KIND], authors: [me] }, WAIT_MS)
       .then((events) => {
-        // What the relays hold under this key is what the MENU's PUBLISH tag
+        // What the relays hold under this key is what SHARD's PUBLISH tag
         // reports (store/usePublished.ts): an object published from another
         // browser or from snocrash reads as PUBLISHED here from this read on.
         usePublished.getState().learn(events)
@@ -126,7 +126,7 @@ export function ObjectPicker({ onClose }: { onClose: () => void }): JSX.Element 
         </div>
         <p className="login__note">
           Placed by reference: it stays that object, and follows it when its author edits it. Only published objects can be
-          placed: PUBLISH one from the MENU first, here or in snocrash.
+          placed: PUBLISH one from SHARD first, here or in snocrash.
         </p>
         <div className="login__section">
           <span className="login__label">Yours</span>

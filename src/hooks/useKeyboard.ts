@@ -8,7 +8,9 @@
  *
  * WALK has its own keys, first-person style (lib/walkKeys.ts): W forward,
  * S back, A and D sideways, Space or R up, C or F down, every press a step. They are answered before anything else, so in WALK Space never
- * commits, scrolls or presses a focused button.
+ * commits, scrolls or presses a focused button. Z switches WALK's GRAVITY
+ * (store/useWalk.ts); the workshop bench's own Z (undo) is never reached
+ * from here, since nothing of WALK's is answered with the workshop open.
  */
 
 import { useEffect } from 'react'
@@ -70,6 +72,41 @@ export function escapeKey(event: Pick<KeyboardEvent, 'code' | 'defaultPrevented'
   return true
 }
 
+/**
+ * WALK's own keys (lib/walkKeys.ts), answered before anything else: true
+ * when the key was one of them. Only while walking, with the scene not
+ * covered and the workshop shut, so the bench keeps its own Z (undo).
+ */
+export function walkKeyDown(event: Pick<KeyboardEvent, 'code' | 'ctrlKey' | 'shiftKey' | 'altKey' | 'metaKey' | 'preventDefault'> & { repeat?: boolean }): boolean {
+  if (!useCyberspace.getState().walking || menuCovering || useWorkshop.getState().open) return false
+  const step = walkMove(event)
+  if (step) {
+    event.preventDefault()
+    useWalk.getState().press(step)
+    return true
+  }
+  // Space is WALK's up even when it is not a step (a modifier held):
+  // never a commit, a scroll or a press of whatever has focus.
+  if (event.code === 'Space') { event.preventDefault(); return true }
+  // GRAVITY on or off. A modifier makes it something else (Ctrl+Z); a
+  // held Z switches it once, not once per repeat.
+  if (event.code === 'KeyZ' && !event.ctrlKey && !event.metaKey && !event.altKey && !event.shiftKey) {
+    event.preventDefault()
+    if (event.repeat) return true
+    const walk = useWalk.getState()
+    walk.setGravity(!walk.gravity)
+    return true
+  }
+  return false
+}
+
+/** X in WALK: stop the steps still to prove (a fall still in the air is some), or with none, back to HOP. */
+export function walkCancel(): void {
+  const walk = useWalk.getState()
+  if (walk.behind > 0 || walk.open !== null || walk.falling || useCyberspace.getState().proof.status === 'computing') walk.stop()
+  else walk.exit()
+}
+
 export function useKeyboard(): void {
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -86,17 +123,7 @@ export function useKeyboard(): void {
       if (tag === 'INPUT' || tag === 'TEXTAREA') return
       // WALK's keys first, so Space and the letters it takes over never reach
       // their HOP meanings below.
-      if (useCyberspace.getState().walking && !menuCovering && !useWorkshop.getState().open) {
-        const step = walkMove(event)
-        if (step) {
-          event.preventDefault()
-          useWalk.getState().press(step)
-          return
-        }
-        // Space is WALK's up even when it is not a step (a modifier held):
-        // never a commit, a scroll or a press of whatever has focus.
-        if (event.code === 'Space') { event.preventDefault(); return }
-      }
+      if (walkKeyDown(event)) return
       // Let the browser keep its own shortcuts.
       if (event.metaKey || event.ctrlKey || event.altKey) return
       if (menuCovering) return
@@ -185,13 +212,7 @@ export function useKeyboard(): void {
       // own recall.
       if (event.code === 'KeyX') {
         event.preventDefault()
-        // WALK: stop the steps still to prove, or with none, back to HOP.
-        if (store.walking) {
-          const walk = useWalk.getState()
-          if (walk.behind > 0 || walk.open !== null || store.proof.status === 'computing') walk.stop()
-          else walk.exit()
-          return
-        }
+        if (store.walking) { walkCancel(); return }
         if (building && store.proof.status !== 'computing' && store.cloud.status === 'idle' && store.plan === null) useBuilder.getState().toAvatar()
         else store.cancel()
         return

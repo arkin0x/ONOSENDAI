@@ -18,7 +18,10 @@
  *
  * The marquee scrolls in pixels and never rewrites what is on screen: new
  * numbers join the end of the line, so a cut no longer jumps it back
- * ("the marquee seems to jump or reset when the scene changes").
+ * ("the marquee seems to jump or reset when the scene changes"). It steps
+ * away while an explainer plays, with the rest of the live picture's own
+ * furniture, and comes back once the picture does (arkinox, 2026-10-24:
+ * "get rid of the marquee too").
  */
 
 import type { ShardModel } from 'sno-core/shards'
@@ -27,8 +30,9 @@ import { chainLengthAt, countTo } from '../lib/tv/stats'
 import { itemLength, type Shot, type TapeItem } from '../lib/tv/director'
 import { CUT_MS, contentsWords, quoteOf, segmentDoing, typePace, TYPE_DELAY_S } from '../hud/TvSegments'
 import { findLines, placeable, shotProgress, type TvAvatar, type TvFindLine } from '../store/useTv'
-import { AD_SUBTITLE, adFor, type AdScene, type AdTheme } from '../lib/tv/hosakaAd'
+import { adFor, type AdScene, type AdTheme } from '../lib/tv/hosakaAd'
 import { BROADCAST_TAG, broadcastScale, isBroadcast } from '../lib/tv/broadcast'
+import { EXPLAINER_PIP_ENABLED } from '../lib/tv/explainer'
 import { watchingWords } from '../lib/tv/watching'
 import type { Census, ChainTimes } from '../lib/tv/stats'
 import type { Position } from '../lib/space'
@@ -85,6 +89,11 @@ const ACCENT = '#00e5ff'
 /** NOW PLAYING's progress, purple to pink (arkinox, 2026-10-18: "make the progress something cool like a gradient from purple to pink"). */
 const MUSIC_PURPLE = '#8a2be2'
 const MUSIC_PINK = '#ff2d95'
+/**
+ * Where the site's OFF button ends, CSS px from the top and the left, and a
+ * gap (styles.css .tv__off: 38 px, 12 px in): what keeps clear of its tap.
+ */
+const OFF_CLEAR_PX = 12 + 38 + 10
 /** The stream's address under the clock: its type, CSS px, and its baseline under the logo's bottom, CSS px (the time's, and a line). */
 const URL_TAG_PX = 13
 const URL_TAG_DROP = 82
@@ -206,6 +215,33 @@ export interface TvAssets {
   hosaka?: CanvasImageSource | null
   /** The HOSAKA mark alone (public/hosaka-mark.png), for the commercial's cards; null until loaded. */
   hosakaMark?: CanvasImageSource | null
+  /** An explainer on screen (lib/tv/explainer), the live picture in its corner; none when none is. */
+  explainer?: TvExplainer | null
+}
+
+/** What the painter shows of an explainer on screen. */
+export interface TvExplainer {
+  title: string
+  /** How far into its corner the live picture is, 0 to 1 (explainerMix). */
+  mix: number
+  /** Where the live picture is when all the way in, and where the video is, CSS px on the flat frame. */
+  pip: FlatRect
+  video: FlatRect
+  /** The caption at this moment, or null. */
+  caption: string | null
+  /** The browser holds its sound back until a tap. */
+  soundHeld?: boolean
+  /**
+   * The viewer's music is muted (store/useTvMusic), which the explainer's
+   * sound follows whether or not a track is playing; NOW PLAYING's when not given.
+   */
+  muted?: boolean
+  /**
+   * Whether the live picture shows small in its corner (lib/tv/explainer
+   * EXPLAINER_PIP_ENABLED, the default when not given). Without it the
+   * title's tag has no PIP to stand under.
+   */
+  pipShown?: boolean
 }
 
 /** What NOW PLAYING shows. */
@@ -354,6 +390,8 @@ export class TvPainter {
   private lastDot: Position | null = null
   /** Where NOW PLAYING was last painted, canvas px, and the canvas px per CSS px then. */
   private npRect: FlatRect | null = null
+  /** The marquee's top at the last paint, CSS px: where an explainer's video stops (lib/tv/explainer explainerLayout). */
+  private floorPx: number | null = null
   private cardScale = 1
   /** Every call on the canvas, followed part by part, for what each paint changed (drawTracker). */
   private track: DrawTracker
@@ -375,7 +413,16 @@ export class TvPainter {
     return this.changed
   }
 
-  /** Where NOW PLAYING is on the flat frame, CSS px, for a tap or a drag on it; null when it is not up. */
+  /** The marquee's top at the last paint, CSS px from the top; null before the first. */
+  get marqueeTop(): number | null {
+    return this.floorPx
+  }
+
+  /**
+   * Where NOW PLAYING is on the flat frame, CSS px, for a tap or a drag on
+   * it; over an explainer, its title's tag, which takes the same tap and
+   * drag for the sound; null when neither is up.
+   */
   get musicCard(): FlatRect | null {
     const c = this.npRect
     const k = this.cardScale
@@ -558,6 +605,15 @@ export class TvPainter {
       return
     }
 
+    // An explainer on screen (lib/tv/explainer) is its own spot, with its own
+    // logo burned in: the top-right block (the logo, PLAY, the date and the
+    // time, the stream's address) steps aside the whole time it is on, as
+    // the marquee and the chiron do, and comes back with the picture
+    // (arkinox, 2026-10-24: "right top corner should go away during ad").
+    // Its sizes still set where everything else goes (the stream's address
+    // is not laid out meanwhile, but all that keeps clear of it is hidden too).
+    const ex = a.explainer && a.explainer.mix > 0 ? a.explainer : null
+
     // The logo, top right: the margins everything else takes.
     part('logo')
     const lw = Math.min(LOGO_PX * s0, W * LOGO_SHARE)
@@ -565,7 +621,7 @@ export class TvPainter {
     // Under heavy snow (tuning, no signal, a bag with no public place) the
     // logo and the clock get a soft dark backing, to read against the noise.
     const snowy = p.status === 'tuning' || p.status === 'no-signal' || (p.shot?.item?.kind === 'bag' && !placeable(p.shot.item.hint))
-    if (snowy) {
+    if (snowy && !ex) {
       const bx = W - MX - lw - 18 * s
       const by = MY - 14 * s
       const back = ctx.createRadialGradient(W - MX - lw / 2, MY + lh, 0, W - MX - lw / 2, MY + lh, lw * 0.9)
@@ -574,7 +630,7 @@ export class TvPainter {
       ctx.fillStyle = back
       ctx.fillRect(bx, by, lw + 36 * s, lh + 130 * s)
     }
-    if (a.logo) {
+    if (a.logo && !ex) {
       ctx.globalAlpha = 0.96
       ctx.drawImage(a.logo, W - MX - lw, MY, lw * LOGO_FILE_W, lh)
       ctx.globalAlpha = 1
@@ -586,16 +642,16 @@ export class TvPainter {
     ctx.textAlign = 'right'
     let cy = MY + lh + 18 * s
     ctx.font = `700 ${11 * s}px ${TV_FONT}`
-    ctx.fillText('▶ PLAY', W - MX, cy)
+    if (!ex) ctx.fillText('▶ PLAY', W - MX, cy)
     // The column's left edge, the logo's or the widest line's.
     let colLeft = Math.min(W - MX - lw, W - MX - ctx.measureText('▶ PLAY').width)
     if (p.tapeTime !== null) {
       const stamp = tapeStamp(p.tapeTime)
       ctx.font = `700 ${(narrow ? 13 : 16) * s}px ${TV_FONT}`
       cy += 20 * s
-      ctx.fillText(stamp.date, W - MX, cy)
+      if (!ex) ctx.fillText(stamp.date, W - MX, cy)
       cy += 20 * s
-      ctx.fillText(stamp.time, W - MX, cy)
+      if (!ex) ctx.fillText(stamp.time, W - MX, cy)
       colLeft = Math.min(colLeft, W - MX - Math.max(ctx.measureText(stamp.date).width, ctx.measureText(stamp.time).width))
     }
 
@@ -603,7 +659,7 @@ export class TvPainter {
     // (lib/tv/broadcast BROADCAST_TAG). Where the time stands whether or not
     // the tape has one yet, so it never moves.
     part('urlTag')
-    const tag = isBroadcast() ? this.urlTag(W - MX, MY + lh + URL_TAG_DROP * s, s) : null
+    const tag = isBroadcast() && !ex ? this.urlTag(W - MX, MY + lh + URL_TAG_DROP * s, s) : null
     const clockBottom = tag ? Math.max(cy, tag.bottom) : cy
     if (tag) colLeft = Math.min(colLeft, tag.left)
 
@@ -619,13 +675,18 @@ export class TvPainter {
     // where the avatar on screen is in it.
     const mapSize = bigInset ? 0 : Math.min(200 * s0, W * 0.3, H * 0.34)
     part('minimap')
-    if (!bigInset) this.minimap(p, MX, MY, mapSize, s, now, reduced)
+    // An explainer's live picture takes the minimap's corner (lib/tv/explainer).
+    if (!bigInset && !ex) this.minimap(p, MX, MY, mapSize, s, now, reduced)
 
     // The marquee along the bottom margin, the CYBERSPACE TV bug at its head.
+    // Hidden while an explainer plays, with its own furniture (arkinox,
+    // 2026-10-24); the reserved band stays so the video and its captions
+    // keep clear of where it would be, and it returns once the picture does.
     const tickH = (big ? BIG_TICKER_H_PX : TICKER_H_PX) * s
     const tickY = H - MY - tickH
+    this.floorPx = tickY / scale
     part('marquee')
-    this.marquee(p, a, MX, tickY, W - MX, tickH, s, dt)
+    if (!ex) this.marquee(p, a, MX, tickY, W - MX, tickH, s, dt)
 
     // The chiron above it, and NOW PLAYING: side by side on one row, the
     // chiron on the left, wide (2026-10-19: "shorten the width of the chiron
@@ -649,10 +710,13 @@ export class TvPainter {
     const npFullH = (big ? CHIRON_PX[1] : NOW_PLAYING_PX) * s
     let chironTop = tickY
     part('chiron')
-    if (p.shot && p.status === 'playing') chironTop = this.chiron(p, a, MX, rowBottom, chironW, chironH, s, narrow)
+    // Over an explainer, the live picture's own words step away with the
+    // minimap: the chiron, NOW PLAYING (the music is out), the segment's
+    // panels, LATER and MEANWHILE, and TUNING and the like.
+    if (p.shot && p.status === 'playing' && !ex) chironTop = this.chiron(p, a, MX, rowBottom, chironW, chironH, s, narrow)
     const npBottom = row ? rowBottom : rowBottom - CHIRON_PX[1] * s - 10 * s
     const ceiling = (narrow ? Math.max(clockBottom, MY + mapSize) : clockBottom) + 10 * s
-    const npLook = !a.music ? null : npBottom - npFullH >= ceiling ? 'full' : npBottom - NOW_PLAYING_LINE_PX * s >= ceiling ? 'line' : null
+    const npLook = !a.music || ex ? null : npBottom - npFullH >= ceiling ? 'full' : npBottom - NOW_PLAYING_LINE_PX * s >= ceiling ? 'line' : null
     part('nowPlaying')
     const npTop = a.music && npLook ? this.nowPlaying(a.music, W - MX - npW, npBottom, npW, s, now, reduced, npLook === 'line', npFullH) : chironTop
     this.npRect = a.music && npLook ? { x: W - MX - npW, y: npTop, w: npW, h: npBottom - npTop } : null
@@ -679,15 +743,16 @@ export class TvPainter {
     // it (review of #447: a comment's panel reached 50).
     const segmentFloor = floor - (bigInset ? 14 : underMap ? 60 : 50) * s
     part('segment')
-    const shown = !item || !panel ? null : this.segment(item, p.shot!.length, a, W, segmentTop + 14 * s, segmentFloor, sideBottom, MX, MY, (big ? colLeft : W - MX - lw) - 16 * s, bigInset ? MX : MX + mapSize + 16 * s, s, narrow, now)
+    const shown = !item || !panel || ex ? null : this.segment(item, p.shot!.length, a, W, segmentTop + 14 * s, segmentFloor, sideBottom, MX, MY, (big ? colLeft : W - MX - lw) - 16 * s, bigInset ? MX : MX + mapSize + 16 * s, s, narrow, now)
 
     // LATER and MEANWHILE, after the cut's transition: top centre, between
     // the minimap and the logo's column (arkinox, 2026-10-23: "I don't like
     // it appearing over the chiron"), and off a segment's panel, which never
-    // moves for it (scene/tvCard). Solid with the stream's larger text.
+    // moves for it (scene/tvCard). Solid with the stream's larger text. Not
+    // over an explainer, with the rest of the live picture's words (#485).
     part('card')
     const cardWords = cardText(p)
-    if (cardWords) {
+    if (cardWords && !ex) {
       const clear = CARD_CLEAR_PX * s
       const reach = bigInset ? 0 : mapSize * (0.5 + MAP_REACH)
       const blocks: Box[] = [{ x0: colLeft, y0: 0, x1: W, y1: clockBottom + 6 * s }]
@@ -704,7 +769,7 @@ export class TvPainter {
 
     // TUNING, END OF TAPE, NO SIGNAL.
     part('status')
-    if (p.status !== 'playing') {
+    if (p.status !== 'playing' && !ex) {
       const label = p.status === 'tuning' ? 'TUNING' : p.status === 'end' ? 'END OF TAPE' : 'NO SIGNAL'
       ctx.globalAlpha = reduced ? 1 : 0.55 + 0.45 * (Math.floor(now / 700) % 2)
       ctx.font = `700 ${26 * s}px ${TV_FONT}`
@@ -713,6 +778,83 @@ export class TvPainter {
       ctx.fillText(label, W / 2, H / 2)
       ctx.globalAlpha = 1
     }
+
+    part('explainer')
+    if (ex) this.explainerParts(ex, ex.muted ?? a.music?.muted === true, W, scale, s, narrow, MX, MY, tickY)
+  }
+
+  /**
+   * What an explainer adds (lib/tv/explainer): a tag, and its captions over
+   * the video's foot, above the marquee. The live picture's own frame is the
+   * tube's (scene/TvScreenEffect), drawn with it as it moves.
+   *
+   * With the PIP on (pipShown), the tag is its title, under the live picture
+   * in its corner, as a channel marks what is on. With the PIP off (the
+   * default since 2026-10-24) there is no picture to stand under, and the
+   * title left at the PIP's old foot read as a stray caption on the left of
+   * the video (arkinox, 2026-10-24: "inexplicable stuck captions"). So the
+   * title is not shown; on the site only, while the sound waits on a tap or
+   * is muted, a short tag says so (TAP FOR SOUND, ♪ MUTED) and takes the tap,
+   * at the video's top left, where ADVERTISEMENT stands over a spot. The
+   * stream, which has no sound to tap for, shows none.
+   */
+  private explainerParts(ex: TvExplainer, muted: boolean, W: number, scale: number, s: number, narrow: boolean, MX: number, MY: number, floor: number): void {
+    const ctx = this.ctx
+    ctx.save()
+    const pipShown = ex.pipShown ?? EXPLAINER_PIP_ENABLED
+    this.npRect = null
+    const site = !isBroadcast()
+    const sound = !site ? null : ex.soundHeld ? 'TAP FOR SOUND' : muted ? '♪ MUTED' : null
+    const words = pipShown ? `${ex.title}${sound ? ` · ${sound.replace('♪ ', '')}` : ''}` : sound
+    if (words) {
+      // Under a PIP, only once the live picture is all but in its corner: the
+      // tag stands where its corner ends, which the picture crosses on its way.
+      const alpha = pipShown ? clamp01((ex.mix - 0.8) / 0.2) : 1
+      ctx.globalAlpha = alpha
+      ctx.textAlign = 'left'
+      ctx.font = `700 ${(narrow ? 9 : 10) * s}px ${TV_FONT}`
+      const h = 18 * s
+      let x = pipShown ? ex.pip.x * scale : Math.max(MX, ex.video.x * scale + 12 * s)
+      const y = pipShown ? (ex.pip.y + ex.pip.h) * scale + 8 * s : Math.max(MY, ex.video.y * scale + 12 * s)
+      // Clear of the site's OFF button (styles.css .tv__off), a page element
+      // that takes a tap first: on a small screen on its side the margins put
+      // the tag under it (review of #493).
+      if (!pipShown && y < OFF_CLEAR_PX * scale) x = Math.max(x, OFF_CLEAR_PX * scale)
+      // A tap on the tag is the sound's, as on NOW PLAYING, which steps away
+      // meanwhile (review of #471): to let it in, or to unmute it. With the PIP
+      // off there is no tag while the sound is on, so none to mute it by.
+      const room = pipShown ? ex.pip.w * scale : W - x - MX
+      const label = fit(ctx, words, Math.max(20 * s, room - 14 * s))
+      const tw = ctx.measureText(label).width
+      this.npRect = alpha > 0 && site ? { x, y, w: tw + 14 * s, h } : null
+      ctx.fillStyle = 'rgba(0, 0, 0, 0.55)'
+      ctx.fillRect(x, y, tw + 14 * s, h)
+      ctx.strokeStyle = 'rgba(0, 229, 255, 0.6)'
+      ctx.lineWidth = Math.max(1, s)
+      ctx.strokeRect(x + 0.5, y + 0.5, tw + 14 * s - 1, h - 1)
+      ctx.fillStyle = 'rgba(242, 251, 255, 0.9)'
+      ctx.fillText(label, x + 7 * s, y + 12.5 * s)
+    }
+    if (ex.caption) {
+      // In as the video comes up, as they always were.
+      ctx.globalAlpha = clamp01((ex.mix - 0.8) / 0.2)
+      const size = (narrow ? 13 : 18) * s
+      ctx.font = `700 ${size}px ${TV_FONT}`
+      ctx.textAlign = 'center'
+      const cx = (ex.video.x + ex.video.w / 2) * scale
+      const lines = wrap(ctx, ex.caption, Math.min(ex.video.w * scale, W) * 0.84).slice(0, 3)
+      const lineH = size * 1.3
+      const bottom = Math.min((ex.video.y + ex.video.h) * scale - 12 * s, floor - 12 * s)
+      lines.forEach((line, i) => {
+        const base = bottom - (lines.length - 1 - i) * lineH
+        const lw = ctx.measureText(line).width
+        ctx.fillStyle = 'rgba(0, 0, 0, 0.7)'
+        ctx.fillRect(cx - lw / 2 - 8 * s, base - size * 1.02, lw + 16 * s, lineH)
+        ctx.fillStyle = FG
+        ctx.fillText(line, cx, base)
+      })
+    }
+    ctx.restore()
   }
 
   private marquee(p: TvPicture, a: TvAssets, x0: number, y: number, x1: number, h: number, s: number, dt: number): void {
@@ -988,7 +1130,7 @@ export class TvPainter {
       const { region: r, size, markH, subLines, subSize } = best
       const markW = markH * (308 / 334)
       const gap = markH ? 18 * s : 0
-      const subH = scene.kind === 'end' ? subLines.length * subSize * 1.4 + 22 * s : 0
+      const subH = subLines.length > 0 ? subLines.length * subSize * 1.4 + 22 * s : 0
       const blockH = markH + gap + subH + scene.lines.length * size * 1.12
       ctx.translate(r.x + r.w / 2 + jolt, r.y + r.h / 2)
       ctx.scale(zoom, zoom)
@@ -997,8 +1139,8 @@ export class TvPainter {
         ctx.drawImage(mark, -markW / 2, y, markW, markH)
         y += markH + gap
       }
-      if (scene.kind === 'end') {
-        // The name's long form, subtly, under the mark.
+      if (subLines.length > 0) {
+        // The name's long form, subtly, under the mark: only where the spot has one (subH above).
         ctx.font = `${subSize}px ${TV_FONT}`
         ctx.fillStyle = 'rgba(242, 221, 255, 0.6)'
         for (const line of subLines) { y += subSize * 1.4; ctx.fillText(line, 0, y) }
@@ -1073,8 +1215,8 @@ export class TvPainter {
     if (widest > maxW) size *= maxW / widest
     const subSize = (narrow ? 8.5 : 11) * s
     ctx.font = `${subSize}px ${TV_FONT}`
-    const subLines = end ? wrap(ctx, AD_SUBTITLE.toUpperCase(), maxW) : []
-    const subH = end ? subLines.length * subSize * 1.4 + 22 * s : 0
+    const subLines = end && scene.subtitle ? wrap(ctx, scene.subtitle, maxW) : []
+    const subH = subLines.length > 0 ? subLines.length * subSize * 1.4 + 22 * s : 0
     const lineH = (sz: number): number => scene.lines.length * sz * 1.12
     // The mark takes what the words leave it at their floor, up to its own share.
     let markH = withMark ? Math.min(r.h * (end ? 0.55 : 0.32), (end ? 300 : 170) * s, r.h - subH - lineH(Math.min(size, Math.max(floor, size * 0.6))) - 18 * s) : 0

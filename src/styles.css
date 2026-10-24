@@ -9431,6 +9431,29 @@ a.feed__act { text-decoration: none; }
   border-color: rgba(255, 59, 107, 0.4);
 }
 
+/* GRAVITY (store/useWalk.ts): a chip across the top of the WALK pad, lit
+ * while gravity is on. Its own row, so no key a hand knows moves. */
+.touchpad--mode-walk {
+  grid-template-rows: 22px repeat(4, 38px);
+  grid-template-areas:
+    "gravity gravity gravity"
+    "pin     earth   cube"
+    "away    up      toward"
+    "left    down    right"
+    "zoomout hub     zoomin";
+}
+.touchpad__key--gravity {
+  grid-area: gravity;
+  font-size: 9px;
+  letter-spacing: 0.14em;
+  color: var(--dim, #7fa6bd);
+}
+.touchpad--mode-walk .touchpad__key--gravity.is-on:not(:active) {
+  color: #fff;
+  background-image: linear-gradient(rgba(255, 59, 107, 0.55), rgba(255, 59, 107, 0.55));
+  border-color: rgba(255, 120, 150, 0.9);
+}
+
 /* ---------- LOSING SYNC ----------
  *
  * WALK three or more steps ahead of its proofs (hud/SyncWarning.tsx). Dead

@@ -37,6 +37,10 @@
  * gibson forward can cross two risers), and the kit's low water caps (2.2,
  * as the assessment listed); never a riser of 3.
  *
+ * With gravity on (store/useWalk.ts), a press that walks off an edge with
+ * no floor within a step-down stops on the first gibson past the edge,
+ * where the fall starts: the press does not carry on through the air.
+ *
  * Every piece of the move is a straight step stepLimit has cleared (the
  * lift, the step at the lifted height, the settle), so the landing is
  * reached from where you stood without crossing a blocking face: it is never
@@ -114,9 +118,9 @@ function settled(at: Position, items: readonly WallItem[]): { at: Position; stan
  * Where a WALK press of `length` gibsons from `from`, along `axis` in
  * direction `dir`, goes among `items`: the walls' stop short, with the
  * step-up and step-down above while you stand on a blocking floor and step
- * level.
+ * level. With `gravity`, a press off an edge stops on the first gibson past it.
  */
-export function walkStep(from: Position, axis: AxisName, dir: 1 | -1, length: bigint, items: readonly WallItem[]): WalkStep {
+export function walkStep(from: Position, axis: AxisName, dir: 1 | -1, length: bigint, items: readonly WallItem[], gravity = false): WalkStep {
   if (axis === 'y' || length > STEP_SUBSTEP_MAX || !standing(from, items)) {
     const wall = stepLimit(from, axis, dir, length, items)
     return { to: moved(from, axis, dir, wall.reach), by: wall.by }
@@ -130,8 +134,10 @@ export function walkStep(from: Position, axis: AxisName, dir: 1 | -1, length: bi
     const down = settled(next, items)
     at = down.at
     // Off an edge higher than a step-down, with no floor near: the rest of
-    // the press is the plain step, at this height. Not gravity.
+    // the press is the plain step, at this height. Under gravity the press
+    // ends here instead, and the fall starts from this gibson.
     if (!down.standing) {
+      if (gravity) break
       const rest = length - n - 1n
       if (rest === 0n) break
       const wall = stepLimit(at, axis, dir, rest, items)

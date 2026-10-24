@@ -19,6 +19,7 @@
 import type { ReactNode } from 'react'
 import { useCyberspace } from '../store/useCyberspace'
 import { useLayers } from '../store/useLayers'
+import { useWalk } from '../store/useWalk'
 import { Field, Switch } from './ui/Switch'
 import { Explanation } from './Explanation'
 
@@ -36,6 +37,7 @@ export function ViewPanel(): JSX.Element {
   const walkAvatarHidden = useLayers((s) => s.walkAvatarHidden)
   const walkLookSphere = useLayers((s) => s.walkLookSphere)
   const headlamp = useLayers((s) => s.headlamp)
+  const gravity = useWalk((s) => s.gravity)
   const showTrail = useCyberspace((s) => s.showTrail)
   const showSecrets = useCyberspace((s) => s.showSecrets)
 
@@ -77,6 +79,16 @@ export function ViewPanel(): JSX.Element {
       hint: 'A ball above the menu button to drag and look around.',
       on: walkLookSphere,
       set: (v) => useLayers.getState().setLayer('walkLookSphere', v),
+    },
+    // GRAVITY in WALK (store/useWalk.ts), kept on this device; also Z and
+    // the WALK pad's chip. Unlike the rows around it, it changes how a walk
+    // moves (falls and jumps), never what a proof is.
+    {
+      id: 'view-walk-gravity',
+      title: 'Gravity in WALK',
+      hint: 'Fall, land and jump. Z.',
+      on: gravity,
+      set: (v) => useWalk.getState().setGravity(v),
     },
     {
       id: 'view-chain-trail',

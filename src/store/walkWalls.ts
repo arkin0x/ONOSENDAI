@@ -157,8 +157,18 @@ function tolerance(e: Entry, g: number, length: bigint): number {
  * it lands on the last whole gibson at least the measure's tolerance short of
  * the face (one gibson short at small units and steps), never on it; a face
  * with no room before it refuses the step (reach 0).
+ *
+ * With `stand`, GRAVITY's question (what is under you), a step down is
+ * measured from a hair (ON_FACE) above the walker's point, so a face in the
+ * walker's own plane is under it and holds it: you stand on the floor you are
+ * exactly on instead of falling through it. WALK never stops there, but a HOP,
+ * a VIEW, a BUILD or a floor deployed at your own height can put you there.
+ * The hair is in this question only: nothing moves, nothing is published, and
+ * every face a hair or more from the point is met exactly as without it.
+ * Only where the measure can tell a hair (a tolerance of ON_FACE): on a
+ * monument the face you stand on lets you go, as below.
  */
-export function stepLimit(from: Position, axis: AxisName, dir: 1 | -1, length: bigint, items: readonly WallItem[]): WallStop {
+export function stepLimit(from: Position, axis: AxisName, dir: 1 | -1, length: bigint, items: readonly WallItem[], stand = false): WallStop {
   const keep = new Set<string>()
   let best: number | null = null
   let bestTol = ON_FACE
@@ -187,7 +197,9 @@ export function stepLimit(from: Position, axis: AxisName, dir: 1 | -1, length: b
     // walker HOPped to within the measure's error of a face on a monument (a
     // shard past about 2^53 gibsons) may still cross it, which is accepted:
     // holding it there would hold it stepping away from the face too.
-    const minT = ON_FACE / g
+    // Asked to stand (above), a face in your own plane is under you instead.
+    const under = stand && axis === 'y' && dir < 0 && tolerance(e, g, 0n) === ON_FACE
+    const minT = (under ? -ON_FACE : ON_FACE) / g
     // A step that would end within `tol` of a face meets it (tolerance).
     const t = firstHit(e.mesh, o, i, s, (Number(length) + tol) / g, minT, e.clip)
     if (t === null) continue

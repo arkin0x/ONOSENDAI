@@ -63,6 +63,12 @@
  * a STOP mid-fall leaves you where the chain is, the step-off point once
  * its hop has landed. Gravity off, a press is exactly what it was.
  *
+ * Under gravity a face in your own plane is under you: a HOP, a VIEW, a BUILD
+ * or a floor deployed at your height can leave you exactly on one (a WALK
+ * stop never does), and you stand on it instead of falling through it. It is
+ * how the walls are asked, from a hair above your point (store/walkWalls.ts
+ * stepLimit, `stand`): nothing moves and nothing is published for it.
+ *
  * `behind` is the walk's lag: the closed segments not yet proven, the one
  * computing included, and never the open one, which is still being walked.
  * It is what the LOSING SYNC warning counts, so the warning comes up only for
@@ -380,7 +386,7 @@ function fallIfAirborne(): void {
   if (!cs.walking || fall || !walk.gravity) return
   const from = walk.open?.end ?? walk.queue[walk.queue.length - 1] ?? cs.position
   const items = wallItems(cs.plane)
-  if (standing(from, items)) return
+  if (standing(from, items, true)) return
   const limit = fallLimit(from, items, affordIn(cs.plane))
   // Hovering already: over a floor no hop from here can afford to reach.
   if (limit.drop === 0n) return
@@ -391,7 +397,7 @@ function fallIfAirborne(): void {
 function jump(from: Position): void {
   const cs = useCyberspace.getState()
   const items = wallItems(cs.plane)
-  if (!standing(from, items)) return
+  if (!standing(from, items, true)) return
   const afford = affordIn(cs.plane)
   const { rise, by } = jumpRise(from, items, afford)
   if (rise === 0n) { if (by) wallChip(by); return }
@@ -535,7 +541,7 @@ function endFall(final: Position, hovering = false): void {
   const next = [...useWalk.getState().queue, ...hops]
   useWalk.setState({ falling: false, queue: next, behind: next.length })
   useCyberspace.setState({ cursor: { ...final } })
-  if (hovering && !standing(final, f.items)) useToast.getState().show({ label: 'HOVERING', meta: 'a hop past here is over the walk budget', mark: 'walk', ms: BRIEF_TOAST_MS * 2 })
+  if (hovering && !standing(final, f.items, true)) useToast.getState().show({ label: 'HOVERING', meta: 'a hop past here is over the walk budget', mark: 'walk', ms: BRIEF_TOAST_MS * 2 })
   pump()
 }
 

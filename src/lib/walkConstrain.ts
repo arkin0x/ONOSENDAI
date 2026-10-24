@@ -317,8 +317,11 @@ let scratch = new Float64Array(0)
  * render frame, model units) and goes `s` (+1 or -1) along render axis `i`,
  * at most `maxT`. A face nearer than `minT` is the one the walker stands on,
  * and does not hold it: it can always step off. A face at exactly `maxT`
- * does: a step never lands on a wall. With `clip`, a hit on the shard's own
- * faces counts only inside the region box, where those faces are drawn.
+ * does: a step never lands on a wall. A negative `minT` counts a face up to
+ * that far behind the start too, at its own (negative) distance: a walker
+ * standing exactly on a floor (store/walkWalls.ts stepLimit, `stand`). With
+ * `clip`, a hit on the shard's own faces counts only inside the region box,
+ * where those faces are drawn.
  *
  * A placed object is passed by when the step's line misses its bounds, and
  * otherwise its corners are put where it stands with exactly the arithmetic

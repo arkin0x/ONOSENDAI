@@ -145,6 +145,46 @@ describe('stepLimit', () => {
     }
   })
 
+  it('asked to stand, a step down meets the face in the walker\'s own plane; nothing else changes', () => {
+    // One horizontal square at the walker's own height, a single plane.
+    const sheet = (unit: number): ShardModel => withConstrain({ ...newShard('Sheet'), unit, mode: 'solid', vertices: [[-2, 0, -2], [2, 0, -2], [2, 0, 2], [-2, 0, 2]].map((p) => ({ p: p as [number, number, number], c: [1, 1, 1] as [number, number, number] })), faces: [[0, 1, 2], [0, 2, 3]] }, 'all')
+    for (const unit of [0, 2]) {
+      clearWalls()
+      const w = item(sheet(unit))
+      // Standing: held, by the sheet.
+      expect(stepLimit(AT, 'y', -1, 1n, [w], true)).toMatchObject({ reach: 0n, by: w })
+      expect(stepLimit(AT, 'y', -1, 1n << 20n, [w], true)).toMatchObject({ reach: 0n, by: w })
+      // Not standing, as before: the face you are on lets you go, either way.
+      expect(stepLimit(AT, 'y', -1, 1n, [w])).toMatchObject({ reach: 1n, by: null })
+      expect(stepLimit(AT, 'y', 1, 1n, [w])).toMatchObject({ reach: 1n, by: null })
+      // Up, and level, the same asked to stand or not.
+      expect(stepLimit(AT, 'y', 1, 1n, [w], true)).toMatchObject({ reach: 1n, by: null })
+      for (const axis of ['x', 'z'] as const) expect(stepLimit(AT, axis, 1, 1n, [w], true)).toEqual(stepLimit(AT, axis, 1, 1n, [w]))
+      // A gibson over it: standing as ever, a gibson short; beside it, nothing under you.
+      const over = { ...AT, y: AT.y + 1n }
+      expect(stepLimit(over, 'y', -1, 4n, [w], true)).toEqual(stepLimit(over, 'y', -1, 4n, [w]))
+      expect(stepLimit(over, 'y', -1, 4n, [w], true)).toMatchObject({ reach: 0n, by: w })
+      const beside = { ...AT, x: AT.x + (3n << BigInt(unit)) }
+      expect(stepLimit(beside, 'y', -1, 1n, [w], true)).toMatchObject({ reach: 1n, by: null })
+    }
+    // A sheet that does not block holds nothing.
+    clearWalls()
+    const off = item(withConstrain(sheet(0), 'off'))
+    expect(stepLimit(AT, 'y', -1, 1n, [off], true)).toMatchObject({ reach: 1n, by: null })
+  })
+
+  it('on a monument, the face in the walker\'s own plane lets it go as before, asked to stand or not', () => {
+    for (const unit of [48, 52, 53, 56, 70]) {
+      clearWalls()
+      const w = item(slab('y', -1, 0, 2, unit))
+      for (const length of [1n, 1n << 40n]) {
+        expect(stepLimit(AT, 'y', -1, length, [w], true)).toEqual(stepLimit(AT, 'y', -1, length, [w]))
+        expect(stepLimit(AT, 'y', 1, length, [w], true)).toEqual(stepLimit(AT, 'y', 1, length, [w]))
+      }
+      expect(stepLimit(AT, 'y', -1, 1n, [w], true)).toMatchObject({ reach: 1n, by: null })
+    }
+  })
+
   it('a part far finer than its parent is still a wall', () => {
     const ref: Ref = ['a', `33331:${'d'.repeat(64)}:fine`]
     primeRef(ref, toPayload(slab('x', 1, 3, 2, 0)))

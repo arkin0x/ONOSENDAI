@@ -498,6 +498,112 @@ describe('a fall', () => {
   })
 })
 
+/**
+ * A walker exactly in a floor's plane: WALK never stops there (a stop is
+ * always at least the tolerance short of a face), but a HOP, a VIEW, a BUILD
+ * or a floor deployed at your own height can put you there. Under GRAVITY
+ * the walls are asked what is under you from a hair above your point, so you
+ * stand on the face you are exactly on instead of falling through it. Nothing
+ * moves and nothing is published for it.
+ */
+describe('exactly on a face', () => {
+  /** One horizontal square, a single plane, `y` gibsons from the shard's origin. */
+  function sheet(name: string, c: Constrain, y = 0, half = 10): ShardModel {
+    const vertices: ShardModel['vertices'] = [[-half, y, -half], [half, y, -half], [half, y, half], [-half, y, half]].map((p) => ({ p: p as V3, c: [1, 1, 1] as V3 }))
+    return withConstrain({ ...newShard(name), mode: 'solid', vertices, faces: [[0, 1, 2], [0, 2, 3]] }, c)
+  }
+  /** One vertical square across X at x = 0, a single plane. */
+  function wall(name: string, c: Constrain, half = 10): ShardModel {
+    const vertices: ShardModel['vertices'] = [[0, -half, -half], [0, half, -half], [0, half, half], [0, -half, half]].map((p) => ({ p: p as V3, c: [1, 1, 1] as V3 }))
+    return withConstrain({ ...newShard(name), mode: 'solid', vertices, faces: [[0, 1, 2], [0, 2, 3]] }, c)
+  }
+  const still = (): void => {
+    expect(useWalk.getState().falling).toBe(false)
+    expect(fallState()).toBeNull()
+    expect(useCyberspace.getState().cursor).toEqual(start)
+    expect(useWalk.getState()).toMatchObject({ queue: [], open: null, behind: 0 })
+    expect(posted).toHaveLength(0)
+  }
+
+  it('a single-plane floor in your own plane holds you on entering WALK with gravity on', () => {
+    world(start, [sheet('Sheet', 'all'), [0, 0, 0]])
+    walk(true)
+    still()
+  })
+
+  it('and when gravity is switched on in WALK', () => {
+    world(start, [sheet('Sheet', 'all'), [0, 0, 0]])
+    walk(false)
+    useWalk.getState().setGravity(true)
+    still()
+  })
+
+  it('the top of a solid box in your own plane holds you, rather than dropping you inside it', () => {
+    world(start, [boxes('Block', 'all', [[[-10, -6, -10], [10, 0, 10]]]), [0, 0, 0]])
+    walk(true)
+    still()
+    useWalk.getState().setGravity(false)
+    useWalk.getState().setGravity(true)
+    still()
+  })
+
+  it('you walk along it at its height, and a jump comes back to it', () => {
+    world(start, [sheet('Sheet', 'all'), [0, 0, 0]])
+    walk(true)
+    for (let k = 1; k <= 3; k++) useWalk.getState().press('away')
+    expect(at(start)).toEqual([0, 0, -3])
+    expect(useWalk.getState().falling).toBe(false)
+    useWalk.getState().settle()
+    const there = { ...useCyberspace.getState().cursor }
+    useWalk.getState().press('up')
+    expect(useWalk.getState().falling).toBe(true)
+    fallOut()
+    expect(useCyberspace.getState().cursor).toEqual(there)
+    // The jump made no hop: only the walk's own segment is queued.
+    expect(useWalk.getState().queue).toEqual([there])
+  })
+
+  it('walking off its edge is a fall as ever', () => {
+    world(start, [sheet('Sheet', 'all', 0, 2), [0, 0, 0]], [boxes('Low', 'all', [lowFloor(20)]), [0, -1, 0]])
+    walk(true)
+    still()
+    for (let k = 1; k <= 3 && !fallState(); k++) useWalk.getState().press('away')
+    expect(useWalk.getState().falling).toBe(true)
+    fallOut()
+    expect(at(start)).toEqual([0, -20, -3])
+  })
+
+  it('a floor set to OFF does not hold you: you fall through it', () => {
+    world(start, [sheet('Ghost', 'off'), [0, 0, 0]], [boxes('Low', 'all', [lowFloor(20)]), [0, -1, 0]])
+    walk(true)
+    expect(useWalk.getState().falling).toBe(true)
+    fallOut()
+    expect(at(start)).toEqual([0, -20, 0])
+  })
+
+  it('in a wall\'s plane you are not held or moved: you fall down along it to the floor', () => {
+    world(start, [wall('Wall', 'all'), [0, 0, 0]], [boxes('Low', 'all', [lowFloor(5)]), [0, -1, 0]])
+    walk(true)
+    expect(useWalk.getState().falling).toBe(true)
+    fallOut()
+    expect(at(start)).toEqual([0, -5, 0])
+  })
+
+  it('in a ceiling\'s plane you are nudged onto it as onto any face, and not moved', () => {
+    // The underside of a block above you: a face cannot say which side is its top (they are two-sided).
+    world(start, [boxes('Over', 'all', [[[-10, 0, -10], [10, 4, 10]]]), [0, 0, 0]])
+    walk(true)
+    still()
+  })
+
+  it('gravity off, a press is what it was: Down goes through the face you are on', () => {
+    world(start, [sheet('Sheet', 'all'), [0, 0, 0]])
+    walk(false)
+    useWalk.getState().press('down')
+    expect(at(start)).toEqual([0, -1, 0])
+  })
+})
+
 describe('as far as a hop can afford (C)', () => {
   /**
    * A cap low enough that a big boundary is a few dozen gibsons under the

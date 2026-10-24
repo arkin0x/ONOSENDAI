@@ -271,7 +271,7 @@ export function TouchControls(): JSX.Element {
             title="Hop: the pad lines up a move and COMMIT sends it. Press for VIEW, a free look that moves nothing"
             {...noCallout}
             onPointerDown={(e) => { e.preventDefault(); e.stopPropagation(); useCyberspace.getState().viewHere() }}
-          >HOP</button>
+          >HOP<span className="touchops__sub">(MODES)</span></button>
         ) : (
         <button
           className={`touchops__commit ${deploying ? 'is-armed' : computing ? 'is-busy' : tooFar ? 'is-too-far' : offload ? 'is-offload' : armed ? 'is-armed' : ''}`}

@@ -4610,6 +4610,8 @@ kbd {
 /* HOP, the resting mode: blue words on the dark button, and nothing to do
    but turn VIEW on. */
 .touchops__commit.is-hop { color: var(--accent, #00e5ff); border-color: rgba(0, 229, 255, 0.45); }
+/* Under HOP: pressing it switches modes (HOP, VIEW, WALK). */
+.touchops__sub { display: block; margin-top: 2px; font-size: 7px; letter-spacing: 0.08em; opacity: 0.7; }
 /* WALK: first person, every press a step. Red, lit, while it is on. */
 .touchops__commit.is-walk.is-on {
   color: #05070d;

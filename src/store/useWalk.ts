@@ -326,6 +326,8 @@ interface Fall {
   topN: number
   bottomN: number
   base: number
+  /** Seconds into the arc when `top` was set: a ceiling is met no earlier than that. */
+  topSince: number
   /** The last mid-air press's heading and where its hop starts: a press the same way after it grows that hop. */
   air: { axis: AxisName; dir: 1 | -1; from: Position } | null
   /** The walls known when it began: the only geometry it meets. */
@@ -362,7 +364,7 @@ function beginFall(from: Position, v0: number, top: bigint, bottom: bigint, land
   clearSettle()
   const hadOpen = useWalk.getState().open !== null
   if (hadOpen) closeOpen()
-  fall = { anchor: { ...from }, waypoints: [], y0: from.y, t0: nowMs(), v0, top, bottom, lands, peak: arcPeak(v0, Number(top)), topN: 0, bottomN: 0, base: 0, air: null, items, plane }
+  fall = { anchor: { ...from }, waypoints: [], y0: from.y, t0: nowMs(), v0, top, bottom, lands, peak: arcPeak(v0, Number(top)), topN: 0, bottomN: 0, base: 0, topSince: 0, air: null, items, plane }
   syncFall(fall)
   walkFall.active = true
   walkFall.offset = 0
@@ -404,8 +406,9 @@ function jump(from: Position): void {
  */
 function meetCeiling(f: Fall, now: number): void {
   if (f.v0 <= 0 || arcApex(f.v0) <= f.topN) return
-  // When the rise reaches the ceiling: v0 t - g t^2 / 2 = top.
-  const hit = (f.v0 - Math.sqrt(Math.max(0, f.v0 * f.v0 - 2 * WALK_GRAVITY * f.topN))) / WALK_GRAVITY
+  // When the rise reaches the ceiling (v0 t - g t^2 / 2 = top), and never
+  // before the ceiling was there: one met over a new column is met now.
+  const hit = Math.max(f.topSince, (f.v0 - Math.sqrt(Math.max(0, f.v0 * f.v0 - 2 * WALK_GRAVITY * f.topN))) / WALK_GRAVITY)
   if ((now - f.t0) / 1000 < hit) return
   f.y0 += f.top
   f.bottom -= f.top
@@ -413,6 +416,7 @@ function meetCeiling(f: Fall, now: number): void {
   f.t0 += hit * 1000
   f.v0 = 0
   f.peak = 0
+  f.topSince = 0
   syncFall(f)
 }
 
@@ -484,10 +488,11 @@ function airPress(f: Fall, axis: AxisName, sign: 1 | -1): void {
     const left = Math.ceil(arcApex(f.v0) - Number(rel) - 1e-6)
     const up = left > 0 ? stepLimit(p, 'y', 1, BigInt(left), f.items).reach : 0n
     f.top = rel + (up > 0n ? affordableRise(p, up, afford) : 0n)
+    f.topSince = Math.max(0, (now - f.t0) / 1000)
     f.peak = arcPeak(f.v0, Number(f.top))
   } else {
-    // Falling: in this column you have been at this point and below it only.
-    f.top = rel
+    // Past the top: in this column you have been at this point and below it
+    // only. The arc goes on falling as it was; its ceiling no longer matters.
     f.peak = Number(rel)
   }
   f.bottom = rel - limit.drop
@@ -639,7 +644,7 @@ useCyberspace.subscribe((s, prev) => {
   // Your head moved mid-fall with none of the walk's own hops in flight:
   // another device's move, or a chain cut short. The fall's hops would start
   // from a place you never were, so it goes, with the walk, back to the head.
-  if (fall !== null && s.position !== prev.position && w.running === null) {
+  if (fall !== null && w.running === null && !samePosition(s.position, prev.position)) {
     w.stop()
     return
   }

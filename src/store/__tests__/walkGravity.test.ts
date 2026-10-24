@@ -635,6 +635,29 @@ describe('a jump', () => {
     expect(walkFall.offset).toBeCloseTo(1 - WALK_GRAVITY * ((200 - 52.8) / 1000) ** 2 / 2, 1)
   })
 
+  it('over a gap: a press past the top keeps the arc as it was, and lands when gravity says', () => {
+    world(start, [boxes('Ledge', 'all', [LEDGE, lowFloor(30)]), [0, -1, 0]])
+    walk(true)
+    useWalk.getState().press('up')
+    const t0 = clock
+    frame(500)
+    const before = walkFall.offset
+    expect(before).toBeCloseTo(arcHeight(JUMP_SPEED, 0.5), 6)
+    useWalk.getState().press('away')
+    // At 1.67 coming down it has been at 2: the hop goes there, the eye stays put.
+    expect(at(start)).toEqual([0, 2, -1])
+    expect(walkFall.offset + 2).toBeCloseTo(before, 6)
+    frame(16)
+    expect(walkFall.offset + 2).toBeCloseTo(arcHeight(JUMP_SPEED, 0.516), 6)
+    fallOut()
+    // Down to 30 below where it left: 20 t - g t^2 / 2 = -30.
+    const t = (clock - t0) / 1000
+    const due = (JUMP_SPEED + Math.sqrt(JUMP_SPEED ** 2 + 2 * WALK_GRAVITY * 30)) / WALK_GRAVITY
+    expect(t).toBeGreaterThanOrEqual(due)
+    expect(t).toBeLessThan(due + 0.02)
+    expect(at(start)).toEqual([0, -30, -1])
+  })
+
   it('toggled off at the top: one hop to where you are', () => {
     world(start, [boxes('Floor', 'all', [FLOOR]), [0, -1, 0]])
     walk(true)

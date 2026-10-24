@@ -28,7 +28,7 @@
 
 import { Canvas, useFrame, useThree, type ThreeEvent } from '@react-three/fiber'
 import { OrbitControls } from '@react-three/drei'
-import { useEffect, useLayoutEffect, useMemo, useRef } from 'react'
+import { memo, useEffect, useLayoutEffect, useMemo, useRef } from 'react'
 import { AdditiveBlending, BufferGeometry, DoubleSide, EdgesGeometry, Float32BufferAttribute, Group, IcosahedronGeometry, Line, LineBasicMaterial, MeshBasicMaterial, PerspectiveCamera, SphereGeometry, Vector3, Matrix4 } from 'three'
 import { ACCENT, BG, WARN } from '../lib/palette'
 import { glowTexture } from '../lib/glow'
@@ -708,7 +708,24 @@ function AxesReporter(): null {
   return null
 }
 
-export function Bench(): JSX.Element {
+/**
+ * Memoized: Bench takes no props, so its only legitimate reason to redraw is
+ * its own store reads (useWorkshop, useBenchView, useThree). Workshop.tsx is
+ * one large component with its own local state (menus, panels, pickers,
+ * drag-and-drop); any one of those re-renders Workshop and, with Bench a
+ * plain function component, re-executed Bench too, which re-executed every
+ * child in its JSX (Grid, Ghost, Handles, ShardMesh) whether or not anything
+ * they read had changed. On a Maze Kit Basilica nave (1,896 vertices, ~290
+ * deduplicated handle points) a single tap on the canvas was measured to
+ * force that whole subtree to re-render ~280 times in a few seconds (none of
+ * them a real store change: useWorkshop.subscribe saw zero notifications)
+ * for seconds of blocked main thread — arkinox's "lockups" (2026-10-23,
+ * scripts/perf-bench-orbit.mjs). Wrapping Bench lets React's default memo
+ * comparison (no props, always equal) skip it on every parent-driven
+ * re-render that isn't Bench's own; its internal store subscriptions still
+ * force a real re-render exactly as before when something they read changes.
+ */
+function BenchImpl(): JSX.Element {
   const shard = useWorkshop((s) => s.current())
   const tool = useWorkshop((s) => s.tool)
   const extent = shard?.extent ?? GRID_HALF
@@ -788,3 +805,5 @@ export function Bench(): JSX.Element {
     </Canvas>
   )
 }
+
+export const Bench = memo(BenchImpl)

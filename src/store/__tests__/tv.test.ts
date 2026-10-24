@@ -42,7 +42,7 @@ import { useCyberspace } from '../useCyberspace'
 import { useBuilder } from '../useBuilder'
 import { usePersonCard } from '../usePersonCard'
 import { beatOf } from '../../lib/tv/tape'
-import { AD_EVERY_MS, BROADCAST_AD_EVERY_MS } from '../../lib/tv/hosakaAd'
+import { AD_EVERY_MS, BROADCAST_AD_EVERY_MS, CTV_ADVERTISE_1, HOSAKA_1 } from '../../lib/tv/hosakaAd'
 import { setBroadcastForTest } from '../../lib/tv/broadcast'
 import { musicHeldForAd } from '../useTvMusic'
 import { setExplainerLineupForTest, useTvExplainer } from '../useTvExplainer'
@@ -475,6 +475,21 @@ describe('Cyberspace TV', () => {
     expect(useTv.getState().ad).toBeNull()
     expect(held.slice(0, 2)).toEqual([false, false])
     expect(musicHeldForAd()).toBe(false)
+  })
+
+  it('the breaks alternate between HOSAKA and the house ad-slot spot, round robin (arkinox, 2026-10-24)', async () => {
+    useTv.getState().start()
+    const ids: string[] = []
+    const off = useTv.subscribe((s, prev) => { if (s.ad && !prev.ad) ids.push(s.ad.id) })
+    // Three breaks: long enough for AD_EVERY_MS to come due three times over.
+    await run(3 * AD_EVERY_MS + 90_000)
+    off()
+    expect(ids.length).toBeGreaterThanOrEqual(3)
+    for (const id of ids) expect([HOSAKA_1.id, CTV_ADVERTISE_1.id]).toContain(id)
+    // Never the same spot twice running: each break is the other one from the last.
+    for (let i = 1; i < ids.length; i++) expect(ids[i]).not.toBe(ids[i - 1])
+    // Round trip: the spot two breaks later is the same one again.
+    for (let i = 2; i < ids.length; i++) expect(ids[i]).toBe(ids[i - 2])
   })
 
   it('an explainer plays over the tape, the live picture going on under it; the spot waits for it and keeps its gap', async () => {

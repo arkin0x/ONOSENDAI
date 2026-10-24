@@ -128,12 +128,13 @@ export interface FallLimit {
  * above the first blocking face below it (the walls' own stop short, the
  * same faces the constraint holds by), unless that is further than a hop
  * from `from` can afford, in which case the last gibson it can. A floor no
- * item has is not there, so it is fallen through.
+ * item has is not there, so it is fallen through. A floor in the plane of
+ * `from` is under it: you stand on it (store/walkWalls.ts stepLimit, `stand`).
  */
 export function fallLimit(from: Position, items: readonly WallItem[], affordable: (from: Position, to: Position) => boolean): FallLimit {
   const reach = affordableAlongY(from, -1, AXIS_SPAN, affordable)
   // With nothing affordable below, still asked one gibson down: standing there is landed.
-  const down = stepLimit(from, 'y', -1, reach > 0n ? reach : 1n, items)
+  const down = stepLimit(from, 'y', -1, reach > 0n ? reach : 1n, items, true)
   if (down.by !== null && down.reach <= reach) return { drop: down.reach, lands: true, by: down.by }
   return { drop: reach, lands: false, by: null }
 }

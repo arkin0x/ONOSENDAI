@@ -9601,6 +9601,13 @@ a.feed__act { text-decoration: none; }
   background: var(--ask-bg);
   border: 1px solid rgba(0, 229, 255, 0.3);
   border-radius: 10px;
+  /* The decode noise (lib/decode.ts) draws from a wider glyph set than the
+     settled phrase, so a mid-decode frame can measure wider than the final
+     text. Never let that wrap the bubble to a second line and push the menu
+     below it down; a noise frame clips instead, for the ~250ms it's on screen. */
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: clip;
 }
 /* The bubble's tail, pointing at the face: a square turned on its corner,
    overlapping the bubble by a pixel so there is no gap, in the bubble's own

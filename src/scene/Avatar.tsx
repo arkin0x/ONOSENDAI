@@ -217,9 +217,11 @@ export function Avatar(): JSX.Element | null {
           top of whatever shares your gibson. Last because the marker is in
           three's transparent list with the shard faces, after them by render
           order (AvatarShape markerMaterialProps): opaque, it was drawn before
-          them, and a floor behind it painted over it. */}
+          them, and a floor behind it painted over it. 9.5, under the cursor's
+          ghost and the deploy box's walls at 10, so they lie over it on every
+          frame rather than by distance (review of #494). */}
       <group ref={drawn}>
-        {!(walking && hiddenInWalk) && <AvatarShape pubkey={pubkey} color="#ff2323" renderOrder={10} depthTest={false} firstPerson={walking} />}
+        {!(walking && hiddenInWalk) && <AvatarShape pubkey={pubkey} color="#ff2323" renderOrder={9.5} depthTest={false} firstPerson={walking} />}
       </group>
       {!walking && <TapTarget measure={drawn} yields onTap={() => usePersonCard.getState().open(pubkey)} />}
     </group>

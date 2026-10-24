@@ -31,11 +31,11 @@ function floor(): { object: Object3D; material: Material } {
   return { object, material }
 }
 
-/** Your own marker as Avatar.tsx draws it: render order 10, no depth test. */
+/** Your own marker as Avatar.tsx draws it: render order 9.5, no depth test. */
 function ownMarker(props = markerMaterialProps({ depthTest: false })): { object: Object3D; material: Material } {
   const material = new LineBasicMaterial(props)
   const object = new LineSegments(new BoxGeometry(), material)
-  object.renderOrder = 10
+  object.renderOrder = 9.5
   return { object, material }
 }
 
@@ -67,9 +67,9 @@ describe('your own marker against a shard', () => {
     expect(order.at(-1)).toBe(m.object)
   })
 
-  it('is the marker Avatar.tsx draws: render order 10, no depth test', () => {
+  it('is the marker Avatar.tsx draws: render order 9.5, no depth test', () => {
     const src = readFileSync(new URL('../Avatar.tsx', import.meta.url), 'utf8')
-    expect(src).toMatch(/<AvatarShape [^>]*renderOrder=\{10\} depthTest=\{false\} firstPerson=\{walking\} \/>/)
+    expect(src).toMatch(/<AvatarShape [^>]*renderOrder=\{9\.5\} depthTest=\{false\} firstPerson=\{walking\} \/>/)
   })
 })
 

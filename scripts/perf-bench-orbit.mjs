@@ -41,15 +41,27 @@ const port = 9400 + Math.floor(Math.random() * 400)
 const profile = fs.mkdtempSync(path.join(os.tmpdir(), 'benchorbit-'))
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 
+// detached: Chrome becomes its own process group leader, so shutdown can
+// kill the whole tree (the browser plus its zygote, GPU and renderer
+// processes) by group rather than just the one PID this script holds.
+// chrome.kill() alone leaves those orphaned: an earlier run of an ancestor
+// of this script left a GPU process running at 200%+ CPU for over half an
+// hour after the script itself had already exited 0, and a second one for
+// over three hours, found only by scanning for stray --user-data-dir
+// processes afterward.
 const chrome = spawn(CHROME, [
   `--remote-debugging-port=${port}`, `--user-data-dir=${profile}`, '--no-first-run', '--no-default-browser-check',
   '--enable-precise-memory-info', '--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader',
   `--window-size=${W},${H + 100}`, `--force-device-scale-factor=${DPR}`, 'about:blank',
-], { stdio: 'ignore' })
+], { stdio: 'ignore', detached: true })
 const shutdown = (code) => {
   // Drain stdout before exiting: a large final JSON.stringify can still be
   // buffered when process.exit() is called, truncating the last line.
-  const done = () => { try { chrome.kill() } catch {} ; try { fs.rmSync(profile, { recursive: true, force: true }) } catch {} ; process.exit(code) }
+  const done = () => {
+    try { process.kill(-chrome.pid, 'SIGKILL') } catch { try { chrome.kill('SIGKILL') } catch {} }
+    try { fs.rmSync(profile, { recursive: true, force: true }) } catch {}
+    process.exit(code)
+  }
   if (process.stdout.writableLength > 0) process.stdout.once('drain', done)
   else setTimeout(done, 50)
 }

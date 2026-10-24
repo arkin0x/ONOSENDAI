@@ -89,7 +89,7 @@ export function AskRow(): JSX.Element {
   return (
     <a className="ask" href={TOUR_HREF} onClick={onAskClick} title="A guided tour of what cyberspace is and what you are looking at">
       <span className="ask__emoji" aria-hidden="true">{ASK_EMOJI}</span>
-      <span className="ask__bubble">{shown}</span>
+      <span className="ask__bubble"><span className="ask__text">{shown}</span></span>
     </a>
   )
 }

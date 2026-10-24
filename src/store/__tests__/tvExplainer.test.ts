@@ -492,6 +492,43 @@ describe('Cyberspace TV explainers', () => {
     expect(explainerDueForTest()).toBe(Infinity)
   })
 
+  it('captions go the moment it starts out, on every way out, and stay gone (arkinox, 2026-10-24: "stuck captions")', async () => {
+    // One cue over the whole video, so only the way out can take it away.
+    const whole = 'WEBVTT\n\n00:00.000 --> 10:00.000\nAlways'
+    const ways: Array<[string, () => void, boolean]> = [
+      ['end', () => { video().ended = true }, true],
+      ['error', () => { video().error = { code: 3 } }, true],
+      ['viewer pause', () => { video().pause() }, true],
+      ['stall', () => {}, false],
+      ['guard', () => {}, true],
+    ]
+    for (const [way, act, moving] of ways) {
+      stopExplainers()
+      setExplainerLineupForTest([one('1-a', { captions: 'https://b.example/c.vtt' })])
+      fetchBody = (url) => new Response(url.endsWith('.vtt') ? whole : bytes as BodyInit)
+      startExplainers(performance.now(), '')
+      await run(EXPLAINER_FIRST_MS + EXPLAINER_IN_MS + 1000)
+      expect(phase(), way).toBe('play')
+      expect(explainerCaption(), way).toBe('Always')
+      act()
+      if (way === 'stall') await run(EXPLAINER_STALL_MS + 100, playing, false)
+      else if (way === 'guard') { for (let i = 0; i < guardMs(one('1-a')) / 100 && phase() === 'play'; i++) await run(100) }
+      else await run(200, playing, moving)
+      expect(phase(), way).toBe('out')
+      expect(explainerCaption(), way).toBeNull()
+      await run(EXPLAINER_OUT_MS + 200)
+      expect(phase(), way).toBeNull()
+      expect(explainerCaption(), way).toBeNull()
+    }
+    // TV off mid-caption.
+    stopExplainers()
+    startExplainers(performance.now(), '')
+    await run(EXPLAINER_FIRST_MS + EXPLAINER_IN_MS + 1000)
+    expect(explainerCaption()).toBe('Always')
+    stopExplainers()
+    expect(explainerCaption()).toBeNull()
+  })
+
   it('paints the caption at the moment', async () => {
     setExplainerLineupForTest([one('1-a', { captions: 'https://b.example/c.vtt' })])
     fetchBody = (url) => new Response(url.endsWith('.vtt') ? 'WEBVTT\n\n00:00.000 --> 00:01.000\nHello\n\n00:01.000 --> 00:05.000\nThere' : bytes as BodyInit)

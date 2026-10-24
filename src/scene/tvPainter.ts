@@ -32,6 +32,7 @@ import { CUT_MS, contentsWords, quoteOf, segmentDoing, typePace, TYPE_DELAY_S } 
 import { findLines, placeable, shotProgress, type TvAvatar, type TvFindLine } from '../store/useTv'
 import { adFor, type AdScene, type AdTheme } from '../lib/tv/hosakaAd'
 import { BROADCAST_TAG, broadcastScale, isBroadcast } from '../lib/tv/broadcast'
+import { EXPLAINER_PIP_ENABLED } from '../lib/tv/explainer'
 import { watchingWords } from '../lib/tv/watching'
 import type { Census, ChainTimes } from '../lib/tv/stats'
 import type { Position } from '../lib/space'
@@ -211,6 +212,12 @@ export interface TvExplainer {
   caption: string | null
   /** The browser holds its sound back until a tap. */
   soundHeld?: boolean
+  /**
+   * Whether the live picture shows small in its corner (lib/tv/explainer
+   * EXPLAINER_PIP_ENABLED, the default when not given). Without it the
+   * title's tag has no PIP to stand under.
+   */
+  pipShown?: boolean
 }
 
 /** What NOW PLAYING shows. */
@@ -574,6 +581,14 @@ export class TvPainter {
       return
     }
 
+    // An explainer on screen (lib/tv/explainer) is its own spot, with its own
+    // logo burned in: the top-right block (the logo, PLAY, the date and the
+    // time, the stream's address) steps aside the whole time it is on, as
+    // the marquee and the chiron do, and comes back with the picture
+    // (arkinox, 2026-10-24: "right top corner should go away during ad").
+    // Still laid out, so nothing else moves.
+    const ex = a.explainer && a.explainer.mix > 0 ? a.explainer : null
+
     // The logo, top right: the margins everything else takes.
     part('logo')
     const lw = Math.min(LOGO_PX * s0, W * LOGO_SHARE)
@@ -581,7 +596,7 @@ export class TvPainter {
     // Under heavy snow (tuning, no signal, a bag with no public place) the
     // logo and the clock get a soft dark backing, to read against the noise.
     const snowy = p.status === 'tuning' || p.status === 'no-signal' || (p.shot?.item?.kind === 'bag' && !placeable(p.shot.item.hint))
-    if (snowy) {
+    if (snowy && !ex) {
       const bx = W - MX - lw - 18 * s
       const by = MY - 14 * s
       const back = ctx.createRadialGradient(W - MX - lw / 2, MY + lh, 0, W - MX - lw / 2, MY + lh, lw * 0.9)
@@ -590,7 +605,7 @@ export class TvPainter {
       ctx.fillStyle = back
       ctx.fillRect(bx, by, lw + 36 * s, lh + 130 * s)
     }
-    if (a.logo) {
+    if (a.logo && !ex) {
       ctx.globalAlpha = 0.96
       ctx.drawImage(a.logo, W - MX - lw, MY, lw * LOGO_FILE_W, lh)
       ctx.globalAlpha = 1
@@ -602,16 +617,16 @@ export class TvPainter {
     ctx.textAlign = 'right'
     let cy = MY + lh + 18 * s
     ctx.font = `700 ${11 * s}px ${TV_FONT}`
-    ctx.fillText('▶ PLAY', W - MX, cy)
+    if (!ex) ctx.fillText('▶ PLAY', W - MX, cy)
     // The column's left edge, the logo's or the widest line's.
     let colLeft = Math.min(W - MX - lw, W - MX - ctx.measureText('▶ PLAY').width)
     if (p.tapeTime !== null) {
       const stamp = tapeStamp(p.tapeTime)
       ctx.font = `700 ${(narrow ? 13 : 16) * s}px ${TV_FONT}`
       cy += 20 * s
-      ctx.fillText(stamp.date, W - MX, cy)
+      if (!ex) ctx.fillText(stamp.date, W - MX, cy)
       cy += 20 * s
-      ctx.fillText(stamp.time, W - MX, cy)
+      if (!ex) ctx.fillText(stamp.time, W - MX, cy)
       colLeft = Math.min(colLeft, W - MX - Math.max(ctx.measureText(stamp.date).width, ctx.measureText(stamp.time).width))
     }
 
@@ -619,7 +634,7 @@ export class TvPainter {
     // (lib/tv/broadcast BROADCAST_TAG). Where the time stands whether or not
     // the tape has one yet, so it never moves.
     part('urlTag')
-    const tag = isBroadcast() ? this.urlTag(W - MX, MY + lh + URL_TAG_DROP * s, s) : null
+    const tag = isBroadcast() && !ex ? this.urlTag(W - MX, MY + lh + URL_TAG_DROP * s, s) : null
     const clockBottom = tag ? Math.max(cy, tag.bottom) : cy
     if (tag) colLeft = Math.min(colLeft, tag.left)
 
@@ -636,7 +651,6 @@ export class TvPainter {
     const mapSize = bigInset ? 0 : Math.min(200 * s0, W * 0.3, H * 0.34)
     part('minimap')
     // An explainer's live picture takes the minimap's corner (lib/tv/explainer).
-    const ex = a.explainer && a.explainer.mix > 0 ? a.explainer : null
     if (!bigInset && !ex) this.minimap(p, MX, MY, mapSize, s, now, reduced)
 
     // The marquee along the bottom margin, the CYBERSPACE TV bug at its head.
@@ -729,40 +743,57 @@ export class TvPainter {
     }
 
     part('explainer')
-    if (ex) this.explainerParts(ex, a.music?.muted === true, W, scale, s, narrow, tickY)
+    if (ex) this.explainerParts(ex, a.music?.muted === true, W, scale, s, narrow, MX, tickY, tickH)
   }
 
   /**
-   * What an explainer adds (lib/tv/explainer): its title in a tag under the
-   * live picture, as a channel marks what is on, and its captions over the
-   * video's foot, above the marquee. The live picture's own frame is the
-   * tube's (scene/TvScreenEffect), drawn with it as it moves.
+   * What an explainer adds (lib/tv/explainer): its title in a tag, as a
+   * channel marks what is on, and its captions over the video's foot, above
+   * the marquee. The live picture's own frame is the tube's
+   * (scene/TvScreenEffect), drawn with it as it moves.
+   *
+   * The tag stands under the live picture where it shows small in its corner
+   * (pipShown). With the PIP off (the default since 2026-10-24) there is no
+   * picture to stand under, and a tag left at the PIP's old foot read as a
+   * stray caption on the left of the video (arkinox, 2026-10-24:
+   * "inexplicable stuck captions"): on the stream, where its only words are
+   * the title the video already shows, there is none; on the site, where a
+   * tap on it is the sound's (TAP FOR SOUND, MUTED), it takes the marquee's
+   * band, empty while the explainer plays, at its left.
    */
-  private explainerParts(ex: TvExplainer, muted: boolean, W: number, scale: number, s: number, narrow: boolean, floor: number): void {
+  private explainerParts(ex: TvExplainer, muted: boolean, W: number, scale: number, s: number, narrow: boolean, MX: number, floor: number, floorH: number): void {
     const ctx = this.ctx
     ctx.save()
-    // Only once the live picture is all but in its corner: the tag stands
-    // where its corner ends, which the picture crosses on its way.
-    const alpha = clamp01((ex.mix - 0.8) / 0.2)
-    ctx.globalAlpha = alpha
-    ctx.textAlign = 'left'
-    ctx.font = `700 ${(narrow ? 9 : 10) * s}px ${TV_FONT}`
-    const x = ex.pip.x * scale
-    const y = (ex.pip.y + ex.pip.h) * scale + 8 * s
-    // The sound is the viewer's to mute here too: a tap on the tag, as on
-    // NOW PLAYING, which steps away meanwhile (review of #471).
-    const state = isBroadcast() ? '' : ex.soundHeld ? ' · TAP FOR SOUND' : muted ? ' · MUTED' : ''
-    const label = fit(ctx, `${ex.title}${state}`, Math.max(20 * s, ex.pip.w * scale - 14 * s))
-    const tw = ctx.measureText(label).width
-    this.npRect = alpha > 0 ? { x, y, w: tw + 14 * s, h: 18 * s } : null
-    ctx.fillStyle = 'rgba(0, 0, 0, 0.55)'
-    ctx.fillRect(x, y, tw + 14 * s, 18 * s)
-    ctx.strokeStyle = 'rgba(0, 229, 255, 0.6)'
-    ctx.lineWidth = Math.max(1, s)
-    ctx.strokeRect(x + 0.5, y + 0.5, tw + 14 * s - 1, 18 * s - 1)
-    ctx.fillStyle = 'rgba(242, 251, 255, 0.9)'
-    ctx.fillText(label, x + 7 * s, y + 12.5 * s)
+    const pipShown = ex.pipShown ?? EXPLAINER_PIP_ENABLED
+    this.npRect = null
+    if (pipShown || !isBroadcast()) {
+      // Under a PIP, only once the live picture is all but in its corner: the
+      // tag stands where its corner ends, which the picture crosses on its way.
+      const alpha = pipShown ? clamp01((ex.mix - 0.8) / 0.2) : 1
+      ctx.globalAlpha = alpha
+      ctx.textAlign = 'left'
+      ctx.font = `700 ${(narrow ? 9 : 10) * s}px ${TV_FONT}`
+      const h = 18 * s
+      const x = pipShown ? ex.pip.x * scale : MX
+      const y = pipShown ? (ex.pip.y + ex.pip.h) * scale + 8 * s : floor + (floorH - h) / 2
+      // The sound is the viewer's to mute here too: a tap on the tag, as on
+      // NOW PLAYING, which steps away meanwhile (review of #471).
+      const state = isBroadcast() ? '' : ex.soundHeld ? ' · TAP FOR SOUND' : muted ? ' · MUTED' : ''
+      const room = pipShown ? ex.pip.w * scale : W / 2 - MX
+      const label = fit(ctx, `${ex.title}${state}`, Math.max(20 * s, room - 14 * s))
+      const tw = ctx.measureText(label).width
+      this.npRect = alpha > 0 ? { x, y, w: tw + 14 * s, h } : null
+      ctx.fillStyle = 'rgba(0, 0, 0, 0.55)'
+      ctx.fillRect(x, y, tw + 14 * s, h)
+      ctx.strokeStyle = 'rgba(0, 229, 255, 0.6)'
+      ctx.lineWidth = Math.max(1, s)
+      ctx.strokeRect(x + 0.5, y + 0.5, tw + 14 * s - 1, h - 1)
+      ctx.fillStyle = 'rgba(242, 251, 255, 0.9)'
+      ctx.fillText(label, x + 7 * s, y + 12.5 * s)
+    }
     if (ex.caption) {
+      // In as the video comes up, as they always were.
+      ctx.globalAlpha = clamp01((ex.mix - 0.8) / 0.2)
       const size = (narrow ? 13 : 18) * s
       ctx.font = `700 ${size}px ${TV_FONT}`
       ctx.textAlign = 'center'

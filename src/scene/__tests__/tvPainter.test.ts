@@ -10,7 +10,7 @@ if (typeof localStorage === 'undefined') {
   ;(globalThis as { localStorage?: unknown }).localStorage = { getItem: (k: string) => mem.get(k) ?? null, setItem: (k: string, v: string) => { mem.set(k, String(v)) }, removeItem: (k: string) => { mem.delete(k) }, clear: () => mem.clear() }
 }
 vi.mock('../../lib/relay', () => ({ query: async () => [], queryEach: async () => [], queryAny: async () => [], publish: async () => ({ ok: true }), publishMany: async () => ({ ok: true }), relaySet: () => [] }))
-import { TvPainter, fit, tickerItems, wrap, type TvAssets, type TvExplainer, type TvPicture } from '../tvPainter'
+import { MARGIN_X, TvPainter, fit, tickerItems, wrap, type TvAssets, type TvExplainer, type TvPicture } from '../tvPainter'
 import { cutKind, explainerPipRect, flatPoint, tubeDrift, tubeFlicker } from '../TvScreenEffect'
 import { Vector2 } from 'three'
 import { useTv } from '../../store/useTv'
@@ -945,7 +945,7 @@ describe('an explainer on the tube (lib/tv/explainer)', () => {
   const shot = { id: 'a'.repeat(64), kind: 'trip' as const, pubkey: 'p', beats: [], start: 1, end: 1, offsets: [], length: 5 }
   const explainer = { title: 'WHAT IS CYBERSPACE?', mix: 1, pip: { x: 84, y: 68, w: 420, h: 236 }, video: { x: 0, y: 0, w: 1400, h: 787.5 }, caption: 'Every move is a proof of work.' }
 
-  it("steps the live picture's own words away, keeps the clock and the marquee, and paints its title and caption", () => {
+  it("steps the live picture's own words and the top-right block away, and paints its title and caption", () => {
     const { canvas, words } = writing()
     const p = new TvPainter(canvas)
     p.size(1400, 800, 1)
@@ -959,12 +959,15 @@ describe('an explainer on the tube (lib/tv/explainer)', () => {
     expect(words).not.toContain('P')
     expect(words).not.toContain('♪ NOW PLAYING')
     expect(words.some((w) => w.includes('MEANWHILE'))).toBe(false)
-    // The sound's tap and drag move to the title's tag (review of #471).
+    // The sound's tap and drag move to the title's tag (review of #471),
+    // which with the PIP off takes the marquee's empty band, bottom left
+    // (arkinox, 2026-10-24: "inexplicable stuck captions").
     const tag = p.musicCard!
-    expect(tag.x).toBeCloseTo(explainer.pip.x, 5)
-    expect(tag.y).toBeGreaterThan(explainer.pip.y + explainer.pip.h)
-    // The clock stays; the title and the caption are painted.
-    expect(words).toContain('▶ PLAY')
+    expect(tag.x).toBe(Math.round(1400 * MARGIN_X))
+    expect(tag.y).toBeGreaterThanOrEqual(p.marqueeTop!)
+    // The top-right block steps aside too (arkinox, 2026-10-24: "right top
+    // corner should go away"); the title and the caption are painted.
+    expect(words).not.toContain('▶ PLAY')
     expect(words).toContain('WHAT IS CYBERSPACE?')
     expect(words).toContain('Every move is a proof of work.')
     expect(p.marqueeTop).toBeGreaterThan(600)
@@ -972,10 +975,11 @@ describe('an explainer on the tube (lib/tv/explainer)', () => {
     words.length = 0
     p.paint(picture({ shot }), { ...assets, music }, 1080, 1, false)
     expect(words).toContain('P')
+    expect(words).toContain('▶ PLAY')
     expect(p.musicCard).not.toBeNull()
   })
 
-  it('says MUTED on the tag while muted, and has no tap target while the picture is still on its way in', () => {
+  it('says MUTED on the tag while muted; under a PIP, no tap target while the picture is still on its way in', () => {
     const { canvas, words } = writing()
     const p = new TvPainter(canvas)
     p.size(1400, 800, 1)
@@ -983,8 +987,11 @@ describe('an explainer on the tube (lib/tv/explainer)', () => {
     expect(words).toContain('WHAT IS CYBERSPACE? · MUTED')
     p.paint(picture({ shot }), { ...assets, music, explainer: { ...explainer, soundHeld: true } }, 1020, 1, false)
     expect(words).toContain('WHAT IS CYBERSPACE? · TAP FOR SOUND')
-    p.paint(picture({ shot }), { ...assets, music, explainer: { ...explainer, mix: 0.5 } }, 1040, 1, false)
+    p.paint(picture({ shot }), { ...assets, music, explainer: { ...explainer, mix: 0.5, pipShown: true } }, 1040, 1, false)
     expect(p.musicCard).toBeNull()
+    // With the PIP off there is no corner to wait for: the tag is the sound's from the start.
+    p.paint(picture({ shot }), { ...assets, music, explainer: { ...explainer, mix: 0.5 } }, 1060, 1, false)
+    expect(p.musicCard).not.toBeNull()
   })
 
   it('over TUNING, says nothing in the middle of the video', () => {

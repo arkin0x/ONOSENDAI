@@ -397,7 +397,14 @@ describe('review fixes: never back onto localStorage after the move', () => {
   it('a database cleared while no tab was open brings the backup back, and says so', async () => {
     const list = [bigShard('a', 4, 1)]
     seedLocal(list)
-    await boot()
+    // Closed, not just loaded: boot() only closes a tab when the next one
+    // loads, so a tab left open here would hear the delete (onversionchange)
+    // and put its own shards back, with a fresh mark, racing this reload's
+    // decide(). Whichever lands first is a matter of scheduling, and when the
+    // open tab wins there is no cleared database left to notice. That race is
+    // covered by 'a database cleared under an open tab...' above.
+    const first = await boot()
+    first.st.closeForTests()
     await new Promise<void>((resolve) => { const r = indexedDB.deleteDatabase('onosendai:workshop'); r.onsuccess = () => resolve() })
     const { ws, st } = await boot()
     expect(st.storageMode()).toBe('indexeddb')

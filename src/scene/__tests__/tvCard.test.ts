@@ -13,11 +13,12 @@ if (typeof localStorage === 'undefined') {
   ;(globalThis as { localStorage?: unknown }).localStorage = { getItem: (k: string) => mem.get(k) ?? null, setItem: (k: string, v: string) => { mem.set(k, String(v)) }, removeItem: (k: string) => { mem.delete(k) }, clear: () => mem.clear() }
 }
 vi.mock('../../lib/relay', () => ({ query: async () => [], queryEach: async () => [], queryAny: async () => [], publish: async () => ({ ok: true }), publishMany: async () => ({ ok: true }), relaySet: () => [] }))
-import { CARD_MS, TvPainter, type TvAssets, type TvPicture } from '../tvPainter'
+import { CARD_MS, MARGIN_X, MARGIN_Y, TvPainter, type TvAssets, type TvPicture } from '../tvPainter'
 import { CARD_CLEAR_PX, CARD_FLOOR, CARD_H_PX, CARD_LEAST, CARD_LINE_EM, CARD_PAD_PX, clearOfPanel, placeCard, type CardFrame, type PanelInk } from '../tvCard'
 import { CUT_MS } from '../../hud/TvSegments'
 import { useTv } from '../../store/useTv'
 import { setBroadcastForTest, type BroadcastTextSize } from '../../lib/tv/broadcast'
+import { explainerLayout } from '../../lib/tv/explainer'
 
 interface Box { x0: number; y0: number; x1: number; y1: number }
 interface Look { font: string; ink: string; alpha: number }
@@ -103,17 +104,17 @@ const shortComment = { ...comment, id: 'd'.repeat(64), text: 'welcome to cybersp
 const segmentShot = (item: typeof bag | typeof object | typeof comment) => ({ id: item.id, kind: item.kind, item, pubkey: 'ann', beats: [], start: 1, end: 1, offsets: [], length: 30 })
 const KINDS = [trip, segmentShot(bag), segmentShot(object), segmentShot(comment), segmentShot(shortComment)]
 
-/** Paint once at `w` x `h` and `now` (`into` ms into the shot for a segment), after a first paint as the set paints on. */
-function paintAt(p: TvPicture, w: number, h: number, now = 1e12, scale = 1, into = 1500): ReturnType<typeof recording> {
+/** Paint once at `w` x `h` and `now` (`into` ms into the shot for a segment), after a first paint as the set paints on, with `a`. */
+function paintAt(p: TvPicture, w: number, h: number, now = 1e12, scale = 1, into = 1500, a: TvAssets = assets): ReturnType<typeof recording> {
   vi.spyOn(performance, 'now').mockReturnValue(now)
   if (p.shot) useTv.setState({ shot: p.shot, status: p.status, cutAt: now - into, played: 0 })
   const rec = recording()
   const painter = new TvPainter(rec.canvas)
   painter.size(w, h, scale)
-  painter.paint(p, assets, now - 33, scale, false)
+  painter.paint(p, a, now - 33, scale, false)
   rec.texts.length = 0
   rec.rects.length = 0
-  painter.paint(p, assets, now, scale, false)
+  painter.paint(p, a, now, scale, false)
   vi.restoreAllMocks()
   return rec
 }
@@ -366,5 +367,26 @@ describe('the card on the tube', () => {
     // Under a minute skipped, or the tape not playing, no card.
     expect(paintAt(picture({ shot: trip as never, skipped: 59, cutAt: 1e12 - 1500 }), 1920, 1080).rects.filter(isCard)).toEqual([])
     expect(paintAt(picture({ shot: trip as never, status: 'end', skipped: 7200, cutAt: 1e12 - 1500 }), 1920, 1080).rects.filter(isCard)).toEqual([])
+  })
+})
+
+describe('the card over an explainer (#485: the live picture\'s words step away with it)', () => {
+  it('not drawn while one is on (coming in, playing, going out), on the site and the stream, and back after', () => {
+    const [w, h] = [1920, 1080]
+    const { pip, video } = explainerLayout(w, h, 16 / 9, MARGIN_X, MARGIN_Y, h * (1 - MARGIN_Y) - 32)
+    for (const mode of [null, 'large', 'xl'] as Array<BroadcastTextSize | null>) {
+      setBroadcastForTest(mode !== null, mode ?? 'normal')
+      for (const shot of [trip, segmentShot(comment)]) {
+        const at = `${mode ?? 'site'} ${shot.kind}`
+        const p = picture({ shot: shot as never, ...CARDS[0] })
+        expect(paintAt(p, w, h).rects.filter(isCard).length, `${at} before`).toBe(1)
+        for (const mix of [0.05, 0.5, 1]) {
+          const during = paintAt(p, w, h, 1e12, 1, 1500, { ...assets, explainer: { title: 'Welcome to Cyberspace', mix, pip, video, caption: null, pipShown: false } })
+          expect(during.rects.filter(isCard).length, `${at} mix ${mix}`).toBe(0)
+          expect(during.texts.some((t) => /LATER$/.test(t.text)), `${at} mix ${mix}`).toBe(false)
+        }
+        expect(paintAt(p, w, h).rects.filter(isCard).length, `${at} after`).toBe(1)
+      }
+    }
   })
 })

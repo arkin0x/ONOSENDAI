@@ -51,7 +51,7 @@ export const EXPLAINERS: Explainer[] = [
     captions: '/explainers/welcome-to-cyberspace.vtt',
   },
   // arkinox's second (2026-10-24), uploaded by him to nostr.build: not
-  // hash-addressed, so the hash is pinned here. No captions.
+  // hash-addressed, so the hash is pinned here. Captions from his words.
   {
     id: '2-your-key-is-your-identity',
     title: 'Your Key Is Your Identity',
@@ -59,5 +59,6 @@ export const EXPLAINERS: Explainer[] = [
     files: [
       { url: 'https://v.nostr.build/E5soFc2c5mWSFkqErhMllf.mp4', type: 'video/mp4; codecs="avc1.640028, mp4a.40.2"', sha256: '6f20d14254baf4a182d2303701c852ab5451cc5beb858aaeef61ac03c9a3cf3d' },
     ],
+    captions: '/explainers/your-key-is-your-identity.vtt',
   },
 ]

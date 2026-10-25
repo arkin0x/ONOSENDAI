@@ -283,6 +283,18 @@ describe("WALK's walls are built by trust (arkinox 2026-10-25: \"ok A sounds goo
     })
   })
 
+  it("a stranger's bag of live links to your own object is charged to the stranger (review of #511)", async () => {
+    // Three links in a stranger's bag, each drawing your own object grown huge: they cannot spend your share.
+    const links = [0, 1, 2].map((i) => item(heavy(ME), { key: `their-link-${i}`, author: THEM }))
+    const m = item(maze(ME), { key: 'maze', mine: true, author: ME })
+    await withWorld([...links, m], async () => {
+      warmWalls(1, AT)
+      await settleAll()
+      expect(wallBudgetLeft('trusted')).toBeGreaterThanOrEqual(TRUSTED_BUDGET - 1)
+      expect(towardWall([...links, m])).toBe(2n)
+    })
+  })
+
   it('a share still out when the next WALK starts is never refunded into it', async () => {
     // A shard of yours whose one part comes from a slow relay.
     const slowRef: Ref = ['a', at(ME, 'slow-part')]

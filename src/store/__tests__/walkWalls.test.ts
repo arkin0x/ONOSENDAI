@@ -20,13 +20,15 @@ vi.hoisted(() => {
 })
 
 // A resolve that never lands, when asked: to show a wait is let go (wallsBuilt).
-const hang = vi.hoisted(() => ({ on: false, calls: new Map<string, number>() }))
+const hang = vi.hoisted(() => ({ on: false, calls: new Map<string, number>(), last: new Map<string, unknown>() }))
 vi.mock('../../lib/parts', async (orig) => {
   const mod = await orig<typeof import('../../lib/parts')>()
   return { ...mod, resolvePartsShared: (...args: Parameters<typeof mod.resolvePartsShared>) => {
     // How often each shard (by name) is resolved: to show what is built again, and when.
     hang.calls.set(args[0].name, (hang.calls.get(args[0].name) ?? 0) + 1)
-    return hang.on ? new Promise<never>(() => {}) : mod.resolvePartsShared(...args)
+    if (hang.on) return new Promise<never>(() => {})
+    // And what it last resolved to, to look at.
+    return mod.resolvePartsShared(...args).then((placed) => { hang.last.set(args[0].name, placed); return placed })
   } }
 })
 
@@ -38,8 +40,8 @@ import { newShard, type Ref, type ShardModel } from 'sno-core/shards'
 import { primeRef } from '../../lib/parts'
 import { withConstrain } from '../../lib/walkConstrain'
 import type { AxisName, Position } from '../../lib/space'
-import { STRANGER_BUDGET, STRANGER_READS, STRANGER_SHARD_READS, TRUSTED_BUDGET, TRUSTED_READS, WALL_WAIT_MS, clearWalls, setWallFollows, stepLimit, takeWallWait, wallBudgetLeft, wallReadsLeft, wallsBuilt, warmWalls, type WallItem } from '../walkWalls'
-import { MAX_MODELS } from 'sno-core/parts'
+import { STRANGER_BUDGET, STRANGER_READS, STRANGER_SHARD, STRANGER_SHARD_READS, TRUSTED_BUDGET, TRUSTED_READS, WALL_WAIT_MS, clearWalls, setWallFollows, stepLimit, takeWallWait, wallBudgetLeft, wallReadsLeft, wallsBuilt, warmWalls, type WallItem } from '../walkWalls'
+import { MAX_MODELS, type Placed } from 'sno-core/parts'
 import { setLocalAuthor } from '../../lib/carried'
 import { useShards } from '../useShards'
 import { toPayload } from 'sno-core/shards'
@@ -482,12 +484,19 @@ describe("WALK's walls are built by trust (arkinox 2026-10-25: \"ok A sounds goo
     const xRef: Ref = ['a', at(THEM, 'x')]
     primeRef(xRef, { ...toPayload({ ...newShard('x'), mode: 'solid' }), refs: [['a', at(THEM, 'y')]], parts: [[0, 0, 0, 0, 0, 0, 0, 0]], objects: { [at(THEM, 'y')]: toPayload({ ...newShard('y'), mode: 'solid' }) } })
     const room = { ...toPayload({ ...newShard('room'), mode: 'solid' }), refs: [xRef], parts: [[0, 0, 0, 0, 0, 0, 0, 0]] }
-    const rooms = item(withConstrain({ ...newShard('Rooms'), mode: 'solid', vertices: [], faces: [], author: ME, refs: [['a', at(ME, 'room')]], objects: { [at(ME, 'room')]: room },
-      parts: Array.from({ length: 18_000 }, (_, i) => ({ ref: 0, at: [0, i % 1000, 0] as [number, number, number], turn: [0, 0, 0] as [number, number, number], step: 0 })) }, 'off'), { key: 'rooms', mine: true, author: ME })
+    // And your tower, published and fetched after everything else, whose floor places your wall.
+    const towerRef: Ref = ['a', at(ME, 'tower')]
+    const tower = { ...toPayload({ ...newShard('tower'), mode: 'solid' }), refs: [['a', at(ME, 'floor')]], parts: [[0, 0, 0, 0, 0, 0, 0, 0]],
+      objects: { [at(ME, 'floor')]: { ...toPayload({ ...newShard('floor'), mode: 'solid' }), refs: [['a', at(ME, 'wall')]], parts: [[0, 0, 0, 0, 0, 0, 0, 0]] }, [at(ME, 'wall')]: toPayload(slab('z', -1, 0)) } }
+    primeRef(towerRef, new Promise((ok) => setTimeout(() => ok(tower), 20)))
+    const rooms = item(withConstrain({ ...newShard('Rooms'), mode: 'solid', vertices: [], faces: [], author: ME, refs: [['a', at(ME, 'room')], towerRef], objects: { [at(ME, 'room')]: room },
+      parts: [...Array.from({ length: 18_000 }, (_, i) => ({ ref: 0, at: [0, i % 1000, 0] as [number, number, number], turn: [0, 0, 0] as [number, number, number], step: 0 })), { ref: 1, at: [0, 0, 3600] as [number, number, number], turn: [0, 0, 0] as [number, number, number], step: 0 }] }, 'off'), { key: 'rooms', mine: true, author: ME })
     const m = item(maze(ME), { key: 'maze', mine: true, author: ME })
     hang.calls.clear()
     await withWorld([rooms, m], async () => {
       warmWalls(1, AT)
+      await settleAll()
+      await new Promise((ok) => setTimeout(ok, 40))
       await settleAll()
       // Its first build: the quick pass from what is in hand, then the relays for what was not.
       const first = hang.calls.get('Rooms') ?? 0
@@ -496,6 +505,16 @@ describe("WALK's walls are built by trust (arkinox 2026-10-25: \"ok A sounds goo
       await settleAll()
       expect(hang.calls.get('Rooms')).toBe(first)
       expect(towardWall([rooms, m])).toBe(2n)
+      // sno-core 0.1.24: the strangers' placeholders never take your placements' place, so every
+      // room of yours is drawn, and the strangers' share draws what it has (each x and its y).
+      const placed = hang.last.get('Rooms') as Placed[]
+      expect(placed.filter((p) => p.model?.name === 'room').length).toBe(18_000)
+      const xs = placed.flatMap((p) => p.children).filter((c) => c.model?.name === 'x')
+      expect(xs.length + xs.flatMap((x) => x.children).filter((c) => c.model).length).toBe(STRANGER_SHARD)
+      // Your wall two levels under your late tower is drawn (in 0.1.23 their placeholders had spent the node ceiling).
+      const towerAt = placed.find((p) => p.model?.name === 'tower')
+      expect(towerAt?.children[0]?.model?.name).toBe('floor')
+      expect(towerAt?.children[0]?.children[0]?.model?.name).toBe('Slab')
       warmWalls(1, AT)
       await settleAll()
       expect(hang.calls.get('Rooms')).toBe(first + 1)

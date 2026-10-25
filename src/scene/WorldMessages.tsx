@@ -2,9 +2,13 @@
  * WorldMessages.tsx — hidden messages, found and read.
  *
  * A discovered kind:1 renders as a billboarded note at its coordinate: the
- * text, and a short marker of who left it. Held to a constant pixel size like
- * every other world label, so a message stays readable at any zoom rather than
- * shrinking to nothing. Culled past the same reach as everything else.
+ * text, and a short marker of who left it. Sized on screen like every other
+ * world label, so a message stays readable at any zoom rather than shrinking
+ * to nothing. Past the headlamp's reach a mark recedes with depth to a
+ * floor (lib/markerSize.ts recedeShare), so a chest at the far end of a hall
+ * in WALK is smaller than one at your feet (arkinox, 2026-10-25), and its
+ * words keep their size and fade out further on, the credit line first
+ * (fadeShare). Culled past the same reach as everything else.
  *
  * Placed with markerCentre, not cellCentre, and the difference is the whole of
  * a bug worth naming. GO TO IT focuses the camera on the item, and a plain
@@ -47,7 +51,7 @@ import { useCeremony } from '../store/useCeremony'
 import { GRID_RADIUS, itemCentre, type ViewAxes } from '../lib/space'
 import { alignedOrigin, useCyberspace } from '../store/useCyberspace'
 import { useShards } from '../store/useShards'
-import { WorldLabel } from './WorldLabel'
+import { LABEL_PRIORITY, WorldLabel } from './WorldLabel'
 import { findCashuToken } from '../lib/cashu'
 import { NFT_WORDS, replaceNftLinks } from '../lib/nftLink'
 import { useProfile } from '../hooks/useProfile'
@@ -60,6 +64,8 @@ import { useItemModel } from '../hooks/useItemModel'
 import type { ItemAnimation, ItemModelRef } from '../lib/itemModel'
 import { ItemModelMark } from './ItemModel'
 import { useMutes } from '../store/useMutes'
+import { MARK_RECEDE_FLOOR, recedeShare } from '../lib/markerSize'
+import { headlampUniforms } from './headlamp'
 
 /** A message's tap target, in CSS pixels: a fingertip over the mark, at any zoom. */
 const TAP_PX = 44
@@ -83,6 +89,18 @@ export const NOTE_EDGE_PX = 0.72 * MARK_PX.note
 const COIN_PX = 31
 /** The note's own color: the box's blue, lit. */
 const AUDIO_BLUE = '#9fd0ff'
+
+/**
+ * A mark's share of its full size at `depth` from the camera: full out to
+ * the headlamp's reach, smaller past it (lib/markerSize.ts recedeShare).
+ * Its words keep their size and fade far off instead (WorldLabel `recede`),
+ * the coin's glyph shrinks with it, and its tap target stays a fingertip.
+ * Marks size themselves when labels do (LABEL_PRIORITY), after the headlamp
+ * has read this frame's camera, so a cut never draws a mark a frame behind.
+ */
+function markRecede(depth: number): number {
+  return recedeShare(depth, headlampUniforms.uHeadlampReach.value, MARK_RECEDE_FLOOR)
+}
 
 interface Props {
   axes: ViewAxes
@@ -261,7 +279,7 @@ export function ItemMark({ id, text, sub, at, opacity = 1, wears, region = null,
   return (
     <>
       <WorldMark kind="note" at={at} opacity={opacity} />
-      <WorldLabel text={label.text} color={label.color} at={at} align="center" px={13} sub={label.sub} subColor={label.subColor} opacity={opacity} />
+      <WorldLabel text={label.text} color={label.color} at={at} align="center" px={13} sub={label.sub} subColor={label.subColor} opacity={opacity} recede="name" />
     </>
   )
 }
@@ -293,7 +311,7 @@ function NoteItem({ w, birth, onTap }: { w: { key: string; text: string; mine: b
       <WorldMark kind="note" at={w.centre} />
       {flourish && birth !== undefined
         ? <DecodingLabel text={messageBillboard(w.text)} seed={seedOf(w.key)} birth={birth} at={w.centre} />
-        : <WorldLabel text={name} color={ACCENT} at={w.centre} align="center" px={10} offsetPx={[0, -26]} />}
+        : <WorldLabel text={name} color={ACCENT} at={w.centre} align="center" px={10} offsetPx={[0, -26]} recede="credit" />}
       {/* The mark is a fixed size on screen at any zoom, so its target is
           too: a fingertip over the mark (TapTarget). */}
       <TapTarget px={TAP_PX} at={w.centre} onTap={onTap} />
@@ -310,7 +328,7 @@ export function AudioMark({ title, at, opacity = 1, onTap }: { title: string; at
     <group>
       <WorldMark kind="note" at={at} opacity={opacity} />
       <AudioNote at={at} opacity={opacity} />
-      <WorldLabel text={title} color={ACCENT} at={at} align="center" px={10} offsetPx={[0, -26]} opacity={opacity} />
+      <WorldLabel text={title} color={ACCENT} at={at} align="center" px={10} offsetPx={[0, -26]} opacity={opacity} recede="name" />
       {onTap && <TapTarget px={TAP_PX} at={at} onTap={onTap} />}
     </group>
   )
@@ -336,9 +354,10 @@ function AudioNote({ at, opacity = 1 }: { at: [number, number, number]; opacity?
     if (!g) return
     const cam = state.camera as PerspectiveCamera
     const perPixel = 2 * Math.tan((cam.fov * Math.PI) / 360) / state.size.height
-    g.scale.setScalar(Math.max(1e-5, cam.position.distanceTo(g.position) * perPixel * MARK_PX.note))
+    const depth = cam.position.distanceTo(g.position)
+    g.scale.setScalar(Math.max(1e-5, depth * perPixel * MARK_PX.note * markRecede(depth)))
     g.quaternion.copy(cam.quaternion)
-  })
+  }, LABEL_PRIORITY)
   const material = <meshBasicMaterial color={AUDIO_BLUE} toneMapped={false} transparent opacity={0.95 * opacity} depthWrite={false} />
   return (
     <group ref={group} position={at}>
@@ -376,7 +395,7 @@ function CoinItem({ text, at, scaleExp, onTap }: { text: string; at: [number, nu
   return (
     <group>
       <WorldMark kind={kind} at={at} />
-      <WorldLabel text="₿" color={spent ? SPENT : BITCOIN} opacity={spent ? 0.7 : 1} at={at} align="center" px={COIN_PX} />
+      <WorldLabel text="₿" color={spent ? SPENT : BITCOIN} opacity={spent ? 0.7 : 1} at={at} align="center" px={COIN_PX} recede="mark" />
       <TapTarget px={TAP_PX} at={at} onTap={onTap} />
     </group>
   )
@@ -404,7 +423,7 @@ function DecodingLabel({ text, seed, birth, at }: { text: string; seed: number; 
     setShown(decodeText(text, t, seed, frame.current))
     if (t >= 1) done.current = true
   })
-  return <WorldLabel text={shown} color={NOTE} at={at} align="center" px={13} />
+  return <WorldLabel text={shown} color={NOTE} at={at} align="center" px={13} recede="name" />
 }
 
 
@@ -419,8 +438,8 @@ const MARK_LOOK: Record<MarkKind, { color: string; opacity: number }> = {
  * The shape behind a hidden thing: a turning diamond for a coin, the same
  * diamond still and gray once the mint says the coin was redeemed, a still
  * cube for a message. Outlines rather than solids, so they read as drawn light
- * like everything else in the scene, and held to a constant size on screen so
- * a note is the same size to the eye wherever it is.
+ * like everything else in the scene, and sized on screen: the same size to
+ * the eye anywhere within the headlamp's reach, smaller past it (markRecede).
  */
 function WorldMark({ kind, at, opacity = 1 }: { kind: MarkKind; at: [number, number, number]; opacity?: number }): JSX.Element {
   const group = useRef<Group>(null)
@@ -435,7 +454,8 @@ function WorldMark({ kind, at, opacity = 1 }: { kind: MarkKind; at: [number, num
     if (!g) return
     const cam = state.camera as PerspectiveCamera
     const perPixel = 2 * Math.tan((cam.fov * Math.PI) / 360) / state.size.height
-    g.scale.setScalar(Math.max(1e-5, cam.position.distanceTo(g.position) * perPixel * MARK_PX[kind]))
+    const depth = cam.position.distanceTo(g.position)
+    g.scale.setScalar(Math.max(1e-5, depth * perPixel * MARK_PX[kind] * markRecede(depth)))
     // A live coin turns; a note, and a spent coin, stay where they were left.
     // Two axes at speeds that do not divide evenly, so the diamond tumbles
     // slowly instead of spinning on a spit, the way a selected hyperjump does
@@ -446,7 +466,7 @@ function WorldMark({ kind, at, opacity = 1 }: { kind: MarkKind; at: [number, num
       g.rotation.y = state.clock.elapsedTime * 0.6
       g.rotation.z = state.clock.elapsedTime * 0.41
     }
-  })
+  }, LABEL_PRIORITY)
 
   const look = MARK_LOOK[kind]
   return (

@@ -385,6 +385,23 @@ export interface WorkshopState {
   rename: (id: string, name: string) => void
   duplicate: (id: string) => string
   remove: (id: string) => void
+  /**
+   * Delete many shards in one step: one change to the list, one storage write
+   * (a single transaction in IndexedDB), however many there are. Local only:
+   * nothing is retracted or published, and a published one stays on the
+   * relays. The shard on the bench, when it is one of them, gives way to the
+   * newest left, and to a new empty one when none is left, so the bench never
+   * holds a shard that is gone. When it is not one of them it stays open as it
+   * was, its undo with it. STAMP's chosen object lets go when it was one of
+   * them (your own object, by its `d`).
+   *
+   * Resolves true once the deletion has committed to storage (saveNow), false
+   * when the write failed: the shards are then gone from this tab only, and
+   * come back on a reload unless a later save lands. A folder's DELETE
+   * CONTENTS waits for true before it takes the folders (hud/ShardFolders
+   * deleteFolderNow), so a failed write never leaves them loose at the top.
+   */
+  removeMany: (ids: readonly string[]) => Promise<boolean>
   setMode: (mode: ShardMode) => void
   /**
    * How solid the shard draws, a whole percent (DECK-0003 §1.11): 100 is
@@ -946,6 +963,26 @@ export const useWorkshop = create<WorkshopState>((set, get) => {
       const list = get().shards.filter((s) => s.id !== id)
       const currentId = get().currentId === id ? newestId(list) : get().currentId
       set({ shards: list, currentId, selection: [], partSel: [], selectedFace: null, facePick: [], past: [], future: [], notice: null }); save(list)
+    },
+
+    removeMany: (ids) => {
+      const out = new Set(ids)
+      const { shards, currentId } = get()
+      let list = shards.filter((s) => !out.has(s.id))
+      if (list.length === shards.length) return Promise.resolve(true)
+      const stamp = get().stampObject
+      const stampGone = !!stamp && (out.has(stamp.shard.id) || (stamp.ref[0] === 'a' && out.has(stamp.ref[1].split(':').slice(2).join(':'))))
+      const stampState = stampGone ? { stampObject: null } : {}
+      if (currentId === null || !out.has(currentId)) { set({ shards: list, ...stampState }); save(list); return saveStored() }
+      let next = newestId(list)
+      // Nothing left while the workshop is open: a new empty shard, as opening an empty workshop makes one.
+      if (next === null && get().open) {
+        const s = newShard(`Object ${list.length + 1}`)
+        list = [...list, s]
+        next = s.id
+      }
+      set({ shards: list, currentId: next, selection: [], partSel: [], selectedFace: null, facePick: [], past: [], future: [], notice: null, ...stampState }); save(list)
+      return saveStored()
     },
 
     setMode: (mode) => edit((s) => ({ ...s, mode })),

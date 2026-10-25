@@ -5,7 +5,7 @@
  * component the hook lives in returns null, so no host element is ever made.
  */
 
-import { createElement, type FunctionComponent } from 'react'
+import { createElement, type FunctionComponent, type ReactElement } from 'react'
 import Reconciler from 'react-reconciler'
 import { DefaultEventPriority } from 'react-reconciler/constants.js'
 
@@ -53,17 +53,17 @@ export async function settle(rounds = 5): Promise<void> {
   for (let i = 0; i < rounds; i++) await new Promise((r) => setTimeout(r, 0))
 }
 
-/** Mount `hook(props)`; `current()` is its latest result, `render` gives it new props, `unmount` ends it. */
-export function mountHook<P, R>(hook: (props: P) => R, props: P): { current: () => R; renders: () => number; render: (p: P) => Promise<void>; unmount: () => Promise<void> } {
+/** Mount `hook(props)`, inside `wrap` when given (a context provider); `current()` is its latest result, `render` gives it new props, `unmount` ends it. */
+export function mountHook<P, R>(hook: (props: P) => R, props: P, wrap: (el: ReactElement) => ReactElement = (el) => el): { current: () => R; renders: () => number; render: (p: P) => Promise<void>; unmount: () => Promise<void> } {
   let latest: R
   let count = 0
   const Host: FunctionComponent<{ p: P }> = ({ p }) => { latest = hook(p); count++; return null }
   const container = renderer.createContainer({}, 0, null, false, null, '', (e: unknown) => { throw e }, null)
-  renderer.updateContainer(createElement(Host, { p: props }), container, null, null)
+  renderer.updateContainer(wrap(createElement(Host, { p: props })), container, null, null)
   return {
     current: () => latest,
     renders: () => count,
-    render: async (p) => { renderer.updateContainer(createElement(Host, { p }), container, null, null); await settle() },
+    render: async (p) => { renderer.updateContainer(wrap(createElement(Host, { p })), container, null, null); await settle() },
     unmount: async () => { renderer.updateContainer(null, container, null, null); await settle() },
   }
 }

@@ -895,7 +895,7 @@ export function Workshop(): JSX.Element | null {
             <ShardFolders items={byRecent} refOf={modelRef} nameOf={modelName} row={(s, f) => (
               <li key={s.id} className={s.id === shard.id ? 'is-current' : ''} {...f.drag}>
                 <button className="workshop__pick" onClick={() => w().select(s.id)}>
-                  <ShardThumb shard={s} />
+                  <ShardThumb shard={s} own />
                   <span className="workshop__pick-name">{s.name}</span>
                   <span className="workshop__pick-meta">{s.vertices.length} v · {s.faces.length} f{s.parts?.length ? ` · ${s.parts.length} parts` : ''} · {s.mode}</span>
                 </button>

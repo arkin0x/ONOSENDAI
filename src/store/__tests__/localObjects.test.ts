@@ -1,13 +1,15 @@
 /**
  * localObjects.test.ts - your own objects placed by reference are drawn from
- * your workshop before any relay is asked (store/localObjects.ts).
+ * your workshop in authoring views, and only there (store/localObjects.ts,
+ * lib/parts.ts fetchOwnFirst and OwnPartsContext).
  *
  * The case is arkinox's (2026-10-25): the Maze Kit imported with PUBLISH off,
  * so its flooded rooms place a room and its water at addresses of his that no
  * relay holds, and the bench drew a placeholder cube for each ("we never
- * published the parts and i dont want to"). Someone else's reference still
- * goes to the relays, and an edit of a piece redraws whatever places it, at
- * any depth.
+ * published the parts and i dont want to"). The bench now draws them; the
+ * world, WALK and items draw what the relays hold, as everyone else sees it
+ * ("A. inline SNO fixes this once it ships because then everyone sees the
+ * same data").
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -37,16 +39,18 @@ vi.mock('../../lib/relay', () => ({
   relaySet: () => ['wss://relay.test'],
 }))
 
+import { createElement, type ReactElement } from 'react'
 import { newShard, type Ref, type ShardModel } from 'sno-core/shards'
 import { resolveParts } from 'sno-core/parts'
-import { fetchRef, fetchRemote, forgetRef, onLocalObjects, primeRef, resolvePartsShared, touchedKeys, useResolved, type Resolved } from '../../lib/parts'
+import { OwnPartsContext, fetchOwnFirst, fetchRef, forgetRef, onLocalObjects, primeRef, resolvePartsShared, touchedKeys, useResolved } from '../../lib/parts'
+import { authoredConstrainOf, withConstrain } from '../../lib/walkConstrain'
+import { thumbKeyOf } from '../../lib/thumbKey'
 import { useItemModel } from '../../hooks/useItemModel'
 import { mountHook, settle } from '../../test/hookRoot'
-import { usePublished } from '../usePublished'
-import { authoredConstrainOf, withConstrain } from '../../lib/walkConstrain'
 import { useWorkshop } from '../useWorkshop'
 import { useCyberspace } from '../useCyberspace'
-import { changedIds, flushLocalObjects, wireLocalObjects } from '../localObjects'
+import { usePublished } from '../usePublished'
+import { changedIds, flushLocalObjects, ownThumbKey, wireLocalObjects } from '../localObjects'
 import { clearWalls, entryFor, type WallItem } from '../walkWalls'
 
 const ME = 'a'.repeat(64)
@@ -54,6 +58,8 @@ const THEM = 'b'.repeat(64)
 const ROOM_ID = 'maze-kit/cistern/cistern-atrium'
 const WATER_ID = 'maze-kit/cistern/cistern-atrium-water-low'
 const FLOODED_ID = 'maze-kit/cistern/flooded/cistern-atrium-flooded-low'
+const ROOM = `a:33331:${ME}:${ROOM_ID}`
+const WATER = `a:33331:${ME}:${WATER_ID}`
 
 const addr = (pubkey: string, d: string): Ref => ['a', `33331:${pubkey}:${d}`]
 const tri = (name: string, y = 0): ShardModel => ({
@@ -66,6 +72,8 @@ const tri = (name: string, y = 0): ShardModel => ({
 const placing = (name: string, refs: Ref[]): ShardModel => ({
   ...newShard(name), mode: 'solid', vertices: [], faces: [], refs, parts: refs.map((_, i) => ({ ref: i, at: [0, 0, 0], turn: [0, 0, 0], step: 0 })),
 })
+/** Inside the bench, as Bench.tsx provides it. */
+const bench = (el: ReactElement): ReactElement => createElement(OwnPartsContext.Provider, { value: true }, el)
 
 const w = () => useWorkshop.getState()
 let unwire: () => void = () => {}
@@ -76,6 +84,7 @@ beforeEach(() => {
   relay.gate = new Promise<void>((r) => { relay.open = r })
   // A slow fetch an earlier test left waiting is not this test's.
   forgetRef(addr(THEM, 'slow'))
+  for (const id of [ROOM_ID, WATER_ID, FLOODED_ID]) forgetRef(addr(ME, id))
   usePublished.setState({ ledger: {} })
   clearWalls()
   useCyberspace.setState({ identity: { pubkey: ME, npub: 'npub-me' } })
@@ -89,17 +98,18 @@ beforeEach(() => {
 afterEach(() => unwire())
 
 const flooded = (): ShardModel => w().shards.find((s) => s.id === FLOODED_ID)!
+const asked = (): string[] => relay.asked.map((f) => (f['#d'] as string[] | undefined)?.[0] ?? '')
 
-describe('your own unpublished pieces', () => {
+describe('the bench and the workshop: your own unpublished pieces', () => {
   it('without the workshop answering, they go to the relays and come back placeholders (the bug)', async () => {
     unwire()
-    const placed = await resolveParts(flooded(), fetchRef)
+    const placed = await resolveParts(flooded(), fetchOwnFirst)
     expect(placed.map((p) => p.missing)).toEqual(['unreachable', 'unreachable'])
-    expect(relay.asked.some((f) => (f['#d'] as string[])?.[0] === ROOM_ID)).toBe(true)
+    expect(asked()).toContain(ROOM_ID)
   })
 
-  it('resolve from the workshop on the bench, each keeping its own opacity and WALK setting, and no relay is asked', async () => {
-    const placed = await resolveParts(flooded(), fetchRef)
+  it('resolve from the workshop, each keeping its own opacity and WALK setting, and no relay is asked', async () => {
+    const placed = await resolveParts(flooded(), fetchOwnFirst)
     expect(placed.map((p) => p.missing)).toEqual([undefined, undefined])
     expect(placed.map((p) => p.model?.name)).toEqual(['Atrium', 'Water'])
     const water = placed[1].model!
@@ -111,99 +121,88 @@ describe('your own unpublished pieces', () => {
 
   it('are drawn as last edited here, ahead of anything a relay or the cache holds', async () => {
     primeRef(addr(ME, ROOM_ID), { v: 2, name: 'Atrium as published', unit: 0, mode: 'solid', vertices: [[0, 0, 0], [1, 0, 0], [0, 1, 0]], colors: [1, 1, 1], faces: [[0, 1, 2]] })
-    const placed = await resolveParts(flooded(), fetchRef)
-    expect(placed[0].model?.name).toBe('Atrium')
+    expect((await resolveParts(flooded(), fetchOwnFirst))[0].model?.name).toBe('Atrium')
+    // The world, meanwhile, draws what was published.
+    expect((await resolveParts(flooded(), fetchRef))[0].model?.name).toBe('Atrium as published')
   })
 
-  it('an edit of a piece says so, every draw that placed it at any depth asks again, and the next draw has the edit', async () => {
-    // A maze placing the flooded room: the water is two levels down.
+  it('an edit is said once a frame, with the address of what changed, and the next draw has it at any depth', async () => {
     const maze = placing('Maze', [addr(ME, FLOODED_ID)])
-    const before = await resolveParts(maze, fetchRef)
+    const before = await resolveParts(maze, fetchOwnFirst)
     expect(before[0].children[1].model?.opacity).toBe(40)
-    const touched = touchedKeys(before)
-    expect(touched.has(`a:33331:${ME}:${WATER_ID}`)).toBe(true)
-
+    expect(touchedKeys(before).has(WATER)).toBe(true)
     const heard: string[][] = []
     const off = onLocalObjects((keys) => heard.push([...keys]))
     w().select(WATER_ID)
     w().setOpacity(70)
     w().setOpacity(71)
     w().setOpacity(70)
-    // Said once a frame, however many edits came in it.
     expect(heard).toHaveLength(0)
     flushLocalObjects()
     off()
-    expect(heard).toHaveLength(1)
-    expect(heard[0]).toEqual([`a:33331:${ME}:${WATER_ID}`])
-    expect(heard[0].some((k) => touched.has(k))).toBe(true)
-
-    const after = await resolveParts(maze, fetchRef)
-    expect(after[0].children[1].model?.opacity).toBe(70)
-  })
-
-  it('an edit builds the walls of a shard placing it again', async () => {
-    const it0: WallItem = { key: 'flooded', at: { x: 1n << 60n, y: 1n << 60n, z: 1n << 60n }, height: 84, plane: 1, shard: flooded() }
-    entryFor(it0)
-    await new Promise((r) => setTimeout(r, 0))
-    await new Promise((r) => setTimeout(r, 0))
-    const first = entryFor(it0)
-    expect(first.keys.has(`a:33331:${ME}:${WATER_ID}`)).toBe(true)
-    w().select(WATER_ID)
-    w().setOpacity(70)
-    flushLocalObjects()
-    expect(entryFor(it0)).not.toBe(first)
-  })
-
-  it('an edit while the walls are still resolving (a slow relay part) builds them again', async () => {
-    relay.slow.add('slow')
-    const shard = placing('Slow', [addr(THEM, 'slow'), addr(ME, FLOODED_ID)])
-    const it0: WallItem = { key: 'slow', at: { x: 1n << 60n, y: 1n << 60n, z: 1n << 60n }, height: 84, plane: 1, shard }
-    const first = entryFor(it0)
-    expect(first.pending).toBe(true)
-    // The water is two levels down, which the pending entry cannot know yet.
-    w().select(WATER_ID)
-    w().setOpacity(70)
-    flushLocalObjects()
-    const again = entryFor(it0)
-    expect(again).not.toBe(first)
-    relay.open()
-    await settle()
-    expect(entryFor(it0)).not.toBe(first)
+    expect(heard).toEqual([[WATER]])
+    expect((await resolveParts(maze, fetchOwnFirst))[0].children[1].model?.opacity).toBe(70)
   })
 
   it('a removed piece goes back to the relays', async () => {
     w().remove(WATER_ID)
-    const placed = await resolveParts(flooded(), fetchRef)
+    const placed = await resolveParts(flooded(), fetchOwnFirst)
     expect(placed.map((p) => p.missing)).toEqual([undefined, 'unreachable'])
-    expect(relay.asked.map((f) => (f['#d'] as string[])[0])).toEqual([WATER_ID])
+    expect(asked()).toEqual([WATER_ID])
+  })
+
+  it('a loop is drawn once and then missing, and placements past four levels are missing', async () => {
+    w().addShard(placing('Loop A', [addr(ME, 'loop-b')]), 'Loop A', 'loop-a')
+    w().addShard(placing('Loop B', [addr(ME, 'loop-a')]), 'Loop B', 'loop-b')
+    const [b] = await resolvePartsShared(w().shards.find((s) => s.id === 'loop-a')!, fetchOwnFirst, addr(ME, 'loop-a'))
+    expect(b.model?.name).toBe('Loop B')
+    expect(b.children[0].missing).toBe('cycle')
+    for (let i = 1; i <= 6; i++) w().addShard(placing(`Deep ${i}`, [addr(ME, `deep-${i + 1}`)]), `Deep ${i}`, `deep-${i}`)
+    w().addShard(tri('Bottom'), 'Bottom', 'deep-7')
+    let p = (await resolvePartsShared(w().shards.find((s) => s.id === 'deep-1')!, fetchOwnFirst))[0]
+    const seen: string[] = []
+    while (p) { seen.push(p.missing ?? p.model!.name); p = p.children[0] }
+    expect(seen).toEqual(['Deep 2', 'Deep 3', 'Deep 4', 'Deep 5', 'deep'])
   })
 })
 
 describe('a mounted draw (useResolved)', () => {
-  const byName = (m: Map<string, Resolved>, key: string): Resolved | undefined => m.get(key)
-  const ROOM = `a:33331:${ME}:${ROOM_ID}`
-  const WATER = `a:33331:${ME}:${WATER_ID}`
-
-  it('redraws after an edit of a piece, and an unchanged sibling keeps its model object', async () => {
-    const h = mountHook(useResolved, flooded())
+  it('on the bench: resolves locally, redraws after an edit, and an unchanged sibling keeps its model object', async () => {
+    const h = mountHook(useResolved, flooded(), bench)
     await settle()
     const before = h.current()
-    expect(byName(before, WATER)?.model?.opacity).toBe(40)
-    const room = byName(before, ROOM)!.model!
+    expect(before.get(WATER)?.model?.opacity).toBe(40)
+    const room = before.get(ROOM)!.model!
     w().select(WATER_ID)
     w().setOpacity(70)
     flushLocalObjects()
     await settle()
     const after = h.current()
     expect(after).not.toBe(before)
-    expect(byName(after, WATER)?.model?.opacity).toBe(70)
+    expect(after.get(WATER)?.model?.opacity).toBe(70)
     // The same object, so its mesh keeps its geometry: nothing is built again for it.
-    expect(byName(after, ROOM)!.model).toBe(room)
+    expect(after.get(ROOM)!.model).toBe(room)
+    expect(relay.asked).toEqual([])
     await h.unmount()
   })
 
-  it('does not redraw for an edit of something it does not place', async () => {
+  it('in the world (no provider): your unpublished pieces go to the relays and are placeholders, and an edit redraws nothing', async () => {
     const h = mountHook(useResolved, flooded())
+    await settle()
+    const got = h.current()
+    expect([got.get(ROOM)?.missing, got.get(WATER)?.missing]).toEqual(['unreachable', 'unreachable'])
+    expect(asked().sort()).toEqual([ROOM_ID, WATER_ID].sort())
+    const renders = h.renders()
+    w().select(WATER_ID)
+    w().setOpacity(70)
+    flushLocalObjects()
+    await settle()
+    expect(h.renders()).toBe(renders)
+    await h.unmount()
+  })
+
+  it('on the bench: does not redraw for an edit of something it does not place', async () => {
+    const h = mountHook(useResolved, flooded(), bench)
     await settle()
     const before = h.current()
     w().addShard(tri('Elsewhere'), 'Elsewhere', 'elsewhere')
@@ -215,11 +214,11 @@ describe('a mounted draw (useResolved)', () => {
     await h.unmount()
   })
 
-  it('an edit while a resolve waits on a slow relay part is not lost', async () => {
+  it('on the bench: an edit while a resolve waits on a slow relay part is not lost', async () => {
     relay.slow.add('slow')
     // A maze placing someone's slow part and your flooded room: the water is two levels down.
     const maze = placing('Maze', [addr(THEM, 'slow'), addr(ME, FLOODED_ID)])
-    const h = mountHook(useResolved, maze)
+    const h = mountHook(useResolved, maze, bench)
     await settle()
     expect(h.current().size).toBe(0)
     w().select(WATER_ID)
@@ -228,13 +227,12 @@ describe('a mounted draw (useResolved)', () => {
     await settle()
     relay.open()
     await settle()
-    const flooded = h.current().get(`a:33331:${ME}:${FLOODED_ID}`)!
-    expect(flooded.children[1].model?.opacity).toBe(70)
+    expect(h.current().get(`a:33331:${ME}:${FLOODED_ID}`)!.children[1].model?.opacity).toBe(70)
     await h.unmount()
   })
 
   it('places nothing and listens for nothing without references', async () => {
-    const h = mountHook(useResolved, null)
+    const h = mountHook(useResolved, null, bench)
     await settle()
     const renders = h.renders()
     w().select(WATER_ID)
@@ -247,49 +245,64 @@ describe('a mounted draw (useResolved)', () => {
   })
 })
 
-describe('an item wearing your object (useItemModel)', () => {
-  it('loads again when a piece the object places is edited, and keeps the old model up meanwhile', async () => {
-    const address = `33331:${ME}:${FLOODED_ID}`
-    const h = mountHook(useItemModel, { address })
+describe('world surfaces never use the workshop', () => {
+  it('fetchRef (the world, the feeds, the OBJECT picker) asks the relays for your own unpublished piece', async () => {
+    expect(await fetchRef(addr(ME, ROOM_ID))).toBeNull()
+    expect(relay.asked).toEqual([{ kinds: [33331], authors: [ME], '#d': [ROOM_ID] }])
+  })
+
+  it("WALK's walls resolve from the relays: your unpublished pieces stop nothing, and an edit leaves the walls alone", async () => {
+    const it0: WallItem = { key: 'flooded', at: { x: 1n << 60n, y: 1n << 60n, z: 1n << 60n }, height: 84, plane: 1, shard: flooded() }
+    entryFor(it0)
     await settle()
-    const first = h.current()
-    expect(first).not.toBeNull()
+    const built = entryFor(it0)
+    expect(built.missingAt).not.toBeNull()
+    expect(asked().sort()).toEqual([ROOM_ID, WATER_ID].sort())
     w().select(WATER_ID)
     w().setOpacity(70)
     flushLocalObjects()
-    expect(h.current()).toBe(first)
+    expect(entryFor(it0)).toBe(built)
+  })
+
+  it('an item wearing your unpublished object is drawn from the relays (the cube until it is published)', async () => {
+    const h = mountHook(useItemModel, { address: `33331:${ME}:${FLOODED_ID}` })
     await settle()
-    expect(h.current()).not.toBeNull()
-    expect(h.current()).not.toBe(first)
+    expect(h.current()).toBeNull()
+    expect(asked()).toContain(FLOODED_ID)
     await h.unmount()
   })
 })
 
-describe('loops and depth among your own pieces', () => {
-  it('a loop is drawn once and then missing, and placements past four levels are missing', async () => {
-    w().addShard(placing('Loop A', [addr(ME, 'loop-b')]), 'Loop A', 'loop-a')
-    w().addShard(placing('Loop B', [addr(ME, 'loop-a')]), 'Loop B', 'loop-b')
-    const [b] = await resolvePartsShared(w().shards.find((s) => s.id === 'loop-a')!, fetchRef, addr(ME, 'loop-a'))
-    expect(b.model?.name).toBe('Loop B')
-    expect(b.children[0].missing).toBe('cycle')
-    for (let i = 1; i <= 6; i++) w().addShard(placing(`Deep ${i}`, [addr(ME, `deep-${i + 1}`)]), `Deep ${i}`, `deep-${i}`)
-    w().addShard(tri('Bottom'), 'Bottom', 'deep-7')
-    let p = (await resolvePartsShared(w().shards.find((s) => s.id === 'deep-1')!))[0]
-    const seen: string[] = []
-    while (p) { seen.push(p.missing ?? p.model!.name); p = p.children[0] }
-    expect(seen).toEqual(['Deep 2', 'Deep 3', 'Deep 4', 'Deep 5', 'deep'])
+describe('the workshop pictures (ownThumbKey)', () => {
+  it('a shard of yours placing your pieces gets a key that changes when a piece is edited', () => {
+    const k1 = ownThumbKey(flooded())
+    expect(k1).not.toBe(thumbKeyOf(flooded()))
+    w().select(WATER_ID)
+    w().setOpacity(70)
+    const k2 = ownThumbKey(flooded())
+    expect(k2).not.toBe(k1)
+    // Two levels down too.
+    const maze = placing('Maze', [addr(ME, FLOODED_ID)])
+    const m1 = ownThumbKey(maze)
+    w().setOpacity(55)
+    expect(ownThumbKey(maze)).not.toBe(m1)
+  })
+
+  it("is the shape's key when nothing it places is yours here", () => {
+    const theirs = placing('Theirs', [addr(THEM, ROOM_ID)])
+    expect(ownThumbKey(theirs)).toBe(thumbKeyOf(theirs))
+    expect(ownThumbKey(tri('Plain'))).toBe(thumbKeyOf(tri('Plain')))
   })
 })
 
-describe('references that are not yours here', () => {
+describe('what is answered here at all', () => {
   it("someone else's reference, even to a d you also hold, still goes to the relays", async () => {
-    const theirs = placing('Theirs', [addr(THEM, ROOM_ID)])
-    const placed = await resolveParts(theirs, fetchRef)
+    const placed = await resolveParts(placing('Theirs', [addr(THEM, ROOM_ID)]), fetchOwnFirst)
     expect(placed[0].missing).toBe('unreachable')
     expect(relay.asked).toEqual([{ kinds: [33331], authors: [THEM], '#d': [ROOM_ID] }])
   })
 
-  it('a change of identity says every shard changed, under both keys', () => {
+  it('a change of identity says every shard changed, under both keys, and the old key is no longer answered', async () => {
     const heard: string[] = []
     const off = onLocalObjects((keys) => heard.push(...keys))
     useCyberspace.setState({ identity: { pubkey: THEM, npub: 'npub-them' } })
@@ -299,28 +312,19 @@ describe('references that are not yours here', () => {
       expect(heard).toContain(`a:33331:${ME}:${id}`)
       expect(heard).toContain(`a:33331:${THEM}:${id}`)
     }
+    const placed = await resolveParts(flooded(), fetchOwnFirst)
+    expect(placed.map((p) => p.missing)).toEqual(['unreachable', 'unreachable'])
   })
 
   it('a shard published under another key is not answered for this one (kit ids are the same for everyone)', async () => {
     usePublished.setState({ ledger: { [ROOM_ID]: { at: 1, fp: '', pubkey: THEM } } })
-    const placed = await resolveParts(flooded(), fetchRef)
+    const placed = await resolveParts(flooded(), fetchOwnFirst)
     expect(placed.map((p) => p.missing)).toEqual(['unreachable', undefined])
-  })
-
-  it("the OBJECT picker's fetch asks the relays only, so an unpublished address of yours is refused there", async () => {
-    expect(await fetchRemote(addr(ME, ROOM_ID))).toBeNull()
-    expect(relay.asked).toEqual([{ kinds: [33331], authors: [ME], '#d': [ROOM_ID] }])
-  })
-
-  it('after a change of identity, the old key is no longer answered here', async () => {
-    useCyberspace.setState({ identity: { pubkey: THEM, npub: 'npub-them' } })
-    const placed = await resolveParts(flooded(), fetchRef)
-    expect(placed.map((p) => p.missing)).toEqual(['unreachable', 'unreachable'])
   })
 
   it('an `e` reference names one signed event and is never answered here', async () => {
     const e: Ref = ['e', 'c'.repeat(64)]
-    expect(await fetchRef(e)).toBeNull()
+    expect(await fetchOwnFirst(e)).toBeNull()
     expect(relay.asked).toEqual([{ ids: ['c'.repeat(64)] }])
   })
 })

@@ -16,7 +16,7 @@ import { nip19 } from 'nostr-tools'
 import { fromPayload, type Ref, type ShardModel } from 'sno-core/shards'
 import { GENERAL_RELAYS } from '../lib/contacts'
 import type { NostrEvent } from '../lib/events'
-import { fetchRemote } from '../lib/parts'
+import { fetchRef } from '../lib/parts'
 import { queryAny, relaySet } from '../lib/relay'
 import { useCyberspace } from '../store/useCyberspace'
 import { useWorkshop, type StampObject } from '../store/useWorkshop'
@@ -108,8 +108,7 @@ export function ObjectPicker({ onClose }: { onClose: () => void }): JSX.Element 
     setBusy(true)
     setStatus('Asking the relays…')
     const ref = refOf(parsed.address, parsed.relay)
-    // The relays only, never your workshop: what is stamped here must be something everyone else can draw.
-    const raw = await fetchRemote(ref)
+    const raw = await fetchRef(ref)
     setBusy(false)
     const shard = raw == null ? null : fromPayload(raw, parsed.address)
     if (!shard) { setStatus(raw == null ? 'No relay had that object.' : 'That object is not one the format can read.'); return }

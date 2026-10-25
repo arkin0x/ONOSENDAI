@@ -18,14 +18,21 @@
  * so after a switch of identity `33331:<new key>:maze-kit/...` could
  * otherwise be drawn from the piece the old key made.
  *
+ * Only authoring views ask (lib/parts.ts fetchOwnFirst): the bench, and the
+ * workshop's and the chest composer's pictures of your shards. The world, WALK,
+ * items and the feeds draw what the relays hold, which is what everyone else
+ * sees (arkinox, 2026-10-25: "inline SNO fixes this once it ships because
+ * then everyone sees the same data").
+ *
  * Every change to the list says which of your addresses changed, at most once
- * a frame (an OPACITY drag is one edit per percent), so each draw placing one,
- * at any depth, asks again (lib/parts.ts localObjectsChanged), and each item
- * wearing one is measured again (hooks/useItemModel.ts).
+ * a frame (an OPACITY drag is one edit per percent), so each bench draw
+ * placing one, at any depth, asks again (lib/parts.ts localObjectsChanged).
  */
 
 import { toPayload, type ShardModel } from 'sno-core/shards'
-import { objectAddress } from 'sno-core/feed'
+import { SNO_KIND, objectAddress } from 'sno-core/feed'
+import { MAX_PART_DEPTH, parseAddress } from 'sno-core/parts'
+import { hash53, thumbKeyOf } from '../lib/thumbKey'
 import { localObjectsChanged, setLocalObjects } from '../lib/parts'
 import { withAuthoredConstrain } from '../lib/walkConstrain'
 import { usePublished } from './usePublished'
@@ -62,6 +69,42 @@ export function localObject(address: { kind: number; pubkey: string; d: string }
   const rec = usePublished.getState().ledger[s.id]
   if (rec && rec.pubkey !== me) return undefined
   return payloadOf(s)
+}
+
+/** A piece's version for a picture key: a hash of its payload, once per version of it, the same in every session. */
+const versions = new WeakMap<ShardModel, string>()
+function versionOf(s: ShardModel): string {
+  let v = versions.get(s)
+  if (v === undefined) versions.set(s, (v = hash53(JSON.stringify(payloadOf(s)))))
+  return v
+}
+
+/**
+ * The picture key of a shard of yours drawn with your own pieces (hud/ShardThumb
+ * `own`): its shape's key, and the version of every piece of yours it places
+ * from the workshop, at any depth (§1.10's four), so editing a piece draws
+ * every picture placing it again. The shape's key alone when it places none.
+ */
+export function ownThumbKey(shard: ShardModel): string {
+  const me = useCyberspace.getState().identity.pubkey
+  const list = byId(useWorkshop.getState().shards)
+  const stamps: string[] = []
+  const seen = new Set<string>()
+  const walk = (s: ShardModel, depth: number): void => {
+    if (depth > MAX_PART_DEPTH) return
+    for (const r of s.refs ?? []) {
+      const a = r[0] === 'a' ? parseAddress(r[1]) : null
+      if (!a || a.kind !== SNO_KIND || a.pubkey !== me || seen.has(a.d)) continue
+      seen.add(a.d)
+      const piece = list.get(a.d)
+      if (!piece || localObject(a) === undefined) continue
+      stamps.push(`${a.d}@${versionOf(piece)}`)
+      walk(piece, depth + 1)
+    }
+  }
+  walk(shard, 1)
+  const base = thumbKeyOf(shard)
+  return stamps.length ? `${base}:own:${hash53(stamps.join('|'))}` : base
 }
 
 /** The ids whose shard is not the same object in both lists: added, edited or removed. */

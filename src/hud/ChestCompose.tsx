@@ -210,7 +210,7 @@ export function ChestCompose({ onDone }: { onDone: () => void }): JSX.Element {
         <ul className="compose__list">
           {contents.map((c, i) => (
             <li key={i} className="chest__row">
-              {c.kind === 'shard' && modelOf(c.shardId) ? <ShardThumb shard={modelOf(c.shardId)!} /> : <ItemIcon className={`chest__glyph chest__glyph--${c.kind === 'message' && findCashuToken(c.text) ? 'cashu' : c.kind}`} type={c.kind} coin={c.kind === 'message' && !!findCashuToken(c.text)} />}
+              {c.kind === 'shard' && modelOf(c.shardId) ? <ShardThumb shard={modelOf(c.shardId)!} own /> : <ItemIcon className={`chest__glyph chest__glyph--${c.kind === 'message' && findCashuToken(c.text) ? 'cashu' : c.kind}`} type={c.kind} coin={c.kind === 'message' && !!findCashuToken(c.text)} />}
               <span className="item__name" title={contentLabel(c, shardName)}>{contentLabel(c, shardName)}</span>
               {/* Only a shard has a place of its own to aim; a message or key reveals at the chest. */}
               {c.kind === 'shard' && c.aimed && <span className="chest__aimed" title="Signed where it will stand when the chest opens, at this size">aimed · 2^{c.aimed.unit}</span>}
@@ -247,7 +247,7 @@ export function ChestCompose({ onDone }: { onDone: () => void }): JSX.Element {
             <ShardFolders items={byRecent} refOf={modelRef} nameOf={modelName} row={(s, f) => (
               <li key={s.id} {...f.drag}>
                 <button className="objpick__row" onClick={() => add({ kind: 'shard', shardId: s.id })} title={`Seal "${s.name}" in the chest`}>
-                  <ShardThumb shard={s} />
+                  <ShardThumb shard={s} own />
                   <span className="objpick__name">{s.name}</span>
                   <span className="objpick__meta">{s.vertices.length} v · {s.faces.length} f{s.parts?.length ? ` · ${s.parts.length} obj` : ''}</span>
                 </button>

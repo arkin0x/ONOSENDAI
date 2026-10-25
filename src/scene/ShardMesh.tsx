@@ -229,7 +229,8 @@ export function ShardMesh({ shard: given, scale = 1, ghost = false, birth, onFac
   // Before its first allocation lands (later in the same task), what is left
   // of its pool, so its first frame is not an outline.
   const allocated = useAllowance(budgetKey)
-  const allowance = budgetKey ? allocated ?? provisional({ demand, trusted, distance }) : undefined
+  const allowance = budgetKey ? allocated ?? (demand > 0 ? provisional({ demand, trusted, distance }) : 0) : undefined
+  const near = useMemo(() => (budget ? { centre: budget.centre, scale: budget.scale, pose } : undefined), [budget, pose])
   // A face that carries its own colour needs three corners of its own, or the
   // colour would bleed across every edge it shares. Expanded here and nowhere
   // else, so the clipper and the face picker below never learn the feature
@@ -374,7 +375,7 @@ export function ShardMesh({ shard: given, scale = 1, ghost = false, birth, onFac
   })
 
   const placements = (given.parts?.length ?? 0) > 0
-    ? <Placements shard={given} byRef={resolved} nested={nested} lit={lit} ghost={ghost} world={world} headlamp={headlamp} pose={pose} onPartClick={onPartClick} selected={selectedParts} cull={cull} ignoreOpacity={ignoreOpacity} allowance={allowance} near={budget ? { centre: budget.centre, scale: budget.scale, pose } : undefined} />
+    ? <Placements shard={given} byRef={resolved} nested={nested} lit={lit} ghost={ghost} world={world} headlamp={headlamp} pose={pose} onPartClick={onPartClick} selected={selectedParts} cull={cull} ignoreOpacity={ignoreOpacity} allowance={allowance} near={near} />
     : null
   // An object may be nothing but the arrangement of others (§1.9 rule 13).
   if (shard.vertices.length === 0) return placements ? <group scale={scale}>{placements}</group> : null

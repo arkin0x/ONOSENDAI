@@ -50,7 +50,13 @@ export function setFollows(list: Iterable<string>): void {
 /** Read your follows once per identity; a read that failed is asked again the next time. */
 export function readFollows(): void {
   const me = you()
-  if (!me || me === followsOfWho) return
+  // Signed out: nobody's follows count.
+  if (!me) {
+    followsOfWho = null
+    if (follows.size) setFollows([])
+    return
+  }
+  if (me === followsOfWho) return
   // Another identity: whom the last one followed is not whom this one does.
   if (followsOfWho !== null && follows.size) setFollows([])
   followsOfWho = me

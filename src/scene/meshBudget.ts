@@ -35,21 +35,27 @@ export const SCENE_STRANGER = 1_000
 export const SCENE_STRANGER_SHARD = 250
 /**
  * How much nearer a shard must be than one already drawing to take its place:
- * a shard that holds an allowance counts as this much nearer, so two shards
- * at about the same distance do not trade hundreds of objects on every step.
+ * a fifth, at every distance. Distances are said in doublings (log2), so a
+ * shard that holds an allowance counts as HYSTERESIS_DOUBLINGS nearer, a flat
+ * 1.25 times, and two shards at about the same distance do not trade hundreds
+ * of objects on every step.
  */
 export const HYSTERESIS = 0.2
+export const HYSTERESIS_DOUBLINGS = Math.log2(1 / (1 - HYSTERESIS))
 
 /** What one world shard would draw: its placed objects at every depth, whose they are, and how far off. */
 export interface Demand {
   demand: number
   trusted: boolean
-  /** From the anchor (where the camera looks), in render units: nearest first. */
+  /** How far from the anchor (where the camera looks), in doublings: log2(1 + render units). Nearest first. */
   distance: number
 }
 
 const demands = new Map<string, Demand>()
 let allowances = new Map<string, number>()
+/** What each pool has given out, at the last allocation: for provisional, at once. */
+let usedTrusted = 0
+let usedStranger = 0
 const listeners = new Set<() => void>()
 /** A reallocation is due: every demand said in this task is counted in one. */
 let dirty = false
@@ -87,6 +93,9 @@ export function flushMeshBudget(): void {
   let changed = next.size !== allowances.size
   if (!changed) for (const [k, v] of next) if (allowances.get(k) !== v) { changed = true; break }
   allowances = next
+  usedTrusted = 0
+  usedStranger = 0
+  for (const [k, v] of next) { if (demands.get(k)?.trusted) usedTrusted += v; else usedStranger += v }
   if (changed) for (const l of listeners) l()
 }
 
@@ -109,7 +118,7 @@ export function allocate(all: ReadonlyMap<string, Demand>, held: ReadonlyMap<str
     if (d.trusted) { trusted.push(entry); trustedAsk += d.demand }
     else { strangers.push(entry); strangerAsk += d.demand; if (d.demand > SCENE_STRANGER_SHARD) strangerOver = true }
   }
-  const near = (e: [string, Demand]): number => e[1].distance * ((held.get(e[0]) ?? 0) > 0 ? 1 - HYSTERESIS : 1)
+  const near = (e: [string, Demand]): number => e[1].distance - ((held.get(e[0]) ?? 0) > 0 ? HYSTERESIS_DOUBLINGS : 0)
   const byNear = (a: [string, Demand], b: [string, Demand]): number => near(a) - near(b)
   if (trustedAsk <= SCENE_TRUSTED) for (const [key, d] of trusted) out.set(key, d.demand)
   else {
@@ -141,9 +150,8 @@ export function allowanceOf(key: string | undefined): number | undefined {
  * allocation, in the same task, corrects it.
  */
 export function provisional(d: Demand): number {
-  let used = 0
-  for (const [k, v] of allowances) if (demands.get(k)?.trusted === d.trusted) used += v
-  const left = Math.max(0, (d.trusted ? SCENE_TRUSTED : SCENE_STRANGER) - used)
+  if (d.demand <= 0) return 0
+  const left = Math.max(0, (d.trusted ? SCENE_TRUSTED - usedTrusted : SCENE_STRANGER - usedStranger))
   return Math.min(d.demand, left, d.trusted ? Infinity : SCENE_STRANGER_SHARD)
 }
 
@@ -157,5 +165,7 @@ export function clearMeshBudget(): void {
   demands.clear()
   dirty = false
   allowances = new Map()
+  usedTrusted = 0
+  usedStranger = 0
   for (const l of listeners) l()
 }

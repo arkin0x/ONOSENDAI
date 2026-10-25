@@ -10,7 +10,7 @@ vi.mock('../../lib/contacts', () => ({ GENERAL_RELAYS: [], followsOf: (pk: strin
 
 import { Vector3 } from 'three'
 import { newShard, toRender, type Part, type ShardModel } from 'sno-core/shards'
-import { SCENE_STRANGER, SCENE_STRANGER_SHARD, SCENE_TRUSTED, allocate, allowanceOf, clearMeshBudget, flushMeshBudget, provisional, setDemand, type Demand } from '../meshBudget'
+import { HYSTERESIS_DOUBLINGS, SCENE_STRANGER, SCENE_STRANGER_SHARD, SCENE_TRUSTED, allocate, allowanceOf, clearMeshBudget, flushMeshBudget, provisional, setDemand, type Demand } from '../meshBudget'
 import { budgeted, placementSizes } from '../ShardMesh'
 import type { Resolved } from '../../lib/parts'
 import { placedPose, renderPose } from '../../lib/pose'
@@ -94,20 +94,28 @@ describe('the review of #511', () => {
     expect(allocate(new Map([['none', d(0, false, 0)], ['some', d(10, false, 1)]])).has('none')).toBe(false)
   })
 
-  it('a shard drawing keeps its share against one about as near (hysteresis), and gives it up to one clearly nearer', () => {
-    const scene = (da: number, db: number, held?: Map<string, number>): Map<string, number> => allocate(new Map<string, Demand>([
-      ...Array.from({ length: 3 }, (_, i) => [`x${i}`, d(250, false, i)] as [string, Demand]),
-      ['A', d(250, false, da)],
-      ['B', d(250, false, db)],
-    ]), held)
-    const first = scene(10, 10.001)
-    expect([first.get('A'), first.get('B')]).toEqual([250, 0])
-    // B a hair nearer: A keeps it.
-    const hair = scene(10.001, 10, first)
-    expect([hair.get('A'), hair.get('B')]).toEqual([250, 0])
-    // B clearly nearer: B takes it.
-    const clear = scene(10, 5, first)
-    expect([clear.get('A'), clear.get('B')]).toEqual([0, 250])
+  it('a shard drawing keeps its share against one up to a fifth nearer, at every distance, and gives it up to one nearer than that', () => {
+    // Distances are doublings: a fifth nearer is HYSTERESIS_DOUBLINGS (about 0.32) less, near or far.
+    for (const D of [1, 4, 10, 40]) {
+      const scene = (da: number, db: number, held?: Map<string, number>): Map<string, number> => allocate(new Map<string, Demand>([
+        ...Array.from({ length: 3 }, (_, i) => [`x${i}`, d(250, false, i / 10)] as [string, Demand]),
+        ['A', d(250, false, da)],
+        ['B', d(250, false, db)],
+      ]), held)
+      const first = scene(D, D + 0.001)
+      expect([first.get('A'), first.get('B')]).toEqual([250, 0])
+      // B up to a fifth nearer: A keeps it.
+      const close = scene(D, D - (HYSTERESIS_DOUBLINGS - 0.01), first)
+      expect([D, close.get('A'), close.get('B')]).toEqual([D, 250, 0])
+      // B more than a fifth nearer: B takes it.
+      const nearer = scene(D, D - (HYSTERESIS_DOUBLINGS + 0.01), first)
+      expect([D, nearer.get('A'), nearer.get('B')]).toEqual([D, 0, 250])
+    }
+  })
+
+  it('a shard that places nothing costs provisional nothing', () => {
+    expect(provisional(d(0, true, 0))).toBe(0)
+    expect(provisional(d(0, false, 0))).toBe(0)
   })
 
   it('a shard not yet allocated may draw what is left of its pool, so its first frame is not an outline', () => {
@@ -174,6 +182,15 @@ describe('the review of #511', () => {
       expect(trustedAuthor(FRIEND)).toBe(true)
       me = B
       readFollows()
+      expect(trustedAuthor(FRIEND)).toBe(false)
+      // Signed out: none count, then back in as A, read again.
+      me = A
+      readFollows()
+      await new Promise((r) => setTimeout(r, 0))
+      expect(trustedAuthor(FRIEND)).toBe(true)
+      me = null
+      readFollows()
+      setLocalAuthor(() => A)
       expect(trustedAuthor(FRIEND)).toBe(false)
     } finally {
       setLocalAuthor(null)

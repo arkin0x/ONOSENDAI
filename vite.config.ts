@@ -89,5 +89,9 @@ export default defineConfig(async () => ({
   test: {
     // Tests never touch a live relay: a WebSocket opened in one fails it (src/test/noNetwork.ts).
     setupFiles: ['src/test/noNetwork.ts'],
+    // HOSAKA, in tests, is one that cannot be reached (src/test/noNetwork.ts
+    // answers it so, without a connection): every move is routed locally, as
+    // the app does when HOSAKA is down, and nothing asks the real one.
+    env: { VITE_HOSAKA_URL: 'http://127.0.0.1:9' },
   },
 }))

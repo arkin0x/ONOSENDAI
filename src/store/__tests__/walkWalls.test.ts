@@ -27,7 +27,7 @@ import { newShard, type Ref, type ShardModel } from 'sno-core/shards'
 import { primeRef } from '../../lib/parts'
 import { withConstrain } from '../../lib/walkConstrain'
 import type { AxisName, Position } from '../../lib/space'
-import { STRANGER_BUDGET, TRUSTED_BUDGET, clearWalls, setWallFollows, stepLimit, wallBudgetLeft, warmWalls, type WallItem } from '../walkWalls'
+import { STRANGER_BUDGET, TRUSTED_BUDGET, clearWalls, setWallFollows, stepLimit, takeWallWait, wallBudgetLeft, wallsBuilt, warmWalls, type WallItem } from '../walkWalls'
 import { setLocalAuthor } from '../../lib/carried'
 import { useShards } from '../useShards'
 import { toPayload } from 'sno-core/shards'
@@ -306,5 +306,44 @@ describe("WALK's walls are built by trust (arkinox 2026-10-25: \"ok A sounds goo
       expect(towardWall([...hs, friends])).toBe(2n)
     })
   })
-})
 
+  it('a step never passes a shard whose first build has not landed: it waits, and then the wall holds (Q, Q2)', async () => {
+    // Q: twelve mazes of yours in the region, the step into the twelfth right after entering WALK.
+    const mazes = Array.from({ length: 12 }, (_, i) => item(maze(ME), { key: `maze-${i}`, mine: true, author: ME, at: { ...AT, x: AT.x + BigInt(i * 1000) } }))
+    const walker = { ...AT, x: AT.x + 11_000n }
+    await withWorld(mazes, async () => {
+      warmWalls(1, AT)
+      takeWallWait()
+      expect(stepLimit(walker, 'z', -1, 1n << 10n, mazes).reach).toBe(0n)
+      expect(takeWallWait()).toBe(true)
+      await wallsBuilt()
+      expect(stepLimit(walker, 'z', -1, 1n << 10n, mazes).reach).toBe(2n)
+      expect(takeWallWait()).toBe(false)
+    })
+    // Q2: the first step ever to reach a maze, with no WALK entry before it.
+    clearWalls()
+    const m = item(maze(ME), { key: 'first', mine: true, author: ME })
+    expect(stepLimit(AT, 'z', -1, 1n << 10n, [m]).reach).toBe(0n)
+    await wallsBuilt()
+    expect(stepLimit(AT, 'z', -1, 1n << 10n, [m]).reach).toBe(2n)
+  })
+
+  it('a shard whose parts need a relay does not hold the step: its own faces stand meanwhile', async () => {
+    const away: Ref = ['a', at(THEM, 'not-carried')]
+    const fetched = item(withConstrain({ ...slab('z', -1, 3), author: ME, refs: [away], parts: [{ ref: 0, at: [0, 0, 0], turn: [0, 0, 0], step: 0 }] }, 'all'), { key: 'own-faces', mine: true, author: ME })
+    // The first build is from what is in hand, which lands in the task; the relay comes after.
+    stepLimit(AT, 'z', -1, 1n << 10n, [fetched])
+    await wallsBuilt()
+    expect(stepLimit(AT, 'z', -1, 1n << 10n, [fetched]).reach).toBe(2n)
+  })
+
+  it('one step among forty mazes stays within the reserved share, and every one of them holds once built', async () => {
+    const mazes = Array.from({ length: 40 }, (_, i) => item(maze(ME), { key: `m-${i}`, mine: true, author: ME, at: { ...AT, x: AT.x + BigInt(i * 1000) } }))
+    stepLimit(AT, 'z', -1, 1n << 10n, mazes)
+    expect(wallBudgetLeft('trusted')).toBeGreaterThanOrEqual(0)
+    await wallsBuilt()
+    expect(wallBudgetLeft('trusted')).toBeLessThanOrEqual(TRUSTED_BUDGET)
+    for (const i of [0, 17, 39]) expect(stepLimit({ ...AT, x: AT.x + BigInt(i * 1000) }, 'z', -1, 1n << 10n, mazes).reach).toBe(2n)
+  })
+
+})

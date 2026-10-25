@@ -10,34 +10,39 @@ vi.mock('../../lib/contacts', () => ({ GENERAL_RELAYS: [], followsOf: (pk: strin
 
 import { Vector3 } from 'three'
 import { newShard, toRender, type Part, type ShardModel } from 'sno-core/shards'
-import { HYSTERESIS_DOUBLINGS, SCENE_STRANGER, SCENE_STRANGER_SHARD, SCENE_TRUSTED, allocate, allowanceOf, clearMeshBudget, flushMeshBudget, provisional, setDemand, type Demand } from '../meshBudget'
-import { budgeted, placementSizes } from '../ShardMesh'
+import { HYSTERESIS_DOUBLINGS, SCENE_STRANGER, SCENE_STRANGER_SHARD, SCENE_TRUSTED, allocate, allowanceOf, clearMeshBudget, flushMeshBudget, provisional, setDemand, type Allowance, type Demand } from '../meshBudget'
+import { budgeted, cutOf, placementSizes, placementSplits } from '../ShardMesh'
 import type { Resolved } from '../../lib/parts'
 import { placedPose, renderPose } from '../../lib/pose'
 import type { ViewAxes } from '../../lib/space'
 import { setLocalAuthor } from '../../lib/carried'
 import { chargeByTrust, readFollows, resetFollows, setFollows, trustedAuthor, trustedPlacement } from '../../lib/trust'
 
-const d = (demand: number, trusted: boolean, distance: number): Demand => ({ demand, trusted, distance })
+/** A shard asking for `n` objects, all from the trusted pool or all from the strangers'. */
+const d = (n: number, trusted: boolean, distance: number): Demand => ({ trusted: trusted ? n : 0, stranger: trusted ? 0 : n, distance })
+/** All an allowance lets a shard draw, from both pools. */
+const all = (a: Allowance | undefined): number | undefined => (a ? a.trusted + a.stranger : undefined)
+/** An allowance of `n` from the strangers' pool: what a list with no references (a stranger's) is drawn within. */
+const S = (n: number): Allowance => ({ trusted: 0, stranger: n })
 
 describe('allocate', () => {
   it('gives your shards and those you follow what they ask, nearest first, from the reserved share', () => {
     const got = allocate(new Map([['far', d(1_500, true, 50)], ['near', d(1_500, true, 5)]]))
-    expect(got.get('near')).toBe(1_500)
-    expect(got.get('far')).toBe(SCENE_TRUSTED - 1_500)
+    expect(all(got.get('near'))).toBe(1_500)
+    expect(all(got.get('far'))).toBe(SCENE_TRUSTED - 1_500)
   })
 
   it('caps every stranger\'s shard, and strangers together, nearest first', () => {
-    const all = new Map(Array.from({ length: 8 }, (_, i) => [`s${i}`, d(10_000, false, i)] as [string, Demand]))
-    const got = allocate(all)
-    expect(got.get('s0')).toBe(SCENE_STRANGER_SHARD)
-    expect([...got.values()].reduce((a, b) => a + b, 0)).toBe(SCENE_STRANGER)
-    expect(got.get('s7')).toBe(0)
+    const every = new Map(Array.from({ length: 8 }, (_, i) => [`s${i}`, d(10_000, false, i)] as [string, Demand]))
+    const got = allocate(every)
+    expect(all(got.get('s0'))).toBe(SCENE_STRANGER_SHARD)
+    expect([...got.values()].reduce((a, b) => a + (all(b) ?? 0), 0)).toBe(SCENE_STRANGER)
+    expect(all(got.get('s7'))).toBe(0)
   })
 
   it('five hostile strangers nearer the camera never take what is yours', () => {
-    const all = new Map<string, Demand>([...Array.from({ length: 5 }, (_, i) => [`h${i}`, d(1_000_000, false, 0)] as [string, Demand]), ['mine', d(2_000, true, 100)]])
-    expect(allocate(all).get('mine')).toBe(2_000)
+    const every = new Map<string, Demand>([...Array.from({ length: 5 }, (_, i) => [`h${i}`, d(1_000_000, false, 0)] as [string, Demand]), ['mine', d(2_000, true, 100)]])
+    expect(all(allocate(every).get('mine'))).toBe(2_000)
   })
 })
 
@@ -58,15 +63,15 @@ describe('a shard within its allowance', () => {
   it('draws everything within its allowance, and the nearest whole placements past it', () => {
     const { shard, byRef } = placements(100, 21)
     const list = (shard.parts ?? []).map((part) => ({ part, r: byRef.get(`a:33331:${'a'.repeat(64)}:obj`) }))
-    expect(budgeted(list, 2_100)).toBeNull()
+    expect(budgeted(list, S(2_100))).toBeNull()
     expect(budgeted(list, undefined)).toBeNull()
     // 250 objects: eleven whole placements of 21, the eleven nearest the anchor (placement 0 is at it).
-    const keep = budgeted(list, 250, { centre: [0, 0, 0], scale: 1 })!
+    const keep = budgeted(list, S(250), { centre: [0, 0, 0], scale: 1 })!
     expect([...keep].sort((a, b) => a - b)).toEqual([0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10])
     // Seen from the other end, the far ones are nearest.
-    const other = budgeted(list, 250, { centre: [-99, 0, 0], scale: 1 })!
+    const other = budgeted(list, S(250), { centre: [-99, 0, 0], scale: 1 })!
     expect(Math.min(...other)).toBe(89)
-    expect(budgeted(list, 0)!.size).toBe(0)
+    expect(budgeted(list, S(0))!.size).toBe(0)
   })
 })
 
@@ -74,13 +79,13 @@ describe('the review of #511', () => {
   it('one anchor step of many shards costs one allocation, in time that grows with the shards and no faster', () => {
     const step = (n: number): number => {
       clearMeshBudget()
-      for (let i = 0; i < n; i++) setDemand(`k${i}`, { demand: 3, trusted: i % 2 === 0, distance: i })
+      for (let i = 0; i < n; i++) setDemand(`k${i}`, d(3, i % 2 === 0, i))
       flushMeshBudget()
       const t0 = performance.now()
-      for (let i = 0; i < n; i++) setDemand(`k${i}`, { demand: 3, trusted: i % 2 === 0, distance: i + 0.5 })
+      for (let i = 0; i < n; i++) setDemand(`k${i}`, d(3, i % 2 === 0, i + 0.5))
       flushMeshBudget()
       const ms = performance.now() - t0
-      expect(allowanceOf('k0')).toBe(3)
+      expect(all(allowanceOf('k0'))).toBe(3)
       return ms
     }
     step(300)
@@ -97,46 +102,46 @@ describe('the review of #511', () => {
   it('a shard drawing keeps its share against one up to a fifth nearer, at every distance, and gives it up to one nearer than that', () => {
     // Distances are doublings: a fifth nearer is HYSTERESIS_DOUBLINGS (about 0.32) less, near or far.
     for (const D of [1, 4, 10, 40]) {
-      const scene = (da: number, db: number, held?: Map<string, number>): Map<string, number> => allocate(new Map<string, Demand>([
+      const scene = (da: number, db: number, held?: Map<string, Allowance>): Map<string, Allowance> => allocate(new Map<string, Demand>([
         ...Array.from({ length: 3 }, (_, i) => [`x${i}`, d(250, false, i / 10)] as [string, Demand]),
         ['A', d(250, false, da)],
         ['B', d(250, false, db)],
       ]), held)
       const first = scene(D, D + 0.001)
-      expect([first.get('A'), first.get('B')]).toEqual([250, 0])
+      expect([all(first.get('A')), all(first.get('B'))]).toEqual([250, 0])
       // B up to a fifth nearer: A keeps it.
       const close = scene(D, D - (HYSTERESIS_DOUBLINGS - 0.01), first)
-      expect([D, close.get('A'), close.get('B')]).toEqual([D, 250, 0])
+      expect([D, all(close.get('A')), all(close.get('B'))]).toEqual([D, 250, 0])
       // B more than a fifth nearer: B takes it.
       const nearer = scene(D, D - (HYSTERESIS_DOUBLINGS + 0.01), first)
-      expect([D, nearer.get('A'), nearer.get('B')]).toEqual([D, 0, 250])
+      expect([D, all(nearer.get('A')), all(nearer.get('B'))]).toEqual([D, 0, 250])
     }
   })
 
   it('provisional grants before a flush never pass the pool: twenty new strangers get 1,000 between them', () => {
     clearMeshBudget()
     let granted = 0
-    for (let i = 0; i < 20; i++) granted += provisional(d(10_000, false, i))
+    for (let i = 0; i < 20; i++) granted += all(provisional(d(10_000, false, i)))!
     expect(granted).toBe(SCENE_STRANGER)
     // The next allocation recounts: grants made before it are not carried over.
     setDemand('one', d(10, false, 0))
     flushMeshBudget()
-    expect(provisional(d(500, false, 1))).toBe(SCENE_STRANGER_SHARD)
+    expect(all(provisional(d(500, false, 1)))).toBe(SCENE_STRANGER_SHARD)
     clearMeshBudget()
   })
 
   it('a shard that places nothing costs provisional nothing', () => {
-    expect(provisional(d(0, true, 0))).toBe(0)
-    expect(provisional(d(0, false, 0))).toBe(0)
+    expect(all(provisional(d(0, true, 0)))).toBe(0)
+    expect(all(provisional(d(0, false, 0)))).toBe(0)
   })
 
   it('a shard not yet allocated may draw what is left of its pool, so its first frame is not an outline', () => {
     clearMeshBudget()
-    expect(provisional(d(500, true, 0))).toBe(500)
+    expect(all(provisional(d(500, true, 0)))).toBe(500)
     setDemand('big', d(SCENE_TRUSTED - 100, true, 0))
     flushMeshBudget()
-    expect(provisional(d(500, true, 1))).toBe(100)
-    expect(provisional(d(500, false, 1))).toBe(SCENE_STRANGER_SHARD)
+    expect(all(provisional(d(500, true, 1)))).toBe(100)
+    expect(all(provisional(d(500, false, 1)))).toBe(SCENE_STRANGER_SHARD)
     clearMeshBudget()
   })
 
@@ -155,7 +160,7 @@ describe('the review of #511', () => {
       const centre: [number, number, number] = [3, 0, 5]
       const real = (p: Part): number => new Vector3(...toRender(p.at)).applyMatrix4(turn).add(new Vector3(...centre)).length()
       const truly = parts.map((p, i) => [real(p), i] as const).sort((a, b) => a[0] - b[0])[0][1]
-      expect([...budgeted(list, 1, { centre, scale: 1, pose })!]).toEqual([truly])
+      expect([...budgeted(list, S(1), { centre, scale: 1, pose })!]).toEqual([truly])
     })
   }
 
@@ -246,4 +251,57 @@ describe('the review of #511', () => {
     }
   })
 
+})
+
+describe('which share pays for each placement (as WALK charges, lib/trust.ts chargeByTrust)', () => {
+  const ME = 'a'.repeat(64), THEM = 'e'.repeat(64)
+  const leaf = (): Resolved => ({ model: newShard('leaf'), children: [] })
+  const tree = (n: number): Resolved => ({ model: newShard('t'), children: Array.from({ length: n - 1 }, () => ({ part: { ref: 0, at: [0, 0, 0], turn: [0, 0, 0], step: 0 }, ref: ['a', 'x'], model: newShard('c'), children: [] })) })
+  /** A resolved object by `pk` of one placed child, `child`. */
+  const holding = (child: { ref: [string, string]; r: Resolved }): Resolved => ({ model: newShard('holder'), children: [{ part: { ref: 0, at: [0, 0, 0], turn: [0, 0, 0], step: 0 }, ref: child.ref as ['a', string], model: child.r.model, children: child.r.children }] })
+  const fanOut = (count: number, ref: string, r: Resolved): { shard: ShardModel; byRef: Map<string, Resolved> } => ({
+    shard: { ...newShard('root'), refs: [['a', ref]], parts: Array.from({ length: count }, (_, i) => ({ ref: 0, at: [i * 120, 0, 0], turn: [0, 0, 0], step: 0 })) },
+    byRef: new Map([[`a:${ref}`, r]]),
+  })
+
+  it("a shard of yours placing a stranger's object pays for it, and all under it, from the strangers' pool, capped", () => {
+    setLocalAuthor(() => ME)
+    try {
+      const { shard, byRef } = fanOut(1_000, `33331:${THEM}:obj`, tree(21))
+      const split = placementSplits(shard, byRef, true).reduce(([a, b], [x, y]) => [a + x, b + y], [0, 0])
+      expect(split).toEqual([0, 21_000])
+      const got = allocate(new Map([['yours', { trusted: split[0], stranger: split[1], distance: 0 }], ['maze', d(1_500, true, 10)]]))
+      expect(got.get('yours')).toEqual({ trusted: 0, stranger: SCENE_STRANGER_SHARD })
+      // Your maze still has all of yours.
+      expect(got.get('maze')?.trusted).toBe(1_500)
+    } finally {
+      setLocalAuthor(null)
+    }
+  })
+
+  it("your own object placing a stranger's charges you for yours and them for theirs; a stranger's shard pays for all of it", () => {
+    setLocalAuthor(() => ME)
+    try {
+      const yours = holding({ ref: ['a', `33331:${THEM}:x`], r: leaf() })
+      const { shard, byRef } = fanOut(10, `33331:${ME}:mine`, yours)
+      expect(placementSplits(shard, byRef, true).reduce(([a, b], [x, y]) => [a + x, b + y], [0, 0])).toEqual([10, 10])
+      expect(placementSplits(shard, byRef, false).reduce(([a, b], [x, y]) => [a + x, b + y], [0, 0])).toEqual([0, 20])
+      // Drawn only where both of a placement's parts fit: 3 of yours and 2 of theirs leave two placements.
+      const list = (shard.parts ?? []).map((part) => ({ part, r: yours, ref: shard.refs![0] }))
+      expect(budgeted(list, { trusted: 3, stranger: 2 }, { centre: [0, 0, 0], scale: 1 }, true)!.size).toBe(2)
+    } finally {
+      setLocalAuthor(null)
+    }
+  })
+})
+
+describe("what sno-core could not read ('objects') is the shard's outline, not a cube each", () => {
+  it('folds placements cut for reads in with those the budget cut', () => {
+    const drawnOne: Resolved = { model: newShard('a'), children: [] }
+    const unread: Resolved = { model: null, missing: 'objects', children: [] }
+    const gone: Resolved = { model: null, missing: 'unreachable', children: [] }
+    const list = [{ r: drawnOne }, { r: unread }, { r: gone }, { r: drawnOne }]
+    expect(cutOf(list, null)).toEqual([1])
+    expect(cutOf(list, new Set([0, 1, 2]))).toEqual([1, 3])
+  })
 })

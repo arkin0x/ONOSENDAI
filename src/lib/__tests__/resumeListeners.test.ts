@@ -15,6 +15,9 @@
 
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
+// relay.ts itself, over its fake pool, not the tests' offline relay (src/test/noNetwork.ts).
+vi.unmock('../relay')
+
 vi.mock('nostr-tools/abstract-pool', () => ({
   AbstractSimplePool: class {
     ensureRelay(): Promise<object> { return Promise.reject(new Error('no relays in tests')) }

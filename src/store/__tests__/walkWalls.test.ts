@@ -5,7 +5,7 @@
  * Earth, a monument at a coarse unit pressed into again and again (review of
  * #461), and a part far finer than its parent.
  */
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 vi.hoisted(() => {
   const m = new Map<string, string>()
@@ -19,11 +19,15 @@ vi.hoisted(() => {
   }
 })
 
+// WALK reads your follows; here they come from setWallFollows, never a relay.
+vi.mock('../../lib/contacts', () => ({ GENERAL_RELAYS: [], followsOf: async () => [], fetchContacts: async () => [] }))
+
 import { newShard, type Ref, type ShardModel } from 'sno-core/shards'
 import { primeRef } from '../../lib/parts'
 import { withConstrain } from '../../lib/walkConstrain'
 import type { AxisName, Position } from '../../lib/space'
-import { WALL_BUDGET, clearWalls, stepLimit, wallBudgetLeft, warmWalls, type WallItem } from '../walkWalls'
+import { STRANGER_BUDGET, clearWalls, setWallFollows, stepLimit, wallBudgetLeft, warmWalls, type WallItem } from '../walkWalls'
+import { setLocalAuthor } from '../../lib/carried'
 import { useShards } from '../useShards'
 import { toPayload } from 'sno-core/shards'
 
@@ -163,120 +167,99 @@ describe('stepLimit', () => {
   })
 })
 
-describe('what WALK resolves is bounded as a whole', () => {
-  const ME = 'a'.repeat(64)
-  const addr = (d: string): string => `33331:${ME}:${d}`
-  // Four levels each placing the next 30 times, carried: 810,000 placements if nothing bounds them.
-  const level = (name: string, next: string | null): Record<string, unknown> => ({
-    ...toPayload({ ...newShard(name), mode: 'solid' }),
-    ...(next ? { refs: [['a', addr(next)]], parts: Array.from({ length: 30 }, (_, i) => [0, i, 0, 0, 0, 0, 0, 0]) } : {}),
-  })
-  const heavy = (): ShardModel => ({
-    ...slab('x', 1, 2),
-    author: ME,
-    refs: [['a', addr('b')]],
-    parts: Array.from({ length: 30 }, (_, i) => ({ ref: 0, at: [0, i, 0] as [number, number, number], turn: [0, 0, 0] as [number, number, number], step: 0 })),
-    objects: { [addr('b')]: level('b', 'c'), [addr('c')]: level('c', 'd'), [addr('d')]: level('d', 'e'), [addr('e')]: level('e', null) },
-  })
-  const settle = (): Promise<void> => new Promise((r) => setTimeout(r, 0))
-
-  it('a step that cannot enter a shard\'s region resolves nothing of it', async () => {
-    warmWalls(1)
-    const far = item(heavy(), { height: 4, at: { x: AT.x + (1n << 20n), y: AT.y, z: AT.z } })
-    expect(stepLimit(AT, 'z', 1, 5n, [far]).reach).toBe(5n)
-    await settle()
-    expect(wallBudgetLeft()).toBe(WALL_BUDGET)
-  })
-
-  it('every shard around the walker shares one budget, nearest first', async () => {
-    const shards = Array.from({ length: 6 }, (_, i) => item(heavy(), { key: `heavy-${i}`, at: { x: AT.x + BigInt(i), y: AT.y, z: AT.z } }))
-    const world = useShards.getState().worldItems
-    useShards.setState({ worldItems: () => shards.map((w) => ({ ...w, type: 'shard' as const })) as unknown as ReturnType<typeof world> })
-    try {
-      warmWalls(1, AT)
-      for (let n = 0; n < 20 && wallBudgetLeft() > 0; n++) await settle()
-      expect(wallBudgetLeft()).toBe(0)
-      // A later step resolves nothing more than what is left.
-      stepLimit(AT, 'y', 1, 3n, shards)
-      await settle()
-      expect(wallBudgetLeft()).toBe(0)
-    } finally {
-      useShards.setState({ worldItems: world })
-    }
-  })
-})
-
-describe('a starved shard fails closed, and no shard takes the whole budget (round-3 review)', () => {
-  const ME = 'a'.repeat(64), THEM = 'b'.repeat(64)
+describe("WALK's walls are built by trust (arkinox 2026-10-25: \"ok A sounds good\")", () => {
+  const ME = 'a'.repeat(64), THEM = 'b'.repeat(64), FRIEND = 'c'.repeat(64)
   const at = (pk: string, d: string): string => `33331:${pk}:${d}`
-  const place = (n: number, spread = 60): ShardModel['parts'] =>
-    Array.from({ length: n }, (_, i) => ({ ref: 0, at: [(i % 100) * spread, 0, Math.floor(i / 100) * spread] as [number, number, number], turn: [0, 0, 0] as [number, number, number], step: 0 }))
-  // The maze: its wall across -Z, carried, placed 3 out, so it needs the budget to stand (and its known box is out there, not around the walker).
-  const maze = (): ShardModel => withConstrain({ ...newShard('Maze'), mode: 'solid', vertices: [], faces: [], author: ME, refs: [['a', at(ME, 'wall')]], parts: [{ ref: 0, at: [0, 0, -360], turn: [0, 0, 0], step: 0 }], objects: { [at(ME, 'wall')]: toPayload(slab('z', -1, 0)) } }, 'off')
-  // Mallory's: four levels of 30 carried under her own key, 810,000 placements unbounded.
+  // A maze: its wall across -Z, carried, placed 3 out, so it needs the budget to stand.
+  const maze = (pk: string): ShardModel => withConstrain({ ...newShard('Maze'), mode: 'solid', vertices: [], faces: [], author: pk, refs: [['a', at(pk, 'wall')]], parts: [{ ref: 0, at: [0, 0, -360], turn: [0, 0, 0], step: 0 }], objects: { [at(pk, 'wall')]: toPayload(slab('z', -1, 0)) } }, 'off')
+  // Four levels of 30, carried under the author's own key: 810,000 placements unbounded.
   const level = (pk: string, name: string, next: string | null): Record<string, unknown> => ({
     ...toPayload({ ...newShard(name), mode: 'solid' }),
     ...(next ? { refs: [['a', at(pk, next)]], parts: Array.from({ length: 30 }, (_, i) => [0, i, 0, 0, 0, 0, 0, 0]) } : {}),
   })
-  const hostile = (): ShardModel => ({
-    ...newShard('Hostile'), mode: 'solid', vertices: [], faces: [], author: THEM,
-    refs: [['a', at(THEM, 'b')]], parts: Array.from({ length: 30 }, (_, i) => ({ ref: 0, at: [0, i * 120, 0] as [number, number, number], turn: [0, 0, 0] as [number, number, number], step: 0 })),
-    objects: { [at(THEM, 'b')]: level(THEM, 'b', 'c'), [at(THEM, 'c')]: level(THEM, 'c', 'd'), [at(THEM, 'd')]: level(THEM, 'd', 'e'), [at(THEM, 'e')]: level(THEM, 'e', null) },
+  const heavy = (pk: string): ShardModel => ({
+    ...newShard('Heavy'), mode: 'solid', vertices: [], faces: [], author: pk,
+    refs: [['a', at(pk, 'b')]], parts: Array.from({ length: 30 }, (_, i) => ({ ref: 0, at: [0, i * 120, 0] as [number, number, number], turn: [0, 0, 0] as [number, number, number], step: 0 })),
+    objects: { [at(pk, 'b')]: level(pk, 'b', 'c'), [at(pk, 'c')]: level(pk, 'c', 'd'), [at(pk, 'd')]: level(pk, 'd', 'e'), [at(pk, 'e')]: level(pk, 'e', null) },
   })
-  // A legitimate floor of 5,000 tiles, five units below the walker.
-  const floor = (): ShardModel => withConstrain({ ...newShard('Floor'), mode: 'solid', vertices: [], faces: [], author: ME, refs: [['a', at(ME, 'tile')]], parts: place(5000), objects: { [at(ME, 'tile')]: toPayload(slab('y', 1, 0, 1)) } }, 'off')
-  const below = { ...AT, y: AT.y - 5n }
-  const settleAll = async (): Promise<void> => { for (let n = 0; n < 30; n++) await new Promise((r) => setTimeout(r, 0)) }
+  const settleAll = async (): Promise<void> => { for (let n = 0; n < 40; n++) await new Promise((r) => setTimeout(r, 0)) }
   const withWorld = async (items: WallItem[], run: () => Promise<void>): Promise<void> => {
     const world = useShards.getState().worldItems
     useShards.setState({ worldItems: () => items.map((w) => ({ ...w, type: 'shard' as const })) as unknown as ReturnType<typeof world> })
     try { await run() } finally { useShards.setState({ worldItems: world }) }
   }
   const towardWall = (items: WallItem[]): bigint => stepLimit(AT, 'z', -1, 1n << 10n, items).reach
+  beforeEach(() => setLocalAuthor(() => ME))
+  afterEach(() => setLocalAuthor(null))
 
-  it('a hostile shard nearer the walker cannot take the maze wall down, this WALK or the next, or once it is gone', async () => {
-    const h = item(hostile(), { key: 'hostile' })
-    const m = item(maze(), { key: 'maze' })
-    await withWorld([h, m], async () => {
-      warmWalls(1, AT)
-      await settleAll()
-      expect(towardWall([h, m])).toBe(2n)
-      // The next WALK.
-      warmWalls(1, AT)
-      await settleAll()
-      expect(towardWall([h, m])).toBe(2n)
-    })
-    // The hostile shard gone.
-    await withWorld([m], async () => {
-      warmWalls(1, AT)
-      await settleAll()
-      expect(towardWall([m])).toBe(2n)
-    })
+  it('a step that cannot enter a shard\'s region resolves nothing of it', async () => {
+    warmWalls(1)
+    const far = item(heavy(THEM), { author: THEM, height: 4, at: { x: AT.x + (1n << 20n), y: AT.y, z: AT.z } })
+    expect(stepLimit(AT, 'z', 1, 5n, [far]).reach).toBe(5n)
+    await settleAll()
+    expect(wallBudgetLeft('stranger')).toBe(STRANGER_BUDGET)
   })
 
-  it('four 5,000-tile floors resolved first leave the maze its share', async () => {
-    const floors = [0, 1, 2, 3].map((i) => item(floor(), { key: `floor-${i}`, at: below }))
-    const m = item(maze(), { key: 'maze' })
-    await withWorld([...floors, m], async () => {
-      warmWalls(1, AT)
-      await settleAll()
-      expect(towardWall([...floors, m])).toBe(2n)
-    })
-  })
-
-  it('when the whole budget is spent before the maze, it fails closed: the walker is still held', async () => {
-    const hs = [0, 1, 2, 3, 4, 5].map((i) => item(hostile(), { key: `hostile-${i}` }))
-    const m = item(maze(), { key: 'maze' })
+  it('five hostile strangers nearer the walker never starve your maze, this WALK, the next, or once they are gone', async () => {
+    const hs = [0, 1, 2, 3, 4].map((i) => item(heavy(THEM), { key: `hostile-${i}`, author: THEM }))
+    const m = item(maze(ME), { key: 'maze', mine: true, author: ME })
     await withWorld([...hs, m], async () => {
       warmWalls(1, AT)
       await settleAll()
-      expect(towardWall([...hs, m])).toBeLessThanOrEqual(2n)
-      // Once they are gone, the next WALK builds the maze whole: its own wall again.
+      expect(wallBudgetLeft('stranger')).toBe(0)
+      expect(towardWall([...hs, m])).toBe(2n)
+      warmWalls(1, AT)
+      await settleAll()
+      expect(towardWall([...hs, m])).toBe(2n)
     })
     await withWorld([m], async () => {
       warmWalls(1, AT)
       await settleAll()
       expect(towardWall([m])).toBe(2n)
+    })
+  })
+
+  it("a followed author's maze is built from your share; a stranger's starved one is walkable", async () => {
+    const hs = [0, 1, 2, 3, 4].map((i) => item(heavy(THEM), { key: `hostile-${i}`, author: THEM }))
+    const friends = item(maze(FRIEND), { key: 'friend', author: FRIEND })
+    // Not yet followed: a stranger, after five strangers spent the strangers' share: walkable.
+    await withWorld([...hs, friends], async () => {
+      warmWalls(1, AT)
+      await settleAll()
+      expect(towardWall([...hs, friends])).toBe(1n << 10n)
+      // Followed: built again from the trusted share, at once.
+      setWallFollows([FRIEND])
+      await settleAll()
+      expect(towardWall([...hs, friends])).toBe(2n)
+    })
+  })
+
+  it('your own shards beyond the reserved share degrade nearest first, and come back when it does', async () => {
+    // Three of your own heavy shards farther off take the whole trusted share (20,000 each); the maze is nearest.
+    const own = [1, 2, 3, 4].map((i) => item(heavy(ME), { key: `own-${i}`, mine: true, author: ME, at: { x: AT.x + BigInt(100 * i), y: AT.y, z: AT.z } }))
+    const m = item(maze(ME), { key: 'maze', mine: true, author: ME })
+    await withWorld([...own, m], async () => {
+      warmWalls(1, AT)
+      await settleAll()
+      expect(wallBudgetLeft('trusted')).toBe(0)
+      expect(towardWall([...own, m])).toBe(2n)
+    })
+    // Nearer ones first: three heavy shards of yours at the walker take the whole share, and a maze of
+    // yours 15 units off (its wall 40 units wide, across the walker's path) waits, walkable.
+    const wide = (): ShardModel => withConstrain({ ...maze(ME), objects: { [at(ME, 'wall')]: toPayload(slab('z', -1, 0, 20)) } }, 'off')
+    const nearer = [1, 2, 3].map((i) => item(heavy(ME), { key: `near-${i}`, mine: true, author: ME }))
+    const far = item(wide(), { key: 'far-maze', mine: true, author: ME, at: { ...AT, x: AT.x + 15n } })
+    await withWorld([...nearer, far], async () => {
+      warmWalls(1, AT)
+      await settleAll()
+      expect(wallBudgetLeft('trusted')).toBe(0)
+      expect(towardWall([...nearer, far])).toBe(1n << 10n)
+    })
+    // The next WALK, with them gone: built, and it holds.
+    await withWorld([far], async () => {
+      warmWalls(1, AT)
+      await settleAll()
+      expect(towardWall([far])).toBe(2n)
     })
   })
 })

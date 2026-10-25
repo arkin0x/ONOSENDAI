@@ -71,7 +71,9 @@ export function meter(pool: ReadPool): Metered {
     get: (t, k) => (k === 'left' ? now() : Reflect.get(t, k)),
     set: (t, k, v) => {
       if (k !== 'left') return Reflect.set(t, k, v)
-      const d = now() - Number(v)
+      // Never more than the share may still read, whatever is written.
+      const has = now()
+      const d = Math.min(has, has - Number(v))
       if (d > 0) { room -= d; left[pool] -= d; used += d }
       return true
     },

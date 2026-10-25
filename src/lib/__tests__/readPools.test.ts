@@ -135,4 +135,38 @@ describe('a shard drawn in the scene reads from its pool (useResolved)', () => {
     await settle()
     expect(readsLeft('trusted')).toBe(SCENE_TRUSTED_READS)
   })
+
+  it('reads given back while a starved shard is still resolving wake it when it lands (review of #515: a lost wakeup)', async () => {
+    const { primeRef } = await import('../parts')
+    // Strangers' shards A to D read 200 each and E 150; F needs 200 pieces from a slow relay, and gets the last 50.
+    const others = (['A', 'B', 'C', 'D'] as const).map((n) => draw(wide(THEM, n, 200), 'stranger'))
+    const e = draw(wide(THEM, 'E', 150), 'stranger')
+    await settle()
+    expect(readsLeft('stranger')).toBe(50)
+    let answer: () => void = () => {}
+    const slow = new Promise<void>((r) => { answer = r })
+    const refs: Ref[] = Array.from({ length: 200 }, (_, i) => ['a', at(THEM, `F-${i}`)])
+    for (const r of refs) primeRef(r, slow.then(() => toPayload({ ...newShard('f'), mode: 'solid' })))
+    const f = draw({ ...newShard('F'), mode: 'solid', vertices: [], faces: [], author: THEM, refs, parts: refs.map((_, i) => ({ ref: i, at: [0, 0, 0], turn: [0, 0, 0], step: 0 })) }, 'stranger')
+    await settle()
+    expect(readsLeft('stranger')).toBe(0)
+    // E is drawn no more while F still waits on its relay: its 150 come back then.
+    await e.unmount()
+    await settle()
+    answer()
+    await settle(20)
+    expect(count(f.current())).toBe(SCENE_STRANGER_SHARD_READS)
+    expect(count(f.current(), 'objects')).toBe(0)
+    for (const h of [...others, f]) await h.unmount()
+    await settle()
+    expect(readsLeft('stranger')).toBe(SCENE_STRANGER_READS)
+  })
+
+  it('a write below zero charges no more than the share may still read', () => {
+    const m = meter('stranger')
+    m.models.left = -1_000
+    expect(m.used()).toBe(SCENE_STRANGER_SHARD_READS)
+    expect(readsLeft('stranger')).toBe(SCENE_STRANGER_READS - SCENE_STRANGER_SHARD_READS)
+  })
 })
+

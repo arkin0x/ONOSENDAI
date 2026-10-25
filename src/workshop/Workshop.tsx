@@ -69,7 +69,8 @@ const TOAST_MS = 4000
 
 /**
  * A folder's DELETE CONTENTS in the MENU's list (hud/ShardFolders): the
- * shards go in one step and one storage write (useWorkshop removeMany), and
+ * shards go in one step and one storage write (useWorkshop removeMany), the
+ * folders only once that write is saved (ShardFolders deleteFolderNow), and
  * the ledger is only read, for the note that published ones stay on relays.
  */
 const DELETE_CONTENTS: DeleteContents = {

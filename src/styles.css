@@ -9842,6 +9842,9 @@ html.tv-broadcast body { overflow: hidden; }
 .sfold__mini { width: 30px; height: 30px; padding: 0; color: var(--dim); }
 .sfold__mini:hover { color: var(--fg); border-color: rgba(0, 229, 255, 0.5); }
 .sfold__mini--danger:hover { color: var(--danger); border-color: var(--danger); }
+/* DELETE on a workshop folder: the switch's line as arkinox wrote it, not shouted, since it names a folder. */
+.sfold__confirm .ui-field { margin: 4px 0 0; }
+.sfold__confirm .ui-field__label { text-transform: none; letter-spacing: 0.02em; font-size: 11px; }
 .sfold__check { width: 18px; height: 18px; margin: 0 6px; flex: 0 0 auto; accent-color: var(--accent); cursor: pointer; }
 /* A folder is a head and, open, its list: the caller's row styles (flex rows) are not for it. */
 .workshop__list li.sfold, .objpick__list li.sfold, li.sfold { display: block; border-top: 1px solid rgba(0, 229, 255, 0.08); }

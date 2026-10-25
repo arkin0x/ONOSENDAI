@@ -26,7 +26,10 @@ import { EffectComposer, Bloom } from '@react-three/postprocessing'
 import { BlendFunction, Effect, type BloomEffect, type EffectComposer as PostComposer } from 'postprocessing'
 import { memo, useEffect, useLayoutEffect, useMemo, useRef } from 'react'
 import { useFrame } from '@react-three/fiber'
-import { Quaternion, Vector3 } from 'three'
+import { Quaternion, Vector3, type PerspectiveCamera } from 'three'
+import { applyLensShift, lensShift, stepShift, uncoveredBand, type Cover } from '../lib/coverBand'
+import { readCovers, setCoverWatch } from '../hooks/useCover'
+import { useBuilder } from '../store/useBuilder'
 import { watchContext } from '../lib/glContext'
 import { broadcastDpr, isBroadcast, recoverLostContext } from '../lib/tv/broadcast'
 import { keepPrograms } from '../lib/keepPrograms'
@@ -346,6 +349,104 @@ function HeadlampRig(): null {
 }
 
 /**
+ * When LensShift sets the projection: before anything else in the frame. It
+ * reads only the covers and the canvas, never the camera's pose, and running
+ * first means everything that projects this frame (the target markers, the
+ * labels, a tap) sees the projection the frame is drawn with.
+ */
+const LENS_PRIORITY = -1
+/**
+ * Time constant of the framing's glide, in seconds: a panel opening, closing
+ * or growing slides the picture to its new middle rather than jumping it.
+ */
+const LENS_TAU = 0.14
+const NO_SHIFT = { x: 0, y: 0 }
+
+/**
+ * Frames the orbit's focus in the middle of what the HUD leaves uncovered,
+ * in BUILD (arkinox, 2026-10-25: the build cursor sat on the deploy bar's top
+ * edge on a phone, with the shard being placed hidden under it).
+ *
+ * A lens shift, not a camera move (lib/coverBand.ts): the picture slides, the
+ * camera and the orbit stay exactly as they are, so a drag turns about the
+ * same point and nothing in the world moves. The covers are the overlays that
+ * opted in (hooks/useCover.ts), measured outside the frame loop; this only
+ * reads them, and they are measured only while the shift is in use
+ * (setCoverWatch). Off outside BUILD, in WALK (the eye looks where you face)
+ * and on Cyberspace TV, whose picture and stream are composed centred: TV
+ * drops the shift at once rather than gliding.
+ *
+ * It holds still while a finger or the mouse drags the scene (an orbit or a
+ * pinch) and glides to wherever the framing should be once the drag lets go:
+ * a cover that moves mid-drag (the pad lifting, caught by the next measure up
+ * to half a second late) never slides the picture under the finger (review of
+ * #505).
+ */
+function LensShift(): null {
+  const shift = useRef({ x: 0, y: 0 })
+  // The target, worked out again only when the covers or the canvas change.
+  const aim = useRef<{ covers: readonly Cover[]; size: unknown; target: { x: number; y: number } } | null>(null)
+  const watched = useRef(false)
+  useEffect(() => () => { setCoverWatch(false) }, [])
+  // The workshop stops this canvas's frames (frameloop "never"), so the frame
+  // below never sees BUILD end under it: stop measuring here while the bench
+  // is open, and the next frame after it closes starts again (review of #508).
+  const benchOpen = useWorkshop((s) => s.open)
+  useEffect(() => { if (benchOpen && watched.current) { watched.current = false; setCoverWatch(false) } }, [benchOpen])
+  // The pointers dragging the scene now: down on the canvas, until they lift.
+  // On the document in the capture phase, as the walk look listens, so a
+  // release over the HUD or one a HUD handler stops still ends the hold.
+  const dragging = useRef(new Set<number>())
+  const surface = useThree((s) => (s.events.connected as HTMLElement | null | undefined | false) || s.gl.domElement)
+  useEffect(() => {
+    const held = dragging.current
+    const down = (e: PointerEvent): void => { held.add(e.pointerId) }
+    const up = (e: PointerEvent): void => { held.delete(e.pointerId) }
+    // A mouse release this never heard (let go off the page) must not hold the framing.
+    const move = (e: PointerEvent): void => { if (e.pointerType === 'mouse' && e.buttons === 0) held.delete(e.pointerId) }
+    const clear = (): void => { held.clear() }
+    const doc = surface.ownerDocument
+    surface.addEventListener('pointerdown', down)
+    doc.addEventListener('pointerup', up, true)
+    doc.addEventListener('pointercancel', up, true)
+    doc.addEventListener('pointermove', move, true)
+    window.addEventListener('blur', clear)
+    return () => {
+      surface.removeEventListener('pointerdown', down)
+      doc.removeEventListener('pointerup', up, true)
+      doc.removeEventListener('pointercancel', up, true)
+      doc.removeEventListener('pointermove', move, true)
+      window.removeEventListener('blur', clear)
+      held.clear()
+    }
+  }, [surface])
+  useFrame((state, dt) => {
+    const cam = state.camera as PerspectiveCamera
+    if (!cam.isPerspectiveCamera) return
+    const { width, height, left, top } = state.size
+    const tv = useTv.getState().on || isBroadcast()
+    const on = !tv && useBuilder.getState().active && !useCyberspace.getState().walking
+    if (on !== watched.current) { watched.current = on; setCoverWatch(on) }
+    let target = NO_SHIFT
+    if (on) {
+      const covers = readCovers()
+      const a = aim.current
+      if (a && a.covers === covers && a.size === state.size) target = a.target
+      else {
+        // The covers are in viewport pixels; the band is in the canvas's.
+        const local = left === 0 && top === 0 ? covers : covers.map((c) => ({ edge: c.edge, box: { left: c.box.left - left, top: c.box.top - top, right: c.box.right - left, bottom: c.box.bottom - top } }))
+        target = lensShift(width, height, uncoveredBand(width, height, local))
+        aim.current = { covers, size: state.size, target }
+      }
+    }
+    const s = shift.current
+    if (tv) { s.x = 0; s.y = 0 } else stepShift(s, target, dt, LENS_TAU, dragging.current.size > 0)
+    applyLensShift(cam, width, height, s)
+  }, LENS_PRIORITY)
+  return null
+}
+
+/**
  * Orbit around the cursor, with the axis views as snap-backs.
  *
  * Free orbit and the 90° axis remapping are both worth having and they do
@@ -582,7 +683,7 @@ function Rig(): JSX.Element {
   // finger on the scene ends the turn rather than jumping it. A finger
   // holding a pad key is not on the scene, so a thumb can walk while the
   // other looks; that is why this does not ask for the primary pointer.
-  const surface = useThree((s) => (s.events.connected as HTMLElement | null | undefined) ?? s.gl.domElement)
+  const surface = useThree((s) => (s.events.connected as HTMLElement | null | undefined | false) || s.gl.domElement)
   useEffect(() => {
     let held: { id: number; x: number; y: number } | null = null
     const down = (e: PointerEvent): void => {
@@ -965,6 +1066,7 @@ export const Scene = memo(function Scene(): JSX.Element {
       <directionalLight position={[10, 10, 10]} intensity={1.2} />
       <Rig />
       <HeadlampRig />
+      <LensShift />
       <CellMetric />
       <ScreenAxes />
       <World />

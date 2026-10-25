@@ -60,7 +60,7 @@ describe('hidden audio in a bag', () => {
   it('an unencrypted kind 1063 is not hidden audio, and is skipped', () => {
     const plain = audioInnerTemplate(audio, at, 0, 1)
     plain.tags = plain.tags.filter((t) => !['encryption-algorithm', 'decryption-key', 'decryption-nonce'].includes(t[0]))
-    expect(readItem({ ...plain, id: '00'.repeat(32) })).toBeNull()
+    expect(readItem({ ...plain, id: '00'.repeat(32) }, null)).toBeNull()
   })
 
   it('is counted in the bag’s contents, after the kinds spec §7.7 listed first', () => {

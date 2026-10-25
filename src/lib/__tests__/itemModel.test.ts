@@ -79,7 +79,7 @@ describe('the model and animate tags', () => {
     expect(t.tags).toContainEqual(['-'])
     const signed = finalizeEvent(t, hider)
     expect(keyItemOf(signed)).toEqual(key)
-    expect(readItem(signed)?.key?.model).toEqual({ address: ADDRESS })
+    expect(readItem(signed, signed.pubkey)?.key?.model).toEqual({ address: ADDRESS })
     // EDIT carries every tag the moved version had (hidden.ts editedTemplate).
     const moved = editedTemplate(keyInnerTemplate({ ...key, model: undefined, animation: undefined }, { x: 1n, y: 1n, z: 1n }, 0, 9), signed)
     expect(keyItemOf({ ...moved, kind: 3340 })).toMatchObject({ model: { address: ADDRESS }, animation: ['bob', 'spin-y'] })

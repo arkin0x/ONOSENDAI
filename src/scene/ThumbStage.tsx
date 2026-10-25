@@ -17,6 +17,7 @@ import { Component, useEffect, useRef, useState, type ReactNode } from 'react'
 import type { ShardModel } from 'sno-core/shards'
 import { placedBounds, resolveParts, type Placed } from 'sno-core/parts'
 import { OwnPartsContext, fetchOwnFirst, fetchRef } from '../lib/parts'
+import { authorOf } from '../lib/carried'
 import { keepPrograms } from '../lib/keepPrograms'
 import { ShardMesh } from './ShardMesh'
 import { ShardLights } from './shardLight'
@@ -66,7 +67,7 @@ export function frameOfBounds(b: { min: number[]; max: number[] } | null): Thumb
 export async function frameOf(shard: ShardModel, own = false): Promise<ThumbFrame> {
   if (!shard.refs?.length || !shard.parts?.length) return frameOfBounds(placedBounds(shard, []))
   const timeout = new Promise<Placed[] | null>((resolve) => setTimeout(() => resolve(null), PARTS_WAIT_MS))
-  const placed = await Promise.race([resolveParts(shard, own ? fetchOwnFirst : fetchRef).catch(() => null), timeout])
+  const placed = await Promise.race([resolveParts(shard, own ? fetchOwnFirst : fetchRef, { author: authorOf(shard) }).catch(() => null), timeout])
   return frameOfBounds(placedBounds(shard, placed ?? []))
 }
 

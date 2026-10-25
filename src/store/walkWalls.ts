@@ -54,13 +54,21 @@ interface Entry {
   reach: { lo: Position; hi: Position } | null
   /** Every reference its parts touched, at any depth: an edit of one of your own here builds it again. */
   keys: Set<string>
+  /** Its parts are still being resolved, so the references deeper than its own are not known yet. */
+  pending: boolean
 }
 
 const entries = new Map<string, Entry>()
 
-// One of your own objects edited in the workshop: the walls of every shard placing it are built again on the next look.
+// One of your own objects edited in the workshop: the walls of every shard
+// placing it are built again on the next look. One still resolving may place
+// it deeper down, so it is built again too; its answer, when it comes, is
+// dropped (resolveInto keeps only the entry it was asked for).
 onLocalObjects((changed) => {
-  for (const [k, e] of entries) for (const c of changed) if (e.keys.has(c)) { entries.delete(k); break }
+  for (const [k, e] of entries) {
+    if (e.pending) { entries.delete(k); continue }
+    for (const c of changed) if (e.keys.has(c)) { entries.delete(k); break }
+  }
 })
 
 function whereOf(w: WallItem): string {
@@ -85,7 +93,7 @@ function build(w: WallItem, placed: readonly Placed[]): Entry {
   const mesh = wallMesh(w.shard, placed, pose)
   const missingAt = placed.some(function gone(p): boolean { return p.missing === 'unreachable' || p.children.some(gone) }) ? Date.now() : null
   const keys = touchedKeys(placed, new Set((w.shard.refs ?? []).map(refKey)))
-  return { shard: w.shard, missingAt, where: whereOf(w), mesh, clip: regionBox(w.at, w.height, w.shard.unit, WALL_AXES), reach: reachOf(mesh, w.shard.unit), keys }
+  return { shard: w.shard, missingAt, where: whereOf(w), mesh, clip: regionBox(w.at, w.height, w.shard.unit, WALL_AXES), reach: reachOf(mesh, w.shard.unit), keys, pending: false }
 }
 
 /** The walls of one placed shard, built now or kept from before; its parts follow when they resolve. */
@@ -113,9 +121,11 @@ const RETRY_MS = 30_000
  */
 function resolveInto(w: WallItem, e: Entry): void {
   if (!w.shard.parts?.length) return
+  e.pending = true
   void resolvePartsShared(w.shard).then((placed) => {
+    e.pending = false
     if (entries.get(w.key) === e) entries.set(w.key, build(w, placed))
-  }, () => { /* unreachable parts stop nothing */ })
+  }, () => { e.pending = false /* unreachable parts stop nothing */ })
 }
 
 /**

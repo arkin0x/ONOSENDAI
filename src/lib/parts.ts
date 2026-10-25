@@ -25,7 +25,7 @@
  */
 
 import { useEffect, useRef, useState } from 'react'
-import { MAX_PART_DEPTH, parseAddress, refKey, resolveParts, type Placed } from 'sno-core/parts'
+import { MAX_PART_DEPTH, parseAddress, refKey, type Placed } from 'sno-core/parts'
 import { MAX_UNIT, fromPayload, type Ref, type ShardModel } from 'sno-core/shards'
 import { GENERAL_RELAYS } from './contacts'
 import { queryAny, relaySet } from './relay'
@@ -78,10 +78,19 @@ export function touchedKeys(placed: readonly Placed[], into: Set<string> = new S
   return into
 }
 
-/** The payload a reference names, parsed, or null. The newest version of an `a`; the one event of an `e`. */
+/** The payload a reference names, parsed, or null. The newest version of an `a`; the one event of an `e`. Your own, from here first. */
 export function fetchRef(ref: Ref): Promise<unknown> {
   const mine = localPayload(ref)
-  if (mine !== undefined) return Promise.resolve(mine)
+  return mine !== undefined ? Promise.resolve(mine) : fetchRemote(ref)
+}
+
+/**
+ * fetchRef without the workshop: what the relays hold, which is what everyone
+ * else can draw. The OBJECT picker asks this way, so an address of yours that
+ * was never published is refused there rather than stamped as something every
+ * other viewer sees as a placeholder.
+ */
+export function fetchRemote(ref: Ref): Promise<unknown> {
   const key = refKey(ref)
   const held = cache.get(key)
   if (held) return held
@@ -132,22 +141,35 @@ export type Resolved = Pick<Placed, 'model' | 'missing' | 'children'>
  */
 export function useResolved(shard: ShardModel | null): Map<string, Resolved> {
   const [byRef, setByRef] = useState<Map<string, Resolved>>(() => new Map())
-  // Bumped when one of your own objects this draw placed, at any depth, is edited here.
+  // Bumped when one of your own objects this draw placed, at any depth, is
+  // edited here, or when anything of yours is edited while a resolve is still
+  // waiting (its deeper references are not known yet): resolved again.
   const [again, setAgain] = useState(0)
   const touched = useRef<Set<string>>(new Set())
+  const pending = useRef(false)
   const refs = shard?.refs ?? []
   const key = refs.map(refKey).join('|')
-  useEffect(() => onLocalObjects((changed) => {
-    for (const k of changed) if (touched.current.has(k)) { setAgain((n) => n + 1); return }
-  }), [])
+  const places = refs.length > 0
+  useEffect(() => {
+    if (!places) return
+    return onLocalObjects((changed) => {
+      if (pending.current) { setAgain((n) => n + 1); return }
+      for (const k of changed) if (touched.current.has(k)) { setAgain((n) => n + 1); return }
+    })
+  }, [places])
   useEffect(() => {
     touched.current = new Set(refs.map(refKey))
-    if (!shard || refs.length === 0) { setByRef((m) => (m.size ? new Map() : m)); return }
+    if (!shard || refs.length === 0) { pending.current = false; setByRef((m) => (m.size ? new Map() : m)); return }
     let live = true
+    pending.current = true
     // One placement per reference is enough: what a reference resolves to does not depend on where it stands.
     const probe: ShardModel = { ...shard, parts: refs.map((_, i) => ({ ref: i, at: [0, 0, 0], turn: [0, 0, 0], step: 0 })) }
-    void resolveParts(probe, fetchRef).then((placed) => {
+    // Shared, so a part whose payload did not change keeps its model object
+    // across an edit of its sibling, and its mesh keeps its geometry: an
+    // OPACITY drag on one piece must not rebuild everything placing it.
+    void resolvePartsShared(probe).then((placed) => {
       if (!live) return
+      pending.current = false
       touched.current = touchedKeys(placed, new Set(refs.map(refKey)))
       const m = new Map<string, Resolved>()
       placed.forEach((p) => m.set(refKey(p.ref), { model: p.model, missing: p.missing, children: p.children }))

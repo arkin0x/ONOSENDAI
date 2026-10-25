@@ -14,10 +14,10 @@
  * does, since a relay that was slow a moment ago may answer now.
  */
 
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { flatten, fromPayload, type ShardModel } from 'sno-core/shards'
 import { placedBounds, resolveParts, type Placed } from 'sno-core/parts'
-import { fetchRef } from '../lib/parts'
+import { fetchRef, onLocalObjects, touchedKeys } from '../lib/parts'
 import { extentOf, type ItemModelRef, type ModelExtent } from '../lib/itemModel'
 
 /** A model, ready to draw: the shard and how far it reaches about its centre. */
@@ -31,6 +31,26 @@ const PARTS_WAIT_MS = 8000
 
 const loading = new Map<string, Promise<LoadedModel | null>>()
 const loaded = new Map<string, LoadedModel>()
+/** Every reference a model was measured with, its own and its parts' at any depth (lib/parts.ts refKey). */
+const touches = new WeakMap<LoadedModel, Set<string>>()
+/** Mounted items, told when the model at an address must be loaded again. */
+const reloads = new Set<(address: string) => void>()
+
+// One of your own objects edited in the workshop (store/localObjects.ts): an
+// item wearing it, or wearing anything that places it, is measured again, and
+// every item mounted with it now loads the new one. One still loading may
+// place it deeper down than is known yet, so it loads again too.
+onLocalObjects((changed) => {
+  const stale = new Set<string>()
+  for (const address of loading.keys()) {
+    const m = loaded.get(address)
+    const keys = m ? touches.get(m) : undefined
+    if (!keys) { stale.add(address); continue }
+    for (const c of changed) if (keys.has(c)) { stale.add(address); break }
+  }
+  for (const address of stale) forgetItemModel(address)
+  for (const address of stale) for (const r of reloads) r(address)
+})
 
 /** The model at `address` from its payload (parsed JSON), measured, or null when it is not one. */
 export async function modelFromPayload(address: string, payload: unknown): Promise<LoadedModel | null> {
@@ -43,7 +63,10 @@ export async function modelFromPayload(address: string, payload: unknown): Promi
   }
   const parts = shard.parts?.length ? placedBounds({ ...shard, vertices: [] }, placed) : null
   const extent = extentOf(flatten(shard).positions, parts)
-  return extent ? { shard, extent } : null
+  if (!extent) return null
+  const model = { shard, extent }
+  touches.set(model, touchedKeys(placed, new Set([`a:${address}`, ...(shard.refs ?? []).map((r) => `${r[0]}:${r[1]}`)])))
+  return model
 }
 
 /** Fetch and measure a model, once per address while it is wanted. */
@@ -78,14 +101,24 @@ export function useItemModel(ref: ItemModelRef | undefined | null): LoadedModel 
   const address = ref?.address ?? null
   const relay = ref?.relay
   const [model, setModel] = useState<LoadedModel | null>(() => (address ? loadedItemModel(address) : null))
+  // Bumped when the model at this address must be loaded again (an edit of yours it wears or places).
+  const [again, setAgain] = useState(0)
+  useEffect(() => {
+    if (!address) return
+    const r = (a: string): void => { if (a === address) setAgain((n) => n + 1) }
+    reloads.add(r)
+    return () => { reloads.delete(r) }
+  }, [address])
+  // The address the model on show was loaded for: a reload keeps it up until the new one is measured.
+  const shown = useRef(address)
   useEffect(() => {
     if (!address) { setModel(null); return }
     const now = loadedItemModel(address)
-    if (now) { setModel(now); return }
-    setModel(null)
+    if (now) { setModel(now); shown.current = address; return }
+    if (shown.current !== address) { setModel(null); shown.current = address }
     let live = true
     void loadItemModel({ address, ...(relay ? { relay } : {}) }).then((m) => { if (live) setModel(m) })
     return () => { live = false }
-  }, [address, relay])
+  }, [address, relay, again])
   return model
 }

@@ -13,16 +13,22 @@
  * than as last published. Anyone else's reference, and yours to a shard this
  * browser does not hold, still goes to the relays.
  *
- * Every change to the list says which of your addresses changed, so each
- * draw placing one asks again (lib/parts.ts localObjectsChanged), and an item
- * wearing one is measured again (hooks/useItemModel.ts forgetItemModel).
+ * A shard this browser knows was published under another key is not answered
+ * for this one: kit pieces have the same ids for everyone who imports them,
+ * so after a switch of identity `33331:<new key>:maze-kit/...` could
+ * otherwise be drawn from the piece the old key made.
+ *
+ * Every change to the list says which of your addresses changed, at most once
+ * a frame (an OPACITY drag is one edit per percent), so each draw placing one,
+ * at any depth, asks again (lib/parts.ts localObjectsChanged), and each item
+ * wearing one is measured again (hooks/useItemModel.ts).
  */
 
 import { toPayload, type ShardModel } from 'sno-core/shards'
 import { objectAddress } from 'sno-core/feed'
 import { localObjectsChanged, setLocalObjects } from '../lib/parts'
 import { withAuthoredConstrain } from '../lib/walkConstrain'
-import { forgetItemModel } from '../hooks/useItemModel'
+import { usePublished } from './usePublished'
 import { useCyberspace } from './useCyberspace'
 import { useWorkshop } from './useWorkshop'
 
@@ -53,6 +59,8 @@ export function localObject(address: { kind: number; pubkey: string; d: string }
   if (!me || address.pubkey !== me) return undefined
   const s = byId(useWorkshop.getState().shards).get(address.d)
   if (!s || (s.vertices.length === 0 && (s.parts?.length ?? 0) === 0)) return undefined
+  const rec = usePublished.getState().ledger[s.id]
+  if (rec && rec.pubkey !== me) return undefined
   return payloadOf(s)
 }
 
@@ -66,14 +74,27 @@ export function changedIds(prev: readonly ShardModel[], next: readonly ShardMode
   return out
 }
 
-function announce(pubkey: string, ids: Iterable<string>): void {
-  const keys = new Set<string>()
-  for (const id of ids) {
-    const address = objectAddress(pubkey, id)
-    keys.add(`a:${address}`)
-    forgetItemModel(address)
-  }
+/** Addresses changed since the last frame, said together on the next. */
+let due = new Set<string>()
+let scheduled = false
+const nextFrame = (fn: () => void): void => {
+  if (typeof requestAnimationFrame === 'function') requestAnimationFrame(fn)
+  else setTimeout(fn, 0)
+}
+
+/** Say now what has changed since the last frame (tests; the next frame does it otherwise). */
+export function flushLocalObjects(): void {
+  scheduled = false
+  const keys = due
+  due = new Set()
   localObjectsChanged(keys)
+}
+
+function announce(pubkey: string, ids: Iterable<string>): void {
+  for (const id of ids) due.add(`a:${objectAddress(pubkey, id)}`)
+  if (due.size === 0 || scheduled) return
+  scheduled = true
+  nextFrame(() => { if (scheduled) flushLocalObjects() })
 }
 
 let wired: (() => void) | null = null
@@ -94,6 +115,14 @@ export function wireLocalObjects(): () => void {
     if (prev.identity.pubkey) announce(prev.identity.pubkey, ids)
     if (s.identity.pubkey) announce(s.identity.pubkey, ids)
   })
-  wired = () => { offShards(); offIdentity(); setLocalObjects(null); wired = null }
+  // A record of a publish under another key takes a shard out of what is answered here (and its removal puts it back).
+  const offLedger = usePublished.subscribe((s, prev) => {
+    if (s.ledger === prev.ledger) return
+    const me = useCyberspace.getState().identity.pubkey
+    if (!me) return
+    const ids = new Set([...Object.keys(s.ledger), ...Object.keys(prev.ledger)])
+    announce(me, [...ids].filter((id) => s.ledger[id]?.pubkey !== prev.ledger[id]?.pubkey))
+  })
+  wired = () => { offShards(); offIdentity(); offLedger(); setLocalObjects(null); due = new Set(); scheduled = false; wired = null }
   return wired
 }

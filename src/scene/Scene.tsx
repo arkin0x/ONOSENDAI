@@ -388,11 +388,16 @@ function LensShift(): null {
   const aim = useRef<{ covers: readonly Cover[]; size: unknown; target: { x: number; y: number } } | null>(null)
   const watched = useRef(false)
   useEffect(() => () => { setCoverWatch(false) }, [])
+  // The workshop stops this canvas's frames (frameloop "never"), so the frame
+  // below never sees BUILD end under it: stop measuring here while the bench
+  // is open, and the next frame after it closes starts again (review of #508).
+  const benchOpen = useWorkshop((s) => s.open)
+  useEffect(() => { if (benchOpen && watched.current) { watched.current = false; setCoverWatch(false) } }, [benchOpen])
   // The pointers dragging the scene now: down on the canvas, until they lift.
   // On the document in the capture phase, as the walk look listens, so a
   // release over the HUD or one a HUD handler stops still ends the hold.
   const dragging = useRef(new Set<number>())
-  const surface = useThree((s) => (s.events.connected as HTMLElement | null | undefined) ?? s.gl.domElement)
+  const surface = useThree((s) => (s.events.connected as HTMLElement | null | undefined | false) || s.gl.domElement)
   useEffect(() => {
     const held = dragging.current
     const down = (e: PointerEvent): void => { held.add(e.pointerId) }
@@ -678,7 +683,7 @@ function Rig(): JSX.Element {
   // finger on the scene ends the turn rather than jumping it. A finger
   // holding a pad key is not on the scene, so a thumb can walk while the
   // other looks; that is why this does not ask for the primary pointer.
-  const surface = useThree((s) => (s.events.connected as HTMLElement | null | undefined) ?? s.gl.domElement)
+  const surface = useThree((s) => (s.events.connected as HTMLElement | null | undefined | false) || s.gl.domElement)
   useEffect(() => {
     let held: { id: number; x: number; y: number } | null = null
     const down = (e: PointerEvent): void => {

@@ -211,8 +211,9 @@ export function ShardMesh({ shard: given, scale = 1, ghost = false, birth, onFac
   const order = shardOrder(opacity, ghost)
   const bench = benchOrders(opacity, ghost)
   // The objects this one places, fetched once for the whole app; a part's own
-  // parts come resolved from its parent instead.
-  const resolved = useResolved(nested ? null : given)
+  // parts come resolved from its parent instead. In the world's scene, what it
+  // reads is charged to the read pool of its trust (lib/readPools.ts).
+  const resolved = useResolved(nested ? null : given, budget ? (budget.trusted ? 'trusted' : 'stranger') : undefined)
   // In the world's scene: what its placed objects would draw, at every depth,
   // said to the scene's budget, and how many it may (scene/meshBudget.ts).
   // Split by which share pays for each object, as WALK's walls charge
@@ -574,6 +575,15 @@ function boundsOf(r: Resolved | undefined): { min: number[]; max: number[] } {
   return b
 }
 
+/**
+ * The placements drawn only as the shard's one faint outline: those the
+ * scene's budget cut (not in `keep`), and those sno-core could not read for
+ * want of reads ('objects'), never one cube each.
+ */
+export function cutOf(list: readonly Pick<Listed, 'r'>[], keep: ReadonlySet<number> | null | undefined): number[] {
+  return list.map((_, i) => i).filter((i) => (keep && !keep.has(i)) || list[i].r?.missing === 'objects')
+}
+
 /** One box round every placement the budget cut, in the shard's frame: drawn as one outline. */
 function cutBox(shard: ShardModel, list: readonly Listed[], cut: readonly number[]): { min: number[]; max: number[] } | null {
   const min = [Infinity, Infinity, Infinity], max = [-Infinity, -Infinity, -Infinity]
@@ -617,15 +627,17 @@ function Placements({ shard, byRef, nested, lit, ghost, world, headlamp, pose, o
   // Within the scene's budget: nearest first, each placement whole, and the
   // rest as one outline (it stops nothing: WALK has its own budget).
   const keep = useMemo(() => budgeted(list, allowance, near, rootTrusted), [list, allowance, near, rootTrusted])
+  // What the scene's budget cut, and what sno-core could not read for want of
+  // reads ('objects', lib/readPools.ts): one faint outline round all of it.
   const outline = useMemo(() => {
-    if (!keep) return null
-    const cut = list.map((_, i) => i).filter((i) => !keep.has(i))
-    return cutBox(shard, list, cut)
+    const cut = cutOf(list, keep)
+    return cut.length ? cutBox(shard, list, cut) : null
   }, [keep, list, shard])
   if (list.length === 0) return null
   const drawn = list.map(({ part, r }, i) => {
     if (!r) return null
     if (keep && !keep.has(i)) return null
+    if (r.missing === 'objects') return null
     const model = r.model && r.model.unit + part.step >= 0 && r.model.unit + part.step <= MAX_UNIT ? r.model : null
     const matrix = new Matrix4().fromArray(partMatrix(part, shard.unit, model ? model.unit : shard.unit))
     let body: ReactNode = <lineSegments geometry={CUBE_EDGES}><lineBasicMaterial color={ACCENT} toneMapped={false} transparent opacity={ghost ? 0.45 : 0.8} /></lineSegments>

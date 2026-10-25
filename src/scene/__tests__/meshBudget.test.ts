@@ -11,7 +11,7 @@ vi.mock('../../lib/contacts', () => ({ GENERAL_RELAYS: [], followsOf: (pk: strin
 import { Vector3 } from 'three'
 import { newShard, toRender, type Part, type ShardModel } from 'sno-core/shards'
 import { HYSTERESIS_DOUBLINGS, SCENE_STRANGER, SCENE_STRANGER_SHARD, SCENE_TRUSTED, allocate, allowanceOf, clearMeshBudget, flushMeshBudget, provisional, setDemand, type Allowance, type Demand } from '../meshBudget'
-import { budgeted, placementSizes, placementSplits } from '../ShardMesh'
+import { budgeted, cutOf, placementSizes, placementSplits } from '../ShardMesh'
 import type { Resolved } from '../../lib/parts'
 import { placedPose, renderPose } from '../../lib/pose'
 import type { ViewAxes } from '../../lib/space'
@@ -295,3 +295,13 @@ describe('which share pays for each placement (as WALK charges, lib/trust.ts cha
   })
 })
 
+describe("what sno-core could not read ('objects') is the shard's outline, not a cube each", () => {
+  it('folds placements cut for reads in with those the budget cut', () => {
+    const drawnOne: Resolved = { model: newShard('a'), children: [] }
+    const unread: Resolved = { model: null, missing: 'objects', children: [] }
+    const gone: Resolved = { model: null, missing: 'unreachable', children: [] }
+    const list = [{ r: drawnOne }, { r: unread }, { r: gone }, { r: drawnOne }]
+    expect(cutOf(list, null)).toEqual([1])
+    expect(cutOf(list, new Set([0, 1, 2]))).toEqual([1, 3])
+  })
+})

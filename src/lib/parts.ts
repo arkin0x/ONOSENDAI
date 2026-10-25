@@ -37,8 +37,10 @@
  */
 
 import { createContext, useContext, useEffect, useRef, useState } from 'react'
-import { Fetched, parseAddress, refKey, resolveParts, type Placed } from 'sno-core/parts'
+import { Fetched, MAX_PLACED, parseAddress, refKey, resolveParts, type Placed } from 'sno-core/parts'
 import { authorOf } from './carried'
+import { giveReads, onReadsBack, readCap, takeReads, type ReadPool } from './readPools'
+import { chargeByTrust } from './trust'
 import { fromPayload, type Ref, type ShardModel } from 'sno-core/shards'
 import { GENERAL_RELAYS } from './contacts'
 import { queryAny, relaySet } from './relay'
@@ -185,7 +187,15 @@ export type Resolved = Pick<Placed, 'model' | 'missing' | 'children' | 'carried'
  * is empty and nothing is drawn for the parts; after that the previous answer
  * stays up while a new one is fetched, so an edit never flashes them away.
  */
-export function useResolved(shard: ShardModel | null): Map<string, Resolved> {
+/** Whether anything a resolve placed, at any depth, was cut for reads (sno-core 'objects'). */
+function cutForReads(placed: readonly Placed[]): boolean {
+  return placed.some(function short(p): boolean { return p.missing === 'objects' || p.children.some(short) })
+}
+
+/** A share of a read pool one resolve holds: given, and given back so far. */
+interface Held { pool: ReadPool; share: { left: number }; given: number; back: number }
+
+export function useResolved(shard: ShardModel | null, pool?: ReadPool): Map<string, Resolved> {
   const own = useContext(OwnPartsContext)
   const [byRef, setByRef] = useState<Map<string, Resolved>>(() => new Map())
   // On the bench only: bumped when one of your own objects this draw placed,
@@ -211,19 +221,52 @@ export function useResolved(shard: ShardModel | null): Map<string, Resolved> {
       for (const k of changed) if (touched.current.has(k)) { setAgain((n) => n + 1); return }
     })
   }, [listens])
+  // The read pools this draw was cut short by, for want of reads in them (not
+  // by its own share's ceiling): resolved again when reads come back to one.
+  const starvedOf = useRef<Set<ReadPool>>(new Set())
+  useEffect(() => {
+    if (!pool) return
+    return onReadsBack((back) => { if (!pending.current && starvedOf.current.has(back)) setAgain((n) => n + 1) })
+  }, [pool])
   useEffect(() => {
     touched.current = new Set(refs.map(refKey))
     dirty.current = false
     if (!shard || refs.length === 0) { pending.current = false; setByRef((m) => (m.size ? new Map() : m)); return }
     let live = true
+    let landed = false
     pending.current = true
+    starvedOf.current = new Set()
     // One placement per reference is enough: what a reference resolves to does not depend on where it stands.
     const probe: ShardModel = { ...shard, parts: refs.map((_, i) => ({ ref: i, at: [0, 0, 0], turn: [0, 0, 0], step: 0 })) }
+    // In the scene: what it reads is charged to its pool (lib/readPools.ts), a
+    // stranger's object under a trusted shard to the strangers'.
+    const held: Held[] = []
+    const share = (from: ReadPool): { left: number; models: { left: number } } => {
+      const models = takeReads(from)
+      held.push({ pool: from, share: models, given: models.left, back: 0 })
+      return { left: MAX_PLACED, models }
+    }
+    const mine = pool ? share(pool) : undefined
+    const charge = mine && pool === 'trusted' ? chargeByTrust(mine, () => share('stranger')) : undefined
+    /** Give back what `h` holds beyond what it read (`keep`), or all of it. */
+    const giveBack = (keep: boolean): void => {
+      for (const h of held) {
+        const n = keep ? h.share.left : h.given - h.back
+        if (keep) h.share.left = 0
+        h.back += Math.max(0, n)
+        giveReads(h.pool, n)
+      }
+    }
     // Shared, so a part whose payload did not change keeps its model object
     // across an edit of its sibling, and its mesh keeps its geometry: an
     // OPACITY drag on one piece must not rebuild everything placing it.
-    void resolvePartsShared(probe, own ? fetchOwnFirst : fetchRef).then((placed) => {
-      if (!live) return
+    void resolvePartsShared(probe, own ? fetchOwnFirst : fetchRef, undefined, mine, charge).then((placed) => {
+      landed = true
+      // Drawn no more, or resolving again: everything it held goes back.
+      if (!live) { giveBack(false); return }
+      // What it did not read goes back now; what it read, when it is drawn no more.
+      if (cutForReads(placed)) for (const h of held) if (h.given < readCap(h.pool)) starvedOf.current.add(h.pool)
+      giveBack(true)
       pending.current = false
       touched.current = touchedKeys(placed, new Set(refs.map(refKey)))
       const m = new Map<string, Resolved>()
@@ -231,7 +274,8 @@ export function useResolved(shard: ShardModel | null): Map<string, Resolved> {
       setByRef(m)
       if (dirty.current) { dirty.current = false; setAgain((n) => n + 1) }
     })
-    return () => { live = false }
+    // Still resolving, it may read until it lands: what it holds goes back then.
+    return () => { live = false; if (landed) giveBack(false) }
     // The references and the table, not the shard: a placement moving needs no new fetch.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [key, carried, again, own])

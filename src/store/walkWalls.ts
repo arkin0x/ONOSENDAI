@@ -35,8 +35,10 @@
  * could not be built: the placeholders of what was cut short stop nothing.
  * That costs nothing that matters: strangers cannot spend your share, so your
  * walls and the walls of those you follow stand whatever a stranger hides
- * beside them. A starved shard is built again when a share comes back to its
- * pool (a shard's unused share is returned) and at every WALK. When your own
+ * beside them. A starved shard is built again when budget comes back to its
+ * pool (a build replaced, failed or gone gives back what it held) and at every
+ * WALK. A share is drawn on as a shard places and reads, never taken before
+ * (meter), so any number of shards resolve at once. When your own
  * shards and those you follow need more than the reserved share, the nearest
  * are built and the farthest are walkable until budget comes back.
  *
@@ -45,11 +47,12 @@
  * those you follow, STRANGER_READS for strangers, no stranger's share more
  * than STRANGER_SHARD_READS, and every resolve of one WALK shares one bound
  * over both, so many shards cannot read many times sno-core's MAX_MODELS. A
- * placement cut for reads (sno-core 'objects') is walkable, and is not built
- * again when placement budget comes back (that would not cure it), only at
- * the next WALK. So is what a stranger's object under your shard could not
- * have from the strangers' share, and a resolve that reached sno-core's
- * MAX_NODES: built again at the next WALK, with that WALK's budget.
+ * placement cut for reads (sno-core 'objects') is walkable; cut because the
+ * pool ran dry, it is built again when reads come back, as a shard short of
+ * placements is; cut at its own share's most, only at the next WALK. So is
+ * what a stranger's object under your shard could not have from the
+ * strangers' share, and a resolve that reached sno-core's MAX_NODES: built
+ * again at the next WALK, with that WALK's budget, never spinning within one.
  */
 
 import { MAX_MODELS, MAX_NODES, MAX_PLACED, type Placed } from 'sno-core/parts'
@@ -128,9 +131,9 @@ export const STRANGER_BUDGET = 20_000
 /** The most of it any one stranger's shard may take, so no one shard spends it all. */
 export const STRANGER_SHARD = 4_000
 /**
- * What is left of each pool this WALK. Each resolve is handed a fresh sno-core
- * budget object of its own share (never one refilled while a resolve draws
- * from it); what a shard does not use comes back to its pool when it lands.
+ * What is left of each pool this WALK. Each resolve draws on it as it places
+ * (meter), never before; a build holds what it drew while it stands
+ * (Entry.spend), and gives it back when it is replaced, fails or goes.
  */
 const pools = { trusted: TRUSTED_BUDGET, stranger: STRANGER_BUDGET }
 type Pool = keyof typeof pools
@@ -156,17 +159,62 @@ function release(spend: Spend | undefined): Pool[] {
   return spend.theirPlaced || spend.theirRead ? [spend.pool, 'stranger'] : [spend.pool]
 }
 
-/** Take back what `spend` gave back (release), for a build still standing after all: a rebuild of it that failed. */
-function hold(spend: Spend): void {
-  if (spend.walk !== walkNo) return
-  pools[spend.pool] -= spend.placed
-  reads[spend.pool] -= spend.read
-  pools.stranger -= spend.theirPlaced
-  reads.stranger -= spend.theirRead
-  walkReads.left -= spend.read + spend.theirRead
+/**
+ * A share of one of this WALK's pools (`counts`: placements or reads), charged
+ * as sno-core draws on it, never taken before it is drawn, so as many shards
+ * resolve at once as the pools have budget for (as the scene's reads are,
+ * lib/readPools.ts meter; review of #515). Its `left` is the lesser of what
+ * the share may still take (`cap`) and what it holds already (`credit`: what
+ * the build it replaces spent, still standing meanwhile) plus what the pool
+ * has; drawing one takes it from the credit first, then from the pool.
+ * sno-core charges only a budget whose `left` is a writable number, so it is
+ * a Proxy that reports one. A share handed out in an earlier WALK charges
+ * nothing of this one's pools (warmWalls starts them afresh).
+ */
+interface Meter {
+  /** For sno-core: the budget (or its `models`). */
+  box: { left: number }
+  /** How much it drew in all, credit and pool. */
+  used: () => number
+  /** How much of that came from the pool. */
+  fromPool: () => number
+  /** Credit it did not draw. */
+  creditLeft: () => number
+  /** Whether it was refused because the pool (and its credit) ran dry while it still had room. */
+  ranLow: () => boolean
+}
+function meter(counts: Record<Pool, number>, pool: Pool, cap: number, credit: number, also: Record<string, unknown> = {}): Meter {
+  const handed = walkNo
+  let room = cap, owed = Math.max(0, credit), used = 0, taken = 0, low = false
+  const now = (): number => {
+    if (walkNo !== handed) return Math.max(0, room)
+    const n = Math.max(0, Math.min(room, owed + Math.max(0, counts[pool])))
+    if (n < 1 && room >= 1) low = true
+    return n
+  }
+  const box = new Proxy({ left: 0, ...also }, {
+    get: (t, k) => (k === 'left' ? now() : Reflect.get(t, k)),
+    set: (t, k, v) => {
+      if (k !== 'left') return Reflect.set(t, k, v)
+      // Never more than it may still take, whatever is written.
+      const has = now()
+      const d = Math.min(has, has - Number(v))
+      if (!(d > 0)) return true
+      room -= d
+      used += d
+      if (walkNo !== handed) return true
+      const c = Math.min(owed, d)
+      owed -= c
+      counts[pool] -= d - c
+      taken += d - c
+      return true
+    },
+    getOwnPropertyDescriptor: (t, k) => (k === 'left' ? { value: now(), writable: true, enumerable: true, configurable: true } : Reflect.getOwnPropertyDescriptor(t, k)),
+  })
+  return { box: box as { left: number }, used: () => used, fromPool: () => taken, creditLeft: () => owed, ranLow: () => low }
 }
 
-/** What is left of each pool's reads this WALK, handed out and given back as the placements are. */
+/** What is left of each pool's reads this WALK, drawn on and held as the placements are. */
 const reads: Record<Pool, number> = { trusted: TRUSTED_READS, stranger: STRANGER_READS }
 /** Every read of this WALK, whatever share pays: one bound over all its resolves (sno-core `models`). */
 let walkReads = { left: TRUSTED_READS + STRANGER_READS }
@@ -383,17 +431,16 @@ function resolveInto(w: WallItem, e: Entry, quick = false): void {
   // follow up to sno-core's own MAX_PLACED, from the share reserved for them.
   const cap = pool === 'trusted' ? MAX_PLACED : STRANGER_SHARD
   const readCap = pool === 'trusted' ? MAX_MODELS : STRANGER_SHARD_READS
-  // What the build standing now holds of this WALK's pools goes into this
-  // share (it is replaced when this lands), so building it again costs only
-  // what it needs more, and a build that could have more gets more each time.
+  // What the build standing now holds of this WALK's pools is this build's
+  // credit (it is replaced when this lands): building it again costs only
+  // what it needs beyond what it holds, and the pools never count it twice.
   const held = e.spend && e.spend.walk === walkNo && e.spend.pool === pool ? e.spend : undefined
-  const share = Math.min(cap, pools[pool] + (held?.placed ?? 0))
-  const readShare = Math.max(0, Math.min(readCap, reads[pool] + (held?.read ?? 0)))
-  if (share <= 0 || readShare <= 0) {
-    // Its pool is out for now, of placements or of reads. Others in it still
-    // resolving will give back what they do not use, so it waits for that
-    // (steps wait with it); with nothing outstanding, it is walkable until
-    // budget comes back.
+  const room = Math.min(cap, pools[pool] + (held?.placed ?? 0))
+  const readRoom = Math.min(readCap, reads[pool] + (held?.read ?? 0))
+  if (room <= 0 || readRoom <= 0) {
+    // Its pool is out for now, of placements or of reads. While other first
+    // builds in it are still out it waits for them (steps wait with it); with
+    // nothing outstanding, it is walkable until budget comes back.
     if (e.first && poolBusy(pool)) { e.deferred = true; return }
     e.deferred = false
     if (entries.get(w.key) === e) entries.set(w.key, build(w, [], true))
@@ -401,68 +448,60 @@ function resolveInto(w: WallItem, e: Entry, quick = false): void {
     return
   }
   e.deferred = false
-  // Handed on: what it held of its own pool is in this share; of the strangers', back to them.
-  // Kept, in case this build fails and the one standing has to keep it.
-  const old = e.spend
-  const handedOn = release(old)
+  // The build standing keeps what it spent until this one lands (its credit
+  // here), or keeps it after all if this one fails. Spent of another pool
+  // (its trust changed), it is not this build's to draw on: all of it back.
+  const old = held
+  const back = held ? [] : release(e.spend)
   e.spend = undefined
-  pools[pool] -= share
-  reads[pool] -= readShare
+  // The WALK's one bound over both: sno-core charges every read of this
+  // build to it, credit or not, so the old build's reads leave it now.
+  if (old) walkReads.left += old.read + old.theirRead
   e.pending = true
   e.quickPending = quick
-  // A fresh budget object for this resolve alone, and the WALK it was handed out
-  // in: what it does not use goes back to that WALK's pool only, never into a
-  // fresh one (warmWalls, clearWalls), which would then hold more than its cap.
-  const mine = { left: share, models: { left: readShare } }
+  const reading = meter(reads, pool, readCap, old?.read ?? 0)
+  const placing = meter(pools, pool, cap, old?.placed ?? 0, { models: reading.box })
   // A trusted shard placing a stranger's object charges that child, and all
   // under it, to the strangers' pool, at most STRANGER_SHARD of it, never to
-  // your share (lib/trust.ts chargeByTrust; sno-core budgetFor).
-  // Taken from the strangers' pool only when a placement is charged to it.
-  let theirs: { left: number; models: { left: number } } | null = null
-  let theirsGiven = { placed: 0, read: 0 }
+  // your share (lib/trust.ts chargeByTrust; sno-core budgetFor). Asked for
+  // only when a placement is charged to it.
+  let theirReading: Meter | null = null
+  let theirPlacing: Meter | null = null
   const strangerShare = (): { left: number } => {
-    theirs = { left: Math.min(STRANGER_SHARD, Math.max(0, pools.stranger)), models: { left: Math.min(STRANGER_SHARD_READS, Math.max(0, reads.stranger)) } }
-    theirsGiven = { placed: theirs.left, read: theirs.models.left }
-    pools.stranger -= theirs.left
-    reads.stranger -= theirs.models.left
-    return theirs
+    theirReading = meter(reads, 'stranger', STRANGER_SHARD_READS, old?.theirRead ?? 0)
+    theirPlacing = meter(pools, 'stranger', STRANGER_SHARD, old?.theirPlaced ?? 0, { models: theirReading.box })
+    return theirPlacing.box
   }
   const handed = walkNo
   const overall = walkReads
-  const refund = (): void => {
-    if (walkNo !== handed) return
-    pools[pool] += Math.max(0, mine.left)
-    reads[pool] += Math.max(0, mine.models.left)
-    const got = theirs as { left: number; models: { left: number } } | null
-    if (got) { pools.stranger += Math.max(0, got.left); reads.stranger += Math.max(0, got.models.left) }
+  /** What of the old build's credit was not drawn goes back to the pools. */
+  const creditBack = (): void => {
+    if (walkNo !== handed || !old) return
+    pools[pool] += placing.creditLeft()
+    reads[pool] += reading.creditLeft()
+    const tp = theirPlacing as Meter | null, tr = theirReading as Meter | null
+    pools.stranger += tp ? tp.creditLeft() : old.theirPlaced
+    reads.stranger += tr ? tr.creditLeft() : old.theirRead
   }
+  for (const p of back) reviveStarved(p)
   // First from what is in hand (carried, or fetched before), which lands in the
   // task; then, for what came back unreachable, from the relays.
-  for (const p of handedOn) if (p !== pool) reviveStarved(p)
-  void resolvePartsShared(w.shard, quick ? fetchSettled : undefined, undefined, mine, pool === 'trusted' ? chargeByTrust(mine, strangerShare) : undefined, overall).then((placed) => {
-    const got = theirs as { left: number; models: { left: number } } | null
-    const spend: Spend = {
-      walk: handed, pool,
-      placed: share - Math.max(0, mine.left), read: readShare - Math.max(0, mine.models.left),
-      theirPlaced: got ? theirsGiven.placed - Math.max(0, got.left) : 0, theirRead: got ? theirsGiven.read - Math.max(0, got.models.left) : 0,
-    }
-    refund()
-    // Starved, and built again when its pool has budget back, only when its own
-    // share ran out short of what a share may be: more in the pool gives it more.
+  void resolvePartsShared(w.shard, quick ? fetchSettled : undefined, undefined, placing.box, pool === 'trusted' ? chargeByTrust(placing.box, strangerShare) : undefined, overall).then((placed) => {
+    const tp = theirPlacing as Meter | null, tr = theirReading as Meter | null
+    const spend: Spend = { walk: handed, pool, placed: placing.used(), read: reading.used(), theirPlaced: tp ? tp.used() : 0, theirRead: tr ? tr.used() : 0 }
+    creditBack()
+    // Starved, and built again when its pool has budget back, only when it
+    // was refused because the pool ran dry while its share still had room:
+    // more in the pool gives it more. Of placements or of reads.
     const short = cutShort(placed)
-    const spent = short && mine.left <= 0
-    // Likewise its reads: cut for want of them (sno-core 'objects') with its
-    // own share of reads spent, short of the most a share may read.
     const readsCut = cutForReads(placed)
-    const readsSpent = readsCut && mine.models.left < 1
-    const starved = (spent && share < cap) || (readsSpent && readShare < readCap)
-    // Built again at the next WALK, never sooner (budget coming back this WALK
-    // would not cure it, and building it again now would only spin): a whole
-    // share was not enough, of placements or of reads; a stranger's object
-    // under it cut on the strangers' share; or a resolve that reached
+    const starved = (short && placing.ranLow()) || (readsCut && reading.ranLow())
+    // Built again at the next WALK, never sooner (budget coming back this
+    // WALK would not cure it, and building it again now would only spin): a
+    // whole share was not enough, of placements or of reads; a stranger's
+    // object under it cut on the strangers' share; or a resolve that reached
     // sno-core's MAX_NODES.
-    const strangersOut = short && !spent && got !== null && got.left <= 0
-    const nextWalk = !starved && (spent || strangersOut || readsCut || nodesOf(placed) >= MAX_NODES)
+    const nextWalk = !starved && (short || readsCut || nodesOf(placed) >= MAX_NODES)
     const next = build(w, placed, starved)
     if (nextWalk) next.nextWalk = true
     // It stands, and holds what it spent; or it was replaced meanwhile, and what it spent goes back.
@@ -477,26 +516,25 @@ function resolveInto(w: WallItem, e: Entry, quick = false): void {
     else if (quick && next.missingAt !== null) resolveInto(w, next)
     reviveStarved(pool)
     // What it held of the strangers' pool came back too.
-    if (theirs) reviveStarved('stranger')
+    if (tp || (old && old.theirPlaced)) reviveStarved('stranger')
   }, () => {
     e.pending = false
     e.quickPending = false
     e.first = false
-    // Nothing was built: the whole share goes back, the strangers' too, and
-    // the reads it made to the WALK's bound; the build still standing keeps
-    // what it spent (it was handed into this share).
-    const theirsBack = theirs as { left: number; models: { left: number } } | null
-    const usedPlaced = share - Math.max(0, mine.left), usedRead = readShare - Math.max(0, mine.models.left)
-    const theirPlaced = theirsBack ? theirsGiven.placed - Math.max(0, theirsBack.left) : 0
-    const theirRead = theirsBack ? theirsGiven.read - Math.max(0, theirsBack.models.left) : 0
-    refund()
+    // Nothing was built: what it drew of the pools goes back, and its reads to
+    // the WALK's bound; the build still standing keeps what it spent.
+    const tp = theirPlacing as Meter | null, tr = theirReading as Meter | null
     if (walkNo === handed) {
-      pools[pool] += usedPlaced
-      reads[pool] += usedRead
-      pools.stranger += theirPlaced
-      reads.stranger += theirRead
-      walkReads.left += usedRead + theirRead
-      if (old && entries.get(w.key) === e) { hold(old); e.spend = old }
+      pools[pool] += placing.fromPool()
+      reads[pool] += reading.fromPool()
+      if (tp) pools.stranger += tp.fromPool()
+      if (tr) reads.stranger += tr.fromPool()
+      walkReads.left += reading.used() + (tr ? tr.used() : 0)
+      if (old) {
+        if (entries.get(w.key) === e) { e.spend = old; walkReads.left -= old.read + old.theirRead }
+        // Replaced meanwhile: the old build stands no more either.
+        else { pools[pool] += old.placed; reads[pool] += old.read; pools.stranger += old.theirPlaced; reads.stranger += old.theirRead }
+      }
     }
     reviveStarved(pool)
     landed()

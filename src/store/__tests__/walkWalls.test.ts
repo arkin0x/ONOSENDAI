@@ -405,10 +405,13 @@ describe("WALK's walls are built by trust (arkinox 2026-10-25: \"ok A sounds goo
     const theirs = item(maze(THEM), { key: 'their-maze', author: THEM })
     stepLimit(AT, 'z', -1, 1n << 10n, hs)
     stepLimit(AT, 'z', -1, 1n << 10n, [theirs])
-    // Resolved by the shares coming back, well before the wait would be let go.
-    const t0 = Date.now()
+    // Resolved by the shares coming back, before the wait would be let go: a timer as long as
+    // that wait, started first, has not fired (ordering, not a wall-clock bound, which load stretches).
+    let letGo = false
+    const timer = setTimeout(() => { letGo = true }, WALL_WAIT_MS)
     await wallsBuilt()
-    expect(Date.now() - t0).toBeLessThan(WALL_WAIT_MS / 2)
+    clearTimeout(timer)
+    expect(letGo).toBe(false)
     // Settled: the strangers' share was spent, so it is walkable, and nothing waits on it any more.
     takeWallWait()
     stepLimit(AT, 'z', -1, 1n << 10n, [theirs])
@@ -513,9 +516,9 @@ describe("WALK's walls are built by trust (arkinox 2026-10-25: \"ok A sounds goo
     }
   })
 
-  it('a build cut for reads it could have had is built again when reads come back, not left walkable for the WALK (review of #516)', async () => {
-    // One build holding 900 reads; two small mazes of yours whose part is on a slow relay, each holding a
-    // share of 1,000 while they wait; then a shard of 800 pieces and a wall, which finds 100 reads left.
+  it('while other builds wait on a relay, a shard needing 800 reads builds whole: a share holds nothing before it reads (metered)', async () => {
+    // The case of the review of #516: one build holding 900 reads, two small mazes of yours waiting on a
+    // slow relay, then a shard of 800 pieces and a wall. Taken up front, the mazes' shares left it 100.
     const holder = item(wide(ME, 'Holder', 900), { key: 'holder', mine: true, author: ME })
     const slow = [0, 1].map((i) => {
       const ref: Ref = ['a', at(ME, `slow-${i}`)]
@@ -525,7 +528,8 @@ describe("WALK's walls are built by trust (arkinox 2026-10-25: \"ok A sounds goo
       return { w, release: () => release(toPayload(slab('x', 1, 30))) }
     })
     const c = item(wide(ME, 'NeedsReads', 800, true), { key: 'c', mine: true, author: ME })
-    await withWorld([holder, ...slow.map((x) => x.w), c], async () => {
+    const all = [holder, ...slow.map((x) => x.w), c]
+    await withWorld([], async () => {
       warmWalls(1)
       await settleAll()
       entryFor(holder)
@@ -534,12 +538,55 @@ describe("WALK's walls are built by trust (arkinox 2026-10-25: \"ok A sounds goo
       await settleAll()
       entryFor(c)
       await settleAll()
-      // Cut for reads now: its wall is not there yet.
-      expect(towardWall([c])).toBe(1n << 10n)
-      // The slow mazes land and give back what they did not read: c is built again, whole.
+      // Held: what was read, and nothing more (900 + 801 + the mazes' one read each).
+      expect(TRUSTED_READS - wallReadsLeft('trusted')).toBe(900 + 801 + 2)
+      expect(towardWall(all)).toBe(2n)
       for (const x of slow) x.release()
       await settleAll()
-      expect(towardWall([c])).toBe(2n)
+    })
+  })
+
+  it('a build cut because the pool ran dry is built again when reads come back, not left walkable for the WALK (review of #516)', async () => {
+    // Three builds hold 2,900 of the 3,000 reads; a shard of 800 pieces and a wall gets the last 100.
+    const holders = [1_000, 1_000, 900].map((n, i) => item(wide(ME, `Holder${i}`, n), { key: `holder-${i}`, mine: true, author: ME }))
+    const c = item(wide(ME, 'NeedsReads', 800, true), { key: 'c', mine: true, author: ME })
+    await withWorld([], async () => {
+      warmWalls(1)
+      await settleAll()
+      for (const h of holders) entryFor(h)
+      await settleAll()
+      expect(wallReadsLeft('trusted')).toBe(100)
+      entryFor(c)
+      await settleAll()
+      expect(towardWall([...holders, c])).toBe(1n << 10n)
+      // One holder is edited to place nothing: its 900 come back, and c is built whole.
+      const edited = { ...holders[2], shard: { ...holders[2].shard, refs: [], parts: [] } }
+      entryFor(edited)
+      await settleAll()
+      expect(towardWall([holders[0], holders[1], edited, c])).toBe(2n)
+    })
+  })
+
+  it('ten of your shards waiting on relays at once hold nothing they have not read: the eleventh builds at once (metered)', async () => {
+    const releases: Array<() => void> = []
+    const waiting = Array.from({ length: 10 }, (_, i) => {
+      const ref: Ref = ['a', at(ME, `wait-${i}`)]
+      primeRef(ref, new Promise((r) => { releases.push(() => r(toPayload(slab('x', 1, 30)))) }))
+      return item(withConstrain({ ...newShard(`Wait${i}`), mode: 'solid', vertices: [], faces: [], author: ME, refs: [ref], parts: [{ ref: 0, at: [0, 0, 0], turn: [0, 0, 0], step: 0 }] }, 'off'), { key: `wait-${i}`, mine: true, author: ME })
+    })
+    const m = item(maze(ME), { key: 'maze', mine: true, author: ME })
+    await withWorld([], async () => {
+      warmWalls(1)
+      await settleAll()
+      for (const w of waiting) entryFor(w)
+      await settleAll()
+      // Ten resolves out, one read each: up front they would have held 10 x 1,000 of 3,000.
+      expect(TRUSTED_READS - wallReadsLeft('trusted')).toBe(10)
+      entryFor(m)
+      await settleAll()
+      expect(towardWall([...waiting, m])).toBe(2n)
+      for (const r of releases) r()
+      await settleAll()
     })
   })
 

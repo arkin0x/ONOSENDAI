@@ -218,7 +218,8 @@ export function OpacityRow(): JSX.Element {
           <span className="explorer__mark" style={{ left: `${fraction * 100}%` }} />
         </div>
         <button className="workshop__btn" {...bind(() => w().setOpacity(stepOpacity(w().current()?.opacity, 1)))} disabled={percent >= 100} aria-label="More solid" title="More solid">+</button>
-        <span className="workshop__value">{percent}%</span>
+        {/* A fixed width: a number that narrowed from 100% to 9% moved the rail under the finger mid-drag (arkinox, 2026-10-25). */}
+        <span className="workshop__value ws__opacity-value">{percent}%</span>
         <button
           className={`workshop__btn linescrub__hash ${typing !== null ? 'is-on' : ''}`}
           title="Type a percent"
@@ -226,7 +227,6 @@ export function OpacityRow(): JSX.Element {
           aria-expanded={typing !== null}
           onClick={() => setTyping((t) => (t === null ? '' : null))}
         ><Hash size={12} strokeWidth={2.5} aria-hidden /></button>
-        <span className="workshop__unit-size" title="Avatars always draw solid.">100% is solid</span>
       </div>
       {typing !== null && (
         <form className="linescrub__goto" onSubmit={(e) => { e.preventDefault(); goTyped() }}>

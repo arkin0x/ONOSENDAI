@@ -321,6 +321,35 @@ describe('Cyberspace TV', () => {
     }
   })
 
+  it('steps back in one power of two a tick, however many the plan crowds into one (review of #470)', async () => {
+    const D = '5'.repeat(64)
+    const base = 1n << 30n
+    // One big hop, then a long run of nudges: in from about 2^17 to 2^0 in the plan's 1.5 s, quicker than the 100 ms tick.
+    const big = hop(D, T0 + 400, base, base + (1n << 17n))
+    const tiny = Array.from({ length: 10 }, (_, i) => hop(D, T0 + 401 + i, base + (1n << 17n) + BigInt(i) * 3n, base + (1n << 17n) + BigInt(i + 1) * 3n))
+    tape.push(big, ...tiny)
+    try {
+      useTv.getState().start()
+      const seen: Array<{ scaleExp: number; viewScale: number }> = []
+      for (let t = 0; t < 60000; t += 100) {
+        await vi.advanceTimersByTimeAsync(100)
+        const s = useTv.getState()
+        if (s.shot?.pubkey !== D) { if (seen.length > 0) break; continue }
+        seen.push({ scaleExp: s.scaleExp, viewScale: useCyberspace.getState().scaleExp })
+      }
+      expect(seen.length).toBeGreaterThan(0)
+      for (const p of seen) expect(p.viewScale).toBe(p.scaleExp)
+      const scales = seen.map((p) => p.scaleExp).filter((v, i, a) => i === 0 || v !== a[i - 1])
+      // Wide for the big hop, then all the way in, never back out.
+      expect(scales[0]).toBeGreaterThan(10)
+      expect(scales[scales.length - 1]).toBe(0)
+      scales.slice(1).forEach((v, i) => expect(v - scales[i]).toBe(-1))
+      expect(publishedBesidesPings()).toEqual([])
+    } finally {
+      tape.splice(tape.length - 11, 11)
+    }
+  })
+
   it('a ride\'s block A: B itself on a ride to the same block, else the rider\'s `c`, never named as A', () => {
     const ride = (from: string, to: string, extra: string[][] = []) => beatOf({ ...hop(B, T0, 1000n, 1n << 59n), tags: [['A', 'hyperjump'], ['e', '0'.repeat(64), '', 'genesis'], ['e', '0'.repeat(64), '', 'previous'], ['c', at(1000n)], ['C', at(1n << 59n)], ['proof', 'a'.repeat(64)], ['from_height', from], ['B', to], ['mp', 'x'], ...extra] })!
     // No stop index here: A is never looked up.

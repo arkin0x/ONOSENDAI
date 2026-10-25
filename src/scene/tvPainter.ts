@@ -1045,7 +1045,11 @@ export class TvPainter {
     ctx.font = `700 ${base}px ${TV_FONT}`
     const bw = ctx.measureText('2').width
     ctx.font = `700 ${sup}px ${TV_FONT}`
-    const ew = ctx.measureText(exp).width
+    // Room for two digits whatever the zoom (MAX_SCALE_EXP is 84), so the
+    // box keeps its width as a trip zooms past 2^9 and the name and doing
+    // beside it are not cut again mid-zoom (review of #470, as #500 held the
+    // opacity percent still).
+    const ew = Math.max(ctx.measureText('88').width, ctx.measureText(exp).width)
     const pad = 10 * s
     const w = pad + bw + 2 * s + ew + pad
     const h = (narrow ? 32 : 38) * s

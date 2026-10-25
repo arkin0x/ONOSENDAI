@@ -721,7 +721,13 @@ function beginShot(shot: Shot, now: number, id: number): void {
   const scaleExp = zoom[0]?.scaleExp ?? fitScale(shot.beats)
   const before = s.shot
   // Straight on from the shot before: the same avatar, picking up where it
-  // stopped, at the same zoom. Anything else is a cut, with static.
+  // stopped, at the same zoom. Anything else is a cut, with static. The zoom
+  // compared is the one on screen as the last shot ended (where its plan, or
+  // its last step in, left it) against the one this shot opens at (its first
+  // span's), not either trip's whole path: so a trip the director cut at
+  // MAX_SHOT_S goes straight on when its nudges carry on at the same zoom,
+  // and a new shot that opens at another zoom is a cut, not a jump of the
+  // zoom under a continuing camera (review of #470).
   const was = s.avatars[shot.pubkey]
   // Only after a trip: a segment's author is not where its camera was (review of #371).
   const continues = ride === null && before !== null && before.kind === 'trip' && before.pubkey === shot.pubkey && was !== undefined &&
@@ -837,9 +843,14 @@ function tick(id: number): void {
     tapeTime = b.at
     played++
   }
-  // The zoom, where the plan has it now (lib/tv/zoom.ts): one power of two
-  // at a time, re-anchored on the avatar so it stays where render space is exact.
-  const want = s.shot.kind === 'trip' ? scaleAt(zoom, elapsed) : null
+  // The zoom, where the plan has it now (lib/tv/zoom.ts), re-anchored on the
+  // avatar so it stays where render space is exact. In one power of two a
+  // tick at most: a long zoom in steps faster than the tick, and a late tick
+  // jumped several (review of #470); stepping in later is only ever wider
+  // than the plan, so no move outruns the frame. Out at once: a zoom out is
+  // never late for the move it makes room for.
+  const planned = s.shot.kind === 'trip' ? scaleAt(zoom, elapsed) : null
+  const want = planned !== null && planned < s.scaleExp ? s.scaleExp - 1 : planned
   const zoomed = want !== null && want !== s.scaleExp
   if (played === s.played && !zoomed) return
   const scaleExp = zoomed ? want : s.scaleExp

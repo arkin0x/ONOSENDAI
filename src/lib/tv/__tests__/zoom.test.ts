@@ -6,7 +6,7 @@
 import { describe, expect, it } from 'vitest'
 import type { ActionEvent } from '../../events'
 import { Director, JUMP_S, type Beat, type Shot } from '../director'
-import { GLIDE_S, MIN_HOLD_S, WIDE_HOLD_S, ZOOM_MAX_S, ZOOM_SETTLE_S, fitScale, moveScale, scaleAt, zoomPlan, type ZoomStep } from '../zoom'
+import { GLIDE_S, MIN_DIP_HOLD_S, MOVE_FIT_CELLS, WIDE_HOLD_S, ZOOM_MAX_S, ZOOM_SETTLE_S, fitScale, moveScale, scaleAt, zoomPlan, type ZoomStep } from '../zoom'
 
 let n = 0
 /** A move along x of `size` gibsons, from where the last one ended. */
@@ -37,6 +37,18 @@ function trip(beats: Beat[]): Shot {
 
 const planOf = (s: Shot): ZoomStep[] => zoomPlan(s.beats, s.offsets, s.length, s.prelude ?? 0)
 
+/** The zoom move `i` plays at: the one that fits it, never wider than the whole path's. */
+const allowed = (s: Shot, i: number): number => Math.min(fitScale(s.beats), moveScale(s.beats[i], i === 0)!)
+
+/** How long each dip (a zoom stepped in to and then out of) is held, from the step in landing to the first step out. */
+function dipHolds(plan: ZoomStep[]): number[] {
+  const holds: number[] = []
+  for (let i = 1; i + 1 < plan.length; i++) {
+    if (plan[i - 1].scaleExp > plan[i].scaleExp && plan[i + 1].scaleExp > plan[i].scaleExp) holds.push(plan[i + 1].at - plan[i].at)
+  }
+  return holds
+}
+
 /** How many times the zoom turns round: in after out, or out after in. */
 function reversals(plan: ZoomStep[]): number {
   let turns = 0
@@ -59,8 +71,8 @@ describe('zoomPlan', () => {
     const shot = trip(chain('xor', [...moves, { at: 18, size: BIG }]))
     const plan = planOf(shot)
     const big = shot.offsets[17]
-    const fine = moveScale(shot.beats[0], true)!
-    const wide = moveScale(shot.beats[17], false)!
+    const fine = allowed(shot, 0)
+    const wide = allowed(shot, 17)
     expect(wide).toBeGreaterThan(fine + 8)
     // Fine from the start and over every tiny move...
     expect(plan[0].scaleExp).toBe(fine)
@@ -82,8 +94,8 @@ describe('zoomPlan', () => {
     const moves = [{ at: 0, size: BIG }, ...Array.from({ length: 8 }, (_, i) => ({ at: 2 + i, size: TINY }))]
     const shot = trip(chain('a', moves))
     const plan = planOf(shot)
-    const wide = moveScale(shot.beats[0], true)!
-    const fine = moveScale(shot.beats[1], false)!
+    const wide = allowed(shot, 0)
+    const fine = allowed(shot, 1)
     expect(plan[0].scaleExp).toBe(wide)
     expect(plan[plan.length - 1].scaleExp).toBe(fine)
     // Nothing changes while the big move glides, nor until the camera has caught up with it.
@@ -101,7 +113,7 @@ describe('zoomPlan', () => {
     // At the big moves' zoom from the start: the first nudge alone is not
     // worth zooming in for. (Finer than the whole six-hop path's zoom: each
     // move is shown, not the trip end to end.)
-    expect(plan).toEqual([{ at: 0, scaleExp: moveScale(shot.beats[1], false) }])
+    expect(plan).toEqual([{ at: 0, scaleExp: allowed(shot, 1) }])
     expect(plan[0].scaleExp).toBeLessThan(fitScale(shot.beats))
   })
 
@@ -109,21 +121,22 @@ describe('zoomPlan', () => {
     const pair = trip(chain('a', [{ at: 0, size: BIG }, { at: 1, size: TINY }, { at: 2, size: TINY }, { at: 3, size: BIG }]))
     expect(reversals(planOf(pair))).toBe(0)
     expect(planOf(pair).every((s) => s.scaleExp === planOf(pair)[0].scaleExp)).toBe(true)
-    // Small moves three seconds apart: the run holds long past MIN_HOLD_S, so it is shown at its own zoom.
+    // Small moves three seconds apart: the run holds at its own zoom long past MIN_DIP_HOLD_S, so it is shown there.
     const run = trip(chain('a', [{ at: 0, size: BIG }, { at: 3, size: TINY }, { at: 6, size: TINY }, { at: 9, size: TINY }, { at: 12, size: BIG }]))
     const plan = planOf(run)
-    const fine = moveScale(run.beats[1], false)!
+    const fine = allowed(run, 1)
     expect(scaleAt(plan, run.offsets[2])).toBe(fine)
-    expect(run.offsets[4] - run.offsets[1]).toBeGreaterThan(MIN_HOLD_S)
-    expect(scaleAt(plan, run.offsets[4])).toBe(moveScale(run.beats[4], false))
+    expect(dipHolds(plan)).toHaveLength(1)
+    expect(dipHolds(plan)[0]).toBeGreaterThanOrEqual(MIN_DIP_HOLD_S)
+    expect(scaleAt(plan, run.offsets[4])).toBe(allowed(run, 4))
     expect(reversals(plan)).toBe(1)
   })
 
   it('shows even a short run of nudges before the big move fine: an opening is no pump (review of #470)', () => {
     const shot = trip(chain('a', [{ at: 0, size: 1n }, { at: 1, size: 1n }, { at: 2, size: 1n }, { at: 3, size: BIG }]))
     const plan = planOf(shot)
-    expect(plan[0].scaleExp).toBe(moveScale(shot.beats[0], true))
-    expect(scaleAt(plan, shot.offsets[3])).toBe(moveScale(shot.beats[3], false))
+    expect(plan[0].scaleExp).toBe(allowed(shot, 0))
+    expect(scaleAt(plan, shot.offsets[3])).toBe(allowed(shot, 3))
     expect(reversals(plan)).toBe(0)
   })
 
@@ -131,7 +144,7 @@ describe('zoomPlan', () => {
     const steps = [1n, 1n, 1n, 1n << 8n, 1n << 8n, 1n << 8n, 1n << 16n, 1n << 16n, 1n << 16n]
     const shot = trip(chain('a', steps.map((size, i) => ({ at: i, size }))))
     const plan = planOf(shot)
-    for (const i of [1, 4, 7]) expect(scaleAt(plan, shot.offsets[i])).toBe(moveScale(shot.beats[i], false))
+    for (const i of [1, 4, 7]) expect(scaleAt(plan, shot.offsets[i])).toBe(allowed(shot, i))
     expect(reversals(plan)).toBe(0)
   })
 
@@ -157,7 +170,7 @@ describe('zoomPlan', () => {
     expect(shot.prelude).toBe(JUMP_S)
     const plan = planOf(shot)
     expect(plan.slice(1).every((s) => s.at >= JUMP_S)).toBe(true)
-    expect(scaleAt(plan, shot.offsets[3])).toBe(moveScale(shot.beats[3], false))
+    expect(scaleAt(plan, shot.offsets[3])).toBe(allowed(shot, 3))
   })
 
   it('holds a wider zoom a moment before stepping back in, so one larger move is not a breath out and in', () => {
@@ -165,7 +178,7 @@ describe('zoomPlan', () => {
     const nudges = (from: number) => Array.from({ length: 6 }, (_, i) => ({ at: from + i, size: 1n }))
     const shot = trip(chain('a', [...nudges(0), { at: 6, size: 1n << 5n }, ...nudges(7)]))
     const plan = planOf(shot)
-    const outDone = plan.find((s) => s.scaleExp === moveScale(shot.beats[6], false))!.at
+    const outDone = plan.find((s) => s.scaleExp === allowed(shot, 6))!.at
     const backIn = plan.filter((s) => s.at > outDone)
     expect(backIn.length).toBeGreaterThan(0)
     expect(backIn[0].at - outDone).toBeGreaterThanOrEqual(WIDE_HOLD_S - 1e-9)
@@ -186,7 +199,7 @@ describe('zoomPlan', () => {
       const shot = trip(chain('p', moves))
       const plan = planOf(shot)
       const needs = shot.beats.map((b, i) => moveScale(b, i === 0))
-      shot.offsets.forEach((o, j) => { if (needs[j] !== null) expect(scaleAt(plan, o)).toBeGreaterThanOrEqual(needs[j]!) })
+      shot.offsets.forEach((o, j) => { if (needs[j] !== null) expect(scaleAt(plan, o)).toBeGreaterThanOrEqual(Math.min(fitScale(shot.beats), needs[j]!)) })
       for (let i = 1; i < plan.length; i++) {
         expect(Math.abs(plan[i].scaleExp - plan[i - 1].scaleExp)).toBe(1)
         expect(plan[i].at).toBeGreaterThanOrEqual(plan[i - 1].at)
@@ -194,13 +207,77 @@ describe('zoomPlan', () => {
         if (plan[i].scaleExp < plan[i - 1].scaleExp) {
           // In: no move needing more than the new zoom is still gliding.
           shot.offsets.forEach((o, j) => {
-            if (needs[j] !== null && needs[j]! > plan[i].scaleExp) expect(plan[i].at < o || plan[i].at >= o + GLIDE_S - 0.05 - 1e-9).toBe(true)
+            if (needs[j] !== null && Math.min(fitScale(shot.beats), needs[j]!) > plan[i].scaleExp) expect(plan[i].at < o || plan[i].at >= o + GLIDE_S - 0.05 - 1e-9).toBe(true)
           })
         }
       }
       expect(Math.max(...plan.map((p) => p.scaleExp))).toBeLessThanOrEqual(fitScale(shot.beats))
     }
   })
+
+  it('fits each move in MOVE_FIT_CELLS, half a whole trip\'s FIT_CELLS, so the eased camera keeps up with it (review of #470)', () => {
+    for (const size of [1n, 6n, 7n, 12n, 13n, 100n, 1n << 16n, (1n << 16n) * 6n, (1n << 16n) * 6n + 1n]) {
+      const b = chain('f', [{ at: 0, size }])[0]
+      const need = moveScale(b, false)!
+      expect(size >> BigInt(need)).toBeLessThanOrEqual(BigInt(MOVE_FIT_CELLS))
+      if (need > 0) expect(size >> BigInt(need - 1)).toBeGreaterThan(BigInt(MOVE_FIT_CELLS))
+    }
+    // A nudge of a few gibsons still plays at 2^0, as large as ever.
+    expect(moveScale(chain('f', [{ at: 0, size: 3n }])[0], false)).toBe(0)
+  })
+
+  it('does not breathe in and out for six 0.7 s nudges between big hops, repeated (review of #470)', () => {
+    // The reviewer's case: before, it zoomed in and out eight times in a 45 s shot, a third of a second at the fine zoom each.
+    for (const big of [5, 16, 30]) {
+      const moves: Array<{ at: number; size: bigint }> = []
+      let at = 0
+      while (at < 44) {
+        for (let j = 0; j < 6 && at < 44; j++) { moves.push({ at, size: 3n }); at += 0.7 }
+        moves.push({ at, size: 12n << BigInt(big) })
+        at += 0.7
+      }
+      const plan = planOf(trip(chain(`alt${big}`, moves)))
+      for (const h of dipHolds(plan)) expect(h).toBeGreaterThanOrEqual(MIN_DIP_HOLD_S)
+      // A big hop takes a long zoom out and in, which leaves the nudges no
+      // time at their own zoom: fine for the opening nudges, then out once
+      // and held. A 2^5 hop's zoom is a few steps away, and its nudges are
+      // held at 2^0 for MIN_DIP_HOLD_S and more between hops.
+      if (big >= 16) expect(reversals(plan)).toBe(0)
+      else expect(dipHolds(plan).length).toBeGreaterThan(0)
+    }
+  })
+
+  it('on any trip, a dip is held at its own zoom for MIN_DIP_HOLD_S or more (review of #470)', () => {
+    let seed = 470
+    const rand = (): number => { seed = (seed * 16807) % 2147483647; return (seed - 1) / 2147483646 }
+    let dips = 0
+    for (let run = 0; run < 800; run++) {
+      const moves: Array<{ at: number; size: bigint; type?: ActionEvent['type'] }> = []
+      let at = 0
+      if (rand() < 0.2) moves.push({ at: 0, size: 0n, type: rand() < 0.5 ? 'hyperjump' : 'spawn' })
+      const count = 2 + Math.floor(rand() * 60)
+      for (let j = 0; j < count && at < 44; j++) {
+        const r = rand()
+        const need = r < 0.6 ? Math.floor(rand() * 2) : r < 0.85 ? Math.floor(rand() * 12) : Math.floor(rand() * 38)
+        moves.push({ at, size: need === 0 ? 3n : 6n << BigInt(need) })
+        at += rand() < 0.8 ? rand() * 0.7 : rand() * 4
+      }
+      const d = new Director()
+      for (const b of chain(`h${run}`, moves)) d.add(b)
+      for (const shot of d.release(Infinity)) {
+        if (shot.kind !== 'trip') continue
+        const plan = planOf(shot)
+        const holds = dipHolds(plan)
+        dips += holds.length
+        for (const h of holds) expect(h).toBeGreaterThanOrEqual(MIN_DIP_HOLD_S - 1e-9)
+        // And still every move at least as wide as it is allowed, a power of two a step.
+        shot.offsets.forEach((o, j) => { if (j > 0 || !shot.prelude) expect(scaleAt(plan, o)).toBeGreaterThanOrEqual(allowed(shot, j)) })
+        for (let i = 1; i < plan.length; i++) expect(Math.abs(plan[i].scaleExp - plan[i - 1].scaleExp)).toBe(1)
+      }
+    }
+    // Dips are still taken where they hold.
+    expect(dips).toBeGreaterThan(50)
+  }, 30_000)
 
   it('is empty for a segment, which has no beats', () => {
     expect(zoomPlan([], [], 7)).toEqual([])

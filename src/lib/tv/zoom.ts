@@ -10,18 +10,24 @@
  * actual larger move is coming up?").
  *
  * So the zoom follows the moves. Each move asks for the zoom that fits it
- * within FIT_CELLS, as a one-move trip always was. The trip is cut into
- * spans of moves that share a zoom: a move that needs a wider zoom starts a
- * new span, and so does a move ZOOM_IN_STEPS or more powers of two finer
- * than the span's. A span with wider zooms on both sides (a dip: in, then
- * straight back out) shorter than MIN_HOLD_S or with fewer than
- * MIN_HOLD_BEATS moves is not worth zooming in for and plays at the nearer
- * of the two, so a trip that alternates small and large moves holds the
- * wide zoom instead of pumping in and out. A span at either end of the trip
- * with a wider neighbour is kept only for MIN_HOLD_BEATS moves or more. A
- * step on the way out or in (finer on one side, wider on the other) keeps
- * its zoom: it is no pump. A large move always gets the zoom it needs: a
- * move wider than the frame would fly out of it.
+ * within MOVE_FIT_CELLS, half the FIT_CELLS a whole trip is framed in: the
+ * camera eases after the avatar, and a glide across a whole frame left it
+ * at the edge of the picture (review of #470). The trip is cut into spans of
+ * moves that share a zoom: a move that needs a wider zoom starts a new span,
+ * and so does a move ZOOM_IN_STEPS or more powers of two finer than the
+ * span's. A span with wider zooms on both sides (a dip: in, then straight
+ * back out) is not worth zooming in for, and plays at the nearer of the two,
+ * when it has fewer than MIN_HOLD_BEATS moves or would be held at its own
+ * zoom for less than MIN_DIP_HOLD_S: the time between the zoom in landing
+ * and the zoom out starting, after the wide hold and both changes, not the
+ * span's length (review of #470: six 0.7 s nudges between big hops breathed
+ * in and out eight times a shot, a third of a second at the fine zoom
+ * each). So a trip that alternates small and large moves holds the wide zoom
+ * instead of pumping in and out. A span at either end of the trip with a
+ * wider neighbour is kept only for MIN_HOLD_BEATS moves or more. A step on
+ * the way out or in (finer on one side, wider on the other) keeps its zoom:
+ * it is no pump. A large move always gets the zoom it needs: a move wider
+ * than the frame would fly out of it.
  *
  * Between spans the zoom changes one power of two at a time, ZOOM_STEP_S
  * apart (at most ZOOM_MAX_S in all), as the zoom buttons step it. Out: it
@@ -32,24 +38,38 @@
  * small ones; and it never runs into the next zoom out, which is never late.
  *
  * A one-move trip plays at the zoom it always did (its move is its whole
- * path), and no trip ever plays wider than its whole path's zoom. Screen
+ * path), and no trip ever plays wider than its whole path's zoom, so a move
+ * that is most of its trip's path plays at the whole path's zoom. Screen
  * time is not changed: the zoom rides on the director's offsets
  * (director.ts).
  *
  * Pure: the store (store/useTv.ts) asks it for a shot's plan when the shot
- * begins and plays the plan against the shot's clock.
+ * begins and plays the plan against the shot's clock, stepping in one power
+ * of two a tick at most (a change of many powers is quicker than its tick).
  */
 
 import { AVATAR_LERP_MS } from '../avatarLerp'
 import { MAX_SCALE_EXP, type Position } from '../space'
 import { isJump, type Beat } from './director'
 
-/** A shot is framed so its whole path fits in about this many cells across; a move, so it fits in this many. */
+/** A shot is framed so its whole path fits in about this many cells across. */
 export const FIT_CELLS = 12
+/**
+ * A move is played at the zoom that fits it in this many cells: one power of
+ * two wider than FIT_CELLS. The camera follows the avatar eased (TvLayer
+ * TV_FOLLOW_TAU), and across a 12-cell glide it fell up to 6.3 cells behind,
+ * past the edge of a close shot (about 5.5 cells either side of the middle);
+ * across 6 cells it is about 3 behind, 4 on a run of them (review of #470).
+ * Nudges of up to 6 gibsons are as big on screen as before.
+ */
+export const MOVE_FIT_CELLS = 6
 /** A move this many powers of two finer than the zoom it plays at, or more, is worth zooming in for. */
 export const ZOOM_IN_STEPS = 2
-/** A finer zoom is held at least this long, seconds of screen time, or not taken. */
-export const MIN_HOLD_S = 4
+/**
+ * A dip's finer zoom is on screen at least this long, seconds, from the zoom
+ * in landing to the zoom out starting, or it is not taken (review of #470).
+ */
+export const MIN_DIP_HOLD_S = 2
 /** A finer zoom is taken for at least this many moves, or not taken. */
 export const MIN_HOLD_BEATS = 2
 /** Screen time per power of two the zoom steps. */
@@ -73,10 +93,10 @@ export interface ZoomStep {
   scaleExp: number
 }
 
-/** The zoom that holds a span of `extent` gibsons within FIT_CELLS. */
-function extentScale(extent: bigint): number {
+/** The zoom that holds a span of `extent` gibsons within `cells`. */
+function extentScale(extent: bigint, cells: number): number {
   let exp = 0
-  while ((extent >> BigInt(exp)) > BigInt(FIT_CELLS) && exp < MAX_SCALE_EXP) exp++
+  while ((extent >> BigInt(exp)) > BigInt(cells) && exp < MAX_SCALE_EXP) exp++
   return exp
 }
 
@@ -105,13 +125,13 @@ export function fitScale(beats: Beat[]): number {
     }
     if (lo !== null && hi !== null && hi - lo > extent) extent = hi - lo
   }
-  return extentScale(extent)
+  return extentScale(extent, FIT_CELLS)
 }
 
-/** The zoom one beat's move asks for; null for an opening jump, which is a cut onto where it lands, not a move. */
+/** The zoom one beat's move asks for (MOVE_FIT_CELLS); null for an opening jump, which is a cut onto where it lands, not a move. */
 export function moveScale(b: Beat, first: boolean): number | null {
   if (first && isJump(b)) return null
-  return extentScale(span(b.from.position, b.action.position))
+  return extentScale(span(b.from.position, b.action.position), MOVE_FIT_CELLS)
 }
 
 /** A run of beats [first, last] played at one zoom. */
@@ -146,47 +166,72 @@ export function zoomPlan(beats: Beat[], offsets: number[], length: number, prelu
   for (const s of spans) if (s.scaleExp < 0) s.scaleExp = whole
   const startOf = (k: number): number => offsets[spans[k].first]
   const endOf = (k: number): number => (k + 1 < spans.length ? offsets[spans[k + 1].first] : length)
-  // Too short to zoom in for: played at the nearer wider neighbour's zoom.
-  // One at a time, the finest first (then the shortest), until none is left:
-  // a lone nudge joins the run beside it before that run is judged.
-  const tooShort = (k: number): boolean => {
+  // Too few moves to zoom in for: a dip, or the trip's first or last span in
+  // from or out to a wider zoom, with fewer than MIN_HOLD_BEATS moves.
+  const tooFew = (k: number): boolean => {
     const prev = spans[k - 1]
     const next = spans[k + 1]
-    const beatsIn = spans[k].last - spans[k].first + 1
+    if (spans[k].last - spans[k].first + 1 >= MIN_HOLD_BEATS) return false
     const widerBefore = prev !== undefined && prev.scaleExp > spans[k].scaleExp
     const widerAfter = next !== undefined && next.scaleExp > spans[k].scaleExp
-    // A dip: in and straight back out.
-    if (widerBefore && widerAfter) return endOf(k) - startOf(k) < MIN_HOLD_S || beatsIn < MIN_HOLD_BEATS
-    // The trip's first or last span, in from or out to a wider zoom.
-    if ((widerBefore && next === undefined) || (widerAfter && prev === undefined)) return beatsIn < MIN_HOLD_BEATS
-    // A step on the way out or in, or the only span.
-    return false
+    // A dip, in and straight back out; or the first or last span. A step on
+    // the way out or in, or the only span, keeps its zoom.
+    return (widerBefore && widerAfter) || (widerBefore && next === undefined) || (widerAfter && prev === undefined)
   }
+  // Played at `to`, wider than its own zoom, and joined to a neighbour there.
+  const lift = (k: number, to: number): boolean => {
+    if (!(to > spans[k].scaleExp)) return false
+    spans[k].scaleExp = to
+    spans = merged(spans)
+    return true
+  }
+  // Played at the nearer wider neighbour's zoom.
+  const raise = (k: number): boolean => {
+    const wider = [spans[k - 1], spans[k + 1]].filter((n): n is Span => n !== undefined && n.scaleExp > spans[k].scaleExp)
+    return wider.length > 0 && lift(k, Math.min(...wider.map((n) => n.scaleExp)))
+  }
+  // One at a time, the finest first (then the shortest), until none is left:
+  // a lone nudge joins the run beside it before that run is judged. Then the
+  // plan is made, and a dip it holds at its own zoom for less than
+  // MIN_DIP_HOLD_S is played at the nearer of the zooms on screen either side
+  // of it (the finest first, then the briefest; a neighbour too brief to be
+  // stepped in to is not on screen, so it is not the one that counts), and
+  // the plan made again, until every dip on screen holds.
   for (;;) {
     let pick = -1
     let pickLen = Infinity
     for (let k = 0; k < spans.length; k++) {
       const len = endOf(k) - startOf(k)
-      if (!tooShort(k)) continue
+      if (!tooFew(k)) continue
       if (pick < 0 || spans[k].scaleExp < spans[pick].scaleExp || (spans[k].scaleExp === spans[pick].scaleExp && len < pickLen)) { pick = k; pickLen = len }
     }
-    if (pick < 0) break
-    const prev = spans[pick - 1]
-    const next = spans[pick + 1]
-    const into = [prev, next].filter((n): n is Span => n !== undefined && n.scaleExp > spans[pick].scaleExp)
-      .reduce((a, b) => (b.scaleExp < a.scaleExp ? b : a))
-    spans[pick].scaleExp = into.scaleExp
-    spans = merged(spans)
+    if (pick >= 0 && raise(pick)) continue
+    const made = steps(spans, whole, offsets, prelude)
+    const brief = made.dips.filter((d) => d.held < MIN_DIP_HOLD_S)
+      .sort((a, b) => spans[a.k].scaleExp - spans[b.k].scaleExp || a.held - b.held)
+    if (!brief.some((d) => lift(d.k, d.wider))) return made.plan
   }
-  spans = merged(spans)
-  // The steps, span by span.
+}
+
+/**
+ * A trip's zoom plan from its spans: the steps, and each dip (a span the
+ * zoom steps in to and then out of) with how long it is held at its own zoom,
+ * from the zoom in landing to the zoom out starting, and the nearer of the
+ * zooms on screen before and after it.
+ */
+function steps(spans: Span[], whole: number, offsets: number[], prelude: number): { plan: ZoomStep[]; dips: Array<{ k: number; held: number; wider: number }> } {
   const zoomOf = (k: number): number => Math.min(whole, spans[k].scaleExp)
   const takes = (n: number): number => Math.min(ZOOM_MAX_S, n * ZOOM_STEP_S)
   const plan: ZoomStep[] = [{ at: 0, scaleExp: zoomOf(0) }]
+  const dips: Array<{ k: number; held: number; wider: number }> = []
   let from = zoomOf(0)
   // When the last change ended (nothing changes during a hyperjump's ride), and when the zoom on screen was reached.
   let free = prelude
   let reached = prelude
+  // The span whose zoom is on screen, whether the zoom stepped in to it, and from what.
+  let shown = 0
+  let inTo = false
+  let inFrom = 0
   for (let k = 1; k < spans.length; k++) {
     const to = zoomOf(k)
     if (to === from) continue
@@ -216,12 +261,17 @@ export function zoomPlan(beats: Beat[], offsets: number[], length: number, prelu
         if (end > latest) { start = Math.max(landed, latest - take); end = Math.min(start + take, latest) }
       }
     }
+    // Out of a span the zoom stepped in to: a dip, held from then till now.
+    if (to > from && inTo) dips.push({ k: shown, held: start - reached, wider: Math.min(inFrom, to) })
     for (let j = 1; j <= n; j++) plan.push({ at: start + ((end - start) * j) / n, scaleExp: from + (to > from ? j : -j) })
     free = end
     reached = end
+    inTo = to < from
+    inFrom = from
     from = to
+    shown = k
   }
-  return plan
+  return { plan, dips }
 }
 
 /** Spans next to each other at the same zoom, as one. */

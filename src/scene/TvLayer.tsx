@@ -44,7 +44,7 @@ const REACH = GRID_RADIUS * 8
 /** The orbit's turn, radians a second: a full circle in a little under two minutes. */
 const TV_ORBIT_SPEED = 0.06
 /** How quickly the camera catches up with the avatar, seconds. */
-const TV_FOLLOW_TAU = 0.35
+export const TV_FOLLOW_TAU = 0.35
 /** The camera's turn in the frame: after the Rig's (0), before the composer's render (1). */
 const TV_CAMERA_PRIORITY = 0.5
 /** How quickly its distance and angle settle, seconds: slow, so the push-in reads as a move. */

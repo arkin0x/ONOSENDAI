@@ -5,11 +5,14 @@ import './styles.css'
 import { installTapGuard } from './lib/tapGuard'
 import { markBroadcastPage } from './lib/tv/broadcast'
 import { hydrateWorkshop } from './store/useWorkshop'
+import { wireLocalObjects } from './store/localObjects'
 
 // A tap on a modal's backdrop only closes it (lib/tapGuard.ts).
 installTapGuard(window)
 // /tv?broadcast=1, the 24/7 stream: no pointer on the page (lib/tv/broadcast.ts).
 markBroadcastPage()
+// Your own objects placed by reference are drawn from your workshop first (store/localObjects.ts).
+wireLocalObjects()
 
 /**
  * The workshop's shards are read from IndexedDB before the app draws

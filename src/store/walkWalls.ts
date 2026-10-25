@@ -21,9 +21,9 @@
  * shard the step cannot reach before any float is made.
  */
 
-import type { Placed } from 'sno-core/parts'
+import { refKey, type Placed } from 'sno-core/parts'
 import type { ShardModel } from 'sno-core/shards'
-import { resolvePartsShared } from '../lib/parts'
+import { onLocalObjects, resolvePartsShared, touchedKeys } from '../lib/parts'
 import { regionBox, type Box } from '../lib/clip'
 import { placedPose } from '../lib/pose'
 import type { AxisName, Position, ViewAxes } from '../lib/space'
@@ -52,9 +52,16 @@ interface Entry {
   clip: Box
   /** The mesh's reach from the shard's coordinate, in whole gibsons, per cyberspace axis, or null for nothing. */
   reach: { lo: Position; hi: Position } | null
+  /** Every reference its parts touched, at any depth: an edit of one of your own here builds it again. */
+  keys: Set<string>
 }
 
 const entries = new Map<string, Entry>()
+
+// One of your own objects edited in the workshop: the walls of every shard placing it are built again on the next look.
+onLocalObjects((changed) => {
+  for (const [k, e] of entries) for (const c of changed) if (e.keys.has(c)) { entries.delete(k); break }
+})
 
 function whereOf(w: WallItem): string {
   return `${w.at.x}:${w.at.y}:${w.at.z}:${w.plane}:${w.height}`
@@ -77,7 +84,8 @@ function build(w: WallItem, placed: readonly Placed[]): Entry {
   const pose = placedPose(WALL_AXES, w.shard.up && w.plane === 0 ? { at: w.at, spin: w.shard.spin } : undefined)
   const mesh = wallMesh(w.shard, placed, pose)
   const missingAt = placed.some(function gone(p): boolean { return p.missing === 'unreachable' || p.children.some(gone) }) ? Date.now() : null
-  return { shard: w.shard, missingAt, where: whereOf(w), mesh, clip: regionBox(w.at, w.height, w.shard.unit, WALL_AXES), reach: reachOf(mesh, w.shard.unit) }
+  const keys = touchedKeys(placed, new Set((w.shard.refs ?? []).map(refKey)))
+  return { shard: w.shard, missingAt, where: whereOf(w), mesh, clip: regionBox(w.at, w.height, w.shard.unit, WALL_AXES), reach: reachOf(mesh, w.shard.unit), keys }
 }
 
 /** The walls of one placed shard, built now or kept from before; its parts follow when they resolve. */

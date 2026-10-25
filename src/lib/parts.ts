@@ -14,9 +14,17 @@
  * cyberspace relay, so the fetch asks both sets. A reference that found
  * nothing is not remembered: the next draw asks again, since a relay that was
  * slow a moment ago may answer now.
+ *
+ * Your own objects are answered from your workshop first (setLocalObjects,
+ * wired by store/localObjects.ts), before any relay is asked: a kit imported
+ * with PUBLISH off places pieces no relay has ("we never published the parts
+ * and i dont want to", arkinox 2026-10-25), and a piece you are editing is
+ * drawn as you left it, not as you last published it. An edit of one says so
+ * (localObjectsChanged), and every draw that placed it, at any depth, asks
+ * again.
  */
 
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { MAX_PART_DEPTH, parseAddress, refKey, resolveParts, type Placed } from 'sno-core/parts'
 import { MAX_UNIT, fromPayload, type Ref, type ShardModel } from 'sno-core/shards'
 import { GENERAL_RELAYS } from './contacts'
@@ -28,8 +36,52 @@ const FETCH_WAIT_MS = 5000
 
 const cache = new Map<string, Promise<unknown>>()
 
+/**
+ * Your own object at an address, from this browser rather than a relay: its
+ * payload, or undefined when the address is not one of yours held here.
+ */
+export type LocalObjects = (address: { kind: number; pubkey: string; d: string }) => unknown | undefined
+let local: LocalObjects | null = null
+const localListeners = new Set<(keys: ReadonlySet<string>) => void>()
+
+/** Answer your own references from here (store/localObjects.ts), or stop (null). */
+export function setLocalObjects(source: LocalObjects | null): void {
+  local = source
+}
+
+/** The payload a local answer gives for a reference, or undefined. Only an `a`: an `e` names one signed event. */
+function localPayload(ref: Ref): unknown | undefined {
+  if (!local || ref[0] !== 'a') return undefined
+  const a = parseAddress(ref[1])
+  return a && a.kind === SNO_KIND ? local(a) : undefined
+}
+
+/**
+ * Some of your own objects changed here, by reference key (refKey): what is
+ * held for them is dropped, and every draw that placed one asks again.
+ */
+export function localObjectsChanged(keys: ReadonlySet<string>): void {
+  if (keys.size === 0) return
+  for (const k of keys) cache.delete(k)
+  for (const l of localListeners) l(keys)
+}
+
+/** Hear of localObjectsChanged; the return stops it. */
+export function onLocalObjects(listener: (keys: ReadonlySet<string>) => void): () => void {
+  localListeners.add(listener)
+  return () => { localListeners.delete(listener) }
+}
+
+/** Every reference a resolved tree touched, found or not, at any depth. */
+export function touchedKeys(placed: readonly Placed[], into: Set<string> = new Set()): Set<string> {
+  for (const p of placed) { into.add(refKey(p.ref)); touchedKeys(p.children, into) }
+  return into
+}
+
 /** The payload a reference names, parsed, or null. The newest version of an `a`; the one event of an `e`. */
 export function fetchRef(ref: Ref): Promise<unknown> {
+  const mine = localPayload(ref)
+  if (mine !== undefined) return Promise.resolve(mine)
   const key = refKey(ref)
   const held = cache.get(key)
   if (held) return held
@@ -80,15 +132,23 @@ export type Resolved = Pick<Placed, 'model' | 'missing' | 'children'>
  */
 export function useResolved(shard: ShardModel | null): Map<string, Resolved> {
   const [byRef, setByRef] = useState<Map<string, Resolved>>(() => new Map())
+  // Bumped when one of your own objects this draw placed, at any depth, is edited here.
+  const [again, setAgain] = useState(0)
+  const touched = useRef<Set<string>>(new Set())
   const refs = shard?.refs ?? []
   const key = refs.map(refKey).join('|')
+  useEffect(() => onLocalObjects((changed) => {
+    for (const k of changed) if (touched.current.has(k)) { setAgain((n) => n + 1); return }
+  }), [])
   useEffect(() => {
+    touched.current = new Set(refs.map(refKey))
     if (!shard || refs.length === 0) { setByRef((m) => (m.size ? new Map() : m)); return }
     let live = true
     // One placement per reference is enough: what a reference resolves to does not depend on where it stands.
     const probe: ShardModel = { ...shard, parts: refs.map((_, i) => ({ ref: i, at: [0, 0, 0], turn: [0, 0, 0], step: 0 })) }
     void resolveParts(probe, fetchRef).then((placed) => {
       if (!live) return
+      touched.current = touchedKeys(placed, new Set(refs.map(refKey)))
       const m = new Map<string, Resolved>()
       placed.forEach((p) => m.set(refKey(p.ref), { model: p.model, missing: p.missing, children: p.children }))
       setByRef(m)
@@ -96,7 +156,7 @@ export function useResolved(shard: ShardModel | null): Map<string, Resolved> {
     return () => { live = false }
     // The references, not the shard: a placement moving needs no new fetch.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [key])
+  }, [key, again])
   return byRef
 }
 

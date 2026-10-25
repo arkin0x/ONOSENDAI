@@ -28,8 +28,8 @@ vi.mock('../../lib/relay', () => ({
   relaySet: () => ['wss://relay.test'],
 }))
 
-import { finalizeEvent, generateSecretKey } from 'nostr-tools/pure'
-import { toPayload, type ShardModel } from 'sno-core/shards'
+import { finalizeEvent, generateSecretKey, getPublicKey } from 'nostr-tools/pure'
+import { newShard, toPayload, type ShardModel } from 'sno-core/shards'
 import { objectFromEvent, readCredit, type FeedObject } from 'sno-core/feed'
 import { useCyberspace } from '../useCyberspace'
 import { forgetLinkCopies, useShards } from '../useShards'
@@ -62,6 +62,20 @@ beforeEach(() => {
   useBuilder.getState().exit()
   useCyberspace.getState().clearFocus()
   useCyberspace.setState({ live: true })
+})
+
+describe('a copy of a feed object brings none of its publisher\'s table', () => {
+  it('deploys with no objects, though the publisher carried some under their own key', async () => {
+    const pk = getPublicKey(AUTHOR)
+    const at = `33331:${pk}:secret-piece`
+    const o = published('Set', 3, 5, { refs: [['a', at]], parts: [[0, 0, 0, 0, 0, 0, 0, 0]], objects: { [at]: { ...toPayload({ ...newShard('Theirs'), mode: 'solid' }) } } })
+    expect(Object.keys(o.shard.objects ?? {})).toEqual([at])
+    useShards.getState().startDeployObject(o)
+    useShards.setState({ deployLink: false })
+    await useShards.getState().deploy()
+    expect(useShards.getState().deployStatus).toBe('done')
+    expect(useShards.getState().mine[0].shard?.objects).toBeUndefined()
+  })
 })
 
 describe('lining up a feed object', () => {

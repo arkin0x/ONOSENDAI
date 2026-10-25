@@ -43,6 +43,7 @@ import { itemTargetOf, type ItemTarget } from '../lib/comments'
 import { bytesToHex, hexToBytes, type EventTemplate, type NostrEvent } from '../lib/events'
 import { regionKeyAt } from '../lib/shardCrypto'
 import { regionKeyOffThread } from '../lib/regionKeyOffThread'
+import { signedTableOnly } from '../lib/carried'
 import { deployCeiling, deployRoute, localKeyCeiling, needsAsk, regionKeyQuote } from '../lib/deployPlan'
 import { useSecrets } from './useSecrets'
 import {
@@ -1534,7 +1535,10 @@ export const useShards = create<ShardsState>((set, get) => {
       const object = pending.type === 'shard' ? pending.object : undefined
       const link = !!object && deployLink
       if (pending.type === 'shard') {
-        const model = was ? was.shard : object ? object.shard : useWorkshop.getState().shards.find((s) => s.id === pending.shardId)
+        // A copy of a feed object is yours once hidden: what it carries comes
+        // with it only when you signed it, and then only your keys
+        // (lib/carried.ts signedTableOnly), never its publisher's.
+        const model = was ? was.shard : object ? (link ? object.shard : signedTableOnly(object.shard, cs.identity.pubkey || null)) : useWorkshop.getState().shards.find((s) => s.id === pending.shardId)
         // An object of parts alone is an object (DECK-0003 §1.9 rule 13).
         if (!model || (model.vertices.length === 0 && (model.parts?.length ?? 0) === 0)) return
         // The deploy carries its own size. A unit the deploy bar changed makes

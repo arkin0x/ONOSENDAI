@@ -10,22 +10,56 @@
  * the part that depends on where an object came from.
  */
 
-import { carriedTable } from 'sno-core/parts'
+import { carriedTable, withAuthor } from 'sno-core/parts'
 import type { ShardModel } from 'sno-core/shards'
 
 /**
- * `model` with only the carried objects keyed under `pubkey`, the author of the
- * event it came in: a key under anyone else's is ignored, and its address
- * fetched as though the table did not hold it (D5, arkinox 2026-10-25; the
- * spec's "keys are under the author's own pubkey"). With no pubkey to check
- * against, nothing carried is honoured. The same model when there is nothing
- * to drop. Applied where an object is read from its event, so every draw
- * after that can take the table as it is.
+ * `model` as read from an event whose pubkey is `pubkey`: its author set
+ * (sno-core withAuthor, local only, never written) and only the carried
+ * objects keyed under that pubkey kept. A key under anyone else's is ignored,
+ * and its address fetched as though the table did not hold it (D5, arkinox
+ * 2026-10-25; the spec's "keys are under the author's own pubkey"). With no
+ * pubkey to check against, nothing carried is honoured. Applied wherever an
+ * object is read from its event; for an unsigned item, the pubkey is the bag's
+ * or the chest's signer, never the item's own claim.
  */
-export function keepOwnTable(model: ShardModel, pubkey: string | undefined): ShardModel {
-  if (!model.objects) return model
-  const kept = pubkey ? carriedTable(model, pubkey) : {}
-  if (Object.keys(kept).length === Object.keys(model.objects).length) return model
-  const { objects: _dropped, ...bare } = model
-  return Object.keys(kept).length ? { ...bare, objects: kept } : bare
+export function keepOwnTable(model: ShardModel, pubkey: string | null | undefined): ShardModel {
+  return withAuthor(model, pubkey ?? null)
+}
+
+/**
+ * `model` with only the carried objects keyed under `pubkey` (or none at all
+ * without one), and no author: what comes into your workshop from anywhere (a
+ * copy from the feed or a bag, PASTE, an import, an avatar), so that a key
+ * someone else wrote under your name can never be published again as yours.
+ */
+export function ownTableOnly(model: ShardModel, pubkey: string | null): ShardModel {
+  const { author: _was, ...bare } = model
+  if (!model.objects) return model.author === undefined ? model : bare
+  const kept = carriedTable(model, pubkey)
+  const { objects: _all, ...rest } = bare
+  return Object.keys(kept).length ? { ...rest, objects: kept } : rest
+}
+
+/** Who "you" are, for a model made here (store/localObjects.ts wires it): null when no one is signed in. */
+let localAuthor: () => string | null = () => null
+
+/** Say who you are (store/localObjects.ts), or stop (null). */
+export function setLocalAuthor(get: (() => string | null) | null): void {
+  localAuthor = get ?? (() => null)
+}
+
+/** You, or null. */
+export function you(): string | null {
+  return localAuthor()
+}
+
+/**
+ * Whose keys of `model`'s table count (DECK-0003 §1.10): the pubkey of the
+ * event it was read from (keepOwnTable), or, for a model with none, yours,
+ * since every model read from an event has one and so a model without one was
+ * made here, by you. Never every key.
+ */
+export function authorOf(model: Pick<ShardModel, 'author'>): string | null {
+  return model.author ?? localAuthor()
 }

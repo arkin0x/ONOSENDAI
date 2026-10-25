@@ -105,11 +105,17 @@ let follows: ReadonlySet<string> = new Set()
 /** Whose follows those are, so a new identity reads its own. */
 let followsOfWho: string | null = null
 
-/** Your shards and those of authors you follow: trusted. A shard with no author was made here, by you. */
+/**
+ * Whose share a shard draws from: the author of the object it DRAWS, never of
+ * the bag it is in. A LIVE LINK in your own bag draws a stranger's object, which
+ * they may grow at any time, so it is a stranger's; a copy you hid carries your
+ * own (a bag's items are read under the bag's signer), and a shard with no
+ * author at all was made here, by you. Yours and those you follow: trusted.
+ */
 function poolOf(w: WallItem): Pool {
   const me = you()
-  const author = w.author ?? w.shard.author ?? me
-  return w.mine || (author !== null && (author === me || follows.has(author))) ? 'trusted' : 'stranger'
+  const author = w.shard.author ?? w.author ?? me
+  return author !== null && (author === me || follows.has(author)) ? 'trusted' : 'stranger'
 }
 
 /**
@@ -238,13 +244,21 @@ function resolveInto(w: WallItem, e: Entry): void {
   }
   pools[pool] -= share
   e.pending = true
-  // A fresh budget object for this resolve alone.
+  // A fresh budget object for this resolve alone, and the WALK it was handed out
+  // in: what it does not use goes back to that WALK's pool only, never into a
+  // fresh one (warmWalls, clearWalls), which would then hold more than its cap.
   const mine = { left: share }
+  const handed = walkNo
+  const refund = (): void => { if (walkNo === handed) pools[pool] += Math.max(0, mine.left) }
   void resolvePartsShared(w.shard, undefined, undefined, mine).then((placed) => {
-    pools[pool] += Math.max(0, mine.left)
-    if (entries.get(w.key) === e) entries.set(w.key, build(w, placed, cutShort(placed)))
+    refund()
+    const starved = cutShort(placed)
+    const built = build(w, placed, starved)
+    if (entries.get(w.key) === e) entries.set(w.key, built)
+    // Trusted since it began (your follows arrived meanwhile): built again from your share.
+    if (starved && poolOf(w) !== pool && entries.get(w.key) === built) resolveInto(w, built)
     reviveStarved(pool)
-  }, () => { e.pending = false; pools[pool] += Math.max(0, mine.left) /* unreachable parts stop nothing */ })
+  }, () => { e.pending = false; refund() /* unreachable parts stop nothing */ })
 }
 
 /** Build again the starved shards of a pool, while it has budget for them; each stands as it is until its new resolve lands. */
@@ -273,18 +287,39 @@ export function warmWalls(plane: number, from?: Position): void {
   const me = you()
   if (me && me !== followsOfWho) {
     followsOfWho = me
-    void followsOf(me).then((list) => { if (followsOfWho === me) setWallFollows(list) }, () => { /* no follows read: everyone else a stranger */ })
+    // A read that failed is asked again at the next WALK.
+    void followsOf(me).then((list) => { if (followsOfWho === me) setWallFollows(list) }, () => { if (followsOfWho === me) followsOfWho = null })
   }
   const items = wallItems(plane)
   const near = from ? items.filter((w) => regionReached(w, from)) : items
   const order = (pool: Pool): WallItem[] => near.filter((w) => poolOf(w) === pool)
     .sort((a, b) => { if (!from) return 0; const x = nearness(a, from), y = nearness(b, from); return x < y ? -1 : x > y ? 1 : 0 })
-  for (const w of [...order('trusted'), ...order('stranger')]) entryFor(w)
+  const queue = [...order('trusted'), ...order('stranger')]
+  // The nearest now; the rest one to a task, so a full share of carried tables
+  // (which resolve with no fetch to wait on) never holds up WALK's first frame.
+  // A step that comes near one first builds it then (stepLimit).
+  const walk = walkNo
+  const next = (): void => {
+    if (walkNo !== walk) return
+    const w = queue.shift()
+    if (!w) return
+    entryFor(w)
+    if (queue.length) later(next)
+  }
+  next()
+}
+
+/** Run `fn` when the page is idle, or on the next task where it cannot say. */
+function later(fn: () => void): void {
+  const idle = (globalThis as { requestIdleCallback?: (cb: () => void, opts?: { timeout: number }) => number }).requestIdleCallback
+  if (idle) idle(fn, { timeout: 50 })
+  else setTimeout(fn, 0)
 }
 
 /** Forget every shard's walls: for tests, and an identity switch has no need of them either. */
 export function clearWalls(): void {
   entries.clear()
+  walkNo++
   pools.trusted = TRUSTED_BUDGET
   pools.stranger = STRANGER_BUDGET
   follows = new Set()

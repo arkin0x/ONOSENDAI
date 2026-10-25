@@ -20,10 +20,14 @@ vi.hoisted(() => {
 })
 
 // A resolve that never lands, when asked: to show a wait is let go (wallsBuilt).
-const hang = vi.hoisted(() => ({ on: false }))
+const hang = vi.hoisted(() => ({ on: false, calls: new Map<string, number>() }))
 vi.mock('../../lib/parts', async (orig) => {
   const mod = await orig<typeof import('../../lib/parts')>()
-  return { ...mod, resolvePartsShared: (...args: Parameters<typeof mod.resolvePartsShared>) => (hang.on ? new Promise<never>(() => {}) : mod.resolvePartsShared(...args)) }
+  return { ...mod, resolvePartsShared: (...args: Parameters<typeof mod.resolvePartsShared>) => {
+    // How often each shard (by name) is resolved: to show what is built again, and when.
+    hang.calls.set(args[0].name, (hang.calls.get(args[0].name) ?? 0) + 1)
+    return hang.on ? new Promise<never>(() => {}) : mod.resolvePartsShared(...args)
+  } }
 })
 
 // WALK reads your follows; here from `contacts.read`, never a relay.
@@ -34,7 +38,8 @@ import { newShard, type Ref, type ShardModel } from 'sno-core/shards'
 import { primeRef } from '../../lib/parts'
 import { withConstrain } from '../../lib/walkConstrain'
 import type { AxisName, Position } from '../../lib/space'
-import { STRANGER_BUDGET, TRUSTED_BUDGET, WALL_WAIT_MS, clearWalls, setWallFollows, stepLimit, takeWallWait, wallBudgetLeft, wallsBuilt, warmWalls, type WallItem } from '../walkWalls'
+import { STRANGER_BUDGET, STRANGER_READS, STRANGER_SHARD_READS, TRUSTED_BUDGET, TRUSTED_READS, WALL_WAIT_MS, clearWalls, setWallFollows, stepLimit, takeWallWait, wallBudgetLeft, wallReadsLeft, wallsBuilt, warmWalls, type WallItem } from '../walkWalls'
+import { MAX_MODELS } from 'sno-core/parts'
 import { setLocalAuthor } from '../../lib/carried'
 import { useShards } from '../useShards'
 import { toPayload } from 'sno-core/shards'
@@ -419,6 +424,82 @@ describe("WALK's walls are built by trust (arkinox 2026-10-25: \"ok A sounds goo
     } finally {
       hang.on = false
     }
+  })
+
+
+  // A shard by `pk` placing `n` different objects of its own, carried, then (when `wall`) the maze's wall.
+  const wide = (pk: string, name: string, n: number, wall = false): ShardModel => {
+    const objects: Record<string, unknown> = {}
+    const refs: Ref[] = []
+    for (let i = 0; i < n; i++) { const a = at(pk, `${name}-${i}`); objects[a] = toPayload({ ...newShard(`p${i}`), mode: 'solid' }); refs.push(['a', a]) }
+    if (wall) { objects[at(pk, 'wall')] = toPayload(slab('z', -1, 0)); refs.push(['a', at(pk, 'wall')]) }
+    return withConstrain({ ...newShard(name), mode: 'solid', vertices: [], faces: [], author: pk, refs, objects,
+      parts: refs.map((_, i) => ({ ref: i, at: (wall && i === n ? [0, 0, -360] : [0, 0, 0]) as [number, number, number], turn: [0, 0, 0] as [number, number, number], step: 0 })) }, 'off')
+  }
+
+  it("strangers read no more than STRANGER_SHARD_READS a shard and STRANGER_READS a WALK, and your maze stands", async () => {
+    const hs = [0, 1, 2, 3, 4, 5].map((i) => item(wide(THEM, `Many${i}`, 300), { key: `many-${i}`, author: THEM }))
+    const m = item(maze(ME), { key: 'maze', mine: true, author: ME })
+    await withWorld([...hs, m], async () => {
+      warmWalls(1, AT)
+      await settleAll()
+      // Six shards wanting 300 each: 200 each at most, 1,000 between them.
+      expect(STRANGER_SHARD_READS).toBe(MAX_MODELS / 5)
+      expect(wallReadsLeft('stranger')).toBe(0)
+      // The WALK's one bound over both pools counts every read: theirs, and the maze's wall.
+      expect(wallReadsLeft()).toBe(TRUSTED_READS + STRANGER_READS - STRANGER_READS - 1)
+      expect(towardWall([...hs, m])).toBe(2n)
+    })
+  })
+
+  it("a placement cut for reads ('objects') is walkable, is not built again when placement budget comes back, and is at the next WALK", async () => {
+    // Your shard placing MAX_MODELS different pieces before its wall: the wall is one read too many.
+    const crowd = item(wide(ME, 'Crowd', MAX_MODELS, true), { key: 'crowd', mine: true, author: ME })
+    const m = item(maze(ME), { key: 'maze', mine: true, author: ME })
+    hang.calls.clear()
+    await withWorld([crowd], async () => {
+      warmWalls(1, AT)
+      await settleAll()
+      expect(towardWall([crowd])).toBe(1n << 10n)
+      expect(hang.calls.get('Crowd')).toBe(1)
+    })
+    // Another of yours lands and gives its share back: the crowd is not built again for it.
+    await withWorld([crowd, m], async () => {
+      stepLimit(AT, 'z', -1, 1n << 10n, [crowd, m])
+      await settleAll()
+      expect(hang.calls.get('Maze')).toBe(1)
+      expect(hang.calls.get('Crowd')).toBe(1)
+      // The next WALK builds it again, once.
+      warmWalls(1, AT)
+      await settleAll()
+      expect(hang.calls.get('Crowd')).toBe(2)
+    })
+  })
+
+  it('a resolve that reaches sno-core MAX_NODES is built again at the next WALK, and never spins within one', async () => {
+    // 18,000 of your rooms, each placing a stranger's object that places one more of theirs: the
+    // strangers' share runs out and its placeholders fill sno-core's node ceiling.
+    const xRef: Ref = ['a', at(THEM, 'x')]
+    primeRef(xRef, { ...toPayload({ ...newShard('x'), mode: 'solid' }), refs: [['a', at(THEM, 'y')]], parts: [[0, 0, 0, 0, 0, 0, 0, 0]], objects: { [at(THEM, 'y')]: toPayload({ ...newShard('y'), mode: 'solid' }) } })
+    const room = { ...toPayload({ ...newShard('room'), mode: 'solid' }), refs: [xRef], parts: [[0, 0, 0, 0, 0, 0, 0, 0]] }
+    const rooms = item(withConstrain({ ...newShard('Rooms'), mode: 'solid', vertices: [], faces: [], author: ME, refs: [['a', at(ME, 'room')]], objects: { [at(ME, 'room')]: room },
+      parts: Array.from({ length: 18_000 }, (_, i) => ({ ref: 0, at: [0, i % 1000, 0] as [number, number, number], turn: [0, 0, 0] as [number, number, number], step: 0 })) }, 'off'), { key: 'rooms', mine: true, author: ME })
+    const m = item(maze(ME), { key: 'maze', mine: true, author: ME })
+    hang.calls.clear()
+    await withWorld([rooms, m], async () => {
+      warmWalls(1, AT)
+      await settleAll()
+      // Its first build: the quick pass from what is in hand, then the relays for what was not.
+      const first = hang.calls.get('Rooms') ?? 0
+      expect(first).toBeGreaterThan(0)
+      stepLimit(AT, 'z', -1, 1n << 10n, [rooms, m])
+      await settleAll()
+      expect(hang.calls.get('Rooms')).toBe(first)
+      expect(towardWall([rooms, m])).toBe(2n)
+      warmWalls(1, AT)
+      await settleAll()
+      expect(hang.calls.get('Rooms')).toBe(first + 1)
+    })
   })
 
 })

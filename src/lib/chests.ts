@@ -165,7 +165,9 @@ function readEntry(e: BagEntry, sealer: string | undefined): ChestEntry | null {
     // rumors (RUMOR_KINDS); any other unsigned kind stays a claim, as it
     // would be dropped from a bag.
     const vouched = !signed && sealedAsRumor(ev.kind) && sealer !== undefined && ev.pubkey === sealer && ev.id === hash
-    const body = readItem({ ...plain, id: hash })
+    // Whose carried pieces count: the signer of a signed entry, else the
+    // chest's sealer, never the pubkey an unsigned entry claims (DECK-0003 §1.10).
+    const body = readItem({ ...plain, id: hash }, signed ? ev.pubkey : sealer ?? null)
     return body ? { id: hash, event: { ...plain, id: hash, sig: signed ? ev.sig : '' }, verified: signed || vouched, body } : null
   } catch {
     return null
@@ -280,7 +282,7 @@ export function sealedInside(entries: BagEntry[], keys: OpeningKey[]): Set<strin
   const read = (e: BagEntry): void => {
     if (isReference(e) || !e || typeof e !== 'object' || Array.isArray(e)) return
     try {
-      const body = readItem(e as NostrEvent)
+      const body = readItem(e as NostrEvent, null)
       if (body?.type === 'chest' && body.chest) doors.push(body.chest)
     } catch { /* not an item this client reads: no chest to look in */ }
   }

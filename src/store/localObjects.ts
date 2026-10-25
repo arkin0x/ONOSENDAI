@@ -34,6 +34,7 @@ import { SNO_KIND, objectAddress } from 'sno-core/feed'
 import { MAX_PART_DEPTH, carriedModel, carryAll, parseAddress } from 'sno-core/parts'
 import { hash53, thumbKeyOf } from '../lib/thumbKey'
 import { localObjectsChanged, setLocalObjects } from '../lib/parts'
+import { setLocalAuthor } from '../lib/carried'
 import { withAuthoredConstrain } from '../lib/walkConstrain'
 import { usePublished } from './usePublished'
 import { useCyberspace } from './useCyberspace'
@@ -193,6 +194,8 @@ let wired: (() => void) | null = null
 export function wireLocalObjects(): () => void {
   if (wired) return wired
   setLocalObjects(localObject)
+  // A model made here is yours (lib/carried.ts authorOf).
+  setLocalAuthor(() => useCyberspace.getState().identity.pubkey || null)
   const offShards = useWorkshop.subscribe((s, prev) => {
     if (s.shards === prev.shards) return
     const me = useCyberspace.getState().identity.pubkey
@@ -213,6 +216,6 @@ export function wireLocalObjects(): () => void {
     const ids = new Set([...Object.keys(s.ledger), ...Object.keys(prev.ledger)])
     announce(me, [...ids].filter((id) => s.ledger[id]?.pubkey !== prev.ledger[id]?.pubkey))
   })
-  wired = () => { offShards(); offIdentity(); offLedger(); setLocalObjects(null); due = new Set(); scheduled = false; wired = null }
+  wired = () => { offShards(); offIdentity(); offLedger(); setLocalObjects(null); setLocalAuthor(null); due = new Set(); scheduled = false; wired = null }
   return wired
 }

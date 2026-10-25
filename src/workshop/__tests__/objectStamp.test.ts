@@ -18,7 +18,6 @@ if (typeof localStorage === 'undefined') {
 import { nip19 } from 'nostr-tools'
 import { fromPayload } from 'sno-core/shards'
 import { liveRef, objectsOf, parseObjectAddress } from '../ObjectPicker'
-import { copiedFrom } from '../../lib/carried'
 import { useWorkshop } from '../../store/useWorkshop'
 import type { NostrEvent } from '../../lib/events'
 
@@ -102,7 +101,7 @@ describe('YOURS: a copy goes inside (DECK-0003 §1.10; arkinox 2026-10-25, the s
   })
   const yours = () => ({ ref: ['a', `33331:${PK}:kit/column`] as ['a', string], name: 'Column', shard: w().shards.find((s) => s.id === 'kit/column')!, copy: { sourceId: 'kit/column', pubkey: PK } })
 
-  it('places a copy under a d of its own, carried in the shard, OPAQUE where never chosen, and a second stamp reuses it', () => {
+  it('places a copy under a d that says nothing about it, carried in the shard, OPAQUE where never chosen, and a second stamp reuses it', () => {
     w().setStampObject(yours())
     w().placeObject([0, 0, 0])
     w().placeObject([240, 0, 0])
@@ -110,8 +109,8 @@ describe('YOURS: a copy goes inside (DECK-0003 §1.10; arkinox 2026-10-25, the s
     expect(s.refs).toHaveLength(1)
     const [kind, address, relay] = s.refs![0]
     expect([kind, relay]).toEqual(['a', undefined])
-    expect(address).toMatch(new RegExp(`^33331:${PK}:kit/column~[0-9a-f]{8}$`))
-    expect(copiedFrom(address)).toBe('kit/column')
+    // Sixteen random hex: nothing of "kit/column" for an older reader to ask relays for.
+    expect(address).toMatch(new RegExp(`^33331:${PK}:[0-9a-f]{16}$`))
     expect(s.parts).toHaveLength(2)
     expect(s.objects?.[address]).toMatchObject({ name: 'Column', constrain: 'opaque' })
   })

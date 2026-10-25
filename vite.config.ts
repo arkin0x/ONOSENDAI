@@ -1,3 +1,4 @@
+/// <reference types="vitest/config" />
 import { execSync } from 'node:child_process'
 import { defineConfig, type Plugin } from 'vite'
 import react from '@vitejs/plugin-react'
@@ -84,5 +85,9 @@ export default defineConfig(async () => ({
   },
   worker: {
     format: 'es',
+  },
+  test: {
+    // Tests never touch a live relay: a WebSocket opened in one fails it (src/test/noNetwork.ts).
+    setupFiles: ['src/test/noNetwork.ts'],
   },
 }))

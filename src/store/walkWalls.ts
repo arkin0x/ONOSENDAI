@@ -19,6 +19,13 @@
  * A placed object's triangles are its model's, shared, and worked out where
  * it stands only when a step comes near it (lib/walkConstrain.ts). A box test in exact bigint gibsons skips every
  * shard the step cannot reach before any float is made.
+ *
+ * What WALK resolves is bounded as a whole, not shard by shard: one budget of
+ * placements (WALL_BUDGET) for every shard's parts between one WALK and the
+ * next, nearest shards first, and only for shards whose region the walker
+ * can be in, since a shard is drawn, and holds a walker, only inside its
+ * region (DECK-0003 §1.12). Sixty hostile shards each under sno-core's own
+ * cap used to cost 3.2 s of main thread and 544 MB on the way into WALK.
  */
 
 import type { Placed } from 'sno-core/parts'
@@ -55,6 +62,41 @@ interface Entry {
 }
 
 const entries = new Map<string, Entry>()
+
+/** The most placements WALK resolves for all the shards around a walker together, from one WALK to the next. */
+export const WALL_BUDGET = 20_000
+let budget = { left: WALL_BUDGET }
+
+/**
+ * Whether a walker at `from`, stepping `length` gibsons along `axis` (or not
+ * stepping, with no axis), can be anywhere in `w`'s region, a gibson either
+ * side included: a shard is drawn only inside its region, so only there can it
+ * hold a walker. Exact, in bigint gibsons.
+ */
+export function regionReached(w: WallItem, from: Position, axis?: AxisName, dir: 1 | -1 = 1, length = 0n): boolean {
+  const h = BigInt(w.height)
+  for (const a of ['x', 'y', 'z'] as const) {
+    const lo = ((w.at[a] >> h) << h) - 1n
+    const hi = ((w.at[a] >> h) << h) + (1n << h)
+    const p0 = from[a]
+    const p1 = a === axis ? p0 + BigInt(dir) * length : p0
+    const min = p0 < p1 ? p0 : p1, max = p0 < p1 ? p1 : p0
+    if (max < lo || min > hi) return false
+  }
+  return true
+}
+
+/** What is left of WALK's placement budget: for tests. */
+export function wallBudgetLeft(): number {
+  return budget.left
+}
+
+/** The larger of the three axis distances between two places, in gibsons: nearest first. */
+function farness(a: Position, b: Position): bigint {
+  const d = (x: bigint): bigint => (x < 0n ? -x : x)
+  const xs = [d(a.x - b.x), d(a.y - b.y), d(a.z - b.z)]
+  return xs.reduce((m, x) => (x > m ? x : m), 0n)
+}
 
 function whereOf(w: WallItem): string {
   return `${w.at.x}:${w.at.y}:${w.at.z}:${w.plane}:${w.height}`
@@ -105,18 +147,23 @@ const RETRY_MS = 30_000
  */
 function resolveInto(w: WallItem, e: Entry): void {
   if (!w.shard.parts?.length) return
-  void resolvePartsShared(w.shard).then((placed) => {
+  void resolvePartsShared(w.shard, undefined, undefined, budget).then((placed) => {
     if (entries.get(w.key) === e) entries.set(w.key, build(w, placed))
   }, () => { /* unreachable parts stop nothing */ })
 }
 
 /**
- * Build the walls of every shard a walker in `plane` can meet, so the parts
- * they place are resolving before the first press rather than after it.
- * WALK calls it on the way in.
+ * Build the walls of the shards a walker at `from` in `plane` stands among,
+ * nearest first, so the parts they place are resolving before the first press
+ * rather than after it, and start WALK's placement budget afresh: every shard
+ * resolved until the next WALK shares it. WALK calls it on the way in. Shards
+ * further off are built when a step can reach their region (stepLimit).
  */
-export function warmWalls(plane: number): void {
-  for (const w of wallItems(plane)) entryFor(w)
+export function warmWalls(plane: number, from?: Position): void {
+  budget = { left: WALL_BUDGET }
+  const items = wallItems(plane)
+  const near = from ? items.filter((w) => regionReached(w, from)).sort((a, b) => { const x = farness(a.at, from), y = farness(b.at, from); return x < y ? -1 : x > y ? 1 : 0 }) : items
+  for (const w of near) entryFor(w)
 }
 
 /** Forget every shard's walls: for tests, and an identity switch has no need of them either. */
@@ -166,6 +213,9 @@ export function stepLimit(from: Position, axis: AxisName, dir: 1 | -1, length: b
   const i = axis === 'x' ? 0 : axis === 'y' ? 1 : 2
   for (const w of items) {
     keep.add(w.key)
+    // A shard whose region this step cannot enter cannot hold it: not built,
+    // and nothing it places resolved, until a step can.
+    if (!regionReached(w, from, axis, dir, length)) continue
     const e = entryFor(w)
     if (!e.reach) continue
     // Exact first: the step against the walls' box, in bigint gibsons,

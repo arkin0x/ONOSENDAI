@@ -51,7 +51,7 @@
  */
 
 import { clampAxis, type AxisName, type Position } from '../lib/space'
-import { stepLimit, type WallItem } from './walkWalls'
+import { stepLimit, underSolid, type WallItem } from './walkWalls'
 
 /** The highest a press lifts you over what is in its way, in gibsons: the Maze Kit's stairs need 2. */
 export const STEP_UP_MAX = 2n
@@ -90,13 +90,15 @@ function moved(at: Position, axis: AxisName, dir: 1 | -1, n: bigint): Position {
  * crosses a blocking face nor ends within its tolerance of one, and the
  * smallest lift whose step is clear must land you standing: on top of the
  * riser, never over a rail into the air. Null when no lift works: a ceiling
- * over you, nothing clear at either height, or nothing to stand on.
+ * over you (a solid whose underside is in your own plane included), nothing
+ * clear at either height, or nothing to stand on.
  */
 function lifted(at: Position, axis: AxisName, dir: 1 | -1, items: readonly WallItem[], gravity: boolean): Position | null {
   for (let lift = 1n; lift <= STEP_UP_MAX; lift++) {
     if (clampAxis(at.y + lift) !== at.y + lift) return null
-    // Headroom: a face over you holds this lift and every higher one.
-    if (stepLimit(at, 'y', 1, lift, items).reach !== lift) return null
+    // Headroom: a face over you holds this lift and every higher one, and so
+    // does a solid whose underside is in your own plane (underSolid).
+    if (stepLimit(at, 'y', 1, lift, items).reach !== lift || (lift === 1n && underSolid(at, items))) return null
     const up = { ...at, y: at.y + lift }
     if (stepLimit(up, axis, dir, 1n, items).reach !== 1n) continue
     const on = moved(up, axis, dir, 1n)

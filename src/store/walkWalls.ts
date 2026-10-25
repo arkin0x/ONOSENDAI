@@ -205,9 +205,10 @@ export function stepLimit(from: Position, axis: AxisName, dir: 1 | -1, length: b
     // walker HOPped to within the measure's error of a face on a monument (a
     // shard past about 2^53 gibsons) may still cross it, which is accepted:
     // holding it there would hold it stepping away from the face too.
-    const hair = tolerance(e, g, 0n)
+    const down = stand && axis === 'y' && dir < 0
+    const hair = down ? tolerance(e, g, 0n) : HAIR_MAX
     let t: number | null
-    if (stand && axis === 'y' && dir < 0 && hair < HAIR_MAX) {
+    if (down && hair < HAIR_MAX) {
       // Asked to stand (above): a face within a hair of your height, either
       // side, is in your own plane. It is held back, and the step is measured
       // past it, as if it were not there, until the space above you is known.
@@ -240,6 +241,32 @@ export function stepLimit(from: Position, axis: AxisName, dir: 1 | -1, length: b
  * a whole gibson is on (a monument), and the face you stand on lets you go.
  */
 const HAIR_MAX = 0.5
+
+/**
+ * The shard whose face is in the walker's own plane (within its tolerance of
+ * `from`'s height, either side) while the space a hair above `from` is
+ * inside a closed solid: you are right under a solid's underside, and nothing
+ * of yours goes up into it, a jump nor a stair's lift (arkinox, 2026-10-25:
+ * floors only; review of #497). Null when there is no such face, or the space
+ * above is open. The upward step itself lets the face you are on go, as every
+ * step does (stepLimit), so this is asked beside it.
+ */
+export function underSolid(from: Position, items: readonly WallItem[]): WallItem | null {
+  let face: WallItem | null = null
+  for (const w of items) {
+    const e = entryFor(w)
+    if (!e.reach) continue
+    const g = 2 ** w.shard.unit
+    const hair = tolerance(e, g, 0n)
+    if (hair >= HAIR_MAX) continue
+    const off = { x: from.x - w.at.x, y: from.y - w.at.y, z: from.z - w.at.z }
+    const lo = e.reach.lo, hi = e.reach.hi
+    if ((['x', 'y', 'z'] as const).some((a) => off[a] < lo[a] || off[a] > hi[a])) continue
+    const o: [number, number, number] = [Number(off.x) / g, Number(off.y) / g, -Number(off.z) / g]
+    if (firstHit(e.mesh, o, 1, 1, hair / g, -hair / g, e.clip) !== null) { face = w; break }
+  }
+  return face && !openAbove(from, items) ? face : null
+}
 
 /**
  * Whether the space a hair above `from` is open: inside no closed solid of

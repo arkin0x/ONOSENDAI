@@ -38,7 +38,7 @@
  */
 
 import { clampAxis, type Position } from '../lib/space'
-import { stepLimit, type WallItem } from './walkWalls'
+import { stepLimit, underSolid, type WallItem } from './walkWalls'
 
 /** How high a jump rises, in gibsons. */
 export const JUMP_HEIGHT = 3
@@ -140,8 +140,15 @@ export function fallLimit(from: Position, items: readonly WallItem[], affordable
   return { drop: reach, lands: false, by: null }
 }
 
-/** How far a jump from `from` may rise among `items`: JUMP_HEIGHT, under a ceiling, and no further than a hop can afford. */
+/**
+ * How far a jump from `from` may rise among `items`: JUMP_HEIGHT, under a
+ * ceiling, and no further than a hop can afford. Right under a solid's
+ * underside (a face in your plane with the solid just above you,
+ * underSolid) it does not rise at all.
+ */
 export function jumpRise(from: Position, items: readonly WallItem[], affordable: (from: Position, to: Position) => boolean): { rise: bigint; by: WallItem | null } {
+  const lid = underSolid(from, items)
+  if (lid) return { rise: 0n, by: lid }
   const up = stepLimit(from, 'y', 1, BigInt(JUMP_HEIGHT), items)
   const afford = affordableAlongY(from, 1, up.reach, affordable)
   return { rise: afford, by: up.reach < BigInt(JUMP_HEIGHT) ? up.by : null }

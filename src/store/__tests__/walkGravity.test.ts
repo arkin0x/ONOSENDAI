@@ -642,6 +642,36 @@ describe('exactly on a face', () => {
       outside()
     })
 
+    /** A floor 1 under you, so you stand, and the block over you, its underside at your height. */
+    const crawl = (...more: Array<[ShardModel, V3]>): void => {
+      world(start, [boxes('Floor', 'all', [FLOOR]), [0, -1, 0]], [boxes('Over', 'all', [[[-10, 0, -20], [10, 4, 10]]]), [0, 0, 0]], ...more)
+    }
+
+    it('standing on a floor under it, a jump does not rise into it', () => {
+      crawl()
+      walk(true)
+      still()
+      useWalk.getState().press('up')
+      expect(useWalk.getState().falling).toBe(false)
+      expect(useToast.getState().toast).toMatchObject({ label: 'WALL', meta: 'Over' })
+      // A press in the air would have followed the jump: there is none, and nothing is made.
+      useWalk.getState().press('right')
+      expect(at(start)).toEqual([1, 0, 0])
+      expect(useWalk.getState().falling).toBe(false)
+      outside()
+    })
+
+    it('standing on a floor under it, a stair does not lift you into it, gravity on or off', () => {
+      // A riser 1 high ahead (-Z), its top at your height.
+      const riser = boxes('Riser', 'all', [[[-10, 0, -20], [10, 1, -1]]])
+      for (const gravity of [true, false]) {
+        crawl([riser, [0, -1, 0]])
+        const step = walkStep(start, 'z', -1, 1n, wallItems(useCyberspace.getState().plane), gravity)
+        expect(at(start, step.to)).toEqual([0, 0, 0])
+        expect(step.by?.shard.name).toBe('Riser')
+      }
+    })
+
     it('a press in mid-air lands below it, never inside it', async () => {
       over()
       walk(true)

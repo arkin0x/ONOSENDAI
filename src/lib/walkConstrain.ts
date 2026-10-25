@@ -474,6 +474,16 @@ export function enclosed(mesh: WallMesh, p: readonly [number, number, number], c
   const d = UPWARD
   // Moller and Trumbore, counting crossings strictly ahead of `p`.
   const crosses = (t: Float64Array, a: number, b: number, c: number): boolean => {
+    // Cheap rejects first. The ray rises 1 a unit along it, so over the
+    // triangle's heights it drifts only a little in X and Z: a triangle
+    // wholly below `p`, or beside that drift, is not crossed.
+    const yHi = Math.max(t[a + 1], t[b + 1], t[c + 1]) - p[1]
+    if (yHi < -NEAR) return false
+    const s0 = Math.max(0, Math.min(t[a + 1], t[b + 1], t[c + 1]) - p[1]), s1 = Math.max(0, yHi)
+    for (const q of [0, 2]) {
+      const r0 = p[q] + d[q] * s0, r1 = p[q] + d[q] * s1
+      if (Math.max(t[a + q], t[b + q], t[c + q]) < Math.min(r0, r1) - NEAR || Math.min(t[a + q], t[b + q], t[c + q]) > Math.max(r0, r1) + NEAR) return false
+    }
     const e1x = t[b] - t[a], e1y = t[b + 1] - t[a + 1], e1z = t[b + 2] - t[a + 2]
     const e2x = t[c] - t[a], e2y = t[c + 1] - t[a + 1], e2z = t[c + 2] - t[a + 2]
     const px = d[1] * e2z - d[2] * e2y, py = d[2] * e2x - d[0] * e2z, pz = d[0] * e2y - d[1] * e2x

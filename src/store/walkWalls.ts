@@ -22,14 +22,29 @@
  *
  * What WALK resolves is bounded as a whole, not shard by shard: one budget of
  * placements (WALL_BUDGET) for every shard's parts between one WALK and the
- * next, nearest shards first, and only for shards whose region the walker
- * can be in, since a shard is drawn, and holds a walker, only inside its
- * region (DECK-0003 §1.12). Sixty hostile shards each under sno-core's own
- * cap used to cost 3.2 s of main thread and 544 MB on the way into WALK.
+ * next, no shard more than SHARD_BUDGET of it, nearest shards first by the
+ * box of what they hold, and only for shards whose region the walker can be
+ * in, since a shard is drawn, and holds a walker, only inside its region
+ * (DECK-0003 §1.12). Sixty hostile shards each under sno-core's own cap used
+ * to cost 3.2 s of main thread and 544 MB on the way into WALK.
+ *
+ * A shard the budget could not build whole is STARVED, and it fails closed:
+ * the box of everything known about it (its own faces, every part that did
+ * resolve and every placeholder, and a unit cube at every placement it makes,
+ * within its region) is solid to a walker coming from outside, who stops a
+ * gibson short of it, so nobody walks into geometry that was never built. A
+ * walker already inside the box is not held by it and walks out freely: a
+ * box nobody could build must not be a cell either, or any shard over the
+ * budget would shut in whoever stood in it. Open would be worse than closed:
+ * a hostile shard placed nearer could spend the budget and take down the
+ * walls of a maze beside it.
+ * A shard starved because the total ran out, not by its own size, is built
+ * again when budget comes back (a shard's unused share is returned) and at
+ * every WALK.
  */
 
-import type { Placed } from 'sno-core/parts'
-import type { ShardModel } from 'sno-core/shards'
+import { placedBounds, type Placed } from 'sno-core/parts'
+import { TICKS_PER_UNIT, ticksOf, toRender, type ShardModel } from 'sno-core/shards'
 import { resolvePartsShared } from '../lib/parts'
 import { regionBox, type Box } from '../lib/clip'
 import { placedPose } from '../lib/pose'
@@ -50,6 +65,22 @@ export const WALL_AXES: ViewAxes = { right: { axis: 'x', dir: 1 }, up: { axis: '
 export type WallItem = Pick<WorldItem, 'key' | 'at' | 'height' | 'plane'> & { shard: ShardModel }
 
 interface Entry {
+  item: WallItem
+  /**
+   * Why it was not built whole, or null: 'total', the walls' budget ran out
+   * before its turn (built again when budget comes back, and at the next
+   * WALK); 'ceiling', it alone needs more than SHARD_BUDGET (kept closed).
+   */
+  starved: 'total' | 'ceiling' | null
+  /** The WALK it was built in (warmWalls), so a starved one is built again at the next. */
+  walk: number
+  /** A resolve for it is running: it stands as it is until that lands. */
+  pending?: boolean
+  /**
+   * For a starved shard, the box it fails closed to, in whole gibsons from its
+   * coordinate on cyberspace's axes, both ends included, within its region.
+   */
+  closed: { lo: Position; hi: Position } | null
   shard: ShardModel
   /** When its parts were resolved with one unreachable: tried again after RETRY_MS. */
   missingAt: number | null
@@ -65,7 +96,17 @@ const entries = new Map<string, Entry>()
 
 /** The most placements WALK resolves for all the shards around a walker together, from one WALK to the next. */
 export const WALL_BUDGET = 20_000
-let budget = { left: WALL_BUDGET }
+/** The most of it any one shard may take: no single shard can spend it all. */
+export const SHARD_BUDGET = 4_000
+/**
+ * What is left of WALL_BUDGET this WALK. Each resolve is handed a fresh
+ * sno-core budget object of its own share (never one refilled while a
+ * resolve draws from it); what a shard does not use comes back here when its
+ * resolve is done.
+ */
+let wallLeft = WALL_BUDGET
+/** Which WALK this is (warmWalls counts them). */
+let walkNo = 0
 
 /**
  * Whether a walker at `from`, stepping `length` gibsons along `axis` (or not
@@ -88,7 +129,35 @@ export function regionReached(w: WallItem, from: Position, axis?: AxisName, dir:
 
 /** What is left of WALK's placement budget: for tests. */
 export function wallBudgetLeft(): number {
-  return budget.left
+  return wallLeft
+}
+
+/**
+ * The box of what a shard is known to hold before anything it places is
+ * fetched, in whole gibsons from its coordinate: its own vertices and the
+ * origin of every placement it makes. Where "nearest" is measured to, rather
+ * than its anchor point, which a hider places where they like.
+ */
+function knownBox(s: ShardModel): { lo: Position; hi: Position } | null {
+  const pts = [...s.vertices.map((v) => ticksOf(v)), ...(s.parts ?? []).map((p) => p.at)]
+  if (!pts.length) return null
+  const g = 2 ** s.unit
+  const lo = [0, 1, 2].map((k) => BigInt(Math.floor((Math.min(...pts.map((p) => p[k])) / TICKS_PER_UNIT - 1) * g)))
+  const hi = [0, 1, 2].map((k) => BigInt(Math.ceil((Math.max(...pts.map((p) => p[k])) / TICKS_PER_UNIT + 1) * g)))
+  return { lo: { x: lo[0], y: lo[1], z: lo[2] }, hi: { x: hi[0], y: hi[1], z: hi[2] } }
+}
+
+/** How far `from` is from the box of what `w` holds, the larger axis gap, 0 inside it. */
+function distanceTo(w: WallItem, from: Position): bigint {
+  const box = knownBox(w.shard)
+  if (!box) return farness(w.at, from)
+  let far = 0n
+  for (const a of ['x', 'y', 'z'] as const) {
+    const p = from[a] - w.at[a]
+    const gap = p < box.lo[a] ? box.lo[a] - p : p > box.hi[a] ? p - box.hi[a] : 0n
+    if (gap > far) far = gap
+  }
+  return far
 }
 
 /** The larger of the three axis distances between two places, in gibsons: nearest first. */
@@ -115,11 +184,72 @@ function reachOf(mesh: WallMesh, unit: number): Entry['reach'] {
   }
 }
 
-function build(w: WallItem, placed: readonly Placed[]): Entry {
+/**
+ * The box a starved shard fails closed to: everything known about it (its own
+ * vertices, every part that resolved and every placeholder, through sno-core
+ * placedBounds, and a unit cube at every placement it makes), in whole
+ * gibsons from its coordinate, cut to its region, since nothing of it holds a
+ * walker outside that. A shard standing on the Earth (posed) is turned in a
+ * way this box does not follow, so it takes the cube that holds the box at
+ * any turn. Null for nothing known.
+ */
+function closedBox(w: WallItem, placed: readonly Placed[]): Entry['closed'] {
+  const s = w.shard
+  const known = placedBounds(s, [...placed])
+  const min = known ? [...known.min] : [Infinity, Infinity, Infinity]
+  const max = known ? [...known.max] : [-Infinity, -Infinity, -Infinity]
+  for (const p of s.parts ?? []) {
+    const c = toRender(p.at)
+    for (let k = 0; k < 3; k++) { min[k] = Math.min(min[k], c[k] - 0.5); max[k] = Math.max(max[k], c[k] + 0.5) }
+  }
+  if (min[0] === Infinity) return null
+  const g = 2 ** s.unit
+  // Render to cyberspace: Z negated.
+  let lo = [min[0], min[1], -max[2]].map((v) => BigInt(Math.floor(v * g)))
+  let hi = [max[0], max[1], -min[2]].map((v) => BigInt(Math.ceil(v * g)))
+  if (s.up && w.plane === 0) {
+    const r = BigInt(Math.ceil(Math.max(...[...min, ...max].map(Math.abs)) * g * Math.sqrt(3)))
+    lo = [-r, -r, -r]
+    hi = [r, r, r]
+  }
+  const h = BigInt(w.height)
+  const axes = ['x', 'y', 'z'] as const
+  const out = { lo: { x: 0n, y: 0n, z: 0n }, hi: { x: 0n, y: 0n, z: 0n } }
+  for (let k = 0; k < 3; k++) {
+    const a = axes[k]
+    const base = (w.at[a] >> h) << h
+    const rlo = base - w.at[a], rhi = base + (1n << h) - 1n - w.at[a]
+    out.lo[a] = lo[k] > rlo ? lo[k] : rlo
+    out.hi[a] = hi[k] < rhi ? hi[k] : rhi
+    if (out.lo[a] > out.hi[a]) return null
+  }
+  return out
+}
+
+/**
+ * How far a step from `off` (from the shard's coordinate) may go before it
+ * would enter the closed box, one gibson short; null when it never enters it,
+ * and null when it starts inside it, which lets it walk out.
+ */
+function boxReach(box: NonNullable<Entry['closed']>, off: Position, axis: AxisName, dir: 1 | -1, length: bigint): bigint | null {
+  const inside = (['x', 'y', 'z'] as const).every((a) => off[a] >= box.lo[a] && off[a] <= box.hi[a])
+  if (inside) return null
+  if ((['x', 'y', 'z'] as const).some((a) => a !== axis && (off[a] < box.lo[a] || off[a] > box.hi[a]))) return null
+  const d = dir > 0 ? box.lo[axis] - off[axis] : off[axis] - box.hi[axis]
+  if (d <= 0n || d > length) return null
+  return d - 1n
+}
+
+/** Whether a resolve was cut short anywhere by the budget. */
+function cutShort(placed: readonly Placed[]): boolean {
+  return placed.some(function short(p): boolean { return p.missing === 'budget' || p.children.some(short) })
+}
+
+function build(w: WallItem, placed: readonly Placed[], starved: Entry['starved'] = null): Entry {
   const pose = placedPose(WALL_AXES, w.shard.up && w.plane === 0 ? { at: w.at, spin: w.shard.spin } : undefined)
   const mesh = wallMesh(w.shard, placed, pose)
   const missingAt = placed.some(function gone(p): boolean { return p.missing === 'unreachable' || p.children.some(gone) }) ? Date.now() : null
-  return { shard: w.shard, missingAt, where: whereOf(w), mesh, clip: regionBox(w.at, w.height, w.shard.unit, WALL_AXES), reach: reachOf(mesh, w.shard.unit) }
+  return { item: w, starved, walk: walkNo, closed: starved ? closedBox(w, placed) : null, shard: w.shard, missingAt, where: whereOf(w), mesh, clip: regionBox(w.at, w.height, w.shard.unit, WALL_AXES), reach: reachOf(mesh, w.shard.unit) }
 }
 
 /** The walls of one placed shard, built now or kept from before; its parts follow when they resolve. */
@@ -128,6 +258,8 @@ export function entryFor(w: WallItem): Entry {
   // A part a relay did not answer is asked for again after a while (lib/parts.ts does not keep a miss).
   if (held && held.shard === w.shard && held.where === whereOf(w)) {
     if (held.missingAt !== null && Date.now() - held.missingAt > RETRY_MS) { held.missingAt = null; resolveInto(w, held) }
+    // Starved in an earlier WALK: built again with this WALK's budget.
+    else if (held.starved && held.walk !== walkNo) { held.walk = walkNo; resolveInto(w, held) }
     return held
   }
   const e = build(w, [])
@@ -147,9 +279,31 @@ const RETRY_MS = 30_000
  */
 function resolveInto(w: WallItem, e: Entry): void {
   if (!w.shard.parts?.length) return
-  void resolvePartsShared(w.shard, undefined, undefined, budget).then((placed) => {
-    if (entries.get(w.key) === e) entries.set(w.key, build(w, placed))
-  }, () => { /* unreachable parts stop nothing */ })
+  const share = Math.min(SHARD_BUDGET, wallLeft)
+  if (share <= 0) {
+    // Nothing left this WALK: closed until budget comes back.
+    if (entries.get(w.key) === e) entries.set(w.key, build(w, [], 'total'))
+    return
+  }
+  wallLeft -= share
+  e.pending = true
+  // A fresh budget object for this resolve alone.
+  const mine = { left: share }
+  void resolvePartsShared(w.shard, undefined, undefined, mine).then((placed) => {
+    wallLeft += Math.max(0, mine.left)
+    const starved = cutShort(placed) ? (share >= SHARD_BUDGET ? 'ceiling' : 'total') : null
+    if (entries.get(w.key) === e) entries.set(w.key, build(w, placed, starved))
+    reviveStarved()
+  }, () => { e.pending = false; wallLeft += Math.max(0, mine.left) /* unreachable parts stop nothing */ })
+}
+
+/** Build again, nearest first, the shards starved only because the total ran out, while there is budget for them. */
+function reviveStarved(): void {
+  for (const e of entries.values()) {
+    if (wallLeft <= 0) return
+    // It stays closed as it is until the new resolve lands.
+    if (e.starved === 'total' && !e.pending) resolveInto(e.item, e)
+  }
 }
 
 /**
@@ -160,17 +314,19 @@ function resolveInto(w: WallItem, e: Entry): void {
  * further off are built when a step can reach their region (stepLimit).
  */
 export function warmWalls(plane: number, from?: Position): void {
-  // A fresh object, never the old one refilled: a resolve still running from
-  // before keeps drawing from the budget it was handed, which is spent.
-  budget = { left: WALL_BUDGET }
+  // This WALK's budget, whole; a resolve still running from before keeps the
+  // share it was handed, and returns what it did not use.
+  wallLeft = WALL_BUDGET
+  walkNo++
   const items = wallItems(plane)
-  const near = from ? items.filter((w) => regionReached(w, from)).sort((a, b) => { const x = farness(a.at, from), y = farness(b.at, from); return x < y ? -1 : x > y ? 1 : 0 }) : items
+  const near = from ? items.filter((w) => regionReached(w, from)).sort((a, b) => { const x = distanceTo(a, from), y = distanceTo(b, from); return x < y ? -1 : x > y ? 1 : 0 }) : items
   for (const w of near) entryFor(w)
 }
 
 /** Forget every shard's walls: for tests, and an identity switch has no need of them either. */
 export function clearWalls(): void {
   entries.clear()
+  wallLeft = WALL_BUDGET
 }
 
 /** Why a step stopped short: the shard it met, and how far it may go. */
@@ -212,6 +368,8 @@ export function stepLimit(from: Position, axis: AxisName, dir: 1 | -1, length: b
   let best: number | null = null
   let bestTol = ON_FACE
   let by: WallItem | null = null
+  let boxBest: bigint | null = null
+  let boxBy: WallItem | null = null
   const i = axis === 'x' ? 0 : axis === 'y' ? 1 : 2
   for (const w of items) {
     keep.add(w.key)
@@ -219,6 +377,11 @@ export function stepLimit(from: Position, axis: AxisName, dir: 1 | -1, length: b
     // and nothing it places resolved, until a step can.
     if (!regionReached(w, from, axis, dir, length)) continue
     const e = entryFor(w)
+    // A starved shard's closed box, exact in gibsons (it fails closed).
+    if (e.closed) {
+      const r = boxReach(e.closed, { x: from.x - w.at.x, y: from.y - w.at.y, z: from.z - w.at.z }, axis, dir, length)
+      if (r !== null && (boxBest === null || r < boxBest)) { boxBest = r; boxBy = w }
+    }
     if (!e.reach) continue
     // Exact first: the step against the walls' box, in bigint gibsons,
     // widened by what the float test below may be off by.
@@ -247,12 +410,12 @@ export function stepLimit(from: Position, axis: AxisName, dir: 1 | -1, length: b
     if (best === null || gib < best) { best = gib; bestTol = tol; by = w }
   }
   for (const k of entries.keys()) if (!keep.has(k)) entries.delete(k)
-  if (best === null) return { reach: length, by: null }
   // The last whole gibson at least `tol` short of the face: one short at a
   // fine zoom, further at a coarse one, where the measure is coarser too.
-  const k = Math.max(0, Math.ceil(best - bestTol) - 1)
-  const reach = BigInt(k) < length ? BigInt(k) : length
-  return { reach, by }
+  const k = best === null ? null : Math.max(0, Math.ceil(best - bestTol) - 1)
+  const reach = k === null || BigInt(k) >= length ? length : BigInt(k)
+  if (boxBest !== null && boxBest < reach) return { reach: boxBest, by: boxBy }
+  return best === null ? { reach: length, by: null } : { reach, by }
 }
 
 /** The shards a walker in `plane` can meet: every shard placed in the world there, as the scene draws them. */

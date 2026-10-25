@@ -113,6 +113,12 @@ beforeEach(() => {
   imp().close()
 })
 
+/** Opens a zip with PUBLISH turned on, as most of these runs publish; it starts off. */
+async function openPublishing(file: File): Promise<void> {
+  await imp().openZip(file)
+  imp().setPublish(true)
+}
+
 afterEach(() => {
   useCyberspace.setState({ signEvent: realSign })
   vi.mocked(folderApi).mockReturnValue(null)
@@ -120,7 +126,7 @@ afterEach(() => {
 
 describe('reading a zip', () => {
   it('lists the shard files, named after their files, with errors and skips', async () => {
-    await imp().openZip(kitZip())
+    await openPublishing(kitZip())
     const s = imp()
     expect(s.phase).toBe('review')
     expect(s.error).toBeNull()
@@ -141,7 +147,7 @@ describe('reading a zip', () => {
   })
 
   it('says why a file that is not a zip cannot be read', async () => {
-    await imp().openZip(new File([strToU8('hello')], 'nope.zip'))
+    await openPublishing(new File([strToU8('hello')], 'nope.zip'))
     expect(imp().error).toMatch(/not a zip/)
     expect(imp().rows).toHaveLength(0)
   })
@@ -149,7 +155,7 @@ describe('reading a zip', () => {
 
 describe('IMPORT', () => {
   it('adds every picked shard and publishes each as a kind 33331 at its own address', async () => {
-    await imp().openZip(kitZip())
+    await openPublishing(kitZip())
     imp().toggle(rowOf('rotunda').key)
     await imp().start()
     expect(imp().phase).toBe('done')
@@ -163,8 +169,20 @@ describe('IMPORT', () => {
     expect(usePublished.getState().ledger[rowOf('hall-straight').shardId!]).toBeDefined()
   })
 
-  it('with PUBLISH off only adds them', async () => {
+  it('starts with PUBLISH off on every import, even after one that published', async () => {
     await imp().openZip(kitZip())
+    expect(imp().publish).toBe(false)
+    imp().setPublish(true)
+    await imp().start()
+    expect(sent().length).toBeGreaterThan(0)
+    imp().close()
+    expect(imp().publish).toBe(false)
+    await imp().openZip(kitZip())
+    expect(imp().publish).toBe(false)
+  })
+
+  it('with PUBLISH off only adds them', async () => {
+    await openPublishing(kitZip())
     imp().setPublish(false)
     await imp().start()
     expect(mine()).toHaveLength(3)
@@ -177,7 +195,7 @@ describe('a taken name', () => {
   beforeEach(() => { useWorkshop.getState().importText(sno('hall-straight', 3)) })
 
   it('is skipped by default', async () => {
-    await imp().openZip(kitZip())
+    await openPublishing(kitZip())
     await imp().start()
     expect(rowOf('hall-straight').run).toBe('skipped')
     expect(mine().filter((s) => s.name.startsWith('hall-straight'))).toHaveLength(1)
@@ -185,7 +203,7 @@ describe('a taken name', () => {
   })
 
   it('COPY adds "<name> copy"', async () => {
-    await imp().openZip(kitZip())
+    await openPublishing(kitZip())
     imp().setDupMode('copy')
     await imp().start()
     expect(mine().map((s) => s.name).sort()).toEqual(['hall-straight', 'hall-straight copy', 'rotunda', 'tetra'])
@@ -194,7 +212,7 @@ describe('a taken name', () => {
 
   it('UPDATE never replaces an unrelated shard that shares the name: the piece comes in beside it', async () => {
     const before = mine()[0]
-    await imp().openZip(kitZip())
+    await openPublishing(kitZip())
     imp().setDupMode('update')
     await imp().start()
     expect(mine().find((x) => x.id === before.id)!.vertices).toEqual(before.vertices)
@@ -208,7 +226,7 @@ describe('failure and retry', () => {
     vi.mocked(publishMany).mockImplementation(async (_r, ev) => (JSON.parse((ev as unknown as { content: string }).content).name === 'rotunda'
       ? { ok: false, reason: 'blocked: not today' }
       : { ok: true, accepted: ['wss://relay.test'] }))
-    await imp().openZip(kitZip())
+    await openPublishing(kitZip())
     await imp().start()
     expect(rowOf('rotunda').run).toBe('failed')
     expect(rowOf('rotunda').failure).toBe('blocked: not today')
@@ -230,7 +248,7 @@ describe('failure and retry', () => {
       return { ok: true, accepted: ['wss://relay.test'] }
     })
     timing.sendDeadlineMs = 20
-    await imp().openZip(kitZip())
+    await openPublishing(kitZip())
     for (const name of ['rotunda', 'tetra']) imp().toggle(rowOf(name).key)
     await imp().start()
     expect(rowOf('hall-straight').run).toBe('failed')
@@ -247,7 +265,7 @@ describe('failure and retry', () => {
   it('a signer that never answers fails at the deadline, and two in a row pause the run', async () => {
     timing.sendDeadlineMs = 20
     useCyberspace.setState({ signEvent: () => new Promise(() => {}) })
-    await imp().openZip(kitZip())
+    await openPublishing(kitZip())
     await imp().start()
     expect(imp().phase).toBe('done')
     expect(imp().stall).toMatch(/signer/)
@@ -258,7 +276,7 @@ describe('failure and retry', () => {
 
   it('STOP ends the wait on a hung signer at once', async () => {
     useCyberspace.setState({ signEvent: () => new Promise(() => {}) })
-    await imp().openZip(kitZip())
+    await openPublishing(kitZip())
     const running = imp().start()
     await vi.waitFor(() => expect(rowOf('hall-straight').run).toBe('working'))
     imp().stop()
@@ -271,7 +289,7 @@ describe('failure and retry', () => {
   it('asks a rate-limited relay again after a wait', async () => {
     let calls = 0
     vi.mocked(publishMany).mockImplementation(async () => (++calls === 1 ? { ok: false, reason: 'rate-limited: slow down' } : { ok: true, accepted: ['wss://relay.test'] }))
-    await imp().openZip(kitZip())
+    await openPublishing(kitZip())
     await imp().start()
     expect(imp().rows.filter((r) => r.run === 'done')).toHaveLength(3)
     expect(calls).toBe(4)
@@ -283,7 +301,7 @@ describe('folders', () => {
     const createFolderPath = vi.fn((path: readonly string[]) => path.join('/'))
     const assignToFolder = vi.fn()
     vi.mocked(folderApi).mockReturnValue({ createFolderPath, assignToFolder })
-    await imp().openZip(kitZip())
+    await openPublishing(kitZip())
     expect(imp().foldersOn).toBe(true)
     await imp().start()
     expect(createFolderPath.mock.calls.map((c) => c[0].join('/')).sort()).toEqual(['maze-kit/forest', 'maze-kit/shared'])
@@ -294,7 +312,7 @@ describe('folders', () => {
     useWorkshop.getState().importText(sno('hall-straight', 3))
     const other = useWorkshop.getState().shards[0].id
     vi.mocked(folderApi).mockReturnValue({ createFolderPath: (p) => p.join('/'), assignToFolder: () => {}, folderPathOf: (id) => (id === other ? ['elsewhere'] : []) })
-    await imp().openZip(kitZip())
+    await openPublishing(kitZip())
     expect(imp().dups[rowOf('hall-straight').key]).toBeNull()
     await imp().start()
     expect(mine().filter((s) => s.name === 'hall-straight')).toHaveLength(2)
@@ -310,7 +328,7 @@ describe('review fixes', () => {
     }
     // Large, well compressed MTLs nothing names: reading them all was the bomb.
     for (let i = 0; i < 20; i++) files[`k/alias${i}.mtl`] = new Uint8Array(4 * 1024 * 1024)
-    await imp().openZip(new File([zipSync(files)], 'obj.zip'))
+    await openPublishing(new File([zipSync(files)], 'obj.zip'))
     expect(rowOf('chair').read).toBe('ok')
     const colors = new Set(rowOf('chair').shard!.vertices.map((v) => v.c.join(',')))
     expect([...colors].some((c) => c.startsWith('255,') || c.startsWith('1,'))).toBe(true)
@@ -330,7 +348,7 @@ describe('review fixes', () => {
     out[e + 8] = 2; out[e + 10] = 2
     const size = cd.length * 2
     out[e + 12] = size & 255; out[e + 13] = (size >> 8) & 255
-    await imp().openZip(new File([out], 'twice.zip'))
+    await openPublishing(new File([out], 'twice.zip'))
     expect(imp().rows).toHaveLength(2)
     expect(imp().rows[0].key).not.toBe(imp().rows[1].key)
     imp().setDupMode('copy')
@@ -340,7 +358,7 @@ describe('review fixes', () => {
 
   it('an exception mid-run marks the row failed and leaves the modal closable', async () => {
     vi.mocked(folderApi).mockReturnValue({ createFolderPath: () => { throw new Error('folder store broke') }, assignToFolder: () => {} })
-    await imp().openZip(kitZip())
+    await openPublishing(kitZip())
     await imp().start()
     expect(imp().phase).toBe('done')
     expect(rowOf('hall-straight').run).toBe('failed')
@@ -351,10 +369,10 @@ describe('review fixes', () => {
 
   it('a second zip waits while a run is going, and STOP still ends the wait', async () => {
     useCyberspace.setState({ signEvent: () => new Promise(() => {}) })
-    await imp().openZip(kitZip())
+    await openPublishing(kitZip())
     const running = imp().start()
     await vi.waitFor(() => expect(rowOf('hall-straight').run).toBe('working'))
-    await imp().openZip(new File([zipSync({ 'other.json': strToU8(sno('other')) })], 'other.zip'))
+    await openPublishing(new File([zipSync({ 'other.json': strToU8(sno('other')) })], 'other.zip'))
     expect(imp().fileName).toBe('maze-kit.zip')
     imp().stop()
     await running
@@ -368,7 +386,7 @@ describe('review fixes', () => {
       setItem(k, v)
     })
     try {
-      await imp().openZip(kitZip())
+      await openPublishing(kitZip())
       await imp().start()
     } finally { spy.mockRestore() }
     expect(rowOf('hall-straight').run).toBe('failed')
@@ -380,7 +398,7 @@ describe('review fixes', () => {
 
   it('a row SKIP left out comes back when the answer changes after a run', async () => {
     useWorkshop.getState().importText(sno('hall-straight', 3))
-    await imp().openZip(kitZip())
+    await openPublishing(kitZip())
     await imp().start()
     expect(rowOf('hall-straight').run).toBe('skipped')
     imp().setDupMode('copy')
@@ -393,7 +411,7 @@ describe('review fixes', () => {
   it('STOP ends a rate-limit wait at once', async () => {
     timing.rateBackoffMs = 60_000
     vi.mocked(publishMany).mockImplementation(async () => ({ ok: false, reason: 'rate-limited: slow down' }))
-    await imp().openZip(kitZip())
+    await openPublishing(kitZip())
     const running = imp().start()
     await vi.waitFor(() => expect(vi.mocked(publishMany)).toHaveBeenCalled())
     const t = Date.now()
@@ -413,18 +431,18 @@ describe('stable ids and kit references', () => {
   })
 
   it('gives each piece its path as its id and published d', async () => {
-    await imp().openZip(kitZip())
+    await openPublishing(kitZip())
     await imp().start()
     expect(mine().map((x) => x.id).sort()).toEqual(['maze-kit/forest/hall-straight', 'maze-kit/forest/rotunda', 'maze-kit/shared/tetra'])
     expect(sent().map(dOf).sort()).toEqual(['maze-kit/forest/hall-straight', 'maze-kit/forest/rotunda', 'maze-kit/shared/tetra'])
   })
 
   it('the same zip again finds the same pieces: SKIP leaves them, UPDATE replaces them in place at the same address', async () => {
-    await imp().openZip(kitZip())
+    await openPublishing(kitZip())
     await imp().start()
     imp().close()
     vi.mocked(publishMany).mockClear()
-    await imp().openZip(kitZip({ 'maze-kit/forest/rotunda.json': sno('changed', 3) }))
+    await openPublishing(kitZip({ 'maze-kit/forest/rotunda.json': sno('changed', 3) }))
     expect(imp().dups[rowOf('rotunda').key]).toEqual({ in: 'same', id: 'maze-kit/forest/rotunda' })
     await imp().start()
     expect(mine()).toHaveLength(3)
@@ -439,7 +457,7 @@ describe('stable ids and kit references', () => {
 
   it('points a piece placing others in the zip at the importer\'s own pieces', async () => {
     const me = useCyberspace.getState().identity.pubkey
-    await imp().openZip(kitZip({ 'maze-kit/forest/flooded.json': shell('flooded', ['maze-kit/forest/rotunda', 'maze-kit/shared/tetra']) }))
+    await openPublishing(kitZip({ 'maze-kit/forest/flooded.json': shell('flooded', ['maze-kit/forest/rotunda', 'maze-kit/shared/tetra']) }))
     expect(rowOf('flooded').read).toBe('ok')
     await imp().start()
     const flooded = mine().find((x) => x.id === 'maze-kit/forest/flooded')!
@@ -449,7 +467,7 @@ describe('stable ids and kit references', () => {
   })
 
   it('a reference to a piece not in the zip is an error at review', async () => {
-    await imp().openZip(kitZip({ 'maze-kit/forest/flooded.json': shell('flooded', ['maze-kit/hall-straight']) }))
+    await openPublishing(kitZip({ 'maze-kit/forest/flooded.json': shell('flooded', ['maze-kit/hall-straight']) }))
     expect(rowOf('flooded').read).toBe('error')
     expect(rowOf('flooded').error).toBe('Places maze-kit/hall-straight, not in this zip')
   })
@@ -461,7 +479,7 @@ describe('stable ids and kit references', () => {
       setItem(k, v)
     })
     try {
-      await imp().openZip(kitZip())
+      await openPublishing(kitZip())
       await imp().start()
       await imp().retry()
       await imp().retry()
@@ -479,7 +497,7 @@ describe('stable ids and kit references', () => {
       buffers: [{ uri, byteLength: bin.length }], bufferViews: [{ buffer: 0, byteOffset: 0, byteLength: bin.length }],
       accessors: [{ bufferView: 0, componentType: 5126, count: 3, type: 'VEC3', min: [0, 0, 0], max: [1, 1, 0] }],
     })
-    await imp().openZip(new File([zipSync({
+    await openPublishing(new File([zipSync({
       'k/Tri.gltf': strToU8(gltf('Tri.bin')), 'k/Tri.bin': bin,
       'k/spaced.gltf': strToU8(gltf('my%20tri.bin')), 'k/my tri.bin': bin,
     })], 'gltf.zip'))
@@ -494,7 +512,7 @@ describe('addresses already yours on your relays', () => {
 
   it('a piece whose address your relays hold is PUBLISHED: SKIP leaves it, UPDATE publishes over it', async () => {
     vi.mocked(queryEach).mockImplementation(async () => [{ url: 'wss://relay.test', outcome: 'answered', events: [ev('maze-kit/forest/rotunda')] }])
-    await imp().openZip(kitZip())
+    await openPublishing(kitZip())
     expect(imp().remote).toBe('checked')
     expect(imp().dups[rowOf('rotunda').key]).toEqual({ in: 'published', id: 'maze-kit/forest/rotunda' })
     await imp().start()
@@ -507,14 +525,14 @@ describe('addresses already yours on your relays', () => {
 
   it('when no relay answers, nothing new goes out over an unchecked address; with PUBLISH off it is still added', async () => {
     vi.mocked(queryEach).mockImplementation(async () => [{ url: 'wss://relay.test', outcome: 'unreachable', reason: 'down', events: [] }])
-    await imp().openZip(kitZip())
+    await openPublishing(kitZip())
     expect(imp().remote).toBe('unknown')
     await imp().start()
     expect(rowOf('rotunda').run).toBe('failed')
     expect(rowOf('rotunda').failure).toMatch(/Could not check/)
     expect(sent()).toHaveLength(0)
     imp().close()
-    await imp().openZip(kitZip())
+    await openPublishing(kitZip())
     imp().setPublish(false)
     await imp().start()
     expect(mine()).toHaveLength(3)
@@ -522,11 +540,11 @@ describe('addresses already yours on your relays', () => {
   })
 
   it('another kit with the same folder name is matched by address, and SKIP (the default) leaves yours alone', async () => {
-    await imp().openZip(new File([zipSync({ 'models/chair.json': strToU8(sno('alice')) })], 'alice.zip'))
+    await openPublishing(new File([zipSync({ 'models/chair.json': strToU8(sno('alice')) })], 'alice.zip'))
     await imp().start()
     imp().close()
     vi.mocked(publishMany).mockClear()
-    await imp().openZip(new File([zipSync({ 'models/chair.json': strToU8(sno('bob', 4)) })], 'bob.zip'))
+    await openPublishing(new File([zipSync({ 'models/chair.json': strToU8(sno('bob', 4)) })], 'bob.zip'))
     expect(imp().dups[rowOf('chair').key]).toEqual({ in: 'same', id: 'models/chair' })
     await imp().start()
     expect(sent()).toHaveLength(0)
@@ -536,7 +554,7 @@ describe('addresses already yours on your relays', () => {
   it('a piece placing one that is unticked, or broken, does not come in', async () => {
     const ZERO = '0'.repeat(64)
     const shell = (targets: string[]) => JSON.stringify({ v: 2, name: 's', unit: 0, mode: 'solid', vertices: [], colors: [], faces: [], refs: targets.map((t) => ['a', `33331:${ZERO}:${t}`]), parts: targets.map((_, i) => [i, 0, 0, 0, 0, 0, 0, 0]) })
-    await imp().openZip(kitZip({ 'maze-kit/forest/a.json': shell(['maze-kit/forest/rotunda']), 'maze-kit/forest/b.json': shell(['maze-kit/extras/broken']) }))
+    await openPublishing(kitZip({ 'maze-kit/forest/a.json': shell(['maze-kit/forest/rotunda']), 'maze-kit/forest/b.json': shell(['maze-kit/extras/broken']) }))
     expect(rowOf('b').read).toBe('error')
     imp().toggle(rowOf('rotunda').key)
     await imp().start()
@@ -552,7 +570,7 @@ describe('addresses already yours on your relays', () => {
     const identity = useCyberspace.getState().identity
     useCyberspace.setState({ identity: { ...identity, pubkey: '' } })
     try {
-      await imp().openZip(kitZip())
+      await openPublishing(kitZip())
       imp().setPublish(false)
       await imp().start()
     } finally { useCyberspace.setState({ identity }); imp().setPublish(true) }
@@ -563,7 +581,7 @@ describe('addresses already yours on your relays', () => {
     const identity = useCyberspace.getState().identity
     vi.mocked(publishMany).mockImplementationOnce(async () => { useCyberspace.setState({ identity: { ...identity, pubkey: 'c'.repeat(64) } }); return { ok: true, accepted: ['wss://relay.test'] } })
     try {
-      await imp().openZip(kitZip())
+      await openPublishing(kitZip())
       await imp().start()
     } finally { useCyberspace.setState({ identity }) }
     expect(imp().stall).toBe('Your key changed.')
@@ -574,7 +592,7 @@ describe('addresses already yours on your relays', () => {
 describe('round 4', () => {
   it('a key switched after review is checked again on its own relays before anything new goes out', async () => {
     const identity = useCyberspace.getState().identity
-    await imp().openZip(kitZip())
+    await openPublishing(kitZip())
     expect(vi.mocked(queryEach)).toHaveBeenCalledTimes(1)
     const other = 'd'.repeat(64)
     // B's relays hold B's rotunda.
@@ -591,14 +609,14 @@ describe('round 4', () => {
   it('a COPY whose reference names a piece that will not exist does not come in', async () => {
     const ZERO = '0'.repeat(64)
     const shellJson = JSON.stringify({ v: 2, name: 's', unit: 0, mode: 'solid', vertices: [], colors: [], faces: [], refs: [['a', `33331:${ZERO}:maze-kit/forest/rotunda`]], parts: [[0, 0, 0, 0, 0, 0, 0, 0]] })
-    await imp().openZip(kitZip({ 'maze-kit/forest/shell.json': shellJson }))
+    await openPublishing(kitZip({ 'maze-kit/forest/shell.json': shellJson }))
     await imp().start()
     // The shell is yours; then the rotunda is deleted here (and was never published, as far as the relays say).
     expect(mine().some((x) => x.id === 'maze-kit/forest/shell')).toBe(true)
     useWorkshop.getState().remove('maze-kit/forest/rotunda')
     imp().close()
     vi.mocked(publishMany).mockClear()
-    await imp().openZip(kitZip({ 'maze-kit/forest/shell.json': shellJson }))
+    await openPublishing(kitZip({ 'maze-kit/forest/shell.json': shellJson }))
     imp().setDupMode('copy')
     imp().toggle(rowOf('rotunda').key)
     await imp().start()
@@ -610,7 +628,7 @@ describe('round 4', () => {
 
   it('STOP during the re-check for a switched key ends the run before anything starts', async () => {
     const identity = useCyberspace.getState().identity
-    await imp().openZip(kitZip())
+    await openPublishing(kitZip())
     let answer: (() => void) | null = null
     vi.mocked(queryEach).mockImplementation(() => new Promise((resolve) => { answer = () => resolve([{ url: 'wss://relay.test', outcome: 'answered', events: [] }]) }))
     useCyberspace.setState({ identity: { ...identity, pubkey: 'f'.repeat(64) } })
@@ -631,7 +649,7 @@ describe('review pictures', () => {
   it('a join is pictured without its kit-internal parts, and its refs carry no kit relay hint', async () => {
     const ZERO = '0'.repeat(64)
     const shellJson = JSON.stringify({ v: 2, name: 's', unit: 0, mode: 'solid', vertices: [[0, 0, 0], [1, 0, 0], [0, 1, 0]], colors: [0, 0, 0], faces: [[0, 1, 2]], refs: [['a', `33331:${ZERO}:maze-kit/forest/rotunda`, 'wss://tracker.example']], parts: [[0, 0, 0, 0, 0, 0, 0, 0]] })
-    await imp().openZip(kitZip({ 'maze-kit/forest/shell.json': shellJson }))
+    await openPublishing(kitZip({ 'maze-kit/forest/shell.json': shellJson }))
     const row = rowOf('shell')
     expect(row.shard!.refs).toEqual([['a', `33331:${ZERO}:maze-kit/forest/rotunda`]])
     expect(row.picture!.refs).toBeUndefined()
@@ -647,7 +665,7 @@ describe('the WALK setting (DECK-0003 §1.12)', () => {
   const wordSent = (d: string): unknown => JSON.parse(sent().find((e) => dOf(e) === d)!.content).constrain
 
   it('a kit piece without the field publishes "opaque"; one with a word keeps it, on the bench and on the wire', async () => {
-    await imp().openZip(kitZip({ 'maze-kit/forest/curtain.json': withWord('curtain', 'off'), 'maze-kit/forest/wall.json': withWord('wall', 'all') }))
+    await openPublishing(kitZip({ 'maze-kit/forest/curtain.json': withWord('curtain', 'off'), 'maze-kit/forest/wall.json': withWord('wall', 'all') }))
     await imp().start()
     expect(wordSent('maze-kit/forest/hall-straight')).toBe('opaque')
     expect(wordSent('maze-kit/forest/curtain')).toBe('off')
@@ -658,13 +676,13 @@ describe('the WALK setting (DECK-0003 §1.12)', () => {
   })
 
   it('UPDATE keeps the word the bench chose when the file says nothing, and a word in the file wins', async () => {
-    await imp().openZip(kitZip())
+    await openPublishing(kitZip())
     await imp().start()
     imp().close()
     const id = 'maze-kit/forest/rotunda'
     useWorkshop.setState({ shards: mine().map((s) => (s.id === id ? withConstrain(s, 'off') : s)) })
     vi.mocked(publishMany).mockClear()
-    await imp().openZip(kitZip({ 'maze-kit/forest/rotunda.json': sno('changed', 3) }))
+    await openPublishing(kitZip({ 'maze-kit/forest/rotunda.json': sno('changed', 3) }))
     imp().setDupMode('update')
     await imp().start()
     const after = mine().find((x) => x.id === id)!
@@ -673,7 +691,7 @@ describe('the WALK setting (DECK-0003 §1.12)', () => {
     expect(wordSent(id)).toBe('off')
     imp().close()
     vi.mocked(publishMany).mockClear()
-    await imp().openZip(kitZip({ 'maze-kit/forest/rotunda.json': withWord('changed again', 'all', 4) }))
+    await openPublishing(kitZip({ 'maze-kit/forest/rotunda.json': withWord('changed again', 'all', 4) }))
     imp().setDupMode('update')
     await imp().start()
     expect(mine().find((x) => x.id === id)!.extra).toEqual({ constrain: 'all' })

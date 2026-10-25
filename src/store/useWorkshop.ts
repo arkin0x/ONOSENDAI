@@ -200,7 +200,9 @@ function clipOf(s: ShardModel, selection: number[], partSel: number[] = []): Cli
   if (taken.length === 0 && placed.length === 0) return null
   const local = new Map(taken.map((i, k) => [i, k]))
   const kept = s.faces.map((_, i) => i).filter((i) => s.faces[i].every((v) => local.has(v)))
-  const seams = s.facecolors && s.facecolors.length === s.faces.length ? s.facecolors : null
+  // No whole face in hand, no seams: an empty list would count as a seamed
+  // clip and flatten every face of a plain shard it was pasted into.
+  const seams = kept.length > 0 && s.facecolors && s.facecolors.length === s.faces.length ? s.facecolors : null
   return {
     points: taken.map((i) => ({ at: ticksOf(s.vertices[i]), c: [...s.vertices[i].c] as [number, number, number] })),
     faces: kept.map((i) => s.faces[i].map((v) => local.get(v) as number) as [number, number, number]),
@@ -839,8 +841,9 @@ export const useWorkshop = create<WorkshopState>((set, get) => {
     const many = clip.points.length + clip.parts.length > 1
     const added = edit((m) => {
       const pasted = clip.faces.map((f) => f.map((i) => base + i) as [number, number, number])
+      const { facecolors: _held, ...bare } = m
       let next: ShardModel = {
-        ...m,
+        ...bare,
         unit,
         extent,
         vertices: [...m.vertices, ...placed.map((q) => vertexAt(q.at, q.c))],
@@ -848,14 +851,16 @@ export const useWorkshop = create<WorkshopState>((set, get) => {
       }
       // Seams are all or none (sno-core shards): when either side has them
       // every face carries one, and a face that had none keeps the look its
-      // corners gave it. Left short, the wire would drop every seam.
-      const own = m.facecolors && m.facecolors.length === m.faces.length ? m.facecolors : null
-      if (own || clip.facecolors) {
+      // corners gave it. Left short, the wire would drop every seam. A side
+      // with no faces has no seams, whatever empty list it holds.
+      const own = m.faces.length > 0 && m.facecolors && m.facecolors.length === m.faces.length ? m.facecolors : null
+      const theirs = clip.faces.length > 0 && clip.facecolors && clip.facecolors.length === clip.faces.length ? clip.facecolors : null
+      if (own || theirs) {
         next = {
           ...next,
           facecolors: [
             ...(own ?? m.faces.map((f) => cornerAverage(m, f))),
-            ...(clip.facecolors ? clip.facecolors.map((c) => [...c] as [number, number, number]) : pasted.map((f) => cornerAverage(next, f))),
+            ...(theirs ? theirs.map((c) => [...c] as [number, number, number]) : pasted.map((f) => cornerAverage(next, f))),
           ],
         }
       }

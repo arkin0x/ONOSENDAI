@@ -41,7 +41,7 @@ import { useReducedMotion } from '../hooks/useReducedMotion'
 import { useCyberspace } from '../store/useCyberspace'
 import { CUBE_EDGES, ShardMesh } from './ShardMesh'
 import { TapTarget } from './TapTarget'
-import { WorldLabel } from './WorldLabel'
+import { LABEL_PRIORITY, WorldLabel } from './WorldLabel'
 import { CUBE_REACH, MARK_RECEDE_FLOOR, recedeShare } from '../lib/markerSize'
 import { headlampUniforms } from './headlamp'
 
@@ -192,7 +192,7 @@ export function ItemModelMark({ id, model, animation, at, region, axes, minPx, o
       frame.current.updateWorldMatrix(true, false)
       for (let i = 0; i < planes.local.length; i++) planes.world[i].copy(planes.local[i]).applyMatrix4(frame.current.matrixWorld)
     }
-  })
+  }, LABEL_PRIORITY)
 
   return (
     <>
@@ -206,7 +206,7 @@ export function ItemModelMark({ id, model, animation, at, region, axes, minPx, o
           model draws can be far larger than the cube was, so the box takes
           taps as a shard's does. */}
       {onTap && <group position={at}><TapTarget measure={frame} onTap={onTap} /></group>}
-      {label && <WorldLabel text={label.text} color={label.color} at={at} align="center" px={13} sub={label.sub} subColor={label.subColor} opacity={opacity} clear={clear} recede />}
+      {label && <WorldLabel text={label.text} color={label.color} at={at} align="center" px={13} sub={label.sub} subColor={label.subColor} opacity={opacity} clear={clear} recede="name" />}
     </>
   )
 }

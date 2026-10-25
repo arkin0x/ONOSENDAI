@@ -89,9 +89,24 @@ export function recedeShare(depth: number, reach: number, floor: number): number
 export const MARK_RECEDE_FLOOR = 0.4
 
 /**
- * The least share a mark's label recedes to: higher than the mark's, because
- * text far smaller than this stops being text. The 13 px name stands about
- * 8 px far off on a desktop and about 5.6 px on a phone (WorldLabel
- * labelShrink).
+ * How much of a mark's label is shown at `depth`, from 1 to 0: whole out to
+ * `from` times the reach, gone at `to` times it, eased between (smoothstep).
+ *
+ * A label never shrinks with its mark: text much under its size stops being
+ * text, and a hall of hidden things became a hall of smudges (review of
+ * #518). It holds its size while it is shown and fades out far off instead,
+ * the credit line first (CREDIT_FADE), then the name (NAME_FADE), so a far
+ * chest is its small mark alone and the words are one step closer.
  */
-export const LABEL_RECEDE_FLOOR = 0.6
+export function fadeShare(depth: number, reach: number, from: number, to: number): number {
+  if (!(reach > 0) || !(depth > reach * from)) return 1
+  if (depth >= reach * to) return 0
+  const t = (depth - reach * from) / (reach * (to - from))
+  return 1 - t * t * (3 - 2 * t)
+}
+
+/** A credit line ("who left it") fades between these multiples of the reach: gone past twice it. */
+export const CREDIT_FADE = [1.5, 2] as const
+
+/** A mark's name fades between these multiples of the reach: gone past three times it, after its credit. */
+export const NAME_FADE = [2.25, 3] as const

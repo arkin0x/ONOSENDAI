@@ -15,9 +15,9 @@
 import { useMemo, useRef } from 'react'
 import { Text } from '@react-three/drei'
 import { useFrame, type RootState } from '@react-three/fiber'
-import { Group, Quaternion, Vector3 } from 'three'
+import { Group, Quaternion, Vector3, type Object3D } from 'three'
 import { WORLD_FONT } from '../lib/font'
-import { LABEL_RECEDE_FLOOR, MARK_RECEDE_FLOOR, labelLiftPx, projScaleOf, recedeShare } from '../lib/markerSize'
+import { CREDIT_FADE, MARK_RECEDE_FLOOR, NAME_FADE, fadeShare, labelLiftPx, projScaleOf, recedeShare } from '../lib/markerSize'
 import { bearingDepth } from '../lib/bearing'
 import { headlampUniforms } from './headlamp'
 
@@ -26,7 +26,20 @@ import { headlampUniforms } from './headlamp'
  * camera rig (0) and Cyberspace TV's camera (0.5) have moved it, before the
  * composer draws (1). Any earlier and the label answers last frame's camera.
  */
-const LABEL_PRIORITY = 0.9
+export const LABEL_PRIORITY = 0.9
+
+/** A troika text mesh as far as a fade needs it: drei's Text forwards its ref to one. */
+type FadingText = Object3D & { fillOpacity: number; outlineOpacity: number }
+
+/** Show a line at `alpha` of its own opacity, its outline with it; hidden outright at 0, so it costs no draw. */
+function fadeTo(t: FadingText | null, base: number, alpha: number): void {
+  if (!t) return
+  const shown = alpha > 0
+  if (t.visible !== shown) t.visible = shown
+  if (!shown) return
+  if (t.fillOpacity !== base * alpha) t.fillOpacity = base * alpha
+  if (t.outlineOpacity !== alpha) t.outlineOpacity = alpha
+}
 
 /**
  * How much smaller labels are drawn on a narrow screen.
@@ -111,22 +124,30 @@ interface Props {
    */
   fromCamera?: [number, number, number]
   /**
-   * Recede with distance, as a hidden item's mark does (lib/markerSize.ts
-   * recedeShare): full size out to the headlamp's reach, then smaller with
-   * depth down to LABEL_RECEDE_FLOOR. A `clear` marker's floor recedes by the
-   * mark's own rule, so the label still sits just above it. Off, the label
-   * holds its pixel height at any depth, as every other label does.
+   * The label of a hidden item's mark, which recedes with distance past the
+   * headlamp's reach (lib/markerSize.ts recedeShare):
+   *   - 'name': the item's name, held at its size and faded out far off
+   *     (NAME_FADE), its `sub` credit line faded first (CREDIT_FADE);
+   *   - 'credit': a label that is only a credit line, faded as one;
+   *   - 'mark': a glyph that is part of the mark (the coin's ₿), shrunk at
+   *     the mark's own rate so it stays inside it.
+   * Either way its pixel offset from the anchor and a `clear` marker's floor
+   * recede with the mark, so the label keeps its place by the mark. Absent,
+   * the label holds its pixel height at any depth, as every other label does.
    */
-  recede?: boolean
+  recede?: 'name' | 'credit' | 'mark'
 }
 
 export function WorldLabel({
   text, color, at, follow, offset = [0, 0, 0], offsetPx = [0, 0], px = 14, opacity = 1, align = 'left',
-  small, smallScale = 0.68, sub, subScale = 0.72, subColor, subOpacity = 0.7, clear, fromCamera, recede = false,
+  small, smallScale = 0.68, sub, subScale = 0.72, subColor, subOpacity = 0.7, clear, fromCamera, recede,
 }: Props): JSX.Element {
   const group = useRef<Group>(null)
   const inner = useRef<Group>(null)
   const facing = useRef<Group>(null)
+  const line = useRef<FadingText>(null)
+  const second = useRef<FadingText>(null)
+  const caption = useRef<FadingText>(null)
   const scratch = useMemo(() => new Vector3(), [])
   const parentTurn = useMemo(() => new Quaternion(), [])
 
@@ -144,12 +165,24 @@ export function WorldLabel({
     const depth = Math.max(0.001, fromCamera ? bearingDepth(fromCamera, g.position) : cam.position.distanceTo(g.getWorldPosition(scratch)))
     const projScale = projScaleOf(state.size.height, cam.fov)
     const reach = headlampUniforms.uHeadlampReach.value
-    const unitPx = px * labelShrink(state.size.width) * (recede ? recedeShare(depth, reach, LABEL_RECEDE_FLOOR) : 1)
+    const mark = recede ? recedeShare(depth, reach, MARK_RECEDE_FLOOR) : 1
+    const unitPx = px * labelShrink(state.size.width) * (recede === 'mark' ? mark : 1)
     g.scale.setScalar((unitPx * depth) / projScale)
+    // A pixel offset is a place by the mark, so it recedes with the mark. A
+    // 'mark' label's units already shrink at that rate.
+    const near = recede && recede !== 'mark' ? mark : 1
     // Lifted clear of its marker: one local unit is `unitPx` pixels.
-    if (clear && inner.current) {
-      const minPx = clear.minPx * (recede ? recedeShare(depth, reach, MARK_RECEDE_FLOOR) : 1)
-      inner.current.position.y = labelLiftPx(clear.trueSide, minPx, depth, projScale, unitPx) / unitPx + offsetPx[1] / px
+    if (inner.current && clear) {
+      inner.current.position.y = labelLiftPx(clear.trueSide, clear.minPx * mark, depth, projScale, unitPx) / unitPx + (offsetPx[1] / px) * near
+    } else if (inner.current && near !== 1) {
+      inner.current.position.set((offsetPx[0] / px) * near, (offsetPx[1] / px) * near, 0)
+    }
+    // Far off a name fades, its credit line first (lib/markerSize.ts fadeShare).
+    if (recede === 'name' || recede === 'credit') {
+      const own = recede === 'name' ? fadeShare(depth, reach, NAME_FADE[0], NAME_FADE[1]) : fadeShare(depth, reach, CREDIT_FADE[0], CREDIT_FADE[1])
+      fadeTo(line.current, opacity, own)
+      fadeTo(second.current, opacity, own)
+      fadeTo(caption.current, opacity * subOpacity, Math.min(own, fadeShare(depth, reach, CREDIT_FADE[0], CREDIT_FADE[1])))
     }
     // Face the camera exactly as it is drawn: the camera's own turn, undone
     // by whatever turns the label's parents. drei's Billboard did this at
@@ -173,6 +206,7 @@ export function WorldLabel({
       <group ref={facing}>
        <group ref={inner} position={nudge}>
         <Text
+          ref={line as never}
           font={WORLD_FONT}
           fontSize={1}
           anchorX={small === undefined ? align : 'right'}
@@ -188,6 +222,7 @@ export function WorldLabel({
         </Text>
         {small !== undefined && (
           <Text
+            ref={second as never}
             font={WORLD_FONT}
             fontSize={smallScale}
             anchorX="left"
@@ -203,6 +238,7 @@ export function WorldLabel({
         )}
         {sub !== undefined && (
           <Text
+            ref={caption as never}
             font={WORLD_FONT}
             fontSize={subScale}
             anchorX={align === 'center' ? 'center' : 'left'}

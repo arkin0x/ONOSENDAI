@@ -14,10 +14,19 @@
  * cyberspace relay, so the fetch asks both sets. A reference that found
  * nothing is not remembered: the next draw asks again, since a relay that was
  * slow a moment ago may answer now.
+ *
+ * In authoring views only, your own objects are answered from your workshop
+ * first (fetchOwnFirst, OwnPartsContext; the source is wired by
+ * store/localObjects.ts): a kit imported with PUBLISH off places pieces no
+ * relay has ("we never published the parts and i dont want to", arkinox
+ * 2026-10-25), and a piece you are editing is drawn on the bench as you left
+ * it. An edit of one says so (localObjectsChanged), and every bench draw that
+ * placed it, at any depth, asks again. Everywhere in the world the relays
+ * alone answer, as before, so you see there what finders see.
  */
 
-import { useEffect, useState } from 'react'
-import { MAX_PART_DEPTH, parseAddress, refKey, resolveParts, type Placed } from 'sno-core/parts'
+import { createContext, useContext, useEffect, useRef, useState } from 'react'
+import { MAX_PART_DEPTH, parseAddress, refKey, type Placed } from 'sno-core/parts'
 import { MAX_UNIT, fromPayload, type Ref, type ShardModel } from 'sno-core/shards'
 import { GENERAL_RELAYS } from './contacts'
 import { queryAny, relaySet } from './relay'
@@ -28,7 +37,69 @@ const FETCH_WAIT_MS = 5000
 
 const cache = new Map<string, Promise<unknown>>()
 
-/** The payload a reference names, parsed, or null. The newest version of an `a`; the one event of an `e`. */
+/**
+ * Your own object at an address, from this browser rather than a relay: its
+ * payload, or undefined when the address is not one of yours held here.
+ */
+export type LocalObjects = (address: { kind: number; pubkey: string; d: string }) => unknown | undefined
+let local: LocalObjects | null = null
+const localListeners = new Set<(keys: ReadonlySet<string>) => void>()
+
+/** Answer your own references from here (store/localObjects.ts), or stop (null). */
+export function setLocalObjects(source: LocalObjects | null): void {
+  local = source
+}
+
+/** The payload a local answer gives for a reference, or undefined. Only an `a`: an `e` names one signed event. */
+function localPayload(ref: Ref): unknown | undefined {
+  if (!local || ref[0] !== 'a') return undefined
+  const a = parseAddress(ref[1])
+  return a && a.kind === SNO_KIND ? local(a) : undefined
+}
+
+/**
+ * Some of your own objects changed here, by reference key (refKey): every
+ * authoring draw that placed one asks again. What the relays hold for them is
+ * not touched: an edit here changes nothing there.
+ */
+export function localObjectsChanged(keys: ReadonlySet<string>): void {
+  if (keys.size === 0) return
+  for (const l of localListeners) l(keys)
+}
+
+/** Hear of localObjectsChanged; the return stops it. */
+export function onLocalObjects(listener: (keys: ReadonlySet<string>) => void): () => void {
+  localListeners.add(listener)
+  return () => { localListeners.delete(listener) }
+}
+
+/** Every reference a resolved tree touched, found or not, at any depth. */
+export function touchedKeys(placed: readonly Placed[], into: Set<string> = new Set()): Set<string> {
+  for (const p of placed) { into.add(refKey(p.ref)); touchedKeys(p.children, into) }
+  return into
+}
+
+/**
+ * Your own object from your workshop, else what the relays hold (fetchRef).
+ * For authoring views only: the bench (through OwnPartsContext), the
+ * workshop's pictures of your shards. The world never asks this way: what is
+ * hidden there is drawn from what everyone else can fetch, so you see what
+ * finders see (arkinox, 2026-10-25: "inline SNO fixes this once it ships
+ * because then everyone sees the same data").
+ */
+export function fetchOwnFirst(ref: Ref): Promise<unknown> {
+  const mine = localPayload(ref)
+  return mine !== undefined ? Promise.resolve(mine) : fetchRef(ref)
+}
+
+/**
+ * Whether the draws under it answer your own references from your workshop
+ * first (fetchOwnFirst). False, the default, everywhere in the world; the
+ * bench provides true inside its own canvas.
+ */
+export const OwnPartsContext = createContext(false)
+
+/** The payload a reference names, parsed, or null. The newest version of an `a`; the one event of an `e`. From the relays only. */
 export function fetchRef(ref: Ref): Promise<unknown> {
   const key = refKey(ref)
   const held = cache.get(key)
@@ -79,16 +150,38 @@ export type Resolved = Pick<Placed, 'model' | 'missing' | 'children'>
  * stays up while a new one is fetched, so an edit never flashes them away.
  */
 export function useResolved(shard: ShardModel | null): Map<string, Resolved> {
+  const own = useContext(OwnPartsContext)
   const [byRef, setByRef] = useState<Map<string, Resolved>>(() => new Map())
+  // On the bench only: bumped when one of your own objects this draw placed,
+  // at any depth, is edited here, or when anything of yours is edited while a
+  // resolve is still waiting (its deeper references are not known yet).
+  const [again, setAgain] = useState(0)
+  const touched = useRef<Set<string>>(new Set())
+  const pending = useRef(false)
   const refs = shard?.refs ?? []
   const key = refs.map(refKey).join('|')
+  const listens = own && refs.length > 0
   useEffect(() => {
-    if (!shard || refs.length === 0) { setByRef((m) => (m.size ? new Map() : m)); return }
+    if (!listens) return
+    return onLocalObjects((changed) => {
+      if (pending.current) { setAgain((n) => n + 1); return }
+      for (const k of changed) if (touched.current.has(k)) { setAgain((n) => n + 1); return }
+    })
+  }, [listens])
+  useEffect(() => {
+    touched.current = new Set(refs.map(refKey))
+    if (!shard || refs.length === 0) { pending.current = false; setByRef((m) => (m.size ? new Map() : m)); return }
     let live = true
+    pending.current = true
     // One placement per reference is enough: what a reference resolves to does not depend on where it stands.
     const probe: ShardModel = { ...shard, parts: refs.map((_, i) => ({ ref: i, at: [0, 0, 0], turn: [0, 0, 0], step: 0 })) }
-    void resolveParts(probe, fetchRef).then((placed) => {
+    // Shared, so a part whose payload did not change keeps its model object
+    // across an edit of its sibling, and its mesh keeps its geometry: an
+    // OPACITY drag on one piece must not rebuild everything placing it.
+    void resolvePartsShared(probe, own ? fetchOwnFirst : fetchRef).then((placed) => {
       if (!live) return
+      pending.current = false
+      touched.current = touchedKeys(placed, new Set(refs.map(refKey)))
       const m = new Map<string, Resolved>()
       placed.forEach((p) => m.set(refKey(p.ref), { model: p.model, missing: p.missing, children: p.children }))
       setByRef(m)
@@ -96,7 +189,7 @@ export function useResolved(shard: ShardModel | null): Map<string, Resolved> {
     return () => { live = false }
     // The references, not the shard: a placement moving needs no new fetch.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [key])
+  }, [key, again, own])
   return byRef
 }
 

@@ -39,6 +39,8 @@ export interface ThumbJob {
   keep?: boolean
   /** How many times the stage stalled on it (`stall`). */
   tries?: number
+  /** Drawn with your own pieces from your workshop (lib/parts.ts fetchOwnFirst): a picture in an authoring view. */
+  own?: boolean
 }
 
 export interface ThumbStore {
@@ -55,7 +57,7 @@ export interface ThumbStore {
   /** Ask for a picture now; nothing happens if it is drawn or already waiting. Not kept on the device. */
   request: (key: string, shard: ShardModel) => void
   /** A row in view wants its picture: from memory, else the device, else the queue. Counted; undo with `unwant`. */
-  want: (key: string, shard: ShardModel) => void
+  want: (key: string, shard: ShardModel, own?: boolean) => void
   /** A row left view or went away: out of the queue if nothing else wants it and it is not being drawn. */
   unwant: (key: string) => void
   /** The stage drew it. */
@@ -124,7 +126,7 @@ export const useThumbs = create<ThumbStore>((set, get) => {
 
     request: (key, shard) => enqueue({ key, shard }),
 
-    want: (key, shard) => {
+    want: (key, shard, own) => {
       wants.set(key, (wants.get(key) ?? 0) + 1)
       const { urls, queue, failed, disabled } = get()
       if (disabled || urls[key] || failed[key] || reading.has(key) || queue.some((j) => j.key === key)) return
@@ -133,7 +135,7 @@ export const useThumbs = create<ThumbStore>((set, get) => {
         reading.delete(key)
         if (url) { remember(key, url); return }
         // Scrolled past while it was read: nothing to draw.
-        if ((wants.get(key) ?? 0) > 0) enqueue({ key, shard, keep: true })
+        if ((wants.get(key) ?? 0) > 0) enqueue({ key, shard, keep: true, ...(own ? { own } : {}) })
       })
     },
 

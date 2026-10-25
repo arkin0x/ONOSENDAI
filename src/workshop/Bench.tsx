@@ -41,6 +41,7 @@ import { OVERLAY_ORDER } from '../scene/shardFaces'
 import { ShardLights } from '../scene/shardLight'
 import { nextSelection, ownAddress, useWorkshop, type Tool } from '../store/useWorkshop'
 import { partMatrix } from 'sno-core/parts'
+import { OwnPartsContext } from '../lib/parts'
 import { useCyberspace } from '../store/useCyberspace'
 import { Hold, noteGesture, tapSlop } from './deadZone'
 import { HandleDots, dotCapacity } from './handleDots'
@@ -774,6 +775,8 @@ function BenchImpl(): JSX.Element {
       }}
       style={{ background: BG }}
     >
+      {/* Your own pieces from your workshop, published or not: the bench is where they are made (lib/parts.ts). */}
+      <OwnPartsContext.Provider value>
       {/* A key light high and to one side, a fill from behind, over a strong
           ambient: faces read by their tilt yet stay near the world's full
           color, and the darker backs (ShardMesh lit) show through any hole.
@@ -802,6 +805,7 @@ function BenchImpl(): JSX.Element {
       <PickLoop />
       <FaceHighlight />
       <Handles />
+      </OwnPartsContext.Provider>
     </Canvas>
   )
 }

@@ -45,6 +45,7 @@ import { useUiHints } from '../store/useUiHints'
 import { noCallout, useRepeatable } from '../hooks/useRepeatable'
 import { ChainStatusStrip, useChainStatus } from './ChainStatus'
 import { useWalk } from '../store/useWalk'
+import { useCover } from '../hooks/useCover'
 
 /**
  * arkinox's wording, kept exactly as he wrote it, bullet shapes and blank
@@ -62,6 +63,10 @@ export const GO_LIVE_BODY = [
 ].join('\n')
 
 export function TouchControls(): JSX.Element {
+  // The pad and the block under it cover the scene from below: BUILD frames
+  // the cursor above them (hooks/useCover).
+  const padRef = useCover('bottom')
+  const opsRef = useCover('bottom')
   const proof = useCyberspace((s) => s.proof)
   const position = useCyberspace((s) => s.position)
   const cursor = useCyberspace((s) => s.cursor)
@@ -160,7 +165,7 @@ export function TouchControls(): JSX.Element {
 
   return (
     <>
-      <div className={`touchpad touchpad--mode-${mode}${atHead ? '' : ' touchpad--scale'}${home && chainStatus ? ' is-lifted' : ''}`} role="group" aria-label={walking ? 'Walk and change scale' : 'Move cursor and change scale'}>
+      <div ref={padRef} className={`touchpad touchpad--mode-${mode}${atHead ? '' : ' touchpad--scale'}${home && chainStatus ? ' is-lifted' : ''}`} role="group" aria-label={walking ? 'Walk and change scale' : 'Move cursor and change scale'}>
         {/* The purple cube: the scale key taken to its end, 2^84, in one press.
             It changes the scale and nothing else, so whatever you are looking
             at stays what you are looking at, only seen from the top of the
@@ -238,7 +243,7 @@ export function TouchControls(): JSX.Element {
         >2^{scaleExp}</button>
       </div>
 
-      {(home || viewing) && <div className={`touchops touchops--mode-${mode}${chainStatus ? ' touchops--status' : ''}`}>
+      {(home || viewing) && <div ref={opsRef} className={`touchops touchops--mode-${mode}${chainStatus ? ' touchops--status' : ''}`}>
         <button
           className="touchops__cancel"
           title={walking

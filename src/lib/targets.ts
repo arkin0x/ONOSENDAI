@@ -58,6 +58,15 @@ export interface TargetScreen {
 export const targetScreens: Record<string, TargetScreen> = {}
 
 /**
+ * Where the camera's line of sight crosses the screen, in normalised device
+ * coordinates, written with targetScreens: (0, 0) unless BUILD has shifted
+ * the picture to frame the cursor past the HUD (lib/coverBand.ts). A marker
+ * off screen points from here, the middle of the picture, not from the
+ * middle of the window.
+ */
+export const viewAxis = { x: 0, y: 0 }
+
+/**
  * The avatars of other people drawn in the scene right now, by pubkey: the
  * group that holds the shape, so the projector can measure what is actually
  * drawn (arkinox, 2026-10-11). Put here by the scene while one is mounted and

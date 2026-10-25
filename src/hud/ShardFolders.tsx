@@ -13,17 +13,23 @@
  *
  * A folder's head folds it (the fold is kept), and holds RENAME, NEW FOLDER
  * inside it, MOVE and DELETE. Deleting never touches a shard: what was in
- * the folder moves up to its parent.
+ * the folder moves up to its parent. The one exception is the workshop's own
+ * list, which hands in `deleteContents`: there DELETE's confirmation has one
+ * switch, off each time it opens, that deletes the folder's contents too,
+ * every shard and folder under it at any depth, in one step (arkinox,
+ * 2026-10-25: "i need an option to actually delete a folder and everything
+ * in it"). The pickers never get it.
  */
 
 import { Fragment, useEffect, useMemo, useRef, useState, type DragEvent } from 'react'
 import { createPortal } from 'react-dom'
 import { ChevronDown, ChevronRight, Folder as FolderIcon, FolderInput, FolderPlus, Pencil, X } from 'lucide-react'
-import { buildTree, canonical, flatFolders, newestFirst, parentOf, folderOf, isWithin, pathOf, type FolderNode, type FolderTree } from '../lib/shardFolders'
+import { buildTree, canonical, contentsOf, flatFolders, newestFirst, parentOf, folderOf, isWithin, pathOf, type FolderNode, type FolderTree } from '../lib/shardFolders'
 import { useShardFolders } from '../store/useShardFolders'
 import { useCyberspace } from '../store/useCyberspace'
 import { useEscape } from '../hooks/useEscape'
 import { ConfirmModal } from './ConfirmModal'
+import { Field, Switch } from './ui/Switch'
 
 /** The drag payload's type, so a file dragged onto the workshop is never read as a shard. */
 const DRAG_TYPE = 'application/x-onosendai-folder-item'
@@ -48,6 +54,19 @@ interface Props<T> {
   nameOf: (item: T) => string
   /** The caller's own row, an <li>; put kit.drag on it and kit.tool inside it. */
   row: (item: T, kit: RowKit) => JSX.Element
+  /**
+   * Where the list's own shards can be deleted (the workshop's MENU, and
+   * nowhere else): a folder's DELETE then offers to delete what is in it too.
+   */
+  deleteContents?: DeleteContents
+}
+
+/** How a list deletes its shards, for DELETE CONTENTS. Local only: nothing is retracted. */
+export interface DeleteContents {
+  /** Delete these shards (by ref) in one step; resolves true once that is saved, false when the write failed. */
+  remove: (refs: string[]) => Promise<boolean>
+  /** How many of these are published (the publish ledger), for the note that they stay on relays. */
+  published: (refs: readonly string[]) => number
 }
 
 /** A workshop model's ref and name, for the lists of models (stable, so the tree is not rebuilt every render). */
@@ -144,7 +163,7 @@ export function moveTo(moving: Moving, to: string | null): void {
   else useShardFolders.getState().moveFolder(moving.id, to)
 }
 
-export function ShardFolders<T>({ items, refOf, nameOf, row }: Props<T>): JSX.Element {
+export function ShardFolders<T>({ items, refOf, nameOf, row, deleteContents }: Props<T>): JSX.Element {
   const me = useCyberspace((s) => s.identity.pubkey)
   const tree = useShardFolders((s) => s.tree)
   useEffect(() => {
@@ -259,7 +278,7 @@ export function ShardFolders<T>({ items, refOf, nameOf, row }: Props<T>): JSX.El
               <button className="sfold__mini" title="Move this folder" aria-label={`Move ${folder.name}`} onClick={() => setMoving({ kind: 'folder', id: folder.id, label: folder.name })}><FolderInput size={13} strokeWidth={2.25} aria-hidden /></button>
               <button
                 className="sfold__mini sfold__mini--danger"
-                title="Delete folder; what is in it moves up"
+                title={deleteContents ? 'Delete folder' : 'Delete folder; what is in it moves up'}
                 aria-label={`Delete ${folder.name}`}
                 onClick={() => { if (node.count === 0 && node.folders.length === 0) f().deleteFolder(folder.id); else setDeleting(folder.id) }}
               ><X size={14} strokeWidth={2.25} aria-hidden /></button>
@@ -278,6 +297,7 @@ export function ShardFolders<T>({ items, refOf, nameOf, row }: Props<T>): JSX.El
 
   const asked = deleting ? tree.folders[deleting] : undefined
   const askedUp = asked ? (pathOf(tree, asked.parent).pop() ?? 'the top') : ''
+  const askedNode = asked && deleteContents ? findNode(built.folders, asked.id) : undefined
 
   return (
     <>
@@ -307,7 +327,17 @@ export function ShardFolders<T>({ items, refOf, nameOf, row }: Props<T>): JSX.El
           onClose={() => setMoving(null)}
         />
       )}
-      {asked && (
+      {asked && askedNode && deleteContents && (
+        <DeleteFolder
+          key={asked.id}
+          node={askedNode}
+          up={askedUp === 'the top' ? 'the top' : `"${askedUp}"`}
+          refOf={refOf}
+          deleteContents={deleteContents}
+          onDone={() => setDeleting(null)}
+        />
+      )}
+      {asked && !askedNode && (
         <ConfirmModal
           title={`Delete folder "${asked.name}"?`}
           body={<>No shard is deleted. What is in it moves up to {askedUp === 'the top' ? 'the top' : `"${askedUp}"`}.</>}
@@ -317,6 +347,83 @@ export function ShardFolders<T>({ items, refOf, nameOf, row }: Props<T>): JSX.El
         />
       )}
     </>
+  )
+}
+
+/** A folder drawn in the list, by id. */
+function findNode<T>(nodes: readonly FolderNode<T>[], id: string): FolderNode<T> | undefined {
+  for (const n of nodes) {
+    if (n.folder.id === id) return n
+    const under = findNode(n.folders, id)
+    if (under) return under
+  }
+  return undefined
+}
+
+const counted = (n: number, one: string): string => `${n} ${one}${n === 1 ? '' : 's'}`
+
+/** What DELETE's confirmation says, switch off or on. Pure, so a test can read it. */
+export function deleteFolderCopy(all: boolean, up: string, shards: number, folders: number, published: number): { label: string; notes: string[]; confirmLabel: string; danger: boolean } {
+  if (!all) return { label: `Preserve contents and expand to ${up}.`, notes: [], confirmLabel: 'DELETE FOLDER', danger: false }
+  const notes = ['This cannot be undone.']
+  if (published > 0) notes.push(published === 1 ? '1 is published: it stays on relays; RETRACT it separately.' : `${published} are published: they stay on relays; RETRACT them separately.`)
+  return { label: `Delete contents: ${counted(shards, 'shard')} and ${counted(folders, 'folder')}`, notes, confirmLabel: 'DELETE FOLDER AND CONTENTS', danger: true }
+}
+
+/**
+ * DELETE's yes. Off: the folder goes and what is in it moves up. On: the
+ * shards in it at any depth go in one step, and only once that is saved do
+ * the folder and every folder under it go, in one folder op. Shards and
+ * folders live in two stores; were the folders taken first and the shard
+ * write then failed with the tab closed before a retry, the shards would come
+ * back on reload with their folders gone, hundreds loose at the top (review
+ * of PR 509). A failed write leaves the folders, empty in this tab, and the
+ * storage warning says why. Nothing is retracted or published. Resolves
+ * whether the folders went.
+ */
+export async function deleteFolderNow<T>(node: FolderNode<T>, all: boolean, refOf: (item: T) => string, deleteContents: DeleteContents): Promise<boolean> {
+  if (!all) { useShardFolders.getState().deleteFolder(node.folder.id); return true }
+  let saved = false
+  try { saved = await deleteContents.remove(contentsOf(node).items.map(refOf)) } catch { saved = false }
+  if (saved) useShardFolders.getState().purgeFolder(node.folder.id)
+  return saved
+}
+
+/**
+ * DELETE on a folder of the workshop's own list: one confirmation with one
+ * switch, off whenever it opens (it is remounted for each ask). Off, the
+ * folder goes and what is in it moves up, as everywhere. On, the folder and
+ * everything in it at any depth go (deleteFolderNow), and the button turns
+ * red. The switch is never the focus, so it takes a deliberate tap. Wording
+ * as arkinox gave it, 2026-10-25, his dash a colon.
+ */
+export function DeleteFolder<T>({ node, up, refOf, deleteContents, onDone }: {
+  node: FolderNode<T>
+  /** Where the contents move up to: a quoted folder name, or the top. */
+  up: string
+  refOf: (item: T) => string
+  deleteContents: DeleteContents
+  onDone: () => void
+}): JSX.Element {
+  const [all, setAll] = useState(false)
+  const { items, folders } = useMemo(() => contentsOf(node), [node])
+  const published = useMemo(() => (all ? deleteContents.published(items.map(refOf)) : 0), [all, items, refOf, deleteContents])
+  const copy = deleteFolderCopy(all, up, items.length, folders, published)
+  const id = `sfold-delete-contents-${node.folder.id}`
+  return (
+    <ConfirmModal
+      title={`Delete folder "${node.folder.name}"?`}
+      cardClassName="sfold__confirm"
+      body={
+        <Field id={id} label={copy.label} hint={copy.notes.length ? <>{copy.notes.map((n) => <span key={n} className="modal__line">{n}</span>)}</> : undefined}>
+          <Switch id={id} checked={all} onCheckedChange={setAll} aria-label="Delete contents" />
+        </Field>
+      }
+      confirmLabel={copy.confirmLabel}
+      danger={copy.danger}
+      onConfirm={() => { void deleteFolderNow(node, all, refOf, deleteContents); onDone() }}
+      onCancel={onDone}
+    />
   )
 }
 

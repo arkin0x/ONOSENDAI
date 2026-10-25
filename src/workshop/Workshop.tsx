@@ -58,7 +58,7 @@ import { Bench } from './Bench'
 import { benchPose, nudgeFor, nudgeLabel, orbitBy, planeAfter, requestView, useBenchView, type NudgeName } from './benchAxes'
 import { stackedSpots } from '../lib/weld'
 import { ObjectPicker } from './ObjectPicker'
-import { ShardFolders, modelEditedAt, modelName, modelRef, useNewestFirst } from '../hud/ShardFolders'
+import { ShardFolders, modelEditedAt, modelName, modelRef, useNewestFirst, type DeleteContents } from '../hud/ShardFolders'
 import { useEscape } from '../hooks/useEscape'
 import { ShardThumb } from '../hud/ShardThumb'
 
@@ -66,6 +66,20 @@ const TOOLS: Tool[] = ['view', 'stamp', 'add', 'select', 'face']
 const TOOL_ICON: Record<Tool, LucideIcon> = { view: Eye, stamp: Stamp, add: Plus, select: MousePointer2, face: Triangle }
 
 const TOAST_MS = 4000
+
+/**
+ * A folder's DELETE CONTENTS in the MENU's list (hud/ShardFolders): the
+ * shards go in one step and one storage write (useWorkshop removeMany), the
+ * folders only once that write is saved (ShardFolders deleteFolderNow), and
+ * the ledger is only read, for the note that published ones stay on relays.
+ */
+const DELETE_CONTENTS: DeleteContents = {
+  remove: (refs) => useWorkshop.getState().removeMany(refs),
+  published: (refs) => {
+    const ledger = usePublished.getState().ledger
+    return refs.filter((r) => r in ledger).length
+  },
+}
 
 /** One line under the tool row. */
 const TOOL_HELP: Partial<Record<Tool, string>> = {
@@ -892,7 +906,7 @@ export function Workshop(): JSX.Element | null {
           <ul className="workshop__list">
             {/* Last edited first: updatedAt moves on every edit and never on opening (arkinox, 2026-09-26).
                 A deploy counts as an edit here, inside its folder (arkinox, 2026-10-23). */}
-            <ShardFolders items={byRecent} refOf={modelRef} nameOf={modelName} row={(s, f) => (
+            <ShardFolders items={byRecent} refOf={modelRef} nameOf={modelName} deleteContents={DELETE_CONTENTS} row={(s, f) => (
               <li key={s.id} className={s.id === shard.id ? 'is-current' : ''} {...f.drag}>
                 <button className="workshop__pick" onClick={() => w().select(s.id)}>
                   <ShardThumb shard={s} own />

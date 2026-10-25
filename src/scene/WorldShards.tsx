@@ -8,7 +8,8 @@
  * the honest picture. Culled past the same reach as Earth and the spawn mark.
  */
 
-import { useCallback, useMemo, useRef } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useSyncExternalStore } from 'react'
+import { followsVersion, onFollows, readFollows, trustedPlacement } from '../lib/trust'
 import { useFrame } from '@react-three/fiber'
 import type { Group, Material, Object3D } from 'three'
 import { GRID_RADIUS, itemCentre, type Position, type ViewAxes } from '../lib/space'
@@ -94,6 +95,10 @@ interface Props {
 export interface PlacedShardDraw {
   key: string
   shard: ShardModel
+  /** Whose object it draws (the object's author, else the bag's). */
+  author?: string
+  /** Who put it there: the bag's signer. The scene's budget trusts a shard only when both are trusted (lib/trust.ts). */
+  container?: string
   centre: [number, number, number]
   scale: number
   clip: ReturnType<typeof regionBox>
@@ -111,7 +116,7 @@ export interface PlacedShardDraw {
  * its shape facing the old way (pose.ts placedPose).
  */
 export function placeShard(
-  w: Pick<WorldItem, 'key' | 'at' | 'height' | 'plane'> & { shard?: ShardModel },
+  w: Pick<WorldItem, 'key' | 'at' | 'height' | 'plane'> & Partial<Pick<WorldItem, 'author'>> & { shard?: ShardModel },
   origin: Position, scaleExp: number, axes: ViewAxes,
 ): PlacedShardDraw {
   const shard = w.shard!
@@ -132,7 +137,8 @@ export function placeShard(
   // Dataspace only: cyberspace has no planet to stand on. Either way in
   // the view frame, so the shape turns with its place.
   const pose = placedPose(axes, shard.up && w.plane === 0 ? { at: w.at, spin: shard.spin } : undefined)
-  return { key: w.key, shard, centre, scale, clip, pose }
+  const author = shard.author ?? w.author
+  return { key: w.key, shard, ...(author ? { author } : {}), ...(w.author ? { container: w.author } : {}), centre, scale, clip, pose }
 }
 
 /**
@@ -141,7 +147,7 @@ export function placeShard(
  * render frame anchored at `anchor`. Cyberspace TV draws its own finds with
  * this (TvFinds).
  */
-export function drawableShards(items: Array<Pick<WorldItem, 'key' | 'type' | 'at' | 'height' | 'plane'> & { shard?: ShardModel }>, anchor: Position, plane: number, scaleExp: number, axes: ViewAxes): PlacedShardDraw[] {
+export function drawableShards(items: Array<Pick<WorldItem, 'key' | 'type' | 'at' | 'height' | 'plane'> & Partial<Pick<WorldItem, 'author'>> & { shard?: ShardModel }>, anchor: Position, plane: number, scaleExp: number, axes: ViewAxes): PlacedShardDraw[] {
   const origin = alignedOrigin(anchor, scaleExp)
   return items
     .filter((w) => w.type === 'shard' && w.shard && w.plane === plane)
@@ -213,6 +219,11 @@ export function WorldShards({ axes }: Props): JSX.Element | null {
   const muted = useMutes((s) => s.muted)
   const births = useCeremony((s) => s.births)
   const moving = useShards((s) => editingId(s.pending))
+  // Whom you follow: the scene's budget trusts them as yours (scene/meshBudget.ts).
+  useSyncExternalStore(onFollows, followsVersion)
+  // Read again for whoever is signed in: a login after this mounted, or another identity.
+  const me = useCyberspace((s) => s.identity.pubkey)
+  useEffect(() => { readFollows() }, [me])
 
   const fresh = useMemo(() => {
     return drawableShards(useShards.getState().worldItems(), anchor, anchorPlane, scaleExp, axes)
@@ -240,6 +251,9 @@ export function WorldShards({ axes }: Props): JSX.Element | null {
 export function PlacedShard({ w, birth, moving = false, tappable = true, drawnRef }: { w: PlacedShardDraw; birth: number | undefined; moving?: boolean; tappable?: boolean; drawnRef?: (g: Group | null) => void }): JSX.Element {
   const drawn = useRef<Group | null>(null)
   const setDrawn = useCallback((g: Group | null) => { drawn.current = g; drawnRef?.(g) }, [drawnRef])
+  // Its placed objects are drawn within the scene's budget, by trust and nearest first (scene/meshBudget.ts).
+  const trusted = trustedPlacement(w.container, w.author)
+  const budget = useMemo(() => ({ key: w.key, trusted, centre: w.centre, scale: w.scale }), [w.key, trusted, w.centre, w.scale])
   // Moving (EDIT): drawn as a ghost is, with ordinary blending, since a world
   // face writes its colour opaque whatever its opacity (ShardMesh TAG_BLEND),
   // and every material's opacity follows the breath each frame.
@@ -251,7 +265,7 @@ export function PlacedShard({ w, birth, moving = false, tappable = true, drawnRe
   return (
     <group position={w.centre}>
       <group ref={setDrawn}>
-        <ShardMesh shard={w.shard} scale={w.scale} birth={birth} world ghost={moving} clip={w.clip} pose={w.pose} />
+        <ShardMesh shard={w.shard} scale={w.scale} birth={birth} world ghost={moving} clip={w.clip} pose={w.pose} budget={budget} />
       </group>
       {/* Not tappable while it moves: the ghost is the one being aimed. */}
       {!moving && tappable && <TapTarget measure={drawn} onTap={() => useShards.getState().selectSecret(w.key)} />}

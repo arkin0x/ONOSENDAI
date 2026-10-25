@@ -70,6 +70,16 @@ export class AvatarLerp {
     this.startedAt = now
   }
 
+  /**
+   * The zoom changed mid-glide by `factor` (2^(old - new) exponents): the
+   * offset is in render cells, so it is the same journey only rescaled by
+   * that much. Cyberspace TV zooms while its avatars move (lib/tv/zoom.ts).
+   */
+  rescale(factor: number): void {
+    if (this.startedAt === null || !Number.isFinite(factor) || factor <= 0) return
+    this.from = [this.from[0] * factor, this.from[1] * factor, this.from[2] * factor]
+  }
+
   /** Stop wherever it is: a cut (another chain, a scrub), not a journey. */
   clear(): void {
     this.from = [0, 0, 0]

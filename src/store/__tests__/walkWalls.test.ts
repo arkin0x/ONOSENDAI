@@ -206,3 +206,78 @@ describe('what WALK resolves is bounded as a whole', () => {
   })
 })
 
+describe('a starved shard fails closed, and no shard takes the whole budget (round-3 review)', () => {
+  const ME = 'a'.repeat(64), THEM = 'b'.repeat(64)
+  const at = (pk: string, d: string): string => `33331:${pk}:${d}`
+  const place = (n: number, spread = 60): ShardModel['parts'] =>
+    Array.from({ length: n }, (_, i) => ({ ref: 0, at: [(i % 100) * spread, 0, Math.floor(i / 100) * spread] as [number, number, number], turn: [0, 0, 0] as [number, number, number], step: 0 }))
+  // The maze: its wall across -Z, carried, placed 3 out, so it needs the budget to stand (and its known box is out there, not around the walker).
+  const maze = (): ShardModel => withConstrain({ ...newShard('Maze'), mode: 'solid', vertices: [], faces: [], author: ME, refs: [['a', at(ME, 'wall')]], parts: [{ ref: 0, at: [0, 0, -360], turn: [0, 0, 0], step: 0 }], objects: { [at(ME, 'wall')]: toPayload(slab('z', -1, 0)) } }, 'off')
+  // Mallory's: four levels of 30 carried under her own key, 810,000 placements unbounded.
+  const level = (pk: string, name: string, next: string | null): Record<string, unknown> => ({
+    ...toPayload({ ...newShard(name), mode: 'solid' }),
+    ...(next ? { refs: [['a', at(pk, next)]], parts: Array.from({ length: 30 }, (_, i) => [0, i, 0, 0, 0, 0, 0, 0]) } : {}),
+  })
+  const hostile = (): ShardModel => ({
+    ...newShard('Hostile'), mode: 'solid', vertices: [], faces: [], author: THEM,
+    refs: [['a', at(THEM, 'b')]], parts: Array.from({ length: 30 }, (_, i) => ({ ref: 0, at: [0, i * 120, 0] as [number, number, number], turn: [0, 0, 0] as [number, number, number], step: 0 })),
+    objects: { [at(THEM, 'b')]: level(THEM, 'b', 'c'), [at(THEM, 'c')]: level(THEM, 'c', 'd'), [at(THEM, 'd')]: level(THEM, 'd', 'e'), [at(THEM, 'e')]: level(THEM, 'e', null) },
+  })
+  // A legitimate floor of 5,000 tiles, five units below the walker.
+  const floor = (): ShardModel => withConstrain({ ...newShard('Floor'), mode: 'solid', vertices: [], faces: [], author: ME, refs: [['a', at(ME, 'tile')]], parts: place(5000), objects: { [at(ME, 'tile')]: toPayload(slab('y', 1, 0, 1)) } }, 'off')
+  const below = { ...AT, y: AT.y - 5n }
+  const settleAll = async (): Promise<void> => { for (let n = 0; n < 30; n++) await new Promise((r) => setTimeout(r, 0)) }
+  const withWorld = async (items: WallItem[], run: () => Promise<void>): Promise<void> => {
+    const world = useShards.getState().worldItems
+    useShards.setState({ worldItems: () => items.map((w) => ({ ...w, type: 'shard' as const })) as unknown as ReturnType<typeof world> })
+    try { await run() } finally { useShards.setState({ worldItems: world }) }
+  }
+  const towardWall = (items: WallItem[]): bigint => stepLimit(AT, 'z', -1, 1n << 10n, items).reach
+
+  it('a hostile shard nearer the walker cannot take the maze wall down, this WALK or the next, or once it is gone', async () => {
+    const h = item(hostile(), { key: 'hostile' })
+    const m = item(maze(), { key: 'maze' })
+    await withWorld([h, m], async () => {
+      warmWalls(1, AT)
+      await settleAll()
+      expect(towardWall([h, m])).toBe(2n)
+      // The next WALK.
+      warmWalls(1, AT)
+      await settleAll()
+      expect(towardWall([h, m])).toBe(2n)
+    })
+    // The hostile shard gone.
+    await withWorld([m], async () => {
+      warmWalls(1, AT)
+      await settleAll()
+      expect(towardWall([m])).toBe(2n)
+    })
+  })
+
+  it('four 5,000-tile floors resolved first leave the maze its share', async () => {
+    const floors = [0, 1, 2, 3].map((i) => item(floor(), { key: `floor-${i}`, at: below }))
+    const m = item(maze(), { key: 'maze' })
+    await withWorld([...floors, m], async () => {
+      warmWalls(1, AT)
+      await settleAll()
+      expect(towardWall([...floors, m])).toBe(2n)
+    })
+  })
+
+  it('when the whole budget is spent before the maze, it fails closed: the walker is still held', async () => {
+    const hs = [0, 1, 2, 3, 4, 5].map((i) => item(hostile(), { key: `hostile-${i}` }))
+    const m = item(maze(), { key: 'maze' })
+    await withWorld([...hs, m], async () => {
+      warmWalls(1, AT)
+      await settleAll()
+      expect(towardWall([...hs, m])).toBeLessThanOrEqual(2n)
+      // Once they are gone, the next WALK builds the maze whole: its own wall again.
+    })
+    await withWorld([m], async () => {
+      warmWalls(1, AT)
+      await settleAll()
+      expect(towardWall([m])).toBe(2n)
+    })
+  })
+})
+

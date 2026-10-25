@@ -14,7 +14,7 @@
  * with an ease-out, jittering less as they land. Decryption made visible.
  */
 
-import { useEffect, useMemo, useRef, type ReactNode } from 'react'
+import { useEffect, useLayoutEffect, useMemo, useRef, type ReactNode } from 'react'
 import { useFrame, type ThreeEvent } from '@react-three/fiber'
 import {
   FrontSide,
@@ -29,9 +29,10 @@ import {
   type Plane,
 } from 'three'
 import { easeOutCubic, hash01, scrambleOffset, seedOf, SHARD_DECODE_MS } from '../lib/decode'
-import { MAX_UNIT, expandFaceColors, flatten, type Part, type ShardModel } from 'sno-core/shards'
+import { MAX_UNIT, expandFaceColors, flatten, toRender, type Part, type ShardModel } from 'sno-core/shards'
 import { partMatrix, placedBounds, refKey, type Placed } from 'sno-core/parts'
 import { useResolved, type Resolved } from '../lib/parts'
+import { dropDemand, setDemand, useAllowance } from './meshBudget'
 import { ACCENT, WARN } from '../lib/palette'
 import { renderPose, type Pose } from '../lib/pose'
 import { boxContains, clipMesh, clipPoints, type Box } from '../lib/clip'
@@ -120,6 +121,13 @@ interface Props {
   /** Placements drawn with the selection's box around them. */
   selectedParts?: number[]
   /**
+   * A shard in the world's scene, which draws its placed objects within the
+   * scene's budget (scene/meshBudget.ts): its key, whether its author is
+   * trusted (lib/trust.ts), and where it stands in the render frame, its
+   * centre and scale, for nearest first. Absent everywhere else.
+   */
+  budget?: { key: string; trusted: boolean; centre: [number, number, number]; scale: number }
+  /**
    * Fronts only, for an avatar seen from inside it (WALK's first person):
    * the faces' backs are culled, so what sticks out of the body still shows
    * and the inside of its own walls does not. The points and lines are not
@@ -186,7 +194,7 @@ export function faceOfHit(i: { object: { userData: { faceOf?: number[] } }; face
   return map && k != null && map[k] !== undefined ? map[k] : null
 }
 
-export function ShardMesh({ shard: given, scale = 1, ghost = false, birth, onFaceClick, world = false, headlamp = world, lit = false, clip, clipPlanes, pose, nested, onPartClick, selectedParts, cull = false, ignoreOpacity = false }: Props): JSX.Element | null {
+export function ShardMesh({ shard: given, scale = 1, ghost = false, birth, onFaceClick, world = false, headlamp = world, lit = false, clip, clipPlanes, pose, nested, onPartClick, selectedParts, cull = false, ignoreOpacity = false, budget }: Props): JSX.Element | null {
   // What everything below is drawn at: the object's own opacity (DECK-0003
   // §1.11, with its 10% floor), times a ghost's; an avatar ignores its own.
   // A placed object reaches here with its own model, so it never takes its
@@ -203,6 +211,18 @@ export function ShardMesh({ shard: given, scale = 1, ghost = false, birth, onFac
   // The objects this one places, fetched once for the whole app; a part's own
   // parts come resolved from its parent instead.
   const resolved = useResolved(nested ? null : given)
+  // In the world's scene: what its placed objects would draw, at every depth,
+  // said to the scene's budget, and how many it may (scene/meshBudget.ts).
+  const demand = useMemo(() => (budget && !nested ? placementSizes(given, resolved).reduce((a, b) => a + b, 0) : 0), [budget, nested, given, resolved])
+  const budgetKey = budget && !nested ? budget.key : undefined
+  const trusted = budget?.trusted ?? false
+  const distance = budget ? Math.hypot(...budget.centre) : 0
+  useLayoutEffect(() => {
+    if (!budgetKey) return
+    setDemand(budgetKey, { demand, trusted, distance })
+  }, [budgetKey, demand, trusted, distance])
+  useLayoutEffect(() => (budgetKey ? () => dropDemand(budgetKey) : undefined), [budgetKey])
+  const allowance = useAllowance(budgetKey)
   // A face that carries its own colour needs three corners of its own, or the
   // colour would bleed across every edge it shares. Expanded here and nowhere
   // else, so the clipper and the face picker below never learn the feature
@@ -347,7 +367,7 @@ export function ShardMesh({ shard: given, scale = 1, ghost = false, birth, onFac
   })
 
   const placements = (given.parts?.length ?? 0) > 0
-    ? <Placements shard={given} byRef={resolved} nested={nested} lit={lit} ghost={ghost} world={world} headlamp={headlamp} pose={pose} onPartClick={onPartClick} selected={selectedParts} cull={cull} ignoreOpacity={ignoreOpacity} />
+    ? <Placements shard={given} byRef={resolved} nested={nested} lit={lit} ghost={ghost} world={world} headlamp={headlamp} pose={pose} onPartClick={onPartClick} selected={selectedParts} cull={cull} ignoreOpacity={ignoreOpacity} allowance={budgetKey ? allowance ?? 0 : undefined} near={budget} />
     : null
   // An object may be nothing but the arrangement of others (§1.9 rule 13).
   if (shard.vertices.length === 0) return placements ? <group scale={scale}>{placements}</group> : null
@@ -418,7 +438,87 @@ export const CUBE_EDGES = new EdgesGeometry(new BoxGeometry(1, 1, 1))
  * flash cubes before its parts arrive. Parts are not clipped to the region:
  * a hidden object's parts are its author's to place.
  */
-function Placements({ shard, byRef, nested, lit, ghost, world, headlamp, pose, onPartClick, selected, cull, ignoreOpacity }: {
+/** One placement as Placements draws it: where it stands, and what it resolved to (undefined while it is fetched). */
+type Listed = { part: Part; r: Resolved | undefined }
+
+/** A shard's placements as listed for drawing: its own `parts`, each with what its reference resolved to. */
+function listOf(shard: ShardModel, byRef: Map<string, Resolved>, nested?: Placed[]): Listed[] {
+  return nested
+    ? nested.map((p) => ({ part: p.part, r: p }))
+    : (shard.parts ?? []).map((part) => ({ part, r: shard.refs?.[part.ref] ? byRef.get(refKey(shard.refs[part.ref])) : undefined }))
+}
+
+/** How many placed objects a resolved placement draws, itself and everything under it; once per resolved object. */
+const sizes = new WeakMap<object, number>()
+function treeSize(r: Pick<Resolved, 'model' | 'children'> | undefined): number {
+  if (!r || !r.model) return 1
+  let n = sizes.get(r)
+  if (n === undefined) {
+    n = 1
+    for (const c of r.children) n += treeSize(c)
+    sizes.set(r, n)
+  }
+  return n
+}
+
+/** What each of a shard's root placements draws, as Placements lists them. */
+export function placementSizes(shard: ShardModel, byRef: Map<string, Resolved>): number[] {
+  return listOf(shard, byRef).map(({ r }) => treeSize(r))
+}
+
+/**
+ * Which of `list` to draw within `allowance` placed objects, nearest the anchor
+ * first: each placement whole or not at all, at the place its origin stands in
+ * the render frame (`near`: the shard's centre and scale). Null for all of them.
+ */
+export function budgeted(list: readonly Listed[], allowance: number | undefined, near?: { centre: [number, number, number]; scale: number }): Set<number> | null {
+  if (allowance === undefined) return null
+  const each = list.map(({ r }) => treeSize(r))
+  if (each.reduce((a, b) => a + b, 0) <= allowance) return null
+  const at = (i: number): number => {
+    const p = toRender(list[i].part.at)
+    const c = near?.centre ?? [0, 0, 0], k = near?.scale ?? 1
+    return Math.hypot(c[0] + p[0] * k, c[1] + p[1] * k, c[2] + p[2] * k)
+  }
+  const order = list.map((_, i) => i).sort((a, b) => at(a) - at(b))
+  const keep = new Set<number>()
+  let spent = 0
+  for (const i of order) {
+    if (spent + each[i] > allowance) continue
+    spent += each[i]
+    keep.add(i)
+  }
+  return keep
+}
+
+/** The bounds of what a resolved placement draws, in its own frame; once per resolved object. */
+const bounds = new WeakMap<object, { min: number[]; max: number[] }>()
+function boundsOf(r: Resolved | undefined): { min: number[]; max: number[] } {
+  if (!r?.model) return { min: [-0.5, -0.5, -0.5], max: [0.5, 0.5, 0.5] }
+  let b = bounds.get(r)
+  if (!b) bounds.set(r, (b = placedBounds(r.model, r.children) ?? { min: [-0.5, -0.5, -0.5], max: [0.5, 0.5, 0.5] }))
+  return b
+}
+
+/** One box round every placement the budget cut, in the shard's frame: drawn as one outline. */
+function cutBox(shard: ShardModel, list: readonly Listed[], cut: readonly number[]): { min: number[]; max: number[] } | null {
+  const min = [Infinity, Infinity, Infinity], max = [-Infinity, -Infinity, -Infinity]
+  for (const i of cut) {
+    const { part, r } = list[i]
+    const b = boundsOf(r)
+    const m = partMatrix(part, shard.unit, r?.model ? r.model.unit : shard.unit)
+    for (const x of [b.min[0], b.max[0]]) for (const y of [b.min[1], b.max[1]]) for (const z of [b.min[2], b.max[2]]) {
+      for (let k = 0; k < 3; k++) {
+        const v = m[k] * x + m[4 + k] * y + m[8 + k] * z + m[12 + k]
+        if (v < min[k]) min[k] = v
+        if (v > max[k]) max[k] = v
+      }
+    }
+  }
+  return min[0] === Infinity ? null : { min, max }
+}
+
+function Placements({ shard, byRef, nested, lit, ghost, world, headlamp, pose, onPartClick, selected, cull, ignoreOpacity, allowance, near }: {
   shard: ShardModel
   byRef: Map<string, Resolved>
   nested?: Placed[]
@@ -431,14 +531,25 @@ function Placements({ shard, byRef, nested, lit, ghost, world, headlamp, pose, o
   selected?: number[]
   cull: boolean
   ignoreOpacity: boolean
+  /** How many placed objects it may draw, at every depth (scene/meshBudget.ts); undefined for no budget. */
+  allowance?: number
+  /** Where the shard stands in the render frame, for nearest first. */
+  near?: { centre: [number, number, number]; scale: number }
 }): JSX.Element | null {
-  const list: Array<{ part: Part; r: Resolved | undefined }> = nested
-    ? nested.map((p) => ({ part: p.part, r: p }))
-    : (shard.parts ?? []).map((part) => ({ part, r: shard.refs?.[part.ref] ? byRef.get(refKey(shard.refs[part.ref])) : undefined }))
+  const list = listOf(shard, byRef, nested)
   const turn = useMemo(() => (pose ? renderPose(pose) : null), [pose])
+  // Within the scene's budget: nearest first, each placement whole, and the
+  // rest as one outline (it stops nothing: WALK has its own budget).
+  const keep = useMemo(() => budgeted(list, allowance, near), [list, allowance, near])
+  const outline = useMemo(() => {
+    if (!keep) return null
+    const cut = list.map((_, i) => i).filter((i) => !keep.has(i))
+    return cutBox(shard, list, cut)
+  }, [keep, list, shard])
   if (list.length === 0) return null
   const drawn = list.map(({ part, r }, i) => {
     if (!r) return null
+    if (keep && !keep.has(i)) return null
     const model = r.model && r.model.unit + part.step >= 0 && r.model.unit + part.step <= MAX_UNIT ? r.model : null
     const matrix = new Matrix4().fromArray(partMatrix(part, shard.unit, model ? model.unit : shard.unit))
     let body: ReactNode = <lineSegments geometry={CUBE_EDGES}><lineBasicMaterial color={ACCENT} toneMapped={false} transparent opacity={ghost ? 0.45 : 0.8} /></lineSegments>
@@ -461,5 +572,15 @@ function Placements({ shard, byRef, nested, lit, ghost, world, headlamp, pose, o
       </group>
     )
   })
-  return turn ? <group matrix={turn} matrixAutoUpdate={false}>{drawn}</group> : <>{drawn}</>
+  const cutOutline = outline && (
+    <lineSegments
+      key="cut"
+      geometry={CUBE_EDGES}
+      position={[(outline.min[0] + outline.max[0]) / 2, (outline.min[1] + outline.max[1]) / 2, (outline.min[2] + outline.max[2]) / 2]}
+      scale={[Math.max(outline.max[0] - outline.min[0], 0.05), Math.max(outline.max[1] - outline.min[1], 0.05), Math.max(outline.max[2] - outline.min[2], 0.05)]}
+    >
+      <lineBasicMaterial color={ACCENT} toneMapped={false} transparent opacity={0.35} />
+    </lineSegments>
+  )
+  return turn ? <group matrix={turn} matrixAutoUpdate={false}>{drawn}{cutOutline}</group> : <>{drawn}{cutOutline}</>
 }

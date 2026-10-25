@@ -44,7 +44,7 @@
 import { MAX_PLACED, type Placed } from 'sno-core/parts'
 import type { ShardModel } from 'sno-core/shards'
 import { you } from '../lib/carried'
-import { followsOf } from '../lib/contacts'
+import { onFollows, readFollows, resetFollows, setFollows, trustedAuthor } from '../lib/trust'
 import { fetchSettled, resolvePartsShared } from '../lib/parts'
 import { regionBox, type Box } from '../lib/clip'
 import { placedPose } from '../lib/pose'
@@ -112,10 +112,6 @@ const pools = { trusted: TRUSTED_BUDGET, stranger: STRANGER_BUDGET }
 type Pool = keyof typeof pools
 /** Which WALK this is (warmWalls counts them). */
 let walkNo = 0
-/** The authors you follow (your kind 3), as last read; empty until it is. */
-let follows: ReadonlySet<string> = new Set()
-/** Whose follows those are, so a new identity reads its own. */
-let followsOfWho: string | null = null
 
 /**
  * Whose share a shard draws from: the author of the object it DRAWS, never of
@@ -125,9 +121,7 @@ let followsOfWho: string | null = null
  * author at all was made here, by you. Yours and those you follow: trusted.
  */
 function poolOf(w: WallItem): Pool {
-  const me = you()
-  const author = w.shard.author ?? w.author ?? me
-  return author !== null && (author === me || follows.has(author)) ? 'trusted' : 'stranger'
+  return trustedAuthor(w.shard.author ?? w.author ?? you()) ? 'trusted' : 'stranger'
 }
 
 /**
@@ -136,9 +130,13 @@ function poolOf(w: WallItem): Pool {
  * starved as a stranger's, is built again from the trusted share.
  */
 export function setWallFollows(list: Iterable<string>): void {
-  follows = new Set(list)
-  for (const e of entries.values()) if (e.starved && !e.pending && poolOf(e.item) === 'trusted') resolveInto(e.item, e)
+  setFollows(list)
 }
+
+/** On any change of follows (lib/trust.ts): a shard now trusted, starved as a stranger's, is built again from your share. */
+onFollows(() => {
+  for (const e of entries.values()) if (e.starved && !e.pending && poolOf(e.item) === 'trusted') resolveInto(e.item, e)
+})
 
 /**
  * Whether a walker at `from`, stepping `length` gibsons along `axis` (or not
@@ -382,12 +380,8 @@ export function warmWalls(plane: number, from?: Position): void {
   pools.trusted = TRUSTED_BUDGET
   pools.stranger = STRANGER_BUDGET
   walkNo++
-  const me = you()
-  if (me && me !== followsOfWho) {
-    followsOfWho = me
-    // A read that failed is asked again at the next WALK.
-    void followsOf(me).then((list) => { if (followsOfWho === me) setWallFollows(list) }, () => { if (followsOfWho === me) followsOfWho = null })
-  }
+  // Your follows, read once per identity; a read that failed is asked again at the next WALK.
+  readFollows()
   const items = wallItems(plane)
   const near = from ? items.filter((w) => regionReached(w, from)) : items
   const order = (pool: Pool): WallItem[] => near.filter((w) => poolOf(w) === pool)
@@ -428,8 +422,7 @@ export function clearWalls(): void {
   walkNo++
   pools.trusted = TRUSTED_BUDGET
   pools.stranger = STRANGER_BUDGET
-  follows = new Set()
-  followsOfWho = null
+  resetFollows()
 }
 
 /** Why a step stopped short: the shard it met, and how far it may go. */

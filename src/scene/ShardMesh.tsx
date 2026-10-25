@@ -26,13 +26,14 @@ import {
   Line,
   LineBasicMaterial,
   Matrix4,
+  Vector3,
   type Plane,
 } from 'three'
 import { easeOutCubic, hash01, scrambleOffset, seedOf, SHARD_DECODE_MS } from '../lib/decode'
 import { MAX_UNIT, expandFaceColors, flatten, toRender, type Part, type ShardModel } from 'sno-core/shards'
 import { partMatrix, placedBounds, refKey, type Placed } from 'sno-core/parts'
 import { useResolved, type Resolved } from '../lib/parts'
-import { dropDemand, setDemand, useAllowance } from './meshBudget'
+import { dropDemand, provisional, setDemand, useAllowance } from './meshBudget'
 import { ACCENT, WARN } from '../lib/palette'
 import { renderPose, type Pose } from '../lib/pose'
 import { boxContains, clipMesh, clipPoints, type Box } from '../lib/clip'
@@ -216,13 +217,19 @@ export function ShardMesh({ shard: given, scale = 1, ghost = false, birth, onFac
   const demand = useMemo(() => (budget && !nested ? placementSizes(given, resolved).reduce((a, b) => a + b, 0) : 0), [budget, nested, given, resolved])
   const budgetKey = budget && !nested ? budget.key : undefined
   const trusted = budget?.trusted ?? false
-  const distance = budget ? Math.hypot(...budget.centre) : 0
+  // Coarsely, in eighths of a doubling: a step of the anchor moves every
+  // shard's centre a little, and a shard says so only when it has moved a
+  // good way nearer or farther, not on every step.
+  const distance = budget ? Math.round(Math.log2(1 + Math.hypot(...budget.centre)) * 8) / 8 : 0
   useLayoutEffect(() => {
     if (!budgetKey) return
     setDemand(budgetKey, { demand, trusted, distance })
   }, [budgetKey, demand, trusted, distance])
   useLayoutEffect(() => (budgetKey ? () => dropDemand(budgetKey) : undefined), [budgetKey])
-  const allowance = useAllowance(budgetKey)
+  // Before its first allocation lands (later in the same task), what is left
+  // of its pool, so its first frame is not an outline.
+  const allocated = useAllowance(budgetKey)
+  const allowance = budgetKey ? allocated ?? provisional({ demand, trusted, distance }) : undefined
   // A face that carries its own colour needs three corners of its own, or the
   // colour would bleed across every edge it shares. Expanded here and nowhere
   // else, so the clipper and the face picker below never learn the feature
@@ -367,7 +374,7 @@ export function ShardMesh({ shard: given, scale = 1, ghost = false, birth, onFac
   })
 
   const placements = (given.parts?.length ?? 0) > 0
-    ? <Placements shard={given} byRef={resolved} nested={nested} lit={lit} ghost={ghost} world={world} headlamp={headlamp} pose={pose} onPartClick={onPartClick} selected={selectedParts} cull={cull} ignoreOpacity={ignoreOpacity} allowance={budgetKey ? allowance ?? 0 : undefined} near={budget} />
+    ? <Placements shard={given} byRef={resolved} nested={nested} lit={lit} ghost={ghost} world={world} headlamp={headlamp} pose={pose} onPartClick={onPartClick} selected={selectedParts} cull={cull} ignoreOpacity={ignoreOpacity} allowance={allowance} near={budget ? { centre: budget.centre, scale: budget.scale, pose } : undefined} />
     : null
   // An object may be nothing but the arrangement of others (§1.9 rule 13).
   if (shard.vertices.length === 0) return placements ? <group scale={scale}>{placements}</group> : null
@@ -438,6 +445,9 @@ export const CUBE_EDGES = new EdgesGeometry(new BoxGeometry(1, 1, 1))
  * flash cubes before its parts arrive. Parts are not clipped to the region:
  * a hidden object's parts are its author's to place.
  */
+/** How faint the outline round what the scene's budget cut is drawn. */
+const CUT_OPACITY = 0.35
+
 /** One placement as Placements draws it: where it stands, and what it resolved to (undefined while it is fetched). */
 type Listed = { part: Part; r: Resolved | undefined }
 
@@ -466,21 +476,29 @@ export function placementSizes(shard: ShardModel, byRef: Map<string, Resolved>):
   return listOf(shard, byRef).map(({ r }) => treeSize(r))
 }
 
+/** Where a shard stands in the render frame: its centre, its scale, and its pose (turned in the view frame, or on the Earth). */
+export interface Near { centre: [number, number, number]; scale: number; pose?: Pose }
+
 /**
  * Which of `list` to draw within `allowance` placed objects, nearest the anchor
  * first: each placement whole or not at all, at the place its origin stands in
- * the render frame (`near`: the shard's centre and scale). Null for all of them.
+ * the render frame, through the shard's pose, scale and centre (`near`). Null
+ * for all of them.
  */
-export function budgeted(list: readonly Listed[], allowance: number | undefined, near?: { centre: [number, number, number]; scale: number }): Set<number> | null {
+export function budgeted(list: readonly Listed[], allowance: number | undefined, near?: Near): Set<number> | null {
   if (allowance === undefined) return null
   const each = list.map(({ r }) => treeSize(r))
   if (each.reduce((a, b) => a + b, 0) <= allowance) return null
-  const at = (i: number): number => {
-    const p = toRender(list[i].part.at)
-    const c = near?.centre ?? [0, 0, 0], k = near?.scale ?? 1
-    return Math.hypot(c[0] + p[0] * k, c[1] + p[1] * k, c[2] + p[2] * k)
-  }
-  const order = list.map((_, i) => i).sort((a, b) => at(a) - at(b))
+  // Each distance once, before the sort.
+  const turn = near?.pose ? renderPose(near.pose) : null
+  const c = near?.centre ?? [0, 0, 0], k = near?.scale ?? 1
+  const v = new Vector3()
+  const far = list.map(({ part }) => {
+    v.fromArray(toRender(part.at))
+    if (turn) v.applyMatrix4(turn)
+    return Math.hypot(c[0] + v.x * k, c[1] + v.y * k, c[2] + v.z * k)
+  })
+  const order = list.map((_, i) => i).sort((a, b) => far[a] - far[b])
   const keep = new Set<number>()
   let spent = 0
   for (const i of order) {
@@ -534,9 +552,9 @@ function Placements({ shard, byRef, nested, lit, ghost, world, headlamp, pose, o
   /** How many placed objects it may draw, at every depth (scene/meshBudget.ts); undefined for no budget. */
   allowance?: number
   /** Where the shard stands in the render frame, for nearest first. */
-  near?: { centre: [number, number, number]; scale: number }
+  near?: Near
 }): JSX.Element | null {
-  const list = listOf(shard, byRef, nested)
+  const list = useMemo(() => listOf(shard, byRef, nested), [shard, byRef, nested])
   const turn = useMemo(() => (pose ? renderPose(pose) : null), [pose])
   // Within the scene's budget: nearest first, each placement whole, and the
   // rest as one outline (it stops nothing: WALK has its own budget).
@@ -579,7 +597,8 @@ function Placements({ shard, byRef, nested, lit, ghost, world, headlamp, pose, o
       position={[(outline.min[0] + outline.max[0]) / 2, (outline.min[1] + outline.max[1]) / 2, (outline.min[2] + outline.max[2]) / 2]}
       scale={[Math.max(outline.max[0] - outline.min[0], 0.05), Math.max(outline.max[1] - outline.min[1], 0.05), Math.max(outline.max[2] - outline.min[2], 0.05)]}
     >
-      <lineBasicMaterial color={ACCENT} toneMapped={false} transparent opacity={0.35} />
+      {/* Its share kept as the EDIT breath and TV's look scale it (WorldShards breatheMaterial). */}
+      <lineBasicMaterial color={ACCENT} toneMapped={false} transparent opacity={CUT_OPACITY} userData-share={CUT_OPACITY} />
     </lineSegments>
   )
   return turn ? <group matrix={turn} matrixAutoUpdate={false}>{drawn}{cutOutline}</group> : <>{drawn}{cutOutline}</>

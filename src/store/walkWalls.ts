@@ -44,7 +44,7 @@
 import { MAX_PLACED, type Placed } from 'sno-core/parts'
 import type { ShardModel } from 'sno-core/shards'
 import { you } from '../lib/carried'
-import { onFollows, readFollows, resetFollows, setFollows, trustedAuthor } from '../lib/trust'
+import { onFollows, readFollows, resetFollows, setFollows, trustedPlacement } from '../lib/trust'
 import { fetchSettled, resolvePartsShared } from '../lib/parts'
 import { regionBox, type Box } from '../lib/clip'
 import { placedPose } from '../lib/pose'
@@ -121,7 +121,10 @@ let walkNo = 0
  * author at all was made here, by you. Yours and those you follow: trusted.
  */
 function poolOf(w: WallItem): Pool {
-  return trustedAuthor(w.shard.author ?? w.author ?? you()) ? 'trusted' : 'stranger'
+  // Both whoever put it there and the author of what it draws (lib/trust.ts):
+  // a stranger's bag of live links to your object is the stranger's.
+  const container = w.author ?? you()
+  return trustedPlacement(container, w.shard.author ?? container) ? 'trusted' : 'stranger'
 }
 
 /**

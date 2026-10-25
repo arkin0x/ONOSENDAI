@@ -262,7 +262,7 @@ export function TvFinds({ axes }: { axes: ViewAxes }): JSX.Element | null {
   const shown = useMemo(() => foundAsOf(found, tapeTime).filter(({ item }) => !findHidden(item, muted, me)), [found, tapeTime, muted, me])
 
   const placedNow = useMemo(() => drawableShards(
-    shown.map(({ item: h }) => ({ key: h.eventId, type: h.type, at: h.at, height: h.height, plane: h.plane, shard: h.shard })),
+    shown.map(({ item: h }) => ({ key: h.eventId, type: h.type, at: h.at, height: h.height, plane: h.plane, shard: h.shard, author: h.author })),
     anchor, plane, scaleExp, axes,
   ), [shown, anchor, plane, scaleExp, axes])
   // As the tape moves, each find keeps its cut and GPU buffers (WorldShards steadied).

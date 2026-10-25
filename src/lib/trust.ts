@@ -5,9 +5,12 @@
  * WALK's walls (store/walkWalls.ts) and the scene's meshes (scene/meshBudget.ts)
  * both spend a budget by it: a reserved share for what you trust, which no
  * stranger can spend, and the rest shared by strangers under a per-shard
- * ceiling (arkinox, 2026-10-25: "ok A sounds good"). Trust is charged to the
- * author of the object a shard DRAWS, never of the bag it is in, so a LIVE LINK
- * in your own bag to a stranger's object is the stranger's.
+ * ceiling (arkinox, 2026-10-25: "ok A sounds good"). A shard is trusted only
+ * when BOTH whoever put it there (the bag's signer, or a chest's sealer) and
+ * the author of the object it draws are trusted (trustedPlacement): a LIVE LINK
+ * in your own bag to a stranger's object is the stranger's, and a stranger's
+ * bag of live links to your own public object is the stranger's too, or anyone
+ * could spend your share with copies of your work.
  */
 
 import { you } from './carried'
@@ -28,6 +31,15 @@ export function trustedAuthor(author: string | null | undefined): boolean {
   return a !== null && (a === me || follows.has(a))
 }
 
+/**
+ * Whether a shard is trusted: whoever put it where it is (`container`, the
+ * bag's signer or a chest's sealer) and the author of the object it draws
+ * (`object`) are both trusted. Either missing is a shard made here, by you.
+ */
+export function trustedPlacement(container: string | null | undefined, object: string | null | undefined): boolean {
+  return trustedAuthor(container) && trustedAuthor(object ?? container)
+}
+
 /** Say whom you follow (readFollows does; tests call it directly), and tell everyone who listens. */
 export function setFollows(list: Iterable<string>): void {
   follows = new Set(list)
@@ -39,6 +51,8 @@ export function setFollows(list: Iterable<string>): void {
 export function readFollows(): void {
   const me = you()
   if (!me || me === followsOfWho) return
+  // Another identity: whom the last one followed is not whom this one does.
+  if (followsOfWho !== null && follows.size) setFollows([])
   followsOfWho = me
   void followsOf(me).then((list) => { if (followsOfWho === me) setFollows(list) }, () => { if (followsOfWho === me) followsOfWho = null })
 }

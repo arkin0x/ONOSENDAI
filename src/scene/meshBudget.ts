@@ -146,13 +146,19 @@ export function allowanceOf(key: string | undefined): number | undefined {
 /**
  * What a shard not yet allocated may draw for its first frame, so it does not
  * show an outline for one: what is left of its pool at the last allocation, no
- * more than it asks (and, for a stranger, the per-shard ceiling). The next
- * allocation, in the same task, corrects it.
+ * more than it asks (and, for a stranger, the per-shard ceiling), and counted
+ * against the pool until then, so many such grants never pass it. The next
+ * allocation, in the same task, recounts and corrects them.
  */
 export function provisional(d: Demand): number {
   if (d.demand <= 0) return 0
   const left = Math.max(0, (d.trusted ? SCENE_TRUSTED - usedTrusted : SCENE_STRANGER - usedStranger))
-  return Math.min(d.demand, left, d.trusted ? Infinity : SCENE_STRANGER_SHARD)
+  const give = Math.min(d.demand, left, d.trusted ? Infinity : SCENE_STRANGER_SHARD)
+  // Counted against its pool until the next allocation recounts it, so the
+  // provisional grants of many new shards before a flush never pass the pool.
+  if (d.trusted) usedTrusted += give
+  else usedStranger += give
+  return give
 }
 
 /** allowanceOf, for a component: it draws again when its own allowance changes. */

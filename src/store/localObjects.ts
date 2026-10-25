@@ -31,7 +31,7 @@
 
 import { toPayload, type ShardModel } from 'sno-core/shards'
 import { SNO_KIND, objectAddress } from 'sno-core/feed'
-import { MAX_PART_DEPTH, carriedModel, parseAddress } from 'sno-core/parts'
+import { MAX_PART_DEPTH, carriedModel, carryAll, parseAddress } from 'sno-core/parts'
 import { hash53, thumbKeyOf } from '../lib/thumbKey'
 import { localObjectsChanged, setLocalObjects } from '../lib/parts'
 import { withAuthoredConstrain } from '../lib/walkConstrain'
@@ -60,15 +60,46 @@ function byId(list: readonly ShardModel[]): Map<string, ShardModel> {
   return m
 }
 
-/** Your object at an address, from the workshop, or undefined when it is not yours or not here. */
-export function localObject(address: { kind: number; pubkey: string; d: string }): unknown | undefined {
+/** Your shard at an address, from the workshop, or undefined when it is not yours, not here, or empty. */
+export function localShard(address: { kind: number; pubkey: string; d: string }): ShardModel | undefined {
   const me = useCyberspace.getState().identity.pubkey
-  if (!me || address.pubkey !== me) return undefined
+  if (!me || address.pubkey !== me || address.kind !== SNO_KIND) return undefined
   const s = byId(useWorkshop.getState().shards).get(address.d)
   if (!s || (s.vertices.length === 0 && (s.parts?.length ?? 0) === 0)) return undefined
   const rec = usePublished.getState().ledger[s.id]
   if (rec && rec.pubkey !== me) return undefined
-  return payloadOf(s)
+  return s
+}
+
+/** Your object at an address, from the workshop, or undefined when it is not yours or not here. */
+export function localObject(address: { kind: number; pubkey: string; d: string }): unknown | undefined {
+  const s = localShard(address)
+  return s ? payloadOf(s) : undefined
+}
+
+/**
+ * `shard` carrying, in its own table (DECK-0003 §1.10), every piece it places
+ * from your library: at any depth, each placement by an `a` reference under
+ * your key, with no relay hint, that names a shard in your workshop, published
+ * or not (arkinox 2026-10-25: "if i chose my water in my library, then its
+ * inlined. if i chose my water from the feed, then its a live reference").
+ *
+ * A reference with a relay hint is a live link: the Stamp's FEED and BY
+ * ADDRESS write one, and it stays a reference, your own published objects
+ * included. Someone else's object is never carried, so every key written is
+ * under your own pubkey. A piece the table already holds stays exactly as it
+ * is, so an edited copy is never replaced by the workshop's piece. Each piece
+ * goes in written as a hide writes it, OPAQUE where its author never chose
+ * (DECK-0003 §1.12). Run at DEPLOY, EDIT and PUT IN CHEST; the caller checks
+ * the size (lib/carried.ts carryRefusal).
+ */
+export function carryLibrary(shard: ShardModel): ShardModel {
+  return carryAll(shard, (ref) => {
+    if (ref[0] !== 'a' || ref[2]) return null
+    const a = parseAddress(ref[1])
+    const piece = a ? localShard(a) : undefined
+    return piece ? { object: withAuthoredConstrain(piece), carry: true } : null
+  })
 }
 
 /** A piece's version for a picture key: a hash of its payload, once per version of it, the same in every session. */

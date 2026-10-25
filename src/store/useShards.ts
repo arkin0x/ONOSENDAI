@@ -43,6 +43,8 @@ import { itemTargetOf, type ItemTarget } from '../lib/comments'
 import { bytesToHex, hexToBytes, type EventTemplate, type NostrEvent } from '../lib/events'
 import { regionKeyAt } from '../lib/shardCrypto'
 import { regionKeyOffThread } from '../lib/regionKeyOffThread'
+import { carryRefusal } from '../lib/carried'
+import { carryLibrary } from './localObjects'
 import { deployCeiling, deployRoute, localKeyCeiling, needsAsk, regionKeyQuote } from '../lib/deployPlan'
 import { useSecrets } from './useSecrets'
 import {
@@ -1214,9 +1216,11 @@ export const useShards = create<ShardsState>((set, get) => {
           signed.push(c.aimed.signed)
           continue
         }
-        const model = useWorkshop.getState().shards.find((s) => s.id === c.shardId)
-        if (!model) throw new Error('A model in this chest is no longer in your workshop.')
-        const refusal = shardRefusal(model)
+        const found = useWorkshop.getState().shards.find((s) => s.id === c.shardId)
+        if (!found) throw new Error('A model in this chest is no longer in your workshop.')
+        // Carrying the pieces it places from your library, as a hide does (DECK-0003 §1.10).
+        const model = carryLibrary(found)
+        const refusal = carryRefusal(model) ?? shardRefusal(model)
         if (refusal) throw new Error(refusal)
         signed.push(await cs.signEvent(shardInnerTemplate(model, at, plane, createdAt, creditOf(model))))
       } else if (c.kind === 'audio') {
@@ -1556,6 +1560,18 @@ export const useShards = create<ShardsState>((set, get) => {
         // The WALK setting goes out like the size (DECK-0003 §1.12): the same
         // object when it is unchanged, so an untouched deploy stays untouched.
         if (!link) shard = withConstrain(shard, deployConstrain)
+        // The pieces it places from your library go inside it (DECK-0003
+        // §1.10), so finders draw them from the bag rather than ask relays
+        // for names nobody published; a live link stays a reference. Over the
+        // budget it is refused in his words (D3).
+        if (!link) {
+          shard = carryLibrary(shard)
+          const over = carryRefusal(shard)
+          if (over) {
+            set({ deployStatus: 'error', deployError: over })
+            return
+          }
+        }
         // The same round trip every reader makes, before the seal: an item the
         // format refuses would deploy, show for its author from this device,
         // and open as nothing for everyone else (a 516-vertex floor, 2026-09-24).

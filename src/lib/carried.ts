@@ -11,7 +11,8 @@
  */
 
 import { carriedTable } from 'sno-core/parts'
-import type { ShardModel } from 'sno-core/shards'
+import { toPayload, type ShardModel } from 'sno-core/shards'
+import { withAuthoredConstrain } from './walkConstrain'
 
 /**
  * `model` with only the carried objects keyed under `pubkey`, the author of the
@@ -28,4 +29,30 @@ export function keepOwnTable(model: ShardModel, pubkey: string | undefined): Sha
   if (Object.keys(kept).length === Object.keys(model.objects).length) return model
   const { objects: _dropped, ...bare } = model
   return Object.keys(kept).length ? { ...bare, objects: kept } : bare
+}
+
+/**
+ * The most a payload carrying pieces may be, in bytes: a relay that takes
+ * 131,072 bytes holds about this much once it is base64'd inside an encrypted
+ * event (DECK-0003 §1.10 Size). Every piece of the Maze Kit fits.
+ */
+export const CARRY_BUDGET_BYTES = 98_304
+
+/** The size of the payload a hide writes for `shard`, in bytes (OPAQUE where its author never chose, as every hide writes it). */
+export function payloadBytes(shard: ShardModel): number {
+  return new TextEncoder().encode(JSON.stringify(toPayload(withAuthoredConstrain(shard)))).length
+}
+
+/**
+ * Why a shard carrying pieces is not hidden, or null when it fits (D3,
+ * arkinox 2026-10-25, his words). Kilobytes rounded up, so a payload just
+ * over the budget never reads as 96. Only a shard that carries something is
+ * held to it: one that carries nothing goes as it always has, inline or by
+ * reference.
+ */
+export function carryRefusal(shard: ShardModel): string | null {
+  if (!shard.objects || Object.keys(shard.objects).length === 0) return null
+  const bytes = payloadBytes(shard)
+  if (bytes <= CARRY_BUDGET_BYTES) return null
+  return `${Math.ceil(bytes / 1024)}kb of ${CARRY_BUDGET_BYTES / 1024}kb may be larger than relays will accept. Keep this part separate.`
 }

@@ -96,7 +96,9 @@ describe('a copy, edited in place', () => {
     expect(keys).toHaveLength(2)
     expect(table()[copyAddress()].objects).toBeUndefined()
     // The water's own payload names the reed, and the room's table holds both.
-    expect((table()[copyAddress()].refs as string[][])[0][1]).toMatch(/kit\/reed~/)
+    const reed = (table()[copyAddress()].refs as string[][])[0][1]
+    expect(reed).toMatch(new RegExp(`^33331:${ME}:[0-9a-f]{16}$`))
+    expect(table()[reed].name).toBe('Reed')
     // What the room reads back draws them both.
     const back = fromPayload(toPayload(w().rootShard()!), 'r')!
     expect(Object.keys(back.objects ?? {}).sort()).toEqual(keys.sort())
@@ -125,7 +127,8 @@ describe('a live link, read-only, with DETACH', () => {
     await w().enterPart(2, fetchRef)
     w().detachPart(ME)
     const room = w().rootShard()!
-    const copy = room.refs!.find((r) => r[1].startsWith(`33331:${ME}:tile~`))!
+    // A copy under your key, at a d that says nothing about it, not the link's.
+    const copy = room.refs!.find((r) => r[1] !== copyAddress() && new RegExp(`^33331:${ME}:[0-9a-f]{16}$`).test(r[1]))!
     expect(copy).toBeDefined()
     expect(room.refs!.some((r) => r[1] === LINK)).toBe(false)
     expect(room.parts!.filter((p) => room.refs![p.ref] === copy)).toHaveLength(2)

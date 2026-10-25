@@ -32,12 +32,13 @@
  * workshop's piece of the same address: the copy is the parent's own data.
  * Keys under any pubkey but that of the event an object came in are ignored
  * (D5), and that is applied where an object is read from its event
- * (lib/carried.ts keepOwnTable), so a model reaching a draw already holds only
- * its own.
+ * (lib/carried.ts keepOwnTable), which also says whose the model is, so every
+ * draw passes that pubkey on (authorOf); a model made here is yours.
  */
 
 import { createContext, useContext, useEffect, useRef, useState } from 'react'
-import { parseAddress, refKey, resolveParts, type Placed } from 'sno-core/parts'
+import { Fetched, parseAddress, refKey, resolveParts, type Placed } from 'sno-core/parts'
+import { authorOf } from './carried'
 import { fromPayload, type Ref, type ShardModel } from 'sno-core/shards'
 import { GENERAL_RELAYS } from './contacts'
 import { queryAny, relaySet } from './relay'
@@ -128,7 +129,11 @@ export function fetchRef(ref: Ref): Promise<unknown> {
     // Several relays may each hold a different edit; the newest is the object.
     const ev = found.sort((x, y) => y.created_at - x.created_at)[0]
     if (!ev || ev.kind !== SNO_KIND) return null
-    try { return JSON.parse(ev.content) } catch { return null }
+    let payload: unknown
+    try { payload = JSON.parse(ev.content) } catch { return null }
+    // By `e`, whose event it is goes with it, so what it carries counts under
+    // its signer (sno-core Fetched; an `a` names its author already).
+    return ref[0] === 'e' ? new Fetched(payload, ev.pubkey) : payload
   })()
   cache.set(key, got)
   void got.then((p) => { if (p == null && cache.get(key) === got) cache.delete(key) }, () => { if (cache.get(key) === got) cache.delete(key) })
@@ -250,5 +255,7 @@ function readShared(payload: unknown, key: string): ShardModel | null {
  * partsShared.test.ts holds the two side by side.
  */
 export function resolvePartsShared(model: ShardModel, fetch: (ref: Ref) => Promise<unknown> = fetchRef, self?: Ref): Promise<Placed[]> {
-  return resolveParts(model, fetch, { self, read: readShared })
+  // Whose keys of its table count: the event's it was read from, or yours for
+  // a model made here (lib/carried.ts authorOf), never every key.
+  return resolveParts(model, fetch, { self, read: readShared, author: authorOf(model) })
 }

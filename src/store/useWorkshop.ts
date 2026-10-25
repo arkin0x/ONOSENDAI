@@ -46,8 +46,8 @@ import {
   type ShardVertex, type Part, type Ref, cloneVertex, hexToRgb, rgbToHex } from 'sno-core/shards'
 import { withOpacity } from '../lib/opacityStep'
 import { authoredConstrainOf, chosenConstrainOf, withConstrain, type Constrain } from '../lib/walkConstrain'
-import { addPart, quarterTurnPart, removeParts } from 'sno-core/parts'
-import { carriedCopy, copyInto, detachInto, focusOf, writeCopy, type InsideStep } from '../lib/carried'
+import { Fetched, addPart, parseAddress, quarterTurnPart, removeParts } from 'sno-core/parts'
+import { carriedCopy, copyInto, detachInto, focusOf, keepOwnTable, ownTableOnly, writeCopy, you, type InsideStep } from '../lib/carried'
 import { FLOOR, MAX_SIZE, MIN_SIZE, stamp, type Facing, type StampKind, type WorkPlane } from 'sno-core/stamps'
 import { BUILT_IN, hexAt, remap, samePalette, snapHex, type Palette } from 'sno-core/snoPalette'
 import { newell, triangulate } from 'sno-core/triangulate'
@@ -1621,15 +1621,21 @@ export const useWorkshop = create<WorkshopState>((set, get) => {
     },
 
     importText: (text) => {
-      const s = shardFromText(text, uuid())
-      if (!s) return null
+      const read = shardFromText(text, uuid())
+      if (!read) return null
+      // What it carries comes in only under your own key (lib/carried.ts ownTableOnly).
+      const s = ownTableOnly(read, you())
       const list = [...get().shards, s]
       set({ shards: list, currentId: s.id, selection: [], partSel: [], selectedFace: null, facePick: [], past: [], future: [], notice: null })
       save(list)
       return s.id
     },
 
-    importShard: (model, credit, id) => {
+    importShard: (given, credit, id) => {
+      // A copy from the feed, a bag, a chest or an avatar: what it carries comes
+      // in only under your own key, so a key someone else wrote under your name
+      // is never published again as yours (lib/carried.ts ownTableOnly).
+      const model = ownTableOnly(given, you())
       const taken = new Set(get().shards.map((s) => s.name))
       // Your own object comes back under its own name: there is no other to be a copy of.
       const name = !id && taken.has(model.name) ? `${model.name} copy` : model.name
@@ -1640,8 +1646,10 @@ export const useWorkshop = create<WorkshopState>((set, get) => {
       return copy.id
     },
 
-    addShard: (model, name, id) => {
+    addShard: (given, name, id) => {
       if (id !== undefined && get().shards.some((s) => s.id === id)) return null
+      // An import (a file, a zip): what it carries comes in only under your own key.
+      const model = ownTableOnly(given, you())
       const copy: ShardModel = { ...model, id: id ?? uuid(), name: name.slice(0, 64), vertices: model.vertices.map(cloneVertex), faces: model.faces.map((f) => [...f] as [number, number, number]), updatedAt: Date.now() }
       const list = [...get().shards, copy]
       set({ shards: list })
@@ -1651,7 +1659,9 @@ export const useWorkshop = create<WorkshopState>((set, get) => {
 
     saveNow: () => saveStored(),
 
-    replaceShard: (id, model) => {
+    replaceShard: (id, given) => {
+      // An import's UPDATE: what it carries comes in only under your own key.
+      const model = ownTableOnly(given, you())
       const { shards, currentId, past } = get()
       const i = shards.findIndex((s) => s.id === id)
       if (i < 0) return Promise.resolve('missing')
@@ -1707,8 +1717,11 @@ export const useWorkshop = create<WorkshopState>((set, get) => {
       const open = (step: InsideStep): void => set({ inside: { rootId: root.id, path: [...path, step] }, selection: [], partSel: [], selectedFace: null, facePick: [], notice: null })
       if (ref[0] === 'a' && carriedCopy(root, ref[1])) { open({ address: ref[1] }); return }
       // A live link: what its author's event holds, read-only.
-      const payload = fetch ? await fetch(ref) : null
-      const live = payload == null ? null : fromPayload(payload, ref[1])
+      const answer = fetch ? await fetch(ref) : null
+      // By `e`, the fetch says whose event it is (sno-core Fetched); by `a`, the address does.
+      const payload = answer instanceof Fetched ? answer.payload : answer
+      const read = payload == null ? null : fromPayload(payload, ref[1])
+      const live = read && keepOwnTable(read, answer instanceof Fetched ? answer.pubkey : parseAddress(ref[1])?.pubkey)
       if (!live) { set({ notice: 'That object did not come back from the relays, so there is nothing to open.' }); return }
       if (get().rootShard() !== root) return
       open({ address: ref[1], live: { ...live, id: ref[1].split(':').slice(2).join(':') || ref[1] } })

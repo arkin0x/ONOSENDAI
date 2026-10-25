@@ -10,25 +10,59 @@
  * the part that depends on where an object came from.
  */
 
-import { carriedModel, carriedPayload, carriedTable, carryObject } from 'sno-core/parts'
+import { carriedModel, carriedPayload, carriedTable, carryObject, withAuthor } from 'sno-core/parts'
 import { addressesIn, toPayload, type Ref, type ShardModel } from 'sno-core/shards'
 import { withAuthoredConstrain } from './walkConstrain'
 
 /**
- * `model` with only the carried objects keyed under `pubkey`, the author of the
- * event it came in: a key under anyone else's is ignored, and its address
- * fetched as though the table did not hold it (D5, arkinox 2026-10-25; the
- * spec's "keys are under the author's own pubkey"). With no pubkey to check
- * against, nothing carried is honoured. The same model when there is nothing
- * to drop. Applied where an object is read from its event, so every draw
- * after that can take the table as it is.
+ * `model` as read from an event whose pubkey is `pubkey`: its author set
+ * (sno-core withAuthor, local only, never written) and only the carried
+ * objects keyed under that pubkey kept. A key under anyone else's is ignored,
+ * and its address fetched as though the table did not hold it (D5, arkinox
+ * 2026-10-25; the spec's "keys are under the author's own pubkey"). With no
+ * pubkey to check against, nothing carried is honoured. Applied wherever an
+ * object is read from its event; for an unsigned item, the pubkey is the bag's
+ * or the chest's signer, never the item's own claim.
  */
-export function keepOwnTable(model: ShardModel, pubkey: string | undefined): ShardModel {
-  if (!model.objects) return model
-  const kept = pubkey ? carriedTable(model, pubkey) : {}
-  if (Object.keys(kept).length === Object.keys(model.objects).length) return model
-  const { objects: _dropped, ...bare } = model
-  return Object.keys(kept).length ? { ...bare, objects: kept } : bare
+export function keepOwnTable(model: ShardModel, pubkey: string | null | undefined): ShardModel {
+  return withAuthor(model, pubkey ?? null)
+}
+
+/**
+ * `model` with only the carried objects keyed under `pubkey` (or none at all
+ * without one), and no author: what comes into your workshop from anywhere (a
+ * copy from the feed or a bag, PASTE, an import, an avatar), so that a key
+ * someone else wrote under your name can never be published again as yours.
+ */
+export function ownTableOnly(model: ShardModel, pubkey: string | null): ShardModel {
+  const { author: _was, ...bare } = model
+  if (!model.objects) return model.author === undefined ? model : bare
+  const kept = carriedTable(model, pubkey)
+  const { objects: _all, ...rest } = bare
+  return Object.keys(kept).length ? { ...rest, objects: kept } : rest
+}
+
+/** Who "you" are, for a model made here (store/localObjects.ts wires it): null when no one is signed in. */
+let localAuthor: () => string | null = () => null
+
+/** Say who you are (store/localObjects.ts), or stop (null). */
+export function setLocalAuthor(get: (() => string | null) | null): void {
+  localAuthor = get ?? (() => null)
+}
+
+/** You, or null. */
+export function you(): string | null {
+  return localAuthor()
+}
+
+/**
+ * Whose keys of `model`'s table count (DECK-0003 §1.10): the pubkey of the
+ * event it was read from (keepOwnTable), or, for a model with none, yours,
+ * since every model read from an event has one and so a model without one was
+ * made here, by you. Never every key.
+ */
+export function authorOf(model: Pick<ShardModel, 'author'>): string | null {
+  return model.author ?? localAuthor()
 }
 
 /**
@@ -57,28 +91,11 @@ export function carryRefusal(shard: ShardModel): string | null {
   return `${Math.ceil(bytes / 1024)}kb of ${CARRY_BUDGET_BYTES / 1024}kb may be larger than relays will accept. Keep this part separate.`
 }
 
-/**
- * What separates a copy's own part of its `d` from the id of the piece it was
- * copied from: `<source id>~<8 hex>`.
- */
-export const COPY_MARK = '~'
-
-/** Eight random hex digits: a copy's own part of its `d`. */
-function nonce(): string {
-  const b = new Uint8Array(4)
+/** Sixteen random hex digits: a copy's `d`, which says nothing about it. */
+function quietD(): string {
+  const b = new Uint8Array(8)
   crypto.getRandomValues(b)
   return [...b].map((x) => x.toString(16).padStart(2, '0')).join('')
-}
-
-/**
- * The id of the workshop piece a copy was made from, by its address: what is
- * before the last COPY_MARK in its `d`. Provenance only, for a later "update
- * from kit"; nothing is live. Null for an address that is not a copy's.
- */
-export function copiedFrom(address: string): string | null {
-  const d = address.split(':').slice(2).join(':')
-  const i = d.lastIndexOf(COPY_MARK)
-  return i > 0 ? d.slice(0, i) : null
 }
 
 /**
@@ -86,10 +103,12 @@ export function copiedFrom(address: string): string | null {
  * reference a placement of it names (STAMP > OBJECT, YOURS; arkinox
  * 2026-10-25: "once copied we should just edit the copy directly").
  *
- * The copy is keyed under a `d` of its own, `<source id>~<8 hex>`, never under
- * the source's own address (DECK-0003 §1.10 allows any `d`, and suggests this):
- * - a reader that does not know `objects` fetches that address and finds
- *   nothing, rather than the source as it is published today;
+ * The copy is keyed under a `d` of its own, sixteen random hex digits, never
+ * under the source's own address, and never one that names it:
+ * - every reader that does not know `objects` asks public relays for that
+ *   address, so the `d` says nothing about the piece (DECK-0003 §1.10, "What an
+ *   older reader asks relays for"), and finds nothing there, rather than the
+ *   source as it is published today;
  * - the workshop never answers for it (lib/parts.ts fetchOwnFirst), so the
  *   bench draws the copy, which is the parent's own data;
  * - stamping the source again after the copy was edited makes a new copy
@@ -97,20 +116,21 @@ export function copiedFrom(address: string): string | null {
  * - two parents' copies of one piece, made at different times, never collide
  *   when both are carried in one hide (a writer flattens into one table).
  *
- * A copy of the source exactly as it is now, already in this parent, is used
- * again, so a piece stamped ten times in one parent travels once and its
- * placements edit together. The copy keeps the source's name, as a label.
- * Written as a hide writes it (OPAQUE where never chosen), and what the source
- * itself carries joins the parent's one table.
+ * A copy of the source exactly as it is now, already in this parent under your
+ * key, is used again, so a piece stamped ten times in one parent travels once
+ * and its placements edit together. The copy keeps the source's name, as a
+ * label, sealed inside with the payload. Written as a hide writes it (OPAQUE
+ * where never chosen), and what the source itself carries joins the parent's
+ * one table.
  */
 export function copyInto(parent: ShardModel, source: ShardModel, pubkey: string): { shard: ShardModel; ref: Ref } {
   const written = withAuthoredConstrain(source)
   const text = JSON.stringify(carriedPayload(written))
-  const prefix = `33331:${pubkey}:${source.id}${COPY_MARK}`
+  const mine = `33331:${pubkey}:`
   for (const [key, entry] of Object.entries(parent.objects ?? {})) {
-    if (key.startsWith(prefix) && key.indexOf(COPY_MARK, prefix.length) < 0 && JSON.stringify(entry) === text) return { shard: parent, ref: ['a', key] }
+    if (key.startsWith(mine) && JSON.stringify(entry) === text) return { shard: parent, ref: ['a', key] }
   }
-  const address = `${prefix}${nonce()}`
+  const address = `${mine}${quietD()}`
   return { shard: carryObject(parent, address, written), ref: ['a', address] }
 }
 

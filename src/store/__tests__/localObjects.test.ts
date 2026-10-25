@@ -43,6 +43,7 @@ import { createElement, type ReactElement } from 'react'
 import { newShard, toPayload, type Ref, type ShardModel } from 'sno-core/shards'
 import { readItem } from '../../lib/hidden'
 import { keepOwnTable } from '../../lib/carried'
+import { objectFromEvent } from 'sno-core/feed'
 import { resolveParts } from 'sno-core/parts'
 import { OwnPartsContext, fetchOwnFirst, fetchRef, forgetRef, onLocalObjects, primeRef, resolvePartsShared, touchedKeys, useResolved } from '../../lib/parts'
 import { authoredConstrainOf, withConstrain } from '../../lib/walkConstrain'
@@ -384,11 +385,39 @@ describe('carried objects (DECK-0003 §1.10 objects)', () => {
   it('a key under another pubkey is ignored where the object is read from its event (D5)', () => {
     const raw = { ...toPayload(placing('P', [addr(THEM, 'x'), addr(ME, 'y')])), objects: { [`33331:${THEM}:x`]: toPayload(tri('X')), [`33331:${ME}:y`]: toPayload(tri('Y')) } }
     const ev = { kind: 3330, id: 'i', tags: [], content: JSON.stringify(raw) }
-    expect(Object.keys(readItem({ ...ev, pubkey: ME })?.shard?.objects ?? {})).toEqual([`33331:${ME}:y`])
-    expect(readItem({ ...ev, pubkey: THEM })?.shard?.objects).toEqual({ [`33331:${THEM}:x`]: toPayload(tri('X')) })
-    expect(readItem(ev)?.shard?.objects).toBeUndefined()
-    const m = carrying()
+    // The pubkey is the one the reader holds the item to (the bag's signer), never the item's claim.
+    const claimed = { ...ev, pubkey: THEM }
+    expect(Object.keys(readItem(claimed, ME)?.shard?.objects ?? {})).toEqual([`33331:${ME}:y`])
+    expect(readItem(ev, ME)?.shard?.author).toBe(ME)
+    expect(readItem(ev, THEM)?.shard?.objects).toEqual({ [`33331:${THEM}:x`]: toPayload(tri('X')) })
+    expect(readItem(ev, null)?.shard?.objects).toBeUndefined()
+    const m = keepOwnTable(carrying(), ME)
     expect(keepOwnTable(m, ME)).toBe(m)
+  })
+
+  it('a forged key under someone else is never drawn: not on the bench, not from the feed', async () => {
+    // A shard of yours whose table claims THEM's tile: your bench draws only keys under your own key.
+    const forged: ShardModel = { ...placing('Forged', [addr(THEM, 'tile')]), objects: { [`33331:${THEM}:tile`]: toPayload(tri('FORGED')) } }
+    const h = mountHook(useResolved, forged, bench)
+    await settle()
+    expect(h.current().get(`a:33331:${THEM}:tile`)?.model).toBeNull()
+    await h.unmount()
+    // Mallory's published object carrying a key under YOUR address: drawn as nothing, and asked of the relays.
+    const content = JSON.stringify({ ...toPayload(placing('Chair set', [addr(ME, 'chair')])), objects: { [`33331:${ME}:chair`]: toPayload(tri('MALLORY')) } })
+    const o = objectFromEvent({ id: 'f'.repeat(64), pubkey: THEM, created_at: 1, kind: 33331, tags: [['d', 'set']], content })!
+    const placed = await resolvePartsShared(o.shard)
+    expect(placed[0].model).toBeNull()
+    expect(asked()).toContain('chair')
+  })
+
+  it('what comes into the workshop keeps only keys under your own key, and no author', () => {
+    const theirs: ShardModel = { ...placing('Theirs', [addr(THEM, 'x'), addr(ME, 'y')]), author: THEM, objects: { [`33331:${THEM}:x`]: toPayload(tri('X')), [`33331:${ME}:y`]: toPayload(tri('Y')) } }
+    const id = w().importShard(theirs)
+    const copy = w().shards.find((s) => s.id === id)!
+    expect(Object.keys(copy.objects ?? {})).toEqual([`33331:${ME}:y`])
+    expect(copy.author).toBeUndefined()
+    const pasted = w().importText(JSON.stringify({ ...toPayload(placing('P', [addr(THEM, 'x')])), objects: { [`33331:${THEM}:x`]: toPayload(tri('X')) } }))!
+    expect(w().shards.find((s) => s.id === pasted)!.objects).toBeUndefined()
   })
 
   it("a picture's key holds the table: a changed copy is a new picture", () => {

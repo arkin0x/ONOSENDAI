@@ -50,8 +50,16 @@ export function trustedPlacement(container: string | null | undefined, object: s
 export function chargeByTrust(trusted: { left: number }, stranger: () => { left: number }): (author: string | null, parent: { left: number }) => { left: number } {
   // The strangers' budget is asked for only when a placement is charged to it.
   let theirs: { left: number } | null = null
+  // Whom this resolve trusts, asked once per author, not per placement: the
+  // follows as they stood when each author was first met.
+  const trust = new Map<string, boolean>()
+  const trusts = (author: string): boolean => {
+    let t = trust.get(author)
+    if (t === undefined) { t = trustedAuthor(author); trust.set(author, t) }
+    return t
+  }
   return (author, parent) => {
-    if (parent === trusted && author !== null && trustedAuthor(author)) return trusted
+    if (parent === trusted && author !== null && trusts(author)) return trusted
     return parent !== trusted ? parent : (theirs ??= stranger())
   }
 }

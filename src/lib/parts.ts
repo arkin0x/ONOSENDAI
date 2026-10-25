@@ -334,11 +334,13 @@ export function resolvePartsShared(
   self?: Ref,
   budget?: { left: number },
   budgetFor?: (author: string | null, parent: { left: number }) => { left: number },
+  models?: { left: number },
 ): Promise<Placed[]> {
   // Whose keys of its table count: the event's it was read from, or yours for
   // a model made here (lib/carried.ts authorOf), never every key. `budget`, when
   // given, is shared with every other resolve handed the same one (WALK's
   // walls); `budgetFor` charges each placement to a budget by whose object it
-  // places (sno-core 0.1.22).
-  return resolveParts(model, fetch, { self, read: readShared, author: authorOf(model), ...(budget ? { budget } : {}), ...(budgetFor ? { budgetFor } : {}) })
+  // places (sno-core 0.1.22); `models`, the distinct objects it may read
+  // whatever share pays, shared as `budget` is (sno-core 0.1.23).
+  return resolveParts(model, fetch, { self, read: readShared, author: authorOf(model), ...(budget ? { budget } : {}), ...(budgetFor ? { budgetFor } : {}), ...(models ? { models } : {}) })
 }

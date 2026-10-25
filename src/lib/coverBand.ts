@@ -35,9 +35,18 @@ export interface Cover { edge: CoverEdge; box: Box }
 
 /**
  * The share of the uncovered width, about its middle, that the focus needs
- * clear. A bar or pad counts toward the top or bottom only when it reaches
- * into this column: on a phone the deploy bar and the pad both do, while on a
- * wide desktop a pad in the corner leaves the picture where it was.
+ * clear on a landscape screen. A bar or pad counts toward the top or bottom
+ * there only when it reaches into this column, so on a wide desktop a pad in
+ * the corner leaves the picture where it was.
+ *
+ * A portrait screen (a phone held upright) counts every top and bottom cover
+ * whatever its width. The column was a cliff there: the pad stands at a fixed
+ * width in the right corner, so it reached the column on a phone up to about
+ * 446 px wide and missed it on a wider one, and BUILD's framing jumped by half
+ * the pad's height (about 128 px) between two phones a few pixels apart
+ * (review of #505). On a phone the bars and the pad run across most of the
+ * width anyway, which is the owner's "vertical portion of the screen not
+ * covered by any menu".
  */
 export const FOCUS_COLUMN = 0.4
 
@@ -56,8 +65,9 @@ function overlaps(a0: number, a1: number, b0: number, b1: number): boolean {
  * The part of a `width` by `height` screen the scene can be seen in past the
  * covers: left and right insets from the side covers that reach the middle of
  * the screen's height, then top and bottom insets from the covers that reach
- * the middle of what is left of its width (FOCUS_COLUMN). The whole screen
- * when nothing covers it, or when what is left is too small to frame in.
+ * the middle of what is left of its width (FOCUS_COLUMN), or from every top
+ * and bottom cover on a portrait screen. The whole screen when nothing covers
+ * it, or when what is left is too small to frame in.
  */
 export function uncoveredBand(width: number, height: number, covers: readonly Cover[]): Box {
   const whole: Box = { left: 0, top: 0, right: width, bottom: height }
@@ -75,10 +85,11 @@ export function uncoveredBand(width: number, height: number, covers: readonly Co
   const span = right - left
   const colX0 = left + span * (0.5 - FOCUS_COLUMN / 2)
   const colX1 = left + span * (0.5 + FOCUS_COLUMN / 2)
+  const portrait = height >= width
   let top = 0
   let bottom = height
   for (const { edge, box } of covers) {
-    if (!overlaps(box.left, box.right, colX0, colX1)) continue
+    if (!portrait && !overlaps(box.left, box.right, colX0, colX1)) continue
     if (edge === 'top') top = Math.max(top, Math.min(height, box.bottom))
     else if (edge === 'bottom') bottom = Math.min(bottom, Math.max(0, box.top))
   }
@@ -100,6 +111,23 @@ export function lensShift(width: number, height: number, band: Box): { x: number
 
 /** Below this many pixels a shift is no shift: the projection goes back to centred. */
 export const SHIFT_EPSILON = 0.5
+
+/**
+ * One frame of the shift's glide toward `target`, written into `shift`: an
+ * exponential ease with time constant `tau` seconds over `dt`, landing
+ * exactly once within SHIFT_EPSILON. While `held` (a finger or the mouse is
+ * dragging the scene) it does not move at all, whatever the target, so the
+ * picture never slides under a drag; it glides to wherever the target is by
+ * then once the drag lets go.
+ */
+export function stepShift(shift: { x: number; y: number }, target: { x: number; y: number }, dt: number, tau: number, held: boolean): void {
+  if (held) return
+  const k = 1 - Math.exp(-dt / tau)
+  shift.x += (target.x - shift.x) * k
+  shift.y += (target.y - shift.y) * k
+  if (Math.abs(target.x - shift.x) < SHIFT_EPSILON) shift.x = target.x
+  if (Math.abs(target.y - shift.y) < SHIFT_EPSILON) shift.y = target.y
+}
 
 /**
  * Sets `camera`'s lens shift to `shift` on a `width` by `height` canvas, or

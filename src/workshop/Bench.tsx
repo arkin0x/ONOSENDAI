@@ -41,7 +41,7 @@ import { OVERLAY_ORDER } from '../scene/shardFaces'
 import { ShardLights } from '../scene/shardLight'
 import { nextSelection, ownAddress, useWorkshop, type Tool } from '../store/useWorkshop'
 import { partMatrix } from 'sno-core/parts'
-import { OwnPartsContext } from '../lib/parts'
+import { OwnPartsContext, fetchRef } from '../lib/parts'
 import { useCyberspace } from '../store/useCyberspace'
 import { Hold, noteGesture, tapSlop } from './deadZone'
 import { HandleDots, dotCapacity } from './handleDots'
@@ -709,6 +709,9 @@ function AxesReporter(): null {
   return null
 }
 
+/** How soon a second tap on a placed object must follow the first to open it, ms. */
+export const DOUBLE_TAP_MS = 400
+
 /**
  * Memoized: Bench takes no props, so its only legitimate reason to redraw is
  * its own store reads (useWorkshop, useBenchView, useThree). Workshop.tsx is
@@ -743,9 +746,20 @@ function BenchImpl(): JSX.Element {
   // in FACE it is caught here, so a tap on it never selects a face of this
   // object hidden behind it. In the placing tools it lets the tap through, to
   // the grid it stands on.
+  // A second tap on the same placed object, soon after the first, opens it in
+  // the edit view (PartCrumbs; arkinox 2026-10-25: "double-tap a part's box").
+  const lastTap = useRef<{ part: number; at: number } | null>(null)
   const onPart = (e: ThreeEvent<MouseEvent>, part: number): void => {
     if (e.delta > tapSlop()) return
     e.stopPropagation()
+    const now = performance.now()
+    const prev = lastTap.current
+    if (prev && prev.part === part && now - prev.at < DOUBLE_TAP_MS) {
+      lastTap.current = null
+      void useWorkshop.getState().enterPart(part, fetchRef)
+      return
+    }
+    lastTap.current = { part, at: now }
     const t = useWorkshop.getState().tool
     // VIEW too (arkinox, 2026-10-10): with the tool put down, a tap on a
     // stamped object picks it, and the pad moves, turns and deletes it.

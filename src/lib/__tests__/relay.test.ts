@@ -1,5 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
+// relay.ts itself, over its fake pool, not the tests' offline relay (src/test/noNetwork.ts).
+vi.unmock('../relay')
+
 // A pool whose first publish fails the way a half-open socket does, and whose
 // second, over fresh sockets, is accepted.
 const calls: { publish: string[][]; closed: string[][] } = { publish: [], closed: [] }

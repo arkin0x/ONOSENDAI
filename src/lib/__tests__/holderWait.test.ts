@@ -16,6 +16,9 @@
 
 import { describe, expect, it, vi } from 'vitest'
 
+// relay.ts itself, over its fake pool, not the tests' offline relay (src/test/noNetwork.ts).
+vi.unmock('../relay')
+
 /** Each relay's behavior, by normalized URL: when it answers, what it holds, or that it never answers or cannot be reached. */
 const net = vi.hoisted(() => ({
   relays: [] as string[],

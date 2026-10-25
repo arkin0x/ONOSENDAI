@@ -71,7 +71,8 @@ export interface WalkStep {
 
 /**
  * Whether a blocking face is less than a gibson below `at`: you stand on it.
- * With `gravity`, a face in your own plane is under you too (stepLimit `stand`).
+ * With `gravity`, a floor in your own plane with open space above it is under
+ * you too (stepLimit `stand`).
  */
 export function standing(at: Position, items: readonly WallItem[], gravity = false): boolean {
   const down = stepLimit(at, 'y', -1, 1n, items, gravity)

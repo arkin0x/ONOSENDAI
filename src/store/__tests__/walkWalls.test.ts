@@ -173,6 +173,24 @@ describe('stepLimit', () => {
     expect(stepLimit(AT, 'y', -1, 1n, [off], true)).toMatchObject({ reach: 1n, by: null })
   })
 
+  it('asked to stand at units 20 to 30: a sheet and a slab\'s top hold you, a slab\'s underside does not', () => {
+    const sheet = (unit: number): ShardModel => withConstrain({ ...newShard('Sheet'), unit, mode: 'solid', vertices: [[-2, 0, -2], [2, 0, -2], [2, 0, 2], [-2, 0, 2]].map((p) => ({ p: p as [number, number, number], c: [1, 1, 1] as [number, number, number] })), faces: [[0, 1, 2], [0, 2, 3]] }, 'all')
+    for (let unit = 20; unit <= 30; unit++) {
+      clearWalls()
+      const plate = item(sheet(unit))
+      expect(stepLimit(AT, 'y', -1, 1n, [plate], true)).toMatchObject({ reach: 0n, by: plate })
+      // A slab whose top is at your height (2 ticks thick, below you): held.
+      const top = item(slab('y', -1, 0, 2, unit))
+      expect(stepLimit(AT, 'y', -1, 1n, [top], true)).toMatchObject({ reach: 0n, by: top })
+      // A slab whose underside is at your height (above you): you fall away, as without `stand`.
+      const under = item(slab('y', 1, 0, 2, unit))
+      expect(stepLimit(AT, 'y', -1, 1n, [under], true)).toEqual(stepLimit(AT, 'y', -1, 1n, [under]))
+      expect(stepLimit(AT, 'y', -1, 1n, [under], true)).toMatchObject({ reach: 1n, by: null })
+      // The sheet under the slab's underside: the space above you is inside the slab, so the sheet does not hold you either.
+      expect(stepLimit(AT, 'y', -1, 1n, [plate, under], true)).toMatchObject({ reach: 1n, by: null })
+    }
+  })
+
   it('on a monument, the face in the walker\'s own plane lets it go as before, asked to stand or not', () => {
     for (const unit of [48, 52, 53, 56, 70]) {
       clearWalls()

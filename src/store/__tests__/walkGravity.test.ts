@@ -56,6 +56,7 @@ import { useShards, type WorldItem } from '../useShards'
 import { useToast } from '../useToast'
 import { useWorkshop } from '../useWorkshop'
 import { clearWalls, entryFor, wallItems } from '../walkWalls'
+import { standing, walkStep } from '../walkStep'
 import { GIBSON_METRES, GRAVITY_KEY, JUMP_HANG_S, JUMP_HEIGHT, JUMP_SPEED, STANDARD_GRAVITY, WALK_GRAVITY, affordableAlongY, arcHeight, loadGravity } from '../walkGravity'
 import { walkFall } from '../../lib/walkEye'
 import { useCalibration } from '../../lib/calibration'
@@ -589,11 +590,67 @@ describe('exactly on a face', () => {
     expect(at(start)).toEqual([0, -5, 0])
   })
 
-  it('in a ceiling\'s plane you are nudged onto it as onto any face, and not moved', () => {
-    // The underside of a block above you: a face cannot say which side is its top (they are two-sided).
-    world(start, [boxes('Over', 'all', [[[-10, 0, -10], [10, 4, 10]]]), [0, 0, 0]])
+  it('a floor and a ceiling of single planes, one open shard: the floor holds you', () => {
+    // No closed solid: the space above the floor is open, whatever a ray up would cross.
+    const room = sheet('Room', 'all')
+    const ceiling = sheet('Room', 'all', 4)
+    world(start, [{ ...room, vertices: [...room.vertices, ...ceiling.vertices], faces: [...room.faces, [4, 5, 6], [4, 6, 7]] }, [0, 0, 0]])
     walk(true)
     still()
+  })
+
+  describe('under a solid, in its underside\'s plane (arkinox, 2026-10-25: floors only)', () => {
+    /** A block from your height up 4, and a floor 20 down. */
+    const over = (): void => { world(start, [boxes('Over', 'all', [[[-10, 0, -10], [10, 4, 10]]]), [0, 0, 0]], [boxes('Low', 'all', [lowFloor(20)]), [0, -1, 0]]) }
+    /** No hop of the walk's is inside the block (its faces are not inside it: the first mid-air point is at your own height). */
+    const outside = (): void => {
+      for (const p of [...posted.map((r) => r.to), ...useWalk.getState().queue]) {
+        const [x, y, z] = at(start, p)
+        expect(y > 0 && y < 4 && Math.abs(x) < 10 && Math.abs(z) < 10).toBe(false)
+      }
+    }
+
+    it('you fall away from it, on entering WALK and on gravity on', () => {
+      over()
+      walk(true)
+      expect(useWalk.getState().falling).toBe(true)
+      fallOut()
+      expect(at(start)).toEqual([0, -20, 0])
+      outside()
+      // Again from your head, which none of that has moved (nothing landed): gravity switched on in WALK.
+      useWalk.getState().exit()
+      expect(useCyberspace.getState().position).toEqual(start)
+      walk(false)
+      useWalk.getState().setGravity(true)
+      expect(useWalk.getState().falling).toBe(true)
+    })
+
+    it('a step out from under it is not lifted into it', () => {
+      over()
+      const step = walkStep(start, 'x', 1, 1n, wallItems(useCyberspace.getState().plane), true)
+      expect(at(start, step.to)).toEqual([1, 0, 0])
+      expect(standing(step.to, wallItems(useCyberspace.getState().plane), true)).toBe(false)
+    })
+
+    it('Up is no jump into it: you are not standing, so you fall', () => {
+      over()
+      walk(true)
+      useWalk.getState().press('up')
+      expect(fallState()?.v0).toBe(0)
+      fallOut()
+      expect(at(start)).toEqual([0, -20, 0])
+      outside()
+    })
+
+    it('a press in mid-air lands below it, never inside it', async () => {
+      over()
+      walk(true)
+      useWalk.getState().press('right')
+      fallOut()
+      expect(at(start)).toEqual([1, -20, 0])
+      await vi.waitFor(() => expect(posted.length).toBeGreaterThan(0))
+      outside()
+    })
   })
 
   it('gravity off, a press is what it was: Down goes through the face you are on', () => {

@@ -63,10 +63,13 @@
  * a STOP mid-fall leaves you where the chain is, the step-off point once
  * its hop has landed. Gravity off, a press is exactly what it was.
  *
- * Under gravity a face in your own plane is under you: a HOP, a VIEW, a BUILD
- * or a floor deployed at your height can leave you exactly on one (a WALK
- * stop never does), and you stand on it instead of falling through it. It is
- * how the walls are asked, from a hair above your point (store/walkWalls.ts
+ * Under gravity a floor in your own plane holds you: a HOP, a VIEW, a BUILD
+ * or a floor deployed at your height can leave you exactly on one, and a fall
+ * can come to rest on one at the height it is passing (a WALK stop never
+ * ends there). You stand on it instead of falling through it when the space
+ * just above you is open: a single-plane floor or the top of a solid, never
+ * the underside of a solid, from under which you fall away (arkinox,
+ * 2026-10-25: floors only). It is how the walls are asked (store/walkWalls.ts
  * stepLimit, `stand`): nothing moves and nothing is published for it.
  *
  * `behind` is the walk's lag: the closed segments not yet proven, the one

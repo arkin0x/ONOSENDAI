@@ -201,6 +201,75 @@ export function wallsOf(m: ShardModel): ModelWalls {
   return walls
 }
 
+/**
+ * The closed solids among a model's wall triangles: for each triangle (in
+ * `tris` order) the solid it belongs to, or -1 when it belongs to none, and
+ * how many solids there are. Faces are two-sided here and their winding is
+ * not to be trusted (an older shard is wound any way, and the disco floor's
+ * own tiles and base are wound opposite ways), so a face cannot say which of
+ * its sides is inside. A closed surface can: a point is inside it when a ray
+ * from the point crosses it an odd number of times, whichever way the ray
+ * goes. Triangles that share an edge, corners matched by where they are
+ * rather than by index, are one surface; it is closed when every edge on it
+ * is shared by an even number of its triangles (a box; two blocks that touch
+ * along an edge). Anything else (a plate, a room of single-plane walls, an
+ * open shell, a seam with a T-junction) is no solid: it encloses nothing, as
+ * sno-core orient.ts found of the bench's inside test on open shards.
+ */
+export interface ModelSolids {
+  of: Int32Array
+  count: number
+}
+
+const modelSolids = new WeakMap<ModelWalls, ModelSolids>()
+
+/** The closed solids of `walls`, worked out once per model, and only when a walker first asks (enclosed). */
+export function solidsOf(walls: ModelWalls): ModelSolids {
+  const held = modelSolids.get(walls)
+  if (held) return held
+  const { corners, tris } = walls
+  const n = tris.length / 3
+  // Corners by place: two vertices at one place are one corner.
+  const ids = new Map<string, number>()
+  const at = (q: number): number => {
+    const k = `${corners[q * 3]},${corners[q * 3 + 1]},${corners[q * 3 + 2]}`
+    let id = ids.get(k)
+    if (id === undefined) { id = ids.size; ids.set(k, id) }
+    return id
+  }
+  const parent = Int32Array.from({ length: n }, (_, t) => t)
+  const find = (t: number): number => { while (parent[t] !== t) { parent[t] = parent[parent[t]]; t = parent[t] } return t }
+  const edges = new Map<string, number[]>()
+  const flat = new Uint8Array(n)
+  for (let t = 0; t < n; t++) {
+    const c = [at(tris[t * 3]), at(tris[t * 3 + 1]), at(tris[t * 3 + 2])]
+    // A triangle with a corner twice has no area: it bounds nothing.
+    if (c[0] === c[1] || c[1] === c[2] || c[2] === c[0]) { flat[t] = 1; continue }
+    for (let e = 0; e < 3; e++) {
+      const a = c[e], b = c[(e + 1) % 3]
+      const k = a < b ? `${a}>${b}` : `${b}>${a}`
+      const on = edges.get(k)
+      if (on) { parent[find(t)] = find(on[0]); on.push(t) } else edges.set(k, [t])
+    }
+  }
+  // A surface with an edge on an odd number of its triangles is open.
+  const open = new Uint8Array(n)
+  for (const on of edges.values()) if (on.length % 2 === 1) open[find(on[0])] = 1
+  const of = new Int32Array(n).fill(-1)
+  const label = new Map<number, number>()
+  for (let t = 0; t < n; t++) {
+    if (flat[t]) continue
+    const r = find(t)
+    if (open[r]) continue
+    let id = label.get(r)
+    if (id === undefined) { id = label.size; label.set(r, id) }
+    of[t] = id
+  }
+  const solids = { of, count: label.size }
+  modelSolids.set(walls, solids)
+  return solids
+}
+
 /** A placed object's walls where it stands: its model's, through `f`, inside `min`..`max`. */
 export interface WallPlacement {
   walls: ModelWalls
@@ -227,6 +296,8 @@ export interface WallMesh {
   tris: Float64Array
   /** How many triangles the shard's own are. */
   own: number
+  /** The shard's own walls in its model frame, whose triangles `tris` holds posed, in order; null when it blocks nothing. */
+  ownWalls: ModelWalls | null
   /** The objects it places, and theirs, each where it stands. */
   placements: WallPlacement[]
   /** The bounds of every corner of every triangle, own and placed, or null for no triangles. */
@@ -245,9 +316,10 @@ export function wallMesh(shard: ShardModel, placed: readonly Placed[], pose?: Po
   const max: [number, number, number] = [-Infinity, -Infinity, -Infinity]
   // The shard's own corners take the pose through their ticks, as flatten does.
   let tris = new Float64Array(0)
-  if (blocks(shard)) {
+  const ownWalls = blocks(shard) ? wallsOf(shard) : null
+  if (ownWalls) {
     const pts = shard.vertices.map((v) => toRender(posed(ticksOf(v), pose)))
-    const own = wallsOf(shard).tris
+    const own = ownWalls.tris
     tris = new Float64Array(own.length * 3)
     for (let q = 0; q < own.length; q++) {
       const p = pts[own[q]]
@@ -294,7 +366,7 @@ export function wallMesh(shard: ShardModel, placed: readonly Placed[], pose?: Po
   }
   place(shard, placed, root)
   const any = tris.length > 0 || placements.length > 0
-  return { tris, own: tris.length / 9, placements, min: any ? min : null, max: any ? max : null }
+  return { tris, own: tris.length / 9, ownWalls, placements, min: any ? min : null, max: any ? max : null }
 }
 
 /** Barycentric slack: a ray through an edge or a corner hits, so two triangles that share an edge leave no seam. */
@@ -384,4 +456,66 @@ export function firstHit(mesh: WallMesh, o: readonly [number, number, number], i
     for (let n = 0; n < tris.length; n += 3) test(scratch, tris[n] * 3, tris[n + 1] * 3, tris[n + 2] * 3, false)
   }
   return best
+}
+
+/**
+ * A ray mostly up, slanted so that on the lattice's axis-aligned shapes it
+ * crosses faces, not edges or corners (as sno-core orient.ts slants its own).
+ */
+const UPWARD: readonly [number, number, number] = [0.0173, 1, 0.0237]
+
+/**
+ * Whether `p` (the shard's render frame, model units) is inside one of the
+ * closed solids of `mesh` (solidsOf): its ray crosses that solid an odd
+ * number of times. Open surfaces never enclose. With `clip`, the shard's own
+ * solids enclose only inside the region box, where they are drawn.
+ */
+export function enclosed(mesh: WallMesh, p: readonly [number, number, number], clip?: Box): boolean {
+  const d = UPWARD
+  // Moller and Trumbore, counting crossings strictly ahead of `p`.
+  const crosses = (t: Float64Array, a: number, b: number, c: number): boolean => {
+    const e1x = t[b] - t[a], e1y = t[b + 1] - t[a + 1], e1z = t[b + 2] - t[a + 2]
+    const e2x = t[c] - t[a], e2y = t[c + 1] - t[a + 1], e2z = t[c + 2] - t[a + 2]
+    const px = d[1] * e2z - d[2] * e2y, py = d[2] * e2x - d[0] * e2z, pz = d[0] * e2y - d[1] * e2x
+    const det = e1x * px + e1y * py + e1z * pz
+    const size = Math.hypot(e1x, e1y, e1z) * Math.hypot(e2x, e2y, e2z)
+    if (!(Math.abs(det) > FLAT * size)) return false
+    const tx = p[0] - t[a], ty = p[1] - t[a + 1], tz = p[2] - t[a + 2]
+    const u = (tx * px + ty * py + tz * pz) / det
+    if (u < 0 || u > 1) return false
+    const qx = ty * e1z - tz * e1y, qy = tz * e1x - tx * e1z, qz = tx * e1y - ty * e1x
+    const v = (d[0] * qx + d[1] * qy + d[2] * qz) / det
+    if (v < 0 || u + v > 1) return false
+    return (e2x * qx + e2y * qy + e2z * qz) / det > 0
+  }
+  const odd = (walls: ModelWalls, t: Float64Array, stride: 9 | 3, idx: Uint32Array | null): boolean => {
+    const { of, count } = solidsOf(walls)
+    if (count === 0) return false
+    const parity = new Uint8Array(count)
+    const n = of.length
+    for (let q = 0; q < n; q++) {
+      const s = of[q]
+      if (s < 0) continue
+      const hit = idx ? crosses(t, idx[q * 3] * 3, idx[q * 3 + 1] * 3, idx[q * 3 + 2] * 3) : crosses(t, q * stride, q * stride + 3, q * stride + 6)
+      if (hit) parity[s] ^= 1
+    }
+    return parity.some((x) => x === 1)
+  }
+  const inClip = !clip || p.every((v, q) => v >= clip.min[q] - EDGE_SLACK && v <= clip.max[q] + EDGE_SLACK)
+  if (mesh.ownWalls && mesh.own > 0 && inClip && odd(mesh.ownWalls, mesh.tris, 9, null)) return true
+  for (const pl of mesh.placements) {
+    // A point outside a placement's bounds is inside none of its solids.
+    if (p.some((v, q) => v < pl.min[q] - NEAR || v > pl.max[q] + NEAR)) continue
+    const { corners, tris } = pl.walls
+    const f = pl.f
+    if (scratch.length < corners.length) scratch = new Float64Array(Math.max(corners.length, scratch.length * 2))
+    for (let q = 0; q < corners.length; q += 3) {
+      const r0 = corners[q], r1 = corners[q + 1], r2 = corners[q + 2]
+      scratch[q] = f[0] * r0 + f[4] * r1 + f[8] * r2 + f[12]
+      scratch[q + 1] = f[1] * r0 + f[5] * r1 + f[9] * r2 + f[13]
+      scratch[q + 2] = f[2] * r0 + f[6] * r1 + f[10] * r2 + f[14]
+    }
+    if (odd(pl.walls, scratch, 3, tris)) return true
+  }
+  return false
 }

@@ -27,7 +27,7 @@ import { resolvePartsShared } from '../lib/parts'
 import { regionBox, type Box } from '../lib/clip'
 import { placedPose } from '../lib/pose'
 import type { AxisName, Position, ViewAxes } from '../lib/space'
-import { firstHit, wallMesh, type WallMesh } from '../lib/walkConstrain'
+import { enclosed, firstHit, wallMesh, type WallMesh } from '../lib/walkConstrain'
 import { useShards, type WorldItem } from './useShards'
 
 /**
@@ -158,21 +158,27 @@ function tolerance(e: Entry, g: number, length: bigint): number {
  * the face (one gibson short at small units and steps), never on it; a face
  * with no room before it refuses the step (reach 0).
  *
- * With `stand`, GRAVITY's question (what is under you), a step down is
- * measured from a hair (ON_FACE) above the walker's point, so a face in the
- * walker's own plane is under it and holds it: you stand on the floor you are
- * exactly on instead of falling through it. WALK never stops there, but a HOP,
- * a VIEW, a BUILD or a floor deployed at your own height can put you there.
- * The hair is in this question only: nothing moves, nothing is published, and
- * every face a hair or more from the point is met exactly as without it.
- * Only where the measure can tell a hair (a tolerance of ON_FACE): on a
- * monument the face you stand on lets you go, as below.
+ * With `stand`, GRAVITY's question (what is under you), a face in the
+ * walker's own plane is measured too: one within the shard's tolerance of the
+ * walker's height, which a HOP, a VIEW, a BUILD or a floor deployed at your
+ * own height can leave you on (a WALK stop never does), and a fall can come
+ * to rest on (a mid-air press over a ledge at the height it is passing). It
+ * holds you, so you stand on it instead of falling through it, only when the
+ * space a hair above you is open: the top of a solid or a single-plane floor
+ * holds you, and the underside of a solid does not, so under a block you fall
+ * away from it as before (arkinox, 2026-10-25: floors only). The hair is the
+ * shard's own tolerance, and the question only: nothing moves, nothing is
+ * published, and every face further from your height is met exactly as
+ * without it. Only where the measure can tell (a tolerance under HAIR_MAX):
+ * on a monument the face you stand on lets you go, as below.
  */
 export function stepLimit(from: Position, axis: AxisName, dir: 1 | -1, length: bigint, items: readonly WallItem[], stand = false): WallStop {
   const keep = new Set<string>()
   let best: number | null = null
   let bestTol = ON_FACE
   let by: WallItem | null = null
+  /** The faces in the walker's own plane, held back until the space above it is known to be open. */
+  const planes: Array<{ w: WallItem; tol: number }> = []
   const i = axis === 'x' ? 0 : axis === 'y' ? 1 : 2
   for (const w of items) {
     keep.add(w.key)
@@ -192,20 +198,33 @@ export function stepLimit(from: Position, axis: AxisName, dir: 1 | -1, length: b
     // Then the triangles, in the shard's own model units from its origin.
     const o: [number, number, number] = [Number(off.x) / g, Number(off.y) / g, -Number(off.z) / g]
     const s = (i === 2 ? -dir : dir) as 1 | -1
+    // A step that would end within `tol` of a face meets it (tolerance).
+    const maxT = (Number(length) + tol) / g
     // The face you stand on lets you go. WALK always stops at least `tol`
     // short of a face, so a walker it brought here is never that near one. A
     // walker HOPped to within the measure's error of a face on a monument (a
     // shard past about 2^53 gibsons) may still cross it, which is accepted:
     // holding it there would hold it stepping away from the face too.
-    // Asked to stand (above), a face in your own plane is under you instead.
-    const under = stand && axis === 'y' && dir < 0 && tolerance(e, g, 0n) === ON_FACE
-    const minT = (under ? -ON_FACE : ON_FACE) / g
-    // A step that would end within `tol` of a face meets it (tolerance).
-    const t = firstHit(e.mesh, o, i, s, (Number(length) + tol) / g, minT, e.clip)
+    const hair = tolerance(e, g, 0n)
+    let t: number | null
+    if (stand && axis === 'y' && dir < 0 && hair < HAIR_MAX) {
+      // Asked to stand (above): a face within a hair of your height, either
+      // side, is in your own plane. It is held back, and the step is measured
+      // past it, as if it were not there, until the space above you is known.
+      t = firstHit(e.mesh, o, i, s, maxT, -hair / g, e.clip)
+      if (t !== null && t * g <= hair) {
+        planes.push({ w, tol })
+        t = firstHit(e.mesh, o, i, s, maxT, hair / g, e.clip)
+      }
+    } else {
+      t = firstHit(e.mesh, o, i, s, maxT, ON_FACE / g, e.clip)
+    }
     if (t === null) continue
     const gib = t * g
     if (best === null || gib < best) { best = gib; bestTol = tol; by = w }
   }
+  // A face in your own plane holds you when the space a hair above you is open.
+  if (planes.length > 0 && openAbove(from, items)) { best = 0; bestTol = planes[0].tol; by = planes[0].w }
   for (const k of entries.keys()) if (!keep.has(k)) entries.delete(k)
   if (best === null) return { reach: length, by: null }
   // The last whole gibson at least `tol` short of the face: one short at a
@@ -213,6 +232,34 @@ export function stepLimit(from: Position, axis: AxisName, dir: 1 | -1, length: b
   const k = Math.max(0, Math.ceil(best - bestTol) - 1)
   const reach = BigInt(k) < length ? BigInt(k) : length
   return { reach, by }
+}
+
+/**
+ * The largest tolerance, in gibsons, at which a face is still told to be in
+ * the walker's own plane: past it the measure cannot say which side of a face
+ * a whole gibson is on (a monument), and the face you stand on lets you go.
+ */
+const HAIR_MAX = 0.5
+
+/**
+ * Whether the space a hair above `from` is open: inside no closed solid of
+ * any of `items` (lib/walkConstrain.ts enclosed), each shard measured with
+ * its own tolerance as the hair. A shard whose measure cannot tell a hair
+ * (HAIR_MAX) encloses nothing here.
+ */
+function openAbove(from: Position, items: readonly WallItem[]): boolean {
+  for (const w of items) {
+    const e = entryFor(w)
+    if (!e.reach) continue
+    const g = 2 ** w.shard.unit
+    const hair = tolerance(e, g, 0n)
+    if (hair >= HAIR_MAX) continue
+    const off = { x: from.x - w.at.x, y: from.y - w.at.y, z: from.z - w.at.z }
+    const lo = e.reach.lo, hi = e.reach.hi
+    if ((['x', 'y', 'z'] as const).some((a) => off[a] < lo[a] || off[a] > hi[a])) continue
+    if (enclosed(e.mesh, [Number(off.x) / g, (Number(off.y) + hair) / g, -Number(off.z) / g], e.clip)) return false
+  }
+  return true
 }
 
 /** The shards a walker in `plane` can meet: every shard placed in the world there, as the scene draws them. */

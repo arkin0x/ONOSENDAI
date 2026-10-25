@@ -30,9 +30,9 @@ export function keepOwnTable(model: ShardModel, pubkey: string | null | undefine
 
 /**
  * `model` with only the carried objects keyed under `pubkey` (or none at all
- * without one), and no author: what comes into your workshop from anywhere (a
- * copy from the feed or a bag, PASTE, an import, an avatar), so that a key
- * someone else wrote under your name can never be published again as yours.
+ * without one), and no author. A table counts as yours only when it was read
+ * from an event you signed; see signedTableOnly and noTable for the two ways
+ * a model comes into the workshop.
  */
 export function ownTableOnly(model: ShardModel, pubkey: string | null): ShardModel {
   const { author: _was, ...bare } = model
@@ -40,6 +40,28 @@ export function ownTableOnly(model: ShardModel, pubkey: string | null): ShardMod
   const kept = carriedTable(model, pubkey)
   const { objects: _all, ...rest } = bare
   return Object.keys(kept).length ? { ...rest, objects: kept } : rest
+}
+
+/**
+ * A copy into your workshop of a model read from an event (the feed, a bag, a
+ * chest, an avatar): its table is kept only when that event was signed by you
+ * (`author`, set where it was read), and then only your keys; from anyone else
+ * nothing it carries comes in. Their keys would not count once it is yours,
+ * and keys under your name in their event are a forgery.
+ */
+export function signedTableOnly(model: ShardModel, me: string | null): ShardModel {
+  return ownTableOnly(model, me && model.author === me ? me : null)
+}
+
+/**
+ * A model read from text or a file (PASTE, IMPORT, a zip, its UPDATE): nobody
+ * signed it, so nothing it carries is trusted, not even keys under your own
+ * name, which anyone can write. Its table goes whole. A placement it makes of
+ * a piece your workshop holds is still carried when you hide it, from the
+ * workshop's own piece (store/localObjects.ts carryLibrary).
+ */
+export function noTable(model: ShardModel): ShardModel {
+  return ownTableOnly(model, null)
 }
 
 /** Who "you" are, for a model made here (store/localObjects.ts wires it): null when no one is signed in. */

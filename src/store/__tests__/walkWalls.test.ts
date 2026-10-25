@@ -23,7 +23,8 @@ import { newShard, type Ref, type ShardModel } from 'sno-core/shards'
 import { primeRef } from '../../lib/parts'
 import { withConstrain } from '../../lib/walkConstrain'
 import type { AxisName, Position } from '../../lib/space'
-import { clearWalls, stepLimit, type WallItem } from '../walkWalls'
+import { WALL_BUDGET, clearWalls, stepLimit, wallBudgetLeft, warmWalls, type WallItem } from '../walkWalls'
+import { useShards } from '../useShards'
 import { toPayload } from 'sno-core/shards'
 
 const AXES: AxisName[] = ['x', 'y', 'z']
@@ -161,3 +162,47 @@ describe('stepLimit', () => {
     })()
   })
 })
+
+describe('what WALK resolves is bounded as a whole', () => {
+  const ME = 'a'.repeat(64)
+  const addr = (d: string): string => `33331:${ME}:${d}`
+  // Four levels each placing the next 30 times, carried: 810,000 placements if nothing bounds them.
+  const level = (name: string, next: string | null): Record<string, unknown> => ({
+    ...toPayload({ ...newShard(name), mode: 'solid' }),
+    ...(next ? { refs: [['a', addr(next)]], parts: Array.from({ length: 30 }, (_, i) => [0, i, 0, 0, 0, 0, 0, 0]) } : {}),
+  })
+  const heavy = (): ShardModel => ({
+    ...slab('x', 1, 2),
+    author: ME,
+    refs: [['a', addr('b')]],
+    parts: Array.from({ length: 30 }, (_, i) => ({ ref: 0, at: [0, i, 0] as [number, number, number], turn: [0, 0, 0] as [number, number, number], step: 0 })),
+    objects: { [addr('b')]: level('b', 'c'), [addr('c')]: level('c', 'd'), [addr('d')]: level('d', 'e'), [addr('e')]: level('e', null) },
+  })
+  const settle = (): Promise<void> => new Promise((r) => setTimeout(r, 0))
+
+  it('a step that cannot enter a shard\'s region resolves nothing of it', async () => {
+    warmWalls(1)
+    const far = item(heavy(), { height: 4, at: { x: AT.x + (1n << 20n), y: AT.y, z: AT.z } })
+    expect(stepLimit(AT, 'z', 1, 5n, [far]).reach).toBe(5n)
+    await settle()
+    expect(wallBudgetLeft()).toBe(WALL_BUDGET)
+  })
+
+  it('every shard around the walker shares one budget, nearest first', async () => {
+    const shards = Array.from({ length: 6 }, (_, i) => item(heavy(), { key: `heavy-${i}`, at: { x: AT.x + BigInt(i), y: AT.y, z: AT.z } }))
+    const world = useShards.getState().worldItems
+    useShards.setState({ worldItems: () => shards.map((w) => ({ ...w, type: 'shard' as const })) as unknown as ReturnType<typeof world> })
+    try {
+      warmWalls(1, AT)
+      for (let n = 0; n < 20 && wallBudgetLeft() > 0; n++) await settle()
+      expect(wallBudgetLeft()).toBe(0)
+      // A later step resolves nothing more than what is left.
+      stepLimit(AT, 'y', 1, 3n, shards)
+      await settle()
+      expect(wallBudgetLeft()).toBe(0)
+    } finally {
+      useShards.setState({ worldItems: world })
+    }
+  })
+})
+

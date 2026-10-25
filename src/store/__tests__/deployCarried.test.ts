@@ -27,7 +27,7 @@ vi.mock('../../lib/relay', () => ({
   relaySet: () => ['wss://relay.test'],
 }))
 
-import { newShard, type Ref, type ShardModel } from 'sno-core/shards'
+import { newShard, toPayload, type Ref, type ShardModel } from 'sno-core/shards'
 import { useCyberspace } from '../useCyberspace'
 import { useShards } from '../useShards'
 import { useWorkshop } from '../useWorkshop'
@@ -101,6 +101,20 @@ describe('a hide carries your library pieces', () => {
     const objects = payload.objects as Record<string, Record<string, unknown>>
     expect(Object.keys(objects).sort()).toEqual([`33331:${me()}:column`, `33331:${me()}:room`])
     expect(objects[`33331:${me()}:room`].objects).toBeUndefined()
+  })
+
+  it('a PASTE that forges a piece under your name is carried as your workshop holds it, never as pasted', async () => {
+    useWorkshop.setState({ shards: [{ ...tri('Room'), id: 'room' }], currentId: null })
+    const forged = { ...toPayload(placing('Pasted', [addr(me(), 'room')])), objects: { [`33331:${me()}:room`]: toPayload(tri('FORGED ROOM')) } }
+    const id = useWorkshop.getState().importText(JSON.stringify(forged))!
+    useShards.getState().startDeployShard(id)
+    await useShards.getState().deploy()
+    expect(useShards.getState().deployStatus).toBe('done')
+    const dep = useShards.getState().mine[0]
+    const bag = [...sent].reverse().find((e) => e.kind === HIDDEN_KIND) as unknown as NostrEvent
+    const item = (await bagEntries(bag, hexToBytes(dep.keyHex))).find((e) => !isReference(e)) as NostrEvent
+    const objects = JSON.parse(item.content).objects as Record<string, { name: string }>
+    expect(objects[`33331:${me()}:room`].name).toBe('Room')
   })
 
   it('carries nothing when it places nothing of yours, and the payload is as before', async () => {

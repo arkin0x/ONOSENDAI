@@ -58,7 +58,7 @@ import { Bench } from './Bench'
 import { benchPose, nudgeFor, nudgeLabel, orbitBy, planeAfter, requestView, useBenchView, type NudgeName } from './benchAxes'
 import { stackedSpots } from '../lib/weld'
 import { ObjectPicker } from './ObjectPicker'
-import { ShardFolders, modelEditedAt, modelName, modelRef, useNewestFirst } from '../hud/ShardFolders'
+import { ShardFolders, modelEditedAt, modelName, modelRef, useNewestFirst, type DeleteContents } from '../hud/ShardFolders'
 import { useEscape } from '../hooks/useEscape'
 import { ShardThumb } from '../hud/ShardThumb'
 
@@ -66,6 +66,19 @@ const TOOLS: Tool[] = ['view', 'stamp', 'add', 'select', 'face']
 const TOOL_ICON: Record<Tool, LucideIcon> = { view: Eye, stamp: Stamp, add: Plus, select: MousePointer2, face: Triangle }
 
 const TOAST_MS = 4000
+
+/**
+ * A folder's DELETE CONTENTS in the MENU's list (hud/ShardFolders): the
+ * shards go in one step and one storage write (useWorkshop removeMany), and
+ * the ledger is only read, for the note that published ones stay on relays.
+ */
+const DELETE_CONTENTS: DeleteContents = {
+  remove: (refs) => useWorkshop.getState().removeMany(refs),
+  published: (refs) => {
+    const ledger = usePublished.getState().ledger
+    return refs.filter((r) => r in ledger).length
+  },
+}
 
 /** One line under the tool row. */
 const TOOL_HELP: Partial<Record<Tool, string>> = {
@@ -218,7 +231,8 @@ export function OpacityRow(): JSX.Element {
           <span className="explorer__mark" style={{ left: `${fraction * 100}%` }} />
         </div>
         <button className="workshop__btn" {...bind(() => w().setOpacity(stepOpacity(w().current()?.opacity, 1)))} disabled={percent >= 100} aria-label="More solid" title="More solid">+</button>
-        <span className="workshop__value">{percent}%</span>
+        {/* A fixed width: a number that narrowed from 100% to 99% moved the rail under the finger mid-drag (arkinox, 2026-10-25). */}
+        <span className="workshop__value ws__opacity-value">{percent}%</span>
         <button
           className={`workshop__btn linescrub__hash ${typing !== null ? 'is-on' : ''}`}
           title="Type a percent"
@@ -226,7 +240,6 @@ export function OpacityRow(): JSX.Element {
           aria-expanded={typing !== null}
           onClick={() => setTyping((t) => (t === null ? '' : null))}
         ><Hash size={12} strokeWidth={2.5} aria-hidden /></button>
-        <span className="workshop__unit-size" title="Avatars always draw solid.">100% is solid</span>
       </div>
       {typing !== null && (
         <form className="linescrub__goto" onSubmit={(e) => { e.preventDefault(); goTyped() }}>
@@ -892,10 +905,10 @@ export function Workshop(): JSX.Element | null {
           <ul className="workshop__list">
             {/* Last edited first: updatedAt moves on every edit and never on opening (arkinox, 2026-09-26).
                 A deploy counts as an edit here, inside its folder (arkinox, 2026-10-23). */}
-            <ShardFolders items={byRecent} refOf={modelRef} nameOf={modelName} row={(s, f) => (
+            <ShardFolders items={byRecent} refOf={modelRef} nameOf={modelName} deleteContents={DELETE_CONTENTS} row={(s, f) => (
               <li key={s.id} className={s.id === shard.id ? 'is-current' : ''} {...f.drag}>
                 <button className="workshop__pick" onClick={() => w().select(s.id)}>
-                  <ShardThumb shard={s} />
+                  <ShardThumb shard={s} own />
                   <span className="workshop__pick-name">{s.name}</span>
                   <span className="workshop__pick-meta">{s.vertices.length} v · {s.faces.length} f{s.parts?.length ? ` · ${s.parts.length} parts` : ''} · {s.mode}</span>
                 </button>

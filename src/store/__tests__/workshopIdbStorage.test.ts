@@ -669,8 +669,8 @@ describe('bulk import over IndexedDB', () => {
     const { ws } = await boot()
     const { useShardImport } = await import('../useShardImport')
     const imp = () => useShardImport.getState()
-    imp().setPublish(true)
     await imp().openZip(kit(3, 10))
+    imp().setPublish(true)
     await imp().start()
     const first = imp().rows[0]
     expect(first.run).toBe('failed')

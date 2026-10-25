@@ -144,7 +144,7 @@ const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout
 const text = new TextDecoder('utf-8')
 const baseName = (path: string): string => path.split('/').pop() ?? path
 
-const blank = { open: false, fileName: '', phase: 'opening' as Phase, error: null, rows: [], skipped: [], dups: {}, dupMode: 'skip' as DupMode, publish: true, foldersOn: false, kit: '', published: [] as string[], remote: 'idle' as const, checkedFor: '', ran: false, stopAsked: false, stall: null }
+const blank = { open: false, fileName: '', phase: 'opening' as Phase, error: null, rows: [], skipped: [], dups: {}, dupMode: 'skip' as DupMode, publish: false, foldersOn: false, kit: '', published: [] as string[], remote: 'idle' as const, checkedFor: '', ran: false, stopAsked: false, stall: null }
 
 /** The ids of your shards, for what exists already (lib/shardZip blockedRows). */
 export function mineIds(): string[] {
@@ -420,7 +420,10 @@ export const useShardImport = create<ShardImportState>((set, get) => {
       if (get().phase === 'running') return
       const g = ++generation
       zip = null
-      set({ ...blank, open: true, fileName: file.name, publish: get().publish, foldersOn: !!folderApi() })
+      // PUBLISH starts off on every import, whatever the last one used
+      // (arkinox, 2026-10-24: "I accidentally published part of the maze kit
+      // because the import has 'publish' ON by default").
+      set({ ...blank, open: true, fileName: file.name, foldersOn: !!folderApi() })
       if (file.size > ZIP_MAX_BYTES) { set({ error: `That zip is ${Math.round(file.size / 1048576)} MB. Import reads zips of up to ${ZIP_MAX_BYTES / 1048576} MB.`, phase: 'review' }); return }
       let bytes: Uint8Array
       try { bytes = new Uint8Array(await file.arrayBuffer()) } catch { if (g === generation) set({ error: 'That zip could not be opened.', phase: 'review' }); return }
@@ -505,7 +508,7 @@ export const useShardImport = create<ShardImportState>((set, get) => {
       if (get().phase === 'running') return
       generation++
       zip = null
-      set({ ...blank, publish: get().publish })
+      set({ ...blank })
     },
   }
 })

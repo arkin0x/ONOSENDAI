@@ -7,7 +7,7 @@
  */
 
 import { describe, expect, it } from 'vitest'
-import { EMPTY_TREE, applyOp, applyOps, buildTree, canonical, flatFolders, folderOf, newestFirst, normalizeTree, pathOf, type FolderNode, type FolderOp, type FolderTree } from '../shardFolders'
+import { EMPTY_TREE, applyOp, applyOps, buildTree, canonical, contentsOf, flatFolders, folderOf, newestFirst, normalizeTree, pathOf, type FolderNode, type FolderOp, type FolderTree } from '../shardFolders'
 
 const mk = (id: string, name: string, parent: string | null = null): FolderOp => ({ op: 'create', id, name, parent, at: 1 })
 const file = (refs: string[], folder: string | null): FolderOp => ({ op: 'assign', refs, folder })
@@ -100,6 +100,55 @@ describe('moving a folder', () => {
     const t = applyOps(kit(), [{ op: 'move', id: 'water', parent: 'forest' }, { op: 'move', id: 'forest', parent: 'water' }])
     expect(pathOf(t, 'water')).toEqual(['maze-kit', 'forest', 'water'])
     expect(allRefs(buildTree(t, SHARDS, (s) => s))).toEqual([...SHARDS].sort())
+  })
+})
+
+describe('purging a folder (DELETE CONTENTS, arkinox 2026-10-25)', () => {
+  /** kit() with one more level under trees, a folder and a filing outside maze-kit, and deploy times. */
+  function deep(): FolderTree {
+    const t = applyOps(kit(), [
+      mk('roots', 'roots', 'trees'),
+      file(['root'], 'roots'),
+      mk('other', 'other-kit'),
+      file(['rock'], 'other'),
+      { op: 'collapse', id: 'trees', collapsed: true },
+      { op: 'collapse', id: 'other', collapsed: true },
+      { op: 'use', refs: ['oak', 'rock'], at: 5 },
+    ])
+    return { ...t, alias: { 'f-old': 'trees', 'f-keep': 'other' } }
+  }
+
+  it('takes the folder and every folder under it, at any depth, and nothing outside', () => {
+    const t = applyOp(deep(), { op: 'purge', id: 'kit' })
+    expect(Object.keys(t.folders)).toEqual(['other'])
+    expect(t.assign).toEqual({ rock: 'other' })
+    expect(t.collapsed).toEqual({ other: true })
+    expect(t.alias).toEqual({ 'f-keep': 'other' })
+    expect(t.used).toEqual({ rock: 5 })
+  })
+
+  it('purging a folder inside leaves its parent and siblings as they were', () => {
+    const t = applyOp(deep(), { op: 'purge', id: 'forest' })
+    expect(Object.keys(t.folders).sort()).toEqual(['kit', 'other', 'water'])
+    expect(t.assign).toEqual({ pond: 'water', gate: 'kit', rock: 'other' })
+  })
+
+  it('acts on the folder an alias names, and changes nothing for a folder that is gone', () => {
+    const t = applyOp(deep(), { op: 'purge', id: 'f-old' })
+    expect(t.folders.trees).toBeUndefined()
+    expect(t.folders.roots).toBeUndefined()
+    expect(t.folders.forest).toBeDefined()
+    const same = deep()
+    expect(applyOp(same, { op: 'purge', id: 'nowhere' })).toBe(same)
+  })
+
+  it('contentsOf counts every shard and folder under a drawn folder, itself left out', () => {
+    const items = [...SHARDS, 'root', 'rock']
+    const built = buildTree(deep(), items, (s) => s)
+    const kitNode = built.folders.find((n) => n.folder.id === 'kit')!
+    const c = contentsOf(kitNode)
+    expect(c.items.sort()).toEqual(['gate', 'moss', 'oak', 'pine', 'pond', 'root'])
+    expect(c.folders).toBe(4)
   })
 })
 

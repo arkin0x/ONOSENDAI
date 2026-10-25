@@ -200,7 +200,9 @@ function clipOf(s: ShardModel, selection: number[], partSel: number[] = []): Cli
   if (taken.length === 0 && placed.length === 0) return null
   const local = new Map(taken.map((i, k) => [i, k]))
   const kept = s.faces.map((_, i) => i).filter((i) => s.faces[i].every((v) => local.has(v)))
-  const seams = s.facecolors && s.facecolors.length === s.faces.length ? s.facecolors : null
+  // No whole face in hand, no seams: an empty list would count as a seamed
+  // clip and flatten every face of a plain shard it was pasted into.
+  const seams = kept.length > 0 && s.facecolors && s.facecolors.length === s.faces.length ? s.facecolors : null
   return {
     points: taken.map((i) => ({ at: ticksOf(s.vertices[i]), c: [...s.vertices[i].c] as [number, number, number] })),
     faces: kept.map((i) => s.faces[i].map((v) => local.get(v) as number) as [number, number, number]),
@@ -208,6 +210,33 @@ function clipOf(s: ShardModel, selection: number[], partSel: number[] = []): Cli
     parts: placed.map((i) => { const q = s.parts![i]; return { ...q, at: [...q.at] as P3, turn: [...q.turn] as [number, number, number], ref: s.refs![q.ref] } }),
   }
 }
+
+/**
+ * The seams carried through an edit that takes faces away or adds them.
+ *
+ * Seams are all or none and one per face (sno-core shards, DECK-0003 §1.4a):
+ * a list left a face short or long is dropped from the wire and from the
+ * bench, so one deleted face used to cost every seam on the shard. `from[j]`
+ * is the face of `before` that face j of `after` was, or -1 for a face the
+ * edit made, which takes the flat average of its corners, as PASTE does.
+ *
+ * The list goes when no face is left: an empty list is in step with no faces,
+ * and the next FILL would grow it into flat seams nobody chose. It goes too
+ * when it was already out of step, which an older build's deletes left it:
+ * nothing says which face each entry was, every reader already ignores it, so
+ * dropping it changes nothing anyone sees, while passing it on let an edit
+ * that brought the lengths level again put each face's neighbour's color on
+ * it and on the wire.
+ */
+function seamsFollow(before: ShardModel, after: ShardModel, from: number[]): ShardModel {
+  const { facecolors: _held, ...bare } = after
+  const own = before.facecolors
+  if (!own?.length || own.length !== before.faces.length || after.faces.length === 0) return bare
+  return { ...bare, facecolors: from.map((i, j) => (i >= 0 && own[i] ? [...own[i]] as [number, number, number] : cornerAverage(after, after.faces[j]))) }
+}
+
+/** Faces 0..n-1 of `after` are `before`'s, in order, and the rest are new: FILL's and FACE's shape. */
+const appended = (before: ShardModel, after: ShardModel): number[] => after.faces.map((_, j) => (j < before.faces.length ? j : -1))
 
 /** This shard's address once this key deploys it, which Bench gives OBJECT and the clipboard gives PASTE: what it must never place. */
 export function ownAddress(pubkey: string, id: string | null): string | undefined {
@@ -356,6 +385,16 @@ export interface WorkshopState {
   rename: (id: string, name: string) => void
   duplicate: (id: string) => string
   remove: (id: string) => void
+  /**
+   * Delete many shards in one step: one change to the list, one storage write
+   * (a single transaction in IndexedDB), however many there are. Local only:
+   * nothing is retracted or published, and a published one stays on the
+   * relays. The shard on the bench, when it is one of them, gives way to the
+   * newest left, and to a new empty one when none is left, so the bench never
+   * holds a shard that is gone. When it is not one of them it stays open as it
+   * was, its undo with it.
+   */
+  removeMany: (ids: readonly string[]) => void
   setMode: (mode: ShardMode) => void
   /**
    * How solid the shard draws, a whole percent (DECK-0003 §1.11): 100 is
@@ -812,8 +851,9 @@ export const useWorkshop = create<WorkshopState>((set, get) => {
     const many = clip.points.length + clip.parts.length > 1
     const added = edit((m) => {
       const pasted = clip.faces.map((f) => f.map((i) => base + i) as [number, number, number])
+      const { facecolors: _held, ...bare } = m
       let next: ShardModel = {
-        ...m,
+        ...bare,
         unit,
         extent,
         vertices: [...m.vertices, ...placed.map((q) => vertexAt(q.at, q.c))],
@@ -821,14 +861,16 @@ export const useWorkshop = create<WorkshopState>((set, get) => {
       }
       // Seams are all or none (sno-core shards): when either side has them
       // every face carries one, and a face that had none keeps the look its
-      // corners gave it. Left short, the wire would drop every seam.
-      const own = m.facecolors && m.facecolors.length === m.faces.length ? m.facecolors : null
-      if (own || clip.facecolors) {
+      // corners gave it. Left short, the wire would drop every seam. A side
+      // with no faces has no seams, whatever empty list it holds.
+      const own = m.faces.length > 0 && m.facecolors && m.facecolors.length === m.faces.length ? m.facecolors : null
+      const theirs = clip.faces.length > 0 && clip.facecolors && clip.facecolors.length === clip.faces.length ? clip.facecolors : null
+      if (own || theirs) {
         next = {
           ...next,
           facecolors: [
             ...(own ?? m.faces.map((f) => cornerAverage(m, f))),
-            ...(clip.facecolors ? clip.facecolors.map((c) => [...c] as [number, number, number]) : pasted.map((f) => cornerAverage(next, f))),
+            ...(theirs ? theirs.map((c) => [...c] as [number, number, number]) : pasted.map((f) => cornerAverage(next, f))),
           ],
         }
       }
@@ -916,6 +958,22 @@ export const useWorkshop = create<WorkshopState>((set, get) => {
       set({ shards: list, currentId, selection: [], partSel: [], selectedFace: null, facePick: [], past: [], future: [], notice: null }); save(list)
     },
 
+    removeMany: (ids) => {
+      const out = new Set(ids)
+      const { shards, currentId } = get()
+      let list = shards.filter((s) => !out.has(s.id))
+      if (list.length === shards.length) return
+      if (currentId === null || !out.has(currentId)) { set({ shards: list }); save(list); return }
+      let next = newestId(list)
+      // Nothing left while the workshop is open: a new empty shard, as opening an empty workshop makes one.
+      if (next === null && get().open) {
+        const s = newShard(`Object ${list.length + 1}`)
+        list = [...list, s]
+        next = s.id
+      }
+      set({ shards: list, currentId: next, selection: [], partSel: [], selectedFace: null, facePick: [], past: [], future: [], notice: null }); save(list)
+    },
+
     setMode: (mode) => edit((s) => ({ ...s, mode })),
     setOpacity: (percent) => edit((s) => withOpacity(s, percent)),
     // Already so: no edit, so no undo step that changes nothing.
@@ -976,7 +1034,18 @@ export const useWorkshop = create<WorkshopState>((set, get) => {
       const res = stamp(s, stampKind, stampSize, stampFacing, at, color, plane)
       if (!res) { set({ notice: 'That stamp could not be placed here.' }); return }
       const { mode, notice } = solidIfFirstFaces(s, res.shard)
-      edit(() => ({ ...res.shard, mode }), notice)
+      // sno-core's stamp keeps the faces it does not cull, in order and on
+      // their own corners, and puts its own after them on corners past the
+      // old ones; it knows nothing of seams, so they are carried here.
+      const base = s.vertices.length
+      let k = 0
+      const from = res.shard.faces.map((f) => {
+        if (f.some((v) => v >= base)) return -1
+        while (k < s.faces.length && !s.faces[k].every((v, n) => v === f[n])) k++
+        // Not found is not expected, but it costs that face its seam, never the stamp.
+        return k < s.faces.length ? k++ : -1
+      })
+      edit(() => ({ ...seamsFollow(s, res.shard, from), mode }), notice)
       set({ selection: [], partSel: [], selectedFace: null, facePick: [] })
     },
 
@@ -1347,10 +1416,9 @@ export const useWorkshop = create<WorkshopState>((set, get) => {
         if (gone.size === 0) return s === before ? null : s
         const remap = new Map<number, number>()
         s.vertices.forEach((_, i) => { if (!gone.has(i)) remap.set(i, remap.size) })
-        const faces = s.faces
-          .filter((f) => !f.some((i) => gone.has(i)))
-          .map((f) => f.map((i) => remap.get(i) as number) as [number, number, number])
-        return { ...s, vertices: s.vertices.filter((_, i) => !gone.has(i)), faces }
+        const kept = s.faces.map((_, i) => i).filter((i) => !s.faces[i].some((v) => gone.has(v)))
+        const faces = kept.map((i) => s.faces[i].map((v) => remap.get(v) as number) as [number, number, number])
+        return seamsFollow(s, { ...s, vertices: s.vertices.filter((_, i) => !gone.has(i)), faces }, kept)
       })
       set({ selection: [], partSel: [], selectedFace: null, facePick: [] })
     },
@@ -1445,7 +1513,7 @@ export const useWorkshop = create<WorkshopState>((set, get) => {
         if (!faces.length) return null
         // Wound outward, or to agree with a face it closes onto (sno-core winding).
         const next = windAdded({ ...cur, faces: [...cur.faces, ...faces] }, cur.faces.length)
-        return { ...next, mode: solidIfFirstFaces(cur, next).mode }
+        return { ...seamsFollow(cur, next, appended(cur, next)), mode: solidIfFirstFaces(cur, next).mode }
       }, solidIfFirstFaces(s, { ...s, faces: [[0, 0, 0]] }).notice)
       set(added ? { facePick: [] } : { facePick: [], notice: 'Those faces are already there.' })
     },
@@ -1473,7 +1541,7 @@ export const useWorkshop = create<WorkshopState>((set, get) => {
         // or to agree with a face it closes onto. Measured in model ticks, as
         // this once was, outward came out inward: the model frame is a mirror.
         const next = windAdded({ ...cur, faces: [...cur.faces, ...fresh] }, cur.faces.length)
-        return { ...next, mode: solidIfFirstFaces(cur, next).mode }
+        return { ...seamsFollow(cur, next, appended(cur, next)), mode: solidIfFirstFaces(cur, next).mode }
       })
       const added = (get().current()?.faces.length ?? before) - before
       set({ notice: added ? `${added} face${added === 1 ? '' : 's'} ${faces.hull ? 'around' : 'across'} ${idx.length} points.` : 'Those faces are already there.' })
@@ -1491,7 +1559,11 @@ export const useWorkshop = create<WorkshopState>((set, get) => {
       get().setSelection([...res.corners, ...res.added])
     },
 
-    removeFace: (index) => edit((s) => (s.faces[index] ? { ...s, faces: s.faces.filter((_, i) => i !== index) } : null)),
+    removeFace: (index) => edit((s) => {
+      if (!s.faces[index]) return null
+      const kept = s.faces.map((_, i) => i).filter((i) => i !== index)
+      return seamsFollow(s, { ...s, faces: kept.map((i) => s.faces[i]) }, kept)
+    }),
 
     // Everything drawn goes, placements included (their refs with them); undo brings it back.
     clearShard: () => { edit((s) => { const { refs: _r, parts: _p, facecolors: _f, ...rest } = s; return { ...rest, vertices: [], faces: [] } }); set({ selection: [], partSel: [], selectedFace: null, facePick: [] }) },

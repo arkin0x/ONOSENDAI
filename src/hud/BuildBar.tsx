@@ -26,6 +26,7 @@ import { axisDistance } from '../lib/nearby'
 import { shortAxis } from '../lib/viewAt'
 import { Explanation } from './Explanation'
 import { useStash } from './stash'
+import { useCover } from '../hooks/useCover'
 import { House, Wrench } from 'lucide-react'
 import { ItemIcon } from './ItemIcon'
 
@@ -33,6 +34,8 @@ import { ItemIcon } from './ItemIcon'
 const ICON = 12
 
 export function BuildBar(): JSX.Element | null {
+  // Covers the scene from above: BUILD frames the cursor below it (hooks/useCover).
+  const coverRef = useCover('top')
   const active = useBuilder((s) => s.active)
   const cursor = useCyberspace((s) => s.cursor)
   const position = useCyberspace((s) => s.position)
@@ -57,7 +60,7 @@ export function BuildBar(): JSX.Element | null {
   }
 
   return (
-    <div className="hyperbar buildbar" role="group" aria-label="Build mode">
+    <div ref={coverRef} className="hyperbar buildbar" role="group" aria-label="Build mode">
       <div className="buildbar__head">
         <Wrench className="buildbar__glyph" size={14} strokeWidth={2.25} aria-hidden />
         <span className="hyperbar__text">

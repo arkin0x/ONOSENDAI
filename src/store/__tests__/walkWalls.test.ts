@@ -295,6 +295,31 @@ describe("WALK's walls are built by trust (arkinox 2026-10-25: \"ok A sounds goo
     })
   })
 
+  it("a shard of yours placing a stranger's object charges that child to the strangers' pool, never your share", async () => {
+    // A stranger's huge object, published (fetched by its address, its own table under its author).
+    const theirsRef: Ref = ['a', at(THEM, 'b')]
+    primeRef(theirsRef, { ...level(THEM, 'b', 'c'), objects: { [at(THEM, 'c')]: level(THEM, 'c', 'd'), [at(THEM, 'd')]: level(THEM, 'd', 'e'), [at(THEM, 'e')]: level(THEM, 'e', null) } })
+    // Three shards of yours, each placing it 30 times.
+    const placers = [0, 1, 2].map((i) => item(withConstrain({ ...newShard('Placer'), mode: 'solid', vertices: [], faces: [], author: ME, refs: [theirsRef], parts: Array.from({ length: 30 }, (_, k) => ({ ref: 0, at: [0, k * 120, 0] as [number, number, number], turn: [0, 0, 0] as [number, number, number], step: 0 })) }, 'off'), { key: `placer-${i}`, mine: true, author: ME }))
+    const m = item(maze(ME), { key: 'maze', mine: true, author: ME })
+    await withWorld([...placers, m], async () => {
+      warmWalls(1, AT)
+      await settleAll()
+      // Your share paid only for your own placements (30 each and the maze's one); the strangers' paid for theirs.
+      expect(TRUSTED_BUDGET - wallBudgetLeft('trusted')).toBeLessThanOrEqual(3 * 30 + 1)
+      expect(towardWall([...placers, m])).toBe(2n)
+    })
+  })
+
+  it("a shard of yours placing only your own pieces takes nothing from the strangers' pool", async () => {
+    const m = item(maze(ME), { key: 'maze', mine: true, author: ME })
+    await withWorld([m], async () => {
+      warmWalls(1, AT)
+      await settleAll()
+      expect(wallBudgetLeft('stranger')).toBe(STRANGER_BUDGET)
+    })
+  })
+
   it('a share still out when the next WALK starts is never refunded into it', async () => {
     // A shard of yours whose one part comes from a slow relay.
     const slowRef: Ref = ['a', at(ME, 'slow-part')]

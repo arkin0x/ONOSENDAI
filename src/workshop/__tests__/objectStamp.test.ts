@@ -17,7 +17,8 @@ if (typeof localStorage === 'undefined') {
 
 import { nip19 } from 'nostr-tools'
 import { fromPayload } from 'sno-core/shards'
-import { objectsOf, parseObjectAddress } from '../ObjectPicker'
+import { liveRef, objectsOf, parseObjectAddress } from '../ObjectPicker'
+import { copiedFrom } from '../../lib/carried'
 import { useWorkshop } from '../../store/useWorkshop'
 import type { NostrEvent } from '../../lib/events'
 
@@ -87,5 +88,54 @@ describe('placeObject', () => {
     expect(w().stampMode).toBe('object')
     w().setStampKind('block')
     expect(w().stampMode).toBe('shape')
+  })
+})
+
+describe('YOURS: a copy goes inside (DECK-0003 §1.10; arkinox 2026-10-25, the source decides)', () => {
+  const w = () => useWorkshop.getState()
+  let wall = ''
+  beforeEach(() => {
+    useWorkshop.setState({ shards: [], currentId: null, selection: [], partSel: [], stampMode: 'shape', stampObject: null, stampFacing: 0 })
+    w().addShard(fromPayload(COLUMN, 'c')!, 'Column', 'kit/column')
+    w().create('wall')
+    wall = w().currentId!
+  })
+  const yours = () => ({ ref: ['a', `33331:${PK}:kit/column`] as ['a', string], name: 'Column', shard: w().shards.find((s) => s.id === 'kit/column')!, copy: { sourceId: 'kit/column', pubkey: PK } })
+
+  it('places a copy under a d of its own, carried in the shard, OPAQUE where never chosen, and a second stamp reuses it', () => {
+    w().setStampObject(yours())
+    w().placeObject([0, 0, 0])
+    w().placeObject([240, 0, 0])
+    const s = w().current()!
+    expect(s.refs).toHaveLength(1)
+    const [kind, address, relay] = s.refs![0]
+    expect([kind, relay]).toEqual(['a', undefined])
+    expect(address).toMatch(new RegExp(`^33331:${PK}:kit/column~[0-9a-f]{8}$`))
+    expect(copiedFrom(address)).toBe('kit/column')
+    expect(s.parts).toHaveLength(2)
+    expect(s.objects?.[address]).toMatchObject({ name: 'Column', constrain: 'opaque' })
+  })
+
+  it('makes a new copy once the piece in the workshop has changed: copies are never shared with a different version', () => {
+    w().setStampObject(yours())
+    w().placeObject([0, 0, 0])
+    void w().replaceShard('kit/column', { ...w().shards.find((s) => s.id === 'kit/column')!, opacity: 50 })
+    w().select(wall)
+    w().placeObject([240, 0, 0])
+    const s = w().current()!
+    expect(s.refs).toHaveLength(2)
+    expect(Object.values(s.objects ?? {}).map((e) => (e as { opacity?: number }).opacity ?? 100).sort()).toEqual([100, 50])
+  })
+
+  it('never stamps a shard into itself', () => {
+    w().setStampObject({ ...yours(), copy: { sourceId: wall, pubkey: PK } })
+    w().placeObject([0, 0, 0])
+    expect(w().notice).toMatch(/cannot place itself/)
+    expect(w().current()!.objects).toBeUndefined()
+  })
+
+  it('a pick from the FEED or by address is a live link, always with a relay hint', () => {
+    expect(liveRef(`33331:${PK}:col`, 'wss://seen.example')).toEqual(['a', `33331:${PK}:col`, 'wss://seen.example'])
+    expect(liveRef(`33331:${PK}:col`)[2]).toMatch(/^wss:\/\//)
   })
 })

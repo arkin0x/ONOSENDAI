@@ -47,6 +47,7 @@ import {
 import { withOpacity } from '../lib/opacityStep'
 import { authoredConstrainOf, chosenConstrainOf, withConstrain, type Constrain } from '../lib/walkConstrain'
 import { addPart, quarterTurnPart, removeParts } from 'sno-core/parts'
+import { copyInto } from '../lib/carried'
 import { FLOOR, MAX_SIZE, MIN_SIZE, stamp, type Facing, type StampKind, type WorkPlane } from 'sno-core/stamps'
 import { BUILT_IN, hexAt, remap, samePalette, snapHex, type Palette } from 'sno-core/snoPalette'
 import { newell, triangulate } from 'sno-core/triangulate'
@@ -257,6 +258,13 @@ export interface StampObject {
   ref: Ref
   name: string
   shard: ShardModel
+  /**
+   * From YOURS: a piece of your workshop, placed as a copy carried inside the
+   * shard it is stamped into (DECK-0003 §1.10; lib/carried.ts copyInto), its
+   * key under `pubkey`. Absent for the FEED and BY ADDRESS, which place by
+   * reference, a live link that follows its author's edits.
+   */
+  copy?: { sourceId: string; pubkey: string }
 }
 
 /** "1 point" or "7 points", with its faces and placed objects when it has any. */
@@ -995,8 +1003,15 @@ export const useWorkshop = create<WorkshopState>((set, get) => {
       const s = get().current()
       if (!s || !validPoint(at, s.extent)) return
       if (!stampObject) { set({ notice: 'Choose an object to stamp first: tap the slot under OBJECT.' }); return }
-      if (self && stampObject.ref[1] === self) { set({ notice: 'An object cannot place itself.' }); return }
-      const { shard } = addPart(s, stampObject.ref, { at: [...at] as P3, turn: [0, (90 * stampFacing) % 360, 0], step: 0 })
+      if ((self && stampObject.ref[1] === self) || stampObject.copy?.sourceId === s.id) { set({ notice: 'An object cannot place itself.' }); return }
+      // From YOURS, a copy goes inside this shard, of the piece as it is now.
+      let base = s
+      let ref = stampObject.ref
+      if (stampObject.copy) {
+        const source = get().shards.find((x) => x.id === stampObject.copy!.sourceId) ?? stampObject.shard
+        ;({ shard: base, ref } = copyInto(s, source, stampObject.copy.pubkey))
+      }
+      const { shard } = addPart(base, ref, { at: [...at] as P3, turn: [0, (90 * stampFacing) % 360, 0], step: 0 })
       edit(() => shard, `"${stampObject.name}" placed. It is one object: SELECT it to move, turn or copy it.`)
       set({ selection: [], partSel: [], selectedFace: null, facePick: [] })
     },

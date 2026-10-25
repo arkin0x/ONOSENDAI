@@ -10,8 +10,8 @@
  * the part that depends on where an object came from.
  */
 
-import { carriedTable } from 'sno-core/parts'
-import { toPayload, type ShardModel } from 'sno-core/shards'
+import { carriedPayload, carriedTable, carryObject } from 'sno-core/parts'
+import { toPayload, type Ref, type ShardModel } from 'sno-core/shards'
 import { withAuthoredConstrain } from './walkConstrain'
 
 /**
@@ -55,4 +55,61 @@ export function carryRefusal(shard: ShardModel): string | null {
   const bytes = payloadBytes(shard)
   if (bytes <= CARRY_BUDGET_BYTES) return null
   return `${Math.ceil(bytes / 1024)}kb of ${CARRY_BUDGET_BYTES / 1024}kb may be larger than relays will accept. Keep this part separate.`
+}
+
+/**
+ * What separates a copy's own part of its `d` from the id of the piece it was
+ * copied from: `<source id>~<8 hex>`.
+ */
+export const COPY_MARK = '~'
+
+/** Eight random hex digits: a copy's own part of its `d`. */
+function nonce(): string {
+  const b = new Uint8Array(4)
+  crypto.getRandomValues(b)
+  return [...b].map((x) => x.toString(16).padStart(2, '0')).join('')
+}
+
+/**
+ * The id of the workshop piece a copy was made from, by its address: what is
+ * before the last COPY_MARK in its `d`. Provenance only, for a later "update
+ * from kit"; nothing is live. Null for an address that is not a copy's.
+ */
+export function copiedFrom(address: string): string | null {
+  const d = address.split(':').slice(2).join(':')
+  const i = d.lastIndexOf(COPY_MARK)
+  return i > 0 ? d.slice(0, i) : null
+}
+
+/**
+ * `parent` carrying a copy of `source`, a piece of your workshop, and the
+ * reference a placement of it names (STAMP > OBJECT, YOURS; arkinox
+ * 2026-10-25: "once copied we should just edit the copy directly").
+ *
+ * The copy is keyed under a `d` of its own, `<source id>~<8 hex>`, never under
+ * the source's own address (DECK-0003 §1.10 allows any `d`, and suggests this):
+ * - a reader that does not know `objects` fetches that address and finds
+ *   nothing, rather than the source as it is published today;
+ * - the workshop never answers for it (lib/parts.ts fetchOwnFirst), so the
+ *   bench draws the copy, which is the parent's own data;
+ * - stamping the source again after the copy was edited makes a new copy
+ *   rather than another placement of the edited one;
+ * - two parents' copies of one piece, made at different times, never collide
+ *   when both are carried in one hide (a writer flattens into one table).
+ *
+ * A copy of the source exactly as it is now, already in this parent, is used
+ * again, so a piece stamped ten times in one parent travels once and its
+ * placements edit together. The copy keeps the source's name, as a label.
+ * Written as a hide writes it (OPAQUE where never chosen), and what the source
+ * itself carries joins the parent's one table.
+ */
+export function copyInto(parent: ShardModel, source: ShardModel, pubkey: string): { shard: ShardModel; ref: Ref } {
+  const written = withAuthoredConstrain(source)
+  const text = JSON.stringify(carriedPayload(written))
+  const prefix = `33331:${pubkey}:${source.id}${COPY_MARK}`
+  for (const [key, entry] of Object.entries(parent.objects ?? {})) {
+    if (key.startsWith(prefix) && key.indexOf(COPY_MARK, prefix.length) < 0 && JSON.stringify(entry) === text) return { shard: parent, ref: ['a', key] }
+  }
+  const address = `${prefix}${nonce()}`
+  return { shard: carryObject(parent, address, written), ref: ['a', address] }
 }

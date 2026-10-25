@@ -1,34 +1,40 @@
 /**
  * ObjectPicker.tsx - choosing the object OBJECT stamps (DECK-0003 §1.10).
  *
- * ONOSENDAI has no public feed, so the choice is the objects this key has
- * published (kind 33331, from snocrash or anywhere else), newest first, and a
- * field for anyone's object by address: an `naddr1…` or `33331:<pubkey>:<d>`.
- * Hidden objects (a 33331 whose payload is sealed to a place, DECK-0003 §3.4)
- * are left out: their content is a preview, not a shape. The choice is always
- * an `a` reference, which follows its author's newest version (arkinox,
- * 2026-09-25: NIP-01 lets relays drop old versions, so an `e` may find nothing).
+ * The source decides what a placement is (arkinox, 2026-10-25: "if i chose my
+ * water in my library, then its inlined. if i chose my water from the feed,
+ * then its a live reference"):
+ * - YOURS, the shards in your workshop, in their folders, published or not: a
+ *   copy goes inside the shard it is stamped into, carried in its `objects`
+ *   (lib/carried.ts copyInto), and is edited there; nothing links it back.
+ * - FEED, the Shard Feed, or anyone's object BY ADDRESS (`naddr1…` or
+ *   `33331:<pubkey>:<d>`), your own published ones included: an `a`
+ *   reference, which follows its author's newest version (arkinox,
+ *   2026-09-25: NIP-01 lets relays drop old versions, so an `e` may find
+ *   nothing). It always carries a relay hint, which is also how a hide tells a
+ *   live link from a piece of your library (store/localObjects.ts carryLibrary).
+ *
+ * No paragraph explains it in the modal; EXPLAIN does (arkinox: no
+ * explanatory paragraphs in the UI).
  */
 
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import { createPortal } from 'react-dom'
 import { nip19 } from 'nostr-tools'
 import { fromPayload, type Ref, type ShardModel } from 'sno-core/shards'
-import { GENERAL_RELAYS } from '../lib/contacts'
 import type { NostrEvent } from '../lib/events'
 import { fetchRef } from '../lib/parts'
 import { keepOwnTable } from '../lib/carried'
-import { queryAny, relaySet } from '../lib/relay'
+import { relaySet } from '../lib/relay'
 import { useCyberspace } from '../store/useCyberspace'
 import { useWorkshop, type StampObject } from '../store/useWorkshop'
-import { usePublished } from '../store/usePublished'
 import { useEscape } from '../hooks/useEscape'
-import { ShardFolders, useNewestFirst } from '../hud/ShardFolders'
+import { ShardFolders, modelEditedAt, modelName, modelRef, useNewestFirst } from '../hud/ShardFolders'
+import { FeedList } from '../hud/FeedList'
+import { Explanation } from '../hud/Explanation'
 import { ShardThumb } from '../hud/ShardThumb'
 
 const OBJECT_KIND = 33331
-const NONE: Found[] = []
-const WAIT_MS = 5000
 
 interface Found { address: string; relay?: string; shard: ShardModel; at: number }
 
@@ -71,45 +77,41 @@ export function objectsOf(events: NostrEvent[]): Found[] {
  * in (hud/ShardFolders).
  */
 export const foundRef = (o: Found): string => o.address.split(':').slice(2).join(':')
-const foundName = (o: Found): string => o.shard.name
-/** When a published object was last edited, ms: its event's time. */
-const foundEditedAt = (o: Found): number => o.at * 1000
+
+/** Where a stamp's object comes from. */
+type Source = 'yours' | 'feed'
+
+/**
+ * A live link to `address`: always with a relay hint, the one it was seen on
+ * or else the first of yours, so a hide knows it for a reference and never
+ * carries it (store/localObjects.ts carryLibrary).
+ */
+export function liveRef(address: string, relay?: string): Ref {
+  return ['a', address, relay || relaySet()[0] || 'wss://cyberspace.nostr1.com']
+}
 
 export function ObjectPicker({ onClose }: { onClose: () => void }): JSX.Element {
   const me = useCyberspace((s) => s.identity.pubkey)
-  const [mine, setMine] = useState<Found[] | null>(null)
+  const shards = useWorkshop((s) => s.shards)
+  const currentId = useWorkshop((s) => s.currentId)
+  const [source, setSource] = useState<Source>(() => (shards.some((s) => s.id !== currentId) ? 'yours' : 'feed'))
   const [address, setAddress] = useState('')
   const [status, setStatus] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
-
-  useEffect(() => {
-    let live = true
-    setMine(null)
-    void queryAny([...new Set([...relaySet(), ...GENERAL_RELAYS])], { kinds: [OBJECT_KIND], authors: [me] }, WAIT_MS)
-      .then((events) => {
-        // What the relays hold under this key is what SHARD's PUBLISH tag
-        // reports (store/usePublished.ts): an object published from another
-        // browser or from snocrash reads as PUBLISHED here from this read on.
-        usePublished.getState().learn(events)
-        if (live) setMine(objectsOf(events))
-      }, () => { if (live) setMine([]) })
-    return () => { live = false }
-  }, [me])
   // Newest first, a deploy counted as an edit, as every list of your shards (hud/ShardFolders).
-  const byRecent = useNewestFirst(mine ?? NONE, foundRef, foundEditedAt)
+  const yours = useNewestFirst(shards, modelRef, modelEditedAt)
 
   const choose = (o: StampObject): void => {
     useWorkshop.getState().setStampObject(o)
     onClose()
   }
-  const refOf = (addr: string, relay?: string): Ref => (relay ? ['a', addr, relay] : ['a', addr])
 
   const byAddress = async (): Promise<void> => {
     const parsed = parseObjectAddress(address)
     if (!parsed) { setStatus('That is not an object address. Paste an naddr1… or 33331:<pubkey>:<d>.'); return }
     setBusy(true)
     setStatus('Asking the relays…')
-    const ref = refOf(parsed.address, parsed.relay)
+    const ref = liveRef(parsed.address, parsed.relay)
     const raw = await fetchRef(ref)
     setBusy(false)
     const read = raw == null ? null : fromPayload(raw, parsed.address)
@@ -127,35 +129,55 @@ export function ObjectPicker({ onClose }: { onClose: () => void }): JSX.Element 
           <h2 className="modal__title">Stamp an object</h2>
           <button className="secret__close" onClick={onClose} aria-label="Close">✕</button>
         </div>
-        <p className="login__note">
-          Placed by reference: it stays that object, and follows it when its author edits it. Only published objects can be
-          placed: PUBLISH one from SHARD first, here or in snocrash.
-        </p>
-        <div className="login__section">
-          <span className="login__label">Yours</span>
-          {mine === null && <p className="login__note">Reading the relays…</p>}
-          {mine !== null && mine.length === 0 && <p className="login__note">No published objects under this key yet.</p>}
-          {mine !== null && mine.length > 0 && (
-            <ul className="objpick__list">
-              <ShardFolders items={byRecent} refOf={foundRef} nameOf={foundName} row={(o, f) => (
-                <li key={o.address} {...f.drag}>
-                  <button className="objpick__row" onClick={() => choose({ ref: refOf(o.address), name: o.shard.name, shard: o.shard })}>
-                    <ShardThumb shard={o.shard} />
-                    <span className="objpick__name">{o.shard.name}</span>
-                    <span className="objpick__meta">{o.shard.vertices.length} v · {o.shard.faces.length} f{o.shard.parts?.length ? ` · ${o.shard.parts.length} obj` : ''}</span>
-                  </button>
-                  {f.tool}
-                </li>
-              )} />
-            </ul>
-          )}
+        <div className="objpick__tabs" role="tablist">
+          <button role="tab" aria-selected={source === 'yours'} className={`objpick__tab ${source === 'yours' ? 'is-on' : ''}`} onClick={() => setSource('yours')} title="Your workshop: a copy goes inside this shard">YOURS</button>
+          <button role="tab" aria-selected={source === 'feed'} className={`objpick__tab ${source === 'feed' ? 'is-on' : ''}`} onClick={() => setSource('feed')} title="Published objects: placed by reference, a live link">FEED</button>
         </div>
-        <div className="login__section">
-          <label className="login__label" htmlFor="objpick-address">Anyone's, by address</label>
-          <input id="objpick-address" className="avatars__input login__input" type="text" spellCheck={false} autoComplete="off" placeholder="naddr1… or 33331:<pubkey>:<d>" value={address} onChange={(e) => setAddress(e.target.value)} />
-          <button className="secret__act login__act" disabled={busy || !address.trim()} onClick={() => void byAddress()}>{busy ? 'LOOKING…' : 'USE THIS OBJECT'}</button>
-          {status && <p className="login__note" style={{ margin: 0 }}>{status}</p>}
-        </div>
+        {source === 'yours' && (
+          <div className="login__section">
+            {yours.length === 0 && <p className="login__note">No shards in your workshop yet.</p>}
+            {yours.length > 0 && (
+              <ul className="objpick__list">
+                <ShardFolders items={yours} refOf={modelRef} nameOf={modelName} row={(s, f) => {
+                  const self = s.id === currentId
+                  const empty = s.vertices.length === 0 && (s.parts?.length ?? 0) === 0
+                  return (
+                    <li key={s.id} {...f.drag}>
+                      <button className="objpick__row" disabled={self || empty || !me} onClick={() => choose({ ref: ['a', `${OBJECT_KIND}:${me}:${s.id}`], name: s.name, shard: s, copy: { sourceId: s.id, pubkey: me } })} title={self ? 'An object cannot place itself' : empty ? 'Nothing in it to place yet' : `Stamp a copy of "${s.name}"`}>
+                        <ShardThumb shard={s} own />
+                        <span className="objpick__name">{s.name}</span>
+                        <span className="objpick__meta">{self ? 'THIS SHARD' : empty ? 'EMPTY' : `${s.vertices.length} v · ${s.faces.length} f${s.parts?.length ? ` · ${s.parts.length} obj` : ''}`}</span>
+                      </button>
+                      {f.tool}
+                    </li>
+                  )
+                }} />
+              </ul>
+            )}
+            <Explanation>
+              <ul className="objpick__explain">
+                <li>A copy goes inside this shard, and inside what you hide, encrypted.</li>
+                <li>Edit the copy here. The piece in your workshop is not linked to it.</li>
+              </ul>
+            </Explanation>
+          </div>
+        )}
+        {source === 'feed' && (
+          <>
+            <FeedList onPick={(o) => choose({ ref: liveRef(o.address, o.seen?.[0]), name: o.shard.name, shard: keepOwnTable(o.shard, o.pubkey) })} />
+            <div className="login__section">
+              <label className="login__label" htmlFor="objpick-address">Anyone's, by address</label>
+              <input id="objpick-address" className="avatars__input login__input" type="text" spellCheck={false} autoComplete="off" placeholder="naddr1… or 33331:<pubkey>:<d>" value={address} onChange={(e) => setAddress(e.target.value)} />
+              <button className="secret__act login__act" disabled={busy || !address.trim()} onClick={() => void byAddress()}>{busy ? 'LOOKING…' : 'USE THIS OBJECT'}</button>
+              {status && <p className="login__note" style={{ margin: 0 }}>{status}</p>}
+            </div>
+            <Explanation>
+              <ul className="objpick__explain">
+                <li>Placed by reference: it stays that object, and follows it when its author edits it.</li>
+              </ul>
+            </Explanation>
+          </>
+        )}
       </div>
     </div>,
     document.body,

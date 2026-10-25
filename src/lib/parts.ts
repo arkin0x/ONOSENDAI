@@ -274,9 +274,17 @@ function readShared(payload: unknown, key: string): ShardModel | null {
  * by its parent's table, so it too is read once while the table holds it.
  * partsShared.test.ts holds the two side by side.
  */
-export function resolvePartsShared(model: ShardModel, fetch: (ref: Ref) => Promise<unknown> = fetchRef, self?: Ref, budget?: { left: number }): Promise<Placed[]> {
+export function resolvePartsShared(
+  model: ShardModel,
+  fetch: (ref: Ref) => Promise<unknown> = fetchRef,
+  self?: Ref,
+  budget?: { left: number },
+  budgetFor?: (author: string | null, parent: { left: number }) => { left: number },
+): Promise<Placed[]> {
   // Whose keys of its table count: the event's it was read from, or yours for
   // a model made here (lib/carried.ts authorOf), never every key. `budget`, when
-  // given, is shared with every other resolve handed the same one (WALK's walls).
-  return resolveParts(model, fetch, { self, read: readShared, author: authorOf(model), ...(budget ? { budget } : {}) })
+  // given, is shared with every other resolve handed the same one (WALK's
+  // walls); `budgetFor` charges each placement to a budget by whose object it
+  // places (sno-core 0.1.22).
+  return resolveParts(model, fetch, { self, read: readShared, author: authorOf(model), ...(budget ? { budget } : {}), ...(budgetFor ? { budgetFor } : {}) })
 }

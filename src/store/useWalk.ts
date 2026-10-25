@@ -197,7 +197,7 @@ export const useWalk = create<WalkState>((set, get) => ({
     const { position } = useCyberspace.getState()
     useCyberspace.setState({ walking: true, cursor: { ...position } })
     // The shards' walls, and the objects they place, ready before the first step.
-    warmWalls(useCyberspace.getState().plane)
+    warmWalls(useCyberspace.getState().plane, useCyberspace.getState().position)
     clearSettle()
     dropFall()
     set({ queue: [], open: null, running: null, behind: 0 })

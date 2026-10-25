@@ -14,7 +14,7 @@
 
 import { useEffect, useRef } from 'react'
 import { formatDistance } from 'sno-core/scale'
-import { targetScreens, type CyberTarget } from '../lib/targets'
+import { targetScreens, viewAxis, type CyberTarget } from '../lib/targets'
 import { labelDrop } from '../lib/avatarLabel'
 import { useProfile } from '../hooks/useProfile'
 import { ProfilePic } from './ProfileBadge'
@@ -109,16 +109,20 @@ export function Targets({ targets }: Props): JSX.Element {
           // clamping x and y separately. Independent clamps pull anything far
           // off-screen into a corner, so two targets in quite different
           // directions pile up in the same place and the marker stops meaning
-          // "that way".
-          const cx = w / 2
-          const cy = h / 2
+          // "that way". From the picture's middle, which BUILD's lens shift
+          // moves off the window's (lib/targets viewAxis).
+          const cx = ((viewAxis.x + 1) / 2) * w
+          const cy = ((1 - viewAxis.y) / 2) * h
           const dx = px - cx
           const dy = py - cy
           angle = Math.atan2(dy, dx)
-          const t = Math.min(
-            (w / 2 - EDGE_INSET) / Math.max(Math.abs(dx), 1e-6),
-            (h / 2 - EDGE_INSET) / Math.max(Math.abs(dy), 1e-6),
-          )
+          // How far the frame's inset edge is from the middle, the way the line goes.
+          const reachX = dx >= 0 ? w - EDGE_INSET - cx : cx - EDGE_INSET
+          const reachY = dy >= 0 ? h - EDGE_INSET - cy : cy - EDGE_INSET
+          const t = Math.max(0, Math.min(
+            reachX / Math.max(Math.abs(dx), 1e-6),
+            reachY / Math.max(Math.abs(dy), 1e-6),
+          ))
           px = cx + dx * t
           py = cy + dy * t
         }

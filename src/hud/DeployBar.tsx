@@ -92,6 +92,7 @@ import { useCalibration } from '../lib/calibration'
 import { ratioOf, useExperience } from '../lib/experience'
 import { cloudKeyQuote, deployCeiling, deployRoute, localKeySeconds, needsAsk, regionKeyLadder, waitLabel } from '../lib/deployPlan'
 import { useEscape } from '../hooks/useEscape'
+import { useCover } from '../hooks/useCover'
 import { fitCause, fitHeight, fitHeightAll, outsideAt, type FitPoint } from '../lib/deployFit'
 import { SHALLOW_WARN, shallowBag, shallowExplain } from '../lib/shallowBag'
 import { CONSTRAINS, CONSTRAIN_TIPS } from '../lib/walkConstrain'
@@ -154,6 +155,8 @@ export function useAtLastSpot(): boolean {
 }
 
 export function DeployBar({ pad = false }: { pad?: boolean }): JSX.Element | null {
+  // Covers the scene from below: BUILD frames the cursor above it (hooks/useCover).
+  const coverRef = useCover('bottom')
   const pending = useShards((s) => s.pending)
   const shard = useShards((s) => (s.pending?.type === 'shard' ? s.pendingShard() : null))
   // EDIT: a shard you hid, being moved. Its old region (a string, so the bar
@@ -308,7 +311,7 @@ export function DeployBar({ pad = false }: { pad?: boolean }): JSX.Element | nul
         : undefined
 
   return (
-    <div className={deployBarClass(pad)} role="dialog" aria-label={intoChest ? 'Aim shard for chest' : pending.type === 'shard' ? 'Deploy shard' : `Hide ${pending.type}`}>
+    <div ref={coverRef} className={deployBarClass(pad)} role="dialog" aria-label={intoChest ? 'Aim shard for chest' : pending.type === 'shard' ? 'Deploy shard' : `Hide ${pending.type}`}>
       {/* The title row carries the action, left of CANCEL, so the rest of the
           bar is free to scroll (arkinox, 2026-10-01). While HOSAKA's ask is up
           it takes its own row below, since three buttons do not fit here. */}

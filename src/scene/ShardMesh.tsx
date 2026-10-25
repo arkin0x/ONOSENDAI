@@ -14,7 +14,7 @@
  * with an ease-out, jittering less as they land. Decryption made visible.
  */
 
-import { useEffect, useLayoutEffect, useMemo, useRef, type ReactNode } from 'react'
+import { useEffect, useLayoutEffect, useMemo, useRef, useSyncExternalStore, type ReactNode } from 'react'
 import { useFrame, type ThreeEvent } from '@react-three/fiber'
 import {
   FrontSide,
@@ -30,10 +30,11 @@ import {
   type Plane,
 } from 'three'
 import { easeOutCubic, hash01, scrambleOffset, seedOf, SHARD_DECODE_MS } from '../lib/decode'
-import { MAX_UNIT, expandFaceColors, flatten, toRender, type Part, type ShardModel } from 'sno-core/shards'
-import { partMatrix, placedBounds, refKey, type Placed } from 'sno-core/parts'
+import { MAX_UNIT, expandFaceColors, flatten, toRender, type Part, type Ref, type ShardModel } from 'sno-core/shards'
+import { parseAddress, partMatrix, placedBounds, refKey, type Placed } from 'sno-core/parts'
 import { useResolved, type Resolved } from '../lib/parts'
-import { dropDemand, provisional, setDemand, useAllowance } from './meshBudget'
+import { dropDemand, provisional, setDemand, useAllowance, type Allowance } from './meshBudget'
+import { followsVersion, onFollows, trustedAuthor } from '../lib/trust'
 import { ACCENT, WARN } from '../lib/palette'
 import { renderPose, type Pose } from '../lib/pose'
 import { boxContains, clipMesh, clipPoints, type Box } from '../lib/clip'
@@ -214,22 +215,33 @@ export function ShardMesh({ shard: given, scale = 1, ghost = false, birth, onFac
   const resolved = useResolved(nested ? null : given)
   // In the world's scene: what its placed objects would draw, at every depth,
   // said to the scene's budget, and how many it may (scene/meshBudget.ts).
-  const demand = useMemo(() => (budget && !nested ? placementSizes(given, resolved).reduce((a, b) => a + b, 0) : 0), [budget, nested, given, resolved])
-  const budgetKey = budget && !nested ? budget.key : undefined
+  // Split by which share pays for each object, as WALK's walls charge
+  // (lib/trust.ts chargeByTrust): a stranger's object placed by a shard of
+  // yours, and everything under it, is the strangers' to pay for.
   const trusted = budget?.trusted ?? false
+  const follows = useSyncExternalStore(onFollows, followsVersion)
+  const split = useMemo(() => {
+    if (!budget || nested) return { trusted: 0, stranger: 0 }
+    let t = 0, n = 0
+    for (const [a, b] of placementSplits(given, resolved, trusted)) { t += a; n += b }
+    return { trusted: t, stranger: n }
+    // `follows` changes whom a shard trusts.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [budget, nested, given, resolved, trusted, follows])
+  const budgetKey = budget && !nested ? budget.key : undefined
   // Coarsely, in eighths of a doubling: a step of the anchor moves every
   // shard's centre a little, and a shard says so only when it has moved a
   // good way nearer or farther, not on every step.
   const distance = budget ? Math.round(Math.log2(1 + Math.hypot(...budget.centre)) * 8) / 8 : 0
   useLayoutEffect(() => {
     if (!budgetKey) return
-    setDemand(budgetKey, { demand, trusted, distance })
-  }, [budgetKey, demand, trusted, distance])
+    setDemand(budgetKey, { trusted: split.trusted, stranger: split.stranger, distance })
+  }, [budgetKey, split, distance])
   useLayoutEffect(() => (budgetKey ? () => dropDemand(budgetKey) : undefined), [budgetKey])
   // Before its first allocation lands (later in the same task), what is left
   // of its pool, so its first frame is not an outline.
   const allocated = useAllowance(budgetKey)
-  const allowance = budgetKey ? allocated ?? (demand > 0 ? provisional({ demand, trusted, distance }) : 0) : undefined
+  const allowance = budgetKey ? allocated ?? provisional({ trusted: split.trusted, stranger: split.stranger, distance }) : undefined
   const near = useMemo(() => (budget ? { centre: budget.centre, scale: budget.scale, pose } : undefined), [budget, pose])
   // A face that carries its own colour needs three corners of its own, or the
   // colour would bleed across every edge it shares. Expanded here and nowhere
@@ -375,7 +387,7 @@ export function ShardMesh({ shard: given, scale = 1, ghost = false, birth, onFac
   })
 
   const placements = (given.parts?.length ?? 0) > 0
-    ? <Placements shard={given} byRef={resolved} nested={nested} lit={lit} ghost={ghost} world={world} headlamp={headlamp} pose={pose} onPartClick={onPartClick} selected={selectedParts} cull={cull} ignoreOpacity={ignoreOpacity} allowance={allowance} near={near} />
+    ? <Placements shard={given} byRef={resolved} nested={nested} lit={lit} ghost={ghost} world={world} headlamp={headlamp} pose={pose} onPartClick={onPartClick} selected={selectedParts} cull={cull} ignoreOpacity={ignoreOpacity} allowance={allowance} near={near} rootTrusted={trusted} />
     : null
   // An object may be nothing but the arrangement of others (§1.9 rule 13).
   if (shard.vertices.length === 0) return placements ? <group scale={scale}>{placements}</group> : null
@@ -450,13 +462,51 @@ export const CUBE_EDGES = new EdgesGeometry(new BoxGeometry(1, 1, 1))
 const CUT_OPACITY = 0.35
 
 /** One placement as Placements draws it: where it stands, and what it resolved to (undefined while it is fetched). */
-type Listed = { part: Part; r: Resolved | undefined }
+type Listed = { part: Part; r: Resolved | undefined; ref?: Ref }
 
-/** A shard's placements as listed for drawing: its own `parts`, each with what its reference resolved to. */
+/** A shard's placements as listed for drawing: its own `parts`, each with its reference and what that resolved to. */
 function listOf(shard: ShardModel, byRef: Map<string, Resolved>, nested?: Placed[]): Listed[] {
   return nested
-    ? nested.map((p) => ({ part: p.part, r: p }))
-    : (shard.parts ?? []).map((part) => ({ part, r: shard.refs?.[part.ref] ? byRef.get(refKey(shard.refs[part.ref])) : undefined }))
+    ? nested.map((p) => ({ part: p.part, r: p, ref: p.ref }))
+    : (shard.parts ?? []).map((part) => {
+      const ref = shard.refs?.[part.ref]
+      return { part, r: ref ? byRef.get(refKey(ref)) : undefined, ...(ref ? { ref } : {}) }
+    })
+}
+
+/** Whether the object a reference places is by you or someone you follow: an `e`, whose author is not known, is not. */
+function refTrusted(ref: Ref | undefined): boolean {
+  const a = ref && ref[0] === 'a' ? parseAddress(ref[1]) : null
+  return !!a && trustedAuthor(a.pubkey)
+}
+
+/**
+ * A resolved placement's objects split by which share pays for them, [trusted,
+ * stranger]: the placement and everything under it is trusted while it, and
+ * every placement above it, places an object by you or someone you follow; from
+ * the first that does not, all of it is the strangers'. Once per resolved
+ * object, whom you follow and whether its parent was trusted.
+ */
+const splits = new WeakMap<object, Map<string, [number, number]>>()
+function treeSplit(r: Pick<Resolved, 'model' | 'children'> | undefined, ref: Ref | undefined, parentTrusted: boolean): [number, number] {
+  const charged = parentTrusted && refTrusted(ref)
+  if (!charged) return [0, treeSize(r)]
+  if (!r || !r.model) return [1, 0]
+  const key = `${followsVersion()}`
+  let byKey = splits.get(r)
+  if (!byKey) splits.set(r, (byKey = new Map()))
+  let got = byKey.get(key)
+  if (!got) {
+    got = [1, 0]
+    for (const c of r.children) { const [a, b] = treeSplit(c, c.ref, true); got[0] += a; got[1] += b }
+    byKey.set(key, got)
+  }
+  return got
+}
+
+/** What each of a shard's root placements draws, split by which share pays ([trusted, stranger]), for a shard trusted or not. */
+export function placementSplits(shard: ShardModel, byRef: Map<string, Resolved>, rootTrusted: boolean): Array<[number, number]> {
+  return listOf(shard, byRef).map(({ r, ref }) => treeSplit(r, ref, rootTrusted))
 }
 
 /** How many placed objects a resolved placement draws, itself and everything under it; once per resolved object. */
@@ -486,10 +536,12 @@ export interface Near { centre: [number, number, number]; scale: number; pose?: 
  * the render frame, through the shard's pose, scale and centre (`near`). Null
  * for all of them.
  */
-export function budgeted(list: readonly Listed[], allowance: number | undefined, near?: Near): Set<number> | null {
+export function budgeted(list: readonly Listed[], allowance: Allowance | undefined, near?: Near, rootTrusted = false): Set<number> | null {
   if (allowance === undefined) return null
-  const each = list.map(({ r }) => treeSize(r))
-  if (each.reduce((a, b) => a + b, 0) <= allowance) return null
+  const each = list.map(({ r, ref }) => treeSplit(r, ref, rootTrusted))
+  let wantT = 0, wantS = 0
+  for (const [a, b] of each) { wantT += a; wantS += b }
+  if (wantT <= allowance.trusted && wantS <= allowance.stranger) return null
   // Each distance once, before the sort.
   const turn = near?.pose ? renderPose(near.pose) : null
   const c = near?.centre ?? [0, 0, 0], k = near?.scale ?? 1
@@ -500,11 +552,14 @@ export function budgeted(list: readonly Listed[], allowance: number | undefined,
     return Math.hypot(c[0] + v.x * k, c[1] + v.y * k, c[2] + v.z * k)
   })
   const order = list.map((_, i) => i).sort((a, b) => far[a] - far[b])
+  // Each placement whole, while both of its parts fit what is left of each.
   const keep = new Set<number>()
-  let spent = 0
+  let t = allowance.trusted, n = allowance.stranger
   for (const i of order) {
-    if (spent + each[i] > allowance) continue
-    spent += each[i]
+    const [a, b] = each[i]
+    if (a > t || b > n) continue
+    t -= a
+    n -= b
     keep.add(i)
   }
   return keep
@@ -537,7 +592,7 @@ function cutBox(shard: ShardModel, list: readonly Listed[], cut: readonly number
   return min[0] === Infinity ? null : { min, max }
 }
 
-function Placements({ shard, byRef, nested, lit, ghost, world, headlamp, pose, onPartClick, selected, cull, ignoreOpacity, allowance, near }: {
+function Placements({ shard, byRef, nested, lit, ghost, world, headlamp, pose, onPartClick, selected, cull, ignoreOpacity, allowance, near, rootTrusted = false }: {
   shard: ShardModel
   byRef: Map<string, Resolved>
   nested?: Placed[]
@@ -550,8 +605,10 @@ function Placements({ shard, byRef, nested, lit, ghost, world, headlamp, pose, o
   selected?: number[]
   cull: boolean
   ignoreOpacity: boolean
-  /** How many placed objects it may draw, at every depth (scene/meshBudget.ts); undefined for no budget. */
-  allowance?: number
+  /** How many placed objects it may draw from each share, at every depth (scene/meshBudget.ts); undefined for no budget. */
+  allowance?: Allowance
+  /** Whether the shard itself is trusted, for which share pays for each placement. */
+  rootTrusted?: boolean
   /** Where the shard stands in the render frame, for nearest first. */
   near?: Near
 }): JSX.Element | null {
@@ -559,7 +616,7 @@ function Placements({ shard, byRef, nested, lit, ghost, world, headlamp, pose, o
   const turn = useMemo(() => (pose ? renderPose(pose) : null), [pose])
   // Within the scene's budget: nearest first, each placement whole, and the
   // rest as one outline (it stops nothing: WALK has its own budget).
-  const keep = useMemo(() => budgeted(list, allowance, near), [list, allowance, near])
+  const keep = useMemo(() => budgeted(list, allowance, near, rootTrusted), [list, allowance, near, rootTrusted])
   const outline = useMemo(() => {
     if (!keep) return null
     const cut = list.map((_, i) => i).filter((i) => !keep.has(i))

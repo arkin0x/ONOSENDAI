@@ -118,6 +118,18 @@ describe('the review of #511', () => {
     }
   })
 
+  it('provisional grants before a flush never pass the pool: twenty new strangers get 1,000 between them', () => {
+    clearMeshBudget()
+    let granted = 0
+    for (let i = 0; i < 20; i++) granted += all(provisional(d(10_000, false, i)))!
+    expect(granted).toBe(SCENE_STRANGER)
+    // The next allocation recounts: grants made before it are not carried over.
+    setDemand('one', d(10, false, 0))
+    flushMeshBudget()
+    expect(all(provisional(d(500, false, 1)))).toBe(SCENE_STRANGER_SHARD)
+    clearMeshBudget()
+  })
+
   it('a shard that places nothing costs provisional nothing', () => {
     expect(all(provisional(d(0, true, 0)))).toBe(0)
     expect(all(provisional(d(0, false, 0)))).toBe(0)

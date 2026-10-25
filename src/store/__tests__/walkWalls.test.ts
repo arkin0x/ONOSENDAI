@@ -19,14 +19,15 @@ vi.hoisted(() => {
   }
 })
 
-// WALK reads your follows; here they come from setWallFollows, never a relay.
-vi.mock('../../lib/contacts', () => ({ GENERAL_RELAYS: [], followsOf: async () => [], fetchContacts: async () => [] }))
+// WALK reads your follows; here from `contacts.read`, never a relay.
+const contacts = vi.hoisted(() => ({ read: async (_pubkey: string): Promise<string[]> => [] }))
+vi.mock('../../lib/contacts', () => ({ GENERAL_RELAYS: [], followsOf: (pk: string) => contacts.read(pk), fetchContacts: async () => [] }))
 
 import { newShard, type Ref, type ShardModel } from 'sno-core/shards'
 import { primeRef } from '../../lib/parts'
 import { withConstrain } from '../../lib/walkConstrain'
 import type { AxisName, Position } from '../../lib/space'
-import { STRANGER_BUDGET, clearWalls, setWallFollows, stepLimit, wallBudgetLeft, warmWalls, type WallItem } from '../walkWalls'
+import { STRANGER_BUDGET, TRUSTED_BUDGET, clearWalls, setWallFollows, stepLimit, wallBudgetLeft, warmWalls, type WallItem } from '../walkWalls'
 import { setLocalAuthor } from '../../lib/carried'
 import { useShards } from '../useShards'
 import { toPayload } from 'sno-core/shards'
@@ -189,7 +190,7 @@ describe("WALK's walls are built by trust (arkinox 2026-10-25: \"ok A sounds goo
     try { await run() } finally { useShards.setState({ worldItems: world }) }
   }
   const towardWall = (items: WallItem[]): bigint => stepLimit(AT, 'z', -1, 1n << 10n, items).reach
-  beforeEach(() => setLocalAuthor(() => ME))
+  beforeEach(() => { setLocalAuthor(() => ME); contacts.read = async () => [] })
   afterEach(() => setLocalAuthor(null))
 
   it('a step that cannot enter a shard\'s region resolves nothing of it', async () => {
@@ -260,6 +261,49 @@ describe("WALK's walls are built by trust (arkinox 2026-10-25: \"ok A sounds goo
       warmWalls(1, AT)
       await settleAll()
       expect(towardWall([far])).toBe(2n)
+    })
+  })
+
+  it("a LIVE LINK in your own bag is charged to the stranger whose object it draws (F2)", async () => {
+    // Three links in your bag, each drawing a stranger's object grown huge: they cannot spend your share.
+    const links = [0, 1, 2].map((i) => item(heavy(THEM), { key: `link-${i}`, mine: true, author: ME }))
+    const m = item(maze(ME), { key: 'maze', mine: true, author: ME })
+    await withWorld([...links, m], async () => {
+      warmWalls(1, AT)
+      await settleAll()
+      expect(wallBudgetLeft('trusted')).toBeGreaterThanOrEqual(TRUSTED_BUDGET - 1)
+      expect(towardWall([...links, m])).toBe(2n)
+    })
+  })
+
+  it('a share still out when the next WALK starts is never refunded into it', async () => {
+    // A shard of yours whose one part comes from a slow relay.
+    const slowRef: Ref = ['a', at(ME, 'slow-part')]
+    let release: (p: unknown) => void = () => {}
+    primeRef(slowRef, new Promise((r) => { release = r }))
+    const slow = item(withConstrain({ ...newShard('Slow'), mode: 'solid', vertices: [], faces: [], author: ME, refs: [slowRef], parts: [{ ref: 0, at: [0, 0, 0], turn: [0, 0, 0], step: 0 }] }, 'off'), { key: 'slow', mine: true, author: ME })
+    await withWorld([slow], async () => {
+      warmWalls(1, AT)
+      await settleAll()
+      warmWalls(1, AT)
+      release(toPayload(slab('z', -1, 3)))
+      await settleAll()
+      expect(wallBudgetLeft('trusted')).toBeLessThanOrEqual(TRUSTED_BUDGET)
+    })
+  })
+
+  it('a kind 3 read that failed is asked again at the next WALK', async () => {
+    const hs = [0, 1, 2, 3, 4].map((i) => item(heavy(THEM), { key: `hostile-${i}`, author: THEM }))
+    const friends = item(maze(FRIEND), { key: 'friend', author: FRIEND })
+    contacts.read = async () => { throw new Error('no relay answered') }
+    await withWorld([...hs, friends], async () => {
+      warmWalls(1, AT)
+      await settleAll()
+      expect(towardWall([...hs, friends])).toBe(1n << 10n)
+      contacts.read = async () => [FRIEND]
+      warmWalls(1, AT)
+      await settleAll()
+      expect(towardWall([...hs, friends])).toBe(2n)
     })
   })
 })

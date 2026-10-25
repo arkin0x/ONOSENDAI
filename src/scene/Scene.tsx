@@ -42,7 +42,7 @@ import { carryLook, clearWalkLook, lookRadPerPx, takeKeepWalkLook, takeWalkLook,
 import { tickFall, useWalk } from '../store/useWalk'
 import { orbitOffset } from '../workshop/benchAxes'
 import { WalkProbe } from './WalkProbe'
-import { commitAnchor, committedAnchor } from '../lib/renderFrame'
+import { commitAnchor, commitScale, committedAnchor } from '../lib/renderFrame'
 import { alignedOrigin, useCyberspace } from '../store/useCyberspace'
 import { cameraPose } from '../lib/cameraPose'
 import { useTerrainVolume } from '../hooks/useTerrainVolume'
@@ -141,7 +141,9 @@ const GLIDE_MAX_CELLS = 300
  */
 function FrameCommit(): null {
   const anchor = useCyberspace((s) => s.anchor)
+  const scaleExp = useCyberspace((s) => s.scaleExp)
   useLayoutEffect(() => { commitAnchor(anchor) }, [anchor])
+  useLayoutEffect(() => { commitScale(scaleExp) }, [scaleExp])
   return null
 }
 

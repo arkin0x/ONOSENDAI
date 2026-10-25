@@ -100,3 +100,26 @@ describe('AvatarLerp: one avatar, one position over time', () => {
     expect(out).toEqual([0, 0, 0])
   })
 })
+
+describe('AvatarLerp.rescale', () => {
+  it('keeps a glide the same journey when the zoom changes under it', () => {
+    const lerp = new AvatarLerp()
+    lerp.move([-64, 0, 0], 0)
+    const half = lerp.offset(AVATAR_LERP_MS / 2)[0]
+    // Out three powers of two: the same distance is an eighth of the cells.
+    lerp.rescale(2 ** -3)
+    expect(lerp.offset(AVATAR_LERP_MS / 2)[0]).toBeCloseTo(half / 8)
+    expect(lerp.moving(AVATAR_LERP_MS / 2)).toBe(true)
+    expect(lerp.offset(AVATAR_LERP_MS)).toEqual([0, 0, 0])
+  })
+
+  it('does nothing to an avatar standing still, or for a factor that is not one', () => {
+    const lerp = new AvatarLerp()
+    lerp.rescale(8)
+    expect(lerp.offset(0)).toEqual([0, 0, 0])
+    lerp.move([4, 0, 0], 0)
+    lerp.rescale(Number.NaN)
+    lerp.rescale(0)
+    expect(lerp.offset(0)[0]).toBe(4)
+  })
+})

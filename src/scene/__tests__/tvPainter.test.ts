@@ -1004,3 +1004,27 @@ describe('an explainer on the tube (lib/tv/explainer)', () => {
     expect(words).not.toContain('TUNING')
   })
 })
+
+describe('the zoom badge on the chiron', () => {
+  /** A fake 2D context that measures every character as 7 px and records what is written where. */
+  function recordingCanvas(texts: Array<{ text: string; x: number }>): HTMLCanvasElement {
+    const ctx = new Proxy({ measureText: (t: string) => ({ width: Array.from(t).length * 7 }), createLinearGradient: () => ({ addColorStop: () => {} }), createRadialGradient: () => ({ addColorStop: () => {} }), fillText: (text: string, x: number) => { texts.push({ text, x }) } } as Record<string, unknown>, {
+      get: (target, key) => (key in target ? target[key as string] : () => {}),
+      set: () => true,
+    })
+    return { width: 0, height: 0, getContext: () => ctx } as unknown as HTMLCanvasElement
+  }
+  const trip = { id: 't', kind: 'trip' as const, pubkey: 'a'.repeat(40), beats: [], start: 1, end: 2, offsets: [], length: 5 }
+
+  it('keeps its width as the zoom gains a digit, so the name beside it is not cut again mid-zoom (review of #470)', () => {
+    const drawn = (scaleExp: number) => {
+      const texts: Array<{ text: string; x: number }> = []
+      const p = new TvPainter(recordingCanvas(texts))
+      p.size(1200, 700, 1)
+      p.paint(picture({ shot: trip as never, scaleExp }), assets, 1000, 1, false)
+      return { two: texts.find((t) => t.text === '2')!.x, name: texts.find((t) => t.text.startsWith('AAAA'))!.text }
+    }
+    const nine = drawn(9)
+    for (const z of [0, 10, 84]) expect(drawn(z)).toEqual(nine)
+  })
+})

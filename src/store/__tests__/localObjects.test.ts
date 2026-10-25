@@ -40,7 +40,7 @@ vi.mock('../../lib/relay', () => ({
 }))
 
 import { createElement, type ReactElement } from 'react'
-import { newShard, toPayload, type Ref, type ShardModel } from 'sno-core/shards'
+import { fromPayload, newShard, toPayload, type Ref, type ShardModel } from 'sno-core/shards'
 import { readItem } from '../../lib/hidden'
 import { keepOwnTable } from '../../lib/carried'
 import { objectFromEvent } from 'sno-core/feed'
@@ -410,14 +410,32 @@ describe('carried objects (DECK-0003 §1.10 objects)', () => {
     expect(asked()).toContain('chair')
   })
 
-  it('what comes into the workshop keeps only keys under your own key, and no author', () => {
-    const theirs: ShardModel = { ...placing('Theirs', [addr(THEM, 'x'), addr(ME, 'y')]), author: THEM, objects: { [`33331:${THEM}:x`]: toPayload(tri('X')), [`33331:${ME}:y`]: toPayload(tri('Y')) } }
-    const id = w().importShard(theirs)
-    const copy = w().shards.find((s) => s.id === id)!
-    expect(Object.keys(copy.objects ?? {})).toEqual([`33331:${ME}:y`])
-    expect(copy.author).toBeUndefined()
-    const pasted = w().importText(JSON.stringify({ ...toPayload(placing('P', [addr(THEM, 'x')])), objects: { [`33331:${THEM}:x`]: toPayload(tri('X')) } }))!
-    expect(w().shards.find((s) => s.id === pasted)!.objects).toBeUndefined()
+  it('a copy into the workshop keeps a table only from an event you signed, and then only your keys', () => {
+    const tableOf = (author: string): ShardModel => ({ ...placing('Copy', [addr(THEM, 'x'), addr(ME, 'y')]), author, objects: { [`33331:${THEM}:x`]: toPayload(tri('X')), [`33331:${ME}:y`]: toPayload(tri('Y')) } })
+    const theirsId = w().importShard(tableOf(THEM))
+    const theirs = w().shards.find((s) => s.id === theirsId)!
+    expect(theirs.objects).toBeUndefined()
+    const mineId = w().importShard(tableOf(ME))
+    const mine = w().shards.find((s) => s.id === mineId)!
+    expect(Object.keys(mine.objects ?? {})).toEqual([`33331:${ME}:y`])
+    expect(mine.author).toBeUndefined()
+  })
+
+  it('PASTE trusts nothing it carries, not even keys under your own name: the bench draws your real piece, and PUBLISH carries nothing', async () => {
+    // Your workshop holds the real room; the pasted text claims a forged one at its address.
+    const forged = { ...toPayload(placing('Pasted', [addr(ME, ROOM_ID)])), objects: { [`33331:${ME}:${ROOM_ID}`]: toPayload(tri('FORGED ROOM')) } }
+    const id = w().importText(JSON.stringify(forged))!
+    const pasted = w().shards.find((s) => s.id === id)!
+    expect(pasted.objects).toBeUndefined()
+    const h = mountHook(useResolved, pasted, bench)
+    await settle()
+    expect(h.current().get(ROOM)?.model?.name).toBe('Atrium')
+    await h.unmount()
+    // What PUBLISH and a hide write from it carries no table.
+    expect(toPayload(pasted).objects).toBeUndefined()
+    // A file or zip import is the same.
+    const added = w().addShard(fromPayload(forged, 'f')!, 'Imported')!
+    expect(w().shards.find((s) => s.id === added.id)!.objects).toBeUndefined()
   })
 
   it("a picture's key holds the table: a changed copy is a new picture", () => {

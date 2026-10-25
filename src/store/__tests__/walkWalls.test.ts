@@ -19,6 +19,13 @@ vi.hoisted(() => {
   }
 })
 
+// A resolve that never lands, when asked: to show a wait is let go (wallsBuilt).
+const hang = vi.hoisted(() => ({ on: false }))
+vi.mock('../../lib/parts', async (orig) => {
+  const mod = await orig<typeof import('../../lib/parts')>()
+  return { ...mod, resolvePartsShared: (...args: Parameters<typeof mod.resolvePartsShared>) => (hang.on ? new Promise<never>(() => {}) : mod.resolvePartsShared(...args)) }
+})
+
 // WALK reads your follows; here from `contacts.read`, never a relay.
 const contacts = vi.hoisted(() => ({ read: async (_pubkey: string): Promise<string[]> => [] }))
 vi.mock('../../lib/contacts', () => ({ GENERAL_RELAYS: [], followsOf: (pk: string) => contacts.read(pk), fetchContacts: async () => [] }))
@@ -27,7 +34,7 @@ import { newShard, type Ref, type ShardModel } from 'sno-core/shards'
 import { primeRef } from '../../lib/parts'
 import { withConstrain } from '../../lib/walkConstrain'
 import type { AxisName, Position } from '../../lib/space'
-import { STRANGER_BUDGET, TRUSTED_BUDGET, clearWalls, setWallFollows, stepLimit, takeWallWait, wallBudgetLeft, wallsBuilt, warmWalls, type WallItem } from '../walkWalls'
+import { STRANGER_BUDGET, TRUSTED_BUDGET, WALL_WAIT_MS, clearWalls, setWallFollows, stepLimit, takeWallWait, wallBudgetLeft, wallsBuilt, warmWalls, type WallItem } from '../walkWalls'
 import { setLocalAuthor } from '../../lib/carried'
 import { useShards } from '../useShards'
 import { toPayload } from 'sno-core/shards'
@@ -344,6 +351,37 @@ describe("WALK's walls are built by trust (arkinox 2026-10-25: \"ok A sounds goo
     await wallsBuilt()
     expect(wallBudgetLeft('trusted')).toBeLessThanOrEqual(TRUSTED_BUDGET)
     for (const i of [0, 17, 39]) expect(stepLimit({ ...AT, x: AT.x + BigInt(i * 1000) }, 'z', -1, 1n << 10n, mazes).reach).toBe(2n)
+  })
+
+  it('first builds waiting in a pool are settled when the shares come back, even from entries taken away meanwhile', async () => {
+    // Six strangers take the strangers' share (five at 4,000) with the sixth waiting; a second step
+    // in the same task, over other shards, takes their entries away and makes a stranger's maze wait too.
+    const hs = [0, 1, 2, 3, 4, 5].map((i) => item(heavy(THEM), { key: `h-${i}`, author: THEM }))
+    const theirs = item(maze(THEM), { key: 'their-maze', author: THEM })
+    stepLimit(AT, 'z', -1, 1n << 10n, hs)
+    stepLimit(AT, 'z', -1, 1n << 10n, [theirs])
+    // Resolved by the shares coming back, well before the wait would be let go.
+    const t0 = Date.now()
+    await wallsBuilt()
+    expect(Date.now() - t0).toBeLessThan(WALL_WAIT_MS / 2)
+    // Settled: the strangers' share was spent, so it is walkable, and nothing waits on it any more.
+    takeWallWait()
+    stepLimit(AT, 'z', -1, 1n << 10n, [theirs])
+    expect(takeWallWait()).toBe(false)
+  })
+
+  it('a wait for walls is let go after WALL_WAIT_MS, so input never hangs', async () => {
+    hang.on = true
+    try {
+      const m = item(maze(ME), { key: 'never', mine: true, author: ME })
+      expect(stepLimit(AT, 'z', -1, 1n << 10n, [m]).reach).toBe(0n)
+      const t0 = Date.now()
+      await wallsBuilt()
+      expect(Date.now() - t0).toBeGreaterThanOrEqual(WALL_WAIT_MS - 20)
+      expect(Date.now() - t0).toBeLessThan(WALL_WAIT_MS * 8)
+    } finally {
+      hang.on = false
+    }
   })
 
 })

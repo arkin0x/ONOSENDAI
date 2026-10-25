@@ -28,3 +28,19 @@ export function committedAnchor(): Position | null {
 export function commitAnchor(anchor: Position): void {
   committed = anchor
 }
+
+let committedZoom: number | null = null
+
+/**
+ * The zoom the scene was last committed with, or null before the first
+ * commit: a zoom moves the store a commit before the meshes, as a landing
+ * does, and Cyberspace TV zooms mid-shot (lib/tv/zoom.ts).
+ */
+export function committedScale(): number | null {
+  return committedZoom
+}
+
+/** Called from the commit that draws the scene at 2^`scaleExp`. */
+export function commitScale(scaleExp: number): void {
+  committedZoom = scaleExp
+}

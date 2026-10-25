@@ -4,7 +4,10 @@
  */
 import { describe, expect, it } from 'vitest'
 import { Vector3 } from 'three'
-import { carryAcross, followStep, framingDirection, grownAt, TV_CARRY_MAX_CELLS, type TvFollow, type TvFollowFrame } from '../TvLayer'
+import { carryAcross, followStep, framingDirection, grownAt, TV_CARRY_MAX_CELLS, TV_FOLLOW_TAU, type TvFollow, type TvFollowFrame } from '../TvLayer'
+import { AvatarLerp, type Vec3 } from '../../lib/avatarLerp'
+import { FIT_CELLS, MOVE_FIT_CELLS } from '../../lib/tv/zoom'
+import { MIN_STEP_S } from '../../lib/tv/director'
 import { originShift, type Position, type ViewAxes } from '../../lib/space'
 import { alignedOrigin } from '../../store/useCyberspace'
 
@@ -117,5 +120,77 @@ describe('the TV camera across a cut', () => {
     expect(smooth.toArray()).toEqual([5 - (TV_CARRY_MAX_CELLS - 1), 0, 1])
     carryAcross(smooth, [0, TV_CARRY_MAX_CELLS, 0], new Vector3(1, 2, 3))
     expect(smooth.toArray()).toEqual([1, 2, 3])
+  })
+})
+
+describe('the TV camera across a zoom step', () => {
+  const AXES: ViewAxes = { right: { axis: 'x', dir: 1 }, up: { axis: 'y', dir: -1 }, out: { axis: 'z', dir: 1 } }
+  const A: Position = { x: 1000n, y: 2000n, z: 3000n }
+  const frame = (scaleExp: number, subject: Vector3, cutAt = 1): TvFollowFrame =>
+    ({ anchor: A, drawn: A, scaleExp, cutAt, live: [0, 0, 0], subject })
+
+  it('keeps its lag behind the avatar, rescaled, rather than cutting onto it', () => {
+    const f: TvFollow = { smooth: null, was: null }
+    const at = new Vector3()
+    expect(followStep(f, frame(4, new Vector3(0, 0, 0)), AXES, 0, at)).toBe('cut')
+    // The avatar moves on 8 cells; the eased point has not followed (k = 0).
+    expect(followStep(f, frame(4, new Vector3(8, 0, 0)), AXES, 0, at)).toBe('follow')
+    // Out two powers of two, re-anchored on the avatar: it is drawn at 0 now.
+    const step = followStep(f, frame(6, new Vector3(0, 0, 0)), AXES, 0, at)
+    expect(step).toBe('zoom')
+    // 8 cells behind at 2^4 is 2 cells behind at 2^6.
+    expect(f.smooth!.toArray()).toEqual([-2, 0, 0])
+  })
+
+  it('keeps its lag as it was on screen when zooming in, never grown (review of #470)', () => {
+    const f: TvFollow = { smooth: null, was: null }
+    const at = new Vector3()
+    followStep(f, frame(16, new Vector3(0, 0, 0)), AXES, 0, at)
+    followStep(f, frame(16, new Vector3(3, 0, 0)), AXES, 0, at)
+    // In six powers of two in a row: the eased point stays 3 cells behind, not 3 * 2^6.
+    for (let z = 15; z >= 10; z--) expect(followStep(f, frame(z, new Vector3(0, 0, 0)), AXES, 0, at)).toBe('zoom')
+    expect(f.smooth!.toArray()).toEqual([-3, 0, 0])
+  })
+
+  it('still cuts when a new shot changes the zoom', () => {
+    const f: TvFollow = { smooth: null, was: null }
+    followStep(f, frame(4, new Vector3(5, 0, 0)), AXES, 0, new Vector3())
+    expect(followStep(f, frame(9, new Vector3(1, 0, 0), 2), AXES, 0, new Vector3())).toBe('cut')
+    expect(f.smooth!.toArray()).toEqual([1, 0, 0])
+  })
+})
+
+describe('the TV camera behind a run of moves', () => {
+  const AXES: ViewAxes = { right: { axis: 'x', dir: 1 }, up: { axis: 'y', dir: -1 }, out: { axis: 'z', dir: 1 } }
+  const A: Position = { x: 1000n, y: 2000n, z: 3000n }
+  /** About how many cells a close shot shows either side of its middle (review of #470). */
+  const CLOSE_HALF_CELLS = 5.5
+
+  /** The farthest the eased point falls behind the avatar, cells, over ten back-to-back moves of `cells` at 60 fps. */
+  function worstLag(cells: number): number {
+    const f: TvFollow = { smooth: null, was: null }
+    const lerp = new AvatarLerp()
+    const at = new Vector3()
+    const out: Vec3 = [0, 0, 0]
+    const dt = 1 / 60
+    let x = 0
+    let worst = 0
+    for (let move = 0; move < 10; move++) {
+      x += cells
+      const t0 = move * MIN_STEP_S * 1000
+      lerp.move([-cells, 0, 0], t0)
+      for (let t = t0; t < t0 + MIN_STEP_S * 1000; t += dt * 1000) {
+        lerp.offset(t, out)
+        const subject = new Vector3(x + out[0], 0, 0)
+        followStep(f, { anchor: A, drawn: A, scaleExp: 0, cutAt: 1, live: [0, 0, 0], subject }, AXES, 1 - Math.exp(-dt / TV_FOLLOW_TAU), at)
+        worst = Math.max(worst, subject.x - f.smooth!.x)
+      }
+    }
+    return worst
+  }
+
+  it('keeps a run of moves fitted to MOVE_FIT_CELLS within a close shot, where FIT_CELLS left it at the edge (review of #470)', () => {
+    expect(worstLag(MOVE_FIT_CELLS)).toBeLessThan(CLOSE_HALF_CELLS * 0.75)
+    expect(worstLag(FIT_CELLS)).toBeGreaterThan(CLOSE_HALF_CELLS)
   })
 })

@@ -42,7 +42,8 @@ import { useCyberspace } from '../store/useCyberspace'
 import { CUBE_EDGES, ShardMesh } from './ShardMesh'
 import { TapTarget } from './TapTarget'
 import { WorldLabel } from './WorldLabel'
-import { CUBE_REACH } from '../lib/markerSize'
+import { CUBE_REACH, MARK_RECEDE_FLOOR, recedeShare } from '../lib/markerSize'
+import { headlampUniforms } from './headlamp'
 
 /** The note's own blue, the cube's color (WorldMessages NOTE_BLUE). */
 export const ITEM_BOX_BLUE = '#4aa3ff'
@@ -181,8 +182,12 @@ export function ItemModelMark({ id, model, animation, at, region, axes, minPx, o
     const g = outer.current
     if (!g) return
     const cam = state.camera as PerspectiveCamera
-    const perPx = (2 * Math.tan((cam.fov * Math.PI) / 360) * cam.position.distanceTo(g.position)) / state.size.height
-    g.scale.setScalar(Math.max(1e-9, modelScale(atTrue, longest, minPx, perPx)))
+    const depth = cam.position.distanceTo(g.position)
+    const perPx = (2 * Math.tan((cam.fov * Math.PI) / 360) * depth) / state.size.height
+    // The floor recedes as the note's cube does (lib/markerSize.ts
+    // recedeShare); the true size already keeps its perspective.
+    const floorPx = minPx * recedeShare(depth, headlampUniforms.uHeadlampReach.value, MARK_RECEDE_FLOOR)
+    g.scale.setScalar(Math.max(1e-9, modelScale(atTrue, longest, floorPx, perPx)))
     if (planes && frame.current) {
       frame.current.updateWorldMatrix(true, false)
       for (let i = 0; i < planes.local.length; i++) planes.world[i].copy(planes.local[i]).applyMatrix4(frame.current.matrixWorld)
@@ -201,7 +206,7 @@ export function ItemModelMark({ id, model, animation, at, region, axes, minPx, o
           model draws can be far larger than the cube was, so the box takes
           taps as a shard's does. */}
       {onTap && <group position={at}><TapTarget measure={frame} onTap={onTap} /></group>}
-      {label && <WorldLabel text={label.text} color={label.color} at={at} align="center" px={13} sub={label.sub} subColor={label.subColor} opacity={opacity} clear={clear} />}
+      {label && <WorldLabel text={label.text} color={label.color} at={at} align="center" px={13} sub={label.sub} subColor={label.subColor} opacity={opacity} clear={clear} recede />}
     </>
   )
 }

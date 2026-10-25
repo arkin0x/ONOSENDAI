@@ -57,3 +57,41 @@ export function labelLiftPx(trueSide: number, minPx: number, depth: number, proj
   const sidePx = Math.max(pixelsForCells(trueSide, depth, projScale), minPx)
   return sidePx * CUBE_REACH + LABEL_GAP_PX + labelPx / 2
 }
+
+/**
+ * How large a hidden item's mark is drawn at `depth` from the camera, as a
+ * share of its full size (arkinox, 2026-10-25: "the chest marker does not
+ * scale with distance. it needs to. its too large at large distances").
+ *
+ * A mark held at a constant pixel size reads the same at your feet and at the
+ * far end of a corridor in WALK, so a chest twenty gibsons off stood as large
+ * as one in reach and said nothing about where it was. Out to `reach` the
+ * mark is its full size; past it the mark keeps its perspective, shrinking as
+ * reach over depth, down to `floor`, so it never vanishes.
+ *
+ * `reach` is the headlamp's (scene/headlamp.ts): the camera's distance from
+ * what it orbits, in render cells, held between 8 and the orbit's limit. It
+ * is in cells at the current 2^N, so the rule keeps its shape at every zoom:
+ * in orbit everything about the focus is at full size and only what stands
+ * behind it recedes; in WALK, whose eye is on the avatar, the reach is 8
+ * cells and a mark further down the hall shrinks as the walls do.
+ */
+export function recedeShare(depth: number, reach: number, floor: number): number {
+  if (!(depth > reach) || !(reach > 0)) return 1
+  return Math.max(floor, Math.min(1, reach / depth))
+}
+
+/**
+ * The least share a mark (the cube, a model's floor, the music note) recedes
+ * to: the note's 24.5 px cube stands about 10 px far off, the size of a fleet
+ * stop cube (FLEET_CUBE_PX), still a box and still something to look at.
+ */
+export const MARK_RECEDE_FLOOR = 0.4
+
+/**
+ * The least share a mark's label recedes to: higher than the mark's, because
+ * text far smaller than this stops being text. The 13 px name stands about
+ * 8 px far off on a desktop and about 5.6 px on a phone (WorldLabel
+ * labelShrink).
+ */
+export const LABEL_RECEDE_FLOOR = 0.6

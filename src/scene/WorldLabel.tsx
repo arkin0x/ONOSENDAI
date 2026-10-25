@@ -17,8 +17,9 @@ import { Text } from '@react-three/drei'
 import { useFrame, type RootState } from '@react-three/fiber'
 import { Group, Quaternion, Vector3 } from 'three'
 import { WORLD_FONT } from '../lib/font'
-import { labelLiftPx, projScaleOf } from '../lib/markerSize'
+import { LABEL_RECEDE_FLOOR, MARK_RECEDE_FLOOR, labelLiftPx, projScaleOf, recedeShare } from '../lib/markerSize'
 import { bearingDepth } from '../lib/bearing'
+import { headlampUniforms } from './headlamp'
 
 /**
  * When in the frame a label turns to the camera and sizes itself: after the
@@ -109,11 +110,19 @@ interface Props {
    * which far from the render origin cancels to nothing (lib/bearing.ts).
    */
   fromCamera?: [number, number, number]
+  /**
+   * Recede with distance, as a hidden item's mark does (lib/markerSize.ts
+   * recedeShare): full size out to the headlamp's reach, then smaller with
+   * depth down to LABEL_RECEDE_FLOOR. A `clear` marker's floor recedes by the
+   * mark's own rule, so the label still sits just above it. Off, the label
+   * holds its pixel height at any depth, as every other label does.
+   */
+  recede?: boolean
 }
 
 export function WorldLabel({
   text, color, at, follow, offset = [0, 0, 0], offsetPx = [0, 0], px = 14, opacity = 1, align = 'left',
-  small, smallScale = 0.68, sub, subScale = 0.72, subColor, subOpacity = 0.7, clear, fromCamera,
+  small, smallScale = 0.68, sub, subScale = 0.72, subColor, subOpacity = 0.7, clear, fromCamera, recede = false,
 }: Props): JSX.Element {
   const group = useRef<Group>(null)
   const inner = useRef<Group>(null)
@@ -134,11 +143,13 @@ export function WorldLabel({
     if (cam.fov === undefined) return
     const depth = Math.max(0.001, fromCamera ? bearingDepth(fromCamera, g.position) : cam.position.distanceTo(g.getWorldPosition(scratch)))
     const projScale = projScaleOf(state.size.height, cam.fov)
-    const unitPx = px * labelShrink(state.size.width)
+    const reach = headlampUniforms.uHeadlampReach.value
+    const unitPx = px * labelShrink(state.size.width) * (recede ? recedeShare(depth, reach, LABEL_RECEDE_FLOOR) : 1)
     g.scale.setScalar((unitPx * depth) / projScale)
     // Lifted clear of its marker: one local unit is `unitPx` pixels.
     if (clear && inner.current) {
-      inner.current.position.y = labelLiftPx(clear.trueSide, clear.minPx, depth, projScale, unitPx) / unitPx + offsetPx[1] / px
+      const minPx = clear.minPx * (recede ? recedeShare(depth, reach, MARK_RECEDE_FLOOR) : 1)
+      inner.current.position.y = labelLiftPx(clear.trueSide, minPx, depth, projScale, unitPx) / unitPx + offsetPx[1] / px
     }
     // Face the camera exactly as it is drawn: the camera's own turn, undone
     // by whatever turns the label's parents. drei's Billboard did this at

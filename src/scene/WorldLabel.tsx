@@ -174,7 +174,10 @@ export function WorldLabel({
     // Lifted clear of its marker: one local unit is `unitPx` pixels.
     if (inner.current && clear) {
       inner.current.position.y = labelLiftPx(clear.trueSide, clear.minPx * mark, depth, projScale, unitPx) / unitPx + (offsetPx[1] / px) * near
-    } else if (inner.current && near !== 1) {
+    } else if (inner.current && recede) {
+      // Every frame while it recedes: back at full size the prop is never
+      // re-applied (R3F skips equal array props), so a jump from far to near
+      // would leave the last shrunk offset (review of #518).
       inner.current.position.set((offsetPx[0] / px) * near, (offsetPx[1] / px) * near, 0)
     }
     // Far off a name fades, its credit line first (lib/markerSize.ts fadeShare).

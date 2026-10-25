@@ -45,6 +45,7 @@ import {
   type ShardModel,
   type ShardVertex, type Part, type Ref, cloneVertex, hexToRgb, rgbToHex } from 'sno-core/shards'
 import { withOpacity } from '../lib/opacityStep'
+import { noTable, signedTableOnly, you } from '../lib/carried'
 import { authoredConstrainOf, chosenConstrainOf, withConstrain, type Constrain } from '../lib/walkConstrain'
 import { addPart, quarterTurnPart, removeParts } from 'sno-core/parts'
 import { FLOOR, MAX_SIZE, MIN_SIZE, stamp, type Facing, type StampKind, type WorkPlane } from 'sno-core/stamps'
@@ -1605,15 +1606,22 @@ export const useWorkshop = create<WorkshopState>((set, get) => {
     },
 
     importText: (text) => {
-      const s = shardFromText(text, uuid())
-      if (!s) return null
+      const read = shardFromText(text, uuid())
+      if (!read) return null
+      // Text nobody signed: nothing it carries is trusted (lib/carried.ts noTable).
+      const s = noTable(read)
       const list = [...get().shards, s]
       set({ shards: list, currentId: s.id, selection: [], partSel: [], selectedFace: null, facePick: [], past: [], future: [], notice: null })
       save(list)
       return s.id
     },
 
-    importShard: (model, credit, id) => {
+    importShard: (given, credit, id) => {
+      // A copy from the feed, a bag, a chest or an avatar: what it carries comes
+      // in only when you signed the event it was read from (lib/carried.ts
+      // signedTableOnly), so a key someone else wrote under your name is never
+      // published again as yours.
+      const model = signedTableOnly(given, you())
       const taken = new Set(get().shards.map((s) => s.name))
       // Your own object comes back under its own name: there is no other to be a copy of.
       const name = !id && taken.has(model.name) ? `${model.name} copy` : model.name
@@ -1624,8 +1632,10 @@ export const useWorkshop = create<WorkshopState>((set, get) => {
       return copy.id
     },
 
-    addShard: (model, name, id) => {
+    addShard: (given, name, id) => {
       if (id !== undefined && get().shards.some((s) => s.id === id)) return null
+      // An import (a file, a zip): nobody signed it, so nothing it carries is trusted.
+      const model = noTable(given)
       const copy: ShardModel = { ...model, id: id ?? uuid(), name: name.slice(0, 64), vertices: model.vertices.map(cloneVertex), faces: model.faces.map((f) => [...f] as [number, number, number]), updatedAt: Date.now() }
       const list = [...get().shards, copy]
       set({ shards: list })
@@ -1635,7 +1645,9 @@ export const useWorkshop = create<WorkshopState>((set, get) => {
 
     saveNow: () => saveStored(),
 
-    replaceShard: (id, model) => {
+    replaceShard: (id, given) => {
+      // An import's UPDATE: nobody signed it, so nothing it carries is trusted.
+      const model = noTable(given)
       const { shards, currentId, past } = get()
       const i = shards.findIndex((s) => s.id === id)
       if (i < 0) return Promise.resolve('missing')

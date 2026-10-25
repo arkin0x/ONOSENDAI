@@ -25,6 +25,7 @@ import type { NostrEvent } from '../lib/events'
 import { publish, query } from '../lib/relay'
 import { SignerAccountMismatch } from '../lib/signers'
 import { fromPayload, toPayload, type ShardModel } from 'sno-core/shards'
+import { keepOwnTable } from '../lib/carried'
 import { useCyberspace } from './useCyberspace'
 
 const MINE_KEY = 'onosendai:avatar'
@@ -256,7 +257,8 @@ export const useAvatars = create<AvatarsState>((set, get) => ({
       if (!raw) return
       const kept = JSON.parse(raw) as { pubkey?: string; payload?: unknown; event?: NostrEvent; published?: boolean }
       if (kept.pubkey !== me) return
-      const shard = kept.payload ? fromPayload(kept.payload, `avatar:${me}`) : null
+      const read = kept.payload ? fromPayload(kept.payload, `avatar:${me}`) : null
+      const shard = read && keepOwnTable(read, me)
       set({
         shards: { ...get().shards, [me]: shard },
         mineEvent: kept.event ?? null,

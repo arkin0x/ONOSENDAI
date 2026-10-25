@@ -16,6 +16,7 @@
  */
 
 import { TICKS_PER_UNIT, fromPayload, ticksOf, toPayload, type ShardModel } from 'sno-core/shards'
+import { keepOwnTable } from './carried'
 import { CLIENT_TAG } from './client'
 
 export const AVATAR_KIND = 11333
@@ -40,7 +41,8 @@ export function avatarFromEvent(ev: { kind: number; pubkey: string; content: str
   if (ev.kind !== AVATAR_KIND) return null
   if (!ev.content) return null
   try {
-    return fromPayload(JSON.parse(ev.content), `avatar:${ev.pubkey}`)
+    const shard = fromPayload(JSON.parse(ev.content), `avatar:${ev.pubkey}`)
+    return shard && keepOwnTable(shard, ev.pubkey)
   } catch {
     return null
   }

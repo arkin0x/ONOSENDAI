@@ -168,5 +168,34 @@ describe('a shard drawn in the scene reads from its pool (useResolved)', () => {
     expect(m.used()).toBe(SCENE_STRANGER_SHARD_READS)
     expect(readsLeft('stranger')).toBe(SCENE_STRANGER_READS - SCENE_STRANGER_SHARD_READS)
   })
+
+  it('a shard cut short two levels down on a dry pool is not woken by the reads it gives back itself (review of #515, round 3)', async () => {
+    const { primeRef } = await import('../parts')
+    // Strangers' shards leave 50 reads; F places X, fetched, whose own table holds the 300 pieces it places.
+    const others = [...(['A', 'B', 'C', 'D'] as const).map((n) => draw(wide(THEM, n, 200), 'stranger')), draw(wide(THEM, 'E', 140), 'stranger')]
+    const small = draw(wide(THEM, 'S', 10), 'stranger')
+    await settle()
+    expect(readsLeft('stranger')).toBe(50)
+    const xRef: Ref = ['a', at(THEM, 'X')]
+    primeRef(xRef, toPayload(wide(THEM, 'X', 300)))
+    const f = draw({ ...newShard('F'), mode: 'solid', vertices: [], faces: [], author: THEM, refs: [xRef], parts: [{ ref: 0, at: [0, 0, 0], turn: [0, 0, 0], step: 0 }] }, 'stranger')
+    await settle()
+    // X and 49 of its pieces: cut two levels down, the pool dry.
+    const x = () => f.current().get(`a:${xRef[1]}`)!
+    expect(x().children.filter((c) => c.model).length).toBe(49)
+    expect(readsLeft('stranger')).toBe(0)
+    // S leaves: its 10 wake F, which gives back its 50 as it resolves again and takes them, and 10 more.
+    await small.unmount()
+    await settle(30)
+    expect(x().children.filter((c) => c.model).length).toBe(59)
+    expect(readsLeft('stranger')).toBe(0)
+    // And it rests there: no more resolves, however long the view stays still.
+    const renders = f.renders()
+    await settle(50)
+    expect(f.renders()).toBe(renders)
+    for (const h of [...others, f]) await h.unmount()
+    await settle()
+    expect(readsLeft('stranger')).toBe(SCENE_STRANGER_READS)
+  })
 })
 

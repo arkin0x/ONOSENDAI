@@ -224,15 +224,9 @@ export function useResolved(shard: ShardModel | null, pool?: ReadPool): Map<stri
   // The read pools this draw was cut short by, for want of reads in them (not
   // by its own share's ceiling): resolved again when reads come back to one.
   const starvedOf = useRef<Set<ReadPool>>(new Set())
-  // Reads that came back while it was still resolving: it learns it starved
-  // only when it lands, so it is told then (review of #515: a lost wakeup).
-  const backWhileResolving = useRef<Set<ReadPool>>(new Set())
   useEffect(() => {
     if (!pool) return
-    return onReadsBack((back) => {
-      if (pending.current) { backWhileResolving.current.add(back); return }
-      if (starvedOf.current.has(back)) setAgain((n) => n + 1)
-    })
+    return onReadsBack((back) => { if (!pending.current && starvedOf.current.has(back)) setAgain((n) => n + 1) })
   }, [pool])
   useEffect(() => {
     touched.current = new Set(refs.map(refKey))
@@ -242,7 +236,6 @@ export function useResolved(shard: ShardModel | null, pool?: ReadPool): Map<stri
     let landed = false
     pending.current = true
     starvedOf.current = new Set()
-    backWhileResolving.current = new Set()
     // One placement per reference is enough: what a reference resolves to does not depend on where it stands.
     const probe: ShardModel = { ...shard, parts: refs.map((_, i) => ({ ref: i, at: [0, 0, 0], turn: [0, 0, 0], step: 0 })) }
     // In the scene: what it reads is charged to its pool (lib/readPools.ts), a
@@ -275,8 +268,12 @@ export function useResolved(shard: ShardModel | null, pool?: ReadPool): Map<stri
       // dry (not by its own share's ceiling): resolved again when reads come back.
       if (cutForReads(placed)) for (const h of held) if (h.meter.poolRanLow()) starvedOf.current.add(h.pool)
       // A pool it ran dry on has reads again already (given back while it
-      // resolved): resolved again now, not when someone else next gives some.
-      const wake = [...starvedOf.current].some((p) => readsLeft(p) > 0 || backWhileResolving.current.has(p))
+      // resolved, and still there): resolved again now, not when someone else
+      // next gives some (review of #515: a lost wakeup). Only while the pool
+      // has them: reads it gave back itself and took again are not there, and
+      // waking on them would wake it forever (review of #515, round 3); if
+      // someone else took them, the next to give some back wakes it.
+      const wake = [...starvedOf.current].some((p) => readsLeft(p) > 0)
       pending.current = false
       touched.current = touchedKeys(placed, new Set(refs.map(refKey)))
       const m = new Map<string, Resolved>()

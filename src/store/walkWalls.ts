@@ -160,6 +160,8 @@ function resolveInto(w: WallItem, e: Entry): void {
  * further off are built when a step can reach their region (stepLimit).
  */
 export function warmWalls(plane: number, from?: Position): void {
+  // A fresh object, never the old one refilled: a resolve still running from
+  // before keeps drawing from the budget it was handed, which is spent.
   budget = { left: WALL_BUDGET }
   const items = wallItems(plane)
   const near = from ? items.filter((w) => regionReached(w, from)).sort((a, b) => { const x = farness(a.at, from), y = farness(b.at, from); return x < y ? -1 : x > y ? 1 : 0 }) : items

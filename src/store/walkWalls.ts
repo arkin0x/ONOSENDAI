@@ -44,7 +44,7 @@
 import { MAX_PLACED, type Placed } from 'sno-core/parts'
 import type { ShardModel } from 'sno-core/shards'
 import { you } from '../lib/carried'
-import { onFollows, readFollows, resetFollows, setFollows, trustedPlacement } from '../lib/trust'
+import { chargeByTrust, onFollows, readFollows, resetFollows, setFollows, trustedPlacement } from '../lib/trust'
 import { fetchSettled, resolvePartsShared } from '../lib/parts'
 import { regionBox, type Box } from '../lib/clip'
 import { placedPose } from '../lib/pose'
@@ -311,13 +311,31 @@ function resolveInto(w: WallItem, e: Entry, quick = false): void {
   // in: what it does not use goes back to that WALK's pool only, never into a
   // fresh one (warmWalls, clearWalls), which would then hold more than its cap.
   const mine = { left: share }
+  // A trusted shard placing a stranger's object charges that child, and all
+  // under it, to the strangers' pool, at most STRANGER_SHARD of it, never to
+  // your share (lib/trust.ts chargeByTrust; sno-core budgetFor).
+  // Taken from the strangers' pool only when a placement is charged to it.
+  let theirs: { left: number } | null = null
+  const strangerShare = (): { left: number } => {
+    theirs = { left: Math.min(STRANGER_SHARD, Math.max(0, pools.stranger)) }
+    pools.stranger -= theirs.left
+    return theirs
+  }
   const handed = walkNo
-  const refund = (): void => { if (walkNo === handed) pools[pool] += Math.max(0, mine.left) }
+  const refund = (): void => {
+    if (walkNo !== handed) return
+    pools[pool] += Math.max(0, mine.left)
+    const got = theirs as { left: number } | null
+    if (got) pools.stranger += Math.max(0, got.left)
+  }
   // First from what is in hand (carried, or fetched before), which lands in the
   // task; then, for what came back unreachable, from the relays.
-  void resolvePartsShared(w.shard, quick ? fetchSettled : undefined, undefined, mine).then((placed) => {
+  void resolvePartsShared(w.shard, quick ? fetchSettled : undefined, undefined, mine, pool === 'trusted' ? chargeByTrust(mine, strangerShare) : undefined).then((placed) => {
     refund()
-    const starved = cutShort(placed)
+    // Starved, and built again when its pool has budget back, only when its own
+    // share ran out: what a stranger's object under it could not have, from the
+    // strangers' share, is walkable until the next WALK, as any stranger's is.
+    const starved = cutShort(placed) && mine.left <= 0
     const next = build(w, placed, starved)
     if (entries.get(w.key) === e) entries.set(w.key, next)
     landed()
@@ -328,6 +346,8 @@ function resolveInto(w: WallItem, e: Entry, quick = false): void {
     if (starved && poolOf(w) !== pool) resolveInto(w, next)
     else if (quick && next.missingAt !== null) resolveInto(w, next)
     reviveStarved(pool)
+    // What it held of the strangers' pool came back too.
+    if (theirs) reviveStarved('stranger')
   }, () => {
     e.pending = false
     e.quickPending = false

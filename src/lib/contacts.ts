@@ -37,3 +37,20 @@ export async function fetchContacts(pubkey: string): Promise<Contact[]> {
   const newest = events.sort((a, b) => b.created_at - a.created_at)[0]
   return newest ? parseContacts(newest) : []
 }
+
+/** Each pubkey's follows, read once per session (WALK's walls, store/walkWalls.ts). */
+const followsRead = new Map<string, Promise<string[]>>()
+
+/**
+ * The pubkeys `pubkey` follows, from its newest kind 3, read once per session;
+ * a read that failed is not kept, so the next asks again.
+ */
+export function followsOf(pubkey: string): Promise<string[]> {
+  let got = followsRead.get(pubkey)
+  if (!got) {
+    got = fetchContacts(pubkey).then((list) => list.map((c) => c.pubkey))
+    followsRead.set(pubkey, got)
+    void got.catch(() => { if (followsRead.get(pubkey) === got) followsRead.delete(pubkey) })
+  }
+  return got
+}

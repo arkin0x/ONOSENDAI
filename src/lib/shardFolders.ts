@@ -12,7 +12,8 @@
  * shown at the top (folderOf). The one exception is asked for by name:
  * 'purge' takes a folder and every folder under it out of the tree, with the
  * filings and deploy times of the shards that were in them, for a caller that
- * deletes those shards itself in the same step (the workshop's DELETE CONTENTS).
+ * has deleted those shards itself, and saved that, first (the workshop's
+ * DELETE CONTENTS).
  * The tree never deletes a shard. A tree read back damaged (a parent that is
  * missing, a loop of parents) is drawn with the broken folders at the top
  * rather than lost (parentOf).

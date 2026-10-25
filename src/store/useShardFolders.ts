@@ -58,7 +58,8 @@ interface ShardFoldersState {
   /**
    * The folder and every folder under it go, with the filings of the shards
    * in them. For the workshop's DELETE CONTENTS, which deletes those shards
-   * itself in the same step (useWorkshop removeMany); this deletes no shard.
+   * itself first (useWorkshop removeMany) and calls this only once that is
+   * saved (hud/ShardFolders deleteFolderNow); this deletes no shard.
    */
   purgeFolder: (id: string) => void
   /** File shards (by ref) in a folder, or at the top with null. */

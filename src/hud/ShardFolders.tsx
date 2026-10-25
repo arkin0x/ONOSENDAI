@@ -63,8 +63,8 @@ interface Props<T> {
 
 /** How a list deletes its shards, for DELETE CONTENTS. Local only: nothing is retracted. */
 export interface DeleteContents {
-  /** Delete these shards (by ref) in one step. */
-  remove: (refs: string[]) => void
+  /** Delete these shards (by ref) in one step; resolves true once that is saved, false when the write failed. */
+  remove: (refs: string[]) => Promise<boolean>
   /** How many of these are published (the publish ledger), for the note that they stay on relays. */
   published: (refs: readonly string[]) => number
 }
@@ -372,14 +372,21 @@ export function deleteFolderCopy(all: boolean, up: string, shards: number, folde
 
 /**
  * DELETE's yes. Off: the folder goes and what is in it moves up. On: the
- * shards in it at any depth go in one step, then the folder and every folder
- * under it in one folder op. Nothing is retracted or published.
+ * shards in it at any depth go in one step, and only once that is saved do
+ * the folder and every folder under it go, in one folder op. Shards and
+ * folders live in two stores; were the folders taken first and the shard
+ * write then failed with the tab closed before a retry, the shards would come
+ * back on reload with their folders gone, hundreds loose at the top (review
+ * of PR 509). A failed write leaves the folders, empty in this tab, and the
+ * storage warning says why. Nothing is retracted or published. Resolves
+ * whether the folders went.
  */
-export function deleteFolderNow<T>(node: FolderNode<T>, all: boolean, refOf: (item: T) => string, deleteContents: DeleteContents): void {
-  const f = useShardFolders.getState()
-  if (!all) { f.deleteFolder(node.folder.id); return }
-  deleteContents.remove(contentsOf(node).items.map(refOf))
-  f.purgeFolder(node.folder.id)
+export async function deleteFolderNow<T>(node: FolderNode<T>, all: boolean, refOf: (item: T) => string, deleteContents: DeleteContents): Promise<boolean> {
+  if (!all) { useShardFolders.getState().deleteFolder(node.folder.id); return true }
+  let saved = false
+  try { saved = await deleteContents.remove(contentsOf(node).items.map(refOf)) } catch { saved = false }
+  if (saved) useShardFolders.getState().purgeFolder(node.folder.id)
+  return saved
 }
 
 /**
@@ -414,7 +421,7 @@ export function DeleteFolder<T>({ node, up, refOf, deleteContents, onDone }: {
       }
       confirmLabel={copy.confirmLabel}
       danger={copy.danger}
-      onConfirm={() => { deleteFolderNow(node, all, refOf, deleteContents); onDone() }}
+      onConfirm={() => { void deleteFolderNow(node, all, refOf, deleteContents); onDone() }}
       onCancel={onDone}
     />
   )

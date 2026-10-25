@@ -2,12 +2,16 @@
  * useCover.ts - the overlays that cover the scene, measured from the DOM.
  *
  * An overlay opts in with the ref this hook returns and the edge it covers
- * from (lib/coverBand.ts). The boxes are measured when one of them changes
- * size (a ResizeObserver, whose callback runs after layout, so the read is
- * free), when the window does, and twice a second while any is registered,
- * which catches a bar that moves without changing size (the HOSAKA mark
- * lifting the deploy bar). The scene reads the last measurement each frame
- * (readCovers) and never measures anything itself.
+ * from (lib/coverBand.ts). Nothing is measured unless the scene is watching
+ * (setCoverWatch), which it does only while the lens shift is in use, in
+ * BUILD: the pad is registered nearly all the time, and a layout read twice a
+ * second through HOP, VIEW and TV bought nothing. While watched, the boxes
+ * are measured when the watch begins, when one of them changes size (a
+ * ResizeObserver, whose callback runs after layout, so the read is free),
+ * when the window does, and twice a second, which catches a bar that moves
+ * without changing size (the HOSAKA mark lifting the deploy bar). The scene
+ * reads the last measurement each frame (readCovers) and never measures
+ * anything itself.
  *
  * Opting in is deliberate: chips and toasts that come and go are left out, so
  * the picture does not slide every time one appears.
@@ -16,13 +20,19 @@
 import { useCallback, useRef } from 'react'
 import type { Cover, CoverEdge } from '../lib/coverBand'
 
-/** How often the boxes are measured again while any overlay is registered, ms. */
+/** How often the boxes are measured again while the scene watches them, ms. */
 const REMEASURE_MS = 500
 
 const entries = new Map<HTMLElement, CoverEdge>()
 let snapshot: readonly Cover[] = []
 let observer: ResizeObserver | null = null
 let timer: number | null = null
+let watching = false
+
+/** Measures the boxes, only while watched: otherwise the last snapshot stands until the watch begins. */
+function remeasure(): void {
+  if (watching) measure()
+}
 
 function measure(): void {
   const next: Cover[] = []
@@ -41,17 +51,29 @@ function measure(): void {
 }
 
 function start(): void {
-  if (typeof ResizeObserver !== 'undefined') observer = new ResizeObserver(measure)
-  window.addEventListener('resize', measure)
-  timer = window.setInterval(measure, REMEASURE_MS)
+  if (typeof ResizeObserver !== 'undefined') observer = new ResizeObserver(remeasure)
+  window.addEventListener('resize', remeasure)
 }
 
 function stop(): void {
   observer?.disconnect()
   observer = null
-  window.removeEventListener('resize', measure)
+  window.removeEventListener('resize', remeasure)
+}
+
+/**
+ * Starts or stops measuring. On: measured at once, then on every change and
+ * twice a second. Off: nothing is read until the next watch. The scene's
+ * lens shift calls this as it turns on and off.
+ */
+export function setCoverWatch(on: boolean): void {
+  if (on === watching) return
+  watching = on
   if (timer !== null) window.clearInterval(timer)
   timer = null
+  if (!on) return
+  measure()
+  timer = window.setInterval(measure, REMEASURE_MS)
 }
 
 /** The overlays over the scene as last measured, in viewport pixels. */
@@ -64,12 +86,12 @@ export function registerCover(el: HTMLElement, edge: CoverEdge): () => void {
   if (entries.size === 0) start()
   entries.set(el, edge)
   observer?.observe(el)
-  measure()
+  remeasure()
   return () => {
     if (!entries.delete(el)) return
     observer?.unobserve(el)
     if (entries.size === 0) stop()
-    measure()
+    remeasure()
   }
 }
 

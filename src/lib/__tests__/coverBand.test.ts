@@ -8,7 +8,7 @@
 
 import { describe, expect, it } from 'vitest'
 import { Mesh, MeshBasicMaterial, PerspectiveCamera, Raycaster, SphereGeometry, Vector2, Vector3 } from 'three'
-import { MIN_BAND, applyLensShift, lensShift, uncoveredBand, viewAxisNdc, type Box, type Cover } from '../coverBand'
+import { MIN_BAND, SHIFT_EPSILON, applyLensShift, lensShift, stepShift, uncoveredBand, viewAxisNdc, type Box, type Cover } from '../coverBand'
 import { CAMERA_NEAR, FOV } from '../../scene/camera'
 
 const box = (left: number, top: number, right: number, bottom: number): Box => ({ left, top, right, bottom })
@@ -58,6 +58,31 @@ describe('uncoveredBand', () => {
     expect(uncoveredBand(1440, 900, covers).bottom).toBe(900)
   })
 
+  it('frames a portrait phone the same at every width, the pad counted wherever it stands', () => {
+    // The pad keeps its size in the right corner (styles.css: 122 px wide,
+    // 14 px in, its top 256 px up). Under the middle-column rule it reached
+    // the column up to about 446 px wide and missed it past that, and the
+    // framing jumped by half its height (review of #505).
+    const H = 915
+    const shifts = new Set<number>()
+    for (let w = 360; w <= 480; w += 2) {
+      const covers: Cover[] = [
+        { edge: 'top', box: box(8, 12, Math.min(308, w - 8), 176) },
+        { edge: 'bottom', box: box(w - 136, H - 256, w - 14, H - 92) },
+      ]
+      const band = uncoveredBand(w, H, covers)
+      expect(band.bottom).toBe(H - 256)
+      shifts.add(lensShift(w, H, band).y)
+    }
+    expect([...shifts]).toEqual([H / 2 - (176 + H - 256) / 2])
+  })
+
+  it('keeps the middle column on a landscape screen', () => {
+    // The same corner pad on a phone held sideways is beside the focus.
+    const covers: Cover[] = [{ edge: 'bottom', box: box(915 - 136, 412 - 256, 915 - 14, 412 - 92) }]
+    expect(uncoveredBand(915, 412, covers)).toEqual(box(0, 0, 915, 412))
+  })
+
   it('gives up, centred, when too little is left to frame in', () => {
     const covers: Cover[] = [{ edge: 'bottom', box: box(0, 915 * MIN_BAND - 1, 412, 915) }]
     expect(uncoveredBand(412, 915, covers)).toEqual(box(0, 0, 412, 915))
@@ -72,6 +97,39 @@ describe('lensShift', () => {
   it('moves the picture up by the distance from the middle to the band middle', () => {
     expect(lensShift(412, 915, box(0, 0, 412, 517))).toEqual({ x: 0, y: 915 / 2 - 517 / 2 })
     expect(lensShift(1440, 900, box(336, 0, 1124, 900))).toEqual({ x: 720 - 730, y: 0 })
+  })
+})
+
+describe('stepShift', () => {
+  const TAU = 0.14
+  const FRAME = 1 / 60
+
+  it('glides toward the target and lands on it exactly', () => {
+    const s = { x: 0, y: 0 }
+    stepShift(s, { x: 0, y: 200 }, FRAME, TAU, false)
+    expect(s.y).toBeGreaterThan(0)
+    expect(s.y).toBeLessThan(200)
+    for (let i = 0; i < 120; i++) stepShift(s, { x: 0, y: 200 }, FRAME, TAU, false)
+    expect(s).toEqual({ x: 0, y: 200 })
+  })
+
+  it('holds still while a drag is on, whatever the target does, and glides after it', () => {
+    const s = { x: 0, y: 40 }
+    // The pad lifts mid-drag: the target moves, the picture under the finger does not.
+    for (let i = 0; i < 60; i++) stepShift(s, { x: 0, y: 140 }, FRAME, TAU, true)
+    expect(s).toEqual({ x: 0, y: 40 })
+    stepShift(s, { x: 0, y: 140 }, FRAME, TAU, false)
+    expect(s.y).toBeGreaterThan(40)
+    for (let i = 0; i < 120; i++) stepShift(s, { x: 0, y: 140 }, FRAME, TAU, false)
+    expect(s.y).toBe(140)
+  })
+
+  it('is the same glide at any frame rate', () => {
+    const a = { x: 0, y: 0 }
+    const b = { x: 0, y: 0 }
+    for (let i = 0; i < 6; i++) stepShift(a, { x: 0, y: 300 }, 1 / 60, TAU, false)
+    for (let i = 0; i < 3; i++) stepShift(b, { x: 0, y: 300 }, 1 / 30, TAU, false)
+    expect(Math.abs(a.y - b.y)).toBeLessThan(SHIFT_EPSILON)
   })
 })
 

@@ -17,7 +17,7 @@
  * always in reach.
  */
 
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { ChevronDown, ChevronLeft, ChevronRight, ChevronUp, Square, SquareMinus, SquarePlus, Volume2, X, type LucideIcon } from 'lucide-react'
 import { splitCaption } from '../demo/captionTokens'
 import { getEventHash, verifyEvent } from 'nostr-tools/pure'
@@ -34,6 +34,7 @@ import type { DemoPanel, DemoStep } from '../demo/types'
 import { ConfirmModal } from './ConfirmModal'
 import { ChainStatusStrip, useChainStatus } from './ChainStatus'
 import { GO_LIVE_BODY } from './TouchControls'
+import { useCover } from '../hooks/useCover'
 
 /** The kinds the Built on Nostr chapter lists (onosendai/kinds.md). */
 const KINDS: Array<[number, string]> = [
@@ -210,6 +211,10 @@ export function DemoCoach(): JSX.Element | null {
   const [speaking, setSpeaking] = useState(false)
   const [spawning, setSpawning] = useState<'idle' | 'signing' | 'failed'>('idle')
   const ref = useRef<HTMLDivElement | null>(null)
+  // Unfolded, the caption panel covers the top of the scene, and BUILD frames
+  // the cursor below it (hooks/useCover). Folded to its bar it does not count.
+  const coverRef = useCover('top', !minimized)
+  const panelRef = useCallback((el: HTMLDivElement | null) => { ref.current = el; coverRef(el) }, [coverRef])
 
   const step = script.steps[index]
   const chapterIndex = step ? script.chapters.findIndex((c) => c.id === step.chapter) : -1
@@ -326,7 +331,7 @@ export function DemoCoach(): JSX.Element | null {
   }
 
   return (
-    <div className="demo" ref={ref} role="region" aria-label="Tour">
+    <div className="demo" ref={panelRef} role="region" aria-label="Tour">
       <div className="demo__head">
         <span className="demo__tag">TOUR</span>
         <span className="demo__chapter">{chapter?.title}</span>

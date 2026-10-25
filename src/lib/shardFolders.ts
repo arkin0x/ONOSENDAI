@@ -9,7 +9,12 @@
  * a folder. Folders are only ever a view over the lists: deleting one never
  * touches a shard. Its shards and subfolders move up to its parent, or to the
  * top when it had none, and a shard whose folder is gone for any reason is
- * shown at the top (folderOf). A tree read back damaged (a parent that is
+ * shown at the top (folderOf). The one exception is asked for by name:
+ * 'purge' takes a folder and every folder under it out of the tree, with the
+ * filings and deploy times of the shards that were in them, for a caller that
+ * has deleted those shards itself, and saved that, first (the workshop's
+ * DELETE CONTENTS).
+ * The tree never deletes a shard. A tree read back damaged (a parent that is
  * missing, a loop of parents) is drawn with the broken folders at the top
  * rather than lost (parentOf).
  *
@@ -56,6 +61,7 @@ export type FolderOp =
   | { op: 'rename'; id: string; name: string }
   | { op: 'move'; id: string; parent: string | null }
   | { op: 'delete'; id: string }
+  | { op: 'purge'; id: string }
   | { op: 'assign'; refs: string[]; folder: string | null }
   | { op: 'collapse'; id: string; collapsed: boolean }
   | { op: 'use'; refs: string[]; at: number }
@@ -188,6 +194,18 @@ export interface FolderNode<T> {
   count: number
 }
 
+/** What a drawn folder holds at any depth: every item, and how many folders are under it (itself left out). */
+export function contentsOf<T>(node: FolderNode<T>): { items: T[]; folders: number } {
+  const items: T[] = []
+  let folders = 0
+  const walk = (n: FolderNode<T>): void => {
+    for (const i of n.items) items.push(i)
+    for (const f of n.folders) { folders += 1; walk(f) }
+  }
+  walk(node)
+  return { items, folders }
+}
+
 /**
  * The list as drawn: the folders at the top with what is in each, and the
  * items in no folder (or in one that is gone). Items keep the order they
@@ -217,7 +235,7 @@ export function buildTree<T>(tree: FolderTree, items: readonly T[], refOf: (item
 export function applyOp(tree: FolderTree, op: FolderOp): FolderTree {
   // An id createFolderPath handed out may be an alias of the folder it found:
   // every op on a folder acts on that folder.
-  if (op.op === 'rename' || op.op === 'move' || op.op === 'delete' || op.op === 'collapse') {
+  if (op.op === 'rename' || op.op === 'move' || op.op === 'delete' || op.op === 'purge' || op.op === 'collapse') {
     const id = canonical(tree, op.id)
     if (id === null) return tree
     if (id !== op.id) return applyOp(tree, { ...op, id })
@@ -285,6 +303,29 @@ export function applyOp(tree: FolderTree, op: FolderOp): FolderTree {
       }
       const { [op.id]: _gone, ...collapsed } = tree.collapsed
       return { ...tree, folders, assign, collapsed, alias }
+    }
+    case 'purge': {
+      if (!tree.folders[op.id]) return tree
+      const gone = new Set(Object.keys(tree.folders).filter((id) => isWithin(tree, id, op.id)))
+      const folders: Record<string, Folder> = {}
+      for (const f of Object.values(tree.folders)) if (!gone.has(f.id)) folders[f.id] = f
+      const assign: Record<string, string> = {}
+      const refs = new Set<string>()
+      for (const [ref, at] of Object.entries(tree.assign)) {
+        if (gone.has(at)) refs.add(ref)
+        else assign[ref] = at
+      }
+      const alias: Record<string, string> = {}
+      for (const [from, to] of Object.entries(tree.alias)) if (!gone.has(to)) alias[from] = to
+      const collapsed: Record<string, true> = {}
+      for (const id of Object.keys(tree.collapsed)) if (!gone.has(id)) collapsed[id] = true
+      let used = tree.used
+      if (used && [...refs].some((r) => r in used!)) {
+        const kept: Record<string, number> = {}
+        for (const [ref, at] of Object.entries(used)) if (!refs.has(ref)) kept[ref] = at
+        used = kept
+      }
+      return { ...tree, folders, assign, collapsed, alias, used }
     }
     case 'assign': {
       const to = canonical(tree, op.folder)

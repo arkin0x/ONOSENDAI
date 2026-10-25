@@ -20,13 +20,14 @@ vi.hoisted(() => {
 })
 
 // A resolve that never lands, when asked: to show a wait is let go (wallsBuilt).
-const hang = vi.hoisted(() => ({ on: false, calls: new Map<string, number>(), last: new Map<string, unknown>() }))
+const hang = vi.hoisted(() => ({ on: false, calls: new Map<string, number>(), last: new Map<string, unknown>(), reject: new Set<string>() }))
 vi.mock('../../lib/parts', async (orig) => {
   const mod = await orig<typeof import('../../lib/parts')>()
   return { ...mod, resolvePartsShared: (...args: Parameters<typeof mod.resolvePartsShared>) => {
     // How often each shard (by name) is resolved: to show what is built again, and when.
     hang.calls.set(args[0].name, (hang.calls.get(args[0].name) ?? 0) + 1)
     if (hang.on) return new Promise<never>(() => {})
+    if (hang.reject.has(args[0].name)) return Promise.reject(new Error('a resolve that failed'))
     // And what it last resolved to, to look at.
     return mod.resolvePartsShared(...args).then((placed) => { hang.last.set(args[0].name, placed); return placed })
   } }
@@ -40,7 +41,7 @@ import { newShard, type Ref, type ShardModel } from 'sno-core/shards'
 import { primeRef } from '../../lib/parts'
 import { withConstrain } from '../../lib/walkConstrain'
 import type { AxisName, Position } from '../../lib/space'
-import { STRANGER_BUDGET, STRANGER_READS, STRANGER_SHARD, STRANGER_SHARD_READS, TRUSTED_BUDGET, TRUSTED_READS, WALL_WAIT_MS, clearWalls, setWallFollows, stepLimit, takeWallWait, wallBudgetLeft, wallReadsLeft, wallsBuilt, warmWalls, type WallItem } from '../walkWalls'
+import { STRANGER_BUDGET, STRANGER_READS, STRANGER_SHARD, STRANGER_SHARD_READS, RETRY_MS, TRUSTED_BUDGET, TRUSTED_READS, WALL_WAIT_MS, clearWalls, entryFor, setWallFollows, stepLimit, takeWallWait, wallBudgetLeft, wallReadsLeft, wallsBuilt, warmWalls, type WallItem } from '../walkWalls'
 import { MAX_MODELS, type Placed } from 'sno-core/parts'
 import { setLocalAuthor } from '../../lib/carried'
 import { useShards } from '../useShards'
@@ -475,6 +476,128 @@ describe("WALK's walls are built by trust (arkinox 2026-10-25: \"ok A sounds goo
       warmWalls(1, AT)
       await settleAll()
       expect(hang.calls.get('Crowd')).toBe(2)
+    })
+  })
+
+  it('a long WALK of builds made again and again holds what is built, not every build: the pools stay at steady state (review of #514)', async () => {
+    // 24 mazes of yours, each placing 30 parts no relay has: asked again every RETRY_MS.
+    const mazes = Array.from({ length: 24 }, (_, i) => {
+      const refs: Ref[] = Array.from({ length: 30 }, (_, k) => ['a', at(ME, `unpublished-${i}-${k}`)])
+      return item(withConstrain({ ...newShard(`Maze${i}`), mode: 'solid', vertices: [], faces: [], author: ME, refs, parts: refs.map((_, k) => ({ ref: k, at: [0, k * 120, 0] as [number, number, number], turn: [0, 0, 0] as [number, number, number], step: 0 })) }, 'off'), { key: `m-${i}`, mine: true, author: ME })
+    })
+    const t0 = Date.now()
+    let now = t0
+    const clock = vi.spyOn(Date, 'now').mockImplementation(() => now)
+    try {
+      await withWorld(mazes, async () => {
+        warmWalls(1, AT)
+        await settleAll()
+        const placed = TRUSTED_BUDGET - wallBudgetLeft('trusted'), read = TRUSTED_READS - wallReadsLeft('trusted')
+        // What stands: 30 placements and 30 reads a maze.
+        expect(placed).toBe(24 * 30)
+        expect(read).toBe(24 * 30)
+        hang.calls.clear()
+        // Ten rounds of retries, each building every maze again (31 s apart).
+        for (let round = 0; round < 10; round++) {
+          now += RETRY_MS + 1_000
+          for (const m of mazes) entryFor(m)
+          await settleAll()
+        }
+        expect(hang.calls.get('Maze0')).toBe(10)
+        expect(TRUSTED_BUDGET - wallBudgetLeft('trusted')).toBe(placed)
+        expect(TRUSTED_READS - wallReadsLeft('trusted')).toBe(read)
+        expect(TRUSTED_READS + STRANGER_READS - wallReadsLeft()).toBe(read)
+      })
+    } finally {
+      clock.mockRestore()
+    }
+  })
+
+  it('a build cut for reads it could have had is built again when reads come back, not left walkable for the WALK (review of #516)', async () => {
+    // One build holding 900 reads; two small mazes of yours whose part is on a slow relay, each holding a
+    // share of 1,000 while they wait; then a shard of 800 pieces and a wall, which finds 100 reads left.
+    const holder = item(wide(ME, 'Holder', 900), { key: 'holder', mine: true, author: ME })
+    const slow = [0, 1].map((i) => {
+      const ref: Ref = ['a', at(ME, `slow-${i}`)]
+      let release: (p: unknown) => void = () => {}
+      primeRef(ref, new Promise((r) => { release = r }))
+      const w = item(withConstrain({ ...newShard(`Slow${i}`), mode: 'solid', vertices: [], faces: [], author: ME, refs: [ref], parts: [{ ref: 0, at: [0, 0, 0], turn: [0, 0, 0], step: 0 }] }, 'off'), { key: `slow-${i}`, mine: true, author: ME })
+      return { w, release: () => release(toPayload(slab('x', 1, 30))) }
+    })
+    const c = item(wide(ME, 'NeedsReads', 800, true), { key: 'c', mine: true, author: ME })
+    await withWorld([holder, ...slow.map((x) => x.w), c], async () => {
+      warmWalls(1)
+      await settleAll()
+      entryFor(holder)
+      await settleAll()
+      for (const x of slow) entryFor(x.w)
+      await settleAll()
+      entryFor(c)
+      await settleAll()
+      // Cut for reads now: its wall is not there yet.
+      expect(towardWall([c])).toBe(1n << 10n)
+      // The slow mazes land and give back what they did not read: c is built again, whole.
+      for (const x of slow) x.release()
+      await settleAll()
+      expect(towardWall([c])).toBe(2n)
+    })
+  })
+
+  it('a shard that leaves the world mid-WALK gives back what its build held (review of #516)', async () => {
+    const holder = item(wide(ME, 'Leaving', 300), { key: 'leaving', mine: true, author: ME })
+    await withWorld([holder], async () => {
+      warmWalls(1)
+      await settleAll()
+      entryFor(holder)
+      await settleAll()
+      expect(TRUSTED_READS - wallReadsLeft('trusted')).toBe(300)
+      // A step among shards it is no longer one of.
+      stepLimit(AT, 'z', -1, 1n << 10n, [])
+      await settleAll()
+      expect(wallReadsLeft('trusted')).toBe(TRUSTED_READS)
+      expect(wallBudgetLeft('trusted')).toBe(TRUSTED_BUDGET)
+    })
+  })
+
+  it('a rebuild that fails leaves the build standing with what it spent (review of #516)', async () => {
+    const refs: Ref[] = Array.from({ length: 30 }, (_, k) => ['a', at(ME, `gone-${k}`)])
+    const r = item(withConstrain({ ...newShard('Fails'), mode: 'solid', vertices: [], faces: [], author: ME, refs, parts: refs.map((_, k) => ({ ref: k, at: [0, k * 120, 0] as [number, number, number], turn: [0, 0, 0] as [number, number, number], step: 0 })) }, 'off'), { key: 'fails', mine: true, author: ME })
+    let now = Date.now()
+    const clock = vi.spyOn(Date, 'now').mockImplementation(() => now)
+    try {
+      await withWorld([r], async () => {
+        warmWalls(1)
+        await settleAll()
+        entryFor(r)
+        await settleAll()
+        const held = { placed: TRUSTED_BUDGET - wallBudgetLeft('trusted'), read: TRUSTED_READS - wallReadsLeft('trusted') }
+        expect(held).toEqual({ placed: 30, read: 30 })
+        // Its retry fails: the walls it had stand, and so does what they hold.
+        hang.reject.add('Fails')
+        now += RETRY_MS + 1_000
+        entryFor(r)
+        await settleAll()
+        expect(TRUSTED_BUDGET - wallBudgetLeft('trusted')).toBe(held.placed)
+        expect(TRUSTED_READS - wallReadsLeft('trusted')).toBe(held.read)
+      })
+    } finally {
+      hang.reject.clear()
+      clock.mockRestore()
+    }
+  })
+
+  it('an empty read pool defers a first build as an empty placement pool does', async () => {
+    // Your shard placing MAX_MODELS different pieces, thrice over the trusted reads: the fourth finds none left.
+    const crowds = [0, 1, 2, 3].map((i) => item(wide(ME, `Crowd${i}`, MAX_MODELS), { key: `crowd-${i}`, mine: true, author: ME }))
+    await withWorld(crowds, async () => {
+      warmWalls(1, AT)
+      await settleAll()
+      expect(wallReadsLeft('trusted')).toBe(0)
+      expect(hang.calls.get('Crowd3') ?? 0).toBe(0)
+      // Given back (one of them is edited to place nothing): the one that waited is built.
+      entryFor({ ...crowds[0], shard: { ...crowds[0].shard, refs: [], parts: [] } })
+      await settleAll()
+      expect(hang.calls.get('Crowd3')).toBeGreaterThan(0)
     })
   })
 

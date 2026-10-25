@@ -32,7 +32,9 @@ vi.mock('../../lib/calibration', async (orig) => {
 })
 vi.mock('../../lib/relay', async (orig) => {
   const mod = await orig<typeof import('../../lib/relay')>()
-  return { ...mod, publishMany: vi.fn(async () => ({ ok: true })), query: vi.fn(async () => []), queryAny: vi.fn(async () => []) }
+  // Offline under these overrides too: no live relay is ever asked (src/test/offlineRelay.ts).
+  const { offlineRelay } = await import('../../test/offlineRelay')
+  return { ...mod, ...offlineRelay, publishMany: vi.fn(async () => ({ ok: true })), query: vi.fn(async () => []), queryAny: vi.fn(async () => []) }
 })
 
 import { newShard, toPayload, type ShardModel } from 'sno-core/shards'

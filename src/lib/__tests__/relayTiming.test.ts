@@ -12,6 +12,9 @@
 
 import { describe, expect, it, vi } from 'vitest'
 
+// relay.ts itself, over its fake pool, not the tests' offline relay (src/test/noNetwork.ts).
+vi.unmock('../relay')
+
 /** A stand-in for nostr-tools' pool: relays that answer after `eoseMs`, and challenge when `challenge` is set. */
 const fake = vi.hoisted(() => ({
   eoseMs: 20,

@@ -132,7 +132,8 @@ describe('taking faces away', () => {
 })
 
 describe('adding faces', () => {
-  it('FILL keeps every seam, and the new face looks as its corners make it look', () => {
+  it('FILL keeps every seam, and the new face takes the flat average of its corners, as PASTE does', () => {
+    useWorkshop.setState({ color: hexToRgb(RED) })
     w().addVertex([0, 0, 2 * T])
     const before = w().current()!
     useWorkshop.setState({ selection: [3, 4, 6] })
@@ -140,7 +141,11 @@ describe('adding faces', () => {
     const after = w().current()!
     expect(after.faces).toHaveLength(5)
     keptSeams(before, after)
-    expect(rgbToHex(after.facecolors![4])).toBe(WHITE)
+    // Two white corners and a red one: the average, not any one corner's color.
+    const corners = after.faces[4].map((i) => after.vertices[i].c)
+    after.facecolors![4].forEach((n, k) => expect(n).toBeCloseTo((corners[0][k] + corners[1][k] + corners[2][k]) / 3, 9))
+    expect(rgbToHex(after.facecolors![4])).not.toBe(WHITE)
+    expect(rgbToHex(after.facecolors![4])).not.toBe(RED)
   })
 
   it('a face picked corner by corner keeps every seam', () => {
@@ -175,5 +180,60 @@ describe('adding faces', () => {
     // The wall the two blocks share went from both: two of the first block's faces among them.
     expect(after.faces.length).toBeLessThan(2 * one.faces.length)
     keptSeams(before, after)
+  })
+})
+
+describe('when there is nothing left to keep in step', () => {
+  it('the list goes with the last face, so a later FILL does not seam the shard for good', () => {
+    for (let n = 0; n < 4; n++) w().removeFace(0)
+    expect(w().current()!.faces).toHaveLength(0)
+    expect(w().current()!.facecolors).toBeUndefined()
+    useWorkshop.setState({ selection: [0, 1, 3] })
+    w().fillSelection()
+    const after = w().current()!
+    expect(after.faces).toHaveLength(1)
+    expect(after.facecolors).toBeUndefined()
+    expect(toPayload(after).facecolors).toBeUndefined()
+  })
+
+  it('the list goes when every point is deleted, too', () => {
+    useWorkshop.setState({ selection: [0, 1, 2, 3, 4, 5] })
+    w().deleteSelected()
+    expect(w().current()!.faces).toHaveLength(0)
+    expect(w().current()!.facecolors).toBeUndefined()
+  })
+})
+
+describe('a shard an older build left out of step', () => {
+  // What removeFace(1) used to leave: three faces, four seams, BLUE's entry
+  // still there, so GREEN and GOLD each sit one place late.
+  function damaged(): ShardModel {
+    const s = strip()
+    const hurt: ShardModel = { ...s, faces: [s.faces[0], s.faces[2], s.faces[3]] }
+    useWorkshop.setState({ shards: [hurt] })
+    return hurt
+  }
+
+  it('a FILL that brings the lengths level again does not hand each face its neighbour\'s color', () => {
+    damaged()
+    useWorkshop.setState({ selection: [0, 3, 4] })
+    w().fillSelection()
+    const after = w().current()!
+    expect(after.faces).toHaveLength(4)
+    // Drawn from its corners, as every reader already drew it, rather than [RED, BLUE, GREEN, GOLD] on the wrong faces.
+    expect(after.facecolors).toBeUndefined()
+    expect(toPayload(after).facecolors).toBeUndefined()
+  })
+
+  it('a delete does not carry the stale list on either', () => {
+    damaged()
+    w().removeFace(0)
+    expect(w().current()!.facecolors).toBeUndefined()
+  })
+
+  it('a stamp does not either', () => {
+    damaged()
+    w().placeStamp([5 * T, 0, 5 * T])
+    expect(w().current()!.facecolors).toBeUndefined()
   })
 })

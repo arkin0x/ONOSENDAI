@@ -216,13 +216,21 @@ function clipOf(s: ShardModel, selection: number[], partSel: number[] = []): Cli
  * a list left a face short or long is dropped from the wire and from the
  * bench, so one deleted face used to cost every seam on the shard. `from[j]`
  * is the face of `before` that face j of `after` was, or -1 for a face the
- * edit made, which keeps the look its corners give it, as PASTE does. A shard
- * with no seams, or a list already out of step, is left as the edit made it.
+ * edit made, which takes the flat average of its corners, as PASTE does.
+ *
+ * The list goes when no face is left: an empty list is in step with no faces,
+ * and the next FILL would grow it into flat seams nobody chose. It goes too
+ * when it was already out of step, which an older build's deletes left it:
+ * nothing says which face each entry was, every reader already ignores it, so
+ * dropping it changes nothing anyone sees, while passing it on let an edit
+ * that brought the lengths level again put each face's neighbour's color on
+ * it and on the wire.
  */
 function seamsFollow(before: ShardModel, after: ShardModel, from: number[]): ShardModel {
-  const own = before.facecolors && before.facecolors.length === before.faces.length ? before.facecolors : null
-  if (!own) return after
-  return { ...after, facecolors: from.map((i, j) => (i >= 0 ? [...own[i]] as [number, number, number] : cornerAverage(after, after.faces[j]))) }
+  const { facecolors: _held, ...bare } = after
+  const own = before.facecolors
+  if (!own?.length || own.length !== before.faces.length || after.faces.length === 0) return bare
+  return { ...bare, facecolors: from.map((i, j) => (i >= 0 && own[i] ? [...own[i]] as [number, number, number] : cornerAverage(after, after.faces[j]))) }
 }
 
 /** Faces 0..n-1 of `after` are `before`'s, in order, and the rest are new: FILL's and FACE's shape. */
@@ -1003,7 +1011,8 @@ export const useWorkshop = create<WorkshopState>((set, get) => {
       const from = res.shard.faces.map((f) => {
         if (f.some((v) => v >= base)) return -1
         while (k < s.faces.length && !s.faces[k].every((v, n) => v === f[n])) k++
-        return k++
+        // Not found is not expected, but it costs that face its seam, never the stamp.
+        return k < s.faces.length ? k++ : -1
       })
       edit(() => ({ ...seamsFollow(s, res.shard, from), mode }), notice)
       set({ selection: [], partSel: [], selectedFace: null, facePick: [] })

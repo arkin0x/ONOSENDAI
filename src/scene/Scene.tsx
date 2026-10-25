@@ -26,7 +26,10 @@ import { EffectComposer, Bloom } from '@react-three/postprocessing'
 import { BlendFunction, Effect, type BloomEffect, type EffectComposer as PostComposer } from 'postprocessing'
 import { memo, useEffect, useLayoutEffect, useMemo, useRef } from 'react'
 import { useFrame } from '@react-three/fiber'
-import { Quaternion, Vector3 } from 'three'
+import { Quaternion, Vector3, type PerspectiveCamera } from 'three'
+import { SHIFT_EPSILON, applyLensShift, lensShift, uncoveredBand, type Cover } from '../lib/coverBand'
+import { readCovers } from '../hooks/useCover'
+import { useBuilder } from '../store/useBuilder'
 import { watchContext } from '../lib/glContext'
 import { broadcastDpr, isBroadcast, recoverLostContext } from '../lib/tv/broadcast'
 import { keepPrograms } from '../lib/keepPrograms'
@@ -342,6 +345,68 @@ function HeadlampRig(): null {
     if (!controls) return
     headlampUniforms.uHeadlampReach.value = headlampReach(state.camera.position.distanceTo(controls.target))
   }, HEADLAMP_PRIORITY)
+  return null
+}
+
+/**
+ * When LensShift sets the projection: before anything else in the frame. It
+ * reads only the covers and the canvas, never the camera's pose, and running
+ * first means everything that projects this frame (the target markers, the
+ * labels, a tap) sees the projection the frame is drawn with.
+ */
+const LENS_PRIORITY = -1
+/**
+ * Time constant of the framing's glide, in seconds: a panel opening, closing
+ * or growing slides the picture to its new middle rather than jumping it.
+ */
+const LENS_TAU = 0.14
+const NO_SHIFT = { x: 0, y: 0 }
+
+/**
+ * Frames the orbit's focus in the middle of what the HUD leaves uncovered,
+ * in BUILD (arkinox, 2026-10-25: the build cursor sat on the deploy bar's top
+ * edge on a phone, with the shard being placed hidden under it).
+ *
+ * A lens shift, not a camera move (lib/coverBand.ts): the picture slides, the
+ * camera and the orbit stay exactly as they are, so a drag turns about the
+ * same point and nothing in the world moves. The covers are the overlays that
+ * opted in (hooks/useCover.ts), measured outside the frame loop; this only
+ * reads them. Off outside BUILD, in WALK (the eye looks where you face) and on
+ * Cyberspace TV, whose picture and stream are composed centred: TV drops the
+ * shift at once rather than gliding.
+ */
+function LensShift(): null {
+  const shift = useRef({ x: 0, y: 0 })
+  // The target, worked out again only when the covers or the canvas change.
+  const aim = useRef<{ covers: readonly Cover[]; size: unknown; target: { x: number; y: number } } | null>(null)
+  useFrame((state, dt) => {
+    const cam = state.camera as PerspectiveCamera
+    if (!cam.isPerspectiveCamera) return
+    const { width, height, left, top } = state.size
+    const tv = useTv.getState().on || isBroadcast()
+    const on = !tv && useBuilder.getState().active && !useCyberspace.getState().walking
+    let target = NO_SHIFT
+    if (on) {
+      const covers = readCovers()
+      const a = aim.current
+      if (a && a.covers === covers && a.size === state.size) target = a.target
+      else {
+        // The covers are in viewport pixels; the band is in the canvas's.
+        const local = left === 0 && top === 0 ? covers : covers.map((c) => ({ edge: c.edge, box: { left: c.box.left - left, top: c.box.top - top, right: c.box.right - left, bottom: c.box.bottom - top } }))
+        target = lensShift(width, height, uncoveredBand(width, height, local))
+        aim.current = { covers, size: state.size, target }
+      }
+    }
+    const s = shift.current
+    if (tv) { s.x = 0; s.y = 0 } else {
+      const k = 1 - Math.exp(-dt / LENS_TAU)
+      s.x += (target.x - s.x) * k
+      s.y += (target.y - s.y) * k
+      if (Math.abs(target.x - s.x) < SHIFT_EPSILON) s.x = target.x
+      if (Math.abs(target.y - s.y) < SHIFT_EPSILON) s.y = target.y
+    }
+    applyLensShift(cam, width, height, s)
+  }, LENS_PRIORITY)
   return null
 }
 
@@ -965,6 +1030,7 @@ export const Scene = memo(function Scene(): JSX.Element {
       <directionalLight position={[10, 10, 10]} intensity={1.2} />
       <Rig />
       <HeadlampRig />
+      <LensShift />
       <CellMetric />
       <ScreenAxes />
       <World />

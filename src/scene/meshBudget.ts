@@ -15,8 +15,10 @@
  * it cut, one draw call; it never stops a walker, since WALK has its own
  * budget (store/walkWalls.ts).
  *
- * Each world shard says what its tree would draw (setDemand) and reads back
- * what it may (useAllowance). Only the world's shards take part: the bench,
+ * Each world shard says what its tree would draw (setDemand), split by which
+ * share pays for each object (a stranger's object placed by a shard of yours
+ * is the strangers' to pay for, as in WALK), and reads back what it may
+ * (useAllowance). Only the world's shards take part: the bench,
  * pictures and item models draw what they are given.
  */
 
@@ -43,17 +45,32 @@ export const SCENE_STRANGER_SHARD = 250
 export const HYSTERESIS = 0.2
 export const HYSTERESIS_DOUBLINGS = Math.log2(1 / (1 - HYSTERESIS))
 
-/** What one world shard would draw: its placed objects at every depth, whose they are, and how far off. */
+/**
+ * What one world shard would draw: its placed objects at every depth, split
+ * by whose share pays for each (lib/trust.ts chargeByTrust, the rule WALK's
+ * walls charge by): `trusted`, objects by you or those you follow placed
+ * through nothing but such objects, from a shard whose placer and author are
+ * both trusted; `stranger`, every other. A stranger's shard has only
+ * `stranger`; a shard of yours placing a stranger's object has some of each.
+ */
 export interface Demand {
-  demand: number
-  trusted: boolean
+  trusted: number
+  stranger: number
   /** How far from the anchor (where the camera looks), in doublings: log2(1 + render units). Nearest first. */
   distance: number
 }
 
+/** How many of a shard's placed objects each pool lets it draw. */
+export interface Allowance {
+  trusted: number
+  stranger: number
+}
+
+const NONE: Allowance = Object.freeze({ trusted: 0, stranger: 0 })
+
 const demands = new Map<string, Demand>()
-let allowances = new Map<string, number>()
-/** What each pool has given out, at the last allocation: for provisional, at once. */
+let allowances = new Map<string, Allowance>()
+/** What each pool has given out, at the last allocation, and provisionally since: for provisional, at once. */
 let usedTrusted = 0
 let usedStranger = 0
 const listeners = new Set<() => void>()
@@ -68,7 +85,7 @@ let dirty = false
  */
 export function setDemand(key: string, d: Demand): void {
   const was = demands.get(key)
-  if (was && was.demand === d.demand && was.trusted === d.trusted && was.distance === d.distance) return
+  if (was && was.trusted === d.trusted && was.stranger === d.stranger && was.distance === d.distance) return
   demands.set(key, d)
   schedule()
 }
@@ -91,45 +108,50 @@ export function flushMeshBudget(): void {
   dirty = false
   const next = allocate(demands, allowances)
   let changed = next.size !== allowances.size
-  if (!changed) for (const [k, v] of next) if (allowances.get(k) !== v) { changed = true; break }
+  // A shard whose allowance did not change keeps the same object, so its draw does not redo anything.
+  for (const [k, v] of next) {
+    const was = allowances.get(k)
+    if (was && was.trusted === v.trusted && was.stranger === v.stranger) next.set(k, was)
+    else changed = true
+  }
   allowances = next
   usedTrusted = 0
   usedStranger = 0
-  for (const [k, v] of next) { if (demands.get(k)?.trusted) usedTrusted += v; else usedStranger += v }
+  for (const v of next.values()) { usedTrusted += v.trusted; usedStranger += v.stranger }
   if (changed) for (const l of listeners) l()
 }
 
 /**
- * The allowances, from the demands: trusted shards first, nearest first, each
- * as much as it asks while the reserved share lasts; then strangers', nearest
- * first, each at most SCENE_STRANGER_SHARD while theirs lasts. A shard that
- * asks for nothing takes no part. Where every demand of a pool fits in it,
- * nothing is sorted. `held`, the allowances before, gives HYSTERESIS: a shard
- * drawing counts as nearer by that much.
+ * The allowances, from the demands. The trusted pool: each shard's trusted
+ * part, nearest first, while SCENE_TRUSTED lasts. The strangers' pool: each
+ * shard's stranger part, nearest first, at most SCENE_STRANGER_SHARD a shard,
+ * while SCENE_STRANGER lasts. A part of nothing takes no part; where every
+ * part of a pool fits in it, nothing is sorted. `held`, the allowances before,
+ * gives HYSTERESIS, pool by pool: a shard drawing from a pool counts as that
+ * much nearer in it.
  */
-export function allocate(all: ReadonlyMap<string, Demand>, held: ReadonlyMap<string, number> = new Map()): Map<string, number> {
-  const out = new Map<string, number>()
-  const trusted: Array<[string, Demand]> = []
-  const strangers: Array<[string, Demand]> = []
-  let trustedAsk = 0, strangerAsk = 0, strangerOver = false
-  for (const entry of all) {
-    const d = entry[1]
-    if (d.demand <= 0) continue
-    if (d.trusted) { trusted.push(entry); trustedAsk += d.demand }
-    else { strangers.push(entry); strangerAsk += d.demand; if (d.demand > SCENE_STRANGER_SHARD) strangerOver = true }
+export function allocate(all: ReadonlyMap<string, Demand>, held: ReadonlyMap<string, Allowance> = new Map()): Map<string, Allowance> {
+  const own = new Map<string, number>()
+  const theirs = new Map<string, number>()
+  const pool = (part: 'trusted' | 'stranger', size: number, cap: number, out: Map<string, number>): void => {
+    const asking: Array<[string, Demand]> = []
+    let ask = 0, over = false
+    for (const entry of all) {
+      const n = entry[1][part]
+      if (n <= 0) continue
+      asking.push(entry)
+      ask += n
+      if (n > cap) over = true
+    }
+    if (!over && ask <= size) { for (const [key, d] of asking) out.set(key, d[part]); return }
+    const near = (e: [string, Demand]): number => e[1].distance - ((held.get(e[0])?.[part] ?? 0) > 0 ? HYSTERESIS_DOUBLINGS : 0)
+    let left = size
+    for (const [key, d] of asking.sort((a, b) => near(a) - near(b))) { const give = Math.min(d[part], cap, left); left -= give; out.set(key, give) }
   }
-  const near = (e: [string, Demand]): number => e[1].distance - ((held.get(e[0]) ?? 0) > 0 ? HYSTERESIS_DOUBLINGS : 0)
-  const byNear = (a: [string, Demand], b: [string, Demand]): number => near(a) - near(b)
-  if (trustedAsk <= SCENE_TRUSTED) for (const [key, d] of trusted) out.set(key, d.demand)
-  else {
-    let left = SCENE_TRUSTED
-    for (const [key, d] of trusted.sort(byNear)) { const give = Math.min(d.demand, left); left -= give; out.set(key, give) }
-  }
-  if (!strangerOver && strangerAsk <= SCENE_STRANGER) for (const [key, d] of strangers) out.set(key, d.demand)
-  else {
-    let left = SCENE_STRANGER
-    for (const [key, d] of strangers.sort(byNear)) { const give = Math.min(d.demand, SCENE_STRANGER_SHARD, left); left -= give; out.set(key, give) }
-  }
+  pool('trusted', SCENE_TRUSTED, Infinity, own)
+  pool('stranger', SCENE_STRANGER, SCENE_STRANGER_SHARD, theirs)
+  const out = new Map<string, Allowance>()
+  for (const key of new Set([...own.keys(), ...theirs.keys()])) out.set(key, { trusted: own.get(key) ?? 0, stranger: theirs.get(key) ?? 0 })
   return out
 }
 
@@ -138,31 +160,29 @@ function subscribe(l: () => void): () => void {
   return () => { listeners.delete(l) }
 }
 
-/** How many placed objects the world shard `key` may draw; undefined for a shard that takes no part, or none yet. */
-export function allowanceOf(key: string | undefined): number | undefined {
+/** What the world shard `key` may draw from each pool; undefined for a shard that takes no part, or none yet. */
+export function allowanceOf(key: string | undefined): Allowance | undefined {
   return key === undefined ? undefined : allowances.get(key)
 }
 
 /**
  * What a shard not yet allocated may draw for its first frame, so it does not
- * show an outline for one: what is left of its pool at the last allocation, no
- * more than it asks (and, for a stranger, the per-shard ceiling), and counted
- * against the pool until then, so many such grants never pass it. The next
- * allocation, in the same task, recounts and corrects them.
+ * show an outline for one: what is left of each pool, no more than it asks
+ * (and, of the strangers', the per-shard ceiling), counted against the pools
+ * until the next allocation recounts them, so many such grants never pass a
+ * pool.
  */
-export function provisional(d: Demand): number {
-  if (d.demand <= 0) return 0
-  const left = Math.max(0, (d.trusted ? SCENE_TRUSTED - usedTrusted : SCENE_STRANGER - usedStranger))
-  const give = Math.min(d.demand, left, d.trusted ? Infinity : SCENE_STRANGER_SHARD)
-  // Counted against its pool until the next allocation recounts it, so the
-  // provisional grants of many new shards before a flush never pass the pool.
-  if (d.trusted) usedTrusted += give
-  else usedStranger += give
-  return give
+export function provisional(d: Demand): Allowance {
+  if (d.trusted <= 0 && d.stranger <= 0) return NONE
+  const trusted = Math.min(d.trusted, Math.max(0, SCENE_TRUSTED - usedTrusted))
+  const stranger = Math.min(d.stranger, SCENE_STRANGER_SHARD, Math.max(0, SCENE_STRANGER - usedStranger))
+  usedTrusted += trusted
+  usedStranger += stranger
+  return { trusted, stranger }
 }
 
 /** allowanceOf, for a component: it draws again when its own allowance changes. */
-export function useAllowance(key: string | undefined): number | undefined {
+export function useAllowance(key: string | undefined): Allowance | undefined {
   return useSyncExternalStore(subscribe, () => allowanceOf(key))
 }
 

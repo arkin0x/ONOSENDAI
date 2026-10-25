@@ -40,6 +40,22 @@ export function trustedPlacement(container: string | null | undefined, object: s
   return trustedAuthor(container) && trustedAuthor(object ?? container)
 }
 
+/**
+ * The budgetFor of a trusted shard's resolve (sno-core resolveParts): each
+ * placement charged to `trusted` while the object it places is by you or
+ * someone you follow, and to `stranger` from the first that is not, for it and
+ * everything under it, so a stranger's object never reaches your share by
+ * placing yours. An `e` reference, whose author is not known, is a stranger's.
+ */
+export function chargeByTrust(trusted: { left: number }, stranger: () => { left: number }): (author: string | null, parent: { left: number }) => { left: number } {
+  // The strangers' budget is asked for only when a placement is charged to it.
+  let theirs: { left: number } | null = null
+  return (author, parent) => {
+    if (parent === trusted && author !== null && trustedAuthor(author)) return trusted
+    return parent !== trusted ? parent : (theirs ??= stranger())
+  }
+}
+
 /** Say whom you follow (readFollows does; tests call it directly), and tell everyone who listens. */
 export function setFollows(list: Iterable<string>): void {
   follows = new Set(list)

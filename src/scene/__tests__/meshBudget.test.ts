@@ -16,7 +16,7 @@ import type { Resolved } from '../../lib/parts'
 import { placedPose, renderPose } from '../../lib/pose'
 import type { ViewAxes } from '../../lib/space'
 import { setLocalAuthor } from '../../lib/carried'
-import { readFollows, resetFollows, setFollows, trustedAuthor, trustedPlacement } from '../../lib/trust'
+import { chargeByTrust, readFollows, resetFollows, setFollows, trustedAuthor, trustedPlacement } from '../../lib/trust'
 
 const d = (demand: number, trusted: boolean, distance: number): Demand => ({ demand, trusted, distance })
 
@@ -197,5 +197,26 @@ describe('the review of #511', () => {
       resetFollows()
     }
   })
-})
 
+  it("chargeByTrust: yours to yours, a stranger's and everything under it to theirs, asked for only when needed", () => {
+    const ME = 'a'.repeat(64), THEM = 'e'.repeat(64)
+    setLocalAuthor(() => ME)
+    try {
+      const T = { left: 10 }
+      let asked = 0
+      const S = { left: 10 }
+      const charge = chargeByTrust(T, () => { asked++; return S })
+      expect(charge(ME, T)).toBe(T)
+      expect(asked).toBe(0)
+      expect(charge(THEM, T)).toBe(S)
+      // Under a stranger's, even your own object stays theirs.
+      expect(charge(ME, S)).toBe(S)
+      // An `e`, whose author is not known, is a stranger's.
+      expect(charge(null, T)).toBe(S)
+      expect(asked).toBe(1)
+    } finally {
+      setLocalAuthor(null)
+    }
+  })
+
+})

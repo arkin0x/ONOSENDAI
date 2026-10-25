@@ -236,6 +236,21 @@ describe('the review of #511', () => {
     }
   })
 
+  it('chargeByTrust asks whom you trust once per author, not once per placement', () => {
+    const ME = 'a'.repeat(64), THEM = 'e'.repeat(64)
+    let looked = 0
+    setLocalAuthor(() => { looked++; return ME })
+    try {
+      const T = { left: 10 }, S = { left: 10 }
+      const charge = chargeByTrust(T, () => S)
+      for (let i = 0; i < 1_000; i++) { charge(ME, T); charge(THEM, T) }
+      // trustedAuthor reads who you are once per question: one for you, one for them.
+      expect(looked).toBe(2)
+    } finally {
+      setLocalAuthor(null)
+    }
+  })
+
 })
 
 describe('which share pays for each placement (as WALK charges, lib/trust.ts chargeByTrust)', () => {

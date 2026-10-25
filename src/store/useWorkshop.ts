@@ -385,6 +385,16 @@ export interface WorkshopState {
   rename: (id: string, name: string) => void
   duplicate: (id: string) => string
   remove: (id: string) => void
+  /**
+   * Delete many shards in one step: one change to the list, one storage write
+   * (a single transaction in IndexedDB), however many there are. Local only:
+   * nothing is retracted or published, and a published one stays on the
+   * relays. The shard on the bench, when it is one of them, gives way to the
+   * newest left, and to a new empty one when none is left, so the bench never
+   * holds a shard that is gone. When it is not one of them it stays open as it
+   * was, its undo with it.
+   */
+  removeMany: (ids: readonly string[]) => void
   setMode: (mode: ShardMode) => void
   /**
    * How solid the shard draws, a whole percent (DECK-0003 §1.11): 100 is
@@ -946,6 +956,22 @@ export const useWorkshop = create<WorkshopState>((set, get) => {
       const list = get().shards.filter((s) => s.id !== id)
       const currentId = get().currentId === id ? newestId(list) : get().currentId
       set({ shards: list, currentId, selection: [], partSel: [], selectedFace: null, facePick: [], past: [], future: [], notice: null }); save(list)
+    },
+
+    removeMany: (ids) => {
+      const out = new Set(ids)
+      const { shards, currentId } = get()
+      let list = shards.filter((s) => !out.has(s.id))
+      if (list.length === shards.length) return
+      if (currentId === null || !out.has(currentId)) { set({ shards: list }); save(list); return }
+      let next = newestId(list)
+      // Nothing left while the workshop is open: a new empty shard, as opening an empty workshop makes one.
+      if (next === null && get().open) {
+        const s = newShard(`Object ${list.length + 1}`)
+        list = [...list, s]
+        next = s.id
+      }
+      set({ shards: list, currentId: next, selection: [], partSel: [], selectedFace: null, facePick: [], past: [], future: [], notice: null }); save(list)
     },
 
     setMode: (mode) => edit((s) => ({ ...s, mode })),

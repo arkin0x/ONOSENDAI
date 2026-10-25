@@ -45,7 +45,7 @@ import { MAX_PLACED, type Placed } from 'sno-core/parts'
 import type { ShardModel } from 'sno-core/shards'
 import { you } from '../lib/carried'
 import { followsOf } from '../lib/contacts'
-import { resolvePartsShared } from '../lib/parts'
+import { fetchSettled, resolvePartsShared } from '../lib/parts'
 import { regionBox, type Box } from '../lib/clip'
 import { placedPose } from '../lib/pose'
 import type { AxisName, Position, ViewAxes } from '../lib/space'
@@ -72,6 +72,18 @@ interface Entry {
   walk: number
   /** A resolve for it is running: it stands as it is until that lands. */
   pending?: boolean
+  /**
+   * Its first build has not landed: a step that could enter it waits
+   * (stepLimit), so nobody walks through walls that are on their way. That
+   * build is of what it carries and what is already fetched, so it lands
+   * within the task; what still needs a relay comes after, while its own
+   * faces stand.
+   */
+  first: boolean
+  /** Its pool was empty while first builds in it were still resolving: it waits for their shares to come back (still `first`). */
+  deferred?: boolean
+  /** The resolve running for it is a first build (from what is in hand), which lands within the task. */
+  quickPending?: boolean
   shard: ShardModel
   /** When its parts were resolved with one unreachable: tried again after RETRY_MS. */
   missingAt: number | null
@@ -199,11 +211,11 @@ function cutShort(placed: readonly Placed[]): boolean {
   return placed.some(function short(p): boolean { return p.missing === 'budget' || p.children.some(short) })
 }
 
-function build(w: WallItem, placed: readonly Placed[], starved = false): Entry {
+function build(w: WallItem, placed: readonly Placed[], starved = false, first = false): Entry {
   const pose = placedPose(WALL_AXES, w.shard.up && w.plane === 0 ? { at: w.at, spin: w.shard.spin } : undefined)
   const mesh = wallMesh(w.shard, placed, pose)
   const missingAt = placed.some(function gone(p): boolean { return p.missing === 'unreachable' || p.children.some(gone) }) ? Date.now() : null
-  return { item: w, starved, walk: walkNo, shard: w.shard, missingAt, where: whereOf(w), mesh, clip: regionBox(w.at, w.height, w.shard.unit, WALL_AXES), reach: reachOf(mesh, w.shard.unit) }
+  return { item: w, starved, first, walk: walkNo, shard: w.shard, missingAt, where: whereOf(w), mesh, clip: regionBox(w.at, w.height, w.shard.unit, WALL_AXES), reach: reachOf(mesh, w.shard.unit) }
 }
 
 /** The walls of one placed shard, built now or kept from before; its parts follow when they resolve. */
@@ -216,10 +228,36 @@ export function entryFor(w: WallItem): Entry {
     else if (held.starved && !held.pending && held.walk !== walkNo) { held.walk = walkNo; resolveInto(w, held) }
     return held
   }
-  const e = build(w, [])
+  const e = build(w, [], false, !!w.shard.parts?.length)
   entries.set(w.key, e)
-  resolveInto(w, e)
+  resolveInto(w, e, true)
   return e
+}
+
+/** Waiting for first builds to land. */
+let built: Array<() => void> = []
+/** Whether a step since the last takeWallWait had to wait for a first build. */
+let waited = false
+
+/** Tell whoever waits once no entry is still waiting for its first build. */
+function landed(): void {
+  for (const e of entries.values()) if (e.first) return
+  const now = built
+  built = []
+  for (const go of now) go()
+}
+
+/** When every shard a step has met so far is built for the first time: what useWalk waits on to press again. */
+export function wallsBuilt(): Promise<void> {
+  for (const e of entries.values()) if (e.first) return new Promise((r) => { built.push(r) })
+  return Promise.resolve()
+}
+
+/** Whether a step since the last call had to wait for a first build (and forget it). */
+export function takeWallWait(): boolean {
+  const was = waited
+  waited = false
+  return was
 }
 
 /** How long a part no relay answered stays a placeholder before it is asked for again. */
@@ -231,42 +269,83 @@ const RETRY_MS = 30_000
  * own setting says (each object keeps its own, §1.10), so they are resolved
  * for every shard that has any.
  */
-function resolveInto(w: WallItem, e: Entry): void {
+function resolveInto(w: WallItem, e: Entry, quick = false): void {
   if (!w.shard.parts?.length) return
   const pool = poolOf(w)
   // A stranger's shard takes no more than STRANGER_SHARD; yours and those you
   // follow up to sno-core's own MAX_PLACED, from the share reserved for them.
   const share = Math.min(pool === 'trusted' ? MAX_PLACED : STRANGER_SHARD, pools[pool])
   if (share <= 0) {
-    // Nothing left in its pool this WALK: walkable until budget comes back.
+    // Its pool is out for now. Others in it still resolving will give back
+    // what they do not use, so it waits for that (steps wait with it); with
+    // nothing outstanding, it is walkable until budget comes back.
+    if (e.first && poolBusy(pool)) { e.deferred = true; return }
+    e.deferred = false
     if (entries.get(w.key) === e) entries.set(w.key, build(w, [], true))
+    landed()
     return
   }
+  e.deferred = false
   pools[pool] -= share
   e.pending = true
+  e.quickPending = quick
   // A fresh budget object for this resolve alone, and the WALK it was handed out
   // in: what it does not use goes back to that WALK's pool only, never into a
   // fresh one (warmWalls, clearWalls), which would then hold more than its cap.
   const mine = { left: share }
   const handed = walkNo
   const refund = (): void => { if (walkNo === handed) pools[pool] += Math.max(0, mine.left) }
-  void resolvePartsShared(w.shard, undefined, undefined, mine).then((placed) => {
+  // First from what is in hand (carried, or fetched before), which lands in the
+  // task; then, for what came back unreachable, from the relays.
+  void resolvePartsShared(w.shard, quick ? fetchSettled : undefined, undefined, mine).then((placed) => {
     refund()
     const starved = cutShort(placed)
-    const built = build(w, placed, starved)
-    if (entries.get(w.key) === e) entries.set(w.key, built)
+    const next = build(w, placed, starved)
+    if (entries.get(w.key) === e) entries.set(w.key, next)
+    landed()
+    if (entries.get(w.key) !== next) return
     // Trusted since it began (your follows arrived meanwhile): built again from your share.
-    if (starved && poolOf(w) !== pool && entries.get(w.key) === built) resolveInto(w, built)
+    if (starved && poolOf(w) !== pool) resolveInto(w, next)
+    else if (quick && next.missingAt !== null) resolveInto(w, next)
     reviveStarved(pool)
-  }, () => { e.pending = false; refund() /* unreachable parts stop nothing */ })
+  }, () => {
+    e.pending = false
+    e.quickPending = false
+    e.first = false
+    refund()
+    reviveStarved(pool)
+    landed()
+  })
 }
 
-/** Build again the starved shards of a pool, while it has budget for them; each stands as it is until its new resolve lands. */
+/**
+ * Whether a first build of this pool is still out: those land within the task,
+ * so a first build that found the pool empty may wait for what they return. A
+ * fetch from a relay holding a share is not waited on: what it holds comes
+ * back when it lands, and starved shards are built again then.
+ */
+function poolBusy(pool: Pool): boolean {
+  for (const e of entries.values()) if (e.pending && e.quickPending && poolOf(e.item) === pool) return true
+  return false
+}
+
+/**
+ * Build the shards of a pool that wait for budget (deferred first builds,
+ * then starved ones), while it has budget for them; each stands as it is
+ * until its new resolve lands. With nothing of the pool left outstanding, a
+ * deferred first build that still gets nothing is built walkable, so no step
+ * waits on budget that will not come.
+ */
 function reviveStarved(pool: Pool): void {
   for (const e of entries.values()) {
-    if (pools[pool] <= 0) return
+    if (pools[pool] <= 0) break
+    if (e.deferred && !e.pending && poolOf(e.item) === pool) resolveInto(e.item, e, e.first)
+  }
+  for (const e of entries.values()) {
+    if (pools[pool] <= 0) break
     if (e.starved && !e.pending && poolOf(e.item) === pool) resolveInto(e.item, e)
   }
+  if (!poolBusy(pool)) for (const e of [...entries.values()]) if (e.deferred && poolOf(e.item) === pool) resolveInto(e.item, e, e.first)
 }
 
 /**
@@ -299,26 +378,34 @@ export function warmWalls(plane: number, from?: Position): void {
   // (which resolve with no fetch to wait on) never holds up WALK's first frame.
   // A step that comes near one first builds it then (stepLimit).
   const walk = walkNo
-  const next = (): void => {
+  const next = (idle?: IdleDeadline): void => {
     if (walkNo !== walk) return
-    const w = queue.shift()
-    if (!w) return
-    entryFor(w)
+    // As many as the idle time allows, and at least one.
+    do {
+      const w = queue.shift()
+      if (!w) return
+      entryFor(w)
+    } while (idle && idle.timeRemaining() > 4)
     if (queue.length) later(next)
   }
   next()
 }
 
+/** An idle callback's deadline (requestIdleCallback), where there is one. */
+interface IdleDeadline { timeRemaining: () => number }
+
 /** Run `fn` when the page is idle, or on the next task where it cannot say. */
-function later(fn: () => void): void {
-  const idle = (globalThis as { requestIdleCallback?: (cb: () => void, opts?: { timeout: number }) => number }).requestIdleCallback
+function later(fn: (idle?: IdleDeadline) => void): void {
+  const idle = (globalThis as { requestIdleCallback?: (cb: (d: IdleDeadline) => void, opts?: { timeout: number }) => number }).requestIdleCallback
   if (idle) idle(fn, { timeout: 50 })
-  else setTimeout(fn, 0)
+  else setTimeout(() => fn(), 0)
 }
 
 /** Forget every shard's walls: for tests, and an identity switch has no need of them either. */
 export function clearWalls(): void {
   entries.clear()
+  waited = false
+  landed()
   walkNo++
   pools.trusted = TRUSTED_BUDGET
   pools.stranger = STRANGER_BUDGET
@@ -365,6 +452,7 @@ export function stepLimit(from: Position, axis: AxisName, dir: 1 | -1, length: b
   let best: number | null = null
   let bestTol = ON_FACE
   let by: WallItem | null = null
+  let wait = false
   const i = axis === 'x' ? 0 : axis === 'y' ? 1 : 2
   for (const w of items) {
     keep.add(w.key)
@@ -372,6 +460,10 @@ export function stepLimit(from: Position, axis: AxisName, dir: 1 | -1, length: b
     // and nothing it places resolved, until a step can.
     if (!regionReached(w, from, axis, dir, length)) continue
     const e = entryFor(w)
+    // Its first build is on its way (within the task): the step waits for it,
+    // rather than pass walls that are about to stand. Every shard it could
+    // enter is started first, so one wait covers them all.
+    if (e.first) { wait = true; continue }
     if (!e.reach) continue
     // Exact first: the step against the walls' box, in bigint gibsons,
     // widened by what the float test below may be off by.
@@ -402,6 +494,7 @@ export function stepLimit(from: Position, axis: AxisName, dir: 1 | -1, length: b
   for (const k of entries.keys()) if (!keep.has(k)) entries.delete(k)
   // The last whole gibson at least `tol` short of the face: one short at a
   // fine zoom, further at a coarse one, where the measure is coarser too.
+  if (wait) { waited = true; return { reach: 0n, by: null } }
   if (best === null) return { reach: length, by: null }
   const k = Math.max(0, Math.ceil(best - bestTol) - 1)
   const reach = BigInt(k) < length ? BigInt(k) : length

@@ -137,7 +137,24 @@ export function keepSources(gl: WebGLRenderer, scene: Scene, camera: Camera, sou
  * R3F canvas. Checked after each render of it, so a program is kept in the
  * frame that first used it, before anything mounted in it can unmount.
  */
+/** Three's own shader-error readback: on in development, off once built. */
+export function checkShaderErrorsInDevOnly(gl: WebGLRenderer): void {
+  gl.debug.checkShaderErrors = import.meta.env.DEV
+}
+
 export function keepPrograms(gl: WebGLRenderer, scene: Scene): void {
+  // A program's first use reads its compile and link logs back from the
+  // driver (gl.getShaderInfoLog x2, getProgramInfoLog, getProgramParameter):
+  // three's own check for a shader that failed to compile. The read stops
+  // the main thread until the driver answers, and on Direct3D (ANGLE, the
+  // Windows backend Chrome and Brave draw through) that can run past a
+  // second for one program, the same slow compiler this file was written to
+  // spare repeat calls to (arkinox, 2026-10-23: freezes navigating the
+  // world, where flying somewhere new keeps meeting shard combinations their
+  // shaders have not been linked for yet). Built code has already shipped
+  // with its shaders checked; development keeps the check, so a broken one
+  // is still caught and printed.
+  checkShaderErrorsInDevOnly(gl)
   // Programs from before a lost context are gone, and three makes new ones.
   let kept = new Set<Counted>()
   let sources: Sources = new Map()

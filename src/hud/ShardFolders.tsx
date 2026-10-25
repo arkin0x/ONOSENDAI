@@ -56,13 +56,46 @@ export const modelName = (s: { name: string }): string => s.name
 export const modelEditedAt = (s: { updatedAt?: number }): number => s.updatedAt ?? 0
 
 /**
+ * `useNewestFirst`'s stability key, pure so a test can pin it down: equal
+ * for two calls whose items carry the same ref and edited time in the same
+ * order and whose `used` map holds the same entries, however different the
+ * `items` array or the `used` object's own reference.
+ *
+ * JSON-encoded rather than joined with a plain separator: a ref is free text
+ * in general (a folder path, a found object's address), so a separator
+ * character inside one ref can read as the boundary between two items.
+ * `["a@1|b",2]` and `["a",1],["b",2]`, joined on `@`/`|`, both read back as
+ * `a@1|b@2`; JSON.stringify keeps the two apart because only it, not the
+ * ref text, ever contributes an unescaped `"`, `[` or `,`.
+ */
+export function newestFirstKey<T>(items: readonly T[], refOf: (item: T) => string, editedAt: (item: T) => number, used: Readonly<Record<string, number>> | undefined): string {
+  const usedKey = used ? Object.keys(used).sort().map((k) => [k, used[k]]) : []
+  return JSON.stringify([items.map((i) => [refOf(i), editedAt(i)]), usedKey])
+}
+
+/**
  * A shard list in the order every one of them is drawn: last edited or last
  * deployed first, whichever is later (lib/shardFolders.ts newestFirst), so
  * the lists cannot drift apart. `refOf` and `editedAt` should be stable.
+ *
+ * Steadied against a re-render that hands back a fresh-but-equal `items`
+ * array or `used` map (newestFirstKey, above): keyed on content rather than
+ * on `items` and `used`'s own identity, a render that changed neither
+ * reuses the exact array `newestFirst` returned last time, so nothing kept
+ * in a list keyed on this array's identity (ShardFolders' rows, a parent's
+ * memo) re-renders either, however often the caller itself re-renders
+ * (arkinox, 2026-10-23: opening the workshop bench on a Maze Kit Basilica
+ * piece and tapping it once, with a 138-shard library, re-sorted the whole
+ * library on every one of ~280 re-renders that single tap set off in
+ * Workshop.tsx, for seconds of blocked main thread, though neither a shard
+ * nor a folder had changed).
  */
 export function useNewestFirst<T>(items: readonly T[], refOf: (item: T) => string, editedAt: (item: T) => number): T[] {
   const used = useShardFolders((s) => s.tree.used)
-  return useMemo(() => newestFirst(items, refOf, editedAt, used), [items, refOf, editedAt, used])
+  const prev = useRef<{ key: string; result: T[] } | null>(null)
+  const key = newestFirstKey(items, refOf, editedAt, used)
+  if (!prev.current || prev.current.key !== key) prev.current = { key, result: newestFirst(items, refOf, editedAt, used) }
+  return prev.current.result
 }
 
 /** Whether there is a mouse to drag with: phones get the tool alone, so a long press stays a press. */

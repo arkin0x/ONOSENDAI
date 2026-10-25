@@ -37,14 +37,16 @@ import type { RelayAnswer } from '../../lib/relayOutcome'
 import { positionHex, type NostrEvent } from '../../lib/events'
 import { coordToXyz } from 'cyberspace-core'
 import { V2_EPOCH } from '../../lib/tv/tape'
-import { READ_STUCK_MS, TV_FOCUS_LABEL, fitScale, pathAfter, placeable, rideEnds, rideView, setTvAsk, shotOpening, useTv, type TvJump } from '../useTv'
+import { READ_STUCK_MS, TV_FOCUS_LABEL, adEndedAtForTest, fitScale, pathAfter, placeable, rideEnds, rideView, setTvAsk, shotOpening, useTv, type TvJump } from '../useTv'
 import { useCyberspace } from '../useCyberspace'
 import { useBuilder } from '../useBuilder'
 import { usePersonCard } from '../usePersonCard'
 import { beatOf } from '../../lib/tv/tape'
-import { AD_EVERY_MS, BROADCAST_AD_EVERY_MS } from '../../lib/tv/hosakaAd'
+import { AD_EVERY_MS, BROADCAST_AD_EVERY_MS, CTV_ADVERTISE_1, HOSAKA_1 } from '../../lib/tv/hosakaAd'
 import { setBroadcastForTest } from '../../lib/tv/broadcast'
 import { musicHeldForAd } from '../useTvMusic'
+import { setExplainerLineupForTest, useTvExplainer } from '../useTvExplainer'
+import { EXPLAINER_AD_GAP_MS, EXPLAINER_FIRST_MS } from '../../lib/tv/explainer'
 import type { Shot } from '../../lib/tv/director'
 
 const A = '1'.repeat(64)
@@ -97,6 +99,33 @@ afterEach(() => {
   vi.useRealTimers()
   vi.restoreAllMocks()
 })
+
+/** A video element that plays at the clock's pace, and a fetch of bytes the lineup's hash names (lib/tv/explainer). Returns that hash. */
+async function stubExplainerMedia(): Promise<string> {
+  // A video that plays at the clock's pace, from a fetch of bytes the lineup's hash names.
+  class ClockVideo extends EventTarget {
+    playsInline = false; preload = ''; muted = false; volume = 1; ended = false; error = null; readyState = 0
+    videoWidth = 1280; videoHeight = 720; paused = true
+    private t = 0; private from = 0; private source = ''
+    canPlayType(): string { return 'probably' }
+    get src(): string { return this.source }
+    set src(v: string) { this.source = v; queueMicrotask(() => { this.readyState = 4; this.dispatchEvent(new Event('canplay')) }) }
+    get currentTime(): number { return this.paused ? this.t : this.t + (performance.now() - this.from) / 1000 }
+    set currentTime(v: number) { this.t = v; this.from = performance.now() }
+    removeAttribute(): void { this.source = '' }
+    load(): void {}
+    pause(): void { this.t = this.currentTime; this.paused = true }
+    play(): Promise<void> { this.from = performance.now(); this.paused = false; return Promise.resolve() }
+  }
+  const body = new TextEncoder().encode('clip')
+  const { sha256 } = await import('@noble/hashes/sha2.js')
+  const { bytesToHex } = await import('../../lib/events')
+  vi.stubGlobal('document', { createElement: () => new ClockVideo(), addEventListener: () => {}, removeEventListener: () => {}, visibilityState: 'visible' })
+  vi.stubGlobal('fetch', async () => new Response(body as BodyInit))
+  const real = globalThis.crypto
+  vi.stubGlobal('crypto', { getRandomValues: <T extends ArrayBufferView>(a: T): T => real.getRandomValues(a as never) })
+  return bytesToHex(sha256(body))
+}
 
 async function run(ms: number): Promise<void> {
   for (let t = 0; t < ms; t += 100) await vi.advanceTimersByTimeAsync(100)
@@ -488,6 +517,74 @@ describe('Cyberspace TV', () => {
     expect(useTv.getState().ad).toBeNull()
     expect(held.slice(0, 2)).toEqual([false, false])
     expect(musicHeldForAd()).toBe(false)
+  })
+
+  it('the breaks alternate between HOSAKA and the house ad-slot spot, round robin (arkinox, 2026-10-24)', async () => {
+    useTv.getState().start()
+    const ids: string[] = []
+    const off = useTv.subscribe((s, prev) => { if (s.ad && !prev.ad) ids.push(s.ad.id) })
+    // Three breaks: long enough for AD_EVERY_MS to come due three times over.
+    await run(3 * AD_EVERY_MS + 90_000)
+    off()
+    expect(ids.length).toBeGreaterThanOrEqual(3)
+    for (const id of ids) expect([HOSAKA_1.id, CTV_ADVERTISE_1.id]).toContain(id)
+    // Never the same spot twice running: each break is the other one from the last.
+    for (let i = 1; i < ids.length; i++) expect(ids[i]).not.toBe(ids[i - 1])
+    // Round trip: the spot two breaks later is the same one again.
+    for (let i = 2; i < ids.length; i++) expect(ids[i]).toBe(ids[i - 2])
+  })
+
+  it('an explainer plays over the tape, the live picture going on under it; the spot waits for it and keeps its gap', async () => {
+    const hash = await stubExplainerMedia()
+    // Long enough to be on when the spot comes due: 2 minutes in, for its guard's 3.
+    setExplainerLineupForTest([{ id: '1-test', title: 'TEST', duration: 600, files: [{ url: `https://b.example/${hash}.webm`, type: 'video/webm' }] }])
+    try {
+      useTv.getState().start()
+      const t0 = performance.now()
+      let shownAt: number | null = null
+      let endedAt: number | null = null
+      let adAt: number | null = null
+      let playedUnder = 0
+      let overlap = false
+      const off = useTv.subscribe((s, prev) => {
+        if (s.ad && !prev.ad) adAt = performance.now()
+        if (useTvExplainer.getState().showing && s.played !== prev.played) playedUnder++
+        if (s.ad && useTvExplainer.getState().showing) overlap = true
+      })
+      const offEx = useTvExplainer.subscribe((e, prev) => {
+        if (e.showing && !prev.showing) shownAt = performance.now()
+        if (!e.showing && prev.showing) endedAt = performance.now()
+      })
+      await run(AD_EVERY_MS + 3 * 60_000)
+      off()
+      offEx()
+      expect(shownAt).not.toBeNull()
+      expect(shownAt! - t0).toBeGreaterThanOrEqual(EXPLAINER_FIRST_MS)
+      expect(endedAt).not.toBeNull()
+      // On through the spot's due time: the spot waited for it, and its gap.
+      expect(endedAt! - t0).toBeGreaterThan(AD_EVERY_MS)
+      expect(adAt).not.toBeNull()
+      expect(adAt! - endedAt!).toBeGreaterThanOrEqual(EXPLAINER_AD_GAP_MS)
+      expect(overlap).toBe(false)
+      // The tape played on in the corner.
+      expect(playedUnder).toBeGreaterThan(0)
+    } finally {
+      setExplainerLineupForTest(null)
+      vi.unstubAllGlobals()
+    }
+  })
+
+  it('a retune that cuts the spot short counts as its end, for the explainer\'s gap (review of #471)', async () => {
+    useTv.getState().start()
+    let retunedAt: number | null = null
+    const off = useTv.subscribe((s, prev) => {
+      // RETRY in the middle of the spot.
+      if (s.ad && !prev.ad) queueMicrotask(() => { retunedAt = performance.now(); useTv.getState().retune() })
+    })
+    await run(AD_EVERY_MS + 30_000)
+    off()
+    expect(retunedAt).not.toBeNull()
+    expect(adEndedAtForTest()).toBe(retunedAt)
   })
 
   it('on the 24/7 stream, breaks every BROADCAST_AD_EVERY_MS instead (arkinox, 2026-10-21)', async () => {

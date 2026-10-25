@@ -35,6 +35,16 @@ export function audioTypeOf(name: string): string | null {
   return known[ext] ?? null
 }
 
+/**
+ * Whether iPhones may not play a file (Safari plays ogg and opus only in
+ * part, by version and container): the composer warns at upload, and the
+ * hider can pick an mp3 or m4a, which play everywhere.
+ */
+export function iphoneMayNotPlay(file: Pick<File, 'type' | 'name'>): boolean {
+  const type = file.type.toLowerCase()
+  return type.includes('ogg') || type.includes('opus') || /\.(ogg|oga|opus)$/i.test(file.name)
+}
+
 /** Why a file cannot be hidden as audio, or null when it can. */
 export function audioFileRefusal(file: Pick<File, 'type' | 'size'>): string | null {
   if (!file.type.toLowerCase().startsWith('audio/')) return 'Not an audio file.'

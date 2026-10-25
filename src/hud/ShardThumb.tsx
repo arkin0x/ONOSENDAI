@@ -25,6 +25,7 @@ import { useEffect, useRef, useState } from 'react'
 import type { ShardModel } from 'sno-core/shards'
 import { useThumbs } from '../store/useThumbs'
 import { thumbKeyOf } from '../lib/thumbKey'
+import { ownThumbKey } from '../store/localObjects'
 import { ItemIcon } from './ItemIcon'
 
 /** How far outside the visible part of its box a row asks for its picture. */
@@ -75,10 +76,16 @@ interface Props {
   /** Width and height in CSS pixels. The picture is 160 pixels, sharp up to 80 on a phone's screen. */
   size?: number
   className?: string
+  /**
+   * An authoring view's picture of a shard of yours: your own pieces are
+   * drawn from your workshop, published or not (lib/parts.ts fetchOwnFirst).
+   * Everywhere else, as in the world, only what the relays hold.
+   */
+  own?: boolean
 }
 
-export function ShardThumb({ shard, size = 36, className }: Props): JSX.Element {
-  const key = thumbKeyOf(shard)
+export function ShardThumb({ shard, size = 36, className, own = false }: Props): JSX.Element {
+  const key = own ? ownThumbKey(shard) : thumbKeyOf(shard)
   const can = drawable(shard)
   const url = useThumbs((s) => s.urls[key])
   // The last picture of this shard: an edited shape keeps it until its new
@@ -102,12 +109,12 @@ export function ShardThumb({ shard, size = 36, className }: Props): JSX.Element 
   useEffect(() => {
     if (!near || !can || url) return
     let asked = false
-    const t = window.setTimeout(() => { asked = true; useThumbs.getState().want(key, shard) }, SETTLE_MS)
+    const t = window.setTimeout(() => { asked = true; useThumbs.getState().want(key, shard, own) }, SETTLE_MS)
     return () => {
       window.clearTimeout(t)
       if (asked) useThumbs.getState().unwant(key)
     }
-  }, [near, can, url, key, shard])
+  }, [near, can, url, key, shard, own])
 
   return (
     <span ref={box} className={className ? `shardthumb ${className}` : 'shardthumb'} style={{ width: size, height: size }} aria-hidden="true">

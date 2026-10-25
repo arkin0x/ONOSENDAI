@@ -17,6 +17,8 @@
 import { create } from 'zustand'
 import { queryEach } from '../lib/relay'
 import { AD_IN_MS, adById, adEveryMs, adLength, nextAd } from '../lib/tv/hosakaAd'
+import { EXPLAINER_AD_GAP_MS } from '../lib/tv/explainer'
+import { explainerBusy, explainerEndedAt, explainerTick, startExplainers, stopExplainers } from './useTvExplainer'
 import { isBroadcast, reloadBroadcast } from '../lib/tv/broadcast'
 import { Dwell, dwellLimits, onAir } from '../lib/tv/dwell'
 import { Director, JUMP_LINE_S, JUMP_S, JUMP_WARP_S, MAX_SHOT_S, isJump, shotFraming, type Beat, type Framing, type Shot, type TapeItem } from '../lib/tv/director'
@@ -239,6 +241,12 @@ let zoom: ZoomStep[] = []
 let adDue = Infinity
 /** The spot played last, so the breaks take them in turn. */
 let lastAd: string | null = null
+/** When the last spot ended (performance.now()): an explainer keeps EXPLAINER_AD_GAP_MS from it (lib/tv/explainer). */
+let adEndedAt = -Infinity
+/** When the last spot ended: for tests. */
+export function adEndedAtForTest(): number {
+  return adEndedAt
+}
 let timer: number | null = null
 let ask: Ask = (f) => queryEach(f)
 
@@ -744,6 +752,9 @@ function tick(id: number): void {
   const now = performance.now()
   let s = useTv.getState()
   if (dwell.playable(queue, now) < QUEUE_LOW) void readMore(id, t)
+  // An explainer (lib/tv/explainer) plays over whatever the tape is doing,
+  // the live picture in its corner: its own clock, never over the spot.
+  explainerTick(now, { playing: s.status === 'playing', ad: s.ad !== null, adEndedAt })
   // A commercial on screen: nothing from the tape plays under it ("No
   // cyberspace actions play in the bg while the hosaka ad plays"). The tape
   // picks up where it was, after a cut.
@@ -752,6 +763,7 @@ function tick(id: number): void {
     if (now - s.ad.at < AD_IN_MS + adLength(adById(s.ad.id)) * 1000) return
     // Over: the next shot starts in this same tick, so the way back is one cut, not two.
     adDue = now + adEveryMs(isBroadcast())
+    adEndedAt = now
     useTv.setState({ ad: null, shot: null, cutAt: now })
     s = useTv.getState()
   }
@@ -775,8 +787,9 @@ function tick(id: number): void {
   // else's shot now, cutting this one short, when the tape has one ready.
   const moveOn = s.shot !== null && dwell.moveOn(queue, now)
   if (s.shot === null || offAir || (now - shotBegan) / 1000 >= s.shot.length || moveOn) {
-    // A break, when one is due: between shots, never across one.
-    if (now >= adDue && s.status === 'playing') {
+    // A break, when one is due: between shots, never across one. Not while
+    // an explainer is getting ready or on, nor close after one: it waits.
+    if (now >= adDue && s.status === 'playing' && !explainerBusy() && now - explainerEndedAt() >= EXPLAINER_AD_GAP_MS) {
       const spot = nextAd(lastAd)
       lastAd = spot.id
       // The music plays on under the spot (2026-10-20: "setto of basspistol
@@ -847,7 +860,8 @@ async function tune(id: number): Promise<void> {
   retryAt = 0
   failures = 0
   // A retune cutting a commercial short counts as one played: the next is adEveryMs on.
-  if (useTv.getState().ad) adDue = performance.now() + adEveryMs(isBroadcast())
+  // And it ended: an explainer keeps its gap from it (review of #471).
+  if (useTv.getState().ad) { adDue = performance.now() + adEveryMs(isBroadcast()); adEndedAt = performance.now() }
   // A new tape shows only what it opens itself: the scan's memory stays, what it showed goes.
   looked = null
   dwell.onScreen(null, performance.now())
@@ -944,6 +958,8 @@ export const useTv = create<TvState>((set, get) => ({
     dwell = new Dwell(dwellLimits(isBroadcast()))
     set({ on: true })
     adDue = performance.now() + adEveryMs(isBroadcast())
+    adEndedAt = -Infinity
+    startExplainers(performance.now())
     // In the tap that turned TV on, where a browser lets sound start.
     startMusic()
     startWatching()
@@ -974,6 +990,7 @@ export const useTv = create<TvState>((set, get) => ({
     looked = null
     prepared.clear()
     keptBags.clear()
+    stopExplainers()
     stopMusic()
     stopWatching()
     set({ on: false, shot: null, played: 0, tapeTime: null, avatars: {}, arrivals: [], reactions: [], found: {}, finds: [], chains: {}, boxes: [], jump: null, ad: null, status: 'tuning' })

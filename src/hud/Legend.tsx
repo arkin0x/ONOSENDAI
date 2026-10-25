@@ -96,6 +96,18 @@ const KEYS: Array<{ what: string; glyph: JSX.Element }> = [
     ),
   },
   {
+    what: 'Blue rings around audio being placed: its full-volume sphere, and for a one-shot its trigger zone. It fades to silence at the green box\'s walls',
+    glyph: (
+      <svg viewBox="0 0 20 20" aria-hidden="true">
+        <g fill="none" stroke="#9fd0ff" strokeWidth="1.1">
+          <circle cx="10" cy="10" r="7.5" strokeOpacity="0.9" />
+          <ellipse cx="10" cy="10" rx="7.5" ry="2.6" strokeOpacity="0.5" />
+          <ellipse cx="10" cy="10" rx="2.6" ry="7.5" strokeOpacity="0.5" />
+        </g>
+      </svg>
+    ),
+  },
+  {
     what: 'Wrench, and a white cube marked BUILD: build mode and its build cursor. The next object or message you place lands in the cube\'s cell. The movement controls move it and the zoom sets its size, and it is not your avatar: building never moves you',
     glyph: <Wrench size={16} strokeWidth={2} color="#f2f7ff" aria-hidden />,
   },

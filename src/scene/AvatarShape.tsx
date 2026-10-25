@@ -20,6 +20,7 @@ import { avatarDraw, avatarDrawKept, spectatorScale } from '../lib/avatar'
 import { useAvatarShard } from '../store/useAvatars'
 import { useCyberspace } from '../store/useCyberspace'
 import { ShardMesh } from './ShardMesh'
+import { markerMaterialProps } from './avatarMarker'
 
 /**
  * The marker's edges, one for every avatar for as long as the page is open.
@@ -67,7 +68,7 @@ export function AvatarShape({ pubkey, color, renderOrder = 0, depthTest = true, 
   return (
     <group scale={[spectator, spectator, spectator]}>
       <lineSegments geometry={MARKER_EDGES} frustumCulled={false} renderOrder={renderOrder}>
-        <lineBasicMaterial color={color} toneMapped={false} depthTest={depthTest} {...(outline ? { transparent: true, opacity: 0.3 } : {})} />
+        <lineBasicMaterial color={color} toneMapped={false} {...markerMaterialProps({ depthTest, outline })} />
       </lineSegments>
     </group>
   )

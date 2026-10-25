@@ -45,6 +45,7 @@ import { usePanelLayout, type Column, type PanelId } from '../store/usePanelLayo
 import { jobInProgress } from '../lib/cloud'
 import { useMutes } from '../store/useMutes'
 import { MuteListModal } from './MuteListModal'
+import { useCover } from '../hooks/useCover'
 
 const AXIS_LABEL: Record<string, string> = { x: 'X', y: 'Y', z: 'Z' }
 
@@ -387,6 +388,7 @@ const OFFICIAL: Array<{ href: string; name: string; what: string }> = [
   { href: 'https://cyberspace.international', name: 'cyberspace.international', what: 'education, proliferation, adoption of cyberspace' },
   { href: 'https://snocrash.art', name: 'SnoCrash', what: 'SNO format 3D model builder' },
   { href: 'https://github.com/arkin0x/ONOSENDAI/tree/v2', name: 'ONOSENDAI v2 Codebase', what: 'this client, on GitHub' },
+  { href: 'https://www.youtube.com/watch?v=e7uVFkwxKh8', name: 'Cyberspace TV', what: 'the 24/7 stream, live' },
 ]
 
 function LinksPanel(): JSX.Element {
@@ -555,6 +557,11 @@ export function Hud({ menuOpen = false }: { menuOpen?: boolean }): JSX.Element {
   const drag = useRef<{ id: PanelId; pointerId: number } | null>(null)
   const hudRef = useRef<HTMLDivElement>(null)
   const grabRef = useRef<HTMLDivElement>(null)
+  // Beside the scene on a desktop the columns cover its sides, and BUILD
+  // frames the cursor between them (hooks/useCover). Not as the phone's menu,
+  // which covers the whole scene while it is open.
+  const leftRef = useCover('left', !menuOpen)
+  const rightRef = useCover('right', !menuOpen)
 
   const leads: PanelId[] = []
   if (building) leads.push('position')
@@ -609,11 +616,11 @@ export function Hud({ menuOpen = false }: { menuOpen?: boolean }): JSX.Element {
   const cls = ['hud', menuOpen && 'hud--menu', lifting && 'hud--dragging'].filter(Boolean).join(' ')
   return (
     <div ref={hudRef} className={cls}>
-      <div className="hud__col hud__col--left" data-column="left">
+      <div ref={leftRef} className="hud__col hud__col--left" data-column="left">
         <Brand />
         {left.map(slot)}
       </div>
-      <div className="hud__col hud__col--right" data-column="right">
+      <div ref={rightRef} className="hud__col hud__col--right" data-column="right">
         {right.map(slot)}
         {/* The licenses, just above the build: the code is CC BY-SA, the
             logo is arkinox's under CC BY-NC-ND, and the name is covered by

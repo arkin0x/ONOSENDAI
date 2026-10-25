@@ -83,7 +83,7 @@ import {
   isReference,
 } from '../lib/hidden'
 import { retractionTemplate } from '../lib/published'
-import { audioInnerTemplate, type AudioItem } from '../lib/audioItem'
+import { audioInnerTemplate, fadeAt, type AudioItem } from '../lib/audioItem'
 import { resealCopy } from '../lib/audioFile'
 import { openWithSecret, openWithSigner, openerFor, readContents, resealWithout, revealedIn, sealEntries, sealedInside, sealerOf, type OpeningKey } from '../lib/chests'
 import { openingKeys, type HeldPlace } from '../lib/inventory'
@@ -102,17 +102,17 @@ import { turnShard, type Turns } from '../lib/turn'
 import { alignedBase, hintFits } from '../lib/hint'
 import { hidesThing, type Muted } from '../lib/muteList'
 import { useMutes } from './useMutes'
-import { constrainOf, readConstrain, withConstrain, type Constrain } from '../lib/walkConstrain'
+import { CONSTRAIN_DEFAULT, authoredConstrain, authoredConstrainOf, withConstrain, type Constrain } from '../lib/walkConstrain'
 
-/** A workshop model's WALK setting, by id; off for one that is not there. */
+/** A workshop model's WALK setting as it publishes, by id; the default for one that never chose or is not there (DECK-0003 §1.12). */
 function constrainOfId(shardId: string): Constrain {
   const m = useWorkshop.getState().shards.find((s) => s.id === shardId)
-  return m ? constrainOf(m) : 'off'
+  return m ? authoredConstrainOf(m) : CONSTRAIN_DEFAULT
 }
 
-/** The WALK setting a signed shard carries in its payload; off when it carries none or cannot be read. */
+/** The WALK setting a signed shard carries in its payload as it publishes; the default when it carries none or cannot be read. */
 function constrainOfSigned(ev: Pick<NostrEvent, 'content'>): Constrain {
-  try { return readConstrain((JSON.parse(ev.content) as { constrain?: unknown }).constrain) } catch { return 'off' }
+  try { return authoredConstrain((JSON.parse(ev.content) as { constrain?: unknown }).constrain) } catch { return CONSTRAIN_DEFAULT }
 }
 
 /** One item this device hid. Its identity is its inner event id. */
@@ -773,6 +773,8 @@ interface ShardsState {
   startDeployKey: (key: KeyItem) => void
   /** Hide audio the composer encrypted and uploaded (DECK-0007). */
   startDeployAudio: (audio: AudioItem, opts?: { server?: string; reseal?: boolean }) => void
+  /** The FADE stepper: the pending audio's full-volume sphere (a one-shot's trigger zone), in gibsons; undefined for the default, half the way to the wall. */
+  setDeployFade: (fade: number | undefined) => void
   /** Hide a chest as the composer drafted it; its contents are signed (the aimed ones already are) and sealed when it is hidden. */
   startDeployChest: (draft: ChestDraft & { lock: ChestLock }) => void
   /**
@@ -1178,7 +1180,7 @@ export const useShards = create<ShardsState>((set, get) => {
 
   /** The same fresh-deploy state every start shares: no pose, no link, the bag settings at their defaults. */
   const freshDeploy = {
-    deployLink: false, deployHeightAuto: false, deployUnit: 0, deployUp: false, deploySpin: 0, deployTurn: [0, 0, 0] as Turns, deployFollow: false, deployConstrain: 'off' as Constrain,
+    deployLink: false, deployHeightAuto: false, deployUnit: 0, deployUp: false, deploySpin: 0, deployTurn: [0, 0, 0] as Turns, deployFollow: false, deployConstrain: CONSTRAIN_DEFAULT,
     deployBag: DEFAULT_BAG_SETTINGS, deployBagFrom: null, deployStatus: 'idle' as const, deployError: null,
   }
 
@@ -1252,7 +1254,7 @@ export const useShards = create<ShardsState>((set, get) => {
     deploySpin: 0,
     deployTurn: [0, 0, 0],
     deployFollow: false,
-    deployConstrain: 'off',
+    deployConstrain: CONSTRAIN_DEFAULT,
     deployLink: false,
     deployBag: DEFAULT_BAG_SETTINGS,
     deployBagFrom: null,
@@ -1321,7 +1323,7 @@ export const useShards = create<ShardsState>((set, get) => {
         deployHeight: d.height,
         deployHeightAuto: false,
         deployUnit: d.shard.unit,
-        deployConstrain: constrainOf(d.shard),
+        deployConstrain: authoredConstrainOf(d.shard),
         deployUp: d.shard.up ?? false,
         deploySpin: d.shard.spin ?? 0,
         deployTurn: [0, 0, 0],
@@ -1340,7 +1342,7 @@ export const useShards = create<ShardsState>((set, get) => {
       deployLink: false,
       deployHeightAuto: true,
       deployUnit: object.shard.unit,
-      deployConstrain: constrainOf(object.shard),
+      deployConstrain: authoredConstrainOf(object.shard),
       // The pose its author published goes with the copy (DECK-0003 §1.7);
       // the height decides whether the snap is offered (setDeployHeight).
       deployUp: object.shard.up ?? false,
@@ -1354,6 +1356,13 @@ export const useShards = create<ShardsState>((set, get) => {
     }),
     startDeployMessage: (text) => set({ pending: { type: 'message', text }, ...freshDeploy }),
     startDeployKey: (key) => set({ pending: { type: 'key', key }, ...freshDeploy }),
+    setDeployFade: (fade) => {
+      const p = get().pending
+      if (p?.type !== 'audio') return
+      const { fade: _drop, ...rest } = p.audio
+      void _drop
+      set({ pending: { ...p, audio: fade === undefined ? rest : { ...rest, fade } } })
+    },
     startDeployAudio: (audio, opts) => set({ pending: { type: 'audio', audio, ...(opts?.reseal ? { reseal: true as const } : {}), ...(opts?.server ? { server: opts.server } : {}) }, ...freshDeploy }),
     // With shards aimed inside, the height starts at the fit that holds them
     // all (DeployBar, lib/deployFit.ts fitHeightAll) and follows the cursor
@@ -1416,7 +1425,7 @@ export const useShards = create<ShardsState>((set, get) => {
       // LIVE LINK must do, so it goes out only as a copy.
       if (link && isProtected(object)) return
       set(link
-        ? { deployLink: true, deployUnit: object.shard.unit, deployTurn: [0, 0, 0], deployUp: false, deployFollow: false, deploySpin: 0, deployConstrain: constrainOf(object.shard), deployAsk: null }
+        ? { deployLink: true, deployUnit: object.shard.unit, deployTurn: [0, 0, 0], deployUp: false, deployFollow: false, deploySpin: 0, deployConstrain: authoredConstrainOf(object.shard), deployAsk: null }
         : { deployLink: false })
       // Copy on pick, while LIVE only (copyForLink).
       if (link && cyber().live) void copyForLink(object)
@@ -1572,7 +1581,11 @@ export const useShards = create<ShardsState>((set, get) => {
         if (!pending.name.trim() || pending.contents.length === 0 || !pending.lock) return
       } else if (pending.type === 'audio') {
         if (!pending.audio.url) return
-        audio = { ...pending.audio, title: pending.audio.title.trim() || 'audio', about: pending.audio.about.trim() }
+        // The sphere is set at the ghost; where it really lands it is clamped to the room it has there (never out of the hide region).
+        const fade = fadeAt(pending.audio.fade, at, deployHeight)
+        const { fade: _old, ...rest } = pending.audio
+        void _old
+        audio = { ...rest, ...(fade !== undefined ? { fade } : {}), title: pending.audio.title.trim() || 'audio', about: pending.audio.about.trim() }
         // A copy's template waits for its fresh key, inside the try below.
         if (!pending.reseal) innerTemplate = audioInnerTemplate(audio, at, plane, createdAt)
       } else {

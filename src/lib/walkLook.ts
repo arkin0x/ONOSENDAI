@@ -17,6 +17,8 @@
  * one pixel turns the same up and down as across.
  */
 
+import type { AxisName, ViewAxes } from './space'
+
 /** A drag across the whole screen turns your head this far. The one number to tune. */
 export const WALK_LOOK_DEG_PER_WIDTH = 360
 
@@ -65,4 +67,36 @@ export function takeWalkLook(dt: number): [number, number] {
 export function clearWalkLook(): void {
   pendingX = 0
   pendingY = 0
+}
+
+/**
+ * Keep the way WALK looks, in cyberspace, through the next change of view:
+ * the rig turns its line of sight from the view it last drew to the new one
+ * (scene/Scene.tsx). Asked only when GRAVITY levels the view
+ * (store/useWalk.ts); any other turn of the view in WALK turns the world
+ * about you, as it always has.
+ */
+let keepLook = false
+export function keepWalkLook(): void { keepLook = true }
+/** Whether a kept look was asked for, once. */
+export function takeKeepWalkLook(): boolean {
+  const k = keepLook
+  keepLook = false
+  return k
+}
+
+/**
+ * `v`, a direction in the render frame of the view `from`, as the same
+ * cyberspace direction in the render frame of `to`, in place. The render
+ * basis is (right, up, out) and each names a signed cyberspace axis
+ * (space.ts viewAxes).
+ */
+export function carryLook(v: { x: number; y: number; z: number }, from: ViewAxes, to: ViewAxes): void {
+  const cs: Record<AxisName, number> = { x: 0, y: 0, z: 0 }
+  const a = [from.right, from.up, from.out]
+  const c = [v.x, v.y, v.z]
+  for (let i = 0; i < 3; i++) cs[a[i].axis] = a[i].dir * c[i]
+  v.x = to.right.dir * cs[to.right.axis]
+  v.y = to.up.dir * cs[to.up.axis]
+  v.z = to.out.dir * cs[to.out.axis]
 }

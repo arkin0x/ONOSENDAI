@@ -16,7 +16,8 @@ import { useMemo } from 'react'
 import { Box3, Vector3 } from 'three'
 
 import { cellDelta, stepFor, type ViewAxes } from '../lib/space'
-import { drawnAvatars, targetScreens, type CyberTarget } from '../lib/targets'
+import { drawnAvatars, targetScreens, viewAxis, type CyberTarget } from '../lib/targets'
+import { viewAxisNdc } from '../lib/coverBand'
 import { labelAnchor, type LabelAnchor } from '../lib/avatarLabel'
 import { alignedOrigin, useCyberspace } from '../store/useCyberspace'
 
@@ -43,6 +44,8 @@ export function TargetProjector({ axes, targets }: Props): null {
     const projScale = cam.fov === undefined
       ? 0
       : state.size.height / (2 * Math.tan((cam.fov * Math.PI) / 360))
+    // The picture's middle: off the window's while BUILD shifts the lens.
+    const axis = viewAxisNdc(state.camera.projectionMatrix, viewAxis)
 
     for (const t of targets) {
       const [x, y, z] = [axes.right, axes.up, axes.out].map(
@@ -66,9 +69,10 @@ export function TargetProjector({ axes, targets }: Props): null {
       scratch.project(state.camera)
       // project() genuinely does mirror x and y behind the camera, because the
       // perspective divide is by a negative w there. That is the only case that
-      // needs undoing.
-      const sx = behind ? -scratch.x : scratch.x
-      const sy = behind ? -scratch.y : scratch.y
+      // needs undoing. The mirror is about the line of sight, which a lens
+      // shift moves off the window's middle; the shift itself is not mirrored.
+      const sx = behind ? 2 * axis.x - scratch.x : scratch.x
+      const sy = behind ? 2 * axis.y - scratch.y : scratch.y
 
       const dist = (a: 'x' | 'y' | 'z'): bigint => {
         const d = t.at[a] - s.anchor[a]

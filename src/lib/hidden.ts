@@ -47,6 +47,7 @@ import { getEventHash, getPublicKey, verifyEvent } from 'nostr-tools/pure'
 import { coordToXyz, hexToCoord, type Plane } from 'cyberspace-core'
 import { bytesToHex, hexToBytes, positionHex, type EventTemplate, type NostrEvent } from './events'
 import { fromPayload, toPayload, type ShardModel } from 'sno-core/shards'
+import { withAuthoredConstrain } from './walkConstrain'
 import { creditTags, type Credit } from 'sno-core/feed'
 import { ALGO, decryptForRegion, encryptForRegion } from './shardCrypto'
 import { hintFits, hintTags, parseHint, type HintHeights } from './hint'
@@ -163,7 +164,7 @@ export interface RegionOrigin { at: Position; plane: Plane }
 
 /** Whether a shard is large enough to hide by reference. */
 export function wantsReference(shard: ShardModel): boolean {
-  return new TextEncoder().encode(JSON.stringify(toPayload(shard))).length > REFERENCE_THRESHOLD_BYTES
+  return new TextEncoder().encode(JSON.stringify(toPayload(withAuthoredConstrain(shard)))).length > REFERENCE_THRESHOLD_BYTES
 }
 
 /**
@@ -175,7 +176,8 @@ export function wantsReference(shard: ShardModel): boolean {
  * No `name`, `C`, height (`H`), hint or sector tag: nothing that could say where.
  */
 export async function objectTemplate(shard: ShardModel, regionKey: Uint8Array, d: string, createdAt: number): Promise<EventTemplate> {
-  const ciphertext = await encryptForRegion(regionKey, JSON.stringify(toPayload(shard)))
+  // OPAQUE for a shard whose author never chose (DECK-0003 §1.12), as every hidden shard.
+  const ciphertext = await encryptForRegion(regionKey, JSON.stringify(toPayload(withAuthoredConstrain(shard))))
   return {
     kind: OBJECT_KIND,
     created_at: createdAt,
@@ -482,7 +484,8 @@ export function shardInnerTemplate(shard: ShardModel, at: Position, plane: Plane
   return {
     kind: SHARD_KIND,
     created_at: createdAt,
-    content: JSON.stringify(toPayload(shard)),
+    // OPAQUE for a shard whose author never chose (DECK-0003 §1.12).
+    content: JSON.stringify(toPayload(withAuthoredConstrain(shard))),
     // A copy of someone else's object credits it (sno-core creditTags). The
     // item is sealed in the bag, so the credit is as private as the item.
     tags: [['C', positionHex(at, plane)], ...(credit ? creditTags(credit) : []), [...PROTECTED_TAG]],

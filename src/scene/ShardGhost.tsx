@@ -44,6 +44,7 @@ import { messagePreview } from '../lib/hidden'
 import { ShardMesh } from './ShardMesh'
 import { regionBox } from '../lib/clip'
 import { WorldLabel } from './WorldLabel'
+import { AudioSphereGhost } from './AudioSphereGhost'
 import { turnShard } from '../lib/turn'
 
 interface Props {
@@ -124,6 +125,9 @@ export function ShardGhost({ axes }: Props): JSX.Element | null {
   // them once hidden.
   if (pending?.type === 'message' || pending?.type === 'key' || pending?.type === 'chest' || pending?.type === 'audio') {
     return (
+      <>
+      {/* Hidden audio's sphere: full volume inside, a one-shot's trigger zone (AudioSphereGhost). */}
+      {pending.type === 'audio' && <AudioSphereGhost landingAt={landingAt} />}
       <WorldLabel
         text={pending.type === 'message' ? messagePreview(pending.text, 40) : pending.type === 'key' ? `⚷ ${pending.key.name}` : pending.type === 'audio' ? `AUDIO · ${pending.audio.title}` : `▣ ${pending.name}`}
         color="#ffd27d"
@@ -132,6 +136,7 @@ export function ShardGhost({ axes }: Props): JSX.Element | null {
         px={13}
         opacity={0.5}
       />
+      </>
     )
   }
 

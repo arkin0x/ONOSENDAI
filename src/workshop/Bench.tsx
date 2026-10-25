@@ -28,8 +28,8 @@
 
 import { Canvas, useFrame, useThree, type ThreeEvent } from '@react-three/fiber'
 import { OrbitControls } from '@react-three/drei'
-import { useEffect, useMemo, useRef } from 'react'
-import { AdditiveBlending, BufferGeometry, DoubleSide, EdgesGeometry, Float32BufferAttribute, Group, IcosahedronGeometry, Line, LineBasicMaterial, PerspectiveCamera, Vector3, Matrix4 } from 'three'
+import { memo, useEffect, useLayoutEffect, useMemo, useRef } from 'react'
+import { AdditiveBlending, BufferGeometry, DoubleSide, EdgesGeometry, Float32BufferAttribute, Group, IcosahedronGeometry, Line, LineBasicMaterial, MeshBasicMaterial, PerspectiveCamera, SphereGeometry, Vector3, Matrix4 } from 'three'
 import { ACCENT, BG, WARN } from '../lib/palette'
 import { glowTexture } from '../lib/glow'
 import { GRID_HALF, TICKS_PER_UNIT, centroid, pointKey, rgbToHex, ticksOf, toRender } from 'sno-core/shards'
@@ -41,8 +41,10 @@ import { OVERLAY_ORDER } from '../scene/shardFaces'
 import { ShardLights } from '../scene/shardLight'
 import { nextSelection, ownAddress, useWorkshop, type Tool } from '../store/useWorkshop'
 import { partMatrix } from 'sno-core/parts'
+import { OwnPartsContext } from '../lib/parts'
 import { useCyberspace } from '../store/useCyberspace'
 import { Hold, noteGesture, tapSlop } from './deadZone'
+import { HandleDots, dotCapacity } from './handleDots'
 
 /** The unit grid's line colour when a unit is not divided. */
 const UNIT_LINE = '#1d3547'
@@ -249,6 +251,8 @@ const RING_OUT = 13
 const HIT_R = 12
 const HIT_FACE_R = 16
 const HIT_NARROW_R = 5.5
+/** Every hit target's material: never drawn, never compiled, one for all of them. */
+const HIT_MATERIAL = new MeshBasicMaterial()
 function hitRadiusFor(tool: Tool): number {
   if (tool === 'add') return HIT_NARROW_R
   if (tool === 'face') return HIT_FACE_R
@@ -274,6 +278,15 @@ function ScreenScale({ position, children }: { position: [number, number, number
 /**
  * One handle per point. Several vertices can share a point once stamps have
  * landed on each other; they read and act as one, so they draw as one.
+ *
+ * The dots are drawn together, as one object (handleDots.ts): one a point,
+ * each a mesh of its own beside a drawn hit sphere, was 3,462 objects in
+ * three's render loop every frame for a 1,731 point Basilica nave, and over
+ * a gigabyte of garbage a minute at 144 Hz (arkinox, 2026-10-23). The hit
+ * targets are still one per point, so a tap knows its point, but they are
+ * invisible: the raycaster finds them and the renderer skips them. They share
+ * one geometry and one material. A selected or picked point keeps its halo
+ * and ring as before; there are few of those.
  */
 function Handles(): JSX.Element | null {
   const shard = useWorkshop((s) => s.current())
@@ -286,9 +299,25 @@ function Handles(): JSX.Element | null {
     shard?.vertices.forEach((v, i) => { const k = pointKey(ticksOf(v)); m.set(k, [...(m.get(k) ?? []), i]) })
     return [...m.values()]
   }, [shard?.vertices])
+  const hitRadius = hitRadiusFor(tool)
+  const hitGeometry = useMemo(() => new SphereGeometry(hitRadius, 10, 10), [hitRadius])
+  useEffect(() => () => hitGeometry.dispose(), [hitGeometry])
+  // Made again only when the points outgrow it, so placing points one by one does not make one each time.
+  const capacity = dotCapacity(groups.length)
+  const dots = useMemo(() => new HandleDots(capacity), [capacity])
+  useEffect(() => () => dots.dispose(), [dots])
+  useLayoutEffect(() => {
+    if (!shard) { dots.set([]); return }
+    dots.set(groups.map((g) => {
+      const v = shard.vertices[g[0]]
+      const isSel = g.some((i) => chosen.has(i))
+      const picked = facePick.some((i) => g.includes(i))
+      return { at: UP(ticksOf(v)), radiusPx: isSel || picked ? DOT_ON_R : DOT_R, color: isSel ? WARN : picked ? ACCENT : rgbToHex(v.c) }
+    }))
+  }, [dots, groups, shard, chosen, facePick])
+  useFrame((state) => { dots.update(state.camera as PerspectiveCamera, state.size.height) })
   if (!shard) return null
   const glow = glowTexture()
-  const hitRadius = hitRadiusFor(tool)
 
   const onClick = (first: number, isSel: boolean) => (e: ThreeEvent<MouseEvent>): void => {
     if (e.delta > tapSlop()) return
@@ -317,6 +346,7 @@ function Handles(): JSX.Element | null {
 
   return (
     <>
+      <primitive object={dots.mesh} />
       {groups.map((g) => {
         const first = g[0]
         const v = shard.vertices[first]
@@ -325,15 +355,9 @@ function Handles(): JSX.Element | null {
         return (
           <ScreenScale key={first} position={UP(ticksOf(v))}>
             {/* An invisible hit target wider than the handle, narrower in ADD so a tap
-                beside a point lands on the plane and places another one near it. */}
-            <mesh onClick={onClick(first, isSel)}>
-              <sphereGeometry args={[hitRadius, 10, 10]} />
-              <meshBasicMaterial transparent opacity={0} depthWrite={false} />
-            </mesh>
-            <mesh>
-              <sphereGeometry args={[isSel || picked ? DOT_ON_R : DOT_R, 12, 12]} />
-              <meshBasicMaterial color={isSel ? WARN : picked ? ACCENT : rgbToHex(v.c)} toneMapped={false} />
-            </mesh>
+                beside a point lands on the plane and places another one near it.
+                Not drawn (visible false): three's raycaster still meets it. */}
+            <mesh visible={false} geometry={hitGeometry} material={HIT_MATERIAL} onClick={onClick(first, isSel)} />
             {/* A halo, so a small selected handle still stands out. */}
             {(isSel || picked) && glow && (
               <sprite scale={[HALO_PX, HALO_PX, 1]} renderOrder={OVERLAY_ORDER}>
@@ -685,7 +709,24 @@ function AxesReporter(): null {
   return null
 }
 
-export function Bench(): JSX.Element {
+/**
+ * Memoized: Bench takes no props, so its only legitimate reason to redraw is
+ * its own store reads (useWorkshop, useBenchView, useThree). Workshop.tsx is
+ * one large component with its own local state (menus, panels, pickers,
+ * drag-and-drop); any one of those re-renders Workshop and, with Bench a
+ * plain function component, re-executed Bench too, which re-executed every
+ * child in its JSX (Grid, Ghost, Handles, ShardMesh) whether or not anything
+ * they read had changed. On a Maze Kit Basilica nave (1,896 vertices, ~290
+ * deduplicated handle points) a single tap on the canvas was measured to
+ * force that whole subtree to re-render ~280 times in a few seconds (none of
+ * them a real store change: useWorkshop.subscribe saw zero notifications)
+ * for seconds of blocked main thread — arkinox's "lockups" (2026-10-23,
+ * scripts/perf-bench-orbit.mjs). Wrapping Bench lets React's default memo
+ * comparison (no props, always equal) skip it on every parent-driven
+ * re-render that isn't Bench's own; its internal store subscriptions still
+ * force a real re-render exactly as before when something they read changes.
+ */
+function BenchImpl(): JSX.Element {
   const shard = useWorkshop((s) => s.current())
   const tool = useWorkshop((s) => s.tool)
   const extent = shard?.extent ?? GRID_HALF
@@ -734,6 +775,8 @@ export function Bench(): JSX.Element {
       }}
       style={{ background: BG }}
     >
+      {/* Your own pieces from your workshop, published or not: the bench is where they are made (lib/parts.ts). */}
+      <OwnPartsContext.Provider value>
       {/* A key light high and to one side, a fill from behind, over a strong
           ambient: faces read by their tilt yet stay near the world's full
           color, and the darker backs (ShardMesh lit) show through any hole.
@@ -762,6 +805,9 @@ export function Bench(): JSX.Element {
       <PickLoop />
       <FaceHighlight />
       <Handles />
+      </OwnPartsContext.Provider>
     </Canvas>
   )
 }
+
+export const Bench = memo(BenchImpl)

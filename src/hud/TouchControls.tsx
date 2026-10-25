@@ -45,6 +45,7 @@ import { useUiHints } from '../store/useUiHints'
 import { noCallout, useRepeatable } from '../hooks/useRepeatable'
 import { ChainStatusStrip, useChainStatus } from './ChainStatus'
 import { useWalk } from '../store/useWalk'
+import { useCover } from '../hooks/useCover'
 
 /**
  * arkinox's wording, kept exactly as he wrote it, bullet shapes and blank
@@ -62,6 +63,10 @@ export const GO_LIVE_BODY = [
 ].join('\n')
 
 export function TouchControls(): JSX.Element {
+  // The pad and the block under it cover the scene from below: BUILD frames
+  // the cursor above them (hooks/useCover).
+  const padRef = useCover('bottom')
+  const opsRef = useCover('bottom')
   const proof = useCyberspace((s) => s.proof)
   const position = useCyberspace((s) => s.position)
   const cursor = useCyberspace((s) => s.cursor)
@@ -97,7 +102,10 @@ export function TouchControls(): JSX.Element {
   const walking = useCyberspace((s) => s.walking)
   // Steps pressed in WALK and not yet proven, queued or still being walked:
   // STOP has something to stop.
-  const behind = useWalk((s) => s.behind + (s.open ? 1 : 0))
+  const behind = useWalk((s) => s.behind + (s.open ? 1 : 0) + (s.falling ? 1 : 0))
+  // GRAVITY in WALK (store/useWalk.ts): Up jumps, Down does nothing.
+  const gravity = useWalk((s) => s.gravity)
+  const fallen = walking && gravity
   const mode = walking ? 'walk' : viewing ? 'view' : 'hop'
 
   const computing = proof.status === 'computing'
@@ -134,7 +142,7 @@ export function TouchControls(): JSX.Element {
     // The keys in the titles are the mode's own: WALK's are first person
     // (lib/walkKeys.ts).
     { cell: 'away', glyph: '⊗', sub: 'FAR', title: walking ? 'Forward (W)' : 'Away from camera (R)', act: move('away') },
-    { cell: 'up', glyph: '▲', title: walking ? 'Up (Space or R)' : 'Up (W)', act: move('up') },
+    { cell: 'up', glyph: '▲', title: fallen ? 'Jump (Space or R)' : walking ? 'Up (Space or R)' : 'Up (W)', act: move('up') },
     { cell: 'toward', glyph: '⊙', sub: 'NEAR', title: walking ? 'Back (S)' : 'Toward camera (F)', act: move('toward') },
     { cell: 'left', glyph: '◀', title: 'Left (A)', act: move('left') },
     { cell: 'right', glyph: '▶', title: 'Right (D)', act: move('right') },
@@ -151,13 +159,13 @@ export function TouchControls(): JSX.Element {
     // would promise a remedy it cannot deliver.
     { cell: 'zoomout', glyph: '+', title: 'Coarser scale (Q)', act: scale(1), disabled: scaleExp >= MAX_SCALE_EXP,
       hint: coveringClipped && scaleExp < MAX_SCALE_EXP, scale: true },
-    { cell: 'down', glyph: '▼', title: walking ? 'Down (C or F)' : 'Down (S)', act: move('down') },
+    { cell: 'down', glyph: '▼', title: walking ? 'Down (C or F)' : 'Down (S)', act: move('down'), disabled: fallen },
     { cell: 'zoomin', glyph: '−', title: 'Finer scale (E)', act: scale(-1), disabled: scaleExp <= 0, scale: true },
   ]
 
   return (
     <>
-      <div className={`touchpad touchpad--mode-${mode}${atHead ? '' : ' touchpad--scale'}${home && chainStatus ? ' is-lifted' : ''}`} role="group" aria-label={walking ? 'Walk and change scale' : 'Move cursor and change scale'}>
+      <div ref={padRef} className={`touchpad touchpad--mode-${mode}${atHead ? '' : ' touchpad--scale'}${home && chainStatus ? ' is-lifted' : ''}`} role="group" aria-label={walking ? 'Walk and change scale' : 'Move cursor and change scale'}>
         {/* The purple cube: the scale key taken to its end, 2^84, in one press.
             It changes the scale and nothing else, so whatever you are looking
             at stays what you are looking at, only seen from the top of the
@@ -190,6 +198,16 @@ export function TouchControls(): JSX.Element {
         <button className="touchpad__key touchpad__key--cube" title="Zoom all the way out (2^84)" aria-label="Zoom out to 2^84" {...noCallout} onPointerDown={(e) => { e.preventDefault(); e.stopPropagation(); useCyberspace.getState().adjustScale(MAX_SCALE_EXP) }}>
           <Box size={16} strokeWidth={2.25} aria-hidden />
         </button>
+        {walking && (
+          <button
+            className={`touchpad__key touchpad__key--gravity${gravity ? ' is-on' : ''}`}
+            aria-pressed={gravity}
+            title="Gravity (Z)"
+            aria-label="Gravity"
+            {...noCallout}
+            onPointerDown={(e) => { e.preventDefault(); e.stopPropagation(); useWalk.getState().setGravity(!gravity) }}
+          >GRAVITY</button>
+        )}
         {pad.map((b) => (
           <button
             key={b.cell}
@@ -225,7 +243,7 @@ export function TouchControls(): JSX.Element {
         >2^{scaleExp}</button>
       </div>
 
-      {(home || viewing) && <div className={`touchops touchops--mode-${mode}${chainStatus ? ' touchops--status' : ''}`}>
+      {(home || viewing) && <div ref={opsRef} className={`touchops touchops--mode-${mode}${chainStatus ? ' touchops--status' : ''}`}>
         <button
           className="touchops__cancel"
           title={walking
@@ -271,7 +289,7 @@ export function TouchControls(): JSX.Element {
             title="Hop: the pad lines up a move and COMMIT sends it. Press for VIEW, a free look that moves nothing"
             {...noCallout}
             onPointerDown={(e) => { e.preventDefault(); e.stopPropagation(); useCyberspace.getState().viewHere() }}
-          >HOP</button>
+          >HOP<span className="touchops__sub">(MODES)</span></button>
         ) : (
         <button
           className={`touchops__commit ${deploying ? 'is-armed' : computing ? 'is-busy' : tooFar ? 'is-too-far' : offload ? 'is-offload' : armed ? 'is-armed' : ''}`}

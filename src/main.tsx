@@ -4,14 +4,34 @@ import App from './App'
 import './styles.css'
 import { installTapGuard } from './lib/tapGuard'
 import { markBroadcastPage } from './lib/tv/broadcast'
+import { hydrateWorkshop } from './store/useWorkshop'
+import { wireLocalObjects } from './store/localObjects'
 
 // A tap on a modal's backdrop only closes it (lib/tapGuard.ts).
 installTapGuard(window)
 // /tv?broadcast=1, the 24/7 stream: no pointer on the page (lib/tv/broadcast.ts).
 markBroadcastPage()
+// Your own objects placed by reference are drawn from your workshop first (store/localObjects.ts).
+wireLocalObjects()
 
-ReactDOM.createRoot(document.getElementById('root')!).render(
-  <React.StrictMode>
-    <App />
-  </React.StrictMode>,
-)
+/**
+ * The workshop's shards are read from IndexedDB before the app draws
+ * (store/workshopStorage.ts), so everything that reads the list finds it
+ * whole, as it did when the list was in localStorage. A database that does
+ * not answer cannot hold the page: past this, the app draws anyway and the
+ * list fills in when the read lands, with any change made meanwhile kept.
+ */
+const HYDRATE_WAIT_MS = 10_000
+
+let drawn = false
+function draw(): void {
+  if (drawn) return
+  drawn = true
+  ReactDOM.createRoot(document.getElementById('root')!).render(
+    <React.StrictMode>
+      <App />
+    </React.StrictMode>,
+  )
+}
+setTimeout(draw, HYDRATE_WAIT_MS)
+hydrateWorkshop().then(draw, draw)

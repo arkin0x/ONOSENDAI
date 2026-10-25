@@ -9,7 +9,7 @@ import {
   BatchedMesh, BufferGeometry, Group, InstancedMesh, SkinnedMesh, Line, LineBasicMaterial, LineLoop, LineSegments, Mesh, MeshBasicMaterial,
   PerspectiveCamera, Points, Scene, ShaderMaterial, Sprite, SpriteMaterial, Texture, UniformsGroup, type Camera, type Material, type Object3D, type WebGLRenderer,
 } from 'three'
-import { KEEP_MAX, copyable, keep, keepPrograms, keepSources, standIn, type Counted, type Sources } from '../keepPrograms'
+import { KEEP_MAX, checkShaderErrorsInDevOnly, copyable, keep, keepPrograms, keepSources, standIn, type Counted, type Sources } from '../keepPrograms'
 
 /** Three's own rule (WebGLPrograms.releaseProgram): a program goes when its last user does. */
 function release(programs: Counted[], p: Counted): void {
@@ -34,6 +34,7 @@ function fakeGl(): { gl: WebGLRenderer; programs: Counted[]; compiled: Compiled[
     info: { programs },
     properties: { get: (m: object) => { let p = props.get(m); if (!p) { p = {}; props.set(m, p) } return p } },
     compile: (object: Object3D, camera: Camera, target: Scene | null = null) => { compiled.push({ object, camera, target }); return new Set() },
+    debug: { checkShaderErrors: true },
   }
   const drawWith = (m: Material, p: Counted): void => {
     if (!programs.includes(p)) programs.push(p)
@@ -243,7 +244,32 @@ describe('keepSources', () => {
   })
 })
 
+describe('checkShaderErrorsInDevOnly', () => {
+  it('leaves the driver-blocking shader check on in development, off once built (arkinox, 2026-10-23: navigation freezes)', () => {
+    const { gl } = fakeGl()
+    const env = import.meta.env as { DEV: boolean }
+    const was = env.DEV
+    env.DEV = true
+    checkShaderErrorsInDevOnly(gl)
+    expect(gl.debug.checkShaderErrors).toBe(true)
+    env.DEV = false
+    checkShaderErrorsInDevOnly(gl)
+    expect(gl.debug.checkShaderErrors).toBe(false)
+    env.DEV = was
+  })
+})
+
 describe('keepPrograms', () => {
+  it('turns off the driver-blocking shader check the same way checkShaderErrorsInDevOnly does', () => {
+    const { gl } = fakeGl()
+    const env = import.meta.env as { DEV: boolean }
+    const was = env.DEV
+    env.DEV = false
+    keepPrograms(gl, new Scene())
+    expect(gl.debug.checkShaderErrors).toBe(false)
+    env.DEV = was
+  })
+
   it('keeps what the render that just ran compiled, and calls what was there before', () => {
     const { gl, programs } = fakeGl()
     const scene = new Scene()

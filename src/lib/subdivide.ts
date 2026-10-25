@@ -34,7 +34,6 @@
  */
 
 import { pointKey, ticksOf, validPoint, vertexAt, type ShardModel } from 'sno-core/shards'
-import { cornerAverage } from './weld'
 
 type Tri = [number, number, number]
 type P3 = [number, number, number]
@@ -152,10 +151,9 @@ export function subdivide(s: ShardModel, selection: readonly number[]): Subdivid
 
   // Seams stay parallel to the faces (sno-core shards: all or none): each
   // child takes its parent's. A seam list that had fallen out of step is
-  // rebuilt from what each face showed, as weld does.
-  const seams: Rgb[] | null = s.facecolors
-    ? s.faces.map((f, i) => (s.facecolors!.length === s.faces.length ? s.facecolors![i] : cornerAverage(s, f)))
-    : null
+  // dropped, as weld does: every reader already ignores it, and rebuilt from
+  // corner averages it would turn every face flat.
+  const seams: Rgb[] | null = s.faces.length > 0 && s.facecolors && s.facecolors.length === s.faces.length ? s.facecolors : null
   const faces: Tri[] = []
   const facecolors: Rgb[] = []
   const corners = new Set<number>()
@@ -169,7 +167,7 @@ export function subdivide(s: ShardModel, selection: readonly number[]): Subdivid
   for (const [a, b] of edges) { corners.add(a); corners.add(b) }
 
   return {
-    shard: { ...s, vertices, faces, ...(seams ? { facecolors } : {}) },
+    shard: { ...s, vertices, faces, facecolors: seams ? facecolors : undefined },
     corners: [...corners].sort((a, b) => a - b),
     added,
     cut,

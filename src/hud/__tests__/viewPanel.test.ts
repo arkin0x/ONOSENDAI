@@ -4,8 +4,9 @@
  * chain trail toggle, not buttons. Each on its own row, each with a title and
  * short subtitle in gray", then moved together into a View panel).
  *
- * Seven Field rows with a Switch each: Terrain dots, hX boxes, Hide avatar in
- * WALK, Look sphere in WALK, Chain trail, Region keys and Headlamp. Each
+ * Eight Field rows with a Switch each: Terrain dots, hX boxes, Hide avatar in
+ * WALK, Look sphere in WALK, Gravity in WALK, Chain trail, Region keys and
+ * Headlamp. Each
  * drives the flag its old control drove and is remembered
  * the same way. The old controls are gone: no chips under Movement proof, no
  * trail switch in Proof chain, no checkbox in the Region keys list.
@@ -52,6 +53,8 @@ import { SecretsModal } from '../SecretsModal'
 import { Switch } from '../ui/Switch'
 import { LAYERS_KEY, useLayers } from '../../store/useLayers'
 import { useCyberspace } from '../../store/useCyberspace'
+import { useWalk } from '../../store/useWalk'
+import { GRAVITY_KEY } from '../../store/walkGravity'
 
 type SwitchEl = ReactElement<{ id: string; checked: boolean; onCheckedChange: (v: boolean) => void }>
 
@@ -89,13 +92,14 @@ const ROWS: Array<[string, string, string]> = [
   ['view-hx-boxes', '<span class="view__hx">h</span>X boxes', 'The math barriers where moving costs increase.'],
   ['view-walk-avatar', 'Hide avatar in WALK', 'Walk without your own avatar around the camera.'],
   ['view-walk-look', 'Look sphere in WALK', 'A ball above the menu button to drag and look around.'],
+  ['view-walk-gravity', 'Gravity in WALK', 'Fall, land and jump. Z.'],
   ['view-chain-trail', 'Chain trail', 'The red line of your movement history.'],
   ['view-region-keys', 'Region keys', 'Green cages on the regions you hold keys for.'],
   ['view-headlamp', 'Headlamp', 'Light shards from your view so their shape and depth show.'],
 ]
 
 describe('the View panel', () => {
-  it('is a panel titled View with seven switches, one to a row, each a title and a gray subtitle, in order', () => {
+  it('is a panel titled View with eight switches, one to a row, each a title and a gray subtitle, in order', () => {
     const html = view()
     expect(html).toMatch(/^<section class="panel panel--view">/)
     expect(html).toContain('<h2>View</h2>')
@@ -163,6 +167,18 @@ describe('the View panel', () => {
     viewSwitch('view-headlamp').props.onCheckedChange(true)
     expect(useLayers.getState().headlamp).toBe(true)
     expect(JSON.parse(localStorage.getItem(LAYERS_KEY) ?? 'null')).toMatchObject({ headlamp: true })
+  })
+
+  it('Gravity in WALK starts off and drives the walk, remembered on this device', () => {
+    expect(useWalk.getState().gravity).toBe(false)
+    expect(switchTag(view(), 'view-walk-gravity')).toContain('aria-checked="false"')
+    viewSwitch('view-walk-gravity').props.onCheckedChange(true)
+    expect(useWalk.getState().gravity).toBe(true)
+    expect(localStorage.getItem(GRAVITY_KEY)).toBe('on')
+    expect(switchTag(view(), 'view-walk-gravity')).toContain('aria-checked="true"')
+    viewSwitch('view-walk-gravity').props.onCheckedChange(false)
+    expect(useWalk.getState().gravity).toBe(false)
+    expect(localStorage.getItem(GRAVITY_KEY)).toBe('off')
   })
 
   it('Chain trail drives showTrail, remembered on this device', () => {

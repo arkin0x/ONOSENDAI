@@ -102,6 +102,24 @@ beforeEach(() => {
 })
 
 describe('AIM from the chest composer', () => {
+  it('a shard that never chose WALK aims at OPAQUE and is signed "opaque"; one set to OFF is signed "off" (DECK-0003 §1.12)', async () => {
+    const shard = benchShard(3)
+    useStash.getState().aimIntoChest(draftOf([{ kind: 'shard', shardId: shard.id }]), 0)
+    expect(S().deployConstrain).toBe('opaque')
+    S().cancelDeploy()
+    const chest = await aimFirst(draftOf([{ kind: 'shard', shardId: shard.id }]), 3)
+    const c = chest.contents[0]
+    if (c.kind !== 'shard' || !c.aimed) throw new Error('not aimed')
+    expect(JSON.parse(c.aimed.signed.content)).toHaveProperty('constrain', 'opaque')
+    // A re-aim starts at what it was signed with.
+    useWorkshop.getState().setConstrain('off')
+    const off = await aimFirst(draftOf([{ kind: 'shard', shardId: shard.id }]), 3)
+    const o = off.contents[0]
+    if (o.kind !== 'shard' || !o.aimed) throw new Error('not aimed')
+    expect(JSON.parse(o.aimed.signed.content)).toHaveProperty('constrain', 'off')
+    expect(useWorkshop.getState().shards[0]).not.toBe(shard)
+  })
+
   it('closes the composer and lines the shard up as a shard deploy carrying the chest, at the model\'s own size', () => {
     const shard = benchShard(3)
     const draft = draftOf([{ kind: 'shard', shardId: shard.id }, { kind: 'message', text: 'hello' }])

@@ -16,7 +16,7 @@ import { Canvas, useFrame, useThree } from '@react-three/fiber'
 import { Component, useEffect, useRef, useState, type ReactNode } from 'react'
 import type { ShardModel } from 'sno-core/shards'
 import { placedBounds, resolveParts, type Placed } from 'sno-core/parts'
-import { fetchRef } from '../lib/parts'
+import { OwnPartsContext, fetchOwnFirst, fetchRef } from '../lib/parts'
 import { keepPrograms } from '../lib/keepPrograms'
 import { ShardMesh } from './ShardMesh'
 import { ShardLights } from './shardLight'
@@ -63,10 +63,10 @@ export function frameOfBounds(b: { min: number[]; max: number[] } | null): Thumb
  * others ("Column Wall") has no vertices of its own to frame, and drawn before
  * its parts arrived it came out blank, and stayed blank (review of #233).
  */
-export async function frameOf(shard: ShardModel): Promise<ThumbFrame> {
+export async function frameOf(shard: ShardModel, own = false): Promise<ThumbFrame> {
   if (!shard.refs?.length || !shard.parts?.length) return frameOfBounds(placedBounds(shard, []))
   const timeout = new Promise<Placed[] | null>((resolve) => setTimeout(() => resolve(null), PARTS_WAIT_MS))
-  const placed = await Promise.race([resolveParts(shard, fetchRef).catch(() => null), timeout])
+  const placed = await Promise.race([resolveParts(shard, own ? fetchOwnFirst : fetchRef).catch(() => null), timeout])
   return frameOfBounds(placedBounds(shard, placed ?? []))
 }
 
@@ -84,9 +84,9 @@ function Capture({ job }: { job: ThumbJob }): JSX.Element | null {
   useEffect(() => {
     let live = true
     setFrame(null)
-    void frameOf(job.shard).then((f) => { if (live) setFrame(f) })
+    void frameOf(job.shard, !!job.own).then((f) => { if (live) setFrame(f) })
     return () => { live = false }
-  }, [job.key, job.shard])
+  }, [job.key, job.shard, job.own])
 
   // The frame the camera was last placed for, and whether the picture is taken.
   const placed = useRef<ThumbFrame | null>(null)
@@ -135,7 +135,9 @@ function Capture({ job }: { job: ThumbJob }): JSX.Element | null {
   if (!frame) return null
   return (
     <group position={[-frame.centre[0], -frame.centre[1], -frame.centre[2]]}>
-      <ShardMesh key={job.key} shard={job.shard} lit />
+      <OwnPartsContext.Provider value={!!job.own}>
+        <ShardMesh key={job.key} shard={job.shard} lit />
+      </OwnPartsContext.Provider>
     </group>
   )
 }

@@ -1,13 +1,19 @@
 /**
  * walkConstrain.test.ts - a shard's WALK setting (DECK-0003 §1.12): how it
- * is read (off unless exactly `all` or `opaque`), written (off is no field),
- * carried by sno-core 0.1.18 as a field it does not know, which faces it
+ * is read by a walker (off unless exactly `all` or `opaque`), read by the
+ * workshop (OPAQUE unless one of the three words), written (off is `"off"`),
+ * carried by sno-core as a field it does not know, which faces it
  * makes walls, and the straight-ray test against them.
  */
+import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { PAYLOAD_FIELDS, fromPayload, newShard, normalizeStored, toPayload, type ShardModel } from 'sno-core/shards'
 import type { Placed } from 'sno-core/parts'
-import { blocks, constrainOf, firstHit, readConstrain, seeThrough, wallMesh, withConstrain, type Constrain } from '../walkConstrain'
+import { CONSTRAIN_DEFAULT, authoredConstrain, authoredConstrainOf, blocks, constrainOf, firstHit, readConstrain, seeThrough, wallMesh, withAuthoredConstrain, withConstrain, type Constrain } from '../walkConstrain'
+import { avatarTemplate } from '../avatar'
+import { objectTemplate } from '../hidden'
+import { decryptForRegion } from '../shardCrypto'
 
 /** A square wall two units across in the model's YZ plane at x = 3: two triangles. */
 function wall(extra: Partial<ShardModel> = {}, c: Constrain = 'all'): ShardModel {
@@ -41,24 +47,65 @@ describe('the field', () => {
     expect(constrainOf({ ...newShard('W'), constrain: 'all' } as ShardModel)).toBe('all')
   })
 
-  it('writes off as no field at all, and keeps the other carried fields', () => {
+  it('the workshop reads the three words exactly, and everything else, absent included, as the default OPAQUE', () => {
+    expect(CONSTRAIN_DEFAULT).toBe('opaque')
+    for (const v of ['all', 'opaque', 'off'] as const) expect(authoredConstrain(v)).toBe(v)
+    for (const v of [undefined, null, 'OFF', 'ALL', 'Opaque', ' all', '', 'none', 1, true, false, [], {}]) expect(authoredConstrain(v)).toBe('opaque')
+  })
+
+  it('a new shard is OPAQUE', () => {
+    expect(authoredConstrainOf(newShard('New'))).toBe('opaque')
+    expect(toPayload(withAuthoredConstrain(newShard('New')))).toHaveProperty('constrain', 'opaque')
+  })
+
+  it('writes off as the word "off", and keeps the other carried fields', () => {
     const base: ShardModel = { ...newShard('W'), extra: { future: 7 } }
     const on = withConstrain(base, 'opaque')
     expect(on.extra).toEqual({ future: 7, constrain: 'opaque' })
     const off = withConstrain(on, 'off')
-    expect(off.extra).toEqual({ future: 7 })
+    expect(off.extra).toEqual({ future: 7, constrain: 'off' })
     expect(withConstrain({ ...newShard('W') }, 'all').extra).toEqual({ constrain: 'all' })
-    expect(withConstrain(withConstrain({ ...newShard('W') }, 'all'), 'off')).not.toHaveProperty('extra')
+    expect(withConstrain(withConstrain({ ...newShard('W') }, 'all'), 'off').extra).toEqual({ constrain: 'off' })
   })
 
-  it('returns the same object when nothing changes, and cleans a malformed value', () => {
+  it('returns the same object when nothing changes, and replaces a malformed value', () => {
     const s = wall({}, 'all')
     expect(withConstrain(s, 'all')).toBe(s)
-    const bare = { ...newShard('W') }
-    expect(withConstrain(bare, 'off')).toBe(bare)
+    const off = withConstrain({ ...newShard('W') }, 'off')
+    expect(withConstrain(off, 'off')).toBe(off)
     const odd: ShardModel = { ...newShard('W'), extra: { constrain: 'ALL' } }
     expect(constrainOf(odd)).toBe('off')
-    expect(withConstrain(odd, 'off')).not.toHaveProperty('extra')
+    expect(authoredConstrainOf(odd)).toBe('opaque')
+    expect(withConstrain(odd, 'off').extra).toEqual({ constrain: 'off' })
+  })
+
+  it('publishes an unset or malformed shard as OPAQUE, and keeps every word its author chose', () => {
+    const bare = { ...newShard('W') }
+    expect(withAuthoredConstrain(bare).extra).toEqual({ constrain: 'opaque' })
+    expect(withAuthoredConstrain({ ...newShard('W'), extra: { constrain: 'OFF', future: 7 } }).extra).toEqual({ future: 7, constrain: 'opaque' })
+    for (const c of ['off', 'all', 'opaque'] as const) {
+      const s = withConstrain({ ...newShard('W') }, c)
+      expect(withAuthoredConstrain(s)).toBe(s)
+    }
+  })
+
+  it('an explicit off is read as off by a walker, and survives a round trip as "off"', () => {
+    const s = wall({}, 'off')
+    expect(constrainOf(s)).toBe('off')
+    expect(blocks(s)).toBe(false)
+    const wire = JSON.parse(JSON.stringify(toPayload(withAuthoredConstrain(s))))
+    expect(wire.constrain).toBe('off')
+    const back = fromPayload(wire, 'x')!
+    expect(authoredConstrainOf(back)).toBe('off')
+    expect(constrainOf(back)).toBe('off')
+    expect(authoredConstrainOf(normalizeStored(JSON.parse(JSON.stringify(back))))).toBe('off')
+  })
+
+  it('an avatar is untouched: its event carries no default, and a word it has rides as it is (DECK-0003 §3.3)', () => {
+    const bare = newShard('Me')
+    expect(bare).not.toHaveProperty('extra')
+    expect(JSON.parse(avatarTemplate(bare, 1).content)).not.toHaveProperty('constrain')
+    expect(JSON.parse(avatarTemplate(withConstrain(newShard('Me'), 'off'), 1).content)).toHaveProperty('constrain', 'off')
   })
 
   it('rides through sno-core as a field it does not know: payload, read back, stored', () => {
@@ -68,8 +115,8 @@ describe('the field', () => {
     const back = fromPayload(wire, 'x')!
     expect(constrainOf(back)).toBe('opaque')
     expect(constrainOf(normalizeStored(JSON.parse(JSON.stringify(back))))).toBe('opaque')
-    // Off writes nothing: an object without the setting is exactly as before.
-    expect(toPayload(withConstrain(s, 'off'))).not.toHaveProperty('constrain')
+    // An object without the setting reads as off to a walker, exactly as before.
+    expect(constrainOf({ ...s, extra: undefined })).toBe('off')
   })
 })
 
@@ -183,5 +230,28 @@ describe('placed objects keep their own setting (§1.10)', () => {
   it('a placed wall is moved by its placement, and a placeholder stops nothing', () => {
     const m = wallMesh(host('off'), [part(wall({}, 'all'), [2, 0, 0]), { ...part(wall()), model: null, missing: 'unreachable' }])
     expect(firstHit(m, [0, 0, 0], 0, 1, 10, 1e-6)).toBeCloseTo(5, 12)
+  })
+})
+
+describe('a sealed object', () => {
+  it('a shard hidden as its own sealed event goes out "opaque" when it never chose, and keeps "off"', async () => {
+    const key = new Uint8Array(32).map((_, i) => i + 1)
+    for (const [s, want] of [[wall({}, 'all'), 'all'], [{ ...wall(), extra: undefined }, 'opaque'], [wall({}, 'off'), 'off']] as const) {
+      const ev = await objectTemplate(s, key, 'd1', 1)
+      const sealed = ev.tags.find((t) => t[0] === 'encrypted')![2]
+      const plain = await decryptForRegion(key, sealed)
+      expect(JSON.parse(plain!)).toHaveProperty('constrain', want)
+    }
+  })
+})
+
+describe('what the controls show', () => {
+  it('the workshop row lights the setting a shard publishes as: OPAQUE for one that never chose', () => {
+    const src = readFileSync(join(__dirname, '..', '..', 'workshop', 'Workshop.tsx'), 'utf8')
+    const row = src.slice(src.indexOf('CONSTRAIN MOVEMENT IN WALK MODE'), src.indexOf('</div>', src.indexOf('CONSTRAIN MOVEMENT IN WALK MODE')))
+    expect(row).toContain('authoredConstrainOf(shard) === c')
+    // The walker's reading would light OFF for a shard that never chose.
+    expect(row).not.toMatch(/\bconstrainOf\(shard\)/)
+    expect(authoredConstrainOf(newShard('Unset'))).toBe('opaque')
   })
 })

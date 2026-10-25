@@ -55,6 +55,12 @@ interface ShardFoldersState {
   moveFolder: (id: string, parent: string | null) => boolean
   /** The folder goes; its shards and folders move up to its parent. No shard is touched. */
   deleteFolder: (id: string) => void
+  /**
+   * The folder and every folder under it go, with the filings of the shards
+   * in them. For the workshop's DELETE CONTENTS, which deletes those shards
+   * itself in the same step (useWorkshop removeMany); this deletes no shard.
+   */
+  purgeFolder: (id: string) => void
   /** File shards (by ref) in a folder, or at the top with null. */
   assignToFolder: (ref: string | readonly string[], folder: string | null) => void
   setCollapsed: (id: string, collapsed: boolean) => void
@@ -246,6 +252,8 @@ export const useShardFolders = create<ShardFoldersState>((set, get) => {
     },
 
     deleteFolder: (id) => { commit({ op: 'delete', id }) },
+
+    purgeFolder: (id) => { commit({ op: 'purge', id }) },
 
     assignToFolder: (ref, folder) => {
       const refs = typeof ref === 'string' ? [ref] : [...ref]

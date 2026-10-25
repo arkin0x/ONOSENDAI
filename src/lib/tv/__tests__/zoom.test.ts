@@ -238,12 +238,10 @@ describe('zoomPlan', () => {
       }
       const plan = planOf(trip(chain(`alt${big}`, moves)))
       for (const h of dipHolds(plan)) expect(h).toBeGreaterThanOrEqual(MIN_DIP_HOLD_S)
-      // A big hop takes a long zoom out and in, which leaves the nudges no
-      // time at their own zoom: fine for the opening nudges, then out once
-      // and held. A 2^5 hop's zoom is a few steps away, and its nudges are
-      // held at 2^0 for MIN_DIP_HOLD_S and more between hops.
-      if (big >= 16) expect(reversals(plan)).toBe(0)
-      else expect(dipHolds(plan).length).toBeGreaterThan(0)
+      // The zoom out and in, at the engine's pace, leave six nudges too
+      // little time at their own zoom: fine for the opening nudges, then out
+      // once and held.
+      expect(reversals(plan)).toBe(0)
     }
   })
 
@@ -277,6 +275,69 @@ describe('zoomPlan', () => {
     }
     // Dips are still taken where they hold.
     expect(dips).toBeGreaterThan(50)
+  }, 30_000)
+
+  it('holds a dip MIN_DIP_HOLD_S on screen as the engine plays it: in a power a tick, late ticks and all (review of #470)', () => {
+    // The engine (useTv tick): every 100 ms, now and then up to 250 ms late;
+    // in one power of two a tick, out at once. Before, a zoom in was planned
+    // to take at most 1.5 s, and a 2^37 hop's took 3.7 s on screen and left
+    // its nudges 0.1 s at their zoom.
+    let seed = 4702
+    const rand = (): number => { seed = (seed * 16807) % 2147483647; return (seed - 1) / 2147483646 }
+    function onScreenDips(shot: Shot): number[] {
+      const plan = planOf(shot)
+      let cur = plan[0].scaleExp
+      const seen: ZoomStep[] = [{ at: 0, scaleExp: cur }]
+      for (let t = 0; t < shot.length;) {
+        t += 0.1 + (rand() < 0.05 ? rand() * 0.25 : rand() * 0.01)
+        const planned = scaleAt(plan, t)!
+        const want = planned < cur ? cur - 1 : planned
+        if (want !== cur) { cur = want; seen.push({ at: t, scaleExp: cur }) }
+      }
+      // A dip on screen: a step in followed straight by a step out, held from one to the other.
+      const holds: number[] = []
+      for (let i = 1; i + 1 < seen.length; i++) {
+        if (seen[i].scaleExp < seen[i - 1].scaleExp && seen[i + 1].scaleExp > seen[i].scaleExp) holds.push(seen[i + 1].at - seen[i].at)
+      }
+      return holds
+    }
+    const size = (need: number): bigint => (need === 0 ? 3n : 6n << BigInt(need))
+    let dips = 0
+    // The deep case: a 2^37 hop, nudges, repeated.
+    for (const gap of [0.7, 1, 1.5, 2]) for (const k of [4, 6, 9]) {
+      const moves: Array<{ at: number; size: bigint }> = []
+      let at = 0
+      for (let r = 0; r < 4; r++) { moves.push({ at, size: size(37) }); at += gap; for (let j = 0; j < k; j++) { moves.push({ at, size: size(0) }); at += gap } }
+      moves.push({ at, size: size(37) })
+      const d = new Director()
+      for (const b of chain(`deep${gap}-${k}`, moves)) d.add(b)
+      for (const shot of d.release(Infinity)) {
+        if (shot.kind !== 'trip') continue
+        const holds = onScreenDips(shot)
+        dips += holds.length
+        for (const h of holds) expect(h).toBeGreaterThanOrEqual(MIN_DIP_HOLD_S)
+      }
+    }
+    // And random trips, needs up to 2^38.
+    for (let run = 0; run < 600; run++) {
+      const moves: Array<{ at: number; size: bigint }> = []
+      let at = 0
+      const count = 2 + Math.floor(rand() * 80)
+      for (let j = 0; j < count && at < 44; j++) {
+        const r = rand()
+        moves.push({ at, size: size(r < 0.6 ? Math.floor(rand() * 2) : r < 0.85 ? Math.floor(rand() * 12) : Math.floor(rand() * 39)) })
+        at += rand() < 0.8 ? rand() * 0.7 : rand() * 4
+      }
+      const d = new Director()
+      for (const b of chain(`eng${run}`, moves)) d.add(b)
+      for (const shot of d.release(Infinity)) {
+        if (shot.kind !== 'trip') continue
+        const holds = onScreenDips(shot)
+        dips += holds.length
+        for (const h of holds) expect(h).toBeGreaterThanOrEqual(MIN_DIP_HOLD_S)
+      }
+    }
+    expect(dips).toBeGreaterThan(100)
   }, 30_000)
 
   it('is empty for a segment, which has no beats', () => {

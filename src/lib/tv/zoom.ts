@@ -45,7 +45,12 @@
  *
  * Pure: the store (store/useTv.ts) asks it for a shot's plan when the shot
  * begins and plays the plan against the shot's clock, stepping in one power
- * of two a tick at most (a change of many powers is quicker than its tick).
+ * of two a tick at most and out at once. So a zoom in is planned at the
+ * engine's pace, ZOOM_IN_STEP_S a power with no cap and ZOOM_IN_SLACK_S
+ * more for a late tick, and a dip's hold is measured from there: a deep zoom
+ * in capped at ZOOM_MAX_S landed late on screen and ate the hold (review of
+ * #470: a 2^37 hop's zoom in took 3.7 s and left 0.1 s at the fine zoom). A
+ * zoom in with no time to land before the next zoom out is not taken.
  */
 
 import { AVATAR_LERP_MS } from '../avatarLerp'
@@ -74,8 +79,16 @@ export const MIN_DIP_HOLD_S = 2
 export const MIN_HOLD_BEATS = 2
 /** Screen time per power of two the zoom steps. */
 export const ZOOM_STEP_S = 0.1
-/** The longest a change of zoom takes, however many powers of two it covers. */
+/** The longest a zoom out takes, however many powers of two it covers (the engine takes it at once). */
 export const ZOOM_MAX_S = 1.5
+/**
+ * Screen time per power of two a zoom in steps, with no cap: a little slower
+ * than the engine's 100 ms tick, which steps in one power a tick, so a tick's
+ * ordinary jitter never leaves the picture behind the plan.
+ */
+export const ZOOM_IN_STEP_S = 0.11
+/** Allowed after a zoom in's last step before its zoom counts as on screen: a late tick or two. */
+export const ZOOM_IN_SLACK_S = 0.5
 /**
  * A wider zoom is held at least this long, seconds, before the zoom steps
  * back in: after it was reached, and after the last move that needed it
@@ -222,10 +235,11 @@ export function zoomPlan(beats: Beat[], offsets: number[], length: number, prelu
 function steps(spans: Span[], whole: number, offsets: number[], prelude: number): { plan: ZoomStep[]; dips: Array<{ k: number; held: number; wider: number }> } {
   const zoomOf = (k: number): number => Math.min(whole, spans[k].scaleExp)
   const takes = (n: number): number => Math.min(ZOOM_MAX_S, n * ZOOM_STEP_S)
+  const takesIn = (n: number): number => n * ZOOM_IN_STEP_S
   const plan: ZoomStep[] = [{ at: 0, scaleExp: zoomOf(0) }]
   const dips: Array<{ k: number; held: number; wider: number }> = []
   let from = zoomOf(0)
-  // When the last change ended (nothing changes during a hyperjump's ride), and when the zoom on screen was reached.
+  // When the last change ended (nothing changes during a hyperjump's ride), and when the zoom on screen was reached (a zoom in's slack after it).
   let free = prelude
   let reached = prelude
   // The span whose zoom is on screen, whether the zoom stepped in to it, and from what.
@@ -236,7 +250,7 @@ function steps(spans: Span[], whole: number, offsets: number[], prelude: number)
     const to = zoomOf(k)
     if (to === from) continue
     const n = Math.abs(to - from)
-    const take = takes(n)
+    const take = to > from ? takes(n) : takesIn(n)
     const move = offsets[spans[k].first]
     let start: number
     let end: number
@@ -253,19 +267,20 @@ function steps(spans: Span[], whole: number, offsets: number[], prelude: number)
       const landed = Math.max(free, wideMove + GLIDE_S)
       start = Math.max(landed, wideMove + WIDE_HOLD_S, reached + WIDE_HOLD_S)
       end = start + take
-      // And done in time for the zoom out before the next large move, which is never late.
+      // And on screen, a late tick allowed, before the zoom out ahead of the
+      // next large move starts, which is never late; or not taken at all.
       const next = k + 1 < spans.length && zoomOf(k + 1) > to ? k + 1 : -1
       if (next >= 0) {
-        const latest = offsets[spans[next].first] - ZOOM_SETTLE_S - takes(zoomOf(next) - to)
-        if (latest < landed) continue
-        if (end > latest) { start = Math.max(landed, latest - take); end = Math.min(start + take, latest) }
+        const latest = offsets[spans[next].first] - ZOOM_SETTLE_S - takes(zoomOf(next) - to) - ZOOM_IN_SLACK_S
+        if (landed + take > latest) continue
+        if (end > latest) { start = latest - take; end = latest }
       }
     }
     // Out of a span the zoom stepped in to: a dip, held from then till now.
     if (to > from && inTo) dips.push({ k: shown, held: start - reached, wider: Math.min(inFrom, to) })
     for (let j = 1; j <= n; j++) plan.push({ at: start + ((end - start) * j) / n, scaleExp: from + (to > from ? j : -j) })
     free = end
-    reached = end
+    reached = to > from ? end : end + ZOOM_IN_SLACK_S
     inTo = to < from
     inFrom = from
     from = to

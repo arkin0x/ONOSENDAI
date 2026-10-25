@@ -66,10 +66,14 @@ export function weld(s: ShardModel, only?: ReadonlySet<number>): Welded | null {
   if (merged === 0) return null
 
   // Faces keep the look they had: their own colour if they had one, else
-  // what their corners blended to, computed on the corners as they were.
-  const needColors = conflict || !!s.facecolors
+  // what their corners blended to, computed on the corners as they were. A
+  // list out of step with the faces (an older build's deletes left some) is
+  // one every reader already ignores, so it is dropped rather than rebuilt:
+  // rebuilt, every face would turn flat (sno-core shards: all or none).
+  const own = s.faces.length > 0 && s.facecolors && s.facecolors.length === s.faces.length ? s.facecolors : null
+  const needColors = conflict || !!own
   const before: Rgb[] | null = needColors
-    ? s.faces.map((f, i) => (s.facecolors && s.facecolors.length === s.faces.length ? s.facecolors[i] : cornerAverage(s, f)))
+    ? s.faces.map((f, i) => (own ? own[i] : cornerAverage(s, f)))
     : null
 
   const index = new Map<number, number>()
@@ -92,9 +96,10 @@ export function weld(s: ShardModel, only?: ReadonlySet<number>): Welded | null {
   })
 
   return {
-    shard: { ...s, vertices: keep.map((i) => s.vertices[i]), faces, facecolors: before ? facecolors : undefined },
+    // With every face folded away there is nothing for a list to be in step with.
+    shard: { ...s, vertices: keep.map((i) => s.vertices[i]), faces, facecolors: before && faces.length ? facecolors : undefined },
     merged,
-    colored: conflict && !s.facecolors,
+    colored: conflict && !own && faces.length > 0,
   }
 }
 

@@ -237,3 +237,103 @@ describe('a shard an older build left out of step', () => {
     expect(w().current()!.facecolors).toBeUndefined()
   })
 })
+
+/** What removeFace(1) used to leave: three faces and four seams, each after the first one place late. */
+function stale(): ShardModel {
+  const s = strip()
+  const hurt: ShardModel = { ...s, faces: [s.faces[0], s.faces[2], s.faces[3]] }
+  useWorkshop.setState({ shards: [hurt] })
+  return hurt
+}
+
+describe('PASTE, with seams on neither side', () => {
+  const W = hexToRgb(WHITE)
+
+  /** A second shard on the bench: one triangle of three colours and no seams. */
+  function plain(): ShardModel {
+    const t: ShardModel = {
+      ...newShard('Plain'),
+      id: 'plain',
+      mode: 'solid',
+      vertices: [vertexAt([0, 0, 3 * T], hexToRgb(RED)), vertexAt([T, 0, 3 * T], hexToRgb(BLUE)), vertexAt([0, 0, 2 * T], hexToRgb(GREEN))],
+      faces: [[0, 1, 2]],
+    }
+    useWorkshop.setState({ shards: [...w().shards, t], currentId: t.id })
+    return t
+  }
+
+  it('points copied from a seamed shard with no whole face among them carry no seams', () => {
+    useWorkshop.setState({ selection: [0, 2] })
+    w().copySelection()
+    expect(w().clip!.faces).toHaveLength(0)
+    expect(w().clip!.facecolors).toBeUndefined()
+  })
+
+  it('pasting them into a shard with no seams leaves its faces blending across their corners', () => {
+    useWorkshop.setState({ selection: [0, 2] })
+    w().copySelection()
+    plain()
+    w().pasteClip('exact')
+    const after = w().current()!
+    expect(after.vertices).toHaveLength(5)
+    expect(after.facecolors).toBeUndefined()
+    expect(toPayload(after).facecolors).toBeUndefined()
+  })
+
+  it('an empty list counts as none, on the clip and on the shard', () => {
+    plain()
+    useWorkshop.setState({ clip: { points: [{ at: [2 * T, 0, 3 * T], c: W }], faces: [], facecolors: [], parts: [] } })
+    w().pasteClip('exact')
+    expect(w().current()!.facecolors).toBeUndefined()
+
+    const empty: ShardModel = { ...newShard('Empty'), id: 'empty', facecolors: [] }
+    useWorkshop.setState({
+      shards: [...w().shards, empty],
+      currentId: 'empty',
+      clip: { points: [{ at: [0, 0, 0], c: W }, { at: [T, 0, 0], c: W }, { at: [0, 0, T], c: W }], faces: [[0, 1, 2]], parts: [] },
+    })
+    w().pasteClip('exact')
+    expect(w().current()!.faces).toHaveLength(1)
+    expect(w().current()!.facecolors).toBeUndefined()
+  })
+})
+
+describe('WELD and SUBDIVIDE', () => {
+  it('a weld that folds every face away leaves no list behind', () => {
+    const W = hexToRgb(WHITE)
+    const s: ShardModel = {
+      ...newShard('Sliver'),
+      id: 'sliver',
+      mode: 'solid',
+      vertices: [vertexAt([0, 0, 0], W), vertexAt([0, 0, 0], W), vertexAt([T, 0, 0], W)],
+      faces: [[0, 1, 2]],
+      facecolors: [hexToRgb(RED)],
+    }
+    useWorkshop.setState({ shards: [s], currentId: s.id })
+    w().weld()
+    expect(w().current()!.faces).toHaveLength(0)
+    expect(w().current()!.facecolors).toBeUndefined()
+  })
+
+  it('a weld drops a list an older build left out of step, rather than flattening every face', () => {
+    const hurt = stale()
+    // A spare corner stacked on corner 0, the same white: nothing to keep a look for.
+    useWorkshop.setState({ shards: [{ ...hurt, vertices: [...hurt.vertices, vertexAt([0, 0, 0], hexToRgb(WHITE))] }] })
+    w().weld()
+    const after = w().current()!
+    expect(after.vertices).toHaveLength(6)
+    expect(after.faces).toHaveLength(3)
+    expect(after.facecolors).toBeUndefined()
+    expect(toPayload(after).facecolors).toBeUndefined()
+  })
+
+  it('SUBDIVIDE drops a list an older build left out of step, rather than flattening every face', () => {
+    stale()
+    w().setSelection([0, 1, 4])
+    w().subdivideSelection()
+    const after = w().current()!
+    expect(after.faces.length).toBeGreaterThan(3)
+    expect(after.facecolors).toBeUndefined()
+    expect(toPayload(after).facecolors).toBeUndefined()
+  })
+})

@@ -79,7 +79,7 @@ import { keepWalkLook } from '../lib/walkLook'
 import { MAX_COMPUTE_HEIGHT, samePosition, useCyberspace } from './useCyberspace'
 import { BRIEF_TOAST_MS, useToast } from './useToast'
 import { standing, walkStep } from './walkStep'
-import { stepLimit, wallItems, warmWalls, type WallItem } from './walkWalls'
+import { stepLimit, takeWallWait, wallItems, wallsBuilt, warmWalls, type WallItem } from './walkWalls'
 import { JUMP_SPEED, WALK_GRAVITY, arcApex, arcHeight, arcPeak, arcSpeed, fallLimit, jumpRise, loadGravity, reachedHeight, saveGravity } from './walkGravity'
 import { walkFall } from '../lib/walkEye'
 
@@ -235,6 +235,9 @@ export const useWalk = create<WalkState>((set, get) => ({
   press: (name) => {
     const cs = useCyberspace.getState()
     if (!cs.walking || !cs.atHead()) return
+    // A press waiting for walls on their way (waitedForWalls) goes first; a
+    // held key's repeats meanwhile are not stacked behind it.
+    if (againWhenBuilt) return
     const dir = moveDirection(cs.screenAxes ?? cs.axes(), name)
     const gravity = get().gravity
     // In the air: a level press is a move in mid-air (B); up and down do nothing.
@@ -253,7 +256,9 @@ export const useWalk = create<WalkState>((set, get) => ({
     // Standing on such a shard, a level step also climbs what is in its way
     // (2 gibsons at most) and settles onto a floor up to 2 below (store/walkStep.ts).
     const length = sign > 0 ? next[dir.axis] - from[dir.axis] : from[dir.axis] - next[dir.axis]
+    takeWallWait()
     const step = walkStep(from, dir.axis, sign, length, wallItems(cs.plane), gravity)
+    if (waitedForWalls(() => get().press(name))) return
     if (step.by) wallChip(step.by)
     if (samePosition(step.to, from)) return
     Object.assign(next, step.to)
@@ -284,6 +289,26 @@ export const useWalk = create<WalkState>((set, get) => ({
     pump()
   },
 }))
+
+/**
+ * A move that met a shard whose walls are on their way (store/walkWalls.ts
+ * stepLimit: a step that could enter a shard still waiting for its first
+ * build waits for it), made again as soon as they are built, which is within
+ * the task for what a shard carries. One at a time.
+ */
+let againWhenBuilt: (() => void) | null = null
+function waitedForWalls(again: () => void): boolean {
+  if (!takeWallWait()) return false
+  if (!againWhenBuilt) {
+    againWhenBuilt = again
+    void wallsBuilt().then(() => {
+      const go = againWhenBuilt
+      againWhenBuilt = null
+      if (go && useCyberspace.getState().walking) go()
+    })
+  }
+  return true
+}
 
 /** The open segment onto the queue. */
 function closeOpen(): void {
@@ -380,8 +405,12 @@ function fallIfAirborne(): void {
   if (!cs.walking || fall || !walk.gravity) return
   const from = walk.open?.end ?? walk.queue[walk.queue.length - 1] ?? cs.position
   const items = wallItems(cs.plane)
-  if (standing(from, items)) return
-  const limit = fallLimit(from, items, affordIn(cs.plane))
+  takeWallWait()
+  const stands = standing(from, items)
+  const limit = stands ? null : fallLimit(from, items, affordIn(cs.plane))
+  // A floor on its way: no fall through it; asked again once it is built.
+  if (waitedForWalls(fallIfAirborne)) return
+  if (stands || !limit) return
   // Hovering already: over a floor no hop from here can afford to reach.
   if (limit.drop === 0n) return
   beginFall(from, 0, 0n, -limit.drop, limit.lands, items, cs.plane)
@@ -391,11 +420,15 @@ function fallIfAirborne(): void {
 function jump(from: Position): void {
   const cs = useCyberspace.getState()
   const items = wallItems(cs.plane)
-  if (!standing(from, items)) return
+  takeWallWait()
+  const stands = standing(from, items)
+  if (waitedForWalls(() => jump(from))) return
+  if (!stands) return
   const afford = affordIn(cs.plane)
   const { rise, by } = jumpRise(from, items, afford)
   if (rise === 0n) { if (by) wallChip(by); return }
   const limit = fallLimit(from, items, afford)
+  if (waitedForWalls(() => jump(from))) return
   beginFall(from, JUMP_SPEED, rise, -limit.drop, limit.lands, items, cs.plane)
 }
 
@@ -475,7 +508,9 @@ function airPress(f: Fall, axis: AxisName, sign: 1 | -1): void {
   const at = reachedPoint(f, now)
   const to = clampAxis(at[axis] + stepFor(scaleExp) * BigInt(sign))
   if (to === at[axis]) return
+  takeWallWait()
   const step = walkStep(at, axis, sign, sign > 0 ? to - at[axis] : at[axis] - to, f.items, true)
+  if (waitedForWalls(() => { if (fall) airPress(fall, axis, sign) })) return
   if (step.by) wallChip(step.by)
   if (samePosition(step.to, at)) return
   const p = { ...step.to }

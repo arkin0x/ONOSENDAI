@@ -48,6 +48,8 @@ const SNO_KIND = 33331
 const FETCH_WAIT_MS = 5000
 
 const cache = new Map<string, Promise<unknown>>()
+/** What fetchRef has already been answered for, by reference key: for fetchSettled. */
+const settled = new Map<string, unknown>()
 
 /**
  * Your own object at an address, from this browser rather than a relay: its
@@ -136,13 +138,30 @@ export function fetchRef(ref: Ref): Promise<unknown> {
     return ref[0] === 'e' ? new Fetched(payload, ev.pubkey) : payload
   })()
   cache.set(key, got)
-  void got.then((p) => { if (p == null && cache.get(key) === got) cache.delete(key) }, () => { if (cache.get(key) === got) cache.delete(key) })
+  void got.then((p) => {
+    if (cache.get(key) !== got) return
+    if (p == null) cache.delete(key)
+    else settled.set(key, p)
+  }, () => { if (cache.get(key) === got) cache.delete(key) })
   return got
+}
+
+/**
+ * What fetchRef already holds for a reference, without asking any relay: the
+ * payload a relay answered earlier, or null. WALK's walls build a shard first
+ * from this and from what the shard carries, which lands within the task, so
+ * a step never passes a shard before it is built (store/walkWalls.ts); what
+ * still needs a relay is fetched after, its shard's own faces standing.
+ */
+export function fetchSettled(ref: Ref): Promise<unknown> {
+  return Promise.resolve(settled.get(refKey(ref)) ?? null)
 }
 
 /** Answer a reference from here instead of a relay: for tests and the dev harness. */
 export function primeRef(ref: Ref, payload: unknown): void {
-  cache.set(refKey(ref), Promise.resolve(payload))
+  const got = Promise.resolve(payload)
+  cache.set(refKey(ref), got)
+  void got.then((p) => { if (p != null && cache.get(refKey(ref)) === got) settled.set(refKey(ref), p) })
 }
 
 /**
@@ -153,6 +172,7 @@ export function primeRef(ref: Ref, payload: unknown): void {
  */
 export function forgetRef(ref: Ref): void {
   cache.delete(refKey(ref))
+  settled.delete(refKey(ref))
 }
 
 /** What a reference resolved to, whatever its placement: its object and that object's own parts, and whether a table carried it. */

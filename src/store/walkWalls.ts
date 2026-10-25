@@ -247,9 +247,26 @@ function landed(): void {
   for (const go of now) go()
 }
 
-/** When every shard a step has met so far is built for the first time: what useWalk waits on to press again. */
+/** The longest a press waits for walls on their way: past it, the wait is let go, so input never hangs. */
+export const WALL_WAIT_MS = 250
+
+/**
+ * When every shard a step has met so far is built for the first time, or
+ * WALL_WAIT_MS has passed, whichever is first: what useWalk waits on to press
+ * again. A first build lands within the task, so the deadline is only ever met
+ * by something gone wrong; then the press goes on, and a step that can still
+ * enter an unbuilt shard waits again.
+ */
 export function wallsBuilt(): Promise<void> {
-  for (const e of entries.values()) if (e.first) return new Promise((r) => { built.push(r) })
+  for (const e of entries.values()) {
+    if (!e.first) continue
+    return new Promise((resolve) => {
+      let done = false
+      const go = (): void => { if (!done) { done = true; resolve() } }
+      built.push(go)
+      setTimeout(() => { built = built.filter((f) => f !== go); go() }, WALL_WAIT_MS)
+    })
+  }
   return Promise.resolve()
 }
 
@@ -303,7 +320,9 @@ function resolveInto(w: WallItem, e: Entry, quick = false): void {
     const next = build(w, placed, starved)
     if (entries.get(w.key) === e) entries.set(w.key, next)
     landed()
-    if (entries.get(w.key) !== next) return
+    // Replaced or taken away meanwhile: what it gave back still goes to the
+    // first builds waiting in its pool.
+    if (entries.get(w.key) !== next) { reviveStarved(pool); return }
     // Trusted since it began (your follows arrived meanwhile): built again from your share.
     if (starved && poolOf(w) !== pool) resolveInto(w, next)
     else if (quick && next.missingAt !== null) resolveInto(w, next)

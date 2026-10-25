@@ -48,6 +48,7 @@ import { coordToXyz, hexToCoord, type Plane } from 'cyberspace-core'
 import { bytesToHex, hexToBytes, positionHex, type EventTemplate, type NostrEvent } from './events'
 import { fromPayload, toPayload, type ShardModel } from 'sno-core/shards'
 import { withAuthoredConstrain } from './walkConstrain'
+import { keepOwnTable } from './carried'
 import { creditTags, type Credit } from 'sno-core/feed'
 import { ALGO, decryptForRegion, encryptForRegion } from './shardCrypto'
 import { hintFits, hintTags, parseHint, type HintHeights } from './hint'
@@ -336,13 +337,14 @@ export interface ItemBody {
  * cannot read, and only that). The same reading serves a bag's items and a
  * chest's contents, so a key is a key wherever it is found.
  */
-export function readItem(inner: Pick<NostrEvent, 'kind' | 'content' | 'tags' | 'id'>): ItemBody | null {
+export function readItem(inner: Pick<NostrEvent, 'kind' | 'content' | 'tags' | 'id'> & { pubkey?: string }): ItemBody | null {
   if (!wellShaped(inner)) return null
   if (inner.kind === SHARD_KIND) {
     let raw: unknown
     try { raw = JSON.parse(inner.content) } catch { return null }
     const shard = fromPayload(raw, inner.id)
-    return shard ? { type: 'shard', shard } : null
+    // The pieces it carries count only under its own pubkey (DECK-0003 §1.10).
+    return shard ? { type: 'shard', shard: keepOwnTable(shard, inner.pubkey) } : null
   }
   if (inner.kind === MESSAGE_KIND) {
     return inner.content ? { type: 'message', text: inner.content.slice(0, MAX_MESSAGE_LENGTH) } : null
@@ -1072,7 +1074,7 @@ async function fromReference(ref: Reference, outer: NostrEvent, regionKey: Uint8
     try { raw = JSON.parse(plain) } catch { return null }
     const shard = fromPayload(raw, target.id)
     if (!shard) return null
-    return { ...base, type: 'shard', shard }
+    return { ...base, type: 'shard', shard: keepOwnTable(shard, target.pubkey) }
   }
   if (target.kind === MESSAGE_KIND) {
     if (!plain) return null

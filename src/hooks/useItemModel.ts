@@ -16,7 +16,8 @@
 
 import { useEffect, useState } from 'react'
 import { flatten, fromPayload, type ShardModel } from 'sno-core/shards'
-import { placedBounds, resolveParts, type Placed } from 'sno-core/parts'
+import { parseAddress, placedBounds, resolveParts, type Placed } from 'sno-core/parts'
+import { keepOwnTable } from '../lib/carried'
 import { fetchRef } from '../lib/parts'
 import { extentOf, type ItemModelRef, type ModelExtent } from '../lib/itemModel'
 
@@ -34,7 +35,9 @@ const loaded = new Map<string, LoadedModel>()
 
 /** The model at `address` from its payload (parsed JSON), measured, or null when it is not one. */
 export async function modelFromPayload(address: string, payload: unknown): Promise<LoadedModel | null> {
-  const shard = payload == null ? null : fromPayload(payload, address)
+  const read = payload == null ? null : fromPayload(payload, address)
+  // What it carries counts only under the pubkey its address names (DECK-0003 §1.10).
+  const shard = read && keepOwnTable(read, parseAddress(address)?.pubkey)
   if (!shard) return null
   let placed: Placed[] = []
   if (shard.refs?.length && shard.parts?.length) {

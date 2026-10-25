@@ -40,7 +40,9 @@ vi.mock('../../lib/relay', () => ({
 }))
 
 import { createElement, type ReactElement } from 'react'
-import { newShard, type Ref, type ShardModel } from 'sno-core/shards'
+import { newShard, toPayload, type Ref, type ShardModel } from 'sno-core/shards'
+import { readItem } from '../../lib/hidden'
+import { keepOwnTable } from '../../lib/carried'
 import { resolveParts } from 'sno-core/parts'
 import { OwnPartsContext, fetchOwnFirst, fetchRef, forgetRef, onLocalObjects, primeRef, resolvePartsShared, touchedKeys, useResolved } from '../../lib/parts'
 import { authoredConstrainOf, withConstrain } from '../../lib/walkConstrain'
@@ -336,5 +338,80 @@ describe('changedIds', () => {
     expect(changedIds([a, b, c], [a, b2]).sort()).toEqual([b.id, c.id].sort())
     expect(changedIds([a], [a, c])).toEqual([c.id])
     expect(changedIds([a, b], [a, b])).toEqual([])
+  })
+})
+
+describe('carried objects (DECK-0003 §1.10 objects)', () => {
+  /** The flooded room carrying copies of its two pieces, as a hide writes it. */
+  const carrying = (water = { ...toPayload(tri('Carried water')), opacity: 25 }): ShardModel => ({
+    ...flooded(),
+    objects: { [`33331:${ME}:${ROOM_ID}`]: toPayload(tri('Carried room')), [`33331:${ME}:${WATER_ID}`]: water },
+  })
+
+  it('on the bench, a carried copy wins over the workshop piece of the same address, and no relay is asked', async () => {
+    const h = mountHook(useResolved, carrying(), bench)
+    await settle()
+    expect(h.current().get(WATER)?.model?.name).toBe('Carried water')
+    expect(h.current().get(WATER)?.model?.opacity).toBe(25)
+    expect(h.current().get(WATER)?.carried).toBe(true)
+    expect(relay.asked).toEqual([])
+    await h.unmount()
+  })
+
+  it('in the world, the carried pieces are drawn for everyone, and their names are never asked of a relay', async () => {
+    const h = mountHook(useResolved, carrying())
+    await settle()
+    expect([h.current().get(ROOM)?.model?.name, h.current().get(WATER)?.model?.name]).toEqual(['Carried room', 'Carried water'])
+    expect(relay.asked).toEqual([])
+    await h.unmount()
+    const it0: WallItem = { key: 'carried', at: { x: 1n << 60n, y: 1n << 60n, z: 1n << 60n }, height: 84, plane: 1, shard: carrying() }
+    entryFor(it0)
+    await settle()
+    expect(entryFor(it0).missingAt).toBeNull()
+    expect(relay.asked).toEqual([])
+  })
+
+  it('draws the parts again when the table changes, though the references do not', async () => {
+    const h = mountHook(useResolved, carrying())
+    await settle()
+    expect(h.current().get(WATER)?.model?.opacity).toBe(25)
+    await h.render(carrying({ ...toPayload(tri('Carried water')), opacity: 60 }))
+    await settle()
+    expect(h.current().get(WATER)?.model?.opacity).toBe(60)
+    await h.unmount()
+  })
+
+  it('a key under another pubkey is ignored where the object is read from its event (D5)', () => {
+    const raw = { ...toPayload(placing('P', [addr(THEM, 'x'), addr(ME, 'y')])), objects: { [`33331:${THEM}:x`]: toPayload(tri('X')), [`33331:${ME}:y`]: toPayload(tri('Y')) } }
+    const ev = { kind: 3330, id: 'i', tags: [], content: JSON.stringify(raw) }
+    expect(Object.keys(readItem({ ...ev, pubkey: ME })?.shard?.objects ?? {})).toEqual([`33331:${ME}:y`])
+    expect(readItem({ ...ev, pubkey: THEM })?.shard?.objects).toEqual({ [`33331:${THEM}:x`]: toPayload(tri('X')) })
+    expect(readItem(ev)?.shard?.objects).toBeUndefined()
+    const m = carrying()
+    expect(keepOwnTable(m, ME)).toBe(m)
+  })
+
+  it("a picture's key holds the table: a changed copy is a new picture", () => {
+    expect(thumbKeyOf(carrying())).not.toBe(thumbKeyOf(flooded()))
+    expect(thumbKeyOf(carrying({ ...toPayload(tri('W')), opacity: 60 }))).not.toBe(thumbKeyOf(carrying()))
+  })
+
+  it('an own picture key is never the world key once the shard names anything of yours, even with none of it here', () => {
+    const elsewhere = placing('Elsewhere', [addr(ME, 'not-in-this-workshop')])
+    expect(ownThumbKey(elsewhere)).not.toBe(thumbKeyOf(elsewhere))
+  })
+
+  it('on the bench, edits while a resolve waits ask the relays once more after it lands, not once per edit', async () => {
+    relay.slow.add('slow')
+    const maze = placing('Maze', [addr(THEM, 'empty'), addr(THEM, 'slow'), addr(ME, FLOODED_ID)])
+    const h = mountHook(useResolved, maze, bench)
+    await settle()
+    w().select(WATER_ID)
+    for (const o of [60, 61, 62]) { w().setOpacity(o); flushLocalObjects(); await settle() }
+    relay.open()
+    await settle()
+    expect(asked().filter((d) => d === 'empty').length).toBe(2)
+    expect(h.current().get(`a:33331:${ME}:${FLOODED_ID}`)!.children[1].model?.opacity).toBe(62)
+    await h.unmount()
   })
 })

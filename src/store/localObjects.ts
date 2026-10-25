@@ -31,7 +31,7 @@
 
 import { toPayload, type ShardModel } from 'sno-core/shards'
 import { SNO_KIND, objectAddress } from 'sno-core/feed'
-import { MAX_PART_DEPTH, parseAddress } from 'sno-core/parts'
+import { MAX_PART_DEPTH, carriedModel, parseAddress } from 'sno-core/parts'
 import { hash53, thumbKeyOf } from '../lib/thumbKey'
 import { localObjectsChanged, setLocalObjects } from '../lib/parts'
 import { withAuthoredConstrain } from '../lib/walkConstrain'
@@ -83,19 +83,35 @@ function versionOf(s: ShardModel): string {
  * The picture key of a shard of yours drawn with your own pieces (hud/ShardThumb
  * `own`): its shape's key, and the version of every piece of yours it places
  * from the workshop, at any depth (§1.10's four), so editing a piece draws
- * every picture placing it again. The shape's key alone when it places none.
+ * every picture placing it again. A piece the shard carries in its own table
+ * (§1.10) is drawn from there, never the workshop, and the shape's key holds
+ * the table already, so only what it places through it is looked for here.
+ *
+ * Whenever the shard names any address of yours the key is an own key, even
+ * when none of those pieces is in the workshop yet: drawn here they may be
+ * answered from the workshop later, and a picture drawn that way must never
+ * be kept under the key the world's picture of the same shape uses. The
+ * shape's key alone only when it names nothing of yours.
  */
 export function ownThumbKey(shard: ShardModel): string {
   const me = useCyberspace.getState().identity.pubkey
   const list = byId(useWorkshop.getState().shards)
+  const table = shard.objects ?? {}
   const stamps: string[] = []
   const seen = new Set<string>()
+  let mine = false
   const walk = (s: ShardModel, depth: number): void => {
     if (depth > MAX_PART_DEPTH) return
     for (const r of s.refs ?? []) {
       const a = r[0] === 'a' ? parseAddress(r[1]) : null
       if (!a || a.kind !== SNO_KIND || a.pubkey !== me || seen.has(a.d)) continue
       seen.add(a.d)
+      mine = true
+      if (Object.prototype.hasOwnProperty.call(table, r[1])) {
+        const held = carriedModel(table, r[1])
+        if (held) walk(held, depth + 1)
+        continue
+      }
       const piece = list.get(a.d)
       if (!piece || localObject(a) === undefined) continue
       stamps.push(`${a.d}@${versionOf(piece)}`)
@@ -104,7 +120,7 @@ export function ownThumbKey(shard: ShardModel): string {
   }
   walk(shard, 1)
   const base = thumbKeyOf(shard)
-  return stamps.length ? `${base}:own:${hash53(stamps.join('|'))}` : base
+  return mine ? `${base}:own:${hash53(stamps.join('|'))}` : base
 }
 
 /** The ids whose shard is not the same object in both lists: added, edited or removed. */

@@ -12,7 +12,7 @@ vi.mock('../contacts', () => ({ GENERAL_RELAYS: [], followsOf: (pk: string) => c
 
 import { newShard, toPayload, type Ref, type ShardModel } from 'sno-core/shards'
 import { useResolved, type Resolved } from '../parts'
-import { SCENE_STRANGER_READS, SCENE_STRANGER_SHARD_READS, SCENE_TRUSTED_READS, giveReads, onReadsBack, readsLeft, resetReads, takeReads, type ReadPool } from '../readPools'
+import { SCENE_STRANGER_READS, SCENE_STRANGER_SHARD_READS, SCENE_TRUSTED_READS, giveReads, meter, onReadsBack, readsLeft, resetReads, type ReadPool } from '../readPools'
 import { setLocalAuthor } from '../carried'
 import { mountHook, settle } from '../../test/hookRoot'
 
@@ -34,8 +34,36 @@ beforeEach(() => { resetReads(); setLocalAuthor(() => ME) })
 afterEach(() => setLocalAuthor(null))
 
 describe('the read pools', () => {
-  it('a share is at most its ceiling, and what is given back is heard once, while the pool has some', async () => {
-    expect(takeReads('stranger').left).toBe(SCENE_STRANGER_SHARD_READS)
+  it('a share takes nothing until it reads, then from its ceiling and the pool together', () => {
+    const m = meter('stranger')
+    expect(readsLeft('stranger')).toBe(SCENE_STRANGER_READS)
+    expect(m.models.left).toBe(SCENE_STRANGER_SHARD_READS)
+    // As sno-core sees it: a writable number (its usable), taken one at a time.
+    const d = Object.getOwnPropertyDescriptor(m.models, 'left')
+    expect(d?.writable).toBe(true)
+    expect(typeof d?.value).toBe('number')
+    m.models.left--
+    m.models.left--
+    expect(m.used()).toBe(2)
+    expect(readsLeft('stranger')).toBe(SCENE_STRANGER_READS - 2)
+    expect(m.models.left).toBe(SCENE_STRANGER_SHARD_READS - 2)
+    expect(m.poolRanLow()).toBe(false)
+  })
+
+  it('a share whose pool runs dry says so; one at its own ceiling does not', () => {
+    const big = meter('stranger')
+    for (let i = 0; i < SCENE_STRANGER_SHARD_READS; i++) big.models.left--
+    expect(big.models.left).toBe(0)
+    expect(big.poolRanLow()).toBe(false)
+    const others = [1, 2, 3, 4].map(() => meter('stranger'))
+    for (const o of others) while (o.models.left >= 1) o.models.left--
+    expect(readsLeft('stranger')).toBe(0)
+    const late = meter('stranger')
+    expect(late.models.left).toBe(0)
+    expect(late.poolRanLow()).toBe(true)
+  })
+
+  it('what is given back is heard once, while the pool has some', async () => {
     const heard: ReadPool[] = []
     const stop = onReadsBack((p) => heard.push(p))
     giveReads('stranger', 50)
@@ -43,7 +71,6 @@ describe('the read pools', () => {
     await Promise.resolve()
     expect(heard).toEqual(['stranger'])
     stop()
-    expect(readsLeft('stranger')).toBe(SCENE_STRANGER_READS - SCENE_STRANGER_SHARD_READS + 100)
   })
 })
 
@@ -94,5 +121,18 @@ describe('a shard drawn in the scene reads from its pool (useResolved)', () => {
     await h.unmount()
     await settle()
     expect(readsLeft('stranger')).toBe(SCENE_STRANGER_READS)
+  })
+
+  it('twelve of your composites resolving at once all draw: reads are taken as they are read, not a share each up front (review of #515)', async () => {
+    const twelve = Array.from({ length: 12 }, (_, i) => draw(wide(ME, `Composite${i}`, 50), 'trusted'))
+    await settle()
+    for (const h of twelve) {
+      expect(count(h.current())).toBe(50)
+      expect(count(h.current(), 'objects')).toBe(0)
+    }
+    expect(readsLeft('trusted')).toBe(SCENE_TRUSTED_READS - 12 * 50)
+    for (const h of twelve) await h.unmount()
+    await settle()
+    expect(readsLeft('trusted')).toBe(SCENE_TRUSTED_READS)
   })
 })

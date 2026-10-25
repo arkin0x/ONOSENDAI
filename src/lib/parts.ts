@@ -39,7 +39,7 @@
 import { createContext, useContext, useEffect, useRef, useState } from 'react'
 import { Fetched, MAX_PLACED, parseAddress, refKey, resolveParts, type Placed } from 'sno-core/parts'
 import { authorOf } from './carried'
-import { giveReads, onReadsBack, readCap, takeReads, type ReadPool } from './readPools'
+import { giveReads, meter, onReadsBack, type Metered, type ReadPool } from './readPools'
 import { chargeByTrust } from './trust'
 import { fromPayload, type Ref, type ShardModel } from 'sno-core/shards'
 import { GENERAL_RELAYS } from './contacts'
@@ -192,8 +192,8 @@ function cutForReads(placed: readonly Placed[]): boolean {
   return placed.some(function short(p): boolean { return p.missing === 'objects' || p.children.some(short) })
 }
 
-/** A share of a read pool one resolve holds: given, and given back so far. */
-interface Held { pool: ReadPool; share: { left: number }; given: number; back: number }
+/** A share of a read pool one resolve reads from, and how much of what it read it has given back. */
+interface Held { pool: ReadPool; meter: Metered; back: number }
 
 export function useResolved(shard: ShardModel | null, pool?: ReadPool): Map<string, Resolved> {
   const own = useContext(OwnPartsContext)
@@ -241,19 +241,19 @@ export function useResolved(shard: ShardModel | null, pool?: ReadPool): Map<stri
     // In the scene: what it reads is charged to its pool (lib/readPools.ts), a
     // stranger's object under a trusted shard to the strangers'.
     const held: Held[] = []
+    // Charged as it reads (lib/readPools.ts meter): nothing is taken before it is read.
     const share = (from: ReadPool): { left: number; models: { left: number } } => {
-      const models = takeReads(from)
-      held.push({ pool: from, share: models, given: models.left, back: 0 })
-      return { left: MAX_PLACED, models }
+      const m = meter(from)
+      held.push({ pool: from, meter: m, back: 0 })
+      return { left: MAX_PLACED, models: m.models }
     }
     const mine = pool ? share(pool) : undefined
     const charge = mine && pool === 'trusted' ? chargeByTrust(mine, () => share('stranger')) : undefined
-    /** Give back what `h` holds beyond what it read (`keep`), or all of it. */
-    const giveBack = (keep: boolean): void => {
+    /** Give back everything it has read and not yet given back. */
+    const giveBack = (): void => {
       for (const h of held) {
-        const n = keep ? h.share.left : h.given - h.back
-        if (keep) h.share.left = 0
-        h.back += Math.max(0, n)
+        const n = h.meter.used() - h.back
+        h.back += n
         giveReads(h.pool, n)
       }
     }
@@ -262,11 +262,11 @@ export function useResolved(shard: ShardModel | null, pool?: ReadPool): Map<stri
     // OPACITY drag on one piece must not rebuild everything placing it.
     void resolvePartsShared(probe, own ? fetchOwnFirst : fetchRef, undefined, mine, charge).then((placed) => {
       landed = true
-      // Drawn no more, or resolving again: everything it held goes back.
-      if (!live) { giveBack(false); return }
-      // What it did not read goes back now; what it read, when it is drawn no more.
-      if (cutForReads(placed)) for (const h of held) if (h.given < readCap(h.pool)) starvedOf.current.add(h.pool)
-      giveBack(true)
+      // Drawn no more, or resolving again: everything it read goes back.
+      if (!live) { giveBack(); return }
+      // What it read, it holds while it is drawn. Cut short because a pool ran
+      // dry (not by its own share's ceiling): resolved again when reads come back.
+      if (cutForReads(placed)) for (const h of held) if (h.meter.poolRanLow()) starvedOf.current.add(h.pool)
       pending.current = false
       touched.current = touchedKeys(placed, new Set(refs.map(refKey)))
       const m = new Map<string, Resolved>()
@@ -275,7 +275,7 @@ export function useResolved(shard: ShardModel | null, pool?: ReadPool): Map<stri
       if (dirty.current) { dirty.current = false; setAgain((n) => n + 1) }
     })
     // Still resolving, it may read until it lands: what it holds goes back then.
-    return () => { live = false; if (landed) giveBack(false) }
+    return () => { live = false; if (landed) giveBack() }
     // The references and the table, not the shard: a placement moving needs no new fetch.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [key, carried, again, own])

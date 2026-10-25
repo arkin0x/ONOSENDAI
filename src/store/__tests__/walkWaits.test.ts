@@ -123,4 +123,20 @@ describe('WALK waits for walls on their way (round-6 review of #503)', () => {
     expect(moved(start)[1]).toBeGreaterThanOrEqual(-5)
     expect(moved(start)[1]).toBeLessThan(0)
   })
+
+  it('a press waiting for walls is never made in a new WALK', async () => {
+    world(start, carrying(slab('z', -1, 3, 2)))
+    useWalk.getState().enter()
+    useCyberspace.setState({ screenAxes: AXES })
+    useWalk.getState().press('away')
+    // WALK ends and begins again before the walls land: the old press is let go.
+    useWalk.getState().exit()
+    clearWalls()
+    useWalk.getState().enter()
+    useCyberspace.setState({ screenAxes: AXES })
+    await wallsBuilt()
+    await new Promise((r) => setTimeout(r, 0))
+    expect(moved(start)).toEqual([0, 0, 0])
+  })
+
 })

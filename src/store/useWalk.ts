@@ -190,6 +190,7 @@ export const useWalk = create<WalkState>((set, get) => ({
   enter: () => {
     const cs = useCyberspace.getState()
     if (cs.walking) return
+    forgetWaitingMove()
     // VIEW is a focus, and WALK is taken from your head: the view ends first,
     // which brings the cursor and the zoom home.
     if (cs.viewing()) cs.clearFocus()
@@ -206,6 +207,7 @@ export const useWalk = create<WalkState>((set, get) => ({
 
   exit: () => {
     if (!useCyberspace.getState().walking) return
+    forgetWaitingMove()
     get().stop()
     useCyberspace.setState({ walking: false })
   },
@@ -297,14 +299,20 @@ export const useWalk = create<WalkState>((set, get) => ({
  * the task for what a shard carries. One at a time.
  */
 let againWhenBuilt: (() => void) | null = null
+/** Let go of a move waiting for walls: WALK ends or begins, and an old press is never made in a new WALK. */
+function forgetWaitingMove(): void {
+  againWhenBuilt = null
+}
 function waitedForWalls(again: () => void): boolean {
   if (!takeWallWait()) return false
   if (!againWhenBuilt) {
     againWhenBuilt = again
+    // Only this wait's own move: one let go (forgetWaitingMove) and replaced by a newer is not this one's to make.
+    const mine = again
     void wallsBuilt().then(() => {
-      const go = againWhenBuilt
+      if (againWhenBuilt !== mine) return
       againWhenBuilt = null
-      if (go && useCyberspace.getState().walking) go()
+      if (useCyberspace.getState().walking) mine()
     })
   }
   return true

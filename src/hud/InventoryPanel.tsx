@@ -291,8 +291,6 @@ export function InventoryPanel(): JSX.Element {
     const r = useInventory.getState().paste(paste)
     setNote(r.ok ? (r.already ? `Already in your ITEMS: ${r.item?.name}.` : `Held: ${r.item?.name}.`) : r.reason ?? 'Not an item.')
     if (r.ok) setPaste('')
-    // A chest found here that it opens opens now, as after TAKE.
-    if (r.ok && !r.already && r.item?.key) useShards.getState().reopenChests([r.item.key.itemPubkey])
   }
   const count = keys.length + taken.length
 
@@ -341,7 +339,7 @@ export function InventoryPanel(): JSX.Element {
 
       <Explanation>
         What you hold: items you took or forged, and what you took out of
-        chests. A chest sealed to one of these items opens where it
+        chests. A chest sealed to one of these items opens with OPEN where it
         is found, in DISCOVERED BAGS. Kept on this device per identity; COPY
         and PASTE carry an item to another device as text.
       </Explanation>

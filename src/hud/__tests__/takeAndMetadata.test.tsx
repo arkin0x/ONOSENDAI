@@ -43,7 +43,8 @@ import { heldFromEntry, heldFromPasted, type HeldItem } from '../../lib/inventor
 import { useCyberspace } from '../../store/useCyberspace'
 import { useInventory } from '../../store/useInventory'
 import { useShards } from '../../store/useShards'
-import { ChestContents, KeyLine, listedOnce, openChestHere, takeEntries, takeableOf, useOpenedChests } from '../ItemRows'
+import { ChestContents, KeyLine, listedOnce, openChestHere, takeableOf } from '../ItemRows'
+import { openedByHand, resetOpenedChests, useOpenedChests } from '../../store/useOpenedChests'
 import { metadataOpen } from '../Metadata'
 import { SecretModal } from '../SecretModal'
 
@@ -73,7 +74,8 @@ const takes = (html: string): string[] => [...html.matchAll(/<button class="ches
 beforeEach(() => {
   useShards.setState({ mine: [], discovered: {}, deleted: {}, deletedBags: {}, selectedSecret: null, curated: null })
   useInventory.setState({ owner: useCyberspace.getState().identity.pubkey, items: {}, storage: 'memory' })
-  useOpenedChests.setState({ opened: {} })
+  localStorage.removeItem('onosendai:chests-opened')
+  resetOpenedChests()
   localStorage.removeItem('onosendai:metadataOpen')
 })
 
@@ -143,6 +145,8 @@ describe('OPEN and TAKE on a chest (review of #519)', () => {
     expect(useShards.getState().discovered[inner.event.id]?.chestId).toBe('d'.repeat(64))
     const me = useCyberspace.getState().identity.pubkey
     expect(useOpenedChests.getState().opened[`${me}/${'d'.repeat(64)}`]).toHaveLength(2)
+    // Opened by hand: kept, so a reload opens it again.
+    expect(openedByHand(me, 'd'.repeat(64))).toBe(true)
   })
 
   it('keeps nothing and finds nothing when the identity changes while the signer decrypts (re-review of #519)', async () => {
@@ -164,13 +168,15 @@ describe('OPEN and TAKE on a chest (review of #519)', () => {
       expect(contents).toBeNull()
       expect(useShards.getState().discovered[words.id]).toBeUndefined()
       expect(useOpenedChests.getState().opened).toEqual({})
+      expect(openedByHand(was.identity.pubkey, 'e'.repeat(64))).toBe(false)
+      expect(openedByHand(other, 'e'.repeat(64))).toBe(false)
       expect(useInventory.getState().items).toEqual({})
     } finally {
       useCyberspace.setState({ identity: was.identity, decryptSealed: was.decryptSealed })
     }
   })
 
-  it('TAKE of an item on a chest\'s row opens, at once, the chest found in play that it opens', () => {
+  it('TAKE of an item on a chest\'s row leaves the chest it opens closed, for OPEN (arkinox, 2026-10-26)', () => {
     const k = keyIn('Gate Key')
     const behind = finalizeEvent(messageInnerTemplate('the room', at, 0, T0), hider) as NostrEvent
     const sealed = sealEntries([behind], k.key.itemPubkey)
@@ -178,8 +184,10 @@ describe('OPEN and TAKE on a chest (review of #519)', () => {
     const gate = finalizeEvent(chestInnerTemplate(item, at, 0, T0), hider) as NostrEvent
     useShards.getState().addDiscovered([find(gate, { type: 'chest', chest: chestItemOf(gate)! })])
     expect(useShards.getState().discovered[behind.id]).toBeUndefined()
-    takeEntries([{ id: k.event.id, event: k.event, verified: true, body: { type: 'key', key: k.key } }], from, null)
-    expect(useShards.getState().discovered[behind.id]?.chestId).toBe(gate.id)
+    useInventory.getState().take([{ id: k.event.id, event: k.event, verified: true, body: { type: 'key', key: k.key } }], from, null)
+    expect(useInventory.getState().items[k.event.id]).toBeDefined()
+    expect(useShards.getState().discovered[behind.id]).toBeUndefined()
+    expect(openedByHand(useCyberspace.getState().identity.pubkey, gate.id)).toBe(false)
   })
 
   it('lists a thing out of a chest once: under the chest while it is open in the same list, else on its own', () => {

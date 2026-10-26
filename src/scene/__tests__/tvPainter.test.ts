@@ -14,7 +14,7 @@ import { TvPainter, fit, tickerItems, wrap, type TvAssets, type TvExplainer, typ
 import { cutKind, explainerPipRect, flatPoint, tubeDrift, tubeFlicker } from '../TvScreenEffect'
 import { Vector2 } from 'three'
 import { useTv } from '../../store/useTv'
-import { CTV_ADDRESS, CTV_ADDRESS_HOLD_S, CTV_ADVERTISE_1, HOSAKA_1 } from '../../lib/tv/hosakaAd'
+import { ADS, CTV_ADDRESS, CTV_ADDRESS_HOLD_S, CTV_ADVERTISE_1, HOSAKA_1, type AdScene, type TvAd } from '../../lib/tv/hosakaAd'
 import { setBroadcastForTest } from '../../lib/tv/broadcast'
 
 /** A 2D context that measures every character as 7 px and draws nothing. */
@@ -902,15 +902,23 @@ describe('the house spot for the ad slot itself (CTV_ADVERTISE_1, arkinox 2026-1
     }
   })
 
-  it('the last card\'s lines land where a block with no mark and no subtitle should, not pushed down by a stray gap', () => {
+  it('an end card\'s lines land where a block with no mark and no subtitle should, not pushed down by a stray gap', () => {
     // Regression: subH's 22*s gap used to be added below the subtitle loop
     // whenever the scene was 'end', whether or not there was a subtitle to
     // put it under (tvPainter commercial()), while blockH and fitCard's own
     // sizing only ever budgeted that space when subLines was non-empty. For
-    // a spot with no subtitle (this one), that left the whole call shoved
-    // down by 22*s past where the centred layout placed it.
-    const end = CTV_ADVERTISE_1.scenes[CTV_ADVERTISE_1.scenes.length - 1]
+    // an end card with no subtitle, that left the whole call shoved down by
+    // 22*s past where the centred layout placed it.
+    //
+    // No shipping spot has such a card any more (the house spot now ends on
+    // a regular card, and HOSAKA's end card has a subtitle), so this drives
+    // a made-up one: a test-only spot whose one scene is an end card with no
+    // mark and no subtitle, added to ADS for this test and taken out after.
+    const end: AdScene = { from: 0, to: 4, kind: 'end', lines: ['NO SUBTITLE HERE', 'JUST THE CALL'], accent: 0, theme: 'night' }
+    const fixture: TvAd = { id: 'test-end-no-subtitle', scenes: [end] }
+    expect(end.kind).toBe('end')
     expect(end.subtitle).toBeUndefined()
+    expect(end.mark).toBeUndefined()
     const seen: Array<{ text: string; y: number; size: number }> = []
     const state: Record<string, unknown> = { globalAlpha: 1, font: '' }
     const ctx = new Proxy({
@@ -927,7 +935,16 @@ describe('the house spot for the ad slot itself (CTV_ADVERTISE_1, arkinox 2026-1
     const p = new TvPainter({ width: 0, height: 0, getContext: () => ctx } as unknown as HTMLCanvasElement)
     p.size(1400, 800, 1)
     const trip = { id: 't', kind: 'trip' as const, pubkey: 'ann', beats: [], start: 1, end: 2, offsets: [], length: 5 }
-    p.paint(picture({ shot: trip as never, ad: { at: 0, id: CTV_ADVERTISE_1.id } }), assets, 700 + ((end.from + end.to) / 2) * 1000, 1, false)
+    ADS.push(fixture)
+    try {
+      setBroadcastForTest(false)
+      p.paint(picture({ shot: trip as never, ad: { at: 0, id: fixture.id } }), assets, 700 + ((end.from + end.to) / 2) * 1000, 1, false)
+    } finally {
+      ADS.splice(ADS.indexOf(fixture), 1)
+      setBroadcastForTest(null)
+    }
+    expect(ADS).not.toContain(fixture)
+    // Found only if the painter drew the fixture: an unknown id falls back to the first spot.
     const lines = end.lines.map((text) => seen.find((s) => s.text === text))
     expect(lines.every((l) => l !== undefined)).toBe(true)
     const [first, last] = lines as Array<{ text: string; y: number; size: number }>

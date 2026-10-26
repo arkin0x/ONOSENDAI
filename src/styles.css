@@ -9730,6 +9730,47 @@ html.tv-broadcast * { cursor: none !important; }
 html.tv-broadcast,
 html.tv-broadcast body { overflow: hidden; }
 
+/* The stream standing by (hud/TvStandby.tsx, lib/tv/standby.ts): NO SIGNAL
+   where the picture was, drawn without WebGL, sized to the frame so it reads
+   on a phone held upright, until the page can draw again. */
+.tv-standby {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background:
+    repeating-linear-gradient(0deg, rgba(255, 255, 255, 0.035) 0 2px, transparent 2px 4px),
+    radial-gradient(ellipse at center, #14052a 0%, #030008 75%);
+  color: #f2fbff;
+  font-family: 'Monaspace Argon', ui-monospace, monospace;
+  font-weight: 700;
+  text-align: center;
+}
+.tv-standby__card { display: flex; flex-direction: column; align-items: center; gap: 2.5vw; }
+.tv-standby__name { font-size: 6vw; letter-spacing: 0.04em; text-shadow: 0 0 1.2vw rgba(0, 0, 0, 0.8); }
+.tv-standby__tv {
+  display: inline-block;
+  padding: 0 0.25em;
+  border: 0.12em solid currentColor;
+  border-radius: 0.12em;
+}
+.tv-standby__status {
+  font-size: 4vw;
+  color: #ff2d95;
+  text-shadow: 0 0 1.5vw #ff2d95;
+  animation: tv-standby-blink 1.2s steps(2, jump-none) infinite;
+}
+.tv-standby__url {
+  position: absolute;
+  top: 8.5vh;
+  right: 6vw;
+  font-size: 2.6vw;
+  color: #00e5ff;
+}
+@keyframes tv-standby-blink { from { opacity: 1; } to { opacity: 0.55; } }
+
 /* The workshop's own round close button, top left (arkinox, 2026-10-18). */
 .tv__off {
   position: absolute;

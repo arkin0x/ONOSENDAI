@@ -3,7 +3,8 @@ import ReactDOM from 'react-dom/client'
 import App from './App'
 import './styles.css'
 import { installTapGuard } from './lib/tapGuard'
-import { markBroadcastPage } from './lib/tv/broadcast'
+import { isBroadcast, markBroadcastPage } from './lib/tv/broadcast'
+import { TvStandby } from './hud/TvStandby'
 import { hydrateWorkshop } from './store/useWorkshop'
 import { wireLocalObjects } from './store/localObjects'
 
@@ -29,7 +30,8 @@ function draw(): void {
   drawn = true
   ReactDOM.createRoot(document.getElementById('root')!).render(
     <React.StrictMode>
-      <App />
+      {/* The stream never goes black: it stands by and reloads (hud/TvStandby, lib/tv/standby). */}
+      {isBroadcast() ? <TvStandby><App /></TvStandby> : <App />}
     </React.StrictMode>,
   )
 }

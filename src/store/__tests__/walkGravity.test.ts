@@ -670,7 +670,8 @@ describe('exactly on a face', () => {
         crawl([riser, [0, -1, 0]])
         const step = walkStep(start, 'z', -1, 1n, wallItems(useCyberspace.getState().plane), gravity)
         expect(at(start, step.to)).toEqual([0, 0, 0])
-        expect(step.by?.shard.name).toBe('Riser')
+        // The WALL chip names the block that refused the lift, not the riser.
+        expect(step.by?.shard.name).toBe('Over')
       }
     })
 

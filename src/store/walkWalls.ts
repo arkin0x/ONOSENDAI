@@ -766,7 +766,10 @@ const HAIR_MAX = 0.5
  * of yours goes up into it, a jump nor a stair's lift (arkinox, 2026-10-25:
  * floors only; review of #497). Null when there is no such face, or the space
  * above is open. The upward step itself lets the face you are on go, as every
- * step does (stepLimit), so this is asked beside it.
+ * step does (stepLimit), so this is asked beside it. Only a closed solid
+ * refuses: an open shell, such as a Maze Kit room's lintel or ceiling (its
+ * doorway rims are open edges), encloses nothing, so it refuses no jump and
+ * no lift (arkinox, 2026-10-26: accepted).
  */
 export function underSolid(from: Position, items: readonly WallItem[]): WallItem | null {
   let face: WallItem | null = null

@@ -41,6 +41,8 @@ import { newShard, type Ref, type ShardModel } from 'sno-core/shards'
 import { primeRef } from '../../lib/parts'
 import { withConstrain } from '../../lib/walkConstrain'
 import type { AxisName, Position } from '../../lib/space'
+import { jumpRise } from '../walkGravity'
+import { walkStep } from '../walkStep'
 import { STRANGER_BUDGET, STRANGER_READS, STRANGER_SHARD, STRANGER_SHARD_READS, RETRY_MS, TRUSTED_BUDGET, TRUSTED_READS, WALL_WAIT_MS, clearWalls, entryFor, setWallFollows, stepLimit, takeWallWait, wallBudgetLeft, wallReadsLeft, wallsBuilt, warmWalls, type WallItem } from '../walkWalls'
 import { MAX_MODELS, type Placed } from 'sno-core/parts'
 import { setLocalAuthor } from '../../lib/carried'
@@ -272,6 +274,21 @@ describe("WALK's walls are built by trust (arkinox 2026-10-25: \"ok A sounds goo
     expect(stepLimit(AT, 'z', 1, 5n, [far]).reach).toBe(5n)
     await settleAll()
     expect(wallBudgetLeft('stranger')).toBe(STRANGER_BUDGET)
+  })
+
+  it('standing in a floor\'s plane, a refused jump and a refused lift build nothing of a shard whose region you are not in (#497)', async () => {
+    warmWalls(1)
+    const far = item(heavy(THEM), { author: THEM, height: 4, at: { x: AT.x + (1n << 20n), y: AT.y, z: AT.z } })
+    const sheet = withConstrain({ ...newShard('Sheet'), mode: 'solid', vertices: [[-4, 0, -4], [4, 0, -4], [4, 0, 4], [-4, 0, 4]].map((p) => ({ p: p as [number, number, number], c: [1, 1, 1] as [number, number, number] })), faces: [[0, 1, 2], [0, 2, 3]] }, 'all')
+    const plate = item(sheet), block = item(slab('y', 1, 0, 4)), floor = item(slab('y', -1, 1, 4)), wall = item(slab('z', -1, 1, 4))
+    // Stand in the sheet's plane, open above: held.
+    expect(stepLimit(AT, 'y', -1, 1n, [plate, far], true)).toMatchObject({ reach: 0n, by: plate })
+    // On a floor 1 below, a block's underside at your height: the jump does not rise, and the lift up the wall is refused.
+    expect(jumpRise(AT, [floor, block, far], () => true)).toMatchObject({ rise: 0n, by: block })
+    expect(walkStep(AT, 'z', -1, 1n, [floor, block, wall, far], true)).toMatchObject({ to: AT, by: block })
+    await settleAll()
+    expect(wallBudgetLeft('stranger')).toBe(STRANGER_BUDGET)
+    expect(wallReadsLeft('stranger')).toBe(STRANGER_READS)
   })
 
   it('five hostile strangers nearer the walker never starve your maze, this WALK, the next, or once they are gone', async () => {

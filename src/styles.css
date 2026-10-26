@@ -1948,6 +1948,11 @@ kbd {
 }
 
 /* The event behind a card (EventData): copyable fields, then the whole event. */
+/* METADATA (hud/Metadata): a card's technical facts, folded, closed by default. */
+.metadata { display: flex; flex-direction: column; }
+.metadata__toggle { min-height: 34px; }
+.metadata__body { display: flex; flex-direction: column; gap: 10px; padding-top: 6px; }
+.metadata__body .secret__facts { margin: 0; }
 .eventdata { display: grid; gap: 10px; }
 .eventdata__props { display: grid; gap: 6px; margin: 0; }
 .eventdata__props > div { display: grid; grid-template-columns: 72px 1fr; gap: 8px; align-items: start; }
@@ -9156,6 +9161,22 @@ a.feed__act { text-decoration: none; }
 .chest__act:hover { background: rgba(0, 229, 255, 0.16); }
 .chest__act:disabled { opacity: 0.45; cursor: default; }
 .chest__act.is-on { color: var(--ok); border-color: color-mix(in srgb, var(--ok) 45%, transparent); background: transparent; }
+/* TAKE, on a found item and on each row of an opened chest, sized for a
+   thumb (arkinox, 2026-10-26: "make the take button bigger"): a card
+   action's height and words, kept to the row's end. */
+.chest__act--take {
+  min-height: 34px;
+  min-width: 64px;
+  padding: 0 14px;
+  font-size: 9px;
+  letter-spacing: 0.12em;
+  border-radius: 6px;
+}
+/* TAKE ALL, under an opened chest's rows, the list's whole width. */
+.chest__all { display: flex; padding-top: 2px; }
+.chest__all .chest__act--take { flex: 1; }
+/* A found keypair item: its line, then TAKE at the row's end. */
+.keyline { display: flex; align-items: center; gap: 8px; min-width: 0; flex: 1 1 auto; }
 .chest__status { font-size: 9px; line-height: 1.4; color: var(--warn); }
 /* Why REMOVE FROM CHEST could not, under the item modal's actions. */
 .secret__status { margin: 6px 0 0; font-size: 10px; line-height: 1.4; color: var(--warn); }

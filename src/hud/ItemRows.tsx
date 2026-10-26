@@ -2,15 +2,19 @@
  * ItemRows.tsx: the key line and the chest block, wherever found things are
  * listed (Keys and Chests B1 §3.2).
  *
- * A keypair item found says its name, who forged it, and that it is in your
- * ITEMS, because reading it was holding it (arkinox, 2026-10-10: "keys ARE
- * items"; the TypeScript names keep saying key). A chest says its name and
- * what opens it; when something you hold does (an item whose public key is
- * the lock, or the lock is your own identity), OPEN decrypts it where it
- * stands and lists what is inside, each row with TAKE, which copies the thing
- * into ITEMS. An item inside an opened chest is held the moment it is read,
- * like any item. A chest inside a chest is a chest block of its own, so
- * chaining reads as nesting.
+ * A keypair item found says its name and who forged it, with TAKE, which
+ * puts it in your ITEMS (arkinox, 2026-10-10: "keys ARE items"; the
+ * TypeScript names keep saying key). Found is not held (arkinox, 2026-10-26:
+ * "I dont want items to automatically be added to my inventory the moment i
+ * decrypt them from a bag. i want to TAKE them"), so an item opens chests
+ * only once it is taken. A chest says its name and what opens it; when
+ * something you hold does (an item whose public key is the lock, or the lock
+ * is your own identity), OPEN decrypts it where it stands and lists what is
+ * inside, each row with TAKE, which copies the thing into ITEMS, and TAKE
+ * ALL under the list (arkinox, 2026-10-26: "TAKE on each row. make the take
+ * button bigger. add a TAKE ALL at the bottom of the list."). An item inside
+ * is taken like anything else. A chest inside a chest is a chest block of
+ * its own, so chaining reads as nesting.
  *
  * Used by the bag record (LootDetail), the nearby list (NearbyLootModal), the
  * item modal (SecretModal) and the ITEMS panel's taken chests, so a chest
@@ -19,15 +23,16 @@
  * row that draws one (ItemFace); the key line itself is the words.
  */
 
-import { useMemo, useState } from 'react'
+import { useCallback, useMemo, useState } from 'react'
+import { create } from 'zustand'
 import { useProfile } from '../hooks/useProfile'
 import { cashuLabel, readCashuToken } from '../lib/cashu'
-import { chestSealer, openWithSecret, openWithSigner, openerFor, readContents, requiresLabel, revealedIn, type ChestEntry } from '../lib/chests'
+import { chestSealer, openWithSecret, openWithSigner, openerFor, readContents, requiresLabel, revealedIn, type ChestEntry, type Opener } from '../lib/chests'
 import { positionOf, useShards } from '../store/useShards'
 import { hiddenLabel, type ChestItem } from '../lib/hidden'
 import { ItemFace } from './ItemIcon'
 import { ShardThumb } from './ShardThumb'
-import { holdsModel, openingKeys, type HeldFrom, type HeldPlace } from '../lib/inventory'
+import { holdsModel, openingKeys, type HeldFrom, type HeldItem, type HeldPlace } from '../lib/inventory'
 import { safeNpub } from '../lib/npub'
 import { useCyberspace } from '../store/useCyberspace'
 import { useInventory } from '../store/useInventory'
@@ -47,15 +52,92 @@ export function useWho(pubkey: string): string {
   return pubkey === me ? 'you' : profileLabel(profile, safeNpub(pubkey))
 }
 
-/** A keypair item where it was found: its name, who forged it, and that it is held. */
-export function KeyLine({ name, author }: { name: string; author: string }): JSX.Element {
+/**
+ * A keypair item where it was found: its name, who forged it, and TAKE, or
+ * IN YOUR ITEMS once it is held. `id` is the find's event id; without one,
+ * or for a thing that is not among this device's finds (one of your own,
+ * held since you forged it), there is nothing to take.
+ */
+export function KeyLine({ id, name, author }: { id?: string; name: string; author: string }): JSX.Element {
   const who = useWho(author)
+  const held = useInventory((s) => (id ? !!s.items[id] : false))
+  const found = useShards((s) => (id ? !!s.discovered[id] : false))
   return (
-    <span className="item__line">
-      <span className="item__name" title={name}>{name}</span>
-      <span className="item__meta">forged by {who} · <span className="item__held" title="Reading an item is holding it: it is in your ITEMS">IN YOUR ITEMS</span></span>
+    <span className="keyline">
+      <span className="item__line">
+        <span className="item__name" title={name}>{name}</span>
+        <span className="item__meta">forged by {who}{held && <> · <span className="item__held" title="It is in your ITEMS">IN YOUR ITEMS</span></>}</span>
+      </span>
+      {id && found && !held && (
+        <button className="chest__act chest__act--take" onClick={() => { useShards.getState().takeFound([id]) }} title="Put it in your ITEMS">TAKE</button>
+      )}
     </span>
   )
+}
+
+/** Whether a chest's content is held already: by its id, or (one shard per model, arkinox, 2026-10-11) a shard whose model is held under any name. */
+function heldIn(items: Record<string, HeldItem>, entry: ChestEntry): boolean {
+  return !!items[entry.id] || (entry.body.type === 'shard' && !!entry.body.shard && holdsModel(items, entry.body.shard))
+}
+
+/**
+ * The chests opened here this session, by `${identity}/${chest id}`, with
+ * what was inside: a chest opened in one list stays open in the next, and a
+ * list can leave out the rows of its contents found on their own, which the
+ * chest lists already (one row per thing, review of #519). Per identity, so
+ * another identity on this device never sees what this one's keys opened.
+ */
+export const useOpenedChests = create<{ opened: Record<string, ChestEntry[]> }>(() => ({ opened: {} }))
+
+export const openedKey = (me: string, chestId: string): string => `${me}/${chestId}`
+
+/** Whether this identity has a chest open here, by its id: its contents are listed under it. */
+export function useChestOpen(): (chestId: string | undefined) => boolean {
+  const me = useCyberspace((s) => s.identity.pubkey)
+  const opened = useOpenedChests((s) => s.opened)
+  return useCallback((chestId: string | undefined) => !!chestId && !!opened[openedKey(me, chestId)], [me, opened])
+}
+
+/**
+ * A list with each thing once: a thing that came out of a chest that is in
+ * the same list and open there is left to that chest's rows, where it has
+ * its TAKE (review of #519: it was listed twice, and held two ways).
+ */
+export function listedOnce<T extends { type: string; chestId?: string }>(items: T[], idOf: (t: T) => string, open: (chestId: string) => boolean): T[] {
+  const chests = new Set(items.filter((i) => i.type === 'chest').map(idOf))
+  return items.filter((i) => !(i.chestId && chests.has(i.chestId) && open(i.chestId)))
+}
+
+/**
+ * OPEN: decrypt a chest where it stands and read what is inside. With a
+ * place, its contents are found in place too, as a scan's finds are. Holds
+ * nothing: what is inside waits for TAKE (arkinox, 2026-10-26). Null when
+ * the identity changed while the signer decrypted: what one identity's
+ * signer opened is never filed or found under another (re-review of #519).
+ */
+export async function openChestHere(c: { id: string; chest: ChestItem; author: string; place: HeldPlace | null; sealer: string | undefined }, opener: Exclude<Opener, null>): Promise<ChestEntry[] | null> {
+  const me = useCyberspace.getState().identity.pubkey
+  const raw = opener.by === 'key' ? openWithSecret(c.chest, opener.key.secretHex) : await openWithSigner(c.chest, useCyberspace.getState().decryptSealed)
+  if (useCyberspace.getState().identity.pubkey !== me) return null
+  const contents = readContents(raw, c.sealer)
+  if (c.place) {
+    // The room behind the door is drawn where the door stands.
+    const door = { eventId: c.id, bagId: c.place.bagId, lookupId: c.place.lookupId, author: c.author, at: positionOf(c.place), plane: c.place.plane, height: c.place.height }
+    useShards.getState().addDiscovered(revealedIn(door, contents))
+  }
+  useOpenedChests.setState((s) => ({ opened: { ...s.opened, [openedKey(me, c.id)]: contents } }))
+  return contents
+}
+
+/**
+ * TAKE out of a chest: hold these, and when an item is among them, open at
+ * once the chests found in play locked to it (useShards reopenChests).
+ */
+export function takeEntries(entries: ChestEntry[], from: HeldFrom, place: HeldPlace | null): HeldItem[] {
+  const added = useInventory.getState().take(entries, from, place)
+  const locks = added.filter((r) => r.type === 'key' && r.key).map((r) => r.key!.itemPubkey)
+  if (locks.length > 0) useShards.getState().reopenChests(locks)
+  return added
 }
 
 /** The row label of a content: a coin's amount, else the item's label. */
@@ -85,7 +167,7 @@ export function ChestBlock({ id, chest, author, verified, place, sealer: given }
   const found = useShards((s) => s.discovered[id])
   const ownInner = useShards((s) => s.mine.find((d) => d.eventId === id)?.inner)
   const sealer = chestSealer(given, found, ownInner)
-  const [entries, setEntries] = useState<ChestEntry[] | null>(null)
+  const entries = useOpenedChests((s) => s.opened[openedKey(me, id)] ?? null)
   const [status, setStatus] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const who = useWho(author)
@@ -100,18 +182,8 @@ export function ChestBlock({ id, chest, author, verified, place, sealer: given }
     setBusy(true)
     setStatus(null)
     try {
-      const raw = opener.by === 'key' ? openWithSecret(chest, opener.key.secretHex) : await openWithSigner(chest, useCyberspace.getState().decryptSealed)
-      const contents = readContents(raw, sealer)
-      setEntries(contents)
-      // A key read is held, wherever it was read (B1 §2.1).
-      useInventory.getState().take(shownOf(contents, useMutes.getState().muted).filter((e) => e.body.type === 'key'), from, place)
-      // What the chest held is found in place: the room behind the door is
-      // drawn where the door stands, as a scan's finds are.
-      if (place) {
-        const door = { eventId: id, bagId: place.bagId, lookupId: place.lookupId, author, at: positionOf(place), plane: place.plane, height: place.height }
-        useShards.getState().addDiscovered(revealedIn(door, contents))
-      }
-      if (contents.length === 0) setStatus('Opened: nothing inside this client can read.')
+      const contents = await openChestHere({ id, chest, author, place, sealer }, opener)
+      if (contents && contents.length === 0) setStatus('Opened: nothing inside this client can read.')
     } catch (err) {
       setStatus(err instanceof Error ? err.message : String(err))
     } finally {
@@ -134,22 +206,40 @@ export function ChestBlock({ id, chest, author, verified, place, sealer: given }
         )}
       </div>
       {status && <span className="chest__status" role="status">{status}</span>}
-      {shown && shown.length > 0 && (
-        <ul className="chest__contents">
-          {shown.map((e) => <ContentRow key={e.id} entry={e} from={from} place={place} />)}
-        </ul>
-      )}
+      {shown && shown.length > 0 && <ChestContents entries={shown} from={from} place={place} />}
     </div>
+  )
+}
+
+/** What TAKE ALL takes: every content here not yet held. */
+export function takeableOf(entries: ChestEntry[], items: Record<string, HeldItem>): ChestEntry[] {
+  return entries.filter((e) => !heldIn(items, e))
+}
+
+/**
+ * An opened chest's contents: a row each with TAKE, and TAKE ALL under the
+ * last, which takes every row not yet held and is off when none is left.
+ */
+export function ChestContents({ entries, from, place }: { entries: ChestEntry[]; from: HeldFrom; place: HeldPlace | null }): JSX.Element {
+  const items = useInventory((s) => s.items)
+  const takeable = useMemo(() => takeableOf(entries, items), [entries, items])
+  return (
+    <ul className="chest__contents">
+      {entries.map((e) => <ContentRow key={e.id} entry={e} from={from} place={place} />)}
+      <li className="chest__all">
+        <button className="chest__act chest__act--take" onClick={() => { takeEntries(takeable, from, place) }} disabled={takeable.length === 0} title={takeable.length === 0 ? 'Everything here is in your ITEMS' : 'Copy everything here into your ITEMS'}>TAKE ALL</button>
+      </li>
+    </ul>
   )
 }
 
 /** One thing inside an opened chest, with TAKE. */
 function ContentRow({ entry, from, place }: { entry: ChestEntry; from: HeldFrom; place: HeldPlace | null }): JSX.Element {
   // One shard per model (arkinox, 2026-10-11): a model already held, under any name, reads TAKEN too.
-  const held = useInventory((s) => !!s.items[entry.id] || (entry.body.type === 'shard' && !!entry.body.shard && holdsModel(s.items, entry.body.shard)))
+  const held = useInventory((s) => heldIn(s.items, entry))
   const { label, coin } = entryLabel(entry)
   const type = entry.body.type
-  const take = (): void => { useInventory.getState().take([entry], from, place) }
+  const take = (): void => { takeEntries([entry], from, place) }
   return (
     <li className="chest__row">
       {type === 'shard' && entry.body.shard ? <ShardThumb shard={entry.body.shard} /> : <ItemFace className={`chest__glyph chest__glyph--${coin ? 'cashu' : type}`} type={type} coin={coin} image={entry.body.key?.image} />}
@@ -161,9 +251,7 @@ function ContentRow({ entry, from, place }: { entry: ChestEntry; from: HeldFrom;
             {!entry.verified && <Unsigned />}
           </span>
         )}
-      {type === 'key'
-        ? <span className="item__held" title="Reading an item is holding it: it is in your ITEMS">IN YOUR ITEMS</span>
-        : <button className={`chest__act ${held ? 'is-on' : ''}`} onClick={take} disabled={held} title={held ? 'Already in your ITEMS' : 'Copy it into your ITEMS'}>{held ? 'TAKEN' : 'TAKE'}</button>}
+      <button className={`chest__act chest__act--take ${held ? 'is-on' : ''}`} onClick={take} disabled={held} title={held ? 'Already in your ITEMS' : 'Copy it into your ITEMS'}>{held ? 'TAKEN' : 'TAKE'}</button>
     </li>
   )
 }

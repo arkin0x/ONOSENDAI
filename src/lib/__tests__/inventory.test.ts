@@ -1,6 +1,6 @@
 /**
  * inventory.test.ts: what an identity holds (Keys and Chests B1 §3.3), as
- * pure functions. A key read is held once; a key travels as text and comes
+ * pure functions. A key taken is held once; a key travels as text and comes
  * back the same, or not at all when tampered with; DISCOVERED and LOOT split
  * the same finds and holdings two ways.
  */
@@ -35,7 +35,7 @@ function messageFind(text: string, createdAt: number, bagId: string): Hidden {
   return { eventId: inner.id, inner, keyHex: 'aa'.repeat(32), bagId, lookupId: `lookup-${bagId}`, author: hiderPk, at, plane: 0, height: 6, createdAt, type: 'message', text }
 }
 
-describe('a key read is held once', () => {
+describe('a key taken is held once', () => {
   it('the same find added twice is one row, with the first holding kept', () => {
     const key = forge('Wind Key')
     const find = keyFind(key)

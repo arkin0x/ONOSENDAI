@@ -111,27 +111,32 @@ export function listedOnce<T extends { type: string; chestId?: string }>(items: 
 /**
  * OPEN: decrypt a chest where it stands and read what is inside. With a
  * place, its contents are found in place too, as a scan's finds are. Holds
- * nothing: what is inside waits for TAKE (arkinox, 2026-10-26).
+ * nothing: what is inside waits for TAKE (arkinox, 2026-10-26). Null when
+ * the identity changed while the signer decrypted: what one identity's
+ * signer opened is never filed or found under another (re-review of #519).
  */
-export async function openChestHere(c: { id: string; chest: ChestItem; author: string; place: HeldPlace | null; sealer: string | undefined }, opener: Exclude<Opener, null>): Promise<ChestEntry[]> {
+export async function openChestHere(c: { id: string; chest: ChestItem; author: string; place: HeldPlace | null; sealer: string | undefined }, opener: Exclude<Opener, null>): Promise<ChestEntry[] | null> {
+  const me = useCyberspace.getState().identity.pubkey
   const raw = opener.by === 'key' ? openWithSecret(c.chest, opener.key.secretHex) : await openWithSigner(c.chest, useCyberspace.getState().decryptSealed)
+  if (useCyberspace.getState().identity.pubkey !== me) return null
   const contents = readContents(raw, c.sealer)
   if (c.place) {
     // The room behind the door is drawn where the door stands.
     const door = { eventId: c.id, bagId: c.place.bagId, lookupId: c.place.lookupId, author: c.author, at: positionOf(c.place), plane: c.place.plane, height: c.place.height }
     useShards.getState().addDiscovered(revealedIn(door, contents))
   }
-  useOpenedChests.setState((s) => ({ opened: { ...s.opened, [openedKey(useCyberspace.getState().identity.pubkey, c.id)]: contents } }))
+  useOpenedChests.setState((s) => ({ opened: { ...s.opened, [openedKey(me, c.id)]: contents } }))
   return contents
 }
 
 /**
  * TAKE out of a chest: hold these, and when an item is among them, open at
- * once the chests found in play that it opens (useShards reopenChests).
+ * once the chests found in play locked to it (useShards reopenChests).
  */
 export function takeEntries(entries: ChestEntry[], from: HeldFrom, place: HeldPlace | null): HeldItem[] {
   const added = useInventory.getState().take(entries, from, place)
-  if (added.some((r) => r.type === 'key')) useShards.getState().reopenChests()
+  const locks = added.filter((r) => r.type === 'key' && r.key).map((r) => r.key!.itemPubkey)
+  if (locks.length > 0) useShards.getState().reopenChests(locks)
   return added
 }
 
@@ -178,7 +183,7 @@ export function ChestBlock({ id, chest, author, verified, place, sealer: given }
     setStatus(null)
     try {
       const contents = await openChestHere({ id, chest, author, place, sealer }, opener)
-      if (contents.length === 0) setStatus('Opened: nothing inside this client can read.')
+      if (contents && contents.length === 0) setStatus('Opened: nothing inside this client can read.')
     } catch (err) {
       setStatus(err instanceof Error ? err.message : String(err))
     } finally {

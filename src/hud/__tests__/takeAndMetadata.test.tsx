@@ -34,6 +34,7 @@ vi.mock('../../lib/relay', () => ({
 }))
 
 import { finalizeEvent, generateSecretKey, getPublicKey } from 'nostr-tools/pure'
+import { nip44 } from 'nostr-tools'
 import { newShard } from 'sno-core/shards'
 import { bytesToHex, type NostrEvent } from '../../lib/events'
 import { sealEntries, type ChestEntry } from '../../lib/chests'
@@ -137,11 +138,36 @@ describe('OPEN and TAKE on a chest (review of #519)', () => {
     const sealed = sealEntries([inner.event, words], lock.key.itemPubkey)
     const chest: ChestItem = { name: 'Strongbox', lockPubkey: lock.key.itemPubkey, senderPubkey: sealed.senderPubkey, requires: '', payload: sealed.payload }
     const contents = await openChestHere({ id: 'd'.repeat(64), chest, author: getPublicKey(hider), place: placeAt, sealer: getPublicKey(hider) }, { by: 'key', key: { id: lock.event.id, itemPubkey: lock.key.itemPubkey, secretHex: lock.key.secretHex } })
-    expect(contents.map((e) => e.id).sort()).toEqual([inner.event.id, words.id].sort())
+    expect(contents?.map((e) => e.id).sort()).toEqual([inner.event.id, words.id].sort())
     expect(useInventory.getState().items).toEqual({})
     expect(useShards.getState().discovered[inner.event.id]?.chestId).toBe('d'.repeat(64))
     const me = useCyberspace.getState().identity.pubkey
     expect(useOpenedChests.getState().opened[`${me}/${'d'.repeat(64)}`]).toHaveLength(2)
+  })
+
+  it('keeps nothing and finds nothing when the identity changes while the signer decrypts (re-review of #519)', async () => {
+    const lockSk = generateSecretKey()
+    const words = finalizeEvent(messageInnerTemplate('for A only', at, 0, T0), hider) as NostrEvent
+    const sealed = sealEntries([words], getPublicKey(lockSk))
+    const chest: ChestItem = { name: 'Sealed to A', lockPubkey: getPublicKey(lockSk), senderPubkey: sealed.senderPubkey, requires: '', payload: sealed.payload }
+    const was = useCyberspace.getState()
+    const other = getPublicKey(generateSecretKey())
+    try {
+      useCyberspace.setState({
+        decryptSealed: async (sender: string, payload: string) => {
+          // The switch lands while the signer is still answering.
+          useCyberspace.setState({ identity: { ...was.identity, pubkey: other } })
+          return nip44.decrypt(payload, nip44.getConversationKey(lockSk, sender))
+        },
+      })
+      const contents = await openChestHere({ id: 'e'.repeat(64), chest, author: getPublicKey(hider), place: placeAt, sealer: getPublicKey(hider) }, { by: 'self' })
+      expect(contents).toBeNull()
+      expect(useShards.getState().discovered[words.id]).toBeUndefined()
+      expect(useOpenedChests.getState().opened).toEqual({})
+      expect(useInventory.getState().items).toEqual({})
+    } finally {
+      useCyberspace.setState({ identity: was.identity, decryptSealed: was.decryptSealed })
+    }
   })
 
   it('TAKE of an item on a chest\'s row opens, at once, the chest found in play that it opens', () => {

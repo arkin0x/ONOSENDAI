@@ -30,10 +30,16 @@ vi.mock('../../lib/relay', () => ({
   relaySet: () => ['wss://relay.test'],
 }))
 
+// Every decryption of a chest by an item's secret, counted (re-review of #519).
+vi.mock('../../lib/chests', async (actual) => {
+  const real = await actual<typeof import('../../lib/chests')>()
+  return { ...real, openWithSecret: vi.fn(real.openWithSecret) }
+})
+
 import { finalizeEvent, generateSecretKey, getPublicKey } from 'nostr-tools/pure'
 import { newShard } from 'sno-core/shards'
 import { bytesToHex, type NostrEvent } from '../../lib/events'
-import { sealEntries, type ChestEntry } from '../../lib/chests'
+import { openWithSecret, sealEntries, type ChestEntry } from '../../lib/chests'
 import { chestInnerTemplate, chestItemOf, keyInnerTemplate, messageInnerTemplate, shardInnerTemplate, type ChestItem, type Hidden, type KeyItem } from '../../lib/hidden'
 import { heldFromEntry, heldFromPasted, placeOf } from '../../lib/inventory'
 import { useCyberspace } from '../useCyberspace'
@@ -133,6 +139,28 @@ describe('TAKE opens what the item opens, at once (review of #519)', () => {
     expect(S().discovered[behind.id]).toBeUndefined()
     S().takeFound([k.event.id])
     expect(S().discovered[behind.id]?.chestId).toBe(chest.event.id)
+  })
+
+  it('an unrelated TAKE decrypts no chest again: only those locked to what was taken', () => {
+    const lock = keyIn('Boss Key')
+    const owner = useCyberspace.getState().identity.pubkey
+    const held = heldFromPasted(owner, lock.event, lock.key, true, 1)
+    useInventory.setState({ items: { [held.id]: held } })
+    const behind = finalizeEvent(messageInnerTemplate('already open', at, 0, T0), hider) as NostrEvent
+    const opened = chestIn('Opened', lock.key.itemPubkey, [behind])
+    const other = keyIn('Other Key')
+    const shut = chestIn('Shut', other.key.itemPubkey, [finalizeEvent(messageInnerTemplate('behind the other', at, 0, T0), hider) as NostrEvent])
+    const unrelated = keyIn('Unrelated Key')
+    S().addDiscovered([find(opened.event, { type: 'chest', chest: opened.chest }), find(shut.event, { type: 'chest', chest: shut.chest }), find(unrelated.event, { type: 'key', key: unrelated.key }), find(other.event, { type: 'key', key: other.key })])
+    expect(S().discovered[behind.id]).toBeDefined()
+    const decrypt = vi.mocked(openWithSecret)
+    decrypt.mockClear()
+    S().takeFound([unrelated.event.id])
+    expect(decrypt).not.toHaveBeenCalled()
+    // Taking the key the shut chest is locked to opens that one, and only that one.
+    S().takeFound([other.event.id])
+    expect(decrypt).toHaveBeenCalledTimes(1)
+    expect(decrypt.mock.calls[0][0]).toMatchObject({ senderPubkey: shut.chest.senderPubkey })
   })
 
   it('a chest only TV showed stays shut when a played key is taken', () => {

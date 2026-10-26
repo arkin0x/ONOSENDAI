@@ -292,7 +292,7 @@ export function InventoryPanel(): JSX.Element {
     setNote(r.ok ? (r.already ? `Already in your ITEMS: ${r.item?.name}.` : `Held: ${r.item?.name}.`) : r.reason ?? 'Not an item.')
     if (r.ok) setPaste('')
     // A chest found here that it opens opens now, as after TAKE.
-    if (r.ok && !r.already) useShards.getState().reopenChests()
+    if (r.ok && !r.already && r.item?.key) useShards.getState().reopenChests([r.item.key.itemPubkey])
   }
   const count = keys.length + taken.length
 

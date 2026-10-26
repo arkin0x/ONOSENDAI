@@ -853,11 +853,14 @@ interface ShardsState {
    */
   takeFound: (eventIds: string[]) => HeldItem[]
   /**
-   * Open, now, every chest found in play that a held item opens: after TAKE
-   * of an item, the chest beside it opens the moment the item is in ITEMS,
-   * not at the next scan (review of #519). A chest TV showed stays shut.
+   * Open, now, the chests found in play locked to these items' public keys:
+   * after TAKE of an item, the chest beside it opens the moment the item is
+   * in ITEMS, not at the next scan (review of #519). Only those: every other
+   * chest a held item opens was opened when it was found, and decrypting
+   * them all again on each TAKE froze the page (re-review of #519). A chest
+   * inside one of them opens in the same pass. A chest TV showed stays shut.
    */
-  reopenChests: () => void
+  reopenChests: (lockPubkeys: string[]) => void
   /**
    * The items among these that earn the reveal and the toast: never opened on
    * this device before, not this identity's own, not deleted. The scan and a
@@ -2258,13 +2261,16 @@ export const useShards = create<ShardsState>((set, get) => {
       }
       const inv = useInventory.getState()
       const added = [...(inPlay.length > 0 ? inv.holdFinds(inPlay, false, inChest) : []), ...(watchedOnly.length > 0 ? inv.holdFinds(watchedOnly, true, inChest) : [])]
-      if (added.some((r) => r.type === 'key' && !r.watched)) get().reopenChests()
+      const locks = added.filter((r) => r.type === 'key' && !r.watched && r.key).map((r) => r.key!.itemPubkey)
+      if (locks.length > 0) get().reopenChests(locks)
       return added
     },
 
-    reopenChests: () => {
+    reopenChests: (lockPubkeys) => {
+      if (lockPubkeys.length === 0) return
+      const locks = new Set(lockPubkeys)
       const playedIds = playedFinds(cyber().identity.pubkey)
-      const chests = Object.values(get().discovered).filter((h) => h.type === 'chest' && h.chest && playedIds.has(h.eventId))
+      const chests = Object.values(get().discovered).filter((h) => h.type === 'chest' && h.chest && locks.has(h.chest.lockPubkey) && playedIds.has(h.eventId))
       if (chests.length > 0) get().addDiscovered(chests)
     },
 

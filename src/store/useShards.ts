@@ -24,8 +24,9 @@
  * the hider forges, and a chest, contents sealed to a key's or a person's
  * public key (lib/chests.ts). A chest's contents are signed here one by one
  * and sealed before the region key is computed; a key hidden, alone or inside
- * a chest, goes into the hider's own inventory at once (store/useInventory.ts),
- * and every key a scan reads is held the moment it is read. A shard inside a
+ * a chest, goes into the hider's own inventory at once (store/useInventory.ts).
+ * A key a scan reads is found, and held once it is taken (takeFound,
+ * arkinox, 2026-10-26: "i want to TAKE them"). A shard inside a
  * chest may be aimed first (startDeployIntoChest, arkinox 2026-10-10): signed
  * through the deploy bar where it should stand when the chest opens, and
  * sealed as it is.
@@ -87,7 +88,7 @@ import { retractionTemplate } from '../lib/published'
 import { audioInnerTemplate, fadeAt, type AudioItem } from '../lib/audioItem'
 import { resealCopy } from '../lib/audioFile'
 import { openWithSecret, openWithSigner, openerFor, readContents, resealWithout, revealedIn, sealEntries, sealedInside, sealerOf, type OpeningKey } from '../lib/chests'
-import { openingKeys, type HeldItem, type HeldPlace } from '../lib/inventory'
+import { openingKeys, placeOf, type HeldItem, type HeldPlace, type InChest } from '../lib/inventory'
 import { useInventory } from './useInventory'
 import { useShardFolders } from './useShardFolders'
 import { creditOf, useWorkshop } from './useWorkshop'
@@ -852,6 +853,12 @@ interface ShardsState {
    */
   takeFound: (eventIds: string[]) => HeldItem[]
   /**
+   * Open, now, every chest found in play that a held item opens: after TAKE
+   * of an item, the chest beside it opens the moment the item is in ITEMS,
+   * not at the next scan (review of #519). A chest TV showed stays shut.
+   */
+  reopenChests: () => void
+  /**
    * The items among these that earn the reveal and the toast: never opened on
    * this device before, not this identity's own, not deleted. The scan and a
    * rescan both ask here, so "new" means one thing everywhere.
@@ -893,10 +900,16 @@ const seen = loadSeen()
 
 /**
  * Finds that came in play this session (a scan, a chest opened, the found
- * cache's played bags), by event id. A find not among them was only shown
- * by Cyberspace TV, and TAKE holds it as watched (takeFound).
+ * cache's played bags), by event id, for one identity: switching identity
+ * starts it over, so what another identity found in play never makes a find
+ * TV showed this one a played key (review of #519). A find not among them
+ * was only shown by Cyberspace TV, and TAKE holds it as watched (takeFound).
  */
-const playedFinds = new Set<string>()
+const played = { owner: '', ids: new Set<string>() }
+function playedFinds(owner: string): Set<string> {
+  if (played.owner !== owner) { played.owner = owner; played.ids = new Set() }
+  return played.ids
+}
 
 function remember(ids: string[]): void {
   let added = false
@@ -2217,7 +2230,8 @@ export const useShards = create<ShardsState>((set, get) => {
       // from a bag. i want to TAKE them"): a key waits for TAKE (takeFound).
       // One TV showed and that is now found in play is an ordinary key.
       if (!watched) {
-        for (const h of all) playedFinds.add(h.eventId)
+        const playedIds = playedFinds(me)
+        for (const h of all) playedIds.add(h.eventId)
         useInventory.getState().markPlayed(all)
       }
       // What a door revealed gets the find ceremony, as a scan's finds do.
@@ -2230,10 +2244,28 @@ export const useShards = create<ShardsState>((set, get) => {
       const muted = useMutes.getState().muted
       // What the mute list hides is neither listed nor taken (review of #464, S5).
       const finds = eventIds.map((id) => discovered[id]).filter((h): h is Hidden => !!h && h.type === 'key' && !findHidden(h, muted, me))
-      const played = finds.filter((h) => playedFinds.has(h.eventId))
-      const watchedOnly = finds.filter((h) => !playedFinds.has(h.eventId))
+      const playedIds = playedFinds(me)
+      const inPlay = finds.filter((h) => playedIds.has(h.eventId))
+      const watchedOnly = finds.filter((h) => !playedIds.has(h.eventId))
+      // One revealed from a chest is held as taken from it, the row its
+      // chest's own TAKE writes (lib/inventory heldFromFind).
+      const inChest = (h: Hidden): InChest | null => {
+        if (!h.chestId) return null
+        const chest = discovered[h.chestId] ?? get().mine.find((d) => d.eventId === h.chestId)
+        const name = chest?.chest?.name ?? ''
+        const place = chest ? { lookupId: chest.lookupId, bagId: chest.bagId, at: { x: chest.at.x.toString(), y: chest.at.y.toString(), z: chest.at.z.toString() }, plane: chest.plane, height: chest.height } : placeOf(h)
+        return { from: { chestId: h.chestId, chestName: name }, place }
+      }
       const inv = useInventory.getState()
-      return [...(played.length > 0 ? inv.holdFinds(played) : []), ...(watchedOnly.length > 0 ? inv.holdFinds(watchedOnly, true) : [])]
+      const added = [...(inPlay.length > 0 ? inv.holdFinds(inPlay, false, inChest) : []), ...(watchedOnly.length > 0 ? inv.holdFinds(watchedOnly, true, inChest) : [])]
+      if (added.some((r) => r.type === 'key' && !r.watched)) get().reopenChests()
+      return added
+    },
+
+    reopenChests: () => {
+      const playedIds = playedFinds(cyber().identity.pubkey)
+      const chests = Object.values(get().discovered).filter((h) => h.type === 'chest' && h.chest && playedIds.has(h.eventId))
+      if (chests.length > 0) get().addDiscovered(chests)
     },
 
     freshOf: (items) => {

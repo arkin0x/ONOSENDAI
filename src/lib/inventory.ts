@@ -46,6 +46,12 @@ export interface HeldFrom {
   chestName: string
 }
 
+/** A find that came out of a chest: the chest, and where the chest stands. */
+export interface InChest {
+  from: HeldFrom
+  place: HeldPlace
+}
+
 /** One held item: a key, or a content taken from a chest. One row per item per identity. */
 export interface HeldItem {
   /** The IndexedDB key: `${owner}/${id}`. */
@@ -132,13 +138,17 @@ function row(owner: string, event: NostrEvent, body: ItemBody, verified: boolean
  * for anything that is not a key with its event: the ceremony's preview items
  * come out of no bag and carry none.
  */
-export function heldFromFind(owner: string, h: Hidden, at: number, watched = false): HeldItem | null {
+export function heldFromFind(owner: string, h: Hidden, at: number, watched = false, inChest: InChest | null = null): HeldItem | null {
   if (h.type !== 'key' || !h.key || !h.inner) return null
   // A bag's items are verified against the bag's author before they are found
   // at all (hidden.ts innerAuthentic), and a key is never a rumor there. One
   // revealed from a chest is a fact unless its reading said it is a claim
-  // (chests.ts revealedIn `claim`).
-  const held = row(owner, h.inner as NostrEvent, { type: 'key', key: h.key }, !h.claim, 'found', placeOf(h), null, at)
+  // (chests.ts revealedIn `claim`). One out of a chest is held as taken
+  // from it, at the chest's place, the same row TAKE on the chest's own
+  // list writes (heldFromEntry), whichever TAKE was pressed.
+  const held = inChest
+    ? row(owner, h.inner as NostrEvent, { type: 'key', key: h.key }, !h.claim, 'taken', inChest.place, inChest.from, at)
+    : row(owner, h.inner as NostrEvent, { type: 'key', key: h.key }, !h.claim, 'found', placeOf(h), null, at)
   return watched ? { ...held, watched: true } : held
 }
 

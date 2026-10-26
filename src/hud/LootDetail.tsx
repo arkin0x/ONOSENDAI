@@ -36,7 +36,7 @@ import { useMutes } from '../store/useMutes'
 import type { Muted } from '../lib/muteList'
 import { BlockButton } from './BlockButton'
 import { ProfilePic, ProfileTap } from './ProfileBadge'
-import { ChestBlock, KeyLine } from './ItemRows'
+import { ChestBlock, KeyLine, listedOnce, useChestOpen } from './ItemRows'
 import { useEscape } from '../hooks/useEscape'
 import { useBagReading } from '../hooks/useBagReadings'
 
@@ -56,6 +56,8 @@ interface OpenedItem {
   chest?: ChestItem
   /** Where it was found, for what is taken out of a chest here. */
   place: HeldPlace
+  /** The chest it came out of, when it did. */
+  chestId?: string
 }
 
 /** A message's preview, or what its Cashu token holds when it carries one; a coin that cannot be read is still a coin. */
@@ -111,6 +113,7 @@ function openedItems(item: LootItem, discovered: ReturnType<typeof useShards.get
       key: h.key,
       chest: h.chest,
       place: placeOf(h),
+      chestId: h.chestId,
     })
   }
   for (const d of mine) {
@@ -151,13 +154,16 @@ export function LootDetail(): JSX.Element | null {
   // on any bag rendered one hook more than the empty render before it, and
   // React threw error 310 (arkinox, 2026-10-09).
   const reading = useBagReading(item?.bagId ?? '')
+  const chestOpen = useChestOpen()
 
   if (!item) return null
 
   const npub = safeNpub(item.author)
   const name = profileLabel(profile, npub)
   const yours = item.author === me
-  const opened = openedItems(item, discovered, mine, muted, me)
+  // A thing that came out of a chest open in this bag is listed under that
+  // chest, with its TAKE, and not again on its own (review of #519).
+  const opened = listedOnce(openedItems(item, discovered, mine, muted, me), (o) => o.eventId, chestOpen)
   const close = (): void => useLootView.getState().select(null)
 
   const view = (o: OpenedItem): void => {

@@ -42,7 +42,7 @@ import { heldFromEntry, heldFromPasted, type HeldItem } from '../../lib/inventor
 import { useCyberspace } from '../../store/useCyberspace'
 import { useInventory } from '../../store/useInventory'
 import { useShards } from '../../store/useShards'
-import { ChestContents, KeyLine, takeableOf } from '../ItemRows'
+import { ChestContents, KeyLine, listedOnce, openChestHere, takeEntries, takeableOf, useOpenedChests } from '../ItemRows'
 import { metadataOpen } from '../Metadata'
 import { SecretModal } from '../SecretModal'
 
@@ -72,6 +72,7 @@ const takes = (html: string): string[] => [...html.matchAll(/<button class="ches
 beforeEach(() => {
   useShards.setState({ mine: [], discovered: {}, deleted: {}, deletedBags: {}, selectedSecret: null, curated: null })
   useInventory.setState({ owner: useCyberspace.getState().identity.pubkey, items: {}, storage: 'memory' })
+  useOpenedChests.setState({ opened: {} })
   localStorage.removeItem('onosendai:metadataOpen')
 })
 
@@ -123,6 +124,43 @@ describe('an opened chest\'s rows', () => {
     const html = render(<ChestContents entries={entries} from={from} place={null} />)
     expect(takes(html)).toEqual(['TAKEN', 'TAKEN', 'TAKEN', 'TAKE ALL'])
     expect(html).toMatch(/disabled=""[^>]*>TAKE ALL/)
+  })
+})
+
+describe('OPEN and TAKE on a chest (review of #519)', () => {
+  const placeAt = { lookupId: 'lookup', bagId: 'bag', at: { x: '1', y: '2', z: '3' }, plane: 0 as const, height: 4 }
+
+  it('OPEN holds nothing: what is inside is found in place and waits for TAKE', async () => {
+    const lock = keyIn('Boss Key')
+    const inner = keyIn('Fire Key')
+    const words = finalizeEvent(messageInnerTemplate('inside', at, 0, T0), hider) as NostrEvent
+    const sealed = sealEntries([inner.event, words], lock.key.itemPubkey)
+    const chest: ChestItem = { name: 'Strongbox', lockPubkey: lock.key.itemPubkey, senderPubkey: sealed.senderPubkey, requires: '', payload: sealed.payload }
+    const contents = await openChestHere({ id: 'd'.repeat(64), chest, author: getPublicKey(hider), place: placeAt, sealer: getPublicKey(hider) }, { by: 'key', key: { id: lock.event.id, itemPubkey: lock.key.itemPubkey, secretHex: lock.key.secretHex } })
+    expect(contents.map((e) => e.id).sort()).toEqual([inner.event.id, words.id].sort())
+    expect(useInventory.getState().items).toEqual({})
+    expect(useShards.getState().discovered[inner.event.id]?.chestId).toBe('d'.repeat(64))
+    const me = useCyberspace.getState().identity.pubkey
+    expect(useOpenedChests.getState().opened[`${me}/${'d'.repeat(64)}`]).toHaveLength(2)
+  })
+
+  it('TAKE of an item on a chest\'s row opens, at once, the chest found in play that it opens', () => {
+    const k = keyIn('Gate Key')
+    const behind = finalizeEvent(messageInnerTemplate('the room', at, 0, T0), hider) as NostrEvent
+    const sealed = sealEntries([behind], k.key.itemPubkey)
+    const item: ChestItem = { name: 'Gate', lockPubkey: k.key.itemPubkey, senderPubkey: sealed.senderPubkey, requires: '', payload: sealed.payload }
+    const gate = finalizeEvent(chestInnerTemplate(item, at, 0, T0), hider) as NostrEvent
+    useShards.getState().addDiscovered([find(gate, { type: 'chest', chest: chestItemOf(gate)! })])
+    expect(useShards.getState().discovered[behind.id]).toBeUndefined()
+    takeEntries([{ id: k.event.id, event: k.event, verified: true, body: { type: 'key', key: k.key } }], from, null)
+    expect(useShards.getState().discovered[behind.id]?.chestId).toBe(gate.id)
+  })
+
+  it('lists a thing out of a chest once: under the chest while it is open in the same list, else on its own', () => {
+    const rows = [{ id: 'c', type: 'chest' }, { id: 'k', type: 'key', chestId: 'c' }, { id: 'm', type: 'message', chestId: 'elsewhere' }, { id: 'n', type: 'message' }]
+    const ids = (open: (c: string) => boolean): string[] => listedOnce(rows, (r) => r.id, open).map((r) => r.id)
+    expect(ids(() => false)).toEqual(['c', 'k', 'm', 'n'])
+    expect(ids((c) => c === 'c' || c === 'elsewhere')).toEqual(['c', 'm', 'n'])
   })
 })
 

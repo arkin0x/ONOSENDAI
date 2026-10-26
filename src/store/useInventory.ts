@@ -24,7 +24,7 @@ import { create } from 'zustand'
 import type { NostrEvent } from '../lib/events'
 import type { ChestEntry } from '../lib/chests'
 import type { Hidden, KeyItem } from '../lib/hidden'
-import { KEY_TEXT_PREFIX, addHeld, heldFromEntry, heldFromFind, heldFromForged, heldFromPasted, holdsModel, parseKeyText, type HeldFrom, type HeldItem, type HeldPlace } from '../lib/inventory'
+import { KEY_TEXT_PREFIX, addHeld, heldFromEntry, heldFromFind, heldFromForged, heldFromPasted, holdsModel, parseKeyText, type HeldFrom, type HeldItem, type HeldPlace, type InChest } from '../lib/inventory'
 import { describeError } from '../lib/secrets/db'
 import { openInventoryDb, readHeld, writeHeld } from '../lib/inventoryDb'
 import { useCyberspace } from './useCyberspace'
@@ -59,7 +59,7 @@ interface InventoryState {
    * so a scan never calls this; TAKE on a found item does. `watched` holds
    * a key only Cyberspace TV showed as watched: it opens nothing by itself.
    */
-  holdFinds: (finds: Hidden[], watched?: boolean) => HeldItem[]
+  holdFinds: (finds: Hidden[], watched?: boolean, inChest?: (h: Hidden) => InChest | null) => HeldItem[]
   /** A scan found these in play: a key held as watched (TV showed it) is an ordinary key from here on. Holds nothing new. */
   markPlayed: (finds: Hidden[]) => void
   /** Hold a key this identity forged and hid, at once (B1 §3.1). */
@@ -160,12 +160,12 @@ export const useInventory = create<InventoryState>((set, get) => {
 
   flush: () => writes,
 
-  holdFinds: (finds, watched = false) => {
+  holdFinds: (finds, watched = false, inChest) => {
     const owner = ownerNow()
     const at = now()
     const rows: HeldItem[] = []
     for (const h of finds) {
-      const r = heldFromFind(owner, h, at, watched)
+      const r = heldFromFind(owner, h, at, watched, inChest?.(h) ?? null)
       if (r) rows.push(r)
     }
     if (!watched) get().markPlayed(finds)

@@ -35,7 +35,7 @@ import { newShard } from 'sno-core/shards'
 import { bytesToHex, type NostrEvent } from '../../lib/events'
 import { sealEntries, type ChestEntry } from '../../lib/chests'
 import { chestInnerTemplate, chestItemOf, keyInnerTemplate, messageInnerTemplate, shardInnerTemplate, type ChestItem, type Hidden, type KeyItem } from '../../lib/hidden'
-import { heldFromPasted } from '../../lib/inventory'
+import { heldFromEntry, heldFromPasted, placeOf } from '../../lib/inventory'
 import { useCyberspace } from '../useCyberspace'
 import { useInventory } from '../useInventory'
 import { useShards } from '../useShards'
@@ -121,6 +121,68 @@ describe('only what is taken opens a chest', () => {
     expect(I().items[innerKey.event.id]?.key?.itemPubkey).toBe(innerKey.key.itemPubkey)
     S().addDiscovered(chests)
     expect(S().discovered[behind.id]?.chestId).toBe(second.event.id)
+  })
+})
+
+describe('TAKE opens what the item opens, at once (review of #519)', () => {
+  it('a chest found in play beside the key opens the moment the key is taken, not at the next scan', () => {
+    const k = keyIn('Gate Key')
+    const behind = finalizeEvent(messageInnerTemplate('the room', at, 0, T0), hider) as NostrEvent
+    const chest = chestIn('Gate', k.key.itemPubkey, [behind])
+    S().addDiscovered([find(k.event, { type: 'key', key: k.key }), find(chest.event, { type: 'chest', chest: chest.chest })])
+    expect(S().discovered[behind.id]).toBeUndefined()
+    S().takeFound([k.event.id])
+    expect(S().discovered[behind.id]?.chestId).toBe(chest.event.id)
+  })
+
+  it('a chest only TV showed stays shut when a played key is taken', () => {
+    const k = keyIn('Gate Key')
+    const behind = finalizeEvent(messageInnerTemplate('the room', at, 0, T0), hider) as NostrEvent
+    const chest = chestIn('Gate', k.key.itemPubkey, [behind])
+    S().addDiscovered([find(chest.event, { type: 'chest', chest: chest.chest })], { watched: true })
+    S().addDiscovered([find(k.event, { type: 'key', key: k.key })])
+    S().takeFound([k.event.id])
+    expect(I().items[k.event.id]?.watched).toBeUndefined()
+    expect(S().discovered[behind.id]).toBeUndefined()
+  })
+})
+
+describe('a key out of a chest is held one way, whichever TAKE (review of #519)', () => {
+  it('TAKE on its own row holds it as taken from the chest, at the chest\'s place, as the chest\'s TAKE does', () => {
+    const outer = keyIn('Outer Key')
+    const inner = keyIn('Inner Key')
+    const chest = chestIn('Strongbox', outer.key.itemPubkey, [inner.event])
+    const owner = useCyberspace.getState().identity.pubkey
+    const held = heldFromPasted(owner, outer.event, outer.key, true, 1)
+    useInventory.setState({ items: { [held.id]: held } })
+    const chestFind = find(chest.event, { type: 'chest', chest: chest.chest })
+    S().addDiscovered([chestFind])
+    S().takeFound([inner.event.id])
+    const row = I().items[inner.event.id]
+    const fromChest = heldFromEntry(owner, { id: inner.event.id, event: inner.event, verified: true, body: { type: 'key', key: inner.key } }, { chestId: chest.event.id, chestName: 'Strongbox' }, placeOf(chestFind), row.at)
+    // As data: nostr-tools marks an event object it verified with a symbol.
+    const plain = (x: unknown): unknown => JSON.parse(JSON.stringify(x))
+    expect(plain(row)).toEqual(plain(fromChest))
+    expect(row.source).toBe('taken')
+  })
+})
+
+describe('what another identity found in play (review of #519)', () => {
+  it('does not make a key TV showed this identity a played key', () => {
+    const k = keyIn('TV Key')
+    S().addDiscovered([find(k.event, { type: 'key', key: k.key })])
+    const was = useCyberspace.getState().identity
+    try {
+      const other = getPublicKey(generateSecretKey())
+      useCyberspace.setState({ identity: { ...was, pubkey: other } })
+      useInventory.setState({ owner: other, items: {} })
+      useShards.setState({ discovered: {} })
+      S().addDiscovered([find(k.event, { type: 'key', key: k.key })], { watched: true })
+      S().takeFound([k.event.id])
+      expect(I().items[k.event.id]?.watched).toBe(true)
+    } finally {
+      useCyberspace.setState({ identity: was })
+    }
   })
 })
 

@@ -14,7 +14,8 @@
  *   - a shard, kind 3330 (v1's shard kind), geometry in the content;
  *   - a message, kind 1, text in the content;
  *   - a key, kind 3340: an item that is a keypair. The content is the item's
- *     private key, so reading it is holding it (Keys and Chests B1, §2.1);
+ *     private key, so whoever reads it can hold it, and does once they TAKE
+ *     it (Keys and Chests B1, §2.1; arkinox, 2026-10-26);
  *   - a chest, kind 3341: a list of entries sealed with NIP-44 v2 to a public
  *     key, an item's or a person's (B1 §2.2). The sealing and opening live in
  *     lib/chests.ts; here the chest is read as an item like any other.

@@ -53,14 +53,30 @@ interface Props {
   keepShape?: boolean
   /** The name label's size, CSS px before labelShrink: larger on Cyberspace TV, read from across a room. */
   labelPx?: number
+  /**
+   * The zoom `place` draws at, when a change of it mid-glide should rescale
+   * the glide rather than leave it in the old zoom's cells: Cyberspace TV,
+   * which zooms while its avatars move (lib/tv/zoom.ts). Left out, as
+   * everywhere else, a glide is never touched by a zoom.
+   */
+  scaleExp?: number
 }
 
-export function OtherAvatar({ pubkey, color, center, position, place, turn, label, labelOpacity, tappable = true, size, keepShape = false, labelPx = 11 }: Props): JSX.Element {
+export function OtherAvatar({ pubkey, color, center, position, place, turn, label, labelOpacity, tappable = true, size, keepShape = false, labelPx = 11, scaleExp }: Props): JSX.Element {
   const drawn = useRef<Group>(null)
   const placed = useRef<Group>(null)
   const lerp = useRef(new AvatarLerp())
   const out = useRef<Vec3>([0, 0, 0])
   const last = useRef<Position>(position)
+  const zoomWas = useRef(scaleExp)
+  // Before the move's effect below, so a move landing in the same commit as
+  // a zoom adds its own offset (in the new zoom's cells) to a glide already
+  // put in them.
+  useLayoutEffect(() => {
+    const was = zoomWas.current
+    zoomWas.current = scaleExp
+    if (was !== undefined && scaleExp !== undefined && was !== scaleExp) lerp.current.rescale(2 ** (was - scaleExp))
+  }, [scaleExp])
   const moveKey = `${position.x},${position.y},${position.z}`
   // A layout effect, so the glide is registered before a frame can draw the
   // avatar at its new place with no offset: that frame was the avatar

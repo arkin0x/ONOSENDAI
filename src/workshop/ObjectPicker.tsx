@@ -17,6 +17,7 @@ import { fromPayload, type Ref, type ShardModel } from 'sno-core/shards'
 import { GENERAL_RELAYS } from '../lib/contacts'
 import type { NostrEvent } from '../lib/events'
 import { fetchRef } from '../lib/parts'
+import { keepOwnTable } from '../lib/carried'
 import { queryAny, relaySet } from '../lib/relay'
 import { useCyberspace } from '../store/useCyberspace'
 import { useWorkshop, type StampObject } from '../store/useWorkshop'
@@ -57,7 +58,8 @@ export function objectsOf(events: NostrEvent[]): Found[] {
   for (const [key, ev] of newest) {
     let raw: unknown
     try { raw = JSON.parse(ev.content) } catch { continue }
-    const shard = fromPayload(raw, key)
+    const read = fromPayload(raw, key)
+    const shard = read && keepOwnTable(read, ev.pubkey)
     if (shard) out.push({ address: `${OBJECT_KIND}:${key}`, shard, at: ev.created_at })
   }
   return out.sort((a, b) => b.at - a.at)
@@ -110,7 +112,8 @@ export function ObjectPicker({ onClose }: { onClose: () => void }): JSX.Element 
     const ref = refOf(parsed.address, parsed.relay)
     const raw = await fetchRef(ref)
     setBusy(false)
-    const shard = raw == null ? null : fromPayload(raw, parsed.address)
+    const read = raw == null ? null : fromPayload(raw, parsed.address)
+    const shard = read && keepOwnTable(read, parsed.address.split(':')[1])
     if (!shard) { setStatus(raw == null ? 'No relay had that object.' : 'That object is not one the format can read.'); return }
     choose({ ref, name: shard.name, shard })
   }

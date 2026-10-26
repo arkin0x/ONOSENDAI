@@ -6,7 +6,8 @@
  * (store/useThumbs, lib/thumbDb). A picture is of a shape, so it is kept
  * under a hash of exactly what the picture shows: the mode, the vertices
  * with their colours, the faces, the face colours, and what the object
- * places with how it places them. The name, the id and the time of the last
+ * places with how it places them, and the objects it carries for those
+ * placements (DECK-0003 §1.10), since they are what is drawn there. The name, the id and the time of the last
  * edit are left out. An edit to the shape is a new key, so the row asks for
  * a new picture; a rename keeps the old one. A model in the workshop and the
  * same object in the feed share one picture.
@@ -54,7 +55,9 @@ export function thumbKeyOf(shard: ShardModel): string {
   if (kept) return kept
   // The unit matters only to how big a placed object is beside this one's own vertices.
   const composite = isComposite(shard)
-  const text = JSON.stringify([LOOK, shard.mode, shard.vertices, shard.faces, shard.facecolors ?? null, composite ? shard.refs : null, composite ? shard.parts : null, composite ? shard.unit : 0])
+  // The carried objects only when there are any, so every key made before they existed stays as it was.
+  const carried = composite && shard.objects ? [shard.objects] : []
+  const text = JSON.stringify([LOOK, shard.mode, shard.vertices, shard.faces, shard.facecolors ?? null, composite ? shard.refs : null, composite ? shard.parts : null, composite ? shard.unit : 0, ...carried])
   const key = `shape:${hash53(text)}${hash53(text, 0x9e3779b9)}`
   keys.set(shard, key)
   return key

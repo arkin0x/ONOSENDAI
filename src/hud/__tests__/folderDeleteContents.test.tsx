@@ -56,7 +56,7 @@ afterEach(() => { useShardFolders.setState({ tree: EMPTY_TREE }) })
 describe('the confirmation', () => {
   it('opens with the switch off: preserve, today\'s button, not red', () => {
     const kit = setup()
-    const html = renderToStaticMarkup(<DeleteFolder node={kit} up="the top" refOf={id} deleteContents={{ remove: () => undefined, published: () => 0 }} onDone={() => undefined} />)
+    const html = renderToStaticMarkup(<DeleteFolder node={kit} up="the top" refOf={id} deleteContents={{ remove: async () => true, published: () => 0 }} onDone={() => undefined} />)
     expect(html).toContain('Delete folder &quot;maze-kit&quot;?')
     expect(html).toContain('Preserve contents and expand to the top.')
     expect(html).toContain('role="switch"')
@@ -88,13 +88,13 @@ describe('the confirmation', () => {
 })
 
 describe('the yes', () => {
-  it('on: every shard and folder inside, at any depth, goes, and nothing outside', () => {
+  it('on: every shard and folder inside, at any depth, goes, and nothing outside', async () => {
     const kit = setup()
-    const remove = vi.fn()
+    const remove = vi.fn(async (_refs: string[]) => true)
     const published = vi.fn(() => 0)
     const sets = vi.fn()
     const off = useShardFolders.subscribe(sets)
-    deleteFolderNow(kit, true, id, { remove, published })
+    expect(await deleteFolderNow(kit, true, id, { remove, published })).toBe(true)
     off()
     expect(remove).toHaveBeenCalledTimes(1)
     expect([...remove.mock.calls[0][0]].sort()).toEqual([...INSIDE].sort())
@@ -105,10 +105,10 @@ describe('the yes', () => {
     expect(sets).toHaveBeenCalledTimes(1)
   })
 
-  it('on, for a folder inside: its parent and siblings stay', () => {
+  it('on, for a folder inside: its parent and siblings stay', async () => {
     setup()
-    const remove = vi.fn()
-    deleteFolderNow(node('cistern'), true, id, { remove, published: () => 0 })
+    const remove = vi.fn(async (_refs: string[]) => true)
+    await deleteFolderNow(node('cistern'), true, id, { remove, published: () => 0 })
     expect([...remove.mock.calls[0][0]].sort()).toEqual(['arch', 'corner1', 'corner2', 'drain', 'wall'])
     const t = useShardFolders.getState().tree
     expect(Object.keys(t.folders).sort()).toEqual(['kit', 'other', 'water'])
@@ -116,10 +116,10 @@ describe('the yes', () => {
     expect(folderOf(t, 'pond')).toBe('water')
   })
 
-  it('off: no shard is deleted and what was inside moves up', () => {
+  it('off: no shard is deleted and what was inside moves up', async () => {
     const kit = setup()
-    const remove = vi.fn()
-    deleteFolderNow(kit, false, id, { remove, published: () => 0 })
+    const remove = vi.fn(async (_refs: string[]) => true)
+    expect(await deleteFolderNow(kit, false, id, { remove, published: () => 0 })).toBe(true)
     expect(remove).not.toHaveBeenCalled()
     const t = useShardFolders.getState().tree
     expect(t.folders.kit).toBeUndefined()
@@ -127,6 +127,37 @@ describe('the yes', () => {
     expect(t.folders.water.parent).toBeNull()
     expect(folderOf(t, 'gate')).toBeNull()
     expect(folderOf(t, 'corner1')).toBe('corners')
+  })
+})
+
+describe('the folders wait for the shards to be saved (review of PR 509)', () => {
+  it('takes no folder until the shard write has committed', async () => {
+    const kit = setup()
+    const before = useShardFolders.getState().tree
+    let land: (ok: boolean) => void = () => undefined
+    const remove = vi.fn(() => new Promise<boolean>((resolve) => { land = resolve }))
+    const done = deleteFolderNow(kit, true, id, { remove, published: () => 0 })
+    await Promise.resolve()
+    expect(remove).toHaveBeenCalledTimes(1)
+    expect(useShardFolders.getState().tree).toBe(before)
+    land(true)
+    expect(await done).toBe(true)
+    expect(Object.keys(useShardFolders.getState().tree.folders)).toEqual(['other'])
+  })
+
+  it('a failed shard write leaves every folder and filing as it was, so nothing comes back loose', async () => {
+    const kit = setup()
+    const before = useShardFolders.getState().tree
+    expect(await deleteFolderNow(kit, true, id, { remove: async () => false, published: () => 0 })).toBe(false)
+    expect(useShardFolders.getState().tree).toBe(before)
+    expect(folderOf(before, 'corner1')).toBe('corners')
+  })
+
+  it('a write that throws is a failed one', async () => {
+    const kit = setup()
+    const before = useShardFolders.getState().tree
+    expect(await deleteFolderNow(kit, true, id, { remove: async () => { throw new Error('QuotaExceededError') }, published: () => 0 })).toBe(false)
+    expect(useShardFolders.getState().tree).toBe(before)
   })
 })
 

@@ -45,6 +45,7 @@ import {
   type ShardModel,
   type ShardVertex, type Part, type Ref, cloneVertex, hexToRgb, rgbToHex } from 'sno-core/shards'
 import { withOpacity } from '../lib/opacityStep'
+import { noTable, signedTableOnly, you } from '../lib/carried'
 import { authoredConstrainOf, chosenConstrainOf, withConstrain, type Constrain } from '../lib/walkConstrain'
 import { addPart, quarterTurnPart, removeParts } from 'sno-core/parts'
 import { FLOOR, MAX_SIZE, MIN_SIZE, stamp, type Facing, type StampKind, type WorkPlane } from 'sno-core/stamps'
@@ -392,9 +393,16 @@ export interface WorkshopState {
    * relays. The shard on the bench, when it is one of them, gives way to the
    * newest left, and to a new empty one when none is left, so the bench never
    * holds a shard that is gone. When it is not one of them it stays open as it
-   * was, its undo with it.
+   * was, its undo with it. STAMP's chosen object lets go when it was one of
+   * them (your own object, by its `d`).
+   *
+   * Resolves true once the deletion has committed to storage (saveNow), false
+   * when the write failed: the shards are then gone from this tab only, and
+   * come back on a reload unless a later save lands. A folder's DELETE
+   * CONTENTS waits for true before it takes the folders (hud/ShardFolders
+   * deleteFolderNow), so a failed write never leaves them loose at the top.
    */
-  removeMany: (ids: readonly string[]) => void
+  removeMany: (ids: readonly string[]) => Promise<boolean>
   setMode: (mode: ShardMode) => void
   /**
    * How solid the shard draws, a whole percent (DECK-0003 §1.11): 100 is
@@ -962,8 +970,11 @@ export const useWorkshop = create<WorkshopState>((set, get) => {
       const out = new Set(ids)
       const { shards, currentId } = get()
       let list = shards.filter((s) => !out.has(s.id))
-      if (list.length === shards.length) return
-      if (currentId === null || !out.has(currentId)) { set({ shards: list }); save(list); return }
+      if (list.length === shards.length) return Promise.resolve(true)
+      const stamp = get().stampObject
+      const stampGone = !!stamp && (out.has(stamp.shard.id) || (stamp.ref[0] === 'a' && out.has(stamp.ref[1].split(':').slice(2).join(':'))))
+      const stampState = stampGone ? { stampObject: null } : {}
+      if (currentId === null || !out.has(currentId)) { set({ shards: list, ...stampState }); save(list); return saveStored() }
       let next = newestId(list)
       // Nothing left while the workshop is open: a new empty shard, as opening an empty workshop makes one.
       if (next === null && get().open) {
@@ -971,7 +982,8 @@ export const useWorkshop = create<WorkshopState>((set, get) => {
         list = [...list, s]
         next = s.id
       }
-      set({ shards: list, currentId: next, selection: [], partSel: [], selectedFace: null, facePick: [], past: [], future: [], notice: null }); save(list)
+      set({ shards: list, currentId: next, selection: [], partSel: [], selectedFace: null, facePick: [], past: [], future: [], notice: null, ...stampState }); save(list)
+      return saveStored()
     },
 
     setMode: (mode) => edit((s) => ({ ...s, mode })),
@@ -1594,15 +1606,22 @@ export const useWorkshop = create<WorkshopState>((set, get) => {
     },
 
     importText: (text) => {
-      const s = shardFromText(text, uuid())
-      if (!s) return null
+      const read = shardFromText(text, uuid())
+      if (!read) return null
+      // Text nobody signed: nothing it carries is trusted (lib/carried.ts noTable).
+      const s = noTable(read)
       const list = [...get().shards, s]
       set({ shards: list, currentId: s.id, selection: [], partSel: [], selectedFace: null, facePick: [], past: [], future: [], notice: null })
       save(list)
       return s.id
     },
 
-    importShard: (model, credit, id) => {
+    importShard: (given, credit, id) => {
+      // A copy from the feed, a bag, a chest or an avatar: what it carries comes
+      // in only when you signed the event it was read from (lib/carried.ts
+      // signedTableOnly), so a key someone else wrote under your name is never
+      // published again as yours.
+      const model = signedTableOnly(given, you())
       const taken = new Set(get().shards.map((s) => s.name))
       // Your own object comes back under its own name: there is no other to be a copy of.
       const name = !id && taken.has(model.name) ? `${model.name} copy` : model.name
@@ -1613,8 +1632,10 @@ export const useWorkshop = create<WorkshopState>((set, get) => {
       return copy.id
     },
 
-    addShard: (model, name, id) => {
+    addShard: (given, name, id) => {
       if (id !== undefined && get().shards.some((s) => s.id === id)) return null
+      // An import (a file, a zip): nobody signed it, so nothing it carries is trusted.
+      const model = noTable(given)
       const copy: ShardModel = { ...model, id: id ?? uuid(), name: name.slice(0, 64), vertices: model.vertices.map(cloneVertex), faces: model.faces.map((f) => [...f] as [number, number, number]), updatedAt: Date.now() }
       const list = [...get().shards, copy]
       set({ shards: list })
@@ -1624,7 +1645,9 @@ export const useWorkshop = create<WorkshopState>((set, get) => {
 
     saveNow: () => saveStored(),
 
-    replaceShard: (id, model) => {
+    replaceShard: (id, given) => {
+      // An import's UPDATE: nobody signed it, so nothing it carries is trusted.
+      const model = noTable(given)
       const { shards, currentId, past } = get()
       const i = shards.findIndex((s) => s.id === id)
       if (i < 0) return Promise.resolve('missing')

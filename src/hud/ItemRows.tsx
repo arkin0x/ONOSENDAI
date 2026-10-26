@@ -24,7 +24,6 @@
  */
 
 import { useCallback, useMemo, useState } from 'react'
-import { create } from 'zustand'
 import { useProfile } from '../hooks/useProfile'
 import { cashuLabel, readCashuToken } from '../lib/cashu'
 import { chestSealer, openWithSecret, openWithSigner, openerFor, readContents, requiresLabel, revealedIn, type ChestEntry, type Opener } from '../lib/chests'
@@ -36,6 +35,7 @@ import { holdsModel, openingKeys, type HeldFrom, type HeldItem, type HeldPlace }
 import { safeNpub } from '../lib/npub'
 import { useCyberspace } from '../store/useCyberspace'
 import { useInventory } from '../store/useInventory'
+import { openedKey, rememberOpened, useOpenedChests } from '../store/useOpenedChests'
 import { profileLabel } from '../store/useProfiles'
 import { useMutes } from '../store/useMutes'
 import { hidesThing, type Muted } from '../lib/muteList'
@@ -80,17 +80,6 @@ function heldIn(items: Record<string, HeldItem>, entry: ChestEntry): boolean {
   return !!items[entry.id] || (entry.body.type === 'shard' && !!entry.body.shard && holdsModel(items, entry.body.shard))
 }
 
-/**
- * The chests opened here this session, by `${identity}/${chest id}`, with
- * what was inside: a chest opened in one list stays open in the next, and a
- * list can leave out the rows of its contents found on their own, which the
- * chest lists already (one row per thing, review of #519). Per identity, so
- * another identity on this device never sees what this one's keys opened.
- */
-export const useOpenedChests = create<{ opened: Record<string, ChestEntry[]> }>(() => ({ opened: {} }))
-
-export const openedKey = (me: string, chestId: string): string => `${me}/${chestId}`
-
 /** Whether this identity has a chest open here, by its id: its contents are listed under it. */
 export function useChestOpen(): (chestId: string | undefined) => boolean {
   const me = useCyberspace((s) => s.identity.pubkey)
@@ -125,19 +114,9 @@ export async function openChestHere(c: { id: string; chest: ChestItem; author: s
     const door = { eventId: c.id, bagId: c.place.bagId, lookupId: c.place.lookupId, author: c.author, at: positionOf(c.place), plane: c.place.plane, height: c.place.height }
     useShards.getState().addDiscovered(revealedIn(door, contents))
   }
-  useOpenedChests.setState((s) => ({ opened: { ...s.opened, [openedKey(me, c.id)]: contents } }))
+  // Opened by hand: it stays opened, and a reload opens it again (store/useOpenedChests).
+  rememberOpened(me, c.id, contents)
   return contents
-}
-
-/**
- * TAKE out of a chest: hold these, and when an item is among them, open at
- * once the chests found in play locked to it (useShards reopenChests).
- */
-export function takeEntries(entries: ChestEntry[], from: HeldFrom, place: HeldPlace | null): HeldItem[] {
-  const added = useInventory.getState().take(entries, from, place)
-  const locks = added.filter((r) => r.type === 'key' && r.key).map((r) => r.key!.itemPubkey)
-  if (locks.length > 0) useShards.getState().reopenChests(locks)
-  return added
 }
 
 /** The row label of a content: a coin's amount, else the item's label. */
@@ -227,7 +206,7 @@ export function ChestContents({ entries, from, place }: { entries: ChestEntry[];
     <ul className="chest__contents">
       {entries.map((e) => <ContentRow key={e.id} entry={e} from={from} place={place} />)}
       <li className="chest__all">
-        <button className="chest__act chest__act--take" onClick={() => { takeEntries(takeable, from, place) }} disabled={takeable.length === 0} title={takeable.length === 0 ? 'Everything here is in your ITEMS' : 'Copy everything here into your ITEMS'}>TAKE ALL</button>
+        <button className="chest__act chest__act--take" onClick={() => { useInventory.getState().take(takeable, from, place) }} disabled={takeable.length === 0} title={takeable.length === 0 ? 'Everything here is in your ITEMS' : 'Copy everything here into your ITEMS'}>TAKE ALL</button>
       </li>
     </ul>
   )
@@ -239,7 +218,7 @@ function ContentRow({ entry, from, place }: { entry: ChestEntry; from: HeldFrom;
   const held = useInventory((s) => heldIn(s.items, entry))
   const { label, coin } = entryLabel(entry)
   const type = entry.body.type
-  const take = (): void => { takeEntries([entry], from, place) }
+  const take = (): void => { useInventory.getState().take([entry], from, place) }
   return (
     <li className="chest__row">
       {type === 'shard' && entry.body.shard ? <ShardThumb shard={entry.body.shard} /> : <ItemFace className={`chest__glyph chest__glyph--${coin ? 'cashu' : type}`} type={type} coin={coin} image={entry.body.key?.image} />}

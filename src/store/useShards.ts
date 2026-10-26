@@ -87,7 +87,8 @@ import {
 import { retractionTemplate } from '../lib/published'
 import { audioInnerTemplate, fadeAt, type AudioItem } from '../lib/audioItem'
 import { resealCopy } from '../lib/audioFile'
-import { openWithSecret, openWithSigner, openerFor, readContents, resealWithout, revealedIn, sealEntries, sealedInside, sealerOf, type OpeningKey } from '../lib/chests'
+import { openWithSecret, openWithSigner, openerFor, readContents, resealWithout, revealedIn, sealEntries, sealedInside, sealerOf, type ChestEntry, type OpeningKey } from '../lib/chests'
+import { openedByHand, restoreOpened } from './useOpenedChests'
 import { openingKeys, placeOf, type HeldItem, type HeldPlace, type InChest } from '../lib/inventory'
 import { useInventory } from './useInventory'
 import { useShardFolders } from './useShardFolders'
@@ -840,9 +841,11 @@ interface ShardsState {
   selectSecret: (eventId: string | null) => void
   /** File what a scan opened. A find this identity wrote joins `mine` as well, whichever device placed it. */
   /**
-   * Add finds. `watched`: found by Cyberspace TV, not in play, so no chest
-   * among them opens by itself and its keys, once taken, are held as watched
-   * (review of #390). Nothing found is held: TAKE does that (takeFound).
+   * Add finds. Nothing found opens or is held: OPEN opens a chest, TAKE
+   * holds (takeFound); only a chest opened by hand before is opened again
+   * (store/useOpenedChests). `watched`: found by Cyberspace TV, not in play,
+   * so not even that, and its keys, once taken, are held as watched
+   * (review of #390).
    */
   addDiscovered: (items: Hidden[], how?: { watched?: boolean }) => void
   /**
@@ -852,15 +855,6 @@ interface ShardsState {
    * opens nothing by itself, as before. Returns what was new.
    */
   takeFound: (eventIds: string[]) => HeldItem[]
-  /**
-   * Open, now, the chests found in play locked to these items' public keys:
-   * after TAKE of an item, the chest beside it opens the moment the item is
-   * in ITEMS, not at the next scan (review of #519). Only those: every other
-   * chest a held item opens was opened when it was found, and decrypting
-   * them all again on each TAKE froze the page (re-review of #519). A chest
-   * inside one of them opens in the same pass. A chest TV showed stays shut.
-   */
-  reopenChests: (lockPubkeys: string[]) => void
   /**
    * The items among these that earn the reveal and the toast: never opened on
    * this device before, not this identity's own, not deleted. The scan and a
@@ -2158,54 +2152,65 @@ export const useShards = create<ShardsState>((set, get) => {
       const { deleted } = get()
       const discovered = { ...get().discovered }
       let changed = false
+      const me = cyber().identity.pubkey
+      // What came out of this identity's own chests here, by id, with the
+      // region it was in: none of it is claimed as a deployment of the bag,
+      // whatever copy of it was seen first.
+      const sealed = new Map<string, string>()
+      /**
+       * File one thing out of a chest opened by hand (OPEN, ItemRows
+       * openChestHere, or the restore below). A plain copy, in the same
+       * region and by the same hider, of what is sealed in the chest (a bag
+       * written by a client that put a chest's contents beside it, publishBag)
+       * is replaced by the chest's copy, so it is listed, deleted and taken
+       * out as the chest's (removeFromChest), never as an entry of the bag.
+       * Whether it was filed now, new or replacing a plain copy.
+       */
+      const fromChest = (r: Hidden): boolean => {
+        if (r.author === me) sealed.set(r.eventId, r.lookupId)
+        const held = discovered[r.eventId]
+        const plain = !!held && !held.chestId && held.lookupId === r.lookupId && held.author === r.author
+        if (held && !plain) return false
+        discovered[r.eventId] = r
+        changed = true
+        return true
+      }
       for (const h of items) {
         if (deleted[h.eventId]) continue
+        if (h.chestId) { fromChest(h); continue }
         const held = discovered[h.eventId]
         // New, or a LIVE LINK whose author published a newer version: the
         // same find, refreshed, and no second ceremony (review of #233).
         const newer = !!held && !!h.inner && !!held.inner && h.inner.id !== held.inner.id && h.inner.created_at > held.inner.created_at
         if (!held || newer) { discovered[h.eventId] = h; changed = true }
       }
-      // A chest that a held key opens is opened here, and what it holds is
-      // found too, in place: the gate of B1. A room sealed behind a door
-      // appears where the door stands the moment its key is in ITEMS, on
-      // every scan. A key found inside opens nothing until it is taken
-      // (arkinox, 2026-10-26): opening asks ITEMS, never what was found.
-      // A chest sealed to this identity waits for OPEN in the record, since a
-      // signer may have to be asked. So does one Cyberspace TV showed, and a
-      // key TV showed opens nothing by itself: watching is not playing, and a
-      // chest may hold the messages and coins TV never shows (review of #390).
+      // Nothing opens by itself (arkinox, 2026-10-26: "everything must be
+      // opened or taken manually. that's the whole Zelda experience."): a
+      // chest or a door found shows closed, with OPEN when you hold what
+      // opens it, and opens only when OPEN is tapped. A scan, a TAKE, TV and
+      // a reload open nothing new. The one exception is a chest this
+      // identity already opened by hand on this device: after a reload the
+      // scan opens it again, as it was, with an item still held
+      // (store/useOpenedChests), and a chest inside it only if that one was
+      // opened by hand too. A chest sealed to this identity waits for OPEN
+      // again, since a signer would have to be asked; nothing TV showed is
+      // restored, and a key TV showed opens nothing (review of #390).
       const keys: OpeningKey[] = openingKeys(useInventory.getState().items, true)
-      const queue = watched ? [] : items.filter((h) => h.type === 'chest' && h.chest)
+      const byHand = (h: Hidden): boolean => h.type === 'chest' && !!h.chest && openedByHand(me, h.eventId)
+      const queue = watched ? [] : items.filter(byHand)
       const revealed: Hidden[] = []
-      // What came out of this identity's own chests here, by id, with the
-      // region it was in: none of it is claimed as a deployment of the bag,
-      // whatever copy of it was seen first.
-      const me = cyber().identity.pubkey
-      const sealed = new Map<string, string>()
       while (queue.length > 0) {
         const door = queue.shift()!
         const opener = openerFor(door.chest!, keys, '')
         if (!opener || opener.by !== 'key') continue
-        let inside: Hidden[]
-        try { inside = revealedIn(door, readContents(openWithSecret(door.chest!, opener.key.secretHex), sealerOf(door))) } catch { continue }
-        for (const r of inside) {
+        let contents: ChestEntry[]
+        try { contents = readContents(openWithSecret(door.chest!, opener.key.secretHex), sealerOf(door)) } catch { continue }
+        restoreOpened(me, door.eventId, contents)
+        for (const r of revealedIn(door, contents)) {
           if (deleted[r.eventId]) continue
-          if (door.author === me) sealed.set(r.eventId, door.lookupId)
-          const held = discovered[r.eventId]
-          // A plain copy, in the same region and by the same hider, of what is
-          // sealed in this chest: a bag written by a client that put a chest's
-          // contents beside it (publishBag), in this version of the bag or an
-          // older one. The chest's copy replaces it, so it is listed, deleted
-          // and taken out as the chest's (removeFromChest), never as an entry
-          // of the bag; it was found already, so no second ceremony, but a key
-          // or a chest in it still opens what it opens in this pass.
-          const plain = !!held && !held.chestId && held.lookupId === r.lookupId && held.author === r.author
-          if (held && !plain) continue
-          discovered[r.eventId] = r
-          if (!plain) revealed.push(r)
-          changed = true
-          if (r.type === 'chest' && r.chest) queue.push(r)
+          if (!fromChest(r)) continue
+          revealed.push(r)
+          if (byHand(r)) queue.push(r)
         }
       }
       if (changed) set({ discovered })
@@ -2237,8 +2242,7 @@ export const useShards = create<ShardsState>((set, get) => {
         for (const h of all) playedIds.add(h.eventId)
         useInventory.getState().markPlayed(all)
       }
-      // What a door revealed gets the find ceremony, as a scan's finds do.
-      if (revealed.length > 0) useCeremony.getState().mark(revealed)
+      // What a reload opened again was found before: no second ceremony.
     },
 
     takeFound: (eventIds) => {
@@ -2261,17 +2265,9 @@ export const useShards = create<ShardsState>((set, get) => {
       }
       const inv = useInventory.getState()
       const added = [...(inPlay.length > 0 ? inv.holdFinds(inPlay, false, inChest) : []), ...(watchedOnly.length > 0 ? inv.holdFinds(watchedOnly, true, inChest) : [])]
-      const locks = added.filter((r) => r.type === 'key' && !r.watched && r.key).map((r) => r.key!.itemPubkey)
-      if (locks.length > 0) get().reopenChests(locks)
+      // Taking an item opens nothing: the chest it opens waits for OPEN
+      // (arkinox, 2026-10-26: "everything must be opened or taken manually").
       return added
-    },
-
-    reopenChests: (lockPubkeys) => {
-      if (lockPubkeys.length === 0) return
-      const locks = new Set(lockPubkeys)
-      const playedIds = playedFinds(cyber().identity.pubkey)
-      const chests = Object.values(get().discovered).filter((h) => h.type === 'chest' && h.chest && locks.has(h.chest.lockPubkey) && playedIds.has(h.eventId))
-      if (chests.length > 0) get().addDiscovered(chests)
     },
 
     freshOf: (items) => {

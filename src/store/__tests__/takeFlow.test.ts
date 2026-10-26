@@ -4,11 +4,11 @@
  * from a bag. i want to TAKE them").
  *
  * What would fail silently without these: a scan putting a found item in
- * ITEMS again; a key found inside an opened chest opening the next chest in
- * the same pass, before anyone took it; TAKE holding twice; TAKE ALL of a
+ * ITEMS again; TAKE holding twice; TAKE ALL of a
  * chest with two identical shards holding the model twice; an item already
  * held being dropped by the change; a find only TV showed being held as an
- * ordinary key by TAKE. Relays are mocked; no network.
+ * ordinary key by TAKE. What opens a chest (only OPEN) is manualOpen.test.
+ * Relays are mocked; no network.
  */
 
 import { beforeEach, describe, expect, it, vi } from 'vitest'
@@ -30,18 +30,12 @@ vi.mock('../../lib/relay', () => ({
   relaySet: () => ['wss://relay.test'],
 }))
 
-// Every decryption of a chest by an item's secret, counted (re-review of #519).
-vi.mock('../../lib/chests', async (actual) => {
-  const real = await actual<typeof import('../../lib/chests')>()
-  return { ...real, openWithSecret: vi.fn(real.openWithSecret) }
-})
-
 import { finalizeEvent, generateSecretKey, getPublicKey } from 'nostr-tools/pure'
 import { newShard } from 'sno-core/shards'
 import { bytesToHex, type NostrEvent } from '../../lib/events'
-import { openWithSecret, sealEntries, type ChestEntry } from '../../lib/chests'
-import { chestInnerTemplate, chestItemOf, keyInnerTemplate, messageInnerTemplate, shardInnerTemplate, type ChestItem, type Hidden, type KeyItem } from '../../lib/hidden'
-import { heldFromEntry, heldFromPasted, placeOf } from '../../lib/inventory'
+import { type ChestEntry } from '../../lib/chests'
+import { keyInnerTemplate, messageInnerTemplate, shardInnerTemplate, type Hidden, type KeyItem } from '../../lib/hidden'
+import { heldFromPasted } from '../../lib/inventory'
 import { useCyberspace } from '../useCyberspace'
 import { useInventory } from '../useInventory'
 import { useShards } from '../useShards'
@@ -56,13 +50,6 @@ function keyIn(name: string): { key: KeyItem; event: NostrEvent } {
   const sk = generateSecretKey()
   const key: KeyItem = { name, about: '', itemPubkey: getPublicKey(sk), secretHex: bytesToHex(sk) }
   return { key, event: finalizeEvent(keyInnerTemplate(key, at, 0, T0), hider) as NostrEvent }
-}
-
-function chestIn(name: string, lock: string, inside: NostrEvent[]): { chest: ChestItem; event: NostrEvent } {
-  const sealed = sealEntries(inside, lock)
-  const item: ChestItem = { name, lockPubkey: lock, senderPubkey: sealed.senderPubkey, requires: '', payload: sealed.payload }
-  const event = finalizeEvent(chestInnerTemplate(item, at, 0, T0), hider) as NostrEvent
-  return { chest: chestItemOf(event)!, event }
 }
 
 /** A find out of one bag, as a scan hands it to addDiscovered. */
@@ -101,97 +88,6 @@ describe('found is not held', () => {
     useInventory.setState({ items: { [row.id]: row } })
     S().addDiscovered([find(event, { type: 'key', key })])
     expect(I().items[event.id]).toEqual(row)
-  })
-})
-
-describe('only what is taken opens a chest', () => {
-  it('a key found inside an opened chest opens the next chest only once it is taken', () => {
-    const outerKey = keyIn('Outer Key')
-    const innerKey = keyIn('Inner Key')
-    const behind = finalizeEvent(messageInnerTemplate('behind the second door', at, 0, T0), hider) as NostrEvent
-    const second = chestIn('Second', innerKey.key.itemPubkey, [behind])
-    const first = chestIn('First', outerKey.key.itemPubkey, [innerKey.event])
-    const owner = useCyberspace.getState().identity.pubkey
-    const held = heldFromPasted(owner, outerKey.event, outerKey.key, true, 1)
-    useInventory.setState({ items: { [held.id]: held } })
-
-    const chests = [find(first.event, { type: 'chest', chest: first.chest }), find(second.event, { type: 'chest', chest: second.chest })]
-    S().addDiscovered(chests)
-    // The first chest opened with the key held; the key inside is found, not held, and opens nothing yet.
-    expect(S().discovered[innerKey.event.id]?.chestId).toBe(first.event.id)
-    expect(I().items[innerKey.event.id]).toBeUndefined()
-    expect(S().discovered[behind.id]).toBeUndefined()
-
-    // TAKE, then the next scan: the second chest opens.
-    S().takeFound([innerKey.event.id])
-    expect(I().items[innerKey.event.id]?.key?.itemPubkey).toBe(innerKey.key.itemPubkey)
-    S().addDiscovered(chests)
-    expect(S().discovered[behind.id]?.chestId).toBe(second.event.id)
-  })
-})
-
-describe('TAKE opens what the item opens, at once (review of #519)', () => {
-  it('a chest found in play beside the key opens the moment the key is taken, not at the next scan', () => {
-    const k = keyIn('Gate Key')
-    const behind = finalizeEvent(messageInnerTemplate('the room', at, 0, T0), hider) as NostrEvent
-    const chest = chestIn('Gate', k.key.itemPubkey, [behind])
-    S().addDiscovered([find(k.event, { type: 'key', key: k.key }), find(chest.event, { type: 'chest', chest: chest.chest })])
-    expect(S().discovered[behind.id]).toBeUndefined()
-    S().takeFound([k.event.id])
-    expect(S().discovered[behind.id]?.chestId).toBe(chest.event.id)
-  })
-
-  it('an unrelated TAKE decrypts no chest again: only those locked to what was taken', () => {
-    const lock = keyIn('Boss Key')
-    const owner = useCyberspace.getState().identity.pubkey
-    const held = heldFromPasted(owner, lock.event, lock.key, true, 1)
-    useInventory.setState({ items: { [held.id]: held } })
-    const behind = finalizeEvent(messageInnerTemplate('already open', at, 0, T0), hider) as NostrEvent
-    const opened = chestIn('Opened', lock.key.itemPubkey, [behind])
-    const other = keyIn('Other Key')
-    const shut = chestIn('Shut', other.key.itemPubkey, [finalizeEvent(messageInnerTemplate('behind the other', at, 0, T0), hider) as NostrEvent])
-    const unrelated = keyIn('Unrelated Key')
-    S().addDiscovered([find(opened.event, { type: 'chest', chest: opened.chest }), find(shut.event, { type: 'chest', chest: shut.chest }), find(unrelated.event, { type: 'key', key: unrelated.key }), find(other.event, { type: 'key', key: other.key })])
-    expect(S().discovered[behind.id]).toBeDefined()
-    const decrypt = vi.mocked(openWithSecret)
-    decrypt.mockClear()
-    S().takeFound([unrelated.event.id])
-    expect(decrypt).not.toHaveBeenCalled()
-    // Taking the key the shut chest is locked to opens that one, and only that one.
-    S().takeFound([other.event.id])
-    expect(decrypt).toHaveBeenCalledTimes(1)
-    expect(decrypt.mock.calls[0][0]).toMatchObject({ senderPubkey: shut.chest.senderPubkey })
-  })
-
-  it('a chest only TV showed stays shut when a played key is taken', () => {
-    const k = keyIn('Gate Key')
-    const behind = finalizeEvent(messageInnerTemplate('the room', at, 0, T0), hider) as NostrEvent
-    const chest = chestIn('Gate', k.key.itemPubkey, [behind])
-    S().addDiscovered([find(chest.event, { type: 'chest', chest: chest.chest })], { watched: true })
-    S().addDiscovered([find(k.event, { type: 'key', key: k.key })])
-    S().takeFound([k.event.id])
-    expect(I().items[k.event.id]?.watched).toBeUndefined()
-    expect(S().discovered[behind.id]).toBeUndefined()
-  })
-})
-
-describe('a key out of a chest is held one way, whichever TAKE (review of #519)', () => {
-  it('TAKE on its own row holds it as taken from the chest, at the chest\'s place, as the chest\'s TAKE does', () => {
-    const outer = keyIn('Outer Key')
-    const inner = keyIn('Inner Key')
-    const chest = chestIn('Strongbox', outer.key.itemPubkey, [inner.event])
-    const owner = useCyberspace.getState().identity.pubkey
-    const held = heldFromPasted(owner, outer.event, outer.key, true, 1)
-    useInventory.setState({ items: { [held.id]: held } })
-    const chestFind = find(chest.event, { type: 'chest', chest: chest.chest })
-    S().addDiscovered([chestFind])
-    S().takeFound([inner.event.id])
-    const row = I().items[inner.event.id]
-    const fromChest = heldFromEntry(owner, { id: inner.event.id, event: inner.event, verified: true, body: { type: 'key', key: inner.key } }, { chestId: chest.event.id, chestName: 'Strongbox' }, placeOf(chestFind), row.at)
-    // As data: nostr-tools marks an event object it verified with a symbol.
-    const plain = (x: unknown): unknown => JSON.parse(JSON.stringify(x))
-    expect(plain(row)).toEqual(plain(fromChest))
-    expect(row.source).toBe('taken')
   })
 })
 

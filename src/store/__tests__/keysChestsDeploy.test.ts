@@ -32,7 +32,9 @@ vi.mock('../../lib/relay', () => ({
 
 import { getEventHash, verifyEvent } from 'nostr-tools/pure'
 import type { NostrEvent } from '../../lib/events'
-import { forgeKey, openWithSecret, readContents } from '../../lib/chests'
+import { forgeKey, openWithSecret, readContents, sealerOf } from '../../lib/chests'
+import { placeOf } from '../../lib/inventory'
+import { openChestHere } from '../../hud/ItemRows'
 import { CHEST_KIND, KEY_KIND, MESSAGE_KIND, chestItemOf, keyItemOf, type Hidden } from '../../lib/hidden'
 import { useCyberspace } from '../useCyberspace'
 import { useInventory } from '../useInventory'
@@ -47,6 +49,11 @@ beforeEach(() => {
   useCyberspace.setState({ live: false })
   vi.spyOn(console, 'warn').mockImplementation(() => { /* IndexedDB is absent here; items stay in memory */ })
 })
+
+/** OPEN, tapped on a chest found here, with the held item it is locked to (ItemRows openChestHere). */
+async function tapOpen(chest: Hidden, lock: { itemPubkey: string; secretHex: string }): Promise<void> {
+  await openChestHere({ id: chest.eventId, chest: chest.chest!, author: chest.author, place: placeOf(chest), sealer: sealerOf(chest) }, { by: 'key', key: { id: 'lock', itemPubkey: lock.itemPubkey, secretHex: lock.secretHex } })
+}
 
 describe('hiding a key', () => {
   it('writes a signed kind 3340 item into the bag and holds the key at once, marked forged', async () => {
@@ -183,7 +190,11 @@ describe('what your own chest holds stays in the chest (review of #409)', () => 
     const finds = S().mine.map((d) => ({ eventId: d.eventId, inner: d.inner, keyHex: d.keyHex, bagId: d.bagId, lookupId: d.lookupId, author: d.inner.pubkey, at: { x: BigInt(d.at.x), y: BigInt(d.at.y), z: BigInt(d.at.z) }, plane: d.plane, height: d.height, createdAt: d.createdAt, type: d.type, key: d.key, chest: d.chest, text: d.text, bag: d.bag }) as Hidden)
     useShards.setState({ mine: [] })
     S().addDiscovered(finds)
-    // The chest opened with the held lock: its message and key are found, in place...
+    // The chest stays closed until OPEN (arkinox, 2026-10-26)...
+    expect(Object.values(S().discovered).filter((h) => h.chestId)).toEqual([])
+    const chest = finds.find((h) => h.type === 'chest')!
+    await tapOpen(S().discovered[chest.eventId], lock)
+    // ...then, opened with the held lock, its message and key are found, in place...
     const revealed = Object.values(S().discovered).filter((h) => h.chestId)
     expect(revealed.map((h) => h.type).sort()).toEqual(['key', 'message'])
     // ...vouched for by the chest, so none is a claim...

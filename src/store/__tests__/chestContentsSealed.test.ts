@@ -51,8 +51,14 @@ import { useCyberspace } from '../useCyberspace'
 import { useInventory } from '../useInventory'
 import { useShards } from '../useShards'
 import { useWorkshop } from '../useWorkshop'
+import { rememberOpened, resetOpenedChests } from '../useOpenedChests'
 
 const S = () => useShards.getState()
+
+/** OPEN was tapped on this chest earlier, on this device, by this identity. */
+function openedEarlier(chestId: string): void {
+  rememberOpened(useCyberspace.getState().identity.pubkey, chestId, [])
+}
 
 /** A model on the bench, deployable. */
 function benchShard(name: string): ShardModel {
@@ -93,7 +99,10 @@ async function hiderWithOpenedChest(): Promise<{ chestLookup: string; chestKey: 
   await S().deploy()
   expect(S().deployStatus).toBe('done')
   const chest = S().mine.find((d) => d.type === 'chest')!
-  // The hider's scan of their own bag: the held key opens the chest in place.
+  // Nothing opens by itself (arkinox, 2026-10-26): the hider opened this
+  // chest by hand earlier on this device, so their scan opens it again in
+  // place with the held key (store/useOpenedChests).
+  openedEarlier(chest.eventId)
   S().addDiscovered(await entriesOf(lastBag(chest.lookupId), chest.keyHex))
   const revealed = Object.values(S().discovered).filter((h) => h.chestId === chest.eventId)
   expect(revealed.map((h) => h.type).sort()).toEqual(['message', 'shard'])
@@ -101,6 +110,8 @@ async function hiderWithOpenedChest(): Promise<{ chestLookup: string; chestKey: 
 }
 
 beforeEach(() => {
+  localStorage.removeItem('onosendai:chests-opened')
+  resetOpenedChests()
   published.length = 0
   relayBags.length = 0
   useShards.setState({ mine: [], discovered: {}, deleted: {}, pending: null, deployHeight: 0, deployStatus: 'idle', deployError: null })

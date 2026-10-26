@@ -94,7 +94,7 @@ export interface HeldItem {
   cleared?: number
   /**
    * Found by watching Cyberspace TV, not in play: it opens a chest only when
-   * you OPEN it, never by itself in a scan (openingKeys `auto`), so nothing
+   * you OPEN it, never on a reload's reopening (openingKeys `auto`), so nothing
    * TV showed unlocks a message or a coin on its own (review of #390). Gone
    * once the same key is found in play.
    */
@@ -229,7 +229,8 @@ export function parseKeyText(text: string): { event: NostrEvent; key: KeyItem; v
 
 /**
  * The held keys as the opener needs them (lib/chests.ts openerFor). For a
- * chest opening by itself in a scan (`auto`), not a key found by watching TV.
+ * chest a reload opens again because it was opened by hand before (`auto`,
+ * useShards addDiscovered), not a key found by watching TV.
  */
 export function openingKeys(items: Record<string, HeldItem>, auto = false): OpeningKey[] {
   const out: OpeningKey[] = []

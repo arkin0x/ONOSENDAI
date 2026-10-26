@@ -14,7 +14,7 @@ import { TvPainter, fit, tickerItems, wrap, type TvAssets, type TvExplainer, typ
 import { cutKind, explainerPipRect, flatPoint, tubeDrift, tubeFlicker } from '../TvScreenEffect'
 import { Vector2 } from 'three'
 import { useTv } from '../../store/useTv'
-import { CTV_ADVERTISE_1, HOSAKA_1 } from '../../lib/tv/hosakaAd'
+import { CTV_ADDRESS, CTV_ADDRESS_HOLD_S, CTV_ADVERTISE_1, HOSAKA_1 } from '../../lib/tv/hosakaAd'
 import { setBroadcastForTest } from '../../lib/tv/broadcast'
 
 /** A 2D context that measures every character as 7 px and draws nothing. */
@@ -811,13 +811,98 @@ describe('the house spot for the ad slot itself (CTV_ADVERTISE_1, arkinox 2026-1
     const end = CTV_ADVERTISE_1.scenes[CTV_ADVERTISE_1.scenes.length - 1]
     const { words, images } = at((end.from + end.to) / 2)
     expect(words).toContain('EMAIL TO CLAIM IT:')
-    // The address is given exactly as arkinox gave it: lower case, not re-cased like the ad's all-caps calls.
-    expect(words).toContain('aflutter_conjoined788@simplelogin.com')
-    expect(words.some((w) => w.includes('ALUTTER') || w.includes('SIMPLELOGIN.COM'))).toBe(false)
+    // The address is given exactly as arkinox gave it (2026-10-26): lower case, not re-cased like the ad's all-caps calls.
+    expect(CTV_ADDRESS).toBe('arkinox@pm.me')
+    expect(words).toContain('arkinox@pm.me')
+    expect(words.some((w) => w.includes('ARKINOX') || w.includes('PM.ME'))).toBe(false)
+    expect(words.some((w) => /simplelogin|aflutter/i.test(w))).toBe(false)
     expect(images).not.toContain(mark)
   })
 
-  it('the end card\'s lines land where a block with no mark and no subtitle should, not pushed down by a stray gap', () => {
+  /**
+   * A canvas that keeps, for each line of text, the size it is set in, the
+   * strength it is drawn at (save and restore kept, as a real canvas keeps
+   * them), and how wide it measures: a character is 0.6 of the type size,
+   * about what the TV's monospaced face measures.
+   */
+  function typeCanvas(): { canvas: HTMLCanvasElement; seen: Array<{ text: string; size: number; alpha: number; width: number }> } {
+    const seen: Array<{ text: string; size: number; alpha: number; width: number }> = []
+    let state: Record<string, unknown> = { globalAlpha: 1, font: '' }
+    const stack: Array<Record<string, unknown>> = []
+    const size = (): number => parseFloat(String(state.font).replace(/^700 /, ''))
+    const ctx = new Proxy({
+      measureText: (t: string) => ({ width: Array.from(t).length * size() * 0.6 }),
+      createLinearGradient: () => ({ addColorStop: () => {} }),
+      createRadialGradient: () => ({ addColorStop: () => {} }),
+      save: () => { stack.push({ ...state }) },
+      restore: () => { state = stack.pop() ?? state },
+      fillText: (text: string) => { seen.push({ text, size: size(), alpha: state.globalAlpha as number, width: Array.from(text).length * size() * 0.6 }) },
+    } as Record<string, unknown>, {
+      get: (target, key) => (key in target ? target[key as string] : key in state ? state[key as string] : () => {}),
+      set: (_t, key, v) => { state[key as string] = v; return true },
+    })
+    return { canvas: { width: 0, height: 0, getContext: () => ctx } as unknown as HTMLCanvasElement, seen }
+  }
+
+  /** The address as painted `t` seconds into the spot, on a frame `w` x `h` CSS px. */
+  function address(t: number, w: number, h: number): { size: number; alpha: number; width: number } | undefined {
+    const { canvas, seen } = typeCanvas()
+    const p = new TvPainter(canvas)
+    p.size(w, h, 1)
+    p.paint(picture({ shot: trip as never, ad: { at: 0, id: CTV_ADVERTISE_1.id } }), assets, 700 + t * 1000, 1, false)
+    return seen.find((l) => l.text === CTV_ADDRESS)
+  }
+
+  it(`holds the address ${CTV_ADDRESS_HOLD_S} s, at full strength all but its quick cut in and out, never blinking (arkinox, 2026-10-26: "not long enough for anyone to read it")`, () => {
+    const end = CTV_ADVERTISE_1.scenes[CTV_ADVERTISE_1.scenes.length - 1]
+    expect(end.lines).toContain(CTV_ADDRESS)
+    expect(end.to - end.from).toBe(CTV_ADDRESS_HOLD_S)
+    expect(CTV_ADDRESS_HOLD_S).toBeGreaterThanOrEqual(10)
+    // Every tenth of a second through the scene: how long it stands at full strength without a break.
+    let run = 0, longest = 0
+    for (let t = end.from; t < end.to; t += 0.1) {
+      const a = address(t, 1400, 800)
+      run = a && a.alpha >= 0.999 ? run + 0.1 : 0
+      longest = Math.max(longest, run)
+    }
+    expect(longest).toBeGreaterThan(CTV_ADDRESS_HOLD_S - 0.5)
+  })
+
+  it('makes the whole spot longer than it was (9.7 s), the first two cards held a little longer too', () => {
+    const [one, two] = CTV_ADVERTISE_1.scenes
+    expect(CTV_ADVERTISE_1.scenes[CTV_ADVERTISE_1.scenes.length - 1].to).toBeGreaterThanOrEqual(6 + CTV_ADDRESS_HOLD_S)
+    expect(one.to - one.from).toBeGreaterThan(2.6)
+    expect(two.to - two.from).toBeGreaterThan(2.6)
+  })
+
+  it('sets the address large: on the 1920 x 1080 stream at text=large and xl, big enough to read on a phone held upright, and inside the frame', () => {
+    const end = CTV_ADVERTISE_1.scenes[CTV_ADVERTISE_1.scenes.length - 1]
+    const mid = (end.from + end.to) / 2
+    try {
+      for (const size of ['large', 'xl'] as const) {
+        setBroadcastForTest(true, size)
+        const a = address(mid, 1920, 1080)!
+        expect(a, size).toBeDefined()
+        // The frame shown 400 px wide on a phone held upright (lib/tv/broadcast):
+        // at least 24 px type there, more than twice the end card's 20 px a unit it had.
+        expect(a.size * (400 / 1920), size).toBeGreaterThanOrEqual(24)
+        expect(a.width, size).toBeLessThanOrEqual(1920 * (1 - 2 * 0.06))
+      }
+      // The normal text size on the stream, and the site on a laptop: as big as a punch card's.
+      setBroadcastForTest(true, 'normal')
+      expect(address(mid, 1920, 1080)!.size).toBeGreaterThanOrEqual(60)
+      setBroadcastForTest(false)
+      expect(address(mid, 1400, 800)!.size).toBeGreaterThanOrEqual(40)
+      // A phone held upright on the site: still the width of the frame at most, and above a card's floor.
+      const phone = address(mid, 390, 800)!
+      expect(phone.size).toBeGreaterThanOrEqual(18)
+      expect(phone.width).toBeLessThanOrEqual(390)
+    } finally {
+      setBroadcastForTest(null)
+    }
+  })
+
+  it('the last card\'s lines land where a block with no mark and no subtitle should, not pushed down by a stray gap', () => {
     // Regression: subH's 22*s gap used to be added below the subtitle loop
     // whenever the scene was 'end', whether or not there was a subtitle to
     // put it under (tvPainter commercial()), while blockH and fitCard's own

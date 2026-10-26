@@ -139,6 +139,8 @@ function card(): string {
 describe('the card (SecretModal)', () => {
   beforeEach(() => {
     useShards.setState({ mine: [], discovered: {}, deleted: {}, deletedBags: {}, selectedSecret: null, curated: null })
+    // The event data is under METADATA, closed by default (Metadata): these read it open.
+    localStorage.setItem('onosendai:metadataOpen', '1')
   })
 
   it('shows the wire facts in the event data for a thing this device hid, and has no WIRE RECORD', async () => {

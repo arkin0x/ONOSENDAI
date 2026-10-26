@@ -7,8 +7,8 @@
  * stays hidden until its hider adds a hint, and the view says so in plain
  * words rather than leaving a number to be misread as a distance. A bag your
  * own scan has already opened, or one of your own, lists its items with a
- * VIEW button that flies the scene to each. A key found is marked as held;
- * a chest found says what opens it and, when you hold that, opens here with
+ * VIEW button that flies the scene to each. A key found has TAKE, which
+ * puts it in your ITEMS (ItemRows KeyLine); a chest found says what opens it and, when you hold that, opens here with
  * its contents beneath and TAKE on each (ItemRows, Keys and Chests B1 §3.2).
  */
 
@@ -233,9 +233,9 @@ export function LootDetail(): JSX.Element | null {
             {opened.map((o) => (
               <li key={o.eventId} className={`lootd__item ${o.type === 'chest' ? 'lootd__item--chest' : ''}`}>
                 {o.type === 'shard' && o.shard ? <ShardThumb shard={o.shard} /> : <span className={`secret__badge secret__badge--${o.coin ? 'cashu' : o.type}`}><ItemFace type={o.type} coin={o.coin} image={o.key?.image} size={12} /></span>}
-                {/* A keypair item says it is held, its picture in the badge when it has one; a chest opens here (ItemRows). Both keep VIEW, which flies to where they stand. */}
+                {/* A keypair item has TAKE until it is held, its picture in the badge when it has one; a chest opens here (ItemRows). Both keep VIEW, which flies to where they stand. */}
                 {o.type === 'key' && o.key
-                  ? <KeyLine name={o.key.name} author={item.author} />
+                  ? <KeyLine id={o.eventId} name={o.key.name} author={item.author} />
                   : o.type === 'chest' && o.chest
                     ? <ChestBlock id={o.eventId} chest={o.chest} author={item.author} verified place={o.place} />
                     : <span className="lootd__item-label" title={o.label}>{o.label}</span>}

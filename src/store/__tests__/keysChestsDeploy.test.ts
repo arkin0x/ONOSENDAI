@@ -7,7 +7,8 @@
  * and sealed to the lock before the bag is written; a key forged inside the
  * chest is held too; the chest opens with the key it was sealed to. A chest
  * whose contents pass NIP-44's limit is refused in words, and nothing is
- * hidden. A key a scan reads is held once. Relays are mocked; no network.
+ * hidden. A key a scan reads is found, and held once on TAKE. Relays are
+ * mocked; no network.
  */
 
 import { beforeEach, describe, expect, it, vi } from 'vitest'
@@ -69,7 +70,7 @@ describe('hiding a key', () => {
     expect(held?.place?.bagId).toBe(d.bagId)
   })
 
-  it('a key a scan reads is held once, not twice', () => {
+  it('a key a scan reads is found, not held, until TAKE; TAKE twice holds it once (arkinox, 2026-10-26)', () => {
     const forged = S().mine
     expect(forged).toHaveLength(0)
     const key = forgeKey('Found Key')
@@ -77,8 +78,13 @@ describe('hiding a key', () => {
     const find: Hidden = { eventId: inner.id, inner, keyHex: 'aa'.repeat(32), bagId: 'bag', lookupId: 'lookup', author: inner.pubkey, at: { x: 1n, y: 2n, z: 3n }, plane: 0, height: 4, createdAt: 1, type: 'key', key }
     S().addDiscovered([find])
     S().addDiscovered([find])
+    expect(S().discovered[inner.id]).toBeDefined()
+    expect(Object.keys(I().items)).toEqual([])
+    expect(S().takeFound([inner.id])).toHaveLength(1)
+    expect(S().takeFound([inner.id])).toHaveLength(0)
     expect(Object.keys(I().items)).toEqual([inner.id])
     expect(I().items[inner.id].source).toBe('found')
+    expect(I().items[inner.id].watched).toBeUndefined()
   })
 })
 

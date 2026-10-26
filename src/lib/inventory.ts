@@ -1,9 +1,9 @@
 /**
  * inventory.ts: what an identity holds, as pure shapes and functions.
  *
- * Items are knowledge (quests design F5, ruled): a key is held by whoever has
- * read its private key, and a chest's contents by whoever opened it and took
- * them. So the inventory is a local list, kept per identity in IndexedDB like
+ * Items are knowledge (quests design F5, ruled): a key can be held by whoever
+ * has read its private key, and is once they TAKE it (arkinox, 2026-10-26),
+ * and a chest's contents by whoever opened it and took them. So the inventory is a local list, kept per identity in IndexedDB like
  * region keys (store/useInventory.ts), and this file is everything about it
  * that does not touch a database: the row shape, how a find, a forging, a
  * taking or a paste becomes a row, the text a key travels as between devices,
@@ -127,7 +127,8 @@ function row(owner: string, event: NostrEvent, body: ItemBody, verified: boolean
 }
 
 /**
- * A key found in a bag, held (B1 §2.1: reading the item is holding it). Null
+ * A key found in a bag, held because TAKE was pressed on it (arkinox,
+ * 2026-10-26: found is not held, "i want to TAKE them"). Null
  * for anything that is not a key with its event: the ceremony's preview items
  * come out of no bag and carry none.
  */
@@ -258,8 +259,8 @@ const newestFirst = <T extends { at: number }>(a: T, b: T): number => b.at - a.a
  * The three-panel model's two local panels, as one pure split (B1 ruling 14):
  * DISCOVERED is everything opened where it stands, grouped by the bag it was
  * in and newest first; LOOT is what is held, keys apart from the rest. A key
- * found is in both, because reading it was holding it; a chest found is in
- * DISCOVERED until something is taken out of it, and what is taken is in LOOT.
+ * found is in DISCOVERED, and in LOOT too once it is taken; a chest found is
+ * in DISCOVERED until something is taken out of it, and what is taken is in LOOT.
  */
 export function splitPanels(discovered: Hidden[], held: HeldItem[]): { discovered: DiscoveredPlace[]; loot: Loot } {
   const places = new Map<string, DiscoveredPlace>()

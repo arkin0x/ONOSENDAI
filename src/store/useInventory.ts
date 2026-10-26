@@ -1,15 +1,17 @@
 /**
  * useInventory.ts: the ITEMS panel's store, what this identity holds.
  *
- * Keys read out of bags, keys the identity forged, and contents taken out of
+ * Keys taken from bags, keys the identity forged, and contents taken out of
  * chests (lib/inventory.ts HeldItem), one row per item, kept in IndexedDB per
  * identity (lib/inventoryDb.ts) so they survive a reload and switching back to
  * an identity brings its items back. Everything held is also here in memory,
  * because the rows, the chest opener and the DISCOVERED panel read them.
  *
- * Holding is idempotent: a key read twice is held once (addHeld). A read that
+ * Nothing found is held until it is taken (arkinox, 2026-10-26): TAKE on
+ * a found item (holdFinds) or on a chest's content (take) holds it. Holding
+ * is idempotent: a key taken twice is held once (addHeld). A take that
  * lands before the load for this identity has finished is kept and merged
- * when it does, so nothing a scan opened in the first second is lost. Where
+ * when it does, so nothing taken in the first second is lost. Where
  * IndexedDB cannot be opened, items last the session and the panel says so.
  *
  * The identity is watched from load() rather than at module load, because
@@ -50,8 +52,16 @@ interface InventoryState {
   add: (items: HeldItem[]) => HeldItem[]
   /** Resolves once every write so far has reached the database, or failed and been said. */
   flush: () => Promise<void>
-  /** Hold every key among a scan's finds (B1 §2.1: reading a key is holding it). */
+  /**
+   * TAKE: hold every key among these finds. Found is not held (arkinox,
+   * 2026-10-26: "I dont want items to automatically be added to my
+   * inventory the moment i decrypt them from a bag. i want to TAKE them"),
+   * so a scan never calls this; TAKE on a found item does. `watched` holds
+   * a key only Cyberspace TV showed as watched: it opens nothing by itself.
+   */
   holdFinds: (finds: Hidden[], watched?: boolean) => HeldItem[]
+  /** A scan found these in play: a key held as watched (TV showed it) is an ordinary key from here on. Holds nothing new. */
+  markPlayed: (finds: Hidden[]) => void
   /** Hold a key this identity forged and hid, at once (B1 §3.1). */
   holdForged: (event: NostrEvent, key: KeyItem, place: HeldPlace) => HeldItem
   /** TAKE: hold contents out of an opened chest. */
@@ -158,19 +168,25 @@ export const useInventory = create<InventoryState>((set, get) => {
       const r = heldFromFind(owner, h, at, watched)
       if (r) rows.push(r)
     }
+    if (!watched) get().markPlayed(finds)
+    return rows.length > 0 ? get().add(rows) : []
+  },
+
+  markPlayed: (finds) => {
     // A key TV showed, now found in play: an ordinary key from here on.
     const held = get().items
-    const played = watched ? [] : rows.filter((r) => held[r.id]?.watched).map((r) => {
-      const { watched: _, ...rest } = held[r.id]
-      return rest
-    })
-    if (played.length > 0) {
-      const items = { ...held }
-      for (const r of played) items[r.id] = r
-      set({ items })
-      void persist(played)
+    const played: HeldItem[] = []
+    for (const h of finds) {
+      const it = held[h.eventId]
+      if (h.type !== 'key' || !it?.watched) continue
+      const { watched: _, ...rest } = it
+      played.push(rest)
     }
-    return rows.length > 0 ? get().add(rows) : []
+    if (played.length === 0) return
+    const items = { ...held }
+    for (const r of played) items[r.id] = r
+    set({ items })
+    void persist(played)
   },
 
   holdForged: (event, key, place) => {
@@ -183,9 +199,17 @@ export const useInventory = create<InventoryState>((set, get) => {
     const owner = ownerNow()
     const at = now()
     // One shard per model (arkinox, 2026-10-11): a content whose geometry is
-    // already held, under any name, is not taken again.
-    const fresh = entries.filter((e) => !(e.body.type === 'shard' && e.body.shard && holdsModel(get().items, e.body.shard)))
-    return get().add(fresh.map((e) => heldFromEntry(owner, e, from, place, at)))
+    // already held, under any name, is not taken again, nor twice in one
+    // TAKE ALL (a chest's two identical Columns are one shard to take).
+    const fresh: HeldItem[] = []
+    let seen = get().items
+    for (const e of entries) {
+      if (e.body.type === 'shard' && e.body.shard && holdsModel(seen, e.body.shard)) continue
+      const row = heldFromEntry(owner, e, from, place, at)
+      if (row.shard) seen = { ...seen, [row.id]: row }
+      fresh.push(row)
+    }
+    return get().add(fresh)
   },
 
   clearTaken: (ids) => {

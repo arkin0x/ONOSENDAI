@@ -1,6 +1,6 @@
 /**
  * itemRows.test.ts: the key line and the chest block, rendered (Keys and
- * Chests B1 §3.2). A key found says it is held. A chest says what it
+ * Chests B1 §3.2). A key found is not held until TAKE. A chest says what it
  * requires and, with nothing held, offers no OPEN. Rendered to a string, so
  * this is the first render, and the stores read as they start: zustand hands
  * the server renderer its initial state, so what OPEN depends on (which held
@@ -46,11 +46,12 @@ function chestTo(lock: string, requires: string): ChestItem {
 const visible = (el: JSX.Element): string => renderToString(el).replace(/<[^>]*>/g, ' ')
 
 describe('the key line', () => {
-  it('names the key, who forged it, and that it is held', () => {
+  it('names the key and who forged it, and claims nothing held when nothing is (arkinox, 2026-10-26)', () => {
     const text = visible(createElement(KeyLine, { name: 'Wind Key', author: hiderPk }))
     expect(text).toContain('Wind Key')
     expect(text).toContain('forged by')
-    expect(text).toContain('IN YOUR ITEMS')
+    expect(text).not.toContain('IN YOUR ITEMS')
+    expect(text).not.toContain('TAKE')
   })
 })
 

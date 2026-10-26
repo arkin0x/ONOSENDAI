@@ -6,8 +6,8 @@
  * whose region holds the anchor, newest first (arkinox, 2026-10-13), nearest
  * first among things made in the same second, undated things last. Reached from the found chip,
  * which says how many, and from NEARBY on the DISCOVERED panel. VIEW flies to
- * the thing the way the bag record's VIEW does. A key row says it is held; a
- * chest row opens here when you hold what opens it (ItemRows).
+ * the thing the way the bag record's VIEW does. A key row has TAKE until it
+ * is held; a chest row opens here when you hold what opens it (ItemRows).
  */
 
 import { useMemo } from 'react'
@@ -55,7 +55,7 @@ function Row({ item, me, onView }: { item: NearbyItem; me: string; onView: (item
       {item.type === 'shard' && item.shard ? <ShardThumb shard={item.shard} /> : <ItemIcon className="nearby__glyph" type={item.type} coin={item.type === 'message' && findCashuToken(item.text) !== null} size={14} />}
       <div className="nearby__body">
         {item.type === 'key' && item.keyItem
-          ? <KeyLine name={item.keyItem.name} author={author} />
+          ? <KeyLine id={item.key} name={item.keyItem.name} author={author} />
           : item.type === 'chest' && item.chest
             ? <ChestBlock id={item.key} chest={item.chest} author={author} verified place={placeOf(item)} />
             : <span className="nearby__label">{labelOf(item)}</span>}

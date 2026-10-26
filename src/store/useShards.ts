@@ -87,7 +87,7 @@ import { retractionTemplate } from '../lib/published'
 import { audioInnerTemplate, fadeAt, type AudioItem } from '../lib/audioItem'
 import { resealCopy } from '../lib/audioFile'
 import { openWithSecret, openWithSigner, openerFor, readContents, resealWithout, revealedIn, sealEntries, sealedInside, sealerOf, type OpeningKey } from '../lib/chests'
-import { openingKeys, type HeldPlace } from '../lib/inventory'
+import { openingKeys, type HeldItem, type HeldPlace } from '../lib/inventory'
 import { useInventory } from './useInventory'
 import { useShardFolders } from './useShardFolders'
 import { creditOf, useWorkshop } from './useWorkshop'
@@ -840,9 +840,17 @@ interface ShardsState {
   /** File what a scan opened. A find this identity wrote joins `mine` as well, whichever device placed it. */
   /**
    * Add finds. `watched`: found by Cyberspace TV, not in play, so no chest
-   * among them opens by itself and its keys are held as watched (review of #390).
+   * among them opens by itself and its keys, once taken, are held as watched
+   * (review of #390). Nothing found is held: TAKE does that (takeFound).
    */
   addDiscovered: (items: Hidden[], how?: { watched?: boolean }) => void
+  /**
+   * TAKE on found items, by event id (arkinox, 2026-10-26: "i want to TAKE
+   * them"): every keypair item among them that is still found here goes into
+   * ITEMS, once. One only Cyberspace TV showed is held as watched, so it
+   * opens nothing by itself, as before. Returns what was new.
+   */
+  takeFound: (eventIds: string[]) => HeldItem[]
   /**
    * The items among these that earn the reveal and the toast: never opened on
    * this device before, not this identity's own, not deleted. The scan and a
@@ -882,6 +890,13 @@ function loadSeen(): Set<string> {
   } catch { return new Set() }
 }
 const seen = loadSeen()
+
+/**
+ * Finds that came in play this session (a scan, a chest opened, the found
+ * cache's played bags), by event id. A find not among them was only shown
+ * by Cyberspace TV, and TAKE holds it as watched (takeFound).
+ */
+const playedFinds = new Set<string>()
 
 function remember(ids: string[]): void {
   let added = false
@@ -2138,7 +2153,8 @@ export const useShards = create<ShardsState>((set, get) => {
       // A chest that a held key opens is opened here, and what it holds is
       // found too, in place: the gate of B1. A room sealed behind a door
       // appears where the door stands the moment its key is in ITEMS, on
-      // every scan, and a key inside opens the next chest in the same pass.
+      // every scan. A key found inside opens nothing until it is taken
+      // (arkinox, 2026-10-26): opening asks ITEMS, never what was found.
       // A chest sealed to this identity waits for OPEN in the record, since a
       // signer may have to be asked. So does one Cyberspace TV showed, and a
       // key TV showed opens nothing by itself: watching is not playing, and a
@@ -2174,8 +2190,6 @@ export const useShards = create<ShardsState>((set, get) => {
           if (!plain) revealed.push(r)
           changed = true
           if (r.type === 'chest' && r.chest) queue.push(r)
-          // A key by someone blocked opens nothing here (store/useMutes).
-          if (r.type === 'key' && r.key && !findHidden(r, useMutes.getState().muted, me)) keys.push({ id: r.eventId, itemPubkey: r.key.itemPubkey, secretHex: r.key.secretHex })
         }
       }
       if (changed) set({ discovered })
@@ -2198,13 +2212,28 @@ export const useShards = create<ShardsState>((set, get) => {
       const ownChestBags = new Set(items.filter((h) => h.type === 'chest' && h.author === me).map((h) => h.bagId))
       const now = get().discovered
       claimOwn(all.filter((h) => !claimedOut(h) && !now[h.eventId]?.chestId && !(watched && h.type !== 'chest' && h.author === me && ownChestBags.has(h.bagId))))
-      // Reading a key is holding it (B1 §2.1): every key a scan opened goes
-      // into the inventory, once, whoever hid it, unless the mute list
-      // hides it (review of #464, S5).
-      const muted = useMutes.getState().muted
-      useInventory.getState().holdFinds(all.filter((h) => !findHidden(h, muted, me)), watched)
+      // Found is not held (arkinox, 2026-10-26: "I dont want items to
+      // automatically be added to my inventory the moment i decrypt them
+      // from a bag. i want to TAKE them"): a key waits for TAKE (takeFound).
+      // One TV showed and that is now found in play is an ordinary key.
+      if (!watched) {
+        for (const h of all) playedFinds.add(h.eventId)
+        useInventory.getState().markPlayed(all)
+      }
       // What a door revealed gets the find ceremony, as a scan's finds do.
       if (revealed.length > 0) useCeremony.getState().mark(revealed)
+    },
+
+    takeFound: (eventIds) => {
+      const { discovered } = get()
+      const me = cyber().identity.pubkey
+      const muted = useMutes.getState().muted
+      // What the mute list hides is neither listed nor taken (review of #464, S5).
+      const finds = eventIds.map((id) => discovered[id]).filter((h): h is Hidden => !!h && h.type === 'key' && !findHidden(h, muted, me))
+      const played = finds.filter((h) => playedFinds.has(h.eventId))
+      const watchedOnly = finds.filter((h) => !playedFinds.has(h.eventId))
+      const inv = useInventory.getState()
+      return [...(played.length > 0 ? inv.holdFinds(played) : []), ...(watchedOnly.length > 0 ? inv.holdFinds(watchedOnly, true) : [])]
     },
 
     freshOf: (items) => {

@@ -27,6 +27,7 @@ import { coordPlace } from '../lib/coordRoute'
 import { clampAxis, MAX_SCALE_EXP, type Position } from '../lib/space'
 import { fetchChain } from '../lib/chains'
 import { landfallCoord } from '../lib/hyperspace/landfall'
+import type { TourPose } from '../demo/tourDistance'
 import { moveDirection } from '../lib/moves'
 import { startCoordRoute, useCoordRoute } from './useCoordRoute'
 import { exitHyperspaceView, useHyperspace } from './useHyperspace'
@@ -238,10 +239,13 @@ function dismissBlockToast(): void {
  * The camera a step asks for, as the rig (scene/Scene.tsx) takes it: how far
  * off in render cells, and, for a step with `faceFrom`, the direction from
  * the place out to the camera in cyberspace axes (x, y, z), unit length.
- * A new object for every step entered, so the rig can tell a step from the
- * next.
+ * `at` is the step's own place, where its view looks (a selected block's
+ * landfall, a coordinate), or null for a step at your own head; the rig
+ * gives the step's camera back after a reframe only when the view has just
+ * arrived there (demo/tourDistance.ts TourCameraState). A new object for
+ * every step entered, so the rig can tell a step from the next.
  */
-export interface TourCamera { distance: number; dir: [number, number, number] | null }
+export type TourCamera = TourPose
 
 /** Where a landfall block comes down, from its hash: no header index needed. */
 function landfallPlace(blockHash: string): Position {
@@ -253,9 +257,9 @@ function landfallPlace(blockHash: string): Position {
 export function tourCamera(scene: DemoScene, pubkey: string): TourCamera | null {
   if (scene.distance === undefined) return null
   let dir: TourCamera['dir'] = null
+  const place = placeOf(scene.target, pubkey)
+  const at = scene.select ? landfallPlace(scene.select.blockHash) : place ? coordPlace(place.hex).position : null
   if (scene.faceFrom) {
-    const place = placeOf(scene.target, pubkey)
-    const at = scene.select ? landfallPlace(scene.select.blockHash) : place ? coordPlace(place.hex).position : null
     if (at) {
       const from = coordToXyz(hexToCoord(scene.faceFrom))
       const v = [Number(at.x - from.x), Number(at.y - from.y), Number(at.z - from.z)]
@@ -263,7 +267,7 @@ export function tourCamera(scene: DemoScene, pubkey: string): TourCamera | null 
       if (len > 0) dir = [v[0] / len, v[1] / len, v[2] / len]
     }
   }
-  return { distance: scene.distance, dir }
+  return { distance: scene.distance, dir, at }
 }
 
 /**

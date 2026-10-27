@@ -31,7 +31,7 @@ import { useHyperspace } from '../useHyperspace'
 import { usePad } from '../usePad'
 import { BLOCK_101_ROOT, DEMO_DISTRICT, DEMO_SCRIPT, XOR_PUBKEY } from '../../demo/script'
 import { markdownCaption, splitCaption, spokenText } from '../../demo/captionTokens'
-import { CaptionText, Finish } from '../../hud/DemoCoach'
+import { CaptionText, Finish, watchTvFromTour } from '../../hud/DemoCoach'
 import { readFileSync } from 'node:fs'
 import { MCP_REPO_URL } from '../../lib/agentInvite'
 import { landfallCoord } from '../../lib/hyperspace/landfall'
@@ -94,7 +94,7 @@ describe('the step cameras', () => {
     useDemo.getState().start('welcome')
     expect(useDemo.getState().camera).toBeNull()
     go('everything')
-    expect(useDemo.getState().camera).toEqual({ distance: 12, dir: null })
+    expect(useDemo.getState().camera).toEqual({ distance: 12, dir: null, at: null })
     go('spawn')
     expect(useDemo.getState().camera).toBeNull()
   })
@@ -108,6 +108,9 @@ describe('the step cameras', () => {
     const len = Math.hypot(...v)
     const dot = cam.dir!.reduce((sum, d, i) => sum + d * (v[i] / len), 0)
     expect(dot).toBeGreaterThan(0.999999)
+    // Its own place is block 1's landfall, where the stop's view lands (review of #523).
+    expect(cam.at).toEqual({ x: c.x, y: c.y, z: c.z })
+    expect(tourCamera(at('everything').scene, 'ab'.repeat(32))!.at).toBeNull()
   })
 })
 
@@ -219,5 +222,24 @@ describe('the last step (10/10 3/3)', () => {
     expect(live).toContain('var(--ok)')
     expect(live).not.toMatch(/#c4203a|#ff5470|--danger/)
     expect(/\.demo__finish \{([^}]*)\}/.exec(css)![1]).toContain('flex-direction: column')
+  })
+})
+
+describe('WATCH CYBERSPACE TV pressed twice (review of #523)', () => {
+  afterEach(() => { vi.unstubAllGlobals() })
+
+  it('waits for the Back once, and a second press before it lands does nothing', () => {
+    const listen = vi.fn()
+    vi.stubGlobal('window', {
+      location: { pathname: '/demo/live' },
+      history: { state: { tour: 1 }, back: vi.fn(), replaceState: vi.fn(), pushState: vi.fn() },
+      addEventListener: listen,
+      removeEventListener: vi.fn(),
+    })
+    useDemo.getState().start('live')
+    watchTvFromTour()
+    watchTvFromTour()
+    expect(useDemo.getState().active).toBe(false)
+    expect(listen.mock.calls.filter(([type]) => type === 'popstate')).toHaveLength(1)
   })
 })

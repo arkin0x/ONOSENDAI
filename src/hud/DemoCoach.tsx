@@ -169,6 +169,10 @@ function Chain(): JSX.Element {
  * starts the tour again.
  */
 export function watchTvFromTour(): void {
+  // Once only: a second press before the Back lands would add a second
+  // listener, start TV twice and push a second /tv entry (review of #523).
+  // The first press ended the tour, so the second finds it gone.
+  if (!useDemo.getState().active) return
   useDemo.getState().exit()
   if (/^\/demo(\/|$)/i.test(window.location.pathname)) window.addEventListener('popstate', () => startTvInPlace(), { once: true })
   else startTvInPlace()

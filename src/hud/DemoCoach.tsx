@@ -339,7 +339,11 @@ export function DemoCoach(): JSX.Element | null {
         <button className="demo__icon" onClick={d.exit} aria-label="Exit the tour" title="Exit the tour"><X size={14} /></button>
       </div>
       <div className="demo__bar-track" aria-hidden><div className="demo__bar-fill" style={{ width: `${((index + 1) / script.steps.length) * 100}%` }} /></div>
-      <div className="demo__body">
+      {/* One scroll box per step, keyed by it: the same box kept from step to
+          step kept its scroll, so NEXT opened the next caption at the middle
+          (arkinox, 2026-10-27). A new step starts at its top, whichever way
+          it came (NEXT, BACK, the keys). */}
+      <div className="demo__body" key={index}>
         {/* The headline wraps rather than being cut, and the counter stands
             across from it at the top right (arkinox, 2026-10-15: the header
             on a phone read "IDENTITY IS LO..." beside LOCAL and the counter). */}

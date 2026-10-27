@@ -67,6 +67,8 @@ import { StopField } from './StopField'
 import { StopCubes } from './StopCubes'
 import { StopBurst } from './StopBurst'
 import { TourLine } from './TourLine'
+import { useDemo } from '../store/useDemo'
+import { tourDistance } from '../demo/tourDistance'
 import { TransitAvatar } from './TransitAvatar'
 import { RidePath } from './RidePath'
 import { PathTrail } from './PathTrail'
@@ -548,6 +550,25 @@ function Rig(): JSX.Element {
   // collapsed, in which case the standard framing distance straight on.
   const keptOffset = (): Vector3 => (lastOffset.current.lengthSq() >= 1 ? lastOffset.current.clone() : new Vector3(0, 0, START_DISTANCE))
 
+  // A /demo step's own camera distance (DemoScene.distance; demo/tourDistance.ts):
+  // worked out on each change of step, and the camera moved to it on the next
+  // frame, along the line it already looks down. The step it is for and the
+  // distance owed back when the tour moves on.
+  const tourDist = useRef<{ key: number; saved: number | null; pending: number | null }>({ key: -1, saved: null, pending: null })
+  useEffect(() => {
+    const check = (d: ReturnType<typeof useDemo.getState>): void => {
+      const key = d.active ? d.index : -1
+      const t = tourDist.current
+      if (key === t.key) return
+      t.key = key
+      const r = tourDistance(key >= 0 ? d.script.steps[key]?.scene.distance : undefined, lastOffset.current.length(), t.saved)
+      t.saved = r.saved
+      t.pending = r.set
+    }
+    check(useDemo.getState())
+    return useDemo.subscribe(check)
+  }, [])
+
   // Re-framed on an axis snap and on a respawn. A respawn moves the render
   // origin home in one step, and the per-frame shift below would faithfully
   // carry the camera the same distance, which is the whole width of the axis:
@@ -894,6 +915,19 @@ function Rig(): JSX.Element {
     walkEye.copy(smooth.current)
 
     c.target.copy(smooth.current)
+    // The tour's distance for this step, once, as a pinch would leave it.
+    // Not in WALK, whose eye owns the distance; the next frame's offset is
+    // this one, so a cut or reframe in between keeps it too.
+    const wantDist = tourDist.current.pending
+    if (wantDist !== null) {
+      tourDist.current.pending = null
+      if (!s.walking && !eye.current) {
+        const along = walkDir.copy(c.object.position).sub(c.target)
+        if (along.lengthSq() === 0) along.set(0, 0, 1)
+        c.object.position.copy(c.target).addScaledVector(along.normalize(), Math.min(GRID_RADIUS * 4, Math.max(ORBIT_MIN_DISTANCE, wantDist)))
+        lastOffset.current.copy(c.object.position).sub(c.target)
+      }
+    }
     c.update()
     if (s.walking) (walkLook.current ??= new Vector3()).copy(c.object.position).sub(c.target).normalize()
   })

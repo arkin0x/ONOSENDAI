@@ -92,8 +92,11 @@ export const DEMO_SCRIPT: DemoScript = {
     },
     {
       id: 'everything', chapter: 'key', title: 'All of cyberspace',
-      caption: 'This cubic area is all of cyberspace. It is 0.48 light years across and Earth is at the center. Note where your avatar is relative to the whole cube. Touch and drag to orbit the camera.',
-      scene: { target: 'self', scale: 84 },
+      caption: 'This cubic area is all of cyberspace. It is 0.48 light years across and Earth is at the center. Note where your avatar is relative to the whole cube. Touch and drag to orbit the camera, and pinch to zoom.',
+      // At 2^84 the whole cube is 2 cells across; 12 cells off it fills about
+      // half a phone's width wherever the avatar is inside it, where the
+      // usual 26 left a speck (arkinox, 2026-10-27: "zoomed out too far").
+      scene: { target: 'self', scale: 84, distance: 12 },
     },
     {
       id: 'spawn', chapter: 'key', title: 'Your key is a place',
@@ -120,7 +123,7 @@ export const DEMO_SCRIPT: DemoScript = {
     {
       id: 'verify', chapter: 'nostr', title: 'Checked, not trusted',
       caption: 'An event\'s ID is the SHA-256 hash of its fields, and its signature is a Schnorr signature by your private key over that ID. Your browser just checked both: only your key could have made this event.',
-      captionWaiting: 'An event\'s ID is the SHA-256 hash of its fields, and its signature is a Schnorr signature by your private key over that ID. Your cursor is set 3 gibsons up, right and forward: press COMMIT to sign a hop, and the tour will check it.',
+      captionWaiting: 'An event\'s ID is the SHA-256 hash of its fields, and its signature is a Schnorr signature by your private key over that ID. Your cursor is set 3 gibsons up, right and forward: press COMMIT (Controls, bottom right) to sign a hop, and the tour will check it.',
       scene: { target: 'keep', scale: 0 },
       panel: 'verify',
       wait: 'own-hop',
@@ -152,7 +155,7 @@ export const DEMO_SCRIPT: DemoScript = {
     },
     {
       id: 'portable', chapter: 'nostr', title: 'Yours, not ours',
-      caption: 'Your key and your events belong to you, not to ONOSENDAI. The events carry your unique verifiable signature and live on relays. Other apps can read them too: Ditto already shows cyberspace objects as furniture in the virtual pet minigame.',
+      caption: 'Your key and your events belong to you, not to ONOSENDAI. The events carry your unique verifiable signature and live on relays. Other apps can read them too: Ditto.pub already shows cyberspace objects as furniture in the Blobbi virtual pet minigame.',
       scene: { target: 'keep', scale: 0 },
     },
 

@@ -92,12 +92,24 @@ describe('the script', () => {
     const at = (id: string) => DEMO_SCRIPT.steps.find((s) => s.id === id)!
     expect(DEMO_SCRIPT.chapters[0].title).toBe('Identity is location')
     expect(DEMO_SCRIPT.steps.slice(0, 4).map((s) => s.id)).toEqual(['welcome', 'everything', 'spawn', 'identity'])
-    expect(at('everything').scene).toEqual({ target: 'self', scale: 84 })
+    expect(at('everything').scene).toEqual({ target: 'self', scale: 84, distance: 12 })
     expect(at('welcome').caption).not.toMatch(/LOCAL/)
     expect(at('event').caption).toMatch(/^Everything in cyberspace is a Nostr event:/)
     expect(at('relays').caption).toMatch(/the union of all cyberspace events/)
     expect(at('kinds').caption).toMatch(/hyperspace block anchors/)
     expect(at('chain').caption).toMatch(/Controls panel in the bottom right/)
+  })
+
+  it("keeps arkinox's 2026-10-27 wording", () => {
+    const at = (id: string) => DEMO_SCRIPT.steps.find((s) => s.id === id)!
+    // 1/10 2/4: all of cyberspace, closer in, with the pinch named.
+    expect(at('everything').caption).toBe('This cubic area is all of cyberspace. It is 0.48 light years across and Earth is at the center. Note where your avatar is relative to the whole cube. Touch and drag to orbit the camera, and pinch to zoom.')
+    // 2/10 2/6: where COMMIT is.
+    expect(at('verify').captionWaiting).toBe('An event\'s ID is the SHA-256 hash of its fields, and its signature is a Schnorr signature by your private key over that ID. Your cursor is set 3 gibsons up, right and forward: press COMMIT (Controls, bottom right) to sign a hop, and the tour will check it.')
+    // 2/10 6/6: the app and the game by name.
+    expect(at('portable').caption).toBe('Your key and your events belong to you, not to ONOSENDAI. The events carry your unique verifiable signature and live on relays. Other apps can read them too: Ditto.pub already shows cyberspace objects as furniture in the Blobbi virtual pet minigame.')
+    const nostr = DEMO_SCRIPT.steps.filter((s) => s.chapter === 'nostr').map((s) => s.id)
+    expect([nostr.indexOf('verify') + 1, nostr.indexOf('portable') + 1, nostr.length]).toEqual([2, 6, 6])
   })
 })
 

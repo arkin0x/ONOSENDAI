@@ -24,6 +24,13 @@ export interface DemoScene {
   target: DemoTarget
   /** The zoom, as a power of two (2^0 to 2^84); omitted keeps the current zoom. */
   scale?: number
+  /**
+   * How far the camera stands from what it orbits, in render cells, as a
+   * pinch or the wheel leaves it; set once as the step comes up, and the
+   * distance from before comes back on the first step without one.
+   * Omitted keeps the camera where it is.
+   */
+  distance?: number
   /** Scene layers to set on this step (useLayers); omitted layers stay as they are. */
   layers?: Partial<Record<SceneLayer, boolean>>
   /** Open the local chat dock. */

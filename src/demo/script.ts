@@ -25,14 +25,24 @@ import type { DemoScript } from './types'
 export const GENESIS_ROOT = '4a5e1e4baab89f3a32518a88c31bc87f618f76673e2cc77ab2127b7afdeda33b'
 
 /**
+ * Block 101's merkle root as an explorer shows it. The last bit is 1, so its
+ * station is a port in ideaspace at the root read as a coordinate. Checked
+ * 2026-10-27 three ways: mempool.space and blockstream.info agree on the
+ * block (00000000b69bd8e4dc60580117617a466d5c76ada85fb7b87e9baea01f9d9984,
+ * whose header hashes to it and names block 100 before it), and the app's
+ * own headers-v1 blob 0 holds this root at height 101.
+ */
+export const BLOCK_101_ROOT = 'cfe6b74cab677b52d850ac659d54266a3a4d7bb48270234d2fec836881d0a5f7'
+
+/**
  * The demo district: where chapter 5 flies everyone to scan and find
- * things. Block 0's port (arkinox, 2026-10-15: he builds a welcoming area
- * there for the class on 2026-10-28). Labeled as the tour labels any
- * station. A full 64-hex coord256; its last bit is the plane (1 = ideaspace).
+ * things. Block 101's port (arkinox, 2026-10-27: "change the demo district
+ * to block 101"; it was block 0's, 2026-10-15). Labeled as the tour labels
+ * any station. A full 64-hex coord256; its last bit is the plane (1 = ideaspace).
  */
 export const DEMO_DISTRICT = {
-  coord: GENESIS_ROOT,
-  label: 'BLOCK 0 · PORT',
+  coord: BLOCK_101_ROOT,
+  label: 'BLOCK 101 · PORT',
 }
 
 /**
@@ -44,9 +54,12 @@ export const DEMO_DISTRICT = {
  * npub16njvq7dd3chcftcd54hetstpgvfzdy6rnrncc73uy38z23lk702qa5ehsr (XOR's
  * cyberspace identity, the key its MCP body signs with).
  */
+/** XOR's cyberspace identity (hex), the key its MCP body signs with. */
+export const XOR_PUBKEY = 'd4e4c079ad8e2f84af0da56f95c161431226934398e78c7a3c244e2547f6f3d4'
+
 export const DEMO_CURATORS: readonly string[] = [
   'e8ed3798c6ffebffa08501ac39e271662bfd160f688f94c45d692d8767dd345a',
-  'd4e4c079ad8e2f84af0da56f95c161431226934398e78c7a3c244e2547f6f3d4',
+  XOR_PUBKEY,
 ]
 
 /** The port example: block 0's station, the same place as the district. */
@@ -58,6 +71,8 @@ const PORT_ROOT = GENESIS_ROOT
  * 2026-10-15 the same way as block 0, a landfall in dataspace.
  */
 const LANDFALL_ROOT = '0e3e2357e806b6cdb1f70b54c3a3a17b6714ee1f0e68bebb44a74b1efd512098'
+/** Block 1's hash, which places its landfall (the same block as LANDFALL_ROOT). */
+const LANDFALL_HASH = '00000000839a8e6886ab5951d76f411475428afc90947ee320161bbf18eb6048'
 
 /**
  * Earth's center: dataspace's half-axis point, where §9.7 centers the WGS84
@@ -65,6 +80,27 @@ const LANDFALL_ROOT = '0e3e2357e806b6cdb1f70b54c3a3a17b6714ee1f0e68bebb44a74b1ef
  * here; Earth's radius is about 2^55.6 gibsons.
  */
 const EARTH_CENTER = coordToHex(xyzToCoord(1n << 84n, 1n << 84n, 1n << 84n, 0)).padStart(64, '0')
+
+/**
+ * Camera distances, in render cells, for the steps that set one
+ * (DemoScene.distance; arkinox, 2026-10-27: "zoomed out too far"). The
+ * usual framing is 26 cells off.
+ *
+ * At 2^84 all of cyberspace is a cube 2 cells across with you somewhere in
+ * it, so every part of it is within 2 cells of you on each axis. Seen from
+ * d cells off, its near side takes at most 2 / (d - 2) of the view, and a
+ * phone held upright (390 x 844, a 55 degree view) shows about 0.24 either
+ * side of center: anything over about 10.3 keeps the whole cube in shot
+ * wherever you are in it, and 12 leaves a margin.
+ */
+const CUBE_DISTANCE = 12
+/** The human-height step, 2^34 (checked on a phone and a desktop, 2026-10-27). */
+const HUMAN_DISTANCE = 12
+/**
+ * Block 1's landfall at 2^52, where Earth's radius is about 12 cells: this
+ * far above the block, looking down at it, the curve of the planet frames it.
+ */
+const LANDFALL_DISTANCE = 20
 
 export const DEMO_SCRIPT: DemoScript = {
   chapters: [
@@ -92,8 +128,9 @@ export const DEMO_SCRIPT: DemoScript = {
     },
     {
       id: 'everything', chapter: 'key', title: 'All of cyberspace',
-      caption: 'This cubic area is all of cyberspace. It is 0.48 light years across and Earth is at the center. Note where your avatar is relative to the whole cube. Touch and drag to orbit the camera.',
-      scene: { target: 'self', scale: 84 },
+      caption: 'This cubic area is all of cyberspace. It is 0.48 light years across and Earth is at the center. Note where your avatar is relative to the whole cube. Touch and drag to orbit the camera, and pinch to zoom.',
+      // Close enough to see the cube (CUBE_DISTANCE); the usual 26 left a speck.
+      scene: { target: 'self', scale: 84, distance: CUBE_DISTANCE },
     },
     {
       id: 'spawn', chapter: 'key', title: 'Your key is a place',
@@ -120,7 +157,7 @@ export const DEMO_SCRIPT: DemoScript = {
     {
       id: 'verify', chapter: 'nostr', title: 'Checked, not trusted',
       caption: 'An event\'s ID is the SHA-256 hash of its fields, and its signature is a Schnorr signature by your private key over that ID. Your browser just checked both: only your key could have made this event.',
-      captionWaiting: 'An event\'s ID is the SHA-256 hash of its fields, and its signature is a Schnorr signature by your private key over that ID. Your cursor is set 3 gibsons up, right and forward: press COMMIT to sign a hop, and the tour will check it.',
+      captionWaiting: 'An event\'s ID is the SHA-256 hash of its fields, and its signature is a Schnorr signature by your private key over that ID. Your cursor is set 3 gibsons up, right and forward: press COMMIT (Controls, bottom right) to sign a hop, and the tour will check it.',
       scene: { target: 'keep', scale: 0 },
       panel: 'verify',
       wait: 'own-hop',
@@ -152,20 +189,24 @@ export const DEMO_SCRIPT: DemoScript = {
     },
     {
       id: 'portable', chapter: 'nostr', title: 'Yours, not ours',
-      caption: 'Your key and your events belong to you, not to ONOSENDAI. The events carry your unique verifiable signature and live on relays. Other apps can read them too: Ditto already shows cyberspace objects as furniture in the virtual pet minigame.',
+      caption: 'Your key and your events belong to you, not to ONOSENDAI. The events carry your unique verifiable signature and live on relays. Other apps can read them too: Ditto.pub already shows cyberspace objects as furniture in the Blobbi virtual pet minigame.',
       scene: { target: 'keep', scale: 0 },
     },
 
     // 3. Scale
     {
       id: 'gibson', chapter: 'scale', title: 'The gibson',
-      caption: 'Space is three axes of 85 bits each. One step along an axis is a gibson, the smallest unit in cyberspace, which is roughly the size of a hydrogen atom.',
-      scene: { target: 'self', scale: 0 },
+      // Two paragraphs, in arkinox's words (2026-10-27); the line break shows
+      // (.demo__caption pre-line). The Controls pad opens on the step: its
+      // 2^X button is the zoom the caption talks about.
+      caption: 'Cyberspace is three axes of 85 bits each. One step along an axis is a gibson, the smallest unit in cyberspace, which is roughly the size of a hydrogen atom.\nThe Controls panel shows your current zoom, which is 1:1 gibson scale at zoom 2^0. As you zoom out, the number of gibsons per cell increases by 2^zoom.',
+      scene: { target: 'self', scale: 0, pad: true },
     },
     {
       id: 'human', chapter: 'scale', title: 'Powers of two',
-      caption: 'Each zoom level doubles what you see. At 2^34 gibsons across, the scale the spec calls human height, a region is about two meters in dataspace.',
-      scene: { target: 'self', scale: 34 },
+      // No size in meters: dataspace comes later, in Two planes (arkinox, 2026-10-27).
+      caption: 'Each zoom level doubles what you see. 2^34 gibsons across is the scale the spec calls human height.',
+      scene: { target: 'self', scale: 34, distance: HUMAN_DISTANCE },
     },
     {
       id: 'cube', chapter: 'scale', title: 'Scaling up and down',
@@ -217,14 +258,15 @@ export const DEMO_SCRIPT: DemoScript = {
     {
       id: 'district', chapter: 'hidden', title: 'The demo district',
       caption: 'This is the demo district. As you arrive, ONOSENDAI computes the region keys around you and asks the relays for anything encrypted to them.',
-      scene: { target: 'district', scale: 8, curated: true },
+      // At 2^0 (arkinox, 2026-10-27: "not 2^8").
+      scene: { target: 'district', scale: 0, curated: true },
       wait: 'scan',
       hint: 'Scanning the district.',
     },
     {
       id: 'found', chapter: 'hidden', title: 'Found',
       caption: 'Whatever decrypted is now drawn in the scene. Tap something to open it.',
-      scene: { target: 'keep', scale: 8, curated: true },
+      scene: { target: 'keep', scale: 0, curated: true },
       wait: 'open-item',
       hint: 'Tap something you found.',
       emptyHint: 'Nothing is hidden here yet.',
@@ -256,25 +298,32 @@ export const DEMO_SCRIPT: DemoScript = {
     {
       id: 'line', chapter: 'hyperspace', title: 'A line through space',
       caption: 'Hyperspace is a transit line threaded through cyberspace by Bitcoin\'s proof of work. Every Bitcoin block is a station you can board or disembark.',
-      // Ideaspace at 2^84, the line running station to station (TourLine).
-      scene: { target: 'self', scale: 84, plane: 1, hyperline: true },
+      // Ideaspace at 2^84, the line running station to station (TourLine),
+      // close enough to see the cube (arkinox, 2026-10-27: "cyberspace is a
+      // tiny tiny box").
+      scene: { target: 'self', scale: 84, plane: 1, hyperline: true, distance: CUBE_DISTANCE },
     },
     {
       id: 'port', chapter: 'hyperspace', title: 'A port',
       caption: 'When a block\'s merkle root ends in a 1 bit, its station is a port in ideaspace, sitting exactly at the merkle root read as a coordinate. This is block 0, Bitcoin\'s genesis block.',
-      // Block 0's port is the district's own coordinate, so the port step
-      // draws only the curators' things too (review of #364, 2026-10-15).
+      // Block 0's port is a famous public station, so the port step draws
+      // only the curators' things, as the district does (review of #364,
+      // 2026-10-15; the district moved to block 101 on 2026-10-27).
       scene: { target: { block: PORT_ROOT }, scale: 0, curated: true },
     },
     {
       id: 'landfall', chapter: 'hyperspace', title: 'A landfall',
       caption: 'Otherwise the station is a landfall on Earth, at a point derived from the block hash. This is block 1.',
-      scene: { target: { block: LANDFALL_ROOT }, scale: 52 },
+      // Block 1 picked out as a typed place is (the destination's spinning,
+      // glowing cube and the pin's +), seen from space above it, Earth
+      // behind (arkinox, 2026-10-27: the view started on the wrong side of
+      // Earth with block 1 lost among the other stops).
+      scene: { target: { block: LANDFALL_ROOT }, scale: 52, select: { height: 1, blockHash: LANDFALL_HASH, label: 'BLOCK 1' }, faceFrom: EARTH_CENTER, distance: LANDFALL_DISTANCE },
     },
     {
       id: 'ride', chapter: 'hyperspace', title: 'Riding the line',
       caption: 'To ride, you board from where you stand and appear at your station, the nearest one. A ride proves fresh work for every block it passes, and from the stop where you arrive, the last mile is ordinary movement.',
-      scene: { target: 'self', scale: 84, plane: 1, hyperline: true },
+      scene: { target: 'self', scale: 84, plane: 1, hyperline: true, distance: CUBE_DISTANCE },
     },
 
     // 8. Others
@@ -297,18 +346,16 @@ export const DEMO_SCRIPT: DemoScript = {
     // 9. Agents
     {
       id: 'agents', chapter: 'agents', title: 'Agents live here too',
-      caption: 'AI agents live in cyberspace too. An agent has its own key and its own movement chain, and it pays the same costs to move.',
+      // {link:cyberspace-mcp} is the repo, in a new tab (demo/captionTokens.ts).
+      caption: 'AI agents live in cyberspace too. An agent has its own key and its own movement chain, and it pays the same costs to move. Your agent can use {link:cyberspace-mcp} to enter cyberspace, move, build, and respond to your commands through an encrypted channel.',
       scene: { target: 'self', scale: 0 },
-    },
-    {
-      id: 'operator', chapter: 'agents', title: 'One operator',
-      caption: 'An agent obeys only its operator: the person its profile names, who also follows it. Orders arrive as private NIP-17 messages.',
-      scene: { target: 'keep', scale: 0 },
     },
     {
       id: 'xor', chapter: 'agents', title: 'XOR',
       caption: 'XOR is one such agent. It builds objects, hides them and rides hyperspace, all through the same protocol you just used.',
-      scene: { target: 'keep', scale: 0 },
+      // Where XOR stands now, from its chain on the relays (arkinox,
+      // 2026-10-27); until that arrives, the view stays where it was.
+      scene: { target: { head: XOR_PUBKEY, label: 'XOR' }, scale: 0 },
     },
 
     // 10. Your turn

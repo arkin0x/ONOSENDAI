@@ -67,6 +67,8 @@ import { StopField } from './StopField'
 import { StopCubes } from './StopCubes'
 import { StopBurst } from './StopBurst'
 import { TourLine } from './TourLine'
+import { useDemo } from '../store/useDemo'
+import { tourDistance } from '../demo/tourDistance'
 import { TransitAvatar } from './TransitAvatar'
 import { RidePath } from './RidePath'
 import { PathTrail } from './PathTrail'
@@ -548,6 +550,33 @@ function Rig(): JSX.Element {
   // collapsed, in which case the standard framing distance straight on.
   const keptOffset = (): Vector3 => (lastOffset.current.lengthSq() >= 1 ? lastOffset.current.clone() : new Vector3(0, 0, START_DISTANCE))
 
+  // A /demo step's own camera (DemoScene.distance and faceFrom; useDemo
+  // tourCamera, demo/tourDistance.ts): worked out on each change of step, and
+  // the camera moved to it on the next frame, along the step's direction or
+  // the line it already looks down. `pose` is the step's camera, `saved` the
+  // distance owed back when the tour moves on, `pending` the move to make.
+  type Pose = { distance: number; dir: [number, number, number] | null }
+  const tourCam = useRef<{ pose: Pose | null; saved: number | null; pending: Pose | null }>({ pose: null, saved: null, pending: null })
+  useEffect(() => {
+    const check = (d: ReturnType<typeof useDemo.getState>): void => {
+      const pose = d.active ? d.camera : null
+      const t = tourCam.current
+      if (pose === t.pose) return
+      t.pose = pose
+      const r = tourDistance(pose?.distance, lastOffset.current.length(), t.saved)
+      t.saved = r.saved
+      t.pending = r.set === null ? null : { distance: r.set, dir: pose?.dir ?? null }
+    }
+    check(useDemo.getState())
+    return useDemo.subscribe(check)
+  }, [])
+  // The rig re-framing on its own (a cut or a straight-on reframe) while a
+  // step has a camera of its own: the step's camera, again. A block landing
+  // late or a scale change in the same breath reframed straight on, which
+  // put the camera on the far side of Earth from the block (arkinox,
+  // 2026-10-27). A pinch or a drag is not a reframe and stays the visitor's.
+  const reposeTour = (): void => { const t = tourCam.current; if (t.pose) t.pending = t.pose }
+
   // Re-framed on an axis snap and on a respawn. A respawn moves the render
   // origin home in one step, and the per-frame shift below would faithfully
   // carry the camera the same distance, which is the whole width of the axis:
@@ -602,6 +631,7 @@ function Rig(): JSX.Element {
       locked.current = true
       prevOrigin.current = null
       c.update()
+      reposeTour()
       return
     }
     // A change of focus at the same zoom: a stop clicked from another, RETURN
@@ -654,6 +684,7 @@ function Rig(): JSX.Element {
       locked.current = true
       prevOrigin.current = null
       c.update()
+      reposeTour()
       return
     }
     trace('reframe')
@@ -665,6 +696,7 @@ function Rig(): JSX.Element {
     locked.current = true
     prevOrigin.current = null
     c.update()
+    reposeTour()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [view, genesisId, focusPubkey, focusPoint, exploreIndex])
 
@@ -894,6 +926,26 @@ function Rig(): JSX.Element {
     walkEye.copy(smooth.current)
 
     c.target.copy(smooth.current)
+    // The tour's camera for this step, once, as a pinch would leave it: at
+    // its distance, from its side when it has one (cyberspace x, y, z put
+    // into the view's render axes, as Earth is placed), else along the line
+    // the camera already looks down. Not in WALK, whose eye owns the
+    // distance; the next frame's offset is this one, so a cut keeps it too.
+    const want = tourCam.current.pending
+    if (want !== null) {
+      tourCam.current.pending = null
+      if (!s.walking && !eye.current) {
+        const along = walkDir.copy(c.object.position).sub(c.target)
+        if (want.dir) {
+          const axes = s.axes()
+          const comp = { x: want.dir[0], y: want.dir[1], z: want.dir[2] }
+          along.set(comp[axes.right.axis] * axes.right.dir, comp[axes.up.axis] * axes.up.dir, comp[axes.out.axis] * axes.out.dir)
+        }
+        if (along.lengthSq() === 0) along.set(0, 0, 1)
+        c.object.position.copy(c.target).addScaledVector(along.normalize(), Math.min(GRID_RADIUS * 4, Math.max(ORBIT_MIN_DISTANCE, want.distance)))
+        lastOffset.current.copy(c.object.position).sub(c.target)
+      }
+    }
     c.update()
     if (s.walking) (walkLook.current ??= new Vector3()).copy(c.object.position).sub(c.target).normalize()
   })

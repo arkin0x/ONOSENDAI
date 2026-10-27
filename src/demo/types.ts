@@ -17,8 +17,11 @@ import type { SceneLayer } from '../store/useLayers'
  * - 'keep': wherever the previous step left the view.
  * - { coord }: a 64-hex coordinate; { block } a /C/ argument (a merkle root
  *   or block hash) that the /C/ machinery resolves to its hyperspace stop.
+ * - { head }: where a pubkey's movement chain stands now, read from the
+ *   relays (read only); until it arrives, or if it never does, the view stays
+ *   where the previous step left it.
  */
-export type DemoTarget = 'self' | 'spawn' | 'district' | 'keep' | { coord: string; label: string } | { block: string }
+export type DemoTarget = 'self' | 'spawn' | 'district' | 'keep' | { coord: string; label: string } | { block: string } | { head: string; label: string }
 
 export interface DemoScene {
   target: DemoTarget
@@ -28,9 +31,26 @@ export interface DemoScene {
    * How far the camera stands from what it orbits, in render cells, as a
    * pinch or the wheel leaves it; set once as the step comes up, and the
    * distance from before comes back on the first step without one.
-   * Omitted keeps the camera where it is.
+   * Omitted keeps the camera where it is. The rig puts it back after any
+   * reframe of its own during the step; a pinch or a drag is the visitor's.
    */
   distance?: number
+  /**
+   * With `distance`: the camera stands on the far side of the step's place
+   * from this 64-hex coordinate, looking back across it. Earth's center
+   * puts the camera above a place on the ground, looking down at it.
+   */
+  faceFrom?: string
+  /** Open the Controls pad (usePad), as the CONTROLS chip does. */
+  pad?: boolean
+  /**
+   * A landfall block to point at while the step is up, as a typed place is
+   * pointed at: the block becomes the destination (its cube turns yellow,
+   * spins and glows) and the place gets the pin's +. Both go back to what
+   * they were when the step ends. The block's place is its landfall, from
+   * the block hash, so it needs no header index to be pinned.
+   */
+  select?: { height: number; blockHash: string; label: string }
   /** Scene layers to set on this step (useLayers); omitted layers stay as they are. */
   layers?: Partial<Record<SceneLayer, boolean>>
   /** Open the local chat dock. */

@@ -19,7 +19,7 @@
 
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { ChevronDown, ChevronLeft, ChevronRight, ChevronUp, Square, SquareMinus, SquarePlus, Volume2, X, type LucideIcon } from 'lucide-react'
-import { splitCaption } from '../demo/captionTokens'
+import { CAPTION_LINKS, splitCaption } from '../demo/captionTokens'
 import { getEventHash, verifyEvent } from 'nostr-tools/pure'
 import type { NostrEvent } from 'nostr-tools'
 import { gateHeld, tourKeyNeedsSpawn, useDemo } from '../store/useDemo'
@@ -35,6 +35,7 @@ import { ConfirmModal } from './ConfirmModal'
 import { ChainStatusStrip, useChainStatus } from './ChainStatus'
 import { GO_LIVE_BODY } from './TouchControls'
 import { useCover } from '../hooks/useCover'
+import { startTvInPlace } from '../store/useTv'
 
 /** The kinds the Built on Nostr chapter lists (onosendai/kinds.md). */
 const KINDS: Array<[number, string]> = [
@@ -55,6 +56,10 @@ export function CaptionText({ caption }: { caption: string }): JSX.Element {
     <>
       {splitCaption(caption).map((p, i) => {
         if ('text' in p) return <span key={i}>{p.text}</span>
+        if ('link' in p) {
+          const l = CAPTION_LINKS[p.link]
+          return <a key={i} className="demo__link" href={l.href} target="_blank" rel="noopener noreferrer">{l.text}</a>
+        }
         const Icon = Object.hasOwn(CAPTION_ICONS, p.icon) ? CAPTION_ICONS[p.icon] : undefined
         return Icon ? <Icon key={i} className="demo__icon-inline" size="1em" strokeWidth={2.25} aria-label={`${p.icon} button`} role="img" /> : null
       })}
@@ -156,18 +161,34 @@ function Chain(): JSX.Element {
   )
 }
 
-function Finish(): JSX.Element {
+/**
+ * Cyberspace TV from the tour's last step. TV cannot start while the tour
+ * runs (tvBlocked), so the tour ends first. Ending it can step Back off a
+ * /demo entry the tour pushed, and that Back lands later: TV's own entry
+ * waits for it, or the Back would take TV's entry and land on /demo, which
+ * starts the tour again.
+ */
+export function watchTvFromTour(): void {
+  useDemo.getState().exit()
+  if (/^\/demo(\/|$)/i.test(window.location.pathname)) window.addEventListener('popstate', () => startTvInPlace(), { once: true })
+  else startTvInPlace()
+}
+
+/** The last step's panel: GO LIVE, the protocol, and Cyberspace TV. */
+export function Finish(): JSX.Element {
   const live = useCyberspace((s) => s.live)
   const [confirming, setConfirming] = useState(false)
   // A held chain, a pending choice or a send with no relay is what the strip
   // under the switch already says; GO LIVE shows it rather than LIVE alone.
   const status = useChainStatus()
   return (
+    // Three buttons, full width, one above the next (arkinox, 2026-10-27).
     <div className="demo__panel demo__finish">
       {live
         ? status ? <ChainStatusStrip status={status} /> : <div className="is-ok">You are LIVE.</div>
         : <button className="demo__btn demo__btn--live" onClick={() => setConfirming(true)}>GO LIVE</button>}
-      <a className="demo__link" href="https://github.com/arkin0x/cyberspace" target="_blank" rel="noreferrer">Read the protocol</a>
+      <a className="demo__btn demo__btn--read" href="https://github.com/arkin0x/cyberspace" target="_blank" rel="noopener noreferrer">READ THE PROTOCOL</a>
+      <button className="demo__btn demo__btn--tv" onClick={watchTvFromTour}>WATCH CYBERSPACE TV</button>
       {confirming && (
         <ConfirmModal
           title="Publishing"

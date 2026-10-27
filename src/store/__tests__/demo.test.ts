@@ -23,7 +23,7 @@ import { useCyberspace } from '../useCyberspace'
 import { PREV_LIVE_KEY, SESSION_KEY, TOUR_KEY_KEY, gateHeld, hadHopsAtStart, restoreAfterUnfinishedTour, startTourInPlace, tourKeyNeedsSpawn, useDemo, watchAction } from '../useDemo'
 import { startCoordRoute, useCoordRoute } from '../useCoordRoute'
 import { useShards } from '../useShards'
-import { DEMO_CURATORS, DEMO_DISTRICT, DEMO_SCRIPT, GENESIS_ROOT } from '../../demo/script'
+import { BLOCK_101_ROOT, DEMO_CURATORS, DEMO_DISTRICT, DEMO_SCRIPT, GENESIS_ROOT } from '../../demo/script'
 import { planeOfMerkleRoot, stopCoordExact, stopFromAnchor } from '../../lib/hyperspace/stops'
 import { PREFERRED_VOICES, pickVoice } from '../../demo/voice'
 import { parseDemoRoute } from '../../lib/demoRoute'
@@ -535,11 +535,11 @@ const ZOOM: Record<string, number> = {
   event: 0, verify: 0, relays: 0, kinds: 0, chain: 0, portable: 0,
   gibson: 0, human: 34, cube: 84, planes: 54,
   cantor: 0, lca: 0, 'no-cheat': 0, walk: 0,
-  'region-keys': 0, district: 8, found: 8, chalk: 0,
+  'region-keys': 0, district: 0, found: 0, chalk: 0,
   'key-item': 0, chest: 0, 'item-feed': 0,
   line: 84, port: 0, landfall: 52, ride: 84,
   avatars: 0, presence: 0, chat: 0,
-  agents: 0, operator: 0, xor: 0,
+  agents: 0, xor: 0,
   menu: 0, recap: 0, live: 0,
 }
 
@@ -643,13 +643,17 @@ describe('starting in place from a /C/ link view (review of #362, 2026-10-15)', 
   })
 })
 
-describe('the genesis district (arkinox, 2026-10-15)', () => {
-  it('is block 0\'s port, and the examples are block 0 (a port) and block 1 (a landfall)', () => {
-    expect(DEMO_DISTRICT.coord).toBe(GENESIS_ROOT)
+describe('the district and the examples (arkinox, 2026-10-15; block 101, 2026-10-27)', () => {
+  it('is block 101\'s port, and the examples are block 0 (a port) and block 1 (a landfall)', () => {
+    expect(DEMO_DISTRICT.coord).toBe(BLOCK_101_ROOT)
+    expect(DEMO_DISTRICT.label).toBe('BLOCK 101 · PORT')
+    const district = stopFromAnchor({ kind: 321, tags: [['B', '101'], ['C', BLOCK_101_ROOT], ['H', '00000000b69bd8e4dc60580117617a466d5c76ada85fb7b87e9baea01f9d9984']] })!
+    expect(district.kind).toBe('port')
+    expect(stopCoordExact(district).toString(16).padStart(64, '0')).toBe(BLOCK_101_ROOT)
+    expect(coordPlace(DEMO_DISTRICT.coord).plane).toBe(1)
     const port = stopFromAnchor({ kind: 321, tags: [['B', '0'], ['C', GENESIS_ROOT], ['H', '000000000019d6689c085ae165831e934ff763ae46a2a6c172b3f1b60a8ce26f']] })!
     expect(port.kind).toBe('port')
     expect(stopCoordExact(port).toString(16).padStart(64, '0')).toBe(GENESIS_ROOT)
-    expect(coordPlace(DEMO_DISTRICT.coord).plane).toBe(1)
     const block1 = '0e3e2357e806b6cdb1f70b54c3a3a17b6714ee1f0e68bebb44a74b1efd512098'
     expect(planeOfMerkleRoot(block1)).toBe(0)
     const at = (id: string) => DEMO_SCRIPT.steps.find((s) => s.id === id)!
@@ -683,7 +687,7 @@ describe('the district shows only the curators\' things (2026-10-15)', () => {
     }
     useDemo.getState().goTo(DEMO_SCRIPT.steps.findIndex((s) => s.id === 'line'))
     expect(authors()).toHaveLength(3)
-    // The port step stands on block 0's port, the district's coordinate.
+    // The port step stands on block 0's port, a famous public station.
     useDemo.getState().goTo(DEMO_SCRIPT.steps.findIndex((s) => s.id === 'port'))
     expect(authors(), 'port').toEqual([...DEMO_CURATORS].sort())
     useDemo.getState().goTo(DEMO_SCRIPT.steps.findIndex((s) => s.id === 'landfall'))

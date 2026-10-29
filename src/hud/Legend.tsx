@@ -21,8 +21,8 @@ const ball = (stroke: string): JSX.Element => (
 
 /** The things drawn in the world that are not terrain: what each glyph is. */
 const KEYS: Array<{ what: string; glyph: JSX.Element }> = [
-  { what: 'Red dodecahedron: your avatar', glyph: ball('#ff2323') },
-  { what: "White dodecahedron: another identity's avatar", glyph: ball('#ffffff') },
+  { what: 'Red icosahedron: your avatar', glyph: ball('#ff2323') },
+  { what: "White icosahedron: another identity's avatar", glyph: ball('#ffffff') },
   {
     what: 'Small glowing yellow star: one of your Starred Places (POSITION panel), with its nickname under it when it has one. Tap it to rename it, view it, or unstar it',
     glyph: (

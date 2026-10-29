@@ -620,7 +620,7 @@ describe('what the tour puts back (arkinox, 2026-10-15)', () => {
   it('welcomes a new identity with arkinox\'s words, and anyone with a chain or an avatar of their own with the variant', () => {
     const welcome = DEMO_SCRIPT.steps.find((s) => s.id === 'welcome')!
     expect(captionFor(welcome, false, true, false)).toBe(welcome.caption)
-    expect(welcome.caption).toMatch(/The red dodecahedron is your avatar/)
+    expect(welcome.caption).toMatch(/The red icosahedron is your avatar/)
     const variant = 'This is a guided tour of cyberspace. The shape at the center is your avatar, at your current position. Let\'s talk about how you got here.'
     expect(captionFor(welcome, true, true, false)).toBe(variant)
     expect(captionFor(welcome, false, true, true)).toBe(variant)

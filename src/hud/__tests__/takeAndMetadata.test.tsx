@@ -9,8 +9,11 @@
  * off once everything is held. "Collapse all the technical info on the
  * chest, door, and shard modal under a "METADATA" accordion.": the shard
  * card and the chest card show their name and actions, and the geometry,
- * facts and event data only once METADATA is open. Rendered to a string,
- * with each store's initial state brought up to date first (wireData.test).
+ * facts and event data only once METADATA is open. A stranger's card has no
+ * LOCAL / LIVE switch anywhere, open or closed (arkinox, 2026-10-29: "seeing
+ * live/local only matters for the owner"; the owner's is under the preview,
+ * wireData.test). Rendered to a string, with each store's initial state
+ * brought up to date first (wireData.test).
  */
 
 import { renderToStaticMarkup } from 'react-dom/server'
@@ -220,6 +223,7 @@ describe('METADATA on the card', () => {
     expect(html).toMatch(/aria-expanded="false"[^>]*>METADATA/)
     for (const t of technical) expect(html).not.toContain(t)
     expect(html).not.toContain(h.eventId)
+    expect(html).not.toContain('pubswitch')
   })
 
   it('holds every technical fact once open, under the actions, remembered on this device', () => {
@@ -232,6 +236,8 @@ describe('METADATA on the card', () => {
     for (const t of technical) expect(html).toContain(t)
     expect(html).toContain(h.eventId)
     expect(html.indexOf('aria-label="Metadata"')).toBeGreaterThan(html.indexOf('secret__actions'))
+    // Open or closed, a stranger's card never has the switch: not hidden, not rendered.
+    expect(html).not.toContain('pubswitch')
   })
 
   it('folds a shard\'s geometry with the rest, and keeps its name in view', () => {

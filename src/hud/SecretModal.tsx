@@ -9,11 +9,13 @@
  *
  * One card for everyone's things and your own (arkinox, 2026-10-20: "then
  * we can have these unified"): for a thing this device hid, the wire facts
- * that the separate wire record (DeploymentDetail) used to show, its relays,
- * the LOCAL / LIVE switch and TEST DISCOVERY, are in the event data at the
- * bottom (WireData). All of the technical facts, a shard's geometry, when,
- * the region and plane, and the event data, fold under METADATA, closed
- * until opened (Metadata, arkinox, 2026-10-26).
+ * that the separate wire record (DeploymentDetail) used to show, its relays
+ * and TEST DISCOVERY, are in the event data at the bottom (WireData), and
+ * its LOCAL / LIVE switch stands under the preview, where only the one who
+ * hid it sees it (PublishRow; arkinox, 2026-10-29). All of the technical
+ * facts, a shard's geometry, when, the region and plane, and the event
+ * data, fold under METADATA, closed until opened (Metadata, arkinox,
+ * 2026-10-26).
  *
  * Hidden audio opens here too, with its own body (AudioCard: PLAY,
  * DOWNLOAD, RESET TRIGGER), and the creator, reactions, comments and
@@ -47,6 +49,7 @@ import { ItemFace } from './ItemIcon'
 import { ShardSpin } from '../scene/ShardSpin'
 import { EventData } from './EventData'
 import { WireData } from './WireData'
+import { PublishRow } from './PublishSwitch'
 import { Metadata } from './Metadata'
 import { AudioCard } from './AudioCard'
 import { BlockButton, MuteItemButton } from './BlockButton'
@@ -94,8 +97,9 @@ export function SecretModal(): JSX.Element | null {
   // (arkinox, 2026-10-10: "we need a confirmation step").
   const [confirming, setConfirming] = useState<'delete' | 'remove' | null>(null)
   // The row this device hid it as (it is among `mine`): only then are there
-  // wire facts to show. Never for a thing revealed from a chest, which is in
-  // the chest's sealed contents and not a bag entry of its own.
+  // wire facts, and a LOCAL / LIVE switch, to show. Never for a thing
+  // revealed from a chest, which is in the chest's sealed contents and not a
+  // bag entry of its own.
   const wire = useShards((s) => (item && !item.chestId ? s.mine.find((d) => d.eventId === item.key) ?? null : null))
   // EDIT: a shard of yours this device can move (useShards editable).
   const movable = !!wire && editable(wire, me)
@@ -192,6 +196,15 @@ export function SecretModal(): JSX.Element | null {
         {item.type === 'shard' && item.shard && (
           <div className="secret__spin"><ShardSpin shard={item.shard} /></div>
         )}
+
+        {/* LOCAL or LIVE, under the preview, for the one who hid it alone
+            (arkinox, 2026-10-29: "seeing live/local only matters for the
+            owner. but the owner should see it more prominently. maybe move
+            it up under the preview on the right."). A row in `mine` is this
+            device's own (useShards worldOf stamps it mine), and the switch
+            acts on that row; someone else's find has no row, and no switch.
+            TEST DISCOVERY stays in METADATA (WireData). */}
+        {wire && <PublishRow dep={wire} />}
 
         <div className="secret__creator">
           <span className="secret__label">Left by</span>

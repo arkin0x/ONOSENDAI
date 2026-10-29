@@ -1839,6 +1839,24 @@ kbd {
   margin-bottom: 14px;
 }
 .secret__shard-meta { font-size: 10px; letter-spacing: 0.06em; color: var(--dim); }
+/* LOCAL or LIVE for the one who hid it, under the preview (PublishSwitch
+   PublishRow; arkinox, 2026-10-29: "the owner should see it more
+   prominently ... make it look well organized"): one row boxed as the event
+   JSON is, the card's own label at the left, the switch at the right, its
+   words at the actions' size. Why its LIVE did not go sits under the row. */
+.secret__publish { margin-bottom: 14px; }
+.secret__publish-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-height: 34px;
+  padding: 0 12px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+.secret__publish .pubswitch__opt { font-size: 9px; padding: 5px 10px; }
+.secret__publish .eventdata__refusal { margin-top: 6px; }
 
 .secret__creator {
   margin-bottom: 12px;

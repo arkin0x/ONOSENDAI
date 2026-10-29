@@ -69,7 +69,7 @@ const MOVED: Record<'shard' | 'avatar', string[]> = {
     'label="show default avatar ghost for scale"',
     '<span className="workshop__label">SET AVATAR</span>',
     '>USE THIS SHARD</button>',
-    '>DODECAHEDRON</button>',
+    '>ICOSAHEDRON</button>',
     '>BROADCAST</button>',
     'useAvatars.getState().cancelAdopt()',
     'WORK ${work.required} BITS',

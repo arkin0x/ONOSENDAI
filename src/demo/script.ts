@@ -119,7 +119,7 @@ export const DEMO_SCRIPT: DemoScript = {
     // 1. Identity is location
     {
       id: 'welcome', chapter: 'key', title: 'Welcome to cyberspace',
-      caption: 'This is a guided tour of cyberspace. The red dodecahedron is your avatar, located at your spawn point. You can customize your avatar later. Let\'s talk about how you got here.',
+      caption: 'This is a guided tour of cyberspace. The red icosahedron is your avatar, located at your spawn point. You can customize your avatar later. Let\'s talk about how you got here.',
       // An identity with a chain is not at its spawn, and one with its own
       // avatar is not a red dodecahedron (2026-10-15).
       captionReturning: 'This is a guided tour of cyberspace. The shape at the center is your avatar, at your current position. Let\'s talk about how you got here.',

@@ -101,6 +101,39 @@ describe('a scan does not open again what it already opened', () => {
     expect((await unbagRemembered(b, rk.key, undefined, origin, 6))[0]).not.toBe(b1[0])
   })
 
+  it('two scans opening the same bag at once share one opening, and count it once', async () => {
+    const a = await cityBag(100)
+    const b = await cityBag(101)
+    const c = await cityBag(102)
+    // Room for three.
+    forgetOpened(openedSize(a) * 3 + 10)
+    const [x, y] = await Promise.all([unbagRemembered(a, rk.key, undefined, origin, 6), unbagRemembered(a, rk.key, undefined, origin, 6)])
+    expect(y[0]).toBe(x[0])
+    const b1 = await unbagRemembered(b, rk.key, undefined, origin, 6)
+    const c1 = await unbagRemembered(c, rk.key, undefined, origin, 6)
+    expect((await unbagRemembered(b, rk.key, undefined, origin, 6))[0]).toBe(b1[0])
+    expect((await unbagRemembered(c, rk.key, undefined, origin, 6))[0]).toBe(c1[0])
+    expect((await unbagRemembered(a, rk.key, undefined, origin, 6))[0]).toBe(x[0])
+  })
+
+  it('overlapping scans, again and again, never wear the budget away', async () => {
+    const bags = await Promise.all(Array.from({ length: 6 }, (_, i) => cityBag(200 + i)))
+    forgetOpened(openedSize(bags[0]) * 4 + 10)
+    for (let r = 0; r < 4; r++) for (const x of bags) await Promise.all([unbagRemembered(x, rk.key, undefined, origin, 6), unbagRemembered(x, rk.key, undefined, origin, 6)])
+    const fresh = await cityBag(300)
+    const f1 = await unbagRemembered(fresh, rk.key, undefined, origin, 6)
+    expect((await unbagRemembered(fresh, rk.key, undefined, origin, 6))[0]).toBe(f1[0])
+  })
+
+  it('a bag with a reference opened with no resolver is not kept, so a later opening still finds the object', async () => {
+    const o = finalizeEvent(await objectTemplate(shard, rk.key, 'kit-2', 50), hider)
+    const outer = await bag([finalizeEvent(messageInnerTemplate('beside it', at, 0, 5), hider), referenceTo(o, at, 0, '')])
+    const blind = await unbagRemembered(outer, rk.key, undefined, origin, 6)
+    expect(blind.map((h) => h.text ?? h.shard?.name)).toEqual(['beside it'])
+    const seen = await unbagRemembered(outer, rk.key, async () => o, origin, 6)
+    expect(seen.map((h) => h.text ?? h.shard?.name).sort()).toEqual(['beside it', 'cistern'])
+  })
+
   it('counts even a bag that opens to nothing, so their number is bounded too', async () => {
     const outer = await cityBag()
     const wrong = regionKeyAt({ ...at, x: at.x + 10_000n }, 6, 20).key

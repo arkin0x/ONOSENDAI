@@ -152,7 +152,7 @@ export function setFoundSink(fn: FoundSink | null): void { sink = fn }
  * through, so the row can be opened again later without asking anyone for
  * them. Nothing is kept yet: rememberBag does that.
  */
-export async function unbagRecording(outer: NostrEvent, regionKey: Uint8Array, resolve?: ResolveReference, origin?: RegionOrigin, height?: number): Promise<{ items: Hidden[]; refs: Record<string, NostrEvent> }> {
+export async function unbagRecording(outer: NostrEvent, regionKey: Uint8Array, resolve?: ResolveReference, origin?: RegionOrigin, height?: number, seen?: { references: number }): Promise<{ items: Hidden[]; refs: Record<string, NostrEvent> }> {
   const refs: Record<string, NostrEvent> = {}
   const recording: ResolveReference | undefined = resolve
     ? async (ref) => {
@@ -161,7 +161,7 @@ export async function unbagRecording(outer: NostrEvent, regionKey: Uint8Array, r
       return ev
     }
     : undefined
-  const items = await unbag(outer, regionKey, recording, origin, height)
+  const items = await unbag(outer, regionKey, recording, origin, height, seen)
   return { items, refs }
 }
 
@@ -223,6 +223,9 @@ function openedKey(outer: NostrEvent, regionKey: Uint8Array, origin: RegionOrigi
 
 function keepOpened(key: string, items: Hidden[], size: number): void {
   if (size > openedBudget) return
+  // Kept again under the same key (two scans that overlapped): counted once.
+  const was = openedBags.get(key)
+  if (was) { openedBags.delete(key); openedChars -= was.size }
   openedBags.set(key, { items, size })
   openedChars += size
   for (const [k, v] of openedBags) {
@@ -232,10 +235,22 @@ function keepOpened(key: string, items: Hidden[], size: number): void {
   }
 }
 
-/** For tests: forget every bag a scan opened, and say how many were kept; `budget` sets the bound (OPENED_KEPT_CHARS by default). */
+/**
+ * Opens under way, by the same key: a second scan that finds a bag while the
+ * first is still opening it (a superseded scan finishing its list, RESCAN ALL
+ * beside a scan) waits for that opening instead of decrypting it again.
+ */
+const opening = new Map<string, Promise<{ items: Hidden[]; refs: Record<string, NostrEvent> }>>()
+
+/**
+ * Forget every bag a scan opened, and say how many were kept: on a change of
+ * identity (store/useFound.ts), and in tests, where `budget` sets the bound
+ * (OPENED_KEPT_CHARS by default).
+ */
 export function forgetOpened(budget: number = OPENED_KEPT_CHARS): number {
   const n = openedBags.size
   openedBags.clear()
+  opening.clear()
   openedChars = 0
   openedBudget = budget
   return n
@@ -252,10 +267,26 @@ export async function unbagRemembered(outer: NostrEvent, regionKey: Uint8Array, 
     rememberBag(outer, regionKey, hit.items, {}, height, origin)
     return hit.items
   }
-  let asked = 0
-  const counting: ResolveReference | undefined = resolve ? (ref) => { asked++; return resolve(ref) } : undefined
-  const { items, refs } = await unbagRecording(outer, regionKey, counting, origin, height)
-  if (key !== null && asked === 0) keepOpened(key, items, openedSize(outer))
+  const under = key !== null ? opening.get(key) : undefined
+  if (under) {
+    const { items, refs } = await under
+    rememberBag(outer, regionKey, items, refs, height, origin)
+    return items
+  }
+  // Whether it holds a reference is read from its entries, not from whether
+  // the resolver was asked: one opened with no resolver drops its references,
+  // and that opening must not stand in for one that could fetch them.
+  const seen = { references: 0 }
+  const run = unbagRecording(outer, regionKey, resolve, origin, height, seen)
+  if (key !== null) opening.set(key, run)
+  let opened: { items: Hidden[]; refs: Record<string, NostrEvent> }
+  try {
+    opened = await run
+  } finally {
+    if (key !== null && opening.get(key) === run) opening.delete(key)
+  }
+  const { items, refs } = opened
+  if (key !== null && seen.references === 0) keepOpened(key, items, openedSize(outer))
   rememberBag(outer, regionKey, items, refs, height, origin)
   return items
 }

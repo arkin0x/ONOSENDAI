@@ -993,7 +993,13 @@ function noteReading(bagId: string, reading: BagReading): void {
   for (const listener of readingListeners) listener()
 }
 
-export async function unbag(outer: NostrEvent, regionKey: Uint8Array, resolve?: ResolveReference, origin?: RegionOrigin, height?: number): Promise<Hidden[]> {
+/**
+ * `seen`, when given, is told how many of the bag's entries are references
+ * (0 when it does not open): what lib/foundCache.ts asks before keeping an
+ * opening, since a reference may open differently next time (a newer version
+ * of the object, or one fetched that could not be before).
+ */
+export async function unbag(outer: NostrEvent, regionKey: Uint8Array, resolve?: ResolveReference, origin?: RegionOrigin, height?: number, seen?: { references: number }): Promise<Hidden[]> {
   const ct = ciphertextOf(outer)
   if (!ct) return []
   const json = await decryptForRegion(regionKey, ct)
@@ -1001,6 +1007,7 @@ export async function unbag(outer: NostrEvent, regionKey: Uint8Array, resolve?: 
   let entries: unknown
   try { entries = JSON.parse(json) } catch { noteReading(outer.id, { entries: 0, readable: 0, opaque: true }); return [] }
   if (!Array.isArray(entries)) { noteReading(outer.id, { entries: 0, readable: 0, opaque: true }); return [] }
+  if (seen) seen.references = entries.filter(isReference).length
   const keyHex = bytesToHex(regionKey)
   const regionHeight = height ?? heightHint(outer) ?? 0
   const facts: BagFacts = { height: regionHeight, bag: bagSettingsOf(outer, regionHeight) }

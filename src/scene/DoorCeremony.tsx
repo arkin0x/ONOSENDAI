@@ -4,9 +4,10 @@
  * with the house static; WALK lets you through immediately; the room's
  * contents appear with the existing reveal effect; no loot float").
  *
- * The closed slab decodes away upward (ShardMesh `dissolve`), fading as it
- * goes, as if it slid up into the lintel; the open look, the slab's bottom
- * rail, settles out of static as a found shard does (ShardMesh `birth`). By
+ * The closed slab decodes away upward (ShardMesh `dissolve`), its faces
+ * thinning first and its glowing points carrying the static up, as if it
+ * slid up into the lintel; the open look, the slab's bottom rail, fades in
+ * at the top of the doorway as the static clears (RailIn). By
  * then WALK has long let the walker through (store/walkWalls.ts), and what
  * is behind the door is appearing with the find ceremony where it stands
  * (hud/ItemRows openChestHere). The calm path fades one into the other.
@@ -15,10 +16,11 @@
 
 import { useEffect, useRef, useState } from 'react'
 import { useFrame } from '@react-three/fiber'
-import type { Group } from 'three'
-import { DOOR_DISSOLVE_MS, DOOR_OPEN_AT, dissolveShare } from '../lib/ceremony'
+import type { Group, Material } from 'three'
+import { DOOR_DISSOLVE_MS, DOOR_OPEN_AT, DOOR_RAIL_FADE_MS, dissolveShare } from '../lib/ceremony'
 import type { Look } from '../lib/looks'
-import { CalmSwap, fadeAll } from './ChestCeremony'
+import { CalmSwap } from './ChestCeremony'
+import { breatheMaterial } from './WorldShards'
 import { ShardMesh } from './ShardMesh'
 
 export function DoorCeremony({ look, at, calm }: { look: Look; at: number; calm: boolean }): JSX.Element {
@@ -35,14 +37,49 @@ function SlabAway({ look, at }: { look: Look; at: number }): JSX.Element {
     return () => window.clearTimeout(t)
   }, [gone, at])
   useFrame(() => {
-    // Faded as a ghost's materials are, so the static thins out as it rises.
+    // The faces thin out first, in the first 40% of the decode; the points,
+    // which the bloom lights, carry the static up into the lintel to the end
+    // (faded as a ghost's materials are, WorldShards breatheMaterial).
     const t = dissolveShare(performance.now() - at)
-    fadeAll(slab.current, 1 - t * t)
+    slab.current?.traverse((o) => {
+      const m = (o as { material?: Material | Material[] }).material
+      if (!m) return
+      for (const one of Array.isArray(m) ? m : [m]) {
+        const points = !!(one as { uniforms?: Record<string, unknown> }).uniforms?.uOpacity
+        breatheMaterial(one, points ? 1 - t * t : Math.max(0, 1 - t / 0.4))
+      }
+    })
   })
   return (
     <>
       {!gone && <group ref={slab}><ShardMesh shard={look.closed} world ghost dissolve={at} /></group>}
-      <ShardMesh shard={look.open!} world birth={at + DOOR_OPEN_AT} />
+      <RailIn look={look} at={at} />
     </>
   )
+}
+
+/**
+ * The open look fading in where the slab was, once most of the static has
+ * risen. Not decoded out of static itself: the house decode throws each
+ * point anywhere within the model's reach from its origin, and the rail
+ * stands at the top of the doorway, so its static would fill the doorway
+ * the slab has just cleared.
+ */
+function RailIn({ look, at }: { look: Look; at: number }): JSX.Element | null {
+  const rail = useRef<Group>(null)
+  const [shown, setShown] = useState(() => performance.now() - at >= DOOR_OPEN_AT)
+  useEffect(() => {
+    if (shown) return
+    const t = window.setTimeout(() => setShown(true), Math.max(0, at + DOOR_OPEN_AT - performance.now()))
+    return () => window.clearTimeout(t)
+  }, [shown, at])
+  useFrame(() => {
+    const share = Math.min(1, Math.max(0, (performance.now() - at - DOOR_OPEN_AT) / DOOR_RAIL_FADE_MS))
+    rail.current?.traverse((o) => {
+      const m = (o as { material?: Material | Material[] }).material
+      if (m) for (const one of Array.isArray(m) ? m : [m]) breatheMaterial(one, share)
+    })
+  })
+  if (!shown) return null
+  return <group ref={rail}><ShardMesh shard={look.open!} world ghost /></group>
 }

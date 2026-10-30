@@ -396,9 +396,10 @@ export function ShardMesh({ shard: given, scale = 1, ghost = false, birth, disso
       const c = colAttr.array as Float32Array
       const n = p.length / 3
       for (let v = 0; v < n; v++) {
-        const o = scrambleOffset(v, away.seed, away.extent * 0.35)
+        // A little scatter, never enough to stretch a face across the room.
+        const o = scrambleOffset(v, away.seed, away.extent * 0.06)
         // Upward first and most: the slab slides up into the lintel as it goes.
-        const lift = away.extent * (0.6 + 0.8 * hash01(v * 7, away.seed)) * e
+        const lift = away.extent * (0.25 + 0.45 * hash01(v * 7, away.seed)) * e
         const j = t > 0 && t < 1 ? (hash01(v * 13 + frame.current, away.seed) - 0.5) * 0.04 * away.extent * t : 0
         p[v * 3] = positions[v * 3] + o[0] * e + j
         p[v * 3 + 1] = positions[v * 3 + 1] + Math.abs(o[1]) * e + lift + j

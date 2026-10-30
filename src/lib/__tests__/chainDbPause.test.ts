@@ -84,7 +84,42 @@ describe('the write pause', () => {
     expect(kept && typeof kept === 'object' ? kept.savedAt : kept).toBe(3)
   })
 
-  it('a branch set aside a moment ago is listed, though its write was still in the pause', async () => {
+  it('waits 400 ms by default: long enough for a relay\'s acknowledgement, short enough to lose little to a crash', async () => {
+    const db = await import('../chainDb')
+    expect(db.chainWritePause()).toBe(400)
+  })
+
+  it('another tab cannot end the pause: it reads the record from before it until the write lands', async () => {
+    const a = await chainDb(150)
+    a.writeStoredChain(PK, chainOf(10, 1))
+    await a.chainWritesSettled()
+    a.writeStoredChain(PK, chainOf(11, 2))
+    vi.resetModules()
+    const b = await import('../chainDb')
+    const early = await b.readStoredChain(PK)
+    expect(early && typeof early === 'object' ? early.events.length : early).toBe(10)
+    // What store/useCyberspace.ts readForMark waits before reading again.
+    await sleep(a.chainWritePause() + 300)
+    const late = await b.readStoredChain(PK)
+    expect(late && typeof late === 'object' ? late.events.length : late).toBe(11)
+  })
+
+  it('a branch set aside is written before the record that replaces it, even when a read ends the record\'s pause (review of #536, F2)', async () => {
+    const db = await chainDb(60_000)
+    const order: string[] = []
+    const proto = (globalThis as unknown as { IDBObjectStore: { prototype: { put: (v: unknown, k?: unknown) => unknown } } }).IDBObjectStore.prototype
+    const put = proto.put
+    proto.put = function (this: unknown, v: unknown, k?: unknown) { order.push(String((v as { key?: string }).key).startsWith('parted:') ? 'parted' : 'record'); return put.call(this, v, k) }
+    try {
+      db.setAsideStoredChain(PK, chainOf(7, 4))
+      db.writeStoredChain(PK, chainOf(9, 5))
+      await db.readStoredChain(PK)
+      await db.chainWritesSettled()
+    } finally { proto.put = put }
+    expect(order).toEqual(['parted', 'record'])
+  })
+
+  it('a branch set aside a moment ago is listed at once', async () => {
     const db = await chainDb(60_000)
     db.setAsideStoredChain(PK, chainOf(7, 4))
     const aside = await db.setAsideChains(PK)

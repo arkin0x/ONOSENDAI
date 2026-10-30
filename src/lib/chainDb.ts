@@ -26,14 +26,19 @@
  * Writes go through one queue per identity, latest wins: a burst of saves
  * (an AUTO route signs one action after another) costs one write in flight
  * and one waiting, never one per save. A write starts a pause (writePauseMs,
- * 1 s) after the first save that asks for it, so the two saves of every action (signed,
- * then acknowledged by a relay a moment later) are one write: the whole
+ * 400 ms) after the first save that asks for it, so the two saves of every
+ * action (signed, then acknowledged by a relay, usually 50 to 250 ms later)
+ * are one write: the whole
  * record is copied on the main thread when it is written (structured clone),
  * about 55 ms for a 1,300-action chain, and twice per action was a stutter in
  * WALK (arkinox, 2026-10-30). Until the store of every event moves to its own
  * layer, which writes one row per event, this only halves it and moves it
  * off the move itself. A read, the page being hidden or left, or a test
- * waiting for the writes ends the pause at once. When the page is hidden or
+ * waiting for the writes ends the pause at once. Another tab cannot end it:
+ * it sees the mark of this save before the chain behind it, and waits for
+ * the chain (store/useCyberspace.ts readForMark). A branch set aside is
+ * written without the pause, so it is never on disk after the record that
+ * replaced it there. When the page is hidden or
  * left, the one waiting is sent at once rather than behind the one in flight. Every
  * write carries a generation, and one that a newer write of the same
  * identity has overtaken is not sent (or sent again after a failure), so an
@@ -58,7 +63,7 @@ const RECORD_VERSION = 1
 /** How long a read waits for the database before it says 'timeout'. */
 let readPatienceMs = 3_000
 /** How long a write waits for the saves after it to join it (see above). */
-let writePauseMs = 1_000
+let writePauseMs = 400
 
 /** One identity's chain as stored: what the store saves, in the same words. */
 export interface StoredChain {
@@ -172,8 +177,9 @@ function recordOf(c: StoredChain): unknown {
  * Keep `chain` as `pubkey`'s, in place of what was kept. Returns at once; the
  * write follows, after any already in flight, and only the newest chain
  * waiting is written. A chain that does not say when it was saved is stamped now.
+ * With `pause` false the write is not held for the saves after it.
  */
-export function writeStoredChain(pubkey: string, chain: StoredChain): void {
+export function writeStoredChain(pubkey: string, chain: StoredChain, pause = true): void {
   if (!chainDbAvailable()) return
   const stamped = { ...chain, savedAt: chain.savedAt ?? Date.now() }
   const gen = ++generations
@@ -183,10 +189,12 @@ export function writeStoredChain(pubkey: string, chain: StoredChain): void {
   const entry: WriteQueue = { running: Promise.resolve(), next: { chain: stamped, gen }, wake: null }
   queues.set(pubkey, entry)
   entry.running = (async () => {
-    await new Promise<void>((resolve) => {
-      const timer = setTimeout(() => entry.wake?.(), writePauseMs)
-      entry.wake = () => { clearTimeout(timer); entry.wake = null; resolve() }
-    })
+    if (pause) {
+      await new Promise<void>((resolve) => {
+        const timer = setTimeout(() => entry.wake?.(), writePauseMs)
+        entry.wake = () => { clearTimeout(timer); entry.wake = null; resolve() }
+      })
+    }
     while (entry.next) {
       const w = entry.next
       entry.next = null
@@ -205,13 +213,14 @@ export function writeStoredChain(pubkey: string, chain: StoredChain): void {
  * (store/useCyberspace.ts takeParted).
  */
 export function setAsideStoredChain(pubkey: string, chain: StoredChain): void {
-  writeStoredChain(`parted:${pubkey}:${Date.now()}`, chain)
+  // At once: the record that replaces it is written after it, never before (review of #536, F2).
+  writeStoredChain(`parted:${pubkey}:${Date.now()}`, chain, false)
 }
 
 /** The branches set aside for `pubkey` (setAsideStoredChain), oldest first. */
 export async function setAsideChains(pubkey: string): Promise<StoredChain[]> {
   const out: StoredChain[] = []
-  // A branch set aside a moment ago, its write still in the pause, is listed too.
+  // A branch set aside a moment ago, its write still on its way, is listed too.
   const prefix = `parted:${pubkey}:`
   const waiting = [...queues].filter(([key]) => key.startsWith(prefix)).map(([, q]) => { q.wake?.(); return q.running })
   await Promise.all(waiting)
@@ -259,6 +268,11 @@ export async function chainWritesSettled(): Promise<void> {
     for (const q of queues.values()) q.wake?.()
     await Promise.all([...queues.values()].map((q) => q.running))
   }
+}
+
+/** How long a write waits for the saves after it (ms): what another tab allows before reading again. */
+export function chainWritePause(): number {
+  return writePauseMs
 }
 
 /** For tests: how long a write waits for the saves after it. */

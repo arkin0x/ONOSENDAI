@@ -443,7 +443,6 @@ export default function App(): JSX.Element {
   )
 }
 
-/** Your own profile's editor, from the Identity panel's PROFILE or a profile's EDIT PROFILE (useProfileView). */
 /**
  * The scans that follow where you are (hidden shards near you, the chat's
  * neighbours). Their own component, so a move re-renders this and not the
@@ -472,6 +471,7 @@ function OfferWatch({ hidden, onChange }: { hidden: boolean; onChange: (up: bool
   return null
 }
 
+/** Your own profile's editor, from the Identity panel's PROFILE or a profile's EDIT PROFILE (useProfileView). */
 function ProfileEditor(): JSX.Element | null {
   const editing = useProfileView((s) => s.editing)
   return editing ? <ProfileModal onClose={() => useProfileView.getState().stopEditing()} /> : null

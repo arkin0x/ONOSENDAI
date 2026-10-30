@@ -602,7 +602,7 @@ export function warmWalls(plane: number, from?: Position): void {
   walkNo++
   // Your follows, read once per identity; a read that failed is asked again at the next WALK.
   readFollows()
-  const items = wallItems(plane, from)
+  const items = from ? wallItemsAt(plane, from) : wallItems(plane)
   const near = from ? items.filter((w) => regionReached(w, from)) : items
   const order = (pool: Pool): WallItem[] => near.filter((w) => poolOf(w) === pool)
     .sort((a, b) => { if (!from) return 0; const x = nearness(a, from), y = nearness(b, from); return x < y ? -1 : x > y ? 1 : 0 })
@@ -858,12 +858,8 @@ export function enclosesWalker(w: WallItem, from: Position): boolean {
  * blocks per its model's collision until opened"). OPEN takes the door out
  * of the walls at once, before any picture of it opening has finished, so a
  * walker is never held by an animation; its open look carries no constrain.
- * A door opened by hand before on this device is open here after a reload
- * too, whether a key or a signer opened it (store/useOpenedChests). Given
- * the walker's place `from`, a closed door whose solid already holds them
- * is left out, so they can step out of it.
  */
-export function wallItems(plane: number, from?: Position): WallItem[] {
+export function wallItems(plane: number): WallItem[] {
   const all = useShards.getState().worldItems()
   const shards = all.filter((w): w is WorldItem & { shard: ShardModel } => w.type === 'shard' && !!w.shard && w.plane === plane)
   const me = useCyberspace.getState().identity.pubkey
@@ -874,9 +870,18 @@ export function wallItems(plane: number, from?: Position): WallItem[] {
     if (opened[openedKey(me, w.key)] || openedByHand(me, w.key)) continue
     const look = lookOf(w)
     if (!look) continue
-    const wall: WallItem = { key: doorWallKey(w.key), at: w.at, height: w.height, plane: w.plane, author: w.author, mine: w.mine, shard: look.closed, uncut: true }
-    if (from && enclosesWalker(wall, from)) continue
-    doors.push(wall)
+    doors.push({ key: doorWallKey(w.key), at: w.at, height: w.height, plane: w.plane, author: w.author, mine: w.mine, shard: look.closed, uncut: true })
   }
   return doors.length > 0 ? [...shards, ...doors] : shards
+}
+
+/**
+ * The walls of a walker at `from`: wallItems, where a door opened by hand
+ * before on this device is open after a reload too, whether a key or a
+ * signer opened it (store/useOpenedChests openedByHand), less any closed
+ * door whose slab already holds them, so they can step out of it (review of
+ * #532). What every WALK step, fall and jump asks.
+ */
+export function wallItemsAt(plane: number, from: Position): WallItem[] {
+  return wallItems(plane).filter((w) => !(w.uncut && enclosesWalker(w, from)))
 }

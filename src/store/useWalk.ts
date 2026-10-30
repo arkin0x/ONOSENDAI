@@ -88,7 +88,7 @@ import { keepWalkLook } from '../lib/walkLook'
 import { MAX_COMPUTE_HEIGHT, samePosition, useCyberspace } from './useCyberspace'
 import { BRIEF_TOAST_MS, useToast } from './useToast'
 import { standing, walkStep } from './walkStep'
-import { stepLimit, takeWallWait, wallItems, wallsBuilt, warmWalls, type WallItem } from './walkWalls'
+import { stepLimit, takeWallWait, wallItemsAt, wallsBuilt, warmWalls, type WallItem } from './walkWalls'
 import { JUMP_SPEED, WALK_GRAVITY, arcApex, arcHeight, arcPeak, arcSpeed, fallLimit, jumpRise, loadGravity, reachedHeight, saveGravity } from './walkGravity'
 import { walkFall } from '../lib/walkEye'
 
@@ -268,7 +268,7 @@ export const useWalk = create<WalkState>((set, get) => ({
     // (2 gibsons at most) and settles onto a floor up to 2 below (store/walkStep.ts).
     const length = sign > 0 ? next[dir.axis] - from[dir.axis] : from[dir.axis] - next[dir.axis]
     takeWallWait()
-    const step = walkStep(from, dir.axis, sign, length, wallItems(cs.plane, from), gravity)
+    const step = walkStep(from, dir.axis, sign, length, wallItemsAt(cs.plane, from), gravity)
     if (waitedForWalls(() => get().press(name))) return
     if (step.by) wallChip(step.by)
     if (samePosition(step.to, from)) return
@@ -421,7 +421,7 @@ function fallIfAirborne(): void {
   const walk = useWalk.getState()
   if (!cs.walking || fall || !walk.gravity) return
   const from = walk.open?.end ?? walk.queue[walk.queue.length - 1] ?? cs.position
-  const items = wallItems(cs.plane, from)
+  const items = wallItemsAt(cs.plane, from)
   takeWallWait()
   const stands = standing(from, items, true)
   const limit = stands ? null : fallLimit(from, items, affordIn(cs.plane))
@@ -436,7 +436,7 @@ function fallIfAirborne(): void {
 /** Up under gravity: a jump of JUMP_HEIGHT from the floor you stand on, under any ceiling. Off a floor, nothing. */
 function jump(from: Position): void {
   const cs = useCyberspace.getState()
-  const items = wallItems(cs.plane, from)
+  const items = wallItemsAt(cs.plane, from)
   takeWallWait()
   const stands = standing(from, items, true)
   if (waitedForWalls(() => jump(from))) return

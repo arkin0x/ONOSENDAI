@@ -8,7 +8,9 @@
  * lot of stuff like comments and reactions. I think this could be replaced
  * entirely with the new metadata section"). What only it had lives here:
  * the lookup id the bag is filed under, the `C` coordinate, the height, the
- * relays that hold it, the LOCAL / LIVE switch, and TEST DISCOVERY.
+ * relays that hold it, and TEST DISCOVERY. The LOCAL / LIVE switch was here
+ * too, and now stands under the preview on the card, for the one who hid
+ * the thing alone (PublishSwitch PublishRow; arkinox, 2026-10-29).
  *
  * TEST DISCOVERY proves the round-trip: it derives the region key fresh from
  * the coordinate, as a stranger would, asks the relay, and opens what comes
@@ -22,7 +24,6 @@ import { positionHex } from '../lib/events'
 import { shardRefusal } from '../lib/hidden'
 import { positionOf, useShards, type MyDeployment } from '../store/useShards'
 import { CopyValue } from './EventData'
-import { PublishSwitch } from './PublishSwitch'
 
 export type TestState = 'idle' | 'testing' | 'found' | 'missing' | 'refused'
 
@@ -42,8 +43,6 @@ export function relayNames(dep: Pick<MyDeployment, 'published' | 'relays'>): str
 
 export function WireData({ dep, initialTest = 'idle' }: { dep: MyDeployment; initialTest?: TestState }): JSX.Element {
   const [test, setTest] = useState<TestState>(initialTest)
-  // Why this bag's LIVE did not go, when it did not: only its own reason.
-  const failed = useShards((s) => (!dep.published && s.broadcastFailed === dep.lookupId ? s.broadcastError : null))
   const at = positionOf(dep)
   const coord = positionHex(at, dep.plane)
   const relays = relayNames(dep)
@@ -78,12 +77,7 @@ export function WireData({ dep, initialTest = 'idle' }: { dep: MyDeployment; ini
               : <span className="eventdata__none">nowhere yet: signed and kept on this device</span>}
           </dd>
         </div>
-        <div>
-          <dt>published</dt>
-          <dd><PublishSwitch lookupId={dep.lookupId} published={dep.published} /></dd>
-        </div>
       </dl>
-      {failed && <p className="eventdata__refusal" role="status">{failed}</p>}
       {dep.published && (
         <button
           className={`secret__act eventdata__test eventdata__test--${test}`}

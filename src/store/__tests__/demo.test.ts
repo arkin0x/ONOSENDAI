@@ -23,7 +23,7 @@ import { useCyberspace } from '../useCyberspace'
 import { PREV_LIVE_KEY, SESSION_KEY, TOUR_KEY_KEY, gateHeld, hadHopsAtStart, restoreAfterUnfinishedTour, startTourInPlace, tourKeyNeedsSpawn, useDemo, watchAction } from '../useDemo'
 import { startCoordRoute, useCoordRoute } from '../useCoordRoute'
 import { useShards } from '../useShards'
-import { DEMO_CURATORS, DEMO_DISTRICT, DEMO_SCRIPT, GENESIS_ROOT } from '../../demo/script'
+import { BLOCK_101_ROOT, DEMO_CURATORS, DEMO_DISTRICT, DEMO_SCRIPT, GENESIS_ROOT } from '../../demo/script'
 import { planeOfMerkleRoot, stopCoordExact, stopFromAnchor } from '../../lib/hyperspace/stops'
 import { PREFERRED_VOICES, pickVoice } from '../../demo/voice'
 import { parseDemoRoute } from '../../lib/demoRoute'
@@ -92,12 +92,24 @@ describe('the script', () => {
     const at = (id: string) => DEMO_SCRIPT.steps.find((s) => s.id === id)!
     expect(DEMO_SCRIPT.chapters[0].title).toBe('Identity is location')
     expect(DEMO_SCRIPT.steps.slice(0, 4).map((s) => s.id)).toEqual(['welcome', 'everything', 'spawn', 'identity'])
-    expect(at('everything').scene).toEqual({ target: 'self', scale: 84 })
+    expect(at('everything').scene).toEqual({ target: 'self', scale: 84, distance: 12 })
     expect(at('welcome').caption).not.toMatch(/LOCAL/)
     expect(at('event').caption).toMatch(/^Everything in cyberspace is a Nostr event:/)
     expect(at('relays').caption).toMatch(/the union of all cyberspace events/)
     expect(at('kinds').caption).toMatch(/hyperspace block anchors/)
     expect(at('chain').caption).toMatch(/Controls panel in the bottom right/)
+  })
+
+  it("keeps arkinox's 2026-10-27 wording", () => {
+    const at = (id: string) => DEMO_SCRIPT.steps.find((s) => s.id === id)!
+    // 1/10 2/4: all of cyberspace, closer in, with the pinch named.
+    expect(at('everything').caption).toBe('This cubic area is all of cyberspace. It is 0.48 light years across and Earth is at the center. Note where your avatar is relative to the whole cube. Touch and drag to orbit the camera, and pinch to zoom.')
+    // 2/10 2/6: where COMMIT is.
+    expect(at('verify').captionWaiting).toBe('An event\'s ID is the SHA-256 hash of its fields, and its signature is a Schnorr signature by your private key over that ID. Your cursor is set 3 gibsons up, right and forward: press COMMIT (Controls, bottom right) to sign a hop, and the tour will check it.')
+    // 2/10 6/6: the app and the game by name.
+    expect(at('portable').caption).toBe('Your key and your events belong to you, not to ONOSENDAI. The events carry your unique verifiable signature and live on relays. Other apps can read them too: Ditto.pub already shows cyberspace objects as furniture in the Blobbi virtual pet minigame.')
+    const nostr = DEMO_SCRIPT.steps.filter((s) => s.chapter === 'nostr').map((s) => s.id)
+    expect([nostr.indexOf('verify') + 1, nostr.indexOf('portable') + 1, nostr.length]).toEqual([2, 6, 6])
   })
 })
 
@@ -523,11 +535,11 @@ const ZOOM: Record<string, number> = {
   event: 0, verify: 0, relays: 0, kinds: 0, chain: 0, portable: 0,
   gibson: 0, human: 34, cube: 84, planes: 54,
   cantor: 0, lca: 0, 'no-cheat': 0, walk: 0,
-  'region-keys': 0, district: 8, found: 8, chalk: 0,
+  'region-keys': 0, district: 0, found: 0, chalk: 0,
   'key-item': 0, chest: 0, 'item-feed': 0,
   line: 84, port: 0, landfall: 52, ride: 84,
   avatars: 0, presence: 0, chat: 0,
-  agents: 0, operator: 0, xor: 0,
+  agents: 0, xor: 0,
   menu: 0, recap: 0, live: 0,
 }
 
@@ -608,7 +620,7 @@ describe('what the tour puts back (arkinox, 2026-10-15)', () => {
   it('welcomes a new identity with arkinox\'s words, and anyone with a chain or an avatar of their own with the variant', () => {
     const welcome = DEMO_SCRIPT.steps.find((s) => s.id === 'welcome')!
     expect(captionFor(welcome, false, true, false)).toBe(welcome.caption)
-    expect(welcome.caption).toMatch(/The red dodecahedron is your avatar/)
+    expect(welcome.caption).toMatch(/The red icosahedron is your avatar/)
     const variant = 'This is a guided tour of cyberspace. The shape at the center is your avatar, at your current position. Let\'s talk about how you got here.'
     expect(captionFor(welcome, true, true, false)).toBe(variant)
     expect(captionFor(welcome, false, true, true)).toBe(variant)
@@ -631,13 +643,17 @@ describe('starting in place from a /C/ link view (review of #362, 2026-10-15)', 
   })
 })
 
-describe('the genesis district (arkinox, 2026-10-15)', () => {
-  it('is block 0\'s port, and the examples are block 0 (a port) and block 1 (a landfall)', () => {
-    expect(DEMO_DISTRICT.coord).toBe(GENESIS_ROOT)
+describe('the district and the examples (arkinox, 2026-10-15; block 101, 2026-10-27)', () => {
+  it('is block 101\'s port, and the examples are block 0 (a port) and block 1 (a landfall)', () => {
+    expect(DEMO_DISTRICT.coord).toBe(BLOCK_101_ROOT)
+    expect(DEMO_DISTRICT.label).toBe('BLOCK 101 · PORT')
+    const district = stopFromAnchor({ kind: 321, tags: [['B', '101'], ['C', BLOCK_101_ROOT], ['H', '00000000b69bd8e4dc60580117617a466d5c76ada85fb7b87e9baea01f9d9984']] })!
+    expect(district.kind).toBe('port')
+    expect(stopCoordExact(district).toString(16).padStart(64, '0')).toBe(BLOCK_101_ROOT)
+    expect(coordPlace(DEMO_DISTRICT.coord).plane).toBe(1)
     const port = stopFromAnchor({ kind: 321, tags: [['B', '0'], ['C', GENESIS_ROOT], ['H', '000000000019d6689c085ae165831e934ff763ae46a2a6c172b3f1b60a8ce26f']] })!
     expect(port.kind).toBe('port')
     expect(stopCoordExact(port).toString(16).padStart(64, '0')).toBe(GENESIS_ROOT)
-    expect(coordPlace(DEMO_DISTRICT.coord).plane).toBe(1)
     const block1 = '0e3e2357e806b6cdb1f70b54c3a3a17b6714ee1f0e68bebb44a74b1efd512098'
     expect(planeOfMerkleRoot(block1)).toBe(0)
     const at = (id: string) => DEMO_SCRIPT.steps.find((s) => s.id === id)!
@@ -671,7 +687,7 @@ describe('the district shows only the curators\' things (2026-10-15)', () => {
     }
     useDemo.getState().goTo(DEMO_SCRIPT.steps.findIndex((s) => s.id === 'line'))
     expect(authors()).toHaveLength(3)
-    // The port step stands on block 0's port, the district's coordinate.
+    // The port step stands on block 0's port, a famous public station.
     useDemo.getState().goTo(DEMO_SCRIPT.steps.findIndex((s) => s.id === 'port'))
     expect(authors(), 'port').toEqual([...DEMO_CURATORS].sort())
     useDemo.getState().goTo(DEMO_SCRIPT.steps.findIndex((s) => s.id === 'landfall'))

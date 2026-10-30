@@ -57,3 +57,56 @@ export function labelLiftPx(trueSide: number, minPx: number, depth: number, proj
   const sidePx = Math.max(pixelsForCells(trueSide, depth, projScale), minPx)
   return sidePx * CUBE_REACH + LABEL_GAP_PX + labelPx / 2
 }
+
+/**
+ * How large a hidden item's mark is drawn at `depth` from the camera, as a
+ * share of its full size (arkinox, 2026-10-25: "the chest marker does not
+ * scale with distance. it needs to. its too large at large distances").
+ *
+ * A mark held at a constant pixel size reads the same at your feet and at the
+ * far end of a corridor in WALK, so a chest twenty gibsons off stood as large
+ * as one in reach and said nothing about where it was. Out to `reach` the
+ * mark is its full size; past it the mark keeps its perspective, shrinking as
+ * reach over depth, down to `floor`, so it never vanishes.
+ *
+ * `reach` is the headlamp's (scene/headlamp.ts): the camera's distance from
+ * what it orbits, in render cells, held between 8 and the orbit's limit. It
+ * is in cells at the current 2^N, so the rule keeps its shape at every zoom:
+ * in orbit everything about the focus is at full size and only what stands
+ * behind it recedes; in WALK, whose eye is on the avatar, the reach is 8
+ * cells and a mark further down the hall shrinks as the walls do.
+ */
+export function recedeShare(depth: number, reach: number, floor: number): number {
+  if (!(depth > reach) || !(reach > 0)) return 1
+  return Math.max(floor, Math.min(1, reach / depth))
+}
+
+/**
+ * The least share a mark (the cube, a model's floor, the music note) recedes
+ * to: the note's 24.5 px cube stands about 10 px far off, the size of a fleet
+ * stop cube (FLEET_CUBE_PX), still a box and still something to look at.
+ */
+export const MARK_RECEDE_FLOOR = 0.4
+
+/**
+ * How much of a mark's label is shown at `depth`, from 1 to 0: whole out to
+ * `from` times the reach, gone at `to` times it, eased between (smoothstep).
+ *
+ * A label never shrinks with its mark: text much under its size stops being
+ * text, and a hall of hidden things became a hall of smudges (review of
+ * #518). It holds its size while it is shown and fades out far off instead,
+ * the credit line first (CREDIT_FADE), then the name (NAME_FADE), so a far
+ * chest is its small mark alone and the words are one step closer.
+ */
+export function fadeShare(depth: number, reach: number, from: number, to: number): number {
+  if (!(reach > 0) || !(depth > reach * from)) return 1
+  if (depth >= reach * to) return 0
+  const t = (depth - reach * from) / (reach * (to - from))
+  return 1 - t * t * (3 - 2 * t)
+}
+
+/** A credit line ("who left it") fades between these multiples of the reach: gone past twice it. */
+export const CREDIT_FADE = [1.5, 2] as const
+
+/** A mark's name fades between these multiples of the reach: gone past three times it, after its credit. */
+export const NAME_FADE = [2.25, 3] as const

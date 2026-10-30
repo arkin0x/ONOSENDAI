@@ -100,22 +100,33 @@ export const HOSAKA_1: TvAd = {
   ],
 }
 
+/** The address the house spot gives (arkinox, 2026-10-26: "change it to arkinox@pm.me"). Verbatim: never re-cased. */
+export const CTV_ADDRESS = 'arkinox@pm.me'
+
+/** How long the house spot holds its address, seconds: long enough to read it and write it down. */
+export const CTV_ADDRESS_HOLD_S = 12
+
 /**
  * Cyberspace TV's own spot, for the ad slot itself (arkinox, 2026-10-24:
  * "add a hosaka-style spot that says you can advertise on cyberspace tv by
- * emailing aflutter_conjoined788@simplelogin.com"). Same family as HOSAKA's
- * (cards over speed stripes), but no banner and no mark: there is no
- * sponsor's logo to show, so it goes straight to the cards.
+ * emailing ..."). Same family as HOSAKA's (cards over speed stripes), but
+ * no banner and no mark: there is no sponsor's logo to show, so it goes
+ * straight to the cards.
+ *
+ * It ends on the address, held CTV_ADDRESS_HOLD_S, as large as a punch
+ * card's type and steady (arkinox, 2026-10-26: "the last frame with the
+ * email was not long enough for anyone to read it", "and make it longer").
+ * So the last scene is a card, not an end card: an end card's type is small
+ * and its call blinks, made to sit under a sponsor's mark, and this spot has
+ * no mark; the address is the whole point of it. The whole spot is longer
+ * with it, the first two cards held a little longer too.
  */
 export const CTV_ADVERTISE_1: TvAd = {
   id: 'ctv-1-advertise-here',
   scenes: [
-    { from: 0, to: 2.6, kind: 'card', lines: ['THIS SPOT', 'IS OPEN.'], accent: 1, theme: 'teal' },
-    { from: 2.6, to: 5.2, kind: 'card', lines: ['ADVERTISE ON', 'CYBERSPACE TV.'], accent: 1, theme: 'magenta' },
-    // The end card's own type is already small (unlike a card's), so the
-    // address sets fine in the call itself: it is the whole point of the
-    // spot, not a quiet line under it.
-    { from: 5.2, to: 9.7, kind: 'end', lines: ['EMAIL TO CLAIM IT:', 'aflutter_conjoined788@simplelogin.com'], accent: 1, theme: 'night' },
+    { from: 0, to: 3, kind: 'card', lines: ['THIS SPOT', 'IS OPEN.'], accent: 1, theme: 'teal' },
+    { from: 3, to: 6, kind: 'card', lines: ['ADVERTISE ON', 'CYBERSPACE TV.'], accent: 1, theme: 'magenta' },
+    { from: 6, to: 6 + CTV_ADDRESS_HOLD_S, kind: 'card', lines: ['EMAIL TO CLAIM IT:', CTV_ADDRESS], accent: 1, theme: 'night' },
   ],
 }
 

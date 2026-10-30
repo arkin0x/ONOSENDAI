@@ -56,4 +56,8 @@ export const PLAYLIST: Track[] = [
   { url: 'https://media.basspistol.com/basspistol.com/kick-n-base-made-in-barcelona/1-larry.mp3' },
   { url: 'https://media.basspistol.com/basspistol.com/kick-n-base-made-in-barcelona/2-night-ride.mp3' },
   { url: 'https://media.basspistol.com/panix/tech-maybe/3-troek.mp3' },
+  { url: 'https://media.basspistol.com/basspistol.com/headcleaner/7-function-111.mp3' },
+  { url: 'https://media.basspistol.com/eardiod/isocyanates/5-mushroom-hunting-v11.mp3' },
+  { url: 'https://media.basspistol.com/sakrecoer.com/unsorted/2012-sakrecoer-anonymous_drummers-drummer_drama.mp3' },
+  { url: 'https://media.basspistol.com/sakrecoer.com/unsorted/2011-reset_sakrecoer-unreleased-that_day_on_your_pillow.mp3' },
 ]

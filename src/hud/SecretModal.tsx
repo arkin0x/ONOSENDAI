@@ -9,9 +9,13 @@
  *
  * One card for everyone's things and your own (arkinox, 2026-10-20: "then
  * we can have these unified"): for a thing this device hid, the wire facts
- * that the separate wire record (DeploymentDetail) used to show, its relays,
- * the LOCAL / LIVE switch and TEST DISCOVERY, are in the event data at the
- * bottom (WireData).
+ * that the separate wire record (DeploymentDetail) used to show, its relays
+ * and TEST DISCOVERY, are in the event data at the bottom (WireData), and
+ * its LOCAL / LIVE switch stands under the preview, where only the one who
+ * hid it sees it (PublishRow; arkinox, 2026-10-29). All of the technical
+ * facts, a shard's geometry, when, the region and plane, and the event
+ * data, fold under METADATA, closed until opened (Metadata, arkinox,
+ * 2026-10-26).
  *
  * Hidden audio opens here too, with its own body (AudioCard: PLAY,
  * DOWNLOAD, RESET TRIGGER), and the creator, reactions, comments and
@@ -45,6 +49,8 @@ import { ItemFace } from './ItemIcon'
 import { ShardSpin } from '../scene/ShardSpin'
 import { EventData } from './EventData'
 import { WireData } from './WireData'
+import { PublishRow } from './PublishSwitch'
+import { Metadata } from './Metadata'
 import { AudioCard } from './AudioCard'
 import { BlockButton, MuteItemButton } from './BlockButton'
 import { useMutes } from '../store/useMutes'
@@ -91,8 +97,9 @@ export function SecretModal(): JSX.Element | null {
   // (arkinox, 2026-10-10: "we need a confirmation step").
   const [confirming, setConfirming] = useState<'delete' | 'remove' | null>(null)
   // The row this device hid it as (it is among `mine`): only then are there
-  // wire facts to show. Never for a thing revealed from a chest, which is in
-  // the chest's sealed contents and not a bag entry of its own.
+  // wire facts, and a LOCAL / LIVE switch, to show. Never for a thing
+  // revealed from a chest, which is in the chest's sealed contents and not a
+  // bag entry of its own.
   const wire = useShards((s) => (item && !item.chestId ? s.mine.find((d) => d.eventId === item.key) ?? null : null))
   // EDIT: a shard of yours this device can move (useShards editable).
   const movable = !!wire && editable(wire, me)
@@ -164,7 +171,7 @@ export function SecretModal(): JSX.Element | null {
         {item.type === 'message' ? (
           <MessageText text={item.text ?? ''} tags={item.event?.tags} words={(t) => <blockquote className="secret__message">{t}</blockquote>} />
         ) : item.type === 'key' && item.keyItem ? (
-          <div className="secret__shard"><KeyLine name={item.keyItem.name} author={author} /></div>
+          <div className="secret__shard"><KeyLine id={item.key} name={item.keyItem.name} author={author} /></div>
         ) : item.type === 'chest' && item.chest ? (
           <div className="secret__shard"><ChestBlock id={item.key} chest={item.chest} author={author} verified place={place} /></div>
         ) : item.type === 'audio' && item.audio ? (
@@ -181,7 +188,6 @@ export function SecretModal(): JSX.Element | null {
         ) : (
           <div className="secret__shard">
             <span className="secret__shard-name">{item.shard?.name}</span>
-            <span className="secret__shard-meta">{item.shard?.vertices.length} v · {item.shard?.faces.length} f · {item.shard?.mode.toUpperCase()} · unit 2^{item.shard?.unit}</span>
           </div>
         )}
 
@@ -190,6 +196,15 @@ export function SecretModal(): JSX.Element | null {
         {item.type === 'shard' && item.shard && (
           <div className="secret__spin"><ShardSpin shard={item.shard} /></div>
         )}
+
+        {/* LOCAL or LIVE, under the preview, for the one who hid it alone
+            (arkinox, 2026-10-29: "seeing live/local only matters for the
+            owner. but the owner should see it more prominently. maybe move
+            it up under the preview on the right."). A row in `mine` is this
+            device's own (useShards worldOf stamps it mine), and the switch
+            acts on that row; someone else's find has no row, and no switch.
+            TEST DISCOVERY stays in METADATA (WireData). */}
+        {wire && <PublishRow dep={wire} />}
 
         <div className="secret__creator">
           <span className="secret__label">Left by</span>
@@ -203,12 +218,6 @@ export function SecretModal(): JSX.Element | null {
           </div>
           {profile?.about && <p className="secret__about">{profile.about}</p>}
         </div>
-
-        <dl className="secret__facts">
-          <div><dt>Placed</dt><dd title={item.createdAt ? formatStamp(item.createdAt) : ''}>{item.createdAt ? formatAgo(item.createdAt) : 'unknown'}</dd></div>
-          <div><dt>Region</dt><dd>{regionLabel(item.height)}</dd></div>
-          <div><dt>Plane</dt><dd>{item.plane === 0 ? 'dataspace' : 'ideaspace'}</dd></div>
-        </dl>
 
         {/* Reactions carry no words, only the item's id, so they need no seal
             (arkinox, 2026-09-28): the item's author and the hider are told. */}
@@ -282,15 +291,27 @@ export function SecretModal(): JSX.Element | null {
         </div>
         {refusal && <p className="secret__status" role="status">{refusal}</p>}
 
-        {item.event && (
-          <>
-            <hr className="secret__rule" />
+        {/* The technical facts under one closed METADATA (arkinox,
+            2026-10-26: "Collapse all the technical info on the chest, door,
+            and shard modal under a "METADATA" accordion."): a shard's
+            geometry, when and where it was placed, and the event data. */}
+        <hr className="secret__rule" />
+        <Metadata>
+          {item.type === 'shard' && item.shard && (
+            <span className="secret__shard-meta">{item.shard.vertices.length} v · {item.shard.faces.length} f · {item.shard.mode.toUpperCase()} · unit 2^{item.shard.unit}</span>
+          )}
+          <dl className="secret__facts">
+            <div><dt>Placed</dt><dd title={item.createdAt ? formatStamp(item.createdAt) : ''}>{item.createdAt ? formatAgo(item.createdAt) : 'unknown'}</dd></div>
+            <div><dt>Region</dt><dd>{regionLabel(item.height)}</dd></div>
+            <div><dt>Plane</dt><dd>{item.plane === 0 ? 'dataspace' : 'ideaspace'}</dd></div>
+          </dl>
+          {item.event && (
             <EventData event={item.event}>
               {/* Keyed by the row, so a test result never carries over to another item. */}
               {wire && <WireData key={wire.eventId} dep={wire} />}
             </EventData>
-          </>
-        )}
+          )}
+        </Metadata>
 
         {/* The card sits over this modal, which stays up behind it: CANCEL,
             Escape and a tap on its backdrop come back here unchanged. It is

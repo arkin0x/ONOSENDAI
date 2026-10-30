@@ -126,6 +126,27 @@ describe('WALK waits for walls on their way (round-6 review of #503)', () => {
     expect(moved(start)[1]).toBeLessThan(0)
   })
 
+  it('a floor in your plane under a block still being built: once it stands, you fall away from its underside (#497)', async () => {
+    // A plate at your height of the carrier's own, and a block carried, its underside at your height: floors only.
+    const me = useCyberspace.getState().identity.pubkey
+    const address = `33331:${me}:block`
+    const plate = [[-3, 0, -3], [3, 0, -3], [3, 0, 3], [-3, 0, 3]].map((p) => ({ p: p as [number, number, number], c: [1, 1, 1] as [number, number, number] }))
+    /** The carrier, its block `x` ticks to the side. */
+    const carrier = (x: number): ShardModel => withConstrain({ ...newShard('Carrier'), mode: 'solid', vertices: plate, faces: [[0, 1, 2], [0, 2, 3]], author: me, refs: [['a', address]], parts: [{ ref: 0, at: [x, 0, 0], turn: [0, 0, 0], step: 0 }], objects: { [address]: toPayload(slab('y', 1, 0, 2)) } }, 'all')
+    for (const [x, falls] of [[2400, false], [0, true]] as const) {
+      // The control first: the block 20 to the side, so the plate, once built, holds you.
+      clearWalls()
+      world(start, carrier(x))
+      useWalk.getState().setGravity(true)
+      useWalk.getState().enter()
+      await wallsBuilt()
+      await new Promise((r) => setTimeout(r, 0))
+      expect(useWalk.getState().falling).toBe(falls)
+      useWalk.getState().exit()
+      useWalk.getState().setGravity(false)
+    }
+  })
+
   it('a press waiting for walls is never made in a new WALK', async () => {
     world(start, carrying(slab('z', -1, 3, 2)))
     useWalk.getState().enter()

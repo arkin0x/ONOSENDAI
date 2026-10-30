@@ -1,9 +1,9 @@
 /**
  * inventory.ts: what an identity holds, as pure shapes and functions.
  *
- * Items are knowledge (quests design F5, ruled): a key is held by whoever has
- * read its private key, and a chest's contents by whoever opened it and took
- * them. So the inventory is a local list, kept per identity in IndexedDB like
+ * Items are knowledge (quests design F5, ruled): a key can be held by whoever
+ * has read its private key, and is once they TAKE it (arkinox, 2026-10-26),
+ * and a chest's contents by whoever opened it and took them. So the inventory is a local list, kept per identity in IndexedDB like
  * region keys (store/useInventory.ts), and this file is everything about it
  * that does not touch a database: the row shape, how a find, a forging, a
  * taking or a paste becomes a row, the text a key travels as between devices,
@@ -44,6 +44,12 @@ export interface HeldPlace {
 export interface HeldFrom {
   chestId: string
   chestName: string
+}
+
+/** A find that came out of a chest: the chest, and where the chest stands. */
+export interface InChest {
+  from: HeldFrom
+  place: HeldPlace
 }
 
 /** One held item: a key, or a content taken from a chest. One row per item per identity. */
@@ -88,7 +94,7 @@ export interface HeldItem {
   cleared?: number
   /**
    * Found by watching Cyberspace TV, not in play: it opens a chest only when
-   * you OPEN it, never by itself in a scan (openingKeys `auto`), so nothing
+   * you OPEN it, never on a reload's reopening (openingKeys `auto`), so nothing
    * TV showed unlocks a message or a coin on its own (review of #390). Gone
    * once the same key is found in play.
    */
@@ -127,17 +133,22 @@ function row(owner: string, event: NostrEvent, body: ItemBody, verified: boolean
 }
 
 /**
- * A key found in a bag, held (B1 §2.1: reading the item is holding it). Null
+ * A key found in a bag, held because TAKE was pressed on it (arkinox,
+ * 2026-10-26: found is not held, "i want to TAKE them"). Null
  * for anything that is not a key with its event: the ceremony's preview items
  * come out of no bag and carry none.
  */
-export function heldFromFind(owner: string, h: Hidden, at: number, watched = false): HeldItem | null {
+export function heldFromFind(owner: string, h: Hidden, at: number, watched = false, inChest: InChest | null = null): HeldItem | null {
   if (h.type !== 'key' || !h.key || !h.inner) return null
   // A bag's items are verified against the bag's author before they are found
   // at all (hidden.ts innerAuthentic), and a key is never a rumor there. One
   // revealed from a chest is a fact unless its reading said it is a claim
-  // (chests.ts revealedIn `claim`).
-  const held = row(owner, h.inner as NostrEvent, { type: 'key', key: h.key }, !h.claim, 'found', placeOf(h), null, at)
+  // (chests.ts revealedIn `claim`). One out of a chest is held as taken
+  // from it, at the chest's place, the same row TAKE on the chest's own
+  // list writes (heldFromEntry), whichever TAKE was pressed.
+  const held = inChest
+    ? row(owner, h.inner as NostrEvent, { type: 'key', key: h.key }, !h.claim, 'taken', inChest.place, inChest.from, at)
+    : row(owner, h.inner as NostrEvent, { type: 'key', key: h.key }, !h.claim, 'found', placeOf(h), null, at)
   return watched ? { ...held, watched: true } : held
 }
 
@@ -218,7 +229,8 @@ export function parseKeyText(text: string): { event: NostrEvent; key: KeyItem; v
 
 /**
  * The held keys as the opener needs them (lib/chests.ts openerFor). For a
- * chest opening by itself in a scan (`auto`), not a key found by watching TV.
+ * chest a reload opens again because it was opened by hand before (`auto`,
+ * useShards addDiscovered), not a key found by watching TV.
  */
 export function openingKeys(items: Record<string, HeldItem>, auto = false): OpeningKey[] {
   const out: OpeningKey[] = []
@@ -258,8 +270,8 @@ const newestFirst = <T extends { at: number }>(a: T, b: T): number => b.at - a.a
  * The three-panel model's two local panels, as one pure split (B1 ruling 14):
  * DISCOVERED is everything opened where it stands, grouped by the bag it was
  * in and newest first; LOOT is what is held, keys apart from the rest. A key
- * found is in both, because reading it was holding it; a chest found is in
- * DISCOVERED until something is taken out of it, and what is taken is in LOOT.
+ * found is in DISCOVERED, and in LOOT too once it is taken; a chest found is
+ * in DISCOVERED until something is taken out of it, and what is taken is in LOOT.
  */
 export function splitPanels(discovered: Hidden[], held: HeldItem[]): { discovered: DiscoveredPlace[]; loot: Loot } {
   const places = new Map<string, DiscoveredPlace>()

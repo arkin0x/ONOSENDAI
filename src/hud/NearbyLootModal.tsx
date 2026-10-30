@@ -6,8 +6,8 @@
  * whose region holds the anchor, newest first (arkinox, 2026-10-13), nearest
  * first among things made in the same second, undated things last. Reached from the found chip,
  * which says how many, and from NEARBY on the DISCOVERED panel. VIEW flies to
- * the thing the way the bag record's VIEW does. A key row says it is held; a
- * chest row opens here when you hold what opens it (ItemRows).
+ * the thing the way the bag record's VIEW does. A key row has TAKE until it
+ * is held; a chest row opens here when you hold what opens it (ItemRows).
  */
 
 import { useMemo } from 'react'
@@ -25,7 +25,7 @@ import { profileLabel } from '../store/useProfiles'
 import { useShards } from '../store/useShards'
 import { rememberNearbyReturn } from '../lib/nearbyReturn'
 import { ProfilePic } from './ProfileBadge'
-import { ChestBlock, KeyLine } from './ItemRows'
+import { ChestBlock, KeyLine, listedOnce, useChestOpen } from './ItemRows'
 import { useEscape } from '../hooks/useEscape'
 
 /** Where a nearby item was found, for what is taken out of a chest here. */
@@ -55,7 +55,7 @@ function Row({ item, me, onView }: { item: NearbyItem; me: string; onView: (item
       {item.type === 'shard' && item.shard ? <ShardThumb shard={item.shard} /> : <ItemIcon className="nearby__glyph" type={item.type} coin={item.type === 'message' && findCashuToken(item.text) !== null} size={14} />}
       <div className="nearby__body">
         {item.type === 'key' && item.keyItem
-          ? <KeyLine name={item.keyItem.name} author={author} />
+          ? <KeyLine id={item.key} name={item.keyItem.name} author={author} />
           : item.type === 'chest' && item.chest
             ? <ChestBlock id={item.key} chest={item.chest} author={author} verified place={placeOf(item)} />
             : <span className="nearby__label">{labelOf(item)}</span>}
@@ -75,8 +75,11 @@ export function NearbyLootModal(): JSX.Element | null {
   const open = useShards((s) => s.nearbyOpen)
   const me = useCyberspace((s) => s.identity.pubkey)
   const items = useNearbyLoot()
-  // Newest first; sort is stable, so the hook's nearest-first order breaks ties.
-  const list = useMemo(() => [...items].sort((a, b) => (b.createdAt ?? 0) - (a.createdAt ?? 0)), [items])
+  const chestOpen = useChestOpen()
+  // Newest first; sort is stable, so the hook's nearest-first order breaks
+  // ties. A thing that came out of a chest open in this list is listed under
+  // that chest, with its TAKE, and not again on its own (review of #519).
+  const list = useMemo(() => listedOnce(items, (i) => i.key, chestOpen).sort((a, b) => (b.createdAt ?? 0) - (a.createdAt ?? 0)), [items, chestOpen])
   // Escape closes it as a tap outside does (arkinox, 2026-10-01).
   useEscape('modal', open, () => useShards.getState().setNearbyOpen(false))
   if (!open) return null

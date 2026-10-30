@@ -44,7 +44,8 @@
  * and finished events only.
  */
 
-import { getEventHash, getPublicKey, verifyEvent } from 'nostr-tools/pure'
+import { getEventHash, getPublicKey } from 'nostr-tools/pure'
+import { verifyOnce } from './verifiedSigs'
 import { coordToXyz, hexToCoord, type Plane } from 'cyberspace-core'
 import { bytesToHex, hexToBytes, positionHex, type EventTemplate, type NostrEvent } from './events'
 import { fromPayload, toPayload, type ShardModel } from 'sno-core/shards'
@@ -681,7 +682,7 @@ export function innerAuthentic(inner: Partial<Rumor>, signer: string): boolean {
   if (!inner || typeof inner !== 'object' || Array.isArray(inner) || typeof inner.kind !== 'number' || inner.pubkey !== signer) return false
   // No `sig`, or an empty one, is unsigned (spec 7.6), as the chest reader has it.
   if (inner.sig === undefined || inner.sig === '') return sealedAsRumor(inner.kind) && rumorHolds(inner)
-  try { return verifyEvent(inner as NostrEvent) } catch { return false }
+  try { return verifyOnce(inner as NostrEvent) } catch { return false }
 }
 
 /**
@@ -1037,7 +1038,7 @@ async function fromReference(ref: Reference, outer: NostrEvent, regionKey: Uint8
   const coordHex = ref[3]
   if (!coordHex && !origin) return null
   const target = await resolve(ref)
-  if (!target || !verifyEvent(target)) return null
+  if (!target || !verifyOnce(target)) return null
   if (ref[0] === 'e' && target.id !== ref[1]) return null
   if (ref[0] === 'a') {
     const [kind, pubkey, ...rest] = ref[1].split(':')
@@ -1120,7 +1121,7 @@ function isChatLine(e: unknown, speaker: string): boolean {
   } catch { return false }
   // No `sig`, or an empty one, is unsigned (DECK-0005 §3.2 rule 5), as innerAuthentic has it.
   if (ev.sig === undefined || ev.sig === '') return true
-  try { return verifyEvent(ev as NostrEvent) } catch { return false }
+  try { return verifyOnce(ev as NostrEvent) } catch { return false }
 }
 
 /**

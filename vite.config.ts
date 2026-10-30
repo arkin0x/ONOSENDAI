@@ -4,7 +4,7 @@ import { defineConfig, type Plugin } from 'vite'
 import react from '@vitejs/plugin-react'
 import { resolveVersion, UNVERSIONED } from './src/lib/version'
 import { ROUTE_PAGES, withCard } from './src/lib/routeCard'
-import { VERSION_FILE, versionFileOf } from './src/lib/chainEpoch'
+import { VERSION_FILE, versionFileOf } from './src/lib/chainRulesEpoch'
 
 /** tv.html and workshop.html: the built page with each route's link preview, served at /tv and /workshop (src/lib/routeCard.ts). */
 function routeCards(): Plugin {
@@ -56,7 +56,7 @@ function composerKnowsWebGL2(): Plugin {
 
 /**
  * version.json: the build id and the chain epoch this deploy requires, which
- * every open tab reads to learn whether it may still move (src/lib/chainEpoch.ts,
+ * every open tab reads to learn whether it may still move (src/lib/chainRulesEpoch.ts,
  * src/lib/versionGate.ts). Emitted beside index.html by the build and served
  * by the dev server, so both answer the way a deploy does. vercel.json keeps
  * it out of every cache.

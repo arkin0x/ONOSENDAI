@@ -65,6 +65,9 @@ import { placedPose } from '../lib/pose'
 import type { AxisName, Position, ViewAxes } from '../lib/space'
 import { enclosed, firstHit, wallMesh, type WallMesh } from '../lib/walkConstrain'
 import { useShards, type WorldItem } from './useShards'
+import { useCyberspace } from './useCyberspace'
+import { openedKey, useOpenedChests } from './useOpenedChests'
+import { isDoor, lookOf } from '../lib/looks'
 
 /**
  * The frame the walls are measured in: screen right +X, up +Y, out of the
@@ -815,7 +818,27 @@ function openAbove(from: Position, items: readonly WallItem[]): boolean {
   return true
 }
 
-/** The shards a walker in `plane` can meet: every shard placed in the world there, as the scene draws them. */
+/** A door's closed look as a wall: its own key, so it is never confused with a shard's entry. */
+export const doorWallKey = (doorId: string): string => `door:${doorId}`
+
+/**
+ * The shards a walker in `plane` can meet: every shard placed in the world
+ * there, as the scene draws them, and every door this identity has not
+ * opened, as its closed look (chest and door design, R11: "a locked door
+ * blocks per its model's collision until opened"). OPEN takes the door out
+ * of the walls at once, before any picture of it opening has finished, so a
+ * walker is never held by an animation; its open look carries no constrain.
+ */
 export function wallItems(plane: number): WallItem[] {
-  return useShards.getState().worldItems().filter((w): w is WorldItem & { shard: ShardModel } => w.type === 'shard' && !!w.shard && w.plane === plane)
+  const all = useShards.getState().worldItems()
+  const shards = all.filter((w): w is WorldItem & { shard: ShardModel } => w.type === 'shard' && !!w.shard && w.plane === plane)
+  const me = useCyberspace.getState().identity.pubkey
+  const opened = useOpenedChests.getState().opened
+  const doors: WallItem[] = []
+  for (const w of all) {
+    if (w.type !== 'chest' || w.plane !== plane || !isDoor(w.event?.tags) || opened[openedKey(me, w.key)]) continue
+    const look = lookOf(w)
+    if (look) doors.push({ key: doorWallKey(w.key), at: w.at, height: w.height, plane: w.plane, author: w.author, mine: w.mine, shard: look.closed })
+  }
+  return doors.length > 0 ? [...shards, ...doors] : shards
 }

@@ -83,6 +83,7 @@ import { TargetAvatars } from './TargetAvatars'
 import { PresenceAvatars } from './PresenceAvatars'
 import { WorldShards } from './WorldShards'
 import { WorldMessages } from './WorldMessages'
+import { ChestLooks } from './ChestLooks'
 import { HiddenAudio } from './HiddenAudio'
 import { StarredMarks } from './StarredMarks'
 import { ShardGhost } from './ShardGhost'
@@ -223,6 +224,7 @@ function World(): JSX.Element {
       <PresenceAvatars axes={axes} />
       <WorldShards axes={axes} />
       <WorldMessages axes={axes} />
+      <ChestLooks axes={axes} />
       <StarredMarks axes={axes} />
       <ShardGhost axes={axes} />
       <DeployRegionBox axes={axes} />

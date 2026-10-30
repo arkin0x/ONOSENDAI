@@ -284,6 +284,8 @@ export const AIM_CHANGED_MESSAGE = 'This move was not sent: the cursor or the pl
 const NO_V2_CLOUD_HOPS_MESSAGE = 'This HOSAKA still makes hops in the old proof format, which the chain rules no longer accept, so no cloud hop is bought from it. Nothing was charged.'
 /** A finished proof with no move waiting for it (a cut or a cancel cleared the target): never signed. */
 const NO_TARGET_MESSAGE = 'This proof was not signed: the move it was computed for is no longer lined up. Commit again.'
+/** A signed cloud move whose c or C is not the move its job was bought for: never recorded or sent. */
+const CLOUD_MOVE_MISMATCH_MESSAGE = 'This cloud move was not recorded or sent: the signed event does not name the move HOSAKA computed it for. Commit again.'
 /** A local hop whose proof failed Level 1 under its own signed id: never recorded or sent. */
 const LOCAL_CHECK_FAILED_MESSAGE = 'This hop was not recorded or sent: its proof did not pass the check every reader will make of it'
 /** A finished proof in the old hop format (no mn, no mp): never signed (hop proof version 2, spec 5.9 to 5.13). */
@@ -2254,6 +2256,17 @@ function cutInauthentic(pubkey: string, badKeys: Set<string>): string | null {
   return words
 }
 
+/** Whether a signed cloud move names the job's move: c at its start (x, y, z), C exactly its destination hex. */
+function cloudMoveMatches(event: NostrEvent, move: { fromHex: string; toHex: string } | undefined): boolean {
+  if (!move) return false
+  const c = event.tags.find((t) => t[0] === 'c')?.[1]
+  const C = event.tags.find((t) => t[0] === 'C')?.[1]
+  if (!c || !C || !/^[0-9a-f]{64}$/.test(c) || C !== move.toHex) return false
+  const a = coordToXyz(hexToCoord(c))
+  const b = coordToXyz(hexToCoord(move.fromHex))
+  return a.x === b.x && a.y === b.y && a.z === b.z
+}
+
 /**
  * Level 1 of a hop just signed here (spec 5.11), under its own event id,
  * with everything but its three tags taken from this client: the standing
@@ -2289,6 +2302,28 @@ function localHopFailures(event: NostrEvent, fromHex: string, to: Position, plan
  * the publisher's release gate. Redraws, saves, and says so in the proof
  * notice. Returns those words, or null when nothing was cut.
  */
+/** The unsent old-format hops already reported as stuck, so each is said once. */
+const staleStuck = new Set<string>()
+
+/**
+ * The publisher met an unsent hop in the old format that retireStaleFormat
+ * will not cut, because an event after it is already on the relays (a cut
+ * never takes back a published event). It is never sent, and nothing after
+ * it on this chain is sent either, since the publisher sends in order. Said
+ * once to the player, and warned in the console. Nothing else is held: only
+ * this chain's queue waits; bags, messages and every other publish go out
+ * by their own paths.
+ */
+export function noteStaleFormatStuck(event: NostrEvent): void {
+  if (staleStuck.has(event.id)) return
+  staleStuck.add(event.id)
+  console.warn(`[onosendai] unsent hop ${event.id} is in the old proof format and an action after it is already on the relays: it is never sent, and this chain's unsent actions after it wait behind it`)
+  if (useCyberspace.getState().proof.status === 'computing') return
+  useCyberspace.setState({ proof: { ...IDLE_PROOF, status: 'infeasible', message: STALE_STUCK_MESSAGE } })
+}
+
+const STALE_STUCK_MESSAGE = 'One of your unsent actions is a hop in the old proof format, and an action after it is already on the relays, so it cannot be taken back. It will never be sent, and your unsent actions after it wait behind it. Respawning starts a new chain.'
+
 export function retireStaleFormat(): string | null {
   const before = useCyberspace.getState()
   const cut = staleFormatCut(before.events, (id) => before.published[id] === 'ok')
@@ -4154,6 +4189,12 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
       const failed = localHopFailures(event, standing?.coordHex ?? '', newPosition, plane, prevEventId)
       if (failed.length > 0) { refuseSigning(msg, `${LOCAL_CHECK_FAILED_MESSAGE} (${failed.join(', ')})`, false); return }
     }
+    // A cloud move was verified for the move its job was bought for; the
+    // event just signed must be that move: its c where the job started (x, y
+    // and z; c's plane bit is the head's), its C exactly the job's
+    // destination in the job's plane. A cheap equality, and a mismatch is
+    // never kept or sent (review of #539).
+    if (msg.source === 'cloud' && !cloudMoveMatches(event, msg.move)) { refuseSigning(msg, CLOUD_MOVE_MISMATCH_MESSAGE, false); return }
     // The live feed kept delivering while the signer thought. What arrived is
     // folded now, before the signed event joins the chain: if it moved the
     // head or entered a game, the signed event is discarded unpublished, as a

@@ -50,7 +50,7 @@ import { cantorPair, computeHopProof, computeHopProofV2, computeSidestepProof, b
 import { useCalibration } from '../../lib/calibration'
 import { saveCloudDeposit, saveCloudJob, type PendingCloudJob } from '../../lib/cloud'
 import { wallSource } from '../../lib/movePlan'
-import { parseAction } from '../../lib/events'
+import { hopTemplate, parseAction } from '../../lib/events'
 import { HosakaError, idempotencyKeyFor, moveIdentity, type HosakaDeposit, type HosakaJob, type HosakaLimits } from '../../lib/hosaka'
 import type { Position } from '../../lib/space'
 import { postProof } from '../../lib/workers'
@@ -113,11 +113,22 @@ function deferred<T>(): { promise: Promise<T>; resolve: (v: T) => void; reject: 
  * (Earlier tests leave the avatar wherever their route ended, so both stand
  * it explicitly.)
  */
-function lineUpH13(atWall = true): Position {
+async function lineUpH13(atWall = true): Promise<Position> {
   const s = useCyberspace.getState()
   const block = (s.position.x >> 13n) << 13n
   const position = { ...s.position, x: atWall ? block + 4095n : block + 2053n }
   const cursor = { ...position, x: position.x ^ (1n << 12n) }
+  // The chain stands there too, not only the avatar: a stand-in move already
+  // on the relays, so the next move's c is where the avatar stands, as it is
+  // outside a test (a signed cloud move must start where its job did).
+  if (position.x !== s.position.x || position.y !== s.position.y || position.z !== s.position.z) {
+    const last = s.events[s.events.length - 1]
+    const ev = await s.signEvent(hopTemplate({
+      createdAt: last.created_at + 1, genesisId: s.genesisId, previousId: s.prevEventId, prevCoordHex: s.coordHex(),
+      to: position, plane: s.headPlane, proofHash: '0'.repeat(64), mn: '0'.repeat(16), mp: '00',
+    }))
+    useCyberspace.setState({ events: [...S().events, ev], prevEventId: ev.id, published: { ...S().published, [ev.id]: 'ok' } })
+  }
   useCyberspace.setState({ position, cursor })
   return cursor
 }
@@ -127,7 +138,7 @@ const idle = (): Promise<void> => vi.waitFor(() => { expect(S().cloud.status).to
 
 describe('cloud routes', () => {
   it('refuses an unverifiable cloud route before quoting, funding, or submitting', async () => {
-    lineUpH13()
+    await lineUpH13()
     const bitLimit = vi.spyOn(proofCapability, 'bigintBitLimit').mockReturnValue(1_048_576)
     const issue = vi.spyOn(proofCapability, 'movementCapabilityIssue').mockReturnValue('This browser cannot verify this movement proof. Use Chrome or Chromium.')
     try {
@@ -170,8 +181,8 @@ describe('cloud routes', () => {
 
   it('a staged hop moves the avatar at once and takes the cubes when they land', async () => {
     useCyberspace.setState({ cloudPrefs: { ...S().cloudPrefs, profile: 'loot' } })
+    const to = await lineUpH13()
     const head = S().prevEventId
-    const to = lineUpH13()
     const from = S().position
     const hop = hopResult(from, to, S().plane, head)
     const cubes = [{ height: 13, secret_key: 'ab'.repeat(32), lookup_id: 'cd'.repeat(32) }]
@@ -196,8 +207,8 @@ describe('cloud routes', () => {
 
   it('a staged hop whose cubes fail keeps the move and says what came back', async () => {
     useCyberspace.setState({ cloudPrefs: { ...S().cloudPrefs, profile: 'loot' } })
+    const to = await lineUpH13()
     const head = S().prevEventId
-    const to = lineUpH13()
     const from = S().position
     const hop = hopResult(from, to, S().plane, head)
     fake.quote.mockResolvedValue(quote('hop'))
@@ -217,7 +228,7 @@ describe('cloud routes', () => {
 
   it('carries HOSAKA\'s reuse into the quote, and says nothing when there is none', async () => {
     useCyberspace.setState({ cloudPrefs: { ...S().cloudPrefs, mode: 'auto', autoMaxSats: 0 } })
-    const to = lineUpH13()
+    const to = await lineUpH13()
     // A HOSAKA that holds one of this hop's axes already: the price and the
     // seconds it sends are the reduced ones, and it says how much it took off.
     fake.quote.mockResolvedValue({ ...quote('hop'), reused_axes: ['x'], reuse_saves_msats: 2000, reuse_saves_seconds: 12 })
@@ -239,8 +250,8 @@ describe('cloud routes', () => {
 
   it('under LOOT the hop is quoted and submitted asking for the destination cubes; COST asks for nothing extra', async () => {
     useCyberspace.setState({ cloudPrefs: { ...S().cloudPrefs, profile: 'loot' } })
+    const to = await lineUpH13()
     const head = S().prevEventId
-    const to = lineUpH13()
     const from = S().position
     fake.quote.mockResolvedValue(quote('hop'))
     fake.submitHop.mockResolvedValue(funded())
@@ -256,9 +267,9 @@ describe('cloud routes', () => {
   })
 
   it('a funded route of one cloud hop lands at the cursor as a signed hop event, verified first', async () => {
+    const to = await lineUpH13()
     const before = S().events.length
     const head = S().prevEventId
-    const to = lineUpH13()
     const from = S().position
     fake.quote.mockResolvedValue(quote('hop'))
     fake.submitHop.mockResolvedValue(funded())
@@ -307,8 +318,8 @@ describe('cloud routes', () => {
   })
 
   it('a step whose submit answer was lost fails; committing again asks for the very same job, under the same key', async () => {
+    const to = await lineUpH13()
     const head = S().prevEventId
-    const to = lineUpH13()
     const from = S().position
     fake.quote.mockResolvedValue(quote('hop'))
     // HOSAKA made the job, but the answer never arrived.
@@ -337,7 +348,7 @@ describe('cloud routes', () => {
   })
 
   it('X during a step\'s submit aborts it, so no retry of it can be charged after the cancel', async () => {
-    lineUpH13()
+    await lineUpH13()
     fake.quote.mockResolvedValue(quote('hop'))
     let seen: AbortSignal | undefined
     // A submit still out (its answer lost, waiting to ask again): it ends only
@@ -360,8 +371,8 @@ describe('cloud routes', () => {
   })
 
   it('a step whose cube setting changed after the move was sent follows the job already running, and says so', async () => {
+    const to = await lineUpH13()
     const head = S().prevEventId
-    const to = lineUpH13()
     const from = S().position
     fake.quote.mockResolvedValue(quote('hop'))
     // lib/hosaka.ts followed the 409 to the job already running for this move.
@@ -389,9 +400,9 @@ describe('cloud routes', () => {
 
   it('asks first in ask mode: CANCEL drops the route, PAY funds and runs it', async () => {
     useCyberspace.setState({ cloudPrefs: { ...S().cloudPrefs, mode: 'ask' } })
+    const to = await lineUpH13()
     const before = S().events.length
     const head = S().prevEventId
-    const to = lineUpH13()
     const from = S().position
     fake.quote.mockResolvedValue(quote('hop', 2500))
 
@@ -421,9 +432,9 @@ describe('cloud routes', () => {
   })
 
   it('one invoice funds the route: the deposit is on disk before the invoice shows, then the step runs funded', async () => {
+    const to = await lineUpH13()
     const before = S().events.length
     const head = S().prevEventId
-    const to = lineUpH13()
     const from = S().position
     fake.quote.mockResolvedValue(quote('hop'))
     // 95 msats short of a sat: the invoice is still for whole sats.
@@ -464,9 +475,9 @@ describe('cloud routes', () => {
   })
 
   it('refuses to append when the chain head moved while HOSAKA computed', async () => {
+    const to = await lineUpH13()
     const before = S().events.length
     const head = S().prevEventId
-    const to = lineUpH13()
     const from = S().position
     fake.quote.mockResolvedValue(quote('hop'))
     fake.submitHop.mockResolvedValue(funded())
@@ -490,9 +501,9 @@ describe('cloud routes', () => {
   })
 
   it('refuses a result that fails verification, and signs nothing', async () => {
+    const to = await lineUpH13()
     const before = S().events.length
     const head = S().prevEventId
-    const to = lineUpH13()
     const from = S().position
     fake.quote.mockResolvedValue(quote('hop'))
     fake.submitHop.mockResolvedValue(funded())
@@ -508,8 +519,8 @@ describe('cloud routes', () => {
   })
 
   it('X while the route waits for its invoice abandons it; X while a step computes keeps the job for RESUME', async () => {
+    const to = await lineUpH13()
     const head = S().prevEventId
-    const to = lineUpH13()
     const from = S().position
     fake.quote.mockResolvedValue(quote('hop'))
     fake.balance.mockResolvedValue({ pubkey: S().identity.pubkey, balance_msats: 0, ledger: [] })
@@ -580,8 +591,8 @@ describe('cloud routes', () => {
     // This machine hashes sidesteps only to h12 here, so the h13 crossing is HOSAKA's.
     useCalibration.setState({ status: 'measured', hopHeight: 12, sidestepHeight: 12 })
     useCyberspace.setState({ cloud: { ...S().cloud, limits: { ...LIMITS, max_hop_height: 12 } } })
+    const cursor = await lineUpH13(false)
     const before = S().events.length
-    const cursor = lineUpH13(false)
     const from = S().position
     const edge = wallSource(from.x, cursor.x, 13)
     const landing = cursor.x > from.x ? edge + 1n : edge - 1n
@@ -638,7 +649,7 @@ describe('cloud routes', () => {
     // A machine that sidesteps to h24 has a local way across the h13 boundary.
     useCalibration.setState({ status: 'measured', hopHeight: 12, sidestepHeight: 24 })
     useCyberspace.setState({ cloudPrefs: { ...S().cloudPrefs, mode: 'off' } })
-    const cursor = lineUpH13(false)
+    const cursor = await lineUpH13(false)
     const from = S().position
     await S().commit()
     expect(fake.quote).not.toHaveBeenCalled()
@@ -657,7 +668,7 @@ describe('cloud routes', () => {
     // Now a machine with no local way across (sidesteps stop at h12): the move is the cloud's, whose caps are not known yet.
     useCalibration.setState({ status: 'measured', hopHeight: 12, sidestepHeight: 12 })
     useCyberspace.setState({ cloudPrefs: { ...S().cloudPrefs, mode: 'auto' }, cloud: { ...S().cloud, limits: null } })
-    lineUpH13()   // on the leaf touching the wall: the crossing is the next commit
+    await lineUpH13()   // on the leaf touching the wall: the crossing is the next commit
     fake.quote.mockResolvedValue(quote('hop'))
     fake.submitHop.mockResolvedValue(funded('job-5'))
     fake.waitForJob.mockImplementation((_id: string, _tok: string, o: { signal?: AbortSignal }) => new Promise((_, reject) => {
@@ -693,7 +704,7 @@ describe('cloud routes', () => {
     expect(S().cloud.balanceError).toMatch(/503|payments_unavailable|wallet/)
   })
   it('a funded route notes the balance it read on the way', async () => {
-    lineUpH13()
+    await lineUpH13()
     fake.quote.mockResolvedValue(quote('hop'))
     fake.submitHop.mockResolvedValue(funded())
     fake.waitForJob.mockResolvedValue(completed(hopResult(S().position, S().cursor, S().plane, S().prevEventId)))
@@ -735,7 +746,7 @@ describe('cloud routes', () => {
     useCalibration.setState({ status: 'measured', hopHeight: 12, sidestepHeight: 24 })
     useCyberspace.setState({ cloud: { ...S().cloud, limits: null } })
     fake.limits.mockRejectedValue(new Error('down'))
-    lineUpH13()
+    await lineUpH13()
     await S().commit()
     expect(S().proof.status).not.toBe('infeasible')
     expect(vi.mocked(postProof)).toHaveBeenCalledTimes(1)
@@ -755,9 +766,9 @@ describe('cloud routes', () => {
   })
 
   it('refuses a hop that finished in the old hop_n shape, signs nothing, says it is eligible for a refund, and drops the record (D-A)', async () => {
+    const to = await lineUpH13()
     const before = S().events.length
     const head = S().prevEventId
-    const to = lineUpH13()
     const from = S().position
     fake.quote.mockResolvedValue(quote('hop'))
     fake.submitHop.mockResolvedValue(funded())
@@ -774,7 +785,7 @@ describe('cloud routes', () => {
   it('buys no hop from a HOSAKA whose limits do not say hop proof version 2: the wall is crossed by a sidestep', async () => {
     const old: HosakaLimits = { ...LIMITS, hop_proof_version: undefined }
     useCyberspace.setState({ cloud: { ...S().cloud, limits: old } })
-    lineUpH13()
+    await lineUpH13()
     fake.quote.mockResolvedValue(quote('sidestep'))
     fake.submitSidestep.mockReturnValue(new Promise(() => {}))
     void S().commit()
@@ -787,8 +798,8 @@ describe('cloud routes', () => {
     const paused: HosakaLimits = { ...LIMITS, hop_paused: true, hop_paused_reason: 'HOSAKA is switching hops to proof version 2. Nothing was charged.' }
     useCyberspace.setState({ cloud: { ...S().cloud, limits: paused } })
     fake.limits.mockResolvedValue(paused)
+    const to = await lineUpH13()
     const head = S().prevEventId
-    const to = lineUpH13()
     const from = S().position
     await S().commit()
     expect(S().plan?.status).toBe('paused')
@@ -811,7 +822,7 @@ describe('cloud routes', () => {
   })
 
   it('a hop quote that comes back paused pauses the route too, with HOSAKA\'s reason', async () => {
-    lineUpH13()
+    await lineUpH13()
     fake.quote.mockResolvedValue({ ...quote('hop'), cost_msats: null, within_cap: false, paused: true, hint: 'Back in a few minutes.' })
     await S().commit()
     expect(S().plan?.status).toBe('paused')
@@ -821,8 +832,8 @@ describe('cloud routes', () => {
   })
 
   it('a submit answered 503 hop_paused is not charged or asked again; RESUME submits the same step once hops reopen', async () => {
+    const to = await lineUpH13()
     const head = S().prevEventId
-    const to = lineUpH13()
     const from = S().position
     fake.quote.mockResolvedValue(quote('hop'))
     fake.submitHop.mockRejectedValueOnce(HosakaError.fromResponse(503, { detail: { error: 'hop_paused', hint: 'Paused for the switch.', retry_after_seconds: 300, charged: false } }))
@@ -844,7 +855,7 @@ describe('cloud routes', () => {
   })
 
   it('a kept job HOSAKA will not start while paused keeps its record for RESUME', async () => {
-    const to = lineUpH13()
+    const to = await lineUpH13()
     saveCloudJob(kept('paid', to))
     fake.startJob.mockRejectedValue(HosakaError.fromResponse(503, { detail: { error: 'hop_paused', hint: 'Paused.', charged: false, job_id: 'job-k', status: 'pending' } }))
     await S().resumeCloudJob()
@@ -854,7 +865,7 @@ describe('cloud routes', () => {
   })
 
   it('a 400 job_not_runnable shows HOSAKA\'s hint, notes the balance it returned, and drops the record', async () => {
-    const to = lineUpH13()
+    const to = await lineUpH13()
     saveCloudJob(kept('paid', to))
     fake.startJob.mockRejectedValue(HosakaError.fromResponse(400, { detail: { error: 'job_not_runnable', job_id: 'job-k', status: 'failed', refunded_msats: 0, current_balance_msats: 4321, hint: 'This hop was priced before hop proof version 2. Nothing was charged for it.' } }))
     await S().resumeCloudJob()

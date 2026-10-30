@@ -128,4 +128,29 @@ describe('unsent hops in the old format, after a reload', () => {
     await new Promise((r) => setTimeout(r, 50))
     expect(sent).not.toContain(old.id)
   })
+
+  it('an old hop the cut may not take back (a published action after it) is never sent, and the player is told once', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    try {
+      const { S, store } = await loadWith([spawn, stale, after], [spawn.id, after.id])
+      // A cut never takes back a published action, so the chain stays as it is.
+      expect(S().events.map((e) => e.id)).toEqual([spawn.id, stale.id, after.id])
+      const pub = await import('../../lib/publisher')
+      pub.startPublisher()
+      store.useCyberspace.setState({ live: true })
+      store.useCyberspace.setState({ publishRequest: S().publishRequest + 1 })
+      await vi.waitFor(() => expect(S().proof.message).toContain('will never be sent'))
+      store.useCyberspace.setState({ publishRequest: S().publishRequest + 1 })
+      await new Promise((r) => setTimeout(r, 50))
+      expect(sent).not.toContain(stale.id)
+      expect(warn.mock.calls.filter((c) => String(c[0]).includes(stale.id))).toHaveLength(1)
+      // Only this chain's queue waits: anything else still goes out by its own path.
+      const relay = await import('../../lib/relay')
+      const other = sign({ kind: 1, created_at: 2_000, content: 'not a chain event', tags: [] })
+      expect((await relay.publish(other)).ok).toBe(true)
+      expect(sent).toContain(other.id)
+    } finally {
+      warn.mockRestore()
+    }
+  })
 })

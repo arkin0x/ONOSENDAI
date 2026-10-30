@@ -16,7 +16,10 @@
  */
 import type { CloudStatus } from '../store/useCyberspace'
 
-import { findLcaHeight, terrainK, type Plane } from 'cyberspace-core'
+import { coordToHex, findLcaHeight, terrainK, xyzToCoord, type Plane } from 'cyberspace-core'
+
+/** 64 hex for a position in a plane (as lib/events positionHex). */
+const positionHexOf = (p: Position, plane: Plane): string => coordToHex(xyzToCoord(p.x, p.y, p.z, plane))
 import type { ProofResponse } from '../workers/proof.worker'
 import type { VerifyRequest, VerifyResponse } from '../workers/verify.worker'
 import { cloudHopShape, verifyCloud, type CloudMove } from './cloudVerify'
@@ -612,6 +615,7 @@ export function cloudProofResponse(id: number, record: PendingCloudJob, job: Hos
   const to = positionFromWire(record.to)
   const lca = { x: findLcaHeight(from.x, to.x), y: findLcaHeight(from.y, to.y), z: findLcaHeight(from.z, to.z) }
   const costMsats = typeof job.cost_msats === 'number' ? job.cost_msats : record.costMsats
+  const move = { fromHex: positionHexOf(from, record.plane), toHex: positionHexOf(to, record.plane) }
   if (record.action === 'hop') {
     // Version 2 (spec 8.4): the seal is the `proof`, mn and mp go into the
     // event as they are (verifyCloudHop checked all three at Level 1). K is
@@ -632,6 +636,7 @@ export function cloudProofResponse(id: number, record: PendingCloudJob, job: Hos
       jobId: record.jobId,
       costMsats,
       lookupId: r.region_n.public_proof,
+      move,
     }
   }
   const r = job.result as CloudSidestepResult
@@ -656,6 +661,7 @@ export function cloudProofResponse(id: number, record: PendingCloudJob, job: Hos
     source: 'cloud',
     jobId: record.jobId,
     costMsats,
+    move,
   }
 }
 

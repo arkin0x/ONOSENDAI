@@ -97,6 +97,12 @@ export type ProofResponse =
       costMsats?: number
       lookupId?: string
       /**
+       * Cloud proofs only: the move the job was bought for, from its record,
+       * as coordinate hex (`to` in the record's plane). The signed event's c
+       * and C must match it, or it is not kept (review of #539).
+       */
+      move?: { fromHex: string; toHex: string }
+      /**
        * A hop's own region (spec §4.7 and §7.2): the box the movement crossed,
        * its three axes at their own heights, with the key that opens whatever
        * is hidden there. The computation makes it either way; dropping it threw

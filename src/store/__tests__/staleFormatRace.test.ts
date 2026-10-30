@@ -167,4 +167,33 @@ describe('review of #539', () => {
     expect(S().position).toEqual(target)
     expect(S().published[S().prevEventId]).toBe('queued')
   }, 20_000)
+
+  it('a signed cloud move whose c or C is not the job\'s move is never recorded; the job\'s own move is', async () => {
+    const store = await page()
+    const S = store.useCyberspace.getState
+    const target = { x: at(4n).x ^ 1n, y: home.y, z: home.z }
+    const req = await commitTo(store, target)
+    const cloud = (toHex: string, fromHex = positionHex(at(4n), home.plane)) => ({
+      type: 'done' as const, id: req.id, mode: 'hop' as const, elapsedMs: 1, ...provedFor(req), terrainK: 8, lca: { x: 1, y: 0, z: 0 }, totalOps: 0,
+      prevEventId: req.prevEventId, source: 'cloud' as const, jobId: 'job-c', costMsats: 1000, move: { fromHex, toHex },
+    })
+    // The job was for another destination (or another plane): refused, nothing kept.
+    const otherPlane = (home.plane === 0 ? 1 : 0) as 0 | 1
+    await S().finishProof(cloud(positionHex(target, otherPlane)))
+    expect(S().events.map((e) => e.id)).toEqual([spawn.id, h1.id])
+    expect(S().proof.message).toContain('does not name the move HOSAKA computed it for')
+    // The job started somewhere else: refused too.
+    store.useCyberspace.setState({ pendingTarget: target })
+    await S().finishProof(cloud(positionHex(target, home.plane), positionHex(at(8n), home.plane)))
+    expect(S().events.map((e) => e.id)).toEqual([spawn.id, h1.id])
+    // No move named at all: refused.
+    store.useCyberspace.setState({ pendingTarget: target })
+    await S().finishProof({ ...cloud(positionHex(target, home.plane)), move: undefined })
+    expect(S().events).toHaveLength(2)
+    // The job's own move: kept.
+    store.useCyberspace.setState({ pendingTarget: target })
+    await S().finishProof(cloud(positionHex(target, home.plane)))
+    expect(S().events).toHaveLength(3)
+    expect(S().position).toEqual(target)
+  }, 20_000)
 })

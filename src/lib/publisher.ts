@@ -33,7 +33,7 @@ import { confirmChainEvents } from './chains'
 import { noteChainHolders } from './chainHolders'
 import type { NostrEvent } from './events'
 import { chainFacts, gateAfter, maySend } from './release'
-import { newestEventOnRelays, retireStaleFormat, useCyberspace } from '../store/useCyberspace'
+import { newestEventOnRelays, noteStaleFormatStuck, retireStaleFormat, useCyberspace } from '../store/useCyberspace'
 import { staleHopFormat } from './staleFormat'
 import { movementBlocked, useVersionGate } from './versionGate'
 
@@ -117,7 +117,10 @@ async function pump(): Promise<void> {
   // Never a hop in the old proof format (hop proof version 2): the store
   // cuts it away as it lands, and this is the last place it could slip out.
   // Cut here too, and the drain goes on from the chain that is left.
-  if (staleHopFormat(next)) { retireStaleFormat(); return }
+  // A cut is declined when an event after it is already published: then it
+  // is never sent, the player is told once, and this chain's queue waits
+  // (nothing else does; other publishing goes out by its own paths).
+  if (staleHopFormat(next)) { if (retireStaleFormat() === null) noteStaleFormatStuck(next); return }
 
   inFlight = true
   s.setPublishStatus(next.id, 'sending')

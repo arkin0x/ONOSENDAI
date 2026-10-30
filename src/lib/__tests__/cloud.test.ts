@@ -11,6 +11,7 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { computeSidestepProof, bytesToHex, encodeNonce, terrainK } from 'cyberspace-core'
+import { positionHex } from '../events'
 import {
   CloudFlowError,
   balanceLabel,
@@ -241,6 +242,8 @@ describe('cloudProofResponse', () => {
       type: 'done', id: 7, mode: 'hop', elapsedMs: 5000, proofHash: 'aa'.repeat(32), terrainK: terrainK(4104n, 0n, 0n, 0),
       lca: { x: 13, y: 0, z: 0 }, totalOps: 0, source: 'cloud', jobId: 'job-1', costMsats: 1234, lookupId: 'cc'.repeat(32),
       hop: { sealHex: 'aa'.repeat(32), mnHex: '0123456789abcdef', mpHex: 'ef'.repeat(64) },
+      // The move the job was bought for: the signed event's c and C must match it.
+      move: { fromHex: positionHex({ x: 0n, y: 0n, z: 0n }, 0), toHex: positionHex({ x: 4104n, y: 0n, z: 0n }, 0) },
       // The head the job was seeded by: the store signs onto no other.
       prevEventId: base.prevEventId,
     })

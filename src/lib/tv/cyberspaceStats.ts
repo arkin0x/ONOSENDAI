@@ -35,17 +35,15 @@
  * and a number.
  *
  * Phase 1 counts in the TV page (ruling D2) from what TV reads: the census
- * (lib/tv/stats loadCensus: spawns, bags, objects), plus one read of every
- * movement event, which the chain rules need, and the bag and object
- * deletions, once an hour. StatsSnapshot is the seam a site page or the
+ * (lib/tv/stats loadCensus: spawns, bags, objects and their deletions), plus
+ * one read of every movement event, which the chain rules need, once an hour. StatsSnapshot is the seam a site page or the
  * later signed service (design 3.2) fills or reads instead.
  */
 
 import type { NostrEvent } from '../events'
 import { ACTION_KIND } from '../events'
-import { HIDDEN_KIND, OBJECT_KIND } from '../hidden'
 import {
-  DELETION_KIND, WEEK_S, activeKeys, actionsByAuthor, arrivalsIn, bagsHidden, deletionOf, keyChains, objectsPublished,
+  WEEK_S, activeKeys, actionsByAuthor, arrivalsIn, bagsHidden, keyChains, objectsPublished,
   type BagRecord, type Deletion, type ObjectRecord,
 } from '../countingRules'
 import { EXPLAINER_AD_GAP_MS } from './explainer'
@@ -192,14 +190,13 @@ export async function countStats(input: StatsInput, asOf: number, yieldEvery = 4
   }
 }
 
-/** The movement events and the deletions the census does not read: once an hour, in the TV page (ruling D2). */
-export async function loadStatsReads(ask: Ask): Promise<{ actions: NostrEvent[]; deletions: Deletion[] }> {
-  const [actions, deletions] = await Promise.all([
-    askAll(ask, { kinds: [ACTION_KIND] }),
-    // Scoped by `k`: a bare kind 5 read pages through all of nostr (design 1.1).
-    askAll(ask, { kinds: [DELETION_KIND], '#k': [String(HIDDEN_KIND), String(OBJECT_KIND)] }),
-  ])
-  return { actions, deletions: deletions.map(deletionOf).filter((d): d is Deletion => d !== null) }
+/**
+ * The one read the census does not make: every movement event, which the
+ * chain rules need. Once an hour, in the TV page (ruling D2). The bags,
+ * objects and their deletions are the census's (lib/tv/stats loadCensus).
+ */
+export async function loadStatsReads(ask: Ask): Promise<{ actions: NostrEvent[] }> {
+  return { actions: await askAll(ask, { kinds: [ACTION_KIND] }) }
 }
 
 /**

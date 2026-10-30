@@ -794,8 +794,8 @@ function beginShot(shot: Shot, now: number, id: number): void {
 
 /**
  * Count the boards again, as of the hour it is now (lib/tv/cyberspaceStats):
- * the census again (bags, objects, spawns; the ticker's numbers with them),
- * every movement event, and the bag and object deletions. The profiles of
+ * the census again (bags, objects, their deletions, spawns; the ticker's
+ * numbers with them), and every movement event. The profiles of
  * everyone a board could name or count are asked for meanwhile, so an agent
  * is known as one before a break shows it. A read no relay answers leaves
  * the last counts as they were.
@@ -808,7 +808,7 @@ async function countBoards(id: number): Promise<void> {
     const [census, reads] = await Promise.all([loadCensus(askWithin), loadStatsReads(askWithin)])
     if (id !== run) return
     useTv.setState({ census })
-    const snap = await countStats({ actions: reads.actions, bags: census.bagRecords, objects: census.objectRecords, deletions: reads.deletions, arrivals: arrivalTimes(reads.actions) }, asOfHour(Date.now() / 1000))
+    const snap = await countStats({ actions: reads.actions, bags: census.bagRecords, objects: census.objectRecords, deletions: census.deletions, arrivals: arrivalTimes(reads.actions) }, asOfHour(Date.now() / 1000))
     if (id !== run) return
     snapshot = snap
     const profiles = useProfiles.getState()

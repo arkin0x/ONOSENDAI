@@ -23,7 +23,7 @@ import { coordToXyz, hexToCoord } from 'cyberspace-core'
 import { positionHex, spawnTemplate, type NostrEvent } from '../../events'
 import { hopEvent, nextId } from '../../__tests__/chainFixtures'
 import { DAY_S, WEEK_S, arrivalTimes, type BagRecord } from '../../countingRules'
-import { chainLengthAt } from '../stats'
+import { bagsHiddenAt, chainLengthAt, loadCensus } from '../stats'
 import {
   AGENTS_FUN_FACT, BEATS, BOARD_ORDER, STATS_GAP_MS, STATS_MIN_ROWS, STATS_TAG, asOfHour, asOfWords, boardFor, breakMayStart, countStats, forcedBoard,
   isAgentProfile, loadStatsReads, nextBoard, rankRows, statNumber, statsEveryMs, statsFirstMs, statsLength, type StatsBoard, type StatsFilter, type StatsSnapshot,
@@ -287,13 +287,26 @@ describe('the break\'s clock (breakMayStart)', () => {
 })
 
 describe('the reads', () => {
-  it('ask for every movement event, and only the bag and object deletions, scoped by k', async () => {
+  it('ask for every movement event; the census asks for the bag and object deletions, scoped by k', async () => {
     const asked: unknown[] = []
     const ask = async (f: unknown) => { asked.push(f); return [{ url: 'wss://relay.test', outcome: 'answered' as const, events: [] }] }
-    const r = await loadStatsReads(ask as never)
-    expect(r).toEqual({ actions: [], deletions: [] })
+    expect(await loadStatsReads(ask as never)).toEqual({ actions: [] })
     expect(asked).toContainEqual(expect.objectContaining({ kinds: [3333] }))
+    await loadCensus(ask as never)
     expect(asked).toContainEqual(expect.objectContaining({ kinds: [5], '#k': ['33330', '33331'] }))
+    // Never a bare kind 5 read.
+    expect(asked.filter((f) => (f as { kinds: number[] }).kinds[0] === 5 && !(f as Record<string, unknown>)['#k'])).toEqual([])
     expect(WEEK_S).toBe(7 * DAY_S)
+  })
+
+  it('the ticker\'s "n BAGS HIDDEN" and MOST BAGS HIDDEN are one number', async () => {
+    const w = world()
+    // Six sealed on one UTC day: five count, on the marquee as on the board (the 37 against 36 seen in the local shots).
+    const day = Math.floor((AS_OF - 3 * DAY_S) / DAY_S) * DAY_S
+    const bags = [...w.input.bags, ...Array.from({ length: 6 }, (_, i): BagRecord => ({ id: nextId(), kind: 33330, pubkey: w.p3, d: `same${i}`, createdAt: day + i, sealed: true }))]
+    const census = { arrivals: [], bags: [], objects: [], bagRecords: bags, objectRecords: [], deletions: [], firstSpawn: new Map() }
+    const snap = await countStats({ ...w.input, bags }, AS_OF, 0)
+    expect(snap.bags.get(w.p3)).toBe(5)
+    for (const pk of [ARKINOX, w.agent, w.p1, w.p2, w.p3]) expect(bagsHiddenAt(census, pk, AS_OF)).toBe(snap.bags.get(pk) ?? 0)
   })
 })

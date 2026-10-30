@@ -26,7 +26,7 @@
 
 import type { ShardModel } from 'sno-core/shards'
 import { actionLabel } from '../lib/events'
-import { chainLengthAt, countTo } from '../lib/tv/stats'
+import { bagsHiddenAt, chainLengthAt, countTo } from '../lib/tv/stats'
 import { itemLength, type Shot, type TapeItem } from '../lib/tv/director'
 import { CUT_MS, contentsWords, quoteOf, segmentDoing, typePace, TYPE_DELAY_S } from '../hud/TvSegments'
 import { findLines, placeable, shotProgress, type TvAvatar, type TvFindLine } from '../store/useTv'
@@ -289,7 +289,7 @@ export function tickerItems(p: TvPicture, name: (pk: string) => string): string[
     const length = chain ? chainLengthAt(chain, t) : 0
     if (length > 0) out.push(`${who}: CHAIN OF ${length.toLocaleString()} ACTION${length === 1 ? '' : 'S'}`)
     if (p.census) {
-      const bags = countTo(p.census.bagsBy.get(shot.pubkey) ?? [], t)
+      const bags = bagsHiddenAt(p.census, shot.pubkey, t)
       out.push(`${who}: ${bags} BAG${bags === 1 ? '' : 'S'} HIDDEN`)
     }
   }

@@ -21,7 +21,7 @@
 
 import { ACTION_KIND, type NostrEvent } from '../events'
 import { HIDDEN_KIND, OBJECT_KIND } from '../hidden'
-import { arrivalTimes, bagRecord, chainLength, isV2Action, objectRecord, type BagRecord, type ObjectRecord } from '../countingRules'
+import { DELETION_KIND, arrivalTimes, bagRecord, bagsHidden, chainLength, deletionOf, isV2Action, objectRecord, type BagRecord, type Deletion, type ObjectRecord } from '../countingRules'
 import { askAll, type Ask } from './tape'
 
 /** Times in ascending order, and how many are at or before `t`. */
@@ -41,9 +41,8 @@ const sorted = (xs: number[]): number[] => xs.sort((a, b) => a - b)
 export interface Census {
   /** When each identity first spawned. */
   arrivals: number[]
-  /** When each bag on the relays was last sealed, all and by author. */
+  /** When each bag on the relays was last sealed. */
   bags: number[]
-  bagsBy: Map<string, number[]>
   /** When each public object was last published. */
   objects: number[]
   /**
@@ -54,30 +53,49 @@ export interface Census {
    */
   bagRecords: BagRecord[]
   objectRecords: ObjectRecord[]
+  /** The bag and object deletions (kind 5, scoped by `k`), which those rules apply. */
+  deletions: Deletion[]
   /** Each key's first v2 spawn (lib/countingRules arrivalTimes). */
   firstSpawn: Map<string, number>
 }
 
 export async function loadCensus(ask: Ask): Promise<Census> {
-  const [spawns, bags, objects] = await Promise.all([
+  const [spawns, bags, objects, deletions] = await Promise.all([
     askAll(ask, { kinds: [ACTION_KIND], '#A': ['spawn'] }),
     askAll(ask, { kinds: [HIDDEN_KIND] }),
     askAll(ask, { kinds: [OBJECT_KIND] }),
+    // Scoped by `k`: a bare kind 5 read pages through all of nostr (tv-leaderboards-design 1.1).
+    askAll(ask, { kinds: [DELETION_KIND], '#k': [String(HIDDEN_KIND), String(OBJECT_KIND)] }),
   ])
   const first = arrivalTimes(spawns)
-  const bagsBy = new Map<string, number[]>()
-  for (const b of bags) bagsBy.set(b.pubkey, [...(bagsBy.get(b.pubkey) ?? []), b.created_at])
-  for (const l of bagsBy.values()) sorted(l)
   return {
     arrivals: sorted([...first.values()]),
     bags: sorted(bags.map((b) => b.created_at)),
-    bagsBy,
     // A public object carries its payload in content; a hidden one is sealed.
     objects: sorted(objects.filter((o) => !o.tags.some((t) => t[0] === 'encrypted')).map((o) => o.created_at)),
     bagRecords: bags.map(bagRecord).filter((b): b is BagRecord => b !== null),
     objectRecords: objects.map(objectRecord).filter((o): o is ObjectRecord => o !== null),
+    deletions: deletions.map(deletionOf).filter((d): d is Deletion => d !== null),
     firstSpawn: first,
   }
+}
+
+/** The last count per census, for the marquee, which asks again each time round at the same moment on tape. */
+const lastBags = new WeakMap<Census, { t: number; by: Map<string, number> }>()
+
+/**
+ * A key's bags hidden as of `t`: MOST BAGS HIDDEN's rule (lib/countingRules
+ * bagsHidden, the STASH badge's number), so the ticker's "n BAGS HIDDEN" for
+ * the avatar on screen and the CYBERSPACE STATS board never disagree. Until
+ * 2026-10-30 it counted every bag event the relays held, uncapped.
+ */
+export function bagsHiddenAt(c: Census, pubkey: string, t: number): number {
+  let last = lastBags.get(c)
+  if (!last || last.t !== t) {
+    last = { t, by: bagsHidden(c.bagRecords, c.deletions, t) }
+    lastBags.set(c, last)
+  }
+  return last.by.get(pubkey) ?? 0
 }
 
 /**

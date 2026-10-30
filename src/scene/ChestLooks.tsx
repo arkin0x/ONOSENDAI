@@ -20,6 +20,7 @@ import { useShards } from '../store/useShards'
 import { useMutes } from '../store/useMutes'
 import { setDrawnLooks, useOpenCeremony } from '../store/useOpenCeremony'
 import { ChestCeremony } from './ChestCeremony'
+import { DoorCeremony } from './DoorCeremony'
 import { ChestLoot, HOVER_Y, LOOT_SIDE } from './ChestLoot'
 import { ShardMesh } from './ShardMesh'
 import { lootOf, type LootObject } from '../lib/lootObjects'
@@ -107,7 +108,7 @@ export function ChestLooks({ axes }: { axes: ViewAxes }): JSX.Element | null {
             {ceremony || loot
               ? () => (
                 <>
-                  {ceremony ? <ChestCeremony look={w.look} at={ceremony.at} calm={ceremony.calm} /> : model && <ShardMesh shard={model} world />}
+                  {ceremony ? (ceremony.kind === 'door' ? <DoorCeremony look={w.look} at={ceremony.at} calm={ceremony.calm} /> : <ChestCeremony look={w.look} at={ceremony.at} calm={ceremony.calm} />) : model && <ShardMesh shard={model} world />}
                   {loot && <ChestLoot loot={w.loot} ceremony={ceremony} still={still} />}
                 </>
               )

@@ -37,6 +37,7 @@ import { useCyberspace } from '../store/useCyberspace'
 import { useInventory } from '../store/useInventory'
 import { openedByHand, openedKey, rememberOpened, useOpenedChests } from '../store/useOpenedChests'
 import { celebrateOpen } from '../store/useOpenCeremony'
+import { useCeremony } from '../store/useCeremony'
 import { lookOf } from '../lib/looks'
 import { lootOf } from '../lib/lootObjects'
 import { landedAt } from '../lib/ceremony'
@@ -106,7 +107,7 @@ export function listedOnce<T extends { type: string; chestId?: string }>(items: 
  * the identity changed while the signer decrypted: what one identity's
  * signer opened is never filed or found under another (re-review of #519).
  */
-export async function openChestHere(c: { id: string; chest: ChestItem; author: string; place: HeldPlace | null; sealer: string | undefined }, opener: Exclude<Opener, null>): Promise<ChestEntry[] | null> {
+export async function openChestHere(c: { id: string; chest: ChestItem; author: string; place: HeldPlace | null; sealer: string | undefined; door?: boolean }, opener: Exclude<Opener, null>): Promise<ChestEntry[] | null> {
   const me = useCyberspace.getState().identity.pubkey
   const raw = opener.by === 'key' ? openWithSecret(c.chest, opener.key.secretHex) : await openWithSigner(c.chest, useCyberspace.getState().decryptSealed)
   if (useCyberspace.getState().identity.pubkey !== me) return null
@@ -114,7 +115,12 @@ export async function openChestHere(c: { id: string; chest: ChestItem; author: s
   if (c.place) {
     // The room behind the door is drawn where the door stands.
     const door = { eventId: c.id, bagId: c.place.bagId, lookupId: c.place.lookupId, author: c.author, at: positionOf(c.place), plane: c.place.plane, height: c.place.height }
-    useShards.getState().addDiscovered(revealedIn(door, contents))
+    const revealed = revealedIn(door, contents)
+    useShards.getState().addDiscovered(revealed)
+    // Behind a door, what is there appears as a scan's finds do, each settling
+    // out of static where it stands (arkinox, 2026-10-30, door A). A chest's
+    // contents float out of it instead (scene/ChestLoot).
+    if (c.door) useCeremony.getState().mark(revealed)
   }
   // Opened by hand: it stays opened, and a reload opens it again (store/useOpenedChests).
   rememberOpened(me, c.id, contents)
@@ -167,11 +173,12 @@ export function ChestBlock({ id, chest, author, verified, place, sealer: given }
     setBusy(true)
     setStatus(null)
     try {
-      const contents = await openChestHere({ id, chest, author, place, sealer }, opener)
+      const look = lookOf({ type: 'chest', event: found?.inner ?? ownInner })
+      const contents = await openChestHere({ id, chest, author, place, sealer, door: look?.name === 'door' && first }, opener)
       if (contents) {
-        // The card yields and the chest opens where it stands (store/useOpenCeremony).
-        const look = lookOf({ type: 'chest', event: found?.inner ?? ownInner })
-        if (look?.name === 'treasure') {
+        // The card yields and the chest or door opens where it stands (store/useOpenCeremony).
+        if (look?.name === 'door') celebrateOpen({ me, chestId: id, kind: 'door', first, calm: prefersReducedMotion() })
+        else if (look?.name === 'treasure') {
           // The chime sounds as the last loot object lands over the chest.
           const loot = lootOf(shownOf(contents, useMutes.getState().muted), (e) => holdsEntry(useInventory.getState().items, e))
           celebrateOpen({ me, chestId: id, kind: 'chest', first, calm: prefersReducedMotion(), landMs: loot.length > 0 ? landedAt(loot.length) : undefined })

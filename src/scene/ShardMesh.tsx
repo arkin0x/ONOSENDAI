@@ -30,6 +30,7 @@ import {
   type Plane,
 } from 'three'
 import { easeOutCubic, hash01, scrambleOffset, seedOf, SHARD_DECODE_MS } from '../lib/decode'
+import { dissolveShare } from '../lib/ceremony'
 import { MAX_UNIT, expandFaceColors, flatten, toRender, type Part, type Ref, type ShardModel } from 'sno-core/shards'
 import { parseAddress, partMatrix, placedBounds, refKey, type Placed } from 'sno-core/parts'
 import { useResolved, type Resolved } from '../lib/parts'
@@ -82,6 +83,13 @@ interface Props {
   headlamp?: boolean
   /** performance.now() when this client opened the shard; runs the decode. */
   birth?: number
+  /**
+   * performance.now() when the shard began to decode AWAY: the decode run
+   * backwards and upward, every vertex lifting into cyan static over
+   * DOOR_DISSOLVE_MS, for a door's slab sliding up out of its doorway
+   * (scene/DoorCeremony). The caller fades the materials and unmounts it.
+   */
+  dissolve?: number
   /**
    * A tap on a SOLID face, with the shard's own index for it; the workshop's
    * FACE tool, through the face meshes' `faceOf` map (shardGeometry `drawn`).
@@ -196,7 +204,7 @@ export function faceOfHit(i: { object: { userData: { faceOf?: number[] } }; face
   return map && k != null && map[k] !== undefined ? map[k] : null
 }
 
-export function ShardMesh({ shard: given, scale = 1, ghost = false, birth, onFaceClick, world = false, headlamp = world, lit = false, clip, clipPlanes, pose, nested, onPartClick, selectedParts, cull = false, ignoreOpacity = false, budget }: Props): JSX.Element | null {
+export function ShardMesh({ shard: given, scale = 1, ghost = false, birth, dissolve, onFaceClick, world = false, headlamp = world, lit = false, clip, clipPlanes, pose, nested, onPartClick, selectedParts, cull = false, ignoreOpacity = false, budget }: Props): JSX.Element | null {
   // What everything below is drawn at: the object's own opacity (DECK-0003
   // §1.11, with its 10% floor), times a ghost's; an avatar ignores its own.
   // A placed object reaches here with its own model, so it never takes its
@@ -364,12 +372,46 @@ export function ShardMesh({ shard: given, scale = 1, ghost = false, birth, onFac
     return { pos, col, extent, seed }
   }, [birth, positions, colors, shard.id])
 
+  // Going away: each vertex's own scatter and lift, and its static brightness.
+  const away = useMemo(() => {
+    if (dissolve === undefined) return null
+    const seed = seedOf(shard.id) ^ 0x5bd1e995
+    let extent = 1
+    for (let i = 0; i < positions.length; i++) extent = Math.max(extent, Math.abs(positions[i]))
+    return { seed, extent }
+  }, [dissolve, positions, shard.id])
+
   const done = useRef(false)
   const frame = useRef(0)
 
   useFrame((state) => {
     // The disc is sized in pixels, so it needs the canvas it is drawn on.
     sizeDisc(pointMaterial, state.gl.getPixelRatio(), state.size.height)
+    if (dissolve !== undefined && away !== null) {
+      if (done.current) return
+      const t = dissolveShare(performance.now() - dissolve)
+      const e = t * t
+      frame.current++
+      const p = posAttr.array as Float32Array
+      const c = colAttr.array as Float32Array
+      const n = p.length / 3
+      for (let v = 0; v < n; v++) {
+        const o = scrambleOffset(v, away.seed, away.extent * 0.35)
+        // Upward first and most: the slab slides up into the lintel as it goes.
+        const lift = away.extent * (0.6 + 0.8 * hash01(v * 7, away.seed)) * e
+        const j = t > 0 && t < 1 ? (hash01(v * 13 + frame.current, away.seed) - 0.5) * 0.04 * away.extent * t : 0
+        p[v * 3] = positions[v * 3] + o[0] * e + j
+        p[v * 3 + 1] = positions[v * 3 + 1] + Math.abs(o[1]) * e + lift + j
+        p[v * 3 + 2] = positions[v * 3 + 2] + o[2] * e + j
+        const toStatic = Math.min(1, t * 2.5)
+        const b = 0.35 + 0.65 * hash01(v * 5, away.seed)
+        for (let k = 0; k < 3; k++) c[v * 3 + k] = colors[v * 3 + k] + (STATIC[k] * b - colors[v * 3 + k]) * toStatic
+      }
+      posAttr.needsUpdate = true
+      colAttr.needsUpdate = true
+      if (t >= 1) done.current = true
+      return
+    }
     if (birth === undefined || noise === null || done.current) return
     const t = Math.min(1, (performance.now() - birth) / SHARD_DECODE_MS)
     const e = easeOutCubic(t)

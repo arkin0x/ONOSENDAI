@@ -26,7 +26,7 @@
  * Cyberspace TV opens nothing, so it never plays there.
  */
 
-import { easeOutCubic } from './decode'
+import { SHARD_DECODE_MS, easeOutCubic } from './decode'
 
 /** How long the lid takes to turn open. */
 export const LID_MS = 700
@@ -67,9 +67,26 @@ export function landedAt(n: number): number {
 /** Which ceremony a look plays. */
 export type CeremonyKind = 'chest' | 'door'
 
-/** How long a ceremony lasts before the chest is simply open. */
-export function ceremonyLength(_kind: CeremonyKind, calm: boolean): number {
-  return calm ? CALM_FADE_MS : LID_MS + GLINT_MS
+/**
+ * A door (arkinox, 2026-10-30, door A): its slab decodes away upward with
+ * the house static over DOOR_DISSOLVE_MS, as if slid up into the lintel,
+ * and the open look (the slab's bottom rail) settles out of static from
+ * DOOR_OPEN_AT, the way a found shard does. No glints, no rain, no loot:
+ * a room is not treasure. WALK passes the door from the start, before any
+ * of this has been drawn (store/walkWalls.ts).
+ */
+export const DOOR_DISSOLVE_MS = 900
+export const DOOR_OPEN_AT = 540
+
+/** How far the slab has decoded away at `elapsed` ms, 0 to 1. */
+export function dissolveShare(elapsed: number): number {
+  return Math.min(1, Math.max(0, elapsed / DOOR_DISSOLVE_MS))
+}
+
+/** How long a ceremony lasts before the chest or door is simply open. */
+export function ceremonyLength(kind: CeremonyKind, calm: boolean): number {
+  if (calm) return CALM_FADE_MS
+  return kind === 'door' ? DOOR_OPEN_AT + SHARD_DECODE_MS : LID_MS + GLINT_MS
 }
 
 /** How far the lid has turned at `elapsed` ms, toward `angle` (radians); the calm path never turns it. */

@@ -7,7 +7,7 @@
  * Synthesised on the spot through the one audio context (lib/audioContext),
  * no asset, nothing copied from any game: for a chest, a lock tick (a short
  * band of noise and a low click), then three rising notes of our own (C5,
- * E5, A5). Quiet, at the chime's gain, and failing silent where there is
+ * E5, A5), and the message chime as the loot lands over it. Quiet, at the chime's gain, and failing silent where there is
  * no audio. The buzz is three short pulses through lib/buzz.ts.
  *
  * Gated across every chest and door together: the sound at most once per
@@ -18,6 +18,7 @@
 
 import { audioContext } from './audioContext'
 import { buzzGate, onceEvery } from './buzz'
+import { chimeAt } from './chime'
 import type { CeremonyKind } from './ceremony'
 
 /** The least time between two ceremony sounds, and between two ceremony buzzes. */
@@ -35,9 +36,9 @@ export interface Feedback { sound: boolean; buzz: boolean }
  * or right after the tap (OPEN), with resumeAudio() already called in the
  * tap, so a phone lets the sound out.
  */
-export function ceremonyFeedback(kind: CeremonyKind, now = Date.now()): Feedback {
+export function ceremonyFeedback(kind: CeremonyKind, now = Date.now(), landMs?: number): Feedback {
   const sound = onceEvery(sounded, 'ceremony', now, CEREMONY_GAP_MS)
-  if (sound) play(kind)
+  if (sound) play(kind, landMs)
   const buzz = buzzGate(['ceremony'], now, CEREMONY_GAP_MS, CEREMONY_BUZZ[kind])
   return { sound, buzz }
 }
@@ -47,12 +48,12 @@ export function resetCeremonySound(): void {
   sounded.clear()
 }
 
-function play(kind: CeremonyKind): void {
+function play(kind: CeremonyKind, landMs?: number): void {
   try {
     const ac = audioContext()
     if (!ac) return
     if (ac.state === 'suspended') void ac.resume()
-    if (kind === 'chest') chestOpening(ac, ac.currentTime)
+    if (kind === 'chest') chestOpening(ac, ac.currentTime, landMs)
   } catch {
     /* no audio here */
   }
@@ -123,7 +124,9 @@ function notes(ac: AudioContext, t0: number, list: ReadonlyArray<readonly [numbe
 /** A chest opening: the tick at once, then C5, E5, A5 rising from 150 ms over the lid's turn. */
 export const CHEST_NOTES: ReadonlyArray<readonly [number, number]> = [[523.25, 0.15], [659.25, 0.33], [880, 0.51]]
 
-function chestOpening(ac: AudioContext, t0: number): void {
+function chestOpening(ac: AudioContext, t0: number, landMs?: number): void {
   lockTick(ac, t0)
   notes(ac, t0, CHEST_NOTES)
+  // The message chime's two notes (lib/chime.ts) as the last loot object lands, a little softer.
+  if (landMs !== undefined) chimeAt(ac, t0 + landMs / 1000, 0.06)
 }

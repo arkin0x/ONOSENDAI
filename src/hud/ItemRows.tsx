@@ -31,13 +31,15 @@ import { positionOf, useShards } from '../store/useShards'
 import { hiddenLabel, type ChestItem } from '../lib/hidden'
 import { ItemFace } from './ItemIcon'
 import { ShardThumb } from './ShardThumb'
-import { holdsModel, openingKeys, type HeldFrom, type HeldItem, type HeldPlace } from '../lib/inventory'
+import { holdsEntry, openingKeys, type HeldFrom, type HeldItem, type HeldPlace } from '../lib/inventory'
 import { safeNpub } from '../lib/npub'
 import { useCyberspace } from '../store/useCyberspace'
 import { useInventory } from '../store/useInventory'
 import { openedByHand, openedKey, rememberOpened, useOpenedChests } from '../store/useOpenedChests'
 import { celebrateOpen } from '../store/useOpenCeremony'
 import { lookOf } from '../lib/looks'
+import { lootOf } from '../lib/lootObjects'
+import { landedAt } from '../lib/ceremony'
 import { resumeAudio } from '../lib/audioContext'
 import { prefersReducedMotion } from '../hooks/useReducedMotion'
 import { profileLabel } from '../store/useProfiles'
@@ -79,10 +81,6 @@ export function KeyLine({ id, name, author }: { id?: string; name: string; autho
   )
 }
 
-/** Whether a chest's content is held already: by its id, or (one shard per model, arkinox, 2026-10-11) a shard whose model is held under any name. */
-function heldIn(items: Record<string, HeldItem>, entry: ChestEntry): boolean {
-  return !!items[entry.id] || (entry.body.type === 'shard' && !!entry.body.shard && holdsModel(items, entry.body.shard))
-}
 
 /** Whether this identity has a chest open here, by its id: its contents are listed under it. */
 export function useChestOpen(): (chestId: string | undefined) => boolean {
@@ -173,7 +171,11 @@ export function ChestBlock({ id, chest, author, verified, place, sealer: given }
       if (contents) {
         // The card yields and the chest opens where it stands (store/useOpenCeremony).
         const look = lookOf({ type: 'chest', event: found?.inner ?? ownInner })
-        if (look?.name === 'treasure') celebrateOpen({ me, chestId: id, kind: 'chest', first, calm: prefersReducedMotion() })
+        if (look?.name === 'treasure') {
+          // The chime sounds as the last loot object lands over the chest.
+          const loot = lootOf(shownOf(contents, useMutes.getState().muted), (e) => holdsEntry(useInventory.getState().items, e))
+          celebrateOpen({ me, chestId: id, kind: 'chest', first, calm: prefersReducedMotion(), landMs: loot.length > 0 ? landedAt(loot.length) : undefined })
+        }
       }
       if (contents && contents.length === 0) setStatus('Opened: nothing inside this client can read.')
     } catch (err) {
@@ -205,21 +207,26 @@ export function ChestBlock({ id, chest, author, verified, place, sealer: given }
 
 /** What TAKE ALL takes: every content here not yet held. */
 export function takeableOf(entries: ChestEntry[], items: Record<string, HeldItem>): ChestEntry[] {
-  return entries.filter((e) => !heldIn(items, e))
+  return entries.filter((e) => !holdsEntry(items, e))
 }
 
 /**
- * An opened chest's contents: a row each with TAKE, and TAKE ALL under the
- * last, which takes every row not yet held and is off when none is left.
+ * An opened chest's contents not yet held: a row each with TAKE, and TAKE
+ * ALL under the last. What is held is not listed (arkinox, 2026-10-30: "if
+ * an item is in your inventory and in the chest, hide it on the chest so it
+ * feels like you took it"), so a row leaves the list as it is taken, and its
+ * loot leaves the chest in the world (scene/ChestLoot). With everything
+ * held, the list says so.
  */
 export function ChestContents({ entries, from, place }: { entries: ChestEntry[]; from: HeldFrom; place: HeldPlace | null }): JSX.Element {
   const items = useInventory((s) => s.items)
   const takeable = useMemo(() => takeableOf(entries, items), [entries, items])
+  if (takeable.length === 0) return <span className="chest__status" role="status">Everything here is in your ITEMS</span>
   return (
     <ul className="chest__contents">
-      {entries.map((e) => <ContentRow key={e.id} entry={e} from={from} place={place} />)}
+      {takeable.map((e) => <ContentRow key={e.id} entry={e} from={from} place={place} />)}
       <li className="chest__all">
-        <button className="chest__act chest__act--take" onClick={() => { useInventory.getState().take(takeable, from, place) }} disabled={takeable.length === 0} title={takeable.length === 0 ? 'Everything here is in your ITEMS' : 'Copy everything here into your ITEMS'}>TAKE ALL</button>
+        <button className="chest__act chest__act--take" onClick={() => { useInventory.getState().take(takeable, from, place) }} title="Copy everything here into your ITEMS">TAKE ALL</button>
       </li>
     </ul>
   )
@@ -228,7 +235,7 @@ export function ChestContents({ entries, from, place }: { entries: ChestEntry[];
 /** One thing inside an opened chest, with TAKE. */
 function ContentRow({ entry, from, place }: { entry: ChestEntry; from: HeldFrom; place: HeldPlace | null }): JSX.Element {
   // One shard per model (arkinox, 2026-10-11): a model already held, under any name, reads TAKEN too.
-  const held = useInventory((s) => heldIn(s.items, entry))
+  const held = useInventory((s) => holdsEntry(s.items, entry))
   const { label, coin } = entryLabel(entry)
   const type = entry.body.type
   const take = (): void => { useInventory.getState().take([entry], from, place) }

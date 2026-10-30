@@ -8,7 +8,7 @@
  * identity opens it, and only where the world draws it.
  */
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { CALM_FADE_MS, GLINT_MS, LID_MS, afterOpen, calmShare, ceremonyLength, glintLevel, lidTurn, rainCount, swapped } from '../ceremony'
+import { CALM_FADE_MS, GLINT_MS, LID_MS, RISE_MS, afterOpen, calmShare, ceremonyLength, glintLevel, landedAt, lidTurn, rainCount, riseShare, riseStart, swapped } from '../ceremony'
 import { CEREMONY_BUZZ, CEREMONY_GAP_MS, ceremonyFeedback, resetCeremonySound } from '../ceremonySound'
 import { buzzGate, onceEvery } from '../buzz'
 
@@ -39,6 +39,23 @@ describe('the lid', () => {
   it('rains half as many glyphs on a phone', () => {
     expect(rainCount(390)).toBe(12)
     expect(rainCount(1440)).toBe(24)
+  })
+})
+
+describe('the loot rising', () => {
+  it('starts as the lid nears the top, one after another, and a full chest is not a queue', () => {
+    expect(riseStart(0)).toBeLessThan(LID_MS)
+    expect(riseStart(1)).toBeGreaterThan(riseStart(0))
+    expect(riseStart(20)).toBe(riseStart(6))
+  })
+  it('is in the mouth before it starts and hovering once it has risen', () => {
+    expect(riseShare(0, 0)).toBe(0)
+    expect(riseShare(0, riseStart(0) + RISE_MS)).toBe(1)
+  })
+  it('lands, and chimes, once the last one is up, within the ceremony', () => {
+    expect(landedAt(0)).toBe(0)
+    expect(landedAt(3)).toBe(riseStart(2) + RISE_MS)
+    expect(landedAt(50)).toBeLessThanOrEqual(ceremonyLength('chest', false))
   })
 })
 

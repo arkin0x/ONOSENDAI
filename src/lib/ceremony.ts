@@ -11,7 +11,10 @@
  *   700 ms        the open look swaps in under the glints (hollow, gold);
  *   700 to 3200   gold glints twinkle at the heap, seen by the bloom;
  *   700 to 1900   glyphs of the wordmark's katakana rise from the mouth,
- *                 resolve, and fade (12 on a phone, 24 wider).
+ *                 resolve, and fade (12 on a phone, 24 wider);
+ *   420 on        the loot rises out of the mouth, one object after
+ *                 another, and hovers above the chest; a chime as the last
+ *                 one lands (scene/ChestLoot.tsx).
  *
  * The calm path, for a person who asked their system for less motion: the
  * closed look fades into the open one over 300 ms; no lid turning, no
@@ -38,6 +41,27 @@ export const CALM_FADE_MS = 300
 /** Glyphs in the rain: fewer on a narrow screen, as labels shrink there (WorldLabel labelShrink). */
 export function rainCount(widthPx: number): number {
   return widthPx < 700 ? 12 : 24
+}
+
+/** How long one loot object takes to rise out of the mouth, and how long after the one before it it starts. */
+export const RISE_MS = 900
+export const RISE_STAGGER_MS = 130
+/** At most this many stagger steps: a full chest is not a queue. */
+const STAGGER_CAP = 6
+
+/** When loot object `i` starts rising, ms from the start: as the lid nears the top, one after another. */
+export function riseStart(i: number): number {
+  return LID_MS * 0.6 + Math.min(i, STAGGER_CAP) * RISE_STAGGER_MS
+}
+
+/** How far loot object `i` has risen at `elapsed` ms, 0 (in the mouth) to 1 (hovering). */
+export function riseShare(i: number, elapsed: number): number {
+  return easeOutCubic((elapsed - riseStart(i)) / RISE_MS)
+}
+
+/** When the last of `n` loot objects lands, ms from the start: when the chime sounds (lib/ceremonySound). */
+export function landedAt(n: number): number {
+  return n === 0 ? 0 : riseStart(n - 1) + RISE_MS
 }
 
 /** Which ceremony a look plays. */

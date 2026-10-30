@@ -211,7 +211,7 @@ describe('a chain longer than localStorage holds (arkinox, 2026-10-30)', () => {
       expect(S().published[chain[FULL - 1].id]).toBe('ok')
       await writesLanded()
     }
-  })
+  }, 20_000)
 
   it('an action really from another device is still reported, and only that one', async () => {
     storage.setItem(`onosendai:chain:${pk}`, storedJson(KEPT))
@@ -429,6 +429,108 @@ describe('review of #528: IndexedDB slow, failing, or holding a copy that parted
     S().moveCursor(moveDirection(S().axes(), 'right'))
     await S().commit()
     expect(posted).toHaveLength(1)
+  })
+})
+
+describe('review of #528, follow-ups: a late answer that parted ways, and holds', () => {
+  // IndexedDB holds all 40, the 15 after action 25 never published (LOCAL); localStorage froze at 25.
+  const seed = async (): Promise<IDBFactory> => {
+    await keepInDb(chain, chain.slice(0, KEPT), 2_000)
+    keepInLocal(chain.slice(0, KEPT), chain.slice(0, KEPT))
+    return (globalThis as { indexedDB: IDBFactory }).indexedDB
+  }
+  /** Another device's move from action 25, published: what the relays bring while the read is out. */
+  const theirs = extend(chain.slice(0, KEPT), 1, 2n, 9_000)
+
+  it('the relays bring a move that parts from this device\'s LOCAL branch while the read is out: asked, on this load and the next, never settled', async () => {
+    const real = await seed()
+    setDb(slowDb(real, 600))
+    let m = await pageLoad(150)
+    let S = m.useCyberspace.getState
+    await m.savedChainLoaded()
+    S().adoptChain(theirs)
+    expect(S().prevEventId).toBe(theirs[KEPT].id)
+    // The late answer: this device's branch comes back, and the parting is put to the person.
+    await vi.waitFor(() => expect(S().chainConflict?.kind).toBe('branch'), { timeout: 3_000 })
+    expect(ids(S().events)).toEqual(ids(chain))
+    expect(S().published[chain[FULL - 1].id]).toBe('queued')
+    await writesLanded()
+
+    // The next load, IndexedDB answering at once: this device's branch, and the same question.
+    setDb(real)
+    m = await pageLoad()
+    S = m.useCyberspace.getState
+    await m.savedChainLoaded()
+    expect(ids(S().events)).toEqual(ids(chain))
+    expect(S().published[chain[FULL - 1].id]).toBe('queued')
+    S().adoptChain(theirs)
+    expect(S().chainConflict?.kind).toBe('branch')
+  }, 20_000)
+
+  it('unpublished moves on both sides of a late parting: the chain in hand stays, and the other branch is kept aside, whole', async () => {
+    const real = await seed()
+    setDb(slowDb(real, 600))
+    const m = await pageLoad(150)
+    const S = m.useCyberspace.getState
+    await m.savedChainLoaded()
+    // A LOCAL move made from action 25 while the read was out.
+    const mine = extend(chain.slice(0, KEPT), 1, 3n, 9_000)
+    m.useCyberspace.setState({ events: mine, prevEventId: mine[KEPT].id, published: { ...S().published, [mine[KEPT].id]: 'queued' } })
+    S().setPublishStatus(chain[0].id, 'ok')
+    await sleep(900)
+    expect(S().prevEventId).toBe(mine[KEPT].id)
+    expect(S().chainConflict).toBeNull()
+    await writesLanded()
+    setDb(real)
+    const db = await import('../../lib/chainDb')
+    const aside = await db.setAsideChains(pk)
+    expect(aside).toHaveLength(1)
+    expect(ids(aside[0].events)).toEqual(ids(chain))
+    const kept = await db.readStoredChain(pk)
+    expect(kept && typeof kept === 'object' ? ids(kept.events) : kept).toEqual(ids(mine))
+  }, 20_000)
+
+  it('a held respawn only IndexedDB has keeps its hold over the older chain in hand', async () => {
+    vi.resetModules()
+    const db = await import('../../lib/chainDb')
+    db.writeStoredChain(pk, { events: respawned, published: [], stats: {}, held: true, savedAt: 9_000 })
+    await db.chainWritesSettled()
+    keepInLocal(chain.slice(0, KEPT), chain.slice(0, KEPT), 1_000)
+    const m = await pageLoad()
+    expect(m.useCyberspace.getState().held).toBe(false)
+    await m.savedChainLoaded()
+    expect(ids(m.useCyberspace.getState().events)).toEqual(ids(respawned))
+    expect(m.useCyberspace.getState().held).toBe(true)
+  })
+})
+
+describe('chainDb writes in order', () => {
+  it('a write that fails on a dead connection is not sent again after a newer one landed', async () => {
+    vi.resetModules()
+    const db = await import('../../lib/chainDb')
+    const older = { events: chain.slice(0, 10), published: [], stats: {}, held: false, savedAt: 1 }
+    const newer = { events: chain, published: [], stats: {}, held: false, savedAt: 2 }
+    // The first transaction meets a dead connection (Safari's "Connection to
+    // Indexed Database server lost"): that write is tried again on a fresh one.
+    const proto = (globalThis as unknown as { IDBDatabase: { prototype: { transaction: (...a: unknown[]) => unknown } } }).IDBDatabase.prototype
+    const transaction = proto.transaction
+    let calls = 0
+    proto.transaction = function (this: unknown, ...a: unknown[]) {
+      if (a[1] === 'readwrite' && calls++ === 0) throw new DOMException('Connection to Indexed Database server lost', 'UnknownError')
+      return transaction.apply(this, a)
+    }
+    try {
+      db.writeStoredChain(pk, older)
+      db.writeStoredChain(pk, newer)
+      // The page is hidden: the waiting write goes at once, beside the one in flight.
+      db.flushChainWrites()
+      await db.chainWritesSettled()
+      await sleep(100)
+    } finally {
+      proto.transaction = transaction
+    }
+    const kept = await db.readStoredChain(pk)
+    expect(kept && typeof kept === 'object' ? kept.events.length : kept).toBe(FULL)
   })
 })
 

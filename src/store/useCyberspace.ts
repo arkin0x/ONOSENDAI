@@ -80,7 +80,7 @@ import {
   type ViewAxes,
 } from '../lib/space'
 import { confirmChainEvents } from '../lib/chains'
-import { chainDbAvailable, readStoredChain, writeStoredChain, type StoredChain } from '../lib/chainDb'
+import { chainDbAvailable, readStoredChain, setAsideStoredChain, writeStoredChain, type StoredChain } from '../lib/chainDb'
 import { checkSignatures } from '../lib/sigCheck'
 import {
   firstMove,
@@ -1888,7 +1888,9 @@ function startSignatureCheck(pubkey: string, unchecked: NostrEvent[]): void {
  * IndexedDB kept the chain. But nothing is written to IndexedDB for this
  * identity until a read has been taken in (dbRead), because the record may
  * hold actions nothing else does, such as LOCAL ones never published. The
- * read that ran out keeps going, and is taken in, in silence, when it lands.
+ * read that ran out keeps going, and is taken in when it lands: in silence
+ * when one copy holds the other, and through the diverged-branch prompt when
+ * they parted ways meanwhile (takeStoredChain).
  */
 function hydrateChain(pubkey: string): void {
   awaitingHydration = []
@@ -1936,10 +1938,14 @@ function hydrateChain(pubkey: string): void {
  * Take in what IndexedDB answered for `pubkey`: the chain in hand becomes
  * the record's when the record is further on, in silence. True when it was
  * taken in, and IndexedDB may be written for this identity from now on.
+ *
  * `blindSince`, for an answer that came after its read ran out: when the
- * chain in hand last changed as that read went out. A record that parted
- * ways with moves made since then is left alone, unwritten, for a load
- * that can compare them before anything is moved.
+ * chain in hand last changed as that read went out. If the chain in hand
+ * changed since and the two parted ways, neither is picked by save time,
+ * because the later save is only the one made without seeing the other
+ * (review of #528, P3): that would settle the parting in silence, on this
+ * load or the next, and lose this device's unpublished actions on the
+ * losing side (takeParted).
  */
 function takeStoredChain(pubkey: string, kept: StoredChain | null, blindSince: number | null): boolean {
   const s = useCyberspace.getState()
@@ -1953,23 +1959,59 @@ function takeStoredChain(pubkey: string, kept: StoredChain | null, blindSince: n
   const inHand: LoadedChain | null = s.events.length === 0
     ? null
     : { version: 2, events: s.events, published: s.events.filter((e) => s.published[e.id] === 'ok').map((e) => e.id), stats: s.chain, held: s.held, savedAt: chainAt.get(pubkey)?.at ?? 0, unchecked: [] }
-  if (furtherCopy(inHand, fromDb) !== fromDb) {
-    const movedSince = blindSince !== null && (chainAt.get(pubkey)?.at ?? 0) > blindSince
-    if (inHand && movedSince && !holdsAll(inHand, fromDb)) {
-      console.warn('[chain] IndexedDB answered late with a chain that parted ways with moves made since; left as it is, and nothing written there this session')
-      return false
-    }
-    dbRead.add(pubkey)
+  const movedSince = blindSince !== null && (chainAt.get(pubkey)?.at ?? 0) > blindSince
+  if (inHand && movedSince && !holdsAll(inHand, fromDb) && !holdsAll(fromDb, inHand)) return takeParted(pubkey, kept, fromDb, have)
+  if (furtherCopy(inHand, fromDb) !== fromDb) { dbRead.add(pubkey); return true }
+  putInHand(pubkey, fromDb, have)
+  return true
+}
+
+/**
+ * A late answer that parted ways with what the chain in hand took on while
+ * the read was out. When everything the chain in hand has and the record
+ * lacks is on the relays (another device's move the relays brought, or a
+ * move of this tab already published), the record is this device's side:
+ * it goes back in hand, and what the relays hold is folded in as from the
+ * relays. adoptChain then raises the diverged-branch prompt when the
+ * record's side is unpublished (lib/branchConflict.ts), or shows the chain
+ * forked when both sides are already on the relays, and nothing is decided
+ * without the person. When both sides hold unpublished actions of this
+ * device (moves made LOCAL during the wait), the prompt has no words for
+ * that: the chain in hand stays, and the record is kept in IndexedDB beside
+ * it, set aside under its own key, so neither side is ever written over.
+ */
+function takeParted(pubkey: string, kept: StoredChain, fromDb: LoadedChain, have: Set<string>): boolean {
+  const s = useCyberspace.getState()
+  const recorded = new Set(fromDb.events.map((e) => e.id))
+  const ours = s.events.filter((e) => !recorded.has(e.id))
+  if (ours.every((e) => s.published[e.id] === 'ok')) {
+    putInHand(pubkey, fromDb, have)
+    // Taken back on purpose, now: stamped as changed now, so the old stretch
+    // localStorage took meanwhile is never the later copy on the next load.
+    chainAt.delete(pubkey)
+    useCyberspace.getState().adoptChain(ours)
     return true
   }
+  setAsideStoredChain(pubkey, kept)
+  console.warn('[chain] IndexedDB answered late with a branch that parted ways with unpublished moves made meanwhile; the chain in hand stays, and that branch is kept aside in IndexedDB')
+  dbRead.add(pubkey)
+  return true
+}
+
+/** The record's chain in hand, in silence: what a load does when IndexedDB holds the chain further on. */
+function putInHand(pubkey: string, fromDb: LoadedChain, have: Set<string>): void {
+  const s = useCyberspace.getState()
   const d = derive(fromDb)
   // Acknowledged here since the load stays acknowledged.
   const published = { ...d.published }
   for (const id of Object.keys(published)) if (s.published[id] === 'ok') published[id] = 'ok'
-  // A hold the self-check already lifted stays lifted: the relays answered
-  // after the record was written (applySelfCheck).
-  const answered = s.selfCheck.pubkey === pubkey && (s.selfCheck.status === 'found' || s.selfCheck.status === 'none')
-  const held = d.held && (s.events.length > 0 ? s.held : !answered)
+  // A hold is only ever lifted on a chain, never put back, so on the same
+  // chain the one in hand decides; a hold the self-check already lifted
+  // (the relays answered "none" after the record was written) stays lifted.
+  // A different chain (a held respawn only the record has) keeps its own.
+  const sameChain = s.events.length > 0 && s.genesisId === d.genesisId
+  const lifted = s.selfCheck.pubkey === pubkey && s.selfCheck.status === 'none'
+  const held = d.held && (sameChain ? s.held : !lifted)
   const following = s.atHead()
   useCyberspace.setState({
     events: d.events,
@@ -1989,7 +2031,6 @@ function takeStoredChain(pubkey: string, kept: StoredChain | null, blindSince: n
   dbRead.add(pubkey)
   // What localStorage did not have is checked like the rest, off the main thread.
   startSignatureCheck(pubkey, fromDb.unchecked.filter((e) => !have.has(e.id)))
-  return true
 }
 
 /** Resolves once the read of `pubkey`'s chain from IndexedDB has landed (hydrateChain). */

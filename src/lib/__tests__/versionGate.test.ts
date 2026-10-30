@@ -1,6 +1,6 @@
 /**
  * versionGate.test.ts - what the deploy's /version.json does to this tab
- * (lib/versionGate.ts, lib/chainEpoch.ts; the owner's ruling of
+ * (lib/versionGate.ts, lib/chainRulesEpoch.ts; the owner's ruling of
  * 2026-10-30, before the hop proof v2 cutover).
  *
  * What would go wrong silently: a stale tab that keeps signing old-format
@@ -12,15 +12,18 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { CHAIN_EPOCH, VERSION_FILE, parseVersionFile, versionFileOf } from '../chainEpoch'
+import { CHAIN_RULES_EPOCH, VERSION_FILE, parseVersionFile, versionFileOf } from '../chainRulesEpoch'
 import {
+  BACKGROUND_TIMEOUT_MS,
   OWN_BUILD,
   PRE_MOVE_MAX_AGE_MS,
   PRE_MOVE_TIMEOUT_MS,
   checkVersion,
   mayMove,
   movementBlocked,
+  reloadStreamOnBlock,
   resetVersionGateForTests,
+  startVersionGate,
   useVersionGate,
   verdictOf,
 } from '../versionGate'
@@ -30,9 +33,11 @@ let answer: Answer
 const fetchStub = vi.fn((_url: string, _init?: RequestInit) => answer())
 const json = (body: unknown, status = 200): Answer => () => Promise.resolve(new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } }))
 const sameEpoch = json(versionFileOf(OWN_BUILD))
-const newerEpoch = json(versionFileOf('cutover-build', CHAIN_EPOCH + 1))
+const newerEpoch = json(versionFileOf('cutover-build', CHAIN_RULES_EPOCH + 1))
 const offline: Answer = () => Promise.reject(new TypeError('fetch failed'))
 const never: Answer = () => new Promise<Response>(() => {})
+/** The fetch's own signal, as the gate handed it over: whether the look was cut short. */
+const signalOf = (call: number): AbortSignal | undefined => fetchStub.mock.calls[call]?.[1]?.signal ?? undefined
 
 beforeEach(() => {
   resetVersionGateForTests(true)
@@ -49,7 +54,7 @@ afterEach(() => {
 
 describe('the version file', () => {
   it('is the build id and the epoch this build requires', () => {
-    expect(versionFileOf('abc123')).toEqual({ build: 'abc123', minChainEpoch: CHAIN_EPOCH })
+    expect(versionFileOf('abc123')).toEqual({ build: 'abc123', minChainEpoch: CHAIN_RULES_EPOCH })
     expect(VERSION_FILE).toBe('version.json')
   })
 
@@ -87,7 +92,7 @@ describe('the look before a move', () => {
     expect(await mayMove()).toBe(false)
     expect(movementBlocked()).toBe(true)
     expect(useVersionGate.getState().verdict).toBe('blocked')
-    expect(useVersionGate.getState().deployed).toEqual({ build: 'cutover-build', minChainEpoch: CHAIN_EPOCH + 1 })
+    expect(useVersionGate.getState().deployed).toEqual({ build: 'cutover-build', minChainEpoch: CHAIN_RULES_EPOCH + 1 })
   })
 
   it('a fetch error (offline): allowed', async () => {
@@ -172,6 +177,35 @@ describe('the look before a move', () => {
     expect(await mayMove()).toBe(true)
   })
 
+  it('a slow link (an answer in 3 s): the move goes ahead at 1.5 s, the look is not cut short, and the late answer refuses the next move (review of #530)', async () => {
+    vi.useFakeTimers()
+    answer = () => new Promise<Response>((resolve) => setTimeout(() => resolve(new Response(JSON.stringify(versionFileOf('cutover-build', CHAIN_RULES_EPOCH + 1)), { status: 200 })), 3_000))
+    let first: boolean | undefined
+    void mayMove().then((r) => { first = r })
+    await vi.advanceTimersByTimeAsync(PRE_MOVE_TIMEOUT_MS)
+    // The move did not wait past its 1.5 s, and nothing was known yet.
+    expect(first).toBe(true)
+    expect(movementBlocked()).toBe(false)
+    // The fetch is still out: not aborted at the move's timeout.
+    expect(signalOf(0)?.aborted).toBe(false)
+    await vi.advanceTimersByTimeAsync(3_000 - PRE_MOVE_TIMEOUT_MS)
+    expect(movementBlocked()).toBe(true)
+    // The next move is refused from the answer in hand, with no second look.
+    expect(await mayMove()).toBe(false)
+    expect(fetchStub).toHaveBeenCalledTimes(1)
+  })
+
+  it('a look that never answers is given up on at BACKGROUND_TIMEOUT_MS, not at a move\'s 1.5 s', async () => {
+    vi.useFakeTimers()
+    answer = never
+    void mayMove()
+    await vi.advanceTimersByTimeAsync(PRE_MOVE_TIMEOUT_MS)
+    expect(signalOf(0)?.aborted).toBe(false)
+    await vi.advanceTimersByTimeAsync(BACKGROUND_TIMEOUT_MS - PRE_MOVE_TIMEOUT_MS)
+    expect(signalOf(0)?.aborted).toBe(true)
+    expect(movementBlocked()).toBe(false)
+  })
+
   it('before the gate is started (tests, and before boot) nothing is fetched', async () => {
     resetVersionGateForTests(false)
     expect(await mayMove()).toBe(true)
@@ -191,5 +225,40 @@ describe('the soft hint', () => {
     await checkVersion()
     useVersionGate.getState().dismissHint()
     expect(useVersionGate.getState().hintDismissed).toBe('a-newer-build')
+  })
+})
+
+describe('when the tab looks', () => {
+  it('at boot, on focus, on a return to the tab, and when the network comes back', async () => {
+    const win = Object.assign(new EventTarget(), { setInterval: () => 0 })
+    const doc = Object.assign(new EventTarget(), { visibilityState: 'visible' })
+    vi.stubGlobal('window', win)
+    vi.stubGlobal('document', doc)
+    resetVersionGateForTests(false)
+    vi.useFakeTimers()
+    startVersionGate()
+    await vi.advanceTimersByTimeAsync(0)
+    expect(fetchStub).toHaveBeenCalledTimes(1)
+    // Focus, visibility and the network coming back each look, past the
+    // few seconds in which one look answers all of them.
+    for (const [target, type] of [[win, 'focus'], [doc, 'visibilitychange'], [win, 'online']] as const) {
+      await vi.advanceTimersByTimeAsync(6_000)
+      const before = fetchStub.mock.calls.length
+      target.dispatchEvent(new Event(type))
+      await vi.advanceTimersByTimeAsync(0)
+      expect(fetchStub.mock.calls.length, type).toBe(before + 1)
+    }
+  })
+})
+
+describe('the TV stream', () => {
+  it('reloads when it learns of a block, once, and not for a hint', () => {
+    const reload = vi.fn()
+    reloadStreamOnBlock({ verdict: 'hint' }, { verdict: 'ok' }, reload)
+    expect(reload).not.toHaveBeenCalled()
+    reloadStreamOnBlock({ verdict: 'blocked' }, { verdict: 'ok' }, reload)
+    expect(reload).toHaveBeenCalledTimes(1)
+    reloadStreamOnBlock({ verdict: 'blocked' }, { verdict: 'blocked' }, reload)
+    expect(reload).toHaveBeenCalledTimes(1)
   })
 })

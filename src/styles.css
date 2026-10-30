@@ -8787,6 +8787,18 @@ kbd {
 .hyperbar--version:not(.hyperbar--broken) { cursor: pointer; }
 .hyperbar--version:not(.hyperbar--broken) .hyperbar__glyph { color: var(--accent); }
 .hyperbar--version.hyperbar--broken .hyperbar__end { background: var(--danger); border-color: var(--danger); }
+.version__dismiss {
+  font: inherit;
+  font-size: 12px;
+  line-height: 1;
+  padding: 4px;
+  color: var(--dim);
+  align-self: center;
+  background: none;
+  border: 0;
+  cursor: pointer;
+}
+.version__dismiss:hover, .version__dismiss:focus-visible { color: var(--accent); }
 
 /* What an action claimed, where that is not where you stand (ChainExplorer). */
 .explorer__detail--claimed { color: var(--danger); opacity: 0.8; }

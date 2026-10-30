@@ -47,7 +47,8 @@ if (typeof (globalThis as { window?: unknown }).window === 'undefined') {
 }
 
 import { startPublisher } from '../publisher'
-import { useVersionGate } from '../versionGate'
+import { mayMove, movementBlocked, resetVersionGateForTests, useVersionGate } from '../versionGate'
+import { CHAIN_RULES_EPOCH, versionFileOf } from '../chainRulesEpoch'
 import { useCyberspace, type PublishStatus } from '../../store/useCyberspace'
 
 const PUBKEY = 'a'.repeat(64)
@@ -317,5 +318,38 @@ describe('the publisher and the release gate', () => {
     }
     await until(() => sent.length === 2)
     expect(sent).toEqual([ev('a1').id, ev('b2').id])
+  })
+
+  it('a slow version file (3 s): the move in the window goes, the late answer holds everything queued after it (review of #530)', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+    vi.stubGlobal('fetch', () => new Promise<Response>((resolve) => setTimeout(() => resolve(new Response(JSON.stringify(versionFileOf('cutover-build', CHAIN_RULES_EPOCH + 1)), { status: 200 })), 3_000)))
+    resetVersionGateForTests(true)
+    try {
+      setChain(['a1'], { [ev('a1').id]: 'ok' })
+      useCyberspace.setState({ live: true })
+      await vi.advanceTimersByTimeAsync(10)
+      // The look before the move gives up waiting at 1.5 s, and the move goes.
+      let allowed: boolean | undefined
+      void mayMove().then((r) => { allowed = r })
+      await vi.advanceTimersByTimeAsync(1_500)
+      expect(allowed).toBe(true)
+      append('b2')
+      await vi.advanceTimersByTimeAsync(10)
+      expect(sent).toEqual([ev('b2').id])
+      // The answer lands at 3 s: blocked, and what is queued now is held.
+      await vi.advanceTimersByTimeAsync(1_500)
+      expect(movementBlocked()).toBe(true)
+      expect(await mayMove()).toBe(false)
+      append('c3')
+      await vi.advanceTimersByTimeAsync(60_000)
+      expect(sent).toEqual([ev('b2').id])
+      expect(useCyberspace.getState().published[ev('c3').id]).toBe('queued')
+    } finally {
+      vi.useRealTimers()
+      vi.unstubAllGlobals()
+      resetVersionGateForTests(false)
+      useCyberspace.setState({ live: false })
+      await idle()
+    }
   })
 })

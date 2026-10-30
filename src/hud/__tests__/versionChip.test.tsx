@@ -9,12 +9,13 @@ import { afterEach, describe, expect, it } from 'vitest'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { VersionChipView } from '../VersionChip'
 import { resetVersionGateForTests, useVersionGate, type Verdict } from '../../lib/versionGate'
+import { setBroadcastForTest } from '../../lib/tv/broadcast'
 
 const html = (verdict: Verdict, build: string | null = 'newer', dismissed: string | null = null): string =>
   renderToStaticMarkup(<VersionChipView verdict={verdict} build={build} dismissed={dismissed} />)
 const buttons = (h: string): string[] => [...h.matchAll(/<button[^>]*>([^<]*)<\/button>/g)].map((m) => m[1])
 
-afterEach(() => resetVersionGateForTests(false))
+afterEach(() => { resetVersionGateForTests(false); setBroadcastForTest(null) })
 
 describe('the version chip', () => {
   it('says nothing while this build is the deployed one, or nothing answered', () => {
@@ -34,12 +35,19 @@ describe('the version chip', () => {
     expect(html('blocked', 'cutover', 'cutover')).toContain('RELOAD TO MOVE')
   })
 
-  it('only the build differs: a plain chip with RELOAD, no block words', () => {
+  it('only the build differs: a plain chip with RELOAD and a dismiss button a keyboard reaches, no block words', () => {
     const h = html('hint', 'newer')
     expect(h).toContain('NEW VERSION')
     expect(h).not.toContain('RELOAD TO MOVE')
     expect(h).not.toContain('hyperbar--broken')
-    expect(buttons(h)).toEqual(['RELOAD'])
+    expect(buttons(h)).toEqual(['RELOAD', '\u2715'])
+    expect(h).toContain('aria-label="Dismiss"')
+  })
+
+  it('never on the TV stream, blocked or not', () => {
+    setBroadcastForTest(true)
+    expect(html('blocked', 'cutover')).toBe('')
+    expect(html('hint', 'newer')).toBe('')
   })
 
   it('a dismissed hint stays away for that build, and comes back for the next', () => {

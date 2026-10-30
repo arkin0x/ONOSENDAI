@@ -3626,6 +3626,14 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
   },
 
   respawn: async () => {
+    // A deploy requiring newer chain rules refuses the new spawn's signing,
+    // so ask first: before it, nothing may be cancelled or cleared, a kept
+    // HOSAKA job above all, which is paid work (lib/versionGate.ts).
+    const versionLook = lookBeforeMove()
+    if (!(versionLook instanceof Promise ? await versionLook : versionLook)) {
+      set({ proof: { ...IDLE_PROOF, status: 'infeasible', message: VERSION_BLOCKED_MESSAGE } })
+      throw new Error(VERSION_BLOCKED_MESSAGE)
+    }
     // A proof in flight was for a chain that is about to stop existing.
     if (get().proof.status === 'computing') {
       cancelProof()
@@ -3692,6 +3700,10 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
   respawnFromBrokenChain: async (forPubkey) => {
     // Confirmed for one identity: never carried out for another.
     if (forPubkey !== undefined && forPubkey !== get().identity.pubkey) throw new Error('the identity changed after this respawn was confirmed, so nothing was respawned')
+    // A deploy requiring newer chain rules refuses the respawn (respawn
+    // below): asked before the End of Chain entry is added for it.
+    const versionLook = lookBeforeMove()
+    if (!(versionLook instanceof Promise ? await versionLook : versionLook)) throw new Error(VERSION_BLOCKED_MESSAGE)
     const broken = firstBreak(get().actions())
     if (broken) {
       // With no valid event at all (an invalid spawn, Q7), the spawn row

@@ -3,12 +3,13 @@
  *
  * Every deploy serves /version.json (vite.config.ts versionFile, no-cache
  * in vercel.json): its build id and the lowest chain epoch it accepts
- * (lib/chainEpoch.ts). This tab asks for it at boot, when it is focused or
- * shown again, every POLL_MS, and right before every move. Three answers:
+ * (lib/chainRulesEpoch.ts). This tab asks for it at boot, when it is focused or
+ * shown again, when the network comes back, every POLL_MS, and right before
+ * every move. Three answers:
  *
  * | The deploy says | Verdict | What happens |
  * |---|---|---|
- * | a higher minChainEpoch than this build's CHAIN_EPOCH | blocked | no kind 3333 is signed or sent (store whyNoMove, store signEvent, lib/publisher.ts); the chip asks for a RELOAD |
+ * | a higher minChainEpoch than this build's CHAIN_RULES_EPOCH | blocked | no kind 3333 is signed or sent (store whyNoMove, store signEvent, lib/publisher.ts); the chip asks for a RELOAD |
  * | the same epoch, another build | hint | the chip says a new version is out; nothing is blocked |
  * | this build, or no answer at all | ok | nothing changes |
  *
@@ -22,8 +23,17 @@
  * The look before a move reuses an answer up to PRE_MOVE_MAX_AGE_MS old and
  * waits at most PRE_MOVE_TIMEOUT_MS for a new one, so a move is not slowed
  * by more than that, and WALK, many moves a minute, asks the network about
- * once a minute. A failed look is remembered for as long as an answer, so a
- * flaky network costs one wait, not one per move.
+ * once a minute. The fetch itself is never cut short at that: it runs for
+ * BACKGROUND_TIMEOUT_MS whoever started it, so on a slow link the answer
+ * still lands a moment later, refuses the next move and holds the
+ * publisher (review of #530: cut at the move's 1.5 s, a slow link never
+ * learned of a block from moves at all). A look that failed or timed out is
+ * remembered for as long as an answer, so a flaky network costs one wait,
+ * not one per move.
+ *
+ * In broadcast mode (the TV stream) a block reloads the page, on the
+ * stream's own backoff (lib/tv/broadcast.ts reloadBroadcast): it signs no
+ * movement, but it should verify by the rules the deploy now runs.
  *
  * Nothing is fetched until startVersionGate runs (App, at boot): until then
  * mayMove answers from the verdict alone, so no test that moves an avatar
@@ -31,7 +41,8 @@
  */
 
 import { create } from 'zustand'
-import { CHAIN_EPOCH, VERSION_FILE, parseVersionFile, type DeployedVersion } from './chainEpoch'
+import { CHAIN_RULES_EPOCH, VERSION_FILE, parseVersionFile, type DeployedVersion } from './chainRulesEpoch'
+import { reloadBroadcast } from './tv/broadcast'
 
 export type Verdict = 'ok' | 'hint' | 'blocked'
 
@@ -53,7 +64,7 @@ export const POLL_MS = 10 * 60_000
 const WAKE_MAX_AGE_MS = 5_000
 
 /** What the deploy's answer means for a tab running `own`. No answer means nothing. */
-export function verdictOf(deployed: DeployedVersion | null, own: { build: string; epoch: number } = { build: OWN_BUILD, epoch: CHAIN_EPOCH }): Verdict {
+export function verdictOf(deployed: DeployedVersion | null, own: { build: string; epoch: number } = { build: OWN_BUILD, epoch: CHAIN_RULES_EPOCH }): Verdict {
   if (!deployed) return 'ok'
   if (deployed.minChainEpoch > own.epoch) return 'blocked'
   return deployed.build === own.build ? 'ok' : 'hint'
@@ -110,14 +121,16 @@ async function look(timeoutMs: number): Promise<Verdict> {
 
 /**
  * Ask the deploy, unless an answer (or a failed look) younger than
- * `maxAgeMs` is in hand. A look already out is joined, waited on for no
- * longer than this caller's `timeoutMs`. Resolves to the verdict; never
+ * `maxAgeMs` is in hand. The look runs for BACKGROUND_TIMEOUT_MS whoever
+ * starts it; this caller waits on it for no longer than its own
+ * `timeoutMs` and then has the verdict as it stands, while the look goes on
+ * and records its answer when it lands. Resolves to the verdict; never
  * throws.
  */
 export function checkVersion({ maxAgeMs = 0, timeoutMs = BACKGROUND_TIMEOUT_MS }: { maxAgeMs?: number; timeoutMs?: number } = {}): Promise<Verdict> {
   const s = useVersionGate.getState()
   if (s.checkedAt > 0 && Date.now() - s.checkedAt < maxAgeMs) return Promise.resolve(s.verdict)
-  if (!inFlight) inFlight = look(timeoutMs).finally(() => { inFlight = null })
+  if (!inFlight) inFlight = look(BACKGROUND_TIMEOUT_MS).finally(() => { inFlight = null })
   const out = inFlight
   let timer: ReturnType<typeof setTimeout> | undefined
   const enough = new Promise<Verdict>((resolve) => { timer = setTimeout(() => resolve(useVersionGate.getState().verdict), timeoutMs) })
@@ -146,7 +159,7 @@ export async function mayMove(): Promise<boolean> {
   return lookBeforeMove()
 }
 
-/** Idempotent. Looks now, on focus or a return to the tab, and every POLL_MS. */
+/** Idempotent. Looks now, on focus, a return to the tab or the network, and every POLL_MS. */
 export function startVersionGate(): void {
   if (armed) return
   armed = true
@@ -155,9 +168,16 @@ export function startVersionGate(): void {
     void checkVersion({ maxAgeMs: WAKE_MAX_AGE_MS })
   }
   window.addEventListener('focus', wake)
+  window.addEventListener('online', wake)
   document.addEventListener('visibilitychange', wake)
+  useVersionGate.subscribe(reloadStreamOnBlock)
   window.setInterval(() => { void checkVersion() }, POLL_MS)
   void checkVersion()
+}
+
+/** The TV stream reloads when it learns of a block; nothing outside broadcast mode (reloadBroadcast). */
+export function reloadStreamOnBlock(now: { verdict: Verdict }, prev: { verdict: Verdict }, reload: () => void = reloadBroadcast): void {
+  if (now.verdict === 'blocked' && prev.verdict !== 'blocked') reload()
 }
 
 /** Tests: forget every answer; `arm` makes mayMove look, as startVersionGate does, without its listeners. */

@@ -27,14 +27,14 @@ if (typeof localStorage === 'undefined') {
 }
 
 import { ACTION_KIND } from '../../lib/events'
-import { CHAIN_EPOCH, versionFileOf } from '../../lib/chainEpoch'
+import { CHAIN_RULES_EPOCH, versionFileOf } from '../../lib/chainRulesEpoch'
 import { OWN_BUILD, VERSION_BLOCKED_MESSAGE, checkVersion, resetVersionGateForTests, useVersionGate } from '../../lib/versionGate'
 import { useCyberspace, whyNoMove } from '../useCyberspace'
 import { placeSpawn } from '../fixtures/placeSpawn'
 
 const S = () => useCyberspace.getState()
 
-let deployedEpoch = CHAIN_EPOCH
+let deployedEpoch = CHAIN_RULES_EPOCH
 const fetchStub = vi.fn(async () => new Response(JSON.stringify(versionFileOf(OWN_BUILD, deployedEpoch)), { status: 200 }))
 
 /** A finished hop proof one unit along x, as the worker would hand it over. */
@@ -49,7 +49,7 @@ async function land(): Promise<void> {
 
 beforeEach(async () => {
   await placeSpawn()
-  deployedEpoch = CHAIN_EPOCH
+  deployedEpoch = CHAIN_RULES_EPOCH
   fetchStub.mockClear()
   vi.stubGlobal('fetch', fetchStub)
   resetVersionGateForTests(true)
@@ -71,7 +71,7 @@ describe('moving while the deploy requires the same chain epoch', () => {
 })
 
 describe('moving while the deploy requires a newer chain epoch', () => {
-  beforeEach(() => { deployedEpoch = CHAIN_EPOCH + 1 })
+  beforeEach(() => { deployedEpoch = CHAIN_RULES_EPOCH + 1 })
 
   it('every move is refused with the RELOAD words, once the deploy has said so', async () => {
     await checkVersion()
@@ -103,6 +103,20 @@ describe('moving while the deploy requires a newer chain epoch', () => {
   it('the store signer refuses any kind 3333 it is handed, whoever asks', async () => {
     const template = { kind: ACTION_KIND, created_at: Math.floor(Date.now() / 1000), tags: [], content: '' }
     await expect(S().signEvent(template)).rejects.toThrow(VERSION_BLOCKED_MESSAGE)
+  })
+
+  it('a respawn is refused before anything is cleared: a kept HOSAKA job stays (review of #530)', async () => {
+    const job = { version: 1, jobId: 'kept-job', costMsats: 21_000 } as unknown as NonNullable<ReturnType<typeof S>['cloud']['job']>
+    useCyberspace.setState({ cloud: { ...S().cloud, job } })
+    const events = S().events
+    await expect(S().respawn()).rejects.toThrow(VERSION_BLOCKED_MESSAGE)
+    expect(S().cloud.job).toBe(job)
+    expect(S().events).toBe(events)
+    expect(S().proof.message).toBe(VERSION_BLOCKED_MESSAGE)
+    // Not after the refusal either: a broken chain's respawn adds no End of Chain entry first.
+    await expect(S().respawnFromBrokenChain()).rejects.toThrow(VERSION_BLOCKED_MESSAGE)
+    expect(S().cloud.job).toBe(job)
+    useCyberspace.setState({ cloud: { ...S().cloud, job: null } })
   })
 
   it('everything else still signs: chat, profiles, reactions', async () => {

@@ -67,6 +67,20 @@ describe('the built-in models', () => {
   })
 })
 
+describe('where each model stands about its origin (review of #532)', () => {
+  const box = (m: Parameters<typeof lookBounds>[0]): number[] => { const b = lookBounds(m); return [...b.min, ...b.max].map((x) => Math.round(x * 1000) / 1000) }
+  it('the door slab fills a 2 x 3 opening above its sill, 0.5 deep behind it with its plates proud', () => {
+    expect(box(builtInLook('door').closed)).toEqual([-1, 0, -0.642, 1, 3, 0.142])
+  })
+  it('the open door is its bottom rail, up in the lintel, clear of the opening below', () => {
+    expect(box(builtInLook('door').open!)).toEqual([-0.983, 2.6, -0.483, 0.983, 2.983, -0.017])
+  })
+  it('the open chest\u2019s lid stands up to 1.4 and leans back (-z), never forward', () => {
+    expect(box(builtInLook('treasure').closed)).toEqual([-0.45, 0, -0.442, 0.45, 0.792, 0.467])
+    expect(box(builtInLook('treasure').open!)).toEqual([-0.45, 0, -0.775, 0.45, 1.4, 0.467])
+  })
+})
+
 describe('what is drawn', () => {
   const treasure = builtInLook('treasure')
   const door = builtInLook('door')
@@ -134,6 +148,7 @@ describe('the treasure chest’s lid', () => {
     const pts = flatten(lid).positions
     const c = Math.cos(hinge.angle), s = Math.sin(hinge.angle)
     let landed = 0
+    let worst = 0
     const n = pts.length / 3
     for (let i = 0; i < n; i++) {
       // A turn about +X through the hinge, as three's rotation.x turns a group.
@@ -142,9 +157,21 @@ describe('the treasure chest’s lid', () => {
       let best = Infinity
       for (let j = 0; j < open.length; j += 3) best = Math.min(best, Math.hypot(open[j] - p[0], open[j + 1] - p[1], open[j + 2] - p[2]))
       if (best < 2.5 / 120) landed++
+      worst = Math.max(worst, best)
     }
     expect(n).toBe(90)
-    expect(landed).toBeGreaterThanOrEqual(80)
+    expect(landed).toBeGreaterThanOrEqual(82)
+    // Every point, the straps' feet at the cut included (the worst, 4.8 ticks), within 5 ticks (review of #533).
+    expect(worst * 120).toBeLessThan(5)
+  })
+
+  it('the lid is everything at or above the cut, the body everything below it but the gold band (review of #533)', () => {
+    const { lid, body } = t.lid!
+    const lb = lookBounds(lid), bb = lookBounds(body)
+    expect(Math.round(lb.min[1] * 120)).toBe(62)
+    expect(Math.round(lb.max[1] * 120)).toBe(95)
+    expect(Math.round(bb.min[1] * 120)).toBe(0)
+    expect(Math.round(bb.max[1] * 120)).toBe(64)
   })
 
   it('only TREASURE has a lid', () => {

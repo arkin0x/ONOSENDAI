@@ -46,6 +46,7 @@ const CHEST = '2'.repeat(64)
 const FRONT: Position = { x: AT.x, y: AT.y + 1n, z: AT.z + 3n }
 
 beforeEach(() => {
+  localStorage.removeItem('onosendai:chests-opened')
   resetOpenedChests()
   useCyberspace.setState({ identity: { ...useCyberspace.getState().identity, pubkey: ME } })
   useShards.setState({ mine: [], discovered: { [DOOR]: chest(DOOR, [['title', 'Gate'], ['door', '6']]), [CHEST]: chest(CHEST, [['title', 'Box']]) } })
@@ -72,5 +73,43 @@ describe('a door in WALK', () => {
   it('stays shut for you when someone else on this device opened it', () => {
     rememberOpened('9'.repeat(64), DOOR, [])
     expect(wallItems(1).map((w) => w.key)).toEqual([doorWallKey(DOOR)])
+  })
+
+  it('stays open after a reload however it was opened, a signer\u2019s door too (review of #532)', () => {
+    rememberOpened(ME, DOOR, [])
+    // A reload: the session forgets what was inside; the ids opened by hand are kept.
+    resetOpenedChests()
+    expect(wallItems(1)).toEqual([])
+  })
+})
+
+describe('a walker inside a closed door (review of #532)', () => {
+  const inside = (dy: bigint): Position => ({ x: AT.x, y: AT.y + dy, z: AT.z })
+  // The probe's heights: on the sill, and one and two gibsons above it.
+  const SIX = [['x', 1], ['x', -1], ['y', 1], ['y', -1], ['z', 1], ['z', -1]] as const
+
+  it('was held on every side; now the door holding them is not a wall to them, and they step out', () => {
+    for (const dy of [0n, 1n, 2n]) {
+      const P = inside(dy)
+      // Without the walker's place the door is a wall, and a wall all round them.
+      const before = SIX.map(([a, d]) => stepLimit(P, a, d, 5n, wallItems(1)).reach)
+      expect(before.some((r) => r === 0n)).toBe(true)
+      const after = SIX.map(([a, d]) => stepLimit(P, a, d, 5n, wallItems(1, P)).reach)
+      expect(after.every((r) => r > 0n)).toBe(true)
+    }
+  })
+
+  it('a walker outside it is still stopped by it', () => {
+    expect(stepLimit(FRONT, 'z', -1, 10n, wallItems(1, FRONT)).reach).toBeLessThan(10n)
+  })
+})
+
+describe('a door is a wall where it is drawn (review of #532)', () => {
+  it('whole, not cut at a small bag\u2019s region, as it is drawn', () => {
+    // A height-1 bag: a 2-gibson region, and the door 3 tall in it. Two gibsons
+    // up is out of the region, where the drawn door still stands.
+    useShards.setState({ discovered: { [DOOR]: { ...chest(DOOR, [['title', 'Gate'], ['door', '1']]), height: 1 } } })
+    const high: Position = { x: AT.x, y: AT.y + 2n, z: AT.z + 3n }
+    expect(stepLimit(high, 'z', -1, 10n, wallItems(1, high)).reach).toBeLessThan(10n)
   })
 })

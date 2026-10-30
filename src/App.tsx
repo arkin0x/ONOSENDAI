@@ -40,6 +40,8 @@ import { HosakaOffer } from './hud/HosakaOffer'
 import { ChainConflictPrompt } from './hud/ChainConflict'
 import { ChainStatusModal } from './hud/ChainStatus'
 import { BrokenChainChip, BrokenChainModal } from './hud/BrokenChain'
+import { VersionChip } from './hud/VersionChip'
+import { startVersionGate } from './lib/versionGate'
 import { HosakaPulse } from './hud/HosakaPulse'
 import { useOfferView } from './store/useOffer'
 import { useDiscovery } from './hooks/useDiscovery'
@@ -104,7 +106,7 @@ export default function App(): JSX.Element {
   useDiscovery()
   // The chain drains to the relay from here on, whenever Live is on, and the
   // targets' positions are kept current.
-  useEffect(() => { startPublisher(); startTracker(); startPresence(); startSelfSync(); startMutes(); watchBlockedSpectation(); startCalibration(); void useCyberspace.getState().initSigner(); useHyperspace.getState().startSync(); useAvatars.getState().loadMine(); void useSecrets.getState().load(); void useInventory.getState().load(); void useShardFolders.getState().load(); void useFound.getState().load(); watchFocus(); watchNearbyReturn() }, [])
+  useEffect(() => { startVersionGate(); startPublisher(); startTracker(); startPresence(); startSelfSync(); startMutes(); watchBlockedSpectation(); startCalibration(); void useCyberspace.getState().initSigner(); useHyperspace.getState().startSync(); useAvatars.getState().loadMine(); void useSecrets.getState().load(); void useInventory.getState().load(); void useShardFolders.getState().load(); void useFound.getState().load(); watchFocus(); watchNearbyReturn() }, [])
   // onosendai.tech/C/<hex>: a place or a region to open on (store/useCoordRoute.ts).
   useEffect(() => startCoordRoute(), [])
   // onosendai.tech/demo (or /demo/<step>): the guided tour (store/useDemo.ts).
@@ -318,6 +320,8 @@ export default function App(): JSX.Element {
               <BuildBar />
             </>,
             status: <>
+              {/* A newer deploy, first of all when it requires a RELOAD to move (lib/versionGate.ts). */}
+              <VersionChip />
               {/* A broken chain first: nothing else moves you until you respawn.
                   It stays in BUILD mode too; building is not moving. */}
               <BrokenChainChip />

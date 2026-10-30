@@ -4,7 +4,8 @@
  *
  * A chest is the treasure chest, a door the door slab, each closed until
  * this identity opens it with OPEN and open from then on (R14), a reload
- * included (store/useOpenedChests restores it silently). Drawn at the zooms
+ * included: opened by hand on this device is open, whether a key or a
+ * signer opened it (store/useOpenedChests), as WALK's walls have it. Drawn at the zooms
  * a key's cube is (lib/worldMarks.ts markShown), labelled with its name and
  * who left it as a key is, and a tap opens its card, where OPEN is.
  */
@@ -15,7 +16,7 @@ import { GRID_RADIUS, itemCentre, type ViewAxes } from '../lib/space'
 import { drawnLook, lookOf, type Look } from '../lib/looks'
 import { markShown } from '../lib/worldMarks'
 import { alignedOrigin, useCyberspace } from '../store/useCyberspace'
-import { openedKey, useOpenedChests } from '../store/useOpenedChests'
+import { openedByHand, openedKey, useOpenedChests } from '../store/useOpenedChests'
 import { useShards } from '../store/useShards'
 import { useMutes } from '../store/useMutes'
 import { setDrawnLooks, useOpenCeremony } from '../store/useOpenCeremony'
@@ -23,7 +24,7 @@ import { ChestCeremony } from './ChestCeremony'
 import { DoorCeremony } from './DoorCeremony'
 import { ChestLoot, HOVER_Y, LOOT_SIDE } from './ChestLoot'
 import { ShardMesh } from './ShardMesh'
-import { lootOf, type LootObject } from '../lib/lootObjects'
+import { chestLoot, type LootObject } from '../lib/lootObjects'
 import { holdsEntry } from '../lib/inventory'
 import { hidesThing } from '../lib/muteList'
 import { useInventory } from '../store/useInventory'
@@ -59,6 +60,9 @@ export function ChestLooks({ axes }: { axes: ViewAxes }): JSX.Element | null {
   const opened = useOpenedChests((s) => s.opened)
   const playing = useOpenCeremony((s) => s.playing)
   const items = useInventory((s) => s.items)
+  // Whose ITEMS these are, and whether they are read: until then no loot, or
+  // what you hold would float out for a moment after an identity switch.
+  const itemsReady = useInventory((s) => s.owner === me && s.storage !== 'loading')
   const still = useReducedMotion()
 
   const placed = useMemo<PlacedLook[]>(() => {
@@ -74,13 +78,13 @@ export function ChestLooks({ axes }: { axes: ViewAxes }): JSX.Element | null {
       const inside = opened[openedKey(me, w.key)]
       // What the mute list hides is not drawn coming out, as it is not listed (ItemRows ChestBlock).
       const shown = inside?.filter((e) => !hidesThing(muted, { authors: [w.author ?? '', e.event.pubkey], ids: [e.id] }, me))
-      const loot = shown ? lootOf(shown, (e) => holdsEntry(items, e)) : []
-      out.push({ key: w.key, look, opened: !!inside, loot, text: itemMarkText(w), sub: author({ author: w.author ?? '', mine: w.mine }), centre })
+      const loot = chestLoot({ look: look.name, entries: shown, held: (e) => holdsEntry(items, e), chest: { at: w.at, plane: w.plane, height: w.height }, itemsReady })
+      out.push({ key: w.key, look, opened: !!inside || openedByHand(me, w.key), loot, text: itemMarkText(w), sub: author({ author: w.author ?? '', mine: w.mine }), centre })
     }
     return out
     // mine, discovered, curated and muted are what worldItems reads.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [anchor, anchorPlane, scaleExp, axes, me, mine, discovered, curated, muted, opened, items])
+  }, [anchor, anchorPlane, scaleExp, axes, me, mine, discovered, curated, muted, opened, items, itemsReady])
 
   // OPEN asks whether a chest is drawn, to know whether its ceremony can be seen (store/useOpenCeremony).
   useEffect(() => { setDrawnLooks(placed.map((w) => w.key)) }, [placed])

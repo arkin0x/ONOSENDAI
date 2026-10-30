@@ -11,7 +11,11 @@ import { fromPayload, newShard, toPayload, type ShardModel } from 'sno-core/shar
 import { windOutward } from 'sno-core/winding'
 import type { ChestEntry } from '../chests'
 import type { ItemBody } from '../hidden'
-import { lootOf } from '../lootObjects'
+import { aimedElsewhere, chestLoot, lootOf } from '../lootObjects'
+import { positionHex } from '../events'
+import { primeRef } from '../parts'
+import { measureModel } from '../../hooks/useItemModel'
+import { LOOT_SIDE, lootFit } from '../../scene/ChestLoot'
 import { lootModels } from '../lootModels'
 
 let n = 0
@@ -98,4 +102,51 @@ describe('the built-in loot models', () => {
       for (const v of model.vertices) for (let k = 0; k < 3; k++) expect(Math.abs(v.p[k] + (v.t?.[k] ?? 0) / 120)).toBeLessThan(0.6)
     })
   }
+})
+
+describe('loot over a chest in the world (review of #534)', () => {
+  const at = { x: 64n, y: 128n, z: 192n }
+  const chest = { at, plane: 0, height: 4 }
+  const withC = (body: ItemBody, p: { x: bigint; y: bigint; z: bigint }): ChestEntry => {
+    const e = entry(body)
+    return { ...e, event: { ...e.event, tags: [['C', positionHex(p, 0)]] } }
+  }
+  const here = withC({ type: 'message', text: 'here' }, at)
+  const aimed = withC({ type: 'shard', shard: shard('Column') }, { ...at, x: at.x + 3n })
+  const outside = withC({ type: 'shard', shard: shard('Far', 3) }, { ...at, x: at.x + 64n })
+  const base = { held: () => false, chest, itemsReady: true }
+
+  it('an opened door lets nothing out: what is behind it stands in the room', () => {
+    expect(chestLoot({ ...base, look: 'door', entries: [here, aimed] })).toEqual([])
+  })
+
+  it('nothing floats out while this identity\u2019s ITEMS are still being read', () => {
+    expect(chestLoot({ ...base, look: 'treasure', entries: [here], itemsReady: false })).toEqual([])
+  })
+
+  it('what is aimed at its own point in the region is drawn there, not floated out too', () => {
+    expect(aimedElsewhere(aimed, chest)).toBe(true)
+    expect(aimedElsewhere(here, chest)).toBe(false)
+    // Out of the region: revealedIn stands it at the chest, so it floats out.
+    expect(aimedElsewhere(outside, chest)).toBe(false)
+    const loot = chestLoot({ ...base, look: 'treasure', entries: [here, aimed, outside] })
+    expect(loot.map((l) => l.ids)).toEqual([[here.id], [outside.id]])
+  })
+})
+
+describe('fitting a loot object (review of #534)', () => {
+  it('a one-part wrapper, as the feed places an object, is fitted by its part, not left at true size', async () => {
+    const ref = ['a', `33331:${'e'.repeat(64)}:pillar`] as ['a', string]
+    primeRef(ref, toPayload(shard('Pillar', 6)))
+    const wrapper: ShardModel = { ...newShard('Wrapper'), vertices: [], faces: [], refs: [ref], parts: [{ ref: 0, at: [0, 0, 0], turn: [0, 0, 0], step: 0 }] }
+    const e = await measureModel(wrapper)
+    const fit = lootFit(e)
+    expect(fit).not.toBeNull()
+    // Six units long: drawn at LOOT_SIDE, not six.
+    expect(fit!.k * 6).toBeCloseTo(LOOT_SIDE, 6)
+  })
+
+  it('nothing measured, nothing drawn', () => {
+    expect(lootFit(null)).toBeNull()
+  })
 })

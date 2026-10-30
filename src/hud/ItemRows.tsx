@@ -39,7 +39,7 @@ import { openedByHand, openedKey, rememberOpened, useOpenedChests } from '../sto
 import { celebrateOpen } from '../store/useOpenCeremony'
 import { useCeremony } from '../store/useCeremony'
 import { lookOf } from '../lib/looks'
-import { lootOf } from '../lib/lootObjects'
+import { chestLoot } from '../lib/lootObjects'
 import { landedAt } from '../lib/ceremony'
 import { resumeAudio } from '../lib/audioContext'
 import { prefersReducedMotion } from '../hooks/useReducedMotion'
@@ -180,7 +180,8 @@ export function ChestBlock({ id, chest, author, verified, place, sealer: given }
         if (look?.name === 'door') celebrateOpen({ me, chestId: id, kind: 'door', first, calm: prefersReducedMotion() })
         else if (look?.name === 'treasure') {
           // The chime sounds as the last loot object lands over the chest.
-          const loot = lootOf(shownOf(contents, useMutes.getState().muted), (e) => holdsEntry(useInventory.getState().items, e))
+          // The same loot the world draws over it (scene/ChestLooks), so the chime lands with the last of it.
+          const loot = place ? chestLoot({ look: 'treasure', entries: shownOf(contents, useMutes.getState().muted), held: (e) => holdsEntry(useInventory.getState().items, e), chest: { at: positionOf(place), plane: place.plane, height: place.height }, itemsReady: true }) : []
           celebrateOpen({ me, chestId: id, kind: 'chest', first, calm: prefersReducedMotion(), landMs: loot.length > 0 ? landedAt(loot.length) : undefined })
         }
       }

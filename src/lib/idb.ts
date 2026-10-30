@@ -42,9 +42,17 @@ export function openDatabase(
   version: number,
   stores: Array<[string, string, IndexSpec[]?]>,
   onUpgrade?: (tx: IDBTransaction, oldVersion: number) => void,
+  opts: { failWhenBlocked?: boolean } = {},
 ): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
     const req = indexedDB.open(name, version)
+    // With failWhenBlocked, an open another tab holds up (it has an older
+    // version open and does not let go) fails at once rather than waiting,
+    // and a connection that arrives after that is closed, not leaked open.
+    let blocked = false
+    if (opts.failWhenBlocked) {
+      req.onblocked = () => { blocked = true; reject(new Error('IndexedDB open blocked by another tab')) }
+    }
     req.onupgradeneeded = (event) => {
       const db = req.result
       const tx = req.transaction!
@@ -56,7 +64,7 @@ export function openDatabase(
       }
       onUpgrade?.(tx, event.oldVersion)
     }
-    req.onsuccess = () => resolve(req.result)
+    req.onsuccess = () => { if (blocked) req.result.close(); else resolve(req.result) }
     req.onerror = () => reject(req.error ?? new Error('IndexedDB open failed'))
   })
 }

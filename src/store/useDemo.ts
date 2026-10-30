@@ -19,12 +19,15 @@
  */
 
 import { create } from 'zustand'
-import { coordToXyz, hexToCoord } from 'cyberspace-core'
+import { coordToXyz, hexToCoord, type Plane } from 'cyberspace-core'
 import { DEMO_CURATORS, DEMO_DISTRICT, DEMO_SCRIPT } from '../demo/script'
 import type { DemoAction, DemoScene, DemoScript, DemoStep } from '../demo/types'
 import { stopSpeaking } from '../demo/voice'
 import { coordPlace } from '../lib/coordRoute'
-import { clampAxis, MAX_SCALE_EXP } from '../lib/space'
+import { clampAxis, MAX_SCALE_EXP, type Position } from '../lib/space'
+import { fetchChain } from '../lib/chains'
+import { landfallCoord } from '../lib/hyperspace/landfall'
+import type { TourPose } from '../demo/tourDistance'
 import { moveDirection } from '../lib/moves'
 import { startCoordRoute, useCoordRoute } from './useCoordRoute'
 import { exitHyperspaceView, useHyperspace } from './useHyperspace'
@@ -34,6 +37,7 @@ import { appMinted, keyMintedOnLoad, useCyberspace } from './useCyberspace'
 import { useLayers, type SceneLayer } from './useLayers'
 import { useShards } from './useShards'
 import { useWalk } from './useWalk'
+import { usePad } from './usePad'
 
 interface DemoState {
   active: boolean
@@ -48,6 +52,8 @@ interface DemoState {
   /** The publishing switch before the tour, put back on exit. */
   prevLive: boolean
   script: DemoScript
+  /** The camera the step on screen asks for (tourCamera), for the rig; null for none and outside the tour. */
+  camera: TourCamera | null
   start: (stepId?: string) => void
   next: () => void
   back: () => void
@@ -229,6 +235,76 @@ function dismissBlockToast(): void {
   if (t && t.sticky && /^Block [\d,]+ · (port|landfall)$/.test(t.label)) useToast.getState().dismiss()
 }
 
+/**
+ * The camera a step asks for, as the rig (scene/Scene.tsx) takes it: how far
+ * off in render cells, and, for a step with `faceFrom`, the direction from
+ * the place out to the camera in cyberspace axes (x, y, z), unit length.
+ * `at` is the step's own place, where its view looks (a selected block's
+ * landfall, a coordinate), or null for a step at your own head; the rig
+ * gives the step's camera back after a reframe only when the view has just
+ * arrived there (demo/tourDistance.ts TourCameraState). A new object for
+ * every step entered, so the rig can tell a step from the next.
+ */
+export type TourCamera = TourPose
+
+/** Where a landfall block comes down, from its hash: no header index needed. */
+function landfallPlace(blockHash: string): Position {
+  const c = coordToXyz(landfallCoord(blockHash))
+  return { x: c.x, y: c.y, z: c.z }
+}
+
+/** The camera for `scene`, or null when it asks for none. */
+export function tourCamera(scene: DemoScene, pubkey: string): TourCamera | null {
+  if (scene.distance === undefined) return null
+  let dir: TourCamera['dir'] = null
+  const place = placeOf(scene.target, pubkey)
+  const at = scene.select ? landfallPlace(scene.select.blockHash) : place ? coordPlace(place.hex).position : null
+  if (scene.faceFrom) {
+    if (at) {
+      const from = coordToXyz(hexToCoord(scene.faceFrom))
+      const v = [Number(at.x - from.x), Number(at.y - from.y), Number(at.z - from.z)]
+      const len = Math.hypot(v[0], v[1], v[2])
+      if (len > 0) dir = [v[0] / len, v[1] / len, v[2] / len]
+    }
+  }
+  return { distance: scene.distance, dir, at }
+}
+
+/**
+ * Where a pubkey's movement chain stands now, read from the relays (read
+ * only), or null when it has none or cannot be read. A seam, so tests can
+ * answer without the relays.
+ */
+export const tourHeads = {
+  read: async (pubkey: string): Promise<{ position: Position; plane: Plane } | null> => {
+    const chain = await fetchChain(pubkey)
+    const head = chain[chain.length - 1]
+    return head ? { position: head.position, plane: head.plane } : null
+  },
+}
+
+/**
+ * Point at a landfall block for the step, as a typed place is pointed at
+ * (Hud PositionPanel look): the block is the destination, so its cube is
+ * the selected one (StopCubes: yellow, spinning, glowing), and its place
+ * gets the pin's +. Whatever destination and pin were there before come
+ * back when the step ends, unless something else replaced them meanwhile.
+ */
+function selectBlock(sel: NonNullable<DemoScene['select']>, scaleExp: number | undefined): void {
+  const prevDest = useHyperspace.getState().destination
+  const prevPin = useCyberspace.getState().pin
+  useHyperspace.getState().setDestination(sel.height)
+  useCyberspace.getState().dropPin(landfallPlace(sel.blockHash), sel.label, scaleExp)
+  stepCleanups.push(() => {
+    if (useHyperspace.getState().destination === sel.height) useHyperspace.getState().setDestination(prevDest)
+    const pin = useCyberspace.getState().pin
+    if (pin && pin.label === sel.label) {
+      if (prevPin) useCyberspace.getState().dropPin(prevPin.position, prevPin.label, prevPin.scaleExp)
+      else useCyberspace.getState().clearPin()
+    }
+  })
+}
+
 /** Put the scene where a step says. Returns nothing; watchers go in stepCleanups. */
 export function applyScene(scene: DemoScene, walkStep = false): void {
   const cs = useCyberspace.getState()
@@ -261,6 +337,15 @@ export function applyScene(scene: DemoScene, walkStep = false): void {
       stepCleanups.push(startCoordRoute({ pathname: `/C/${target.block}`, search: '', hash: '' }, tourHistory))
       // The block's toast waits for a tap; the tour takes its own toast with it.
       stepCleanups.push(dismissBlockToast)
+    } else if (typeof target === 'object' && 'head' in target) {
+      // Someone's present position: looked at once their chain arrives,
+      // and only while the step is still up. Nothing arriving leaves the
+      // view where it was.
+      let up = true
+      stepCleanups.push(() => { up = false })
+      void tourHeads.read(target.head).then((at) => {
+        if (up && at) useCyberspace.getState().focusOn(at.position, at.plane, target.label)
+      }, () => {})
     }
   }
   if (scene.plane !== undefined && target === 'self') useCyberspace.getState().setPlane(scene.plane)
@@ -271,6 +356,8 @@ export function applyScene(scene: DemoScene, walkStep = false): void {
   }
   if (scene.layers) for (const [layer, on] of Object.entries(scene.layers)) if (on !== undefined) useLayers.getState().setLayer(layer as SceneLayer, on)
   if (scene.chat) useChat.getState().setOpen(true)
+  if (scene.pad) usePad.getState().setOpen(true)
+  if (scene.select) selectBlock(scene.select, scene.scale)
 }
 
 /**
@@ -396,7 +483,7 @@ function stepAt(state: { script: DemoScript }, index: number): DemoStep | undefi
  * /demo/<id> link still lands somewhere sensible (arkinox, 2026-10-15:
  * chapter 2 now makes the hops, and no-cheat carries the proof fact).
  */
-export const STEP_ALIASES: Record<string, string> = { hop: 'no-cheat', 'hop-event': 'no-cheat' }
+export const STEP_ALIASES: Record<string, string> = { hop: 'no-cheat', 'hop-event': 'no-cheat', operator: 'agents' }
 
 /** Gated steps already done this tour: going BACK and on again does not ask twice. */
 const gatesPassed = new Set<string>()
@@ -407,7 +494,7 @@ export const useDemo = create<DemoState>((set, get) => {
     stopSpeaking()
     const step = stepAt(get(), index)
     if (!step) return
-    set({ index, empty: false, done: !step.wait || (step.gate === true && gatesPassed.has(step.id)) })
+    set({ index, empty: false, done: !step.wait || (step.gate === true && gatesPassed.has(step.id)), camera: tourCamera(step.scene, useCyberspace.getState().identity.pubkey) })
     // The district's steps show only the curators' things; every other step the whole world.
     useShards.getState().setCurated(step.scene.curated ? DEMO_CURATORS : null)
     applyScene(step.scene, step.wait === 'walk')
@@ -448,6 +535,7 @@ export const useDemo = create<DemoState>((set, get) => {
     minimized: false,
     prevLive: false,
     script: DEMO_SCRIPT,
+    camera: null,
 
     start: (stepId) => {
       const cs = useCyberspace.getState()
@@ -515,7 +603,7 @@ export const useDemo = create<DemoState>((set, get) => {
       writeSession(null)
       if (useCyberspace.getState().live !== get().prevLive) useCyberspace.getState().setLive(get().prevLive)
       writePrevLive(null)
-      set({ active: false, minimized: false })
+      set({ active: false, minimized: false, camera: null })
       // Off the /demo address. An entry the tour pushed itself is stepped
       // back off, so Back from the page you return to does not land on a
       // /demo entry that no longer starts anything; a /demo the visitor

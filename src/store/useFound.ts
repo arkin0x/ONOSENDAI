@@ -229,9 +229,10 @@ export const useFound = create<FoundState>((set, get) => ({
     set({ storage: 'indexeddb' })
     rememberWaiting(owner)
     // Through the same door as a scan's finds: deletions you made are
-    // honored, keys inside are held, chests a held key opens are opened.
+    // honored, and nothing opens but a chest this identity opened by hand
+    // before, opened again as it was (store/useOpenedChests).
     if (found.length > 0) useShards.getState().addDiscovered(found)
-    // Kept by TV: back as TV's finds are, no chest in them opening by itself.
+    // Kept by TV: back as TV's finds are, no chest in them opening.
     if (watchedFinds.length > 0) useShards.getState().addDiscovered(watchedFinds, { watched: true })
     void pruneDeletions(owner, [...rows.values()])
   },

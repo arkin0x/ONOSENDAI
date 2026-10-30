@@ -18,7 +18,7 @@
 
 import { useState } from 'react'
 import { ConfirmModal } from './ConfirmModal'
-import { useShards } from '../store/useShards'
+import { useShards, type MyDeployment } from '../store/useShards'
 import { SHALLOW_WARN, shallowBag } from '../lib/shallowBag'
 
 /**
@@ -70,6 +70,29 @@ export function PublishSwitch({ lookupId, published }: { lookupId: string; publi
           onCancel={() => setAsking(false)}
         />
       )}
+    </div>
+  )
+}
+
+/**
+ * The switch where the one who hid the thing reads it: on the item card,
+ * under the preview, out of METADATA (arkinox, 2026-10-29: "seeing
+ * live/local only matters for the owner. but the owner should see it more
+ * prominently. maybe move it up under the preview on the right. make it
+ * look well organized."). The card's own label, the switch at the right of
+ * the row, and under them why this bag's LIVE did not go, when it did not:
+ * only its own reason, never another bag's. The card shows it for a row in
+ * `mine` alone (SecretModal `wire`), so someone else's find never has it.
+ */
+export function PublishRow({ dep }: { dep: Pick<MyDeployment, 'lookupId' | 'published'> }): JSX.Element {
+  const failed = useShards((s) => (!dep.published && s.broadcastFailed === dep.lookupId ? s.broadcastError : null))
+  return (
+    <div className="secret__publish">
+      <div className="secret__publish-row">
+        <span className="secret__label">Published</span>
+        <PublishSwitch lookupId={dep.lookupId} published={dep.published} />
+      </div>
+      {failed && <p className="eventdata__refusal" role="status">{failed}</p>}
     </div>
   )
 }

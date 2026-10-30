@@ -10,7 +10,7 @@ import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { PAYLOAD_FIELDS, fromPayload, newShard, normalizeStored, toPayload, type ShardModel } from 'sno-core/shards'
 import type { Placed } from 'sno-core/parts'
-import { CONSTRAIN_DEFAULT, authoredConstrain, authoredConstrainOf, blocks, constrainOf, firstHit, readConstrain, seeThrough, wallMesh, withAuthoredConstrain, withConstrain, type Constrain } from '../walkConstrain'
+import { CONSTRAIN_DEFAULT, authoredConstrain, authoredConstrainOf, blocks, constrainOf, enclosed, firstHit, readConstrain, seeThrough, solidsOf, wallMesh, wallsOf, withAuthoredConstrain, withConstrain, type Constrain } from '../walkConstrain'
 import { avatarTemplate } from '../avatar'
 import { objectTemplate } from '../hidden'
 import { decryptForRegion } from '../shardCrypto'
@@ -253,5 +253,61 @@ describe('what the controls show', () => {
     // The walker's reading would light OFF for a shard that never chose.
     expect(row).not.toMatch(/\bconstrainOf\(shard\)/)
     expect(authoredConstrainOf(newShard('Unset'))).toBe('opaque')
+  })
+})
+
+describe('closed solids, for the space above a walker (store/walkWalls.ts stepLimit, `stand`)', () => {
+  type V = [number, number, number]
+  /** A box from `lo` to `hi` in whole units, as twelve triangles wound any old way: winding is never read. */
+  const box = (lo: V, hi: V, at = 0): { v: ShardModel['vertices']; f: Array<[number, number, number]> } => {
+    const v: ShardModel['vertices'] = []
+    for (const x of [lo[0], hi[0]]) for (const y of [lo[1], hi[1]]) for (const z of [lo[2], hi[2]]) v.push({ p: [x, y, z], c: [1, 1, 1] })
+    const quads = [[0, 1, 3, 2], [4, 6, 7, 5], [0, 4, 5, 1], [2, 3, 7, 6], [0, 2, 6, 4], [1, 5, 7, 3]]
+    // Half the quads wound the other way round: a face cannot say which side is inside.
+    const f = quads.flatMap(([a, b, c, d], n) => (n % 2 ? [[at + a, at + c, at + b], [at + a, at + d, at + c]] : [[at + a, at + b, at + c], [at + a, at + c, at + d]]) as Array<[number, number, number]>)
+    return { v, f }
+  }
+  const shard = (parts: Array<{ v: ShardModel['vertices']; f: Array<[number, number, number]> }>): ShardModel =>
+    withConstrain({ ...newShard('S'), mode: 'solid', vertices: parts.flatMap((p) => p.v), faces: parts.flatMap((p) => p.f) }, 'all')
+
+  it('a box is one closed solid; a plate, or a box with a face gone, is none', () => {
+    const b = shard([box([-2, 0, -2], [2, 4, 2])])
+    expect(solidsOf(wallsOf(b)).count).toBe(1)
+    expect([...solidsOf(wallsOf(b)).of]).toEqual(new Array(12).fill(0))
+    const open = { ...b, faces: b.faces.slice(2) }
+    expect(solidsOf(wallsOf(open)).count).toBe(0)
+    const plate = withConstrain({ ...newShard('P'), mode: 'solid', vertices: [[-2, 0, -2], [2, 0, -2], [2, 0, 2], [-2, 0, 2]].map((p) => ({ p: p as V, c: [1, 1, 1] as V })), faces: [[0, 1, 2], [0, 2, 3]] }, 'all')
+    expect(solidsOf(wallsOf(plate)).count).toBe(0)
+  })
+
+  it('two boxes, apart or touching along an edge, are closed; duplicate corners are matched by place', () => {
+    const apart = shard([box([-2, 0, -2], [0, 2, 0]), box([4, 0, 4], [6, 2, 6], 8)])
+    expect(solidsOf(wallsOf(apart)).count).toBe(2)
+    // The second on the first's top edge at x = 0: four triangles on that edge, an even number.
+    const touching = shard([box([-2, 0, -2], [0, 2, 0]), box([0, 2, -2], [2, 4, 0], 8)])
+    expect(solidsOf(wallsOf(touching)).count).toBe(1)
+    expect([...solidsOf(wallsOf(touching)).of].every((x) => x === 0)).toBe(true)
+  })
+
+  it('a point is enclosed inside a box, not above it or below it, nor anywhere in an open shell', () => {
+    const b = shard([box([-2, 0, -2], [2, 4, 2])])
+    const m = wallMesh(b, [])
+    // Render Z is model -Z; the box is symmetric in Z.
+    expect(enclosed(m, [0, 1e-6, 0])).toBe(true)
+    expect(enclosed(m, [1.5, 3.9, -1.5])).toBe(true)
+    expect(enclosed(m, [0, 4 + 1e-6, 0])).toBe(false)
+    expect(enclosed(m, [0, -1e-6, 0])).toBe(false)
+    expect(enclosed(m, [3, 1, 0])).toBe(false)
+    const shell = wallMesh({ ...b, faces: b.faces.slice(2) }, [])
+    expect(enclosed(shell, [0, 1, 0])).toBe(false)
+  })
+
+  it('a placed box encloses where it is placed', () => {
+    const b = shard([box([-2, 0, -2], [2, 4, 2])])
+    const holder = withConstrain({ ...newShard('H'), mode: 'solid', vertices: [], faces: [] }, 'off')
+    const placed: Placed[] = [{ part: { ref: 0, at: [0, 1200, 0], turn: [0, 0, 0], step: 0 }, ref: ['a', `33331:${'e'.repeat(64)}:box`], model: b, children: [] }]
+    const m = wallMesh(holder, placed)
+    expect(enclosed(m, [0, 10 + 1e-6, 0])).toBe(true)
+    expect(enclosed(m, [0, 1e-6, 0])).toBe(false)
   })
 })

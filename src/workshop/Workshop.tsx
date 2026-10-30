@@ -1037,7 +1037,7 @@ export function Workshop(): JSX.Element | null {
           <div className="workshop__avatar" role="group" aria-label="My avatar">
             <div className="workshop__row">
               <span className="workshop__label">MY AVATAR</span>
-              <span className="workshop__value workshop__value--wide">{myAvatar ? myAvatar.name : 'dodecahedron'}</span>
+              <span className="workshop__value workshop__value--wide">{myAvatar ? myAvatar.name : 'icosahedron'}</span>
             </div>
             {/* The avatar is not one of these shards. It lives in its own store,
                 read back from the kind 11333 event you published, which is why
@@ -1111,7 +1111,7 @@ export function Workshop(): JSX.Element | null {
               >USE THIS SHARD</button>
             )}
             {myAvatar && !phase && (
-              <button className="workshop__btn" onClick={() => { void useAvatars.getState().adopt(null).then((ok) => say(ok ? 'The dodecahedron is your avatar again.' : useAvatars.getState().adoptError ?? 'No relay took the change.')) }} title="Back to the dodecahedron; it owes no work">DODECAHEDRON</button>
+              <button className="workshop__btn" onClick={() => { void useAvatars.getState().adopt(null).then((ok) => say(ok ? 'The icosahedron is your avatar again.' : useAvatars.getState().adoptError ?? 'No relay took the change.')) }} title="Back to the icosahedron; it owes no work">ICOSAHEDRON</button>
             )}
             </div>
             {/* The price (spec 8.10): 16 bits for any avatar, 6 more per doubling of

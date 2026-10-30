@@ -38,7 +38,7 @@
  */
 
 import { clampAxis, type Position } from '../lib/space'
-import { stepLimit, type WallItem } from './walkWalls'
+import { stepLimit, underSolid, type WallItem } from './walkWalls'
 
 /** How high a jump rises, in gibsons. */
 export const JUMP_HEIGHT = 3
@@ -128,18 +128,27 @@ export interface FallLimit {
  * above the first blocking face below it (the walls' own stop short, the
  * same faces the constraint holds by), unless that is further than a hop
  * from `from` can afford, in which case the last gibson it can. A floor no
- * item has is not there, so it is fallen through.
+ * item has is not there, so it is fallen through. A floor in the plane of
+ * `from` with open space above it holds you (store/walkWalls.ts stepLimit,
+ * `stand`): drop 0.
  */
 export function fallLimit(from: Position, items: readonly WallItem[], affordable: (from: Position, to: Position) => boolean): FallLimit {
   const reach = affordableAlongY(from, -1, AXIS_SPAN, affordable)
   // With nothing affordable below, still asked one gibson down: standing there is landed.
-  const down = stepLimit(from, 'y', -1, reach > 0n ? reach : 1n, items)
+  const down = stepLimit(from, 'y', -1, reach > 0n ? reach : 1n, items, true)
   if (down.by !== null && down.reach <= reach) return { drop: down.reach, lands: true, by: down.by }
   return { drop: reach, lands: false, by: null }
 }
 
-/** How far a jump from `from` may rise among `items`: JUMP_HEIGHT, under a ceiling, and no further than a hop can afford. */
+/**
+ * How far a jump from `from` may rise among `items`: JUMP_HEIGHT, under a
+ * ceiling, and no further than a hop can afford. Right under a solid's
+ * underside (a face in your plane with the solid just above you,
+ * underSolid) it does not rise at all.
+ */
 export function jumpRise(from: Position, items: readonly WallItem[], affordable: (from: Position, to: Position) => boolean): { rise: bigint; by: WallItem | null } {
+  const lid = underSolid(from, items)
+  if (lid) return { rise: 0n, by: lid }
   const up = stepLimit(from, 'y', 1, BigInt(JUMP_HEIGHT), items)
   const afford = affordableAlongY(from, 1, up.reach, affordable)
   return { rise: afford, by: up.reach < BigInt(JUMP_HEIGHT) ? up.by : null }

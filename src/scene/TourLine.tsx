@@ -3,8 +3,9 @@
  *
  * While a tour step asks for it (DemoScene.hyperline), a line runs slowly
  * from one block's station to the next block's, on and on, turning around
- * at block 0 or the newest block known (demo/hyperLine.ts), and cycles
- * through the hyperspace burst's colors (StopBurst BURST_COLOR_GLSL).
+ * at block 0 or the newest block known (demo/hyperLine.ts), and slowly cycles
+ * through the hyperspace burst's colors (StopBurst BURST_COLOR_GLSL), once
+ * round every HUE_TURN_S seconds.
  * Stations are placed as every stop marker is (stopPosition, markerCentre
  * against the anchor's aligned origin), and only the plane on show is
  * visited, as the stop field draws only that plane's stops.
@@ -25,13 +26,22 @@ import { useDemo } from '../store/useDemo'
 import { stopPlane, stopPosition } from '../hud/HyperspacePanel'
 import { lineSource, nextStation, type LineSource, type LineWalk } from '../demo/hyperLine'
 import { BURST_COLOR_GLSL } from './StopBurst'
+import { useReducedMotion } from '../hooks/useReducedMotion'
 
 /** Stations kept behind the head. */
 const TRAIL = 48
 /** Seconds the head takes from one station to the next. */
 const SEGMENT_S = 0.9
-/** How fast the colors run along the line, in hue turns a second. */
-const CYCLE = 1.6
+/**
+ * Seconds for the line's colors to go once round the hues. burstColor
+ * multiplies what it is given by 9.31 before it takes the hue, so the old
+ * 1.6 a second ran the rainbow about fifteen times a second, which read as
+ * flicker (arkinox, 2026-10-27: "changing too fast to be perceptible").
+ * Twelve seconds a turn is a color change you can watch happen.
+ */
+export const HUE_TURN_S = 12
+/** What the shader adds to a vertex's seed per second for that: burstColor's 9.31 undone. */
+export const CYCLE = 1 / (9.31 * HUE_TURN_S)
 
 const vertexShader = /* glsl */ `
   attribute float aSeed;
@@ -47,7 +57,7 @@ const fragmentShader = /* glsl */ `
   varying float vSeed;
 ${BURST_COLOR_GLSL}
   void main() {
-    gl_FragColor = vec4(burstColor(vSeed + uTime * ${CYCLE.toFixed(2)}), 0.9);
+    gl_FragColor = vec4(burstColor(vSeed + uTime * ${CYCLE.toFixed(6)}), 0.9);
   }
 `
 
@@ -72,6 +82,8 @@ function TourLineRun({ axes }: { axes: ViewAxes }): JSX.Element {
   const anchor = useCyberspace((s) => s.anchor)
   const anchorPlane = useCyberspace((s) => s.anchorPlane)
   const scaleExp = useCyberspace((s) => s.scaleExp)
+  // Asked for less motion, the colors hold still; the head still travels.
+  const reduced = useReducedMotion()
 
   const line = useMemo(() => {
     const geometry = new BufferGeometry()
@@ -142,7 +154,7 @@ function TourLineRun({ axes }: { axes: ViewAxes }): JSX.Element {
 
   useFrame((state, delta) => {
     const r = run.current
-    ;(line.material as ShaderMaterial).uniforms.uTime.value = state.clock.elapsedTime
+    ;(line.material as ShaderMaterial).uniforms.uTime.value = reduced ? 0 : state.clock.elapsedTime
     if (!r || !r.walk || !r.next || r.count === 0) return
     const pos = line.geometry.getAttribute('position') as BufferAttribute
     const seed = line.geometry.getAttribute('aSeed') as BufferAttribute

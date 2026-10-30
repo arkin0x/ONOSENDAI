@@ -145,4 +145,41 @@ describe('two tabs, one chain (review of #536, F1)', () => {
     expect(posted).toHaveLength(0)
     expect(b.store.useCyberspace.getState().prevEventId).toBe(moved)
   }, 20_000)
+
+  it('a mark whose chain never lands refuses only while it is young; then the move goes on from this tab\'s head (review of #536, R1)', async () => {
+    // Only the clock is faked: the pause and the reads keep their real timers.
+    const t0 = new Date('2026-10-30T12:00:00Z').getTime()
+    vi.useFakeTimers({ toFake: ['Date'] })
+    vi.setSystemTime(t0)
+    try {
+      const a = await openTab()
+      // A signs, writes its mark, and then never writes the chain: closed or crashed inside its pause.
+      a.db.setChainWritePause(3_600_000)
+      const b = await openTab()
+      const head = b.store.useCyberspace.getState().prevEventId
+      await signMove(a)
+      posted.length = 0
+      // Young: refused, nothing signed, the head where it was.
+      await press(b)
+      expect(b.store.useCyberspace.getState().proof.message).toBe(b.store.OTHER_TAB_SAVING_MESSAGE)
+      vi.setSystemTime(t0 + 3_000)
+      await press(b)
+      expect(b.store.useCyberspace.getState().proof.message).toBe(b.store.OTHER_TAB_SAVING_MESSAGE)
+      expect(posted).toHaveLength(0)
+      expect(b.store.useCyberspace.getState().prevEventId).toBe(head)
+      // Past the pause and the patience: the mark is taken as seen, and the move is signed from B's head.
+      const { chainWritePause } = b.db
+      vi.setSystemTime(t0 + chainWritePause() + b.store.OTHER_TAB_MARK_PATIENCE_MS + 100)
+      await press(b)
+      expect(posted).toHaveLength(1)
+      expect((posted[0] as { prevEventId: string }).prevEventId).toBe(head)
+      // And the next one is not held up by it either.
+      posted.length = 0
+      b.store.useCyberspace.setState({ proof: { ...b.store.useCyberspace.getState().proof, status: 'idle' } })
+      await press(b)
+      expect(posted).toHaveLength(1)
+    } finally {
+      vi.useRealTimers()
+    }
+  }, 30_000)
 })

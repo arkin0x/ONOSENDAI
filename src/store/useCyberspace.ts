@@ -1743,7 +1743,34 @@ const HEAD_CONFIRM_TRIES = 2
  * queued (adoptChain counts what it folds as already on the relays).
  */
 /** Said when another tab's move is still on its way into storage, and this tab's move waits for it. */
-export const OTHER_TAB_SAVING_MESSAGE = "Another tab just moved you and is still saving that move. Try again in a moment."
+export const OTHER_TAB_SAVING_MESSAGE = "Another tab of yours just moved, and that move is not in this tab's saved chain yet. Try again in a few seconds."
+
+/**
+ * How long past the write pause another tab's mark may run ahead of the
+ * chain before it is taken as seen anyway. A mark whose chain never lands
+ * (the tab was closed or crashed inside its pause, its write failed, or its
+ * IndexedDB read timed out and it writes marks only) must not refuse every
+ * move until a reload (review of #536, R1): once it is this old, the move
+ * goes on to the relays' confirmation, as it did before marks were checked.
+ */
+export const OTHER_TAB_MARK_PATIENCE_MS = 5_000
+
+/** When a mark was written (ms), from its third field, which starts with Date.now() in base 36 (saveChain); null when it does not say. */
+function markWrittenAt(mark: string): number | null {
+  const third = mark.split(':')[2]
+  if (!third || third.length < 8) return null
+  const at = Number.parseInt(third.slice(0, 8), 36)
+  return Number.isFinite(at) ? at : null
+}
+
+/** Whether a mark is still young enough that its chain may yet land: written within the pause and OTHER_TAB_MARK_PATIENCE_MS. */
+function markStillLanding(mark: string | null): boolean {
+  if (mark === null) return false
+  const at = markWrittenAt(mark)
+  if (at === null) return false
+  const age = Date.now() - at
+  return age >= 0 && age < chainWritePause() + OTHER_TAB_MARK_PATIENCE_MS
+}
 
 /**
  * Whether `stored` (or the chain in hand) reaches the head a mark names. A
@@ -1764,6 +1791,8 @@ function reachesMark(mark: string | null, stored: { events: NostrEvent[] } | nul
  * mark's head is read again once that pause is over; and while it still does
  * not, the mark is not taken as seen, and the caller is told: signing now
  * would sign from the head before that tab's move, a fork (review of #536, F1).
+ * Only while the mark is young (markStillLanding): an older one whose chain
+ * never came is taken as seen, and the relays decide, as before (R1).
  */
 async function readForMark(pubkey: string, before: string | null | undefined): Promise<{ stored: LoadedChain | null; behind: boolean }> {
   for (let attempt = 0; ; attempt++) {
@@ -1771,6 +1800,8 @@ async function readForMark(pubkey: string, before: string | null | undefined): P
     // loadChain notes the mark it read as this tab's own, before its await.
     const stored = await loadNewestChain(pubkey)
     if (reachesMark(mark, stored, useCyberspace.getState().events)) return { stored, behind: false }
+    // Its chain is not coming: the mark stays seen (loadChain noted it), and the relays are asked.
+    if (!markStillLanding(mark)) return { stored, behind: false }
     // Not seen after all: unless this tab saved meanwhile (its own mark then stands).
     if (knownMarks.get(pubkey) === mark) {
       if (before === undefined) knownMarks.delete(pubkey)

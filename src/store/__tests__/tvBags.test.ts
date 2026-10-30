@@ -225,6 +225,9 @@ describe('TV opens bags where its avatars stand', () => {
     for (const k of Object.values(useSecrets.getState().keys)) await useShards.getState().rescan(k.lookupId, k.keyHex)
     expect(asked.slice(before).flat()).not.toContain(rk.lookupId)
     expect(Object.values(useShards.getState().discovered).some((h) => h.type === 'message')).toBe(false)
+    // Found, not held (arkinox, 2026-10-26); TAKE holds what TV showed as watched.
+    expect(useInventory.getState().items[keyEvent.id]).toBeUndefined()
+    useShards.getState().takeFound([keyEvent.id])
     expect(useInventory.getState().items[keyEvent.id]?.watched).toBe(true)
     expect(useCeremony.getState().chip).toBeNull()
   })
@@ -241,7 +244,9 @@ describe('TV opens bags where its avatars stand', () => {
     expect(Object.keys(useShards.getState().discovered).sort()).toEqual([keyEvent.id, chestEvent.id].sort())
     expect(Object.values(useShards.getState().discovered).some((h) => h.type === 'message')).toBe(false)
     expect(useCeremony.getState().chip).toBeNull()
-    // The key is held, as watched.
+    // The key is found, not held, until TAKE, which holds it as watched (arkinox, 2026-10-26).
+    expect(useInventory.getState().items[keyEvent.id]).toBeUndefined()
+    useShards.getState().takeFound([keyEvent.id])
     const held = useInventory.getState().items[keyEvent.id]
     expect(held?.watched).toBe(true)
     useTv.getState().stop()

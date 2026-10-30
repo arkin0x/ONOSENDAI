@@ -63,6 +63,15 @@
  * a STOP mid-fall leaves you where the chain is, the step-off point once
  * its hop has landed. Gravity off, a press is exactly what it was.
  *
+ * Under gravity a floor in your own plane holds you: a HOP, a VIEW, a BUILD
+ * or a floor deployed at your height can leave you exactly on one, and a fall
+ * can come to rest on one at the height it is passing (a WALK stop never
+ * ends there). You stand on it instead of falling through it when the space
+ * just above you is open: a single-plane floor or the top of a solid, never
+ * the underside of a solid, from under which you fall away (arkinox,
+ * 2026-10-25: floors only). It is how the walls are asked (store/walkWalls.ts
+ * stepLimit, `stand`): nothing moves and nothing is published for it.
+ *
  * `behind` is the walk's lag: the closed segments not yet proven, the one
  * computing included, and never the open one, which is still being walked.
  * It is what the LOSING SYNC warning counts, so the warning comes up only for
@@ -414,7 +423,7 @@ function fallIfAirborne(): void {
   const from = walk.open?.end ?? walk.queue[walk.queue.length - 1] ?? cs.position
   const items = wallItems(cs.plane)
   takeWallWait()
-  const stands = standing(from, items)
+  const stands = standing(from, items, true)
   const limit = stands ? null : fallLimit(from, items, affordIn(cs.plane))
   // A floor on its way: no fall through it; asked again once it is built.
   if (waitedForWalls(fallIfAirborne)) return
@@ -429,7 +438,7 @@ function jump(from: Position): void {
   const cs = useCyberspace.getState()
   const items = wallItems(cs.plane)
   takeWallWait()
-  const stands = standing(from, items)
+  const stands = standing(from, items, true)
   if (waitedForWalls(() => jump(from))) return
   if (!stands) return
   const afford = affordIn(cs.plane)
@@ -578,7 +587,7 @@ function endFall(final: Position, hovering = false): void {
   const next = [...useWalk.getState().queue, ...hops]
   useWalk.setState({ falling: false, queue: next, behind: next.length })
   useCyberspace.setState({ cursor: { ...final } })
-  if (hovering && !standing(final, f.items)) useToast.getState().show({ label: 'HOVERING', meta: 'a hop past here is over the walk budget', mark: 'walk', ms: BRIEF_TOAST_MS * 2 })
+  if (hovering && !standing(final, f.items, true)) useToast.getState().show({ label: 'HOVERING', meta: 'a hop past here is over the walk budget', mark: 'walk', ms: BRIEF_TOAST_MS * 2 })
   pump()
 }
 

@@ -7,7 +7,8 @@
  * and sealed to the lock before the bag is written; a key forged inside the
  * chest is held too; the chest opens with the key it was sealed to. A chest
  * whose contents pass NIP-44's limit is refused in words, and nothing is
- * hidden. A key a scan reads is held once. Relays are mocked; no network.
+ * hidden. A key a scan reads is found, and held once on TAKE. Relays are
+ * mocked; no network.
  */
 
 import { beforeEach, describe, expect, it, vi } from 'vitest'
@@ -31,7 +32,9 @@ vi.mock('../../lib/relay', () => ({
 
 import { getEventHash, verifyEvent } from 'nostr-tools/pure'
 import type { NostrEvent } from '../../lib/events'
-import { forgeKey, openWithSecret, readContents } from '../../lib/chests'
+import { forgeKey, openWithSecret, readContents, sealerOf } from '../../lib/chests'
+import { placeOf } from '../../lib/inventory'
+import { openChestHere } from '../../hud/ItemRows'
 import { CHEST_KIND, KEY_KIND, MESSAGE_KIND, chestItemOf, keyItemOf, type Hidden } from '../../lib/hidden'
 import { useCyberspace } from '../useCyberspace'
 import { useInventory } from '../useInventory'
@@ -46,6 +49,11 @@ beforeEach(() => {
   useCyberspace.setState({ live: false })
   vi.spyOn(console, 'warn').mockImplementation(() => { /* IndexedDB is absent here; items stay in memory */ })
 })
+
+/** OPEN, tapped on a chest found here, with the held item it is locked to (ItemRows openChestHere). */
+async function tapOpen(chest: Hidden, lock: { itemPubkey: string; secretHex: string }): Promise<void> {
+  await openChestHere({ id: chest.eventId, chest: chest.chest!, author: chest.author, place: placeOf(chest), sealer: sealerOf(chest) }, { by: 'key', key: { id: 'lock', itemPubkey: lock.itemPubkey, secretHex: lock.secretHex } })
+}
 
 describe('hiding a key', () => {
   it('writes a signed kind 3340 item into the bag and holds the key at once, marked forged', async () => {
@@ -69,7 +77,7 @@ describe('hiding a key', () => {
     expect(held?.place?.bagId).toBe(d.bagId)
   })
 
-  it('a key a scan reads is held once, not twice', () => {
+  it('a key a scan reads is found, not held, until TAKE; TAKE twice holds it once (arkinox, 2026-10-26)', () => {
     const forged = S().mine
     expect(forged).toHaveLength(0)
     const key = forgeKey('Found Key')
@@ -77,8 +85,13 @@ describe('hiding a key', () => {
     const find: Hidden = { eventId: inner.id, inner, keyHex: 'aa'.repeat(32), bagId: 'bag', lookupId: 'lookup', author: inner.pubkey, at: { x: 1n, y: 2n, z: 3n }, plane: 0, height: 4, createdAt: 1, type: 'key', key }
     S().addDiscovered([find])
     S().addDiscovered([find])
+    expect(S().discovered[inner.id]).toBeDefined()
+    expect(Object.keys(I().items)).toEqual([])
+    expect(S().takeFound([inner.id])).toHaveLength(1)
+    expect(S().takeFound([inner.id])).toHaveLength(0)
     expect(Object.keys(I().items)).toEqual([inner.id])
     expect(I().items[inner.id].source).toBe('found')
+    expect(I().items[inner.id].watched).toBeUndefined()
   })
 })
 
@@ -177,7 +190,11 @@ describe('what your own chest holds stays in the chest (review of #409)', () => 
     const finds = S().mine.map((d) => ({ eventId: d.eventId, inner: d.inner, keyHex: d.keyHex, bagId: d.bagId, lookupId: d.lookupId, author: d.inner.pubkey, at: { x: BigInt(d.at.x), y: BigInt(d.at.y), z: BigInt(d.at.z) }, plane: d.plane, height: d.height, createdAt: d.createdAt, type: d.type, key: d.key, chest: d.chest, text: d.text, bag: d.bag }) as Hidden)
     useShards.setState({ mine: [] })
     S().addDiscovered(finds)
-    // The chest opened with the held lock: its message and key are found, in place...
+    // The chest stays closed until OPEN (arkinox, 2026-10-26)...
+    expect(Object.values(S().discovered).filter((h) => h.chestId)).toEqual([])
+    const chest = finds.find((h) => h.type === 'chest')!
+    await tapOpen(S().discovered[chest.eventId], lock)
+    // ...then, opened with the held lock, its message and key are found, in place...
     const revealed = Object.values(S().discovered).filter((h) => h.chestId)
     expect(revealed.map((h) => h.type).sort()).toEqual(['key', 'message'])
     // ...vouched for by the chest, so none is a claim...

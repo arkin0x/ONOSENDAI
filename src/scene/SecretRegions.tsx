@@ -3,8 +3,8 @@
  *
  * A held region key (store/useSecrets) is a cube of side 2^height, aligned on
  * every axis, and holding it means you can ask the relay what is hidden there
- * and read the answer. A key is held when it opened something or when it was
- * bought, so a cage here is not "somewhere you walked": it is somewhere with
+ * and read the answer. A region key (not an item: items wait for TAKE) is
+ * held when it opened something or when it was bought, so a cage here is not "somewhere you walked": it is somewhere with
  * something in it. This draws each one you are near as a light green cage with
  * a key at its +X +Z corner, the same green the deploy box uses for "found
  * here", so the colour means one thing throughout.

@@ -38,6 +38,11 @@
  *     and so does TV going off (store/useTv): the stream is TV or nothing.
  *     Every reload goes to the address the page loaded on, so the flag
  *     stays, and reloads close together back off (reloadBroadcast).
+ *   - A page that cannot draw (WebGL refused after the GPU lost the page's
+ *     contexts, or any render error) stands by: NO SIGNAL in place of a
+ *     black page, window.__tvStandby set for the watchdog, and a reload as
+ *     soon as WebGL is given again (lib/tv/standby, hud/TvStandby;
+ *     arkinox, 2026-10-26).
  */
 
 /** The query flag: /tv?broadcast=1. */

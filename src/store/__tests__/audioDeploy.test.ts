@@ -27,7 +27,9 @@ vi.mock('../../lib/relay', () => ({
 }))
 
 import { getEventHash } from 'nostr-tools/pure'
-import { forgeKey, openWithSecret, readContents } from '../../lib/chests'
+import { forgeKey, openWithSecret, readContents, sealerOf } from '../../lib/chests'
+import { placeOf } from '../../lib/inventory'
+import { openChestHere } from '../../hud/ItemRows'
 import { AUDIO_KIND, audioItemOf, type AudioItem } from '../../lib/audioItem'
 import { type Hidden } from '../../lib/hidden'
 import { useCyberspace } from '../useCyberspace'
@@ -50,6 +52,11 @@ beforeEach(() => {
   useCyberspace.setState({ live: false })
   vi.spyOn(console, 'warn').mockImplementation(() => { /* IndexedDB is absent here */ })
 })
+
+/** OPEN, tapped on a chest found here, with the held item it is locked to (ItemRows openChestHere). */
+async function tapOpen(chest: Hidden, lock: { itemPubkey: string; secretHex: string }): Promise<void> {
+  await openChestHere({ id: chest.eventId, chest: chest.chest!, author: chest.author, place: placeOf(chest), sealer: sealerOf(chest) }, { by: 'key', key: { id: 'lock', itemPubkey: lock.itemPubkey, secretHex: lock.secretHex } })
+}
 
 describe('hiding audio', () => {
   it('names the deploy by its title, and is empty only without a file', () => {
@@ -137,10 +144,13 @@ describe('audio in a chest (a room behind a door)', () => {
     expect(read[0].body.audio?.retrigger).toBe('auto')
     expect(read[0].verified).toBe(true)
 
-    // Another device holding the key finds the bag: the audio is revealed where the chest stands.
+    // Another device holding the key finds the bag: the chest stays closed
+    // until OPEN (arkinox, 2026-10-26), then the audio is revealed where it stands.
     const finds = S().mine.map((m) => ({ eventId: m.eventId, inner: m.inner, keyHex: m.keyHex, bagId: m.bagId, lookupId: m.lookupId, author: m.inner.pubkey, at: { x: BigInt(m.at.x), y: BigInt(m.at.y), z: BigInt(m.at.z) }, plane: m.plane, height: m.height, createdAt: m.createdAt, type: m.type, key: m.key, chest: m.chest, text: m.text, audio: m.audio, bag: m.bag }) as Hidden)
     useShards.setState({ mine: [] })
     S().addDiscovered(finds)
+    expect(Object.values(S().discovered).filter((h) => h.chestId)).toEqual([])
+    await tapOpen(S().discovered[d.eventId], lock)
     const revealed = Object.values(S().discovered).filter((h) => h.chestId)
     expect(revealed.map((h) => h.type)).toEqual(['audio'])
     expect(revealed[0].audio?.title).toBe('Trickling water')

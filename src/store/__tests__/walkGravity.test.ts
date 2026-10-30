@@ -58,6 +58,7 @@ import { useShards, type WorldItem } from '../useShards'
 import { useToast } from '../useToast'
 import { useWorkshop } from '../useWorkshop'
 import { clearWalls, entryFor, wallItems } from '../walkWalls'
+import { standing, walkStep } from '../walkStep'
 import { GIBSON_METRES, GRAVITY_KEY, JUMP_HANG_S, JUMP_HEIGHT, JUMP_SPEED, STANDARD_GRAVITY, WALK_GRAVITY, affordableAlongY, arcHeight, loadGravity } from '../walkGravity'
 import { walkFall } from '../../lib/walkEye'
 import { useCalibration } from '../../lib/calibration'
@@ -497,6 +498,199 @@ describe('a fall', () => {
     expect(at(start)).toEqual([0, -2, -1])
     expect(useWalk.getState().falling).toBe(false)
     expect(useWalk.getState().open).toMatchObject({ from: start, end: { ...start, y: start.y - 2n, z: start.z - 1n } })
+  })
+})
+
+/**
+ * A walker exactly in a floor's plane: WALK never stops there (a stop is
+ * always at least the tolerance short of a face), but a HOP, a VIEW, a BUILD
+ * or a floor deployed at your own height can put you there. Under GRAVITY
+ * the walls are asked what is under you from a hair above your point, so you
+ * stand on the face you are exactly on instead of falling through it. Nothing
+ * moves and nothing is published for it.
+ */
+describe('exactly on a face', () => {
+  /** One horizontal square, a single plane, `y` gibsons from the shard's origin. */
+  function sheet(name: string, c: Constrain, y = 0, half = 10): ShardModel {
+    const vertices: ShardModel['vertices'] = [[-half, y, -half], [half, y, -half], [half, y, half], [-half, y, half]].map((p) => ({ p: p as V3, c: [1, 1, 1] as V3 }))
+    return withConstrain({ ...newShard(name), mode: 'solid', vertices, faces: [[0, 1, 2], [0, 2, 3]] }, c)
+  }
+  /** One vertical square across X at x = 0, a single plane. */
+  function wall(name: string, c: Constrain, half = 10): ShardModel {
+    const vertices: ShardModel['vertices'] = [[0, -half, -half], [0, half, -half], [0, half, half], [0, -half, half]].map((p) => ({ p: p as V3, c: [1, 1, 1] as V3 }))
+    return withConstrain({ ...newShard(name), mode: 'solid', vertices, faces: [[0, 1, 2], [0, 2, 3]] }, c)
+  }
+  const still = (): void => {
+    expect(useWalk.getState().falling).toBe(false)
+    expect(fallState()).toBeNull()
+    expect(useCyberspace.getState().cursor).toEqual(start)
+    expect(useWalk.getState()).toMatchObject({ queue: [], open: null, behind: 0 })
+    expect(posted).toHaveLength(0)
+  }
+
+  it('a single-plane floor in your own plane holds you on entering WALK with gravity on', () => {
+    world(start, [sheet('Sheet', 'all'), [0, 0, 0]])
+    walk(true)
+    still()
+  })
+
+  it('and when gravity is switched on in WALK', () => {
+    world(start, [sheet('Sheet', 'all'), [0, 0, 0]])
+    walk(false)
+    useWalk.getState().setGravity(true)
+    still()
+  })
+
+  it('the top of a solid box in your own plane holds you, rather than dropping you inside it', () => {
+    world(start, [boxes('Block', 'all', [[[-10, -6, -10], [10, 0, 10]]]), [0, 0, 0]])
+    walk(true)
+    still()
+    useWalk.getState().setGravity(false)
+    useWalk.getState().setGravity(true)
+    still()
+  })
+
+  it('you walk along it at its height, and a jump comes back to it', () => {
+    world(start, [sheet('Sheet', 'all'), [0, 0, 0]])
+    walk(true)
+    for (let k = 1; k <= 3; k++) useWalk.getState().press('away')
+    expect(at(start)).toEqual([0, 0, -3])
+    expect(useWalk.getState().falling).toBe(false)
+    useWalk.getState().settle()
+    const there = { ...useCyberspace.getState().cursor }
+    useWalk.getState().press('up')
+    expect(useWalk.getState().falling).toBe(true)
+    fallOut()
+    expect(useCyberspace.getState().cursor).toEqual(there)
+    // The jump made no hop: only the walk's own segment is queued.
+    expect(useWalk.getState().queue).toEqual([there])
+  })
+
+  it('walking off its edge is a fall as ever', () => {
+    world(start, [sheet('Sheet', 'all', 0, 2), [0, 0, 0]], [boxes('Low', 'all', [lowFloor(20)]), [0, -1, 0]])
+    walk(true)
+    still()
+    for (let k = 1; k <= 3 && !fallState(); k++) useWalk.getState().press('away')
+    expect(useWalk.getState().falling).toBe(true)
+    fallOut()
+    expect(at(start)).toEqual([0, -20, -3])
+  })
+
+  it('a floor set to OFF does not hold you: you fall through it', () => {
+    world(start, [sheet('Ghost', 'off'), [0, 0, 0]], [boxes('Low', 'all', [lowFloor(20)]), [0, -1, 0]])
+    walk(true)
+    expect(useWalk.getState().falling).toBe(true)
+    fallOut()
+    expect(at(start)).toEqual([0, -20, 0])
+  })
+
+  it('in a wall\'s plane you are not held or moved: you fall down along it to the floor', () => {
+    world(start, [wall('Wall', 'all'), [0, 0, 0]], [boxes('Low', 'all', [lowFloor(5)]), [0, -1, 0]])
+    walk(true)
+    expect(useWalk.getState().falling).toBe(true)
+    fallOut()
+    expect(at(start)).toEqual([0, -5, 0])
+  })
+
+  it('a floor and a ceiling of single planes, one open shard: the floor holds you', () => {
+    // No closed solid: the space above the floor is open, whatever a ray up would cross.
+    const room = sheet('Room', 'all')
+    const ceiling = sheet('Room', 'all', 4)
+    world(start, [{ ...room, vertices: [...room.vertices, ...ceiling.vertices], faces: [...room.faces, [4, 5, 6], [4, 6, 7]] }, [0, 0, 0]])
+    walk(true)
+    still()
+  })
+
+  describe('under a solid, in its underside\'s plane (arkinox, 2026-10-25: floors only)', () => {
+    /** A block from your height up 4, and a floor 20 down. */
+    const over = (): void => { world(start, [boxes('Over', 'all', [[[-10, 0, -10], [10, 4, 10]]]), [0, 0, 0]], [boxes('Low', 'all', [lowFloor(20)]), [0, -1, 0]]) }
+    /** No hop of the walk's is inside the block (its faces are not inside it: the first mid-air point is at your own height). */
+    const outside = (): void => {
+      for (const p of [...posted.map((r) => r.to), ...useWalk.getState().queue]) {
+        const [x, y, z] = at(start, p)
+        expect(y > 0 && y < 4 && Math.abs(x) < 10 && Math.abs(z) < 10).toBe(false)
+      }
+    }
+
+    it('you fall away from it, on entering WALK and on gravity on', () => {
+      over()
+      walk(true)
+      expect(useWalk.getState().falling).toBe(true)
+      fallOut()
+      expect(at(start)).toEqual([0, -20, 0])
+      outside()
+      // Again from your head, which none of that has moved (nothing landed): gravity switched on in WALK.
+      useWalk.getState().exit()
+      expect(useCyberspace.getState().position).toEqual(start)
+      walk(false)
+      useWalk.getState().setGravity(true)
+      expect(useWalk.getState().falling).toBe(true)
+    })
+
+    it('a step out from under it is not lifted into it', () => {
+      over()
+      const step = walkStep(start, 'x', 1, 1n, wallItems(useCyberspace.getState().plane), true)
+      expect(at(start, step.to)).toEqual([1, 0, 0])
+      expect(standing(step.to, wallItems(useCyberspace.getState().plane), true)).toBe(false)
+    })
+
+    it('Up is no jump into it: you are not standing, so you fall', () => {
+      over()
+      walk(true)
+      useWalk.getState().press('up')
+      expect(fallState()?.v0).toBe(0)
+      fallOut()
+      expect(at(start)).toEqual([0, -20, 0])
+      outside()
+    })
+
+    /** A floor 1 under you, so you stand, and the block over you, its underside at your height. */
+    const crawl = (...more: Array<[ShardModel, V3]>): void => {
+      world(start, [boxes('Floor', 'all', [FLOOR]), [0, -1, 0]], [boxes('Over', 'all', [[[-10, 0, -20], [10, 4, 10]]]), [0, 0, 0]], ...more)
+    }
+
+    it('standing on a floor under it, a jump does not rise into it', () => {
+      crawl()
+      walk(true)
+      still()
+      useWalk.getState().press('up')
+      expect(useWalk.getState().falling).toBe(false)
+      expect(useToast.getState().toast).toMatchObject({ label: 'WALL', meta: 'Over' })
+      // A press in the air would have followed the jump: there is none, and nothing is made.
+      useWalk.getState().press('right')
+      expect(at(start)).toEqual([1, 0, 0])
+      expect(useWalk.getState().falling).toBe(false)
+      outside()
+    })
+
+    it('standing on a floor under it, a stair does not lift you into it, gravity on or off', () => {
+      // A riser 1 high ahead (-Z), its top at your height.
+      const riser = boxes('Riser', 'all', [[[-10, 0, -20], [10, 1, -1]]])
+      for (const gravity of [true, false]) {
+        crawl([riser, [0, -1, 0]])
+        const step = walkStep(start, 'z', -1, 1n, wallItems(useCyberspace.getState().plane), gravity)
+        expect(at(start, step.to)).toEqual([0, 0, 0])
+        // The WALL chip names the block that refused the lift, not the riser.
+        expect(step.by?.shard.name).toBe('Over')
+      }
+    })
+
+    it('a press in mid-air lands below it, never inside it', async () => {
+      over()
+      walk(true)
+      useWalk.getState().press('right')
+      fallOut()
+      expect(at(start)).toEqual([1, -20, 0])
+      await vi.waitFor(() => expect(posted.length).toBeGreaterThan(0))
+      outside()
+    })
+  })
+
+  it('gravity off, a press is what it was: Down goes through the face you are on', () => {
+    world(start, [sheet('Sheet', 'all'), [0, 0, 0]])
+    walk(false)
+    useWalk.getState().press('down')
+    expect(at(start)).toEqual([0, -1, 0])
   })
 })
 

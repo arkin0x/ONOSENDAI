@@ -268,7 +268,7 @@ export function KeyCompose({ onDone }: { onDone: () => void }): JSX.Element {
         <button className="avatars__go" disabled={!key.name.trim()} onClick={place} title="Aim it at the build cursor; the item goes into your ITEMS when it is hidden">PLACE ITEM ▸</button>
       </div>
       <Explanation>
-        An item is a keypair hidden in a bag: whoever reads it holds it, and it lands in their ITEMS. Seal a chest to it and only a holder can open that chest. A mini quest is four steps: forge an item, hide it somewhere, seal a chest to it with a prize inside, and hide the chest somewhere else.
+        An item is a keypair hidden in a bag: whoever finds it can TAKE it into their ITEMS. Seal a chest to it and only a holder can open that chest. A mini quest is four steps: forge an item, hide it somewhere, seal a chest to it with a prize inside, and hide the chest somewhere else.
       </Explanation>
     </div>
   )

@@ -180,10 +180,12 @@ describe('MUTE THIS ITEM names an id something can hide by (review of #464, B2)'
 
 describe('keys found in a bag (review of #464, S5)', () => {
   afterEach(() => { useShards.setState({ discovered: {} }); vi.restoreAllMocks() })
-  it('a blocked hider\'s key is not held; another\'s is', () => {
+  it('a blocked hider\'s key is not taken; another\'s is, and a scan holds neither', () => {
     const hold = vi.spyOn(useInventory.getState(), 'holdFinds').mockReturnValue([])
     const key = (id: string, author: string): Hidden => find({ eventId: id, author, type: 'key', text: undefined, key: { name: 'k', about: '', itemPubkey: 'f'.repeat(64), secretHex: '1'.repeat(64) } as never })
     useShards.getState().addDiscovered([key('7'.repeat(64), BLOCKED), key('6'.repeat(64), FRIEND)])
+    expect(hold).not.toHaveBeenCalled()
+    useShards.getState().takeFound(['7'.repeat(64), '6'.repeat(64)])
     expect(hold.mock.calls.at(-1)?.[0].map((h: Hidden) => h.eventId)).toEqual(['6'.repeat(64)])
   })
 })

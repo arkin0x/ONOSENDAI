@@ -1,8 +1,9 @@
 /**
  * hosakaAd.test.ts: the spots are versioned and taken in turn, and each runs
- * its scenes back to back, ending in the end card. Not every spot has a
+ * its scenes back to back, ending on its call: an end card under a sponsor's
+ * mark, or, with no mark, a card held long and steady. Not every spot has a
  * banner: HOSAKA's does (its logo animation); a spot with no sponsor's mark
- * (CTV_ADVERTISE_1) goes straight to its cards.
+ * (CTV_ADVERTISE_1) goes straight to its cards, and ends on its address.
  */
 import { describe, expect, it } from 'vitest'
 import { ADS, AD_EVERY_MS, AD_IN_MS, BROADCAST_AD_EVERY_MS, CTV_ADVERTISE_1, HOSAKA_1, adById, adEveryMs, adFor, adLength, broadcastCut, nextAd } from '../hosakaAd'
@@ -14,14 +15,15 @@ describe('TV commercials', () => {
     expect(new Set(ADS.map((a) => a.id)).size).toBe(ADS.length)
   })
 
-  it('run their scenes back to back, ending in the end card', () => {
+  it('run their scenes back to back, ending on the call: an end card under a mark, a card where there is none', () => {
     for (const ad of ADS) {
       ad.scenes.forEach((sc, i) => {
         expect(sc.to).toBeGreaterThan(sc.from)
         if (i > 0) expect(sc.from).toBe(ad.scenes[i - 1].to)
         else expect(sc.from).toBe(0)
       })
-      expect(ad.scenes[ad.scenes.length - 1].kind).toBe('end')
+      const last = ad.scenes[ad.scenes.length - 1]
+      expect(last.kind).toBe(ad.scenes.some((sc) => sc.mark) ? 'end' : 'card')
       // Brief: well under a minute.
       expect(adLength(ad)).toBeLessThan(30)
     }

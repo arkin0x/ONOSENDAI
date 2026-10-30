@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useState } from 'react'
 import { BitReadout } from './hud/BitReadout'
 import { CrashNote } from './hud/CrashNote'
 import { ChainExplorer } from './hud/ChainExplorer'
@@ -102,8 +102,6 @@ export default function App(): JSX.Element {
   // cannot drift apart, and nothing about having a pointer takes the keys away.
   useKeyboard()
   useProofListener()
-  // The background scan for hidden shards near where you are looking.
-  useDiscovery()
   // The chain drains to the relay from here on, whenever Live is on, and the
   // targets' positions are kept current.
   useEffect(() => { startVersionGate(); startPublisher(); startTracker(); startPresence(); startSelfSync(); startMutes(); watchBlockedSpectation(); startCalibration(); void useCyberspace.getState().initSigner(); useHyperspace.getState().startSync(); useAvatars.getState().loadMine(); void useSecrets.getState().load(); void useInventory.getState().load(); void useShardFolders.getState().load(); void useFound.getState().load(); watchFocus(); watchNearbyReturn() }, [])
@@ -178,8 +176,6 @@ export default function App(): JSX.Element {
   }, [])
 
   const isMobile = useIsMobile()
-  useChatFeed()
-  const targets = useTargets()
   // Spectating locks the panels: they describe you, and the scene is not about
   // you right now. The bar carries what matters and the way out.
   const spectating = useCyberspace((s) => s.spectate !== null)
@@ -241,7 +237,11 @@ export default function App(): JSX.Element {
   // While the HOSAKA offer card is up it has the screen to itself: the panels,
   // instruments, compass and pad step aside until the cursor comes back
   // within reach, NOT NOW, or the menu opens.
-  const offerUp = useOfferView(crowded || secretOpen) !== null
+  // Kept here as a flag that OfferWatch sets: the offer is worked out from the
+  // cursor, and reading it here re-rendered the whole app (every chip, panel
+  // and modal host) on every WALK press and every landing (arkinox,
+  // 2026-10-30: walking stuttered).
+  const [offerUp, setOfferUp] = useState(false)
 
   // Escape closes the menu after any modal and before any chip (arkinox,
   // 2026-10-01: "ESC should exit modals, then exit menu, then close ui
@@ -297,6 +297,7 @@ export default function App(): JSX.Element {
   if (tv) {
     return (
       <div className="app">
+        <WorldScans />
         <Scene />
         <TvScreen />
       </div>
@@ -305,8 +306,10 @@ export default function App(): JSX.Element {
 
   return (
     <div className="app">
+      <WorldScans />
+      <OfferWatch hidden={crowded || secretOpen} onChange={setOfferUp} />
       <Scene />
-      {!crowded && !offerUp && <Targets targets={targets} />}
+      {!crowded && !offerUp && <TargetsHere />}
       {!crowded && !secretOpen && !offerUp && !deploying && (
         <div className="instruments">
           {/* Grouped, not ordered by hand (InstrumentStack.tsx): chips with a
@@ -438,6 +441,34 @@ export default function App(): JSX.Element {
       </button>
     </div>
   )
+}
+
+/**
+ * The scans that follow where you are (hidden shards near you, the chat's
+ * neighbours). Their own component, so a move re-renders this and not the
+ * app: both read the anchor, which changes with every step.
+ */
+function WorldScans(): null {
+  // The background scan for hidden shards near where you are looking.
+  useDiscovery()
+  useChatFeed()
+  return null
+}
+
+/** The targets' markers, positioned from where you stand; read here so a move re-renders only them. */
+function TargetsHere(): JSX.Element {
+  return <Targets targets={useTargets()} />
+}
+
+/**
+ * Whether the HOSAKA offer card is up, handed to the app only when it
+ * changes. Laid out before paint, so the panels step aside in the same frame
+ * the card appears.
+ */
+function OfferWatch({ hidden, onChange }: { hidden: boolean; onChange: (up: boolean) => void }): null {
+  const up = useOfferView(hidden) !== null
+  useLayoutEffect(() => { onChange(up) }, [up, onChange])
+  return null
 }
 
 /** Your own profile's editor, from the Identity panel's PROFILE or a profile's EDIT PROFILE (useProfileView). */

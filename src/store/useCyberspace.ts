@@ -80,7 +80,7 @@ import {
   type ViewAxes,
 } from '../lib/space'
 import { confirmChainEvents } from '../lib/chains'
-import { chainDbAvailable, readStoredChain, setAsideStoredChain, writeStoredChain, type StoredChain } from '../lib/chainDb'
+import { chainDbAvailable, chainWritePause, readStoredChain, setAsideStoredChain, writeStoredChain, type StoredChain } from '../lib/chainDb'
 import { checkSignatures } from '../lib/sigCheck'
 import {
   firstMove,
@@ -95,6 +95,7 @@ import {
   ACTION_KIND,
   buildChain,
   chainHead,
+  extendChain,
   firstBreak,
   openBracket,
   hopTemplate,
@@ -174,8 +175,34 @@ import type { SelfCrypto } from '../lib/muteList'
  */
 let actionsFor: { events: NostrEvent[]; actions: ActionEvent[] } | null = null
 function parsedChain(events: NostrEvent[]): ActionEvent[] {
-  if (!actionsFor || actionsFor.events !== events) actionsFor = { events, actions: buildChain(events) }
+  if (!actionsFor || actionsFor.events !== events) actionsFor = { events, actions: appendedTo(actionsFor, events) ?? buildChain(events) }
   return actionsFor.actions
+}
+
+/**
+ * The chain of `events` from the one memoized, when `events` are its events
+ * and one more (an action signed here, an event the feed brought): only the
+ * new one is read (lib/events.ts extendChain). Null otherwise.
+ */
+function appendedTo(memo: { events: NostrEvent[]; actions: ActionEvent[] } | null, events: NostrEvent[]): ActionEvent[] | null {
+  if (!memo || events.length !== memo.events.length + 1) return null
+  for (let i = 0; i < memo.events.length; i++) if (events[i] !== memo.events[i]) return null
+  return extendChain(memo.actions, memo.events, events[events.length - 1])
+}
+
+/**
+ * Whether a fold of nothing new into `events` would leave them as they are
+ * (adoptChain): the chain they build is all of them, ending at `prevEventId`,
+ * or it is forked, which keeps every event. Exactly the two ways adoptChain
+ * returns without a change once the merge adds nothing.
+ */
+function settledChain(events: NostrEvent[], prevEventId: string, pubkey: string): boolean {
+  // parsedChain reads every author's spawns, adoptChain only `pubkey`'s: the same chain when all of them are its.
+  if (!events.every((e) => e.pubkey === pubkey)) return false
+  const order = parsedChain(events)
+  if (order.length === 0) return true
+  if (order[0].fork !== undefined) return true
+  return order[order.length - 1].id === prevEventId && order.length === events.length
 }
 
 /**
@@ -1715,25 +1742,98 @@ const HEAD_CONFIRM_TRIES = 2
  * What it signed is folded in, and whatever of it is not yet published stays
  * queued (adoptChain counts what it folds as already on the relays).
  */
-async function foldOtherTabs(pubkey: string): Promise<void> {
-  if (useCyberspace.getState().events.length === 0) return
+/** Said when another tab's move is still on its way into storage, and this tab's move waits for it. */
+export const OTHER_TAB_SAVING_MESSAGE = "Another tab of yours just moved, and that move is not in this tab's saved chain yet. Try again in a few seconds."
+
+/**
+ * How long past the write pause another tab's mark may run ahead of the
+ * chain before it is taken as seen anyway. A mark whose chain never lands
+ * (the tab was closed or crashed inside its pause, its write failed, or its
+ * IndexedDB read timed out and it writes marks only) must not refuse every
+ * move until a reload (review of #536, R1): once it is this old, the move
+ * goes on to the relays' confirmation, as it did before marks were checked.
+ */
+export const OTHER_TAB_MARK_PATIENCE_MS = 5_000
+
+/** When a mark was written (ms), from its third field, which starts with Date.now() in base 36 (saveChain); null when it does not say. */
+function markWrittenAt(mark: string): number | null {
+  const third = mark.split(':')[2]
+  if (!third || third.length < 8) return null
+  const at = Number.parseInt(third.slice(0, 8), 36)
+  return Number.isFinite(at) ? at : null
+}
+
+/** Whether a mark is still young enough that its chain may yet land: written within the pause and OTHER_TAB_MARK_PATIENCE_MS. */
+function markStillLanding(mark: string | null): boolean {
+  if (mark === null) return false
+  const at = markWrittenAt(mark)
+  if (at === null) return false
+  const age = Date.now() - at
+  return age >= 0 && age < chainWritePause() + OTHER_TAB_MARK_PATIENCE_MS
+}
+
+/**
+ * Whether `stored` (or the chain in hand) reaches the head a mark names. A
+ * mark is `length:head-id-prefix:nonce` (saveChain); one this build cannot
+ * read names nothing to wait for.
+ */
+function reachesMark(mark: string | null, stored: { events: NostrEvent[] } | null, inHand: NostrEvent[]): boolean {
+  const m = mark === null ? null : /^\d+:([0-9a-f]{16}):/.exec(mark)
+  if (!m) return true
+  const head = m[1]
+  return inHand.some((e) => e.id.startsWith(head)) || (stored?.events.some((e) => e.id.startsWith(head)) ?? false)
+}
+
+/**
+ * Read the stored chain for another tab's mark. The mark is written at once
+ * and the chain behind it a moment later (lib/chainDb.ts pauses a write to
+ * merge the two saves of an action), so a copy that does not yet reach the
+ * mark's head is read again once that pause is over; and while it still does
+ * not, the mark is not taken as seen, and the caller is told: signing now
+ * would sign from the head before that tab's move, a fork (review of #536, F1).
+ * Only while the mark is young (markStillLanding): an older one whose chain
+ * never came is taken as seen, and the relays decide, as before (R1).
+ */
+async function readForMark(pubkey: string, before: string | null | undefined): Promise<{ stored: LoadedChain | null; behind: boolean }> {
+  for (let attempt = 0; ; attempt++) {
+    const mark = storedMark(pubkey)
+    // loadChain notes the mark it read as this tab's own, before its await.
+    const stored = await loadNewestChain(pubkey)
+    if (reachesMark(mark, stored, useCyberspace.getState().events)) return { stored, behind: false }
+    // Its chain is not coming: the mark stays seen (loadChain noted it), and the relays are asked.
+    if (!markStillLanding(mark)) return { stored, behind: false }
+    // Not seen after all: unless this tab saved meanwhile (its own mark then stands).
+    if (knownMarks.get(pubkey) === mark) {
+      if (before === undefined) knownMarks.delete(pubkey)
+      else knownMarks.set(pubkey, before)
+    }
+    if (attempt > 0) return { stored, behind: true }
+    await new Promise((r) => setTimeout(r, chainWritePause() + 300))
+    if (useCyberspace.getState().identity.pubkey !== pubkey) return { stored: null, behind: false }
+  }
+}
+
+async function foldOtherTabs(pubkey: string): Promise<string | null> {
+  if (useCyberspace.getState().events.length === 0) return null
   // Only when another tab has saved since this one last wrote or read the
   // chain: comparing the mark costs nothing, and reading, hashing and
   // rebuilding a long saved chain before every move cost about 190 ms on a
   // 2,000-event chain (review of #236). With no mark (an older build saved
   // it), the chain is read as before.
   const mark = storedMark(pubkey)
-  if (mark !== null && knownMarks.get(pubkey) === mark) return
+  const before = knownMarks.get(pubkey)
+  if (mark !== null && before === mark) return null
   // Both stores: the other tab's chain may have outgrown localStorage, and
   // then only IndexedDB has its save (lib/chainDb.ts).
   // loadChain notes the mark it read, before the await; set again after it,
   // it could overwrite the newer mark of a save this tab made meanwhile.
-  const stored = await loadNewestChain(pubkey)
+  const { stored, behind } = await readForMark(pubkey, before)
+  if (behind) return OTHER_TAB_SAVING_MESSAGE
   const s = useCyberspace.getState()
-  if (!stored || s.identity.pubkey !== pubkey || s.events.length === 0) return
+  if (!stored || s.identity.pubkey !== pubkey || s.events.length === 0) return null
   const have = new Set(s.events.map((e) => e.id))
   const extra = stored.events.filter((e) => !have.has(e.id))
-  if (extra.length === 0) return
+  if (extra.length === 0) return null
   // Only what another tab can have done: moved on from this tab's head (the
   // stored chain holds every event this tab holds), or respawned (a newer
   // spawn). Storage that disagrees in any other way is not taken on trust
@@ -1741,15 +1841,16 @@ async function foldOtherTabs(pubkey: string): Promise<void> {
   const storedIds = new Set(stored.events.map((e) => e.id))
   const movedOn = s.events.every((e) => storedIds.has(e.id))
   const respawned = stored.events[0].id !== s.genesisId && stored.events[0].created_at > s.events[0].created_at
-  if (!movedOn && !respawned) return
+  if (!movedOn && !respawned) return null
   foldNow(extra)
   const now = useCyberspace.getState()
   const queued = extra.filter((e) => !stored.published.includes(e.id) && now.published[e.id] === 'ok')
-  if (queued.length === 0) return
+  if (queued.length === 0) return null
   const published = { ...now.published }
   for (const e of queued) published[e.id] = 'queued'
   useCyberspace.setState({ published })
   saveChain(now.events, published, now.chain)
+  return null
 }
 
 /**
@@ -1791,8 +1892,9 @@ async function confirmHead(retrying: () => void): Promise<string | null | typeof
   const cut = await signaturesChecked(pubkey)
   if (chainEpoch !== epoch) return STALE_CONFIRMATION
   if (cut) return cut
-  await foldOtherTabs(pubkey)
+  const otherTab = await foldOtherTabs(pubkey)
   if (chainEpoch !== epoch) return STALE_CONFIRMATION
+  if (otherTab) return otherTab
   // No confirmation is reused, however recent (arkinox, 2026-10-08): another
   // device can move in the second between two looks, and only a fresh answer
   // makes the relay's silence mean "nothing newer".
@@ -4586,6 +4688,16 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
       stopForNewHead(cur.prevEventId)
       return
     }
+    // Nothing new: the usual answer, since every move's confirmation asks the
+    // relays for the chain from the newest event they hold, and gets back
+    // events this device already has. Everything below would come to nothing
+    // (findDivergence skips what is held, and the merge is the chain in hand),
+    // after rebuilding the whole chain twice: about 0.35 s per fold on a
+    // 1,300-action chain, twice per move (arkinox, 2026-10-30: a WALK step
+    // took 2 to 6 seconds). Only when the chain in hand reads the way a fold
+    // would leave it, which parsedChain answers from its memo.
+    const inHand = new Set(cur.events.map((e) => e.id))
+    if (mine.every((e) => inHand.has(e.id)) && settledChain(cur.events, cur.prevEventId, me)) return
     // This device's unpublished moves fork against moves the relays already
     // hold (another device of yours moved on while this one was LOCAL or
     // offline). Folding now would decide in silence, and publishing this
@@ -4598,7 +4710,7 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
       useChainUi.getState().setPromptAside(false)
       return
     }
-    const seen = new Set(cur.events.map((e) => e.id))
+    const seen = inHand
     const merged = cur.events.concat(mine.filter((e) => !seen.has(e.id)))
     // buildChain is §8.7.3: the newest spawn wins, then follow the links. So a
     // newer chain from another machine supersedes ours; our own echoed events

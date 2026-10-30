@@ -26,6 +26,8 @@ import { keyInnerTemplate, messageInnerTemplate, type ChestItem, type KeyItem } 
 import { CALM_FADE_MS, DOOR_DISSOLVE_MS, afterOpen, ceremonyLength, dissolveShare } from '../../lib/ceremony'
 import { CEREMONY_BUZZ, ceremonyFeedback, resetCeremonySound } from '../../lib/ceremonySound'
 import { openChestHere } from '../../hud/ItemRows'
+import { lookOf } from '../../lib/looks'
+import { chestLoot } from '../../lib/lootObjects'
 import { useCeremony } from '../useCeremony'
 import { useCyberspace } from '../useCyberspace'
 import { useShards } from '../useShards'
@@ -84,6 +86,18 @@ describe('OPEN on a door', () => {
     await openChestHere({ id: ev.id, chest, author: ev.pubkey, place, sealer: ev.pubkey, door: true }, opener)
     expect(useCeremony.getState().births[behind.id]).toBeTypeOf('number')
     expect(useShards.getState().discovered[behind.id]?.at.z).toBe(at.z + 2n)
+  })
+
+  it('lets nothing float out: an opened door has no loot (review of #534 and #535)', async () => {
+    const ev = doorEvent(true)
+    useShards.setState({ mine: [], discovered: { [ev.id]: found(ev) } })
+    const contents = await openChestHere({ id: ev.id, chest, author: ev.pubkey, place, sealer: ev.pubkey, door: true }, opener)
+    expect(contents?.length).toBe(1)
+    const look = lookOf({ type: 'chest', event: ev })!
+    expect(look.name).toBe('door')
+    expect(chestLoot({ look: look.name, entries: contents!, held: () => false, chest: { at, plane: 1, height: 6 }, itemsReady: true })).toEqual([])
+    // The same contents in a chest whose region does not hold their point would float out.
+    expect(chestLoot({ look: 'treasure', entries: contents!, held: () => false, chest: { at, plane: 1, height: 1 }, itemsReady: true })).not.toEqual([])
   })
 
   it('a chest marks nothing found: its contents float out instead', async () => {

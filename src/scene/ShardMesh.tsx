@@ -373,12 +373,27 @@ export function ShardMesh({ shard: given, scale = 1, ghost = false, birth, disso
   }, [birth, positions, colors, shard.id])
 
   // Going away: each vertex's own scatter and lift, and its static brightness.
+  // Made once, not per vertex per frame: the decode runs every frame for DOOR_DISSOLVE_MS.
   const away = useMemo(() => {
     if (dissolve === undefined) return null
     const seed = seedOf(shard.id) ^ 0x5bd1e995
     let extent = 1
     for (let i = 0; i < positions.length; i++) extent = Math.max(extent, Math.abs(positions[i]))
-    return { seed, extent }
+    const n = positions.length / 3
+    const scatter = new Float32Array(n * 3)
+    const lift = new Float32Array(n)
+    const shade = new Float32Array(n)
+    for (let v = 0; v < n; v++) {
+      // A little scatter, never enough to stretch a face across the room.
+      const o = scrambleOffset(v, seed, extent * 0.06)
+      scatter[v * 3] = o[0]
+      scatter[v * 3 + 1] = Math.abs(o[1])
+      scatter[v * 3 + 2] = o[2]
+      // Upward first and most: the slab slides up into the lintel as it goes.
+      lift[v] = extent * (0.25 + 0.45 * hash01(v * 7, seed))
+      shade[v] = 0.35 + 0.65 * hash01(v * 5, seed)
+    }
+    return { seed, extent, scatter, lift, shade }
   }, [dissolve, positions, shard.id])
 
   const done = useRef(false)
@@ -395,17 +410,13 @@ export function ShardMesh({ shard: given, scale = 1, ghost = false, birth, disso
       const p = posAttr.array as Float32Array
       const c = colAttr.array as Float32Array
       const n = p.length / 3
+      const toStatic = Math.min(1, t * 2.5)
       for (let v = 0; v < n; v++) {
-        // A little scatter, never enough to stretch a face across the room.
-        const o = scrambleOffset(v, away.seed, away.extent * 0.06)
-        // Upward first and most: the slab slides up into the lintel as it goes.
-        const lift = away.extent * (0.25 + 0.45 * hash01(v * 7, away.seed)) * e
         const j = t > 0 && t < 1 ? (hash01(v * 13 + frame.current, away.seed) - 0.5) * 0.04 * away.extent * t : 0
-        p[v * 3] = positions[v * 3] + o[0] * e + j
-        p[v * 3 + 1] = positions[v * 3 + 1] + Math.abs(o[1]) * e + lift + j
-        p[v * 3 + 2] = positions[v * 3 + 2] + o[2] * e + j
-        const toStatic = Math.min(1, t * 2.5)
-        const b = 0.35 + 0.65 * hash01(v * 5, away.seed)
+        p[v * 3] = positions[v * 3] + away.scatter[v * 3] * e + j
+        p[v * 3 + 1] = positions[v * 3 + 1] + away.scatter[v * 3 + 1] * e + away.lift[v] * e + j
+        p[v * 3 + 2] = positions[v * 3 + 2] + away.scatter[v * 3 + 2] * e + j
+        const b = away.shade[v]
         for (let k = 0; k < 3; k++) c[v * 3 + k] = colors[v * 3 + k] + (STATIC[k] * b - colors[v * 3 + k]) * toStatic
       }
       posAttr.needsUpdate = true

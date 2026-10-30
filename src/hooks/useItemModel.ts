@@ -33,19 +33,31 @@ const PARTS_WAIT_MS = 8000
 const loading = new Map<string, Promise<LoadedModel | null>>()
 const loaded = new Map<string, LoadedModel>()
 
-/** The model at `address` from its payload (parsed JSON), measured, or null when it is not one. */
-export async function modelFromPayload(address: string, payload: unknown): Promise<LoadedModel | null> {
-  const read = payload == null ? null : fromPayload(payload, address)
-  // What it carries counts only under the pubkey its address names (DECK-0003 §1.10).
-  const shard = read && keepOwnTable(read, parseAddress(address)?.pubkey)
-  if (!shard) return null
+/**
+ * How far a model reaches about its centre with the objects it places: its
+ * own points, and its parts as fetched (waiting PARTS_WAIT_MS at most for
+ * them). A one-part wrapper (an object placed from the feed) has no points
+ * of its own, so it is measured by its part alone. Null when nothing is
+ * there at all. Also measures the objects that float out of a chest
+ * (scene/ChestLoot).
+ */
+export async function measureModel(shard: ShardModel): Promise<ModelExtent | null> {
   let placed: Placed[] = []
   if (shard.refs?.length && shard.parts?.length) {
     const timeout = new Promise<null>((resolve) => setTimeout(() => resolve(null), PARTS_WAIT_MS))
     placed = (await Promise.race([resolveParts(shard, fetchRef).catch(() => null), timeout])) ?? []
   }
   const parts = shard.parts?.length ? placedBounds({ ...shard, vertices: [] }, placed) : null
-  const extent = extentOf(flatten(shard).positions, parts)
+  return extentOf(flatten(shard).positions, parts)
+}
+
+/** The model at `address` from its payload (parsed JSON), measured, or null when it is not one. */
+export async function modelFromPayload(address: string, payload: unknown): Promise<LoadedModel | null> {
+  const read = payload == null ? null : fromPayload(payload, address)
+  // What it carries counts only under the pubkey its address names (DECK-0003 §1.10).
+  const shard = read && keepOwnTable(read, parseAddress(address)?.pubkey)
+  if (!shard) return null
+  const extent = await measureModel(shard)
   return extent ? { shard, extent } : null
 }
 

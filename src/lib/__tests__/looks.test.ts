@@ -67,6 +67,20 @@ describe('the built-in models', () => {
   })
 })
 
+describe('where each model stands about its origin (review of #532)', () => {
+  const box = (m: Parameters<typeof lookBounds>[0]): number[] => { const b = lookBounds(m); return [...b.min, ...b.max].map((x) => Math.round(x * 1000) / 1000) }
+  it('the door slab fills a 2 x 3 opening above its sill, 0.5 deep behind it with its plates proud', () => {
+    expect(box(builtInLook('door').closed)).toEqual([-1, 0, -0.642, 1, 3, 0.142])
+  })
+  it('the open door is its bottom rail, up in the lintel, clear of the opening below', () => {
+    expect(box(builtInLook('door').open!)).toEqual([-0.983, 2.6, -0.483, 0.983, 2.983, -0.017])
+  })
+  it('the open chest\u2019s lid stands up to 1.4 and leans back (-z), never forward', () => {
+    expect(box(builtInLook('treasure').closed)).toEqual([-0.45, 0, -0.442, 0.45, 0.792, 0.467])
+    expect(box(builtInLook('treasure').open!)).toEqual([-0.45, 0, -0.775, 0.45, 1.4, 0.467])
+  })
+})
+
 describe('what is drawn', () => {
   const treasure = builtInLook('treasure')
   const door = builtInLook('door')

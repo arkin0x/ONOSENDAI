@@ -4,7 +4,8 @@
  *
  * A chest is the treasure chest, a door the door slab, each closed until
  * this identity opens it with OPEN and open from then on (R14), a reload
- * included (store/useOpenedChests restores it silently). Drawn at the zooms
+ * included: opened by hand on this device is open, whether a key or a
+ * signer opened it (store/useOpenedChests), as WALK's walls have it. Drawn at the zooms
  * a key's cube is (lib/worldMarks.ts markShown), labelled with its name and
  * who left it as a key is, and a tap opens its card, where OPEN is.
  */
@@ -15,7 +16,7 @@ import { GRID_RADIUS, itemCentre, type ViewAxes } from '../lib/space'
 import { drawnLook, lookOf, type Look } from '../lib/looks'
 import { markShown } from '../lib/worldMarks'
 import { alignedOrigin, useCyberspace } from '../store/useCyberspace'
-import { openedKey, useOpenedChests } from '../store/useOpenedChests'
+import { openedByHand, openedKey, useOpenedChests } from '../store/useOpenedChests'
 import { useShards } from '../store/useShards'
 import { useMutes } from '../store/useMutes'
 import { setDrawnLooks, useOpenCeremony } from '../store/useOpenCeremony'
@@ -57,7 +58,7 @@ export function ChestLooks({ axes }: { axes: ViewAxes }): JSX.Element | null {
       if (!look) continue
       const centre = itemCentre(w.at, origin, scaleExp, axes)
       if (Math.hypot(...centre) > REACH) continue
-      out.push({ key: w.key, look, opened: !!opened[openedKey(me, w.key)], text: itemMarkText(w), sub: author({ author: w.author ?? '', mine: w.mine }), centre })
+      out.push({ key: w.key, look, opened: !!opened[openedKey(me, w.key)] || openedByHand(me, w.key), text: itemMarkText(w), sub: author({ author: w.author ?? '', mine: w.mine }), centre })
     }
     return out
     // mine, discovered, curated and muted are what worldItems reads.

@@ -24,10 +24,13 @@ let relayAnswers: (filter: unknown) => NostrEvent[] = () => []
 let held: Record<string, { id: string }> = {}
 let starred: Array<{ input: string; plane: number }> = []
 
+/** What the store subscribed to useCyberspace, so a test can switch identity under it. */
+type IdentityListener = (s: { identity: { pubkey: string } }, prev: { identity: { pubkey: string } }) => void
+let identityListeners: IdentityListener[] = []
 vi.mock('../useCyberspace', () => ({
   useCyberspace: {
     getState: () => ({ identity: { pubkey: identity, npub: '' } }),
-    subscribe: () => () => undefined,
+    subscribe: (fn: IdentityListener) => { identityListeners.push(fn); return () => undefined },
   },
 }))
 vi.mock('../useShards', () => ({
@@ -49,6 +52,7 @@ type Cache = typeof import('../../lib/foundCache')
 /** A page load: the modules fresh, then the store's load for the identity. */
 async function boot(owner = identity): Promise<{ found: Mod; cache: Cache }> {
   vi.resetModules()
+  identityListeners = []
   const found = await import('../useFound')
   const cache = await import('../../lib/foundCache')
   await found.useFound.getState().load(owner)
@@ -166,6 +170,17 @@ describe('one identity\'s finds are its own', () => {
     discovered = {}
     await boot(ME)
     expect(texts()).toEqual(['mine'])
+  })
+})
+
+describe('what scans opened belongs to the identity they opened it for', () => {
+  it('a change of identity forgets every bag a scan kept, so none is handed back', async () => {
+    const a = await boot()
+    const outer = await bagOf('under the old key')
+    const first = await find(a.cache, a.found, outer)
+    expect((await find(a.cache, a.found, outer))[0]).toBe(first[0])
+    for (const fn of identityListeners) fn({ identity: { pubkey: OTHER } }, { identity: { pubkey: ME } })
+    expect(a.cache.forgetOpened()).toBe(0)
   })
 })
 

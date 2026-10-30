@@ -42,6 +42,8 @@ export interface BreakFrame {
   area: Box
   /** Canvas px per CSS px, the stream's text size in it (tvPainter's s). */
   s: number
+  /** Canvas px per CSS px alone, without the stream's text size: for a size that must read on any screen. Taken as s when not given. */
+  css?: number
   /** Stacked, as the upright stream and a phone are (design 4.4). */
   stacked: boolean
   /** The card's accent (tvPainter AD_THEMES). */
@@ -280,7 +282,7 @@ function hero(k: BreakKit, f: BreakFrame, b: Box, spin: CanvasImageSource | null
   else redCube(ctx, b, t, f.s)
   ctx.restore()
   // Never so small its #1 cannot be read: at least SPLASH_MIN_PX across the middle (review of #537, a phone).
-  k.splash(b.x1 - w(b) * 0.04, b.y0 + h(b) * 0.5, Math.max(w(b) * 0.2, SPLASH_MIN_PX * f.s), t)
+  k.splash(b.x1 - w(b) * 0.04, b.y0 + h(b) * 0.5, Math.max(w(b) * 0.2, SPLASH_MIN_PX * (f.css ?? f.s)), t)
 }
 
 /** A count, large, and LAST WEEK under it: counting up from nothing as it comes in. */
@@ -320,7 +322,7 @@ function bigCount(k: BreakKit, f: BreakFrame, b: Box, label: string | null, c: W
   ctx.restore()
 }
 
-/** The #1 splash's least radius, CSS px before the stream's scale: its #1 is set at 0.3 of it (tvPainter splash), so never under 12. */
+/** The #1 splash's least radius, CSS px: its #1 is set at 0.3 of it (tvPainter splash), so never under 12 px on any screen, a large frame keeping its own size. */
 const SPLASH_MIN_PX = 40
 
 /** The note line's type, CSS px before the stream's scale: his Fun Fact, wrapped, never re-cased. */

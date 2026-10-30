@@ -1308,7 +1308,7 @@ export class TvPainter {
     const area = { x0: MX, y0: top, x1: W - MX, y1: tickY - 14 * s }
     const stacked = isPortraitBroadcast() || narrow || W < H
     const lead = br.board.kind === 'ranking' ? br.board.rows[0]?.pubkey : undefined
-    paintStatsBoard(kit, { area, s, stacked, accent: theme.accent }, br.board, { name: a.name, spin: lead ? a.spin : null }, t, Math.floor(now / 60), reduced)
+    paintStatsBoard(kit, { area, s, css: scale, stacked, accent: theme.accent }, br.board, { name: a.name, spin: lead ? a.spin : null }, t, Math.floor(now / 60), reduced)
     ctx.restore()
     this.breakFurniture(STATS_TAG, p, a, W, MX, MY, tickY, tickH, s, dt, scale)
   }

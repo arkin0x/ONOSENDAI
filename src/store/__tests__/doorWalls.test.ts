@@ -26,7 +26,7 @@ import type { Position } from '../../lib/space'
 import { useCyberspace } from '../useCyberspace'
 import { rememberOpened, resetOpenedChests } from '../useOpenedChests'
 import { useShards } from '../useShards'
-import { doorWallKey, stepLimit, wallItems } from '../walkWalls'
+import { doorWallKey, stepLimit, wallItems, wallItemsAt } from '../walkWalls'
 
 const AT: Position = { x: 1n << 40n, y: 1n << 39n, z: 1n << 38n }
 const ME = 'a'.repeat(64)
@@ -94,13 +94,13 @@ describe('a walker inside a closed door (review of #532)', () => {
       // Without the walker's place the door is a wall, and a wall all round them.
       const before = SIX.map(([a, d]) => stepLimit(P, a, d, 5n, wallItems(1)).reach)
       expect(before.some((r) => r === 0n)).toBe(true)
-      const after = SIX.map(([a, d]) => stepLimit(P, a, d, 5n, wallItems(1, P)).reach)
+      const after = SIX.map(([a, d]) => stepLimit(P, a, d, 5n, wallItemsAt(1, P)).reach)
       expect(after.every((r) => r > 0n)).toBe(true)
     }
   })
 
   it('a walker outside it is still stopped by it', () => {
-    expect(stepLimit(FRONT, 'z', -1, 10n, wallItems(1, FRONT)).reach).toBeLessThan(10n)
+    expect(stepLimit(FRONT, 'z', -1, 10n, wallItemsAt(1, FRONT)).reach).toBeLessThan(10n)
   })
 })
 
@@ -110,6 +110,6 @@ describe('a door is a wall where it is drawn (review of #532)', () => {
     // up is out of the region, where the drawn door still stands.
     useShards.setState({ discovered: { [DOOR]: { ...chest(DOOR, [['title', 'Gate'], ['door', '1']]), height: 1 } } })
     const high: Position = { x: AT.x, y: AT.y + 2n, z: AT.z + 3n }
-    expect(stepLimit(high, 'z', -1, 10n, wallItems(1, high)).reach).toBeLessThan(10n)
+    expect(stepLimit(high, 'z', -1, 10n, wallItemsAt(1, high)).reach).toBeLessThan(10n)
   })
 })

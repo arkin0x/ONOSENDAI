@@ -5,7 +5,8 @@
  * A chest is the treasure chest, a door the door slab, each closed until
  * this identity opens it with OPEN and open from then on (R14), a reload
  * included: opened by hand on this device is open, whether a key or a
- * signer opened it (store/useOpenedChests), as WALK's walls have it. Drawn at the zooms
+ * signer opened it (store/useOpenedChests), as WALK's walls have it. Only
+ * what this session read floats out of it. Drawn at the zooms
  * a key's cube is (lib/worldMarks.ts markShown), labelled with its name and
  * who left it as a key is, and a tap opens its card, where OPEN is.
  */

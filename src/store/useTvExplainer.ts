@@ -133,6 +133,11 @@ export function explainerEndedAt(): number {
   return endedAt
 }
 
+/** When the next one is due, performance.now(), Infinity for none: a CYBERSPACE STATS break keeps clear of it (lib/tv/cyberspaceStats breakMayStart). */
+export function explainerDue(): number {
+  return lineup.length === 0 ? Infinity : due
+}
+
 /** TV came on: the first is due a little in, or a forced one (/tv?explainer=<id>) at once. */
 export function startExplainers(now: number, search: string = typeof window !== 'undefined' && window.location ? window.location.search : ''): void {
   stopExplainers()

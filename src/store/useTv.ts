@@ -18,13 +18,19 @@ import { create } from 'zustand'
 import { queryEach } from '../lib/relay'
 import { AD_IN_MS, adById, adEveryMs, adLength, nextAd } from '../lib/tv/hosakaAd'
 import { EXPLAINER_AD_GAP_MS } from '../lib/tv/explainer'
-import { explainerBusy, explainerEndedAt, explainerTick, startExplainers, stopExplainers } from './useTvExplainer'
+import { explainerBusy, explainerDue, explainerEndedAt, explainerTick, startExplainers, stopExplainers } from './useTvExplainer'
+import {
+  BEATS, STATS_FORCED_MS, STATS_GAP_MS, STATS_LOAD_DELAY_MS, STATS_RETRY_MS, asOfHour, breakMayStart, countStats, forcedBoard, isAgentProfile, keysToKnow,
+  loadStatsReads, nextBoard, statsEveryMs, statsFirstMs, statsLength, type BoardId, type StatsBoard, type StatsFilter, type StatsSnapshot,
+} from '../lib/tv/cyberspaceStats'
+import { arrivalTimes } from '../lib/countingRules'
+import { useProfiles } from './useProfiles'
 import { isBroadcast, reloadBroadcast } from '../lib/tv/broadcast'
 import { Dwell, dwellLimits, onAir } from '../lib/tv/dwell'
 import { Director, JUMP_LINE_S, JUMP_S, JUMP_WARP_S, MAX_SHOT_S, isJump, shotFraming, type Beat, type Framing, type Shot, type TapeItem } from '../lib/tv/director'
 import type { HintBox } from '../lib/hint'
 import { TapeReader, V2_EPOCH, randomStart, type Ask, TapeUnanswered } from '../lib/tv/tape'
-import { loadCensus, loadChainTimes, type Census, type ChainTimes } from '../lib/tv/stats'
+import { loadCensus, loadChainHistory, type Census, type ChainHistory } from '../lib/tv/stats'
 import { MAX_SCALE_EXP, type Position } from '../lib/space'
 import { coordToXyz } from 'cyberspace-core'
 import { stopCoordExact } from '../lib/hyperspace/stops'
@@ -169,7 +175,7 @@ interface TvState {
   /** The ticker's counts (lib/tv/stats.ts), once read. */
   census: Census | null
   /** Each on-screen avatar's chain, for its length at tape time. */
-  chains: Record<string, ChainTimes>
+  chains: Record<string, ChainHistory>
   /** The hint boxes of the bags the tape has shown, whose outlines stay in the world (TvLayer). */
   boxes: Array<{ id: string; hint: HintBox }>
   /** The hyperjump being ridden on screen, or null. */
@@ -179,6 +185,12 @@ interface TvState {
    * (performance.now()), or null. Nothing from the tape plays under it.
    */
   ad: { at: number; id: string } | null
+  /**
+   * The CYBERSPACE STATS break on screen (lib/tv/cyberspaceStats): which
+   * board, counted and frozen as it came on, since `at` (performance.now()),
+   * or null. Like a spot, nothing from the tape plays under it.
+   */
+  stats: { at: number; board: StatsBoard } | null
   /** Turn the set on; false when something else owns the camera (tvBlocked). */
   start: () => boolean
   /** A new random start, the set staying on (RETRY). */
@@ -246,6 +258,34 @@ let adEndedAt = -Infinity
 /** When the last spot ended: for tests. */
 export function adEndedAtForTest(): number {
   return adEndedAt
+}
+/** When the next CYBERSPACE STATS break is due (performance.now()): statsFirstMs after TV came on, statsEveryMs after each break. */
+let statsDue = Infinity
+/** The board played last, so the breaks take them in turn. */
+let lastBoard: BoardId | null = null
+/** When the last break ended (performance.now()): spots and explainers keep STATS_GAP_MS from it. */
+let statsEndedAt = -Infinity
+/** The board the address asked to play first (/tv?stats=<id>), until it has. */
+let forcedStats: BoardId | null = null
+/** The counts the breaks show, as of an hour (lib/tv/cyberspaceStats), kept across runs; and whether they are being counted. */
+let snapshot: StatsSnapshot | null = null
+/** The run a count is under way for, or -1: one stuck in a run that has ended never holds up the next. */
+let countingRun = -1
+/** When counting last began, this run (performance.now()): a count no relay answered is tried again STATS_RETRY_MS on, not every tick. */
+let countedAt = -Infinity
+let statsTimer: ReturnType<typeof setTimeout> | null = null
+
+/** The break's clock, for tests: when the next is due, and when the last ended. */
+export function statsClockForTest(): { due: number; endedAt: number } {
+  return { due: statsDue, endedAt: statsEndedAt }
+}
+/** The counts the breaks show, for tests and the local screenshots. */
+export function statsSnapshotForTest(): StatsSnapshot | null {
+  return snapshot
+}
+/** Swap the counts the breaks show, for tests (null to count them again). */
+export function setStatsSnapshotForTest(s: StatsSnapshot | null): void {
+  snapshot = s
 }
 let timer: number | null = null
 let ask: Ask = (f) => queryEach(f)
@@ -521,7 +561,7 @@ async function readMore(id: number, t: number): Promise<void> {
     failures++
     retryAt = performance.now() + Math.min(RETRY_MAX_MS, RETRY_MS * 2 ** (failures - 1))
     // Not over a commercial, which has no shot either (review of #384).
-    if (failures >= NO_SIGNAL_AFTER && queue.length === 0 && useTv.getState().shot === null && useTv.getState().ad === null) useTv.setState({ status: 'no-signal' })
+    if (failures >= NO_SIGNAL_AFTER && queue.length === 0 && useTv.getState().shot === null && useTv.getState().ad === null && useTv.getState().stats === null) useTv.setState({ status: 'no-signal' })
     // A shot still on screen says NO SIGNAL from tick, once it has played out.
   } finally {
     if (readingTape === t && r === reader) readingTape = -1
@@ -575,7 +615,7 @@ const asked = new Set<string>()
 function needChain(pubkey: string, id: number): void {
   if (useTv.getState().chains[pubkey] || asked.has(pubkey)) return
   asked.add(pubkey)
-  loadChainTimes(pubkey, askWithin).then((c) => {
+  loadChainHistory(pubkey, askWithin).then((c) => {
     if (id === run) useTv.setState({ chains: { ...useTv.getState().chains, [pubkey]: c } })
   }, () => { asked.delete(pubkey) })
 }
@@ -752,6 +792,66 @@ function beginShot(shot: Shot, now: number, id: number): void {
   frame(opening.position, opening.plane, scaleExp)
 }
 
+/**
+ * Count the boards again, as of the hour it is now (lib/tv/cyberspaceStats):
+ * the census again (bags, objects, spawns; the ticker's numbers with them),
+ * every movement event, and the bag and object deletions. The profiles of
+ * everyone a board could name or count are asked for meanwhile, so an agent
+ * is known as one before a break shows it. A read no relay answers leaves
+ * the last counts as they were.
+ */
+async function countBoards(id: number): Promise<void> {
+  if (countingRun === id || id !== run || performance.now() - countedAt < STATS_RETRY_MS) return
+  countingRun = id
+  countedAt = performance.now()
+  try {
+    const [census, reads] = await Promise.all([loadCensus(askWithin), loadStatsReads(askWithin)])
+    if (id !== run) return
+    useTv.setState({ census })
+    const snap = await countStats({ actions: reads.actions, bags: census.bagRecords, objects: census.objectRecords, deletions: reads.deletions, arrivals: arrivalTimes(reads.actions) }, asOfHour(Date.now() / 1000))
+    if (id !== run) return
+    snapshot = snap
+    const profiles = useProfiles.getState()
+    for (const pk of keysToKnow(snap)) if (profiles.profiles[pk] === undefined) profiles.request(pk)
+  } catch {
+    // No relay answered: the last counts stand, and the next break asks again.
+  } finally {
+    if (countingRun === id) countingRun = -1
+  }
+}
+
+/** Who a break leaves off its rankings, read as it comes on: agents by their kind 0, and whoever this viewer has blocked. */
+function statsFilter(): StatsFilter {
+  const profiles = useProfiles.getState().profiles
+  const blocked = useMutes.getState().muted.pubkeys
+  return { isAgent: (pk) => isAgentProfile(profiles[pk]), hidden: (pk) => blocked.has(pk) }
+}
+
+/**
+ * A CYBERSPACE STATS break, if one is due and may start now (breakMayStart):
+ * on screen, and true. Counts older than the hour are counted again
+ * meanwhile, the old ones shown until the new are in; with none yet, it
+ * waits for them. One asked for by the address (/tv?stats=<id>) plays as
+ * soon as its counts are in, over the gaps.
+ */
+function statsBreak(now: number, s: TvState, id: number): boolean {
+  if (now < statsDue || s.ad !== null || explainerBusy()) return false
+  const forced = forcedStats !== null
+  if (!snapshot || asOfHour(Date.now() / 1000) > snapshot.asOf) void countBoards(id)
+  if (!snapshot) return false
+  // The longest a break runs, for the clock: a board is only counted out once one may start.
+  const longest = AD_IN_MS + BEATS.ranking.end * 1000
+  const clock = { now, due: statsDue, playing: s.status === 'playing', busy: false, adDue, adEndedAt, explainerDue: explainerDue(), explainerEndedAt: explainerEndedAt(), length: longest }
+  if (!forced && !breakMayStart(clock)) return false
+  const board = nextBoard(snapshot, statsFilter(), lastBoard, forcedStats)
+  forcedStats = null
+  if (!board) { statsDue = now + STATS_RETRY_MS; return false }
+  lastBoard = board.id
+  useTv.setState({ stats: { at: now, board }, shot: null, jump: null, played: 0, cutAt: now })
+  dwell.onScreen(null, now)
+  return true
+}
+
 function tick(id: number): void {
   if (id !== run) return
   const t = tape
@@ -760,7 +860,8 @@ function tick(id: number): void {
   if (dwell.playable(queue, now) < QUEUE_LOW) void readMore(id, t)
   // An explainer (lib/tv/explainer) plays over whatever the tape is doing,
   // the live picture in its corner: its own clock, never over the spot.
-  explainerTick(now, { playing: s.status === 'playing', ad: s.ad !== null, adEndedAt })
+  // A CYBERSPACE STATS break is a break like a spot, to an explainer.
+  explainerTick(now, { playing: s.status === 'playing', ad: s.ad !== null || s.stats !== null, adEndedAt: Math.max(adEndedAt, statsEndedAt) })
   // A commercial on screen: nothing from the tape plays under it ("No
   // cyberspace actions play in the bg while the hosaka ad plays"). The tape
   // picks up where it was, after a cut.
@@ -771,6 +872,14 @@ function tick(id: number): void {
     adDue = now + adEveryMs(isBroadcast())
     adEndedAt = now
     useTv.setState({ ad: null, shot: null, cutAt: now })
+    s = useTv.getState()
+  }
+  // A CYBERSPACE STATS break on screen: the same, on its own clock.
+  if (s.stats) {
+    if (now - s.stats.at < AD_IN_MS + statsLength(s.stats.board) * 1000) return
+    statsDue = now + statsEveryMs(isBroadcast())
+    statsEndedAt = now
+    useTv.setState({ stats: null, shot: null, cutAt: now })
     s = useTv.getState()
   }
   scanTick(s)
@@ -795,7 +904,7 @@ function tick(id: number): void {
   if (s.shot === null || offAir || (now - shotBegan) / 1000 >= s.shot.length || moveOn) {
     // A break, when one is due: between shots, never across one. Not while
     // an explainer is getting ready or on, nor close after one: it waits.
-    if (now >= adDue && s.status === 'playing' && !explainerBusy() && now - explainerEndedAt() >= EXPLAINER_AD_GAP_MS) {
+    if (now >= adDue && s.status === 'playing' && !explainerBusy() && now - explainerEndedAt() >= EXPLAINER_AD_GAP_MS && now - statsEndedAt >= STATS_GAP_MS) {
       const spot = nextAd(lastAd)
       lastAd = spot.id
       // The music plays on under the spot (2026-10-20: "setto of basspistol
@@ -805,6 +914,8 @@ function tick(id: number): void {
       dwell.onScreen(null, now)
       return
     }
+    // A CYBERSPACE STATS break, when one is due: between shots too, never across one.
+    if (statsBreak(now, s, id)) return
     // Arrivals and reactions take no screen time: each is a line on the
     // ticker. A resting pubkey's shots are passed over (lib/tv/dwell), or,
     // with no one else queued, play on while the tape is read for someone.
@@ -873,11 +984,13 @@ async function tune(id: number): Promise<void> {
   // A retune cutting a commercial short counts as one played: the next is adEveryMs on.
   // And it ended: an explainer keeps its gap from it (review of #471).
   if (useTv.getState().ad) { adDue = performance.now() + adEveryMs(isBroadcast()); adEndedAt = performance.now() }
+  // A break cut short likewise.
+  if (useTv.getState().stats) { statsDue = performance.now() + statsEveryMs(isBroadcast()); statsEndedAt = performance.now() }
   // A new tape shows only what it opens itself: the scan's memory stays, what it showed goes.
   looked = null
   dwell.onScreen(null, performance.now())
   prepared.clear()
-  useTv.setState({ status: 'tuning', shot: null, played: 0, tapeTime: null, avatars: {}, arrivals: [], reactions: [], boxes: [], jump: null, ad: null, skipped: 0, cutAt: performance.now(), found: {}, finds: [] })
+  useTv.setState({ status: 'tuning', shot: null, played: 0, tapeTime: null, avatars: {}, arrivals: [], reactions: [], boxes: [], jump: null, ad: null, stats: null, skipped: 0, cutAt: performance.now(), found: {}, finds: [] })
   let from: number | null = null
   for (let attempt = 0; from === null; attempt++) {
     try {
@@ -953,6 +1066,7 @@ export const useTv = create<TvState>((set, get) => ({
   boxes: [],
   jump: null,
   ad: null,
+  stats: null,
 
   start: () => {
     if (get().on) return true
@@ -971,6 +1085,11 @@ export const useTv = create<TvState>((set, get) => ({
     adDue = performance.now() + adEveryMs(isBroadcast())
     adEndedAt = -Infinity
     startExplainers(performance.now())
+    forcedStats = forcedBoard(typeof window !== 'undefined' && window.location ? window.location.search : '')
+    lastBoard = null
+    statsEndedAt = -Infinity
+    countedAt = -Infinity
+    statsDue = performance.now() + (forcedStats ? STATS_FORCED_MS : statsFirstMs(isBroadcast()))
     // In the tap that turned TV on, where a browser lets sound start.
     startMusic()
     startWatching()
@@ -978,6 +1097,8 @@ export const useTv = create<TvState>((set, get) => ({
     timer = setInterval(() => tick(id), TICK_MS) as unknown as number
     void tune(id)
     if (!get().census) loadCensus(askWithin).then((census) => { if (id === run) set({ census }) }, () => {})
+    // The boards' counts: after the tape's own first reads, or at once for a board asked for by name.
+    statsTimer = setTimeout(() => { statsTimer = null; void countBoards(id) }, forcedStats ? 0 : STATS_LOAD_DELAY_MS)
     return true
   },
 
@@ -991,6 +1112,9 @@ export const useTv = create<TvState>((set, get) => ({
     tape++
     if (timer !== null) clearInterval(timer)
     timer = null
+    if (statsTimer !== null) clearTimeout(statsTimer)
+    statsTimer = null
+    statsDue = Infinity
     reader = null
     director = null
     queue = []
@@ -1004,7 +1128,7 @@ export const useTv = create<TvState>((set, get) => ({
     stopExplainers()
     stopMusic()
     stopWatching()
-    set({ on: false, shot: null, played: 0, tapeTime: null, avatars: {}, arrivals: [], reactions: [], found: {}, finds: [], chains: {}, boxes: [], jump: null, ad: null, status: 'tuning' })
+    set({ on: false, shot: null, played: 0, tapeTime: null, avatars: {}, arrivals: [], reactions: [], found: {}, finds: [], chains: {}, boxes: [], jump: null, ad: null, stats: null, status: 'tuning' })
     // A tap on an avatar during TV is not a request for its card afterwards.
     usePersonCard.getState().close()
     const cs = useCyberspace.getState()

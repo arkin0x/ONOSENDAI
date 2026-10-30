@@ -285,7 +285,7 @@ const NO_V2_CLOUD_HOPS_MESSAGE = 'This HOSAKA still makes hops in the old proof 
 /** A finished proof with no move waiting for it (a cut or a cancel cleared the target): never signed. */
 const NO_TARGET_MESSAGE = 'This proof was not signed: the move it was computed for is no longer lined up. Commit again.'
 /** A signed cloud move whose c or C is not the move its job was bought for: never recorded or sent. */
-const CLOUD_MOVE_MISMATCH_MESSAGE = 'This cloud move was not recorded or sent: the signed event does not name the move HOSAKA computed it for. Commit again.'
+const CLOUD_MOVE_MISMATCH_MESSAGE = 'This cloud move was not recorded or sent: the signed event does not name the move HOSAKA computed it for. The paid result is kept: RESUME signs it for its own move, from where the job started; moving first makes it worthless.'
 /** A local hop whose proof failed Level 1 under its own signed id: never recorded or sent. */
 const LOCAL_CHECK_FAILED_MESSAGE = 'This hop was not recorded or sent: its proof did not pass the check every reader will make of it'
 /** A finished proof in the old hop format (no mn, no mp): never signed (hop proof version 2, spec 5.9 to 5.13). */
@@ -2291,17 +2291,6 @@ function localHopFailures(event: NostrEvent, fromHex: string, to: Position, plan
   }
 }
 
-/**
- * Cut the chain in hand at its first unsent hop in the old proof format
- * (lib/staleFormat.ts; cutover checklist item 1 in lib/chainRulesEpoch.ts):
- * that hop and everything after it, all unsent, are set aside unpublished
- * and the chain continues from the event before. One such hop alone, whose
- * previous is still the head and which this machine proves within its
- * ceiling, goes back on the cursor so one COMMIT makes it again with the new
- * proof; it is never re-proved without the player, because a commit opens
- * the publisher's release gate. Redraws, saves, and says so in the proof
- * notice. Returns those words, or null when nothing was cut.
- */
 /** The unsent old-format hops already reported as stuck, so each is said once. */
 const staleStuck = new Set<string>()
 
@@ -2324,6 +2313,17 @@ export function noteStaleFormatStuck(event: NostrEvent): void {
 
 const STALE_STUCK_MESSAGE = 'One of your unsent actions is a hop in the old proof format, and an action after it is already on the relays, so it cannot be taken back. It will never be sent, and your unsent actions after it wait behind it. Respawning starts a new chain.'
 
+/**
+ * Cut the chain in hand at its first unsent hop in the old proof format
+ * (lib/staleFormat.ts; cutover checklist item 1 in lib/chainRulesEpoch.ts):
+ * that hop and everything after it, all unsent, are set aside unpublished
+ * and the chain continues from the event before. One such hop alone, whose
+ * previous is still the head and which this machine proves within its
+ * ceiling, goes back on the cursor so one COMMIT makes it again with the new
+ * proof; it is never re-proved without the player, because a commit opens
+ * the publisher's release gate. Redraws, saves, and says so in the proof
+ * notice. Returns those words, or null when nothing was cut.
+ */
 export function retireStaleFormat(): string | null {
   const before = useCyberspace.getState()
   const cut = staleFormatCut(before.events, (id) => before.published[id] === 'ok')
@@ -3952,7 +3952,12 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
     if (plan.awaiting) {
       const msg = plan.awaiting
       // The kept proof is for the paused step: its destination is the step's.
-      set({ plan: { ...plan, status: 'running', message: null, awaiting: null }, pendingTarget: plan.step.to })
+      set({
+        plan: { ...plan, status: 'running', message: null, awaiting: null },
+        pendingTarget: plan.step.to,
+        // A kept cloud proof goes in its job's plane (finishProof signs it there either way).
+        ...(msg.type === 'done' && msg.move ? { plane: coordToXyz(hexToCoord(msg.move.toHex)).plane } : {}),
+      })
       void get().finishProof(msg)
       return
     }
@@ -4108,7 +4113,11 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
     // Capture the chain we are extending. A cancel or a respawn bumps requestId,
     // so for this id events/head stay valid across the await; only `published`
     // moves under us as the publisher drains, so that is re-read after signing.
-    const { pendingTarget, plane, events, genesisId, prevEventId } = get()
+    const { pendingTarget, events, genesisId, prevEventId } = get()
+    // A cloud proof is for its job's move, in the job's plane, whatever plane
+    // is lined up now (a reload, or a flip between a declined signature and
+    // RESUME, leaves the head's): it is signed there (review of #539).
+    const plane: Plane = msg.move ? coordToXyz(hexToCoord(msg.move.toHex)).plane : get().plane
     // A proof is for one move, from here to its pending target. With none
     // (a cut or a cancel cleared it), nothing says where this proof goes, and
     // signing it at the current position would name a C its proof was never
@@ -5549,6 +5558,9 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
     }
     set({
       pendingTarget: positionFromWire(record.to),
+      // The job's plane, with its destination: a plane-change job resumed
+      // after a reload must sign C in the plane it was bought for.
+      plane: record.plane,
       proof: { ...IDLE_PROOF, status: 'computing', mode: moveAction(record.action), source: 'cloud' },
       cloud: {
         ...get().cloud,

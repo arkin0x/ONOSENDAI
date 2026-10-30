@@ -177,9 +177,10 @@ describe('review of #539', () => {
       type: 'done' as const, id: req.id, mode: 'hop' as const, elapsedMs: 1, ...provedFor(req), terrainK: 8, lca: { x: 1, y: 0, z: 0 }, totalOps: 0,
       prevEventId: req.prevEventId, source: 'cloud' as const, jobId: 'job-c', costMsats: 1000, move: { fromHex, toHex },
     })
-    // The job was for another destination (or another plane): refused, nothing kept.
-    const otherPlane = (home.plane === 0 ? 1 : 0) as 0 | 1
-    await S().finishProof(cloud(positionHex(target, otherPlane)))
+    // The job was for another destination: refused, nothing kept. (Another
+    // plane is no mismatch: a cloud proof is signed in its job's plane,
+    // cloudPlaneResume.test.ts.)
+    await S().finishProof(cloud(positionHex({ ...target, x: target.x ^ 2n }, home.plane)))
     expect(S().events.map((e) => e.id)).toEqual([spawn.id, h1.id])
     expect(S().proof.message).toContain('does not name the move HOSAKA computed it for')
     // The job started somewhere else: refused too.

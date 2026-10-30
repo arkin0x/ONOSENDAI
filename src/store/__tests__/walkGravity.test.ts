@@ -18,6 +18,7 @@
  * touches neither store nor the walls' cache; and a STOP mid-fall leaves
  * nothing behind.
  */
+import { provedFor } from '../fixtures/provedHop'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 vi.hoisted(() => {
@@ -121,7 +122,7 @@ function at(start: Position, p: Position = useCyberspace.getState().cursor): V3 
 }
 
 function done(req: (typeof posted)[number]) {
-  return { type: 'done' as const, id: req.id, mode: req.mode as 'hop' | 'sidestep', elapsedMs: 5, proofHash: 'dd'.repeat(32), hop: { sealHex: 'dd'.repeat(32), mnHex: '0'.repeat(16), mpHex: '00' }, terrainK: 3, lca: { x: 1, y: 0, z: 0 }, totalOps: 4 }
+  return { type: 'done' as const, id: req.id, mode: req.mode as 'hop' | 'sidestep', elapsedMs: 5, ...provedFor(req), terrainK: 3, lca: { x: 1, y: 0, z: 0 }, totalOps: 4 }
 }
 
 /** Land the newest proof, and wait for the next one when one is due. */

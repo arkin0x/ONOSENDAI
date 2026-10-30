@@ -15,6 +15,7 @@
  * The relays know nothing (LOCAL): what the other tab signed is only on disk.
  */
 
+import { provedHop } from '../fixtures/provedHop'
 import 'fake-indexeddb/auto'
 import { IDBFactory } from 'fake-indexeddb'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
@@ -82,7 +83,7 @@ async function openTab(): Promise<Tab> {
 async function signMove(tab: Tab): Promise<string> {
   const S = tab.store.useCyberspace.getState
   tab.store.useCyberspace.setState({ pendingTarget: { ...S().position, x: S().position.x + 1n } })
-  await S().applyProofMessage({ type: 'done', id: 0, mode: 'hop', elapsedMs: 1, proofHash: 'ab'.repeat(32), hop: { sealHex: 'ab'.repeat(32), mnHex: '0'.repeat(16), mpHex: '00' }, terrainK: 8, lca: { x: 1, y: 0, z: 0 }, totalOps: 1, prevEventId: S().prevEventId })
+  await S().applyProofMessage({ type: 'done', id: 0, mode: 'hop', elapsedMs: 1, ...provedHop(S()), terrainK: 8, lca: { x: 1, y: 0, z: 0 }, totalOps: 1, prevEventId: S().prevEventId })
   return S().prevEventId
 }
 

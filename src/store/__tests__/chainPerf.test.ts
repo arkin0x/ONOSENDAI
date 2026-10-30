@@ -16,6 +16,7 @@
  * job), so its size is reported, not held to O(1).
  */
 
+import { provedHop } from '../fixtures/provedHop'
 import 'fake-indexeddb/auto'
 import { IDBFactory } from 'fake-indexeddb'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
@@ -98,7 +99,7 @@ function countPuts(): { puts: number; chars: number[]; stop: () => void } {
 async function act(m: typeof import('../useCyberspace')): Promise<void> {
   const s = m.useCyberspace.getState()
   m.useCyberspace.setState({ pendingTarget: { ...s.position, x: s.position.x + 1n } })
-  await s.applyProofMessage({ type: 'done', id: 0, mode: 'hop', elapsedMs: 1, proofHash: 'ab'.repeat(32), hop: { sealHex: 'ab'.repeat(32), mnHex: '0'.repeat(16), mpHex: '00' }, terrainK: 8, lca: { x: 1, y: 0, z: 0 }, totalOps: 1, prevEventId: s.prevEventId })
+  await s.applyProofMessage({ type: 'done', id: 0, mode: 'hop', elapsedMs: 1, ...provedHop(m.useCyberspace.getState()), terrainK: 8, lca: { x: 1, y: 0, z: 0 }, totalOps: 1, prevEventId: s.prevEventId })
   const head = m.useCyberspace.getState().prevEventId
   m.useCyberspace.getState().setPublishStatus(head, 'ok')
 }

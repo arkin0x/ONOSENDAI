@@ -396,7 +396,7 @@ describe('hop proof version 2 at the HOSAKA boundary', () => {
     const v1 = { hop_n: { public_proof: 'aa'.repeat(32), secret_key: 'bb'.repeat(32) }, region_n: { public_proof: 'cc'.repeat(32), secret_key: 'dd'.repeat(32) }, K: 11 }
     const words = straddlingV1Hop('hop', v1, 'job-1234567890')
     expect(words).toContain('old proof format')
-    expect(words).toContain('refund')
+    expect(words).toContain('Nothing was signed and you did not move. This job is eligible for a refund to your HOSAKA balance.')
     expect(words).toContain('job-1234')
     expect(straddlingV1Hop('hop', { seal: 'aa'.repeat(32), mn: '0'.repeat(16), mp: '00', region_n: v1.region_n }, 'job-1')).toBeNull()
     expect(straddlingV1Hop('sidestep', v1, 'job-1')).toBeNull()

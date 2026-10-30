@@ -7,6 +7,7 @@
  * dragging the anchor to the new head.
  */
 
+import { provedHop } from '../fixtures/provedHop'
 import { describe, it, expect, beforeAll } from 'vitest'
 import { SPAWN, useCyberspace } from '../useCyberspace'
 import { placeSpawn } from '../fixtures/placeSpawn'
@@ -15,7 +16,7 @@ async function land(dx: bigint): Promise<void> {
   const s = useCyberspace.getState()
   useCyberspace.setState({ pendingTarget: { ...s.position, x: s.position.x + dx } })
   await s.applyProofMessage({
-    type: 'done', id: 0, mode: 'hop', elapsedMs: 1, proofHash: 'ab'.repeat(32), hop: { sealHex: 'ab'.repeat(32), mnHex: '0'.repeat(16), mpHex: '00' },
+    type: 'done', id: 0, mode: 'hop', elapsedMs: 1, ...provedHop(useCyberspace.getState()),
     terrainK: 8, lca: { x: 1, y: 0, z: 0 }, totalOps: 1,
   })
 }

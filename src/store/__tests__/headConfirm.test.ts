@@ -10,6 +10,7 @@
  * refusal with no word said; and every quick move paying two round trips.
  */
 
+import { provedFor } from '../fixtures/provedHop'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 /** Every key read from storage, in order. */
@@ -75,7 +76,7 @@ beforeEach(async () => {
 })
 
 /** A finished proof for the move just committed. */
-const done = (elapsedMs: number, prevEventId: string) => ({ type: 'done' as const, id: posted[posted.length - 1].id, mode: 'hop' as const, elapsedMs, proofHash: 'ab'.repeat(32), hop: { sealHex: 'ab'.repeat(32), mnHex: '0'.repeat(16), mpHex: '00' }, terrainK: 8, lca: { x: 1, y: 0, z: 0 }, totalOps: 1, prevEventId })
+const done = (elapsedMs: number, prevEventId: string) => ({ type: 'done' as const, id: posted[posted.length - 1].id, mode: 'hop' as const, elapsedMs, ...provedFor({ ...posted[posted.length - 1], prevEventId }), terrainK: 8, lca: { x: 1, y: 0, z: 0 }, totalOps: 1, prevEventId })
 
 describe('a move is signed only from a head the relays confirm', () => {
   it('refuses the move, and says so in a line, when the canonical relay cannot answer', async () => {

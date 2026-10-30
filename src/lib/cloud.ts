@@ -435,9 +435,10 @@ export function hopPausedWords(reason: string | null, retryAfterSeconds: number 
  * on its old worker. Such a proof cannot be signed by these chain rules.
  *
  * RULING PENDING; the recommended default is in force: refuse it, sign
- * nothing (never a version 1 hop), drop the record, and say HOSAKA refunds
- * it (the operator's scripts/v1_hop_refunds.py credits the job's debit to
- * the HOSAKA balance once, by job id). The one place the ruling lands: a
+ * nothing (never a version 1 hop), drop the record, and say the job is
+ * eligible for a refund. The refund is not automatic: the operator runs
+ * hosaka-api's scripts/v1_hop_refunds.py, which credits the job's debit to
+ * the HOSAKA balance once, by job id, for the ids the owner names. The one place the ruling lands: a
  * ruling to sign such a result as a version 1 hop inside the census-2
  * window would change this function and add a version 1 path to signing,
  * which hopTemplate refuses today.
@@ -447,7 +448,7 @@ export function hopPausedWords(reason: string | null, retryAfterSeconds: number 
  */
 export function straddlingV1Hop(action: HosakaAction, result: unknown, jobId: string): string | null {
   if (action !== 'hop' || cloudHopShape(result) !== 'v1') return null
-  return `HOSAKA finished this hop (job ${jobId.slice(0, 8)}) in the old proof format, which the chain rules no longer accept, so nothing was signed and you did not move. HOSAKA will refund it to your HOSAKA balance.`
+  return `HOSAKA finished this hop (job ${jobId.slice(0, 8)}) in the old proof format, which the chain rules no longer accept. Nothing was signed and you did not move. This job is eligible for a refund to your HOSAKA balance.`
 }
 
 export interface CloudStageDetail {

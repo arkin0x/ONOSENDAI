@@ -158,6 +158,10 @@ describe('signed but unsent hops in the old format (staleFormatCut)', () => {
     expect(cut).toEqual({ at: 1, removed: [v1], reprove: v1 })
   })
 
+  it('never removes a published event: a chain with one after the old hop is not cut', () => {
+    expect(staleFormatCut([spawn, v1, after], (id) => id === spawn.id || id === after.id)).toBeNull()
+  })
+
   it('cuts every unsent event after it too, and makes none of them again', () => {
     const cut = staleFormatCut([spawn, v1, after], (id) => id === spawn.id)
     expect(cut).toEqual({ at: 1, removed: [v1, after], reprove: null })

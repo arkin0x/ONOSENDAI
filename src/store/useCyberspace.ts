@@ -58,6 +58,7 @@ import {
   sidestepLanding,
   xyzToSectorId,
   type Plane,
+  verifyHopLevel1,
 } from 'cyberspace-core'
 import {
   GRID_RADIUS,
@@ -281,6 +282,10 @@ export const AIM_CHANGED_MESSAGE = 'This move was not sent: the cursor or the pl
 
 /** A HOSAKA whose /limits does not say hop_proof_version 2 makes the old hop proof, which this client cannot sign: no hop is bought from it. */
 const NO_V2_CLOUD_HOPS_MESSAGE = 'This HOSAKA still makes hops in the old proof format, which the chain rules no longer accept, so no cloud hop is bought from it. Nothing was charged.'
+/** A finished proof with no move waiting for it (a cut or a cancel cleared the target): never signed. */
+const NO_TARGET_MESSAGE = 'This proof was not signed: the move it was computed for is no longer lined up. Commit again.'
+/** A local hop whose proof failed Level 1 under its own signed id: never recorded or sent. */
+const LOCAL_CHECK_FAILED_MESSAGE = 'This hop was not recorded or sent: its proof did not pass the check every reader will make of it'
 /** A finished proof in the old hop format (no mn, no mp): never signed (hop proof version 2, spec 5.9 to 5.13). */
 const OLD_FORMAT_PROOF_MESSAGE = 'This proof is in the old hop format, which the chain rules no longer accept, so it was not signed. Commit again to make the move with the new proof.'
 /**
@@ -2250,6 +2255,30 @@ function cutInauthentic(pubkey: string, badKeys: Set<string>): string | null {
 }
 
 /**
+ * Level 1 of a hop just signed here (spec 5.11), under its own event id,
+ * with everything but its three tags taken from this client: the standing
+ * coordinate it moved from, the destination it was proved for, the previous
+ * event. Empty when it holds.
+ */
+function localHopFailures(event: NostrEvent, fromHex: string, to: Position, plane: Plane, prevEventId: string): string[] {
+  if (!/^[0-9a-f]{64}$/.test(fromHex)) return ['c']
+  const tagOf = (name: string): string | undefined => event.tags.find((t) => t[0] === name)?.[1]
+  try {
+    return verifyHopLevel1({
+      from: coordToXyz(hexToCoord(fromHex)),
+      to: { x: to.x, y: to.y, z: to.z, plane },
+      previousEventIdHex: prevEventId,
+      proof: tagOf('proof'),
+      nonce: tagOf('mn'),
+      openings: tagOf('mp'),
+      eventId: event.id,
+    })
+  } catch (err) {
+    return [`check: ${err instanceof Error ? err.message : String(err)}`]
+  }
+}
+
+/**
  * Cut the chain in hand at its first unsent hop in the old proof format
  * (lib/staleFormat.ts; cutover checklist item 1 in lib/chainRulesEpoch.ts):
  * that hop and everything after it, all unsent, are set aside unpublished
@@ -2261,9 +2290,21 @@ function cutInauthentic(pubkey: string, badKeys: Set<string>): string | null {
  * notice. Returns those words, or null when nothing was cut.
  */
 export function retireStaleFormat(): string | null {
-  const s = useCyberspace.getState()
-  const cut = staleFormatCut(s.events, (id) => s.published[id] === 'ok')
+  const before = useCyberspace.getState()
+  const cut = staleFormatCut(before.events, (id) => before.published[id] === 'ok')
   if (!cut) return null
+  // Whatever was computing or being bought was for the chain as it stood,
+  // and the head is about to change under it: stopped as a respawn stops it
+  // (review of #539, F1), so no proof lands on the cut chain with a
+  // destination it was not made for. A paid cloud job is kept for RESUME
+  // (cancelCloud), which drops it if its head is gone.
+  if (before.proof.status === 'computing') {
+    cancelProof()
+    requestId++
+  }
+  if (before.cloud.status !== 'idle') before.cancelCloud()
+  if (before.plan) useCyberspace.setState({ plan: null })
+  const s = useCyberspace.getState()
   const events = s.events.slice(0, cut.at)
   for (const e of cut.removed) setAside.add(e.id)
   const d = derive({ version: 2, events, published: events.filter((e) => s.published[e.id] === 'ok').map((e) => e.id), stats: s.chain, held: s.held })
@@ -3875,7 +3916,8 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
     }
     if (plan.awaiting) {
       const msg = plan.awaiting
-      set({ plan: { ...plan, status: 'running', message: null, awaiting: null } })
+      // The kept proof is for the paused step: its destination is the step's.
+      set({ plan: { ...plan, status: 'running', message: null, awaiting: null }, pendingTarget: plan.step.to })
       void get().finishProof(msg)
       return
     }
@@ -4031,8 +4073,13 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
     // Capture the chain we are extending. A cancel or a respawn bumps requestId,
     // so for this id events/head stay valid across the await; only `published`
     // moves under us as the publisher drains, so that is re-read after signing.
-    const { pendingTarget, position, plane, events, genesisId, prevEventId } = get()
-    const newPosition = pendingTarget ?? position
+    const { pendingTarget, plane, events, genesisId, prevEventId } = get()
+    // A proof is for one move, from here to its pending target. With none
+    // (a cut or a cancel cleared it), nothing says where this proof goes, and
+    // signing it at the current position would name a C its proof was never
+    // made for (review of #539, F1).
+    if (!pendingTarget) { refuseSigning(msg, NO_TARGET_MESSAGE, false); return }
+    const newPosition = pendingTarget
     const head = events[events.length - 1]
     // `previous` is the chain's actual last event, whatever it is, and `c` is
     // where the identity stands, which after an action this client does not
@@ -4099,6 +4146,14 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
     // A remote signer can take seconds; a cancel or respawn may have landed
     // while it was thinking. If so this receipt is for a chain that is gone.
     if (msg.id !== requestId) return
+    // Every hop computed here is checked at Level 1 under its own signed id
+    // before it is recorded or queued (spec 5.11; as cyberspace-mcp does), so
+    // a hop whose proof does not hold for this very event is never kept or
+    // sent. About 15 ms at h20. A cloud hop was checked before signing.
+    if (msg.mode === 'hop' && msg.source !== 'cloud') {
+      const failed = localHopFailures(event, standing?.coordHex ?? '', newPosition, plane, prevEventId)
+      if (failed.length > 0) { refuseSigning(msg, `${LOCAL_CHECK_FAILED_MESSAGE} (${failed.join(', ')})`, false); return }
+    }
     // The live feed kept delivering while the signer thought. What arrived is
     // folded now, before the signed event joins the chain: if it moved the
     // head or entered a game, the signed event is discarded unpublished, as a

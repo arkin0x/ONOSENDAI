@@ -13,6 +13,7 @@ import * as proofCapability from '../../lib/proofCapability'
  * paid but never claimed after a reload, or a cancelled flow landing late.
  */
 
+import { provedFor } from '../fixtures/provedHop'
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 
 const { fake, storage } = vi.hoisted(() => {
@@ -600,7 +601,7 @@ describe('cloud routes', () => {
     expect(S().plan?.step.source).toBe('local')
 
     // The local hop lands (the worker's answer, fed by hand). That commit is done; the cursor stays.
-    await S().applyProofMessage({ type: 'done', id: req1.id, mode: 'hop', elapsedMs: 5, proofHash: 'dd'.repeat(32), hop: { sealHex: 'dd'.repeat(32), mnHex: '0'.repeat(16), mpHex: '00' }, terrainK: 3, lca: { x: 12, y: 0, z: 0 }, totalOps: 4 })
+    await S().applyProofMessage({ type: 'done', id: req1.id, mode: 'hop', elapsedMs: 5, ...provedFor({ ...vi.mocked(postProof).mock.calls[vi.mocked(postProof).mock.calls.length - 1][0] }, S().events), terrainK: 3, lca: { x: 12, y: 0, z: 0 }, totalOps: 4 })
     expect(S().position.x).toBe(edge)
     expect(S().plan).toBeNull()
     expect(S().cursor).toEqual(cursor)
@@ -626,7 +627,7 @@ describe('cloud routes', () => {
     await vi.waitFor(() => { expect(vi.mocked(postProof)).toHaveBeenCalledTimes(2) })
     const req2 = vi.mocked(postProof).mock.calls[1][0]
     expect(req2).toMatchObject({ mode: 'hop', to: cursor })
-    await S().applyProofMessage({ type: 'done', id: req2.id, mode: 'hop', elapsedMs: 5, proofHash: 'ee'.repeat(32), hop: { sealHex: 'ee'.repeat(32), mnHex: '0'.repeat(16), mpHex: '00' }, terrainK: 3, lca: { x: 1, y: 0, z: 0 }, totalOps: 4 })
+    await S().applyProofMessage({ type: 'done', id: req2.id, mode: 'hop', elapsedMs: 5, ...provedFor({ ...vi.mocked(postProof).mock.calls[vi.mocked(postProof).mock.calls.length - 1][0] }, S().events), terrainK: 3, lca: { x: 1, y: 0, z: 0 }, totalOps: 4 })
     expect(S().plan).toBeNull()
     expect(S().position).toEqual(cursor)
     expect(S().events).toHaveLength(before + 3)
@@ -753,7 +754,7 @@ describe('cloud routes', () => {
     costMsats: 1000, createdAt: Date.now(), stage, deposit: null,
   })
 
-  it('refuses a hop that finished in the old hop_n shape, signs nothing, says HOSAKA refunds it, and drops the record (D-A)', async () => {
+  it('refuses a hop that finished in the old hop_n shape, signs nothing, says it is eligible for a refund, and drops the record (D-A)', async () => {
     const before = S().events.length
     const head = S().prevEventId
     const to = lineUpH13()
@@ -766,7 +767,7 @@ describe('cloud routes', () => {
     expect(S().events).toHaveLength(before)
     expect(S().position).toEqual(from)
     expect(S().cloud.message).toContain('old proof format')
-    expect(S().cloud.message).toContain('HOSAKA will refund it')
+    expect(S().cloud.message).toContain('This job is eligible for a refund to your HOSAKA balance.')
     expect(storage.getItem('onosendai:cloudJob')).toBeNull()
   })
 

@@ -46,5 +46,9 @@ export function staleFormatCut(events: readonly NostrEvent[], sent: (id: string)
   // A spawn is never a hop, so a cut always leaves the chain its spawn.
   if (at < 1) return null
   const removed = events.slice(at)
+  // Never a published event: what the relays hold is not this client's to
+  // take back. A chain that has one after an unsent old hop is not cut (and
+  // the publisher still never sends the old hop).
+  if (removed.some((e) => sent(e.id))) return null
   return { at, removed, reprove: removed.length === 1 ? removed[0] : null }
 }

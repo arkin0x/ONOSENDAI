@@ -68,8 +68,10 @@
  *    release gate, which only a deliberate action may do.
  * 2. lib/cloud.ts straddlingV1Hop: a kept hop job that comes back in the old
  *    hop_n shape is refused unsigned and its record dropped (decision D-A,
- *    recommended default; HOSAKA refunds it). A version 2 result is checked
- *    at Level 1 like any other.
+ *    RULING PENDING, recommended default). The player is told the job is
+ *    eligible for a refund; the refund is the operator's to run
+ *    (hosaka-api scripts/v1_hop_refunds.py), never automatic. A version 2
+ *    result is checked at Level 1 like any other.
  * 3 and 4 stand as written. cyberspace-mcp and cyberspace-cli are their own
  *    releases (mcp-1, cli-2).
  */

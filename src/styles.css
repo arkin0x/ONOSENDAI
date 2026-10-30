@@ -8781,6 +8781,13 @@ kbd {
 .hyperbar--broken .hyperbar__label { color: var(--danger); }
 .hyperbar--broken .hyperbar__meta { white-space: normal; }
 
+/* A newer deploy (VersionChip): required, the broken bar with a red RELOAD;
+   a hint, a plain chip with an accent glyph that a tap dismisses. */
+.hyperbar--version { cursor: default; }
+.hyperbar--version:not(.hyperbar--broken) { cursor: pointer; }
+.hyperbar--version:not(.hyperbar--broken) .hyperbar__glyph { color: var(--accent); }
+.hyperbar--version.hyperbar--broken .hyperbar__end { background: var(--danger); border-color: var(--danger); }
+
 /* What an action claimed, where that is not where you stand (ChainExplorer). */
 .explorer__detail--claimed { color: var(--danger); opacity: 0.8; }
 

@@ -91,6 +91,7 @@ import {
 } from '../lib/chainHold'
 import { findDivergence, foldBranchConflict, relayVersion, type BranchConflict } from '../lib/branchConflict'
 import {
+  ACTION_KIND,
   buildChain,
   chainHead,
   firstBreak,
@@ -105,6 +106,7 @@ import {
   enterHyperspaceTemplate,
   hyperjumpTemplate,
 } from '../lib/events'
+import { lookBeforeMove, movementBlocked, VERSION_BLOCKED_MESSAGE } from '../lib/versionGate'
 import { cancelProof, postProof, type ProofMode, type ProofResponse } from '../lib/workers'
 import { offloadFrom, cloudSeconds } from '../lib/crossover'
 import { recommendedHopHeight, recommendedSidestepHeight, useCalibration } from '../lib/calibration'
@@ -205,9 +207,12 @@ export const BROKEN_CHAIN_MESSAGE =
 
 /**
  * Why this client will not sign a base action onto `chain` now, in words, or
- * null when it may. Every way to move asks this one question. A broken chain
- * comes first: nothing on it counts, a game included, and a respawn is the
- * only way on from either.
+ * null when it may. Every way to move asks this one question. A deploy that
+ * requires newer chain rules than this build's comes first
+ * (lib/versionGate.ts): nothing this tab signs would be in the format the
+ * rules now ask for, a respawn included, so a RELOAD is the way on from
+ * anything. Then a broken chain: nothing on it counts, a game included, and
+ * a respawn is the only way on from either.
  */
 /**
  * A forked chain refuses every move too, but it stands at the spawn
@@ -222,6 +227,7 @@ export function brokenChainMessage(broken: NonNullable<ReturnType<typeof firstBr
 }
 
 export function whyNoMove(chain: ActionEvent[]): string | null {
+  if (movementBlocked()) return VERSION_BLOCKED_MESSAGE
   const broken = REFUSE_MOVES_ON_BROKEN_CHAIN ? firstBreak(chain) : null
   if (broken) return brokenChainMessage(broken)
   if (openBracket(chain)) return GAME_HOLDS_MESSAGE
@@ -1415,6 +1421,14 @@ function otherAccount(pubkey: string): void {
 }
 
 async function signEvent(template: EventTemplate, patienceMs?: number, signer: Signer = currentSigner): Promise<NostrEvent> {
+  // The last look before a movement event exists, whatever path asked for
+  // it (a hop, a sidestep, BOARD, a ride, a spawn, a respawn): a deploy
+  // requiring newer chain rules than this build's gets none from this tab
+  // (lib/versionGate.ts). A recent answer is reused, and no answer lets it go.
+  if (template.kind === ACTION_KIND) {
+    const look = lookBeforeMove()
+    if (!(look instanceof Promise ? await look : look)) throw new Error(VERSION_BLOCKED_MESSAGE)
+  }
   if (signer.kind === 'local') {
     // The local key computes the id and the signature itself, so its events
     // are authentic by construction, and are remembered as checked.
@@ -2940,6 +2954,11 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
    * counts as still aimed, and that it never asks HOSAKA for a quote.
    */
   const commitToward = async (walk: { target: Position; stillAimed: () => boolean } | null): Promise<void> => {
+    // Is a newer deploy requiring newer chain rules (lib/versionGate.ts)?
+    // Asked now, alongside the look at the relays below, and waited for
+    // before any proof is computed or any HOSAKA sats are spent; whyNoMove
+    // gives the answer. A recent answer is in hand at once, with no wait.
+    const versionLook = lookBeforeMove()
     // One proof at a time. X cancels a commit you regret.
     if (get().proof.status === 'computing') return
     // Looking at history: nothing here is a place you can move from.
@@ -3000,6 +3019,7 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
     if (get().events.length > 0) {
       const beforeHead = get().prevEventId
       const refusal = await confirmHead(() => set({ proof: { ...IDLE_PROOF, message: HEAD_RETRYING_MESSAGE } }))
+      if (versionLook instanceof Promise) await versionLook
       if (refusal === STALE_CONFIRMATION) return
       if (refusal) {
         set({ pendingTarget: null, proof: { ...IDLE_PROOF, status: 'infeasible', message: refusal } })
@@ -4575,6 +4595,11 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
   },
 
   rideViaHosaka: async (ask) => {
+    // Before anything is paid for: a deploy requiring newer chain rules
+    // refuses the ride below (whyNoMove), as for a commit. No wait when the
+    // answer is in hand.
+    const versionLook = lookBeforeMove()
+    if (versionLook instanceof Promise) await versionLook
     const { cloud, cloudPrefs, plan, proof, prevEventId, identity } = get()
     const refuse = (message: string): false => {
       set({ cloud: { ...get().cloud, rideError: message } })

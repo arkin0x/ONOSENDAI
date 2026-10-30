@@ -4,6 +4,7 @@ import { defineConfig, type Plugin } from 'vite'
 import react from '@vitejs/plugin-react'
 import { resolveVersion, UNVERSIONED } from './src/lib/version'
 import { ROUTE_PAGES, withCard } from './src/lib/routeCard'
+import { VERSION_FILE, versionFileOf } from './src/lib/chainEpoch'
 
 /** tv.html and workshop.html: the built page with each route's link preview, served at /tv and /workshop (src/lib/routeCard.ts). */
 function routeCards(): Plugin {
@@ -53,15 +54,49 @@ function composerKnowsWebGL2(): Plugin {
   }
 }
 
+/**
+ * version.json: the build id and the chain epoch this deploy requires, which
+ * every open tab reads to learn whether it may still move (src/lib/chainEpoch.ts,
+ * src/lib/versionGate.ts). Emitted beside index.html by the build and served
+ * by the dev server, so both answer the way a deploy does. vercel.json keeps
+ * it out of every cache.
+ */
+function versionFile(build: string): Plugin {
+  const source = `${JSON.stringify(versionFileOf(build))}\n`
+  return {
+    name: 'onosendai-version-file',
+    configureServer(server) {
+      server.middlewares.use(`/${VERSION_FILE}`, (_req, res) => {
+        res.setHeader('content-type', 'application/json')
+        res.setHeader('cache-control', 'no-store')
+        res.end(source)
+      })
+    },
+    generateBundle() {
+      this.emitFile({ type: 'asset', fileName: VERSION_FILE, source })
+    },
+  }
+}
+
+/** The commit being built, which is the build's id: Vercel's variable, else git's, else "dev". */
+function buildId(): string {
+  if (process.env.VERCEL_GIT_COMMIT_SHA) return process.env.VERCEL_GIT_COMMIT_SHA
+  try { return execSync('git rev-parse HEAD', { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim() || 'dev' } catch { return 'dev' }
+}
+
 /** The subject of the commit being built: Vercel's variable, else git's. */
 function commitMessage(): string | null {
   if (process.env.VERCEL_GIT_COMMIT_MESSAGE) return process.env.VERCEL_GIT_COMMIT_MESSAGE
   try { return execSync('git log -1 --format=%s', { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim() } catch { return null }
 }
 
+const BUILD = process.env.VITEST ? 'test' : buildId()
+
 export default defineConfig(async () => ({
-  plugins: [react(), routeCards(), composerKnowsWebGL2()],
+  plugins: [react(), routeCards(), composerKnowsWebGL2(), versionFile(BUILD)],
   define: {
+    // The same id version.json names, so a tab can tell a newer deploy from its own.
+    __ONOSENDAI_BUILD__: JSON.stringify(BUILD),
     // Tests never reach the network for a number; the build and the dev
     // server ask GitHub once (see src/lib/version.ts).
     __ONOSENDAI_VERSION__: JSON.stringify(process.env.VITEST ? UNVERSIONED : await resolveVersion(process.env, commitMessage())),

@@ -47,6 +47,7 @@ if (typeof (globalThis as { window?: unknown }).window === 'undefined') {
 }
 
 import { startPublisher } from '../publisher'
+import { useVersionGate } from '../versionGate'
 import { useCyberspace, type PublishStatus } from '../../store/useCyberspace'
 
 const PUBKEY = 'a'.repeat(64)
@@ -296,6 +297,24 @@ describe('the publisher and the release gate', () => {
     await idle()
     // resolveHeldConflict('local'): the hold lifts and the answer opens the gate.
     useCyberspace.setState({ held: false, publishRequest: useCyberspace.getState().publishRequest + 1 })
+    await until(() => sent.length === 2)
+    expect(sent).toEqual([ev('a1').id, ev('b2').id])
+  })
+
+  it('sends nothing while a newer deploy requires newer chain rules, and what waited goes out if that lifts (lib/versionGate.ts)', async () => {
+    useVersionGate.setState({ verdict: 'blocked' })
+    try {
+      setChain(['a1'])
+      useCyberspace.setState({ live: true })
+      // An action that would open the gate, signed before the tab learned of the deploy.
+      append('b2')
+      await idle()
+      expect(sent).toEqual([])
+      expect(useCyberspace.getState().published[ev('b2').id]).toBe('queued')
+    } finally {
+      // A later answer with this build's epoch (a revert): the hold lifts.
+      useVersionGate.setState({ verdict: 'ok' })
+    }
     await until(() => sent.length === 2)
     expect(sent).toEqual([ev('a1').id, ev('b2').id])
   })

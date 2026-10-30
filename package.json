@@ -20,7 +20,7 @@
     "@radix-ui/react-checkbox": "^1.3.11",
     "@radix-ui/react-switch": "^1.3.7",
     "@react-three/fiber": "^8.17.10",
-    "cyberspace-core": "git+https://github.com/arkin0x/cyberspace-core.git#0692a126109d0448715c0b7eb1449c8d57f55ffc",
+    "cyberspace-core": "git+https://github.com/arkin0x/cyberspace-core.git#fe6133a665bd5dd8e83f3ea1b82c30153600796e",
     "decimal.js": "^10.6.0",
     "fflate": "0.8.3",
     "lucide-react": "^1.34.0",

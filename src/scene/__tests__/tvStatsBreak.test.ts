@@ -168,6 +168,22 @@ describe('the CYBERSPACE STATS break on the tube', () => {
         // Rows on the right, the title and the avatar in the left third.
         expect(ranks[0].box.x0).toBeGreaterThan(f.w * 0.3)
       }
+
+    })
+
+    it(`${f.name}: the #1 splash keeps clear of every ranking's title and qualifier (the shots had it over A NEW SHAPE)`, () => {
+      set()
+      for (const id of ['longest-chain', 'most-bags', 'most-respawns', 'most-objects'] as const) {
+        const board = { ...ranking, id, ...BOARD_WORDS[id] }
+        const { texts } = paintBoard(board, BEATS.ranking.stamp - 0.5, f.w, f.h)
+        const splash = texts.find((x) => x.text === '#1')!
+        // The starburst round it: its type is 0.3 of its radius (tvPainter splash), set 0.08 of it above the centre.
+        const r = splash.size / 0.3
+        const burst = { x0: splash.x - r, x1: splash.x + r, y0: splash.y + 0.08 * r - r, y1: splash.y + 0.08 * r + r }
+        const words = texts.filter((x) => x.size !== splash.size && x.text.length > 2 && (board.title.includes(x.text) || board.qualifier.includes(x.text)))
+        expect(words.length, id).toBeGreaterThan(0)
+        for (const q of words) expect(burst.x0 < q.box.x1 && q.box.x0 < burst.x1 && burst.y0 < q.box.y1 && q.box.y0 < burst.y1, `${id}: the splash over "${q.text}"`).toBe(false)
+      }
     })
 
     it(`${f.name}: ACTIVE USERS shows HUMANS and AGENTS, ${f.stacked ? 'one over the other' : 'side by side'}, each with last week, and his Fun Fact whole`, () => {

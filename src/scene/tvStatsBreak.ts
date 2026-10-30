@@ -133,7 +133,8 @@ function slam(k: BreakKit, f: BreakFrame, lead: string, second: string, tc: numb
   const ctx = k.ctx
   const s = f.s
   const a = f.area
-  const big = titleLines(k, lead, w(a) - 20 * s, h(a) * 0.55, (f.stacked ? 72 : 110) * s)
+  // Stacked, the title takes two lines where that makes it larger (design 4.4: LONGEST / CHAIN).
+  const big = titleLines(k, lead, w(a) - 20 * s, h(a) * (f.stacked ? 0.4 : 0.55), (f.stacked ? 140 : 110) * s)
   const subSize = Math.max(14 * s, big.size * 0.32)
   ctx.font = `700 ${subSize}px ${k.font}`
   const sub = k.wrap(second, w(a) - 20 * s)
@@ -262,7 +263,7 @@ function redCube(ctx: CanvasRenderingContext2D, b: Box, t: number, s: number): v
   ctx.restore()
 }
 
-/** The #1's avatar on its stage, slamming in at `t` 0, with the #1 splash on its corner. */
+/** The #1's avatar on its stage, slamming in at `t` 0, with the #1 splash at its right, halfway down: clear of the title over it. */
 function hero(k: BreakKit, f: BreakFrame, b: Box, spin: CanvasImageSource | null, t: number, reduced: boolean): void {
   if (t < 0) return
   const ctx = k.ctx
@@ -278,7 +279,7 @@ function hero(k: BreakKit, f: BreakFrame, b: Box, spin: CanvasImageSource | null
   if (spin) ctx.drawImage(spin, b.x0, b.y0, w(b), h(b))
   else redCube(ctx, b, t, f.s)
   ctx.restore()
-  k.splash(b.x1 - w(b) * 0.06, b.y0 + h(b) * 0.12, w(b) * 0.24, t)
+  k.splash(b.x1 - w(b) * 0.04, b.y0 + h(b) * 0.5, w(b) * 0.2, t)
 }
 
 /** A count, large, and LAST WEEK under it: counting up from nothing as it comes in. */

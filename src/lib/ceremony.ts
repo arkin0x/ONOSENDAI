@@ -11,7 +11,10 @@
  *   700 ms        the open look swaps in under the glints (hollow, gold);
  *   700 to 3200   gold glints twinkle at the heap, seen by the bloom;
  *   700 to 1900   glyphs of the wordmark's katakana rise from the mouth,
- *                 resolve, and fade (12 on a phone, 24 wider).
+ *                 resolve, and fade (12 on a phone, 24 wider);
+ *   420 on        the loot rises out of the mouth, one object after
+ *                 another, and hovers above the chest; a chime as the last
+ *                 one lands (scene/ChestLoot.tsx).
  *
  * The calm path, for a person who asked their system for less motion: the
  * closed look fades into the open one over 300 ms; no lid turning, no
@@ -40,12 +43,51 @@ export function rainCount(widthPx: number): number {
   return widthPx < 700 ? 12 : 24
 }
 
+/** How long one loot object takes to rise out of the mouth, and how long after the one before it it starts. */
+export const RISE_MS = 900
+export const RISE_STAGGER_MS = 130
+/** At most this many stagger steps: a full chest is not a queue. */
+const STAGGER_CAP = 6
+
+/** When loot object `i` starts rising, ms from the start: as the lid nears the top, one after another. */
+export function riseStart(i: number): number {
+  return LID_MS * 0.6 + Math.min(i, STAGGER_CAP) * RISE_STAGGER_MS
+}
+
+/** How far loot object `i` has risen at `elapsed` ms, 0 (in the mouth) to 1 (hovering). */
+export function riseShare(i: number, elapsed: number): number {
+  return easeOutCubic((elapsed - riseStart(i)) / RISE_MS)
+}
+
+/** When the last of `n` loot objects lands, ms from the start: when the chime sounds (lib/ceremonySound). */
+export function landedAt(n: number): number {
+  return n === 0 ? 0 : riseStart(n - 1) + RISE_MS
+}
+
 /** Which ceremony a look plays. */
 export type CeremonyKind = 'chest' | 'door'
 
-/** How long a ceremony lasts before the chest is simply open. */
-export function ceremonyLength(_kind: CeremonyKind, calm: boolean): number {
-  return calm ? CALM_FADE_MS : LID_MS + GLINT_MS
+/**
+ * A door (arkinox, 2026-10-30, door A): its slab decodes away upward with
+ * the house static over DOOR_DISSOLVE_MS, as if slid up into the lintel,
+ * and the open look (the slab's bottom rail) fades in from DOOR_OPEN_AT
+ * over DOOR_RAIL_FADE_MS. No glints, no rain, no loot:
+ * a room is not treasure. WALK passes the door from the start, before any
+ * of this has been drawn (store/walkWalls.ts).
+ */
+export const DOOR_DISSOLVE_MS = 900
+export const DOOR_OPEN_AT = 540
+export const DOOR_RAIL_FADE_MS = 360
+
+/** How far the slab has decoded away at `elapsed` ms, 0 to 1. */
+export function dissolveShare(elapsed: number): number {
+  return Math.min(1, Math.max(0, elapsed / DOOR_DISSOLVE_MS))
+}
+
+/** How long a ceremony lasts before the chest or door is simply open. */
+export function ceremonyLength(kind: CeremonyKind, calm: boolean): number {
+  if (calm) return CALM_FADE_MS
+  return kind === 'door' ? Math.max(DOOR_DISSOLVE_MS, DOOR_OPEN_AT + DOOR_RAIL_FADE_MS) + 100 : LID_MS + GLINT_MS
 }
 
 /** How far the lid has turned at `elapsed` ms, toward `angle` (radians); the calm path never turns it. */

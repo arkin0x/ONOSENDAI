@@ -100,7 +100,7 @@ function LidOpening({ look, at }: { look: Look; at: number }): JSX.Element {
 }
 
 /** Every material under `root` at opacity `b` (WorldShards breatheMaterial, as EDIT's breath writes it). */
-function fadeAll(root: Object3D | null, b: number): void {
+export function fadeAll(root: Object3D | null, b: number): void {
   root?.traverse((o) => {
     const m = (o as { material?: Material | Material[] }).material
     if (!m) return
@@ -110,7 +110,7 @@ function fadeAll(root: Object3D | null, b: number): void {
 }
 
 /** The calm path: one look fading into the other, drawn as ghosts are so their opacity is real. */
-function CalmSwap({ from, to, at }: { from: ShardModel; to: ShardModel; at: number }): JSX.Element {
+export function CalmSwap({ from, to, at }: { from: ShardModel; to: ShardModel; at: number }): JSX.Element {
   const a = useRef<Group>(null)
   const b = useRef<Group>(null)
   useFrame(() => {

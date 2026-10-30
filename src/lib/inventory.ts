@@ -307,6 +307,16 @@ export function modelPrint(shard: ShardModel): string {
 }
 
 /** Whether a shard with this model is already held, cleared or not: taking it again would only duplicate it. */
+/**
+ * Whether a chest's content is held already: by its id, or (one shard per
+ * model, arkinox, 2026-10-11) a shard whose model is held under any name.
+ * What is held is hidden on the chest, in its rows and its loot (arkinox,
+ * 2026-10-30: "hide it on the chest so it feels like you took it").
+ */
+export function holdsEntry(items: Record<string, HeldItem>, entry: ChestEntry): boolean {
+  return !!items[entry.id] || (entry.body.type === 'shard' && !!entry.body.shard && holdsModel(items, entry.body.shard))
+}
+
 export function holdsModel(items: Record<string, HeldItem>, shard: ShardModel): boolean {
   const print = modelPrint(shard)
   for (const it of Object.values(items)) if (it.shard && modelPrint(it.shard) === print) return true

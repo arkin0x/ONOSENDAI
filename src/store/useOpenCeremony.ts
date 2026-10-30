@@ -74,12 +74,13 @@ export function yieldToWorld(): void {
 /**
  * After OPEN opened a chest: the card yields and the ceremony plays when
  * this is the first time and the chest is drawn, and the sound and the buzz
- * are offered (each gated). Returns what it did, for the caller and tests.
+ * are offered (each gated), the chime as the loot lands (`landMs`) only
+ * when the loot is seen rising. Returns what it did, for the caller and tests.
  */
-export function celebrateOpen(o: { me: string; chestId: string; kind: CeremonyKind; first: boolean; calm: boolean }): ReturnType<typeof afterOpen> {
+export function celebrateOpen(o: { me: string; chestId: string; kind: CeremonyKind; first: boolean; calm: boolean; landMs?: number }): ReturnType<typeof afterOpen> {
   const plan = afterOpen(o.first, lookDrawn(o.chestId))
   if (plan.yieldCards) yieldToWorld()
   if (plan.ceremony) useOpenCeremony.getState().begin(o.me, o.chestId, o.kind, o.calm)
-  if (plan.feedback) ceremonyFeedback(o.kind)
+  if (plan.feedback) ceremonyFeedback(o.kind, Date.now(), plan.ceremony ? o.landMs : undefined)
   return plan
 }

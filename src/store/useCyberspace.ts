@@ -1130,6 +1130,12 @@ interface PersistedChain {
    * all ordinary chains.
    */
   held?: boolean
+  /**
+   * When the chain's actions last changed (ms), in both stores: of two copies
+   * that have parted ways, the later one is the chain (furtherCopy). Absent
+   * on everything saved before IndexedDB kept the chain too: read as 0.
+   */
+  savedAt?: number
 }
 
 function loadOrGenerateKey(): Uint8Array {
@@ -1266,31 +1272,42 @@ function chainFrom(pubkey: string, data: Partial<PersistedChain> | StoredChain, 
     published: Array.isArray(data.published) ? data.published : [],
     stats: { ...EMPTY_STATS, ...(data.stats ?? {}) },
     held: data.held === true,
+    savedAt: typeof data.savedAt === 'number' && Number.isFinite(data.savedAt) ? data.savedAt : 0,
   }
 }
 
 /**
  * Of two stored copies of one identity's chain, the one that is further on:
  * the one holding every event of the other and more (a later save of the
- * same chain), or else the one with the newer spawn (a respawn). Otherwise
- * `a`, the copy the caller already trusts. localStorage stops taking a chain
- * that outgrew its few megabytes, so its copy can be an old stretch of the
- * one IndexedDB holds (lib/chainDb.ts).
+ * same chain); else, when they have parted ways (a respawn, a branch kept
+ * from the relays, a stretch one store missed), the one whose actions
+ * changed last (`savedAt`), and on a tie the one with the newer spawn.
+ * Otherwise `a`, the copy the caller already trusts. localStorage stops
+ * taking a chain that outgrew its few megabytes, so its copy can be an old
+ * stretch of the one IndexedDB holds (lib/chainDb.ts), stamped with the
+ * time it stopped.
  */
 function furtherCopy(a: LoadedChain | null, b: LoadedChain | null): LoadedChain | null {
   if (!a || !b) return a ?? b
-  const aIds = new Set(a.events.map((e) => e.id))
-  const bIds = new Set(b.events.map((e) => e.id))
-  if (b.events.length > a.events.length && a.events.every((e) => bIds.has(e.id))) return b
-  if (a.events.length >= b.events.length && b.events.every((e) => aIds.has(e.id))) return a
+  if (b.events.length > a.events.length && holdsAll(b, a)) return b
+  if (a.events.length >= b.events.length && holdsAll(a, b)) return a
+  const aAt = a.savedAt ?? 0
+  const bAt = b.savedAt ?? 0
+  if (aAt !== bAt) return bAt > aAt ? b : a
   return b.events[0].created_at > a.events[0].created_at ? b : a
+}
+
+/** Whether `outer` holds every event of `inner`. */
+function holdsAll(outer: { events: NostrEvent[] }, inner: { events: NostrEvent[] }): boolean {
+  const ids = new Set(outer.events.map((e) => e.id))
+  return inner.events.every((e) => ids.has(e.id))
 }
 
 /** This identity's saved chain, from whichever store holds it furthest on (furtherCopy). */
 async function loadNewestChain(pubkey: string): Promise<LoadedChain | null> {
   const local = loadChain(pubkey)
   const kept = await readStoredChain(pubkey)
-  return furtherCopy(local, kept && kept !== 'unreadable' ? chainFrom(pubkey, kept, false) : null)
+  return furtherCopy(local, kept && kept !== 'unreadable' && kept !== 'timeout' ? chainFrom(pubkey, kept, false) : null)
 }
 
 /**
@@ -1313,20 +1330,26 @@ function heldNow(pubkey: string): boolean {
 function saveChain(events: NostrEvent[], published: Record<string, PublishStatus>, stats: ChainStats, held?: boolean): void {
   const pubkey = events[0]?.pubkey
   if (!pubkey) return
+  const savedAt = changedAt(pubkey, events)
+  // While the load is still reading IndexedDB, what is in hand may be the
+  // old stretch localStorage kept, and saving it would put that over the
+  // whole chain: the save waits for the read (hydrateChain), which then
+  // saves whatever the chain is by then. When the actions changed is noted
+  // now, so a respawn made meanwhile is still the newer chain.
+  if (hydration?.pubkey === pubkey) { hydration.dirty = true; return }
   const data: PersistedChain = {
     version: 2,
     events,
     published: events.map((e) => e.id).filter((id) => published[id] === 'ok'),
     stats,
     ...((held ?? heldNow(pubkey)) ? { held: true } : {}),
+    savedAt,
   }
-  // The whole chain, whatever its size (lib/chainDb.ts). localStorage below
-  // takes it only while it fits. While the load is still reading IndexedDB,
-  // what is in hand may be the old stretch localStorage kept, and writing it
-  // would put that over the whole chain: the write waits for the read
-  // (hydrateChain), which then saves whatever the chain is by then.
-  if (hydration?.pubkey === pubkey) hydration.dirty = true
-  else storeWhole(pubkey, data)
+  // The whole chain, whatever its size (lib/chainDb.ts), but only once this
+  // session has read what IndexedDB keeps for the identity and taken it in:
+  // after a read that timed out or failed, what is in hand may be the old
+  // stretch, and the record may hold actions nothing else does.
+  if (dbRead.has(pubkey)) storeWhole(pubkey, data)
   // A chain at least as long as one localStorage already refused is not
   // offered again this session: the refusal costs a full serialization of
   // the chain on every save, and the answer would be the same. A shorter one
@@ -1338,7 +1361,7 @@ function saveChain(events: NostrEvent[], published: Record<string, PublishStatus
       tooBigForLocal.delete(pubkey)
     } catch {
       // Quota exceeded or private mode. The copy there stays at the last
-      // chain that fit; IndexedDB has this one, and the next load reads it.
+      // chain that fit, with that chain's time; IndexedDB has this one.
       tooBigForLocal.set(pubkey, events.length)
     }
   }
@@ -1352,12 +1375,42 @@ function saveChain(events: NostrEvent[], published: Record<string, PublishStatus
   } catch { /* storage full: the other tab learns from the relays instead */ }
 }
 
+/**
+ * Per identity, the chain in hand as last saved or loaded: its head, its
+ * length, and when its actions last changed. A save that changes neither
+ * (a relay acknowledgement) keeps the time, so it never makes an old
+ * stretch look newer than the chain it is a stretch of.
+ */
+const chainAt = new Map<string, { head: string; length: number; at: number }>()
+
+/** When `events` last changed, as saveChain stamps it: now, unless they are the chain already noted. */
+function changedAt(pubkey: string, events: NostrEvent[]): number {
+  const head = events[events.length - 1].id
+  const prev = chainAt.get(pubkey)
+  if (prev && prev.head === head && prev.length === events.length) return prev.at
+  const at = Math.max(Date.now(), (prev?.at ?? 0) + 1)
+  chainAt.set(pubkey, { head, length: events.length, at })
+  return at
+}
+
+/** Note the chain a load or a switch put in hand, with the time its store gave it. */
+function noteInHand(pubkey: string, chain: LoadedChain | null): void {
+  if (!chain) { chainAt.delete(pubkey); return }
+  chainAt.set(pubkey, { head: chain.events[chain.events.length - 1].id, length: chain.events.length, at: chain.savedAt ?? 0 })
+}
+
+/**
+ * Identities whose IndexedDB record this session has read and taken in
+ * (hydrateChain). Only theirs are written there (saveChain).
+ */
+const dbRead = new Set<string>()
+
 /** Per identity, the length of a chain localStorage refused this session (saveChain). */
 const tooBigForLocal = new Map<string, number>()
 
 /** Keep `data` as `pubkey`'s whole chain in IndexedDB (lib/chainDb.ts). */
 function storeWhole(pubkey: string, data: PersistedChain): void {
-  writeStoredChain(pubkey, { events: data.events, published: data.published, stats: { ...data.stats }, held: data.held === true })
+  writeStoredChain(pubkey, { events: data.events, published: data.published, stats: { ...data.stats }, held: data.held === true, savedAt: data.savedAt })
 }
 
 /**
@@ -1367,13 +1420,13 @@ function storeWhole(pubkey: string, data: PersistedChain): void {
  * identity wait for it (adoptChain), or the relays' copy of the actions this
  * device already signed would be counted as another device's; chain actions
  * wait for it (signaturesChecked), or a move would be signed from an old
- * head; and saves leave IndexedDB alone (`dirty`, saveChain).
+ * head; and saves wait (`dirty`, saveChain).
  */
 let hydration: { pubkey: string; done: Promise<void>; dirty: boolean } | null = null
 /** Relay events for the hydrating identity, folded once the read lands. */
 let awaitingHydration: NostrEvent[] = []
-/** How long a load waits for IndexedDB before it carries on with the chain in hand. */
-const HYDRATE_PATIENCE_MS = 4_000
+/** Bumped by every hydrateChain: a late answer to an older read is not taken. */
+let hydrateTicket = 0
 
 /** The small key every save of a chain writes beside it: what foldOtherTabs compares before reading the chain. */
 function chainMarkKeyFor(pubkey: string): string {
@@ -1659,8 +1712,9 @@ async function foldOtherTabs(pubkey: string): Promise<void> {
   if (mark !== null && knownMarks.get(pubkey) === mark) return
   // Both stores: the other tab's chain may have outgrown localStorage, and
   // then only IndexedDB has its save (lib/chainDb.ts).
+  // loadChain notes the mark it read, before the await; set again after it,
+  // it could overwrite the newer mark of a save this tab made meanwhile.
   const stored = await loadNewestChain(pubkey)
-  knownMarks.set(pubkey, mark)
   const s = useCyberspace.getState()
   if (!stored || s.identity.pubkey !== pubkey || s.events.length === 0) return
   const have = new Set(s.events.map((e) => e.id))
@@ -1826,65 +1880,116 @@ function startSignatureCheck(pubkey: string, unchecked: NostrEvent[]): void {
  * copy is then an old stretch of the chain. Taken in silence, because every
  * action in it was saved here; the relays are compared with it afterwards,
  * so what they hold that it lacks is all that is reported as another
- * device's. Nothing is written by the read itself: a save made while it was
- * out is written once it lands (`dirty`).
+ * device's. The read itself writes nothing: a save made while it was out
+ * waits, and is made once it lands.
+ *
+ * A read that runs out of time (lib/chainDb.ts READ_PATIENCE_MS) or fails
+ * stops holding anything up: the chain in hand is used as it is, as before
+ * IndexedDB kept the chain. But nothing is written to IndexedDB for this
+ * identity until a read has been taken in (dbRead), because the record may
+ * hold actions nothing else does, such as LOCAL ones never published. The
+ * read that ran out keeps going, and is taken in, in silence, when it lands.
  */
 function hydrateChain(pubkey: string): void {
   awaitingHydration = []
+  dbRead.delete(pubkey)
+  const ticket = ++hydrateTicket
   if (!chainDbAvailable()) { hydration = null; return }
   const epoch = chainEpoch
   const entry: { pubkey: string; done: Promise<void>; dirty: boolean } = { pubkey, done: Promise.resolve(), dirty: false }
-  let timer: ReturnType<typeof setTimeout> | undefined
-  const patience = new Promise<'unreadable'>((resolve) => { timer = setTimeout(() => resolve('unreadable'), HYDRATE_PATIENCE_MS) })
-  entry.done = Promise.race([readStoredChain(pubkey), patience]).then((kept) => {
-    clearTimeout(timer)
-    if (hydration !== entry) return
+  // When the chain in hand last changed as the read went out: a late answer
+  // that disagrees with moves made after that is not taken over them.
+  const startedAt = chainAt.get(pubkey)?.at ?? 0
+  entry.done = readStoredChain(pubkey, (late) => {
+    if (ticket !== hydrateTicket || late === 'unreadable') return
+    if (useCyberspace.getState().identity.pubkey !== pubkey) return
+    if (!takeStoredChain(pubkey, late, startedAt)) return
+    // Taken in: IndexedDB now gets whatever the chain is.
     const s = useCyberspace.getState()
-    if (s.identity.pubkey !== pubkey || chainEpoch !== epoch || kept === null || kept === 'unreadable') return
-    // The usual case, a chain that fits localStorage: nothing kept that is
-    // not in hand, and the chain is not rebuilt a second time.
-    const have = new Set(s.events.map((e) => e.id))
-    if (kept.events.every((e) => have.has(e?.id))) return
-    const fromDb = chainFrom(pubkey, kept, true)
-    if (!fromDb) return
-    const inHand: LoadedChain | null = s.events.length === 0
-      ? null
-      : { version: 2, events: s.events, published: s.events.filter((e) => s.published[e.id] === 'ok').map((e) => e.id), stats: s.chain, held: s.held, unchecked: [] }
-    if (furtherCopy(inHand, fromDb) !== fromDb) return
-    const d = derive(fromDb)
-    // Acknowledged here since the load stays acknowledged.
-    const published = { ...d.published }
-    for (const id of Object.keys(published)) if (s.published[id] === 'ok') published[id] = 'ok'
-    const following = s.atHead()
-    useCyberspace.setState({
-      events: d.events,
-      genesisId: d.genesisId,
-      prevEventId: d.prevEventId,
-      published,
-      held: d.held,
-      chain: d.chain,
-      position: d.position,
-      plane: d.plane,
-      headPlane: d.headPlane,
-      positionHistory: d.positionHistory,
-      ...(d.genesisId !== s.genesisId ? { spentMsats: loadSpent(d.genesisId) } : {}),
-      ...(following ? { anchor: d.position, anchorPlane: d.headPlane, ...(s.walking ? {} : { cursor: d.position }), exploreIndex: null } : {}),
-    })
-    // What localStorage did not have is checked like the rest, off the main thread.
-    startSignatureCheck(pubkey, fromDb.unchecked.filter((e) => !have.has(e.id)))
+    if (s.events[0]?.pubkey === pubkey) saveChain(s.events, s.published, s.chain, s.held)
+  }).then((kept) => {
+    if (hydration !== entry || ticket !== hydrateTicket) return
+    if (kept === 'timeout' || kept === 'unreadable') {
+      console.warn(`[chain] IndexedDB ${kept === 'timeout' ? 'did not answer in time' : 'could not be read'}: using the chain localStorage kept, and writing nothing to IndexedDB until it answers`)
+      return
+    }
+    if (useCyberspace.getState().identity.pubkey !== pubkey) return
+    // A respawn while the read was out is a new chain, never one to replace.
+    if (chainEpoch !== epoch) { dbRead.add(pubkey); return }
+    takeStoredChain(pubkey, kept, null)
   }).catch(() => { /* the chain in hand stands */ }).finally(() => {
     if (hydration !== entry) return
     hydration = null
     const s = useCyberspace.getState()
     if (s.identity.pubkey !== pubkey) { awaitingHydration = []; return }
-    if (entry.dirty && s.events[0]?.pubkey === pubkey) {
-      storeWhole(pubkey, { version: 2, events: s.events, published: s.events.filter((e) => s.published[e.id] === 'ok').map((e) => e.id), stats: s.chain, ...(s.held ? { held: true } : {}) })
-    }
+    // The save that waited. To localStorage either way; to IndexedDB only
+    // when the read was taken in (saveChain, dbRead).
+    if (entry.dirty && s.events[0]?.pubkey === pubkey) saveChain(s.events, s.published, s.chain, s.held)
     const waiting = awaitingHydration
     awaitingHydration = []
     if (waiting.length > 0) s.adoptChain(waiting)
   })
   hydration = entry
+}
+
+/**
+ * Take in what IndexedDB answered for `pubkey`: the chain in hand becomes
+ * the record's when the record is further on, in silence. True when it was
+ * taken in, and IndexedDB may be written for this identity from now on.
+ * `blindSince`, for an answer that came after its read ran out: when the
+ * chain in hand last changed as that read went out. A record that parted
+ * ways with moves made since then is left alone, unwritten, for a load
+ * that can compare them before anything is moved.
+ */
+function takeStoredChain(pubkey: string, kept: StoredChain | null, blindSince: number | null): boolean {
+  const s = useCyberspace.getState()
+  if (kept === null) { dbRead.add(pubkey); return true }
+  // The usual case, a chain that fits localStorage: nothing kept that is
+  // not in hand, and the chain is not rebuilt a second time.
+  const have = new Set(s.events.map((e) => e.id))
+  if (kept.events.every((e) => have.has(e?.id))) { dbRead.add(pubkey); return true }
+  const fromDb = chainFrom(pubkey, kept, true)
+  if (!fromDb) { dbRead.add(pubkey); return true }
+  const inHand: LoadedChain | null = s.events.length === 0
+    ? null
+    : { version: 2, events: s.events, published: s.events.filter((e) => s.published[e.id] === 'ok').map((e) => e.id), stats: s.chain, held: s.held, savedAt: chainAt.get(pubkey)?.at ?? 0, unchecked: [] }
+  if (furtherCopy(inHand, fromDb) !== fromDb) {
+    const movedSince = blindSince !== null && (chainAt.get(pubkey)?.at ?? 0) > blindSince
+    if (inHand && movedSince && !holdsAll(inHand, fromDb)) {
+      console.warn('[chain] IndexedDB answered late with a chain that parted ways with moves made since; left as it is, and nothing written there this session')
+      return false
+    }
+    dbRead.add(pubkey)
+    return true
+  }
+  const d = derive(fromDb)
+  // Acknowledged here since the load stays acknowledged.
+  const published = { ...d.published }
+  for (const id of Object.keys(published)) if (s.published[id] === 'ok') published[id] = 'ok'
+  // A hold the self-check already lifted stays lifted: the relays answered
+  // after the record was written (applySelfCheck).
+  const answered = s.selfCheck.pubkey === pubkey && (s.selfCheck.status === 'found' || s.selfCheck.status === 'none')
+  const held = d.held && (s.events.length > 0 ? s.held : !answered)
+  const following = s.atHead()
+  useCyberspace.setState({
+    events: d.events,
+    genesisId: d.genesisId,
+    prevEventId: d.prevEventId,
+    published,
+    held,
+    chain: d.chain,
+    position: d.position,
+    plane: d.plane,
+    headPlane: d.headPlane,
+    positionHistory: d.positionHistory,
+    ...(d.genesisId !== s.genesisId ? { spentMsats: loadSpent(d.genesisId) } : {}),
+    ...(following ? { anchor: d.position, anchorPlane: d.headPlane, ...(s.walking ? {} : { cursor: d.position }), exploreIndex: null } : {}),
+  })
+  noteInHand(pubkey, fromDb)
+  dbRead.add(pubkey)
+  // What localStorage did not have is checked like the rest, off the main thread.
+  startSignatureCheck(pubkey, fromDb.unchecked.filter((e) => !have.has(e.id)))
+  return true
 }
 
 /** Resolves once the read of `pubkey`'s chain from IndexedDB has landed (hydrateChain). */
@@ -2098,6 +2203,7 @@ function derive(saved: PersistedChain): {
 // (startSignatureCheck, below the store), and every chain action waits.
 const saved = loadChain(pubkeyHex, true)
 const initial = saved ? derive(saved) : provisionalChain(pubkeyHex)
+noteInHand(pubkeyHex, saved)
 // And the rest of it, if localStorage could only keep an old stretch:
 // started now, ahead of any save, so none of them writes the old stretch
 // over the whole chain IndexedDB keeps.
@@ -3074,6 +3180,7 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
     // Drawn at once, its signatures checked in the background (below).
     const local = loadChain(signer.pubkey, true)
     const base = local ? derive(local) : provisionalChain(signer.pubkey)
+    noteInHand(signer.pubkey, local)
     // A broken-chain notice or respawn confirm left open was about the old
     // identity's chain; it must never respawn the new one.
     useChainUi.getState().setBrokenView(null)

@@ -7,7 +7,8 @@
  * Synthesised on the spot through the one audio context (lib/audioContext),
  * no asset, nothing copied from any game: for a chest, a lock tick (a short
  * band of noise and a low click), then three rising notes of our own (C5,
- * E5, A5), and the message chime as the loot lands over it. Quiet, at the chime's gain, and failing silent where there is
+ * E5, A5), and the message chime as the loot lands over it; for a door,
+ * a low unlatch and a rising whoosh as the slab lifts (doorOpening). Quiet, at the chime's gain, and failing silent where there is
  * no audio. The buzz is three short pulses through lib/buzz.ts.
  *
  * Gated across every chest and door together: the sound at most once per
@@ -54,6 +55,7 @@ function play(kind: CeremonyKind, landMs?: number): void {
     if (!ac) return
     if (ac.state === 'suspended') void ac.resume()
     if (kind === 'chest') chestOpening(ac, ac.currentTime, landMs)
+    else doorOpening(ac, ac.currentTime)
   } catch {
     /* no audio here */
   }
@@ -129,4 +131,46 @@ function chestOpening(ac: AudioContext, t0: number, landMs?: number): void {
   notes(ac, t0, CHEST_NOTES)
   // The message chime's two notes (lib/chime.ts) as the last loot object lands, a little softer.
   if (landMs !== undefined) chimeAt(ac, t0 + landMs / 1000, 0.06)
+}
+
+/**
+ * A door opening: a low unlatch (a falling thump under a short dull click),
+ * then a rising whoosh as the slab lifts (noise through a band sweeping up
+ * over the slab's decode). Its own sound, never the chest's notes.
+ */
+function doorOpening(ac: AudioContext, t0: number): void {
+  const thump = ac.createOscillator()
+  thump.type = 'sine'
+  thump.frequency.setValueAtTime(120, t0)
+  thump.frequency.exponentialRampToValueAtTime(52, t0 + 0.18)
+  thump.connect(envelope(ac, t0, 0.14, 0.22, 0.004))
+  thump.start(t0)
+  thump.stop(t0 + 0.24)
+  const click = ac.createBufferSource()
+  click.buffer = noise(ac)
+  const dull = ac.createBiquadFilter()
+  dull.type = 'lowpass'
+  dull.frequency.setValueAtTime(700, t0)
+  click.connect(dull)
+  dull.connect(envelope(ac, t0, 0.08, 0.05, 0.002))
+  click.start(t0)
+  click.stop(t0 + 0.06)
+  const w0 = t0 + 0.12
+  const air = ac.createBufferSource()
+  air.buffer = noise(ac)
+  air.loop = true
+  const band = ac.createBiquadFilter()
+  band.type = 'bandpass'
+  band.Q.setValueAtTime(1.6, w0)
+  band.frequency.setValueAtTime(260, w0)
+  band.frequency.exponentialRampToValueAtTime(2400, w0 + 0.8)
+  const swell = ac.createGain()
+  swell.gain.setValueAtTime(0.0001, w0)
+  swell.gain.exponentialRampToValueAtTime(0.07, w0 + 0.45)
+  swell.gain.exponentialRampToValueAtTime(0.0001, w0 + 0.9)
+  swell.connect(ac.destination)
+  air.connect(band)
+  band.connect(swell)
+  air.start(w0)
+  air.stop(w0 + 0.95)
 }

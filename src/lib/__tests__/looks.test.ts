@@ -11,7 +11,8 @@
  * its closed look.
  */
 import { describe, expect, it } from 'vitest'
-import { builtInLook, drawnLook, isDoor, lookOf, type Look } from '../looks'
+import { flatten } from 'sno-core/shards'
+import { builtInLook, drawnLook, isDoor, keptInChest, lookOf, type Look } from '../looks'
 import { constrainOf } from '../walkConstrain'
 import { lookBounds, lookScale } from '../../scene/LookMark'
 
@@ -91,5 +92,62 @@ describe('how big a look is drawn', () => {
     expect(lookScale(1e-6, 1, 24, 0.01)).toBeCloseTo(0.24, 9)
     // Nothing to measure: the true size.
     expect(lookScale(3, 0, 24, 0.01)).toBe(3)
+  })
+})
+
+describe('what stays in a chest', () => {
+  const here = { x: 8n, y: 9n, z: 10n }
+  const box = { at: here, tags: [['title', 'Box']] }
+  const gate = { at: here, tags: [['title', 'Gate'], ['door', '4']] }
+  it('a thing found in a bag is drawn where it stands', () => {
+    expect(keptInChest({ at: here }, undefined)).toBe(false)
+  })
+  it('a thing out of a chest at the chest\u2019s own place stays in it, to float out as loot', () => {
+    expect(keptInChest({ chestId: 'box', at: here }, box)).toBe(true)
+  })
+  it('a thing aimed at its own point in the chest\u2019s region is drawn there, as before', () => {
+    expect(keptInChest({ chestId: 'box', at: { ...here, x: 9n } }, box)).toBe(false)
+  })
+  it('everything behind a door stands in the room, and a thing whose chest is unknown is drawn', () => {
+    expect(keptInChest({ chestId: 'gate', at: here }, gate)).toBe(false)
+    expect(keptInChest({ chestId: 'gone', at: here }, undefined)).toBe(false)
+  })
+})
+
+describe('the treasure chest’s lid', () => {
+  const t = builtInLook('treasure')
+  it('cuts the closed chest into a body and a lid, every face once, every point it uses', () => {
+    const lid = t.lid!
+    expect(lid.body.faces.length + lid.lid.faces.length).toBe(t.closed.faces.length)
+    expect(lid.lid.faces.length).toBe(154)
+    for (const part of [lid.body, lid.lid]) {
+      expect(part.facecolors).toHaveLength(part.faces.length)
+      const used = new Set(part.faces.flat())
+      expect(used.size).toBe(part.vertices.length)
+      expect(Math.max(...used)).toBe(part.vertices.length - 1)
+    }
+  })
+
+  it('turned on its hinge, the lid stands where the owner’s open chest has it', () => {
+    const { lid, hinge } = t.lid!
+    const open = flatten(t.open!).positions
+    const pts = flatten(lid).positions
+    const c = Math.cos(hinge.angle), s = Math.sin(hinge.angle)
+    let landed = 0
+    const n = pts.length / 3
+    for (let i = 0; i < n; i++) {
+      // A turn about +X through the hinge, as three's rotation.x turns a group.
+      const y = pts[i * 3 + 1] - hinge.y, z = pts[i * 3 + 2] - hinge.z
+      const p = [pts[i * 3], hinge.y + y * c - z * s, hinge.z + y * s + z * c]
+      let best = Infinity
+      for (let j = 0; j < open.length; j += 3) best = Math.min(best, Math.hypot(open[j] - p[0], open[j + 1] - p[1], open[j + 2] - p[2]))
+      if (best < 2.5 / 120) landed++
+    }
+    expect(n).toBe(90)
+    expect(landed).toBeGreaterThanOrEqual(80)
+  })
+
+  it('only TREASURE has a lid', () => {
+    expect(builtInLook('door').lid).toBeUndefined()
   })
 })

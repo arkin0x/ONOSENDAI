@@ -35,7 +35,11 @@ import { holdsModel, openingKeys, type HeldFrom, type HeldItem, type HeldPlace }
 import { safeNpub } from '../lib/npub'
 import { useCyberspace } from '../store/useCyberspace'
 import { useInventory } from '../store/useInventory'
-import { openedKey, rememberOpened, useOpenedChests } from '../store/useOpenedChests'
+import { openedByHand, openedKey, rememberOpened, useOpenedChests } from '../store/useOpenedChests'
+import { celebrateOpen } from '../store/useOpenCeremony'
+import { lookOf } from '../lib/looks'
+import { resumeAudio } from '../lib/audioContext'
+import { prefersReducedMotion } from '../hooks/useReducedMotion'
 import { profileLabel } from '../store/useProfiles'
 import { useMutes } from '../store/useMutes'
 import { hidesThing, type Muted } from '../lib/muteList'
@@ -158,10 +162,19 @@ export function ChestBlock({ id, chest, author, verified, place, sealer: given }
 
   const open = async (): Promise<void> => {
     if (!opener || busy) return
+    // Inside the tap, so a phone lets the ceremony's sound out (lib/audioContext).
+    resumeAudio()
+    // Once per chest, per identity, per device: a chest opened by hand before plays nothing.
+    const first = !openedByHand(me, id)
     setBusy(true)
     setStatus(null)
     try {
       const contents = await openChestHere({ id, chest, author, place, sealer }, opener)
+      if (contents) {
+        // The card yields and the chest opens where it stands (store/useOpenCeremony).
+        const look = lookOf({ type: 'chest', event: found?.inner ?? ownInner })
+        if (look?.name === 'treasure') celebrateOpen({ me, chestId: id, kind: 'chest', first, calm: prefersReducedMotion() })
+      }
       if (contents && contents.length === 0) setStatus('Opened: nothing inside this client can read.')
     } catch (err) {
       setStatus(err instanceof Error ? err.message : String(err))

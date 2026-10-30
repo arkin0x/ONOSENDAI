@@ -9,7 +9,7 @@
  * who left it as a key is, and a tap opens its card, where OPEN is.
  */
 
-import { useMemo } from 'react'
+import { useEffect, useMemo } from 'react'
 import { ACCENT } from '../lib/palette'
 import { GRID_RADIUS, itemCentre, type ViewAxes } from '../lib/space'
 import { drawnLook, lookOf, type Look } from '../lib/looks'
@@ -18,6 +18,8 @@ import { alignedOrigin, useCyberspace } from '../store/useCyberspace'
 import { openedKey, useOpenedChests } from '../store/useOpenedChests'
 import { useShards } from '../store/useShards'
 import { useMutes } from '../store/useMutes'
+import { setDrawnLooks, useOpenCeremony } from '../store/useOpenCeremony'
+import { ChestCeremony } from './ChestCeremony'
 import { LookMark } from './LookMark'
 import { NOTE, NOTE_EDGE_PX, author, itemMarkText } from './WorldMessages'
 
@@ -43,12 +45,13 @@ export function ChestLooks({ axes }: { axes: ViewAxes }): JSX.Element | null {
   const curated = useShards((s) => s.curated)
   const muted = useMutes((s) => s.muted)
   const opened = useOpenedChests((s) => s.opened)
+  const playing = useOpenCeremony((s) => s.playing)
 
   const placed = useMemo<PlacedLook[]>(() => {
     if (!markShown('note', scaleExp)) return []
     const origin = alignedOrigin(anchor, scaleExp)
     const out: PlacedLook[] = []
-    for (const w of useShards.getState().worldItems()) {
+    for (const w of useShards.getState().drawnItems()) {
       if (w.type !== 'chest' || !w.chest || w.plane !== anchorPlane) continue
       const look = lookOf(w)
       if (!look) continue
@@ -61,21 +64,30 @@ export function ChestLooks({ axes }: { axes: ViewAxes }): JSX.Element | null {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [anchor, anchorPlane, scaleExp, axes, me, mine, discovered, curated, muted, opened])
 
+  // OPEN asks whether a chest is drawn, to know whether its ceremony can be seen (store/useOpenCeremony).
+  useEffect(() => { setDrawnLooks(placed.map((w) => w.key)) }, [placed])
+  useEffect(() => () => setDrawnLooks([]), [])
+
   if (placed.length === 0) return null
   return (
     <>
-      {placed.map((w) => (
-        <LookMark
-          key={w.key}
-          look={w.look}
-          model={drawnLook(w.look, w.opened)}
-          at={w.centre}
-          axes={axes}
-          minPx={NOTE_EDGE_PX}
-          label={{ text: w.text, color: NOTE, sub: w.sub, subColor: ACCENT }}
-          onTap={() => useShards.getState().selectSecret(w.key)}
-        />
-      ))}
+      {placed.map((w) => {
+        const ceremony = playing[openedKey(me, w.key)]
+        return (
+          <LookMark
+            key={w.key}
+            look={w.look}
+            model={drawnLook(w.look, w.opened)}
+            at={w.centre}
+            axes={axes}
+            minPx={NOTE_EDGE_PX}
+            label={{ text: w.text, color: NOTE, sub: w.sub, subColor: ACCENT }}
+            onTap={() => useShards.getState().selectSecret(w.key)}
+          >
+            {ceremony && w.opened ? () => <ChestCeremony look={w.look} at={ceremony.at} calm={ceremony.calm} /> : undefined}
+          </LookMark>
+        )
+      })}
     </>
   )
 }

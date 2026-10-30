@@ -63,7 +63,7 @@ export function HiddenAudio({ axes }: { axes: ViewAxes }): null {
     placed.current.clear()
     const sh = useShards.getState()
     const from = [sh.mine, sh.discovered, sh.curated, useMutes.getState().muted, cs.identity.pubkey]
-    if (from.some((v, i) => v !== cache.current.from[i])) cache.current = { from, items: sh.worldItems().filter((w) => w.type === 'audio') }
+    if (from.some((v, i) => v !== cache.current.from[i])) cache.current = { from, items: sh.drawnItems().filter((w) => w.type === 'audio') }
     for (const w of cache.current.items) {
       // One that failed waits out its pause (useHiddenAudio worldFailed), so a dead URL is not fetched every tick.
       if (w.type !== 'audio' || !w.audio?.autoplay || w.plane !== cs.anchorPlane || worldFailed(w.key, now)) continue

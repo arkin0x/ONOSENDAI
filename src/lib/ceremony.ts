@@ -1,0 +1,102 @@
+/**
+ * ceremony.ts: the OPEN ceremony's timeline, as pure numbers (arkinox,
+ * 2026-10-30, design L "Treasure", onosendai/chest-open-ceremony-options.md).
+ *
+ * "when you open the chest the modal goes away and the in-world animation
+ * plays." Every time is from the moment the decrypt returns, never the tap:
+ * a signer can take seconds, and nothing moves for a chest that is not open
+ * yet. Then, on the chest where it stands:
+ *
+ *   0 to 700 ms   the lid turns up and back on its hinge, ease-out;
+ *   700 ms        the open look swaps in under the glints (hollow, gold);
+ *   700 to 3200   gold glints twinkle at the heap, seen by the bloom;
+ *   700 to 1900   glyphs of the wordmark's katakana rise from the mouth,
+ *                 resolve, and fade (12 on a phone, 24 wider).
+ *
+ * The calm path, for a person who asked their system for less motion: the
+ * closed look fades into the open one over 300 ms; no lid turning, no
+ * glints, no rain. It ends in the same state: the open look.
+ *
+ * Plays once per chest, per identity, per device: only an OPEN that opened
+ * a chest not opened by hand before (store/useOpenedChests openedByHand). A
+ * reload restores an opened chest silently, open. The camera never moves.
+ * Cyberspace TV opens nothing, so it never plays there.
+ */
+
+import { easeOutCubic } from './decode'
+
+/** How long the lid takes to turn open. */
+export const LID_MS = 700
+/** How long the gold glints at the heap last, from the swap. */
+export const GLINT_MS = 2500
+/** How long each rising glyph takes, from its own start. */
+export const RAIN_MS = 1200
+/** The latest a rising glyph starts after the swap. */
+export const RAIN_SPREAD_MS = 450
+/** The calm path's crossfade. */
+export const CALM_FADE_MS = 300
+/** Glyphs in the rain: fewer on a narrow screen, as labels shrink there (WorldLabel labelShrink). */
+export function rainCount(widthPx: number): number {
+  return widthPx < 700 ? 12 : 24
+}
+
+/** Which ceremony a look plays. */
+export type CeremonyKind = 'chest' | 'door'
+
+/** How long a ceremony lasts before the chest is simply open. */
+export function ceremonyLength(_kind: CeremonyKind, calm: boolean): number {
+  return calm ? CALM_FADE_MS : LID_MS + GLINT_MS
+}
+
+/** How far the lid has turned at `elapsed` ms, toward `angle` (radians); the calm path never turns it. */
+export function lidTurn(elapsed: number, angle: number, calm = false): number {
+  if (calm) return 0
+  return easeOutCubic(elapsed / LID_MS) * angle
+}
+
+/** Whether the open look has swapped in at `elapsed` ms. */
+export function swapped(elapsed: number, calm = false): boolean {
+  return elapsed >= (calm ? CALM_FADE_MS : LID_MS)
+}
+
+/** The open look's share of the calm path's crossfade at `elapsed` ms, 0 to 1. */
+export function calmShare(elapsed: number): number {
+  return Math.min(1, Math.max(0, elapsed / CALM_FADE_MS))
+}
+
+/**
+ * How bright the glints are at `elapsed` ms from the start: none until the
+ * lid is nearly up, at full in 150 ms, then fading out by the end; none at
+ * all on the calm path.
+ */
+export function glintLevel(elapsed: number, calm = false): number {
+  if (calm) return 0
+  const t = elapsed - LID_MS * 0.85
+  if (t <= 0) return 0
+  const end = LID_MS + GLINT_MS - LID_MS * 0.85
+  if (t >= end) return 0
+  return Math.min(1, t / 150) * (1 - (t / end) ** 2)
+}
+
+/** What OPEN does once the decrypt has returned. */
+export interface AfterOpen {
+  /** The card (and any list it was in) closes, so the chest is seen. */
+  yieldCards: boolean
+  /** The in-world ceremony plays on the chest. */
+  ceremony: boolean
+  /** The sound and the buzz are offered (each still gated, lib/ceremonySound). */
+  feedback: boolean
+}
+
+/**
+ * What an OPEN that worked does next. `first`: this identity had not opened
+ * the chest by hand on this device before (once per chest). `drawn`: the
+ * chest stands in the world as its look right now, on screen to be seen. A
+ * chest opened somewhere it is not drawn (a chest in ITEMS, one inside
+ * another chest, one past the zoom chests are drawn at) keeps its card open
+ * and lists what is inside, with the sound alone.
+ */
+export function afterOpen(first: boolean, drawn: boolean): AfterOpen {
+  if (!first) return { yieldCards: false, ceremony: false, feedback: false }
+  return { yieldCards: drawn, ceremony: drawn, feedback: true }
+}

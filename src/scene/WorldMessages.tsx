@@ -189,7 +189,7 @@ export function WorldMessages({ axes }: Props): JSX.Element | null {
     // name, so VIEW and GO TO IT have something to arrive at. What it is and
     // what it opens is in the lists (ItemRows), one tap away. A chest or a
     // door is drawn as the look it wears (ChestLooks), at the same zooms.
-    return useShards.getState().worldItems()
+    return useShards.getState().drawnItems()
       .filter((w) => ((w.type === 'message' && w.text) || w.type === 'key' || (w.type === 'audio' && w.audio)) && w.plane === anchorPlane)
       .map((w) => ({
         key: w.key,

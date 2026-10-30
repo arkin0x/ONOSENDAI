@@ -18,3 +18,8 @@ export function useReducedMotion(): boolean {
   }, [query])
   return reduced
 }
+
+/** The same question asked once, outside React: for a moment that starts from a tap (the OPEN ceremony). */
+export function prefersReducedMotion(): boolean {
+  try { return typeof window !== 'undefined' && window.matchMedia('(prefers-reduced-motion: reduce)').matches } catch { return false }
+}

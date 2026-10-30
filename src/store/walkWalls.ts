@@ -830,7 +830,7 @@ export const doorWallKey = (doorId: string): string => `door:${doorId}`
  * walker is never held by an animation; its open look carries no constrain.
  */
 export function wallItems(plane: number): WallItem[] {
-  const all = useShards.getState().worldItems()
+  const all = useShards.getState().drawnItems()
   const shards = all.filter((w): w is WorldItem & { shard: ShardModel } => w.type === 'shard' && !!w.shard && w.plane === plane)
   const me = useCyberspace.getState().identity.pubkey
   const opened = useOpenedChests.getState().opened

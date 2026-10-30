@@ -584,9 +584,11 @@ export function TvScreenEffect(): JSX.Element {
     // Now and then the set acts up (lib/tv/glitch.ts): never over a cut, the
     // tunnel or tuning, and never with reduced motion asked for.
     // Nor over a commercial: the sponsor's spot plays clean.
-    const held = since < CUT_MS || tv.jump?.phase === 'warp' || tv.status !== 'playing' || tv.ad !== null
+    // A CYBERSPACE STATS break plays clean too.
+    const onBreak = tv.ad !== null || tv.stats !== null
+    const held = since < CUT_MS || tv.jump?.phase === 'warp' || tv.status !== 'playing' || onBreak
     // And one already on ends as the spot or the tunnel comes in, not over them.
-    const g = reduced ? CALM : glitches.levels(now, held, tv.ad !== null || tv.jump?.phase === 'warp')
+    const g = reduced ? CALM : glitches.levels(now, held, onBreak || tv.jump?.phase === 'warp')
     u.get('uAberr')!.value = g.aberration
     u.get('uTear')!.value = g.tear
     u.get('uTearSeed')!.value = g.tearSeed

@@ -26,15 +26,17 @@
 
 import type { ShardModel } from 'sno-core/shards'
 import { actionLabel } from '../lib/events'
-import { chainLengthAt, countTo } from '../lib/tv/stats'
+import { bagsHiddenAt, chainLengthAt, countTo } from '../lib/tv/stats'
 import { itemLength, type Shot, type TapeItem } from '../lib/tv/director'
 import { CUT_MS, contentsWords, quoteOf, segmentDoing, typePace, TYPE_DELAY_S } from '../hud/TvSegments'
 import { findLines, placeable, shotProgress, type TvAvatar, type TvFindLine } from '../store/useTv'
 import { adFor, type AdScene, type AdTheme } from '../lib/tv/hosakaAd'
 import { BROADCAST_TAG, broadcastScale, isBroadcast, isPortraitBroadcast } from '../lib/tv/broadcast'
+import { BOARD_WORDS, STATS_TAG, type StatsBoard } from '../lib/tv/cyberspaceStats'
+import { paintStatsBoard, type BreakKit } from './tvStatsBreak'
 import { EXPLAINER_PIP_ENABLED } from '../lib/tv/explainer'
 import { watchingWords } from '../lib/tv/watching'
-import type { Census, ChainTimes } from '../lib/tv/stats'
+import type { Census, ChainHistory } from '../lib/tv/stats'
 import type { Position } from '../lib/space'
 import { trackDrawing, type DirtyRect, type DrawTracker } from './drawTracker'
 import { CARD_CLEAR_PX, CARD_LINE_EM, CARD_RISE, MAP_REACH, clearOfPanel, placeCard, type Box, type CardFrame, type CardPlace, type PanelInk } from './tvCard'
@@ -83,6 +85,8 @@ const AD_SPLASH: SplashLook = { fill: '#ffd23f', edge: '#ff2d7a', words: ['NOW',
 const MONEY_SPLASH: SplashLook = { fill: '#ffc21a', edge: '#ff7a00', words: ['CASHU', 'INSIDE!'] }
 /** An NFT inside, hyped as money is, in the NFT card's violet (arkinox, 2026-10-22). */
 const NFT_SPLASH: SplashLook = { fill: '#c9a6ff', edge: '#7a2dff', words: ['NFT', 'INSIDE!'] }
+/** The #1 on a CYBERSPACE STATS board: gold on hot pink (design 4.2). */
+const STATS_SPLASH: SplashLook = { fill: '#ffd23f', edge: '#ff2d95', words: ['#1', ''] }
 /** The minimap's turn, radians a second: about once round in forty seconds. */
 const MAP_TURN = 0.15
 const ACCENT = '#00e5ff'
@@ -197,12 +201,14 @@ export interface TvPicture {
   skipped: number
   meanwhile: boolean
   census: Census | null
-  chains: Record<string, ChainTimes>
+  chains: Record<string, ChainHistory>
   arrivals: Array<{ pubkey: string; at: number }>
   reactions: Array<{ pubkey: string; at: number; content: string; on: 'shard' | 'move' }>
   avatars: Record<string, TvAvatar>
   /** The commercial on screen, which spot and since `at` (performance.now()), or null (lib/tv/hosakaAd). */
   ad?: { at: number; id: string } | null
+  /** The CYBERSPACE STATS break on screen, which board and since `at` (performance.now()), or null (lib/tv/cyberspaceStats). */
+  stats?: { at: number; board: StatsBoard } | null
   /** What TV's scan just opened, newest last, for the ticker (store/useTv finds, findLines). */
   finds?: TvFindLine[]
 }
@@ -299,7 +305,7 @@ export function tickerItems(p: TvPicture, name: (pk: string) => string): string[
     const length = chain ? chainLengthAt(chain, t) : 0
     if (length > 0) out.push(`${who}: CHAIN OF ${length.toLocaleString()} ACTION${length === 1 ? '' : 'S'}`)
     if (p.census) {
-      const bags = countTo(p.census.bagsBy.get(shot.pubkey) ?? [], t)
+      const bags = bagsHiddenAt(p.census, shot.pubkey, t)
       out.push(`${who}: ${bags} BAG${bags === 1 ? '' : 'S'} HIDDEN`)
     }
   }
@@ -627,6 +633,11 @@ export class TvPainter {
     // A commercial owns the picture: nothing of the tape under it.
     if (p.ad) {
       this.commercial(p.ad, p, a, W, H, MX, MY, s, narrow, now, reduced, dt, scale)
+      return
+    }
+    // So does a CYBERSPACE STATS break.
+    if (p.stats) {
+      this.statsBreak(p.stats, p, a, W, H, MX, MY, s, narrow, now, reduced, dt, scale)
       return
     }
 
@@ -1227,11 +1238,20 @@ export class TvPainter {
     ctx.restore()
 
     // The channel round it.
+    this.breakFurniture('ADVERTISEMENT', p, a, W, MX, MY, tickY, tickH, s, dt, scale)
+  }
+
+  /**
+   * What stays round a break (a spot, a CYBERSPACE STATS board): its tag in
+   * the corner, as a channel marks its breaks, the stream's address, the
+   * marquee; NOW PLAYING steps away while the music plays on.
+   */
+  private breakFurniture(tag: string, p: TvPicture, a: TvAssets, W: number, MX: number, MY: number, tickY: number, tickH: number, s: number, dt: number, scale: number): void {
+    const ctx = this.ctx
     this.track.part('adTag')
     ctx.save()
     ctx.font = `700 ${9 * s}px ${TV_FONT}`
     ctx.textAlign = 'left'
-    const tag = 'ADVERTISEMENT'
     const tw = ctx.measureText(tag).width
     ctx.fillStyle = 'rgba(0, 0, 0, 0.55)'
     ctx.fillRect(MX, MY, tw + 14 * s, 18 * s)
@@ -1251,6 +1271,46 @@ export class TvPainter {
     this.marquee(p, a, MX, tickY, W - MX, tickH, s, dt)
     this.npRect = null
     this.cardScale = scale
+  }
+
+  /**
+   * A CYBERSPACE STATS break (lib/tv/cyberspaceStats), cut in as a spot is:
+   * over a ground in its board's theme with speed stripes running, the world
+   * hidden, the marquee kept, CYBERSPACE STATS in the corner where a spot says
+   * ADVERTISEMENT. The board itself is scene/tvStatsBreak's: stacked on the
+   * upright stream (lib/tv/broadcast isPortraitBroadcast) and on a frame
+   * taller than wide or narrow, side by side otherwise.
+   */
+  private statsBreak(br: { at: number; board: StatsBoard }, p: TvPicture, a: TvAssets, W: number, H: number, MX: number, MY: number, s: number, narrow: boolean, now: number, reduced: boolean, dt: number, scale: number): void {
+    const ctx = this.ctx
+    const t = Math.max(0, (now - br.at) / 1000 - CUT_MS / 1000)
+    const theme = AD_THEMES[BOARD_WORDS[br.board.id].theme]
+    this.track.part('stats')
+    ctx.save()
+    ctx.globalAlpha = clamp01((now - br.at) / CUT_MS)
+    const ground = ctx.createLinearGradient(0, 0, W, H)
+    ground.addColorStop(0, theme.deep)
+    ground.addColorStop(1, '#030008')
+    ctx.fillStyle = ground
+    ctx.fillRect(0, 0, W, H)
+    this.stripes(theme.stripe, W, H, s, reduced ? 0 : t)
+    const tickH = (this.big ? BIG_TICKER_H_PX : TICKER_H_PX) * s
+    const tickY = H - MY - tickH
+    const kit: BreakKit = {
+      ctx,
+      font: TV_FONT,
+      fit: (text, max) => fit(ctx, text, max),
+      wrap: (text, max) => wrap(ctx, text, max),
+      splash: (cx, cy, r, tt) => this.splash(cx, cy, r, tt, s, STATS_SPLASH),
+      part: (name) => this.track.part(name),
+    }
+    const top = br.board.kind === 'ranking' ? MY + 34 * s : MY + 30 * s
+    const area = { x0: MX, y0: top, x1: W - MX, y1: tickY - 14 * s }
+    const stacked = isPortraitBroadcast() || narrow || W < H
+    const lead = br.board.kind === 'ranking' ? br.board.rows[0]?.pubkey : undefined
+    paintStatsBoard(kit, { area, s, css: scale, stacked, accent: theme.accent }, br.board, { name: a.name, spin: lead ? a.spin : null }, t, Math.floor(now / 60), reduced)
+    ctx.restore()
+    this.breakFurniture(STATS_TAG, p, a, W, MX, MY, tickY, tickH, s, dt, scale)
   }
 
   /**

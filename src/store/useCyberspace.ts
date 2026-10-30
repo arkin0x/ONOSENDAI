@@ -95,6 +95,7 @@ import {
   ACTION_KIND,
   buildChain,
   chainHead,
+  extendChain,
   firstBreak,
   openBracket,
   hopTemplate,
@@ -174,8 +175,34 @@ import type { SelfCrypto } from '../lib/muteList'
  */
 let actionsFor: { events: NostrEvent[]; actions: ActionEvent[] } | null = null
 function parsedChain(events: NostrEvent[]): ActionEvent[] {
-  if (!actionsFor || actionsFor.events !== events) actionsFor = { events, actions: buildChain(events) }
+  if (!actionsFor || actionsFor.events !== events) actionsFor = { events, actions: appendedTo(actionsFor, events) ?? buildChain(events) }
   return actionsFor.actions
+}
+
+/**
+ * The chain of `events` from the one memoized, when `events` are its events
+ * and one more (an action signed here, an event the feed brought): only the
+ * new one is read (lib/events.ts extendChain). Null otherwise.
+ */
+function appendedTo(memo: { events: NostrEvent[]; actions: ActionEvent[] } | null, events: NostrEvent[]): ActionEvent[] | null {
+  if (!memo || events.length !== memo.events.length + 1) return null
+  for (let i = 0; i < memo.events.length; i++) if (events[i] !== memo.events[i]) return null
+  return extendChain(memo.actions, memo.events, events[events.length - 1])
+}
+
+/**
+ * Whether a fold of nothing new into `events` would leave them as they are
+ * (adoptChain): the chain they build is all of them, ending at `prevEventId`,
+ * or it is forked, which keeps every event. Exactly the two ways adoptChain
+ * returns without a change once the merge adds nothing.
+ */
+function settledChain(events: NostrEvent[], prevEventId: string, pubkey: string): boolean {
+  // parsedChain reads every author's spawns, adoptChain only `pubkey`'s: the same chain when all of them are its.
+  if (!events.every((e) => e.pubkey === pubkey)) return false
+  const order = parsedChain(events)
+  if (order.length === 0) return true
+  if (order[0].fork !== undefined) return true
+  return order[order.length - 1].id === prevEventId && order.length === events.length
 }
 
 /**
@@ -4586,6 +4613,16 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
       stopForNewHead(cur.prevEventId)
       return
     }
+    // Nothing new: the usual answer, since every move's confirmation asks the
+    // relays for the chain from the newest event they hold, and gets back
+    // events this device already has. Everything below would come to nothing
+    // (findDivergence skips what is held, and the merge is the chain in hand),
+    // after rebuilding the whole chain twice: about 0.35 s per fold on a
+    // 1,300-action chain, twice per move (arkinox, 2026-10-30: a WALK step
+    // took 2 to 6 seconds). Only when the chain in hand reads the way a fold
+    // would leave it, which parsedChain answers from its memo.
+    const inHand = new Set(cur.events.map((e) => e.id))
+    if (mine.every((e) => inHand.has(e.id)) && settledChain(cur.events, cur.prevEventId, me)) return
     // This device's unpublished moves fork against moves the relays already
     // hold (another device of yours moved on while this one was LOCAL or
     // offline). Folding now would decide in silence, and publishing this
@@ -4598,7 +4635,7 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
       useChainUi.getState().setPromptAside(false)
       return
     }
-    const seen = new Set(cur.events.map((e) => e.id))
+    const seen = inHand
     const merged = cur.events.concat(mine.filter((e) => !seen.has(e.id)))
     // buildChain is §8.7.3: the newest spawn wins, then follow the links. So a
     // newer chain from another machine supersedes ours; our own echoed events

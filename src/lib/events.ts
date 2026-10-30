@@ -350,10 +350,36 @@ function isRecognized(name: string): name is RecognizedAction {
   return (RECOGNIZED_ACTIONS as readonly string[]).includes(name)
 }
 
+/** A decoded coordinate, as decodeCoord keeps it: never changed by anyone, only read. */
+interface DecodedCoord { readonly x: bigint; readonly y: bigint; readonly z: bigint; readonly plane: Plane }
+/** Coordinates decoded so far, by their 64 hex chars (decodeCoord). */
+const decoded = new Map<string, DecodedCoord>()
+/** Past this many, the memo starts over: a chain is a few thousand places, a long session's spectating a few times that. */
+const DECODED_MAX = 50_000
+
+/**
+ * coordToXyz(hexToCoord(coordHex)), remembered. A pure function of the hex,
+ * and the most expensive step of reading a chain: buildChain decodes each
+ * event's C three times, and the chain is rebuilt whenever its events change
+ * (every action, every fold), so a 1,300-action chain spent about 0.1 s per
+ * build here (arkinox, 2026-10-30: WALK steps took seconds). Every caller
+ * reads the fields into objects of its own; the shared one is frozen.
+ */
+function decodeCoord(coordHex: string): DecodedCoord {
+  let d = decoded.get(coordHex)
+  if (d === undefined) {
+    const { x, y, z, plane } = coordToXyz(hexToCoord(coordHex))
+    d = Object.freeze({ x, y, z, plane })
+    if (decoded.size >= DECODED_MAX) decoded.clear()
+    decoded.set(coordHex, d)
+  }
+  return d
+}
+
 /** A 64-hex coordinate as a place, or null when it is not one. */
 function placeOf(coordHex: string | undefined, sector?: string): Placed | null {
   if (!coordHex || !HEX_64.test(coordHex)) return null
-  const { x, y, z, plane } = coordToXyz(hexToCoord(coordHex))
+  const { x, y, z, plane } = decodeCoord(coordHex)
   const position = { x, y, z }
   return { coordHex, position, plane, sector: sector ?? sectorTag(xyzToSectorId(x, y, z)) }
 }
@@ -376,7 +402,7 @@ function regionOf(ev: NostrEvent): GameRegion | null {
   if (hStr === undefined || !/^(0|[1-9][0-9]*)$/.test(hStr)) return null
   const height = Number.parseInt(hStr, 10)
   if (height > 85) return null
-  const { x, y, z, plane } = coordToXyz(hexToCoord(coordHex))
+  const { x, y, z, plane } = decodeCoord(coordHex)
   const h = BigInt(height)
   const low = (1n << h) - 1n
   if ((x & low) !== 0n || (y & low) !== 0n || (z & low) !== 0n) return null
@@ -683,7 +709,7 @@ export function parseAction(ev: NostrEvent): ActionEvent | null {
   const coordHex = tag(ev, 'C')
   if (!coordHex || !HEX_64.test(coordHex)) return null
 
-  const { x, y, z, plane } = coordToXyz(hexToCoord(coordHex))
+  const { x, y, z, plane } = decodeCoord(coordHex)
   // The sector tags are read by buildChain, which breaks an event whose tags
   // are missing or disagree with its C (Q9); here only what they say is
   // kept, computed when the tag is not there.
@@ -1029,6 +1055,52 @@ export function buildChain(events: NostrEvent[], pubkey?: string): ActionEvent[]
 }
 
 /**
+ * buildChain(events.concat(ev)), from `chain`, which is buildChain(events), in
+ * the one case that cannot change any row already there: `ev` names the head
+ * of a chain that has no break and no fork as its previous, and no event of
+ * `events` names `ev`. Null in every other case, and the caller builds the
+ * chain whole: a spawn (it can be the newest), an event naming another row (a
+ * fork there), an event that arrived before the one it follows (the walk goes
+ * on through it), a chain already broken or forked (its rows stand where the
+ * break left them), or a row that breaks.
+ *
+ * Why: the chain is rebuilt whenever its events change, and every action
+ * appends one. buildChain reads every event again, about 0.1 s on a
+ * 1,300-action chain, on the main thread, on every move (arkinox, 2026-10-30:
+ * WALK steps took seconds and stuttered the view). This reads the new one.
+ *
+ * Exact, not an approximation: the walk of buildChain reaches the head with
+ * no child there (one child would be the next row, two a fork), so with `ev`
+ * the head has exactly one, `ev`, read against the head and the bracket open
+ * at it by the same placeInChain and rideBreak; nothing before it moves, and
+ * with no event naming `ev` the walk ends there.
+ */
+export function extendChain(chain: ActionEvent[], events: NostrEvent[], ev: NostrEvent): ActionEvent[] | null {
+  if (chain.length === 0 || ev.kind !== ACTION_KIND || carriesSpawn(ev)) return null
+  const spawn = chain[0]
+  if (spawn.fork !== undefined || chain.some((a) => a.breaks)) return null
+  const link = actionLink(ev)
+  // Not of this chain: buildChain leaves it out, and the chain is as it was.
+  if (!link || link.genesisId !== spawn.id || link.pubkey !== spawn.pubkey) return chain
+  const head = chain[chain.length - 1]
+  if (link.previousId !== head.id || link.id === head.id) return null
+  // An event already here that names `ev` (any e tag, so a child of every kind): the walk would go on.
+  for (const e of events) for (const t of e.tags) if (t[0] === 'e' && t[1] === ev.id) return null
+  let open: ActionEvent | null = null
+  for (let i = chain.length - 1; i >= 0; i--) {
+    if (chain[i].role === 'exit') break
+    if (chain[i].role === 'enter') { open = chain[i]; break }
+  }
+  let entry = placeInChain(ev, link, head, open)
+  if (entry.type === 'hyperjump' && !entry.breaks) {
+    const ride = rideBreak(entry, lookBack(chain, chain.length), ev)
+    if (ride) entry = { ...entry, breaks: ride }
+  }
+  if (entry.breaks) return null
+  return chain.concat([entry])
+}
+
+/**
  * Why a ride breaks the rules about where it may start, or null (DECK-0001
  * §4.2, §4.3), given the action it looks back to (§8.9 rule 4, §8.11.4 rule
  * 8). Checked without any block data: a ride follows a boarding or a ride; a
@@ -1123,8 +1195,8 @@ function sectorTagsWrong(ev: NostrEvent, name: string, at: Position): { breaks: 
 
 /** Whether two coordinates name the same x, y and z in different planes. */
 function planeBitOnly(a: string, b: string): boolean {
-  const p = coordToXyz(hexToCoord(a))
-  const q = coordToXyz(hexToCoord(b))
+  const p = decodeCoord(a)
+  const q = decodeCoord(b)
   return p.plane !== q.plane && p.x === q.x && p.y === q.y && p.z === q.z
 }
 

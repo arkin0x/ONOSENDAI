@@ -76,7 +76,9 @@ export function ChainConflictPrompt(): JSX.Element {
 
 function HeldConflictPrompt(): JSX.Element | null {
   const conflict = useCyberspace((s) => (s.chainConflict?.kind === 'held' ? s.chainConflict : null))
-  const events = useCyberspace((s) => s.events)
+  // The chain only while the prompt is up: read always, every action re-rendered
+  // this and rebuilt the whole chain to summarize it for a prompt not on screen.
+  const events = useCyberspace((s) => (s.chainConflict?.kind === 'held' ? s.events : null))
   const live = useCyberspace((s) => s.live)
   const check = useCyberspace((s) => s.selfCheck)
   const aside = useChainUi((s) => s.promptAside)
@@ -89,8 +91,8 @@ function HeldConflictPrompt(): JSX.Element | null {
     useChainUi.getState().setPromptAside(false)
   }, [conflict])
   const relay = useMemo(() => (conflict ? summarizeChain(conflict.relayEvents) : null), [conflict])
-  const local = useMemo(() => summarizeChain(events), [events])
-  const canKeepLocal = useMemo(() => (conflict ? localSupersedes(events, conflict.relayEvents) : false), [conflict, events])
+  const local = useMemo(() => (events ? summarizeChain(events) : null), [events])
+  const canKeepLocal = useMemo(() => (conflict && events ? localSupersedes(events, conflict.relayEvents) : false), [conflict, events])
   // Why it was held is the check as it was before the relays answered; once
   // they have, the reason worth giving is the one the person saw.
   const why = check.status === 'unknown' ? holdReason(check) : 'the relays had not answered yet'
@@ -179,10 +181,11 @@ function branchCells(b: BranchSummary, now: number): ReactNode[] {
  */
 function BranchConflictPrompt(): JSX.Element | null {
   const conflict = useCyberspace((s) => (s.chainConflict?.kind === 'branch' ? s.chainConflict : null))
-  const events = useCyberspace((s) => s.events)
-  const published = useCyberspace((s) => s.published)
+  // As above: the chain and its acknowledgements only while this prompt is up.
+  const events = useCyberspace((s) => (s.chainConflict?.kind === 'branch' ? s.events : null))
+  const published = useCyberspace((s) => (s.chainConflict?.kind === 'branch' ? s.published : null))
   const aside = useChainUi((s) => s.promptAside)
-  const div = useMemo(() => (conflict ? findDivergence(events, published, conflict.relayEvents) : null), [conflict, events, published])
+  const div = useMemo(() => (conflict && events && published ? findDivergence(events, published, conflict.relayEvents) : null), [conflict, events, published])
   const mine = useMemo(() => (div ? summarizeBranch(div.local) : null), [div])
   const theirs = useMemo(() => (div ? summarizeBranch(div.relay) : null), [div])
 

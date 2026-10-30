@@ -60,7 +60,7 @@ const prevOf = (e: NostrEvent): string | undefined => e.tags.find((t) => t[0] ==
 
 const done = (who: 'A' | 'B', elapsedMs: number) => {
   const p = posted[who][posted[who].length - 1]
-  return { type: 'done' as const, id: p.id, mode: 'hop' as const, elapsedMs, proofHash: 'ab'.repeat(32), terrainK: 8, lca: { x: 1, y: 0, z: 0 }, totalOps: 1, prevEventId: p.prevEventId }
+  return { type: 'done' as const, id: p.id, mode: 'hop' as const, elapsedMs, proofHash: 'ab'.repeat(32), hop: { sealHex: 'ab'.repeat(32), mnHex: '0'.repeat(16), mpHex: '00' }, terrainK: 8, lca: { x: 1, y: 0, z: 0 }, totalOps: 1, prevEventId: p.prevEventId }
 }
 async function as<T>(who: 'A' | 'B', f: () => Promise<T> | T): Promise<T> {
   dev.current = who

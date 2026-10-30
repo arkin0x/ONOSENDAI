@@ -56,7 +56,7 @@ const here = { x: 5n * SECTOR + 7n, y: 9n * SECTOR + 1n, z: 3n * SECTOR + 2n }
 
 /** A hop by `sk` at `createdAt`: the smallest placing action the parser accepts. */
 function hop(createdAt: number, sk: Uint8Array = generateSecretKey(), dx = 0n): NostrEvent {
-  return finalizeEvent(hopTemplate({ createdAt, genesisId: 'a'.repeat(64), previousId: 'b'.repeat(64), prevCoordHex: positionHex(here, 0), to: { ...here, x: here.x + dx }, plane: 0, proofHash: 'c'.repeat(64) }), sk) as NostrEvent
+  return finalizeEvent(hopTemplate({ createdAt, genesisId: 'a'.repeat(64), previousId: 'b'.repeat(64), prevCoordHex: positionHex(here, 0), to: { ...here, x: here.x + dx }, plane: 0, proofHash: 'c'.repeat(64), mn: '0'.repeat(16), mp: '00'}), sk) as NostrEvent
 }
 
 const answered = (url: string, events: NostrEvent[]): RelayAnswer => ({ url, outcome: 'answered', events })

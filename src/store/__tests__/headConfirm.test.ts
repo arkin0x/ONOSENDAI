@@ -75,7 +75,7 @@ beforeEach(async () => {
 })
 
 /** A finished proof for the move just committed. */
-const done = (elapsedMs: number, prevEventId: string) => ({ type: 'done' as const, id: posted[posted.length - 1].id, mode: 'hop' as const, elapsedMs, proofHash: 'ab'.repeat(32), terrainK: 8, lca: { x: 1, y: 0, z: 0 }, totalOps: 1, prevEventId })
+const done = (elapsedMs: number, prevEventId: string) => ({ type: 'done' as const, id: posted[posted.length - 1].id, mode: 'hop' as const, elapsedMs, proofHash: 'ab'.repeat(32), hop: { sealHex: 'ab'.repeat(32), mnHex: '0'.repeat(16), mpHex: '00' }, terrainK: 8, lca: { x: 1, y: 0, z: 0 }, totalOps: 1, prevEventId })
 
 describe('a move is signed only from a head the relays confirm', () => {
   it('refuses the move, and says so in a line, when the canonical relay cannot answer', async () => {
@@ -114,7 +114,7 @@ describe('a move is signed only from a head the relays confirm', () => {
   it('a relay that holds another device\'s newer move: it is adopted and the move refused', async () => {
     const s = S()
     const head = s.events[s.events.length - 1]
-    const theirs: NostrEvent = await s.signEvent(hopTemplate({ createdAt: head.created_at + 1, genesisId: s.genesisId, previousId: head.id, prevCoordHex: s.coordHex(), to: { ...s.position, z: s.position.z + 4n }, plane: s.headPlane, proofHash: '0'.repeat(64) }))
+    const theirs: NostrEvent = await s.signEvent(hopTemplate({ createdAt: head.created_at + 1, genesisId: s.genesisId, previousId: head.id, prevCoordHex: s.coordHex(), to: { ...s.position, z: s.position.z + 4n }, plane: s.headPlane, proofHash: '0'.repeat(64), mn: '0'.repeat(16), mp: '00'}))
     relay.answers = [[theirs]]
     S().moveCursor(moveDirection(S().axes(), 'right'))
     await S().commit()
@@ -158,7 +158,7 @@ describe('a move is signed only from a head the relays confirm', () => {
     const head = s.events[s.events.length - 1]
     const to = { ...s.position, x: s.position.x + 2n }
     // Signed with this identity's key, as the other tab would sign it.
-    const theirs: NostrEvent = await s.signEvent(hopTemplate({ createdAt: head.created_at + 1, genesisId: s.genesisId, previousId: head.id, prevCoordHex: s.coordHex(), to, plane: s.headPlane, proofHash: '0'.repeat(64) }))
+    const theirs: NostrEvent = await s.signEvent(hopTemplate({ createdAt: head.created_at + 1, genesisId: s.genesisId, previousId: head.id, prevCoordHex: s.coordHex(), to, plane: s.headPlane, proofHash: '0'.repeat(64), mn: '0'.repeat(16), mp: '00'}))
     const stored = [...s.events, theirs]
     // What the other tab's save writes: the chain, and a new mark beside it.
     localStorage.setItem(`onosendai:chain:${s.identity.pubkey}`, JSON.stringify({ version: 2, events: stored, published: s.events.map((e) => e.id), stats: {} }))

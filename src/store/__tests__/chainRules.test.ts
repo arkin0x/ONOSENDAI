@@ -50,7 +50,7 @@ async function land(dx: bigint): Promise<void> {
   const s = S()
   useCyberspace.setState({ pendingTarget: { ...s.position, x: s.position.x + dx } })
   await s.applyProofMessage({
-    type: 'done', id: 0, mode: 'hop', elapsedMs: 1, proofHash: 'ab'.repeat(32),
+    type: 'done', id: 0, mode: 'hop', elapsedMs: 1, proofHash: 'ab'.repeat(32), hop: { sealHex: 'ab'.repeat(32), mnHex: '0'.repeat(16), mpHex: '00' },
     terrainK: 8, lca: { x: 1, y: 0, z: 0 }, totalOps: 1,
   })
 }
@@ -211,7 +211,7 @@ describe('presence places someone inside a game at the entry c', () => {
 /** A finished hop proof from the current head to one gibson over, as the worker reports it. */
 function doneFromHead(over: Partial<Extract<ProofResponse, { type: 'done' }>> = {}): Extract<ProofResponse, { type: 'done' }> {
   return {
-    type: 'done', id: 0, mode: 'hop', elapsedMs: 1, proofHash: 'ab'.repeat(32), terrainK: 8,
+    type: 'done', id: 0, mode: 'hop', elapsedMs: 1, proofHash: 'ab'.repeat(32), hop: { sealHex: 'ab'.repeat(32), mnHex: '0'.repeat(16), mpHex: '00' }, terrainK: 8,
     lca: { x: 1, y: 0, z: 0 }, totalOps: 1, prevEventId: S().prevEventId, ...over,
   }
 }

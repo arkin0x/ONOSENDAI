@@ -51,8 +51,14 @@ export function actionEvent(i: Common & { name: string; c?: string; C?: Position
 }
 
 /** A hop from `c` to `to`, with a zero proof (§8.4). */
-export function hopEvent(i: Common & { c: string; to: Position; plane?: Plane }): NostrEvent {
-  return actionEvent({ ...i, name: 'hop', C: i.to, tags: [['proof', ZERO]] })
+/**
+ * A hop in the form this client signs since hop proof version 2: `proof`,
+ * `mn` and `mp` (spec 8.4). The values are stand-ins; nothing here checks a
+ * proof. `v1` leaves out mn and mp, as a hop published before the cutover.
+ */
+export function hopEvent(i: Common & { c: string; to: Position; plane?: Plane; v1?: boolean }): NostrEvent {
+  const { v1, ...rest } = i
+  return actionEvent({ ...rest, name: 'hop', C: i.to, tags: v1 ? [['proof', ZERO]] : [['proof', ZERO], ['mn', '0'.repeat(16)], ['mp', '00']] })
 }
 
 /** The aligned cube of height `height` that contains `p`. */

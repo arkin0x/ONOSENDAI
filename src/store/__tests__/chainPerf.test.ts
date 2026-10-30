@@ -75,7 +75,7 @@ function chainOf(n: number): NostrEvent[] {
       prevCoordHex: k === 1 ? pk : positionHex({ x: home.x + BigInt(k - 1), y: home.y, z: home.z }, home.plane),
       to: { x: home.x + BigInt(k), y: home.y, z: home.z },
       plane: home.plane,
-      proofHash: '0'.repeat(64),
+      proofHash: '0'.repeat(64), mn: '0'.repeat(16), mp: '00',
     }), sk) as NostrEvent)
   }
   return out
@@ -98,7 +98,7 @@ function countPuts(): { puts: number; chars: number[]; stop: () => void } {
 async function act(m: typeof import('../useCyberspace')): Promise<void> {
   const s = m.useCyberspace.getState()
   m.useCyberspace.setState({ pendingTarget: { ...s.position, x: s.position.x + 1n } })
-  await s.applyProofMessage({ type: 'done', id: 0, mode: 'hop', elapsedMs: 1, proofHash: 'ab'.repeat(32), terrainK: 8, lca: { x: 1, y: 0, z: 0 }, totalOps: 1, prevEventId: s.prevEventId })
+  await s.applyProofMessage({ type: 'done', id: 0, mode: 'hop', elapsedMs: 1, proofHash: 'ab'.repeat(32), hop: { sealHex: 'ab'.repeat(32), mnHex: '0'.repeat(16), mpHex: '00' }, terrainK: 8, lca: { x: 1, y: 0, z: 0 }, totalOps: 1, prevEventId: s.prevEventId })
   const head = m.useCyberspace.getState().prevEventId
   m.useCyberspace.getState().setPublishStatus(head, 'ok')
 }

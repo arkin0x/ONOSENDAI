@@ -45,7 +45,7 @@ vi.mock('../../lib/workers', async (importOriginal) => {
   return { ...actual, postProof: vi.fn(), cancelProof: vi.fn() }
 })
 
-import { cantorPair, computeHopProof, computeSidestepProof, bytesToHex, encodeNonce, hexToBytes, intToBytesBE, sha256Hex } from 'cyberspace-core'
+import { cantorPair, computeHopProof, computeHopProofV2, computeSidestepProof, bytesToHex, deriveRegionKeys, encodeNonce, hexToBytes, intToBytesBE, sha256Hex, verifyHopLevel1 } from 'cyberspace-core'
 import { useCalibration } from '../../lib/calibration'
 import { saveCloudDeposit, saveCloudJob, type PendingCloudJob } from '../../lib/cloud'
 import { wallSource } from '../../lib/movePlan'
@@ -58,22 +58,25 @@ import { placeSpawn } from '../fixtures/placeSpawn'
 import { useToast } from '../useToast'
 import { useSecrets } from '../useSecrets'
 
-const LIMITS: HosakaLimits = { max_hop_height: 25, max_sidestep_height: 29, hop_min_msats: 1000, deposit_min_msats: 1000, deposit_max_msats: 5e9, invoice_ttl_seconds: 3600 }
+const LIMITS: HosakaLimits = { max_hop_height: 25, max_sidestep_height: 29, hop_min_msats: 1000, deposit_min_msats: 1000, deposit_max_msats: 5e9, invoice_ttl_seconds: 3600, hop_proof_version: 2, hop_paused: false, hop_paused_reason: null }
 
-function envelope(n: bigint): { public_proof: string; secret_key: string } {
-  const secret = sha256Hex(intToBytesBE(n))
-  return { public_proof: sha256Hex(hexToBytes(secret)), secret_key: secret }
-}
-
-/** What HOSAKA's completed hop job would carry for this move, computed here at h13. */
+/** What HOSAKA's completed hop job carries for this move (hop proof version 2, hosaka-api ha-1), proved here by core at h13. */
 function hopResult(from: Position, to: Position, plane: 0 | 1, prev: string): Record<string, unknown> {
-  const p = computeHopProof(from.x, from.y, from.z, to.x, to.y, to.z, plane, prev, 20)
+  const p = computeHopProofV2(from.x, from.y, from.z, to.x, to.y, to.z, plane, prev)
+  const keys = deriveRegionKeys(p.regionN)
   const h = (a: bigint, b: bigint): number => (a === b ? 0 : (a ^ b).toString(2).length)
   return {
-    hop_n: envelope(p.hopN), region_n: envelope(p.regionN), region_xy: envelope(cantorPair(p.cantorX, p.cantorY)),
-    cantor_x: envelope(p.cantorX), cantor_y: envelope(p.cantorY), cantor_z: envelope(p.cantorZ), cantor_t: envelope(p.cantorT),
-    K: p.terrainK, max_height: Math.max(h(from.x, to.x), h(from.y, to.y), h(from.z, to.z)), compute_msats: 1000,
+    seal: p.tags.proof, mn: p.tags.mn, mp: p.tags.mp, K: p.terrainK,
+    region_n: { public_proof: keys.lookupIdHex, secret_key: bytesToHex(keys.locationDecryptionKey) },
+    max_height: Math.max(h(from.x, to.x), h(from.y, to.y), h(from.z, to.z)), compute_msats: 1000,
   }
+}
+
+/** The old hop_n shape, as a hop that straddled HOSAKA's switch finishes on its old worker. */
+function v1HopResult(from: Position, to: Position, plane: 0 | 1, prev: string): Record<string, unknown> {
+  const p = computeHopProof(from.x, from.y, from.z, to.x, to.y, to.z, plane, prev, 20)
+  const env = (n: bigint) => { const secret = sha256Hex(intToBytesBE(n)); return { public_proof: sha256Hex(hexToBytes(secret)), secret_key: secret } }
+  return { hop_n: env(p.hopN), region_n: env(p.regionN), region_xy: env(cantorPair(p.cantorX, p.cantorY)), K: p.terrainK, max_height: 13, compute_msats: 1000 }
 }
 
 function sidestepResult(from: Position, to: Position, plane: 0 | 1, prev: string): Record<string, unknown> {
@@ -280,9 +283,19 @@ describe('cloud routes', () => {
     const event = parseAction(s.events[s.events.length - 1])!
     expect(event.type).toBe('hop')
     expect(event.previousId).toBe(head)
-    const p = computeHopProof(from.x, from.y, from.z, to.x, to.y, to.z, s.headPlane, head, 20)
-    expect(event.proofHash).toBe(p.proofHash)
-    expect(s.proof.lookupId).toBe(sha256Hex(hexToBytes(sha256Hex(intToBytesBE(p.regionN)))))
+    // Hop proof version 2: the seal is the proof, mn and mp once each beside it, and the
+    // signed event passes core's Level 1 under its own id.
+    const p = computeHopProofV2(from.x, from.y, from.z, to.x, to.y, to.z, s.headPlane, head)
+    const signed = s.events[s.events.length - 1]
+    expect(event.proofHash).toBe(p.tags.proof)
+    expect(event.mn).toBe(p.tags.mn)
+    expect(event.mp).toBe(p.tags.mp)
+    for (const t of ['proof', 'mn', 'mp']) expect(signed.tags.filter((x) => x[0] === t)).toHaveLength(1)
+    expect(verifyHopLevel1({
+      from: { ...from, plane: s.headPlane }, to: { ...to, plane: s.headPlane }, previousEventIdHex: head,
+      proof: event.proofHash, nonce: event.mn, openings: event.mp, eventId: signed.id,
+    })).toEqual([])
+    expect(s.proof.lookupId).toBe(deriveRegionKeys(p.regionN).lookupIdHex)
     expect(s.cloud.last?.jobId).toBe('job-1')
     expect(storage.getItem('onosendai:cloudJob')).toBeNull()
     // spent on this chain, on this device
@@ -587,7 +600,7 @@ describe('cloud routes', () => {
     expect(S().plan?.step.source).toBe('local')
 
     // The local hop lands (the worker's answer, fed by hand). That commit is done; the cursor stays.
-    await S().applyProofMessage({ type: 'done', id: req1.id, mode: 'hop', elapsedMs: 5, proofHash: 'dd'.repeat(32), terrainK: 3, lca: { x: 12, y: 0, z: 0 }, totalOps: 4 })
+    await S().applyProofMessage({ type: 'done', id: req1.id, mode: 'hop', elapsedMs: 5, proofHash: 'dd'.repeat(32), hop: { sealHex: 'dd'.repeat(32), mnHex: '0'.repeat(16), mpHex: '00' }, terrainK: 3, lca: { x: 12, y: 0, z: 0 }, totalOps: 4 })
     expect(S().position.x).toBe(edge)
     expect(S().plan).toBeNull()
     expect(S().cursor).toEqual(cursor)
@@ -613,7 +626,7 @@ describe('cloud routes', () => {
     await vi.waitFor(() => { expect(vi.mocked(postProof)).toHaveBeenCalledTimes(2) })
     const req2 = vi.mocked(postProof).mock.calls[1][0]
     expect(req2).toMatchObject({ mode: 'hop', to: cursor })
-    await S().applyProofMessage({ type: 'done', id: req2.id, mode: 'hop', elapsedMs: 5, proofHash: 'ee'.repeat(32), terrainK: 3, lca: { x: 1, y: 0, z: 0 }, totalOps: 4 })
+    await S().applyProofMessage({ type: 'done', id: req2.id, mode: 'hop', elapsedMs: 5, proofHash: 'ee'.repeat(32), hop: { sealHex: 'ee'.repeat(32), mnHex: '0'.repeat(16), mpHex: '00' }, terrainK: 3, lca: { x: 1, y: 0, z: 0 }, totalOps: 4 })
     expect(S().plan).toBeNull()
     expect(S().position).toEqual(cursor)
     expect(S().events).toHaveLength(before + 3)
@@ -726,5 +739,141 @@ describe('cloud routes', () => {
     expect(S().proof.status).not.toBe('infeasible')
     expect(vi.mocked(postProof)).toHaveBeenCalledTimes(1)
     S().cancel()
+  })
+
+  // ---------------------------------------------------------------------------
+  // Hop proof version 2 at the cutover (ono-1): what HOSAKA may say and do.
+  // ---------------------------------------------------------------------------
+
+  /** A job record kept from before a reload, for this identity at this head. */
+  const kept = (stage: PendingCloudJob['stage'], to: Position): PendingCloudJob => ({
+    version: 1, jobId: 'job-k', pollToken: 'tok-k', action: 'hop', pubkey: S().identity.pubkey,
+    from: { x: String(S().position.x), y: String(S().position.y), z: String(S().position.z) },
+    to: { x: String(to.x), y: String(to.y), z: String(to.z) }, plane: S().plane, prevEventId: S().prevEventId,
+    costMsats: 1000, createdAt: Date.now(), stage, deposit: null,
+  })
+
+  it('refuses a hop that finished in the old hop_n shape, signs nothing, says HOSAKA refunds it, and drops the record (D-A)', async () => {
+    const before = S().events.length
+    const head = S().prevEventId
+    const to = lineUpH13()
+    const from = S().position
+    fake.quote.mockResolvedValue(quote('hop'))
+    fake.submitHop.mockResolvedValue(funded())
+    fake.waitForJob.mockResolvedValue(completed(v1HopResult(from, to, S().plane, head)))
+    await S().commit()
+    await vi.waitFor(() => { expect(S().cloud.status).toBe('error') })
+    expect(S().events).toHaveLength(before)
+    expect(S().position).toEqual(from)
+    expect(S().cloud.message).toContain('old proof format')
+    expect(S().cloud.message).toContain('HOSAKA will refund it')
+    expect(storage.getItem('onosendai:cloudJob')).toBeNull()
+  })
+
+  it('buys no hop from a HOSAKA whose limits do not say hop proof version 2: the wall is crossed by a sidestep', async () => {
+    const old: HosakaLimits = { ...LIMITS, hop_proof_version: undefined }
+    useCyberspace.setState({ cloud: { ...S().cloud, limits: old } })
+    lineUpH13()
+    fake.quote.mockResolvedValue(quote('sidestep'))
+    fake.submitSidestep.mockReturnValue(new Promise(() => {}))
+    void S().commit()
+    await vi.waitFor(() => { expect(fake.quote).toHaveBeenCalled() })
+    expect(fake.quote.mock.calls.every((c) => c[0] === 'sidestep')).toBe(true)
+    expect(fake.submitHop).not.toHaveBeenCalled()
+  })
+
+  it('while HOSAKA has hops paused, quotes nothing and pauses the route; RESUME after it reopens quotes again and lands', async () => {
+    const paused: HosakaLimits = { ...LIMITS, hop_paused: true, hop_paused_reason: 'HOSAKA is switching hops to proof version 2. Nothing was charged.' }
+    useCyberspace.setState({ cloud: { ...S().cloud, limits: paused } })
+    fake.limits.mockResolvedValue(paused)
+    const head = S().prevEventId
+    const to = lineUpH13()
+    const from = S().position
+    await S().commit()
+    expect(S().plan?.status).toBe('paused')
+    expect(S().plan?.requote).toBe(true)
+    expect(S().plan?.message).toContain('switching hops to proof version 2')
+    expect(S().plan?.message).toContain('RESUME')
+    expect(fake.quote).not.toHaveBeenCalled()
+    expect(fake.balance).not.toHaveBeenCalled()
+    expect(fake.submitHop).not.toHaveBeenCalled()
+
+    // Reopened: the limits are asked for again, never taken from the paused answer.
+    fake.limits.mockResolvedValue(LIMITS)
+    fake.quote.mockResolvedValue(quote('hop'))
+    fake.submitHop.mockResolvedValue(funded())
+    fake.waitForJob.mockResolvedValue(completed(hopResult(from, to, S().plane, head)))
+    S().resumePlan()
+    await vi.waitFor(() => { expect(S().position).toEqual(to) })
+    expect(S().cloud.limits?.hop_paused).toBe(false)
+    expect(fake.quote).toHaveBeenCalledTimes(1)
+  })
+
+  it('a hop quote that comes back paused pauses the route too, with HOSAKA\'s reason', async () => {
+    lineUpH13()
+    fake.quote.mockResolvedValue({ ...quote('hop'), cost_msats: null, within_cap: false, paused: true, hint: 'Back in a few minutes.' })
+    await S().commit()
+    expect(S().plan?.status).toBe('paused')
+    expect(S().plan?.requote).toBe(true)
+    expect(S().plan?.message).toContain('Back in a few minutes.')
+    expect(fake.balance).not.toHaveBeenCalled()
+  })
+
+  it('a submit answered 503 hop_paused is not charged or asked again; RESUME submits the same step once hops reopen', async () => {
+    const head = S().prevEventId
+    const to = lineUpH13()
+    const from = S().position
+    fake.quote.mockResolvedValue(quote('hop'))
+    fake.submitHop.mockRejectedValueOnce(HosakaError.fromResponse(503, { detail: { error: 'hop_paused', hint: 'Paused for the switch.', retry_after_seconds: 300, charged: false } }))
+    await S().commit()
+    await vi.waitFor(() => { expect(S().plan?.status).toBe('paused') })
+    expect(S().plan?.requote).toBe(false)
+    expect(S().plan?.message).toContain('Paused for the switch.')
+    expect(S().plan?.message).toContain('about 5 min')
+    expect(fake.submitHop).toHaveBeenCalledTimes(1)
+    expect(storage.getItem('onosendai:cloudJob')).toBeNull()
+
+    fake.submitHop.mockResolvedValue(funded())
+    fake.waitForJob.mockResolvedValue(completed(hopResult(from, to, S().plane, head)))
+    S().resumePlan()
+    await vi.waitFor(() => { expect(S().position).toEqual(to) })
+    expect(fake.submitHop).toHaveBeenCalledTimes(2)
+    // Same step, same head: the same idempotency identity, so a job made by the first is the one followed.
+    expect(fake.submitHop.mock.calls[1].slice(0, 3)).toEqual(fake.submitHop.mock.calls[0].slice(0, 3))
+  })
+
+  it('a kept job HOSAKA will not start while paused keeps its record for RESUME', async () => {
+    const to = lineUpH13()
+    saveCloudJob(kept('paid', to))
+    fake.startJob.mockRejectedValue(HosakaError.fromResponse(503, { detail: { error: 'hop_paused', hint: 'Paused.', charged: false, job_id: 'job-k', status: 'pending' } }))
+    await S().resumeCloudJob()
+    expect(S().cloud.status).toBe('error')
+    expect(S().cloud.message).toContain('RESUME tries again once HOSAKA reopens')
+    expect(JSON.parse(storage.getItem('onosendai:cloudJob')!).jobId).toBe('job-k')
+  })
+
+  it('a 400 job_not_runnable shows HOSAKA\'s hint, notes the balance it returned, and drops the record', async () => {
+    const to = lineUpH13()
+    saveCloudJob(kept('paid', to))
+    fake.startJob.mockRejectedValue(HosakaError.fromResponse(400, { detail: { error: 'job_not_runnable', job_id: 'job-k', status: 'failed', refunded_msats: 0, current_balance_msats: 4321, hint: 'This hop was priced before hop proof version 2. Nothing was charged for it.' } }))
+    await S().resumeCloudJob()
+    expect(S().cloud.status).toBe('error')
+    expect(S().cloud.message).toContain('priced before hop proof version 2')
+    expect(S().cloud.message).toContain('The job was dropped.')
+    expect(S().cloud.balance?.msats).toBe(4321)
+    expect(storage.getItem('onosendai:cloudJob')).toBeNull()
+  })
+
+  it('never buys a hop taller than this client can check before signing', async () => {
+    useCyberspace.setState({ cloud: { ...S().cloud, limits: { ...LIMITS, max_hop_height: 40, max_sidestep_height: 40 } } })
+    const s = S()
+    const block = (s.position.x >> 31n) << 31n
+    const position = { ...s.position, x: block + (1n << 30n) - 1n }
+    useCyberspace.setState({ position, cursor: { ...position, x: position.x ^ (1n << 30n) } })
+    await S().commit()
+    expect(S().proof.status).toBe('infeasible')
+    expect(S().proof.message).toContain('h31, above the h30 this client can check before signing')
+    expect(fake.quote).not.toHaveBeenCalled()
+    expect(fake.submitHop).not.toHaveBeenCalled()
   })
 })

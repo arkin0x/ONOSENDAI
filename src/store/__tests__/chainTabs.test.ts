@@ -60,7 +60,7 @@ function chainOf(n: number): NostrEvent[] {
   for (let k = 1; k < n; k++) {
     out.push(finalizeEvent(hopTemplate({
       createdAt: 1_000 + k, genesisId: out[0].id, previousId: out[k - 1].id,
-      prevCoordHex: k === 1 ? pk : positionHex(at(k - 1), home.plane), to: at(k), plane: home.plane, proofHash: '0'.repeat(64),
+      prevCoordHex: k === 1 ? pk : positionHex(at(k - 1), home.plane), to: at(k), plane: home.plane, proofHash: '0'.repeat(64), mn: '0'.repeat(16), mp: '00',
     }), sk) as NostrEvent)
   }
   return out
@@ -82,7 +82,7 @@ async function openTab(): Promise<Tab> {
 async function signMove(tab: Tab): Promise<string> {
   const S = tab.store.useCyberspace.getState
   tab.store.useCyberspace.setState({ pendingTarget: { ...S().position, x: S().position.x + 1n } })
-  await S().applyProofMessage({ type: 'done', id: 0, mode: 'hop', elapsedMs: 1, proofHash: 'ab'.repeat(32), terrainK: 8, lca: { x: 1, y: 0, z: 0 }, totalOps: 1, prevEventId: S().prevEventId })
+  await S().applyProofMessage({ type: 'done', id: 0, mode: 'hop', elapsedMs: 1, proofHash: 'ab'.repeat(32), hop: { sealHex: 'ab'.repeat(32), mnHex: '0'.repeat(16), mpHex: '00' }, terrainK: 8, lca: { x: 1, y: 0, z: 0 }, totalOps: 1, prevEventId: S().prevEventId })
   return S().prevEventId
 }
 

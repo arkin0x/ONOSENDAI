@@ -12,7 +12,7 @@
 import { CheckPaymentButton } from './InvoiceModal'
 import { useEffect, useState } from 'react'
 import { balanceLabel, formatClock, satsLabel, satsOf, sinceLabel, type CloudMode } from '../lib/cloud'
-import { HOSAKA_DEFAULT_URL } from '../lib/hosaka'
+import { HOSAKA_DEFAULT_URL, cloudHopsSold } from '../lib/hosaka'
 import { shortHex } from '../lib/time'
 import { useNow } from '../hooks/useNow'
 import { useCyberspace } from '../store/useCyberspace'
@@ -99,7 +99,7 @@ export function CloudPanel(): JSX.Element {
   const crossover = offloadFrom('time', {
     hopCeiling: hopCeil,
     sidestepCeiling: sidestepCeil,
-    cloudHop: cloud.limits?.max_hop_height ?? 0,
+    cloudHop: cloudHopsSold(cloud.limits),
     provider: cloud.provider ?? null,
     signerKind,
     cantorMsByHeight,

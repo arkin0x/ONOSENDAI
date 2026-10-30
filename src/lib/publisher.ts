@@ -33,7 +33,8 @@ import { confirmChainEvents } from './chains'
 import { noteChainHolders } from './chainHolders'
 import type { NostrEvent } from './events'
 import { chainFacts, gateAfter, maySend } from './release'
-import { newestEventOnRelays, useCyberspace } from '../store/useCyberspace'
+import { newestEventOnRelays, retireStaleFormat, useCyberspace } from '../store/useCyberspace'
+import { staleHopFormat } from './staleFormat'
 import { movementBlocked, useVersionGate } from './versionGate'
 
 /** First retry after a refusal or a dead socket; doubles up to the cap. */
@@ -113,6 +114,10 @@ async function pump(): Promise<void> {
   }
   const next = s.events.find((e) => s.published[e.id] !== 'ok')
   if (!next) { backlogChecked = false; return }
+  // Never a hop in the old proof format (hop proof version 2): the store
+  // cuts it away as it lands, and this is the last place it could slip out.
+  // Cut here too, and the drain goes on from the chain that is left.
+  if (staleHopFormat(next)) { retireStaleFormat(); return }
 
   inFlight = true
   s.setPublishStatus(next.id, 'sending')

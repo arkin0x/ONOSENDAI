@@ -73,7 +73,7 @@ function hop(prev: NostrEvent, at: number, dx: bigint, flip = false): NostrEvent
   const from = coordToXyz(hexToCoord(prevC))
   return finalizeEvent(hopTemplate({
     createdAt: at, genesisId: spawnEv.id, previousId: prev.id, prevCoordHex: prevC,
-    to: { x: from.x + dx, y: from.y, z: from.z }, plane: flip ? (from.plane === 0 ? 1 : 0) : from.plane, proofHash: '1'.repeat(64),
+    to: { x: from.x + dx, y: from.y, z: from.z }, plane: flip ? (from.plane === 0 ? 1 : 0) : from.plane, proofHash: '1'.repeat(64), mn: '0'.repeat(16), mp: '00',
   }), sk)
 }
 const h1 = hop(spawnEv, 110, 1n)
@@ -85,7 +85,7 @@ async function land(dx: bigint): Promise<void> {
   const s = S()
   useCyberspace.setState({ pendingTarget: { ...s.position, x: s.position.x + dx } })
   await s.applyProofMessage({
-    type: 'done', id: 0, mode: 'hop', elapsedMs: 1, proofHash: 'ab'.repeat(32),
+    type: 'done', id: 0, mode: 'hop', elapsedMs: 1, proofHash: 'ab'.repeat(32), hop: { sealHex: 'ab'.repeat(32), mnHex: '0'.repeat(16), mpHex: '00' },
     terrainK: 8, lca: { x: 1, y: 0, z: 0 }, totalOps: 1,
   })
 }

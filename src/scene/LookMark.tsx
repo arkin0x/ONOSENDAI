@@ -80,6 +80,8 @@ interface Props {
   minPx: number
   label: { text: string; color: string; sub: string; subColor: string }
   onTap?: () => void
+  /** How high above the origin, in the look's units, the label must clear: what floats over it (ChestLoot). */
+  clearTop?: number
   /**
    * What else is drawn in the look's own frame, scaled and turned with it:
    * the model is the default, and a ceremony draws its own instead.
@@ -88,7 +90,7 @@ interface Props {
 }
 
 /** A chest or a door as its look, sized, turned with the view, labelled and tappable. */
-export function LookMark({ look, model, at, axes, minPx, label, onTap, children }: Props): JSX.Element {
+export function LookMark({ look, model, at, axes, minPx, label, onTap, clearTop = 0, children }: Props): JSX.Element {
   const scaleExp = useCyberspace((s) => s.scaleExp)
   const turn = useMemo(() => renderPose(viewPose(axes)), [axes])
   const bounds = lookBounds(look.closed)
@@ -96,10 +98,13 @@ export function LookMark({ look, model, at, axes, minPx, label, onTap, children 
   // The label clears the look from any side at the scale it is drawn at
   // (WorldLabel `clear`, the rule ItemModel follows): the farthest corner of
   // its bounds from the origin, at true size and at the floor alike.
-  const clear = useMemo(() => ({
-    trueSide: (bounds.reach * atTrue) / CUBE_REACH,
-    minPx: bounds.longest > 0 ? (bounds.reach * minPx) / bounds.longest / CUBE_REACH : minPx,
-  }), [bounds, atTrue, minPx])
+  const clear = useMemo(() => {
+    const reach = Math.max(bounds.reach, clearTop)
+    return {
+      trueSide: (reach * atTrue) / CUBE_REACH,
+      minPx: bounds.longest > 0 ? (reach * minPx) / bounds.longest / CUBE_REACH : minPx,
+    }
+  }, [bounds, atTrue, minPx, clearTop])
   const outer = useRef<Group>(null)
   const drawn = useRef<Group | null>(null)
   useFrame((state) => {

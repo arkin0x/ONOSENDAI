@@ -94,6 +94,7 @@ import { useInventory } from './useInventory'
 import { useShardFolders } from './useShardFolders'
 import { creditOf, useWorkshop } from './useWorkshop'
 import { deletionFilters, isDeleted, type Credit, type FeedObject } from 'sno-core/feed'
+import { keptInChest } from '../lib/looks'
 import { useCeremony } from './useCeremony'
 import { useToast } from './useToast'
 import type { ShardModel } from 'sno-core/shards'
@@ -871,6 +872,11 @@ interface ShardsState {
   testDiscovery: (eventId: string) => Promise<'found' | 'missing' | 'refused'>
   pendingShard: () => ShardModel | null
   worldItems: () => WorldItem[]
+  /**
+   * What the world draws: worldItems, less what stays in an opened chest
+   * and floats out of it as loot instead (lib/looks.ts keptInChest).
+   */
+  drawnItems: () => WorldItem[]
   /** The clicked item, mine or discovered, as one shape. */
   secretByEvent: (eventId: string) => WorldItem | null
 }
@@ -2314,6 +2320,17 @@ export const useShards = create<ShardsState>((set, get) => {
       const shown = (w: WorldItem): boolean => !worldItemHidden(w, muted, me)
       if (curated) return worldOf(get()).filter((w) => w.author !== undefined && curated.includes(w.author) && shown(w))
       return worldOf(get()).filter(shown)
+    },
+
+    drawnItems: () => {
+      const { discovered, mine } = get()
+      const parent = (chestId: string): { at: Position; tags?: readonly unknown[] } | undefined => {
+        const h = discovered[chestId]
+        if (h) return { at: h.at, tags: h.inner?.tags }
+        const d = mine.find((x) => x.eventId === chestId)
+        return d ? { at: positionOf(d), tags: d.inner?.tags } : undefined
+      }
+      return get().worldItems().filter((w) => !keptInChest(w, w.chestId ? parent(w.chestId) : undefined))
     },
 
     secretByEvent: (eventId) => get().worldItems().find((w) => w.key === eventId) ?? null,

@@ -22,7 +22,7 @@
  */
 
 import { verifyEvent } from 'nostr-tools/pure'
-import { HIDDEN_KIND, entryKey, unbag, type Hidden, type Reference, type RegionOrigin, type ResolveReference } from './hidden'
+import { HIDDEN_KIND, ciphertextOf, entryKey, unbag, type Hidden, type Reference, type RegionOrigin, type ResolveReference } from './hidden'
 import { bytesToHex, hexToBytes } from './events'
 import type { NostrEvent } from './events'
 import type { FoundBag, FoundOrigin } from './foundDb'
@@ -175,9 +175,87 @@ export function rememberBag(outer: NostrEvent, regionKey: Uint8Array, items: Hid
   try { sink(outer, bytesToHex(regionKey), items, refs, height, origin, watched) } catch { /* a cache that fails never fails a find */ }
 }
 
-/** unbag, and the bag kept when it opened. */
+/**
+ * What a scan has already opened this session, so the same bag found again
+ * is not opened again (arkinox, 2026-10-30: "Perf on windows brave is still
+ * really bad", standing in the sewer under block 101's city). A scan runs at
+ * every crossing of a cube, which at your head is every hop, every landed
+ * WALK segment and every re-anchor of a view, and each one asks the relay
+ * for all the bags in the thirteen cubes around you and gets the same ones
+ * back. Every one of them was decrypted, every entry inside it verified
+ * (a Schnorr check apiece), and every shard parsed again, only for
+ * addDiscovered to keep the copy it already had: 300 to 800 ms of main
+ * thread a scan among the city's 90 objects (measured on a production
+ * build, block 101, 2026-10-30), and the garbage of a fresh parse of all of
+ * them.
+ *
+ * Kept by the exact bag (its id and signature: the id commits to every
+ * other field), the key it was opened with, and the height and place it was
+ * read at, which are everything unbag reads besides its references. A bag
+ * that asked for a reference is never kept: an `a` reference opens to the
+ * newest version of an object, so a later scan may rightly see an edit
+ * (Shard EDIT), and one that could not be fetched may be fetched next time.
+ * Handing back the same items also hands addDiscovered the copy it holds.
+ *
+ * Bounded by the bags' own size (their sealed contents, which the items are
+ * parsed from, and never less than OPENED_MIN_CHARS a bag), least recently
+ * opened first out, so this never holds more than a few cities' worth.
+ */
+export const OPENED_KEPT_CHARS = 8 * 1024 * 1024
+let openedBudget = OPENED_KEPT_CHARS
+const openedBags = new Map<string, { items: Hidden[]; size: number }>()
+let openedChars = 0
+/** What one bag counts against the budget at least, so even one that opened to nothing is bounded in number. */
+export const OPENED_MIN_CHARS = 1024
+
+/** What a bag counts against the budget: its sealed contents and its content, at least OPENED_MIN_CHARS. */
+export function openedSize(outer: NostrEvent): number {
+  const sealed = ciphertextOf(outer)?.length ?? 0
+  const content = typeof outer.content === 'string' ? outer.content.length : 0
+  return Math.max(OPENED_MIN_CHARS, sealed + content)
+}
+
+function openedKey(outer: NostrEvent, regionKey: Uint8Array, origin: RegionOrigin | undefined, height: number | undefined): string | null {
+  if (typeof outer.id !== 'string' || typeof outer.sig !== 'string') return null
+  const place = origin ? `${origin.at.x},${origin.at.y},${origin.at.z},${origin.plane}` : '-'
+  return `${outer.id}:${outer.sig}:${bytesToHex(regionKey)}:${height ?? '-'}:${place}`
+}
+
+function keepOpened(key: string, items: Hidden[], size: number): void {
+  if (size > openedBudget) return
+  openedBags.set(key, { items, size })
+  openedChars += size
+  for (const [k, v] of openedBags) {
+    if (openedChars <= openedBudget) break
+    openedBags.delete(k)
+    openedChars -= v.size
+  }
+}
+
+/** For tests: forget every bag a scan opened, and say how many were kept; `budget` sets the bound (OPENED_KEPT_CHARS by default). */
+export function forgetOpened(budget: number = OPENED_KEPT_CHARS): number {
+  const n = openedBags.size
+  openedBags.clear()
+  openedChars = 0
+  openedBudget = budget
+  return n
+}
+
+/** unbag, and the bag kept when it opened. A bag opened before, unchanged and with no references, is not opened again. */
 export async function unbagRemembered(outer: NostrEvent, regionKey: Uint8Array, resolve?: ResolveReference, origin?: RegionOrigin, height?: number): Promise<Hidden[]> {
-  const { items, refs } = await unbagRecording(outer, regionKey, resolve, origin, height)
+  const key = openedKey(outer, regionKey, origin, height)
+  const hit = key !== null ? openedBags.get(key) : undefined
+  if (key !== null && hit) {
+    // The most recently opened goes last, so it is the last to go.
+    openedBags.delete(key)
+    openedBags.set(key, hit)
+    rememberBag(outer, regionKey, hit.items, {}, height, origin)
+    return hit.items
+  }
+  let asked = 0
+  const counting: ResolveReference | undefined = resolve ? (ref) => { asked++; return resolve(ref) } : undefined
+  const { items, refs } = await unbagRecording(outer, regionKey, counting, origin, height)
+  if (key !== null && asked === 0) keepOpened(key, items, openedSize(outer))
   rememberBag(outer, regionKey, items, refs, height, origin)
   return items
 }

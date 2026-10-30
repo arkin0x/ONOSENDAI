@@ -14,7 +14,7 @@
  *
  * | Board | Rule |
  * |---|---|
- * | LONGEST CHAIN | chainLength: valid actions on the current chain, the spawn included |
+ * | LONGEST CHAIN | chainLength: valid actions on the current chain, the spawn included (the current chain for now: the CHAIN badge's best-of-any-chain is an owner ruling pending) |
  * | MOST BAGS HIDDEN | bagsHidden: live sealed bags, distinct d, at most 5 a UTC day |
  * | MOST RESPAWNS | respawnCount: spawns after the first that kept going |
  * | MOST OBJECTS PUBLISHED | objectsPublished: live public objects, each a new shape, 8+ vertices, at most 10 a UTC day |
@@ -27,8 +27,12 @@
  * something to aspire to"). Agents (a kind 0 with `bot: true` and a `p`
  * marked `operator`, lib/agentInvite) are never ranked among humans (badge
  * plan 6.8); with one agent today they have no board of their own yet, and
- * ACTIVE USERS counts them apart. A viewer's own blocks take a key off the
- * rankings, as they take it off the air.
+ * ACTIVE USERS counts them apart. Whether a key is an agent is read from its
+ * kind 0, so a break waits for the profiles of everyone it could show or
+ * count (PROFILE_HOLD_MS); a key whose profile is still unknown then is left
+ * off the rankings and out of both HUMANS and AGENTS, never guessed a human
+ * (review of #537). A viewer's own blocks take a key off the rankings, as
+ * they take it off the air.
  *
  * Counts only: no board carries, names or implies a coordinate, sector,
  * height, hint or bag location (design 3.3 L1, L2). A row is a rank, a key
@@ -36,7 +40,11 @@
  *
  * Phase 1 counts in the TV page (ruling D2) from what TV reads: the census
  * (lib/tv/stats loadCensus: spawns, bags, objects and their deletions), plus
- * one read of every movement event, which the chain rules need, once an hour. StatsSnapshot is the seam a site page or the
+ * every v2 movement event, which the chain rules need. Each is read whole
+ * once, then only what is new since the last read (READ_OVERLAP_S back, for
+ * events signed earlier than they were published), whole again once a day;
+ * an hour already counted is not counted again (review of #537). Whether the
+ * site's TV counts at all is one flag (STATS_ON_SITE); the stream always does. StatsSnapshot is the seam a site page or the
  * later signed service (design 3.2) fills or reads instead.
  */
 
@@ -47,7 +55,8 @@ import {
   type BagRecord, type Deletion, type ObjectRecord,
 } from '../countingRules'
 import { EXPLAINER_AD_GAP_MS } from './explainer'
-import { askAll, type Ask } from './tape'
+import { V2_EPOCH, askAll, type Ask } from './tape'
+import { READ_OVERLAP_S, READ_WHOLE_S } from './stats'
 import type { AdTheme } from './hosakaAd'
 
 /** The name on the break's tag and its stamp (arkinox, 2026-10-30). */
@@ -70,6 +79,25 @@ export const STATS_LOAD_DELAY_MS = 60_000
 /** Rows on a ranking: the #1 and four more (design 4.3). A ranking with fewer than STATS_MIN_ROWS is skipped. */
 export const STATS_ROWS = 5
 export const STATS_MIN_ROWS = 3
+
+/**
+ * Whether the site's TV counts and plays the boards, as the stream does: ON
+ * for now. The owner decides whether site viewers count at all (review of
+ * #537); OFF leaves the site with no reads and no breaks of its own.
+ */
+export const STATS_ON_SITE = true
+
+/** Whether this TV counts and plays the boards: the stream always, the site by STATS_ON_SITE. */
+export function statsOn(broadcast: boolean, onSite: boolean = STATS_ON_SITE): boolean {
+  return broadcast || onSite
+}
+
+
+/**
+ * How long a break waits for the profiles of everyone it could show or count,
+ * ms, after they were asked for: whether a key is an agent is in its kind 0.
+ */
+export const PROFILE_HOLD_MS = 15_000
 
 /** The query that plays one board first, for a look at it: /tv?stats=<board id>. */
 export const STATS_PARAM = 'stats'
@@ -176,7 +204,13 @@ export async function countStats(input: StatsInput, asOf: number, yieldEvery = 4
     if (k.activeWeek) active.push(pk)
     if (yieldEvery > 0 && ++n % yieldEvery === 0) await breathe()
   }
-  const activeBefore = activeKeys(by, asOf - 2 * WEEK_S, asOf - WEEK_S)
+  // The week before, the page getting its turn as above.
+  const activeBefore: string[] = []
+  n = 0
+  for (const [pk, evs] of by) {
+    if (activeKeys(new Map([[pk, evs]]), asOf - 2 * WEEK_S, asOf - WEEK_S).length > 0) activeBefore.push(pk)
+    if (yieldEvery > 0 && ++n % yieldEvery === 0) await breathe()
+  }
   const arrivals = new Map([...input.arrivals].filter(([, at]) => at <= asOf))
   return {
     asOf,
@@ -191,12 +225,37 @@ export async function countStats(input: StatsInput, asOf: number, yieldEvery = 4
 }
 
 /**
- * The one read the census does not make: every movement event, which the
- * chain rules need. Once an hour, in the TV page (ruling D2). The bags,
+ * The one read the census does not make: the v2 movement events, which the
+ * chain rules need (ruling D2). From V2_EPOCH, never v1's history (review of
+ * #537: unscoped, a read paged through thousands of v1 events); scoped by
+ * time and not by `A`, because a chain is followed through every event
+ * whatever its `A` (spec 8.9 rule 1), and leaving out a game's own actions
+ * would cut chains short. `since` for a read of what is new. The bags,
  * objects and their deletions are the census's (lib/tv/stats loadCensus).
  */
-export async function loadStatsReads(ask: Ask): Promise<{ actions: NostrEvent[] }> {
-  return { actions: await askAll(ask, { kinds: [ACTION_KIND] }) }
+export async function loadStatsReads(ask: Ask, since: number = V2_EPOCH): Promise<{ actions: NostrEvent[] }> {
+  return { actions: await askAll(ask, { kinds: [ACTION_KIND], since: Math.max(V2_EPOCH, since) }) }
+}
+
+/** The movement events read so far, by id, and when they were read: a later read asks only for what is new. */
+export interface ActionStore {
+  byId: Map<string, NostrEvent>
+  /** When the last read was made, and the last whole one, unix s. */
+  readAt: number
+  wholeAt: number
+}
+
+/**
+ * Read the movement events, whole the first time and once a READ_WHOLE_S,
+ * otherwise only those since the last read less READ_OVERLAP_S, into `kept`
+ * (a new store when null). Returns the store, every event in it.
+ */
+export async function readActions(ask: Ask, kept: ActionStore | null, nowS: number): Promise<ActionStore> {
+  const whole = !kept || nowS - kept.wholeAt >= READ_WHOLE_S
+  const { actions } = await loadStatsReads(ask, whole ? V2_EPOCH : kept.readAt - READ_OVERLAP_S)
+  const byId = whole ? new Map<string, NostrEvent>() : new Map(kept.byId)
+  for (const e of actions) byId.set(e.id, e)
+  return { byId, readAt: nowS, wholeAt: whole ? nowS : kept.wholeAt }
 }
 
 /**
@@ -209,23 +268,37 @@ export function isAgentProfile(p: { bot?: true; operator?: string } | null | und
   return p?.bot === true && typeof p.operator === 'string' && p.operator.length > 0
 }
 
-/** Who a board leaves out of its rankings: agents, always; and whoever the viewer has blocked. */
+/**
+ * Who a board leaves out: agents, always, from the rankings; a key whose
+ * profile is not known (`isKnown` false: no answer about its kind 0 yet), from
+ * the rankings and from both HUMANS and AGENTS; and whoever the viewer has
+ * blocked, from the rankings.
+ */
 export interface StatsFilter {
   isAgent: (pubkey: string) => boolean
+  isKnown?: (pubkey: string) => boolean
   hidden?: (pubkey: string) => boolean
 }
 
+/** Whether every key's profile is known, or the hold for them is over: a break may then show them (PROFILE_HOLD_MS). */
+export function profilesSettled(keys: string[], isKnown: (pubkey: string) => boolean, askedAt: number, now: number): boolean {
+  return now - askedAt >= PROFILE_HOLD_MS || keys.every(isKnown)
+}
+
 /**
- * A ranking's rows: the higher number first, then the earlier arrival, then
- * the pubkey's order (design 2.2 Ties; the first spawn stands in for the
- * service's first-seen until there is one). Zeros are not on it.
+ * A ranking's rows, in order: the higher number first, then the earlier
+ * arrival, then the pubkey's order (design 2.2 Ties; the first spawn stands
+ * in for the service's first-seen until there is one). Equal numbers share
+ * a rank (1, 1, 3), the way a table of standings writes it. Zeros are not on
+ * it, nor agents, nor keys not known, nor the blocked.
  */
 export function rankRows(values: Map<string, number>, arrivals: Map<string, number>, filter: StatsFilter, rows = STATS_ROWS): StatsRow[] {
-  return [...values]
-    .filter(([pk, v]) => v > 0 && !filter.isAgent(pk) && !filter.hidden?.(pk))
+  const known = filter.isKnown ?? (() => true)
+  const sorted = [...values]
+    .filter(([pk, v]) => v > 0 && known(pk) && !filter.isAgent(pk) && !filter.hidden?.(pk))
     .sort(([a, x], [b, y]) => y - x || (arrivals.get(a) ?? Infinity) - (arrivals.get(b) ?? Infinity) || (a < b ? -1 : a > b ? 1 : 0))
     .slice(0, rows)
-    .map(([pubkey, value], i) => ({ rank: i + 1, pubkey, value }))
+  return sorted.map(([pubkey, value]) => ({ rank: sorted.findIndex(([, v]) => v === value) + 1, pubkey, value }))
 }
 
 /** The keys a snapshot will name or count, for their profiles to be asked for before a break needs them. */
@@ -249,11 +322,14 @@ export function boardFor(id: BoardId, snap: StatsSnapshot, filter: StatsFilter):
     case 'new-arrivals':
       return { ...base, kind: 'count', count: { now: arrivalsIn(snap.arrivals, snap.asOf - WEEK_S, snap.asOf), before: arrivalsIn(snap.arrivals, snap.asOf - 2 * WEEK_S, snap.asOf - WEEK_S) } }
     case 'active-users': {
-      const agents = (keys: string[]): number => keys.filter(filter.isAgent).length
+      // A key not known is in neither count: never guessed a human.
+      const known = filter.isKnown ?? (() => true)
+      const agents = (keys: string[]): number => keys.filter((pk) => known(pk) && filter.isAgent(pk)).length
+      const humans = (keys: string[]): number => keys.filter((pk) => known(pk) && !filter.isAgent(pk)).length
       return {
         ...base,
         kind: 'split',
-        humans: { now: snap.active.length - agents(snap.active), before: snap.activeBefore.length - agents(snap.activeBefore) },
+        humans: { now: humans(snap.active), before: humans(snap.activeBefore) },
         agents: { now: agents(snap.active), before: agents(snap.activeBefore) },
         note: AGENTS_FUN_FACT,
       }
@@ -302,9 +378,9 @@ export function statsLength(board: StatsBoard): number {
   return BEATS[board.kind].end
 }
 
-/** When the rows of a ranking start decoding in, seconds: the bottom one first, one a second, the #1 at its own beat. */
-export function rowStart(rank: number, rows: number): number {
-  return rank === 1 ? BEATS.ranking.top : BEATS.ranking.rows + (rows - rank) * 1.1
+/** When the row at `position` (1 the top) starts decoding in, seconds: the bottom one first, one a second, the top one at its own beat. */
+export function rowStart(position: number, rows: number): number {
+  return position === 1 ? BEATS.ranking.top : BEATS.ranking.rows + (rows - position) * 1.1
 }
 
 /** Three letters a month, as the tape's clock writes them (scene/tvPainter tapeStamp). */

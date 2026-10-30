@@ -34,10 +34,12 @@ import type { Filter } from 'nostr-tools'
 import type { RelayAnswer } from '../../lib/relayOutcome'
 import { positionHex, type NostrEvent } from '../../lib/events'
 import { V2_EPOCH } from '../../lib/tv/tape'
-import { setStatsSnapshotForTest, setTvAsk, statsClockForTest, useTv } from '../useTv'
+import { resetStatsReadsForTest, setStatsSnapshotForTest, setTvAsk, statsClockForTest, statsReadsForTest, useTv } from '../useTv'
+import { useProfiles } from '../useProfiles'
+import { asOfHour } from '../../lib/tv/cyberspaceStats'
 import { setExplainerLineupForTest, useTvExplainer } from '../useTvExplainer'
 import { setBroadcastForTest } from '../../lib/tv/broadcast'
-import { BROADCAST_STATS_FIRST_MS, STATS_FIRST_MS, STATS_GAP_MS, STATS_HOUR_S, STATS_TAG } from '../../lib/tv/cyberspaceStats'
+import { BROADCAST_STATS_FIRST_MS, PROFILE_HOLD_MS, STATS_FIRST_MS, STATS_GAP_MS, STATS_HOUR_S, STATS_TAG } from '../../lib/tv/cyberspaceStats'
 
 const A = '1'.repeat(64)
 const B = '2'.repeat(64)
@@ -139,6 +141,10 @@ beforeEach(async () => {
   asked.length = 0
   published.length = 0
   setStatsSnapshotForTest(null)
+  resetStatsReadsForTest()
+  // The census is kept across runs of TV, as the counts are: each test starts with none.
+  useTv.setState({ census: null })
+  useProfiles.setState({ profiles: {} })
   setTvAsk(ask)
   const hash = await stubExplainerMedia()
   setExplainerLineupForTest([{ id: '1-test', title: 'TEST', duration: 45, files: [{ url: `https://b.example/${hash}.webm`, type: 'video/webm' }] }])
@@ -187,7 +193,8 @@ describe('the CYBERSPACE STATS break in TV\'s engine', () => {
     expect(board).not.toBeNull()
     expect(board!.asOf % STATS_HOUR_S).toBe(0)
     expect(board!.title).not.toContain(STATS_TAG)
-    expect(asked.some((f) => f.kinds?.length === 1 && f.kinds[0] === 3333 && !f.authors && !f['#A' as keyof Filter] && f.since === undefined)).toBe(true)
+    // From V2_EPOCH (never v1 history), not by A.
+    expect(asked.some((f) => f.kinds?.length === 1 && f.kinds[0] === 3333 && !f.authors && !f['#A' as keyof Filter] && f.since === V2_EPOCH)).toBe(true)
     expect(asked.some((f) => f.kinds?.[0] === 5 && (f as Record<string, unknown>)['#k'] !== undefined)).toBe(true)
     expect(asked.some((f) => f.kinds?.[0] === 5 && (f as Record<string, unknown>)['#k'] === undefined)).toBe(false)
     expect(published.filter((e) => (e as { kind?: number }).kind !== 23334)).toEqual([])
@@ -204,4 +211,79 @@ describe('the CYBERSPACE STATS break in TV\'s engine', () => {
     off()
     expect(ids[0]).toBe('new-arrivals')
   })
+
+  it('TV off and on again in the same hour reads and counts nothing again; the census TV came on with is the one counted', async () => {
+    useTv.getState().start()
+    await run(STATS_FIRST_MS + 30_000)
+    // A whole read's first page: from V2_EPOCH with no until (the tape's random start always has one).
+    const whole = asked.filter((f) => f.kinds?.[0] === 3333 && !f.authors && f.since === V2_EPOCH && f.until === undefined && !f['#A' as keyof Filter]).length
+    const censusBags = asked.filter((f) => f.kinds?.[0] === 33330).length
+    expect(whole).toBeGreaterThan(0)
+    // Every distinct event of the tape (its ids repeat where the padding meets: f, ff, fff...).
+    expect(statsReadsForTest().actions).toBe(new Set(tape.map((e) => e.id)).size)
+    // Only the census TV read when it came on: counting did not read it again.
+    expect(censusBags).toBe(1)
+    useTv.getState().stop()
+    useTv.getState().start()
+    await run(STATS_FIRST_MS + 30_000)
+    expect(asked.filter((f) => f.kinds?.[0] === 3333 && !f.authors && f.since === V2_EPOCH && f.until === undefined && !f['#A' as keyof Filter]).length).toBe(whole)
+    expect(asked.filter((f) => f.kinds?.[0] === 33330).length).toBe(censusBags)
+  }, 60_000)
+})
+
+describe('who is an agent: a break holds for the profiles (review of #537)', () => {
+  const AGENT = 'a'.repeat(64)
+  const people = ['b', 'c', 'd'].map((c) => c.repeat(64))
+  /** Counts as of this hour: the agent the longest chain, three people after it, all four active. */
+  function counts() {
+    const asOf = asOfHour(Date.now() / 1000)
+    const chain = new Map([[AGENT, 500], [people[0], 130], [people[1], 77], [people[2], 44]])
+    return { asOf, chain, respawns: new Map(), bags: new Map(), objects: new Map(), arrivals: new Map(), active: [AGENT, ...people], activeBefore: [] }
+  }
+  // Asked for by name, on an empty tape: no shot to wait out, so a board is due 4 s in, and only the hold keeps it off.
+  const forced = (): void => {
+    vi.stubGlobal('window', { location: { pathname: '/tv', search: '?stats=longest-chain' }, setTimeout, clearTimeout, addEventListener: () => {}, removeEventListener: () => {} })
+    setTvAsk(async () => [{ url: 'wss://relay.test', outcome: 'answered', events: [] }])
+  }
+
+  it('waits for the answers, then leaves the agent off the humans\' board', async () => {
+    forced()
+    const shown: Array<{ at: number; board: unknown }> = []
+    const off = useTv.subscribe((s, prev) => { if (s.stats && !prev.stats) shown.push({ at: performance.now(), board: s.stats.board }) })
+    const t0 = performance.now()
+    useTv.getState().start()
+    setStatsSnapshotForTest(counts())
+    // The answers come late, inside the hold.
+    const answerAt = PROFILE_HOLD_MS - 1_000
+    await run(answerAt)
+    // Not yet: no answer about anyone's kind 0.
+    expect(shown).toHaveLength(0)
+    useProfiles.setState({ profiles: { [AGENT]: { name: 'XOR', bot: true, operator: people[0] } as never, [people[0]]: null, [people[1]]: null, [people[2]]: null } })
+    await run(60_000)
+    off()
+    expect(shown.length).toBeGreaterThan(0)
+    expect(shown[0].at - t0).toBeGreaterThanOrEqual(answerAt)
+    const b = shown[0].board as { id: string; rows: Array<{ pubkey: string }> }
+    expect(b.id).toBe('longest-chain')
+    expect(b.rows.map((r) => r.pubkey)).toEqual(people)
+  }, 60_000)
+
+  it('with no answer by PROFILE_HOLD_MS, a key not known is shown nowhere: not ranked, not counted a human', async () => {
+    forced()
+    const shown: Array<{ at: number; board: { id: string; kind: string; rows?: unknown[]; humans?: { now: number }; agents?: { now: number } } }> = []
+    const off = useTv.subscribe((s, prev) => { if (s.stats && !prev.stats) shown.push({ at: performance.now(), board: s.stats.board as never }) })
+    const t0 = performance.now()
+    useTv.getState().start()
+    setStatsSnapshotForTest(counts())
+    // Everyone but the agent answered.
+    useProfiles.setState({ profiles: { [people[0]]: null, [people[1]]: null, [people[2]]: null } })
+    await run(PROFILE_HOLD_MS + 60_000)
+    off()
+    expect(shown.length).toBeGreaterThan(0)
+    expect(shown[0].at - t0).toBeGreaterThanOrEqual(PROFILE_HOLD_MS - 200)
+    for (const { board } of shown) {
+      if (board.kind === 'ranking') expect(JSON.stringify(board.rows)).not.toContain(AGENT)
+      if (board.kind === 'split') expect([board.humans!.now, board.agents!.now]).toEqual([3, 0])
+    }
+  }, 90_000)
 })

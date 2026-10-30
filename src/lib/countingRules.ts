@@ -11,12 +11,18 @@
  *
  * | Rule | Counts | Badge |
  * |---|---|---|
- * | chainLength | valid actions on the current chain, the spawn included | CHAIN |
- * | respawnCount | spawns after the first whose chain went on past the spawn | PHOENIX |
+ * | chainLength | valid actions on the current chain, the spawn included | CHAIN, for now (below) |
+ * | respawnCount | spawns after the first whose chain went on past the spawn | PHOENIX, for now (below) |
  * | activeKeys | keys with a valid action in a window | REGULAR's "valid action" |
  * | bagsHidden | live sealed bags, distinct d, at most 5 a UTC day | STASH |
  * | objectsPublished | live public objects, distinct shape, 8+ vertices, at most 10 a UTC day | BUILDER |
  * | arrivalTimes | each key's first v2 spawn | the ticker's AVATARS, NEW ARRIVALS |
+ *
+ * Two owner rulings are pending, and these rules follow the board for now
+ * (review of #537): CHAIN in the badge catalog counts the best of any of a
+ * key's chains, where chainLength counts the current chain; and PHOENIX
+ * asks for a valid hop after the newest spawn, where respawnCount counts a
+ * respawn followed by any valid action.
  *
  * What these rules never read or return: a place. No coordinate, sector,
  * height, hint or lookup id is part of any answer here, only keys and counts
@@ -86,8 +92,9 @@ function asOf(events: NostrEvent[], t: number): NostrEvent[] {
 }
 
 /**
- * LONGEST CHAIN, the CHAIN badge's number: the valid actions on `pubkey`'s
- * current chain as of `t`. The current chain is the newest spawn by the key
+ * LONGEST CHAIN: the valid actions on `pubkey`'s current chain as of `t`
+ * (the current chain for now; the catalog's CHAIN badge counts the best of
+ * any chain, an owner ruling pending). The current chain is the newest spawn by the key
  * itself, followed forward by `previous` links through every event whose
  * genesis names it, whatever its `A` (spec 8.7.3, lib/events buildChain). The
  * ticker's CHAIN OF n ACTIONS and the board are this one function.
@@ -119,7 +126,8 @@ export function chainFrom(events: NostrEvent[], spawn: NostrEvent, t: number = I
 }
 
 /**
- * MOST RESPAWNS, PHOENIX's "respawned and kept going": the key's spawns after
+ * MOST RESPAWNS, "respawned and kept going" (any valid action for now; the
+ * catalog's PHOENIX asks for a valid hop, an owner ruling pending): the key's spawns after
  * its first, as of `t`, counting a spawn only when its own chain's valid
  * prefix goes on past the spawn (at least one valid action after it). A spawn
  * with nothing after it is free and counts for nothing.
@@ -144,6 +152,64 @@ export function activeIn(events: NostrEvent[], pubkey: string, from: number, to:
     for (let i = 0; i < valid; i++) if (chain[i].createdAt > from && chain[i].createdAt <= to) return true
   }
   return false
+}
+
+/**
+ * A key's chains, each walked once (review of #537: the marquee rebuilt a
+ * 1,315-event chain inside a paint frame, 80 to 200 ms each time): for every
+ * spawn, when each entry of its walk was signed (as the latest so far, so a
+ * binary search finds how far the walk reaches by any moment), and how many
+ * of them are valid. chainLengthIndexed answers chainLength from it.
+ */
+export interface ChainIndex {
+  pubkey: string
+  spawns: Array<{ id: string; at: number; reach: number[]; valid: number; forked: boolean }>
+}
+
+/** Index a key's chains (chainLengthIndexed). Every spawn's chain built once, as of every event in hand. */
+export function chainIndex(events: NostrEvent[], pubkey: string): ChainIndex {
+  const mine = events.filter((e) => e.pubkey === pubkey && isV2Action(e))
+  const spawns = mine.filter(isV2Spawn).sort((a, b) => a.created_at - b.created_at || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
+  const under = new Map<string, NostrEvent[]>()
+  for (const e of mine) {
+    const g = genesisOf(e)
+    if (!g || isV2Spawn(e)) continue
+    const list = under.get(g)
+    if (list) list.push(e)
+    else under.set(g, [e])
+  }
+  return {
+    pubkey,
+    spawns: spawns.map((s) => {
+      const chain = buildChain([s, ...(under.get(s.id) ?? [])], pubkey)
+      let latest = -Infinity
+      const reach = chain.map((a) => (latest = Math.max(latest, a.createdAt)))
+      // A fork's other branch is not on the walk: as of a moment before both branches were signed, the chain went on through one; so it is answered the long way.
+      return { id: s.id, at: s.created_at, reach, valid: chain[0]?.fork ? 0 : validPrefixLength(chain), forked: chain[0]?.fork !== undefined }
+    }),
+  }
+}
+
+/**
+ * chainLength from an index, in a binary search: the newest spawn signed by
+ * `t`, its walk as far as every entry so far was signed by `t` (the walk
+ * cannot reach past an event not yet signed), at most its valid entries. A
+ * chain that forked is counted the long way (chainLength), as of `t`.
+ */
+export function chainLengthIndexed(index: ChainIndex, events: NostrEvent[], t: number): number {
+  let s = -1
+  for (let i = index.spawns.length - 1; i >= 0; i--) if (index.spawns[i].at <= t) { s = i; break }
+  if (s < 0) return 0
+  const spawn = index.spawns[s]
+  if (spawn.forked) return chainLength(events, index.pubkey, t)
+  let lo = 0
+  let hi = spawn.reach.length
+  while (lo < hi) {
+    const mid = (lo + hi) >> 1
+    if (spawn.reach[mid] <= t) lo = mid + 1
+    else hi = mid
+  }
+  return Math.min(lo, spawn.valid)
 }
 
 /** Every key with a valid action in the window (`from`, `to`] (activeIn), from every v2 action by author. */
@@ -213,6 +279,7 @@ export function arrivalsIn(arrivals: Map<string, number>, from: number, to: numb
 
 /** What a deletion (NIP-09 kind 5) names: its author, when, and the ids and addresses it deletes. */
 export interface Deletion {
+  id: string
   pubkey: string
   createdAt: number
   ids: string[]
@@ -223,6 +290,7 @@ export interface Deletion {
 export function deletionOf(e: NostrEvent): Deletion | null {
   if (e.kind !== DELETION_KIND) return null
   return {
+    id: e.id,
     pubkey: e.pubkey,
     createdAt: e.created_at,
     ids: e.tags.filter((t) => t[0] === 'e' && t[1]).map((t) => t[1]),

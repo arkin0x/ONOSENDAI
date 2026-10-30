@@ -211,6 +211,22 @@ describe('the CYBERSPACE STATS break on the tube', () => {
       }
     })
 
+    it(`${f.name}: equal numbers share a rank, each on its own row (review of #537)`, () => {
+      set()
+      const tied: StatsBoard = { ...ranking, rows: [9, 5, 5, 5, 1].map((value, i) => ({ rank: [1, 2, 2, 2, 5][i], pubkey: String(i + 3).repeat(64), value })) }
+      const { texts } = paintBoard(tied, BEATS.ranking.stamp - 0.5, f.w, f.h)
+      const labels = texts.filter((x) => /^[1-5]$/.test(x.text) && x.align === 'left').sort((a, b) => a.y - b.y)
+      expect(labels.map((x) => x.text)).toEqual(['1', '2', '2', '2', '5'])
+      for (let i = 1; i < labels.length; i++) expect(labels[i].box.y0).toBeGreaterThanOrEqual(labels[i - 1].box.y1 - 0.5)
+    })
+
+    it(`${f.name}: the splash's #1 can be read (review of #537: tiny at 390 px)`, () => {
+      set()
+      const { texts } = paintBoard(ranking, BEATS.ranking.stamp - 0.5, f.w, f.h)
+      const splash = texts.find((x) => x.text === '#1')!
+      expect(splash.size, f.name).toBeGreaterThanOrEqual(11)
+    })
+
     it(`${f.name}: NEW ARRIVALS, one number and last week's`, () => {
       set()
       const { texts } = paintBoard(count, BEATS.count.stamp - 0.5, f.w, f.h)

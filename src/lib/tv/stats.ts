@@ -21,8 +21,9 @@
 
 import { ACTION_KIND, type NostrEvent } from '../events'
 import { HIDDEN_KIND, OBJECT_KIND } from '../hidden'
-import { DELETION_KIND, arrivalTimes, bagRecord, bagsHidden, chainLength, deletionOf, isV2Action, objectRecord, type BagRecord, type Deletion, type ObjectRecord } from '../countingRules'
-import { askAll, type Ask } from './tape'
+import { DELETION_KIND, newestPerAddress, arrivalTimes, bagRecord, bagsHidden, chainIndex, chainLengthIndexed, deletionOf, isV2Action, objectRecord, type BagRecord, type ChainIndex, type Deletion, type ObjectRecord } from '../countingRules'
+import type { Filter } from 'nostr-tools'
+import { V2_EPOCH, askAll, type Ask } from './tape'
 
 /** Times in ascending order, and how many are at or before `t`. */
 export function countTo(times: number[], t: number): number {
@@ -57,26 +58,52 @@ export interface Census {
   deletions: Deletion[]
   /** Each key's first v2 spawn (lib/countingRules arrivalTimes). */
   firstSpawn: Map<string, number>
+  /** When it was read, and last read whole, unix s: a later read asks only for what is new (loadCensus). */
+  readAt: number
+  wholeAt: number
 }
 
-export async function loadCensus(ask: Ask): Promise<Census> {
+/** How far back a read after the first starts, s, before the last one: a move signed offline is published later than it was signed (review of #537). */
+export const READ_OVERLAP_S = 24 * 60 * 60
+/** How often everything is read whole again, s: for one signed earlier than READ_OVERLAP_S before it was published. */
+export const READ_WHOLE_S = 24 * 60 * 60
+
+const byId = <T extends { id: string }>(...lists: T[][]): T[] => [...new Map(lists.flat().map((x) => [x.id, x])).values()]
+
+/**
+ * The census: whole the first time (or with no `prev`) and once a
+ * READ_WHOLE_S, otherwise only what is new since `prev` was read, less
+ * READ_OVERLAP_S, merged into it by id (review of #537: every count read it
+ * all again). Spawns from V2_EPOCH. Bags and objects are addressable, so the
+ * counts are of the newest of each address, as the relays keep them.
+ */
+export async function loadCensus(ask: Ask, prev: Census | null = null, nowS: number = Math.floor(Date.now() / 1000)): Promise<Census> {
+  const whole = !prev || nowS - prev.wholeAt >= READ_WHOLE_S
+  const since = whole ? undefined : prev.readAt - READ_OVERLAP_S
+  const at = (f: Filter): Filter => (since === undefined ? f : { ...f, since })
   const [spawns, bags, objects, deletions] = await Promise.all([
-    askAll(ask, { kinds: [ACTION_KIND], '#A': ['spawn'] }),
-    askAll(ask, { kinds: [HIDDEN_KIND] }),
-    askAll(ask, { kinds: [OBJECT_KIND] }),
+    askAll(ask, at({ kinds: [ACTION_KIND], '#A': ['spawn'], since: since ?? V2_EPOCH })),
+    askAll(ask, at({ kinds: [HIDDEN_KIND] })),
+    askAll(ask, at({ kinds: [OBJECT_KIND] })),
     // Scoped by `k`: a bare kind 5 read pages through all of nostr (tv-leaderboards-design 1.1).
-    askAll(ask, { kinds: [DELETION_KIND], '#k': [String(HIDDEN_KIND), String(OBJECT_KIND)] }),
+    askAll(ask, at({ kinds: [DELETION_KIND], '#k': [String(HIDDEN_KIND), String(OBJECT_KIND)] })),
   ])
-  const first = arrivalTimes(spawns)
+  const keep = whole ? null : prev
+  const first = new Map(keep?.firstSpawn ?? [])
+  for (const [pk, t] of arrivalTimes(spawns)) first.set(pk, Math.min(first.get(pk) ?? Infinity, t))
+  const bagRecords = byId(keep?.bagRecords ?? [], bags.map(bagRecord).filter((b): b is BagRecord => b !== null))
+  const objectRecords = byId(keep?.objectRecords ?? [], objects.map(objectRecord).filter((o): o is ObjectRecord => o !== null))
   return {
     arrivals: sorted([...first.values()]),
-    bags: sorted(bags.map((b) => b.created_at)),
+    bags: sorted(newestPerAddress(bagRecords).map((b) => b.createdAt)),
     // A public object carries its payload in content; a hidden one is sealed.
-    objects: sorted(objects.filter((o) => !o.tags.some((t) => t[0] === 'encrypted')).map((o) => o.created_at)),
-    bagRecords: bags.map(bagRecord).filter((b): b is BagRecord => b !== null),
-    objectRecords: objects.map(objectRecord).filter((o): o is ObjectRecord => o !== null),
-    deletions: deletions.map(deletionOf).filter((d): d is Deletion => d !== null),
+    objects: sorted(newestPerAddress(objectRecords).filter((o) => o.open).map((o) => o.createdAt)),
+    bagRecords,
+    objectRecords,
+    deletions: byId(keep?.deletions ?? [], deletions.map(deletionOf).filter((d): d is Deletion => d !== null)),
     firstSpawn: first,
+    readAt: nowS,
+    wholeAt: whole ? nowS : prev.wholeAt,
   }
 }
 
@@ -106,11 +133,13 @@ export function bagsHiddenAt(c: Census, pubkey: string, t: number): number {
 export interface ChainHistory {
   pubkey: string
   events: NostrEvent[]
+  /** Its chains, each walked once (lib/countingRules chainIndex): made as it loads, never in a paint. */
+  index?: ChainIndex
 }
 
 export async function loadChainHistory(pubkey: string, ask: Ask): Promise<ChainHistory> {
-  const events = await askAll(ask, { kinds: [ACTION_KIND], authors: [pubkey] })
-  return { pubkey, events: events.filter((e) => e.pubkey === pubkey && isV2Action(e)) }
+  const events = (await askAll(ask, { kinds: [ACTION_KIND], authors: [pubkey] })).filter((e) => e.pubkey === pubkey && isV2Action(e))
+  return { pubkey, events, index: chainIndex(events, pubkey) }
 }
 
 /** The last answer per history, for the marquee, which asks again each time round at the same moment on tape. */
@@ -121,12 +150,14 @@ const lastLength = new WeakMap<ChainHistory, { t: number; n: number }>()
  * (lib/countingRules chainLength), so the ticker and the CYBERSPACE STATS
  * board never disagree. The chain is followed by its `previous` links, not
  * counted by time: a fork counts nothing and a gap ends it (until
- * 2026-10-30 this counted every action signed since the latest spawn).
+ * 2026-10-30 this counted every action signed since the latest spawn). From
+ * the history's index, a binary search: the marquee asks in a paint frame.
  */
 export function chainLengthAt(c: ChainHistory, t: number): number {
   const last = lastLength.get(c)
   if (last && last.t === t) return last.n
-  const n = chainLength(c.events, c.pubkey, t)
+  c.index ??= chainIndex(c.events, c.pubkey)
+  const n = chainLengthIndexed(c.index, c.events, t)
   lastLength.set(c, { t, n })
   return n
 }

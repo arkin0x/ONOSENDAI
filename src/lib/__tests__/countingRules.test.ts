@@ -11,7 +11,7 @@ import { newShard, toPayload } from 'sno-core/shards'
 import { positionHex, spawnTemplate, type NostrEvent } from '../events'
 import {
   BAGS_PER_DAY, DAY_S, OBJECTS_PER_DAY, WEEK_S, activeIn, activeKeys, actionsByAuthor, arrivalTimes, arrivalsIn, bagRecord, bagsHidden, chainLength,
-  deletionOf, keyChains, objectRecord, objectsPublished, respawnCount, validPrefixLength, type BagRecord, type ObjectRecord,
+  chainIndex, chainLengthIndexed, deletionOf, keyChains, objectRecord, objectsPublished, respawnCount, validPrefixLength, type BagRecord, type ObjectRecord,
 } from '../countingRules'
 import { buildChain } from '../events'
 import { hopEvent, nextId } from './chainFixtures'
@@ -236,5 +236,27 @@ describe('NEW ARRIVALS (arrivalTimes, arrivalsIn)', () => {
     expect(arr.get(a)).toBe(asOf - 10 * DAY_S)
     expect(arrivalsIn(arr, asOf - WEEK_S, asOf)).toBe(1)
     expect(arrivalsIn(arr, asOf - 2 * WEEK_S, asOf - WEEK_S)).toBe(1)
+  })
+})
+
+describe('chainLengthIndexed: the ticker\'s index answers as chainLength does, at every moment', () => {
+  it('a plain chain, a gap, a fork, a respawn, a hop signed out of order, a broken one', () => {
+    const pk = key()
+    const a = walk(pk, T, 6)
+    const fork = hopEvent({ pubkey: pk, createdAt: T + 30, genesisId: a[0].id, previousId: a[3].id, c: a[4].tags.find((t) => t[0] === 'c')![1], to: { x: 1n, y: 2n, z: 3n } })
+    const wrong = hopEvent({ pubkey: pk, createdAt: T + 7, genesisId: a[0].id, previousId: a[6].id, c: pk, to: { x: 9n, y: 9n, z: 9n } })
+    const again = walk(pk, T + 100, 3)
+    const sets: NostrEvent[][] = [
+      a,
+      [a[0], a[1], a[2], a[4], a[5]],
+      [...a, fork],
+      [...a, ...again],
+      [a[0], a[1], { ...a[2], created_at: T + 50 }, a[3], a[4]],
+      [...a, wrong],
+    ]
+    for (const evs of sets) {
+      const index = chainIndex(evs, pk)
+      for (let t = T - 1; t <= T + 110; t++) expect(chainLengthIndexed(index, evs, t), `t=${t}`).toBe(chainLength(evs, pk, t))
+    }
   })
 })

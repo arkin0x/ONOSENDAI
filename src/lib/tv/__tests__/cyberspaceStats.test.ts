@@ -23,10 +23,11 @@ import { coordToXyz, hexToCoord } from 'cyberspace-core'
 import { positionHex, spawnTemplate, type NostrEvent } from '../../events'
 import { hopEvent, nextId } from '../../__tests__/chainFixtures'
 import { DAY_S, WEEK_S, arrivalTimes, type BagRecord } from '../../countingRules'
-import { bagsHiddenAt, chainLengthAt, loadCensus } from '../stats'
+import { READ_OVERLAP_S, READ_WHOLE_S, bagsHiddenAt, chainLengthAt, loadCensus } from '../stats'
+import { V2_EPOCH } from '../tape'
 import {
   AGENTS_FUN_FACT, BEATS, BOARD_ORDER, STATS_GAP_MS, STATS_MIN_ROWS, STATS_TAG, asOfHour, asOfWords, boardFor, breakMayStart, countStats, forcedBoard,
-  isAgentProfile, loadStatsReads, nextBoard, rankRows, statNumber, statsEveryMs, statsFirstMs, statsLength, type StatsBoard, type StatsFilter, type StatsSnapshot,
+  PROFILE_HOLD_MS, STATS_ON_SITE, isAgentProfile, loadStatsReads, nextBoard, profilesSettled, rankRows, readActions, statsOn, statNumber, statsEveryMs, statsFirstMs, statsLength, type StatsBoard, type StatsFilter, type StatsSnapshot,
 } from '../cyberspaceStats'
 import { AD_EVERY_MS, BROADCAST_AD_EVERY_MS, AD_IN_MS } from '../hosakaAd'
 import { EXPLAINER_AD_GAP_MS } from '../explainer'
@@ -114,7 +115,8 @@ describe('the boards', () => {
       if (!b) continue
       expect(JSON.stringify(b)).not.toMatch(/HOUSE/i)
       if (b.kind === 'ranking') {
-        expect(b.rows.map((r) => r.rank)).toEqual(b.rows.map((_, i) => i + 1))
+        // Each rank is one more than how many rows have more (equal numbers share it).
+        expect(b.rows.map((r) => r.rank)).toEqual(b.rows.map((r) => b.rows.filter((o) => o.value > r.value).length + 1))
         expect(b.rows.filter((r) => r.pubkey === ARKINOX).length).toBeLessThanOrEqual(1)
       }
     }
@@ -188,10 +190,43 @@ describe('the boards', () => {
     expect(forcedBoard('?stats=the-house')).toBeNull()
   })
 
-  it('ties: the higher number, then the earlier arrival, then the pubkey', () => {
-    const values = new Map([['c'.repeat(64), 5], ['a'.repeat(64), 5], ['b'.repeat(64), 5], ['d'.repeat(64), 9], ['e'.repeat(64), 0]])
+  it('ties: the higher number, then the earlier arrival, then the pubkey; equal numbers share a rank', () => {
+    const values = new Map([['c'.repeat(64), 5], ['a'.repeat(64), 5], ['b'.repeat(64), 5], ['d'.repeat(64), 9], ['f'.repeat(64), 2], ['e'.repeat(64), 0]])
     const arrivals = new Map([['b'.repeat(64), 10], ['a'.repeat(64), 20], ['c'.repeat(64), 20]])
-    expect(rankRows(values, arrivals, nobody).map((r) => r.pubkey[0])).toEqual(['d', 'b', 'a', 'c'])
+    const rows = rankRows(values, arrivals, nobody)
+    expect(rows.map((r) => r.pubkey[0])).toEqual(['d', 'b', 'a', 'c', 'f'])
+    expect(rows.map((r) => r.rank)).toEqual([1, 2, 2, 2, 5])
+  })
+
+  it('a key whose profile is not known is off every ranking and in neither HUMANS nor AGENTS (review of #537)', async () => {
+    const w = world()
+    const snap = await countStats(w.input, AS_OF, 0)
+    // The agent's kind 0 has not come: never ranked as a human, never counted as one.
+    const unknownAgent: StatsFilter = { isAgent: () => false, isKnown: (pk) => pk !== w.agent }
+    const chain = boardFor('longest-chain', snap, unknownAgent)!
+    expect(chain.kind === 'ranking' && chain.rows.some((r) => r.pubkey === w.agent)).toBe(false)
+    expect(chain.kind === 'ranking' && chain.rows[1].value).toBe(10)
+    const actions = [...walk(w.agent, AS_OF - DAY_S, 2), ...walk(w.p1, AS_OF - DAY_S, 1)]
+    const s2 = await countStats({ actions, bags: [], objects: [], deletions: [], arrivals: arrivalTimes(actions) }, AS_OF, 0)
+    const split = boardFor('active-users', s2, unknownAgent)!
+    expect(split.kind === 'split' && [split.humans.now, split.agents.now]).toEqual([1, 0])
+    // Known, it is an agent.
+    const known = boardFor('active-users', s2, agentFilter(w.agent))!
+    expect(known.kind === 'split' && [known.humans.now, known.agents.now]).toEqual([1, 1])
+  })
+
+  it('a break holds for the profiles until they are known or PROFILE_HOLD_MS is over', () => {
+    const keys = ['a', 'b']
+    expect(profilesSettled(keys, (k) => k === 'a', 1000, 1000 + PROFILE_HOLD_MS - 1)).toBe(false)
+    expect(profilesSettled(keys, () => true, 1000, 1001)).toBe(true)
+    expect(profilesSettled(keys, () => false, 1000, 1000 + PROFILE_HOLD_MS)).toBe(true)
+  })
+
+  it('the site counts by one flag, ON for now; the stream always counts', () => {
+    expect(STATS_ON_SITE).toBe(true)
+    expect(statsOn(false)).toBe(true)
+    expect(statsOn(false, false)).toBe(false)
+    expect(statsOn(true, false)).toBe(true)
   })
 })
 
@@ -287,11 +322,16 @@ describe('the break\'s clock (breakMayStart)', () => {
 })
 
 describe('the reads', () => {
-  it('ask for every movement event; the census asks for the bag and object deletions, scoped by k', async () => {
+  it('ask for the v2 movement events from V2_EPOCH, never v1 history, and not by A; the census asks for the deletions scoped by k', async () => {
     const asked: unknown[] = []
     const ask = async (f: unknown) => { asked.push(f); return [{ url: 'wss://relay.test', outcome: 'answered' as const, events: [] }] }
     expect(await loadStatsReads(ask as never)).toEqual({ actions: [] })
-    expect(asked).toContainEqual(expect.objectContaining({ kinds: [3333] }))
+    expect(asked).toContainEqual(expect.objectContaining({ kinds: [3333], since: V2_EPOCH }))
+    // Not scoped by A: a chain follows every event whatever its A (spec 8.9 rule 1); a game's own actions left out would cut it short.
+    expect(asked.some((f) => (f as Record<string, unknown>)['#A'] !== undefined)).toBe(false)
+    // A since before V2_EPOCH is V2_EPOCH.
+    await loadStatsReads(ask as never, 5)
+    expect(asked[asked.length - 1]).toEqual(expect.objectContaining({ since: V2_EPOCH }))
     await loadCensus(ask as never)
     expect(asked).toContainEqual(expect.objectContaining({ kinds: [5], '#k': ['33330', '33331'] }))
     // Never a bare kind 5 read.
@@ -304,9 +344,55 @@ describe('the reads', () => {
     // Six sealed on one UTC day: five count, on the marquee as on the board (the 37 against 36 seen in the local shots).
     const day = Math.floor((AS_OF - 3 * DAY_S) / DAY_S) * DAY_S
     const bags = [...w.input.bags, ...Array.from({ length: 6 }, (_, i): BagRecord => ({ id: nextId(), kind: 33330, pubkey: w.p3, d: `same${i}`, createdAt: day + i, sealed: true }))]
-    const census = { arrivals: [], bags: [], objects: [], bagRecords: bags, objectRecords: [], deletions: [], firstSpawn: new Map() }
+    const census = { arrivals: [], bags: [], objects: [], bagRecords: bags, objectRecords: [], deletions: [], firstSpawn: new Map(), readAt: 0, wholeAt: 0 }
     const snap = await countStats({ ...w.input, bags }, AS_OF, 0)
     expect(snap.bags.get(w.p3)).toBe(5)
     for (const pk of [ARKINOX, w.agent, w.p1, w.p2, w.p3]) expect(bagsHiddenAt(census, pk, AS_OF)).toBe(snap.bags.get(pk) ?? 0)
+  })
+})
+
+describe('reading only what is new (review of #537)', () => {
+  const answer = (events: NostrEvent[]) => [{ url: 'wss://relay.test', outcome: 'answered' as const, events }]
+
+  it('the movement events: whole the first time, then since the last read less a day, merged; whole again after a day', async () => {
+    const pk = key()
+    const old = walk(pk, AS_OF - 3 * DAY_S, 2)
+    const fresh = walk(pk, AS_OF + 600, 1)
+    const asked: Array<Record<string, unknown>> = []
+    let serve = old
+    const ask = async (f: Record<string, unknown>) => { asked.push(f); return answer(serve.filter((e) => e.created_at >= (f.since as number))) }
+    const first = await readActions(ask as never, null, AS_OF)
+    expect(asked[0].since).toBe(V2_EPOCH)
+    expect(first.byId.size).toBe(3)
+    serve = [...old, ...fresh]
+    const second = await readActions(ask as never, first, AS_OF + 3600)
+    expect(asked[1].since).toBe(AS_OF - READ_OVERLAP_S)
+    expect(second.byId.size).toBe(5)
+    expect(second.wholeAt).toBe(AS_OF)
+    await readActions(ask as never, second, AS_OF + READ_WHOLE_S)
+    expect(asked[2].since).toBe(V2_EPOCH)
+  })
+
+  it('the census: whole the first time, then only what is new, merged by id', async () => {
+    const pk = key()
+    const spawn = walk(pk, AS_OF - DAY_S, 0)[0]
+    const bag = (d: string, t: number): NostrEvent => ({ id: nextId(), pubkey: pk, created_at: t, kind: 33330, tags: [['d', d], ['encrypted', 'x']], content: '', sig: '' })
+    const asked: Array<Record<string, unknown>> = []
+    let serve: NostrEvent[] = [spawn, bag('one', AS_OF - DAY_S)]
+    const ask = async (f: Record<string, unknown>) => {
+      asked.push(f)
+      const kinds = f.kinds as number[]
+      return answer(serve.filter((e) => kinds.includes(e.kind) && (f.since === undefined || e.created_at >= (f.since as number))))
+    }
+    const c1 = await loadCensus(ask as never, null, AS_OF)
+    expect(asked.filter((f) => f.since !== undefined && (f.kinds as number[])[0] !== 3333)).toEqual([])
+    expect(c1.bags).toHaveLength(1)
+    serve = [...serve, bag('two', AS_OF + 60)]
+    asked.length = 0
+    const c2 = await loadCensus(ask as never, c1, AS_OF + 3600)
+    for (const f of asked) expect(f.since).toBe(AS_OF - READ_OVERLAP_S)
+    expect(c2.bags).toHaveLength(2)
+    expect(c2.firstSpawn.get(pk)).toBe(AS_OF - DAY_S)
+    expect(bagsHiddenAt(c2, pk, AS_OF + 3600)).toBe(2)
   })
 })

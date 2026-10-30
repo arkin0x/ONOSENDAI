@@ -21,7 +21,7 @@ import { EXPLAINER_AD_GAP_MS } from '../lib/tv/explainer'
 import { explainerBusy, explainerDue, explainerEndedAt, explainerTick, startExplainers, stopExplainers } from './useTvExplainer'
 import {
   BEATS, STATS_FORCED_MS, STATS_GAP_MS, STATS_LOAD_DELAY_MS, STATS_RETRY_MS, asOfHour, breakMayStart, countStats, forcedBoard, isAgentProfile, keysToKnow,
-  loadStatsReads, nextBoard, statsEveryMs, statsFirstMs, statsLength, type BoardId, type StatsBoard, type StatsFilter, type StatsSnapshot,
+  nextBoard, profilesSettled, readActions, statsEveryMs, statsFirstMs, statsLength, statsOn, type ActionStore, type BoardId, type StatsBoard, type StatsFilter, type StatsSnapshot,
 } from '../lib/tv/cyberspaceStats'
 import { arrivalTimes } from '../lib/countingRules'
 import { useProfiles } from './useProfiles'
@@ -273,11 +273,32 @@ let snapshot: StatsSnapshot | null = null
 let countingRun = -1
 /** When counting last began, this run (performance.now()): a count no relay answered is tried again STATS_RETRY_MS on, not every tick. */
 let countedAt = -Infinity
+/** The movement events read so far (lib/tv/cyberspaceStats readActions): a later count reads only what is new. Kept across runs. */
+let actionsKept: ActionStore | null = null
+/** The census being read, if one is: start, a retune and a count share it. */
+let censusLoad: Promise<Census> | null = null
+/** When the profiles of the counts' keys were asked for, and last asked again (performance.now()): a break holds for them (PROFILE_HOLD_MS). */
+let profilesAskedAt = -Infinity
+let profilesAgainAt = -Infinity
+/** How often, ms, a break holding for profiles asks again for those not answered. */
+const PROFILES_AGAIN_MS = 5_000
 let statsTimer: ReturnType<typeof setTimeout> | null = null
 
 /** The break's clock, for tests: when the next is due, and when the last ended. */
 export function statsClockForTest(): { due: number; endedAt: number } {
   return { due: statsDue, endedAt: statsEndedAt }
+}
+/** What has been read so far, for tests: the movement events kept, and the census's read times. */
+export function statsReadsForTest(): { actions: number; readAt: number | null; wholeAt: number | null } {
+  return { actions: actionsKept?.byId.size ?? 0, readAt: actionsKept?.readAt ?? null, wholeAt: actionsKept?.wholeAt ?? null }
+}
+/** Forget what has been read and counted, for tests. */
+export function resetStatsReadsForTest(): void {
+  actionsKept = null
+  snapshot = null
+  censusLoad = null
+  profilesAskedAt = -Infinity
+  profilesAgainAt = -Infinity
 }
 /** The counts the breaks show, for tests and the local screenshots. */
 export function statsSnapshotForTest(): StatsSnapshot | null {
@@ -286,6 +307,8 @@ export function statsSnapshotForTest(): StatsSnapshot | null {
 /** Swap the counts the breaks show, for tests (null to count them again). */
 export function setStatsSnapshotForTest(s: StatsSnapshot | null): void {
   snapshot = s
+  // As a count does: the profiles of its keys asked for now, a break holding for them.
+  if (s) profilesAskedAt = profilesAgainAt = performance.now()
 }
 let timer: number | null = null
 let ask: Ask = (f) => queryEach(f)
@@ -793,26 +816,59 @@ function beginShot(shot: Shot, now: number, id: number): void {
 }
 
 /**
- * Count the boards again, as of the hour it is now (lib/tv/cyberspaceStats):
- * the census again (bags, objects, their deletions, spawns; the ticker's
- * numbers with them), and every movement event. The profiles of
- * everyone a board could name or count are asked for meanwhile, so an agent
- * is known as one before a break shows it. A read no relay answers leaves
- * the last counts as they were.
+ * The census, read at or after `minReadAt` (unix s): the one in hand when it
+ * is, else the one being read, else a new read of what is new since the one
+ * in hand (lib/tv/stats loadCensus). Start, a retune and a count share it, so
+ * TV coming on and counting read it once (review of #537).
+ */
+async function freshCensus(minReadAt: number): Promise<Census> {
+  for (let tries = 0; ; tries++) {
+    const have = useTv.getState().census
+    if (have && have.readAt >= minReadAt) return have
+    if (!censusLoad) {
+      censusLoad = loadCensus(askWithin, have).then((c) => { useTv.setState({ census: c }); return c })
+      censusLoad.then(() => { censusLoad = null }, () => { censusLoad = null })
+    }
+    const c = await censusLoad
+    if (c.readAt >= minReadAt || tries > 0) return c
+  }
+}
+
+/** Ask for the profiles of every key the counts could show or count, that no answer has come for. Never throws. */
+function askProfiles(keys: string[]): void {
+  try {
+    const p = useProfiles.getState()
+    for (const pk of keys) if (p.profiles[pk] === undefined) p.request(pk)
+  } catch { /* no page to ask from (tests) */ }
+}
+
+/**
+ * Count the boards, as of the hour it is now (lib/tv/cyberspaceStats), unless
+ * this hour is already counted (TV off and on again counts nothing again).
+ * The census is the one TV read when it came on, or what is new since; the
+ * movement events are read whole once, then only what is new (readActions).
+ * The profiles of everyone a board could name or count are asked for, and a
+ * break holds for them (PROFILE_HOLD_MS). A read no relay answers leaves the
+ * last counts as they were. Nothing at all where this TV does not count
+ * (statsOn: the site, with STATS_ON_SITE off).
  */
 async function countBoards(id: number): Promise<void> {
+  if (!statsOn(isBroadcast())) return
+  const hour = asOfHour(Date.now() / 1000)
+  if (snapshot && snapshot.asOf >= hour) return
   if (countingRun === id || id !== run || performance.now() - countedAt < STATS_RETRY_MS) return
   countingRun = id
   countedAt = performance.now()
   try {
-    const [census, reads] = await Promise.all([loadCensus(askWithin), loadStatsReads(askWithin)])
+    const [census, kept] = await Promise.all([freshCensus(hour), readActions(askWithin, actionsKept, Math.floor(Date.now() / 1000))])
     if (id !== run) return
-    useTv.setState({ census })
-    const snap = await countStats({ actions: reads.actions, bags: census.bagRecords, objects: census.objectRecords, deletions: census.deletions, arrivals: arrivalTimes(reads.actions) }, asOfHour(Date.now() / 1000))
+    actionsKept = kept
+    const actions = [...kept.byId.values()]
+    const snap = await countStats({ actions, bags: census.bagRecords, objects: census.objectRecords, deletions: census.deletions, arrivals: arrivalTimes(actions) }, hour)
     if (id !== run) return
     snapshot = snap
-    const profiles = useProfiles.getState()
-    for (const pk of keysToKnow(snap)) if (profiles.profiles[pk] === undefined) profiles.request(pk)
+    profilesAskedAt = profilesAgainAt = performance.now()
+    askProfiles(keysToKnow(snap))
   } catch {
     // No relay answered: the last counts stand, and the next break asks again.
   } finally {
@@ -820,19 +876,24 @@ async function countBoards(id: number): Promise<void> {
   }
 }
 
-/** Who a break leaves off its rankings, read as it comes on: agents by their kind 0, and whoever this viewer has blocked. */
+/**
+ * Who a break leaves out, read as it comes on: agents by their kind 0; keys
+ * whose kind 0 no answer has come about (undefined in the profile store: not
+ * guessed humans, review of #537); and whoever this viewer has blocked.
+ */
 function statsFilter(): StatsFilter {
   const profiles = useProfiles.getState().profiles
   const blocked = useMutes.getState().muted.pubkeys
-  return { isAgent: (pk) => isAgentProfile(profiles[pk]), hidden: (pk) => blocked.has(pk) }
+  return { isAgent: (pk) => isAgentProfile(profiles[pk]), isKnown: (pk) => profiles[pk] !== undefined, hidden: (pk) => blocked.has(pk) }
 }
 
 /**
  * A CYBERSPACE STATS break, if one is due and may start now (breakMayStart):
  * on screen, and true. Counts older than the hour are counted again
  * meanwhile, the old ones shown until the new are in; with none yet, it
- * waits for them. One asked for by the address (/tv?stats=<id>) plays as
- * soon as its counts are in, over the gaps.
+ * waits for them, and then for the profiles that say who is an agent
+ * (PROFILE_HOLD_MS). One asked for by the address (/tv?stats=<id>) plays as
+ * soon as its counts and those profiles are in, over the gaps.
  */
 function statsBreak(now: number, s: TvState, id: number): boolean {
   if (now < statsDue || s.ad !== null || explainerBusy()) return false
@@ -843,7 +904,14 @@ function statsBreak(now: number, s: TvState, id: number): boolean {
   const longest = AD_IN_MS + BEATS.ranking.end * 1000
   const clock = { now, due: statsDue, playing: s.status === 'playing', busy: false, adDue, adEndedAt, explainerDue: explainerDue(), explainerEndedAt: explainerEndedAt(), length: longest }
   if (!forced && !breakMayStart(clock)) return false
-  const board = nextBoard(snapshot, statsFilter(), lastBoard, forcedStats)
+  // Who is an agent is in each key's kind 0: hold for the answers, up to PROFILE_HOLD_MS, asking again now and then.
+  const filter = statsFilter()
+  const keys = keysToKnow(snapshot)
+  if (!profilesSettled(keys, filter.isKnown!, profilesAskedAt, now)) {
+    if (now - profilesAgainAt >= PROFILES_AGAIN_MS) { profilesAgainAt = now; askProfiles(keys) }
+    return false
+  }
+  const board = nextBoard(snapshot, filter, lastBoard, forcedStats)
   forcedStats = null
   if (!board) { statsDue = now + STATS_RETRY_MS; return false }
   lastBoard = board.id
@@ -1011,7 +1079,7 @@ async function tune(id: number): Promise<void> {
   // seen from its start rather than joined in the middle.
   reader = new TapeReader(Math.max(V2_EPOCH, from - MAX_SHOT_S), askWithin)
   // The numbers, again, if they did not come the first time.
-  if (!useTv.getState().census) loadCensus(askWithin).then((census) => { if (live(id, t)) useTv.setState({ census }) }, () => {})
+  if (!useTv.getState().census) freshCensus(0).catch(() => {})
   void readMore(id, t)
 }
 
@@ -1089,16 +1157,17 @@ export const useTv = create<TvState>((set, get) => ({
     lastBoard = null
     statsEndedAt = -Infinity
     countedAt = -Infinity
-    statsDue = performance.now() + (forcedStats ? STATS_FORCED_MS : statsFirstMs(isBroadcast()))
+    // Where this TV does not count (statsOn), no break is ever due.
+    statsDue = !statsOn(isBroadcast()) ? Infinity : performance.now() + (forcedStats ? STATS_FORCED_MS : statsFirstMs(isBroadcast()))
     // In the tap that turned TV on, where a browser lets sound start.
     startMusic()
     startWatching()
     const id = run
     timer = setInterval(() => tick(id), TICK_MS) as unknown as number
     void tune(id)
-    if (!get().census) loadCensus(askWithin).then((census) => { if (id === run) set({ census }) }, () => {})
+    if (!get().census) freshCensus(0).catch(() => {})
     // The boards' counts: after the tape's own first reads, or at once for a board asked for by name.
-    statsTimer = setTimeout(() => { statsTimer = null; void countBoards(id) }, forcedStats ? 0 : STATS_LOAD_DELAY_MS)
+    if (statsOn(isBroadcast())) statsTimer = setTimeout(() => { statsTimer = null; void countBoards(id) }, forcedStats ? 0 : STATS_LOAD_DELAY_MS)
     return true
   },
 

@@ -66,7 +66,7 @@ import type { AxisName, Position, ViewAxes } from '../lib/space'
 import { enclosed, firstHit, wallMesh, type WallMesh } from '../lib/walkConstrain'
 import { useShards, type WorldItem } from './useShards'
 import { useCyberspace } from './useCyberspace'
-import { openedKey, useOpenedChests } from './useOpenedChests'
+import { openedByHand, openedKey, useOpenedChests } from './useOpenedChests'
 import { isDoor, lookOf } from '../lib/looks'
 
 /**
@@ -79,7 +79,17 @@ import { isDoor, lookOf } from '../lib/looks'
 export const WALL_AXES: ViewAxes = { right: { axis: 'x', dir: 1 }, up: { axis: 'y', dir: 1 }, out: { axis: 'z', dir: -1 } }
 
 /** One shard placed in the world, as the walls need it. */
-export type WallItem = Pick<WorldItem, 'key' | 'at' | 'height' | 'plane'> & Partial<Pick<WorldItem, 'author' | 'mine'>> & { shard: ShardModel }
+export type WallItem = Pick<WorldItem, 'key' | 'at' | 'height' | 'plane'> & Partial<Pick<WorldItem, 'author' | 'mine'>> & {
+  shard: ShardModel
+  /**
+   * Not cut at its region: a door's built-in look, drawn whole (scene/LookMark),
+   * holds a walker wherever it is drawn, as a shard holds one where it is drawn.
+   */
+  uncut?: boolean
+}
+
+/** No cut at all, for an uncut wall: wider than anything a wall mesh can reach. */
+const NO_CUT: Box = { min: [-1e12, -1e12, -1e12], max: [1e12, 1e12, 1e12] }
 
 interface Entry {
   item: WallItem
@@ -267,6 +277,8 @@ onFollows(() => {
  * hold a walker. Exact, in bigint gibsons.
  */
 export function regionReached(w: WallItem, from: Position, axis?: AxisName, dir: 1 | -1 = 1, length = 0n): boolean {
+  // Drawn whole: its own reach (Entry `reach`) is the only bound.
+  if (w.uncut) return true
   const h = BigInt(w.height)
   for (const a of ['x', 'y', 'z'] as const) {
     const lo = ((w.at[a] >> h) << h) - 1n
@@ -353,7 +365,7 @@ function build(w: WallItem, placed: readonly Placed[], starved = false, first = 
   const pose = placedPose(WALL_AXES, w.shard.up && w.plane === 0 ? { at: w.at, spin: w.shard.spin } : undefined)
   const mesh = wallMesh(w.shard, placed, pose)
   const missingAt = placed.some(function gone(p): boolean { return p.missing === 'unreachable' || p.children.some(gone) }) ? Date.now() : null
-  return { item: w, starved, first, walk: walkNo, shard: w.shard, missingAt, where: whereOf(w), mesh, clip: regionBox(w.at, w.height, w.shard.unit, WALL_AXES), reach: reachOf(mesh, w.shard.unit) }
+  return { item: w, starved, first, walk: walkNo, shard: w.shard, missingAt, where: whereOf(w), mesh, clip: w.uncut ? NO_CUT : regionBox(w.at, w.height, w.shard.unit, WALL_AXES), reach: reachOf(mesh, w.shard.unit) }
 }
 
 /** The walls of one placed shard, built now or kept from before; its parts follow when they resolve. */
@@ -590,7 +602,7 @@ export function warmWalls(plane: number, from?: Position): void {
   walkNo++
   // Your follows, read once per identity; a read that failed is asked again at the next WALK.
   readFollows()
-  const items = wallItems(plane)
+  const items = wallItems(plane, from)
   const near = from ? items.filter((w) => regionReached(w, from)) : items
   const order = (pool: Pool): WallItem[] => near.filter((w) => poolOf(w) === pool)
     .sort((a, b) => { if (!from) return 0; const x = nearness(a, from), y = nearness(b, from); return x < y ? -1 : x > y ? 1 : 0 })
@@ -822,23 +834,49 @@ function openAbove(from: Position, items: readonly WallItem[]): boolean {
 export const doorWallKey = (doorId: string): string => `door:${doorId}`
 
 /**
+ * Whether the walker at `from` stands inside a door's slab: shut, or
+ * written, around where they stand. Such a door is left out of their walls,
+ * or they could never step out of it (review of #532: all six ways read 0).
+ * Inside means within the slab's own bounds, the doorway's volume: a slab
+ * has no side faces of its own (the doorway's reveal is its edge,
+ * chest-door/models/README.md), so it encloses nothing a ray test could find.
+ */
+export function enclosesWalker(w: WallItem, from: Position): boolean {
+  if (!regionReached(w, from)) return false
+  const { mesh } = entryFor(w)
+  if (!mesh.min || !mesh.max) return false
+  const g = 2 ** w.shard.unit
+  // The walls' frame: render Z is cyberspace -Z.
+  const p = [Number(from.x - w.at.x) / g, Number(from.y - w.at.y) / g, -Number(from.z - w.at.z) / g]
+  return p.every((v, k) => v >= mesh.min![k] && v <= mesh.max![k])
+}
+
+/**
  * The shards a walker in `plane` can meet: every shard placed in the world
  * there, as the scene draws them, and every door this identity has not
  * opened, as its closed look (chest and door design, R11: "a locked door
  * blocks per its model's collision until opened"). OPEN takes the door out
  * of the walls at once, before any picture of it opening has finished, so a
  * walker is never held by an animation; its open look carries no constrain.
+ * A door opened by hand before on this device is open here after a reload
+ * too, whether a key or a signer opened it (store/useOpenedChests). Given
+ * the walker's place `from`, a closed door whose solid already holds them
+ * is left out, so they can step out of it.
  */
-export function wallItems(plane: number): WallItem[] {
+export function wallItems(plane: number, from?: Position): WallItem[] {
   const all = useShards.getState().worldItems()
   const shards = all.filter((w): w is WorldItem & { shard: ShardModel } => w.type === 'shard' && !!w.shard && w.plane === plane)
   const me = useCyberspace.getState().identity.pubkey
   const opened = useOpenedChests.getState().opened
   const doors: WallItem[] = []
   for (const w of all) {
-    if (w.type !== 'chest' || w.plane !== plane || !isDoor(w.event?.tags) || opened[openedKey(me, w.key)]) continue
+    if (w.type !== 'chest' || w.plane !== plane || !isDoor(w.event?.tags)) continue
+    if (opened[openedKey(me, w.key)] || openedByHand(me, w.key)) continue
     const look = lookOf(w)
-    if (look) doors.push({ key: doorWallKey(w.key), at: w.at, height: w.height, plane: w.plane, author: w.author, mine: w.mine, shard: look.closed })
+    if (!look) continue
+    const wall: WallItem = { key: doorWallKey(w.key), at: w.at, height: w.height, plane: w.plane, author: w.author, mine: w.mine, shard: look.closed, uncut: true }
+    if (from && enclosesWalker(wall, from)) continue
+    doors.push(wall)
   }
   return doors.length > 0 ? [...shards, ...doors] : shards
 }

@@ -121,15 +121,24 @@ describe('an opened chest\'s rows', () => {
     expect(html.lastIndexOf('chest__all')).toBeGreaterThan(html.lastIndexOf('chest__row'))
   })
 
-  it('read TAKEN once held, and TAKE ALL is off with nothing left to take', () => {
+  it('hide a row once it is held, as if taken off the chest (arkinox, 2026-10-30)', () => {
+    const owner = useCyberspace.getState().identity.pubkey
+    useInventory.setState({ items: { [note.id]: heldFromEntry(owner, entries[1], from, null, 1) } })
+    const html = render(<ChestContents entries={entries} from={from} place={null} />)
+    expect(takes(html)).toEqual(['TAKE', 'TAKE', 'TAKE ALL'])
+    expect(html).not.toContain('>inside<')
+    expect(html).not.toContain('TAKEN')
+  })
+
+  it('say everything is held once it is, with no TAKE ALL left', () => {
     const owner = useCyberspace.getState().identity.pubkey
     const items: Record<string, HeldItem> = {}
     for (const e of entries) items[e.id] = heldFromEntry(owner, e, from, null, 1)
     useInventory.setState({ items })
     expect(takeableOf(entries, items)).toEqual([])
     const html = render(<ChestContents entries={entries} from={from} place={null} />)
-    expect(takes(html)).toEqual(['TAKEN', 'TAKEN', 'TAKEN', 'TAKE ALL'])
-    expect(html).toMatch(/disabled=""[^>]*>TAKE ALL/)
+    expect(takes(html)).toEqual([])
+    expect(html).toContain('Everything here is in your ITEMS')
   })
 })
 

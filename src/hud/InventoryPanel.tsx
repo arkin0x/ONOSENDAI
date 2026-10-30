@@ -30,6 +30,7 @@ import { ItemFace, ItemIcon } from './ItemIcon'
 import { ShardThumb } from './ShardThumb'
 import { chestsOpenedBy, clearsWithAll, keyText, splitPanels, type HeldItem } from '../lib/inventory'
 import { regionLabel } from '../lib/loot'
+import { provenanceOf } from '../lib/provenance'
 import { safeNpub } from '../lib/npub'
 import { formatAgo, formatStamp, shortHex } from '../lib/time'
 import { useCyberspace } from '../store/useCyberspace'
@@ -66,15 +67,27 @@ function Copyable({ label, value, title }: { label: string; value: string; title
   )
 }
 
-/** Where a held item was found, as a line, and a VIEW that flies there. */
-function FoundAt({ item }: { item: HeldItem }): JSX.Element | null {
-  const p = item.place
+/**
+ * Where a held item was obtained (arkinox, 2026-10-30: "a record of where
+ * the item was obtained and to View the chest where it was found or the
+ * coordinate"): the chest it came out of with VIEW CHEST, or the place it
+ * was found with VIEW, its coordinate to copy, and when it was taken. Each
+ * VIEW frames the place as every other VIEW does. The record is this
+ * identity's own inventory row (lib/provenance.ts).
+ */
+export function Provenance({ item }: { item: HeldItem }): JSX.Element | null {
+  const p = provenanceOf(item)
   if (!p) return null
-  const view = (): void => useCyberspace.getState().focusItem({ x: BigInt(p.at.x), y: BigInt(p.at.y), z: BigInt(p.at.z) }, p.plane, item.name.toUpperCase(), 0)
+  const view = (label: string): void => useCyberspace.getState().focusItem(p.at, p.plane, label.toUpperCase(), 0)
+  const where = `${regionLabel(p.height)} · ${p.plane === 0 ? 'dataspace' : 'ideaspace'}`
   return (
     <>
-      <dt>Found at</dt>
-      <dd>{regionLabel(p.height)} · {p.plane === 0 ? 'dataspace' : 'ideaspace'} <button className="chest__act" onClick={view} title="Fly to where it was found">VIEW</button></dd>
+      {p.chest
+        ? <><dt>Found in</dt><dd>chest “{p.chest.name}” <button className="chest__act" onClick={() => view(p.chest!.name)} title="Fly to the chest it came out of">VIEW CHEST</button></dd></>
+        : <><dt>Found at</dt><dd>{where} <button className="chest__act" onClick={() => view(item.name)} title="Fly to where it was found">VIEW</button></dd></>}
+      {p.chest && <><dt>Where</dt><dd>{where}</dd></>}
+      {p.coordinate && <Copyable label="Coordinate" value={p.coordinate} title={p.coordinate} />}
+      <dt>{item.source === 'forged' ? 'Forged' : 'Taken'}</dt><dd title={formatStamp(p.when)}>{formatAgo(p.when)}</dd>
     </>
   )
 }
@@ -153,8 +166,7 @@ function KeyRow({ item, opens }: { item: HeldItem; opens: number }): JSX.Element
             <Copyable label="item" value={safeNpub(pubkey)} title={safeNpub(pubkey)} />
             <Copyable label="hex" value={pubkey} title={pubkey} />
             <dt>Forged by</dt><dd>{who}</dd>
-            <FoundAt item={item} />
-            {item.from && <><dt>From</dt><dd>chest “{item.from.chestName}”</dd></>}
+            <Provenance item={item} />
             {item.key?.about && <><dt>About</dt><dd>{item.key.about}</dd></>}
           </dl>
         </div>
@@ -201,6 +213,7 @@ export function takenAudioModeration(item: Pick<HeldItem, 'id' | 'author' | 'ver
  */
 function TakenRow({ item }: { item: HeldItem }): JSX.Element {
   const [open, setOpen] = useState(false)
+  const [details, setDetails] = useState(false)
   const me = useCyberspace((s) => s.identity.pubkey)
   const [moved, setMoved] = useState(false)
   const { raw, token } = readCashuToken(item.type === 'message' ? item.text : null)
@@ -241,12 +254,18 @@ function TakenRow({ item }: { item: HeldItem }): JSX.Element {
         {item.type === 'shard' && <button className="chest__act" onClick={moveToWorkshop} title="Move this model into your workshop">MOVE TO WORKSHOP</button>}
         {item.type === 'message' && <button className={`chest__act ${open ? 'is-on' : ''}`} onClick={() => setOpen((o) => !o)} aria-expanded={open}>{coin || hasNftLink(item.text) ? 'CARD' : 'READ'}</button>}
         {item.type === 'audio' && item.audio && <button className={`chest__act ${open ? 'is-on' : ''}`} onClick={() => setOpen((o) => !o)} aria-expanded={open} title="Play it or save it">LISTEN</button>}
+        {item.place && <button className={`chest__act ${details ? 'is-on' : ''}`} onClick={() => setDetails((d) => !d)} aria-expanded={details}>DETAILS</button>}
         {clearable && (
           <button className="held__clear" onClick={() => useInventory.getState().clearTaken([item.id])} title="Clear it from TAKEN" aria-label={`Clear ${label} from TAKEN`}>
             <X size={14} aria-hidden />
           </button>
         )}
       </span>
+      {details && (
+        <div className="held__details">
+          <dl><Provenance item={item} /></dl>
+        </div>
+      )}
       {open && item.type === 'audio' && item.audio && (
         <div className="held__details">
           <AudioCard

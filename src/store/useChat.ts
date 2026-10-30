@@ -14,6 +14,7 @@
  * The signed events are not kept; they are said and gone, as the kind says.
  */
 
+import { buzzGate } from '../lib/buzz'
 import { create } from 'zustand'
 import { chatInnerTemplate, chatInners, chatRumor, bagTemplate, CHAT_BAG_KIND, MAX_CHAT_LENGTH } from '../lib/hidden'
 import { hexToBytes, type NostrEvent } from '../lib/events'
@@ -146,18 +147,10 @@ export function setHoldFolded(hold: () => boolean): void { holdFolded = hold }
 
 /** The least time between two buzzes for tags from the same person. */
 export const MENTION_BUZZ_MS = 5_000
-const lastBuzz = new Map<string, number>()
 
-/** One short vibration for tags from these senders, each at most once per MENTION_BUZZ_MS, only while the tab is on screen. */
+/** One short vibration for tags from these senders, each at most once per MENTION_BUZZ_MS, only while the tab is on screen (lib/buzz.ts). */
 export function buzzFor(senders: readonly string[], now = Date.now()): boolean {
-  const due = senders.filter((s) => now - (lastBuzz.get(s) ?? -Infinity) >= MENTION_BUZZ_MS)
-  if (due.length === 0) return false
-  for (const s of due) lastBuzz.set(s, now)
-  try {
-    if (typeof document !== 'undefined' && document.visibilityState !== 'visible') return false
-    if (typeof navigator !== 'undefined' && typeof navigator.vibrate === 'function') navigator.vibrate(60)
-  } catch { /* no vibration here */ }
-  return true
+  return buzzGate(senders, now, MENTION_BUZZ_MS, 60)
 }
 
 export const useChat = create<ChatState>((set, get) => ({

@@ -48,6 +48,19 @@ export function perPixelAt1(fovDeg: number, heightPx: number): number {
 const SEGMENTS = 12
 
 /**
+ * A CSS colour, parsed once. The dots are rewritten on every change of the
+ * selection, every point of them, and a box dragged over a shard changes it on
+ * every move: 1,731 trips through three's colour parser each time, for the
+ * handful of colours a shard has. A palette has 256, so this stays small.
+ */
+const colors = new Map<string, Color>()
+function parsed(css: string): Color {
+  let c = colors.get(css)
+  if (!c) colors.set(css, (c = new Color(css)))
+  return c
+}
+
+/**
  * The bench's dots as one InstancedMesh. `set` hands it the dots; `update`,
  * called every frame, rewrites the instances only when the camera, the
  * viewport or the dots changed since it last did, and says whether it wrote.
@@ -63,7 +76,6 @@ export class HandleDots {
   private readonly lastEye = new Vector3(Number.NaN, 0, 0)
   private lastFov = Number.NaN
   private lastHeight = Number.NaN
-  private readonly c = new Color()
   private readonly geometry: SphereGeometry
   private readonly material: MeshBasicMaterial
 
@@ -95,7 +107,7 @@ export class HandleDots {
     for (let i = 0; i < n; i++) {
       const d = dots[i]
       this.spots[i * 4] = d.at[0]; this.spots[i * 4 + 1] = d.at[1]; this.spots[i * 4 + 2] = d.at[2]; this.spots[i * 4 + 3] = d.radiusPx
-      this.mesh.setColorAt(i, this.c.set(d.color))
+      this.mesh.setColorAt(i, parsed(d.color))
     }
     this.mesh.instanceColor!.needsUpdate = true
     this.dirty = true
@@ -230,7 +242,6 @@ export class HandleHalos {
   readonly points: Points<BufferGeometry, PointsMaterial>
   private readonly geometry = new BufferGeometry()
   private readonly material: PointsMaterial
-  private readonly c = new Color()
   private written = false
 
   constructor(capacity: number, map: Texture | null, sizePx: number, opacity: number) {
@@ -259,8 +270,8 @@ export class HandleHalos {
     for (let i = 0; i < n; i++) {
       const h = halos[i]
       pos.setXYZ(i, h.at[0], h.at[1], h.at[2])
-      this.c.set(h.color)
-      col.setXYZ(i, this.c.r, this.c.g, this.c.b)
+      const c = parsed(h.color)
+      col.setXYZ(i, c.r, c.g, c.b)
     }
     this.written = n > 0
     this.geometry.setDrawRange(0, n)

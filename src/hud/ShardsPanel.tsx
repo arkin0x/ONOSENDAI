@@ -107,7 +107,7 @@ export function ShardsPanel(): JSX.Element {
           and chests"): the hide bar comes up at once, and the chest's modal
           after PLACE CHEST. SEAL A DOOR waits for DOOR authoring. */}
       <div className="shards__section">
-        <span className="legend__label">Place an item or a chest</span>
+        <span className="legend__label">Place an item, a chest or a door</span>
         <div className="shards__modes">
           <button className="avatars__go shards__compose-open" onClick={() => useStash.getState().openKey()} title="Forge a keypair as an item and hide it; whoever finds it can TAKE it, and a chest can be sealed to it"><ItemIcon type="key" className="shards__build-icon" size={13} strokeWidth={2.5} /> FORGE AN ITEM</button>
           <button className="avatars__go shards__compose-open" onClick={sealAChest} title="Place a chest, then seal a message, a model or an item in it to an item or a person"><ItemIcon type="chest" className="shards__build-icon" size={13} strokeWidth={2.5} /> SEAL A CHEST</button>

@@ -2483,17 +2483,19 @@ useShards.subscribe((s, prev) => {
  * it may not have finished loading while this one runs; then this tries again
  * as soon as the loading stops.
  */
-function followIdentity(): void {
+function followIdentity(tries = 0): void {
+  let me = ''
   try {
-    if (!useCyberspace.getState().identity.pubkey) throw new Error('no identity yet')
+    me = useCyberspace.getState().identity.pubkey
+    if (!me || !useCyberspace.subscribe) throw new Error('not loaded')
   } catch {
-    setTimeout(followIdentity, 0)
+    // About ten seconds, for a slow load. A test that mocks useCyberspace away never has it.
+    if (tries < 200) setTimeout(() => followIdentity(tries + 1), tries === 0 ? 0 : 50)
     return
   }
   const claim = (owner: string): void => {
     void claimUnclaimed(owner).catch((err) => console.warn(`[shards] could not claim hidden items: ${err instanceof Error ? err.message : String(err)}`))
   }
-  const me = useCyberspace.getState().identity.pubkey
   if (useShards.getState().mine === NOT_READ_YET) useShards.setState({ mine: loadMine(me) })
   else migrateMine()
   claim(me)

@@ -367,8 +367,9 @@ export function aimedPoint(signed: NostrEvent): (FitPoint & { plane: Plane }) | 
  * Each entry stands at its own `C` when it carries one inside the chest's
  * region, else where the chest stands; the chest's bag, lookup id, height and
  * hider carry over, so the scene draws a revealed room exactly as it draws a
- * found shard, and the record lists it under the same bag. A door is a chest
- * whose contents are the room behind it.
+ * found shard, and the record lists it under the same bag. What the world
+ * draws of it is lib/looks keptInChest's to say: nothing, since a chest's
+ * contents are taken, not placed (DECK-0004 §3.4).
  */
 export function revealedIn(chest: Pick<Hidden, 'eventId' | 'bagId' | 'lookupId' | 'author' | 'at' | 'plane' | 'height' | 'bag' | 'keyHex'>, entries: ChestEntry[]): Hidden[] {
   const shift = BigInt(chest.height)

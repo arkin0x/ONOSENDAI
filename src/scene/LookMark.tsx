@@ -11,8 +11,10 @@
  * closed look's, so the open look swaps in without the chest changing size.
  *
  * Not cut at its region: a built-in look carries nothing secret, and a chest
- * cut in half at a small bag's wall would read as broken. A custom look
- * (spec PR #82, the seam in lib/looks.ts) is cut as a shard is when it lands.
+ * cut in half at a small bag's wall would read as broken. A custom look is
+ * cut at its region's walls as a hidden shard is (DECK-0003 §1.6, DECK-0004
+ * §3.6): `clip`, in the look's own frame, which the scale and the view's
+ * turn around it leave as it is.
  *
  * Its name and who left it stand just above it, as an item's model's do
  * (ItemModel); a tap anywhere it draws opens its card.
@@ -26,6 +28,7 @@ import { extentOf, trueScale } from '../lib/itemModel'
 import { renderPose, viewPose } from '../lib/pose'
 import { CUBE_REACH, MARK_RECEDE_FLOOR, recedeShare } from '../lib/markerSize'
 import type { ViewAxes } from '../lib/space'
+import type { Box } from '../lib/clip'
 import type { Look } from '../lib/looks'
 import { useCyberspace } from '../store/useCyberspace'
 import { headlampUniforms } from './headlamp'
@@ -87,10 +90,12 @@ interface Props {
    * the model is the default, and a ceremony draws its own instead.
    */
   children?: (frame: { model: ShardModel | null }) => ReactNode
+  /** Where a custom look is cut: its region's walls in its own frame (lib/clip regionBox). None for a built-in. */
+  clip?: Box
 }
 
 /** A chest or a door as its look, sized, turned with the view, labelled and tappable. */
-export function LookMark({ look, model, at, axes, minPx, label, onTap, clearTop = 0, children }: Props): JSX.Element {
+export function LookMark({ look, model, at, axes, minPx, label, onTap, clearTop = 0, children, clip }: Props): JSX.Element {
   const scaleExp = useCyberspace((s) => s.scaleExp)
   const turn = useMemo(() => renderPose(viewPose(axes)), [axes])
   const bounds = lookBounds(look.closed)
@@ -121,7 +126,7 @@ export function LookMark({ look, model, at, axes, minPx, label, onTap, clearTop 
       <group ref={outer} position={at}>
         <group matrix={turn} matrixAutoUpdate={false}>
           <group ref={drawn}>
-            {children ? children({ model }) : model && <ShardMesh shard={model} world />}
+            {children ? children({ model }) : model && <ShardMesh shard={model} world clip={clip} />}
           </group>
         </group>
       </group>

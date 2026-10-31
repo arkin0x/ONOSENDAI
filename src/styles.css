@@ -1838,6 +1838,8 @@ kbd {
   justify-content: center;
   margin-bottom: 14px;
 }
+.secret__look-name { margin: 0 0 8px; font-size: 15px; font-weight: 600; letter-spacing: 0.04em; color: var(--fg); text-align: center; overflow-wrap: anywhere; }
+.secret__spin--look { width: 100%; }
 .secret__shard-meta { font-size: 10px; letter-spacing: 0.06em; color: var(--dim); }
 /* LOCAL or LIVE for the one who hid it, under the preview (PublishSwitch
    PublishRow; arkinox, 2026-10-29: "the owner should see it more

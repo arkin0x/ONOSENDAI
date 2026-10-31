@@ -287,11 +287,11 @@ describe('the seal takes the aimed event as it is', () => {
     expect(S().mine).toHaveLength(0)
   })
 
-  it('a chest with nothing aimed inside keeps its height where the composer left it', () => {
+  it('a chest with nothing aimed inside still fits its height, to the model it wears (D2: placed like a shard)', () => {
     const shard = benchShard(3)
     const lock = forgeKey('Wind Key')
     S().startDeployChest({ ...draftOf([{ kind: 'shard', shardId: shard.id }]), lock: { pubkey: lock.itemPubkey, label: 'Wind Key' } })
-    expect(S().deployHeightAuto).toBe(false)
+    expect(S().deployHeightAuto).toBe(true)
   })
 })
 

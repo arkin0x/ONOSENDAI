@@ -89,8 +89,12 @@ function Pacer({ pace }: { pace: Pace }): null {
  * were never seen (arkinox, 2026-10-20: "the perf on /tv on my laptop is not
  * satisfactory"). The turn keeps its pace either way: each frame turns by
  * the time since the last.
+ *
+ * `wide`: the whole width of its row, `size` tall, as a chest's or a door's
+ * card shows its look (chest and door design, 4.7: "the door in 3D full
+ * width with its name above it. the chest modal should do the same").
  */
-export function ShardSpin({ shard, size = 160, preserve = false, pace, ignoreOpacity = false }: { shard: ShardModel | null; size?: number; preserve?: boolean; pace?: Pace; ignoreOpacity?: boolean }): JSX.Element {
+export function ShardSpin({ shard, size = 160, preserve = false, pace, ignoreOpacity = false, wide = false }: { shard: ShardModel | null; size?: number; preserve?: boolean; pace?: Pace; ignoreOpacity?: boolean; wide?: boolean }): JSX.Element {
   // A new turn for each shard, inside the same canvas: one shard straight
   // after another would otherwise be built once on the last one's framing,
   // then again on its own (review of #394). Not keyed on the shard's id: an
@@ -98,12 +102,12 @@ export function ShardSpin({ shard, size = 160, preserve = false, pace, ignoreOpa
   const turns = useRef(0)
   const turn = useMemo(() => ++turns.current, [shard])
   return (
-    <div className="shardspin" style={{ width: size, height: size }} aria-label={shard ? `${shard.name}, turning` : undefined} role={shard ? 'img' : undefined}>
+    <div className="shardspin" style={{ width: wide ? '100%' : size, height: size }} aria-label={shard ? `${shard.name}, turning` : undefined} role={shard ? 'img' : undefined}>
       <Canvas
         dpr={[1, 2]}
         gl={{ alpha: true, antialias: true, preserveDrawingBuffer: preserve }}
         camera={{ fov: FOV, near: 0.01, far: 100000 }}
-        style={{ width: size, height: size, pointerEvents: 'none' }}
+        style={{ width: wide ? '100%' : size, height: size, pointerEvents: 'none' }}
         // Nothing to draw between shards: no frames spent on an empty canvas.
         frameloop={!shard ? 'never' : pace ? 'demand' : 'always'}
         // One shard after another on the same canvas: compiled once (lib/keepPrograms).

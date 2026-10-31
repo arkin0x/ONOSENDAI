@@ -146,7 +146,7 @@ export function entryLabel(entry: ChestEntry): { label: string; coin: boolean } 
  * finds and deployments by `id`, and rumors read as claims if it is not
  * there. Never the bag's author: a chest inside a chest may be another's.
  */
-export function ChestBlock({ id, chest, author, verified, place, sealer: given }: { id: string; chest: ChestItem; author: string; verified: boolean; place: HeldPlace | null; sealer?: string }): JSX.Element {
+export function ChestBlock({ id, chest, author, verified, place, sealer: given, named = true }: { id: string; chest: ChestItem; author: string; verified: boolean; place: HeldPlace | null; sealer?: string; named?: boolean }): JSX.Element {
   const items = useInventory((s) => s.items)
   const me = useCyberspace((s) => s.identity.pubkey)
   const keys = useMemo(() => openingKeys(items), [items])
@@ -174,14 +174,14 @@ export function ChestBlock({ id, chest, author, verified, place, sealer: given }
     setStatus(null)
     try {
       const look = lookOf({ type: 'chest', event: found?.inner ?? ownInner })
-      const contents = await openChestHere({ id, chest, author, place, sealer, door: look?.name === 'door' && first }, opener)
+      const contents = await openChestHere({ id, chest, author, place, sealer, door: look?.kind === 'door' && first }, opener)
       if (contents) {
         // The card yields and the chest or door opens where it stands (store/useOpenCeremony).
-        if (look?.name === 'door') celebrateOpen({ me, chestId: id, kind: 'door', first, calm: prefersReducedMotion() })
-        else if (look?.name === 'treasure') {
+        if (look?.kind === 'door') celebrateOpen({ me, chestId: id, kind: 'door', first, calm: prefersReducedMotion() })
+        else if (look?.kind === 'chest') {
           // The chime sounds as the last loot object lands over the chest.
           // The same loot the world draws over it (scene/ChestLooks), so the chime lands with the last of it.
-          const loot = place ? chestLoot({ look: 'treasure', entries: shownOf(contents, useMutes.getState().muted), held: (e) => holdsEntry(useInventory.getState().items, e), chest: { at: positionOf(place), plane: place.plane, height: place.height }, itemsReady: true }) : []
+          const loot = place ? chestLoot({ look: 'chest', entries: shownOf(contents, useMutes.getState().muted), held: (e) => holdsEntry(useInventory.getState().items, e), chest: { at: positionOf(place), plane: place.plane, height: place.height }, itemsReady: true }) : []
           celebrateOpen({ me, chestId: id, kind: 'chest', first, calm: prefersReducedMotion(), landMs: loot.length > 0 ? landedAt(loot.length) : undefined })
         }
       }
@@ -198,7 +198,8 @@ export function ChestBlock({ id, chest, author, verified, place, sealer: given }
     <div className="chest">
       <div className="chest__head">
         <span className="item__line">
-          <span className="item__name" title={chest.name}>{chest.name}</span>
+          {/* The card names it above its look (SecretModal); every list names it here. */}
+          {named && <span className="item__name" title={chest.name}>{chest.name}</span>}
           <span className="item__meta" title={opensWith ? `Opens with ${opensWith}` : 'The hider’s label of what opens it'}>
             {entries ? 'OPEN' : `REQUIRES: ${requiresLabel(chest)}`} · hidden by {who}{!verified && <> · <Unsigned /></>}
           </span>

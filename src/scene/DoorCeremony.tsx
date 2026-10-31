@@ -80,6 +80,7 @@ function RailIn({ look, at }: { look: Look; at: number }): JSX.Element | null {
       if (m) for (const one of Array.isArray(m) ? m : [m]) breatheMaterial(one, share)
     })
   })
-  if (!shown) return null
-  return <group ref={rail}><ShardMesh shard={look.open!} world ghost /></group>
+  // A custom door with no open look is not drawn once opened (lib/looks.ts drawnLook).
+  if (!shown || !look.open) return null
+  return <group ref={rail}><ShardMesh shard={look.open} world ghost /></group>
 }

@@ -63,11 +63,11 @@ import { fetchSettled, resolvePartsShared } from '../lib/parts'
 import { regionBox, type Box } from '../lib/clip'
 import { placedPose } from '../lib/pose'
 import type { AxisName, Position, ViewAxes } from '../lib/space'
-import { enclosed, firstHit, wallMesh, type WallMesh } from '../lib/walkConstrain'
+import { constrainOf, enclosed, firstHit, wallMesh, type WallMesh } from '../lib/walkConstrain'
 import { useShards, type WorldItem } from './useShards'
 import { useCyberspace } from './useCyberspace'
 import { openedByHand, openedKey, useOpenedChests } from './useOpenedChests'
-import { isDoor, lookOf } from '../lib/looks'
+import { drawnLook, lookOf } from '../lib/looks'
 
 /**
  * The frame the walls are measured in: screen right +X, up +Y, out of the
@@ -82,8 +82,9 @@ export const WALL_AXES: ViewAxes = { right: { axis: 'x', dir: 1 }, up: { axis: '
 export type WallItem = Pick<WorldItem, 'key' | 'at' | 'height' | 'plane'> & Partial<Pick<WorldItem, 'author' | 'mine'>> & {
   shard: ShardModel
   /**
-   * Not cut at its region: a door's built-in look, drawn whole (scene/LookMark),
-   * holds a walker wherever it is drawn, as a shard holds one where it is drawn.
+   * Not cut at its region: a built-in look, drawn whole (scene/LookMark),
+   * holds a walker wherever it is drawn, as a shard holds one where it is
+   * drawn. A custom look is cut at its region, as a shard is.
    */
   uncut?: boolean
 }
@@ -830,7 +831,7 @@ function openAbove(from: Position, items: readonly WallItem[]): boolean {
   return true
 }
 
-/** A door's closed look as a wall: its own key, so it is never confused with a shard's entry. */
+/** A chest's or a door's look as a wall: its own key, so it is never confused with a shard's entry. */
 export const doorWallKey = (doorId: string): string => `door:${doorId}`
 
 /**
@@ -853,26 +854,30 @@ export function enclosesWalker(w: WallItem, from: Position): boolean {
 
 /**
  * The shards a walker in `plane` can meet: every shard placed in the world
- * there, as the scene draws them, and every door this identity has not
- * opened, as its closed look (chest and door design, R11: "a locked door
- * blocks per its model's collision until opened"). OPEN takes the door out
- * of the walls at once, before any picture of it opening has finished, so a
- * walker is never held by an animation; its open look carries no constrain.
+ * there, as the scene draws them, and every chest and door as the look it
+ * is drawn as, by that look's own WALK setting (DECK-0004 §3.6 Walkers): a
+ * chest's look always, a door's closed look until this identity opens it
+ * (chest and door design, R11: "a locked door blocks per its model's
+ * collision until opened"), and its open look after. OPEN swaps the look at
+ * once, before any picture of it opening has finished, so a walker is never
+ * held by an animation. The built-in slabs' open looks carry no setting,
+ * which is OFF, so an opened built-in door holds nobody.
  */
 export function wallItems(plane: number): WallItem[] {
   const all = useShards.getState().drawnItems()
   const shards = all.filter((w): w is WorldItem & { shard: ShardModel } => w.type === 'shard' && !!w.shard && w.plane === plane)
   const me = useCyberspace.getState().identity.pubkey
   const opened = useOpenedChests.getState().opened
-  const doors: WallItem[] = []
+  const looks: WallItem[] = []
   for (const w of all) {
-    if (w.type !== 'chest' || w.plane !== plane || !isDoor(w.event?.tags)) continue
-    if (opened[openedKey(me, w.key)] || openedByHand(me, w.key)) continue
+    if (w.type !== 'chest' || w.plane !== plane) continue
     const look = lookOf(w)
     if (!look) continue
-    doors.push({ key: doorWallKey(w.key), at: w.at, height: w.height, plane: w.plane, author: w.author, mine: w.mine, shard: look.closed, uncut: true })
+    const model = drawnLook(look, !!opened[openedKey(me, w.key)] || openedByHand(me, w.key))
+    if (!model || constrainOf(model) === 'off') continue
+    looks.push({ key: doorWallKey(w.key), at: w.at, height: w.height, plane: w.plane, author: w.author, mine: w.mine, shard: model, uncut: look.name !== 'custom' })
   }
-  return doors.length > 0 ? [...shards, ...doors] : shards
+  return looks.length > 0 ? [...shards, ...looks] : shards
 }
 
 /**

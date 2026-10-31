@@ -3,8 +3,8 @@
  * closed look, and OPEN takes it out of the walls at once (chest and door
  * design, R11: "a locked door blocks per its model's collision until
  * opened"; the ceremony ruling: "WALK lets you through immediately"). A
- * chest never joins the walls here, and another identity's opening opens
- * nothing for you. No relay is touched (src/test/noNetwork.ts).
+ * chest's look is a wall at all times (DECK-0004 §3.6 Walkers, spec #82),
+ * and another identity's opening opens nothing for you. No relay is touched (src/test/noNetwork.ts).
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -32,16 +32,19 @@ const AT: Position = { x: 1n << 40n, y: 1n << 39n, z: 1n << 38n }
 const ME = 'a'.repeat(64)
 const HIDER = 'b'.repeat(64)
 
-function chest(id: string, tags: string[][]): Hidden {
+function chest(id: string, tags: string[][], at: Position = AT): Hidden {
   const inner = { id, pubkey: HIDER, created_at: 1, kind: 3341, tags, content: 'sealed' }
   return {
-    eventId: id, inner, bagId: 'f'.repeat(64), lookupId: 'e'.repeat(64), author: HIDER, at: AT, plane: 1, height: 6, createdAt: 1,
+    eventId: id, inner, bagId: 'f'.repeat(64), lookupId: 'e'.repeat(64), author: HIDER, at, plane: 1, height: 6, createdAt: 1,
     type: 'chest', chest: { name: id, lockPubkey: 'c'.repeat(64), senderPubkey: 'd'.repeat(64), requires: '', payload: 'sealed' },
   }
 }
 
 const DOOR = '1'.repeat(64)
 const CHEST = '2'.repeat(64)
+/** The chest stands well away from the door, so each test reads one of them. */
+const CHEST_AT: Position = { x: AT.x + 4096n, y: AT.y, z: AT.z }
+const doorWalls = (plane: number): string[] => wallItems(plane).map((w) => w.key).filter((k) => k === doorWallKey(DOOR))
 /** In front of the door's outer face (+z), in the opening, a gibson above the sill. */
 const FRONT: Position = { x: AT.x, y: AT.y + 1n, z: AT.z + 3n }
 
@@ -49,15 +52,21 @@ beforeEach(() => {
   localStorage.removeItem('onosendai:chests-opened')
   resetOpenedChests()
   useCyberspace.setState({ identity: { ...useCyberspace.getState().identity, pubkey: ME } })
-  useShards.setState({ mine: [], discovered: { [DOOR]: chest(DOOR, [['title', 'Gate'], ['door', '6']]), [CHEST]: chest(CHEST, [['title', 'Box']]) } })
+  useShards.setState({ mine: [], discovered: { [DOOR]: chest(DOOR, [['title', 'Gate'], ['door', '6']]), [CHEST]: chest(CHEST, [['title', 'Box']], CHEST_AT) } })
 })
 
 describe('a door in WALK', () => {
-  it('stands in the walls as its closed look, and a chest does not', () => {
+  it('stands in the walls as its closed look, and a chest as its look too (spec #82: a chest\u2019s look always)', () => {
     const items = wallItems(1)
-    expect(items.map((w) => w.key)).toEqual([doorWallKey(DOOR)])
-    expect(items[0].shard.name).toMatch(/door/)
+    expect(items.map((w) => w.key).sort()).toEqual([doorWallKey(DOOR), doorWallKey(CHEST)].sort())
+    expect(items.find((w) => w.key === doorWallKey(DOOR))!.shard.name).toMatch(/door/)
+    expect(items.find((w) => w.key === doorWallKey(CHEST))!.shard.name).toMatch(/Treasure/)
     expect(wallItems(0)).toEqual([])
+  })
+
+  it('a chest stays a wall once opened: its open look is solid too', () => {
+    rememberOpened(ME, CHEST, [])
+    expect(wallItems(1).find((w) => w.key === doorWallKey(CHEST))!.shard.name).toMatch(/open/)
   })
 
   it('stops a step through the doorway while closed', () => {
@@ -66,20 +75,20 @@ describe('a door in WALK', () => {
 
   it('lets you through at once once you open it', () => {
     rememberOpened(ME, DOOR, [])
-    expect(wallItems(1)).toEqual([])
+    expect(doorWalls(1)).toEqual([])
     expect(stepLimit(FRONT, 'z', -1, 10n, wallItems(1)).reach).toBe(10n)
   })
 
   it('stays shut for you when someone else on this device opened it', () => {
     rememberOpened('9'.repeat(64), DOOR, [])
-    expect(wallItems(1).map((w) => w.key)).toEqual([doorWallKey(DOOR)])
+    expect(doorWalls(1)).toEqual([doorWallKey(DOOR)])
   })
 
   it('stays open after a reload however it was opened, a signer\u2019s door too (review of #532)', () => {
     rememberOpened(ME, DOOR, [])
     // A reload: the session forgets what was inside; the ids opened by hand are kept.
     resetOpenedChests()
-    expect(wallItems(1)).toEqual([])
+    expect(doorWalls(1)).toEqual([])
   })
 })
 

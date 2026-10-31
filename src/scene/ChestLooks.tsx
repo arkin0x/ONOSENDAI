@@ -15,6 +15,7 @@ import { useEffect, useMemo } from 'react'
 import { ACCENT } from '../lib/palette'
 import { GRID_RADIUS, itemCentre, type ViewAxes } from '../lib/space'
 import { drawnLook, lookOf, type Look } from '../lib/looks'
+import { regionBox, type Box } from '../lib/clip'
 import { markShown } from '../lib/worldMarks'
 import { alignedOrigin, useCyberspace } from '../store/useCyberspace'
 import { openedByHand, openedKey, useOpenedChests } from '../store/useOpenedChests'
@@ -34,6 +35,12 @@ import { LookMark } from './LookMark'
 import { NOTE, NOTE_EDGE_PX, author, itemMarkText } from './WorldMessages'
 
 const REACH = GRID_RADIUS * 8
+/**
+ * A look's own frame, where the view's turn is the identity (store/walkWalls
+ * WALL_AXES): LookMark turns the look with the view around it, so its cut is
+ * measured here.
+ */
+const LOOK_FRAME: ViewAxes = { right: { axis: 'x', dir: 1 }, up: { axis: 'y', dir: 1 }, out: { axis: 'z', dir: -1 } }
 /** The top of the loot hovering over an opened chest, which its label stands above. */
 const LOOT_TOP = HOVER_Y + LOOT_SIDE
 
@@ -47,6 +54,8 @@ export interface PlacedLook {
   text: string
   sub: string
   centre: [number, number, number]
+  /** Where a custom look is cut: its region's walls, in its own frame. None for a built-in, drawn whole. */
+  clip?: Box
 }
 
 export function ChestLooks({ axes }: { axes: ViewAxes }): JSX.Element | null {
@@ -79,8 +88,9 @@ export function ChestLooks({ axes }: { axes: ViewAxes }): JSX.Element | null {
       const inside = opened[openedKey(me, w.key)]
       // What the mute list hides is not drawn coming out, as it is not listed (ItemRows ChestBlock).
       const shown = inside?.filter((e) => !hidesThing(muted, { authors: [w.author ?? '', e.event.pubkey], ids: [e.id] }, me))
-      const loot = chestLoot({ look: look.name, entries: shown, held: (e) => holdsEntry(items, e), chest: { at: w.at, plane: w.plane, height: w.height }, itemsReady })
-      out.push({ key: w.key, look, opened: !!inside || openedByHand(me, w.key), loot, text: itemMarkText(w), sub: author({ author: w.author ?? '', mine: w.mine }), centre })
+      const loot = chestLoot({ look: look.kind, entries: shown, held: (e) => holdsEntry(items, e), chest: { at: w.at, plane: w.plane, height: w.height }, itemsReady })
+      const clip = look.name === 'custom' ? regionBox(w.at, w.height, look.closed.unit, LOOK_FRAME) : undefined
+      out.push({ key: w.key, look, opened: !!inside || openedByHand(me, w.key), loot, text: itemMarkText(w), sub: author({ author: w.author ?? '', mine: w.mine }), centre, clip })
     }
     return out
     // mine, discovered, curated and muted are what worldItems reads.
@@ -109,6 +119,7 @@ export function ChestLooks({ axes }: { axes: ViewAxes }): JSX.Element | null {
             label={{ text: w.text, color: NOTE, sub: w.sub, subColor: ACCENT }}
             onTap={() => useShards.getState().selectSecret(w.key)}
             clearTop={loot ? LOOT_TOP : 0}
+            clip={w.clip}
           >
             {ceremony || loot
               ? () => (

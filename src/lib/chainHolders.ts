@@ -12,7 +12,7 @@
  * Kept per identity beside the saved chain, as the publisher keeps the
  * actions still owed to the canonical relay, so a reload still knows which
  * relays another device of this identity has been publishing to. A relay is
- * never dropped from the set, unless it is retired (useRelays RETIRED_RELAYS):
+ * never dropped from the set, unless it is retired (useRelays RETIRED_HOSTS):
  * one that stops answering costs a move at most those 2.5 s, until the player
  * takes it out of the relay list (only the configured relays are asked, so
  * only they are waited for).
@@ -36,7 +36,10 @@ function load(pubkey: string): Set<string> {
   try {
     const saved: unknown = JSON.parse(localStorage.getItem(holdersKeyFor(pubkey)) ?? '[]')
     const urls = Array.isArray(saved) ? saved.filter((url): url is string => typeof url === 'string') : []
-    for (const url of urls) if (!isRetiredRelay(url)) set.add(normalizeURL(url))
+    for (const url of urls) {
+      // One bad string must not hide the holders after it.
+      try { if (!isRetiredRelay(url)) set.add(normalizeURL(url)) } catch { /* not a URL */ }
+    }
     if (urls.some(isRetiredRelay)) localStorage.setItem(holdersKeyFor(pubkey), JSON.stringify([...set]))
   } catch { /* nothing saved, or no storage here: an empty set */ }
   known.set(pubkey, set)

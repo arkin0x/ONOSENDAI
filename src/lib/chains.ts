@@ -219,6 +219,9 @@ async function gatherChain<T>(
   return { got, whole: hole() === null }
 }
 
+/** A chain is read from every configured relay, even one that hung: it may hold a newer move (relay.ts skipHung). */
+const CHAIN_READ = { evenHung: true }
+
 /**
  * Everything the relays have for one pubkey's current chain, raw: every
  * spawn it has signed, and every event of the chain the newest one starts.
@@ -230,7 +233,7 @@ async function gatherChain<T>(
  * Rejects with ChainGapError when a hole could not be filled.
  */
 export async function fetchChainEvents(pubkey: string, knownSpawnId?: string, have: NostrEvent[] = [], since?: number): Promise<NostrEvent[]> {
-  const { got, whole } = await gatherChain(query, (e) => e, mergeEvents, pubkey, knownSpawnId, have, ownEvents, since)
+  const { got, whole } = await gatherChain((f) => query(f, CHAIN_READ), (e) => e, mergeEvents, pubkey, knownSpawnId, have, ownEvents, since)
   if (!whole) throw new ChainGapError(got)
   return got
 }
@@ -245,7 +248,7 @@ export const CHAIN_CHECK_MS = 6000
  * this identity has a chain, has none, or cannot be told (chainHold.ts).
  */
 export async function askChainEvents(pubkey: string, knownSpawnId?: string, have: NostrEvent[] = []): Promise<RelayAnswer[]> {
-  const { got, whole } = await gatherChain((f) => queryEach(f, CHAIN_CHECK_MS), mergeAnswers, combineAnswers, pubkey, knownSpawnId, have,
+  const { got, whole } = await gatherChain((f) => queryEach(f, CHAIN_CHECK_MS, CHAIN_READ), mergeAnswers, combineAnswers, pubkey, knownSpawnId, have,
     (answers, author) => answers.map((a) => ({ ...a, events: ownEvents(a.events, author) })))
   // Every relay that sent back one of the chain's events holds it, and a
   // move's confirmation waits for it from now on (chainHolders.ts).

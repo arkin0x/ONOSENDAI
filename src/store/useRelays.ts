@@ -8,6 +8,7 @@
  * whole set. Persisted locally, so your relays survive a reload.
  */
 
+import { normalizeURL } from 'nostr-tools/utils'
 import { create } from 'zustand'
 
 /**
@@ -22,13 +23,13 @@ import { create } from 'zustand'
 export const DEFAULT_RELAY = 'wss://cyberspace.nostr1.com'
 
 /**
- * Relays this client never dials, whichever list names them: a saved relay
+ * Hosts this client never dials, whichever list names them: a saved relay
  * list, a saved chain-holder set, a kind 10002, a kind 10050, a hint. The owner
  * ruled on 2026-10-31 that wss://onosendai.feeds.relay.tools is down
  * indefinitely: it answered HTTP 502 or refused for days, and a WALK step waited
- * on it twice. Taking a relay off this list is all it takes to dial it again.
+ * on it twice. Taking a host off this list is all it takes to dial it again.
  */
-export const RETIRED_RELAYS: readonly string[] = ['wss://onosendai.feeds.relay.tools']
+export const RETIRED_HOSTS: readonly string[] = ['onosendai.feeds.relay.tools']
 
 const STORAGE = 'onosendai:relays'
 
@@ -57,10 +58,17 @@ export function normalizeRelay(input: string): string | null {
   }
 }
 
-/** Whether a relay URL is retired, however it is written. Not a relay URL at all: not retired. */
+/**
+ * Whether a relay URL is on a retired host, however it is written: by host, the
+ * way nostr-tools opens it, so a scheme, a path or a trailing dot cannot get
+ * around it. Not a relay URL at all: not retired.
+ */
 export function isRetiredRelay(url: string): boolean {
-  const norm = normalizeRelay(url)
-  return norm !== null && RETIRED_RELAYS.includes(norm)
+  try {
+    return RETIRED_HOSTS.includes(new URL(normalizeURL(url.trim())).hostname.replace(/\.+$/, ''))
+  } catch {
+    return false
+  }
 }
 
 function load(): string[] {

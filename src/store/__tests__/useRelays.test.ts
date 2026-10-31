@@ -4,7 +4,7 @@
  */
 
 import { describe, it, expect, vi } from 'vitest'
-import { DEFAULT_RELAY, RETIRED_RELAYS, isRetiredRelay, normalizeRelay } from '../useRelays'
+import { DEFAULT_RELAY, RETIRED_HOSTS, isRetiredRelay, normalizeRelay } from '../useRelays'
 
 describe('normalizeRelay', () => {
   it('accepts and completes real relay hosts', () => {
@@ -43,12 +43,15 @@ describe('a retired relay', () => {
   }
 
   it('is wss://onosendai.feeds.relay.tools (the owner, 2026-10-31), however the URL is written', () => {
-    expect(RETIRED_RELAYS).toEqual([RETIRED])
-    expect(isRetiredRelay(`${RETIRED}/`)).toBe(true)
-    expect(isRetiredRelay('onosendai.feeds.relay.tools')).toBe(true)
-    expect(isRetiredRelay('WSS://Onosendai.Feeds.Relay.Tools')).toBe(true)
-    expect(isRetiredRelay(DEFAULT_RELAY)).toBe(false)
-    expect(isRetiredRelay('not a url')).toBe(false)
+    expect(RETIRED_HOSTS).toEqual(['onosendai.feeds.relay.tools'])
+    const host = 'onosendai.feeds.relay.tools'
+    for (const spelled of [RETIRED, `${RETIRED}/`, host, 'WSS://Onosendai.Feeds.Relay.Tools', ` ${RETIRED} `,
+      `wss://${host}//`, `https://${host}`, `http://${host}`, `ws://${host}`, `wss://${host}.`, `wss://${host}/x`, `wss://${host}:443`, `wss://${host}/?a=1`]) {
+      expect(isRetiredRelay(spelled), spelled).toBe(true)
+    }
+    for (const other of [DEFAULT_RELAY, 'not a url', '', `wss://x.${host}`, 'wss://feeds.relay.tools', `wss://${host}.evil.example`, 'wss://relay.onosendai.tech']) {
+      expect(isRetiredRelay(other), other).toBe(false)
+    }
   })
 
   it('leaves a saved list on load, on disk too, and the other relays stay', async () => {

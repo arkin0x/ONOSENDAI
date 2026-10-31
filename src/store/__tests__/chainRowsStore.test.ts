@@ -34,7 +34,7 @@ vi.hoisted(() => {
   }
   ;(globalThis as { localStorage?: Storage }).localStorage = storage
 })
-vi.mock('../../lib/chainStoreVersion', () => ({ get CHAIN_STORE_VERSION() { return version.v } }))
+vi.mock('../../lib/chainStoreVersion', () => ({ get CHAIN_STORE_VERSION() { return version.v }, CHAIN_ROWS_ON_WEBKIT: false }))
 vi.mock('../../lib/workers', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../lib/workers')>()
   return { ...actual, postProof: vi.fn((m: unknown) => { posted.push(m) }), cancelProof: vi.fn() }
@@ -636,7 +636,8 @@ describe('when storage will not take it', () => {
     rows.setRowsPatience({ read: 0 })
     const store = await import('../useCyberspace')
     await store.savedChainLoaded()
-    expect(store.useCyberspace.getState().events).toHaveLength(10)
+    // The frozen copy, or the late answer already: never less, and never a write over the copy.
+    expect(store.useCyberspace.getState().events.length).toBeGreaterThanOrEqual(10)
     expect(localStorage.getItem(LOCAL_KEY)).toBe(frozen)
     await vi.waitFor(() => expect(store.useCyberspace.getState().prevEventId).toBe(further))
     expect(rows.inRows(pk)).toBe(true)

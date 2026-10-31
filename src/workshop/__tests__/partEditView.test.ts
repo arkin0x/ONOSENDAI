@@ -141,3 +141,71 @@ describe('a live link, read-only, with DETACH', () => {
     expect(w().insidePath()).toEqual([])
   })
 })
+
+describe('the table answers first in the edit view (DECK-0003 §1.10)', () => {
+  const asked: string[] = []
+  const net = async (ref: readonly string[]): Promise<unknown> => { asked.push(ref[1]); return null }
+  const a = (pk: string, d: string): ['a', string] => ['a', `33331:${pk}:${d}`]
+  const place = (s: ShardModel, ...refs: Array<['a', string, string?]>): ShardModel => ({ ...s, refs: refs as ShardModel['refs'], parts: refs.map((_, i) => ({ ref: i, at: [0, 0, 0], turn: [0, 0, 0], step: 0 })) })
+  beforeEach(() => { asked.length = 0 })
+
+  it('a bad entry is never fetched: it says so, and nothing opens', async () => {
+    const id = w().currentId!
+    const key = `33331:${ME}:0d4b8f1e2c97a356`
+    useWorkshop.setState({ shards: w().shards.map((s) => (s.id === id ? { ...place(s, a(ME, '0d4b8f1e2c97a356')), objects: { [key]: { v: 3 } } } : s)) })
+    await w().enterPart(0, net as never)
+    expect(asked).toEqual([])
+    expect(w().insidePath()).toEqual([])
+    expect(w().notice).toMatch(/carried here/)
+  })
+
+  it('a part inside a live link comes from the link\'s own table, read-only, and is not asked for', async () => {
+    const LINK = `33331:${THEM}:statue`
+    const pedestal = `33331:${THEM}:pedestal`
+    const fetched = { ...toPayload(place(tri('Statue'), ['a', pedestal])), objects: { [pedestal]: toPayload(tri('Pedestal')) } }
+    const id = w().currentId!
+    useWorkshop.setState({ shards: w().shards.map((s) => (s.id === id ? { ...place(s, ['a', LINK, 'wss://relay.test']), objects: undefined } : s)) })
+    await w().enterPart(0, (async (ref: readonly string[]) => { asked.push(ref[1]); return ref[1] === LINK ? fetched : null }) as never)
+    expect(w().insidePath()[0].live?.name).toBe('Statue')
+    expect(asked).toEqual([LINK])
+    await w().enterPart(0, net as never)
+    expect(asked).toEqual([LINK])
+    expect(w().insidePath()[1].live?.name).toBe('Pedestal')
+    // Still not yours, and nothing beneath a link can be detached on its own.
+    const before = w().rootShard()
+    w().setOpacity(20)
+    expect(w().notice).toBe(LIVE_LINK_NOTICE)
+    w().detachPart(ME)
+    expect(w().rootShard()).toBe(before)
+  })
+
+  it('DETACH brings what the link\'s event carries, under your key, every ref following', async () => {
+    const LINK = `33331:${THEM}:statue`
+    const pedestal = `33331:${THEM}:pedestal`
+    const fetched = { ...toPayload(place(tri('Statue'), ['a', pedestal])), objects: { [pedestal]: toPayload(tri('Pedestal')) } }
+    const id = w().currentId!
+    useWorkshop.setState({ shards: w().shards.map((s) => (s.id === id ? { ...place(s, ['a', LINK, 'wss://relay.test']), objects: undefined } : s)) })
+    await w().enterPart(0, (async () => fetched) as never)
+    w().detachPart(ME)
+    const room = w().rootShard()!
+    const tableNow = room.objects as Record<string, { name: string; refs?: string[][] }>
+    expect(Object.keys(tableNow).every((k) => k.startsWith(`33331:${ME}:`))).toBe(true)
+    const copy = tableNow[room.refs![0][1]]
+    expect(copy.name).toBe('Statue')
+    expect(tableNow[copy.refs![0][1]].name).toBe('Pedestal')
+  })
+
+  it('an edited copy is written OPAQUE where nobody chose (§1.12), and the table stays flat', async () => {
+    const bare = toPayload(tri('Bare')) as unknown as Record<string, unknown>
+    delete bare.constrain
+    const key = `33331:${ME}:0d4b8f1e2c97a356`
+    const id = w().currentId!
+    useWorkshop.setState({ shards: w().shards.map((s) => (s.id === id ? { ...place(s, a(ME, '0d4b8f1e2c97a356')), objects: { [key]: bare } } : s)) })
+    await w().enterPart(0)
+    w().setOpacity(30)
+    const entry = (w().rootShard()!.objects as Record<string, Record<string, unknown>>)[key]
+    expect(entry.constrain).toBe('opaque')
+    expect(entry.opacity).toBe(30)
+    expect(entry.objects).toBeUndefined()
+  })
+})

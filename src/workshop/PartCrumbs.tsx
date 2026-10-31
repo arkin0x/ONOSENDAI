@@ -35,7 +35,7 @@ export function PartCrumbs({ root, path }: { root: ShardModel; path: InsideStep[
         </Fragment>
       ))}
       {top?.live && <span className="tag" title="A live link follows its author's object. DETACH makes a copy you can edit.">LIVE LINK</span>}
-      {top?.live && (
+      {top?.live && !path.slice(0, -1).some((step) => step.live) && (
         <button className="chip ws__chip" disabled={!me} onClick={() => w().detachPart(me)} title="Make it a copy, carried inside the shard, and edit that">DETACH</button>
       )}
       <button className="chip ws__chip" onClick={() => w().exitTo(path.length - 1)} title="Back out of this part (Esc)">EXIT</button>

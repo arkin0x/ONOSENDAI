@@ -32,10 +32,13 @@ import { useCyberspace } from '../useCyberspace'
 import { useShards } from '../useShards'
 import { useWorkshop } from '../useWorkshop'
 import { usePublished } from '../usePublished'
-import { bagEntries, HIDDEN_KIND, isReference } from '../../lib/hidden'
-import { CARRY_BUDGET_BYTES, carryRefusal, payloadBytes } from '../../lib/carried'
+import { bagEntries, HIDDEN_KIND, isReference, objectTemplate } from '../../lib/hidden'
+import { CARRY_BUDGET_BYTES, carryRefusal, dOf, inTheClear, isQuietD, keepTable, ownKeysOnly, payloadBytes, rekeyTable, setLocalAuthor, tableFromBag, takenCopy } from '../../lib/carried'
+import { attributed } from '../../lib/client'
 import { carryLibrary } from '../localObjects'
 import { hexToBytes, type NostrEvent } from '../../lib/events'
+import { avatarTemplate } from '../../lib/avatar'
+import { publicObjectTemplate, shardFingerprint } from '../../lib/published'
 
 const THEM = 'b'.repeat(64)
 const me = (): string => useCyberspace.getState().identity.pubkey
@@ -76,11 +79,41 @@ describe('a hide carries your library pieces', () => {
     const root = placing('Flooded', [addr(me(), 'room'), addr(me(), 'water')])
     const payload = await hide(root, { room: tri('Room'), water: tri('Water', { opacity: 40, extra: { constrain: 'off' } }) })
     const objects = payload.objects as Record<string, Record<string, unknown>>
-    expect(Object.keys(objects).sort()).toEqual([`33331:${me()}:room`, `33331:${me()}:water`])
-    expect(objects[`33331:${me()}:room`].constrain).toBe('opaque')
-    expect(objects[`33331:${me()}:water`]).toMatchObject({ name: 'Water', opacity: 40, constrain: 'off' })
-    // The references stay exactly as they were.
-    expect(payload.refs).toEqual([addr(me(), 'room'), addr(me(), 'water')])
+    const refs = payload.refs as string[][]
+    expect(Object.keys(objects).sort()).toEqual(refs.map((r) => r[1]).sort())
+    expect(objects[refs[0][1]].constrain).toBe('opaque')
+    expect(objects[refs[1][1]]).toMatchObject({ name: 'Water', opacity: 40, constrain: 'off' })
+  })
+
+  it('never names a piece with no event of its own in a key: "room" goes in under a d that says nothing', async () => {
+    const column = placing('Column', [addr(me(), 'kit/stone/base')])
+    const payload = await hide(placing('Maze', [addr(me(), 'kit/stone/column')]), { 'kit/stone/column': column, 'kit/stone/base': tri('Base') })
+    const objects = payload.objects as Record<string, { name: string; refs?: string[][] }>
+    const keys = Object.keys(objects)
+    expect(keys).toHaveLength(2)
+    expect(JSON.stringify(keys)).not.toContain('kit/')
+    expect(keys.every((k) => k.startsWith(`33331:${me()}:`) && isQuietD(dOf(k)))).toBe(true)
+    // The refs say the same, at the root and inside the entry, and every placement still finds its entry.
+    const top = (payload.refs as string[][])[0][1]
+    expect(objects[top].name).toBe('Column')
+    expect(objects[objects[top].refs![0][1]].name).toBe('Base')
+    // Sorted as §1.2 requires.
+    expect(keys).toEqual([...keys].sort())
+    // The workshop's shard keeps its own refs.
+    expect(useWorkshop.getState().shards.find((s) => s.name === 'Maze')!.refs![0][1]).toBe(`33331:${me()}:kit/stone/column`)
+  })
+
+  it('leaves a quiet d alone, so a uuid\'s or a random d\'s key is the address the ref already names', async () => {
+    const id = '0d4b8f1e-2c97-4a35-8c6e-0123456789ab'
+    const payload = await hide(placing('P', [addr(me(), id)]), { [id]: tri('Quiet') })
+    expect(Object.keys(payload.objects as object)).toEqual([`33331:${me()}:${id}`])
+  })
+
+  it('a hidden object carries no a or e tag naming what it places or carries (§3.4)', async () => {
+    const shard = carryLibrary(placing('P', [addr(me(), 'room'), addr(THEM, 'tile', 'wss://relay.test')]))
+    const tmpl = await objectTemplate(shard, new Uint8Array(32).fill(1), 'f'.repeat(32), 1_800_000_000)
+    expect(tmpl.tags.filter((t) => t[0] === 'a' || t[0] === 'e')).toEqual([])
+    expect(tmpl.tags.map((t) => t[0]).sort()).toEqual(['alt', 'd', 'encrypted'])
   })
 
   it('carries a published piece from the library too: the source decides, not publish state', async () => {
@@ -92,15 +125,16 @@ describe('a hide carries your library pieces', () => {
   it('keeps a live link (a relay hint, as FEED writes it) and anyone else\'s object as references', async () => {
     const root = placing('Mixed', [addr(me(), 'room', 'wss://relay.test'), addr(THEM, 'tile'), addr(me(), 'water')])
     const payload = await hide(root, { room: tri('Room'), water: tri('Water') })
-    expect(Object.keys(payload.objects as object)).toEqual([`33331:${me()}:water`])
+    expect(Object.keys(payload.objects as object)).toEqual([(payload.refs as string[][])[2][1]])
+    expect((payload.refs as string[][]).slice(0, 2)).toEqual([addr(me(), 'room', 'wss://relay.test'), addr(THEM, 'tile')])
   })
 
   it('flattens: a piece placed by a piece is carried in the one table', async () => {
     const room = placing('Room', [addr(me(), 'column')])
     const payload = await hide(placing('Maze', [addr(me(), 'room')]), { room, column: tri('Column') })
     const objects = payload.objects as Record<string, Record<string, unknown>>
-    expect(Object.keys(objects).sort()).toEqual([`33331:${me()}:column`, `33331:${me()}:room`])
-    expect(objects[`33331:${me()}:room`].objects).toBeUndefined()
+    expect(Object.keys(objects)).toHaveLength(2)
+    expect(objects[(payload.refs as string[][])[0][1]].objects).toBeUndefined()
   })
 
   it('a PASTE that forges a piece under your name is carried as your workshop holds it, never as pasted', async () => {
@@ -114,7 +148,7 @@ describe('a hide carries your library pieces', () => {
     const bag = [...sent].reverse().find((e) => e.kind === HIDDEN_KIND) as unknown as NostrEvent
     const item = (await bagEntries(bag, hexToBytes(dep.keyHex))).find((e) => !isReference(e)) as NostrEvent
     const objects = JSON.parse(item.content).objects as Record<string, { name: string }>
-    expect(objects[`33331:${me()}:room`].name).toBe('Room')
+    expect(Object.values(objects).map((o) => o.name)).toEqual(['Room'])
   })
 
   it('carries nothing when it places nothing of yours, and the payload is as before', async () => {
@@ -132,13 +166,159 @@ describe('a hide carries your library pieces', () => {
 })
 
 describe('the budget', () => {
-  it('holds only a shard that carries something, and rounds up', async () => {
-    expect(CARRY_BUDGET_BYTES).toBe(96 * 1024)
+  /** A shard whose whole hide payload is exactly `bytes`: it carries one piece, padded by name-free extra data. */
+  const ofBytes = (bytes: number): ShardModel => {
+    const parent = { ...placing('P', [addr(me(), 'a'.repeat(16))]), objects: { [`33331:${me()}:${'a'.repeat(16)}`]: { pad: '' } } as Record<string, unknown> }
+    const short = bytes - payloadBytes(parent)
+    return { ...parent, objects: { [`33331:${me()}:${'a'.repeat(16)}`]: { pad: 'x'.repeat(short) } } }
+  }
+  /** The bytes a relay sees for the hidden object this client publishes. */
+  const eventBytes = async (s: ShardModel): Promise<number> => {
+    const tmpl = attributed(await objectTemplate(s, new Uint8Array(32).fill(1), 'f'.repeat(32), 1_800_000_000))
+    return new TextEncoder().encode(JSON.stringify({ id: '0'.repeat(64), pubkey: '0'.repeat(64), ...tmpl, sig: '0'.repeat(128) })).length
+  }
+
+  it('is what fits the real event on a relay that takes 131,072 bytes, and not a byte group more (§1.10 Size)', async () => {
+    const at = ofBytes(CARRY_BUDGET_BYTES)
+    expect(payloadBytes(at)).toBe(CARRY_BUDGET_BYTES)
+    expect(await eventBytes(at)).toBeLessThanOrEqual(131_072)
+    expect(await eventBytes(ofBytes(CARRY_BUDGET_BYTES + 1))).toBeGreaterThan(131_072)
+    expect(carryRefusal(at)).toBeNull()
+  })
+
+  it('a payload just over never reads 96 of 96', () => {
+    const over = carryRefusal(ofBytes(CARRY_BUDGET_BYTES + 1))
+    expect(over).toBe('97kb of 96kb may be larger than relays will accept. Keep this part separate.')
+    expect(carryRefusal(ofBytes(100 * 1024))).toMatch(/^100kb of 96kb/)
+  })
+
+  it('holds only a shard that carries something', async () => {
     const plain = tri('Plain')
     expect(carryRefusal(plain)).toBeNull()
     useWorkshop.setState({ shards: [{ ...tri('W'), id: 'w' }], currentId: null })
     const carried = carryLibrary(placing('P', [addr(me(), 'w')]))
     expect(payloadBytes(carried)).toBeLessThan(CARRY_BUDGET_BYTES)
     expect(carryRefusal(carried)).toBeNull()
+  })
+})
+
+describe('every key under the signer (§1.10: a publisher MUST write only those)', () => {
+  const OLD = 'c'.repeat(64)
+  const built = (): ShardModel => ({
+    ...placing('Built', [addr(OLD, 'x1')]),
+    objects: { [`33331:${OLD}:x1`]: toPayload(placing('Inner', [addr(OLD, 'x2'), addr(THEM, 'live', 'wss://relay.test')])), [`33331:${OLD}:x2`]: toPayload(tri('Leaf')) },
+  })
+  const keysAreMine = (p: Record<string, unknown>): void => {
+    const objects = p.objects as Record<string, { name: string; refs?: string[][] }>
+    expect(Object.keys(objects).every((k) => k.startsWith(`33331:${me()}:`))).toBe(true)
+    const top = objects[(p.refs as string[][])[0][1]]
+    expect(top.name).toBe('Inner')
+    expect(objects[top.refs![0][1]].name).toBe('Leaf')
+    // A link stays a link, relay hint and all.
+    expect(top.refs![1]).toEqual(addr(THEM, 'live', 'wss://relay.test'))
+  }
+
+  it('a shard built under another identity is hidden with its pieces re-keyed', async () => {
+    keysAreMine(await hide(built(), {}))
+  })
+
+  it('and published the same way', async () => {
+    await usePublished.getState().send(built())
+    keysAreMine(JSON.parse(sent[sent.length - 1].content))
+  })
+
+  it('ownKeysOnly gives the same object back when every key is already the signer\'s', () => {
+    const mine = { ...placing('P', [addr(me(), 'q')]), objects: { [`33331:${me()}:q`]: toPayload(tri('Q')) } }
+    expect(ownKeysOnly(mine, me())).toBe(mine)
+  })
+
+  it('an entry re-keyed is written OPAQUE where nobody chose, an entry it leaves alone is carried as found (§1.12)', () => {
+    const noWord = { ...toPayload(tri('Bare')) } as Record<string, unknown>
+    delete noWord.constrain
+    const m = { ...placing('P', [addr(OLD, 'a'), addr(me(), 'b')]), objects: { [`33331:${OLD}:a`]: noWord, [`33331:${me()}:b`]: noWord } }
+    const out = ownKeysOnly(m, me()).objects as Record<string, Record<string, unknown>>
+    const moved = Object.keys(out).find((k) => k !== `33331:${me()}:b`) as string
+    expect(out[moved].constrain).toBe('opaque')
+    expect(out[`33331:${me()}:b`].constrain).toBeUndefined()
+  })
+
+  it('a bad entry moves with its key and stays a bad entry', () => {
+    const m = { ...placing('P', [addr(OLD, 'a')]), objects: { [`33331:${OLD}:a`]: 'not a payload' } } as ShardModel
+    const out = rekeyTable(m, me(), () => true)
+    expect(Object.values(out.objects as object)).toEqual(['not a payload'])
+    expect(Object.keys(out.objects as object)[0]).toBe(out.refs![0][1])
+  })
+})
+
+describe('a table taken from a bag (DECK-0004 §3.4, DECK-0003 §1.10)', () => {
+  const found = (author: string | null): ShardModel => ({
+    ...placing('Found', [addr(THEM, 'p'), addr(THEM, 'live', 'wss://relay.test')]),
+    objects: { [`33331:${THEM}:p`]: toPayload(tri('Piece')) },
+    ...(author ? { author } : {}),
+  })
+
+  it('comes with a taken copy, re-keyed under the taker, and every ref follows', () => {
+    const copy = takenCopy(found(THEM), me())
+    const key = Object.keys(copy.objects as object)[0]
+    expect(key.startsWith(`33331:${me()}:`)).toBe(true)
+    expect(isQuietD(dOf(key))).toBe(true)
+    expect(copy.refs![0]).toEqual(['a', key])
+    expect(copy.refs![1]).toEqual(addr(THEM, 'live', 'wss://relay.test'))
+    expect(tableFromBag(copy)).toBe(true)
+  })
+
+  it('your own object taken back keeps its keys, and still remembers the bag', () => {
+    const mine = { ...placing('Mine', [addr(me(), 'p')]), objects: { [`33331:${me()}:p`]: toPayload(tri('Piece')) }, author: me() }
+    const copy = takenCopy(mine, me())
+    expect(Object.keys(copy.objects as object)).toEqual([`33331:${me()}:p`])
+    expect(tableFromBag(copy)).toBe(true)
+  })
+
+  it('an object read with no pubkey that counts brings nothing, and nothing to ask', () => {
+    const copy = takenCopy(found(null), me())
+    expect(copy.objects).toBeUndefined()
+    expect(tableFromBag(copy)).toBe(false)
+  })
+
+  it('stays out of a public object and an avatar until its user keeps it', () => {
+    const copy = takenCopy(found(THEM), me())
+    expect(JSON.parse(publicObjectTemplate(copy, 1).content).objects).toBeUndefined()
+    expect(JSON.parse(avatarTemplate(copy, 1).content).objects).toBeUndefined()
+    expect(inTheClear(copy).objects).toBeUndefined()
+    const kept = keepTable(copy)
+    expect(tableFromBag(kept)).toBe(false)
+    expect(Object.keys(JSON.parse(publicObjectTemplate(kept, 1).content).objects)).toHaveLength(1)
+    expect(Object.keys(JSON.parse(avatarTemplate(kept, 1).content).objects)).toHaveLength(1)
+  })
+
+  it('what the publish state compares is what goes out, so leaving it out does not read as edited', () => {
+    const copy = takenCopy(found(THEM), me())
+    const out = publicObjectTemplate(copy, 1)
+    expect(shardFingerprint(copy)).toBe(shardFingerprint({ ...copy, objects: undefined }))
+    expect(JSON.parse(out.content).objects).toBeUndefined()
+  })
+
+  it('stays out through an edit, a save and a reload, in the workshop', () => {
+    setLocalAuthor(() => me())
+    const id = useWorkshop.getState().importShard(found(THEM), undefined, undefined, true)
+    const held = useWorkshop.getState().shards.find((s) => s.id === id)!
+    expect(tableFromBag(held)).toBe(true)
+    // What the workshop stores: the model as JSON.
+    const back = JSON.parse(JSON.stringify(held)) as ShardModel
+    expect(tableFromBag(back)).toBe(true)
+    useWorkshop.setState({ currentId: id })
+    useWorkshop.getState().setMode('lines')
+    expect(tableFromBag(useWorkshop.getState().current()!)).toBe(true)
+    // The question's yes: asked once, and the shard is like any other after it.
+    useWorkshop.getState().keepCarried(id)
+    expect(tableFromBag(useWorkshop.getState().current()!)).toBe(false)
+    setLocalAuthor(null)
+  })
+
+  it('a copy from the feed is not from a bag, and brings no table of its publisher\'s', () => {
+    const id = useWorkshop.getState().importShard(found(THEM))
+    const held = useWorkshop.getState().shards.find((s) => s.id === id)!
+    expect(held.objects).toBeUndefined()
+    expect(tableFromBag(held)).toBe(false)
   })
 })

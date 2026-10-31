@@ -20,6 +20,7 @@ import { fromPayload } from 'sno-core/shards'
 import { liveRef, objectsOf, parseObjectAddress } from '../ObjectPicker'
 import { useWorkshop } from '../../store/useWorkshop'
 import type { NostrEvent } from '../../lib/events'
+import { copyInto, keepTable, setLocalAuthor, tableFromBag, takenCopy } from '../../lib/carried'
 
 const PK = 'e8ed3798c6ffebffa08501ac39e271662bfd160f688f94c45d692d8767dd345a'
 const COLUMN = { v: 2, name: 'Column', unit: 0, mode: 'solid', vertices: [[0, 0, 0], [1, 0, 0], [0, 4, 0]], colors: [5, 5, 5], faces: [[0, 1, 2]] }
@@ -124,6 +125,34 @@ describe('YOURS: a copy goes inside (DECK-0003 §1.10; arkinox 2026-10-25, the s
     const s = w().current()!
     expect(s.refs).toHaveLength(2)
     expect(Object.values(s.objects ?? {}).map((e) => (e as { opacity?: number }).opacity ?? 100).sort()).toEqual([100, 50])
+  })
+
+  it('keys a copy under whoever is signed in when it is stamped, not when it was picked', () => {
+    const NOW = 'c'.repeat(64)
+    w().setStampObject(yours())
+    setLocalAuthor(() => NOW)
+    try {
+      w().placeObject([0, 0, 0])
+      expect(w().current()!.refs![0][1].startsWith(`33331:${NOW}:`)).toBe(true)
+      expect(Object.keys(w().current()!.objects ?? {})[0].startsWith(`33331:${NOW}:`)).toBe(true)
+    } finally { setLocalAuthor(null) }
+  })
+
+  it('a piece taken from a bag marks what it is stamped into, so PUBLISH asks; a piece that was kept does not', () => {
+    const THEM = 'd'.repeat(64)
+    const taken = takenCopy({ ...fromPayload(COLUMN, 'c')!, refs: [['a', `33331:${THEM}:p`]], parts: [{ ref: 0, at: [0, 0, 0], turn: [0, 0, 0], step: 0 }], objects: { [`33331:${THEM}:p`]: COLUMN }, author: THEM }, PK)
+    const { shard } = copyInto(w().current()!, taken, PK)
+    expect(tableFromBag(shard)).toBe(true)
+    expect(tableFromBag(copyInto(w().current()!, keepTable(taken), PK).shard)).toBe(false)
+  })
+
+  it('a source built under another identity brings its pieces under yours', () => {
+    const OLD = 'e'.repeat(64)
+    const source = { ...fromPayload(COLUMN, 'c')!, refs: [['a', `33331:${OLD}:p`] as ['a', string]], parts: [{ ref: 0, at: [0, 0, 0] as [number, number, number], turn: [0, 0, 0] as [number, number, number], step: 0 }], objects: { [`33331:${OLD}:p`]: COLUMN } }
+    const { shard, ref } = copyInto(w().current()!, source, PK)
+    const table = shard.objects as Record<string, { refs?: string[][] }>
+    expect(Object.keys(table).every((k) => k.startsWith(`33331:${PK}:`))).toBe(true)
+    expect(table[table[ref[1]].refs![0][1]]).toBeDefined()
   })
 
   it('never stamps a shard into itself', () => {

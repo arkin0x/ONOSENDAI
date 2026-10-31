@@ -16,7 +16,7 @@
  */
 
 import { TICKS_PER_UNIT, fromPayload, ticksOf, toPayload, type ShardModel } from 'sno-core/shards'
-import { keepOwnTable } from './carried'
+import { inTheClear, keepOwnTable } from './carried'
 import { CLIENT_TAG } from './client'
 
 export const AVATAR_KIND = 11333
@@ -32,7 +32,8 @@ export function avatarTemplate(shard: ShardModel | null, createdAt: number): Ava
     // only invite a reader to filter on it. The client tag is here and not
     // added at signing because the work is mined over these tags (client.ts).
     tags: shard ? [['name', shard.name], [...CLIENT_TAG]] : [[...CLIENT_TAG]],
-    content: shard ? JSON.stringify(toPayload(shard)) : '',
+    // An avatar is in the clear: a table from a bag stays out unless its user chose (DECK-0003 §1.10).
+    content: shard ? JSON.stringify(toPayload(inTheClear(shard))) : '',
   }
 }
 

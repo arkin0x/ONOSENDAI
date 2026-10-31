@@ -197,6 +197,36 @@ describe('the chest plaintext is a list of entries (spec §7.6)', () => {
     expect(readContents([claiming])[0].id).toBe(getEventHash(unsigned))
   })
 
+  describe('whose keys count for a shard in a chest (DECK-0003 §1.10)', () => {
+    const me = getPublicKey(hider)
+    const carrying = (pubkey: string): string => JSON.stringify({
+      v: 2, name: 'Room', unit: 0, mode: 'solid', vertices: [], colors: [], faces: [],
+      refs: [['a', `33331:${pubkey}:0d4b8f1e2c97a356`]], parts: [[0, 0, 0, 0, 0, 0, 0, 0]],
+      objects: { [`33331:${pubkey}:0d4b8f1e2c97a356`]: { v: 2, name: 'Water', unit: 0, mode: 'solid', vertices: [[0, 0, 0]], colors: [1] } },
+    })
+    const template = (content: string): { kind: number; created_at: number; tags: string[][]; content: string } => ({ kind: 3330, created_at: 7, tags: [['-']], content })
+
+    it('a signed item: its signer, whatever is known of the chest', () => {
+      const signed = finalizeEvent(template(carrying(me)), hider)
+      for (const sealer of [me, undefined]) {
+        const [read] = readContents([signed], sealer)
+        expect(read.body.shard?.author).toBe(me)
+        expect(Object.keys(read.body.shard?.objects ?? {})).toHaveLength(1)
+      }
+    })
+
+    it('an unsigned item: none, even when it claims the chest\'s own signer', () => {
+      const rumor = { ...template(carrying(me)), pubkey: me, id: '', sig: '' }
+      const unsigned = { ...rumor, id: getEventHash(rumor) }
+      for (const sealer of [me, undefined]) {
+        const [read] = readContents([unsigned], sealer)
+        expect(read.verified).toBe(false)
+        expect(read.body.shard?.objects).toBeUndefined()
+        expect(read.body.shard?.author).toBeUndefined()
+      }
+    })
+  })
+
   it('one malformed entry never blocks the rest', () => {
     const good = finalizeEvent(messageInnerTemplate('still here', at, 0, 7), hider)
     const badSig = { ...wire(good), sig: 'not even hex' }

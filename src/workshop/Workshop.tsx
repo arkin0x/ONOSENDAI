@@ -31,6 +31,7 @@ import { Explanation } from '../hud/Explanation'
 import { DIVISIONS, MAX_EXTENT, MAX_UNIT, MIN_EXTENT, MODES, OPACITY_FLOOR, TICKS_PER_UNIT, neededExtent, rgbToHex, ticksOf, toPayload, unitsLabel, type ShardMode , type ShardModel} from 'sno-core/shards'
 import { clampOpacity, dragHistory, opacityAt, opacityFraction, opacityPercent, stepOpacity } from '../lib/opacityStep'
 import { CONSTRAINS, CONSTRAIN_TIPS, authoredConstrainOf, withAuthoredConstrain } from '../lib/walkConstrain'
+import { inTheClear, tableFromBag } from '../lib/carried'
 import { stepDivision } from './divisions'
 import { IMPORT_FORMATS_LABEL } from 'sno-core/importFile'
 import { IMPORT_PICKER_ACCEPT, isZipFile } from '../lib/shardZip'
@@ -644,11 +645,14 @@ export function Workshop(): JSX.Element | null {
   // open menu, and is dropped the moment either changes, so it can never
   // come back over a different object (review of snocrash #36, 2026-10-15).
   const [retractAsk, setRetractAsk] = useState<string | null>(null)
+  // What was pressed while PUBLISH's question is open (DECK-0003 §1.10): a
+  // table from a bag goes out in the clear only when its user chooses to keep it.
+  const [clearAsk, setClearAsk] = useState<'publish' | 'avatar' | null>(null)
   const pubState = useMemo(
     () => publishState(root ? ledger[root.id] : undefined, root ? shardFingerprint(root) : '', me),
     [root, ledger, me],
   )
-  const wireBytes = useMemo(() => (root ? new TextEncoder().encode(JSON.stringify(toPayload(withAuthoredConstrain(root)))).length : 0), [root])
+  const wireBytes = useMemo(() => (root ? new TextEncoder().encode(JSON.stringify(toPayload(withAuthoredConstrain(inTheClear(root))))).length : 0), [root])
   // The moment the work is done: say so, because the signer's prompt may take a
   // while to appear and nothing else marks the end of the mining.
   const lastPhase = useRef<typeof phase>(null)
@@ -678,7 +682,7 @@ export function Workshop(): JSX.Element | null {
   const canRedo = useWorkshop((s) => s.future.length > 0)
   const [panel, setPanel] = useState<Panel | null>(null)
   // A RETRACT question belongs to one object in one open menu.
-  useEffect(() => { setRetractAsk(null) }, [root?.id, panel, open])
+  useEffect(() => { setRetractAsk(null); setClearAsk(null) }, [root?.id, panel, open])
   const [pickerOpen, setPickerOpen] = useState(false)
   // The color bucket's second stage while a face is in hand (FILL or SEAM):
   // put away when the face goes.
@@ -743,6 +747,18 @@ export function Workshop(): JSX.Element | null {
   if (!open) return null
   const w = useWorkshop.getState
   const say = (notice: string): void => useWorkshop.setState({ notice })
+  /** Mine the work and publish `s` as your avatar, and say how it went. */
+  const adoptAvatar = (s: ShardModel): void => {
+    const started = Date.now()
+    void useAvatars.getState().adopt(s).then((ok) => {
+      const st = useAvatars.getState()
+      const took = describeDuration((Date.now() - started) / 1000).replace('about ', '')
+      if (!ok) { say(st.adoptError ?? 'Mining cancelled. Your avatar is as it was.'); return }
+      say(st.minePublished
+        ? `"${s.name}" is your avatar now: ${work.required} bits of work in ${took}.`
+        : `"${s.name}" is your avatar on this device: ${work.required} bits of work in ${took}. You are LOCAL, so no relay has it. BROADCAST sends it when you go LIVE.`)
+    })
+  }
   const toggle = (p: Panel): void => setPanel((cur) => (cur === p ? null : p))
 
   const selectedPoints = shard ? new Set(selection.map((i) => { const v = shard.vertices[i]; return v ? ticksOf(v).join(',') : '' })).size : 0
@@ -959,6 +975,29 @@ export function Workshop(): JSX.Element | null {
 
       {/* SHARD (arkinox, 2026-10-23): the open shard itself, its name, the
           Shard Feed, its counts, how it draws and whether it walls a walker. */}
+      {clearAsk && root && (
+        <ConfirmModal
+          title={`Publish what "${root.name}" carries?`}
+          body={`It came out of a bag with ${Object.keys(root.objects ?? {}).length} ${Object.keys(root.objects ?? {}).length === 1 ? 'object' : 'objects'} inside. Kept, anyone can read them. Left out, others see a placeholder.`}
+          confirmLabel="KEEP THEM"
+          cancelLabel="LEAVE THEM OUT"
+          onBackdrop={() => setClearAsk(null)}
+          onConfirm={() => {
+            const ask = clearAsk
+            setClearAsk(null)
+            w().keepCarried(root.id)
+            const kept = w().shards.find((s) => s.id === root.id) ?? root
+            if (ask === 'publish') void usePublished.getState().publish(kept)
+            else adoptAvatar(kept)
+          }}
+          onCancel={() => {
+            const ask = clearAsk
+            setClearAsk(null)
+            if (ask === 'publish') void usePublished.getState().publish(root)
+            else adoptAvatar(root)
+          }}
+        />
+      )}
       {panel === 'shard' && shard && (
         <div className="ws__panel" role="region" aria-label="Shard">
           {/* Inside a copy, its name is a label: the name of the piece it was copied from. */}
@@ -980,7 +1019,7 @@ export function Workshop(): JSX.Element | null {
               <button
                 className="workshop__btn workshop__btn--warn"
                 disabled={!hasContent || publishing || retracting || !me}
-                onClick={() => { void usePublished.getState().publish(shard) }}
+                onClick={() => { if (!root) return; if (tableFromBag(root)) setClearAsk('publish'); else void usePublished.getState().publish(root) }}
                 title={!hasContent
                   ? 'Nothing to publish yet: add points, or place objects'
                   : pubState === 'other-key'
@@ -1107,17 +1146,7 @@ export function Workshop(): JSX.Element | null {
               <button
                 className="workshop__btn"
                 disabled={!buildable}
-                onClick={() => {
-                  const started = Date.now()
-                  void useAvatars.getState().adopt(shard).then((ok) => {
-                    const st = useAvatars.getState()
-                    const took = describeDuration((Date.now() - started) / 1000).replace('about ', '')
-                    if (!ok) { say(st.adoptError ?? 'Mining cancelled. Your avatar is as it was.'); return }
-                    say(st.minePublished
-                      ? `"${shard.name}" is your avatar now: ${work.required} bits of work in ${took}.`
-                      : `"${shard.name}" is your avatar on this device: ${work.required} bits of work in ${took}. You are LOCAL, so no relay has it. BROADCAST sends it when you go LIVE.`)
-                  })
-                }}
+                onClick={() => { if (!root) return; if (tableFromBag(root)) setClearAsk('avatar'); else adoptAvatar(root) }}
                 title="Publish this object as the shape others see for you, at true scale: the white avatar on the grid is the size of one cell. Its size and detail are paid for in proof of work first."
               >USE THIS SHARD</button>
             )}

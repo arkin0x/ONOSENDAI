@@ -25,7 +25,7 @@ import type { NostrEvent } from '../lib/events'
 import { publish, query } from '../lib/relay'
 import { SignerAccountMismatch } from '../lib/signers'
 import { fromPayload, toPayload, type ShardModel } from 'sno-core/shards'
-import { keepOwnTable } from '../lib/carried'
+import { inTheClear, keepOwnTable, ownKeysOnly } from '../lib/carried'
 import { useCyberspace } from './useCyberspace'
 
 const MINE_KEY = 'onosendai:avatar'
@@ -170,6 +170,9 @@ export const useAvatars = create<AvatarsState>((set, get) => ({
     if (get().phase) return false
     const cs = useCyberspace.getState()
     const me = cs.identity.pubkey
+    // What goes out is what is kept and drawn: every key under the signer's
+    // pubkey, and a table from a bag left out unless its user chose (DECK-0003 §1.10).
+    if (shard) shard = ownKeysOnly(inTheClear(shard), me)
     let template = avatarTemplate(shard, Math.floor(Date.now() / 1000))
     set({ adoptError: null, minedMs: null })
     if (shard) {

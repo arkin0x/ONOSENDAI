@@ -39,8 +39,21 @@ const PARTS_SETTLE_FRAMES = 12
 /** How long a composite object's parts get to arrive before it is drawn with what came (a placeholder for the rest). */
 const PARTS_WAIT_MS = 8000
 
-/** How long the canvas stays after the queue empties: a scroll that pauses does not make a new WebGL context. */
+/** How long the canvas stays after the queue empties, on a phone: a browser there keeps only a handful of contexts. */
 export const IDLE_MS = 8000
+/**
+ * The same, with a mouse. A desktop browser keeps about sixteen contexts, and
+ * this one is 160 pixels square and draws nothing while it waits. Let go after
+ * 8 s, a list read at reading speed made a new context, and compiled every
+ * program again, each time it was scrolled: the churn that wears out the GPU
+ * process on Windows (TV's freeze, #394), and Direct3D is slow at compiling.
+ */
+export const IDLE_DESKTOP_MS = 10 * 60_000
+
+/** How long the stage stays once the queue is empty. */
+export function stageIdleMs(finePointer: boolean): number {
+  return finePointer ? IDLE_DESKTOP_MS : IDLE_MS
+}
 /** How long one picture may take before the stage is made again (a lost context draws nothing, ever). Past PARTS_WAIT_MS. */
 export const JOB_LIMIT_MS = 12000
 
@@ -235,8 +248,8 @@ function useVisible(): boolean {
 
 /**
  * The stage, mounted at the app's root (App.tsx): there while the queue has
- * something in it and IDLE_MS after, so a list costs one WebGL context while
- * its pictures are drawn and none once they are. A picture that takes longer
+ * something in it and stageIdleMs after, so a list costs one WebGL context while
+ * its pictures are drawn and none once it has been left a while. A picture that takes longer
  * than JOB_LIMIT_MS (a lost context never draws again) goes to the back of the
  * queue, once (useThumbs stall), and the stage is made again. Not while the
  * page is hidden: a hidden page draws no frames, and counting that as stalls
@@ -251,7 +264,7 @@ export function ThumbHost(): JSX.Element | null {
   useEffect(() => {
     if (busy) { setUp(true); return }
     if (!up) return
-    const t = window.setTimeout(() => setUp(false), IDLE_MS)
+    const t = window.setTimeout(() => setUp(false), stageIdleMs(window.matchMedia('(pointer: fine)').matches))
     return () => window.clearTimeout(t)
   }, [busy, up])
   useEffect(() => {

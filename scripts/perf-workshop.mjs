@@ -285,7 +285,7 @@ const phase = async (name, drive) => {
     scriptMs: Math.round((m1.ScriptDuration - m0.ScriptDuration) * 1000), taskMs: Math.round((m1.TaskDuration - m0.TaskDuration) * 1000),
     commits: p.commits, renders: p.renders, allocMB: Math.round(alloc / 1e5) / 10, allocKBperFrame: p.frames ? Math.round(alloc / p.frames / 1024) : 0,
     heapMB: Math.round(heap.usedSize / 1e5) / 10, drawsPerFrame: p.frames ? Math.round(p.gl.draws / p.frames) : 0,
-    bufferData: p.gl.bufferData, uploadMB: Math.round(p.gl.bufferBytes / 1e5) / 10, glBuffers: p.gl.buffers, glVAOs: p.gl.vaos,
+    bufferData: p.gl.bufferData, uploadMB: Math.round(p.gl.bufferBytes / 1e5) / 10, glBuffers: p.gl.buffers, glVAOs: p.gl.vaos, programsLinkedTotal: p.gl.linked,
     state, topRenders: p.topRenders, cpu: top(cpu), allocTop,
   }
   console.log('PHASE', name, JSON.stringify({ ...row, topRenders: undefined, cpu: undefined, allocTop: undefined }))

@@ -11,7 +11,7 @@ describe('GRID SIZE stepping', () => {
 
   it('counts in sixteenths of a doubling past 64', () => {
     expect([64, 68, 124, 128, 136, 256, 272].map((e) => stepExtent(e, 1))).toEqual([68, 72, 128, 136, 144, 272, 288])
-    expect([68, 128, 136, 256].map((e) => stepExtent(e, -1))).toEqual([64, 124, 128, 240])
+    expect([68, 128, 136, 256].map((e) => stepExtent(e, -1))).toEqual([64, 124, 128, 248])
   })
 
   it('comes back down through every stop it went up through', () => {

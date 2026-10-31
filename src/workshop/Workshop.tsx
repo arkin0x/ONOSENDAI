@@ -747,6 +747,13 @@ export function Workshop(): JSX.Element | null {
   if (!open) return null
   const w = useWorkshop.getState
   const say = (notice: string): void => useWorkshop.setState({ notice })
+  /** PUBLISH's question answered: go on with what was pressed, as `s`. */
+  const answerClear = (s: ShardModel): void => {
+    const ask = clearAsk
+    setClearAsk(null)
+    if (ask === 'publish') void usePublished.getState().publish(s)
+    else if (ask === 'avatar') adoptAvatar(s)
+  }
   /** Mine the work and publish `s` as your avatar, and say how it went. */
   const adoptAvatar = (s: ShardModel): void => {
     const started = Date.now()
@@ -982,20 +989,8 @@ export function Workshop(): JSX.Element | null {
           confirmLabel="KEEP THEM"
           cancelLabel="LEAVE THEM OUT"
           onBackdrop={() => setClearAsk(null)}
-          onConfirm={() => {
-            const ask = clearAsk
-            setClearAsk(null)
-            w().keepCarried(root.id)
-            const kept = w().shards.find((s) => s.id === root.id) ?? root
-            if (ask === 'publish') void usePublished.getState().publish(kept)
-            else adoptAvatar(kept)
-          }}
-          onCancel={() => {
-            const ask = clearAsk
-            setClearAsk(null)
-            if (ask === 'publish') void usePublished.getState().publish(root)
-            else adoptAvatar(root)
-          }}
+          onConfirm={() => { w().keepCarried(root.id); answerClear(w().shards.find((s) => s.id === root.id) ?? root) }}
+          onCancel={() => answerClear(root)}
         />
       )}
       {panel === 'shard' && shard && (
@@ -1019,7 +1014,7 @@ export function Workshop(): JSX.Element | null {
               <button
                 className="workshop__btn workshop__btn--warn"
                 disabled={!hasContent || publishing || retracting || !me}
-                onClick={() => { if (!root) return; if (tableFromBag(root)) setClearAsk('publish'); else void usePublished.getState().publish(root) }}
+                onClick={() => { if (tableFromBag(shard)) setClearAsk('publish'); else void usePublished.getState().publish(shard) }}
                 title={!hasContent
                   ? 'Nothing to publish yet: add points, or place objects'
                   : pubState === 'other-key'

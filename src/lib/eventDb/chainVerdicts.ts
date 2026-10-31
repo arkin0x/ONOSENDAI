@@ -11,8 +11,9 @@
  * chain is never one long transaction.
  *
  * A row's verdict is transitive. Valid means it and every action before it hold.
- * Broken means it or something before it does not, and a fork ends the whole
- * chain from the head two events name (the ruling of 2026-10-08).
+ * Broken means it or something before it does not. A fork ends the whole chain,
+ * from its spawn (the ruling of 2026-10-08): buildChain says so on the spawn's
+ * row, and every row then reads broken, with nothing valid.
  */
 
 import { request } from '../idb'
@@ -50,16 +51,11 @@ export function verdictsFor(pubkey: string, rows: EventRow[]): { flags: Map<stri
   const broke = firstBreak(actions)
   const end = broke ? broke.index : actions.length
   for (let i = 0; i < end; i++) flags.set(actions[i].id, 1)
-  const fork = actions[0]?.fork
   const lastValid = end > 0 ? actions[end - 1] : null
   return {
     flags,
     validThrough: lastValid ? { id: lastValid.id, n: place.get(lastValid.id) ?? end - 1 } : null,
-    firstBreak: broke
-      ? { id: broke.action.id, n: place.get(broke.action.id) ?? broke.index, reason: String(broke.action.breaks ?? 'broken') }
-      : fork !== undefined
-        ? { id: fork.previousId, n: place.get(fork.previousId) ?? 0, reason: 'fork' }
-        : null,
+    firstBreak: broke ? { id: broke.action.id, n: place.get(broke.action.id) ?? broke.index, reason: String(broke.action.breaks ?? 'broken') } : null,
   }
 }
 

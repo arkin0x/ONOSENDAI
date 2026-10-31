@@ -102,15 +102,19 @@ describe('chain verdicts', () => {
     expect(rows[6].breakAt).toBeUndefined()
   })
 
-  it('a fork ends the chain: the record says so, from the head two events name', async () => {
+  it('a fork ends the whole chain, from its spawn: every row broken, nothing valid, the reason on the spawn', async () => {
     const chain = chainOf(4)
     const left = hop(4, chain[0].id, chain[3].id)
     const right = hop(4, chain[0].id, chain[3].id, 1n, 3)
-    await seed([...chain, left, right])
+    const all = [...chain, left, right]
+    await seed(all)
     const { verdict } = await mark()
-    expect(verdict?.firstBreak).toMatchObject({ id: chain[3].id, reason: 'fork' })
-    const rows = await rowsOf([left, right])
+    expect(verdict?.validThrough).toBeNull()
+    expect(verdict?.firstBreak).toMatchObject({ id: chain[0].id, n: 0 })
+    expect(verdict?.firstBreak?.reason).toMatch(/fork/)
+    const rows = await rowsOf(all)
     expect(rows.every((r) => r.chain === -1)).toBe(true)
+    expect(rows[0].breakAt).toMatch(/fork/)
   })
 
   it('the epoch rises: every older verdict reads as not checked, with no row rewritten for that alone', async () => {

@@ -21,7 +21,7 @@ const sign = (sk: Uint8Array, kind: number, created_at: number, tags: string[][]
 
 const put = (events: NostrEvent[], opts: { relay?: string; pin?: boolean; nip01?: 0 | 1 | 2 } = {}, now?: number) =>
   withEventDb((db) => ingest(db, events.map((event) => ({ event, nip01: opts.nip01 ?? (1 as const), relay: opts.relay, pin: opts.pin })), now))
-const size = (e: NostrEvent): number => new TextEncoder().encode(JSON.stringify(e)).length
+const size = (e: NostrEvent): number => new TextEncoder().encode(JSON.stringify({ id: e.id, pubkey: e.pubkey, created_at: e.created_at, kind: e.kind, tags: e.tags, content: e.content, sig: e.sig })).length
 const countOf = (store: string) => withEventDb((db) => new Promise<number>((resolve) => { const r = db.transaction(store).objectStore(store).count(); r.onsuccess = () => resolve(r.result) }))
 const row = async (id: string): Promise<EventRow | undefined> => (await withEventDb((db) => getRows(db, [id])))[0]
 
@@ -127,6 +127,32 @@ describe('what is kept, by its contents', () => {
   })
 })
 
+describe('what has the shape of an event', () => {
+  const good = (): NostrEvent => sign(alice, 7, 1000)
+  it.each([
+    ['an uppercase id', (e: NostrEvent) => ({ ...e, id: e.id.toUpperCase() })],
+    ['a short id', (e: NostrEvent) => ({ ...e, id: 'abc' })],
+    ['a bad pubkey', (e: NostrEvent) => ({ ...e, pubkey: 'not hex' })],
+    ['a pubkey that is no string', (e: NostrEvent) => ({ ...e, pubkey: 5 })],
+    ['a created_at with a fraction', (e: NostrEvent) => ({ ...e, created_at: 1000.5 })],
+    ['a created_at that is no number', (e: NostrEvent) => ({ ...e, created_at: '1000' })],
+    ['a kind with a fraction', (e: NostrEvent) => ({ ...e, kind: 7.5 })],
+    ['a kind that is no number', (e: NostrEvent) => ({ ...e, kind: '7' })],
+    ['content that is no string', (e: NostrEvent) => ({ ...e, content: 5 })],
+    ['a sig that is no string', (e: NostrEvent) => ({ ...e, sig: 5 })],
+    ['tags that are no list', (e: NostrEvent) => ({ ...e, tags: 'x' })],
+    ['a tag that is no list', (e: NostrEvent) => ({ ...e, tags: ['x'] })],
+    ['a tag item that is no string', (e: NostrEvent) => ({ ...e, tags: [['e', 5]] })],
+  ])('refuses %s, and takes the rest of the batch', async (_name, bend) => {
+    const bad = bend(good()) as unknown as NostrEvent
+    const fine = sign(alice, 7, 1001)
+    const r = await put([bad, fine])
+    expect(r.added).toEqual([fine.id])
+    expect(r.refused).toHaveLength(1)
+    expect((await withEventDb(budget)).unpinnedRows).toBe(1)
+  })
+})
+
 describe('an event that arrives again', () => {
   it('adds the relay to `seen`, and the row is otherwise as it was', async () => {
     const e = sign(alice, 3333, 1000)
@@ -194,6 +220,46 @@ describe('the NIP-01 flag describes the bytes beside it', () => {
     }))
     await put([real], { nip01: 1 })
     expect(await row(real.id)).toMatchObject({ chainOf: alicePk, chainN: 4, proof: 1, chain: 1, chainEpoch: 2, acked: 1, content: '' })
+  })
+})
+
+describe('a flag that rises', () => {
+  it('says the event is known, not new', async () => {
+    const real = sign(alice, 7, 1000)
+    await put([{ ...real, content: 'forged' }], { nip01: 0 })
+    const r = await put([real], { nip01: 1 })
+    expect(r.known).toEqual([real.id])
+    expect(r.added).toEqual([])
+  })
+
+  it('keeps every verdict and mark the row had, and adds the relay', async () => {
+    const real = sign(alice, 3333, 1000)
+    await put([{ ...real, content: 'forged' }], { nip01: 0, relay: 'wss://a/' })
+    await withEventDb((db) => new Promise<void>((resolve) => {
+      const tx = db.transaction('events', 'readwrite')
+      const os = tx.objectStore('events')
+      const g = os.get(real.id)
+      g.onsuccess = () => os.put({ ...g.result, deleted: 1, proof: 1, proofRev: 'rev', chain: -1, chainEpoch: 2, chainRev: 'rules', breakAt: 'why', acked: 1, chainOf: alicePk, chainN: 3 })
+      tx.oncomplete = () => resolve()
+    }))
+    await put([real], { nip01: 1, relay: 'wss://b/' })
+    expect(await row(real.id)).toMatchObject({ content: '', nip01: 1, deleted: 1, proof: 1, proofRev: 'rev', chain: -1, chainEpoch: 2, chainRev: 'rules', breakAt: 'why', acked: 1, chainOf: alicePk, chainN: 3, seen: ['wss://a/', 'wss://b/'] })
+  })
+
+  it('a row nobody checked, under an id a deletion names, goes when the verified event is refused, and is uncounted', async () => {
+    const real = sign(alice, 7, 1000)
+    const malloryPk = getPublicKey(mallory)
+    // The row claims another author, so the deletion could not strike it when it landed.
+    await put([{ ...real, pubkey: malloryPk }], { nip01: 0 })
+    await put([sign(alice, 5, 1001, [['e', real.id]])])
+    expect(await row(real.id)).toBeDefined()
+    const before = await withEventDb(budget)
+    expect(before.unpinnedRows).toBe(2)
+    expect((await put([real], { nip01: 1 })).refused).toEqual([real.id])
+    expect(await row(real.id)).toBeUndefined()
+    const after = await withEventDb(budget)
+    expect(after.unpinnedRows).toBe(1)
+    expect(after.unpinnedBytes).toBe(before.unpinnedBytes - size({ ...real, pubkey: malloryPk }))
   })
 })
 
@@ -354,9 +420,30 @@ describe('deletions', () => {
     const e = sign(alice, 33330, 1000, [['d', 'x']])
     await put([e], { pin: true })
     await put([sign(alice, 5, 1001, [['a', `33330:${alicePk}:x`]])])
+    expect((await row(e.id))!.addr).toBeUndefined()
     const fresh = sign(alice, 33330, 1002, [['d', 'x']])
     expect((await put([fresh], { pin: true })).added).toEqual([fresh.id])
     expect((await withEventDb((db) => byAddress(db, `33330:${alicePk}:x`)))?.id).toBe(fresh.id)
+  })
+
+  it('a pinned arrival a deletion already named is stored marked, with no address to hold', async () => {
+    await put([sign(alice, 5, 1005, [['a', `33330:${alicePk}:x`]])])
+    const e = sign(alice, 33330, 1001, [['d', 'x']])
+    expect((await put([e], { pin: true })).added).toEqual([e.id])
+    expect(await row(e.id)).toMatchObject({ deleted: 1, pin: 1 })
+    expect((await row(e.id))!.addr).toBeUndefined()
+  })
+
+  it('an address of kind 5 names nothing: no tombstone', async () => {
+    await put([sign(alice, 5, 1000, [['a', `5:${alicePk}:x`]])])
+    expect(await countOf('deletions')).toBe(0)
+  })
+
+  it('only targets count toward the cap: other tags do not', async () => {
+    const targets = Array.from({ length: DELETION_TARGETS_MAX }, (_, i) => ['e', i.toString(16).padStart(64, '0')])
+    const others = Array.from({ length: 100 }, (_, i) => ['t', String(i)])
+    const del = sign(mallory, 5, 1000, [...targets, ...others])
+    expect((await put([del])).added).toEqual([del.id])
   })
 
   it('a kind 5 has no effect on a movement action, on the row or on a later arrival: a fork is still a fork', async () => {
@@ -471,6 +558,37 @@ describe('reads', () => {
 })
 
 describe('limited reads', () => {
+  const fake = (i: number): NostrEvent => ({ id: i.toString(16).padStart(64, '0'), pubkey: alicePk, created_at: 1000 + i, kind: 7, tags: [['t', 'x']], content: '', sig: '' })
+
+  it('each read stops at its default limit when it does not say', async () => {
+    await put(Array.from({ length: READ_LIMIT_DEFAULT + 3 }, (_, i) => fake(i)))
+    expect(await withEventDb((db) => byKind(db, 7))).toHaveLength(READ_LIMIT_DEFAULT)
+    expect(await withEventDb((db) => byAuthorKind(db, alicePk, 7))).toHaveLength(READ_LIMIT_DEFAULT)
+    expect(await withEventDb((db) => byTag(db, 't:x'))).toHaveLength(READ_LIMIT_DEFAULT)
+  })
+
+  it('a limit of nothing reads nothing', async () => {
+    await put([fake(1)])
+    expect(await withEventDb((db) => byKind(db, 7, 0))).toEqual([])
+  })
+
+  it('an unsigned-on-purpose row stays readable: only a row nobody checked is hidden', async () => {
+    const e = sign(alice, 7, 1000)
+    await put([{ ...e, sig: '' }], { nip01: 2 })
+    expect((await withEventDb((db) => byKind(db, 7))).map((x) => x.id)).toEqual([e.id])
+  })
+
+  it('a movement action dated far ahead holds no place in a limited read, by tag or by kind', async () => {
+    const now = 1_800_000_000_000
+    const honest = sign(alice, 3333, 1_800_000_000, [['S', '1-2-3']])
+    const spam = [1, 2, 3].map((n) => sign(mallory, 3333, 9_000_000_000 + n, [['S', '1-2-3']]))
+    await put([honest, ...spam], {}, now)
+    expect((await withEventDb((db) => byTag(db, 'S:1-2-3', 1, now)))[0].id).toBe(honest.id)
+    expect((await withEventDb((db) => byKind(db, 3333, 1, now)))[0].id).toBe(honest.id)
+    // Its own author's read still finds it: a chain has its own clock.
+    expect((await withEventDb((db) => byAuthorKind(db, getPublicKey(mallory), 3333, 10, now)))).toHaveLength(3)
+  })
+
   it('byTag stops at its limit, newest first, reading no further', async () => {
     const events = Array.from({ length: 60 }, (_, i) => sign(mallory, 7, 1000 + i, [['X', 'same']]))
     await put(events)

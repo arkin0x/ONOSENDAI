@@ -6,7 +6,7 @@
 
 import 'fake-indexeddb/auto'
 import { IDBFactory } from 'fake-indexeddb'
-import { beforeEach, describe, expect, it } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { openDatabase } from '../../idb'
 import { closeEventDb, withEventDb } from '../connection'
 import { EVENT_DB, EVENT_DB_STORES, EVENT_DB_VERSION, OTHERS_BUDGET_BYTES } from '../schema'
@@ -69,6 +69,40 @@ describe('onosendai:events', () => {
     closeEventDb()
     await expect(withEventDb(budget)).resolves.toBeDefined()
     expect(await withEventDb(async (db) => [...db.objectStoreNames])).toContain('added')
+  })
+
+  it('a database gone between the VersionError and the reopen is not left empty: the next try opens it whole', async () => {
+    const later = await openDatabase(EVENT_DB, EVENT_DB_VERSION + 1, EVENT_DB_STORES)
+    later.close()
+    closeEventDb()
+    const factory = (globalThis as { indexedDB: IDBFactory }).indexedDB
+    const realOpen = factory.open.bind(factory)
+    const open = vi.spyOn(factory, 'open').mockImplementation((name: string, version?: number) => {
+      // The other tab deletes it just as this tab reopens with no version.
+      if (version === undefined) factory.deleteDatabase(name)
+      return realOpen(name, version)
+    })
+    try {
+      await expect(withEventDb(budget)).resolves.toBeDefined()
+    } finally { open.mockRestore() }
+    expect(await withEventDb(async (db) => db.objectStoreNames.contains('events'))).toBe(true)
+    await expect(withEventDb(budget)).resolves.toBeDefined()
+  })
+
+  it('an open that fails any other way does not reopen with no version: it fails', async () => {
+    const factory = (globalThis as { indexedDB: IDBFactory }).indexedDB
+    const open = vi.spyOn(factory, 'open').mockImplementation(() => { throw new DOMException('A mutation operation was attempted', 'InvalidStateError') })
+    try {
+      await expect(withEventDb(budget)).rejects.toMatchObject({ name: 'InvalidStateError' })
+      expect(open.mock.calls.every((c) => c[1] !== undefined)).toBe(true)
+    } finally { open.mockRestore() }
+  })
+
+  it('a connection the browser closes is forgotten: the next call opens a fresh one', async () => {
+    const first = await withEventDb(async (db) => db)
+    first.onclose?.(new Event('close'))
+    const second = await withEventDb(async (db) => db)
+    expect(second).not.toBe(first)
   })
 
   it('two branches set aside in one millisecond are two branches', async () => {

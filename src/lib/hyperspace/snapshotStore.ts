@@ -45,36 +45,66 @@ export const snapshotWorker: MakeWorker = () => {
 export const READ_WAIT_MS = 20_000
 /** How long a write may take. A stuck one must not hold up the sync after it; the next snapshot tries again. */
 export const WRITE_WAIT_MS = 120_000
+/** How long a worker gets to load and open the database. Past that the buffers stay here. */
+export const READY_WAIT_MS = 10_000
 
-/** One call to a worker of its own; null when it could not answer, or not in time. */
-function ask(request: SnapshotRequest, transfer: Transferable[], make: MakeWorker, waitMs: number): Promise<SnapshotReply | null> {
+/** How a call went: `here` while nothing was handed over, so this thread can still do it. */
+type Answer = { here: true; why: string } | { here: false; reply: SnapshotReply }
+
+/** One call to a worker of its own, which says it is ready before anything is handed over. */
+function ask(request: Exclude<SnapshotRequest, { op: 'open' }>, transfer: Transferable[], make: MakeWorker, waitMs: number): Promise<Answer> {
   const worker = make()
-  if (!worker) return Promise.resolve(null)
+  if (!worker) return Promise.resolve({ here: true, why: 'no worker' })
   return new Promise((resolve) => {
-    const timer = setTimeout(() => done(null), waitMs)
-    function done(reply: SnapshotReply | null): void { clearTimeout(timer); worker!.terminate(); resolve(reply) }
-    worker.onmessage = (e: MessageEvent<SnapshotReply>) => done(e.data)
-    worker.onerror = () => done(null)
-    worker.postMessage(request, transfer)
+    let ready = false
+    let timer = setTimeout(() => fail('did not answer in time'), READY_WAIT_MS)
+    function done(answer: Answer): void { clearTimeout(timer); worker!.terminate(); resolve(answer) }
+    function fail(why: string): void { done(ready ? { here: false, reply: { ok: false, error: why } } : { here: true, why }) }
+    worker.onmessage = (e: MessageEvent<SnapshotReply>) => {
+      if (ready) { done({ here: false, reply: e.data }); return }
+      if (!e.data.ok) { fail(e.data.error ?? 'could not open the database'); return }
+      ready = true
+      clearTimeout(timer)
+      timer = setTimeout(() => fail('did not answer in time'), waitMs)
+      worker.postMessage(request, transfer)
+    }
+    worker.onerror = (e) => fail(e.message || 'worker failed')
+    worker.postMessage({ op: 'open' } satisfies SnapshotRequest)
   })
 }
 
 /**
- * Store the record; whether it was. Its buffers go with the worker. If no worker
- * could be made they are still here, and the database on this thread takes them.
+ * Store the record, or reject saying why: a failure here must not be silent, as
+ * the one that hid this record outgrowing a put was. Its buffers go to the worker
+ * only once it is ready. Until then they are here, and this thread writes them.
  */
-export async function putSnapshot(database: IDBDatabase, record: SnapshotRecord, make: MakeWorker = snapshotWorker): Promise<boolean> {
-  const reply = await ask({ op: 'put', record }, buffersOfRecord(record), make, WRITE_WAIT_MS)
-  if (reply?.ok) return true
-  // The worker failed after the buffers went to it: nothing left to store, and the next snapshot tries again.
-  if (reply !== null || buffersOfRecord(record).some((b) => b.byteLength === 0)) return false
-  await writeSnapshotRecord(database, record)
-  return true
+export async function putSnapshot(database: IDBDatabase, record: SnapshotRecord, make: MakeWorker = snapshotWorker): Promise<void> {
+  const answer = await ask({ op: 'put', record }, buffersOfRecord(record), make, WRITE_WAIT_MS)
+  if (answer.here) { await writeSnapshotRecord(database, record); return }
+  if (!answer.reply.ok) throw new Error(answer.reply.error ?? 'snapshot write failed')
 }
 
 /** Read the record, off this thread where a worker can be made. */
 export async function getSnapshot(database: IDBDatabase, make: MakeWorker = snapshotWorker): Promise<unknown> {
-  const reply = await ask({ op: 'get' }, [], make, READ_WAIT_MS)
-  if (reply?.ok) return reply.record
+  const answer = await ask({ op: 'get' }, [], make, READ_WAIT_MS)
+  if (!answer.here && answer.reply.ok) return answer.reply.record
   return readSnapshotRecord(database)
+}
+
+/** Writes that may fail in a row before this session stops trying: each copies the whole index. */
+export const SNAPSHOT_GIVE_UP_AFTER = 3
+/** Rows that make a new snapshot worth its 128 MB. */
+export const SNAPSHOT_MIN_GROWTH = 5000
+const SNAPSHOT_INTERVAL_MS = 10 * 60_000
+
+/** Whether a long-lived tab should write again: after an interval that doubles with each failure, and grown enough. */
+export function tailSnapshotDue(now: number, lastAt: number, size: number, lastSize: number, failures: number): boolean {
+  if (failures >= SNAPSHOT_GIVE_UP_AFTER) return false
+  return now - lastAt >= SNAPSHOT_INTERVAL_MS * 2 ** failures && size - lastSize >= SNAPSHOT_MIN_GROWTH
+}
+
+/** Whether a boot should write: nothing stored yet, or grown enough. One new row is not worth rewriting 128 MB. */
+export function bootSnapshotDue(size: number, lastSize: number, failures: number): boolean {
+  if (failures >= SNAPSHOT_GIVE_UP_AFTER || size === 0) return false
+  return lastSize === 0 || size - lastSize >= SNAPSHOT_MIN_GROWTH
 }

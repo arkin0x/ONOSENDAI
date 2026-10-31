@@ -30,8 +30,19 @@ export interface SnapshotRecord {
   coveredAtSnapshot: Array<[number, number]>
 }
 
-export type SnapshotRequest = { op: 'put'; record: SnapshotRecord } | { op: 'get' }
-export type SnapshotReply = { ok: boolean; record?: unknown }
+/**
+ * To the worker: `open` first. Nothing with buffers goes until it says it is
+ * ready, because a transferred buffer is gone from here: a worker that failed
+ * to load, or could not open the database, must leave them for this thread.
+ */
+export type SnapshotRequest = { op: 'open' } | { op: 'put'; record: SnapshotRecord } | { op: 'get' }
+/** `error` says why, so a write that fails is not silent. */
+export type SnapshotReply = { ok: boolean; ready?: boolean; record?: unknown; error?: string }
+
+/** An error as one line: what a console needs to say why a write failed. */
+export function errorLine(e: unknown): string {
+  return e instanceof Error ? `${e.name}: ${e.message}` : String(e)
+}
 
 /** Every buffer in a stored record, to hand over rather than copy. Anything else is left for the validator to refuse. */
 export function buffersOfRecord(record: unknown): ArrayBuffer[] {
@@ -51,8 +62,16 @@ export function writeSnapshotRecord(database: IDBDatabase, record: SnapshotRecor
     tx.onerror = () => reject(tx.error ?? new Error('snapshot write failed'))
     const os = tx.objectStore(META_STORE)
     const { snapshot, coveredAtSnapshot } = record
-    for (const name of SNAPSHOT_COLUMNS) os.put({ key: columnKey(name), value: snapshot[name] })
-    os.put({ key: SNAPSHOT_KEY, value: { split: 1, version: snapshot.version, count: snapshot.count, maxHeight: snapshot.maxHeight, coveredAtSnapshot } })
+    // A put that throws (a column that cannot be cloned) would leave the
+    // transaction to commit those before it, over another snapshot's rows and
+    // under its header: a wrong stop that passes every check. So abort.
+    try {
+      for (const name of SNAPSHOT_COLUMNS) os.put({ key: columnKey(name), value: snapshot[name] })
+      os.put({ key: SNAPSHOT_KEY, value: { split: 1, version: snapshot.version, count: snapshot.count, maxHeight: snapshot.maxHeight, coveredAtSnapshot } })
+    } catch (e) {
+      try { tx.abort() } catch { /* already over */ }
+      reject(e)
+    }
   })
 }
 

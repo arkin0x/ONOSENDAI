@@ -48,7 +48,7 @@ describe('which look tags count (shape first, spec #82)', () => {
   })
 
   it('a tag that is not well-formed by shape does not count, so the next well-formed one does', () => {
-    const t = lookTagsOf([['look', 42], ['look', payloadOf(tri('Ajar')), 'ajar'], ['look'], ['look', payloadOf(tri('Real'))]] as unknown[])
+    const t = lookTagsOf([['look', 42], ['look', payloadOf(tri('Ajar')), 'ajar'], ['look'], ['look', payloadOf(tri('Four')), 'open', 'extra'], ['look', payloadOf(tri('Real'))]] as unknown[])
     expect(t.closed?.name).toBe('Real')
     expect(t.open).toBeNull()
   })

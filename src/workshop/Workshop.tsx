@@ -59,6 +59,7 @@ import { Bench } from './Bench'
 import { benchPose, nudgeFor, nudgeLabel, orbitBy, planeAfter, requestView, useBenchView, type NudgeName } from './benchAxes'
 import { stackedSpots } from '../lib/weld'
 import { ObjectPicker } from './ObjectPicker'
+import { PartCrumbs } from './PartCrumbs'
 import { ShardFolders, modelEditedAt, modelName, modelRef, useNewestFirst, type DeleteContents } from '../hud/ShardFolders'
 import { useEscape } from '../hooks/useEscape'
 import { ShardThumb } from '../hud/ShardThumb'
@@ -606,8 +607,13 @@ const ICON_PX = 16
 
 export function Workshop(): JSX.Element | null {
   const open = useWorkshop((s) => s.open)
+  // What the tools edit: the shard, or the placed part open in it (enterPart).
   const shard = useWorkshop((s) => s.current())
+  // The shard itself: what PUBLISH, DEPLOY, the avatar and the list act on.
+  const root = useWorkshop((s) => s.rootShard())
+  const inside = useWorkshop((s) => s.inside)
   const shards = useWorkshop((s) => s.shards)
+  const path = useMemo(() => useWorkshop.getState().insidePath(), [inside, shards, root])
   const tool = useWorkshop((s) => s.tool)
   const selection = useWorkshop((s) => s.selection)
   const partSel = useWorkshop((s) => s.partSel)
@@ -643,10 +649,10 @@ export function Workshop(): JSX.Element | null {
   // table from a bag goes out in the clear only when its user chooses to keep it.
   const [clearAsk, setClearAsk] = useState<'publish' | 'avatar' | null>(null)
   const pubState = useMemo(
-    () => publishState(shard ? ledger[shard.id] : undefined, shard ? shardFingerprint(shard) : '', me),
-    [shard, ledger, me],
+    () => publishState(root ? ledger[root.id] : undefined, root ? shardFingerprint(root) : '', me),
+    [root, ledger, me],
   )
-  const wireBytes = useMemo(() => (shard ? new TextEncoder().encode(JSON.stringify(toPayload(withAuthoredConstrain(inTheClear(shard))))).length : 0), [shard])
+  const wireBytes = useMemo(() => (root ? new TextEncoder().encode(JSON.stringify(toPayload(withAuthoredConstrain(inTheClear(root))))).length : 0), [root])
   // The moment the work is done: say so, because the signer's prompt may take a
   // while to appear and nothing else marks the end of the mining.
   const lastPhase = useRef<typeof phase>(null)
@@ -657,17 +663,17 @@ export function Workshop(): JSX.Element | null {
   }, [phase])
   const sha256PerSec = useCalibration((s) => s.sha256PerSec)
   // The avatar's price (spec 8.10), memoised on the geometry; a hook, so it sits with the others.
-  const buildable = shard !== null && shard.vertices.length > 0 && shard.faces.length > 0
+  const buildable = root !== null && root.vertices.length > 0 && root.faces.length > 0
   // Something to deploy or clear: its own vertices, or objects it places (DECK-0003 §1.9 rule 13).
-  const hasContent = shard !== null && (shard.vertices.length > 0 || (shard.parts?.length ?? 0) > 0)
+  const hasContent = root !== null && (root.vertices.length > 0 || (root.parts?.length ?? 0) > 0)
   const work = useMemo(() => {
-    if (!shard || !buildable) return { required: 0, reach: 0, detail: 0, bytes: 0 }
-    const payload = toPayload(shard)
+    if (!root || !buildable) return { required: 0, reach: 0, detail: 0, bytes: 0 }
+    const payload = toPayload(root)
     // The bytes hashed per try: the serialized event with a nonce tag of typical width.
-    const bytes = new TextEncoder().encode(serializeEvent({ ...avatarTemplate(shard, 1_800_000_000), pubkey: me })).length + 40
-    return { required: avatarWork(payload), reach: Math.max(1, avatarReach(payload)), detail: shard.vertices.length + shard.faces.length, bytes }
+    const bytes = new TextEncoder().encode(serializeEvent({ ...avatarTemplate(root, 1_800_000_000), pubkey: me })).length + 40
+    return { required: avatarWork(payload), reach: Math.max(1, avatarReach(payload)), detail: root.vertices.length + root.faces.length, bytes }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [buildable, shard?.vertices, shard?.faces, shard?.unit, shard?.name, me])
+  }, [buildable, root?.vertices, root?.faces, root?.unit, root?.name, me])
   const color = useWorkshop((s) => s.color)
   const stampKind = useWorkshop((s) => s.stampKind)
   const stampSize = useWorkshop((s) => s.stampSize)
@@ -676,7 +682,7 @@ export function Workshop(): JSX.Element | null {
   const canRedo = useWorkshop((s) => s.future.length > 0)
   const [panel, setPanel] = useState<Panel | null>(null)
   // A RETRACT question belongs to one object in one open menu.
-  useEffect(() => { setRetractAsk(null); setClearAsk(null) }, [shard?.id, panel, open])
+  useEffect(() => { setRetractAsk(null); setClearAsk(null) }, [root?.id, panel, open])
   const [pickerOpen, setPickerOpen] = useState(false)
   // The color bucket's second stage while a face is in hand (FILL or SEAM):
   // put away when the face goes.
@@ -733,6 +739,8 @@ export function Workshop(): JSX.Element | null {
     if (panel !== null) setPanel(null)
     else if (viewOpen) setViewOpen(false)
     else if (ws.selection.length || ws.partSel.length || ws.selectedFace !== null || ws.facePick.length) { ws.selectVertex(null); ws.clearFacePick() }
+    // Inside a placed part, out one level, as EXIT does.
+    else if (ws.insidePath().length) ws.exitTo(ws.insidePath().length - 1)
     else ws.closeWorkshop()
   })
 
@@ -905,6 +913,8 @@ export function Workshop(): JSX.Element | null {
       {/* The grid floor's level, under the chips on every tool. Out of the way
           while a panel is open, as undo and redo are: GRID has its own LEVEL
           row, and the others need the room. */}
+      {/* Inside a placed part: where you are, and the way back out. */}
+      {root && path.length > 0 && <PartCrumbs root={root} path={path} />}
       {!panel && shard && <LevelStack />}
       {/* MENU (arkinox, 2026-10-23): the shard list and the ways in, NEW,
           PASTE and IMPORT. The open shard's own settings are under SHARD,
@@ -930,7 +940,7 @@ export function Workshop(): JSX.Element | null {
             {/* Last edited first: updatedAt moves on every edit and never on opening (arkinox, 2026-09-26).
                 A deploy counts as an edit here, inside its folder (arkinox, 2026-10-23). */}
             <ShardFolders items={byRecent} refOf={modelRef} nameOf={modelName} deleteContents={DELETE_CONTENTS} row={(s, f) => (
-              <li key={s.id} className={s.id === shard.id ? 'is-current' : ''} {...f.drag}>
+              <li key={s.id} className={s.id === root?.id ? 'is-current' : ''} {...f.drag}>
                 <button className="workshop__pick" onClick={() => w().select(s.id)}>
                   <ShardThumb shard={s} own />
                   <span className="workshop__pick-name">{s.name}</span>
@@ -972,20 +982,21 @@ export function Workshop(): JSX.Element | null {
 
       {/* SHARD (arkinox, 2026-10-23): the open shard itself, its name, the
           Shard Feed, its counts, how it draws and whether it walls a walker. */}
-      {clearAsk && shard && (
+      {clearAsk && root && (
         <ConfirmModal
-          title={`Publish what "${shard.name}" carries?`}
-          body={`It came out of a bag with ${Object.keys(shard.objects ?? {}).length} ${Object.keys(shard.objects ?? {}).length === 1 ? 'object' : 'objects'} inside. Kept, anyone can read them. Left out, others see a placeholder.`}
+          title={`Publish what "${root.name}" carries?`}
+          body={`It came out of a bag with ${Object.keys(root.objects ?? {}).length} ${Object.keys(root.objects ?? {}).length === 1 ? 'object' : 'objects'} inside. Kept, anyone can read them. Left out, others see a placeholder.`}
           confirmLabel="KEEP THEM"
           cancelLabel="LEAVE THEM OUT"
           onBackdrop={() => setClearAsk(null)}
-          onConfirm={() => { w().keepCarried(shard.id); answerClear(w().shards.find((s) => s.id === shard.id) ?? shard) }}
-          onCancel={() => answerClear(shard)}
+          onConfirm={() => { w().keepCarried(root.id); answerClear(w().shards.find((s) => s.id === root.id) ?? root) }}
+          onCancel={() => answerClear(root)}
         />
       )}
       {panel === 'shard' && shard && (
         <div className="ws__panel" role="region" aria-label="Shard">
-          <input className="workshop__name" value={shard.name} onChange={(e) => w().rename(shard.id, e.target.value)} aria-label="Object name" spellCheck={false} />
+          {/* Inside a copy, its name is a label: the name of the piece it was copied from. */}
+          <input className="workshop__name" value={shard.name} readOnly={path.length > 0} onChange={(e) => { if (root && path.length === 0) w().rename(root.id, e.target.value) }} aria-label="Object name" title={path.length > 0 ? 'The name of the piece this part was copied from' : undefined} spellCheck={false} />
           {/* PUBLISH: this shard as a public kind 33331 object, listed by the
               Shard Feed and read by other apps (DECK-0003 §3.1), the way
               snocrash.art publishes one (arkinox, 2026-10-10: "I want to make
@@ -993,7 +1004,7 @@ export function Workshop(): JSX.Element | null {
               shard feed instantly"). Hiding seals a copy at a place; this puts
               the object itself on your relays for anyone to place. The tag is
               the ledger's word (lib/published.ts), since no relay keeps one. */}
-          <div className="workshop__avatar" role="group" aria-label="Publishing">
+          {path.length === 0 && <div className="workshop__avatar" role="group" aria-label="Publishing">
             <div className="workshop__row">
               <span className="workshop__label">SHARD FEED</span>
               <span className={`tag ${STATE_TAG[pubState]}`} title={STATE_HELP[pubState]}>{STATE_LABEL[pubState]}</span>
@@ -1020,7 +1031,7 @@ export function Workshop(): JSX.Element | null {
               )}
             </div>
             <span className="workshop__work">{wireBytes.toLocaleString('en-US')} BYTES ON THE WIRE · {shard.vertices.length} VERTICES + {shard.faces.length} FACES{shard.parts?.length ? ` + ${shard.parts.length} PLACED` : ''}</span>
-          </div>
+          </div>}
           {retractAsk === shard.id && (
             <ConfirmModal
               title={`Retract "${shard.name}"?`}
@@ -1130,7 +1141,7 @@ export function Workshop(): JSX.Element | null {
               <button
                 className="workshop__btn"
                 disabled={!buildable}
-                onClick={() => { if (tableFromBag(shard)) setClearAsk('avatar'); else adoptAvatar(shard) }}
+                onClick={() => { if (!root) return; if (tableFromBag(root)) setClearAsk('avatar'); else adoptAvatar(root) }}
                 title="Publish this object as the shape others see for you, at true scale: the white avatar on the grid is the size of one cell. Its size and detail are paid for in proof of work first."
               >USE THIS SHARD</button>
             )}
@@ -1200,7 +1211,7 @@ export function Workshop(): JSX.Element | null {
         <button
           className="workshop__deploy"
           disabled={!hasContent}
-          onClick={() => { if (shard) { useShards.getState().startDeployShard(shard.id, 'workshop'); w().closeWorkshop() } }}
+          onClick={() => { if (root) { useShards.getState().startDeployShard(root.id, 'workshop'); w().closeWorkshop() } }}
           title="Place this object in the world"
         >DEPLOY ▸</button>
         <button className="chip ws__icon" onClick={() => w().closeWorkshop()} title="Close the workshop (Esc)" aria-label="Close"><X size={15} strokeWidth={2.25} aria-hidden /></button>

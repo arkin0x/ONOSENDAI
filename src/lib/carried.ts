@@ -10,8 +10,8 @@
  * the part that depends on where an object came from.
  */
 
-import { carriedPayload, carriedTable, carryObject, withAuthor } from 'sno-core/parts'
-import { toPayload, type Ref, type ShardModel } from 'sno-core/shards'
+import { carriedModel, carriedPayload, carriedTable, carryObject, withAuthor } from 'sno-core/parts'
+import { addressesIn, toPayload, type Ref, type ShardModel } from 'sno-core/shards'
 import { withAuthoredConstrain } from './walkConstrain'
 
 /**
@@ -269,4 +269,134 @@ export function copyInto(parent: ShardModel, source: ShardModel, pubkey: string)
   }
   const address = `${mine}${quietD()}`
   return { shard: marked(carryObject(parent, address, written)), ref: ['a', address] }
+}
+
+/**
+ * One step into a shard in the workshop's edit view of a placed part (arkinox,
+ * 2026-10-25: double-tap a part's box, ROOM > WATER, EXIT returns): the
+ * address the placement names, and, for a live link, the object as its
+ * author's event has it. A step without `live` is a copy carried in the root
+ * shard's own table, and is edited in place.
+ */
+export interface InsideStep {
+  address: string
+  /** A live link (FEED, BY ADDRESS): read-only, as fetched. DETACH makes it a copy. */
+  live?: ShardModel
+}
+
+/** A copy as a model, once per version of the root's table. */
+const focused = new WeakMap<object, Map<string, ShardModel | null>>()
+
+/**
+ * The copy at `address` in `root`'s table as a model to edit: its id is its
+ * `d`, so `33331:<you>:<id>` is its own address, and it holds the root's whole
+ * table, since the root's table answers for its placements at every depth
+ * (DECK-0003 §1.10). The same object for the same table. Null when the table
+ * does not hold it, or holds one the format refuses.
+ */
+export function carriedCopy(root: ShardModel, address: string): ShardModel | null {
+  const table = root.objects
+  if (!table) return null
+  let byAddress = focused.get(table)
+  if (!byAddress) focused.set(table, (byAddress = new Map()))
+  if (byAddress.has(address)) return byAddress.get(address) ?? null
+  const m = carriedModel(table, address)
+  const model = m ? { ...m, id: dOf(address), objects: table } : null
+  byAddress.set(address, model)
+  return model
+}
+
+/**
+ * What the table of the event a placed object travels in holds for `address`
+ * (DECK-0003 §1.10, in the order a reader looks): the root's, then, inside a
+ * live link, that link's own. A carried answer is never fetched, even a bad
+ * one. `read` is the model, or null for a bad entry; undefined when neither
+ * holds it, and only then is it fetched.
+ */
+export function carriedAnswer(root: ShardModel, path: readonly InsideStep[], address: string): { read: ShardModel | null; live?: ShardModel } | undefined {
+  if (root.objects && Object.prototype.hasOwnProperty.call(root.objects, address)) return { read: carriedCopy(root, address) }
+  const link = path[path.length - 1]?.live
+  const own = link?.objects
+  if (!link || !own || !Object.prototype.hasOwnProperty.call(own, address)) return undefined
+  const read = carriedModel(own, address) ?? null
+  // It travels in the link's event, so it keeps that event's table and author.
+  return { read, ...(read ? { live: { ...read, id: dOf(address), objects: own, ...(link.author ? { author: link.author } : {}) } } : {}) }
+}
+
+/**
+ * Where a path into `root` really leads: the steps that still stand (an undo
+ * can take a copy away from under the view), and the model the last of them
+ * is, or the root itself for none.
+ */
+export function focusOf(root: ShardModel, path: readonly InsideStep[]): { path: InsideStep[]; model: ShardModel } {
+  const kept: InsideStep[] = []
+  let model = root
+  for (const step of path) {
+    const next = step.live ?? carriedCopy(root, step.address)
+    if (!next) break
+    kept.push(step)
+    model = next
+  }
+  return { path: kept, model }
+}
+
+/** The addresses the root's own placements name. */
+function placedBy(s: ShardModel): string[] {
+  const used = new Set((s.parts ?? []).map((p) => p.ref))
+  return (s.refs ?? []).filter((r, i) => used.has(i) && r[0] === 'a').map((r) => r[1])
+}
+
+/**
+ * `root` with the copy at `address` replaced by `next`, an edit of it. What the
+ * edit did to the table (a copy stamped inside the copy, a placement removed)
+ * becomes the root's table, flat, and every entry the root still reaches, from
+ * its own placements and through the table, is kept even when the copy no
+ * longer places it. The copy is written here, so it is OPAQUE where nobody
+ * chose (DECK-0003 §1.12); the entries it does not touch are carried as found.
+ */
+export function writeCopy(root: ShardModel, address: string, next: ShardModel): ShardModel {
+  const before = root.objects ?? {}
+  const table: Record<string, unknown> = { ...(next.objects ?? before) }
+  table[address] = carriedPayload(withAuthoredConstrain(next))
+  const seen = new Set<string>()
+  const queue = placedBy(root)
+  while (queue.length) {
+    const a = queue.pop() as string
+    if (seen.has(a)) continue
+    seen.add(a)
+    if (!(a in table) && a in before) table[a] = before[a]
+    if (a in table) queue.push(...addressesIn(table[a]))
+  }
+  return { ...root, objects: table }
+}
+
+/**
+ * DETACH: the live link at the end of `path` becomes a copy carried in the
+ * shard that places it, keyed under your own pubkey (lib/carried.ts copyInto),
+ * and every reference of that shard to the link names the copy instead, so
+ * all its placements there follow. What the link's own event carries comes
+ * with it, under your key (copyInto). The new path ends at the copy, to edit.
+ * Null when the path does not end at a live link, or when a live link holds it:
+ * nothing inside a link is yours to change until that link is detached.
+ */
+export function detachInto(root: ShardModel, path: readonly InsideStep[], pubkey: string): { root: ShardModel; path: InsideStep[] } | null {
+  const top = path[path.length - 1]
+  if (!top?.live) return null
+  const above = path.slice(0, -1)
+  if (above.some((step) => step.live)) return null
+  const holder = above.length ? focusOf(root, above).model : root
+  const { shard: withCopy, ref } = copyInto(holder, { ...top.live, id: dOf(top.address) }, pubkey)
+  // The holder's references, the link's now the copy's, each named once (§1.10).
+  const refs: Ref[] = []
+  const index = new Map<string, number>()
+  const moved = (withCopy.refs ?? []).map((r) => {
+    const named = r[1] === top.address ? ref : r
+    const key = `${named[0]}:${named[1]}`
+    let i = index.get(key)
+    if (i === undefined) { i = refs.length; index.set(key, i); refs.push(named) }
+    return i
+  })
+  const next: ShardModel = { ...withCopy, refs, ...(withCopy.parts ? { parts: withCopy.parts.map((p) => ({ ...p, ref: moved[p.ref] })) } : {}) }
+  const written = above.length ? writeCopy(root, above[above.length - 1].address, next) : next
+  return { root: written, path: [...above, { address: ref[1] }] }
 }

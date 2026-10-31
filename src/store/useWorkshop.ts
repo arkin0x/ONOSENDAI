@@ -45,10 +45,9 @@ import {
   type ShardModel,
   type ShardVertex, type Part, type Ref, cloneVertex, hexToRgb, rgbToHex } from 'sno-core/shards'
 import { withOpacity } from '../lib/opacityStep'
-import { keepTable, noTable, signedTableOnly, takenCopy, you } from '../lib/carried'
+import { carriedAnswer, copyInto, detachInto, focusOf, keepOwnTable, keepTable, noTable, signedTableOnly, takenCopy, writeCopy, you, type InsideStep } from '../lib/carried'
 import { authoredConstrainOf, chosenConstrainOf, withConstrain, type Constrain } from '../lib/walkConstrain'
-import { addPart, quarterTurnPart, removeParts } from 'sno-core/parts'
-import { copyInto } from '../lib/carried'
+import { Fetched, addPart, parseAddress, quarterTurnPart, removeParts } from 'sno-core/parts'
 import { FLOOR, MAX_SIZE, MIN_SIZE, stamp, type Facing, type StampKind, type WorkPlane } from 'sno-core/stamps'
 import { BUILT_IN, hexAt, remap, samePalette, snapHex, type Palette } from 'sno-core/snoPalette'
 import { newell, triangulate } from 'sno-core/triangulate'
@@ -595,7 +594,35 @@ export interface WorkshopState {
    * the answer comes once the write has committed, or failed.
    */
   replaceShard: (id: string, model: ShardModel) => Promise<'saved' | 'unsaved' | 'missing'>
+  /**
+   * The shard being edited: the current shard, or, inside a placed part
+   * (enterPart), that part. Every editing tool works on it; edits to a copy
+   * are written into the current shard's own table, and history is the
+   * current shard's, so UNDO and REDO reach inside.
+   */
   current: () => ShardModel | null
+  /** The current shard itself, whatever part is open: what PUBLISH, DEPLOY and the name act on. */
+  rootShard: () => ShardModel | null
+  /**
+   * The parts open in the edit view, outermost first, for the current shard
+   * (lib/carried.ts InsideStep). Empty on the shard itself.
+   */
+  inside: { rootId: string; path: InsideStep[] } | null
+  /** The steps of `inside` that still stand for the current shard. */
+  insidePath: () => InsideStep[]
+  /**
+   * Open the placement at `index` of what is being edited: a copy carried in
+   * the shard is edited in place; a live link is shown read-only, as its
+   * author's event has it, with DETACH. Resolves once it is open, or with a
+   * notice when there is nothing to open. `fetch` reaches the relays for a
+   * live link (lib/parts.ts fetchRef, passed in: this store is imported by
+   * what lib/parts.ts imports).
+   */
+  enterPart: (index: number, fetch?: (ref: Ref) => Promise<unknown>) => Promise<void>
+  /** Back out to `depth` parts deep (0, the shard itself). */
+  exitTo: (depth: number) => void
+  /** DETACH the open live link: a copy of it under `pubkey`, carried in what places it, and open to edit. */
+  detachPart: (pubkey: string) => void
 }
 
 /** A shard from wire form (DECK-0003 §1), as PASTE and bulk import read it; null if it is not one. */
@@ -793,6 +820,9 @@ function facesFor(pts: P3[]): Tris | null {
   return out
 }
 
+/** Why an edit inside a live link does nothing. */
+export const LIVE_LINK_NOTICE = 'A live link follows its author\'s object: DETACH to edit a copy of it here.'
+
 export const useWorkshop = create<WorkshopState>((set, get) => {
   /**
    * Apply an edit to the current shard, remember what it was, stamp it, persist.
@@ -807,10 +837,16 @@ export const useWorkshop = create<WorkshopState>((set, get) => {
     const { shards, currentId, past } = get()
     const i = shards.findIndex((s) => s.id === currentId)
     if (i < 0) return false
-    const next = fn(shards[i])
+    // Inside a placed part, the edit is of that part: a copy is written back
+    // into this shard's own table (lib/carried.ts writeCopy), a live link is
+    // not yours to edit here.
+    const path = get().insidePath()
+    const top = path[path.length - 1]
+    if (top?.live) { set({ notice: LIVE_LINK_NOTICE }); return false }
+    const next = fn(top ? focusOf(shards[i], path).model : shards[i])
     if (!next) return false
     const list = shards.slice()
-    list[i] = { ...next, updatedAt: Date.now() }
+    list[i] = { ...(top ? writeCopy(shards[i], top.address, next) : next), updatedAt: Date.now() }
     const partSel = get().partSel.filter((k) => k < (next.parts?.length ?? 0))
     set({ shards: list, past: [...past.slice(-(HISTORY - 1)), shards[i]], future: [], notice, turnPivot: null, partSel })
     save(list)
@@ -931,6 +967,7 @@ export const useWorkshop = create<WorkshopState>((set, get) => {
     turnPivot: null,
     stampMode: 'shape',
     stampObject: null,
+    inside: null,
     showAvatar: loadShowAvatar(),
     color: [0, 0.9, 1],
     stampKind: 'block',
@@ -1704,7 +1741,68 @@ export const useWorkshop = create<WorkshopState>((set, get) => {
       return saveStored().then((ok) => (ok ? 'saved' : 'unsaved'))
     },
 
-    current: () => get().shards.find((s) => s.id === get().currentId) ?? null,
+    current: () => {
+      const root = get().rootShard()
+      const inside = get().inside
+      if (!root || !inside || inside.rootId !== root.id || inside.path.length === 0) return root
+      return focusOf(root, inside.path).model
+    },
+
+    rootShard: () => get().shards.find((s) => s.id === get().currentId) ?? null,
+
+    insidePath: () => {
+      const root = get().rootShard()
+      const inside = get().inside
+      if (!root || !inside || inside.rootId !== root.id) return []
+      return focusOf(root, inside.path).path
+    },
+
+    enterPart: async (index, fetch) => {
+      const root = get().rootShard()
+      const at = get().current()
+      const part = at?.parts?.[index]
+      const ref = part ? at?.refs?.[part.ref] : undefined
+      if (!root || !ref) return
+      const path = get().insidePath()
+      const open = (step: InsideStep): void => set({ inside: { rootId: root.id, path: [...path, step] }, selection: [], partSel: [], selectedFace: null, facePick: [], notice: null })
+      // A table holds it: drawn from there and never fetched, even when its
+      // entry is one the format refuses (DECK-0003 §1.10).
+      const held = ref[0] === 'a' ? carriedAnswer(root, path, ref[1]) : undefined
+      if (held) {
+        if (!held.read) set({ notice: 'That part is carried here, but it is not one the format can read.' })
+        else open(held.live ? { address: ref[1], live: held.live } : { address: ref[1] })
+        return
+      }
+      // A live link: what its author's event holds, read-only.
+      const answer = fetch ? await fetch(ref) : null
+      // By `e`, the fetch says whose event it is (sno-core Fetched); by `a`, the address does.
+      const payload = answer instanceof Fetched ? answer.payload : answer
+      const read = payload == null ? null : fromPayload(payload, ref[1])
+      const live = read && keepOwnTable(read, answer instanceof Fetched ? answer.pubkey : parseAddress(ref[1])?.pubkey)
+      if (!live) { set({ notice: 'That object did not come back from the relays, so there is nothing to open.' }); return }
+      if (get().rootShard() !== root) return
+      open({ address: ref[1], live: { ...live, id: ref[1].split(':').slice(2).join(':') || ref[1] } })
+    },
+
+    exitTo: (depth) => {
+      const root = get().rootShard()
+      if (!root) return
+      const path = get().insidePath().slice(0, Math.max(0, depth))
+      set({ inside: path.length ? { rootId: root.id, path } : null, selection: [], partSel: [], selectedFace: null, facePick: [], notice: null })
+    },
+
+    detachPart: (pubkey) => {
+      const { shards, currentId, past } = get()
+      const i = shards.findIndex((s) => s.id === currentId)
+      if (i < 0 || !pubkey) return
+      const done = detachInto(shards[i], get().insidePath(), pubkey)
+      if (!done) return
+      const list = shards.slice()
+      list[i] = { ...done.root, updatedAt: Date.now() }
+      // One edit of the shard: UNDO puts the link back.
+      set({ shards: list, past: [...past.slice(-(HISTORY - 1)), shards[i]], future: [], inside: { rootId: shards[i].id, path: done.path }, selection: [], partSel: [], selectedFace: null, facePick: [], notice: 'Detached: this is your copy now, carried inside the shard. Edit it here.' })
+      save(list)
+    },
   }
 })
 

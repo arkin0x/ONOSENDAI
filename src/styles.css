@@ -3366,6 +3366,26 @@ kbd {
   gap: 8px;
   padding-right: 124px;
 }
+/* Inside a placed part (PartCrumbs): ROOM › WATER, then EXIT. Wraps on a
+   phone, and a long name is cut short rather than pushing EXIT off screen.
+   The room on the right is the axes box's, as for the row above. */
+.ws__crumbs {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  box-sizing: border-box;
+  max-width: 100%;
+  padding-right: 124px;
+}
+.ws__crumb {
+  max-width: 42vw;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ws__crumb.is-on { opacity: 1; }
+.ws__crumb-sep { color: var(--accent, #00e5ff); opacity: 0.7; }
 .ws__chip {
   display: inline-flex;
   align-items: center;

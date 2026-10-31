@@ -307,7 +307,8 @@ export function TvLayer({ axes }: { axes: ViewAxes }): JSX.Element {
   const anchorPlane = useCyberspace((s) => s.anchorPlane)
   const scaleExp = useCyberspace((s) => s.scaleExp)
   const lining = useTv((s) => s.jump?.phase === 'line')
-  const commercial = useTv((s) => s.ad !== null)
+  // A CYBERSPACE STATS break is a break like a spot: the same.
+  const commercial = useTv((s) => s.ad !== null || s.stats !== null)
   const showTrail = useCyberspace((s) => s.showTrail)
 
   const place = useMemo(() => {

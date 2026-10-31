@@ -43,6 +43,20 @@
  *     black page, window.__tvStandby set for the watchdog, and a reload as
  *     soon as WebGL is given again (lib/tv/standby, hud/TvStandby;
  *     arkinox, 2026-10-26).
+ *   - A second, upright stream (layout=portrait; BROADCAST_LAYOUT,
+ *     isPortraitBroadcast): the same TV laid out for a 720 x 1280 frame
+ *     (PORTRAIT_FRAME), for YouTube's vertical live, which a phone shows
+ *     full screen (arkinox, 2026-10-30). The streamer opens it in a window
+ *     of its own, beside the 16:9 one. Everything it changes is behind the
+ *     flag: the 16:9 stream and the site are as they were.
+ *     scene/tvPainter stacks NOW PLAYING over the chiron, puts LATER and a
+ *     segment's panel in the tall middle, and an explainer's captions in
+ *     the band under its video; scene/Scene widens the camera's angle so
+ *     the world fills the tall frame (portraitFov). The sizes are the 16:9
+ *     stream's for the same share of the frame's width (broadcastScale),
+ *     so a phone showing the upright frame full width reads them as it
+ *     reads the 16:9 one held upright; hud/TvStandby's NO SIGNAL, sized to
+ *     the frame's width, already does.
  */
 
 /** The query flag: /tv?broadcast=1. */
@@ -94,8 +108,32 @@ export function parseBroadcast(pathname: string, search: string): boolean {
   }
 }
 
+/** The query naming the stream's frame: /tv?broadcast=1&layout=portrait. */
+export const BROADCAST_LAYOUT_PARAM = 'layout'
+
+/**
+ * The frames the stream can be laid out for: the 16:9 one, which is the
+ * default and what every address without the query gets, and the upright
+ * 9:16 one (arkinox, 2026-10-30).
+ */
+export const BROADCAST_LAYOUT = ['landscape', 'portrait'] as const
+export type BroadcastLayout = (typeof BROADCAST_LAYOUT)[number]
+
+/** The upright stream's frame, CSS px at a pixel ratio of 1: what the streamer's window for it is. */
+export const PORTRAIT_FRAME = { width: 720, height: 1280 } as const
+
+/** The frame an address asks for; landscape for none or one not known. */
+export function parseBroadcastLayout(search: string): BroadcastLayout {
+  try {
+    return new URLSearchParams(search).get(BROADCAST_LAYOUT_PARAM) === 'portrait' ? 'portrait' : 'landscape'
+  } catch {
+    return 'landscape'
+  }
+}
+
 let mode: boolean | null = null
 let text: BroadcastTextSize = 'normal'
+let layout: BroadcastLayout = 'landscape'
 /** The address the broadcast loaded on, kept: TV's own history writes cannot take the flag away from a reload. */
 let address = '/tv?broadcast=1'
 
@@ -110,6 +148,7 @@ export function isBroadcast(): boolean {
     if (mode) {
       address = window.location.pathname + window.location.search
       text = parseBroadcastText(window.location.search)
+      layout = parseBroadcastLayout(window.location.search)
     }
   }
   return mode
@@ -122,6 +161,29 @@ export function isBroadcast(): boolean {
  */
 export function broadcastText(): number {
   return isBroadcast() ? BROADCAST_TEXT[text] : 1
+}
+
+/**
+ * Whether this page is the upright stream (layout=portrait), read with the
+ * flag from the address the page loaded on: false off the stream, whatever
+ * the address says, and false for the 16:9 stream.
+ */
+export function isPortraitBroadcast(): boolean {
+  return isBroadcast() && layout === 'portrait'
+}
+
+/**
+ * The camera's vertical angle, degrees, on the upright stream: wide enough
+ * that its angle across is `fov`, the angle the 16:9 stream has from top to
+ * bottom, so a shot's subject spans the narrow frame's width as it spans the
+ * wide frame's height, and the tall frame shows more of the world above and
+ * below it rather than cropping it at the sides. `aspect` is width over
+ * height; at 1 or wider, `fov` as it is.
+ */
+export function portraitFov(fov: number, aspect: number): number {
+  if (!(aspect > 0) || aspect >= 1 || !(fov > 0)) return fov
+  const half = (fov * Math.PI) / 360
+  return (Math.atan(Math.tan(half) / aspect) * 360) / Math.PI
 }
 
 /** The frame width, CSS px, BROADCAST_TEXT's factors are set for: the Wide 1080p capture's. */
@@ -143,9 +205,10 @@ export function broadcastScale(px: number, frameW: number, refPx: number = px): 
 }
 
 /** For tests: set broadcast mode, or (null) read it from the address again. */
-export function setBroadcastForTest(on: boolean | null, size: BroadcastTextSize = 'normal'): void {
+export function setBroadcastForTest(on: boolean | null, size: BroadcastTextSize = 'normal', frame: BroadcastLayout = 'landscape'): void {
   mode = on
   text = size
+  layout = frame
   reloading = false
   address = '/tv?broadcast=1'
 }

@@ -44,7 +44,8 @@
  * and finished events only.
  */
 
-import { getEventHash, getPublicKey, verifyEvent } from 'nostr-tools/pure'
+import { getEventHash, getPublicKey } from 'nostr-tools/pure'
+import { verifyOnce } from './verifiedSigs'
 import { coordToXyz, hexToCoord, type Plane } from 'cyberspace-core'
 import { bytesToHex, hexToBytes, positionHex, type EventTemplate, type NostrEvent } from './events'
 import { fromPayload, toPayload, type ShardModel } from 'sno-core/shards'
@@ -681,7 +682,7 @@ export function innerAuthentic(inner: Partial<Rumor>, signer: string): boolean {
   if (!inner || typeof inner !== 'object' || Array.isArray(inner) || typeof inner.kind !== 'number' || inner.pubkey !== signer) return false
   // No `sig`, or an empty one, is unsigned (spec 7.6), as the chest reader has it.
   if (inner.sig === undefined || inner.sig === '') return sealedAsRumor(inner.kind) && rumorHolds(inner)
-  try { return verifyEvent(inner as NostrEvent) } catch { return false }
+  try { return verifyOnce(inner as NostrEvent) } catch { return false }
 }
 
 /**
@@ -992,7 +993,13 @@ function noteReading(bagId: string, reading: BagReading): void {
   for (const listener of readingListeners) listener()
 }
 
-export async function unbag(outer: NostrEvent, regionKey: Uint8Array, resolve?: ResolveReference, origin?: RegionOrigin, height?: number): Promise<Hidden[]> {
+/**
+ * `seen`, when given, is told how many of the bag's entries are references
+ * (0 when it does not open): what lib/foundCache.ts asks before keeping an
+ * opening, since a reference may open differently next time (a newer version
+ * of the object, or one fetched that could not be before).
+ */
+export async function unbag(outer: NostrEvent, regionKey: Uint8Array, resolve?: ResolveReference, origin?: RegionOrigin, height?: number, seen?: { references: number }): Promise<Hidden[]> {
   const ct = ciphertextOf(outer)
   if (!ct) return []
   const json = await decryptForRegion(regionKey, ct)
@@ -1000,6 +1007,7 @@ export async function unbag(outer: NostrEvent, regionKey: Uint8Array, resolve?: 
   let entries: unknown
   try { entries = JSON.parse(json) } catch { noteReading(outer.id, { entries: 0, readable: 0, opaque: true }); return [] }
   if (!Array.isArray(entries)) { noteReading(outer.id, { entries: 0, readable: 0, opaque: true }); return [] }
+  if (seen) seen.references = entries.filter(isReference).length
   const keyHex = bytesToHex(regionKey)
   const regionHeight = height ?? heightHint(outer) ?? 0
   const facts: BagFacts = { height: regionHeight, bag: bagSettingsOf(outer, regionHeight) }
@@ -1037,7 +1045,7 @@ async function fromReference(ref: Reference, outer: NostrEvent, regionKey: Uint8
   const coordHex = ref[3]
   if (!coordHex && !origin) return null
   const target = await resolve(ref)
-  if (!target || !verifyEvent(target)) return null
+  if (!target || !verifyOnce(target)) return null
   if (ref[0] === 'e' && target.id !== ref[1]) return null
   if (ref[0] === 'a') {
     const [kind, pubkey, ...rest] = ref[1].split(':')
@@ -1120,7 +1128,7 @@ function isChatLine(e: unknown, speaker: string): boolean {
   } catch { return false }
   // No `sig`, or an empty one, is unsigned (DECK-0005 §3.2 rule 5), as innerAuthentic has it.
   if (ev.sig === undefined || ev.sig === '') return true
-  try { return verifyEvent(ev as NostrEvent) } catch { return false }
+  try { return verifyOnce(ev as NostrEvent) } catch { return false }
 }
 
 /**

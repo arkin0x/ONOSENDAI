@@ -16,6 +16,7 @@
 
 import { useEffect, useMemo, useState } from 'react'
 import { Cloud, Cpu } from 'lucide-react'
+import { useVersionGate, VERSION_BLOCKED_MESSAGE } from '../lib/versionGate'
 import { create } from 'zustand'
 import { coordToHex, coordToXyz, hexToCoord, xyzToCoord, type Plane } from 'cyberspace-core'
 import { coordToLatLon } from '../lib/hyperspace/landfall'
@@ -380,9 +381,13 @@ export function HyperspacePanel(): JSX.Element {
   // or at a stop (a hyperjump head). Neither needs a BOARD.
   // eslint-disable-next-line react-hooks/exhaustive-deps
   const line = useMemo(() => lineStateOf(useCyberspace.getState().actions()), [events])
-  // A game holds the avatar: BOARD and RIDE stand down, and say why.
+  // A game holds the avatar, or a newer deploy requires a RELOAD
+  // (lib/versionGate.ts): BOARD and RIDE stand down, and say why. The
+  // gate's verdict is read here so a block shows at once, not at the next
+  // change of chain.
+  const versionVerdict = useVersionGate((s) => s.verdict)
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  const noMove = useMemo(() => whyNoMove(useCyberspace.getState().actions()), [events])
+  const noMove = useMemo(() => whyNoMove(useCyberspace.getState().actions()), [events, versionVerdict])
   const inGame = noMove !== null
   const atStop = line !== null && line.fromHeight !== null
   const onLine = transit !== null || line !== null
@@ -693,7 +698,9 @@ export function HyperspacePanel(): JSX.Element {
       {/* A dead button that never says why reads as broken. One line names
           the gate that is actually holding BOARD shut; the answer is never
           proof of work, because boarding itself costs none. */}
-      {inGame && progress === null && (noMove === GAME_HOLDS_MESSAGE
+      {inGame && progress === null && (noMove === VERSION_BLOCKED_MESSAGE
+        ? <p className="hyper__why">NEW VERSION: RELOAD TO BOARD OR RIDE</p>
+        : noMove === GAME_HOLDS_MESSAGE
         ? <p className="hyper__why">A GAME HOLDS YOUR AVATAR: LEAVE THE GAME IN THE CLIENT YOU ENTERED IT WITH, OR RESPAWN, TO BOARD OR RIDE</p>
         : (
           <p className="hyper__why">

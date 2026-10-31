@@ -11,6 +11,7 @@
  * instances, each with its own storage, share one relay here.
  */
 
+import { provedFor } from '../fixtures/provedHop'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const dev = vi.hoisted(() => {
@@ -60,7 +61,7 @@ const prevOf = (e: NostrEvent): string | undefined => e.tags.find((t) => t[0] ==
 
 const done = (who: 'A' | 'B', elapsedMs: number) => {
   const p = posted[who][posted[who].length - 1]
-  return { type: 'done' as const, id: p.id, mode: 'hop' as const, elapsedMs, proofHash: 'ab'.repeat(32), terrainK: 8, lca: { x: 1, y: 0, z: 0 }, totalOps: 1, prevEventId: p.prevEventId }
+  return { type: 'done' as const, id: p.id, mode: 'hop' as const, elapsedMs, ...provedFor(p), terrainK: 8, lca: { x: 1, y: 0, z: 0 }, totalOps: 1, prevEventId: p.prevEventId }
 }
 async function as<T>(who: 'A' | 'B', f: () => Promise<T> | T): Promise<T> {
   dev.current = who

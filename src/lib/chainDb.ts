@@ -25,8 +25,24 @@
  *
  * Writes go through one queue per identity, latest wins: a burst of saves
  * (an AUTO route signs one action after another) costs one write in flight
- * and one waiting, never one per save. When the page is hidden or left, the
- * one waiting is sent at once rather than behind the one in flight.
+ * and one waiting, never one per save. A write starts a pause (writePauseMs,
+ * 400 ms) after the first save that asks for it, so the two saves of every
+ * action (signed, then acknowledged by a relay, usually 50 to 250 ms later)
+ * are one write: the whole
+ * record is copied on the main thread when it is written (structured clone),
+ * about 55 ms for a 1,300-action chain, and twice per action was a stutter in
+ * WALK (arkinox, 2026-10-30). Until the store of every event moves to its own
+ * layer, which writes one row per event, this only halves it and moves it
+ * off the move itself. A read, the page being hidden or left, or a test
+ * waiting for the writes ends the pause at once. Another tab cannot end it:
+ * it sees the mark of this save before the chain behind it, and waits for
+ * the chain (store/useCyberspace.ts readForMark). A branch set aside is
+ * written without the pause, so it is never on disk after the record that
+ * replaced it there. When the page is hidden or
+ * left, the one waiting is sent at once rather than behind the one in flight. Every
+ * write carries a generation, and one that a newer write of the same
+ * identity has overtaken is not sent (or sent again after a failure), so an
+ * older chain never lands after a newer one.
  *
  * A read never waits longer than READ_PATIENCE_MS (an open another tab
  * blocks, a database that never answers): it says 'timeout' then, and a
@@ -46,6 +62,8 @@ const DB_VERSION = 1
 const RECORD_VERSION = 1
 /** How long a read waits for the database before it says 'timeout'. */
 let readPatienceMs = 3_000
+/** How long a write waits for the saves after it to join it (see above). */
+let writePauseMs = 400
 
 /** One identity's chain as stored: what the store saves, in the same words. */
 export interface StoredChain {
@@ -104,6 +122,8 @@ export function chainDbAvailable(): boolean {
 async function readNow(pubkey: string): Promise<StoredChain | null | 'unreadable'> {
   try {
     if (!chainDbAvailable()) return 'unreadable'
+    // This tab's own last save first, now rather than after its pause.
+    queues.get(pubkey)?.wake?.()
     await settled(pubkey)
     const raw = (await withDb((d) => getMeta(d, pubkey))) as { v?: number; events?: unknown; published?: unknown; stats?: unknown; held?: unknown; savedAt?: unknown } | undefined
     if (!raw || raw.v !== RECORD_VERSION || !Array.isArray(raw.events) || raw.events.length === 0) return null
@@ -136,8 +156,17 @@ export function readStoredChain(pubkey: string, onLate?: (late: StoredChain | nu
   })
 }
 
-/** Per identity: the write in flight, and the newest chain waiting behind it. */
-const queues = new Map<string, { running: Promise<void>; next: StoredChain | null }>()
+/** Per identity: the write in flight, the newest chain waiting behind it, with its generation, and, during the pause before the first write, what ends it. */
+interface WriteQueue { running: Promise<void>; next: { chain: StoredChain; gen: number } | null; wake: (() => void) | null }
+const queues = new Map<string, WriteQueue>()
+/** Per identity, the generation of the newest write asked for. */
+const newestGen = new Map<string, number>()
+let generations = 0
+
+/** Write `c` under `key`, unless a newer write of the same key was asked for meanwhile: checked before each try, so a retry on a fresh connection never lands an older chain after a newer one. */
+async function putUnlessOvertaken(key: string, c: StoredChain, gen: number): Promise<void> {
+  await withDb((d) => (newestGen.get(key) ?? 0) > gen ? Promise.resolve() : putMeta(d, key, recordOf(c)))
+}
 
 /** One record, as written. */
 function recordOf(c: StoredChain): unknown {
@@ -148,24 +177,63 @@ function recordOf(c: StoredChain): unknown {
  * Keep `chain` as `pubkey`'s, in place of what was kept. Returns at once; the
  * write follows, after any already in flight, and only the newest chain
  * waiting is written. A chain that does not say when it was saved is stamped now.
+ * With `pause` false the write is not held for the saves after it.
  */
-export function writeStoredChain(pubkey: string, chain: StoredChain): void {
+export function writeStoredChain(pubkey: string, chain: StoredChain, pause = true): void {
   if (!chainDbAvailable()) return
   const stamped = { ...chain, savedAt: chain.savedAt ?? Date.now() }
+  const gen = ++generations
+  newestGen.set(pubkey, gen)
   const q = queues.get(pubkey)
-  if (q) { q.next = stamped; return }
-  const entry: { running: Promise<void>; next: StoredChain | null } = { running: Promise.resolve(), next: stamped }
+  if (q) { q.next = { chain: stamped, gen }; return }
+  const entry: WriteQueue = { running: Promise.resolve(), next: { chain: stamped, gen }, wake: null }
   queues.set(pubkey, entry)
   entry.running = (async () => {
+    if (pause) {
+      await new Promise<void>((resolve) => {
+        const timer = setTimeout(() => entry.wake?.(), writePauseMs)
+        entry.wake = () => { clearTimeout(timer); entry.wake = null; resolve() }
+      })
+    }
     while (entry.next) {
-      const c = entry.next
+      const w = entry.next
       entry.next = null
       try {
-        await withDb((d) => putMeta(d, pubkey, recordOf(c)))
+        await putUnlessOvertaken(pubkey, w.chain, w.gen)
       } catch { /* full disk or blocked: localStorage still has the last copy that fit */ }
     }
     queues.delete(pubkey)
   })()
+}
+
+/**
+ * Keep `chain` beside `pubkey`'s record, under a key of its own that no
+ * later save touches: a branch of this device's that parted ways with the
+ * chain in hand, kept so that neither side is ever written over
+ * (store/useCyberspace.ts takeParted).
+ */
+export function setAsideStoredChain(pubkey: string, chain: StoredChain): void {
+  // At once: the record that replaces it is written after it, never before (review of #536, F2).
+  writeStoredChain(`parted:${pubkey}:${Date.now()}`, chain, false)
+}
+
+/** The branches set aside for `pubkey` (setAsideStoredChain), oldest first. */
+export async function setAsideChains(pubkey: string): Promise<StoredChain[]> {
+  const out: StoredChain[] = []
+  // A branch set aside a moment ago, its write still on its way, is listed too.
+  const prefix = `parted:${pubkey}:`
+  const waiting = [...queues].filter(([key]) => key.startsWith(prefix)).map(([, q]) => { q.wake?.(); return q.running })
+  await Promise.all(waiting)
+  const keys = await withDb((d) => new Promise<IDBValidKey[]>((resolve, reject) => {
+    const req = d.transaction(META_STORE, 'readonly').objectStore(META_STORE).getAllKeys(IDBKeyRange.bound(`parted:${pubkey}:`, `parted:${pubkey};`))
+    req.onsuccess = () => resolve(req.result)
+    req.onerror = () => reject(req.error)
+  }))
+  for (const key of keys) {
+    const r = await readNow(String(key))
+    if (r && r !== 'unreadable') out.push(r)
+  }
+  return out
 }
 
 /**
@@ -174,17 +242,19 @@ export function writeStoredChain(pubkey: string, chain: StoredChain): void {
  * transactions on one store commit in the order they were made, so the
  * newest still lands last.
  */
-function flushWaiting(): void {
+export function flushChainWrites(): void {
   for (const [pubkey, q] of queues) {
-    const c = q.next
-    if (!c) continue
+    // Still in its pause: the write is sent now, by its own queue.
+    if (q.wake) { q.wake(); continue }
+    const w = q.next
+    if (!w) continue
     q.next = null
-    void withDb((d) => putMeta(d, pubkey, recordOf(c))).catch(() => { /* as above */ })
+    void putUnlessOvertaken(pubkey, w.chain, w.gen).catch(() => { /* as above */ })
   }
 }
 if (typeof window !== 'undefined' && typeof document !== 'undefined') {
-  window.addEventListener('pagehide', flushWaiting)
-  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') flushWaiting() })
+  window.addEventListener('pagehide', flushChainWrites)
+  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') flushChainWrites() })
 }
 
 /** Resolves once every write asked for `pubkey` so far has been tried. A read waits for it, so it sees this tab's own last save. */
@@ -192,9 +262,22 @@ function settled(pubkey: string): Promise<void> {
   return queues.get(pubkey)?.running ?? Promise.resolve()
 }
 
-/** For tests: wait for every queued write. */
+/** For tests: wait for every queued write, without the pause. */
 export async function chainWritesSettled(): Promise<void> {
-  while (queues.size > 0) await Promise.all([...queues.values()].map((q) => q.running))
+  while (queues.size > 0) {
+    for (const q of queues.values()) q.wake?.()
+    await Promise.all([...queues.values()].map((q) => q.running))
+  }
+}
+
+/** How long a write waits for the saves after it (ms): what another tab allows before reading again. */
+export function chainWritePause(): number {
+  return writePauseMs
+}
+
+/** For tests: how long a write waits for the saves after it. */
+export function setChainWritePause(ms: number): void {
+  writePauseMs = ms
 }
 
 /** For tests: how long a read waits before it says 'timeout'. */

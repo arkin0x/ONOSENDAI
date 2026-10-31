@@ -132,6 +132,10 @@ export function useDiscovery(): void {
       const found = []
       const opened: string[] = []
       for (const ev of events) {
+        // A scan superseded while it opens its list stops opening it: the
+        // newer one is opening the same bags, and its finds are the ones
+        // kept. What already opened still holds its keys, below.
+        if (id !== reqId.current) break
         const region = ev.tags.find((t) => t[0] === 'd')?.[1]
         const keyHex = region ? keys.get(region) : undefined
         if (!keyHex || !region) continue

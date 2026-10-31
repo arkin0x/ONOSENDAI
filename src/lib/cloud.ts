@@ -16,10 +16,13 @@
  */
 import type { CloudStatus } from '../store/useCyberspace'
 
-import { findLcaHeight, type Plane } from 'cyberspace-core'
+import { coordToHex, findLcaHeight, terrainK, xyzToCoord, type Plane } from 'cyberspace-core'
+
+/** 64 hex for a position in a plane (as lib/events positionHex). */
+const positionHexOf = (p: Position, plane: Plane): string => coordToHex(xyzToCoord(p.x, p.y, p.z, plane))
 import type { ProofResponse } from '../workers/proof.worker'
 import type { VerifyRequest, VerifyResponse } from '../workers/verify.worker'
-import { verifyCloud, type CloudMove } from './cloudVerify'
+import { cloudHopShape, verifyCloud, type CloudMove } from './cloudVerify'
 import {
   HosakaError,
   defaultHosakaUrl,
@@ -32,6 +35,7 @@ import {
   type HosakaJob,
   type HosakaLimits,
   type Waker,
+  cloudHopsSold,
   keysPending } from './hosaka'
 import type { Position } from './space'
 
@@ -336,7 +340,7 @@ export interface RouteInput {
 export function routeCommit(i: RouteInput): CloudRoute {
   if (i.maxHeight <= i.ceiling) return 'local-hop'
   if (i.mode === 'off' || i.limits === null) return 'local-sidestep'
-  if (i.maxHeight <= i.limits.max_hop_height) return 'cloud-hop'
+  if (i.maxHeight <= cloudHopsSold(i.limits)) return 'cloud-hop'
   if (i.maxHeight <= i.limits.max_sidestep_height) return 'cloud-sidestep'
   return 'local-sidestep'
 }
@@ -406,6 +410,8 @@ export function retainsRecord(err: unknown): boolean {
 export function describeCloudError(err: unknown): string {
   if (err instanceof HosakaError) {
     if (err.code === 'aborted') return 'Cancelled.'
+    if (err.hopPaused) return hopPausedWords(err.hint, err.retryAfterSeconds)
+    if (err.jobNotRunnable) return `HOSAKA will not run this job: ${err.hint ?? 'no reason given'} The job was dropped.`
     if (err.code === 'network') return `HOSAKA unreachable: ${err.message}`
     if (err.code === 'timeout') return 'HOSAKA is still computing. The job is kept; RESUME when it is done.'
     if (err.status === 401) return `HOSAKA refused the signature: ${err.message}`
@@ -413,6 +419,39 @@ export function describeCloudError(err: unknown): string {
   }
   if (err instanceof CloudFlowError) return err.message
   return err instanceof Error ? err.message : String(err)
+}
+
+/**
+ * The cloud hop maintenance pause in words (hosaka-api hop_pause): HOSAKA's
+ * own reason, that nothing was charged, and that RESUME asks again.
+ */
+export function hopPausedWords(reason: string | null, retryAfterSeconds: number | null = null): string {
+  const said = reason ?? 'HOSAKA is not taking hop jobs for a few minutes. Nothing was charged.'
+  const when = retryAfterSeconds !== null && retryAfterSeconds > 0 ? ` (HOSAKA says ${formatWait(retryAfterSeconds)})` : ''
+  return `${said} RESUME tries again once HOSAKA reopens${when}.`
+}
+
+/**
+ * Hop proof version 2 cutover, held decision D-A (2026-10-31): what this
+ * client does with a completed hop job in the old hop_n shape, a job that
+ * was already running on HOSAKA when it switched to version 2 and finished
+ * on its old worker. Such a proof cannot be signed by these chain rules.
+ *
+ * RULING PENDING; the recommended default is in force: refuse it, sign
+ * nothing (never a version 1 hop), drop the record, and say the job is
+ * eligible for a refund. The refund is not automatic: the operator runs
+ * hosaka-api's scripts/v1_hop_refunds.py, which credits the job's debit to
+ * the HOSAKA balance once, by job id, for the ids the owner names. The one place the ruling lands: a
+ * ruling to sign such a result as a version 1 hop inside the census-2
+ * window would change this function and add a version 1 path to signing,
+ * which hopTemplate refuses today.
+ *
+ * Returns the words to show for a v1-shape hop result, or null when the
+ * result is not one (anything else goes on to Level 1).
+ */
+export function straddlingV1Hop(action: HosakaAction, result: unknown, jobId: string): string | null {
+  if (action !== 'hop' || cloudHopShape(result) !== 'v1') return null
+  return `HOSAKA finished this hop (job ${jobId.slice(0, 8)}) in the old proof format, which the chain rules no longer accept. Nothing was signed and you did not move. This job is eligible for a refund to your HOSAKA balance.`
 }
 
 export interface CloudStageDetail {
@@ -539,15 +578,15 @@ let verifyId = 0
  * (a browser), inline otherwise (tests). A worker that cannot be created falls
  * back inline too: a frozen frame is better than an unverified proof.
  */
-export function verifyCloudResult(action: HosakaAction, result: unknown, move: CloudMove, localCeiling: number): Promise<string[]> {
-  const request: VerifyRequest = { id: ++verifyId, action, result, move, localCeiling }
-  if (typeof Worker === 'undefined') return Promise.resolve(verifyCloud(action, result, move, localCeiling))
+export function verifyCloudResult(action: HosakaAction, result: unknown, move: CloudMove): Promise<string[]> {
+  const request: VerifyRequest = { id: ++verifyId, action, result, move }
+  if (typeof Worker === 'undefined') return Promise.resolve(verifyCloud(action, result, move))
   return new Promise<string[]>((resolve, reject) => {
     let worker: Worker
     try {
       worker = new Worker(new URL('../workers/verify.worker.ts', import.meta.url), { type: 'module' })
     } catch {
-      resolve(verifyCloud(action, result, move, localCeiling))
+      resolve(verifyCloud(action, result, move))
       return
     }
     worker.onmessage = (event: MessageEvent<VerifyResponse>) => {
@@ -560,7 +599,7 @@ export function verifyCloudResult(action: HosakaAction, result: unknown, move: C
     }
     worker.onerror = () => {
       worker.terminate()
-      try { resolve(verifyCloud(action, result, move, localCeiling)) } catch (err) { reject(err) }
+      try { resolve(verifyCloud(action, result, move)) } catch (err) { reject(err) }
     }
     worker.postMessage(request)
   })
@@ -576,7 +615,11 @@ export function cloudProofResponse(id: number, record: PendingCloudJob, job: Hos
   const to = positionFromWire(record.to)
   const lca = { x: findLcaHeight(from.x, to.x), y: findLcaHeight(from.y, to.y), z: findLcaHeight(from.z, to.z) }
   const costMsats = typeof job.cost_msats === 'number' ? job.cost_msats : record.costMsats
+  const move = { fromHex: positionHexOf(from, record.plane), toHex: positionHexOf(to, record.plane) }
   if (record.action === 'hop') {
+    // Version 2 (spec 8.4): the seal is the `proof`, mn and mp go into the
+    // event as they are (verifyCloudHop checked all three at Level 1). K is
+    // this machine's own, never HOSAKA's; the region key is region_n's.
     const r = job.result as CloudHopResult
     return {
       type: 'done',
@@ -584,15 +627,16 @@ export function cloudProofResponse(id: number, record: PendingCloudJob, job: Hos
       mode: 'hop',
       prevEventId: record.prevEventId,
       elapsedMs,
-      proofHash: r.hop_n.public_proof,
-      // The region integer never left the cloud; its lookup id did.
-      terrainK: r.K,
+      proofHash: r.seal,
+      terrainK: terrainK(to.x, to.y, to.z, record.plane),
       lca,
       totalOps: 0,
+      hop: { sealHex: r.seal, mnHex: r.mn, mpHex: r.mp },
       source: 'cloud',
       jobId: record.jobId,
       costMsats,
       lookupId: r.region_n.public_proof,
+      move,
     }
   }
   const r = job.result as CloudSidestepResult
@@ -617,6 +661,7 @@ export function cloudProofResponse(id: number, record: PendingCloudJob, job: Hos
     source: 'cloud',
     jobId: record.jobId,
     costMsats,
+    move,
   }
 }
 

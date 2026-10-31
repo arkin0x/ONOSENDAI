@@ -6,6 +6,7 @@
  * WALL; a stair without collision is walked through at the same height; and
  * a press up or down still turns, closing the segment as before.
  */
+import { provedFor } from '../fixtures/provedHop'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 vi.hoisted(() => {
@@ -68,7 +69,7 @@ function moved(start: Position, p: Position = useCyberspace.getState().cursor): 
 }
 
 function done(req: (typeof posted)[number]) {
-  return { type: 'done' as const, id: req.id, mode: req.mode as 'hop' | 'sidestep', elapsedMs: 5, proofHash: 'dd'.repeat(32), terrainK: 3, lca: { x: 1, y: 0, z: 0 }, totalOps: 4 }
+  return { type: 'done' as const, id: req.id, mode: req.mode as 'hop' | 'sidestep', elapsedMs: 5, ...provedFor(req), terrainK: 3, lca: { x: 1, y: 0, z: 0 }, totalOps: 4 }
 }
 
 describe('WALK up a stair', () => {

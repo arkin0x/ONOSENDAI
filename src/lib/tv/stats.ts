@@ -21,7 +21,9 @@
 
 import { ACTION_KIND, type NostrEvent } from '../events'
 import { HIDDEN_KIND, OBJECT_KIND } from '../hidden'
-import { askAll, type Ask } from './tape'
+import { DELETION_KIND, newestPerAddress, arrivalTimes, bagRecord, bagsHidden, chainIndex, chainLengthIndexed, deletionOf, isV2Action, objectRecord, type BagRecord, type ChainIndex, type Deletion, type ObjectRecord } from '../countingRules'
+import type { Filter } from 'nostr-tools'
+import { V2_EPOCH, askAll, type Ask } from './tape'
 
 /** Times in ascending order, and how many are at or before `t`. */
 export function countTo(times: number[], t: number): number {
@@ -40,63 +42,122 @@ const sorted = (xs: number[]): number[] => xs.sort((a, b) => a - b)
 export interface Census {
   /** When each identity first spawned. */
   arrivals: number[]
-  /** When each bag on the relays was last sealed, all and by author. */
+  /** When each bag on the relays was last sealed. */
   bags: number[]
-  bagsBy: Map<string, number[]>
   /** When each public object was last published. */
   objects: number[]
+  /**
+   * The bags and objects as the shared counting rules read them (lib/countingRules
+   * bagsHidden, objectsPublished), for the CYBERSPACE STATS break: who, which
+   * `d`, when, sealed or open, an object's vertex count and shape hash. Never
+   * a place.
+   */
+  bagRecords: BagRecord[]
+  objectRecords: ObjectRecord[]
+  /** The bag and object deletions (kind 5, scoped by `k`), which those rules apply. */
+  deletions: Deletion[]
+  /** Each key's first v2 spawn (lib/countingRules arrivalTimes). */
+  firstSpawn: Map<string, number>
+  /** When it was read, and last read whole, unix s: a later read asks only for what is new (loadCensus). */
+  readAt: number
+  wholeAt: number
 }
 
-function isV2Spawn(e: NostrEvent): boolean {
-  return e.kind === ACTION_KIND && !e.tags.some((t) => t[0] === 'version') && e.tags.some((t) => t[0] === 'A' && t[1] === 'spawn')
-}
+/** How far back a read after the first starts, s, before the last one: a move signed offline is published later than it was signed (review of #537). */
+export const READ_OVERLAP_S = 24 * 60 * 60
+/** How often everything is read whole again, s: for one signed earlier than READ_OVERLAP_S before it was published. */
+export const READ_WHOLE_S = 24 * 60 * 60
 
-export async function loadCensus(ask: Ask): Promise<Census> {
-  const [spawns, bags, objects] = await Promise.all([
-    askAll(ask, { kinds: [ACTION_KIND], '#A': ['spawn'] }),
-    askAll(ask, { kinds: [HIDDEN_KIND] }),
-    askAll(ask, { kinds: [OBJECT_KIND] }),
+const byId = <T extends { id: string }>(...lists: T[][]): T[] => [...new Map(lists.flat().map((x) => [x.id, x])).values()]
+
+/**
+ * The census: whole the first time (or with no `prev`) and once a
+ * READ_WHOLE_S, otherwise only what is new since `prev` was read, less
+ * READ_OVERLAP_S, merged into it by id (review of #537: every count read it
+ * all again). Spawns from V2_EPOCH. Bags and objects are addressable, so the
+ * counts are of the newest of each address, as the relays keep them.
+ */
+export async function loadCensus(ask: Ask, prev: Census | null = null, nowS: number = Math.floor(Date.now() / 1000)): Promise<Census> {
+  const whole = !prev || nowS - prev.wholeAt >= READ_WHOLE_S
+  const since = whole ? undefined : prev.readAt - READ_OVERLAP_S
+  const at = (f: Filter): Filter => (since === undefined ? f : { ...f, since })
+  const [spawns, bags, objects, deletions] = await Promise.all([
+    askAll(ask, at({ kinds: [ACTION_KIND], '#A': ['spawn'], since: since ?? V2_EPOCH })),
+    askAll(ask, at({ kinds: [HIDDEN_KIND] })),
+    askAll(ask, at({ kinds: [OBJECT_KIND] })),
+    // Scoped by `k`: a bare kind 5 read pages through all of nostr (tv-leaderboards-design 1.1).
+    askAll(ask, at({ kinds: [DELETION_KIND], '#k': [String(HIDDEN_KIND), String(OBJECT_KIND)] })),
   ])
-  const first = new Map<string, number>()
-  for (const e of spawns) if (isV2Spawn(e)) first.set(e.pubkey, Math.min(first.get(e.pubkey) ?? Infinity, e.created_at))
-  const bagsBy = new Map<string, number[]>()
-  for (const b of bags) bagsBy.set(b.pubkey, [...(bagsBy.get(b.pubkey) ?? []), b.created_at])
-  for (const l of bagsBy.values()) sorted(l)
+  const keep = whole ? null : prev
+  const first = new Map(keep?.firstSpawn ?? [])
+  for (const [pk, t] of arrivalTimes(spawns)) first.set(pk, Math.min(first.get(pk) ?? Infinity, t))
+  const bagRecords = byId(keep?.bagRecords ?? [], bags.map(bagRecord).filter((b): b is BagRecord => b !== null))
+  const objectRecords = byId(keep?.objectRecords ?? [], objects.map(objectRecord).filter((o): o is ObjectRecord => o !== null))
   return {
     arrivals: sorted([...first.values()]),
-    bags: sorted(bags.map((b) => b.created_at)),
-    bagsBy,
+    bags: sorted(newestPerAddress(bagRecords).map((b) => b.createdAt)),
     // A public object carries its payload in content; a hidden one is sealed.
-    objects: sorted(objects.filter((o) => !o.tags.some((t) => t[0] === 'encrypted')).map((o) => o.created_at)),
+    objects: sorted(newestPerAddress(objectRecords).filter((o) => o.open).map((o) => o.createdAt)),
+    bagRecords,
+    objectRecords,
+    deletions: byId(keep?.deletions ?? [], deletions.map(deletionOf).filter((d): d is Deletion => d !== null)),
+    firstSpawn: first,
+    readAt: nowS,
+    wholeAt: whole ? nowS : prev.wholeAt,
   }
+}
+
+/** The last count per census, for the marquee, which asks again each time round at the same moment on tape. */
+const lastBags = new WeakMap<Census, { t: number; by: Map<string, number> }>()
+
+/**
+ * A key's bags hidden as of `t`: MOST BAGS HIDDEN's rule (lib/countingRules
+ * bagsHidden, the STASH badge's number), so the ticker's "n BAGS HIDDEN" for
+ * the avatar on screen and the CYBERSPACE STATS board never disagree. Until
+ * 2026-10-30 it counted every bag event the relays held, uncapped.
+ */
+export function bagsHiddenAt(c: Census, pubkey: string, t: number): number {
+  let last = lastBags.get(c)
+  if (!last || last.t !== t) {
+    last = { t, by: bagsHidden(c.bagRecords, c.deletions, t) }
+    lastBags.set(c, last)
+  }
+  return last.by.get(pubkey) ?? 0
 }
 
 /**
- * When each of an identity's actions was signed, in its current chain: the
- * actions from its latest spawn at or before `t` up to `t` are its chain
- * length then. Kept as spawns and actions so one fetch answers for any `t`.
+ * An identity's v2 actions, as the ticker's CHAIN OF n ACTIONS counts them:
+ * every one it signed, read once the first time it is on screen, so its
+ * chain length at any moment on tape is one rule away (chainLengthAt).
  */
-export interface ChainTimes {
-  spawns: number[]
-  actions: number[]
+export interface ChainHistory {
+  pubkey: string
+  events: NostrEvent[]
+  /** Its chains, each walked once (lib/countingRules chainIndex): made as it loads, never in a paint. */
+  index?: ChainIndex
 }
 
-export async function loadChainTimes(pubkey: string, ask: Ask): Promise<ChainTimes> {
-  const events = await askAll(ask, { kinds: [ACTION_KIND], authors: [pubkey] })
-  const v2 = events.filter((e) => !e.tags.some((t) => t[0] === 'version'))
-  return {
-    spawns: sorted(v2.filter(isV2Spawn).map((e) => e.created_at)),
-    actions: sorted(v2.map((e) => e.created_at)),
-  }
+export async function loadChainHistory(pubkey: string, ask: Ask): Promise<ChainHistory> {
+  const events = (await askAll(ask, { kinds: [ACTION_KIND], authors: [pubkey] })).filter((e) => e.pubkey === pubkey && isV2Action(e))
+  return { pubkey, events, index: chainIndex(events, pubkey) }
 }
 
-/** Actions in the chain standing at `t`: from the latest spawn at or before it, that spawn included. */
-export function chainLengthAt(c: ChainTimes, t: number): number {
-  const s = countTo(c.spawns, t)
-  if (s === 0) return 0
-  const spawnAt = c.spawns[s - 1]
-  // Everything signed at or after the spawn's second, up to t. A second
-  // shared with the action before the spawn is counted to the new chain: a
-  // respawn and a hop in the same second does not happen in practice.
-  return countTo(c.actions, t) - countTo(c.actions, spawnAt - 1)
+/** The last answer per history, for the marquee, which asks again each time round at the same moment on tape. */
+const lastLength = new WeakMap<ChainHistory, { t: number; n: number }>()
+
+/**
+ * The valid actions on the chain standing at `t`: LONGEST CHAIN's rule
+ * (lib/countingRules chainLength), so the ticker and the CYBERSPACE STATS
+ * board never disagree. The chain is followed by its `previous` links, not
+ * counted by time: a fork counts nothing and a gap ends it (until
+ * 2026-10-30 this counted every action signed since the latest spawn). From
+ * the history's index, a binary search: the marquee asks in a paint frame.
+ */
+export function chainLengthAt(c: ChainHistory, t: number): number {
+  const last = lastLength.get(c)
+  if (last && last.t === t) return last.n
+  c.index ??= chainIndex(c.events, c.pubkey)
+  const n = chainLengthIndexed(c.index, c.events, t)
+  lastLength.set(c, { t, n })
+  return n
 }

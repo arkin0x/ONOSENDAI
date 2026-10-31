@@ -126,14 +126,16 @@ const SPIN_PX = 256
  */
 export function TvSpinHost(): JSX.Element | null {
   const item = useTv((s) => s.shot?.item)
-  const commenter = item?.kind === 'comment' ? item.pubkey : ''
+  // A CYBERSPACE STATS ranking's #1, turning beside the board (lib/tv/cyberspaceStats); no avatar, no shard, and the painter draws the red cube.
+  const leader = useTv((s) => (s.stats?.board.kind === 'ranking' ? s.stats.board.rows[0]?.pubkey ?? '' : ''))
+  const commenter = item?.kind === 'comment' ? item.pubkey : leader
   const avatar = useAvatarShard(commenter)
   const shard = useMemo(() => {
     if (item?.kind === 'object') return objectsOf([item.event])[0]?.shard ?? null
     if (item?.kind === 'avatar') return avatarFromEvent(item.event)
-    if (item?.kind === 'comment') return avatar
+    if (item?.kind === 'comment' || leader) return avatar
     return null
-  }, [item, avatar])
+  }, [item, avatar, leader])
   const host = useRef<HTMLDivElement>(null)
   const canvas = useRef<HTMLCanvasElement | null>(null)
   useEffect(() => {

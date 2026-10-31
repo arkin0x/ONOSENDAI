@@ -56,8 +56,8 @@ import { rememberOpened, resetOpenedChests } from '../useOpenedChests'
 const S = () => useShards.getState()
 
 /** OPEN was tapped on this chest earlier, on this device, by this identity. */
-function openedEarlier(chestId: string): void {
-  rememberOpened(useCyberspace.getState().identity.pubkey, chestId, [])
+function openedEarlier(chestId: string, lock: string): void {
+  rememberOpened(useCyberspace.getState().identity.pubkey, chestId, lock, [])
 }
 
 /** A model on the bench, deployable. */
@@ -102,7 +102,7 @@ async function hiderWithOpenedChest(): Promise<{ chestLookup: string; chestKey: 
   // Nothing opens by itself (arkinox, 2026-10-26): the hider opened this
   // chest by hand earlier on this device, so their scan opens it again in
   // place with the held key (store/useOpenedChests).
-  openedEarlier(chest.eventId)
+  openedEarlier(chest.eventId, chest.chest!.lockPubkey)
   S().addDiscovered(await entriesOf(lastBag(chest.lookupId), chest.keyHex))
   const revealed = Object.values(S().discovered).filter((h) => h.chestId === chest.eventId)
   expect(revealed.map((h) => h.type).sort()).toEqual(['message', 'shard'])

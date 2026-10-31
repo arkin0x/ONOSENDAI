@@ -19,7 +19,7 @@
 import type { ShardModel } from 'sno-core/shards'
 
 /** Bump when the pictures are drawn differently, so none drawn before is shown again. */
-export const LOOK = 1
+export const LOOK = 2
 
 /**
  * A 53 bit hash of a string (cyrb53, public domain), as 14 hex digits. Not

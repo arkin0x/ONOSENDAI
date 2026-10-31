@@ -108,7 +108,7 @@ function chainOf(hops: number): NostrEvent[] {
       prevCoordHex: n === 1 ? pk : positionHex(step(BigInt(n - 1)), home.plane),
       to: step(BigInt(n)),
       plane: home.plane,
-      proofHash: '0'.repeat(64),
+      proofHash: '0'.repeat(64), mn: '0'.repeat(16), mp: '00',
     })))
   }
   return out

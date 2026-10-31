@@ -1,10 +1,11 @@
 /**
  * verify.worker.ts - checks a cloud proof off the main thread.
  *
- * Verification is cheap next to the proof itself, but "cheap" includes
- * recomputing any axis within the local ceiling (seconds of BigInt work at
- * h17) and a temporal root of up to 65,536 pairings. The main thread would
- * freeze through the VERIFYING state it is trying to show, so it runs here.
+ * Verification is cheap next to the proof itself, but not free: a cloud hop's
+ * Level 1 recomputes 16 residues of each root, seconds at h28 and more on a
+ * phone (cloudVerify.ts CLOUD_VERIFY_MAX_HEIGHT), and a sidestep rebuilds a
+ * temporal root of up to 65,536 pairings. The main thread would freeze
+ * through the VERIFYING state it is trying to show, so it runs here.
  * One message in, one message out; the caller terminates the worker.
  *
  * A HOSAKA ride is checked here too (arkinox, 2026-10-11): Level 1
@@ -23,7 +24,6 @@ export interface MoveVerifyRequest {
   action: HosakaAction
   result: unknown
   move: CloudMove
-  localCeiling: number
 }
 
 /** A ride proof's Level 1 check, with the hashes of the blocks it samples. */
@@ -57,7 +57,7 @@ self.onmessage = async (event: MessageEvent<VerifyRequest>) => {
       })
       response = { id: req.id, ride }
     } else {
-      response = { id: req.id, failed: verifyCloud(req.action, req.result, req.move, req.localCeiling) }
+      response = { id: req.id, failed: verifyCloud(req.action, req.result, req.move) }
     }
   } catch (err) {
     response = { id: req.id, error: err instanceof Error ? err.message : String(err) }

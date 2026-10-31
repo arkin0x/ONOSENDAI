@@ -77,7 +77,7 @@ import { noCallout, useRepeatable } from '../hooks/useRepeatable'
 import { MAX_UNIT } from 'sno-core/shards'
 import { formatCellSize, formatDistance } from 'sno-core/scale'
 import { fadeStep, inscribedRadius, sourceLocal } from '../lib/audioItem'
-import { LINK_PROTECTED, SCAN_MAX_HEIGHT, fillingChest, movingId, placingChest, sealingDoor, lookModelOf, lookTagsFor, type LookChoice, aimedOf, atLastSpot, copyLinedUp, isProtected, ownBagIn, pendingEmpty, pendingName, positionOf, regionOf, useShards } from '../store/useShards'
+import { LINK_PROTECTED, SCAN_MAX_HEIGHT, effectiveDoorHeight, fillingChest, movingId, placingChest, sealingDoor, lookModelOf, lookTagsFor, type LookChoice, aimedOf, atLastSpot, copyLinedUp, isProtected, ownBagIn, pendingEmpty, pendingName, positionOf, regionOf, useShards } from '../store/useShards'
 import { aimedPoint } from '../lib/chests'
 import { snapOffered } from '../lib/pose'
 import { MAX_RIDDLE_LENGTH } from '../lib/hidden'
@@ -282,9 +282,11 @@ export function DeployBar({ pad = false }: { pad?: boolean }): JSX.Element | nul
   // chip goes away with the height, and nothing locks the height.
   const me = useCyberspace((s) => s.identity.pubkey)
   const leaveOut = useShards((s) => s.deployLeaveOut)
+  const chosenRoom = useShards((s) => s.deployDoorHeight)
+  const doorHeight = effectiveDoorHeight(chosenRoom, height)
   const sealing = useMemo(
-    () => (pending ? sealingDoor({ mine, pending, deployLeaveOut: leaveOut }, me, deployPoint(cursor, step, height), plane, height) : null),
-    [pending, mine, leaveOut, me, cursor, step, height, plane],
+    () => (pending ? sealingDoor({ mine, pending, deployLeaveOut: leaveOut, deployDoorHeight: chosenRoom }, me, deployPoint(cursor, step, height), plane, height) : null),
+    [pending, mine, leaveOut, chosenRoom, me, cursor, step, height, plane],
   )
   // A chest with shards aimed inside: where each stands, with its reach, in
   // the plane the chest is being placed in. One aimed in the other plane can
@@ -456,6 +458,17 @@ export function DeployBar({ pad = false }: { pad?: boolean }): JSX.Element | nul
               a few words in the note (arkinox, 2026-10-10). */}
         </DeployRow>
       )}
+      {/* A door's own room (R6, §3.7.1): its height, at most the height it is
+          hidden at. Lower, inside a room of yours at that room's height, it is
+          a door behind that door. */}
+      {door && !moving && (
+        <DeployRow kind="roomheight" label="ROOM HEIGHT" hint={`locks ${formatCellSize(doorHeight)}`}>
+          <button className="deploybar__btn" {...bind(() => { const s = useShards.getState(); s.setDeployDoorHeight(Math.max(1, effectiveDoorHeight(s.deployDoorHeight, s.deployHeight) - 1)) })} disabled={doorHeight <= 1} aria-label="Lower room height">−</button>
+          <span className="deploybar__value">{doorHeight}</span>
+          <button className="deploybar__btn" {...bind(() => { const s = useShards.getState(); const next = effectiveDoorHeight(s.deployDoorHeight, s.deployHeight) + 1; s.setDeployDoorHeight(next >= s.deployHeight ? null : next) })} disabled={doorHeight >= height} aria-label="Higher room height">+</button>
+        </DeployRow>
+      )}
+
       {!intoChest && fit.auto && fit.height === null && (
         <div className="deploybar__row deploybar__fitnote">{fit.cause === 'edge'
           ? 'Sits across a region edge; move it to fit.'

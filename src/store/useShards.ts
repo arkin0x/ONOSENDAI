@@ -533,10 +533,47 @@ export function ownDoors(mine: readonly MyDeployment[], me: string): OwnDoor[] {
     : []))
 }
 
+/** A door's own height: what the ROOM HEIGHT row chose, never above the height it is hidden at; the hidden height until then. */
+export function effectiveDoorHeight(chosen: number | null, hideHeight: number): number {
+  return chosen === null ? hideHeight : Math.min(chosen, hideHeight)
+}
+
+/**
+ * How deep a door is (R6, §3.7.6): 1 at the top level, one more for each room
+ * it stands in. What its red cube's line count says.
+ */
+export function doorDepth(mine: readonly MyDeployment[], door: Pick<MyDeployment, 'eventId' | 'room'>): number {
+  let depth = 1
+  const seen = new Set([door.eventId])
+  let at = door.room?.doorId
+  while (at && !seen.has(at)) {
+    seen.add(at)
+    depth++
+    at = mine.find((m) => m.eventId === at)?.room?.doorId
+  }
+  return depth
+}
+
 /** What stands behind a door of yours: the rows of its room, whichever of its doors they name. */
 export function behindDoor(mine: readonly MyDeployment[], door: MyDeployment): MyDeployment[] {
   const ids = new Set([door.eventId, ...doorsBeside(mine, door).map((d) => d.eventId)])
   return mine.filter((m) => !!m.room && ids.has(m.room.doorId))
+}
+
+/** Everything behind a door, what stands behind the doors behind it included: what DELETE's count says (R12). */
+export function behindDoorDeep(mine: readonly MyDeployment[], door: MyDeployment): MyDeployment[] {
+  const out: MyDeployment[] = []
+  const seen = new Set<string>([door.eventId])
+  const walk = (d: MyDeployment): void => {
+    for (const r of behindDoor(mine, d)) {
+      if (seen.has(r.eventId)) continue
+      seen.add(r.eventId)
+      out.push(r)
+      if (r.chest?.door !== undefined) walk(r)
+    }
+  }
+  walk(door)
+  return out
 }
 
 /** The other doors of your room (§3.7.5): the same signer, height and region. */
@@ -561,10 +598,18 @@ export function hereInRoom(mine: readonly MyDeployment[], door: MyDeployment): M
  * not left out with the X. A door at the same height in the same room joins
  * the room rather than entering it (R5). An aim into a chest hides nothing.
  */
-export function sealingDoor(s: Pick<ShardsState, 'mine' | 'pending' | 'deployLeaveOut'>, me: string, at: Position, plane: number, height: number): OwnDoor | null {
+export function sealingDoor(s: Pick<ShardsState, 'mine' | 'pending' | 'deployLeaveOut' | 'deployDoorHeight'>, me: string, at: Position, plane: number, height: number): OwnDoor | null {
   const p = s.pending
   if (!p || (p.type === 'shard' && p.intoChest)) return null
-  if (p.type === 'chest' && (p.door || (p.move && s.mine.find((d) => d.eventId === p.move?.eventId)?.chest?.door !== undefined))) return null
+  if (p.type === 'chest' && p.move) {
+    // A door moves only inside its own room (R7), so it stays in the bag that
+    // holds it: the outer room when it is nested, an ordinary bag when not.
+    const moved = s.mine.find((d) => d.eventId === p.move?.eventId)
+    if (moved?.chest?.door !== undefined) return moved.room ? ownDoors(s.mine, me).find((d) => d.eventId === moved.room?.doorId) ?? null : null
+  }
+  // A door of the room's own height joins that room (R5); a lower one goes
+  // into it like anything else (R6, §3.7.6), its own room a smaller cube inside.
+  if (p.type === 'chest' && p.door && !p.move && effectiveDoorHeight(s.deployDoorHeight, height) === height) return null
   const d = roomDoorAt(ownDoors(s.mine, me), at, plane, height)
   if (!d || s.deployLeaveOut === roomOf(d.at, d.plane, d.height)) return null
   return d
@@ -942,6 +987,9 @@ interface ShardsState {
   /** The room the door-name chip's X left this one placement out of (R2), as lib/doors roomOf says it. */
   deployLeaveOut: string | null
   setDeployLeaveOut: (room: string | null) => void
+  /** A door being placed: the height of its own room, when the ROOM HEIGHT row set it; else the height it is hidden at. */
+  deployDoorHeight: number | null
+  setDeployDoorHeight: (h: number | null) => void
   /** ADD on a door: the height the next placement starts at, the door's (4.8). */
   deployInto: number | null
   /** SEAL A DOOR (4.2): a door on the hide bar to place first. */
@@ -1669,6 +1717,8 @@ export const useShards = create<ShardsState>((set, get) => {
     deployLeaveOut: null,
     setDeployLeaveOut: (room) => set({ deployLeaveOut: room }),
     deployInto: null,
+    deployDoorHeight: null,
+    setDeployDoorHeight: (h) => set({ deployDoorHeight: h }),
     mine: loadMine(),
     discovered: {},
     curated: null,
@@ -1773,7 +1823,7 @@ export const useShards = create<ShardsState>((set, get) => {
     },
     startPlaceDoor: () => {
       if (get().deployStatus === 'working') return
-      set({ pending: { type: 'chest', door: true, name: '', lock: null, requires: '', contents: [], look: DEFAULT_DOOR_LOOK }, ...freshDeploy, ...lookStart(DEFAULT_DOOR_LOOK), deployHeightAuto: true, deployNote: null, deployAsk: null })
+      set({ pending: { type: 'chest', door: true, name: '', lock: null, requires: '', contents: [], look: DEFAULT_DOOR_LOOK }, ...freshDeploy, ...lookStart(DEFAULT_DOOR_LOOK), deployHeightAuto: true, deployDoorHeight: null, deployNote: null, deployAsk: null })
     },
     placeChest: () => {
       const p = get().pending
@@ -1935,7 +1985,15 @@ export const useShards = create<ShardsState>((set, get) => {
         const rows = await syncRoomRows(d, secret, live)
         const place = await doorLocation(d)
         const key = roomKey(place.key, hexToBytes(secret))
-        if (contents) for (const r of rows) await get().deleteInstance(r.eventId)
+        // A door behind this one goes the same way, room and all (§3.7.8: never a room bag no door names).
+        if (contents) {
+          for (const r of rows) {
+            if (r.chest?.door !== undefined) {
+              const why = await get().deleteDoor(r.eventId, true)
+              if (why) return why
+            } else await get().deleteInstance(r.eventId)
+          }
+        }
         else await moveEntries(rows, { key: place.key, lookupId: place.lookupId, height: place.height })
         // Never a room bag no door names (§3.7.8).
         if (live || rows.some((r) => r.published)) await retractBag(roomLookupId(key), null)
@@ -2134,7 +2192,8 @@ export const useShards = create<ShardsState>((set, get) => {
         return
       }
       // A door locks a region: a height of at least 1 (§3.7.1).
-      if (pending.type === 'chest' && pending.door && deployHeight < 1) {
+      const doorHeight = effectiveDoorHeight(get().deployDoorHeight, deployHeight)
+      if (pending.type === 'chest' && pending.door && !pending.move && doorHeight < 1) {
         set({ deployStatus: 'error', deployError: 'A door locks a region: hide it at height 1 or more.' })
         return
       }
@@ -2288,12 +2347,12 @@ export const useShards = create<ShardsState>((set, get) => {
             // (R5). One this device has no secret for cannot be joined here:
             // two secrets would be two rooms at one height, which the spec
             // forbids, so it is opened first.
-            const room = roomOf(at, plane, deployHeight)
+            const room = roomOf(at, plane, doorHeight)
             const standing = ownDoors(get().mine, cs.identity.pubkey).filter((d) => roomOf(d.at, d.plane, d.height) === room)
             if (standing.length > 0 && !standing.some((d) => d.secret)) throw new Error('A door of yours already stands in this room. Open it first, and this one joins it.')
             doorSecretHex = standing.find((d) => d.secret)?.secret ?? newDoorSecret()
             const sealed = sealEntries(roomEntries(doorSecretHex) as BagEntry[], pending.lock!.pubkey)
-            chest = { name: pending.name.trim(), lockPubkey: pending.lock!.pubkey, senderPubkey: sealed.senderPubkey, requires: pending.requires.trim(), payload: sealed.payload, look, door: deployHeight }
+            chest = { name: pending.name.trim(), lockPubkey: pending.lock!.pubkey, senderPubkey: sealed.senderPubkey, requires: pending.requires.trim(), payload: sealed.payload, look, door: doorHeight }
           } else {
             const sealed = await sealChest(pending, at, plane, createdAt)
             chest = { ...sealed.chest, look }

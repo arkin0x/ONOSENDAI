@@ -38,6 +38,7 @@ import { useCyberspace } from '../store/useCyberspace'
 import { editable, muteSubject, useShards, type WorldItem } from '../store/useShards'
 import { editPlaced } from '../store/useBuilder'
 import { useWorkshop } from '../store/useWorkshop'
+import { keepOwnTable } from '../lib/carried'
 import { useEscape } from '../hooks/useEscape'
 import { findCashuToken, textWithoutToken } from '../lib/cashu'
 import { hasNftLink, textWithoutNftLinks } from '../lib/nftLink'
@@ -139,7 +140,10 @@ export function SecretModal(): JSX.Element | null {
   const words = coin || nft ? textWithoutToken(textWithoutNftLinks(item.text)) : item.text ?? ''
   // A shard copies into your workshop as a model; a message copies its text.
   const copy = (): void => {
-    if (item.type === 'shard' && item.shard) useWorkshop.getState().importShard(item.shard)
+    // Decrypted from a bag, unless it is a public object the bag only names (a LIVE LINK).
+    const publicLink = item.event?.kind === 33331 && !item.event.tags.some((t) => t[0] === 'encrypted')
+    // Your own deployment is a model made here, with no author on it: its table is yours.
+    if (item.type === 'shard' && item.shard) useWorkshop.getState().importShard(item.mine ? keepOwnTable(item.shard, item.author) : item.shard, undefined, undefined, !publicLink)
     else if (words) void navigator.clipboard?.writeText(words)
     setCopied(true)
     window.setTimeout(() => setCopied(false), 1400)

@@ -59,6 +59,7 @@ import { refTags } from 'sno-core/parts'
 import { SNO_KIND, creditAuthor, creditOf, creditTags, objectAddress, readCredit, type Credit } from 'sno-core/feed'
 import type { EventTemplate } from './events'
 import { withAuthoredConstrain } from './walkConstrain'
+import { inTheClear } from './carried'
 
 const STORAGE = 'onosendai:published'
 
@@ -115,8 +116,9 @@ export function publicObjectTemplate(shard: ShardModel, createdAt: number): Even
       ...refTags(shard),
       ...(credit ? creditTags(credit, { notify: true }) : []),
     ],
-    // OPAQUE for a shard whose author never chose (DECK-0003 §1.12).
-    content: JSON.stringify(toPayload(withAuthoredConstrain(shard))),
+    // OPAQUE for a shard whose author never chose (DECK-0003 §1.12). A table
+    // from a bag stays out unless its user chose to keep it (§1.10).
+    content: JSON.stringify(toPayload(withAuthoredConstrain(inTheClear(shard)))),
   }
 }
 
@@ -248,7 +250,7 @@ export const STATE_HELP: Record<PublishState, string> = {
  * drifted, so the two can never disagree about what "the same object" means.
  */
 export function shardFingerprint(shard: ShardModel): string {
-  return fingerprint(JSON.stringify(toPayload(withAuthoredConstrain(shard))))
+  return fingerprint(JSON.stringify(toPayload(withAuthoredConstrain(inTheClear(shard)))))
 }
 
 /**

@@ -199,8 +199,8 @@ export function ChestBlock({ id, chest, author, verified, place, sealer: given, 
   const shown = entries ? shownOf(entries, muted) : null
   // A door locks a room where it stands (DECK-0004 §3.7): OPEN reads its
   // secret and opens the room. One found inside a chest never opens its room
-  // (§3.7.1: a chest's contents are taken, not placed).
-  const door = isDoor((found?.inner ?? ownInner)?.tags) && !inChest && !!place
+  // (§3.7.1: a chest's contents are taken, not placed), whichever list or card it is opened from.
+  const door = isDoor((found?.inner ?? ownInner)?.tags) && !inChest && !found?.chestId && !!place
   // Opened by hand before, under this lock: never OPEN again. What is inside
   // is read again once, as OPEN read it (readAgain); OPEN comes back only if
   // that fails, a signer refusing, and the refusal holds for the session

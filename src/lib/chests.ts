@@ -29,7 +29,8 @@ import { generateSecretKey, getEventHash, getPublicKey, verifyEvent } from 'nost
 import { bytesToHex, hexToBytes, type EventTemplate, type NostrEvent } from './events'
 import { coordToXyz, hexToCoord, type Plane } from 'cyberspace-core'
 import { fromPayload } from 'sno-core/shards'
-import { entryKey, isReference, readItem, sealedAsRumor, type BagEntry, type ChestItem, type Hidden, type ItemBody, type KeyItem } from './hidden'
+import { doorRefusal, inRoom } from './doors'
+import { CHEST_KIND, entryKey, innerAuthentic, isReference, readItem, sealedAsRumor, type BagEntry, type ChestItem, type Hidden, type ItemBody, type KeyItem } from './hidden'
 import { reachGibsons, type FitPoint } from './deployFit'
 import type { Position } from './space'
 
@@ -101,10 +102,35 @@ export function parseChestPlaintext(plaintext: string): BagEntry[] {
   return parsed.filter((e): e is BagEntry => isReference(e) || (!!e && typeof e === 'object' && !Array.isArray(e) && typeof (e as NostrEvent).kind === 'number'))
 }
 
+/**
+ * What a chest holds, split by whether it could stand in a room of `height`
+ * holding `at` (CONVERT TO DOOR: it must never lose anything). `list` is the
+ * plaintext's elements exactly as they are, unfiltered, so nothing is missed
+ * by not being counted. A thing can move when a reader would keep it in the
+ * room bag: this client reads it, its `C` lies in the room and its plane
+ * (§3.7.2), it is authentic under the door's signer (spec §7.6, the bag's
+ * rule, which is stricter than a chest's), and if it is a door, it is lower
+ * than the room (§3.7.1).
+ */
+export function movableIntoRoom(list: readonly unknown[], signer: string, at: Position, plane: Plane, height: number): { movable: ChestEntry[]; blocked: number } {
+  const movable = readContents(list as BagEntry[], signer).filter((e) => {
+    const p = placeOf(e.event)
+    if (!p || p.plane !== plane || !inRoom(at, height, p.at)) return false
+    const { sig, ...unsigned } = e.event
+    if (!innerAuthentic(sig ? e.event : unsigned, signer)) return false
+    return e.event.kind !== CHEST_KIND || doorRefusal(e.event.tags, height, height) === null
+  })
+  return { movable, blocked: list.length - movable.length }
+}
+
+/** Open a chest with an item's secret, its plaintext as it is: the holder's half of the conversation key. Throws on the wrong key. */
+export function plaintextWithSecret(chest: Pick<ChestItem, 'senderPubkey' | 'payload'>, secretHex: string): string {
+  return nip44.decrypt(chest.payload, nip44.utils.getConversationKey(hexToBytes(secretHex), chest.senderPubkey))
+}
+
 /** Open a chest with an item's secret: the holder's half of the conversation key. Throws on the wrong key. */
 export function openWithSecret(chest: Pick<ChestItem, 'senderPubkey' | 'payload'>, secretHex: string): BagEntry[] {
-  const key = nip44.utils.getConversationKey(hexToBytes(secretHex), chest.senderPubkey)
-  return parseChestPlaintext(nip44.decrypt(chest.payload, key))
+  return parseChestPlaintext(plaintextWithSecret(chest, secretHex))
 }
 
 /** What a person's identity offers: NIP-44 decrypt of a payload from a sender, as NIP-07 and NIP-46 both phrase it. */

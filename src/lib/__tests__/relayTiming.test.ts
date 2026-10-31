@@ -95,6 +95,15 @@ describe('an AUTH waiting on the signer (verification of #236, finding 4)', () =
 })
 
 describe('an AUTH the relay never answers (review of #556)', () => {
+  it('two callers sharing one AUTH that times out are one timeout: the relay is not left alone', async () => {
+    fake.relays.clear(); fake.challenge = 'c4'; fake.authTimesOutMs = 1_100
+    const url = 'ws://relay.four/'
+    await Promise.all([authForRead(url), authForRead(url)])
+    const result = await publishMany([url], { id: 'e'.repeat(64) } as never)
+    expect(!result.ok && /left alone/.test(result.reason)).toBe(false)
+    fake.authTimesOutMs = 0
+  })
+
   it('counts once per real wait, however often its rejection comes back, and one is not enough to leave the relay alone', async () => {
     fake.relays.clear(); fake.challenge = 'c3'; fake.authTimesOutMs = 1_100
     const url = 'ws://relay.three/'

@@ -95,7 +95,8 @@ vi.mock('../../store/useCyberspace', () => ({
 
 import { finalizeEvent, generateSecretKey, getPublicKey } from 'nostr-tools/pure'
 import { useRelays } from '../../store/useRelays'
-import { confirmChainEvents, fetchChainEvents, HEAD_CONFIRM_MS } from '../chains'
+import { decideSelfCheck } from '../chainHold'
+import { askChainEvents, confirmChainEvents, fetchChainEvents, HEAD_CONFIRM_MS } from '../chains'
 import { noteChainHolders } from '../chainHolders'
 import { hopTemplate, spawnTemplate, type NostrEvent } from '../events'
 import { connectRelay, CYBERSPACE_RELAY, dropRelays, publishMany, queryAny, queryEachAt, subscribeOne, watchConnectivity } from '../relay'
@@ -181,6 +182,17 @@ describe('head confirmation and a relay that hung', () => {
     await hangPublishes(mine)
     const got = await within(AT_ONCE, fetchChainEvents(c.pubkey, c.spawn.id, [c.spawn, c.hop1]))
     expect(got.value?.map((e) => e.id)).toContain(c.hop2.id)
+  })
+
+  it('the self-check asks a relay that hung, too: it holds the chain, so the first move adopts it and never spawns', async () => {
+    const mine = 'wss://mine.selfcheck.example/'
+    const c = aChain()
+    useRelays.getState().add(mine)
+    net.rules.hold.set(mine, [c.spawn, c.hop1])
+    await hangPublishes(mine)
+    const answers = await within(1000, askChainEvents(c.pubkey))
+    expect(answers.settled).toBe(true)
+    expect(decideSelfCheck(answers.value ?? [], CANON, true).status).toBe('found')
   })
 
   it('a holder that stays hung costs a move at most the 2.5 s of the owner\'s ruling, every move', async () => {
@@ -304,6 +316,15 @@ describe('a slow relay is not a hung one', () => {
     const next = await within(AT_ONCE, publishMany([CANON, slow], anEvent()))
     expect(sent(slow)).toBe(before + 1)
     expect(next.value).toEqual({ ok: true, accepted: [CANON, slow] })
+  })
+
+  it('two callers sharing one connect that times out are one timeout: the relay is not left alone', async () => {
+    const slow = 'wss://slow.shared.example/'
+    net.rules.neverOpen.add(slow)
+    await within(CONNECT, Promise.all([connectRelay(slow), connectRelay(slow)]))
+    net.rules.neverOpen.delete(slow)
+    await within(1000, publishMany([CANON, slow], anEvent()))
+    expect(sent(slow)).toBe(1)
   })
 
   it('an OK between two missed ones starts the count again', async () => {

@@ -47,15 +47,21 @@ const HUNG_REASON = 'relay hung, left alone for now'
 const hungUntil = new Map<string, number>()
 /** Full timeouts in a row, per relay. */
 const timeoutsInARow = new Map<string, number>()
+/** When each relay's last full timeout was counted. */
+const lastTimeoutAt = new Map<string, number>()
 
 /** A full wait ran out. One says little, since a slow relay misses an OK now and then; two in a row is a relay that hung. */
 function noteTimeout(url: string): void {
   const norm = normalizeURL(url)
   // Never the canonical relay: it is where everyone meets, so it is always asked.
   if (norm === normalizeURL(CYBERSPACE_RELAY)) return
+  // Callers sharing one connect or one AUTH all hear the same rejection: that is one wait.
+  const now = Date.now()
+  if (now - (lastTimeoutAt.get(norm) ?? -Infinity) < 1000) return
+  lastTimeoutAt.set(norm, now)
   const count = (timeoutsInARow.get(norm) ?? 0) + 1
   timeoutsInARow.set(norm, count)
-  if (count >= HUNG_AFTER) hungUntil.set(norm, Date.now() + HUNG_MS)
+  if (count >= HUNG_AFTER) hungUntil.set(norm, now + HUNG_MS)
 }
 
 /** The relay answered: it is not hung, whatever it did before. */
@@ -69,6 +75,7 @@ function noteAnswered(url: string): void {
 function forgetHung(): void {
   hungUntil.clear()
   timeoutsInARow.clear()
+  lastTimeoutAt.clear()
 }
 
 function isHung(url: string): boolean {

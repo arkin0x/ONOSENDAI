@@ -889,7 +889,24 @@ interface ShardsState {
   secretByEvent: (eventId: string) => WorldItem | null
 }
 
+/**
+ * Each identity's deployments live under `onosendai:deployments:<pubkey>`, so
+ * another identity on a shared device never sees them as YOURS. The bare key
+ * is the list from before that, unscoped: it is moved out, never read as a list
+ * again (migrateMine).
+ */
 const MINE_KEY = 'onosendai:deployments'
+const mineKey = (owner: string): string => `${MINE_KEY}:${owner}`
+/**
+ * Rows from the bare list whose records do not prove who placed them: a
+ * reference names another identity's object as easily as its own. Shown to
+ * nobody, deleted by nothing, and moved to their owner when that owner's bag on
+ * the relays names them (claimUnclaimed).
+ */
+const UNCLAIMED_KEY = 'onosendai:deployments-unclaimed'
+const MOVING_KEY = 'onosendai:deployments-moving'
+/** The store's list until followIdentity has read the identity's own. */
+const NOT_READ_YET: MyDeployment[] = []
 /**
  * Event ids this device has ever opened, newest last. `discovered` is memory
  * only and starts empty on every load, so without this the first scan after a
@@ -934,17 +951,248 @@ const DELETED_KEY = 'onosendai:deployments-deleted'
 /** Bags this identity has taken down, by `author:lookupId`, which is a loot row's own key. */
 const DELETED_BAGS_KEY = 'onosendai:bags-deleted'
 
-function loadMine(): MyDeployment[] {
+/** A stored list as it stands. Anything that is not a list reads as nothing, and is left where it is. */
+function readRows(key: string): MyDeployment[] {
   try {
-    const raw = localStorage.getItem(MINE_KEY)
-    if (!raw) return []
-    const list = JSON.parse(raw)
-    return Array.isArray(list) ? list.filter((d) => d && d.eventId && d.inner && (d.shard || d.text || d.key || d.chest)).map((d) => (d.shard ? { ...d, shard: normalizeStored(d.shard) } : d)) : []
+    const list = JSON.parse(localStorage.getItem(key) ?? '[]')
+    return Array.isArray(list) ? list : []
   } catch { return [] }
 }
 
-function saveMine(mine: MyDeployment[]): void {
-  try { localStorage.setItem(MINE_KEY, JSON.stringify(mine)) } catch { /* quota or private mode */ }
+/**
+ * A sealed object counts as placed by its signer. That is a ruling, not a proof:
+ * the spec lets a bag place another author's sealed object (hidden.ts
+ * fromReference), though this app only writes a sealed reference for its signer's
+ * own hide. A LIVE LINK names any author's public object, so it proves nothing.
+ */
+function isSealedRef(d: MyDeployment): boolean {
+  return d.inner?.kind === OBJECT_KIND && !!d.inner.tags?.some((t) => t[0] === 'encrypted') && d.eventId === d.inner.id
+}
+
+/** Who placed a row, as far as its record says: a whole inner event, or a sealed object (isSealedRef). */
+function provenOwner(d: MyDeployment | null | undefined): string | null {
+  const pubkey = d?.eventId && (!d.ref || isSealedRef(d)) ? d.inner?.pubkey : null
+  return pubkey && /^[0-9a-f]{64}$/.test(pubkey) ? pubkey : null
+}
+
+/** What a list shows. A row without this cannot be drawn, and a save would drop it. */
+function isListed(d: MyDeployment | null | undefined): d is MyDeployment {
+  return !!d && !!d.eventId && !!d.inner && !!(d.shard || d.text || d.key || d.chest || d.audio)
+}
+
+/**
+ * A row whose shard cannot be drawn. It stays on disk and is never listed:
+ * drawing one throws during render, and that can blank the page.
+ */
+function unreadable(d: MyDeployment): boolean {
+  if (!d?.shard) return false
+  try {
+    const s = normalizeStored(d.shard)
+    return !Array.isArray(s.vertices) || !Array.isArray(s.faces)
+  } catch { return true }
+}
+
+/** A stored row as the app reads it. Only for a row that is not unreadable. */
+function normalizedRow(d: MyDeployment): MyDeployment {
+  return d.shard ? { ...d, shard: normalizeStored(d.shard) } : d
+}
+
+/** A row's identity in a list, for a row with no event id too. */
+const rowKey = (d: MyDeployment | null | undefined): string => d?.eventId ?? JSON.stringify(d)
+
+/** Add rows to a stored list, once each. Throws when storage refuses. */
+function withRows(key: string, rows: MyDeployment[]): void {
+  const stored = readRows(key)
+  const have = new Set(stored.map(rowKey))
+  const added = rows.filter((d) => { const k = rowKey(d); if (have.has(k)) return false; have.add(k); return true })
+  if (added.length > 0) localStorage.setItem(key, JSON.stringify([...stored, ...added]))
+}
+
+/** Where a bare row goes. A row deleted here, which only a tab still running the old code could write back, does not come back to life. */
+function bareRowKey(d: MyDeployment, deleted: Record<string, true>): string {
+  const owner = isListed(d) && !deleted[d.eventId] ? provenOwner(d) : null
+  return owner ? mineKey(owner) : UNCLAIMED_KEY
+}
+
+/**
+ * A row between two keys, for the one step where it is on neither. localStorage
+ * survives a closed tab, but rarely has room here, since that lack of room is why
+ * this step runs. So sessionStorage, which has its own room, is the fallback.
+ * IndexedDB would survive better, but it cannot confirm a write before the
+ * synchronous step that depends on it.
+ */
+function journalRow(d: MyDeployment): boolean {
+  const text = JSON.stringify(d)
+  try { localStorage.setItem(MOVING_KEY, text); return true } catch { /* no room: the usual case */ }
+  try { sessionStorage.setItem(MOVING_KEY, text); return true } catch { return false }
+}
+
+function clearJournal(): void {
+  try { localStorage.removeItem(MOVING_KEY) } catch { /* nothing to clear */ }
+  try { sessionStorage.removeItem(MOVING_KEY) } catch { /* nothing to clear */ }
+}
+
+/** A row left in the journal goes back on the bare list, and the move below takes it from there. It stays in the journal until that write lands. */
+function restoreJournal(): void {
+  for (const read of [() => localStorage.getItem(MOVING_KEY), () => sessionStorage.getItem(MOVING_KEY)]) {
+    try {
+      const text = read()
+      if (text === null) continue
+      withRows(MINE_KEY, [JSON.parse(text) as MyDeployment])
+      clearJournal()
+      return
+    } catch { /* no room yet, or no such store: the next load tries again */ }
+  }
+}
+
+/**
+ * The move when storage has no room for a second copy of the list: a row at a
+ * time, each written before the bare list gives it up. A row too big for even
+ * that gives up its bare copy first, inside this one synchronous step, journalled
+ * so it is never on no key, and taken back if the write still fails.
+ */
+function moveRowByRow(list: MyDeployment[], deleted: Record<string, true>): void {
+  let left = list
+  try {
+    while (left.length > 0) {
+      const [d, ...rest] = left
+      const giveUp = (): void => {
+        if (rest.length > 0) localStorage.setItem(MINE_KEY, JSON.stringify(rest))
+        else localStorage.removeItem(MINE_KEY)
+      }
+      const key = bareRowKey(d, deleted)
+      try {
+        withRows(key, [d])
+      } catch {
+        // No journal, no give-up: the row stays on the bare list.
+        if (!journalRow(d)) return
+        giveUp()
+        try {
+          withRows(key, [d])
+        } catch {
+          localStorage.setItem(MINE_KEY, JSON.stringify(left))
+          clearJournal()
+          return
+        }
+        clearJournal()
+      }
+      giveUp()
+      left = rest
+    }
+  } catch { /* the bare list stays as far as it got, and the journal holds any row in between, for the next load */ }
+}
+
+/**
+ * Move the bare list out to its owners, once. Rows are written first and the
+ * bare key removed last, so a failure part way loses nothing and the next load
+ * carries on. A row already under its owner's key stays as it is.
+ */
+function migrateMine(): void {
+  restoreJournal()
+  let list: unknown
+  try {
+    const raw = localStorage.getItem(MINE_KEY)
+    if (raw === null) return
+    list = JSON.parse(raw)
+  } catch { return }
+  if (!Array.isArray(list)) return
+  const deleted = loadDeleted()
+  try {
+    const byKey = new Map<string, MyDeployment[]>()
+    for (const d of list as MyDeployment[]) {
+      const key = bareRowKey(d, deleted)
+      byKey.set(key, [...(byKey.get(key) ?? []), d])
+    }
+    for (const [key, rows] of byKey) withRows(key, rows)
+  } catch {
+    moveRowByRow(list as MyDeployment[], deleted)
+    return
+  }
+  try { localStorage.removeItem(MINE_KEY) } catch { /* the next load finishes it */ }
+}
+
+function loadMine(owner: string): MyDeployment[] {
+  migrateMine()
+  const rows = readRows(mineKey(owner))
+  const have = new Set(rows.map(rowKey))
+  // Only when the move above could not finish: this owner's rows still count.
+  const stuck = readRows(MINE_KEY).filter((d) => provenOwner(d) === owner && !have.has(rowKey(d)) && !loadDeleted()[d.eventId])
+  return [...rows, ...stuck].filter((d) => isListed(d) && !unreadable(d)).map(normalizedRow)
+}
+
+const BAG_NOT_READ = 'No relay answered, so this bag could not be read. Nothing was changed. Try again when one answers.'
+const SWITCHED = 'You switched identity while this was on its way, so it was not sent.'
+const NOT_SAVED = 'This device is out of storage, so this was not saved here. It may be gone after a reload.'
+
+/**
+ * Whether the list reached disk. When it did not, a toast says so: it shows
+ * whatever is open. Rows never listed stay with it. A row the move could not
+ * finish is still safe on the bare list, so when the whole list will not fit, it
+ * stays there rather than cost the rows around it their save.
+ */
+function saveMine(mine: MyDeployment[], owner = useCyberspace.getState().identity.pubkey): boolean {
+  const kept = readRows(mineKey(owner)).filter(unreadable)
+  try {
+    localStorage.setItem(mineKey(owner), JSON.stringify([...mine, ...kept]))
+    return true
+  } catch { /* try without what the bare list still holds */ }
+  const onBare = new Set(readRows(MINE_KEY).map(rowKey))
+  const rest = mine.filter((d) => !onBare.has(rowKey(d)))
+  try {
+    if (rest.length < mine.length) {
+      localStorage.setItem(mineKey(owner), JSON.stringify([...rest, ...kept]))
+      return true
+    }
+  } catch { /* said below */ }
+  useToast.getState().show({ label: 'NOT SAVED', meta: NOT_SAVED, mark: 'build' })
+  return false
+}
+
+/** One identity's rows: the store's while it is the one signed in, its own on disk once it is not. */
+function rowsOf(owner: string): MyDeployment[] {
+  return useCyberspace.getState().identity.pubkey === owner ? useShards.getState().mine : loadMine(owner)
+}
+
+/** Write one identity's rows where rowsOf reads them, so work a switch landed during never touches the next identity's list. */
+function commitRows(owner: string, rows: MyDeployment[]): boolean {
+  if (useCyberspace.getState().identity.pubkey === owner) useShards.setState({ mine: rows })
+  return saveMine(rows, owner)
+}
+
+/** The unclaimed rows that could be claimed: a reference with what opens its bag, not deleted here. */
+function claimableRows(): MyDeployment[] {
+  const deleted = loadDeleted()
+  return readRows(UNCLAIMED_KEY).filter((d) => d?.ref && d.inner && d.keyHex && d.lookupId && !deleted[d.eventId])
+}
+
+/**
+ * Move to this identity the unclaimed rows its own bags name. The bag's signature
+ * says who placed what it names, and only the row's own key opens it. A row no
+ * relay can vouch for yet stays unclaimed and is asked about on the next load.
+ * It asks for all of this identity's bags and looks here, so the relays never
+ * learn that another identity's lookup ids are on this device.
+ */
+async function claimUnclaimed(owner: string): Promise<void> {
+  const rows = claimableRows().filter((d) => !unreadable(d))
+  if (rows.length === 0) return
+  const bags = await query({ kinds: [HIDDEN_KIND], authors: [owner] })
+  const claimed: MyDeployment[] = []
+  for (const d of rows) {
+    for (const bag of bags) {
+      if (bag.pubkey !== owner || bag.tags.find((t) => t[0] === 'd')?.[1] !== d.lookupId) continue
+      const entries = await bagEntries(bag, hexToBytes(d.keyHex)).catch(() => [])
+      if (entries.some((e) => entryKey(e) === entryKey(entryOf(d)))) { claimed.push(d); break }
+    }
+  }
+  if (claimed.length === 0) return
+  const have = new Set(rowsOf(owner).map((d) => d.eventId))
+  const added = claimed.filter((d) => !have.has(d.eventId)).map(normalizedRow)
+  // Written to the owner first, and taken off the unclaimed only once that reached disk.
+  if (!commitRows(owner, [...rowsOf(owner), ...added])) return
+  const gone = new Set(claimed.map((d) => d.eventId))
+  try {
+    localStorage.setItem(UNCLAIMED_KEY, JSON.stringify(readRows(UNCLAIMED_KEY).filter((d) => !gone.has(d?.eventId))))
+  } catch { /* still listed there too: the next claim finds them already owned, and takes them off */ }
 }
 
 function loadDeleted(): Record<string, true> {
@@ -1126,7 +1374,9 @@ export const useShards = create<ShardsState>((set, get) => {
    * #407): otherwise a bag written the old way would keep it beside the new
    * chest, or carry it loose with no chest at all.
    */
-  async function publishBag(inners: BagEntry[], key: Uint8Array, lookupId: string, height: number, live: boolean, settings: BagSettings, place: { at: Position; plane: Plane }, beforeSend?: () => Promise<void>, before: BagEntry[] = []): Promise<{ event: NostrEvent; published: boolean }> {
+  async function publishBag(inners: BagEntry[], key: Uint8Array, lookupId: string, height: number, live: boolean, settings: BagSettings, place: { at: Position; plane: Plane }, beforeSend?: () => Promise<void>, before: BagEntry[] = [], owner = cyber().identity.pubkey): Promise<{ event: NostrEvent; published: boolean }> {
+    // This work began under another identity: it must not be signed by, or touch the list of, the one signed in now.
+    if (cyber().identity.pubkey !== owner) throw new Error(SWITCHED)
     const looked = [...inners, ...before]
     const inside = sealedInside(looked, openingKeys(useInventory.getState().items))
     const chests = new Set(looked.filter((e): e is NostrEvent => !isReference(e) && e.kind === CHEST_KIND).map((e) => e.id))
@@ -1160,16 +1410,24 @@ export const useShards = create<ShardsState>((set, get) => {
     const local = items.map(entryOf)
     const localSettings = items.length > 0 ? items.reduce((a, b) => (b.createdAt > a.createdAt ? b : a)).bag ?? DEFAULT_BAG_SETTINGS : null
     if (!live) return { entries: local, settings: localSettings }
+    let relay: BagEntry[] = []
+    let settings = localSettings
+    let heard = false
     try {
-      const events = await query({ kinds: [HIDDEN_KIND], authors: [cyber().identity.pubkey], '#d': [lookupId] })
+      const answers = await queryEach({ kinds: [HIDDEN_KIND], authors: [cyber().identity.pubkey], '#d': [lookupId] })
+      const events = answers.flatMap((a) => a.events)
+      heard = answers.some((a) => a.outcome === 'answered')
       const newest = events.sort((a, b) => b.created_at - a.created_at)[0]
-      const relay = newest ? await bagEntries(newest, key) : []
+      relay = newest ? await bagEntries(newest, key) : []
       // A relay copy that does not open with this key is not this bag.
-      const settings = newest && relay.length > 0 ? bagSettingsOf(newest, height) : localSettings
-      return { entries: mergeEntries(relay, local), settings }
-    } catch {
-      return { entries: local, settings: localSettings }
-    }
+      if (newest && relay.length > 0) settings = bagSettingsOf(newest, height)
+    } catch { relay = []; heard = false }
+    // No relay answered, and a published bag here may name a row this device
+    // cannot list yet. Writing from the list alone would drop that row from the
+    // bag for good, or delete the whole bag as empty. A relay that answers with
+    // nothing is an answer: there is no bag to lose.
+    if (relay.length === 0 && !heard && claimableRows().some((d) => d.lookupId === lookupId && d.published)) throw new Error(BAG_NOT_READ)
+    return { entries: mergeEntries(relay, local), settings }
   }
 
   /**
@@ -1313,7 +1571,8 @@ export const useShards = create<ShardsState>((set, get) => {
     deployNote: null,
     deployAsk: null,
     deployError: null,
-    mine: loadMine(),
+    // Filled in by followIdentity below, once useCyberspace has loaded.
+    mine: NOT_READ_YET,
     discovered: {},
     curated: null,
     deleted: loadDeleted(),
@@ -1780,7 +2039,7 @@ export const useShards = create<ShardsState>((set, get) => {
               objectSent = true
             }
             : undefined
-          ;({ event, published } = await publishBag(allInners, rk.key, rk.lookupId, deployHeight, live, settings, { at, plane }, sendObject, existing.entries))
+          ;({ event, published } = await publishBag(allInners, rk.key, rk.lookupId, deployHeight, live, settings, { at, plane }, sendObject, existing.entries, cs.identity.pubkey))
           // A move whose new bag no relay took has not happened: the old
           // copy stays, and is never taken down (review of #369).
           if (was && live && !published) throw new Error('No relay took the moved shard. It stays where it was.')
@@ -1838,15 +2097,15 @@ export const useShards = create<ShardsState>((set, get) => {
         if (key) useInventory.getState().holdForged(inner, key, place)
         for (const f of forgedInside) useInventory.getState().holdForged(f.event, f.key, place)
         // Every item now in this region's bag shares its new envelope, status and settings.
+        // Onto the list of the identity that hid it, even if another has signed in meanwhile.
         const mine = [
-          ...get().mine
+          ...rowsOf(cs.identity.pubkey)
             // Moved inside its bag: the old version left with the rewrite above.
             .filter((d) => !(was && was.lookupId === rk.lookupId && d.eventId === was.eventId))
             .map((d) => (d.lookupId === rk.lookupId ? { ...d, bagId: event.id, published, bag: settings } : d)),
           item,
         ]
-        set({ mine })
-        saveMine(mine)
+        commitRows(cs.identity.pubkey, mine)
         // Placed: first in your shard lists from now. Local, and never the
         // deploy's failure; not for an identity switched to meanwhile.
         if (cyber().identity.pubkey === cs.identity.pubkey) {
@@ -1932,6 +2191,7 @@ export const useShards = create<ShardsState>((set, get) => {
       set({ broadcasting: lookupId, broadcastError: null, broadcastFailed: null })
       try {
         const key = hexToBytes(items[0].keyHex)
+        const owner = cyber().identity.pubkey
         const existing = await gatherInners(lookupId, key, true, items[0].height)
         // Objects hidden by reference go out before the bag that names them,
         // and so do the authors' objects a LIVE LINK names: a finder looks
@@ -1964,7 +2224,7 @@ export const useShards = create<ShardsState>((set, get) => {
         const keep = existing.entries.filter((e) => !fresh.some((d) => d.ref && entryKey(e) === entryKey(d.ref)))
         const allInners = mergeEntries(keep, fresh.map(entryOf))
         const settings = existing.settings ?? DEFAULT_BAG_SETTINGS
-        const { event, published } = await publishBag(allInners, key, lookupId, items[0].height, true, settings, { at: positionOf(items[0]), plane: items[0].plane }, undefined, existing.entries)
+        const { event, published } = await publishBag(allInners, key, lookupId, items[0].height, true, settings, { at: positionOf(items[0]), plane: items[0].plane }, undefined, existing.entries, owner)
         if (!published) {
           set({ broadcasting: null, broadcastError: 'No relay took the bag. Try again when one is reachable.', broadcastFailed: lookupId })
           return false
@@ -2037,7 +2297,15 @@ export const useShards = create<ShardsState>((set, get) => {
       // list, and going by the list alone both dropped it from a rewrite and,
       // when it was the only other thing, deleted the whole envelope as if
       // the bag were empty.
-      const gathered = await gatherInners(item.lookupId, key, wasPublic, item.height)
+      // A move asks with opts, and takes the failure as its own to report. On its
+      // own, DELETE closed its card first, so a toast is what is left to say so.
+      const refused = (err: unknown): null => {
+        if (opts) throw err
+        useToast.getState().show({ label: 'NOT DELETED', meta: err instanceof Error ? err.message : String(err), mark: 'build' })
+        return null
+      }
+      const gathered = await gatherInners(item.lookupId, key, wasPublic, item.height).catch(refused)
+      if (!gathered) return
       const gone = entryKey(entryOf(item))
       const left = gathered.entries.filter((e) => entryKey(e) !== gone)
       const me = cs.identity.pubkey
@@ -2049,14 +2317,17 @@ export const useShards = create<ShardsState>((set, get) => {
         // Rewrite the region bag without this item; the newer bag replaces it,
         // with the bag's settings as they stand.
         const settings = gathered.settings ?? DEFAULT_BAG_SETTINGS
-        const { event, published } = await publishBag(left, key, item.lookupId, item.height, wasPublic, settings, { at: positionOf(item), plane: item.plane }, undefined, gathered.entries)
+        const sent = await publishBag(left, key, item.lookupId, item.height, wasPublic, settings, { at: positionOf(item), plane: item.plane }, undefined, gathered.entries, cs.identity.pubkey).catch(refused)
+        if (!sent) return
+        const { event, published } = sent
         unnamed = published
-        mine = get().mine
+        mine = rowsOf(me)
           .filter((d) => d.eventId !== eventId)
           .map((d) => (d.lookupId === item.lookupId ? { ...d, bagId: event.id, published, bag: settings } : d))
       } else {
         // The last thing in the region: delete the envelope itself (NIP-09).
         if (wasPublic) {
+          if (cyber().identity.pubkey !== me) { refused(new Error(SWITCHED)); return }
           const del = await cs.signEvent({
             kind: 5,
             created_at: Math.floor(Date.now() / 1000),
@@ -2068,7 +2339,7 @@ export const useShards = create<ShardsState>((set, get) => {
           })
           try { unnamed = (await publishMany(item.relays ?? relaySet(), del)).ok } catch { /* best effort */ }
         }
-        mine = get().mine.filter((d) => d.eventId !== eventId)
+        mine = rowsOf(me).filter((d) => d.eventId !== eventId)
       }
       // A shard hidden by reference is also its own event. Once no bag names
       // it, take that down too (NIP-09), if it is ours to take down: it is
@@ -2091,8 +2362,8 @@ export const useShards = create<ShardsState>((set, get) => {
       const deletedBags = left.length > 0
         ? get().deletedBags
         : { ...get().deletedBags, [`${me}:${item.lookupId}`]: true as const }
-      set({ mine, deleted, deletedBags, discovered })
-      saveMine(mine); saveDeleted(deleted)
+      set({ deleted, deletedBags, discovered })
+      commitRows(me, mine); saveDeleted(deleted)
       if (left.length === 0) saveDeletedBags(deletedBags)
     },
 
@@ -2129,13 +2400,18 @@ export const useShards = create<ShardsState>((set, get) => {
       // The bag as it really is (gatherInners, as deleteInstance explains),
       // with the new chest in the old one's place; a bag that somehow lacked
       // the chest gets it added rather than lost.
-      const gathered = await gatherInners(chest.lookupId, key, wasPublic, chest.height)
+      let gathered: Awaited<ReturnType<typeof gatherInners>>
+      try {
+        gathered = await gatherInners(chest.lookupId, key, wasPublic, chest.height)
+      } catch (err) {
+        return err instanceof Error ? err.message : String(err)
+      }
       const was = entryKey(entryOf(chest))
       const entries = gathered.entries.some((e) => entryKey(e) === was)
         ? gathered.entries.map((e) => (entryKey(e) === was ? inner : e))
         : [...gathered.entries, inner]
       const settings = gathered.settings ?? chest.bag ?? DEFAULT_BAG_SETTINGS
-      const { event, published } = await publishBag(entries, key, chest.lookupId, chest.height, wasPublic, settings, { at, plane: chest.plane }, undefined, gathered.entries)
+      const { event, published } = await publishBag(entries, key, chest.lookupId, chest.height, wasPublic, settings, { at, plane: chest.plane }, undefined, gathered.entries, cs.identity.pubkey)
       // The chest is a new inner event now: the deployment, its record among
       // the finds and everything revealed from it follow the new id, and the
       // whole region's items follow the new envelope.
@@ -2374,6 +2650,49 @@ useShards.subscribe((s, prev) => {
   const again = s.pending !== null && s.pending === s.placedLast?.pending
   if (s.pending !== prev.pending && !again && (cs.buildStep !== null || cs.buildSettle !== null)) cs.setBuildStep(null)
 })
+
+/**
+ * YOURS is the signed-in identity's list and nobody else's: read it now, and
+ * again on every switch. A card open on the old identity's row closes with it.
+ * useCyberspace reaches this file through lib/destinationKeys and useSecrets, so
+ * it may not have finished loading while this one runs; then this tries again
+ * as soon as the loading stops.
+ */
+function followIdentity(tries = 0): void {
+  let me = ''
+  try {
+    me = useCyberspace.getState().identity.pubkey
+    if (!me || !useCyberspace.subscribe) throw new Error('not loaded')
+  } catch {
+    // About ten seconds, for a slow load. A test that mocks useCyberspace away never has it.
+    if (tries < 200) setTimeout(() => followIdentity(tries + 1), tries === 0 ? 0 : 50)
+    return
+  }
+  const claim = (owner: string): void => {
+    void claimUnclaimed(owner).catch((err) => console.warn(`[shards] could not claim hidden items: ${err instanceof Error ? err.message : String(err)}`))
+  }
+  if (useShards.getState().mine === NOT_READ_YET) useShards.setState({ mine: loadMine(me) })
+  else migrateMine()
+  claim(me)
+  useCyberspace.subscribe((s, prev) => {
+    const owner = s.identity.pubkey
+    if (owner === prev.identity.pubkey) return
+    const { mine: left, selectedSecret } = useShards.getState()
+    const mine = loadMine(owner)
+    const closes = selectedSecret !== null && left.some((d) => d.eventId === selectedSecret) && !mine.some((d) => d.eventId === selectedSecret)
+    useShards.setState(closes ? { mine, selectedSecret: null } : { mine })
+    claim(owner)
+  })
+  // Another tab wrote this identity's list, a claim or a deploy: without this,
+  // this tab's next save would write its older copy over that one.
+  if (typeof window !== 'undefined' && typeof window.addEventListener === 'function') {
+    window.addEventListener('storage', (e: StorageEvent) => {
+      const owner = useCyberspace.getState().identity.pubkey
+      if (e.key === mineKey(owner)) useShards.setState({ mine: loadMine(owner) })
+    })
+  }
+}
+followIdentity()
 
 if (import.meta.env.DEV && typeof window !== 'undefined') {
   ;(window as unknown as { __shards?: unknown }).__shards = useShards

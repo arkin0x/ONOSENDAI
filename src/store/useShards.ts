@@ -1124,15 +1124,28 @@ const BAG_NOT_READ = 'No relay answered, so this bag could not be read. Nothing 
 const SWITCHED = 'You switched identity while this was on its way, so it was not sent.'
 const NOT_SAVED = 'This device is out of storage, so this was not saved here. It may be gone after a reload.'
 
-/** Whether the list reached disk. When it did not, a toast says so: it shows whatever is open. Rows never listed stay with it. */
+/**
+ * Whether the list reached disk. When it did not, a toast says so: it shows
+ * whatever is open. Rows never listed stay with it. A row the move could not
+ * finish is still safe on the bare list, so when the whole list will not fit, it
+ * stays there rather than cost the rows around it their save.
+ */
 function saveMine(mine: MyDeployment[], owner = useCyberspace.getState().identity.pubkey): boolean {
+  const kept = readRows(mineKey(owner)).filter(unreadable)
   try {
-    localStorage.setItem(mineKey(owner), JSON.stringify([...mine, ...readRows(mineKey(owner)).filter(unreadable)]))
+    localStorage.setItem(mineKey(owner), JSON.stringify([...mine, ...kept]))
     return true
-  } catch {
-    useToast.getState().show({ label: 'NOT SAVED', meta: NOT_SAVED, mark: 'build' })
-    return false
-  }
+  } catch { /* try without what the bare list still holds */ }
+  const onBare = new Set(readRows(MINE_KEY).map(rowKey))
+  const rest = mine.filter((d) => !onBare.has(rowKey(d)))
+  try {
+    if (rest.length < mine.length) {
+      localStorage.setItem(mineKey(owner), JSON.stringify([...rest, ...kept]))
+      return true
+    }
+  } catch { /* said below */ }
+  useToast.getState().show({ label: 'NOT SAVED', meta: NOT_SAVED, mark: 'build' })
+  return false
 }
 
 /** One identity's rows: the store's while it is the one signed in, its own on disk once it is not. */

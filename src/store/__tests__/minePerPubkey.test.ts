@@ -418,6 +418,21 @@ describe('a full disk', () => {
     expect([...everywhere('huge'), ...everywhere('small')].length).toBeGreaterThanOrEqual(2)
   })
 
+  it('with no journal possible, a row stuck on the bare list costs new rows nothing', async () => {
+    sessionRefuses = true
+    localStorage.setItem(BARE, JSON.stringify([row(home, 'x-big', { text: 'a'.repeat(60_000) })]))
+    const cap = capStorage(100_000)
+    signIn(Y); signIn(home)
+    expect(localStorage.getItem(BARE)).not.toBeNull()
+    await deployAShard()
+    const fresh = ids(useShards.getState().mine).filter((id) => id !== 'x-big')
+    expect(fresh).toHaveLength(1)
+    expect(notSaved()).toBe(false)
+    signIn(Y); signIn(home)
+    cap.restore()
+    expect(ids(useShards.getState().mine).sort()).toEqual([...fresh, 'x-big'].sort())
+  })
+
   it('a save that fails says so where it shows, with the bar closed too', async () => {
     signIn(Y); signIn(home)
     const spy = vi.spyOn(localStorage, 'setItem').mockImplementation(() => { throw new Error('QuotaExceededError') })

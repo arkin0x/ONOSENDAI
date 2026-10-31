@@ -1604,7 +1604,9 @@ export const useShards = create<ShardsState>((set, get) => {
     },
     keepChestDraft: (draft) => {
       const p = get().pending
-      if (p?.type !== 'chest' || !p.spot || p.move) return
+      // Not while it is being sealed: the deploy knows what it is finishing by
+      // this very object, and a new one would leave it working for good.
+      if (p?.type !== 'chest' || !p.spot || p.move || get().deployStatus === 'working') return
       set({ pending: { ...p, ...draft } })
     },
     sealPlacedChest: async (draft) => {

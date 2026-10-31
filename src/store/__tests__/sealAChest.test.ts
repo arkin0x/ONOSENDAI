@@ -132,6 +132,22 @@ describe('SEAL A CHEST: tap, choose the place, then the contents', () => {
     expect(S().pending).toMatchObject({ name: 'Unfinished', contents: [{ kind: 'message', text: 'inside' }] })
   })
 
+  it('typing in the modal while it seals changes nothing, and the seal still finishes', async () => {
+    S().startPlaceChest()
+    S().setDeployHeight(4)
+    S().placeChest()
+    const sealing = S().sealPlacedChest(draft())
+    expect(S().deployStatus).toBe('working')
+    const was = S().pending
+    S().keepChestDraft(draft({ name: 'Typed meanwhile' }))
+    expect(S().pending).toBe(was)
+    await sealing
+    expect(S().pending).toBeNull()
+    expect(S().deployStatus).toBe('done')
+    expect(useStash.getState().chest).toBe(false)
+    expect(chestRow()?.chest?.name).toBe('Wind Chest')
+  })
+
   it('seals nothing without a name, a lock or contents', async () => {
     S().startPlaceChest()
     S().placeChest()

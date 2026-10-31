@@ -414,6 +414,12 @@ export interface RideVerifyResult {
   /** True when the ride has no `mn` and is on the §5.8 list, so its root and
    * openings were accepted unchecked. Everything else still needs checking. */
   grandfathered: boolean
+  /**
+   * The block whose opening did not verify. Set only for that failure, the one
+   * that depends on the hash this reader holds for that block: it says the proof
+   * and this line disagree, and not which of them is wrong.
+   */
+  openingHeight?: number
 }
 
 /**
@@ -448,7 +454,7 @@ export async function verifyRideLevel1(input: RideVerifyInput): Promise<RideVeri
     const hash = await input.blockHashFor(height)
     const leaf = computeRideLeaf(input.previousEventIdHex, height, hash)
     if (!verifyInclusion(leaf, idx, paths[s], root)) {
-      return fail(s, `opening ${s} (block ${height}) does not verify`)
+      return { ...fail(s, `opening ${s} (block ${height}) does not verify`), openingHeight: height }
     }
   }
   return { ok: true, checked: indices.length, reason: null, grandfathered: false }

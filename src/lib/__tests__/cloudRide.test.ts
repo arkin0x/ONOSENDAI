@@ -20,7 +20,7 @@ vi.hoisted(() => {
 })
 
 import { sha256 } from 'cyberspace-core'
-import { rideChoice, rideFits, rideOfferOf, rideServiceOf, verifyCloudRide } from '../cloudRide'
+import { checkCloudRide, rideChoice, rideFits, rideOfferOf, rideServiceOf, verifyCloudRide } from '../cloudRide'
 import { buildRideProof, computeRideLeaf, rideBlocks } from '../hyperspace/ride'
 import { createHosaka, idempotencyKeyFor, rideBody, type HosakaJob, type HosakaProvider } from '../hosaka'
 import { clearCloudJob, loadCloudJob, saveCloudJob, wirePosition, type PendingCloudJob } from '../cloud'
@@ -112,6 +112,24 @@ describe('a finished HOSAKA ride is checked here before anything is signed', () 
   it('a proof over other block hashes is refused: HOSAKA cannot invent the line', async () => {
     const otherLine = (h: number): string => fakeHash(h + 1)
     expect(await verifyCloudRide(completedRide(PREV, 100, 105), asked, otherLine)).not.toEqual([])
+  })
+
+  it('a disagreement over a block says which block, because this device\'s copy may be the wrong one', async () => {
+    const otherLine = (h: number): string => fakeHash(h + 1)
+    const check = await checkCloudRide(completedRide(PREV, 100, 105), asked, otherLine)
+    expect(check.failed).not.toEqual([])
+    expect(check.disagreesAt).toBeGreaterThanOrEqual(100)
+    expect(check.disagreesAt).toBeLessThanOrEqual(105)
+  })
+
+  it('only a block disagreement says so: what is wrong with the proof itself is not this device\'s line', async () => {
+    const good = completedRide(PREV, 100, 105)
+    const r = good.result as { mp: string; root: string; mn: string }
+    expect((await checkCloudRide(good, asked, fakeHash)).disagreesAt).toBeNull()
+    expect((await checkCloudRide({ ...good, result: { ...r, root: 'not a root' } }, asked, fakeHash)).disagreesAt).toBeNull()
+    expect((await checkCloudRide({ ...good, result: { ...r, mn: 'nope' } }, asked, fakeHash)).disagreesAt).toBeNull()
+    expect((await checkCloudRide(completedRide('cd'.repeat(32), 100, 105), asked, fakeHash)).disagreesAt).toBeNull()
+    expect((await checkCloudRide(completedRide(PREV, 100, 106), asked, fakeHash)).disagreesAt).toBeNull()
   })
 
   it('a valid proof for another head or other blocks is refused', async () => {

@@ -85,7 +85,7 @@ interface StashModals {
   key: boolean
   /** The chest modal for the chest just placed (SEAL A CHEST, then PLACE CHEST: useShards placeChest). */
   chest: boolean
-  /** The chest modal on a chest of yours already hidden: EDIT (its name and lock too) or ADD (its contents). */
+  /** The chest or door modal on one of yours already hidden: EDIT (its name and lock too) or ADD (a chest's contents). */
   chestEdit: { eventId: string; fields: boolean } | null
   /** The PLACE AUDIO composer (DECK-0007). */
   audio: boolean

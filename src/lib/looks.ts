@@ -410,18 +410,16 @@ export function builtInLookTags(name: LookName, pose: LookPose): string[][] {
 interface At { x: bigint; y: bigint; z: bigint }
 
 /**
- * Whether a thing that came out of an opened chest stays in the chest: it
- * is listed under the chest's rows and floats out as loot, and is not drawn
- * again in the world on top of the chest. That is anything out of a chest
- * (not a door) that stands at the chest's own place. One aimed at its own
- * point (a room built in a chest's region, lib/chests.ts revealedIn) is
- * drawn where it stands, as before, until CONVERT TO DOOR moves such rooms
- * behind doors (chest and door design, P4b). Everything behind a door
- * stands in the room. A thing whose chest is not known is drawn, as before.
+ * Whether a thing that came out of an opened chest stays in the chest: it is
+ * listed under the chest's rows and floats out as loot, and is not drawn in
+ * the world (DECK-0004 §3.4: "a chest's contents are taken, not placed"; a
+ * hider who wants things to appear where they stand uses a door, and CONVERT
+ * TO DOOR moves an old room-chest behind one, R13). Anything out of a chest,
+ * wherever it was aimed. A thing whose chest is not known is drawn, as
+ * before; a door's room never comes this way.
  */
 export function keptInChest(item: { chestId?: string; at: At }, parent: { at: At; tags?: readonly unknown[] } | undefined): boolean {
-  if (!item.chestId || !parent || isDoor(parent.tags)) return false
-  return item.at.x === parent.at.x && item.at.y === parent.at.y && item.at.z === parent.at.z
+  return !!item.chestId && !!parent && !isDoor(parent.tags)
 }
 
 /**

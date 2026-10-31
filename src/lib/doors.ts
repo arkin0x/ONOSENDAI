@@ -122,3 +122,29 @@ export function doorRefusal(tags: readonly unknown[], bagHeight: number, inRoomO
   if (inRoomOf !== null && h >= inRoomOf) return 'A door inside a room must be lower than the room.'
   return null
 }
+
+/** A door of yours, as a placement asks about it: where it stands, its height, and its secret when this device knows it. */
+export interface OwnDoor {
+  eventId: string
+  name: string
+  at: Position
+  plane: number
+  /** Its `door` height: its room is the region of this height holding `at`. */
+  height: number
+  secret: string | null
+}
+
+/**
+ * The door whose room a placement falls in (chest and door design, 4.3, 4.5,
+ * R1, the owner's height clarification): the point inside its room, in its
+ * plane, and hidden at exactly its height, which is what "a door locks one
+ * height" comes to. Heights never compete, so at most one room answers; two
+ * doors of one room are one answer. A door whose secret is not known here comes
+ * first, secret null, for the placement to refuse (useShards deploy): it may
+ * have rotated since this device last saw it, and sealing to a sibling's old
+ * secret would hide this in a room nobody opens.
+ */
+export function roomDoorAt(doors: readonly OwnDoor[], at: Position, plane: number, height: number): OwnDoor | null {
+  const here = doors.filter((d) => d.height === height && d.plane === plane && inRoom(d.at, d.height, at))
+  return here.find((d) => !d.secret) ?? here[0] ?? null
+}

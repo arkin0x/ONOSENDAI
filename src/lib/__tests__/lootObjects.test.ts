@@ -11,7 +11,7 @@ import { fromPayload, newShard, toPayload, type ShardModel } from 'sno-core/shar
 import { windOutward } from 'sno-core/winding'
 import type { ChestEntry } from '../chests'
 import type { ItemBody } from '../hidden'
-import { aimedElsewhere, chestLoot, lootOf } from '../lootObjects'
+import { chestLoot, lootOf } from '../lootObjects'
 import { positionHex } from '../events'
 import { primeRef } from '../parts'
 import { measureModel } from '../../hooks/useItemModel'
@@ -106,7 +106,6 @@ describe('the built-in loot models', () => {
 
 describe('loot over a chest in the world (review of #534)', () => {
   const at = { x: 64n, y: 128n, z: 192n }
-  const chest = { at, plane: 0, height: 4 }
   const withC = (body: ItemBody, p: { x: bigint; y: bigint; z: bigint }): ChestEntry => {
     const e = entry(body)
     return { ...e, event: { ...e.event, tags: [['C', positionHex(p, 0)]] } }
@@ -114,7 +113,7 @@ describe('loot over a chest in the world (review of #534)', () => {
   const here = withC({ type: 'message', text: 'here' }, at)
   const aimed = withC({ type: 'shard', shard: shard('Column') }, { ...at, x: at.x + 3n })
   const outside = withC({ type: 'shard', shard: shard('Far', 3) }, { ...at, x: at.x + 64n })
-  const base = { held: () => false, chest, itemsReady: true }
+  const base = { held: () => false, itemsReady: true }
 
   it('an opened door lets nothing out: what is behind it stands in the room', () => {
     expect(chestLoot({ ...base, look: 'door', entries: [here, aimed] })).toEqual([])
@@ -124,13 +123,9 @@ describe('loot over a chest in the world (review of #534)', () => {
     expect(chestLoot({ ...base, look: 'chest', entries: [here], itemsReady: false })).toEqual([])
   })
 
-  it('what is aimed at its own point in the region is drawn there, not floated out too', () => {
-    expect(aimedElsewhere(aimed, chest)).toBe(true)
-    expect(aimedElsewhere(here, chest)).toBe(false)
-    // Out of the region: revealedIn stands it at the chest, so it floats out.
-    expect(aimedElsewhere(outside, chest)).toBe(false)
+  it('everything floats out of a chest, wherever it was aimed: its contents are taken, not placed (spec #82)', () => {
     const loot = chestLoot({ ...base, look: 'chest', entries: [here, aimed, outside] })
-    expect(loot.map((l) => l.ids)).toEqual([[here.id], [outside.id]])
+    expect(loot.map((l) => l.ids).flat().sort()).toEqual([here.id, aimed.id, outside.id].sort())
   })
 })
 

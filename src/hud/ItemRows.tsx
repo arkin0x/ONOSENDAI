@@ -200,8 +200,8 @@ export function ChestBlock({ id, chest, author, verified, place, sealer: given, 
   const shown = entries ? shownOf(entries, muted) : null
   // A door locks a room where it stands (DECK-0004 §3.7): OPEN reads its
   // secret and opens the room. One found inside a chest never opens its room
-  // (§3.7.1: a chest's contents are taken, not placed).
-  const door = isDoor((found?.inner ?? ownInner)?.tags) && !inChest && !!place
+  // (§3.7.1: a chest's contents are taken, not placed), whichever list or card it is opened from.
+  const door = isDoor((found?.inner ?? ownInner)?.tags) && !inChest && !found?.chestId && !!place
   // Opened by hand before, under this lock: never OPEN again. What is inside
   // is read again once, as OPEN read it (readAgain); OPEN comes back only if
   // that fails, a signer refusing, and the refusal holds for the session
@@ -260,7 +260,7 @@ export function ChestBlock({ id, chest, author, verified, place, sealer: given, 
         else if (look?.kind === 'chest') {
           // The chime sounds as the last loot object lands over the chest.
           // The same loot the world draws over it (scene/ChestLooks), so the chime lands with the last of it.
-          const loot = place ? chestLoot({ look: 'chest', entries: shownOf(contents, useMutes.getState().muted), held: (e) => holdsEntry(useInventory.getState().items, e), chest: { at: positionOf(place), plane: place.plane, height: place.height }, itemsReady: true }) : []
+          const loot = place ? chestLoot({ look: 'chest', entries: shownOf(contents, useMutes.getState().muted), held: (e) => holdsEntry(useInventory.getState().items, e), itemsReady: true }) : []
           celebrateOpen({ me, chestId: id, kind: 'chest', first, calm: prefersReducedMotion(), landMs: loot.length > 0 ? landedAt(loot.length) : undefined })
         }
       }

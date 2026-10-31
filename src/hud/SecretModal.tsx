@@ -37,7 +37,9 @@ import { useProfile } from '../hooks/useProfile'
 import { profileLabel } from '../store/useProfiles'
 import { useCyberspace } from '../store/useCyberspace'
 import { editable, muteSubject, useShards, type WorldItem } from '../store/useShards'
-import { editPlaced } from '../store/useBuilder'
+import { addToRoom, editPlaced } from '../store/useBuilder'
+import { DeleteDoorCard, DoorOwnerBlock } from './DoorOwner'
+import { doorSecret } from '../store/doorSecrets'
 import { useStash } from './stash'
 import { useWorkshop } from '../store/useWorkshop'
 import { useEscape } from '../hooks/useEscape'
@@ -109,6 +111,12 @@ export function SecretModal(): JSX.Element | null {
   const movable = !!wire && editable(wire, me)
   // A chest this device hid, signed by you: EDIT, MOVE and ADD.
   const chestOfMine = !!wire && wire.type === 'chest' && !!wire.chest && wire.inner.pubkey === me
+  // A door of yours: everything but DELETE needs its secret, known here from
+  // sealing it or from opening it (4.11).
+  const doorOfMine = chestOfMine && wire?.chest?.door !== undefined
+  const editsDoor = doorOfMine && !!wire && !!doorSecret(me, wire.eventId)
+  const [converting, setConverting] = useState(false)
+  const [convertWhy, setConvertWhy] = useState<string | null>(null)
   // The chest a revealed thing came out of, by name, for the card's question.
   const chestName = useShards((s) => {
     const id = item?.chestId
@@ -189,6 +197,7 @@ export function SecretModal(): JSX.Element | null {
             <h3 className="secret__look-name">{item.chest.name}</h3>
             {look && <div className="secret__spin secret__spin--look"><ShardSpin shard={drawnLook(look, openedByHand(me, item.key, item.chest.lockPubkey)) ?? look.closed} size={180} wide /></div>}
             <div className="secret__shard"><ChestBlock id={item.key} chest={item.chest} author={author} verified place={place} named={false} /></div>
+            {doorOfMine && wire && <DoorOwnerBlock door={wire} />}
           </>
         ) : item.type === 'audio' && item.audio ? (
           // MUTE THIS AUDIO and BLOCK AUTHOR in the card's own row, by PLAY
@@ -294,11 +303,12 @@ export function SecretModal(): JSX.Element | null {
               there too), ADD to what it holds. Each seals it again where it
               stands; DELETE is below as for anything. From the device that
               hid it, or one that can open it. */}
-          {mine && chestOfMine && (
+          {mine && chestOfMine && (!doorOfMine || editsDoor) && (
             <>
               <button className="secret__act" title="Its name, its lock and what opens it" onClick={() => useStash.getState().openChestEdit(item.key, true)}><Pencil size={ICON} strokeWidth={2.25} aria-hidden />EDIT</button>
               <button className="secret__act" title="Place it somewhere else, in another model if you like" onClick={() => { close(); useShards.getState().startMoveChest(item.key) }}><Move3d size={ICON} strokeWidth={2.25} aria-hidden />MOVE</button>
-              <button className="secret__act" title="Put more in it" onClick={() => useStash.getState().openChestEdit(item.key, false)}><PackagePlus size={ICON} strokeWidth={2.25} aria-hidden />ADD</button>
+              <button className="secret__act" title="Put more in it" onClick={() => { if (doorOfMine) { close(); addToRoom(item.key) } else useStash.getState().openChestEdit(item.key, false) }}><PackagePlus size={ICON} strokeWidth={2.25} aria-hidden />ADD</button>
+              {!doorOfMine && <button className="secret__act" disabled={converting} title="Make it a door where it stands, the same lock, what it holds behind it" onClick={() => { setConverting(true); setConvertWhy(null); void useShards.getState().convertToDoor(item.key).then((why) => { setConverting(false); setConvertWhy(why) }) }}>{converting ? 'CONVERTING…' : 'CONVERT TO DOOR'}</button>}
             </>
           )}
           {mine && !item.chestId && (
@@ -317,7 +327,7 @@ export function SecretModal(): JSX.Element | null {
             >{removing ? 'REMOVING…' : 'REMOVE FROM CHEST'}</button>
           )}
         </div>
-        {refusal && <p className="secret__status" role="status">{refusal}</p>}
+        {(refusal ?? convertWhy) && <p className="secret__status" role="status">{refusal ?? convertWhy}</p>}
 
         {/* The technical facts under one closed METADATA (arkinox,
             2026-10-26: "Collapse all the technical info on the chest, door,
@@ -348,7 +358,8 @@ export function SecretModal(): JSX.Element | null {
             up this tree, and only this card's stopPropagation keeps a tap on
             the confirmation's backdrop from reaching the close on ours.
             Escape reaches it first because it opened later (useEscape). */}
-        {card && (
+        {confirming === 'delete' && doorOfMine && wire && <DeleteDoorCard door={wire} onCancel={() => setConfirming(null)} onDone={close} />}
+        {card && !(confirming === 'delete' && doorOfMine) && (
           <ConfirmModal
             title={card.title}
             body={card.lines.map((line) => <span key={line} className="modal__line">{line}</span>)}

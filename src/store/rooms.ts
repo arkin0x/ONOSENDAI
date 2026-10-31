@@ -33,40 +33,9 @@ import { regionKeyOffThread } from '../lib/regionKeyOffThread'
 import { MAX_COMPUTE_HEIGHT, useCyberspace } from './useCyberspace'
 import { positionOf, useShards } from './useShards'
 import { rememberOpened } from './useOpenedChests'
+import { doorSecret, keepDoorSecret } from './doorSecrets'
 
-const SECRETS_KEY = 'onosendai:door-secrets'
-/** Enough for years of play; the oldest fall off past it. */
-const SECRETS_MAX = 2000
-
-let kept: Record<string, Record<string, string>> | null = null
-
-function all(): Record<string, Record<string, string>> {
-  if (kept) return kept
-  try {
-    const raw = JSON.parse(localStorage.getItem(SECRETS_KEY) ?? '{}') as unknown
-    kept = raw && typeof raw === 'object' && !Array.isArray(raw) ? (raw as Record<string, Record<string, string>>) : {}
-  } catch { kept = {} }
-  return kept
-}
-
-/** The door secret this identity knows for a door, or null. */
-export function doorSecret(me: string, doorId: string): string | null {
-  const s = all()[me]?.[doorId]
-  return typeof s === 'string' && /^[0-9a-f]{64}$/.test(s) ? s : null
-}
-
-/** Keep a door secret this identity has learned: by opening the door, or by sealing it. */
-export function keepDoorSecret(me: string, doorId: string, secretHex: string): void {
-  const a = all()
-  const mine = { ...(a[me] ?? {}), [doorId]: secretHex }
-  const ids = Object.keys(mine)
-  if (ids.length > SECRETS_MAX) for (const id of ids.slice(0, ids.length - SECRETS_MAX)) delete mine[id]
-  a[me] = mine
-  try { localStorage.setItem(SECRETS_KEY, JSON.stringify(a)) } catch { /* quota or private mode: known for this session */ }
-}
-
-/** For tests: forget what is kept, so the next read is from localStorage. */
-export function resetDoorSecrets(): void { kept = null }
+export { doorSecret, keepDoorSecret, resetDoorSecrets } from './doorSecrets'
 
 /** A door's height (its `door` tag), or null for a chest or a malformed door. */
 export function heightOfDoor(door: Pick<Hidden, 'inner'>): number | null {
@@ -104,6 +73,8 @@ export async function openRoom(door: Hidden, secretHex: string): Promise<OpenedR
   const h = heightOfDoor(door)
   const signer = door.inner?.pubkey
   if (h === null || !signer) throw new Error('This is not a door.')
+  // §3.7.1: a chest's contents are taken, not placed.
+  if (door.chestId) throw new Error('A door found inside a chest does not open a room.')
   const key = roomKey(await roomLocationKey(door), hexToBytes(secretHex))
   const lookupId = roomLookupId(key)
   const keyHex = bytesToHex(key)

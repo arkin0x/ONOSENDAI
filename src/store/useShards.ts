@@ -88,13 +88,15 @@ import {
 import { retractionTemplate } from '../lib/published'
 import { audioInnerTemplate, fadeAt, type AudioItem } from '../lib/audioItem'
 import { resealCopy } from '../lib/audioFile'
-import { openWithSecret, openWithSigner, openerFor, readContents, resealWithout, revealedIn, sealEntries, sealedInside, sealerOf, type ChestEntry, type OpeningKey } from '../lib/chests'
+import { movableIntoRoom, openWithSecret, openWithSigner, openerFor, placeOf as eventPlace, plaintextWithSecret, readContents, resealWithout, revealedIn, sealEntries, sealedInside, sealerOf, type ChestEntry, type OpeningKey } from '../lib/chests'
 import { openedByHand, restoreOpened } from './useOpenedChests'
 import { openingKeys, placeOf, type HeldItem, type HeldPlace, type InChest } from '../lib/inventory'
 import { useInventory } from './useInventory'
 import { useShardFolders } from './useShardFolders'
 import { creditOf, useWorkshop } from './useWorkshop'
 import { deletionFilters, isDeleted, type Credit, type FeedObject } from 'sno-core/feed'
+import { ROOM_BAG_SETTINGS, inRoom, newDoorSecret, roomDoorAt, roomEntries, roomKey, roomLookupId, roomOf, type OwnDoor } from '../lib/doors'
+import { doorSecret, keepDoorSecret } from './doorSecrets'
 import { builtInLook, builtInLookTags, isDoor, keptInChest, lookOf, lookTags, lookTagsOf, posedLook, posedOpenLook, posedWrapper, type LookName, type LookPose } from '../lib/looks'
 import { useCeremony } from './useCeremony'
 import { useToast } from './useToast'
@@ -170,6 +172,12 @@ export interface MyDeployment {
    * or claimed from another device: EDIT and ADD then open it first.
    */
   sealed?: BagEntry[]
+  /**
+   * Set when it is hidden in a room (DECK-0004 §3.7.4): the door whose room
+   * it stands in. `lookupId` and `keyHex` are then the room bag's and the room
+   * key, `height` the room's, and `bag` ROOM_BAG_SETTINGS.
+   */
+  room?: { doorId: string }
 }
 
 /** Something placed in the world, ready to draw. */
@@ -371,6 +379,8 @@ export type LookChoice =
 
 /** What a chest wears when nothing else is chosen. */
 export const DEFAULT_CHEST_LOOK: LookChoice = { from: 'builtin', name: 'treasure' }
+/** What a door wears when nothing else is chosen (D2). */
+export const DEFAULT_DOOR_LOOK: LookChoice = { from: 'builtin', name: 'door' }
 
 /**
  * A feed object as a look: a model with no geometry of its own and one part
@@ -459,8 +469,11 @@ export type DeployPending =
    * seals and hides it there. With `move` it is a chest already hidden from
    * here, being moved (MOVE on its card): the same sealed chest, at a new
    * place, wearing its look posed again.
+   *
+   * With `door` it is a door (chest and door design, 4.2): placed the same
+   * way, and sealed around one secret for its room rather than contents.
    */
-  | ({ type: 'chest'; look?: LookChoice; spot?: { at: Position; plane: Plane }; move?: { eventId: string } } & ChestDraft)
+  | ({ type: 'chest'; look?: LookChoice; spot?: { at: Position; plane: Plane }; move?: { eventId: string }; door?: true } & ChestDraft)
   /**
    * Hidden audio (DECK-0007): the file is encrypted and on Blossom already
    * (AudioCompose); the item is sealed as a rumor. With `reseal` it is PLACE
@@ -516,6 +529,55 @@ export function placingChest(pending: DeployPending | null): boolean {
 /** Whether a placed chest is being filled in its modal: the hide bar steps aside for it. */
 export function fillingChest(pending: DeployPending | null): boolean {
   return pending?.type === 'chest' && !!pending.spot && !pending.move
+}
+
+/** Your doors as a placement asks about them: every door row signed by you, with its secret when this device knows it. */
+export function ownDoors(mine: readonly MyDeployment[], me: string): OwnDoor[] {
+  return mine.flatMap((d) => (d.type === 'chest' && d.chest?.door !== undefined && d.inner.pubkey === me
+    ? [{ eventId: d.eventId, name: d.chest.name, at: positionOf(d), plane: d.plane, height: d.chest.door, secret: doorSecret(me, d.eventId) }]
+    : []))
+}
+
+/** What refuses CONVERT TO DOOR, short enough for the card: how many things could not stand in the room. */
+export function cantMove(n: number): string {
+  return `${n} CAN'T MOVE`
+}
+
+/** What stands behind a door of yours: the rows of its room, whichever of its doors they name. */
+export function behindDoor(mine: readonly MyDeployment[], door: MyDeployment): MyDeployment[] {
+  const ids = new Set([door.eventId, ...doorsBeside(mine, door).map((d) => d.eventId)])
+  return mine.filter((m) => !!m.room && ids.has(m.room.doorId))
+}
+
+/** The other doors of your room (§3.7.5): the same signer, height and region. */
+export function doorsBeside(mine: readonly MyDeployment[], door: MyDeployment): MyDeployment[] {
+  const h = door.chest?.door
+  if (h === undefined) return []
+  const room = roomOf(positionOf(door), door.plane, h)
+  return mine.filter((m) => m.eventId !== door.eventId && m.chest?.door === h && m.inner.pubkey === door.inner.pubkey && roomOf(positionOf(m), m.plane, h) === room)
+}
+
+/** What you already hid in a door's room at its height and did not seal behind it (R3): ordinary placements. Never a door. */
+export function hereInRoom(mine: readonly MyDeployment[], door: MyDeployment): MyDeployment[] {
+  const h = door.chest?.door
+  if (h === undefined) return []
+  const at = positionOf(door)
+  return mine.filter((m) => !m.room && m.eventId !== door.eventId && m.chest?.door === undefined && m.height === h && m.plane === door.plane && inRoom(at, h, positionOf(m)))
+}
+
+/**
+ * The door a placement seals to, or null (chest and door design, R1, R2,
+ * 4.3): yours, its room holding the point, hidden at exactly its height, and
+ * not left out with the X. A door at the same height in the same room joins
+ * the room rather than entering it (R5). An aim into a chest hides nothing.
+ */
+export function sealingDoor(s: Pick<ShardsState, 'mine' | 'pending' | 'deployLeaveOut'>, me: string, at: Position, plane: number, height: number): OwnDoor | null {
+  const p = s.pending
+  if (!p || (p.type === 'shard' && p.intoChest)) return null
+  if (p.type === 'chest' && (p.door || (p.move && s.mine.find((d) => d.eventId === p.move?.eventId)?.chest?.door !== undefined))) return null
+  const d = roomDoorAt(ownDoors(s.mine, me), at, plane, height)
+  if (!d || s.deployLeaveOut === roomOf(d.at, d.plane, d.height)) return null
+  return d
 }
 
 /**
@@ -681,7 +743,8 @@ export function pendingEmpty(pending: DeployPending, shard: ShardModel | null): 
     case 'message': return pending.text.trim().length === 0
     case 'key': return pending.key.name.trim().length === 0
     // Being placed or moved, a chest is not empty: its contents come after (R18), or are already sealed.
-    case 'chest': return !!pending.spot && !pending.move && (pending.name.trim().length === 0 || pending.contents.length === 0)
+    // A door holds no contents of its own: only its name is asked for.
+    case 'chest': return !!pending.spot && !pending.move && (pending.name.trim().length === 0 || (!pending.door && pending.contents.length === 0))
     case 'audio': return !pending.audio.url
     default: return !shard || (shard.vertices.length === 0 && (shard.parts?.length ?? 0) === 0)
   }
@@ -706,7 +769,8 @@ export interface OwnBag { region: string; settings: BagSettings; count: number; 
  * in the region, so they agree, and the newest is the latest word if not.
  */
 export function ownBagIn(mine: MyDeployment[], region: string): OwnBag | null {
-  const items = mine.filter((d) => regionOf(positionOf(d), d.plane, d.height) === region)
+  // What is behind a door is in a room bag, whose settings are no one's to choose.
+  const items = mine.filter((d) => !d.room && regionOf(positionOf(d), d.plane, d.height) === region)
   if (items.length === 0) return null
   const newest = items.reduce((a, b) => (b.createdAt > a.createdAt ? b : a))
   return { region, settings: { ...DEFAULT_BAG_SETTINGS, ...(newest.bag ?? {}) }, count: items.length, cashu: items.some((d) => d.inner.kind === MESSAGE_KIND && findCashuToken(d.inner.content) !== null) }
@@ -886,6 +950,21 @@ interface ShardsState {
   startDeployChest: (draft: ChestDraft & { lock: ChestLock }) => void
   /** The hide bar's model row: what the chest being hidden wears. SCALE and WALK start from that model's own. */
   setDeployLook: (look: LookChoice) => void
+  /** The room the door-name chip's X left this one placement out of (R2), as lib/doors roomOf says it. */
+  deployLeaveOut: string | null
+  setDeployLeaveOut: (room: string | null) => void
+  /** ADD on a door: the height the next placement starts at, the door's (4.8). */
+  deployInto: number | null
+  /** SEAL A DOOR (4.2): a door on the hide bar to place first. */
+  startPlaceDoor: () => void
+  /** DOOR: seal what you already hid in its room at its height into it (R3): a rewrite of both bags. A refusal in words, or null. */
+  sealIntoRoom: (doorId: string, eventIds: string[]) => Promise<string | null>
+  /** EDIT on a door of yours: name and label, and a new lock, which rotates the room key (R10). A refusal in words, or null. */
+  resealDoor: (eventId: string, draft: Pick<ChestDraft, 'name' | 'requires'> & { lock: ChestLock }) => Promise<string | null>
+  /** DELETE on a door of yours (R12): one of several goes alone; the last moves what is behind it out, or with `contents` deletes it. A refusal in words, or null. */
+  deleteDoor: (eventId: string, contents: boolean) => Promise<string | null>
+  /** CONVERT TO DOOR on a chest of yours (R13): a door where it stood, the same lock, what it holds in the new room. A refusal in words, or null. */
+  convertToDoor: (eventId: string) => Promise<string | null>
   /** SEAL A CHEST (R18): an empty chest on the hide bar to place first; a draft BUILD kept comes back filled. */
   startPlaceChest: (draft?: ChestDraft | null) => void
   /** PLACE CHEST: where it lands is fixed at the build cursor, and the chest modal fills it. */
@@ -1275,6 +1354,16 @@ export const useShards = create<ShardsState>((set, get) => {
    * chest, or carry it loose with no chest at all.
    */
   async function publishBag(inners: BagEntry[], key: Uint8Array, lookupId: string, height: number, live: boolean, settings: BagSettings, place: { at: Position; plane: Plane }, beforeSend?: () => Promise<void>, before: BagEntry[] = []): Promise<{ event: NostrEvent; published: boolean }> {
+    const event = await signBag(inners, key, lookupId, height, settings, place, before)
+    // Anything that must go out only once the bag is signed (an EDIT's
+    // resealed object): a signer that refuses the bag stops it here.
+    if (beforeSend) await beforeSend()
+    const result = live ? await publishMany(relaySet(), event) : { ok: true as const }
+    return { event, published: live && result.ok }
+  }
+
+  /** The bag signed, and nothing sent: publishBag's first half, for what must sign everything before anything goes out. */
+  async function signBag(inners: BagEntry[], key: Uint8Array, lookupId: string, height: number, settings: BagSettings, place: { at: Position; plane: Plane }, before: BagEntry[] = []): Promise<NostrEvent> {
     const looked = [...inners, ...before]
     const inside = sealedInside(looked, openingKeys(useInventory.getState().items))
     const chests = new Set(looked.filter((e): e is NostrEvent => !isReference(e) && e.kind === CHEST_KIND).map((e) => e.id))
@@ -1285,12 +1374,7 @@ export const useShards = create<ShardsState>((set, get) => {
       if (mine.length < get().mine.length) { set({ mine }); saveMine(mine) }
     }
     const createdAt = nextBagAt(lookupId)
-    const event = await cyber().signEvent(await bagTemplate(entries, key, lookupId, height, createdAt, HIDDEN_KIND, settings, place))
-    // Anything that must go out only once the bag is signed (an EDIT's
-    // resealed object): a signer that refuses the bag stops it here.
-    if (beforeSend) await beforeSend()
-    const result = live ? await publishMany(relaySet(), event) : { ok: true as const }
-    return { event, published: live && result.ok }
+    return cyber().signEvent(await bagTemplate(entries, key, lookupId, height, createdAt, HIDDEN_KIND, settings, place))
   }
 
   /**
@@ -1314,10 +1398,28 @@ export const useShards = create<ShardsState>((set, get) => {
       const relay = newest ? await bagEntries(newest, key) : []
       // A relay copy that does not open with this key is not this bag.
       const settings = newest && relay.length > 0 ? bagSettingsOf(newest, height) : localSettings
-      return { entries: mergeEntries(relay, local), settings }
+      // A door of yours the relays' newer bag no longer holds was changed from
+      // another device: its old self does not go back in beside the new one (§3.7.5).
+      if (newest && relay.length > 0) pruneGoneDoors(lookupId, new Set(relay.map(entryKey)), newest.created_at)
+      return { entries: mergeEntries(relay, get().mine.filter((d) => d.lookupId === lookupId).map(entryOf)), settings }
     } catch {
       return { entries: local, settings: localSettings }
     }
+  }
+
+  /**
+   * Your door rows a bag read just now no longer holds, gone: another device
+   * rotated, renamed or removed the door. Only a published row, under a bag newer
+   * than it, so a relay's stale copy never takes away what was just hidden here.
+   */
+  function pruneGoneDoors(lookupId: string, held: ReadonlySet<string>, bagAt: number): void {
+    const me = cyber().identity.pubkey
+    const gone = get().mine.filter((d) => d.lookupId === lookupId && d.chest?.door !== undefined && d.inner.pubkey === me && d.published && d.createdAt < bagAt && !held.has(entryKey(entryOf(d))))
+    if (gone.length === 0) return
+    const ids = new Set(gone.map((d) => d.eventId))
+    const mine = get().mine.filter((d) => !ids.has(d.eventId))
+    set({ mine })
+    saveMine(mine)
   }
 
   /**
@@ -1334,6 +1436,15 @@ export const useShards = create<ShardsState>((set, get) => {
    */
   function claimOwn(items: Hidden[]): void {
     const me = cyber().identity.pubkey
+    // A bag read just now says what it holds: a door of yours no longer in it was changed elsewhere.
+    const read = new Map<string, { at: number; held: Set<string> }>()
+    for (const h of items) {
+      if (h.chestId || h.author !== me || !h.inner || h.bagAt === undefined) continue
+      const r = read.get(h.lookupId) ?? { at: h.bagAt, held: new Set<string>() }
+      r.held.add(entryKey(h.ref ?? h.inner))
+      read.set(h.lookupId, r)
+    }
+    for (const [lookupId, r] of read) pruneGoneDoors(lookupId, r.held, r.at)
     const { mine, deleted } = get()
     const have = new Set(mine.map((d) => d.eventId))
     const own: MyDeployment[] = []
@@ -1357,7 +1468,7 @@ export const useShards = create<ShardsState>((set, get) => {
       own.push({
         eventId: h.eventId, inner: h.inner, ref: h.ref, bagId: h.bagId, type: h.type, shard: h.shard, text: h.text, key: h.key, chest: h.chest, audio: h.audio,
         at: storedAt(h.at), plane: h.plane, height: h.height, lookupId: h.lookupId, keyHex: h.keyHex,
-        relays: relaySet(), createdAt: h.createdAt, published: true, bag: h.bag,
+        relays: relaySet(), createdAt: h.createdAt, published: true, bag: h.bag, ...(h.room ? { room: h.room } : {}),
       })
     }
     if (own.length === 0 && !refreshed) return
@@ -1480,6 +1591,215 @@ export const useShards = create<ShardsState>((set, get) => {
     return row
   }
 
+  /** What stands behind a door follows it to its new id: a door is a new inner event whenever it is signed again. */
+  function retargetRoom(from: string, to: string): void {
+    if (from === to || !get().mine.some((d) => d.room?.doorId === from)) return
+    const mine = get().mine.map((d) => (d.room?.doorId === from ? { ...d, room: { doorId: to } } : d))
+    set({ mine })
+    saveMine(mine)
+  }
+
+  /** The location key of a door's room: its bag's when that bag is of its height and not itself a room bag, else computed (§3.7.3). */
+  async function doorLocation(d: MyDeployment): Promise<{ key: Uint8Array; lookupId: string; height: number }> {
+    const height = d.chest?.door
+    if (height === undefined) throw new Error('This is not a door.')
+    if (!d.room && d.height === height) return { key: hexToBytes(d.keyHex), lookupId: d.lookupId, height }
+    const rk = await regionKeyOffThread(positionOf(d), height, MAX_COMPUTE_HEIGHT)
+    return { key: rk.key, lookupId: rk.lookupId, height }
+  }
+
+  /** Your door rows of one room, this one included (§3.7.5). */
+  function doorRowsOfRoom(d: MyDeployment): MyDeployment[] {
+    const h = d.chest?.door
+    if (h === undefined) return [d]
+    const room = roomOf(positionOf(d), d.plane, h)
+    return get().mine.filter((m) => m.chest?.door === h && m.inner.pubkey === d.inner.pubkey && roomOf(positionOf(m), m.plane, h) === room)
+  }
+
+  /**
+   * What is behind a door, as rows. While LIVE the relays are asked first, each on
+   * its own, and whatever they hold is read into rows: a rewrite goes by rows, so
+   * anything without one would be lost by it. Refuses, in words, when no relay
+   * answered, or when the bag holds anything that could not be read (a reference
+   * that cannot be fetched, or past the most a bag reads, MAX_REFERENCES_PER_BAG).
+   */
+  async function syncRoomRows(d: MyDeployment, secretHex: string, live: boolean): Promise<MyDeployment[] | string> {
+    const place = await doorLocation(d)
+    const key = roomKey(place.key, hexToBytes(secretHex))
+    const lookupId = roomLookupId(key)
+    // Whichever door a row names: one replaced from another device leaves them naming it (pruneGoneDoors).
+    // In the room's own bag is what makes them this room's.
+    const rows = (): MyDeployment[] => {
+      const doors = new Set(doorRowsOfRoom(d).map((x) => x.eventId))
+      const held = get().mine.filter((m) => m.room && (doors.has(m.room.doorId) || m.lookupId === lookupId))
+      if (held.some((m) => !doors.has(m.room!.doorId))) {
+        const mine = get().mine.map((m) => (m.room && m.lookupId === lookupId && !doors.has(m.room.doorId) ? { ...m, room: { doorId: d.eventId } } : m))
+        set({ mine })
+        saveMine(mine)
+        return mine.filter((m) => m.room && (doors.has(m.room.doorId) || m.lookupId === lookupId))
+      }
+      return held
+    }
+    if (!live) return rows()
+    const answers = (await queryEach({ kinds: [HIDDEN_KIND], authors: [d.inner.pubkey], '#d': [lookupId] })).filter((a) => a.outcome === 'answered')
+    if (answers.length === 0) return 'No relay answered, so this cannot tell what is behind the door. Nothing has changed. Try again when one is reachable.'
+    const newest = answers.flatMap((a) => a.events).filter((e) => e.pubkey === d.inner.pubkey).sort((a, b) => b.created_at - a.created_at)[0]
+    if (!newest) return rows()
+    const { doorAsFound } = await import('./rooms')
+    const found = doorAsFound(d.eventId)
+    const h = BigInt(place.height)
+    const at = positionOf(d)
+    const read = await unbag(newest, key, resolveReference, { at: { x: (at.x >> h) << h, y: (at.y >> h) << h, z: (at.z >> h) << h }, plane: d.plane }, place.height, undefined, { doorId: found?.eventId ?? d.eventId })
+    get().addDiscovered(read)
+    // Filed under this door: what the relay names by any door of the room is one room.
+    const held = new Set(rows().map((r) => entryKey(entryOf(r))))
+    const unread = (await bagEntries(newest, key)).filter((e) => !held.has(entryKey(e))).length
+    if (unread > 0) return `${unread} behind this door could not be read here. Nothing has changed. Try again when they can be.`
+    return rows()
+  }
+
+  /** NIP-09 of a bag no door or row names any more, signed: by its address, and its last event when known. */
+  async function bagRetraction(lookupId: string, bagId: string | null): Promise<NostrEvent> {
+    const cs = cyber()
+    return cs.signEvent({ kind: 5, created_at: Math.floor(Date.now() / 1000), content: 'hidden content removed', tags: [['a', `${HIDDEN_KIND}:${cs.identity.pubkey}:${lookupId}`], ...(bagId ? [['e', bagId]] : []), ['k', String(HIDDEN_KIND)]] })
+  }
+
+  async function retractBag(lookupId: string, bagId: string | null): Promise<void> {
+    const del = await bagRetraction(lookupId, bagId)
+    try { await publishMany(relaySet(), del) } catch { /* best effort */ }
+  }
+
+  /** Where a move is going. */
+  interface MoveTarget { key: Uint8Array; lookupId: string; height: number; room?: { doorId: string } }
+
+  /** A move with everything signed and nothing sent (stageMove). */
+  interface StagedMove {
+    rows: MyDeployment[]
+    moved: MyDeployment[]
+    /** Each resealed object, and the old one signed again a second newer, to put back if the move does not land. */
+    objects: Array<{ rowId: string; next: NostrEvent; back: NostrEvent }>
+    to: MoveTarget
+    settings: BagSettings
+    bag: NostrEvent
+    targetLive: boolean
+    /** The source without them, or its retraction when nothing is left, unless the caller keeps it for last. */
+    source: { bag?: NostrEvent; retraction?: NostrEvent; settings?: BagSettings } | null
+  }
+
+  /**
+   * Rows of one bag moving into another: SEAL (R3) into a room, a last door's room
+   * out into the place's ordinary bag, a rotation into the new room bag. This part
+   * signs everything and sends nothing, so a signer that refuses leaves everything
+   * as it was. A large shard of your own is sealed again under the target's key at
+   * the same address, with the old version signed again to put back; a LIVE LINK
+   * names a public object and only moves.
+   */
+  async function stageMove(rows: MyDeployment[], to: MoveTarget, keepSource = false): Promise<StagedMove> {
+    const cs = cyber()
+    const me = cs.identity.pubkey
+    const src = rows[0]
+    const srcKey = hexToBytes(src.keyHex)
+    const sourceLive = get().mine.some((d) => d.lookupId === src.lookupId && d.published)
+    // A LIVE door's bag stays LIVE when a LOCAL room's entries come into it.
+    const targetLive = sourceLive || get().mine.some((d) => d.lookupId === to.lookupId && d.published)
+    const now = Math.floor(Date.now() / 1000)
+    const moved: MyDeployment[] = []
+    const objects: StagedMove['objects'] = []
+    for (const r of rows) {
+      if (r.ref && r.shard && r.inner.pubkey === me && r.inner.kind === OBJECT_KIND && r.inner.tags.some((t) => t[0] === 'encrypted')) {
+        const at = Math.max(now, r.inner.created_at + 1)
+        const next = await cs.signEvent(await objectTemplate(r.shard, to.key, dOf(r.inner), at))
+        const back = await cs.signEvent({ kind: r.inner.kind, created_at: at + 1, content: r.inner.content, tags: r.inner.tags })
+        const ref = referenceTo(next, positionOf(r), r.plane, relaySet()[0] ?? '')
+        objects.push({ rowId: r.eventId, next, back })
+        moved.push({ ...r, eventId: next.id, inner: next, ref })
+      } else moved.push(r)
+    }
+    const target = await gatherInners(to.lookupId, to.key, targetLive, to.height)
+    const settings = to.room ? ROOM_BAG_SETTINGS : target.settings ?? DEFAULT_BAG_SETTINGS
+    const place = { at: positionOf(src), plane: src.plane }
+    const bag = await signBag(mergeEntries(target.entries, moved.map(entryOf)), to.key, to.lookupId, to.height, settings, place, target.entries)
+    let source: StagedMove['source'] = null
+    if (!keepSource) {
+      const was = await gatherInners(src.lookupId, srcKey, sourceLive, src.height)
+      const gone = new Set(rows.map((r) => entryKey(entryOf(r))))
+      const left = was.entries.filter((e) => !gone.has(entryKey(e)))
+      const kept = was.settings ?? src.bag ?? DEFAULT_BAG_SETTINGS
+      if (left.length > 0) source = { bag: await signBag(left, srcKey, src.lookupId, src.height, kept, place, was.entries), settings: kept }
+      else source = sourceLive ? { retraction: await bagRetraction(src.lookupId, src.bagId) } : {}
+    }
+    return { rows, moved, objects, to, settings, bag, targetLive, source }
+  }
+
+  /**
+   * The signed move's objects and new bag, out: a bag never names what no relay has.
+   * If any relay step fails, the old versions go back and nothing has moved. A row
+   * whose old version no relay took keeps it to put back (MyDeployment `putBack`).
+   */
+  async function sendMove(stage: StagedMove): Promise<void> {
+    if (!stage.targetLive) return
+    const sent: StagedMove['objects'] = []
+    const fail = async (words: string): Promise<never> => { await undoObjects(sent); throw new Error(words) }
+    for (const o of stage.objects) {
+      const ok = await publishMany(relaySet(), o.next).then((r) => r.ok, () => false)
+      if (!ok) await fail('No relay took a shard being moved. Nothing has moved.')
+      sent.push(o)
+    }
+    const ok = await publishMany(relaySet(), stage.bag).then((r) => r.ok, () => false)
+    if (!ok) await fail('No relay took the new bag. Nothing has moved.')
+  }
+
+  /** The old versions of what went out, back: the row follows (rekeyTo), or keeps it to put back. */
+  async function undoObjects(sent: StagedMove['objects']): Promise<void> {
+    for (const o of sent) {
+      if (await publishRetried(o.back)) rekeyTo(o.rowId, o.back)
+      else {
+        const mine = get().mine.map((d) => (d.eventId === o.rowId ? { ...d, putBack: o.back } : d))
+        set({ mine })
+        saveMine(mine)
+      }
+    }
+  }
+
+  /** A sent move's rows, and its source without them. Says so, in words, if no relay took the source: what moved has moved, and the old bag still names it until it is sent again. */
+  async function finishMove(stage: StagedMove): Promise<void> {
+    const src = stage.rows[0]
+    let sourcePublished = false
+    if (stage.source?.bag) sourcePublished = get().mine.some((d) => d.lookupId === src.lookupId && d.published) ? await publishMany(relaySet(), stage.source.bag).then((r) => r.ok, () => false) : false
+    if (stage.source?.retraction) await publishMany(relaySet(), stage.source.retraction).catch(() => undefined)
+    const leaving = new Set(stage.rows.map((r) => r.eventId))
+    const keyHex = bytesToHex(stage.to.key)
+    const fresh = stage.moved.map((r): MyDeployment => {
+      const { room: _was, putBack: _done, ...rest } = r
+      void _was
+      void _done
+      return { ...rest, ...(stage.to.room ? { room: stage.to.room } : {}), lookupId: stage.to.lookupId, keyHex, height: stage.to.height, bagId: stage.bag.id, published: stage.targetLive, bag: stage.settings }
+    })
+    const wasLive = get().mine.some((d) => d.lookupId === src.lookupId && d.published)
+    const mine = [
+      ...get().mine.filter((d) => !leaving.has(d.eventId)).map((d) => {
+        if (d.lookupId === stage.to.lookupId) return { ...d, bagId: stage.bag.id, published: stage.targetLive, bag: stage.settings }
+        return d.lookupId === src.lookupId && stage.source?.bag ? { ...d, bagId: stage.source.bag.id, published: sourcePublished } : d
+      }),
+      ...fresh,
+    ]
+    // The row is what speaks for it now; a find of the old place would draw it twice.
+    const discovered = { ...get().discovered }
+    for (const id of leaving) delete discovered[id]
+    set({ mine, discovered })
+    saveMine(mine)
+    for (const o of stage.objects) forgetReference(fresh.find((f) => f.inner.id === o.next.id)?.ref ?? [])
+    if (stage.source?.bag && wasLive && !sourcePublished) throw new Error('It moved, but no relay took the old bag without it. Send that bag again, or the old place still names it.')
+  }
+
+  /** All of a move: sign everything, send the new, finish with the old. */
+  async function moveEntries(rows: MyDeployment[], to: MoveTarget): Promise<void> {
+    if (rows.length === 0) return
+    const stage = await stageMove(rows, to)
+    await sendMove(stage)
+    await finishMove(stage)
+  }
+
   return {
     pending: null,
     chestBack: null,
@@ -1520,6 +1840,9 @@ export const useShards = create<ShardsState>((set, get) => {
     deployNote: null,
     deployAsk: null,
     deployError: null,
+    deployLeaveOut: null,
+    setDeployLeaveOut: (room) => set({ deployLeaveOut: room }),
+    deployInto: null,
     mine: loadMine(),
     discovered: {},
     curated: null,
@@ -1622,6 +1945,10 @@ export const useShards = create<ShardsState>((set, get) => {
       const d: ChestDraft = draft ?? { name: '', lock: null, requires: '', contents: [] }
       set({ pending: { type: 'chest', name: d.name, lock: d.lock, requires: d.requires, contents: d.contents, look: DEFAULT_CHEST_LOOK }, ...freshDeploy, ...lookStart(DEFAULT_CHEST_LOOK), deployHeightAuto: true, deployNote: null, deployAsk: null })
     },
+    startPlaceDoor: () => {
+      if (get().deployStatus === 'working') return
+      set({ pending: { type: 'chest', door: true, name: '', lock: null, requires: '', contents: [], look: DEFAULT_DOOR_LOOK }, ...freshDeploy, ...lookStart(DEFAULT_DOOR_LOOK), deployHeightAuto: true, deployNote: null, deployAsk: null })
+    },
     placeChest: () => {
       const p = get().pending
       if (!placingChest(p) || p?.type !== 'chest') return
@@ -1655,13 +1982,14 @@ export const useShards = create<ShardsState>((set, get) => {
       // Its look as it stands, posed again from there: a chest from before
       // looks goes out wearing the built-in it was drawn as.
       const worn = lookOf({ type: 'chest', event: d.inner })
+      const door = d.chest.door !== undefined
       // A look this client will not read goes as it is, raw: reading it as "no look" would swap it for the built-in.
       const own = lookTagsOf(d.chest.look, d.inner.pubkey)
       const unread = !!d.chest.look && ((!own.closed && d.chest.look.some((t) => t.length === 2)) || (!own.open && d.chest.look.some((t) => t.length === 3 && t[2] === 'open')))
-      const look: LookChoice = unread ? { from: 'kept', tags: d.chest.look! } : d.chest.look && worn ? { from: 'model', closed: worn.closed, open: worn.open } : DEFAULT_CHEST_LOOK
+      const look: LookChoice = unread ? { from: 'kept', tags: d.chest.look! } : d.chest.look && worn ? { from: 'model', closed: worn.closed, open: worn.open } : door ? DEFAULT_DOOR_LOOK : DEFAULT_CHEST_LOOK
       const model = lookModelOf(look)
       set({
-        pending: { type: 'chest', name: d.chest.name, lock: { pubkey: d.chest.lockPubkey, label: d.chest.requires || 'its lock' }, requires: d.chest.requires, contents: [], look, move: { eventId } },
+        pending: { type: 'chest', name: d.chest.name, lock: { pubkey: d.chest.lockPubkey, label: d.chest.requires || 'its lock' }, requires: d.chest.requires, contents: [], look, move: { eventId }, ...(door ? { door: true as const } : {}) },
         ...freshDeploy,
         deployHeight: d.height,
         deployHeightAuto: false,
@@ -1705,6 +2033,243 @@ export const useShards = create<ShardsState>((set, get) => {
         await replaceChest(d, { ...sealed.chest, ...(d.chest.look ? { look: d.chest.look } : {}) }, sealed.entries)
         const place: HeldPlace = { lookupId: d.lookupId, bagId: d.bagId, at: d.at, plane: d.plane, height: d.height }
         for (const f of sealed.forged) useInventory.getState().holdForged(f.event, f.key, place)
+        return null
+      } catch (err) {
+        return err instanceof Error ? err.message : String(err)
+      }
+    },
+    sealIntoRoom: async (doorId, eventIds) => {
+      const cs = cyber()
+      const me = cs.identity.pubkey
+      const door = get().mine.find((d) => d.eventId === doorId)
+      const secret = door ? doorSecret(me, doorId) : null
+      if (!door || !secret) return 'Sealing into a room needs its door secret. Open the door first.'
+      const rows = hereInRoom(get().mine, door).filter((d) => eventIds.includes(d.eventId))
+      if (rows.length === 0) return 'Nothing here to seal.'
+      try {
+        const place = await doorLocation(door)
+        const key = roomKey(place.key, hexToBytes(secret))
+        await moveEntries(rows, { key, lookupId: roomLookupId(key), height: place.height, room: { doorId } })
+        return null
+      } catch (err) {
+        return err instanceof Error ? err.message : String(err)
+      }
+    },
+    resealDoor: async (eventId, draft) => {
+      const cs = cyber()
+      const me = cs.identity.pubkey
+      const d = get().mine.find((m) => m.eventId === eventId)
+      if (!d?.chest || d.chest.door === undefined || d.inner.pubkey !== me) return 'Only the door\u2019s hider can change it.'
+      if (!draft.name.trim()) return 'Name the door.'
+      const named = { ...d.chest, name: draft.name.trim(), requires: draft.requires.trim() }
+      try {
+        // The same lock: the same seal, a new name and label. Nothing behind it changes.
+        if (draft.lock.pubkey === d.chest.lockPubkey) {
+          const row = await replaceChest(d, named)
+          const secret = doorSecret(me, eventId)
+          if (secret) keepDoorSecret(me, row.eventId, secret)
+          retargetRoom(eventId, row.eventId)
+          return null
+        }
+        // A new lock rotates the room key (R10, §3.7.7). In the spec's order, so
+        // nothing can be lost on the way: every door and bag is signed first, and
+        // the new secret kept, before anything goes out; then the new room bag;
+        // then the doors; and only when all of that has landed, the old bag goes.
+        // Whoever opened it before keeps what they read, not what comes after.
+        const secret = doorSecret(me, eventId)
+        if (!secret) return 'Changing the lock needs the door secret. Open the door first.'
+        const doorRows = doorRowsOfRoom(d)
+        const live = doorRows.some((door) => get().mine.some((m) => m.lookupId === door.lookupId && m.published))
+        const synced = await syncRoomRows(d, secret, live)
+        if (typeof synced === 'string') return synced
+        const place = await doorLocation(d)
+        const oldKey = roomKey(place.key, hexToBytes(secret))
+        const oldLookup = roomLookupId(oldKey)
+        const nextSecret = newDoorSecret()
+        const nextKey = roomKey(place.key, hexToBytes(nextSecret))
+        const nextLookup = roomLookupId(nextKey)
+        const signed = new Map<string, { row: MyDeployment; next: ChestItem; inner: NostrEvent; createdAt: number }>()
+        for (const door of doorRows) {
+          const lockPubkey = door.eventId === eventId ? draft.lock.pubkey : door.chest!.lockPubkey
+          const sealed = sealEntries(roomEntries(nextSecret) as BagEntry[], lockPubkey)
+          const next = { ...(door.eventId === eventId ? named : door.chest!), lockPubkey, senderPubkey: sealed.senderPubkey, payload: sealed.payload }
+          const createdAt = Math.max(Math.floor(Date.now() / 1000), door.createdAt + 1)
+          signed.set(door.eventId, { row: door, next, createdAt, inner: await cs.signEvent(chestInnerTemplate(next, positionOf(door), door.plane, createdAt)) })
+        }
+        const editedId = signed.get(eventId)!.inner.id
+        const stage = synced.length > 0 ? await stageMove(synced, { key: nextKey, lookupId: nextLookup, height: place.height, room: { doorId: editedId } }, true) : null
+        const bags = new Map<string, { event: NostrEvent; settings: BagSettings; publicly: boolean }>()
+        for (const lookupId of new Set(doorRows.map((door) => door.lookupId))) {
+          const first = doorRows.find((door) => door.lookupId === lookupId)!
+          const publicly = get().mine.some((m) => m.lookupId === lookupId && m.published)
+          const key = hexToBytes(first.keyHex)
+          const gathered = await gatherInners(lookupId, key, publicly, first.height)
+          const swap = new Map(doorRows.filter((door) => door.lookupId === lookupId).map((door) => [entryKey(entryOf(door)), signed.get(door.eventId)!.inner as BagEntry]))
+          const entries = [...gathered.entries.map((e) => swap.get(entryKey(e)) ?? e), ...[...swap].filter(([k]) => !gathered.entries.some((e) => entryKey(e) === k)).map(([, v]) => v)]
+          const settings = gathered.settings ?? first.bag ?? DEFAULT_BAG_SETTINGS
+          bags.set(lookupId, { publicly, settings, event: await signBag(entries, key, lookupId, first.height, settings, { at: positionOf(first), plane: first.plane }, gathered.entries) })
+        }
+        const retraction = live ? await bagRetraction(oldLookup, synced[0]?.bagId ?? null) : null
+        // Everything is signed. From here a failure is a relay's. The new secret is
+        // kept before anything goes out, under the doors it will open.
+        for (const { inner } of signed.values()) keepDoorSecret(me, inner.id, nextSecret)
+        if (stage) await sendMove(stage)
+        let landed = 0
+        for (const [, bag] of bags) {
+          if (!bag.publicly) { landed++; continue }
+          const ok = await publishMany(relaySet(), bag.event).then((r) => r.ok, () => false)
+          if (ok) landed++
+          else if (landed === 0) {
+            // No door has moved: the old one stands, and its room comes back as it was.
+            if (stage) {
+              await undoObjects(stage.objects)
+              await retractBag(nextLookup, stage.bag.id)
+            }
+            return 'No relay took the door. Nothing has changed.'
+          } else break
+        }
+        // The rows follow what went out.
+        const doorMine = get().mine.map((m): MyDeployment => {
+          const was = signed.get(m.eventId)
+          const bag = bags.get(m.lookupId)
+          if (was && bag) {
+            const { sealed: _gone, ...rest } = m
+            void _gone
+            return { ...rest, eventId: was.inner.id, inner: was.inner, chest: was.next, createdAt: was.createdAt, bagId: bag.event.id, published: bag.publicly, bag: bag.settings }
+          }
+          return bag ? { ...m, bagId: bag.event.id, published: bag.publicly, bag: bag.settings } : m
+        })
+        set({ mine: doorMine })
+        saveMine(doorMine)
+        const discovered = { ...get().discovered }
+        for (const [old, was] of signed) {
+          const h = discovered[old]
+          if (h) { delete discovered[old]; discovered[was.inner.id] = { ...h, eventId: was.inner.id, inner: was.inner, chest: was.next, createdAt: was.createdAt, bagId: bags.get(was.row.lookupId)?.event.id ?? h.bagId } }
+        }
+        set({ discovered, selectedSecret: signed.get(get().selectedSecret ?? '')?.inner.id ?? get().selectedSecret })
+        remember([...signed.values()].map((v) => v.inner.id))
+        if (stage) await finishMove(stage)
+        for (const [old, was] of signed) retargetRoom(old, was.inner.id)
+        if (landed < bags.size) return 'One of this room\u2019s doors did not go out, and still names the old room. Nothing behind it is lost: EDIT it again when a relay is reachable.'
+        // Last, and only now: the old room bag (§3.7.7 step 4).
+        if (retraction) await publishMany(relaySet(), retraction).catch(() => undefined)
+        return null
+      } catch (err) {
+        return err instanceof Error ? err.message : String(err)
+      }
+    },
+    deleteDoor: async (eventId, contents) => {
+      const me = cyber().identity.pubkey
+      const d = get().mine.find((m) => m.eventId === eventId)
+      if (!d?.chest || d.chest.door === undefined || d.inner.pubkey !== me) return 'Only the door\u2019s hider can remove it.'
+      try {
+        // One of several: only this door goes. The room stays while any other
+        // door opens it (§3.7.8), and what stood behind this door now stands
+        // behind that one.
+        const others = doorRowsOfRoom(d).filter((m) => m.eventId !== eventId)
+        if (others.length > 0) {
+          await get().deleteInstance(eventId)
+          retargetRoom(eventId, others[0].eventId)
+          // What this device knew of the room it still knows, by the door that stands.
+          const known = doorSecret(me, eventId)
+          if (known && !doorSecret(me, others[0].eventId)) keepDoorSecret(me, others[0].eventId, known)
+          return null
+        }
+        const secret = doorSecret(me, eventId)
+        // Without the secret the door goes and its room bag stays, readable
+        // only by whoever kept the secret (§3.7.8, 4.11).
+        if (!secret) { await get().deleteInstance(eventId); return null }
+        const live = get().mine.some((m) => (m.lookupId === d.lookupId || m.room?.doorId === eventId) && m.published)
+        const rows = await syncRoomRows(d, secret, live)
+        if (typeof rows === 'string') return rows
+        const place = await doorLocation(d)
+        const key = roomKey(place.key, hexToBytes(secret))
+        if (contents) for (const r of rows) await get().deleteInstance(r.eventId)
+        else await moveEntries(rows, { key: place.key, lookupId: place.lookupId, height: place.height })
+        // Never a room bag no door names (§3.7.8).
+        if (live || rows.some((r) => r.published)) await retractBag(roomLookupId(key), null)
+        await get().deleteInstance(eventId)
+        return null
+      } catch (err) {
+        return err instanceof Error ? err.message : String(err)
+      }
+    },
+    convertToDoor: async (eventId) => {
+      const cs = cyber()
+      const me = cs.identity.pubkey
+      const d = get().mine.find((m) => m.eventId === eventId)
+      if (!d?.chest || d.type !== 'chest' || d.chest.door !== undefined || d.inner.pubkey !== me) return 'Only the chest\u2019s hider can convert it.'
+      if (d.height < 1) return 'A door locks a region: this chest is hidden at height 0, so MOVE it higher first.'
+      if (d.room) return 'This chest stands in a room: MOVE it out of the room first.'
+      // CONVERT never loses anything: every thing in the chest, as it is, unfiltered.
+      let list: unknown[]
+      if (d.sealed) list = d.sealed
+      else {
+        const opener = openerFor(d.chest, openingKeys(useInventory.getState().items), me)
+        if (!opener) return 'Opening the chest needs the key it is sealed to, which this device does not hold.'
+        try {
+          const parsed = JSON.parse(opener.by === 'key' ? plaintextWithSecret(d.chest, opener.key.secretHex) : await cs.decryptSealed(d.chest.senderPubkey, d.chest.payload)) as unknown
+          if (!Array.isArray(parsed)) return 'This chest holds something this client cannot read.'
+          list = parsed
+        } catch (err) {
+          return `The chest did not open: ${err instanceof Error ? err.message : String(err)}`
+        }
+      }
+      // Anything that could not stand in the room refuses the whole conversion:
+      // the chest stays exactly as it was, and nothing has been signed or sent.
+      const here = positionOf(d)
+      const { movable, blocked } = movableIntoRoom(list, me, here, d.plane, d.height)
+      if (blocked > 0) return cantMove(blocked)
+      // One secret per room (§3.7.5): a door of yours already in this room hands
+      // this one its secret, and what the chest held joins that room.
+      const standing = ownDoors(get().mine, me).filter((o) => roomOf(o.at, o.plane, o.height) === roomOf(here, d.plane, d.height))
+      if (standing.some((o) => !o.secret)) return 'A door of yours already stands in this room. Open it first, and this one joins it.'
+      const secret = standing[0]?.secret ?? newDoorSecret()
+      const key = roomKey(hexToBytes(d.keyHex), hexToBytes(secret))
+      const lookupId = roomLookupId(key)
+      const inside = movable.map((e): BagEntry => { const { sig, ...rumor } = e.event; return sig ? e.event : rumor })
+      const live = get().mine.some((m) => m.lookupId === d.lookupId && m.published)
+      let bagId = ''
+      let published = false
+      try {
+        if (inside.length > 0) {
+          const room = await gatherInners(lookupId, key, live, d.height)
+          const written = await publishBag(mergeEntries(room.entries, inside), key, lookupId, d.height, live, ROOM_BAG_SETTINGS, { at: here, plane: d.plane }, undefined, room.entries)
+          bagId = written.event.id
+          published = written.published
+          if (live && !published) return 'No relay took the room. The chest stays as it was.'
+          // Every entry must have reached the room bag, read back from what was
+          // written: the bag writer leaves out what a chest beside it holds.
+          const reached = new Set((await bagEntries(written.event, key)).map(entryKey))
+          const missing = inside.filter((e) => !reached.has(entryKey(e))).length
+          if (missing > 0) {
+            // Taken back only when this write made the bag; a room already there stays as it was.
+            if (published && room.entries.length === 0) await retractBag(lookupId, bagId)
+            return cantMove(missing)
+          }
+        }
+        const sealed = sealEntries(roomEntries(secret) as BagEntry[], d.chest.lockPubkey)
+        const look = builtInLookTags('door', { unit: 0, turn: [0, 0, 0], constrain: 'all' })
+        // Only now does the chest go, in one rewrite with the door in its place.
+        let row: MyDeployment
+        try {
+          row = await replaceChest(d, { ...d.chest, senderPubkey: sealed.senderPubkey, payload: sealed.payload, look, door: d.height })
+        } catch (err) {
+          // The chest stands; a room bag no door names does not (§3.7.8).
+          if (published && standing.length === 0) await retractBag(lookupId, bagId)
+          throw err
+        }
+        keepDoorSecret(me, row.eventId, secret)
+        const keyHex = bytesToHex(key)
+        const rows = movable.map((e): MyDeployment => {
+          const p = eventPlace(e.event)!
+          const { sig, ...rumor } = e.event
+          return { eventId: e.id, inner: sig ? e.event : rumor, type: e.body.type, shard: e.body.shard, text: e.body.text, key: e.body.key, chest: e.body.chest, audio: e.body.audio, bagId, at: storedAt(p.at), plane: d.plane, height: d.height, lookupId, keyHex, relays: relaySet(), createdAt: e.event.created_at, published, bag: ROOM_BAG_SETTINGS, room: { doorId: row.eventId } }
+        })
+        // Any room bag's other rows name its newest envelope; the door's bag is this write's own.
+        const mine = [...get().mine.map((m) => (m.lookupId === lookupId && bagId ? { ...m, bagId, published } : m)), ...rows]
+        set({ mine })
+        saveMine(mine)
         return null
       } catch (err) {
         return err instanceof Error ? err.message : String(err)
@@ -1848,6 +2413,23 @@ export const useShards = create<ShardsState>((set, get) => {
         set({ deployStatus: 'error', deployError: 'That chest is no longer among what this device hid, so there is nothing to move.' })
         return
       }
+      // A door moves only inside its own room (R7), and keeps its height.
+      const movedDoorHeight = movedChest?.chest?.door
+      if (movedChest && movedDoorHeight !== undefined && (deployHeight !== movedChest.height || !inRoom(positionOf(movedChest), movedDoorHeight, at) || plane !== movedChest.plane)) {
+        set({ deployStatus: 'error', deployError: 'A door moves only inside its own room, at its own height.' })
+        return
+      }
+      // A door locks a region: a height of at least 1 (§3.7.1).
+      if (pending.type === 'chest' && pending.door && deployHeight < 1) {
+        set({ deployStatus: 'error', deployError: 'A door locks a region: hide it at height 1 or more.' })
+        return
+      }
+      // Which door's room this lands in, at exactly that door's height (R1). X left it out (R2).
+      const into = sealingDoor(get(), cs.identity.pubkey, at, plane, deployHeight)
+      if (into && !into.secret) {
+        set({ deployStatus: 'error', deployError: `${into.name} stands here, and this device does not know its secret. OPEN it first, or leave this one out with the ×.` })
+        return
+      }
       // An earlier move of it that could not be put back is put back first.
       if (was?.putBack) {
         // Working from here, so a second tap waits as for any hide.
@@ -1887,6 +2469,8 @@ export const useShards = create<ShardsState>((set, get) => {
       let forgedInside: Array<{ event: NostrEvent; key: KeyItem }> = []
       // What a chest holds, as sealed, kept on this device (MyDeployment `sealed`).
       let sealedInside: BagEntry[] | undefined
+      // A door's secret, kept on this device from the moment it is sealed (4.11).
+      let doorSecretHex: string | null = null
       let innerTemplate: EventTemplate | undefined
       // From the Shard Feed: the author's object, by reference (LIVE LINK) or
       // as a copy that credits it (DECK-0003 §3.2; ruling B1).
@@ -1941,7 +2525,7 @@ export const useShards = create<ShardsState>((set, get) => {
         // Signed and sealed inside the try below: the contents are signed by
         // the identity, which may be a remote signer, and the bar shows it.
         // A moved chest is sealed already.
-        if (!movedChest && (!pending.name.trim() || pending.contents.length === 0 || !pending.lock)) return
+        if (!movedChest && (!pending.name.trim() || (!pending.door && pending.contents.length === 0) || !pending.lock)) return
       } else if (pending.type === 'audio') {
         if (!pending.audio.url) return
         // The sphere is set at the ghost; where it really lands it is clamped to the room it has there (never out of the hide region).
@@ -1981,13 +2565,26 @@ export const useShards = create<ShardsState>((set, get) => {
       set({ deployStatus: 'working', deployError: null, deployAsk: null })
       try {
         if (pending.type === 'chest') {
-          set({ deployNote: 'Signing and sealing the chest' })
+          set({ deployNote: pending.door ? 'Sealing the door' : 'Signing and sealing the chest' })
           // What it wears, posed by the bar (DECK-0004 §3.6), before anything is sealed.
           const look = lookTagsFor(pending.look ?? DEFAULT_CHEST_LOOK, { unit: deployUnit, turn: deployTurn, constrain: deployConstrain })
           if (movedChest?.chest) {
             // Moved: its seal and what it holds are untouched; only its place and look change.
             chest = { ...movedChest.chest, look }
             sealedInside = movedChest.sealed
+          } else if (pending.door) {
+            // One secret per room (§3.7.5): a door of yours already in this
+            // room hands this one its secret, and this one joins the room
+            // (R5). One this device has no secret for cannot be joined here:
+            // two secrets would be two rooms at one height, which the spec
+            // forbids, so it is opened first.
+            const room = roomOf(at, plane, deployHeight)
+            const standing = ownDoors(get().mine, cs.identity.pubkey).filter((d) => roomOf(d.at, d.plane, d.height) === room)
+            // Every door of the room: one this device has no secret for may have rotated since, and a sibling's secret would be the old room's.
+            if (standing.some((d) => !d.secret)) throw new Error('A door of yours already stands in this room. Open it first, and this one joins it.')
+            doorSecretHex = standing[0]?.secret ?? newDoorSecret()
+            const sealed = sealEntries(roomEntries(doorSecretHex) as BagEntry[], pending.lock!.pubkey)
+            chest = { name: pending.name.trim(), lockPubkey: pending.lock!.pubkey, senderPubkey: sealed.senderPubkey, requires: pending.requires.trim(), payload: sealed.payload, look, door: deployHeight }
           } else {
             const sealed = await sealChest(pending, at, plane, createdAt)
             chest = { ...sealed.chest, look }
@@ -2011,6 +2608,13 @@ export const useShards = create<ShardsState>((set, get) => {
         } else {
           set({ deployNote: `Computing the 2^${deployHeight} key on this machine` })
           rk = await regionKeyOffThread(at, deployHeight, MAX_COMPUTE_HEIGHT)
+        }
+        // Into a door's room: the room key and lookup id in place of the
+        // region's (DECK-0004 §3.7.2), everything else as for any bag, large
+        // shards by reference sealed with the room key included.
+        if (into?.secret) {
+          const key = roomKey(rk.key, hexToBytes(into.secret))
+          rk = { key, lookupId: roomLookupId(key) }
         }
         set({ deployNote: 'Sealing and publishing' })
         // A move of something already on the relays goes to the relays, LOCAL
@@ -2102,7 +2706,7 @@ export const useShards = create<ShardsState>((set, get) => {
           // this region's bag only if `deployBagFrom` names this region.
           const region = regionOf(at, plane, deployHeight)
           const base = deployBagFrom?.region === region ? deployBagFrom.settings : DEFAULT_BAG_SETTINGS
-          settings = resolveBagSettings(deployBag, base, existing.settings, deployHeight)
+          settings = into ? ROOM_BAG_SETTINGS : resolveBagSettings(deployBag, base, existing.settings, deployHeight)
           const sendObject = was && rollback && live
             ? async () => {
               const sent = await publishMany(relaySet(), inner)
@@ -2166,7 +2770,9 @@ export const useShards = create<ShardsState>((set, get) => {
           published,
           bag: settings,
           ...(sealedInside ? { sealed: sealedInside } : {}),
+          ...(into ? { room: { doorId: into.eventId } } : {}),
         }
+        if (doorSecretHex) keepDoorSecret(cs.identity.pubkey, inner.id, doorSecretHex)
         // A key you hid is yours to hold at once, alone or inside a chest, so
         // chests can be sealed to it from here on (B1 §3.1).
         const place: HeldPlace = { lookupId: rk.lookupId, bagId: event.id, at: storedAt(at), plane, height: deployHeight }
@@ -2227,6 +2833,12 @@ export const useShards = create<ShardsState>((set, get) => {
           const bag = again ? { deployBag: settings, deployBagFrom: ownBagIn(s.mine, regionOf(at, plane, deployHeight)) } : {}
           set({ deployStatus: 'done', pending: again, deployNote: null, deployAsk: null, placedLast, ...bag })
         }
+        // A moved door keeps its room: its secret, and what stands behind it, follow its new id.
+        if (movedChest && movedDoorHeight !== undefined) {
+          const secret = doorSecret(cs.identity.pubkey, movedChest.eventId)
+          if (secret) keepDoorSecret(cs.identity.pubkey, inner.id, secret)
+          retargetRoom(movedChest.eventId, inner.id)
+        }
         // A moved chest leaves its old place the same way.
         if (movedChest) {
           if (movedChest.lookupId !== rk.lookupId) {
@@ -2276,6 +2888,10 @@ export const useShards = create<ShardsState>((set, get) => {
       }
       const items = get().mine.filter((d) => d.lookupId === lookupId)
       if (items.length === 0) return false
+      // A door must never go out before its room: it would open onto nothing.
+      const doorIds = new Set(items.filter((d) => d.chest?.door !== undefined).map((d) => d.eventId))
+      const rooms = new Set(get().mine.filter((d) => d.room && doorIds.has(d.room.doorId) && !d.published).map((d) => d.lookupId))
+      for (const room of rooms) if (!(await get().broadcast(room))) return false
       set({ broadcasting: lookupId, broadcastError: null, broadcastFailed: null })
       try {
         const key = hexToBytes(items[0].keyHex)
@@ -2622,13 +3238,14 @@ export const useShards = create<ShardsState>((set, get) => {
       const item = get().mine.find((d) => d.eventId === eventId)
       if (!item || !item.published) return 'missing'
       // Region key derived fresh from the coordinate, as a stranger would.
-      const rk = regionKeyAt(positionOf(item), item.height, MAX_COMPUTE_HEIGHT)
+      // In a room, its key is the room key, which no coordinate alone gives.
+      const rk = item.room ? { key: hexToBytes(item.keyHex), lookupId: item.lookupId } : regionKeyAt(positionOf(item), item.height, MAX_COMPUTE_HEIGHT)
       const events = await query({ kinds: [HIDDEN_KIND], '#d': [rk.lookupId] })
       let refused = false
       for (const ev of events) {
         const h = BigInt(item.height)
         const p = positionOf(item)
-        const items = await unbag(ev, rk.key, resolveReference, { at: { x: (p.x >> h) << h, y: (p.y >> h) << h, z: (p.z >> h) << h }, plane: item.plane }, item.height)
+        const items = await unbag(ev, rk.key, resolveReference, { at: { x: (p.x >> h) << h, y: (p.y >> h) << h, z: (p.z >> h) << h }, plane: item.plane }, item.height, undefined, item.room)
         if (items.some((h) => h.eventId === eventId)) return 'found'
         // The bag opened and this item is in it, signed, yet unbag dropped it:
         // the format refused it, and every other client will too.
@@ -2679,7 +3296,7 @@ export const useShards = create<ShardsState>((set, get) => {
     const me = useCyberspace.getState().identity.pubkey
     for (const d of state.mine) {
       seen.add(d.eventId)
-      out.push({ key: d.eventId, type: d.type, at: positionOf(d), plane: d.plane, height: d.height, mine: true, author: me, shard: d.shard, text: d.text, keyItem: d.key, chest: d.chest, audio: d.audio, createdAt: d.createdAt, lookupId: d.lookupId, bagId: d.bagId, target: itemTargetOf(d.inner, d.ref), event: d.inner as NostrEvent, ...lineageOf(d.inner, d.ref) })
+      out.push({ key: d.eventId, type: d.type, at: positionOf(d), plane: d.plane, height: d.height, mine: true, author: me, shard: d.shard, text: d.text, keyItem: d.key, chest: d.chest, audio: d.audio, createdAt: d.createdAt, lookupId: d.lookupId, bagId: d.bagId, ...(d.room ? { roomKeyHex: d.keyHex } : {}), target: itemTargetOf(d.inner, d.ref), event: d.inner as NostrEvent, ...lineageOf(d.inner, d.ref) })
     }
     for (const h of Object.values(state.discovered)) {
       if (seen.has(h.eventId)) continue
@@ -2702,3 +3319,11 @@ useShards.subscribe((s, prev) => {
 if (import.meta.env.DEV && typeof window !== 'undefined') {
   ;(window as unknown as { __shards?: unknown }).__shards = useShards
 }
+
+// The X on the door-name chip leaves one placement out (R2): whatever is
+// lined up next asks again. A chest being placed and then filled is one placement.
+useShards.subscribe((s, prev) => {
+  if (s.pending === prev.pending || s.deployLeaveOut === null) return
+  if (s.pending?.type === 'chest' && prev.pending?.type === 'chest') return
+  useShards.setState({ deployLeaveOut: null })
+})

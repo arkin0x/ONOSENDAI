@@ -64,13 +64,13 @@ const actions = (html: string): string[] => {
 }
 
 describe('FORGE AN ITEM / SEAL A CHEST / SEAL A DOOR', () => {
-  it('are three distinct buttons, SEAL A DOOR soon', () => {
+  it('are three distinct buttons, each live', () => {
     const html = render(<ShardsPanel />)
     const i = html.indexOf('FORGE AN ITEM'), c = html.indexOf('SEAL A CHEST'), d = html.indexOf('SEAL A DOOR')
     expect(i).toBeGreaterThan(-1)
     expect(c).toBeGreaterThan(i)
     expect(d).toBeGreaterThan(c)
-    expect(html).toMatch(/<button[^>]*disabled=""[^>]*title="Soon"[^>]*>.*?SEAL A DOOR/)
+    expect(html).not.toContain('title="Soon"')
   })
 })
 
@@ -98,7 +98,7 @@ describe('EDIT · MOVE · ADD · DELETE on a chest', () => {
     const row: MyDeployment = { eventId: event.id, inner: event, type: 'chest', chest, bagId: 'bag', at: { x: '1', y: '2', z: '3' }, plane: 0, height: 4, lookupId: 'lookup', keyHex: 'aa'.repeat(32), relays: [], createdAt: 1, published: false }
     useShards.setState({ mine: [row], selectedSecret: event.id })
     const a = actions(render(<SecretModal />))
-    expect(a.slice(1)).toEqual(['EDIT', 'MOVE', 'ADD', 'DELETE'])
+    expect(a.slice(1)).toEqual(['EDIT', 'MOVE', 'ADD', 'CONVERT TO DOOR', 'DELETE'])
     useCyberspace.setState({ identity: me })
   })
 

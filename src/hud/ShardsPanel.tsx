@@ -35,6 +35,12 @@ export function sealAChest(): void {
   useShards.getState().startPlaceChest(kept?.type === 'chest' ? { name: kept.name, lock: kept.lock, requires: kept.requires, contents: kept.contents } : null)
 }
 
+/** SEAL A DOOR: a door on the hide bar at once, to place first (4.2). */
+export function sealADoor(): void {
+  useStash.getState().close()
+  useShards.getState().startPlaceDoor()
+}
+
 export function ShardsPanel(): JSX.Element {
   const mine = useShards((s) => s.mine)
   const scanning = useShards((s) => s.scanning)
@@ -105,13 +111,13 @@ export function ShardsPanel(): JSX.Element {
           first. A chest and a door are placed first, then filled (R18;
           2026-10-31: "tap, choose location, choose contents for both doors
           and chests"): the hide bar comes up at once, and the chest's modal
-          after PLACE CHEST. SEAL A DOOR waits for DOOR authoring. */}
+          after PLACE CHEST or PLACE DOOR. */}
       <div className="shards__section">
         <span className="legend__label">Place an item, a chest or a door</span>
         <div className="shards__modes">
           <button className="avatars__go shards__compose-open" onClick={() => useStash.getState().openKey()} title="Forge a keypair as an item and hide it; whoever finds it can TAKE it, and a chest can be sealed to it"><ItemIcon type="key" className="shards__build-icon" size={13} strokeWidth={2.5} /> FORGE AN ITEM</button>
           <button className="avatars__go shards__compose-open" onClick={sealAChest} title="Place a chest, then seal a message, a model or an item in it to an item or a person"><ItemIcon type="chest" className="shards__build-icon" size={13} strokeWidth={2.5} /> SEAL A CHEST</button>
-          <button className="avatars__go shards__compose-open" disabled title="Soon"><DoorClosedLocked className="item-icon shards__build-icon" size={13} strokeWidth={2.5} aria-hidden /> SEAL A DOOR</button>
+          <button className="avatars__go shards__compose-open" onClick={sealADoor} title="Place a door, then whatever you place in its red cube at its height is sealed to it"><DoorClosedLocked className="item-icon shards__build-icon" size={13} strokeWidth={2.5} aria-hidden /> SEAL A DOOR</button>
         </div>
       </div>
 

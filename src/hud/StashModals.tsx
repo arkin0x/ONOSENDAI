@@ -139,6 +139,8 @@ export function StashModals(): JSX.Element | null {
   const mine = useShards((s) => s.mine)
   const close = useStash.getState().close
   const all = bagsOf(mine)
+  const placedDoor = useShards((s) => s.pending?.type === 'chest' && !!s.pending.door)
+  const editedDoor = !!chestEdit && mine.find((d) => d.eventId === chestEdit.eventId)?.chest?.door !== undefined
 
   if (bag !== null) {
     const b = all.find((x) => x.lookupId === bag)
@@ -197,14 +199,14 @@ export function StashModals(): JSX.Element | null {
   if (chest) {
     // Closing the modal of a chest being placed goes back to the hide bar, the draft kept on it (ChestCompose MOVE).
     return (
-      <Shell title="Seal a chest" onClose={() => { if (useShards.getState().deployStatus === 'working') return; useShards.getState().unplaceChest(); close() }}>
+      <Shell title={placedDoor ? 'Seal a door' : 'Seal a chest'} onClose={() => { if (useShards.getState().deployStatus === 'working') return; useShards.getState().unplaceChest(); close() }}>
         <ChestCompose onDone={close} />
       </Shell>
     )
   }
   if (chestEdit) {
     return (
-      <Shell title={chestEdit.fields ? 'Edit chest' : 'Add to chest'} onClose={close}>
+      <Shell title={editedDoor ? 'Edit door' : chestEdit.fields ? 'Edit chest' : 'Add to chest'} onClose={close}>
         <ChestCompose key={chestEdit.eventId} onDone={close} target={{ mode: 'edit', eventId: chestEdit.eventId, fields: chestEdit.fields }} />
       </Shell>
     )

@@ -1,6 +1,6 @@
 /**
  * lookDeploy.test.ts: hiding a chest writes the model it wears as `look`
- * tags (DECK-0004 §3.6, cyberspace PR #82, held), chosen on the hide bar's
+ * tags (DECK-0004 §3.6), chosen on the hide bar's
  * model row and posed by its SCALE, TURN and WALK (chest and door design,
  * D2, D3). TREASURE by default; OTHER from MINE as a copy, from FEED as a
  * one-part wrapper; a look too large is refused in words and nothing is
@@ -35,7 +35,8 @@ import type { Position } from '../../lib/space'
 import { useBuilder } from '../useBuilder'
 import { useCyberspace } from '../useCyberspace'
 import { useInventory } from '../useInventory'
-import { useShards } from '../useShards'
+import { storedMine, useShards } from '../useShards'
+import { useToast } from '../useToast'
 import { useWorkshop } from '../useWorkshop'
 
 const S = () => useShards.getState()
@@ -66,6 +67,30 @@ beforeEach(() => {
   useCyberspace.setState({ live: false, position: CURSOR, anchor: CURSOR, cursor: CURSOR, spectate: null, exploreIndex: null, transit: null })
   useWorkshop.setState({ shards: [] })
   vi.spyOn(console, 'warn').mockImplementation(() => { /* IndexedDB is absent here */ })
+})
+
+describe('a chest\u2019s record', () => {
+  it('stores its look once, in its inner event; a reload has it back', async () => {
+    start()
+    const chest = await hide()
+    expect(chest?.look).toHaveLength(2)
+    const row = S().mine.find((x) => x.type === 'chest')!
+    const stored = JSON.parse(storedMine(S().mine)) as Array<{ chest?: { look?: unknown }; inner: { tags: string[][] } }>
+    expect(stored[0].chest?.look).toBeUndefined()
+    expect(stored[0].inner.tags.filter((t) => t[0] === 'look')).toHaveLength(2)
+    // One copy of each 8 KB payload, not two.
+    expect(storedMine(S().mine).length).toBeLessThan(2 * JSON.stringify(row.chest?.look).length)
+  })
+
+  it('says so when this device has no room for it, rather than losing it in silence', async () => {
+    const spy = vi.spyOn(useToast.getState(), 'show')
+    const set = vi.spyOn(Object.getPrototypeOf(localStorage) === Object.prototype ? localStorage : Storage.prototype, 'setItem').mockImplementation(() => { throw new Error('QuotaExceededError') })
+    start()
+    await hide()
+    set.mockRestore()
+    expect(useToast.getState().toast?.label ?? spy.mock.calls.at(-1)?.[0].label).toBe('NOT SAVED ON THIS DEVICE')
+    spy.mockRestore()
+  })
 })
 
 describe('a chest hides with the look it wears', () => {

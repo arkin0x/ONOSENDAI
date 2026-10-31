@@ -904,6 +904,8 @@ const mineKey = (owner: string): string => `${MINE_KEY}:${owner}`
  * the relays names them (claimUnclaimed).
  */
 const UNCLAIMED_KEY = 'onosendai:deployments-unclaimed'
+/** The store's list until followIdentity has read the identity's own. */
+const NOT_READ_YET: MyDeployment[] = []
 /**
  * Event ids this device has ever opened, newest last. `discovered` is memory
  * only and starts empty on every load, so without this the first scan after a
@@ -1412,7 +1414,7 @@ export const useShards = create<ShardsState>((set, get) => {
     deployAsk: null,
     deployError: null,
     // Filled in by followIdentity below, once useCyberspace has loaded.
-    mine: [],
+    mine: NOT_READ_YET,
     discovered: {},
     curated: null,
     deleted: loadDeleted(),
@@ -2477,15 +2479,23 @@ useShards.subscribe((s, prev) => {
 /**
  * YOURS is the signed-in identity's list and nobody else's: read it now, and
  * again on every switch. A card open on the old identity's row closes with it.
- * Deferred, because useCyberspace reaches this file through lib/destinationKeys
- * and may not have finished loading while this one runs.
+ * useCyberspace reaches this file through lib/destinationKeys and useSecrets, so
+ * it may not have finished loading while this one runs; then this tries again
+ * as soon as the loading stops.
  */
 function followIdentity(): void {
+  try {
+    if (!useCyberspace.getState().identity.pubkey) throw new Error('no identity yet')
+  } catch {
+    setTimeout(followIdentity, 0)
+    return
+  }
   const claim = (owner: string): void => {
     void claimUnclaimed(owner).catch((err) => console.warn(`[shards] could not claim hidden items: ${err instanceof Error ? err.message : String(err)}`))
   }
   const me = useCyberspace.getState().identity.pubkey
-  useShards.setState({ mine: loadMine(me) })
+  if (useShards.getState().mine === NOT_READ_YET) useShards.setState({ mine: loadMine(me) })
+  else migrateMine()
   claim(me)
   useCyberspace.subscribe((s, prev) => {
     const owner = s.identity.pubkey
@@ -2497,7 +2507,7 @@ function followIdentity(): void {
     claim(owner)
   })
 }
-queueMicrotask(followIdentity)
+followIdentity()
 
 if (import.meta.env.DEV && typeof window !== 'undefined') {
   ;(window as unknown as { __shards?: unknown }).__shards = useShards

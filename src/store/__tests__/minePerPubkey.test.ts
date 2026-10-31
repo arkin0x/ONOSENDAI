@@ -6,7 +6,7 @@
  * the owners its records prove, and no row is ever dropped on the way.
  */
 
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 
 if (typeof localStorage === 'undefined') {
   const mem = new Map<string, string>()
@@ -20,11 +20,11 @@ if (typeof localStorage === 'undefined') {
 
 let relayBags: unknown[] = []
 const sent: { kind: number }[] = []
-/** When set, a bag waits here on its way to the relays. */
-let holdBag: Promise<void> | null = null
+/** When set, a bag or a retraction waits here on its way to the relays, after its signature. */
+let held: { reached: () => void; until: Promise<void> } | null = null
 vi.mock('../../lib/relay', () => ({
   publishMany: vi.fn(async (_relays: string[], ev: { kind: number }) => {
-    if (ev.kind === 33330 && holdBag) await holdBag
+    if ((ev.kind === 33330 || ev.kind === 5) && held) { held.reached(); await held.until }
     sent.push(ev)
     return { ok: true }
   }),
@@ -75,16 +75,31 @@ function bagBy(sk: Uint8Array, ...entries: Reference[]): Promise<unknown> {
   return bagTemplate(entries, rk.key, rk.lookupId, HEIGHT, 2_000_000_000).then((tpl) => finalizeEvent(tpl, sk))
 }
 
+/** Hold what is sent to the relays. `reached` is when something got there; `release` lets it go. */
+function holdRelays(): { reached: Promise<void>; release: () => void } {
+  let release = (): void => {}
+  let arrive = (): void => {}
+  const until = new Promise<void>((resolve) => { release = resolve })
+  const reached = new Promise<void>((resolve) => { arrive = resolve })
+  held = { reached: arrive, until }
+  return { reached, release }
+}
+
 let home = ''
+
+beforeAll(async () => {
+  // useShards starts following the identity as soon as useCyberspace has loaded.
+  await new Promise((resolve) => setTimeout(resolve, 20))
+})
 
 beforeEach(() => {
   home ||= useCyberspace.getState().identity.pubkey
   relayBags = []
   sent.length = 0
-  holdBag = null
+  held = null
   localStorage.clear()
   useCyberspace.setState({ identity: { pubkey: home, npub: 'npub-home' }, live: true })
-  useShards.setState({ mine: [], deleted: {}, discovered: {}, pending: null, selectedSecret: null, deployStatus: 'idle' })
+  useShards.setState({ mine: [], deleted: {}, deletedBags: {}, discovered: {}, pending: null, selectedSecret: null, deployHeight: 0, deployUnit: 0, deployStatus: 'idle' })
 })
 
 describe('switching identity', () => {
@@ -120,39 +135,36 @@ describe('switching identity', () => {
     expect(useShards.getState().selectedSecret).toBe('a find')
   })
 
-  it('keeps a reload out of a deploy that finished after the switch: the row goes to whoever hid it', async () => {
+  it('puts a deploy that finishes after the switch on the list of whoever hid it', async () => {
     const shard: ShardModel = { ...newShard('held'), unit: 1, vertices: [{ p: [0, 0, 0] }, { p: [1, 0, 0] }, { p: [0, 1, 0] }], faces: [[0, 1, 2]] } as ShardModel
     useWorkshop.setState({ shards: [shard], currentId: shard.id })
     localStorage.setItem(keyOf(Y), JSON.stringify([row(Y, 'y1')]))
-    let release = (): void => {}
-    holdBag = new Promise((resolve) => { release = resolve })
+    const relays = holdRelays()
     useShards.getState().startDeployShard(shard.id)
     const deploying = useShards.getState().deploy()
-    await vi.waitFor(() => expect(useShards.getState().deployNote ?? useShards.getState().deployStatus).toBeTruthy())
-    await new Promise((resolve) => setTimeout(resolve, 50))
+    await relays.reached
     signIn(Y)
-    release()
+    relays.release()
     await deploying
     expect(ids(useShards.getState().mine)).toEqual(['y1'])
     expect(ids(stored(keyOf(Y)))).toEqual(['y1'])
     expect(stored(keyOf(home))).toHaveLength(1)
   })
 
-  it('keeps a delete that finished after the switch on the list it came from', async () => {
-    const mine = [row(home, 'h1'), row(home, 'h2', { lookupId: 'elsewhere', published: false })]
-    localStorage.setItem(keyOf(home), JSON.stringify(mine))
+  it('takes a delete that finishes after the switch off the list it came from', async () => {
+    localStorage.setItem(keyOf(home), JSON.stringify([row(home, 'h1', { lookupId: 'elsewhere' }), row(home, 'h2')]))
     localStorage.setItem(keyOf(Y), JSON.stringify([row(Y, 'y1')]))
     signIn(Y)
     signIn(home)
-    let release = (): void => {}
-    holdBag = new Promise((resolve) => { release = resolve })
-    relayBags = []
+    const relays = holdRelays()
     const deleting = useShards.getState().deleteInstance('h2')
+    await relays.reached
     signIn(Y)
-    release()
+    relays.release()
     await deleting
     expect(ids(useShards.getState().mine)).toEqual(['y1'])
     expect(ids(stored(keyOf(Y)))).toEqual(['y1'])
+    expect(ids(stored(keyOf(home)))).toEqual(['h1'])
   })
 })
 
@@ -208,13 +220,11 @@ describe('moving the bare list to its owners', () => {
   it('loses nothing when storage is full: the bare list stays, its owner still sees their rows, and the next load finishes', () => {
     const list = JSON.stringify([row(X, 'x1'), row(Y, 'y1')])
     localStorage.setItem(BARE, list)
-    const real = localStorage.setItem.bind(localStorage)
-    const full = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => { throw new DOMException('full', 'QuotaExceededError') })
+    const full = vi.spyOn(localStorage, 'setItem').mockImplementation(() => { throw new Error('QuotaExceededError') })
     signIn(X)
     full.mockRestore()
     expect(localStorage.getItem(BARE)).toBe(list)
     expect(ids(useShards.getState().mine)).toEqual(['x1'])
-    void real
     signIn(Y)
     expect(ids(useShards.getState().mine)).toEqual(['y1'])
     expect(localStorage.getItem(BARE)).toBeNull()
@@ -239,9 +249,8 @@ describe('a page load', () => {
     // useCyberspace first: it reaches useShards through lib/destinationKeys, so useShards loads inside it.
     const cyber = await import('../useCyberspace')
     const shards = await import('../useShards')
-    await Promise.resolve()
     expect(cyber.useCyberspace.getState().identity.pubkey).toBe(pubkey)
-    expect(ids(shards.useShards.getState().mine)).toEqual(['p1'])
+    await vi.waitFor(() => expect(ids(shards.useShards.getState().mine)).toEqual(['p1']))
     vi.resetModules()
   })
 })

@@ -113,8 +113,9 @@ const lastBags = new WeakMap<Census, { t: number; by: Map<string, number> }>()
 /**
  * A key's bags hidden as of `t`: MOST BAGS HIDDEN's rule (lib/countingRules
  * bagsHidden, the STASH badge's number), so the ticker's "n BAGS HIDDEN" for
- * the avatar on screen and the CYBERSPACE STATS board never disagree. Until
- * 2026-10-30 it counted every bag event the relays held, uncapped.
+ * the avatar on screen and the CYBERSPACE STATS board count by one rule, each
+ * at its own moment. Until 2026-10-30 it counted every bag event the relays
+ * held, uncapped.
  */
 export function bagsHiddenAt(c: Census, pubkey: string, t: number): number {
   let last = lastBags.get(c)
@@ -147,8 +148,10 @@ const lastLength = new WeakMap<ChainHistory, { t: number; n: number }>()
 
 /**
  * The valid actions on the chain standing at `t`: LONGEST CHAIN's rule
- * (lib/countingRules chainLength), so the ticker and the CYBERSPACE STATS
- * board never disagree. The chain is followed by its `previous` links, not
+ * (lib/countingRules chainLength), the rule of the CYBERSPACE STATS board too.
+ * They can still disagree: the board leaves out version 1 hops not on the list
+ * (dropUnlistedV1Hops) and the ticker does not, because that would make every
+ * TV viewer fetch the list. The chain is followed by its `previous` links, not
  * counted by time: a fork counts nothing and a gap ends it (until
  * 2026-10-30 this counted every action signed since the latest spawn). From
  * the history's index, a binary search: the marquee asks in a paint frame.

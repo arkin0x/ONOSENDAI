@@ -21,6 +21,15 @@ import { create } from 'zustand'
  */
 export const DEFAULT_RELAY = 'wss://cyberspace.nostr1.com'
 
+/**
+ * Relays this client never dials, whichever list names them: a saved relay
+ * list, a saved chain-holder set, a kind 10002, a kind 10050, a hint. The owner
+ * ruled on 2026-10-31 that wss://onosendai.feeds.relay.tools is down
+ * indefinitely: it answered HTTP 502 or refused for days, and a WALK step waited
+ * on it twice. Taking a relay off this list is all it takes to dial it again.
+ */
+export const RETIRED_RELAYS: readonly string[] = ['wss://onosendai.feeds.relay.tools']
+
 const STORAGE = 'onosendai:relays'
 
 interface RelaysState {
@@ -48,13 +57,22 @@ export function normalizeRelay(input: string): string | null {
   }
 }
 
+/** Whether a relay URL is retired, however it is written. Not a relay URL at all: not retired. */
+export function isRetiredRelay(url: string): boolean {
+  const norm = normalizeRelay(url)
+  return norm !== null && RETIRED_RELAYS.includes(norm)
+}
+
 function load(): string[] {
   try {
     const raw = localStorage.getItem(STORAGE)
     const list = raw ? (JSON.parse(raw) as unknown) : []
     const urls = Array.isArray(list) ? list.map((x) => (typeof x === 'string' ? normalizeRelay(x) : null)).filter((x): x is string => !!x) : []
+    // A retired relay leaves the saved list too, so this browser stops carrying it.
+    const kept = urls.filter((u) => !isRetiredRelay(u))
+    if (kept.length !== urls.length) save(kept)
     // The default is always first and always present.
-    return [DEFAULT_RELAY, ...urls.filter((u) => u !== DEFAULT_RELAY)]
+    return [DEFAULT_RELAY, ...kept.filter((u) => u !== DEFAULT_RELAY)]
   } catch {
     return [DEFAULT_RELAY]
   }
@@ -69,7 +87,7 @@ export const useRelays = create<RelaysState>((set, get) => ({
 
   add: (url) => {
     const norm = normalizeRelay(url)
-    if (!norm) return null
+    if (!norm || isRetiredRelay(norm)) return null
     if (get().relays.includes(norm)) return norm
     const relays = [...get().relays, norm]
     set({ relays })

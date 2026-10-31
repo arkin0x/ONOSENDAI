@@ -66,6 +66,11 @@ export interface PlacedLook {
 /** A look's cut and stance as last handed to the scene, by key: kept while equal, so what keys on them holds still. */
 export type KeptLookFrames = Map<string, Pick<LookFrame, 'clip' | 'pose'>>
 
+/** Only what is drawn stays kept: a look passed by goes, or a long walk keeps one of each it ever passed. */
+export function pruneLookFrames(kept: KeptLookFrames, drawn: ReadonlySet<string>): void {
+  for (const key of kept.keys()) if (!drawn.has(key)) kept.delete(key)
+}
+
 /**
  * How a look is drawn now (scene/LookMark LookFrame), from what is drawn: its
  * unit, its stance, and whom to trust for what it places (as WorldShards'
@@ -111,7 +116,7 @@ export function ChestLooks({ axes }: { axes: ViewAxes }): JSX.Element | null {
   const frames = useRef<KeptLookFrames>(new Map())
 
   const placed = useMemo<PlacedLook[]>(() => {
-    if (!markShown('note', scaleExp)) return []
+    if (!markShown('note', scaleExp)) { frames.current.clear(); return [] }
     const origin = alignedOrigin(anchor, scaleExp)
     const out: PlacedLook[] = []
     for (const w of useShards.getState().drawnItems()) {
@@ -128,6 +133,7 @@ export function ChestLooks({ axes }: { axes: ViewAxes }): JSX.Element | null {
       const frame = lookFrame(w, look, drawnLook(look, isOpen) ?? look.closed, centre, scaleExp, axes, frames.current)
       out.push({ key: w.key, look, opened: isOpen, loot, text: itemMarkText(w), sub: author({ author: w.author ?? '', mine: w.mine }), centre, frame })
     }
+    pruneLookFrames(frames.current, new Set(out.map((w) => w.key)))
     return out
     // mine, discovered, curated and muted are what worldItems reads.
     // eslint-disable-next-line react-hooks/exhaustive-deps

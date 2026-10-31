@@ -52,6 +52,7 @@ import { composeVerdict, SETTLE_MS, useCashu } from './useCashu'
 import { useSettled } from './useSettled'
 import { AudioUpload } from './AudioCompose'
 import { audioInnerTemplate } from '../lib/audioItem'
+import { useStash } from './stash'
 
 /** A pasted lock: an item's public key as hex, or a person's npub; either must name a point on the curve. */
 function parseLock(text: string): ChestLock | null {
@@ -142,7 +143,7 @@ export function ChestCompose({ onDone, target = { mode: 'place' } }: { onDone: (
   const [status, setStatus] = useState<string | null>(null)
   // What is inside could not be read here: sealing it again would wipe it, so nothing goes in or out.
   const [unread, setUnread] = useState(false)
-  const [saving, setSaving] = useState(false)
+  const saving = useStash((s) => s.chestSaving)
   useEffect(() => {
     if (!editing) return
     let on = true
@@ -150,7 +151,8 @@ export function ChestCompose({ onDone, target = { mode: 'place' } }: { onDone: (
       if (!on) return
       setLoading(false)
       if (typeof r === 'string') { setStatus(r); setUnread(true) }
-      else setContents(sealedContents(r, hidden?.inner.pubkey ?? me))
+      // Behind what was added while it opened, which stays.
+      else setContents((list) => [...sealedContents(r, hidden?.inner.pubkey ?? me), ...list])
     })
     return () => { on = false }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -217,8 +219,11 @@ export function ChestCompose({ onDone, target = { mode: 'place' } }: { onDone: (
   const seal = (): void => {
     if (!ready || !lock) return
     if (editing) {
-      setSaving(true); setStatus(null)
-      void useShards.getState().resealChest(editing.eventId, { ...current(), lock }).then((why) => { setSaving(false); if (why) setStatus(why); else onDone() })
+      useStash.setState({ chestSaving: true }); setStatus(null)
+      void useShards.getState().resealChest(editing.eventId, { ...current(), lock }).then(
+        (why) => { useStash.setState({ chestSaving: false }); if (why) setStatus(why); else onDone() },
+        (e: unknown) => { useStash.setState({ chestSaving: false }); setStatus(e instanceof Error ? e.message : 'The chest could not be saved.') },
+      )
       return
     }
     void useShards.getState().sealPlacedChest({ ...current(), lock })

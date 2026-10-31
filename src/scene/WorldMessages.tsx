@@ -72,7 +72,7 @@ const TAP_PX = 44
 
 const REACH = GRID_RADIUS * 8
 /** The message color: a warm note against the cool field. */
-const NOTE = '#ffd27d'
+export const NOTE = '#ffd27d'
 /** Bitcoin's own orange, for a coin left in cyberspace. */
 const BITCOIN = '#f7931a'
 /** The note's own blue, for the cube a message hangs on. */
@@ -114,7 +114,7 @@ interface Props {
  * credit ended up an inch from what it credited, with nothing to say which
  * item it belonged to (arkinox, 2026-09-14).
  */
-function author(w: { author: string; mine: boolean }): string {
+export function author(w: { author: string; mine: boolean }): string {
   return `— ${shortAuthor(w.author, w.mine)}`
 }
 
@@ -185,11 +185,12 @@ export function WorldMessages({ axes }: Props): JSX.Element | null {
     // the list at every zoom: whether one is spent is the mint's word, which
     // CoinItem asks for, and a spent coin drops out there.
     const notesShown = markShown('note', scaleExp)
-    // A key and a chest are drawn as notes are: a cube and a short label with
-    // the item's name, so VIEW and GO TO IT have something to arrive at. What
-    // they are and what they open is in the lists (ItemRows), one tap away.
-    return useShards.getState().worldItems()
-      .filter((w) => ((w.type === 'message' && w.text) || w.type === 'key' || w.type === 'chest' || (w.type === 'audio' && w.audio)) && w.plane === anchorPlane)
+    // A key is drawn as a note is: a cube and a short label with the item's
+    // name, so VIEW and GO TO IT have something to arrive at. What it is and
+    // what it opens is in the lists (ItemRows), one tap away. A chest or a
+    // door is drawn as the look it wears (ChestLooks), at the same zooms.
+    return useShards.getState().drawnItems()
+      .filter((w) => ((w.type === 'message' && w.text) || w.type === 'key' || (w.type === 'audio' && w.audio)) && w.plane === anchorPlane)
       .map((w) => ({
         key: w.key,
         type: w.type,
@@ -216,7 +217,7 @@ export function WorldMessages({ axes }: Props): JSX.Element | null {
         if (w.coin) return <CoinItem key={w.key} text={w.text} at={w.centre} scaleExp={scaleExp} onTap={open} />
         if (w.type === 'message') return <NoteItem key={w.key} w={w} birth={births[w.key]} onTap={open} />
         if (w.type === 'audio') return <AudioMark key={w.key} title={w.text} at={w.centre} onTap={open} />
-        // A key or a chest: the cube and its short name, as before.
+        // A key: the cube and its short name, as before.
         return (
           <group key={w.key}>
             <ItemMark id={w.key} text={w.text} sub={author(w)} at={w.centre} wears={w.wears} region={w.region} axes={axes} onTap={open} />

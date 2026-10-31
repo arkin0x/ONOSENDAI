@@ -65,6 +65,9 @@ import { placedPose } from '../lib/pose'
 import type { AxisName, Position, ViewAxes } from '../lib/space'
 import { enclosed, firstHit, wallMesh, type WallMesh } from '../lib/walkConstrain'
 import { useShards, type WorldItem } from './useShards'
+import { useCyberspace } from './useCyberspace'
+import { openedByHand } from './useOpenedChests'
+import { isDoor, lookOf } from '../lib/looks'
 
 /**
  * The frame the walls are measured in: screen right +X, up +Y, out of the
@@ -76,7 +79,24 @@ import { useShards, type WorldItem } from './useShards'
 export const WALL_AXES: ViewAxes = { right: { axis: 'x', dir: 1 }, up: { axis: 'y', dir: 1 }, out: { axis: 'z', dir: -1 } }
 
 /** One shard placed in the world, as the walls need it. */
-export type WallItem = Pick<WorldItem, 'key' | 'at' | 'height' | 'plane'> & Partial<Pick<WorldItem, 'author' | 'mine'>> & { shard: ShardModel }
+export type WallItem = Pick<WorldItem, 'key' | 'at' | 'height' | 'plane'> & Partial<Pick<WorldItem, 'author' | 'mine'>> & {
+  shard: ShardModel
+  /**
+   * Not cut at its region: a door's built-in look, drawn whole (scene/LookMark),
+   * holds a walker wherever it is drawn, as a shard holds one where it is drawn.
+   */
+  uncut?: boolean
+  /**
+   * A closed door's slab that holds the walker where they asked (wallItemsAt):
+   * its faces let them go, so they can always step out, and only its middle,
+   * across its thin axis, holds them, so they leave on the side they are on
+   * and never pass through the door (review of the ceremony, #532).
+   */
+  inside?: boolean
+}
+
+/** No cut at all, for an uncut wall: wider than anything a wall mesh can reach. */
+const NO_CUT: Box = { min: [-1e12, -1e12, -1e12], max: [1e12, 1e12, 1e12] }
 
 interface Entry {
   item: WallItem
@@ -264,6 +284,8 @@ onFollows(() => {
  * hold a walker. Exact, in bigint gibsons.
  */
 export function regionReached(w: WallItem, from: Position, axis?: AxisName, dir: 1 | -1 = 1, length = 0n): boolean {
+  // Drawn whole: its own reach (Entry `reach`) is the only bound.
+  if (w.uncut) return true
   const h = BigInt(w.height)
   for (const a of ['x', 'y', 'z'] as const) {
     const lo = ((w.at[a] >> h) << h) - 1n
@@ -350,7 +372,7 @@ function build(w: WallItem, placed: readonly Placed[], starved = false, first = 
   const pose = placedPose(WALL_AXES, w.shard.up && w.plane === 0 ? { at: w.at, spin: w.shard.spin } : undefined)
   const mesh = wallMesh(w.shard, placed, pose)
   const missingAt = placed.some(function gone(p): boolean { return p.missing === 'unreachable' || p.children.some(gone) }) ? Date.now() : null
-  return { item: w, starved, first, walk: walkNo, shard: w.shard, missingAt, where: whereOf(w), mesh, clip: regionBox(w.at, w.height, w.shard.unit, WALL_AXES), reach: reachOf(mesh, w.shard.unit) }
+  return { item: w, starved, first, walk: walkNo, shard: w.shard, missingAt, where: whereOf(w), mesh, clip: w.uncut ? NO_CUT : regionBox(w.at, w.height, w.shard.unit, WALL_AXES), reach: reachOf(mesh, w.shard.unit) }
 }
 
 /** The walls of one placed shard, built now or kept from before; its parts follow when they resolve. */
@@ -587,7 +609,7 @@ export function warmWalls(plane: number, from?: Position): void {
   walkNo++
   // Your follows, read once per identity; a read that failed is asked again at the next WALK.
   readFollows()
-  const items = wallItems(plane)
+  const items = from ? wallItemsAt(plane, from) : wallItems(plane)
   const near = from ? items.filter((w) => regionReached(w, from)) : items
   const order = (pool: Pool): WallItem[] => near.filter((w) => poolOf(w) === pool)
     .sort((a, b) => { if (!from) return 0; const x = nearness(a, from), y = nearness(b, from); return x < y ? -1 : x > y ? 1 : 0 })
@@ -683,6 +705,8 @@ export function stepLimit(from: Position, axis: AxisName, dir: 1 | -1, length: b
   let bestTol = ON_FACE
   let by: WallItem | null = null
   let wait = false
+  /** The nearest middle of a door slab holding the walker that this step would cross (WallItem `inside`). */
+  let middle: WallStop | null = null
   /** The faces in the walker's own plane, held back until the space above it is known to be open. */
   const planes: Array<{ w: WallItem; tol: number }> = []
   const i = axis === 'x' ? 0 : axis === 'y' ? 1 : 2
@@ -697,6 +721,11 @@ export function stepLimit(from: Position, axis: AxisName, dir: 1 | -1, length: b
     // enter is started first, so one wait covers them all.
     if (e.first) { wait = true; continue }
     if (!e.reach) continue
+    if (w.inside) {
+      const k = middleReach(e, w, from, i, dir, length)
+      if (k !== null && (middle === null || k < middle.reach)) middle = { reach: k, by: w }
+      continue
+    }
     // Exact first: the step against the walls' box, in bigint gibsons,
     // widened by what the float test below may be off by.
     const g = 2 ** w.shard.unit
@@ -746,10 +775,46 @@ export function stepLimit(from: Position, axis: AxisName, dir: 1 | -1, length: b
   // The last whole gibson at least `tol` short of the face: one short at a
   // fine zoom, further at a coarse one, where the measure is coarser too.
   if (wait) { waited = true; return { reach: 0n, by: null } }
-  if (best === null) return { reach: length, by: null }
-  const k = Math.max(0, Math.ceil(best - bestTol) - 1)
-  const reach = BigInt(k) < length ? BigInt(k) : length
-  return { reach, by }
+  let stop: WallStop = { reach: length, by: null }
+  if (best !== null) {
+    const k = Math.max(0, Math.ceil(best - bestTol) - 1)
+    stop = { reach: BigInt(k) < length ? BigInt(k) : length, by }
+  }
+  return middle && middle.reach < stop.reach ? middle : stop
+}
+
+/**
+ * A door slab's thin axis in the walls' frame (0, 1, 2 for X, Y, Z) and its
+ * middle along it, in model units: where a walker inside the slab is held
+ * (WallItem `inside`). Null for a slab with no bounds.
+ */
+function slabMiddle(mesh: WallMesh): { axis: 0 | 1 | 2; at: number } | null {
+  if (!mesh.min || !mesh.max) return null
+  const size = [0, 1, 2].map((k) => mesh.max![k] - mesh.min![k])
+  const axis = (size[0] <= size[1] && size[0] <= size[2] ? 0 : size[1] <= size[2] ? 1 : 2) as 0 | 1 | 2
+  return { axis, at: (mesh.min[axis] + mesh.max[axis]) / 2 }
+}
+
+/**
+ * How many whole gibsons a walker at `from`, inside the door slab `w`, may
+ * step along walls axis `i` before reaching its middle: never onto it, never
+ * across it. Null when the step does not go toward the middle (another axis,
+ * away from it) or starts beside the slab, where walking round a door with
+ * no frame is no way through it. On the middle itself, neither way.
+ */
+function middleReach(e: Entry, w: WallItem, from: Position, i: 0 | 1 | 2, dir: 1 | -1, length: bigint): bigint | null {
+  const m = slabMiddle(e.mesh)
+  if (!m || m.axis !== i) return null
+  const g = 2 ** w.shard.unit
+  const p = [Number(from.x - w.at.x) / g, Number(from.y - w.at.y) / g, -Number(from.z - w.at.z) / g]
+  for (const k of [0, 1, 2]) if (k !== i && (p[k] < e.mesh.min![k] || p[k] > e.mesh.max![k])) return null
+  const off = p[i] - m.at
+  if (off === 0) return 0n
+  // Render Z is cyberspace -Z.
+  const s = i === 2 ? -dir : dir
+  if (Math.sign(off) === s) return null
+  const k = BigInt(Math.max(0, Math.ceil(Math.abs(off) * g) - 1))
+  return k < length ? k : length
 }
 
 /**
@@ -776,7 +841,8 @@ export function underSolid(from: Position, items: readonly WallItem[]): WallItem
   for (const w of items) {
     // As stepLimit: only a shard whose region you are in, and one whose first
     // build is on its way is waited for (takeWallWait) rather than passed.
-    if (!regionReached(w, from)) continue
+    // A door slab holding the walker: its faces let them go (WallItem `inside`).
+    if (w.inside || !regionReached(w, from)) continue
     const e = entryFor(w)
     if (e.first) { waited = true; continue }
     if (!e.reach) continue
@@ -800,7 +866,8 @@ export function underSolid(from: Position, items: readonly WallItem[]): WallItem
  */
 function openAbove(from: Position, items: readonly WallItem[]): boolean {
   for (const w of items) {
-    if (!regionReached(w, from)) continue
+    // A door slab holding the walker: its faces let them go (WallItem `inside`).
+    if (w.inside || !regionReached(w, from)) continue
     const e = entryFor(w)
     if (e.first) { waited = true; continue }
     if (!e.reach) continue
@@ -815,7 +882,61 @@ function openAbove(from: Position, items: readonly WallItem[]): boolean {
   return true
 }
 
-/** The shards a walker in `plane` can meet: every shard placed in the world there, as the scene draws them. */
+/** A door's closed look as a wall: its own key, so it is never confused with a shard's entry. */
+export const doorWallKey = (doorId: string): string => `door:${doorId}`
+
+/**
+ * Whether the walker at `from` stands inside a door's slab: shut, or
+ * written, around where they stand. Its faces then let them go, or they
+ * could never step out of it (review of #532: all six ways read 0), and its
+ * middle holds them instead (WallItem `inside`). Inside means strictly within
+ * the slab's own bounds, the doorway's volume: a slab has no side faces of
+ * its own (the doorway's reveal is its edge, chest-door/models/README.md), so
+ * it encloses nothing a ray test could find. On its bounds is outside, and
+ * its faces stand.
+ */
+export function enclosesWalker(w: WallItem, from: Position): boolean {
+  if (!regionReached(w, from)) return false
+  const { mesh } = entryFor(w)
+  if (!mesh.min || !mesh.max) return false
+  const g = 2 ** w.shard.unit
+  // The walls' frame: render Z is cyberspace -Z.
+  const p = [Number(from.x - w.at.x) / g, Number(from.y - w.at.y) / g, -Number(from.z - w.at.z) / g]
+  return p.every((v, k) => v > mesh.min![k] && v < mesh.max![k])
+}
+
+/**
+ * The shards a walker in `plane` can meet: every shard placed in the world
+ * there, as the scene draws them, and every door this identity has not
+ * opened, as its closed look (chest and door design, R11: "a locked door
+ * blocks per its model's collision until opened"). OPEN takes the door out
+ * of the walls at once, before any picture of it opening has finished, so a
+ * walker is never held by an animation; its open look carries no constrain.
+ */
 export function wallItems(plane: number): WallItem[] {
-  return useShards.getState().worldItems().filter((w): w is WorldItem & { shard: ShardModel } => w.type === 'shard' && !!w.shard && w.plane === plane)
+  const all = useShards.getState().drawnItems()
+  const shards = all.filter((w): w is WorldItem & { shard: ShardModel } => w.type === 'shard' && !!w.shard && w.plane === plane)
+  const me = useCyberspace.getState().identity.pubkey
+  const doors: WallItem[] = []
+  for (const w of all) {
+    if (w.type !== 'chest' || w.plane !== plane || !isDoor(w.event?.tags)) continue
+    // Opened by hand, this session or before, under the lock it has now (R10).
+    if (w.chest && openedByHand(me, w.key, w.chest.lockPubkey)) continue
+    const look = lookOf(w)
+    if (!look) continue
+    doors.push({ key: doorWallKey(w.key), at: w.at, height: w.height, plane: w.plane, author: w.author, mine: w.mine, shard: look.closed, uncut: true })
+  }
+  return doors.length > 0 ? [...shards, ...doors] : shards
+}
+
+/**
+ * The walls of a walker at `from`: wallItems, where a door opened by hand
+ * before on this device is open after a reload too, whether a key or a
+ * signer opened it (store/useOpenedChests openedByHand), and a closed door
+ * whose slab already holds them is marked `inside`: they can step out of it
+ * (review of #532), on their own side only (review of the ceremony). What
+ * every WALK step, fall and jump asks.
+ */
+export function wallItemsAt(plane: number, from: Position): WallItem[] {
+  return wallItems(plane).map((w) => (w.uncut && enclosesWalker(w, from) ? { ...w, inside: true } : w))
 }

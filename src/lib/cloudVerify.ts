@@ -1,4 +1,4 @@
-import { axisComputeCeiling, movementCapabilityIssue } from './proofCapability'
+import { movementCapabilityIssue } from './proofCapability'
 /**
  * cloudVerify.ts - what this client checks before it signs a cloud proof.
  *
@@ -7,13 +7,18 @@ import { axisComputeCeiling, movementCapabilityIssue } from './proofCapability'
  * contract lists (hosaka-audit/client-contract.md, "What the client must
  * verify before signing") runs here, and a single failure refuses the move.
  *
- * Hop results are checked for everything that is cheap: the terrain K, the
- * temporal root (K is at most 16, so it is recomputed exactly), every h = 0
- * axis, every axis this machine can recompute within its ceiling, and the
- * transport consistency of each envelope. The cloud axis root itself is
- * operator trust: it is deterministic, so a wrong one is detectable later by
- * anyone willing to redo the work (the spec's Level 2 argument, 6.11).
- *
+ * Hop results are hop proof version 2 (spec 5.9 to 5.13) and are checked at
+ * Level 1 (5.11) with cyberspace-core, exactly as any verifier will check the
+ * signed event: the form and width of `proof`, `mn` and `mp`, the price of
+ * the nonce, the 16 sampled openings' paths to the seal and their residues
+ * recomputed in word arithmetic. Every input but the three tags is this
+ * client's own: the geometry from the move, K from the destination, the
+ * previous event id from the chain. Then the region key HOSAKA sent must be
+ * consistent (sha256(secret_key) is its lookup id). Level 1 builds no root,
+ * so it needs no big numbers and no ceiling of this machine's; its cost
+ * grows with the hop's height, so a hop is never bought above
+ * CLOUD_VERIFY_MAX_HEIGHT (cloudVerifyIssue, asked before any quote).
+
  * Sidestep results are checked completely at Level 1 (6.11, 8.7.2): the
  * re-roll price of the `mn` nonce, the destination leaf's path and the eight
  * paths sampled from G on every crossing axis, and the proof hash rebuilt
@@ -30,7 +35,6 @@ import {
   TEMPORAL_MAX_COMPUTE_HEIGHT,
   alignedBase,
   cantorPair,
-  computeAxisCantor,
   computeSubtreeCantor,
   decodeNonce,
   findLcaHeight,
@@ -46,6 +50,7 @@ import {
   terrainK,
   type Plane,
   verifyAxisOpenings,
+  verifyHopLevel1,
 } from 'cyberspace-core'
 import type { CloudHopResult, CloudSidestepResult, HopEnvelope, HosakaAction } from './hosaka'
 import type { Position } from './space'
@@ -60,7 +65,6 @@ export interface CloudMove {
 
 const HEX64 = /^[0-9a-f]{64}$/
 const AXES = ['x', 'y', 'z'] as const
-type Axis = (typeof AXES)[number]
 
 /** sha256(sha256(int_to_bytes_be_min(n))) as lowercase hex: the proof hash
  * shape (5.6, 6.8) and HOSAKA's `public_proof` of a stored root. */
@@ -89,54 +93,89 @@ function envelopeConsistent(env: HopEnvelope | undefined): boolean {
 }
 
 /**
- * The cheap hop checks. `localCeiling` is the height up to which an axis root
- * is recomputed here and compared; axes above it are the cloud's work and are
- * taken on trust.
+ * The tallest hop this client buys and verifies (h_max: the largest of the
+ * three axis heights and K). Level 1 recomputes 16 residues of each root in
+ * word arithmetic, and that grows with the height: measured in Node on a
+ * desktop for one tall axis, h24 0.6 s, h26 2.1 s, h28 9.8 s, h30 30 s, h32
+ * 66 s, about three times that when all three axes are tall, and about five
+ * times on a phone. 30 is the tallest hop HOSAKA sells (MAX_HOSAKA_HEIGHT),
+ * so nothing it sells is refused, and the check stays bounded if a provider
+ * ever offers more. It runs in the verify worker either way.
  */
-export function verifyCloudHop(result: CloudHopResult, move: CloudMove, localCeiling: number): string[] {
+export const CLOUD_VERIFY_MAX_HEIGHT = 30
+
+/** h_max of a hop (5.9): the three axis heights and the destination's K. */
+export function hopMaxHeight(move: Pick<CloudMove, 'from' | 'to' | 'plane'>): number {
+  const { from, to, plane } = move
+  return Math.max(findLcaHeight(from.x, to.x), findLcaHeight(from.y, to.y), findLcaHeight(from.z, to.z), terrainK(to.x, to.y, to.z, plane))
+}
+
+/** Why a cloud hop must not be bought: one this client could not verify before signing. Null when it can. */
+export function cloudVerifyIssue(move: Pick<CloudMove, 'from' | 'to' | 'plane'>): string | null {
+  const h = hopMaxHeight(move)
+  return h > CLOUD_VERIFY_MAX_HEIGHT
+    ? `This hop reaches h${h}, above the h${CLOUD_VERIFY_MAX_HEIGHT} this client can check before signing, so it is not bought. Line up a nearer cursor.`
+    : null
+}
+
+/**
+ * The shape of a completed hop job: `v2` when it carries any of seal, mn and
+ * mp (all three are then required), `v1` for the old hop_n shape, which this
+ * client never signs (straddlingV1Hop in lib/cloud.ts), `junk` otherwise.
+ */
+export function cloudHopShape(result: unknown): 'v2' | 'v1' | 'junk' {
+  if (!result || typeof result !== 'object') return 'junk'
+  const r = result as Record<string, unknown>
+  if ('seal' in r || 'mn' in r || 'mp' in r) return 'v2'
+  return 'hop_n' in r ? 'v1' : 'junk'
+}
+
+/** An id no event has, for a hop nobody has signed yet: never on the exemption list (5.13), and the list is passed empty besides. */
+const UNSIGNED_EVENT_ID = '0'.repeat(64)
+
+/**
+ * Level 1 of a cloud hop (5.11), before it is signed. Returns the failed
+ * checks: `shape:v1` or `result` for a result that is not version 2, `seal`,
+ * `mn`, `mp` for a missing or non-string tag, `height` above
+ * CLOUD_VERIFY_MAX_HEIGHT, `K` when HOSAKA's K is not ours, `envelope:region_n`
+ * for an inconsistent region key, and `level1:<step>` for core's verdict
+ * (`level1:form:mp`, `level1:price`, `level1:path:3`, `level1:residue:7`).
+ */
+export function verifyCloudHop(result: CloudHopResult, move: CloudMove): string[] {
+  const shape = cloudHopShape(result)
+  if (shape === 'v1') return ['shape:v1']
+  if (shape === 'junk') return ['result']
   const failed: string[] = []
-  if (!result || typeof result !== 'object') return ['result']
   const { from, to, plane, prevEventId } = move
-  const issue = movementCapabilityIssue('hop', from, to, plane, 'cloud')
-  if (issue) throw new Error(issue)
-  localCeiling = axisComputeCeiling(localCeiling)
+  if (typeof result.seal !== 'string') failed.push('seal')
+  if (typeof result.mn !== 'string') failed.push('mn')
+  if (typeof result.mp !== 'string') failed.push('mp')
+  if (failed.length > 0) return failed
+  if (cloudVerifyIssue(move)) return ['height']
 
+  // K is ours (5.2): HOSAKA's is bookkeeping, and a disagreement means it
+  // proved another hop. Absent is fine; a non-integer is not.
   const K = terrainK(to.x, to.y, to.z, plane)
-  if (result.K !== K) failed.push('K')
+  if (result.K !== undefined && result.K !== K) failed.push('K')
+  if (!envelopeConsistent(result.region_n)) failed.push('envelope:region_n')
 
-  const envelopes: Array<[string, HopEnvelope | undefined]> = [
-    ['hop_n', result.hop_n],
-    ['region_n', result.region_n],
-    ['region_xy', result.region_xy],
-    ['cantor_x', result.cantor_x],
-    ['cantor_y', result.cantor_y],
-    ['cantor_z', result.cantor_z],
-    ['cantor_t', result.cantor_t],
-  ]
-  for (const [name, env] of envelopes) {
-    if (!envelopeConsistent(env)) failed.push(`envelope:${name}`)
-  }
-
-  // The temporal root is fully recomputable: K <= 16 caps it at 65,536 pairs.
-  // The LOCAL K is used, so a wrong K fails here too rather than steering the
-  // recompute to an arbitrary height.
-  if (result.cantor_t?.public_proof !== doubleSha256Hex(temporalCantor(prevEventId, K))) failed.push('cantor_t')
-
-  const heights: Record<Axis, number> = { x: 0, y: 0, z: 0 }
-  for (const axis of AXES) {
-    const h = findLcaHeight(from[axis], to[axis])
-    heights[axis] = h
-    const env = result[`cantor_${axis}` as const]
-    if (!env || typeof env.public_proof !== 'string') continue
-    // h = 0: the root is the axis value itself (4.6), so the envelope must be
-    // its double hash. Within the ceiling: the whole axis tree is recomputed.
-    // Either way computeAxisCantor gives the root; above the ceiling it is the
-    // cloud's word.
-    if (h > localCeiling) continue
-    if (env.public_proof !== doubleSha256Hex(computeAxisCantor(from[axis], to[axis], localCeiling))) failed.push(`axis:${axis}`)
-  }
-
-  if (result.max_height !== Math.max(heights.x, heights.y, heights.z)) failed.push('max_height')
+  // Level 1 from our own geometry and previous event; nothing but the three
+  // tags comes from HOSAKA. 'cost' order: a junk tree is rejected on its
+  // paths before any residue is computed, with the same verdict.
+  const level1 = verifyHopLevel1(
+    {
+      from: { x: from.x, y: from.y, z: from.z, plane },
+      to: { x: to.x, y: to.y, z: to.z, plane },
+      previousEventIdHex: prevEventId,
+      proof: result.seal,
+      nonce: result.mn,
+      openings: result.mp,
+      eventId: UNSIGNED_EVENT_ID,
+      grandfathered: new Set(),
+    },
+    { order: 'cost' },
+  )
+  for (const f of level1) failed.push(`level1:${f}`)
   return failed
 }
 
@@ -221,8 +260,8 @@ export function verifyCloudSidestep(result: CloudSidestepResult, move: CloudMove
 }
 
 /** One entry point for the verify worker and for tests. */
-export function verifyCloud(action: HosakaAction, result: unknown, move: CloudMove, localCeiling: number): string[] {
+export function verifyCloud(action: HosakaAction, result: unknown, move: CloudMove): string[] {
   return action === 'hop'
-    ? verifyCloudHop(result as CloudHopResult, move, localCeiling)
+    ? verifyCloudHop(result as CloudHopResult, move)
     : verifyCloudSidestep(result as CloudSidestepResult, move)
 }

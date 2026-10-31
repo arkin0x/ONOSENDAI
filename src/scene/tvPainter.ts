@@ -26,15 +26,17 @@
 
 import type { ShardModel } from 'sno-core/shards'
 import { actionLabel } from '../lib/events'
-import { chainLengthAt, countTo } from '../lib/tv/stats'
+import { bagsHiddenAt, chainLengthAt, countTo } from '../lib/tv/stats'
 import { itemLength, type Shot, type TapeItem } from '../lib/tv/director'
 import { CUT_MS, contentsWords, quoteOf, segmentDoing, typePace, TYPE_DELAY_S } from '../hud/TvSegments'
 import { findLines, placeable, shotProgress, type TvAvatar, type TvFindLine } from '../store/useTv'
 import { adFor, type AdScene, type AdTheme } from '../lib/tv/hosakaAd'
-import { BROADCAST_TAG, broadcastScale, isBroadcast } from '../lib/tv/broadcast'
+import { BROADCAST_TAG, broadcastScale, isBroadcast, isPortraitBroadcast } from '../lib/tv/broadcast'
+import { BOARD_WORDS, STATS_TAG, type StatsBoard } from '../lib/tv/cyberspaceStats'
+import { paintStatsBoard, type BreakKit } from './tvStatsBreak'
 import { EXPLAINER_PIP_ENABLED } from '../lib/tv/explainer'
 import { watchingWords } from '../lib/tv/watching'
-import type { Census, ChainTimes } from '../lib/tv/stats'
+import type { Census, ChainHistory } from '../lib/tv/stats'
 import type { Position } from '../lib/space'
 import { trackDrawing, type DirtyRect, type DrawTracker } from './drawTracker'
 import { CARD_CLEAR_PX, CARD_LINE_EM, CARD_RISE, MAP_REACH, clearOfPanel, placeCard, type Box, type CardFrame, type CardPlace, type PanelInk } from './tvCard'
@@ -83,6 +85,8 @@ const AD_SPLASH: SplashLook = { fill: '#ffd23f', edge: '#ff2d7a', words: ['NOW',
 const MONEY_SPLASH: SplashLook = { fill: '#ffc21a', edge: '#ff7a00', words: ['CASHU', 'INSIDE!'] }
 /** An NFT inside, hyped as money is, in the NFT card's violet (arkinox, 2026-10-22). */
 const NFT_SPLASH: SplashLook = { fill: '#c9a6ff', edge: '#7a2dff', words: ['NFT', 'INSIDE!'] }
+/** The #1 on a CYBERSPACE STATS board: gold on hot pink (design 4.2). */
+const STATS_SPLASH: SplashLook = { fill: '#ffd23f', edge: '#ff2d95', words: ['#1', ''] }
 /** The minimap's turn, radians a second: about once round in forty seconds. */
 const MAP_TURN = 0.15
 const ACCENT = '#00e5ff'
@@ -123,6 +127,22 @@ const CHIRON_PX = [NOW_PLAYING_PX, 62] as const
  */
 const ROW_MIN_H = 500
 const REGION = '#52e39f'
+/**
+ * An explainer's captions on the upright stream (lib/tv/broadcast
+ * isPortraitBroadcast): their type, CSS px before the stream's scale (a
+ * comment's quote's), and how many lines, in the band under the video, where
+ * the frame has room the 16:9 one keeps for the video's foot.
+ */
+const PORTRAIT_CAPTION_PX = 20
+const PORTRAIT_CAPTION_LINES = 4
+/**
+ * A spot's end card on the upright stream: its call's largest type and its
+ * small print's, CSS px before the stream's scale (20 and 11 elsewhere). The
+ * tall frame leaves the end card room the 16:9 one gives its mark, and at 20
+ * the call read at 12 px on a phone.
+ */
+const PORTRAIT_END_PX = 30
+const PORTRAIT_END_SUB_PX = 13
 /** A marquee narrower than this, CSS px, says how many are watching with the number alone. */
 const NARROW_MARQUEE_PX = 480
 /** A commercial's button after its last line, in ems of the type: the gap before it, its radius, and its room, the gap included. */
@@ -181,12 +201,14 @@ export interface TvPicture {
   skipped: number
   meanwhile: boolean
   census: Census | null
-  chains: Record<string, ChainTimes>
+  chains: Record<string, ChainHistory>
   arrivals: Array<{ pubkey: string; at: number }>
   reactions: Array<{ pubkey: string; at: number; content: string; on: 'shard' | 'move' }>
   avatars: Record<string, TvAvatar>
   /** The commercial on screen, which spot and since `at` (performance.now()), or null (lib/tv/hosakaAd). */
   ad?: { at: number; id: string } | null
+  /** The CYBERSPACE STATS break on screen, which board and since `at` (performance.now()), or null (lib/tv/cyberspaceStats). */
+  stats?: { at: number; board: StatsBoard } | null
   /** What TV's scan just opened, newest last, for the ticker (store/useTv finds, findLines). */
   finds?: TvFindLine[]
 }
@@ -283,7 +305,7 @@ export function tickerItems(p: TvPicture, name: (pk: string) => string): string[
     const length = chain ? chainLengthAt(chain, t) : 0
     if (length > 0) out.push(`${who}: CHAIN OF ${length.toLocaleString()} ACTION${length === 1 ? '' : 'S'}`)
     if (p.census) {
-      const bags = countTo(p.census.bagsBy.get(shot.pubkey) ?? [], t)
+      const bags = bagsHiddenAt(p.census, shot.pubkey, t)
       out.push(`${who}: ${bags} BAG${bags === 1 ? '' : 'S'} HIDDEN`)
     }
   }
@@ -386,6 +408,13 @@ export class TvPainter {
    * shrinking its type.
    */
   private big = false
+  /**
+   * The upright stream (lib/tv/broadcast isPortraitBroadcast): a 720 px wide
+   * frame laid out as a phone held upright is, with the stream's larger
+   * text. NOW PLAYING stands over the chiron, each the frame's width, and a
+   * segment's panel stacks its model over its words in the tall middle.
+   */
+  private portrait = false
   /** Where the minimap's dot was last: a segment shows no avatar, and the dot stays where it was. */
   private lastDot: Position | null = null
   /** Where NOW PLAYING was last painted, canvas px, and the canvas px per CSS px then. */
@@ -587,6 +616,8 @@ export class TvPainter {
     const s = s0 * broadcastScale(grow, cssW, 1.35)
     const big = s > s0
     this.big = big
+    const portrait = isPortraitBroadcast()
+    this.portrait = portrait
     this.tickPx = (big ? BIG_TICKER_TEXT_PX : TICKER_TEXT_PX) * s
     const dt = this.lastPaint ? Math.min(0.25, (now - this.lastPaint) / 1000) : 0
     this.lastPaint = now
@@ -602,6 +633,11 @@ export class TvPainter {
     // A commercial owns the picture: nothing of the tape under it.
     if (p.ad) {
       this.commercial(p.ad, p, a, W, H, MX, MY, s, narrow, now, reduced, dt, scale)
+      return
+    }
+    // So does a CYBERSPACE STATS break.
+    if (p.stats) {
+      this.statsBreak(p.stats, p, a, W, H, MX, MY, s, narrow, now, reduced, dt, scale)
       return
     }
 
@@ -699,10 +735,11 @@ export class TvPainter {
     // was. Where it would reach the clock (and on a phone the minimap) it is
     // one line; where even that would, it is not shown, and the music plays on.
     const rowBottom = tickY - 10 * s
-    const row = !narrow && H / scale >= ROW_MIN_H
+    // The upright stream stacks them, as a phone does, each the frame's width.
+    const row = !narrow && !portrait && H / scale >= ROW_MIN_H
     // The stream's larger text (lib/tv/broadcast) has NOW PLAYING wider than
     // the logo's column over it: that was room for four letters of its name.
-    const npW = narrow ? W - 2 * MX : big ? Math.max(lw + 16 * s, W * BIG_NOW_PLAYING_SHARE) : lw + 16 * s
+    const npW = narrow || portrait ? W - 2 * MX : big ? Math.max(lw + 16 * s, W * BIG_NOW_PLAYING_SHARE) : lw + 16 * s
     const chironW = row ? W - 2 * MX - npW - 10 * s : W - 2 * MX
     // With the stream's larger text the row is as low as the stacked chiron,
     // NOW PLAYING with it: the row's own height left a panel one line.
@@ -783,7 +820,7 @@ export class TvPainter {
     }
 
     part('explainer')
-    if (ex) this.explainerParts(ex, ex.muted ?? a.music?.muted === true, W, scale, s, narrow, MX, MY, tickY)
+    if (ex) this.explainerParts(ex, ex.muted ?? a.music?.muted === true, W, scale, s, narrow, MX, MY, tickY, portrait)
   }
 
   /**
@@ -800,8 +837,12 @@ export class TvPainter {
    * is muted, a short tag says so (TAP FOR SOUND, ♪ MUTED) and takes the tap,
    * at the video's top left, where ADVERTISEMENT stands over a spot. The
    * stream, which has no sound to tap for, shows none.
+   *
+   * On the upright stream the video is the frame's width with room above and
+   * below it, so the captions go under it, in that room, larger and on up to
+   * PORTRAIT_CAPTION_LINES lines, rather than over the video's foot.
    */
-  private explainerParts(ex: TvExplainer, muted: boolean, W: number, scale: number, s: number, narrow: boolean, MX: number, MY: number, floor: number): void {
+  private explainerParts(ex: TvExplainer, muted: boolean, W: number, scale: number, s: number, narrow: boolean, MX: number, MY: number, floor: number, portrait = false): void {
     const ctx = this.ctx
     ctx.save()
     const pipShown = ex.pipShown ?? EXPLAINER_PIP_ENABLED
@@ -838,7 +879,26 @@ export class TvPainter {
       ctx.fillStyle = 'rgba(242, 251, 255, 0.9)'
       ctx.fillText(label, x + 7 * s, y + 12.5 * s)
     }
-    if (ex.caption) {
+    if (ex.caption && portrait) {
+      ctx.globalAlpha = clamp01((ex.mix - 0.8) / 0.2)
+      const size = PORTRAIT_CAPTION_PX * s
+      ctx.font = `700 ${size}px ${TV_FONT}`
+      ctx.textAlign = 'center'
+      const lineH = size * 1.3
+      const lines = wrap(ctx, ex.caption, W - 2 * MX - 16 * s)
+      // Under the video, and above the marquee's band: as many lines as fit there, the last cut with an ellipsis.
+      const first = (ex.video.y + ex.video.h) * scale + 16 * s + size
+      const room = Math.max(1, Math.min(PORTRAIT_CAPTION_LINES, Math.floor((floor - 12 * s - first + size * 1.02) / lineH)))
+      const shown = lines.length > room ? [...lines.slice(0, room - 1), fit(ctx, `${lines.slice(room - 1).join(' ')}`, W - 2 * MX - 16 * s)] : lines
+      shown.forEach((line, i) => {
+        const base = first + i * lineH
+        const lw = ctx.measureText(line).width
+        ctx.fillStyle = 'rgba(0, 0, 0, 0.7)'
+        ctx.fillRect(W / 2 - lw / 2 - 8 * s, base - size * 1.02, lw + 16 * s, lineH)
+        ctx.fillStyle = FG
+        ctx.fillText(line, W / 2, base)
+      })
+    } else if (ex.caption) {
       // In as the video comes up, as they always were.
       ctx.globalAlpha = clamp01((ex.mix - 0.8) / 0.2)
       const size = (narrow ? 13 : 18) * s
@@ -1178,11 +1238,20 @@ export class TvPainter {
     ctx.restore()
 
     // The channel round it.
+    this.breakFurniture('ADVERTISEMENT', p, a, W, MX, MY, tickY, tickH, s, dt, scale)
+  }
+
+  /**
+   * What stays round a break (a spot, a CYBERSPACE STATS board): its tag in
+   * the corner, as a channel marks its breaks, the stream's address, the
+   * marquee; NOW PLAYING steps away while the music plays on.
+   */
+  private breakFurniture(tag: string, p: TvPicture, a: TvAssets, W: number, MX: number, MY: number, tickY: number, tickH: number, s: number, dt: number, scale: number): void {
+    const ctx = this.ctx
     this.track.part('adTag')
     ctx.save()
     ctx.font = `700 ${9 * s}px ${TV_FONT}`
     ctx.textAlign = 'left'
-    const tag = 'ADVERTISEMENT'
     const tw = ctx.measureText(tag).width
     ctx.fillStyle = 'rgba(0, 0, 0, 0.55)'
     ctx.fillRect(MX, MY, tw + 14 * s, 18 * s)
@@ -1205,6 +1274,46 @@ export class TvPainter {
   }
 
   /**
+   * A CYBERSPACE STATS break (lib/tv/cyberspaceStats), cut in as a spot is:
+   * over a ground in its board's theme with speed stripes running, the world
+   * hidden, the marquee kept, CYBERSPACE STATS in the corner where a spot says
+   * ADVERTISEMENT. The board itself is scene/tvStatsBreak's: stacked on the
+   * upright stream (lib/tv/broadcast isPortraitBroadcast) and on a frame
+   * taller than wide or narrow, side by side otherwise.
+   */
+  private statsBreak(br: { at: number; board: StatsBoard }, p: TvPicture, a: TvAssets, W: number, H: number, MX: number, MY: number, s: number, narrow: boolean, now: number, reduced: boolean, dt: number, scale: number): void {
+    const ctx = this.ctx
+    const t = Math.max(0, (now - br.at) / 1000 - CUT_MS / 1000)
+    const theme = AD_THEMES[BOARD_WORDS[br.board.id].theme]
+    this.track.part('stats')
+    ctx.save()
+    ctx.globalAlpha = clamp01((now - br.at) / CUT_MS)
+    const ground = ctx.createLinearGradient(0, 0, W, H)
+    ground.addColorStop(0, theme.deep)
+    ground.addColorStop(1, '#030008')
+    ctx.fillStyle = ground
+    ctx.fillRect(0, 0, W, H)
+    this.stripes(theme.stripe, W, H, s, reduced ? 0 : t)
+    const tickH = (this.big ? BIG_TICKER_H_PX : TICKER_H_PX) * s
+    const tickY = H - MY - tickH
+    const kit: BreakKit = {
+      ctx,
+      font: TV_FONT,
+      fit: (text, max) => fit(ctx, text, max),
+      wrap: (text, max) => wrap(ctx, text, max),
+      splash: (cx, cy, r, tt) => this.splash(cx, cy, r, tt, s, STATS_SPLASH),
+      part: (name) => this.track.part(name),
+    }
+    const top = br.board.kind === 'ranking' ? MY + 34 * s : MY + 30 * s
+    const area = { x0: MX, y0: top, x1: W - MX, y1: tickY - 14 * s }
+    const stacked = isPortraitBroadcast() || narrow || W < H
+    const lead = br.board.kind === 'ranking' ? br.board.rows[0]?.pubkey : undefined
+    paintStatsBoard(kit, { area, s, css: scale, stacked, accent: theme.accent }, br.board, { name: a.name, spin: lead ? a.spin : null }, t, Math.floor(now / 60), reduced)
+    ctx.restore()
+    this.breakFurniture(STATS_TAG, p, a, W, MX, MY, tickY, tickH, s, dt, scale)
+  }
+
+  /**
    * How a card fits `r`: the type as big as the widest line and the height
    * allow, the mark giving way first and going altogether before the type
    * goes under its floor (18 px a punch line, 12 the end card's call).
@@ -1214,13 +1323,13 @@ export class TvPainter {
     const end = scene.kind === 'end'
     const maxW = Math.max(40 * s, r.w - 20 * s)
     const floor = (end ? 12 : 18) * s
-    let size = (end ? (narrow ? 13 : 20) : narrow ? 40 : 96) * s
+    let size = (end ? (narrow ? 13 : this.portrait ? PORTRAIT_END_PX : 20) : narrow ? 40 : 96) * s
     ctx.font = `700 ${size}px ${TV_FONT}`
     // The icon after the last line is as tall as the type: its room, in ems.
     const last = scene.lines.length - 1
     const widest = Math.max(...scene.lines.map((l, i) => ctx.measureText(l).width + (scene.icon && i === last ? size * ICON_EM : 0)))
     if (widest > maxW) size *= maxW / widest
-    const subSize = (narrow ? 8.5 : 11) * s
+    const subSize = (narrow ? 8.5 : this.portrait ? PORTRAIT_END_SUB_PX : 11) * s
     ctx.font = `${subSize}px ${TV_FONT}`
     const subLines = end && scene.subtitle ? wrap(ctx, scene.subtitle, maxW) : []
     const subH = subLines.length > 0 ? subLines.length * subSize * 1.4 + 22 * s : 0
@@ -1527,12 +1636,15 @@ export class TvPainter {
     // logo's column, side by side.
     const fullW = Math.min(760 * s, W - 2 * MX)
     let room = Math.max(0, bottom - top)
-    let fitted = fitPanel(fullW, narrow || ad, room)
+    // On the upright stream the model stands over the words, the frame's tall
+    // middle being the room it has, and the panel never goes beside the clock,
+    // where the narrow frame leaves it a few letters a line.
+    let fitted = fitPanel(fullW, narrow || ad || this.portrait, room)
     let px = (W - fullW) / 2
     let top0 = top
     // Also when it only fit by cutting the quote: side by side may show all
     // of it (review of #375: one line at 915x412, seven at 844x390).
-    if (!fits(fitted.ph, room) || fitted.cut) {
+    if (!this.portrait && (!fits(fitted.ph, room) || fitted.cut)) {
       // Between the minimap and the logo's column.
       const sideW = Math.min(760 * s, sideRight - sideLeft)
       // Beside the clock, left of the logo's column: never under NOW
@@ -1580,7 +1692,7 @@ export class TvPainter {
       this.cube(sx + (stacked ? (pw - 2 * pad - stage) / 2 : 0), sy, stage, t, s)
       // What its author said is inside, when they said; else how big a region.
       const inside = contentsWords(item.counts)
-      this.caption(tx, ty + (narrow ? 0 : stage / 2 - 40 * s), textW, 'A BAG IS SEALED', 'LOCATION UNKNOWN', inside ?? (item.height !== null ? `A REGION 2^${item.height} GIBSONS ACROSS` : null), s)
+      this.caption(tx, ty + (narrow || stacked ? 0 : stage / 2 - 40 * s), textW, 'A BAG IS SEALED', 'LOCATION UNKNOWN', inside ?? (item.height !== null ? `A REGION 2^${item.height} GIBSONS ACROSS` : null), s)
       // Money inside: hyped, on the cube's corner (arkinox, 2026-10-18). An
       // NFT inside is hyped the same way (2026-10-22): on that corner, or on
       // the cube's other top corner when money is there too.
@@ -1603,7 +1715,7 @@ export class TvPainter {
     } else if (item.kind === 'avatar') {
       const ox = sx + (stacked ? (pw - 2 * pad - stage) / 2 : 0)
       if (a.spin) ctx.drawImage(a.spin, ox, sy, stage, stage)
-      this.caption(tx, ty + (narrow ? 0 : stage / 2 - 30 * s), textW, 'NEW LOOK', a.name(item.pubkey), null, s)
+      this.caption(tx, ty + (narrow || stacked ? 0 : stage / 2 - 30 * s), textW, 'NEW LOOK', a.name(item.pubkey), null, s)
     } else if (item.kind === 'comment') {
       // The commenter as a photograph: their avatar turning, else their picture.
       const ox = sx + (stacked ? (pw - 2 * pad - stage) / 2 : 0)

@@ -45,7 +45,7 @@ describe('the marquee', () => {
   })
 
   it('reads the numbers as of the tape', () => {
-    const census = { arrivals: [1, 50, 200], bags: [10], bagsBy: new Map(), objects: [] }
+    const census = { arrivals: [1, 50, 200], bags: [10], objects: [], bagRecords: [], objectRecords: [], deletions: [], firstSpawn: new Map(), readAt: 0, wholeAt: 0 }
     expect(tickerItems(picture({ census, tapeTime: 60 }), (pk) => pk)).toContain('2 AVATARS IN CYBERSPACE')
   })
 

@@ -19,6 +19,10 @@ export interface SpinClaim {
 
 interface SpinStack {
   claims: SpinClaim[]
+  /** Which making of the canvas this is: a new number makes it again (CardSpin's boundary). */
+  made: number
+  /** Make the canvas again: it threw, or its context is lost for good. */
+  remake: () => void
   claim: (c: Omit<SpinClaim, 'id'>) => number
   update: (id: number, c: Partial<Omit<SpinClaim, 'id'>>) => void
   release: (id: number) => void
@@ -28,6 +32,8 @@ let nextId = 1
 
 export const useSpinStack = create<SpinStack>((set) => ({
   claims: [],
+  made: 0,
+  remake: () => set((s) => ({ made: s.made + 1 })),
   claim: (c) => {
     const id = nextId++
     set((s) => ({ claims: [...s.claims, { ...c, id }] }))

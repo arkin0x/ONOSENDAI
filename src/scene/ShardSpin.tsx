@@ -93,7 +93,7 @@ function Pacer({ pace }: { pace: Pace }): null {
  * satisfactory"). The turn keeps its pace either way: each frame turns by
  * the time since the last.
  */
-export function ShardSpin({ shard, size = 160, preserve = false, pace, ignoreOpacity = false, onDrawn }: { shard: ShardModel | null; size?: number; preserve?: boolean; pace?: Pace; ignoreOpacity?: boolean; onDrawn?: () => void }): JSX.Element {
+export function ShardSpin({ shard, size = 160, preserve = false, pace, ignoreOpacity = false, onDrawn, onContext }: { shard: ShardModel | null; size?: number; preserve?: boolean; pace?: Pace; ignoreOpacity?: boolean; onDrawn?: () => void; onContext?: (canvas: HTMLCanvasElement, gl: WebGL2RenderingContext) => void }): JSX.Element {
   // A new turn for each shard, inside the same canvas: one shard straight
   // after another would otherwise be built once on the last one's framing,
   // then again on its own (review of #394). Not keyed on the shard's id: an
@@ -110,7 +110,7 @@ export function ShardSpin({ shard, size = 160, preserve = false, pace, ignoreOpa
         // Nothing to draw between shards: no frames spent on an empty canvas.
         frameloop={!shard ? 'never' : pace ? 'demand' : 'always'}
         // One shard after another on the same canvas: compiled once (lib/keepPrograms).
-        onCreated={({ gl, scene }) => keepPrograms(gl, scene)}
+        onCreated={({ gl, scene }) => { keepPrograms(gl, scene); onContext?.(gl.domElement, gl.getContext() as WebGL2RenderingContext) }}
       >
         {pace && <Pacer pace={pace} />}
         {/* Lit as on the bench, near the world's full color (shardLight.tsx; arkinox, 2026-10-12). */}

@@ -1590,12 +1590,23 @@ export const useShards = create<ShardsState>((set, get) => {
    * that cannot be fetched, or past the most a bag reads, MAX_REFERENCES_PER_BAG).
    */
   async function syncRoomRows(d: MyDeployment, secretHex: string, live: boolean): Promise<MyDeployment[] | string> {
-    const ids = (): Set<string> => new Set(doorRowsOfRoom(d).map((x) => x.eventId))
-    const rows = (): MyDeployment[] => { const doors = ids(); return get().mine.filter((m) => m.room && doors.has(m.room.doorId)) }
-    if (!live) return rows()
     const place = await doorLocation(d)
     const key = roomKey(place.key, hexToBytes(secretHex))
     const lookupId = roomLookupId(key)
+    // Whichever door a row names: one replaced from another device leaves them naming it (pruneGoneDoors).
+    // In the room's own bag is what makes them this room's.
+    const rows = (): MyDeployment[] => {
+      const doors = new Set(doorRowsOfRoom(d).map((x) => x.eventId))
+      const held = get().mine.filter((m) => m.room && (doors.has(m.room.doorId) || m.lookupId === lookupId))
+      if (held.some((m) => !doors.has(m.room!.doorId))) {
+        const mine = get().mine.map((m) => (m.room && m.lookupId === lookupId && !doors.has(m.room.doorId) ? { ...m, room: { doorId: d.eventId } } : m))
+        set({ mine })
+        saveMine(mine)
+        return mine.filter((m) => m.room && (doors.has(m.room.doorId) || m.lookupId === lookupId))
+      }
+      return held
+    }
+    if (!live) return rows()
     const answers = (await queryEach({ kinds: [HIDDEN_KIND], authors: [d.inner.pubkey], '#d': [lookupId] })).filter((a) => a.outcome === 'answered')
     if (answers.length === 0) return 'No relay answered, so this cannot tell what is behind the door. Nothing has changed. Try again when one is reachable.'
     const newest = answers.flatMap((a) => a.events).filter((e) => e.pubkey === d.inner.pubkey).sort((a, b) => b.created_at - a.created_at)[0]

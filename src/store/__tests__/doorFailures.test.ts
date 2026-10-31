@@ -25,10 +25,10 @@ vi.mock('../../lib/relay', () => {
   }
 })
 import { newShard, type ShardModel } from 'sno-core/shards'
-import { forgeKey, revealedIn, readContents, openWithSecret } from '../../lib/chests'
-import { bytesToHex, hexToBytes, type NostrEvent } from '../../lib/events'
-import { HIDDEN_KIND, OBJECT_KIND, bagEntries, bagTemplate, chestInnerTemplate, chestItemOf, unbag, DEFAULT_BAG_SETTINGS, type KeyItem, type Hidden } from '../../lib/hidden'
-import { doorSecretWithKey, roomKey, roomLookupId, ROOM_BAG_SETTINGS, roomOf } from '../../lib/doors'
+import { forgeKey } from '../../lib/chests'
+import { hexToBytes, type NostrEvent } from '../../lib/events'
+import { HIDDEN_KIND, OBJECT_KIND, bagEntries, unbag, type KeyItem, type Hidden } from '../../lib/hidden'
+import { roomOf } from '../../lib/doors'
 import { regionKeyOffThread } from '../../lib/regionKeyOffThread'
 import type { Position } from '../../lib/space'
 import { useStash } from '../../hud/stash'
@@ -38,7 +38,7 @@ import { useCyberspace } from '../useCyberspace'
 import { useInventory } from '../useInventory'
 import { useWorkshop } from '../useWorkshop'
 import { resetOpenedChests } from '../useOpenedChests'
-import { behindDoor, ownBagIn, ownDoors, positionOf, regionOf, sealingDoor, useShards, type MyDeployment } from '../useShards'
+import { ownBagIn, positionOf, regionOf, useShards, type MyDeployment } from '../useShards'
 import { openRoom, doorAsFound } from '../rooms'
 
 const S = () => useShards.getState()
@@ -54,9 +54,9 @@ const dOf = (e: Ev): string => e.tags.find((t) => t[0] === 'd')?.[1] ?? ''
 const newestBag = (d: string): NostrEvent | undefined => relay.events.filter((e) => e.kind === HIDDEN_KIND && dOf(e) === d).sort((a, b) => b.created_at - a.created_at)[0] as NostrEvent | undefined
 const retracted = (d: string): boolean => relay.events.some((e) => e.kind === 5 && e.tags.some((t) => t[0] === 'a' && t[1] === `${HIDDEN_KIND}:${me()}:${d}`))
 
-async function sealDoor(name = 'North Door', h = HEIGHT, key = lock, room: number | null = null): Promise<MyDeployment> {
+async function sealDoor(name = 'North Door', h = HEIGHT, key = lock): Promise<MyDeployment> {
   const before = new Set(S().mine.map((d) => d.eventId))
-  S().startPlaceDoor(); S().setDeployHeight(h); S().setDeployDoorHeight(room); S().placeChest()
+  S().startPlaceDoor(); S().setDeployHeight(h); S().placeChest()
   await S().sealPlacedChest({ name, lock: lockOf(key), requires: `the ${key.name}`, contents: [] })
   expect(S().deployError).toBeNull()
   return S().mine.find((d) => !before.has(d.eventId))!
@@ -84,9 +84,9 @@ async function chestHere(name = 'Old Room', text = 'inside the chest', key = loc
   expect(S().deployError).toBeNull()
   return S().mine.find((m) => m.chest?.name === name)!
 }
-function failSigningWhen(p: (t: { kind: number }) => boolean): () => void {
+function failSigningWhen(p: (t: { kind: number; tags?: string[][] }) => boolean): () => void {
   const real = C().signEvent
-  useCyberspace.setState({ signEvent: (async (t: { kind: number }, ms?: number) => { if (p(t)) throw new Error('signer refused'); return (real as (a: unknown, b?: number) => Promise<NostrEvent>)(t, ms) }) as never })
+  useCyberspace.setState({ signEvent: (async (t: { kind: number; tags?: string[][] }, ms?: number) => { if (p(t)) throw new Error('signer refused'); return (real as (a: unknown, b?: number) => Promise<NostrEvent>)(t, ms) }) as never })
   return () => useCyberspace.setState({ signEvent: real })
 }
 
@@ -95,7 +95,7 @@ beforeEach(() => {
   lock = forgeKey('Silver Key')
   localStorage.removeItem('onosendai:door-secrets'); localStorage.removeItem('onosendai:chests-opened')
   resetDoorSecrets(); resetOpenedChests()
-  useShards.setState({ mine: [], deleted: {}, deletedBags: {}, discovered: {}, pending: null, chestBack: null, deployHeight: 0, deployUnit: 0, deployTurn: [0, 0, 0], deployStatus: 'idle', deployError: null, selectedSecret: null, deployLeaveOut: null, deployInto: null, deployDoorHeight: null, placedLast: null })
+  useShards.setState({ mine: [], deleted: {}, deletedBags: {}, discovered: {}, pending: null, chestBack: null, deployHeight: 0, deployUnit: 0, deployTurn: [0, 0, 0], deployStatus: 'idle', deployError: null, selectedSecret: null, deployLeaveOut: null, deployInto: null, placedLast: null })
   useBuilder.getState().exit(); useStash.getState().close()
   useInventory.setState({ owner: me(), items: {}, storage: 'memory' })
   useCyberspace.setState({ live: true, position: CURSOR, anchor: CURSOR, cursor: CURSOR, spectate: null, exploreIndex: null, transit: null })
@@ -193,7 +193,7 @@ describe('a large shard when a move fails', () => {
     relay.refuse = (e) => e.kind === HIDDEN_KIND
     expect(await S().resealDoor(d.eventId, NEW())).toMatch(/Nothing has moved/)
     relay.refuse = () => false
-    expect((await read(row(d), secret)).length).toBe(2)
+    expect((await read(doors()[0], secret)).length).toBe(2)
     expect(new Set(S().mine.filter((m) => m.room).map((m) => m.lookupId))).toEqual(lookups)
   })
 
@@ -410,9 +410,7 @@ describe('sending a door and its room', () => {
     await hide('behind it', HEIGHT)
     useCyberspace.setState({ live: true })
     // The door's bag alone goes out, as if the room's failed long ago.
-    const { publishMany } = await import('../../lib/relay')
-    const dBag = await (async () => { const rows = S().mine.map((m) => (m.lookupId === d.lookupId ? { ...m, published: true } : m)); useShards.setState({ mine: rows }); return rows })()
-    void dBag; void publishMany
+    useShards.setState({ mine: S().mine.map((m) => (m.lookupId === d.lookupId ? { ...m, published: true } : m)) })
     expect(await S().deleteDoor(d.eventId, false)).toBeNull()
     const place = await regionKeyOffThread(positionOf(d), HEIGHT, 20)
     const held = await bagEntries(newestBag(place.lookupId)!, place.key) as NostrEvent[]

@@ -25,3 +25,12 @@
  * can read them is back. That is why this constant is the way back.
  */
 export const CHAIN_STORE_VERSION: 1 | 2 = 2
+
+/**
+ * Whether WebKit (Safari, and every browser on an iPhone) may keep chains in
+ * rows. Not until a real iPhone has passed: nothing here can test one. iPhones
+ * lose nothing meanwhile, because they stay on the old stores. Lifting this is
+ * its own PR, which the owner merges. One device can try it first, by opening
+ * the app with ?chainstore=trial (lib/chainStore.ts).
+ */
+export const CHAIN_ROWS_ON_WEBKIT: boolean = false

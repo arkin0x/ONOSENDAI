@@ -145,7 +145,7 @@ describe('the draw order (review of #452)', () => {
     expect(bench).toMatch(/<mesh geometry=\{lit\.g\} frustumCulled=\{false\} renderOrder=\{OVERLAY_ORDER\}>/)
     expect(bench).toMatch(/edge\.renderOrder = OVERLAY_ORDER/)
     expect(bench).toMatch(/LineBasicMaterial\(\{ color: WARN, toneMapped: false, transparent: true \}\)/)
-    expect(bench).toMatch(/<sprite [^>]*renderOrder=\{OVERLAY_ORDER\}>/)
+    expect(bench).toMatch(/<primitive object=\{halos\.points\} renderOrder=\{OVERLAY_ORDER\} \/>/)
     expect(bench).toMatch(/l\.renderOrder = OVERLAY_ORDER/)
     expect(bench).toMatch(/<mesh position=\{UP\(aim\)\} renderOrder=\{OVERLAY_ORDER\}>/)
   })

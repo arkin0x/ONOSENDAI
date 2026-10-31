@@ -17,6 +17,8 @@ const sent = vi.hoisted(() => [] as Array<{ id: string }>)
 const quota = vi.hoisted(() => ({ chainChars: Infinity }))
 /** What the deploy's /version.json answers: a value, or nothing at all (offline). */
 const deploy = vi.hoisted(() => ({ answer: null as unknown }))
+/** What the relays answer a head confirmation: the events, or null when nobody counted. */
+const relays = vi.hoisted(() => ({ confirm: [] as unknown }))
 vi.hoisted(() => {
   const m = new Map<string, string>()
   const storage: Storage = {
@@ -32,14 +34,14 @@ vi.hoisted(() => {
   }
   ;(globalThis as { localStorage?: Storage }).localStorage = storage
 })
-vi.mock('../../lib/chainStoreVersion', () => ({ get CHAIN_STORE_VERSION() { return version.v } }))
+vi.mock('../../lib/chainStoreVersion', () => ({ get CHAIN_STORE_VERSION() { return version.v }, CHAIN_ROWS_ON_WEBKIT: false }))
 vi.mock('../../lib/workers', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../lib/workers')>()
   return { ...actual, postProof: vi.fn((m: unknown) => { posted.push(m) }), cancelProof: vi.fn() }
 })
 vi.mock('../../lib/chains', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../lib/chains')>()
-  return { ...actual, fetchChainEvents: vi.fn(async () => []), confirmChainEvents: vi.fn(async () => []) }
+  return { ...actual, fetchChainEvents: vi.fn(async () => []), confirmChainEvents: vi.fn(async () => relays.confirm) }
 })
 
 import { finalizeEvent, generateSecretKey, getPublicKey } from 'nostr-tools/pure'
@@ -140,6 +142,7 @@ async function oldRecord(): Promise<unknown> {
 beforeEach(() => {
   posted.length = 0
   sent.length = 0
+  relays.confirm = []
   version.v = 2
   deploy.answer = { build: 'deployed', minChainEpoch: 2, chainStore: 2 }
   vi.stubGlobal('fetch', async (url: unknown) => {
@@ -633,7 +636,8 @@ describe('when storage will not take it', () => {
     rows.setRowsPatience({ read: 0 })
     const store = await import('../useCyberspace')
     await store.savedChainLoaded()
-    expect(store.useCyberspace.getState().events).toHaveLength(10)
+    // The frozen copy, or the late answer already: never less, and never a write over the copy.
+    expect(store.useCyberspace.getState().events.length).toBeGreaterThanOrEqual(10)
     expect(localStorage.getItem(LOCAL_KEY)).toBe(frozen)
     await vi.waitFor(() => expect(store.useCyberspace.getState().prevEventId).toBe(further))
     expect(rows.inRows(pk)).toBe(true)
@@ -907,5 +911,216 @@ describe('the store probe, at open', () => {
       expect((await db.readStoredChain(pk) as { events: NostrEvent[] }).events.map((e) => e.id)).toContain(m)
       db.closeChainDb()
     } finally { restore() }
+  })
+})
+
+describe('a switched device whose rows fail', () => {
+  /** Damage the rows, so a read answers `unreadable`, as a sick database does. */
+  async function breakRows(id: string): Promise<void> {
+    const { withEventDb, closeEventDb } = await import('../../lib/eventDb/connection')
+    await withEventDb((db) => new Promise<void>((resolve) => {
+      const tx = db.transaction('events', 'readwrite')
+      tx.objectStore('events').delete(id)
+      tx.oncomplete = () => resolve()
+    }))
+    closeEventDb()
+  }
+  const recordNow = async (): Promise<unknown> => {
+    const { withEventDb, closeEventDb } = await import('../../lib/eventDb/connection')
+    const r = await withEventDb((db) => new Promise((resolve) => { const g = db.transaction('chains').objectStore('chains').get(pk); g.onsuccess = () => resolve(g.result) }))
+    closeEventDb()
+    return r
+  }
+
+  it('unreadable is not "no chain": no second move, no record written, the frozen copies untouched', async () => {
+    const chain = chainOf(8)
+    await seedOldStores(chain, { localToo: true })
+    await openTab()
+    const frozenLocal = localStorage.getItem(LOCAL_KEY)
+    const frozenRecord = await oldRecord()
+    await breakRows(chain[3].id)
+    const record = await recordNow()
+    const b = await openTab()
+    expect(b.S().events).toHaveLength(8)
+    expect(b.rows.inRows(pk)).toBe(false)
+    expect(await recordNow()).toEqual(record)
+    expect(localStorage.getItem(LOCAL_KEY)).toBe(frozenLocal)
+    expect(await oldRecord()).toEqual(frozenRecord)
+  })
+
+  it('a failed read blocks signing until the relays confirm the head', async () => {
+    const chain = chainOf(8)
+    await seedOldStores(chain, { localToo: true })
+    await openTab()
+    await breakRows(chain[3].id)
+    relays.confirm = null
+    const b = await openTab()
+    const head = b.S().prevEventId
+    await press(b)
+    await signMove(b).catch(() => {})
+    expect(b.S().prevEventId).toBe(head)
+    expect(b.S().events).toHaveLength(8)
+    // The relays answer, and the move goes on from what they confirmed.
+    relays.confirm = []
+    b.store.useCyberspace.setState({ proof: { ...b.S().proof, status: 'idle', message: null } })
+    const m = await signMove(b)
+    expect(m).not.toBe(head)
+    // It went nowhere over the frozen copy, and is kept until the rows are back.
+    expect(JSON.parse(localStorage.getItem(`onosendai:chain-unsaved:${pk}`)!).map((e: NostrEvent) => e.id)).toContain(m)
+  })
+
+  it('no frozen copy and no relays: no new spawn over a chain nobody can see', async () => {
+    const chain = chainOf(5)
+    await seedOldStores(chain)
+    await openTab()
+    await breakRows(chain[2].id)
+    relays.confirm = null
+    // A device that only ever had the chain in rows: no old copy to draw from.
+    ;(globalThis as { indexedDB: IDBFactory }).indexedDB.deleteDatabase('onosendai:chains')
+    localStorage.removeItem(LOCAL_KEY)
+    const b = await openTab()
+    expect(b.S().events).toHaveLength(0)
+    await expect(b.S().signEvent(spawnTemplate(pk, 5_000))).rejects.toThrow(b.store.ROWS_DOWN_MESSAGE)
+    // Even once the relays have answered: they may simply never have held it.
+    relays.confirm = []
+    await b.S().confirmHeadNow()
+    await expect(b.S().signEvent(spawnTemplate(pk, 5_000))).rejects.toThrow(b.store.ROWS_DOWN_MESSAGE)
+  })
+
+  it('a kill switch while the rows are unreadable writes nothing over the frozen copy either', async () => {
+    const chain = chainOf(6)
+    await seedOldStores(chain, { localToo: true })
+    await openTab()
+    await breakRows(chain[2].id)
+    deploy.answer = { build: 'fix', minChainEpoch: 2, chainStore: 1 }
+    const frozen = localStorage.getItem(LOCAL_KEY)
+    await (await import('../../lib/versionGate')).checkVersion()
+    const b = await openTab()
+    await signMove(b)
+    expect(localStorage.getItem(LOCAL_KEY)).toBe(frozen)
+  })
+
+  it('the late answer ends it: the rows are taken, and writing to them goes on', async () => {
+    const chain = chainOf(6)
+    await seedOldStores(chain, { localToo: true })
+    await openTab()
+    vi.resetModules()
+    const rows = await import('../../lib/chainStore')
+    rows.setRowsPatience({ read: 0 })
+    const store = await import('../useCyberspace')
+    await store.savedChainLoaded()
+    await vi.waitFor(() => expect(rows.inRows(pk)).toBe(true))
+    rows.setRowsPatience({ read: 3_000 })
+    const tab: Tab = { store, rows, S: store.useCyberspace.getState }
+    store.useCyberspace.setState({ selfCheck: { pubkey: pk, status: 'none' } })
+    const m = await signMove(tab)
+    await rows.chainRowsSettled()
+    expect((await rowsNow())!.events.map((e) => e.id)).toContain(m)
+  })
+})
+
+describe('WebKit', () => {
+  const IPHONE = 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Mobile/15E148 Safari/604.1'
+  const CHROME_ON_IPHONE = 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) CriOS/130.0 Mobile/15E148 Safari/604.1'
+  const SAFARI_MAC = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 14_0) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Safari/605.1.15'
+  const CHROME_DESKTOP = 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0 Safari/537.36'
+  const be = (ua: string): void => { vi.stubGlobal('navigator', { userAgent: ua }) }
+
+  it.each([[IPHONE, true], [CHROME_ON_IPHONE, true], [SAFARI_MAC, true], [CHROME_DESKTOP, false]])('%s: WebKit is %s', async (ua, webkit) => {
+    be(ua)
+    const rows = await import('../../lib/chainStore')
+    expect(rows.onWebKit()).toBe(webkit)
+  })
+
+  it('an iPhone stays on the old stores: no probe, no marker, no record, the old store written whole', async () => {
+    be(IPHONE)
+    const chain = chainOf(6)
+    await seedOldStores(chain, { localToo: true })
+    const a = await openTab()
+    expect(a.rows.rowsWanted()).toBe(false)
+    expect(a.rows.inRows(pk)).toBe(false)
+    const m = await signMove(a)
+    expect((JSON.parse(localStorage.getItem(LOCAL_KEY)!) as { events: NostrEvent[] }).events.map((e) => e.id)).toContain(m)
+    expect((await indexedDB.databases()).map((d) => d.name)).not.toContain('onosendai:events')
+    expect(localStorage.getItem(`onosendai:chain-rows:${pk}`)).toBeNull()
+  })
+
+  it('on the trial: it moves, every action stays in the spare key until a relay has it, and it says what it did', async () => {
+    be(IPHONE)
+    localStorage.setItem('onosendai:chain-store-trial', '1')
+    const chain = chainOf(6)
+    await seedOldStores(chain)
+    const a = await openTab()
+    expect(a.rows.inRows(pk)).toBe(true)
+    expect((await import('../useToast')).useToast.getState().toast?.label).toBe('STORE ROWS')
+    const m1 = await signMove(a)
+    const m2 = await signMove(a)
+    await a.rows.chainRowsSettled()
+    // Committed, and still in the key, because no relay has them.
+    expect((await rowsNow())!.events.map((e) => e.id)).toContain(m2)
+    const tail = (): string[] => (JSON.parse(localStorage.getItem(`onosendai:chain-unsaved:${pk}`) ?? '[]') as NostrEvent[]).map((e) => e.id)
+    expect(tail()).toEqual(expect.arrayContaining([m1, m2]))
+    // A relay takes the first: only the second stays.
+    a.S().setPublishStatus(m1, 'ok')
+    await a.rows.chainRowsSettled()
+    expect(tail()).not.toContain(m1)
+    expect(tail()).toContain(m2)
+  })
+
+  it('on the trial, Safari clears the database: the spare key and the old copies bring back every unsent move', async () => {
+    be(IPHONE)
+    localStorage.setItem('onosendai:chain-store-trial', '1')
+    const chain = chainOf(6)
+    await seedOldStores(chain, { localToo: true })
+    const a = await openTab()
+    const m = await signMove(a)
+    await a.rows.chainRowsSettled()
+    ;(await import('../../lib/eventDb/connection')).closeEventDb()
+    ;(await import('../../lib/chainDb')).closeChainDb()
+    const indexed = new IDBFactory()
+    ;(globalThis as { indexedDB?: IDBFactory }).indexedDB = indexed
+    const b = await openTab()
+    expect(b.S().prevEventId).toBe(m)
+  })
+})
+
+describe('the probe decides before anything is written', () => {
+  it('a put that throws in the probe: no marker, no record, no real database, and the old store written', async () => {
+    const chain = chainOf(5)
+    await seedOldStores(chain)
+    const proto = IDBObjectStore.prototype as unknown as { put: (...x: unknown[]) => unknown }
+    const real = proto.put
+    proto.put = function (this: IDBObjectStore, ...x: unknown[]) {
+      if (this.transaction.db.name === 'onosendai:events-probe') throw new DOMException('no', 'DataError')
+      return real.apply(this, x)
+    }
+    try {
+      const a = await openTab()
+      expect(a.rows.rowsWanted()).toBe(false)
+      const m = await signMove(a)
+      const db = await import('../../lib/chainDb')
+      await db.chainWritesSettled()
+      expect((await db.readStoredChain(pk) as { events: NostrEvent[] }).events.map((e) => e.id)).toContain(m)
+      db.closeChainDb()
+    } finally { proto.put = real }
+    expect(localStorage.getItem(`onosendai:chain-rows:${pk}`)).toBeNull()
+    expect((await indexedDB.databases()).map((d) => d.name)).not.toContain('onosendai:events')
+  })
+
+  it('a chain is only moved on a probe run now, never on a memo', async () => {
+    await seedOldStores(chainOf(4))
+    // A real pass, remembered from another identity on this browser.
+    await openTab()
+    const memo = localStorage.getItem('onosendai:chain-store-probe')!
+    expect(memo).toContain(navigator.userAgent)
+    ;(await import('../../lib/eventDb/connection')).closeEventDb()
+    ;(await import('../../lib/chainDb')).closeChainDb()
+    ;(globalThis as { indexedDB?: IDBFactory }).indexedDB = new IDBFactory()
+    localStorage.removeItem(`onosendai:chain-rows:${pk}`)
+    await seedOldStores(chainOf(4))
+    expect(localStorage.getItem('onosendai:chain-store-probe')).toBe(memo)
+    const open = vi.spyOn((globalThis as { indexedDB: IDBFactory }).indexedDB, 'open')
+    await openTab()
+    expect(open.mock.calls.map((c) => c[0])).toContain('onosendai:events-probe')
   })
 })

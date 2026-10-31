@@ -265,7 +265,13 @@ function alive(row: EventRow, seconds: number): boolean {
   return row.deleted !== 1 && row.nip01 !== 0 && (expires === null || expires > seconds) && (addressOf(row) === undefined || row.addr !== undefined)
 }
 
-/** Rows from `index` over `range`, newest key first, up to `limit`; it stops there, and reads no further. */
+/**
+ * Rows from `index` over `range`, newest key first, up to `limit`; it stops
+ * there, and reads no further. Within one second the higher id comes first, the
+ * order of the keys. NIP-01 says the lowest, and nothing here needs it, because
+ * a limited read is never a whole answer: fresh-dated spam can still fill a
+ * limit, so a caller never treats one as complete.
+ */
 async function newestFrom(db: IDBDatabase, index: string, range: IDBKeyRange, limit: number, now: number): Promise<NostrEvent[]> {
   const seconds = Math.floor(now / 1000)
   const os = db.transaction(EVENTS, 'readonly').objectStore(EVENTS).index(index)
@@ -290,14 +296,21 @@ export function byAuthorKind(db: IDBDatabase, pubkey: string, kind: number, limi
   return newestFrom(db, 'byAuthorKind', IDBKeyRange.bound([pubkey, kind, -Infinity], [pubkey, kind, Infinity]), limit, now)
 }
 
-/** Everyone's events of one kind, newest first. */
+/**
+ * The newest second a read of everyone's events looks at. A movement action may
+ * claim any time (a chain has its own clock), so one dated far ahead by a
+ * throwaway key would otherwise sit on top of every limited read forever.
+ */
+const readCeiling = (now: number): number => Math.floor(now / 1000) + FUTURE_SLACK_S
+
+/** Everyone's events of one kind, newest first, none dated past the ceiling. */
 export function byKind(db: IDBDatabase, kind: number, limit = READ_LIMIT_DEFAULT, now = Date.now()): Promise<NostrEvent[]> {
-  return newestFrom(db, 'byKind', IDBKeyRange.bound([kind, -Infinity], [kind, Infinity]), limit, now)
+  return newestFrom(db, 'byKind', IDBKeyRange.bound([kind, -Infinity], [kind, readCeiling(now)]), limit, now)
 }
 
-/** The events carrying one tag value (`letter:value`, TAG_INDEX), newest first. */
+/** The events carrying one tag value (`letter:value`, TAG_INDEX), newest first, none dated past the ceiling. */
 export function byTag(db: IDBDatabase, tag: string, limit = READ_LIMIT_DEFAULT, now = Date.now()): Promise<NostrEvent[]> {
-  return newestFrom(db, 'byTag', IDBKeyRange.bound([tag, -Infinity], [tag, Infinity]), limit, now)
+  return newestFrom(db, 'byTag', IDBKeyRange.bound([tag, -Infinity], [tag, readCeiling(now)]), limit, now)
 }
 
 /** The current version at an address, when it is here and alive. */

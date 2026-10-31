@@ -82,7 +82,7 @@ import {
 } from '../lib/space'
 import { confirmChainEvents } from '../lib/chains'
 import { chainDbAvailable, chainWritePause, readStoredChain, setAsideChains, setAsideStoredChain, writeStoredChain, type StoredChain } from '../lib/chainDb'
-import { checkRows, clearTail, committedHead, deployAllowsMove, inRows, markerValue, migrateToRows, noteCommitted, onChainLost, onChainRefused, readRows, readTail, rowsHead, rowsMarked, rowsWanted, saveRows, setAsideRows, setMarker, storeWorksHere, turnRowsOff, writeTail, type RowsRead } from '../lib/chainStore'
+import { checkRows, clearTail, committedHead, deployAllowsMove, inRows, markerValue, migrateToRows, noteCommitted, onChainLost, onChainRefused, probePassedBefore, readRows, readTail, rowsHead, rowsMarked, rowsWanted, saveRows, setAsideRows, setMarker, storeTrial, storeWorksHere, tailOnSave, turnRowsOff, writeTail } from '../lib/chainStore'
 import { eventDbAvailable } from '../lib/eventDb/client'
 import type { ChainRead, ChainSource } from '../lib/eventDb/chainRows'
 import { checkSignatures } from '../lib/sigCheck'
@@ -1403,24 +1403,23 @@ function saveChain(events: NostrEvent[], published: Record<string, PublishStatus
   // saves whatever the chain is by then. When the actions changed is noted
   // now, so a respawn made meanwhile is still the newer chain.
   if (hydration?.pubkey === pubkey) { hydration.dirty = true; return }
-  if (rowsWanted()) {
-    // One row per new action, off the main thread, and no copy of the chain
-    // anywhere else (lib/chainStore.ts): the old stores stay as they are.
-    if (inRows(pubkey)) {
-      // The marker says a chain is in rows, so it goes up with the first action.
-      if (!rowsMarked(pubkey)) setMarker(pubkey, storedMark(pubkey))
-      saveRows(pubkey, { events, isPublished: (id) => published[id] === 'ok', nip01Of: (e) => (verifiedSigs.has(sigKey(e)) ? 1 : 0), held: held ?? heldNow(pubkey), stats: { ...stats }, savedAt })
-      markForOldTabs(pubkey, events)
-      return
-    }
-    // The rows hold this chain and have not answered yet. Nothing goes over
-    // the frozen copy; what no relay holds is kept until they do answer.
-    if (rowsMarked(pubkey)) {
-      const unsent = events.filter((e) => published[e.id] !== 'ok')
-      const inHand = new Set(unsent.map((e) => e.id))
-      writeTail(pubkey, readTail(pubkey).filter((e) => !inHand.has(e?.id)).concat(unsent))
-      return
-    }
+  // The rows hold this chain and cannot be read. Nothing goes over the frozen
+  // copy or the rows; what no relay holds is kept until they can.
+  if (rowsDown.has(pubkey)) {
+    const unsent = events.filter((e) => published[e.id] !== 'ok')
+    const inHand = new Set(unsent.map((e) => e.id))
+    writeTail(pubkey, readTail(pubkey).filter((e) => !inHand.has(e?.id)).concat(unsent))
+    return
+  }
+  // One row per new action, off the main thread, and no copy of the chain
+  // anywhere else (lib/chainStore.ts): the old stores stay as they are.
+  if (rowsWanted() && inRows(pubkey)) {
+    // The marker says a chain is in rows, so it goes up with the first action.
+    if (!rowsMarked(pubkey)) setMarker(pubkey, storedMark(pubkey))
+    tailOnSave(pubkey, () => events.filter((e) => published[e.id] !== 'ok'))
+    saveRows(pubkey, { events, isPublished: (id) => published[id] === 'ok', nip01Of: (e) => (verifiedSigs.has(sigKey(e)) ? 1 : 0), held: held ?? heldNow(pubkey), stats: { ...stats }, savedAt })
+    markForOldTabs(pubkey, events)
+    return
   }
   const data: PersistedChain = {
     version: 2,
@@ -1458,6 +1457,37 @@ function saveChain(events: NostrEvent[], published: Record<string, PublishStatus
     localStorage.setItem(chainMarkKeyFor(pubkey), mark)
     knownMarks.set(pubkey, mark)
   } catch { /* storage full: the other tab learns from the relays instead */ }
+}
+
+/**
+ * Identities whose chain is in rows that cannot be read now: a read answered
+ * `unreadable` or `timeout`. That is never "no chain". There is no second move
+ * into rows, no new spawn, and nothing is written over the rows or the frozen
+ * copy. The chain drawn is the frozen copy, the tail and what the relays bring,
+ * and the frozen copy can be far behind, so signing from it would fork the
+ * chain, and a fork ends it. Nothing is signed until the relays have confirmed
+ * the head on this page (relaysConfirmed), and a spawn not at all.
+ */
+const rowsDown = new Set<string>()
+/** Identities whose head the relays confirmed on this page (confirmHead). */
+const relaysConfirmed = new Set<string>()
+
+/** Said when a move is refused because the saved chain cannot be read. */
+export const ROWS_DOWN_MESSAGE = 'Your saved chain cannot be read right now. Your move waits until the relays confirm your head.'
+
+/** The words a kind 3333 is refused with while the rows are down, or null. */
+function rowsDownRefusal(pubkey: string, events: NostrEvent[]): string | null {
+  if (!rowsDown.has(pubkey)) return null
+  return events.length === 0 || !relaysConfirmed.has(pubkey) ? ROWS_DOWN_MESSAGE : null
+}
+
+/** A read of a chain in rows failed. */
+function rowsAreDown(pubkey: string, why: string): void {
+  if (!rowsDown.has(pubkey)) console.warn(`[chain] the event database ${why}: using the frozen copy and the relays, writing nothing over either, and signing nothing until the relays confirm the head`)
+  rowsDown.add(pubkey)
+  relaysConfirmed.delete(pubkey)
+  frozenCopyInHand(pubkey)
+  tailInHand(pubkey)
 }
 
 /** Per identity, the head the old stores' mark last named here. */
@@ -1664,6 +1694,9 @@ async function signEvent(template: EventTemplate, patienceMs?: number, signer: S
   if (template.kind === ACTION_KIND) {
     const look = lookBeforeMove()
     if (!(look instanceof Promise ? await look : look)) throw new Error(VERSION_BLOCKED_MESSAGE)
+    const s = useCyberspace.getState()
+    const down = rowsDownRefusal(s.identity.pubkey, s.events)
+    if (down) throw new Error(down)
   }
   if (signer.kind === 'local') {
     // The local key computes the id and the signature itself, so its events
@@ -2069,6 +2102,7 @@ async function confirmHead(retrying: () => void): Promise<string | null | typeof
     if (chainEpoch !== epoch) return STALE_CONFIRMATION
     if (useCyberspace.getState().identity.pubkey !== pubkey) return HEAD_UNCONFIRMED_MESSAGE
     if (got) {
+      relaysConfirmed.add(pubkey)
       foldNow(got)
       return null
     }
@@ -2238,7 +2272,7 @@ function hydrateChain(pubkey: string): void {
   // When the chain in hand last changed as the read went out: a late answer
   // that disagrees with moves made after that is not taken over them.
   const startedAt = chainAt.get(pubkey)?.at ?? 0
-  const read = rowsWanted() ? hydrateFromRows(pubkey, entry, ticket, epoch, startedAt) : hydrateFromOldStores(pubkey, entry, ticket, epoch, startedAt).then(() => takeRowsBack(pubkey, entry, ticket))
+  const read = rowsWanted() ? hydrateFromRows(pubkey, entry, ticket, epoch, startedAt) : hydrateFromOldStores(pubkey, entry, ticket, epoch, startedAt).then(() => takeRowsBack(pubkey, entry, ticket, startedAt))
   entry.done = read.catch(() => { /* the chain in hand stands */ }).finally(() => {
     if (hydration !== entry) return
     hydration = null
@@ -2252,8 +2286,17 @@ function hydrateChain(pubkey: string): void {
     awaitingHydration = []
     if (waiting.length > 0) s.adoptChain(waiting)
     if (rowsWanted() && inRows(pubkey)) void foldStaleBuild(pubkey)
+    if (storeTrial()) sayTrial(pubkey)
   })
   hydration = entry
+}
+
+/** What a device on the trial sees after each load (?chainstore=trial): what the store did, and the head to compare by hand. */
+function sayTrial(pubkey: string): void {
+  const s = useCyberspace.getState()
+  const head = s.prevEventId ? s.prevEventId.slice(0, 8) : 'none'
+  const state = rowsDown.has(pubkey) ? 'UNREADABLE' : !rowsWanted() ? 'OFF' : inRows(pubkey) ? 'ROWS' : 'OLD STORES'
+  useToast.getState().show({ label: `STORE ${state}`, meta: `probe ${probePassedBefore() ? 'pass' : 'FAIL'}, ${s.events.length} actions, head ${head}`, mark: 'build', sticky: true })
 }
 
 /** The read of the old stores. True when it was taken in. */
@@ -2319,13 +2362,14 @@ function tailInHand(pubkey: string): void {
  * old stores are never written again for an identity once it is in rows.
  */
 async function hydrateFromRows(pubkey: string, entry: { pubkey: string; dirty: boolean }, ticket: number, epoch: number, startedAt: number): Promise<void> {
-  // Not on this browser, unless it has shown it can. It stays on the old stores.
-  if (!await storeWorksHere()) {
+  // Before anything is written or moved. A browser that fails stays on the old
+  // stores, as a build of version 1 does: no marker, no record, the old stores
+  // written whole. Asked afresh unless this identity's rows are already there.
+  if (!await storeWorksHere(!rowsMarked(pubkey))) {
     turnRowsOff()
     if (hydration !== entry || ticket !== hydrateTicket || useCyberspace.getState().identity.pubkey !== pubkey) return
-    if (rowsMarked(pubkey)) frozenCopyInHand(pubkey)
     await hydrateFromOldStores(pubkey, entry, ticket, epoch, startedAt)
-    await takeRowsBack(pubkey, entry, ticket)
+    await takeRowsBack(pubkey, entry, ticket, startedAt)
     return
   }
   const read = await readRows(pubkey, (late) => {
@@ -2338,15 +2382,8 @@ async function hydrateFromRows(pubkey: string, entry: { pubkey: string; dirty: b
   if (hydration !== entry || ticket !== hydrateTicket) return
   if (useCyberspace.getState().identity.pubkey !== pubkey) return
   if (read === 'timeout' || read === 'unreadable') {
-    if (rowsMarked(pubkey)) {
-      // The chain is in the rows and the rows do not answer. The frozen copy
-      // draws something, moves go on to the relays' confirmation, and nothing
-      // is written over it (saveChain) until the late answer lands.
-      console.warn(`[chain] the event database ${read === 'timeout' ? 'did not answer in time' : 'could not be read'}: using the frozen copy, and writing nothing until it answers`)
-      frozenCopyInHand(pubkey)
-      return
-    }
-    await hydrateFromOldStores(pubkey, entry, ticket, epoch, startedAt)
+    if (rowsMarked(pubkey)) rowsAreDown(pubkey, read === 'timeout' ? 'did not answer in time' : 'could not be read')
+    else await hydrateFromOldStores(pubkey, entry, ticket, epoch, startedAt)
     return
   }
   if (read !== null) {
@@ -2419,6 +2456,7 @@ async function moveToRows(pubkey: string, startedAt: number): Promise<void> {
  * added, so they are written now.
  */
 function takeRows(pubkey: string, read: ChainRead, blindSince: number | null): boolean {
+  rowsDown.delete(pubkey)
   noteCommitted(pubkey, read.events.map((e) => e.id), read.published)
   startRowsCheck(pubkey, read)
   markedHead.set(pubkey, read.headId)
@@ -2448,12 +2486,21 @@ function takeRows(pubkey: string, read: ChainRead, blindSince: number | null): b
  * by every move made since. Taken like any other copy, and the old stores are
  * written from it at once.
  */
-async function takeRowsBack(pubkey: string, entry: { dirty: boolean }, ticket: number): Promise<void> {
+async function takeRowsBack(pubkey: string, entry: { dirty: boolean }, ticket: number, startedAt: number): Promise<void> {
   // Only a device that has used the rows opens them: everywhere else this is the old build, to the letter.
   if (rowsWanted() || !eventDbAvailable() || !rowsMarked(pubkey)) return
-  const read: RowsRead = await readRows(pubkey)
-  if (ticket !== hydrateTicket || read === null || read === 'unreadable' || read === 'timeout') return
-  if (useCyberspace.getState().identity.pubkey !== pubkey) return
+  const read = await readRows(pubkey, (late) => {
+    if (ticket !== hydrateTicket || late === 'unreadable' || late === null) return
+    if (useCyberspace.getState().identity.pubkey !== pubkey) return
+    rowsDown.delete(pubkey)
+    takeStoredChain(pubkey, late, startedAt)
+    const s = useCyberspace.getState()
+    if (s.events[0]?.pubkey === pubkey) saveChain(s.events, s.published, s.chain, s.held)
+  })
+  if (ticket !== hydrateTicket || useCyberspace.getState().identity.pubkey !== pubkey) return
+  if (read === null) return
+  // Unreadable is never "no chain": moves only in the rows would be lost if the old stores went on without them.
+  if (read === 'unreadable' || read === 'timeout') { rowsAreDown(pubkey, read === 'timeout' ? 'did not answer in time' : 'could not be read'); return }
   takeStoredChain(pubkey, read, null)
   entry.dirty = true
 }
@@ -2569,7 +2616,7 @@ async function chainHydrated(pubkey: string): Promise<void> {
  * there, so the old copy is an old stretch not worth parsing and drawing.
  */
 function rowsFirst(pubkey: string): boolean {
-  return rowsWanted() && rowsMarked(pubkey)
+  return rowsWanted() && rowsMarked(pubkey) && probePassedBefore()
 }
 
 /**

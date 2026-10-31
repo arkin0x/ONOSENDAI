@@ -45,7 +45,7 @@ import {
   type ShardModel,
   type ShardVertex, type Part, type Ref, cloneVertex, hexToRgb, rgbToHex } from 'sno-core/shards'
 import { withOpacity } from '../lib/opacityStep'
-import { noTable, signedTableOnly, you } from '../lib/carried'
+import { keepTable, noTable, signedTableOnly, takenCopy, you } from '../lib/carried'
 import { authoredConstrainOf, chosenConstrainOf, withConstrain, type Constrain } from '../lib/walkConstrain'
 import { addPart, quarterTurnPart, removeParts } from 'sno-core/parts'
 import { FLOOR, MAX_SIZE, MIN_SIZE, stamp, type Facing, type StampKind, type WorkPlane } from 'sno-core/stamps'
@@ -560,7 +560,12 @@ export interface WorkshopState {
    * `d`, so PUBLISH edits it in place rather than publishing a second copy
    * beside it, as snocrash's adopt does (arkinox, 2026-10-10).
    */
-  importShard: (model: ShardModel, credit?: Credit, id?: string) => string
+  importShard: (model: ShardModel, credit?: Credit, id?: string, fromBag?: boolean) => string
+  /**
+   * The answer to PUBLISH's question: this shard's table, which came out of a
+   * bag, may go out with it (DECK-0003 §1.10). Without it the table stays out.
+   */
+  keepCarried: (id: string) => void
   /**
    * Bulk import's add (store/useShardImport): a deep copy of the model as a
    * new shard of yours under exactly `name`, nothing selected or opened, with
@@ -1616,12 +1621,13 @@ export const useWorkshop = create<WorkshopState>((set, get) => {
       return s.id
     },
 
-    importShard: (given, credit, id) => {
-      // A copy from the feed, a bag, a chest or an avatar: what it carries comes
-      // in only when you signed the event it was read from (lib/carried.ts
-      // signedTableOnly), so a key someone else wrote under your name is never
-      // published again as yours.
-      const model = signedTableOnly(given, you())
+    importShard: (given, credit, id, fromBag) => {
+      // A copy from the feed or an avatar: what it carries comes in only when
+      // you signed the event it was read from (lib/carried.ts signedTableOnly),
+      // so a key someone else wrote under your name is never published again
+      // as yours. Taken from a bag or a chest, its table comes with it under
+      // your key, and it remembers the bag (lib/carried.ts takenCopy).
+      const model = fromBag ? takenCopy(given, you()) : signedTableOnly(given, you())
       const taken = new Set(get().shards.map((s) => s.name))
       // Your own object comes back under its own name: there is no other to be a copy of.
       const name = !id && taken.has(model.name) ? `${model.name} copy` : model.name
@@ -1630,6 +1636,11 @@ export const useWorkshop = create<WorkshopState>((set, get) => {
       const list = [...get().shards, copy]
       set({ shards: list }); save(list)
       return copy.id
+    },
+
+    keepCarried: (id) => {
+      const list = get().shards.map((s) => (s.id === id ? keepTable(s) : s))
+      set({ shards: list }); save(list)
     },
 
     addShard: (given, name, id) => {

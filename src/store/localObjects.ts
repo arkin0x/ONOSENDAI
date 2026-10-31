@@ -34,7 +34,7 @@ import { SNO_KIND, objectAddress } from 'sno-core/feed'
 import { MAX_PART_DEPTH, carriedModel, carryAll, parseAddress } from 'sno-core/parts'
 import { hash53, thumbKeyOf } from '../lib/thumbKey'
 import { localObjectsChanged, setLocalObjects } from '../lib/parts'
-import { setLocalAuthor } from '../lib/carried'
+import { dOf, isQuietD, ownKeysOnly, rekeyTable, setLocalAuthor } from '../lib/carried'
 import { withAuthoredConstrain } from '../lib/walkConstrain'
 import { usePublished } from './usePublished'
 import { useCyberspace } from './useCyberspace'
@@ -93,14 +93,27 @@ export function localObject(address: { kind: number; pubkey: string; d: string }
  * goes in written as a hide writes it, OPAQUE where its author never chose
  * (DECK-0003 §1.12). Run at DEPLOY, EDIT and PUT IN CHEST; the caller checks
  * the size (lib/carried.ts carryRefusal).
+ *
+ * A piece with no event of its own, whose `d` says something about it (a kit's
+ * path, a name), goes in under a `d` that says nothing, because an older reader
+ * asks public relays for every carried address (§1.10). A published piece keeps
+ * its address, so that reader finds it. What the hide writes names the new
+ * address; the workshop's shard is not touched. Every key that goes out is under
+ * the signer's pubkey, as a publisher MUST write (§1.10; lib/carried.ts ownKeysOnly).
  */
 export function carryLibrary(shard: ShardModel): ShardModel {
-  return carryAll(shard, (ref) => {
+  const carried = carryAll(shard, (ref) => {
     if (ref[0] !== 'a' || ref[2]) return null
     const a = parseAddress(ref[1])
     const piece = a ? localShard(a) : undefined
     return piece ? { object: withAuthoredConstrain(piece), carry: true } : null
   })
+  const me = useCyberspace.getState().identity.pubkey
+  if (!me) return carried
+  const held = shard.objects ?? {}
+  const ledger = usePublished.getState().ledger
+  const quiet = rekeyTable(carried, me, (key) => !Object.prototype.hasOwnProperty.call(held, key) && !isQuietD(dOf(key)) && !ledger[dOf(key)])
+  return ownKeysOnly(quiet, me)
 }
 
 /** A piece's version for a picture key: a hash of its payload, once per version of it, the same in every session. */

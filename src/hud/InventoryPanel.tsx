@@ -222,7 +222,7 @@ function TakenRow({ item }: { item: HeldItem }): JSX.Element {
   const label = coin ? (token ? cashuLabel(token) : 'cashu token') : item.name
   const moveToWorkshop = (): void => {
     if (!item.shard || moved) return
-    useWorkshop.getState().importShard(item.shard)
+    useWorkshop.getState().importShard(item.shard, undefined, undefined, true)
     setMoved(true)
     // Held by the store, not this row: the row leaves the list even when the menu closes first.
     window.setTimeout(() => useInventory.getState().clearTaken([item.id]), MOVED_NOTICE_MS)

@@ -165,9 +165,10 @@ function readEntry(e: BagEntry, sealer: string | undefined): ChestEntry | null {
     // rumors (RUMOR_KINDS); any other unsigned kind stays a claim, as it
     // would be dropped from a bag.
     const vouched = !signed && sealedAsRumor(ev.kind) && sealer !== undefined && ev.pubkey === sealer && ev.id === hash
-    // Whose carried pieces count: the signer of a signed entry, else the
-    // chest's sealer, never the pubkey an unsigned entry claims (DECK-0003 §1.10).
-    const body = readItem({ ...plain, id: hash }, signed ? ev.pubkey : sealer ?? null)
+    // Whose carried pieces count (DECK-0003 §1.10): the signer of a signed
+    // entry. An unsigned shard's author is a claim, whoever sealed the chest,
+    // because only a message or hidden audio is vouched for: no key counts.
+    const body = readItem({ ...plain, id: hash }, signed ? ev.pubkey : null)
     return body ? { id: hash, event: { ...plain, id: hash, sig: signed ? ev.sig : '' }, verified: signed || vouched, body } : null
   } catch {
     return null

@@ -588,6 +588,27 @@ function bufferOf(v: unknown, byteLength: number): ArrayBuffer | null {
 }
 
 /**
+ * serializeIndex, a slice at a time, so copying a million rows leaves room for
+ * frames. Everything the sort and the row count depend on is copied in the same
+ * tick, and `perm` is among them because an insert moves it in place. The four
+ * 32-byte columns can wait: a row is written once, as it is appended, and never
+ * moves, and only the first `count` are read. Null as serializeIndex is.
+ */
+export async function serializeIndexSliced(index: StopIndex, copy: (column: Uint8Array, bytes: number, rowBytes: number) => Promise<ArrayBuffer>): Promise<IndexSnapshot | null> {
+  if (hasPending(index) || index.permCount !== index.size) return null
+  const count = index.size
+  const maxHeight = index.maxHeight
+  const kinds = index.kinds.slice(0, count).buffer
+  const heights = index.heights.slice(0, count).buffer
+  const perm = index.perm.slice(0, count).buffer
+  const keys = await copy(index.keys, count * 32, 32)
+  const coords = await copy(index.coords, count * 32, 32)
+  const merkles = await copy(index.merkles, count * 32, 32)
+  const hashes = await copy(index.hashes, count * 32, 32)
+  return { version: 1, count, maxHeight, keys, coords, merkles, hashes, kinds, heights, perm }
+}
+
+/**
  * Adopt a stored snapshot into an EMPTY index. Everything is validated before
  * the first mutation (shape, version, exact buffer lengths, perm being a real
  * permutation, heights unique and consistent with maxHeight), because a

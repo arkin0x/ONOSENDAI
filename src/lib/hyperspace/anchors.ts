@@ -50,7 +50,7 @@ import {
   mergeAll,
   mergeStep,
   rowByHeight,
-  serializeIndex,
+  serializeIndexSliced,
   type StopIndex,
 } from './compactIndex'
 import { fetchManifest, runHeaderSync } from './headerSync'
@@ -63,6 +63,7 @@ import {
   putMeta,
   STOPS_STORE,
 } from './idb'
+import { copySliced, getSnapshot, putSnapshot } from './snapshotStore'
 
 // ---------------------------------------------------------------------------
 // Pure helpers (exported for tests)
@@ -287,7 +288,6 @@ const SYNC_BUMP_MS = 2500
 const MERGE_SLICE_MS = 12
 const CACHE_CHUNK = 50_000
 const COVERED_KEY = 'covered'
-const SNAPSHOT_KEY = 'indexSnapshot'
 const TIP_KEY = 'tip'
 /** Tail re-snapshot gates: both must pass, so the ~130 MB put stays rare. */
 const SNAPSHOT_INTERVAL_MS = 10 * 60_000
@@ -438,9 +438,10 @@ function validSnapshotMeta(v: unknown): v is { snapshot: unknown; coveredAtSnaps
 /**
  * Persist the built index wholesale so the next boot adopts it instead of
  * re-sorting a million replayed rows. coveredAtSnapshot rides along so that
- * boot's replay can skip every IDB row the snapshot already contains. One
- * structured-clone put of ~130 MB of ArrayBuffers, which IndexedDB handles;
- * best effort like every other cache write. mergeAll first: serializeIndex
+ * boot's replay can skip every IDB row the snapshot already contains. About
+ * 130 MB of ArrayBuffers, copied in slices and stored by a worker
+ * (snapshotStore), which took the main thread 0.4 to 4 s when done here. Best
+ * effort like every other cache write. mergeAll first: serializeIndexSliced
  * refuses a half-merged index, and by the time this runs (ready, or the
  * quiescent tail) there is at most a sliver pending.
  */
@@ -450,10 +451,16 @@ async function persistSnapshot(): Promise<void> {
   snapshotWriting = true
   try {
     mergeAll(anchorIndex)
-    const snapshot = serializeIndex(anchorIndex)
+    // In the tick the row count is taken, nothing between: heights that land
+    // during the copy are not in this snapshot and must not be said to be, or
+    // the next boot would skip them.
+    const coveredAtSnapshot = effectiveCovered()
+    const snapshot = await serializeIndexSliced(anchorIndex, copySliced)
     if (snapshot) {
-      await putMeta(database, SNAPSHOT_KEY, { snapshot, coveredAtSnapshot: effectiveCovered() })
-      snapshotSize = snapshot.count
+      // Read now: the buffers leave with the worker.
+      const count = snapshot.count
+      await putSnapshot(database, { snapshot, coveredAtSnapshot })
+      snapshotSize = count
       snapshotAt = Date.now()
     }
   } catch { /* cache write is best effort */
@@ -487,7 +494,7 @@ async function loadCache(cb: SyncCallbacks): Promise<void> {
   let coveredAtSnapshot: Array<[number, number]> = []
   let adopted = 0
   try {
-    const snapMeta = await getMeta(db, SNAPSHOT_KEY)
+    const snapMeta = await getSnapshot(db)
     if (validSnapshotMeta(snapMeta) && adoptSnapshot(anchorIndex, snapMeta.snapshot)) {
       adopted = anchorIndex.size - before
       coveredAtSnapshot = snapMeta.coveredAtSnapshot

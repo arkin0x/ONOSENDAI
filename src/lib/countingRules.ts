@@ -26,6 +26,10 @@
  * and MOST RESPAWNS only when its chain goes on to a valid hop, as the badge
  * catalog says, not to any valid action (respawnCount).
  *
+ * These rules check no proof (lib/events: this client is a viewer). A caller
+ * that wants a verifier's answer about old hops passes its events through
+ * dropUnlistedV1Hops first; CYBERSPACE STATS does.
+ *
  * What these rules never read or return: a place. No coordinate, sector,
  * height, hint or lookup id is part of any answer here, only keys and counts
  * (design 3.3 L1, L2; the standing rule never to infer bag locations).
@@ -55,6 +59,20 @@ const utcDay = (t: number): number => Math.floor(t / DAY_S)
 /** A v2 movement event: kind 3333 with no `version` tag (v1 carried one; the ticker's own test, lib/tv/stats). */
 export function isV2Action(e: NostrEvent): boolean {
   return e.kind === ACTION_KIND && !hasTag(e, 'version')
+}
+
+/**
+ * The events without the hops a verifier rejects on sight: a version 1 hop (no
+ * `mn` and no `mp`) whose id is not on the list (spec 5.13). Taking one away
+ * ends its chain at the event before it (spec 8.7.3), so nothing after it
+ * counts and the identity stands where the chain ended, its spawn included.
+ * This checks no proof: a hop that carries `mn` and `mp` is not looked at.
+ */
+export function dropUnlistedV1Hops(events: NostrEvent[], listed: ReadonlySet<string>): NostrEvent[] {
+  return events.filter((e) => {
+    if (e.kind !== ACTION_KIND || listed.has(e.id) || hasTag(e, 'mn') || hasTag(e, 'mp')) return true
+    return !e.tags.some((t) => t[0] === 'A' && t[1] === 'hop')
+  })
 }
 
 /** A v2 spawn: a v2 action carrying `["A", "spawn"]`. */

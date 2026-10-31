@@ -23,7 +23,8 @@ import {
   BEATS, STATS_FORCED_MS, STATS_GAP_MS, STATS_LOAD_DELAY_MS, STATS_RETRY_MS, asOfHour, breakMayStart, countStats, forcedBoard, isAgentProfile, keysToKnow,
   nextBoard, profilesSettled, readActions, statsEveryMs, statsFirstMs, statsLength, statsOn, type ActionStore, type BoardId, type StatsBoard, type StatsFilter, type StatsSnapshot,
 } from '../lib/tv/cyberspaceStats'
-import { arrivalTimes } from '../lib/countingRules'
+import { arrivalTimes, dropUnlistedV1Hops } from '../lib/countingRules'
+import { loadV1HopList } from '../lib/v1HopList'
 import { useProfiles } from './useProfiles'
 import { isBroadcast, reloadBroadcast } from '../lib/tv/broadcast'
 import { Dwell, dwellLimits, onAir } from '../lib/tv/dwell'
@@ -863,7 +864,11 @@ async function countBoards(id: number): Promise<void> {
     const [census, kept] = await Promise.all([freshCensus(hour), readActions(askWithin, actionsKept, Math.floor(Date.now() / 1000))])
     if (id !== run) return
     actionsKept = kept
-    const actions = [...kept.byId.values()]
+    // Version 1 hops not on the list do not count. The list is loaded here, so only a TV that counts pays for
+    // it. If it does not load, count without it: an empty list would wrongly cut every old chain.
+    const listed = await loadV1HopList().catch(() => null)
+    if (id !== run) return
+    const actions = listed ? dropUnlistedV1Hops([...kept.byId.values()], listed) : [...kept.byId.values()]
     const snap = await countStats({ actions, bags: census.bagRecords, objects: census.objectRecords, deletions: census.deletions, arrivals: arrivalTimes(actions) }, hour)
     if (id !== run) return
     snapshot = snap

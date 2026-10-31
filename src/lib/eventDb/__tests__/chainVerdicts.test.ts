@@ -67,9 +67,16 @@ describe('chain verdicts', () => {
   it('run again with nothing changed: reads only the record, writes nothing', async () => {
     await seed(chainOf(6))
     await mark()
-    const { rows, value } = await writes(() => mark())
-    expect(rows).toBe(0)
-    expect(value.written).toBe(0)
+    const proto = IDBIndex.prototype as unknown as { getAll: (...x: unknown[]) => unknown }
+    const real = proto.getAll
+    let reads = 0
+    proto.getAll = function (this: IDBIndex, ...x: unknown[]) { reads++; return real.apply(this, x) }
+    try {
+      const { rows, value } = await writes(() => mark())
+      expect(rows).toBe(0)
+      expect(value.written).toBe(0)
+    } finally { proto.getAll = real }
+    expect(reads).toBe(0)
   })
 
   it('a new action: only its row is written', async () => {
@@ -129,6 +136,22 @@ describe('chain verdicts', () => {
     const run = await mark(3)
     expect(run.written).toBe(4)
     expect((await rowsOf(chain))[0]).toMatchObject({ chain: 1, chainEpoch: 3 })
+  })
+
+  it('a row no longer broken loses the old reason', async () => {
+    const chain = chainOf(3)
+    await seed(chain)
+    await withEventDb((db) => new Promise<void>((resolve) => {
+      const tx = db.transaction('events', 'readwrite')
+      const os = tx.objectStore('events')
+      const g = os.get(chain[1].id)
+      g.onsuccess = () => os.put({ ...g.result, chain: -1, chainEpoch: 1, breakAt: 'an older rule' })
+      tx.oncomplete = () => resolve()
+    }))
+    await mark(2)
+    const row = (await rowsOf(chain))[1]
+    expect(row).toMatchObject({ chain: 1, chainEpoch: 2 })
+    expect(row.breakAt).toBeUndefined()
   })
 
   it('a long chain is written in batches, not one long transaction', async () => {

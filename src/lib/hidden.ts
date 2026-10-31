@@ -51,6 +51,7 @@ import { bytesToHex, hexToBytes, positionHex, type EventTemplate, type NostrEven
 import { fromPayload, toPayload, type ShardModel } from 'sno-core/shards'
 import { withAuthoredConstrain } from './walkConstrain'
 import { keepOwnTable } from './carried'
+import { signalRescan } from './rescanSignal'
 import { creditTags, type Credit } from 'sno-core/feed'
 import { ALGO, decryptForRegion, encryptForRegion } from './shardCrypto'
 import { hintFits, hintTags, parseHint, type HintHeights } from './hint'
@@ -1041,10 +1042,12 @@ export async function unbag(outer: NostrEvent, regionKey: Uint8Array, resolve?: 
  * was a new model with new arrays, so ShardMesh, which keys its geometry on those
  * arrays, cut and uploaded it again too. An edit is a new event, so a new key.
  *
- * Bounded by the events' own size, least recently found first out. Holds
+ * Bounded by the events' own size, sealed text included, least recently found
+ * first out, at the same bound as opened bags (foundCache OPENED_KEPT_CHARS).
+ * About 6 bytes of heap to a sealed character, so about 48 MB at most. Holds
  * plaintext, so it goes with the identity (forgetParsedObjects).
  */
-export const PARSED_KEPT_CHARS = 32 * 1024 * 1024
+export const PARSED_KEPT_CHARS = 8 * 1024 * 1024
 let parsedBudget = PARSED_KEPT_CHARS
 const parsedObjects = new Map<string, { shard: ShardModel; size: number }>()
 let parsedChars = 0
@@ -1136,13 +1139,18 @@ async function fromReference(ref: Reference, outer: NostrEvent, regionKey: Uint8
     createdAt: target.created_at,
   }
   if (target.kind === OBJECT_KIND) {
-    if (kept) return { ...base, type: 'shard', shard: kept }
+    if (kept) {
+      // No new table this time, so a part still missing needs telling to ask again.
+      if (kept.objects) signalRescan()
+      return { ...base, type: 'shard', shard: kept }
+    }
     let raw: unknown
     try { raw = JSON.parse(plain) } catch { return null }
     const shard = fromPayload(raw, target.id)
     if (!shard) return null
     const own = keepOwnTable(shard, target.pubkey)
-    keepParsed(parsedKey, own, target.content.length)
+    // Sealed, its size is in the tag: the content is only a short public preview.
+    keepParsed(parsedKey, own, (enc?.[2]?.length ?? 0) + target.content.length)
     return { ...base, type: 'shard', shard: own }
   }
   if (target.kind === MESSAGE_KIND) {

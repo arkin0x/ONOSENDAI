@@ -44,6 +44,7 @@ import { chargeByTrust } from './trust'
 import { fromPayload, type Ref, type ShardModel } from 'sno-core/shards'
 import { GENERAL_RELAYS } from './contacts'
 import { queryAny, relaySet } from './relay'
+import { onRescan } from './rescanSignal'
 
 const SNO_KIND = 33331
 /** How long one reference waits on the relays before it is drawn as a placeholder. */
@@ -221,6 +222,13 @@ export function useResolved(shard: ShardModel | null, pool?: ReadPool): Map<stri
       for (const k of changed) if (touched.current.has(k)) { setAgain((n) => n + 1); return }
     })
   }, [listens])
+  // A draw with a table and a part still missing asks again when a scan finds its
+  // object again: as it did when every scan parsed a new table (lib/rescanSignal).
+  const missing = useRef(false)
+  useEffect(() => {
+    if (!carried) return
+    return onRescan(() => { if (missing.current && !pending.current) setAgain((n) => n + 1) })
+  }, [carried])
   // The read pools this draw was cut short by, for want of reads in them (not
   // by its own share's ceiling): resolved again when reads come back to one.
   const starvedOf = useRef<Set<ReadPool>>(new Set())
@@ -276,6 +284,7 @@ export function useResolved(shard: ShardModel | null, pool?: ReadPool): Map<stri
       const wake = [...starvedOf.current].some((p) => readsLeft(p) > 0)
       pending.current = false
       touched.current = touchedKeys(placed, new Set(refs.map(refKey)))
+      missing.current = placed.some((p) => p.missing !== undefined)
       const m = new Map<string, Resolved>()
       placed.forEach((p) => m.set(refKey(p.ref), { model: p.model, missing: p.missing, children: p.children, ...(p.carried ? { carried: p.carried } : {}) }))
       setByRef(m)

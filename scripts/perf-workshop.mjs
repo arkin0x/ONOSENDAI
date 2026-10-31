@@ -25,9 +25,9 @@
  * and an EVENT or AUTH frame seen leaving for a real relay aborts the run.
  *
  * Usage: DISPLAY=:N node scripts/perf-workshop.mjs <dev url> <zip> <piece substring> [out.json]
- * Env: SECONDS (15 per timed phase), THROTTLE (CPU slowdown, 1), UNCAPPED=1
+ * Env: PHASE_S (15 per timed phase), THROTTLE (CPU slowdown, 1), UNCAPPED=1
  * (no vsync, no frame-rate limit: frames as fast as the machine can draw,
- * standing in for a 144 Hz display), W (1600), H (1000), CHROME=<path>,
+ * standing in for a 144 Hz display), W (900), H (600), CHROME=<path>,
  * PHASES (comma list to run a subset).
  */
 import { spawn } from 'node:child_process'
@@ -37,10 +37,10 @@ import path from 'node:path'
 
 const [url, zipPath, piece, outPath] = process.argv.slice(2)
 if (!url || !zipPath || !piece) { console.log('usage: perf-workshop.mjs <url> <zip> <piece> [out.json]'); process.exit(1) }
-const PHASE_S = Number(process.env.SECONDS ?? 15)
+const PHASE_S = Number(process.env.PHASE_S ?? 15)
 const THROTTLE = Number(process.env.THROTTLE ?? 1)
-const W = Number(process.env.W ?? 1600)
-const H = Number(process.env.H ?? 1000)
+const W = Number(process.env.W ?? 900)
+const H = Number(process.env.H ?? 600)
 const ONLY = process.env.PHASES ? new Set(process.env.PHASES.split(',')) : null
 const CHROME = process.env.CHROME ?? '/data/claude/ms-playwright/chromium-1234/chrome-linux64/chrome'
 const port = 9400 + Math.floor(Math.random() * 400)
@@ -60,7 +60,8 @@ const shutdown = (code) => {
 }
 process.on('SIGTERM', () => shutdown(143))
 process.on('SIGINT', () => shutdown(130))
-await sleep(3000)
+// A loaded machine can take a while to bring the browser up.
+for (let i = 0; i < 60; i++) { try { await fetch(`http://127.0.0.1:${port}/json/version`); break } catch { await sleep(1000) } }
 
 const connect = (wsUrl) => {
   const ws = new WebSocket(wsUrl)
@@ -128,20 +129,27 @@ await cdp.send('Page.addScriptToEvaluateOnNewDocument', { source: `(() => {
   const renders = new Map()
   let commits = 0
   const nameOf = (f) => { const t = f.type; if (!t) return null; if (typeof t === 'string') return null; const inner = t.type || t.render || t; return t.displayName || inner.displayName || inner.name || null }
-  const walk = (f) => {
-    const stack = [f]
-    while (stack.length) {
-      const n = stack.pop()
+  // As React DevTools walks a commit: a subtree whose first child is the same
+  // fiber as last time bailed out, so it is not looked at, and a component
+  // rendered when it mounted or carries the PerformedWork flag. Comparing
+  // props with the alternate alone overcounts: an untouched subtree's
+  // alternate is simply older.
+  const comp = (n) => n.tag === 0 || n.tag === 1 || n.tag === 11 || n.tag === 14 || n.tag === 15
+  const count = (n) => { const k = nameOf(n) || '(anon)'; renders.set(k, (renders.get(k) || 0) + 1) }
+  const mount = (first) => { const st = [first]; while (st.length) { const n = st.pop(); if (!n) continue; if (comp(n)) count(n); if (n.sibling) st.push(n.sibling); if (n.child) st.push(n.child) } }
+  const visit = (first) => {
+    const st = [first]
+    while (st.length) {
+      const n = st.pop()
       if (!n) continue
-      if (n.tag === 0 || n.tag === 1 || n.tag === 11 || n.tag === 14 || n.tag === 15) {
-        const a = n.alternate
-        const did = !a || a.memoizedProps !== n.memoizedProps || a.memoizedState !== n.memoizedState
-        if (did) { const k = nameOf(n) || '(anon)'; renders.set(k, (renders.get(k) || 0) + 1) }
-      }
-      if (n.sibling) stack.push(n.sibling)
-      if (n.child) stack.push(n.child)
+      if (n.sibling) st.push(n.sibling)
+      const a = n.alternate
+      if (!a) { if (comp(n)) count(n); if (n.child) mount(n.child); continue }
+      if (comp(n) && (n.flags & 1)) count(n)
+      if (n.child !== a.child && n.child) st.push(n.child)
     }
   }
+  const walk = visit
   let rid = 0
   window.__REACT_DEVTOOLS_GLOBAL_HOOK__ = {
     supportsFiber: true, renderers: new Map(), isDisabled: false,
@@ -261,6 +269,8 @@ const phase = async (name, drive) => {
   const m1 = Object.fromEntries((await cdp.send('Performance.getMetrics')).metrics.map((x) => [x.name, x.value]))
   const p = await ev('window.__perf.read()')
   const heap = await cdp.send('Runtime.getHeapUsage')
+  const state = await ev(`(() => { const w = window.__ws.getState(); const s = w.current(); return { tool: w.tool, selection: w.selection.length, selectedFace: w.selectedFace, selectedFaces: w.selectedFaces ? w.selectedFaces.length : undefined, vertices: s ? s.vertices.length : 0, faces: s ? s.faces.length : 0, past: w.past.length } })()`)
+  if (process.env.SHOTS) { const png = await cdp.send('Page.captureScreenshot', { format: 'png' }); fs.mkdirSync(process.env.SHOTS, { recursive: true }); fs.writeFileSync(path.join(process.env.SHOTS, `${name}.png`), Buffer.from(png.data, 'base64')) }
   let alloc = 0
   const walk = (node) => { alloc += node.selfSize; for (const c of node.children) walk(c) }
   walk(heapProf.head)
@@ -272,7 +282,7 @@ const phase = async (name, drive) => {
     commits: p.commits, renders: p.renders, allocMB: Math.round(alloc / 1e5) / 10, allocKBperFrame: p.frames ? Math.round(alloc / p.frames / 1024) : 0,
     heapMB: Math.round(heap.usedSize / 1e5) / 10, drawsPerFrame: p.frames ? Math.round(p.gl.draws / p.frames) : 0,
     bufferData: p.gl.bufferData, uploadMB: Math.round(p.gl.bufferBytes / 1e5) / 10, glBuffers: p.gl.buffers, glVAOs: p.gl.vaos,
-    topRenders: p.topRenders, cpu: top(cpu),
+    state, topRenders: p.topRenders, cpu: top(cpu),
   }
   console.log('PHASE', name, JSON.stringify({ ...row, topRenders: undefined, cpu: undefined }))
   console.log('  renders', JSON.stringify(row.topRenders))

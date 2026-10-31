@@ -1032,6 +1032,55 @@ export async function unbag(outer: NostrEvent, regionKey: Uint8Array, resolve?: 
 }
 
 /**
+ * The objects references have opened to, so a scan that finds the same signed
+ * event does not decrypt and parse it again.
+ *
+ * A bag holding references is opened again at every scan, rightly: a reference
+ * may name a newer version now (lib/foundCache.ts). But what comes back is nearly
+ * always the same event, and a city is mostly references. Parsed again, each one
+ * was a new model with new arrays, so ShardMesh, which keys its geometry on those
+ * arrays, cut and uploaded it again too. An edit is a new event, so a new key.
+ *
+ * Bounded by the events' own size, least recently found first out. Holds
+ * plaintext, so it goes with the identity (forgetParsedObjects).
+ */
+export const PARSED_KEPT_CHARS = 32 * 1024 * 1024
+let parsedBudget = PARSED_KEPT_CHARS
+const parsedObjects = new Map<string, { shard: ShardModel; size: number }>()
+let parsedChars = 0
+
+function parsedObject(key: string): ShardModel | undefined {
+  const hit = parsedObjects.get(key)
+  if (!hit) return undefined
+  // The most recently found goes last, so it is the last to go.
+  parsedObjects.delete(key)
+  parsedObjects.set(key, hit)
+  return hit.shard
+}
+
+function keepParsed(key: string, shard: ShardModel, size: number): void {
+  if (size > parsedBudget) return
+  const was = parsedObjects.get(key)
+  if (was) { parsedObjects.delete(key); parsedChars -= was.size }
+  parsedObjects.set(key, { shard, size })
+  parsedChars += size
+  for (const [k, v] of parsedObjects) {
+    if (parsedChars <= parsedBudget) break
+    parsedObjects.delete(k)
+    parsedChars -= v.size
+  }
+}
+
+/** Forget every object parsed, and say how many there were: on a change of identity, and in tests, where `budget` sets the bound. */
+export function forgetParsedObjects(budget: number = PARSED_KEPT_CHARS): number {
+  const n = parsedObjects.size
+  parsedObjects.clear()
+  parsedChars = 0
+  parsedBudget = budget
+  return n
+}
+
+/**
  * One reference entry of a bag -> a Hidden, or null.
  *
  * The referenced event must verify, must be the one the reference names, and
@@ -1055,8 +1104,13 @@ async function fromReference(ref: Reference, outer: NostrEvent, regionKey: Uint8
   // placed by reference (§3.1, §3.2: a LIVE LINK from the Shard Feed), whose
   // payload is its content as published.
   const enc = target.tags.find((t) => t[0] === 'encrypted')
+  // The same signed event under the same key opens to the same object.
+  const parsedKey = `${target.id}:${target.sig}:${keyHex}`
+  const kept = target.kind === OBJECT_KIND ? parsedObject(parsedKey) : undefined
   let plain: string | null
-  if (enc) {
+  if (kept) {
+    plain = ''
+  } else if (enc) {
     if (enc[1] !== ALGO || !enc[2]) return null
     plain = await decryptForRegion(regionKey, enc[2])
   } else {
@@ -1082,11 +1136,14 @@ async function fromReference(ref: Reference, outer: NostrEvent, regionKey: Uint8
     createdAt: target.created_at,
   }
   if (target.kind === OBJECT_KIND) {
+    if (kept) return { ...base, type: 'shard', shard: kept }
     let raw: unknown
     try { raw = JSON.parse(plain) } catch { return null }
     const shard = fromPayload(raw, target.id)
     if (!shard) return null
-    return { ...base, type: 'shard', shard: keepOwnTable(shard, target.pubkey) }
+    const own = keepOwnTable(shard, target.pubkey)
+    keepParsed(parsedKey, own, target.content.length)
+    return { ...base, type: 'shard', shard: own }
   }
   if (target.kind === MESSAGE_KIND) {
     if (!plain) return null

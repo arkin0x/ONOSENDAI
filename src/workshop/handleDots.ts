@@ -19,13 +19,19 @@
  * material, however many points. Each instance is placed and scaled to its
  * pixel radius from the camera, and only when something it depends on has
  * changed (the camera, the viewport, the points or their looks). A bench left
- * alone writes nothing and uploads nothing, frame after frame. The hit
- * targets stay one per point, since a tap must know its point, but they are
- * invisible: three's raycaster still finds them, and its renderer skips
- * them.
+ * alone writes nothing and uploads nothing, frame after frame.
+ *
+ * The hit targets and the halos followed (arkinox, 2026-10-31: "locking up
+ * only a minute after opening it"). A hit target per point was still a group
+ * and a mesh per point: two objects for three to carry a matrix down every
+ * frame, a frame callback per point, and a React element per point to diff on
+ * every tap. So HandleHits is one object that answers the raycaster itself,
+ * by arithmetic over the points, and HandleHalos draws every selected point's
+ * glow as one set of points. Selecting all 1,731 points of a nave used to
+ * make 1,731 sprites with a material each.
  */
 
-import { Color, InstancedBufferAttribute, InstancedMesh, Matrix4, MeshBasicMaterial, SphereGeometry, Vector3, type PerspectiveCamera } from 'three'
+import { AdditiveBlending, BufferAttribute, BufferGeometry, Color, InstancedBufferAttribute, InstancedMesh, Matrix4, MeshBasicMaterial, Object3D, Points, PointsMaterial, SphereGeometry, Vector3, type Intersection, type PerspectiveCamera, type Raycaster, type Texture } from 'three'
 
 /** One dot: where it is (render space), its radius in CSS pixels, its colour (a CSS colour). */
 export interface Dot {
@@ -132,4 +138,125 @@ export function dotCapacity(n: number): number {
   let c = 64
   while (c < n) c *= 2
   return c
+}
+
+/**
+ * Every point's hit target as one object, invisible, that answers the
+ * raycaster by arithmetic: a sphere around each point, `radiusPx` CSS pixels
+ * across on screen wherever the camera stands, as the hit spheres were. A tap
+ * still knows its point: each hit carries the point's place in the list as
+ * `index`, which R3F keeps on the event (and tells hits apart by).
+ *
+ * Nothing runs per frame and nothing is allocated unless a point is hit: a
+ * pointer press costs one pass over a typed array.
+ */
+export class HandleHits extends Object3D {
+  /** The hit sphere's radius, in CSS pixels. */
+  radiusPx = 12
+  /** The canvas's height in CSS pixels, which a pixel's size depends on. */
+  heightPx = 1
+  private at = new Float32Array(0)
+  private count = 0
+
+  constructor() {
+    super()
+    this.visible = false
+  }
+
+  /** The points to answer for, in render space. A hit's `index` is a place in this list. */
+  set(points: readonly (readonly [number, number, number])[]): void {
+    this.count = points.length
+    if (this.at.length < points.length * 3) this.at = new Float32Array(dotCapacity(points.length) * 3)
+    for (let i = 0; i < points.length; i++) {
+      const p = points[i]
+      this.at[i * 3] = p[0]; this.at[i * 3 + 1] = p[1]; this.at[i * 3 + 2] = p[2]
+    }
+  }
+
+  /** How many world units one CSS pixel covers at point `index`, for a camera standing at `eye`. */
+  pixelAt(index: number, eye: Vector3, fovDeg: number): number {
+    const dx = this.at[index * 3] - eye.x, dy = this.at[index * 3 + 1] - eye.y, dz = this.at[index * 3 + 2] - eye.z
+    return Math.max(1e-5, Math.sqrt(dx * dx + dy * dy + dz * dz) * perPixelAt1(fovDeg, this.heightPx))
+  }
+
+  override raycast(raycaster: Raycaster, intersects: Intersection[]): void {
+    const camera = raycaster.camera as PerspectiveCamera | null
+    if (!camera) return
+    const { origin: o, direction: d } = raycaster.ray
+    const k = perPixelAt1(camera.fov, this.heightPx) * this.radiusPx
+    const at = this.at
+    for (let i = 0; i < this.count; i++) {
+      const dx = at[i * 3] - o.x, dy = at[i * 3 + 1] - o.y, dz = at[i * 3 + 2] - o.z
+      const along = dx * d.x + dy * d.y + dz * d.z
+      if (along <= 0) continue
+      const square = dx * dx + dy * dy + dz * dz
+      const r = Math.max(1e-5, Math.sqrt(square) * k)
+      const off = square - along * along
+      if (off > r * r) continue
+      // Where the ray enters the sphere: a sphere's near side faces the ray, as a mesh's front faces did.
+      const distance = along - Math.sqrt(r * r - off)
+      if (distance < raycaster.near || distance > raycaster.far) continue
+      intersects.push({ distance, point: new Vector3(o.x + d.x * distance, o.y + d.y * distance, o.z + d.z * distance), object: this, index: i })
+    }
+  }
+}
+
+/** One halo: where it is, and its colour (a CSS colour). */
+export interface Halo {
+  at: readonly [number, number, number]
+  color: string
+}
+
+/**
+ * Every selected point's glow as one object: a set of points, each the glow
+ * texture `sizePx` CSS pixels across wherever it stands, as a sprite in a
+ * screen-scaled group was. One draw, one geometry and one material, however
+ * much is selected. Written when the selection changes, never per frame.
+ */
+export class HandleHalos {
+  readonly points: Points<BufferGeometry, PointsMaterial>
+  private readonly geometry = new BufferGeometry()
+  private readonly material: PointsMaterial
+  private readonly c = new Color()
+  private written = false
+
+  constructor(capacity: number, map: Texture | null, sizePx: number, opacity: number) {
+    this.geometry.setAttribute('position', new BufferAttribute(new Float32Array(Math.max(1, capacity) * 3), 3))
+    this.geometry.setAttribute('color', new BufferAttribute(new Float32Array(Math.max(1, capacity) * 3), 3))
+    this.geometry.setDrawRange(0, 0)
+    this.material = new PointsMaterial({ map, size: sizePx, sizeAttenuation: false, vertexColors: true, transparent: true, opacity, blending: AdditiveBlending, depthWrite: false, toneMapped: false })
+    this.points = new Points(this.geometry, this.material)
+    // Written in render space, so nothing needs a bounding sphere kept in step.
+    this.points.frustumCulled = false
+    this.points.raycast = () => {}
+    this.points.visible = false
+  }
+
+  get capacity(): number {
+    return this.geometry.getAttribute('position').count
+  }
+
+  /** The halos to draw. Writes only when there is something to write, or something to take away. */
+  set(halos: readonly Halo[]): void {
+    const n = Math.min(halos.length, this.capacity)
+    this.points.visible = n > 0
+    if (n === 0 && !this.written) return
+    const pos = this.geometry.getAttribute('position') as BufferAttribute
+    const col = this.geometry.getAttribute('color') as BufferAttribute
+    for (let i = 0; i < n; i++) {
+      const h = halos[i]
+      pos.setXYZ(i, h.at[0], h.at[1], h.at[2])
+      this.c.set(h.color)
+      col.setXYZ(i, this.c.r, this.c.g, this.c.b)
+    }
+    this.written = n > 0
+    this.geometry.setDrawRange(0, n)
+    if (n > 0) { pos.needsUpdate = true; col.needsUpdate = true }
+  }
+
+  /** Lets the GPU's copies go. */
+  dispose(): void {
+    this.geometry.dispose()
+    this.material.dispose()
+  }
 }

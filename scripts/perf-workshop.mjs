@@ -454,7 +454,7 @@ if (ONLY?.has('multiFace')) {
 if ((!ONLY && !process.env.NO_VERIFY) || ONLY?.has('verify')) {
   const checks = []
   const check = (name, ok, got) => { checks.push({ name, ok: !!ok, got }); console.log(ok ? '  ok  ' : '  FAIL', name, got === undefined ? '' : JSON.stringify(got)) }
-  const st = () => ev(`(() => { const w = window.__ws.getState(); const s = w.current(); return { tool: w.tool, sel: w.selection.slice(), pick: w.facePick.slice(), face: w.selectedFace, v: s.vertices.length, f: s.faces.length } })()`)
+  const st = () => ev(`(() => { const w = window.__ws.getState(); const s = w.current(); return { tool: w.tool, sel: w.selection.slice(), pick: w.facePick.slice(), face: w.selectedFaces ? (w.selectedFaces.length ? w.selectedFaces[w.selectedFaces.length - 1] : null) : w.selectedFace, v: s.vertices.length, f: s.faces.length } })()`)
   const screen = (i) => ev(`(() => { const w = window.__ws.getState(); const s = w.current(); const v = s.vertices[${'${i}'}]; const t = [0, 1, 2].map((a) => v.p[a] * 120 + (v.t ? v.t[a] : 0)); const c = window.__benchCamera.position.clone().set(t[0] / 120, t[1] / 120, -t[2] / 120).project(window.__benchCamera); return { x: ${box.x} + (c.x + 1) / 2 * ${box.w}, y: ${box.y} + (1 - c.y) / 2 * ${box.h} } })()`.replaceAll('${i}', String(i)))
   await ev(`(() => { const w = window.__ws.getState(); w.create('verify'); w.setDivision(1); w.setTool('add') })()`)
   await sleep(1200)

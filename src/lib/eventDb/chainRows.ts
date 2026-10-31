@@ -95,6 +95,17 @@ async function readBudget(meta: IDBObjectStore): Promise<BudgetTotals> {
   return { ...EMPTY_BUDGET, ...stored?.value }
 }
 
+/** Take these rows out of any chain. They stay, signed facts nothing reads as part of one. */
+async function stripPlaces(events: IDBObjectStore, ids: string[]): Promise<void> {
+  for (const id of ids) {
+    const row = await request(events.get(id)) as EventRow | undefined
+    if (!row) continue
+    const { chainOf: _o, chainN: _n, ...out } = row
+    void _o; void _n
+    events.put(out)
+  }
+}
+
 /**
  * Commit a change of one identity's chain, whole or not at all. Strict: the
  * action may be sent to a relay as soon as this answers, so it must be on disk,
@@ -117,14 +128,11 @@ export async function commitChain(db: IDBDatabase, c: ChainCommit, now = Date.no
     let changed = false
     if (wantsChange && !already) {
       const stay = new Set(c.rows.map((r) => r.event.id))
-      if (record && c.keep < record.length) {
-        const old = await request(events.index('byChain').getAll(placesFrom(c.pubkey, c.keep))) as EventRow[]
-        for (const row of old) {
-          if (stay.has(row.id)) continue
-          const { chainOf: _o, chainN: _n, ...out } = row
-          void _o; void _n
-          events.put(out)
-        }
+      // Everything from the first place that changes. With no record yet that is
+      // nothing, unless a move into rows was cut short before it switched.
+      if (!record || c.keep < record.length) {
+        const old = await request(events.index('byChain').getAllKeys(placesFrom(c.pubkey, record ? c.keep : 0))) as string[]
+        await stripPlaces(events, old.filter((id) => !stay.has(id)))
       }
       for (let i = 0; i < c.rows.length; i++) {
         const had = await request(events.get(c.rows[i].event.id)) as EventRow | undefined
@@ -196,8 +204,14 @@ export interface ChainSource { events: NostrEvent[]; published: string[]; stats:
 
 const COPY_BATCH = 200
 
-/** Copy rows outside any chain, in one transaction; false when the chain has been switched by another tab meanwhile. Safe to run twice. */
-async function copyBatch(db: IDBDatabase, pubkey: string, rows: ChainRowIn[], now: number): Promise<boolean> {
+/**
+ * Copy rows in one transaction, each with its place in the chain (or none, for
+ * a branch: such a row keeps whatever place it has). False when another tab
+ * has switched this chain meanwhile. Nothing reads these places until the
+ * record exists. A row already here as it should be is not written again, so a
+ * copy cut short by a reload picks up where it stopped.
+ */
+async function copyBatch(db: IDBDatabase, pubkey: string, rows: Array<ChainRowIn & { n?: number }>, now: number): Promise<boolean> {
   const tx = db.transaction([EVENTS, CHAINS, META], 'readwrite')
   return inTransaction(tx, async () => {
     const events = tx.objectStore(EVENTS)
@@ -206,8 +220,8 @@ async function copyBatch(db: IDBDatabase, pubkey: string, rows: ChainRowIn[], no
     const totals = await readBudget(meta)
     for (const r of rows) {
       const had = await request(events.get(r.event.id)) as EventRow | undefined
-      // A row already placed by nothing yet: its flags are kept or raised, and it stays outside the chain.
-      const row = placed(had, r, pubkey, undefined, now)
+      const row = placed(had, r, pubkey, r.n ?? had?.chainN, now)
+      if (had && JSON.stringify(row) === JSON.stringify(had)) continue
       budgetFor(had, row, totals)
       events.put(row)
     }
@@ -245,31 +259,43 @@ export interface ChainMigration {
 
 /**
  * Move an identity's chain into rows: copy, read back, compare, switch. The
- * copy lands outside any chain, in small transactions, so a crash or a full
- * disk leaves nothing the chain reads. The switch is one transaction: every
- * row read back and compared with its source, then given its place, then the
- * record that makes the chain readable from here, then the mark. A row that
- * reads back differently aborts all of it. The old stores are not touched,
- * here or later (the removal is a separate PR the owner merges).
+ * copy lands in small transactions, and nothing reads a chain's rows until its
+ * record exists, so a crash or a full disk leaves nothing the chain reads. Then
+ * every row is read back and compared with its source, in read-only batches
+ * that hold nothing up. The switch is one small transaction: the places checked
+ * by their keys, then the record that makes the chain readable from here, then
+ * the mark. A row that reads back differently switches nothing. The old stores
+ * are not touched, here or later (the removal is a separate PR the owner merges).
  */
 export async function migrateChain(db: IDBDatabase, m: ChainMigration, now = Date.now()): Promise<MigrationResult> {
   const { pubkey, source } = m
-  const sourceRows = asRows(source)
-  const copies = [...sourceRows, ...m.parted.flatMap(asRows)]
+  const sourceRows: Array<ChainRowIn & { n?: number }> = asRows(source).map((r, n) => ({ ...r, n }))
+  const inChain = new Set(source.events.map((e) => e.id))
+  const copies = [...sourceRows, ...m.parted.flatMap(asRows).filter((r) => !inChain.has(r.event.id))]
   for (let i = 0; i < copies.length; i += COPY_BATCH) {
     if (!await copyBatch(db, pubkey, copies.slice(i, i + COPY_BATCH), now)) return { status: 'exists' }
   }
-  const tx = db.transaction([EVENTS, CHAINS, PARTED, META], 'readwrite')
+  for (let i = 0; i < source.events.length; i += COPY_BATCH) {
+    const batch = source.events.slice(i, i + COPY_BATCH)
+    const os = db.transaction(EVENTS, 'readonly').objectStore(EVENTS)
+    const rows = await Promise.all(batch.map((e) => request(os.get(e.id)) as Promise<EventRow | undefined>))
+    for (let k = 0; k < batch.length; k++) {
+      const row = rows[k]
+      if (!row || !sameEvent(row, batch[k])) return { status: 'unverified', id: batch[k].id }
+    }
+  }
+  const tx = db.transaction([EVENTS, CHAINS, PARTED, META], 'readwrite', { durability: 'strict' })
   try {
     return await inTransaction<MigrationResult>(tx, async () => {
       const chains = tx.objectStore(CHAINS)
       const events = tx.objectStore(EVENTS)
       if (await request(chains.get(pubkey))) return { status: 'exists' }
+      // A copy cut short once, of a chain since changed, can have left places behind.
+      const held = await request(events.index('byChain').getAllKeys(placesFrom(pubkey, 0))) as string[]
+      await stripPlaces(events, held.filter((id) => !inChain.has(id)))
+      const places = held.filter((id) => inChain.has(id))
       for (let n = 0; n < source.events.length; n++) {
-        const e = source.events[n]
-        const row = await request(events.get(e.id)) as EventRow | undefined
-        if (!row || !sameEvent(row, e)) throw new Unverified(e.id)
-        events.put({ ...row, chainOf: pubkey, chainN: n })
+        if (places[n] !== source.events[n].id) throw new Unverified(source.events[n].id)
       }
       for (let i = 0; i < m.parted.length; i++) {
         const p = m.parted[i]

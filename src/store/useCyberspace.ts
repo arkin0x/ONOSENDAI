@@ -2349,6 +2349,7 @@ async function moveToRows(pubkey: string, startedAt: number): Promise<void> {
   noteCommitted(pubkey, events.map((e) => e.id), published)
   setMarker(pubkey, legacyMark)
   clearTail(pubkey)
+  mark('onosendai:chain-moved')
   // Moves made after the hold gave out go in now, as the next save would take them.
   const now = useCyberspace.getState()
   if (now.identity.pubkey === pubkey && now.events !== events && now.events[0]?.pubkey === pubkey) saveChain(now.events, now.published, now.chain, now.held)

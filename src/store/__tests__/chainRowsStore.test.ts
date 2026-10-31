@@ -209,8 +209,8 @@ describe('moving a chain to rows', () => {
     const proto = IDBObjectStore.prototype as unknown as { put: (...x: unknown[]) => unknown }
     const real = proto.put
     proto.put = function (this: IDBObjectStore, ...x: unknown[]) {
-      const row = x[0] as { id?: string; chainOf?: string; content?: string }
-      if (this.name === 'events' && row.id === chain[5].id && row.chainOf === undefined) return real.apply(this, [{ ...row, content: 'bit rot' }])
+      const row = x[0] as { id?: string; content?: string }
+      if (this.name === 'events' && row.id === chain[5].id) return real.apply(this, [{ ...row, content: 'bit rot' }])
       return real.apply(this, x)
     }
     let a: Tab

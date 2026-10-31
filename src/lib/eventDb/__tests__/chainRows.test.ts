@@ -264,7 +264,7 @@ describe('moving a chain into rows', () => {
     let damaged = false
     proto.put = function (this: IDBObjectStore, ...x: unknown[]) {
       const row = x[0] as { id?: string; content?: string; chainOf?: string }
-      if (this.name === 'events' && !damaged && row.id === chain[300].id && row.chainOf === undefined) {
+      if (this.name === 'events' && !damaged && row.id === chain[300].id) {
         damaged = true
         return real.apply(this, [{ ...row, content: 'bit rot' }])
       }
@@ -282,7 +282,7 @@ describe('moving a chain into rows', () => {
     let damaged = false
     proto.put = function (this: IDBObjectStore, ...x: unknown[]) {
       const row = x[0] as { id?: string; chainOf?: string }
-      if (this.name === 'events' && !damaged && row.id === chain[10].id && row.chainOf === undefined) { damaged = true; return real.apply(this, [{ ...row, content: 'bit rot' }]) }
+      if (this.name === 'events' && !damaged && row.id === chain[10].id) { damaged = true; return real.apply(this, [{ ...row, content: 'bit rot' }]) }
       return real.apply(this, x)
     }
     try {
@@ -305,6 +305,45 @@ describe('moving a chain into rows', () => {
     } finally { proto.put = real }
     expect(await read()).toBeNull()
     expect(await migrate(source(chain))).toMatchObject({ status: 'switched' })
+  })
+
+  it('writes each row once, and a copy cut short picks up where it stopped', async () => {
+    const proto = IDBObjectStore.prototype as unknown as { put: (...x: unknown[]) => unknown }
+    const real = proto.put
+    let rows = 0
+    proto.put = function (this: IDBObjectStore, ...x: unknown[]) {
+      if (this.name === 'events') {
+        if (++rows === 301) throw new DOMException('The page went away.', 'AbortError')
+      }
+      return real.apply(this, x)
+    }
+    try {
+      await expect(migrate(source(chain))).rejects.toBeDefined()
+      // The first two batches of 200 are not all on disk: the second aborted whole.
+      expect(rows).toBe(301)
+      rows = 0
+      expect(await migrate(source(chain))).toMatchObject({ status: 'switched' })
+      expect(rows).toBe(chain.length - 200)
+    } finally { proto.put = real }
+    expect(ids((await read())!.events)).toEqual(ids(chain))
+    expect((await withEventDb(budget)).pinnedRows).toBe(chain.length)
+  })
+
+  it('a copy cut short of a chain since changed leaves nothing the chain reads', async () => {
+    const proto = IDBObjectStore.prototype as unknown as { put: (...x: unknown[]) => unknown }
+    const real = proto.put
+    let rows = 0
+    proto.put = function (this: IDBObjectStore, ...x: unknown[]) {
+      if (this.name === 'chains' || (this.name === 'events' && ++rows > 250)) throw new DOMException('The page went away.', 'AbortError')
+      return real.apply(this, x)
+    }
+    await expect(migrate(source(chain))).rejects.toBeDefined()
+    proto.put = real
+    expect(await read()).toBeNull()
+    // The identity respawned meanwhile: a fresh chain, and the old places must not read as part of it.
+    const fresh = [action(900, 'respawn')]
+    await commitIt(commit({ events: fresh, keep: 0, expectHead: null }))
+    expect(ids((await read())!.events)).toEqual(ids(fresh))
   })
 
   it('a second tab finds the chain moved, and changes nothing', async () => {

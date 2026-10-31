@@ -163,7 +163,7 @@ describe('HandleHits', () => {
   })
 
   it('misses what is farther off than its radius on screen, at any zoom', () => {
-    for (const eye of [[10, 9, 12], [2, 2, 2], [40, 30, 40]] as const) {
+    for (const eye of [[10, 9, 12], [2, 2, 2], [40, 30, 40]] as Array<[number, number, number]>) {
       const { hits, cam } = setup([[0, 0, 0]])
       cam.position.set(...eye); cam.lookAt(0, 0, 0); cam.updateMatrixWorld()
       const pxInNdc = 2 / HEIGHT

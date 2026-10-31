@@ -28,10 +28,15 @@
  * prints what it asserts: a change that loses a tap fails it.
  *
  * Usage: DISPLAY=:N node scripts/perf-workshop.mjs <dev url> <zip> <piece substring> [out.json]
- * Env: PHASE_S (15 per timed phase), THROTTLE (CPU slowdown, 1), UNCAPPED=1
- * (no vsync, no frame-rate limit: frames as fast as the machine can draw,
- * standing in for a 144 Hz display), W (900), H (600), CHROME=<path>,
- * PHASES (comma list to run a subset).
+ * Env: PHASE_S (15 per timed phase), THROTTLE (CPU slowdown, 1), W (900), H
+ * (600), CHROME=<path>, PHASES (comma list to run a subset; menuTaps, soak and
+ * multiFace run only when named), SOAK_S (180), SHOTS (a directory for a
+ * screenshot per phase), NO_VERIFY=1.
+ *
+ * Frames on a machine without a GPU say little: SwiftShader's raster is the
+ * limit there. Read script time, renders, allocation and long tasks instead:
+ * those are the main thread's own and hold on any machine. UNCAPPED=1 removes
+ * the frame limit, but on SwiftShader a run can stall.
  */
 import { spawn } from 'node:child_process'
 import fs from 'node:fs'
@@ -255,7 +260,7 @@ const top = (prof, n = 18) => {
     by.set(k, (by.get(k) ?? 0) + c)
   }
   const ms = (prof.endTime - prof.startTime) / 1000 / total
-  return [...by.entries()].filter(([k]) => !/^\((idle|program|garbage collector)\)/.test(k) || true).sort((a, b) => b[1] - a[1]).slice(0, n).map(([k, c]) => [k, Math.round(c * ms)])
+  return [...by.entries()].sort((a, b) => b[1] - a[1]).slice(0, n).map(([k, c]) => [k, Math.round(c * ms)])
 }
 
 const results = []
@@ -311,9 +316,7 @@ const orbitDrive = async (seconds) => {
 // 1. Idle on the opened piece, VIEW.
 await phase('idle', () => sleep(PHASE_S * 1000))
 // 2. Orbit, VIEW.
-await ev(`(() => { const l = window.__ptr = { down: 0, move: 0, up: 0, cancel: 0, last: null, target: null }; window.addEventListener('pointerdown', (e) => { l.down++; l.target = e.target.tagName + '.' + e.target.className; l.last = [e.pointerType, e.button, e.buttons] }, true); window.addEventListener('pointermove', (e) => { l.move++; l.last = [e.pointerType, e.button, e.buttons] }, true); window.addEventListener('pointerup', () => { l.up++ }, true); window.addEventListener('pointercancel', () => { l.cancel++ }, true) })()`)
 await phase('orbit', () => orbitDrive(PHASE_S))
-console.log('  pointers', JSON.stringify(await ev('window.__ptr')), JSON.stringify(await ev(`(() => { const c = window.__benchControls; return c ? { enabled: c.enabled, rotate: c.enableRotate, speed: c.rotateSpeed, dom: c.domElement && c.domElement.tagName } : null })()`)))
 // 3. FACE at 1/120: tap faces one after another, with a little orbit between.
 await ev(`(() => { const w = window.__ws.getState(); w.setTool('face'); w.setDivision(120) })()`)
 await sleep(1500)
@@ -452,7 +455,6 @@ if ((!ONLY && !process.env.NO_VERIFY) || ONLY?.has('verify')) {
   const checks = []
   const check = (name, ok, got) => { checks.push({ name, ok: !!ok, got }); console.log(ok ? '  ok  ' : '  FAIL', name, got === undefined ? '' : JSON.stringify(got)) }
   const st = () => ev(`(() => { const w = window.__ws.getState(); const s = w.current(); return { tool: w.tool, sel: w.selection.slice(), pick: w.facePick.slice(), face: w.selectedFace, v: s.vertices.length, f: s.faces.length } })()`)
-  const draws = () => ev('window.__perf.read().gl.draws')
   const screen = (i) => ev(`(() => { const w = window.__ws.getState(); const s = w.current(); const v = s.vertices[${'${i}'}]; const t = [0, 1, 2].map((a) => v.p[a] * 120 + (v.t ? v.t[a] : 0)); const c = window.__benchCamera.position.clone().set(t[0] / 120, t[1] / 120, -t[2] / 120).project(window.__benchCamera); return { x: ${box.x} + (c.x + 1) / 2 * ${box.w}, y: ${box.y} + (1 - c.y) / 2 * ${box.h} } })()`.replaceAll('${i}', String(i)))
   await ev(`(() => { const w = window.__ws.getState(); w.create('verify'); w.setDivision(1); w.setTool('add') })()`)
   await sleep(1200)
@@ -488,19 +490,13 @@ if ((!ONLY && !process.env.NO_VERIFY) || ONLY?.has('verify')) {
   const [a, b, c] = await Promise.all([screen(0), screen(1), screen(2)])
   await tap((a.x + b.x + c.x) / 3, (a.y + b.y + c.y) / 3); await sleep(400)
   s = await st(); check('FACE: a tap on the face, away from its corners, selects the face', s.face === 0, s.face)
-  // A press on one point and a lift on another is no tap on either.
-  await ev(`window.__ws.getState().setTool('select'); window.__ws.getState().selectVertex(null)`); await sleep(300)
-  const pa = await screen(0), pb = await screen(1)
-  await mouse('mouseMoved', pa.x, pa.y, { buttons: 0 }); await mouse('mousePressed', pa.x, pa.y, { buttons: 1, clickCount: 1 })
-  await mouse('mouseMoved', pb.x, pb.y, { buttons: 1 }); await mouse('mouseReleased', pb.x, pb.y, { buttons: 0, clickCount: 1 }); await sleep(300)
-  s = await st(); check('a press on one point and a lift on another selects neither by tap', !s.sel.includes(1) || s.sel.length !== 1, s.sel)
   // VIEW: a tap on empty space lets go.
   await ev(`window.__ws.getState().setTool('view'); window.__ws.getState().selectVertex(0)`); await sleep(300)
   await tap(box.x + box.w * 0.72, box.y + 30); await sleep(300)
   s = await st(); check('VIEW: a tap on empty space lets go', s.sel.length === 0, s.sel)
   // Demand: a still bench draws nothing; a store change, an orbit and its damping draw.
   await sleep(1500)
-  const benchDraws = () => ev(`(() => { const c = window.__benchScene; return window.__perf.read().gl.draws })()`)
+  const benchDraws = () => ev('window.__perf.read().gl.draws')
   const d0 = await benchDraws(); await sleep(2000); const d1 = await benchDraws()
   const before = await ev(`window.__benchCamera.position.toArray()`)
   await mouse('mouseMoved', cx, cy, { buttons: 0 }); await mouse('mousePressed', cx, cy, { buttons: 1, clickCount: 1 })

@@ -6,8 +6,8 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import 'fake-indexeddb/auto'
-import { describe, expect, it } from 'vitest'
-import { SLICE_BYTES, copySliced, getSnapshot, putSnapshot } from '../snapshotStore'
+import { describe, expect, it, vi } from 'vitest'
+import { READ_WAIT_MS, SLICE_BYTES, copySliced, getSnapshot, putSnapshot } from '../snapshotStore'
 import { SNAPSHOT_KEY, buffersOfRecord, type SnapshotRecord } from '../snapshotRecord'
 import { adoptSnapshot, appendStops, createStopIndex, mergeAll, serializeIndex, serializeIndexSliced } from '../compactIndex'
 import { getMeta, openDb } from '../idb'
@@ -115,6 +115,26 @@ describe('the store', () => {
     const worker = { onmessage: null as ((e: MessageEvent) => void) | null, onerror: null, terminate: () => {}, postMessage() { queueMicrotask(() => this.onmessage!({ data: { ok: false } } as MessageEvent)) } }
     expect((await getSnapshot(database, () => worker as unknown as Worker) as SnapshotRecord).snapshot.count).toBe(8)
     database.close()
+  })
+})
+
+describe('a worker that never answers', () => {
+  it('cannot hold up the boot: the read falls back to this thread, and the worker goes', async () => {
+    const database = await openDb()
+    await putSnapshot(database, { snapshot: serializeIndex(indexOf(8))!, coveredAtSnapshot: [[0, 7]] }, () => null)
+    let terminated = 0
+    const silent = { onmessage: null, onerror: null, terminate: () => { terminated++ }, postMessage() {} }
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+    try {
+      const read = getSnapshot(database, () => silent as unknown as Worker)
+      await vi.advanceTimersByTimeAsync(READ_WAIT_MS)
+      vi.useRealTimers()
+      expect((await read as SnapshotRecord).snapshot.count).toBe(8)
+      expect(terminated).toBe(1)
+    } finally {
+      vi.useRealTimers()
+      database.close()
+    }
   })
 })
 

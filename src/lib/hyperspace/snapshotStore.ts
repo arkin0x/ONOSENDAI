@@ -42,12 +42,18 @@ export const snapshotWorker: MakeWorker = () => {
   }
 }
 
-/** One call to a worker of its own; null when it could not answer. */
-function ask(request: SnapshotRequest, transfer: Transferable[], make: MakeWorker): Promise<SnapshotReply | null> {
+/** How long a read may take before this thread reads for itself. The boot's sync waits on it. */
+export const READ_WAIT_MS = 20_000
+/** How long a write may take. A stuck one must not hold up the sync after it; the next snapshot tries again. */
+export const WRITE_WAIT_MS = 120_000
+
+/** One call to a worker of its own; null when it could not answer, or not in time. */
+function ask(request: SnapshotRequest, transfer: Transferable[], make: MakeWorker, waitMs: number): Promise<SnapshotReply | null> {
   const worker = make()
   if (!worker) return Promise.resolve(null)
   return new Promise((resolve) => {
-    const done = (reply: SnapshotReply | null): void => { worker.terminate(); resolve(reply) }
+    const timer = setTimeout(() => done(null), waitMs)
+    function done(reply: SnapshotReply | null): void { clearTimeout(timer); worker!.terminate(); resolve(reply) }
     worker.onmessage = (e: MessageEvent<SnapshotReply>) => done(e.data)
     worker.onerror = () => done(null)
     worker.postMessage(request, transfer)
@@ -59,7 +65,7 @@ function ask(request: SnapshotRequest, transfer: Transferable[], make: MakeWorke
  * they are still here, and the database on this thread takes them.
  */
 export async function putSnapshot(database: IDBDatabase, record: SnapshotRecord, make: MakeWorker = snapshotWorker): Promise<void> {
-  const reply = await ask({ op: 'put', record }, buffersOfRecord(record), make)
+  const reply = await ask({ op: 'put', record }, buffersOfRecord(record), make, WRITE_WAIT_MS)
   if (reply?.ok) return
   // The worker failed after the buffers went to it: nothing left to store, and the next snapshot tries again.
   if (reply === null && buffersOfRecord(record).every((b) => b.byteLength > 0)) await putMeta(database, SNAPSHOT_KEY, record)
@@ -67,7 +73,7 @@ export async function putSnapshot(database: IDBDatabase, record: SnapshotRecord,
 
 /** Read the record, off this thread where a worker can be made. */
 export async function getSnapshot(database: IDBDatabase, make: MakeWorker = snapshotWorker): Promise<unknown> {
-  const reply = await ask({ op: 'get' }, [], make)
+  const reply = await ask({ op: 'get' }, [], make, READ_WAIT_MS)
   if (reply?.ok) return reply.record
   return getMeta(database, SNAPSHOT_KEY)
 }

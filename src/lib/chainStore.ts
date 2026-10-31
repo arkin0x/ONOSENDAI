@@ -142,10 +142,7 @@ export async function storeWorksHere(fresh: boolean): Promise<boolean> {
   if (!fresh && probePassedBefore()) return true
   let works = false
   try { works = await probeWhereItRuns() } catch { works = false }
-  try {
-    if (works) localStorage.setItem(PROBE_KEY, probeMemo())
-    else localStorage.removeItem(PROBE_KEY)
-  } catch { /* asked again next load */ }
+  try { if (works) localStorage.setItem(PROBE_KEY, probeMemo()) } catch { /* asked again next load */ }
   return works
 }
 

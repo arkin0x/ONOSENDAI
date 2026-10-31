@@ -55,6 +55,19 @@ describe('the store probe', () => {
     expect(r).toBe(false)
   })
 
+  it('fails where a row is found under one of its tags and not the other', async () => {
+    const r = await bent(IDBIndex.prototype, 'openCursor', (real) => function (this: unknown, range, dir) {
+      const lower = (range as IDBKeyRange | undefined)?.lower as unknown[] | undefined
+      return real.call(this, (this as IDBIndex).name === 'byTag' && lower?.[0] === 'Y:7' ? IDBKeyRange.only(['nothing', 0]) : range, dir)
+    }, probeStore)
+    expect(r).toBe(false)
+  })
+
+  it('fails where an abort is reported and the row lands all the same', async () => {
+    const r = await bent(IDBTransaction.prototype, 'abort', () => function (this: unknown) { (this as IDBTransaction).onabort?.(new Event('abort')) }, probeStore)
+    expect(r).toBe(false)
+  })
+
   it('reopens before it passes: rows only in a connection\'s memory do not count', async () => {
     const proto = IDBFactory.prototype as unknown as { open: (...a: unknown[]) => unknown }
     const real = proto.open

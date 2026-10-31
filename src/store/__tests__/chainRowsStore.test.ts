@@ -981,6 +981,10 @@ describe('a switched device whose rows fail', () => {
     const b = await openTab()
     expect(b.S().events).toHaveLength(0)
     await expect(b.S().signEvent(spawnTemplate(pk, 5_000))).rejects.toThrow(b.store.ROWS_DOWN_MESSAGE)
+    // Even once the relays have answered: they may simply never have held it.
+    relays.confirm = []
+    await b.S().confirmHeadNow()
+    await expect(b.S().signEvent(spawnTemplate(pk, 5_000))).rejects.toThrow(b.store.ROWS_DOWN_MESSAGE)
   })
 
   it('a kill switch while the rows are unreadable writes nothing over the frozen copy either', async () => {
@@ -1105,7 +1109,16 @@ describe('the probe decides before anything is written', () => {
 
   it('a chain is only moved on a probe run now, never on a memo', async () => {
     await seedOldStores(chainOf(4))
-    localStorage.setItem('onosendai:chain-store-probe', 'a memo that would have passed')
+    // A real pass, remembered from another identity on this browser.
+    await openTab()
+    const memo = localStorage.getItem('onosendai:chain-store-probe')!
+    expect(memo).toContain(navigator.userAgent)
+    ;(await import('../../lib/eventDb/connection')).closeEventDb()
+    ;(await import('../../lib/chainDb')).closeChainDb()
+    ;(globalThis as { indexedDB?: IDBFactory }).indexedDB = new IDBFactory()
+    localStorage.removeItem(`onosendai:chain-rows:${pk}`)
+    await seedOldStores(chainOf(4))
+    expect(localStorage.getItem('onosendai:chain-store-probe')).toBe(memo)
     const open = vi.spyOn((globalThis as { indexedDB: IDBFactory }).indexedDB, 'open')
     await openTab()
     expect(open.mock.calls.map((c) => c[0])).toContain('onosendai:events-probe')

@@ -155,7 +155,13 @@ export function drawableShards(items: Array<Pick<WorldItem, 'key' | 'type' | 'at
     // with placed objects is exempt, since they can be far larger than it.
     .filter((w) => (w.shard!.parts?.length ?? 0) > 0 || scaleExp - w.shard!.unit < (w.shard!.extent > 64 ? farCullDoublings(w.shard!.extent) : FAR_CULL))
     .map((w) => placeShard(w, origin, scaleExp, axes))
-    .filter((w) => Number.isFinite(w.scale) && Math.hypot(...w.centre) <= REACH)
+    // The far edge counts, not the centre: standing inside a big shard, its centre can be well past REACH.
+    .filter((w) => Number.isFinite(w.scale) && Math.hypot(...w.centre) <= REACH + shardReach(w.shard!.extent, w.scale))
+}
+
+/** How far a shard can stretch from its centre in the render frame: the corner of its grid, at its scale. */
+export function shardReach(extent: number, scale: number): number {
+  return Math.sqrt(3) * extent * scale
 }
 
 /** Two clip boxes that cut the same. */

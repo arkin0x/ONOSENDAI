@@ -71,7 +71,7 @@ export async function frameOf(shard: ShardModel, own = false): Promise<ThumbFram
   return frameOfBounds(placedBounds(shard, placed ?? []))
 }
 
-/** How far these cameras draw, which every object fitted until a grid could reach 65,536 units a side. */
+/** How far these cameras draw, which every object fitted until a grid could grow past 64 units. */
 const CLIP_FAR = 100000
 
 /**

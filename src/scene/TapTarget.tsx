@@ -98,7 +98,7 @@ const CULL_EXTENT_MIN = 64
  * (CAMERA_NEAR), on a MAX_VIEWPORT_PX tall screen. At the usual size it is 22:
  * a shard of up to 64 units at unit 2^X is never visible from 2^(X + 22) out.
  * A larger grid earns its own bound, a doubling per doubling of its size, and
- * only for itself: one 65,536-unit shard does not make the whole world keep
+ * only for itself: one very large shard does not make the whole world keep
  * every shard drawn ten doublings further out. Placed objects carry their own
  * unit and scale step, up to 2^84 whatever their parent's unit, so a shard with
  * any is never culled by this bound; its taps still follow the measured size.

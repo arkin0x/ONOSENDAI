@@ -3,11 +3,12 @@
  * grid that size (arkinox, 2026-10-31: "the extent seems to be limited at 64
  * but I don't see any reason for that").
  *
- * The grid can reach 65,536 units a side (sno-core MAX_EXTENT, DECK-0003 §1.8),
- * and one unit a press would take most of a day. So the stepper counts in ones
- * to 64, as it always has, and past that in sixteenths of the current power of
- * two: 64, 68, 72 ... 128, 136 ... Holding the key runs from 64 to the top in
- * under twenty seconds, and every stop is a round number you can step back to.
+ * The grid can reach MAX_EXTENT units a side (sno-core, DECK-0003 §1.8), and one
+ * unit a press would take far too long. So the stepper counts in ones to 64, as
+ * it always has, and past that in sixteenths of the current power of two: 64,
+ * 68, 72 ... 128, 136 ... Holding the key runs from 64 to the top in seconds,
+ * every stop is a round number you can step back to, and the whole hold is one
+ * undo step (store setExtent).
  */
 import { MAX_EXTENT, MIN_EXTENT } from 'sno-core/shards'
 

@@ -2609,7 +2609,7 @@ function followIdentity(tries = 0): void {
   })
   // Another tab wrote this identity's list, a claim or a deploy: without this,
   // this tab's next save would write its older copy over that one.
-  if (typeof window !== 'undefined') {
+  if (typeof window !== 'undefined' && typeof window.addEventListener === 'function') {
     window.addEventListener('storage', (e: StorageEvent) => {
       const owner = useCyberspace.getState().identity.pubkey
       if (e.key === mineKey(owner)) useShards.setState({ mine: loadMine(owner) })

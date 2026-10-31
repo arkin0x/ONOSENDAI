@@ -39,6 +39,8 @@ describe('carried parts re-keyed to you on TAKE (R15)', () => {
     expect(keys).toContain(pieceKey)
     const innerRef = (out.objects![pieceKey] as { refs: string[][] }).refs[0][1]
     expect(keys).toContain(innerRef)
+    // Written again in code point order (DECK-0003 §1.2).
+    expect(keys).toEqual([...keys].sort())
   })
 
   it('leaves a link to someone’s public object as it is', () => {

@@ -33,6 +33,7 @@ import { useBuilder } from '../store/useBuilder'
 import { watchContext } from '../lib/glContext'
 import { broadcastDpr, isBroadcast, isPortraitBroadcast, portraitFov, recoverLostContext } from '../lib/tv/broadcast'
 import { keepPrograms } from '../lib/keepPrograms'
+import { sortWithoutBoxing } from '../lib/sortNoAlloc'
 import { BG } from '../lib/palette'
 import { GRID_RADIUS, cellDelta, claimScreenAxes, levelScreenAxes, originShift, renderDirection, viewAxes, type Position } from '../lib/space'
 import { carryOrbit } from '../lib/zoomOrbit'
@@ -1122,7 +1123,7 @@ export const Scene = memo(function Scene(): JSX.Element {
       // A lost context is said in the console (lib/glContext). Shader
       // programs are compiled once, not again at every cut (lib/keepPrograms).
       // On the stream, a loss that does not come back reloads (lib/tv/broadcast).
-      onCreated={({ gl, scene }) => { watchContext(gl.domElement, 'main view'); recoverLostContext(gl.domElement); keepPrograms(gl, scene) }}
+      onCreated={({ gl, scene }) => { watchContext(gl.domElement, 'main view'); recoverLostContext(gl.domElement); keepPrograms(gl, scene); sortWithoutBoxing(gl) }}
     >
       <ClockKeeper />
       {/* Fog to pure black: the only distance cue in an otherwise empty field. */}

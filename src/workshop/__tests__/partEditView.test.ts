@@ -26,6 +26,8 @@ vi.mock('../../lib/relay', () => ({
 import { fromPayload, newShard, toPayload, type ShardModel } from 'sno-core/shards'
 import { useWorkshop, LIVE_LINK_NOTICE } from '../../store/useWorkshop'
 import { fetchRef, primeRef } from '../../lib/parts'
+import { setLocalAuthor, takenCopy } from '../../lib/carried'
+import { publicObjectTemplate } from '../../lib/published'
 
 const ME = 'a'.repeat(64)
 const THEM = 'b'.repeat(64)
@@ -209,3 +211,62 @@ describe('the table answers first in the edit view (DECK-0003 §1.10)', () => {
     expect(entry.objects).toBeUndefined()
   })
 })
+
+describe('review of the stack: the edit view', () => {
+  const place = (s: ShardModel, ...refs: ShardModel['refs'] & object): ShardModel => ({ ...s, refs, parts: refs.map((_, i) => ({ ref: i, at: [0, 0, 0] as [number, number, number], turn: [0, 0, 0] as [number, number, number], step: 0 })) })
+
+  it('B1: a piece from a bag stamped INSIDE a part marks the shard, and stays out of a public object', async () => {
+    const bagPiece = { ...takenCopy({ ...place(tri('Sealed'), ['a', `33331:${THEM}:secret`]), objects: { [`33331:${THEM}:secret`]: toPayload(tri('SECRET GEOMETRY')) }, author: THEM }, ME), id: 'bag-piece' }
+    useWorkshop.setState({ shards: [...w().shards, bagPiece] })
+    await w().enterPart(0)
+    w().setStampObject({ ref: ['a', `33331:${ME}:bag-piece`], name: 'Sealed', shard: bagPiece, copy: { sourceId: 'bag-piece', pubkey: ME } })
+    w().placeObject([120, 0, 0])
+    w().exitTo(0)
+    const content = publicObjectTemplate(w().rootShard()!, 1).content
+    expect(content).not.toContain('SECRET GEOMETRY')
+  })
+
+  it('B3: double-tapping a piece of your own workshop asks no relay, and opens that shard', async () => {
+    const asked: string[] = []
+    const net = (async (ref: readonly string[]) => { asked.push(ref[1]); return null }) as never
+    setLocalAuthor(() => ME)
+    try {
+      w().addShard(tri('Secret door'), 'Secret door', 'kit/review/secret-door')
+      const roomId = w().currentId!
+      useWorkshop.setState({ shards: w().shards.map((s) => (s.id === roomId ? { ...place(s, ['a', `33331:${ME}:kit/review/secret-door`]), objects: undefined } : s)) })
+      await w().enterPart(0, net)
+      expect(asked).toEqual([])
+      expect(w().currentId).toBe('kit/review/secret-door')
+      expect(w().notice).toMatch(/Secret door/)
+    } finally { setLocalAuthor(null) }
+  })
+
+  it('B3: a ref with a relay hint is a live link even when your workshop holds that piece', async () => {
+    const asked: string[] = []
+    setLocalAuthor(() => ME)
+    try {
+      w().addShard(tri('Published'), 'Published', 'pub-piece')
+      const roomId = w().currentId!
+      useWorkshop.setState({ shards: w().shards.map((s) => (s.id === roomId ? { ...place(s, ['a', `33331:${ME}:pub-piece`, 'wss://relay.test']), objects: undefined } : s)) })
+      await w().enterPart(0, (async (ref: readonly string[]) => { asked.push(ref[1]); return toPayload(tri('As published')) }) as never)
+      expect(asked).toEqual([`33331:${ME}:pub-piece`])
+      expect(w().currentId).toBe(roomId)
+      expect(w().insidePath()[0].live?.name).toBe('As published')
+    } finally { setLocalAuthor(null) }
+  })
+
+  it('S2: a live link whose placement an UNDO removed closes, and DETACH then does nothing', async () => {
+    const LINK = `33331:${THEM}:tile`
+    w().setStampObject({ ref: ['a', LINK, 'wss://relay.test'], name: 'Tile', shard: tri('Tile') })
+    w().placeObject([0, 0, 480])
+    const index = w().current()!.parts!.length - 1
+    await w().enterPart(index, (async () => toPayload(tri('Tile'))) as never)
+    expect(w().insidePath()).toHaveLength(1)
+    w().undo()
+    expect(w().insidePath()).toHaveLength(0)
+    const before = w().rootShard()
+    w().detachPart(ME)
+    expect(w().rootShard()).toBe(before)
+  })
+})
+

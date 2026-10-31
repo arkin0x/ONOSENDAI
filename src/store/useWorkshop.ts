@@ -1773,6 +1773,18 @@ export const useWorkshop = create<WorkshopState>((set, get) => {
         else open(held.live ? { address: ref[1], live: held.live } : { address: ref[1] })
         return
       }
+      // A piece of your own workshop, no relay hint: the bench draws it from here
+      // (lib/parts.ts fetchOwnFirst), so its address goes to no relay. It is edited
+      // in place (DECK-0003 §1.10, "Groups are objects"), so every shard placing it follows.
+      if (ref[0] === 'a' && !ref[2]) {
+        const a = parseAddress(ref[1])
+        const own = a && a.kind === 33331 && a.pubkey === you() ? get().shards.find((s) => s.id === a.d) : undefined
+        if (own) {
+          get().select(own.id)
+          set({ inside: null, notice: `Editing "${own.name}" itself: every shard that places it follows.` })
+          return
+        }
+      }
       // A live link: what its author's event holds, read-only.
       const answer = fetch ? await fetch(ref) : null
       // By `e`, the fetch says whose event it is (sno-core Fetched); by `a`, the address does.

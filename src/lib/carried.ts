@@ -372,6 +372,8 @@ export function focusOf(root: ShardModel, path: readonly InsideStep[]): { path: 
   const kept: InsideStep[] = []
   let model = root
   for (const step of path) {
+    // A live link stands only while what holds it still places it (an UNDO can take that away).
+    if (step.live && !(model.refs ?? []).some((r) => r[1] === step.address)) break
     const next = step.live ?? carriedCopy(root, step.address)
     if (!next) break
     kept.push(step)
@@ -407,7 +409,8 @@ export function writeCopy(root: ShardModel, address: string, next: ShardModel): 
     if (!(a in table) && a in before) table[a] = before[a]
     if (a in table) queue.push(...addressesIn(table[a]))
   }
-  return { ...root, objects: table }
+  // A piece from a bag stamped inside this copy marks `next`: the root holds its table now (§1.10).
+  return { ...root, objects: table, ...((next as FromBag).fromBag ? { fromBag: true } : {}) } as ShardModel
 }
 
 /**

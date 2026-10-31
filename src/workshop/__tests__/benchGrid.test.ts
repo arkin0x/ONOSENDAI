@@ -10,7 +10,7 @@
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
-import { Color, DoubleSide } from 'three'
+import { Color, DoubleSide, type BufferAttribute } from 'three'
 import { DIVISIONS, TICKS_PER_UNIT } from 'sno-core/shards'
 import { ACCENT } from '../../lib/palette'
 import { BenchGrid } from '../benchGrid'
@@ -89,7 +89,7 @@ describe('the cost', () => {
   it('stepping through every division touches no geometry and makes no object', () => {
     const g = made(8, 1)
     const geometry = g.mesh.geometry, material = g.mesh.material
-    const position = geometry.getAttribute('position')
+    const position = geometry.getAttribute('position') as BufferAttribute
     const v = position.version, mv = material.version
     for (let round = 0; round < 50; round++) for (const d of DIVISIONS) g.set(8, d)
     expect(g.mesh.geometry).toBe(geometry)
@@ -102,7 +102,7 @@ describe('the cost', () => {
 
   it('a new extent rewrites the same four corners, keeps the buffer, and bounds the lattice', () => {
     const g = made(8, 1)
-    const position = g.mesh.geometry.getAttribute('position')
+    const position = g.mesh.geometry.getAttribute('position') as BufferAttribute
     const v = position.version
     g.set(64, 1)
     expect(g.mesh.geometry.getAttribute('position')).toBe(position)

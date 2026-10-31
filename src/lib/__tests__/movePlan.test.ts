@@ -4,20 +4,50 @@ import { buildMovePlan, isSpecSidestep, isSpecSidestepMove, nextAxisMove, nextSt
 
 const P = (x: bigint, y: bigint = 5n, z: bigint = 5n): Position => ({ x, y, z })
 
-function checkPlan(steps: PlanStep[], from: Position, to: Position, ceiling: number): void {
+const same = (a: Position, b: Position): boolean => a.x === b.x && a.y === b.y && a.z === b.z
+
+/**
+ * What is wrong with a route, or null. Plain comparisons, not an expect per
+ * step: the random routes below run to 75,000 steps, and 264,000 expects took
+ * 2.4 s of a test with a 5 s limit where these take 30 ms, so a loaded machine
+ * timed it out.
+ */
+function planProblem(steps: PlanStep[], from: Position, to: Position, ceiling: number): string | null {
   let cur = from
-  for (const s of steps) {
-    expect(s.from).toEqual(cur)
+  for (const [i, s] of steps.entries()) {
+    if (!same(s.from, cur)) return `step ${i} does not start where the last one ended`
     if (s.kind === 'hop') {
-      for (const a of ['x', 'y', 'z'] as const) expect(findLcaHeight(s.from[a], s.to[a])).toBeLessThanOrEqual(ceiling)
-      expect(s.from).not.toEqual(s.to)
-    } else {
-      expect(isSpecSidestepMove(s.from, s.to)).toBe(true)
+      if (same(s.from, s.to)) return `step ${i} is a hop that goes nowhere`
+      for (const a of ['x', 'y', 'z'] as const) {
+        const h = findLcaHeight(s.from[a], s.to[a])
+        if (h > ceiling) return `step ${i} hops h${h} on ${a}, above the ceiling h${ceiling}`
+      }
+    } else if (!isSpecSidestepMove(s.from, s.to)) {
+      return `step ${i} is not a spec sidestep`
     }
     cur = s.to
   }
-  expect(cur).toEqual(to)
+  return same(cur, to) ? null : 'the route does not end at the cursor'
 }
+
+function checkPlan(steps: PlanStep[], from: Position, to: Position, ceiling: number): void {
+  expect(planProblem(steps, from, to, ceiling)).toBeNull()
+}
+
+describe('the route check', () => {
+  const step = (kind: PlanStep['kind'], from: Position, to: Position): PlanStep => ({ kind, from, to, maxHeight: 0, heights: { x: 0, y: 0, z: 0 }, source: 'local' })
+  it('passes a legal route', () => {
+    expect(planProblem([step('hop', P(0n), P(3n)), step('sidestep', P(3n), P(4n))], P(0n), P(4n), 2)).toBeNull()
+  })
+  it('catches every way a route can be wrong', () => {
+    expect(planProblem([step('hop', P(1n), P(3n))], P(0n), P(3n), 2)).toContain('does not start')
+    expect(planProblem([step('hop', P(0n), P(0n))], P(0n), P(0n), 2)).toContain('goes nowhere')
+    expect(planProblem([step('hop', P(0n), P(16n))], P(0n), P(16n), 2)).toContain('above the ceiling')
+    expect(planProblem([step('hop', P(0n, 0n), P(0n, 16n))], P(0n, 0n), P(0n, 16n), 2)).toContain('on y')
+    expect(planProblem([step('sidestep', P(0n), P(2n))], P(0n), P(2n), 2)).toContain('not a spec sidestep')
+    expect(planProblem([step('hop', P(0n), P(3n))], P(0n), P(2n), 2)).toContain('does not end')
+  })
+})
 
 describe('spec 6.3 geometry', () => {
   it('names the leaf touching the wall on each side', () => {
@@ -99,7 +129,7 @@ describe('buildMovePlan', () => {
     let seed = 7
     const rnd = () => { seed = (seed * 1103515245 + 12345) & 0x7fffffff; return seed }
     for (let i = 0; i < 40; i++) {
-      // walls up to h24 above a ceiling of 12..17: routes stay in the tens
+      // walls up to h24 above a ceiling of 12..17: routes of about 1,200 steps, the longest 6,533
       const big = () => BigInt(rnd()) % (1n << 24n)
       const from = P(big(), big(), big())
       const to = P(big(), big(), big())

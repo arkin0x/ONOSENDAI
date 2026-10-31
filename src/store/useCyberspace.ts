@@ -82,7 +82,8 @@ import {
 } from '../lib/space'
 import { confirmChainEvents } from '../lib/chains'
 import { chainDbAvailable, chainWritePause, readStoredChain, setAsideChains, setAsideStoredChain, writeStoredChain, type StoredChain } from '../lib/chainDb'
-import { checkRows, clearTail, committedHead, deployAllowsMove, inRows, markerValue, migrateToRows, noteCommitted, onChainLost, onChainRefused, readRows, readTail, rowsHead, rowsMarked, rowsWanted, saveRows, setAsideRows, setMarker, storeWorksHere, turnRowsOff, writeTail, type RowsRead } from '../lib/chainStore'
+import { CHAIN_RULES_EPOCH } from '../lib/chainRulesEpoch'
+import { checkRows, clearTail, markVerdicts, committedHead, deployAllowsMove, inRows, markerValue, migrateToRows, noteCommitted, onChainLost, onChainRefused, readRows, readTail, rowsHead, rowsMarked, rowsWanted, saveRows, setAsideRows, setMarker, storeWorksHere, turnRowsOff, writeTail, type RowsRead } from '../lib/chainStore'
 import { eventDbAvailable } from '../lib/eventDb/client'
 import type { ChainRead, ChainSource } from '../lib/eventDb/chainRows'
 import { checkSignatures } from '../lib/sigCheck'
@@ -2204,6 +2205,8 @@ function startRowsCheck(pubkey: string, read: ChainRead): void {
   entry.done = (running ? Promise.all([running, own]).then(([a, b]) => a ?? b) : own).then((cut) => {
     if (sigCheck === entry) sigCheck = null
     mark('onosendai:chain-verified')
+    // Only over signatures that held: a verdict is about authentic events (a cut has already changed the chain).
+    void markVerdicts(pubkey, CHAIN_RULES_EPOCH)
     return cut
   })
   sigCheck = entry

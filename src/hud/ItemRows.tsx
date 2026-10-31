@@ -40,7 +40,8 @@ import { celebrateOpen } from '../store/useOpenCeremony'
 import { useCeremony } from '../store/useCeremony'
 import { isDoor, lookOf } from '../lib/looks'
 import { doorSecretWithKey, doorSecretWithSigner } from '../lib/doors'
-import { doorAsFound, enterRoom } from '../store/rooms'
+import { doorAsFound, fillRoom, openDoorNow } from '../store/rooms'
+import { useToast } from '../store/useToast'
 import { chestLoot } from '../lib/lootObjects'
 import { landedAt } from '../lib/ceremony'
 import { resumeAudio } from '../lib/audioContext'
@@ -228,11 +229,16 @@ export function ChestBlock({ id, chest, author, verified, place, sealer: given, 
     if (!secret) { setStatus('This door holds nothing this client can read.'); return }
     const at = doorAsFound(id)
     if (!at) { setStatus('This door is no longer here.'); return }
-    // What is behind it settles out of static where it stands (door A), the first time only.
-    const opened = await enterRoom(at, secret, first ? (items) => useCeremony.getState().mark(items) : undefined)
-    if (!opened) return
+    // Open at once, before any relay is asked (his ruling: "OPEN closes the
+    // modal", WALK passes at once): remembered, the card yielding, the slab going.
+    openDoorNow(at, secret)
     celebrateOpen({ me, chestId: id, kind: 'door', first, calm: prefersReducedMotion() })
-    if (!opened.found) setStatus('The room could not be retrieved.')
+    // Then the room: what is behind it settles out of static where it stands
+    // (door A), the first time only. The card has gone by now, so what went wrong
+    // is said where it can be seen (§3.7.3: not found is not the same as empty).
+    const opened = await fillRoom(at, secret, first ? (items) => useCeremony.getState().mark(items) : undefined).catch(() => undefined)
+    if (opened === null) return
+    if (!opened?.found) useToast.getState().show({ label: 'THE ROOM COULD NOT BE RETRIEVED', meta: `${chest.name} is open, but what is behind it did not come back from your relays. It may only be missing from them.`, mark: 'build' })
   }
 
   const open = async (): Promise<void> => {

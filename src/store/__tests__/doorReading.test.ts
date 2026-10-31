@@ -44,7 +44,8 @@ import { useCyberspace } from '../useCyberspace'
 import { useInventory } from '../useInventory'
 import { openedByHand, resetOpenedChests } from '../useOpenedChests'
 import { useShards } from '../useShards'
-import { doorSecret, enterRoom, keepDoorSecret, resetDoorSecrets } from '../rooms'
+import { doorSecret, doorsOfRoom, enterRoom, keepDoorSecret, reopenRoom, resetDoorSecrets, resetReopens } from '../rooms'
+import { query } from '../../lib/relay'
 import { doorWallKey, wallItems } from '../walkWalls'
 
 const hider = generateSecretKey()
@@ -83,6 +84,8 @@ beforeEach(() => {
   localStorage.removeItem('onosendai:door-secrets')
   resetOpenedChests()
   resetDoorSecrets()
+  resetReopens()
+  vi.mocked(query).mockClear()
   useShards.setState({ mine: [], discovered: {}, deleted: {}, curated: null })
   useInventory.setState({ owner: me(), items: {}, storage: 'memory' })
 })
@@ -174,6 +177,20 @@ describe('two doors, one room (R5)', () => {
     expect(doorSecret(me(), a.door.eventId)).toBe(a.secret)
   })
 
+  it('a door of another signer in the same place is not a door of this room, and stays shut (§3.7.5)', async () => {
+    const a = await build(3, 3)
+    const other = generateSecretKey()
+    const sealed = sealEntries(roomEntries(newDoorSecret()) as BagEntry[], a.lock.itemPubkey)
+    const t = chestInnerTemplate({ name: 'Their Door', lockPubkey: a.lock.itemPubkey, senderPubkey: sealed.senderPubkey, requires: '', payload: sealed.payload }, AT, PLANE, T)
+    t.tags.splice(t.tags.length - 1, 0, ['door', '3'])
+    const theirs = finalizeEvent(t, other) as NostrEvent
+    const found: Hidden = { ...a.door, eventId: theirs.id, inner: theirs, author: getPublicKey(other), chest: chestItemOf(theirs)! }
+    useShards.setState({ discovered: { [a.door.eventId]: a.door, [theirs.id]: found } })
+    expect(doorsOfRoom(a.door).map((d) => d.eventId)).toEqual([a.door.eventId])
+    await enterRoom(a.door, a.secret)
+    expect(openedByHand(me(), theirs.id, found.chest!.lockPubkey)).toBe(false)
+  })
+
   it('a door of another height or region is another room, and stays shut', async () => {
     const a = await build(3, 3)
     const far: Position = { x: AT.x + (1n << 10n), y: AT.y, z: AT.z }
@@ -194,6 +211,52 @@ describe('where a door may stand, read (§3.7.1)', () => {
     expect(await unbag(fine, key, undefined, undefined, 4)).toHaveLength(1)
     expect(await unbag(fine, key, undefined, undefined, 3, undefined, { doorId: 'x' })).toEqual([])
     expect(await unbag(fine, key, undefined, undefined, 4, undefined, { doorId: 'x' })).toHaveLength(1)
+  })
+})
+
+describe('a scan finding a door again and again', () => {
+  const opened = async (): Promise<Built> => {
+    const b = await build(3, 3)
+    keepDoorSecret(me(), b.door.eventId, b.secret)
+    return b
+  }
+  it('asks for a room it found only once in a while', async () => {
+    const b = await opened()
+    await reopenRoom(b.door)
+    await reopenRoom(b.door)
+    await reopenRoom(b.door)
+    expect(vi.mocked(query)).toHaveBeenCalledTimes(1)
+  })
+  it('asks again for a room it did not find, once a little time has passed', async () => {
+    const b = await opened()
+    relay.bags = []
+    const clock = vi.spyOn(Date, 'now')
+    const t0 = 1_900_000_000_000
+    clock.mockReturnValue(t0)
+    await reopenRoom(b.door)
+    await reopenRoom(b.door)
+    expect(vi.mocked(query)).toHaveBeenCalledTimes(1)
+    clock.mockReturnValue(t0 + 31_000)
+    await reopenRoom(b.door)
+    expect(vi.mocked(query)).toHaveBeenCalledTimes(2)
+    clock.mockRestore()
+  })
+})
+
+describe('where a door stands in its bag (§3.7.1)', () => {
+  it('a door whose C is outside the region of its bag is dropped when the region is known', async () => {
+    const b = await build(3, 3)
+    const key = (await regionKeyOffThread(AT, 3, 20)).key
+    const outer = finalizeEvent(await bagTemplate([b.doorEvent], key, 'd'.repeat(64), 3, T), hider) as NostrEvent
+    expect(await unbag(outer, key, undefined, { at: AT, plane: PLANE }, 3)).toHaveLength(1)
+    const elsewhere: Position = { ...AT, x: AT.x + (1n << 10n) }
+    expect(await unbag(outer, key, undefined, { at: elsewhere, plane: PLANE }, 3)).toEqual([])
+  })
+  it('a bag of no known height holds a door to no height rule: it has nothing to break', async () => {
+    const b = await build(3, 3)
+    const key = (await regionKeyOffThread(AT, 3, 20)).key
+    const noH = finalizeEvent(await bagTemplate([b.doorEvent], key, 'd'.repeat(64), 3, T, HIDDEN_KIND, ROOM_BAG_SETTINGS), hider) as NostrEvent
+    expect(await unbag(noH, key)).toHaveLength(1)
   })
 })
 

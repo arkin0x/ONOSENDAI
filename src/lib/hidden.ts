@@ -941,7 +941,7 @@ export function heightHint(ev: Pick<NostrEvent, 'tags'>): number | null {
 interface BagFacts { height: number; bag: BagSettings; room?: { doorId: string } }
 
 /** One inner event of a bag -> a Hidden, or null if it does not verify. `keyHex` is the key that opened the bag. */
-function fromInner(inner: Rumor, outer: NostrEvent, keyHex: string, facts: BagFacts): Hidden | null {
+function fromInner(inner: Rumor, outer: NostrEvent, keyHex: string, facts: BagFacts, heightKnown = true, origin?: RegionOrigin): Hidden | null {
   // By the same key that wrapped it, and signed, or a message sealed as a
   // rumor (innerAuthentic).
   if (!innerAuthentic(inner, outer.pubkey)) return null
@@ -965,7 +965,14 @@ function fromInner(inner: Rumor, outer: NostrEvent, keyHex: string, facts: BagFa
   // A door must stand where it was found (DECK-0004 §3.7.1): no higher than
   // its bag, and inside a room lower than the room. One that breaks either is
   // dropped, never read as a chest.
-  if (inner.kind === CHEST_KIND && doorRefusal(inner.tags, facts.height, facts.room ? facts.height : null)) return null
+  // A bag of no known height has no bound to hold it to; the same for its place.
+  if (inner.kind === CHEST_KIND && isDoor(inner.tags)) {
+    if (heightKnown && doorRefusal(inner.tags, facts.height, facts.room ? facts.height : null)) return null
+    if (heightKnown && origin) {
+      const s = BigInt(facts.height)
+      if ((x >> s) !== (origin.at.x >> s) || (y >> s) !== (origin.at.y >> s) || (z >> s) !== (origin.at.z >> s)) return null
+    }
+  } else if (inner.kind === CHEST_KIND && doorRefusal(inner.tags, facts.height, null)) return null
   // innerAuthentic held it to the bag's signer, so that is whose it is.
   const body = readItem(inner, outer.pubkey)
   return body ? { ...base, ...body } : null
@@ -1035,7 +1042,8 @@ export async function unbag(outer: NostrEvent, regionKey: Uint8Array, resolve?: 
   const keyHex = bytesToHex(regionKey)
   const regionHeight = height ?? heightHint(outer) ?? 0
   const facts: BagFacts = { height: regionHeight, bag: bagSettingsOf(outer, regionHeight), ...(room ? { room } : {}) }
-  const out: (Hidden | null)[] = entries.map((entry) => (Array.isArray(entry) ? null : fromInner(entry as Rumor, outer, keyHex, facts)))
+  const heightKnown = height !== undefined || heightHint(outer) !== null
+  const out: (Hidden | null)[] = entries.map((entry) => (Array.isArray(entry) ? null : fromInner(entry as Rumor, outer, keyHex, facts, heightKnown, origin)))
   // References are fetched a few at a time, and only so many per bag; an
   // entry that cannot be fetched or opened is a missing entry, dropped like
   // an item that fails to verify.

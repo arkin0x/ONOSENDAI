@@ -18,7 +18,7 @@ vi.mock('../../lib/relay', () => ({
   relaySet: () => ['wss://relay.test'],
 }))
 
-import { publishMany, query, queryEach } from '../../lib/relay'
+import { publishMany, queryEach } from '../../lib/relay'
 import { useCyberspace } from '../useCyberspace'
 import { useShards, type MyDeployment } from '../useShards'
 

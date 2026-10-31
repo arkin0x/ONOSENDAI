@@ -46,7 +46,7 @@ import { MessageText } from './CashuCard'
 import { ChestBlock, KeyLine } from './ItemRows'
 import { ConfirmModal } from './ConfirmModal'
 import { ItemFace } from './ItemIcon'
-import { ShardSpin } from '../scene/ShardSpin'
+import { CardSpin } from '../scene/CardSpin'
 import { EventData } from './EventData'
 import { WireData } from './WireData'
 import { PublishRow } from './PublishSwitch'
@@ -194,7 +194,7 @@ export function SecretModal(): JSX.Element | null {
         {/* The shard itself, turning, as the avatar card shows one (arkinox,
             2026-10-13): what you tapped, seen whole, before who left it. */}
         {item.type === 'shard' && item.shard && (
-          <div className="secret__spin"><ShardSpin shard={item.shard} /></div>
+          <div className="secret__spin"><CardSpin shard={item.shard} /></div>
         )}
 
         {/* LOCAL or LIVE, under the preview, for the one who hid it alone

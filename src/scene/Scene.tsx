@@ -97,6 +97,7 @@ import { TvScreenEffect } from './TvScreenEffect'
 import { useTv } from '../store/useTv'
 import { CAMERA_NEAR, FOV } from './camera'
 import { headlampReach, headlampUniforms } from './headlamp'
+import { composerSamples, screenPixels } from './composerBudget'
 
 /** Starting distance from the cursor, in cells. Orbit takes over from here. */
 const START_DISTANCE = 26
@@ -1083,7 +1084,14 @@ function resolveColourOnly(composer: PostComposer | null): void {
     buffer.resolveDepthBuffer = false
     buffer.resolveStencilBuffer = false
   }
+  // The second buffer only ever takes a full-screen pass (TV's bloom, ahead of
+  // the tube): a quad's edges are off screen, so samples there smooth nothing,
+  // and it was a second full copy of the scene's buffer while TV had been on.
+  composer.outputBuffer.samples = 0
 }
+
+/** The composer's samples, fixed for the page: a new count would make a new composer (composerBudget.ts). */
+const COMPOSER_SAMPLES = typeof window === 'undefined' ? 4 : composerSamples(screenPixels(window))
 
 /**
  * The canvas, rendered only when what it reads changes (memo): it takes no
@@ -1156,7 +1164,7 @@ export const Scene = memo(function Scene(): JSX.Element {
         so the 0.25 that stood here did nothing. The bloom's blur runs from
         half resolution down on its own (mipmapBlur).
       */}
-      <EffectComposer ref={resolveColourOnly} stencilBuffer>
+      <EffectComposer ref={resolveColourOnly} stencilBuffer multisampling={COMPOSER_SAMPLES}>
         {bloom}
       </EffectComposer>
     </Canvas>

@@ -71,8 +71,19 @@ describe('shardGeometry, what every ShardMesh draws, on the bench and in the wor
 
   it('converts a seam too: a face color becomes its own corners before the geometry', () => {
     const mesh = readFileSync('src/scene/ShardMesh.tsx', 'utf8')
-    expect(mesh).toMatch(/const shard = useMemo\(\(\) => expandFaceColors\(given\), \[given\]\)/)
+    expect(mesh).toMatch(/const shard = useMemo\(\(\) => shared\?\.shard \?\? expandFaceColors\(given\), \[given, shared\]\)/)
     expect(mesh).toMatch(/shardGeometry\(shard, clip, pose\)/)
+  })
+})
+
+describe('a placed piece, whose buffers its placements share (#563)', () => {
+  it('builds them through shardGeometry, so it is converted the same way, from its seams too', () => {
+    const mesh = readFileSync('src/scene/ShardMesh.tsx', 'utf8')
+    const start = mesh.indexOf('function buildPlaced(')
+    const build = mesh.slice(start, mesh.indexOf('\n}\n', start))
+    expect(start).toBeGreaterThan(-1)
+    expect(build).toMatch(/const shard = expandFaceColors\(model\)/)
+    expect(build).toMatch(/= shardGeometry\(shard\)/)
   })
 })
 

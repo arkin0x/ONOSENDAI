@@ -87,7 +87,7 @@ import {
 import { retractionTemplate } from '../lib/published'
 import { audioInnerTemplate, fadeAt, type AudioItem } from '../lib/audioItem'
 import { resealCopy } from '../lib/audioFile'
-import { openWithSecret, openWithSigner, openerFor, placeOf as eventPlace, readContents, resealWithout, revealedIn, sealEntries, sealedInside, sealerOf, type ChestEntry, type OpeningKey } from '../lib/chests'
+import { movableIntoRoom, openWithSecret, openWithSigner, openerFor, placeOf as eventPlace, plaintextWithSecret, readContents, resealWithout, revealedIn, sealEntries, sealedInside, sealerOf, type ChestEntry, type OpeningKey } from '../lib/chests'
 import { openedByHand, restoreOpened } from './useOpenedChests'
 import { openingKeys, placeOf, type HeldItem, type HeldPlace, type InChest } from '../lib/inventory'
 import { useInventory } from './useInventory'
@@ -531,6 +531,11 @@ export function ownDoors(mine: readonly MyDeployment[], me: string): OwnDoor[] {
   return mine.flatMap((d) => (d.type === 'chest' && d.chest?.door !== undefined && d.inner.pubkey === me
     ? [{ eventId: d.eventId, name: d.chest.name, at: positionOf(d), plane: d.plane, height: d.chest.door, secret: doorSecret(me, d.eventId) }]
     : []))
+}
+
+/** What refuses CONVERT TO DOOR, short enough for the card: how many things could not stand in the room. */
+export function cantMove(n: number): string {
+  return `${n} CAN'T MOVE`
 }
 
 /** What stands behind a door of yours: the rows of its room, whichever of its doors they name. */
@@ -1954,34 +1959,63 @@ export const useShards = create<ShardsState>((set, get) => {
       if (!d?.chest || d.type !== 'chest' || d.chest.door !== undefined || d.inner.pubkey !== me) return 'Only the chest\u2019s hider can convert it.'
       if (d.height < 1) return 'A door locks a region: this chest is hidden at height 0, so MOVE it higher first.'
       if (d.room) return 'This chest stands in a room: MOVE it out of the room first.'
-      const entries = await get().chestEntries(eventId)
-      if (typeof entries === 'string') return entries
+      // CONVERT never loses anything: every thing in the chest, as it is, unfiltered.
+      let list: unknown[]
+      if (d.sealed) list = d.sealed
+      else {
+        const opener = openerFor(d.chest, openingKeys(useInventory.getState().items), me)
+        if (!opener) return 'Opening the chest needs the key it is sealed to, which this device does not hold.'
+        try {
+          const parsed = JSON.parse(opener.by === 'key' ? plaintextWithSecret(d.chest, opener.key.secretHex) : await cs.decryptSealed(d.chest.senderPubkey, d.chest.payload)) as unknown
+          if (!Array.isArray(parsed)) return 'This chest holds something this client cannot read.'
+          list = parsed
+        } catch (err) {
+          return `The chest did not open: ${err instanceof Error ? err.message : String(err)}`
+        }
+      }
+      // Anything that could not stand in the room refuses the whole conversion:
+      // the chest stays exactly as it was, and nothing has been signed or sent.
+      const here = positionOf(d)
+      const { movable, blocked } = movableIntoRoom(list, me, here, d.plane, d.height)
+      if (blocked > 0) return cantMove(blocked)
+      const secret = newDoorSecret()
+      const key = roomKey(hexToBytes(d.keyHex), hexToBytes(secret))
+      const lookupId = roomLookupId(key)
+      const inside = movable.map((e): BagEntry => { const { sig, ...rumor } = e.event; return sig ? e.event : rumor })
+      const live = get().mine.some((m) => m.lookupId === d.lookupId && m.published)
+      let bagId = ''
+      let published = false
       try {
-        // What it holds goes into the new room, each thing where it stands. A
-        // thing aimed outside the region cannot stand in the room (§3.7.2 Coordinates).
-        const secret = newDoorSecret()
-        const key = roomKey(hexToBytes(d.keyHex), hexToBytes(secret))
-        const lookupId = roomLookupId(key)
-        const here = positionOf(d)
-        const readable = readContents(entries, me).filter((e) => { const p = eventPlace(e.event); return !!p && p.plane === d.plane && inRoom(here, d.height, p.at) })
-        const inside = readable.map((e): BagEntry => (e.event.sig ? e.event : { id: e.event.id, pubkey: e.event.pubkey, created_at: e.event.created_at, kind: e.event.kind, tags: e.event.tags, content: e.event.content }))
-        const live = get().mine.some((m) => m.lookupId === d.lookupId && m.published)
-        let bagId = ''
-        let published = false
         if (inside.length > 0) {
           const written = await publishBag(inside, key, lookupId, d.height, live, ROOM_BAG_SETTINGS, { at: here, plane: d.plane })
-          if (live && !written.published) return 'No relay took the room. The chest stays as it was.'
           bagId = written.event.id
           published = written.published
+          if (live && !published) return 'No relay took the room. The chest stays as it was.'
+          // Every entry must have reached the room bag, read back from what was
+          // written: the bag writer leaves out what a chest beside it holds.
+          const reached = (await bagEntries(written.event, key)).length
+          if (reached !== inside.length) {
+            if (published) await retractBag(lookupId, bagId)
+            return cantMove(inside.length - reached)
+          }
         }
         const sealed = sealEntries(roomEntries(secret) as BagEntry[], d.chest.lockPubkey)
         const look = builtInLookTags('door', { unit: 0, turn: [0, 0, 0], constrain: 'all' })
-        const row = await replaceChest(d, { ...d.chest, senderPubkey: sealed.senderPubkey, payload: sealed.payload, look, door: d.height })
+        // Only now does the chest go, in one rewrite with the door in its place.
+        let row: MyDeployment
+        try {
+          row = await replaceChest(d, { ...d.chest, senderPubkey: sealed.senderPubkey, payload: sealed.payload, look, door: d.height })
+        } catch (err) {
+          // The chest stands; a room bag no door names does not (§3.7.8).
+          if (published) await retractBag(lookupId, bagId)
+          throw err
+        }
         keepDoorSecret(me, row.eventId, secret)
         const keyHex = bytesToHex(key)
-        const rows = readable.map((e): MyDeployment => {
+        const rows = movable.map((e): MyDeployment => {
           const p = eventPlace(e.event)!
-          return { eventId: e.id, inner: e.event, type: e.body.type, shard: e.body.shard, text: e.body.text, key: e.body.key, chest: e.body.chest, audio: e.body.audio, bagId, at: storedAt(p.at), plane: d.plane, height: d.height, lookupId, keyHex, relays: relaySet(), createdAt: e.event.created_at, published, bag: ROOM_BAG_SETTINGS, room: { doorId: row.eventId } }
+          const { sig, ...rumor } = e.event
+          return { eventId: e.id, inner: sig ? e.event : rumor, type: e.body.type, shard: e.body.shard, text: e.body.text, key: e.body.key, chest: e.body.chest, audio: e.body.audio, bagId, at: storedAt(p.at), plane: d.plane, height: d.height, lookupId, keyHex, relays: relaySet(), createdAt: e.event.created_at, published, bag: ROOM_BAG_SETTINGS, room: { doorId: row.eventId } }
         })
         const mine = [...get().mine, ...rows]
         set({ mine })

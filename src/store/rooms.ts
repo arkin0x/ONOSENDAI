@@ -70,6 +70,8 @@ export async function openRoom(door: Hidden, secretHex: string): Promise<OpenedR
   const h = heightOfDoor(door)
   const signer = door.inner?.pubkey
   if (h === null || !signer) throw new Error('This is not a door.')
+  // §3.7.1: a chest's contents are taken, not placed.
+  if (door.chestId) throw new Error('A door found inside a chest does not open a room.')
   const key = roomKey(await roomLocationKey(door), hexToBytes(secretHex))
   const lookupId = roomLookupId(key)
   const keyHex = bytesToHex(key)

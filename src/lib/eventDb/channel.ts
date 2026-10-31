@@ -7,8 +7,8 @@
 export const EVENT_DB_CHANNEL = 'onosendai:events'
 
 export type EventDbNote =
-  /** Rows arrived. `by` is the tab that wrote them. */
-  | { kind: 'events'; by: string; ids: string[] }
+  /** Rows arrived, or a deletion took some away. `by` is the tab that wrote them. */
+  | { kind: 'events'; by: string; ids: string[]; struck: string[] }
   /** An identity's chain changed. */
   | { kind: 'chain'; by: string; pubkey: string; headId: string; generation: number; length: number }
 

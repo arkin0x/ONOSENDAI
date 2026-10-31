@@ -54,10 +54,17 @@ function started(): Worker | null {
     const w = new Worker(new URL('../../workers/events.worker.ts', import.meta.url), { type: 'module' })
     w.onmessage = (message: MessageEvent<EventDbResponse>) => {
       const entry = waiting.get(message.data.call)
-      if (!entry) return
-      waiting.delete(message.data.call)
-      if (entry.timer) clearTimeout(entry.timer)
-      entry.settle(message.data)
+      if (entry) {
+        waiting.delete(message.data.call)
+        if (entry.timer) clearTimeout(entry.timer)
+        entry.settle(message.data)
+      }
+      // A worker answering is a worker alive: it runs one request at a time, so
+      // what waits behind a long one has only been waiting its turn.
+      for (const w2 of waiting.values()) {
+        if (w2.timer) clearTimeout(w2.timer)
+        w2.timer = setTimeout(() => giveUp('did not answer'), w2.patienceMs)
+      }
     }
     w.onerror = () => giveUp('failed')
     worker = w

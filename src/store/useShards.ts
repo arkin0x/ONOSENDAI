@@ -889,7 +889,21 @@ interface ShardsState {
   secretByEvent: (eventId: string) => WorldItem | null
 }
 
+/**
+ * Each identity's deployments live under `onosendai:deployments:<pubkey>`, so
+ * another identity on a shared device never sees them as YOURS. The bare key
+ * is the list from before that, unscoped: it is moved out, never read as a list
+ * again (migrateMine).
+ */
 const MINE_KEY = 'onosendai:deployments'
+const mineKey = (owner: string): string => `${MINE_KEY}:${owner}`
+/**
+ * Rows from the bare list whose records do not prove who placed them: a
+ * reference names another identity's object as easily as its own. Shown to
+ * nobody, deleted by nothing, and moved to their owner when that owner's bag on
+ * the relays names them (claimUnclaimed).
+ */
+const UNCLAIMED_KEY = 'onosendai:deployments-unclaimed'
 /**
  * Event ids this device has ever opened, newest last. `discovered` is memory
  * only and starts empty on every load, so without this the first scan after a
@@ -934,17 +948,101 @@ const DELETED_KEY = 'onosendai:deployments-deleted'
 /** Bags this identity has taken down, by `author:lookupId`, which is a loot row's own key. */
 const DELETED_BAGS_KEY = 'onosendai:bags-deleted'
 
-function loadMine(): MyDeployment[] {
+/** A stored list as it stands. Anything that is not a list reads as nothing, and is left where it is. */
+function readRows(key: string): MyDeployment[] {
   try {
-    const raw = localStorage.getItem(MINE_KEY)
-    if (!raw) return []
-    const list = JSON.parse(raw)
-    return Array.isArray(list) ? list.filter((d) => d && d.eventId && d.inner && (d.shard || d.text || d.key || d.chest)).map((d) => (d.shard ? { ...d, shard: normalizeStored(d.shard) } : d)) : []
+    const list = JSON.parse(localStorage.getItem(key) ?? '[]')
+    return Array.isArray(list) ? list : []
   } catch { return [] }
 }
 
-function saveMine(mine: MyDeployment[]): void {
-  try { localStorage.setItem(MINE_KEY, JSON.stringify(mine)) } catch { /* quota or private mode */ }
+/** Who placed a row, where the record proves it: a whole inner event is signed by, or a rumor made by, whoever placed it. */
+function provenOwner(d: MyDeployment | null | undefined): string | null {
+  const pubkey = d?.eventId && !d.ref ? d.inner?.pubkey : null
+  return pubkey && /^[0-9a-f]{64}$/.test(pubkey) ? pubkey : null
+}
+
+function withRows(key: string, rows: MyDeployment[]): void {
+  const stored = readRows(key)
+  const have = new Set(stored.map((d) => d?.eventId))
+  const added = rows.filter((d) => !d?.eventId || !have.has(d.eventId))
+  if (added.length > 0) localStorage.setItem(key, JSON.stringify([...stored, ...added]))
+}
+
+/**
+ * Move the bare list out to its owners, once. Rows are written first and the
+ * bare key removed last, so a failure part way (quota) loses nothing and the
+ * next load carries on. A row already under its owner's key stays as it is. A
+ * row deleted here, which only a tab still running the old code could write
+ * back, goes with the unclaimed rather than coming back to life.
+ */
+function migrateMine(): void {
+  try {
+    const raw = localStorage.getItem(MINE_KEY)
+    if (raw === null) return
+    const list = JSON.parse(raw)
+    if (!Array.isArray(list)) return
+    const deleted = loadDeleted()
+    const byKey = new Map<string, MyDeployment[]>()
+    for (const d of list as MyDeployment[]) {
+      const owner = d?.eventId && deleted[d.eventId] ? null : provenOwner(d)
+      const key = owner ? mineKey(owner) : UNCLAIMED_KEY
+      byKey.set(key, [...(byKey.get(key) ?? []), d])
+    }
+    for (const [key, rows] of byKey) withRows(key, rows)
+    localStorage.removeItem(MINE_KEY)
+  } catch { /* quota or private mode: the bare list stays, for the next load */ }
+}
+
+function loadMine(owner: string): MyDeployment[] {
+  migrateMine()
+  const rows = readRows(mineKey(owner))
+  const have = new Set(rows.map((d) => d?.eventId))
+  // Only when the move above could not finish: this owner's rows still count.
+  const stuck = readRows(MINE_KEY).filter((d) => provenOwner(d) === owner && !have.has(d.eventId) && !loadDeleted()[d.eventId])
+  return [...rows, ...stuck].filter((d) => d && d.eventId && d.inner && (d.shard || d.text || d.key || d.chest || d.audio)).map((d) => (d.shard ? { ...d, shard: normalizeStored(d.shard) } : d))
+}
+
+function saveMine(mine: MyDeployment[], owner = useCyberspace.getState().identity.pubkey): void {
+  try { localStorage.setItem(mineKey(owner), JSON.stringify(mine)) } catch { /* quota or private mode */ }
+}
+
+/** One identity's rows: the store's while it is the one signed in, its own on disk once it is not. */
+function rowsOf(owner: string): MyDeployment[] {
+  return useCyberspace.getState().identity.pubkey === owner ? useShards.getState().mine : loadMine(owner)
+}
+
+/** Write one identity's rows where rowsOf reads them, so work a switch landed during never touches the next identity's list. */
+function commitRows(owner: string, rows: MyDeployment[]): void {
+  if (useCyberspace.getState().identity.pubkey === owner) useShards.setState({ mine: rows })
+  saveMine(rows, owner)
+}
+
+/**
+ * Move to this identity the unclaimed rows its own bags name. The bag's signature
+ * says who placed what it names, and only the row's own key opens it. A row no
+ * relay can vouch for yet stays unclaimed and is asked about on the next load.
+ */
+async function claimUnclaimed(owner: string): Promise<void> {
+  const deleted = loadDeleted()
+  const rows = readRows(UNCLAIMED_KEY).filter((d) => d?.ref && d.inner && d.keyHex && d.lookupId && !deleted[d.eventId])
+  if (rows.length === 0) return
+  const bags = await query({ kinds: [HIDDEN_KIND], authors: [owner], '#d': [...new Set(rows.map((d) => d.lookupId))] })
+  const claimed: MyDeployment[] = []
+  for (const d of rows) {
+    for (const bag of bags) {
+      if (bag.pubkey !== owner || bag.tags.find((t) => t[0] === 'd')?.[1] !== d.lookupId) continue
+      const entries = await bagEntries(bag, hexToBytes(d.keyHex)).catch(() => [])
+      if (entries.some((e) => entryKey(e) === entryKey(entryOf(d)))) { claimed.push(d); break }
+    }
+  }
+  if (claimed.length === 0) return
+  const have = new Set(rowsOf(owner).map((d) => d.eventId))
+  const added = claimed.filter((d) => !have.has(d.eventId)).map((d) => (d.shard ? { ...d, shard: normalizeStored(d.shard) } : d))
+  // Written to the owner first and only then taken off the unclaimed.
+  commitRows(owner, [...rowsOf(owner), ...added])
+  const gone = new Set(claimed.map((d) => d.eventId))
+  localStorage.setItem(UNCLAIMED_KEY, JSON.stringify(readRows(UNCLAIMED_KEY).filter((d) => !gone.has(d?.eventId))))
 }
 
 function loadDeleted(): Record<string, true> {
@@ -1313,7 +1411,8 @@ export const useShards = create<ShardsState>((set, get) => {
     deployNote: null,
     deployAsk: null,
     deployError: null,
-    mine: loadMine(),
+    // Filled in by followIdentity below, once useCyberspace has loaded.
+    mine: [],
     discovered: {},
     curated: null,
     deleted: loadDeleted(),
@@ -1838,15 +1937,15 @@ export const useShards = create<ShardsState>((set, get) => {
         if (key) useInventory.getState().holdForged(inner, key, place)
         for (const f of forgedInside) useInventory.getState().holdForged(f.event, f.key, place)
         // Every item now in this region's bag shares its new envelope, status and settings.
+        // Onto the list of the identity that hid it, even if another has signed in meanwhile.
         const mine = [
-          ...get().mine
+          ...rowsOf(cs.identity.pubkey)
             // Moved inside its bag: the old version left with the rewrite above.
             .filter((d) => !(was && was.lookupId === rk.lookupId && d.eventId === was.eventId))
             .map((d) => (d.lookupId === rk.lookupId ? { ...d, bagId: event.id, published, bag: settings } : d)),
           item,
         ]
-        set({ mine })
-        saveMine(mine)
+        commitRows(cs.identity.pubkey, mine)
         // Placed: first in your shard lists from now. Local, and never the
         // deploy's failure; not for an identity switched to meanwhile.
         if (cyber().identity.pubkey === cs.identity.pubkey) {
@@ -2051,7 +2150,7 @@ export const useShards = create<ShardsState>((set, get) => {
         const settings = gathered.settings ?? DEFAULT_BAG_SETTINGS
         const { event, published } = await publishBag(left, key, item.lookupId, item.height, wasPublic, settings, { at: positionOf(item), plane: item.plane }, undefined, gathered.entries)
         unnamed = published
-        mine = get().mine
+        mine = rowsOf(me)
           .filter((d) => d.eventId !== eventId)
           .map((d) => (d.lookupId === item.lookupId ? { ...d, bagId: event.id, published, bag: settings } : d))
       } else {
@@ -2068,7 +2167,7 @@ export const useShards = create<ShardsState>((set, get) => {
           })
           try { unnamed = (await publishMany(item.relays ?? relaySet(), del)).ok } catch { /* best effort */ }
         }
-        mine = get().mine.filter((d) => d.eventId !== eventId)
+        mine = rowsOf(me).filter((d) => d.eventId !== eventId)
       }
       // A shard hidden by reference is also its own event. Once no bag names
       // it, take that down too (NIP-09), if it is ours to take down: it is
@@ -2091,8 +2190,8 @@ export const useShards = create<ShardsState>((set, get) => {
       const deletedBags = left.length > 0
         ? get().deletedBags
         : { ...get().deletedBags, [`${me}:${item.lookupId}`]: true as const }
-      set({ mine, deleted, deletedBags, discovered })
-      saveMine(mine); saveDeleted(deleted)
+      set({ deleted, deletedBags, discovered })
+      commitRows(me, mine); saveDeleted(deleted)
       if (left.length === 0) saveDeletedBags(deletedBags)
     },
 
@@ -2374,6 +2473,31 @@ useShards.subscribe((s, prev) => {
   const again = s.pending !== null && s.pending === s.placedLast?.pending
   if (s.pending !== prev.pending && !again && (cs.buildStep !== null || cs.buildSettle !== null)) cs.setBuildStep(null)
 })
+
+/**
+ * YOURS is the signed-in identity's list and nobody else's: read it now, and
+ * again on every switch. A card open on the old identity's row closes with it.
+ * Deferred, because useCyberspace reaches this file through lib/destinationKeys
+ * and may not have finished loading while this one runs.
+ */
+function followIdentity(): void {
+  const claim = (owner: string): void => {
+    void claimUnclaimed(owner).catch((err) => console.warn(`[shards] could not claim hidden items: ${err instanceof Error ? err.message : String(err)}`))
+  }
+  const me = useCyberspace.getState().identity.pubkey
+  useShards.setState({ mine: loadMine(me) })
+  claim(me)
+  useCyberspace.subscribe((s, prev) => {
+    const owner = s.identity.pubkey
+    if (owner === prev.identity.pubkey) return
+    const { mine: left, selectedSecret } = useShards.getState()
+    const mine = loadMine(owner)
+    const closes = selectedSecret !== null && left.some((d) => d.eventId === selectedSecret) && !mine.some((d) => d.eventId === selectedSecret)
+    useShards.setState(closes ? { mine, selectedSecret: null } : { mine })
+    claim(owner)
+  })
+}
+queueMicrotask(followIdentity)
 
 if (import.meta.env.DEV && typeof window !== 'undefined') {
   ;(window as unknown as { __shards?: unknown }).__shards = useShards

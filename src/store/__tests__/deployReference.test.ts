@@ -164,7 +164,7 @@ describe('the review fixes', () => {
 
   it('a deployment keeps its reference across a reload', async () => {
     await deploy(3000)
-    const saved = JSON.parse(localStorage.getItem('onosendai:deployments') ?? '[]')
+    const saved = JSON.parse(localStorage.getItem(`onosendai:deployments:${useCyberspace.getState().identity.pubkey}`) ?? '[]')
     const stored = Array.isArray(saved) ? saved.find((d: { ref?: unknown }) => d.ref) : undefined
     expect(stored?.ref).toEqual(useShards.getState().mine[0].ref)
   })

@@ -173,7 +173,7 @@ export function SecretModal(): JSX.Element | null {
           {/* The badge each kind of hidden thing opens under: its icon, or a
               keypair item's own picture (ItemFace), and its name. A kind 'key'
               is an ITEM to the reader (arkinox, 2026-10-10: "keys ARE items"). */}
-          <span className={`secret__badge secret__badge--${coin ? 'cashu' : item.type}`}><ItemFace type={item.type} coin={coin} image={item.keyItem?.image} size={11} />{item.type === 'key' ? 'ITEM' : item.type.toUpperCase()}</span>
+          <span className={`secret__badge secret__badge--${coin ? 'cashu' : item.type}`}><ItemFace type={item.type} coin={coin} image={item.keyItem?.image} size={11} />{item.type === 'key' ? 'ITEM' : look?.kind === 'door' ? 'DOOR' : item.type.toUpperCase()}</span>
           {mine && <span className="secret__mine">YOURS</span>}
           <button className="secret__close" onClick={close} aria-label="Close">✕</button>
         </div>
@@ -248,7 +248,7 @@ export function SecretModal(): JSX.Element | null {
             />}
 
         {item.author && item.lookupId && (
-          <Comments subject={{ author: item.author, lookupId: item.lookupId, itemId: item.lineage ?? item.key, type: item.type, target: item.target, at: item.at, height: item.height }} />
+          <Comments subject={{ author: item.author, lookupId: item.lookupId, itemId: item.lineage ?? item.key, type: item.type, target: item.target, at: item.at, height: item.height, roomKeyHex: item.roomKeyHex }} />
         )}
 
         {/* The actions between two rules: the comments above, the event data

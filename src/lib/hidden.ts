@@ -44,7 +44,8 @@
  * and finished events only.
  */
 
-import { doorHeightOf } from './looks'
+import { doorHeightOf, isDoor } from './looks'
+import { doorRefusal } from './doors'
 import { getEventHash, getPublicKey } from 'nostr-tools/pure'
 import { verifyOnce } from './verifiedSigs'
 import { coordToXyz, hexToCoord, type Plane } from 'cyberspace-core'
@@ -463,6 +464,12 @@ export interface Hidden {
    * against the bag's signer or dropped.
    */
   claim?: true
+  /**
+   * Set when this was read from a room bag (DECK-0004 §3.7.2): the door whose
+   * room it stands in. Its `lookupId` and `keyHex` are then the room bag's
+   * and the room key, and its `height` the room's.
+   */
+  room?: { doorId: string }
 }
 
 /**
@@ -736,16 +743,17 @@ export const DEFAULT_BAG_SETTINGS: BagSettings = { heightTag: true, hint: null, 
  * keys, chests, hidden audio, and the cashu tokens and nonfungible.cash claim links (NFTs,
  * lib/nftLink) written in its messages.
  */
-export interface BagContents { shard: number; message: number; key: number; chest: number; cashu: number; nft: number; audio: number }
+export interface BagContents { shard: number; message: number; key: number; chest: number; cashu: number; nft: number; audio: number; door: number }
 
 export function bagContents(inners: readonly (BagEntry | ChatRumor)[]): BagContents {
-  const out: BagContents = { shard: 0, message: 0, key: 0, chest: 0, cashu: 0, nft: 0, audio: 0 }
+  const out: BagContents = { shard: 0, message: 0, key: 0, chest: 0, cashu: 0, nft: 0, audio: 0, door: 0 }
   for (const e of inners) {
     if (isReference(e)) { out.shard++; continue }
     if (e.kind === SHARD_KIND) out.shard++
     else if (e.kind === MESSAGE_KIND) { out.message++; out.cashu += cashuTokensAsWritten(e.content).length; out.nft += countNftLinks(e.content) }
     else if (e.kind === KEY_KIND) out.key++
-    else if (e.kind === CHEST_KIND) out.chest++
+    // A door counts as `door`, never as `chest` (spec §7.7, #82); what its room holds is never counted.
+    else if (e.kind === CHEST_KIND) { if (isDoor(e.tags)) out.door++; else out.chest++ }
     else if (e.kind === AUDIO_KIND) out.audio++
   }
   return out
@@ -754,9 +762,10 @@ export function bagContents(inners: readonly (BagEntry | ChatRumor)[]): BagConte
 /**
  * The order a bag's `contents` tags are written in, and read in. Hidden audio
  * (DECK-0007) came last, after the money kinds, so every bag written before
- * it keeps the order spec §7.7 gives.
+ * it keeps the order spec §7.7 gives; `door` (DECK-0004 §3.7, spec #82)
+ * after it, for the same reason.
  */
-export const CONTENTS_KINDS = ['shard', 'message', 'key', 'chest', 'cashu', 'nft', 'audio'] as const
+export const CONTENTS_KINDS = ['shard', 'message', 'key', 'chest', 'cashu', 'nft', 'audio', 'door'] as const
 
 /**
  * The public tags a bag's contents settings write (arkinox, 2026-10-18:
@@ -929,10 +938,10 @@ export function heightHint(ev: Pick<NostrEvent, 'tags'>): number | null {
 }
 
 /** What every item of one bag shares: its region's height and its public settings. */
-interface BagFacts { height: number; bag: BagSettings }
+interface BagFacts { height: number; bag: BagSettings; room?: { doorId: string } }
 
 /** One inner event of a bag -> a Hidden, or null if it does not verify. `keyHex` is the key that opened the bag. */
-function fromInner(inner: Rumor, outer: NostrEvent, keyHex: string, facts: BagFacts): Hidden | null {
+function fromInner(inner: Rumor, outer: NostrEvent, keyHex: string, facts: BagFacts, heightKnown = true, origin?: RegionOrigin): Hidden | null {
   // By the same key that wrapped it, and signed, or a message sealed as a
   // rumor (innerAuthentic).
   if (!innerAuthentic(inner, outer.pubkey)) return null
@@ -953,6 +962,17 @@ function fromInner(inner: Rumor, outer: NostrEvent, keyHex: string, facts: BagFa
     createdAt: inner.created_at,
   }
 
+  // A door must stand where it was found (DECK-0004 §3.7.1): no higher than
+  // its bag, and inside a room lower than the room. One that breaks either is
+  // dropped, never read as a chest.
+  // A bag of no known height has no bound to hold it to; the same for its place.
+  if (inner.kind === CHEST_KIND && isDoor(inner.tags)) {
+    if (heightKnown && doorRefusal(inner.tags, facts.height, facts.room ? facts.height : null)) return null
+    if (heightKnown && origin) {
+      const s = BigInt(facts.height)
+      if ((x >> s) !== (origin.at.x >> s) || (y >> s) !== (origin.at.y >> s) || (z >> s) !== (origin.at.z >> s)) return null
+    }
+  } else if (inner.kind === CHEST_KIND && doorRefusal(inner.tags, facts.height, null)) return null
   // innerAuthentic held it to the bag's signer, so that is whose it is.
   const body = readItem(inner, outer.pubkey)
   return body ? { ...base, ...body } : null
@@ -1010,7 +1030,7 @@ function noteReading(bagId: string, reading: BagReading): void {
  * opening, since a reference may open differently next time (a newer version
  * of the object, or one fetched that could not be before).
  */
-export async function unbag(outer: NostrEvent, regionKey: Uint8Array, resolve?: ResolveReference, origin?: RegionOrigin, height?: number, seen?: { references: number }): Promise<Hidden[]> {
+export async function unbag(outer: NostrEvent, regionKey: Uint8Array, resolve?: ResolveReference, origin?: RegionOrigin, height?: number, seen?: { references: number }, room?: { doorId: string }): Promise<Hidden[]> {
   const ct = ciphertextOf(outer)
   if (!ct) return []
   const json = await decryptForRegion(regionKey, ct)
@@ -1021,8 +1041,9 @@ export async function unbag(outer: NostrEvent, regionKey: Uint8Array, resolve?: 
   if (seen) seen.references = entries.filter(isReference).length
   const keyHex = bytesToHex(regionKey)
   const regionHeight = height ?? heightHint(outer) ?? 0
-  const facts: BagFacts = { height: regionHeight, bag: bagSettingsOf(outer, regionHeight) }
-  const out: (Hidden | null)[] = entries.map((entry) => (Array.isArray(entry) ? null : fromInner(entry as Rumor, outer, keyHex, facts)))
+  const facts: BagFacts = { height: regionHeight, bag: bagSettingsOf(outer, regionHeight), ...(room ? { room } : {}) }
+  const heightKnown = height !== undefined || heightHint(outer) !== null
+  const out: (Hidden | null)[] = entries.map((entry) => (Array.isArray(entry) ? null : fromInner(entry as Rumor, outer, keyHex, facts, heightKnown, origin)))
   // References are fetched a few at a time, and only so many per bag; an
   // entry that cannot be fetched or opened is a missing entry, dropped like
   // an item that fails to verify.

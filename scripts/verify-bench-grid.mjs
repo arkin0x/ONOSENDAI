@@ -256,7 +256,7 @@ if (!SKIP.has('taps')) {
 if (!SKIP.has('shots')) {
   const views = { home: [10, 9, 12, 0, 0, 0], near: [2.4, 2.2, 2.9, 0, 0, 0], close: [0.5, 0.5, 0.6, 0.25, 0, -0.2] }
   const sheet = []
-  for (const division of DIVISIONS) {
+  for (const division of (process.env.SHOT_DIVS ? process.env.SHOT_DIVS.split(',').map(Number) : DIVISIONS)) {
     await ev(`window.__ws.getState().setDivision(${division})`)
     for (const [name, v] of Object.entries(views)) {
       await look(...v)

@@ -313,13 +313,14 @@ describe('moving a chain into rows', () => {
     let rows = 0
     proto.put = function (this: IDBObjectStore, ...x: unknown[]) {
       if (this.name === 'events') {
-        if (++rows === 301) throw new DOMException('The page went away.', 'AbortError')
+        // A full disk, because anything else is tried once more on a fresh connection.
+        if (++rows === 301) throw new DOMException('The quota has been exceeded.', 'QuotaExceededError')
       }
       return real.apply(this, x)
     }
     try {
-      await expect(migrate(source(chain))).rejects.toBeDefined()
-      // The first two batches of 200 are not all on disk: the second aborted whole.
+      await expect(migrate(source(chain))).rejects.toMatchObject({ name: 'QuotaExceededError' })
+      // The first batch of 200 is on disk. The second aborted whole.
       expect(rows).toBe(301)
       rows = 0
       expect(await migrate(source(chain))).toMatchObject({ status: 'switched' })
@@ -334,7 +335,7 @@ describe('moving a chain into rows', () => {
     const real = proto.put
     let rows = 0
     proto.put = function (this: IDBObjectStore, ...x: unknown[]) {
-      if (this.name === 'chains' || (this.name === 'events' && ++rows > 250)) throw new DOMException('The page went away.', 'AbortError')
+      if (this.name === 'chains' || (this.name === 'events' && ++rows > 250)) throw new DOMException('The quota has been exceeded.', 'QuotaExceededError')
       return real.apply(this, x)
     }
     await expect(migrate(source(chain))).rejects.toBeDefined()

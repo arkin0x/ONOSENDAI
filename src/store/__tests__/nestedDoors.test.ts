@@ -27,8 +27,8 @@ vi.mock('../../lib/relay', () => {
   return {
     publishMany: vi.fn(async (_r: string[], ev: (typeof relay.events)[number]) => { relay.events.push(ev); return { ok: true } }),
     query: vi.fn(answer),
-    queryAny: vi.fn(answer),
-    queryEach: vi.fn(async () => []),
+    queryAny: vi.fn((_r: string[], f: Parameters<typeof answer>[0]) => answer(f)),
+    queryEach: vi.fn(async (f: Parameters<typeof answer>[0]) => [{ url: 'wss://relay.test', outcome: 'answered', events: await answer(f) }]),
     relaySet: () => ['wss://relay.test'],
   }
 })
@@ -194,12 +194,33 @@ describe('the red cube’s lines (4.4, R6)', () => {
     expect(roomLines(3)).toHaveLength(3)
     expect(roomLines(3)[0]).toBe(1)
     expect(roomLines(3)[1]).toBeLessThan(1)
+    // A room's outline is as deep as the deepest of its doors: a second door of B's room, at the top level.
+    const sibling = await sealDoor('B too', OUTER)
+    expect(sibling.chest?.door).toBe(OUTER)
+    expect(roomOutlines(S().mine, me(), true, a.plane).find((o) => o.height === OUTER)?.depth).toBe(2)
     // Only for you, only while building (R8).
     expect(roomOutlines(S().mine, me(), false, a.plane)).toEqual([])
   })
 })
 
 describe('MOVE, DELETE and EDIT with a door behind a door', () => {
+  it('MOVE of a nested door whose outer secret is not known here: refused; it never lands in the public bag, nor strips that bag\u2019s tags', async () => {
+    const outer = await sealDoor('Outer', OUTER)
+    const inner = await sealDoor('Inner', OUTER, INNER)
+    const place = deployPoint(CURSOR, buildStepOf(C()), OUTER)
+    const ordinaryBefore = relay.events.filter((e) => e.kind === HIDDEN_KIND && e.tags.some((t) => t[0] === 'd' && t[1] === outer.lookupId)).length
+    localStorage.setItem('onosendai:door-secrets', JSON.stringify({ [me()]: { [inner.eventId]: doorSecret(me(), inner.eventId) } }))
+    resetDoorSecrets()
+    S().startMoveChest(inner.eventId)
+    expect(sealingDoor(S(), me(), place, inner.plane, OUTER)?.secret).toBeNull()
+    goTo({ ...CURSOR, x: CURSOR.x + 2n })
+    await S().deploy()
+    expect(S().deployError).toMatch(/OPEN it first/)
+    expect(named('Inner').eventId).toBe(inner.eventId)
+    expect(relay.events.filter((e) => e.kind === HIDDEN_KIND && e.tags.some((t) => t[0] === 'd' && t[1] === outer.lookupId))).toHaveLength(ordinaryBefore)
+    S().cancelDeploy()
+  })
+
   it('MOVE: inside its own cube it stays behind the outer door; out of it, refused', async () => {
     const outer = await sealDoor('Outer', OUTER)
     const inner = await sealDoor('Inner', OUTER, INNER)

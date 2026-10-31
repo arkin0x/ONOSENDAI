@@ -123,7 +123,7 @@ describe('AIM from the chest composer', () => {
   it('closes the composer and lines the shard up as a shard deploy carrying the chest, at the model\'s own size', () => {
     const shard = benchShard(3)
     const draft = draftOf([{ kind: 'shard', shardId: shard.id }, { kind: 'message', text: 'hello' }])
-    useStash.getState().openChest()
+    useStash.setState({ chest: true })
     useStash.getState().aimIntoChest(draft, 0)
     expect(useStash.getState().chest).toBe(false)
     expect(useStash.getState().returnToChest).toBe(true)

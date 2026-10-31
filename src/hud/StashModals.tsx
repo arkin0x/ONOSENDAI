@@ -199,7 +199,7 @@ export function StashModals(): JSX.Element | null {
   if (chest) {
     // Closing the modal of a chest being placed goes back to the hide bar, the draft kept on it (ChestCompose MOVE).
     return (
-      <Shell title={placedDoor ? 'Seal a door' : 'Seal a chest'} onClose={() => { useShards.getState().unplaceChest(); close() }}>
+      <Shell title={placedDoor ? 'Seal a door' : 'Seal a chest'} onClose={() => { if (useShards.getState().deployStatus === 'working') return; useShards.getState().unplaceChest(); close() }}>
         <ChestCompose onDone={close} />
       </Shell>
     )

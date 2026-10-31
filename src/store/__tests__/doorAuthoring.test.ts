@@ -35,7 +35,7 @@ vi.mock('../../lib/relay', () => {
     }),
     query: vi.fn(answer),
     queryAny: vi.fn((_r: string[], f: Parameters<typeof answer>[0]) => answer(f)),
-    queryEach: vi.fn(async () => []),
+    queryEach: vi.fn(async (f: Parameters<typeof answer>[0]) => [{ url: 'wss://relay.test', outcome: 'answered', events: await answer(f) }]),
     relaySet: () => ['wss://relay.test'],
   }
 })

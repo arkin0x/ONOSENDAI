@@ -1,5 +1,5 @@
 /**
- * lookTags.test.ts: the `look` tag (DECK-0004 §3.6, cyberspace PR #82, held)
+ * lookTags.test.ts: the `look` tag (DECK-0004 §3.6)
  * as ONOSENDAI reads and writes it, and the door tag's height rule (§3.7.1).
  *
  * Read: the first well-formed closed and open look by shape alone, then the
@@ -12,9 +12,9 @@
  */
 import { describe, expect, it } from 'vitest'
 import { toPayload, type ShardModel } from 'sno-core/shards'
-import { CHEST_LOOKS, DOOR_LOOKS, MAX_LOOK_BYTES, builtInLook, builtInLookTags, doorHeightOf, drawnLook, isTreasureShape, lookOf, lookRefusal, lookStand, lookTags, lookTagsOf, posedLook } from '../looks'
+import { CHEST_LOOKS, DOOR_LOOKS, MAX_LOOK_BYTES, builtInLook, builtInLookTags, doorHeightOf, drawnLook, isTreasureShape, lookOf, lookRefusal, lookStand, lookTags, lookTagsOf, posedLook, posedWrapper } from '../looks'
 import { chestInnerTemplate, chestItemOf, readItem, type ChestItem } from '../hidden'
-import { constrainOf } from '../walkConstrain'
+import { chosenConstrainOf, constrainOf } from '../walkConstrain'
 import { lookBounds } from '../../scene/LookMark'
 import { feedWrapper } from '../../store/useShards'
 import { unpublishedPieces } from '../../hud/LookPicker'
@@ -103,6 +103,32 @@ describe('which look a chest or a door wears', () => {
   })
 })
 
+describe('how a look is posed for the wire', () => {
+  const pose = { unit: 3, turn: [0, 0, 0] as [number, number, number], constrain: 'opaque' as const }
+  it('a chest\u2019s built-in open look takes the bar\u2019s WALK; a door\u2019s, which has no setting, keeps none', () => {
+    const chest = lookTagsOf(builtInLookTags('treasure', pose))
+    expect(constrainOf(chest.open!)).toBe('opaque')
+    const door = lookTagsOf(builtInLookTags('door', pose))
+    expect(chosenConstrainOf(door.open!)).toBeUndefined()
+  })
+  it('what stood on the bench does not come along: the bar offers no snap', () => {
+    const posed = posedLook({ ...tri('Standing'), up: true, spin: 40 }, pose)
+    expect(posed.up).toBe(false)
+    expect(posed.spin).toBe(0)
+  })
+  it('SCALE on a look that is one placement moves its step, or the object would not change size', () => {
+    const object = { address: `33331:${PK}:statue`, shard: tri('Statue', 1) } as unknown as FeedObject
+    expect(posedLook(feedWrapper(object, 1), pose).parts?.[0].step).toBe(2)
+    // A FEED wrapper writes no WALK of its own: the object's author's setting stands.
+    expect(chosenConstrainOf(posedWrapper(feedWrapper(object, 3), pose))).toBeUndefined()
+  })
+  it('one model per payload and author, so what keys on it holds still', () => {
+    const payload = payloadOf(tri('Same'))
+    expect(lookTagsOf([['look', payload]], PK).closed).toBe(lookTagsOf([['look', payload]], PK).closed)
+    expect(lookTagsOf([['look', payload]], PK).closed).not.toBe(lookTagsOf([['look', payload]], 'b'.repeat(64)).closed)
+  })
+})
+
 describe('how a look stands (§3.6)', () => {
   const at = { x: 1n, y: 2n, z: 3n }
   it('by its own payload\u2019s up and spin, in dataspace; on cyberspace axes otherwise', () => {
@@ -175,7 +201,7 @@ describe('MINE and FEED', () => {
     expect(back.parts?.[0].turn).toEqual([0, 90, 0])
   })
 
-  it('a model of yours placing pieces you never published waits for inline parts (spec #81)', () => {
+  it('a model of yours placing pieces you never published waits for inline parts (#504)', () => {
     const own = { refs: [['a', `33331:${PK}:mine`]] as ShardModel['refs'] }
     expect(unpublishedPieces(own, PK, () => false)).toMatch(/not published/)
     expect(unpublishedPieces(own, PK, () => true)).toBeNull()

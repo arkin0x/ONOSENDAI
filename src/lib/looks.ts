@@ -1,7 +1,7 @@
 /**
  * looks.ts: what a chest or a door looks like in the world (chest and door
  * design, D2, D3, R14; arkinox, 2026-10-26), and the `look` tag that says so
- * on the wire (DECK-0004 §3.6, cyberspace PR #82, not yet merged).
+ * on the wire (DECK-0004 §3.6).
  *
  * A chest used to be the note's cube. It is now a model, placed like a
  * shard: its origin on the chest's place, at its true size. The built-in
@@ -38,7 +38,7 @@
 import { fromPayload, ticksOf, toPayload, type ShardModel } from 'sno-core/shards'
 import { keepOwnTable } from './carried'
 import { turnShard, type Turns } from './turn'
-import { withConstrain, type Constrain } from './walkConstrain'
+import { chosenConstrainOf, withConstrain, type Constrain } from './walkConstrain'
 import chestClosed from './looks/chest.json'
 import chestOpen from './looks/chest-open.json'
 import crawlClosed from './looks/door-crawl.json'
@@ -217,13 +217,23 @@ const parsed = new Map<string, ShardModel | null>()
 const PARSED_MAX = 256
 function readLookPayload(payload: string): ShardModel | null {
   if (parsed.has(payload)) return parsed.get(payload)!
+  // Too large is refused before it is kept: a key this size in the cache would hold what the limit refuses.
+  if (bytesOf(payload) > MAX_LOOK_BYTES) return null
   let model: ShardModel | null = null
-  if (bytesOf(payload) <= MAX_LOOK_BYTES) {
-    try { model = fromPayload(JSON.parse(payload), `look:${payload.length}:${payload.slice(-16)}`) } catch { model = null }
-  }
+  try { model = fromPayload(JSON.parse(payload), `look:${payload.length}:${payload.slice(-16)}`) } catch { model = null }
   if (parsed.size >= PARSED_MAX) parsed.delete(parsed.keys().next().value as string)
   parsed.set(payload, model)
   return model
+}
+
+/** One object per model and author, so whatever keys on a model's identity (geometry, measures) holds across reads. */
+const owned = new WeakMap<ShardModel, Map<string | null, ShardModel>>()
+function ownedLook(model: ShardModel, author: string | null): ShardModel {
+  let byAuthor = owned.get(model)
+  if (!byAuthor) owned.set(model, byAuthor = new Map())
+  let held = byAuthor.get(author)
+  if (!held) byAuthor.set(author, held = keepOwnTable(model, author))
+  return held
 }
 
 /** A thing's own looks, read from its tags: each null when it carries no well-formed one. */
@@ -257,7 +267,7 @@ export function lookTagsOf(tags: readonly unknown[] | undefined, author: string 
   }
   const read = (payload: string | null): ShardModel | null => {
     const model = payload === null ? null : readLookPayload(payload)
-    return model ? keepOwnTable(model, author) : null
+    return model ? ownedLook(model, author) : null
   }
   return { closed: read(closed), open: read(open) }
 }
@@ -331,9 +341,38 @@ export interface LookPose {
   constrain: Constrain
 }
 
-/** A model posed for the wire: turned (lib/turn.ts), at the bar's unit, with the bar's WALK setting. */
+/**
+ * A model posed by the bar, its WALK aside: turned (lib/turn.ts), at the bar's
+ * unit, on cyberspace axes (the bar offers no snap, so whatever the model stood
+ * as on the bench does not come along). A wrapper, a look of placements alone,
+ * is scaled by its placements' steps, since a placed object is drawn at its own
+ * unit plus the step (DECK-0003 §1.10) and the wrapper's unit says nothing of it.
+ */
+function posedShape(model: ShardModel, pose: Pick<LookPose, 'unit' | 'turn'>): ShardModel {
+  const turned = turnShard(model, pose.turn)
+  const by = pose.unit - model.unit
+  const parts = by !== 0 && turned.vertices.length === 0 && turned.parts ? turned.parts.map((p) => ({ ...p, step: p.step + by })) : turned.parts
+  return { ...turned, ...(parts ? { parts } : {}), unit: pose.unit, up: false, spin: 0 }
+}
+
+/** A model posed for the wire: posedShape, with the bar's WALK setting. */
 export function posedLook(model: ShardModel, pose: LookPose): ShardModel {
-  return withConstrain({ ...turnShard(model, pose.turn), unit: pose.unit }, pose.constrain)
+  return withConstrain(posedShape(model, pose), pose.constrain)
+}
+
+/**
+ * An open look posed alike, so it stands exactly where the closed one stood.
+ * The bar's WALK reaches one that has a setting (a chest's); one with none (a
+ * built-in slab's) keeps none, so an opened door holds nobody.
+ */
+export function posedOpenLook(model: ShardModel, pose: LookPose): ShardModel {
+  const shape = posedShape(model, pose)
+  return chosenConstrainOf(model) === undefined ? shape : withConstrain(shape, pose.constrain)
+}
+
+/** A FEED wrapper posed: its WALK setting is its object's author's, and the wrapper writes none (DECK-0003 §1.12). */
+export function posedWrapper(model: ShardModel, pose: Pick<LookPose, 'unit' | 'turn'>): ShardModel {
+  return posedShape(model, pose)
 }
 
 /**
@@ -360,15 +399,11 @@ export function lookBytes(model: ShardModel): number {
 }
 
 /**
- * A built-in look as it goes out: closed and open, both posed alike, so the
- * open look stands exactly where the closed one stood. The built-in's own
- * open look keeps its own WALK setting (the slabs' open looks have none, so
- * an opened door does not block), turned and scaled with the closed one.
+ * A built-in look as it goes out: closed and open, both posed alike (posedOpenLook).
  */
 export function builtInLookTags(name: LookName, pose: LookPose): string[][] {
   const look = builtInLook(name)
-  const open = look.open ? { ...turnShard(look.open, pose.turn), unit: pose.unit } : null
-  return lookTags(posedLook(look.closed, pose), open)
+  return lookTags(posedLook(look.closed, pose), look.open ? posedOpenLook(look.open, pose) : null)
 }
 
 /** A point, as a world item's place is. */

@@ -36,15 +36,17 @@ const REACH = 400
  */
 export function roomOutlines(mine: readonly MyDeployment[], me: string, building: boolean, plane: number): Array<OwnDoor & { depth: number }> {
   if (!building) return []
-  const seen = new Set<string>()
-  return ownDoors(mine, me).filter((d) => {
-    if (d.plane !== plane) return false
+  // Rows of one room are one outline, as deep as the deepest of them.
+  const rooms = new Map<string, OwnDoor & { depth: number }>()
+  for (const d of ownDoors(mine, me)) {
+    if (d.plane !== plane) continue
     const s = BigInt(d.height)
     const key = `${d.height}:${d.at.x >> s}:${d.at.y >> s}:${d.at.z >> s}`
-    if (seen.has(key)) return false
-    seen.add(key)
-    return true
-  }).map((d) => ({ ...d, depth: doorDepth(mine, mine.find((m) => m.eventId === d.eventId) ?? { eventId: d.eventId }) }))
+    const depth = doorDepth(mine, mine.find((m) => m.eventId === d.eventId) ?? { eventId: d.eventId })
+    const was = rooms.get(key)
+    if (!was || depth > was.depth) rooms.set(key, { ...d, depth })
+  }
+  return [...rooms.values()]
 }
 
 /** The scales of a room's lines, one per level of depth, each just inside the last, so they read as double and triple lines. */

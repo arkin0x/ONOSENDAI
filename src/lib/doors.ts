@@ -139,10 +139,12 @@ export interface OwnDoor {
  * R1, the owner's height clarification): the point inside its room, in its
  * plane, and hidden at exactly its height, which is what "a door locks one
  * height" comes to. Heights never compete, so at most one room answers; two
- * doors of one room are one answer. Only a door whose secret is known: one
- * this device cannot write into is an ordinary place.
+ * doors of one room are one answer. A door whose secret is not known here comes
+ * first, secret null, for the placement to refuse (useShards deploy): it may
+ * have rotated since this device last saw it, and sealing to a sibling's old
+ * secret would hide this in a room nobody opens.
  */
 export function roomDoorAt(doors: readonly OwnDoor[], at: Position, plane: number, height: number): OwnDoor | null {
-  for (const d of doors) if (d.secret && d.height === height && d.plane === plane && inRoom(d.at, d.height, at)) return d
-  return null
+  const here = doors.filter((d) => d.height === height && d.plane === plane && inRoom(d.at, d.height, at))
+  return here.find((d) => !d.secret) ?? here[0] ?? null
 }

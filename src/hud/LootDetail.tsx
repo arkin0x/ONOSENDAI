@@ -12,6 +12,7 @@
  * its contents beneath and TAKE on each (ItemRows, Keys and Chests B1 §3.2).
  */
 
+import { takeIntoKeeping, you } from '../lib/carried'
 import { cashuLabel, readCashuToken } from '../lib/cashu'
 import type { Plane } from 'cyberspace-core'
 import { useEffect, useState } from 'react'
@@ -177,7 +178,7 @@ export function LootDetail(): JSX.Element | null {
   }
   // A shard copies into your workshop as a model; a message copies its text.
   const copy = (o: OpenedItem): void => {
-    if (o.type === 'shard' && o.shard) useWorkshop.getState().importShard(o.shard)
+    if (o.type === 'shard' && o.shard) useWorkshop.getState().importShard(takeIntoKeeping(o.shard, you()))
     else if (o.text) void navigator.clipboard?.writeText(o.text)
     setCopied(o.eventId)
     window.setTimeout(() => setCopied((c) => (c === o.eventId ? null : c)), 1400)

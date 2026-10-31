@@ -87,6 +87,8 @@ export type WallItem = Pick<WorldItem, 'key' | 'at' | 'height' | 'plane'> & Part
    * drawn. A custom look is cut at its region, as a shard is.
    */
   uncut?: boolean
+  /** A door's look, built in or written as tags: a walker it holds can always step out of it (wallItemsAt). */
+  door?: boolean
   /**
    * A closed door's slab that holds the walker where they asked (wallItemsAt):
    * its faces let them go, so they can always step out, and only its middle,
@@ -929,7 +931,7 @@ export function wallItems(plane: number): WallItem[] {
     // Opened by hand, this session or before, under the lock it has now (R10).
     const model = drawnLook(look, openedByHand(me, w.key, w.chest.lockPubkey))
     if (!model || constrainOf(model) === 'off') continue
-    looks.push({ key: doorWallKey(w.key), at: w.at, height: w.height, plane: w.plane, author: w.author, mine: w.mine, shard: model, uncut: look.name !== 'custom' })
+    looks.push({ key: doorWallKey(w.key), at: w.at, height: w.height, plane: w.plane, author: w.author, mine: w.mine, shard: model, uncut: look.name !== 'custom', door: look.kind === 'door' })
   }
   return looks.length > 0 ? [...shards, ...looks] : shards
 }
@@ -943,5 +945,5 @@ export function wallItems(plane: number): WallItem[] {
  * every WALK step, fall and jump asks.
  */
 export function wallItemsAt(plane: number, from: Position): WallItem[] {
-  return wallItems(plane).map((w) => (w.uncut && enclosesWalker(w, from) ? { ...w, inside: true } : w))
+  return wallItems(plane).map((w) => ((w.uncut || w.door) && enclosesWalker(w, from) ? { ...w, inside: true } : w))
 }

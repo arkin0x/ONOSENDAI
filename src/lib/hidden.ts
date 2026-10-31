@@ -44,6 +44,7 @@
  * and finished events only.
  */
 
+import { doorHeightOf } from './looks'
 import { getEventHash, getPublicKey } from 'nostr-tools/pure'
 import { verifyOnce } from './verifiedSigs'
 import { coordToXyz, hexToCoord, type Plane } from 'cyberspace-core'
@@ -246,6 +247,12 @@ export interface ChestItem {
   requires: string
   /** The NIP-44 v2 payload, base64, as the chest carries it. */
   payload: string
+  /**
+   * The chest's `look` tags exactly as they were read (DECK-0004 §3.6), so
+   * every reseal and move writes them back unchanged; lib/looks.ts lookTagsOf
+   * reads them. Absent: it wears the built-in.
+   */
+  look?: string[][]
 }
 
 const HEX_64 = /^[0-9a-f]{64}$/
@@ -320,7 +327,10 @@ export function chestItemOf(ev: Pick<NostrEvent, 'kind' | 'content' | 'tags'>): 
   const lock = ev.tags.find((t) => Array.isArray(t) && t[0] === 'lock')
   if (!lock || typeof lock[1] !== 'string' || typeof lock[2] !== 'string' || !HEX_64.test(lock[1]) || !HEX_64.test(lock[2])) return null
   if (!ev.content) return null
-  return { name: nameOf(ev.tags, 'chest'), lockPubkey: lock[1], senderPubkey: lock[2], requires: capped(ev.tags, 'requires', MAX_ITEM_NAME), payload: ev.content }
+  // A door whose `door` tag lacks a well-formed height is dropped, never read as a chest (DECK-0004 §3.7.1).
+  if (doorHeightOf(ev.tags) === 'malformed') return null
+  const look = ev.tags.filter((t) => Array.isArray(t) && t[0] === 'look' && typeof t[1] === 'string')
+  return { name: nameOf(ev.tags, 'chest'), lockPubkey: lock[1], senderPubkey: lock[2], requires: capped(ev.tags, 'requires', MAX_ITEM_NAME), payload: ev.content, ...(look.length ? { look } : {}) }
 }
 
 /** What an inline item is, by its kind: the part of a Hidden that is not about where or who. */
@@ -580,8 +590,9 @@ export function keyInnerTemplate(key: KeyItem, at: Position, plane: Plane, creat
  * The inner chest event template (kind 3341), signed by the hider (B1 §2.2).
  * The content is the sealed payload (lib/chests.ts sealEntries); `lock` names
  * the public key it is sealed to and the one-time sender's public key, and
- * `requires` is the hider's label of what opens it. `-` is NIP-70, as on
- * every item. A chest stays signed: its signature is what vouches for the
+ * `requires` is the hider's label of what opens it, and `look` what it is
+ * drawn as, closed and open (DECK-0004 §3.6), carried as read. `-` is
+ * NIP-70, as on every item. A chest stays signed: its signature is what vouches for the
  * messages sealed inside it, which are rumors (lib/chests.ts readContents).
  */
 export function chestInnerTemplate(chest: ChestItem, at: Position, plane: Plane, createdAt: number): EventTemplate {
@@ -589,7 +600,7 @@ export function chestInnerTemplate(chest: ChestItem, at: Position, plane: Plane,
     kind: CHEST_KIND,
     created_at: createdAt,
     content: chest.payload,
-    tags: [['C', positionHex(at, plane)], ['title', chest.name.slice(0, MAX_ITEM_NAME)], ['lock', chest.lockPubkey, chest.senderPubkey], ['requires', chest.requires], [...PROTECTED_TAG]],
+    tags: [['C', positionHex(at, plane)], ['title', chest.name.slice(0, MAX_ITEM_NAME)], ['lock', chest.lockPubkey, chest.senderPubkey], ['requires', chest.requires], ...(chest.look ?? []).map((t) => [...t]), [...PROTECTED_TAG]],
   }
 }
 

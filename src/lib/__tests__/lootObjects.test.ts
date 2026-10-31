@@ -121,7 +121,7 @@ describe('loot over a chest in the world (review of #534)', () => {
   })
 
   it('nothing floats out while this identity\u2019s ITEMS are still being read', () => {
-    expect(chestLoot({ ...base, look: 'treasure', entries: [here], itemsReady: false })).toEqual([])
+    expect(chestLoot({ ...base, look: 'chest', entries: [here], itemsReady: false })).toEqual([])
   })
 
   it('what is aimed at its own point in the region is drawn there, not floated out too', () => {
@@ -129,7 +129,7 @@ describe('loot over a chest in the world (review of #534)', () => {
     expect(aimedElsewhere(here, chest)).toBe(false)
     // Out of the region: revealedIn stands it at the chest, so it floats out.
     expect(aimedElsewhere(outside, chest)).toBe(false)
-    const loot = chestLoot({ ...base, look: 'treasure', entries: [here, aimed, outside] })
+    const loot = chestLoot({ ...base, look: 'chest', entries: [here, aimed, outside] })
     expect(loot.map((l) => l.ids)).toEqual([[here.id], [outside.id]])
   })
 })

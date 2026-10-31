@@ -27,7 +27,7 @@
 
 import type { ShardModel } from 'sno-core/shards'
 import { placeOf, type ChestEntry } from './chests'
-import type { LookName } from './looks'
+import type { LookKind } from './looks'
 import type { Position } from './space'
 import { modelPrint } from './inventory'
 import type { ItemModelRef } from './itemModel'
@@ -100,12 +100,12 @@ export function aimedElsewhere(e: ChestEntry, chest: { at: Position; plane: numb
  * less what is aimed at its own point in the region.
  */
 export function chestLoot(o: {
-  look: LookName
+  look: LookKind
   entries: readonly ChestEntry[] | undefined
   held: (e: ChestEntry) => boolean
   chest: { at: Position; plane: number; height: number }
   itemsReady: boolean
 }): LootObject[] {
-  if (o.look !== 'treasure' || !o.entries || !o.itemsReady) return []
+  if (o.look !== 'chest' || !o.entries || !o.itemsReady) return []
   return lootOf(o.entries.filter((e) => !aimedElsewhere(e, o.chest)), o.held)
 }

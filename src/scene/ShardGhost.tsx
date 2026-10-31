@@ -39,7 +39,7 @@ import { deployPoint, itemCentre, type ViewAxes } from '../lib/space'
 import { buildPlane, buildStepOf } from '../lib/buildCursor'
 import { bearingOf, csDirection, frameOf, placedPose, snapOffered, type V3 } from '../lib/pose'
 import { alignedOrigin, useCyberspace } from '../store/useCyberspace'
-import { useShards } from '../store/useShards'
+import { lookModelOf, useShards } from '../store/useShards'
 import { messagePreview } from '../lib/hidden'
 import { ShardMesh } from './ShardMesh'
 import { regionBox } from '../lib/clip'
@@ -53,7 +53,12 @@ interface Props {
 
 export function ShardGhost({ axes }: Props): JSX.Element | null {
   const pending = useShards((s) => s.pending)
-  const model = useShards((s) => (s.pending?.type === 'shard' ? s.pendingShard() : null))
+  // A chest ghosts as the model it wears (the hide bar's model row), placed
+  // as a shard is, so the ghost shows exactly where it lands (D2).
+  const look = useShards((s) => (s.pending?.type === 'chest' ? s.pending.look ?? null : null))
+  const lookModel = useMemo(() => (look ? lookModelOf(look) : null), [look])
+  const shardModel = useShards((s) => (s.pending?.type === 'shard' ? s.pendingShard() : null))
+  const model = shardModel ?? lookModel
   // What will land: the model turned by the deploy bar's TURN row, the same function the deploy uses.
   const deployTurn = useShards((s) => s.deployTurn)
   const shard = useMemo(() => (model ? turnShard(model, deployTurn) : null), [model, deployTurn])
@@ -123,7 +128,7 @@ export function ShardGhost({ axes }: Props): JSX.Element | null {
   // A message ghosts as a dim note that follows the cursor; a key, a chest
   // and hidden audio ghost as their mark and name, the way the world draws
   // them once hidden.
-  if (pending?.type === 'message' || pending?.type === 'key' || pending?.type === 'chest' || pending?.type === 'audio') {
+  if (pending?.type === 'message' || pending?.type === 'key' || (pending?.type === 'chest' && !shard) || pending?.type === 'audio') {
     return (
       <>
       {/* Hidden audio's sphere: full volume inside, a one-shot's trigger zone (AudioSphereGhost). */}
@@ -140,11 +145,14 @@ export function ShardGhost({ axes }: Props): JSX.Element | null {
     )
   }
 
-  if (!shard || pending?.type !== 'shard' || !Number.isFinite(scale)) return null
+  if (!shard || (pending?.type !== 'shard' && pending?.type !== 'chest') || !Number.isFinite(scale)) return null
 
   return (
-    <group ref={group}>
-      <ShardMesh shard={shard} scale={scale} ghost headlamp clip={clip} pose={pose} />
-    </group>
+    <>
+      <group ref={group}>
+        <ShardMesh shard={shard} scale={scale} ghost headlamp clip={clip} pose={pose} />
+      </group>
+      {pending.type === 'chest' && <WorldLabel text={`▣ ${pending.name}`} color="#ffd27d" follow={landingAt} align="center" px={13} opacity={0.5} />}
+    </>
   )
 }

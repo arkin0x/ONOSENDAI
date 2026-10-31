@@ -47,6 +47,8 @@ import { ChestBlock, KeyLine } from './ItemRows'
 import { ConfirmModal } from './ConfirmModal'
 import { ItemFace } from './ItemIcon'
 import { ShardSpin } from '../scene/ShardSpin'
+import { drawnLook, lookOf } from '../lib/looks'
+import { openedByHand, useOpenedChests } from '../store/useOpenedChests'
 import { EventData } from './EventData'
 import { WireData } from './WireData'
 import { PublishRow } from './PublishSwitch'
@@ -109,6 +111,10 @@ export function SecretModal(): JSX.Element | null {
     if (!id) return null
     return s.mine.find((d) => d.eventId === id)?.chest?.name ?? s.discovered[id]?.chest?.name ?? null
   })
+
+  // A chest's or a door's look, open once this identity opened it (R14), for the card's 3D header.
+  useOpenedChests((s) => s.opened)
+  const look = item?.type === 'chest' ? lookOf(item) : null
 
   // A selection that no longer resolves (deleted, scrolled out) closes itself.
   useEffect(() => { if (selected && !item) useShards.getState().selectSecret(null) }, [selected, item])
@@ -173,7 +179,13 @@ export function SecretModal(): JSX.Element | null {
         ) : item.type === 'key' && item.keyItem ? (
           <div className="secret__shard"><KeyLine id={item.key} name={item.keyItem.name} author={author} /></div>
         ) : item.type === 'chest' && item.chest ? (
-          <div className="secret__shard"><ChestBlock id={item.key} chest={item.chest} author={author} verified place={place} /></div>
+          // The name, then the chest or door in 3D across the card, slowly
+          // turning (chest and door design, 4.7), then what opens it.
+          <>
+            <h3 className="secret__look-name">{item.chest.name}</h3>
+            {look && <div className="secret__spin secret__spin--look"><ShardSpin shard={drawnLook(look, openedByHand(me, item.key, item.chest.lockPubkey)) ?? look.closed} size={180} wide /></div>}
+            <div className="secret__shard"><ChestBlock id={item.key} chest={item.chest} author={author} verified place={place} named={false} /></div>
+          </>
         ) : item.type === 'audio' && item.audio ? (
           // MUTE THIS AUDIO and BLOCK AUTHOR in the card's own row, by PLAY
           // (store/useMutes): muting closes this card, and the voice, which

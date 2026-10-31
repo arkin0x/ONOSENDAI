@@ -25,8 +25,11 @@ describe('which look a thing wears', () => {
     expect(lookOf({ type: 'shard' })).toBeNull()
   })
 
-  it('reads a door tag in any form, and only an array tag named door', () => {
-    expect(isDoor([['door']])).toBe(true)
+  it('reads a door only from one door tag with a well-formed height (spec #82: a malformed one is dropped)', () => {
+    expect(isDoor([['door']])).toBe(false)
+    expect(isDoor([['door', '04']])).toBe(false)
+    expect(isDoor([['door', '0']])).toBe(false)
+    expect(isDoor([['door', '4'], ['door', '4']])).toBe(false)
     expect(isDoor([['door', '4']])).toBe(true)
     expect(isDoor([['doors', '4'], 'door', ['title', 'door']])).toBe(false)
     expect(isDoor(undefined)).toBe(false)

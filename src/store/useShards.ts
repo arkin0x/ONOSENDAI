@@ -69,6 +69,7 @@ import {
   type Reference,
   type Rumor,
   chestInnerTemplate,
+  chestItemOf,
   keyInnerTemplate,
   messageInnerTemplate,
   rumorOf,
@@ -94,7 +95,7 @@ import { useInventory } from './useInventory'
 import { useShardFolders } from './useShardFolders'
 import { creditOf, useWorkshop } from './useWorkshop'
 import { deletionFilters, isDeleted, type Credit, type FeedObject } from 'sno-core/feed'
-import { keptInChest } from '../lib/looks'
+import { builtInLook, builtInLookTags, keptInChest, lookTags, posedLook, posedWrapper, type LookName, type LookPose } from '../lib/looks'
 import { useCeremony } from './useCeremony'
 import { useToast } from './useToast'
 import type { ShardModel } from 'sno-core/shards'
@@ -337,6 +338,60 @@ export interface ChestDraft {
   contents: ChestContent[]
 }
 
+/**
+ * The model a chest or a door wears, chosen on the hide bar's model row
+ * (chest and door design, D2, D3): a built-in, one of your workshop models
+ * carried inline as a copy (MINE), or an object from the Shard Feed placed
+ * by a one-part wrapper that follows its author's edits (FEED; DECK-0004
+ * §3.6, "a look whose only content is one part placing it").
+ */
+export type LookChoice =
+  | { from: 'builtin'; name: LookName }
+  | { from: 'mine'; shardId: string }
+  | { from: 'feed'; object: FeedObject }
+
+/** What a chest wears when nothing else is chosen. */
+export const DEFAULT_CHEST_LOOK: LookChoice = { from: 'builtin', name: 'treasure' }
+
+/**
+ * A feed object as a look: a model with no geometry of its own and one part
+ * placing the object by its address at its origin, so it can be turned and
+ * scaled and still follows its author's edits (§3.6). Scaled by the part's
+ * step, since a placed object is drawn at its own unit plus the step
+ * (DECK-0003 §1.10).
+ */
+export function feedWrapper(object: FeedObject, unit: number = object.shard.unit): ShardModel {
+  const relay = object.seen?.[0]
+  return {
+    id: `look:${object.address}`, name: object.shard.name, unit, extent: object.shard.extent, mode: 'solid',
+    vertices: [], faces: [], up: false, spin: 0, updatedAt: 0,
+    refs: [relay ? ['a', object.address, relay] : ['a', object.address]],
+    parts: [{ ref: 0, at: [0, 0, 0], turn: [0, 0, 0], step: unit - object.shard.unit }],
+  }
+}
+
+/** The closed model a choice wears, unposed: what the ghost shows and SCALE starts from. Null when a MINE model is gone. */
+export function lookModelOf(choice: LookChoice): ShardModel | null {
+  if (choice.from === 'builtin') return builtInLook(choice.name).closed
+  if (choice.from === 'feed') return feedWrapper(choice.object)
+  return useWorkshop.getState().shards.find((s) => s.id === choice.shardId) ?? null
+}
+
+/**
+ * A choice as its `look` tags, posed by the hide bar: a built-in closed and
+ * open, a MINE model or a FEED wrapper closed alone (§3.6: with no open look
+ * an opened chest keeps its closed look, an opened door is not drawn).
+ * Throws with lib/looks.ts lookRefusal's words when a look is too large, and
+ * when a MINE model is no longer in the workshop.
+ */
+export function lookTagsFor(choice: LookChoice, pose: LookPose): string[][] {
+  if (choice.from === 'builtin') return builtInLookTags(choice.name, pose)
+  if (choice.from === 'feed') return lookTags(posedWrapper(feedWrapper(choice.object, pose.unit), pose), null)
+  const model = useWorkshop.getState().shards.find((s) => s.id === choice.shardId)
+  if (!model) throw new Error('That model is no longer in your workshop.')
+  return lookTags(posedLook(model, pose), null)
+}
+
 /** Whether any shard in the draft has been aimed: the chest's height then follows them (DeployBar). */
 export function hasAimed(draft: Pick<ChestDraft, 'contents'>): boolean {
   return draft.contents.some((c) => c.kind === 'shard' && !!c.aimed)
@@ -373,7 +428,8 @@ export type DeployPending =
   | { type: 'message'; text: string }
   /** A key forged in the composer: the keypair is made there, so its public key can be shown and sealed to before it is hidden. */
   | { type: 'key'; key: KeyItem }
-  | ({ type: 'chest' } & ChestDraft)
+  /** `look`: what it wears (the hide bar's model row); absent, the built-in TREASURE. */
+  | ({ type: 'chest'; look?: LookChoice } & ChestDraft)
   /**
    * Hidden audio (DECK-0007): the file is encrypted and on Blossom already
    * (AudioCompose); the item is sealed as a rumor. With `reseal` it is PLACE
@@ -781,6 +837,8 @@ interface ShardsState {
   setDeployFade: (fade: number | undefined) => void
   /** Hide a chest as the composer drafted it; its contents are signed (the aimed ones already are) and sealed when it is hidden. */
   startDeployChest: (draft: ChestDraft & { lock: ChestLock }) => void
+  /** The hide bar's model row: what the chest being hidden wears. SCALE and WALK start from that model's own. */
+  setDeployLook: (look: LookChoice) => void
   /**
    * Aim one shard of a chest draft through the deploy bar (arkinox,
    * 2026-10-10): the content at `contentIndex` is lined up as a shard deploy
@@ -939,12 +997,39 @@ function loadMine(): MyDeployment[] {
     const raw = localStorage.getItem(MINE_KEY)
     if (!raw) return []
     const list = JSON.parse(raw)
-    return Array.isArray(list) ? list.filter((d) => d && d.eventId && d.inner && (d.shard || d.text || d.key || d.chest)).map((d) => (d.shard ? { ...d, shard: normalizeStored(d.shard) } : d)) : []
+    return Array.isArray(list) ? list.filter((d) => d && d.eventId && d.inner && (d.shard || d.text || d.key || d.chest)).map((d) => {
+      if (d.shard) return { ...d, shard: normalizeStored(d.shard) }
+      // A chest's look is stored once, in its inner event (storedMine).
+      const look = d.chest && !d.chest.look ? chestItemOf(d.inner)?.look : undefined
+      return look ? { ...d, chest: { ...d.chest, look } } : d
+    }) : []
   } catch { return [] }
 }
 
+/**
+ * The record as stored. A chest's look is in its inner event already, and a
+ * built-in's is some 20 KB a side: kept twice it was 39,800 bytes a row, enough
+ * to fill this storage in a hundred chests. It comes back from the inner event
+ * on load (loadMine).
+ */
+export function storedMine(mine: readonly MyDeployment[]): string {
+  return JSON.stringify(mine.map((d) => {
+    if (!d.chest?.look) return d
+    const { look: _inInner, ...chest } = d.chest
+    void _inInner
+    return { ...d, chest }
+  }))
+}
+
 function saveMine(mine: MyDeployment[]): void {
-  try { localStorage.setItem(MINE_KEY, JSON.stringify(mine)) } catch { /* quota or private mode */ }
+  try {
+    localStorage.setItem(MINE_KEY, storedMine(mine))
+  } catch (err) {
+    // What you hid is on the relays if it went LIVE, but this device forgets
+    // it on a reload: say so, rather than lose your own record in silence.
+    console.warn(`[shards] could not save the record of what you hid: ${err instanceof Error ? err.message : String(err)}`)
+    useToast.getState().show({ label: 'NOT SAVED ON THIS DEVICE', meta: 'This device has no room left for the record of what you hid. It is here until you reload.', mark: 'build' })
+  }
 }
 
 function loadDeleted(): Record<string, true> {
@@ -1218,6 +1303,12 @@ export const useShards = create<ShardsState>((set, get) => {
     saveMine(next)
   }
 
+  /** A look's own size and WALK setting, where SCALE and WALK start when it is picked. */
+  function lookStart(look: LookChoice): { deployUnit: number; deployConstrain: Constrain } {
+    const model = lookModelOf(look)
+    return { deployUnit: model?.unit ?? 0, deployConstrain: model ? authoredConstrainOf(model) : CONSTRAIN_DEFAULT }
+  }
+
   /** The same fresh-deploy state every start shares: no pose, no link, the bag settings at their defaults. */
   const freshDeploy = {
     deployLink: false, deployHeightAuto: false, deployUnit: 0, deployUp: false, deploySpin: 0, deployTurn: [0, 0, 0] as Turns, deployFollow: false, deployConstrain: CONSTRAIN_DEFAULT,
@@ -1407,7 +1498,14 @@ export const useShards = create<ShardsState>((set, get) => {
     // With shards aimed inside, the height starts at the fit that holds them
     // all (DeployBar, lib/deployFit.ts fitHeightAll) and follows the cursor
     // until + or - is pressed, as a shard's own height does.
-    startDeployChest: (draft) => set({ pending: { type: 'chest', ...draft }, ...freshDeploy, deployHeightAuto: hasAimed(draft) }),
+    // A chest wears TREASURE until the model row picks another, at the
+    // model's own size and WALK setting, as a shard starts.
+    startDeployChest: (draft) => set({ pending: { type: 'chest', ...draft, look: DEFAULT_CHEST_LOOK }, ...freshDeploy, ...lookStart(DEFAULT_CHEST_LOOK), deployHeightAuto: true }),
+    setDeployLook: (look) => {
+      const p = get().pending
+      if (p?.type !== 'chest' || get().deployStatus === 'working') return
+      set({ pending: { ...p, look }, ...lookStart(look), deployTurn: [0, 0, 0], deployAsk: null, deployError: null })
+    },
     startDeployIntoChest: (draft, contentIndex) => {
       const c = draft.contents[contentIndex]
       if (c?.kind !== 'shard') return
@@ -1662,8 +1760,10 @@ export const useShards = create<ShardsState>((set, get) => {
       try {
         if (pending.type === 'chest') {
           set({ deployNote: 'Signing and sealing the chest' })
+          // What it wears, posed by the bar (DECK-0004 §3.6), before anything is sealed.
+          const look = lookTagsFor(pending.look ?? DEFAULT_CHEST_LOOK, { unit: deployUnit, turn: deployTurn, constrain: deployConstrain })
           const sealed = await sealChest(pending, at, plane, createdAt)
-          chest = sealed.chest
+          chest = { ...sealed.chest, look }
           forgedInside = sealed.forged
           innerTemplate = chestInnerTemplate(chest, at, plane, createdAt)
         }

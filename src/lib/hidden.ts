@@ -473,6 +473,11 @@ export interface Hidden {
    * and the room key, and its `height` the room's.
    */
   room?: { doorId: string }
+  /**
+   * When the bag it was read from was written: what says a bag read now is newer
+   * than something this device thinks is in it (useShards pruneGoneDoors).
+   */
+  bagAt?: number
 }
 
 /**
@@ -957,6 +962,7 @@ function fromInner(inner: Rumor, outer: NostrEvent, keyHex: string, facts: BagFa
     inner,
     keyHex,
     bagId: outer.id,
+    bagAt: outer.created_at,
     lookupId: tag(outer, 'd') ?? '',
     author: outer.pubkey,
     at: { x, y, z },

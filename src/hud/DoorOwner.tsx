@@ -20,12 +20,19 @@ import { ConfirmModal } from './ConfirmModal'
 import { ItemIcon } from './ItemIcon'
 import { Field, Switch } from './ui/Switch'
 
-/** The words on DELETE's card, as deleteDoor works. */
-export function deleteDoorWords(behind: number, alone: boolean, contents: boolean): { title: string; lines: string[]; confirmLabel: string; danger: boolean } {
-  if (!alone) return { title: 'Delete this door?', lines: ['The room stays, and the other door still opens it.'], confirmLabel: 'DELETE DOOR', danger: true }
+/**
+ * The words on DELETE's card, as deleteDoor works. `known`: this device knows the
+ * door's secret, without which nothing behind it can be moved, deleted or even
+ * counted; it stays sealed on the relays (§3.7.8).
+ */
+export function deleteDoorWords(behind: number, alone: boolean, contents: boolean, known = true): { title: string; lines: string[]; confirmLabel: string; danger: boolean } {
+  const title = 'Delete this door?'
+  if (!alone) return { title, lines: ['The room stays, and the other door still opens it.'], confirmLabel: 'DELETE DOOR', danger: true }
+  if (!known) return { title, lines: ['You have not opened it on this device, so what is behind it stays sealed, out of reach by this door.'], confirmLabel: 'DELETE DOOR', danger: true }
+  if (behind === 0) return { title, lines: ['Nothing is behind it.'], confirmLabel: 'DELETE DOOR', danger: false }
   return contents
-    ? { title: 'Delete this door?', lines: [`Delete contents: ${behind} ${behind === 1 ? 'thing' : 'things'}.`, 'This cannot be undone.'], confirmLabel: 'DELETE DOOR AND CONTENTS', danger: true }
-    : { title: 'Delete this door?', lines: ['What was behind it stays where it is, as ordinary placements anyone at the place can find.'], confirmLabel: 'DELETE DOOR', danger: false }
+    ? { title, lines: [`Delete contents: ${behind} ${behind === 1 ? 'thing' : 'things'}.`, 'This cannot be undone.'], confirmLabel: 'DELETE DOOR AND CONTENTS', danger: true }
+    : { title, lines: ['What was behind it stays where it stands, unsealed: anyone at the place can find it.'], confirmLabel: 'DELETE DOOR', danger: false }
 }
 
 /** BEHIND IT and HERE, on a door of yours. */
@@ -74,7 +81,7 @@ export function DeleteDoorCard({ door, onCancel, onDone }: { door: MyDeployment;
   const alone = doorsBeside(mine, door).length === 0
   const known = !!doorSecret(me, door.eventId)
   const behind = behindDoor(mine, door).length
-  const words = deleteDoorWords(behind, alone, contents)
+  const words = deleteDoorWords(behind, alone, contents, known)
   return (
     <ConfirmModal
       title={words.title}

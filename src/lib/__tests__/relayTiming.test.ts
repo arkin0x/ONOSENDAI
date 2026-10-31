@@ -20,6 +20,7 @@ const fake = vi.hoisted(() => ({
   eoseMs: 20,
   challenge: undefined as string | undefined,
   signerMs: 0,
+  authTimesOutMs: 0,
   signed: 0,
   closed: [] as string[],
   relays: new Map<string, unknown>(),
@@ -33,6 +34,10 @@ vi.mock('nostr-tools/abstract-pool', () => {
     auth(signer: (t: { kind: number; created_at: number; tags: string[][]; content: string }) => Promise<unknown>): Promise<string> {
       // As nostr-tools does: one AUTH per socket, the same promise to every caller.
       if (this.authPromise) return this.authPromise
+      if (fake.authTimesOutMs) {
+        this.authPromise = new Promise((_, refuse) => { setTimeout(() => refuse(new Error('auth timed out')), fake.authTimesOutMs) })
+        return this.authPromise
+      }
       this.authPromise = (async () => { await signer({ kind: 22242, created_at: 0, tags: [['relay', this.url], ['challenge', this.challenge ?? '']], content: '' }); return 'ok' })()
       return this.authPromise
     }
@@ -55,7 +60,7 @@ vi.mock('../../store/useCyberspace', () => ({
   useCyberspace: { getState: () => ({ signEvent: async (t: unknown) => { fake.signed++; await new Promise((r) => setTimeout(r, fake.signerMs)); return t } }) },
 }))
 
-import { authPending, queryEachSettled } from '../relay'
+import { authForRead, authPending, publishMany, queryEachSettled } from '../relay'
 
 /** Hold the main thread, as drawing and checking a long chain does. */
 const busy = (ms: number): void => { const end = Date.now() + ms; while (Date.now() < end) { /* busy */ } }
@@ -86,5 +91,26 @@ describe('an AUTH waiting on the signer (verification of #236, finding 4)', () =
     expect(b[0].outcome).toBe('answered')
     expect(fake.signed).toBe(1)
     expect(authPending(url)).toBe(false)
+  })
+})
+
+describe('an AUTH the relay never answers (review of #556)', () => {
+  it('counts once per real wait, however often its rejection comes back, and one is not enough to leave the relay alone', async () => {
+    fake.relays.clear(); fake.challenge = 'c3'; fake.authTimesOutMs = 1_100
+    const url = 'ws://relay.three/'
+    const leftAlone = async (): Promise<boolean> => {
+      const result = await publishMany([url], { id: 'e'.repeat(64) } as never)
+      return !result.ok && /left alone/.test(result.reason)
+    }
+    await authForRead(url)
+    // nostr-tools keeps the rejected promise: these come back at once, and are not another wait.
+    await authForRead(url)
+    await authForRead(url)
+    expect(await leftAlone()).toBe(false)
+    // A new socket, and a second real wait.
+    fake.relays.clear()
+    await authForRead(url)
+    expect(await leftAlone()).toBe(true)
+    fake.authTimesOutMs = 0
   })
 })

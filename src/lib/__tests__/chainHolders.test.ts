@@ -88,6 +88,14 @@ describe('the relays that hold a chain', () => {
     expect(JSON.parse(localStorage.getItem(key)!)).toEqual(['wss://holds.example/'])
   })
 
+  it('a bad string in a saved set does not hide the holders after it', async () => {
+    localStorage.clear()
+    const pk = 'd1'.repeat(32)
+    localStorage.setItem(`onosendai:chain-holders:${pk}`, JSON.stringify(['bad url', 'wss://holds.example/']))
+    const { holders } = await page()
+    expect([...holders.chainHolders(pk)]).toEqual([CANONICAL, 'wss://holds.example/'])
+  })
+
   it('a relay that took one of the chain\'s actions holds it, saved beside the chain', async () => {
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] })
     try {

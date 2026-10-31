@@ -21,11 +21,11 @@ if (typeof localStorage === 'undefined') {
   }
 }
 
-const relay = vi.hoisted(() => ({ events: [] as Array<{ id: string; kind: number; pubkey: string; created_at: number; tags: string[][]; content: string }> }))
+const relay = vi.hoisted(() => ({ events: [] as Array<{ id: string; kind: number; pubkey: string; created_at: number; tags: string[][]; content: string }>, refuse: (_e: { kind: number; tags: string[][] }) => false as boolean }))
 vi.mock('../../lib/relay', () => {
   const answer = async (f: { kinds?: number[]; authors?: string[]; '#d'?: string[] }): Promise<unknown[]> => relay.events.filter((e) => (!f.kinds || f.kinds.includes(e.kind)) && (!f.authors || f.authors.includes(e.pubkey)) && (!f['#d'] || f['#d'].includes(e.tags.find((t) => t[0] === 'd')?.[1] ?? '')))
   return {
-    publishMany: vi.fn(async (_r: string[], ev: (typeof relay.events)[number]) => { relay.events.push(ev); return { ok: true } }),
+    publishMany: vi.fn(async (_r: string[], ev: (typeof relay.events)[number]) => { if (relay.refuse(ev)) return { ok: false }; relay.events.push(ev); return { ok: true } }),
     query: vi.fn(answer),
     queryAny: vi.fn((_r: string[], f: Parameters<typeof answer>[0]) => answer(f)),
     queryEach: vi.fn(async (f: Parameters<typeof answer>[0]) => [{ url: 'wss://relay.test', outcome: 'answered', events: await answer(f) }]),
@@ -34,7 +34,8 @@ vi.mock('../../lib/relay', () => {
 })
 
 import { forgeKey } from '../../lib/chests'
-import { HIDDEN_KIND, chestItemOf, type Hidden, type KeyItem } from '../../lib/hidden'
+import { hexToBytes } from '../../lib/events'
+import { HIDDEN_KIND, bagEntries, chestItemOf, type Hidden, type KeyItem } from '../../lib/hidden'
 import { doorSecretWithKey } from '../../lib/doors'
 import type { Position } from '../../lib/space'
 import { deployPoint } from '../../lib/space'
@@ -86,6 +87,7 @@ const asFound = (d: MyDeployment): Hidden => ({ eventId: d.eventId, inner: d.inn
 
 beforeEach(() => {
   relay.events = []
+  relay.refuse = () => false
   lock = forgeKey('Silver Key')
   localStorage.removeItem('onosendai:door-secrets')
   localStorage.removeItem('onosendai:chests-opened')
@@ -176,6 +178,65 @@ describe('a finder opens them in turn (§3.7.6)', () => {
     const seen = await openRoom(asFound(outer), doorSecret(me(), outer.eventId)!)
     expect(seen.items.some((h) => h.text === 'deep inside')).toBe(false)
   })
+})
+
+describe('one room, its doors in two bags', () => {
+  const dOf = (e: { tags: string[][] }): string => e.tags.find((t) => t[0] === 'd')?.[1] ?? ''
+  const retractedIn = (lookupId: string): boolean => relay.events.some((e) => e.kind === 5 && e.tags.some((t) => t[0] === 'a' && t[1] === `${HIDDEN_KIND}:${me()}:${lookupId}`))
+  const idsIn = async (d: MyDeployment): Promise<string[]> => {
+    const bag = relay.events.filter((e) => e.kind === HIDDEN_KIND && dOf(e) === d.lookupId).sort((a, b) => b.created_at - a.created_at)[0]
+    return (await bagEntries(bag as never, hexToBytes(d.keyHex)) as Array<{ id: string }>).map((e) => e.id)
+  }
+
+  it('a new lock one bag of which no relay takes: marked unsent, the old room stands; EDIT again rotates, and finishes what was owed', async () => {
+    const low = await sealDoor('Low', INNER)
+    const high = await sealDoor('High', OUTER, INNER)
+    expect(doorSecret(me(), high.eventId)).toBe(doorSecret(me(), low.eventId))
+    const first = (await hide('behind both', INNER)).lookupId
+    relay.refuse = (e) => e.kind === HIDDEN_KIND && dOf(e) === high.lookupId
+    const why = await S().resealDoor(low.eventId, { name: 'Low', requires: 'n', lock: lockOf(forgeKey('New Key')) })
+    relay.refuse = () => false
+    expect(why).toMatch(/did not go out/)
+    // The door no relay took says so, and the room its old self still names stands.
+    expect(named('High').published).toBe(false)
+    expect(named('High').rotating?.map((o) => o.lookupId)).toEqual([first])
+    expect(named('Low').published).toBe(true)
+    expect(retractedIn(first)).toBe(false)
+    const second = textRow('behind both').lookupId
+    expect(second).not.toBe(first)
+    const stuck = named('High')
+    const secretThen = doorSecret(me(), stuck.eventId)
+    // The same lock now, and still it rotates: a rename would leave the old room standing for good.
+    expect(await S().resealDoor(stuck.eventId, { name: 'High', requires: 'n', lock: { pubkey: stuck.chest!.lockPubkey, label: 'x' } })).toBeNull()
+    const nowHigh = named('High')
+    const nowLow = named('Low')
+    expect(doorSecret(me(), nowHigh.eventId)).not.toBe(secretThen)
+    expect(doorSecret(me(), nowHigh.eventId)).toBe(doorSecret(me(), nowLow.eventId))
+    expect([nowHigh.rotating, nowLow.rotating]).toEqual([undefined, undefined])
+    expect(nowHigh.published).toBe(true)
+    // Both rooms it left go, the first included.
+    expect(retractedIn(first)).toBe(true)
+    expect(retractedIn(second)).toBe(true)
+    // The bag holds the door as it is now, and neither version before it.
+    const ids = await idsIn(nowHigh)
+    expect(ids).toContain(nowHigh.eventId)
+    expect(ids).not.toContain(high.eventId)
+    expect(ids).not.toContain(stuck.eventId)
+    const seen = await openRoom(asFound(nowHigh), doorSecret(me(), nowHigh.eventId)!)
+    expect(seen.items.map((h) => h.text)).toContain('behind both')
+  }, 30000)
+
+  it('a door unseen here, its room the height asked for, not the height hidden at: refused', async () => {
+    await sealDoor('Elsewhere', INNER)
+    useShards.setState({ mine: [], discovered: {} })
+    localStorage.removeItem('onosendai:door-secrets'); resetDoorSecrets()
+    goTo({ ...CURSOR, x: CURSOR.x + 1n })
+    S().startPlaceDoor(); S().setDeployHeight(OUTER); S().setDeployDoorHeight(INNER); S().placeChest()
+    await S().sealPlacedChest({ name: 'Here', lock: lockOf(), requires: 'x', contents: [] })
+    expect(S().deployError).toMatch(/Open it first/)
+    expect(S().mine.filter((d) => d.chest?.door !== undefined)).toEqual([])
+    S().cancelDeploy()
+  }, 30000)
 })
 
 describe('the red cube’s lines (4.4, R6)', () => {

@@ -2716,7 +2716,7 @@ export const useShards = create<ShardsState>((set, get) => {
             const room = roomOf(at, plane, doorHeight)
             const standing = ownDoors(get().mine, cs.identity.pubkey).filter((d) => roomOf(d.at, d.plane, d.height) === room)
             // Every door of the room: one this device has no secret for may have rotated since, and a sibling's secret would be the old room's.
-            if (standing.some((d) => !d.secret) || (await unseenDoorHere(at, plane, deployHeight))) throw new Error('A door of yours already stands in this room. Open it first, and this one joins it.')
+            if (standing.some((d) => !d.secret) || (await unseenDoorHere(at, plane, doorHeight))) throw new Error('A door of yours already stands in this room. Open it first, and this one joins it.')
             doorSecretHex = standing[0]?.secret ?? newDoorSecret()
             const sealed = sealEntries(roomEntries(doorSecretHex) as BagEntry[], pending.lock!.pubkey)
             chest = { name: pending.name.trim(), lockPubkey: pending.lock!.pubkey, senderPubkey: sealed.senderPubkey, requires: pending.requires.trim(), payload: sealed.payload, look, door: doorHeight }

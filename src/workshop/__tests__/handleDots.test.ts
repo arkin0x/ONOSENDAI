@@ -10,8 +10,8 @@
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
-import { Color, Matrix4, PerspectiveCamera, Vector3 } from 'three'
-import { HandleDots, dotCapacity, perPixelAt1, type Dot } from '../handleDots'
+import { Color, Group, Matrix4, Mesh, MeshBasicMaterial, PerspectiveCamera, Raycaster, Scene, SphereGeometry, Vector2, Vector3, type Intersection } from 'three'
+import { HandleDots, HandleHalos, HandleHits, dotCapacity, perPixelAt1, type Dot } from '../handleDots'
 
 const NAVE_POINTS = 1731
 
@@ -119,8 +119,161 @@ describe('the bench draws its handles as one object (Bench.tsx Handles)', () => 
     expect(body).toContain('<primitive object={dots.mesh} />')
   })
 
-  it('makes no geometry per point: the hit targets share one and are never drawn', () => {
+  it('makes no geometry per point: the hit target is one object, never drawn', () => {
     expect(body).not.toMatch(/<sphereGeometry/)
-    expect(body).toMatch(/<mesh visible=\{false\} geometry=\{hitGeometry\} material=\{HIT_MATERIAL\}/)
+    expect(body).toContain('new HandleHits()')
+    expect(body).toMatch(/<primitive object=\{hits\} onPointerDown=\{onPress\} onClick=\{onClick\} \/>/)
+  })
+})
+
+/** A tap's ray through the canvas point (ndcX, ndcY), as R3F sets it up. */
+function rayAt(cam: PerspectiveCamera, ndcX: number, ndcY: number): Raycaster {
+  const r = new Raycaster()
+  r.setFromCamera(new Vector2(ndcX, ndcY), cam)
+  return r
+}
+
+describe('HandleHits', () => {
+  const HEIGHT = 1080
+  const RADIUS = 12
+  function setup(points: Array<[number, number, number]>): { hits: HandleHits; cam: PerspectiveCamera } {
+    const hits = new HandleHits()
+    hits.radiusPx = RADIUS
+    hits.heightPx = HEIGHT
+    hits.set(points)
+    const cam = camera()
+    cam.updateMatrixWorld()
+    return { hits, cam }
+  }
+
+  it('is one object in the scene for every point of a nave, and adds none per point', () => {
+    const { hits } = setup(nave().map((d) => [...d.at] as [number, number, number]))
+    expect(hits.children).toHaveLength(0)
+    expect(hits.visible).toBe(false)
+  })
+
+  it('answers with the point it met, as R3F needs: its index, its object and its distance', () => {
+    const { hits, cam } = setup([[0, 0, 0], [2, 0, 0]])
+    const p = new Vector3(2, 0, 0).project(cam)
+    const found = rayAt(cam, p.x, p.y).intersectObject(hits, false)
+    expect(found.map((f) => f.index)).toEqual([1])
+    expect(found[0].object).toBe(hits)
+    expect(found[0].distance).toBeGreaterThan(0)
+    expect(found[0].point.distanceTo(new Vector3(2, 0, 0))).toBeLessThan(0.5)
+  })
+
+  it('misses what is farther off than its radius on screen, at any zoom', () => {
+    for (const eye of [[10, 9, 12], [2, 2, 2], [40, 30, 40]] as Array<[number, number, number]>) {
+      const { hits, cam } = setup([[0, 0, 0]])
+      cam.position.set(...eye); cam.lookAt(0, 0, 0); cam.updateMatrixWorld()
+      const pxInNdc = 2 / HEIGHT
+      expect(rayAt(cam, 0, (RADIUS * 0.9) * pxInNdc).intersectObject(hits, false)).toHaveLength(1)
+      expect(rayAt(cam, 0, (RADIUS * 1.1) * pxInNdc).intersectObject(hits, false)).toHaveLength(0)
+    }
+  })
+
+  it('finds what a real screen-scaled hit sphere found, ray for ray, nearest first', () => {
+    // The object it replaces, built as the bench built it: a group scaled by
+    // its distance from the camera, holding a ten-segment sphere of the hit
+    // radius. That sphere is a polygon, so it sits a little inside the true
+    // one: whatever it met must be met, and the same point must come first.
+    const points: Array<[number, number, number]> = []
+    for (let i = 0; i < 300; i++) points.push([((i * 37) % 23) - 11, ((i * 53) % 13) - 6, ((i * 71) % 17) - 8])
+    const { hits, cam } = setup(points)
+    const k = perPixelAt1(cam.fov, HEIGHT)
+    const sphere = new SphereGeometry(RADIUS, 10, 10)
+    const material = new MeshBasicMaterial()
+    const scene = new Scene()
+    const meshes = points.map((p, i) => {
+      const g = new Group()
+      g.position.set(...p)
+      g.scale.setScalar(Math.max(1e-5, cam.position.distanceTo(g.position) * k))
+      const m = new Mesh(sphere, material)
+      m.userData.point = i
+      g.add(m)
+      scene.add(g)
+      return m
+    })
+    scene.updateMatrixWorld(true)
+    let compared = 0
+    let grazing = 0
+    for (let y = -0.8; y <= 0.8; y += 0.013) {
+      for (let x = -0.8; x <= 0.8; x += 0.013) {
+        const ray = rayAt(cam, x, y)
+        const old = ray.intersectObjects(meshes, false)
+        if (old.length === 0) continue
+        const now = ray.intersectObject(hits, false)
+        const oldFirst = old[0].object.userData.point as number
+        // Every point the old spheres met, the new ones meet too.
+        for (const h of old) expect(now.some((f) => f.index === h.object.userData.point)).toBe(true)
+        // The same one first, unless the new one is a ray grazing the rim of a
+        // nearer point's true sphere, outside the old one's facets. A ten
+        // segment sphere's outline runs in to about 0.9 of its radius.
+        if (now[0].index !== oldFirst) {
+          const c = new Vector3(...points[now[0].index as number])
+          const rim = ray.ray.distanceToPoint(c) / (RADIUS * k * cam.position.distanceTo(c))
+          expect(rim).toBeGreaterThan(0.85)
+          grazing++
+        }
+        compared++
+      }
+    }
+    expect(compared).toBeGreaterThan(100)
+    // The rim is a sliver of what a tap lands on.
+    expect(grazing / compared).toBeLessThan(0.1)
+    sphere.dispose(); material.dispose()
+  })
+
+  it('adds nothing to the list for a ray that meets nothing', () => {
+    const { hits, cam } = setup(nave().map((d) => [...d.at] as [number, number, number]))
+    const found: Intersection[] = []
+    hits.raycast(rayAt(cam, 0.99, 0.99), found)
+    expect(found).toHaveLength(0)
+  })
+})
+
+describe('HandleHalos', () => {
+  it('draws a whole nave selected as one object, and shows nothing with nothing selected', () => {
+    const h = new HandleHalos(dotCapacity(NAVE_POINTS), null, 26, 0.85)
+    h.set([])
+    expect(h.points.visible).toBe(false)
+    h.set(nave().map((d) => ({ at: d.at, color: '#ff8800' })))
+    expect(h.points.visible).toBe(true)
+    expect(h.points.geometry.drawRange.count).toBe(NAVE_POINTS)
+    expect(h.points.children).toHaveLength(0)
+    const at = h.points.geometry.getAttribute('position')
+    expect([at.getX(30), at.getY(30), at.getZ(30)]).toEqual([...nave()[30].at])
+    h.set([])
+    expect(h.points.visible).toBe(false)
+    expect(h.points.geometry.drawRange.count).toBe(0)
+    h.dispose()
+  })
+
+  it('holds its size on screen, as a sprite in a screen-scaled group did', () => {
+    const h = new HandleHalos(8, null, 26, 0.85)
+    expect(h.points.material.sizeAttenuation).toBe(false)
+    expect(h.points.material.size).toBe(26)
+    expect(h.points.material.depthWrite).toBe(false)
+    h.dispose()
+  })
+})
+
+describe('the bench', () => {
+  const bench = readFileSync(join(__dirname, '..', 'Bench.tsx'), 'utf8')
+  const handles = bench.slice(bench.indexOf('function Handles()'), bench.indexOf('/** The face being picked'))
+
+  it('makes no object, element or frame callback per point', () => {
+    // Only the picked corners' rings go through a list, and only those.
+    expect(handles.match(/groups\.[a-z]*\(?[^\n]*=>[^\n]*<ScreenScale/g)).toBeNull()
+    expect(handles).toMatch(/groups\.filter\(\(g\) => g\.some\(\(i\) => pickedSet\.has\(i\)\)\)\.map/)
+    expect(handles).not.toMatch(/<sprite/)
+    expect(handles).not.toMatch(/SphereGeometry/)
+  })
+
+  it('draws on demand and keeps its programs', () => {
+    expect(bench).toMatch(/frameloop="demand"/)
+    expect(bench).toMatch(/onCreated=\{\(\{ gl: renderer, scene \}\) => keepPrograms\(renderer, scene\)\}/)
+    expect(bench).toMatch(/<BenchWake \/>/)
+    expect(bench).toMatch(/useWorkshop\.subscribe\(wake\)/)
   })
 })

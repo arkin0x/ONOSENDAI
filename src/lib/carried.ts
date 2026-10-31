@@ -233,13 +233,6 @@ export function inTheClear(model: ShardModel): ShardModel {
   return rest
 }
 
-/** Sixteen random hex digits: a copy's `d`, which says nothing about it. */
-function quietD(): string {
-  const b = new Uint8Array(8)
-  crypto.getRandomValues(b)
-  return [...b].map((x) => x.toString(16).padStart(2, '0')).join('')
-}
-
 /**
  * `parent` carrying a copy of `source`, a piece of your workshop, and the
  * reference a placement of it names (STAMP > OBJECT, YOURS; arkinox
@@ -263,15 +256,17 @@ function quietD(): string {
  * and its placements edit together. The copy keeps the source's name, as a
  * label, sealed inside with the payload. Written as a hide writes it (OPAQUE
  * where never chosen), and what the source itself carries joins the parent's
- * one table.
+ * one table, under your key. A source whose table came out of a bag marks the
+ * parent too, so PUBLISH asks before writing it in the clear (§1.10).
  */
 export function copyInto(parent: ShardModel, source: ShardModel, pubkey: string): { shard: ShardModel; ref: Ref } {
-  const written = withAuthoredConstrain(source)
+  const written = withAuthoredConstrain(ownKeysOnly(source, pubkey))
   const text = JSON.stringify(carriedPayload(written))
   const mine = `33331:${pubkey}:`
+  const marked = (s: ShardModel): ShardModel => ((source as FromBag).fromBag ? ({ ...s, fromBag: true } as FromBag) : s)
   for (const [key, entry] of Object.entries(parent.objects ?? {})) {
-    if (key.startsWith(mine) && JSON.stringify(entry) === text) return { shard: parent, ref: ['a', key] }
+    if (key.startsWith(mine) && JSON.stringify(entry) === text) return { shard: marked(parent), ref: ['a', key] }
   }
   const address = `${mine}${quietD()}`
-  return { shard: carryObject(parent, address, written), ref: ['a', address] }
+  return { shard: marked(carryObject(parent, address, written)), ref: ['a', address] }
 }

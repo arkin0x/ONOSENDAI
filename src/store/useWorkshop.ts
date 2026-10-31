@@ -1052,7 +1052,8 @@ export const useWorkshop = create<WorkshopState>((set, get) => {
       let ref = stampObject.ref
       if (stampObject.copy) {
         const source = get().shards.find((x) => x.id === stampObject.copy!.sourceId) ?? stampObject.shard
-        ;({ shard: base, ref } = copyInto(s, source, stampObject.copy.pubkey))
+        // Under whoever is signed in now: a pick outlives an identity switch.
+        ;({ shard: base, ref } = copyInto(s, source, you() ?? stampObject.copy.pubkey))
       }
       const { shard } = addPart(base, ref, { at: [...at] as P3, turn: [0, (90 * stampFacing) % 360, 0], step: 0 })
       edit(() => shard, `"${stampObject.name}" placed. It is one object: SELECT it to move, turn or copy it.`)

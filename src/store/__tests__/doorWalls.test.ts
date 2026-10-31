@@ -116,6 +116,17 @@ describe('a new lock (R10: "earlier openers lose the room from then on")', () =>
     resetOpenedChests()
     expect(wallItems(1)).toEqual([])
   })
+
+  it('and is kept from then on with that lock, so a new lock closes it too', () => {
+    localStorage.setItem('onosendai:chests-opened', JSON.stringify({ [ME]: ['5'.repeat(64), DOOR] }))
+    resetOpenedChests()
+    expect(wallItems(1)).toEqual([])
+    expect(JSON.parse(localStorage.getItem('onosendai:chests-opened')!)[ME]).toEqual(['5'.repeat(64), `${DOOR}:${LOCK}`])
+    relocked(NEW)
+    expect(wallItems(1).map((w) => w.key)).toEqual([doorWallKey(DOOR)])
+    resetOpenedChests()
+    expect(wallItems(1).map((w) => w.key)).toEqual([doorWallKey(DOOR)])
+  })
 })
 
 describe('a walker inside a closed door (review of #532)', () => {

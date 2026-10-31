@@ -62,10 +62,26 @@ function keptIds(): Record<string, string[]> {
   return kept
 }
 
-/** Whether this identity opened this chest by hand on this device, under the lock it has now (`lock`, its lock pubkey). */
+function save(all: Record<string, string[]>): void {
+  try { localStorage.setItem(OPENED_KEY, JSON.stringify(all)) } catch { /* quota or private mode: it stays open this session */ }
+}
+
+/**
+ * Whether this identity opened this chest by hand on this device, under the
+ * lock it has now (`lock`, its lock pubkey). A bare id kept before locks were
+ * is kept from now on with the lock it is first asked with, which its id
+ * named, so it does not outlive a new lock either.
+ */
 export function openedByHand(me: string, chestId: string, lock: string): boolean {
-  const ids = keptIds()[me]
-  return !!ids && (ids.includes(keptAs(chestId, lock)) || ids.includes(chestId))
+  const all = keptIds()
+  const ids = all[me]
+  if (!ids) return false
+  if (ids.includes(keptAs(chestId, lock))) return true
+  const bare = ids.indexOf(chestId)
+  if (bare < 0) return false
+  all[me] = ids.map((e, i) => (i === bare ? keptAs(chestId, lock) : e))
+  save(all)
+  return true
 }
 
 /**
@@ -85,7 +101,30 @@ export function rememberOpened(me: string, chestId: string, lock: string, conten
   if (ids.includes(keptAs(chestId, lock))) return
   // Opened again under a new lock: that lock replaces the one before.
   all[me] = [...ids.filter((e) => !keptFor(e, chestId)), keptAs(chestId, lock)].slice(-OPENED_MAX)
-  try { localStorage.setItem(OPENED_KEY, JSON.stringify(all)) } catch { /* quota or private mode: it stays open this session */ }
+  save(all)
+}
+
+/**
+ * Reads again (hud/ItemRows readAgain) that failed this session, a signer
+ * refusing, by identity, chest and lock: not asked again each time the card
+ * is shown, only when OPEN is tapped.
+ */
+const refused = new Set<string>()
+const refusalKey = (me: string, chestId: string, lock: string): string => `${openedKey(me, chestId)}:${lock}`
+
+/** Whether reading this chest again failed this session for this identity, under this lock. */
+export function readRefused(me: string, chestId: string, lock: string): boolean {
+  return refused.has(refusalKey(me, chestId, lock))
+}
+
+/** Reading it again failed: remembered for the session. */
+export function refuseRead(me: string, chestId: string, lock: string): void {
+  refused.add(refusalKey(me, chestId, lock))
+}
+
+/** OPEN was tapped: a refusal before is forgotten. */
+export function forgetRefusal(me: string, chestId: string, lock: string): void {
+  refused.delete(refusalKey(me, chestId, lock))
 }
 
 /** A chest opened again by a reload's scan: what was inside, for the session. Its id is kept already. */
@@ -93,8 +132,9 @@ export function restoreOpened(me: string, chestId: string, contents: ChestEntry[
   useOpenedChests.setState((s) => ({ opened: { ...s.opened, [openedKey(me, chestId)]: contents } }))
 }
 
-/** For tests: forget what is kept, so the next read is from localStorage. */
+/** For tests: forget what is kept, so the next read is from localStorage, and every refusal. */
 export function resetOpenedChests(): void {
   kept = null
+  refused.clear()
   useOpenedChests.setState({ opened: {} })
 }

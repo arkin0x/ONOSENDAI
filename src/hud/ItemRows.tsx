@@ -35,7 +35,7 @@ import { holdsEntry, openingKeys, type HeldFrom, type HeldItem, type HeldPlace }
 import { safeNpub } from '../lib/npub'
 import { useCyberspace } from '../store/useCyberspace'
 import { useInventory } from '../store/useInventory'
-import { openedByHand, openedContents, openedKey, rememberOpened, useOpenedChests } from '../store/useOpenedChests'
+import { forgetRefusal, openedByHand, openedContents, openedKey, readRefused, refuseRead, rememberOpened, useOpenedChests } from '../store/useOpenedChests'
 import { celebrateOpen } from '../store/useOpenCeremony'
 import { useCeremony } from '../store/useCeremony'
 import { lookOf } from '../lib/looks'
@@ -83,11 +83,20 @@ export function KeyLine({ id, name, author }: { id?: string; name: string; autho
 }
 
 
-/** Whether this identity has a chest open here, by its id: its contents are listed under it. */
+/**
+ * Whether this identity has a chest open here, by its id, under the lock it
+ * has now (the chest as found or deployed): its contents are listed under it.
+ */
 export function useChestOpen(): (chestId: string | undefined) => boolean {
   const me = useCyberspace((s) => s.identity.pubkey)
   const opened = useOpenedChests((s) => s.opened)
-  return useCallback((chestId: string | undefined) => !!chestId && !!opened[openedKey(me, chestId)], [me, opened])
+  const discovered = useShards((s) => s.discovered)
+  const mine = useShards((s) => s.mine)
+  return useCallback((chestId: string | undefined) => {
+    if (!chestId) return false
+    const lock = (discovered[chestId] ?? mine.find((d) => d.eventId === chestId))?.chest?.lockPubkey
+    return !!lock && !!openedContents(opened, me, chestId, lock)
+  }, [me, opened, discovered, mine])
 }
 
 /**
@@ -137,10 +146,14 @@ const readingAgain = new Map<string, Promise<ChestEntry[] | null>>()
  * open already, and drawn so.
  */
 export function readAgain(c: Parameters<typeof openChestHere>[0], opener: Exclude<Opener, null>): Promise<ChestEntry[] | null> {
-  const k = openedKey(useCyberspace.getState().identity.pubkey, c.id)
+  const me = useCyberspace.getState().identity.pubkey
+  const k = openedKey(me, c.id)
   const running = readingAgain.get(k)
   if (running) return running
-  const reading = openChestHere({ ...c, door: false }, opener).finally(() => readingAgain.delete(k))
+  // Refused, a signer saying no: remembered for the session, so the card does not ask again until OPEN.
+  const reading = openChestHere({ ...c, door: false }, opener)
+    .catch((err: unknown) => { refuseRead(me, c.id, c.chest.lockPubkey); throw err })
+    .finally(() => readingAgain.delete(k))
   readingAgain.set(k, reading)
   return reading
 }
@@ -184,18 +197,19 @@ export function ChestBlock({ id, chest, author, verified, place, sealer: given }
   const shown = entries ? shownOf(entries, muted) : null
   // Opened by hand before, under this lock: never OPEN again. What is inside
   // is read again once, as OPEN read it (readAgain); OPEN comes back only if
-  // that fails, a signer refusing.
+  // that fails, a signer refusing, and the refusal holds for the session
+  // until OPEN is tapped (store/useOpenedChests readRefused).
   const handOpened = openedByHand(me, id, chest.lockPubkey)
   const readKey = `${openedKey(me, id)}:${chest.lockPubkey}`
   const tried = useRef<string | null>(null)
-  const [unread, setUnread] = useState<string | null>(null)
-  const rereading = handOpened && !entries && !!opener && unread !== readKey
+  const [, setRefusals] = useState(0)
+  const rereading = handOpened && !entries && !!opener && !readRefused(me, id, chest.lockPubkey)
   useEffect(() => {
     if (!rereading || !opener || tried.current === readKey) return
     tried.current = readKey
     readAgain({ id, chest, author, place, sealer }, opener)
       .then((contents) => { if (contents && contents.length === 0) setStatus('Opened: nothing inside this client can read.') })
-      .catch((err: unknown) => { setUnread(readKey); setStatus(err instanceof Error ? err.message : String(err)) })
+      .catch((err: unknown) => { setRefusals((n) => n + 1); setStatus(err instanceof Error ? err.message : String(err)) })
     // Once per chest, lock and identity: the props it reads are those of that chest.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [rereading, readKey])
@@ -206,6 +220,7 @@ export function ChestBlock({ id, chest, author, verified, place, sealer: given }
     resumeAudio()
     // Once per chest, per identity, per device: a chest opened by hand before plays nothing.
     const first = !openedByHand(me, id, chest.lockPubkey)
+    forgetRefusal(me, id, chest.lockPubkey)
     setBusy(true)
     setStatus(null)
     try {
@@ -223,6 +238,8 @@ export function ChestBlock({ id, chest, author, verified, place, sealer: given }
       }
       if (contents && contents.length === 0) setStatus('Opened: nothing inside this client can read.')
     } catch (err) {
+      // Refused again: OPEN stays, and the card does not ask by itself.
+      refuseRead(me, id, chest.lockPubkey)
       setStatus(err instanceof Error ? err.message : String(err))
     } finally {
       setBusy(false)
@@ -236,7 +253,7 @@ export function ChestBlock({ id, chest, author, verified, place, sealer: given }
         <span className="item__line">
           <span className="item__name" title={chest.name}>{chest.name}</span>
           <span className="item__meta" title={opensWith ? `Opens with ${opensWith}` : 'The hider’s label of what opens it'}>
-            {entries || (handOpened && opener) ? 'OPEN' : `REQUIRES: ${requiresLabel(chest)}`} · hidden by {who}{!verified && <> · <Unsigned /></>}
+            {entries || rereading ? 'OPEN' : `REQUIRES: ${requiresLabel(chest)}`} · hidden by {who}{!verified && <> · <Unsigned /></>}
           </span>
         </span>
         {opener && !entries && (

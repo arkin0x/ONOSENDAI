@@ -46,8 +46,9 @@ import { heldFromEntry, heldFromPasted, type HeldItem } from '../../lib/inventor
 import { useCyberspace } from '../../store/useCyberspace'
 import { useInventory } from '../../store/useInventory'
 import { useShards } from '../../store/useShards'
-import { ChestBlock, ChestContents, KeyLine, listedOnce, openChestHere, readAgain, takeableOf } from '../ItemRows'
-import { openedByHand, resetOpenedChests, useOpenedChests } from '../../store/useOpenedChests'
+import { ChestBlock, ChestContents, KeyLine, listedOnce, openChestHere, readAgain, takeableOf, useChestOpen } from '../ItemRows'
+import { mountHook, settle } from '../../test/hookRoot'
+import { forgetRefusal, openedByHand, readRefused, rememberOpened, resetOpenedChests, useOpenedChests } from '../../store/useOpenedChests'
 import { metadataOpen } from '../Metadata'
 import { SecretModal } from '../SecretModal'
 
@@ -246,6 +247,67 @@ describe('a chest opened with a signer, after a reload (review of the ceremony)'
       expect(takes(after)).toEqual(['TAKE', 'TAKE ALL'])
     } finally {
       useCyberspace.setState({ identity: was.identity, decryptSealed: was.decryptSealed })
+    }
+  })
+
+  it('a refusal holds for the session: the card shows OPEN, beside no "OPEN \u00b7 hidden by", and asks no more until OPEN', async () => {
+    const was = useCyberspace.getState()
+    const mine = generateSecretKey()
+    const me = getPublicKey(mine)
+    const words = finalizeEvent(messageInnerTemplate('inside', at, 0, T0), hider) as NostrEvent
+    const sealed = sealEntries([words], me)
+    const chest: ChestItem = { name: 'Sealed to me', lockPubkey: me, senderPubkey: sealed.senderPubkey, requires: 'my say-so', payload: sealed.payload }
+    const id = 'e'.repeat(64)
+    const c = { id, chest, author: getPublicKey(hider), place: placeAt, sealer: getPublicKey(hider) }
+    let asked = 0
+    try {
+      useCyberspace.setState({
+        identity: { ...was.identity, pubkey: me },
+        decryptSealed: async (sender: string, payload: string) => { asked++; return nip44.decrypt(payload, nip44.getConversationKey(mine, sender)) },
+      })
+      await openChestHere(c, { by: 'self' })
+      resetOpenedChests()
+      useCyberspace.setState({ decryptSealed: async () => { asked++; throw new Error('refused') } })
+      asked = 0
+      await expect(readAgain(c, { by: 'self' })).rejects.toThrow('refused')
+      expect(asked).toBe(1)
+      expect(readRefused(me, id, me)).toBe(true)
+      // Shown again: OPEN, not OPENING, so nothing reads it by itself, and the label says what it needs.
+      const html = render(<ChestBlock {...c} verified />)
+      expect(openButtons(html)).toEqual(['OPEN'])
+      expect(html).not.toContain('OPEN · hidden by')
+      expect(html).toContain('REQUIRES: my say-so')
+      // Per lock: a new lock is a new question.
+      expect(readRefused(me, id, 'a'.repeat(64))).toBe(false)
+      // OPEN tapped: the refusal is forgotten, and the card reads it again.
+      forgetRefusal(me, id, me)
+      expect(openButtons(render(<ChestBlock {...c} verified />))).toEqual(['OPENING'])
+    } finally {
+      useCyberspace.setState({ identity: was.identity, decryptSealed: was.decryptSealed })
+    }
+  })
+
+  it('a list leaves a thing under its chest only while the chest is open under the lock it has now (useChestOpen)', async () => {
+    const me = useCyberspace.getState().identity.pubkey
+    const lock = keyIn('Gate Key')
+    const sealed = sealEntries([lock.event], lock.key.itemPubkey)
+    const item: ChestItem = { name: 'Gate', lockPubkey: lock.key.itemPubkey, senderPubkey: sealed.senderPubkey, requires: '', payload: sealed.payload }
+    const gate = finalizeEvent(chestInnerTemplate(item, at, 0, T0), hider) as NostrEvent
+    useShards.setState({ discovered: { [gate.id]: find(gate, { type: 'chest', chest: item }) } })
+    const hook = mountHook(() => useChestOpen(), {})
+    try {
+      await settle()
+      expect(hook.current()(gate.id)).toBe(false)
+      rememberOpened(me, gate.id, item.lockPubkey, [])
+      await settle()
+      expect(hook.current()(gate.id)).toBe(true)
+      // A new lock, the same chest: no longer open.
+      useShards.setState({ discovered: { [gate.id]: find(gate, { type: 'chest', chest: { ...item, lockPubkey: '7'.repeat(64) } }) } })
+      await settle()
+      expect(hook.current()(gate.id)).toBe(false)
+      expect(hook.current()(undefined)).toBe(false)
+    } finally {
+      await hook.unmount()
     }
   })
 

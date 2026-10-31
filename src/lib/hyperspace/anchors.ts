@@ -459,9 +459,10 @@ async function persistSnapshot(): Promise<void> {
     if (snapshot) {
       // Read now: the buffers leave with the worker.
       const count = snapshot.count
-      await putSnapshot(database, { snapshot, coveredAtSnapshot })
-      snapshotSize = count
-      snapshotAt = Date.now()
+      if (await putSnapshot(database, { snapshot, coveredAtSnapshot })) {
+        snapshotSize = count
+        snapshotAt = Date.now()
+      }
     }
   } catch { /* cache write is best effort */
   } finally {

@@ -61,14 +61,16 @@ function ask(request: SnapshotRequest, transfer: Transferable[], make: MakeWorke
 }
 
 /**
- * Store the record. Its buffers go with the worker. If no worker could be made
- * they are still here, and the database on this thread takes them.
+ * Store the record; whether it was. Its buffers go with the worker. If no worker
+ * could be made they are still here, and the database on this thread takes them.
  */
-export async function putSnapshot(database: IDBDatabase, record: SnapshotRecord, make: MakeWorker = snapshotWorker): Promise<void> {
+export async function putSnapshot(database: IDBDatabase, record: SnapshotRecord, make: MakeWorker = snapshotWorker): Promise<boolean> {
   const reply = await ask({ op: 'put', record }, buffersOfRecord(record), make, WRITE_WAIT_MS)
-  if (reply?.ok) return
+  if (reply?.ok) return true
   // The worker failed after the buffers went to it: nothing left to store, and the next snapshot tries again.
-  if (reply === null && buffersOfRecord(record).every((b) => b.byteLength > 0)) await putMeta(database, SNAPSHOT_KEY, record)
+  if (reply !== null || buffersOfRecord(record).some((b) => b.byteLength === 0)) return false
+  await putMeta(database, SNAPSHOT_KEY, record)
+  return true
 }
 
 /** Read the record, off this thread where a worker can be made. */

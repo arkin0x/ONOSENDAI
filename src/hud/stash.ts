@@ -87,6 +87,8 @@ interface StashModals {
   chest: boolean
   /** The chest modal on a chest of yours already hidden: EDIT (its name and lock too) or ADD (its contents). */
   chestEdit: { eventId: string; fields: boolean } | null
+  /** SAVE on a chest of yours is running: the modal stays, so what it answers can be read. */
+  chestSaving: boolean
   /** The PLACE AUDIO composer (DECK-0007). */
   audio: boolean
   /** The SHARD FEED window: everyone's published objects, outside the Builder. */
@@ -138,6 +140,7 @@ export const useStash = create<StashModals>((set) => ({
   key: false,
   chest: false,
   chestEdit: null,
+  chestSaving: false,
   audio: false,
   feed: false,
   returnToModels: false,

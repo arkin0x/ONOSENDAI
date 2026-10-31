@@ -34,10 +34,10 @@ import { builtInLookTags } from '../../lib/looks'
 import { chestInnerTemplate, chestItemOf, messageInnerTemplate, type ChestItem, type Hidden } from '../../lib/hidden'
 import { useCyberspace } from '../../store/useCyberspace'
 import { useInventory } from '../../store/useInventory'
-import { useShards } from '../../store/useShards'
+import { feedWrapper, useShards } from '../../store/useShards'
 import { useWorkshop } from '../../store/useWorkshop'
 import { SecretModal } from '../SecretModal'
-import { LookRow } from '../DeployBar'
+import { LookRow, lookFitShape } from '../DeployBar'
 
 const hider = generateSecretKey()
 const at = { x: 1n, y: 2n, z: 3n }
@@ -96,5 +96,17 @@ describe('the model row', () => {
     expect(html).toMatch(/aria-pressed="true"[^>]*>OTHER/)
     expect(html).toContain('Statue')
     expect(render(<LookRow choices={['treasure']} look={{ from: 'mine', shardId: statue.id }} refusal="This model is too large to wear: 20,000 of 16,384 bytes." />)).toContain('too large to wear')
+  })
+})
+
+describe('what a look\u2019s height fits', () => {
+  it('a FEED look fits the object it places, never its wrapper; any other, the model it wears', () => {
+    const shard = newShard('Statue')
+    const object = { address: `33331:${'a'.repeat(64)}:d`, seen: [], shard } as never
+    const wrapper = feedWrapper(object)
+    expect(wrapper).not.toBe(shard)
+    expect(lookFitShape({ from: 'feed', object }, wrapper)).toBe(shard)
+    expect(lookFitShape({ from: 'mine', shardId: 'x' }, shard)).toBe(shard)
+    expect(lookFitShape(null, null)).toBeNull()
   })
 })

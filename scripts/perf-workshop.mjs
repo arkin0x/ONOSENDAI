@@ -102,7 +102,7 @@ cdp.on('Fetch.requestPaused', (p) => {
 
 await cdp.send('Page.enable')
 await cdp.send('Page.addScriptToEvaluateOnNewDocument', { source: `(() => {
-  try { localStorage.setItem('onosendai:live', '0') } catch {}
+  try { localStorage.setItem('onosendai:live', '0'); localStorage.setItem('onosendai:workshop-intro', '1') } catch {}
   const WS = window.WebSocket
   window.WebSocket = new Proxy(WS, { construct(t, a) { const u = String(a[0]); if (!/^wss?:\\/\\/(localhost|127\\.0\\.0\\.1)[:/]/.test(u)) { a = ['ws://127.0.0.1:9/refused'] } return new t(...a) } })
   const g = { buffers: 0, vaos: 0, programs: 0, linked: 0, textures: 0, bufferData: 0, bufferBytes: 0, subData: 0, draws: 0 }
@@ -271,7 +271,7 @@ const phase = async (name, drive) => {
   const m1 = Object.fromEntries((await cdp.send('Performance.getMetrics')).metrics.map((x) => [x.name, x.value]))
   const p = await ev('window.__perf.read()')
   const heap = await cdp.send('Runtime.getHeapUsage')
-  const state = await ev(`(() => { const w = window.__ws.getState(); const s = w.current(); return { tool: w.tool, selection: w.selection.length, selectedFace: w.selectedFace, selectedFaces: w.selectedFaces ? w.selectedFaces.length : undefined, vertices: s ? s.vertices.length : 0, faces: s ? s.faces.length : 0, past: w.past.length, storeNotes: window.__notes } })()`)
+  const state = await ev(`(() => { const w = window.__ws.getState(); const s = w.current(); return { tool: w.tool, selection: w.selection.length, selectedFace: w.selectedFace, selectedFaces: w.selectedFaces ? w.selectedFaces.length : undefined, vertices: s ? s.vertices.length : 0, faces: s ? s.faces.length : 0, past: w.past.length, storeNotes: window.__notes, cam: window.__benchCamera ? window.__benchCamera.position.toArray().map((n) => Math.round(n * 100) / 100) : null } })()`)
   if (process.env.SHOTS) { const png = await cdp.send('Page.captureScreenshot', { format: 'png' }); fs.mkdirSync(process.env.SHOTS, { recursive: true }); fs.writeFileSync(path.join(process.env.SHOTS, `${name}.png`), Buffer.from(png.data, 'base64')) }
   let alloc = 0
   const allocBy = new Map()
@@ -308,7 +308,9 @@ const orbitDrive = async (seconds) => {
 // 1. Idle on the opened piece, VIEW.
 await phase('idle', () => sleep(PHASE_S * 1000))
 // 2. Orbit, VIEW.
+await ev(`(() => { const l = window.__ptr = { down: 0, move: 0, up: 0, cancel: 0, last: null, target: null }; window.addEventListener('pointerdown', (e) => { l.down++; l.target = e.target.tagName + '.' + e.target.className; l.last = [e.pointerType, e.button, e.buttons] }, true); window.addEventListener('pointermove', (e) => { l.move++; l.last = [e.pointerType, e.button, e.buttons] }, true); window.addEventListener('pointerup', () => { l.up++ }, true); window.addEventListener('pointercancel', () => { l.cancel++ }, true) })()`)
 await phase('orbit', () => orbitDrive(PHASE_S))
+console.log('  pointers', JSON.stringify(await ev('window.__ptr')), JSON.stringify(await ev(`(() => { const c = window.__benchControls; return c ? { enabled: c.enabled, rotate: c.enableRotate, speed: c.rotateSpeed, dom: c.domElement && c.domElement.tagName } : null })()`)))
 // 3. FACE at 1/120: tap faces one after another, with a little orbit between.
 await ev(`(() => { const w = window.__ws.getState(); w.setTool('face'); w.setDivision(120) })()`)
 await sleep(1500)

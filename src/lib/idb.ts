@@ -26,8 +26,8 @@ export function request<T>(req: IDBRequest<T>): Promise<T> {
   })
 }
 
-/** An index on a store: its name, the key path it reads, and whether an array key indexes each element. */
-export interface IndexSpec { name: string; keyPath: string | string[]; multiEntry?: boolean }
+/** An index on a store: its name, the key path it reads, whether an array key indexes each element, and whether a key may be held by one row only. */
+export interface IndexSpec { name: string; keyPath: string | string[]; multiEntry?: boolean; unique?: boolean }
 
 /**
  * Open a database with a fixed set of stores, each [name, keyPath, indexes],
@@ -40,7 +40,7 @@ export interface IndexSpec { name: string; keyPath: string | string[]; multiEntr
 export function openDatabase(
   name: string,
   version: number,
-  stores: Array<[string, string, IndexSpec[]?]>,
+  stores: Array<[string, string | string[], IndexSpec[]?]>,
   onUpgrade?: (tx: IDBTransaction, oldVersion: number) => void,
   opts: { failWhenBlocked?: boolean } = {},
 ): Promise<IDBDatabase> {
@@ -59,7 +59,7 @@ export function openDatabase(
       for (const [store, keyPath, indexes = []] of stores) {
         const os = db.objectStoreNames.contains(store) ? tx.objectStore(store) : db.createObjectStore(store, { keyPath })
         for (const ix of indexes) {
-          if (!os.indexNames.contains(ix.name)) os.createIndex(ix.name, ix.keyPath, { multiEntry: ix.multiEntry ?? false })
+          if (!os.indexNames.contains(ix.name)) os.createIndex(ix.name, ix.keyPath, { multiEntry: ix.multiEntry ?? false, unique: ix.unique ?? false })
         }
       }
       onUpgrade?.(tx, event.oldVersion)

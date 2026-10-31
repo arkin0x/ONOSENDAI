@@ -33,7 +33,7 @@ import { BufferGeometry, DoubleSide, EdgesGeometry, Float32BufferAttribute, Grou
 import { ACCENT, BG, WARN } from '../lib/palette'
 import { glowTexture } from '../lib/glow'
 import { GRID_HALF, TICKS_PER_UNIT, centroid, pointKey, rgbToHex, ticksOf, toRender } from 'sno-core/shards'
-import { drawnDivision } from './divisions'
+import { BenchGrid } from './benchGrid'
 import { benchAxes, benchPose, nudgeFor, orbitOffset, planeAfter, sameAxes, setOrbitSink, useBenchView, type NudgeName } from './benchAxes'
 import { landing, preview, type WorkPlane } from 'sno-core/stamps'
 import { ShardMesh, faceOfHit } from '../scene/ShardMesh'
@@ -44,17 +44,8 @@ import { partMatrix } from 'sno-core/parts'
 import { OwnPartsContext } from '../lib/parts'
 import { useCyberspace } from '../store/useCyberspace'
 import { Hold, noteGesture, tapSlop } from './deadZone'
-import { HandleDots, HandleHalos, HandleHits, dotCapacity, type Halo } from './handleDots'
+import { HandleDots, HandleHalos, HandleHits, PressMemory, dotCapacity, type Halo } from './handleDots'
 import { keepPrograms } from '../lib/keepPrograms'
-
-/** The unit grid's line colour when a unit is not divided. */
-const UNIT_LINE = '#1d3547'
-/**
- * When a unit is divided the unit lines step up toward the axis lines'
- * light blue, and the division lines take the unit lines' old colour, so
- * the unit grid stays the unit grid however fine the snap.
- */
-const UNIT_LINE_DIVIDED = '#166c86'
 
 type P3 = [number, number, number]
 
@@ -121,10 +112,14 @@ function Grid(): JSX.Element {
   const level = useWorkshop((s) => s.level)
   const plane = useWorkshop((s) => s.plane)
   const division = useWorkshop((s) => s.division)
-  const drawn = drawnDivision(division)
   const extent = useWorkshop((s) => s.current()?.extent ?? GRID_HALF)
   const tool = useWorkshop((s) => s.tool)
   const places = tool === 'add' || tool === 'stamp'
+  const invalidate = useThree((s) => s.invalidate)
+  // One quad and a shader, whatever the division and the extent (benchGrid.ts).
+  const grid = useMemo(() => new BenchGrid(), [])
+  useEffect(() => () => grid.dispose(), [grid])
+  useLayoutEffect(() => { grid.set(extent, division); invalidate() }, [grid, extent, division, invalidate])
 
   const onClick = (e: ThreeEvent<MouseEvent>): void => {
     if (e.delta > tapSlop()) return
@@ -157,11 +152,8 @@ function Grid(): JSX.Element {
   const rotation: P3 = plane === 0 ? [0, 0, -Math.PI / 2] : plane === 2 ? [Math.PI / 2, 0, 0] : [0, 0, 0]
   return (
     <group position={position} rotation={rotation}>
-      {/* The visible lattice. One cell per unit, so what you tap is what you get. */}
-      <gridHelper key={`u${extent}-${division > 1 ? 1 : 0}`} args={[extent * 2, extent * 2, ACCENT, division > 1 ? UNIT_LINE_DIVIDED : UNIT_LINE]} />
-      {/* The snap grid between the unit lines when a unit is divided, in the unit lines' plain colour. */}
-      {/* Past twelve lines a unit the snap is drawn at a divisor of itself (divisions.ts). */}
-      {drawn > 1 && <gridHelper key={`d${extent}-${drawn}`} args={[extent * 2, extent * 2 * drawn, UNIT_LINE, UNIT_LINE]} position={[0, -0.002, 0]} />}
+      {/* The visible lattice: a line for every unit and every division of one, so what you tap is what you get. */}
+      <primitive object={grid.mesh} />
       {/*
         The surface taps land on, in the placing tools only. In select and face
         mode it carries no handler at all, so the raycaster ignores it: a raised
@@ -332,21 +324,15 @@ function Handles(): JSX.Element | null {
     dots.update(state.camera as PerspectiveCamera, state.size.height)
     hits.heightPx = state.size.height
   })
-  // What a press landed on, so a lift elsewhere is no tap on what it lifted
-  // over: as it was when each point had its own object, which R3F asks
-  // whether the press met. A finger on a dense shard rolls across points.
-  const pressed = useRef<{ event: unknown; on: Set<number> }>({ event: null, on: new Set() })
+  const pressed = useMemo(() => new PressMemory(), [])
   if (!shard) return null
 
-  const onPress = (e: ThreeEvent<PointerEvent>): void => {
-    if (pressed.current.event !== e.nativeEvent) pressed.current = { event: e.nativeEvent, on: new Set() }
-    if (e.index !== undefined) pressed.current.on.add(e.index)
-  }
+  const onPress = (e: ThreeEvent<PointerEvent>): void => { pressed.press(e.nativeEvent, e.index) }
 
   const onClick = (e: ThreeEvent<MouseEvent>): void => {
     if (e.delta > tapSlop()) return
     const g = e.index === undefined ? undefined : groups[e.index]
-    if (!g || !pressed.current.on.has(e.index as number)) return
+    if (!g || !pressed.met(e.index as number)) return
     e.stopPropagation()
     const first = g[0]
     const isSel = g.some((i) => chosen.has(i))
@@ -409,33 +395,46 @@ function PickLoop(): JSX.Element | null {
   return line ? <primitive object={line} /> : null
 }
 
-/** The face tapped in FACE mode, lit in the selection color so DELETE FACE has a visible target. */
+/**
+ * The faces tapped in FACE mode, each lit in the selection color so DELETE and
+ * the bucket have a visible target. Every one in hand stays lit (arkinox,
+ * 2026-10-31). One fill and one set of outlines however many there are: made
+ * when the faces in hand or the shard change, never per frame.
+ */
 function FaceHighlight(): JSX.Element | null {
   const shard = useWorkshop((s) => s.current())
-  const face = useWorkshop((s) => s.selectedFace)
+  const faces = useWorkshop((s) => s.selectedFaces)
   const lit = useMemo(() => {
-    const f = face === null ? undefined : shard?.faces[face]
-    if (!shard || !f) return null
-    const pts = f.map((i) => UP(ticksOf(shard.vertices[i])))
-    // Four points: the mesh draws the first three as its one triangle, the line closes the loop.
+    if (!shard || faces.length === 0) return null
+    const fill: number[] = []
+    const lines: number[] = []
+    for (const k of faces) {
+      const f = shard.faces[k]
+      if (!f) continue
+      const [a, b, c] = f.map((i) => UP(ticksOf(shard.vertices[i])))
+      fill.push(...a, ...b, ...c)
+      lines.push(...a, ...b, ...b, ...c, ...c, ...a)
+    }
+    if (fill.length === 0) return null
     const g = new BufferGeometry()
-    g.setAttribute('position', new Float32BufferAttribute([...pts, pts[0]].flat(), 3))
-    // Transparent, at OVERLAY_ORDER like the fill: both draw after a
-    // see-through shard's faces (order 1), or the face blends over them and
-    // the highlight vanishes on a see-through shard (shardFaces.ts).
-    const edge = new Line(g, new LineBasicMaterial({ color: WARN, toneMapped: false, transparent: true }))
-    edge.frustumCulled = false
-    edge.renderOrder = OVERLAY_ORDER
-    return { g, edge }
-  }, [shard, face])
-  useEffect(() => () => { lit?.g.dispose(); lit?.edge.material.dispose() }, [lit])
+    g.setAttribute('position', new Float32BufferAttribute(fill, 3))
+    const e = new BufferGeometry()
+    e.setAttribute('position', new Float32BufferAttribute(lines, 3))
+    return { g, e }
+  }, [shard, faces])
+  useEffect(() => () => { lit?.g.dispose(); lit?.e.dispose() }, [lit])
   if (!lit) return null
+  // Transparent, at OVERLAY_ORDER, the fill and the outlines alike: both draw
+  // after a see-through shard's faces (order 1), or a face blends over them
+  // and the highlight vanishes on a see-through shard (shardFaces.ts).
   return (
     <>
       <mesh geometry={lit.g} frustumCulled={false} renderOrder={OVERLAY_ORDER}>
         <meshBasicMaterial color={WARN} transparent opacity={0.5} side={DoubleSide} forceSinglePass depthWrite={false} polygonOffset polygonOffsetFactor={-4} toneMapped={false} />
       </mesh>
-      <primitive object={lit.edge} />
+      <lineSegments geometry={lit.e} frustumCulled={false} renderOrder={OVERLAY_ORDER}>
+        <lineBasicMaterial color={WARN} toneMapped={false} transparent />
+      </lineSegments>
     </>
   )
 }
@@ -658,7 +657,7 @@ function Keys(): null {
         KeyR: 'away', KeyF: 'toward',
       }
       if (nudge[e.code]) { e.preventDefault(); const n = nudgeFor(benchAxes(camera), nudge[e.code]); w.moveSelected(n.axis, n.delta * w.step()); return }
-      if (e.code === 'Delete' || e.code === 'Backspace') { e.preventDefault(); if (w.selectedFace !== null) w.deleteSelectedFace(); else w.deleteSelected(); return }
+      if (e.code === 'Delete' || e.code === 'Backspace') { e.preventDefault(); if (w.selectedFaces.length > 0) w.deleteSelectedFace(); else w.deleteSelected(); return }
       if (e.code === 'Enter') { e.preventDefault(); if (w.facePick.length >= 3) w.fill(); else if (w.selection.length >= 3) w.fillSelection(); return }
       // Escape is not here: it goes through the Escape stack (useEscape), so
       // the palette sheet and the confirmations over the bench close before

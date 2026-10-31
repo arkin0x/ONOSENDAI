@@ -19,6 +19,7 @@
 
 import { useCallback, useRef } from 'react'
 import type { Cover, CoverEdge } from '../lib/coverBand'
+import { whileVisible } from '../lib/whileVisible'
 
 /** How often the boxes are measured again while the scene watches them, ms. */
 const REMEASURE_MS = 500
@@ -73,7 +74,7 @@ export function setCoverWatch(on: boolean): void {
   timer = null
   if (!on) return
   measure()
-  timer = window.setInterval(measure, REMEASURE_MS)
+  timer = window.setInterval(whileVisible(measure), REMEASURE_MS)
 }
 
 /** The overlays over the scene as last measured, in viewport pixels. */

@@ -108,7 +108,7 @@ describe('the workshop top bar', () => {
 
   it('keeps the list and the ways in under MENU', () => {
     const menu = panel('menu')
-    for (const m of ['SHARDS ({shards.length})', '+ NEW SHARD', '>PASTE</button>', "{importing ? 'READING' : 'IMPORT'}", '{pasteOpen && (', '<ShardFolders', 'CLEAR THIS SCENE', '<Explanation>']) {
+    for (const m of ['SHARDS ({shardCount})', '+ NEW SHARD', '>PASTE</button>', "{importing ? 'READING' : 'IMPORT'}", '{pasteOpen && (', '<ShardList currentId={shard.id} />', 'CLEAR THIS SCENE', '<Explanation>']) {
       expect(menu).toContain(m)
     }
   })

@@ -28,7 +28,7 @@ const QUAD = JSON.stringify({ v: 1, type: 'shard', name: 'q', unit: 0, extent: 1
 
 describe('workshop', () => {
   beforeEach(() => {
-    useWorkshop.setState({ shards: [], currentId: null, selection: [], selectedFace: null, facePick: [], palette: [...DEFAULT_PALETTE], level: 0, color: [0, 0.9, 1], past: [], future: [], aim: null, notice: null, tool: 'stamp', stampKind: 'block', stampSize: 1, stampFacing: 0 })
+    useWorkshop.setState({ shards: [], currentId: null, selection: [], selectedFaces: [], facePick: [], palette: [...DEFAULT_PALETTE], level: 0, color: [0, 0.9, 1], past: [], future: [], aim: null, notice: null, tool: 'stamp', stampKind: 'block', stampSize: 1, stampFacing: 0 })
     w().create('t')
   })
 
@@ -39,16 +39,20 @@ describe('workshop', () => {
     w().selectFace(0)
     // Corners 0, 1, 2, and vertex 4, which stands on corner 0's point.
     expect(w().selection).toEqual([0, 1, 2, 4])
-    expect(w().selectedFace).toBe(0)
-    // The second face adds its own corner; the shared ones are already in hand.
+    expect(w().selectedFaces).toEqual([0])
+    // The second face adds its own corner; the shared ones are already in hand. Both stay in hand.
     w().selectFace(1)
     expect(w().selection).toEqual([0, 1, 2, 3, 4])
-    expect(w().selectedFace).toBe(1)
-    // A face whose corners are all in hand is taken back out, and is no longer the selected face.
+    expect(w().selectedFaces).toEqual([0, 1])
+    // A face in hand tapped again lets go of it, and of the corner only it stood on.
     w().selectFace(1)
-    expect(w().selection).toEqual([1])
-    expect(w().selectedFace).toBeNull()
-    // Then the pad moves what is selected: the remaining corner, one unit along X.
+    expect(w().selection).toEqual([0, 1, 2, 4])
+    expect(w().selectedFaces).toEqual([0])
+    // The last one out takes every corner with it.
+    w().selectFace(0)
+    expect(w().selection).toEqual([])
+    expect(w().selectedFaces).toEqual([])
+    // Then the pad moves what is selected: a face's corners, one unit along X.
     w().selectFace(0)
     const before = w().current()!.vertices.map((v) => ticksOf(v))
     w().moveSelected(0, T)
@@ -278,7 +282,7 @@ describe('workshop', () => {
     w().colorSelected([1, 0, 0])
     const corners = new Set(s.faces[0])
     s.vertices.forEach((_, i) => expect(w().current()!.vertices[i].c.join(), `vertex ${i}`).toBe(corners.has(i) ? '1,0,0' : s.vertices[i].c.join()))
-    expect(w().selectedFace).toBe(0)
+    expect(w().selectedFaces).toEqual([0])
   })
 
   it('turns the selection a quarter turn about the middle of its extent, on the grid, and refuses a turn off it', () => {
@@ -629,7 +633,7 @@ describe('selection under INVERT', () => {
   /** Two placed objects and no points of its own, as snocrash builds a wall of columns. */
   const PARTS = JSON.stringify({ v: 2, name: 'wall', unit: 0, extent: 10, mode: 'solid', vertices: [], ticks: [], colors: [], refs: [['a', '33331:e8ed3798c6ffebffa08501ac39e271662bfd160f688f94c45d692d8767dd345a:fce13d24']], parts: [[0, 0, 0, 0, 0, 0, 0, 0], [0, 480, 0, 0, 0, 0, 0, 0]], faces: [] })
   beforeEach(() => {
-    useWorkshop.setState({ shards: [], currentId: null, selection: [], partSel: [], selectedFace: null, facePick: [], invert: false, past: [], future: [], aim: null, notice: null, tool: 'select' })
+    useWorkshop.setState({ shards: [], currentId: null, selection: [], partSel: [], selectedFaces: [], facePick: [], invert: false, past: [], future: [], aim: null, notice: null, tool: 'select' })
   })
   const open = (payload: string): void => { const id = w().importText(payload); expect(id).not.toBeNull(); w().select(id!) }
 
@@ -674,21 +678,21 @@ describe('selection under INVERT', () => {
     // Face 1 is corners 0, 2, 3, and vertex 4 on corner 0's point.
     w().selectFace(1)
     expect(w().selection).toEqual([1])
-    expect(w().selectedFace).toBeNull()
+    expect(w().selectedFaces).toEqual([])
     // Nothing of it in hand any more: nothing is added, and no face is selected.
     w().selectFace(1)
     expect(w().selection).toEqual([1])
-    expect(w().selectedFace).toBeNull()
+    expect(w().selectedFaces).toEqual([])
     // A face only partly in hand still loses what it had.
     w().setInvert(false)
     w().selectFace(0)
     expect(w().selection).toEqual([0, 1, 2, 4])
-    expect(w().selectedFace).toBe(0)
+    expect(w().selectedFaces).toEqual([0])
     w().setInvert(true)
     w().toggleVertex(1)
     w().selectFace(0)
     expect(w().selection).toEqual([])
-    expect(w().selectedFace).toBeNull()
+    expect(w().selectedFaces).toEqual([])
   })
 
   it('a placed object tapped under INVERT comes out and never goes in', () => {
@@ -721,7 +725,7 @@ describe('selection under INVERT', () => {
 
 describe('faces and palette', () => {
   beforeEach(() => {
-    useWorkshop.setState({ shards: [], currentId: null, selection: [], selectedFace: null, facePick: [], palette: [...DEFAULT_PALETTE], past: [], future: [], tool: 'stamp', stampKind: 'block', stampSize: 1, stampFacing: 0, color: [0, 0.9, 1] })
+    useWorkshop.setState({ shards: [], currentId: null, selection: [], selectedFaces: [], facePick: [], palette: [...DEFAULT_PALETTE], past: [], future: [], tool: 'stamp', stampKind: 'block', stampSize: 1, stampFacing: 0, color: [0, 0.9, 1] })
     w().create('t')
     w().placeStamp([0, 0, 0])
     w().setTool('face')
@@ -735,10 +739,10 @@ describe('faces and palette', () => {
     // (2026-10-10); a point already in hand stays, as with point taps.
     const corners = w().current()!.faces[3]
     expect(w().selection).toEqual(expect.arrayContaining([0, ...corners]))
-    expect(w().selectedFace).toBe(3)
+    expect(w().selectedFaces).toEqual([3])
     const gone = w().current()!.faces[3]
     w().deleteSelectedFace()
-    expect(w().selectedFace).toBeNull()
+    expect(w().selectedFaces).toEqual([])
     expect(w().current()!.faces).toHaveLength(before - 1)
     expect(w().current()!.faces).not.toContainEqual(gone)
     w().undo()
@@ -746,10 +750,10 @@ describe('faces and palette', () => {
   })
 
   it('drops the face when a point is selected, a corner picked, or the tool changes', () => {
-    w().selectFace(0); w().selectVertex(1); expect(w().selectedFace).toBeNull()
-    w().selectFace(0); w().pickForFace(2); expect(w().selectedFace).toBeNull()
+    w().selectFace(0); w().selectVertex(1); expect(w().selectedFaces).toEqual([])
+    w().selectFace(0); w().pickForFace(2); expect(w().selectedFaces).toEqual([])
     w().clearFacePick()
-    w().selectFace(0); w().setTool('select'); expect(w().selectedFace).toBeNull()
+    w().selectFace(0); w().setTool('select'); expect(w().selectedFaces).toEqual([])
   })
 
   it('remembers a picked color at the front once, moves a repeat forward, ignores junk, forgets on request', () => {
@@ -791,7 +795,7 @@ describe('faces and palette', () => {
  */
 describe('face colors and palettes', () => {
   beforeEach(() => {
-    useWorkshop.setState({ shards: [], currentId: null, selection: [], selectedFace: null, facePick: [], palette: [...DEFAULT_PALETTE], palettes: [], level: 0, color: [0, 0.9, 1], past: [], future: [], aim: null, notice: null, tool: 'stamp', stampKind: 'block', stampSize: 1, stampFacing: 0 })
+    useWorkshop.setState({ shards: [], currentId: null, selection: [], selectedFaces: [], facePick: [], palette: [...DEFAULT_PALETTE], palettes: [], level: 0, color: [0, 0.9, 1], past: [], future: [], aim: null, notice: null, tool: 'stamp', stampKind: 'block', stampSize: 1, stampFacing: 0 })
     w().create('t')
     w().placeStamp([0, 0, 0])
   })
@@ -904,7 +908,7 @@ describe('stacked by a move is not welded (2026-10-12)', () => {
   const RECT = [8, 9, 10, 11]
   const CUBE = [0, 1, 2, 3, 4, 5, 6, 7]
   beforeEach(() => {
-    useWorkshop.setState({ shards: [], currentId: null, selection: [], partSel: [], selectedFace: null, facePick: [], invert: false, past: [], future: [], aim: null, notice: null, tool: 'select', division: 1 })
+    useWorkshop.setState({ shards: [], currentId: null, selection: [], partSel: [], selectedFaces: [], facePick: [], invert: false, past: [], future: [], aim: null, notice: null, tool: 'select', division: 1 })
     const id = w().importText(SCENE)
     expect(id).not.toBeNull()
     w().select(id!)

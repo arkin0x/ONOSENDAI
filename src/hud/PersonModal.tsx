@@ -8,7 +8,7 @@
  * Who they are: picture, name, NIP-05 and npub (with COPY). An agent (a
  * kind 0 with NIP-24 `bot: true`) carries the AGENT badge, and the operator
  * its profile names, when it names one. Their avatar turning slowly
- * (ShardSpin), and COPY TO WORKSHOP, which copies the shard into your
+ * (CardSpin), and COPY TO WORKSHOP, which copies the shard into your
  * workshop credited to them (store/usePersonCard copyAvatarToWorkshop) and
  * says COPIED on the button, as the other copies do. Someone still drawn as
  * the default dodecahedron has no shard to show or copy, so the card is the
@@ -35,7 +35,7 @@ import { useAvatarShard, useAvatars } from '../store/useAvatars'
 import { copyAvatarToWorkshop, usePersonCard } from '../store/usePersonCard'
 import { spectate } from '../lib/spectator'
 import { shortHex } from '../lib/time'
-import { ShardSpin } from '../scene/ShardSpin'
+import { CardSpin } from '../scene/CardSpin'
 import { sendKey, useChat } from '../store/useChat'
 import { useSecrets } from '../store/useSecrets'
 import { setTalking } from '../store/useAgentDms'
@@ -82,7 +82,7 @@ interface CardProps {
   Preview?: ComponentType<{ shard: ShardModel; ignoreOpacity?: boolean }>
 }
 
-export function PersonCard({ pubkey, shard, event = null, onClose, Preview = ShardSpin }: CardProps): JSX.Element {
+export function PersonCard({ pubkey, shard, event = null, onClose, Preview = CardSpin }: CardProps): JSX.Element {
   const profile = useProfile(pubkey)
   const operator = profile?.bot ? profile.operator ?? null : null
   const operatorProfile = useProfile(operator)

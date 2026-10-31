@@ -11,7 +11,7 @@ import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { Color, Group, Matrix4, Mesh, MeshBasicMaterial, PerspectiveCamera, Raycaster, Scene, SphereGeometry, Vector2, Vector3, type Intersection } from 'three'
-import { HandleDots, HandleHalos, HandleHits, dotCapacity, perPixelAt1, type Dot } from '../handleDots'
+import { HandleDots, HandleHalos, HandleHits, PressMemory, dotCapacity, perPixelAt1, type Dot } from '../handleDots'
 
 const NAVE_POINTS = 1731
 
@@ -232,6 +232,40 @@ describe('HandleHits', () => {
   })
 })
 
+describe('PressMemory, the guard on a tap (Bench.tsx Handles onClick)', () => {
+  it('a lift on a point the press did not meet is no tap on it', () => {
+    const p = new PressMemory()
+    p.press('down 1', 3)
+    expect(p.met(3)).toBe(true)
+    expect(p.met(4)).toBe(false)
+  })
+  it('one press can meet several overlapping points', () => {
+    const p = new PressMemory()
+    p.press('down 1', 3); p.press('down 1', 4)
+    expect(p.met(3)).toBe(true)
+    expect(p.met(4)).toBe(true)
+  })
+  it('a new press forgets the last', () => {
+    const p = new PressMemory()
+    p.press('down 1', 3)
+    p.press('down 2', 7)
+    expect(p.met(3)).toBe(false)
+    expect(p.met(7)).toBe(true)
+  })
+  it('a press that met nothing leaves nothing met', () => {
+    const p = new PressMemory()
+    p.press('down 1', 3)
+    p.press('down 2', undefined)
+    expect(p.met(3)).toBe(false)
+  })
+  it('is what the bench asks before it takes a tap', () => {
+    const bench = readFileSync(join(__dirname, '..', 'Bench.tsx'), 'utf8')
+    expect(bench).toMatch(/if \(!g \|\| !pressed\.met\(e\.index as number\)\) return/)
+    expect(bench).toMatch(/pressed\.press\(e\.nativeEvent, e\.index\)/)
+    expect(bench).toMatch(/onPointerDown=\{onPress\}/)
+  })
+})
+
 describe('HandleHalos', () => {
   it('draws a whole nave selected as one object, and shows nothing with nothing selected', () => {
     const h = new HandleHalos(dotCapacity(NAVE_POINTS), null, 26, 0.85)
@@ -263,9 +297,15 @@ describe('the bench', () => {
   const handles = bench.slice(bench.indexOf('function Handles()'), bench.indexOf('/** The face being picked'))
 
   it('makes no object, element or frame callback per point', () => {
-    // Only the picked corners' rings go through a list, and only those.
-    expect(handles.match(/groups\.[a-z]*\(?[^\n]*=>[^\n]*<ScreenScale/g)).toBeNull()
-    expect(handles).toMatch(/groups\.filter\(\(g\) => g\.some\(\(i\) => pickedSet\.has\(i\)\)\)\.map/)
+    // Only the picked corners' rings go through a list, and only those: in the
+    // JSX it returns, one .map, however its lines are broken, and it starts
+    // from the picked points rather than from every point.
+    const jsx = handles.slice(handles.lastIndexOf('return (\n    <>'))
+    expect(jsx).toContain('<primitive object={hits}')
+    const lists = jsx.match(/\.(map|flatMap|forEach)\(/g) ?? []
+    expect(lists).toHaveLength(1)
+    expect(jsx).toMatch(/groups\s*\.filter\(\s*\(g\) => g\.some\(\(i\) => pickedSet\.has\(i\)\)\s*\)\s*\.map\(/)
+    expect(jsx).toMatch(/facePick\.length > 0 &&/)
     expect(handles).not.toMatch(/<sprite/)
     expect(handles).not.toMatch(/SphereGeometry/)
   })

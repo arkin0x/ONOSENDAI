@@ -20,7 +20,7 @@
  * the bottom above the two corners.
  */
 
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { memo, useEffect, useMemo, useRef, useState } from 'react'
 import { Field, Switch } from '../hud/ui/Switch'
 import { Vector3 } from 'three'
 import { Compass3D } from '../scene/Compass3D'
@@ -317,7 +317,7 @@ function ControlsPad({ points, objects = 0 }: { points: number; objects?: number
   const axes = useBenchView((s) => s.axes)
   // In FACE the pad's DELETE is the face's (see the corner below).
   const tool = useWorkshop((s) => s.tool)
-  const face = useWorkshop((s) => s.selectedFace)
+  const face = useWorkshop((s) => s.selectedFaces.length > 0)
   const bind = useRepeatable()
   const w = useWorkshop.getState
   const move = (name: NudgeName) => () => { const n = nudgeFor(useBenchView.getState().axes, name); w().moveSelected(n.axis, n.delta * w().step()) }
@@ -348,8 +348,8 @@ function ControlsPad({ points, objects = 0 }: { points: number; objects?: number
           the empty spot"). In FACE with points but no face the corner stays
           empty: deleting corners takes every face on them, which is not what
           a face tap meant. */}
-      {(tool !== 'face' || face !== null) && (
-        <button className="touchpad__key touchpad__key--delete" title={tool === 'face' ? 'Remove this face (Del)' : 'Delete the selected points (Del)'} aria-label={tool === 'face' ? 'Delete the face' : 'Delete selected'} {...noCallout} onClick={() => { if (tool === 'face') w().deleteSelectedFace(); else w().deleteSelected() }}>
+      {(tool !== 'face' || face) && (
+        <button className="touchpad__key touchpad__key--delete" title={tool === 'face' ? 'Remove the selected faces (Del)' : 'Delete the selected points (Del)'} aria-label={tool === 'face' ? 'Delete the face' : 'Delete selected'} {...noCallout} onClick={() => { if (tool === 'face') w().deleteSelectedFace(); else w().deleteSelected() }}>
           <Trash2 size={14} strokeWidth={2.25} aria-hidden />
           <span className="touchpad__sub">DELETE</span>
         </button>
@@ -432,10 +432,10 @@ function SelectRow({ inHand }: { inHand: boolean }): JSX.Element {
  * selected the row holds AUTO alone, and stands on the bottom, since the pad
  * is away then.
  */
-function ActionRow({ points, verts, parts, tool, face, picks, faces }: { points: number; verts: number; parts: number; tool: Tool; face: number | null; picks: number; faces: number }): JSX.Element | null {
+function ActionRow({ points, verts, parts, tool, face, picks, faces }: { points: number; verts: number; parts: number; tool: Tool; face: boolean; picks: number; faces: number }): JSX.Element | null {
   const w = useWorkshop.getState
   const [asking, setAsking] = useState(false)
-  useEffect(() => { if (face === null) setAsking(false) }, [face])
+  useEffect(() => { if (!face) setAsking(false) }, [face])
   const selecting = tool === 'select' || tool === 'face'
   // ALL under SELECT only: in FACE it confused what a tap on a face does
   // (arkinox, 2026-10-10).
@@ -444,7 +444,7 @@ function ActionRow({ points, verts, parts, tool, face, picks, faces }: { points:
   const showFill = picking || points >= 3
   const showSub = selecting && points >= 2
   const showAuto = tool === 'face' && faces > 0
-  const showFlip = tool === 'face' && face !== null
+  const showFlip = tool === 'face' && face
   if (!showAll && !showFill && !showSub && !showAuto && !showFlip) return null
   const choose = (fn: () => void) => (): void => { setAsking(false); fn() }
   return (
@@ -483,18 +483,18 @@ function ActionRow({ points, verts, parts, tool, face, picks, faces }: { points:
         </button>
       )}
       {showFlip && (
-        <button className="touchpad__key touchpad__key--two" title="Turn this face round: which side is its front" aria-label="Flip" aria-haspopup="menu" aria-expanded={asking} {...noCallout} onClick={() => setAsking((o) => !o)}>
+        <button className="touchpad__key touchpad__key--two" title="Turn the selected faces round: which side is the front" aria-label="Flip" aria-haspopup="menu" aria-expanded={asking} {...noCallout} onClick={() => setAsking((o) => !o)}>
           <FlipVertical2 size={15} strokeWidth={2.25} aria-hidden />
           <span className="touchpad__sub">FLIP</span>
         </button>
       )}
-      {asking && face !== null && (
+      {asking && face && (
         <>
           {/* Anywhere else puts the question away and turns nothing. */}
           <div className="benchpaste__away" onPointerDown={() => setAsking(false)} />
           <div className="benchpaste" role="menu" aria-label="What to flip">
-            <button className="workshop__btn" role="menuitem" title="This face turned round, its back to the front" onClick={choose(() => w().flipSelectedFace())}>FLIP FACE</button>
-            <button className="workshop__btn" role="menuitem" title="This face turned round, and every face joined to it by an edge turned to agree" onClick={choose(() => w().flipSelectedSurface())}>FLIP SURFACE</button>
+            <button className="workshop__btn" role="menuitem" title="The selected faces turned round, each back to its front" onClick={choose(() => w().flipSelectedFace())}>FLIP FACE</button>
+            <button className="workshop__btn" role="menuitem" title="The selected faces turned round, and every face joined to them by an edge turned to agree" onClick={choose(() => w().flipSelectedSurface())}>FLIP SURFACE</button>
           </div>
         </>
       )}
@@ -603,10 +603,82 @@ function BenchViewMenu(): JSX.Element {
 const ICON_PX = 16
 
 
+/**
+ * Put a shard on the clipboard, or say why not. Two silences lived here.
+ *
+ * An empty shard copied happily. A brand new object is zero vertices, and
+ * the payload that comes out is well formed, so pasting one into snocrash
+ * reported success and put nothing on the bench. "Nothing happens" was the
+ * whole of the bug report and it was accurate. Nothing is worth copying
+ * until there is something in it.
+ *
+ * And where there is no clipboard at all, `navigator.clipboard?.writeText(x)
+ * .then(...)` short-circuits the ENTIRE chain, not just the call: the button
+ * did nothing and said nothing. The check is explicit now, and the avatar's
+ * COPY goes through here too, where it used to reach for
+ * navigator.clipboard with no guard and throw.
+ *
+ * It fills the bench's own clipboard first, so the PASTE beside the tools
+ * puts the whole shard down in any shard (arkinox, 2026-10-08), and that
+ * works even where the system clipboard does not.
+ */
+function copyShard(s: ShardModel, ok: string): void {
+  const w = useWorkshop.getState
+  const say = (notice: string): void => useWorkshop.setState({ notice })
+  if (!w().copyShard(s)) { say(`"${s.name}" is empty. There is nothing to copy yet.`); return }
+  const clip = navigator.clipboard
+  if (!clip) return
+  void clip.writeText(JSON.stringify(toPayload(s))).then(
+    () => say(ok),
+    () => say(`Copied "${s.name}" for PASTE here. The system clipboard refused it.`),
+  )
+}
+
+function copy(id: string): void {
+  const w = useWorkshop.getState
+  const s = w().shards.find((x) => x.id === id)
+  if (!s) return
+  copyShard(s, `Copied "${s.name}" to the clipboard. PASTE it here or anywhere.`)
+}
+
+/**
+ * The SHARDS list in MENU, reading what it lists itself and memoized on which
+ * one is open, so a tap on the bench no longer draws it. Workshop renders on
+ * every change of the selection, the pick, the notice or the color; with the
+ * list inside it, a tap on a face walked every row of a Maze Kit library, a
+ * hundred and more, each with its thumbnail and its buttons. It draws when the
+ * shards change or another is opened, and not otherwise.
+ */
+const ShardList = memo(function ShardList({ currentId }: { currentId: string }): JSX.Element {
+  const shards = useWorkshop((s) => s.shards)
+  const w = useWorkshop.getState
+  // The list's order (the comment below says why).
+  const byRecent = useNewestFirst(shards, modelRef, modelEditedAt)
+  return (
+    <ul className="workshop__list">
+      {/* Last edited first: updatedAt moves on every edit and never on opening (arkinox, 2026-09-26).
+          A deploy counts as an edit here, inside its folder (arkinox, 2026-10-23). */}
+      <ShardFolders items={byRecent} refOf={modelRef} nameOf={modelName} deleteContents={DELETE_CONTENTS} row={(s, f) => (
+        <li key={s.id} className={s.id === currentId ? 'is-current' : ''} {...f.drag}>
+          <button className="workshop__pick" onClick={() => w().select(s.id)}>
+            <ShardThumb shard={s} own />
+            <span className="workshop__pick-name">{s.name}</span>
+            <span className="workshop__pick-meta">{s.vertices.length} v · {s.faces.length} f{s.parts?.length ? ` · ${s.parts.length} parts` : ''} · {s.mode}</span>
+          </button>
+          <button className="workshop__mini" title="Duplicate" aria-label={`Duplicate ${s.name}`} onClick={() => w().duplicate(s.id)}><CopyPlus size={13} strokeWidth={2.25} aria-hidden /></button>
+          <button className="workshop__mini" title="Copy to the clipboard" aria-label={`Copy ${s.name} to the clipboard`} onClick={() => copy(s.id)}><ClipboardCopy size={13} strokeWidth={2.25} aria-hidden /></button>
+          {f.tool}
+          <button className="workshop__mini workshop__mini--danger workshop__mini--x" title="Delete" aria-label={`Delete ${s.name}`} onClick={() => { if (window.confirm(`Delete "${s.name}"? This cannot be undone.`)) w().remove(s.id) }}>×</button>
+        </li>
+      )} />
+    </ul>
+  )
+})
+
 export function Workshop(): JSX.Element | null {
   const open = useWorkshop((s) => s.open)
   const shard = useWorkshop((s) => s.current())
-  const shards = useWorkshop((s) => s.shards)
+  const shardCount = useWorkshop((s) => s.shards.length)
   const tool = useWorkshop((s) => s.tool)
   const selection = useWorkshop((s) => s.selection)
   const partSel = useWorkshop((s) => s.partSel)
@@ -614,7 +686,8 @@ export function Workshop(): JSX.Element | null {
   const stampObject = useWorkshop((s) => s.stampObject)
   const [picking, setPicking] = useState(false)
   const facePick = useWorkshop((s) => s.facePick)
-  const selectedFace = useWorkshop((s) => s.selectedFace)
+  const selectedFaces = useWorkshop((s) => s.selectedFaces)
+  const faceHeld = selectedFaces.length > 0
   const plane = useWorkshop((s) => s.plane)
   const division = useWorkshop((s) => s.division)
   const showAvatar = useWorkshop((s) => s.showAvatar)
@@ -638,11 +711,16 @@ export function Workshop(): JSX.Element | null {
   // open menu, and is dropped the moment either changes, so it can never
   // come back over a different object (review of snocrash #36, 2026-10-15).
   const [retractAsk, setRetractAsk] = useState<string | null>(null)
+  const [panel, setPanel] = useState<Panel | null>(null)
+  // Only while SHARD is open, the one panel that shows them. Each is the whole
+  // object written out and measured or hashed: a cost on every paint of a big
+  // shard (a Basilica nave's payload is hundreds of KB), for lines nobody could see.
+  const seen = panel === 'shard' ? shard : null
   const pubState = useMemo(
-    () => publishState(shard ? ledger[shard.id] : undefined, shard ? shardFingerprint(shard) : '', me),
-    [shard, ledger, me],
+    () => publishState(seen ? ledger[seen.id] : undefined, seen ? shardFingerprint(seen) : '', me),
+    [seen, ledger, me],
   )
-  const wireBytes = useMemo(() => (shard ? new TextEncoder().encode(JSON.stringify(toPayload(withAuthoredConstrain(shard)))).length : 0), [shard])
+  const wireBytes = useMemo(() => (seen ? new TextEncoder().encode(JSON.stringify(toPayload(withAuthoredConstrain(seen)))).length : 0), [seen])
   // The moment the work is done: say so, because the signer's prompt may take a
   // while to appear and nothing else marks the end of the mining.
   const lastPhase = useRef<typeof phase>(null)
@@ -656,29 +734,29 @@ export function Workshop(): JSX.Element | null {
   const buildable = shard !== null && shard.vertices.length > 0 && shard.faces.length > 0
   // Something to deploy or clear: its own vertices, or objects it places (DECK-0003 §1.9 rule 13).
   const hasContent = shard !== null && (shard.vertices.length > 0 || (shard.parts?.length ?? 0) > 0)
+  // Only while AVATAR is open, which is what shows it and acts on it.
+  const pricing = panel === 'avatar'
   const work = useMemo(() => {
-    if (!shard || !buildable) return { required: 0, reach: 0, detail: 0, bytes: 0 }
+    if (!pricing || !shard || !buildable) return { required: 0, reach: 0, detail: 0, bytes: 0 }
     const payload = toPayload(shard)
     // The bytes hashed per try: the serialized event with a nonce tag of typical width.
     const bytes = new TextEncoder().encode(serializeEvent({ ...avatarTemplate(shard, 1_800_000_000), pubkey: me })).length + 40
     return { required: avatarWork(payload), reach: Math.max(1, avatarReach(payload)), detail: shard.vertices.length + shard.faces.length, bytes }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [buildable, shard?.vertices, shard?.faces, shard?.unit, shard?.name, me])
+  }, [pricing, buildable, shard?.vertices, shard?.faces, shard?.unit, shard?.name, me])
   const color = useWorkshop((s) => s.color)
   const stampKind = useWorkshop((s) => s.stampKind)
   const stampSize = useWorkshop((s) => s.stampSize)
   const stampFacing = useWorkshop((s) => s.stampFacing)
   const canUndo = useWorkshop((s) => s.past.length > 0)
   const canRedo = useWorkshop((s) => s.future.length > 0)
-  const [panel, setPanel] = useState<Panel | null>(null)
   // A RETRACT question belongs to one object in one open menu.
   useEffect(() => { setRetractAsk(null) }, [shard?.id, panel, open])
   const [pickerOpen, setPickerOpen] = useState(false)
   // The color bucket's second stage while a face is in hand (FILL or SEAM):
   // put away when the face goes.
   const [askingColor, setAskingColor] = useState(false)
-  const faceInHand = useWorkshop((s) => s.selectedFace)
-  useEffect(() => { if (faceInHand === null) setAskingColor(false) }, [faceInHand])
+  useEffect(() => { if (!faceHeld) setAskingColor(false) }, [faceHeld])
   const [viewOpen, setViewOpen] = useState(false)
   // On a phone the palette sheet and the TOOLS panel would share the bottom,
   // so opening the sheet puts the panel away.
@@ -716,8 +794,6 @@ export function Workshop(): JSX.Element | null {
   // changes which hooks run, and React counts them. This one sat after the
   // return for a day and opening the workshop threw React #310 (2026-09-24).
   const stacked = useMemo(() => (shard ? stackedSpots(shard) : { spots: 0, points: 0 }), [shard])
-  // The SHARDS list's order (the list below says why).
-  const byRecent = useNewestFirst(shards, modelRef, modelEditedAt)
   // The workshop is a modal over the scene, with arkinox's order inside it
   // (2026-10-01): its own modals (the palette sheet, the object picker, every
   // confirmation) open later and so close first; then the open panel, the
@@ -728,7 +804,7 @@ export function Workshop(): JSX.Element | null {
     const ws = useWorkshop.getState()
     if (panel !== null) setPanel(null)
     else if (viewOpen) setViewOpen(false)
-    else if (ws.selection.length || ws.partSel.length || ws.selectedFace !== null || ws.facePick.length) { ws.selectVertex(null); ws.clearFacePick() }
+    else if (ws.selection.length || ws.partSel.length || ws.selectedFaces.length > 0 || ws.facePick.length) { ws.selectVertex(null); ws.clearFacePick() }
     else ws.closeWorkshop()
   })
 
@@ -747,40 +823,6 @@ export function Workshop(): JSX.Element | null {
   // and the sheet behind the dropper holds all 256.
   const hex = rgbToHex(color)
 
-  /**
-   * Put a shard on the clipboard, or say why not. Two silences lived here.
-   *
-   * An empty shard copied happily. A brand new object is zero vertices, and
-   * the payload that comes out is well formed, so pasting one into snocrash
-   * reported success and put nothing on the bench. "Nothing happens" was the
-   * whole of the bug report and it was accurate. Nothing is worth copying
-   * until there is something in it.
-   *
-   * And where there is no clipboard at all, `navigator.clipboard?.writeText(x)
-   * .then(...)` short-circuits the ENTIRE chain, not just the call: the button
-   * did nothing and said nothing. The check is explicit now, and the avatar's
-   * COPY goes through here too, where it used to reach for
-   * navigator.clipboard with no guard and throw.
-   *
-   * It fills the bench's own clipboard first, so the PASTE beside the tools
-   * puts the whole shard down in any shard (arkinox, 2026-10-08), and that
-   * works even where the system clipboard does not.
-   */
-  const copyShard = (s: ShardModel, ok: string): void => {
-    if (!w().copyShard(s)) { say(`"${s.name}" is empty. There is nothing to copy yet.`); return }
-    const clip = navigator.clipboard
-    if (!clip) return
-    void clip.writeText(JSON.stringify(toPayload(s))).then(
-      () => say(ok),
-      () => say(`Copied "${s.name}" for PASTE here. The system clipboard refused it.`),
-    )
-  }
-
-  const copy = (id: string): void => {
-    const s = w().shards.find((x) => x.id === id)
-    if (!s) return
-    copyShard(s, `Copied "${s.name}" to the clipboard. PASTE it here or anywhere.`)
-  }
   const importText = (text: string): void => {
     const id = w().importText(text)
     if (id) { setPasteOpen(false); setPasteText(''); say('Pasted as a new object.') }
@@ -888,7 +930,7 @@ export function Workshop(): JSX.Element | null {
           and the avatar's under AVATAR. */}
       {panel === 'menu' && shard && (
         <div className="ws__panel" role="region" aria-label="Menu">
-          <div className="ws__panel-title">SHARDS ({shards.length})</div>
+          <div className="ws__panel-title">SHARDS ({shardCount})</div>
           <div className="workshop__list-row">
             <button className="workshop__new" onClick={() => w().create()}>+ NEW SHARD</button>
             <button className="workshop__btn" onClick={() => void paste()} title="An object copied from here or anywhere">PASTE</button>
@@ -903,23 +945,7 @@ export function Workshop(): JSX.Element | null {
               </div>
             </div>
           )}
-          <ul className="workshop__list">
-            {/* Last edited first: updatedAt moves on every edit and never on opening (arkinox, 2026-09-26).
-                A deploy counts as an edit here, inside its folder (arkinox, 2026-10-23). */}
-            <ShardFolders items={byRecent} refOf={modelRef} nameOf={modelName} deleteContents={DELETE_CONTENTS} row={(s, f) => (
-              <li key={s.id} className={s.id === shard.id ? 'is-current' : ''} {...f.drag}>
-                <button className="workshop__pick" onClick={() => w().select(s.id)}>
-                  <ShardThumb shard={s} own />
-                  <span className="workshop__pick-name">{s.name}</span>
-                  <span className="workshop__pick-meta">{s.vertices.length} v · {s.faces.length} f{s.parts?.length ? ` · ${s.parts.length} parts` : ''} · {s.mode}</span>
-                </button>
-                <button className="workshop__mini" title="Duplicate" aria-label={`Duplicate ${s.name}`} onClick={() => w().duplicate(s.id)}><CopyPlus size={13} strokeWidth={2.25} aria-hidden /></button>
-                <button className="workshop__mini" title="Copy to the clipboard" aria-label={`Copy ${s.name} to the clipboard`} onClick={() => copy(s.id)}><ClipboardCopy size={13} strokeWidth={2.25} aria-hidden /></button>
-                {f.tool}
-                <button className="workshop__mini workshop__mini--danger workshop__mini--x" title="Delete" aria-label={`Delete ${s.name}`} onClick={() => { if (window.confirm(`Delete "${s.name}"? This cannot be undone.`)) w().remove(s.id) }}>×</button>
-              </li>
-            )} />
-          </ul>
+          <ShardList currentId={shard.id} />
           <div className="workshop__row">
             <button className="workshop__btn workshop__btn--danger" disabled={!hasContent} onClick={() => { if (window.confirm('Delete all vertices, faces and placed objects in the scene?')) w().clearShard() }} title="Empty this scene (undoable)">CLEAR THIS SCENE</button>
             <span className="workshop__gap" />
@@ -1204,8 +1230,8 @@ export function Workshop(): JSX.Element | null {
           its panel, which opens upward over the chip. */}
       <div className="ws__tools">
         <WeldRow stacked={stacked} selected={selection.length} />
-        {(tool === 'select' || tool === 'face') && <SelectRow inHand={selection.length > 0 || partSel.length > 0 || selectedFace !== null || facePick.length > 0} />}
-        <ActionRow points={selectedPoints} verts={shard?.vertices.length ?? 0} parts={shard?.parts?.length ?? 0} tool={tool} face={selectedFace} picks={facePick.length} faces={shard?.faces.length ?? 0} />
+        {(tool === 'select' || tool === 'face') && <SelectRow inHand={selection.length > 0 || partSel.length > 0 || faceHeld || facePick.length > 0} />}
+        <ActionRow points={selectedPoints} verts={shard?.vertices.length ?? 0} parts={shard?.parts?.length ?? 0} tool={tool} face={faceHeld} picks={facePick.length} faces={shard?.faces.length ?? 0} />
         <TurnRow inHand={selection.length + partSel.length} />
         {/* The pad only while something is in hand: with the orbit ball on
             the bottom row now, nothing needs the pad's room kept, and an
@@ -1307,18 +1333,18 @@ export function Workshop(): JSX.Element | null {
             swatches and a second way to open the palette. The palette modal
             replaced all three of those, so the column was a worse copy of it
             wrapped around the only part worth keeping. */}
-        {(tool !== 'face' || selectedFace !== null) && (
+        {(tool !== 'face' || faceHeld) && (
           <div className="ws__acts" role="group" aria-label="Apply the color">
             {/* The dropper, over the globe while one point or one face is in
                 hand (arkinox, 2026-10-10; it stood beside the chip before):
                 that color, a face's as the average of its corners, into the
                 chip and onto the front of the recent row. */}
-            {(selection.length === 1 || (selectedFace !== null && (selection.length === 0 || tool === 'face'))) && (
-              <button className="workshop__color ws__act" onClick={() => w().sampleColor()} title={selectedFace !== null && (selection.length === 0 || tool === 'face') ? 'Take this face\'s color: its seam color, else the average of its corners' : 'Take this point\'s color'} aria-label="Take the selected color" {...noCallout}>
+            {(selection.length === 1 || (faceHeld && (selection.length === 0 || tool === 'face'))) && (
+              <button className="workshop__color ws__act" onClick={() => w().sampleColor()} title={faceHeld && (selection.length === 0 || tool === 'face') ? 'Take this face\'s color: its seam color, else the average of its corners' : 'Take this point\'s color'} aria-label="Take the selected color" {...noCallout}>
                 <Pipette size={17} strokeWidth={2.25} aria-hidden />
               </button>
             )}
-            <button className="workshop__color ws__act" disabled={!shard || shard.vertices.length === 0} onClick={() => w().colorAll(w().color)} title="The color onto every vertex in the object" aria-label="Color everything" style={{ borderColor: hex }} {...noCallout}>
+            <button className="workshop__color ws__act" disabled={!shard || shard.vertices.length === 0} onClick={() => w().colorAll(w().color)} title="The color onto every vertex and every face in the object" aria-label="Color everything" style={{ borderColor: hex }} {...noCallout}>
               <Globe size={17} strokeWidth={2.25} aria-hidden />
             </button>
             {selection.length > 0 && (
@@ -1326,28 +1352,28 @@ export function Workshop(): JSX.Element | null {
                 <Waypoints size={17} strokeWidth={2.25} aria-hidden />
               </button>
             )}
-            {/* The bucket: the color onto the points in hand. With a face in
+            {/* The bucket: the color onto the points in hand. With faces in
                 hand it asks first (arkinox, 2026-10-10; SEAM was its own key
-                on the face row): FILL colors the corners and blends across
-                the edges they share, SEAM gives this one face a hard color
-                that stops at its edge (store colorFace). */}
-            {selection.length > 0 && selectedFace === null && (
+                on the face row): FILL colors their corners and blends across
+                the edges they share, SEAM gives every one a hard color
+                that stops at its edge (store colorFaces). */}
+            {selection.length > 0 && !faceHeld && (
               <button className="workshop__color ws__act" onClick={() => w().colorSelected(w().color)} title="The color onto the points in hand" aria-label="Color the selected points" style={{ borderColor: hex }} {...noCallout}>
                 <PaintBucket size={17} strokeWidth={2.25} aria-hidden />
               </button>
             )}
-            {selectedFace !== null && (
-              <button className="workshop__color ws__act ws__act--two" onClick={() => setAskingColor((o) => !o)} title="Color this face: its corners, or a hard seam" aria-label="Color the face" aria-haspopup="menu" aria-expanded={askingColor} style={{ borderColor: hex }} {...noCallout}>
+            {faceHeld && (
+              <button className="workshop__color ws__act ws__act--two" onClick={() => setAskingColor((o) => !o)} title="Color the selected faces: their corners, or a hard seam" aria-label="Color the selected faces" aria-haspopup="menu" aria-expanded={askingColor} style={{ borderColor: hex }} {...noCallout}>
                 <PaintBucket size={17} strokeWidth={2.25} aria-hidden />
               </button>
             )}
-            {askingColor && selectedFace !== null && (
+            {askingColor && faceHeld && (
               <>
                 {/* Anywhere else puts the question away and colors nothing. */}
                 <div className="benchpaste__away" onPointerDown={() => setAskingColor(false)} />
-                <div className="benchpaste benchpaste--right" role="menu" aria-label="How to color the face">
-                  <button className="workshop__btn" role="menuitem" title="The color onto the face's corners; it blends across the edges they share" onClick={() => { setAskingColor(false); w().colorSelected(w().color) }}>FILL</button>
-                  <button className="workshop__btn" role="menuitem" title="The color onto this face as a hard seam, not blended from its corners" onClick={() => { setAskingColor(false); w().colorFace(selectedFace, w().color) }}>SEAM</button>
+                <div className="benchpaste benchpaste--right" role="menu" aria-label="How to color the selected faces">
+                  <button className="workshop__btn" role="menuitem" title="The color onto the corners of every selected face; it blends across the edges they share, and a face with a seam takes the color flat" onClick={() => { setAskingColor(false); w().colorSelected(w().color) }}>FILL</button>
+                  <button className="workshop__btn" role="menuitem" title="The color onto every selected face as a hard seam, not blended from its corners" onClick={() => { setAskingColor(false); w().colorFaces(selectedFaces, w().color) }}>SEAM</button>
                 </div>
               </>
             )}

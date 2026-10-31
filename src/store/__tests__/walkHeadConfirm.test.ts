@@ -11,6 +11,7 @@
  * moves again; a COMMIT that lost its first look along with WALK.
  */
 
+import { provedFor } from '../fixtures/provedHop'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 vi.hoisted(() => {
@@ -59,7 +60,14 @@ import { hopTemplate, positionHex, type NostrEvent } from '../../lib/events'
 const S = () => useCyberspace.getState()
 
 /** The worker's answer to a proof request: done, bound to the head it was asked from. */
-const done = (req: Req) => ({ type: 'done' as const, id: req.id, mode: req.mode as 'hop', elapsedMs: 5, proofHash: 'ab'.repeat(32), terrainK: 8, lca: { x: 1, y: 0, z: 0 }, totalOps: 1, prevEventId: req.prevEventId })
+const done = (req: Req) => ({ type: 'done' as const, id: req.id, mode: req.mode as 'hop', elapsedMs: 5, ...provedFor(req), terrainK: 8, lca: { x: 1, y: 0, z: 0 }, totalOps: 1, prevEventId: req.prevEventId })
+
+/**
+ * A finished proof with a stand-in seal, for a step the head refuses: that
+ * refusal comes before the Level 1 check (finishProof), and a real proof of
+ * a tall route step is seconds of work in a test.
+ */
+const refusedAtHead = (req: Req) => ({ type: 'done' as const, id: req.id, mode: req.mode as 'hop', elapsedMs: 5, proofHash: 'ab'.repeat(32), terrainK: 8, lca: { x: 1, y: 0, z: 0 }, totalOps: 1, prevEventId: req.prevEventId })
 
 /** The id of the event an action names as the one before it. */
 const previousOf = (e: NostrEvent): string | undefined => e.tags.find((t) => t[0] === 'e' && t[3] === 'previous')?.[1] ?? e.tags.find((t) => t[0] === 'e')?.[1]
@@ -68,7 +76,7 @@ const previousOf = (e: NostrEvent): string | undefined => e.tags.find((t) => t[0
 async function theirMove(dz: bigint): Promise<NostrEvent> {
   const s = S()
   const head = s.events[s.events.length - 1]
-  return s.signEvent(hopTemplate({ createdAt: head.created_at + 1, genesisId: s.genesisId, previousId: head.id, prevCoordHex: s.coordHex(), to: { ...s.position, z: s.position.z + dz }, plane: s.headPlane, proofHash: '0'.repeat(64) }))
+  return s.signEvent(hopTemplate({ createdAt: head.created_at + 1, genesisId: s.genesisId, previousId: head.id, prevCoordHex: s.coordHex(), to: { ...s.position, z: s.position.z + dz }, plane: s.headPlane, proofHash: '0'.repeat(64), mn: '0'.repeat(16), mp: '00' }))
 }
 
 /** One WALK step pressed and closed: its proof is asked of the worker. */
@@ -174,7 +182,7 @@ describe('WALK asks the relays once per step, before signing (arkinox, 2026-10-3
     expect(relay.asked).toBe(0)
     const theirs = await theirMove(4n)
     relay.answers = [[theirs]]
-    await S().applyProofMessage(done(req))
+    await S().applyProofMessage(refusedAtHead(req))
     await new Promise((r) => setTimeout(r, 20))
     // Refused at signing: their move taken in, no second proof asked, the
     // route and the walk stopped with the WALK words.

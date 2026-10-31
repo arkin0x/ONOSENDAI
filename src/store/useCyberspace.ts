@@ -2229,7 +2229,7 @@ function startRowsCheck(pubkey: string, read: ChainRead): void {
   const own = checkRows(pubkey).then((bad) => new Set(bad), () => checkSignatures(events)).then((bad) => {
     const badKeys = new Set(events.filter((e) => bad.has(e.id)).map(sigKey))
     for (const e of events) {
-      if (bad.has(e.id)) { verifiedSigs.delete(sigKey(e)); continue }
+      if (bad.has(e.id)) continue
       verifiedSigs.add(sigKey(e))
       rememberVerified(e.id, e.sig)
     }

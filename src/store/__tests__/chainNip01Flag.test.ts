@@ -120,6 +120,39 @@ describe('the NIP-01 flag', () => {
     expect(third.useCyberspace.getState().events).toHaveLength(12)
   })
 
+  it('a row not flagged yet is checked exactly once: by the worker, and not again by the old check', async () => {
+    const chain = chainOf(12)
+    await seed(chain)
+    await settled(await load())
+    performance.clearMarks()
+    schnorr.n = 0
+    await settled(await load())
+    expect(schnorr.n).toBe(12)
+  })
+
+  it('a relay that sends a flagged event while the check is still running is not checked again', async () => {
+    const chain = chainOf(60)
+    await seed(chain)
+    await settled(await load())
+    performance.clearMarks()
+    await settled(await load())
+    // The check takes the slow road, so it is still going when the relay's copy lands.
+    const proto = IDBDatabase.prototype as unknown as { transaction: (...x: unknown[]) => unknown }
+    const real = proto.transaction
+    proto.transaction = function (this: IDBDatabase, ...x: unknown[]) {
+      if (x[0] === 'events' && x[1] === 'readonly') throw new DOMException('gone', 'InvalidStateError')
+      return real.apply(this, x)
+    }
+    try {
+      await load()
+      const { verifyOnce } = await import('../../lib/verifiedSigs')
+      schnorr.n = 0
+      expect(verifyOnce(JSON.parse(JSON.stringify(chain[2])) as NostrEvent)).toBe(true)
+      expect(schnorr.n).toBe(0)
+    } finally { proto.transaction = real }
+    await new Promise((r) => setTimeout(r, 100))
+  })
+
   it('a reload holds no action back: nothing says it is checking signatures', async () => {
     const chain = chainOf(6)
     await seed(chain)
@@ -205,6 +238,7 @@ describe('the NIP-01 flag', () => {
     const proto = IDBIndex.prototype as unknown as { getAll: (...x: unknown[]) => unknown }
     const real = proto.getAll
     let reads = 0
+    schnorr.n = 0
     const second = (async () => {
       // The chain's read itself goes through; the check's read of the same index does not.
       proto.getAll = function (this: IDBIndex, ...x: unknown[]) {

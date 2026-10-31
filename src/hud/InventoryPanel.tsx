@@ -212,7 +212,7 @@ export function takenAudioModeration(item: Pick<HeldItem, 'id' | 'author' | 'ver
  * (arkinox, 2026-10-11). The X clears a row off the list; a coin has it
  * only once redeemed, since a cleared coin's card is out of reach.
  */
-function TakenRow({ item }: { item: HeldItem }): JSX.Element {
+export function TakenRow({ item }: { item: HeldItem }): JSX.Element {
   const [open, setOpen] = useState(false)
   const [details, setDetails] = useState(false)
   const me = useCyberspace((s) => s.identity.pubkey)

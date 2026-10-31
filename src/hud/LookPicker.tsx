@@ -11,9 +11,13 @@
  * yet: carrying those pieces inside what is hidden is the inline parts work
  * (cyberspace spec PR #81, ONOSENDAI #504), held until that spec merges. It
  * is listed, disabled, with the reason as its tooltip.
+ *
+ * Rendered on the body (a portal), over the screen: the hide bar it opens
+ * from scrolls and clips what is inside it.
  */
 
 import { useState } from 'react'
+import { createPortal } from 'react-dom'
 import type { ShardModel } from 'sno-core/shards'
 import { parseAddress } from 'sno-core/parts'
 import { useWorkshop } from '../store/useWorkshop'
@@ -42,7 +46,8 @@ export function LookPicker({ onPick, onClose }: { onPick: (look: LookChoice) => 
   const list: ShardModel[] = useNewestFirst(shards, modelRef, modelEditedAt)
   const [source, setSource] = useState<'mine' | 'feed'>(() => (shards.length === 0 ? 'feed' : 'mine'))
   useEscape('modal', true, onClose)
-  return (
+  // To the body: the hide bar it opens from clips what is inside it.
+  return createPortal((
     <div className="modal" role="dialog" aria-modal="true" aria-label="Model" onPointerDown={onClose}>
       <div className="modal__card login stash-modal" onPointerDown={(e) => e.stopPropagation()}>
         <header className="panel__head secrets__head">
@@ -80,5 +85,5 @@ export function LookPicker({ onPick, onClose }: { onPick: (look: LookChoice) => 
         )}
       </div>
     </div>
-  )
+  ), document.body)
 }

@@ -113,11 +113,13 @@ export function rekeyCarried(model: ShardModel, me: string | null): ShardModel {
     if (!Array.isArray(x.refs)) return x
     return { ...x, refs: x.refs.map((r: unknown) => (Array.isArray(r) && r[0] === 'a' && typeof r[1] === 'string' && renamed.has(r[1]) ? ['a', renamed.get(r[1]), ...r.slice(2)] : r)) }
   }
-  const objects: Record<string, unknown> = {}
+  // The keys go back in code point order (DECK-0003 §1.2): plain string comparison.
+  const rewritten: Array<[string, unknown]> = []
   for (const [key, payload] of Object.entries(model.objects)) {
     const next = renamed.get(key)
-    if (!next) continue
-    objects[next] = payload && typeof payload === 'object' && !Array.isArray(payload) ? refsOf(payload as { refs?: unknown }) : payload
+    if (next) rewritten.push([next, payload && typeof payload === 'object' && !Array.isArray(payload) ? refsOf(payload as { refs?: unknown }) : payload])
   }
+  rewritten.sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
+  const objects = Object.fromEntries(rewritten)
   return { ...refsOf(model), objects, author: me }
 }

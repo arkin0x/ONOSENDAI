@@ -235,8 +235,8 @@ export interface LookTags {
 /**
  * The `look` tags of a chest or a door (§3.6), chosen by shape before any
  * payload is read: a tag is well-formed when its second element is a
- * string and it has exactly two elements (a closed look) or `open` as its
- * third (an open look); the first well-formed tag of each counts, and every
+ * string and it has exactly two elements (a closed look), or exactly three
+ * with `open` as the third (an open look); the first well-formed tag of each counts, and every
  * other `look` tag is ignored, one whose third element is a word not known
  * among them. Only then is each counted payload checked (DECK-0003 §1.9, and
  * MAX_LOOK_BYTES here): one that fails is no look of that kind, never a fall
@@ -253,7 +253,7 @@ export function lookTagsOf(tags: readonly unknown[] | undefined, author: string 
   for (const t of tags) {
     if (!Array.isArray(t) || t[0] !== LOOK_TAG || typeof t[1] !== 'string') continue
     if (t.length === 2) closed ??= t[1]
-    else if (t[2] === 'open') open ??= t[1]
+    else if (t.length === 3 && t[2] === 'open') open ??= t[1]
   }
   const read = (payload: string | null): ShardModel | null => {
     const model = payload === null ? null : readLookPayload(payload)

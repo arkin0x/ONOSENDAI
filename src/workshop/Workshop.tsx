@@ -20,7 +20,7 @@
  * the bottom above the two corners.
  */
 
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { memo, useEffect, useMemo, useRef, useState } from 'react'
 import { Field, Switch } from '../hud/ui/Switch'
 import { Vector3 } from 'three'
 import { Compass3D } from '../scene/Compass3D'
@@ -603,10 +603,82 @@ function BenchViewMenu(): JSX.Element {
 const ICON_PX = 16
 
 
+/**
+ * Put a shard on the clipboard, or say why not. Two silences lived here.
+ *
+ * An empty shard copied happily. A brand new object is zero vertices, and
+ * the payload that comes out is well formed, so pasting one into snocrash
+ * reported success and put nothing on the bench. "Nothing happens" was the
+ * whole of the bug report and it was accurate. Nothing is worth copying
+ * until there is something in it.
+ *
+ * And where there is no clipboard at all, `navigator.clipboard?.writeText(x)
+ * .then(...)` short-circuits the ENTIRE chain, not just the call: the button
+ * did nothing and said nothing. The check is explicit now, and the avatar's
+ * COPY goes through here too, where it used to reach for
+ * navigator.clipboard with no guard and throw.
+ *
+ * It fills the bench's own clipboard first, so the PASTE beside the tools
+ * puts the whole shard down in any shard (arkinox, 2026-10-08), and that
+ * works even where the system clipboard does not.
+ */
+function copyShard(s: ShardModel, ok: string): void {
+  const w = useWorkshop.getState
+  const say = (notice: string): void => useWorkshop.setState({ notice })
+  if (!w().copyShard(s)) { say(`"${s.name}" is empty. There is nothing to copy yet.`); return }
+  const clip = navigator.clipboard
+  if (!clip) return
+  void clip.writeText(JSON.stringify(toPayload(s))).then(
+    () => say(ok),
+    () => say(`Copied "${s.name}" for PASTE here. The system clipboard refused it.`),
+  )
+}
+
+function copy(id: string): void {
+  const w = useWorkshop.getState
+  const s = w().shards.find((x) => x.id === id)
+  if (!s) return
+  copyShard(s, `Copied "${s.name}" to the clipboard. PASTE it here or anywhere.`)
+}
+
+/**
+ * The SHARDS list in MENU, reading what it lists itself and memoized on which
+ * one is open, so a tap on the bench no longer draws it. Workshop renders on
+ * every change of the selection, the pick, the notice or the color; with the
+ * list inside it, a tap on a face walked every row of a Maze Kit library, a
+ * hundred and more, each with its thumbnail and its buttons. It draws when the
+ * shards change or another is opened, and not otherwise.
+ */
+const ShardList = memo(function ShardList({ currentId }: { currentId: string }): JSX.Element {
+  const shards = useWorkshop((s) => s.shards)
+  const w = useWorkshop.getState
+  // The list's order (the comment below says why).
+  const byRecent = useNewestFirst(shards, modelRef, modelEditedAt)
+  return (
+    <ul className="workshop__list">
+      {/* Last edited first: updatedAt moves on every edit and never on opening (arkinox, 2026-09-26).
+          A deploy counts as an edit here, inside its folder (arkinox, 2026-10-23). */}
+      <ShardFolders items={byRecent} refOf={modelRef} nameOf={modelName} deleteContents={DELETE_CONTENTS} row={(s, f) => (
+        <li key={s.id} className={s.id === currentId ? 'is-current' : ''} {...f.drag}>
+          <button className="workshop__pick" onClick={() => w().select(s.id)}>
+            <ShardThumb shard={s} own />
+            <span className="workshop__pick-name">{s.name}</span>
+            <span className="workshop__pick-meta">{s.vertices.length} v · {s.faces.length} f{s.parts?.length ? ` · ${s.parts.length} parts` : ''} · {s.mode}</span>
+          </button>
+          <button className="workshop__mini" title="Duplicate" aria-label={`Duplicate ${s.name}`} onClick={() => w().duplicate(s.id)}><CopyPlus size={13} strokeWidth={2.25} aria-hidden /></button>
+          <button className="workshop__mini" title="Copy to the clipboard" aria-label={`Copy ${s.name} to the clipboard`} onClick={() => copy(s.id)}><ClipboardCopy size={13} strokeWidth={2.25} aria-hidden /></button>
+          {f.tool}
+          <button className="workshop__mini workshop__mini--danger workshop__mini--x" title="Delete" aria-label={`Delete ${s.name}`} onClick={() => { if (window.confirm(`Delete "${s.name}"? This cannot be undone.`)) w().remove(s.id) }}>×</button>
+        </li>
+      )} />
+    </ul>
+  )
+})
+
 export function Workshop(): JSX.Element | null {
   const open = useWorkshop((s) => s.open)
   const shard = useWorkshop((s) => s.current())
-  const shards = useWorkshop((s) => s.shards)
+  const shardCount = useWorkshop((s) => s.shards.length)
   const tool = useWorkshop((s) => s.tool)
   const selection = useWorkshop((s) => s.selection)
   const partSel = useWorkshop((s) => s.partSel)
@@ -638,11 +710,16 @@ export function Workshop(): JSX.Element | null {
   // open menu, and is dropped the moment either changes, so it can never
   // come back over a different object (review of snocrash #36, 2026-10-15).
   const [retractAsk, setRetractAsk] = useState<string | null>(null)
+  const [panel, setPanel] = useState<Panel | null>(null)
+  // Only while SHARD is open, the one panel that shows them. Each is the whole
+  // object written out and measured or hashed: a cost on every paint of a big
+  // shard (a Basilica nave's payload is hundreds of KB), for lines nobody could see.
+  const seen = panel === 'shard' ? shard : null
   const pubState = useMemo(
-    () => publishState(shard ? ledger[shard.id] : undefined, shard ? shardFingerprint(shard) : '', me),
-    [shard, ledger, me],
+    () => publishState(seen ? ledger[seen.id] : undefined, seen ? shardFingerprint(seen) : '', me),
+    [seen, ledger, me],
   )
-  const wireBytes = useMemo(() => (shard ? new TextEncoder().encode(JSON.stringify(toPayload(withAuthoredConstrain(shard)))).length : 0), [shard])
+  const wireBytes = useMemo(() => (seen ? new TextEncoder().encode(JSON.stringify(toPayload(withAuthoredConstrain(seen)))).length : 0), [seen])
   // The moment the work is done: say so, because the signer's prompt may take a
   // while to appear and nothing else marks the end of the mining.
   const lastPhase = useRef<typeof phase>(null)
@@ -656,21 +733,22 @@ export function Workshop(): JSX.Element | null {
   const buildable = shard !== null && shard.vertices.length > 0 && shard.faces.length > 0
   // Something to deploy or clear: its own vertices, or objects it places (DECK-0003 §1.9 rule 13).
   const hasContent = shard !== null && (shard.vertices.length > 0 || (shard.parts?.length ?? 0) > 0)
+  // Only while AVATAR is open, which is what shows it and acts on it.
+  const pricing = panel === 'avatar'
   const work = useMemo(() => {
-    if (!shard || !buildable) return { required: 0, reach: 0, detail: 0, bytes: 0 }
+    if (!pricing || !shard || !buildable) return { required: 0, reach: 0, detail: 0, bytes: 0 }
     const payload = toPayload(shard)
     // The bytes hashed per try: the serialized event with a nonce tag of typical width.
     const bytes = new TextEncoder().encode(serializeEvent({ ...avatarTemplate(shard, 1_800_000_000), pubkey: me })).length + 40
     return { required: avatarWork(payload), reach: Math.max(1, avatarReach(payload)), detail: shard.vertices.length + shard.faces.length, bytes }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [buildable, shard?.vertices, shard?.faces, shard?.unit, shard?.name, me])
+  }, [pricing, buildable, shard?.vertices, shard?.faces, shard?.unit, shard?.name, me])
   const color = useWorkshop((s) => s.color)
   const stampKind = useWorkshop((s) => s.stampKind)
   const stampSize = useWorkshop((s) => s.stampSize)
   const stampFacing = useWorkshop((s) => s.stampFacing)
   const canUndo = useWorkshop((s) => s.past.length > 0)
   const canRedo = useWorkshop((s) => s.future.length > 0)
-  const [panel, setPanel] = useState<Panel | null>(null)
   // A RETRACT question belongs to one object in one open menu.
   useEffect(() => { setRetractAsk(null) }, [shard?.id, panel, open])
   const [pickerOpen, setPickerOpen] = useState(false)
@@ -716,8 +794,6 @@ export function Workshop(): JSX.Element | null {
   // changes which hooks run, and React counts them. This one sat after the
   // return for a day and opening the workshop threw React #310 (2026-09-24).
   const stacked = useMemo(() => (shard ? stackedSpots(shard) : { spots: 0, points: 0 }), [shard])
-  // The SHARDS list's order (the list below says why).
-  const byRecent = useNewestFirst(shards, modelRef, modelEditedAt)
   // The workshop is a modal over the scene, with arkinox's order inside it
   // (2026-10-01): its own modals (the palette sheet, the object picker, every
   // confirmation) open later and so close first; then the open panel, the
@@ -747,40 +823,6 @@ export function Workshop(): JSX.Element | null {
   // and the sheet behind the dropper holds all 256.
   const hex = rgbToHex(color)
 
-  /**
-   * Put a shard on the clipboard, or say why not. Two silences lived here.
-   *
-   * An empty shard copied happily. A brand new object is zero vertices, and
-   * the payload that comes out is well formed, so pasting one into snocrash
-   * reported success and put nothing on the bench. "Nothing happens" was the
-   * whole of the bug report and it was accurate. Nothing is worth copying
-   * until there is something in it.
-   *
-   * And where there is no clipboard at all, `navigator.clipboard?.writeText(x)
-   * .then(...)` short-circuits the ENTIRE chain, not just the call: the button
-   * did nothing and said nothing. The check is explicit now, and the avatar's
-   * COPY goes through here too, where it used to reach for
-   * navigator.clipboard with no guard and throw.
-   *
-   * It fills the bench's own clipboard first, so the PASTE beside the tools
-   * puts the whole shard down in any shard (arkinox, 2026-10-08), and that
-   * works even where the system clipboard does not.
-   */
-  const copyShard = (s: ShardModel, ok: string): void => {
-    if (!w().copyShard(s)) { say(`"${s.name}" is empty. There is nothing to copy yet.`); return }
-    const clip = navigator.clipboard
-    if (!clip) return
-    void clip.writeText(JSON.stringify(toPayload(s))).then(
-      () => say(ok),
-      () => say(`Copied "${s.name}" for PASTE here. The system clipboard refused it.`),
-    )
-  }
-
-  const copy = (id: string): void => {
-    const s = w().shards.find((x) => x.id === id)
-    if (!s) return
-    copyShard(s, `Copied "${s.name}" to the clipboard. PASTE it here or anywhere.`)
-  }
   const importText = (text: string): void => {
     const id = w().importText(text)
     if (id) { setPasteOpen(false); setPasteText(''); say('Pasted as a new object.') }
@@ -888,7 +930,7 @@ export function Workshop(): JSX.Element | null {
           and the avatar's under AVATAR. */}
       {panel === 'menu' && shard && (
         <div className="ws__panel" role="region" aria-label="Menu">
-          <div className="ws__panel-title">SHARDS ({shards.length})</div>
+          <div className="ws__panel-title">SHARDS ({shardCount})</div>
           <div className="workshop__list-row">
             <button className="workshop__new" onClick={() => w().create()}>+ NEW SHARD</button>
             <button className="workshop__btn" onClick={() => void paste()} title="An object copied from here or anywhere">PASTE</button>
@@ -903,23 +945,7 @@ export function Workshop(): JSX.Element | null {
               </div>
             </div>
           )}
-          <ul className="workshop__list">
-            {/* Last edited first: updatedAt moves on every edit and never on opening (arkinox, 2026-09-26).
-                A deploy counts as an edit here, inside its folder (arkinox, 2026-10-23). */}
-            <ShardFolders items={byRecent} refOf={modelRef} nameOf={modelName} deleteContents={DELETE_CONTENTS} row={(s, f) => (
-              <li key={s.id} className={s.id === shard.id ? 'is-current' : ''} {...f.drag}>
-                <button className="workshop__pick" onClick={() => w().select(s.id)}>
-                  <ShardThumb shard={s} own />
-                  <span className="workshop__pick-name">{s.name}</span>
-                  <span className="workshop__pick-meta">{s.vertices.length} v · {s.faces.length} f{s.parts?.length ? ` · ${s.parts.length} parts` : ''} · {s.mode}</span>
-                </button>
-                <button className="workshop__mini" title="Duplicate" aria-label={`Duplicate ${s.name}`} onClick={() => w().duplicate(s.id)}><CopyPlus size={13} strokeWidth={2.25} aria-hidden /></button>
-                <button className="workshop__mini" title="Copy to the clipboard" aria-label={`Copy ${s.name} to the clipboard`} onClick={() => copy(s.id)}><ClipboardCopy size={13} strokeWidth={2.25} aria-hidden /></button>
-                {f.tool}
-                <button className="workshop__mini workshop__mini--danger workshop__mini--x" title="Delete" aria-label={`Delete ${s.name}`} onClick={() => { if (window.confirm(`Delete "${s.name}"? This cannot be undone.`)) w().remove(s.id) }}>×</button>
-              </li>
-            )} />
-          </ul>
+          <ShardList currentId={shard.id} />
           <div className="workshop__row">
             <button className="workshop__btn workshop__btn--danger" disabled={!hasContent} onClick={() => { if (window.confirm('Delete all vertices, faces and placed objects in the scene?')) w().clearShard() }} title="Empty this scene (undoable)">CLEAR THIS SCENE</button>
             <span className="workshop__gap" />

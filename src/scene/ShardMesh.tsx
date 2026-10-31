@@ -15,7 +15,7 @@
  */
 
 import { useEffect, useLayoutEffect, useMemo, useRef, useSyncExternalStore, type ReactNode } from 'react'
-import { useFrame, type ThreeEvent } from '@react-three/fiber'
+import { useFrame, useThree, type ThreeEvent } from '@react-three/fiber'
 import {
   FrontSide,
   BufferAttribute,
@@ -159,6 +159,41 @@ interface Props {
 }
 
 const STATIC = [0, 0.9, 1] as const
+
+/** Whether two lists hold the same numbers, in the same order. */
+export function sameNumbers(a: ArrayLike<number>, b: ArrayLike<number>): boolean {
+  if (a === b) return true
+  if (a.length !== b.length) return false
+  for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return false
+  return true
+}
+
+/**
+ * The list last handed over while the new one holds the same numbers, so what
+ * is keyed on it stands. The numbers are read at most once per change of the
+ * model, and that is far less than what it saves: painting a face changes no
+ * position and no triangle, and rebuilt, it was five new geometries and their
+ * GPU buffers per paint.
+ */
+/**
+ * What the position and color attributes live and die by. Every geometry a
+ * shard draws shares them, and disposing a geometry makes three delete the GL
+ * buffer of each attribute it holds, even one another geometry still uses. That
+ * geometry's vertex array goes on reading the deleted buffer, while three writes
+ * to a new one: a paint changes the store and the buffer and nothing on screen
+ * (SOLID, LINES, SOLID, then paint: review of #562). So they are made again
+ * whenever any geometry using them is: the points, the triangles (a FLIP), the
+ * mode (the wireframe) and `lit` (the insides). A paint changes none of these.
+ */
+export function sharedBufferDeps(positions: ArrayLike<number>, colorCount: number, index: ArrayLike<number>, mode: string, lit: boolean): unknown[] {
+  return [positions, colorCount, index, mode, lit]
+}
+
+function useSame<T extends ArrayLike<number>>(next: T): T {
+  const held = useRef(next)
+  if (!sameNumbers(held.current, next)) held.current = next
+  return held.current
+}
 
 /**
  * What a shard draws: its points in the render mapping, and every one of its
@@ -330,11 +365,31 @@ export function ShardMesh({ shard: given, scale = 1, ghost = false, birth, disso
   // that hands over a fresh copy of the same shard does not rebuild it
   // (unless it has face colours: the expansion above makes new arrays).
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  const { positions, colors, index, faces, drawn } = useMemo(() => shared ?? shardGeometry(shard, clip, pose), [shared, shard.vertices, shard.faces, clip, pose])
+  const built = useMemo(() => shared ?? shardGeometry(shard, clip, pose), [shared, shard.vertices, shard.faces, clip, pose])
+  const { colors, faces, drawn } = built
+  const positions = useSame(built.positions)
+  const index = useSame(built.index)
 
-  // Live copies: the decode writes into these, the targets stay untouched.
-  const posAttr = useMemo(() => (shared ? null : new Float32BufferAttribute(positions.slice(), 3)), [positions, shared])
-  const colAttr = useMemo(() => (shared ? null : new Float32BufferAttribute(colors.slice(), 3)), [colors, shared])
+  // Live copies: the decode writes into these, the targets stay untouched. A
+  // placement sharing its object's buffers has none of its own.
+  // Made again with the geometries that share them (sharedBufferDeps), and not
+  // for a paint: new colors on the same corners go into the buffer that is
+  // there, once, below.
+  const buffers = sharedBufferDeps(positions, colors.length, index, shard.mode, lit)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const posAttr = useMemo(() => (shared ? null : new Float32BufferAttribute(positions.slice(), 3)), [...buffers, shared])
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const colAttr = useMemo(() => (shared ? null : new Float32BufferAttribute(colors.slice(), 3)), [...buffers, shared])
+  const invalidate = useThree((s) => s.invalidate)
+  useLayoutEffect(() => {
+    if (!colAttr) return
+    const a = colAttr.array as Float32Array
+    if (sameNumbers(a, colors)) return
+    a.set(colors)
+    colAttr.needsUpdate = true
+    // Nothing R3F set has changed, so it would not know to draw on a canvas that draws on demand.
+    invalidate()
+  }, [colAttr, colors, invalidate])
 
   const plain = useMemo(() => shared?.plain ?? plainGeometry(posAttr!, colAttr!), [posAttr, colAttr, shared])
 
@@ -365,7 +420,13 @@ export function ShardMesh({ shard: given, scale = 1, ghost = false, birth, disso
    * polygon shows its outline and not the diagonals its triangles were cut
    * along, and an edge two faces share is drawn once rather than twice.
    */
-  const outline = useMemo(() => (shared ? shared.outline : outlineGeometry(posAttr!, colAttr!, faces)), [posAttr, colAttr, faces, shared])
+  const outline = useMemo(() => {
+    if (shared) return shared.outline
+    if (shard.mode !== 'lines') return null
+    return outlineGeometry(posAttr!, colAttr!, faces)
+    // Keyed on the triangle list, the steady twin of `faces`: a paint that leaves it alone keeps the outline.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [posAttr, colAttr, index, shard.mode, shared])
 
   useEffect(() => (shared ? undefined : () => { outline?.dispose() }), [outline, shared])
 

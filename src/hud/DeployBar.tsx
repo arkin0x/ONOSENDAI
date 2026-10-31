@@ -88,6 +88,8 @@ import { useBuilder } from '../store/useBuilder'
 import { Field, Switch } from './ui/Switch'
 import { ItemIcon } from './ItemIcon'
 import { MAX_COMPUTE_HEIGHT, useCyberspace } from '../store/useCyberspace'
+import { useWorkshop } from '../store/useWorkshop'
+import { foreignKeys, foreignNotice } from '../lib/carried'
 import { useCalibration } from '../lib/calibration'
 import { ratioOf, useExperience } from '../lib/experience'
 import { cloudKeyQuote, deployCeiling, deployRoute, localKeySeconds, needsAsk, regionKeyLadder, waitLabel } from '../lib/deployPlan'
@@ -179,6 +181,13 @@ export function DeployBar({ pad = false }: { pad?: boolean }): JSX.Element | nul
   const unit = useShards((s) => s.deployUnit)
   const status = useShards((s) => s.deployStatus)
   const error = useShards((s) => s.deployError)
+  // A shard built under another identity is written under this one, with pieces this bench could not show.
+  const foreign = useWorkshop((w) => {
+    const p = useShards.getState().pending
+    const held = p?.type === 'shard' ? w.shards.find((m) => m.id === p.shardId) : undefined
+    const me = useCyberspace.getState().identity.pubkey
+    return held && me ? foreignKeys(held, me) : 0
+  })
   const note = useShards((s) => s.deployNote)
   const ask = useShards((s) => s.deployAsk)
   const live = useCyberspace((s) => s.live)
@@ -337,6 +346,7 @@ export function DeployBar({ pad = false }: { pad?: boolean }): JSX.Element | nul
       </div>
 
       {error && <div className="deploybar__row notice">{error}</div>}
+      {foreign > 0 && <div className="deploybar__row deploybar__fitnote" role="note">{foreignNotice(foreign)}</div>}
       {/* Comments answer the bag, which is the region at its height: a move
           out of it leaves them behind (reactions name the shard and follow). */}
       {moving && movedRegion !== null && region !== movedRegion && (

@@ -59,7 +59,7 @@ import { refTags } from 'sno-core/parts'
 import { SNO_KIND, creditAuthor, creditOf, creditTags, objectAddress, readCredit, type Credit } from 'sno-core/feed'
 import type { EventTemplate } from './events'
 import { withAuthoredConstrain } from './walkConstrain'
-import { inTheClear } from './carried'
+import { inTheClear, ownKeysOnly, you } from './carried'
 
 const STORAGE = 'onosendai:published'
 
@@ -250,7 +250,9 @@ export const STATE_HELP: Record<PublishState, string> = {
  * drifted, so the two can never disagree about what "the same object" means.
  */
 export function shardFingerprint(shard: ShardModel): string {
-  return fingerprint(JSON.stringify(toPayload(withAuthoredConstrain(inTheClear(shard)))))
+  const clear = inTheClear(shard)
+  const me = you()
+  return fingerprint(JSON.stringify(toPayload(withAuthoredConstrain(me ? ownKeysOnly(clear, me) : clear))))
 }
 
 /**

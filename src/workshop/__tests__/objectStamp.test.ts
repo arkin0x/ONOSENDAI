@@ -155,6 +155,14 @@ describe('YOURS: a copy goes inside (DECK-0003 §1.10; arkinox 2026-10-25, the s
     expect(table[table[ref[1]].refs![0][1]]).toBeDefined()
   })
 
+  it('ten stamps of a source built under another identity travel once', () => {
+    const OLD = 'e'.repeat(64)
+    const source = { ...fromPayload(COLUMN, 'c')!, refs: [['a', `33331:${OLD}:p`] as ['a', string]], parts: [{ ref: 0, at: [0, 0, 0] as [number, number, number], turn: [0, 0, 0] as [number, number, number], step: 0 }], objects: { [`33331:${OLD}:p`]: COLUMN } }
+    let parent = w().current()!
+    for (let i = 0; i < 10; i++) parent = copyInto(parent, source, PK).shard
+    expect(Object.keys(parent.objects ?? {})).toHaveLength(2)
+  })
+
   it('never stamps a shard into itself', () => {
     w().setStampObject({ ...yours(), copy: { sourceId: wall, pubkey: PK } })
     w().placeObject([0, 0, 0])

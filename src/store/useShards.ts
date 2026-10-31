@@ -94,7 +94,7 @@ import { useInventory } from './useInventory'
 import { useShardFolders } from './useShardFolders'
 import { creditOf, useWorkshop } from './useWorkshop'
 import { deletionFilters, isDeleted, type Credit, type FeedObject } from 'sno-core/feed'
-import { builtInLook, builtInLookTags, keptInChest, lookOf, lookTags, posedLook, type LookName, type LookPose } from '../lib/looks'
+import { builtInLook, builtInLookTags, isDoor, keptInChest, lookOf, lookTags, posedLook, type LookName, type LookPose } from '../lib/looks'
 import { useCeremony } from './useCeremony'
 import { useToast } from './useToast'
 import type { ShardModel } from 'sno-core/shards'
@@ -192,6 +192,8 @@ export interface WorldItem {
   lookupId?: string
   /** The bag's event id, for the inventory's record of where a thing was found. */
   bagId?: string
+  /** In a room: the room key, which seals its comments (lib/comments CommentSubject). */
+  roomKeyHex?: string
   /** For an item hidden by reference: the event comments answer (lib/comments ItemTarget). */
   target?: ItemTarget
   /**
@@ -2478,7 +2480,12 @@ export const useShards = create<ShardsState>((set, get) => {
       // restored, and a key TV showed opens nothing (review of #390).
       const keys: OpeningKey[] = openingKeys(useInventory.getState().items, true)
       const byHand = (h: Hidden): boolean => h.type === 'chest' && !!h.chest && openedByHand(me, h.eventId)
-      const queue = watched ? [] : items.filter(byHand)
+      // A door opened by hand opens its room again with the secret this
+      // device kept (store/rooms.ts), quietly, after the scan; never one
+      // found inside a chest (DECK-0004 §3.7.1).
+      const reopen = watched ? [] : items.filter((h) => byHand(h) && !h.chestId && isDoor(h.inner?.tags))
+      if (reopen.length > 0) void import('./rooms').then((m) => { for (const d of reopen) void m.reopenRoom(d) })
+      const queue = watched ? [] : items.filter((h) => byHand(h) && !(isDoor(h.inner?.tags) && !h.chestId))
       const revealed: Hidden[] = []
       while (queue.length > 0) {
         const door = queue.shift()!
@@ -2624,7 +2631,7 @@ export const useShards = create<ShardsState>((set, get) => {
     }
     for (const h of Object.values(state.discovered)) {
       if (seen.has(h.eventId)) continue
-      out.push({ key: h.eventId, type: h.type, at: h.at, plane: h.plane, height: h.height, mine: false, author: h.author, shard: h.shard, text: h.text, keyItem: h.key, chest: h.chest, audio: h.audio, createdAt: h.createdAt, lookupId: h.lookupId, bagId: h.bagId, target: itemTargetOf(h.inner, h.ref), chestId: h.chestId, event: h.inner as NostrEvent | undefined, ...lineageOf(h.inner, h.ref) })
+      out.push({ key: h.eventId, type: h.type, at: h.at, plane: h.plane, height: h.height, mine: false, author: h.author, shard: h.shard, text: h.text, keyItem: h.key, chest: h.chest, audio: h.audio, createdAt: h.createdAt, lookupId: h.lookupId, bagId: h.bagId, ...(h.room && h.keyHex ? { roomKeyHex: h.keyHex } : {}), target: itemTargetOf(h.inner, h.ref), chestId: h.chestId, event: h.inner as NostrEvent | undefined, ...lineageOf(h.inner, h.ref) })
     }
     return out
   }

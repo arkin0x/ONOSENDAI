@@ -38,7 +38,9 @@ import { useInventory } from '../store/useInventory'
 import { openedByHand, openedKey, rememberOpened, useOpenedChests } from '../store/useOpenedChests'
 import { celebrateOpen } from '../store/useOpenCeremony'
 import { useCeremony } from '../store/useCeremony'
-import { lookOf } from '../lib/looks'
+import { isDoor, lookOf } from '../lib/looks'
+import { doorSecretWithKey, doorSecretWithSigner } from '../lib/doors'
+import { doorAsFound, enterRoom } from '../store/rooms'
 import { chestLoot } from '../lib/lootObjects'
 import { landedAt } from '../lib/ceremony'
 import { resumeAudio } from '../lib/audioContext'
@@ -146,7 +148,7 @@ export function entryLabel(entry: ChestEntry): { label: string; coin: boolean } 
  * finds and deployments by `id`, and rumors read as claims if it is not
  * there. Never the bag's author: a chest inside a chest may be another's.
  */
-export function ChestBlock({ id, chest, author, verified, place, sealer: given, named = true }: { id: string; chest: ChestItem; author: string; verified: boolean; place: HeldPlace | null; sealer?: string; named?: boolean }): JSX.Element {
+export function ChestBlock({ id, chest, author, verified, place, sealer: given, named = true, inChest = false }: { id: string; chest: ChestItem; author: string; verified: boolean; place: HeldPlace | null; sealer?: string; named?: boolean; inChest?: boolean }): JSX.Element {
   const items = useInventory((s) => s.items)
   const me = useCyberspace((s) => s.identity.pubkey)
   const keys = useMemo(() => openingKeys(items), [items])
@@ -164,6 +166,24 @@ export function ChestBlock({ id, chest, author, verified, place, sealer: given, 
   const shownOf = (list: ChestEntry[], m: Muted): ChestEntry[] => list.filter((e) => !hidesThing(m, { authors: [author, e.event.pubkey], ids: [e.id] }, me))
   const shown = entries ? shownOf(entries, muted) : null
 
+  // A door locks a room where it stands (DECK-0004 §3.7): OPEN reads its
+  // secret and opens the room. One found inside a chest never opens its room
+  // (§3.7.1: a chest's contents are taken, not placed).
+  const door = isDoor((found?.inner ?? ownInner)?.tags) && !inChest && !!place
+  const openDoor = async (first: boolean): Promise<void> => {
+    if (!opener) return
+    const secret = opener.by === 'key' ? doorSecretWithKey(chest, opener.key.secretHex) : await doorSecretWithSigner(chest, useCyberspace.getState().decryptSealed)
+    if (useCyberspace.getState().identity.pubkey !== me) return
+    if (!secret) { setStatus('This door holds nothing this client can read.'); return }
+    const at = doorAsFound(id)
+    if (!at) { setStatus('This door is no longer here.'); return }
+    // What is behind it settles out of static where it stands (door A), the first time only.
+    const opened = await enterRoom(at, secret, first ? (items) => useCeremony.getState().mark(items) : undefined)
+    if (!opened) return
+    celebrateOpen({ me, chestId: id, kind: 'door', first, calm: prefersReducedMotion() })
+    if (!opened.found) setStatus('The room could not be retrieved.')
+  }
+
   const open = async (): Promise<void> => {
     if (!opener || busy) return
     // Inside the tap, so a phone lets the ceremony's sound out (lib/audioContext).
@@ -173,6 +193,7 @@ export function ChestBlock({ id, chest, author, verified, place, sealer: given, 
     setBusy(true)
     setStatus(null)
     try {
+      if (door) { await openDoor(first); return }
       const look = lookOf({ type: 'chest', event: found?.inner ?? ownInner })
       const contents = await openChestHere({ id, chest, author, place, sealer, door: look?.kind === 'door' && first }, opener)
       if (contents) {
@@ -252,7 +273,7 @@ function ContentRow({ entry, from, place }: { entry: ChestEntry; from: HeldFrom;
     <li className="chest__row">
       {type === 'shard' && entry.body.shard ? <ShardThumb shard={entry.body.shard} /> : <ItemFace className={`chest__glyph chest__glyph--${coin ? 'cashu' : type}`} type={type} coin={coin} image={entry.body.key?.image} />}
       {type === 'chest' && entry.body.chest
-        ? <ChestBlock id={entry.id} chest={entry.body.chest} author={entry.event.pubkey} verified={entry.verified} place={place} sealer={entry.verified ? entry.event.pubkey : undefined} />
+        ? <ChestBlock id={entry.id} chest={entry.body.chest} author={entry.event.pubkey} verified={entry.verified} place={place} sealer={entry.verified ? entry.event.pubkey : undefined} inChest />
         : (
           <span className="item__line">
             <span className="item__name" title={label}>{label}</span>

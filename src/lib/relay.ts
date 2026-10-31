@@ -13,7 +13,8 @@
 
 import { AbstractSimplePool } from 'nostr-tools/abstract-pool'
 import type { AbstractRelay } from 'nostr-tools/abstract-relay'
-import { verifyOnce } from './verifiedSigs'
+import { deferCheck, verifyOnce, verifyUnlessDeferred } from './verifiedSigs'
+import { keepAuthenticAnswers } from './sigCheck'
 import type { Filter } from 'nostr-tools/filter'
 import type { EventTemplate, VerifiedEvent } from 'nostr-tools/core'
 import type { NostrEvent } from './events'
@@ -91,7 +92,7 @@ export function getPool(): AbstractSimplePool {
     // else as before. (A publisher allowlist for anchors is the follow-up
     // that would make relay-sourced stops authenticated at all.)
     pool = new Pool({
-      verifyEvent: (ev) => (ev.kind === 321 ? true : verifyRelayEvent(ev)),
+      verifyEvent: (ev) => (ev.kind === 321 ? true : verifyUnlessDeferred(ev)),
       // SimplePool's own default (3e3), restated because the abstract
       // constructor requires the field.
       maxWaitForConnection: 3000,
@@ -260,6 +261,8 @@ interface AskOptions {
   stop?: AbortSignal
   /** Handed every event the moment it lands, before the relay has finished answering. */
   onEvent?: (ev: NostrEvent) => void
+  /** Whoever asked checks the signatures of what comes back (queryChecked): none are checked as they land. */
+  deferChecks?: boolean
 }
 
 /**
@@ -273,7 +276,7 @@ interface AskOptions {
  * challenge.
  */
 async function askOne(url: string, filter: Filter, deadline: number, opts: AskOptions = {}): Promise<RelayAnswer> {
-  const { answerMs, onSent, stop, onEvent } = opts
+  const { answerMs, onSent, stop, onEvent, deferChecks } = opts
   const remaining = (): number => Math.max(0, deadline - Date.now())
   const late = (events: NostrEvent[] = []): RelayAnswer => ({ url, outcome: 'unreachable', reason: 'no answer in time', events })
   if (stop?.aborted) return late()
@@ -319,6 +322,7 @@ async function askOne(url: string, filter: Filter, deadline: number, opts: AskOp
     const open = (): void => {
       try {
         sub = relay.subscribe([filter], {
+          ...(deferChecks ? { alreadyHaveEvent: deferCheck } : {}),
           onevent: (e) => {
             if (settled || events.has(e.id)) return
             events.set(e.id, e as NostrEvent)
@@ -357,11 +361,11 @@ async function askOne(url: string, filter: Filter, deadline: number, opts: AskOp
  * deadline is ours and is the only timer that ends a wait (see
  * NOSTR_TOOLS_EOSE_MS).
  */
-async function queryRelays(relays: string[], filter: Filter, maxWait = MAX_WAIT_MS): Promise<RelayAnswer[]> {
+async function queryRelays(relays: string[], filter: Filter, maxWait = MAX_WAIT_MS, opts: AskOptions = {}): Promise<RelayAnswer[]> {
   const urls = [...new Set(relays.map((r) => normalizeURL(r)))]
   await authAll(urls)
   const deadline = Date.now() + maxWait
-  return Promise.all(urls.map((url) => askOne(url, filter, deadline)))
+  return Promise.all(urls.map((url) => askOne(url, filter, deadline, opts)))
 }
 
 /**
@@ -375,9 +379,15 @@ async function collect(relays: string[], filter: Filter, maxWait = MAX_WAIT_MS):
   return mergeAnswers(await queryRelays(relays, filter, maxWait))
 }
 
-/** Query the configured relays. */
-export function query(filter: Filter): Promise<NostrEvent[]> {
-  return collect(relaySet(), filter)
+/**
+ * Query the configured relays. With `offThread`, for a read that may bring back
+ * thousands of events (a whole chain): the signatures are checked in a worker, and
+ * only what verifies comes back, so nothing is decided on an unchecked event. As
+ * they land, a Schnorr check apiece took about 2 s of main thread for one long chain.
+ */
+export async function query(filter: Filter, opts: { offThread?: boolean } = {}): Promise<NostrEvent[]> {
+  if (!opts.offThread) return collect(relaySet(), filter)
+  return mergeAnswers(await keepAuthenticAnswers(await queryRelays(relaySet(), filter, MAX_WAIT_MS, { deferChecks: true })))
 }
 
 /**

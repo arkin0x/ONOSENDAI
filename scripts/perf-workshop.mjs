@@ -105,12 +105,12 @@ await cdp.send('Page.addScriptToEvaluateOnNewDocument', { source: `(() => {
   try { localStorage.setItem('onosendai:live', '0') } catch {}
   const WS = window.WebSocket
   window.WebSocket = new Proxy(WS, { construct(t, a) { const u = String(a[0]); if (!/^wss?:\\/\\/(localhost|127\\.0\\.0\\.1)[:/]/.test(u)) { a = ['ws://127.0.0.1:9/refused'] } return new t(...a) } })
-  const g = { buffers: 0, vaos: 0, programs: 0, textures: 0, bufferData: 0, bufferBytes: 0, subData: 0, draws: 0 }
+  const g = { buffers: 0, vaos: 0, programs: 0, linked: 0, textures: 0, bufferData: 0, bufferBytes: 0, subData: 0, draws: 0 }
   for (const P of [window.WebGLRenderingContext, window.WebGL2RenderingContext].filter(Boolean)) {
     const wrap = (name, f) => { const o = P.prototype[name]; if (o) P.prototype[name] = function (...a) { f(a, this); return o.apply(this, a) } }
     wrap('createBuffer', () => g.buffers++); wrap('deleteBuffer', (a) => { if (a[0]) g.buffers-- })
     wrap('createVertexArray', () => g.vaos++); wrap('deleteVertexArray', (a) => { if (a[0]) g.vaos-- })
-    wrap('createProgram', () => g.programs++); wrap('deleteProgram', (a) => { if (a[0]) g.programs-- })
+    wrap('createProgram', () => { g.programs++; g.linked++ }); wrap('deleteProgram', (a) => { if (a[0]) g.programs-- })
     wrap('createTexture', () => g.textures++); wrap('deleteTexture', (a) => { if (a[0]) g.textures-- })
     wrap('bufferData', (a) => { g.bufferData++; const s = a[1]; g.bufferBytes += typeof s === 'number' ? s : (s?.byteLength ?? 0) })
     wrap('bufferSubData', (a) => { g.subData++; g.bufferBytes += a[2]?.byteLength ?? 0 })
@@ -197,6 +197,7 @@ const imported = await ev(`(async () => {
   useShardImport.getState().setPublish(false)
   await useShardImport.getState().start()
   for (let i = 0; i < 600 && useShardImport.getState().phase === 'running'; i++) await new Promise((r) => setTimeout(r, 200))
+  useShardImport.getState().close()
   const want = useWorkshop.getState().shards.find((s) => s.name.includes(${JSON.stringify(piece)}))
   if (want) useWorkshop.getState().openWorkshop(want.id)
   return { shards: useWorkshop.getState().shards.length, open: want ? { name: want.name, vertices: want.vertices.length, faces: want.faces.length } : null }
@@ -208,6 +209,7 @@ if (!imported.open) { console.log('ABORT: no piece', piece); shutdown(4) }
   while (Date.now() - t < 120_000 && !(await ev('!!window.__benchScene && window.__perf.read().gl.draws > 0'))) await sleep(1000)
 }
 await sleep(4000)
+await ev(`(() => { window.__notes = 0; window.__ws.subscribe(() => { window.__notes++ }) })()`)
 if (THROTTLE > 1) await cdp.send('Emulation.setCPUThrottlingRate', { rate: THROTTLE })
 
 const { width, height } = await cdp.send('Page.getLayoutMetrics').then((m) => ({ width: m.cssVisualViewport.clientWidth, height: m.cssVisualViewport.clientHeight }))
@@ -229,7 +231,7 @@ const facePoints = (n) => ev(`(async () => {
     const c = new V((p[0][0] + p[1][0] + p[2][0]) / 3, (p[0][1] + p[1][1] + p[2][1]) / 3, (p[0][2] + p[1][2] + p[2][2]) / 3)
     const d = c.distanceTo(cam.position)
     c.project(cam)
-    if (c.z > 1 || Math.abs(c.x) > 0.8 || Math.abs(c.y) > 0.8) return
+    if (c.z > 1 || Math.abs(c.x) > 0.5 || Math.abs(c.y) > 0.5) return
     out.push({ i, d, x: ${box.x} + (c.x + 1) / 2 * ${box.w}, y: ${box.y} + (1 - c.y) / 2 * ${box.h} })
   })
   out.sort((a, b) => a.d - b.d)
@@ -269,11 +271,13 @@ const phase = async (name, drive) => {
   const m1 = Object.fromEntries((await cdp.send('Performance.getMetrics')).metrics.map((x) => [x.name, x.value]))
   const p = await ev('window.__perf.read()')
   const heap = await cdp.send('Runtime.getHeapUsage')
-  const state = await ev(`(() => { const w = window.__ws.getState(); const s = w.current(); return { tool: w.tool, selection: w.selection.length, selectedFace: w.selectedFace, selectedFaces: w.selectedFaces ? w.selectedFaces.length : undefined, vertices: s ? s.vertices.length : 0, faces: s ? s.faces.length : 0, past: w.past.length } })()`)
+  const state = await ev(`(() => { const w = window.__ws.getState(); const s = w.current(); return { tool: w.tool, selection: w.selection.length, selectedFace: w.selectedFace, selectedFaces: w.selectedFaces ? w.selectedFaces.length : undefined, vertices: s ? s.vertices.length : 0, faces: s ? s.faces.length : 0, past: w.past.length, storeNotes: window.__notes } })()`)
   if (process.env.SHOTS) { const png = await cdp.send('Page.captureScreenshot', { format: 'png' }); fs.mkdirSync(process.env.SHOTS, { recursive: true }); fs.writeFileSync(path.join(process.env.SHOTS, `${name}.png`), Buffer.from(png.data, 'base64')) }
   let alloc = 0
-  const walk = (node) => { alloc += node.selfSize; for (const c of node.children) walk(c) }
+  const allocBy = new Map()
+  const walk = (node) => { alloc += node.selfSize; const f = node.callFrame; const k = `${f.functionName || '(anon)'} ${(f.url || '').replace(/^.*\/src\//, 'src/').replace(/^.*node_modules\/(\.vite\/deps\/)?/, 'nm/').replace(/\?.*$/, '')}:${f.lineNumber + 1}`; allocBy.set(k, (allocBy.get(k) ?? 0) + node.selfSize); for (const c of node.children) walk(c) }
   walk(heapProf.head)
+  const allocTop = [...allocBy.entries()].sort((a, b) => b[1] - a[1]).slice(0, 12).map(([k, v]) => [k, Math.round(v / 1024)])
   const row = {
     phase: name, seconds: Math.round(elapsed * 10) / 10,
     fps: Math.round(p.frames / elapsed), meanMs: p.meanMs, p95: p.p95, p99: p.p99, maxMs: p.max, over50: p.over50,
@@ -282,9 +286,10 @@ const phase = async (name, drive) => {
     commits: p.commits, renders: p.renders, allocMB: Math.round(alloc / 1e5) / 10, allocKBperFrame: p.frames ? Math.round(alloc / p.frames / 1024) : 0,
     heapMB: Math.round(heap.usedSize / 1e5) / 10, drawsPerFrame: p.frames ? Math.round(p.gl.draws / p.frames) : 0,
     bufferData: p.gl.bufferData, uploadMB: Math.round(p.gl.bufferBytes / 1e5) / 10, glBuffers: p.gl.buffers, glVAOs: p.gl.vaos,
-    state, topRenders: p.topRenders, cpu: top(cpu),
+    state, topRenders: p.topRenders, cpu: top(cpu), allocTop,
   }
-  console.log('PHASE', name, JSON.stringify({ ...row, topRenders: undefined, cpu: undefined }))
+  console.log('PHASE', name, JSON.stringify({ ...row, topRenders: undefined, cpu: undefined, allocTop: undefined }))
+  console.log('  allocKB', JSON.stringify(allocTop.slice(0, 8)))
   console.log('  renders', JSON.stringify(row.topRenders))
   console.log('  cpu', JSON.stringify(row.cpu.slice(0, 12)))
   results.push(row)

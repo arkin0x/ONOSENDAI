@@ -10,8 +10,8 @@
  * the part that depends on where an object came from.
  */
 
-import { carriedTable, withAuthor } from 'sno-core/parts'
-import { toPayload, type ShardModel } from 'sno-core/shards'
+import { carriedPayload, carriedTable, carryObject, withAuthor } from 'sno-core/parts'
+import { toPayload, type Ref, type ShardModel } from 'sno-core/shards'
 import { withAuthoredConstrain } from './walkConstrain'
 
 /**
@@ -231,4 +231,42 @@ export function inTheClear(model: ShardModel): ShardModel {
   if (!(model as FromBag).fromBag || !model.objects) return model
   const { objects: _sealed, ...rest } = model
   return rest
+}
+
+/**
+ * `parent` carrying a copy of `source`, a piece of your workshop, and the
+ * reference a placement of it names (STAMP > OBJECT, YOURS; arkinox
+ * 2026-10-25: "once copied we should just edit the copy directly").
+ *
+ * The copy is keyed under a `d` of its own, sixteen random hex digits, never
+ * under the source's own address, and never one that names it:
+ * - every reader that does not know `objects` asks public relays for that
+ *   address, so the `d` says nothing about the piece (DECK-0003 §1.10, "What an
+ *   older reader asks relays for"), and finds nothing there, rather than the
+ *   source as it is published today;
+ * - the workshop never answers for it (lib/parts.ts fetchOwnFirst), so the
+ *   bench draws the copy, which is the parent's own data;
+ * - stamping the source again after the copy was edited makes a new copy
+ *   rather than another placement of the edited one;
+ * - two parents' copies of one piece, made at different times, never collide
+ *   when both are carried in one hide (a writer flattens into one table).
+ *
+ * A copy of the source exactly as it is now, already in this parent under your
+ * key, is used again, so a piece stamped ten times in one parent travels once
+ * and its placements edit together. The copy keeps the source's name, as a
+ * label, sealed inside with the payload. Written as a hide writes it (OPAQUE
+ * where never chosen), and what the source itself carries joins the parent's
+ * one table, under your key. A source whose table came out of a bag marks the
+ * parent too, so PUBLISH asks before writing it in the clear (§1.10).
+ */
+export function copyInto(parent: ShardModel, source: ShardModel, pubkey: string): { shard: ShardModel; ref: Ref } {
+  const written = withAuthoredConstrain(ownKeysOnly(source, pubkey))
+  const text = JSON.stringify(carriedPayload(written))
+  const mine = `33331:${pubkey}:`
+  const marked = (s: ShardModel): ShardModel => ((source as FromBag).fromBag ? ({ ...s, fromBag: true } as FromBag) : s)
+  for (const [key, entry] of Object.entries(parent.objects ?? {})) {
+    if (key.startsWith(mine) && JSON.stringify(entry) === text) return { shard: marked(parent), ref: ['a', key] }
+  }
+  const address = `${mine}${quietD()}`
+  return { shard: marked(carryObject(parent, address, written)), ref: ['a', address] }
 }

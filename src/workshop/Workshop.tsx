@@ -1259,7 +1259,7 @@ export function Workshop(): JSX.Element | null {
                   ))}
                   {/* A published object, placed by reference (DECK-0003 §1.10): it
                       stays that object and follows its author's edits. */}
-                  <button className={`workshop__tool ${stampMode === 'object' ? 'is-on' : ''}`} aria-pressed={stampMode === 'object'} onClick={() => { w().setStampMode('object'); if (!w().stampObject) setPicking(true) }} title="Stamp a published object, placed by reference">
+                  <button className={`workshop__tool ${stampMode === 'object' ? 'is-on' : ''}`} aria-pressed={stampMode === 'object'} onClick={() => { w().setStampMode('object'); if (!w().stampObject) setPicking(true) }} title="Stamp an object: a copy of one of yours, or a published one by reference">
                     <Box size={12} strokeWidth={2.25} aria-hidden />OBJECT
                   </button>
                 </div>

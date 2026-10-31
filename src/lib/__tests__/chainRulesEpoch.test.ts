@@ -14,7 +14,7 @@ describe('the cutover epoch', () => {
   })
 
   it('is what this deploy says it requires', () => {
-    expect(versionFileOf('cutover-build')).toEqual({ build: 'cutover-build', minChainEpoch: 2 })
+    expect(versionFileOf('cutover-build')).toMatchObject({ build: 'cutover-build', minChainEpoch: 2, chainStore: 2 })
   })
 
   it('blocks a tab of the build before (epoch 1), and nothing of its own', () => {

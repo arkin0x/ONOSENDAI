@@ -76,6 +76,8 @@ async function oneMove(n: number): Promise<{ calls: Record<string, number>; ms: 
   vi.resetModules()
   const { useSecrets } = await import('../useSecrets')
   await useSecrets.getState().load()
+  // What the store's own load reads (the chain) is not what a move costs.
+  await (await import('../useCyberspace')).savedChainLoaded()
   const keysBefore = useSecrets.getState().keys
   const t0 = performance.now()
   const calls = await counting(() => useSecrets.getState().recordPlace(spot(n), 0, scanAt(spot(n))))

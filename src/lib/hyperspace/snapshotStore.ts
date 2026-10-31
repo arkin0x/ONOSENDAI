@@ -8,8 +8,7 @@
  * works: a cache write that blocks is better than none.
  */
 
-import { getMeta, putMeta } from './idb'
-import { SNAPSHOT_KEY, buffersOfRecord, type SnapshotRecord, type SnapshotReply, type SnapshotRequest } from './snapshotRecord'
+import { buffersOfRecord, readSnapshotRecord, writeSnapshotRecord, type SnapshotRecord, type SnapshotReply, type SnapshotRequest } from './snapshotRecord'
 
 /** The most copied at once, in bytes: about 2 ms of memcpy between chances for a frame. */
 export const SLICE_BYTES = 8 * 1024 * 1024
@@ -69,7 +68,7 @@ export async function putSnapshot(database: IDBDatabase, record: SnapshotRecord,
   if (reply?.ok) return true
   // The worker failed after the buffers went to it: nothing left to store, and the next snapshot tries again.
   if (reply !== null || buffersOfRecord(record).some((b) => b.byteLength === 0)) return false
-  await putMeta(database, SNAPSHOT_KEY, record)
+  await writeSnapshotRecord(database, record)
   return true
 }
 
@@ -77,5 +76,5 @@ export async function putSnapshot(database: IDBDatabase, record: SnapshotRecord,
 export async function getSnapshot(database: IDBDatabase, make: MakeWorker = snapshotWorker): Promise<unknown> {
   const reply = await ask({ op: 'get' }, [], make, READ_WAIT_MS)
   if (reply?.ok) return reply.record
-  return getMeta(database, SNAPSHOT_KEY)
+  return readSnapshotRecord(database)
 }

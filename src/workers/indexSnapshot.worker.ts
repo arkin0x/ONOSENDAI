@@ -7,8 +7,8 @@
  * blocked each boot. The worker lives for one call and takes its copy with it.
  */
 
-import { openDb, getMeta, putMeta } from '../lib/hyperspace/idb'
-import { SNAPSHOT_KEY, buffersOfRecord, type SnapshotReply, type SnapshotRequest } from '../lib/hyperspace/snapshotRecord'
+import { openDb } from '../lib/hyperspace/idb'
+import { buffersOfRecord, readSnapshotRecord, writeSnapshotRecord, type SnapshotReply, type SnapshotRequest } from '../lib/hyperspace/snapshotRecord'
 
 const post = postMessage as unknown as (m: SnapshotReply, transfer?: Transferable[]) => void
 
@@ -17,10 +17,10 @@ onmessage = async (e: MessageEvent<SnapshotRequest>) => {
   if (!database) { post({ ok: false }); return }
   try {
     if (e.data.op === 'put') {
-      await putMeta(database, SNAPSHOT_KEY, e.data.record)
+      await writeSnapshotRecord(database, e.data.record)
       post({ ok: true })
     } else {
-      const record = await getMeta(database, SNAPSHOT_KEY)
+      const record = await readSnapshotRecord(database)
       post({ ok: true, record }, buffersOfRecord(record))
     }
   } catch {

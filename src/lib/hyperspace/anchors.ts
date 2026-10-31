@@ -439,9 +439,10 @@ function validSnapshotMeta(v: unknown): v is { snapshot: unknown; coveredAtSnaps
  * Persist the built index wholesale so the next boot adopts it instead of
  * re-sorting a million replayed rows. coveredAtSnapshot rides along so that
  * boot's replay can skip every IDB row the snapshot already contains. About
- * 130 MB of ArrayBuffers, copied in slices and stored by a worker
- * (snapshotStore), which took the main thread 0.4 to 4 s when done here. Best
- * effort like every other cache write. mergeAll first: serializeIndexSliced
+ * 130 MB of ArrayBuffers, copied in slices and stored by a worker, a record per
+ * column (snapshotStore, snapshotRecord), since one record that size took the main
+ * thread 0.4 to 4 s and has since outgrown what Chromium stores. Best effort like
+ * every other cache write. mergeAll first: serializeIndexSliced
  * refuses a half-merged index, and by the time this runs (ready, or the
  * quiescent tail) there is at most a sliver pending.
  */
@@ -459,10 +460,10 @@ async function persistSnapshot(): Promise<void> {
     if (snapshot) {
       // Read now: the buffers leave with the worker.
       const count = snapshot.count
-      if (await putSnapshot(database, { snapshot, coveredAtSnapshot })) {
-        snapshotSize = count
-        snapshotAt = Date.now()
-      }
+      // Timed even if it failed: the tail asks again by this clock, and a write
+      // that cannot land must not copy the whole index at every new block.
+      snapshotAt = Date.now()
+      if (await putSnapshot(database, { snapshot, coveredAtSnapshot })) snapshotSize = count
     }
   } catch { /* cache write is best effort */
   } finally {

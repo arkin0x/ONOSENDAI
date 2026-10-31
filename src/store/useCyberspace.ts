@@ -406,6 +406,8 @@ export interface MovePlan {
    */
   requote?: boolean
   startedAt: number
+  /** A WALK step's route (commitToward): a head that moves under it stops the walk instead of computing the step again (headMovedUnder). */
+  walk?: true
 }
 
 export interface ChainStats {
@@ -1912,14 +1914,8 @@ let chainEpoch = 0
 async function confirmHead(retrying: () => void): Promise<string | null | typeof STALE_CONFIRMATION> {
   const pubkey = useCyberspace.getState().identity.pubkey
   const epoch = chainEpoch
-  // The saved chain's signatures are checked first: nothing is signed onto
-  // a chain until every event of it is known to be authentic.
-  const cut = await signaturesChecked(pubkey)
-  if (chainEpoch !== epoch) return STALE_CONFIRMATION
-  if (cut) return cut
-  const otherTab = await foldOtherTabs(pubkey)
-  if (chainEpoch !== epoch) return STALE_CONFIRMATION
-  if (otherTab) return otherTab
+  const here = await headCheckedHere()
+  if (here) return here
   // No confirmation is reused, however recent (arkinox, 2026-10-08): another
   // device can move in the second between two looks, and only a fresh answer
   // makes the relay's silence mean "nothing newer".
@@ -1941,6 +1937,25 @@ async function confirmHead(retrying: () => void): Promise<string | null | typeof
     }
   }
   return HEAD_UNCONFIRMED_MESSAGE
+}
+
+/**
+ * The part of confirmHead that asks no relay: the whole saved chain read in
+ * (the hydration hold), its signatures checked, so nothing is signed onto a
+ * chain until every event of it is known to be authentic, and another tab's
+ * move taken in (foldOtherTabs). Null when none of them refuses. Every
+ * confirmHead runs it first; a WALK step runs only this before its proof
+ * (arkinox, 2026-10-31), and the whole confirmHead before it is signed.
+ */
+async function headCheckedHere(): Promise<string | null | typeof STALE_CONFIRMATION> {
+  const pubkey = useCyberspace.getState().identity.pubkey
+  const epoch = chainEpoch
+  const cut = await signaturesChecked(pubkey)
+  if (chainEpoch !== epoch) return STALE_CONFIRMATION
+  if (cut) return cut
+  const otherTab = await foldOtherTabs(pubkey)
+  if (chainEpoch !== epoch) return STALE_CONFIRMATION
+  return otherTab
 }
 
 /**
@@ -2501,6 +2516,9 @@ mark('onosendai:chain-loaded')
 
 let requestId = 0
 
+/** The request id of the one hop a WALK step asked for, when it was not a route (a route says so on its plan, MovePlan.walk). */
+let walkHopId: number | null = null
+
 /**
  * Relay events for your own chain that arrived while a proof was computing.
  * Folding them then would move the head under the proof, so they wait here
@@ -2719,11 +2737,35 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
       set({ pendingTarget: null, plan: plan ? { ...plan, status: 'failed', message: reason, awaiting: null } : null, proof: { ...IDLE_PROOF, status: 'infeasible', message: reason } })
       return
     }
-    if (get().prevEventId !== beforeHead) headMovedUnder()
+    if (get().prevEventId !== beforeHead) headMovedUnder(isWalkProof(requestId))
   }
 
-  const headMovedUnder = (): void => {
+  /**
+   * Whether the proof with this request id is a WALK step's: its one hop, or
+   * a step of its route. A HOSAKA result never is (a walk never pays), so a
+   * cloud job resumed while walking is refused as HOP's.
+   */
+  const isWalkProof = (id: number, source?: 'local' | 'cloud'): boolean =>
+    source !== 'cloud' && (id === walkHopId || get().plan?.walk === true)
+
+  /**
+   * A WALK step (`walk`) is not computed again: the walk stops, route and
+   * all, as it does the moment any step does not land (store/useWalk.ts),
+   * with the words the look before its proof gave when it still asked the
+   * relays there (arkinox, 2026-10-31). Nothing starts again without a
+   * press, and the next press walks on from the new head.
+   */
+  const headMovedUnder = (walk: boolean): void => {
     const { plan, position } = get()
+    if (walk) {
+      const message = headMovedWords(get().events, 'Re-aim from where you are now.')
+      set({
+        pendingTarget: null,
+        plan: plan ? { ...plan, status: 'failed', message, awaiting: null } : null,
+        proof: { ...IDLE_PROOF, status: 'infeasible', message },
+      })
+      return
+    }
     if (!plan) {
       set({ pendingTarget: null, proof: { ...IDLE_PROOF, status: 'infeasible', message: `${HEAD_MOVED_MESSAGE} Your aim is kept: commit again to compute the move from where you stand now.` } })
       return
@@ -3601,7 +3643,7 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
    */
   const commitToward = async (walk: { target: Position; stillAimed: () => boolean } | null): Promise<void> => {
     // Is a newer deploy requiring newer chain rules (lib/versionGate.ts)?
-    // Asked now, alongside the look at the relays below, and waited for
+    // Asked now, alongside the head checks below, and waited for
     // before any proof is computed or any HOSAKA sats are spent; whyNoMove
     // gives the answer. A recent answer is in hand at once, with no wait.
     const versionLook = lookBeforeMove()
@@ -3662,9 +3704,20 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
     //
     // Only for a chain that exists. A provisional identity's question is a
     // different one (does it have a chain at all?) and is answered below.
+    //
+    // A WALK step does not ask the relays here, only before it is signed
+    // (arkinox, 2026-10-31): the relays' look before the proof was most of
+    // a step's wait, and a step's proof takes milliseconds, so a head that
+    // moved meanwhile costs only that proof. The look before signing still
+    // refuses it, and the walk stops there (headMovedUnder); the next press
+    // walks on from the new head. What this device can check without a relay (the
+    // saved chain read in, its signatures, another tab's move) is still
+    // checked now, so the proof starts from the head this browser knows.
     if (get().events.length > 0) {
       const beforeHead = get().prevEventId
-      const refusal = await confirmHead(() => set({ proof: { ...IDLE_PROOF, message: HEAD_RETRYING_MESSAGE } }))
+      const refusal = walk
+        ? await headCheckedHere()
+        : await confirmHead(() => set({ proof: { ...IDLE_PROOF, message: HEAD_RETRYING_MESSAGE } }))
       if (versionLook instanceof Promise) await versionLook
       if (refusal === STALE_CONFIRMATION) return
       if (refusal) {
@@ -3744,6 +3797,7 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
       }
       const to = { ...cursor }
       const id = ++requestId
+      if (walk) walkHopId = id
       set({
         pendingTarget: to,
         plan: null,
@@ -3815,6 +3869,7 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
         message: null,
         awaiting: null,
         startedAt: Date.now(),
+        ...(walk ? { walk: true as const } : {}),
       },
     })
     if (funded) startPlanStep()
@@ -4094,7 +4149,7 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
     const refusedBefore = whyNoMove(get().actions())
     if (refusedBefore) { refuseSigning(msg, refusedBefore, false); return }
     if (get().chainConflict) { refuseSigning(msg, CHOOSE_FIRST_MESSAGE, true); return }
-    if (msg.prevEventId !== undefined && msg.prevEventId !== get().prevEventId) { headMovedUnder(); return }
+    if (msg.prevEventId !== undefined && msg.prevEventId !== get().prevEventId) { headMovedUnder(isWalkProof(msg.id, msg.source)); return }
     // Then the head is confirmed immediately before signing, every time
     // (arkinox, 2026-10-08): a silent feed is no proof that nothing moved,
     // since a half-open socket is silent too.
@@ -4109,7 +4164,7 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
     const refusal = whyNoMove(get().actions())
     if (refusal) { refuseSigning(msg, refusal, false); return }
     if (get().chainConflict) { refuseSigning(msg, CHOOSE_FIRST_MESSAGE, true); return }
-    if (msg.prevEventId !== undefined && msg.prevEventId !== get().prevEventId) { headMovedUnder(); return }
+    if (msg.prevEventId !== undefined && msg.prevEventId !== get().prevEventId) { headMovedUnder(isWalkProof(msg.id, msg.source)); return }
     // Capture the chain we are extending. A cancel or a respawn bumps requestId,
     // so for this id events/head stay valid across the await; only `published`
     // moves under us as the publisher drains, so that is re-read after signing.
@@ -4212,7 +4267,7 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
     const refusedNow = whyNoMove(get().actions())
     if (refusedNow) { refuseSigning(msg, refusedNow, false); return }
     if (get().chainConflict) { refuseSigning(msg, CHOOSE_FIRST_MESSAGE, true); return }
-    if (get().prevEventId !== prevEventId) { headMovedUnder(); return }
+    if (get().prevEventId !== prevEventId) { headMovedUnder(isWalkProof(msg.id, msg.source)); return }
 
     const now = get()
     const stats: ChainStats = {

@@ -14,10 +14,11 @@ if (typeof localStorage === 'undefined') {
 vi.mock('../../lib/relay', () => ({
   publishMany: vi.fn(async () => ({ ok: true })),
   query: vi.fn(async () => []),
+  queryEach: vi.fn(async () => [{ url: 'wss://relay.test', outcome: 'answered', events: [] }]),
   relaySet: () => ['wss://relay.test'],
 }))
 
-import { publishMany, query } from '../../lib/relay'
+import { publishMany, query, queryEach } from '../../lib/relay'
 import { useCyberspace } from '../useCyberspace'
 import { useShards, type MyDeployment } from '../useShards'
 
@@ -101,7 +102,7 @@ describe('taking a published bag down', () => {
     // hears of it, and the relay answers with the bag that holds both.
     useShards.setState({ mine: [{ ...useShards.getState().mine[0] }] })
     vi.mocked(publishMany).mockClear()
-    vi.mocked(query).mockResolvedValue([bag] as never)
+    vi.mocked(queryEach).mockResolvedValue([{ url: 'wss://relay.test', outcome: 'answered', events: [bag] }] as never)
 
     await useShards.getState().deleteInstance(known.eventId)
 
@@ -124,7 +125,7 @@ describe('broadcasting a bag left LOCAL', () => {
   beforeEach(async () => {
     useShards.setState({ mine: [await localDeployment()], broadcasting: null, broadcastError: null })
     vi.mocked(publishMany).mockClear()
-    vi.mocked(query).mockClear()
+    vi.mocked(queryEach).mockClear()
     useCyberspace.setState({ live: true })
   })
 
@@ -165,7 +166,7 @@ describe('broadcasting a bag left LOCAL', () => {
 
   it('merges what the relay already holds for the region rather than overwriting it', async () => {
     await useShards.getState().broadcast(LOOKUP)
-    expect(vi.mocked(query)).toHaveBeenCalledTimes(1)
-    expect(vi.mocked(query).mock.calls[0][0]).toMatchObject({ '#d': [LOOKUP] })
+    expect(vi.mocked(queryEach)).toHaveBeenCalledTimes(1)
+    expect(vi.mocked(queryEach).mock.calls[0][0]).toMatchObject({ '#d': [LOOKUP] })
   })
 })

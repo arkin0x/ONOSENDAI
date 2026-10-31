@@ -10,6 +10,7 @@ import { beforeEach, describe, expect, it } from 'vitest'
 import { openDatabase } from '../../idb'
 import { closeEventDb, withEventDb } from '../connection'
 import { EVENT_DB, EVENT_DB_STORES, EVENT_DB_VERSION, OTHERS_BUDGET_BYTES } from '../schema'
+import { budget } from '../store'
 
 beforeEach(() => {
   closeEventDb()
@@ -17,7 +18,7 @@ beforeEach(() => {
 })
 
 describe('onosendai:events', () => {
-  it('has every store and index the design names', async () => {
+  it('has every store and index the design names, with the keys it reads by', async () => {
     const names = await withEventDb(async (db) => [...db.objectStoreNames].sort())
     expect(names).toEqual(['chains', 'cursors', 'deletions', 'events', 'found', 'held', 'marks', 'meta', 'mine', 'opened', 'outbox', 'parted'])
     const indexes = await withEventDb(async (db) => [...db.transaction('events').objectStore('events').indexNames].sort())
@@ -52,6 +53,52 @@ describe('onosendai:events', () => {
     const later = await openDatabase(EVENT_DB, EVENT_DB_VERSION + 1, EVENT_DB_STORES)
     expect(later.version).toBe(EVENT_DB_VERSION + 1)
     later.close()
+  })
+
+  it('a tab left open through an upgrade keeps working: it opens the database at the version it now has', async () => {
+    await withEventDb(budget)
+    const later = await openDatabase(EVENT_DB, EVENT_DB_VERSION + 1, [...EVENT_DB_STORES, ['added', 'key']])
+    later.close()
+    await expect(withEventDb(budget)).resolves.toBeDefined()
+    expect(await withEventDb(async (db) => db.version)).toBe(EVENT_DB_VERSION + 1)
+  })
+
+  it('a build taken back a version keeps working, and leaves the newer stores alone', async () => {
+    const later = await openDatabase(EVENT_DB, EVENT_DB_VERSION + 1, [...EVENT_DB_STORES, ['added', 'key']])
+    later.close()
+    closeEventDb()
+    await expect(withEventDb(budget)).resolves.toBeDefined()
+    expect(await withEventDb(async (db) => [...db.objectStoreNames])).toContain('added')
+  })
+
+  it('two branches set aside in one millisecond are two branches', async () => {
+    await withEventDb((db) => new Promise<void>((resolve, reject) => {
+      const tx = db.transaction('parted', 'readwrite')
+      tx.objectStore('parted').put({ pubkey: 'p', at: 5, headId: 'one' })
+      tx.objectStore('parted').put({ pubkey: 'p', at: 5, headId: 'two' })
+      tx.oncomplete = () => resolve()
+      tx.onerror = () => reject(tx.error)
+    }))
+    const n = await withEventDb((db) => new Promise<number>((resolve) => { const r = db.transaction('parted').objectStore('parted').count(); r.onsuccess = () => resolve(r.result) }))
+    expect(n).toBe(2)
+  })
+
+  it('a dead connection is replaced: the call that met it runs once more on a fresh one', async () => {
+    const seen: IDBDatabase[] = []
+    const value = await withEventDb(async (db) => {
+      seen.push(db)
+      if (seen.length === 1) throw new DOMException('Connection to Indexed Database server lost', 'UnknownError')
+      return 'answered'
+    })
+    expect(value).toBe('answered')
+    expect(seen).toHaveLength(2)
+    expect(seen[1]).not.toBe(seen[0])
+  })
+
+  it('a full disk is not tried again: it would only be full again', async () => {
+    let runs = 0
+    await expect(withEventDb(async () => { runs++; throw new DOMException('full', 'QuotaExceededError') })).rejects.toMatchObject({ name: 'QuotaExceededError' })
+    expect(runs).toBe(1)
   })
 
   it('the budget for other people\'s events is the ruled 100 MB', () => {

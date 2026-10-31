@@ -92,6 +92,22 @@ async function press(tab: Tab): Promise<void> {
   await S().commit()
 }
 
+/**
+ * The look before signing can be beaten by a millisecond in a browser, and
+ * never is here, where nothing runs in between. So a test blinds it: the record
+ * read alone, which is the look and nothing else, answers "none", which proves
+ * nothing and lets the move go on. The commit itself is untouched. Returns what puts it back.
+ */
+function blindTheLook(): () => void {
+  const proto = IDBObjectStore.prototype as unknown as { get: (...x: unknown[]) => unknown }
+  const real = proto.get
+  proto.get = function (this: IDBObjectStore, ...x: unknown[]) {
+    const alone = this.name === 'chains' && this.transaction.mode === 'readonly' && this.transaction.objectStoreNames.length === 1
+    return real.apply(this, alone ? ['no such identity'] : x)
+  }
+  return () => { proto.get = real }
+}
+
 /** The rows, read directly, with no tab in between. */
 async function rowsNow(): Promise<{ events: NostrEvent[]; published: string[]; generation: number } | null> {
   const { withEventDb, closeEventDb } = await import('../../lib/eventDb/connection')
@@ -353,9 +369,11 @@ describe('two tabs, one chain', () => {
     const head = chain[11].id
     const moveA = await signMove(a)
     await a.rows.chainRowsSettled()
-    // B has not looked, so it signs from the old head: the race a press's look can lose by a millisecond.
+    // B's look comes to nothing, so it signs from the old head.
     expect(b.S().prevEventId).toBe(head)
+    const see = blindTheLook()
     const moveB = await signMove(b, 'y')
+    see()
     expect(moveB).not.toBe(moveA)
     expect(await b.rows.chainLanded(pk, moveB)).toBe(false)
     await vi.waitFor(() => expect(b.S().prevEventId).toBe(moveA))
@@ -522,7 +540,9 @@ describe('when storage will not take it', () => {
     const won = await signMove(a)
     await a.rows.chainRowsSettled()
     // B signed from the old head and closed before it heard: its move is in the tail, and lost in the rows.
+    const see = blindTheLook()
     const lost = await signMove(b, 'y')
+    see()
     const lostEvent = b.S().events.find((e) => e.id === lost)!
     await b.rows.chainRowsSettled()
     await vi.waitFor(() => expect(b.S().prevEventId).toBe(won))

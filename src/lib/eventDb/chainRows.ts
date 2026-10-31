@@ -18,8 +18,8 @@
 import { getEventHash, verifyEvent, type VerifiedEvent } from 'nostr-tools/pure'
 import { request } from '../idb'
 import type { NostrEvent } from '../events'
-import { countRow, inTransaction } from './store'
-import { BUDGET_KEY, CHAINS, EMPTY_BUDGET, EVENTS, META, PARTED, eventOf, rowOf, type BudgetTotals, type EventRow, type Nip01Flag } from './schema'
+import { carried, countRow, inTransaction } from './store'
+import { BUDGET_KEY, CHAINS, EMPTY_BUDGET, EVENTS, META, PARTED, eventOf, nip01Rank, rowOf, type BudgetTotals, type EventRow, type Nip01Flag } from './schema'
 
 /** The small record of one identity's chain. */
 export interface ChainRecord {
@@ -58,23 +58,35 @@ export interface ChainCommit {
 }
 
 export type ChainCommitResult =
-  | { status: 'ok'; changed: boolean; generation: number }
+  /** `repeated`: this exact commit had landed already (a worker given up on after it finished, a retry). */
+  | { status: 'ok'; changed: boolean; repeated: boolean; generation: number }
   /** Another tab's commit got there first. Nothing was written. */
   | { status: 'lost'; record: ChainRecord | null }
 
 const placesFrom = (pubkey: string, n: number): IDBKeyRange => IDBKeyRange.bound([pubkey, n], [pubkey, Infinity])
 
-/** A row taking its place in a chain: the row that is here when there is one, its flags kept or raised. */
+/**
+ * A row taking its place in a chain: the row that is here when there is one.
+ * A flag always describes the bytes beside it. When the row's bytes differ from
+ * the event handed in (damaged on disk, or nobody had checked them) the event
+ * replaces them, unless the row says more about its bytes than the hand does.
+ */
 function placed(had: EventRow | undefined, r: ChainRowIn, pubkey: string, n: number | undefined, now: number): EventRow {
-  const base = had ?? rowOf(r.event, { nip01: r.nip01, pin: true }, now)
-  const row: EventRow = { ...base, pin: 1, nip01: r.nip01 > base.nip01 ? r.nip01 : base.nip01 }
+  const fresh = rowOf(r.event, { nip01: r.nip01, pin: true }, now)
+  let row: EventRow
+  if (!had) row = fresh
+  else if (JSON.stringify(eventOf(had)) === JSON.stringify(eventOf(r.event as EventRow))) row = { ...had, nip01: nip01Rank(r.nip01) > nip01Rank(had.nip01) ? r.nip01 : had.nip01 }
+  else if (nip01Rank(r.nip01) >= nip01Rank(had.nip01)) row = { ...fresh, ...carried(had), nip01: r.nip01 }
+  else row = had
+  row = { ...row, pin: 1 }
   if (r.acked) row.acked = 1
   if (n === undefined) { delete row.chainOf; delete row.chainN } else { row.chainOf = pubkey; row.chainN = n }
   return row
 }
 
+/** Keep the totals in step with a row that changed: its pin or its bytes. */
 function budgetFor(row: EventRow | undefined, next: EventRow, totals: BudgetTotals): void {
-  if (row && row.pin === next.pin) return
+  if (row && row.pin === next.pin && row.bytes === next.bytes) return
   if (row) countRow(totals, row, -1)
   countRow(totals, next, 1)
 }
@@ -84,9 +96,13 @@ async function readBudget(meta: IDBObjectStore): Promise<BudgetTotals> {
   return { ...EMPTY_BUDGET, ...stored?.value }
 }
 
-/** Commit a change of one identity's chain, whole or not at all. */
+/**
+ * Commit a change of one identity's chain, whole or not at all. Strict: the
+ * action may be sent to a relay as soon as this answers, so it must be on disk,
+ * not only in the browser's cache, by then.
+ */
 export async function commitChain(db: IDBDatabase, c: ChainCommit, now = Date.now()): Promise<ChainCommitResult> {
-  const tx = db.transaction([EVENTS, CHAINS, META], 'readwrite')
+  const tx = db.transaction([EVENTS, CHAINS, META], 'readwrite', { durability: 'strict' })
   return inTransaction<ChainCommitResult>(tx, async () => {
     const events = tx.objectStore(EVENTS)
     const chains = tx.objectStore(CHAINS)
@@ -131,7 +147,7 @@ export async function commitChain(db: IDBDatabase, c: ChainCommit, now = Date.no
       const next: ChainRecord = { pubkey: c.pubkey, own: true, spawnId: c.spawnId, headId: c.headId, length: c.length, generation, savedAt: c.savedAt, held: c.held, stats: c.stats }
       chains.put(next)
     }
-    return { status: 'ok', changed, generation }
+    return { status: 'ok', changed, repeated: wantsChange && already, generation }
   })
 }
 
@@ -174,7 +190,7 @@ export async function readChain(db: IDBDatabase, pubkey: string): Promise<ChainR
 }
 
 /** A branch of this device set aside: never written over, read by nothing that reads the chain. */
-export interface PartedBranch { pubkey: string; at: number; ids: string[]; published: string[]; stats: Record<string, unknown>; held: boolean; savedAt: number }
+export interface PartedBranch { pubkey: string; at: number; headId: string; ids: string[]; published: string[]; stats: Record<string, unknown>; held: boolean; savedAt: number }
 
 /** What a chain's old stores held. */
 export interface ChainSource { events: NostrEvent[]; published: string[]; stats: Record<string, unknown>; held: boolean; savedAt: number }
@@ -259,7 +275,7 @@ export async function migrateChain(db: IDBDatabase, m: ChainMigration, now = Dat
       for (let i = 0; i < m.parted.length; i++) {
         const p = m.parted[i]
         const at = (p.savedAt || now) + i
-        tx.objectStore(PARTED).put({ pubkey, at, ids: p.events.map((e) => e.id), published: p.published, stats: p.stats, held: p.held, savedAt: p.savedAt } satisfies PartedBranch)
+        tx.objectStore(PARTED).put({ pubkey, at, headId: p.events[p.events.length - 1]?.id ?? '', ids: p.events.map((e) => e.id), published: p.published, stats: p.stats, held: p.held, savedAt: p.savedAt } satisfies PartedBranch)
       }
       const headId = source.events[source.events.length - 1].id
       const record: ChainRecord = { pubkey, own: true, spawnId: source.events[0].id, headId, length: source.events.length, generation: 1, savedAt: source.savedAt, held: source.held, stats: source.stats }
@@ -282,12 +298,12 @@ export async function setAsideBranch(db: IDBDatabase, pubkey: string, branch: Ch
     const totals = await readBudget(meta)
     for (const r of asRows(branch)) {
       const had = await request(events.get(r.event.id)) as EventRow | undefined
-      // A row of the chain keeps its place: this only ever adds.
-      const row = had ?? placed(undefined, r, pubkey, undefined, now)
-      if (!had) { budgetFor(undefined, row, totals); events.put(row) }
+      // A row of the chain keeps its place: this only ever adds, and pins.
+      const row = had ? { ...had, pin: 1 as const } : placed(undefined, r, pubkey, undefined, now)
+      if (!had || had.pin !== 1) { budgetFor(had, row, totals); events.put(row) }
     }
     meta.put({ key: BUDGET_KEY, value: totals })
-    tx.objectStore(PARTED).put({ pubkey, at: now, ids: branch.events.map((e) => e.id), published: branch.published, stats: branch.stats, held: branch.held, savedAt: branch.savedAt } satisfies PartedBranch)
+    tx.objectStore(PARTED).put({ pubkey, at: now, headId: branch.events[branch.events.length - 1]?.id ?? '', ids: branch.events.map((e) => e.id), published: branch.published, stats: branch.stats, held: branch.held, savedAt: branch.savedAt } satisfies PartedBranch)
     return now
   })
 }
@@ -295,7 +311,7 @@ export async function setAsideBranch(db: IDBDatabase, pubkey: string, branch: Ch
 /** The branches set aside for `pubkey`, oldest first. */
 export async function partedBranches(db: IDBDatabase, pubkey: string): Promise<ChainSource[]> {
   const tx = db.transaction([EVENTS, PARTED], 'readonly')
-  const branches = await request(tx.objectStore(PARTED).getAll(IDBKeyRange.bound([pubkey, -Infinity], [pubkey, Infinity]))) as PartedBranch[]
+  const branches = await request(tx.objectStore(PARTED).getAll(IDBKeyRange.bound([pubkey, -Infinity, ''], [pubkey, Infinity, '\uffff']))) as PartedBranch[]
   const events = tx.objectStore(EVENTS)
   const out: ChainSource[] = []
   for (const b of branches) {

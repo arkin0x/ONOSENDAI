@@ -169,11 +169,6 @@ export function committedHead(pubkey: string): { headId: string | null; length: 
   return { headId: t?.committed[t.committed.length - 1] ?? null, length: t?.committed.length ?? 0 }
 }
 
-/** For an identity that leaves this tab's rows (a version flip in a test, a failed switch). */
-export function forgetRows(pubkey: string): void {
-  tracks.delete(pubkey)
-}
-
 /** What the store does when a commit lost to another tab. Installed by the store. */
 let lostHandler: ((pubkey: string) => void) | null = null
 export function onChainLost(handler: (pubkey: string) => void): void { lostHandler = handler }

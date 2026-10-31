@@ -10,7 +10,7 @@ import { beforeEach, describe, expect, it } from 'vitest'
 import { finalizeEvent, generateSecretKey, getPublicKey } from 'nostr-tools/pure'
 import { closeEventDb, withEventDb } from '../connection'
 import { chainHead, commitChain, migrateChain, partedBranches, readChain, setAsideBranch, type ChainCommit, type ChainSource } from '../chainRows'
-import { budget, getRows } from '../store'
+import { budget, getRows, ingest } from '../store'
 import type { NostrEvent } from '../../events'
 
 const sk = generateSecretKey()
@@ -53,6 +53,17 @@ describe('a commit', () => {
     expect(ids((await read())!.events)).toEqual(ids(chain))
   })
 
+  it('is strict: it answers once the action is on disk, because the answer lets it go to a relay', async () => {
+    const proto = IDBDatabase.prototype as unknown as { transaction: (...x: unknown[]) => unknown }
+    const real = proto.transaction
+    const asked: unknown[] = []
+    proto.transaction = function (this: IDBDatabase, ...x: unknown[]) { asked.push(x[2]); return real.apply(this, x) }
+    try {
+      await commitIt(commit({ events: [action(1)], keep: 0, expectHead: null }))
+    } finally { proto.transaction = real }
+    expect(asked).toContainEqual({ durability: 'strict' })
+  })
+
   it('reads back in chain order, with the record beside it', async () => {
     const chain = [action(1), action(2), action(3)]
     await commitIt(commit({ events: chain, keep: 0, expectHead: null, held: true }))
@@ -88,7 +99,7 @@ describe('a commit', () => {
     const chain = [action(1), action(2)]
     const c = commit({ events: chain, keep: 0, expectHead: null })
     await commitIt(c)
-    expect(await commitIt(c)).toMatchObject({ status: 'ok', changed: false, generation: 1 })
+    expect(await commitIt(c)).toMatchObject({ status: 'ok', changed: false, repeated: true, generation: 1 })
     expect((await read())!.generation).toBe(1)
   })
 
@@ -178,7 +189,36 @@ describe('a commit', () => {
   it('counts the chain as pinned: your own events are never against the budget', async () => {
     const chain = [action(1), action(2)]
     await commitIt(commit({ events: chain, keep: 0, expectHead: null }))
-    expect(await withEventDb(budget)).toEqual({ pinnedBytes: JSON.stringify(chain[0]).length + JSON.stringify(chain[1]).length, pinnedRows: 2, unpinnedBytes: 0, unpinnedRows: 0 })
+    expect(await withEventDb(budget)).toEqual({ pinnedBytes: JSON.stringify(chain[0]).length + JSON.stringify(chain[1]).length, pinnedRows: 2, unpinnedBytes: 0, unpinnedRows: 0, tombstoneBytes: 0 })
+  })
+})
+
+describe('a row already here', () => {
+  it('forged bytes nobody checked are replaced when the action takes its place, and recounted', async () => {
+    const real = action(1)
+    await withEventDb((db) => ingest(db, [{ event: { ...real, content: 'FORGED, and longer' }, nip01: 0 }]))
+    await commitIt(commit({ events: [real], keep: 0, expectHead: null }))
+    const [row] = await withEventDb((db) => getRows(db, [real.id]))
+    expect(row).toMatchObject({ content: '', nip01: 1, pin: 1, chainOf: pk, chainN: 0, bytes: JSON.stringify(plain(real)).length })
+    expect(await withEventDb(budget)).toMatchObject({ pinnedBytes: JSON.stringify(plain(real)).length, pinnedRows: 1, unpinnedBytes: 0, unpinnedRows: 0 })
+  })
+
+  it('a verified row keeps its bytes against a hand that has checked nothing', async () => {
+    const real = action(1)
+    await withEventDb((db) => ingest(db, [{ event: real, nip01: 1 }]))
+    await withEventDb((db) => migrateChain(db, { pubkey: pk, source: source([{ ...real, content: 'changed' }]), parted: [], from: ['test'] }))
+    const [row] = await withEventDb((db) => getRows(db, [real.id]))
+    expect(row).toMatchObject({ content: '', nip01: 1 })
+  })
+
+  it('a sign-later row takes its signature when its signed copy arrives, and keeps its place in the chain', async () => {
+    const signed = action(1)
+    const unsigned = { ...signed, sig: '' }
+    await commitIt({ ...commit({ events: [signed], keep: 0, expectHead: null }), rows: [{ event: unsigned, nip01: 2, acked: false }] })
+    expect((await withEventDb((db) => getRows(db, [signed.id])))[0]).toMatchObject({ nip01: 2, sig: '' })
+    await withEventDb((db) => ingest(db, [{ event: signed, nip01: 1 }]))
+    expect((await withEventDb((db) => getRows(db, [signed.id])))[0]).toMatchObject({ nip01: 1, sig: signed.sig, chainOf: pk, chainN: 0, pin: 1 })
+    expect((await read())!.events[0].sig).toBe(signed.sig)
   })
 })
 
@@ -234,13 +274,22 @@ describe('moving a chain into rows', () => {
       expect(await migrate(source(chain))).toEqual({ status: 'unverified', id: chain[300].id })
     } finally { proto.put = real }
     expect(await read()).toBeNull()
-    // A row that stays damaged keeps refusing; put right, the chain switches.
-    await withEventDb((db) => new Promise<void>((resolve) => {
-      const tx = db.transaction('events', 'readwrite')
-      tx.objectStore('events').delete(chain[300].id)
-      tx.oncomplete = () => resolve()
-    }))
+  })
+
+  it('a damaged row is put right by the source on the next try, and the chain switches', async () => {
+    const proto = IDBObjectStore.prototype as unknown as { put: (...x: unknown[]) => unknown }
+    const real = proto.put
+    let damaged = false
+    proto.put = function (this: IDBObjectStore, ...x: unknown[]) {
+      const row = x[0] as { id?: string; chainOf?: string }
+      if (this.name === 'events' && !damaged && row.id === chain[10].id && row.chainOf === undefined) { damaged = true; return real.apply(this, [{ ...row, content: 'bit rot' }]) }
+      return real.apply(this, x)
+    }
+    try {
+      expect(await migrate(source(chain))).toEqual({ status: 'unverified', id: chain[10].id })
+    } finally { proto.put = real }
     expect(await migrate(source(chain))).toMatchObject({ status: 'switched' })
+    expect((await read())!.events[10].content).toBe(chain[10].content)
   })
 
   it('a full disk partway through switches nothing', async () => {
@@ -284,6 +333,16 @@ describe('moving a chain into rows', () => {
 })
 
 describe('a branch set aside', () => {
+  it('pins the rows it finds here, and two in one millisecond are two', async () => {
+    const theirs = action(50, 'relay brought')
+    await withEventDb((db) => ingest(db, [{ event: theirs, nip01: 1 }]))
+    await withEventDb((db) => setAsideBranch(db, pk, source([theirs]), 100))
+    expect((await withEventDb((db) => getRows(db, [theirs.id])))[0].pin).toBe(1)
+    expect(await withEventDb(budget)).toMatchObject({ pinnedRows: 1, unpinnedRows: 0 })
+    await withEventDb((db) => setAsideBranch(db, pk, source([action(51, 'other')]), 100))
+    expect(await withEventDb((db) => partedBranches(db, pk))).toHaveLength(2)
+  })
+
   it('is never written over by a save, and the chain\'s rows keep their places', async () => {
     const chain = [action(1), action(2)]
     await commitIt(commit({ events: chain, keep: 0, expectHead: null }))

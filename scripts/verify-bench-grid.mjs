@@ -119,6 +119,7 @@ await ev(`(async () => {
   const w = useWorkshop.getState()
   w.openWorkshop()
   w.create('grid test')
+  useWorkshop.setState({ showAvatar: false })
 })()`)
 for (let i = 0; i < 60 && !(await ev('!!window.__benchScene && !!window.__benchControls')); i++) await sleep(500)
 await sleep(2500)
@@ -142,12 +143,13 @@ function linesIn(png, along /* 'x' columns or 'y' rows */) {
   const profile = new Float64Array(n)
   for (let a = 0; a < n; a++) {
     let sum = 0
-    for (let b = 0; b < m; b += 2) {
+    // Past the compass, which sits in the top right corner on its own canvas.
+    for (let b = along === 'x' ? 170 : 0; b < (along === 'x' ? m : m - 170); b += 2) {
       const x = along === 'x' ? a : b, y = along === 'x' ? b : a
       const i = (y * width + x) * 4
       sum += data[i] + data[i + 1] + data[i + 2]
     }
-    profile[a] = sum / Math.ceil(m / 2)
+    profile[a] = sum / Math.ceil((m - 170) / 2)
   }
   const sorted = [...profile].sort((p, q) => p - q)
   const floor = sorted[Math.floor(n * 0.1)]

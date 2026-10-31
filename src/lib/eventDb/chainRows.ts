@@ -65,8 +65,12 @@ const placesFrom = (pubkey: string, n: number): IDBKeyRange => IDBKeyRange.bound
 
 /** A row taking its place in a chain: the row that is here when there is one, its flags kept or raised. */
 function placed(had: EventRow | undefined, r: ChainRowIn, pubkey: string, n: number | undefined, now: number): EventRow {
-  const base = had ?? rowOf(r.event, { nip01: r.nip01, pin: true }, now)
+  // A row that differs from the event handed in was damaged on disk: the event
+  // replaces it, with what is known of the event, and no flag of the row's.
+  const intact = had !== undefined && JSON.stringify(eventOf(had)) === JSON.stringify(eventOf(r.event as EventRow))
+  const base = had && intact ? had : rowOf(r.event, { nip01: r.nip01, pin: true }, now)
   const row: EventRow = { ...base, pin: 1, nip01: r.nip01 > base.nip01 ? r.nip01 : base.nip01 }
+  if (had?.seen.length) row.seen = had.seen
   if (r.acked) row.acked = 1
   if (n === undefined) { delete row.chainOf; delete row.chainN } else { row.chainOf = pubkey; row.chainN = n }
   return row

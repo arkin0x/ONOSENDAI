@@ -234,13 +234,22 @@ describe('moving a chain into rows', () => {
       expect(await migrate(source(chain))).toEqual({ status: 'unverified', id: chain[300].id })
     } finally { proto.put = real }
     expect(await read()).toBeNull()
-    // A row that stays damaged keeps refusing; put right, the chain switches.
-    await withEventDb((db) => new Promise<void>((resolve) => {
-      const tx = db.transaction('events', 'readwrite')
-      tx.objectStore('events').delete(chain[300].id)
-      tx.oncomplete = () => resolve()
-    }))
+  })
+
+  it('a damaged row is put right by the source on the next try, and the chain switches', async () => {
+    const proto = IDBObjectStore.prototype as unknown as { put: (...x: unknown[]) => unknown }
+    const real = proto.put
+    let damaged = false
+    proto.put = function (this: IDBObjectStore, ...x: unknown[]) {
+      const row = x[0] as { id?: string; chainOf?: string }
+      if (this.name === 'events' && !damaged && row.id === chain[10].id && row.chainOf === undefined) { damaged = true; return real.apply(this, [{ ...row, content: 'bit rot' }]) }
+      return real.apply(this, x)
+    }
+    try {
+      expect(await migrate(source(chain))).toEqual({ status: 'unverified', id: chain[10].id })
+    } finally { proto.put = real }
     expect(await migrate(source(chain))).toMatchObject({ status: 'switched' })
+    expect((await read())!.events[10].content).toBe(chain[10].content)
   })
 
   it('a full disk partway through switches nothing', async () => {

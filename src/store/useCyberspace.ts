@@ -2389,7 +2389,8 @@ function takeRows(pubkey: string, read: ChainRead, blindSince: number | null): b
  * from it at once.
  */
 async function takeRowsBack(pubkey: string, entry: { dirty: boolean }, ticket: number): Promise<void> {
-  if (CHAIN_STORE_VERSION !== 1 || !eventDbAvailable()) return
+  // Only a device that has used the rows opens them: everywhere else this is the old build, to the letter.
+  if (CHAIN_STORE_VERSION !== 1 || !eventDbAvailable() || !rowsMarked(pubkey)) return
   const read: RowsRead = await readRows(pubkey)
   if (ticket !== hydrateTicket || read === null || read === 'unreadable' || read === 'timeout') return
   if (useCyberspace.getState().identity.pubkey !== pubkey) return

@@ -31,7 +31,7 @@ import { Explanation } from '../hud/Explanation'
 import { DIVISIONS, MAX_EXTENT, MAX_UNIT, MIN_EXTENT, MODES, OPACITY_FLOOR, TICKS_PER_UNIT, neededExtent, rgbToHex, ticksOf, toPayload, unitsLabel, type ShardMode , type ShardModel} from 'sno-core/shards'
 import { clampOpacity, dragHistory, opacityAt, opacityFraction, opacityPercent, stepOpacity } from '../lib/opacityStep'
 import { CONSTRAINS, CONSTRAIN_TIPS, authoredConstrainOf, withAuthoredConstrain } from '../lib/walkConstrain'
-import { inTheClear, tableFromBag } from '../lib/carried'
+import { foreignKeys, foreignNotice, inTheClear, tableFromBag } from '../lib/carried'
 import { stepDivision } from './divisions'
 import { IMPORT_FORMATS_LABEL } from 'sno-core/importFile'
 import { IMPORT_PICKER_ACCEPT, isZipFile } from '../lib/shardZip'
@@ -677,6 +677,11 @@ export function Workshop(): JSX.Element | null {
   const [panel, setPanel] = useState<Panel | null>(null)
   // A RETRACT question belongs to one object in one open menu.
   useEffect(() => { setRetractAsk(null); setClearAsk(null) }, [shard?.id, panel, open])
+  // Opening a shard with pieces under another identity: they read as placeholders here, and go out anyway.
+  useEffect(() => {
+    const count = open && shard && me ? foreignKeys(shard, me) : 0
+    if (count > 0) useWorkshop.setState({ notice: foreignNotice(count) })
+  }, [open, shard?.id, me]) // eslint-disable-line react-hooks/exhaustive-deps
   const [pickerOpen, setPickerOpen] = useState(false)
   // The color bucket's second stage while a face is in hand (FILL or SEAM):
   // put away when the face goes.

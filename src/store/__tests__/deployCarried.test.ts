@@ -33,7 +33,9 @@ import { useShards } from '../useShards'
 import { useWorkshop } from '../useWorkshop'
 import { usePublished } from '../usePublished'
 import { bagEntries, HIDDEN_KIND, isReference, objectTemplate } from '../../lib/hidden'
-import { CARRY_BUDGET_BYTES, carryRefusal, dOf, inTheClear, isQuietD, keepTable, ownKeysOnly, payloadBytes, rekeyTable, setLocalAuthor, tableFromBag, takenCopy } from '../../lib/carried'
+import { CARRY_BUDGET_BYTES, carryRefusal, dOf, inTheClear, isQuietD, keepTable, ownKeysOnly, payloadBytes, foreignKeys, foreignNotice, rekeyTable, setLocalAuthor, tableFromBag, takenCopy } from '../../lib/carried'
+import { publishState } from '../../lib/published'
+import { useAvatars } from '../useAvatars'
 import { attributed } from '../../lib/client'
 import { carryLibrary } from '../localObjects'
 import { hexToBytes, type NostrEvent } from '../../lib/events'
@@ -322,3 +324,82 @@ describe('a table taken from a bag (DECK-0004 §3.4, DECK-0003 §1.10)', () => {
     expect(tableFromBag(held)).toBe(false)
   })
 })
+
+describe('review of the stack: what goes out', () => {
+  const OLD = 'c'.repeat(64)
+  const names = (table: unknown): string[] => Object.values((table ?? {}) as Record<string, { name: string }>).map((e) => e.name)
+  /** A room with a live link, and an entry no placement reaches any more: removeParts keeps it, since a link may place anything. */
+  const leftBehind = (): ShardModel => ({
+    ...placing('Room', [addr(THEM, 'tile', 'wss://relay.test'), addr(me(), 'kept')]),
+    id: 'room',
+    objects: { [`33331:${me()}:kept`]: toPayload(tri('Kept')), [`33331:${me()}:gone`]: toPayload(tri('Private water')) },
+  })
+
+  it('B2: a piece no placement names stays out of a public object, an avatar and a hide', async () => {
+    const room = leftBehind()
+    expect(names(JSON.parse(publicObjectTemplate(room, 1).content).objects)).toEqual(['Kept'])
+    expect(names(JSON.parse(avatarTemplate(room, 1).content).objects)).toEqual(['Kept'])
+    expect(names(carryLibrary(room).objects)).toEqual(['Kept'])
+    expect(names((await hide(room, {})).objects)).toEqual(['Kept'])
+  })
+
+  it('B2: what the publish state compares leaves it out too', () => {
+    const room = leftBehind()
+    const { objects, ...rest } = room
+    const kept = { ...rest, objects: { [`33331:${me()}:kept`]: (objects as Record<string, unknown>)[`33331:${me()}:kept`] } }
+    expect(shardFingerprint(room)).toBe(shardFingerprint(kept))
+  })
+
+  it('S1: a shard built under another identity reads PUBLISHED after PUBLISH, and republishing writes the same thing', async () => {
+    setLocalAuthor(() => me())
+    try {
+      const built: ShardModel = { ...placing('Built', [addr(OLD, 'x1')]), id: 'built', objects: { [`33331:${OLD}:x1`]: toPayload(tri('Leaf')) } }
+      await usePublished.getState().send(built)
+      const first = sent[sent.length - 1].content
+      expect(publishState(usePublished.getState().ledger.built, shardFingerprint(built), me())).toBe('published')
+      await usePublished.getState().send(built)
+      expect(sent[sent.length - 1].content).toBe(first)
+      const keys = Object.keys(JSON.parse(first).objects)
+      expect(keys).toHaveLength(1)
+      expect(keys[0].startsWith(`33331:${me()}:`)).toBe(true)
+      expect(isQuietD(dOf(keys[0]))).toBe(true)
+    } finally { setLocalAuthor(null) }
+  })
+
+  it('S1: the same old key under the same signer lands on the same address; a taken copy stays random', () => {
+    const built: ShardModel = { ...placing('Built', [addr(OLD, 'x1')]), objects: { [`33331:${OLD}:x1`]: toPayload(tri('Leaf')) } }
+    expect(Object.keys(ownKeysOnly(built, me()).objects!)).toEqual(Object.keys(ownKeysOnly(built, me()).objects!))
+    expect(Object.keys(ownKeysOnly(built, me()).objects!)).not.toEqual(Object.keys(ownKeysOnly(built, THEM).objects!))
+    const found = { ...built, author: OLD }
+    expect(Object.keys(takenCopy(found, me()).objects!)).not.toEqual(Object.keys(takenCopy(found, me()).objects!))
+  })
+
+  it('PUT IN CHEST says a shard is too large to seal before it signs anything', async () => {
+    const big = { ...tri('Big'), id: 'big', extra: { pad: 'x'.repeat(70_000) } }
+    useWorkshop.setState({ shards: [big], currentId: null })
+    const signed = vi.spyOn(useCyberspace.getState(), 'signEvent')
+    useShards.getState().startDeployIntoChest({ name: 'C', lock: null, requires: '', contents: [{ kind: 'shard', shardId: 'big' }] } as never, 0)
+    await useShards.getState().deploy()
+    expect(useShards.getState().deployStatus).toBe('error')
+    expect(useShards.getState().deployError).toMatch(/^Too large to seal: /)
+    expect(signed).not.toHaveBeenCalled()
+    signed.mockRestore()
+    useShards.setState({ pending: null, deployStatus: 'idle', deployError: null })
+  })
+
+  it('a large avatar is refused before the mining starts', async () => {
+    const big: ShardModel = { ...placing('Big', [addr(me(), 'k')]), objects: { [`33331:${me()}:k`]: { ...toPayload(tri('Big piece')), extra: 'x'.repeat(140_000) } } }
+    expect(await useAvatars.getState().adopt(big)).toBe(false)
+    expect(useAvatars.getState().adoptError).toMatch(/^\d+kb of 128kb may be larger than relays will accept\. Keep this part separate\.$/)
+    expect(useAvatars.getState().phase ?? null).toBeNull()
+  })
+
+  it('says how many pieces were built under another identity', () => {
+    const built: ShardModel = { ...placing('Built', [addr(OLD, 'x1'), addr(me(), 'x2')]), objects: { [`33331:${OLD}:x1`]: toPayload(tri('A')), [`33331:${me()}:x2`]: toPayload(tri('B')) } }
+    expect(foreignKeys(built, me())).toBe(1)
+    expect(foreignNotice(1)).toMatch(/1 piece here was built under another key/)
+    expect(foreignNotice(2)).toMatch(/2 pieces here were built under another key/)
+    expect(foreignKeys(tri('Plain'), me())).toBe(0)
+  })
+})
+

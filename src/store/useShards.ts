@@ -88,7 +88,7 @@ import {
 import { retractionTemplate } from '../lib/published'
 import { audioInnerTemplate, fadeAt, type AudioItem } from '../lib/audioItem'
 import { resealCopy } from '../lib/audioFile'
-import { openWithSecret, openWithSigner, openerFor, readContents, resealWithout, revealedIn, sealEntries, sealedInside, sealerOf, type ChestEntry, type OpeningKey } from '../lib/chests'
+import { openWithSecret, openWithSigner, openerFor, plaintextBytes, readContents, resealWithout, revealedIn, sealEntries, sealedInside, sealerOf, sizeRefusal, type ChestEntry, type OpeningKey } from '../lib/chests'
 import { openedByHand, restoreOpened } from './useOpenedChests'
 import { openingKeys, placeOf, type HeldItem, type HeldPlace, type InChest } from '../lib/inventory'
 import { useInventory } from './useInventory'
@@ -1658,6 +1658,14 @@ export const useShards = create<ShardsState>((set, get) => {
       // and the chest handed back to its composer (`chestBack`). Nothing is
       // hidden and nothing is published: the chest's own hide seals it.
       if (intoChest && shard && innerTemplate) {
+        // What the chest would hold with this in it: the seal's own limit, said
+        // here rather than after every shard is signed and the chest is hidden.
+        const held = intoChest.draft.contents.flatMap((c, i) => (i !== intoChest.contentIndex && c.kind === 'shard' && c.aimed ? [c.aimed.signed] : []))
+        const tooLarge = sizeRefusal(plaintextBytes([...held, { ...innerTemplate, id: '0'.repeat(64), pubkey: cs.identity.pubkey, sig: '0'.repeat(128) } as NostrEvent]))
+        if (tooLarge) {
+          set({ deployStatus: 'error', deployError: tooLarge })
+          return
+        }
         set({ deployStatus: 'working', deployError: null, deployAsk: null, deployNote: 'Signing for the chest' })
         try {
           const signed = await cs.signEvent(innerTemplate)

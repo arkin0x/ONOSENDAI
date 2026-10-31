@@ -135,7 +135,7 @@ function FeedActions({ object }: { object: FeedObject }): JSX.Element {
 }
 
 export function StashModals(): JSX.Element | null {
-  const { models, bags, bag, message, key, chest, audio, feed } = useStash()
+  const { models, bags, bag, message, key, chest, chestEdit, audio, feed } = useStash()
   const mine = useShards((s) => s.mine)
   const close = useStash.getState().close
   const all = bagsOf(mine)
@@ -195,9 +195,17 @@ export function StashModals(): JSX.Element | null {
     )
   }
   if (chest) {
+    // Closing the modal of a chest being placed goes back to the hide bar, the draft kept on it (ChestCompose MOVE).
     return (
-      <Shell title="Seal a chest" onClose={close}>
+      <Shell title="Seal a chest" onClose={() => { if (useShards.getState().deployStatus === 'working') return; useShards.getState().unplaceChest(); close() }}>
         <ChestCompose onDone={close} />
+      </Shell>
+    )
+  }
+  if (chestEdit) {
+    return (
+      <Shell title={chestEdit.fields ? 'Edit chest' : 'Add to chest'} onClose={close}>
+        <ChestCompose key={chestEdit.eventId} onDone={close} target={{ mode: 'edit', eventId: chestEdit.eventId, fields: chestEdit.fields }} />
       </Shell>
     )
   }

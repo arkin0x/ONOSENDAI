@@ -15,6 +15,7 @@
  * workshop can keep the button down and say where things are.
  */
 
+import { withoutCarried } from '../lib/carried'
 import { useEffect } from 'react'
 import { create } from 'zustand'
 import { avatarWork, verifyAvatarWork } from 'cyberspace-core'
@@ -164,7 +165,9 @@ export const useAvatars = create<AvatarsState>((set, get) => ({
       .catch(() => { if (!(pubkey in get().shards)) set({ shards: { ...get().shards, [pubkey]: null } }) })
   },
 
-  adopt: async (shard) => {
+  adopt: async (chosen) => {
+    // An avatar is public: what came to you sealed stays out of it.
+    const shard = chosen ? withoutCarried(chosen) : chosen
     // One adopt at a time, through mining, signing and publishing: a second
     // press while the signer's prompt is open would mine and ask again.
     if (get().phase) return false

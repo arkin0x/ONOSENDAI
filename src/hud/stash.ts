@@ -14,7 +14,7 @@
 
 import { create } from 'zustand'
 import type { ChestDraft, MyDeployment } from '../store/useShards'
-import { useShards } from '../store/useShards'
+import { fillingChest, useShards } from '../store/useShards'
 import { useCyberspace } from '../store/useCyberspace'
 import { hiddenLabel } from '../lib/hidden'
 import type { FeedObject } from 'sno-core/feed'
@@ -83,8 +83,10 @@ interface StashModals {
   message: boolean
   /** The FORGE AN ITEM composer (Keys and Chests B1 §3.1; the item is a keypair, so the name says key). */
   key: boolean
-  /** The SEAL A CHEST composer. */
+  /** The chest modal for the chest just placed (SEAL A CHEST, then PLACE CHEST: useShards placeChest). */
   chest: boolean
+  /** The chest modal on a chest of yours already hidden: EDIT (its name and lock too) or ADD (its contents). */
+  chestEdit: { eventId: string; fields: boolean } | null
   /** The PLACE AUDIO composer (DECK-0007). */
   audio: boolean
   /** The SHARD FEED window: everyone's published objects, outside the Builder. */
@@ -112,8 +114,8 @@ interface StashModals {
   openMessage: () => void
   /** Forge a key to hide at the build cursor. */
   openKey: () => void
-  /** Seal a chest to hide at the build cursor. */
-  openChest: () => void
+  /** EDIT or ADD on a chest of yours. */
+  openChestEdit: (eventId: string, fields: boolean) => void
   /** Hide audio at the build cursor (DECK-0007). */
   openAudio: () => void
   /** Browse the Shard Feed. */
@@ -126,7 +128,7 @@ interface StashModals {
 }
 
 /** Every modal closed: what each open sets before opening its own. */
-const NONE_OPEN = { models: false, bags: false, bag: null, message: false, key: false, chest: false, audio: false, feed: false }
+const NONE_OPEN = { models: false, bags: false, bag: null, message: false, key: false, chest: false, chestEdit: null, audio: false, feed: false }
 
 export const useStash = create<StashModals>((set) => ({
   models: false,
@@ -135,6 +137,7 @@ export const useStash = create<StashModals>((set) => ({
   message: false,
   key: false,
   chest: false,
+  chestEdit: null,
   audio: false,
   feed: false,
   returnToModels: false,
@@ -146,7 +149,7 @@ export const useStash = create<StashModals>((set) => ({
   openBag: (lookupId) => set({ ...NONE_OPEN, bag: lookupId }),
   openMessage: () => set({ ...NONE_OPEN, message: true }),
   openKey: () => set({ ...NONE_OPEN, key: true }),
-  openChest: () => set({ ...NONE_OPEN, chest: true }),
+  openChestEdit: (eventId, fields) => set({ ...NONE_OPEN, chestEdit: { eventId, fields } }),
   openAudio: () => set({ ...NONE_OPEN, audio: true }),
   openFeed: () => set({ ...NONE_OPEN, feed: true }),
   close: () => set(NONE_OPEN),
@@ -174,6 +177,17 @@ export const useStash = create<StashModals>((set) => ({
 // in the world, and the chest is still to be hidden.
 // A placement lined up again (useShards `placedLast`) has placed: it forgets
 // too, so a CANCEL on the copy does not bring the modal back.
+// A chest placed first (R18): PLACE CHEST opens its modal, and the modal
+// goes when the chest is no longer being filled (sealed and hidden, MOVE
+// back to the bar, or canceled).
+useShards.subscribe((s, prev) => {
+  const now = fillingChest(s.pending)
+  const was = fillingChest(prev.pending)
+  // A seal that failed while being filled: its modal says why, whatever closed it meanwhile.
+  if ((now && !was) || (now && s.deployStatus === 'error' && prev.deployStatus !== 'error')) useStash.setState({ ...NONE_OPEN, chest: true })
+  else if (!now && was && useStash.getState().chest) useStash.setState({ chest: false })
+})
+
 useShards.subscribe((s, prev) => {
   if (s.pending !== null && s.deployStatus === 'done' && prev.deployStatus !== 'done') {
     useStash.setState({ returnToModels: false, returnToFeed: false })

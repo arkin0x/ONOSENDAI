@@ -79,9 +79,11 @@ describe('what a key and a chest are called', () => {
     const key = forgeKey('Wind Key')
     expect(pendingName({ type: 'key', key }, null)).toBe('Wind Key')
     expect(pendingEmpty({ type: 'key', key: { ...key, name: ' ' } }, null)).toBe(true)
-    const draft = { type: 'chest' as const, name: 'Wind Chest', lock: { pubkey: key.itemPubkey, label: 'Wind Key' }, requires: '', contents: [] }
+    // Placed (R18: placed first, then filled): empty until something is put in it; while being placed it never is.
+    const draft = { type: 'chest' as const, name: 'Wind Chest', lock: { pubkey: key.itemPubkey, label: 'Wind Key' }, requires: '', contents: [], spot: { at: { x: 0n, y: 0n, z: 0n }, plane: 0 as const } }
     expect(pendingName(draft, null)).toBe('Wind Chest')
     expect(pendingEmpty(draft, null)).toBe(true)
+    expect(pendingEmpty({ ...draft, spot: undefined }, null)).toBe(false)
     expect(pendingEmpty({ ...draft, contents: [{ kind: 'message', text: 'x' }] }, null)).toBe(false)
     expect(hiddenLabel({ type: 'key', key })).toBe('Wind Key')
     expect(hiddenLabel({ type: 'chest', chest: chestTo(key.itemPubkey, '') })).toBe('Wind Chest')

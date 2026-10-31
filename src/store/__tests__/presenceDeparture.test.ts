@@ -98,7 +98,7 @@ const plane = act(enterHyperspace).plane
 
 /** A hop by `sk` to `to` at `createdAt`: the parser checks its shape, not its proof. */
 function hopBy(sk: Uint8Array, to: Position, createdAt: number): NostrEvent {
-  const ev = finalizeEvent(hopTemplate({ createdAt, genesisId: 'a'.repeat(64), previousId: 'b'.repeat(64), prevCoordHex: positionHex(to, plane), to, plane, proofHash: 'c'.repeat(64) }), sk) as NostrEvent
+  const ev = finalizeEvent(hopTemplate({ createdAt, genesisId: 'a'.repeat(64), previousId: 'b'.repeat(64), prevCoordHex: positionHex(to, plane), to, plane, proofHash: 'c'.repeat(64), mn: '0'.repeat(16), mp: '00'}), sk) as NostrEvent
   known.set(ev.id, ev)
   return ev
 }

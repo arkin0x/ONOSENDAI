@@ -15,7 +15,7 @@ const at = coordToXyz(hexToCoord(pk))
 const spawn = finalizeEvent(spawnTemplate(pk, 100), sk)
 const hop = finalizeEvent(hopTemplate({
   createdAt: 110, genesisId: spawn.id, previousId: spawn.id, prevCoordHex: pk,
-  to: { x: at.x + 7n, y: at.y, z: at.z }, plane: at.plane, proofHash: '2'.repeat(64),
+  to: { x: at.x + 7n, y: at.y, z: at.z }, plane: at.plane, proofHash: '2'.repeat(64), mn: '0'.repeat(16), mp: '00',
 }), sk)
 
 describe('targets', () => {

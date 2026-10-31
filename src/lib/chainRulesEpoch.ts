@@ -27,6 +27,11 @@
  * The chain rules this build signs movement under. Bumped only by a PR that
  * changes them.
  *
+ * | epoch | chain rules | from |
+ * |---|---|---|
+ * | 1 | hops carry the version 1 proof hash | the version gate (#530) |
+ * | 2 | hop proof version 2, residue openings: every hop carries `proof` (the seal), `mn` and `mp` (spec 5.9 to 5.13, revision 2026-10-08-residue-openings) | the hop proof v2 cutover (ono-1) |
+ *
  * CUTOVER CHECKLIST, for the PR that bumps this (hop proof v2 first):
  *
  * 1. Signed but unsent events. A stale tab keeps whatever it signed and had
@@ -49,8 +54,28 @@
  *    - the TV stream: it signs nothing, but it reloads when it learns of a
  *      block (lib/versionGate.ts, reloadBroadcast) so it verifies by the new
  *      rules. Check it came back after the deploy.
+ *
+ * How the bump to 2 (hop proof v2) answers it:
+ *
+ * 1. lib/staleFormat.ts, from store/useCyberspace.ts whenever the chain in
+ *    hand changes, and lib/publisher.ts before every send: an unsent hop in
+ *    the old format (no `mn`, no `mp`) is never published. The chain is cut
+ *    back to the event before it, which drops every unsent event after it
+ *    too, since each is bound to it. One such hop alone at the head, within
+ *    this machine's ceiling, is put back on the cursor to be proved again in
+ *    the new format with one COMMIT; anything else is dropped with a notice.
+ *    Never re-proved without the player: a commit opens the publisher's
+ *    release gate, which only a deliberate action may do.
+ * 2. lib/cloud.ts straddlingV1Hop: a kept hop job that comes back in the old
+ *    hop_n shape is refused unsigned and its record dropped (decision D-A,
+ *    RULING PENDING, recommended default). The player is told the job is
+ *    eligible for a refund; the refund is the operator's to run
+ *    (hosaka-api scripts/v1_hop_refunds.py), never automatic. A version 2
+ *    result is checked at Level 1 like any other.
+ * 3 and 4 stand as written. cyberspace-mcp and cyberspace-cli are their own
+ *    releases (mcp-1, cli-2).
  */
-export const CHAIN_RULES_EPOCH = 1
+export const CHAIN_RULES_EPOCH = 2
 
 /** Where every deploy serves its version file, from the site root. */
 export const VERSION_FILE = 'version.json'

@@ -280,7 +280,7 @@ describe('waiting for the visitor', () => {
     const done = vi.fn()
     const before = useCyberspace.getState().events
     const stop = watchAction('hop', done)
-    const fake = (a: string, n: number): NostrEvent => ({ id: String(n).repeat(64).slice(0, 64), pubkey: 'p', created_at: n, kind: 3333, tags: [['A', a]], content: '', sig: '' })
+    const fake = (a: string, n: number): NostrEvent => ({ id: String(n).repeat(64).slice(0, 64), pubkey: 'p', created_at: n, kind: 3333, tags: [['A', a], ...(a === 'hop' ? [['mn', '0'.repeat(16)], ['mp', '00']] : [])], content: '', sig: '' })
     useCyberspace.setState({ events: [...before, fake('enter-hyperspace', 1)] })
     expect(done).not.toHaveBeenCalled()
     useCyberspace.setState({ events: [...before, fake('enter-hyperspace', 1), fake('hop', 2)] })
@@ -353,7 +353,7 @@ describe('the voice', () => {
 
 describe('the gates (arkinox, 2026-10-15)', () => {
   const pubkey = () => useCyberspace.getState().identity.pubkey
-  const fake = (a: string, n: number): NostrEvent => ({ id: String(n % 10).repeat(64), pubkey: pubkey(), created_at: n, kind: 3333, tags: [['A', a]], content: '', sig: '' })
+  const fake = (a: string, n: number): NostrEvent => ({ id: String(n % 10).repeat(64), pubkey: pubkey(), created_at: n, kind: 3333, tags: [['A', a], ...(a === 'hop' ? [['mn', '0'.repeat(16)], ['mp', '00']] : [])], content: '', sig: '' })
   const stepIndex = (id: string) => DEMO_SCRIPT.steps.findIndex((s) => s.id === id)
   let saved: NostrEvent[] = []
   beforeEach(() => {

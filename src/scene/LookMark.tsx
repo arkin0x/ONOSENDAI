@@ -25,9 +25,9 @@ import { useFrame } from '@react-three/fiber'
 import type { Group, PerspectiveCamera } from 'three'
 import { flatten, type ShardModel } from 'sno-core/shards'
 import { extentOf, trueScale } from '../lib/itemModel'
-import { renderPose, viewPose } from '../lib/pose'
+import { placedPose, renderPose } from '../lib/pose'
 import { CUBE_REACH, MARK_RECEDE_FLOOR, recedeShare } from '../lib/markerSize'
-import type { ViewAxes } from '../lib/space'
+import type { Position, ViewAxes } from '../lib/space'
 import type { Box } from '../lib/clip'
 import type { Look } from '../lib/looks'
 import { useCyberspace } from '../store/useCyberspace'
@@ -90,14 +90,16 @@ interface Props {
    * the model is the default, and a ceremony draws its own instead.
    */
   children?: (frame: { model: ShardModel | null }) => ReactNode
+  /** Standing on the ground, by its payload's `up` and `spin` (lib/looks lookStand). */
+  stand?: { at: Position; spin: number }
   /** Where a custom look is cut: its region's walls in its own frame (lib/clip regionBox). None for a built-in. */
   clip?: Box
 }
 
 /** A chest or a door as its look, sized, turned with the view, labelled and tappable. */
-export function LookMark({ look, model, at, axes, minPx, label, onTap, clearTop = 0, children, clip }: Props): JSX.Element {
+export function LookMark({ look, model, at, axes, minPx, label, onTap, clearTop = 0, children, clip, stand }: Props): JSX.Element {
   const scaleExp = useCyberspace((s) => s.scaleExp)
-  const turn = useMemo(() => renderPose(viewPose(axes)), [axes])
+  const turn = useMemo(() => renderPose(placedPose(axes, stand)), [axes, stand])
   const bounds = lookBounds(look.closed)
   const atTrue = useMemo(() => trueScale(look.closed.unit, scaleExp), [look.closed.unit, scaleExp])
   // The label clears the look from any side at the scale it is drawn at

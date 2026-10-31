@@ -143,9 +143,9 @@ describe('the draw order (review of #452)', () => {
     expect(walls).toMatch(/material=\{m\}[^>]*renderOrder=\{OVERLAY_ORDER\}/)
     // The face highlight's fill and edge, the halo, the pick loop and ADD's ghost.
     expect(bench).toMatch(/<mesh geometry=\{lit\.g\} frustumCulled=\{false\} renderOrder=\{OVERLAY_ORDER\}>/)
-    expect(bench).toMatch(/edge\.renderOrder = OVERLAY_ORDER/)
-    expect(bench).toMatch(/LineBasicMaterial\(\{ color: WARN, toneMapped: false, transparent: true \}\)/)
-    expect(bench).toMatch(/<sprite [^>]*renderOrder=\{OVERLAY_ORDER\}>/)
+    expect(bench).toMatch(/<lineSegments geometry=\{lit\.e\} frustumCulled=\{false\} renderOrder=\{OVERLAY_ORDER\}>/)
+    expect(bench).toMatch(/<lineBasicMaterial color=\{WARN\} toneMapped=\{false\} transparent \/>/)
+    expect(bench).toMatch(/<primitive object=\{halos\.points\} renderOrder=\{OVERLAY_ORDER\} \/>/)
     expect(bench).toMatch(/l\.renderOrder = OVERLAY_ORDER/)
     expect(bench).toMatch(/<mesh position=\{UP\(aim\)\} renderOrder=\{OVERLAY_ORDER\}>/)
   })

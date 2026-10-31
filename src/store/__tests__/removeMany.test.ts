@@ -41,7 +41,7 @@ function library(n: number) {
 }
 
 function start(n: number, current: string | null, open = true): void {
-  useWorkshop.setState({ shards: library(n), currentId: current, open, selection: [3], partSel: [], selectedFace: null, facePick: [], past: [library(1)[0]], future: [], notice: null })
+  useWorkshop.setState({ shards: library(n), currentId: current, open, selection: [3], partSel: [], selectedFaces: [], facePick: [], past: [library(1)[0]], future: [], notice: null })
   persist.mockClear()
   saveNow.mockClear()
 }

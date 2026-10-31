@@ -219,6 +219,9 @@ async function gatherChain<T>(
   return { got, whole: hole() === null }
 }
 
+/** A chain is read from every configured relay, even one that hung: it may hold a newer move (relay.ts skipHung). */
+const CHAIN_READ = { evenHung: true }
+
 /**
  * A chain is read from every configured relay, even one that hung: it may hold
  * a newer move (relay.ts skipHung). And a relay still waiting on the signer is

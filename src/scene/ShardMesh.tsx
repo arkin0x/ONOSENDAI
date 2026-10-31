@@ -15,9 +15,10 @@
  */
 
 import { useEffect, useLayoutEffect, useMemo, useRef, useSyncExternalStore, type ReactNode } from 'react'
-import { useFrame, type ThreeEvent } from '@react-three/fiber'
+import { useFrame, useThree, type ThreeEvent } from '@react-three/fiber'
 import {
   FrontSide,
+  BufferAttribute,
   BufferGeometry,
   DoubleSide,
   Float32BufferAttribute,
@@ -45,6 +46,7 @@ import { SHARD_DOTS, SHARD_POINTS, createDiscMaterial, sizeDisc, withDiscColors 
 import { DOTS_ORDER, basicFaceProps, benchOrders, lineProps, litFaceProps, shardOpacity, shardOrder } from './shardFaces'
 
 import { HEADLAMP_FACES, HEADLAMP_LINES } from './headlamp'
+import { holdPlaced, placedBuffers, type PlacedBuffers } from './placedBuffers'
 
 export { FACE_TAG_STENCIL } from './shardFaces'
 
@@ -126,6 +128,8 @@ interface Props {
    * at four and makes a loop a placeholder.
    */
   nested?: Placed[]
+  /** Drawn by a parent's placement: its geometry can be shared with every other placement of the object (placedBuffers.ts). */
+  placed?: boolean
   /** A tap on a placed object, with its index in `parts`: the workshop's SELECT takes it whole. */
   onPartClick?: (e: ThreeEvent<MouseEvent>, part: number) => void
   /** Placements drawn with the selection's box around them. */
@@ -155,6 +159,41 @@ interface Props {
 }
 
 const STATIC = [0, 0.9, 1] as const
+
+/** Whether two lists hold the same numbers, in the same order. */
+export function sameNumbers(a: ArrayLike<number>, b: ArrayLike<number>): boolean {
+  if (a === b) return true
+  if (a.length !== b.length) return false
+  for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return false
+  return true
+}
+
+/**
+ * The list last handed over while the new one holds the same numbers, so what
+ * is keyed on it stands. The numbers are read at most once per change of the
+ * model, and that is far less than what it saves: painting a face changes no
+ * position and no triangle, and rebuilt, it was five new geometries and their
+ * GPU buffers per paint.
+ */
+/**
+ * What the position and color attributes live and die by. Every geometry a
+ * shard draws shares them, and disposing a geometry makes three delete the GL
+ * buffer of each attribute it holds, even one another geometry still uses. That
+ * geometry's vertex array goes on reading the deleted buffer, while three writes
+ * to a new one: a paint changes the store and the buffer and nothing on screen
+ * (SOLID, LINES, SOLID, then paint: review of #562). So they are made again
+ * whenever any geometry using them is: the points, the triangles (a FLIP), the
+ * mode (the wireframe) and `lit` (the insides). A paint changes none of these.
+ */
+export function sharedBufferDeps(positions: ArrayLike<number>, colorCount: number, index: ArrayLike<number>, mode: string, lit: boolean): unknown[] {
+  return [positions, colorCount, index, mode, lit]
+}
+
+function useSame<T extends ArrayLike<number>>(next: T): T {
+  const held = useRef(next)
+  if (!sameNumbers(held.current, next)) held.current = next
+  return held.current
+}
 
 /**
  * What a shard draws: its points in the render mapping, and every one of its
@@ -189,6 +228,64 @@ export function shardGeometry(shard: ShardModel, clip?: Box, pose?: Pose): { pos
   return { ...cut, faces, drawn: faces.map((_, i) => i) }
 }
 
+/** A shard's points and lines: one vertex each, with the colours again under the name the disc shader reads (scene/pointDisc). */
+function plainGeometry(posAttr: BufferAttribute, colAttr: BufferAttribute): BufferGeometry {
+  const g = new BufferGeometry()
+  g.setAttribute('position', posAttr)
+  g.setAttribute('color', colAttr)
+  return withDiscColors(g, colAttr)
+}
+
+/** A shard's faces. */
+function indexedGeometry(posAttr: BufferAttribute, colAttr: BufferAttribute, index: number[]): BufferGeometry {
+  const g = new BufferGeometry()
+  g.setAttribute('position', posAttr)
+  g.setAttribute('color', colAttr)
+  g.setIndex(index)
+  g.computeVertexNormals()
+  return g
+}
+
+/** The same triangles wound the other way: the insides, for a lit draw. */
+function insideGeometry(posAttr: BufferAttribute, colAttr: BufferAttribute, index: number[]): BufferGeometry {
+  const g = new BufferGeometry()
+  g.setAttribute('position', posAttr)
+  g.setAttribute('color', colAttr)
+  const flipped: number[] = []
+  for (let i = 0; i + 2 < index.length; i += 3) flipped.push(index[i], index[i + 2], index[i + 1])
+  g.setIndex(flipped)
+  return g
+}
+
+/** LINES mode: every edge of every face, once. Null with no edges to draw. */
+function outlineGeometry(posAttr: BufferAttribute, colAttr: BufferAttribute, faces: number[][]): BufferGeometry | null {
+  if (faces.length === 0) return null
+  const idx = faceEdges(faces)
+  if (idx.length === 0) return null
+  const g = new BufferGeometry()
+  g.setAttribute('position', posAttr)
+  g.setAttribute('color', colAttr)
+  g.setIndex(idx)
+  return g
+}
+
+/** One object's buffers, for all its placements (placedBuffers.ts): no decode writes to them, so no second copy of any array. */
+function buildPlaced(model: ShardModel): PlacedBuffers<ShardModel> {
+  const shard = expandFaceColors(model)
+  const { positions, colors, index, faces, drawn } = shardGeometry(shard)
+  const posAttr = new BufferAttribute(positions, 3)
+  const colAttr = new BufferAttribute(colors, 3)
+  const plain = plainGeometry(posAttr, colAttr)
+  const indexed = indexedGeometry(posAttr, colAttr, index)
+  const outline = outlineGeometry(posAttr, colAttr, faces)
+  let inside: BufferGeometry | null = null
+  return {
+    shard, positions, colors, index, faces, drawn, plain, indexed, outline,
+    inside: () => (inside ??= insideGeometry(posAttr, colAttr, index)),
+    geometries: () => [plain, indexed, ...(outline ? [outline] : []), ...(inside ? [inside] : [])],
+  }
+}
+
 /**
  * The shard's own face index for a ray's hit on either side of a face, or
  * null for a hit on anything else. Both face meshes carry `faceOf`, the map
@@ -204,7 +301,7 @@ export function faceOfHit(i: { object: { userData: { faceOf?: number[] } }; face
   return map && k != null && map[k] !== undefined ? map[k] : null
 }
 
-export function ShardMesh({ shard: given, scale = 1, ghost = false, birth, dissolve, onFaceClick, world = false, headlamp = world, lit = false, clip, clipPlanes, pose, nested, onPartClick, selectedParts, cull = false, ignoreOpacity = false, budget }: Props): JSX.Element | null {
+export function ShardMesh({ shard: given, scale = 1, ghost = false, birth, dissolve, onFaceClick, world = false, headlamp = world, lit = false, clip, clipPlanes, pose, nested, placed = false, onPartClick, selectedParts, cull = false, ignoreOpacity = false, budget }: Props): JSX.Element | null {
   // What everything below is drawn at: the object's own opacity (DECK-0003
   // §1.11, with its 10% floor), times a ghost's; an avatar ignores its own.
   // A placed object reaches here with its own model, so it never takes its
@@ -256,33 +353,47 @@ export function ShardMesh({ shard: given, scale = 1, ghost = false, birth, disso
   // colour would bleed across every edge it shares. Expanded here and nowhere
   // else, so the clipper and the face picker below never learn the feature
   // exists.
-  const shard = useMemo(() => expandFaceColors(given), [given])
+  // A placed object that does nothing of its own shares one set of buffers with
+  // every other placement of it (placedBuffers.ts). Decoding or dissolving writes
+  // to its vertices, and a clip or a pose changes them, so those keep their own.
+  const sharing = placed && !clip && !pose && birth === undefined && dissolve === undefined
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const shared = useMemo(() => (sharing ? placedBuffers(given, () => buildPlaced(given)) : null), [sharing, given])
+  useEffect(() => (shared ? holdPlaced(given, shared as PlacedBuffers<unknown>) : undefined), [shared, given])
+  const shard = useMemo(() => shared?.shard ?? expandFaceColors(given), [given, shared])
   // Keyed on the points and faces rather than the whole model, so a parent
   // that hands over a fresh copy of the same shard does not rebuild it
   // (unless it has face colours: the expansion above makes new arrays).
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  const { positions, colors, index, faces, drawn } = useMemo(() => shardGeometry(shard, clip, pose), [shard.vertices, shard.faces, clip, pose])
+  const built = useMemo(() => shared ?? shardGeometry(shard, clip, pose), [shared, shard.vertices, shard.faces, clip, pose])
+  const { colors, faces, drawn } = built
+  const positions = useSame(built.positions)
+  const index = useSame(built.index)
 
-  // Live copies: the decode writes into these, the targets stay untouched.
-  const posAttr = useMemo(() => new Float32BufferAttribute(positions.slice(), 3), [positions])
-  const colAttr = useMemo(() => new Float32BufferAttribute(colors.slice(), 3), [colors])
+  // Live copies: the decode writes into these, the targets stay untouched. A
+  // placement sharing its object's buffers has none of its own.
+  // Made again with the geometries that share them (sharedBufferDeps), and not
+  // for a paint: new colors on the same corners go into the buffer that is
+  // there, once, below.
+  const buffers = sharedBufferDeps(positions, colors.length, index, shard.mode, lit)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const posAttr = useMemo(() => (shared ? null : new Float32BufferAttribute(positions.slice(), 3)), [...buffers, shared])
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const colAttr = useMemo(() => (shared ? null : new Float32BufferAttribute(colors.slice(), 3)), [...buffers, shared])
+  const invalidate = useThree((s) => s.invalidate)
+  useLayoutEffect(() => {
+    if (!colAttr) return
+    const a = colAttr.array as Float32Array
+    if (sameNumbers(a, colors)) return
+    a.set(colors)
+    colAttr.needsUpdate = true
+    // Nothing R3F set has changed, so it would not know to draw on a canvas that draws on demand.
+    invalidate()
+  }, [colAttr, colors, invalidate])
 
-  const plain = useMemo(() => {
-    const g = new BufferGeometry()
-    g.setAttribute('position', posAttr)
-    g.setAttribute('color', colAttr)
-    // The same colours under the name the disc shader reads (scene/pointDisc).
-    return withDiscColors(g, colAttr)
-  }, [posAttr, colAttr])
+  const plain = useMemo(() => shared?.plain ?? plainGeometry(posAttr!, colAttr!), [posAttr, colAttr, shared])
 
-  const indexed = useMemo(() => {
-    const g = new BufferGeometry()
-    g.setAttribute('position', posAttr)
-    g.setAttribute('color', colAttr)
-    g.setIndex(index)
-    g.computeVertexNormals()
-    return g
-  }, [posAttr, colAttr, index])
+  const indexed = useMemo(() => shared?.indexed ?? indexedGeometry(posAttr!, colAttr!, index), [posAttr, colAttr, index, shared])
 
   // The inside of every face as a front face of its own: the same triangles
   // wound the other way. Flat shading takes a face's normal from the screen,
@@ -291,14 +402,8 @@ export function ShardMesh({ shard: given, scale = 1, ghost = false, birth, disso
   // lights like the outsides do.
   const inside = useMemo(() => {
     if (!lit) return null
-    const g = new BufferGeometry()
-    g.setAttribute('position', posAttr)
-    g.setAttribute('color', colAttr)
-    const flipped: number[] = []
-    for (let i = 0; i + 2 < index.length; i += 3) flipped.push(index[i], index[i + 2], index[i + 1])
-    g.setIndex(flipped)
-    return g
-  }, [posAttr, colAttr, index, lit])
+    return shared ? shared.inside() : insideGeometry(posAttr!, colAttr!, index)
+  }, [posAttr, colAttr, index, lit, shared])
 
   // The points, drawn as the terrain field draws its gibsons: a feathered disc
   // with a bright core for the bloom, sized in pixels between a floor and a cap.
@@ -316,17 +421,14 @@ export function ShardMesh({ shard: given, scale = 1, ghost = false, birth, disso
    * along, and an edge two faces share is drawn once rather than twice.
    */
   const outline = useMemo(() => {
-    if (faces.length === 0) return null
-    const idx = faceEdges(faces)
-    if (idx.length === 0) return null
-    const g = new BufferGeometry()
-    g.setAttribute('position', posAttr)
-    g.setAttribute('color', colAttr)
-    g.setIndex(idx)
-    return g
-  }, [posAttr, colAttr, faces])
+    if (shared) return shared.outline
+    if (shard.mode !== 'lines') return null
+    return outlineGeometry(posAttr!, colAttr!, faces)
+    // Keyed on the triangle list, the steady twin of `faces`: a paint that leaves it alone keeps the outline.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [posAttr, colAttr, index, shard.mode, shared])
 
-  useEffect(() => () => { outline?.dispose() }, [outline])
+  useEffect(() => (shared ? undefined : () => { outline?.dispose() }), [outline, shared])
 
   const line = useMemo(() => {
     const m = new LineBasicMaterial({ vertexColors: true, toneMapped: false, ...lineProps(opacity, ghost) })
@@ -340,9 +442,9 @@ export function ShardMesh({ shard: given, scale = 1, ghost = false, birth, disso
 
   // A rebuild replaces these; nothing else lets the GPU buffers go. The line
   // is a primitive, which R3F never disposes, so its material is ours too.
-  useEffect(() => () => { plain.dispose() }, [plain])
-  useEffect(() => () => { indexed.dispose() }, [indexed])
-  useEffect(() => () => { inside?.dispose() }, [inside])
+  useEffect(() => (shared ? undefined : () => { plain.dispose() }), [plain, shared])
+  useEffect(() => (shared ? undefined : () => { indexed.dispose() }), [indexed, shared])
+  useEffect(() => (shared ? undefined : () => { inside?.dispose() }), [inside, shared])
   useEffect(() => () => { line.material.dispose() }, [line])
   useEffect(() => { (line.material as LineBasicMaterial).clippingPlanes = clipPlanes ?? null }, [line, clipPlanes])
   // Spread into each JSX material: nothing at all when there are no planes, so those materials are as they were.
@@ -407,8 +509,9 @@ export function ShardMesh({ shard: given, scale = 1, ghost = false, birth, disso
       const t = dissolveShare(performance.now() - dissolve)
       const e = t * t
       frame.current++
-      const p = posAttr.array as Float32Array
-      const c = colAttr.array as Float32Array
+      // Dissolving never shares (see `sharing`), so these are its own.
+      const p = posAttr!.array as Float32Array
+      const c = colAttr!.array as Float32Array
       const n = p.length / 3
       const toStatic = Math.min(1, t * 2.5)
       for (let v = 0; v < n; v++) {
@@ -419,8 +522,8 @@ export function ShardMesh({ shard: given, scale = 1, ghost = false, birth, disso
         const b = away.shade[v]
         for (let k = 0; k < 3; k++) c[v * 3 + k] = colors[v * 3 + k] + (STATIC[k] * b - colors[v * 3 + k]) * toStatic
       }
-      posAttr.needsUpdate = true
-      colAttr.needsUpdate = true
+      posAttr!.needsUpdate = true
+      colAttr!.needsUpdate = true
       if (t >= 1) done.current = true
       return
     }
@@ -429,15 +532,16 @@ export function ShardMesh({ shard: given, scale = 1, ghost = false, birth, disso
     const e = easeOutCubic(t)
     const jitter = (1 - t) ** 2 * 0.12 * noise.extent
     frame.current++
-    const p = posAttr.array as Float32Array
-    const c = colAttr.array as Float32Array
+    // Decoding never shares either.
+    const p = posAttr!.array as Float32Array
+    const c = colAttr!.array as Float32Array
     for (let i = 0; i < p.length; i++) {
       const j = t < 1 ? (hash01(i * 13 + frame.current, noise.seed) - 0.5) * jitter : 0
       p[i] = noise.pos[i] + (positions[i] - noise.pos[i]) * e + j
       c[i] = noise.col[i] + (colors[i] - noise.col[i]) * e
     }
-    posAttr.needsUpdate = true
-    colAttr.needsUpdate = true
+    posAttr!.needsUpdate = true
+    colAttr!.needsUpdate = true
     if (t >= 1) done.current = true
   })
 
@@ -696,7 +800,7 @@ function Placements({ shard, byRef, nested, lit, ghost, world, headlamp, pose, o
     const matrix = new Matrix4().fromArray(partMatrix(part, shard.unit, model ? model.unit : shard.unit))
     let body: ReactNode = <lineSegments geometry={CUBE_EDGES}><lineBasicMaterial color={ACCENT} toneMapped={false} transparent opacity={ghost ? 0.45 : 0.8} /></lineSegments>
     // The part's own model, so its own opacity, never the parent's (§1.10).
-    if (model) body = <ShardMesh shard={model} nested={r.children} lit={lit} ghost={ghost} world={world} headlamp={headlamp} cull={cull} ignoreOpacity={ignoreOpacity} />
+    if (model) body = <ShardMesh shard={model} placed nested={r.children} lit={lit} ghost={ghost} world={world} headlamp={headlamp} cull={cull} ignoreOpacity={ignoreOpacity} />
     // Selected: an amber box around what the placement draws, in its own frame so it turns with it.
     const box = selected?.includes(i) ? (model ? placedBounds(model, r.children) : null) ?? { min: [-0.5, -0.5, -0.5], max: [0.5, 0.5, 0.5] } : null
     return (

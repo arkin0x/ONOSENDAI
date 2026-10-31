@@ -13,8 +13,8 @@
 
 import { useEffect, useMemo } from 'react'
 import { ACCENT } from '../lib/palette'
-import { GRID_RADIUS, itemCentre, type ViewAxes } from '../lib/space'
-import { drawnLook, lookOf, type Look } from '../lib/looks'
+import { GRID_RADIUS, itemCentre, type Position, type ViewAxes } from '../lib/space'
+import { drawnLook, lookOf, lookStand, type Look } from '../lib/looks'
 import { regionBox, type Box } from '../lib/clip'
 import { markShown } from '../lib/worldMarks'
 import { alignedOrigin, useCyberspace } from '../store/useCyberspace'
@@ -56,6 +56,8 @@ export interface PlacedLook {
   centre: [number, number, number]
   /** Where a custom look is cut: its region's walls, in its own frame. None for a built-in, drawn whole. */
   clip?: Box
+  /** Standing on the ground, by its payload (§3.6). Its region is not square to its own frame then, and it is not cut: standing needs a height of 27 or more (lib/pose SNAP_MIN_HEIGHT), where a region dwarfs a look. */
+  stand?: { at: Position; spin: number }
 }
 
 export function ChestLooks({ axes }: { axes: ViewAxes }): JSX.Element | null {
@@ -89,8 +91,9 @@ export function ChestLooks({ axes }: { axes: ViewAxes }): JSX.Element | null {
       // What the mute list hides is not drawn coming out, as it is not listed (ItemRows ChestBlock).
       const shown = inside?.filter((e) => !hidesThing(muted, { authors: [w.author ?? '', e.event.pubkey], ids: [e.id] }, me))
       const loot = chestLoot({ look: look.kind, entries: shown, held: (e) => holdsEntry(items, e), chest: { at: w.at, plane: w.plane, height: w.height }, itemsReady })
-      const clip = look.name === 'custom' ? regionBox(w.at, w.height, look.closed.unit, LOOK_FRAME) : undefined
-      out.push({ key: w.key, look, opened: openedByHand(me, w.key, w.chest.lockPubkey), loot, text: itemMarkText(w), sub: author({ author: w.author ?? '', mine: w.mine }), centre, clip })
+      const stand = lookStand(look.closed, w.plane, w.at)
+      const clip = look.name === 'custom' && !stand ? regionBox(w.at, w.height, look.closed.unit, LOOK_FRAME) : undefined
+      out.push({ key: w.key, look, opened: openedByHand(me, w.key, w.chest.lockPubkey), loot, text: itemMarkText(w), sub: author({ author: w.author ?? '', mine: w.mine }), centre, clip, stand })
     }
     return out
     // mine, discovered, curated and muted are what worldItems reads.
@@ -120,6 +123,7 @@ export function ChestLooks({ axes }: { axes: ViewAxes }): JSX.Element | null {
             onTap={() => useShards.getState().selectSecret(w.key)}
             clearTop={loot ? LOOT_TOP : 0}
             clip={w.clip}
+            stand={w.stand}
           >
             {ceremony || loot
               ? () => (

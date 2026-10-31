@@ -346,8 +346,8 @@ export function readItem(inner: Pick<NostrEvent, 'kind' | 'content' | 'tags' | '
     try { raw = JSON.parse(inner.content) } catch { return null }
     const shard = fromPayload(raw, inner.id)
     // The pieces it carries count only under `author` (DECK-0003 §1.10): the
-    // item's signer, or for an unsigned one the bag's or chest's signer, never
-    // the pubkey it claims; null honours none.
+    // item's signer, or for an unsigned one the bag's signer, never the pubkey
+    // it claims. In a chest an unsigned one has none; null honours no key.
     return shard ? { type: 'shard', shard: keepOwnTable(shard, author) } : null
   }
   if (inner.kind === MESSAGE_KIND) {

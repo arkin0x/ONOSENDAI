@@ -139,7 +139,9 @@ export function SecretModal(): JSX.Element | null {
   const words = coin || nft ? textWithoutToken(textWithoutNftLinks(item.text)) : item.text ?? ''
   // A shard copies into your workshop as a model; a message copies its text.
   const copy = (): void => {
-    if (item.type === 'shard' && item.shard) useWorkshop.getState().importShard(item.shard)
+    // Decrypted from a bag, unless it is a public object the bag only names (a LIVE LINK).
+    const publicLink = item.event?.kind === 33331 && !item.event.tags.some((t) => t[0] === 'encrypted')
+    if (item.type === 'shard' && item.shard) useWorkshop.getState().importShard(item.shard, undefined, undefined, !publicLink)
     else if (words) void navigator.clipboard?.writeText(words)
     setCopied(true)
     window.setTimeout(() => setCopied(false), 1400)

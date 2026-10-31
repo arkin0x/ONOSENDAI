@@ -29,6 +29,7 @@ import { SNO_KIND, objectAddress } from 'sno-core/feed'
 import { publishMany, relaySet } from '../lib/relay'
 import { shardRefusal } from '../lib/hidden'
 import { forgetRef } from '../lib/parts'
+import { ownKeysOnly } from '../lib/carried'
 import { forgetItemModel } from '../hooks/useItemModel'
 import type { NostrEvent } from '../lib/events'
 import {
@@ -151,6 +152,8 @@ export const usePublished = create<PublishedState>((set, get) => ({
     if (refusal) return { ok: false, message: refusal, detail: refusal }
     const cs = useCyberspace.getState()
     const relays = relaySet()
+    // Every key under the signer's pubkey, as a publisher MUST write (DECK-0003 §1.10).
+    if (cs.identity.pubkey) shard = ownKeysOnly(shard, cs.identity.pubkey)
     try {
       const template = publicObjectTemplate(shard, nextAt(shard.id, Math.max(get().ledger[shard.id]?.at ?? 0, retractedAt(shard.id))))
       const signed = await cs.signEvent(template)

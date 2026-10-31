@@ -188,12 +188,31 @@ function level1(input: { previousEventIdHex: string; fromHeight: number; toHeigh
  * caller keeps it for RESUME rather than refusing it.
  */
 export async function verifyCloudRide(job: HosakaJob, asked: RideAsked, blockHashFor: BlockHashFor): Promise<string[]> {
+  return (await checkCloudRide(job, asked, blockHashFor)).failed
+}
+
+/** What a check of a finished ride found. */
+export interface CloudRideCheck {
+  /** What failed, empty when the proof is good. */
+  failed: string[]
+  /**
+   * The block whose opening disagreed with this device's own hash for it, or null.
+   * This device's line may be what is wrong, and the proof was paid for, so the
+   * record is kept for the check to run again. Whatever else fails does not depend
+   * on this device's line: the proof is wrong as it stands.
+   */
+  disagreesAt: number | null
+}
+
+/** verifyCloudRide, saying whether what failed could be this device's own line. */
+export async function checkCloudRide(job: HosakaJob, asked: RideAsked, blockHashFor: BlockHashFor): Promise<CloudRideCheck> {
+  const proofOnly = (failed: string[]): CloudRideCheck => ({ failed, disagreesAt: null })
   const r = rideResultOf(job)
-  if (typeof r === 'string') return [r]
+  if (typeof r === 'string') return proofOnly([r])
   const failed: string[] = []
   if (r.previous_event_id !== asked.previousId) failed.push('the proof is bound to another chain head')
   if (r.from_height !== asked.fromHeight || r.to_height !== asked.toHeight) failed.push(`the proof is for a ride from block ${r.from_height} to block ${r.to_height}`)
-  if (failed.length > 0) return failed
+  if (failed.length > 0) return proofOnly(failed)
   const heights = rideSampleHeights(asked.previousId, asked.fromHeight, asked.toHeight, r.root, r.mn) ?? []
   const hashes: Record<number, string> = {}
   for (const h of heights) {
@@ -202,5 +221,6 @@ export async function verifyCloudRide(job: HosakaJob, asked: RideAsked, blockHas
     hashes[h] = hash
   }
   const result = await level1({ previousEventIdHex: asked.previousId, fromHeight: asked.fromHeight, toHeight: asked.toHeight, rootHex: r.root, mp: r.mp, mn: r.mn }, hashes)
-  return result.ok ? [] : [result.reason ?? 'Level 1 verification failed']
+  if (result.ok) return proofOnly([])
+  return { failed: [result.reason ?? 'Level 1 verification failed'], disagreesAt: result.openingHeight ?? null }
 }

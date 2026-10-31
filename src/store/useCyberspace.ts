@@ -2628,6 +2628,8 @@ function localHopFailures(event: NostrEvent, fromHex: string, to: Position, plan
       nonce: tagOf('mn'),
       openings: tagOf('mp'),
       eventId: event.id,
+      // A hop this client just signed is a new id, so it is on no list (lib/v1HopListGuard).
+      grandfathered: new Set(),
     })
   } catch (err) {
     return [`check: ${err instanceof Error ? err.message : String(err)}`]

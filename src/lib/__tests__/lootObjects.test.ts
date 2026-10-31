@@ -15,7 +15,7 @@ import { chestLoot, lootOf } from '../lootObjects'
 import { positionHex } from '../events'
 import { primeRef } from '../parts'
 import { measureModel } from '../../hooks/useItemModel'
-import { LOOT_SIDE, lootFit } from '../../scene/ChestLoot'
+import { HOVER_Z, LOOT_ROUND, LOOT_SIDE, LOOT_UP, hoverAt, lootFit, openChestBounds } from '../../scene/ChestLoot'
 import { lootModels } from '../lootModels'
 
 let n = 0
@@ -143,5 +143,28 @@ describe('fitting a loot object (review of #534)', () => {
 
   it('nothing measured, nothing drawn', () => {
     expect(lootFit(null)).toBeNull()
+  })
+})
+
+describe('loot over the open chest (review of the ceremony)', () => {
+  it('no loot object reaches into the open chest from any side, turning and bobbing, in a row of any length', () => {
+    const b = openChestBounds()
+    // The open look, lid up: taller than the closed chest, leaning back.
+    expect(b.max[1]).toBeGreaterThan(1.3)
+    for (let n = 1; n <= 9; n++) for (let i = 0; i < n; i++) {
+      const [x, y] = hoverAt(i, n)
+      // The volume it sweeps: a circle LOOT_ROUND about its point, LOOT_UP up and down.
+      const dx = Math.max(b.min[0] - x, 0, x - b.max[0])
+      const dz = Math.max(b.min[2] - HOVER_Z, 0, HOVER_Z - b.max[2])
+      const beside = Math.hypot(dx, dz) >= LOOT_ROUND
+      const above = y - LOOT_UP > b.max[1]
+      expect(beside || above, `object ${i} of ${n}`).toBe(true)
+    }
+  })
+
+  it('keeps the row\u2019s arc where it is clear of the chest', () => {
+    const [, mid] = hoverAt(2, 5)
+    const [, end] = hoverAt(4, 5)
+    expect(end).toBeLessThan(mid)
   })
 })

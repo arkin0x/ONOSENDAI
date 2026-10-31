@@ -126,7 +126,7 @@ export async function enterRoom(door: Hidden, secretHex: string, mark?: (items: 
   if (useCyberspace.getState().identity.pubkey !== me) return null
   for (const d of doorsOfRoom(door)) {
     keepDoorSecret(me, d.eventId, secretHex)
-    rememberOpened(me, d.eventId, [])
+    if (d.chest) rememberOpened(me, d.eventId, d.chest.lockPubkey, [])
   }
   if (opened.items.length > 0) {
     useShards.getState().addDiscovered(opened.items)

@@ -43,7 +43,7 @@ const within = <T>(p: Promise<T>, ms: number): Promise<T | 'still waiting'> => P
 describe('a signature check that never answers', () => {
   it('holds the old chain\'s moves, saying so, but a respawn stops waiting on it', async () => {
     const spawn = sign(spawnTemplate(pk, 1_000))
-    const hop = sign(hopTemplate({ createdAt: 1_001, genesisId: spawn.id, previousId: spawn.id, prevCoordHex: pk, to: { x: home.x + 1n, y: home.y, z: home.z }, plane: home.plane, proofHash: '0'.repeat(64) }))
+    const hop = sign(hopTemplate({ createdAt: 1_001, genesisId: spawn.id, previousId: spawn.id, prevCoordHex: pk, to: { x: home.x + 1n, y: home.y, z: home.z }, plane: home.plane, proofHash: '0'.repeat(64), mn: '0'.repeat(16), mp: '00'}))
     void positionHex
     storage.setItem('onosendai:nsec', nip19.nsecEncode(sk))
     storage.setItem(`onosendai:chain:${pk}`, JSON.stringify({ version: 2, events: [spawn, hop], published: [spawn.id, hop.id], stats: {} }))

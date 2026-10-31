@@ -15,6 +15,7 @@ import { create } from 'zustand'
 import { useCalibration } from '../lib/calibration'
 import { offloadFrom } from '../lib/crossover'
 import { localOnly, nextStep, routeFeasible, routeNeedsCloud, type Ceilings, type PlanStep } from '../lib/movePlan'
+import { cloudHopsSold } from '../lib/hosaka'
 import { offerVerdict, type OfferVerdict } from '../lib/offer'
 import type { Position } from '../lib/space'
 import { MAX_COMPUTE_HEIGHT, useCyberspace } from './useCyberspace'
@@ -61,7 +62,7 @@ export function offerNeed(): OfferView | null {
   const verdict = offerVerdict(s.position, s.cursor, s.plane, {
     hop: machineCeiling,
     sidestep: cal.sidestepHeight,
-    cloudHop: s.cloud.limits?.max_hop_height ?? 0,
+    cloudHop: cloudHopsSold(s.cloud.limits),
     cloudSidestep: s.cloud.limits?.max_sidestep_height ?? 0,
   }, s.cloud.limits !== null)
   return verdict ? { verdict, cursorKey: cursorKeyOf(s.cursor, s.plane), machineCeiling, localFeasible: localFeasibleFor(s.position, s.cursor, machineCeiling, cal.sidestepHeight) } : null
@@ -80,7 +81,7 @@ export function useOfferNeed(): OfferView | null {
   const verdict = !home ? null : offerVerdict(position, cursor, plane, {
     hop: machineCeiling,
     sidestep: sidestepCeil,
-    cloudHop: limits?.max_hop_height ?? 0,
+    cloudHop: cloudHopsSold(limits),
     cloudSidestep: limits?.max_sidestep_height ?? 0,
   }, limits !== null)
   return verdict ? { verdict, cursorKey: cursorKeyOf(cursor, plane), machineCeiling, localFeasible: localFeasibleFor(position, cursor, machineCeiling, sidestepCeil) } : null
@@ -110,7 +111,7 @@ export interface NextActionView {
   cursorKey: string
 }
 
-export function nextActionFor(position: Position, cursor: Position, plane: number, hopCeil: number, sidestepCeil: number, limits: { max_hop_height: number; max_sidestep_height: number } | null, offloadFromHeight: number = Infinity): NextActionView | null {
+export function nextActionFor(position: Position, cursor: Position, plane: number, hopCeil: number, sidestepCeil: number, limits: { max_hop_height: number; max_sidestep_height: number; hop_proof_version?: number } | null, offloadFromHeight: number = Infinity): NextActionView | null {
   if (position.x === cursor.x && position.y === cursor.y && position.z === cursor.z) return null
   const machineCeiling = Math.min(MAX_COMPUTE_HEIGHT, hopCeil)
   const cursorKey = cursorKeyOf(cursor, plane)
@@ -119,7 +120,7 @@ export function nextActionFor(position: Position, cursor: Position, plane: numbe
   // cross, which is when it is actually needed; a route with such a boundary
   // anywhere on it reads OFFLOAD from the start. A cursor no one reaches is
   // TOO FAR as soon as HOSAKA's caps are known; until they are, OFFLOAD asks.
-  const ceilings: Ceilings = { hop: machineCeiling, sidestep: sidestepCeil, cloudHop: limits?.max_hop_height ?? 0, cloudSidestep: limits?.max_sidestep_height ?? 0, offloadFrom: offloadFromHeight }
+  const ceilings: Ceilings = { hop: machineCeiling, sidestep: sidestepCeil, cloudHop: cloudHopsSold(limits), cloudSidestep: limits?.max_sidestep_height ?? 0, offloadFrom: offloadFromHeight }
   if (limits !== null && !routeFeasible(position, cursor, ceilings)) return { action: 'too-far', step: null, cursorKey }
   const step = nextStep(position, cursor, ceilings)
   if (!step) return null
@@ -140,7 +141,7 @@ export function nextAction(): NextActionView | null {
   const cal = useCalibration.getState()
   const from = offloadFrom(s.cloudPrefs.profile, {
     hopCeiling: cal.hopHeight, sidestepCeiling: cal.sidestepHeight,
-    cloudHop: s.cloud.limits?.max_hop_height ?? 0, provider: s.cloud.provider ?? null,
+    cloudHop: cloudHopsSold(s.cloud.limits), provider: s.cloud.provider ?? null,
     signerKind: s.signerKind, cantorMsByHeight: cal.cantorMsByHeight, sha256PerSec: cal.sha256PerSec,
   })
   return nextActionFor(s.position, s.cursor, s.plane, cal.hopHeight, cal.sidestepHeight, s.cloud.limits, from)
@@ -161,7 +162,7 @@ export function useNextAction(): NextActionView | null {
   const signerKind = useCyberspace((s) => s.signerKind)
   const cantorMsByHeight = useCalibration((s) => s.cantorMsByHeight)
   const sha256PerSec = useCalibration((s) => s.sha256PerSec)
-  const from = offloadFrom(profile, { hopCeiling: hopCeil, sidestepCeiling: sidestepCeil, cloudHop: limits?.max_hop_height ?? 0, provider: provider ?? null, signerKind, cantorMsByHeight, sha256PerSec })
+  const from = offloadFrom(profile, { hopCeiling: hopCeil, sidestepCeiling: sidestepCeil, cloudHop: cloudHopsSold(limits), provider: provider ?? null, signerKind, cantorMsByHeight, sha256PerSec })
   return home ? nextActionFor(position, cursor, plane, hopCeil, sidestepCeil, limits, from) : null
 }
 

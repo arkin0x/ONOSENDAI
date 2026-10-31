@@ -55,7 +55,7 @@ const hop = (n: number, previous: NostrEvent): NostrEvent => sign(hopTemplate({
   prevCoordHex: n === 1 ? pk : positionHex(step(BigInt(n - 1)), home.plane),
   to: step(BigInt(n)),
   plane: home.plane,
-  proofHash: '0'.repeat(64),
+  proofHash: '0'.repeat(64), mn: '0'.repeat(16), mp: '00',
 }))
 const hop1 = hop(1, spawn)
 const hop2 = hop(2, hop1)

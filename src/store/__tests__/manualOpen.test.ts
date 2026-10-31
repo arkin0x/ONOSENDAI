@@ -142,7 +142,7 @@ describe('OPEN opens', () => {
     expect(S().discovered[inner.event.id]?.chestId).toBe(c.event.id)
     expect(useOpenedChests.getState().opened[openedKey(me(), c.event.id)]).toHaveLength(2)
     expect(Object.keys(I().items)).toEqual([k.event.id])
-    expect(openedByHand(me(), c.event.id)).toBe(true)
+    expect(openedByHand(me(), c.event.id, k.key.itemPubkey)).toBe(true)
   })
 
   it('a chest inside an opened chest is found closed, and opens only with its own OPEN', async () => {

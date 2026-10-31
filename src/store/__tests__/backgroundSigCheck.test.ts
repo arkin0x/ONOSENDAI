@@ -65,7 +65,7 @@ function chainOf(hops: number): NostrEvent[] {
   const spawn = sign(spawnTemplate(pk, 1_000))
   const out = [spawn]
   for (let n = 1; n <= hops; n++) {
-    out.push(sign(hopTemplate({ createdAt: 1_000 + n, genesisId: spawn.id, previousId: out[n - 1].id, prevCoordHex: n === 1 ? pk : positionHex(step(BigInt(n - 1)), home.plane), to: step(BigInt(n)), plane: home.plane, proofHash: '0'.repeat(64) })))
+    out.push(sign(hopTemplate({ createdAt: 1_000 + n, genesisId: spawn.id, previousId: out[n - 1].id, prevCoordHex: n === 1 ? pk : positionHex(step(BigInt(n - 1)), home.plane), to: step(BigInt(n)), plane: home.plane, proofHash: '0'.repeat(64), mn: '0'.repeat(16), mp: '00'})))
   }
   return out
 }

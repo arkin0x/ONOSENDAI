@@ -18,7 +18,7 @@ function hop(prev: NostrEvent, at: number, dx: bigint): NostrEvent {
   const from = coordToXyz(hexToCoord(prevC))
   return finalizeEvent(hopTemplate({
     createdAt: at, genesisId: spawn.id, previousId: prev.id, prevCoordHex: prevC,
-    to: { x: from.x + dx, y: from.y, z: from.z }, plane: from.plane, proofHash: '1'.repeat(64),
+    to: { x: from.x + dx, y: from.y, z: from.z }, plane: from.plane, proofHash: '1'.repeat(64), mn: '0'.repeat(16), mp: '00',
   }), sk)
 }
 const h1 = hop(spawn, 110, 1n)

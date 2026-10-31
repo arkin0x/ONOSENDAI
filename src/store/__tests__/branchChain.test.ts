@@ -45,7 +45,7 @@ function hop(id: number, prev: string, at: number): NostrEvent {
   const genesis = spawn ? spawn.id : S().genesisId
   return {
     id: hex(id), pubkey: me, created_at: at, kind: ACTION_KIND, content: '', sig: '0'.repeat(128),
-    tags: [['A', 'hop'], ['C', hex(0xaa + id)], ['c', me], ['S', '0-0-0'], ['e', genesis, '', 'genesis'], ['e', prev, '', 'previous'], ['proof', hex(0xbeef)]],
+    tags: [['A', 'hop'], ['C', hex(0xaa + id)], ['c', me], ['S', '0-0-0'], ['e', genesis, '', 'genesis'], ['e', prev, '', 'previous'], ['proof', hex(0xbeef)], ['mn', '0'.repeat(16)], ['mp', '00']],
   }
 }
 

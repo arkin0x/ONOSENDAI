@@ -97,7 +97,7 @@ import { creditOf, useWorkshop } from './useWorkshop'
 import { deletionFilters, isDeleted, type Credit, type FeedObject } from 'sno-core/feed'
 import { ROOM_BAG_SETTINGS, inRoom, newDoorSecret, roomDoorAt, roomEntries, roomKey, roomLookupId, roomOf, type OwnDoor } from '../lib/doors'
 import { doorSecret, keepDoorSecret } from './doorSecrets'
-import { builtInLook, builtInLookTags, isDoor, keptInChest, lookOf, lookTags, lookTagsOf, posedLook, posedOpenLook, posedWrapper, type LookName, type LookPose } from '../lib/looks'
+import { builtInLook, builtInLookTags, doorHeightOf, isDoor, keptInChest, lookOf, lookTags, lookTagsOf, posedLook, posedOpenLook, posedWrapper, type LookName, type LookPose } from '../lib/looks'
 import { useCeremony } from './useCeremony'
 import { useToast } from './useToast'
 import type { ShardModel } from 'sno-core/shards'
@@ -178,6 +178,12 @@ export interface MyDeployment {
    * key, `height` the room's, and `bag` ROOM_BAG_SETTINGS.
    */
   room?: { doorId: string }
+  /**
+   * A door of a rotation (§3.7.7) that no relay took: what the rotation still owes.
+   * The rooms to retract, which stay until every door has left them, and the door
+   * this one replaced, which must not go back in a bag beside it. EDIT rotates again.
+   */
+  rotating?: Array<{ lookupId: string; bagId: string | null; doorId: string }>
 }
 
 /** Something placed in the world, ready to draw. */
@@ -1395,7 +1401,16 @@ export const useShards = create<ShardsState>((set, get) => {
     try {
       const events = await query({ kinds: [HIDDEN_KIND], authors: [cyber().identity.pubkey], '#d': [lookupId] })
       const newest = events.sort((a, b) => b.created_at - a.created_at)[0]
-      const relay = newest ? await bagEntries(newest, key) : []
+      // A bag retracted from another device, with a door of yours in it: that door is gone (§3.7.8).
+      // A bag written in the same second as a retraction is the newer word.
+      const retractedAt = await bagRetractedAt(lookupId, items)
+      if (retractedAt > (newest?.created_at ?? 0)) {
+        pruneGoneDoors(lookupId, new Set(), retractedAt)
+        return { entries: get().mine.filter((d) => d.lookupId === lookupId).map(entryOf), settings: localSettings }
+      }
+      // What a rotation that did not finish replaced stays out, whichever write comes first.
+      const replaced = new Set(items.flatMap((d) => d.rotating ?? []).map((o) => o.doorId))
+      const relay = (newest ? await bagEntries(newest, key) : []).filter((e) => isReference(e) || !replaced.has(e.id))
       // A relay copy that does not open with this key is not this bag.
       const settings = newest && relay.length > 0 ? bagSettingsOf(newest, height) : localSettings
       // A door of yours the relays' newer bag no longer holds was changed from
@@ -1405,6 +1420,33 @@ export const useShards = create<ShardsState>((set, get) => {
     } catch {
       return { entries: local, settings: localSettings }
     }
+  }
+
+  /** When this bag's address was last retracted, 0 if never. Asked only of a bag holding a door of yours, the one row a retraction can leave standing here. */
+  async function bagRetractedAt(lookupId: string, items: readonly MyDeployment[]): Promise<number> {
+    if (!items.some((d) => d.chest?.door !== undefined && d.published)) return 0
+    const me = cyber().identity.pubkey
+    const address = `${HIDDEN_KIND}:${me}:${lookupId}`
+    const deletions = await query({ kinds: [5], authors: [me], '#a': [address] })
+    return deletions.filter((e) => e.pubkey === me && e.tags.some((t) => t[0] === 'a' && t[1] === address)).reduce((at, e) => Math.max(at, e.created_at), 0)
+  }
+
+  /**
+   * Whether a door of yours stands in this room that this device has no row for:
+   * one sealed from another device and not scanned here yet. A second door here
+   * would choose a second secret, and a finder who opens either marks both opened
+   * under that one secret, so the other room is lost to them (§3.7.5). One read and
+   * one derivation per door sealed. It sees a door in the place's ordinary bag; one
+   * hidden inside another room, LOCAL, or past what can be derived here, it cannot.
+   */
+  async function unseenDoorHere(at: Position, plane: Plane, height: number): Promise<boolean> {
+    const cs = cyber()
+    if (!cs.live || height > MAX_COMPUTE_HEIGHT) return false
+    const me = cs.identity.pubkey
+    const here = await regionKeyOffThread(at, height, MAX_COMPUTE_HEIGHT)
+    const seen = await gatherInners(here.lookupId, here.key, true, height)
+    const known = new Set(ownDoors(get().mine, me).map((d) => d.eventId))
+    return seen.entries.some((e) => !isReference(e) && e.kind === CHEST_KIND && e.pubkey === me && !known.has(e.id) && doorHeightOf(e.tags) === height && eventPlace(e)?.plane === plane)
   }
 
   /**
@@ -1456,6 +1498,13 @@ export const useShards = create<ShardsState>((set, get) => {
       if (!h || !h.inner) return d
       refreshed = true
       return { ...d, inner: h.inner, shard: h.shard ?? d.shard }
+    }).map((d) => {
+      // A row read from a room follows that room: another device renamed its door or
+      // rotated it, and a row left naming the old one counts as behind no door.
+      const h = items.find((x) => x.eventId === d.eventId && x.room && x.keyHex)
+      if (!h?.room || (d.room?.doorId === h.room.doorId && d.lookupId === h.lookupId)) return d
+      refreshed = true
+      return { ...d, room: h.room, lookupId: h.lookupId, keyHex: h.keyHex!, bagId: h.bagId, height: h.height, bag: h.bag, published: true }
     })
     for (const h of items) {
       // What came out of a chest is the chest's, not an entry of the bag:
@@ -1472,7 +1521,9 @@ export const useShards = create<ShardsState>((set, get) => {
       })
     }
     if (own.length === 0 && !refreshed) return
-    const next = [...updated, ...own]
+    // A reference resealed by a rotation has a new event id and the same address: the new row is it.
+    const resealed = own.filter((o) => o.room && o.ref)
+    const next = [...updated.filter((d) => !d.room || !d.ref || !resealed.some((o) => o.inner.kind === d.inner.kind && dOf(o.inner) === dOf(d.inner) && o.inner.created_at > d.inner.created_at)), ...own]
     set({ mine: next })
     saveMine(next)
   }
@@ -1641,8 +1692,11 @@ export const useShards = create<ShardsState>((set, get) => {
       return held
     }
     if (!live) return rows()
-    const answers = (await queryEach({ kinds: [HIDDEN_KIND], authors: [d.inner.pubkey], '#d': [lookupId] })).filter((a) => a.outcome === 'answered')
+    const asked = await queryEach({ kinds: [HIDDEN_KIND], authors: [d.inner.pubkey], '#d': [lookupId] })
+    const answers = asked.filter((a) => a.outcome === 'answered')
     if (answers.length === 0) return 'No relay answered, so this cannot tell what is behind the door. Nothing has changed. Try again when one is reachable.'
+    // Both callers destroy what they do not see, and the relay that said nothing may hold the newest bag.
+    if (answers.length < asked.length) return 'A relay did not answer, and it may hold what is behind the door. Nothing has changed. Try again when they all answer.'
     const newest = answers.flatMap((a) => a.events).filter((e) => e.pubkey === d.inner.pubkey).sort((a, b) => b.created_at - a.created_at)[0]
     if (!newest) return rows()
     const { doorAsFound } = await import('./rooms')
@@ -1653,6 +1707,9 @@ export const useShards = create<ShardsState>((set, get) => {
     get().addDiscovered(read)
     // Filed under this door: what the relay names by any door of the room is one room.
     const held = new Set(rows().map((r) => entryKey(entryOf(r))))
+    // Deleted here and still on a relay, because none took the rewrite: read, and gone.
+    const { deleted } = get()
+    for (const h of read) if (deleted[h.eventId] && (h.ref ?? h.inner)) held.add(entryKey((h.ref ?? h.inner)!))
     const unread = (await bagEntries(newest, key)).filter((e) => !held.has(entryKey(e))).length
     if (unread > 0) return `${unread} behind this door could not be read here. Nothing has changed. Try again when they can be.`
     return rows()
@@ -1661,7 +1718,8 @@ export const useShards = create<ShardsState>((set, get) => {
   /** NIP-09 of a bag no door or row names any more, signed: by its address, and its last event when known. */
   async function bagRetraction(lookupId: string, bagId: string | null): Promise<NostrEvent> {
     const cs = cyber()
-    return cs.signEvent({ kind: 5, created_at: Math.floor(Date.now() / 1000), content: 'hidden content removed', tags: [['a', `${HIDDEN_KIND}:${cs.identity.pubkey}:${lookupId}`], ...(bagId ? [['e', bagId]] : []), ['k', String(HIDDEN_KIND)]] })
+    // On the bag's own clock: quick rewrites run it ahead of the wall's, and a relay keeps a bag newer than its deletion.
+    return cs.signEvent({ kind: 5, created_at: nextBagAt(lookupId), content: 'hidden content removed', tags: [['a', `${HIDDEN_KIND}:${cs.identity.pubkey}:${lookupId}`], ...(bagId ? [['e', bagId]] : []), ['k', String(HIDDEN_KIND)]] })
   }
 
   async function retractBag(lookupId: string, bagId: string | null): Promise<void> {
@@ -2064,7 +2122,7 @@ export const useShards = create<ShardsState>((set, get) => {
       const named = { ...d.chest, name: draft.name.trim(), requires: draft.requires.trim() }
       try {
         // The same lock: the same seal, a new name and label. Nothing behind it changes.
-        if (draft.lock.pubkey === d.chest.lockPubkey) {
+        if (draft.lock.pubkey === d.chest.lockPubkey && !doorRowsOfRoom(d).some((x) => x.rotating)) {
           const row = await replaceChest(d, named)
           const secret = doorSecret(me, eventId)
           if (secret) keepDoorSecret(me, row.eventId, secret)
@@ -2079,7 +2137,9 @@ export const useShards = create<ShardsState>((set, get) => {
         const secret = doorSecret(me, eventId)
         if (!secret) return 'Changing the lock needs the door secret. Open the door first.'
         const doorRows = doorRowsOfRoom(d)
-        const live = doorRows.some((door) => get().mine.some((m) => m.lookupId === door.lookupId && m.published))
+        // A rotation that did not finish is finished by this one: its rooms go too.
+        const owed = doorRows.flatMap((door) => door.rotating ?? [])
+        const live = owed.length > 0 || doorRows.some((door) => get().mine.some((m) => m.lookupId === door.lookupId && m.published))
         const synced = await syncRoomRows(d, secret, live)
         if (typeof synced === 'string') return synced
         const place = await doorLocation(d)
@@ -2101,7 +2161,7 @@ export const useShards = create<ShardsState>((set, get) => {
         const bags = new Map<string, { event: NostrEvent; settings: BagSettings; publicly: boolean }>()
         for (const lookupId of new Set(doorRows.map((door) => door.lookupId))) {
           const first = doorRows.find((door) => door.lookupId === lookupId)!
-          const publicly = get().mine.some((m) => m.lookupId === lookupId && m.published)
+          const publicly = doorRows.some((door) => door.lookupId === lookupId && door.rotating) || get().mine.some((m) => m.lookupId === lookupId && m.published)
           const key = hexToBytes(first.keyHex)
           const gathered = await gatherInners(lookupId, key, publicly, first.height)
           const swap = new Map(doorRows.filter((door) => door.lookupId === lookupId).map((door) => [entryKey(entryOf(door)), signed.get(door.eventId)!.inner as BagEntry]))
@@ -2109,16 +2169,19 @@ export const useShards = create<ShardsState>((set, get) => {
           const settings = gathered.settings ?? first.bag ?? DEFAULT_BAG_SETTINGS
           bags.set(lookupId, { publicly, settings, event: await signBag(entries, key, lookupId, first.height, settings, { at: positionOf(first), plane: first.plane }, gathered.entries) })
         }
-        const retraction = live ? await bagRetraction(oldLookup, synced[0]?.bagId ?? null) : null
+        const oldBagId = synced[0]?.bagId ?? null
+        const retractions: NostrEvent[] = []
+        if (live) for (const [lookupId, bagId] of new Map([...owed.map((o) => [o.lookupId, o.bagId] as const), [oldLookup, oldBagId] as const])) retractions.push(await bagRetraction(lookupId, bagId))
         // Everything is signed. From here a failure is a relay's. The new secret is
         // kept before anything goes out, under the doors it will open.
         for (const { inner } of signed.values()) keepDoorSecret(me, inner.id, nextSecret)
         if (stage) await sendMove(stage)
         let landed = 0
-        for (const [, bag] of bags) {
-          if (!bag.publicly) { landed++; continue }
+        const out = new Set<string>()
+        for (const [lookupId, bag] of bags) {
+          if (!bag.publicly) { landed++; out.add(lookupId); continue }
           const ok = await publishMany(relaySet(), bag.event).then((r) => r.ok, () => false)
-          if (ok) landed++
+          if (ok) { landed++; out.add(lookupId) }
           else if (landed === 0) {
             // No door has moved: the old one stands, and its room comes back as it was.
             if (stage) {
@@ -2133,11 +2196,13 @@ export const useShards = create<ShardsState>((set, get) => {
           const was = signed.get(m.eventId)
           const bag = bags.get(m.lookupId)
           if (was && bag) {
-            const { sealed: _gone, ...rest } = m
+            const { sealed: _gone, rotating: _done, ...rest } = m
             void _gone
-            return { ...rest, eventId: was.inner.id, inner: was.inner, chest: was.next, createdAt: was.createdAt, bagId: bag.event.id, published: bag.publicly, bag: bag.settings }
+            void _done
+            const sent = out.has(m.lookupId)
+            return { ...rest, eventId: was.inner.id, inner: was.inner, chest: was.next, createdAt: was.createdAt, bagId: bag.event.id, published: bag.publicly && sent, bag: bag.settings, ...(sent ? {} : { rotating: [...owed, { lookupId: oldLookup, bagId: oldBagId, doorId: m.eventId }] }) }
           }
-          return bag ? { ...m, bagId: bag.event.id, published: bag.publicly, bag: bag.settings } : m
+          return bag ? { ...m, bagId: bag.event.id, published: bag.publicly && out.has(m.lookupId), bag: bag.settings } : m
         })
         set({ mine: doorMine })
         saveMine(doorMine)
@@ -2152,7 +2217,7 @@ export const useShards = create<ShardsState>((set, get) => {
         for (const [old, was] of signed) retargetRoom(old, was.inner.id)
         if (landed < bags.size) return 'One of this room\u2019s doors did not go out, and still names the old room. Nothing behind it is lost: EDIT it again when a relay is reachable.'
         // Last, and only now: the old room bag (§3.7.7 step 4).
-        if (retraction) await publishMany(relaySet(), retraction).catch(() => undefined)
+        for (const retraction of retractions) await publishMany(relaySet(), retraction).catch(() => undefined)
         return null
       } catch (err) {
         return err instanceof Error ? err.message : String(err)
@@ -2223,7 +2288,7 @@ export const useShards = create<ShardsState>((set, get) => {
       // One secret per room (§3.7.5): a door of yours already in this room hands
       // this one its secret, and what the chest held joins that room.
       const standing = ownDoors(get().mine, me).filter((o) => roomOf(o.at, o.plane, o.height) === roomOf(here, d.plane, d.height))
-      if (standing.some((o) => !o.secret)) return 'A door of yours already stands in this room. Open it first, and this one joins it.'
+      if (standing.some((o) => !o.secret) || (await unseenDoorHere(here, d.plane, d.height))) return 'A door of yours already stands in this room. Open it first, and this one joins it.'
       const secret = standing[0]?.secret ?? newDoorSecret()
       const key = roomKey(hexToBytes(d.keyHex), hexToBytes(secret))
       const lookupId = roomLookupId(key)
@@ -2231,9 +2296,22 @@ export const useShards = create<ShardsState>((set, get) => {
       const live = get().mine.some((m) => m.lookupId === d.lookupId && m.published)
       let bagId = ''
       let published = false
+      let before: BagEntry[] = []
+      // The chest stands, so what was copied comes out: a bag this write made goes
+      // (§3.7.8), and a room already there goes back to what it held.
+      const takeBack = async (): Promise<void> => {
+        if (!published) return
+        if (before.length === 0) { await retractBag(lookupId, bagId); return }
+        const back = await publishBag(before, key, lookupId, d.height, live, ROOM_BAG_SETTINGS, { at: here, plane: d.plane }, undefined, before).catch(() => null)
+        if (!back?.published) return
+        const mine = get().mine.map((m) => (m.lookupId === lookupId ? { ...m, bagId: back.event.id } : m))
+        set({ mine })
+        saveMine(mine)
+      }
       try {
         if (inside.length > 0) {
           const room = await gatherInners(lookupId, key, live, d.height)
+          before = room.entries
           const written = await publishBag(mergeEntries(room.entries, inside), key, lookupId, d.height, live, ROOM_BAG_SETTINGS, { at: here, plane: d.plane }, undefined, room.entries)
           bagId = written.event.id
           published = written.published
@@ -2243,8 +2321,7 @@ export const useShards = create<ShardsState>((set, get) => {
           const reached = new Set((await bagEntries(written.event, key)).map(entryKey))
           const missing = inside.filter((e) => !reached.has(entryKey(e))).length
           if (missing > 0) {
-            // Taken back only when this write made the bag; a room already there stays as it was.
-            if (published && room.entries.length === 0) await retractBag(lookupId, bagId)
+            await takeBack()
             return cantMove(missing)
           }
         }
@@ -2255,8 +2332,7 @@ export const useShards = create<ShardsState>((set, get) => {
         try {
           row = await replaceChest(d, { ...d.chest, senderPubkey: sealed.senderPubkey, payload: sealed.payload, look, door: d.height })
         } catch (err) {
-          // The chest stands; a room bag no door names does not (§3.7.8).
-          if (published && standing.length === 0) await retractBag(lookupId, bagId)
+          await takeBack()
           throw err
         }
         keepDoorSecret(me, row.eventId, secret)
@@ -2581,7 +2657,7 @@ export const useShards = create<ShardsState>((set, get) => {
             const room = roomOf(at, plane, deployHeight)
             const standing = ownDoors(get().mine, cs.identity.pubkey).filter((d) => roomOf(d.at, d.plane, d.height) === room)
             // Every door of the room: one this device has no secret for may have rotated since, and a sibling's secret would be the old room's.
-            if (standing.some((d) => !d.secret)) throw new Error('A door of yours already stands in this room. Open it first, and this one joins it.')
+            if (standing.some((d) => !d.secret) || (await unseenDoorHere(at, plane, deployHeight))) throw new Error('A door of yours already stands in this room. Open it first, and this one joins it.')
             doorSecretHex = standing[0]?.secret ?? newDoorSecret()
             const sealed = sealEntries(roomEntries(doorSecretHex) as BagEntry[], pending.lock!.pubkey)
             chest = { name: pending.name.trim(), lockPubkey: pending.lock!.pubkey, senderPubkey: sealed.senderPubkey, requires: pending.requires.trim(), payload: sealed.payload, look, door: deployHeight }
@@ -2830,7 +2906,8 @@ export const useShards = create<ShardsState>((set, get) => {
               step: cs.buildStep, spot, count: s.placedLast?.pending === pending ? s.placedLast.count + 1 : 1,
             }
             : s.placedLast
-          const bag = again ? { deployBag: settings, deployBagFrom: ownBagIn(s.mine, regionOf(at, plane, deployHeight)) } : {}
+          // A room's settings are the room's: left out of it, the next placement starts as any other.
+          const bag = again ? { deployBag: into ? DEFAULT_BAG_SETTINGS : settings, deployBagFrom: ownBagIn(s.mine, regionOf(at, plane, deployHeight)) } : {}
           set({ deployStatus: 'done', pending: again, deployNote: null, deployAsk: null, placedLast, ...bag })
         }
         // A moved door keeps its room: its secret, and what stands behind it, follow its new id.
@@ -3022,7 +3099,7 @@ export const useShards = create<ShardsState>((set, get) => {
         if (wasPublic) {
           const del = await cs.signEvent({
             kind: 5,
-            created_at: Math.floor(Date.now() / 1000),
+            created_at: nextBagAt(item.lookupId),
             content: 'hidden content removed',
             // kind 33330 is addressable, so the address is what a relay
             // replaces and what NIP-09 asks for; the event id goes too, for

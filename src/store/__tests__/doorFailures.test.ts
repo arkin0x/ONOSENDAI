@@ -12,7 +12,7 @@ if (typeof localStorage === 'undefined') {
   ;(globalThis as { localStorage?: unknown }).localStorage = { getItem: (k: string) => mem.get(k) ?? null, setItem: (k: string, v: string) => { mem.set(k, String(v)) }, removeItem: (k: string) => { mem.delete(k) }, clear: () => { mem.clear() } }
 }
 type Ev = { id: string; kind: number; pubkey: string; created_at: number; tags: string[][]; content: string }
-const relay = vi.hoisted(() => ({ events: [] as Ev[], refuse: (_e: Ev) => false as boolean, blind: (_d: string) => false as boolean, silent: (_d: string) => false as boolean as boolean }))
+const relay = vi.hoisted(() => ({ events: [] as Ev[], refuse: (_e: Ev) => false as boolean, blind: (_d: string) => false as boolean, silent: (_d: string) => false as boolean as boolean, partial: false }))
 vi.mock('../../lib/relay', () => {
   const dOf = (e: Ev): string => e.tags.find((t) => t[0] === 'd')?.[1] ?? ''
   const live = (e: Ev): boolean => !relay.events.some((x) => x.kind === 5 && x.created_at >= e.created_at && x.tags.some((t) => t[0] === 'a' && t[1] === `${e.kind}:${e.pubkey}:${dOf(e)}`))
@@ -20,7 +20,7 @@ vi.mock('../../lib/relay', () => {
   return {
     publishMany: vi.fn(async (_r: string[], ev: Ev) => { if (relay.refuse(ev)) return { ok: false }; relay.events.push(ev); return { ok: true } }),
     query: vi.fn(answer), queryAny: vi.fn(async (_r: string[], f: never) => answer(f)),
-    queryEach: vi.fn(async (f: { '#d'?: string[] }) => (f['#d']?.some((d) => relay.silent(d)) ? [{ url: 'wss://relay.test', outcome: 'silent', events: [] }] : [{ url: 'wss://relay.test', outcome: 'answered', events: await answer(f as never) }])),
+    queryEach: vi.fn(async (f: { '#d'?: string[] }) => (f['#d']?.some((d) => relay.silent(d)) ? [{ url: 'wss://relay.test', outcome: 'silent', events: [] }] : [{ url: 'wss://relay.test', outcome: 'answered', events: await answer(f as never) }, ...(relay.partial ? [{ url: 'wss://down.test', outcome: 'unreachable', events: [] }] : [])])),
     relaySet: () => ['wss://relay.test'],
   }
 })
@@ -28,7 +28,7 @@ import { newShard, type ShardModel } from 'sno-core/shards'
 import { forgeKey } from '../../lib/chests'
 import { hexToBytes, type NostrEvent } from '../../lib/events'
 import { HIDDEN_KIND, OBJECT_KIND, bagEntries, unbag, type KeyItem, type Hidden } from '../../lib/hidden'
-import { roomOf } from '../../lib/doors'
+import { roomKey, roomLookupId, roomOf } from '../../lib/doors'
 import { regionKeyOffThread } from '../../lib/regionKeyOffThread'
 import type { Position } from '../../lib/space'
 import { useStash } from '../../hud/stash'
@@ -38,8 +38,8 @@ import { useCyberspace } from '../useCyberspace'
 import { useInventory } from '../useInventory'
 import { useWorkshop } from '../useWorkshop'
 import { resetOpenedChests } from '../useOpenedChests'
-import { ownBagIn, positionOf, regionOf, useShards, type MyDeployment } from '../useShards'
-import { openRoom, doorAsFound } from '../rooms'
+import { behindDoor, ownBagIn, positionOf, regionOf, useShards, type MyDeployment } from '../useShards'
+import { enterRoom, openRoom, doorAsFound } from '../rooms'
 
 const S = () => useShards.getState()
 const C = () => useCyberspace.getState()
@@ -91,7 +91,7 @@ function failSigningWhen(p: (t: { kind: number; tags?: string[][] }) => boolean)
 }
 
 beforeEach(() => {
-  relay.events = []; relay.refuse = () => false; relay.blind = () => false; relay.silent = () => false
+  relay.events = []; relay.refuse = () => false; relay.blind = () => false; relay.silent = () => false; relay.partial = false
   lock = forgeKey('Silver Key')
   localStorage.removeItem('onosendai:door-secrets'); localStorage.removeItem('onosendai:chests-opened')
   resetDoorSecrets(); resetOpenedChests()
@@ -277,7 +277,11 @@ describe('one secret to a room, CONVERT too (§3.7.5)', () => {
     expect(await S().convertToDoor(c.eventId)).toMatch(/signer refused/)
     restore()
     expect(retracted(inside.lookupId)).toBe(false)
-    expect((await read(a, doorSecret(me(), a.eventId)!)).length).toBeGreaterThan(0)
+    // That room as it was: what stood there stands, and what was copied in has gone back out.
+    const held = await read(a, doorSecret(me(), a.eventId)!)
+    expect(held).toContain('already behind')
+    expect(held).not.toContain('inside the chest')
+    expect(S().mine.some((m) => m.eventId === c.eventId)).toBe(true)
   })
 })
 
@@ -331,20 +335,22 @@ describe('a read that cannot be trusted refuses (§3.7.8)', () => {
 })
 
 describe('a second device after the first rotated or renamed', () => {
-  async function asSecondDeviceAfter(edit: (d: MyDeployment) => Promise<unknown>): Promise<{ d: MyDeployment; now: MyDeployment; secret: string }> {
+  async function asSecondDeviceAfter(edit: (d: MyDeployment) => Promise<unknown>, { scan = true, also }: { scan?: boolean; also?: () => Promise<unknown> } = {}): Promise<{ d: MyDeployment; now: MyDeployment; secret: string; nowSecret: string; found: Hidden }> {
     const d = await sealDoor()
     await hide('behind it', HEIGHT)
+    await also?.()
     const b = { mine: S().mine.map((m) => ({ ...m })), secret: doorSecret(me(), d.eventId)! }
     // The bag A writes is a later second than anything B has.
     await new Promise((r) => setTimeout(r, 1100))
     await edit(d)
     const now = doors()[0]
+    const nowSecret = doorSecret(me(), now.eventId)!
     const bag = newestBag(now.lookupId)!
     const found: Hidden = { eventId: now.eventId, inner: now.inner, keyHex: now.keyHex, bagId: now.bagId, bagAt: bag.created_at, lookupId: now.lookupId, author: me(), at: positionOf(now), plane: now.plane, height: now.height, createdAt: now.createdAt, type: 'chest', chest: now.chest }
     useShards.setState({ mine: b.mine, discovered: {} })
     localStorage.removeItem('onosendai:door-secrets'); resetDoorSecrets(); keepDoorSecret(me(), d.eventId, b.secret)
-    S().addDiscovered([found])
-    return { d, now, secret: b.secret }
+    if (scan) S().addDiscovered([found])
+    return { d, now, secret: b.secret, nowSecret, found }
   }
   const ROTATE = (d: MyDeployment) => S().resealDoor(d.eventId, { name: 'North Door', requires: 'n', lock: lockOf(forgeKey('New')) })
 
@@ -382,11 +388,134 @@ describe('a second device after the first rotated or renamed', () => {
     expect((await bagEntries(newestBag(place.lookupId)!, place.key) as NostrEvent[]).map((e) => e.id)).not.toContain(d.eventId)
   }, 30000)
 
+  const inOrdinaryBag = async (d: MyDeployment): Promise<string[]> => {
+    const place = await regionKeyOffThread(positionOf(d), HEIGHT, 20)
+    const bag = newestBag(place.lookupId)
+    return bag ? (await bagEntries(bag, place.key) as NostrEvent[]).map((e) => e.content) : []
+  }
+  const RENAME = (x: MyDeployment) => S().resealDoor(x.eventId, { name: 'Renamed', requires: 'n', lock: lockOf() })
+
+  it('renamed there; scanned, OPENed and DELETEd here: the card counts what is behind it, and it goes only as asked', async () => {
+    const { now, secret, found } = await asSecondDeviceAfter(RENAME)
+    await enterRoom(found, secret)
+    const row = doors().find((m) => m.eventId === now.eventId)!
+    const inside = S().mine.find((m) => m.text === 'behind it')!
+    expect(inside.room).toEqual({ doorId: now.eventId })
+    expect(behindDoor(S().mine, row)).toHaveLength(1)
+    expect(await S().deleteDoor(now.eventId, true)).toBeNull()
+    expect(retracted(inside.lookupId)).toBe(true)
+    expect(S().mine.some((m) => m.text === 'behind it')).toBe(false)
+    expect((await inOrdinaryBag(now)).join()).not.toContain('behind it')
+  }, 30000)
+
+  it('rotated there; scanned, OPENed and DELETEd here: the row follows the new room, and the same', async () => {
+    const { now, nowSecret, found } = await asSecondDeviceAfter(ROTATE)
+    await enterRoom(found, nowSecret)
+    const row = doors().find((m) => m.eventId === now.eventId)!
+    const inside = S().mine.find((m) => m.text === 'behind it')!
+    expect(inside.room).toEqual({ doorId: now.eventId })
+    expect(inside.lookupId).toBe(roomLookupId(roomKey((await regionKeyOffThread(positionOf(row), HEIGHT, 20)).key, hexToBytes(nowSecret))))
+    expect(inside.published).toBe(true)
+    expect(behindDoor(S().mine, row)).toHaveLength(1)
+    expect(await S().deleteDoor(now.eventId, true)).toBeNull()
+    expect(retracted(inside.lookupId)).toBe(true)
+    expect(S().mine.some((m) => m.text === 'behind it')).toBe(false)
+    expect((await inOrdinaryBag(now)).join()).not.toContain('behind it')
+  }, 30000)
+
+  it('rotated there: a large shard behind it has a new id and one row here, not two', async () => {
+    const { nowSecret, found } = await asSecondDeviceAfter(ROTATE, { also: () => hideBig('Statue', 3, HEIGHT) })
+    await enterRoom(found, nowSecret)
+    expect(S().mine.filter((m) => m.ref).length).toBe(1)
+  }, 30000)
+
+  it('with no scan first: the write itself leaves out a door the bag no longer holds', async () => {
+    const { d, now } = await asSecondDeviceAfter(ROTATE, { scan: false })
+    expect(doors().map((m) => m.eventId)).toContain(d.eventId)
+    S().startDeployMessage('left out, no scan'); S().setDeployHeight(HEIGHT)
+    S().setDeployLeaveOut(roomOf(positionOf(d), d.plane, HEIGHT))
+    await S().deploy(); expect(S().deployError).toBeNull(); S().cancelDeploy()
+    const ids = (await bagEntries(newestBag(d.lookupId)!, hexToBytes(d.keyHex)) as NostrEvent[]).map((e) => e.id)
+    expect(ids).toContain(now.eventId)
+    expect(ids).not.toContain(d.eventId)
+    expect(doors().map((m) => m.eventId)).not.toContain(d.eventId)
+  }, 30000)
+
+  it('deleted there, with its bag retracted: this device does not write it back', async () => {
+    const d = await sealDoor()
+    await hide('behind it', HEIGHT)
+    const b = { mine: S().mine.map((m) => ({ ...m })), secret: doorSecret(me(), d.eventId)! }
+    await new Promise((res) => setTimeout(res, 1100))
+    expect(await S().deleteDoor(d.eventId, true)).toBeNull()
+    expect(retracted(d.lookupId)).toBe(true)
+    useShards.setState({ mine: b.mine, discovered: {} })
+    localStorage.removeItem('onosendai:door-secrets'); resetDoorSecrets(); keepDoorSecret(me(), d.eventId, b.secret)
+    S().startDeployMessage('ordinary'); S().setDeployHeight(HEIGHT)
+    S().setDeployLeaveOut(roomOf(positionOf(d), d.plane, HEIGHT))
+    await S().deploy(); expect(S().deployError).toBeNull(); S().cancelDeploy()
+    const ids = (await bagEntries(newestBag(d.lookupId)!, hexToBytes(d.keyHex)) as NostrEvent[]).map((e) => e.id)
+    expect(ids).not.toContain(d.eventId)
+    expect(doors()).toEqual([])
+  }, 30000)
+
+  it('a retraction is newer than the bag it takes down, however fast the writes before it came', async () => {
+    const d = await sealDoor()
+    for (const text of ['one', 'two', 'three']) {
+      S().startDeployMessage(text); S().setDeployHeight(HEIGHT)
+      S().setDeployLeaveOut(roomOf(positionOf(d), d.plane, HEIGHT))
+      await S().deploy(); expect(S().deployError).toBeNull(); S().cancelDeploy()
+    }
+    for (const r of S().mine.filter((m) => m.lookupId === d.lookupId && !m.chest)) await S().deleteInstance(r.eventId)
+    expect(await S().deleteDoor(d.eventId, true)).toBeNull()
+    const newest = Math.max(...relay.events.filter((e) => e.kind === HIDDEN_KIND && dOf(e) === d.lookupId).map((e) => e.created_at))
+    const deletion = relay.events.filter((e) => e.kind === 5 && e.tags.some((t) => t[0] === 'a' && t[1] === `${HIDDEN_KIND}:${me()}:${d.lookupId}`)).map((e) => e.created_at)
+    expect(Math.max(...deletion)).toBeGreaterThan(newest)
+  }, 30000)
+
   it('a relay’s stale copy, older than the door, takes nothing away', async () => {
     const d = await sealDoor()
     S().addDiscovered([{ eventId: 'e'.repeat(64), inner: { id: 'e'.repeat(64), pubkey: me(), created_at: d.createdAt - 100, kind: 1, tags: [], content: 'old' }, keyHex: d.keyHex, bagId: 'f'.repeat(64), bagAt: d.createdAt - 100, lookupId: d.lookupId, author: me(), at: positionOf(d), plane: d.plane, height: d.height, createdAt: d.createdAt - 100, type: 'message', text: 'old' } as Hidden])
     expect(doors().map((m) => m.eventId)).toEqual([d.eventId])
   })
+})
+
+describe('a door this device has not seen stands in the room (§3.7.5)', () => {
+  async function unseen(): Promise<void> {
+    await sealDoor('Elsewhere')
+    await hide('behind the first', HEIGHT)
+    useShards.setState({ mine: [], discovered: {} })
+    localStorage.removeItem('onosendai:door-secrets'); resetDoorSecrets()
+    goTo({ ...CURSOR, x: CURSOR.x + 3n })
+  }
+  const secondDoor = async (): Promise<void> => {
+    S().startPlaceDoor(); S().setDeployHeight(HEIGHT); S().placeChest()
+    await S().sealPlacedChest({ name: 'Here', lock: lockOf(), requires: 'x', contents: [] })
+  }
+
+  it('a second door is refused in words: no second secret, and nothing written', async () => {
+    await unseen()
+    const before = relay.events.length
+    await secondDoor()
+    expect(S().deployError).toMatch(/Open it first/)
+    expect(doors()).toEqual([])
+    expect(relay.events.length).toBe(before)
+    S().cancelDeploy()
+  }, 30000)
+
+  it('CONVERT beside it too: refused, the chest stays', async () => {
+    await unseen()
+    const c = await chestHere()
+    expect(await S().convertToDoor(c.eventId)).toMatch(/Open it first/)
+    expect(S().mine.some((m) => m.eventId === c.eventId && m.chest?.door === undefined)).toBe(true)
+  }, 30000)
+
+  it('the limit, as it stands: LOCAL reads no relay, so it cannot know', async () => {
+    await unseen()
+    useCyberspace.setState({ live: false })
+    await secondDoor()
+    expect(S().deployError).toBeNull()
+    expect(doors()).toHaveLength(1)
+  }, 30000)
 })
 
 describe('sending a door and its room', () => {
@@ -417,6 +546,48 @@ describe('sending a door and its room', () => {
     expect(held.map((e) => e.id)).not.toContain(d.eventId)
     expect(held.some((e) => e.content === 'behind it')).toBe(true)
   })
+})
+
+describe('a read of a room when not everything is known', () => {
+  it('a thing deleted here that a relay still holds counts as read: the door can still go, and the thing stays gone', async () => {
+    const d = await sealDoor()
+    const gone = await hide('stays on the relay', HEIGHT)
+    await hide('other', HEIGHT)
+    relay.refuse = (e) => e.kind === HIDDEN_KIND && dOf(e) === gone.lookupId
+    await S().deleteInstance(gone.eventId)
+    relay.refuse = () => false
+    expect(await S().deleteDoor(d.eventId, false)).toBeNull()
+    const place = await regionKeyOffThread(positionOf(d), HEIGHT, 20)
+    const out = (await bagEntries(newestBag(place.lookupId)!, place.key) as NostrEvent[]).map((e) => e.content).join()
+    expect(out).toContain('other')
+    expect(out).not.toContain('stays on the relay')
+  }, 30000)
+
+  it('one relay of two silent: DELETE and a new lock refuse; nothing is retracted', async () => {
+    const d = await sealDoor()
+    const inside = await hide('behind it', HEIGHT)
+    relay.partial = true
+    expect(await S().deleteDoor(d.eventId, false)).toMatch(/did not answer/)
+    expect(await S().resealDoor(d.eventId, { name: 'North Door', requires: 'n', lock: lockOf(forgeKey('New')) })).toMatch(/did not answer/)
+    relay.partial = false
+    expect(retracted(inside.lookupId)).toBe(false)
+    expect(doors().map((m) => m.eventId)).toEqual([d.eventId])
+    expect(await read(d, doorSecret(me(), d.eventId)!)).toContain('behind it')
+  }, 30000)
+})
+
+describe('after a placement in a room, the next left out of it', () => {
+  it('starts from the place’s settings: the ordinary bag keeps its H', async () => {
+    const d = await sealDoor()
+    S().startDeployMessage('behind it'); S().setDeployHeight(HEIGHT)
+    await S().deploy(); expect(S().deployError).toBeNull()
+    expect(S().pending).not.toBeNull()
+    expect(S().deployBag.heightTag).toBe(true)
+    S().setDeployLeaveOut(roomOf(positionOf(d), d.plane, HEIGHT))
+    goTo({ ...CURSOR, x: CURSOR.x + 1n })
+    await S().deploy(); expect(S().deployError).toBeNull(); S().cancelDeploy()
+    expect(newestBag(d.lookupId)!.tags.some((t) => t[0] === 'H')).toBe(true)
+  }, 30000)
 })
 
 describe('small things', () => {

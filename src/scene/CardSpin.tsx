@@ -66,7 +66,8 @@ function hostElement(): HTMLDivElement {
   if (host) return host
   parking = document.createElement('div')
   parking.setAttribute('aria-hidden', 'true')
-  parking.style.cssText = 'position:fixed;left:-10000px;top:0;width:0;height:0;overflow:hidden;'
+  // Sized, not zero: the spin's max-width would follow it to nothing, and a canvas measured empty stops drawing.
+  parking.style.cssText = 'position:fixed;left:-10000px;top:0;width:512px;height:512px;overflow:hidden;'
   document.body.append(parking)
   host = document.createElement('div')
   host.className = 'cardspin'

@@ -69,6 +69,7 @@ import {
   type Reference,
   type Rumor,
   chestInnerTemplate,
+  chestItemOf,
   keyInnerTemplate,
   messageInnerTemplate,
   rumorOf,

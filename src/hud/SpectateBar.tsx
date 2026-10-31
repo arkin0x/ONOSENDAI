@@ -12,12 +12,13 @@ import { stopSpectating } from '../lib/spectator'
 import { formatAgo, formatStamp } from '../lib/time'
 import { useCyberspace } from '../store/useCyberspace'
 import { ProfileBadge } from './ProfileBadge'
+import { whileVisible } from '../lib/whileVisible'
 
 export function SpectateBar(): JSX.Element | null {
   const spectate = useCyberspace((s) => s.spectate)
   const [now, setNow] = useState(() => Date.now() / 1000)
   useEffect(() => {
-    const t = window.setInterval(() => setNow(Date.now() / 1000), 5_000)
+    const t = window.setInterval(whileVisible(() => setNow(Date.now() / 1000)), 5_000)
     return () => window.clearInterval(t)
   }, [])
 

@@ -27,6 +27,7 @@ import { formatAgo, formatStamp } from '../lib/time'
 import { useCyberspace } from '../store/useCyberspace'
 import { Explanation } from './Explanation'
 import { useEscape } from '../hooks/useEscape'
+import { whileVisible } from '../lib/whileVisible'
 
 /** Rows the panel shows before VIEW MORE takes over. */
 const SHOWN = 5
@@ -41,7 +42,7 @@ export function AvatarsPanel(): JSX.Element {
   useEscape('modal', more, () => setMore(false))
   const [now, setNow] = useState(() => Date.now() / 1000)
   useEffect(() => {
-    const t = window.setInterval(() => setNow(Date.now() / 1000), 10_000)
+    const t = window.setInterval(whileVisible(() => setNow(Date.now() / 1000)), 10_000)
     return () => window.clearInterval(t)
   }, [])
 

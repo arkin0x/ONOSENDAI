@@ -43,6 +43,7 @@ import { Explanation } from './Explanation'
 import { ItemIcon, distinctKinds, type ItemKind } from './ItemIcon'
 import { useNearbyLoot } from '../hooks/useNearbyLoot'
 import { useEscape } from '../hooks/useEscape'
+import { whileVisible } from '../lib/whileVisible'
 
 /** Rows a panel shows before VIEW MORE takes over. */
 const SHOWN = 4
@@ -116,7 +117,7 @@ function BagList({ mode }: { mode: Mode }): JSX.Element {
   const shown = useMemo(() => shownBags(items, opened, mode, curated, muted, me), [items, opened, mode, curated, muted, me])
   const [now, setNow] = useState(() => Date.now() / 1000)
   useEffect(() => {
-    const t = window.setInterval(() => setNow(Date.now() / 1000), 10_000)
+    const t = window.setInterval(whileVisible(() => setNow(Date.now() / 1000)), 10_000)
     return () => window.clearInterval(t)
   }, [])
   const relayName = CYBERSPACE_RELAY.replace('wss://', '')

@@ -60,6 +60,7 @@ import { useSocialUi } from '../store/useSocialUi'
 import { useEscape } from '../hooks/useEscape'
 import { useChainUi } from '../store/useChainUi'
 import { stepChain, useBuilder, walkChain } from '../store/useBuilder'
+import { whileVisible } from '../lib/whileVisible'
 
 // Spectating opens the chain explorer: the chain is the thing you came to
 // look at. What you had it set to is put back when the spectation ends, and
@@ -153,7 +154,7 @@ export function ChainExplorer(): JSX.Element {
   // Relative times drift; refresh them on a slow clock rather than per frame.
   const [now, setNow] = useState(() => Date.now() / 1000)
   useEffect(() => {
-    const t = window.setInterval(() => setNow(Date.now() / 1000), 10_000)
+    const t = window.setInterval(whileVisible(() => setNow(Date.now() / 1000)), 10_000)
     return () => window.clearInterval(t)
   }, [])
 

@@ -130,6 +130,17 @@ describe('SEAL A DOOR: tap, choose the place, then its name and lock', () => {
     expect(d.height).toBe(HEIGHT)
   })
 
+  it('then build (4.2): the mode stays on, and the next placement starts at the door\u2019s height', async () => {
+    useBuilder.getState().exit()
+    expect(useBuilder.getState().active).toBe(false)
+    await sealDoor()
+    expect(useBuilder.getState().active).toBe(true)
+    expect(S().deployInto).toBe(HEIGHT)
+    useBuilder.getState().exit()
+    expect(useBuilder.getState().active).toBe(false)
+    expect(S().deployInto).toBeNull()
+  })
+
   it('refuses a height of 0: a door locks a region', async () => {
     S().startPlaceDoor()
     S().setDeployHeight(0)

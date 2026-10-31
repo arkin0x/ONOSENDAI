@@ -2336,7 +2336,7 @@ export const useShards = create<ShardsState>((set, get) => {
       set({ deployStatus: 'working', deployError: null, deployAsk: null })
       try {
         if (pending.type === 'chest') {
-          set({ deployNote: 'Signing and sealing the chest' })
+          set({ deployNote: pending.door ? 'Sealing the door' : 'Signing and sealing the chest' })
           // What it wears, posed by the bar (DECK-0004 §3.6), before anything is sealed.
           const look = lookTagsFor(pending.look ?? DEFAULT_CHEST_LOOK, { unit: deployUnit, turn: deployTurn, constrain: deployConstrain })
           if (movedChest?.chest) {

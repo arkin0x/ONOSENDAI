@@ -443,6 +443,14 @@ useShards.subscribe((s, prev) => {
     const draft = useShards.getState().takeChestBack()
     if (draft) useBuilder.setState({ itemDraft: { type: 'chest', ...draft } })
   }
+  // A door sealed: "then build" (chest and door design, 4.2). The mode stays on
+  // however it started, the red cube up, and the next placement starts at the
+  // door's height, so what is placed next is sealed to it.
+  if (s.pending === null && prev.pending?.type === 'chest' && prev.pending.door && !prev.pending.move && s.deployStatus === 'done' && prev.deployStatus !== 'idle') {
+    const height = s.mine[s.mine.length - 1]?.chest?.door
+    if (useBuilder.getState().active) useBuilder.setState({ via: 'build' })
+    if (height !== undefined) useShards.setState({ deployInto: height })
+  }
   // A placement lines the same thing up again (useShards `placedLast`) only
   // where BUILD mode goes on after it. Where the mode ends with the placement
   // (a DEPLOY that never left your avatar), or already ended while it hid,

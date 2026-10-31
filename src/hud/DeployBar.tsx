@@ -351,7 +351,7 @@ export function DeployBar({ pad = false }: { pad?: boolean }): JSX.Element | nul
   // WALK, but not the snap.
   const isMessage = pending.type !== 'shard'
   const sized = pending.type === 'shard' || pending.type === 'chest'
-  const title = intoChest ? 'AIM' : moving ? (pending.type === 'chest' ? 'MOVE' : 'EDIT') : pending.type === 'shard' ? 'DEPLOY' : `HIDE ${pending.type.toUpperCase()}`
+  const title = intoChest ? 'AIM' : moving ? (pending.type === 'chest' ? 'MOVE' : 'EDIT') : pending.type === 'shard' ? 'DEPLOY' : door ? 'HIDE DOOR' : `HIDE ${pending.type.toUpperCase()}`
   const name = pendingName(pending, shard)
   const empty = pendingEmpty(pending, shard)
   const working = status === 'working'
@@ -372,7 +372,7 @@ export function DeployBar({ pad = false }: { pad?: boolean }): JSX.Element | nul
         : undefined
 
   return (
-    <div ref={coverRef} className={deployBarClass(pad)} role="dialog" aria-label={intoChest ? 'Aim shard for chest' : pending.type === 'shard' ? 'Deploy shard' : `Hide ${pending.type}`}>
+    <div ref={coverRef} className={deployBarClass(pad)} role="dialog" aria-label={intoChest ? 'Aim shard for chest' : pending.type === 'shard' ? 'Deploy shard' : door ? 'Hide door' : `Hide ${pending.type}`}>
       {/* The title row carries the action, left of CANCEL, so the rest of the
           bar is free to scroll (arkinox, 2026-10-01). While HOSAKA's ask is up
           it takes its own row below, since three buttons do not fit here. */}

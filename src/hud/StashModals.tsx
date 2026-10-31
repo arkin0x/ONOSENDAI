@@ -206,7 +206,7 @@ export function StashModals(): JSX.Element | null {
   }
   if (chestEdit) {
     return (
-      <Shell title={editedDoor ? 'Edit door' : chestEdit.fields ? 'Edit chest' : 'Add to chest'} onClose={close}>
+      <Shell title={editedDoor ? 'Edit door' : chestEdit.fields ? 'Edit chest' : 'Add to chest'} onClose={() => { if (useStash.getState().chestSaving) return; close() }}>
         <ChestCompose key={chestEdit.eventId} onDone={close} target={{ mode: 'edit', eventId: chestEdit.eventId, fields: chestEdit.fields }} />
       </Shell>
     )

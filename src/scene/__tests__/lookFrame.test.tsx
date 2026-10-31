@@ -35,7 +35,7 @@ import { builtInLook, lookOf, lookTags, posedLook } from '../../lib/looks'
 import type { Position, ViewAxes } from '../../lib/space'
 import { mount } from '../../test/elementRoot'
 import { LookMark, type LookFrame } from '../LookMark'
-import { lookFrame, type KeptLookFrames } from '../ChestLooks'
+import { lookFrame, pruneLookFrames, type KeptLookFrames } from '../ChestLooks'
 
 const AXES: ViewAxes = { right: { axis: 'x', dir: 1 }, up: { axis: 'y', dir: 1 }, out: { axis: 'z', dir: -1 } }
 const STRANGER = 'b'.repeat(64)
@@ -83,6 +83,14 @@ describe('a custom look’s frame', () => {
     const look = tagged(panel())
     const f = lookFrame(w, look, { ...look.closed, unit: 3 }, [0, 0, 0], 1, AXES, new Map())
     expect(f.budget?.scale).toBe(4)
+  })
+})
+
+describe('the kept frames', () => {
+  it('keep only what is drawn', () => {
+    const kept: KeptLookFrames = new Map([['near', {}], ['passed', {}]])
+    pruneLookFrames(kept, new Set(['near']))
+    expect([...kept.keys()]).toEqual(['near'])
   })
 })
 

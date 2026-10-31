@@ -171,6 +171,10 @@ export const useAvatars = create<AvatarsState>((set, get) => ({
     // One adopt at a time, through mining, signing and publishing: a second
     // press while the signer's prompt is open would mine and ask again.
     if (get().phase) return false
+    if (chosen && shard && shard !== chosen && shard.vertices.length === 0 && (shard.parts?.length ?? 0) === 0) {
+      set({ adoptError: 'Without what came to you sealed, this shard has no vertices and places nothing.', minedMs: null })
+      return false
+    }
     const cs = useCyberspace.getState()
     const me = cs.identity.pubkey
     let template = avatarTemplate(shard, Math.floor(Date.now() / 1000))

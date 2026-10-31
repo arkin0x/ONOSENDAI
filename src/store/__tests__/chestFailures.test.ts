@@ -40,6 +40,7 @@ import { useStash } from '../../hud/stash'
 import { useBuilder } from '../useBuilder'
 import { useCyberspace } from '../useCyberspace'
 import { useInventory } from '../useInventory'
+import { useAvatars } from '../useAvatars'
 import { usePublished } from '../usePublished'
 import { positionOf, useShards, type MyDeployment } from '../useShards'
 
@@ -210,5 +211,17 @@ describe('PUBLISH of a model carrying parts that came sealed', () => {
   it('goes out with them only if you said so', async () => {
     expect((await usePublished.getState().send(taken(), false, true)).ok).toBe(true)
     expect(published()).toContain('objects')
+  })
+})
+
+describe('an avatar taken from a bag, made only of what it carries', () => {
+  it('is refused: stripped, nothing would be left to wear', async () => {
+    const piece = `33331:${'a'.repeat(64)}:piece`
+    const taken = takeIntoKeeping({ ...newShard('Statue'), refs: [['a', piece]], parts: [{ ref: 0, at: [0, 0, 0], turn: [0, 0, 0], step: 0 }], objects: { [piece]: { v: 2, name: 'Piece' } } } as ShardModel, C().identity.pubkey)
+    const before = relay.events.length
+    expect(await useAvatars.getState().adopt(taken)).toBe(false)
+    expect(useAvatars.getState().adoptError).toMatch(/places nothing/)
+    expect(useAvatars.getState().phase).toBeNull()
+    expect(relay.events.length).toBe(before)
   })
 })

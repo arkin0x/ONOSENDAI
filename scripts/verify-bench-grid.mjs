@@ -105,8 +105,14 @@ await cdp.send('Page.addScriptToEvaluateOnNewDocument', { source: `(() => {
 })()` })
 await cdp.send('Page.navigate', { url })
 await sleep(6000)
-const ev = async (expression) => {
-  const r = await cdp.send('Runtime.evaluate', { expression, awaitPromise: true, returnByValue: true })
+const ev = async (expression, tries = 4) => {
+  // V8 can drop a promise it finds unreachable while a loaded machine is slow to
+  // settle it. The expressions here are safe to run again.
+  const r = await cdp.send('Runtime.evaluate', { expression, awaitPromise: true, returnByValue: true }).catch(async (e) => {
+    if (tries <= 1 || !/Promise was collected/.test(e.message)) throw e
+    await sleep(1000)
+    return { retried: true, result: { value: await ev(expression, tries - 1) } }
+  })
   if (r.exceptionDetails) throw new Error(r.exceptionDetails.exception?.description ?? r.exceptionDetails.text)
   return r.result.value
 }
@@ -177,7 +183,7 @@ const tan25 = Math.tan((50 * Math.PI) / 360)
 const report = { tag, box, spacing: [], taps: [], perf: {} }
 
 if (!SKIP.has('spacing')) {
-  for (const division of DIVISIONS) {
+  for (const division of (process.env.DIVS ? process.env.DIVS.split(",").map(Number) : DIVISIONS)) {
     await ev(`window.__ws.getState().setDivision(${division})`)
     const want = 14 // px between lines
     const d = Math.max(0.65, Math.min(8, box.h / (2 * tan25 * want * division)))

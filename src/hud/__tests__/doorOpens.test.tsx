@@ -43,6 +43,7 @@ import { useInventory } from '../../store/useInventory'
 import { openedByHand, resetOpenedChests } from '../../store/useOpenedChests'
 import { useShards } from '../../store/useShards'
 import { useToast } from '../../store/useToast'
+import { setDrawnLooks } from '../../store/useOpenCeremony'
 import { doorWallKey, wallItems } from '../../store/walkWalls'
 import { SecretModal } from '../SecretModal'
 
@@ -86,6 +87,8 @@ describe('OPEN on a door', () => {
     const { found, room } = await door()
     useShards.setState({ discovered: { [found.eventId]: found }, selectedSecret: found.eventId })
     expect(wallItems(1).map((w) => w.key)).toContain(doorWallKey(found.eventId))
+    // Drawn in the scene: the card yields to it (scene/ChestLooks).
+    setDrawnLooks([found.eventId])
     const card = await mount(<SecretModal />)
     await card.press(/^OPEN$/)
     await settled()

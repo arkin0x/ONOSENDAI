@@ -75,7 +75,7 @@ import { noCallout, useRepeatable } from '../hooks/useRepeatable'
 import { MAX_UNIT } from 'sno-core/shards'
 import { formatCellSize, formatDistance } from 'sno-core/scale'
 import { fadeStep, inscribedRadius, sourceLocal } from '../lib/audioItem'
-import { LINK_PROTECTED, SCAN_MAX_HEIGHT, lookModelOf, lookTagsFor, type LookChoice, aimedOf, atLastSpot, copyLinedUp, editingId, isProtected, ownBagIn, pendingEmpty, pendingName, positionOf, regionOf, useShards } from '../store/useShards'
+import { LINK_PROTECTED, SCAN_MAX_HEIGHT, fillingChest, movingId, placingChest, lookModelOf, lookTagsFor, type LookChoice, aimedOf, atLastSpot, copyLinedUp, isProtected, ownBagIn, pendingEmpty, pendingName, positionOf, regionOf, useShards } from '../store/useShards'
 import { aimedPoint } from '../lib/chests'
 import { snapOffered } from '../lib/pose'
 import { MAX_RIDDLE_LENGTH } from '../lib/hidden'
@@ -164,7 +164,7 @@ export function useAtLastSpot(): boolean {
 export function LookRow({ choices, look, refusal }: { choices: readonly (keyof typeof LOOK_LABELS)[]; look: LookChoice; refusal: string | null }): JSX.Element {
   const [picking, setPicking] = useState(false)
   const pick = (l: LookChoice): void => { useShards.getState().setDeployLook(l); setPicking(false) }
-  const other = look.from === 'mine' ? lookModelOf(look)?.name ?? 'model' : look.from === 'feed' ? look.object.shard.name : null
+  const other = look.from === 'mine' ? lookModelOf(look)?.name ?? 'model' : look.from === 'feed' ? look.object.shard.name : look.from === 'model' ? look.closed.name : null
   return (
     <DeployRow kind="model" label="MODEL" hint={refusal ?? other}>
       <span className="deploybar__choices" role="group" aria-label="Model">
@@ -186,14 +186,17 @@ export function DeployBar({ pad = false }: { pad?: boolean }): JSX.Element | nul
   // EDIT: a shard you hid, being moved. Its old region (a string, so the bar
   // re-renders only when it changes) says whether the move leaves its bag,
   // and whether it was published says where the move goes.
-  const moving = useShards((s) => editingId(s.pending) !== null)
+  const moving = useShards((s) => movingId(s.pending) !== null)
+  // SEAL A CHEST (R18): placed first, here, then filled in its modal, which this bar steps aside for.
+  const placing = useShards((s) => placingChest(s.pending))
+  const filling = useShards((s) => fillingChest(s.pending))
   const movedRegion = useShards((s) => {
-    const id = editingId(s.pending)
+    const id = movingId(s.pending)
     const d = id ? s.mine.find((m) => m.eventId === id) : undefined
     return d ? regionOf(positionOf(d), d.plane, d.height) : null
   })
   const movedPublished = useShards((s) => {
-    const id = editingId(s.pending)
+    const id = movingId(s.pending)
     return !!id && !!s.mine.find((m) => m.eventId === id)?.published
   })
   // A shard being aimed into a chest: signed where it stands, not hidden.
@@ -312,21 +315,21 @@ export function DeployBar({ pad = false }: { pad?: boolean }): JSX.Element | nul
 
   // On a copy lined up after a placement, Escape leaves BUILD mode, as it
   // did the moment a placement used to close the bar; CANCEL stays in it.
-  useEscape('chip', pending !== null, () => {
+  useEscape('chip', pending !== null && !filling, () => {
     const s = useShards.getState()
     if (s.deployAsk) s.declineDeploy()
     else if (copyLinedUp(s)) useBuilder.getState().exit()
     else s.cancelDeploy(true)
   })
 
-  if (!pending) return null
+  if (!pending || filling) return null
 
   // A message, a key and audio have no size or pose. A shard has them, and a
   // chest has the model it wears placed like a shard (D2): SCALE, TURN and
   // WALK, but not the snap.
   const isMessage = pending.type !== 'shard'
   const sized = pending.type === 'shard' || pending.type === 'chest'
-  const title = intoChest ? 'AIM' : moving ? 'EDIT' : pending.type === 'shard' ? 'DEPLOY' : `HIDE ${pending.type.toUpperCase()}`
+  const title = intoChest ? 'AIM' : moving ? (pending.type === 'chest' ? 'MOVE' : 'EDIT') : pending.type === 'shard' ? 'DEPLOY' : `HIDE ${pending.type.toUpperCase()}`
   const name = pendingName(pending, shard)
   const empty = pendingEmpty(pending, shard)
   const working = status === 'working'
@@ -361,11 +364,11 @@ export function DeployBar({ pad = false }: { pad?: boolean }): JSX.Element | nul
           <button
             className="deploybar__deploy"
             disabled={empty || working || here || !!lookRefusal}
-            title={lookRefusal ?? (here ? 'The last one stands here. Move, or change how it goes out, to place another' : localEst)}
-            onClick={() => void useShards.getState().deploy()}
+            title={lookRefusal ?? (placing ? 'Place it here, then fill it' : here ? 'The last one stands here. Move, or change how it goes out, to place another' : localEst)}
+            onClick={() => { if (placing) useShards.getState().placeChest(); else void useShards.getState().deploy() }}
             {...noCallout}
           >
-            {empty ? `${pending.type.toUpperCase()} IS EMPTY` : here && !working ? 'PLACED HERE' : working ? (note ? `${note.toUpperCase()}…` : 'HIDING…') : intoChest ? 'PUT IN CHEST' : moving ? (route === 'cloud' ? 'MOVE VIA HOSAKA' : live || movedPublished ? 'MOVE & PUBLISH' : 'MOVE (LOCAL)') : route === 'cloud' ? 'HIDE VIA HOSAKA' : live ? 'HIDE & PUBLISH' : 'HIDE (LOCAL)'}
+            {placing ? 'PLACE CHEST ▸' : empty ? `${pending.type.toUpperCase()} IS EMPTY` : here && !working ? 'PLACED HERE' : working ? (note ? `${note.toUpperCase()}…` : 'HIDING…') : intoChest ? 'PUT IN CHEST' : moving ? (route === 'cloud' ? 'MOVE VIA HOSAKA' : live || movedPublished ? 'MOVE & PUBLISH' : 'MOVE (LOCAL)') : route === 'cloud' ? 'HIDE VIA HOSAKA' : live ? 'HIDE & PUBLISH' : 'HIDE (LOCAL)'}
           </button>
         )}
         {/* Once hiding, it finishes where it was placed: CANCEL would only pretend. */}

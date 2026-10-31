@@ -94,7 +94,7 @@ import { useInventory } from './useInventory'
 import { useShardFolders } from './useShardFolders'
 import { creditOf, useWorkshop } from './useWorkshop'
 import { deletionFilters, isDeleted, type Credit, type FeedObject } from 'sno-core/feed'
-import { builtInLook, builtInLookTags, keptInChest, lookTags, posedLook, type LookName, type LookPose } from '../lib/looks'
+import { builtInLook, builtInLookTags, keptInChest, lookOf, lookTags, posedLook, type LookName, type LookPose } from '../lib/looks'
 import { useCeremony } from './useCeremony'
 import { useToast } from './useToast'
 import type { ShardModel } from 'sno-core/shards'
@@ -162,6 +162,13 @@ export interface MyDeployment {
    * (review of #369).
    */
   putBack?: NostrEvent
+  /**
+   * For a chest: what it holds, as sealed (signed events and rumors), kept
+   * on the device that sealed it, so EDIT and ADD can seal it again without
+   * the key it is locked to. Never published. Absent on a chest from before,
+   * or claimed from another device: EDIT and ADD then open it first.
+   */
+  sealed?: BagEntry[]
 }
 
 /** Something placed in the world, ready to draw. */
@@ -316,6 +323,12 @@ export type ChestContent =
   | { kind: 'key'; key: KeyItem }
   /** Hidden audio, its file already encrypted and uploaded (AudioCompose): sealed in at the chest's place. */
   | { kind: 'audio'; audio: AudioItem }
+  /**
+   * Something already sealed in a chest of yours, kept as it is when EDIT or
+   * ADD seals the chest again (its event, signed or a rumor, untouched), with
+   * the words its row shows.
+   */
+  | { kind: 'sealed'; entry: BagEntry; label: string; type: HiddenType }
 
 /** What a chest is sealed to, and how the composer named it. */
 export interface ChestLock {
@@ -348,6 +361,8 @@ export type LookChoice =
   | { from: 'builtin'; name: LookName }
   | { from: 'mine'; shardId: string }
   | { from: 'feed'; object: FeedObject }
+  /** The look a hidden chest already wears, kept by MOVE: posed again from where it stands. */
+  | { from: 'model'; closed: ShardModel; open: ShardModel | null }
 
 /** What a chest wears when nothing else is chosen. */
 export const DEFAULT_CHEST_LOOK: LookChoice = { from: 'builtin', name: 'treasure' }
@@ -373,6 +388,7 @@ export function feedWrapper(object: FeedObject, unit: number = object.shard.unit
 export function lookModelOf(choice: LookChoice): ShardModel | null {
   if (choice.from === 'builtin') return builtInLook(choice.name).closed
   if (choice.from === 'feed') return feedWrapper(choice.object)
+  if (choice.from === 'model') return choice.closed
   return useWorkshop.getState().shards.find((s) => s.id === choice.shardId) ?? null
 }
 
@@ -386,6 +402,7 @@ export function lookModelOf(choice: LookChoice): ShardModel | null {
 export function lookTagsFor(choice: LookChoice, pose: LookPose): string[][] {
   if (choice.from === 'builtin') return builtInLookTags(choice.name, pose)
   if (choice.from === 'feed') return lookTags(posedLook(feedWrapper(choice.object, pose.unit), pose), null)
+  if (choice.from === 'model') return lookTags(posedLook(choice.closed, pose), choice.open ? { ...turnShard(choice.open, pose.turn), unit: pose.unit } : null)
   const model = useWorkshop.getState().shards.find((s) => s.id === choice.shardId)
   if (!model) throw new Error('That model is no longer in your workshop.')
   return lookTags(posedLook(model, pose), null)
@@ -427,8 +444,16 @@ export type DeployPending =
   | { type: 'message'; text: string }
   /** A key forged in the composer: the keypair is made there, so its public key can be shown and sealed to before it is hidden. */
   | { type: 'key'; key: KeyItem }
-  /** `look`: what it wears (the hide bar's model row); absent, the built-in TREASURE. */
-  | ({ type: 'chest'; look?: LookChoice } & ChestDraft)
+  /**
+   * A chest (chest and door design, R18: "placed first, then filled with
+   * ADD"). `look`: what it wears (the hide bar's model row); absent, the
+   * built-in TREASURE. SEAL A CHEST lines it up empty on the hide bar; PLACE
+   * CHEST fixes where it lands (`spot`) and the chest modal fills it, then
+   * seals and hides it there. With `move` it is a chest already hidden from
+   * here, being moved (MOVE on its card): the same sealed chest, at a new
+   * place, wearing its look posed again.
+   */
+  | ({ type: 'chest'; look?: LookChoice; spot?: { at: Position; plane: Plane }; move?: { eventId: string } } & ChestDraft)
   /**
    * Hidden audio (DECK-0007): the file is encrypted and on Blossom already
    * (AudioCompose); the item is sealed as a rumor. With `reseal` it is PLACE
@@ -469,6 +494,21 @@ export function deployedRefs(pending: DeployPending, me: string): string[] {
 /** The event id of the deployment a pending EDIT is moving, or null. */
 export function editingId(pending: DeployPending | null): string | null {
   return pending?.type === 'shard' ? pending.edit?.eventId ?? null : null
+}
+
+/** The deployment a pending deploy moves: a shard's EDIT, or a chest's MOVE. */
+export function movingId(pending: DeployPending | null): string | null {
+  return editingId(pending) ?? (pending?.type === 'chest' ? pending.move?.eventId ?? null : null)
+}
+
+/** Whether a chest is still being placed on the hide bar: SEAL A CHEST's first step, before PLACE CHEST (R18). */
+export function placingChest(pending: DeployPending | null): boolean {
+  return pending?.type === 'chest' && !pending.spot && !pending.move
+}
+
+/** Whether a placed chest is being filled in its modal: the hide bar steps aside for it. */
+export function fillingChest(pending: DeployPending | null): boolean {
+  return pending?.type === 'chest' && !!pending.spot && !pending.move
 }
 
 /**
@@ -633,7 +673,8 @@ export function pendingEmpty(pending: DeployPending, shard: ShardModel | null): 
   switch (pending.type) {
     case 'message': return pending.text.trim().length === 0
     case 'key': return pending.key.name.trim().length === 0
-    case 'chest': return pending.name.trim().length === 0 || pending.contents.length === 0
+    // Being placed or moved, a chest is not empty: its contents come after (R18), or are already sealed.
+    case 'chest': return !!pending.spot && !pending.move && (pending.name.trim().length === 0 || pending.contents.length === 0)
     case 'audio': return !pending.audio.url
     default: return !shard || (shard.vertices.length === 0 && (shard.parts?.length ?? 0) === 0)
   }
@@ -838,6 +879,22 @@ interface ShardsState {
   startDeployChest: (draft: ChestDraft & { lock: ChestLock }) => void
   /** The hide bar's model row: what the chest being hidden wears. SCALE and WALK start from that model's own. */
   setDeployLook: (look: LookChoice) => void
+  /** SEAL A CHEST (R18): an empty chest on the hide bar to place first; a draft BUILD kept comes back filled. */
+  startPlaceChest: (draft?: ChestDraft | null) => void
+  /** PLACE CHEST: where it lands is fixed at the build cursor, and the chest modal fills it. */
+  placeChest: () => void
+  /** MOVE in the chest modal before it is sealed (or closing it): back to the hide bar, the draft kept. */
+  unplaceChest: (draft?: ChestDraft) => void
+  /** The chest modal's draft, kept on the chest being placed as it is typed, so closing the modal loses nothing. */
+  keepChestDraft: (draft: ChestDraft) => void
+  /** SEAL & PUBLISH in the chest modal: the draft sealed and hidden where it was placed. */
+  sealPlacedChest: (draft: ChestDraft) => Promise<void>
+  /** MOVE on a chest of yours: the hide bar, the chest and its look as they are, anywhere. */
+  startMoveChest: (eventId: string) => void
+  /** What a chest of yours holds, as sealed: kept from sealing, else opened with what opens it; a refusal in words otherwise. */
+  chestEntries: (eventId: string) => Promise<BagEntry[] | string>
+  /** EDIT and ADD on a chest of yours: sealed again with this draft (name, lock, label, contents) where it stands. A refusal in words, or null. */
+  resealChest: (eventId: string, draft: ChestDraft & { lock: ChestLock }) => Promise<string | null>
   /**
    * Aim one shard of a chest draft through the deploy bar (arkinox,
    * 2026-10-10): the content at `contentIndex` is lined up as a shard deploy
@@ -1295,13 +1352,16 @@ export const useShards = create<ShardsState>((set, get) => {
    * Returns the chest item for the inner template and the keys forged inside,
    * each with its signed event, for the inventory.
    */
-  async function sealChest(draft: ChestDraft, at: Position, plane: Plane, createdAt: number): Promise<{ chest: ChestItem; forged: Array<{ event: NostrEvent; key: KeyItem }> }> {
+  async function sealChest(draft: ChestDraft, at: Position, plane: Plane, createdAt: number): Promise<{ chest: ChestItem; forged: Array<{ event: NostrEvent; key: KeyItem }>; entries: BagEntry[] }> {
     const cs = cyber()
     if (!draft.lock) throw new Error('The chest has no lock.')
-    const signed: Rumor[] = []
+    const signed: BagEntry[] = []
     const forged: Array<{ event: NostrEvent; key: KeyItem }> = []
     for (const c of draft.contents) {
-      if (c.kind === 'message') {
+      if (c.kind === 'sealed') {
+        // Already in the chest: kept exactly as it was sealed (EDIT, ADD).
+        signed.push(c.entry)
+      } else if (c.kind === 'message') {
         const text = c.text.trim()
         if (!text) continue
         // A rumor, never signed, in a chest as in a bag: the chest's
@@ -1333,7 +1393,55 @@ export const useShards = create<ShardsState>((set, get) => {
     }
     if (signed.length === 0) throw new Error('The chest is empty.')
     const sealed = sealEntries(signed, draft.lock.pubkey)
-    return { chest: { name: draft.name.trim(), lockPubkey: draft.lock.pubkey, senderPubkey: sealed.senderPubkey, requires: draft.requires.trim(), payload: sealed.payload }, forged }
+    return { chest: { name: draft.name.trim(), lockPubkey: draft.lock.pubkey, senderPubkey: sealed.senderPubkey, requires: draft.requires.trim(), payload: sealed.payload }, forged, entries: signed }
+  }
+
+  /**
+   * A chest of yours, signed again as `next` where it stands, in its old
+   * one's place in the bag, and the bag published as it was (LIVE or LOCAL).
+   * The deployment, its record among the finds and everything revealed from
+   * it follow the new id, and the region's items the new envelope. `sealed`
+   * is what it now holds, kept on this device (MyDeployment `sealed`).
+   * REMOVE FROM CHEST, EDIT and ADD all end here.
+   */
+  async function replaceChest(chest: MyDeployment, next: ChestItem, sealed?: BagEntry[]): Promise<MyDeployment> {
+    const cs = cyber()
+    const me = cs.identity.pubkey
+    const at = positionOf(chest)
+    const createdAt = Math.max(Math.floor(Date.now() / 1000), chest.createdAt + 1)
+    const inner = await cs.signEvent(chestInnerTemplate(next, at, chest.plane, createdAt))
+    const key = hexToBytes(chest.keyHex)
+    const wasPublic = get().mine.some((d) => d.lookupId === chest.lookupId && d.published)
+    // The bag as it really is (gatherInners, as deleteInstance explains),
+    // with the new chest in the old one's place; a bag that somehow lacked
+    // the chest gets it added rather than lost.
+    const gathered = await gatherInners(chest.lookupId, key, wasPublic, chest.height)
+    const was = entryKey(entryOf(chest))
+    const entries = gathered.entries.some((e) => entryKey(e) === was)
+      ? gathered.entries.map((e) => (entryKey(e) === was ? inner : e))
+      : [...gathered.entries, inner]
+    const settings = gathered.settings ?? chest.bag ?? DEFAULT_BAG_SETTINGS
+    const { event, published } = await publishBag(entries, key, chest.lookupId, chest.height, wasPublic, settings, { at, plane: chest.plane }, undefined, gathered.entries)
+    let row: MyDeployment = chest
+    const mine = get().mine.map((d) => {
+      if (d.eventId === chest.eventId) {
+        row = { ...d, eventId: inner.id, inner, chest: next, createdAt, bagId: event.id, published, bag: settings, ...(sealed ? { sealed } : {}) }
+        if (!sealed) delete row.sealed
+        return row
+      }
+      return d.lookupId === chest.lookupId ? { ...d, bagId: event.id, published, bag: settings } : d
+    })
+    const discovered: Record<string, Hidden> = {}
+    for (const h of Object.values(get().discovered)) {
+      if (h.eventId === chest.eventId) { discovered[inner.id] = { ...h, eventId: inner.id, inner, chest: next, createdAt, bagId: event.id }; continue }
+      if (h.chestId === chest.eventId) { discovered[h.eventId] = { ...h, chestId: inner.id, bagId: event.id }; continue }
+      discovered[h.eventId] = h.author === me && h.lookupId === chest.lookupId ? { ...h, bagId: event.id } : h
+    }
+    // Seen already: the next scan finds the rewritten chest without a ceremony.
+    remember([inner.id])
+    set({ mine, discovered, selectedSecret: get().selectedSecret === chest.eventId ? inner.id : get().selectedSecret })
+    saveMine(mine)
+    return row
   }
 
   return {
@@ -1473,6 +1581,87 @@ export const useShards = create<ShardsState>((set, get) => {
     // A chest wears TREASURE until the model row picks another, at the
     // model's own size and WALK setting, as a shard starts.
     startDeployChest: (draft) => set({ pending: { type: 'chest', ...draft, look: DEFAULT_CHEST_LOOK }, ...freshDeploy, ...lookStart(DEFAULT_CHEST_LOOK), deployHeightAuto: true }),
+    startPlaceChest: (draft) => {
+      if (get().deployStatus === 'working') return
+      const d: ChestDraft = draft ?? { name: '', lock: null, requires: '', contents: [] }
+      set({ pending: { type: 'chest', name: d.name, lock: d.lock, requires: d.requires, contents: d.contents, look: DEFAULT_CHEST_LOOK }, ...freshDeploy, ...lookStart(DEFAULT_CHEST_LOOK), deployHeightAuto: true, deployNote: null, deployAsk: null })
+    },
+    placeChest: () => {
+      const p = get().pending
+      if (!placingChest(p) || p?.type !== 'chest') return
+      // Where it lands, fixed now: the deploy point of the build cursor at the bar's height (deploy, below).
+      const { position, plane } = buildCursorOf(cyber())
+      set({ pending: { ...p, spot: { at: deployPoint(position, buildStepOf(cyber()), get().deployHeight), plane } }, deployError: null })
+    },
+    unplaceChest: (draft) => {
+      const p = get().pending
+      if (p?.type !== 'chest' || !p.spot || get().deployStatus === 'working') return
+      const { spot: _was, ...rest } = p
+      void _was
+      set({ pending: { ...rest, ...(draft ?? {}) }, deployError: null, deployAsk: null })
+    },
+    keepChestDraft: (draft) => {
+      const p = get().pending
+      if (p?.type !== 'chest' || !p.spot || p.move) return
+      set({ pending: { ...p, ...draft } })
+    },
+    sealPlacedChest: async (draft) => {
+      const p = get().pending
+      if (p?.type !== 'chest' || !p.spot || get().deployStatus === 'working') return
+      set({ pending: { ...p, ...draft } })
+      await get().deploy()
+    },
+    startMoveChest: (eventId) => {
+      const d = get().mine.find((m) => m.eventId === eventId)
+      if (!d?.chest || d.type !== 'chest' || d.inner.pubkey !== cyber().identity.pubkey || get().deployStatus === 'working') return
+      // Its look as it stands, posed again from there: a chest from before
+      // looks goes out wearing the built-in it was drawn as.
+      const worn = lookOf({ type: 'chest', event: d.inner })
+      const look: LookChoice = d.chest.look && worn ? { from: 'model', closed: worn.closed, open: worn.open } : DEFAULT_CHEST_LOOK
+      const model = lookModelOf(look)
+      set({
+        pending: { type: 'chest', name: d.chest.name, lock: { pubkey: d.chest.lockPubkey, label: d.chest.requires || 'its lock' }, requires: d.chest.requires, contents: [], look, move: { eventId } },
+        ...freshDeploy,
+        deployHeight: d.height,
+        deployHeightAuto: false,
+        deployUnit: model?.unit ?? 0,
+        deployConstrain: model ? authoredConstrainOf(model) : CONSTRAIN_DEFAULT,
+        deployBag: { ...DEFAULT_BAG_SETTINGS, ...(d.bag ?? {}) },
+        deployBagFrom: ownBagIn(get().mine, regionOf(positionOf(d), d.plane, d.height)),
+        deployNote: null,
+        deployAsk: null,
+      })
+    },
+    chestEntries: async (eventId) => {
+      const d = get().mine.find((m) => m.eventId === eventId)
+      if (!d?.chest) return 'Only the chest’s hider can change what is inside it, from the device that hid it.'
+      if (d.sealed) return d.sealed
+      const cs = cyber()
+      const opener = openerFor(d.chest, openingKeys(useInventory.getState().items), cs.identity.pubkey)
+      if (!opener) return 'Opening the chest needs the key it is sealed to, which this device does not hold.'
+      try {
+        return opener.by === 'key' ? openWithSecret(d.chest, opener.key.secretHex) : await openWithSigner(d.chest, cs.decryptSealed)
+      } catch (err) {
+        return `The chest did not open: ${err instanceof Error ? err.message : String(err)}`
+      }
+    },
+    resealChest: async (eventId, draft) => {
+      const d = get().mine.find((m) => m.eventId === eventId)
+      if (!d?.chest || d.inner.pubkey !== cyber().identity.pubkey) return 'Only the chest’s hider can change it.'
+      if (!draft.name.trim()) return 'Name the chest.'
+      if (draft.contents.length === 0) return 'Put something in it first.'
+      try {
+        const createdAt = Math.floor(Date.now() / 1000)
+        const sealed = await sealChest(draft, positionOf(d), d.plane, createdAt)
+        // Its look, and everything else it carried, stay as they were.
+        await replaceChest(d, { ...sealed.chest, ...(d.chest.look ? { look: d.chest.look } : {}) }, sealed.entries)
+        const place: HeldPlace = { lookupId: d.lookupId, bagId: d.bagId, at: d.at, plane: d.plane, height: d.height }
+        for (const f of sealed.forged) useInventory.getState().holdForged(f.event, f.key, place)
+        return null
+      } catch (err) {
+        return err instanceof Error ? err.message : String(err)
+      }
+    },
     setDeployLook: (look) => {
       const p = get().pending
       if (p?.type !== 'chest' || get().deployStatus === 'working') return
@@ -1576,8 +1765,12 @@ export const useShards = create<ShardsState>((set, get) => {
       // plane is the one the build view shows (lib/buildCursor.ts).
       // The cell is the build STEP's when one finer than the zoom is set
       // (lib/buildCursor.ts buildStepOf, arkinox 2026-10-08).
-      const { position: cursor, plane } = buildCursorOf(cs)
-      const at: Position = deployPoint(cursor, buildStepOf(cs), deployHeight)
+      // A chest placed first (R18) lands where PLACE CHEST fixed it, whatever
+      // the cursor did while its modal was filled.
+      const built = buildCursorOf(cs)
+      const spotted = pending.type === 'chest' ? pending.spot : undefined
+      const plane: Plane = spotted?.plane ?? built.plane
+      const at: Position = spotted?.at ?? deployPoint(built.position, buildStepOf(cs), deployHeight)
       // A copy lined up again lands nowhere new until something changes: the
       // place, or how it goes out. Exactly on top of the last one it would be
       // a second, identical item, which is a second press or a held Space.
@@ -1599,6 +1792,12 @@ export const useShards = create<ShardsState>((set, get) => {
       let was = editId ? get().mine.find((d) => d.eventId === editId) : undefined
       if (editId && (!was?.shard || !editable(was, cs.identity.pubkey))) {
         set({ deployStatus: 'error', deployError: EDIT_GONE })
+        return
+      }
+      // MOVE of a chest of yours: the same sealed chest, at the new place.
+      const movedChest = pending.type === 'chest' && pending.move ? get().mine.find((d) => d.eventId === pending.move?.eventId && d.type === 'chest') : undefined
+      if (pending.type === 'chest' && pending.move && (!movedChest?.chest || movedChest.inner.pubkey !== cs.identity.pubkey)) {
+        set({ deployStatus: 'error', deployError: 'That chest is no longer among what this device hid, so there is nothing to move.' })
         return
       }
       // An earlier move of it that could not be put back is put back first.
@@ -1638,6 +1837,8 @@ export const useShards = create<ShardsState>((set, get) => {
       let audio: AudioItem | undefined
       // Keys forged inside a chest, held by the hider once the chest is hidden.
       let forgedInside: Array<{ event: NostrEvent; key: KeyItem }> = []
+      // What a chest holds, as sealed, kept on this device (MyDeployment `sealed`).
+      let sealedInside: BagEntry[] | undefined
       let innerTemplate: EventTemplate | undefined
       // From the Shard Feed: the author's object, by reference (LIVE LINK) or
       // as a copy that credits it (DECK-0003 §3.2; ruling B1).
@@ -1691,7 +1892,8 @@ export const useShards = create<ShardsState>((set, get) => {
       } else if (pending.type === 'chest') {
         // Signed and sealed inside the try below: the contents are signed by
         // the identity, which may be a remote signer, and the bar shows it.
-        if (!pending.name.trim() || pending.contents.length === 0 || !pending.lock) return
+        // A moved chest is sealed already.
+        if (!movedChest && (!pending.name.trim() || pending.contents.length === 0 || !pending.lock)) return
       } else if (pending.type === 'audio') {
         if (!pending.audio.url) return
         // The sphere is set at the ghost; where it really lands it is clamped to the room it has there (never out of the hide region).
@@ -1734,9 +1936,16 @@ export const useShards = create<ShardsState>((set, get) => {
           set({ deployNote: 'Signing and sealing the chest' })
           // What it wears, posed by the bar (DECK-0004 §3.6), before anything is sealed.
           const look = lookTagsFor(pending.look ?? DEFAULT_CHEST_LOOK, { unit: deployUnit, turn: deployTurn, constrain: deployConstrain })
-          const sealed = await sealChest(pending, at, plane, createdAt)
-          chest = { ...sealed.chest, look }
-          forgedInside = sealed.forged
+          if (movedChest?.chest) {
+            // Moved: its seal and what it holds are untouched; only its place and look change.
+            chest = { ...movedChest.chest, look }
+            sealedInside = movedChest.sealed
+          } else {
+            const sealed = await sealChest(pending, at, plane, createdAt)
+            chest = { ...sealed.chest, look }
+            forgedInside = sealed.forged
+            sealedInside = sealed.entries
+          }
           innerTemplate = chestInnerTemplate(chest, at, plane, createdAt)
         }
         if (pending.type === 'audio' && pending.reseal && audio) {
@@ -1759,7 +1968,7 @@ export const useShards = create<ShardsState>((set, get) => {
         // A move of something already on the relays goes to the relays, LOCAL
         // or not, as a DELETE does: leaving the old version up while the new
         // one stays here would show it in two places, or in the old one only.
-        const live = cs.live || (was?.published ?? false)
+        const live = cs.live || (was?.published ?? false) || (movedChest?.published ?? false)
         // A large shard is hidden by reference (spec §7.6, DECK-0003 §3.2): it
         // becomes its own kind 33331 object sealed with the same key, and the
         // bag carries only a tag naming it. The object goes out first, so a
@@ -1836,7 +2045,8 @@ export const useShards = create<ShardsState>((set, get) => {
         try {
           const existing = await gatherInners(rk.lookupId, rk.key, live, deployHeight)
           // A move inside its own bag replaces the old entry in the same rewrite.
-          const gone = was && was.lookupId === rk.lookupId ? entryKey(entryOf(was)) : null
+          const replaced = was ?? movedChest
+          const gone = replaced && replaced.lookupId === rk.lookupId ? entryKey(entryOf(replaced)) : null
           const allInners = mergeEntries(gone ? existing.entries.filter((e) => entryKey(e) !== gone) : existing.entries, [ref ?? inner])
           // What you changed in the deploy bar wins; what you left as it was
           // takes the bag's current value, which may be newer than what the
@@ -1903,6 +2113,7 @@ export const useShards = create<ShardsState>((set, get) => {
           createdAt,
           published,
           bag: settings,
+          ...(sealedInside ? { sealed: sealedInside } : {}),
         }
         // A key you hid is yours to hold at once, alone or inside a chest, so
         // chests can be sealed to it from here on (B1 §3.1).
@@ -1914,6 +2125,7 @@ export const useShards = create<ShardsState>((set, get) => {
           ...get().mine
             // Moved inside its bag: the old version left with the rewrite above.
             .filter((d) => !(was && was.lookupId === rk.lookupId && d.eventId === was.eventId))
+            .filter((d) => !(movedChest && movedChest.lookupId === rk.lookupId && d.eventId === movedChest.eventId))
             .map((d) => (d.lookupId === rk.lookupId ? { ...d, bagId: event.id, published, bag: settings } : d)),
           item,
         ]
@@ -1962,6 +2174,17 @@ export const useShards = create<ShardsState>((set, get) => {
             : s.placedLast
           const bag = again ? { deployBag: settings, deployBagFrom: ownBagIn(s.mine, regionOf(at, plane, deployHeight)) } : {}
           set({ deployStatus: 'done', pending: again, deployNote: null, deployAsk: null, placedLast, ...bag })
+        }
+        // A moved chest leaves its old place the same way.
+        if (movedChest) {
+          if (movedChest.lookupId !== rk.lookupId) {
+            try { await get().deleteInstance(movedChest.eventId) } catch (err) { moveError = err instanceof Error ? err.message : String(err) }
+          } else {
+            const deleted = { ...get().deleted, [movedChest.eventId]: true as const }
+            set({ deleted })
+            saveDeleted(deleted)
+          }
+          if (get().selectedSecret === movedChest.eventId) set({ selectedSecret: null })
         }
         if (moveError) useToast.getState().show({ label: 'MOVED, OLD COPY STAYED', meta: `It stands at the new place; the old one could not be taken down (${moveError}). Tap it and DELETE it.`, mark: 'build' })
       } catch (err) {
@@ -2193,40 +2416,12 @@ export const useShards = create<ShardsState>((set, get) => {
       }
       const resealed = resealWithout(chest.chest, raw, eventId)
       if (!resealed) return 'That is no longer inside this chest.'
-      const at = positionOf(chest)
-      const createdAt = Math.floor(Date.now() / 1000)
-      const inner = await cs.signEvent(chestInnerTemplate(resealed.chest, at, chest.plane, createdAt))
-      const key = hexToBytes(chest.keyHex)
-      const wasPublic = get().mine.some((d) => d.lookupId === chest.lookupId && d.published)
-      // The bag as it really is (gatherInners, as deleteInstance explains),
-      // with the new chest in the old one's place; a bag that somehow lacked
-      // the chest gets it added rather than lost.
-      const gathered = await gatherInners(chest.lookupId, key, wasPublic, chest.height)
-      const was = entryKey(entryOf(chest))
-      const entries = gathered.entries.some((e) => entryKey(e) === was)
-        ? gathered.entries.map((e) => (entryKey(e) === was ? inner : e))
-        : [...gathered.entries, inner]
-      const settings = gathered.settings ?? chest.bag ?? DEFAULT_BAG_SETTINGS
-      const { event, published } = await publishBag(entries, key, chest.lookupId, chest.height, wasPublic, settings, { at, plane: chest.plane }, undefined, gathered.entries)
-      // The chest is a new inner event now: the deployment, its record among
-      // the finds and everything revealed from it follow the new id, and the
-      // whole region's items follow the new envelope.
-      const mine = get().mine.map((d) => {
-        if (d.eventId === chest.eventId) return { ...d, eventId: inner.id, inner, chest: resealed.chest, createdAt, bagId: event.id, published, bag: settings }
-        return d.lookupId === chest.lookupId ? { ...d, bagId: event.id, published, bag: settings } : d
-      })
+      await replaceChest(chest, resealed.chest, resealed.left)
       const deleted = { ...get().deleted, [eventId]: true as const }
-      const discovered: Record<string, Hidden> = {}
-      for (const h of Object.values(get().discovered)) {
-        if (h.eventId === eventId) continue
-        if (h.eventId === chest.eventId) { discovered[inner.id] = { ...h, eventId: inner.id, inner, chest: resealed.chest, createdAt, bagId: event.id }; continue }
-        if (h.chestId === chest.eventId) { discovered[h.eventId] = { ...h, chestId: inner.id, bagId: event.id }; continue }
-        discovered[h.eventId] = h.author === me && h.lookupId === chest.lookupId ? { ...h, bagId: event.id } : h
-      }
-      // Seen already: the next scan finds the rewritten chest without a ceremony.
-      remember([inner.id])
-      set({ mine, deleted, discovered, selectedSecret: get().selectedSecret === eventId ? null : get().selectedSecret })
-      saveMine(mine); saveDeleted(deleted)
+      const discovered = { ...get().discovered }
+      delete discovered[eventId]
+      set({ deleted, discovered, selectedSecret: get().selectedSecret === eventId ? null : get().selectedSecret })
+      saveDeleted(deleted)
       return null
     },
 

@@ -17,13 +17,23 @@ import { useWorkshop } from '../store/useWorkshop'
 import { useBuilder } from '../store/useBuilder'
 import { Explanation } from './Explanation'
 import { MessageCompose } from './MessageCompose'
-import { Rss, Wrench } from 'lucide-react'
+import { DoorClosedLocked, Rss, Wrench } from 'lucide-react'
 import { ItemIcon } from './ItemIcon'
 import { bagsOf, useStash } from './stash'
 import { BagRow } from './StashModals'
 
 /** How many bags the panel shows before VIEW ALL. */
 const RECENT_BAGS = 3
+
+/**
+ * SEAL A CHEST: a chest on the hide bar at once, to place first (R18). One
+ * that BUILD mode ended under comes back with what was in it.
+ */
+export function sealAChest(): void {
+  useStash.getState().close()
+  const kept = useBuilder.getState().takeItemDraft('chest')
+  useShards.getState().startPlaceChest(kept?.type === 'chest' ? { name: kept.name, lock: kept.lock, requires: kept.requires, contents: kept.contents } : null)
+}
 
 export function ShardsPanel(): JSX.Element {
   const mine = useShards((s) => s.mine)
@@ -89,16 +99,19 @@ export function ShardsPanel(): JSX.Element {
         )}
       </div>
 
-      {/* Items and chests (B1 §3.1): an item is a keypair hidden in a bag, and
-          a chest is contents sealed to an item or a person (arkinox,
-          2026-10-10: "keys ARE items"; key is the role an item plays when a
-          chest is sealed to it). Both compose in a modal (StashModals), since
-          a chest's composer is taller than a panel row. */}
+      {/* Items, chests and doors (B1 §3.1; chest and door design, arkinox
+          2026-10-26: "buttons should be forge an item / seal a chest / seal a
+          door"). An item is a keypair hidden in a bag, composed in a modal
+          first. A chest and a door are placed first, then filled (R18;
+          2026-10-31: "tap, choose location, choose contents for both doors
+          and chests"): the hide bar comes up at once, and the chest's modal
+          after PLACE CHEST. SEAL A DOOR waits for DOOR authoring. */}
       <div className="shards__section">
         <span className="legend__label">Place an item or a chest</span>
         <div className="shards__modes">
           <button className="avatars__go shards__compose-open" onClick={() => useStash.getState().openKey()} title="Forge a keypair as an item and hide it; whoever finds it can TAKE it, and a chest can be sealed to it"><ItemIcon type="key" className="shards__build-icon" size={13} strokeWidth={2.5} /> FORGE AN ITEM</button>
-          <button className="avatars__go shards__compose-open" onClick={() => useStash.getState().openChest()} title="Seal a message, a model or an item to an item or a person, and hide it"><ItemIcon type="chest" className="shards__build-icon" size={13} strokeWidth={2.5} /> SEAL A CHEST</button>
+          <button className="avatars__go shards__compose-open" onClick={sealAChest} title="Place a chest, then seal a message, a model or an item in it to an item or a person"><ItemIcon type="chest" className="shards__build-icon" size={13} strokeWidth={2.5} /> SEAL A CHEST</button>
+          <button className="avatars__go shards__compose-open" disabled title="Soon"><DoorClosedLocked className="item-icon shards__build-icon" size={13} strokeWidth={2.5} aria-hidden /> SEAL A DOOR</button>
         </div>
       </div>
 

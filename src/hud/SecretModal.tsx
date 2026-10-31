@@ -23,7 +23,7 @@
  */
 
 import { useEffect, useState, type ReactNode } from 'react'
-import { Copy, CopyPlus, Move3d, Rotate3d, Target, TvMinimal } from 'lucide-react'
+import { Copy, CopyPlus, Move3d, PackagePlus, Pencil, Rotate3d, Target, TvMinimal } from 'lucide-react'
 import { nip19 } from 'nostr-tools'
 import { regionLabel } from '../lib/loot'
 import { formatAgo, formatStamp, shortHex } from '../lib/time'
@@ -37,6 +37,7 @@ import { profileLabel } from '../store/useProfiles'
 import { useCyberspace } from '../store/useCyberspace'
 import { editable, muteSubject, useShards, type WorldItem } from '../store/useShards'
 import { editPlaced } from '../store/useBuilder'
+import { useStash } from './stash'
 import { useWorkshop } from '../store/useWorkshop'
 import { useEscape } from '../hooks/useEscape'
 import { findCashuToken, textWithoutToken } from '../lib/cashu'
@@ -105,6 +106,8 @@ export function SecretModal(): JSX.Element | null {
   const wire = useShards((s) => (item && !item.chestId ? s.mine.find((d) => d.eventId === item.key) ?? null : null))
   // EDIT: a shard of yours this device can move (useShards editable).
   const movable = !!wire && editable(wire, me)
+  // A chest this device hid, signed by you: EDIT, MOVE and ADD.
+  const chestOfMine = !!wire && wire.type === 'chest' && !!wire.chest && wire.inner.pubkey === me
   // The chest a revealed thing came out of, by name, for the card's question.
   const chestName = useShards((s) => {
     const id = item?.chestId
@@ -284,6 +287,18 @@ export function SecretModal(): JSX.Element | null {
               (arkinox, 2026-10-16). */}
           {movable && (
             <button className="secret__act" title="Move it: aim the ghost, then deploy. The old one is taken down and its comments and reactions stay with it" onClick={() => { close(); editPlaced(item.key) }}><Move3d size={ICON} strokeWidth={2.25} aria-hidden />EDIT</button>
+          )}
+          {/* A chest of yours (R18, 4.8): EDIT its name, lock and label, MOVE
+              it anywhere on the hide bar (its model, SCALE, TURN and WALK
+              there too), ADD to what it holds. Each seals it again where it
+              stands; DELETE is below as for anything. From the device that
+              hid it, or one that can open it. */}
+          {mine && chestOfMine && (
+            <>
+              <button className="secret__act" title="Its name, its lock and what opens it" onClick={() => useStash.getState().openChestEdit(item.key, true)}><Pencil size={ICON} strokeWidth={2.25} aria-hidden />EDIT</button>
+              <button className="secret__act" title="Place it somewhere else, in another model if you like" onClick={() => { close(); useShards.getState().startMoveChest(item.key) }}><Move3d size={ICON} strokeWidth={2.25} aria-hidden />MOVE</button>
+              <button className="secret__act" title="Put more in it" onClick={() => useStash.getState().openChestEdit(item.key, false)}><PackagePlus size={ICON} strokeWidth={2.25} aria-hidden />ADD</button>
+            </>
           )}
           {mine && !item.chestId && (
             <button

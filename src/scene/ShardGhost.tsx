@@ -101,7 +101,10 @@ export function ShardGhost({ axes }: Props): JSX.Element | null {
   // from the stores each frame like the cursor cube, not from a React commit.
   const landingAt = (): [number, number, number] => {
     const st = useCyberspace.getState()
-    const p = deployPoint(st.cursor, buildStepOf(st), useShards.getState().deployHeight)
+    // A chest placed first (R18) stays where PLACE CHEST put it while its modal is filled.
+    const pd = useShards.getState().pending
+    const spot = pd?.type === 'chest' ? pd.spot : undefined
+    const p = spot?.at ?? deployPoint(st.cursor, buildStepOf(st), useShards.getState().deployHeight)
     return itemCentre(p, alignedOrigin(st.anchor, st.scaleExp), st.scaleExp, axes)
   }
 

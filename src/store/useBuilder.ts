@@ -367,6 +367,9 @@ function endUnder(reason: BuildEndReason): void {
       useBuilder.setState({ messageDraft: pending.text })
       // The panel is CREATE and the forged thing is an item (arkinox, 2026-10-10); the type still says key.
       kept = ' Your message is kept: WRITE A MESSAGE in CREATE, or HIDE MESSAGE in build mode, opens it again.' + dropped
+    } else if (pending.type === 'chest' && pending.move) {
+      // A move of a chest already hidden: nothing to keep, it stands where it was.
+      kept = ' The move was canceled; the chest stands where it was.'
     } else if (pending.type === 'key' || pending.type === 'chest') {
       // Kept whole, as a message is: the item's pair, name and picture, or the chest's lock and contents.
       useBuilder.setState({ itemDraft: pending })

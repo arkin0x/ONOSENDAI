@@ -22,8 +22,8 @@ if (typeof localStorage === 'undefined') {
 
 vi.mock('../../lib/relay', () => ({ publishMany: vi.fn(async () => ({ ok: true })), query: vi.fn(async () => []), queryAny: vi.fn(async () => []), relaySet: () => ['wss://relay.test'] }))
 vi.mock('@react-three/fiber', async (real) => ({ ...(await real<object>()), useFrame: () => undefined }))
-vi.mock('../TapTarget', () => ({ TapTarget: () => null }))
-vi.mock('../WorldLabel', () => ({ LABEL_PRIORITY: 0, WorldLabel: () => null }))
+vi.mock('../TapTarget', async (real) => ({ ...(await real<object>()), TapTarget: () => null }))
+vi.mock('../WorldLabel', async (real) => ({ ...(await real<object>()), WorldLabel: () => null }))
 vi.mock('../ShardMesh', async () => {
   const { createElement } = await import('react')
   return { ShardMesh: (props: object) => createElement('shardmesh', props) }

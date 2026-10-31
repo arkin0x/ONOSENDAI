@@ -220,7 +220,10 @@ describe('a door written with look tags', () => {
     useShards.setState({ mine: [], discovered: { [DOOR]: chest(DOOR, [['door', '6'], ...TAGS]) } })
     const items = wallItemsAt(1, IN)
     expect(items.map((w) => w.inside)).toEqual([true])
-    expect(SIX.map(([a, d]) => stepLimit(IN, a, d, 5n, items).reach).every((r) => r > 0n)).toBe(true)
+    const after = Object.fromEntries(SIX.map(([a, d]) => [`${d > 0 ? '+' : '-'}${a}`, stepLimit(IN, a, d, 5n, items).reach]))
+    // Out the side they are on, sideways, up and down; never across it.
+    expect(after).toMatchObject({ '+x': 5n, '-x': 5n, '+y': 5n, '-y': 5n, '-z': 5n })
+    expect(after['+z']).toBe(0n)
     // Without the walker's place it is a wall all round them: what the rule is for.
     expect(SIX.map(([a, d]) => stepLimit(IN, a, d, 5n, wallItems(1)).reach).some((r) => r === 0n)).toBe(true)
   })

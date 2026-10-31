@@ -15,7 +15,7 @@
  */
 
 import { useEffect, useLayoutEffect, useMemo, useRef, useSyncExternalStore, type ReactNode } from 'react'
-import { useFrame, type ThreeEvent } from '@react-three/fiber'
+import { useFrame, useThree, type ThreeEvent } from '@react-three/fiber'
 import {
   FrontSide,
   BufferAttribute,
@@ -323,8 +323,9 @@ export function ShardMesh({ shard: given, scale = 1, ghost = false, birth, disso
   // to its vertices, and a clip or a pose changes them, so those keep their own.
   const sharing = placed && !clip && !pose && birth === undefined && dissolve === undefined
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  const shared = useMemo(() => (sharing ? placedBuffers(given, () => buildPlaced(given)) : null), [sharing, given])
-  useEffect(() => (shared ? holdPlaced(given, shared as PlacedBuffers<unknown>) : undefined), [shared, given])
+  const renderer = useThree((s) => s.gl)
+  const shared = useMemo(() => (sharing ? placedBuffers(given, renderer, () => buildPlaced(given)) : null), [sharing, given, renderer])
+  useEffect(() => (shared ? holdPlaced(given, renderer, shared as PlacedBuffers<unknown>) : undefined), [shared, given, renderer])
   const shard = useMemo(() => shared?.shard ?? expandFaceColors(given), [given, shared])
   // Keyed on the points and faces rather than the whole model, so a parent
   // that hands over a fresh copy of the same shard does not rebuild it

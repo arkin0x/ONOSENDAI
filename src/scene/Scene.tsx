@@ -97,7 +97,7 @@ import { TvScreenEffect } from './TvScreenEffect'
 import { useTv } from '../store/useTv'
 import { CAMERA_NEAR, FOV } from './camera'
 import { headlampReach, headlampUniforms } from './headlamp'
-import { composerSamples, screenPixels } from './composerBudget'
+import { canvasPixels, composerSamples } from './composerBudget'
 
 /** Starting distance from the cursor, in cells. Orbit takes over from here. */
 const START_DISTANCE = 26
@@ -1091,7 +1091,7 @@ function resolveColourOnly(composer: PostComposer | null): void {
 }
 
 /** The composer's samples, fixed for the page: a new count would make a new composer (composerBudget.ts). */
-const COMPOSER_SAMPLES = typeof window === 'undefined' ? 4 : composerSamples(screenPixels(window))
+const COMPOSER_SAMPLES = typeof window === 'undefined' ? 4 : composerSamples(canvasPixels(window))
 
 /**
  * The canvas, rendered only when what it reads changes (memo): it takes no

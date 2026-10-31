@@ -14,7 +14,7 @@
  * with an ease-out, jittering less as they land. Decryption made visible.
  */
 
-import { useEffect, useLayoutEffect, useMemo, useRef, useSyncExternalStore, type ReactNode } from 'react'
+import { Component, useEffect, useLayoutEffect, useMemo, useRef, useSyncExternalStore, type ReactNode } from 'react'
 import { useFrame, type ThreeEvent } from '@react-three/fiber'
 import {
   FrontSide,
@@ -266,7 +266,26 @@ export function faceOfHit(i: { object: { userData: { faceOf?: number[] } }; face
   return map && k != null && map[k] !== undefined ? map[k] : null
 }
 
-export function ShardMesh({ shard: given, scale = 1, ghost = false, birth, dissolve, onFaceClick, world = false, headlamp = world, lit = false, clip, clipPlanes, pose, nested, placed = false, onPartClick, selectedParts, cull = false, ignoreOpacity = false, budget }: Props): JSX.Element | null {
+/**
+ * One shard that cannot be drawn is drawn as nothing, for that shard alone. A throw
+ * while building geometry would otherwise reach the root and blank the page, and a
+ * stranger's event can carry the shard. A new model gets a new try.
+ */
+export class ShardBoundary extends Component<{ shard: unknown; children: ReactNode }, { broken: boolean; shard: unknown }> {
+  state = { broken: false, shard: this.props.shard }
+  static getDerivedStateFromError(): { broken: boolean } { return { broken: true } }
+  static getDerivedStateFromProps(props: { shard: unknown }, state: { shard: unknown }): { broken: boolean; shard: unknown } | null {
+    return props.shard === state.shard ? null : { broken: false, shard: props.shard }
+  }
+  componentDidCatch(e: unknown): void { console.warn('[onosendai] a shard could not be drawn', e) }
+  render(): ReactNode { return this.state.broken ? null : this.props.children }
+}
+
+export function ShardMesh(props: Props): ReactNode {
+  return <ShardBoundary shard={props.shard}><ShardMeshBody {...props} /></ShardBoundary>
+}
+
+function ShardMeshBody({ shard: given, scale = 1, ghost = false, birth, dissolve, onFaceClick, world = false, headlamp = world, lit = false, clip, clipPlanes, pose, nested, placed = false, onPartClick, selectedParts, cull = false, ignoreOpacity = false, budget }: Props): JSX.Element | null {
   // What everything below is drawn at: the object's own opacity (DECK-0003
   // §1.11, with its 10% floor), times a ghost's; an avatar ignores its own.
   // A placed object reaches here with its own model, so it never takes its

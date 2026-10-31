@@ -8,8 +8,15 @@
  * imports it, so it stays out of every bundle until then.
  *
  * It only adds. The per-identity key stays as it is, so going forward again
- * loses nothing, and a row deleted here does not come back. It takes only `me`:
- * merging every identity's list would bring the shared list back for all of them.
+ * loses nothing. It takes only `me`: merging every identity's list would bring
+ * the shared list back for all of them.
+ *
+ * Its limits:
+ * - A row deleted while rolled back comes back on going forward, because its
+ *   per-identity copy is still there, unless the deleted list holds it.
+ * - LIVE LINK rows in `onosendai:deployments-unclaimed` are not restored, and
+ *   the old code does not read them.
+ * - It returns false, restoring nothing, when the merged list does not fit.
  */
 export function rollbackMineToBare(me: string): boolean {
   const read = (key: string): { eventId?: string }[] => {

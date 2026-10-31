@@ -82,10 +82,11 @@ import {
 } from '../lib/space'
 import { confirmChainEvents } from '../lib/chains'
 import { chainDbAvailable, chainWritePause, readStoredChain, setAsideChains, setAsideStoredChain, writeStoredChain, type StoredChain } from '../lib/chainDb'
-import { clearTail, committedHead, deployAllowsMove, inRows, markerValue, migrateToRows, noteCommitted, onChainLost, onChainRefused, probePassedBefore, readRows, readTail, rowsHead, rowsMarked, rowsWanted, saveRows, setAsideRows, setMarker, storeTrial, storeWorksHere, tailOnSave, turnRowsOff, writeTail } from '../lib/chainStore'
+import { checkRows, clearTail, committedHead, deployAllowsMove, inRows, markerValue, migrateToRows, noteCommitted, onChainLost, onChainRefused, probePassedBefore, readRows, readTail, rowsHead, rowsMarked, rowsWanted, saveRows, setAsideRows, setMarker, storeTrial, storeWorksHere, tailOnSave, turnRowsOff, writeTail } from '../lib/chainStore'
 import { eventDbAvailable } from '../lib/eventDb/client'
 import type { ChainRead, ChainSource } from '../lib/eventDb/chainRows'
 import { checkSignatures } from '../lib/sigCheck'
+import { rememberVerified } from '../lib/verifiedSigs'
 import {
   firstMove,
   foldHeldConflict,
@@ -1245,8 +1246,10 @@ export function appMinted(pubkey: string): boolean | null {
  * costs about 2 ms on the main thread, and the same chain is read from
  * storage more than once in a session (at boot by the signer pick and again
  * by the store, and again on every switch back to an identity), so each
- * signature is checked once. Memory only, never written to storage: a flag
- * on disk would be exactly as trustworthy as the disk.
+ * signature is checked once. On the old stores this is memory only: their
+ * copies carry no verdict. A chain's rows do (the owner's ruling, 2026-10-30:
+ * a stored NIP-01 flag), and what that flag lets a load skip, and what it still
+ * recomputes, is said at lib/eventDb/chainRows.ts checkChainRows.
  */
 const verifiedSigs = new Set<string>()
 
@@ -2198,6 +2201,49 @@ function startSignatureCheck(pubkey: string, unchecked: NostrEvent[]): void {
 }
 
 /**
+ * The rows a check of the chain's rows covers: nothing else needs to check them
+ * (putInHand), and what the check finds comes from the rows themselves.
+ */
+const coveredByRows = new Set<string>()
+
+/**
+ * Check a chain just read from its rows, in the worker, instead of every
+ * signature on every load: flagged rows have only their id recomputed, and a
+ * row not flagged yet has its signature checked, once, and is flagged. Chain
+ * actions wait for it as they wait for startSignatureCheck, and the chain is
+ * cut the same way. A database that will not do it hands the job to the check
+ * that needs no database.
+ */
+function startRowsCheck(pubkey: string, read: ChainRead): void {
+  const flagged = new Set(read.checked)
+  const events = read.events
+  for (const e of events) {
+    coveredByRows.add(e.id)
+    if (flagged.has(e.id)) {
+      verifiedSigs.add(sigKey(e))
+      rememberVerified(e.id, e.sig)
+    }
+  }
+  const running = sigCheck?.pubkey === pubkey ? sigCheck.done : null
+  const entry: { pubkey: string; done: Promise<string | null> } = { pubkey, done: Promise.resolve(null) }
+  const own = checkRows(pubkey).then((bad) => new Set(bad), () => checkSignatures(events)).then((bad) => {
+    const badKeys = new Set(events.filter((e) => bad.has(e.id)).map(sigKey))
+    for (const e of events) {
+      if (bad.has(e.id)) continue
+      verifiedSigs.add(sigKey(e))
+      rememberVerified(e.id, e.sig)
+    }
+    return badKeys.size === 0 ? null : cutInauthentic(pubkey, badKeys)
+  })
+  entry.done = (running ? Promise.all([running, own]).then(([a, b]) => a ?? b) : own).then((cut) => {
+    if (sigCheck === entry) sigCheck = null
+    mark('onosendai:chain-verified')
+    return cut
+  })
+  sigCheck = entry
+}
+
+/**
  * After a load has drawn the chain localStorage kept, read the one IndexedDB
  * keeps (lib/chainDb.ts) and take it when it is further on (furtherCopy):
  * localStorage stops taking a chain that outgrew its few megabytes, and its
@@ -2412,6 +2458,7 @@ async function moveToRows(pubkey: string, startedAt: number): Promise<void> {
 function takeRows(pubkey: string, read: ChainRead, blindSince: number | null): boolean {
   rowsDown.delete(pubkey)
   noteCommitted(pubkey, read.events.map((e) => e.id), read.published)
+  startRowsCheck(pubkey, read)
   markedHead.set(pubkey, read.headId)
   if (!rowsMarked(pubkey)) setMarker(pubkey, storedMark(pubkey))
   const held = new Set(read.events.map((e) => e.id))
@@ -2555,7 +2602,7 @@ function putInHand(pubkey: string, fromDb: LoadedChain, have: Set<string>): void
   noteInHand(pubkey, fromDb)
   dbRead.add(pubkey)
   // What localStorage did not have is checked like the rest, off the main thread.
-  startSignatureCheck(pubkey, fromDb.unchecked.filter((e) => !have.has(e.id)))
+  startSignatureCheck(pubkey, fromDb.unchecked.filter((e) => !have.has(e.id) && !coveredByRows.has(e.id)))
 }
 
 /** Resolves once the read of `pubkey`'s chain from IndexedDB has landed (hydrateChain). */

@@ -7,7 +7,7 @@ import { withEventDb } from './connection'
 import { postNote } from './channel'
 import { probeStore } from './probe'
 import { budget, byAddress, byAuthorKind, byKind, byTag, getRows, ingest, type IngestItem } from './store'
-import { chainHead, commitChain, migrateChain, partedBranches, readChain, setAsideBranch, type ChainCommit, type ChainMigration, type ChainSource } from './chainRows'
+import { chainHead, checkChainRows, commitChain, migrateChain, partedBranches, readChain, setAsideBranch, type ChainCommit, type ChainMigration, type ChainSource } from './chainRows'
 
 export const eventDbOps = {
   probeStore: () => probeStore(),
@@ -30,6 +30,7 @@ export const eventDbOps = {
     return result
   },
   chainHead: (pubkey: string) => withEventDb((db) => chainHead(db, pubkey)),
+  checkChainRows: (pubkey: string) => withEventDb((db) => checkChainRows(db, pubkey)),
   readChain: (pubkey: string) => withEventDb((db) => readChain(db, pubkey)),
   async migrateChain(by: string, m: ChainMigration) {
     const result = await withEventDb((db) => migrateChain(db, m))

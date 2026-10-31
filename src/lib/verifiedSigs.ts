@@ -28,6 +28,15 @@ const VERIFIED_KEPT = 10_000
 const verifiedSigs = new Set<string>()
 
 /**
+ * A signature this device checked on an earlier page, as a stored row says
+ * (lib/eventDb). So an event the relays send again after a reload is not
+ * checked again either. A repeat still has its id recomputed (verifyOnce).
+ */
+export function rememberVerified(id: string, sig: string): void {
+  if (verifiedSigs.size < VERIFIED_KEPT) verifiedSigs.add(`${id}:${sig}`)
+}
+
+/**
  * verifyEvent, skipping the Schnorr check for a signature already checked
  * here (verifiedSigs). For events freshly parsed, as the pool hands them over
  * (lib/relay.ts verifyRelayEvent) and as a bag's entries come out of its

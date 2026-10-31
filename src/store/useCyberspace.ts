@@ -1887,14 +1887,8 @@ let chainEpoch = 0
 async function confirmHead(retrying: () => void): Promise<string | null | typeof STALE_CONFIRMATION> {
   const pubkey = useCyberspace.getState().identity.pubkey
   const epoch = chainEpoch
-  // The saved chain's signatures are checked first: nothing is signed onto
-  // a chain until every event of it is known to be authentic.
-  const cut = await signaturesChecked(pubkey)
-  if (chainEpoch !== epoch) return STALE_CONFIRMATION
-  if (cut) return cut
-  const otherTab = await foldOtherTabs(pubkey)
-  if (chainEpoch !== epoch) return STALE_CONFIRMATION
-  if (otherTab) return otherTab
+  const here = await headCheckedHere()
+  if (here) return here
   // No confirmation is reused, however recent (arkinox, 2026-10-08): another
   // device can move in the second between two looks, and only a fresh answer
   // makes the relay's silence mean "nothing newer".
@@ -1916,6 +1910,25 @@ async function confirmHead(retrying: () => void): Promise<string | null | typeof
     }
   }
   return HEAD_UNCONFIRMED_MESSAGE
+}
+
+/**
+ * The part of confirmHead that asks no relay: the whole saved chain read in
+ * (the hydration hold), its signatures checked, so nothing is signed onto a
+ * chain until every event of it is known to be authentic, and another tab's
+ * move taken in (foldOtherTabs). Null when none of them refuses. Every
+ * confirmHead runs it first; a WALK step runs only this before its proof
+ * (arkinox, 2026-10-31), and the whole confirmHead before it is signed.
+ */
+async function headCheckedHere(): Promise<string | null | typeof STALE_CONFIRMATION> {
+  const pubkey = useCyberspace.getState().identity.pubkey
+  const epoch = chainEpoch
+  const cut = await signaturesChecked(pubkey)
+  if (chainEpoch !== epoch) return STALE_CONFIRMATION
+  if (cut) return cut
+  const otherTab = await foldOtherTabs(pubkey)
+  if (chainEpoch !== epoch) return STALE_CONFIRMATION
+  return otherTab
 }
 
 /**
@@ -2593,7 +2606,14 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
   const headMovedUnder = (): void => {
     const { plan, position } = get()
     if (!plan) {
-      set({ pendingTarget: null, proof: { ...IDLE_PROOF, status: 'infeasible', message: `${HEAD_MOVED_MESSAGE} Your aim is kept: commit again to compute the move from where you stand now.` } })
+      // A WALK step stops the walk here (store/useWalk.ts), so its aim is not
+      // kept: it says what the look before its proof said when it still
+      // asked the relays there (arkinox, 2026-10-31), and the next press
+      // walks on from the new head.
+      const message = get().walking
+        ? headMovedWords(get().events, 'Re-aim from where you are now.')
+        : `${HEAD_MOVED_MESSAGE} Your aim is kept: commit again to compute the move from where you stand now.`
+      set({ pendingTarget: null, proof: { ...IDLE_PROOF, status: 'infeasible', message } })
       return
     }
     const next = nextStep(position, plan.target, plan.ceilings)
@@ -3394,7 +3414,7 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
    */
   const commitToward = async (walk: { target: Position; stillAimed: () => boolean } | null): Promise<void> => {
     // Is a newer deploy requiring newer chain rules (lib/versionGate.ts)?
-    // Asked now, alongside the look at the relays below, and waited for
+    // Asked now, alongside the head checks below, and waited for
     // before any proof is computed or any HOSAKA sats are spent; whyNoMove
     // gives the answer. A recent answer is in hand at once, with no wait.
     const versionLook = lookBeforeMove()
@@ -3455,9 +3475,20 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
     //
     // Only for a chain that exists. A provisional identity's question is a
     // different one (does it have a chain at all?) and is answered below.
+    //
+    // A WALK step does not ask the relays here, only before it is signed
+    // (arkinox, 2026-10-31): the relays' look before the proof was most of
+    // a step's wait, and a step's proof takes milliseconds, so a head that
+    // moved meanwhile costs only that proof. The look before signing still
+    // refuses it, and the step is computed again from the new head
+    // (headMovedUnder). What this device can check without a relay (the
+    // saved chain read in, its signatures, another tab's move) is still
+    // checked now, so the proof starts from the head this browser knows.
     if (get().events.length > 0) {
       const beforeHead = get().prevEventId
-      const refusal = await confirmHead(() => set({ proof: { ...IDLE_PROOF, message: HEAD_RETRYING_MESSAGE } }))
+      const refusal = walk
+        ? await headCheckedHere()
+        : await confirmHead(() => set({ proof: { ...IDLE_PROOF, message: HEAD_RETRYING_MESSAGE } }))
       if (versionLook instanceof Promise) await versionLook
       if (refusal === STALE_CONFIRMATION) return
       if (refusal) {

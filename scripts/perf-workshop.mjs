@@ -24,6 +24,9 @@
  * HTTP request to anything but localhost is failed through the Fetch domain,
  * and an EVENT or AUTH frame seen leaving for a real relay aborts the run.
  *
+ * The last phase, `verify`, drives the handles by real taps in every tool and
+ * prints what it asserts: a change that loses a tap fails it.
+ *
  * Usage: DISPLAY=:N node scripts/perf-workshop.mjs <dev url> <zip> <piece substring> [out.json]
  * Env: PHASE_S (15 per timed phase), THROTTLE (CPU slowdown, 1), UNCAPPED=1
  * (no vsync, no frame-rate limit: frames as fast as the machine can draw,
@@ -354,6 +357,76 @@ await phase('freshFace', async () => {
   const pts = await facePoints(16)
   for (const q of pts) { await tap(q.x, q.y); await sleep(150); await ev(`window.__ws.getState().colorSelected([20, 0, 255])`); await sleep(150) }
 })
+
+// 9. What the handles must still do, by real taps, and that a still bench draws nothing.
+if (!ONLY || ONLY.has('verify')) {
+  const checks = []
+  const check = (name, ok, got) => { checks.push({ name, ok: !!ok, got }); console.log(ok ? '  ok  ' : '  FAIL', name, got === undefined ? '' : JSON.stringify(got)) }
+  const st = () => ev(`(() => { const w = window.__ws.getState(); const s = w.current(); return { tool: w.tool, sel: w.selection.slice(), pick: w.facePick.slice(), face: w.selectedFace, v: s.vertices.length, f: s.faces.length } })()`)
+  const draws = () => ev('window.__perf.read().gl.draws')
+  const screen = (i) => ev(`(() => { const w = window.__ws.getState(); const s = w.current(); const v = s.vertices[${'${i}'}]; const t = [0, 1, 2].map((a) => v.p[a] * 120 + (v.t ? v.t[a] : 0)); const c = window.__benchCamera.position.clone().set(t[0] / 120, t[1] / 120, -t[2] / 120).project(window.__benchCamera); return { x: ${box.x} + (c.x + 1) / 2 * ${box.w}, y: ${box.y} + (1 - c.y) / 2 * ${box.h} } })()`.replaceAll('${i}', String(i)))
+  await ev(`(() => { const w = window.__ws.getState(); w.create('verify'); w.setDivision(1); w.setTool('add') })()`)
+  await sleep(1200)
+  // ADD: taps on the plane place points; a tap on a point does not place another.
+  const spots = [[cx - 60, cy + 40], [cx + 60, cy + 40], [cx, cy - 20], [cx + 120, cy - 40]]
+  for (const [x, y] of spots) { await mouse('mouseMoved', x, y, { buttons: 0 }); await sleep(120); await tap(x, y); await sleep(350) }
+  let s = await st()
+  check('ADD: four taps place four points', s.v === 4, s.v)
+  const p0 = await screen(0)
+  await tap(p0.x, p0.y); await sleep(350)
+  s = await st()
+  check('ADD: a tap on a point places nothing and selects it', s.v === 4 && s.sel.length === 1, s)
+  // SELECT: taps add and take away; a marquee takes what it surrounds.
+  await ev(`window.__ws.getState().setTool('select'); window.__ws.getState().selectVertex(null)`); await sleep(400)
+  const p1 = await screen(1)
+  await tap(p1.x, p1.y); await sleep(300)
+  s = await st(); check('SELECT: a tap adds the point', s.sel.includes(1) && s.sel.length === 1, s.sel)
+  await tap(p1.x, p1.y); await sleep(300)
+  s = await st(); check('SELECT: a second tap takes it away', s.sel.length === 0, s.sel)
+  await mouse('mouseMoved', box.x + 230, box.y + 60, { buttons: 0 })
+  await mouse('mousePressed', box.x + 230, box.y + 60, { buttons: 1, clickCount: 1 })
+  for (let m = 1; m <= 12; m++) { await mouse('mouseMoved', box.x + 230 + (box.w - 400) * m / 12, box.y + 60 + (box.h - 150) * m / 12, { buttons: 1 }); await sleep(30) }
+  await mouse('mouseReleased', box.x + box.w - 170, box.y + box.h - 90, { buttons: 0, clickCount: 1 }); await sleep(400)
+  s = await st(); check('SELECT: a box takes every point inside it', s.sel.length === 4, s.sel)
+  if (process.env.SHOTS) { const png = await cdp.send('Page.captureScreenshot', { format: 'png' }); fs.mkdirSync(process.env.SHOTS, { recursive: true }); fs.writeFileSync(path.join(process.env.SHOTS, 'verify-selected.png'), Buffer.from(png.data, 'base64')) }
+  // FACE: corners picked in order, with rings; FILL makes a face; a tap on it selects it.
+  await ev(`window.__ws.getState().setTool('face')`); await sleep(400)
+  for (const i of [0, 1, 2]) { const q = await screen(i); await tap(q.x, q.y); await sleep(300) }
+  s = await st(); check('FACE: three corner taps pick three corners', s.pick.length === 3, s.pick)
+  if (process.env.SHOTS) { const png = await cdp.send('Page.captureScreenshot', { format: 'png' }); fs.writeFileSync(path.join(process.env.SHOTS, 'verify-picked.png'), Buffer.from(png.data, 'base64')) }
+  await ev(`window.__ws.getState().fill()`); await sleep(500)
+  s = await st(); check('FACE: FILL makes the face', s.f === 1, s.f)
+  const [a, b, c] = await Promise.all([screen(0), screen(1), screen(2)])
+  await tap((a.x + b.x + c.x) / 3, (a.y + b.y + c.y) / 3); await sleep(400)
+  s = await st(); check('FACE: a tap on the face, away from its corners, selects the face', s.face === 0, s.face)
+  // A press on one point and a lift on another is no tap on either.
+  await ev(`window.__ws.getState().setTool('select'); window.__ws.getState().selectVertex(null)`); await sleep(300)
+  const pa = await screen(0), pb = await screen(1)
+  await mouse('mouseMoved', pa.x, pa.y, { buttons: 0 }); await mouse('mousePressed', pa.x, pa.y, { buttons: 1, clickCount: 1 })
+  await mouse('mouseMoved', pb.x, pb.y, { buttons: 1 }); await mouse('mouseReleased', pb.x, pb.y, { buttons: 0, clickCount: 1 }); await sleep(300)
+  s = await st(); check('a press on one point and a lift on another selects neither by tap', !s.sel.includes(1) || s.sel.length !== 1, s.sel)
+  // VIEW: a tap on empty space lets go.
+  await ev(`window.__ws.getState().setTool('view'); window.__ws.getState().selectVertex(0)`); await sleep(300)
+  await tap(box.x + box.w * 0.72, box.y + 30); await sleep(300)
+  s = await st(); check('VIEW: a tap on empty space lets go', s.sel.length === 0, s.sel)
+  // Demand: a still bench draws nothing; a store change, an orbit and its damping draw.
+  await sleep(1500)
+  const benchDraws = () => ev(`(() => { const c = window.__benchScene; return window.__perf.read().gl.draws })()`)
+  const d0 = await benchDraws(); await sleep(2000); const d1 = await benchDraws()
+  const before = await ev(`window.__benchCamera.position.toArray()`)
+  await mouse('mouseMoved', cx, cy, { buttons: 0 }); await mouse('mousePressed', cx, cy, { buttons: 1, clickCount: 1 })
+  for (let m = 1; m <= 10; m++) { await mouse('mouseMoved', cx + m * 14, cy, { buttons: 1 }); await sleep(30) }
+  await mouse('mouseReleased', cx + 140, cy, { buttons: 0, clickCount: 1 })
+  const justAfter = await ev(`window.__benchCamera.position.toArray()`)
+  await sleep(1200)
+  const settled = await ev(`window.__benchCamera.position.toArray()`)
+  const d2 = await benchDraws()
+  check('an orbit moves the camera', before.join() !== justAfter.join(), { before, justAfter })
+  check('damping carries on after the lift, under demand', justAfter.join() !== settled.join(), { justAfter, settled })
+  check('an orbit draws', d2 > d1, { d1, d2 })
+  console.log('  still bench draws in 2 s (the compass may draw on its own):', d1 - d0)
+  console.log('VERIFY', checks.every((x) => x.ok) ? 'PASS' : 'FAIL', checks.filter((x) => !x.ok).length, 'failed of', checks.length)
+}
 
 if (outPath) fs.writeFileSync(outPath, JSON.stringify({ imported, throttle: THROTTLE, uncapped: !!process.env.UNCAPPED, results, leaked }, null, 1))
 console.log('done leaked', leaked)

@@ -31,7 +31,7 @@
  * make 1,731 sprites with a material each.
  */
 
-import { AdditiveBlending, BufferAttribute, BufferGeometry, Color, InstancedBufferAttribute, InstancedMesh, Matrix4, MeshBasicMaterial, Object3D, Points, PointsMaterial, SphereGeometry, Vector3, type Intersection, type PerspectiveCamera, type Raycaster, type Texture } from 'three'
+import { AdditiveBlending, BufferAttribute, BufferGeometry, Color, InstancedBufferAttribute, InstancedMesh, MeshBasicMaterial, Object3D, Points, PointsMaterial, SphereGeometry, Vector3, type Intersection, type PerspectiveCamera, type Raycaster, type Texture } from 'three'
 
 /** One dot: where it is (render space), its radius in CSS pixels, its colour (a CSS colour). */
 export interface Dot {
@@ -54,7 +54,8 @@ const SEGMENTS = 12
  */
 export class HandleDots {
   readonly mesh: InstancedMesh
-  private dots: readonly Dot[] = []
+  /** x, y, z and pixel radius of every dot: what `update` reads, every frame the camera moves. */
+  private spots = new Float32Array(0)
   private dirty = true
   // What the last write was for. A sphere looks the same from every side, so
   // only where the camera stands, its field of view and the canvas height
@@ -62,8 +63,6 @@ export class HandleDots {
   private readonly lastEye = new Vector3(Number.NaN, 0, 0)
   private lastFov = Number.NaN
   private lastHeight = Number.NaN
-  private readonly m = new Matrix4()
-  private readonly p = new Vector3()
   private readonly c = new Color()
   private readonly geometry: SphereGeometry
   private readonly material: MeshBasicMaterial
@@ -91,9 +90,13 @@ export class HandleDots {
   /** The dots to draw. Their colours are written now; their places at the next `update`. */
   set(dots: readonly Dot[]): void {
     const n = Math.min(dots.length, this.capacity)
-    this.dots = dots
     this.mesh.count = n
-    for (let i = 0; i < n; i++) this.mesh.setColorAt(i, this.c.set(dots[i].color))
+    if (this.spots.length < n * 4) this.spots = new Float32Array(this.capacity * 4)
+    for (let i = 0; i < n; i++) {
+      const d = dots[i]
+      this.spots[i * 4] = d.at[0]; this.spots[i * 4 + 1] = d.at[1]; this.spots[i * 4 + 2] = d.at[2]; this.spots[i * 4 + 3] = d.radiusPx
+      this.mesh.setColorAt(i, this.c.set(d.color))
+    }
     this.mesh.instanceColor!.needsUpdate = true
     this.dirty = true
   }
@@ -114,12 +117,22 @@ export class HandleDots {
     this.lastEye.copy(eye)
     const k = perPixelAt1(camera.fov, heightPx)
     const n = this.mesh.count
+    // Straight into the instance buffer: a scale and a place, column by
+    // column, as Matrix4 lays them out. This runs on every frame of an orbit,
+    // once per dot, so it asks for no objects at all.
+    const out = this.mesh.instanceMatrix.array as Float32Array
+    const spots = this.spots
+    const ex = eye.x, ey = eye.y, ez = eye.z
     for (let i = 0; i < n; i++) {
-      const d = this.dots[i]
-      this.p.set(d.at[0], d.at[1], d.at[2])
-      const r = Math.max(1e-5, this.p.distanceTo(eye) * k) * d.radiusPx
-      this.m.makeScale(r, r, r).setPosition(this.p)
-      this.mesh.setMatrixAt(i, this.m)
+      const s4 = i * 4, m = i * 16
+      const x = spots[s4], y = spots[s4 + 1], z = spots[s4 + 2]
+      const dx = x - ex, dy = y - ey, dz = z - ez
+      const dist = Math.sqrt(dx * dx + dy * dy + dz * dz) * k
+      const r = (dist > 1e-5 ? dist : 1e-5) * spots[s4 + 3]
+      out[m] = r; out[m + 1] = 0; out[m + 2] = 0; out[m + 3] = 0
+      out[m + 4] = 0; out[m + 5] = r; out[m + 6] = 0; out[m + 7] = 0
+      out[m + 8] = 0; out[m + 9] = 0; out[m + 10] = r; out[m + 11] = 0
+      out[m + 12] = x; out[m + 13] = y; out[m + 14] = z; out[m + 15] = 1
     }
     this.mesh.instanceMatrix.needsUpdate = true
     return true

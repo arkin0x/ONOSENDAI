@@ -154,6 +154,15 @@ describe('DELETE’s words (R12)', () => {
     expect(deleteDoorWords(1, true, true).lines[0]).toBe('Delete contents: 1 thing.')
   })
 
+  it('honest about what it cannot reach, and quiet when nothing is behind it', () => {
+    const unknown = deleteDoorWords(0, true, false, false)
+    expect(unknown.lines[0]).toMatch(/stays sealed/)
+    expect(unknown.lines[0]).not.toMatch(/anyone at the place/)
+    expect(unknown.danger).toBe(true)
+    expect(deleteDoorWords(0, true, false, true).lines).toEqual(['Nothing is behind it.'])
+    expect(deleteDoorWords(3, true, false, true).lines[0]).toMatch(/anyone at the place can find it/)
+  })
+
   it('one of several: the room stays, no contents to choose', () => {
     expect(deleteDoorWords(7, false, true)).toMatchObject({ confirmLabel: 'DELETE DOOR' })
   })

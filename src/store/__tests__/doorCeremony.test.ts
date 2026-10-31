@@ -71,7 +71,7 @@ describe('OPEN on a door', () => {
     useCyberspace.setState({ identity: { ...useCyberspace.getState().identity, pubkey: ME } })
     setDrawnLooks([ev.id])
     expect(wallItems(1).map((w) => w.key)).toContain(doorWallKey(ev.id))
-    const first = !openedByHand(ME, ev.id)
+    const first = !openedByHand(ME, ev.id, chest.lockPubkey)
     await openChestHere({ id: ev.id, chest, author: ev.pubkey, place, sealer: ev.pubkey, door: true }, opener)
     expect(wallItems(1).map((w) => w.key)).not.toContain(doorWallKey(ev.id))
     const plan = celebrateOpen({ me: ME, chestId: ev.id, kind: 'door', first, calm: false })
@@ -113,7 +113,7 @@ describe('OPEN on a door', () => {
     await openChestHere({ id: ev.id, chest, author: ev.pubkey, place, sealer: ev.pubkey, door: true }, opener)
     useCeremony.setState({ births: {}, chip: null })
     resetOpenedChests()
-    expect(afterOpen(!openedByHand(ME, ev.id), true).ceremony).toBe(false)
+    expect(afterOpen(!openedByHand(ME, ev.id, chest.lockPubkey), true).ceremony).toBe(false)
   })
 })
 

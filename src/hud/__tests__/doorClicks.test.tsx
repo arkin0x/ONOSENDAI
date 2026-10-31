@@ -142,6 +142,33 @@ describe('ADD on a door, by its buttons (4.8)', () => {
   })
 })
 
+describe('the chip while a door moves', () => {
+  it('names the room it stays in, and offers no X: a door moving stays in the bag that holds it (R7)', async () => {
+    await sealedDoor()
+    S().startPlaceDoor()
+    S().setDeployHeight(HEIGHT)
+    S().setDeployDoorHeight(HEIGHT - 2)
+    S().placeChest()
+    await S().sealPlacedChest({ name: 'Inner Door', lock: { pubkey: forgeKey('Brass Key').itemPubkey, label: 'Brass Key' }, requires: 'the Brass Key', contents: [] })
+    expect(S().deployError).toBeNull()
+    const inner = S().mine.find((d) => d.chest?.name === 'Inner Door')!
+    useBuilder.getState().exit()
+    S().startMoveChest(inner.eventId)
+    const moving = await mount(<DeployBar />)
+    expect(moving.says('North Door')).toBe(true)
+    expect(moving.says('×')).toBe(false)
+    await moving.unmount()
+    S().cancelDeploy()
+    // The same chip on anything else still has its X.
+    S().startDeployMessage('not a door')
+    S().setDeployHeight(HEIGHT)
+    const other = await mount(<DeployBar />)
+    expect(other.says('North Door')).toBe(true)
+    expect(other.says('×')).toBe(true)
+    await other.unmount()
+  })
+})
+
 describe('CONVERT TO DOOR, by its button', () => {
   it('says what blocks it, on the card, and the chest stays', async () => {
     const lock = forgeKey('Silver Key')

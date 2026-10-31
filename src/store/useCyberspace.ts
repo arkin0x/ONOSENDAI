@@ -82,11 +82,7 @@ import {
 } from '../lib/space'
 import { confirmChainEvents } from '../lib/chains'
 import { chainDbAvailable, chainWritePause, readStoredChain, setAsideChains, setAsideStoredChain, writeStoredChain, type StoredChain } from '../lib/chainDb'
-<<<<<<< HEAD
-import { checkRows, clearTail, committedHead, inRows, markerValue, migrateToRows, noteCommitted, onChainLost, onChainRefused, readRows, readTail, rowsHead, rowsMarked, rowsWanted, saveRows, setAsideRows, setMarker, writeTail, type RowsRead } from '../lib/chainStore'
-=======
-import { clearTail, committedHead, deployAllowsMove, inRows, markerValue, migrateToRows, noteCommitted, onChainLost, onChainRefused, readRows, readTail, rowsHead, rowsMarked, rowsWanted, saveRows, setAsideRows, setMarker, storeWorksHere, turnRowsOff, writeTail, type RowsRead } from '../lib/chainStore'
->>>>>>> feat/event-db-chain
+import { checkRows, clearTail, committedHead, deployAllowsMove, inRows, markerValue, migrateToRows, noteCommitted, onChainLost, onChainRefused, readRows, readTail, rowsHead, rowsMarked, rowsWanted, saveRows, setAsideRows, setMarker, storeWorksHere, turnRowsOff, writeTail, type RowsRead } from '../lib/chainStore'
 import { eventDbAvailable } from '../lib/eventDb/client'
 import type { ChainRead, ChainSource } from '../lib/eventDb/chainRows'
 import { checkSignatures } from '../lib/sigCheck'

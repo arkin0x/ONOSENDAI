@@ -403,6 +403,50 @@ if (ONLY?.has('soak')) {
   results.push({ phase: 'soak', rows })
 }
 
+// Items 1 and 2, by real taps and the real bucket (PHASES=multiFace): every face tapped stays lit, FILL and SEAM reach them all.
+if (ONLY?.has('multiFace')) {
+  const shot = async (name) => { if (!process.env.SHOTS) return; const png = await cdp.send('Page.captureScreenshot', { format: 'png' }); fs.mkdirSync(process.env.SHOTS, { recursive: true }); fs.writeFileSync(path.join(process.env.SHOTS, `${name}.png`), Buffer.from(png.data, 'base64')) }
+  const say = (name, ok, got) => console.log(ok ? '  ok  ' : '  FAIL', name, JSON.stringify(got))
+  const clickOn = async (selector, text) => { const r = await ev(`(() => { const el = [...document.querySelectorAll(${JSON.stringify(selector)})].find((b) => ${text ? `b.textContent.trim() === ${JSON.stringify(text)}` : 'true'}); if (!el) return null; const q = el.getBoundingClientRect(); return { x: q.left + q.width / 2, y: q.top + q.height / 2 } })()`); if (!r) throw new Error('no ' + selector + ' ' + text); await tap(r.x, r.y); await sleep(350) }
+  await ev(`(() => { const w = window.__ws.getState(); const nave = w.shards.find((s) => s.name.includes(${JSON.stringify(piece)})); w.select(nave.id); w.setTool('face'); w.setDivision(1) })()`)
+  await sleep(1500)
+  const read = () => ev(`(() => { const w = window.__ws.getState(); const s = w.current(); const held = w.selectedFaces ?? (w.selectedFace === null ? [] : [w.selectedFace]); return { held, picks: w.facePick.length, seams: s.facecolors ? held.map((k) => s.facecolors[k]) : null, corners: held.map((k) => s.faces[k].map((v) => s.vertices[v].c)), faces: s.faces.length, past: w.past.length } })()`)
+  const pts = (await facePoints(60)).filter((q) => q.x > box.x + box.w * 0.3 && q.y < box.y + box.h * 0.62)
+  const tapped = []
+  for (const q of pts) {
+    if (tapped.length >= 6) break
+    await tap(q.x, q.y); await sleep(300)
+    const r = await read()
+    if (r.picks) { await ev(`window.__ws.getState().clearFacePick()`); await sleep(100); continue }
+    tapped.push(q)
+  }
+  let r = await read()
+  say('every face tapped stays in hand', r.held.length >= 2 && r.held.length === new Set(r.held).size, { tapped: tapped.length, held: r.held })
+  await shot('1-faces-lit')
+  await ev(`window.__ws.setState({ color: [0, 0, 1] })`)
+  await clickOn('[aria-label="Color the selected faces"], [aria-label="Color the face"]')
+  await shot('2-bucket-menu')
+  await clickOn('[role="menuitem"]', 'SEAM')
+  r = await read()
+  say('SEAM reaches every face in hand', r.seams && r.seams.length === r.held.length && r.seams.every((c) => c[0] === 0 && c[1] === 0 && c[2] === 1), { held: r.held.length, seams: r.seams })
+  await shot('3-seamed')
+  await ev(`window.__ws.getState().undo()`); await sleep(400)
+  const left = tapped.slice(0, 3)
+  for (const q of left) { await tap(q.x, q.y); await sleep(300) }
+  await ev(`window.__ws.getState().clearFacePick(); window.__ws.setState({ color: [1, 0, 0] })`)
+  r = await read()
+  await clickOn('[aria-label="Color the selected faces"], [aria-label="Color the face"]')
+  await clickOn('[role="menuitem"]', 'FILL')
+  r = await read()
+  say('FILL reaches the corners of every face in hand', r.held.length > 0 && r.corners.flat().every((c) => c[0] === 1 && c[1] === 0 && c[2] === 0), { held: r.held.length })
+  await shot('4-filled')
+  const faces0 = r.faces, past0 = r.past, n = r.held.length
+  await cdp.send('Input.dispatchKeyEvent', { type: 'keyDown', code: 'Delete', key: 'Delete', windowsVirtualKeyCode: 46 }); await cdp.send('Input.dispatchKeyEvent', { type: 'keyUp', code: 'Delete', key: 'Delete', windowsVirtualKeyCode: 46 }); await sleep(500)
+  r = await read()
+  say('DELETE takes them all in one step', r.faces === faces0 - n && r.past === past0 + 1 && r.held.length === 0, { from: faces0, to: r.faces, n })
+  await shot('5-deleted')
+}
+
 // 9. What the handles must still do, by real taps, and that a still bench draws nothing.
 if ((!ONLY && !process.env.NO_VERIFY) || ONLY?.has('verify')) {
   const checks = []

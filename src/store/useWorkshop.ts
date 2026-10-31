@@ -313,8 +313,13 @@ export interface WorkshopState {
   selection: number[]
   /** Corners picked so far for the next face, in order. */
   facePick: number[]
-  /** The face tapped in FACE mode, an index into the shard's faces, so DELETE can take it. */
-  selectedFace: number | null
+  /**
+   * The faces tapped in FACE mode, as indices into the shard's faces, in the
+   * order they were tapped. Every one stays lit and in hand until it is tapped
+   * again or let go (arkinox, 2026-10-31), and DELETE, FLIP, FILL and SEAM take
+   * them all.
+   */
+  selectedFaces: number[]
   /** The swatch row: hexes the author has reached for, all of them palette colours. */
   palette: string[]
   /** Palettes this browser knows, beyond the built-in. Named for people, not for the wire. */
@@ -444,15 +449,18 @@ export interface WorkshopState {
   /** Grow the selection to every vertex joined to it by faces (and by shared points). */
   selectConnected: () => void
   selectFace: (index: number | null) => void
+  /** Every selected face gone, in one undoable step; their points stay. */
   deleteSelectedFace: () => void
-  /** FLIP FACE: the selected face turned round, its front to its back (DECK-0003 §1.4). */
+  /** FLIP FACE: every selected face turned round, its front to its back (DECK-0003 §1.4). */
   flipSelectedFace: () => void
-  /** FLIP SURFACE: the selected face turned, and every face joined to it by clean edges turned to agree. */
+  /** FLIP SURFACE: every selected face turned, and every face joined to them by clean edges turned to agree. */
   flipSelectedSurface: () => void
   /** AUTO: every face of the shard wound outward by the guess (sno-core orient). */
   autoWind: () => void
   /** The colour onto one face as a hard seam, not onto its corners. */
   colorFace: (index: number, c: [number, number, number]) => void
+  /** The colour onto several faces as hard seams, in one undoable step: SEAM with faces in hand. */
+  colorFaces: (indices: readonly number[], c: [number, number, number]) => void
   /** Give every face back to its corners: the object interpolates again. */
   clearFaceColors: () => void
   /** Put a color at the front of the palette (moving it there if it is already in). */
@@ -719,14 +727,33 @@ export function tapSelection(s: Pick<ShardModel, 'vertices'>, held: readonly num
   return nextSelection([...held], g, release)
 }
 
+/**
+ * Each point's vertices, once per list of vertices. A list is never changed
+ * in place (every edit makes a new one), so this holds for as long as the list
+ * does. A tap on a face asks three times, and with many faces held a release
+ * asks for all of theirs: a pass over a nave's 1,896 vertices each time was a
+ * good part of a tap.
+ */
+const byPoint = new WeakMap<readonly ShardVertex[], Map<string, number[]>>()
+function pointsOf(vertices: readonly ShardVertex[]): Map<string, number[]> {
+  let m = byPoint.get(vertices)
+  if (!m) {
+    m = new Map()
+    for (let i = 0; i < vertices.length; i++) {
+      const k = pointKey(ticksOf(vertices[i]))
+      const g = m.get(k)
+      if (g) g.push(i); else m.set(k, [i])
+    }
+    byPoint.set(vertices, m)
+  }
+  return m
+}
+
 /** Every vertex on the same point as vertex `index`, itself included. */
 function group(s: Pick<ShardModel, 'vertices'>, index: number): number[] {
   const v = s.vertices[index]
   if (!v) return []
-  const key = pointKey(ticksOf(v))
-  const out: number[] = []
-  s.vertices.forEach((o, i) => { if (pointKey(ticksOf(o)) === key) out.push(i) })
-  return out
+  return [...(pointsOf(s.vertices).get(pointKey(ticksOf(v))) ?? [])]
 }
 
 /**
@@ -895,7 +922,7 @@ export const useWorkshop = create<WorkshopState>((set, get) => {
     // widens to every vertex sharing a point: pasted exactly, the copy sits
     // on its original and widening would take both, so the nudges could
     // never carry the copy off alone.
-    if (added) set({ selection: placed.map((_, k) => base + k), partSel: objects.map((_, k) => firstPart + k), selectedFace: null, facePick: [] })
+    if (added) set({ selection: placed.map((_, k) => base + k), partSel: objects.map((_, k) => firstPart + k), selectedFaces: [], facePick: [] })
     return added
   }
 
@@ -908,7 +935,7 @@ export const useWorkshop = create<WorkshopState>((set, get) => {
     selection: [], partSel: [],
     invert: false,
     facePick: [],
-    selectedFace: null,
+    selectedFaces: [],
     clip: null,
     palette: loadPalette(),
     palettes: loadPalettes(),
@@ -931,20 +958,20 @@ export const useWorkshop = create<WorkshopState>((set, get) => {
     openWorkshop: (id) => {
       const { shards } = get()
       const currentId = id ?? get().currentId ?? newestId(shards) ?? get().create()
-      set({ open: true, currentId, selection: [], partSel: [], selectedFace: null, facePick: [], tool: 'view', plane: FLOOR, aim: null, past: [], future: [], notice: null })
+      set({ open: true, currentId, selection: [], partSel: [], selectedFaces: [], facePick: [], tool: 'view', plane: FLOOR, aim: null, past: [], future: [], notice: null })
     },
 
-    closeWorkshop: () => set({ open: false, selection: [], partSel: [], selectedFace: null, facePick: [], aim: null }),
+    closeWorkshop: () => set({ open: false, selection: [], partSel: [], selectedFaces: [], facePick: [], aim: null }),
 
     create: (name) => {
       const s = newShard(name ?? `Object ${get().shards.length + 1}`)
       const list = [...get().shards, s]
-      set({ shards: list, currentId: s.id, selection: [], partSel: [], selectedFace: null, facePick: [], past: [], future: [], notice: null })
+      set({ shards: list, currentId: s.id, selection: [], partSel: [], selectedFaces: [], facePick: [], past: [], future: [], notice: null })
       save(list)
       return s.id
     },
 
-    select: (id) => set({ currentId: id, selection: [], partSel: [], selectedFace: null, facePick: [], past: [], future: [], notice: null }),
+    select: (id) => set({ currentId: id, selection: [], partSel: [], selectedFaces: [], facePick: [], past: [], future: [], notice: null }),
 
     rename: (id, name) => {
       const list = get().shards.map((s) => (s.id === id ? { ...s, name: name.slice(0, 64), updatedAt: Date.now() } : s))
@@ -956,14 +983,14 @@ export const useWorkshop = create<WorkshopState>((set, get) => {
       if (!src) return id
       const copy: ShardModel = { ...src, id: uuid(), name: `${src.name} copy`, vertices: src.vertices.map(cloneVertex), faces: src.faces.map((f) => [...f] as [number, number, number]), updatedAt: Date.now() }
       const list = [...get().shards, copy]
-      set({ shards: list, currentId: copy.id, selection: [], partSel: [], selectedFace: null, facePick: [], past: [], future: [], notice: null }); save(list)
+      set({ shards: list, currentId: copy.id, selection: [], partSel: [], selectedFaces: [], facePick: [], past: [], future: [], notice: null }); save(list)
       return copy.id
     },
 
     remove: (id) => {
       const list = get().shards.filter((s) => s.id !== id)
       const currentId = get().currentId === id ? newestId(list) : get().currentId
-      set({ shards: list, currentId, selection: [], partSel: [], selectedFace: null, facePick: [], past: [], future: [], notice: null }); save(list)
+      set({ shards: list, currentId, selection: [], partSel: [], selectedFaces: [], facePick: [], past: [], future: [], notice: null }); save(list)
     },
 
     removeMany: (ids) => {
@@ -982,7 +1009,7 @@ export const useWorkshop = create<WorkshopState>((set, get) => {
         list = [...list, s]
         next = s.id
       }
-      set({ shards: list, currentId: next, selection: [], partSel: [], selectedFace: null, facePick: [], past: [], future: [], notice: null, ...stampState }); save(list)
+      set({ shards: list, currentId: next, selection: [], partSel: [], selectedFaces: [], facePick: [], past: [], future: [], notice: null, ...stampState }); save(list)
       return saveStored()
     },
 
@@ -996,7 +1023,7 @@ export const useWorkshop = create<WorkshopState>((set, get) => {
     // it and the tool looked broken. Taking the tool clears the selection.
     // INVERT goes off with the tool too: it is a mode of SELECT and FACE, and
     // the key that shows it is only drawn there.
-    setTool: (tool) => set({ tool, facePick: [], selectedFace: null, aim: null, invert: false, ...(tool === 'face' ? { selection: [], partSel: [] } : {}) }),
+    setTool: (tool) => set({ tool, facePick: [], selectedFaces: [], aim: null, invert: false, ...(tool === 'face' ? { selection: [], partSel: [] } : {}) }),
     setInvert: (on) => set({ invert: on }),
     setExtent: (extent) => {
       const s = get().current()
@@ -1036,7 +1063,7 @@ export const useWorkshop = create<WorkshopState>((set, get) => {
       if (self && stampObject.ref[1] === self) { set({ notice: 'An object cannot place itself.' }); return }
       const { shard } = addPart(s, stampObject.ref, { at: [...at] as P3, turn: [0, (90 * stampFacing) % 360, 0], step: 0 })
       edit(() => shard, `"${stampObject.name}" placed. It is one object: SELECT it to move, turn or copy it.`)
-      set({ selection: [], partSel: [], selectedFace: null, facePick: [] })
+      set({ selection: [], partSel: [], selectedFaces: [], facePick: [] })
     },
 
     placeStamp: (at) => {
@@ -1058,7 +1085,7 @@ export const useWorkshop = create<WorkshopState>((set, get) => {
         return k < s.faces.length ? k++ : -1
       })
       edit(() => ({ ...seamsFollow(s, res.shard, from), mode }), notice)
-      set({ selection: [], partSel: [], selectedFace: null, facePick: [] })
+      set({ selection: [], partSel: [], selectedFaces: [], facePick: [] })
     },
 
     addVertex: (p) => {
@@ -1071,17 +1098,17 @@ export const useWorkshop = create<WorkshopState>((set, get) => {
         added = s.vertices.length
         return { ...s, vertices: [...s.vertices, vertexAt(p, [...get().color] as ShardVertex['c'])] }
       })
-      if (added >= 0) set({ selection: group(get().current()!, added), selectedFace: null })
+      if (added >= 0) set({ selection: group(get().current()!, added), selectedFaces: [] })
     },
 
     selectVertex: (index) => {
       const s = get().current()
-      set({ selection: index === null || !s ? [] : group(s, index), partSel: [], selectedFace: null })
+      set({ selection: index === null || !s ? [] : group(s, index), partSel: [], selectedFaces: [] })
     },
 
     selectPart: (index) => {
       const s = get().current()
-      set({ partSel: index === null || !s?.parts?.[index] ? [] : [index], selection: [], selectedFace: null })
+      set({ partSel: index === null || !s?.parts?.[index] ? [] : [index], selection: [], selectedFaces: [] })
     },
 
     togglePart: (index) => {
@@ -1089,7 +1116,7 @@ export const useWorkshop = create<WorkshopState>((set, get) => {
       if (!s?.parts?.[index]) return
       const { partSel, invert } = get()
       // Under INVERT a tap only takes an object out; one not in hand is left alone.
-      set({ partSel: nextSelection(partSel, [index], invert || partSel.includes(index)), selectedFace: null })
+      set({ partSel: nextSelection(partSel, [index], invert || partSel.includes(index)), selectedFaces: [] })
     },
 
     setPartSelection: (indices) => {
@@ -1103,7 +1130,7 @@ export const useWorkshop = create<WorkshopState>((set, get) => {
       const { selection, invert } = get()
       // The whole point goes in, or what is held of it comes out. Under INVERT
       // a tap only takes a point out; one not in hand is left alone, never added.
-      set({ selection: tapSelection(s, selection, index, invert), selectedFace: null })
+      set({ selection: tapSelection(s, selection, index, invert), selectedFaces: [] })
     },
 
     setSelection: (indices) => {
@@ -1112,7 +1139,7 @@ export const useWorkshop = create<WorkshopState>((set, get) => {
       // Only what is new to the selection is widened to whole points
       // (settleSelection): a box growing or a pan putting it back rewrites
       // the held vertices as they are.
-      set({ selection: settleSelection(s, get().selection, indices), selectedFace: null })
+      set({ selection: settleSelection(s, get().selection, indices), selectedFaces: [] })
     },
 
     selectConnected: () => {
@@ -1121,47 +1148,78 @@ export const useWorkshop = create<WorkshopState>((set, get) => {
       if (!s || selection.length === 0) return
       const out = connectedTo(s, selection)
       const grew = out.length > selection.length
-      set({ selection: out, selectedFace: null, notice: grew ? `${new Set(out.map((i) => pointKey(ticksOf(s.vertices[i])))).size} points connected by faces.` : 'Nothing else is joined to the selection by faces.' })
+      set({ selection: out, selectedFaces: [], notice: grew ? `${new Set(out.map((i) => pointKey(ticksOf(s.vertices[i])))).size} points connected by faces.` : 'Nothing else is joined to the selection by faces.' })
     },
 
     selectFace: (index) => {
-      if (index === null) { set({ selectedFace: null }); return }
+      if (index === null) { set({ selectedFaces: [] }); return }
       const s = get().current()
       const f = s?.faces[index]
       if (!s || !f) return
       // A face is its corners: picking it puts them in the selection (every
       // vertex on each corner's point, as a point tap does), so the pad moves
-      // and turns the face as one thing. Picking a face whose corners are all
-      // in hand already takes them back out (arkinox, 2026-10-10: selecting a
-      // face should let you move it; before, it emptied the selection). Under
-      // INVERT a tap on a face takes its corners out whatever was held, and
-      // selects no face: it is taking away, not picking.
+      // and turns the faces in hand as one thing. Every face tapped stays in
+      // hand and lit, in the order tapped (arkinox, 2026-10-31: "Every face I
+      // tap should remain highlighted"). A tap on one in hand lets it go, and
+      // takes back the corners no other face in hand still stands on. Under
+      // INVERT a tap on a face takes its corners out whatever was held and
+      // selects no face: it is taking away, not picking, and a face that loses
+      // a corner to it is no longer whole in hand, so it goes too.
       const corners = [...new Set(f.flatMap((v) => group(s, v)))]
-      const { selection: sel, invert } = get()
-      const release = invert || corners.every((i) => sel.includes(i))
-      set({
-        selectedFace: release ? null : index,
-        selection: nextSelection(sel, corners, release),
-      })
+      const { selection: sel, invert, selectedFaces: held } = get()
+      if (invert) {
+        const gone = new Set(corners)
+        set({
+          selectedFaces: held.filter((k) => !s.faces[k]?.some((v) => group(s, v).some((i) => gone.has(i)))),
+          selection: nextSelection(sel, corners, true),
+        })
+        return
+      }
+      if (held.includes(index)) {
+        const rest = held.filter((k) => k !== index)
+        const kept = new Set(rest.flatMap((k) => (s.faces[k] ?? []).flatMap((v) => group(s, v))))
+        set({ selectedFaces: rest, selection: nextSelection(sel, corners.filter((i) => !kept.has(i)), true) })
+        return
+      }
+      set({ selectedFaces: [...held, index], selection: nextSelection(sel, corners, false) })
     },
 
     deleteSelectedFace: () => {
-      const { selectedFace } = get()
-      if (selectedFace === null) return
-      get().removeFace(selectedFace)
-      set({ selectedFace: null })
+      const { selectedFaces } = get()
+      if (selectedFaces.length === 0) return
+      const gone = new Set(selectedFaces)
+      edit((s) => {
+        const kept = s.faces.map((_, i) => i).filter((i) => !gone.has(i))
+        if (kept.length === s.faces.length) return null
+        return seamsFollow(s, { ...s, faces: kept.map((i) => s.faces[i]) }, kept)
+      })
+      set({ selectedFaces: [] })
     },
 
     flipSelectedFace: () => {
-      const { selectedFace } = get()
-      if (selectedFace === null) return
-      edit((s) => (s.faces[selectedFace] ? flipFace(s, selectedFace) : null), 'Face turned round.')
+      const { selectedFaces } = get()
+      if (selectedFaces.length === 0) return
+      edit((s) => {
+        const held = selectedFaces.filter((k) => s.faces[k])
+        return held.length ? held.reduce((m, k) => flipFace(m, k), s) : null
+      }, selectedFaces.length === 1 ? 'Face turned round.' : `${selectedFaces.length} faces turned round.`)
     },
 
     flipSelectedSurface: () => {
-      const { selectedFace } = get()
-      if (selectedFace === null) return
-      edit((s) => (s.faces[selectedFace] ? flipSurface(s, selectedFace) : null), 'Surface turned round.')
+      const { selectedFaces } = get()
+      if (selectedFaces.length === 0) return
+      edit((s) => {
+        // Two faces in hand on one surface turn it once: a second turn would put it back.
+        const done = new Set<number>()
+        let m = s
+        for (const k of selectedFaces) {
+          if (!m.faces[k] || done.has(k)) continue
+          const next = flipSurface(m, k)
+          next.faces.forEach((f, i) => { if (f !== m.faces[i] && (f[0] !== m.faces[i][0] || f[1] !== m.faces[i][1] || f[2] !== m.faces[i][2])) done.add(i) })
+          m = next
+        }
+        return m === s ? null : m
+      }, selectedFaces.length === 1 ? 'Surface turned round.' : 'Surfaces turned round.')
     },
 
     autoWind: () => {
@@ -1180,10 +1238,13 @@ export const useWorkshop = create<WorkshopState>((set, get) => {
      * looks like, the average of its corners, so turning one face hard leaves
      * every other face looking exactly as it did.
      */
-    colorFace: (index, c) => {
+    colorFace: (index, c) => { get().colorFaces([index], c) },
+
+    colorFaces: (indices, c) => {
       set({ color: clampColor(c) })
       edit((s) => {
-        if (!s.faces[index]) return null
+        const on = indices.filter((k) => s.faces[k])
+        if (on.length === 0) return null
         const current = s.facecolors && s.facecolors.length === s.faces.length
           ? s.facecolors
           : s.faces.map((f) => {
@@ -1194,9 +1255,9 @@ export const useWorkshop = create<WorkshopState>((set, get) => {
             return sum.map((n) => n / 3) as [number, number, number]
           })
         const facecolors = current.slice()
-        facecolors[index] = clampColor(c)
+        for (const k of on) facecolors[k] = clampColor(c)
         return { ...s, facecolors }
-      }, 'That face keeps its own color now.')
+      }, indices.length === 1 ? 'That face keeps its own color now.' : `${indices.length} faces keep their own colors now.`)
     },
 
     clearFaceColors: () => {
@@ -1275,9 +1336,11 @@ export const useWorkshop = create<WorkshopState>((set, get) => {
     },
 
     sampleColor: () => {
-      const { selection, selectedFace, tool } = get()
+      const { selection, selectedFaces, tool } = get()
       const s = get().current()
       if (!s) return
+      // The face tapped last, of those in hand.
+      const selectedFace = selectedFaces.length ? selectedFaces[selectedFaces.length - 1] : null
       // A selected face is sampled as a face whenever it is in hand: in FACE
       // its corners are selected with it, so the selection is never empty
       // there (arkinox, 2026-10-12: "the face tool has no sample dropper for
@@ -1378,14 +1441,15 @@ export const useWorkshop = create<WorkshopState>((set, get) => {
     },
 
     colorSelected: (c) => {
-      const { selection, selectedFace } = get()
+      const { selection, selectedFaces } = get()
       set({ color: clampColor(c) })
       get().rememberColor(rgbToHex(clampColor(c)))
-      // With no points selected, a selected face takes the color for its corners.
-      const face = selection.length === 0 && selectedFace !== null ? get().current()?.faces[selectedFace] : undefined
-      if (selection.length === 0 && !face) return
+      // With no points selected, the selected faces take the color for their corners.
+      const held = get().current()?.faces
+      const corners = selection.length === 0 && held ? selectedFaces.flatMap((k) => held[k] ?? []) : []
+      if (selection.length === 0 && corners.length === 0) return
       edit((s) => {
-        const chosen = new Set((face ?? selection).filter((i) => s.vertices[i]))
+        const chosen = new Set((corners.length ? corners : selection).filter((i) => s.vertices[i]))
         if (chosen.size === 0) return null
         const vertices = s.vertices.slice()
         for (const i of chosen) vertices[i] = { ...vertices[i], c: clampColor(c) }
@@ -1432,7 +1496,7 @@ export const useWorkshop = create<WorkshopState>((set, get) => {
         const faces = kept.map((i) => s.faces[i].map((v) => remap.get(v) as number) as [number, number, number])
         return seamsFollow(s, { ...s, vertices: s.vertices.filter((_, i) => !gone.has(i)), faces }, kept)
       })
-      set({ selection: [], partSel: [], selectedFace: null, facePick: [] })
+      set({ selection: [], partSel: [], selectedFaces: [], facePick: [] })
     },
 
     weld: () => {
@@ -1443,7 +1507,7 @@ export const useWorkshop = create<WorkshopState>((set, get) => {
       if (!res) { set({ notice: 'Nothing to weld: no two points stand on the same spot.' }); return }
       const n = res.shard.vertices.length
       edit(() => res.shard, `${res.merged} point${res.merged === 1 ? '' : 's'} welded${res.colored ? ', and the faces keep their own colors now' : ''}. ${n} vert${n === 1 ? 'ex' : 'ices'}.`)
-      set({ selection: [], partSel: [], selectedFace: null, facePick: [] })
+      set({ selection: [], partSel: [], selectedFaces: [], facePick: [] })
     },
 
     cutSelection: () => {
@@ -1504,8 +1568,8 @@ export const useWorkshop = create<WorkshopState>((set, get) => {
       const at = facePick.findIndex((i) => pointKey(ticksOf(s.vertices[i])) === key)
       // Tapping the first corner again closes the loop.
       if (at === 0 && facePick.length >= 3) { get().fill(); return }
-      if (at >= 0) { set({ facePick: facePick.filter((_, i) => i !== at), selectedFace: null }); return }
-      set({ facePick: [...facePick, index], selectedFace: null })
+      if (at >= 0) { set({ facePick: facePick.filter((_, i) => i !== at), selectedFaces: [] }); return }
+      set({ facePick: [...facePick, index], selectedFaces: [] })
     },
 
     clearFacePick: () => set({ facePick: [] }),
@@ -1578,7 +1642,7 @@ export const useWorkshop = create<WorkshopState>((set, get) => {
     }),
 
     // Everything drawn goes, placements included (their refs with them); undo brings it back.
-    clearShard: () => { edit((s) => { const { refs: _r, parts: _p, facecolors: _f, ...rest } = s; return { ...rest, vertices: [], faces: [] } }); set({ selection: [], partSel: [], selectedFace: null, facePick: [] }) },
+    clearShard: () => { edit((s) => { const { refs: _r, parts: _p, facecolors: _f, ...rest } = s; return { ...rest, vertices: [], faces: [] } }); set({ selection: [], partSel: [], selectedFaces: [], facePick: [] }) },
 
     undo: () => {
       const { past, shards, currentId } = get()
@@ -1586,7 +1650,7 @@ export const useWorkshop = create<WorkshopState>((set, get) => {
       if (i < 0 || !past.length) return
       const list = shards.slice()
       list[i] = past[past.length - 1]
-      set({ shards: list, past: past.slice(0, -1), future: [...get().future, shards[i]], selection: [], partSel: [], selectedFace: null, facePick: [], notice: null })
+      set({ shards: list, past: past.slice(0, -1), future: [...get().future, shards[i]], selection: [], partSel: [], selectedFaces: [], facePick: [], notice: null })
       save(list)
     },
 
@@ -1596,7 +1660,7 @@ export const useWorkshop = create<WorkshopState>((set, get) => {
       if (i < 0 || !future.length) return
       const list = shards.slice()
       list[i] = future[future.length - 1]
-      set({ shards: list, future: future.slice(0, -1), past: [...get().past, shards[i]], selection: [], partSel: [], selectedFace: null, facePick: [], notice: null })
+      set({ shards: list, future: future.slice(0, -1), past: [...get().past, shards[i]], selection: [], partSel: [], selectedFaces: [], facePick: [], notice: null })
       save(list)
     },
 
@@ -1611,7 +1675,7 @@ export const useWorkshop = create<WorkshopState>((set, get) => {
       // Text nobody signed: nothing it carries is trusted (lib/carried.ts noTable).
       const s = noTable(read)
       const list = [...get().shards, s]
-      set({ shards: list, currentId: s.id, selection: [], partSel: [], selectedFace: null, facePick: [], past: [], future: [], notice: null })
+      set({ shards: list, currentId: s.id, selection: [], partSel: [], selectedFaces: [], facePick: [], past: [], future: [], notice: null })
       save(list)
       return s.id
     },
@@ -1671,7 +1735,7 @@ export const useWorkshop = create<WorkshopState>((set, get) => {
       const list = shards.slice()
       list[i] = walk
       // On the bench it is an edit like any other: UNDO brings the old one back.
-      if (id === currentId) set({ shards: list, past: [...past.slice(-(HISTORY - 1)), old], future: [], selection: [], partSel: [], selectedFace: null, facePick: [] })
+      if (id === currentId) set({ shards: list, past: [...past.slice(-(HISTORY - 1)), old], future: [], selection: [], partSel: [], selectedFaces: [], facePick: [] })
       else set({ shards: list })
       save(list)
       return saveStored().then((ok) => (ok ? 'saved' : 'unsaved'))

@@ -59,7 +59,7 @@ describe('ShardMesh draws what shardGeometry gives it', () => {
 describe('FILL on corners inside a shape', () => {
   const w = () => useWorkshop.getState()
   beforeEach(() => {
-    useWorkshop.setState({ shards: [], currentId: null, selection: [], selectedFace: null, facePick: [], past: [], future: [], notice: null })
+    useWorkshop.setState({ shards: [], currentId: null, selection: [], selectedFaces: [], facePick: [], past: [], future: [], notice: null })
   })
 
   it('adds a face the bench draws: the Stair run riser triangle taken out and filled back', () => {

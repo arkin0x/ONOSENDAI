@@ -135,30 +135,46 @@ describe('chain verdicts', () => {
     expect(transactions).toBe(3)
   })
 
-  it('a move made during the run keeps the chain\'s head: the verdict is not written over it', async () => {
+  it('a move made during the run: its head stands, and a verdict about the old head is not written on the record', async () => {
     const chain = chainOf(4)
     await seed(chain)
     const next = hop(4, chain[0].id, chain[3].id)
     const c: ChainCommit = { pubkey: pk, expectHead: chain[3].id, keep: 4, rows: [{ event: next, nip01: 1, acked: false }], acks: [], length: 5, headId: next.id, spawnId: chain[0].id, savedAt: 2, held: false, stats: {} }
     const proto = IDBDatabase.prototype as unknown as { transaction: (...x: unknown[]) => unknown }
     const real = proto.transaction
-    let moved = false
+    let committing: Promise<unknown> | null = null
     proto.transaction = function (this: IDBDatabase, ...x: unknown[]) {
-      // Just as the verdict is about to go on the record, the other tab commits.
-      if (x[0] === 'chains' && x[1] === 'readwrite' && !moved) {
-        moved = true
+      // Just as the verdict is about to go on the record, the other tab's commit is ahead of it in the queue.
+      if (x[0] === 'chains' && x[1] === 'readwrite') {
         proto.transaction = real
-        return commitChain(this, c).then(() => undefined) && real.apply(this, x)
+        committing = commitChain(this, c)
       }
       return real.apply(this, x)
     }
     try {
       await mark()
     } finally { proto.transaction = real }
-    await new Promise((r) => setTimeout(r, 10))
+    await committing
+    const rec = await record()
+    expect(committing).not.toBeNull()
+    expect(rec.headId).toBe(next.id)
+    expect(rec.verdict).toBeUndefined()
+    // And the next run brings it up to the new head, writing only the new row.
+    const again = await writes(() => mark())
+    expect(again.rows).toBe(1)
+    expect(again.value.verdict?.validThrough?.id).toBe(next.id)
+  })
+
+  it('a verdict survives the next move on the record, and says the head it was reached at', async () => {
+    const chain = chainOf(4)
+    await seed(chain)
+    await mark()
+    const next = hop(4, chain[0].id, chain[3].id)
+    const c: ChainCommit = { pubkey: pk, expectHead: chain[3].id, keep: 4, rows: [{ event: next, nip01: 1, acked: false }], acks: [], length: 5, headId: next.id, spawnId: chain[0].id, savedAt: 2, held: false, stats: {} }
+    await withEventDb((db) => commitChain(db, c))
     const rec = await record()
     expect(rec.headId).toBe(next.id)
-    expect((rec.verdict as { headId?: string } | undefined)?.headId ?? next.id).not.toBe(undefined)
+    expect(rec.verdict).toMatchObject({ headId: chain[3].id })
   })
 
   it('no chain: nothing to say', async () => {

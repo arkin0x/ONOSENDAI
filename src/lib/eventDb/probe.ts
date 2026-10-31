@@ -9,11 +9,14 @@
  * events, and every answer is compared with what it must be. Nothing here
  * touches `onosendai:events`, and the throwaway is deleted afterwards. A browser
  * that fails stays on the old stores, as if this PR had not shipped.
+ *
+ * It runs where the database will run: in the worker, and on the main thread only
+ * when the worker fails it (client.ts probeWhereItRuns).
  */
 
 import { openDatabase } from '../idb'
 import type { NostrEvent } from '../events'
-import { EVENT_DB_STORES, EVENT_DB_VERSION, EVENTS } from './schema'
+import { EVENT_DB_STORES, EVENT_DB_VERSION, EVENTS, rowOf, type EventRow } from './schema'
 import { byAddress, byTag, getRows, ingest } from './store'
 import { commitChain, migrateChain, partedBranches, readChain, setAsideBranch, type ChainCommit } from './chainRows'
 
@@ -24,6 +27,23 @@ export const PROBE_VERSION = `1.${EVENT_DB_VERSION}`
 const hex = (c: string): string => c.repeat(64)
 const fake = (id: string, created_at: number, kind: number, tags: string[][], pubkey = hex('a')): NostrEvent => ({ id: hex(id), pubkey, created_at, kind, tags, content: 'probe', sig: 'f'.repeat(128) })
 const ids = (events: NostrEvent[] | undefined): string => (events ?? []).map((e) => e.id[0]).join('')
+const openProbe = (): Promise<IDBDatabase> => openDatabase(PROBE_DB, EVENT_DB_VERSION, EVENT_DB_STORES)
+
+/** Write a row directly, through the real rowOf; resolves to whether the transaction committed. */
+function putRow(db: IDBDatabase, row: EventRow, abort = false): Promise<boolean> {
+  return new Promise((resolve) => {
+    const tx = db.transaction(EVENTS, 'readwrite')
+    tx.oncomplete = () => resolve(true)
+    tx.onabort = () => resolve(false)
+    tx.onerror = () => { /* the abort follows */ }
+    try {
+      const req = tx.objectStore(EVENTS).put(row)
+      // The default is to abort: a constraint a request breaks must abort its transaction.
+      req.onerror = () => { /* heard on the transaction */ }
+      if (abort) tx.abort()
+    } catch { resolve(false); try { tx.abort() } catch { /* already over */ } }
+  })
+}
 
 function removeProbe(): Promise<void> {
   return new Promise((resolve) => {
@@ -36,8 +56,24 @@ function removeProbe(): Promise<void> {
   })
 }
 
+/** A row the size of a real v2 hop: its `mp` tag is 7,177 bytes. */
+const bigRow = (): EventRow => rowOf(fake('f', 150, 3333, [['X', '2'], ['Y', '7'], ['mp', 'ab'.repeat(3_600)]]), { nip01: 1, pin: true }, 1_000_000)
+
+/** What only a real reopen can show: rows that were on disk, not in a connection's memory. */
+async function afterReopen(db: IDBDatabase): Promise<string | null> {
+  const big = (await getRows(db, [hex('f')]))[0]
+  if (!big || big.tags.find((t) => t[0] === 'mp')?.[1]?.length !== 7_200) return 'an 8 KB row read after a reopen'
+  if (ids(await byTag(db, 'X:1', 10, 1_000_000)) !== '21') return 'the tag index after a reopen'
+  if (ids((await readChain(db, hex('b')))?.events) !== '6') return 'a chain after a reopen'
+  return null
+}
+
 /** The first thing that did not answer as it must, or null when all did. */
 async function firstFailure(db: IDBDatabase): Promise<string | null> {
+  if (!await putRow(db, bigRow())) return 'an 8 KB row'
+  if (ids(await byTag(db, 'X:2', 10, 1_000_000)) !== 'f' || ids(await byTag(db, 'Y:7', 10, 1_000_000)) !== 'f') return 'one row under each of its two tags'
+  if (await putRow(db, rowOf(fake('0', 1, 3333, [['X', 'aborted']]), { nip01: 1 }, 1_000_000), true)) return 'a transaction that would not abort'
+  if ((await getRows(db, [hex('0')])).length !== 0 || (await byTag(db, 'X:aborted', 10, 1_000_000)).length !== 0) return 'a transaction aborted leaving nothing'
   const old = fake('1', 100, 3333, [['X', '1'], ['S', '1-2-3'], ['e', hex('9')]])
   const fresh = fake('2', 200, 3333, [['X', '1'], ['S', '1-2-3']])
   const neighbor = fake('3', 300, 3333, [['X', '10']])
@@ -58,6 +94,8 @@ async function firstFailure(db: IDBDatabase): Promise<string | null> {
   await ingest(db, [{ event: fake('5', 200, 33331, [['d', 'x']]), nip01: 1 }], 1_000_000)
   if ((await byAddress(db, addr, 1_000_000))?.id !== hex('5')) return 'the unique address index'
   if ((await getRows(db, [hex('4')]))[0]?.addr !== undefined) return 'a row leaving the unique index'
+  if (await putRow(db, { ...rowOf(fake('9', 300, 33331, [['d', 'x']]), { nip01: 1 }, 1_000_000), addr })) return 'a duplicate address refused'
+  if ((await getRows(db, [hex('9')])).length !== 0) return 'a refused row leaving nothing'
 
   const pubkey = hex('b')
   const a = fake('6', 100, 3333, [], pubkey)
@@ -87,8 +125,13 @@ export async function probeStore(): Promise<boolean> {
   let db: IDBDatabase | null = null
   try {
     await removeProbe()
-    db = await openDatabase(PROBE_DB, EVENT_DB_VERSION, EVENT_DB_STORES)
-    const failed = await firstFailure(db)
+    db = await openProbe()
+    let failed = await firstFailure(db)
+    if (!failed) {
+      db.close()
+      db = await openProbe()
+      failed = await afterReopen(db)
+    }
     if (failed) console.warn(`[chain] the event database does not work on this browser (${failed}): the chain stays in the old stores`)
     return failed === null
   } catch (err) {

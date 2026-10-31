@@ -71,7 +71,7 @@ export function verdictsFor(pubkey: string, rows: EventRow[]): { flags: Map<stri
  */
 export async function markChainVerdicts(db: IDBDatabase, pubkey: string, epoch: number): Promise<VerdictRun> {
   const first = db.transaction([CHAINS, EVENTS], 'readonly')
-  const record = await request(first.objectStore(CHAINS).get(pubkey)) as (ChainRecord & { verdict?: ChainVerdict }) | undefined
+  const record = await request(first.objectStore(CHAINS).get(pubkey)) as ChainRecord | undefined
   if (!record) return { verdict: null, written: 0 }
   if (record.verdict?.epoch === epoch && record.verdict.headId === record.headId) return { verdict: record.verdict, written: 0 }
   const rows = await request(first.objectStore(EVENTS).index('byChain').getAll(placesOf(pubkey))) as EventRow[]

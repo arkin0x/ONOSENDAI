@@ -347,6 +347,19 @@ describe('moving a chain into rows', () => {
     expect(ids((await read())!.events)).toEqual(ids(fresh))
   })
 
+  it('does not switch when a row reads back right but sits in the wrong place', async () => {
+    const proto = IDBObjectStore.prototype as unknown as { put: (...x: unknown[]) => unknown }
+    const real = proto.put
+    proto.put = function (this: IDBObjectStore, ...x: unknown[]) {
+      const row = x[0] as { id?: string }
+      return real.apply(this, this.name === 'events' && row.id === chain[10].id ? [{ ...row, chainN: 9_999 }] : x)
+    }
+    try {
+      expect(await migrate(source(chain))).toMatchObject({ status: 'unverified' })
+    } finally { proto.put = real }
+    expect(await read()).toBeNull()
+  })
+
   it('a second tab finds the chain moved, and changes nothing', async () => {
     await migrate(source(chain))
     const further = [...chain, action(500)]

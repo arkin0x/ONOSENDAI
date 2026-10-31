@@ -23,6 +23,10 @@ let dbPromise: Promise<IDBDatabase> | null = null
 function openAtItsVersion(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
     const req = indexedDB.open(EVENT_DB)
+    // Gone since the VersionError: this open would make an empty database at
+    // version 1, and every call after it would find no stores, for good. It is
+    // refused instead, so the next call opens it properly.
+    req.onupgradeneeded = () => req.transaction?.abort()
     req.onsuccess = () => resolve(req.result)
     req.onerror = () => reject(req.error ?? new Error('IndexedDB open failed'))
   })

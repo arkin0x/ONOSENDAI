@@ -19,12 +19,12 @@
  * the chain. It holds what no other store has, and only while that is so.
  */
 
-import { TAB_ID, callEventDb, eventDbAvailable } from './eventDb/client'
+import { TAB_ID, callEventDb, eventDbAvailable, probeWhereItRuns } from './eventDb/client'
 import { PROBE_VERSION } from './eventDb/probe'
 import { checkVersion, useVersionGate } from './versionGate'
 import type { ChainCommit, ChainRead, ChainRecord, ChainSource, MigrationResult } from './eventDb/chainRows'
 import type { Nip01Flag } from './eventDb/schema'
-import { CHAIN_STORE_VERSION } from './chainStoreVersion'
+import { CHAIN_ROWS_ON_WEBKIT, CHAIN_STORE_VERSION } from './chainStoreVersion'
 import type { NostrEvent } from './events'
 
 /** The patience of a read: the same 3 s the old store's reads have (lib/chainDb.ts). */
@@ -41,6 +41,7 @@ let deployPatienceMs = 3_000
 
 const OFF_KEY = 'onosendai:chain-store-off'
 const PROBE_KEY = 'onosendai:chain-store-probe'
+const TRIAL_KEY = 'onosendai:chain-store-trial'
 const markerKey = (pubkey: string): string => `onosendai:chain-rows:${pubkey}`
 const tailKey = (pubkey: string): string => `onosendai:chain-unsaved:${pubkey}`
 
@@ -55,9 +56,40 @@ function offAtLoad(): boolean {
  */
 let rowsOff = offAtLoad()
 
-/** Whether this build keeps chains in rows, and this browser can try. */
+/** WebKit: Safari, and every browser on an iPhone, whatever it calls itself. Blink's user agents also say AppleWebKit, and Chrome/. */
+export function onWebKit(): boolean {
+  const ua = typeof navigator === 'undefined' ? '' : navigator.userAgent ?? ''
+  return /AppleWebKit\//.test(ua) && !/(?:Chrome|Chromium)\//.test(ua)
+}
+
+/** One device trying the rows before WebKit is let in: ?chainstore=trial sets it, ?chainstore=off ends it. */
+function trialFromUrl(): void {
+  try {
+    const asked = new URLSearchParams(location.search).get('chainstore')
+    if (asked === 'trial') localStorage.setItem(TRIAL_KEY, '1')
+    else if (asked === 'off') localStorage.removeItem(TRIAL_KEY)
+  } catch { /* no location, or no storage: no trial */ }
+}
+trialFromUrl()
+
+/** Whether this device is running the trial: it then says what the store did (store/useCyberspace.ts). */
+export function storeTrial(): boolean {
+  try { return localStorage.getItem(TRIAL_KEY) !== null } catch { return false }
+}
+
+/** Whether this build keeps chains in rows, and this browser may try. Whether the store works here is storeWorksHere, asked before anything is written. */
 export function rowsWanted(): boolean {
-  return CHAIN_STORE_VERSION === 2 && eventDbAvailable() && !rowsOff
+  return CHAIN_STORE_VERSION === 2 && eventDbAvailable() && !rowsOff && (!onWebKit() || CHAIN_ROWS_ON_WEBKIT || storeTrial())
+}
+
+/**
+ * On WebKit every action stays in the spare key until a relay has it, committed
+ * or not: nothing there has been proven on a real device for long, and Safari may
+ * clear a site's storage on its own. Wherever else, the key only holds what no
+ * store has.
+ */
+function keepsUnsentInTail(): boolean {
+  return onWebKit()
 }
 
 /** Stop using the rows on this page. The next save goes whole to the old stores, which then hold everything again. */
@@ -94,19 +126,24 @@ export async function deployAllowsMove(): Promise<boolean> {
 
 const probeMemo = (): string => `${PROBE_VERSION}:${typeof navigator === 'undefined' ? '' : navigator.userAgent}`
 
+/** Whether this browser, at this version, has passed the probe. What lets a load read its rows without parsing the frozen copy first. */
+export function probePassedBefore(): boolean {
+  try { return localStorage.getItem(PROBE_KEY) === probeMemo() } catch { return false }
+}
+
 /**
  * Whether the store works on this browser (lib/eventDb/probe.ts). A pass is
- * remembered for this browser's version, so it is not paid for on every load: a
- * browser update asks again. A failure is never remembered, so a passing private
- * window or a fixed browser is not held to it.
+ * remembered for this browser's version, so reading rows that are already there
+ * does not pay for it on every load, and a browser update asks again. A chain is
+ * only ever moved on a probe run now (`fresh`). A failure is never remembered, so
+ * a fixed browser or a passing window is not held to it.
  */
-export async function storeWorksHere(): Promise<boolean> {
-  try { if (localStorage.getItem(PROBE_KEY) === probeMemo()) return true } catch { /* no memo: asked below */ }
-  try {
-    if (!await callEventDb('probeStore', [])) return false
-    try { localStorage.setItem(PROBE_KEY, probeMemo()) } catch { /* asked again next load */ }
-    return true
-  } catch { return false }
+export async function storeWorksHere(fresh: boolean): Promise<boolean> {
+  if (!fresh && probePassedBefore()) return true
+  let works = false
+  try { works = await probeWhereItRuns() } catch { works = false }
+  try { if (works) localStorage.setItem(PROBE_KEY, probeMemo()) } catch { /* asked again next load */ }
+  return works
 }
 
 /**
@@ -379,7 +416,13 @@ export function writeTail(pubkey: string, events: NostrEvent[]): void {
 }
 
 export function clearTail(pubkey: string): void {
+  if (keepsUnsentInTail()) return
   try { localStorage.removeItem(tailKey(pubkey)) } catch { /* private mode */ }
+}
+
+/** What a save does for the spare key: on WebKit, it always holds what no relay has yet. */
+export function tailOnSave(pubkey: string, unsent: () => NostrEvent[]): void {
+  if (keepsUnsentInTail()) writeTail(pubkey, unsent())
 }
 
 export function readTail(pubkey: string): NostrEvent[] {

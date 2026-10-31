@@ -111,6 +111,91 @@ describe('the client', () => {
   })
 })
 
+describe('a worker that answers it could not', () => {
+  it('is given up, and the call runs here', async () => {
+    FakeWorker.behaviour = 'quiet'
+    const c = await freshClient()
+    const e = event(10)
+    const call = c.callEventDb('ingest', ['tab', [{ event: e, nip01: 1 }]])
+    await new Promise((r) => setTimeout(r, 5))
+    FakeWorker.made[0].onmessage?.({ data: { call: 1, ok: false, name: 'NotFoundError', message: 'no such store' } } as MessageEvent<EventDbResponse>)
+    expect((await call).added).toEqual([e.id])
+    expect(FakeWorker.made[0].terminated).toBe(true)
+  })
+
+  it('a full disk is not the worker\'s fault: it stays, and the caller hears it by name', async () => {
+    FakeWorker.behaviour = 'quiet'
+    const c = await freshClient()
+    const call = c.callEventDb('budget', [])
+    await new Promise((r) => setTimeout(r, 5))
+    FakeWorker.made[0].onmessage?.({ data: { call: 1, ok: false, name: 'QuotaExceededError', message: 'full' } } as MessageEvent<EventDbResponse>)
+    await expect(call).rejects.toMatchObject({ name: 'QuotaExceededError' })
+    expect(FakeWorker.made[0].terminated).toBe(false)
+  })
+})
+
+describe('the store probe, where the database will run', () => {
+  /** A worker whose probe answers as the test says. */
+  const answering = (value: unknown, ok = true): void => {
+    const post = FakeWorker.prototype.postMessage
+    vi.spyOn(FakeWorker.prototype, 'postMessage').mockImplementation(function (this: FakeWorker, r: EventDbRequest) {
+      if (r.op === 'probeStore') {
+        this.got.push(r)
+        setTimeout(() => this.onmessage?.({ data: ok ? { call: r.call, ok: true, value } : { call: r.call, ok: false, name: 'UnknownError', message: 'x' } } as MessageEvent<EventDbResponse>), 0)
+        return
+      }
+      post.call(this, r)
+    })
+  }
+
+  it('passes in the worker: the worker stays, and the main thread is not asked', async () => {
+    answering(true)
+    const c = await freshClient()
+    expect(await c.probeWhereItRuns()).toBe(true)
+    expect(FakeWorker.made[0].terminated).toBe(false)
+  })
+
+  it('fails in the worker and passes here: the worker is given up, and the database lives here', async () => {
+    answering(false)
+    const c = await freshClient()
+    expect(await c.probeWhereItRuns()).toBe(true)
+    expect(FakeWorker.made[0].terminated).toBe(true)
+    const e = event(11)
+    expect((await c.callEventDb('ingest', ['tab', [{ event: e, nip01: 1 }]])).added).toEqual([e.id])
+    expect(FakeWorker.made[0].got.some((r) => r.op === 'ingest')).toBe(false)
+  })
+
+  it('a worker that answers it could not is treated the same', async () => {
+    answering(null, false)
+    const c = await freshClient()
+    expect(await c.probeWhereItRuns()).toBe(true)
+    expect(FakeWorker.made[0].terminated).toBe(true)
+  })
+
+  it('no answer from the worker in time: tried here', async () => {
+    FakeWorker.behaviour = 'quiet'
+    const c = await freshClient()
+    expect(await c.probeWhereItRuns(50)).toBe(true)
+    expect(FakeWorker.made[0].terminated).toBe(true)
+  })
+
+  it('no answer in time anywhere means it does not work', async () => {
+    FakeWorker.behaviour = 'throw'
+    vi.resetModules()
+    vi.doMock('../ops', () => ({ answer: () => new Promise(() => {}) }))
+    const c = await import('../client')
+    vi.doUnmock('../ops')
+    expect(await c.probeWhereItRuns(20)).toBe(false)
+  })
+
+  it('fails in both: it does not work', async () => {
+    answering(false)
+    const c = await freshClient()
+    ;(globalThis as { indexedDB?: unknown }).indexedDB = { open: () => { throw new DOMException('no', 'InvalidStateError') }, deleteDatabase: () => { throw new DOMException('no', 'InvalidStateError') } }
+    expect(await c.probeWhereItRuns()).toBe(false)
+  })
+})
+
 describe('the order calls run in', () => {
   /** A fresh client over stand-in ops, whose answers the test releases one at a time. */
   async function heldClient() {

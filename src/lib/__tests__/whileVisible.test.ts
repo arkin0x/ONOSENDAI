@@ -5,7 +5,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { whileVisible } from '../whileVisible'
+import { everyWhileVisible, whileVisible } from '../whileVisible'
 
 afterEach(() => vi.unstubAllGlobals())
 
@@ -33,12 +33,47 @@ describe('whileVisible', () => {
   })
 })
 
+describe('everyWhileVisible', () => {
+  const page = (): { visibilityState: string; listeners: Set<() => void>; addEventListener(n: string, f: () => void): void; removeEventListener(n: string, f: () => void): void } => {
+    const listeners = new Set<() => void>()
+    return { visibilityState: 'visible', listeners, addEventListener: (_, f) => { listeners.add(f) }, removeEventListener: (_, f) => { listeners.delete(f) } }
+  }
+
+  it('ticks on screen, not while hidden, and once as the page comes back so a label is right when read', () => {
+    vi.useFakeTimers()
+    try {
+      const doc = page()
+      vi.stubGlobal('document', doc)
+      const fn = vi.fn()
+      const stop = everyWhileVisible(fn, 1000)
+      vi.advanceTimersByTime(2000)
+      expect(fn).toHaveBeenCalledTimes(2)
+      doc.visibilityState = 'hidden'
+      for (const f of doc.listeners) f()
+      vi.advanceTimersByTime(5000)
+      expect(fn).toHaveBeenCalledTimes(2)
+      doc.visibilityState = 'visible'
+      for (const f of doc.listeners) f()
+      expect(fn).toHaveBeenCalledTimes(3)
+      stop()
+      expect(doc.listeners.size).toBe(0)
+      vi.advanceTimersByTime(5000)
+      expect(fn).toHaveBeenCalledTimes(3)
+    } finally { vi.useRealTimers() }
+  })
+})
+
 describe('what stops while hidden', () => {
   const SRC = path.resolve(__dirname, '../..')
-  const uses = ['hud/AvatarsPanel.tsx', 'hud/TargetsPanel.tsx', 'hud/DiscoveredPanel.tsx', 'hud/ChainExplorer.tsx', 'hud/SpectateBar.tsx', 'hud/Notifications.tsx', 'hooks/useCover.ts']
-  for (const f of uses) {
+  for (const f of ['hud/AvatarsPanel.tsx', 'hud/TargetsPanel.tsx', 'hud/DiscoveredPanel.tsx', 'hud/ChainExplorer.tsx', 'hud/SpectateBar.tsx']) {
     it(`${f} goes through it`, () => {
-      expect(fs.readFileSync(path.join(SRC, f), 'utf8')).toMatch(/setInterval\(whileVisible\(/)
+      expect(fs.readFileSync(path.join(SRC, f), 'utf8')).toMatch(/return everyWhileVisible\(/)
     })
   }
+  it('the cover measure goes through it', () => {
+    expect(fs.readFileSync(path.join(SRC, 'hooks/useCover.ts'), 'utf8')).toMatch(/setInterval\(whileVisible\(/)
+  })
+  it('the notification poll does not: waiting leaves a hole it may never read across (review of #564)', () => {
+    expect(fs.readFileSync(path.join(SRC, 'hud/Notifications.tsx'), 'utf8')).not.toMatch(/whileVisible/)
+  })
 })

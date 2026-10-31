@@ -52,7 +52,6 @@ import { useProfiles } from '../store/useProfiles'
 import { previewText } from '../lib/mentions'
 import { useMutes } from '../store/useMutes'
 import { hidesThing, type Muted } from '../lib/muteList'
-import { whileVisible } from '../lib/whileVisible'
 
 /**
  * The glyph a notification leads with: the reaction itself, or for words the
@@ -84,7 +83,7 @@ export function useNotificationsLoop(): void {
   const me = useCyberspace((s) => s.identity.pubkey)
   useEffect(() => {
     void useNotifications.getState().start(me)
-    const t = window.setInterval(whileVisible(() => void useNotifications.getState().poll()), POLL_MS)
+    const t = window.setInterval(() => void useNotifications.getState().poll(), POLL_MS)
     return () => window.clearInterval(t)
   }, [me])
 }

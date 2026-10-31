@@ -42,6 +42,8 @@ import { regionKeyAt } from '../../lib/shardCrypto'
 import { useCyberspace } from '../useCyberspace'
 import { useShards, type MyDeployment } from '../useShards'
 import { useWorkshop } from '../useWorkshop'
+import { rollbackMineToBare } from '../mineRollback'
+import { useToast } from '../useToast'
 
 const BARE = 'onosendai:deployments'
 const UNCLAIMED = 'onosendai:deployments-unclaimed'
@@ -312,5 +314,279 @@ describe('rows hidden by reference', () => {
     await new Promise((resolve) => setTimeout(resolve, 20))
     expect(useShards.getState().mine).toEqual([])
     expect(ids(stored(UNCLAIMED))).toEqual(['r1'])
+  })
+})
+
+const SK = generateSecretKey()
+const OWNER = getPublicKey(SK)
+const tick = (ms = 30): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms))
+const everywhere = (id: string): string[] => [BARE, UNCLAIMED, keyOf(OWNER), keyOf(X), keyOf(Y), keyOf(home)].filter((k) => stored(k).some((d) => d?.eventId === id))
+/** Storage with a total size, counted over the keys these tests use. */
+function capStorage(cap: number): { restore: () => void } {
+  const real = localStorage.setItem.bind(localStorage)
+  const total = (): number => [BARE, UNCLAIMED, keyOf(OWNER), keyOf(X), keyOf(Y), keyOf(home)].reduce((n, k) => n + (localStorage.getItem(k) ?? '').length, 0)
+  const spy = vi.spyOn(localStorage, 'setItem').mockImplementation((k: string, v: string) => {
+    if (total() - (localStorage.getItem(k) ?? '').length + String(v).length > cap) throw new Error('QuotaExceededError')
+    real(k, v)
+  })
+  return { restore: () => spy.mockRestore() }
+}
+const aShard = (): ShardModel => ({ ...newShard('new'), unit: 1, vertices: Array.from({ length: 3 }, (_, i) => ({ p: [i % 16, Math.floor(i / 16) % 16, Math.floor(i / 256)] as [number, number, number], c: [1, 1, 1] as [number, number, number] })), faces: [[0, 1, 2]] })
+async function deployAShard(): Promise<void> {
+  const shard = aShard()
+  useWorkshop.setState({ shards: [shard], currentId: shard.id })
+  useShards.getState().startDeployShard(shard.id)
+  await useShards.getState().deploy()
+}
+
+describe('a full disk', () => {
+  it('a claim the owner key cannot take leaves the row unclaimed', async () => {
+    const d = refRow(X, 'r1')
+    relayBags = [await bagBy(SK, d.ref as Reference)]
+    localStorage.setItem(UNCLAIMED, JSON.stringify([d]))
+    const real = localStorage.setItem.bind(localStorage)
+    const spy = vi.spyOn(localStorage, 'setItem').mockImplementation((k: string, v: string) => {
+      if (k === keyOf(OWNER)) throw new Error('QuotaExceededError')
+      real(k, v)
+    })
+    signIn(OWNER)
+    await vi.waitFor(() => expect(ids(useShards.getState().mine)).toEqual(['r1']))
+    await tick()
+    spy.mockRestore()
+    expect(everywhere('r1')).toEqual([UNCLAIMED])
+    expect(useShards.getState().deployError).toContain('out of storage')
+    signIn(Y)
+    relayBags = []
+    signIn(OWNER)
+    await tick()
+    expect(everywhere('r1')).toEqual([UNCLAIMED])
+  })
+
+  it('a bare list over half of free storage still moves, and rows hidden afterwards survive a reload', async () => {
+    localStorage.setItem(BARE, JSON.stringify([row(home, 'x-big', { text: 'a'.repeat(60_000) })]))
+    const cap = capStorage(100_000) // the old code fits: one key rewritten in place
+    signIn(Y); signIn(home)
+    expect(ids(useShards.getState().mine)).toEqual(['x-big'])
+    expect(localStorage.getItem(BARE)).toBeNull()
+    await deployAShard()
+    const fresh = ids(useShards.getState().mine).filter((id) => id !== 'x-big')
+    expect(fresh).toHaveLength(1)
+    signIn(Y); signIn(home)
+    cap.restore()
+    expect(ids(useShards.getState().mine)).toContain(fresh[0])
+    expect(useShards.getState().deployError).toBeNull()
+  })
+
+  it('moves many rows a row at a time, losing none, when a second copy of the list will not fit', () => {
+    const list = Array.from({ length: 12 }, (_, i) => row(i % 2 ? X : Y, `m${i}`, { text: 'a'.repeat(5_000) }))
+    localStorage.setItem(BARE, JSON.stringify(list))
+    const cap = capStorage(70_000)
+    signIn(X)
+    cap.restore()
+    expect(localStorage.getItem(BARE)).toBeNull()
+    expect(stored(keyOf(X)).length + stored(keyOf(Y)).length).toBe(12)
+  })
+
+  it('a row that fits nowhere stays on the bare list, in order, and still shows', () => {
+    const list = [row(X, 'small'), row(X, 'huge', { text: 'a'.repeat(50_000) })]
+    localStorage.setItem(BARE, JSON.stringify(list))
+    const cap = capStorage(50_400)
+    signIn(X)
+    cap.restore()
+    expect(ids(useShards.getState().mine).sort()).toEqual(['huge', 'small'])
+    expect([...everywhere('huge'), ...everywhere('small')].length).toBeGreaterThanOrEqual(2)
+  })
+
+  it('a save that fails says so in the bar', async () => {
+    signIn(Y); signIn(home)
+    const spy = vi.spyOn(localStorage, 'setItem').mockImplementation(() => { throw new Error('QuotaExceededError') })
+    await deployAShard()
+    spy.mockRestore()
+    expect(useShards.getState().deployError).toContain('out of storage')
+  })
+})
+
+describe('a bag that may name a row not listed yet', () => {
+  const lostBag = (): void => {
+    localStorage.setItem(BARE, JSON.stringify([row(home, 'm1'), refRow(home, 'A')]))
+    signIn(Y); signIn(home)
+  }
+
+  it('DELETE beside it, with no bag read, refuses and sends nothing', async () => {
+    lostBag()
+    await tick()
+    expect(ids(useShards.getState().mine)).toEqual(['m1'])
+    const toast = vi.spyOn(useToast.getState(), 'show')
+    await useShards.getState().deleteInstance('m1')
+    expect(sent).toEqual([])
+    expect(ids(useShards.getState().mine)).toEqual(['m1'])
+    expect(toast).toHaveBeenCalledWith(expect.objectContaining({ label: 'NOT DELETED' }))
+    toast.mockRestore()
+  })
+
+  it('a hide into it, with no bag read, refuses and sends nothing', async () => {
+    signIn(Y); signIn(home)
+    const shard = aShard()
+    useWorkshop.setState({ shards: [shard], currentId: shard.id })
+    useShards.getState().startDeployShard(shard.id)
+    // The bag this hide would write is at the spot and height the bar is set to.
+    const here = useCyberspace.getState().position
+    const { deployHeight } = useShards.getState()
+    const { lookupId } = regionKeyAt(here, deployHeight, 20)
+    localStorage.setItem(UNCLAIMED, JSON.stringify([{ ...refRow(home, 'A'), lookupId }]))
+    await useShards.getState().deploy()
+    expect(useShards.getState().deployStatus).toBe('error')
+    expect(useShards.getState().deployError).toContain('No relay showed this bag')
+    expect(sent).toEqual([])
+  })
+
+  it('BROADCAST of it, with no bag read, refuses and sends nothing', async () => {
+    lostBag()
+    await tick()
+    expect(await useShards.getState().broadcast(rk.lookupId)).toBe(false)
+    expect(useShards.getState().broadcastError).toContain('No relay showed this bag')
+    expect(sent).toEqual([])
+  })
+
+  it('goes ahead when the bag is read, and the rewrite keeps what the bag names', async () => {
+    lostBag()
+    await tick()
+    const a = stored(UNCLAIMED)[0]
+    const m = useShards.getState().mine[0]
+    const { query } = await import('../../lib/relay')
+    relayBags = [await bagBy(SK, a.ref as Reference)]
+    vi.mocked(query).mockClear()
+    useShards.setState({ mine: [m] })
+    await useShards.getState().deleteInstance('m1')
+    expect(sent.map((e) => e.kind)).toEqual([33330])
+  })
+
+  it('a row deleted here, or another region, blocks nothing', async () => {
+    localStorage.setItem(UNCLAIMED, JSON.stringify([{ ...refRow(home, 'A'), lookupId: 'another' }, refRow(home, 'B')]))
+    localStorage.setItem('onosendai:deployments-deleted', JSON.stringify(['B']))
+    localStorage.setItem(keyOf(home), JSON.stringify([row(home, 'm1')]))
+    signIn(Y); signIn(home)
+    await tick()
+    await useShards.getState().deleteInstance('m1')
+    expect(sent.map((e) => e.kind)).toEqual([5])
+  })
+})
+
+describe('what a row proves', () => {
+  it('a sealed reference is its signer\'s: only a LIVE LINK waits', () => {
+    const inner = { id: 'sealed', pubkey: X, kind: 33331, created_at: 1, tags: [['d', 'e'], ['encrypted', 'aes-256-gcm', 'ct', 'cyberspace:region']], content: '' }
+    const sealed = { ...refRow(X, 'sealed'), inner }
+    const live = { ...refRow(X, 'live'), inner: { ...inner, id: 'other', tags: [['d', 'e']] } }
+    const notItsId = { ...refRow(X, 'moved'), inner: { ...inner, id: 'not-moved' } }
+    localStorage.setItem(BARE, JSON.stringify([sealed, live, notItsId]))
+    signIn(X)
+    expect(ids(useShards.getState().mine)).toEqual(['sealed'])
+    expect(ids(stored(UNCLAIMED))).toEqual(['live', 'moved'])
+  })
+
+  it('a row with nothing to show waits rather than being erased by the next save', async () => {
+    localStorage.setItem(BARE, JSON.stringify([row(home, 'no-content', { text: undefined }), row(home, 'h1', { lookupId: 'elsewhere' })]))
+    signIn(Y); signIn(home)
+    await deployAShard()
+    expect(everywhere('no-content')).toEqual([UNCLAIMED])
+  })
+
+  it('a row that will not normalize neither stops a switch nor is lost', () => {
+    for (const bad of [{}, { vertices: null }, 'junk', 7]) {
+      localStorage.setItem(keyOf(X), JSON.stringify([row(X, 'x1'), row(X, 'bad', { shard: bad as never })]))
+      expect(() => signIn(X)).not.toThrow()
+      expect(ids(useShards.getState().mine)).toEqual(['x1', 'bad'])
+      useCyberspace.setState({ identity: { pubkey: home, npub: 'npub-home' } })
+    }
+  })
+
+  it('a crash before the bare key is removed finishes on the next load with no duplicates, rows without an id too', () => {
+    localStorage.setItem(BARE, JSON.stringify([row(X, 'x1'), refRow(X, 'r1'), { junk: true }]))
+    const rm = vi.spyOn(localStorage, 'removeItem').mockImplementationOnce(() => { throw new Error('crash') })
+    signIn(X)
+    rm.mockRestore()
+    expect(localStorage.getItem(BARE)).not.toBeNull()
+    signIn(Y); signIn(X)
+    expect(localStorage.getItem(BARE)).toBeNull()
+    expect(ids(stored(keyOf(X)))).toEqual(['x1'])
+    expect(stored(UNCLAIMED)).toHaveLength(2)
+  })
+})
+
+describe('what relays and other identities see', () => {
+  it('a claim asks for this identity\'s bags, never naming another identity\'s lookup ids', async () => {
+    const { query } = await import('../../lib/relay')
+    vi.mocked(query).mockClear()
+    localStorage.setItem(UNCLAIMED, JSON.stringify([{ ...refRow(X, 'r1'), lookupId: 'x-lookup-id' }]))
+    signIn(Y)
+    await tick()
+    expect(vi.mocked(query).mock.calls.map((c) => c[0])).toEqual([{ kinds: [33330], authors: [Y] }])
+  })
+
+  it('a claim that lands after a switch goes to the prover', async () => {
+    const d = refRow(X, 'r1')
+    relayBags = [await bagBy(SK, d.ref as Reference)]
+    const { query } = await import('../../lib/relay')
+    let answer = (): void => {}
+    vi.mocked(query).mockImplementationOnce(() => new Promise((resolve) => { answer = () => resolve(relayBags as never) }))
+    localStorage.setItem(UNCLAIMED, JSON.stringify([d]))
+    signIn(OWNER)
+    signIn(Y)
+    answer()
+    await tick()
+    expect(useShards.getState().mine).toEqual([])
+    expect(stored(keyOf(Y))).toEqual([])
+    expect(ids(stored(keyOf(OWNER)))).toEqual(['r1'])
+  })
+
+  it('work begun before a switch is not sent, signed by, or written over the next identity', async () => {
+    localStorage.setItem(keyOf(Y), JSON.stringify([row(Y, 'y1', { lookupId: rk.lookupId })]))
+    localStorage.setItem(keyOf(home), JSON.stringify([row(home, 'h1', { lookupId: 'elsewhere' }), row(home, 'h2', { lookupId: 'elsewhere' })]))
+    signIn(Y); signIn(home)
+    const { query } = await import('../../lib/relay')
+    let answer = (): void => {}
+    vi.mocked(query).mockImplementationOnce(() => new Promise((resolve) => { answer = () => resolve([] as never) }))
+    const deleting = useShards.getState().deleteInstance('h1').catch((err: unknown) => String(err))
+    await tick(0)
+    signIn(Y)
+    answer()
+    expect(await deleting).toContain('switched identity')
+    expect(sent).toEqual([])
+    expect(ids(useShards.getState().mine)).toEqual(['y1'])
+    expect(ids(stored(keyOf(Y)))).toEqual(['y1'])
+    expect(ids(stored(keyOf(home)))).toEqual(['h1', 'h2'])
+  })
+})
+
+describe('rolling back', () => {
+  it('puts this identity\'s rows back on the bare key, once each, leaving its own key alone', () => {
+    localStorage.setItem(keyOf(X), JSON.stringify([row(X, 'x1'), row(X, 'x2')]))
+    localStorage.setItem(keyOf(Y), JSON.stringify([row(Y, 'y1')]))
+    localStorage.setItem(BARE, JSON.stringify([row(X, 'x1', { text: 'already here' })]))
+    expect(rollbackMineToBare(X)).toBe(true)
+    expect(rollbackMineToBare(X)).toBe(true)
+    expect(stored(BARE).map((d) => d.text)).toEqual(['already here', 'hello'])
+    expect(ids(stored(BARE))).toEqual(['x1', 'x2'])
+    expect(ids(stored(keyOf(X)))).toEqual(['x1', 'x2'])
+    expect(ids(stored(keyOf(Y)))).toEqual(['y1'])
+  })
+
+  it('does not bring back what was deleted, and says when storage refused', () => {
+    localStorage.setItem(keyOf(X), JSON.stringify([row(X, 'x1'), row(X, 'gone')]))
+    localStorage.setItem('onosendai:deployments-deleted', JSON.stringify(['gone']))
+    const spy = vi.spyOn(localStorage, 'setItem').mockImplementation(() => { throw new Error('QuotaExceededError') })
+    expect(rollbackMineToBare(X)).toBe(false)
+    spy.mockRestore()
+    expect(rollbackMineToBare(X)).toBe(true)
+    expect(ids(stored(BARE))).toEqual(['x1'])
+  })
+
+  it('rolling forward again from a rollback loses nothing', () => {
+    localStorage.setItem(keyOf(X), JSON.stringify([row(X, 'x1')]))
+    rollbackMineToBare(X)
+    signIn(X)
+    expect(ids(useShards.getState().mine)).toEqual(['x1'])
+    expect(ids(stored(keyOf(X)))).toEqual(['x1'])
+    expect(localStorage.getItem(BARE)).toBeNull()
   })
 })

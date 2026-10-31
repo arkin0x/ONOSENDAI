@@ -988,7 +988,7 @@ function unreadable(d: MyDeployment): boolean {
   if (!d?.shard) return false
   try {
     const s = normalizeStored(d.shard)
-    return !Array.isArray(s.vertices) || !Array.isArray(s.faces)
+    return !Array.isArray(s.vertices) || !Array.isArray(s.faces) || clampUnit(s.unit) !== s.unit
   } catch { return true }
 }
 
@@ -1032,17 +1032,22 @@ function clearJournal(): void {
   try { sessionStorage.removeItem(MOVING_KEY) } catch { /* nothing to clear */ }
 }
 
-/** A row left in the journal goes back on the bare list, and the move below takes it from there. It stays in the journal until that write lands. */
-function restoreJournal(): void {
-  for (const read of [() => localStorage.getItem(MOVING_KEY), () => sessionStorage.getItem(MOVING_KEY)]) {
-    try {
-      const text = read()
-      if (text === null) continue
-      withRows(MINE_KEY, [JSON.parse(text) as MyDeployment])
-      clearJournal()
-      return
-    } catch { /* no room yet, or no such store: the next load tries again */ }
+/**
+ * A row left in a journal goes back on the bare list, and the move below takes it
+ * from there. Each store's copy leaves only once its own write lands. False when
+ * one could not: the move must then wait, or the next big row would overwrite it.
+ */
+function restoreJournal(): boolean {
+  let clean = true
+  for (const store of [() => localStorage, () => sessionStorage]) {
+    let text: string | null = null
+    try { text = store().getItem(MOVING_KEY) } catch { continue }
+    if (text === null) continue
+    let row: MyDeployment
+    try { row = JSON.parse(text) as MyDeployment } catch { continue }
+    try { withRows(MINE_KEY, [row]); store().removeItem(MOVING_KEY) } catch { clean = false }
   }
+  return clean
 }
 
 /**
@@ -1088,7 +1093,7 @@ function moveRowByRow(list: MyDeployment[], deleted: Record<string, true>): void
  * carries on. A row already under its owner's key stays as it is.
  */
 function migrateMine(): void {
-  restoreJournal()
+  if (!restoreJournal()) return
   let list: unknown
   try {
     const raw = localStorage.getItem(MINE_KEY)

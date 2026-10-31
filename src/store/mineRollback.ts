@@ -13,7 +13,7 @@
  *
  * Its limits:
  * - A row deleted while rolled back comes back on going forward, because its
- *   per-identity copy is still there, unless the deleted list holds it.
+ *   per-identity copy is still there.
  * - LIVE LINK rows in `onosendai:deployments-unclaimed` are not restored, and
  *   the old code does not read them.
  * - It returns false, restoring nothing, when the merged list does not fit.

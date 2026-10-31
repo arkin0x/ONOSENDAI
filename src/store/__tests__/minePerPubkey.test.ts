@@ -512,6 +512,29 @@ describe('a row between two keys', () => {
     expect(localStorage.getItem(BARE)).toBeNull()
   })
 
+  it('a journalled row whose restore fails is not overwritten by the next big row', () => {
+    const a = row(X, 'A', { text: 'a'.repeat(60_000) })
+    localStorage.setItem(MOVING, JSON.stringify(a))
+    localStorage.setItem(BARE, JSON.stringify([row(X, 'B', { text: 'b'.repeat(60_000) })]))
+    const s = strict((k) => k === BARE || k === keyOf(X))
+    signIn(X)
+    s.restore()
+    expect(JSON.parse(localStorage.getItem(MOVING) ?? '{}').eventId).toBe('A')
+    expect(ids(stored(BARE))).toEqual(['B'])
+    signIn(Y); signIn(X)
+    expect(ids(useShards.getState().mine).sort()).toEqual(['A', 'B'])
+    expect(localStorage.getItem(MOVING)).toBeNull()
+  })
+
+  it('a row in each journal: restoring one leaves the other, and both come back', () => {
+    localStorage.setItem(MOVING, JSON.stringify(row(X, 'in-local')))
+    sessionStore.set(MOVING, JSON.stringify(row(X, 'in-session')))
+    signIn(X)
+    expect(ids(useShards.getState().mine).sort()).toEqual(['in-local', 'in-session'])
+    expect(localStorage.getItem(MOVING)).toBeNull()
+    expect(sessionStore.has(MOVING)).toBe(false)
+  })
+
   it('a leftover whose write had landed comes out once, with the bare list otherwise intact', () => {
     localStorage.setItem(keyOf(X), JSON.stringify([big]))
     localStorage.setItem(BARE, JSON.stringify([row(X, 'other')]))
@@ -644,6 +667,7 @@ describe('what a row proves', () => {
   it.each([
     ['empty', {}], ['unit only', { unit: 0 }], ['null vertices', { unit: 0, vertices: null }], ['no faces', { unit: 0, vertices: [] }],
     ['a string', 'junk'], ['a number', 7], ['a null vertex', { unit: 0, vertices: [null], faces: [] }],
+    ['a fractional unit', { unit: 0.5, vertices: [], faces: [] }], ['a unit past the limit', { unit: 1_000_000_000, vertices: [], faces: [] }],
   ])('a shard that cannot be drawn (%s) is never listed, stays on disk, and survives a save', (_name, bad) => {
     localStorage.setItem(keyOf(X), JSON.stringify([row(X, 'x1'), row(X, 'bad', { type: 'shard', text: undefined, shard: bad as never })]))
     expect(() => signIn(X)).not.toThrow()

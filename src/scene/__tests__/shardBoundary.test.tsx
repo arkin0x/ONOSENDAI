@@ -33,6 +33,12 @@ describe('a shard that cannot be drawn', () => {
     warn.mockRestore()
   })
 
+  it('leaves the picture stage to its own boundary, so a bad shard fails at once and is not retried', () => {
+    const source = readFileSync(resolve(__dirname, '../ThumbStage.tsx'), 'utf8')
+    expect(source).toContain('<ShardMeshBody key={job.key} shard={job.shard} lit />')
+    expect(source).not.toMatch(/<ShardMesh\b/)
+  })
+
   it('stands in ShardMesh itself, so every place that draws a shard has it', () => {
     const source = readFileSync(resolve(__dirname, '../ShardMesh.tsx'), 'utf8')
     expect(source).toMatch(/export function ShardMesh\(props: Props\): ReactNode \{\s+return <ShardBoundary shard=\{props\.shard\}><ShardMeshBody \{\.\.\.props\} \/><\/ShardBoundary>/)

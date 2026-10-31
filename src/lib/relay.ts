@@ -17,7 +17,7 @@ import { verifyOnce } from './verifiedSigs'
 import type { Filter } from 'nostr-tools/filter'
 import type { EventTemplate, VerifiedEvent } from 'nostr-tools/core'
 import type { NostrEvent } from './events'
-import { currentRelays, DEFAULT_RELAY } from '../store/useRelays'
+import { currentRelays, DEFAULT_RELAY, isRetiredRelay } from '../store/useRelays'
 import { LiveRegistry, type Transport } from './liveSub'
 import { classifyClose, mergeAnswers, type RelayAnswer } from './relayOutcome'
 import { normalizeURL } from 'nostr-tools/utils'
@@ -28,6 +28,18 @@ export const CYBERSPACE_RELAY = DEFAULT_RELAY
 
 /** How long a publish or a one-shot query waits before giving up. */
 const MAX_WAIT_MS = 8000
+
+/**
+ * The pool, refusing a retired relay. Every connection comes through
+ * ensureRelay, publishing and live subscriptions included, so no list and no
+ * event's hint can bring one back, and a refusal costs no wait at all.
+ */
+class Pool extends AbstractSimplePool {
+  override ensureRelay(...args: Parameters<AbstractSimplePool['ensureRelay']>): ReturnType<AbstractSimplePool['ensureRelay']> {
+    if (isRetiredRelay(args[0])) return Promise.reject(new Error('retired relay, not dialed'))
+    return super.ensureRelay(...args)
+  }
+}
 
 let pool: AbstractSimplePool | null = null
 
@@ -78,7 +90,7 @@ export function getPool(): AbstractSimplePool {
     // attacker could not sign themselves; skip it there, verify everything
     // else as before. (A publisher allowlist for anchors is the follow-up
     // that would make relay-sourced stops authenticated at all.)
-    pool = new AbstractSimplePool({
+    pool = new Pool({
       verifyEvent: (ev) => (ev.kind === 321 ? true : verifyRelayEvent(ev)),
       // SimplePool's own default (3e3), restated because the abstract
       // constructor requires the field.

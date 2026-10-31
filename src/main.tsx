@@ -7,6 +7,7 @@ import { isBroadcast, markBroadcastPage } from './lib/tv/broadcast'
 import { TvStandby } from './hud/TvStandby'
 import { hydrateWorkshop } from './store/useWorkshop'
 import { wireLocalObjects } from './store/localObjects'
+import { diagWanted } from './lib/diagGate'
 
 // A tap on a modal's backdrop only closes it (lib/tapGuard.ts).
 installTapGuard(window)
@@ -35,5 +36,24 @@ function draw(): void {
     </React.StrictMode>,
   )
 }
-setTimeout(draw, HYDRATE_WAIT_MS)
-hydrateWorkshop().then(draw, draw)
+/** How long the app waits for the capture's chunk before drawing without it. */
+const DIAG_WAIT_MS = 3_000
+
+function boot(): void {
+  setTimeout(draw, HYDRATE_WAIT_MS)
+  hydrateWorkshop().then(draw, draw)
+}
+
+/**
+ * ?diag=1: the capture for a machine we cannot reach (lib/diag.ts), in before
+ * the first render so it sees the contexts made. Otherwise it is never fetched.
+ */
+let tabStore: Storage | null = null
+try { tabStore = sessionStorage } catch { /* refused: on for this load only */ }
+if (diagWanted(location.search, tabStore)) {
+  // A chunk that stalls cannot hold the first render: the capture starts late, and says so.
+  let booted = false
+  const once = (): void => { if (booted) return; booted = true; boot() }
+  setTimeout(once, DIAG_WAIT_MS)
+  void import('./lib/diag').then((m) => m.startDiag()).catch((e) => console.warn('[diag]', e)).finally(once)
+} else boot()

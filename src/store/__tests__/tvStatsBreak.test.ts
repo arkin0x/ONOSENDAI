@@ -31,12 +31,19 @@ vi.mock('../../lib/relay', () => ({
   subscribe: vi.fn(() => () => {}),
 }))
 
+const v1List = vi.hoisted((): { load: (() => Promise<ReadonlySet<string>>) | null } => ({ load: null }))
+vi.mock('../../lib/v1HopList', async (original) => {
+  const real = await original<typeof import('../../lib/v1HopList')>()
+  return { loadV1HopList: () => (v1List.load ?? real.loadV1HopList)() }
+})
+
 import type { Filter } from 'nostr-tools'
 import type { RelayAnswer } from '../../lib/relayOutcome'
 import { positionHex, type NostrEvent } from '../../lib/events'
 import { V2_EPOCH } from '../../lib/tv/tape'
-import { resetStatsReadsForTest, setStatsSnapshotForTest, setTvAsk, statsClockForTest, statsReadsForTest, useTv } from '../useTv'
+import { resetStatsReadsForTest, setStatsSnapshotForTest, setTvAsk, statsClockForTest, statsReadsForTest, statsSnapshotForTest, useTv } from '../useTv'
 import { useProfiles } from '../useProfiles'
+import unlisted from '../../lib/__tests__/vectors/unlisted-v1-hops.json'
 import { asOfHour } from '../../lib/tv/cyberspaceStats'
 import { setExplainerLineupForTest, useTvExplainer } from '../useTvExplainer'
 import { setBroadcastForTest } from '../../lib/tv/broadcast'
@@ -248,6 +255,35 @@ describe('the CYBERSPACE STATS break in TV\'s engine', () => {
     expect(asked.filter((f) => f.kinds?.[0] === 3333 && !f.authors && f.since === V2_EPOCH && f.until === undefined && !f['#A' as keyof Filter]).length).toBe(whole)
     expect(asked.filter((f) => f.kinds?.[0] === 33330).length).toBe(censusBags)
   }, 60_000)
+})
+
+describe('version 1 hops not on the list do not count on the boards', () => {
+  // The real spawn and hop of a key whose hop failed the census 1 audit: 2 on the chain counted as it is, 1 without the hop.
+  const pk = unlisted[0].pubkey
+  async function chainCounted(load: () => Promise<ReadonlySet<string>>): Promise<number | undefined> {
+    v1List.load = load
+    setTvAsk(async (f) => {
+      const [answer] = await ask(f)
+      const more = (unlisted as NostrEvent[]).filter((e) => (!f.kinds || f.kinds.includes(e.kind)) && (f.since === undefined || e.created_at >= f.since) && (f.until === undefined || e.created_at <= f.until))
+      return [{ ...answer, events: [...answer.events, ...more] } as RelayAnswer]
+    })
+    useTv.getState().start()
+    await run(BROADCAST_STATS_FIRST_MS + 60_000)
+    v1List.load = null
+    return statsSnapshotForTest()?.chain.get(pk)
+  }
+
+  it('a list with ids on it takes the hop off the chain', async () => {
+    expect(await chainCounted(async () => new Set(['ab'.repeat(32)]))).toBe(1)
+  })
+
+  it('an empty list, from a core older than the census, cuts nothing', async () => {
+    expect(await chainCounted(async () => new Set())).toBe(2)
+  })
+
+  it('a list that does not load cuts nothing', async () => {
+    expect(await chainCounted(async () => { throw new Error('chunk failed') })).toBe(2)
+  })
 })
 
 describe('who is an agent: a break holds for the profiles (review of #537)', () => {

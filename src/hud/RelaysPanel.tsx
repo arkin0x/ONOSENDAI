@@ -10,7 +10,7 @@
 import { useEffect, useState } from 'react'
 import { connected } from '../lib/relay'
 import { getPool } from '../lib/relay'
-import { DEFAULT_RELAY, useRelays } from '../store/useRelays'
+import { DEFAULT_RELAY, isRetiredRelay, useRelays } from '../store/useRelays'
 import { Explanation } from './Explanation'
 
 export function RelaysPanel(): JSX.Element {
@@ -76,7 +76,7 @@ export function RelaysPanel(): JSX.Element {
         />
         <button className="avatars__go" type="submit" disabled={!input.trim()}>ADD</button>
       </form>
-      {error && <p className="notice">Not a valid ws:// or wss:// URL.</p>}
+      {error && <p className="notice">{isRetiredRelay(input) ? 'That relay is retired.' : 'Not a valid ws:// or wss:// URL.'}</p>}
 
       <Explanation>
         Your actions are published to each relay, and cyberspace data is pulled

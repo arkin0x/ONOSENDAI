@@ -51,19 +51,23 @@ describe('the shared attributes live as long as the geometries that share them (
 
 describe('a paint on the bench', () => {
   it('keeps the geometries and their GPU buffers: the colors go into the buffer that is there', () => {
+    expect(mesh).toMatch(/const built = useMemo\(\(\) => shared \?\? shardGeometry\(shard, clip, pose\)/)
     expect(mesh).toMatch(/const positions = useSame\(built\.positions\)/)
     expect(mesh).toMatch(/const index = useSame\(built\.index\)/)
-    expect(mesh).toMatch(/new Float32BufferAttribute\(positions\.slice\(\), 3\), buffers\)/)
-    expect(mesh).toMatch(/new Float32BufferAttribute\(colors\.slice\(\), 3\), buffers\)/)
+    expect(mesh).toMatch(/shared \? null : new Float32BufferAttribute\(positions\.slice\(\), 3\)\), \[\.\.\.buffers, shared\]\)/)
+    expect(mesh).toMatch(/shared \? null : new Float32BufferAttribute\(colors\.slice\(\), 3\)\), \[\.\.\.buffers, shared\]\)/)
     expect(mesh).toMatch(/const buffers = sharedBufferDeps\(positions, colors\.length, index, shard\.mode, lit\)/)
     expect(mesh).toMatch(/a\.set\(colors\)\s+colAttr\.needsUpdate = true/)
+  })
+  it('leaves alone a placement sharing its object\'s buffers, which has no color buffer of its own', () => {
+    expect(mesh).toMatch(/if \(!colAttr\) return\n\s+const a = colAttr\.array/)
   })
   it('asks a canvas that draws on demand for a frame, since R3F set nothing', () => {
     expect(mesh).toMatch(/colAttr\.needsUpdate = true[\s\S]{0,160}invalidate\(\)/)
   })
   it('builds the wireframe only for a shard drawn as lines, and keeps it through a paint', () => {
-    expect(mesh).toMatch(/if \(shard\.mode !== 'lines' \|\| faces\.length === 0\) return null/)
-    expect(mesh).toMatch(/\[posAttr, colAttr, index, shard\.mode\]\)/)
+    expect(mesh).toMatch(/if \(shard\.mode !== 'lines'\) return null/)
+    expect(mesh).toMatch(/\[posAttr, colAttr, index, shard\.mode, shared\]\)/)
   })
 })
 

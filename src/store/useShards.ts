@@ -533,6 +533,28 @@ export function ownDoors(mine: readonly MyDeployment[], me: string): OwnDoor[] {
     : []))
 }
 
+/** What stands behind a door of yours: the rows of its room, whichever of its doors they name. */
+export function behindDoor(mine: readonly MyDeployment[], door: MyDeployment): MyDeployment[] {
+  const ids = new Set([door.eventId, ...doorsBeside(mine, door).map((d) => d.eventId)])
+  return mine.filter((m) => !!m.room && ids.has(m.room.doorId))
+}
+
+/** The other doors of your room (§3.7.5): the same signer, height and region. */
+export function doorsBeside(mine: readonly MyDeployment[], door: MyDeployment): MyDeployment[] {
+  const h = door.chest?.door
+  if (h === undefined) return []
+  const room = roomOf(positionOf(door), door.plane, h)
+  return mine.filter((m) => m.eventId !== door.eventId && m.chest?.door === h && m.inner.pubkey === door.inner.pubkey && roomOf(positionOf(m), m.plane, h) === room)
+}
+
+/** What you already hid in a door's room at its height and did not seal behind it (R3): ordinary placements. Never a door. */
+export function hereInRoom(mine: readonly MyDeployment[], door: MyDeployment): MyDeployment[] {
+  const h = door.chest?.door
+  if (h === undefined) return []
+  const at = positionOf(door)
+  return mine.filter((m) => !m.room && m.eventId !== door.eventId && m.chest?.door === undefined && m.height === h && m.plane === door.plane && inRoom(at, h, positionOf(m)))
+}
+
 /**
  * The door a placement seals to, or null (chest and door design, R1, R2,
  * 4.3): yours, its room holding the point, hidden at exactly its height, and
@@ -1784,10 +1806,11 @@ export const useShards = create<ShardsState>((set, get) => {
       // Its look as it stands, posed again from there: a chest from before
       // looks goes out wearing the built-in it was drawn as.
       const worn = lookOf({ type: 'chest', event: d.inner })
-      const look: LookChoice = d.chest.look && worn ? { from: 'model', closed: worn.closed, open: worn.open } : DEFAULT_CHEST_LOOK
+      const door = d.chest.door !== undefined
+      const look: LookChoice = d.chest.look && worn ? { from: 'model', closed: worn.closed, open: worn.open } : door ? DEFAULT_DOOR_LOOK : DEFAULT_CHEST_LOOK
       const model = lookModelOf(look)
       set({
-        pending: { type: 'chest', name: d.chest.name, lock: { pubkey: d.chest.lockPubkey, label: d.chest.requires || 'its lock' }, requires: d.chest.requires, contents: [], look, move: { eventId } },
+        pending: { type: 'chest', name: d.chest.name, lock: { pubkey: d.chest.lockPubkey, label: d.chest.requires || 'its lock' }, requires: d.chest.requires, contents: [], look, move: { eventId }, ...(door ? { door: true as const } : {}) },
         ...freshDeploy,
         deployHeight: d.height,
         deployHeightAuto: false,
@@ -1835,7 +1858,7 @@ export const useShards = create<ShardsState>((set, get) => {
       const door = get().mine.find((d) => d.eventId === doorId)
       const secret = door ? doorSecret(me, doorId) : null
       if (!door || !secret) return 'Sealing into a room needs its door secret. Open the door first.'
-      const rows = get().mine.filter((d) => eventIds.includes(d.eventId) && !d.room && d.lookupId === door.lookupId && d.chest?.door === undefined && d.eventId !== doorId)
+      const rows = hereInRoom(get().mine, door).filter((d) => eventIds.includes(d.eventId))
       if (rows.length === 0) return 'Nothing here to seal.'
       try {
         const place = await doorLocation(door)

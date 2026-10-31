@@ -588,7 +588,8 @@ export function DeployBar({ pad = false }: { pad?: boolean }): JSX.Element | nul
           tight"): how aiming works is in the Builder's EXPLAIN, and how far
           away it can be found is on the height row itself. */}
 
-      <HeightWarnings height={height} intoChest={intoChest} localMax={inputs.localMax} />
+      {/* Behind a door the height says nothing about who can find it: the door does. */}
+      <HeightWarnings height={height} intoChest={intoChest || !!sealing} localMax={inputs.localMax} />
 
       {/* What HOSAKA's key costs, its time and price, and whether the mode
           will ask first. This machine's time is the button's tooltip. An aim

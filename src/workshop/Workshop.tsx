@@ -739,6 +739,13 @@ export function Workshop(): JSX.Element | null {
   if (!open) return null
   const w = useWorkshop.getState
   const say = (notice: string): void => useWorkshop.setState({ notice })
+  /** PUBLISH's question answered: go on with what was pressed, as `s`. */
+  const answerClear = (s: ShardModel): void => {
+    const ask = clearAsk
+    setClearAsk(null)
+    if (ask === 'publish') void usePublished.getState().publish(s)
+    else if (ask === 'avatar') adoptAvatar(s)
+  }
   /** Mine the work and publish `s` as your avatar, and say how it went. */
   const adoptAvatar = (s: ShardModel): void => {
     const started = Date.now()
@@ -972,20 +979,8 @@ export function Workshop(): JSX.Element | null {
           confirmLabel="KEEP THEM"
           cancelLabel="LEAVE THEM OUT"
           onBackdrop={() => setClearAsk(null)}
-          onConfirm={() => {
-            const ask = clearAsk
-            setClearAsk(null)
-            w().keepCarried(shard.id)
-            const kept = w().shards.find((s) => s.id === shard.id) ?? shard
-            if (ask === 'publish') void usePublished.getState().publish(kept)
-            else adoptAvatar(kept)
-          }}
-          onCancel={() => {
-            const ask = clearAsk
-            setClearAsk(null)
-            if (ask === 'publish') void usePublished.getState().publish(shard)
-            else adoptAvatar(shard)
-          }}
+          onConfirm={() => { w().keepCarried(shard.id); answerClear(w().shards.find((s) => s.id === shard.id) ?? shard) }}
+          onCancel={() => answerClear(shard)}
         />
       )}
       {panel === 'shard' && shard && (

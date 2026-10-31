@@ -32,6 +32,8 @@ const EVENT_ROWS = 300
 /** A frame this long is logged with its scripts. */
 const SLOW_FRAME_MS = 200
 const STORAGE_EVERY_MS = 60_000
+/** How long the clipboard gets before the log is saved as a file instead. */
+const COPY_WAIT_MS = 2_000
 
 interface ThreeLike {
   isWebGLRenderer?: boolean
@@ -264,6 +266,8 @@ export function startDiag(): void {
   const peak = { heapUsed: 0, heapUsedAt: 0, glBytes: 0, glBytesAt: 0, ctxHeld: 0, ctxHeldAt: 0, longMax: 0, longMaxAt: 0, subs: 0, subsAt: 0 }
   let lastCoarse = -COARSE_MS
   let lastStorage = 0
+  // Each distinct state of the UI once, and rows point at it: a menu's panel list would be most of a row.
+  const uiStates: string[] = []
   let lastUi = ''
   let lastHidden = false
   let hiddenSince: number | null = null
@@ -362,8 +366,10 @@ export function startDiag(): void {
     row.thumbs = th.order.length; row.thumbQueue = th.queue.length
 
     const ui = uiNow()
-    row.ui = ui
-    if (ui !== lastUi) { lastUi = ui; note('ui', ui) }
+    let uiAt = uiStates.indexOf(ui)
+    if (uiAt < 0) uiAt = uiStates.push(ui) - 1
+    row.ui = uiAt
+    if (ui !== lastUi) { lastUi = ui; note('ui', uiAt) }
 
     const glBytes = g.bufferBytes + g.textureBytes + g.renderbufferBytes + canvasB
     if ((mem?.usedJSHeapSize ?? 0) > peak.heapUsed) { peak.heapUsed = mem!.usedJSHeapSize; peak.heapUsedAt = row.t as number }
@@ -392,11 +398,12 @@ export function startDiag(): void {
     } catch { /* refused */ }
     let gpu = ''
     let maxSamples = 0
-    const first = ctxs.find((gl) => !gl.isContextLost())
+    // The largest drawing context: a throwaway probe may be WebGL 1, with no MAX_SAMPLES to ask.
+    const first = ctxs.filter((gl) => !gl.isContextLost()).sort((a, b) => b.drawingBufferWidth * b.drawingBufferHeight - a.drawingBufferWidth * a.drawingBufferHeight)[0]
     if (first) {
       const ext = first.getExtension('WEBGL_debug_renderer_info')
       gpu = ext ? String(first.getParameter(ext.UNMASKED_RENDERER_WEBGL)).replace(/[^\w .,()/+-]/g, '').slice(0, 120) : ''
-      maxSamples = first.getParameter(first.MAX_SAMPLES) as number
+      maxSamples = (first.MAX_SAMPLES ? first.getParameter(first.MAX_SAMPLES) : 0) as number
     }
     return JSON.stringify({
       diag: 1,
@@ -417,6 +424,7 @@ export function startDiag(): void {
       storage: { ...storage, localStorageKeys: lsKeys, localStorageChars: lsBytes },
       peak,
       columns: DIAG_COLUMNS,
+      uiStates,
       fine: fine.all(),
       coarse: coarse.all(),
       events: events.all(),
@@ -454,7 +462,16 @@ export function startDiag(): void {
     label,
     button('COPY', () => {
       const json = fresh()
-      navigator.clipboard.writeText(json).then(() => say(`COPIED ${Math.round(json.length / 1024)} KB`), () => { save(json); say('SAVED') })
+      // A clipboard that refuses, or never answers, still gets him the file.
+      let settled = false
+      const asFile = (): void => { if (settled) return; settled = true; save(json); say('SAVED') }
+      const late = setT(asFile, COPY_WAIT_MS)
+      navigator.clipboard.writeText(json).then(() => {
+        clearTimeout(late)
+        if (settled) return
+        settled = true
+        say(`COPIED ${Math.round(json.length / 1024)} KB`)
+      }, () => { clearTimeout(late); asFile() })
     }),
     button('SAVE', () => { save(fresh()); say('SAVED') }),
   )

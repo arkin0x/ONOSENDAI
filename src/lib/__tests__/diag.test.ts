@@ -180,7 +180,7 @@ describe('the log stays small', () => {
     expect(r.all()).toEqual([7, 8, 9])
   })
   it('a full log stays under half a megabyte a ring, at its largest', () => {
-    const row = toRow(Object.fromEntries(DIAG_COLUMNS.map((c) => [c, c === 'ui' ? 'panels:identity,agents,hidden,scale,position,chain|modal|view' : 1234567890])))
+    const row = toRow(Object.fromEntries(DIAG_COLUMNS.map((c) => [c, 1234567890])))
     expect(row.length).toBe(DIAG_COLUMNS.length)
     expect(JSON.stringify(row).length * 720).toBeLessThan(800 * 1024)
   })

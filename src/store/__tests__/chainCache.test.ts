@@ -82,7 +82,7 @@ function extend(base: NostrEvent[], n: number, dy: bigint, t0: number): NostrEve
       prevCoordHex: k === 1 ? pk : positionHex(placeOf.get(prev.id)!, home.plane),
       to,
       plane: home.plane,
-      proofHash: '0'.repeat(64),
+      proofHash: '0'.repeat(64), mn: '0'.repeat(16), mp: '00',
     }))
     placeOf.set(e.id, to)
     out.push(e)

@@ -197,7 +197,11 @@ describe('the red cube’s lines (4.4, R6)', () => {
     // A room's outline is as deep as the deepest of its doors: a second door of B's room, at the top level.
     const sibling = await sealDoor('B too', OUTER)
     expect(sibling.chest?.door).toBe(OUTER)
-    expect(roomOutlines(S().mine, me(), true, a.plane).find((o) => o.height === OUTER)?.depth).toBe(2)
+    expect(doorDepth(S().mine, sibling)).toBe(1)
+    // Whichever of the room's rows comes first.
+    for (const rows of [S().mine, [...S().mine].reverse()]) {
+      expect(roomOutlines(rows, me(), true, a.plane).filter((o) => o.height === OUTER).map((o) => o.depth)).toEqual([2])
+    }
     // Only for you, only while building (R8).
     expect(roomOutlines(S().mine, me(), false, a.plane)).toEqual([])
   })

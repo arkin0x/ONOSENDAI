@@ -100,6 +100,8 @@ export function localObject(address: { kind: number; pubkey: string; d: string }
  * its address, so that reader finds it. What the hide writes names the new
  * address; the workshop's shard is not touched. Every key that goes out is under
  * the signer's pubkey, as a publisher MUST write (§1.10; lib/carried.ts ownKeysOnly).
+ * An entry no placement names goes (§1.10), so a piece removed from the shard is
+ * not carried to every finder.
  */
 export function carryLibrary(shard: ShardModel): ShardModel {
   const carried = carryAll(shard, (ref) => {
@@ -107,7 +109,7 @@ export function carryLibrary(shard: ShardModel): ShardModel {
     const a = parseAddress(ref[1])
     const piece = a ? localShard(a) : undefined
     return piece ? { object: withAuthoredConstrain(piece), carry: true } : null
-  })
+  }, { prune: true })
   const me = useCyberspace.getState().identity.pubkey
   if (!me) return carried
   const held = shard.objects ?? {}

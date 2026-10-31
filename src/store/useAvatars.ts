@@ -25,7 +25,7 @@ import type { NostrEvent } from '../lib/events'
 import { publish, query } from '../lib/relay'
 import { SignerAccountMismatch } from '../lib/signers'
 import { fromPayload, toPayload, type ShardModel } from 'sno-core/shards'
-import { inTheClear, keepOwnTable, ownKeysOnly } from '../lib/carried'
+import { clearRefusal, inTheClear, keepOwnTable, ownKeysOnly } from '../lib/carried'
 import { useCyberspace } from './useCyberspace'
 
 const MINE_KEY = 'onosendai:avatar'
@@ -174,6 +174,9 @@ export const useAvatars = create<AvatarsState>((set, get) => ({
     // pubkey, and a table from a bag left out unless its user chose (DECK-0003 §1.10).
     if (shard) shard = ownKeysOnly(inTheClear(shard), me)
     let template = avatarTemplate(shard, Math.floor(Date.now() / 1000))
+    // Carrying its pieces it may be more than a relay takes: say so before the work is spent.
+    const over = clearRefusal(template, Object.keys(shard?.objects ?? {}).length > 0)
+    if (over) { set({ adoptError: over }); return false }
     set({ adoptError: null, minedMs: null })
     if (shard) {
       const required = avatarWork(toPayload(shard))

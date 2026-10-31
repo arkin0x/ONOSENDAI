@@ -10,7 +10,8 @@
  * the part that depends on where an object came from.
  */
 
-import { carriedModel, carriedPayload, carriedTable, carryObject, withAuthor } from 'sno-core/parts'
+import { sha256 } from '@noble/hashes/sha2.js'
+import { carriedModel, carriedPayload, carriedTable, carryAll, carryObject, withAuthor } from 'sno-core/parts'
 import { addressesIn, toPayload, type Ref, type ShardModel } from 'sno-core/shards'
 import { withAuthoredConstrain } from './walkConstrain'
 
@@ -160,12 +161,13 @@ function movedRefs<T>(refs: T, moved: ReadonlyMap<string, string>): T {
  * An entry this rewrites is one this tool writes, so it is written OPAQUE when
  * nobody chose (DECK-0003 §1.12); one it leaves alone is carried as found. An
  * object placed by an address not in the table is a link, and stays as it is.
+ * The new `d` is random unless `dFor` says otherwise.
  */
-export function rekeyTable(model: ShardModel, pubkey: string, should: (key: string) => boolean): ShardModel {
+export function rekeyTable(model: ShardModel, pubkey: string, should: (key: string) => boolean, dFor: (key: string) => string = quietD): ShardModel {
   const table = model.objects
   if (!table) return model
   const moved = new Map<string, string>()
-  for (const key of Object.keys(table)) if (should(key)) moved.set(key, `33331:${pubkey}:${quietD()}`)
+  for (const key of Object.keys(table)) if (should(key)) moved.set(key, `33331:${pubkey}:${dFor(key)}`)
   if (moved.size === 0) return model
   const entries = Object.entries(table).map(([key, entry]): [string, unknown] => {
     const to = moved.get(key) ?? key
@@ -179,15 +181,32 @@ export function rekeyTable(model: ShardModel, pubkey: string, should: (key: stri
   return { ...model, ...(model.refs ? { refs: movedRefs(model.refs, moved) } : {}), objects: Object.fromEntries(entries) }
 }
 
+/** Sixteen hex digits that say nothing, the same for one old key and one signer. */
+function steadyD(key: string, pubkey: string): string {
+  return [...sha256(new TextEncoder().encode(key + pubkey)).slice(0, 8)].map((x) => x.toString(16).padStart(2, '0')).join('')
+}
+
 /**
  * `model` with every table key under `pubkey`, the signer about to write it: a
  * publisher MUST write no other, because a reader ignores it and asks relays
  * for that address instead (DECK-0003 §1.10). A workshop is kept per device,
  * not per key, so a shard built under one identity can be hidden under
- * another. Its pieces stay inside, as that signer's copies.
+ * another. Its pieces stay inside, as that signer's copies. The new address
+ * comes from the old one, so writing the shard again writes the same thing, and
+ * the publish state does not read it as edited.
  */
 export function ownKeysOnly(model: ShardModel, pubkey: string): ShardModel {
-  return rekeyTable(model, pubkey, (key) => !key.startsWith(`33331:${pubkey}:`))
+  return rekeyTable(model, pubkey, (key) => !key.startsWith(`33331:${pubkey}:`), (key) => steadyD(key, pubkey))
+}
+
+/** How many of `model`'s carried pieces were keyed under another identity, and so read as placeholders on this bench. */
+export function foreignKeys(model: Pick<ShardModel, 'objects'>, pubkey: string): number {
+  return Object.keys(model.objects ?? {}).filter((key) => !key.startsWith(`33331:${pubkey}:`)).length
+}
+
+/** What to say about them: the bench cannot show them, and they are written anyway. */
+export function foreignNotice(count: number): string {
+  return `${count} ${count === 1 ? 'piece here was' : 'pieces here were'} built under another key, so ${count === 1 ? 'it shows' : 'they show'} as a placeholder here. DEPLOY and PUBLISH write ${count === 1 ? 'it' : 'them'} under this key.`
 }
 
 /** A model whose table came out of a bag, as the workshop remembers it: local only, never written. */
@@ -228,9 +247,30 @@ export function keepTable(model: ShardModel): ShardModel {
  * lifts it.
  */
 export function inTheClear(model: ShardModel): ShardModel {
-  if (!(model as FromBag).fromBag || !model.objects) return model
-  const { objects: _sealed, ...rest } = model
-  return rest
+  if (!model.objects) return model
+  if ((model as FromBag).fromBag) {
+    const { objects: _sealed, ...rest } = model
+    return rest
+  }
+  // An entry no placement names is carried to everyone and drawn by none
+  // (§1.10), and in the clear it is a piece its author removed. A fetched
+  // object's own table still answers beneath it, so nothing is lost there.
+  return carryAll(model, () => null, { prune: true })
+}
+
+/** The bytes a relay is taken to accept for one event, as DECK-0003 §1.8 measures them. */
+const RELAY_EVENT_BYTES = 131_072
+
+/**
+ * Why an event carrying pieces in the clear is not worth the work of mining it,
+ * or null when it fits or carries nothing (D3's words).
+ */
+export function clearRefusal(event: { content: string; tags: string[][] }, carries: boolean): string | null {
+  if (!carries) return null
+  // With the fields a signer adds: id, pubkey and sig, a timestamp and a nonce tag.
+  const bytes = new TextEncoder().encode(JSON.stringify({ id: '', pubkey: '', sig: '', ...event })).length + 350
+  if (bytes <= RELAY_EVENT_BYTES) return null
+  return `${Math.ceil(bytes / 1024)}kb of ${RELAY_EVENT_BYTES / 1024}kb may be larger than relays will accept. Keep this part separate.`
 }
 
 /**

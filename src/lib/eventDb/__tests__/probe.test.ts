@@ -32,6 +32,38 @@ describe('the store probe', () => {
     expect(names).not.toContain(EVENT_DB)
   })
 
+  it('fails where a put throws', async () => {
+    const r = await bent(IDBObjectStore.prototype, 'put', () => function () { throw new DOMException('no', 'DataError') }, probeStore)
+    expect(r).toBe(false)
+  })
+
+  it('fails where nested keys silently do not index: the rows are there and nothing finds them', async () => {
+    const r = await bent(IDBIndex.prototype, 'openCursor', (real) => function (this: unknown, range, dir) {
+      const name = (this as IDBIndex).name
+      return real.call(this, name === 'byTag' ? IDBKeyRange.only(['nothing', 0]) : range, dir)
+    }, probeStore)
+    expect(r).toBe(false)
+  })
+
+  it('fails where an abort leaves the row behind', async () => {
+    const r = await bent(IDBTransaction.prototype, 'abort', () => function () { /* an engine that ignores it */ }, probeStore)
+    expect(r).toBe(false)
+  })
+
+  it('fails where a duplicate address is taken', async () => {
+    const r = await bent(IDBObjectStore.prototype, 'createIndex', (real) => function (this: unknown, name, key, opts) { return real.call(this, name, key, name === 'byAddr' ? { ...(opts as object), unique: false } : opts) }, probeStore)
+    expect(r).toBe(false)
+  })
+
+  it('reopens before it passes: rows only in a connection\'s memory do not count', async () => {
+    const proto = IDBFactory.prototype as unknown as { open: (...a: unknown[]) => unknown }
+    const real = proto.open
+    const opened: unknown[] = []
+    proto.open = function (this: unknown, ...a: unknown[]) { opened.push(a[0]); return real.apply(this, a) }
+    try { expect(await probeStore()).toBe(true) } finally { proto.open = real }
+    expect(opened.filter((n) => n === PROBE_DB)).toHaveLength(2)
+  })
+
   it('fails where nested arrays do not work as multi-entry keys', async () => {
     const r = await bent(IDBObjectStore.prototype, 'createIndex', (real) => function (this: unknown, name, key, opts) { return real.call(this, name, key, name === 'byTag' ? { ...(opts as object), multiEntry: false } : opts) }, probeStore)
     expect(r).toBe(false)

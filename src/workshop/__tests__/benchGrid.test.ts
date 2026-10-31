@@ -54,6 +54,11 @@ describe('every division draws as itself', () => {
     expect(src).toMatch(/fract\(c - 0\.5\)/)
   })
 
+  it('never divides by a rate of zero, which two pixels holding the same float can give far from the origin', () => {
+    const src = new BenchGrid().mesh.material.fragmentShader
+    expect(src).toMatch(/return max\(vec2\(length\(vec2\(dx\.x, dy\.x\)\), length\(vec2\(dx\.y, dy\.y\)\)\), vec2\(1e-6\)\);/)
+  })
+
   it('the bench no longer draws line geometry or a divisor of the snap', () => {
     const bench = readFileSync(join(process.cwd(), 'src/workshop/Bench.tsx'), 'utf8')
     expect(bench).not.toMatch(/<gridHelper/)

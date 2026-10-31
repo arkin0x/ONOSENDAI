@@ -83,7 +83,9 @@ const float TINT = 0.28;
 vec2 cellsPerPixel(vec2 c) {
   vec2 dx = dFdx(c);
   vec2 dy = dFdy(c);
-  return vec2(length(vec2(dx.x, dy.x)), length(vec2(dx.y, dy.y)));
+  // Never quite zero: far from the origin and close in, two neighbouring pixels
+  // can hold the same float, and a rate of 0 divides into infinity or NaN.
+  return max(vec2(length(vec2(dx.x, dy.x)), length(vec2(dx.y, dy.y))), vec2(1e-6));
 }
 
 // One family of lines, a whole number of 1/cells from the origin: how much of this pixel they cover.

@@ -24,7 +24,7 @@ const here = { x: 5n * SECTOR + 7n, y: 9n * SECTOR + 1n, z: 3n * SECTOR + 2n }
  * can, and the parser checks the shape of its links and proof, not their truth.
  */
 function spawnAt(at: { x: bigint; y: bigint; z: bigint }, createdAt: number, sk = generateSecretKey()) {
-  return finalizeEvent(hopTemplate({ createdAt, genesisId: 'a'.repeat(64), previousId: 'b'.repeat(64), prevCoordHex: positionHex(at, 0), to: at, plane: 0, proofHash: 'c'.repeat(64) }), sk)
+  return finalizeEvent(hopTemplate({ createdAt, genesisId: 'a'.repeat(64), previousId: 'b'.repeat(64), prevCoordHex: positionHex(at, 0), to: at, plane: 0, proofHash: 'c'.repeat(64), mn: '0'.repeat(16), mp: '00'}), sk)
 }
 
 describe('the neighborhood', () => {

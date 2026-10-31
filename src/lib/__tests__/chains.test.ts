@@ -26,7 +26,7 @@ const spawnA = finalizeEvent(spawnTemplate(pa, 100), a)
 const spawnB = finalizeEvent(spawnTemplate(pb, 150), b)
 const hopA = finalizeEvent(hopTemplate({
   createdAt: 200, genesisId: spawnA.id, previousId: spawnA.id, prevCoordHex: pa,
-  to: { x: 1n, y: 2n, z: 3n }, plane: 0, proofHash: '0'.repeat(64),
+  to: { x: 1n, y: 2n, z: 3n }, plane: 0, proofHash: '0'.repeat(64), mn: '0'.repeat(16), mp: '00',
 }), a)
 const v1: NostrEvent = { ...spawnB, id: 'f'.repeat(64), tags: [['A', 'drift'], ['C', pb]], created_at: 999 }
 

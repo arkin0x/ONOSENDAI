@@ -1,27 +1,24 @@
 /**
  * cloudVerify.test.ts - the verifier against cyberspace-core as the oracle.
  *
- * A remote result is built exactly the way HOSAKA builds one (content
- * addressed envelopes, hex roots, hex sibling paths) from proofs
- * cyberspace-core computes at small heights, then one field at a time is
- * corrupted. Every corruption must name its check; the untouched result must
- * pass with nothing to say. The one thing that must NOT be caught, a
- * self-consistent forged cloud axis root above the local ceiling, is pinned
- * too, because that is the trust boundary the contract draws.
+ * A remote result is built exactly the way HOSAKA builds one (hop proof
+ * version 2 tags flat, the region key as an envelope, hex roots and hex
+ * sibling paths for a sidestep) from proofs cyberspace-core computes at small
+ * heights, then one field at a time is corrupted. Every corruption must name
+ * its check; the untouched result must pass with nothing to say.
  */
 
 import { describe, expect, it } from 'vitest'
 import {
   AXIS_BYTE,
   bytesToHex,
-  cantorPair,
   computeAxisMerkleRoot,
   computeHopProof,
+  computeHopProofV2,
   computeSidestepProof,
   deriveRegionKeys,
   encodeNonce,
   hexToBytes,
-  intToBytesBE,
   meetsPrice,
   seedPrefix,
   sha256Hex,
@@ -30,106 +27,106 @@ import {
   sidestepLanding,
   type Plane,
 } from 'cyberspace-core'
-import { doubleSha256Hex, temporalCantor, verifyCloudHop, verifyCloudSidestep, type CloudMove } from '../cloudVerify'
-import type { CloudHopResult, CloudSidestepResult, HopEnvelope } from '../hosaka'
+import { CLOUD_VERIFY_MAX_HEIGHT, cloudHopShape, cloudVerifyIssue, doubleSha256Hex, hopMaxHeight, temporalCantor, verifyCloud, verifyCloudHop, verifyCloudSidestep, type CloudMove } from '../cloudVerify'
+import type { CloudHopResult, CloudSidestepResult } from '../hosaka'
 
 const PREV = 'ab'.repeat(32)
 const PLANE: Plane = 0
 
-/** HOSAKA's save_cantor_root: secret_key = sha256(bytes), public_proof = sha256(secret_key). */
-function envelope(n: bigint): HopEnvelope {
-  const secret = sha256Hex(intToBytesBE(n))
-  return { public_proof: sha256Hex(hexToBytes(secret)), secret_key: secret, size_bytes: intToBytesBE(n).length }
-}
-
+/** HOSAKA's version 2 hop result (hosaka-api ha-1): seal, mn and mp flat, K, and region_n as the region's key. */
 function hopResult(move: CloudMove): CloudHopResult {
-  const p = computeHopProof(move.from.x, move.from.y, move.from.z, move.to.x, move.to.y, move.to.z, move.plane, move.prevEventId, 20)
-  const h = (a: bigint, b: bigint): number => (a === b ? 0 : (a ^ b).toString(2).length)
+  const p = computeHopProofV2(move.from.x, move.from.y, move.from.z, move.to.x, move.to.y, move.to.z, move.plane, move.prevEventId)
+  const keys = deriveRegionKeys(p.regionN)
   return {
-    hop_n: envelope(p.hopN),
-    region_n: envelope(p.regionN),
-    region_xy: envelope(cantorPair(p.cantorX, p.cantorY)),
-    cantor_x: envelope(p.cantorX),
-    cantor_y: envelope(p.cantorY),
-    cantor_z: envelope(p.cantorZ),
-    cantor_t: envelope(p.cantorT),
+    seal: p.tags.proof,
+    mn: p.tags.mn,
+    mp: p.tags.mp,
     K: p.terrainK,
-    max_height: Math.max(h(move.from.x, move.to.x), h(move.from.y, move.to.y), h(move.from.z, move.to.z)),
+    region_n: { public_proof: keys.lookupIdHex, secret_key: bytesToHex(keys.locationDecryptionKey) },
+    // Bookkeeping HOSAKA sends and this client never reads for the proof.
+    max_height: 13,
     compute_msats: 1000,
   }
 }
 
-// x crosses h13 (beyond a ceiling of 12), y crosses h3, z stays put.
+/** One character of a hex string changed, at `at`. */
+function flip(hex: string, at: number): string {
+  const c = hex[at] === '0' ? '1' : '0'
+  return hex.slice(0, at) + c + hex.slice(at + 1)
+}
+
+// x crosses h13, y crosses h3, z stays put.
 const HOP: CloudMove = { from: { x: 0n, y: 0n, z: 0n }, to: { x: 4104n, y: 5n, z: 0n }, plane: PLANE, prevEventId: PREV }
 
-describe('verifyCloudHop', () => {
+describe('verifyCloudHop (hop proof version 2, Level 1)', () => {
   const good = hopResult(HOP)
 
-  it('models the server: hop_n is the proof hash and region_n is the region key', () => {
-    const p = computeHopProof(0n, 0n, 0n, 4104n, 5n, 0n, PLANE, PREV, 20)
-    expect(good.hop_n.public_proof).toBe(p.proofHash)
-    const keys = deriveRegionKeys(p.regionN)
-    expect(good.region_n.public_proof).toBe(keys.lookupIdHex)
-    expect(good.region_n.secret_key).toBe(bytesToHex(keys.locationDecryptionKey))
+  it('models the server: the seal is the proof tag and region_n is the region key', () => {
+    expect(good.seal).toMatch(/^[0-9a-f]{64}$/)
+    expect(good.mn).toMatch(/^[0-9a-f]{16}$/)
+    expect(good.mp).toMatch(/^[0-9a-f]+$/)
+    expect(sha256Hex(hexToBytes(good.region_n.secret_key))).toBe(good.region_n.public_proof)
   })
 
-  it('passes an honest result, with and without the cloud axis inside the ceiling', () => {
-    expect(verifyCloudHop(good, HOP, 12)).toEqual([])
-    expect(verifyCloudHop(good, HOP, 13)).toEqual([])
+  it('passes an honest result, and needs no ceiling of this machine to do it', () => {
+    expect(verifyCloudHop(good, HOP)).toEqual([])
+    expect(verifyCloud('hop', good, HOP)).toEqual([])
   })
 
-  it('recomputes the temporal root exactly', () => {
+  it('takes nothing but the three tags from HOSAKA: a proof for another head fails', () => {
+    const other = hopResult({ ...HOP, prevEventId: 'cd'.repeat(32) })
+    const failed = verifyCloudHop({ ...good, seal: other.seal, mn: other.mn, mp: other.mp }, HOP)
+    expect(failed.length).toBeGreaterThan(0)
+    expect(failed.every((f) => f.startsWith('level1:'))).toBe(true)
+  })
+
+  it('rejects a corrupted seal, nonce or opening at Level 1', () => {
+    expect(verifyCloudHop({ ...good, seal: flip(good.seal, 0) }, HOP)[0]).toMatch(/^level1:(price|path:\d+)$/)
+    expect(verifyCloudHop({ ...good, mn: flip(good.mn, 15) }, HOP)[0]).toMatch(/^level1:(price|path:\d+|residue:\d+)$/)
+    // The first residue of the first opening.
+    expect(verifyCloudHop({ ...good, mp: flip(good.mp, 3) }, HOP)[0]).toMatch(/^level1:(residue|path):\d+$/)
+    expect(verifyCloudHop({ ...good, mp: good.mp.slice(0, -2) }, HOP)).toEqual(['level1:form:mp'])
+  })
+
+  it('requires all three tags once any is there', () => {
+    const { mp: _mp, ...noMp } = good
+    expect(verifyCloudHop(noMp as unknown as CloudHopResult, HOP)).toEqual(['mp'])
+    const { seal: _seal, mn: _mn, ...onlyMp } = good
+    expect(verifyCloudHop(onlyMp as unknown as CloudHopResult, HOP)).toEqual(['seal', 'mn'])
+  })
+
+  it('names the old hop_n shape, and anything else that is not a result', () => {
+    const v1 = { hop_n: { public_proof: 'aa'.repeat(32), secret_key: 'bb'.repeat(32) }, region_n: good.region_n, K: good.K }
+    expect(cloudHopShape(v1)).toBe('v1')
+    expect(verifyCloudHop(v1 as unknown as CloudHopResult, HOP)).toEqual(['shape:v1'])
+    expect(cloudHopShape(good)).toBe('v2')
+    expect(cloudHopShape(null)).toBe('junk')
+    expect(verifyCloudHop(null as unknown as CloudHopResult, HOP)).toEqual(['result'])
+  })
+
+  it('rejects a K that is not ours, and does without one', () => {
+    expect(verifyCloudHop({ ...good, K: (good.K ?? 0) + 1 }, HOP)).toEqual(['K'])
+    const { K: _K, ...noK } = good
+    expect(verifyCloudHop(noK, HOP)).toEqual([])
+  })
+
+  it('rejects a region key whose secret does not hash to its lookup id', () => {
+    expect(verifyCloudHop({ ...good, region_n: { ...good.region_n, secret_key: 'ff'.repeat(32) } }, HOP)).toEqual(['envelope:region_n'])
+    expect(verifyCloudHop({ ...good, region_n: undefined as unknown as CloudHopResult['region_n'] }, HOP)).toEqual(['envelope:region_n'])
+  })
+
+  it('never builds a hop above the verify ceiling, before any Level 1 work', () => {
+    const tall: CloudMove = { ...HOP, to: { x: 1n << BigInt(CLOUD_VERIFY_MAX_HEIGHT), y: 5n, z: 0n } }
+    expect(hopMaxHeight(tall)).toBe(CLOUD_VERIFY_MAX_HEIGHT + 1)
+    expect(cloudVerifyIssue(tall)).toContain(`h${CLOUD_VERIFY_MAX_HEIGHT + 1}`)
+    expect(verifyCloudHop(good, tall)).toEqual(['height'])
+    expect(cloudVerifyIssue(HOP)).toBeNull()
+  })
+
+  it('the temporal root of a sidestep still recomputes exactly', () => {
     const p = computeHopProof(0n, 0n, 0n, 4104n, 5n, 0n, PLANE, PREV, 20)
     expect(temporalCantor(PREV, p.terrainK)).toBe(p.cantorT)
     expect(doubleSha256Hex(p.hopN)).toBe(p.proofHash)
-  })
-
-  it('rejects a wrong K field on its own, and a temporal root built at that K with it', () => {
-    // The temporal check uses the LOCAL K, so a lying K field cannot steer it.
-    expect(verifyCloudHop({ ...good, K: good.K + 1 }, HOP, 12)).toEqual(['K'])
-    const atWrongK = envelope(temporalCantor(PREV, good.K + 1))
-    const failed = verifyCloudHop({ ...good, K: good.K + 1, cantor_t: atWrongK }, HOP, 12)
-    expect(failed).toContain('K')
-    expect(failed).toContain('cantor_t')
-  })
-
-  it('rejects a temporal root computed for another chain head', () => {
-    const other = hopResult({ ...HOP, prevEventId: 'cd'.repeat(32) })
-    const failed = verifyCloudHop({ ...good, cantor_t: other.cantor_t }, HOP, 12)
-    expect(failed).toEqual(['cantor_t'])
-  })
-
-  it('rejects a trivial axis whose root is not the axis value', () => {
-    expect(verifyCloudHop({ ...good, cantor_z: envelope(1n) }, HOP, 12)).toEqual(['axis:z'])
-  })
-
-  it('rejects an axis within the ceiling whose root does not recompute', () => {
-    const p = computeHopProof(0n, 0n, 0n, 4104n, 5n, 0n, PLANE, PREV, 20)
-    expect(verifyCloudHop({ ...good, cantor_y: envelope(p.cantorY + 1n) }, HOP, 12)).toEqual(['axis:y'])
-  })
-
-  it('takes the cloud axis on trust above the ceiling, and checks it below', () => {
-    const p = computeHopProof(0n, 0n, 0n, 4104n, 5n, 0n, PLANE, PREV, 20)
-    const forged = { ...good, cantor_x: envelope(p.cantorX + 1n) }
-    // The trust boundary: a self-consistent envelope for an h13 axis passes a
-    // client whose ceiling is 12. Detectable later by anyone redoing the work.
-    expect(verifyCloudHop(forged, HOP, 12)).toEqual([])
-    expect(verifyCloudHop(forged, HOP, 13)).toEqual(['axis:x'])
-  })
-
-  it('rejects an envelope whose secret does not hash to its proof', () => {
-    const bad = { ...good.region_n, secret_key: 'ff'.repeat(32) }
-    expect(verifyCloudHop({ ...good, region_n: bad }, HOP, 12)).toEqual(['envelope:region_n'])
-    const malformed = { ...good.hop_n, public_proof: 'not hex' }
-    expect(verifyCloudHop({ ...good, hop_n: malformed }, HOP, 12)).toEqual(['envelope:hop_n'])
-  })
-
-  it('rejects a max_height that disagrees with the move', () => {
-    expect(verifyCloudHop({ ...good, max_height: 14 }, HOP, 12)).toEqual(['max_height'])
-  })
-
-  it('rejects a result that is not one', () => {
-    expect(verifyCloudHop(null as unknown as CloudHopResult, HOP, 12)).toEqual(['result'])
   })
 })
 

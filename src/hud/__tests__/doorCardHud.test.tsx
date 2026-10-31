@@ -70,7 +70,7 @@ describe('a door’s card, for a finder', () => {
   it('OPEN once opened, and no list of contents', () => {
     const d = doorFind()
     useShards.setState({ discovered: { [d.eventId]: d }, mine: [], selectedSecret: d.eventId })
-    rememberOpened(useCyberspace.getState().identity.pubkey, d.eventId, [])
+    rememberOpened(useCyberspace.getState().identity.pubkey, d.eventId, d.chest!.lockPubkey, [])
     const html = render()
     expect(html).toMatch(/item__meta[^>]*>OPEN/)
     expect(html).not.toContain('chest__contents')

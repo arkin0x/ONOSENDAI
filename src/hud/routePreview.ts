@@ -13,6 +13,7 @@ import { useMemo } from 'react'
 import { estimateHopCost } from 'cyberspace-core'
 import { useCalibration } from '../lib/calibration'
 import { offloadFrom } from '../lib/crossover'
+import { cloudHopsSold } from '../lib/hosaka'
 import { buildMovePlan, planSummary, type Ceilings, type PlanStep, type PlanSummary } from '../lib/movePlan'
 import { MAX_COMPUTE_HEIGHT, samePosition, useCyberspace } from '../store/useCyberspace'
 
@@ -54,7 +55,7 @@ export function useRoutePreview(): RoutePreview | null {
   const hopCeil = useCalibration((s) => s.hopHeight)
   const sidestepCeil = useCalibration((s) => s.sidestepHeight)
   const ceiling = Math.min(MAX_COMPUTE_HEIGHT, hopCeil)
-  const cloudHop = limits?.max_hop_height ?? 0
+  const cloudHop = cloudHopsSold(limits)
   const cloudSidestep = limits?.max_sidestep_height ?? 0
   const profile = useCyberspace((st) => st.cloudPrefs.profile)
   const provider = useCyberspace((st) => st.cloud.provider)

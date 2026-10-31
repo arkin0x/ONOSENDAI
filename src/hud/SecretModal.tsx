@@ -49,7 +49,7 @@ import { ConfirmModal } from './ConfirmModal'
 import { ItemFace } from './ItemIcon'
 import { ShardSpin } from '../scene/ShardSpin'
 import { drawnLook, lookOf } from '../lib/looks'
-import { openedByHand, openedKey, useOpenedChests } from '../store/useOpenedChests'
+import { openedByHand, useOpenedChests } from '../store/useOpenedChests'
 import { EventData } from './EventData'
 import { WireData } from './WireData'
 import { PublishRow } from './PublishSwitch'
@@ -116,7 +116,7 @@ export function SecretModal(): JSX.Element | null {
   })
 
   // A chest's or a door's look, open once this identity opened it (R14), for the card's 3D header.
-  const opened = useOpenedChests((s) => (item?.type === 'chest' ? !!s.opened[openedKey(me, item.key)] : false))
+  useOpenedChests((s) => s.opened)
   const look = item?.type === 'chest' ? lookOf(item) : null
 
   // A selection that no longer resolves (deleted, scrolled out) closes itself.
@@ -186,7 +186,7 @@ export function SecretModal(): JSX.Element | null {
           // turning (chest and door design, 4.7), then what opens it.
           <>
             <h3 className="secret__look-name">{item.chest.name}</h3>
-            {look && <div className="secret__spin secret__spin--look"><ShardSpin shard={drawnLook(look, opened || openedByHand(me, item.key)) ?? look.closed} size={180} wide /></div>}
+            {look && <div className="secret__spin secret__spin--look"><ShardSpin shard={drawnLook(look, openedByHand(me, item.key, item.chest.lockPubkey)) ?? look.closed} size={180} wide /></div>}
             <div className="secret__shard"><ChestBlock id={item.key} chest={item.chest} author={author} verified place={place} named={false} /></div>
           </>
         ) : item.type === 'audio' && item.audio ? (

@@ -80,7 +80,7 @@ function chainFor(seed: string): { pk: string; spawn: NostrEvent; hop1: NostrEve
   const pk = seed.repeat(32)
   const spawn: NostrEvent = { ...spawnTemplate(pk, 1_000), id: `${seed}01`.padEnd(64, '0'), pubkey: pk, sig: '0'.repeat(128) }
   const hop = (n: number, previous: NostrEvent): NostrEvent => ({
-    ...hopTemplate({ createdAt: 1_000 + n * 10, genesisId: spawn.id, previousId: previous.id, prevCoordHex: pk, to: { x: BigInt(n), y: 1n, z: 1n }, plane: 0, proofHash: '0'.repeat(64) }),
+    ...hopTemplate({ createdAt: 1_000 + n * 10, genesisId: spawn.id, previousId: previous.id, prevCoordHex: pk, to: { x: BigInt(n), y: 1n, z: 1n }, plane: 0, proofHash: '0'.repeat(64), mn: '0'.repeat(16), mp: '00'}),
     id: `${seed}0${n + 1}`.padEnd(64, '0'),
     pubkey: pk,
     sig: '0'.repeat(128),

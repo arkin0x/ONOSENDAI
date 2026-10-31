@@ -20,6 +20,8 @@
  */
 
 import { TAB_ID, callEventDb, eventDbAvailable } from './eventDb/client'
+import { PROBE_VERSION } from './eventDb/probe'
+import { checkVersion, useVersionGate } from './versionGate'
 import type { ChainCommit, ChainRead, ChainRecord, ChainSource, MigrationResult } from './eventDb/chainRows'
 import type { Nip01Flag } from './eventDb/schema'
 import { CHAIN_STORE_VERSION } from './chainStoreVersion'
@@ -34,12 +36,77 @@ let retryMs = 30_000
 /** The worker's patience for a migration, which is a once-per-identity copy of the whole chain. */
 const MIGRATE_PATIENCE_MS = 120_000
 
+/** How long a move into rows waits for the deploy's yes. No answer means not on this load. */
+let deployPatienceMs = 3_000
+
+const OFF_KEY = 'onosendai:chain-store-off'
+const PROBE_KEY = 'onosendai:chain-store-probe'
 const markerKey = (pubkey: string): string => `onosendai:chain-rows:${pubkey}`
 const tailKey = (pubkey: string): string => `onosendai:chain-unsaved:${pubkey}`
 
+function offAtLoad(): boolean {
+  try { return localStorage.getItem(OFF_KEY) !== null } catch { return false }
+}
+
+/**
+ * The rows are off for this page: the deploy said so (now, or on an earlier
+ * load), or the store failed its probe here. Off takes effect at once. On only
+ * takes effect at the next load, so a tab never swaps stores back in mid-chain.
+ */
+let rowsOff = offAtLoad()
+
 /** Whether this build keeps chains in rows, and this browser can try. */
 export function rowsWanted(): boolean {
-  return CHAIN_STORE_VERSION === 2 && eventDbAvailable()
+  return CHAIN_STORE_VERSION === 2 && eventDbAvailable() && !rowsOff
+}
+
+/** Stop using the rows on this page. The next save goes whole to the old stores, which then hold everything again. */
+export function turnRowsOff(): void {
+  rowsOff = true
+}
+
+/** Whether the deploy says chains may be in rows. A file without the field is from before the rows. */
+const deploySaysYes = (chainStore: number | undefined): boolean => chainStore === 2
+
+/** The kill switch: what a running build does with each answer of the deploy's version file. */
+useVersionGate.subscribe((s, prev) => {
+  if (!s.deployed || s.deployed === prev.deployed) return
+  try {
+    if (deploySaysYes(s.deployed.chainStore)) localStorage.removeItem(OFF_KEY)
+    else localStorage.setItem(OFF_KEY, String(s.deployed.chainStore ?? 'absent'))
+  } catch { /* private mode: it holds for this page */ }
+  if (!deploySaysYes(s.deployed.chainStore) && !rowsOff) {
+    console.warn('[chain] the deploy turned the event database off: this tab goes back to the old stores')
+    rowsOff = true
+  }
+})
+
+/**
+ * Whether a chain may be moved into rows now. Only on a yes from the deploy: no
+ * answer (offline, a slow link) leaves the chain where it is until a later load,
+ * which costs nothing, because the old stores keep working.
+ */
+export async function deployAllowsMove(): Promise<boolean> {
+  await checkVersion({ maxAgeMs: 60_000, timeoutMs: deployPatienceMs })
+  const { deployed } = useVersionGate.getState()
+  return deployed !== null && deploySaysYes(deployed.chainStore) && !rowsOff
+}
+
+const probeMemo = (): string => `${PROBE_VERSION}:${typeof navigator === 'undefined' ? '' : navigator.userAgent}`
+
+/**
+ * Whether the store works on this browser (lib/eventDb/probe.ts). A pass is
+ * remembered for this browser's version, so it is not paid for on every load: a
+ * browser update asks again. A failure is never remembered, so a passing private
+ * window or a fixed browser is not held to it.
+ */
+export async function storeWorksHere(): Promise<boolean> {
+  try { if (localStorage.getItem(PROBE_KEY) === probeMemo()) return true } catch { /* no memo: asked below */ }
+  try {
+    if (!await callEventDb('probeStore', [])) return false
+    try { localStorage.setItem(PROBE_KEY, probeMemo()) } catch { /* asked again next load */ }
+    return true
+  } catch { return false }
 }
 
 /**
@@ -331,7 +398,8 @@ export async function chainRowsSettled(): Promise<void> {
 }
 
 /** For tests. */
-export function setRowsPatience(p: { read?: number; land?: number; retry?: number }): void {
+export function setRowsPatience(p: { read?: number; land?: number; retry?: number; deploy?: number }): void {
+  if (p.deploy !== undefined) deployPatienceMs = p.deploy
   if (p.read !== undefined) readPatienceMs = p.read
   if (p.land !== undefined) landPatienceMs = p.land
   if (p.retry !== undefined) retryMs = p.retry

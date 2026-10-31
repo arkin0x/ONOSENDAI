@@ -23,7 +23,7 @@ import { useHyperspace } from '../store/useHyperspace'
 import { useThumbs } from '../store/useThumbs'
 import { useTv } from '../store/useTv'
 import { useWorkshop } from '../store/useWorkshop'
-import { DIAG_KEY } from './diagGate'
+import { DIAG_FOUND_KEY, DIAG_LAST_KEY, diagForget } from './diagGate'
 import { DIAG_COLUMNS, GlLedger, Ring, frameVerb, framePercentiles, heapReading, invokerLabel, safeDescription, safeLabel, toRow, uploadedBytes, type DiagRow } from './diagCore'
 
 /** Seconds between samples, and how long each ring reaches back. */
@@ -40,9 +40,6 @@ const SLOW_FRAME_MS = 200
 const STORAGE_EVERY_MS = 60_000
 /** How often the report is kept for a tab that crashes. */
 const KEEP_EVERY_MS = 60_000
-/** The report as last kept, and the one found on loading: this load must not write over what the last one left. */
-const LAST_KEY = 'onosendai:diag:last'
-const FOUND_KEY = 'onosendai:diag:found'
 /** How long the clipboard gets before the log is saved as a file instead. */
 const COPY_WAIT_MS = 2_000
 
@@ -75,6 +72,8 @@ let started = false
 export function startDiag(): void {
   if (started) return
   started = true
+  // Past the wait in main.tsx, the app drew first, and contexts made before now go uncounted.
+  const lateStart = !!document.querySelector('canvas')
   const ledger = new GlLedger()
 
   // ---- Contexts. Weak, so the capture never holds a context or a canvas alive.
@@ -235,8 +234,13 @@ export function startDiag(): void {
   const NativeWorker = window.Worker
   if (NativeWorker) {
     window.Worker = new Proxy(NativeWorker, { construct(t, a) { workers.made++; return Reflect.construct(t, a) as object } })
+    // Terminated twice is ended once, or live would read too low.
+    const ended = new WeakSet<Worker>()
     const terminate = NativeWorker.prototype.terminate
-    NativeWorker.prototype.terminate = function (this: Worker) { workers.ended++; terminate.call(this) }
+    NativeWorker.prototype.terminate = function (this: Worker) {
+      if (!ended.has(this)) { ended.add(this); workers.ended++ }
+      terminate.call(this)
+    }
   }
 
   // ---- Frames, while the tab draws.
@@ -305,7 +309,7 @@ export function startDiag(): void {
 
   let lastKept = 0
   // Refused or full: the log in memory still stands.
-  const keep = (): void => { try { sessionStorage.setItem(LAST_KEY, report()) } catch { /* as above */ } }
+  const keep = (): void => { try { sessionStorage.setItem(DIAG_LAST_KEY, report()) } catch { /* as above */ } }
 
   const take = (): void => {
     const t0 = performance.now()
@@ -398,8 +402,9 @@ export function startDiag(): void {
 
     row.dom = document.getElementsByTagName('*').length
     row.canvases = document.getElementsByTagName('canvas').length
-    row.idbB = storage.details?.indexedDB ?? 0
-    row.storeB = storage.usage ?? 0
+    // Unread stays null: a refused estimate is not a measured 0.
+    row.idbB = storage.details?.indexedDB
+    row.storeB = storage.usage
     const th = useThumbs.getState()
     row.thumbs = th.order.length; row.thumbQueue = th.queue.length
 
@@ -428,6 +433,7 @@ export function startDiag(): void {
 
   // ---- The report.
   const isBrave = !!(navigator as unknown as { brave?: unknown }).brave
+  let gpuInfo: { gpu: string | null; maxSamples: number | null } | null = null
   const report = (): string => {
     const ctxs = liveContexts()
     let lsBytes = 0
@@ -436,14 +442,15 @@ export function startDiag(): void {
       lsKeys = localStorage.length
       for (let i = 0; i < localStorage.length; i++) { const key = localStorage.key(i)!; lsBytes += key.length + (localStorage.getItem(key)?.length ?? 0) }
     } catch { /* refused */ }
-    let gpu = ''
-    let maxSamples = 0
     // The largest drawing context: a throwaway probe may be WebGL 1, with no MAX_SAMPLES to ask.
     const first = ctxs.filter((gl) => !gl.isContextLost()).sort((a, b) => b.drawingBufferWidth * b.drawingBufferHeight - a.drawingBufferWidth * a.drawingBufferHeight)[0]
-    if (first) {
+    // Read once: these wait on the GPU process, and a stalled one must not hold the tab each time he copies.
+    if (first && !gpuInfo) {
       const ext = first.getExtension('WEBGL_debug_renderer_info')
-      gpu = ext ? safeDescription(first.getParameter(ext.UNMASKED_RENDERER_WEBGL), 120) : ''
-      maxSamples = (first.MAX_SAMPLES ? first.getParameter(first.MAX_SAMPLES) : 0) as number
+      gpuInfo = {
+        gpu: ext ? safeDescription(first.getParameter(ext.UNMASKED_RENDERER_WEBGL), 120) : null,
+        maxSamples: first.MAX_SAMPLES ? (first.getParameter(first.MAX_SAMPLES) as number) : null,
+      }
     }
     return JSON.stringify({
       diag: 1,
@@ -460,7 +467,7 @@ export function startDiag(): void {
         farbled: isBrave ? ['cores', 'memGb', 'screen'] : [],
         cores: navigator.hardwareConcurrency, memGb: (navigator as unknown as { deviceMemory?: number }).deviceMemory ?? null,
         dpr: window.devicePixelRatio, inner: [window.innerWidth, window.innerHeight], screen: [screen.width, screen.height],
-        gpu, maxSamples, route: safeLabel(location.pathname.split('/')[1] ?? '', 12), isolated: window.crossOriginIsolated,
+        gpu: gpuInfo?.gpu ?? null, maxSamples: gpuInfo?.maxSamples ?? null, lateStart, route: safeLabel(location.pathname.split('/')[1] ?? '', 12), isolated: window.crossOriginIsolated,
         heapLimit: (performance as unknown as { memory?: { jsHeapSizeLimit: number } }).memory?.jsHeapSizeLimit ?? null,
       },
       contexts: { made: contextsMade, lostEver: contextsLostEver },
@@ -489,9 +496,9 @@ export function startDiag(): void {
   // What the load before this one left, kept aside before this load writes over it.
   let found = false
   try {
-    const last = sessionStorage.getItem(LAST_KEY)
-    if (last) { sessionStorage.setItem(FOUND_KEY, last); sessionStorage.removeItem(LAST_KEY); found = true }
-    else found = sessionStorage.getItem(FOUND_KEY) !== null
+    const last = sessionStorage.getItem(DIAG_LAST_KEY)
+    if (last) { sessionStorage.setItem(DIAG_FOUND_KEY, last); sessionStorage.removeItem(DIAG_LAST_KEY); found = true }
+    else found = sessionStorage.getItem(DIAG_FOUND_KEY) !== null
   } catch { /* refused: nothing to offer */ }
 
   // ---- The chip.
@@ -529,7 +536,7 @@ export function startDiag(): void {
   }
   const fresh = (): string => { take(); return report() }
   const off = (): void => {
-    try { sessionStorage.removeItem(DIAG_KEY); sessionStorage.removeItem(LAST_KEY); sessionStorage.removeItem(FOUND_KEY) } catch { /* refused */ }
+    try { diagForget(sessionStorage) } catch { /* refused */ }
     const u = new URL(location.href)
     u.searchParams.delete('diag')
     location.replace(u)
@@ -539,7 +546,7 @@ export function startDiag(): void {
     button('SAVE', () => { save(fresh()); say('SAVED') }),
     ...(found ? [button('LAST', () => {
       let last: string | null = null
-      try { last = sessionStorage.getItem(FOUND_KEY) } catch { /* refused */ }
+      try { last = sessionStorage.getItem(DIAG_FOUND_KEY) } catch { /* refused */ }
       if (last) copy(last)
     })] : []),
     button('OFF', off),

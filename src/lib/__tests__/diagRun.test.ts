@@ -35,6 +35,7 @@ const tasks: Array<() => void> = []
 let reported = ''
 let WS: { prototype: { send: (d: unknown) => void } }
 const sent: unknown[] = []
+let estimate: () => Promise<unknown> = async () => ({ usage: 1, quota: 2, usageDetails: { indexedDB: 1 } })
 
 function element(tag: string): Record<string, unknown> {
   const listeners = new Map<string, (e: unknown) => void>()
@@ -81,10 +82,10 @@ beforeAll(async () => {
   vi.stubGlobal('screen', { width: 2560, height: 1440 })
   vi.stubGlobal('requestAnimationFrame', () => 1)
   vi.stubGlobal('location', { pathname: `/C/${COORD}`, href: `https://www.onosendai.tech/C/${COORD}?diag=1`, replace: vi.fn() })
-  vi.stubGlobal('navigator', { userAgent: 'Mozilla/5.0 (Windows NT 10.0) Chrome/151.0.0.0', hardwareConcurrency: 8, brave: {}, storage: { estimate: async () => ({ usage: 1, quota: 2, usageDetails: { indexedDB: 1 } }) }, clipboard: { writeText: async (s: string) => { reported = s } } })
+  vi.stubGlobal('navigator', { userAgent: 'Mozilla/5.0 (Windows NT 10.0) Chrome/151.0.0.0', hardwareConcurrency: 8, brave: {}, storage: { estimate: () => estimate() }, clipboard: { writeText: async (s: string) => { reported = s } } })
   vi.stubGlobal('document', {
     visibilityState: 'visible', hasFocus: () => true, body: { append: (e: { textContent?: string }) => appended.push(e) },
-    querySelectorAll: () => [], getElementsByTagName: () => [], addEventListener() {}, createElement: element,
+    querySelector: () => null, querySelectorAll: () => [], getElementsByTagName: () => [], addEventListener() {}, createElement: element,
   })
   vi.stubGlobal('__ONOSENDAI_BUILD__', 'ded106e6e0bd1234567890')
   vi.stubGlobal('__ONOSENDAI_VERSION__', '2.test')
@@ -117,6 +118,8 @@ describe('the capture, running', () => {
     const before = report() as { columns: string[]; fine: unknown[][]; workers: { made: number; ended: number } }
     const W = window.Worker as unknown as new () => { terminate(): void }
     const a = new W(), b = new W()
+    a.terminate()
+    // Terminated twice is ended once, or live would read too low (re-review of #551).
     a.terminate()
     void b
     const after = report() as { workers: { made: number; ended: number } }
@@ -158,12 +161,28 @@ describe('the capture, running', () => {
     await vi.waitFor(() => expect(reported).toContain('the load before'))
   })
 
-  it('turns off, and goes back to the same address without the flag', () => {
+  it('turns off, with what it kept, and goes back to the same address without the flag', () => {
     session.setItem('onosendai:diag', '1')
     const chip = appended[0] as unknown as { children: Array<{ tap(): void }> }
     chip.children[3].tap()
     expect(session.getItem('onosendai:diag')).toBeNull()
+    expect(session.getItem('onosendai:diag:found')).toBeNull()
     const replaced = (location.replace as unknown as ReturnType<typeof vi.fn>).mock.calls[0][0] as URL
     expect(replaced.searchParams.has('diag')).toBe(false)
+  })
+})
+
+describe('a browser that refuses the estimate', () => {
+  it('reads as nothing read, not as a measured 0 (re-review of #551)', async () => {
+    estimate = () => Promise.reject(new Error('refused'))
+    vi.resetModules()
+    const { startDiag } = await import('../diag')
+    startDiag()
+    // The refusal lands, then a sample is taken after it.
+    await new Promise((r) => { setImmediate(r) })
+    const r = JSON.parse((window as unknown as { __diag: { report(): string } }).__diag.report()) as { columns: string[]; fine: unknown[][] }
+    const last = r.fine[r.fine.length - 1]
+    expect(last[r.columns.indexOf('idbB')]).toBeNull()
+    expect(last[r.columns.indexOf('storeB')]).toBeNull()
   })
 })

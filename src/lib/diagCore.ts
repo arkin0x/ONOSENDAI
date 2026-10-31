@@ -243,6 +243,19 @@ export class Ring<T> {
 }
 
 /**
+ * What a string is refused as, read before anything is stripped: '#url' for an
+ * address, '#' for hex or a key broken up by punctuation, which a strip would
+ * rejoin. The split-hex test wants three or more runs, so a driver's
+ * `D3D11-27.20.100.8681` still reads.
+ */
+function refusal(s: string): '#url' | '#' | null {
+  if (/:\s*\/\/|^\/\/|(https?|wss?|blob|data|file|ipfs|magnet):/i.test(s)) return '#url'
+  if (/(?:[0-9a-f]{4,}[^0-9a-z]+){3,}/i.test(`${s} `)) return '#'
+  if (/(nsec|npub|nprofile|nevent|naddr|ncryptsec)1[0-9a-z]{8,}/i.test(s.replace(/[^A-Za-z0-9]/g, ''))) return '#'
+  return null
+}
+
+/**
  * The only text that leaves: a browser's or the app's own label, cut down to the
  * characters such labels use. Anything naming a URL goes whole, tested first,
  * since the strip below takes the colon. Keys and long hex go after the strip,
@@ -250,7 +263,8 @@ export class Ring<T> {
  */
 export function safeLabel(s: unknown, max = 48): string {
   if (typeof s !== 'string') return ''
-  if (/(https?|wss?|blob|data|file):/i.test(s)) return '#url'
+  const refused = refusal(s)
+  if (refused) return refused
   return s
     .replace(/[^A-Za-z0-9_.:#$-]/g, '')
     .replace(/(nsec|npub|nprofile|nevent|naddr|note|ncryptsec)1[0-9a-z]+/gi, '#')
@@ -262,14 +276,17 @@ export function safeLabel(s: unknown, max = 48): string {
  * A long frame's `invoker`, without what the element it names says about itself:
  * Chromium writes an image's src into it, so a broken avatar would put a viewed
  * profile's picture host and path in a report. `IMG[src=...].onerror` is IMG.onerror.
+ * Everything from the first `#` or `[` to the last `.word` goes, since an address
+ * may hold brackets and an id may hold dots.
  */
 export function invokerLabel(invoker: unknown): string {
-  return safeLabel(typeof invoker === 'string' ? invoker.replace(/\[[^\]]*\]|#[^.]*/g, '') : '')
+  return safeLabel(typeof invoker === 'string' ? invoker.replace(/^([A-Za-z]+)[#[].*(\.\w+)$/, '$1$2') : '')
 }
 
 /** A browser's description of itself, spaces as underscores so it still reads. */
 export function safeDescription(s: unknown, max = 200): string {
-  return safeLabel(typeof s === 'string' ? s.replace(/[ ,;()/+]+/g, '_') : '', max)
+  if (typeof s !== 'string') return ''
+  return refusal(s) ?? safeLabel(s.replace(/[ ,;()/+]+/g, '_'), max)
 }
 
 /**

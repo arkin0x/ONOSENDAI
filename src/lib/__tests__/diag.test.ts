@@ -5,7 +5,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { describe, expect, it } from 'vitest'
-import { diagWanted, DIAG_KEY } from '../diagGate'
+import { diagWanted, DIAG_FOUND_KEY, DIAG_KEY, DIAG_LAST_KEY } from '../diagGate'
 import { DIAG_COLUMNS, GlLedger, Ring, bytesPerPixel, framePercentiles, frameVerb, heapReading, invokerLabel, safeDescription, safeLabel, toRow, uploadedBytes } from '../diagCore'
 
 const SRC = path.resolve(__dirname, '../..')
@@ -35,8 +35,13 @@ describe('off costs nothing', () => {
 
   it('main loads it only behind the gate', () => {
     const main = fs.readFileSync(path.join(SRC, 'main.tsx'), 'utf8')
-    expect(main).toMatch(/if \(diagWanted\(location\.search, tabStore\)\) void import\('\.\/lib\/diag'\)/)
-    expect(main).toMatch(/else boot\(\)/)
+    expect(main).toMatch(/if \(diagWanted\(location\.search, tabStore\)\) \{[\s\S]*?import\('\.\/lib\/diag'\)[\s\S]*?\} else boot\(\)/)
+  })
+
+  it('a chunk that stalls cannot hold the first render', () => {
+    const main = fs.readFileSync(path.join(SRC, 'main.tsx'), 'utf8')
+    expect(main).toMatch(/setTimeout\(once, DIAG_WAIT_MS\)/)
+    expect(main).toMatch(/\.finally\(once\)/)
   })
 
   it('wraps nothing at import: every prototype change is inside startDiag', () => {
@@ -63,6 +68,11 @@ describe('the gate', () => {
     const s = memoryStore({ [DIAG_KEY]: '1' })
     expect(diagWanted('?diag=0', s)).toBe(false)
     expect(diagWanted('', s)).toBe(false)
+  })
+  it('?diag=0 takes what it kept with it', () => {
+    const s = memoryStore({ [DIAG_KEY]: '1', [DIAG_LAST_KEY]: '{}', [DIAG_FOUND_KEY]: '{}' })
+    diagWanted('?diag=0', s)
+    expect(s.map.size).toBe(0)
   })
   it('a tab that refuses storage still honours the link', () => {
     const refusing = { getItem: () => { throw new Error('no') }, setItem: () => { throw new Error('no') }, removeItem: () => { throw new Error('no') } }
@@ -109,12 +119,42 @@ describe('nothing private leaves', () => {
     expect(invokerLabel('TimerHandler:setTimeout')).toBe('TimerHandler:setTimeout')
     expect(invokerLabel('Window.requestAnimationFrame')).toBe('Window.requestAnimationFrame')
     expect(invokerLabel(undefined)).toBe('')
+    // An address with a bracket in it, and an id with a dot in it (re-review of #551).
+    expect(invokerLabel('IMG[src=https://secret-host.example.test/a]b/diary-bracket.png].onload')).toBe('IMG.onload')
+    expect(invokerLabel('IMG#secret-id.tailsecret.onload')).toBe('IMG.onload')
+    expect(invokerLabel('IMG#logo[src=https://secret-host.example.test/x.png].onerror')).toBe('IMG.onerror')
+    expect(invokerLabel('Response.json.then')).toBe('Response.json.then')
   })
 
   it('the browser\'s own description still reads, and passes the same rule', () => {
     expect(safeDescription('ANGLE (NVIDIA, NVIDIA GeForce RTX 3080 (0x00002206) Direct3D11 vs_5_0 ps_5_0, D3D11)')).toContain('GeForce_RTX_3080')
     expect(safeDescription(`gpu at https://x.example/${HEX}`)).toBe('#url')
     expect(safeDescription(`x ${NSEC}`)).not.toMatch(/nsec1/i)
+  })
+
+  describe('hostile strings (re-review of #551)', () => {
+    const split = (s: string, n: number, sep: string): string => s.match(new RegExp(`.{1,${n}}`, 'g'))!.join(sep)
+    const both = (s: string): string[] => [safeLabel(s, 500), safeDescription(s, 500), invokerLabel(s)]
+    const urls = ['ftp://secret-host.example/x', 'ipfs://QmSecret/d.png', '//secret-host.example/x', 'wss ://relay.example/x', 'https://a/b', 'data:image/png;base64,AA', 'blob:https://x/y', 'magnet:?xt=urn:btih:abc', 'chrome-extension://abcdef/inpage.js']
+    for (const u of urls) {
+      it(`an address goes whole: ${u}`, () => { expect(both(u)).toEqual(['#url', '#url', '#url']) })
+    }
+    const pieces = [split(HEX, 8, ' '), split(HEX, 12, '/'), split(HEX, 8, '-'), split(HEX, 8, ':'), split(HEX, 8, '.'), split(HEX, 8, '_'), split(HEX, 4, '-'), `${NSEC.slice(0, 20)}/${NSEC.slice(20)}`, `${NSEC.slice(0, 20)}-${NSEC.slice(20)}`, `${NSEC.slice(0, 20)}.${NSEC.slice(20)}`]
+    for (const p of pieces) {
+      it(`broken up, it does not rejoin: ${p.slice(0, 30)}`, () => { for (const out of both(p)) expect(out).toBe('#') })
+    }
+    const real = [
+      'ANGLE (NVIDIA, NVIDIA GeForce RTX 3080 (0x00002206) Direct3D11 vs_5_0 ps_5_0, D3D11)',
+      'ANGLE (Intel, Intel(R) UHD Graphics 630 (0x00003E9B) Direct3D11 vs_5_0 ps_5_0, D3D11-27.20.100.8681)',
+      'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.0.0 Safari/537.36',
+    ]
+    for (const r of real) {
+      it(`a real browser string still reads: ${r.slice(0, 30)}`, () => { expect(safeDescription(r).length).toBeGreaterThan(30) })
+    }
+    it('a driver version survives', () => { expect(safeDescription(real[1])).toContain('D3D11-27.20.100.8681') })
+    it('the invokers we need stay as they are', () => {
+      for (const v of ['Window.requestAnimationFrame', 'TimerHandler:setTimeout', 'Response.json.then']) expect(invokerLabel(v)).toBe(v)
+    })
   })
 
   it('a socket frame gives up only its verb', () => {
@@ -130,7 +170,7 @@ describe('nothing private leaves', () => {
     expect(text.match(/localStorage\.getItem\([^)]*\)[^;\n]*/g)).toEqual(['localStorage.getItem(key)?.length ?? 0) }'])
     expect(text).not.toMatch(/indexedDB\.|location\.search/)
     // This tab's storage holds only the capture's own keys.
-    expect([...text.matchAll(/sessionStorage\.(?:get|set|remove)Item\(([A-Z_]+)/g)].every((m) => ['DIAG_KEY', 'LAST_KEY', 'FOUND_KEY'].includes(m[1]))).toBe(true)
+    expect([...text.matchAll(/sessionStorage\.(?:get|set|remove)Item\(([A-Z_]+)/g)].every((m) => ['DIAG_LAST_KEY', 'DIAG_FOUND_KEY'].includes(m[1]))).toBe(true)
     // The address is read once, to go back to it without the flag, and never kept.
     expect(text.match(/location\.href/g)).toHaveLength(1)
     expect(text).toMatch(/new URL\(location\.href\)/)

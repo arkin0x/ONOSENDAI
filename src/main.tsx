@@ -36,6 +36,9 @@ function draw(): void {
     </React.StrictMode>,
   )
 }
+/** How long the app waits for the capture's chunk before drawing without it. */
+const DIAG_WAIT_MS = 3_000
+
 function boot(): void {
   setTimeout(draw, HYDRATE_WAIT_MS)
   hydrateWorkshop().then(draw, draw)
@@ -47,5 +50,10 @@ function boot(): void {
  */
 let tabStore: Storage | null = null
 try { tabStore = sessionStorage } catch { /* refused: on for this load only */ }
-if (diagWanted(location.search, tabStore)) void import('./lib/diag').then((m) => m.startDiag()).catch((e) => console.warn('[diag]', e)).finally(boot)
-else boot()
+if (diagWanted(location.search, tabStore)) {
+  // A chunk that stalls cannot hold the first render: the capture starts late, and says so.
+  let booted = false
+  const once = (): void => { if (booted) return; booted = true; boot() }
+  setTimeout(once, DIAG_WAIT_MS)
+  void import('./lib/diag').then((m) => m.startDiag()).catch((e) => console.warn('[diag]', e)).finally(once)
+} else boot()

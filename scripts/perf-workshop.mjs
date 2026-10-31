@@ -161,7 +161,7 @@ await cdp.send('Page.addScriptToEvaluateOnNewDocument', { source: `(() => {
     onCommitFiberRoot(_id, root) { commits++; try { walk(root.current.child) } catch {} },
   }
   window.__perf = {
-    reset() { frames.length = 0; renders.clear(); commits = 0; window.__longtasks.length = 0 },
+    reset() { frames.length = 0; renders.clear(); commits = 0; window.__longtasks.length = 0; g.draws = 0; g.bufferData = 0; g.bufferBytes = 0; g.subData = 0 },
     read() {
       const f = frames.slice().sort((a, b) => a - b)
       const q = (p) => f.length ? Math.round(f[Math.min(f.length - 1, Math.floor(p * f.length))] * 10) / 10 : 0
@@ -358,8 +358,53 @@ await phase('freshFace', async () => {
   for (const q of pts) { await tap(q.x, q.y); await sleep(150); await ev(`window.__ws.getState().colorSelected([20, 0, 255])`); await sleep(150) }
 })
 
+// Asked for by name only (PHASES=menuTaps,soak): not part of a plain run.
+// Tapping faces with the MENU list open, a library's worth of rows beside the bench.
+if (ONLY?.has('menuTaps')) {
+  const want = await ev(`(() => { const w = window.__ws.getState(); const nave = w.shards.find((s) => s.name.includes(${JSON.stringify(piece)})); w.select(nave.id); w.setTool('face'); [...document.querySelectorAll('button')].find((b) => /MENU/.test(b.textContent)).click(); return nave.id })()`)
+  await sleep(6000)
+  await phase('menuTaps', async () => {
+    const pts = (await facePoints(40)).filter((q) => q.x > box.x + box.w * 0.55).slice(0, 12)
+    for (const q of pts) { await tap(q.x, q.y); await sleep(250) }
+    await ev(`window.__ws.getState().colorSelected([0, 0, 1])`); await sleep(600)
+  })
+  await ev(`[...document.querySelectorAll('button')].find((b) => /MENU/.test(b.textContent)).click()`)
+  void want
+}
+// Working for minutes, as he does: tap, paint, seam, orbit, over and over. Is it the same at the end?
+if (ONLY?.has('soak')) {
+  const SOAK_S = Number(process.env.SOAK_S ?? 180)
+  await ev(`(() => { const w = window.__ws.getState(); const nave = w.shards.find((s) => s.name.includes(${JSON.stringify(piece)})); w.select(nave.id); w.setTool('face'); w.setDivision(120) })()`)
+  await sleep(2000)
+  await ev('window.__perf.reset()')
+  const t0 = Date.now()
+  const rows = []
+  let next = 30, k = 0
+  while ((Date.now() - t0) / 1000 < SOAK_S) {
+    const pts = await facePoints(8)
+    for (const q of pts) { await tap(q.x, q.y); await sleep(120) }
+    await ev(`(() => { const w = window.__ws.getState(); w.colorSelected(${k % 2 ? '[0, 0, 1]' : '[0, 1, 0.5]'}) })()`); await sleep(150)
+    await ev(`(() => { const w = window.__ws.getState(); if (w.selectedFaces) { if (w.selectedFaces.length) w.colorFaces(w.selectedFaces, [1, 0, 0]) } else if (w.selectedFace !== null) w.colorFace(w.selectedFace, [1, 0, 0]) })()`); await sleep(150)
+    await ev(`window.__ws.getState().selectVertex(null)`); await sleep(100)
+    await orbitDrive(1.5)
+    k++
+    const t = (Date.now() - t0) / 1000
+    if (t >= next) {
+      next += 30
+      await cdp.send('HeapProfiler.collectGarbage')
+      const heap = await cdp.send('Runtime.getHeapUsage')
+      const p = await ev('window.__perf.read()')
+      const row = { t: Math.round(t), heapMB: Math.round(heap.usedSize / 1e5) / 10, longtasks: p.longtasks, longtaskMs: p.longtaskMs, longestMs: p.longest, p95: p.p95, over50: p.over50, frames: p.frames, renders: p.renders, glBuffers: p.gl.buffers, glVAOs: p.gl.vaos, programs: p.gl.programs, linked: p.gl.linked, past: await ev('window.__ws.getState().past.length') }
+      console.log('SOAK', JSON.stringify(row))
+      rows.push(row)
+      await ev('window.__perf.reset()')
+    }
+  }
+  results.push({ phase: 'soak', rows })
+}
+
 // 9. What the handles must still do, by real taps, and that a still bench draws nothing.
-if (!ONLY || ONLY.has('verify')) {
+if ((!ONLY && !process.env.NO_VERIFY) || ONLY?.has('verify')) {
   const checks = []
   const check = (name, ok, got) => { checks.push({ name, ok: !!ok, got }); console.log(ok ? '  ok  ' : '  FAIL', name, got === undefined ? '' : JSON.stringify(got)) }
   const st = () => ev(`(() => { const w = window.__ws.getState(); const s = w.current(); return { tool: w.tool, sel: w.selection.slice(), pick: w.facePick.slice(), face: w.selectedFace, v: s.vertices.length, f: s.faces.length } })()`)

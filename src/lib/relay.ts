@@ -17,7 +17,7 @@ import { verifyOnce } from './verifiedSigs'
 import type { Filter } from 'nostr-tools/filter'
 import type { EventTemplate, VerifiedEvent } from 'nostr-tools/core'
 import type { NostrEvent } from './events'
-import { currentRelays, DEFAULT_RELAY } from '../store/useRelays'
+import { currentRelays, DEFAULT_RELAY, isRetiredRelay } from '../store/useRelays'
 import { LiveRegistry, type Transport } from './liveSub'
 import { classifyClose, mergeAnswers, type RelayAnswer } from './relayOutcome'
 import { normalizeURL } from 'nostr-tools/utils'
@@ -56,6 +56,7 @@ function noteHung(url: string): void {
 /** Every connection goes through ensureRelay, publishing and live subscriptions included. */
 class Pool extends AbstractSimplePool {
   override async ensureRelay(...[url, params]: Parameters<AbstractSimplePool['ensureRelay']>): ReturnType<AbstractSimplePool['ensureRelay']> {
+    if (isRetiredRelay(url)) throw new Error('retired relay, not dialed')
     if ((hungUntil.get(normalizeURL(url)) ?? 0) > Date.now()) throw new Error('relay hung, left alone for now')
     const started = Date.now()
     try {

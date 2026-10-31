@@ -17,6 +17,12 @@
  * Shared, a placement costs its own transform, materials and draw calls.
  * Nothing here is written after it is built: a placement that decodes or
  * dissolves keeps a copy of its own (ShardMesh).
+ *
+ * One set per object per canvas. A geometry's dispose frees its buffers in every
+ * renderer at once, so shared across canvases, a canvas held its GL copy until
+ * the last placement anywhere had left. A canvas now frees its own when its own
+ * placements leave, which matters for the canvases that stay parked and empty:
+ * the pictures' stage and a card's preview (review of #563).
  */
 
 import type { BufferGeometry } from 'three'
@@ -44,14 +50,25 @@ interface Entry<S> {
   released: boolean
 }
 
-const entries = new WeakMap<object, Entry<unknown>>()
+/** By object, then by the renderer that draws it. Both weak: an object or a canvas that goes takes its entries with it. */
+const entries = new WeakMap<object, WeakMap<object, Entry<unknown>>>()
 
-/** The object's buffers, made the first time anything asks. Safe in a render: nothing is held until `holdPlaced`. */
-export function placedBuffers<S>(model: object, make: () => PlacedBuffers<S>): PlacedBuffers<S> {
-  let e = entries.get(model) as Entry<S> | undefined
+function ofModel(model: object): WeakMap<object, Entry<unknown>> {
+  let byRenderer = entries.get(model)
+  if (!byRenderer) {
+    byRenderer = new WeakMap()
+    entries.set(model, byRenderer)
+  }
+  return byRenderer
+}
+
+/** The object's buffers for this renderer, made the first time it asks. Safe in a render: nothing is held until `holdPlaced`. */
+export function placedBuffers<S>(model: object, renderer: object, make: () => PlacedBuffers<S>): PlacedBuffers<S> {
+  const byRenderer = ofModel(model)
+  let e = byRenderer.get(renderer) as Entry<S> | undefined
   if (!e) {
     e = { buffers: make(), holders: 0, released: false }
-    entries.set(model, e as Entry<unknown>)
+    byRenderer.set(renderer, e as Entry<unknown>)
   }
   return e.buffers
 }
@@ -62,12 +79,13 @@ export function placedBuffers<S>(model: object, make: () => PlacedBuffers<S>): P
  * arrays go. Not at once: a commit that replaces one placement with another runs
  * every cleanup before every new effect.
  */
-export function holdPlaced(model: object, buffers: PlacedBuffers<unknown>): () => void {
-  let e = entries.get(model)
+export function holdPlaced(model: object, renderer: object, buffers: PlacedBuffers<unknown>): () => void {
+  const byRenderer = ofModel(model)
+  let e = byRenderer.get(renderer)
   // Let go between its render and this effect: the same buffers come back, or they would be drawn unowned.
   if (!e || e.buffers !== buffers) {
     e = { buffers, holders: 0, released: false }
-    entries.set(model, e)
+    byRenderer.set(renderer, e)
   }
   const entry = e
   entry.holders++
@@ -76,7 +94,7 @@ export function holdPlaced(model: object, buffers: PlacedBuffers<unknown>): () =
     setTimeout(() => {
       if (entry.holders > 0 || entry.released) return
       entry.released = true
-      if (entries.get(model) === entry) entries.delete(model)
+      if (byRenderer.get(renderer) === entry) byRenderer.delete(renderer)
       for (const g of entry.buffers.geometries()) g.dispose()
     }, 0)
   }

@@ -25,17 +25,20 @@ export function composerSamples(pixels: number): number {
   return pixels > HIGH_RES_PIXELS ? SAMPLES_HIGH_RES : SAMPLES
 }
 
-/** What the scene's buffer asks for, in bytes: the multisampled colour, depth and stencil, and the resolved colour. */
+/** What the scene's buffer asks for, in bytes: the multisampled colour, depth and stencil, and the resolved colour, depth and stencil. */
 export function composerBytes(pixels: number, samples: number): number {
-  return pixels * samples * (COLOUR_B + DEPTH_STENCIL_B) + pixels * COLOUR_B
+  return pixels * samples * (COLOUR_B + DEPTH_STENCIL_B) + pixels * (COLOUR_B + DEPTH_STENCIL_B)
 }
 
 /**
- * The device pixels of the screen this page opened on, at the ratio the canvas
- * draws at (Scene.tsx: 1 to 2). Read once: a new sample count makes a new
- * composer, and dragging the window across monitors should not.
+ * The device pixels of the canvas this page opened with, at the ratio it draws at
+ * (Scene.tsx: 1 to 2). From the window and not the screen: browser zoom raises the
+ * ratio and leaves `screen` alone, so 1440p at 125% read as 5.8 MP with the same
+ * canvas pixels as ever, where the window shrinks as the ratio rises and the two
+ * cancel. Read once: a new sample count makes a new composer, and resizing or
+ * dragging the window across monitors should not.
  */
-export function screenPixels(view: { screen: { width: number; height: number }; devicePixelRatio: number }): number {
+export function canvasPixels(view: { innerWidth: number; innerHeight: number; devicePixelRatio: number }): number {
   const ratio = Math.min(2, Math.max(1, view.devicePixelRatio))
-  return view.screen.width * view.screen.height * ratio * ratio
+  return view.innerWidth * view.innerHeight * ratio * ratio
 }

@@ -111,6 +111,94 @@ describe('the client', () => {
   })
 })
 
+describe('the order calls run in', () => {
+  /** A fresh client over stand-in ops, whose answers the test releases one at a time. */
+  async function heldClient() {
+    vi.resetModules()
+    const ran: number[] = []
+    const release = new Map<number, () => void>()
+    vi.doMock('../ops', () => ({
+      answer: (r: EventDbRequest) => {
+        ran.push(r.call)
+        return new Promise<EventDbResponse>((resolve) => { release.set(r.call, () => resolve({ call: r.call, ok: true, value: r.call })) })
+      },
+    }))
+    const c = await import('../client')
+    vi.doUnmock('../ops')
+    return { c, ran, release }
+  }
+  const settle = (): Promise<void> => new Promise((r) => setTimeout(r, 5))
+
+  it('on the main thread, one at a time, in the order asked', async () => {
+    vi.unstubAllGlobals()
+    const { c, ran, release } = await heldClient()
+    const first = c.callEventDb('budget', [])
+    const second = c.callEventDb('budget', [])
+    await settle()
+    expect(ran).toEqual([1])
+    release.get(1)!()
+    await first
+    await settle()
+    expect(ran).toEqual([1, 2])
+    release.get(2)!()
+    await second
+  })
+
+  it('what a failed worker had not answered runs here oldest first, one at a time', async () => {
+    FakeWorker.behaviour = 'quiet'
+    const { c, ran, release } = await heldClient()
+    const first = c.callEventDb('budget', [])
+    const second = c.callEventDb('budget', [])
+    await settle()
+    expect(ran).toEqual([])
+    FakeWorker.made[0].onerror?.()
+    await settle()
+    expect(ran).toEqual([1])
+    release.get(1)!()
+    await first
+    await settle()
+    expect(ran).toEqual([1, 2])
+    release.get(2)!()
+    await second
+  })
+
+  it('a worker answering is a worker alive: a long queue is not given up while answers come', async () => {
+    vi.useFakeTimers()
+    try {
+      FakeWorker.behaviour = 'quiet'
+      const { c } = await heldClient()
+      const first = c.callEventDb('budget', [], 100)
+      const second = c.callEventDb('budget', [], 100)
+      const w = FakeWorker.made[0]
+      await vi.advanceTimersByTimeAsync(80)
+      w.onmessage?.({ data: { call: 1, ok: true, value: 1 } } as MessageEvent<EventDbResponse>)
+      await first
+      await vi.advanceTimersByTimeAsync(80)
+      expect(w.terminated).toBe(false)
+      w.onmessage?.({ data: { call: 2, ok: true, value: 2 } } as MessageEvent<EventDbResponse>)
+      expect(await second).toBe(2)
+      expect(w.terminated).toBe(false)
+    } finally { vi.useRealTimers() }
+  })
+
+  it('a worker that stops answering is still given up', async () => {
+    vi.useFakeTimers()
+    try {
+      FakeWorker.behaviour = 'quiet'
+      const { c, release } = await heldClient()
+      const first = c.callEventDb('budget', [], 100)
+      const second = c.callEventDb('budget', [], 100)
+      const w = FakeWorker.made[0]
+      w.onmessage?.({ data: { call: 1, ok: true, value: 1 } } as MessageEvent<EventDbResponse>)
+      await first
+      await vi.advanceTimersByTimeAsync(150)
+      expect(w.terminated).toBe(true)
+      release.get(2)!()
+      expect(await second).toBe(2)
+    } finally { vi.useRealTimers() }
+  })
+})
+
 describe('notes', () => {
   it('another tab hears a write after it committed; the tab that wrote does not hear its own', async () => {
     const c = await freshClient()
@@ -121,9 +209,23 @@ describe('notes', () => {
     other.onmessage = (m) => others.push(m.data)
     const e = event(7)
     await c.callEventDb('ingest', [c.TAB_ID, [{ event: e, nip01: 1 }]])
-    await vi.waitFor(() => expect(others).toEqual([{ kind: 'events', by: c.TAB_ID, ids: [e.id] }]))
+    await vi.waitFor(() => expect(others).toEqual([{ kind: 'events', by: c.TAB_ID, ids: [e.id], struck: [] }]))
     expect(heardHere).toEqual([])
     stop()
+    other.close()
+  })
+
+  it('a note says what a deletion struck', async () => {
+    const c = await freshClient()
+    const others: unknown[] = []
+    const other = new BroadcastChannel('onosendai:events')
+    other.onmessage = (m) => others.push(m.data)
+    const e = event(9)
+    const del = finalizeEvent({ kind: 5, created_at: 2000, tags: [['e', e.id]], content: '' }, sk) as NostrEvent
+    await c.callEventDb('ingest', [c.TAB_ID, [{ event: e, nip01: 1 }]])
+    await c.callEventDb('ingest', [c.TAB_ID, [{ event: del, nip01: 1 }]])
+    await vi.waitFor(() => expect(others).toHaveLength(2))
+    expect(others[1]).toEqual({ kind: 'events', by: c.TAB_ID, ids: [del.id], struck: [e.id] })
     other.close()
   })
 

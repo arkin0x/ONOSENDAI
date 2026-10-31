@@ -11,7 +11,7 @@ import { chainHead, commitChain, migrateChain, partedBranches, readChain, setAsi
 export const eventDbOps = {
   async ingest(by: string, items: IngestItem[]) {
     const result = await withEventDb((db) => ingest(db, items))
-    if (result.added.length > 0) postNote({ kind: 'events', by, ids: result.added })
+    if (result.added.length > 0 || result.struck.length > 0) postNote({ kind: 'events', by, ids: result.added, struck: result.struck })
     return result
   },
   getRows: (ids: string[]) => withEventDb((db) => getRows(db, ids)),

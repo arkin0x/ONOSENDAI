@@ -99,7 +99,7 @@ beforeEach(() => {
   held = null
   localStorage.clear()
   useCyberspace.setState({ identity: { pubkey: home, npub: 'npub-home' }, live: true })
-  useShards.setState({ mine: [], deleted: {}, deletedBags: {}, discovered: {}, pending: null, selectedSecret: null, deployHeight: 0, deployUnit: 0, deployStatus: 'idle' })
+  useShards.setState({ mine: [], deleted: {}, deletedBags: {}, discovered: {}, pending: null, selectedSecret: null, deployHeight: 0, deployUnit: 0, deployStatus: 'idle', deployError: null })
 })
 
 describe('switching identity', () => {
@@ -136,7 +136,7 @@ describe('switching identity', () => {
   })
 
   it('puts a deploy that finishes after the switch on the list of whoever hid it', async () => {
-    const shard: ShardModel = { ...newShard('held'), unit: 1, vertices: [{ p: [0, 0, 0] }, { p: [1, 0, 0] }, { p: [0, 1, 0] }], faces: [[0, 1, 2]] } as ShardModel
+    const shard: ShardModel = { ...newShard('held'), unit: 1, vertices: Array.from({ length: 3 }, (_, i) => ({ p: [i % 16, Math.floor(i / 16) % 16, Math.floor(i / 256)] as [number, number, number], c: [1, 1, 1] as [number, number, number] })), faces: [[0, 1, 2]] }
     useWorkshop.setState({ shards: [shard], currentId: shard.id })
     localStorage.setItem(keyOf(Y), JSON.stringify([row(Y, 'y1')]))
     const relays = holdRelays()

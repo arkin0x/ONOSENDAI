@@ -171,6 +171,20 @@ export function sameNumbers(a: ArrayLike<number>, b: ArrayLike<number>): boolean
  * position and no triangle, and rebuilt, it was five new geometries and their
  * GPU buffers per paint.
  */
+/**
+ * What the position and color attributes live and die by. Every geometry a
+ * shard draws shares them, and disposing a geometry makes three delete the GL
+ * buffer of each attribute it holds, even one another geometry still uses. That
+ * geometry's vertex array goes on reading the deleted buffer, while three writes
+ * to a new one: a paint changes the store and the buffer and nothing on screen
+ * (SOLID, LINES, SOLID, then paint: review of #562). So they are made again
+ * whenever any geometry using them is: the points, the triangles (a FLIP), the
+ * mode (the wireframe) and `lit` (the insides). A paint changes none of these.
+ */
+export function sharedBufferDeps(positions: ArrayLike<number>, colorCount: number, index: ArrayLike<number>, mode: string, lit: boolean): unknown[] {
+  return [positions, colorCount, index, mode, lit]
+}
+
 function useSame<T extends ArrayLike<number>>(next: T): T {
   const held = useRef(next)
   if (!sameNumbers(held.current, next)) held.current = next
@@ -288,10 +302,14 @@ export function ShardMesh({ shard: given, scale = 1, ghost = false, birth, disso
   const index = useSame(built.index)
 
   // Live copies: the decode writes into these, the targets stay untouched.
-  const posAttr = useMemo(() => new Float32BufferAttribute(positions.slice(), 3), [positions])
-  // Made again only when the count changes. A paint is new colors on the same
-  // corners: they go into the buffer that is there, once, below.
-  const colAttr = useMemo(() => new Float32BufferAttribute(colors.slice(), 3), [colors.length])
+  // Made again with the geometries that share them (sharedBufferDeps), and not
+  // for a paint: new colors on the same corners go into the buffer that is
+  // there, once, below.
+  const buffers = sharedBufferDeps(positions, colors.length, index, shard.mode, lit)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const posAttr = useMemo(() => new Float32BufferAttribute(positions.slice(), 3), buffers)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const colAttr = useMemo(() => new Float32BufferAttribute(colors.slice(), 3), buffers)
   const invalidate = useThree((s) => s.invalidate)
   useLayoutEffect(() => {
     const a = colAttr.array as Float32Array

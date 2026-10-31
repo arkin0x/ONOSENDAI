@@ -8,7 +8,7 @@
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
-import { sameNumbers } from '../../scene/ShardMesh'
+import { sameNumbers, sharedBufferDeps } from '../../scene/ShardMesh'
 
 const workshop = readFileSync(join(__dirname, '..', 'Workshop.tsx'), 'utf8')
 const mesh = readFileSync(join(__dirname, '..', '..', 'scene', 'ShardMesh.tsx'), 'utf8')
@@ -27,11 +27,35 @@ describe('sameNumbers, which decides whether a geometry stands', () => {
   })
 })
 
+describe('the shared attributes live as long as the geometries that share them (review of #562)', () => {
+  const points = new Float32Array([0, 0, 0, 1, 0, 0, 0, 1, 0])
+  const tris = [0, 1, 2]
+  const deps = (over: Partial<{ positions: Float32Array; count: number; index: number[]; mode: string; lit: boolean }> = {}): unknown[] =>
+    sharedBufferDeps(over.positions ?? points, over.count ?? 9, over.index ?? tris, over.mode ?? 'solid', over.lit ?? true)
+  const changed = (a: unknown[], b: unknown[]): boolean => a.some((v, i) => !Object.is(v, b[i]))
+
+  it('a paint leaves them standing', () => {
+    expect(changed(deps(), deps())).toBe(false)
+  })
+  it('anything that disposes a geometry using them makes them again, or a later paint draws nothing', () => {
+    expect(changed(deps(), deps({ mode: 'lines' }))).toBe(true)
+    // A FLIP is new triangles: the outline and the insides go, and the discs would go on reading the old colors.
+    expect(changed(deps(), deps({ index: [0, 2, 1] }))).toBe(true)
+    expect(changed(deps(), deps({ lit: false }))).toBe(true)
+    // A nudge is new points.
+    expect(changed(deps(), deps({ positions: new Float32Array(9) }))).toBe(true)
+    // A first seam gives every face its own corners.
+    expect(changed(deps(), deps({ count: 12 }))).toBe(true)
+  })
+})
+
 describe('a paint on the bench', () => {
   it('keeps the geometries and their GPU buffers: the colors go into the buffer that is there', () => {
     expect(mesh).toMatch(/const positions = useSame\(built\.positions\)/)
     expect(mesh).toMatch(/const index = useSame\(built\.index\)/)
-    expect(mesh).toMatch(/new Float32BufferAttribute\(colors\.slice\(\), 3\), \[colors\.length\]\)/)
+    expect(mesh).toMatch(/new Float32BufferAttribute\(positions\.slice\(\), 3\), buffers\)/)
+    expect(mesh).toMatch(/new Float32BufferAttribute\(colors\.slice\(\), 3\), buffers\)/)
+    expect(mesh).toMatch(/const buffers = sharedBufferDeps\(positions, colors\.length, index, shard\.mode, lit\)/)
     expect(mesh).toMatch(/a\.set\(colors\)\s+colAttr\.needsUpdate = true/)
   })
   it('asks a canvas that draws on demand for a frame, since R3F set nothing', () => {

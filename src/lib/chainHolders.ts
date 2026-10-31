@@ -12,15 +12,16 @@
  * Kept per identity beside the saved chain, as the publisher keeps the
  * actions still owed to the canonical relay, so a reload still knows which
  * relays another device of this identity has been publishing to. A relay is
- * never dropped from the set: one that stops answering costs a move at most
- * those 2.5 s, until the player takes it out of the relay
- * list (only the configured relays are asked, so only they are waited for).
+ * never dropped from the set, unless it is retired (useRelays RETIRED_RELAYS):
+ * one that stops answering costs a move at most those 2.5 s, until the player
+ * takes it out of the relay list (only the configured relays are asked, so
+ * only they are waited for).
  */
 
 import { normalizeURL } from 'nostr-tools/utils'
 import type { NostrEvent } from './events'
 import type { RelayAnswer } from './relayOutcome'
-import { DEFAULT_RELAY } from '../store/useRelays'
+import { DEFAULT_RELAY, isRetiredRelay } from '../store/useRelays'
 
 /** Where an identity's set is saved: normalized relay URLs, the canonical relay left implicit. */
 const holdersKeyFor = (pubkey: string): string => `onosendai:chain-holders:${pubkey}`
@@ -34,7 +35,9 @@ function load(pubkey: string): Set<string> {
   const set = new Set<string>()
   try {
     const saved: unknown = JSON.parse(localStorage.getItem(holdersKeyFor(pubkey)) ?? '[]')
-    if (Array.isArray(saved)) for (const url of saved) if (typeof url === 'string') set.add(normalizeURL(url))
+    const urls = Array.isArray(saved) ? saved.filter((url): url is string => typeof url === 'string') : []
+    for (const url of urls) if (!isRetiredRelay(url)) set.add(normalizeURL(url))
+    if (urls.some(isRetiredRelay)) localStorage.setItem(holdersKeyFor(pubkey), JSON.stringify([...set]))
   } catch { /* nothing saved, or no storage here: an empty set */ }
   known.set(pubkey, set)
   return set

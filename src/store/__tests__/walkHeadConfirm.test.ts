@@ -92,11 +92,11 @@ beforeEach(async () => {
   relay.answers = []
   relay.onAsk = null
   useWalk.getState().exit()
-  useCyberspace.setState({ cloudPrefs: { ...S().cloudPrefs, mode: 'off' } })
+  useCyberspace.setState({ cloudPrefs: { ...S().cloudPrefs, mode: 'off' }, scaleExp: 0 })
   await placeSpawn()
   S().cancel()
   S().clearFocus()
-  useCyberspace.setState({ proof: { ...S().proof, status: 'idle', message: null }, transit: null, pendingTarget: null, chainConflict: null })
+  useCyberspace.setState({ proof: { ...S().proof, status: 'idle', message: null }, transit: null, pendingTarget: null, chainConflict: null, plan: null })
 })
 
 describe('WALK asks the relays once per step, before signing (arkinox, 2026-10-31)', () => {
@@ -161,6 +161,57 @@ describe('WALK asks the relays once per step, before signing (arkinox, 2026-10-3
     expect(previousOf(S().events[events + 1])).toBe(theirs.id)
     expect(S().position).toEqual(next.to)
     noFork()
+    useWalk.getState().exit()
+  })
+
+  it('a WALK step that runs as a route (a tall step at a coarse zoom): a head moved under it stops the walk, and nothing is computed again without a press (review of #541, F1)', async () => {
+    useWalk.getState().enter()
+    useCyberspace.setState({ scaleExp: 24 })
+    const head = S().prevEventId
+    const events = S().events.length
+    const req = await walkStep()
+    expect(S().plan?.walk).toBe(true)
+    expect(relay.asked).toBe(0)
+    const theirs = await theirMove(4n)
+    relay.answers = [[theirs]]
+    await S().applyProofMessage(done(req))
+    await new Promise((r) => setTimeout(r, 20))
+    // Refused at signing: their move taken in, no second proof asked, the
+    // route and the walk stopped with the WALK words.
+    expect(relay.asked).toBe(1)
+    expect(S().prevEventId).toBe(theirs.id)
+    expect(S().events).toHaveLength(events + 1)
+    expect(S().events.filter((e) => previousOf(e) === head).map((e) => e.id)).toEqual([theirs.id])
+    expect(posted).toHaveLength(1)
+    expect(S().plan).toBeNull()
+    expect(S().proof.message).toBe('Another device moved you. Re-aim from where you are now.')
+    expect(useWalk.getState().running).toBeNull()
+    expect(useWalk.getState().queue).toEqual([])
+    expect(S().cursor).toEqual(S().position)
+    // The next press starts from their move.
+    const next = await walkStep()
+    expect(next.prevEventId).toBe(theirs.id)
+    expect(next.from).toEqual(S().position)
+    noFork()
+    useWalk.getState().exit()
+  })
+
+  it('the WALK words are for a WALK step only: a proof that is not one keeps its own words while walking (a COMMIT, a HOSAKA result)', async () => {
+    useWalk.getState().enter()
+    // A COMMIT's proof, while WALK is on.
+    useCyberspace.setState({ cursor: { ...S().position, x: S().position.x + 1n } })
+    await S().commit()
+    expect(posted).toHaveLength(1)
+    relay.answers = [[await theirMove(4n)]]
+    await S().applyProofMessage(done(posted[0]))
+    expect(S().proof.message).toMatch(/Your aim is kept: commit again/)
+    // A WALK step's request answered as a HOSAKA result: never a WALK step's (a walk never pays).
+    useCyberspace.setState({ proof: { ...S().proof, status: 'idle', message: null } })
+    useWalk.getState().stop()
+    const req = await walkStep()
+    relay.answers = [[await theirMove(6n)]]
+    await S().applyProofMessage({ ...done(req), source: 'cloud' as const })
+    expect(S().proof.message).toMatch(/Your aim is kept: commit again/)
     useWalk.getState().exit()
   })
 

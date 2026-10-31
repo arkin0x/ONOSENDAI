@@ -13,6 +13,7 @@ import { describe, expect, it } from 'vitest'
 import { Color, DoubleSide, type BufferAttribute } from 'three'
 import { DIVISIONS, TICKS_PER_UNIT } from 'sno-core/shards'
 import { ACCENT } from '../../lib/palette'
+import { TRANSLUCENT_ORDER } from '../../scene/shardFaces'
 import { BenchGrid } from '../benchGrid'
 
 const made = (extent = 8, division = 1): BenchGrid => { const g = new BenchGrid(); g.set(extent, division); return g }
@@ -139,7 +140,10 @@ describe('the material rules', () => {
     expect(m.toneMapped).toBe(false)
   })
 
-  it('draws before anything see-through', () => {
-    expect(made().mesh.renderOrder).toBeLessThan(0)
+  it('draws after opaque faces and before see-through ones, so the depth test can sort it against a face', () => {
+    // Faces are order 0 and write depth; the grid writes none. At -1 a face painted over the grid even behind it.
+    expect(made().mesh.renderOrder).toBeGreaterThan(0)
+    expect(made().mesh.renderOrder).toBeLessThan(TRANSLUCENT_ORDER)
+    expect(made().mesh.material.depthTest).toBe(true)
   })
 })

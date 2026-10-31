@@ -46,11 +46,15 @@ const UNIT_LINE_DIVIDED = '#166c86'
 const QUAD_PAD = 1
 
 /**
- * Before every transparent thing and after every opaque one: the grid is
- * blended (for its antialiasing and fade) but it sits under anything
- * see-through, as it did when it was opaque lines (shardFaces.ts draw order).
+ * After opaque faces and before see-through ones (shardFaces.ts draw order).
+ * An opaque shard's faces carry three's transparent flag at order 0 and write
+ * depth, and the grid is blended and writes none. Drawn before them, at -1, the
+ * faces painted over the grid even where the grid stood in front (review of
+ * #558). Drawn after, the depth test sorts them: a line in front of a face
+ * shows, and one behind it does not. Before order 1, see-through faces still
+ * blend over it, as they did when it was opaque lines.
  */
-const GRID_ORDER = -1
+const GRID_ORDER = 0.5
 
 const VERTEX = /* glsl */ `
 varying vec2 vGrid;

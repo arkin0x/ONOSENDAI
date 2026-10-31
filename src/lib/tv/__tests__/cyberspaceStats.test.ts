@@ -222,9 +222,11 @@ describe('the boards', () => {
     expect(profilesSettled(keys, () => false, 1000, 1000 + PROFILE_HOLD_MS)).toBe(true)
   })
 
-  it('the site counts by one flag, ON for now; the stream always counts', () => {
-    expect(STATS_ON_SITE).toBe(true)
-    expect(statsOn(false)).toBe(true)
+  it('the site counts by one flag, OFF (2026-10-31); the stream always counts', () => {
+    expect(STATS_ON_SITE).toBe(false)
+    expect(statsOn(false)).toBe(false)
+    expect(statsOn(true)).toBe(true)
+    expect(statsOn(false, true)).toBe(true)
     expect(statsOn(false, false)).toBe(false)
     expect(statsOn(true, false)).toBe(true)
   })

@@ -11,18 +11,20 @@
  *
  * | Rule | Counts | Badge |
  * |---|---|---|
- * | chainLength | valid actions on the current chain, the spawn included | CHAIN, for now (below) |
- * | respawnCount | spawns after the first whose chain went on past the spawn | PHOENIX, for now (below) |
+ * | chainLength | valid actions on the current chain, the spawn included | the LONGEST CHAIN board and the ticker (not a badge) |
+ * | bestChainLength | valid actions on the best (longest) of all the key's chains, the spawn included | CHAIN |
+ * | respawnCount | spawns after the first whose chain went on to a valid hop | PHOENIX |
  * | activeKeys | keys with a valid action in a window | REGULAR's "valid action" |
  * | bagsHidden | live sealed bags, distinct d, at most 5 a UTC day | STASH |
  * | objectsPublished | live public objects, distinct shape, 8+ vertices, at most 10 a UTC day | BUILDER |
  * | arrivalTimes | each key's first v2 spawn | the ticker's AVATARS, NEW ARRIVALS |
  *
- * Two owner rulings are pending, and these rules follow the board for now
- * (review of #537): CHAIN in the badge catalog counts the best of any of a
- * key's chains, where chainLength counts the current chain; and PHOENIX
- * asks for a valid hop after the newest spawn, where respawnCount counts a
- * respawn followed by any valid action.
+ * Two owner rulings (arkinox, 2026-10-31), both raised in the review of
+ * #537: the LONGEST CHAIN board counts the current chain (chainLength), and
+ * the CHAIN badge counts the best chain the key ever reached
+ * (bestChainLength), two separate rules; and a respawn counts for PHOENIX
+ * and MOST RESPAWNS only when its chain goes on to a valid hop, as the badge
+ * catalog says, not to any valid action (respawnCount).
  *
  * What these rules never read or return: a place. No coordinate, sector,
  * height, hint or lookup id is part of any answer here, only keys and counts
@@ -92,12 +94,13 @@ function asOf(events: NostrEvent[], t: number): NostrEvent[] {
 }
 
 /**
- * LONGEST CHAIN: the valid actions on `pubkey`'s current chain as of `t`
- * (the current chain for now; the catalog's CHAIN badge counts the best of
- * any chain, an owner ruling pending). The current chain is the newest spawn by the key
- * itself, followed forward by `previous` links through every event whose
- * genesis names it, whatever its `A` (spec 8.7.3, lib/events buildChain). The
- * ticker's CHAIN OF n ACTIONS and the board are this one function.
+ * LONGEST CHAIN, the board: the valid actions on `pubkey`'s CURRENT chain as
+ * of `t` (ruling 2026-10-31: the board is the current chain; the CHAIN
+ * badge's best chain is bestChainLength). The current chain is the newest
+ * spawn by the key itself, followed forward by `previous` links through
+ * every event whose genesis names it, whatever its `A` (spec 8.7.3,
+ * lib/events buildChain). The ticker's CHAIN OF n ACTIONS and the board are
+ * this one function. A respawn starts it again from 1.
  */
 export function chainLength(events: NostrEvent[], pubkey: string, t: number = Infinity): number {
   return validPrefixLength(buildChain(asOf(events, t).filter(isV2Action), pubkey))
@@ -126,16 +129,46 @@ export function chainFrom(events: NostrEvent[], spawn: NostrEvent, t: number = I
 }
 
 /**
- * MOST RESPAWNS, "respawned and kept going" (any valid action for now; the
- * catalog's PHOENIX asks for a valid hop, an owner ruling pending): the key's spawns after
- * its first, as of `t`, counting a spawn only when its own chain's valid
- * prefix goes on past the spawn (at least one valid action after it). A spawn
- * with nothing after it is free and counts for nothing.
+ * The CHAIN badge's number: the valid actions on the BEST chain `pubkey`
+ * ever reached as of `t`, the longest valid prefix of any of its chains, the
+ * spawn included (badge catalog: "any one chain of the identity"; ruling
+ * 2026-10-31). Unlike chainLength (the board's current chain), a respawn
+ * never lowers it: a chain left behind keeps the length it reached. Each
+ * chain is counted as chainLength counts one: a fork ends it, a gap stops
+ * it, only its valid prefix counts.
+ */
+export function bestChainLength(events: NostrEvent[], pubkey: string, t: number = Infinity): number {
+  let best = 0
+  for (const s of spawnsOf(events, pubkey, t)) best = Math.max(best, validPrefixLength(chainFrom(events, s, t)))
+  return best
+}
+
+/**
+ * Whether a chain goes on, within its first `valid` entries (its valid
+ * prefix), to a valid hop after its spawn: what PHOENIX asks of a respawn. On
+ * the valid prefix a hop is always a base action (a hop inside a bracket
+ * breaks the chain), so a hop there is a valid hop.
+ */
+export function goesOnToHop(chain: ActionEvent[], valid: number): boolean {
+  for (let i = 1; i < valid; i++) if (chain[i].type === 'hop' && chain[i].role === 'base') return true
+  return false
+}
+
+/**
+ * MOST RESPAWNS and PHOENIX, "respawned and kept going": the key's spawns
+ * after its first, as of `t`, counting a spawn only when its own chain's
+ * valid prefix goes on to a valid HOP (ruling 2026-10-31, as the badge
+ * catalog says: "a valid hop after the newest one"). A spawn with nothing
+ * after it, or with only other actions after it (an enter-hyperspace, a
+ * sidestep), counts for nothing.
  */
 export function respawnCount(events: NostrEvent[], pubkey: string, t: number = Infinity): number {
   const spawns = spawnsOf(events, pubkey, t)
   let n = 0
-  for (const s of spawns.slice(1)) if (validPrefixLength(chainFrom(events, s, t)) >= 2) n++
+  for (const s of spawns.slice(1)) {
+    const chain = chainFrom(events, s, t)
+    if (goesOnToHop(chain, validPrefixLength(chain))) n++
+  }
   return n
 }
 
@@ -231,7 +264,9 @@ export function activeKeys(byAuthor: Map<string, NostrEvent[]>, from: number, to
  * goes through.
  */
 export interface KeyChains {
+  /** The CURRENT chain's valid actions (chainLength, the LONGEST CHAIN board); never the best chain (bestChainLength). */
   chainLength: number
+  /** Respawns whose chain went on to a valid hop (respawnCount). */
   respawns: number
   /** A valid action in (`t` - WEEK_S, `t`]. */
   activeWeek: boolean
@@ -255,7 +290,7 @@ export function keyChains(events: NostrEvent[], pubkey: string, t: number = Infi
   spawns.forEach((s, i) => {
     const chain = buildChain([s, ...(under.get(s.id) ?? [])], pubkey)
     const valid = validPrefixLength(chain)
-    if (i > 0 && valid >= 2) respawns++
+    if (i > 0 && goesOnToHop(chain, valid)) respawns++
     // The newest spawn, in NIP-01's order (lib/events newestSpawn), is the last of the oldest-first list.
     if (i === spawns.length - 1) current = valid
     if (!activeWeek) for (let k = 0; k < valid; k++) if (chain[k].createdAt > t - WEEK_S && chain[k].createdAt <= t) { activeWeek = true; break }

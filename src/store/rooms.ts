@@ -3,7 +3,7 @@
  * held; chest and door design, 4.9, R5, R17).
  *
  * OPEN on a door, always a tap (R17): the door is opened as a chest and its
- * secret read (lib/doors.ts), the room region's location key taken (the bag
+ * secret read (lib/doors.ts). Then the room region's location key is taken (the bag
  * key in hand when the door was found in a bag of its own height, else
  * computed for the door's height), the room key derived, and the room bag
  * fetched by its `d` from the door's signer alone, then opened as a bag.
@@ -12,6 +12,9 @@
  *
  * Every door of one signer, height and region is a door to one room (R5,
  * §3.7.5): opening one opens all of them, for you.
+ *
+ * A door is opened the moment its secret is read, and its room fetched after, so
+ * no relay ever holds up the card, the ceremony or the walker.
  *
  * The secret is kept on this device, per identity, once known: a finder's
  * reload opens the room again as it was (store/useShards addDiscovered),
@@ -116,20 +119,28 @@ export function doorsOfRoom(door: Hidden): Hidden[] {
 }
 
 /**
- * The room behind a door, opened with a secret this identity knows: its
- * entries found where they stand, every door of the room opened for you
- * (R5), the secret kept. `fresh` marks them for the reveal (a first OPEN);
- * a reload's reopening shows them as they were. Null when the identity
- * changed meanwhile: what one identity opened is never filed under another.
+ * A door opened by hand, at once and before any relay is asked (his ruling: "OPEN
+ * closes the modal", "WALK passes at once"): every door of its room open for this
+ * identity (R5), the secret kept. Fetching the room comes after (fillRoom).
  */
-export async function enterRoom(door: Hidden, secretHex: string, mark?: (items: Hidden[]) => void): Promise<OpenedRoom | null> {
+export function openDoorNow(door: Hidden, secretHex: string): void {
   const me = useCyberspace.getState().identity.pubkey
-  const opened = await openRoom(door, secretHex)
-  if (useCyberspace.getState().identity.pubkey !== me) return null
   for (const d of doorsOfRoom(door)) {
     keepDoorSecret(me, d.eventId, secretHex)
     if (d.chest) rememberOpened(me, d.eventId, d.chest.lockPubkey, [])
   }
+}
+
+/**
+ * The room behind a door opened (openDoorNow): its entries found where they
+ * stand. `mark` marks them for the reveal, a first OPEN; a reload's reopening shows
+ * them as they were. Null when the identity changed meanwhile: what one identity
+ * opened is never filed under another.
+ */
+export async function fillRoom(door: Hidden, secretHex: string, mark?: (items: Hidden[]) => void): Promise<OpenedRoom | null> {
+  const me = useCyberspace.getState().identity.pubkey
+  const opened = await openRoom(door, secretHex)
+  if (useCyberspace.getState().identity.pubkey !== me) return null
   if (opened.items.length > 0) {
     useShards.getState().addDiscovered(opened.items)
     mark?.(opened.items)
@@ -137,10 +148,37 @@ export async function enterRoom(door: Hidden, secretHex: string, mark?: (items: 
   return opened
 }
 
-/** A door opened by hand before, after a reload: its room opened again with the secret kept here, quietly. */
+/** Both: the door open, then its room. */
+export async function enterRoom(door: Hidden, secretHex: string, mark?: (items: Hidden[]) => void): Promise<OpenedRoom | null> {
+  if (door.chestId) throw new Error('A door found inside a chest does not open a room.')
+  openDoorNow(door, secretHex)
+  return fillRoom(door, secretHex, mark)
+}
+
+/** How soon an opened door's room is asked for again by a scan: a found room rarely, one not found soon, since it may only be missing from the relays asked. */
+const REOPEN_FOUND_MS = 5 * 60_000
+const REOPEN_MISSING_MS = 30_000
+const lastReopen = new Map<string, { at: number; found: boolean }>()
+
+/** For tests: forget when each room was last asked for. */
+export function resetReopens(): void { lastReopen.clear() }
+
+/**
+ * A door opened by hand before, after a reload or a later scan: its room opened
+ * again with the secret kept here, quietly. A scan finds a bag again and again, so
+ * a room that was found is not asked for again soon, and one that was not is.
+ */
 export async function reopenRoom(door: Hidden): Promise<void> {
   const me = useCyberspace.getState().identity.pubkey
   const secret = doorSecret(me, door.eventId)
   if (!secret) return
-  try { await enterRoom(door, secret) } catch { /* unreachable now: OPEN again later */ }
+  const key = `${me}/${door.eventId}`
+  const was = lastReopen.get(key)
+  if (was && Date.now() - was.at < (was.found ? REOPEN_FOUND_MS : REOPEN_MISSING_MS)) return
+  // Claimed before the wait: scans do not stack up behind a slow relay.
+  lastReopen.set(key, { at: Date.now(), found: was?.found ?? false })
+  try {
+    const opened = await enterRoom(door, secret)
+    if (opened) lastReopen.set(key, { at: Date.now(), found: opened.found })
+  } catch { /* unreachable now: the next scan asks again */ }
 }

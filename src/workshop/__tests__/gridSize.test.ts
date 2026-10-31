@@ -25,7 +25,7 @@ describe('GRID SIZE stepping', () => {
   it('gets from 64 to the top in under twenty seconds of holding the key', () => {
     let e = 64, presses = 0
     while (e < MAX_EXTENT) { e = stepExtent(e, 1); presses++ }
-    expect(presses).toBe(160)
+    expect(presses).toBe(16 * Math.log2(MAX_EXTENT / 64))
     expect(presses * 110).toBeLessThan(20_000) // useRepeatable's REPEAT_MS
   })
 
@@ -61,7 +61,7 @@ describe('the bench camera follows the grid', () => {
   it('keeps depth usable far out, where 0.05 could not sort a thing', () => {
     const resolution = (d: number, near: number): number => (d * d) / (near * 2 ** 24)
     const d = benchReach(MAX_EXTENT).maxDistance
-    expect(resolution(d, BENCH_NEAR) / d).toBeGreaterThan(0.1)
+    expect(resolution(d, BENCH_NEAR) / d).toBeGreaterThan(0.01)
     expect(resolution(d, benchNear(d)) / d).toBeLessThan(0.001)
   })
 

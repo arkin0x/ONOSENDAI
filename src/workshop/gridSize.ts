@@ -38,8 +38,8 @@ const FAR_MIN = 200
 export const BENCH_NEAR = 0.05
 /**
  * Near plane to camera distance. A depth buffer has 24 bits, spent mostly near
- * the near plane, so at 0.05 a camera 100,000 units out cannot tell faces 10,000
- * units apart. Within 200 units this leaves the near plane exactly where it was.
+ * the near plane, so at 0.05 a camera far out cannot tell faces apart that are
+ * a hundred units from each other. Within 200 units this leaves the near plane exactly where it was.
  */
 const NEAR_FRACTION = 1 / 4000
 

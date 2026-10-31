@@ -19,7 +19,8 @@ import type { EventTemplate, VerifiedEvent } from 'nostr-tools/core'
 import type { NostrEvent } from './events'
 import { currentRelays, DEFAULT_RELAY, isRetiredRelay } from '../store/useRelays'
 import { LiveRegistry, type Transport } from './liveSub'
-import { classifyClose, mergeAnswers, type RelayAnswer } from './relayOutcome'
+import { authOpen } from './authOpen'
+import { AUTH_STALLED, classifyClose, mergeAnswers, type RelayAnswer } from './relayOutcome'
 import { normalizeURL } from 'nostr-tools/utils'
 import { useCyberspace } from '../store/useCyberspace'
 
@@ -205,21 +206,27 @@ interface AuthRelay {
  * and re-auths on its own when a reconnect brings a fresh challenge.
  */
 const authedFor = new Map<string, string>()
-const noChallenge = new Set<string>()
+const noChallenge = new WeakSet<object>()
 async function authRelay(url: string): Promise<void> {
-  // A relay that never challenged before will not now: skip the wait.
-  if (noChallenge.has(url)) return
   const started = Date.now()
   try {
     const relay = (await getPool().ensureRelay(url)) as unknown as AuthRelay
+    // This socket did not challenge when asked before: skip the wait. A challenge since, or a new socket, is seen.
+    if (!relay.challenge && noChallenge.has(relay)) return
     for (let i = 0; i < 10 && !relay.challenge; i++) await new Promise((r) => setTimeout(r, 40))
     if (relay.challenge) {
       if (authedFor.get(url) !== relay.challenge) {
-        await relay.auth(authSign)
-        authedFor.set(url, relay.challenge)
+        const key = normalizeURL(url)
+        authOpen.set(key, relay)
+        try {
+          await relay.auth(authSign)
+          authedFor.set(url, relay.challenge)
+        } finally {
+          if (authOpen.get(key) === relay) authOpen.delete(key)
+        }
       }
     } else {
-      noChallenge.add(url)
+      noChallenge.add(relay)
     }
   } catch (err) {
     // Relay down, or does not require auth; or it took the socket and never answered its AUTH.
@@ -228,8 +235,38 @@ async function authRelay(url: string): Promise<void> {
   }
 }
 
-async function authAll(relays: string[]): Promise<void> {
-  await Promise.allSettled(relays.map(authRelay))
+/** How long anything waits for the signer before going on without that relay. */
+const AUTH_WAIT_MS = MAX_WAIT_MS
+/** The last word on a publish: nostr-tools' own auth-required retry waits on an AUTH that may never settle. */
+const PUBLISH_BOUND_MS = 15_000
+
+/**
+ * Wait for these relays' AUTHs, up to a bound. Resolves to the relays not done
+ * yet, which must not be read or sent to: their AUTH stays in flight on its
+ * socket, so a signer that answers later lands with no second prompt. A signer
+ * is not the relay's doing, so this never counts against the relay.
+ */
+async function authAll(relays: string[]): Promise<string[]> {
+  const done = new Set<string>()
+  let timer: ReturnType<typeof setTimeout> | undefined
+  await Promise.race([
+    Promise.allSettled(relays.map((url) => authRelay(url).finally(() => done.add(url)))),
+    new Promise<void>((resolve) => { timer = setTimeout(resolve, AUTH_WAIT_MS) }),
+  ])
+  clearTimeout(timer)
+  return relays.filter((url) => !done.has(url))
+}
+
+/** A send that gives up by PUBLISH_BOUND_MS, in the words of a signer that has not answered. */
+function boundedSend(sent: Promise<string>): Promise<string> {
+  let timer: ReturnType<typeof setTimeout> | undefined
+  const bound = new Promise<string>((_, refuse) => { timer = setTimeout(() => refuse(new Error(AUTH_STALLED)), PUBLISH_BOUND_MS) })
+  return Promise.race([sent, bound]).finally(() => clearTimeout(timer))
+}
+
+/** Whether this relay has yet taken an AUTH from this page on the socket in hand. */
+export function signedIn(url: string): boolean {
+  return authedFor.has(normalizeURL(url))
 }
 
 /** The relays every cyberspace read and write fans out across, right now. */
@@ -252,20 +289,26 @@ const REFUSED = /^(blocked|invalid|duplicate|pow|rate-limited|restricted|error)\
  */
 export function dropRelays(relays: string[]): void {
   try { getPool().close(relays) } catch { /* nothing open */ }
-  for (const url of relays) authedFor.delete(url)
+  for (const url of relays) {
+    authedFor.delete(url)
+    // A read's key is the normalized URL, and relaySet's is not.
+    authedFor.delete(normalizeURL(url))
+    authOpen.delete(normalizeURL(url))
+  }
 }
 
 /** What nostr-tools resolves a publish with when the relay could not be reached. */
 const CONNECTION_FAILURE = 'connection failure'
 
 async function publishOnce(listed: string[], event: NostrEvent): Promise<PublishResult> {
-  const relays = skipHung(listed)
-  if (relays.length === 0) return { ok: false, reason: HUNG_REASON }
+  const reachableNow = skipHung(listed)
+  if (reachableNow.length === 0) return { ok: false, reason: HUNG_REASON }
   // Protected events (the `-` tag) are only accepted from an authenticated
   // author, and the relay does not challenge on the EVENT itself, so we must
   // already be authed before publishing.
-  await authAll(relays)
-  const results = await Promise.allSettled(getPool().publish(relays, event, { maxWait: MAX_WAIT_MS, onauth: authSign }))
+  const waiting = await authAll(reachableNow)
+  const relays = reachableNow.filter((url) => !waiting.includes(url))
+  const results = await Promise.allSettled(getPool().publish(relays, event, { maxWait: MAX_WAIT_MS, onauth: authSign }).map(boundedSend))
   // nostr-tools does not reject when it cannot connect: that relay's promise
   // RESOLVES with the string "connection failure: ...". Counted as fulfilled,
   // an event sent while offline was marked published and never sent again,
@@ -281,7 +324,7 @@ async function publishOnce(listed: string[], event: NostrEvent): Promise<Publish
   const accepted = relays.filter((_, i) => results[i] !== undefined && failed(results[i]) === null).map((r) => normalizeURL(r))
   if (accepted.length > 0) return { ok: true, accepted }
   const reason = results.map(failed).find(Boolean)
-  return { ok: false, reason: reason || 'no relay accepted it' }
+  return { ok: false, reason: reason || (waiting.length > 0 ? AUTH_STALLED : 'no relay accepted it') }
 }
 
 /**
@@ -293,8 +336,9 @@ async function publishOnce(listed: string[], event: NostrEvent): Promise<Publish
 export async function publishMany(relays: string[], event: NostrEvent): Promise<PublishResult> {
   if (relays.length === 0) return { ok: false, reason: 'no relays configured' }
   const first = await publishOnce(relays, event)
-  if (first.ok || REFUSED.test(first.reason)) return first
-  dropRelays(relays)
+  // Waiting on the signer: dropping the socket would throw its AUTH away and prompt again (verification of #236, finding 4).
+  if (first.ok || REFUSED.test(first.reason) || /^auth-required\b/i.test(first.reason)) return first
+  dropRelays(relays.filter((url) => !authPending(url)))
   return publishOnce(relays, event)
 }
 
@@ -360,8 +404,12 @@ interface AskOptions {
  */
 const NO_ANSWER = 'no answer in time'
 
-/** `evenHung`: ask a hung relay too. Reading a chain needs it (skipHung). */
-export interface ReadOptions { evenHung?: boolean }
+/**
+ * `evenHung`: ask a hung relay too. Reading a chain needs it (skipHung).
+ * `failIfStalled`: reject when a relay is still waiting on the signer, for a
+ * caller that would otherwise read its silence as an empty list.
+ */
+export interface ReadOptions { evenHung?: boolean; failIfStalled?: boolean }
 
 async function askOne(url: string, filter: Filter, deadline: number, opts: AskOptions = {}): Promise<RelayAnswer> {
   const { answerMs, onSent, stop, onEvent } = opts
@@ -415,7 +463,20 @@ async function askOne(url: string, filter: Filter, deadline: number, opts: AskOp
             events.set(e.id, e as NostrEvent)
             onEvent?.(e as NostrEvent)
           },
-          oneose: () => { noteAnswered(url); finish({ url, outcome: 'answered', events: got() }) },
+          oneose: () => {
+            // A challenge came in and is not answered: an empty answer to a reader not signed in is no answer.
+            const challenge = (relay as unknown as AuthRelay).challenge
+            if (events.size === 0 && challenge && authedFor.get(url) !== challenge && !authTried) {
+              authTried = true
+              relay.auth(authSign).then(
+                () => { authedFor.set(url, challenge); if (!settled) open() },
+                (err) => finish({ url, outcome: 'refused', reason: `auth-required: ${err instanceof Error ? err.message : String(err)}`, events: got() }),
+              )
+              return
+            }
+            noteAnswered(url)
+            finish({ url, outcome: 'answered', events: got() })
+          },
           onclose: (reason) => {
             if (settled) return
             if (/^auth-required:/i.test(reason) && !authTried) {
@@ -451,11 +512,12 @@ async function askOne(url: string, filter: Filter, deadline: number, opts: AskOp
 async function queryRelays(relays: string[], filter: Filter, maxWait = MAX_WAIT_MS, opts: ReadOptions = {}): Promise<RelayAnswer[]> {
   const urls = [...new Set(relays.map((r) => normalizeURL(r)))]
   const asked = opts.evenHung ? urls : skipHung(urls)
-  await authAll(asked)
+  const waiting = await authAll(asked)
   const deadline = Date.now() + maxWait
-  const answers = await Promise.all(urls.map((url): Promise<RelayAnswer> => asked.includes(url)
-    ? askOne(url, filter, deadline)
-    : Promise.resolve({ url, outcome: 'unreachable', reason: HUNG_REASON, events: [] })))
+  const answers = await Promise.all(urls.map((url): Promise<RelayAnswer> => {
+    if (waiting.includes(url)) return Promise.resolve({ url, outcome: 'refused', reason: AUTH_STALLED, events: [] })
+    return asked.includes(url) ? askOne(url, filter, deadline) : Promise.resolve({ url, outcome: 'unreachable', reason: HUNG_REASON, events: [] })
+  }))
   // Silent for a whole full-length question, with nothing sent: it hung. A short question says nothing.
   if (maxWait >= CONNECT_MS) for (const a of answers) if (a.outcome === 'unreachable' && a.reason === NO_ANSWER && a.events.length === 0) noteTimeout(a.url)
   return answers
@@ -469,7 +531,9 @@ async function queryRelays(relays: string[], filter: Filter, maxWait = MAX_WAIT_
  * relay sent before the deadline still count.
  */
 async function collect(relays: string[], filter: Filter, maxWait = MAX_WAIT_MS, opts: ReadOptions = {}): Promise<NostrEvent[]> {
-  return mergeAnswers(await queryRelays(relays, filter, maxWait, opts))
+  const answers = await queryRelays(relays, filter, maxWait, opts)
+  if (opts.failIfStalled && answers.some((a) => a.outcome === 'refused' && a.reason === AUTH_STALLED)) throw new Error(AUTH_STALLED)
+  return mergeAnswers(answers)
 }
 
 /** Query the configured relays. */
@@ -587,7 +651,7 @@ export function queryEachSettled(
   const urls = [...new Set(relays.map((r) => normalizeURL(r)))]
   const main = normalizeURL(primary)
   const held = new Set(waitFor.map((r) => normalizeURL(r)).filter((url) => urls.includes(url) && url !== main))
-  const unanswered = (url: string): RelayAnswer => ({ url, outcome: 'unreachable', reason: 'no answer in time', events: [] })
+  const unanswered = (url: string): RelayAnswer => authOpen.has(url) ? { url, outcome: 'refused', reason: AUTH_STALLED, events: [] } : { url, outcome: 'unreachable', reason: 'no answer in time', events: [] }
   if (opts.stop?.aborted) return Promise.resolve(urls.map(unanswered))
   // `maxWait` to connect and authenticate, then `maxWait` from the moment
   // the REQ goes out (askOne answerMs).
@@ -624,13 +688,21 @@ export function queryEachSettled(
       // Each relay authenticates inside its own time, so one that is slow to
       // connect or whose signer is slow to answer holds nobody else.
       void Promise.race([authRelay(url), new Promise<void>((r) => setTimeout(r, left()))])
-        .then(() => askOne(url, filter, deadline, ask))
+        // A signer still deciding gets one more window, on the same AUTH, so a slow one lands. Then this relay
+        // is not read: unauthenticated it may answer with nothing, and the head would pass on that answer.
+        .then(() => (authOpen.has(url) ? Promise.race([authRelay(url), new Promise<void>((r) => setTimeout(r, maxWait))]) : undefined))
+        .then((): Promise<RelayAnswer> | RelayAnswer => (authOpen.has(url) ? { url, outcome: 'refused', reason: AUTH_STALLED, events: [] } : askOne(url, filter, deadline, ask)))
         .then((answer) => {
           if (settled) { opts.onLate?.(answer); return }
           answers.set(url, answer)
           if (url === main && answer.outcome === 'answered') {
             primaryAnswered = true
-            cap = setTimeout(settle, Math.max(0, (firstSent ?? Date.now()) + maxWait - Date.now()))
+            // A holder whose AUTH is still waiting on the signer gets the same one more window.
+            const sentAt = firstSent ?? Date.now()
+            cap = setTimeout(() => {
+              if ([...held].some((u) => authOpen.has(u) && !answers.has(u))) cap = setTimeout(settle, Math.max(0, sentAt + 2 * maxWait - Date.now()))
+              else settle()
+            }, Math.max(0, sentAt + maxWait - Date.now()))
           }
           if (enough()) settle()
         })

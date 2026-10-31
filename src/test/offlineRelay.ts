@@ -38,6 +38,7 @@ export const offlineRelay = {
     return () => clearTimeout(t)
   },
   probeLiveness: async (): Promise<'alive' | 'dead' | 'skipped'> => 'skipped',
+  signedIn: (_url: string): boolean => true,
   resumeLive: (): void => {},
   watchConnectivity: (): (() => void) => () => {},
 }

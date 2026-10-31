@@ -20,6 +20,7 @@
  * |---|---|
  * | the chain came back with a hole no question could fill | unknown: unreachable, only part of the chain |
  * | any relay returned events that make a chain | found |
+ * | a relay is still waiting on the signer, so it was not asked | unknown: refused, with its reason |
  * | the canonical relay answered (a real EOSE) and no relay returned a chain | none |
  * | anything else, with navigator.onLine false | unknown: offline |
  * | the canonical relay refused | unknown: refused, with its reason |
@@ -36,7 +37,7 @@ import { normalizeURL } from 'nostr-tools/utils'
 import { sectorTag, xyzToSectorId, type Plane } from 'cyberspace-core'
 import { buildChain, type NostrEvent } from './events'
 import type { Position } from './space'
-import { PARTIAL_CHAIN_REASON, mergeAnswers, type RelayAnswer } from './relayOutcome'
+import { AUTH_STALLED, PARTIAL_CHAIN_REASON, mergeAnswers, type RelayAnswer } from './relayOutcome'
 
 /** Why the relays could not say whether this identity has a chain. */
 export type CheckCause =
@@ -69,6 +70,10 @@ export function decideSelfCheck(answers: RelayAnswer[], canonical: string, onlin
   // are not a chain anyone can follow or continue, so they do not count as
   // one; the verdict falls to what the canonical relay said.
   if (events.length > 0 && buildChain(events).length > 0) return { status: 'found', events }
+  // A relay waiting on the signer may hold the chain, and this says nothing
+  // until the signer answers, whatever the canonical relay said.
+  const waiting = answers.find((a) => a.outcome === 'refused' && a.reason === AUTH_STALLED)
+  if (waiting?.outcome === 'refused') return { status: 'unknown', cause: { kind: 'refused', url: waiting.url, reason: waiting.reason } }
   const home = normalizeURL(canonical)
   const answer = answers.find((a) => normalizeURL(a.url) === home)
   if (answer?.outcome === 'answered') return { status: 'none' }

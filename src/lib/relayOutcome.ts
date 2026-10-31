@@ -46,6 +46,14 @@ const REFUSAL = new RegExp(`^(${REFUSAL_PREFIXES.join('|')}):`, 'i')
  */
 export const PARTIAL_CHAIN_REASON = 'the relays returned only part of this chain'
 
+/**
+ * The reason a relay's answer carries when it was never asked, because its AUTH
+ * is still waiting on the signer. It said nothing about what it holds: read
+ * before the AUTH, a gated relay can answer with nothing at all, which would
+ * read as "no chain" and sign a rival spawn.
+ */
+export const AUTH_STALLED = 'auth-required: the signer has not answered'
+
 /** True when a close reason is a relay's own refusal rather than a dropped connection. */
 export function isRefusal(reason: string): boolean {
   return REFUSAL.test(reason.trim())

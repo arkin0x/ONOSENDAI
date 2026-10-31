@@ -24,7 +24,7 @@ function onScreen(linear: number): number {
 
 function shardOf(hex: string): ShardModel {
   const c = hexToRgb(hex)
-  const at = (x: number, z: number): ShardModel['vertices'][number] => ({ ...vertexAt([x * 120, 0, z * 120]), c })
+  const at = (x: number, z: number): ShardModel['vertices'][number] => vertexAt([x * 120, 0, z * 120], c)
   return { ...newShard('t'), mode: 'solid', vertices: [at(0, 0), at(1, 0), at(0, 1)], faces: [[0, 1, 2]] }
 }
 

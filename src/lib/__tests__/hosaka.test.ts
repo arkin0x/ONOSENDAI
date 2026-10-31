@@ -677,3 +677,25 @@ describe('a changed cube setting is the same job', () => {
     expect(calls).toHaveLength(1)
   })
 })
+
+describe('the cloud hop maintenance pause (hosaka-api hop_pause)', () => {
+  it('a 503 hop_paused submit is not asked again on its own: nothing was charged, and asking again only prompts the signer', async () => {
+    let hops = 0
+    const { fetch } = scripted({
+      'GET /api/v1/provider': () => ({ body: { version: 1, name: 'HOSAKA', idempotency: { body_field: 'idempotency_key' } } }),
+      'POST /api/v1/hop': () => { hops++; return { status: 503, body: { detail: { error: 'hop_paused', hint: 'Paused.', retry_after_seconds: 300, charged: false } } } },
+    })
+    const c = createHosaka({ apiUrl: API, sign, fetch, lostAnswerDelaysMs: [0, 0] })
+    const err = await rejection(c.submitHop(V1, V2, PREV))
+    expect(err.hopPaused).toBe(true)
+    expect(err.retryAfterSeconds).toBe(300)
+    expect(hops).toBe(1)
+  })
+
+  it('reads Retry-After when the response lets it be read', async () => {
+    const fetchFn = (async () => new Response(JSON.stringify({ detail: { error: 'hop_paused', hint: 'Paused.', charged: false } }), { status: 503, headers: { 'Retry-After': '90' } })) as unknown as typeof fetch
+    const c = createHosaka({ apiUrl: API, sign, fetch: fetchFn, lostAnswerDelaysMs: [] })
+    const err = await rejection(c.submitHop(V1, V2, PREV))
+    expect(err.retryAfterSeconds).toBe(90)
+  })
+})

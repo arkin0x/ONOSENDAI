@@ -31,14 +31,17 @@ export function axisComputeCeiling(ceiling: number, limit = bigintBitLimit()): n
   return ceiling
 }
 
-/** Cloud hops return hashed envelopes, but their temporal root is still
- * recomputed locally. Sidesteps also combine that root with the Merkle roots.
- * Use the full 85-bit seed bound: later route steps have not been signed yet. */
+/** A cloud hop is checked at Level 1 (hop proof version 2, spec 5.11), which
+ * builds no root and needs no big numbers, so any browser can verify and
+ * sign one. A cloud sidestep still rebuilds the temporal root and combines it
+ * with the Merkle roots. Use the full 85-bit seed bound: later route steps
+ * have not been signed yet. */
 export function movementCapabilityIssue(
   mode: 'hop' | 'sidestep', from: Position, to: Position, plane: Plane,
   source: 'local' | 'cloud' = 'local', limit = bigintBitLimit(),
 ): string | null {
   if (!Number.isFinite(limit)) return null
+  if (source === 'cloud' && mode === 'hop') return null
   const temporalBits = cantorTreeBits(terrainK(to.x, to.y, to.z, plane))
   let bits = temporalBits
   if (source === 'local' || mode === 'sidestep') {

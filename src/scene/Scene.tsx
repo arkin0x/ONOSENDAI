@@ -31,7 +31,7 @@ import { applyLensShift, lensShift, stepShift, uncoveredBand, type Cover } from 
 import { readCovers, setCoverWatch } from '../hooks/useCover'
 import { useBuilder } from '../store/useBuilder'
 import { watchContext } from '../lib/glContext'
-import { broadcastDpr, isBroadcast, recoverLostContext } from '../lib/tv/broadcast'
+import { broadcastDpr, isBroadcast, isPortraitBroadcast, portraitFov, recoverLostContext } from '../lib/tv/broadcast'
 import { keepPrograms } from '../lib/keepPrograms'
 import { BG } from '../lib/palette'
 import { GRID_RADIUS, cellDelta, claimScreenAxes, levelScreenAxes, originShift, renderDirection, viewAxes, type Position } from '../lib/space'
@@ -83,6 +83,7 @@ import { TargetAvatars } from './TargetAvatars'
 import { PresenceAvatars } from './PresenceAvatars'
 import { WorldShards } from './WorldShards'
 import { WorldMessages } from './WorldMessages'
+import { ChestLooks } from './ChestLooks'
 import { HiddenAudio } from './HiddenAudio'
 import { StarredMarks } from './StarredMarks'
 import { ShardGhost } from './ShardGhost'
@@ -223,6 +224,7 @@ function World(): JSX.Element {
       <PresenceAvatars axes={axes} />
       <WorldShards axes={axes} />
       <WorldMessages axes={axes} />
+      <ChestLooks axes={axes} />
       <StarredMarks axes={axes} />
       <ShardGhost axes={axes} />
       <DeployRegionBox axes={axes} />
@@ -365,6 +367,25 @@ const LENS_PRIORITY = -1
  */
 const LENS_TAU = 0.14
 const NO_SHIFT = { x: 0, y: 0 }
+
+/**
+ * The upright stream's camera (lib/tv/broadcast isPortraitBroadcast): as wide
+ * across as the 16:9 stream's camera is from top to bottom (portraitFov), so
+ * a shot frames its subject across the narrow frame as it does on the wide
+ * one and the tall frame fills with the world above and below. Mounted on
+ * that stream alone; everywhere else the camera keeps FOV.
+ */
+function PortraitLens(): null {
+  const camera = useThree((s) => s.camera) as PerspectiveCamera
+  const width = useThree((s) => s.size.width)
+  const height = useThree((s) => s.size.height)
+  useLayoutEffect(() => {
+    if (!camera.isPerspectiveCamera || !(height > 0)) return
+    camera.fov = portraitFov(FOV, width / height)
+    camera.updateProjectionMatrix()
+  }, [camera, width, height])
+  return null
+}
 
 /**
  * Frames the orbit's focus in the middle of what the HUD leaves uncovered,
@@ -1111,6 +1132,7 @@ export const Scene = memo(function Scene(): JSX.Element {
       <Rig />
       <HeadlampRig />
       <LensShift />
+      {isPortraitBroadcast() && <PortraitLens />}
       <CellMetric />
       <ScreenAxes />
       <World />

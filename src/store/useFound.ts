@@ -22,7 +22,7 @@ import { create } from 'zustand'
 import type { NostrEvent } from '../lib/events'
 import type { Hidden, RegionOrigin } from '../lib/hidden'
 import { HIDDEN_KIND } from '../lib/hidden'
-import { FOUND_BUDGET_BYTES, deletedRows, foundRow, keepsOver, lookupOf, openRow, rowKeyOf, setFoundSink, toEvict } from '../lib/foundCache'
+import { FOUND_BUDGET_BYTES, deletedRows, forgetOpened, foundRow, keepsOver, lookupOf, openRow, rowKeyOf, setFoundSink, toEvict } from '../lib/foundCache'
 import { deleteFound, openFoundDb, readFound, writeFound, type FoundBag } from '../lib/foundDb'
 import { placePosition } from '../lib/starred'
 import { query } from '../lib/relay'
@@ -194,6 +194,8 @@ export const useFound = create<FoundState>((set, get) => ({
       useCyberspace.subscribe((s, prev) => {
         if (s.identity.pubkey === prev.identity.pubkey) return
         useShards.setState({ discovered: {} })
+        // And what scans opened under the last one, so nothing of it is handed back.
+        forgetOpened()
         void get().load(s.identity.pubkey)
       })
     }

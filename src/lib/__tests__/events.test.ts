@@ -95,11 +95,11 @@ describe('hop (§8.4)', () => {
     prevCoordHex: pk,
     to,
     plane: spawnAt.plane,
-    proofHash: 'ab'.repeat(32),
+    proofHash: 'ab'.repeat(32), mn: '0'.repeat(16), mp: '00',
   }))
 
-  it('lays the tags out in spec order', () => {
-    expect(hop.tags.map((t) => t[0])).toEqual(['A', 'e', 'e', 'c', 'C', 'proof', 'X', 'Y', 'Z', 'S'])
+  it('lays the tags out in spec order, mn and mp after the seal (hop proof version 2)', () => {
+    expect(hop.tags.map((t) => t[0])).toEqual(['A', 'e', 'e', 'c', 'C', 'proof', 'mn', 'mp', 'X', 'Y', 'Z', 'S'])
   })
 
   it('marks genesis and previous on the e tags, with an empty relay hint', () => {
@@ -119,7 +119,7 @@ describe('hop (§8.4)', () => {
     const other = spawnAt.plane === 0 ? 1 : 0
     const flipped = hopTemplate({
       createdAt: 1, genesisId: ZERO, previousId: ZERO, prevCoordHex: ZERO,
-      to, plane: other, proofHash: ZERO,
+      to, plane: other, proofHash: ZERO, mn: '0'.repeat(16), mp: '00',
     })
     const C = tagsNamed(flipped, 'C')[0][1]
     expect(coordToXyz(hexToCoord(C)).plane).toBe(other)
@@ -222,7 +222,7 @@ describe('parseAction refuses what the spec refuses', () => {
   it('a hop missing a link', () => {
     const hop = sign(hopTemplate({
       createdAt: 2, genesisId: good.id, previousId: good.id, prevCoordHex: pk,
-      to: spawnAt, plane: 0, proofHash: ZERO,
+      to: spawnAt, plane: 0, proofHash: ZERO, mn: '0'.repeat(16), mp: '00',
     }))
     const noPrev = { ...hop, tags: hop.tags.filter((t) => t[3] !== 'previous') }
     expect(parseAction(noPrev)).toBeNull()
@@ -231,7 +231,7 @@ describe('parseAction refuses what the spec refuses', () => {
   it('a sidestep missing its merkle tags', () => {
     const hop = sign(hopTemplate({
       createdAt: 2, genesisId: good.id, previousId: good.id, prevCoordHex: pk,
-      to: spawnAt, plane: 0, proofHash: ZERO,
+      to: spawnAt, plane: 0, proofHash: ZERO, mn: '0'.repeat(16), mp: '00',
     }))
     expect(parseAction({ ...hop, tags: [['A', 'sidestep'], ...hop.tags.slice(1)] })).toBeNull()
   })
@@ -247,7 +247,7 @@ describe('buildChain (§8.7.3: the newest spawn wins)', () => {
       prevCoordHex: from.coordHex,
       to: { ...from.position, x: from.position.x + dx },
       plane: from.plane,
-      proofHash: ZERO,
+      proofHash: ZERO, mn: '0'.repeat(16), mp: '00',
     }))
   }
 
@@ -276,7 +276,7 @@ describe('buildChain (§8.7.3: the newest spawn wins)', () => {
     // Claims B's chain but descends from A's spawn: a link into the wrong tree.
     const stray = sign(hopTemplate({
       createdAt: 220, genesisId: spawnA.id, previousId: b1.id, prevCoordHex: pk,
-      to: spawnAt, plane: spawnAt.plane, proofHash: ZERO,
+      to: spawnAt, plane: spawnAt.plane, proofHash: ZERO, mn: '0'.repeat(16), mp: '00',
     }))
     expect(buildChain([spawnB, b1, stray]).map((e) => e.id)).toEqual([spawnB.id, b1.id])
   })

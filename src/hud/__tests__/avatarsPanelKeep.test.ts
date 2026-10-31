@@ -41,7 +41,7 @@ import { flushIngest, ingest, stopRoster, useRoster } from '../../store/useRoste
 const here = { x: 5n << 30n, y: 9n << 30n, z: 3n << 30n }
 
 function hop(createdAt: number): NostrEvent {
-  return finalizeEvent(hopTemplate({ createdAt, genesisId: 'a'.repeat(64), previousId: 'b'.repeat(64), prevCoordHex: positionHex(here, 0), to: here, plane: 0, proofHash: 'c'.repeat(64) }), generateSecretKey()) as NostrEvent
+  return finalizeEvent(hopTemplate({ createdAt, genesisId: 'a'.repeat(64), previousId: 'b'.repeat(64), prevCoordHex: positionHex(here, 0), to: here, plane: 0, proofHash: 'c'.repeat(64), mn: '0'.repeat(16), mp: '00'}), generateSecretKey()) as NostrEvent
 }
 
 /** The panel as a fresh mount renders it: what reopening the menu shows first. */

@@ -323,12 +323,17 @@ export interface ActionEvent {
   toHeight?: number
   /** Hyperjump only: the declared station set bound (as_of tag). */
   asOf?: number
-  /** Hyperjump only: the sampled openings, as written in the `mp` tag. */
+  /**
+   * Hyperjump and hop: the sampled openings, as written in the `mp` tag. On a
+   * hop (spec §8.4) the 16 residue openings of hop proof version 2, lowercase
+   * hex; their width is the verifier's to check, from the hop's geometry.
+   */
   mp?: string
   /**
-   * Hyperjump and sidestep: the re-roll nonce of the `mn` tag (DECK-0001
-   * §5.5, spec 6.10), exactly 16 lowercase hex. Absent on a ride or sidestep
-   * published before the re-roll price, which stands only if exempt by id.
+   * Hyperjump, sidestep and hop: the re-roll nonce of the `mn` tag (DECK-0001
+   * §5.5, spec 6.10, §5.10), exactly 16 lowercase hex. Absent on a ride or
+   * sidestep published before the re-roll price, which stands only if exempt
+   * by id, and on a version 1 hop (hopProofForm).
    */
   mn?: string
 }
@@ -350,10 +355,36 @@ function isRecognized(name: string): name is RecognizedAction {
   return (RECOGNIZED_ACTIONS as readonly string[]).includes(name)
 }
 
+/** A decoded coordinate, as decodeCoord keeps it: never changed by anyone, only read. */
+interface DecodedCoord { readonly x: bigint; readonly y: bigint; readonly z: bigint; readonly plane: Plane }
+/** Coordinates decoded so far, by their 64 hex chars (decodeCoord). */
+const decoded = new Map<string, DecodedCoord>()
+/** Past this many, the memo starts over: a chain is a few thousand places, a long session's spectating a few times that. */
+const DECODED_MAX = 50_000
+
+/**
+ * coordToXyz(hexToCoord(coordHex)), remembered. A pure function of the hex,
+ * and the most expensive step of reading a chain: buildChain decodes each
+ * event's C three times, and the chain is rebuilt whenever its events change
+ * (every action, every fold), so a 1,300-action chain spent about 0.1 s per
+ * build here (arkinox, 2026-10-30: WALK steps took seconds). Every caller
+ * reads the fields into objects of its own; the shared one is frozen.
+ */
+function decodeCoord(coordHex: string): DecodedCoord {
+  let d = decoded.get(coordHex)
+  if (d === undefined) {
+    const { x, y, z, plane } = coordToXyz(hexToCoord(coordHex))
+    d = Object.freeze({ x, y, z, plane })
+    if (decoded.size >= DECODED_MAX) decoded.clear()
+    decoded.set(coordHex, d)
+  }
+  return d
+}
+
 /** A 64-hex coordinate as a place, or null when it is not one. */
 function placeOf(coordHex: string | undefined, sector?: string): Placed | null {
   if (!coordHex || !HEX_64.test(coordHex)) return null
-  const { x, y, z, plane } = coordToXyz(hexToCoord(coordHex))
+  const { x, y, z, plane } = decodeCoord(coordHex)
   const position = { x, y, z }
   return { coordHex, position, plane, sector: sector ?? sectorTag(xyzToSectorId(x, y, z)) }
 }
@@ -376,7 +407,7 @@ function regionOf(ev: NostrEvent): GameRegion | null {
   if (hStr === undefined || !/^(0|[1-9][0-9]*)$/.test(hStr)) return null
   const height = Number.parseInt(hStr, 10)
   if (height > 85) return null
-  const { x, y, z, plane } = coordToXyz(hexToCoord(coordHex))
+  const { x, y, z, plane } = decodeCoord(coordHex)
   const h = BigInt(height)
   const low = (1n << h) - 1n
   if ((x & low) !== 0n || (y & low) !== 0n || (z & low) !== 0n) return null
@@ -413,7 +444,8 @@ export function spawnTemplate(pubkey: string, createdAt: number): EventTemplate 
   }
 }
 
-export interface HopInput {
+/** What every movement event (hop, sidestep) names: its links, where it was and where it goes, and its `proof`. */
+export interface MoveInput {
   createdAt: number
   genesisId: string
   previousId: string
@@ -422,28 +454,57 @@ export interface HopInput {
   prevCoordHex: string
   to: Position
   plane: Plane
+  /** The `proof` tag: a hop's seal (§5.10), a sidestep's proof hash (§6.8). */
   proofHash: string
 }
 
-/** §8.4. */
+/** The tags §8.4 and §8.5 open with, after the A tag: the links, `c`, `C` and `proof`. */
+function moveHead(i: MoveInput): string[][] {
+  return [
+    ['e', i.genesisId, '', 'genesis'],
+    ['e', i.previousId, '', 'previous'],
+    ['c', i.prevCoordHex],
+    ['C', positionHex(i.to, i.plane)],
+    ['proof', i.proofHash],
+  ]
+}
+
+/**
+ * A hop as this client signs it: always hop proof version 2 (§5.9 to §5.13,
+ * chain rules revision 2026-10-08-residue-openings). `proofHash` is the seal,
+ * and the re-roll nonce and the openings ride beside it. A version 1 hop (no
+ * `mn`, no `mp`) is never signed here; one already published is read and
+ * judged against the exemption list (hopProofForm), never re-made.
+ */
+export interface HopInput extends MoveInput {
+  /** The `mn` tag (§8.4): the re-roll nonce, exactly 16 lowercase hex. */
+  mn: string
+  /** The `mp` tag (§8.4): the 16 openings, lowercase hex, no separators. */
+  mp: string
+}
+
+/** §8.4, in the tag order the spec lists: proof, mn, mp, then the sector tags. */
 export function hopTemplate(i: HopInput): EventTemplate {
+  // Never a version 1 hop, and never a malformed one: the template is the
+  // last place before a signature, so it refuses rather than signs.
+  if (!/^[0-9a-f]{64}$/.test(i.proofHash)) throw new Error('a hop is signed with its seal: proof must be 64 lowercase hex')
+  if (!/^[0-9a-f]{16}$/.test(i.mn)) throw new Error('a hop is signed with its re-roll nonce: mn must be 16 lowercase hex')
+  if (!/^(?:[0-9a-f]{2})+$/.test(i.mp)) throw new Error('a hop is signed with its openings: mp must be lowercase hex')
   return {
     kind: ACTION_KIND,
     created_at: i.createdAt,
     content: '',
     tags: [
       ['A', 'hop'],
-      ['e', i.genesisId, '', 'genesis'],
-      ['e', i.previousId, '', 'previous'],
-      ['c', i.prevCoordHex],
-      ['C', positionHex(i.to, i.plane)],
-      ['proof', i.proofHash],
+      ...moveHead(i),
+      ['mn', i.mn],
+      ['mp', i.mp],
       ...sectorTags(i.to),
     ],
   }
 }
 
-export interface SidestepInput extends HopInput {
+export interface SidestepInput extends MoveInput {
   /** Per-axis Merkle roots, 64 hex chars each. */
   merkleRoots: [string, string, string]
   /** Per-axis openings (spec 6.10, 8.5): the destination path then the eight
@@ -457,13 +518,14 @@ export interface SidestepInput extends HopInput {
 
 /** §8.5. */
 export function sidestepTemplate(i: SidestepInput): EventTemplate {
-  const hop = hopTemplate(i)
   const [hx, hy, hz] = i.lcaHeights
   return {
-    ...hop,
+    kind: ACTION_KIND,
+    created_at: i.createdAt,
+    content: '',
     tags: [
       ['A', 'sidestep'],
-      ...hop.tags.slice(1, 6),
+      ...moveHead(i),
       ['mr', i.merkleRoots.join(':')],
       ['mp', i.openings.join(':')],
       ['mn', i.mnHex],
@@ -577,7 +639,7 @@ export function hexToBytes(hex: string): Uint8Array {
 }
 
 /** The first tag of that name's value. A rule that needs a tag exactly once also asks tagCount. */
-function tag(ev: NostrEvent, name: string): string | undefined {
+function tag(ev: Pick<NostrEvent, 'tags'>, name: string): string | undefined {
   return ev.tags.find((t) => t[0] === name)?.[1]
 }
 
@@ -630,7 +692,9 @@ const LINK_TAGS = ['e:genesis', 'e:previous'] as const
 const READ_TAGS: Record<RecognizedAction | 'links', readonly string[]> = {
   links: LINK_TAGS,
   spawn: ['C'],
-  hop: [...LINK_TAGS, 'c', 'C', 'proof'],
+  // Hop proof version 2 (§8.4): the seal in `proof`, with `mn` and `mp`.
+  // A version 1 hop carries neither, which is no break of this rule.
+  hop: [...LINK_TAGS, 'c', 'C', 'proof', 'mn', 'mp'],
   sidestep: [...LINK_TAGS, 'c', 'C', 'proof', 'mr', 'mp', 'mn', 'hx', 'hy', 'hz'],
   'enter-hyperspace': [...LINK_TAGS, 'c', 'C', 'proof'],
   hyperjump: [...LINK_TAGS, 'c', 'C', 'from_height', 'B', 'proof', 'mp', 'mn'],
@@ -683,7 +747,7 @@ export function parseAction(ev: NostrEvent): ActionEvent | null {
   const coordHex = tag(ev, 'C')
   if (!coordHex || !HEX_64.test(coordHex)) return null
 
-  const { x, y, z, plane } = coordToXyz(hexToCoord(coordHex))
+  const { x, y, z, plane } = decodeCoord(coordHex)
   // The sector tags are read by buildChain, which breaks an event whose tags
   // are missing or disagree with its C (Q9); here only what they say is
   // kept, computed when the tag is not there.
@@ -795,7 +859,39 @@ export function parseAction(ev: NostrEvent): ActionEvent | null {
     }
   }
   if (type === 'sidestep' && mn !== undefined) return { ...base, type, ...links, proofHash, mn }
+  if (type === 'hop') {
+    // Hop proof version 2 (§8.4): `proof` is the seal, `mn` and `mp` beside
+    // it, both kept. A hop with neither is a version 1 hop, carried as one:
+    // whether it stands is the exemption list's to say (§5.13, hopProofForm),
+    // never the parser's, so it parses exactly as before. An `mp` with any
+    // character outside 0-9 and a-f is malformed at any width (§8.4).
+    const mp = tag(ev, 'mp')
+    if (mp !== undefined && !/^[0-9a-f]+$/.test(mp)) return null
+    return { ...base, type, ...links, proofHash, ...(mn !== undefined ? { mn } : {}), ...(mp !== undefined ? { mp } : {}) }
+  }
   return { ...base, type, ...links, proofHash }
+}
+
+/**
+ * What a hop's proof is, by the tags it carries (§8.4, §5.13):
+ *
+ * | form | tags | stands when |
+ * |---|---|---|
+ * | `v2` | `proof`, `mn` and `mp` | its proof passes Level 1 (§5.11) |
+ * | `v1` | `proof` alone | its id is on the exemption list (§5.13); otherwise never, under the strict ruling D2 of 2026-10-30 |
+ * | `partial` | `proof` and only one of `mn`, `mp` | never: §5.11 step 7 rejects a missing tag |
+ *
+ * Null for anything that is not a hop. Read by form only: this client
+ * signs `v2` alone, and keeps `v1` and `partial` events as read so a verifier
+ * (ono-3) can decide them against the list.
+ */
+export type HopProofForm = 'v2' | 'v1' | 'partial'
+
+export function hopProofForm(ev: Pick<NostrEvent, 'kind' | 'tags'>): HopProofForm | null {
+  if (ev.kind !== ACTION_KIND || tag(ev, 'A') !== 'hop') return null
+  const mn = tag(ev, 'mn') !== undefined
+  const mp = tag(ev, 'mp') !== undefined
+  return mn && mp ? 'v2' : !mn && !mp ? 'v1' : 'partial'
 }
 
 /** The links of any kind:3333 event that can sit on a chain, whatever its action. */
@@ -1029,6 +1125,52 @@ export function buildChain(events: NostrEvent[], pubkey?: string): ActionEvent[]
 }
 
 /**
+ * buildChain(events.concat(ev)), from `chain`, which is buildChain(events), in
+ * the one case that cannot change any row already there: `ev` names the head
+ * of a chain that has no break and no fork as its previous, and no event of
+ * `events` names `ev`. Null in every other case, and the caller builds the
+ * chain whole: a spawn (it can be the newest), an event naming another row (a
+ * fork there), an event that arrived before the one it follows (the walk goes
+ * on through it), a chain already broken or forked (its rows stand where the
+ * break left them), or a row that breaks.
+ *
+ * Why: the chain is rebuilt whenever its events change, and every action
+ * appends one. buildChain reads every event again, about 0.1 s on a
+ * 1,300-action chain, on the main thread, on every move (arkinox, 2026-10-30:
+ * WALK steps took seconds and stuttered the view). This reads the new one.
+ *
+ * Exact, not an approximation: the walk of buildChain reaches the head with
+ * no child there (one child would be the next row, two a fork), so with `ev`
+ * the head has exactly one, `ev`, read against the head and the bracket open
+ * at it by the same placeInChain and rideBreak; nothing before it moves, and
+ * with no event naming `ev` the walk ends there.
+ */
+export function extendChain(chain: ActionEvent[], events: NostrEvent[], ev: NostrEvent): ActionEvent[] | null {
+  if (chain.length === 0 || ev.kind !== ACTION_KIND || carriesSpawn(ev)) return null
+  const spawn = chain[0]
+  if (spawn.fork !== undefined || chain.some((a) => a.breaks)) return null
+  const link = actionLink(ev)
+  // Not of this chain: buildChain leaves it out, and the chain is as it was.
+  if (!link || link.genesisId !== spawn.id || link.pubkey !== spawn.pubkey) return chain
+  const head = chain[chain.length - 1]
+  if (link.previousId !== head.id || link.id === head.id) return null
+  // An event already here that names `ev` (any e tag, so a child of every kind): the walk would go on.
+  for (const e of events) for (const t of e.tags) if (t[0] === 'e' && t[1] === ev.id) return null
+  let open: ActionEvent | null = null
+  for (let i = chain.length - 1; i >= 0; i--) {
+    if (chain[i].role === 'exit') break
+    if (chain[i].role === 'enter') { open = chain[i]; break }
+  }
+  let entry = placeInChain(ev, link, head, open)
+  if (entry.type === 'hyperjump' && !entry.breaks) {
+    const ride = rideBreak(entry, lookBack(chain, chain.length), ev)
+    if (ride) entry = { ...entry, breaks: ride }
+  }
+  if (entry.breaks) return null
+  return chain.concat([entry])
+}
+
+/**
  * Why a ride breaks the rules about where it may start, or null (DECK-0001
  * §4.2, §4.3), given the action it looks back to (§8.9 rule 4, §8.11.4 rule
  * 8). Checked without any block data: a ride follows a boarding or a ride; a
@@ -1123,8 +1265,8 @@ function sectorTagsWrong(ev: NostrEvent, name: string, at: Position): { breaks: 
 
 /** Whether two coordinates name the same x, y and z in different planes. */
 function planeBitOnly(a: string, b: string): boolean {
-  const p = coordToXyz(hexToCoord(a))
-  const q = coordToXyz(hexToCoord(b))
+  const p = decodeCoord(a)
+  const q = decodeCoord(b)
   return p.plane !== q.plane && p.x === q.x && p.y === q.y && p.z === q.z
 }
 

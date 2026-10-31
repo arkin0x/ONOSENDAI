@@ -47,6 +47,8 @@ if (typeof (globalThis as { window?: unknown }).window === 'undefined') {
 }
 
 import { startPublisher } from '../publisher'
+import { mayMove, movementBlocked, resetVersionGateForTests, useVersionGate } from '../versionGate'
+import { CHAIN_RULES_EPOCH, versionFileOf } from '../chainRulesEpoch'
 import { useCyberspace, type PublishStatus } from '../../store/useCyberspace'
 
 const PUBKEY = 'a'.repeat(64)
@@ -298,5 +300,56 @@ describe('the publisher and the release gate', () => {
     useCyberspace.setState({ held: false, publishRequest: useCyberspace.getState().publishRequest + 1 })
     await until(() => sent.length === 2)
     expect(sent).toEqual([ev('a1').id, ev('b2').id])
+  })
+
+  it('sends nothing while a newer deploy requires newer chain rules, and what waited goes out if that lifts (lib/versionGate.ts)', async () => {
+    useVersionGate.setState({ verdict: 'blocked' })
+    try {
+      setChain(['a1'])
+      useCyberspace.setState({ live: true })
+      // An action that would open the gate, signed before the tab learned of the deploy.
+      append('b2')
+      await idle()
+      expect(sent).toEqual([])
+      expect(useCyberspace.getState().published[ev('b2').id]).toBe('queued')
+    } finally {
+      // A later answer with this build's epoch (a revert): the hold lifts.
+      useVersionGate.setState({ verdict: 'ok' })
+    }
+    await until(() => sent.length === 2)
+    expect(sent).toEqual([ev('a1').id, ev('b2').id])
+  })
+
+  it('a slow version file (3 s): the move in the window goes, the late answer holds everything queued after it (review of #530)', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+    vi.stubGlobal('fetch', () => new Promise<Response>((resolve) => setTimeout(() => resolve(new Response(JSON.stringify(versionFileOf('cutover-build', CHAIN_RULES_EPOCH + 1)), { status: 200 })), 3_000)))
+    resetVersionGateForTests(true)
+    try {
+      setChain(['a1'], { [ev('a1').id]: 'ok' })
+      useCyberspace.setState({ live: true })
+      await vi.advanceTimersByTimeAsync(10)
+      // The look before the move gives up waiting at 1.5 s, and the move goes.
+      let allowed: boolean | undefined
+      void mayMove().then((r) => { allowed = r })
+      await vi.advanceTimersByTimeAsync(1_500)
+      expect(allowed).toBe(true)
+      append('b2')
+      await vi.advanceTimersByTimeAsync(10)
+      expect(sent).toEqual([ev('b2').id])
+      // The answer lands at 3 s: blocked, and what is queued now is held.
+      await vi.advanceTimersByTimeAsync(1_500)
+      expect(movementBlocked()).toBe(true)
+      expect(await mayMove()).toBe(false)
+      append('c3')
+      await vi.advanceTimersByTimeAsync(60_000)
+      expect(sent).toEqual([ev('b2').id])
+      expect(useCyberspace.getState().published[ev('c3').id]).toBe('queued')
+    } finally {
+      vi.useRealTimers()
+      vi.unstubAllGlobals()
+      resetVersionGateForTests(false)
+      useCyberspace.setState({ live: false })
+      await idle()
+    }
   })
 })

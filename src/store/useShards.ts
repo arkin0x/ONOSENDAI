@@ -95,6 +95,7 @@ import { useInventory } from './useInventory'
 import { useShardFolders } from './useShardFolders'
 import { creditOf, useWorkshop } from './useWorkshop'
 import { deletionFilters, isDeleted, type Credit, type FeedObject } from 'sno-core/feed'
+import { keptInChest } from '../lib/looks'
 import { useCeremony } from './useCeremony'
 import { useToast } from './useToast'
 import type { ShardModel } from 'sno-core/shards'
@@ -872,6 +873,19 @@ interface ShardsState {
   testDiscovery: (eventId: string) => Promise<'found' | 'missing' | 'refused'>
   pendingShard: () => ShardModel | null
   worldItems: () => WorldItem[]
+  /**
+   * What the world draws: worldItems, less what stays in an opened chest
+   * and floats out of it as loot instead (lib/looks.ts keptInChest).
+   */
+  drawnItems: () => WorldItem[]
+  /**
+   * What hidden audio is heard from (scene/HiddenAudio): every audio item in
+   * worldItems, one that stays in an opened chest included, so audio sealed
+   * in a chest autoplays at the chest once it is opened, as it did before
+   * the chest ceremony (#533). drawnItems leaves such an item out of what is
+   * drawn, never out of what is heard; its card and ITEMS still play it.
+   */
+  heardAudio: () => WorldItem[]
   /** The clicked item, mine or discovered, as one shape. */
   secretByEvent: (eventId: string) => WorldItem | null
 }
@@ -2207,11 +2221,13 @@ export const useShards = create<ShardsState>((set, get) => {
       // identity already opened by hand on this device: after a reload the
       // scan opens it again, as it was, with an item still held
       // (store/useOpenedChests), and a chest inside it only if that one was
-      // opened by hand too. A chest sealed to this identity waits for OPEN
-      // again, since a signer would have to be asked; nothing TV showed is
-      // restored, and a key TV showed opens nothing (review of #390).
+      // opened by hand too, under the lock each has now. A chest sealed to
+      // this identity is not read here, since a scan never asks a signer: it
+      // is drawn open, and its card reads it again when shown (hud/ItemRows
+      // readAgain). Nothing TV showed is restored, and a key TV showed opens
+      // nothing (review of #390).
       const keys: OpeningKey[] = openingKeys(useInventory.getState().items, true)
-      const byHand = (h: Hidden): boolean => h.type === 'chest' && !!h.chest && openedByHand(me, h.eventId)
+      const byHand = (h: Hidden): boolean => h.type === 'chest' && !!h.chest && openedByHand(me, h.eventId, h.chest.lockPubkey)
       const queue = watched ? [] : items.filter(byHand)
       const revealed: Hidden[] = []
       while (queue.length > 0) {
@@ -2330,6 +2346,19 @@ export const useShards = create<ShardsState>((set, get) => {
       if (curated) return worldOf(get()).filter((w) => w.author !== undefined && curated.includes(w.author) && shown(w))
       return worldOf(get()).filter(shown)
     },
+
+    drawnItems: () => {
+      const { discovered, mine } = get()
+      const parent = (chestId: string): { at: Position; tags?: readonly unknown[] } | undefined => {
+        const h = discovered[chestId]
+        if (h) return { at: h.at, tags: h.inner?.tags }
+        const d = mine.find((x) => x.eventId === chestId)
+        return d ? { at: positionOf(d), tags: d.inner?.tags } : undefined
+      }
+      return get().worldItems().filter((w) => !keptInChest(w, w.chestId ? parent(w.chestId) : undefined))
+    },
+
+    heardAudio: () => get().worldItems().filter((w) => w.type === 'audio'),
 
     secretByEvent: (eventId) => get().worldItems().find((w) => w.key === eventId) ?? null,
   }

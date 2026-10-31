@@ -226,7 +226,7 @@ export function WorldShards({ axes }: Props): JSX.Element | null {
   useEffect(() => { readFollows() }, [me])
 
   const fresh = useMemo(() => {
-    return drawableShards(useShards.getState().worldItems(), anchor, anchorPlane, scaleExp, axes)
+    return drawableShards(useShards.getState().drawnItems(), anchor, anchorPlane, scaleExp, axes)
     // mine and discovered are what worldShards reads.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [anchor, anchorPlane, scaleExp, axes, mine, discovered, curated, muted])

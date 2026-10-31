@@ -14,6 +14,12 @@
  * here and nowhere else; it changes whether this file runs, never the order
  * in which it sends, so the prefix invariant above is untouched by it.
  *
+ * A deploy that requires newer chain rules than this build's holds every
+ * send (lib/versionGate.ts): each event here is a kind 3333, signed in the
+ * format this build knows, and a stale tab must not go on publishing that
+ * format after the rules change. What waits is kept, as for LOCAL, and the
+ * reloaded build decides what becomes of it.
+ *
  * A module singleton rather than an effect, because React's dev double-mount
  * would otherwise start two drains, and because a publish that is already in
  * flight when the component goes away should still land and be recorded. The
@@ -27,7 +33,9 @@ import { confirmChainEvents } from './chains'
 import { noteChainHolders } from './chainHolders'
 import type { NostrEvent } from './events'
 import { chainFacts, gateAfter, maySend } from './release'
-import { newestEventOnRelays, useCyberspace } from '../store/useCyberspace'
+import { newestEventOnRelays, noteStaleFormatStuck, retireStaleFormat, useCyberspace } from '../store/useCyberspace'
+import { staleHopFormat } from './staleFormat'
+import { movementBlocked, useVersionGate } from './versionGate'
 
 /** First retry after a refusal or a dead socket; doubles up to the cap. */
 const RETRY_MS = 4000
@@ -88,6 +96,8 @@ function retryLater(): void {
 
 async function pump(): Promise<void> {
   if (inFlight) return
+  // Held, not failed: nothing is retried until the hold lifts (startPublisher).
+  if (movementBlocked()) return
   let s = useCyberspace.getState()
   if (!maySend(s, released)) return
   if (!s.events.some((e) => s.published[e.id] !== 'ok')) { backlogChecked = false; return }
@@ -98,12 +108,19 @@ async function pump(): Promise<void> {
     const answered = await preflight()
     inFlight = false
     s = useCyberspace.getState()
-    if (!maySend(s, released)) return
+    if (!maySend(s, released) || movementBlocked()) return
     if (!answered) { retryLater(); return }
     backlogChecked = true
   }
   const next = s.events.find((e) => s.published[e.id] !== 'ok')
   if (!next) { backlogChecked = false; return }
+  // Never a hop in the old proof format (hop proof version 2): the store
+  // cuts it away as it lands, and this is the last place it could slip out.
+  // Cut here too, and the drain goes on from the chain that is left.
+  // A cut is declined when an event after it is already published: then it
+  // is never sent, the player is told once, and this chain's queue waits
+  // (nothing else does; other publishing goes out by its own paths).
+  if (staleHopFormat(next)) { if (retireStaleFormat() === null) noteStaleFormatStuck(next); return }
 
   inFlight = true
   s.setPublishStatus(next.id, 'sending')
@@ -222,6 +239,8 @@ export function requeueForCanonical(events: NostrEvent[]): void {
 
 async function retryCanonical(): Promise<void> {
   canonicalHandle = null
+  // Held while a newer deploy's rules stand: asked again on the usual backoff.
+  if (movementBlocked()) { canonicalBackoff = Math.min(canonicalBackoff * 2, RETRY_MAX_MS); scheduleCanonical(); return }
   const s = useCyberspace.getState()
   const ids = new Set(s.events.map((e) => e.id))
   for (const [id, { event }] of [...notOnCanonical]) {
@@ -266,6 +285,13 @@ export function startPublisher(): void {
     if (retryHandle !== null) { clearTimeout(retryHandle); retryHandle = null }
     backoff = RETRY_MS
     void pump()
+  })
+
+  // A hold for a newer deploy's chain rules lifted (a later answer with a
+  // lower epoch, a revert): what waited goes out as it would have.
+  useVersionGate.subscribe((v, prev) => {
+    if (prev.verdict !== 'blocked' || v.verdict === 'blocked') return
+    if (maySend(useCyberspace.getState(), released)) void pump()
   })
 
   // No pump on startup. The gate starts shut, so a reload with Live

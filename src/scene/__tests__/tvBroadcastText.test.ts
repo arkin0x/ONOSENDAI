@@ -15,8 +15,8 @@ if (typeof localStorage === 'undefined') {
 vi.mock('../../lib/relay', () => ({ query: async () => [], queryEach: async () => [], queryAny: async () => [], publish: async () => ({ ok: true }), publishMany: async () => ({ ok: true }), relaySet: () => [] }))
 import { TvPainter, type TvAssets, type TvPicture } from '../tvPainter'
 import { useTv } from '../../store/useTv'
-import { HOSAKA_1 } from '../../lib/tv/hosakaAd'
-import { BROADCAST_TAG, broadcastScale, broadcastText, setBroadcastForTest, type BroadcastTextSize } from '../../lib/tv/broadcast'
+import { CTV_ADVERTISE_1, HOSAKA_1 } from '../../lib/tv/hosakaAd'
+import { BROADCAST_TAG, PORTRAIT_FRAME, broadcastScale, broadcastText, setBroadcastForTest, type BroadcastLayout, type BroadcastTextSize } from '../../lib/tv/broadcast'
 
 interface Box { x0: number; y0: number; x1: number; y1: number }
 /** The drawing state a call inked with: the font, the ink, how opaque, the shadow. */
@@ -109,8 +109,8 @@ const inside = (a: Box, b: Box): boolean => a.x0 >= b.x0 - 0.5 && a.x1 <= b.x1 +
 
 afterEach(() => setBroadcastForTest(null))
 
-/** The captures the streamer offers, CSS px and pixel ratio (cyberspace-tv RESOLUTIONS). */
-const FRAMES: Array<[number, number, number]> = [[1920, 1080, 1], [1280, 720, 1], [720, 720, 1], [720, 720, 1.5]]
+/** The captures the streamer offers, CSS px, pixel ratio and layout (cyberspace-tv RESOLUTIONS; the upright one from 2026-10-30). */
+const FRAMES: Array<[number, number, number, BroadcastLayout?]> = [[1920, 1080, 1], [1280, 720, 1], [720, 720, 1], [720, 720, 1.5], [PORTRAIT_FRAME.width, PORTRAIT_FRAME.height, 1, 'portrait']]
 const longComment = { ...comment, text: 'the sky above the port was the color of television, tuned to a dead channel and then some more words to run it past what any panel holds at this size' }
 const shortComment = { ...comment, id: 'd'.repeat(64), text: 'welcome to cyberspace! Let me know if you have any questions' }
 const KINDS = [trip, segmentShot(bag), segmentShot(object), segmentShot(longComment as never), segmentShot(shortComment as never)]
@@ -125,8 +125,8 @@ describe('the stream\'s text sizes', () => {
     const silent = assets.music
     try {
       for (const size of ['large', 'xl'] as BroadcastTextSize[]) {
-        setBroadcastForTest(true, size)
-        for (const [w, h, scale] of FRAMES) {
+        for (const [w, h, scale, layout = 'landscape'] of FRAMES) {
+          setBroadcastForTest(true, size, layout)
           const W = w * scale
           const H = h * scale
           const frame = { x0: 0, y0: 0, x1: W, y1: H }
@@ -227,8 +227,8 @@ describe('the stream\'s text sizes', () => {
   it('the HOSAKA spot, ONOSENDAI.TECH and all, fits every frame at every size', () => {
     const scenes = HOSAKA_1.scenes
     for (const size of ['large', 'xl'] as BroadcastTextSize[]) {
-      setBroadcastForTest(true, size)
-      for (const [w, h, scale] of FRAMES) {
+      for (const [w, h, scale, layout = 'landscape'] of FRAMES) {
+        setBroadcastForTest(true, size, layout)
         for (const sc of scenes) {
           const { texts } = paintAt(picture({ shot: trip as never, ad: { at: 1e12 - 700 - ((sc.from + sc.to) / 2) * 1000, id: HOSAKA_1.id } }), w, h, 1e12, scale)
           expect(texts.some((t) => t.text === BROADCAST_TAG), `${size} ${w}x${h} ${sc.kind}`).toBe(true)
@@ -262,6 +262,100 @@ describe('the text size flag', () => {
     for (const [w, h] of [[1920, 1080], [1280, 720], [390, 844], [844, 390]]) {
       for (const shot of shots) {
         setBroadcastForTest(false, 'xl')
+        const a = paintAt(picture({ shot: shot as never }), w, h)
+        setBroadcastForTest(false)
+        const b = paintAt(picture({ shot: shot as never }), w, h)
+        expect(a.texts.map((t) => [t.text, t.x, t.y, t.size])).toEqual(b.texts.map((t) => [t.text, t.x, t.y, t.size]))
+        expect(a.rects.map((r) => [r.x0, r.y0, r.x1, r.y1])).toEqual(b.rects.map((r) => [r.x0, r.y0, r.x1, r.y1]))
+      }
+    }
+  })
+})
+
+describe('the upright stream (layout=portrait; arkinox, 2026-10-30)', () => {
+  const W = PORTRAIT_FRAME.width
+  const H = PORTRAIT_FRAME.height
+  const frame = { x0: 0, y0: 0, x1: W, y1: H }
+
+  it('stacks NOW PLAYING over the chiron, each the frame\'s width between the margins', () => {
+    setBroadcastForTest(true, 'large', 'portrait')
+    const { texts, rects } = paintAt(picture({ shot: trip as never }), W, H)
+    const grounds = rects.filter((r) => r.look.ink === 'gradient' && !r.radial)
+    const npLabel = texts.find((t) => t.text.includes('NOW PLAYING'))!
+    const np = grounds.find((r) => r.x0 <= npLabel.box.x0 && r.x1 >= npLabel.box.x0 && r.y0 <= npLabel.y && r.y1 >= npLabel.y)!
+    const chiron = grounds.filter((r) => r !== np).reduce((low, r) => (r.y1 > low.y1 ? r : low))
+    const MX = Math.round(W * 0.06)
+    for (const r of [np, chiron]) {
+      expect(r.x0).toBeCloseTo(MX, 6)
+      expect(r.x1).toBeCloseTo(W - MX, 6)
+    }
+    expect(np.y1).toBeLessThan(chiron.y0)
+  })
+
+  it('stacks a segment\'s model over its words, in the middle, never beside the clock', () => {
+    setBroadcastForTest(true, 'large', 'portrait')
+    for (const item of [longComment, shortComment, bag]) {
+      const { texts, rects } = paintAt(picture({ shot: segmentShot(item as never) as never }), W, H)
+      const grounds = rects.filter((r) => r.look.ink === 'gradient' && !r.radial)
+      const chiron = grounds.reduce((low, r) => (r.y1 > low.y1 ? r : low))
+      const panel = grounds.filter((r) => r !== chiron && r.x1 - r.x0 > 200).sort((a, b) => (b.x1 - b.x0) * (b.y1 - b.y0) - (a.x1 - a.x0) * (a.y1 - a.y0))[0]
+      expect(panel, item.kind).toBeDefined()
+      // The frame's width between the margins, under the clock's column.
+      const date = texts.find((t) => /^[A-Z]{3} \d\d \d{4}$/.test(t.text))!
+      expect(panel.y0, item.kind).toBeGreaterThan(date.y)
+      expect(panel.x1 - panel.x0, item.kind).toBeGreaterThan(W * 0.8)
+      if (item.kind === 'comment') {
+        // The quote under the model: it starts on the panel's left padding, not beside a model.
+        const quote = texts.find((t) => t.text.startsWith('“'))!
+        expect(quote.box.x0 - panel.x0, item.kind).toBeLessThan(40)
+      }
+    }
+  })
+
+  it('puts an explainer\'s captions under its video, larger, every line in the frame and above the marquee', () => {
+    setBroadcastForTest(true, 'large', 'portrait')
+    const video = { x: 0, y: (H - W * 9 / 16) / 2, w: W, h: W * 9 / 16 }
+    const caption = 'cyberspace is a real place, with real coordinates, and every move in it takes real work to make, so here is a caption long enough to wrap'
+    const explainer = { title: 'Welcome to Cyberspace', mix: 1, pip: { x: 0, y: 0, w: 0, h: 0 }, video, caption, pipShown: false }
+    vi.spyOn(performance, 'now').mockReturnValue(1e12)
+    const rec = recording()
+    const painter = new TvPainter(rec.canvas)
+    painter.size(W, H, 1)
+    painter.paint(picture({ shot: trip as never }), { ...assets, explainer }, 1e12, 1, false)
+    vi.restoreAllMocks()
+    const lines = rec.texts.filter((t) => caption.includes(t.text.replace(/…$/u, '')))
+    expect(lines.length).toBeGreaterThan(1)
+    const floor = painter.marqueeTop!
+    for (const l of lines) {
+      expect(inside(l.box, frame), l.text).toBe(true)
+      expect(l.box.y0, l.text).toBeGreaterThanOrEqual(video.y + video.h)
+      expect(l.box.y1, l.text).toBeLessThanOrEqual(floor)
+      // Larger than the 16:9 stream's captions are, for the same share of the frame.
+      expect(l.size).toBeCloseTo(20 * 0.9 * broadcastScale(0.9, W, 1.35), 6)
+    }
+    expect(lines.map((l) => l.text).join(' ').replace(/…$/u, '')).toBe(caption)
+  })
+
+  it('the house spot, the address and all, is inside the frame and as large as it is at 16:9 on a phone', () => {
+    for (const size of ['large', 'xl'] as BroadcastTextSize[]) {
+      setBroadcastForTest(true, size, 'portrait')
+      for (const sc of CTV_ADVERTISE_1.scenes) {
+        const { texts } = paintAt(picture({ shot: trip as never, ad: { at: 1e12 - 700 - ((sc.from + sc.to) / 2) * 1000, id: CTV_ADVERTISE_1.id } }), W, H)
+        for (const t of texts) expect(inside(t.box, frame), `${size} "${t.text}"`).toBe(true)
+        for (const line of sc.lines) {
+          const t = texts.find((x) => x.text === line)
+          expect(t, `${size} ${line}`).toBeDefined()
+          // A punch line on a phone 390 px wide, CSS px: never under 18.
+          expect(t!.size * 390 / W, `${size} ${line}`).toBeGreaterThan(18)
+        }
+      }
+    }
+  })
+
+  it('changes nothing on the site\'s TV, whatever the address says', () => {
+    for (const [w, h] of [[1920, 1080], [1280, 720], [390, 844], [844, 390], [W, H]]) {
+      for (const shot of [trip, segmentShot(longComment as never), segmentShot(bag)]) {
+        setBroadcastForTest(false, 'large', 'portrait')
         const a = paintAt(picture({ shot: shot as never }), w, h)
         setBroadcastForTest(false)
         const b = paintAt(picture({ shot: shot as never }), w, h)

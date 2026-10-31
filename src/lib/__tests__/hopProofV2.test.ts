@@ -13,7 +13,7 @@
 
 import { describe, expect, it } from 'vitest'
 import { finalizeEvent, generateSecretKey, getPublicKey } from 'nostr-tools/pure'
-import { auditHopLevel2, computeHopProofV2, coordToXyz, hexToCoord, verifyHopLevel1, GRANDFATHERED_V1_HOPS } from 'cyberspace-core'
+import { auditHopLevel2, computeHopProofV2, coordToXyz, hexToCoord, verifyHopLevel1 } from 'cyberspace-core'
 import {
   buildChain,
   enterHyperspaceTemplate,
@@ -88,10 +88,9 @@ describe('a version 2 hop made the worker way verifies with core', () => {
       openings: hop.tags.find((t) => t[0] === 'mp')![1],
       eventId: hop.id,
     }
-    expect(verifyHopLevel1(claim)).toEqual([])
+    // Nothing here leans on an exemption.
+    expect(verifyHopLevel1({ ...claim, grandfathered: new Set() })).toEqual([])
     expect(auditHopLevel2(claim)).toEqual([])
-    // The list is still empty: nothing here leans on an exemption.
-    expect(GRANDFATHERED_V1_HOPS.size).toBe(0)
   })
 })
 

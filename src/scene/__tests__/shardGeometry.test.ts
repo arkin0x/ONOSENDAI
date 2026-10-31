@@ -49,7 +49,9 @@ describe('shardGeometry draws every face', () => {
 describe('ShardMesh draws what shardGeometry gives it', () => {
   const src = readFileSync(fileURLToPath(new URL('../ShardMesh.tsx', import.meta.url)), 'utf8')
   it('builds its faces from shardGeometry and from nothing else', () => {
-    expect(src).toMatch(/useMemo\(\(\) => shardGeometry\(shard,/)
+    // A placement sharing its object's buffers gets them from shardGeometry too (buildPlaced).
+    expect(src).toMatch(/useMemo\(\(\) => shared \?\? shardGeometry\(shard, clip, pose\),/)
+    expect(src).toMatch(/= shardGeometry\(shard\)\n/)
   })
   it('asks no outward guess which faces to leave out', () => {
     expect(src).not.toMatch(/orientShard|\.interior\b/)

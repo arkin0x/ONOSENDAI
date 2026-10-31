@@ -78,6 +78,16 @@ describe('the relays that hold a chain', () => {
     expect([...holders.chainHolders(other)]).toEqual([CANONICAL])
   })
 
+  it('a retired relay leaves a saved set on the next page, on disk too, and the others stay', async () => {
+    localStorage.clear()
+    const pk = 'c9'.repeat(32)
+    const key = `onosendai:chain-holders:${pk}`
+    localStorage.setItem(key, JSON.stringify(['wss://onosendai.feeds.relay.tools/', 'wss://holds.example/']))
+    const { holders } = await page()
+    expect([...holders.chainHolders(pk)]).toEqual([CANONICAL, 'wss://holds.example/'])
+    expect(JSON.parse(localStorage.getItem(key)!)).toEqual(['wss://holds.example/'])
+  })
+
   it('a relay that took one of the chain\'s actions holds it, saved beside the chain', async () => {
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] })
     try {

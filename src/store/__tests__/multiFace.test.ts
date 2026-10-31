@@ -28,7 +28,7 @@ const BLUE: [number, number, number] = [0, 0, 1]
 /** A row of four triangles, each sharing an edge with the next: vertices 0..5, zigzag. */
 function strip(): ShardModel {
   const s = newShard('strip')
-  const at = (x: number, z: number): ShardModel['vertices'][number] => ({ ...vertexAt([x * 120, 0, z * 120]), c: [0.25, 0.5, 0.75] })
+  const at = (x: number, z: number): ShardModel['vertices'][number] => vertexAt([x * 120, 0, z * 120], [0.25, 0.5, 0.75])
   return { ...s, mode: 'solid', vertices: [at(0, 0), at(0, 1), at(1, 0), at(1, 1), at(2, 0), at(2, 1)], faces: [[0, 1, 2], [2, 1, 3], [2, 3, 4], [4, 3, 5]] }
 }
 

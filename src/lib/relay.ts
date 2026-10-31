@@ -19,6 +19,7 @@ import type { EventTemplate, VerifiedEvent } from 'nostr-tools/core'
 import type { NostrEvent } from './events'
 import { currentRelays, DEFAULT_RELAY, isRetiredRelay } from '../store/useRelays'
 import { LiveRegistry, type Transport } from './liveSub'
+import { authOpen } from './authOpen'
 import { AUTH_STALLED, classifyClose, mergeAnswers, type RelayAnswer } from './relayOutcome'
 import { normalizeURL } from 'nostr-tools/utils'
 import { useCyberspace } from '../store/useCyberspace'
@@ -205,27 +206,27 @@ interface AuthRelay {
  * and re-auths on its own when a reconnect brings a fresh challenge.
  */
 const authedFor = new Map<string, string>()
-const noChallenge = new Set<string>()
+const noChallenge = new WeakSet<object>()
 async function authRelay(url: string): Promise<void> {
-  // A relay that never challenged before will not now: skip the wait.
-  if (noChallenge.has(url)) return
   const started = Date.now()
   try {
     const relay = (await getPool().ensureRelay(url)) as unknown as AuthRelay
+    // This socket did not challenge when asked before: skip the wait. A challenge since, or a new socket, is seen.
+    if (!relay.challenge && noChallenge.has(relay)) return
     for (let i = 0; i < 10 && !relay.challenge; i++) await new Promise((r) => setTimeout(r, 40))
     if (relay.challenge) {
       if (authedFor.get(url) !== relay.challenge) {
         const key = normalizeURL(url)
-        authOpen.add(key)
+        authOpen.set(key, relay)
         try {
           await relay.auth(authSign)
           authedFor.set(url, relay.challenge)
         } finally {
-          authOpen.delete(key)
+          if (authOpen.get(key) === relay) authOpen.delete(key)
         }
       }
     } else {
-      noChallenge.add(url)
+      noChallenge.add(relay)
     }
   } catch (err) {
     // Relay down, or does not require auth; or it took the socket and never answered its AUTH.
@@ -234,11 +235,6 @@ async function authRelay(url: string): Promise<void> {
   }
 }
 
-/**
- * AUTHs not finished yet (normalized URLs). A signer can take as long as a
- * person takes, and nostr-tools never settles an AUTH whose signer rejected.
- */
-const authOpen = new Set<string>()
 /** How long anything waits for the signer before going on without that relay. */
 const AUTH_WAIT_MS = MAX_WAIT_MS
 /** The last word on a publish: nostr-tools' own auth-required retry waits on an AUTH that may never settle. */
@@ -268,6 +264,11 @@ function boundedSend(sent: Promise<string>): Promise<string> {
   return Promise.race([sent, bound]).finally(() => clearTimeout(timer))
 }
 
+/** Whether this relay has yet taken an AUTH from this page on the socket in hand. */
+export function signedIn(url: string): boolean {
+  return authedFor.has(normalizeURL(url))
+}
+
 /** The relays every cyberspace read and write fans out across, right now. */
 export function relaySet(): string[] {
   return currentRelays()
@@ -290,6 +291,8 @@ export function dropRelays(relays: string[]): void {
   try { getPool().close(relays) } catch { /* nothing open */ }
   for (const url of relays) {
     authedFor.delete(url)
+    // A read's key is the normalized URL, and relaySet's is not.
+    authedFor.delete(normalizeURL(url))
     authOpen.delete(normalizeURL(url))
   }
 }
@@ -335,7 +338,7 @@ export async function publishMany(relays: string[], event: NostrEvent): Promise<
   const first = await publishOnce(relays, event)
   // Waiting on the signer: dropping the socket would throw its AUTH away and prompt again (verification of #236, finding 4).
   if (first.ok || REFUSED.test(first.reason) || /^auth-required\b/i.test(first.reason)) return first
-  dropRelays(relays)
+  dropRelays(relays.filter((url) => !authPending(url)))
   return publishOnce(relays, event)
 }
 
@@ -460,7 +463,20 @@ async function askOne(url: string, filter: Filter, deadline: number, opts: AskOp
             events.set(e.id, e as NostrEvent)
             onEvent?.(e as NostrEvent)
           },
-          oneose: () => { noteAnswered(url); finish({ url, outcome: 'answered', events: got() }) },
+          oneose: () => {
+            // A challenge came in and is not answered: an empty answer to a reader not signed in is no answer.
+            const challenge = (relay as unknown as AuthRelay).challenge
+            if (events.size === 0 && challenge && authedFor.get(url) !== challenge && !authTried) {
+              authTried = true
+              relay.auth(authSign).then(
+                () => { authedFor.set(url, challenge); if (!settled) open() },
+                (err) => finish({ url, outcome: 'refused', reason: `auth-required: ${err instanceof Error ? err.message : String(err)}`, events: got() }),
+              )
+              return
+            }
+            noteAnswered(url)
+            finish({ url, outcome: 'answered', events: got() })
+          },
           onclose: (reason) => {
             if (settled) return
             if (/^auth-required:/i.test(reason) && !authTried) {
@@ -635,7 +651,7 @@ export function queryEachSettled(
   const urls = [...new Set(relays.map((r) => normalizeURL(r)))]
   const main = normalizeURL(primary)
   const held = new Set(waitFor.map((r) => normalizeURL(r)).filter((url) => urls.includes(url) && url !== main))
-  const unanswered = (url: string): RelayAnswer => ({ url, outcome: 'unreachable', reason: 'no answer in time', events: [] })
+  const unanswered = (url: string): RelayAnswer => authOpen.has(url) ? { url, outcome: 'refused', reason: AUTH_STALLED, events: [] } : { url, outcome: 'unreachable', reason: 'no answer in time', events: [] }
   if (opts.stop?.aborted) return Promise.resolve(urls.map(unanswered))
   // `maxWait` to connect and authenticate, then `maxWait` from the moment
   // the REQ goes out (askOne answerMs).
@@ -681,7 +697,12 @@ export function queryEachSettled(
           answers.set(url, answer)
           if (url === main && answer.outcome === 'answered') {
             primaryAnswered = true
-            cap = setTimeout(settle, Math.max(0, (firstSent ?? Date.now()) + maxWait - Date.now()))
+            // A holder whose AUTH is still waiting on the signer gets the same one more window.
+            const sentAt = firstSent ?? Date.now()
+            cap = setTimeout(() => {
+              if ([...held].some((u) => authOpen.has(u) && !answers.has(u))) cap = setTimeout(settle, Math.max(0, sentAt + 2 * maxWait - Date.now()))
+              else settle()
+            }, Math.max(0, sentAt + maxWait - Date.now()))
           }
           if (enough()) settle()
         })

@@ -1,3 +1,4 @@
+import { signerWaiting } from '../lib/authOpen'
 import { bigintBitLimit, movementCapabilityIssue } from '../lib/proofCapability'
 /**
  * useCyberspace.ts - the single source of truth for who you are, where you
@@ -1761,6 +1762,8 @@ function wakeSigner(): void {
 export const HEAD_RETRYING_MESSAGE = "Can't confirm your latest move; retrying."
 /** Said when the relays still could not confirm it, and the move is refused. */
 export const HEAD_UNCONFIRMED_MESSAGE = "Can't confirm your latest move. Try again."
+/** The same, when a relay is waiting on the signer: trying again would not help until it answers. */
+export const HEAD_UNCONFIRMED_SIGNER_MESSAGE = "Can't confirm your latest move. Check your signer."
 /** How many times a move asks before it refuses. */
 const HEAD_CONFIRM_TRIES = 2
 
@@ -1936,7 +1939,7 @@ async function confirmHead(retrying: () => void): Promise<string | null | typeof
       return null
     }
   }
-  return HEAD_UNCONFIRMED_MESSAGE
+  return signerWaiting() ? HEAD_UNCONFIRMED_SIGNER_MESSAGE : HEAD_UNCONFIRMED_MESSAGE
 }
 
 /**

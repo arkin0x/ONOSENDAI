@@ -31,9 +31,9 @@
 import type { Filter } from 'nostr-tools/filter'
 import { RECOGNIZED_ACTIONS, actionLink, buildChain, chainGap, newestSpawn, parseAction, type ActionEvent, type NostrEvent } from './events'
 import { nip19 } from 'nostr-tools'
-import { CYBERSPACE_RELAY, authPending, dropRelays, query, queryEach, queryEachSettled, relaySet, subscribe } from './relay'
+import { CYBERSPACE_RELAY, signedIn, authPending, dropRelays, query, queryEach, queryEachSettled, relaySet, subscribe } from './relay'
 import { normalizeURL } from 'nostr-tools/utils'
-import { PARTIAL_CHAIN_REASON, mergeAnswers, type RelayAnswer } from './relayOutcome'
+import { PARTIAL_CHAIN_REASON, mergeAnswers, type RelayAnswer, AUTH_STALLED } from './relayOutcome'
 import { chainHolders, noteHoldersFrom } from './chainHolders'
 
 export { PARTIAL_CHAIN_REASON }
@@ -219,9 +219,6 @@ async function gatherChain<T>(
   return { got, whole: hole() === null }
 }
 
-/** A chain is read from every configured relay, even one that hung: it may hold a newer move (relay.ts skipHung). */
-const CHAIN_READ = { evenHung: true }
-
 /**
  * A chain is read from every configured relay, even one that hung: it may hold
  * a newer move (relay.ts skipHung). And a relay still waiting on the signer is
@@ -247,6 +244,8 @@ export async function fetchChainEvents(pubkey: string, knownSpawnId?: string, ha
 
 /** How long the own-chain check waits for each relay's real answer, per question. */
 export const CHAIN_CHECK_MS = 6000
+/** How long a relay may take to challenge, before an empty answer is believed. */
+const LATE_CHALLENGE_MS = 1000
 
 /**
  * The same question, with each relay's answer kept: answered, refused or
@@ -255,8 +254,14 @@ export const CHAIN_CHECK_MS = 6000
  * this identity has a chain, has none, or cannot be told (chainHold.ts).
  */
 export async function askChainEvents(pubkey: string, knownSpawnId?: string, have: NostrEvent[] = []): Promise<RelayAnswer[]> {
-  const { got, whole } = await gatherChain((f) => queryEach(f, CHAIN_CHECK_MS, CHAIN_READ), mergeAnswers, combineAnswers, pubkey, knownSpawnId, have,
+  const read = (): ReturnType<typeof gatherChain<RelayAnswer[]>> => gatherChain((f) => queryEach(f, CHAIN_CHECK_MS, CHAIN_READ), mergeAnswers, combineAnswers, pubkey, knownSpawnId, have,
     (answers, author) => answers.map((a) => ({ ...a, events: ownEvents(a.events, author) })))
+  let { got, whole } = await read()
+  // "No chain" signs a spawn, so an empty answer from a canonical relay not signed in looks once more: one that challenges late has challenged by now.
+  if (mergeAnswers(got).length === 0 && !got.some((a) => a.outcome === 'refused' && a.reason === AUTH_STALLED) && !signedIn(CYBERSPACE_RELAY)) {
+    await new Promise((r) => setTimeout(r, LATE_CHALLENGE_MS))
+    ;({ got, whole } = await read())
+  }
   // Every relay that sent back one of the chain's events holds it, and a
   // move's confirmation waits for it from now on (chainHolders.ts).
   noteHoldersFrom(pubkey, got)
@@ -357,6 +362,8 @@ export async function confirmChainEvents(
     noteHoldersFrom(pubkey, got)
     if (!whole) return null
     const merged = mergeAnswers(got)
+    // A holder, the canonical relay among them, behind a signer that has not answered may hold a newer move. Not read, it says nothing, so the move waits.
+    if (got.some((a) => waitFor.includes(a.url) && a.outcome === 'refused' && a.reason === AUTH_STALLED)) return extendsChain(merged, have) ? merged : null
     if (got.some((a) => a.url === canonical && a.outcome === 'answered')) return merged
     const holdsChain = (a: RelayAnswer): boolean => opts.anchorId === undefined || a.events.some((e) => e.id === opts.anchorId)
     if (got.some((a) => a.url !== canonical && a.outcome === 'answered' && holdsChain(a))) return merged

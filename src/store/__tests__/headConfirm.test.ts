@@ -51,7 +51,8 @@ vi.mock('../../lib/workers', async (orig) => ({
 }))
 vi.mock('../../lib/hyperspace/enter', async (orig) => ({ ...(await orig() as object), computeEnterProof: () => '0'.repeat(64) }))
 
-import { HEAD_RETRYING_MESSAGE, HEAD_UNCONFIRMED_MESSAGE, useCyberspace } from '../useCyberspace'
+import { authOpen } from '../../lib/authOpen'
+import { HEAD_RETRYING_MESSAGE, HEAD_UNCONFIRMED_MESSAGE, HEAD_UNCONFIRMED_SIGNER_MESSAGE, useCyberspace } from '../useCyberspace'
 import { placeSpawn } from '../fixtures/placeSpawn'
 import { moveDirection } from '../../lib/moves'
 import { hopTemplate, positionHex, type NostrEvent } from '../../lib/events'
@@ -87,6 +88,17 @@ describe('a move is signed only from a head the relays confirm', () => {
     expect(relay.asked).toBe(2)
     expect(S().proof.message).toBe(HEAD_UNCONFIRMED_MESSAGE)
     expect(S().proof.message).toBe("Can't confirm your latest move. Try again.")
+  })
+
+  it('says to check the signer when a relay is waiting on it, since trying again would not help', async () => {
+    relay.answers = [null, null]
+    authOpen.set('wss://gated.example/', {})
+    S().moveCursor(moveDirection(S().axes(), 'right'))
+    await S().commit()
+    authOpen.clear()
+    expect(posted).toEqual([])
+    expect(S().proof.message).toBe(HEAD_UNCONFIRMED_SIGNER_MESSAGE)
+    expect(S().proof.message).toBe("Can't confirm your latest move. Check your signer.")
   })
 
   it('says it is retrying while it asks again, and moves once the relay answers', async () => {

@@ -226,6 +226,28 @@ export class HandleHits extends Object3D {
   }
 }
 
+/**
+ * What a press landed on, so a lift elsewhere is no tap on what it lifted over:
+ * as it was when each point had its own object, which R3F asks whether the
+ * press met. A finger on a dense shard rolls across points. One press can meet
+ * several points that overlap on screen, and each is told by its own call.
+ */
+export class PressMemory {
+  private event: unknown = null
+  private readonly on = new Set<number>()
+
+  /** The press `event` met point `index`. A new event is a new press, and forgets the last. */
+  press(event: unknown, index: number | undefined): void {
+    if (this.event !== event) { this.event = event; this.on.clear() }
+    if (index !== undefined) this.on.add(index)
+  }
+
+  /** Whether the press met point `index`. */
+  met(index: number): boolean {
+    return this.on.has(index)
+  }
+}
+
 /** One halo: where it is, and its colour (a CSS colour). */
 export interface Halo {
   at: readonly [number, number, number]

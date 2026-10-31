@@ -44,7 +44,7 @@ import { partMatrix } from 'sno-core/parts'
 import { OwnPartsContext } from '../lib/parts'
 import { useCyberspace } from '../store/useCyberspace'
 import { Hold, noteGesture, tapSlop } from './deadZone'
-import { HandleDots, HandleHalos, HandleHits, dotCapacity, type Halo } from './handleDots'
+import { HandleDots, HandleHalos, HandleHits, PressMemory, dotCapacity, type Halo } from './handleDots'
 import { keepPrograms } from '../lib/keepPrograms'
 
 /** The unit grid's line colour when a unit is not divided. */
@@ -332,21 +332,15 @@ function Handles(): JSX.Element | null {
     dots.update(state.camera as PerspectiveCamera, state.size.height)
     hits.heightPx = state.size.height
   })
-  // What a press landed on, so a lift elsewhere is no tap on what it lifted
-  // over: as it was when each point had its own object, which R3F asks
-  // whether the press met. A finger on a dense shard rolls across points.
-  const pressed = useRef<{ event: unknown; on: Set<number> }>({ event: null, on: new Set() })
+  const pressed = useMemo(() => new PressMemory(), [])
   if (!shard) return null
 
-  const onPress = (e: ThreeEvent<PointerEvent>): void => {
-    if (pressed.current.event !== e.nativeEvent) pressed.current = { event: e.nativeEvent, on: new Set() }
-    if (e.index !== undefined) pressed.current.on.add(e.index)
-  }
+  const onPress = (e: ThreeEvent<PointerEvent>): void => { pressed.press(e.nativeEvent, e.index) }
 
   const onClick = (e: ThreeEvent<MouseEvent>): void => {
     if (e.delta > tapSlop()) return
     const g = e.index === undefined ? undefined : groups[e.index]
-    if (!g || !pressed.current.on.has(e.index as number)) return
+    if (!g || !pressed.met(e.index as number)) return
     e.stopPropagation()
     const first = g[0]
     const isSel = g.some((i) => chosen.has(i))

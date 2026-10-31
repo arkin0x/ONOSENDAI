@@ -219,8 +219,12 @@ async function gatherChain<T>(
   return { got, whole: hole() === null }
 }
 
-/** A chain is read from every configured relay, even one that hung: it may hold a newer move (relay.ts skipHung). */
-const CHAIN_READ = { evenHung: true }
+/**
+ * A chain is read from every configured relay, even one that hung: it may hold
+ * a newer move (relay.ts skipHung). And a relay still waiting on the signer is
+ * not an empty chain, so a fetch rejects rather than say so.
+ */
+const CHAIN_READ = { evenHung: true, failIfStalled: true }
 
 /**
  * Everything the relays have for one pubkey's current chain, raw: every

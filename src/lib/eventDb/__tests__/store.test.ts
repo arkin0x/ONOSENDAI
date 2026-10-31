@@ -325,6 +325,16 @@ describe('deletions', () => {
     expect(await withEventDb((db) => byKind(db, 33330))).toHaveLength(0)
   })
 
+  it('a pinned row with no address, marked deleted, is not handed out by any read, and is still found by id', async () => {
+    const e = sign(alice, 7, 1000, [['X', '1']])
+    await put([e], { pin: true })
+    await put([sign(alice, 5, 1001, [['e', e.id]])])
+    expect(await withEventDb((db) => byKind(db, 7))).toEqual([])
+    expect(await withEventDb((db) => byAuthorKind(db, alicePk, 7))).toEqual([])
+    expect(await withEventDb((db) => byTag(db, 'X:1'))).toEqual([])
+    expect((await row(e.id))!.deleted).toBe(1)
+  })
+
   it('your own event ends the same whichever comes first, it or its deletion', async () => {
     const e = sign(alice, 7, 1000)
     const del = sign(alice, 5, 1001, [['e', e.id]])
@@ -365,8 +375,11 @@ describe('deletions', () => {
     const del = sign(alice, 5, 1000, [['e', 'f'.repeat(64)]])
     const against = sign(alice, 5, 1001, [['e', del.id]])
     await put([del])
+    expect(await countOf('deletions')).toBe(1)
     await put([against])
     expect(await row(del.id)).toBeDefined()
+    // No tombstone for a target that is a deletion: only the first deletion's own target has one.
+    expect(await countOf('deletions')).toBe(1)
     closeEventDb()
     ;(globalThis as { indexedDB?: IDBFactory }).indexedDB = new IDBFactory()
     await put([against])

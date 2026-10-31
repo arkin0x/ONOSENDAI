@@ -29,11 +29,11 @@
 import { Canvas, useFrame, useThree, type ThreeEvent } from '@react-three/fiber'
 import { OrbitControls } from '@react-three/drei'
 import { memo, useEffect, useLayoutEffect, useMemo, useRef } from 'react'
-import { AdditiveBlending, BufferGeometry, DoubleSide, EdgesGeometry, Float32BufferAttribute, Group, IcosahedronGeometry, Line, LineBasicMaterial, MeshBasicMaterial, PerspectiveCamera, SphereGeometry, Vector3, Matrix4 } from 'three'
+import { BufferGeometry, DoubleSide, EdgesGeometry, Float32BufferAttribute, Group, IcosahedronGeometry, Line, LineBasicMaterial, PerspectiveCamera, Vector3, Matrix4 } from 'three'
 import { ACCENT, BG, WARN } from '../lib/palette'
 import { glowTexture } from '../lib/glow'
 import { GRID_HALF, TICKS_PER_UNIT, centroid, pointKey, rgbToHex, ticksOf, toRender } from 'sno-core/shards'
-import { drawnDivision } from './divisions'
+import { BenchGrid } from './benchGrid'
 import { benchAxes, benchPose, nudgeFor, orbitOffset, planeAfter, sameAxes, setOrbitSink, useBenchView, type NudgeName } from './benchAxes'
 import { landing, preview, type WorkPlane } from 'sno-core/stamps'
 import { ShardMesh, faceOfHit } from '../scene/ShardMesh'
@@ -44,16 +44,8 @@ import { partMatrix } from 'sno-core/parts'
 import { OwnPartsContext } from '../lib/parts'
 import { useCyberspace } from '../store/useCyberspace'
 import { Hold, noteGesture, tapSlop } from './deadZone'
-import { HandleDots, dotCapacity } from './handleDots'
-
-/** The unit grid's line colour when a unit is not divided. */
-const UNIT_LINE = '#1d3547'
-/**
- * When a unit is divided the unit lines step up toward the axis lines'
- * light blue, and the division lines take the unit lines' old colour, so
- * the unit grid stays the unit grid however fine the snap.
- */
-const UNIT_LINE_DIVIDED = '#166c86'
+import { HandleDots, HandleHalos, HandleHits, PressMemory, dotCapacity, type Halo } from './handleDots'
+import { keepPrograms } from '../lib/keepPrograms'
 
 type P3 = [number, number, number]
 
@@ -120,10 +112,14 @@ function Grid(): JSX.Element {
   const level = useWorkshop((s) => s.level)
   const plane = useWorkshop((s) => s.plane)
   const division = useWorkshop((s) => s.division)
-  const drawn = drawnDivision(division)
   const extent = useWorkshop((s) => s.current()?.extent ?? GRID_HALF)
   const tool = useWorkshop((s) => s.tool)
   const places = tool === 'add' || tool === 'stamp'
+  const invalidate = useThree((s) => s.invalidate)
+  // One quad and a shader, whatever the division and the extent (benchGrid.ts).
+  const grid = useMemo(() => new BenchGrid(), [])
+  useEffect(() => () => grid.dispose(), [grid])
+  useLayoutEffect(() => { grid.set(extent, division); invalidate() }, [grid, extent, division, invalidate])
 
   const onClick = (e: ThreeEvent<MouseEvent>): void => {
     if (e.delta > tapSlop()) return
@@ -156,11 +152,8 @@ function Grid(): JSX.Element {
   const rotation: P3 = plane === 0 ? [0, 0, -Math.PI / 2] : plane === 2 ? [Math.PI / 2, 0, 0] : [0, 0, 0]
   return (
     <group position={position} rotation={rotation}>
-      {/* The visible lattice. One cell per unit, so what you tap is what you get. */}
-      <gridHelper key={`u${extent}-${division > 1 ? 1 : 0}`} args={[extent * 2, extent * 2, ACCENT, division > 1 ? UNIT_LINE_DIVIDED : UNIT_LINE]} />
-      {/* The snap grid between the unit lines when a unit is divided, in the unit lines' plain colour. */}
-      {/* Past twelve lines a unit the snap is drawn at a divisor of itself (divisions.ts). */}
-      {drawn > 1 && <gridHelper key={`d${extent}-${drawn}`} args={[extent * 2, extent * 2 * drawn, UNIT_LINE, UNIT_LINE]} position={[0, -0.002, 0]} />}
+      {/* The visible lattice: a line for every unit and every division of one, so what you tap is what you get. */}
+      <primitive object={grid.mesh} />
       {/*
         The surface taps land on, in the placing tools only. In select and face
         mode it carries no handler at all, so the raycaster ignores it: a raised
@@ -226,8 +219,9 @@ function Ghost(): JSX.Element | null {
 /**
  * Handle sizes in CSS pixels, not bench units.
  *
- * Each handle sits in a group scaled by its own distance from the camera
- * (`ScreenScale`), so a radius of 1 draws one pixel across whatever the zoom.
+ * Each handle is scaled by its own distance from the camera (handleDots.ts,
+ * and `ScreenScale` for a picked corner's ring), so a radius of 1 draws one
+ * pixel across whatever the zoom.
  * That is the whole point: a ball sized in the world is a good target when you
  * are looking at the whole shard and a screenful when you lean in to place two
  * points inside one gibson. Constant on screen, it is the same target at every
@@ -251,8 +245,6 @@ const RING_OUT = 13
 const HIT_R = 12
 const HIT_FACE_R = 16
 const HIT_NARROW_R = 5.5
-/** Every hit target's material: never drawn, never compiled, one for all of them. */
-const HIT_MATERIAL = new MeshBasicMaterial()
 function hitRadiusFor(tool: Tool): number {
   if (tool === 'add') return HIT_NARROW_R
   if (tool === 'face') return HIT_FACE_R
@@ -279,49 +271,71 @@ function ScreenScale({ position, children }: { position: [number, number, number
  * One handle per point. Several vertices can share a point once stamps have
  * landed on each other; they read and act as one, so they draw as one.
  *
- * The dots are drawn together, as one object (handleDots.ts): one a point,
- * each a mesh of its own beside a drawn hit sphere, was 3,462 objects in
- * three's render loop every frame for a 1,731 point Basilica nave, and over
- * a gigabyte of garbage a minute at 144 Hz (arkinox, 2026-10-23). The hit
- * targets are still one per point, so a tap knows its point, but they are
- * invisible: the raycaster finds them and the renderer skips them. They share
- * one geometry and one material. A selected or picked point keeps its halo
- * and ring as before; there are few of those.
+ * However many points there are, this is three objects in three's scene and
+ * no React element per point (handleDots.ts): the dots, their halos, and one
+ * invisible object that answers taps by arithmetic and says which point it
+ * met. A mesh and a group per point, each with a frame callback, cost a
+ * Basilica nave 3,462 matrices and 1,731 callbacks every frame, and a re-diff
+ * of 1,731 elements on every tap (arkinox, 2026-10-31: "locking up only a
+ * minute after opening it"). A corner picked for a face keeps its ring, as
+ * its own object: a face has few corners.
  */
 function Handles(): JSX.Element | null {
   const shard = useWorkshop((s) => s.current())
   const selection = useWorkshop((s) => s.selection)
   const facePick = useWorkshop((s) => s.facePick)
   const tool = useWorkshop((s) => s.tool)
+  const invalidate = useThree((s) => s.invalidate)
   const chosen = useMemo(() => new Set(selection), [selection])
   const groups = useMemo(() => {
     const m = new Map<string, number[]>()
-    shard?.vertices.forEach((v, i) => { const k = pointKey(ticksOf(v)); m.set(k, [...(m.get(k) ?? []), i]) })
+    shard?.vertices.forEach((v, i) => {
+      const k = pointKey(ticksOf(v))
+      const g = m.get(k)
+      if (g) g.push(i); else m.set(k, [i])
+    })
     return [...m.values()]
   }, [shard?.vertices])
-  const hitRadius = hitRadiusFor(tool)
-  const hitGeometry = useMemo(() => new SphereGeometry(hitRadius, 10, 10), [hitRadius])
-  useEffect(() => () => hitGeometry.dispose(), [hitGeometry])
-  // Made again only when the points outgrow it, so placing points one by one does not make one each time.
+  // Made again only when the points outgrow them, so placing points one by one does not make one each time.
   const capacity = dotCapacity(groups.length)
   const dots = useMemo(() => new HandleDots(capacity), [capacity])
   useEffect(() => () => dots.dispose(), [dots])
+  const halos = useMemo(() => new HandleHalos(capacity, glowTexture(), HALO_PX, 0.85), [capacity])
+  useEffect(() => () => halos.dispose(), [halos])
+  const hits = useMemo(() => new HandleHits(), [])
+  const pickedSet = useMemo(() => new Set(facePick), [facePick])
   useLayoutEffect(() => {
-    if (!shard) { dots.set([]); return }
-    dots.set(groups.map((g) => {
-      const v = shard.vertices[g[0]]
+    if (!shard) { dots.set([]); halos.set([]); hits.set([]); invalidate(); return }
+    const at = groups.map((g) => UP(ticksOf(shard.vertices[g[0]])))
+    const lit: Halo[] = []
+    dots.set(groups.map((g, k) => {
       const isSel = g.some((i) => chosen.has(i))
-      const picked = facePick.some((i) => g.includes(i))
-      return { at: UP(ticksOf(v)), radiusPx: isSel || picked ? DOT_ON_R : DOT_R, color: isSel ? WARN : picked ? ACCENT : rgbToHex(v.c) }
+      const picked = pickedSet.size > 0 && g.some((i) => pickedSet.has(i))
+      if (isSel || picked) lit.push({ at: at[k], color: isSel ? WARN : ACCENT })
+      return { at: at[k], radiusPx: isSel || picked ? DOT_ON_R : DOT_R, color: isSel ? WARN : picked ? ACCENT : rgbToHex(shard.vertices[g[0]].c) }
     }))
-  }, [dots, groups, shard, chosen, facePick])
-  useFrame((state) => { dots.update(state.camera as PerspectiveCamera, state.size.height) })
+    halos.set(lit)
+    hits.set(at)
+    // These are written behind R3F's back, which would not know to draw.
+    invalidate()
+  }, [dots, halos, hits, groups, shard, chosen, pickedSet, invalidate])
+  useLayoutEffect(() => { hits.radiusPx = hitRadiusFor(tool) }, [hits, tool])
+  useFrame((state) => {
+    dots.update(state.camera as PerspectiveCamera, state.size.height)
+    hits.heightPx = state.size.height
+  })
+  const pressed = useMemo(() => new PressMemory(), [])
   if (!shard) return null
-  const glow = glowTexture()
 
-  const onClick = (first: number, isSel: boolean) => (e: ThreeEvent<MouseEvent>): void => {
+  const onPress = (e: ThreeEvent<PointerEvent>): void => { pressed.press(e.nativeEvent, e.index) }
+
+  const onClick = (e: ThreeEvent<MouseEvent>): void => {
     if (e.delta > tapSlop()) return
+    const g = e.index === undefined ? undefined : groups[e.index]
+    if (!g || !pressed.met(e.index as number)) return
     e.stopPropagation()
+    const first = g[0]
+    const isSel = g.some((i) => chosen.has(i))
     const w = useWorkshop.getState()
     if (tool === 'face') {
       // The sphere stands proud of the faces, so it meets the ray first even when
@@ -330,8 +344,9 @@ function Handles(): JSX.Element | null {
       const centre = new Vector3(...UP(ticksOf(shard.vertices[first])))
       // Either side of a face, the nearer first (ShardMesh faceOfHit).
       const face = e.intersections.map(faceOfHit).find((f) => f !== null) ?? null
-      // The dot's drawn radius in world units: its pixels times the group's own scale.
-      const drawn = DOT_ON_R * (e.object.parent?.scale.x ?? 1)
+      // The dot's drawn radius in world units: its pixels times a pixel's size there.
+      const cam = e.camera as PerspectiveCamera
+      const drawn = DOT_ON_R * hits.pixelAt(e.index as number, cam.position, cam.fov)
       if (face !== null && e.ray.distanceToPoint(centre) > drawn) { w.selectFace(face); return }
       // Under INVERT a corner tap takes the point out of the selection, as the
       // key promises of every tap; it picks no corner for a face. Off INVERT
@@ -347,32 +362,16 @@ function Handles(): JSX.Element | null {
   return (
     <>
       <primitive object={dots.mesh} />
-      {groups.map((g) => {
-        const first = g[0]
-        const v = shard.vertices[first]
-        const isSel = g.some((i) => chosen.has(i))
-        const picked = facePick.some((i) => g.includes(i))
-        return (
-          <ScreenScale key={first} position={UP(ticksOf(v))}>
-            {/* An invisible hit target wider than the handle, narrower in ADD so a tap
-                beside a point lands on the plane and places another one near it.
-                Not drawn (visible false): three's raycaster still meets it. */}
-            <mesh visible={false} geometry={hitGeometry} material={HIT_MATERIAL} onClick={onClick(first, isSel)} />
-            {/* A halo, so a small selected handle still stands out. */}
-            {(isSel || picked) && glow && (
-              <sprite scale={[HALO_PX, HALO_PX, 1]} renderOrder={OVERLAY_ORDER}>
-                <spriteMaterial map={glow} color={isSel ? WARN : ACCENT} transparent opacity={0.85} blending={AdditiveBlending} depthWrite={false} toneMapped={false} />
-              </sprite>
-            )}
-            {picked && (
-              <mesh>
-                <ringGeometry args={[RING_R, RING_OUT, 24]} />
-                <meshBasicMaterial color={ACCENT} toneMapped={false} side={2} />
-              </mesh>
-            )}
-          </ScreenScale>
-        )
-      })}
+      <primitive object={halos.points} renderOrder={OVERLAY_ORDER} />
+      <primitive object={hits} onPointerDown={onPress} onClick={onClick} />
+      {facePick.length > 0 && groups.filter((g) => g.some((i) => pickedSet.has(i))).map((g) => (
+        <ScreenScale key={g[0]} position={UP(ticksOf(shard.vertices[g[0]]))}>
+          <mesh>
+            <ringGeometry args={[RING_R, RING_OUT, 24]} />
+            <meshBasicMaterial color={ACCENT} toneMapped={false} side={2} />
+          </mesh>
+        </ScreenScale>
+      ))}
     </>
   )
 }
@@ -700,6 +699,35 @@ function ViewDriver(): null {
   return null
 }
 
+/**
+ * The bench draws when something changed, never otherwise (frameloop
+ * "demand" on the Canvas below). A still bench at 144 Hz drew and sorted
+ * everything 144 times a second to show the same picture: the fan, the
+ * garbage and the frame budget of a tab doing nothing. R3F draws for what it
+ * sets itself, and the orbit controls ask for a frame whenever they move,
+ * through their damping too. This asks for the rest: any change to the
+ * workshop's store, and a canvas that may have lost its picture.
+ */
+function BenchWake(): null {
+  const invalidate = useThree((s) => s.invalidate)
+  const gl = useThree((s) => s.gl)
+  useEffect(() => {
+    const wake = (): void => invalidate()
+    const shown = (): void => { if (document.visibilityState === 'visible') invalidate() }
+    const canvas = gl.domElement
+    const stop = useWorkshop.subscribe(wake)
+    canvas.addEventListener('webglcontextrestored', wake)
+    document.addEventListener('visibilitychange', shown)
+    if (import.meta.env.DEV) Object.assign(window as unknown as Record<string, unknown>, { __benchInvalidate: invalidate })
+    return () => {
+      stop()
+      canvas.removeEventListener('webglcontextrestored', wake)
+      document.removeEventListener('visibilitychange', shown)
+    }
+  }, [invalidate, gl])
+  return null
+}
+
 function AxesReporter(): null {
   const camera = useThree((s) => s.camera)
   useFrame(() => {
@@ -768,6 +796,12 @@ function BenchImpl(): JSX.Element {
       camera={{ fov: 50, position: [10, 9, 12], near: 0.05, far: 200 }}
       dpr={[1, 2]}
       gl={{ antialias: true }}
+      frameloop="demand"
+      // Compiled once each, and no synchronous read of the driver's logs once
+      // built: a selection coming and going freed programs and compiled them
+      // again, which on Direct3D stops the main thread for a second or more
+      // each (lib/keepPrograms.ts; every other canvas already did this).
+      onCreated={({ gl: renderer, scene }) => keepPrograms(renderer, scene)}
       onPointerMissed={(e) => {
         if ((e as PointerEvent).button !== 0) return
         const w = useWorkshop.getState()
@@ -794,6 +828,7 @@ function BenchImpl(): JSX.Element {
       <Marquee />
       <Aim />
       <Keys />
+      <BenchWake />
       <AxesReporter />
       <ViewDriver />
       {/* Axes, in the compass's colors, so X is red here and out there. */}

@@ -138,6 +138,31 @@ export interface HosakaLimits {
   deposit_max_msats: number
   invoice_ttl_seconds: number
   local_compute?: boolean
+  /**
+   * The cloud hop maintenance pause (hosaka-api hop_pause): while true no hop
+   * is quoted or taken, and `hop_paused_reason` says why. The caps above stay
+   * as they are, so the pause is never read as a lower hop cap. Absent on a
+   * HOSAKA that predates it, which is the same as false.
+   */
+  hop_paused?: boolean
+  hop_paused_reason?: string | null
+  /**
+   * The hop proof this HOSAKA makes: 2 is residue openings (spec 5.9 to
+   * 5.13), the only kind this client signs. Absent on a HOSAKA that makes
+   * the old hop_n proof, from which this client buys no hop (cloudHopsSold).
+   */
+  hop_proof_version?: number
+}
+
+/** The hop cap a client may buy up to: none from a HOSAKA whose hops are not version 2. */
+export function cloudHopsSold(limits: Pick<HosakaLimits, 'max_hop_height' | 'hop_proof_version'> | null | undefined): number {
+  return limits && limits.hop_proof_version === 2 ? limits.max_hop_height : 0
+}
+
+/** Why no hop can be bought now (the pause), or null when hops are open. */
+export function cloudHopPause(limits: HosakaLimits | null): string | null {
+  if (!limits?.hop_paused) return null
+  return limits.hop_paused_reason || 'HOSAKA is not taking hop jobs for a few minutes. Nothing was charged.'
 }
 
 /** POST /api/v1/quote: the price the submit route would charge, without submitting. */
@@ -171,6 +196,8 @@ export interface HosakaQuote {
    * when it was the tallest.
    */
   reuse_saves_seconds?: number
+  /** True while cloud hops are paused: no price, and the reason in `hint`. */
+  paused?: boolean
 }
 
 export type HosakaDepositStatus = 'pending' | 'settled' | 'expired'
@@ -209,20 +236,29 @@ export interface HopEnvelope {
   base?: number
 }
 
-/** `result` of a completed hop job. The event's proof tag is hop_n.public_proof;
- * region_n.public_proof is the region's lookup id and region_n.secret_key its
- * location decryption key (spec 7.2). */
+/**
+ * `result` of a completed hop job, hop proof version 2 (hosaka-api ha-1, the
+ * CLI's contract): the event's `proof`, `mn` and `mp` tags flat, and the
+ * region's key. HOSAKA never sends both shapes; a result with none of `seal`,
+ * `mn` and `mp` is the old hop_n shape (straddlingV1Hop), never signed.
+ *
+ * Only these five are read, and the move's geometry, previous event and K are
+ * this client's own (cloudVerify.ts). The rest is HOSAKA's bookkeeping.
+ */
 export interface CloudHopResult {
-  hop_n: HopEnvelope
+  /** The `proof` tag: 64 lowercase hex. */
+  seal: string
+  /** The `mn` tag: 16 lowercase hex, big-endian u64. */
+  mn: string
+  /** The `mp` tag: exactly 16 x (128 + 64 x depth) lowercase hex. */
+  mp: string
+  /** The destination's terrain height, a JSON integer; checked against our own, never used. */
+  K?: number
+  /** region_n.public_proof is the region's lookup id and region_n.secret_key its location decryption key (spec 7.2); sha256(secret_key) = public_proof. */
   region_n: HopEnvelope
-  region_xy: HopEnvelope
-  cantor_x: HopEnvelope
-  cantor_y: HopEnvelope
-  cantor_z: HopEnvelope
-  cantor_t: HopEnvelope
-  K: number
-  max_height: number
-  compute_msats: number
+  /** Bookkeeping, never read for the proof. */
+  max_height?: number
+  compute_msats?: number
   storage_msats_24h?: number
   /**
    * The cubes around the destination, one per height, when the hop asked for
@@ -359,6 +395,8 @@ export class HosakaError extends Error {
   readonly status: number
   readonly code: string | null
   readonly detail: unknown
+  /** Seconds the server asked to wait (Retry-After, or the body's retry_after_seconds); null when it named none. */
+  retryAfterSeconds: number | null = null
 
   constructor(status: number, code: string | null, message: string, detail?: unknown) {
     super(message)
@@ -366,9 +404,19 @@ export class HosakaError extends Error {
     this.status = status
     this.code = code
     this.detail = detail
+    const d = detail !== null && typeof detail === 'object' ? (detail as Record<string, unknown>) : null
+    const wait = d?.retry_after_seconds
+    if (typeof wait === 'number' && Number.isFinite(wait) && wait >= 0) this.retryAfterSeconds = wait
   }
 
-  static fromResponse(status: number, body: unknown): HosakaError {
+  static fromResponse(status: number, body: unknown, retryAfter?: string | null): HosakaError {
+    const err = HosakaError.fromBody(status, body)
+    const header = retryAfter !== undefined && retryAfter !== null && /^\d+$/.test(retryAfter.trim()) ? Number(retryAfter.trim()) : null
+    if (header !== null) err.retryAfterSeconds = header
+    return err
+  }
+
+  private static fromBody(status: number, body: unknown): HosakaError {
     const detail = body !== null && typeof body === 'object' && 'detail' in body
       ? (body as { detail: unknown }).detail
       : body
@@ -405,7 +453,27 @@ export class HosakaError extends Error {
    * since nothing was sent; a 429 is an answer, a refusal.
    */
   get answerLost(): boolean {
+    // A 503 hop_paused is an answer: HOSAKA refused the hop and charged
+    // nothing (charged: false), so asking again at once only asks the signer
+    // for nothing. RESUME asks again once hops reopen.
+    if (this.code === 'hop_paused') return false
     return (this.status === 0 && this.code === 'network') || this.status >= 500
+  }
+
+  /** The cloud hop maintenance pause (503 hop_paused): nothing was charged, and the same job can be asked for once hops reopen. */
+  get hopPaused(): boolean {
+    return this.status === 503 && this.code === 'hop_paused'
+  }
+
+  /** A job HOSAKA will not run (400 job_not_runnable): it is failed, anything paid is back in the balance, and the record is worthless. */
+  get jobNotRunnable(): boolean {
+    return this.status === 400 && this.code === 'job_not_runnable'
+  }
+
+  /** The words HOSAKA gave, without the machine code in front. */
+  get hint(): string | null {
+    const d = this.detail !== null && typeof this.detail === 'object' ? (this.detail as Record<string, unknown>) : null
+    return typeof d?.hint === 'string' && d.hint !== '' ? d.hint : null
   }
 }
 
@@ -713,7 +781,7 @@ export function createHosaka(opts: HosakaClientOptions): HosakaClient {
     if (text) {
       try { data = JSON.parse(text) } catch { data = text }
     }
-    if (!res.ok) throw HosakaError.fromResponse(res.status, data)
+    if (!res.ok) throw HosakaError.fromResponse(res.status, data, res.headers?.get?.('retry-after'))
     return data as T
   }
 

@@ -18,7 +18,7 @@ import { drawnLook, lookOf, type Look } from '../lib/looks'
 import { regionBox, type Box } from '../lib/clip'
 import { markShown } from '../lib/worldMarks'
 import { alignedOrigin, useCyberspace } from '../store/useCyberspace'
-import { openedByHand, openedKey, useOpenedChests } from '../store/useOpenedChests'
+import { openedByHand, openedContents, openedKey, useOpenedChests } from '../store/useOpenedChests'
 import { useShards } from '../store/useShards'
 import { useMutes } from '../store/useMutes'
 import { setDrawnLooks, useOpenCeremony } from '../store/useOpenCeremony'
@@ -85,12 +85,12 @@ export function ChestLooks({ axes }: { axes: ViewAxes }): JSX.Element | null {
       if (!look) continue
       const centre = itemCentre(w.at, origin, scaleExp, axes)
       if (Math.hypot(...centre) > REACH) continue
-      const inside = opened[openedKey(me, w.key)]
+      const inside = openedContents(opened, me, w.key, w.chest.lockPubkey)
       // What the mute list hides is not drawn coming out, as it is not listed (ItemRows ChestBlock).
       const shown = inside?.filter((e) => !hidesThing(muted, { authors: [w.author ?? '', e.event.pubkey], ids: [e.id] }, me))
       const loot = chestLoot({ look: look.kind, entries: shown, held: (e) => holdsEntry(items, e), chest: { at: w.at, plane: w.plane, height: w.height }, itemsReady })
       const clip = look.name === 'custom' ? regionBox(w.at, w.height, look.closed.unit, LOOK_FRAME) : undefined
-      out.push({ key: w.key, look, opened: !!inside || openedByHand(me, w.key), loot, text: itemMarkText(w), sub: author({ author: w.author ?? '', mine: w.mine }), centre, clip })
+      out.push({ key: w.key, look, opened: openedByHand(me, w.key, w.chest.lockPubkey), loot, text: itemMarkText(w), sub: author({ author: w.author ?? '', mine: w.mine }), centre, clip })
     }
     return out
     // mine, discovered, curated and muted are what worldItems reads.

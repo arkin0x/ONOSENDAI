@@ -23,7 +23,7 @@
  * row that draws one (ItemFace); the key line itself is the words.
  */
 
-import { useCallback, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useProfile } from '../hooks/useProfile'
 import { cashuLabel, readCashuToken } from '../lib/cashu'
 import { chestSealer, openWithSecret, openWithSigner, openerFor, readContents, requiresLabel, revealedIn, type ChestEntry, type Opener } from '../lib/chests'
@@ -35,7 +35,7 @@ import { holdsEntry, openingKeys, type HeldFrom, type HeldItem, type HeldPlace }
 import { safeNpub } from '../lib/npub'
 import { useCyberspace } from '../store/useCyberspace'
 import { useInventory } from '../store/useInventory'
-import { openedByHand, openedKey, rememberOpened, useOpenedChests } from '../store/useOpenedChests'
+import { forgetRefusal, openedByHand, openedContents, openedKey, readRefused, refuseRead, rememberOpened, useOpenedChests } from '../store/useOpenedChests'
 import { celebrateOpen } from '../store/useOpenCeremony'
 import { useCeremony } from '../store/useCeremony'
 import { lookOf } from '../lib/looks'
@@ -83,11 +83,20 @@ export function KeyLine({ id, name, author }: { id?: string; name: string; autho
 }
 
 
-/** Whether this identity has a chest open here, by its id: its contents are listed under it. */
+/**
+ * Whether this identity has a chest open here, by its id, under the lock it
+ * has now (the chest as found or deployed): its contents are listed under it.
+ */
 export function useChestOpen(): (chestId: string | undefined) => boolean {
   const me = useCyberspace((s) => s.identity.pubkey)
   const opened = useOpenedChests((s) => s.opened)
-  return useCallback((chestId: string | undefined) => !!chestId && !!opened[openedKey(me, chestId)], [me, opened])
+  const discovered = useShards((s) => s.discovered)
+  const mine = useShards((s) => s.mine)
+  return useCallback((chestId: string | undefined) => {
+    if (!chestId) return false
+    const lock = (discovered[chestId] ?? mine.find((d) => d.eventId === chestId))?.chest?.lockPubkey
+    return !!lock && !!openedContents(opened, me, chestId, lock)
+  }, [me, opened, discovered, mine])
 }
 
 /**
@@ -123,8 +132,30 @@ export async function openChestHere(c: { id: string; chest: ChestItem; author: s
     if (c.door) useCeremony.getState().mark(revealed)
   }
   // Opened by hand: it stays opened, and a reload opens it again (store/useOpenedChests).
-  rememberOpened(me, c.id, contents)
+  rememberOpened(me, c.id, c.chest.lockPubkey, contents)
   return contents
+}
+
+/** What is being read again, by openedKey, so two cards of one chest ask its signer once. */
+const readingAgain = new Map<string, Promise<ChestEntry[] | null>>()
+
+/**
+ * A chest this identity opened by hand before, under the lock it has now,
+ * whose contents this session has not read (a signer's chest after a reload:
+ * the scan asks no signer), read again as OPEN read it. No ceremony: it is
+ * open already, and drawn so.
+ */
+export function readAgain(c: Parameters<typeof openChestHere>[0], opener: Exclude<Opener, null>): Promise<ChestEntry[] | null> {
+  const me = useCyberspace.getState().identity.pubkey
+  const k = openedKey(me, c.id)
+  const running = readingAgain.get(k)
+  if (running) return running
+  // Refused, a signer saying no: remembered for the session, so the card does not ask again until OPEN.
+  const reading = openChestHere({ ...c, door: false }, opener)
+    .catch((err: unknown) => { refuseRead(me, c.id, c.chest.lockPubkey); throw err })
+    .finally(() => readingAgain.delete(k))
+  readingAgain.set(k, reading)
+  return reading
 }
 
 /** The row label of a content: a coin's amount, else the item's label. */
@@ -154,7 +185,8 @@ export function ChestBlock({ id, chest, author, verified, place, sealer: given, 
   const found = useShards((s) => s.discovered[id])
   const ownInner = useShards((s) => s.mine.find((d) => d.eventId === id)?.inner)
   const sealer = chestSealer(given, found, ownInner)
-  const entries = useOpenedChests((s) => s.opened[openedKey(me, id)] ?? null)
+  const opened = useOpenedChests((s) => s.opened)
+  const entries = openedContents(opened, me, id, chest.lockPubkey)
   const [status, setStatus] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const who = useWho(author)
@@ -163,13 +195,32 @@ export function ChestBlock({ id, chest, author, verified, place, sealer: given, 
   const muted = useMutes((s) => s.muted)
   const shownOf = (list: ChestEntry[], m: Muted): ChestEntry[] => list.filter((e) => !hidesThing(m, { authors: [author, e.event.pubkey], ids: [e.id] }, me))
   const shown = entries ? shownOf(entries, muted) : null
+  // Opened by hand before, under this lock: never OPEN again. What is inside
+  // is read again once, as OPEN read it (readAgain); OPEN comes back only if
+  // that fails, a signer refusing, and the refusal holds for the session
+  // until OPEN is tapped (store/useOpenedChests readRefused).
+  const handOpened = openedByHand(me, id, chest.lockPubkey)
+  const readKey = `${openedKey(me, id)}:${chest.lockPubkey}`
+  const tried = useRef<string | null>(null)
+  const [, setRefusals] = useState(0)
+  const rereading = handOpened && !entries && !!opener && !readRefused(me, id, chest.lockPubkey)
+  useEffect(() => {
+    if (!rereading || !opener || tried.current === readKey) return
+    tried.current = readKey
+    readAgain({ id, chest, author, place, sealer }, opener)
+      .then((contents) => { if (contents && contents.length === 0) setStatus('Opened: nothing inside this client can read.') })
+      .catch((err: unknown) => { setRefusals((n) => n + 1); setStatus(err instanceof Error ? err.message : String(err)) })
+    // Once per chest, lock and identity: the props it reads are those of that chest.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [rereading, readKey])
 
   const open = async (): Promise<void> => {
     if (!opener || busy) return
     // Inside the tap, so a phone lets the ceremony's sound out (lib/audioContext).
     resumeAudio()
     // Once per chest, per identity, per device: a chest opened by hand before plays nothing.
-    const first = !openedByHand(me, id)
+    const first = !openedByHand(me, id, chest.lockPubkey)
+    forgetRefusal(me, id, chest.lockPubkey)
     setBusy(true)
     setStatus(null)
     try {
@@ -187,6 +238,8 @@ export function ChestBlock({ id, chest, author, verified, place, sealer: given, 
       }
       if (contents && contents.length === 0) setStatus('Opened: nothing inside this client can read.')
     } catch (err) {
+      // Refused again: OPEN stays, and the card does not ask by itself.
+      refuseRead(me, id, chest.lockPubkey)
       setStatus(err instanceof Error ? err.message : String(err))
     } finally {
       setBusy(false)
@@ -201,11 +254,11 @@ export function ChestBlock({ id, chest, author, verified, place, sealer: given, 
           {/* The card names it above its look (SecretModal); every list names it here. */}
           {named && <span className="item__name" title={chest.name}>{chest.name}</span>}
           <span className="item__meta" title={opensWith ? `Opens with ${opensWith}` : 'The hider’s label of what opens it'}>
-            {entries ? 'OPEN' : `REQUIRES: ${requiresLabel(chest)}`} · hidden by {who}{!verified && <> · <Unsigned /></>}
+            {entries || rereading ? 'OPEN' : `REQUIRES: ${requiresLabel(chest)}`} · hidden by {who}{!verified && <> · <Unsigned /></>}
           </span>
         </span>
         {opener && !entries && (
-          <button className="chest__act" onClick={() => void open()} disabled={busy} title={`Decrypt it here with ${opensWith}`}>{busy ? 'OPENING' : 'OPEN'}</button>
+          <button className="chest__act" onClick={() => void open()} disabled={busy || rereading} title={`Decrypt it here with ${opensWith}`}>{busy || rereading ? 'OPENING' : 'OPEN'}</button>
         )}
       </div>
       {status && <span className="chest__status" role="status">{status}</span>}

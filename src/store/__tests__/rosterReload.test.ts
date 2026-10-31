@@ -40,7 +40,7 @@ import { catchUp, flushIngest, hydrateRoster, ingest, saveNow, startRoster, stop
 const here = { x: 5n << 30n, y: 9n << 30n, z: 3n << 30n }
 
 function hop(createdAt: number, sk: Uint8Array = generateSecretKey(), dx = 0n): NostrEvent {
-  return finalizeEvent(hopTemplate({ createdAt, genesisId: 'a'.repeat(64), previousId: 'b'.repeat(64), prevCoordHex: positionHex(here, 0), to: { ...here, x: here.x + dx }, plane: 0, proofHash: 'c'.repeat(64) }), sk) as NostrEvent
+  return finalizeEvent(hopTemplate({ createdAt, genesisId: 'a'.repeat(64), previousId: 'b'.repeat(64), prevCoordHex: positionHex(here, 0), to: { ...here, x: here.x + dx }, plane: 0, proofHash: 'c'.repeat(64), mn: '0'.repeat(16), mp: '00'}), sk) as NostrEvent
 }
 
 /** The relay sends these and answers. */

@@ -1318,7 +1318,7 @@ export function Workshop(): JSX.Element | null {
                 <Pipette size={17} strokeWidth={2.25} aria-hidden />
               </button>
             )}
-            <button className="workshop__color ws__act" disabled={!shard || shard.vertices.length === 0} onClick={() => w().colorAll(w().color)} title="The color onto every vertex in the object" aria-label="Color everything" style={{ borderColor: hex }} {...noCallout}>
+            <button className="workshop__color ws__act" disabled={!shard || shard.vertices.length === 0} onClick={() => w().colorAll(w().color)} title="The color onto every vertex and every face in the object" aria-label="Color everything" style={{ borderColor: hex }} {...noCallout}>
               <Globe size={17} strokeWidth={2.25} aria-hidden />
             </button>
             {selection.length > 0 && (
@@ -1346,7 +1346,7 @@ export function Workshop(): JSX.Element | null {
                 {/* Anywhere else puts the question away and colors nothing. */}
                 <div className="benchpaste__away" onPointerDown={() => setAskingColor(false)} />
                 <div className="benchpaste benchpaste--right" role="menu" aria-label="How to color the selected faces">
-                  <button className="workshop__btn" role="menuitem" title="The color onto the corners of every selected face; it blends across the edges they share" onClick={() => { setAskingColor(false); w().colorSelected(w().color) }}>FILL</button>
+                  <button className="workshop__btn" role="menuitem" title="The color onto the corners of every selected face; it blends across the edges they share, and a face with a seam takes the color flat" onClick={() => { setAskingColor(false); w().colorSelected(w().color) }}>FILL</button>
                   <button className="workshop__btn" role="menuitem" title="The color onto every selected face as a hard seam, not blended from its corners" onClick={() => { setAskingColor(false); w().colorFaces(selectedFaces, w().color) }}>SEAM</button>
                 </div>
               </>

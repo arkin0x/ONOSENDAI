@@ -231,6 +231,19 @@ describe('what is drawn, on a shard with seams (DECK-0003 §1.4a: a face color o
     expect(drawn()).toEqual([RED, RED, RED, RED])
   })
 
+  it('the whole object says what it did to the seams, and how to get them back', () => {
+    w().colorAll(BLUE)
+    expect(w().notice).toBe('Every face took the color. UNDO brings the seams back.')
+    expect(w().notice!.length).toBeLessThanOrEqual(60)
+    w().undo()
+    expect(drawn()).toEqual([GREEN, GREEN, GREEN, GREEN])
+    // Nothing was flattened on a shard with no seams, so nothing is said.
+    const s = strip()
+    useWorkshop.setState({ shards: [s], currentId: s.id })
+    w().colorAll(BLUE)
+    expect(w().notice).toBeNull()
+  })
+
   it('one undo brings the seams back', () => {
     w().selectFace(0)
     w().colorSelected(BLUE)

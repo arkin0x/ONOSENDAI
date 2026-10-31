@@ -1478,7 +1478,9 @@ export const useWorkshop = create<WorkshopState>((set, get) => {
     colorAll: (c) => {
       set({ color: clampColor(c) })
       get().rememberColor(rgbToHex(clampColor(c)))
-      edit((s) => ({ ...s, vertices: s.vertices.map((v) => ({ ...v, c: clampColor(c) })), ...seamsPoured(s, () => true, clampColor(c)) }))
+      // The globe sits beside the other buckets on a phone, and a mistap flattens a whole piece: say so, and say the way back.
+      const seamed = (get().current()?.faces.length ?? 0) > 0 && get().current()?.facecolors?.length === get().current()?.faces.length
+      edit((s) => ({ ...s, vertices: s.vertices.map((v) => ({ ...v, c: clampColor(c) })), ...seamsPoured(s, () => true, clampColor(c)) }), seamed ? 'Every face took the color. UNDO brings the seams back.' : null)
     },
 
     // The whole piece you are pointing at, without having to select it first.

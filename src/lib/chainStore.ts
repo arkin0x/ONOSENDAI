@@ -208,6 +208,14 @@ export async function checkRows(pubkey: string): Promise<string[]> {
   return (await callEventDb('checkChainRows', [pubkey], CHECK_PATIENCE_MS)).bad
 }
 
+/** Bring the chain's verdict flags up to date, in the worker, in the background (lib/eventDb/chainVerdicts.ts). Never rejects: a verdict not written reads as not checked. */
+export async function markVerdicts(pubkey: string, epoch: number): Promise<void> {
+  try {
+    await rowsSettled(pubkey)
+    await callEventDb('markChainVerdicts', [pubkey, epoch], CHECK_PATIENCE_MS)
+  } catch { /* the next load tries again */ }
+}
+
 /** Set a branch aside. A failure is said, and the branch's old copy (if any) stands. */
 export async function setAsideRows(pubkey: string, branch: ChainSource): Promise<void> {
   try { await callEventDb('setAsideBranch', [pubkey, branch]) } catch (err) { console.warn('[chain] a branch could not be set aside', err) }

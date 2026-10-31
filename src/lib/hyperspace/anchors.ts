@@ -50,7 +50,7 @@ import {
   mergeAll,
   mergeStep,
   rowByHeight,
-  serializeIndex,
+  serializeIndexSliced,
   type StopIndex,
 } from './compactIndex'
 import { fetchManifest, runHeaderSync } from './headerSync'
@@ -63,6 +63,8 @@ import {
   putMeta,
   STOPS_STORE,
 } from './idb'
+import { bootSnapshotDue, copySliced, getSnapshot, putSnapshot, tailSnapshotDue } from './snapshotStore'
+import { errorLine } from './snapshotRecord'
 
 // ---------------------------------------------------------------------------
 // Pure helpers (exported for tests)
@@ -287,11 +289,8 @@ const SYNC_BUMP_MS = 2500
 const MERGE_SLICE_MS = 12
 const CACHE_CHUNK = 50_000
 const COVERED_KEY = 'covered'
-const SNAPSHOT_KEY = 'indexSnapshot'
 const TIP_KEY = 'tip'
 /** Tail re-snapshot gates: both must pass, so the ~130 MB put stays rare. */
-const SNAPSHOT_INTERVAL_MS = 10 * 60_000
-const SNAPSHOT_MIN_GROWTH = 5000
 
 let running = false
 let db: IDBDatabase | null = null
@@ -309,6 +308,8 @@ let blobRows = 0
  * baselines for the tail's re-snapshot gates and the redundant-write skip. */
 let snapshotSize = 0
 let snapshotAt = 0
+/** Writes failed in a row (snapshotStore tailSnapshotDue). */
+let snapshotFailures = 0
 let snapshotWriting = false
 let knownTip: number | null = null
 let metaChain: Promise<void> = Promise.resolve()
@@ -438,9 +439,11 @@ function validSnapshotMeta(v: unknown): v is { snapshot: unknown; coveredAtSnaps
 /**
  * Persist the built index wholesale so the next boot adopts it instead of
  * re-sorting a million replayed rows. coveredAtSnapshot rides along so that
- * boot's replay can skip every IDB row the snapshot already contains. One
- * structured-clone put of ~130 MB of ArrayBuffers, which IndexedDB handles;
- * best effort like every other cache write. mergeAll first: serializeIndex
+ * boot's replay can skip every IDB row the snapshot already contains. About
+ * 130 MB of ArrayBuffers, copied in slices and stored by a worker, a record per
+ * column (snapshotStore, snapshotRecord), since one record that size took the main
+ * thread 0.4 to 4 s and has since outgrown what Chromium stores. Best effort like
+ * every other cache write. mergeAll first: serializeIndexSliced
  * refuses a half-merged index, and by the time this runs (ready, or the
  * quiescent tail) there is at most a sliver pending.
  */
@@ -450,13 +453,25 @@ async function persistSnapshot(): Promise<void> {
   snapshotWriting = true
   try {
     mergeAll(anchorIndex)
-    const snapshot = serializeIndex(anchorIndex)
+    // In the tick the row count is taken, nothing between: heights that land
+    // during the copy are not in this snapshot and must not be said to be, or
+    // the next boot would skip them.
+    const coveredAtSnapshot = effectiveCovered()
+    const snapshot = await serializeIndexSliced(anchorIndex, copySliced)
     if (snapshot) {
-      await putMeta(database, SNAPSHOT_KEY, { snapshot, coveredAtSnapshot: effectiveCovered() })
-      snapshotSize = snapshot.count
+      // Read now: the buffers leave with the worker.
+      const count = snapshot.count
+      // Timed even if it fails: the tail asks again by this clock, and a write
+      // that cannot land must not copy the whole index at every new block.
       snapshotAt = Date.now()
+      await putSnapshot(database, { snapshot, coveredAtSnapshot })
+      snapshotSize = count
+      snapshotFailures = 0
     }
-  } catch { /* cache write is best effort */
+  } catch (e) {
+    // Best effort, not silent: this catch hid the record outgrowing a put.
+    snapshotFailures++
+    console.warn(`[hyperspace] the stop index was not stored (${snapshotFailures} in a row): ${errorLine(e)}`)
   } finally {
     snapshotWriting = false
   }
@@ -487,7 +502,7 @@ async function loadCache(cb: SyncCallbacks): Promise<void> {
   let coveredAtSnapshot: Array<[number, number]> = []
   let adopted = 0
   try {
-    const snapMeta = await getMeta(db, SNAPSHOT_KEY)
+    const snapMeta = await getSnapshot(db)
     if (validSnapshotMeta(snapMeta) && adoptSnapshot(anchorIndex, snapMeta.snapshot)) {
       adopted = anchorIndex.size - before
       coveredAtSnapshot = snapMeta.coveredAtSnapshot
@@ -609,7 +624,7 @@ function startTail(cb: SyncCallbacks): void {
       persistCovered()
       // Re-snapshot occasionally so a long-lived tab's accumulation is not
       // replayed row by row on the next boot; both gates must pass.
-      if (Date.now() - snapshotAt >= SNAPSHOT_INTERVAL_MS && anchorIndex.size - snapshotSize >= SNAPSHOT_MIN_GROWTH) {
+      if (tailSnapshotDue(Date.now(), snapshotAt, anchorIndex.size, snapshotSize, snapshotFailures)) {
         void persistSnapshot()
       }
     }
@@ -755,11 +770,6 @@ export async function runAnchorSync(cb: SyncCallbacks): Promise<void> {
       await whenMerged()
       setStatus(cb, 'ready')
       cb.onIndexChanged()
-      // Persist the built index for the next boot. Awaited on purpose: the
-      // bulk sync just finished, so nothing is hot. Skipped when no row has
-      // landed since the last write (a reload that adopted the snapshot and
-      // backfilled nothing) because rewriting identical buffers buys nothing.
-      if (anchorIndex.size !== snapshotSize) await persistSnapshot()
       break
     } catch (e) {
       setStatus(cb, 'error', e instanceof Error ? e.message : String(e))
@@ -768,6 +778,11 @@ export async function runAnchorSync(cb: SyncCallbacks): Promise<void> {
   }
 
   startTail(cb)
+  // Persist the built index for the next boot, behind the tail: the write can
+  // take a while, and new blocks should not wait on it. Skipped when too little
+  // has landed since the last write (a reload that adopted the snapshot and
+  // backfilled a few rows), because rewriting 128 MB for one row buys nothing.
+  if (bootSnapshotDue(anchorIndex.size, snapshotSize, snapshotFailures)) void persistSnapshot()
   void pruneBlobCovered()
 }
 

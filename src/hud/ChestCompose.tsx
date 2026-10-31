@@ -101,6 +101,8 @@ export type ChestModalMode = { mode: 'place' } | { mode: 'edit'; eventId: string
 
 export function ChestCompose({ onDone, target = { mode: 'place' } }: { onDone: () => void; target?: ChestModalMode }): JSX.Element {
   const editing = target.mode === 'edit' ? target : null
+  // A door: a name, a lock and what opens it, and no contents; what it locks is placed in the world (4.2).
+  const isDoor = useShards((s) => (editing ? s.mine.find((d) => d.eventId === editing.eventId)?.chest?.door !== undefined : s.pending?.type === 'chest' && !!s.pending.door))
   // The chest being placed: what the bar handed over (useShards placeChest).
   const pending = useShards((s) => (s.pending?.type === 'chest' ? s.pending : null))
   const hidden = useShards((s) => (editing ? s.mine.find((d) => d.eventId === editing.eventId) ?? null : null))
@@ -138,11 +140,11 @@ export function ChestCompose({ onDone, target = { mode: 'place' } }: { onDone: (
   const [pasted, setPasted] = useState(kept && kept.label === 'a pasted key' && !keys.some((k) => k.key?.itemPubkey === kept.pubkey) ? kept.pubkey : kept?.label === 'a person' ? nip19.npubEncode(kept.pubkey) : '')
   const [contents, setContents] = useState<ChestContent[]>(start.contents)
   // A hidden chest's contents, opened from what this device kept, or with what opens it.
-  const [loading, setLoading] = useState(!!editing)
+  const [loading, setLoading] = useState(!!editing && !isDoor)
   const [status, setStatus] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
   useEffect(() => {
-    if (!editing) return
+    if (!editing || isDoor) return
     let on = true
     void useShards.getState().chestEntries(editing.eventId).then((r) => {
       if (!on) return
@@ -197,7 +199,7 @@ export function ChestCompose({ onDone, target = { mode: 'place' } }: { onDone: (
 
   const add = (c: ChestContent): void => { setContents((list) => [...list, c]); setAdding(null); setText(''); setKeyName('') }
   const remove = (i: number): void => setContents((list) => list.filter((_, j) => j !== i))
-  const ready = name.trim().length > 0 && !!lock && contents.length > 0 && !refusal && !loading
+  const ready = name.trim().length > 0 && !!lock && (isDoor || contents.length > 0) && !refusal && !loading
   const current = (): ChestDraft => ({ name: name.trim(), lock, requires: requires.trim(), contents })
   // Placing: the draft rides on the chest being placed, so closing the modal (back to the bar) keeps it.
   useEffect(() => {
@@ -216,7 +218,8 @@ export function ChestCompose({ onDone, target = { mode: 'place' } }: { onDone: (
     if (!ready || !lock) return
     if (editing) {
       setSaving(true); setStatus(null)
-      void useShards.getState().resealChest(editing.eventId, { ...current(), lock }).then((why) => { setSaving(false); if (why) setStatus(why); else onDone() })
+      const saved = isDoor ? useShards.getState().resealDoor(editing.eventId, { name: name.trim(), requires: requires.trim(), lock }) : useShards.getState().resealChest(editing.eventId, { ...current(), lock })
+      void saved.then((why) => { setSaving(false); if (why) setStatus(why); else onDone() })
       return
     }
     void useShards.getState().sealPlacedChest({ ...current(), lock })
@@ -237,13 +240,13 @@ export function ChestCompose({ onDone, target = { mode: 'place' } }: { onDone: (
   return (
     <div className="shards__compose">
       {look && <div className="secret__spin secret__spin--look"><ShardSpin shard={look} size={150} wide /></div>}
-      {fields && <input className="avatars__input" value={name} onChange={(e) => setName(e.target.value.slice(0, MAX_ITEM_NAME))} placeholder="Name the chest" maxLength={MAX_ITEM_NAME} autoFocus={!editing || editing.fields} aria-label="Chest name" />}
+      {fields && <input className="avatars__input" value={name} onChange={(e) => setName(e.target.value.slice(0, MAX_ITEM_NAME))} placeholder={isDoor ? 'Name the door' : 'Name the chest'} maxLength={MAX_ITEM_NAME} autoFocus={!editing || editing.fields} aria-label={isDoor ? 'Door name' : 'Chest name'} />}
 
       {/* The lock: an item you hold, or a pasted public key. */}
       {fields && (
         <div className="compose__row">
           <span className="legend__label">Lock</span>
-          <select className="avatars__input compose__select" value={lockKeyId} onChange={(e) => { setLockKeyId(e.target.value); if (e.target.value) setFeedLock(null) }} aria-label="Seal to an item you hold" title="An item in your ITEMS: whoever holds it opens the chest">
+          <select className="avatars__input compose__select" value={lockKeyId} onChange={(e) => { setLockKeyId(e.target.value); if (e.target.value) setFeedLock(null) }} aria-label="Seal to an item you hold" title={`An item in your ITEMS: whoever holds it opens the ${isDoor ? 'door' : 'chest'}`}>
             <option value="">{keys.length === 0 ? 'no items in your ITEMS' : 'paste a public key below'}</option>
             {keys.map((k) => <option key={k.id} value={k.id}>{k.name}</option>)}
           </select>
@@ -270,9 +273,10 @@ export function ChestCompose({ onDone, target = { mode: 'place' } }: { onDone: (
       {fields && !heldLock && !feedLock && (
         <input className={`avatars__input ${pasted.trim() && !lock ? 'is-bad' : ''}`} value={pasted} onChange={(e) => setPasted(e.target.value)} placeholder="an item public key (hex) or an npub" spellCheck={false} autoComplete="off" aria-label="Seal to a pasted public key" title="An item’s public key seals it to that item; an npub seals it to that person" />
       )}
-      {fields && <input className="avatars__input" value={requires} onChange={(e) => { setRequires(e.target.value.slice(0, MAX_ITEM_NAME)); setRequiresTouched(true) }} placeholder="What opens it, for those who cannot" maxLength={MAX_ITEM_NAME} aria-label="Requires" title="Shown to anyone who finds the chest without its key" />}
+      {fields && <input className="avatars__input" value={requires} onChange={(e) => { setRequires(e.target.value.slice(0, MAX_ITEM_NAME)); setRequiresTouched(true) }} placeholder="What opens it, for those who cannot" maxLength={MAX_ITEM_NAME} aria-label="Requires" title={`Shown to anyone who finds the ${isDoor ? 'door' : 'chest'} without its key`} />}
 
-      {/* The contents, one editor at a time. */}
+      {/* The contents, one editor at a time. A door has none. */}
+      {isDoor ? null : <>
       {loading && <span className="chest__status" role="status">OPENING</span>}
       {contents.length > 0 && (
         <ul className="compose__list">
@@ -334,6 +338,7 @@ export function ChestCompose({ onDone, target = { mode: 'place' } }: { onDone: (
         <span>{refusal ?? (contents.length === 0 ? 'Nothing inside yet.' : `sealed to ${lock ? lock.label : 'nothing yet'}`)}</span>
         <span>{bytes.toLocaleString('en-US')}/{NIP44_MAX_PLAINTEXT.toLocaleString('en-US')} B</span>
       </div>
+      </>}
 
       {(status ?? (editing ? null : deployError)) && <span className="chest__status notice" role="status">{status ?? deployError}</span>}
       {!editing && ask ? (
@@ -345,7 +350,7 @@ export function ChestCompose({ onDone, target = { mode: 'place' } }: { onDone: (
         <div className="shards__actions">
           <button className="avatars__go" onClick={cancel} disabled={working}>CANCEL</button>
           {!editing && <button className="avatars__go" onClick={move} disabled={working} title="Back to the hide bar, to place it somewhere else">MOVE</button>}
-          <button className="avatars__go" disabled={!ready || working} onClick={seal} title={refusal ?? (!lock ? 'Pick an item or paste a public key to seal to' : contents.length === 0 ? 'Put something in it first' : editing ? 'Seal it again where it stands' : undefined)}>
+          <button className="avatars__go" disabled={!ready || working} onClick={seal} title={refusal ?? (!lock ? 'Pick an item or paste a public key to seal to' : !isDoor && contents.length === 0 ? 'Put something in it first' : editing ? 'Seal it again where it stands' : undefined)}>
             {working ? (deployNote && !editing ? `${deployNote.toUpperCase()}…` : 'SEALING…') : editing ? 'SAVE' : live ? 'SEAL & PUBLISH' : 'SEAL (LOCAL)'}
           </button>
         </div>

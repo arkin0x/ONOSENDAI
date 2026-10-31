@@ -367,6 +367,9 @@ function endUnder(reason: BuildEndReason): void {
       useBuilder.setState({ messageDraft: pending.text })
       // The panel is CREATE and the forged thing is an item (arkinox, 2026-10-10); the type still says key.
       kept = ' Your message is kept: WRITE A MESSAGE in CREATE, or HIDE MESSAGE in build mode, opens it again.' + dropped
+    } else if (pending.type === 'chest' && pending.door && !pending.move) {
+      // A door holds nothing yet: only its name and lock, typed again next time.
+      kept = ' The door was not placed.'
     } else if (pending.type === 'chest' && pending.move) {
       // A move of a chest already hidden: nothing to keep, it stands where it was.
       kept = ' The move was canceled; the chest stands where it was.'
@@ -533,4 +536,32 @@ useBuilder.subscribe((s, prev) => {
   offEscape = s.active ? registerEscape('chip', () => useBuilder.getState().exit()) : null
   // What PLACE AGAIN would place belongs to one session: each starts fresh.
   if (useShards.getState().placedLast !== null) useShards.setState({ placedLast: null })
+})
+
+/**
+ * ADD on a door of yours (chest and door design, 4.8): BUILD with the cursor
+ * inside its red cube and the next placement starting at the door's height,
+ * so what you place is sealed to it; the bar's place actions are ready.
+ */
+export function addToRoom(eventId: string): void {
+  let shards = useShards.getState()
+  const d = shards.mine.find((m) => m.eventId === eventId)
+  const height = d?.chest?.door
+  if (!d || height === undefined) return
+  if (copyLinedUp(shards)) {
+    shards.cancelDeploy()
+    shards = useShards.getState()
+  }
+  if (shards.pending) return
+  const b = useBuilder.getState()
+  if (b.active) b.exit()
+  const at = positionOf(d)
+  useCyberspace.getState().focusItem(at, d.plane, d.chest?.name || 'door', placedStep(at, height))
+  useBuilder.getState().enter('build')
+  useShards.setState({ deployInto: height })
+}
+
+// ADD's height lasts as long as the BUILD it started.
+useBuilder.subscribe((s, prev) => {
+  if (prev.active && !s.active && useShards.getState().deployInto !== null) useShards.setState({ deployInto: null })
 })

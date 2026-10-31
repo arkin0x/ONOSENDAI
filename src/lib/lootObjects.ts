@@ -107,5 +107,5 @@ export function chestLoot(o: {
   itemsReady: boolean
 }): LootObject[] {
   if (o.look !== 'chest' || !o.entries || !o.itemsReady) return []
-  return lootOf(o.entries.filter((e) => !aimedElsewhere(e, o.chest)), o.held)
+  return lootOf(o.entries, o.held)
 }

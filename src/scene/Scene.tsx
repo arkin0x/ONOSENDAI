@@ -88,6 +88,7 @@ import { HiddenAudio } from './HiddenAudio'
 import { StarredMarks } from './StarredMarks'
 import { ShardGhost } from './ShardGhost'
 import { DeployRegionBox } from './DeployRegionBox'
+import { DoorRooms } from './DoorRooms'
 import { StepBox } from './StepBox'
 import { ChatRoomBox } from './ChatRoomBox'
 import { TargetProjector } from './TargetProjector'
@@ -228,6 +229,7 @@ function World(): JSX.Element {
       <StarredMarks axes={axes} />
       <ShardGhost axes={axes} />
       <DeployRegionBox axes={axes} />
+      <DoorRooms axes={axes} />
       <StepBox axes={axes} />
       <ChatRoomBox axes={axes} />
       <SecretRegions axes={axes} />

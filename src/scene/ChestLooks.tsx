@@ -88,7 +88,7 @@ export function ChestLooks({ axes }: { axes: ViewAxes }): JSX.Element | null {
       const inside = opened[openedKey(me, w.key)]
       // What the mute list hides is not drawn coming out, as it is not listed (ItemRows ChestBlock).
       const shown = inside?.filter((e) => !hidesThing(muted, { authors: [w.author ?? '', e.event.pubkey], ids: [e.id] }, me))
-      const loot = chestLoot({ look: look.kind, entries: shown, held: (e) => holdsEntry(items, e), chest: { at: w.at, plane: w.plane, height: w.height }, itemsReady })
+      const loot = chestLoot({ look: look.kind, entries: shown, held: (e) => holdsEntry(items, e), itemsReady })
       const clip = look.name === 'custom' ? regionBox(w.at, w.height, look.closed.unit, LOOK_FRAME) : undefined
       out.push({ key: w.key, look, opened: !!inside || openedByHand(me, w.key), loot, text: itemMarkText(w), sub: author({ author: w.author ?? '', mine: w.mine }), centre, clip })
     }

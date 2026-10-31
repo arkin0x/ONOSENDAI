@@ -202,7 +202,7 @@ export function ChestBlock({ id, chest, author, verified, place, sealer: given, 
         else if (look?.kind === 'chest') {
           // The chime sounds as the last loot object lands over the chest.
           // The same loot the world draws over it (scene/ChestLooks), so the chime lands with the last of it.
-          const loot = place ? chestLoot({ look: 'chest', entries: shownOf(contents, useMutes.getState().muted), held: (e) => holdsEntry(useInventory.getState().items, e), chest: { at: positionOf(place), plane: place.plane, height: place.height }, itemsReady: true }) : []
+          const loot = place ? chestLoot({ look: 'chest', entries: shownOf(contents, useMutes.getState().muted), held: (e) => holdsEntry(useInventory.getState().items, e), itemsReady: true }) : []
           celebrateOpen({ me, chestId: id, kind: 'chest', first, calm: prefersReducedMotion(), landMs: loot.length > 0 ? landedAt(loot.length) : undefined })
         }
       }

@@ -30,6 +30,7 @@ import {
   BoxGeometry,
 } from 'three'
 import { offloadFrom } from '../lib/crossover'
+import { cloudHopsSold } from '../lib/hosaka'
 import { useCalibration } from '../lib/calibration'
 import { nextActionFor } from '../store/useOffer'
 import { ACCENT, BUILD, DANGER, SIDESTEP, WARN } from '../lib/palette'
@@ -186,7 +187,7 @@ export function Cursor({ axes }: Props): JSX.Element | null {
   const signerKind = useCyberspace((s) => s.signerKind)
   const cantorMsByHeight = useCalibration((s) => s.cantorMsByHeight)
   const sha256PerSec = useCalibration((s) => s.sha256PerSec)
-  const from = offloadFrom(profile, { hopCeiling: hopCeil, sidestepCeiling: sidestepCeil, cloudHop: limits?.max_hop_height ?? 0, provider: provider ?? null, signerKind, cantorMsByHeight, sha256PerSec })
+  const from = offloadFrom(profile, { hopCeiling: hopCeil, sidestepCeiling: sidestepCeil, cloudHop: cloudHopsSold(limits), provider: provider ?? null, signerKind, cantorMsByHeight, sha256PerSec })
   const next = useMemo(
     () => (active ? nextActionFor(position, target, plane, hopCeil, sidestepCeil, limits, from) : null),
     [active, position, target, plane, hopCeil, sidestepCeil, limits, from],

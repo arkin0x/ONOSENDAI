@@ -58,6 +58,7 @@ import {
   sidestepLanding,
   xyzToSectorId,
   type Plane,
+  verifyHopLevel1,
 } from 'cyberspace-core'
 import {
   GRID_RADIUS,
@@ -99,6 +100,7 @@ import {
   firstBreak,
   openBracket,
   hopTemplate,
+  parseAction,
   positionHex,
   sidestepTemplate,
   spawnTemplate,
@@ -110,6 +112,7 @@ import {
 } from '../lib/events'
 import { lookBeforeMove, movementBlocked, VERSION_BLOCKED_MESSAGE } from '../lib/versionGate'
 import { cancelProof, postProof, type ProofMode, type ProofResponse } from '../lib/workers'
+import { staleFormatCut } from '../lib/staleFormat'
 import { offloadFrom, cloudSeconds } from '../lib/crossover'
 import { recommendedHopHeight, recommendedSidestepHeight, useCalibration } from '../lib/calibration'
 import {
@@ -122,7 +125,11 @@ import {
   type HosakaClient,
   type HosakaJob,
   type HosakaLimits,
-  type Waker, type HosakaProvider, type HopWants, keysPending } from '../lib/hosaka'
+  type Waker, type HosakaProvider, type HopWants, keysPending,
+  HosakaError,
+  cloudHopPause,
+  cloudHopsSold } from '../lib/hosaka'
+import { cloudVerifyIssue } from '../lib/cloudVerify'
 import {
   clearCloudJob,
   clearKeysTicket,
@@ -130,6 +137,8 @@ import {
   saveKeysTicket,
   cloudProofResponse,
   describeCloudError,
+  hopPausedWords,
+  straddlingV1Hop,
   driveCloudJob,
   hosakaCoord,
   invoiceOf,
@@ -271,6 +280,16 @@ export const LEFT_HEAD_MESSAGE = 'This move was not sent: you left your avatar (
 export const WALK_NEEDS_HOSAKA_MESSAGE = 'WALK stopped: this step crosses a boundary only HOSAKA computes. Switch to HOP to see the offer.'
 export const AIM_CHANGED_MESSAGE = 'This move was not sent: the cursor or the plane changed while it was being checked. Commit again to go where the cursor is now.'
 
+/** A HOSAKA whose /limits does not say hop_proof_version 2 makes the old hop proof, which this client cannot sign: no hop is bought from it. */
+const NO_V2_CLOUD_HOPS_MESSAGE = 'This HOSAKA still makes hops in the old proof format, which the chain rules no longer accept, so no cloud hop is bought from it. Nothing was charged.'
+/** A finished proof with no move waiting for it (a cut or a cancel cleared the target): never signed. */
+const NO_TARGET_MESSAGE = 'This proof was not signed: the move it was computed for is no longer lined up. Commit again.'
+/** A signed cloud move whose c or C is not the move its job was bought for: never recorded or sent. */
+const CLOUD_MOVE_MISMATCH_MESSAGE = 'This cloud move was not recorded or sent: the signed event does not name the move HOSAKA computed it for. The paid result is kept: RESUME signs it for its own move, from where the job started; moving first makes it worthless.'
+/** A local hop whose proof failed Level 1 under its own signed id: never recorded or sent. */
+const LOCAL_CHECK_FAILED_MESSAGE = 'This hop was not recorded or sent: its proof did not pass the check every reader will make of it'
+/** A finished proof in the old hop format (no mn, no mp): never signed (hop proof version 2, spec 5.9 to 5.13). */
+const OLD_FORMAT_PROOF_MESSAGE = 'This proof is in the old hop format, which the chain rules no longer accept, so it was not signed. Commit again to make the move with the new proof.'
 /**
  * The message for a proof whose head moved before it was signed: the work is
  * seeded by the head it started from (spec §5.3), so signed onto any other
@@ -380,6 +399,12 @@ export interface MovePlan {
   message: string | null
   /** A finished proof waiting for its signature across a pause. */
   awaiting: ProofResponse | null
+  /**
+   * Paused before it was paid for, because HOSAKA's cloud hops were paused
+   * (hosaka-api hop_pause): RESUME asks for a quote again rather than
+   * starting a step nobody has approved a price for.
+   */
+  requote?: boolean
   startedAt: number
 }
 
@@ -2231,6 +2256,113 @@ function cutInauthentic(pubkey: string, badKeys: Set<string>): string | null {
   return words
 }
 
+/** Whether a signed cloud move names the job's move: c at its start (x, y, z), C exactly its destination hex. */
+function cloudMoveMatches(event: NostrEvent, move: { fromHex: string; toHex: string } | undefined): boolean {
+  if (!move) return false
+  const c = event.tags.find((t) => t[0] === 'c')?.[1]
+  const C = event.tags.find((t) => t[0] === 'C')?.[1]
+  if (!c || !C || !/^[0-9a-f]{64}$/.test(c) || C !== move.toHex) return false
+  const a = coordToXyz(hexToCoord(c))
+  const b = coordToXyz(hexToCoord(move.fromHex))
+  return a.x === b.x && a.y === b.y && a.z === b.z
+}
+
+/**
+ * Level 1 of a hop just signed here (spec 5.11), under its own event id,
+ * with everything but its three tags taken from this client: the standing
+ * coordinate it moved from, the destination it was proved for, the previous
+ * event. Empty when it holds.
+ */
+function localHopFailures(event: NostrEvent, fromHex: string, to: Position, plane: Plane, prevEventId: string): string[] {
+  if (!/^[0-9a-f]{64}$/.test(fromHex)) return ['c']
+  const tagOf = (name: string): string | undefined => event.tags.find((t) => t[0] === name)?.[1]
+  try {
+    return verifyHopLevel1({
+      from: coordToXyz(hexToCoord(fromHex)),
+      to: { x: to.x, y: to.y, z: to.z, plane },
+      previousEventIdHex: prevEventId,
+      proof: tagOf('proof'),
+      nonce: tagOf('mn'),
+      openings: tagOf('mp'),
+      eventId: event.id,
+    })
+  } catch (err) {
+    return [`check: ${err instanceof Error ? err.message : String(err)}`]
+  }
+}
+
+/** The unsent old-format hops already reported as stuck, so each is said once. */
+const staleStuck = new Set<string>()
+
+/**
+ * The publisher met an unsent hop in the old format that retireStaleFormat
+ * will not cut, because an event after it is already on the relays (a cut
+ * never takes back a published event). It is never sent, and nothing after
+ * it on this chain is sent either, since the publisher sends in order. Said
+ * once to the player, and warned in the console. Nothing else is held: only
+ * this chain's queue waits; bags, messages and every other publish go out
+ * by their own paths.
+ */
+export function noteStaleFormatStuck(event: NostrEvent): void {
+  if (staleStuck.has(event.id)) return
+  staleStuck.add(event.id)
+  console.warn(`[onosendai] unsent hop ${event.id} is in the old proof format and an action after it is already on the relays: it is never sent, and this chain's unsent actions after it wait behind it`)
+  if (useCyberspace.getState().proof.status === 'computing') return
+  useCyberspace.setState({ proof: { ...IDLE_PROOF, status: 'infeasible', message: STALE_STUCK_MESSAGE } })
+}
+
+const STALE_STUCK_MESSAGE = 'One of your unsent actions is a hop in the old proof format, and an action after it is already on the relays, so it cannot be taken back. It will never be sent, and your unsent actions after it wait behind it. Respawning starts a new chain.'
+
+/**
+ * Cut the chain in hand at its first unsent hop in the old proof format
+ * (lib/staleFormat.ts; cutover checklist item 1 in lib/chainRulesEpoch.ts):
+ * that hop and everything after it, all unsent, are set aside unpublished
+ * and the chain continues from the event before. One such hop alone, whose
+ * previous is still the head and which this machine proves within its
+ * ceiling, goes back on the cursor so one COMMIT makes it again with the new
+ * proof; it is never re-proved without the player, because a commit opens
+ * the publisher's release gate. Redraws, saves, and says so in the proof
+ * notice. Returns those words, or null when nothing was cut.
+ */
+export function retireStaleFormat(): string | null {
+  const before = useCyberspace.getState()
+  const cut = staleFormatCut(before.events, (id) => before.published[id] === 'ok')
+  if (!cut) return null
+  // Whatever was computing or being bought was for the chain as it stood,
+  // and the head is about to change under it: stopped as a respawn stops it
+  // (review of #539, F1), so no proof lands on the cut chain with a
+  // destination it was not made for. A paid cloud job is kept for RESUME
+  // (cancelCloud), which drops it if its head is gone.
+  if (before.proof.status === 'computing') {
+    cancelProof()
+    requestId++
+  }
+  if (before.cloud.status !== 'idle') before.cancelCloud()
+  if (before.plan) useCyberspace.setState({ plan: null })
+  const s = useCyberspace.getState()
+  const events = s.events.slice(0, cut.at)
+  for (const e of cut.removed) setAside.add(e.id)
+  const d = derive({ version: 2, events, published: events.filter((e) => s.published[e.id] === 'ok').map((e) => e.id), stats: s.chain, held: s.held })
+  const again = cut.reprove ? parseAction(cut.reprove) : null
+  const ceiling = Math.min(MAX_COMPUTE_HEIGHT, recommendedHopHeight())
+  const reprove = again !== null && again.type === 'hop' && again.previousId === d.prevEventId && again.prevCoordHex === positionHex(d.position, d.headPlane)
+    && !estimateHopCost(d.position.x, d.position.y, d.position.z, again.position.x, again.position.y, again.position.z, again.plane, ceiling).exceedsLimit
+  const words = reprove
+    ? 'A hop signed by the previous version of ONOSENDAI was never sent, and its proof is in the old format the chain rules no longer accept. It was taken back and your cursor is on where it went: COMMIT makes the same hop with the new proof.'
+    : cut.removed.length === 1
+      ? 'An action signed by the previous version of ONOSENDAI was never sent, and its proof is in the old format the chain rules no longer accept, so it was set aside. Your chain continues from the action before it.'
+      : `${cut.removed.length} actions signed by the previous version of ONOSENDAI were never sent, from a hop whose proof is in the old format the chain rules no longer accept, so they were set aside. Your chain continues from the action before them.`
+  useCyberspace.setState({
+    ...d,
+    cursor: reprove ? again.position : d.position,
+    ...(reprove ? { plane: again.plane } : {}),
+    pendingTarget: null,
+    proof: { ...IDLE_PROOF, status: 'infeasible', message: words },
+  })
+  saveChain(d.events, d.published, d.chain, s.held)
+  return words
+}
+
 const pubkeyHex = currentSigner.pubkey
 if (mintedOnLoad) markMinted(pubkeyHex)
 
@@ -2634,10 +2766,15 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
     })
   }
 
-  /** GET /limits, once per API URL. null when HOSAKA cannot be reached, which routes every move locally. */
+  /**
+   * GET /limits, once per API URL. null when HOSAKA cannot be reached, which
+   * routes every move locally. Limits that said cloud hops were paused are
+   * asked for again each time, so a reopened HOSAKA is seen at the next
+   * commit or RESUME, not at the next reload.
+   */
   const ensureCloudLimits = (): Promise<HosakaLimits | null> => {
     const cached = get().cloud.limits
-    if (cached) return Promise.resolve(cached)
+    if (cached && !cached.hop_paused) return Promise.resolve(cached)
     const url = get().cloudPrefs.apiUrl
     // A request out for another URL is not this one: its answer would be
     // dropped as stale below, and the caller would plan without caps (#69).
@@ -2666,12 +2803,12 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
     return {
       hop: Math.min(MAX_COMPUTE_HEIGHT, recommendedHopHeight()),
       sidestep: recommendedSidestepHeight(),
-      cloudHop: on && cloud.limits ? cloud.limits.max_hop_height : 0,
+      cloudHop: on ? cloudHopsSold(cloud.limits) : 0,
       cloudSidestep: on && cloud.limits ? cloud.limits.max_sidestep_height : 0,
       offloadFrom: offloadFrom(cloudPrefs.profile, {
         hopCeiling: Math.min(MAX_COMPUTE_HEIGHT, recommendedHopHeight()),
         sidestepCeiling: recommendedSidestepHeight(),
-        cloudHop: on && cloud.limits ? cloud.limits.max_hop_height : 0,
+        cloudHop: on ? cloudHopsSold(cloud.limits) : 0,
         provider: cloud.provider ?? null,
         signerKind: get().signerKind,
         cantorMsByHeight: useCalibration.getState().cantorMsByHeight,
@@ -2717,6 +2854,20 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
       }
     }
     const steps = cloudStepsOf(position, plan)
+    // Cloud hops, before any quote: only from a HOSAKA that makes hop proof
+    // version 2, only as tall as this client can check before signing, and
+    // never while HOSAKA has them paused (the route waits for RESUME).
+    if (steps.some((st) => st.kind === 'hop')) {
+      const limits = get().cloud.limits?.hop_paused ? (await ensureCloudLimits()) ?? get().cloud.limits : get().cloud.limits
+      if (id !== requestId) return
+      if (cloudHopsSold(limits) === 0) { routeFail(NO_V2_CLOUD_HOPS_MESSAGE); return }
+      for (const st of steps) {
+        const tooTall = st.kind === 'hop' ? cloudVerifyIssue({ from: st.from, to: st.to, plane }) : null
+        if (tooTall) { routeFail(tooTall); return }
+      }
+      const paused = cloudHopPause(limits)
+      if (paused) { routePause(hopPausedWords(paused), true, false); return }
+    }
     let total = 0
     let tallest = 0
     let estTime: string | null = null
@@ -2733,6 +2884,7 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
         // is what LOOT pays for; the other profiles quote the bare hop.
         const q = await client.quote(step.kind, hosakaCoord(step.from, plane), hosakaCoord(step.to, plane), undefined, hopWants(step.kind))
         if (id !== requestId) return
+        if (q.paused) { routePause(hopPausedWords(q.hint), true, false); return }
         if (!q.within_cap || q.cost_msats === null) {
           routeFail(q.hint ?? `HOSAKA does not sell an h${q.max_height} ${step.kind}.`)
           return
@@ -2769,6 +2921,31 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
     }
     set({ cloud: { ...get().cloud, quote } })
     await fundRoute(total, id)
+  }
+
+  /**
+   * HOSAKA has cloud hops paused (hosaka-api hop_pause, 503 hop_paused):
+   * nothing was charged, and the same move can be bought once it reopens. The
+   * route pauses with HOSAKA's reason; RESUME asks again, for a quote when
+   * none was approved yet (`requote`), else for the same step, whose
+   * idempotency key names the job any earlier submit made. `keepJob` keeps a
+   * paid job's record, which RESUME in the cloud panel also finishes.
+   */
+  const routePause = (message: string, requote: boolean, keepJob: boolean): void => {
+    const { plan, cloud } = get()
+    set({
+      pendingTarget: null,
+      plan: plan ? { ...plan, status: 'paused', message, awaiting: null, requote } : null,
+      proof: plan ? IDLE_PROOF : { ...IDLE_PROOF, status: 'infeasible', message },
+      cloud: { ...cloud, status: keepJob ? 'error' : 'idle', message, quote: null, invoice: null, invoiceOpen: false, progress: null, job: keepJob ? cloud.job : null },
+    })
+  }
+
+  /** What a refusal that returned money left in the balance (400 job_not_runnable), noted at once. */
+  const noteRefusalBalance = (err: unknown): void => {
+    if (!(err instanceof HosakaError) || !err.jobNotRunnable) return
+    const d = err.detail as { current_balance_msats?: unknown } | null
+    if (d && typeof d.current_balance_msats === 'number') get().noteBalance(d.current_balance_msats)
   }
 
   /** The route cannot be bought: the plan ends with the reason, nothing is signed. */
@@ -2856,6 +3033,14 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
     const { plane, prevEventId, identity, cloudPrefs } = get()
     const issue = movementCapabilityIssue(step.kind, step.from, step.to, plane, 'cloud')
     if (issue) { routeFail(issue); return }
+    // The same three checks quoteRoute made, again at the moment of buying:
+    // the limits may have changed since (a HOSAKA rolled back, or paused).
+    if (step.kind === 'hop') {
+      const limits = get().cloud.limits
+      if (cloudHopsSold(limits) === 0) { routeFail(NO_V2_CLOUD_HOPS_MESSAGE); return }
+      const tooTall = cloudVerifyIssue({ from: step.from, to: step.to, plane })
+      if (tooTall) { routeFail(tooTall); return }
+    }
     const client = cloudClient(cloudPrefs.apiUrl)
     set({
       pendingTarget: step.to,
@@ -2898,6 +3083,9 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
       }
     } catch (err) {
       if (id !== requestId || abort.signal.aborted) return
+      // Paused: nothing was charged, and RESUME submits the same step again.
+      if (err instanceof HosakaError && err.hopPaused) { routePause(describeCloudError(err), false, false); return }
+      noteRefusalBalance(err)
       routeFail(describeCloudError(err))
       return
     } finally {
@@ -2973,6 +3161,13 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
       }, abort.signal, waker)
     } catch (err) {
       if (id !== requestId || abort.signal.aborted) return
+      // A paid job HOSAKA will not start while hops are paused: it stays
+      // pending and uncharged, so its record is kept and RESUME starts it
+      // once they reopen.
+      if (err instanceof HosakaError && err.hopPaused) { routePause(describeCloudError(err), false, true); return }
+      // job_not_runnable: failed, refunded to the balance, and the record
+      // is worthless (retainsRecord drops it).
+      noteRefusalBalance(err)
       const keep = retainsRecord(err)
       if (!keep) clearCloudJob()
       cloudFail(describeCloudError(err), keep)
@@ -2996,11 +3191,21 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
     // What it actually took, against what was estimated: TIME learns from it.
     recordJobExperience(final, Math.max(findLcaHeight(BigInt(final.from.x), BigInt(final.to.x)), findLcaHeight(BigInt(final.from.y), BigInt(final.to.y)), findLcaHeight(BigInt(final.from.z), BigInt(final.to.z))))
 
+    // A hop that finished in the old hop_n shape (a job that straddled
+    // HOSAKA's switch to version 2): never signed (lib/cloud.ts
+    // straddlingV1Hop, decision D-A), and the record goes with it.
+    const straddled = straddlingV1Hop(final.action, job.result, final.jobId)
+    if (straddled) {
+      clearCloudJob()
+      cloudFail(straddled, false)
+      return
+    }
+
     set({ cloud: { ...get().cloud, status: 'verifying', invoice: null, invoiceOpen: false, progress: null, message: null } })
     const move = { from: positionFromWire(final.from), to: positionFromWire(final.to), plane: final.plane, prevEventId: final.prevEventId }
     let failed: string[]
     try {
-      failed = await verifyCloudResult(final.action, job.result, move, Math.min(MAX_COMPUTE_HEIGHT, recommendedHopHeight()))
+      failed = await verifyCloudResult(final.action, job.result, move)
     } catch (err) {
       failed = [`verifier: ${err instanceof Error ? err.message : String(err)}`]
     }
@@ -3024,10 +3229,12 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
     if (msg.type === 'done' && msg.mode === 'hop' && msg.lookupId) {
       // The region key of the region entered (spec 7.2), which this machine could not derive.
       const r = job.result as CloudHopResult
+      // The region's height is the move's own tallest axis, never HOSAKA's word.
+      const height = Math.max(msg.lca.x, msg.lca.y, msg.lca.z)
       saveCloudRegionKey({
         lookupId: msg.lookupId,
         keyHex: r.region_n.secret_key,
-        height: r.max_height,
+        height,
         coordHex: positionHex(move.to, move.plane),
         jobId: final.jobId,
         at: Math.floor(Date.now() / 1000),
@@ -3037,11 +3244,11 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
       useSecrets.getState().hold([{
         lookupId: msg.lookupId,
         keyHex: r.region_n.secret_key,
-        height: r.max_height,
+        height,
         base: {
-          x: String((move.to.x >> BigInt(r.max_height)) << BigInt(r.max_height)),
-          y: String((move.to.y >> BigInt(r.max_height)) << BigInt(r.max_height)),
-          z: String((move.to.z >> BigInt(r.max_height)) << BigInt(r.max_height)),
+          x: String((move.to.x >> BigInt(height)) << BigInt(height)),
+          y: String((move.to.y >> BigInt(height)) << BigInt(height)),
+          z: String((move.to.z >> BigInt(height)) << BigInt(height)),
         },
         plane: move.plane,
         source: 'cloud',
@@ -3053,7 +3260,7 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
       if (get().cloudPrefs.profile === 'loot') {
         const sent = r.destination_keys ? holdCloudDestinationKeys(r.destination_keys, move.to, move.plane) : 0
         const top = sent > 0 ? Math.min(...r.destination_keys!.map((k) => k.height)) - 1 : localKeyCeiling()
-        void holdDestinationCubes(move.to, move.plane, destinationHeights(Math.min(r.max_height, top), localKeyCeiling()), MAX_COMPUTE_HEIGHT, 'cloud')
+        void holdDestinationCubes(move.to, move.plane, destinationHeights(Math.min(height, top), localKeyCeiling()), MAX_COMPUTE_HEIGHT, 'cloud')
         // Staged delivery: this result is the hop alone and the cubes are
         // still being computed on the same job. Noted here, taken up once the
         // move itself has landed, since the cubes are the lesser half.
@@ -3735,9 +3942,22 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
   resumePlan: () => {
     const { plan } = get()
     if (!plan || plan.status !== 'paused') return
+    if (plan.requote) {
+      // Paused by HOSAKA before any price was approved: ask for a quote
+      // again, which looks at the limits afresh (ensureCloudLimits).
+      set({ plan: { ...plan, status: 'funding', message: null, requote: false } })
+      void quoteRoute(++requestId)
+      return
+    }
     if (plan.awaiting) {
       const msg = plan.awaiting
-      set({ plan: { ...plan, status: 'running', message: null, awaiting: null } })
+      // The kept proof is for the paused step: its destination is the step's.
+      set({
+        plan: { ...plan, status: 'running', message: null, awaiting: null },
+        pendingTarget: plan.step.to,
+        // A kept cloud proof goes in its job's plane (finishProof signs it there either way).
+        ...(msg.type === 'done' && msg.move ? { plane: coordToXyz(hexToCoord(msg.move.toHex)).plane } : {}),
+      })
       void get().finishProof(msg)
       return
     }
@@ -3893,8 +4113,17 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
     // Capture the chain we are extending. A cancel or a respawn bumps requestId,
     // so for this id events/head stay valid across the await; only `published`
     // moves under us as the publisher drains, so that is re-read after signing.
-    const { pendingTarget, position, plane, events, genesisId, prevEventId } = get()
-    const newPosition = pendingTarget ?? position
+    const { pendingTarget, events, genesisId, prevEventId } = get()
+    // A cloud proof is for its job's move, in the job's plane, whatever plane
+    // is lined up now (a reload, or a flip between a declined signature and
+    // RESUME, leaves the head's): it is signed there (review of #539).
+    const plane: Plane = msg.move ? coordToXyz(hexToCoord(msg.move.toHex)).plane : get().plane
+    // A proof is for one move, from here to its pending target. With none
+    // (a cut or a cancel cleared it), nothing says where this proof goes, and
+    // signing it at the current position would name a C its proof was never
+    // made for (review of #539, F1).
+    if (!pendingTarget) { refuseSigning(msg, NO_TARGET_MESSAGE, false); return }
+    const newPosition = pendingTarget
     const head = events[events.length - 1]
     // `previous` is the chain's actual last event, whatever it is, and `c` is
     // where the identity stands, which after an action this client does not
@@ -3915,13 +4144,23 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
       proofHash: msg.proofHash,
     }
 
+    // A hop is signed as hop proof version 2 or not at all: a proof without
+    // its mn and mp (an old worker's, or HOSAKA's old shape) is refused here,
+    // before any signer is asked.
+    let template: EventTemplate | null = null
+    try {
+      template = msg.mode === 'sidestep'
+        ? (msg.sidestep ? sidestepTemplate({ ...link, ...msg.sidestep }) : null)
+        : (msg.hop && msg.hop.sealHex === msg.proofHash ? hopTemplate({ ...link, mn: msg.hop.mnHex, mp: msg.hop.mpHex }) : null)
+    } catch {
+      // hopTemplate refuses a malformed tag rather than sign it.
+      template = null
+    }
+    if (!template) { refuseSigning(msg, OLD_FORMAT_PROOF_MESSAGE, false); return }
+
     let event: NostrEvent
     try {
-      event = await get().signEvent(
-        msg.mode === 'sidestep' && msg.sidestep
-          ? sidestepTemplate({ ...link, ...msg.sidestep })
-          : hopTemplate(link),
-      )
+      event = await get().signEvent(template)
     } catch (err) {
       // The signer refused, or a bunker dropped mid-handshake: the move does not
       // commit, and the avatar stays where the last committed hop left it.
@@ -3951,6 +4190,20 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
     // A remote signer can take seconds; a cancel or respawn may have landed
     // while it was thinking. If so this receipt is for a chain that is gone.
     if (msg.id !== requestId) return
+    // Every hop computed here is checked at Level 1 under its own signed id
+    // before it is recorded or queued (spec 5.11; as cyberspace-mcp does), so
+    // a hop whose proof does not hold for this very event is never kept or
+    // sent. About 15 ms at h20. A cloud hop was checked before signing.
+    if (msg.mode === 'hop' && msg.source !== 'cloud') {
+      const failed = localHopFailures(event, standing?.coordHex ?? '', newPosition, plane, prevEventId)
+      if (failed.length > 0) { refuseSigning(msg, `${LOCAL_CHECK_FAILED_MESSAGE} (${failed.join(', ')})`, false); return }
+    }
+    // A cloud move was verified for the move its job was bought for; the
+    // event just signed must be that move: its c where the job started (x, y
+    // and z; c's plane bit is the head's), its C exactly the job's
+    // destination in the job's plane. A cheap equality, and a mismatch is
+    // never kept or sent (review of #539).
+    if (msg.source === 'cloud' && !cloudMoveMatches(event, msg.move)) { refuseSigning(msg, CLOUD_MOVE_MISMATCH_MESSAGE, false); return }
     // The live feed kept delivering while the signer thought. What arrived is
     // folded now, before the signed event joins the chain: if it moved the
     // head or entered a game, the signed event is discarded unpublished, as a
@@ -5305,6 +5558,9 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
     }
     set({
       pendingTarget: positionFromWire(record.to),
+      // The job's plane, with its destination: a plane-change job resumed
+      // after a reload must sign C in the plane it was bought for.
+      plane: record.plane,
       proof: { ...IDLE_PROOF, status: 'computing', mode: moveAction(record.action), source: 'cloud' },
       cloud: {
         ...get().cloud,
@@ -5501,6 +5757,15 @@ useCyberspace.subscribe((s, prev) => {
 useCyberspace.subscribe((s, prev) => {
   if (prev.proof.status === 'computing' && s.proof.status !== 'computing') foldDeferred()
 })
+
+// Nothing in the old hop format is ever published (retireStaleFormat): what
+// a reload, another tab's save or a fold brings in is inspected as it lands,
+// before a new action can be signed on top of it, and once for the chain
+// this page loaded with.
+useCyberspace.subscribe((s, prev) => {
+  if (s.events !== prev.events || s.published !== prev.published) retireStaleFormat()
+})
+retireStaleFormat()
 
 if (import.meta.env.DEV && typeof window !== 'undefined') {
   // Lets the browser harness read and drive real state instead of inferring it

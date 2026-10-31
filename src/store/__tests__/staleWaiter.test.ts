@@ -44,7 +44,7 @@ const sign = (t: Parameters<typeof finalizeEvent>[0]): NostrEvent => JSON.parse(
 describe('a commit waiting on the signature check, across a respawn', () => {
   it('ends without writing to the panel, and the new proof keeps computing, guarded', async () => {
     const spawn = sign(spawnTemplate(pk, 1_000))
-    const hop = sign(hopTemplate({ createdAt: 1_001, genesisId: spawn.id, previousId: spawn.id, prevCoordHex: pk, to: { x: home.x + 1n, y: home.y, z: home.z }, plane: home.plane, proofHash: '0'.repeat(64) }))
+    const hop = sign(hopTemplate({ createdAt: 1_001, genesisId: spawn.id, previousId: spawn.id, prevCoordHex: pk, to: { x: home.x + 1n, y: home.y, z: home.z }, plane: home.plane, proofHash: '0'.repeat(64), mn: '0'.repeat(16), mp: '00'}))
     void positionHex
     storage.setItem('onosendai:nsec', nip19.nsecEncode(sk))
     storage.setItem(`onosendai:chain:${pk}`, JSON.stringify({ version: 2, events: [spawn, hop], published: [spawn.id, hop.id], stats: {} }))

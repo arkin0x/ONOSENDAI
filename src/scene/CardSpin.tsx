@@ -16,7 +16,7 @@
  * it is moved by hand between the cards' slots. Empty, it draws nothing.
  */
 
-import { useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useMemo, useRef } from 'react'
 import { createRoot } from 'react-dom/client'
 import type { ShardModel } from 'sno-core/shards'
 import { ShardSpin, type Pace } from './ShardSpin'
@@ -33,10 +33,10 @@ let parking: HTMLDivElement | null = null
 /** Asks for frames at CARD_SPIN_FRAME_MS while it is mounted and the tab draws. */
 function usePaced(active: boolean): Pace {
   const next = useRef<(() => void) | null>(null)
-  const [pace] = useState<Pace>(() => (ask, mine) => {
+  const pace = useMemo<Pace>(() => (ask, mine) => {
     if (ask) next.current = ask
     else if (next.current === mine) next.current = null
-  })
+  }, [])
   useEffect(() => {
     if (!active) return
     let raf = 0

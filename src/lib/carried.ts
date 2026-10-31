@@ -102,7 +102,7 @@ export function authorOf(model: Pick<ShardModel, 'author'>): string | null {
  */
 export function rekeyCarried(model: ShardModel, me: string | null): ShardModel {
   const from = model.author
-  if (!me || !from || !model.objects) return model
+  if (!me || !from || !model.objects || from === me) return model
   const renamed = new Map<string, string>()
   for (const key of Object.keys(model.objects)) {
     const a = parseAddress(key)
@@ -122,4 +122,42 @@ export function rekeyCarried(model: ShardModel, me: string | null): ShardModel {
   rewritten.sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
   const objects = Object.fromEntries(rewritten)
   return { ...refsOf(model), objects, author: me }
+}
+
+/** A model that came out of a bag or a chest: local only, never on the wire, like `author`. */
+type Taken = ShardModel & { takenFromBag?: true }
+
+/**
+ * A model taken into your keeping from where it was hidden: its table keyed under
+ * you (rekeyCarried), and marked, so that what was sealed does not go public with
+ * a PUBLISH (withoutCarried). Only one that carries anything needs the mark.
+ */
+export function takeIntoKeeping(model: ShardModel, me: string | null): ShardModel {
+  const out = rekeyCarried(model, me)
+  return out.objects ? ({ ...out, takenFromBag: true } as Taken) : out
+}
+
+/** Whether this model carries parts that came to you sealed: publishing them in the clear needs asking. */
+export function carriesSealedParts(model: ShardModel): boolean {
+  return !!(model as Taken).takenFromBag && !!model.objects && Object.keys(model.objects).length > 0
+}
+
+/**
+ * A model without the parts it carries from where it was hidden, as it goes out in
+ * public: the table, the placements that drew on it, and their refs. A placement
+ * of a public object stays. The same model when there is nothing to take out.
+ */
+export function withoutCarried(model: ShardModel): ShardModel {
+  if (!carriesSealedParts(model)) return model
+  const carried = new Set(Object.keys(model.objects ?? {}))
+  const refs = model.refs ?? []
+  const kept = refs.map((r, i) => [r, i] as const).filter(([r]) => !(r[0] === 'a' && carried.has(r[1])))
+  const index = new Map(kept.map(([, old], now) => [old, now]))
+  const parts = (model.parts ?? []).filter((p) => index.has(p.ref)).map((p) => ({ ...p, ref: index.get(p.ref)! }))
+  const { objects: _table, takenFromBag: _mark, refs: _refs, parts: _parts, ...rest } = model as Taken
+  void _table
+  void _mark
+  void _refs
+  void _parts
+  return { ...rest, ...(kept.length ? { refs: kept.map(([r]) => r) } : {}), ...(parts.length ? { parts } : {}) }
 }

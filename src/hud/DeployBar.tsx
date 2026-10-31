@@ -72,7 +72,7 @@
 
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import { noCallout, useRepeatable } from '../hooks/useRepeatable'
-import { MAX_UNIT } from 'sno-core/shards'
+import { MAX_UNIT, type ShardModel } from 'sno-core/shards'
 import { formatCellSize, formatDistance } from 'sno-core/scale'
 import { fadeStep, inscribedRadius, sourceLocal } from '../lib/audioItem'
 import { LINK_PROTECTED, SCAN_MAX_HEIGHT, fillingChest, movingId, placingChest, lookModelOf, lookTagsFor, type LookChoice, aimedOf, atLastSpot, copyLinedUp, isProtected, ownBagIn, pendingEmpty, pendingName, positionOf, regionOf, useShards } from '../store/useShards'
@@ -157,6 +157,14 @@ export function useAtLastSpot(): boolean {
 }
 
 /**
+ * What a look's height fits: the model it wears. A FEED look is a wrapper with
+ * nothing of its own to reach with, so the object it places stands for it.
+ */
+export function lookFitShape(look: LookChoice | null, model: ShardModel | null): ShardModel | null {
+  return look?.from === 'feed' ? look.object.shard : model
+}
+
+/**
  * The model row (chest and door design, D2, D3): the built-in looks, then
  * OTHER, any model from MINE or FEED (LookPicker). The chosen OTHER's name
  * is the row's note; a look too large to wear says so there instead.
@@ -164,7 +172,7 @@ export function useAtLastSpot(): boolean {
 export function LookRow({ choices, look, refusal }: { choices: readonly (keyof typeof LOOK_LABELS)[]; look: LookChoice; refusal: string | null }): JSX.Element {
   const [picking, setPicking] = useState(false)
   const pick = (l: LookChoice): void => { useShards.getState().setDeployLook(l); setPicking(false) }
-  const other = look.from === 'mine' ? lookModelOf(look)?.name ?? 'model' : look.from === 'feed' ? look.object.shard.name : look.from === 'model' ? look.closed.name : null
+  const other = look.from === 'mine' ? lookModelOf(look)?.name ?? 'model' : look.from === 'feed' ? look.object.shard.name : look.from === 'model' ? look.closed.name : look.from === 'kept' ? 'as it is' : null
   return (
     <DeployRow kind="model" label="MODEL" hint={refusal ?? other}>
       <span className="deploybar__choices" role="group" aria-label="Model">
@@ -237,6 +245,7 @@ export function DeployBar({ pad = false }: { pad?: boolean }): JSX.Element | nul
   // What a chest wears (the model row), and that model, for the fit and the 16 KB check.
   const look = useShards((s) => (s.pending?.type === 'chest' ? s.pending.look ?? null : null))
   const lookModel = useMemo(() => (look ? lookModelOf(look) : null), [look])
+  const fitShape = useMemo(() => lookFitShape(look, lookModel), [look, lookModel])
   const lookRefusal = useMemo(() => {
     if (!look) return null
     try { lookTagsFor(look, { unit, turn, constrain }); return null } catch (err) { return err instanceof Error ? err.message : String(err) }
@@ -292,15 +301,16 @@ export function DeployBar({ pad = false }: { pad?: boolean }): JSX.Element | nul
   // and aimed contents, so its region holds the whole model it wears.
   const fitting = !!shard || !!lookModel || aimed.points.length > 0
   const fitH = useMemo(
-    () => (shard ? fitHeight(shard, unit, cursor, step, 0, ceiling) : lookModel || aimed.points.length > 0 ? fitHeightAll(lookModel ? reachGibsons(lookModel, unit) : 0n, aimed.points, cursor, step, 0, ceiling) : null),
-    [shard, lookModel, unit, cursor, step, ceiling, aimed],
+    () => (shard ? fitHeight(shard, unit, cursor, step, 0, ceiling) : lookModel || aimed.points.length > 0 ? fitHeightAll(fitShape ? reachGibsons(fitShape, unit) : 0n, aimed.points, cursor, step, 0, ceiling) : null),
+    [shard, lookModel, fitShape, unit, cursor, step, ceiling, aimed],
   )
   useEffect(() => {
-    if (!heightAuto || !fitting) return
+    // Once placed, its height is fixed with its place, whatever the cursor does while the modal is filled.
+    if (!heightAuto || !fitting || filling) return
     const want = fitH ?? ceiling
     if (want !== useShards.getState().deployHeight) useShards.getState().setDeployHeight(want)
-  }, [heightAuto, fitting, fitH, ceiling])
-  const fitModel = shard ?? (aimed.points.length === 0 ? lookModel : null)
+  }, [heightAuto, fitting, fitH, ceiling, filling])
+  const fitModel = shard ?? (aimed.points.length === 0 ? fitShape : null)
   const fit: { auto: boolean; height: number | null; cause: 'size' | 'edge' | 'contents' } = { auto: heightAuto && fitting, height: fitH, cause: fitModel ? fitCause(fitModel, unit, fitH, ceiling) : 'contents' }
   // Aimed contents the region at this height does not hold: they stand at the chest when it opens (revealedIn).
   const outside = aimed.points.length + aimed.elsewhere === 0 ? 0 : outsideAt(deployPoint(cursor, step, height), height, aimed.points) + aimed.elsewhere
@@ -512,7 +522,8 @@ export function DeployBar({ pad = false }: { pad?: boolean }): JSX.Element | nul
       {/* Whether a walker can cross it in WALK (DECK-0003 §1.12), for this
           deployment, as SCALE is; the workshop's model keeps its own. Linked,
           it is the author's. */}
-      {sized && !link && (
+      {/* A FEED look's WALK setting is its object's author's, as a LIVE LINK's is. */}
+      {sized && !link && look?.from !== 'feed' && (
         <DeployRow kind="constrain" label="CONSTRAIN MOVEMENT IN WALK MODE">
           <span className="deploybar__choices" role="group" aria-label="Constrain movement in WALK mode">
           {CONSTRAINS.map((c) => (

@@ -22,6 +22,7 @@
  * actions every item has.
  */
 
+import { takeIntoKeeping, you } from '../lib/carried'
 import { useEffect, useState, type ReactNode } from 'react'
 import { Copy, CopyPlus, Move3d, PackagePlus, Pencil, Rotate3d, Target, TvMinimal } from 'lucide-react'
 import { nip19 } from 'nostr-tools'
@@ -148,7 +149,7 @@ export function SecretModal(): JSX.Element | null {
   const words = coin || nft ? textWithoutToken(textWithoutNftLinks(item.text)) : item.text ?? ''
   // A shard copies into your workshop as a model; a message copies its text.
   const copy = (): void => {
-    if (item.type === 'shard' && item.shard) useWorkshop.getState().importShard(item.shard)
+    if (item.type === 'shard' && item.shard) useWorkshop.getState().importShard(takeIntoKeeping(item.shard, you()))
     else if (words) void navigator.clipboard?.writeText(words)
     setCopied(true)
     window.setTimeout(() => setCopied(false), 1400)

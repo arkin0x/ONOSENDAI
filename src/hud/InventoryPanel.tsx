@@ -19,7 +19,7 @@
  * The confirmation says it cannot be taken back.
  */
 
-import { rekeyCarried, you } from '../lib/carried'
+import { takeIntoKeeping, you } from '../lib/carried'
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import { ConfirmModal } from './ConfirmModal'
 import { useItemFeed } from '../store/useItemFeed'
@@ -224,7 +224,7 @@ function TakenRow({ item }: { item: HeldItem }): JSX.Element {
   const moveToWorkshop = (): void => {
     if (!item.shard || moved) return
     // Its carried parts keyed under you, so your copy keeps them when you hide it (R15).
-    useWorkshop.getState().importShard(rekeyCarried(item.shard, you()))
+    useWorkshop.getState().importShard(takeIntoKeeping(item.shard, you()))
     setMoved(true)
     // Held by the store, not this row: the row leaves the list even when the menu closes first.
     window.setTimeout(() => useInventory.getState().clearTaken([item.id]), MOVED_NOTICE_MS)

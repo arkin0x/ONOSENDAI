@@ -69,6 +69,7 @@ import {
   type Reference,
   type Rumor,
   chestInnerTemplate,
+  chestItemOf,
   keyInnerTemplate,
   messageInnerTemplate,
   rumorOf,
@@ -94,7 +95,7 @@ import { useInventory } from './useInventory'
 import { useShardFolders } from './useShardFolders'
 import { creditOf, useWorkshop } from './useWorkshop'
 import { deletionFilters, isDeleted, type Credit, type FeedObject } from 'sno-core/feed'
-import { builtInLook, builtInLookTags, keptInChest, lookOf, lookTags, posedLook, type LookName, type LookPose } from '../lib/looks'
+import { builtInLook, builtInLookTags, keptInChest, lookOf, lookTags, lookTagsOf, posedLook, posedOpenLook, posedWrapper, type LookName, type LookPose } from '../lib/looks'
 import { useCeremony } from './useCeremony'
 import { useToast } from './useToast'
 import type { ShardModel } from 'sno-core/shards'
@@ -363,6 +364,8 @@ export type LookChoice =
   | { from: 'feed'; object: FeedObject }
   /** The look a hidden chest already wears, kept by MOVE: posed again from where it stands. */
   | { from: 'model'; closed: ShardModel; open: ShardModel | null }
+  /** A look this client will not read (over MAX_LOOK_BYTES, or failing the format), kept by MOVE exactly as it is, never swapped for a built-in. */
+  | { from: 'kept'; tags: string[][] }
 
 /** What a chest wears when nothing else is chosen. */
 export const DEFAULT_CHEST_LOOK: LookChoice = { from: 'builtin', name: 'treasure' }
@@ -389,6 +392,7 @@ export function lookModelOf(choice: LookChoice): ShardModel | null {
   if (choice.from === 'builtin') return builtInLook(choice.name).closed
   if (choice.from === 'feed') return feedWrapper(choice.object)
   if (choice.from === 'model') return choice.closed
+  if (choice.from === 'kept') return null
   return useWorkshop.getState().shards.find((s) => s.id === choice.shardId) ?? null
 }
 
@@ -401,8 +405,9 @@ export function lookModelOf(choice: LookChoice): ShardModel | null {
  */
 export function lookTagsFor(choice: LookChoice, pose: LookPose): string[][] {
   if (choice.from === 'builtin') return builtInLookTags(choice.name, pose)
-  if (choice.from === 'feed') return lookTags(posedLook(feedWrapper(choice.object, pose.unit), pose), null)
-  if (choice.from === 'model') return lookTags(posedLook(choice.closed, pose), choice.open ? { ...turnShard(choice.open, pose.turn), unit: pose.unit } : null)
+  if (choice.from === 'feed') return lookTags(posedWrapper(feedWrapper(choice.object, pose.unit), pose), null)
+  if (choice.from === 'kept') return choice.tags.map((t) => [...t])
+  if (choice.from === 'model') return lookTags(posedLook(choice.closed, pose), choice.open ? posedOpenLook(choice.open, pose) : null)
   const model = useWorkshop.getState().shards.find((s) => s.id === choice.shardId)
   if (!model) throw new Error('That model is no longer in your workshop.')
   return lookTags(posedLook(model, pose), null)
@@ -1053,12 +1058,39 @@ function loadMine(): MyDeployment[] {
     const raw = localStorage.getItem(MINE_KEY)
     if (!raw) return []
     const list = JSON.parse(raw)
-    return Array.isArray(list) ? list.filter((d) => d && d.eventId && d.inner && (d.shard || d.text || d.key || d.chest)).map((d) => (d.shard ? { ...d, shard: normalizeStored(d.shard) } : d)) : []
+    return Array.isArray(list) ? list.filter((d) => d && d.eventId && d.inner && (d.shard || d.text || d.key || d.chest)).map((d) => {
+      if (d.shard) return { ...d, shard: normalizeStored(d.shard) }
+      // A chest's look is stored once, in its inner event (storedMine).
+      const look = d.chest && !d.chest.look ? chestItemOf(d.inner)?.look : undefined
+      return look ? { ...d, chest: { ...d.chest, look } } : d
+    }) : []
   } catch { return [] }
 }
 
+/**
+ * The record as stored. A chest's look is in its inner event already, and a
+ * built-in's is some 20 KB a side: kept twice it was 39,800 bytes a row, enough
+ * to fill this storage in a hundred chests. It comes back from the inner event
+ * on load (loadMine).
+ */
+export function storedMine(mine: readonly MyDeployment[]): string {
+  return JSON.stringify(mine.map((d) => {
+    if (!d.chest?.look) return d
+    const { look: _inInner, ...chest } = d.chest
+    void _inInner
+    return { ...d, chest }
+  }))
+}
+
 function saveMine(mine: MyDeployment[]): void {
-  try { localStorage.setItem(MINE_KEY, JSON.stringify(mine)) } catch { /* quota or private mode */ }
+  try {
+    localStorage.setItem(MINE_KEY, storedMine(mine))
+  } catch (err) {
+    // What you hid is on the relays if it went LIVE, but this device forgets
+    // it on a reload: say so, rather than lose your own record in silence.
+    console.warn(`[shards] could not save the record of what you hid: ${err instanceof Error ? err.message : String(err)}`)
+    useToast.getState().show({ label: 'NOT SAVED ON THIS DEVICE', meta: 'This device has no room left for the record of what you hid. It is here until you reload.', mark: 'build' })
+  }
 }
 
 function loadDeleted(): Record<string, true> {
@@ -1422,6 +1454,8 @@ export const useShards = create<ShardsState>((set, get) => {
       : [...gathered.entries, inner]
     const settings = gathered.settings ?? chest.bag ?? DEFAULT_BAG_SETTINGS
     const { event, published } = await publishBag(entries, key, chest.lookupId, chest.height, wasPublic, settings, { at, plane: chest.plane }, undefined, gathered.entries)
+    // Before anything here changes: the relays still hold the chest as it was.
+    if (wasPublic && !published) throw new Error('No relay took the new bag. The chest stays as it was.')
     let row: MyDeployment = chest
     const mine = get().mine.map((d) => {
       if (d.eventId === chest.eventId) {
@@ -1619,7 +1653,10 @@ export const useShards = create<ShardsState>((set, get) => {
       // Its look as it stands, posed again from there: a chest from before
       // looks goes out wearing the built-in it was drawn as.
       const worn = lookOf({ type: 'chest', event: d.inner })
-      const look: LookChoice = d.chest.look && worn ? { from: 'model', closed: worn.closed, open: worn.open } : DEFAULT_CHEST_LOOK
+      // A look this client will not read goes as it is, raw: reading it as "no look" would swap it for the built-in.
+      const own = lookTagsOf(d.chest.look, d.inner.pubkey)
+      const unread = !!d.chest.look && ((!own.closed && d.chest.look.some((t) => t.length === 2)) || (!own.open && d.chest.look.some((t) => t.length === 3 && t[2] === 'open')))
+      const look: LookChoice = unread ? { from: 'kept', tags: d.chest.look! } : d.chest.look && worn ? { from: 'model', closed: worn.closed, open: worn.open } : DEFAULT_CHEST_LOOK
       const model = lookModelOf(look)
       set({
         pending: { type: 'chest', name: d.chest.name, lock: { pubkey: d.chest.lockPubkey, label: d.chest.requires || 'its lock' }, requires: d.chest.requires, contents: [], look, move: { eventId } },
@@ -1652,6 +1689,13 @@ export const useShards = create<ShardsState>((set, get) => {
       if (!d?.chest || d.inner.pubkey !== cyber().identity.pubkey) return 'Only the chest’s hider can change it.'
       if (!draft.name.trim()) return 'Name the chest.'
       if (draft.contents.length === 0) return 'Put something in it first.'
+      // A reseal replaces everything inside. Nothing kept in the draft, and nothing
+      // kept on this device: unless this device can read what is there, that
+      // would wipe it for good.
+      if (!d.sealed && !draft.contents.some((c) => c.kind === 'sealed')) {
+        const inside = await get().chestEntries(eventId)
+        if (typeof inside === 'string') return inside
+      }
       try {
         const createdAt = Math.floor(Date.now() / 1000)
         const sealed = await sealChest(draft, positionOf(d), d.plane, createdAt)
@@ -2068,6 +2112,10 @@ export const useShards = create<ShardsState>((set, get) => {
           // A move whose new bag no relay took has not happened: the old
           // copy stays, and is never taken down (review of #369).
           if (was && live && !published) throw new Error('No relay took the moved shard. It stays where it was.')
+          if (movedChest && live && !published) throw new Error('No relay took the moved chest. It stays where it was.')
+          // A first seal: nothing has been recorded yet, so nothing claims to be hidden.
+          // Its look rides in the bag every time, so the bag is what a relay may refuse for size.
+          if (pending.type === 'chest' && live && !published) throw new Error(`No relay took the bag (${JSON.stringify(event).length.toLocaleString('en-US')} bytes). Nothing was hidden.`)
         } catch (err) {
           // Put back, the row follows: the relays now hold the rollback, so it
           // is this device's version of the shard, keyed by its id as a scan

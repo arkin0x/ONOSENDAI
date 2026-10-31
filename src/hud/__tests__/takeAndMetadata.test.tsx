@@ -46,7 +46,7 @@ import { heldFromEntry, heldFromPasted, type HeldItem } from '../../lib/inventor
 import { useCyberspace } from '../../store/useCyberspace'
 import { useInventory } from '../../store/useInventory'
 import { useShards } from '../../store/useShards'
-import { ChestContents, KeyLine, listedOnce, openChestHere, takeableOf } from '../ItemRows'
+import { ChestBlock, ChestContents, KeyLine, listedOnce, openChestHere, readAgain, takeableOf } from '../ItemRows'
 import { openedByHand, resetOpenedChests, useOpenedChests } from '../../store/useOpenedChests'
 import { metadataOpen } from '../Metadata'
 import { SecretModal } from '../SecretModal'
@@ -67,7 +67,7 @@ function find(event: NostrEvent, body: Partial<Hidden>): Hidden {
 }
 
 function render(el: JSX.Element): string {
-  for (const store of [useShards, useInventory, useCyberspace] as const) Object.assign(store.getInitialState(), store.getState())
+  for (const store of [useShards, useInventory, useCyberspace, useOpenedChests] as const) Object.assign(store.getInitialState(), store.getState())
   return renderToStaticMarkup(el)
 }
 
@@ -158,7 +158,7 @@ describe('OPEN and TAKE on a chest (review of #519)', () => {
     const me = useCyberspace.getState().identity.pubkey
     expect(useOpenedChests.getState().opened[`${me}/${'d'.repeat(64)}`]).toHaveLength(2)
     // Opened by hand: kept, so a reload opens it again.
-    expect(openedByHand(me, 'd'.repeat(64))).toBe(true)
+    expect(openedByHand(me, 'd'.repeat(64), chest.lockPubkey)).toBe(true)
   })
 
   it('keeps nothing and finds nothing when the identity changes while the signer decrypts (re-review of #519)', async () => {
@@ -180,8 +180,8 @@ describe('OPEN and TAKE on a chest (review of #519)', () => {
       expect(contents).toBeNull()
       expect(useShards.getState().discovered[words.id]).toBeUndefined()
       expect(useOpenedChests.getState().opened).toEqual({})
-      expect(openedByHand(was.identity.pubkey, 'e'.repeat(64))).toBe(false)
-      expect(openedByHand(other, 'e'.repeat(64))).toBe(false)
+      expect(openedByHand(was.identity.pubkey, 'e'.repeat(64), chest.lockPubkey)).toBe(false)
+      expect(openedByHand(other, 'e'.repeat(64), chest.lockPubkey)).toBe(false)
       expect(useInventory.getState().items).toEqual({})
     } finally {
       useCyberspace.setState({ identity: was.identity, decryptSealed: was.decryptSealed })
@@ -199,7 +199,7 @@ describe('OPEN and TAKE on a chest (review of #519)', () => {
     useInventory.getState().take([{ id: k.event.id, event: k.event, verified: true, body: { type: 'key', key: k.key } }], from, null)
     expect(useInventory.getState().items[k.event.id]).toBeDefined()
     expect(useShards.getState().discovered[behind.id]).toBeUndefined()
-    expect(openedByHand(useCyberspace.getState().identity.pubkey, gate.id)).toBe(false)
+    expect(openedByHand(useCyberspace.getState().identity.pubkey, gate.id, item.lockPubkey)).toBe(false)
   })
 
   it('lists a thing out of a chest once: under the chest while it is open in the same list, else on its own', () => {
@@ -207,6 +207,53 @@ describe('OPEN and TAKE on a chest (review of #519)', () => {
     const ids = (open: (c: string) => boolean): string[] => listedOnce(rows, (r) => r.id, open).map((r) => r.id)
     expect(ids(() => false)).toEqual(['c', 'k', 'm', 'n'])
     expect(ids((c) => c === 'c' || c === 'elsewhere')).toEqual(['c', 'm', 'n'])
+  })
+})
+
+describe('a chest opened with a signer, after a reload (review of the ceremony)', () => {
+  const placeAt = { lookupId: 'lookup', bagId: 'bag', at: { x: '1', y: '2', z: '3' }, plane: 0 as const, height: 4 }
+  const openButtons = (html: string): string[] => [...html.matchAll(/<button class="chest__act"[^>]*>([^<]*)<\/button>/g)].map((m) => m[1])
+
+  it('offers no OPEN again, and lists what is inside with TAKE once read again, asking the signer once', async () => {
+    const was = useCyberspace.getState()
+    const mine = generateSecretKey()
+    const me = getPublicKey(mine)
+    const words = finalizeEvent(messageInnerTemplate('inside', at, 0, T0), hider) as NostrEvent
+    const sealed = sealEntries([words], me)
+    const chest: ChestItem = { name: 'Sealed to me', lockPubkey: me, senderPubkey: sealed.senderPubkey, requires: '', payload: sealed.payload }
+    const id = 'f'.repeat(64)
+    let asked = 0
+    try {
+      useCyberspace.setState({
+        identity: { ...was.identity, pubkey: me },
+        decryptSealed: async (sender: string, payload: string) => { asked++; return nip44.decrypt(payload, nip44.getConversationKey(mine, sender)) },
+      })
+      useInventory.setState({ owner: me, items: {}, storage: 'memory' })
+      // OPEN was tapped before the reload: kept by hand, read this session by nobody.
+      expect(await openChestHere({ id, chest, author: getPublicKey(hider), place: placeAt, sealer: getPublicKey(hider) }, { by: 'self' })).toHaveLength(1)
+      resetOpenedChests()
+      asked = 0
+      const block = (): JSX.Element => <ChestBlock id={id} chest={chest} author={getPublicKey(hider)} verified place={placeAt} sealer={getPublicKey(hider)} />
+      const before = render(block())
+      expect(openButtons(before)).not.toContain('OPEN')
+      expect(before).toContain('OPEN · hidden by')
+      // Two cards of the one chest read it once.
+      const [a, b] = await Promise.all([readAgain({ id, chest, author: getPublicKey(hider), place: placeAt, sealer: getPublicKey(hider) }, { by: 'self' }), readAgain({ id, chest, author: getPublicKey(hider), place: placeAt, sealer: getPublicKey(hider) }, { by: 'self' })])
+      expect(a).toBe(b)
+      expect(asked).toBe(1)
+      const after = render(block())
+      expect(openButtons(after)).toEqual([])
+      expect(takes(after)).toEqual(['TAKE', 'TAKE ALL'])
+    } finally {
+      useCyberspace.setState({ identity: was.identity, decryptSealed: was.decryptSealed })
+    }
+  })
+
+  it('a chest never opened by hand still offers OPEN', () => {
+    const lock = keyIn('Gate Key')
+    const sealed = sealEntries([lock.event], lock.key.itemPubkey)
+    const chest: ChestItem = { name: 'Gate', lockPubkey: useCyberspace.getState().identity.pubkey, senderPubkey: sealed.senderPubkey, requires: '', payload: sealed.payload }
+    expect(openButtons(render(<ChestBlock id={'9'.repeat(64)} chest={chest} author={getPublicKey(hider)} verified place={placeAt} />))).toEqual(['OPEN'])
   })
 })
 

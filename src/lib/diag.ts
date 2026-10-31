@@ -10,6 +10,9 @@
  * for its size, and all text passes safeLabel. No key, no plaintext, no relay
  * address and no coordinate is ever kept.
  *
+ * A tab that crashes at a spike takes a log in memory with it, so the last report
+ * is kept in this tab's sessionStorage once a minute, and the next load offers it.
+ *
  * Installed before the first render, because it has to see the contexts made.
  */
 
@@ -20,18 +23,26 @@ import { useHyperspace } from '../store/useHyperspace'
 import { useThumbs } from '../store/useThumbs'
 import { useTv } from '../store/useTv'
 import { useWorkshop } from '../store/useWorkshop'
-import { DIAG_COLUMNS, GlLedger, Ring, frameVerb, framePercentiles, safeLabel, toRow, type DiagRow } from './diagCore'
+import { DIAG_KEY } from './diagGate'
+import { DIAG_COLUMNS, GlLedger, Ring, frameVerb, framePercentiles, heapReading, invokerLabel, safeDescription, safeLabel, toRow, uploadedBytes, type DiagRow } from './diagCore'
 
 /** Seconds between samples, and how long each ring reaches back. */
 const SAMPLE_MS = 5_000
 const COARSE_MS = 60_000
 const FINE_ROWS = 360
 const COARSE_ROWS = 720
-/** Long frames kept with what ran in them, and the moments the view changed. */
-const EVENT_ROWS = 300
+/** Long frames kept with what ran in them. */
+const SLOW_ROWS = 200
+/** The moments things changed: kept apart, so a burst of long frames cannot push them out. */
+const EVENT_ROWS = 200
 /** A frame this long is logged with its scripts. */
 const SLOW_FRAME_MS = 200
 const STORAGE_EVERY_MS = 60_000
+/** How often the report is kept for a tab that crashes. */
+const KEEP_EVERY_MS = 60_000
+/** The report as last kept, and the one found on loading: this load must not write over what the last one left. */
+const LAST_KEY = 'onosendai:diag:last'
+const FOUND_KEY = 'onosendai:diag:found'
 /** How long the clipboard gets before the log is saved as a file instead. */
 const COPY_WAIT_MS = 2_000
 
@@ -40,7 +51,7 @@ interface ThreeLike {
   isScene?: boolean
   domElement?: HTMLCanvasElement
   getPixelRatio?: () => number
-  info?: { memory: { geometries: number; textures: number }; programs: unknown[] | null; render: { calls: number; triangles: number } }
+  info?: { memory: { geometries: number; textures: number }; programs: unknown[] | null }
   traverse?: (f: (o: Record<string, unknown>) => void) => void
 }
 
@@ -71,6 +82,7 @@ export function startDiag(): void {
   let contextsMade = 0
   let contextsLostEver = 0
   const events = new Ring<unknown[]>(EVENT_ROWS)
+  const slow = new Ring<unknown[]>(SLOW_ROWS)
   const note = (...e: unknown[]): void => events.push([Math.round(performance.now() / 1000), ...e])
   const getContext = HTMLCanvasElement.prototype.getContext as (this: HTMLCanvasElement, type: string, ...r: unknown[]) => unknown
   ;(HTMLCanvasElement.prototype as unknown as Proto).getContext = function (this: HTMLCanvasElement, type: string, ...r: unknown[]) {
@@ -126,18 +138,26 @@ export function startDiag(): void {
     around(P, 'generateMipmap', (gl, a) => ledger.mipmap(gl, a[0]))
     around(P, 'renderbufferStorage', (gl, a) => ledger.renderbufferStorage(gl, 1, a[1], a[2], a[3]))
     around(P, 'renderbufferStorageMultisample', (gl, a) => ledger.renderbufferStorage(gl, a[1], a[2], a[3], a[4]))
-    around(P, 'texStorage2D', (gl, a) => { ledger.textureStorage(gl, a[0], a[1], a[2], a[3], a[4]); ledger.counts.texUploads++ })
-    around(P, 'texStorage3D', (gl, a) => { ledger.textureStorage(gl, a[0], a[1], a[2], a[3], a[4], a[5]); ledger.counts.texUploads++ })
+    // Sizing storage hands over no pixels: not an upload.
+    around(P, 'texStorage2D', (gl, a) => ledger.textureStorage(gl, a[0], a[1], a[2], a[3], a[4]))
+    around(P, 'texStorage3D', (gl, a) => ledger.textureStorage(gl, a[0], a[1], a[2], a[3], a[4], a[5]))
     around(P, 'texImage2D', (gl, a) => {
       // (target, level, format, width, height, border, srcFormat, type, pixels) or (target, level, format, srcFormat, type, source).
       const source = a.length === 6 ? (a[5] as { width?: number; height?: number; videoWidth?: number; videoHeight?: number; naturalWidth?: number; naturalHeight?: number } | null) : null
       const w = source ? (source.videoWidth || source.naturalWidth || source.width || 0) : a[3]
       const h = source ? (source.videoHeight || source.naturalHeight || source.height || 0) : a[4]
       ledger.textureLevel(gl, a[0], a[1], a[2], w, h)
-      ledger.counts.texUploads++
-      ledger.counts.texUploadBytes += w * h * 4
+      const bytes = uploadedBytes(a, w, h)
+      if (bytes > 0) { ledger.counts.texUploads++; ledger.counts.texUploadBytes += bytes }
     })
-    around(P, 'texSubImage2D', () => { ledger.counts.texUploads++ })
+    around(P, 'texSubImage2D', (_, a) => {
+      // (target, level, x, y, width, height, srcFormat, type, pixels) or (target, level, x, y, srcFormat, type, source).
+      const source = a.length === 7 ? (a[6] as { width?: number; height?: number; videoWidth?: number; videoHeight?: number; naturalWidth?: number; naturalHeight?: number } | null) : null
+      const w = source ? (source.videoWidth || source.naturalWidth || source.width || 0) : a[4]
+      const h = source ? (source.videoHeight || source.naturalHeight || source.height || 0) : a[5]
+      ledger.counts.texUploads++
+      ledger.counts.texUploadBytes += uploadedBytes(a, w, h)
+    })
     around(P, 'linkProgram', () => { ledger.counts.links++ })
     around(P, 'createProgram', (gl) => ledger.added(gl, 'programs', 1))
     around(P, 'deleteProgram', (gl, a) => { if (a[0]) ledger.added(gl, 'programs', -1) })
@@ -210,6 +230,15 @@ export function startDiag(): void {
   const setI = window.setInterval
   window.setInterval = function (this: unknown, ...a: unknown[]) { timers.intervals++; return (setI as unknown as (...x: unknown[]) => number).apply(window, a) } as typeof window.setInterval
 
+  // ---- Workers: their heaps are in no column of this thread's, and terrain and rides can start one per core.
+  const workers = { made: 0, ended: 0 }
+  const NativeWorker = window.Worker
+  if (NativeWorker) {
+    window.Worker = new Proxy(NativeWorker, { construct(t, a) { workers.made++; return Reflect.construct(t, a) as object } })
+    const terminate = NativeWorker.prototype.terminate
+    NativeWorker.prototype.terminate = function (this: Worker) { workers.ended++; terminate.call(this) }
+  }
+
   // ---- Frames, while the tab draws.
   const frameTimes = new Float32Array(4096)
   let frameN = 0
@@ -230,7 +259,7 @@ export function startDiag(): void {
   observe('long-animation-frame', (e) => {
     if (e.duration < SLOW_FRAME_MS) return
     const scripts = (e as unknown as { scripts?: Array<{ duration: number; invoker?: string; sourceFunctionName?: string; sourceCharPosition?: number; sourceURL?: string }> }).scripts ?? []
-    note('slow', Math.round(e.duration), scripts.slice().sort((a, b) => b.duration - a.duration).slice(0, 3).map((s) => [Math.round(s.duration), safeLabel(s.invoker), safeLabel(s.sourceFunctionName), s.sourceCharPosition ?? -1, safeLabel((s.sourceURL ?? '').split('/').pop())]))
+    slow.push([Math.round(performance.now() / 1000), Math.round(e.duration), scripts.slice().sort((a, b) => b.duration - a.duration).slice(0, 3).map((s) => [Math.round(s.duration), invokerLabel(s.invoker), safeLabel(s.sourceFunctionName), s.sourceCharPosition ?? -1, safeLabel((s.sourceURL ?? '').split('/').pop())])])
   })
   observe('resource', (e) => { long.res++; long.resB += (e as PerformanceResourceTiming).encodedBodySize ?? 0 })
 
@@ -261,9 +290,10 @@ export function startDiag(): void {
   void readStorage()
 
   // ---- The sample.
-  const fine = new Ring<Array<number | string>>(FINE_ROWS)
-  const coarse = new Ring<Array<number | string>>(COARSE_ROWS)
+  const fine = new Ring<Array<number | string | null>>(FINE_ROWS)
+  const coarse = new Ring<Array<number | string | null>>(COARSE_ROWS)
   const peak = { heapUsed: 0, heapUsedAt: 0, glBytes: 0, glBytesAt: 0, ctxHeld: 0, ctxHeldAt: 0, longMax: 0, longMaxAt: 0, subs: 0, subsAt: 0 }
+  const heapReadings: number[] = []
   let lastCoarse = -COARSE_MS
   let lastStorage = 0
   // Each distinct state of the UI once, and rows point at it: a menu's panel list would be most of a row.
@@ -272,6 +302,10 @@ export function startDiag(): void {
   let lastHidden = false
   let hiddenSince: number | null = null
   let hiddenTotal = 0
+
+  let lastKept = 0
+  // Refused or full: the log in memory still stands.
+  const keep = (): void => { try { sessionStorage.setItem(LAST_KEY, report()) } catch { /* as above */ } }
 
   const take = (): void => {
     const t0 = performance.now()
@@ -296,7 +330,11 @@ export function startDiag(): void {
     long.n = 0; long.ms = 0; long.max = 0; long.res = 0; long.resB = 0
 
     const mem = (performance as unknown as { memory?: { usedJSHeapSize: number; totalJSHeapSize: number } }).memory
-    if (mem) { row.heapUsed = mem.usedJSHeapSize; row.heapTotal = mem.totalJSHeapSize }
+    if (mem) {
+      row.heapUsed = mem.usedJSHeapSize; row.heapTotal = mem.totalJSHeapSize
+      // Enough to tell precise readings from buckets: one that is not a round thousand settles it.
+      if (heapReadings.length < 50) heapReadings.push(mem.usedJSHeapSize)
+    }
 
     const ctxs = liveContexts()
     row.ctxHeld = ctxs.length
@@ -327,7 +365,6 @@ export function startDiag(): void {
     if (renderer?.info) {
       row.riGeoms = renderer.info.memory.geometries; row.riTextures = renderer.info.memory.textures
       row.riPrograms = renderer.info.programs?.length ?? 0
-      row.riCalls = renderer.info.render.calls; row.riTriangles = renderer.info.render.triangles
     }
     if (scene) {
       let objects = 0, meshes = 0, visible = 0, faces = 0, points = 0, lines = 0, instanced = 0, geoms = 0, verts = 0
@@ -355,6 +392,7 @@ export function startDiag(): void {
     row.relays = relays?.size ?? 0; row.relaysUp = up; row.subs = subs
     row.txReq = wire.txReq; row.txClose = wire.txClose; row.txEvent = wire.txEvent; row.txAuth = wire.txAuth; row.rxN = wire.rxN; row.rxB = wire.rxB
     wire.txReq = 0; wire.txClose = 0; wire.txEvent = 0; wire.txAuth = 0; wire.rxN = 0; wire.rxB = 0
+    row.workersMade = workers.made; row.workersLive = workers.made - workers.ended
     row.timeouts = timers.timeouts; row.intervals = timers.intervals
     timers.timeouts = 0; timers.intervals = 0
 
@@ -383,11 +421,13 @@ export function startDiag(): void {
     fine.push(out)
     if (t0 - lastCoarse >= COARSE_MS) { lastCoarse = t0; coarse.push(out) }
     if (t0 - lastStorage >= STORAGE_EVERY_MS) { lastStorage = t0; void readStorage() }
+    if (t0 - lastKept >= KEEP_EVERY_MS) { lastKept = t0; keep() }
   }
   window.setInterval(take, SAMPLE_MS)
   document.addEventListener('visibilitychange', take)
 
   // ---- The report.
+  const isBrave = !!(navigator as unknown as { brave?: unknown }).brave
   const report = (): string => {
     const ctxs = liveContexts()
     let lsBytes = 0
@@ -402,7 +442,7 @@ export function startDiag(): void {
     const first = ctxs.filter((gl) => !gl.isContextLost()).sort((a, b) => b.drawingBufferWidth * b.drawingBufferHeight - a.drawingBufferWidth * a.drawingBufferHeight)[0]
     if (first) {
       const ext = first.getExtension('WEBGL_debug_renderer_info')
-      gpu = ext ? String(first.getParameter(ext.UNMASKED_RENDERER_WEBGL)).replace(/[^\w .,()/+-]/g, '').slice(0, 120) : ''
+      gpu = ext ? safeDescription(first.getParameter(ext.UNMASKED_RENDERER_WEBGL), 120) : ''
       maxSamples = (first.MAX_SAMPLES ? first.getParameter(first.MAX_SAMPLES) : 0) as number
     }
     return JSON.stringify({
@@ -412,13 +452,19 @@ export function startDiag(): void {
       hiddenS: Math.round((hiddenTotal + (hiddenSince !== null ? performance.now() - hiddenSince : 0)) / 1000),
       env: {
         build: safeLabel(String(__ONOSENDAI_BUILD__).slice(0, 12)), version: safeLabel(__ONOSENDAI_VERSION__),
-        ua: navigator.userAgent.replace(/[^\w .,;()/+-]/g, '').slice(0, 200),
+        ua: safeDescription(navigator.userAgent),
+        nav: safeLabel((performance.getEntriesByType('navigation')[0] as PerformanceNavigationTiming | undefined)?.type),
+        heap: heapReading(heapReadings),
+        brave: isBrave,
+        // Default Shields farble these and Strict randomizes `gpu`, so under Brave they are not facts about his machine.
+        farbled: isBrave ? ['cores', 'memGb', 'screen'] : [],
         cores: navigator.hardwareConcurrency, memGb: (navigator as unknown as { deviceMemory?: number }).deviceMemory ?? null,
         dpr: window.devicePixelRatio, inner: [window.innerWidth, window.innerHeight], screen: [screen.width, screen.height],
         gpu, maxSamples, route: safeLabel(location.pathname.split('/')[1] ?? '', 12), isolated: window.crossOriginIsolated,
         heapLimit: (performance as unknown as { memory?: { jsHeapSizeLimit: number } }).memory?.jsHeapSizeLimit ?? null,
       },
       contexts: { made: contextsMade, lostEver: contextsLostEver },
+      workers: { made: workers.made, ended: workers.ended },
       renderers: alive(renderers).map((r) => ({ w: r.domElement?.width, h: r.domElement?.height, pr: r.getPixelRatio?.(), geoms: r.info?.memory.geometries, textures: r.info?.memory.textures, programs: r.info?.programs?.length ?? 0 })),
       largest: ledger.largest(ctxs, isLost),
       storage: { ...storage, localStorageKeys: lsKeys, localStorageChars: lsBytes },
@@ -427,6 +473,7 @@ export function startDiag(): void {
       uiStates,
       fine: fine.all(),
       coarse: coarse.all(),
+      slow: slow.all(),
       events: events.all(),
     })
   }
@@ -439,6 +486,14 @@ export function startDiag(): void {
     URL.revokeObjectURL(a.href)
   }
 
+  // What the load before this one left, kept aside before this load writes over it.
+  let found = false
+  try {
+    const last = sessionStorage.getItem(LAST_KEY)
+    if (last) { sessionStorage.setItem(FOUND_KEY, last); sessionStorage.removeItem(LAST_KEY); found = true }
+    else found = sessionStorage.getItem(FOUND_KEY) !== null
+  } catch { /* refused: nothing to offer */ }
+
   // ---- The chip.
   const chip = document.createElement('div')
   chip.className = 'diag-chip'
@@ -449,31 +504,47 @@ export function startDiag(): void {
     const b = document.createElement('button')
     b.type = 'button'
     b.textContent = text
-    b.style.cssText = 'font:inherit;color:inherit;background:none;border:1px solid currentColor;padding:0 4px;cursor:pointer;'
-    b.addEventListener('click', (e) => { e.stopPropagation(); onTap() })
+    b.style.cssText = 'font:inherit;color:inherit;background:none;border:1px solid currentColor;padding:4px 8px;cursor:pointer;'
+    // Not left holding focus: Space is COMMIT in this app, and a focused button would take it.
+    b.addEventListener('click', (e) => { e.stopPropagation(); b.blur(); onTap() })
     return b
   }
   const say = (text: string): void => {
     label.textContent = text
     setT(() => { label.textContent = 'DIAG' }, 3000)
   }
+  const copy = (json: string): void => {
+    // A clipboard that refuses, is missing, or never answers still gets him the file.
+    let settled = false
+    const asFile = (): void => { if (settled) return; settled = true; save(json); say('SAVED') }
+    const late = setT(asFile, COPY_WAIT_MS)
+    const written = navigator.clipboard?.writeText(json)
+    if (!written) { clearTimeout(late); asFile(); return }
+    written.then(() => {
+      clearTimeout(late)
+      if (settled) return
+      settled = true
+      say(`COPIED ${Math.round(json.length / 1024)} KB`)
+    }, () => { clearTimeout(late); asFile() })
+  }
   const fresh = (): string => { take(); return report() }
+  const off = (): void => {
+    try { sessionStorage.removeItem(DIAG_KEY); sessionStorage.removeItem(LAST_KEY); sessionStorage.removeItem(FOUND_KEY) } catch { /* refused */ }
+    const u = new URL(location.href)
+    u.searchParams.delete('diag')
+    location.replace(u)
+  }
   chip.append(
-    label,
-    button('COPY', () => {
-      const json = fresh()
-      // A clipboard that refuses, or never answers, still gets him the file.
-      let settled = false
-      const asFile = (): void => { if (settled) return; settled = true; save(json); say('SAVED') }
-      const late = setT(asFile, COPY_WAIT_MS)
-      navigator.clipboard.writeText(json).then(() => {
-        clearTimeout(late)
-        if (settled) return
-        settled = true
-        say(`COPIED ${Math.round(json.length / 1024)} KB`)
-      }, () => { clearTimeout(late); asFile() })
-    }),
+    button('COPY', () => copy(fresh())),
     button('SAVE', () => { save(fresh()); say('SAVED') }),
+    ...(found ? [button('LAST', () => {
+      let last: string | null = null
+      try { last = sessionStorage.getItem(FOUND_KEY) } catch { /* refused */ }
+      if (last) copy(last)
+    })] : []),
+    button('OFF', off),
+    // After the buttons: a long status moves nothing he might be about to tap.
+    label,
   )
   const mount = (): void => { document.body.append(chip) }
   if (document.body) mount()

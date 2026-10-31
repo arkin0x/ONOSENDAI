@@ -243,13 +243,53 @@ export class Ring<T> {
 }
 
 /**
- * The only text that leaves: a browser's or the app's own label, cut down to
- * the characters such labels use. Spaces, quotes, colons with slashes and long
- * hex are gone, so a URL, a key or a sentence cannot survive it whole.
+ * The only text that leaves: a browser's or the app's own label, cut down to the
+ * characters such labels use. Anything naming a URL goes whole, tested first,
+ * since the strip below takes the colon. Keys and long hex go after the strip,
+ * so nothing rejoins past them, and the cut to length is last.
  */
 export function safeLabel(s: unknown, max = 48): string {
   if (typeof s !== 'string') return ''
-  return s.replace(/[0-9a-fA-F]{16,}/g, '#').replace(/\b(nsec|npub|ncryptsec)1[0-9a-z]+/g, '#').replace(/[^A-Za-z0-9_.:#$-]/g, '').slice(0, max)
+  if (/(https?|wss?|blob|data|file):/i.test(s)) return '#url'
+  return s
+    .replace(/[^A-Za-z0-9_.:#$-]/g, '')
+    .replace(/(nsec|npub|nprofile|nevent|naddr|note|ncryptsec)1[0-9a-z]+/gi, '#')
+    .replace(/[0-9a-f]{16,}/gi, '#')
+    .slice(0, max)
+}
+
+/**
+ * A long frame's `invoker`, without what the element it names says about itself:
+ * Chromium writes an image's src into it, so a broken avatar would put a viewed
+ * profile's picture host and path in a report. `IMG[src=...].onerror` is IMG.onerror.
+ */
+export function invokerLabel(invoker: unknown): string {
+  return safeLabel(typeof invoker === 'string' ? invoker.replace(/\[[^\]]*\]|#[^.]*/g, '') : '')
+}
+
+/** A browser's description of itself, spaces as underscores so it still reads. */
+export function safeDescription(s: unknown, max = 200): string {
+  return safeLabel(typeof s === 'string' ? s.replace(/[ ,;()/+]+/g, '_') : '', max)
+}
+
+/**
+ * Bytes a texImage2D or texSubImage2D call hands over, or 0 when it only sizes
+ * storage. By argument count: 9 for pixels in an array, 6 or 7 for an image or
+ * canvas, whose size is in `w` and `h`.
+ */
+export function uploadedBytes(args: ArrayLike<unknown>, w: number, h: number): number {
+  const n = args.length
+  const pixels = n >= 9 ? args[8] : n === 6 ? args[5] : n === 7 ? args[6] : null
+  if (pixels === null || pixels === undefined) return 0
+  const length = (pixels as { byteLength?: number }).byteLength
+  return typeof length === 'number' ? length : w * h * 4
+}
+
+/** How exact `performance.memory` is here: Chromium rounds it to buckets unless told otherwise. */
+export type HeapReading = 'precise' | 'bucketed' | 'absent'
+export function heapReading(readings: readonly number[]): HeapReading {
+  if (readings.length === 0) return 'absent'
+  return readings.some((r) => r % 1000 !== 0) ? 'precise' : 'bucketed'
 }
 
 /** The frame's verb, from its first bytes: nothing else of a frame is read, and nothing of it is kept. */
@@ -266,18 +306,18 @@ export function frameVerb(data: unknown): 'req' | 'close' | 'event' | 'auth' | '
 export const DIAG_COLUMNS = [
   't', 'hidden', 'focused', 'frames', 'ftP50', 'ftP95', 'ftP99', 'ftMax',
   'longN', 'longMs', 'longMax', 'heapUsed', 'heapTotal',
-  'ctxHeld', 'ctxInDom', 'ctxLost', 'renderers', 'riGeoms', 'riTextures', 'riPrograms', 'riCalls', 'riTriangles',
+  'ctxHeld', 'ctxInDom', 'ctxLost', 'renderers', 'riGeoms', 'riTextures', 'riPrograms',
   'glBuffers', 'glBufferB', 'glTextures', 'glTextureB', 'glRbs', 'glRbB', 'glCanvasB', 'glFbos', 'glVaos', 'glPrograms',
   'draws', 'verts', 'bufData', 'bufDataB', 'bufSub', 'bufSubB', 'texUp', 'texUpB', 'links',
   'objects', 'meshes', 'visibleMeshes', 'shardFaces', 'points', 'lines', 'instanced', 'geoms', 'sceneVerts',
   'wsOpen', 'relays', 'relaysUp', 'subs', 'txReq', 'txClose', 'txEvent', 'txAuth', 'rxN', 'rxB',
-  'timeouts', 'intervals', 'resN', 'resB', 'dom', 'canvases', 'idbB', 'storeB', 'thumbs', 'thumbQueue', 'selfMs', 'ui',
+  'workersMade', 'workersLive', 'timeouts', 'intervals', 'resN', 'resB', 'dom', 'canvases', 'idbB', 'storeB', 'thumbs', 'thumbQueue', 'selfMs', 'ui',
 ] as const
 
 export type DiagColumn = (typeof DIAG_COLUMNS)[number]
 export type DiagRow = Partial<Record<DiagColumn, number | string>>
 
-/** A sample as a flat array in column order: about a quarter the size of objects with names. */
-export function toRow(s: DiagRow): Array<number | string> {
-  return DIAG_COLUMNS.map((c) => s[c] ?? 0)
+/** A sample as a flat array in column order: about a quarter the size of objects with names. Null where nothing was read, never a false 0. */
+export function toRow(s: DiagRow): Array<number | string | null> {
+  return DIAG_COLUMNS.map((c) => s[c] ?? null)
 }

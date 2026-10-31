@@ -51,7 +51,7 @@ import { addPart, quarterTurnPart, removeParts } from 'sno-core/parts'
 import { FLOOR, MAX_SIZE, MIN_SIZE, stamp, type Facing, type StampKind, type WorkPlane } from 'sno-core/stamps'
 import { BUILT_IN, hexAt, remap, samePalette, snapHex, type Palette } from 'sno-core/snoPalette'
 import { newell, triangulate } from 'sno-core/triangulate'
-import { flipFace, flipSurface, windAdded, windOutward } from 'sno-core/winding'
+import { flipFace, flipSurface, surfaceOf, windAdded, windOutward } from 'sno-core/winding'
 import { Vector3 } from 'three'
 import { ConvexHull } from 'three/examples/jsm/math/ConvexHull.js'
 import { cornerAverage, weld } from '../lib/weld'
@@ -234,6 +234,20 @@ function seamsFollow(before: ShardModel, after: ShardModel, from: number[]): Sha
   const own = before.facecolors
   if (!own?.length || own.length !== before.faces.length || after.faces.length === 0) return bare
   return { ...bare, facecolors: from.map((i, j) => (i >= 0 && own[i] ? [...own[i]] as [number, number, number] : cornerAverage(after, after.faces[j]))) }
+}
+
+/**
+ * A color poured over faces that have seams (DECK-0003 §1.4a): a face color
+ * fills the whole triangle and its corners contribute nothing, so a FILL that
+ * wrote the corners alone changed nothing you could see. 321 of the 337 Maze
+ * Kit pieces carry seams, and one SEAM gives every face of a shard one (review
+ * of #550). The faces `on` picks take the color too; a shard with no seams, or
+ * a list out of step that every reader ignores, stays as it is.
+ */
+function seamsPoured(s: ShardModel, on: (face: number) => boolean, c: [number, number, number]): Pick<ShardModel, 'facecolors'> | Record<string, never> {
+  const own = s.facecolors
+  if (!own || own.length !== s.faces.length) return {}
+  return { facecolors: own.map((fc, k) => (on(k) ? [...c] as [number, number, number] : fc)) }
 }
 
 /** Faces 0..n-1 of `after` are `before`'s, in order, and the rest are new: FILL's and FACE's shape. */
@@ -1209,14 +1223,15 @@ export const useWorkshop = create<WorkshopState>((set, get) => {
       const { selectedFaces } = get()
       if (selectedFaces.length === 0) return
       edit((s) => {
-        // Two faces in hand on one surface turn it once: a second turn would put it back.
+        // Two faces in hand on one surface turn it once: a second turn would
+        // put it back. The whole surface is marked, whether or not a face of
+        // it changed: one wound the other way already agrees after the turn.
         const done = new Set<number>()
         let m = s
         for (const k of selectedFaces) {
           if (!m.faces[k] || done.has(k)) continue
-          const next = flipSurface(m, k)
-          next.faces.forEach((f, i) => { if (f !== m.faces[i] && (f[0] !== m.faces[i][0] || f[1] !== m.faces[i][1] || f[2] !== m.faces[i][2])) done.add(i) })
-          m = next
+          for (const i of surfaceOf(m.faces, k)) done.add(i)
+          m = flipSurface(m, k)
         }
         return m === s ? null : m
       }, selectedFaces.length === 1 ? 'Surface turned round.' : 'Surfaces turned round.')
@@ -1453,14 +1468,17 @@ export const useWorkshop = create<WorkshopState>((set, get) => {
         if (chosen.size === 0) return null
         const vertices = s.vertices.slice()
         for (const i of chosen) vertices[i] = { ...vertices[i], c: clampColor(c) }
-        return { ...s, vertices }
+        // The faces in hand, or with none in hand, the faces standing wholly on the points.
+        const heldFaces = new Set(selectedFaces)
+        const on = heldFaces.size > 0 ? (k: number): boolean => heldFaces.has(k) : (k: number): boolean => s.faces[k].every((v) => chosen.has(v))
+        return { ...s, vertices, ...seamsPoured(s, on, clampColor(c)) }
       })
     },
 
     colorAll: (c) => {
       set({ color: clampColor(c) })
       get().rememberColor(rgbToHex(clampColor(c)))
-      edit((s) => ({ ...s, vertices: s.vertices.map((v) => ({ ...v, c: clampColor(c) })) }))
+      edit((s) => ({ ...s, vertices: s.vertices.map((v) => ({ ...v, c: clampColor(c) })), ...seamsPoured(s, () => true, clampColor(c)) }))
     },
 
     // The whole piece you are pointing at, without having to select it first.
@@ -1477,7 +1495,7 @@ export const useWorkshop = create<WorkshopState>((set, get) => {
         if (reach.length === 0) return null
         const chosen = new Set(reach)
         const vertices = s.vertices.map((v, i) => (chosen.has(i) ? { ...v, c: clampColor(c) } : v))
-        return { ...s, vertices }
+        return { ...s, vertices, ...seamsPoured(s, (k) => s.faces[k].every((v) => chosen.has(v)), clampColor(c)) }
       })
     },
 

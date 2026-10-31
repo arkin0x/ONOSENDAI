@@ -18,7 +18,8 @@ if (typeof localStorage === 'undefined') {
   }
 }
 
-import { newShard, vertexAt, type ShardModel } from 'sno-core/shards'
+import { expandFaceColors, newShard, vertexAt, type ShardModel } from 'sno-core/shards'
+import { shardGeometry } from '../../scene/ShardMesh'
 import { useWorkshop } from '../useWorkshop'
 
 const w = useWorkshop.getState
@@ -135,16 +136,45 @@ describe('what acts on all of them', () => {
     expect(after[3]).toEqual(before[3])
   })
 
-  it('FLIP SURFACE turns a surface once, when two faces in hand lie on it', () => {
-    const before = w().current()!.faces
+  it('FLIP SURFACE with two faces in hand on one surface does what one flip does', () => {
     w().selectFace(0)
     w().flipSelectedSurface()
-    const once = w().current()!.faces
-    expect(once).not.toEqual(before)
+    const one = w().current()!.faces
     w().undo()
-    w().selectFace(2)
+    w().selectFace(null); useWorkshop.setState({ selection: [] })
+    w().selectFace(0); w().selectFace(2)
+    expect(w().selectedFaces).toEqual([0, 2])
     w().flipSelectedSurface()
-    expect(w().current()!.faces).toEqual(once)
+    expect(w().current()!.faces).toEqual(one)
+  })
+
+  it('FLIP SURFACE turns it once when the two in hand were wound against each other', () => {
+    const s = strip()
+    const wound: ShardModel = { ...s, vertices: s.vertices.slice(0, 4), faces: [[0, 1, 2], [1, 3, 2]] }
+    useWorkshop.setState({ shards: [wound], currentId: wound.id })
+    w().selectFace(0)
+    w().flipSelectedSurface()
+    const one = w().current()!.faces
+    w().undo()
+    w().selectFace(null); useWorkshop.setState({ selection: [] })
+    w().selectFace(0); w().selectFace(1)
+    expect(w().selectedFaces).toEqual([0, 1])
+    w().flipSelectedSurface()
+    expect(w().current()!.faces).toEqual(one)
+  })
+
+  it('FLIP SURFACE turns each surface once when the faces in hand lie on two', () => {
+    const s = strip()
+    const far = (x: number): ShardModel['vertices'][number] => vertexAt([x * 120, 120, 0], [0.25, 0.5, 0.75])
+    // A second, separate triangle, joined to nothing.
+    const two: ShardModel = { ...s, vertices: [...s.vertices, far(5), far(6), far(7)], faces: [...s.faces, [6, 7, 8]] }
+    useWorkshop.setState({ shards: [two], currentId: two.id })
+    const before = w().current()!.faces
+    w().selectFace(0); w().selectFace(4)
+    w().flipSelectedSurface()
+    const after = w().current()!.faces
+    expect(after[0]).not.toEqual(before[0])
+    expect(after[4]).not.toEqual(before[4])
   })
 
   it('the dropper samples the face tapped last', () => {
@@ -153,6 +183,67 @@ describe('what acts on all of them', () => {
     w().selectFace(2); w().selectFace(0)
     w().sampleColor()
     expect(w().color).toEqual(RED)
+  })
+})
+
+describe('what is drawn, on a shard with seams (DECK-0003 §1.4a: a face color overrides its corners)', () => {
+  /** The color each face is drawn with, read from what ShardMesh hands the GPU, as bytes of a pure color survive either way. */
+  function drawn(): Array<[number, number, number]> {
+    const s = expandFaceColors(w().current()!)
+    const { colors, index } = shardGeometry(s)
+    const out: Array<[number, number, number]> = []
+    for (let t = 0; t + 2 < index.length; t += 3) {
+      const v = index[t]
+      out.push([colors[v * 3], colors[v * 3 + 1], colors[v * 3 + 2]])
+    }
+    return out
+  }
+  const GREEN: [number, number, number] = [0, 1, 0]
+  beforeEach(() => {
+    const s = strip()
+    const seamed: ShardModel = { ...s, facecolors: s.faces.map(() => [...GREEN] as [number, number, number]) }
+    useWorkshop.setState({ shards: [seamed], currentId: seamed.id })
+  })
+
+  it('FILL shows on every face in hand, and on no other', () => {
+    w().selectFace(0); w().selectFace(2)
+    w().colorSelected(BLUE)
+    expect(drawn()).toEqual([BLUE, GREEN, BLUE, GREEN])
+  })
+
+  it('FILL with no points held still shows on the faces in hand', () => {
+    useWorkshop.setState({ selectedFaces: [3], selection: [] })
+    w().colorSelected(BLUE)
+    expect(drawn()).toEqual([GREEN, GREEN, GREEN, BLUE])
+  })
+
+  it('FILL on points with no face in hand shows on faces standing wholly on them, and no other', () => {
+    useWorkshop.setState({ tool: 'select', selectedFaces: [], selection: [0, 1, 2] })
+    w().colorSelected(BLUE)
+    expect(drawn()).toEqual([BLUE, GREEN, GREEN, GREEN])
+  })
+
+  it('the whole object and the joined piece show too', () => {
+    w().colorAll(BLUE)
+    expect(drawn()).toEqual([BLUE, BLUE, BLUE, BLUE])
+    useWorkshop.setState({ selection: [0] })
+    w().colorConnected(RED)
+    expect(drawn()).toEqual([RED, RED, RED, RED])
+  })
+
+  it('one undo brings the seams back', () => {
+    w().selectFace(0)
+    w().colorSelected(BLUE)
+    w().undo()
+    expect(drawn()).toEqual([GREEN, GREEN, GREEN, GREEN])
+  })
+
+  it('a shard with no seams gets none from a FILL', () => {
+    const s = strip()
+    useWorkshop.setState({ shards: [s], currentId: s.id })
+    w().selectFace(0)
+    w().colorSelected(BLUE)
+    expect(w().current()!.facecolors).toBeUndefined()
   })
 })
 

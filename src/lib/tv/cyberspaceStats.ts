@@ -14,9 +14,9 @@
  *
  * | Board | Rule |
  * |---|---|
- * | LONGEST CHAIN | chainLength: valid actions on the current chain, the spawn included (the current chain for now: the CHAIN badge's best-of-any-chain is an owner ruling pending) |
+ * | LONGEST CHAIN | chainLength: valid actions on the current chain, the spawn included (ruling 2026-10-31: the current chain; the CHAIN badge's best chain is bestChainLength, not shown here) |
  * | MOST BAGS HIDDEN | bagsHidden: live sealed bags, distinct d, at most 5 a UTC day |
- * | MOST RESPAWNS | respawnCount: spawns after the first that kept going |
+ * | MOST RESPAWNS | respawnCount: spawns after the first whose chain went on to a valid hop |
  * | MOST OBJECTS PUBLISHED | objectsPublished: live public objects, each a new shape, 8+ vertices, at most 10 a UTC day |
  * | NEW ARRIVALS | keys whose first spawn is in the week to AS OF, and the week before |
  * | ACTIVE USERS | keys with a valid action in the week to AS OF, HUMANS and AGENTS apart, and the week before |
@@ -44,8 +44,9 @@
  * once, then only what is new since the last read (READ_OVERLAP_S back, for
  * events signed earlier than they were published), whole again once a day;
  * an hour already counted is not counted again (review of #537). Whether the
- * site's TV counts at all is one flag (STATS_ON_SITE); the stream always does. StatsSnapshot is the seam a site page or the
- * later signed service (design 3.2) fills or reads instead.
+ * site's TV counts at all is one flag (STATS_ON_SITE, OFF since 2026-10-31);
+ * the stream always does. StatsSnapshot is the seam a site page or the later
+ * signed service (design 3.2) fills or reads instead.
  */
 
 import type { NostrEvent } from '../events'
@@ -81,11 +82,13 @@ export const STATS_ROWS = 5
 export const STATS_MIN_ROWS = 3
 
 /**
- * Whether the site's TV counts and plays the boards, as the stream does: ON
- * for now. The owner decides whether site viewers count at all (review of
- * #537); OFF leaves the site with no reads and no breaks of its own.
+ * Whether the site's TV counts and plays the boards, as the stream does: OFF
+ * (arkinox, 2026-10-31). The boards are counted and shown only on the
+ * broadcast stream, so a site viewer never pays the hourly read: the site's
+ * TV never schedules a break and never reads the movement events or the
+ * census again to count. ON would give the site its own breaks again.
  */
-export const STATS_ON_SITE = true
+export const STATS_ON_SITE = false
 
 /** Whether this TV counts and plays the boards: the stream always, the site by STATS_ON_SITE. */
 export function statsOn(broadcast: boolean, onSite: boolean = STATS_ON_SITE): boolean {

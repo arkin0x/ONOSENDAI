@@ -8,13 +8,13 @@ import { describe, expect, it } from 'vitest'
 import { generateSecretKey, getPublicKey } from 'nostr-tools/pure'
 import { coordToXyz, hexToCoord } from 'cyberspace-core'
 import { newShard, toPayload } from 'sno-core/shards'
-import { positionHex, spawnTemplate, type NostrEvent } from '../events'
+import { enterHyperspaceTemplate, positionHex, spawnTemplate, type NostrEvent } from '../events'
 import {
-  BAGS_PER_DAY, DAY_S, OBJECTS_PER_DAY, WEEK_S, activeIn, activeKeys, actionsByAuthor, arrivalTimes, arrivalsIn, bagRecord, bagsHidden, chainLength,
+  BAGS_PER_DAY, DAY_S, OBJECTS_PER_DAY, WEEK_S, activeIn, activeKeys, actionsByAuthor, arrivalTimes, arrivalsIn, bagRecord, bagsHidden, bestChainLength, chainLength,
   chainIndex, chainLengthIndexed, deletionOf, keyChains, objectRecord, objectsPublished, respawnCount, validPrefixLength, type BagRecord, type ObjectRecord,
 } from '../countingRules'
 import { buildChain } from '../events'
-import { hopEvent, nextId } from './chainFixtures'
+import { ZERO, hopEvent, nextId } from './chainFixtures'
 
 const T = 1_790_000_000
 
@@ -31,7 +31,14 @@ function walk(pk: string, t: number, n: number): NostrEvent[] {
 }
 const key = (): string => getPublicKey(generateSecretKey())
 
-describe('LONGEST CHAIN (chainLength, the CHAIN badge\'s number)', () => {
+/** A key's spawn at `t`, then an enter-hyperspace from where it stands (a valid action, not a hop), and nothing else. */
+function spawnThenBoard(pk: string, t: number): NostrEvent[] {
+  const spawn: NostrEvent = { ...spawnTemplate(pk, t), id: nextId(), pubkey: pk, sig: '0'.repeat(128) }
+  const board: NostrEvent = { ...enterHyperspaceTemplate({ createdAt: t + 1, genesisId: spawn.id, previousId: spawn.id, coordHex: pk, proofHash: ZERO }), id: nextId(), pubkey: pk, sig: '0'.repeat(128) }
+  return [spawn, board]
+}
+
+describe('LONGEST CHAIN (chainLength, the board: the current chain)', () => {
   const pk = key()
   const chain = walk(pk, T, 4)
 
@@ -104,6 +111,57 @@ describe('MOST RESPAWNS (respawnCount, PHOENIX)', () => {
   it('the first spawn is never a respawn, however far it went', () => {
     expect(respawnCount([...walk(pk, T, 9)], pk)).toBe(0)
   })
+
+  it('a respawn followed only by an enter-hyperspace does not count: PHOENIX asks for a valid hop', () => {
+    const boarded = spawnThenBoard(pk, T + 300)
+    // The enter-hyperspace is valid: the respawned chain is two valid actions long.
+    expect(chainLength([...first, ...boarded], pk)).toBe(2)
+    expect(respawnCount([...first, ...boarded], pk)).toBe(0)
+    expect(keyChains([...first, ...boarded], pk).respawns).toBe(0)
+  })
+
+  it('a respawn that goes on to a valid hop after another action counts', () => {
+    const [spawn, board] = spawnThenBoard(pk, T + 300)
+    const home = coordToXyz(hexToCoord(pk))
+    const hop = hopEvent({ pubkey: pk, createdAt: T + 302, genesisId: spawn.id, previousId: board.id, c: pk, to: { x: home.x + 1n, y: home.y, z: home.z }, plane: home.plane })
+    expect(chainLength([...first, spawn, board, hop], pk)).toBe(3)
+    expect(respawnCount([...first, spawn, board, hop], pk)).toBe(1)
+    expect(keyChains([...first, spawn, board, hop], pk).respawns).toBe(1)
+    // As of before the hop was signed, it had not yet kept going.
+    expect(respawnCount([...first, spawn, board, hop], pk, T + 301)).toBe(0)
+  })
+})
+
+describe('the CHAIN badge\'s number (bestChainLength: the best chain, not the current one)', () => {
+  const pk = key()
+  const long = walk(pk, T, 6)
+  const short = walk(pk, T + 100, 2)
+
+  it('the longest valid chain the key ever reached, where the board counts the current chain', () => {
+    expect(bestChainLength([...long, ...short], pk)).toBe(7)
+    expect(chainLength([...long, ...short], pk)).toBe(3)
+    // A current chain that grows past the old best is the best.
+    const longer = walk(pk, T + 100, 9)
+    expect(bestChainLength([...long, ...longer], pk)).toBe(10)
+    expect(bestChainLength([], pk)).toBe(0)
+  })
+
+  it('as of `t`: only what was signed by then', () => {
+    expect(bestChainLength([...long, ...short], pk, T + 3)).toBe(4)
+  })
+
+  it('counts each chain as the board counts one: a forked chain counts nothing, a broken one its valid prefix', () => {
+    const fork = hopEvent({ pubkey: pk, createdAt: T + 50, genesisId: long[0].id, previousId: long[2].id, c: long[3].tags.find((t) => t[0] === 'c')![1], to: { x: 1n, y: 2n, z: 3n } })
+    expect(bestChainLength([...long, fork, ...short], pk)).toBe(3)
+    const wrong = hopEvent({ pubkey: pk, createdAt: T + 50, genesisId: long[0].id, previousId: long[6].id, c: pk, to: { x: 9n, y: 9n, z: 9n } })
+    expect(bestChainLength([...long, wrong, ...short], pk)).toBe(7)
+  })
+
+  it('only the key\'s own v2 events', () => {
+    const other = key()
+    expect(bestChainLength([...long, ...walk(other, T, 20)], pk)).toBe(7)
+    expect(bestChainLength(long.map((e) => ({ ...e, tags: [...e.tags, ['version', '1']] })), pk)).toBe(0)
+  })
 })
 
 describe('active keys in a week (activeIn, activeKeys)', () => {
@@ -140,6 +198,7 @@ describe('keyChains: each chain built once, the same answers', () => {
       walk(pk, T, 3),
       [...walk(pk, T, 3), ...walk(pk, asOf - DAY_S, 2)],
       [...walk(pk, T, 1), ...walk(pk, T + DAY_S, 0), ...walk(pk, asOf - 3, 2)],
+      [...walk(pk, T, 2), ...spawnThenBoard(pk, T + DAY_S)],
     ]
     for (const evs of sets) {
       for (const t of [asOf, asOf - 2 * DAY_S, T + 2]) {

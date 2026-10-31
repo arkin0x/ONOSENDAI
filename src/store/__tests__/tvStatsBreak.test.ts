@@ -1,10 +1,11 @@
 /**
  * tvStatsBreak.test.ts: the CYBERSPACE STATS break in TV's engine
- * (store/useTv, lib/tv/cyberspaceStats). It comes due on its own clock, ten
- * minutes on the site and fifteen on the stream, and never collides with a
- * spot or an explainer: it waits for them, keeps STATS_GAP_MS either side,
- * and they never wait on it. Nothing of the tape plays under it, and nothing
- * is published or fetched from outside.
+ * (store/useTv, lib/tv/cyberspaceStats). On the stream it comes due on its
+ * own clock, every fifteen minutes, and never collides with a spot or an
+ * explainer: it waits for them, keeps STATS_GAP_MS either side, and they
+ * never wait on it. Nothing of the tape plays under it, and nothing is
+ * published or fetched from outside. On the site (STATS_ON_SITE OFF since
+ * 2026-10-31) there is no break at all and no read to count one.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -39,7 +40,7 @@ import { useProfiles } from '../useProfiles'
 import { asOfHour } from '../../lib/tv/cyberspaceStats'
 import { setExplainerLineupForTest, useTvExplainer } from '../useTvExplainer'
 import { setBroadcastForTest } from '../../lib/tv/broadcast'
-import { BROADCAST_STATS_FIRST_MS, PROFILE_HOLD_MS, STATS_FIRST_MS, STATS_GAP_MS, STATS_HOUR_S, STATS_TAG } from '../../lib/tv/cyberspaceStats'
+import { BROADCAST_STATS_FIRST_MS, PROFILE_HOLD_MS, STATS_FIRST_MS, STATS_GAP_MS, STATS_HOUR_S, STATS_LOAD_DELAY_MS, STATS_ON_SITE, STATS_TAG } from '../../lib/tv/cyberspaceStats'
 
 const A = '1'.repeat(64)
 const B = '2'.repeat(64)
@@ -146,6 +147,8 @@ beforeEach(async () => {
   useTv.setState({ census: null })
   useProfiles.setState({ profiles: {} })
   setTvAsk(ask)
+  // The boards play only on the stream (STATS_ON_SITE OFF): every test is the stream unless it says the site.
+  setBroadcastForTest(true)
   const hash = await stubExplainerMedia()
   setExplainerLineupForTest([{ id: '1-test', title: 'TEST', duration: 45, files: [{ url: `https://b.example/${hash}.webm`, type: 'video/webm' }] }])
 })
@@ -160,12 +163,35 @@ afterEach(() => {
 })
 
 describe('the CYBERSPACE STATS break in TV\'s engine', () => {
-  it('on the site: first after STATS_FIRST_MS, then in turn, clear of every spot and explainer, the tape still under it', async () => {
-    const { spans, tapeUnderStats, boards } = await watch(32 * 60_000)
+  it('on the site, with STATS_ON_SITE off: never a break, and never a read to count one', async () => {
+    expect(STATS_ON_SITE).toBe(false)
+    setBroadcastForTest(false)
+    const { spans } = await watch(STATS_FIRST_MS + 12 * 60_000)
+    expect(spans.filter((s) => s.kind === 'stats')).toEqual([])
+    // The spots still play: only the boards are gone.
+    expect(spans.filter((s) => s.kind === 'ad').length).toBeGreaterThanOrEqual(1)
+    expect(statsClockForTest().due).toBe(Infinity)
+    // No whole read of the movement events from V2_EPOCH (the counting read): the tape's own reads always carry an until.
+    expect(asked.some((f) => f.kinds?.[0] === 3333 && !f.authors && f.since === V2_EPOCH && f.until === undefined && !f['#A' as keyof Filter])).toBe(false)
+    expect(statsReadsForTest().actions).toBe(0)
+    // The census TV reads when it comes on (its marquee), once: never again for the hour's counts.
+    expect(asked.filter((f) => f.kinds?.[0] === 33330).length).toBeLessThanOrEqual(1)
+  }, 60_000)
+
+  it('on the site, a board the address names is not played either (/tv?stats=<id>)', async () => {
+    setBroadcastForTest(false)
+    vi.stubGlobal('window', { location: { pathname: '/tv', search: '?stats=new-arrivals' }, setTimeout, clearTimeout, addEventListener: () => {}, removeEventListener: () => {} })
+    const { spans } = await watch(STATS_LOAD_DELAY_MS + 60_000)
+    expect(spans.filter((s) => s.kind === 'stats')).toEqual([])
+    expect(statsReadsForTest().actions).toBe(0)
+  }, 60_000)
+
+  it('on the stream: first after BROADCAST_STATS_FIRST_MS, then in turn, clear of every spot and explainer, the tape still under it', async () => {
+    const { spans, tapeUnderStats, boards } = await watch(40 * 60_000)
     const stats = spans.filter((s) => s.kind === 'stats')
     expect(stats.length).toBeGreaterThanOrEqual(2)
-    expect(stats[0].from).toBeGreaterThanOrEqual(STATS_FIRST_MS)
-    expect(spans.filter((s) => s.kind === 'ad').length).toBeGreaterThanOrEqual(4)
+    expect(stats[0].from).toBeGreaterThanOrEqual(BROADCAST_STATS_FIRST_MS)
+    expect(spans.filter((s) => s.kind === 'ad').length).toBeGreaterThanOrEqual(2)
     expect(spans.filter((s) => s.kind === 'explainer').length).toBeGreaterThanOrEqual(1)
     expectClear(spans, STATS_GAP_MS)
     // The boards in turn: never the same one twice running.
@@ -175,20 +201,11 @@ describe('the CYBERSPACE STATS break in TV\'s engine', () => {
     expect(useTv.getState().stats === null || stats[stats.length - 1].to === Infinity).toBe(true)
    }, 60_000)
 
-  it('on the stream: first at BROADCAST_STATS_FIRST_MS, between the spots, clear of them', async () => {
-    setBroadcastForTest(true)
-    const { spans } = await watch(40 * 60_000)
-    const stats = spans.filter((s) => s.kind === 'stats')
-    expect(stats.length).toBeGreaterThanOrEqual(2)
-    expect(stats[0].from).toBeGreaterThanOrEqual(BROADCAST_STATS_FIRST_MS)
-    expectClear(spans, STATS_GAP_MS)
-   }, 60_000)
-
   it('counts from one read of the movement events and the scoped deletions, stamped on the hour; publishes nothing', async () => {
     let board: { asOf: number; title: string } | null = null
     const off = useTv.subscribe((s) => { if (s.stats && !board) board = s.stats.board })
     useTv.getState().start()
-    await run(STATS_FIRST_MS + 60_000)
+    await run(BROADCAST_STATS_FIRST_MS + 60_000)
     off()
     expect(board).not.toBeNull()
     expect(board!.asOf % STATS_HOUR_S).toBe(0)
@@ -213,8 +230,10 @@ describe('the CYBERSPACE STATS break in TV\'s engine', () => {
   })
 
   it('TV off and on again in the same hour reads and counts nothing again; the census TV came on with is the one counted', async () => {
+    // The stream's watchdog reloads the page when no frame is drawn (none are, here): a reload that goes nowhere.
+    vi.stubGlobal('window', { location: { pathname: '/tv', search: '?broadcast=1', replace: () => {} }, setTimeout, clearTimeout, addEventListener: () => {}, removeEventListener: () => {} })
     useTv.getState().start()
-    await run(STATS_FIRST_MS + 30_000)
+    await run(BROADCAST_STATS_FIRST_MS + 30_000)
     // A whole read's first page: from V2_EPOCH with no until (the tape's random start always has one).
     const whole = asked.filter((f) => f.kinds?.[0] === 3333 && !f.authors && f.since === V2_EPOCH && f.until === undefined && !f['#A' as keyof Filter]).length
     const censusBags = asked.filter((f) => f.kinds?.[0] === 33330).length
@@ -225,7 +244,7 @@ describe('the CYBERSPACE STATS break in TV\'s engine', () => {
     expect(censusBags).toBe(1)
     useTv.getState().stop()
     useTv.getState().start()
-    await run(STATS_FIRST_MS + 30_000)
+    await run(BROADCAST_STATS_FIRST_MS + 30_000)
     expect(asked.filter((f) => f.kinds?.[0] === 3333 && !f.authors && f.since === V2_EPOCH && f.until === undefined && !f['#A' as keyof Filter]).length).toBe(whole)
     expect(asked.filter((f) => f.kinds?.[0] === 33330).length).toBe(censusBags)
   }, 60_000)

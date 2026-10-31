@@ -877,6 +877,14 @@ interface ShardsState {
    * and floats out of it as loot instead (lib/looks.ts keptInChest).
    */
   drawnItems: () => WorldItem[]
+  /**
+   * What hidden audio is heard from (scene/HiddenAudio): every audio item in
+   * worldItems, one that stays in an opened chest included, so audio sealed
+   * in a chest autoplays at the chest once it is opened, as it did before
+   * the chest ceremony (#533). drawnItems leaves such an item out of what is
+   * drawn, never out of what is heard; its card and ITEMS still play it.
+   */
+  heardAudio: () => WorldItem[]
   /** The clicked item, mine or discovered, as one shape. */
   secretByEvent: (eventId: string) => WorldItem | null
 }
@@ -2332,6 +2340,8 @@ export const useShards = create<ShardsState>((set, get) => {
       }
       return get().worldItems().filter((w) => !keptInChest(w, w.chestId ? parent(w.chestId) : undefined))
     },
+
+    heardAudio: () => get().worldItems().filter((w) => w.type === 'audio'),
 
     secretByEvent: (eventId) => get().worldItems().find((w) => w.key === eventId) ?? null,
   }

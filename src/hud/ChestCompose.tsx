@@ -140,6 +140,8 @@ export function ChestCompose({ onDone, target = { mode: 'place' } }: { onDone: (
   // A hidden chest's contents, opened from what this device kept, or with what opens it.
   const [loading, setLoading] = useState(!!editing)
   const [status, setStatus] = useState<string | null>(null)
+  // What is inside could not be read here: sealing it again would wipe it, so nothing goes in or out.
+  const [unread, setUnread] = useState(false)
   const [saving, setSaving] = useState(false)
   useEffect(() => {
     if (!editing) return
@@ -147,7 +149,7 @@ export function ChestCompose({ onDone, target = { mode: 'place' } }: { onDone: (
     void useShards.getState().chestEntries(editing.eventId).then((r) => {
       if (!on) return
       setLoading(false)
-      if (typeof r === 'string') setStatus(r)
+      if (typeof r === 'string') { setStatus(r); setUnread(true) }
       else setContents(sealedContents(r, hidden?.inner.pubkey ?? me))
     })
     return () => { on = false }
@@ -197,7 +199,7 @@ export function ChestCompose({ onDone, target = { mode: 'place' } }: { onDone: (
 
   const add = (c: ChestContent): void => { setContents((list) => [...list, c]); setAdding(null); setText(''); setKeyName('') }
   const remove = (i: number): void => setContents((list) => list.filter((_, j) => j !== i))
-  const ready = name.trim().length > 0 && !!lock && contents.length > 0 && !refusal && !loading
+  const ready = name.trim().length > 0 && !!lock && contents.length > 0 && !refusal && !loading && !unread
   const current = (): ChestDraft => ({ name: name.trim(), lock, requires: requires.trim(), contents })
   // Placing: the draft rides on the chest being placed, so closing the modal (back to the bar) keeps it.
   useEffect(() => {
@@ -285,7 +287,7 @@ export function ChestCompose({ onDone, target = { mode: 'place' } }: { onDone: (
           ))}
         </ul>
       )}
-      {adding === null ? (
+      {unread ? null : adding === null ? (
         <div className="compose__row">
           <button className="chest__act" onClick={() => setAdding('message')} title="A message, which may hold a cashu token">+ MESSAGE</button>
           <button className="chest__act" onClick={() => setAdding('shard')} disabled={models.length === 0} title={models.length === 0 ? 'Nothing in your workshop yet' : 'One of your workshop models'}>+ SHARD</button>

@@ -114,8 +114,6 @@ interface StashModals {
   openMessage: () => void
   /** Forge a key to hide at the build cursor. */
   openKey: () => void
-  /** Seal a chest to hide at the build cursor. */
-  openChest: () => void
   /** EDIT or ADD on a chest of yours. */
   openChestEdit: (eventId: string, fields: boolean) => void
   /** Hide audio at the build cursor (DECK-0007). */
@@ -151,7 +149,6 @@ export const useStash = create<StashModals>((set) => ({
   openBag: (lookupId) => set({ ...NONE_OPEN, bag: lookupId }),
   openMessage: () => set({ ...NONE_OPEN, message: true }),
   openKey: () => set({ ...NONE_OPEN, key: true }),
-  openChest: () => set({ ...NONE_OPEN, chest: true }),
   openChestEdit: (eventId, fields) => set({ ...NONE_OPEN, chestEdit: { eventId, fields } }),
   openAudio: () => set({ ...NONE_OPEN, audio: true }),
   openFeed: () => set({ ...NONE_OPEN, feed: true }),
@@ -186,7 +183,8 @@ export const useStash = create<StashModals>((set) => ({
 useShards.subscribe((s, prev) => {
   const now = fillingChest(s.pending)
   const was = fillingChest(prev.pending)
-  if (now && !was) useStash.setState({ ...NONE_OPEN, chest: true })
+  // A seal that failed while being filled: its modal says why, whatever closed it meanwhile.
+  if ((now && !was) || (now && s.deployStatus === 'error' && prev.deployStatus !== 'error')) useStash.setState({ ...NONE_OPEN, chest: true })
   else if (!now && was && useStash.getState().chest) useStash.setState({ chest: false })
 })
 

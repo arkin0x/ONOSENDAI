@@ -27,6 +27,7 @@ import { useCyberspace } from '../useCyberspace'
 import { openedByHand, openedContents, rememberOpened, resetOpenedChests, useOpenedChests } from '../useOpenedChests'
 import { useShards } from '../useShards'
 import { doorWallKey, stepLimit, wallItems, wallItemsAt } from '../walkWalls'
+import { builtInLookTags } from '../../lib/looks'
 
 const AT: Position = { x: 1n << 40n, y: 1n << 39n, z: 1n << 38n }
 const ME = 'a'.repeat(64)
@@ -207,5 +208,39 @@ describe('a door is a wall where it is drawn (review of #532)', () => {
     useShards.setState({ discovered: { [DOOR]: { ...chest(DOOR, [['title', 'Gate'], ['door', '1']]), height: 1 } } })
     const high: Position = { x: AT.x, y: AT.y + 2n, z: AT.z + 3n }
     expect(stepLimit(high, 'z', -1, 10n, wallItemsAt(1, high)).reach).toBeLessThan(10n)
+  })
+})
+
+describe('a door written with look tags', () => {
+  const TAGS = builtInLookTags('door', { unit: 0, turn: [0, 0, 0], constrain: 'all' })
+  const IN: Position = { x: AT.x, y: AT.y + 1n, z: AT.z }
+  const SIX = [['x', 1], ['x', -1], ['y', 1], ['y', -1], ['z', 1], ['z', -1]] as const
+
+  it('lets a walker inside it step out, as a door with no tags does (review of #543)', () => {
+    useShards.setState({ mine: [], discovered: { [DOOR]: chest(DOOR, [['door', '6'], ...TAGS]) } })
+    const items = wallItemsAt(1, IN)
+    expect(items.map((w) => w.inside)).toEqual([true])
+    const after = Object.fromEntries(SIX.map(([a, d]) => [`${d > 0 ? '+' : '-'}${a}`, stepLimit(IN, a, d, 5n, items).reach]))
+    // Out the side they are on, sideways, up and down; never across it.
+    expect(after).toMatchObject({ '+x': 5n, '-x': 5n, '+y': 5n, '-y': 5n, '-z': 5n })
+    expect(after['+z']).toBe(0n)
+    // Without the walker's place it is a wall all round them: what the rule is for.
+    expect(SIX.map(([a, d]) => stepLimit(IN, a, d, 5n, wallItems(1)).reach).some((r) => r === 0n)).toBe(true)
+  })
+
+  it('a chest\u2019s look gets no such pass: only a door lets go of who is inside', () => {
+    useShards.setState({ mine: [], discovered: { [CHEST]: chest(CHEST, builtInLookTags('treasure', { unit: 3, turn: [0, 0, 0], constrain: 'all' })) } })
+    expect(wallItemsAt(1, { x: AT.x, y: AT.y + 2n, z: AT.z }).map((w) => w.inside)).toEqual([undefined])
+  })
+
+  it('is cut at its region\u2019s walls, as it is drawn: past them a walker is held by nothing', () => {
+    // A height-1 bag: a 2-gibson region, and the door 3 tall in it. Two gibsons up is out of the region.
+    const high: Position = { x: AT.x, y: AT.y + 2n, z: AT.z + 3n }
+    useShards.setState({ mine: [], discovered: { [DOOR]: { ...chest(DOOR, [['door', '1'], ...TAGS]), height: 1 } } })
+    expect(wallItems(1)[0].uncut).toBe(false)
+    expect(stepLimit(high, 'z', -1, 10n, wallItemsAt(1, high)).reach).toBe(10n)
+    // Inside the region, the same wall holds: the cut is what let it through.
+    const low: Position = { x: AT.x, y: AT.y + 1n, z: AT.z + 3n }
+    expect(stepLimit(low, 'z', -1, 10n, wallItemsAt(1, low)).reach).toBeLessThan(10n)
   })
 })

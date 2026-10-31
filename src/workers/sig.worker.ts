@@ -8,11 +8,13 @@
  * lib/sigCheck.ts holds every chain action until the answer is in.
  */
 
-import { verifyEvent, type VerifiedEvent } from 'nostr-tools/pure'
+import { getEventHash, verifyEvent, type VerifiedEvent } from 'nostr-tools/pure'
 import type { NostrEvent } from '../lib/events'
 
 export interface SigCheckRequest {
   events: NostrEvent[]
+  /** `id:sig` of signatures this page already checked: only their ids are recomputed. */
+  known?: readonly string[]
 }
 
 export interface SigCheckResponse {
@@ -21,8 +23,16 @@ export interface SigCheckResponse {
 }
 
 self.onmessage = (message: MessageEvent<SigCheckRequest>): void => {
+  const known = new Set(message.data.known ?? [])
   const bad: string[] = []
-  for (const e of message.data.events) if (!verifyEvent(e as unknown as VerifiedEvent)) bad.push(e.id)
+  for (const e of message.data.events) {
+    const holds = known.has(`${e.id}:${e.sig}`) ? idHolds(e) : verifyEvent(e as unknown as VerifiedEvent)
+    if (!holds) bad.push(e.id)
+  }
   const answer: SigCheckResponse = { bad }
   self.postMessage(answer)
+}
+
+function idHolds(e: NostrEvent): boolean {
+  try { return getEventHash(e) === e.id } catch { return false }
 }

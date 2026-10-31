@@ -211,13 +211,14 @@ describe('a row already here', () => {
     expect(row).toMatchObject({ content: '', nip01: 1 })
   })
 
-  it('a sign-later row takes its signature when its signed copy is committed', async () => {
+  it('a sign-later row takes its signature when its signed copy arrives, and keeps its place in the chain', async () => {
     const signed = action(1)
     const unsigned = { ...signed, sig: '' }
-    await commitIt(commit({ events: [signed], keep: 0, expectHead: null, rows: [{ event: unsigned, nip01: 2, acked: false }] }))
+    await commitIt({ ...commit({ events: [signed], keep: 0, expectHead: null }), rows: [{ event: unsigned, nip01: 2, acked: false }] })
     expect((await withEventDb((db) => getRows(db, [signed.id])))[0]).toMatchObject({ nip01: 2, sig: '' })
-    await commitIt({ ...commit({ events: [signed], keep: 0, expectHead: signed.id }), length: 1 })
-    expect((await withEventDb((db) => getRows(db, [signed.id])))[0]).toMatchObject({ nip01: 2 })
+    await withEventDb((db) => ingest(db, [{ event: signed, nip01: 1 }]))
+    expect((await withEventDb((db) => getRows(db, [signed.id])))[0]).toMatchObject({ nip01: 1, sig: signed.sig, chainOf: pk, chainN: 0, pin: 1 })
+    expect((await read())!.events[0].sig).toBe(signed.sig)
   })
 })
 

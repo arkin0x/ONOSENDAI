@@ -64,7 +64,7 @@ import { hopTemplate, spawnTemplate, type NostrEvent } from '../events'
 
 const PK = 'ab'.repeat(32)
 const spawn: NostrEvent = { ...spawnTemplate(PK, 1_000), id: 'cd'.repeat(32), pubkey: PK, sig: '0'.repeat(128) }
-const child: NostrEvent = { ...hopTemplate({ createdAt: 1_010, genesisId: spawn.id, previousId: spawn.id, prevCoordHex: PK, to: { x: 1n, y: 1n, z: 1n }, plane: 0, proofHash: '0'.repeat(64) }), id: 'ee'.repeat(32), pubkey: PK, sig: '0'.repeat(128) }
+const child: NostrEvent = { ...hopTemplate({ createdAt: 1_010, genesisId: spawn.id, previousId: spawn.id, prevCoordHex: PK, to: { x: 1n, y: 1n, z: 1n }, plane: 0, proofHash: '0'.repeat(64), mn: '0'.repeat(16), mp: '00'}), id: 'ee'.repeat(32), pubkey: PK, sig: '0'.repeat(128) }
 const canonical = normalizeURL(CYBERSPACE_RELAY)
 /** The player's own relay, as confirmation names it (normalized). */
 const user = normalizeURL(net.user)
@@ -150,7 +150,7 @@ describe('a degraded pass needs a relay that holds the chain (verification of #2
 
   it('canonical relay silent, a configured relay without the anchor but with a newer move: handed back, to adopt and refuse on', async () => {
     reset()
-    const newer: NostrEvent = { ...hopTemplate({ createdAt: 1_020, genesisId: spawn.id, previousId: anchor.id, prevCoordHex: PK, to: { x: 2n, y: 1n, z: 1n }, plane: 0, proofHash: '0'.repeat(64) }), id: 'ff'.repeat(32), pubkey: PK, sig: '0'.repeat(128) }
+    const newer: NostrEvent = { ...hopTemplate({ createdAt: 1_020, genesisId: spawn.id, previousId: anchor.id, prevCoordHex: PK, to: { x: 2n, y: 1n, z: 1n }, plane: 0, proofHash: '0'.repeat(64), mn: '0'.repeat(16), mp: '00'}), id: 'ff'.repeat(32), pubkey: PK, sig: '0'.repeat(128) }
     net.answers.set(canonical, { outcome: 'unreachable', events: [] })
     net.answers.set(user, { outcome: 'answered', events: [newer] })
     expect((await confirmChainEvents(PK, spawn.id, [spawn, anchor], { since: anchor.created_at, anchorId: anchor.id }))?.map((e) => e.id)).toEqual([newer.id])

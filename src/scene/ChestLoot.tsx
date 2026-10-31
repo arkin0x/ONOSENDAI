@@ -29,7 +29,7 @@ import { lootModels } from '../lib/lootModels'
 import type { LootObject } from '../lib/lootObjects'
 import { measureModel, useItemModel } from '../hooks/useItemModel'
 import type { ModelExtent } from '../lib/itemModel'
-import { lookBounds } from './LookMark'
+import { lookBounds, type LookBounds } from './LookMark'
 import { MOUTH_Y } from './ChestCeremony'
 import { ShardMesh } from './ShardMesh'
 import { breatheMaterial } from './WorldShards'
@@ -49,10 +49,37 @@ const TURN_RAD_S = 0.55
 /** How far a scroll sways each way, radians: never end on. */
 const SCROLL_SWAY = 0.5
 
-/** Where object `i` of `n` hovers, in the chest's units: a row across X, a gentle arc toward the viewer. */
+/**
+ * How far a loot object reaches from the point it hovers at: up and down, its
+ * half side and the bob; about Y, as it turns or sways, the half diagonal of
+ * its side (a model fitted to LOOT_SIDE, its middle on that point).
+ */
+export const LOOT_UP = LOOT_SIDE / 2 + BOB
+export const LOOT_ROUND = (LOOT_SIDE / 2) * Math.SQRT2
+/** Air left between a loot object and the open chest. */
+const LOOT_AIR = 0.03
+
+let openBounds: LookBounds | null = null
+/** The open chest's bounds: its open look, the lid up. */
+export function openChestBounds(): LookBounds {
+  const look = builtInLook('treasure')
+  return (openBounds ??= lookBounds(look.open ?? look.closed))
+}
+
+/**
+ * Where object `i` of `n` hovers, in the chest's units: a row across X, a
+ * gentle arc toward the viewer, and wholly above the open chest wherever the
+ * turning object could reach over it, so none touches the lid from any side
+ * (review of the ceremony: one at the end of a row of three dipped into it).
+ */
 export function hoverAt(i: number, n: number): [number, number, number] {
   const x = (i - (n - 1) / 2) * LOOT_GAP
-  return [x, HOVER_Y - Math.abs(x) * 0.12, HOVER_Z]
+  const arc = HOVER_Y - Math.abs(x) * 0.12
+  const b = openChestBounds()
+  const dx = Math.max(b.min[0] - x, 0, x - b.max[0])
+  const dz = Math.max(b.min[2] - HOVER_Z, 0, HOVER_Z - b.max[2])
+  const over = Math.hypot(dx, dz) < LOOT_ROUND + LOOT_AIR
+  return [x, over ? Math.max(arc, b.max[1] + LOOT_UP + LOOT_AIR) : arc, HOVER_Z]
 }
 
 interface Props {

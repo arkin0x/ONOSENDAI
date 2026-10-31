@@ -32,8 +32,11 @@ describe('browser proof allocation preflight', () => {
     const start = { ...to, x: to.x - 1n }
     for (const mode of ['hop', 'sidestep'] as const) {
       expect(movementCapabilityIssue(mode, start, to, 0, 'local', limit)).toContain('BigInt')
-      expect(movementCapabilityIssue(mode, start, to, 0, 'cloud', limit)).toContain('cannot verify')
     }
+    // A cloud sidestep rebuilds the temporal root here; a cloud hop is
+    // checked at Level 1, which needs no big numbers (hop proof version 2).
+    expect(movementCapabilityIssue('sidestep', start, to, 0, 'cloud', limit)).toContain('cannot verify')
+    expect(movementCapabilityIssue('hop', start, to, 0, 'cloud', limit)).toBeNull()
   })
 
   it('allows cloud hop envelopes when only spatial combination exceeds the limit', () => {

@@ -2908,11 +2908,13 @@ export const useShards = create<ShardsState>((set, get) => {
       // identity already opened by hand on this device: after a reload the
       // scan opens it again, as it was, with an item still held
       // (store/useOpenedChests), and a chest inside it only if that one was
-      // opened by hand too. A chest sealed to this identity waits for OPEN
-      // again, since a signer would have to be asked; nothing TV showed is
-      // restored, and a key TV showed opens nothing (review of #390).
+      // opened by hand too, under the lock each has now. A chest sealed to
+      // this identity is not read here, since a scan never asks a signer: it
+      // is drawn open, and its card reads it again when shown (hud/ItemRows
+      // readAgain). Nothing TV showed is restored, and a key TV showed opens
+      // nothing (review of #390).
       const keys: OpeningKey[] = openingKeys(useInventory.getState().items, true)
-      const byHand = (h: Hidden): boolean => h.type === 'chest' && !!h.chest && openedByHand(me, h.eventId)
+      const byHand = (h: Hidden): boolean => h.type === 'chest' && !!h.chest && openedByHand(me, h.eventId, h.chest.lockPubkey)
       // A door opened by hand opens its room again with the secret this
       // device kept (store/rooms.ts), quietly, after the scan; never one
       // found inside a chest (DECK-0004 §3.7.1).

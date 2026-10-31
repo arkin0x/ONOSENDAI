@@ -12,7 +12,7 @@
  */
 import { describe, expect, it } from 'vitest'
 import { toPayload, type ShardModel } from 'sno-core/shards'
-import { CHEST_LOOKS, DOOR_LOOKS, MAX_LOOK_BYTES, builtInLook, builtInLookTags, doorHeightOf, drawnLook, isTreasureShape, lookOf, lookRefusal, lookTags, lookTagsOf, posedLook } from '../looks'
+import { CHEST_LOOKS, DOOR_LOOKS, MAX_LOOK_BYTES, builtInLook, builtInLookTags, doorHeightOf, drawnLook, isTreasureShape, lookOf, lookRefusal, lookStand, lookTags, lookTagsOf, posedLook } from '../looks'
 import { chestInnerTemplate, chestItemOf, readItem, type ChestItem } from '../hidden'
 import { constrainOf } from '../walkConstrain'
 import { lookBounds } from '../../scene/LookMark'
@@ -100,6 +100,17 @@ describe('which look a chest or a door wears', () => {
 
   it('a look that fails reads as the built-in, and the chest is kept', () => {
     expect(lookOf({ type: 'chest', event: { tags: [['look', BAD]] } })).toBe(builtInLook('treasure'))
+  })
+})
+
+describe('how a look stands (§3.6)', () => {
+  const at = { x: 1n, y: 2n, z: 3n }
+  it('by its own payload\u2019s up and spin, in dataspace; on cyberspace axes otherwise', () => {
+    const payload = JSON.stringify({ ...toPayload(tri('Standing')), up: true, spin: 90 })
+    const read = lookTagsOf([['look', payload]]).closed!
+    expect(lookStand(read, 0, at)).toEqual({ at, spin: 90 })
+    expect(lookStand(read, 1, at)).toBeUndefined()
+    expect(lookStand(tri(), 0, at)).toBeUndefined()
   })
 })
 

@@ -47,7 +47,7 @@ const opener = { by: 'key' as const, key: { id: lockEvent.id, itemPubkey: lock.i
 
 /** OPEN as ChestBlock runs it: whether it was opened by hand before, the decrypt, then the ceremony. */
 async function tapOpen(me: string, calm = false): Promise<ReturnType<typeof celebrateOpen>> {
-  const first = !openedByHand(me, CHEST)
+  const first = !openedByHand(me, CHEST, chest.lockPubkey)
   await openChestHere({ id: CHEST, chest, author: getPublicKey(hider), place, sealer: getPublicKey(hider) }, opener)
   return celebrateOpen({ me, chestId: CHEST, kind: 'chest', first, calm })
 }
@@ -97,9 +97,9 @@ describe('once per chest', () => {
   it('another identity on this device gets its own first time', async () => {
     await tapOpen(ME)
     const other = 'f'.repeat(64)
-    expect(openedByHand(other, CHEST)).toBe(false)
+    expect(openedByHand(other, CHEST, chest.lockPubkey)).toBe(false)
     useShards.setState({ selectedSecret: CHEST })
-    const plan = celebrateOpen({ me: other, chestId: CHEST, kind: 'chest', first: !openedByHand(other, CHEST), calm: false })
+    const plan = celebrateOpen({ me: other, chestId: CHEST, kind: 'chest', first: !openedByHand(other, CHEST, chest.lockPubkey), calm: false })
     expect(plan.ceremony).toBe(true)
     expect(Object.keys(useOpenCeremony.getState().playing).sort()).toEqual([openedKey(ME, CHEST), openedKey(other, CHEST)].sort())
   })

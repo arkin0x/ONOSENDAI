@@ -6,12 +6,17 @@ import { movementCapabilityIssue } from '../lib/proofCapability'
  * with no storage wall. Either way a single commit can be seconds of work, so
  * it runs here, streaming real progress instead of a spinner. The main thread
  * kills this worker outright to cancel (see lib/workers.ts).
+ *
+ * A hop is always hop proof version 2 (spec 5.9 to 5.13): the trees, the
+ * region from the axis roots, and the residue openings over hop_n, which is
+ * never built. What it hands back is the three tags, `proof` (the seal),
+ * `mn` and `mp`, and the region the hop crossed with its key.
  */
 
 import {
   deriveRegionKeys,
   alignedBase,
-  computeHopProof,
+  computeHopProofV2,
   computeSidestepProof,
   encodeNonce,
   encodeOpenings,
@@ -20,6 +25,7 @@ import {
   type Plane,
 } from 'cyberspace-core'
 import { bytesToHex } from '../lib/events'
+import { hopProgressPlan } from '../lib/hopProgress'
 
 export type ProofMode = 'hop' | 'sidestep'
 
@@ -49,6 +55,16 @@ export interface SidestepTags {
   lcaHeights: [number, number, number]
 }
 
+/**
+ * What a hop event carries (spec 8.4): the seal for `proof`, the re-roll
+ * nonce for `mn` and the 16 openings for `mp`, each already the tag's value.
+ */
+export interface HopTags {
+  sealHex: string
+  mnHex: string
+  mpHex: string
+}
+
 export type ProofResponse =
   | { type: 'progress'; id: number; fraction: number; elapsedMs: number }
   | {
@@ -64,6 +80,11 @@ export type ProofResponse =
       /** Present on sidesteps only. */
       sidestep?: SidestepTags
       /**
+       * Present on hops, local and cloud alike: the three tags. `proofHash`
+       * above is the same seal. A hop without them is never signed.
+       */
+      hop?: HopTags
+      /**
        * The chain head the proof's work was seeded by (spec §5.3): the event
        * the signed action must name as its `previous`. The store refuses to
        * sign onto any other head.
@@ -75,6 +96,12 @@ export type ProofResponse =
       jobId?: string
       costMsats?: number
       lookupId?: string
+      /**
+       * Cloud proofs only: the move the job was bought for, from its record,
+       * as coordinate hex (`to` in the record's plane). The signed event's c
+       * and C must match it, or it is not kept (review of #539).
+       */
+      move?: { fromHex: string; toHex: string }
       /**
        * A hop's own region (spec §4.7 and §7.2): the box the movement crossed,
        * its three axes at their own heights, with the key that opens whatever
@@ -174,14 +201,18 @@ self.onmessage = (event: MessageEvent<ProofRequest>) => {
       return
     }
 
-    const proof = computeHopProof(
+    // The bar in time, not in core's units of work (lib/hopProgress.ts):
+    // the residue extension is more than half of a tall hop.
+    const bar = hopProgressPlan({ x: estimate.lcaX, y: estimate.lcaY, z: estimate.lcaZ, K: estimate.terrainK })
+    const proof = computeHopProofV2(
       from.x, from.y, from.z,
       to.x, to.y, to.z,
       plane,
       prevEventId,
-      maxComputeHeight,
-      onProgress,
+      { maxComputeHeight, onProgress: (f) => onProgress(bar.remap(f)) },
     )
+    // Derived once: each derivation hashes all of region_n, 0.67 s at h20.
+    const keys = deriveRegionKeys(proof.regionN)
 
     const response: ProofResponse = {
       type: 'done',
@@ -189,15 +220,16 @@ self.onmessage = (event: MessageEvent<ProofRequest>) => {
       mode,
       prevEventId,
       elapsedMs: performance.now() - started,
-      proofHash: proof.proofHash,
+      proofHash: proof.tags.proof,
       terrainK: proof.terrainK,
       lca: { x: estimate.lcaX, y: estimate.lcaY, z: estimate.lcaZ },
       totalOps: estimate.totalOps,
+      hop: { sealHex: proof.tags.proof, mnHex: proof.tags.mn, mpHex: proof.tags.mp },
       // The region this hop crossed, and its key (§7.2). Free: the proof
-      // already built region_n on its way to the movement proof.
+      // builds region_n from the axis roots anyway.
       region: {
-        keyHex: bytesToHex(deriveRegionKeys(proof.regionN).locationDecryptionKey),
-        lookupId: deriveRegionKeys(proof.regionN).lookupIdHex,
+        keyHex: bytesToHex(keys.locationDecryptionKey),
+        lookupId: keys.lookupIdHex,
         heights: [estimate.lcaX, estimate.lcaY, estimate.lcaZ],
         base: [
           alignedBase(from.x, estimate.lcaX).toString(),

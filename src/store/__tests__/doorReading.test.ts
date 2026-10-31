@@ -110,7 +110,7 @@ describe('OPEN on a door', () => {
     // Drawn where they stand, as any find is.
     expect(useShards.getState().drawnItems().some((w) => w.type === 'message' && w.text === 'behind the door')).toBe(true)
     // Opened by hand, the secret kept: a reload opens it again.
-    expect(openedByHand(me(), b.door.eventId)).toBe(true)
+    expect(openedByHand(me(), b.door.eventId, b.door.chest!.lockPubkey)).toBe(true)
     expect(doorSecret(me(), b.door.eventId)).toBe(b.secret)
   })
 
@@ -169,8 +169,8 @@ describe('two doors, one room (R5)', () => {
     const b = await build(3, 3, elsewhere, a.secret)
     useShards.setState({ discovered: { [a.door.eventId]: a.door, [b.door.eventId]: b.door } })
     await enterRoom(b.door, b.secret)
-    expect(openedByHand(me(), a.door.eventId)).toBe(true)
-    expect(openedByHand(me(), b.door.eventId)).toBe(true)
+    expect(openedByHand(me(), a.door.eventId, a.door.chest!.lockPubkey)).toBe(true)
+    expect(openedByHand(me(), b.door.eventId, b.door.chest!.lockPubkey)).toBe(true)
     expect(doorSecret(me(), a.door.eventId)).toBe(a.secret)
   })
 
@@ -180,7 +180,7 @@ describe('two doors, one room (R5)', () => {
     const b = await build(3, 3, far, a.secret)
     useShards.setState({ discovered: { [a.door.eventId]: a.door, [b.door.eventId]: b.door } })
     await enterRoom(a.door, a.secret)
-    expect(openedByHand(me(), b.door.eventId)).toBe(false)
+    expect(openedByHand(me(), b.door.eventId, b.door.chest!.lockPubkey)).toBe(false)
   })
 })
 

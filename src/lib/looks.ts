@@ -315,6 +315,15 @@ export function lookOf(item: LookSubject): Look | null {
   return look
 }
 
+/**
+ * How a look stands, by its own payload's `up` and `spin` (§3.6, DECK-0003
+ * §1.7): on the ground where it is placed, in dataspace, as a hidden shard
+ * does. Undefined: on cyberspace axes as built.
+ */
+export function lookStand<P>(model: Pick<ShardModel, 'up' | 'spin'>, plane: number, at: P): { at: P; spin: number } | undefined {
+  return model.up && plane === 0 ? { at, spin: model.spin } : undefined
+}
+
 /** How a look goes out from the hide bar: its size, its quarter turns and its WALK setting, as a shard's do. */
 export interface LookPose {
   unit: number

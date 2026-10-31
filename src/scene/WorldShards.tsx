@@ -26,7 +26,7 @@ import { TapTarget, farCullDoublings } from './TapTarget'
 import { useMutes } from '../store/useMutes'
 
 const REACH = GRID_RADIUS * 8
-/** Past this many doublings out from its unit, a shard with no placed objects can never be seen (TapTarget farCullDoublings). */
+/** Past this many doublings out from its unit, a shard of the usual size with no placed objects can never be seen (TapTarget farCullDoublings). */
 const FAR_CULL = farCullDoublings()
 
 /**
@@ -153,7 +153,7 @@ export function drawableShards(items: Array<Pick<WorldItem, 'key' | 'type' | 'at
     .filter((w) => w.type === 'shard' && w.shard && w.plane === plane)
     // Not drawn at all once it cannot show a pixel at any distance; a shard
     // with placed objects is exempt, since they can be far larger than it.
-    .filter((w) => (w.shard!.parts?.length ?? 0) > 0 || scaleExp - w.shard!.unit < FAR_CULL)
+    .filter((w) => (w.shard!.parts?.length ?? 0) > 0 || scaleExp - w.shard!.unit < (w.shard!.extent > 64 ? farCullDoublings(w.shard!.extent) : FAR_CULL))
     .map((w) => placeShard(w, origin, scaleExp, axes))
     .filter((w) => Number.isFinite(w.scale) && Math.hypot(...w.centre) <= REACH)
 }

@@ -6,7 +6,7 @@
  */
 
 import { describe, it, expect, beforeEach } from 'vitest'
-import { TICKS_PER_UNIT as T, ticksOf, vertexAt } from 'sno-core/shards'
+import { MAX_EXTENT, TICKS_PER_UNIT as T, ticksOf, vertexAt } from 'sno-core/shards'
 import { DEFAULT_PALETTE, nextSelection, settleSelection, tapSelection, useWorkshop } from '../useWorkshop'
 import { stackedCount } from '../../lib/weld'
 import { BUILT_IN, hexAt, snapHex } from 'sno-core/snoPalette'
@@ -211,7 +211,9 @@ describe('workshop', () => {
     w().setExtent(3)
     expect(w().current()!.extent).toBe(5)        // the point at x=5 holds it
     w().setExtent(999)
-    expect(w().current()!.extent).toBe(64)
+    expect(w().current()!.extent).toBe(999)      // no cap at 64 any more (arkinox, 2026-10-31)
+    w().setExtent(MAX_EXTENT * 2)
+    expect(w().current()!.extent).toBe(MAX_EXTENT) // held at the position bound
     w().setLevel(50 * T); expect(w().level).toBe(50 * T)
     w().setExtent(6)
     expect(w().level).toBe(6 * T)                // the level follows the grid down

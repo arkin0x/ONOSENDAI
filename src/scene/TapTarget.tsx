@@ -31,7 +31,6 @@
 import { useLayoutEffect, useMemo, useRef, type RefObject } from 'react'
 import { useThree, type ThreeEvent } from '@react-three/fiber'
 import { Box3, Mesh, PerspectiveCamera, Raycaster, Vector3, type Camera, type Intersection, type Object3D } from 'three'
-import { MAX_EXTENT } from 'sno-core/shards'
 import { CAMERA_NEAR, FOV } from './camera'
 import { markSceneTapHandled } from '../hooks/useCanvasTap'
 
@@ -87,20 +86,25 @@ function screenAcross(b: Box3, cam: PerspectiveCamera, width: number, height: nu
   return Math.max(maxX - minX, maxY - minY)
 }
 
+/** No shard is culled nearer than a model of this many units would be, whatever its own size. */
+const CULL_EXTENT_MIN = 64
+
 /**
  * How many doublings past a shard's own unit the view can zoom out before the
  * shard cannot show MIN_VISIBLE_PX at any distance, for a shard with no
- * placed objects. Worked out from the worst case rather than chosen: the
- * largest model (MAX_EXTENT each side of the origin, so 2 x MAX_EXTENT + 1
- * units per axis, measured along the diagonal), as close to the camera as
- * anything is drawn (CAMERA_NEAR), on a MAX_VIEWPORT_PX tall screen. At the
- * shipped constants it is 22: a shard at unit 2^X is never visible from
- * 2^(X + 22) out. Placed objects carry their own unit and scale step, up to
- * 2^84 whatever their parent's unit, so a shard with any is never culled by
- * this bound; its taps still follow the measured size.
+ * placed objects. Worked out from the worst case rather than chosen: a model
+ * `extent` each side of the origin (2 x extent + 1 units per axis, measured
+ * along the diagonal), as close to the camera as anything is drawn
+ * (CAMERA_NEAR), on a MAX_VIEWPORT_PX tall screen. At the usual size it is 22:
+ * a shard of up to 64 units at unit 2^X is never visible from 2^(X + 22) out.
+ * A larger grid earns its own bound, a doubling per doubling of its size, and
+ * only for itself: one 65,536-unit shard does not make the whole world keep
+ * every shard drawn ten doublings further out. Placed objects carry their own
+ * unit and scale step, up to 2^84 whatever their parent's unit, so a shard with
+ * any is never culled by this bound; its taps still follow the measured size.
  */
-export function farCullDoublings(): number {
-  const span = Math.sqrt(3) * (2 * MAX_EXTENT + 1)
+export function farCullDoublings(extent: number = CULL_EXTENT_MIN): number {
+  const span = Math.sqrt(3) * (2 * Math.max(CULL_EXTENT_MIN, extent) + 1)
   return Math.ceil(Math.log2((span * pxPerUnit(FOV, MAX_VIEWPORT_PX, CAMERA_NEAR)) / MIN_VISIBLE_PX))
 }
 

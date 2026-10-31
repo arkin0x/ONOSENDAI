@@ -19,7 +19,7 @@ import type { ShardModel } from 'sno-core/shards'
 import { ShardMesh } from './ShardMesh'
 import { ShardLights } from './shardLight'
 import { keepPrograms } from '../lib/keepPrograms'
-import { frameOf, framedDistance, type ThumbFrame } from './ThumbStage'
+import { frameOf, framedDistance, holdInClip, type ThumbFrame } from './ThumbStage'
 
 /** The camera's field of view, in degrees, as for the feed's pictures. */
 const FOV = 35
@@ -41,6 +41,7 @@ function Spinning({ shard, ignoreOpacity }: { shard: ShardModel | null; ignoreOp
     const d = framedDistance(frame.reach, FOV)
     camera.position.set(0, d * 0.42, d * 0.91)
     camera.lookAt(0, 0, 0)
+    holdInClip(camera, d, frame.reach)
     camera.updateProjectionMatrix()
   }, [frame, camera])
   useFrame((_, dt) => {

@@ -32,6 +32,7 @@ import { DIVISIONS, MAX_EXTENT, MAX_UNIT, MIN_EXTENT, MODES, OPACITY_FLOOR, TICK
 import { clampOpacity, dragHistory, opacityAt, opacityFraction, opacityPercent, stepOpacity } from '../lib/opacityStep'
 import { CONSTRAINS, CONSTRAIN_TIPS, authoredConstrainOf, withAuthoredConstrain } from '../lib/walkConstrain'
 import { stepDivision } from './divisions'
+import { stepExtent } from './gridSize'
 import { IMPORT_FORMATS_LABEL } from 'sno-core/importFile'
 import { IMPORT_PICKER_ACCEPT, isZipFile } from '../lib/shardZip'
 import { importFitFor } from 'sno-core/meshToShard'
@@ -1161,9 +1162,9 @@ export function Workshop(): JSX.Element | null {
           </div>
           <div className="workshop__row">
             <span className="workshop__label">GRID SIZE</span>
-            <button className="workshop__btn" {...bind(() => w().setExtent((w().current()?.extent ?? MIN_EXTENT) - 1))} disabled={extent <= minExtent} aria-label="Smaller grid">−</button>
+            <button className="workshop__btn" {...bind(() => w().setExtent(stepExtent(w().current()?.extent ?? MIN_EXTENT, -1)))} disabled={extent <= minExtent} aria-label="Smaller grid">−</button>
             <span className="workshop__value">{extent}</span>
-            <button className="workshop__btn" {...bind(() => w().setExtent((w().current()?.extent ?? MIN_EXTENT) + 1))} disabled={extent >= MAX_EXTENT} aria-label="Larger grid">+</button>
+            <button className="workshop__btn" {...bind(() => w().setExtent(stepExtent(w().current()?.extent ?? MIN_EXTENT, 1)))} disabled={extent >= MAX_EXTENT} aria-label="Larger grid">+</button>
             <span className="workshop__unit-size" title="Saved with the shard. Never below what its points need.">gibsons each side of each axis</span>
           </div>
         </div>

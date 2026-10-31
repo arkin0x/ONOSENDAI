@@ -21,12 +21,12 @@ import { ShardMesh } from './ShardMesh'
 import { GHOST_OPACITY } from './shardFaces'
 import { regionBox, type Box } from '../lib/clip'
 import { placedPose, type Pose } from '../lib/pose'
-import type { ShardModel } from 'sno-core/shards'
+import { neededExtent, type ShardModel } from 'sno-core/shards'
 import { TapTarget, farCullDoublings } from './TapTarget'
 import { useMutes } from '../store/useMutes'
 
 const REACH = GRID_RADIUS * 8
-/** Past this many doublings out from its unit, a shard with no placed objects can never be seen (TapTarget farCullDoublings). */
+/** Past this many doublings out from its unit, a shard of the usual size with no placed objects can never be seen (TapTarget farCullDoublings). */
 const FAR_CULL = farCullDoublings()
 
 /**
@@ -153,9 +153,28 @@ export function drawableShards(items: Array<Pick<WorldItem, 'key' | 'type' | 'at
     .filter((w) => w.type === 'shard' && w.shard && w.plane === plane)
     // Not drawn at all once it cannot show a pixel at any distance; a shard
     // with placed objects is exempt, since they can be far larger than it.
-    .filter((w) => (w.shard!.parts?.length ?? 0) > 0 || scaleExp - w.shard!.unit < FAR_CULL)
+    .filter((w) => (w.shard!.parts?.length ?? 0) > 0 || scaleExp - w.shard!.unit < (w.shard!.extent > 64 ? farCullDoublings(w.shard!.extent) : FAR_CULL))
     .map((w) => placeShard(w, origin, scaleExp, axes))
-    .filter((w) => Number.isFinite(w.scale) && Math.hypot(...w.centre) <= REACH)
+    // The far edge counts, not the centre: standing inside a big shard, its centre can be well past REACH.
+    .filter((w) => Number.isFinite(w.scale) && Math.hypot(...w.centre) <= REACH + shardReach(w.shard!, w.scale))
+}
+
+/**
+ * How far a shard really reaches from its origin, in its own units. Its declared
+ * `extent` is advisory (DECK-0003 §1.8), so a tiny object declaring 4,096 would
+ * otherwise stay in the draw list thousands of cells out. Its points are what
+ * count, and a walk over them is kept for as long as the model is.
+ */
+const reaches = new WeakMap<ShardModel, number>()
+function drawnExtent(shard: ShardModel): number {
+  let r = reaches.get(shard)
+  if (r === undefined) reaches.set(shard, (r = Math.min(shard.extent, neededExtent(shard))))
+  return r
+}
+
+/** How far a shard can stretch from its centre in the render frame: the corner of what it holds, at its scale. */
+export function shardReach(shard: ShardModel, scale: number): number {
+  return Math.sqrt(3) * drawnExtent(shard) * scale
 }
 
 /** Two clip boxes that cut the same. */

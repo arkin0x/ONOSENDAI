@@ -44,7 +44,7 @@ describe('targetSpan', () => {
 
 describe('the far bound (arkinox, 2026-10-01)', () => {
   // The largest model, along its diagonal, at the nearest drawn distance on the tallest screen.
-  const worstPx = (doublings: number): number => Math.sqrt(3) * (2 * MAX_EXTENT + 1) * 2 ** -doublings * pxPerUnit(FOV, MAX_VIEWPORT_PX, CAMERA_NEAR)
+  const worstPx = (doublings: number, extent = 64): number => Math.sqrt(3) * (2 * extent + 1) * 2 ** -doublings * pxPerUnit(FOV, MAX_VIEWPORT_PX, CAMERA_NEAR)
 
   it('is 22 doublings at the shipped constants', () => {
     expect(farCullDoublings()).toBe(22)
@@ -54,6 +54,17 @@ describe('the far bound (arkinox, 2026-10-01)', () => {
     const n = farCullDoublings()
     expect(worstPx(n - 1)).toBeGreaterThanOrEqual(MIN_VISIBLE_PX)
     expect(worstPx(n)).toBeLessThan(MIN_VISIBLE_PX)
+  })
+
+  it('gives a larger grid its own bound, still the tightest safe one, and leaves the rest of the world alone', () => {
+    expect(farCullDoublings(8)).toBe(22)
+    expect(farCullDoublings(64)).toBe(22)
+    for (const extent of [65, 200, 1000, MAX_EXTENT]) {
+      const n = farCullDoublings(extent)
+      expect(worstPx(n - 1, extent)).toBeGreaterThanOrEqual(MIN_VISIBLE_PX)
+      expect(worstPx(n, extent)).toBeLessThan(MIN_VISIBLE_PX)
+    }
+    expect(farCullDoublings(MAX_EXTENT)).toBe(22 + Math.ceil(Math.log2(MAX_EXTENT / 64)))
   })
 })
 

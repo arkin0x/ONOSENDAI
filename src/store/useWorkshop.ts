@@ -781,6 +781,9 @@ function facesFor(pts: P3[]): Tris | null {
 }
 
 export const useWorkshop = create<WorkshopState>((set, get) => {
+  /** The shard as the last change of GRID SIZE left it, while that is still the shard on the bench (setExtent). */
+  let extentRun: ShardModel | null = null
+
   /**
    * Apply an edit to the current shard, remember what it was, stamp it, persist.
    *
@@ -1003,7 +1006,16 @@ export const useWorkshop = create<WorkshopState>((set, get) => {
       if (!s) return
       const e = Math.max(Math.max(MIN_EXTENT, neededExtent(s)), Math.min(MAX_EXTENT, Math.round(extent)))
       if (e === s.extent) return
-      edit((cur) => ({ ...cur, extent: e }))
+      // One held key is one undo step: from 64 to the top is about a hundred
+      // calls, which would push everything before it out of the undo history.
+      // Whatever edit comes next leaves the shard a different object, and starts a new step.
+      if (extentRun === s) {
+        const { shards } = get()
+        const list = shards.map((x) => (x === s ? { ...x, extent: e, updatedAt: Date.now() } : x))
+        set({ shards: list, future: [] })
+        save(list)
+      } else edit((cur) => ({ ...cur, extent: e }))
+      extentRun = get().current()
       set({ level: Math.max(-e * TICKS_PER_UNIT, Math.min(e * TICKS_PER_UNIT, get().level)) })
     },
     setPlane: (plane) => set({ plane, aim: null }),

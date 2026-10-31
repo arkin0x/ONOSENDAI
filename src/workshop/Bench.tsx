@@ -46,6 +46,7 @@ import { useCyberspace } from '../store/useCyberspace'
 import { Hold, noteGesture, tapSlop } from './deadZone'
 import { HandleDots, HandleHalos, HandleHits, PressMemory, dotCapacity, type Halo } from './handleDots'
 import { keepPrograms } from '../lib/keepPrograms'
+import { BENCH_NEAR, benchNear, benchReach, nearMoved } from './gridSize'
 
 type P3 = [number, number, number]
 
@@ -700,6 +701,31 @@ function ViewDriver(): null {
 }
 
 /**
+ * The camera follows the grid out (gridSize.ts): how far it draws goes with the
+ * grid's size, and the near plane goes with how far back it stands, because a
+ * depth buffer spent on the first few centimetres cannot sort a grid hundreds of
+ * gibsons across. Close in, the near plane is where it always was. Nothing here
+ * allocates, and the projection is rebuilt only when a plane really moves.
+ */
+function CameraReach({ extent }: { extent: number }): null {
+  const camera = useThree((s) => s.camera) as PerspectiveCamera
+  const controls = useThree((s) => s.controls) as unknown as { target: Vector3 } | null
+  const invalidate = useThree((s) => s.invalidate)
+  useEffect(() => {
+    camera.far = benchReach(extent).far
+    camera.updateProjectionMatrix()
+    invalidate()
+  }, [camera, extent, invalidate])
+  useFrame(() => {
+    const near = controls ? benchNear(camera.position.distanceTo(controls.target)) : BENCH_NEAR
+    if (!nearMoved(camera.near, near)) return
+    camera.near = near
+    camera.updateProjectionMatrix()
+  })
+  return null
+}
+
+/**
  * The bench draws when something changed, never otherwise (frameloop
  * "demand" on the Canvas below). A still bench at 144 Hz drew and sorted
  * everything 144 times a second to show the same picture: the fan, the
@@ -793,7 +819,7 @@ function BenchImpl(): JSX.Element {
   // whole selection; DESELECT, the pad's hub and Esc let go there.
   return (
     <Canvas
-      camera={{ fov: 50, position: [10, 9, 12], near: 0.05, far: 200 }}
+      camera={{ fov: 50, position: [10, 9, 12], near: BENCH_NEAR, far: 200 }}
       dpr={[1, 2]}
       gl={{ antialias: true }}
       frameloop="demand"
@@ -823,7 +849,7 @@ function BenchImpl(): JSX.Element {
           the view in the screen plane; pinch or the wheel dollies, in to 0.6 of a
           gibson so a fifth-gibson step fills a good share of a phone's screen.
           These are the controls' own bindings. */}
-      <OrbitControls makeDefault enablePan screenSpacePanning panSpeed={0.9} enableRotate={tool !== 'select'} minDistance={0.6} maxDistance={60} dampingFactor={0.12} />
+      <OrbitControls makeDefault enablePan screenSpacePanning panSpeed={0.9} enableRotate={tool !== 'select'} minDistance={0.6} maxDistance={benchReach(extent).maxDistance} dampingFactor={0.12} />
       <OrbitHold />
       <Marquee />
       <Aim />
@@ -831,6 +857,7 @@ function BenchImpl(): JSX.Element {
       <BenchWake />
       <AxesReporter />
       <ViewDriver />
+      <CameraReach extent={extent} />
       {/* Axes, in the compass's colors, so X is red here and out there. */}
       <BenchAxes reach={extent + 1} />
       <Grid />

@@ -84,6 +84,23 @@ export async function frameOf(shard: ShardModel, own = false): Promise<ThumbFram
   return frameOfBounds(placedBounds(shard, placed ?? []))
 }
 
+/** How far these cameras draw, which every object fitted until a grid could grow past 64 units. */
+const CLIP_FAR = 100000
+
+/**
+ * Keep a framed object inside the camera's clipping planes. Past CLIP_FAR an
+ * object would frame perfectly and draw nothing, so a frame that overruns takes
+ * the far plane out with it, and the near plane too, or its depth buffer could
+ * not sort it. Both are set every time: these cameras are reused, and the next
+ * object may be small, which a near plane left out there would slice in half.
+ * Any object that fits gets exactly the planes it always had.
+ */
+export function holdInClip(camera: { near: number; far: number }, distance: number, reach: number, near = 0.01): void {
+  const needed = distance + 2 * reach
+  camera.far = Math.max(CLIP_FAR, needed)
+  camera.near = needed > CLIP_FAR ? needed / CLIP_FAR : near
+}
+
 /** How far a camera with this field of view stands for a sphere of `reach` to fit with a little room. */
 export function framedDistance(reach: number, fovDeg: number): number {
   return (reach / Math.sin((fovDeg / 2) * (Math.PI / 180))) * 1.08
@@ -123,6 +140,7 @@ function Capture({ job }: { job: ThumbJob }): JSX.Element | null {
       const n = Math.hypot(0.62, 0.48, 0.62)
       camera.position.set((d * 0.62) / n, (d * 0.48) / n, (d * 0.62) / n)
       camera.lookAt(0, 0, 0)
+      holdInClip(camera, d, frame.reach)
       camera.updateProjectionMatrix()
     }
     gl.render(scene, camera)

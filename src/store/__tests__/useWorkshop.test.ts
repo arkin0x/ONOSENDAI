@@ -6,7 +6,7 @@
  */
 
 import { describe, it, expect, beforeEach } from 'vitest'
-import { TICKS_PER_UNIT as T, ticksOf, vertexAt } from 'sno-core/shards'
+import { MAX_EXTENT, TICKS_PER_UNIT as T, ticksOf, vertexAt } from 'sno-core/shards'
 import { DEFAULT_PALETTE, nextSelection, settleSelection, tapSelection, useWorkshop } from '../useWorkshop'
 import { stackedCount } from '../../lib/weld'
 import { BUILT_IN, hexAt, snapHex } from 'sno-core/snoPalette'
@@ -211,7 +211,9 @@ describe('workshop', () => {
     w().setExtent(3)
     expect(w().current()!.extent).toBe(5)        // the point at x=5 holds it
     w().setExtent(999)
-    expect(w().current()!.extent).toBe(64)
+    expect(w().current()!.extent).toBe(999)      // no cap at 64 any more (arkinox, 2026-10-31)
+    w().setExtent(MAX_EXTENT * 2)
+    expect(w().current()!.extent).toBe(MAX_EXTENT) // held at the position bound
     w().setLevel(50 * T); expect(w().level).toBe(50 * T)
     w().setExtent(6)
     expect(w().level).toBe(6 * T)                // the level follows the grid down
@@ -974,5 +976,40 @@ describe('stacked by a move is not welded (2026-10-12)', () => {
     w().undo(); w().undo(); w().undo()
     expect(at()).toEqual(start)
     expect(w().selection).toEqual([])
+  })
+})
+
+describe('GRID SIZE held down (review of #555)', () => {
+  const w2 = () => useWorkshop.getState()
+  beforeEach(() => {
+    useWorkshop.setState({ shards: [], currentId: null, selection: [], selectedFace: null, facePick: [], past: [], future: [] })
+    w2().create('t')
+  })
+
+  it('is one undo step, however many stops it runs through', () => {
+    const start = w2().current()!.extent
+    for (let e = start + 1; e < start + 200; e++) w2().setExtent(e)
+    expect(w2().current()!.extent).toBe(start + 199)
+    expect(w2().past).toHaveLength(1)
+    w2().undo()
+    expect(w2().current()!.extent).toBe(start)
+  })
+
+  it('does not push what came before it out of the history', () => {
+    w2().addVertex([0, 0, 0])
+    for (let e = 20; e < 300; e++) w2().setExtent(e)
+    expect(w2().past).toHaveLength(2)
+    w2().undo()
+    w2().undo()
+    expect(w2().current()!.vertices).toHaveLength(0)
+  })
+
+  it('an edit between two holds makes two steps', () => {
+    w2().setExtent(20); w2().setExtent(21)
+    w2().addVertex([0, 0, 0])
+    w2().setExtent(30); w2().setExtent(31)
+    expect(w2().past).toHaveLength(3)
+    w2().undo()
+    expect(w2().current()!.extent).toBe(21)
   })
 })

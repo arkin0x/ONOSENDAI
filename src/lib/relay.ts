@@ -29,6 +29,45 @@ export const CYBERSPACE_RELAY = DEFAULT_RELAY
 /** How long a publish or a one-shot query waits before giving up. */
 const MAX_WAIT_MS = 8000
 
+/**
+ * How long any connection may take when its caller names no time of its own.
+ * nostr-tools sets no timer without one, and every caller on a socket shares
+ * the first caller's connect, so one untimed connect to a relay that accepts
+ * and never answers took the time limit from all of them: a publish or a read
+ * then waited as long as the socket did. Long enough for a slow relay
+ * (cyberspace.nostr1.com took 4.6 s on 2026-10-10).
+ */
+const CONNECT_MS = 5000
+/** How long a relay that hung is left alone. */
+const HUNG_MS = 5 * 60_000
+/** Relays that hung (normalized URL to when they may be asked again). */
+const hungUntil = new Map<string, number>()
+
+/**
+ * Leave this relay alone for a while, so that it costs one wait and not one
+ * on every move. Never the canonical relay: it is where everyone meets, so it
+ * is always asked, and a publish that fails there is retried.
+ */
+function noteHung(url: string): void {
+  const norm = normalizeURL(url)
+  if (norm !== normalizeURL(CYBERSPACE_RELAY)) hungUntil.set(norm, Date.now() + HUNG_MS)
+}
+
+/** Every connection goes through ensureRelay, publishing and live subscriptions included. */
+class Pool extends AbstractSimplePool {
+  override async ensureRelay(...[url, params]: Parameters<AbstractSimplePool['ensureRelay']>): ReturnType<AbstractSimplePool['ensureRelay']> {
+    if ((hungUntil.get(normalizeURL(url)) ?? 0) > Date.now()) throw new Error('relay hung, left alone for now')
+    const started = Date.now()
+    try {
+      return await super.ensureRelay(url, { ...params, connectionTimeout: params?.connectionTimeout ?? CONNECT_MS })
+    } catch (err) {
+      // Only a full wait says the relay hung: a caller's short question may run out on a healthy one.
+      if (/timed out/.test(String(err)) && Date.now() - started >= CONNECT_MS) noteHung(url)
+      throw err
+    }
+  }
+}
+
 let pool: AbstractSimplePool | null = null
 
 /**
@@ -78,7 +117,7 @@ export function getPool(): AbstractSimplePool {
     // attacker could not sign themselves; skip it there, verify everything
     // else as before. (A publisher allowlist for anchors is the follow-up
     // that would make relay-sourced stops authenticated at all.)
-    pool = new AbstractSimplePool({
+    pool = new Pool({
       verifyEvent: (ev) => (ev.kind === 321 ? true : verifyRelayEvent(ev)),
       // SimplePool's own default (3e3), restated because the abstract
       // constructor requires the field.
@@ -133,7 +172,10 @@ async function authRelay(url: string): Promise<void> {
     } else {
       noChallenge.add(url)
     }
-  } catch { /* relay down, or does not require auth */ }
+  } catch (err) {
+    // Relay down, or does not require auth; or it took the socket and never answered its AUTH.
+    if (/auth timed out/.test(String(err))) noteHung(url)
+  }
 }
 
 async function authAll(relays: string[]): Promise<void> {
@@ -180,6 +222,7 @@ async function publishOnce(relays: string[], event: NostrEvent): Promise<Publish
     r.status === 'rejected'
       ? String(r.reason?.message ?? r.reason)
       : String(r.value).startsWith(CONNECTION_FAILURE) ? String(r.value) : null
+  results.forEach((r, i) => { if (r.status === 'rejected' && /publish timed out/.test(String(r.reason))) noteHung(relays[i]) })
   const accepted = relays.filter((_, i) => results[i] !== undefined && failed(results[i]) === null).map((r) => normalizeURL(r))
   if (accepted.length > 0) return { ok: true, accepted }
   const reason = results.map(failed).find(Boolean)
@@ -260,10 +303,12 @@ interface AskOptions {
  * the relay auth-gates reads and a fresh socket's first REQ can beat the
  * challenge.
  */
+const NO_ANSWER = 'no answer in time'
+
 async function askOne(url: string, filter: Filter, deadline: number, opts: AskOptions = {}): Promise<RelayAnswer> {
   const { answerMs, onSent, stop, onEvent } = opts
   const remaining = (): number => Math.max(0, deadline - Date.now())
-  const late = (events: NostrEvent[] = []): RelayAnswer => ({ url, outcome: 'unreachable', reason: 'no answer in time', events })
+  const late = (events: NostrEvent[] = []): RelayAnswer => ({ url, outcome: 'unreachable', reason: NO_ANSWER, events })
   if (stop?.aborted) return late()
   let relay: AbstractRelay
   try {
@@ -349,7 +394,10 @@ async function queryRelays(relays: string[], filter: Filter, maxWait = MAX_WAIT_
   const urls = [...new Set(relays.map((r) => normalizeURL(r)))]
   await authAll(urls)
   const deadline = Date.now() + maxWait
-  return Promise.all(urls.map((url) => askOne(url, filter, deadline)))
+  const answers = await Promise.all(urls.map((url) => askOne(url, filter, deadline)))
+  // Silent for a whole full-length question, with nothing sent: it hung. A short question says nothing.
+  if (maxWait >= CONNECT_MS) for (const a of answers) if (a.outcome === 'unreachable' && a.reason === NO_ANSWER && a.events.length === 0) noteHung(a.url)
+  return answers
 }
 
 /**
@@ -728,10 +776,14 @@ export async function probeLiveness(): Promise<'alive' | 'dead' | 'skipped'> {
 export function watchConnectivity(): () => void {
   const onVisibility = (): void => {
     if (document.visibilityState === 'hidden') { hiddenAt = Date.now(); return }
-    if (hiddenAt !== null && Date.now() - hiddenAt >= RESUME_AFTER_HIDDEN_MS) resumeLive()
+    if (hiddenAt !== null && Date.now() - hiddenAt >= RESUME_AFTER_HIDDEN_MS) {
+      // A device coming back has half-open sockets, so what timed out was not the relay's doing.
+      hungUntil.clear()
+      resumeLive()
+    }
     hiddenAt = null
   }
-  const onOnline = (): void => resumeLive()
+  const onOnline = (): void => { hungUntil.clear(); resumeLive() }
   // Not while hidden: a background tab's timers are throttled anyway, and the
   // return is handled above.
   const tick = (): void => { if (document.visibilityState === 'visible') void probeLiveness() }

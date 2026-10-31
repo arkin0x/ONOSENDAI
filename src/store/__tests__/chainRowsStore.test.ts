@@ -15,6 +15,8 @@ const version = vi.hoisted(() => ({ v: 2 as 1 | 2 }))
 const posted = vi.hoisted(() => [] as unknown[])
 const sent = vi.hoisted(() => [] as Array<{ id: string }>)
 const quota = vi.hoisted(() => ({ chainChars: Infinity }))
+/** What the deploy's /version.json answers: a value, or nothing at all (offline). */
+const deploy = vi.hoisted(() => ({ answer: null as unknown }))
 vi.hoisted(() => {
   const m = new Map<string, string>()
   const storage: Storage = {
@@ -139,6 +141,11 @@ beforeEach(() => {
   posted.length = 0
   sent.length = 0
   version.v = 2
+  deploy.answer = { build: 'deployed', minChainEpoch: 2, chainStore: 2 }
+  vi.stubGlobal('fetch', async (url: unknown) => {
+    if (!String(url).includes('version.json') || deploy.answer === null) throw new Error('no network')
+    return { ok: true, json: async () => deploy.answer }
+  })
   quota.chainChars = Infinity
   localStorage.clear()
   ;(globalThis as { indexedDB?: IDBFactory }).indexedDB = new IDBFactory()
@@ -146,7 +153,7 @@ beforeEach(() => {
   localStorage.setItem('onosendai:live', '0')
   vi.spyOn(console, 'warn').mockImplementation(() => {})
 })
-afterEach(() => { vi.restoreAllMocks() })
+afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals() })
 
 describe('moving a chain to rows', () => {
   it('copies the chain whole, and the load after it reads the rows', async () => {
@@ -209,8 +216,8 @@ describe('moving a chain to rows', () => {
     const proto = IDBObjectStore.prototype as unknown as { put: (...x: unknown[]) => unknown }
     const real = proto.put
     proto.put = function (this: IDBObjectStore, ...x: unknown[]) {
-      const row = x[0] as { id?: string; chainOf?: string; content?: string }
-      if (this.name === 'events' && row.id === chain[5].id && row.chainOf === undefined) return real.apply(this, [{ ...row, content: 'bit rot' }])
+      const row = x[0] as { id?: string; content?: string }
+      if (this.name === 'events' && row.id === chain[5].id) return real.apply(this, [{ ...row, content: 'bit rot' }])
       return real.apply(this, x)
     }
     let a: Tab
@@ -727,5 +734,178 @@ describe('the first draw', () => {
     await S().commit()
     expect(S().events).toHaveLength(6)
     expect(posted.every((m) => (m as { prevEventId?: string }).prevEventId !== '')).toBe(true)
+  })
+})
+
+describe('the kill switch, from the deploy\'s version file', () => {
+  const OFF = 'onosendai:chain-store-off'
+  const look = async (): Promise<void> => { await (await import('../../lib/versionGate')).checkVersion() }
+
+  it('a deploy that says no: nobody\'s chain is moved, and it goes on in the old stores', async () => {
+    deploy.answer = { build: 'deployed', minChainEpoch: 2, chainStore: 1 }
+    const chain = chainOf(6)
+    await seedOldStores(chain, { localToo: true })
+    const a = await openTab()
+    expect(a.rows.inRows(pk)).toBe(false)
+    expect(a.S().events).toHaveLength(6)
+    const m = await signMove(a)
+    const db = await import('../../lib/chainDb')
+    await db.chainWritesSettled()
+    expect((await db.readStoredChain(pk) as { events: NostrEvent[] }).events.map((e) => e.id)).toContain(m)
+    db.closeChainDb()
+    expect(await rowsNow()).toBeNull()
+  })
+
+  it('a version file without the field is a deploy from before the rows, and also says no', async () => {
+    deploy.answer = { build: 'deployed', minChainEpoch: 2 }
+    await seedOldStores(chainOf(4))
+    const a = await openTab()
+    expect(a.rows.inRows(pk)).toBe(false)
+    expect(localStorage.getItem(OFF)).toBe('absent')
+  })
+
+  it('no answer at all: not on this load, and nothing remembered against the next', async () => {
+    deploy.answer = null
+    await seedOldStores(chainOf(4))
+    const a = await openTab()
+    expect(a.rows.inRows(pk)).toBe(false)
+    expect(await rowsNow()).toBeNull()
+    expect(localStorage.getItem(OFF)).toBeNull()
+    deploy.answer = { build: 'deployed', minChainEpoch: 2, chainStore: 2 }
+    const b = await openTab()
+    expect(b.rows.inRows(pk)).toBe(true)
+    expect((await rowsNow())!.events).toHaveLength(4)
+  })
+
+  it('off while a tab is in rows: its next save goes whole to the old stores, moves in rows included', async () => {
+    const chain = chainOf(5)
+    await seedOldStores(chain, { localToo: true })
+    const a = await openTab()
+    const inRows = await signMove(a)
+    await a.rows.chainRowsSettled()
+    deploy.answer = { build: 'fix', minChainEpoch: 2, chainStore: 1 }
+    await look()
+    expect(a.rows.rowsWanted()).toBe(false)
+    const after = await signMove(a)
+    const db = await import('../../lib/chainDb')
+    await db.chainWritesSettled()
+    const kept = await db.readStoredChain(pk) as { events: NostrEvent[] }
+    db.closeChainDb()
+    expect(kept.events.map((e) => e.id)).toEqual(expect.arrayContaining([inRows, after]))
+    // And the rows stay as they were, whole.
+    expect((await rowsNow())!.events.map((e) => e.id)).toContain(inRows)
+  })
+
+  it('off, across a reload, offline: it holds, and the chain comes from the rows and goes to the old stores', async () => {
+    const chain = chainOf(5)
+    await seedOldStores(chain, { localToo: true })
+    const a = await openTab()
+    const m = await signMove(a)
+    await a.rows.chainRowsSettled()
+    deploy.answer = { build: 'fix', minChainEpoch: 2, chainStore: 1 }
+    await look()
+    deploy.answer = null
+    const b = await openTab()
+    expect(b.rows.rowsWanted()).toBe(false)
+    expect(b.S().prevEventId).toBe(m)
+    const db = await import('../../lib/chainDb')
+    await db.chainWritesSettled()
+    expect((await db.readStoredChain(pk) as { events: NostrEvent[] }).events.map((e) => e.id)).toContain(m)
+    db.closeChainDb()
+  })
+
+  it('on again: the next load folds in what the old stores took meanwhile, and nothing is lost', async () => {
+    const chain = chainOf(5)
+    await seedOldStores(chain, { localToo: true })
+    const a = await openTab()
+    const m1 = await signMove(a)
+    await a.rows.chainRowsSettled()
+    deploy.answer = { build: 'fix', minChainEpoch: 2, chainStore: 1 }
+    await look()
+    const m2 = await signMove(a)
+    const db = await import('../../lib/chainDb')
+    await db.chainWritesSettled()
+    db.closeChainDb()
+    ;(await import('../../lib/eventDb/connection')).closeEventDb()
+    deploy.answer = { build: 'fixed', minChainEpoch: 2, chainStore: 2 }
+    await look()
+    // On takes effect at a load, never under a running tab.
+    expect(a.rows.rowsWanted()).toBe(false)
+    expect(localStorage.getItem(OFF)).toBeNull()
+    const b = await openTab()
+    await vi.waitFor(() => expect(b.S().prevEventId).toBe(m2))
+    await b.rows.chainRowsSettled()
+    expect((await rowsNow())!.events.map((e) => e.id).slice(-2)).toEqual([m1, m2])
+  })
+})
+
+describe('the store probe, at open', () => {
+  const bendIndex = (): (() => void) => {
+    const proto = IDBObjectStore.prototype as unknown as { createIndex: (...a: unknown[]) => unknown }
+    const real = proto.createIndex
+    proto.createIndex = function (this: unknown, name: unknown, key: unknown, opts: unknown) { return real.call(this, name, key, name === 'byTag' ? { ...(opts as object), multiEntry: false } : opts) }
+    return () => { proto.createIndex = real }
+  }
+
+  it('a browser that fails it: nobody\'s chain is moved, and the real database is never made', async () => {
+    const chain = chainOf(6)
+    await seedOldStores(chain, { localToo: true })
+    const restore = bendIndex()
+    let a: Tab
+    try {
+      a = await openTab()
+      expect(a.rows.inRows(pk)).toBe(false)
+      expect(a.rows.rowsWanted()).toBe(false)
+      expect(a.S().events).toHaveLength(6)
+      const m = await signMove(a)
+      const db = await import('../../lib/chainDb')
+      await db.chainWritesSettled()
+      expect((await db.readStoredChain(pk) as { events: NostrEvent[] }).events.map((e) => e.id)).toContain(m)
+      db.closeChainDb()
+      expect((await indexedDB.databases()).map((d) => d.name)).not.toContain('onosendai:events')
+    } finally { restore() }
+  })
+
+  it('a failure is not remembered: once the browser passes, the chain moves', async () => {
+    await seedOldStores(chainOf(4))
+    const restore = bendIndex()
+    try { await openTab() } finally { restore() }
+    expect(localStorage.getItem('onosendai:chain-store-probe')).toBeNull()
+    const b = await openTab()
+    expect(b.rows.inRows(pk)).toBe(true)
+  })
+
+  it('a pass is remembered for this browser version, so a load does not pay for it, and a new version asks again', async () => {
+    await seedOldStores(chainOf(4))
+    await openTab()
+    expect(localStorage.getItem('onosendai:chain-store-probe')).toContain(navigator.userAgent)
+    const proto = (globalThis as { indexedDB: IDBFactory }).indexedDB
+    const open = vi.spyOn(proto, 'open')
+    await openTab()
+    expect(open.mock.calls.map((c) => c[0])).not.toContain('onosendai:events-probe')
+    open.mockClear()
+    localStorage.setItem('onosendai:chain-store-probe', '1.1:an older browser')
+    await openTab()
+    expect(open.mock.calls.map((c) => c[0])).toContain('onosendai:events-probe')
+  })
+
+  it('a browser that stops passing after an update: the moves in rows are taken back to the old stores', async () => {
+    const chain = chainOf(5)
+    await seedOldStores(chain, { localToo: true })
+    const a = await openTab()
+    const m = await signMove(a)
+    await a.rows.chainRowsSettled()
+    ;(await import('../../lib/eventDb/connection')).closeEventDb()
+    localStorage.setItem('onosendai:chain-store-probe', '1.1:the browser before the update')
+    const restore = bendIndex()
+    try {
+      const b = await openTab()
+      expect(b.rows.rowsWanted()).toBe(false)
+      expect(b.S().prevEventId).toBe(m)
+      const db = await import('../../lib/chainDb')
+      await db.chainWritesSettled()
+      expect((await db.readStoredChain(pk) as { events: NostrEvent[] }).events.map((e) => e.id)).toContain(m)
+      db.closeChainDb()
+    } finally { restore() }
   })
 })

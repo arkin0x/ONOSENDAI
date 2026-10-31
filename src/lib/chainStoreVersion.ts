@@ -8,6 +8,12 @@
  * | 2 | `onosendai:events`: one row per action (lib/eventDb/chainRows.ts). The old stores stay frozen, as a backup |
  *
  * Going back is a deploy of this constant set to 1, not a revert of the code.
+ * It reaches builds already running too, with no app update: the deploy's
+ * /version.json carries this number as `chainStore` (lib/chainRulesEpoch.ts),
+ * and a build that sees anything but 2 there stops using the rows at once, and
+ * remembers that across loads (lib/chainStore.ts). A chain is only moved after
+ * the deploy has said yes.
+ *
  * A build on version 1 reads the rows too, takes the chain from them when they
  * are further on (the moves made on version 2 are only there), and from then
  * on saves whole to the old stores again. A later build on version 2 finds

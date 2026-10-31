@@ -90,8 +90,10 @@ beforeEach(async () => {
   localStorage.setItem('onosendai:nsec', nip19.nsecEncode(sk))
   localStorage.setItem('onosendai:live', '0')
   vi.spyOn(console, 'warn').mockImplementation(() => {})
+  // The deploy says yes, so a chain moves into rows (lib/chainStore.ts deployAllowsMove).
+  vi.stubGlobal('fetch', async () => ({ ok: true, json: async () => ({ build: 'deployed', minChainEpoch: 2, chainStore: 2 }) }))
 })
-afterEach(() => { vi.restoreAllMocks() })
+afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals() })
 
 async function seed(events: NostrEvent[]): Promise<void> {
   vi.resetModules()

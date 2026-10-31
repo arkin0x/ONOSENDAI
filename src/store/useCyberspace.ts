@@ -82,10 +82,13 @@ import {
 } from '../lib/space'
 import { confirmChainEvents } from '../lib/chains'
 import { chainDbAvailable, chainWritePause, readStoredChain, setAsideChains, setAsideStoredChain, writeStoredChain, type StoredChain } from '../lib/chainDb'
+<<<<<<< HEAD
 import { checkRows, clearTail, committedHead, inRows, markerValue, migrateToRows, noteCommitted, onChainLost, onChainRefused, readRows, readTail, rowsHead, rowsMarked, rowsWanted, saveRows, setAsideRows, setMarker, writeTail, type RowsRead } from '../lib/chainStore'
+=======
+import { clearTail, committedHead, deployAllowsMove, inRows, markerValue, migrateToRows, noteCommitted, onChainLost, onChainRefused, readRows, readTail, rowsHead, rowsMarked, rowsWanted, saveRows, setAsideRows, setMarker, storeWorksHere, turnRowsOff, writeTail, type RowsRead } from '../lib/chainStore'
+>>>>>>> feat/event-db-chain
 import { eventDbAvailable } from '../lib/eventDb/client'
 import type { ChainRead, ChainSource } from '../lib/eventDb/chainRows'
-import { CHAIN_STORE_VERSION } from '../lib/chainStoreVersion'
 import { checkSignatures } from '../lib/sigCheck'
 import { rememberVerified } from '../lib/verifiedSigs'
 import {
@@ -2320,6 +2323,15 @@ function tailInHand(pubkey: string): void {
  * old stores are never written again for an identity once it is in rows.
  */
 async function hydrateFromRows(pubkey: string, entry: { pubkey: string; dirty: boolean }, ticket: number, epoch: number, startedAt: number): Promise<void> {
+  // Not on this browser, unless it has shown it can. It stays on the old stores.
+  if (!await storeWorksHere()) {
+    turnRowsOff()
+    if (hydration !== entry || ticket !== hydrateTicket || useCyberspace.getState().identity.pubkey !== pubkey) return
+    if (rowsMarked(pubkey)) frozenCopyInHand(pubkey)
+    await hydrateFromOldStores(pubkey, entry, ticket, epoch, startedAt)
+    await takeRowsBack(pubkey, entry, ticket)
+    return
+  }
   const read = await readRows(pubkey, (late) => {
     if (ticket !== hydrateTicket || late === 'unreadable' || late === null) return
     if (useCyberspace.getState().identity.pubkey !== pubkey) return
@@ -2350,6 +2362,9 @@ async function hydrateFromRows(pubkey: string, entry: { pubkey: string; dirty: b
   if (rowsMarked(pubkey)) frozenCopyInHand(pubkey)
   if (!await hydrateFromOldStores(pubkey, entry, ticket, epoch, startedAt)) return
   tailInHand(pubkey)
+  // Only on the deploy's yes, asked now, so a bad move can be stopped from the version file.
+  if (!await deployAllowsMove()) return
+  if (hydration !== entry || ticket !== hydrateTicket) return
   const moving = moveToRows(pubkey, startedAt)
   await Promise.race([moving, new Promise((resolve) => setTimeout(resolve, MIGRATE_HOLD_MS))])
 }
@@ -2395,6 +2410,7 @@ async function moveToRows(pubkey: string, startedAt: number): Promise<void> {
   noteCommitted(pubkey, events.map((e) => e.id), published)
   setMarker(pubkey, legacyMark)
   clearTail(pubkey)
+  mark('onosendai:chain-moved')
   // Moves made after the hold gave out go in now, as the next save would take them.
   const now = useCyberspace.getState()
   if (now.identity.pubkey === pubkey && now.events !== events && now.events[0]?.pubkey === pubkey) saveChain(now.events, now.published, now.chain, now.held)
@@ -2430,14 +2446,15 @@ function takeRows(pubkey: string, read: ChainRead, blindSince: number | null): b
 }
 
 /**
- * Version 1 of the chain store (lib/chainStoreVersion.ts), after a version 2
- * ran on this device: the rows may be further on than the old stores, by every
- * move made since. Taken like any other copy, and the old stores are written
- * from it at once.
+ * The rows are off (lib/chainStoreVersion.ts: a build on version 1, or the
+ * deploy's kill switch, or a browser that no longer passes the probe), after
+ * they were in use on this device: they may be further on than the old stores,
+ * by every move made since. Taken like any other copy, and the old stores are
+ * written from it at once.
  */
 async function takeRowsBack(pubkey: string, entry: { dirty: boolean }, ticket: number): Promise<void> {
   // Only a device that has used the rows opens them: everywhere else this is the old build, to the letter.
-  if (CHAIN_STORE_VERSION !== 1 || !eventDbAvailable() || !rowsMarked(pubkey)) return
+  if (rowsWanted() || !eventDbAvailable() || !rowsMarked(pubkey)) return
   const read: RowsRead = await readRows(pubkey)
   if (ticket !== hydrateTicket || read === null || read === 'unreadable' || read === 'timeout') return
   if (useCyberspace.getState().identity.pubkey !== pubkey) return
@@ -2674,6 +2691,8 @@ function localHopFailures(event: NostrEvent, fromHex: string, to: Position, plan
       nonce: tagOf('mn'),
       openings: tagOf('mp'),
       eventId: event.id,
+      // A hop this client just signed is a new id, so it is on no list (lib/v1HopListGuard).
+      grandfathered: new Set(),
     })
   } catch (err) {
     return [`check: ${err instanceof Error ? err.message : String(err)}`]

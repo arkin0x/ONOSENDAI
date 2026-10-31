@@ -5,10 +5,12 @@
 
 import { withEventDb } from './connection'
 import { postNote } from './channel'
+import { probeStore } from './probe'
 import { budget, byAddress, byAuthorKind, byKind, byTag, getRows, ingest, type IngestItem } from './store'
 import { chainHead, checkChainRows, commitChain, migrateChain, partedBranches, readChain, setAsideBranch, type ChainCommit, type ChainMigration, type ChainSource } from './chainRows'
 
 export const eventDbOps = {
+  probeStore: () => probeStore(),
   async ingest(by: string, items: IngestItem[]) {
     const result = await withEventDb((db) => ingest(db, items))
     if (result.added.length > 0 || result.struck.length > 0) postNote({ kind: 'events', by, ids: result.added, struck: result.struck })

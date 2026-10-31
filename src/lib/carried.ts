@@ -10,14 +10,9 @@
  * the part that depends on where an object came from.
  */
 
-<<<<<<< HEAD
-import { carriedPayload, carriedTable, carryObject, withAuthor } from 'sno-core/parts'
-import { toPayload, type Ref, type ShardModel } from 'sno-core/shards'
-=======
 import { sha256 } from '@noble/hashes/sha2.js'
-import { carriedTable, carryAll, withAuthor } from 'sno-core/parts'
-import { toPayload, type ShardModel } from 'sno-core/shards'
->>>>>>> feat/carried-objects-deploy
+import { carriedPayload, carriedTable, carryAll, carryObject, withAuthor } from 'sno-core/parts'
+import { toPayload, type Ref, type ShardModel } from 'sno-core/shards'
 import { withAuthoredConstrain } from './walkConstrain'
 
 /**

@@ -11,15 +11,16 @@
  * who left it as a key is, and a tap opens its card, where OPEN is.
  */
 
-import { useEffect, useMemo } from 'react'
+import { useEffect, useMemo, useRef, useSyncExternalStore } from 'react'
 import { ACCENT } from '../lib/palette'
-import { GRID_RADIUS, itemCentre, type Position, type ViewAxes } from '../lib/space'
+import { GRID_RADIUS, itemCentre, type ViewAxes } from '../lib/space'
 import { drawnLook, lookOf, lookStand, type Look } from '../lib/looks'
-import { regionBox, type Box } from '../lib/clip'
+import { regionBox } from '../lib/clip'
+import type { ShardModel } from 'sno-core/shards'
 import { markShown } from '../lib/worldMarks'
 import { alignedOrigin, useCyberspace } from '../store/useCyberspace'
 import { openedByHand, openedContents, openedKey, useOpenedChests } from '../store/useOpenedChests'
-import { useShards } from '../store/useShards'
+import { useShards, type WorldItem } from '../store/useShards'
 import { useMutes } from '../store/useMutes'
 import { setDrawnLooks, useOpenCeremony } from '../store/useOpenCeremony'
 import { ChestCeremony } from './ChestCeremony'
@@ -31,7 +32,11 @@ import { holdsEntry } from '../lib/inventory'
 import { hidesThing } from '../lib/muteList'
 import { useInventory } from '../store/useInventory'
 import { useReducedMotion } from '../hooks/useReducedMotion'
-import { LookMark } from './LookMark'
+import { LookMark, type LookFrame } from './LookMark'
+import { sameBox, samePose } from './WorldShards'
+import { placedPose } from '../lib/pose'
+import { trueScale } from '../lib/itemModel'
+import { followsVersion, onFollows, trustedPlacement } from '../lib/trust'
 import { NOTE, NOTE_EDGE_PX, author, itemMarkText } from './WorldMessages'
 
 const REACH = GRID_RADIUS * 8
@@ -54,10 +59,35 @@ export interface PlacedLook {
   text: string
   sub: string
   centre: [number, number, number]
-  /** Where a custom look is cut: its region's walls, in its own frame. None for a built-in, drawn whole. */
-  clip?: Box
-  /** Standing on the ground, by its payload (§3.6). Its region is not square to its own frame then, and it is not cut: standing needs a height of 27 or more (lib/pose SNAP_MIN_HEIGHT), where a region dwarfs a look. */
-  stand?: { at: Position; spin: number }
+  /** Its cut, its stance and its share of the scene's budget (lookFrame). */
+  frame: LookFrame
+}
+
+/** A look's cut and stance as last handed to the scene, by key: kept while equal, so what keys on them holds still. */
+export type KeptLookFrames = Map<string, Pick<LookFrame, 'clip' | 'pose'>>
+
+/**
+ * How a look is drawn now (scene/LookMark LookFrame), from what is drawn: its
+ * unit, its stance, and whom to trust for what it places (as WorldShards'
+ * PlacedShard). A built-in carries nothing to cut, stand or fetch. Its cut and
+ * stance are the same objects as last time while they are equal, because
+ * ShardMesh keys its geometry on the clip's identity and the anchor moves with
+ * every WALK step: a fresh box each step cut every look again every step
+ * (the 2026-10-23 freeze, WorldShards useSteadied).
+ */
+export function lookFrame(w: Pick<WorldItem, 'key' | 'at' | 'height' | 'plane' | 'author'>, look: Look, drawn: ShardModel, centre: [number, number, number], scaleExp: number, axes: ViewAxes, kept: KeptLookFrames): LookFrame {
+  if (look.name !== 'custom') { kept.delete(w.key); return {} }
+  const stand = lookStand(drawn, w.plane, w.at)
+  const was = kept.get(w.key)
+  const pose = stand ? placedPose(axes, stand) : undefined
+  const clip = regionBox(w.at, w.height, drawn.unit, stand ? axes : LOOK_FRAME)
+  const steady = {
+    clip: was?.clip && sameBox(was.clip, clip) ? was.clip : clip,
+    pose: pose && was?.pose && samePose(was.pose, pose) ? was.pose : pose,
+  }
+  kept.set(w.key, steady)
+  const author = drawn.author ?? w.author
+  return { ...steady, budget: { key: `look:${w.key}`, trusted: trustedPlacement(w.author, author), centre, scale: trueScale(drawn.unit, scaleExp) } }
 }
 
 export function ChestLooks({ axes }: { axes: ViewAxes }): JSX.Element | null {
@@ -76,6 +106,9 @@ export function ChestLooks({ axes }: { axes: ViewAxes }): JSX.Element | null {
   // what you hold would float out for a moment after an identity switch.
   const itemsReady = useInventory((s) => s.owner === me && s.storage !== 'loading')
   const still = useReducedMotion()
+  // Whom you follow decides what a look's placed objects may spend.
+  const follows = useSyncExternalStore(onFollows, followsVersion)
+  const frames = useRef<KeptLookFrames>(new Map())
 
   const placed = useMemo<PlacedLook[]>(() => {
     if (!markShown('note', scaleExp)) return []
@@ -91,14 +124,14 @@ export function ChestLooks({ axes }: { axes: ViewAxes }): JSX.Element | null {
       // What the mute list hides is not drawn coming out, as it is not listed (ItemRows ChestBlock).
       const shown = inside?.filter((e) => !hidesThing(muted, { authors: [w.author ?? '', e.event.pubkey], ids: [e.id] }, me))
       const loot = chestLoot({ look: look.kind, entries: shown, held: (e) => holdsEntry(items, e), chest: { at: w.at, plane: w.plane, height: w.height }, itemsReady })
-      const stand = lookStand(look.closed, w.plane, w.at)
-      const clip = look.name === 'custom' && !stand ? regionBox(w.at, w.height, look.closed.unit, LOOK_FRAME) : undefined
-      out.push({ key: w.key, look, opened: openedByHand(me, w.key, w.chest.lockPubkey), loot, text: itemMarkText(w), sub: author({ author: w.author ?? '', mine: w.mine }), centre, clip, stand })
+      const isOpen = openedByHand(me, w.key, w.chest.lockPubkey)
+      const frame = lookFrame(w, look, drawnLook(look, isOpen) ?? look.closed, centre, scaleExp, axes, frames.current)
+      out.push({ key: w.key, look, opened: isOpen, loot, text: itemMarkText(w), sub: author({ author: w.author ?? '', mine: w.mine }), centre, frame })
     }
     return out
     // mine, discovered, curated and muted are what worldItems reads.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [anchor, anchorPlane, scaleExp, axes, me, mine, discovered, curated, muted, opened, items, itemsReady])
+  }, [anchor, anchorPlane, scaleExp, axes, me, mine, discovered, curated, muted, opened, items, itemsReady, follows])
 
   // OPEN asks whether a chest is drawn, to know whether its ceremony can be seen (store/useOpenCeremony).
   useEffect(() => { setDrawnLooks(placed.map((w) => w.key)) }, [placed])
@@ -122,13 +155,12 @@ export function ChestLooks({ axes }: { axes: ViewAxes }): JSX.Element | null {
             label={{ text: w.text, color: NOTE, sub: w.sub, subColor: ACCENT }}
             onTap={() => useShards.getState().selectSecret(w.key)}
             clearTop={loot ? LOOT_TOP : 0}
-            clip={w.clip}
-            stand={w.stand}
+            frame={w.frame}
           >
             {ceremony || loot
               ? () => (
                 <>
-                  {ceremony ? (ceremony.kind === 'door' ? <DoorCeremony look={w.look} at={ceremony.at} calm={ceremony.calm} /> : <ChestCeremony look={w.look} at={ceremony.at} calm={ceremony.calm} />) : model && <ShardMesh shard={model} world />}
+                  {ceremony ? (ceremony.kind === 'door' ? <DoorCeremony look={w.look} at={ceremony.at} calm={ceremony.calm} frame={w.frame} /> : <ChestCeremony look={w.look} at={ceremony.at} calm={ceremony.calm} frame={w.frame} />) : model && <ShardMesh shard={model} world {...w.frame} />}
                   {loot && <ChestLoot loot={w.loot} ceremony={ceremony} still={still} />}
                 </>
               )

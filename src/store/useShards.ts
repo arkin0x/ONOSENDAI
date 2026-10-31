@@ -94,7 +94,7 @@ import { useInventory } from './useInventory'
 import { useShardFolders } from './useShardFolders'
 import { creditOf, useWorkshop } from './useWorkshop'
 import { deletionFilters, isDeleted, type Credit, type FeedObject } from 'sno-core/feed'
-import { builtInLook, builtInLookTags, keptInChest, lookTags, posedLook, type LookName, type LookPose } from '../lib/looks'
+import { builtInLook, builtInLookTags, keptInChest, lookTags, posedLook, posedWrapper, type LookName, type LookPose } from '../lib/looks'
 import { useCeremony } from './useCeremony'
 import { useToast } from './useToast'
 import type { ShardModel } from 'sno-core/shards'
@@ -385,7 +385,7 @@ export function lookModelOf(choice: LookChoice): ShardModel | null {
  */
 export function lookTagsFor(choice: LookChoice, pose: LookPose): string[][] {
   if (choice.from === 'builtin') return builtInLookTags(choice.name, pose)
-  if (choice.from === 'feed') return lookTags(posedLook(feedWrapper(choice.object, pose.unit), pose), null)
+  if (choice.from === 'feed') return lookTags(posedWrapper(feedWrapper(choice.object, pose.unit), pose), null)
   const model = useWorkshop.getState().shards.find((s) => s.id === choice.shardId)
   if (!model) throw new Error('That model is no longer in your workshop.')
   return lookTags(posedLook(model, pose), null)
@@ -996,12 +996,39 @@ function loadMine(): MyDeployment[] {
     const raw = localStorage.getItem(MINE_KEY)
     if (!raw) return []
     const list = JSON.parse(raw)
-    return Array.isArray(list) ? list.filter((d) => d && d.eventId && d.inner && (d.shard || d.text || d.key || d.chest)).map((d) => (d.shard ? { ...d, shard: normalizeStored(d.shard) } : d)) : []
+    return Array.isArray(list) ? list.filter((d) => d && d.eventId && d.inner && (d.shard || d.text || d.key || d.chest)).map((d) => {
+      if (d.shard) return { ...d, shard: normalizeStored(d.shard) }
+      // A chest's look is stored once, in its inner event (storedMine).
+      const look = d.chest && !d.chest.look ? chestItemOf(d.inner)?.look : undefined
+      return look ? { ...d, chest: { ...d.chest, look } } : d
+    }) : []
   } catch { return [] }
 }
 
+/**
+ * The record as stored. A chest's look is in its inner event already, and a
+ * built-in's is some 20 KB a side: kept twice it was 39,800 bytes a row, enough
+ * to fill this storage in a hundred chests. It comes back from the inner event
+ * on load (loadMine).
+ */
+export function storedMine(mine: readonly MyDeployment[]): string {
+  return JSON.stringify(mine.map((d) => {
+    if (!d.chest?.look) return d
+    const { look: _inInner, ...chest } = d.chest
+    void _inInner
+    return { ...d, chest }
+  }))
+}
+
 function saveMine(mine: MyDeployment[]): void {
-  try { localStorage.setItem(MINE_KEY, JSON.stringify(mine)) } catch { /* quota or private mode */ }
+  try {
+    localStorage.setItem(MINE_KEY, storedMine(mine))
+  } catch (err) {
+    // What you hid is on the relays if it went LIVE, but this device forgets
+    // it on a reload: say so, rather than lose your own record in silence.
+    console.warn(`[shards] could not save the record of what you hid: ${err instanceof Error ? err.message : String(err)}`)
+    useToast.getState().show({ label: 'NOT SAVED ON THIS DEVICE', meta: 'This device has no room left for the record of what you hid. It is here until you reload.', mark: 'build' })
+  }
 }
 
 function loadDeleted(): Record<string, true> {

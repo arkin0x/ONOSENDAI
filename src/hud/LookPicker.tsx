@@ -8,8 +8,8 @@
  * feedWrapper). The same two tabs PLACE OBJECT has, in the same words.
  *
  * A model of yours that places pieces you never published cannot go out
- * yet: carrying those pieces inside what is hidden is the inline parts work
- * (cyberspace spec PR #81, ONOSENDAI #504), held until that spec merges. It
+ * yet: carrying those pieces inside what is hidden is the inline parts writer
+ * (DECK-0003 §1.10, ONOSENDAI #504), which has not landed. It
  * is listed, disabled, with the reason as its tooltip.
  *
  * Rendered on the body (a portal), over the screen: the hide bar it opens

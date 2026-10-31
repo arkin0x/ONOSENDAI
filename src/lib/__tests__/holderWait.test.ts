@@ -27,6 +27,7 @@ const net = vi.hoisted(() => ({
 vi.mock('../../store/useRelays', () => ({
   DEFAULT_RELAY: 'ws://canonical.test',
   currentRelays: () => net.relays,
+  isRetiredRelay: () => false,
 }))
 vi.mock('../../store/useCyberspace', () => ({
   useCyberspace: { getState: () => ({ signEvent: async (t: unknown) => t }) },

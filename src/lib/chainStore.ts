@@ -95,6 +95,15 @@ export async function migrateToRows(pubkey: string, source: ChainSource, parted:
   }
 }
 
+/** How long the worker gets to check a chain's rows: the first time it may check every signature of a long chain. */
+const CHECK_PATIENCE_MS = 180_000
+
+/** Check the chain's rows (lib/eventDb/chainRows.ts checkChainRows). Rejects when the database will not do it, and the caller checks by other means. */
+export async function checkRows(pubkey: string): Promise<string[]> {
+  await rowsSettled(pubkey)
+  return (await callEventDb('checkChainRows', [pubkey], CHECK_PATIENCE_MS)).bad
+}
+
 /** Set a branch aside. A failure is said, and the branch's old copy (if any) stands. */
 export async function setAsideRows(pubkey: string, branch: ChainSource): Promise<void> {
   try { await callEventDb('setAsideBranch', [pubkey, branch]) } catch (err) { console.warn('[chain] a branch could not be set aside', err) }

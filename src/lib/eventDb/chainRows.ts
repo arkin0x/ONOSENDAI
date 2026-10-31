@@ -15,6 +15,7 @@
  * and no expiry: a reader only ever sees what has committed, whole.
  */
 
+import { getEventHash, verifyEvent, type VerifiedEvent } from 'nostr-tools/pure'
 import { request } from '../idb'
 import type { NostrEvent } from '../events'
 import { countRow, inTransaction } from './store'
@@ -302,4 +303,59 @@ export async function partedBranches(db: IDBDatabase, pubkey: string): Promise<C
     out.push({ events: rows.filter((r): r is EventRow => r !== undefined).map(eventOf), published: b.published, stats: b.stats, held: b.held, savedAt: b.savedAt })
   }
   return out
+}
+
+/** How many rows' flags go down in one transaction. */
+const FLAG_BATCH = 100
+
+/** What a check of a chain's rows found. */
+export interface ChainCheck {
+  /** The ids that failed. Their flags are not raised, and the store cuts the chain at the first. */
+  bad: string[]
+  /** Rows whose signature was checked here, now flagged: once per row, ever. */
+  signed: number
+  /** Rows whose flag was trusted: only their id was recomputed. */
+  rehashed: number
+}
+
+/**
+ * The trust boundary of the NIP-01 flag (onosendai/event-db-design.md, 3.4). A
+ * row flagged 1 had its signature checked, and that Schnorr check is never run
+ * again. Its id is still recomputed on every load, because that costs
+ * microseconds and catches a damaged row: the id commits to every field. A row
+ * flagged 0 (moved from the old stores, or signed elsewhere and not checked
+ * yet) is checked in full here, once, and flagged. What a flag cannot catch is
+ * someone rewriting this origin's storage on purpose; such a party already
+ * holds the key in localStorage.
+ */
+export async function checkChainRows(db: IDBDatabase, pubkey: string): Promise<ChainCheck> {
+  const os = db.transaction(EVENTS, 'readonly').objectStore(EVENTS)
+  const rows = await request(os.index('byChain').getAll(placesFrom(pubkey, 0))) as EventRow[]
+  const result: ChainCheck = { bad: [], signed: 0, rehashed: 0 }
+  let flips: string[] = []
+  const flush = async (): Promise<void> => {
+    if (flips.length === 0) return
+    const ids = flips
+    flips = []
+    const tx = db.transaction(EVENTS, 'readwrite')
+    await inTransaction(tx, async () => {
+      const events = tx.objectStore(EVENTS)
+      for (const id of ids) {
+        const row = await request(events.get(id)) as EventRow | undefined
+        if (row && row.nip01 === 0) events.put({ ...row, nip01: 1 })
+      }
+    })
+  }
+  for (const row of rows) {
+    const event = eventOf(row)
+    if (row.nip01 === 0) {
+      if (verifyEvent(event as VerifiedEvent)) { result.signed++; flips.push(row.id) } else result.bad.push(row.id)
+      if (flips.length >= FLAG_BATCH) await flush()
+    } else {
+      result.rehashed++
+      if (getEventHash(event) !== row.id) result.bad.push(row.id)
+    }
+  }
+  await flush()
+  return result
 }

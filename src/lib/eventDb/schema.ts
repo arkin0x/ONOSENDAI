@@ -104,7 +104,11 @@ export interface EventRow extends NostrEvent {
   /** 1: never evicted, and not counted against the budget. */
   pin: 0 | 1
   savedAt: number
-  /** A relay took it. On a row of a chain this is what `published` was on the old record. */
+  /**
+   * A relay took it: what `published` was on the old record, and what the
+   * publisher knows. `seen` says which relays, once they are named (the relay
+   * tap); a chain moved from the old stores has `acked` and no names to give it.
+   */
   acked?: 1
   /** A valid deletion named it, and it is pinned (your own history is the chain's evidence). */
   deleted?: 1

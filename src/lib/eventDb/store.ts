@@ -163,7 +163,7 @@ async function struck(event: NostrEvent, deletions: IDBObjectStore): Promise<boo
 }
 
 /** What a row replacing a lower-ranked one of the same id keeps of it: everything but the event and what is read from the event. */
-function carried(had: EventRow): Partial<EventRow> {
+export function carried(had: EventRow): Partial<EventRow> {
   const { seen, pin, usedAt, savedAt, proof, proofRev, chain, chainEpoch, chainRev, breakAt, acked, deleted, chainOf, chainN } = had
   return {
     seen, pin, usedAt, savedAt, proof, chain,

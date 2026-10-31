@@ -23,7 +23,8 @@ export const eventDbOps = {
   async commitChain(by: string, c: ChainCommit) {
     const result = await withEventDb((db) => commitChain(db, c))
     // After the commit, so a note never runs ahead of the rows it names.
-    if (result.status === 'ok' && result.changed) postNote({ kind: 'chain', by, pubkey: c.pubkey, headId: c.headId, generation: result.generation, length: c.length })
+    // A repeat too: the first run may have died with its worker before it could say.
+    if (result.status === 'ok' && (result.changed || result.repeated)) postNote({ kind: 'chain', by, pubkey: c.pubkey, headId: c.headId, generation: result.generation, length: c.length })
     return result
   },
   chainHead: (pubkey: string) => withEventDb((db) => chainHead(db, pubkey)),

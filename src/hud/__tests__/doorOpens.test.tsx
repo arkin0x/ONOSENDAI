@@ -37,7 +37,7 @@ import { ROOM_BAG_SETTINGS, newDoorSecret, roomEntries, roomKey, roomLookupId } 
 import { regionKeyOffThread } from '../../lib/regionKeyOffThread'
 import type { Position } from '../../lib/space'
 import { mount, settled } from '../../test/elementRoot'
-import { resetDoorSecrets } from '../../store/doorSecrets'
+import { resetDoorSecrets } from '../../store/rooms'
 import { useCyberspace } from '../../store/useCyberspace'
 import { useInventory } from '../../store/useInventory'
 import { openedByHand, resetOpenedChests } from '../../store/useOpenedChests'

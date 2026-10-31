@@ -865,10 +865,12 @@ async function countBoards(id: number): Promise<void> {
     if (id !== run) return
     actionsKept = kept
     // Version 1 hops not on the list do not count. The list is loaded here, so only a TV that counts pays for
-    // it. If it does not load, count without it: an empty list would wrongly cut every old chain.
+    // it. If it does not load, or is empty (a core older than the census), count without it: an empty list would
+    // wrongly cut every old chain.
+    const all = [...kept.byId.values()]
     const listed = await loadV1HopList().catch(() => null)
     if (id !== run) return
-    const actions = listed ? dropUnlistedV1Hops([...kept.byId.values()], listed) : [...kept.byId.values()]
+    const actions = listed?.size ? dropUnlistedV1Hops(all, listed) : all
     const snap = await countStats({ actions, bags: census.bagRecords, objects: census.objectRecords, deletions: census.deletions, arrivals: arrivalTimes(actions) }, hour)
     if (id !== run) return
     snapshot = snap

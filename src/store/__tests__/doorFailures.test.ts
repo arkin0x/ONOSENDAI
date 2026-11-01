@@ -95,7 +95,7 @@ beforeEach(() => {
   lock = forgeKey('Silver Key')
   localStorage.removeItem('onosendai:door-secrets'); localStorage.removeItem('onosendai:chests-opened')
   resetDoorSecrets(); resetOpenedChests()
-  useShards.setState({ mine: [], deleted: {}, deletedBags: {}, discovered: {}, pending: null, chestBack: null, deployHeight: 0, deployUnit: 0, deployTurn: [0, 0, 0], deployStatus: 'idle', deployError: null, selectedSecret: null, deployLeaveOut: null, deployInto: null, placedLast: null })
+  useShards.setState({ mine: [], deleted: {}, deletedBags: {}, discovered: {}, pending: null, chestBack: null, deployHeight: 0, deployUnit: 0, deployTurn: [0, 0, 0], deployStatus: 'idle', deployError: null, selectedSecret: null, deployLeaveOut: null, deployInto: null, deployDoorHeight: null, placedLast: null })
   useBuilder.getState().exit(); useStash.getState().close()
   useInventory.setState({ owner: me(), items: {}, storage: 'memory' })
   useCyberspace.setState({ live: true, position: CURSOR, anchor: CURSOR, cursor: CURSOR, spectate: null, exploreIndex: null, transit: null })

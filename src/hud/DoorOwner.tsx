@@ -14,7 +14,7 @@
 import { useState } from 'react'
 import { doorSecret } from '../store/doorSecrets'
 import { useCyberspace } from '../store/useCyberspace'
-import { behindDoor, doorsBeside, hereInRoom, useShards, type MyDeployment } from '../store/useShards'
+import { behindDoor, behindDoorDeep, doorsBeside, hereInRoom, useShards, type MyDeployment } from '../store/useShards'
 import { hiddenLabel } from '../lib/hidden'
 import { ConfirmModal } from './ConfirmModal'
 import { ItemIcon } from './ItemIcon'
@@ -80,7 +80,7 @@ export function DeleteDoorCard({ door, onCancel, onDone }: { door: MyDeployment;
   const [status, setStatus] = useState<string | null>(null)
   const alone = doorsBeside(mine, door).length === 0
   const known = !!doorSecret(me, door.eventId)
-  const behind = behindDoor(mine, door).length
+  const behind = behindDoorDeep(mine, door).length
   const words = deleteDoorWords(behind, alone, contents, known)
   return (
     <ConfirmModal

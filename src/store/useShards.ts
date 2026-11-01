@@ -1751,7 +1751,7 @@ export const useShards = create<ShardsState>((set, get) => {
       ? gathered.entries.map((e) => (entryKey(e) === was ? inner : e))
       : [...gathered.entries, inner]
     const settings = gathered.settings ?? chest.bag ?? DEFAULT_BAG_SETTINGS
-    const { event, published } = await publishBag(entries, key, chest.lookupId, chest.height, wasPublic, settings, { at, plane: chest.plane }, undefined, gathered.entries)
+    const { event, published } = await publishBag(entries, key, chest.lookupId, chest.height, wasPublic, settings, { at, plane: chest.plane }, undefined, gathered.entries, me)
     // Before anything here changes: the relays still hold the chest as it was.
     if (wasPublic && !published) throw new Error('No relay took the new bag. The chest stays as it was.')
     let row: MyDeployment = chest
@@ -2448,7 +2448,7 @@ export const useShards = create<ShardsState>((set, get) => {
       const takeBack = async (): Promise<void> => {
         if (!published) return
         if (before.length === 0) { await retractBag(lookupId, bagId); return }
-        const back = await publishBag(before, key, lookupId, d.height, live, ROOM_BAG_SETTINGS, { at: here, plane: d.plane }, undefined, before).catch(() => null)
+        const back = await publishBag(before, key, lookupId, d.height, live, ROOM_BAG_SETTINGS, { at: here, plane: d.plane }, undefined, before, me).catch(() => null)
         if (!back?.published) return
         await commitRows(me, rowsOf(me).map((m) => (m.lookupId === lookupId ? { ...m, bagId: back.event.id } : m)))
       }
@@ -2456,7 +2456,7 @@ export const useShards = create<ShardsState>((set, get) => {
         if (inside.length > 0) {
           const room = await gatherInners(lookupId, key, live, d.height)
           before = room.entries
-          const written = await publishBag(mergeEntries(room.entries, inside), key, lookupId, d.height, live, ROOM_BAG_SETTINGS, { at: here, plane: d.plane }, undefined, room.entries)
+          const written = await publishBag(mergeEntries(room.entries, inside), key, lookupId, d.height, live, ROOM_BAG_SETTINGS, { at: here, plane: d.plane }, undefined, room.entries, me)
           bagId = written.event.id
           published = written.published
           if (live && !published) return 'No relay took the room. The chest stays as it was.'
@@ -3237,7 +3237,8 @@ export const useShards = create<ShardsState>((set, get) => {
       const left = gathered.entries.filter((e) => entryKey(e) !== gone)
       const me = cs.identity.pubkey
 
-      let mine: MyDeployment[]
+      // The change, not the list: another tab may add a row during the awaits below.
+      let after = (rows: MyDeployment[]): MyDeployment[] => rows.filter((d) => d.eventId !== eventId)
       // Whether the relays now hold a bag that no longer names this item.
       let unnamed = false
       if (left.length > 0) {
@@ -3248,9 +3249,7 @@ export const useShards = create<ShardsState>((set, get) => {
         if (!sent) return
         const { event, published } = sent
         unnamed = published
-        mine = rowsOf(me)
-          .filter((d) => d.eventId !== eventId)
-          .map((d) => (d.lookupId === item.lookupId ? { ...d, bagId: event.id, published, bag: settings } : d))
+        after = (rows) => rows.filter((d) => d.eventId !== eventId).map((d) => (d.lookupId === item.lookupId ? { ...d, bagId: event.id, published, bag: settings } : d))
       } else {
         // The last thing in the region: delete the envelope itself (NIP-09).
         if (wasPublic) {
@@ -3266,7 +3265,6 @@ export const useShards = create<ShardsState>((set, get) => {
           })
           try { unnamed = (await publishMany(item.relays ?? relaySet(), del)).ok } catch { /* best effort */ }
         }
-        mine = rowsOf(me).filter((d) => d.eventId !== eventId)
       }
       // A shard hidden by reference is also its own event. Once no bag names
       // it, take that down too (NIP-09), if it is ours to take down: it is
@@ -3290,7 +3288,7 @@ export const useShards = create<ShardsState>((set, get) => {
         ? get().deletedBags
         : { ...get().deletedBags, [`${me}:${item.lookupId}`]: true as const }
       set({ deleted, deletedBags, discovered })
-      commitRows(me, mine); saveDeleted(deleted)
+      void commitRows(me, after(rowsOf(me))); saveDeleted(deleted)
       if (left.length === 0) saveDeletedBags(deletedBags)
     },
 

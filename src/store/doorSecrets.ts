@@ -97,15 +97,12 @@ export function keepDoorSecret(me: string, doorId: string, secretHex: string, ho
 /**
  * Keep the secret of a door about to go out, on disk, before it does: a door
  * published with its secret lost cannot be edited from here. Rejects, in words, when
- * the database refuses, and the caller publishes nothing. In local mode this is the
- * path it always was: a failure says so, and the door still goes.
+ * it cannot be kept, in either mode, and the caller publishes nothing.
  */
 export async function commitDoorSecret(me: string, doorId: string, secretHex: string): Promise<void> {
   await hiddenDecided()
-  if (storageMode() === 'local') { if (!keepLocally(me, doorId, secretHex)) saidNotKept(); return }
-  if (!await putSecret(record(me, doorId, secretHex))) {
-    throw new Error('This device could not save the door\'s secret, so nothing was sent. Free some space and try again.')
-  }
+  const kept = storageMode() === 'local' ? keepLocally(me, doorId, secretHex) : await putSecret(record(me, doorId, secretHex))
+  if (!kept) throw new Error('This device could not save the door\'s secret, so nothing was sent. Free some space and try again.')
 }
 
 /** For tests: forget what is kept, so the next read is from localStorage. */

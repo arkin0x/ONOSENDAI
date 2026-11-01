@@ -67,6 +67,10 @@ let chain: Promise<boolean> = Promise.resolve(true)
 let db: IDBDatabase | null = null
 let channel: BroadcastChannel | null = null
 let ready: Promise<HiddenStorage> | null = null
+/** The look at the database took too long, and this session went on without it. */
+let expired = false
+const DECIDE_TIMEOUT_MS = 15_000
+const COMMIT_TIMEOUT_MS = 10_000
 const listeners = new Set<() => void>()
 /** The JSON each row object was stored as, so a save knows what did not change without serializing it. */
 const storedAs = new WeakMap<object, string>()
@@ -215,13 +219,20 @@ function flush(): Promise<boolean> {
   return chain
 }
 
+/** A database that never answers is a failed write: the batch stays in hand, and the save says so. */
+function withTimeout<T>(work: Promise<T>, ms: number): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined
+  const late = new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error('IndexedDB did not answer in time')), ms) })
+  return Promise.race([work, late]).finally(() => clearTimeout(timer))
+}
+
 async function commitDirty(): Promise<boolean> {
   if (dirty.size === 0) return true
   const batch = dirty
   dirty = new Map()
   try {
     const d = db ?? (db = await openHiddenDb())
-    await commit(d, [...batch.values()])
+    await withTimeout(commit(d, [...batch.values()]), COMMIT_TIMEOUT_MS)
     announce(batch)
     return true
   } catch {
@@ -336,6 +347,9 @@ async function decide(): Promise<HiddenStorage> {
     const heldSecrets = new Map(all.secrets.map((r) => [`${r.owner}\0${r.doorId}`, r.secret]))
     for (const r of added.rows) if (held.get(`${r.bucket}\0${r.key}`) !== r.json) throw new Error('a row did not read back')
     for (const r of added.secrets) if (heldSecrets.get(`${r.owner}\0${r.doorId}`) !== r.secret) throw new Error('a door secret did not read back')
+    // Read back: what local mode took off is tombstoned now, so its list need not replay.
+    for (const name of localBuckets()) { try { localStorage.removeItem(goneKey(name)) } catch { /* the next load tries again */ } }
+    if (expired) { d.close(); return 'local' }
     const view = new Map<string, Map<string, Entry>>()
     for (const r of all.rows) {
       let b = view.get(r.bucket)
@@ -364,7 +378,10 @@ async function decide(): Promise<HiddenStorage> {
 export function hydrateHidden(): Promise<HiddenStorage> {
   if (ready) return ready
   mode = 'pending'
-  ready = decide().catch((): HiddenStorage => 'local').then(async (m) => {
+  let timer: ReturnType<typeof setTimeout> | undefined
+  const late = new Promise<HiddenStorage>((resolve) => { timer = setTimeout(() => { expired = true; resolve('local') }, DECIDE_TIMEOUT_MS) })
+  ready = Promise.race([decide().catch((): HiddenStorage => 'local'), late]).then(async (m) => {
+    clearTimeout(timer)
     mode = m
     changed()
     if (dirty.size > 0) { if (m === 'indexeddb') await flush(); else writeLocal() }
@@ -386,6 +403,6 @@ export { HIDDEN_DB }
 export function resetHiddenForTests(): void {
   try { channel?.close() } catch { /* already closed */ }
   try { db?.close() } catch { /* already closed */ }
-  channel = null; db = null; ready = null; buckets = null; secrets = {}; dirty = new Map(); mode = 'local'; chain = Promise.resolve(true)
+  channel = null; db = null; ready = null; expired = false; buckets = null; secrets = {}; dirty = new Map(); mode = 'local'; chain = Promise.resolve(true)
   listeners.clear()
 }

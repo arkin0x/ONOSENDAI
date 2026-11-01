@@ -11,7 +11,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const h = vi.hoisted(() => {
   const mem = new Map<string, string>()
-  const state = { full: false, failCommit: false, failProbe: false, failAdd: false, corruptAdd: false }
+  const state = { full: false, failCommit: false, failProbe: false, failAdd: false, hangProbe: false }
   ;(globalThis as { localStorage?: unknown }).localStorage = {
     get length() { return mem.size },
     key: (i: number) => [...mem.keys()][i] ?? null,
@@ -48,7 +48,7 @@ vi.mock('../../lib/hiddenDb', async (orig) => {
   return {
     ...real,
     commit: (...a: Parameters<typeof real.commit>) => (h.state.failCommit ? Promise.reject(new Error('quota')) : real.commit(...a)),
-    probe: (...a: Parameters<typeof real.probe>) => (h.state.failProbe ? Promise.reject(new Error('private mode')) : real.probe(...a)),
+    probe: (...a: Parameters<typeof real.probe>) => (h.state.hangProbe ? new Promise<void>(() => {}) : h.state.failProbe ? Promise.reject(new Error('private mode')) : real.probe(...a)),
     addMissing: (...a: Parameters<typeof real.addMissing>) => (h.state.failAdd ? Promise.reject(new Error('crash')) : real.addMissing(...a)),
   }
 })
@@ -118,7 +118,7 @@ beforeEach(() => {
   h.mem.clear()
   h.events = []
   h.sent = []
-  Object.assign(h.state, { full: false, failCommit: false, failProbe: false, failAdd: false })
+  Object.assign(h.state, { full: false, failCommit: false, failProbe: false, failAdd: false, hangProbe: false })
 })
 
 describe('the case he hit: localStorage full, a live door placed', () => {
@@ -136,19 +136,6 @@ describe('the case he hit: localStorage full, a live door placed', () => {
     expect(next.st.storageMode()).toBe('indexeddb')
     expect(next.ids()).toContain(door.eventId)
     expect(next.secrets.doorSecret(next.me(), door.eventId)).toBe(secret)
-  })
-
-  it('without the database, that same door is what the owner saw: a toast and no record after a reload', async () => {
-    h.state.failProbe = true
-    const p = await page()
-    expect(p.st.storageMode()).toBe('local')
-    h.state.full = true
-    const { door } = await sealDoor(p)
-    await tick()
-    expect(['NOT SAVED ON THIS DEVICE', 'SECRET NOT SAVED']).toContain(p.toast())
-    h.state.full = false
-    const next = await page()
-    expect(next.ids()).not.toContain(door.eventId)
   })
 })
 
@@ -208,13 +195,14 @@ describe('a door\'s secret comes first', () => {
     expect(heldAtPublish.map((s) => s.doorId)).toContain(door.eventId)
   })
 
-  it('with no database, a secret that cannot be written says so, and the door still goes as it always did', async () => {
+  it('with no database, a secret that cannot be written publishes nothing too', async () => {
     h.state.failProbe = true
     const p = await page()
     h.state.full = true
-    await sealDoor(p)
-    expect(h.sent.length).toBeGreaterThan(0)
-    expect(['SECRET NOT SAVED', 'NOT SAVED ON THIS DEVICE']).toContain(p.toast())
+    const { door } = await sealDoor(p)
+    expect(door).toBeUndefined()
+    expect(h.sent).toEqual([])
+    expect(p.useShards.getState().deployError).toContain('could not save the door')
   })
 })
 
@@ -372,6 +360,16 @@ describe('work begun before a switch', () => {
     expect(p.ids()).toEqual([])
     expect((await dbRows()).filter((r) => r.bucket === Y)).toEqual([])
   })
+})
+
+describe('a database that hangs', () => {
+  it('leaves the session on localStorage after 15 s, and saves are answered', async () => {
+    h.state.hangProbe = true
+    const p = await page({ hydrate: false })
+    const mode = await p.st.hydrateHidden()
+    expect(mode).toBe('local')
+    expect(await p.st.saveRows(X, [row(X, 'x1') as never], JSON.stringify, () => false)).toBe(true)
+  }, 20_000)
 })
 
 describe('with no database', () => {

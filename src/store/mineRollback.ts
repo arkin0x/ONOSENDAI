@@ -57,12 +57,13 @@ export async function rollbackMineToBare(me: string): Promise<boolean> {
     have.add(d.eventId)
     return true
   })
+  // Secrets first: small, and a door cannot be edited without one, so a full list of rows must not cost them.
   try {
-    if (back.length > 0) localStorage.setItem(BARE, JSON.stringify([...bare, ...back]))
     let all: Record<string, Record<string, string>> = {}
     try { all = JSON.parse(localStorage.getItem(SECRETS) ?? '{}') as typeof all } catch { /* unreadable: replaced only if there is something to add */ }
     const mine = { ...known, ...(all[me] ?? {}) }
     if (Object.keys(mine).length > Object.keys(all[me] ?? {}).length) localStorage.setItem(SECRETS, JSON.stringify({ ...all, [me]: mine }))
+    if (back.length > 0) localStorage.setItem(BARE, JSON.stringify([...bare, ...back]))
     return true
   } catch { return false }
 }

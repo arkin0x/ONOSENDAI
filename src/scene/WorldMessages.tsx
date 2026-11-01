@@ -237,7 +237,7 @@ export function WorldMessages({ axes }: Props): JSX.Element | null {
           <group key={w.key}>
             {draw === 'item'
               ? <ItemMark id={w.key} text={w.text} sub={author(w)} at={w.centre} wears={w.wears} region={w.region} axes={axes} onTap={open} />
-              : <WorldMark kind="note" at={w.centre} />}
+              : <PlacedBox at={w.centre} />}
             {draw === 'vanishing' && <ItemVanish id={w.key} label={{ text: w.text, color: NOTE, sub: author(w), subColor: ACCENT }} at={w.centre} wears={w.wears} region={w.region} axes={axes} minPx={NOTE_EDGE_PX} play={play} />}
             {/* The mark is a fixed size on screen at any zoom, so its target is
                 too: a fingertip over the mark (TapTarget). */}
@@ -345,7 +345,7 @@ function NoteItem({ w, birth, onTap }: { w: { key: string; text: string; mine: b
 export function AudioMark({ title, at, opacity = 1, onTap }: { title: string; at: [number, number, number]; opacity?: number; onTap?: () => void }): JSX.Element {
   return (
     <group>
-      <WorldMark kind="note" at={at} opacity={opacity} />
+      <PlacedBox at={at} opacity={opacity} />
       <AudioNote at={at} opacity={opacity} />
       <WorldLabel text={title} color={ACCENT} at={at} align="center" px={10} offsetPx={[0, -26]} opacity={opacity} recede="name" />
       {onTap && <TapTarget px={TAP_PX} at={at} onTap={onTap} />}
@@ -372,9 +372,8 @@ function AudioNote({ at, opacity = 1 }: { at: [number, number, number]; opacity?
     const g = group.current
     if (!g) return
     const cam = state.camera as PerspectiveCamera
-    const perPixel = 2 * Math.tan((cam.fov * Math.PI) / 360) / state.size.height
-    const depth = cam.position.distanceTo(g.position)
-    g.scale.setScalar(Math.max(1e-5, depth * perPixel * MARK_PX.note * markRecede(depth)))
+    // The box's own size, so the note stands about half of it at any zoom.
+    g.scale.setScalar(placedBoxSide(useCyberspace.getState().scaleExp) / NOTE_BOX_EDGE)
     g.quaternion.copy(cam.quaternion)
   }, LABEL_PRIORITY)
   const material = <meshBasicMaterial color={AUDIO_BLUE} toneMapped={false} transparent opacity={0.95 * opacity} depthWrite={false} />
@@ -445,6 +444,36 @@ function DecodingLabel({ text, seed, birth, at }: { text: string; seed: number; 
   return <WorldLabel text={shown} color={NOTE} at={at} align="center" px={13} recede="name" />
 }
 
+
+/** A held item's and a sound's box: half a gibson, wherever you look from (owner, 2026-11-01). */
+const PLACED_BOX_GIBSONS = 0.5
+/** The edge the music note was drawn against, in its own units. */
+const NOTE_BOX_EDGE = 0.72
+/** The box's side in scene units: a scene unit is 2^scaleExp gibsons. */
+export function placedBoxSide(scaleExp: number): number {
+  return PLACED_BOX_GIBSONS / 2 ** scaleExp
+}
+const PLACED_BOX_FILL = new BoxGeometry(1, 1, 1)
+const PLACED_BOX_EDGES = new EdgesGeometry(PLACED_BOX_FILL)
+
+/**
+ * Where a held item or a sound stands: a blue box of a fixed size in the world.
+ * It is not sized to the screen, so it reads as a thing in the place, and its
+ * fill keeps it blue from every side.
+ */
+function PlacedBox({ at, opacity = 1 }: { at: [number, number, number]; opacity?: number }): JSX.Element {
+  const side = placedBoxSide(useCyberspace((s) => s.scaleExp))
+  return (
+    <group position={at} scale={side}>
+      <mesh geometry={PLACED_BOX_FILL}>
+        <meshBasicMaterial color={NOTE_BLUE} toneMapped={false} transparent opacity={0.3 * opacity} depthWrite={false} />
+      </mesh>
+      <lineSegments geometry={PLACED_BOX_EDGES} frustumCulled={false}>
+        <lineBasicMaterial color={NOTE_BLUE} toneMapped={false} transparent opacity={0.95 * opacity} depthWrite={false} />
+      </lineSegments>
+    </group>
+  )
+}
 
 /** The line color and opacity of each mark. A spent coin is steel and faint. */
 const MARK_LOOK: Record<MarkKind, { color: string; opacity: number }> = {

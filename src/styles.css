@@ -1838,6 +1838,17 @@ kbd {
   justify-content: center;
   margin-bottom: 14px;
 }
+.secret__look-name { margin: 0 0 8px; font-size: 15px; font-weight: 600; letter-spacing: 0.04em; color: var(--fg); text-align: center; overflow-wrap: anywhere; }
+.secret__spin--look { width: 100%; }
+/* A door of yours on its card: what is behind it, and what could be (DoorOwner). */
+.doorowner { display: flex; flex-direction: column; gap: 6px; margin-bottom: 14px; }
+.doorowner__count { color: var(--fg); }
+/* The door-name chip on the hide bar (4.3): the door what you place is sealed to, with its X. */
+.deploybar__doorchip { display: flex; align-items: center; gap: 6px; padding: 4px 8px; border: 1px solid #ff3b4e; border-radius: 3px; color: #ff8a95; font-size: 11px; }
+.deploybar__doorchip-name { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* Four models on a phone-narrow bar: they wrap rather than clip. */
+.deploybar__row--model .deploybar__choices { flex-wrap: wrap; }
+.deploybar__doorchip-x { background: none; border: 0; color: inherit; cursor: pointer; font: inherit; padding: 0 4px; }
 .secret__shard-meta { font-size: 10px; letter-spacing: 0.06em; color: var(--dim); }
 /* LOCAL or LIVE for the one who hid it, under the preview (PublishSwitch
    PublishRow; arkinox, 2026-10-29: "the owner should see it more
@@ -7930,7 +7941,7 @@ kbd {
   color: var(--fg); background: rgba(0, 229, 255, 0.05); border: 1px solid rgba(0, 229, 255, 0.18);
 }
 .objpick__row:hover { border-color: rgba(0, 229, 255, 0.5); }
-.objpick__name { font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.objpick__name { font-size: 12px; min-width: 0; white-space: normal; overflow-wrap: anywhere; }
 .objpick__meta { font-size: 9px; letter-spacing: 0.08em; color: var(--dim); flex-shrink: 0; }
 .ws__slot { width: 100%; display: flex; flex-direction: column; align-items: flex-start; gap: 2px; padding: 6px 8px; border-radius: 5px; font-family: inherit; cursor: pointer; color: var(--fg); background: rgba(0, 229, 255, 0.05); border: 1px dashed rgba(0, 229, 255, 0.35); }
 .ws__slot.is-full { border-style: solid; }

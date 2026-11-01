@@ -19,16 +19,17 @@ import { useFrame } from '@react-three/fiber'
 import type { Group, Material } from 'three'
 import { DOOR_DISSOLVE_MS, DOOR_OPEN_AT, DOOR_RAIL_FADE_MS, dissolveShare } from '../lib/ceremony'
 import type { Look } from '../lib/looks'
-import { CalmSwap } from './ChestCeremony'
+import { CalmSwap, meshFrame } from './ChestCeremony'
+import type { LookFrame } from './LookMark'
 import { breatheMaterial } from './WorldShards'
 import { ShardMesh } from './ShardMesh'
 
-export function DoorCeremony({ look, at, calm }: { look: Look; at: number; calm: boolean }): JSX.Element {
-  if (calm || !look.open) return <CalmSwap from={look.closed} to={look.open ?? look.closed} at={at} />
-  return <SlabAway look={look} at={at} />
+export function DoorCeremony({ look, at, calm, frame }: { look: Look; at: number; calm: boolean; frame?: LookFrame }): JSX.Element {
+  if (calm || !look.open) return <CalmSwap from={look.closed} to={look.open ?? look.closed} at={at} frame={frame} />
+  return <SlabAway look={look} at={at} frame={frame} />
 }
 
-function SlabAway({ look, at }: { look: Look; at: number }): JSX.Element {
+function SlabAway({ look, at, frame }: { look: Look; at: number; frame?: LookFrame }): JSX.Element {
   const slab = useRef<Group>(null)
   const [gone, setGone] = useState(() => performance.now() - at >= DOOR_DISSOLVE_MS)
   useEffect(() => {
@@ -52,8 +53,8 @@ function SlabAway({ look, at }: { look: Look; at: number }): JSX.Element {
   })
   return (
     <>
-      {!gone && <group ref={slab}><ShardMesh shard={look.closed} world ghost dissolve={at} /></group>}
-      <RailIn look={look} at={at} />
+      {!gone && <group ref={slab}><ShardMesh shard={look.closed} world ghost dissolve={at} {...meshFrame(frame, 'slab')} /></group>}
+      <RailIn look={look} at={at} frame={frame} />
     </>
   )
 }
@@ -65,7 +66,7 @@ function SlabAway({ look, at }: { look: Look; at: number }): JSX.Element {
  * stands at the top of the doorway, so its static would fill the doorway
  * the slab has just cleared.
  */
-function RailIn({ look, at }: { look: Look; at: number }): JSX.Element | null {
+function RailIn({ look, at, frame }: { look: Look; at: number; frame?: LookFrame }): JSX.Element | null {
   const rail = useRef<Group>(null)
   const [shown, setShown] = useState(() => performance.now() - at >= DOOR_OPEN_AT)
   useEffect(() => {
@@ -80,6 +81,7 @@ function RailIn({ look, at }: { look: Look; at: number }): JSX.Element | null {
       if (m) for (const one of Array.isArray(m) ? m : [m]) breatheMaterial(one, share)
     })
   })
-  if (!shown) return null
-  return <group ref={rail}><ShardMesh shard={look.open!} world ghost /></group>
+  // A custom door with no open look is not drawn once opened (lib/looks.ts drawnLook).
+  if (!shown || !look.open) return null
+  return <group ref={rail}><ShardMesh shard={look.open} world ghost {...meshFrame(frame, 'open')} /></group>
 }

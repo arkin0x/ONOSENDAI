@@ -26,6 +26,8 @@ if (typeof localStorage === 'undefined') {
 ;(globalThis as { document?: unknown }).document ??= { addEventListener: () => undefined, removeEventListener: () => undefined, body: { nodeType: 1 } }
 
 const relay = vi.hoisted(() => ({ events: [] as Array<{ kind: number; pubkey: string; tags: string[][] }>, asked: [] as string[] }))
+// The card's one shared canvas lives outside the card (scene/CardSpin): here, what it is asked to draw.
+vi.mock('../../scene/CardSpin', () => ({ CardSpin: ({ shard, wide }: { shard: { name: string } | null; wide?: boolean }) => <div aria-label={`${shard?.name}, turning`} style={{ width: wide ? '100%' : 160 }} /> }))
 vi.mock('../../lib/relay', () => {
   const answer = async (f: { kinds?: number[]; authors?: string[]; '#d'?: string[] }): Promise<unknown[]> => {
     relay.asked.push(...(f['#d'] ?? []))

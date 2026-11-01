@@ -33,7 +33,7 @@
 import { useState } from 'react'
 import { Box, Globe, MapPinOff } from 'lucide-react'
 import { ConfirmModal } from './ConfirmModal'
-import { useCyberspace } from '../store/useCyberspace'
+import { CHECKING_RELAYS_MESSAGE, HEAD_RETRYING_MESSAGE, useCyberspace, WAITING_SIGNER_MESSAGE } from '../store/useCyberspace'
 import { DEFAULT_RELAY } from '../store/useRelays'
 import { moveDirection, type MoveName } from '../lib/moves'
 import { MAX_SCALE_EXP } from '../lib/space'
@@ -308,7 +308,7 @@ export function TouchControls(): JSX.Element {
             else useCyberspace.getState().commit()
           }}
         >
-          {deploying ? (placedHere ? 'PLACED' : 'PLACE') : computing ? `${Math.round(proof.progress * 100)}%` : action ? ACTION_LABEL[action] : 'COMMIT'}
+          {deploying ? (placedHere ? 'PLACED' : 'PLACE') : computing ? (proof.message === WAITING_SIGNER_MESSAGE ? 'SIGNER' : proof.message === CHECKING_RELAYS_MESSAGE || proof.message === HEAD_RETRYING_MESSAGE ? 'RELAYS' : `${Math.round(proof.progress * 100)}%`) : action ? ACTION_LABEL[action] : 'COMMIT'}
         </button>
         )}
         {/* Whether a commit leaves the device. Under COMMIT because that is the

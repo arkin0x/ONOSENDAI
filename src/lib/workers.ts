@@ -7,10 +7,71 @@
 
 import type { RunRequest, RunResponse } from '../workers/terrain.worker'
 import { tlog } from './log'
-import type { ProofMode, ProofRequest, ProofResponse } from '../workers/proof.worker'
+import type { ProofMode, ProofRequest, ProofResponse, ProofWorkerMessage } from '../workers/proof.worker'
 
 let proofWorker: Worker | null = null
 let proofHandler: ((msg: ProofResponse) => void) | null = null
+
+/** How long a worker has to say it has the request. Covers fetching its file on a slow link. */
+export const PROOF_START_MS = 20_000
+/**
+ * How long a started worker may stay silent. Far past the longest quiet stage
+ * of the tallest hop a machine is allowed, so it only ever ends a worker that
+ * is gone (a phone can drop one while the tab is asleep, with no error event).
+ */
+export const PROOF_QUIET_MS = 5 * 60_000
+/** What a move says when no worker could compute it. */
+export const PROOF_WORKER_FAILED_MESSAGE = "This move's proof could not run. Press again."
+
+/**
+ * The proof being computed. Nothing else can end a move whose worker failed:
+ * the store waits in 'computing' for an answer, and a worker that never loaded
+ * or has died never gives one (arkinox, 2026-11-01: a hop at 0% until a
+ * refresh). A worker that failed before it started is replaced once, since a
+ * dropped connection is the usual reason. One that failed after starting is
+ * not: the same proof may fail the same way, and it may have been a tall one.
+ */
+let proofRun: { request: ProofRequest; started: boolean; retried: boolean; at: number; timer: ReturnType<typeof setTimeout> | undefined } | null = null
+
+function dropProofWorker(): void {
+  proofWorker?.terminate()
+  proofWorker = null
+}
+
+function endProofRun(): void {
+  if (proofRun) clearTimeout(proofRun.timer)
+  proofRun = null
+}
+
+function watchProofRun(ms: number): void {
+  if (!proofRun) return
+  clearTimeout(proofRun.timer)
+  proofRun.timer = setTimeout(() => proofWorkerFailed('no answer'), ms)
+}
+
+function proofWorkerFailed(why: string): void {
+  tlog('[workers] proof worker FAILED:', why)
+  dropProofWorker()
+  const run = proofRun
+  if (!run) return
+  if (!run.started && !run.retried) {
+    run.retried = true
+    sendProof()
+    return
+  }
+  endProofRun()
+  proofHandler?.({ type: 'error', id: run.request.id, message: PROOF_WORKER_FAILED_MESSAGE, elapsedMs: performance.now() - run.at })
+}
+
+function sendProof(): void {
+  if (!proofRun) return
+  watchProofRun(PROOF_START_MS)
+  try {
+    getProofWorker().postMessage(proofRun.request)
+  } catch (err) {
+    proofWorkerFailed(err instanceof Error ? err.message : String(err))
+  }
+}
 
 const TERRAIN_WORKER_COUNT = Math.max(1, (navigator.hardwareConcurrency || 4) - 1)
 const terrainWorkers: Worker[] = []
@@ -51,9 +112,34 @@ function getProofWorker(): Worker {
     proofWorker = new Worker(new URL('../workers/proof.worker.ts', import.meta.url), {
       type: 'module',
     })
-    proofWorker.onmessage = (event: MessageEvent<ProofResponse>) => proofHandler?.(event.data)
+    proofWorker.onmessage = (event: MessageEvent<ProofWorkerMessage>) => {
+      const msg = event.data
+      if (proofRun?.request.id === msg.id) {
+        if (msg.type === 'started') proofRun.started = true
+        if (msg.type === 'done' || msg.type === 'error') endProofRun()
+        else watchProofRun(PROOF_QUIET_MS)
+      }
+      if (msg.type !== 'started') proofHandler?.(msg)
+    }
+    proofWorker.onerror = (event) => proofWorkerFailed(event.message || 'worker error')
+    proofWorker.onmessageerror = () => proofWorkerFailed('unreadable message')
   }
   return proofWorker
+}
+
+/**
+ * Start the proof worker before it is needed. A running worker holds its code,
+ * so a deploy that removes the file from under an open tab costs that tab
+ * nothing until the worker is replaced. A failure here is nobody's move: the
+ * worker is dropped, and the move that needs one tries again.
+ */
+export function preloadProofWorker(): void {
+  if (typeof Worker === 'undefined') return
+  try {
+    getProofWorker()
+  } catch (err) {
+    tlog('[workers] proof worker did not preload:', err instanceof Error ? err.message : String(err))
+  }
 }
 
 export function getTerrainWorkers(): Worker[] {
@@ -102,12 +188,15 @@ function pumpRunQueue(): void {
 }
 
 export function cancelProof(): void {
-  proofWorker?.terminate()
-  proofWorker = null
+  endProofRun()
+  dropProofWorker()
+  preloadProofWorker()
 }
 
 export function postProof(request: ProofRequest): void {
-  getProofWorker().postMessage(request)
+  endProofRun()
+  proofRun = { request, started: false, retried: false, at: performance.now(), timer: undefined }
+  sendProof()
 }
 
 /** Queue a run. Order is preserved: the first queued is the first started. */

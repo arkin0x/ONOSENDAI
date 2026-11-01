@@ -48,6 +48,7 @@ import {
   type SignerKind,
   type NostrConnectSession,
   signWithin,
+  handshakeWithin,
 } from '../lib/signers'
 import {
   coordToXyz,
@@ -110,8 +111,8 @@ import {
   enterHyperspaceTemplate,
   hyperjumpTemplate,
 } from '../lib/events'
-import { lookBeforeMove, movementBlocked, VERSION_BLOCKED_MESSAGE } from '../lib/versionGate'
-import { cancelProof, postProof, type ProofMode, type ProofResponse } from '../lib/workers'
+import { lookBeforeMove, movementBlocked, useVersionGate, VERSION_BLOCKED_MESSAGE } from '../lib/versionGate'
+import { cancelProof, postProof, PROOF_WORKER_FAILED_MESSAGE, type ProofMode, type ProofResponse } from '../lib/workers'
 import { staleFormatCut } from '../lib/staleFormat'
 import { offloadFrom, cloudSeconds } from '../lib/crossover'
 import { recommendedHopHeight, recommendedSidestepHeight, useCalibration } from '../lib/calibration'
@@ -1636,7 +1637,7 @@ async function signEvent(template: EventTemplate, patienceMs?: number, signer: S
       // once more over fresh ones. Not a signer on another account (a
       // stand-in whose reconnect found one): asking again only asks it again.
       if (err instanceof SignerAccountMismatch || !signer.reconnect) throw err
-      const fresh = await signer.reconnect()
+      const fresh = await handshakeWithin(signer.reconnect())
       if (currentSigner === signer) currentSigner = fresh
       signed = await signWithin(fresh, template, patienceMs)
     }
@@ -1759,6 +1760,12 @@ function wakeSigner(): void {
 
 /** Said while a move asks the relays again for your latest move. */
 export const HEAD_RETRYING_MESSAGE = "Can't confirm your latest move; retrying."
+/** Said once a proof is done and before it is signed: the look at the relays. */
+export const CHECKING_RELAYS_MESSAGE = 'Checking the relays.'
+/** Said while a remote signer has a finished proof's event. */
+export const WAITING_SIGNER_MESSAGE = 'Waiting for your signer.'
+/** A worker could not run on a tab an update has left behind: its file may be gone from the server. */
+export const NEW_VERSION_RELOAD_MESSAGE = 'A new version of ONOSENDAI is out. RELOAD to move again.'
 /** Said when the relays still could not confirm it, and the move is refused. */
 export const HEAD_UNCONFIRMED_MESSAGE = "Can't confirm your latest move. Try again."
 /** How many times a move asks before it refuses. */
@@ -4125,14 +4132,15 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
 
     if (msg.type === 'error') {
       const { plan } = get()
+      const message = msg.message === PROOF_WORKER_FAILED_MESSAGE && useVersionGate.getState().verdict === 'hint' ? NEW_VERSION_RELOAD_MESSAGE : msg.message
       set({
         pendingTarget: null,
-        plan: plan ? { ...plan, status: 'failed', message: msg.message, awaiting: null } : null,
+        plan: plan ? { ...plan, status: 'failed', message, awaiting: null } : null,
         proof: {
           ...IDLE_PROOF,
           status: 'infeasible',
           elapsedMs: msg.elapsedMs,
-          message: msg.message,
+          message,
         },
       })
       return
@@ -4143,6 +4151,13 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
 
   finishProof: async (msg) => {
     if (msg.type !== 'done' || msg.id !== requestId) return
+
+    // The proof is done, whatever the bar last heard: a short one finishes
+    // inside the worker's progress throttle, and the bar read 0% through every
+    // wait below (arkinox, 2026-11-01). The words say what it waits on now. A
+    // WALK step goes without them, or the panel would jump at every step.
+    const walking = isWalkProof(msg.id, msg.source)
+    set({ proof: { ...get().proof, progress: 1, message: walking ? get().proof.message : CHECKING_RELAYS_MESSAGE } })
 
     // The chain as it stands now, not as it stood when the proof started:
     // relay events held back while it computed are folded first. What the
@@ -4215,6 +4230,7 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
     }
     if (!template) { refuseSigning(msg, OLD_FORMAT_PROOF_MESSAGE, false); return }
 
+    set({ proof: { ...get().proof, message: walking || get().signerKind === 'local' ? null : WAITING_SIGNER_MESSAGE } })
     let event: NostrEvent
     try {
       event = await get().signEvent(template)
@@ -4228,7 +4244,7 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
         // The proof is done and kept; RESUME asks for the signature again.
         set({
           plan: { ...plan, status: 'paused', message: `Signature declined: ${reason}`, awaiting: msg },
-          proof: { ...get().proof, status: 'idle', progress: 1, elapsedMs: msg.elapsedMs },
+          proof: { ...get().proof, status: 'idle', progress: 1, elapsedMs: msg.elapsedMs, message: null },
         })
         return
       }

@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 
 // signers imports the relay layer, which imports the store, which reads
 // localStorage as it loads; the test runs where there is none.
@@ -28,6 +28,8 @@ const extension = (key: Uint8Array) => ({
   signEvent: async (t: EventTemplate) => finalizeEvent(t, key),
 })
 const win = globalThis as { window?: { nostr?: unknown } }
+/** Enough for the wait for window.nostr, which finds one at once here. */
+const NIP07_POLL_GRACE = 1000
 
 describe('deferredReconnect with an extension (arkinox, 2026-10-13)', () => {
   it('waits for an extension injected after the page started, and signs', async () => {
@@ -42,6 +44,24 @@ describe('deferredReconnect with an extension (arkinox, 2026-10-13)', () => {
     win.window = { nostr: { getPublicKey: async () => { throw new Error('locked') }, signEvent: async () => { throw new Error('locked') } } }
     const signer = await deferredReconnect({ kind: 'nip07', pubkey }, () => {})
     await expect(signer.signEvent(template)).rejects.toThrow('locked')
+    win.window = { nostr: extension(sk) }
+    const signed = await signer.signEvent(template)
+    expect(signed.pubkey).toBe(pubkey)
+  })
+
+  it('does not keep a handshake that never answers: the next signature tries again (arkinox, 2026-11-01)', async () => {
+    const { HANDSHAKE_PATIENCE_MS } = await import('../signWithin')
+    win.window = { nostr: { getPublicKey: () => new Promise(() => {}), signEvent: async () => { throw new Error('never asked') } } }
+    const signer = await deferredReconnect({ kind: 'nip07', pubkey }, () => {})
+    vi.useFakeTimers()
+    try {
+      const first = signer.signEvent(template)
+      const refused = expect(first).rejects.toThrow('did not answer')
+      await vi.advanceTimersByTimeAsync(NIP07_POLL_GRACE + HANDSHAKE_PATIENCE_MS)
+      await refused
+    } finally {
+      vi.useRealTimers()
+    }
     win.window = { nostr: extension(sk) }
     const signed = await signer.signEvent(template)
     expect(signed.pubkey).toBe(pubkey)

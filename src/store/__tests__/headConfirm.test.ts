@@ -51,7 +51,9 @@ vi.mock('../../lib/workers', async (orig) => ({
 }))
 vi.mock('../../lib/hyperspace/enter', async (orig) => ({ ...(await orig() as object), computeEnterProof: () => '0'.repeat(64) }))
 
-import { HEAD_RETRYING_MESSAGE, HEAD_UNCONFIRMED_MESSAGE, useCyberspace } from '../useCyberspace'
+import { CHECKING_RELAYS_MESSAGE, HEAD_RETRYING_MESSAGE, HEAD_UNCONFIRMED_MESSAGE, NEW_VERSION_RELOAD_MESSAGE, useCyberspace, WAITING_SIGNER_MESSAGE } from '../useCyberspace'
+import { PROOF_WORKER_FAILED_MESSAGE } from '../../lib/workers'
+import { useVersionGate } from '../../lib/versionGate'
 import { placeSpawn } from '../fixtures/placeSpawn'
 import { moveDirection } from '../../lib/moves'
 import { hopTemplate, positionHex, type NostrEvent } from '../../lib/events'
@@ -110,6 +112,60 @@ describe('a move is signed only from a head the relays confirm', () => {
     await S().applyProofMessage(done(5, head))
     expect(relay.asked).toBe(2)
     expect(S().events).toHaveLength(events + 1)
+  })
+
+  it('a finished proof reads 100% and says what it waits on, never a silent 0% (arkinox, 2026-11-01)', async () => {
+    S().moveCursor(moveDirection(S().axes(), 'right'))
+    const head = S().prevEventId
+    await S().commit()
+    expect(S().proof).toMatchObject({ status: 'computing', progress: 0 })
+    let atRelays: unknown = null
+    let atSigner: unknown = null
+    relay.onAsk = () => { atRelays = { ...S().proof } }
+    const sign = S().signEvent
+    useCyberspace.setState({
+      signerKind: 'nip07',
+      signEvent: (template) => { atSigner = { ...S().proof }; return sign(template) },
+    })
+    try {
+      await S().applyProofMessage(done(5, head))
+    } finally {
+      useCyberspace.setState({ signerKind: 'local', signEvent: sign })
+    }
+    expect(atRelays).toMatchObject({ status: 'computing', progress: 1, message: CHECKING_RELAYS_MESSAGE })
+    expect(atSigner).toMatchObject({ status: 'computing', progress: 1, message: WAITING_SIGNER_MESSAGE })
+    expect(S().proof).toMatchObject({ status: 'done', progress: 1, message: null })
+  })
+
+  it('a key on this device is not a signer to wait for: nothing is said for it', async () => {
+    S().moveCursor(moveDirection(S().axes(), 'right'))
+    const head = S().prevEventId
+    await S().commit()
+    let atSigner: unknown = null
+    const sign = S().signEvent
+    useCyberspace.setState({ signEvent: (template) => { atSigner = { ...S().proof }; return sign(template) } })
+    try {
+      await S().applyProofMessage(done(5, head))
+    } finally {
+      useCyberspace.setState({ signEvent: sign })
+    }
+    expect(atSigner).toMatchObject({ progress: 1, message: null })
+  })
+
+  it('a worker that could not run ends the move in words, and an update that left this tab behind says RELOAD', async () => {
+    S().moveCursor(moveDirection(S().axes(), 'right'))
+    await S().commit()
+    const id = posted[posted.length - 1].id
+    await S().applyProofMessage({ type: 'error', id, message: PROOF_WORKER_FAILED_MESSAGE, elapsedMs: 1 })
+    expect(S().proof).toMatchObject({ status: 'infeasible', message: PROOF_WORKER_FAILED_MESSAGE })
+    useVersionGate.setState({ verdict: 'hint' })
+    try {
+      await S().commit()
+      await S().applyProofMessage({ type: 'error', id: posted[posted.length - 1].id, message: PROOF_WORKER_FAILED_MESSAGE, elapsedMs: 1 })
+      expect(S().proof).toMatchObject({ status: 'infeasible', message: NEW_VERSION_RELOAD_MESSAGE })
+    } finally {
+      useVersionGate.setState({ verdict: 'ok' })
+    }
   })
 
   it('a relay that holds another device\'s newer move: it is adopted and the move refused', async () => {

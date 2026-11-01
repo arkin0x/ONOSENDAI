@@ -25,7 +25,8 @@ import { DEFAULT_SIGNER_RELAY, normalizeSignerRelay, signerRelays } from './logi
 export { BACKUP_SIGNER_RELAY, DEFAULT_SIGNER_RELAY, loginCredentialKind, normalizeSignerRelay, signerRelays } from './loginCredentials'
 
 export type SignerKind = 'local' | 'nip07' | 'nip46'
-export { SIGN_PATIENCE_MS, SignerTimeout, signWithin } from './signWithin'
+import { handshakeWithin } from './signWithin'
+export { SIGN_PATIENCE_MS, HANDSHAKE_PATIENCE_MS, SignerTimeout, signWithin, handshakeWithin } from './signWithin'
 
 export interface Signer {
   kind: SignerKind
@@ -458,9 +459,11 @@ export function deferredReconnect(pref: SignerPref, onReady: (s: Signer) => void
   const ensure = (): Promise<Signer> => {
     // A failed reconnect is not kept: the next signature tries again. Kept,
     // one early failure (an extension not injected yet, a bunker relay
-    // down) refused every signature until the page was reloaded.
+    // down) refused every signature until the page was reloaded. A handshake
+    // that never answers is one too, so it has a limit: without it, every
+    // later signature waited on it (arkinox, 2026-11-01).
     if (!pending) {
-      const attempt = signerFromPref(pref).then((s) => { onReady(s); return s })
+      const attempt = handshakeWithin(signerFromPref(pref)).then((s) => { onReady(s); return s })
       pending = attempt
       attempt.catch(() => { if (pending === attempt) pending = null })
     }

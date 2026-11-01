@@ -26,9 +26,8 @@
  */
 
 import type { ShardModel } from 'sno-core/shards'
-import { placeOf, type ChestEntry } from './chests'
+import type { ChestEntry } from './chests'
 import type { LookKind } from './looks'
-import type { Position } from './space'
 import { modelPrint } from './inventory'
 import type { ItemModelRef } from './itemModel'
 
@@ -79,33 +78,19 @@ export function lootOf(entries: readonly ChestEntry[], held: (e: ChestEntry) => 
 }
 
 /**
- * Whether a content is aimed at its own point inside the chest's region: it
- * is drawn there in the world (lib/chests.ts revealedIn, lib/looks.ts
- * keptInChest), so it does not also float out as loot (review of #534).
- */
-export function aimedElsewhere(e: ChestEntry, chest: { at: Position; plane: number; height: number }): boolean {
-  const own = placeOf(e.event)
-  if (!own || own.plane !== chest.plane) return false
-  const h = BigInt(chest.height)
-  const inRegion = (['x', 'y', 'z'] as const).every((a) => (own.at[a] >> h) === (chest.at[a] >> h))
-  const same = own.at.x === chest.at.x && own.at.y === chest.at.y && own.at.z === chest.at.z
-  return inRegion && !same
-}
-
-/**
  * The loot over an opened chest as the world draws it: none over a door (a
  * room is not treasure, and what is behind it stands in the room), none
  * while this identity's ITEMS are still loading (or every held thing would
- * float out for a moment after an identity switch), and otherwise lootOf,
- * less what is aimed at its own point in the region.
+ * float out for a moment after an identity switch), and otherwise lootOf:
+ * everything in a chest stays in it, wherever it was aimed (lib/looks
+ * keptInChest).
  */
 export function chestLoot(o: {
   look: LookKind
   entries: readonly ChestEntry[] | undefined
   held: (e: ChestEntry) => boolean
-  chest: { at: Position; plane: number; height: number }
   itemsReady: boolean
 }): LootObject[] {
   if (o.look !== 'chest' || !o.entries || !o.itemsReady) return []
-  return lootOf(o.entries.filter((e) => !aimedElsewhere(e, o.chest)), o.held)
+  return lootOf(o.entries, o.held)
 }

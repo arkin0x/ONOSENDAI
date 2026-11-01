@@ -12,8 +12,10 @@
  * Cashu card and its mint state, shards with MOVE TO WORKSHOP, messages, and
  * chests, which open here as they do where they were found. COPY puts an item
  * on the clipboard as text (`cyberspace-key:` and its event) and PASTE reads
- * one back, so an item crosses devices. Nothing here is destructive; BURN
- * comes later. An item you forged can be PUBLISHED to the ITEM FEED (a kind
+ * one back, so an item crosses devices. DELETE takes an item off this
+ * identity's list after a confirmation naming it (arkinox, 2026-11-01: "I
+ * can't delete items"), since an item is a secret key: it publishes and
+ * retracts nothing, and the item can be found and TAKEN again. An item you forged can be PUBLISHED to the ITEM FEED (a kind
  * 33340 listing, lib/itemListing.ts): its name, picture and public key, never
  * its private key, so anyone can seal a chest to it (arkinox, 2026-10-13).
  * The confirmation says it cannot be taken back.
@@ -102,7 +104,45 @@ const LISTING_WARNING = [
   'This cannot be undone. You can ask relays to delete the listing later, but relays and other people may already have kept copies, and chests sealed to this item stay sealed to it. Treat it as permanent.',
 ].join('\n')
 
-/** A held keypair item: its picture or the kind's icon, name, who forged it, where and when, what it opens, DETAILS and COPY. */
+/** The DELETE confirmation: an item is a secret key, and this copy of it goes. */
+const DELETE_WARNING = 'Its secret key leaves this identity\u2019s ITEMS on this device. Nothing is published or retracted. COPY it first to keep a way back; otherwise it returns only if you find it and TAKE it again.'
+
+/** DELETE and its confirmation, naming the item. Nothing goes until the second tap. */
+export function DeleteItem({ item, asking = false }: { item: Pick<HeldItem, 'id' | 'name'>; asking?: boolean }): JSX.Element {
+  const [confirming, setConfirming] = useState(asking)
+  const [busy, setBusy] = useState(false)
+  const [refusal, setRefusal] = useState<string | null>(null)
+  const remove = async (): Promise<void> => {
+    setBusy(true)
+    setRefusal(null)
+    const gone = await useInventory.getState().remove(item.id)
+    // Gone, this row has left the list with it.
+    if (gone) return
+    setBusy(false)
+    setConfirming(false)
+    setRefusal('Could not delete it from this device. It is still held.')
+  }
+  return (
+    <>
+      <button className="chest__act chest__act--danger" onClick={() => setConfirming(true)} title="Delete it from your ITEMS">DELETE</button>
+      {refusal && <span className="held__refusal" role="status">{refusal}</span>}
+      {confirming && (
+        <ConfirmModal
+          title={`Delete \u201c${item.name}\u201d?`}
+          body={DELETE_WARNING}
+          confirmLabel="DELETE ITEM"
+          cancelLabel="CANCEL"
+          danger
+          busy={busy}
+          onConfirm={() => void remove()}
+          onCancel={() => setConfirming(false)}
+        />
+      )}
+    </>
+  )
+}
+
+/** A held keypair item: its picture or the kind's icon, name, who forged it, where and when, what it opens, DETAILS, COPY and DELETE. */
 function KeyRow({ item, opens }: { item: HeldItem; opens: number }): JSX.Element {
   const me = useCyberspace((s) => s.identity.pubkey)
   const profile = useProfile(item.author || null)
@@ -147,6 +187,7 @@ function KeyRow({ item, opens }: { item: HeldItem; opens: number }): JSX.Element
         {mine && (
           <button className={`chest__act ${listed ? 'is-on' : ''}`} disabled={listed || busy} onClick={() => setConfirming(true)} title={listed ? 'Listed in the ITEM FEED: anyone can seal a chest to it' : 'Publish this item to the ITEM FEED so anyone can seal a chest to it'}>{busy ? 'LISTING…' : listed ? 'LISTED' : 'PUBLISH'}</button>
         )}
+        <DeleteItem item={item} />
       </span>
       {refusal && <span className="held__refusal" role="status">{refusal}</span>}
       {confirming && (

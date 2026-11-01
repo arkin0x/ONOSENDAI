@@ -36,7 +36,7 @@ import { safeNpub } from '../lib/npub'
 import { useCyberspace } from '../store/useCyberspace'
 import { useInventory } from '../store/useInventory'
 import { forgetRefusal, openedByHand, openedContents, openedKey, readRefused, refuseRead, rememberOpened, useOpenedChests } from '../store/useOpenedChests'
-import { celebrateOpen } from '../store/useOpenCeremony'
+import { celebrateOpen, takeAndVanish } from '../store/useOpenCeremony'
 import { useCeremony } from '../store/useCeremony'
 import { isDoor, lookOf } from '../lib/looks'
 import { doorSecretWithKey, doorSecretWithSigner } from '../lib/doors'
@@ -65,13 +65,14 @@ export function useWho(pubkey: string): string {
 /**
  * A keypair item where it was found: its name, who forged it, and TAKE, or
  * IN YOUR ITEMS once it is held. `id` is the find's event id; without one,
- * or for a thing that is not among this device's finds (one of your own,
- * held since you forged it), there is nothing to take.
+ * or for a thing that is neither among this device's finds nor one of your
+ * own (deleted from ITEMS, it is yours to take again), there is nothing to
+ * take. TAKE closes the list and the item fades out where it stands.
  */
 export function KeyLine({ id, name, author }: { id?: string; name: string; author: string }): JSX.Element {
   const who = useWho(author)
   const held = useInventory((s) => (id ? !!s.items[id] : false))
-  const found = useShards((s) => (id ? !!s.discovered[id] : false))
+  const found = useShards((s) => (id ? !!s.discovered[id] || s.mine.some((d) => d.eventId === id && !!d.key && !!d.inner) : false))
   return (
     <span className="keyline">
       <span className="item__line">
@@ -79,7 +80,7 @@ export function KeyLine({ id, name, author }: { id?: string; name: string; autho
         <span className="item__meta">forged by {who}{held && <> · <span className="item__held" title="It is in your ITEMS">IN YOUR ITEMS</span></>}</span>
       </span>
       {id && found && !held && (
-        <button className="chest__act chest__act--take" onClick={() => { useShards.getState().takeFound([id]) }} title="Put it in your ITEMS">TAKE</button>
+        <button className="chest__act chest__act--take" onClick={() => takeAndVanish(id, prefersReducedMotion())} title="Put it in your ITEMS">TAKE</button>
       )}
     </span>
   )

@@ -39,6 +39,10 @@
  * Hidden audio (DECK-0007) is a small music note inside the note's blue box
  * (arkinox, 2026-10-23), its name under it, drawn when notes are; a tap opens
  * its card, with PLAY and DOWNLOAD.
+ *
+ * An item this identity holds is not drawn: the note's blue box alone stays
+ * where it was, its tap still opening its card (arkinox, 2026-11-01; lib/
+ * worldMarks itemDrawAs). TAKE fades it out over that box (scene/ItemVanish).
  */
 
 import { useEffect, useMemo, useRef, useState } from 'react'
@@ -48,6 +52,9 @@ import { useFrame } from '@react-three/fiber'
 import { BoxGeometry, CircleGeometry, EdgesGeometry, OctahedronGeometry, PlaneGeometry, type Group, type PerspectiveCamera } from 'three'
 import { decodeText, seedOf, TEXT_DECODE_MS } from '../lib/decode'
 import { useCeremony } from '../store/useCeremony'
+import { useInventory } from '../store/useInventory'
+import { useTakeVanish } from '../store/useOpenCeremony'
+import { openedKey } from '../store/useOpenedChests'
 import { GRID_RADIUS, itemCentre, type ViewAxes } from '../lib/space'
 import { alignedOrigin, useCyberspace } from '../store/useCyberspace'
 import { useShards } from '../store/useShards'
@@ -56,13 +63,14 @@ import { findCashuToken } from '../lib/cashu'
 import { NFT_WORDS, replaceNftLinks } from '../lib/nftLink'
 import { useProfile } from '../hooks/useProfile'
 import { profileLabel } from '../store/useProfiles'
-import { coinKind, markShown, type MarkKind } from '../lib/worldMarks'
+import { coinKind, itemDrawAs, markShown, type MarkKind } from '../lib/worldMarks'
 import { useCashu } from '../hud/useCashu'
 import { TapTarget } from './TapTarget'
 import { regionBox, type Box } from '../lib/clip'
 import { useItemModel } from '../hooks/useItemModel'
 import type { ItemAnimation, ItemModelRef } from '../lib/itemModel'
 import { ItemModelMark } from './ItemModel'
+import { ItemVanish } from './ItemVanish'
 import { useMutes } from '../store/useMutes'
 import { MARK_RECEDE_FLOOR, recedeShare } from '../lib/markerSize'
 import { headlampUniforms } from './headlamp'
@@ -178,6 +186,11 @@ export function WorldMessages({ axes }: Props): JSX.Element | null {
   // A block or a mute hides what it names (store/useMutes).
   const muted = useMutes((s) => s.muted)
   const births = useCeremony((s) => s.births)
+  const me = useCyberspace((s) => s.identity.pubkey)
+  const held = useInventory((s) => s.items)
+  // Whose ITEMS these are, and whether read: until then nothing held is shown by mistake.
+  const itemsRead = useInventory((s) => s.owner === me && s.storage !== 'loading')
+  const vanishing = useTakeVanish((s) => s.playing)
 
   const placed = useMemo(() => {
     const origin = alignedOrigin(anchor, scaleExp)
@@ -217,10 +230,15 @@ export function WorldMessages({ axes }: Props): JSX.Element | null {
         if (w.coin) return <CoinItem key={w.key} text={w.text} at={w.centre} scaleExp={scaleExp} onTap={open} />
         if (w.type === 'message') return <NoteItem key={w.key} w={w} birth={births[w.key]} onTap={open} />
         if (w.type === 'audio') return <AudioMark key={w.key} title={w.text} at={w.centre} onTap={open} />
-        // A key: the cube and its short name, as before.
+        // A key: the cube and its short name, or the box alone while it is held.
+        const play = vanishing[openedKey(me, w.key)]
+        const draw = itemDrawAs(!!held[w.key], itemsRead, !!play)
         return (
           <group key={w.key}>
-            <ItemMark id={w.key} text={w.text} sub={author(w)} at={w.centre} wears={w.wears} region={w.region} axes={axes} onTap={open} />
+            {draw === 'item'
+              ? <ItemMark id={w.key} text={w.text} sub={author(w)} at={w.centre} wears={w.wears} region={w.region} axes={axes} onTap={open} />
+              : <WorldMark kind="note" at={w.centre} />}
+            {draw === 'vanishing' && <ItemVanish id={w.key} label={{ text: w.text, color: NOTE, sub: author(w), subColor: ACCENT }} at={w.centre} wears={w.wears} region={w.region} axes={axes} minPx={NOTE_EDGE_PX} play={play} />}
             {/* The mark is a fixed size on screen at any zoom, so its target is
                 too: a fingertip over the mark (TapTarget). */}
             <TapTarget px={TAP_PX} at={w.centre} onTap={open} />

@@ -3454,6 +3454,12 @@ export const useShards = create<ShardsState>((set, get) => {
       }
       const inv = useInventory.getState()
       const added = [...(inPlay.length > 0 ? inv.holdFinds(inPlay, false, inChest) : []), ...(watchedOnly.length > 0 ? inv.holdFinds(watchedOnly, true, inChest) : [])]
+      // One of your own you deleted from ITEMS is no find, so it is held again as forged, on this TAKE only.
+      for (const id of eventIds) {
+        const d = discovered[id] ? undefined : get().mine.find((x) => x.eventId === id)
+        if (!d?.key || !d.inner || inv.has(id)) continue
+        added.push(inv.holdForged(d.inner as NostrEvent, d.key, { lookupId: d.lookupId, bagId: d.bagId, at: d.at, plane: d.plane, height: d.height }))
+      }
       // Taking an item opens nothing: the chest it opens waits for OPEN
       // (arkinox, 2026-10-26: "everything must be opened or taken manually").
       return added

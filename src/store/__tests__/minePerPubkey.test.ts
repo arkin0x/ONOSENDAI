@@ -73,7 +73,6 @@ const signIn = (pubkey: string): void => { useCyberspace.setState({ identity: { 
 
 const X = 'a1'.repeat(32)
 const Y = 'b2'.repeat(32)
-const Z = 'c3'.repeat(32)
 const at = { x: 90_000n, y: 4_000n, z: 71n }
 const HEIGHT = 5
 const rk = regionKeyAt(at, HEIGHT, 20)
@@ -273,16 +272,6 @@ const SK = generateSecretKey()
 const OWNER = getPublicKey(SK)
 const tick = (ms = 30): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms))
 const everywhere = (id: string): string[] => [BARE, UNCLAIMED, keyOf(OWNER), keyOf(X), keyOf(Y), keyOf(home)].filter((k) => stored(k).some((d) => d?.eventId === id))
-/** Storage with a total size, counted over the keys these tests use. */
-function capStorage(cap: number): { restore: () => void } {
-  const real = localStorage.setItem.bind(localStorage)
-  const total = (): number => [BARE, UNCLAIMED, keyOf(OWNER), keyOf(X), keyOf(Y), keyOf(home)].reduce((n, k) => n + (localStorage.getItem(k) ?? '').length, 0)
-  const spy = vi.spyOn(localStorage, 'setItem').mockImplementation((k: string, v: string) => {
-    if (total() - (localStorage.getItem(k) ?? '').length + String(v).length > cap) throw new Error('QuotaExceededError')
-    real(k, v)
-  })
-  return { restore: () => spy.mockRestore() }
-}
 const aShard = (): ShardModel => ({ ...newShard('new'), unit: 1, vertices: Array.from({ length: 3 }, (_, i) => ({ p: [i % 16, Math.floor(i / 16) % 16, Math.floor(i / 256)] as [number, number, number], c: [1, 1, 1] as [number, number, number] })), faces: [[0, 1, 2]] })
 async function deployAShard(): Promise<void> {
   const shard = aShard()
@@ -291,7 +280,6 @@ async function deployAShard(): Promise<void> {
   await useShards.getState().deploy()
 }
 
-const onAnyKey = (id: string): boolean => [BARE, UNCLAIMED, keyOf(X)].some((k) => stored(k).some((d) => d?.eventId === id))
 
 describe('a public bag when no relay answered', () => {
   const lostBag = (): void => {

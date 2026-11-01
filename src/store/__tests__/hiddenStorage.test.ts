@@ -65,7 +65,7 @@ function row(author: string, id: string, extra: Record<string, unknown> = {}): R
 }
 
 type Page = Awaited<ReturnType<typeof page>>
-let last: Page | null = null
+let last: { st: { resetHiddenForTests: () => void } } | null = null
 
 /** A page load: the last page gone, the modules fresh, the read before the first draw done. */
 async function page(opts: { hydrate?: boolean; keepLast?: boolean } = {}) {
@@ -149,6 +149,28 @@ describe('the case he hit: localStorage full, a live door placed', () => {
     h.state.full = false
     const next = await page()
     expect(next.ids()).not.toContain(door.eventId)
+  })
+})
+
+describe('a row that cannot be saved', () => {
+  it('says so, stays in hand, and is written with the next save', async () => {
+    const p = await page()
+    p.signIn(X)
+    h.state.failCommit = true
+    expect(await p.st.saveRows(X, [row(X, 'x1') as never], JSON.stringify, () => false)).toBe(false)
+    expect((await dbRows()).length).toBe(0)
+    h.state.failCommit = false
+    expect(await p.st.saveRows(X, [row(X, 'x1') as never, row(X, 'x2') as never], JSON.stringify, () => false)).toBe(true)
+    expect((await dbRows()).map((r) => r.key).sort()).toEqual(['x1', 'x2'])
+  })
+
+  it('a deploy whose row cannot be saved shows the toast', async () => {
+    const p = await page()
+    const { door } = await sealDoor(p)
+    expect(door).toBeDefined()
+    h.state.failCommit = true
+    await p.useShards.getState().deleteInstance(door.eventId).catch(() => {})
+    await vi.waitFor(() => expect(p.toast()).toBe('NOT SAVED ON THIS DEVICE'))
   })
 })
 

@@ -20,6 +20,8 @@ if (typeof localStorage === 'undefined') {
 ;(globalThis as { document?: unknown }).document ??= { addEventListener: () => undefined, removeEventListener: () => undefined, body: { nodeType: 1 } }
 
 const relay = vi.hoisted(() => ({ answer: null as null | ((events: unknown[]) => void), asked: 0, events: [] as unknown[], hold: false }))
+// The card's one shared canvas lives outside the card (scene/CardSpin), and nothing here draws.
+vi.mock('../../scene/CardSpin', () => ({ CardSpin: () => null }))
 vi.mock('../../lib/relay', () => ({
   publishMany: vi.fn(async () => ({ ok: true })),
   query: vi.fn(() => { relay.asked++; return relay.hold ? new Promise((r) => { relay.answer = r }) : Promise.resolve(relay.events) }),

@@ -40,7 +40,7 @@ import { celebrateOpen } from '../store/useOpenCeremony'
 import { useCeremony } from '../store/useCeremony'
 import { isDoor, lookOf } from '../lib/looks'
 import { doorSecretWithKey, doorSecretWithSigner } from '../lib/doors'
-import { doorAsFound, fillRoom, openDoorNow } from '../store/rooms'
+import { doorAsFound, fillRoom, ownOpenOwed, openDoorNow } from '../store/rooms'
 import { useToast } from '../store/useToast'
 import { chestLoot } from '../lib/lootObjects'
 import { landedAt } from '../lib/ceremony'
@@ -207,6 +207,8 @@ export function ChestBlock({ id, chest, author, verified, place, sealer: given, 
   // that fails, a signer refusing, and the refusal holds for the session
   // until OPEN is tapped (store/useOpenedChests readRefused).
   const handOpened = openedByHand(me, id, chest.lockPubkey)
+  // Open only because another door of its room was, and its own key is here now (§3.7.5).
+  const owed = door && handOpened && ownOpenOwed(me, id, chest, opener)
   const readKey = `${openedKey(me, id)}:${chest.lockPubkey}`
   const tried = useRef<string | null>(null)
   const [, setRefusals] = useState(0)
@@ -246,7 +248,7 @@ export function ChestBlock({ id, chest, author, verified, place, sealer: given, 
     // Inside the tap, so a phone lets the ceremony's sound out (lib/audioContext).
     resumeAudio()
     // Once per chest, per identity, per device: a chest opened by hand before plays nothing.
-    const first = !openedByHand(me, id, chest.lockPubkey)
+    const first = !openedByHand(me, id, chest.lockPubkey) || owed
     forgetRefusal(me, id, chest.lockPubkey)
     setBusy(true)
     setStatus(null)
@@ -285,7 +287,7 @@ export function ChestBlock({ id, chest, author, verified, place, sealer: given, 
             {entries || rereading ? 'OPEN' : `REQUIRES: ${requiresLabel(chest)}`} · hidden by {who}{!verified && <> · <Unsigned /></>}
           </span>
         </span>
-        {opener && !entries && (
+        {opener && (!entries || owed) && (
           <button className="chest__act" onClick={() => void open()} disabled={busy || rereading} title={`Decrypt it here with ${opensWith}`}>{busy || rereading ? 'OPENING' : 'OPEN'}</button>
         )}
       </div>

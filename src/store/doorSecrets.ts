@@ -9,8 +9,10 @@
  * knowledge, as an item is, and never leaves this device.
  */
 
-const SECRETS_KEY = 'onosendai:door-secrets'
-/** Enough for years of play; the oldest fall off past it. */
+import { hiddenDecided, ONLY_SAID_KEY, putSecret, secretRecord, SECRETS_KEY, storageMode } from './hiddenStorage'
+import { useToast } from './useToast'
+
+/** In local mode only (store/hiddenStorage.ts): the database has no such limit. The oldest fall off past it. */
 const SECRETS_MAX = 2000
 
 let kept: Record<string, Record<string, string>> | null = null
@@ -24,7 +26,6 @@ function all(): Record<string, Record<string, string>> {
   return kept
 }
 
-const ONLY_SAID_KEY = 'onosendai:door-secrets-only-said'
 let onlySaid: Record<string, Record<string, true>> | null = null
 
 function saidByAll(): Record<string, Record<string, true>> {
@@ -42,29 +43,66 @@ function saidByAll(): Record<string, Record<string, true>> {
  * makes that right; but a second secret can exist, so it is only what was said.
  */
 export function doorSecretOnlySaid(me: string, doorId: string): boolean {
+  if (storageMode() === 'indexeddb') return !!secretRecord(me, doorId)?.onlySaid
   return !!saidByAll()[me]?.[doorId]
 }
 
 /** The door secret this identity knows for a door, or null. */
 export function doorSecret(me: string, doorId: string): string | null {
-  const s = all()[me]?.[doorId]
+  const s = storageMode() === 'indexeddb' ? secretRecord(me, doorId)?.secret : all()[me]?.[doorId]
   return typeof s === 'string' && /^[0-9a-f]{64}$/.test(s) ? s : null
 }
 
-/** Keep a door secret this identity has learned: by opening the door, or by sealing it. */
-export function keepDoorSecret(me: string, doorId: string, secretHex: string, how?: { onlySaid: true }): void {
+const NOT_KEPT = 'This device could not save a door secret. It is known until you reload: free some space, then open or seal the door again.'
+
+function saidNotKept(): void {
+  useToast.getState().show({ label: 'SECRET NOT SAVED', meta: NOT_KEPT, mark: 'build' })
+}
+
+/** As it always was, for local mode: whether it reached localStorage. */
+function keepLocally(me: string, doorId: string, secretHex: string, how?: { onlySaid: true }): boolean {
+  let ok = true
   const said = saidByAll()
   const marks = { ...(said[me] ?? {}) }
   if (how?.onlySaid) marks[doorId] = true
   else delete marks[doorId]
   said[me] = marks
-  try { localStorage.setItem(ONLY_SAID_KEY, JSON.stringify(said)) } catch { /* quota or private mode: known for this session */ }
+  try { localStorage.setItem(ONLY_SAID_KEY, JSON.stringify(said)) } catch { ok = false }
   const a = all()
   const mine = { ...(a[me] ?? {}), [doorId]: secretHex }
   const ids = Object.keys(mine)
   if (ids.length > SECRETS_MAX) for (const id of ids.slice(0, ids.length - SECRETS_MAX)) delete mine[id]
   a[me] = mine
-  try { localStorage.setItem(SECRETS_KEY, JSON.stringify(a)) } catch { /* quota or private mode: known for this session */ }
+  try { localStorage.setItem(SECRETS_KEY, JSON.stringify(a)) } catch { ok = false }
+  return ok
+}
+
+function record(me: string, doorId: string, secretHex: string, how?: { onlySaid: true }): { owner: string; doorId: string; secret: string; onlySaid?: true } {
+  return { owner: me, doorId, secret: secretHex, ...(how?.onlySaid ? { onlySaid: true as const } : {}) }
+}
+
+/**
+ * Keep a door secret this identity has learned, by opening the door: known at
+ * once, and saved behind that. A failure says so. For a door about to go out, use
+ * commitDoorSecret.
+ */
+export function keepDoorSecret(me: string, doorId: string, secretHex: string, how?: { onlySaid: true }): void {
+  if (storageMode() === 'local') { if (!keepLocally(me, doorId, secretHex, how)) saidNotKept(); return }
+  void hiddenDecided().then(() => {
+    if (storageMode() === 'local') { if (!keepLocally(me, doorId, secretHex, how)) saidNotKept(); return }
+    return putSecret(record(me, doorId, secretHex, how)).then((ok) => { if (!ok) saidNotKept() })
+  })
+}
+
+/**
+ * Keep the secret of a door about to go out, on disk, before it does: a door
+ * published with its secret lost cannot be edited from here. Rejects, in words, when
+ * it cannot be kept, in either mode, and the caller publishes nothing.
+ */
+export async function commitDoorSecret(me: string, doorId: string, secretHex: string): Promise<void> {
+  await hiddenDecided()
+  const kept = storageMode() === 'local' ? keepLocally(me, doorId, secretHex) : await putSecret(record(me, doorId, secretHex))
+  if (!kept) throw new Error('This device could not save the door\'s secret, so nothing was sent. Free some space and try again.')
 }
 
 /** For tests: forget what is kept, so the next read is from localStorage. */

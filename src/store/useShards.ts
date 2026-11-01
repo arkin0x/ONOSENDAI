@@ -96,7 +96,8 @@ import { useShardFolders } from './useShardFolders'
 import { creditOf, useWorkshop } from './useWorkshop'
 import { deletionFilters, isDeleted, type Credit, type FeedObject } from 'sno-core/feed'
 import { ROOM_BAG_SETTINGS, inRoom, newDoorSecret, roomDoorAt, roomEntries, roomKey, roomLookupId, roomOf, type OwnDoor } from '../lib/doors'
-import { doorSecret, keepDoorSecret } from './doorSecrets'
+import { commitDoorSecret, doorSecret, keepDoorSecret } from './doorSecrets'
+import { entriesIn, isListed, noteStored, onHiddenChange, reloadLocalView, saveRows, UNCLAIMED } from './hiddenStorage'
 import { builtInLook, builtInLookTags, doorHeightOf, isDoor, keptInChest, lookOf, lookTags, lookTagsOf, posedLook, posedWrapper, wireLook, wireOpenLook, type LookName, type LookPose } from '../lib/looks'
 import { useCeremony } from './useCeremony'
 import { useToast } from './useToast'
@@ -1143,7 +1144,8 @@ interface ShardsState {
   secretByEvent: (eventId: string) => WorldItem | null
 }
 
-const MINE_KEY = 'onosendai:deployments'
+/** The store's list until followIdentity has read the identity's own. */
+const NOT_READ_YET: MyDeployment[] = []
 /**
  * Event ids this device has ever opened, newest last. `discovered` is memory
  * only and starts empty on every load, so without this the first scan after a
@@ -1188,44 +1190,113 @@ const DELETED_KEY = 'onosendai:deployments-deleted'
 /** Bags this identity has taken down, by `author:lookupId`, which is a loot row's own key. */
 const DELETED_BAGS_KEY = 'onosendai:bags-deleted'
 
-function loadMine(): MyDeployment[] {
+/**
+ * A row whose shard cannot be drawn. It stays stored and is never listed: drawing
+ * one throws during render, and placing a fractional unit throws above the boundary.
+ */
+function unreadable(d: MyDeployment): boolean {
+  if (!d?.shard) return false
   try {
-    const raw = localStorage.getItem(MINE_KEY)
-    if (!raw) return []
-    const list = JSON.parse(raw)
-    return Array.isArray(list) ? list.filter((d) => d && d.eventId && d.inner && (d.shard || d.text || d.key || d.chest)).map((d) => {
-      if (d.shard) return { ...d, shard: normalizeStored(d.shard) }
-      // A chest's look is stored once, in its inner event (storedMine).
-      const look = d.chest && !d.chest.look ? chestItemOf(d.inner)?.look : undefined
-      return look ? { ...d, chest: { ...d.chest, look } } : d
-    }) : []
-  } catch { return [] }
+    const s = normalizeStored(d.shard)
+    return !Array.isArray(s.vertices) || !Array.isArray(s.faces) || clampUnit(s.unit) !== s.unit
+  } catch { return true }
+}
+
+/** A stored row as the app reads it. Only for a row that is not unreadable. */
+function normalizedRow(d: MyDeployment): MyDeployment {
+  if (d.shard) return { ...d, shard: normalizeStored(d.shard) }
+  // A chest's look is stored once, in its inner event (storedRow).
+  const look = d.chest && !d.chest.look ? chestItemOf(d.inner)?.look : undefined
+  return look ? { ...d, chest: { ...d.chest!, look } } : d
+}
+
+function loadMine(owner: string): MyDeployment[] {
+  const out: MyDeployment[] = []
+  for (const { row, json } of entriesIn(owner)) {
+    if (!isListed(row) || unreadable(row)) continue
+    const d = normalizedRow(row)
+    noteStored(d, json)
+    out.push(d)
+  }
+  return out
 }
 
 /**
- * The record as stored. A chest's look is in its inner event already, and a
- * built-in's is some 20 KB a side: kept twice it was 39,800 bytes a row, enough
- * to fill this storage in a hundred chests. It comes back from the inner event
- * on load (loadMine).
+ * A row as stored. A chest's look is in its inner event already, and a built-in's
+ * is some 20 KB a side: kept twice it was 39,800 bytes a row. It comes back from
+ * the inner event on load (normalizedRow).
  */
-export function storedMine(mine: readonly MyDeployment[]): string {
-  return JSON.stringify(mine.map((d) => {
-    if (!d.chest?.look) return d
-    const { look: _inInner, ...chest } = d.chest
-    void _inInner
-    return { ...d, chest }
-  }))
+function storedRow(d: MyDeployment): string {
+  if (!d.chest?.look) return JSON.stringify(d)
+  const { look: _inInner, ...chest } = d.chest
+  void _inInner
+  return JSON.stringify({ ...d, chest })
 }
 
-function saveMine(mine: MyDeployment[]): void {
-  try {
-    localStorage.setItem(MINE_KEY, storedMine(mine))
-  } catch (err) {
-    // What you hid is on the relays if it went LIVE, but this device forgets
-    // it on a reload: say so, rather than lose your own record in silence.
-    console.warn(`[shards] could not save the record of what you hid: ${err instanceof Error ? err.message : String(err)}`)
-    useToast.getState().show({ label: 'NOT SAVED ON THIS DEVICE', meta: 'This device has no room left for the record of what you hid. It is here until you reload.', mark: 'build' })
+export function storedMine(mine: readonly MyDeployment[]): string {
+  return `[${mine.map(storedRow).join(',')}]`
+}
+
+const BAG_NOT_READ = 'No relay answered, so this bag could not be read. Nothing was changed. Try again when one answers.'
+const SWITCHED = 'You switched identity while this was on its way, so it was not sent.'
+
+/** What this list leaves out but must stay stored: rows no list shows. */
+const notShown = (d: MyDeployment | null): boolean => !isListed(d) || unreadable(d)
+
+/** Whether the list reached disk. Only what changed is written. When it did not, a toast says so: it shows whatever is open. */
+function saveMine(mine: MyDeployment[], owner = useCyberspace.getState().identity.pubkey): Promise<boolean> {
+  return saveRows(owner, mine, storedRow, notShown).then((ok) => {
+    // What you hid is on the relays if it went LIVE, but this device forgets it
+    // on a reload: say so, rather than lose your own record in silence.
+    if (!ok) useToast.getState().show({ label: 'NOT SAVED ON THIS DEVICE', meta: 'This device has no room left for the record of what you hid. If it went LIVE, a scan where you hid it brings it back.', mark: 'build' })
+    return ok
+  })
+}
+
+/** One identity's rows: the store's while it is the one signed in, its own stored ones once it is not. */
+function rowsOf(owner: string): MyDeployment[] {
+  return useCyberspace.getState().identity.pubkey === owner ? useShards.getState().mine : loadMine(owner)
+}
+
+/** Write one identity's rows where rowsOf reads them, so work a switch landed during never touches the next identity's list. */
+function commitRows(owner: string, rows: MyDeployment[]): Promise<boolean> {
+  if (useCyberspace.getState().identity.pubkey === owner) useShards.setState({ mine: rows })
+  return saveMine(rows, owner)
+}
+
+/** The unclaimed rows that could be claimed: a reference with what opens its bag, not deleted here. */
+function claimableRows(): MyDeployment[] {
+  const deleted = loadDeleted()
+  return entriesIn(UNCLAIMED).flatMap((e) => (e.row?.ref && e.row.inner && e.row.keyHex && e.row.lookupId && !deleted[e.row.eventId] ? [e.row] : []))
+}
+
+/**
+ * Move to this identity the unclaimed rows its own bags name. The bag's signature
+ * says who placed what it names, and only the row's own key opens it. A row no
+ * relay can vouch for yet stays unclaimed and is asked about on the next load.
+ * It asks for all of this identity's bags and looks here, so the relays never
+ * learn that another identity's lookup ids are on this device.
+ */
+async function claimUnclaimed(owner: string): Promise<void> {
+  const rows = claimableRows().filter((d) => !unreadable(d))
+  if (rows.length === 0) return
+  const bags = await query({ kinds: [HIDDEN_KIND], authors: [owner] })
+  const claimed: MyDeployment[] = []
+  for (const d of rows) {
+    for (const bag of bags) {
+      if (bag.pubkey !== owner || bag.tags.find((t) => t[0] === 'd')?.[1] !== d.lookupId) continue
+      const entries = await bagEntries(bag, hexToBytes(d.keyHex)).catch(() => [])
+      if (entries.some((e) => entryKey(e) === entryKey(entryOf(d)))) { claimed.push(d); break }
+    }
   }
+  if (claimed.length === 0) return
+  const have = new Set(rowsOf(owner).map((d) => d.eventId))
+  const added = claimed.filter((d) => !have.has(d.eventId)).map(normalizedRow)
+  // Committed to the owner first, and taken off the unclaimed only once that reached disk.
+  if (!await commitRows(owner, [...rowsOf(owner), ...added])) return
+  const gone = new Set(claimed.map((d) => d.eventId))
+  const left = entriesIn(UNCLAIMED).flatMap((e) => (e.row && !gone.has(e.row.eventId) ? [e.row] : []))
+  await saveRows(UNCLAIMED, left, JSON.stringify, (d) => d === null)
 }
 
 function loadDeleted(): Record<string, true> {
@@ -1407,8 +1478,8 @@ export const useShards = create<ShardsState>((set, get) => {
    * #407): otherwise a bag written the old way would keep it beside the new
    * chest, or carry it loose with no chest at all.
    */
-  async function publishBag(inners: BagEntry[], key: Uint8Array, lookupId: string, height: number, live: boolean, settings: BagSettings, place: { at: Position; plane: Plane }, beforeSend?: () => Promise<void>, before: BagEntry[] = []): Promise<{ event: NostrEvent; published: boolean }> {
-    const event = await signBag(inners, key, lookupId, height, settings, place, before)
+  async function publishBag(inners: BagEntry[], key: Uint8Array, lookupId: string, height: number, live: boolean, settings: BagSettings, place: { at: Position; plane: Plane }, beforeSend?: () => Promise<void>, before: BagEntry[] = [], owner = cyber().identity.pubkey): Promise<{ event: NostrEvent; published: boolean }> {
+    const event = await signBag(inners, key, lookupId, height, settings, place, before, owner)
     // Anything that must go out only once the bag is signed (an EDIT's
     // resealed object): a signer that refuses the bag stops it here.
     if (beforeSend) await beforeSend()
@@ -1417,7 +1488,9 @@ export const useShards = create<ShardsState>((set, get) => {
   }
 
   /** The bag signed, and nothing sent: publishBag's first half, for what must sign everything before anything goes out. */
-  async function signBag(inners: BagEntry[], key: Uint8Array, lookupId: string, height: number, settings: BagSettings, place: { at: Position; plane: Plane }, before: BagEntry[] = []): Promise<NostrEvent> {
+  async function signBag(inners: BagEntry[], key: Uint8Array, lookupId: string, height: number, settings: BagSettings, place: { at: Position; plane: Plane }, before: BagEntry[] = [], owner = cyber().identity.pubkey): Promise<NostrEvent> {
+    // This work began under another identity: it must not be signed by, or touch the list of, the one signed in now.
+    if (cyber().identity.pubkey !== owner) throw new Error(SWITCHED)
     const looked = [...inners, ...before]
     const inside = sealedInside(looked, openingKeys(useInventory.getState().items))
     const chests = new Set(looked.filter((e): e is NostrEvent => !isReference(e) && e.kind === CHEST_KIND).map((e) => e.id))
@@ -1446,8 +1519,13 @@ export const useShards = create<ShardsState>((set, get) => {
     const local = items.map(entryOf)
     const localSettings = items.length > 0 ? items.reduce((a, b) => (b.createdAt > a.createdAt ? b : a)).bag ?? DEFAULT_BAG_SETTINGS : null
     if (!live) return { entries: local, settings: localSettings }
+    let relay: BagEntry[] = []
+    let settings = localSettings
+    let heard = false
     try {
-      const events = await query({ kinds: [HIDDEN_KIND], authors: [cyber().identity.pubkey], '#d': [lookupId] })
+      const answers = await queryEach({ kinds: [HIDDEN_KIND], authors: [cyber().identity.pubkey], '#d': [lookupId] })
+      const events = answers.flatMap((a) => a.events)
+      heard = answers.some((a) => a.outcome === 'answered')
       const newest = events.sort((a, b) => b.created_at - a.created_at)[0]
       // A bag retracted from another device, with a door of yours in it: that door is gone (§3.7.8).
       // A bag written in the same second as a retraction is the newer word.
@@ -1458,16 +1536,21 @@ export const useShards = create<ShardsState>((set, get) => {
       }
       // What a rotation that did not finish replaced stays out, whichever write comes first.
       const replaced = new Set(items.flatMap((d) => d.rotating ?? []).map((o) => o.doorId))
-      const relay = (newest ? await bagEntries(newest, key) : []).filter((e) => isReference(e) || !replaced.has(e.id))
+      relay = (newest ? await bagEntries(newest, key) : []).filter((e) => isReference(e) || !replaced.has(e.id))
       // A relay copy that does not open with this key is not this bag.
-      const settings = newest && relay.length > 0 ? bagSettingsOf(newest, height) : localSettings
-      // A door of yours the relays' newer bag no longer holds was changed from
-      // another device: its old self does not go back in beside the new one (§3.7.5).
-      if (newest && relay.length > 0) pruneGoneDoors(lookupId, new Set(relay.map(entryKey)), newest.created_at)
-      return { entries: mergeEntries(relay, get().mine.filter((d) => d.lookupId === lookupId).map(entryOf)), settings }
-    } catch {
-      return { entries: local, settings: localSettings }
-    }
+      if (newest && relay.length > 0) {
+        settings = bagSettingsOf(newest, height)
+        // A door of yours the relays' newer bag no longer holds was changed from
+        // another device: its old self does not go back in beside the new one (§3.7.5).
+        pruneGoneDoors(lookupId, new Set(relay.map(entryKey)), newest.created_at)
+      }
+    } catch { relay = []; heard = false }
+    // No relay answered, and a published bag here may name a row this device
+    // cannot list yet. Writing from the list alone would drop that row from the
+    // bag for good, or delete the whole bag as empty. A relay that answers with
+    // nothing is an answer: there is no bag to lose.
+    if (relay.length === 0 && !heard && claimableRows().some((d) => d.lookupId === lookupId && d.published)) throw new Error(BAG_NOT_READ)
+    return { entries: mergeEntries(relay, get().mine.filter((d) => d.lookupId === lookupId).map(entryOf)), settings }
   }
 
   /** When this bag's address was last retracted, 0 if never. Asked only of a bag holding a door of yours, the one row a retraction can leave standing here. */
@@ -1649,12 +1732,14 @@ export const useShards = create<ShardsState>((set, get) => {
    * is what it now holds, kept on this device (MyDeployment `sealed`).
    * REMOVE FROM CHEST, EDIT and ADD all end here.
    */
-  async function replaceChest(chest: MyDeployment, next: ChestItem, sealed?: BagEntry[]): Promise<MyDeployment> {
+  async function replaceChest(chest: MyDeployment, next: ChestItem, sealed?: BagEntry[], onSigned?: (innerId: string) => Promise<void>): Promise<MyDeployment> {
     const cs = cyber()
     const me = cs.identity.pubkey
     const at = positionOf(chest)
     const createdAt = Math.max(Math.floor(Date.now() / 1000), chest.createdAt + 1)
     const inner = await cs.signEvent(chestInnerTemplate(next, at, chest.plane, createdAt))
+    // Its id is known now, and nothing has gone out: what must reach disk first does.
+    if (onSigned) await onSigned(inner.id)
     const key = hexToBytes(chest.keyHex)
     const wasPublic = get().mine.some((d) => d.lookupId === chest.lookupId && d.published)
     // The bag as it really is (gatherInners, as deleteInstance explains),
@@ -1666,11 +1751,11 @@ export const useShards = create<ShardsState>((set, get) => {
       ? gathered.entries.map((e) => (entryKey(e) === was ? inner : e))
       : [...gathered.entries, inner]
     const settings = gathered.settings ?? chest.bag ?? DEFAULT_BAG_SETTINGS
-    const { event, published } = await publishBag(entries, key, chest.lookupId, chest.height, wasPublic, settings, { at, plane: chest.plane }, undefined, gathered.entries)
+    const { event, published } = await publishBag(entries, key, chest.lookupId, chest.height, wasPublic, settings, { at, plane: chest.plane }, undefined, gathered.entries, me)
     // Before anything here changes: the relays still hold the chest as it was.
     if (wasPublic && !published) throw new Error('No relay took the new bag. The chest stays as it was.')
     let row: MyDeployment = chest
-    const mine = get().mine.map((d) => {
+    const mine = rowsOf(me).map((d) => {
       if (d.eventId === chest.eventId) {
         row = { ...d, eventId: inner.id, inner, chest: next, createdAt, bagId: event.id, published, bag: settings, ...(sealed ? { sealed } : {}) }
         if (!sealed) delete row.sealed
@@ -1686,17 +1771,16 @@ export const useShards = create<ShardsState>((set, get) => {
     }
     // Seen already: the next scan finds the rewritten chest without a ceremony.
     remember([inner.id])
-    set({ mine, discovered, selectedSecret: get().selectedSecret === chest.eventId ? inner.id : get().selectedSecret })
-    saveMine(mine)
+    if (cyber().identity.pubkey === me) set({ discovered, selectedSecret: get().selectedSecret === chest.eventId ? inner.id : get().selectedSecret })
+    await commitRows(me, mine)
     return row
   }
 
   /** What stands behind a door follows it to its new id: a door is a new inner event whenever it is signed again. */
-  function retargetRoom(from: string, to: string): void {
-    if (from === to || !get().mine.some((d) => d.room?.doorId === from)) return
-    const mine = get().mine.map((d) => (d.room?.doorId === from ? { ...d, room: { doorId: to } } : d))
-    set({ mine })
-    saveMine(mine)
+  function retargetRoom(from: string, to: string, owner = cyber().identity.pubkey): void {
+    const rows = rowsOf(owner)
+    if (from === to || !rows.some((d) => d.room?.doorId === from)) return
+    void commitRows(owner, rows.map((d) => (d.room?.doorId === from ? { ...d, room: { doorId: to } } : d)))
   }
 
   /** The location key of a door's room: its bag's when that bag is of its height and not itself a room bag, else computed (§3.7.3). */
@@ -1781,6 +1865,8 @@ export const useShards = create<ShardsState>((set, get) => {
 
   /** A move with everything signed and nothing sent (stageMove). */
   interface StagedMove {
+    /** Whose move: its rows go on this identity's list, whoever is signed in by then. */
+    owner: string
     rows: MyDeployment[]
     moved: MyDeployment[]
     /** Each resealed object, and the old one signed again a second newer, to put back if the move does not land. */
@@ -1825,17 +1911,17 @@ export const useShards = create<ShardsState>((set, get) => {
     const target = await gatherInners(to.lookupId, to.key, targetLive, to.height)
     const settings = to.room ? ROOM_BAG_SETTINGS : target.settings ?? DEFAULT_BAG_SETTINGS
     const place = { at: positionOf(src), plane: src.plane }
-    const bag = await signBag(mergeEntries(target.entries, moved.map(entryOf)), to.key, to.lookupId, to.height, settings, place, target.entries)
+    const bag = await signBag(mergeEntries(target.entries, moved.map(entryOf)), to.key, to.lookupId, to.height, settings, place, target.entries, me)
     let source: StagedMove['source'] = null
     if (!keepSource) {
       const was = await gatherInners(src.lookupId, srcKey, sourceLive, src.height)
       const gone = new Set(rows.map((r) => entryKey(entryOf(r))))
       const left = was.entries.filter((e) => !gone.has(entryKey(e)))
       const kept = was.settings ?? src.bag ?? DEFAULT_BAG_SETTINGS
-      if (left.length > 0) source = { bag: await signBag(left, srcKey, src.lookupId, src.height, kept, place, was.entries), settings: kept }
+      if (left.length > 0) source = { bag: await signBag(left, srcKey, src.lookupId, src.height, kept, place, was.entries, me), settings: kept }
       else source = sourceLive ? { retraction: await bagRetraction(src.lookupId, src.bagId) } : {}
     }
-    return { rows, moved, objects, to, settings, bag, targetLive, source }
+    return { owner: me, rows, moved, objects, to, settings, bag, targetLive, source }
   }
 
   /**
@@ -1871,8 +1957,9 @@ export const useShards = create<ShardsState>((set, get) => {
   /** A sent move's rows, and its source without them. Says so, in words, if no relay took the source: what moved has moved, and the old bag still names it until it is sent again. */
   async function finishMove(stage: StagedMove): Promise<void> {
     const src = stage.rows[0]
+    const before = rowsOf(stage.owner)
     let sourcePublished = false
-    if (stage.source?.bag) sourcePublished = get().mine.some((d) => d.lookupId === src.lookupId && d.published) ? await publishMany(relaySet(), stage.source.bag).then((r) => r.ok, () => false) : false
+    if (stage.source?.bag) sourcePublished = before.some((d) => d.lookupId === src.lookupId && d.published) ? await publishMany(relaySet(), stage.source.bag).then((r) => r.ok, () => false) : false
     if (stage.source?.retraction) await publishMany(relaySet(), stage.source.retraction).catch(() => undefined)
     const leaving = new Set(stage.rows.map((r) => r.eventId))
     const keyHex = bytesToHex(stage.to.key)
@@ -1882,9 +1969,9 @@ export const useShards = create<ShardsState>((set, get) => {
       void _done
       return { ...rest, ...(stage.to.room ? { room: stage.to.room } : {}), lookupId: stage.to.lookupId, keyHex, height: stage.to.height, bagId: stage.bag.id, published: stage.targetLive, bag: stage.settings }
     })
-    const wasLive = get().mine.some((d) => d.lookupId === src.lookupId && d.published)
+    const wasLive = before.some((d) => d.lookupId === src.lookupId && d.published)
     const mine = [
-      ...get().mine.filter((d) => !leaving.has(d.eventId)).map((d) => {
+      ...rowsOf(stage.owner).filter((d) => !leaving.has(d.eventId)).map((d) => {
         if (d.lookupId === stage.to.lookupId) return { ...d, bagId: stage.bag.id, published: stage.targetLive, bag: stage.settings }
         return d.lookupId === src.lookupId && stage.source?.bag ? { ...d, bagId: stage.source.bag.id, published: sourcePublished } : d
       }),
@@ -1893,8 +1980,8 @@ export const useShards = create<ShardsState>((set, get) => {
     // The row is what speaks for it now; a find of the old place would draw it twice.
     const discovered = { ...get().discovered }
     for (const id of leaving) delete discovered[id]
-    set({ mine, discovered })
-    saveMine(mine)
+    if (cyber().identity.pubkey === stage.owner) set({ discovered })
+    await commitRows(stage.owner, mine)
     for (const o of stage.objects) forgetReference(fresh.find((f) => f.inner.id === o.next.id)?.ref ?? [])
     if (stage.source?.bag && wasLive && !sourcePublished) throw new Error('It moved, but no relay took the old bag without it. Send that bag again, or the old place still names it.')
   }
@@ -1952,7 +2039,8 @@ export const useShards = create<ShardsState>((set, get) => {
     deployInto: null,
     deployDoorHeight: null,
     setDeployDoorHeight: (h) => set({ deployDoorHeight: h }),
-    mine: loadMine(),
+    // Filled in by followIdentity below, once useCyberspace has loaded.
+    mine: NOT_READ_YET,
     discovered: {},
     curated: null,
     deleted: loadDeleted(),
@@ -2174,10 +2262,9 @@ export const useShards = create<ShardsState>((set, get) => {
       try {
         // The same lock: the same seal, a new name and label. Nothing behind it changes.
         if (draft.lock.pubkey === d.chest.lockPubkey && !doorRowsOfRoom(d).some((x) => x.rotating)) {
-          const row = await replaceChest(d, named)
           const secret = doorSecret(me, eventId)
-          if (secret) keepDoorSecret(me, row.eventId, secret)
-          retargetRoom(eventId, row.eventId)
+          const row = await replaceChest(d, named, undefined, secret ? (id) => commitDoorSecret(me, id, secret) : undefined)
+          retargetRoom(eventId, row.eventId, me)
           return null
         }
         // A new lock rotates the room key (R10, §3.7.7). In the spec's order, so
@@ -2218,14 +2305,15 @@ export const useShards = create<ShardsState>((set, get) => {
           const swap = new Map(doorRows.filter((door) => door.lookupId === lookupId).map((door) => [entryKey(entryOf(door)), signed.get(door.eventId)!.inner as BagEntry]))
           const entries = [...gathered.entries.map((e) => swap.get(entryKey(e)) ?? e), ...[...swap].filter(([k]) => !gathered.entries.some((e) => entryKey(e) === k)).map(([, v]) => v)]
           const settings = gathered.settings ?? first.bag ?? DEFAULT_BAG_SETTINGS
-          bags.set(lookupId, { publicly, settings, event: await signBag(entries, key, lookupId, first.height, settings, { at: positionOf(first), plane: first.plane }, gathered.entries) })
+          bags.set(lookupId, { publicly, settings, event: await signBag(entries, key, lookupId, first.height, settings, { at: positionOf(first), plane: first.plane }, gathered.entries, me) })
         }
         const oldBagId = synced[0]?.bagId ?? null
         const retractions: NostrEvent[] = []
         if (live) for (const [lookupId, bagId] of new Map([...owed.map((o) => [o.lookupId, o.bagId] as const), [oldLookup, oldBagId] as const])) retractions.push(await bagRetraction(lookupId, bagId))
         // Everything is signed. From here a failure is a relay's. The new secret is
         // kept before anything goes out, under the doors it will open.
-        for (const { inner } of signed.values()) keepDoorSecret(me, inner.id, nextSecret)
+        // If this device cannot keep it, nothing goes out.
+        for (const { inner } of signed.values()) await commitDoorSecret(me, inner.id, nextSecret)
         if (stage) await sendMove(stage)
         let landed = 0
         const out = new Set<string>()
@@ -2243,7 +2331,7 @@ export const useShards = create<ShardsState>((set, get) => {
           } else break
         }
         // The rows follow what went out.
-        const doorMine = get().mine.map((m): MyDeployment => {
+        const doorMine = rowsOf(me).map((m): MyDeployment => {
           const was = signed.get(m.eventId)
           const bag = bags.get(m.lookupId)
           if (was && bag) {
@@ -2255,8 +2343,7 @@ export const useShards = create<ShardsState>((set, get) => {
           }
           return bag ? { ...m, bagId: bag.event.id, published: bag.publicly && out.has(m.lookupId), bag: bag.settings } : m
         })
-        set({ mine: doorMine })
-        saveMine(doorMine)
+        await commitRows(me, doorMine)
         const discovered = { ...get().discovered }
         for (const [old, was] of signed) {
           const h = discovered[old]
@@ -2265,7 +2352,7 @@ export const useShards = create<ShardsState>((set, get) => {
         set({ discovered, selectedSecret: signed.get(get().selectedSecret ?? '')?.inner.id ?? get().selectedSecret })
         remember([...signed.values()].map((v) => v.inner.id))
         if (stage) await finishMove(stage)
-        for (const [old, was] of signed) retargetRoom(old, was.inner.id)
+        for (const [old, was] of signed) retargetRoom(old, was.inner.id, me)
         if (landed < bags.size) return 'One of this room\u2019s doors did not go out, and still names the old room. Nothing behind it is lost: EDIT it again when a relay is reachable.'
         // Last, and only now: the old room bag (§3.7.7 step 4).
         for (const retraction of retractions) await publishMany(relaySet(), retraction).catch(() => undefined)
@@ -2361,17 +2448,15 @@ export const useShards = create<ShardsState>((set, get) => {
       const takeBack = async (): Promise<void> => {
         if (!published) return
         if (before.length === 0) { await retractBag(lookupId, bagId); return }
-        const back = await publishBag(before, key, lookupId, d.height, live, ROOM_BAG_SETTINGS, { at: here, plane: d.plane }, undefined, before).catch(() => null)
+        const back = await publishBag(before, key, lookupId, d.height, live, ROOM_BAG_SETTINGS, { at: here, plane: d.plane }, undefined, before, me).catch(() => null)
         if (!back?.published) return
-        const mine = get().mine.map((m) => (m.lookupId === lookupId ? { ...m, bagId: back.event.id } : m))
-        set({ mine })
-        saveMine(mine)
+        await commitRows(me, rowsOf(me).map((m) => (m.lookupId === lookupId ? { ...m, bagId: back.event.id } : m)))
       }
       try {
         if (inside.length > 0) {
           const room = await gatherInners(lookupId, key, live, d.height)
           before = room.entries
-          const written = await publishBag(mergeEntries(room.entries, inside), key, lookupId, d.height, live, ROOM_BAG_SETTINGS, { at: here, plane: d.plane }, undefined, room.entries)
+          const written = await publishBag(mergeEntries(room.entries, inside), key, lookupId, d.height, live, ROOM_BAG_SETTINGS, { at: here, plane: d.plane }, undefined, room.entries, me)
           bagId = written.event.id
           published = written.published
           if (live && !published) return 'No relay took the room. The chest stays as it was.'
@@ -2389,12 +2474,11 @@ export const useShards = create<ShardsState>((set, get) => {
         // Only now does the chest go, in one rewrite with the door in its place.
         let row: MyDeployment
         try {
-          row = await replaceChest(d, { ...d.chest, senderPubkey: sealed.senderPubkey, payload: sealed.payload, look, door: d.height })
+          row = await replaceChest(d, { ...d.chest, senderPubkey: sealed.senderPubkey, payload: sealed.payload, look, door: d.height }, undefined, (id) => commitDoorSecret(me, id, secret))
         } catch (err) {
           await takeBack()
           throw err
         }
-        keepDoorSecret(me, row.eventId, secret)
         const keyHex = bytesToHex(key)
         const rows = movable.map((e): MyDeployment => {
           const p = eventPlace(e.event)!
@@ -2402,9 +2486,7 @@ export const useShards = create<ShardsState>((set, get) => {
           return { eventId: e.id, inner: sig ? e.event : rumor, type: e.body.type, shard: e.body.shard, text: e.body.text, key: e.body.key, chest: e.body.chest, audio: e.body.audio, bagId, at: storedAt(p.at), plane: d.plane, height: d.height, lookupId, keyHex, relays: relaySet(), createdAt: e.event.created_at, published, bag: ROOM_BAG_SETTINGS, room: { doorId: row.eventId } }
         })
         // Any room bag's other rows name its newest envelope; the door's bag is this write's own.
-        const mine = [...get().mine.map((m) => (m.lookupId === lookupId && bagId ? { ...m, bagId, published } : m)), ...rows]
-        set({ mine })
-        saveMine(mine)
+        await commitRows(me, [...rowsOf(me).map((m) => (m.lookupId === lookupId && bagId ? { ...m, bagId, published } : m)), ...rows])
         return null
       } catch (err) {
         return err instanceof Error ? err.message : String(err)
@@ -2827,6 +2909,13 @@ export const useShards = create<ShardsState>((set, get) => {
           // only ever goes into the bag as its entry, never out on its own.
           inner = pending.type === 'message' || pending.type === 'audio' ? rumorOf(innerTemplate, cs.identity.pubkey) as NostrEvent : await cs.signEvent(innerTemplate)
         }
+        // A door's secret reaches disk before the door goes anywhere. Its id needs the
+        // signature, and a signature sends nothing. If this device cannot keep it, nothing goes out.
+        if (doorSecretHex) await commitDoorSecret(cs.identity.pubkey, inner.id, doorSecretHex)
+        if (movedChest && movedDoorHeight !== undefined) {
+          const secret = doorSecret(cs.identity.pubkey, movedChest.eventId)
+          if (secret) await commitDoorSecret(cs.identity.pubkey, inner.id, secret)
+        }
         let event: NostrEvent
         let published: boolean
         let settings: BagSettings
@@ -2850,7 +2939,7 @@ export const useShards = create<ShardsState>((set, get) => {
               objectSent = true
             }
             : undefined
-          ;({ event, published } = await publishBag(allInners, rk.key, rk.lookupId, deployHeight, live, settings, { at, plane }, sendObject, existing.entries))
+          ;({ event, published } = await publishBag(allInners, rk.key, rk.lookupId, deployHeight, live, settings, { at, plane }, sendObject, existing.entries, cs.identity.pubkey))
           // A move whose new bag no relay took has not happened: the old
           // copy stays, and is never taken down (review of #369).
           if (was && live && !published) throw new Error('No relay took the moved shard. It stays where it was.')
@@ -2908,23 +2997,22 @@ export const useShards = create<ShardsState>((set, get) => {
           ...(sealedInside ? { sealed: sealedInside } : {}),
           ...(into ? { room: { doorId: into.eventId } } : {}),
         }
-        if (doorSecretHex) keepDoorSecret(cs.identity.pubkey, inner.id, doorSecretHex)
         // A key you hid is yours to hold at once, alone or inside a chest, so
         // chests can be sealed to it from here on (B1 §3.1).
         const place: HeldPlace = { lookupId: rk.lookupId, bagId: event.id, at: storedAt(at), plane, height: deployHeight }
         if (key) useInventory.getState().holdForged(inner, key, place)
         for (const f of forgedInside) useInventory.getState().holdForged(f.event, f.key, place)
         // Every item now in this region's bag shares its new envelope, status and settings.
+        // Onto the list of the identity that hid it, even if another has signed in meanwhile.
         const mine = [
-          ...get().mine
+          ...rowsOf(cs.identity.pubkey)
             // Moved inside its bag: the old version left with the rewrite above.
             .filter((d) => !(was && was.lookupId === rk.lookupId && d.eventId === was.eventId))
             .filter((d) => !(movedChest && movedChest.lookupId === rk.lookupId && d.eventId === movedChest.eventId))
             .map((d) => (d.lookupId === rk.lookupId ? { ...d, bagId: event.id, published, bag: settings } : d)),
           item,
         ]
-        set({ mine })
-        saveMine(mine)
+        commitRows(cs.identity.pubkey, mine)
         // Placed: first in your shard lists from now. Local, and never the
         // deploy's failure; not for an identity switched to meanwhile.
         if (cyber().identity.pubkey === cs.identity.pubkey) {
@@ -2972,9 +3060,7 @@ export const useShards = create<ShardsState>((set, get) => {
         }
         // A moved door keeps its room: its secret, and what stands behind it, follow its new id.
         if (movedChest && movedDoorHeight !== undefined) {
-          const secret = doorSecret(cs.identity.pubkey, movedChest.eventId)
-          if (secret) keepDoorSecret(cs.identity.pubkey, inner.id, secret)
-          retargetRoom(movedChest.eventId, inner.id)
+          retargetRoom(movedChest.eventId, inner.id, cs.identity.pubkey)
         }
         // A moved chest leaves its old place the same way.
         if (movedChest) {
@@ -3032,6 +3118,7 @@ export const useShards = create<ShardsState>((set, get) => {
       set({ broadcasting: lookupId, broadcastError: null, broadcastFailed: null })
       try {
         const key = hexToBytes(items[0].keyHex)
+        const owner = cyber().identity.pubkey
         const existing = await gatherInners(lookupId, key, true, items[0].height)
         // Objects hidden by reference go out before the bag that names them,
         // and so do the authors' objects a LIVE LINK names: a finder looks
@@ -3064,7 +3151,7 @@ export const useShards = create<ShardsState>((set, get) => {
         const keep = existing.entries.filter((e) => !fresh.some((d) => d.ref && entryKey(e) === entryKey(d.ref)))
         const allInners = mergeEntries(keep, fresh.map(entryOf))
         const settings = existing.settings ?? DEFAULT_BAG_SETTINGS
-        const { event, published } = await publishBag(allInners, key, lookupId, items[0].height, true, settings, { at: positionOf(items[0]), plane: items[0].plane }, undefined, existing.entries)
+        const { event, published } = await publishBag(allInners, key, lookupId, items[0].height, true, settings, { at: positionOf(items[0]), plane: items[0].plane }, undefined, existing.entries, owner)
         if (!published) {
           set({ broadcasting: null, broadcastError: 'No relay took the bag. Try again when one is reachable.', broadcastFailed: lookupId })
           return false
@@ -3137,26 +3224,36 @@ export const useShards = create<ShardsState>((set, get) => {
       // list, and going by the list alone both dropped it from a rewrite and,
       // when it was the only other thing, deleted the whole envelope as if
       // the bag were empty.
-      const gathered = await gatherInners(item.lookupId, key, wasPublic, item.height)
+      // A move asks with opts, and takes the failure as its own to report. On its
+      // own, DELETE closed its card first, so a toast is what is left to say so.
+      const refused = (err: unknown): null => {
+        if (opts) throw err
+        useToast.getState().show({ label: 'NOT DELETED', meta: err instanceof Error ? err.message : String(err), mark: 'build' })
+        return null
+      }
+      const gathered = await gatherInners(item.lookupId, key, wasPublic, item.height).catch(refused)
+      if (!gathered) return
       const gone = entryKey(entryOf(item))
       const left = gathered.entries.filter((e) => entryKey(e) !== gone)
       const me = cs.identity.pubkey
 
-      let mine: MyDeployment[]
+      // The change, not the list: another tab may add a row during the awaits below.
+      let after = (rows: MyDeployment[]): MyDeployment[] => rows.filter((d) => d.eventId !== eventId)
       // Whether the relays now hold a bag that no longer names this item.
       let unnamed = false
       if (left.length > 0) {
         // Rewrite the region bag without this item; the newer bag replaces it,
         // with the bag's settings as they stand.
         const settings = gathered.settings ?? DEFAULT_BAG_SETTINGS
-        const { event, published } = await publishBag(left, key, item.lookupId, item.height, wasPublic, settings, { at: positionOf(item), plane: item.plane }, undefined, gathered.entries)
+        const sent = await publishBag(left, key, item.lookupId, item.height, wasPublic, settings, { at: positionOf(item), plane: item.plane }, undefined, gathered.entries, cs.identity.pubkey).catch(refused)
+        if (!sent) return
+        const { event, published } = sent
         unnamed = published
-        mine = get().mine
-          .filter((d) => d.eventId !== eventId)
-          .map((d) => (d.lookupId === item.lookupId ? { ...d, bagId: event.id, published, bag: settings } : d))
+        after = (rows) => rows.filter((d) => d.eventId !== eventId).map((d) => (d.lookupId === item.lookupId ? { ...d, bagId: event.id, published, bag: settings } : d))
       } else {
         // The last thing in the region: delete the envelope itself (NIP-09).
         if (wasPublic) {
+          if (cyber().identity.pubkey !== me) { refused(new Error(SWITCHED)); return }
           const del = await cs.signEvent({
             kind: 5,
             created_at: nextBagAt(item.lookupId),
@@ -3168,7 +3265,6 @@ export const useShards = create<ShardsState>((set, get) => {
           })
           try { unnamed = (await publishMany(item.relays ?? relaySet(), del)).ok } catch { /* best effort */ }
         }
-        mine = get().mine.filter((d) => d.eventId !== eventId)
       }
       // A shard hidden by reference is also its own event. Once no bag names
       // it, take that down too (NIP-09), if it is ours to take down: it is
@@ -3191,8 +3287,8 @@ export const useShards = create<ShardsState>((set, get) => {
       const deletedBags = left.length > 0
         ? get().deletedBags
         : { ...get().deletedBags, [`${me}:${item.lookupId}`]: true as const }
-      set({ mine, deleted, deletedBags, discovered })
-      saveMine(mine); saveDeleted(deleted)
+      set({ deleted, deletedBags, discovered })
+      void commitRows(me, after(rowsOf(me))); saveDeleted(deleted)
       if (left.length === 0) saveDeletedBags(deletedBags)
     },
 
@@ -3452,6 +3548,48 @@ useShards.subscribe((s, prev) => {
   const again = s.pending !== null && s.pending === s.placedLast?.pending
   if (s.pending !== prev.pending && !again && (cs.buildStep !== null || cs.buildSettle !== null)) cs.setBuildStep(null)
 })
+
+/**
+ * YOURS is the signed-in identity's list and nobody else's: read it now, and
+ * again on every switch. A card open on the old identity's row closes with it.
+ * useCyberspace reaches this file through lib/destinationKeys and useSecrets, so
+ * it may not have finished loading while this one runs; then this tries again
+ * as soon as the loading stops.
+ */
+function followIdentity(tries = 0): void {
+  let me = ''
+  try {
+    me = useCyberspace.getState().identity.pubkey
+    if (!me || !useCyberspace.subscribe) throw new Error('not loaded')
+  } catch {
+    // About ten seconds, for a slow load. A test that mocks useCyberspace away never has it.
+    if (tries < 200) setTimeout(() => followIdentity(tries + 1), tries === 0 ? 0 : 50)
+    return
+  }
+  const claim = (owner: string): void => {
+    void claimUnclaimed(owner).catch((err) => console.warn(`[shards] could not claim hidden items: ${err instanceof Error ? err.message : String(err)}`))
+  }
+  if (useShards.getState().mine === NOT_READ_YET) useShards.setState({ mine: loadMine(me) })
+  claim(me)
+  useCyberspace.subscribe((s, prev) => {
+    const owner = s.identity.pubkey
+    if (owner === prev.identity.pubkey) return
+    const { mine: left, selectedSecret } = useShards.getState()
+    const mine = loadMine(owner)
+    const closes = selectedSecret !== null && left.some((d) => d.eventId === selectedSecret) && !mine.some((d) => d.eventId === selectedSecret)
+    useShards.setState(closes ? { mine, selectedSecret: null } : { mine })
+    claim(owner)
+  })
+  // Stored rows changed under this list: the move finished, or another tab wrote.
+  onHiddenChange(() => {
+    useShards.setState({ mine: loadMine(useCyberspace.getState().identity.pubkey) })
+  })
+  // In local mode, the other tab's word is a storage event.
+  if (typeof window !== 'undefined' && typeof window.addEventListener === 'function') {
+    window.addEventListener('storage', (e: StorageEvent) => { if (e.key?.startsWith('onosendai:deployments')) reloadLocalView() })
+  }
+}
+followIdentity()
 
 if (import.meta.env.DEV && typeof window !== 'undefined') {
   ;(window as unknown as { __shards?: unknown }).__shards = useShards

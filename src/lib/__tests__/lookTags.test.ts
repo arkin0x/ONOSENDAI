@@ -105,11 +105,11 @@ describe('which look a chest or a door wears', () => {
 
 describe('how a look is posed for the wire', () => {
   const pose = { unit: 3, turn: [0, 0, 0] as [number, number, number], constrain: 'opaque' as const }
-  it('a chest\u2019s built-in open look takes the bar\u2019s WALK; a door\u2019s, which has no setting, keeps none', () => {
+  it('a chest\u2019s built-in open look takes the bar\u2019s WALK; a door\u2019s, authored off, stays off', () => {
     const chest = lookTagsOf(builtInLookTags('treasure', pose))
     expect(constrainOf(chest.open!)).toBe('opaque')
     const door = lookTagsOf(builtInLookTags('door', pose))
-    expect(chosenConstrainOf(door.open!)).toBeUndefined()
+    expect(constrainOf(door.open!)).toBe('off')
   })
   it('what stood on the bench does not come along: the bar offers no snap', () => {
     const posed = posedLook({ ...tri('Standing'), up: true, spin: 40 }, pose)

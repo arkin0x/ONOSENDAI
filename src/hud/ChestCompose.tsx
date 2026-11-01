@@ -246,13 +246,8 @@ export function ChestCompose({ onDone, target = { mode: 'place' } }: { onDone: (
 
   return (
     <div className="shards__compose">
-<<<<<<< HEAD
-      {look && <div className="secret__spin secret__spin--look"><ShardSpin shard={look} size={150} wide /></div>}
-      {fields && <input className="avatars__input" value={name} onChange={(e) => setName(e.target.value.slice(0, MAX_ITEM_NAME))} placeholder={isDoor ? 'Name the door' : 'Name the chest'} maxLength={MAX_ITEM_NAME} autoFocus={!editing || editing.fields} aria-label={isDoor ? 'Door name' : 'Chest name'} />}
-=======
       {look && <div className="secret__spin secret__spin--look"><CardSpin shard={look} size={150} wide /></div>}
-      {fields && <input className="avatars__input" value={name} onChange={(e) => setName(e.target.value.slice(0, MAX_ITEM_NAME))} placeholder="Name the chest" maxLength={MAX_ITEM_NAME} autoFocus={!editing || editing.fields} aria-label="Chest name" />}
->>>>>>> feat/door-reading
+      {fields && <input className="avatars__input" value={name} onChange={(e) => setName(e.target.value.slice(0, MAX_ITEM_NAME))} placeholder={isDoor ? 'Name the door' : 'Name the chest'} maxLength={MAX_ITEM_NAME} autoFocus={!editing || editing.fields} aria-label={isDoor ? 'Door name' : 'Chest name'} />}
 
       {/* The lock: an item you hold, or a pasted public key. */}
       {fields && (

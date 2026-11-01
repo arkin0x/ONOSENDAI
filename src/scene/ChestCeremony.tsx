@@ -107,14 +107,19 @@ function LidOpening({ look, at, frame }: { look: Look; at: number; frame?: LookF
   )
 }
 
+/** The level fadeAll is writing: one visitor for every call, so a frame's fade allocates nothing. */
+let fadeLevel = 1
+function fadeOne(o: Object3D): void {
+  const m = (o as { material?: Material | Material[] }).material
+  if (!m) return
+  if (Array.isArray(m)) for (let i = 0; i < m.length; i++) breatheMaterial(m[i], fadeLevel)
+  else breatheMaterial(m, fadeLevel)
+}
+
 /** Every material under `root` at opacity `b` (WorldShards breatheMaterial, as EDIT's breath writes it). */
 export function fadeAll(root: Object3D | null, b: number): void {
-  root?.traverse((o) => {
-    const m = (o as { material?: Material | Material[] }).material
-    if (!m) return
-    if (Array.isArray(m)) m.forEach((one) => breatheMaterial(one, b))
-    else breatheMaterial(m, b)
-  })
+  fadeLevel = b
+  root?.traverse(fadeOne)
 }
 
 /** The calm path: one look fading into the other, drawn as ghosts are so their opacity is real. */
@@ -153,6 +158,11 @@ const GOLD = new Color('#ffd27d')
 /** Points of gold light at the heap, twinkling, fading with the timeline. */
 function Glints({ model, at }: { model: ShardModel; at: number }): JSX.Element | null {
   const positions = useMemo(() => glintPoints(model), [model])
+  return <Twinkles positions={positions} at={at} level={glintLevel} />
+}
+
+/** Points of gold light, each twinkling on its own clock, as bright as `level` says at each moment since `at`. */
+export function Twinkles({ positions, at, level: levelAt }: { positions: Float32Array; at: number; level: (elapsed: number) => number }): JSX.Element | null {
   const count = positions.length / 3
   const geometry = useMemo(() => {
     const g = new BufferGeometry()
@@ -167,7 +177,7 @@ function Glints({ model, at }: { model: ShardModel; at: number }): JSX.Element |
   useEffect(() => () => { geometry.dispose(); material.dispose() }, [geometry, material])
   useFrame(() => {
     const t = performance.now() - at
-    const level = glintLevel(t)
+    const level = levelAt(t)
     const c = geometry.getAttribute('color') as Float32BufferAttribute
     const arr = c.array as Float32Array
     for (let i = 0; i < count; i++) {

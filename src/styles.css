@@ -7712,6 +7712,42 @@ kbd {
 /* VIEW on a Nearby Loot row: a button, not a label. */
 .nearby__view { flex: none; padding: 3px 9px; font-size: 8px; letter-spacing: 0.14em; }
 
+/* DISCOVERED NEARBY's tabs: each kind with its count, an empty one dimmed and still there. */
+.nearby__tabs { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 4px; flex: none; }
+.nearby__tab {
+  min-height: 44px;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  padding: 2px;
+  font-family: inherit;
+  font-size: 9px;
+  letter-spacing: 0.08em;
+  color: var(--dim);
+  background: transparent;
+  border: 1px solid rgba(0, 229, 255, 0.25);
+  border-radius: 4px;
+  cursor: pointer;
+}
+.nearby__tab.is-on { color: var(--accent); background: rgba(0, 229, 255, 0.1); border-color: rgba(0, 229, 255, 0.7); }
+.nearby__tab.is-empty { opacity: 0.45; }
+.nearby__count { font-size: 11px; }
+@media (max-width: 480px) { .nearby__tabs { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+/* Whether a chest or a door is open, as the world draws it. */
+.nearby__lock { letter-spacing: 0.1em; }
+.nearby__lock--locked { color: var(--dim); }
+.nearby__lock--open { color: var(--ok); }
+/* A fingertip on a phone; the buttons keep their look. */
+@media (max-width: 640px) {
+  .nearby__row .chest__act, .nearby__row .nearby__view, .secrets__box .secrets__close, .held__acts .chest__act--danger { min-height: 44px; min-width: 44px; }
+}
+/* DELETE on a held item: it destroys something, so it does not read as COPY does. */
+.chest__act.chest__act--danger { color: var(--danger); border-color: color-mix(in srgb, var(--danger) 50%, transparent); background: transparent; }
+.chest__act.chest__act--danger:hover { background: color-mix(in srgb, var(--danger) 14%, transparent); }
+
 /* The Nearby Loot row's second line: the plane and the height. */
 .nearby__where { font-size: 9px; color: var(--dim); letter-spacing: 0.06em; }
 .nearby__label { white-space: normal; overflow-wrap: anywhere; }
@@ -9292,7 +9328,7 @@ a.feed__act { text-decoration: none; }
 .held__row { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 8px; }
 .held__row .chest { grid-column: 2; }
 .held__acts { display: flex; gap: 4px; align-items: center; }
-.held__refusal { grid-column: 1 / -1; font-size: 10px; color: var(--danger, #ff5d5d); padding-left: 22px; }
+.held__refusal { grid-column: 1 / -1; font-size: 10px; color: var(--danger); padding-left: 22px; }
 .held__details { grid-column: 1 / -1; display: flex; flex-direction: column; gap: 4px; padding: 2px 0 2px 22px; font-size: 10px; }
 .held__details dl { display: grid; grid-template-columns: auto 1fr; gap: 3px 10px; margin: 0; }
 .held__details dt { font-size: 8px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--dim); align-self: center; }

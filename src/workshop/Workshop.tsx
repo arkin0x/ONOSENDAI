@@ -20,6 +20,7 @@
  * the bottom above the two corners.
  */
 
+import { carriesSealedParts } from '../lib/carried'
 import { memo, useEffect, useMemo, useRef, useState } from 'react'
 import { Field, Switch } from '../hud/ui/Switch'
 import { Vector3 } from 'three'
@@ -711,6 +712,8 @@ export function Workshop(): JSX.Element | null {
   // open menu, and is dropped the moment either changes, so it can never
   // come back over a different object (review of snocrash #36, 2026-10-15).
   const [retractAsk, setRetractAsk] = useState<string | null>(null)
+  // Parts that came to you sealed go public only if you say so (DECK-0003 §1.10; lib/carried.ts).
+  const [publishAsk, setPublishAsk] = useState<string | null>(null)
   const [panel, setPanel] = useState<Panel | null>(null)
   // Only while SHARD is open, the one panel that shows them. Each is the whole
   // object written out and measured or hashed: a cost on every paint of a big
@@ -995,7 +998,7 @@ export function Workshop(): JSX.Element | null {
               <button
                 className="workshop__btn workshop__btn--warn"
                 disabled={!hasContent || publishing || retracting || !me}
-                onClick={() => { void usePublished.getState().publish(shard) }}
+                onClick={() => { if (carriesSealedParts(shard)) setPublishAsk(shard.id); else void usePublished.getState().publish(shard) }}
                 title={!hasContent
                   ? 'Nothing to publish yet: add points, or place objects'
                   : pubState === 'other-key'
@@ -1013,6 +1016,18 @@ export function Workshop(): JSX.Element | null {
             </div>
             <span className="workshop__work">{wireBytes.toLocaleString('en-US')} BYTES ON THE WIRE · {shard.vertices.length} VERTICES + {shard.faces.length} FACES{shard.parts?.length ? ` + ${shard.parts.length} PLACED` : ''}</span>
           </div>
+          {publishAsk === shard.id && (
+            <ConfirmModal
+              title={`Publish "${shard.name}"?`}
+              body={<>It carries parts that came to you sealed. Published with it, anyone can read them.</>}
+              confirmLabel="PUBLISH THEM TOO"
+              cancelLabel="LEAVE THEM OUT"
+              danger={false}
+              onBackdrop={() => setPublishAsk(null)}
+              onConfirm={() => { setPublishAsk(null); void usePublished.getState().publish(shard, true) }}
+              onCancel={() => { setPublishAsk(null); void usePublished.getState().publish(shard) }}
+            />
+          )}
           {retractAsk === shard.id && (
             <ConfirmModal
               title={`Retract "${shard.name}"?`}

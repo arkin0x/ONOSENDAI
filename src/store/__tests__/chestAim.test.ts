@@ -123,7 +123,7 @@ describe('AIM from the chest composer', () => {
   it('closes the composer and lines the shard up as a shard deploy carrying the chest, at the model\'s own size', () => {
     const shard = benchShard(3)
     const draft = draftOf([{ kind: 'shard', shardId: shard.id }, { kind: 'message', text: 'hello' }])
-    useStash.getState().openChest()
+    useStash.setState({ chest: true })
     useStash.getState().aimIntoChest(draft, 0)
     expect(useStash.getState().chest).toBe(false)
     expect(useStash.getState().returnToChest).toBe(true)
@@ -287,11 +287,11 @@ describe('the seal takes the aimed event as it is', () => {
     expect(S().mine).toHaveLength(0)
   })
 
-  it('a chest with nothing aimed inside keeps its height where the composer left it', () => {
+  it('a chest with nothing aimed inside still fits its height, to the model it wears (D2: placed like a shard)', () => {
     const shard = benchShard(3)
     const lock = forgeKey('Wind Key')
     S().startDeployChest({ ...draftOf([{ kind: 'shard', shardId: shard.id }]), lock: { pubkey: lock.itemPubkey, label: 'Wind Key' } })
-    expect(S().deployHeightAuto).toBe(false)
+    expect(S().deployHeightAuto).toBe(true)
   })
 })
 

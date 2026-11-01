@@ -189,7 +189,7 @@ export function WorldMessages({ axes }: Props): JSX.Element | null {
   const me = useCyberspace((s) => s.identity.pubkey)
   const held = useInventory((s) => s.items)
   // Whose ITEMS these are, and whether read: until then nothing held is shown by mistake.
-  const itemsRead = useInventory((s) => !(s.owner === me && s.storage === 'loading'))
+  const itemsRead = useInventory((s) => s.owner === me && s.storage !== 'loading')
   const vanishing = useTakeVanish((s) => s.playing)
 
   const placed = useMemo(() => {

@@ -20,22 +20,27 @@
  *
  * On the wire a look is a tag: `["look", payload]` closed and `["look",
  * payload, "open"]` open, each payload a SNO object exactly as a kind 3330
- * carries it (DECK-0003 §1.1). A built-in goes out the same way, posed by
- * the hide bar's SCALE, TURN and WALK, so every reader draws it; nothing
- * about a look is ONOSENDAI's own. A chest written before looks has none,
- * and wears TREASURE, or DOOR when it is a door.
+ * carries it (DECK-0003 §1.1). A built-in goes out as a small wrapper placing
+ * its public object, posed by the hide bar's SCALE and TURN, the kind 33331 the
+ * owner publishes at each address in DEFAULT_LOOK_DS (his ruling, 2026-11-01:
+ * a look's bytes in every bag were what filled it). Another client fetches the
+ * object. Here an exact match on one of the eight addresses is the bundled file,
+ * with no fetch and no relay asked (expandDefault), and from there on a real
+ * model: its walls, its lid and its drawing are as they were. Custom looks stay
+ * inline, and an inline look of any shape is still read. A chest written before
+ * looks has none, and wears TREASURE, or DOOR when it is a door.
  *
  * A door is a chest that carries a `door` tag (DECK-0004 §3.7). Every chest
  * without one is a chest.
  *
  * THE SEAM: `lookOf`. Everything that draws a chest or a door asks it, and
  * it reads the `look` tags first (lookTagsOf), then the built-in. `lid` is
- * the built-in TREASURE's alone, and a custom closed look whose shape is
- * exactly TREASURE's (the built-in, sealed at any SCALE but never turned)
- * keeps it: the hinge is only ever applied to a look whose lid is known.
+ * TREASURE's alone: by its address when it goes by reference, by its exact
+ * shape for one written inline before that. Turned, it has none: the hinge is
+ * only ever applied to a look whose lid is known.
  */
 
-import { fromPayload, ticksOf, toPayload, type ShardModel } from 'sno-core/shards'
+import { MAX_UNIT, fromPayload, ticksOf, toPayload, type ShardModel } from 'sno-core/shards'
 import { keepOwnTable } from './carried'
 import { turnShard, type Turns } from './turn'
 import { chosenConstrainOf, withConstrain, type Constrain } from './walkConstrain'
@@ -172,6 +177,38 @@ const PAYLOADS: Record<LookName, { closed: unknown; open: unknown; kind: LookKin
 /** What each built-in is called on the hide bar's model row. */
 export const LOOK_LABELS: Readonly<Record<LookName, string>> = { treasure: 'TREASURE', crawl: 'CRAWL', door: 'DOOR', hall: 'HALL' }
 
+/** Who publishes the eight default models. */
+export const DEFAULT_LOOK_AUTHOR = 'e8ed3798c6ffebffa08501ac39e271662bfd160f688f94c45d692d8767dd345a'
+
+/** Each default's `d`, as the real import names them from maze-kit-locks.zip (lib/shardZip.ts kitIds; lookDefaults.test.ts). */
+export const DEFAULT_LOOK_DS: Readonly<Record<LookName, { closed: string; open: string }>> = {
+  treasure: { closed: 'maze-kit/locks/chests/chest/chest', open: 'maze-kit/locks/chests/chest/chest-open' },
+  crawl: { closed: 'maze-kit/locks/doors/door-crawl/door-crawl', open: 'maze-kit/locks/doors/door-crawl/door-crawl-open' },
+  door: { closed: 'maze-kit/locks/doors/door-standard/door-standard', open: 'maze-kit/locks/doors/door-standard/door-standard-open' },
+  hall: { closed: 'maze-kit/locks/doors/door-hall/door-hall', open: 'maze-kit/locks/doors/door-hall/door-hall-open' },
+}
+
+export const defaultLookAddress = (d: string): string => `33331:${DEFAULT_LOOK_AUTHOR}:${d}`
+
+/** The eight addresses, and which bundled file each one is. */
+export const DEFAULT_LOOK_ADDRESSES: ReadonlyMap<string, { name: LookName; part: 'closed' | 'open' }> = new Map(
+  (Object.keys(DEFAULT_LOOK_DS) as LookName[]).flatMap((name) => (['closed', 'open'] as const).map((part) => [defaultLookAddress(DEFAULT_LOOK_DS[name][part]), { name, part }] as const)),
+)
+
+/** A default model as this client holds it: which it is, and the wrapper that says so on the wire. */
+interface DefaultLook { name: LookName; part: 'closed' | 'open'; wrapper: ShardModel; turned: boolean }
+const defaultOf = new WeakMap<ShardModel, DefaultLook>()
+
+/** A wrapper placing one model at its origin, at its own size (the FEED wrapper's shape, useShards feedWrapper). */
+function wrapperOf(model: ShardModel, address: string): ShardModel {
+  return {
+    id: `look:${address}`, name: model.name, unit: model.unit, extent: model.extent, mode: 'solid',
+    vertices: [], faces: [], up: false, spin: 0, updatedAt: 0,
+    refs: [['a', address]],
+    parts: [{ ref: 0, at: [0, 0, 0], turn: [0, 0, 0], step: 0 }],
+  }
+}
+
 const cache = new Map<LookName, Look>()
 
 /** A built-in look, read once and shared by every chest that wears it. */
@@ -183,6 +220,10 @@ export function builtInLook(name: LookName): Look {
   if (!closed) throw new Error(`the built-in ${name} look does not parse`)
   const look: Look = { name, kind: p.kind, closed, open: fromPayload(p.open, `look:${name}:open`) }
   if (name === 'treasure') look.lid = treasureLid(closed)
+  for (const part of ['closed', 'open'] as const) {
+    const model = look[part]
+    if (model) defaultOf.set(model, { name, part, wrapper: wrapperOf(model, defaultLookAddress(DEFAULT_LOOK_DS[name][part])), turned: false })
+  }
   cache.set(name, look)
   return look
 }
@@ -236,6 +277,53 @@ function ownedLook(model: ShardModel, author: string | null): ShardModel {
   return held
 }
 
+/** Every way a wrapper's one placement can be turned, as the bar writes it (turnShard), found by asking. */
+let partTurns: Map<string, Turns> | null = null
+function turnsOfPart(turn: unknown): Turns | null {
+  if (!partTurns) {
+    partTurns = new Map()
+    const blank = wrapperOf(builtInLook('door').closed, 'table')
+    for (let x = 0; x < 4; x++) for (let y = 0; y < 4; y++) for (let z = 0; z < 4; z++) {
+      const key = JSON.stringify(turnShard(blank, [x, y, z]).parts?.[0].turn)
+      if (!partTurns.has(key)) partTurns.set(key, [x, y, z])
+    }
+  }
+  return partTurns.get(JSON.stringify(turn)) ?? null
+}
+
+/**
+ * A wrapper of exactly one default model, as that model posed: the bundled file,
+ * so nothing is fetched and no relay is asked, and walls and a lid have a real
+ * model to read (a wrapper's `constrain` does not reach what it places, §1.12).
+ * Null for anything else: more than one placement, a placement moved off the
+ * origin or carrying anything but its step and turn, a turn that is not quarter
+ * turns, a size past the limit, or any other address. Those are ordinary wrappers,
+ * fetched as any other. Its WALK is the wrapper's when it says, else the model's.
+ */
+const expanded = new WeakMap<ShardModel, ShardModel | null>()
+function expandDefault(w: ShardModel): ShardModel | null {
+  const held = expanded.get(w)
+  if (held !== undefined) return held
+  let out: ShardModel | null = null
+  const part = w.parts?.length === 1 ? w.parts[0] : null
+  const ref = w.refs?.length === 1 ? w.refs[0] : null
+  const hit = ref && ref[0] === 'a' ? DEFAULT_LOOK_ADDRESSES.get(String(ref[1])) : undefined
+  const plain = !!part && part.ref === 0 && part.at.every((n) => n === 0) && Object.keys(part).every((k) => k === 'ref' || k === 'at' || k === 'turn' || k === 'step')
+  if (hit && part && plain && w.vertices.length === 0 && w.faces.length === 0 && !w.objects) {
+    const base = builtInLook(hit.name)[hit.part]
+    const turns = turnsOfPart(part.turn)
+    const unit = (base?.unit ?? 0) + part.step
+    if (base && turns && unit >= 0 && unit <= MAX_UNIT) {
+      const shaped: ShardModel = { ...turnShard(base, turns), id: w.id, unit, up: w.up, spin: w.spin }
+      const chosen = chosenConstrainOf(w)
+      out = chosen ? withConstrain(shaped, chosen) : shaped
+      defaultOf.set(out, { name: hit.name, part: hit.part, wrapper: { ...w, unit }, turned: turns.some((t) => t % 4 !== 0) })
+    }
+  }
+  expanded.set(w, out)
+  return out
+}
+
 /** A thing's own looks, read from its tags: each null when it carries no well-formed one. */
 export interface LookTags {
   closed: ShardModel | null
@@ -267,7 +355,8 @@ export function lookTagsOf(tags: readonly unknown[] | undefined, author: string 
   }
   const read = (payload: string | null): ShardModel | null => {
     const model = payload === null ? null : readLookPayload(payload)
-    return model ? ownedLook(model, author) : null
+    if (!model) return null
+    return expandDefault(model) ?? ownedLook(model, author)
   }
   return { closed: read(closed), open: read(open) }
 }
@@ -319,7 +408,9 @@ export function lookOf(item: LookSubject): Look | null {
   else if (!own.closed) look = { ...builtIn, name: 'custom', kind, open: own.open, lid: undefined }
   else {
     look = { name: 'custom', kind, closed: own.closed, open: own.open }
-    if (kind === 'chest' && isTreasureShape(own.closed)) look.lid = treasureLid(own.closed)
+    // TREASURE by reference, by its address and unturned; one written inline before that, by its shape.
+    const known = defaultOf.get(own.closed)
+    if (kind === 'chest' && (known ? known.name === 'treasure' && known.part === 'closed' && !known.turned : isTreasureShape(own.closed))) look.lid = treasureLid(own.closed)
   }
   custom.set(tags, look)
   return look
@@ -376,6 +467,27 @@ export function posedWrapper(model: ShardModel, pose: Pick<LookPose, 'unit' | 't
 }
 
 /**
+ * A closed look as it goes out: a default model by reference, posed from the
+ * wrapper it came from, or any other as posedLook writes it inline.
+ */
+export function wireLook(model: ShardModel, pose: LookPose): ShardModel {
+  const known = defaultOf.get(model)
+  return known ? withConstrain(posedShape(known.wrapper, pose), pose.constrain) : posedLook(model, pose)
+}
+
+/**
+ * An open look as it goes out, posed alike. The bar's WALK reaches a default that
+ * can hold a walker (TREASURE open), and never one authored `off`: an opened door
+ * holds nobody, whatever the closed one was set to.
+ */
+export function wireOpenLook(model: ShardModel, pose: LookPose): ShardModel {
+  const known = defaultOf.get(model)
+  if (!known) return posedOpenLook(model, pose)
+  const shape = posedShape(known.wrapper, pose)
+  return chosenConstrainOf(builtInLook(known.name).open ?? model) === 'off' ? shape : withConstrain(shape, pose.constrain)
+}
+
+/**
  * A look as tags (§3.6): the closed look, and the open one when there is
  * one, each the payload a kind 3330 would carry. Throws with lookRefusal's
  * words when either is over MAX_LOOK_BYTES, so the hide bar and the seal
@@ -399,11 +511,12 @@ export function lookBytes(model: ShardModel): number {
 }
 
 /**
- * A built-in look as it goes out: closed and open, both posed alike (posedOpenLook).
+ * A built-in look as it goes out: closed and open, each a wrapper of its public
+ * object, both posed alike (wireLook, wireOpenLook).
  */
 export function builtInLookTags(name: LookName, pose: LookPose): string[][] {
   const look = builtInLook(name)
-  return lookTags(posedLook(look.closed, pose), look.open ? posedOpenLook(look.open, pose) : null)
+  return lookTags(wireLook(look.closed, pose), look.open ? wireOpenLook(look.open, pose) : null)
 }
 
 /** A point, as a world item's place is. */

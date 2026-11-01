@@ -17,6 +17,8 @@ if (typeof localStorage === 'undefined') {
   }
 }
 
+// The card's one shared canvas lives outside the card (scene/CardSpin): here, what it is asked to draw.
+vi.mock('../../scene/CardSpin', () => ({ CardSpin: ({ shard, wide }: { shard: { name: string } | null; wide?: boolean }) => <div aria-label={`${shard?.name}, turning`} style={{ width: wide ? '100%' : 160 }} /> }))
 vi.mock('../../lib/relay', () => ({
   publishMany: vi.fn(async () => ({ ok: true })),
   query: vi.fn(async () => []),

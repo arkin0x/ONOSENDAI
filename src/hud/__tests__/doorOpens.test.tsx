@@ -54,7 +54,7 @@ const AT: Position = { x: (1n << 40n) + 0x35n, y: (1n << 39n) + 0x12n, z: (1n <<
 const T = 1_800_000_000
 const me = (): string => useCyberspace.getState().identity.pubkey
 
-async function door(): Promise<{ lock: ReturnType<typeof forgeKey>; found: Hidden; room: NostrEvent }> {
+async function door(text = 'behind it'): Promise<{ lock: ReturnType<typeof forgeKey>; found: Hidden; room: NostrEvent }> {
   const lock = forgeKey('Silver Key')
   const held = finalizeEvent({ kind: 3340, created_at: T, content: '', tags: [] }, hider) as NostrEvent
   useInventory.getState().holdForged(held, lock, { lookupId: 'e'.repeat(64), bagId: 'f'.repeat(64), at: { x: '0', y: '0', z: '0' }, plane: 1, height: 3 })
@@ -65,7 +65,7 @@ async function door(): Promise<{ lock: ReturnType<typeof forgeKey>; found: Hidde
   const event = finalizeEvent(t, hider) as NostrEvent
   const bagKey = (await regionKeyOffThread(AT, 3, 20)).key
   const key = roomKey(bagKey, hexToBytes(secret))
-  const room = finalizeEvent(await bagTemplate([rumorOf(messageInnerTemplate('behind it', AT, 1, T), event.pubkey)], key, roomLookupId(key), 3, T, HIDDEN_KIND, ROOM_BAG_SETTINGS), hider) as NostrEvent
+  const room = finalizeEvent(await bagTemplate([rumorOf(messageInnerTemplate(text, AT, 1, T), event.pubkey)], key, roomLookupId(key), 3, T, HIDDEN_KIND, ROOM_BAG_SETTINGS), hider) as NostrEvent
   return { lock, room, found: { eventId: event.id, inner: event, keyHex: bytesToHex(bagKey), bagId: 'f'.repeat(64), lookupId: 'e'.repeat(64), author: event.pubkey, at: AT, plane: 1, height: 3, createdAt: T, type: 'chest', chest: chestItemOf(event)! } }
 }
 
@@ -130,8 +130,8 @@ describe('OPEN on a door', () => {
   })
 
   it('two secrets at one height: the door opened only by the other gives its own OPEN once its key is held, and its room comes', async () => {
-    const a = await door()
-    const b = await door()
+    const a = await door('behind the first')
+    const b = await door('behind the second')
     // Only a's key: door() holds the same event each time, so b's is not held yet.
     useShards.setState({ discovered: { [a.found.eventId]: a.found, [b.found.eventId]: b.found }, selectedSecret: a.found.eventId })
     relay.events = [a.room]
@@ -155,6 +155,9 @@ describe('OPEN on a door', () => {
     await vi.waitFor(() => expect(Object.values(useShards.getState().discovered).some((h) => h.room?.doorId === b.found.eventId)).toBe(true))
     expect(doorSecretOnlySaid(me(), b.found.eventId)).toBe(false)
     expect(doorSecretOnlySaid(me(), a.found.eventId)).toBe(false)
+    // Both rooms stand: neither was lost to the other's secret.
+    const texts = Object.values(useShards.getState().discovered).filter((h) => h.room).map((h) => h.text)
+    expect(texts).toEqual(expect.arrayContaining(['behind the first', 'behind the second']))
     await card.unmount()
   })
 })

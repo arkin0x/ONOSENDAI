@@ -237,6 +237,17 @@ describe('two doors, one room (R5)', () => {
       expect(vi.mocked(query)).not.toHaveBeenCalled()
     })
 
+    it('a door already opened by its own seal keeps its secret when the other opens later, its key gone by then', async () => {
+      const { a, b } = await pair()
+      hold(a.lock)
+      await enterRoom(a.door, a.secret)
+      useInventory.setState({ items: {} })
+      hold(b.lock)
+      await enterRoom(b.door, b.secret)
+      expect(doorSecret(me(), a.door.eventId)).toBe(a.secret)
+      expect(doorSecretOnlySaid(me(), a.door.eventId)).toBe(false)
+    })
+
     it('one secret, as written: a key held later owes nothing', async () => {
       const a = await build(3, 3)
       const b = await build(3, 3, { x: AT.x + 2n, y: AT.y, z: AT.z }, a.secret)

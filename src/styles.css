@@ -7930,7 +7930,7 @@ kbd {
   color: var(--fg); background: rgba(0, 229, 255, 0.05); border: 1px solid rgba(0, 229, 255, 0.18);
 }
 .objpick__row:hover { border-color: rgba(0, 229, 255, 0.5); }
-.objpick__name { font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.objpick__name { font-size: 12px; min-width: 0; white-space: normal; overflow-wrap: anywhere; }
 .objpick__meta { font-size: 9px; letter-spacing: 0.08em; color: var(--dim); flex-shrink: 0; }
 .ws__slot { width: 100%; display: flex; flex-direction: column; align-items: flex-start; gap: 2px; padding: 6px 8px; border-radius: 5px; font-family: inherit; cursor: pointer; color: var(--fg); background: rgba(0, 229, 255, 0.05); border: 1px dashed rgba(0, 229, 255, 0.35); }
 .ws__slot.is-full { border-style: solid; }

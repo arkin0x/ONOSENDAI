@@ -41,7 +41,7 @@ import { sealAChest } from '../../hud/ShardsPanel'
 import { useBuilder } from '../useBuilder'
 import { useCyberspace } from '../useCyberspace'
 import { useInventory } from '../useInventory'
-import { fillingChest, placingChest, pendingEmpty, positionOf, useShards, type ChestDraft, type MyDeployment } from '../useShards'
+import { fillingChest, lookTagsFor, placingChest, pendingEmpty, positionOf, useShards, type ChestDraft, type LookChoice, type MyDeployment } from '../useShards'
 
 const S = () => useShards.getState()
 const C = () => useCyberspace.getState()
@@ -230,5 +230,20 @@ describe('a chest of yours: EDIT, MOVE, ADD', () => {
     S().startMoveChest(d.eventId)
     expect(S().pending).toBeNull()
     expect(await S().resealChest(d.eventId, { ...draft(), lock: draft().lock! })).toMatch(/Only the chest/)
+  })
+})
+
+describe('MOVE of a chest wearing a default look', () => {
+  it('stays by reference: moved, it never goes out inline', async () => {
+    const lock = forgeKey('Silver Key')
+    S().startPlaceChest(); S().setDeployHeight(4); S().placeChest()
+    await S().sealPlacedChest({ name: 'Mover', lock: { pubkey: lock.itemPubkey, label: 'Silver Key' }, requires: '', contents: [{ kind: 'message', text: 'inside' }] })
+    const row = S().mine.find((d) => d.chest?.name === 'Mover')!
+    S().startMoveChest(row.eventId)
+    const look = (S().pending as { look: LookChoice }).look
+    const tags = lookTagsFor(look, { unit: 2, turn: [0, 1, 0], constrain: 'all' })
+    expect(JSON.stringify(tags).length).toBeLessThan(1024)
+    for (const t of tags) expect((JSON.parse(t[1]) as { refs: unknown[][] }).refs[0][1]).toMatch(/^33331:/)
+    S().cancelDeploy()
   })
 })

@@ -95,7 +95,7 @@ import { useInventory } from './useInventory'
 import { useShardFolders } from './useShardFolders'
 import { creditOf, useWorkshop } from './useWorkshop'
 import { deletionFilters, isDeleted, type Credit, type FeedObject } from 'sno-core/feed'
-import { builtInLook, builtInLookTags, keptInChest, lookOf, lookTags, lookTagsOf, posedLook, posedOpenLook, posedWrapper, type LookName, type LookPose } from '../lib/looks'
+import { builtInLook, builtInLookTags, keptInChest, lookOf, lookTags, lookTagsOf, posedLook, posedWrapper, wireLook, wireOpenLook, type LookName, type LookPose } from '../lib/looks'
 import { useCeremony } from './useCeremony'
 import { useToast } from './useToast'
 import type { ShardModel } from 'sno-core/shards'
@@ -407,7 +407,7 @@ export function lookTagsFor(choice: LookChoice, pose: LookPose): string[][] {
   if (choice.from === 'builtin') return builtInLookTags(choice.name, pose)
   if (choice.from === 'feed') return lookTags(posedWrapper(feedWrapper(choice.object, pose.unit), pose), null)
   if (choice.from === 'kept') return choice.tags.map((t) => [...t])
-  if (choice.from === 'model') return lookTags(posedLook(choice.closed, pose), choice.open ? posedOpenLook(choice.open, pose) : null)
+  if (choice.from === 'model') return lookTags(wireLook(choice.closed, pose), choice.open ? wireOpenLook(choice.open, pose) : null)
   const model = useWorkshop.getState().shards.find((s) => s.id === choice.shardId)
   if (!model) throw new Error('That model is no longer in your workshop.')
   return lookTags(posedLook(model, pose), null)

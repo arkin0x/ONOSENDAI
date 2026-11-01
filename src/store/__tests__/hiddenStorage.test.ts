@@ -353,6 +353,27 @@ describe('a switch mid-write', () => {
   })
 })
 
+describe('work begun before a switch', () => {
+  it('is not signed by the next identity: a hide reaching its bag after the switch sends nothing', async () => {
+    const p = await page()
+    const relay = await import('../../lib/relay')
+    const real = vi.mocked(relay.queryEach).getMockImplementation()!
+    let release = (): void => {}
+    const gate = new Promise<void>((r) => { release = r })
+    vi.mocked(relay.queryEach).mockImplementation(async (...a) => { await gate; return real(...a) })
+    const sealing = sealDoor(p).catch(() => undefined)
+    await tick()
+    const before = h.sent.length
+    p.signIn(Y)
+    release()
+    await sealing
+    vi.mocked(relay.queryEach).mockImplementation(real)
+    expect(h.sent.length).toBe(before)
+    expect(p.ids()).toEqual([])
+    expect((await dbRows()).filter((r) => r.bucket === Y)).toEqual([])
+  })
+})
+
 describe('with no database', () => {
   it('a failed probe keeps the old path, each identity\'s list its own, with what differs under its own key', async () => {
     h.mem.set(BARE, JSON.stringify([row(X, 'x1'), row(Y, 'y1')]))

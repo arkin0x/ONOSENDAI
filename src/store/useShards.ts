@@ -1479,9 +1479,7 @@ export const useShards = create<ShardsState>((set, get) => {
    * chest, or carry it loose with no chest at all.
    */
   async function publishBag(inners: BagEntry[], key: Uint8Array, lookupId: string, height: number, live: boolean, settings: BagSettings, place: { at: Position; plane: Plane }, beforeSend?: () => Promise<void>, before: BagEntry[] = [], owner = cyber().identity.pubkey): Promise<{ event: NostrEvent; published: boolean }> {
-    // This work began under another identity: it must not be signed by, or touch the list of, the one signed in now.
-    if (cyber().identity.pubkey !== owner) throw new Error(SWITCHED)
-    const event = await signBag(inners, key, lookupId, height, settings, place, before)
+    const event = await signBag(inners, key, lookupId, height, settings, place, before, owner)
     // Anything that must go out only once the bag is signed (an EDIT's
     // resealed object): a signer that refuses the bag stops it here.
     if (beforeSend) await beforeSend()
@@ -1490,7 +1488,9 @@ export const useShards = create<ShardsState>((set, get) => {
   }
 
   /** The bag signed, and nothing sent: publishBag's first half, for what must sign everything before anything goes out. */
-  async function signBag(inners: BagEntry[], key: Uint8Array, lookupId: string, height: number, settings: BagSettings, place: { at: Position; plane: Plane }, before: BagEntry[] = []): Promise<NostrEvent> {
+  async function signBag(inners: BagEntry[], key: Uint8Array, lookupId: string, height: number, settings: BagSettings, place: { at: Position; plane: Plane }, before: BagEntry[] = [], owner = cyber().identity.pubkey): Promise<NostrEvent> {
+    // This work began under another identity: it must not be signed by, or touch the list of, the one signed in now.
+    if (cyber().identity.pubkey !== owner) throw new Error(SWITCHED)
     const looked = [...inners, ...before]
     const inside = sealedInside(looked, openingKeys(useInventory.getState().items))
     const chests = new Set(looked.filter((e): e is NostrEvent => !isReference(e) && e.kind === CHEST_KIND).map((e) => e.id))
@@ -1911,14 +1911,14 @@ export const useShards = create<ShardsState>((set, get) => {
     const target = await gatherInners(to.lookupId, to.key, targetLive, to.height)
     const settings = to.room ? ROOM_BAG_SETTINGS : target.settings ?? DEFAULT_BAG_SETTINGS
     const place = { at: positionOf(src), plane: src.plane }
-    const bag = await signBag(mergeEntries(target.entries, moved.map(entryOf)), to.key, to.lookupId, to.height, settings, place, target.entries)
+    const bag = await signBag(mergeEntries(target.entries, moved.map(entryOf)), to.key, to.lookupId, to.height, settings, place, target.entries, me)
     let source: StagedMove['source'] = null
     if (!keepSource) {
       const was = await gatherInners(src.lookupId, srcKey, sourceLive, src.height)
       const gone = new Set(rows.map((r) => entryKey(entryOf(r))))
       const left = was.entries.filter((e) => !gone.has(entryKey(e)))
       const kept = was.settings ?? src.bag ?? DEFAULT_BAG_SETTINGS
-      if (left.length > 0) source = { bag: await signBag(left, srcKey, src.lookupId, src.height, kept, place, was.entries), settings: kept }
+      if (left.length > 0) source = { bag: await signBag(left, srcKey, src.lookupId, src.height, kept, place, was.entries, me), settings: kept }
       else source = sourceLive ? { retraction: await bagRetraction(src.lookupId, src.bagId) } : {}
     }
     return { owner: me, rows, moved, objects, to, settings, bag, targetLive, source }
@@ -2305,7 +2305,7 @@ export const useShards = create<ShardsState>((set, get) => {
           const swap = new Map(doorRows.filter((door) => door.lookupId === lookupId).map((door) => [entryKey(entryOf(door)), signed.get(door.eventId)!.inner as BagEntry]))
           const entries = [...gathered.entries.map((e) => swap.get(entryKey(e)) ?? e), ...[...swap].filter(([k]) => !gathered.entries.some((e) => entryKey(e) === k)).map(([, v]) => v)]
           const settings = gathered.settings ?? first.bag ?? DEFAULT_BAG_SETTINGS
-          bags.set(lookupId, { publicly, settings, event: await signBag(entries, key, lookupId, first.height, settings, { at: positionOf(first), plane: first.plane }, gathered.entries) })
+          bags.set(lookupId, { publicly, settings, event: await signBag(entries, key, lookupId, first.height, settings, { at: positionOf(first), plane: first.plane }, gathered.entries, me) })
         }
         const oldBagId = synced[0]?.bagId ?? null
         const retractions: NostrEvent[] = []

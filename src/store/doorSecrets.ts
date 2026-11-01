@@ -24,6 +24,27 @@ function all(): Record<string, Record<string, string>> {
   return kept
 }
 
+const ONLY_SAID_KEY = 'onosendai:door-secrets-only-said'
+let onlySaid: Record<string, Record<string, true>> | null = null
+
+function saidByAll(): Record<string, Record<string, true>> {
+  if (onlySaid) return onlySaid
+  try {
+    const raw = JSON.parse(localStorage.getItem(ONLY_SAID_KEY) ?? '{}') as unknown
+    onlySaid = raw && typeof raw === 'object' && !Array.isArray(raw) ? (raw as Record<string, Record<string, true>>) : {}
+  } catch { onlySaid = {} }
+  return onlySaid
+}
+
+/**
+ * Whether the secret kept for a door came from another door of its room, not from
+ * this door's own seal. §3.7.5 has a reader open them all, and one secret to a room
+ * makes that right; but a second secret can exist, so it is only what was said.
+ */
+export function doorSecretOnlySaid(me: string, doorId: string): boolean {
+  return !!saidByAll()[me]?.[doorId]
+}
+
 /** The door secret this identity knows for a door, or null. */
 export function doorSecret(me: string, doorId: string): string | null {
   const s = all()[me]?.[doorId]
@@ -31,7 +52,13 @@ export function doorSecret(me: string, doorId: string): string | null {
 }
 
 /** Keep a door secret this identity has learned: by opening the door, or by sealing it. */
-export function keepDoorSecret(me: string, doorId: string, secretHex: string): void {
+export function keepDoorSecret(me: string, doorId: string, secretHex: string, how?: { onlySaid: true }): void {
+  const said = saidByAll()
+  const marks = { ...(said[me] ?? {}) }
+  if (how?.onlySaid) marks[doorId] = true
+  else delete marks[doorId]
+  said[me] = marks
+  try { localStorage.setItem(ONLY_SAID_KEY, JSON.stringify(said)) } catch { /* quota or private mode: known for this session */ }
   const a = all()
   const mine = { ...(a[me] ?? {}), [doorId]: secretHex }
   const ids = Object.keys(mine)
@@ -41,4 +68,4 @@ export function keepDoorSecret(me: string, doorId: string, secretHex: string): v
 }
 
 /** For tests: forget what is kept, so the next read is from localStorage. */
-export function resetDoorSecrets(): void { kept = null }
+export function resetDoorSecrets(): void { kept = null; onlySaid = null }

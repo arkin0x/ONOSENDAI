@@ -26,16 +26,19 @@
 import { HIDDEN_KIND, bagEntries, unbag, type Hidden } from '../lib/hidden'
 import { bytesToHex, hexToBytes } from '../lib/events'
 import { doorHeightOf } from '../lib/looks'
-import { regionBase, roomKey, roomLookupId, roomOf } from '../lib/doors'
+import { openerFor, type Opener } from '../lib/chests'
+import { doorSecretWithKey, regionBase, roomKey, roomLookupId, roomOf } from '../lib/doors'
+import { openingKeys } from '../lib/inventory'
 import { query } from '../lib/relay'
 import { resolveReference } from '../lib/references'
 import { regionKeyOffThread } from '../lib/regionKeyOffThread'
 import { MAX_COMPUTE_HEIGHT, useCyberspace } from './useCyberspace'
+import { useInventory } from './useInventory'
 import { positionOf, useShards } from './useShards'
 import { rememberOpened } from './useOpenedChests'
-import { doorSecret, keepDoorSecret } from './doorSecrets'
+import { doorSecret, doorSecretOnlySaid, keepDoorSecret } from './doorSecrets'
 
-export { doorSecret, keepDoorSecret, resetDoorSecrets } from './doorSecrets'
+export { doorSecret, doorSecretOnlySaid, keepDoorSecret, resetDoorSecrets } from './doorSecrets'
 
 /** A door's height (its `door` tag), or null for a chest or a malformed door. */
 export function heightOfDoor(door: Pick<Hidden, 'inner'>): number | null {
@@ -118,17 +121,48 @@ export function doorsOfRoom(door: Hidden): Hidden[] {
   return [...seen.values()]
 }
 
+/** A door's own secret, read with a key this identity holds; null when none is held, or only a signer could say, which asks. */
+function ownSecret(chest: NonNullable<Hidden['chest']>, opener: Opener): string | null {
+  if (opener?.by !== 'key') return null
+  try { return doorSecretWithKey(chest, opener.key.secretHex) } catch { return null }
+}
+
 /**
  * A door opened by hand, at once and before any relay is asked (his ruling: "OPEN
- * closes the modal", "WALK passes at once"): every door of its room open for this
- * identity (R5), the secret kept. Fetching the room comes after (fillRoom).
+ * closes the modal", "WALK passes at once"), the secret kept. Fetching the room
+ * comes after (fillRoom).
+ *
+ * The rest of its room opens with it (§3.7.5, R5), per secret: a door whose own seal
+ * can be read here and holds another secret is another room and stays shut, and one
+ * already opened by its own seal keeps its own. One that cannot be read opens as the
+ * spec says, the secret only said (doorSecretOnlySaid), so OPEN stays on it for
+ * whoever comes to hold its key (ownOpenOwed): its room is never lost to this door's
+ * secret.
  */
 export function openDoorNow(door: Hidden, secretHex: string): void {
   const me = useCyberspace.getState().identity.pubkey
+  keepDoorSecret(me, door.eventId, secretHex)
+  if (door.chest) rememberOpened(me, door.eventId, door.chest.lockPubkey, [])
+  const keys = openingKeys(useInventory.getState().items)
   for (const d of doorsOfRoom(door)) {
-    keepDoorSecret(me, d.eventId, secretHex)
-    if (d.chest) rememberOpened(me, d.eventId, d.chest.lockPubkey, [])
+    if (d.eventId === door.eventId || !d.chest) continue
+    const own = ownSecret(d.chest, openerFor(d.chest, keys, me))
+    if (own !== null && own !== secretHex) continue
+    if (own === null && doorSecret(me, d.eventId) && !doorSecretOnlySaid(me, d.eventId)) continue
+    keepDoorSecret(me, d.eventId, secretHex, own === null ? { onlySaid: true } : undefined)
+    rememberOpened(me, d.eventId, d.chest.lockPubkey, [])
   }
+}
+
+/**
+ * Whether a door open only because another of its room was still has its own OPEN
+ * to give: this identity can now read its seal, and it holds, or may hold, another
+ * secret. A key says at once. A signer asks, so OPEN stays until it is tapped.
+ */
+export function ownOpenOwed(me: string, doorId: string, chest: NonNullable<Hidden['chest']>, opener: Opener): boolean {
+  if (!opener || !doorSecretOnlySaid(me, doorId)) return false
+  const own = ownSecret(chest, opener)
+  return own === null || own !== doorSecret(me, doorId)
 }
 
 /**
@@ -171,7 +205,8 @@ export function resetReopens(): void { lastReopen.clear() }
 export async function reopenRoom(door: Hidden): Promise<void> {
   const me = useCyberspace.getState().identity.pubkey
   const secret = doorSecret(me, door.eventId)
-  if (!secret) return
+  // A secret only said is the room of the door that said it, which opens it again itself.
+  if (!secret || doorSecretOnlySaid(me, door.eventId)) return
   const key = `${me}/${door.eventId}`
   const was = lastReopen.get(key)
   if (was && Date.now() - was.at < (was.found ? REOPEN_FOUND_MS : REOPEN_MISSING_MS)) return

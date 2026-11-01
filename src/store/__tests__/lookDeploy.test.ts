@@ -28,8 +28,9 @@ vi.mock('../../lib/relay', () => ({
 import { newShard, type ShardModel } from 'sno-core/shards'
 import type { FeedObject } from 'sno-core/feed'
 import { forgeKey } from '../../lib/chests'
-import { chestItemOf } from '../../lib/hidden'
-import { isTreasureShape, lookOf, lookTagsOf } from '../../lib/looks'
+import { HIDDEN_KIND, chestItemOf } from '../../lib/hidden'
+import { builtInLookTags, isTreasureShape, lookOf, lookTagsOf } from '../../lib/looks'
+import { publishMany } from '../../lib/relay'
 import { constrainOf } from '../../lib/walkConstrain'
 import type { Position } from '../../lib/space'
 import { useBuilder } from '../useBuilder'
@@ -78,8 +79,9 @@ describe('a chest\u2019s record', () => {
     const stored = JSON.parse(storedMine(S().mine)) as Array<{ chest?: { look?: unknown }; inner: { tags: string[][] } }>
     expect(stored[0].chest?.look).toBeUndefined()
     expect(stored[0].inner.tags.filter((t) => t[0] === 'look')).toHaveLength(2)
-    // One copy of each 8 KB payload, not two.
-    expect(storedMine(S().mine).length).toBeLessThan(2 * JSON.stringify(row.chest?.look).length)
+    // One copy of each, not two: the chest's own look is not stored beside its event.
+    const address = (JSON.parse(row.chest!.look![1][1]) as { refs: string[][] }).refs[0][1]
+    expect(storedMine(S().mine).split(address).length - 1).toBe(1)
   })
 
   it('says so when this device has no room for it, rather than losing it in silence', async () => {
@@ -91,6 +93,27 @@ describe('a chest\u2019s record', () => {
     expect(useToast.getState().toast?.label ?? spy.mock.calls.at(-1)?.[0].label).toBe('NOT SAVED ON THIS DEVICE')
     spy.mockRestore()
   })
+})
+
+describe('a default chest in a bag (his ruling, 2026-11-01)', () => {
+  it('goes by reference: six fit one bag under 65 KB, with room to spare', async () => {
+    useCyberspace.setState({ live: true })
+    vi.mocked(publishMany).mockClear()
+    const sizes: number[] = []
+    for (let i = 0; i < 6; i++) {
+      const at = { ...CURSOR, x: CURSOR.x + BigInt(i) }
+      useCyberspace.setState({ position: at, anchor: at, cursor: at })
+      start()
+      await hide()
+      expect(S().deployError).toBeNull()
+      const last = vi.mocked(publishMany).mock.calls.at(-1)![1] as unknown as { kind: number }
+      expect(last.kind).toBe(HIDDEN_KIND)
+      sizes.push(JSON.stringify(last).length)
+    }
+    console.log(`[look size] the bag's bytes as each chest joins: ${sizes.join(', ')}; TREASURE's look tags alone: ${JSON.stringify(builtInLookTags('treasure', { unit: 0, turn: [0, 0, 0], constrain: 'all' })).length}`)
+    expect(S().mine.filter((d) => d.type === 'chest')).toHaveLength(6)
+    expect(sizes[5]).toBeLessThan(65_000)
+  }, 30000)
 })
 
 describe('a chest hides with the look it wears', () => {

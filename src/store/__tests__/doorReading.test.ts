@@ -35,7 +35,8 @@ vi.mock('../../lib/relay', () => ({
 
 import { finalizeEvent, generateSecretKey, getPublicKey } from 'nostr-tools/pure'
 import { bytesToHex, hexToBytes, type NostrEvent } from '../../lib/events'
-import { forgeKey, sealEntries } from '../../lib/chests'
+import { forgeKey, openerFor, sealEntries } from '../../lib/chests'
+import { openingKeys } from '../../lib/inventory'
 import { HIDDEN_KIND, bagTemplate, chestInnerTemplate, chestItemOf, keyInnerTemplate, messageInnerTemplate, rumorOf, unbag, type BagEntry, type Hidden } from '../../lib/hidden'
 import { ROOM_BAG_SETTINGS, doorSecretWithKey, newDoorSecret, roomEntries, roomKey, roomLookupId } from '../../lib/doors'
 import { regionKeyOffThread } from '../../lib/regionKeyOffThread'
@@ -44,7 +45,7 @@ import { useCyberspace } from '../useCyberspace'
 import { useInventory } from '../useInventory'
 import { openedByHand, resetOpenedChests } from '../useOpenedChests'
 import { useShards } from '../useShards'
-import { doorSecret, doorsOfRoom, enterRoom, keepDoorSecret, reopenRoom, resetDoorSecrets, resetReopens } from '../rooms'
+import { doorSecret, doorSecretOnlySaid, doorsOfRoom, enterRoom, keepDoorSecret, ownOpenOwed, reopenRoom, resetDoorSecrets, resetReopens } from '../rooms'
 import { query } from '../../lib/relay'
 import { doorWallKey, wallItems } from '../walkWalls'
 
@@ -82,6 +83,7 @@ beforeEach(() => {
   relay.bags = []
   localStorage.removeItem('onosendai:chests-opened')
   localStorage.removeItem('onosendai:door-secrets')
+  localStorage.removeItem('onosendai:door-secrets-only-said')
   resetOpenedChests()
   resetDoorSecrets()
   resetReopens()
@@ -175,6 +177,75 @@ describe('two doors, one room (R5)', () => {
     expect(openedByHand(me(), a.door.eventId, a.door.chest!.lockPubkey)).toBe(true)
     expect(openedByHand(me(), b.door.eventId, b.door.chest!.lockPubkey)).toBe(true)
     expect(doorSecret(me(), a.door.eventId)).toBe(a.secret)
+  })
+
+  describe('opened per secret: two secrets at one height', () => {
+    const hold = (lock: Built['lock']): void => {
+      const held = finalizeEvent({ kind: 3340, created_at: T, content: lock.itemPubkey, tags: [] }, hider) as NostrEvent
+      useInventory.getState().holdForged(held, lock, { lookupId: 'e'.repeat(64), bagId: 'f'.repeat(64), at: { x: '0', y: '0', z: '0' }, plane: PLANE, height: 3 })
+    }
+    const pair = async (): Promise<{ a: Built; b: Built }> => {
+      const a = await build(3, 3)
+      const b = await build(3, 3, { x: AT.x + 2n, y: AT.y, z: AT.z })
+      expect(b.secret).not.toBe(a.secret)
+      useShards.setState({ discovered: { [a.door.eventId]: a.door, [b.door.eventId]: b.door } })
+      return { a, b }
+    }
+    const openerOf = (x: Built) => openerFor(x.door.chest!, openingKeys(useInventory.getState().items), me())
+
+    it('holding both keys: the door opened opens alone, and the other keeps its own room', async () => {
+      const { a, b } = await pair()
+      hold(a.lock); hold(b.lock)
+      await enterRoom(b.door, b.secret)
+      expect(openedByHand(me(), b.door.eventId, b.door.chest!.lockPubkey)).toBe(true)
+      expect(openedByHand(me(), a.door.eventId, a.door.chest!.lockPubkey)).toBe(false)
+      expect(doorSecret(me(), a.door.eventId)).toBeNull()
+      const roomA = await enterRoom(a.door, a.secret)
+      expect(roomA?.lookupId).toBe(a.lookupId)
+      expect(roomA?.items.length).toBeGreaterThan(0)
+      // Each keeps its own, and both rooms stand.
+      expect(doorSecret(me(), a.door.eventId)).toBe(a.secret)
+      expect(doorSecret(me(), b.door.eventId)).toBe(b.secret)
+      const doors = new Set(Object.values(useShards.getState().discovered).map((h) => h.room?.doorId))
+      expect(doors.has(a.door.eventId) && doors.has(b.door.eventId)).toBe(true)
+    })
+
+    it('holding one key: the other opens as the spec says, only said; its own key later gives its OPEN, and its room is not lost', async () => {
+      const { a, b } = await pair()
+      hold(b.lock)
+      await enterRoom(b.door, b.secret)
+      expect(openedByHand(me(), a.door.eventId, a.door.chest!.lockPubkey)).toBe(true)
+      expect(doorSecretOnlySaid(me(), a.door.eventId)).toBe(true)
+      expect(ownOpenOwed(me(), a.door.eventId, a.door.chest!, openerOf(a))).toBe(false)
+      hold(a.lock)
+      expect(ownOpenOwed(me(), a.door.eventId, a.door.chest!, openerOf(a))).toBe(true)
+      const roomA = await enterRoom(a.door, a.secret)
+      expect(roomA?.lookupId).toBe(a.lookupId)
+      expect(doorSecretOnlySaid(me(), a.door.eventId)).toBe(false)
+      expect(doorSecret(me(), a.door.eventId)).toBe(a.secret)
+      // Opening the second never rewrites the first's.
+      expect(doorSecret(me(), b.door.eventId)).toBe(b.secret)
+      expect(ownOpenOwed(me(), a.door.eventId, a.door.chest!, openerOf(a))).toBe(false)
+    })
+
+    it('a secret only said is not used to read a room under the wrong door', async () => {
+      const { a, b } = await pair()
+      hold(b.lock)
+      await enterRoom(b.door, b.secret)
+      vi.mocked(query).mockClear()
+      await reopenRoom(a.door)
+      expect(vi.mocked(query)).not.toHaveBeenCalled()
+    })
+
+    it('one secret, as written: a key held later owes nothing', async () => {
+      const a = await build(3, 3)
+      const b = await build(3, 3, { x: AT.x + 2n, y: AT.y, z: AT.z }, a.secret)
+      useShards.setState({ discovered: { [a.door.eventId]: a.door, [b.door.eventId]: b.door } })
+      hold(b.lock)
+      await enterRoom(b.door, b.secret)
+      hold(a.lock)
+      expect(ownOpenOwed(me(), a.door.eventId, a.door.chest!, openerOf(a))).toBe(false)
+    })
   })
 
   it('a door of another signer in the same place is not a door of this room, and stays shut (§3.7.5)', async () => {

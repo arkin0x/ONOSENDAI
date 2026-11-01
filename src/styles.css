@@ -9506,10 +9506,19 @@ a.feed__act { text-decoration: none; }
 /* GRAVITY (store/useWalk.ts): a chip across the top of the WALK pad, lit
  * while gravity is on. Its own row, so no key a hand knows moves. */
 .touchpad--mode-walk {
+  grid-template-rows: 22px repeat(3, 38px);
+  grid-template-areas:
+    "gravity gravity gravity"
+    "away    up      toward"
+    "left    down    right"
+    "zoomout hub     zoomin";
+}
+/* A pin to remove gets its row back. The pad is anchored at the bottom, so no key moves. */
+.touchpad--mode-walk:has(> .touchpad__key--pin) {
   grid-template-rows: 22px repeat(4, 38px);
   grid-template-areas:
     "gravity gravity gravity"
-    "pin     earth   cube"
+    "pin     .       ."
     "away    up      toward"
     "left    down    right"
     "zoomout hub     zoomin";

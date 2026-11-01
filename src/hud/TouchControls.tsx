@@ -192,12 +192,17 @@ export function TouchControls(): JSX.Element {
             centre, so pressing it while looking at a place threw the place
             away (arkinox, 2026-09-14). adjustScale takes a delta, so the
             delta is whatever gets this view to EARTH_SCALE_EXP. */}
-        <button className="touchpad__key touchpad__key--earth" title="Zoom to Earth's scale (2^52)" aria-label="Zoom to 2^52" {...noCallout} onPointerDown={(e) => { e.preventDefault(); e.stopPropagation(); const s = useCyberspace.getState(); s.adjustScale(EARTH_SCALE_EXP - s.scaleExp) }}>
-          <Globe size={16} strokeWidth={2.25} aria-hidden />
-        </button>
-        <button className="touchpad__key touchpad__key--cube" title="Zoom all the way out (2^84)" aria-label="Zoom out to 2^84" {...noCallout} onPointerDown={(e) => { e.preventDefault(); e.stopPropagation(); useCyberspace.getState().adjustScale(MAX_SCALE_EXP) }}>
-          <Box size={16} strokeWidth={2.25} aria-hidden />
-        </button>
+        {/* WALK has no one-press zoom: the owner removed both (2026-11-01). */}
+        {!walking && (
+          <>
+            <button className="touchpad__key touchpad__key--earth" title="Zoom to Earth's scale (2^52)" aria-label="Zoom to 2^52" {...noCallout} onPointerDown={(e) => { e.preventDefault(); e.stopPropagation(); const s = useCyberspace.getState(); s.adjustScale(EARTH_SCALE_EXP - s.scaleExp) }}>
+              <Globe size={16} strokeWidth={2.25} aria-hidden />
+            </button>
+            <button className="touchpad__key touchpad__key--cube" title="Zoom all the way out (2^84)" aria-label="Zoom out to 2^84" {...noCallout} onPointerDown={(e) => { e.preventDefault(); e.stopPropagation(); useCyberspace.getState().adjustScale(MAX_SCALE_EXP) }}>
+              <Box size={16} strokeWidth={2.25} aria-hidden />
+            </button>
+          </>
+        )}
         {walking && (
           <button
             className={`touchpad__key touchpad__key--gravity${gravity ? ' is-on' : ''}`}

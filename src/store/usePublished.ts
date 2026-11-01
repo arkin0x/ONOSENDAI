@@ -23,6 +23,7 @@
  * PUBLISHED here.
  */
 
+import { withoutCarried } from '../lib/carried'
 import { create } from 'zustand'
 import type { ShardModel } from 'sno-core/shards'
 import { SNO_KIND, objectAddress } from 'sno-core/feed'
@@ -56,7 +57,7 @@ interface PublishedState {
   publishing: boolean
   retracting: boolean
   /** Sign the shard as a public object and send it to your relays. True when one took it. */
-  publish: (shard: ShardModel) => Promise<boolean>
+  publish: (shard: ShardModel, withCarried?: boolean) => Promise<boolean>
   /**
    * PUBLISH's work without its toast or its one-at-a-time lock: sign, send,
    * write the ledger. Bulk import (store/useShardImport) sends each shard
@@ -64,7 +65,7 @@ interface PublishedState {
    * `refresh` re-reads the Shard Feed after a success, as PUBLISH does; a
    * batch does that once at the end instead.
    */
-  send: (shard: ShardModel, refresh?: boolean) => Promise<SendOutcome>
+  send: (shard: ShardModel, refresh?: boolean, withCarried?: boolean) => Promise<SendOutcome>
   /** Send a deletion of the published object (NIP-09). True when a relay took it. */
   retract: (shard: ShardModel) => Promise<boolean>
   /** Note the public objects among these that this identity published, from any read of the relays. */
@@ -132,11 +133,11 @@ export const usePublished = create<PublishedState>((set, get) => ({
   publishing: false,
   retracting: false,
 
-  publish: async (shard) => {
+  publish: async (shard, withCarried = false) => {
     if (get().publishing) return false
     set({ publishing: true })
     try {
-      const outcome = await get().send(shard, true)
+      const outcome = await get().send(shard, true, withCarried)
       say(outcome.message)
       return outcome.ok
     } finally {
@@ -144,7 +145,9 @@ export const usePublished = create<PublishedState>((set, get) => ({
     }
   },
 
-  send: async (shard, refresh = false) => {
+  send: async (given, refresh = false, withCarried = false) => {
+    // What came to you sealed does not go out in the clear unless you said so (Workshop's offer).
+    const shard = withCarried ? given : withoutCarried(given)
     // The same round trip every reader makes, before the signature: an object
     // the format refuses would be listed by the feed and open as nothing.
     const refusal = shardRefusal(shard)

@@ -71,11 +71,13 @@
  */
 
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
+import { DoorClosedLocked } from 'lucide-react'
+import { roomOf } from '../lib/doors'
 import { noCallout, useRepeatable } from '../hooks/useRepeatable'
 import { MAX_UNIT, type ShardModel } from 'sno-core/shards'
 import { formatCellSize, formatDistance } from 'sno-core/scale'
 import { fadeStep, inscribedRadius, sourceLocal } from '../lib/audioItem'
-import { LINK_PROTECTED, SCAN_MAX_HEIGHT, lookModelOf, lookTagsFor, type LookChoice, aimedOf, atLastSpot, copyLinedUp, editingId, isProtected, ownBagIn, pendingEmpty, pendingName, positionOf, regionOf, useShards } from '../store/useShards'
+import { LINK_PROTECTED, SCAN_MAX_HEIGHT, effectiveDoorHeight, fillingChest, movingId, placingChest, sealingDoor, lookModelOf, lookTagsFor, type LookChoice, aimedOf, atLastSpot, copyLinedUp, isProtected, ownBagIn, pendingEmpty, pendingName, positionOf, regionOf, useShards } from '../store/useShards'
 import { aimedPoint } from '../lib/chests'
 import { snapOffered } from '../lib/pose'
 import { MAX_RIDDLE_LENGTH } from '../lib/hidden'
@@ -94,7 +96,7 @@ import { cloudKeyQuote, deployCeiling, deployRoute, localKeySeconds, needsAsk, r
 import { useEscape } from '../hooks/useEscape'
 import { useCover } from '../hooks/useCover'
 import { fitCause, fitHeight, fitHeightAll, outsideAt, reachGibsons, type FitPoint } from '../lib/deployFit'
-import { CHEST_LOOKS, LOOK_LABELS } from '../lib/looks'
+import { CHEST_LOOKS, DOOR_LOOKS, LOOK_LABELS } from '../lib/looks'
 import { LookPicker } from './LookPicker'
 import { SHALLOW_WARN, shallowBag, shallowExplain } from '../lib/shallowBag'
 import { CONSTRAINS, CONSTRAIN_TIPS } from '../lib/walkConstrain'
@@ -172,7 +174,7 @@ export function lookFitShape(look: LookChoice | null, model: ShardModel | null):
 export function LookRow({ choices, look, refusal }: { choices: readonly (keyof typeof LOOK_LABELS)[]; look: LookChoice; refusal: string | null }): JSX.Element {
   const [picking, setPicking] = useState(false)
   const pick = (l: LookChoice): void => { useShards.getState().setDeployLook(l); setPicking(false) }
-  const other = look.from === 'mine' ? lookModelOf(look)?.name ?? 'model' : look.from === 'feed' ? look.object.shard.name : null
+  const other = look.from === 'mine' ? lookModelOf(look)?.name ?? 'model' : look.from === 'feed' ? look.object.shard.name : look.from === 'model' ? look.closed.name : look.from === 'kept' ? 'as it is' : null
   return (
     <DeployRow kind="model" label="MODEL" hint={refusal ?? other}>
       <span className="deploybar__choices" role="group" aria-label="Model">
@@ -194,14 +196,17 @@ export function DeployBar({ pad = false }: { pad?: boolean }): JSX.Element | nul
   // EDIT: a shard you hid, being moved. Its old region (a string, so the bar
   // re-renders only when it changes) says whether the move leaves its bag,
   // and whether it was published says where the move goes.
-  const moving = useShards((s) => editingId(s.pending) !== null)
+  const moving = useShards((s) => movingId(s.pending) !== null)
+  // SEAL A CHEST (R18): placed first, here, then filled in its modal, which this bar steps aside for.
+  const placing = useShards((s) => placingChest(s.pending))
+  const filling = useShards((s) => fillingChest(s.pending))
   const movedRegion = useShards((s) => {
-    const id = editingId(s.pending)
+    const id = movingId(s.pending)
     const d = id ? s.mine.find((m) => m.eventId === id) : undefined
     return d ? regionOf(positionOf(d), d.plane, d.height) : null
   })
   const movedPublished = useShards((s) => {
-    const id = editingId(s.pending)
+    const id = movingId(s.pending)
     return !!id && !!s.mine.find((m) => m.eventId === id)?.published
   })
   // A shard being aimed into a chest: signed where it stands, not hidden.
@@ -280,6 +285,18 @@ export function DeployBar({ pad = false }: { pad?: boolean }): JSX.Element | nul
   // The build STEP: how far a move steps and the cell the placement snaps to
   // (store/buildStep.ts), the zoom until it is lowered.
   const step = useCyberspace(buildStepOf)
+  // A door being placed or moved: its own rows.
+  const door = useShards((s) => s.pending?.type === 'chest' && !!s.pending.door)
+  // The door what is being placed seals to, at exactly its height (4.3): the
+  // chip goes away with the height, and nothing locks the height.
+  const me = useCyberspace((s) => s.identity.pubkey)
+  const leaveOut = useShards((s) => s.deployLeaveOut)
+  const chosenRoom = useShards((s) => s.deployDoorHeight)
+  const doorHeight = effectiveDoorHeight(chosenRoom, height)
+  const sealing = useMemo(
+    () => (pending ? sealingDoor({ mine, pending, deployLeaveOut: leaveOut, deployDoorHeight: chosenRoom }, me, deployPoint(cursor, step, height), plane, height) : null),
+    [pending, mine, leaveOut, chosenRoom, me, cursor, step, height, plane],
+  )
   // A chest with shards aimed inside: where each stands, with its reach, in
   // the plane the chest is being placed in. One aimed in the other plane can
   // never be inside the chest's region and is counted among the outside.
@@ -302,11 +319,20 @@ export function DeployBar({ pad = false }: { pad?: boolean }): JSX.Element | nul
     [shard, lookModel, fitShape, unit, cursor, step, ceiling, aimed],
   )
   useEffect(() => {
-    if (!heightAuto || !fitting) return
+    // Once placed, its height is fixed with its place, whatever the cursor does while the modal is filled.
+    if (!heightAuto || !fitting || filling) return
     const want = fitH ?? ceiling
     if (want !== useShards.getState().deployHeight) useShards.getState().setDeployHeight(want)
-  }, [heightAuto, fitting, fitH, ceiling])
+  }, [heightAuto, fitting, fitH, ceiling, filling])
   const fitModel = shard ?? (aimed.points.length === 0 ? fitShape : null)
+  // ADD on a door (4.8): what is placed next starts at the door's height, set by hand from then on.
+  const into = useShards((s) => s.deployInto)
+  const lined = pending !== null
+  useEffect(() => {
+    if (!lined || into === null) return
+    useShards.setState({ deployHeightAuto: false })
+    useShards.getState().setDeployHeight(into)
+  }, [lined, into])
   const fit: { auto: boolean; height: number | null; cause: 'size' | 'edge' | 'contents' } = { auto: heightAuto && fitting, height: fitH, cause: fitModel ? fitCause(fitModel, unit, fitH, ceiling) : 'contents' }
   // Aimed contents the region at this height does not hold: they stand at the chest when it opens (revealedIn).
   const outside = aimed.points.length + aimed.elsewhere === 0 ? 0 : outsideAt(deployPoint(cursor, step, height), height, aimed.points) + aimed.elsewhere
@@ -321,21 +347,21 @@ export function DeployBar({ pad = false }: { pad?: boolean }): JSX.Element | nul
 
   // On a copy lined up after a placement, Escape leaves BUILD mode, as it
   // did the moment a placement used to close the bar; CANCEL stays in it.
-  useEscape('chip', pending !== null, () => {
+  useEscape('chip', pending !== null && !filling, () => {
     const s = useShards.getState()
     if (s.deployAsk) s.declineDeploy()
     else if (copyLinedUp(s)) useBuilder.getState().exit()
     else s.cancelDeploy(true)
   })
 
-  if (!pending) return null
+  if (!pending || filling) return null
 
   // A message, a key and audio have no size or pose. A shard has them, and a
   // chest has the model it wears placed like a shard (D2): SCALE, TURN and
   // WALK, but not the snap.
   const isMessage = pending.type !== 'shard'
   const sized = pending.type === 'shard' || pending.type === 'chest'
-  const title = intoChest ? 'AIM' : moving ? 'EDIT' : pending.type === 'shard' ? 'DEPLOY' : `HIDE ${pending.type.toUpperCase()}`
+  const title = intoChest ? 'AIM' : moving ? (pending.type === 'chest' ? 'MOVE' : 'EDIT') : pending.type === 'shard' ? 'DEPLOY' : door ? 'HIDE DOOR' : `HIDE ${pending.type.toUpperCase()}`
   const name = pendingName(pending, shard)
   const empty = pendingEmpty(pending, shard)
   const working = status === 'working'
@@ -356,7 +382,7 @@ export function DeployBar({ pad = false }: { pad?: boolean }): JSX.Element | nul
         : undefined
 
   return (
-    <div ref={coverRef} className={deployBarClass(pad)} role="dialog" aria-label={intoChest ? 'Aim shard for chest' : pending.type === 'shard' ? 'Deploy shard' : `Hide ${pending.type}`}>
+    <div ref={coverRef} className={deployBarClass(pad)} role="dialog" aria-label={intoChest ? 'Aim shard for chest' : pending.type === 'shard' ? 'Deploy shard' : door ? 'Hide door' : `Hide ${pending.type}`}>
       {/* The title row carries the action, left of CANCEL, so the rest of the
           bar is free to scroll (arkinox, 2026-10-01). While HOSAKA's ask is up
           it takes its own row below, since three buttons do not fit here. */}
@@ -370,11 +396,11 @@ export function DeployBar({ pad = false }: { pad?: boolean }): JSX.Element | nul
           <button
             className="deploybar__deploy"
             disabled={empty || working || here || !!lookRefusal}
-            title={lookRefusal ?? (here ? 'The last one stands here. Move, or change how it goes out, to place another' : localEst)}
-            onClick={() => void useShards.getState().deploy()}
+            title={lookRefusal ?? (placing ? 'Place it here, then fill it' : here ? 'The last one stands here. Move, or change how it goes out, to place another' : localEst)}
+            onClick={() => { if (placing) useShards.getState().placeChest(); else void useShards.getState().deploy() }}
             {...noCallout}
           >
-            {empty ? `${pending.type.toUpperCase()} IS EMPTY` : here && !working ? 'PLACED HERE' : working ? (note ? `${note.toUpperCase()}…` : 'HIDING…') : intoChest ? 'PUT IN CHEST' : moving ? (route === 'cloud' ? 'MOVE VIA HOSAKA' : live || movedPublished ? 'MOVE & PUBLISH' : 'MOVE (LOCAL)') : route === 'cloud' ? 'HIDE VIA HOSAKA' : live ? 'HIDE & PUBLISH' : 'HIDE (LOCAL)'}
+            {placing ? (door ? 'PLACE DOOR ▸' : 'PLACE CHEST ▸') : empty ? `${pending.type.toUpperCase()} IS EMPTY` : here && !working ? 'PLACED HERE' : working ? (note ? `${note.toUpperCase()}…` : 'HIDING…') : intoChest ? 'PUT IN CHEST' : moving ? (route === 'cloud' ? 'MOVE VIA HOSAKA' : live || movedPublished ? 'MOVE & PUBLISH' : 'MOVE (LOCAL)') : route === 'cloud' ? 'HIDE VIA HOSAKA' : live ? 'HIDE & PUBLISH' : 'HIDE (LOCAL)'}
           </button>
         )}
         {/* Once hiding, it finishes where it was placed: CANCEL would only pretend. */}
@@ -382,6 +408,15 @@ export function DeployBar({ pad = false }: { pad?: boolean }): JSX.Element | nul
       </div>
 
       {error && <div className="deploybar__row notice">{error}</div>}
+      {/* 4.3: the icon, the door's name, and an X that leaves this one placement out (R2). */}
+      {sealing && (
+        <div className="deploybar__doorchip" role="status" title="Sealed to this door: only whoever opens it finds this">
+          <DoorClosedLocked size={13} strokeWidth={2.25} aria-hidden />
+          <span className="deploybar__doorchip-name">{sealing.name}</span>
+          {/* A door moving stays in the bag that holds it (R7): nothing to leave out of. */}
+          {!(door && moving) && <button className="deploybar__doorchip-x" aria-label="Leave this one out of the door" title="Leave this one out: it goes in the place's ordinary bag" onClick={() => useShards.getState().setDeployLeaveOut(roomOf(sealing.at, sealing.plane, sealing.height))} {...noCallout}>×</button>}
+        </div>
+      )}
       {/* Comments answer the bag, which is the region at its height: a move
           out of it leaves them behind (reactions name the shard and follow). */}
       {moving && movedRegion !== null && region !== movedRegion && (
@@ -412,21 +447,21 @@ export function DeployBar({ pad = false }: { pad?: boolean }): JSX.Element | nul
       </DeployRow>
 
       {/* What a chest wears (D2, D3): a built-in or OTHER, from MINE or FEED. */}
-      {pending.type === 'chest' && look && <LookRow choices={CHEST_LOOKS} look={look} refusal={lookRefusal} />}
+      {pending.type === 'chest' && look && <LookRow choices={door ? DOOR_LOOKS : CHEST_LOOKS} look={look} refusal={lookRefusal} />}
 
       {/* Both steppers read the store inside the press rather than the value
           this render closed over: `bind` repeats the very same callback while
           the button is held, so a captured `height` would set the same number
           again and again and a held button would move exactly one step. */}
-      {/* The height is the chest's, not a content's: an aim has none to show. */}
-      {!intoChest && (
+      {/* The height is the chest's, not a content's: an aim has none to show. A door keeps its own when it moves (R7). */}
+      {!intoChest && !(door && moving) && (
         <DeployRow
           kind="height"
           label="HIDE AT HEIGHT"
           hintTitle={heightTip}
           hint={`${height === 0 ? 'this exact gibson' : `found within ${formatCellSize(height)}`}${fit.auto && fit.height !== null && fit.cause === 'contents' && height > 0 ? ' · raised to hold what is inside' : ''}`}
         >
-          <button className="deploybar__btn" {...bind(() => { useShards.setState({ deployHeightAuto: false }); useShards.getState().setDeployHeight(useShards.getState().deployHeight - 1) })} disabled={height <= 0} aria-label="Lower height">−</button>
+          <button className="deploybar__btn" {...bind(() => { useShards.setState({ deployHeightAuto: false }); useShards.getState().setDeployHeight(useShards.getState().deployHeight - 1) })} disabled={height <= (door ? 1 : 0)} aria-label="Lower height">−</button>
           <span className="deploybar__value">{height}</span>
           <button className="deploybar__btn" {...bind(() => { useShards.setState({ deployHeightAuto: false }); useShards.getState().setDeployHeight(useShards.getState().deployHeight + 1) })} disabled={height >= ceiling} aria-label="Higher height">+</button>
           {/* Why an automatic height rose is a tooltip only (arkinox, 2026-10-08),
@@ -434,6 +469,17 @@ export function DeployBar({ pad = false }: { pad?: boolean }): JSX.Element | nul
               a few words in the note (arkinox, 2026-10-10). */}
         </DeployRow>
       )}
+      {/* A door's own room (R6, §3.7.1): its height, at most the height it is
+          hidden at. Lower, inside a room of yours at that room's height, it is
+          a door behind that door. */}
+      {door && !moving && (
+        <DeployRow kind="roomheight" label="ROOM HEIGHT" hint={`locks ${formatCellSize(doorHeight)}`}>
+          <button className="deploybar__btn" {...bind(() => { const s = useShards.getState(); s.setDeployDoorHeight(Math.max(1, effectiveDoorHeight(s.deployDoorHeight, s.deployHeight) - 1)) })} disabled={doorHeight <= 1} aria-label="Lower room height">−</button>
+          <span className="deploybar__value">{doorHeight}</span>
+          <button className="deploybar__btn" {...bind(() => { const s = useShards.getState(); const next = effectiveDoorHeight(s.deployDoorHeight, s.deployHeight) + 1; s.setDeployDoorHeight(next >= s.deployHeight ? null : next) })} disabled={doorHeight >= height} aria-label="Higher room height">+</button>
+        </DeployRow>
+      )}
+
       {!intoChest && fit.auto && fit.height === null && (
         <div className="deploybar__row deploybar__fitnote">{fit.cause === 'edge'
           ? 'Sits across a region edge; move it to fit.'
@@ -567,7 +613,8 @@ export function DeployBar({ pad = false }: { pad?: boolean }): JSX.Element | nul
           tight"): how aiming works is in the Builder's EXPLAIN, and how far
           away it can be found is on the height row itself. */}
 
-      <HeightWarnings height={height} intoChest={intoChest} localMax={inputs.localMax} />
+      {/* Behind a door the height says nothing about who can find it: the door does. */}
+      <HeightWarnings height={height} intoChest={intoChest || !!sealing} localMax={inputs.localMax} />
 
       {/* What HOSAKA's key costs, its time and price, and whether the mode
           will ask first. This machine's time is the button's tooltip. An aim
@@ -580,7 +627,8 @@ export function DeployBar({ pad = false }: { pad?: boolean }): JSX.Element | nul
         </div>
       )}
 
-      {!intoChest && <BagControls height={height} bag={bag} existing={existing?.count ?? 0} cashu={(pending.type === 'message' && findCashuToken(pending.text) !== null) || (existing?.cashu ?? false)} />}
+      {/* A room bag says nothing in public: no settings to choose (§3.7.2). */}
+      {!intoChest && !sealing && <BagControls height={height} bag={bag} existing={existing?.count ?? 0} cashu={(pending.type === 'message' && findCashuToken(pending.text) !== null) || (existing?.cashu ?? false)} />}
       </div>
 
     </div>

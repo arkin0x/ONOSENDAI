@@ -19,6 +19,7 @@
  * The confirmation says it cannot be taken back.
  */
 
+import { takeIntoKeeping, you } from '../lib/carried'
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import { ConfirmModal } from './ConfirmModal'
 import { useItemFeed } from '../store/useItemFeed'
@@ -211,7 +212,7 @@ export function takenAudioModeration(item: Pick<HeldItem, 'id' | 'author' | 'ver
  * (arkinox, 2026-10-11). The X clears a row off the list; a coin has it
  * only once redeemed, since a cleared coin's card is out of reach.
  */
-function TakenRow({ item }: { item: HeldItem }): JSX.Element {
+export function TakenRow({ item }: { item: HeldItem }): JSX.Element {
   const [open, setOpen] = useState(false)
   const [details, setDetails] = useState(false)
   const me = useCyberspace((s) => s.identity.pubkey)
@@ -222,7 +223,8 @@ function TakenRow({ item }: { item: HeldItem }): JSX.Element {
   const label = coin ? (token ? cashuLabel(token) : 'cashu token') : item.name
   const moveToWorkshop = (): void => {
     if (!item.shard || moved) return
-    useWorkshop.getState().importShard(item.shard)
+    // Its carried parts keyed under you, so your copy keeps them when you hide it (R15).
+    useWorkshop.getState().importShard(takeIntoKeeping(item.shard, you()))
     setMoved(true)
     // Held by the store, not this row: the row leaves the list even when the menu closes first.
     window.setTimeout(() => useInventory.getState().clearTaken([item.id]), MOVED_NOTICE_MS)

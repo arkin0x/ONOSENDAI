@@ -39,7 +39,7 @@ import { deployPoint, itemCentre, type ViewAxes } from '../lib/space'
 import { buildPlane, buildStepOf } from '../lib/buildCursor'
 import { bearingOf, csDirection, frameOf, placedPose, snapOffered, type V3 } from '../lib/pose'
 import { alignedOrigin, useCyberspace } from '../store/useCyberspace'
-import { lookModelOf, useShards } from '../store/useShards'
+import { lookModelOf, sealingDoor, useShards } from '../store/useShards'
 import { messagePreview } from '../lib/hidden'
 import { ShardMesh } from './ShardMesh'
 import { regionBox } from '../lib/clip'
@@ -101,7 +101,10 @@ export function ShardGhost({ axes }: Props): JSX.Element | null {
   // from the stores each frame like the cursor cube, not from a React commit.
   const landingAt = (): [number, number, number] => {
     const st = useCyberspace.getState()
-    const p = deployPoint(st.cursor, buildStepOf(st), useShards.getState().deployHeight)
+    // A chest placed first (R18) stays where PLACE CHEST put it while its modal is filled.
+    const pd = useShards.getState().pending
+    const spot = pd?.type === 'chest' ? pd.spot : undefined
+    const p = spot?.at ?? deployPoint(st.cursor, buildStepOf(st), useShards.getState().deployHeight)
     return itemCentre(p, alignedOrigin(st.anchor, st.scaleExp), st.scaleExp, axes)
   }
 
@@ -125,6 +128,11 @@ export function ShardGhost({ axes }: Props): JSX.Element | null {
   })
 
 
+  // The door's name under what is sealed to it (4.3); its X is on the bar's chip.
+  const me = useCyberspace((s) => s.identity.pubkey)
+  const sealing = useShards((s) => (s.pending ? sealingDoor(s, me, (s.pending.type === 'chest' && s.pending.spot?.at) || at, plane, deployHeight)?.name ?? null : null))
+  const sealed = sealing !== null && <WorldLabel text={sealing} color="#ff3b4e" follow={landingAt} align="center" px={11} />
+
   // A message ghosts as a dim note that follows the cursor; a key, a chest
   // and hidden audio ghost as their mark and name, the way the world draws
   // them once hidden.
@@ -133,6 +141,7 @@ export function ShardGhost({ axes }: Props): JSX.Element | null {
       <>
       {/* Hidden audio's sphere: full volume inside, a one-shot's trigger zone (AudioSphereGhost). */}
       {pending.type === 'audio' && <AudioSphereGhost landingAt={landingAt} />}
+      {sealed}
       <WorldLabel
         text={pending.type === 'message' ? messagePreview(pending.text, 40) : pending.type === 'key' ? `⚷ ${pending.key.name}` : pending.type === 'audio' ? `AUDIO · ${pending.audio.title}` : `▣ ${pending.name}`}
         color="#ffd27d"
@@ -152,7 +161,8 @@ export function ShardGhost({ axes }: Props): JSX.Element | null {
       <group ref={group}>
         <ShardMesh shard={shard} scale={scale} ghost headlamp clip={clip} pose={pose} />
       </group>
-      {pending.type === 'chest' && <WorldLabel text={`▣ ${pending.name}`} color="#ffd27d" follow={landingAt} align="center" px={13} opacity={0.5} />}
+      {sealed}
+      {pending.type === 'chest' && pending.name && <WorldLabel text={`▣ ${pending.name}`} color="#ffd27d" follow={landingAt} align="center" px={13} opacity={0.5} />}
     </>
   )
 }

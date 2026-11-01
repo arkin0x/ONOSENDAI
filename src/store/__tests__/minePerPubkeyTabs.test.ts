@@ -12,6 +12,8 @@ const handlers = vi.hoisted(() => {
   const g = globalThis as Record<string, unknown>
   if (typeof g.localStorage === 'undefined') {
     g.localStorage = {
+      get length() { return mem.size },
+      key: (i: number) => [...mem.keys()][i] ?? null,
       getItem: (k: string) => mem.get(k) ?? null,
       setItem: (k: string, v: string) => { mem.set(k, String(v)) },
       removeItem: (k: string) => { mem.delete(k) },
@@ -55,9 +57,9 @@ describe('another tab', () => {
     expect(useShards.getState().mine.map((d) => d.eventId)).toEqual(['claimed'])
   })
 
-  it('ignores another identity\'s list and any other key', () => {
+  it('never lists another identity\'s list', () => {
     const me = useCyberspace.getState().identity.pubkey
-    useShards.setState({ mine: [row('mine', me)] })
+    localStorage.setItem(`onosendai:deployments:${me}`, JSON.stringify([row('mine', me)]))
     localStorage.setItem(`onosendai:deployments:${'b2'.repeat(32)}`, JSON.stringify([row('theirs', 'b2'.repeat(32))]))
     fire(`onosendai:deployments:${'b2'.repeat(32)}`)
     fire('onosendai:seen')

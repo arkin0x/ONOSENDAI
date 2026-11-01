@@ -1840,6 +1840,15 @@ kbd {
 }
 .secret__look-name { margin: 0 0 8px; font-size: 15px; font-weight: 600; letter-spacing: 0.04em; color: var(--fg); text-align: center; overflow-wrap: anywhere; }
 .secret__spin--look { width: 100%; }
+/* A door of yours on its card: what is behind it, and what could be (DoorOwner). */
+.doorowner { display: flex; flex-direction: column; gap: 6px; margin-bottom: 14px; }
+.doorowner__count { color: var(--fg); }
+/* The door-name chip on the hide bar (4.3): the door what you place is sealed to, with its X. */
+.deploybar__doorchip { display: flex; align-items: center; gap: 6px; padding: 4px 8px; border: 1px solid #ff3b4e; border-radius: 3px; color: #ff8a95; font-size: 11px; }
+.deploybar__doorchip-name { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* Four models on a phone-narrow bar: they wrap rather than clip. */
+.deploybar__row--model .deploybar__choices { flex-wrap: wrap; }
+.deploybar__doorchip-x { background: none; border: 0; color: inherit; cursor: pointer; font: inherit; padding: 0 4px; }
 .secret__shard-meta { font-size: 10px; letter-spacing: 0.06em; color: var(--dim); }
 /* LOCAL or LIVE for the one who hid it, under the preview (PublishSwitch
    PublishRow; arkinox, 2026-10-29: "the owner should see it more

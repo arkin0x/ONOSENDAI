@@ -85,7 +85,7 @@ interface StashModals {
   key: boolean
   /** The chest modal for the chest just placed (SEAL A CHEST, then PLACE CHEST: useShards placeChest). */
   chest: boolean
-  /** The chest modal on a chest of yours already hidden: EDIT (its name and lock too) or ADD (its contents). */
+  /** The chest or door modal on one of yours already hidden: EDIT (its name and lock too) or ADD (a chest's contents). */
   chestEdit: { eventId: string; fields: boolean } | null
   /** SAVE on a chest of yours is running: the modal stays, so what it answers can be read. */
   chestSaving: boolean

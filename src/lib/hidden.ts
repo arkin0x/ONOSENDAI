@@ -254,6 +254,8 @@ export interface ChestItem {
    * reads them. Absent: it wears the built-in.
    */
   look?: string[][]
+  /** A door's height, from its `door` tag (DECK-0004 §3.7.1). Absent on a chest. */
+  door?: number
 }
 
 const HEX_64 = /^[0-9a-f]{64}$/
@@ -331,7 +333,8 @@ export function chestItemOf(ev: Pick<NostrEvent, 'kind' | 'content' | 'tags'>): 
   // A door whose `door` tag lacks a well-formed height is dropped, never read as a chest (DECK-0004 §3.7.1).
   if (doorHeightOf(ev.tags) === 'malformed') return null
   const look = ev.tags.filter((t) => Array.isArray(t) && t[0] === 'look' && typeof t[1] === 'string')
-  return { name: nameOf(ev.tags, 'chest'), lockPubkey: lock[1], senderPubkey: lock[2], requires: capped(ev.tags, 'requires', MAX_ITEM_NAME), payload: ev.content, ...(look.length ? { look } : {}) }
+  const door = doorHeightOf(ev.tags)
+  return { name: nameOf(ev.tags, 'chest'), lockPubkey: lock[1], senderPubkey: lock[2], requires: capped(ev.tags, 'requires', MAX_ITEM_NAME), payload: ev.content, ...(look.length ? { look } : {}), ...(typeof door === 'number' ? { door } : {}) }
 }
 
 /** What an inline item is, by its kind: the part of a Hidden that is not about where or who. */
@@ -470,6 +473,11 @@ export interface Hidden {
    * and the room key, and its `height` the room's.
    */
   room?: { doorId: string }
+  /**
+   * When the bag it was read from was written: what says a bag read now is newer
+   * than something this device thinks is in it (useShards pruneGoneDoors).
+   */
+  bagAt?: number
 }
 
 /**
@@ -598,8 +606,8 @@ export function keyInnerTemplate(key: KeyItem, at: Position, plane: Plane, creat
  * The content is the sealed payload (lib/chests.ts sealEntries); `lock` names
  * the public key it is sealed to and the one-time sender's public key, and
  * `requires` is the hider's label of what opens it, and `look` what it is
- * drawn as, closed and open (DECK-0004 §3.6), carried as read. `-` is
- * NIP-70, as on every item. A chest stays signed: its signature is what vouches for the
+ * drawn as, closed and open (DECK-0004 §3.6), carried as read. On a door,
+ * `door` gives its height (§3.7.1). `-` is NIP-70, as on every item. A chest stays signed: its signature is what vouches for the
  * messages sealed inside it, which are rumors (lib/chests.ts readContents).
  */
 export function chestInnerTemplate(chest: ChestItem, at: Position, plane: Plane, createdAt: number): EventTemplate {
@@ -607,7 +615,7 @@ export function chestInnerTemplate(chest: ChestItem, at: Position, plane: Plane,
     kind: CHEST_KIND,
     created_at: createdAt,
     content: chest.payload,
-    tags: [['C', positionHex(at, plane)], ['title', chest.name.slice(0, MAX_ITEM_NAME)], ['lock', chest.lockPubkey, chest.senderPubkey], ['requires', chest.requires], ...(chest.look ?? []).map((t) => [...t]), [...PROTECTED_TAG]],
+    tags: [['C', positionHex(at, plane)], ['title', chest.name.slice(0, MAX_ITEM_NAME)], ['lock', chest.lockPubkey, chest.senderPubkey], ['requires', chest.requires], ...(chest.look ?? []).map((t) => [...t]), ...(chest.door !== undefined ? [['door', String(chest.door)]] : []), [...PROTECTED_TAG]],
   }
 }
 
@@ -954,6 +962,7 @@ function fromInner(inner: Rumor, outer: NostrEvent, keyHex: string, facts: BagFa
     inner,
     keyHex,
     bagId: outer.id,
+    bagAt: outer.created_at,
     lookupId: tag(outer, 'd') ?? '',
     author: outer.pubkey,
     at: { x, y, z },

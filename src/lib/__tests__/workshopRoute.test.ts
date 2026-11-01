@@ -33,7 +33,7 @@ function page(pathname: string, search = '', hash = '') {
 
 beforeEach(() => {
   useShardFolders.setState({ tree: EMPTY_TREE, storage: 'loading' })
-  useWorkshop.setState({ shards: [], currentId: null, open: false, selection: [], partSel: [], selectedFace: null, facePick: [], past: [], future: [], aim: null, notice: null })
+  useWorkshop.setState({ shards: [], currentId: null, open: false, selection: [], partSel: [], selectedFaces: [], facePick: [], past: [], future: [], aim: null, notice: null })
 })
 
 describe('isWorkshopPath', () => {

@@ -35,7 +35,7 @@ const square = (): void => {
 
 describe('winding in the workshop', () => {
   beforeEach(() => {
-    useWorkshop.setState({ shards: [], currentId: null, selection: [], selectedFace: null, facePick: [], palette: [...DEFAULT_PALETTE], level: 0, color: [0, 0.9, 1], past: [], future: [], aim: null, notice: null, tool: 'stamp', stampKind: 'block', stampSize: 1, stampFacing: 0 })
+    useWorkshop.setState({ shards: [], currentId: null, selection: [], selectedFaces: [], facePick: [], palette: [...DEFAULT_PALETTE], level: 0, color: [0, 0.9, 1], past: [], future: [], aim: null, notice: null, tool: 'stamp', stampKind: 'block', stampSize: 1, stampFacing: 0 })
     w().create('t')
   })
 

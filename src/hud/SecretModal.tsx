@@ -46,7 +46,7 @@ import { MessageText } from './CashuCard'
 import { ChestBlock, KeyLine } from './ItemRows'
 import { ConfirmModal } from './ConfirmModal'
 import { ItemFace } from './ItemIcon'
-import { ShardSpin } from '../scene/ShardSpin'
+import { CardSpin } from '../scene/CardSpin'
 import { drawnLook, lookOf } from '../lib/looks'
 import { openedByHand, useOpenedChests } from '../store/useOpenedChests'
 import { EventData } from './EventData'
@@ -183,7 +183,7 @@ export function SecretModal(): JSX.Element | null {
           // turning (chest and door design, 4.7), then what opens it.
           <>
             <h3 className="secret__look-name">{item.chest.name}</h3>
-            {look && <div className="secret__spin secret__spin--look"><ShardSpin shard={drawnLook(look, openedByHand(me, item.key, item.chest.lockPubkey)) ?? look.closed} size={180} wide /></div>}
+            {look && <div className="secret__spin secret__spin--look"><CardSpin shard={drawnLook(look, openedByHand(me, item.key, item.chest.lockPubkey)) ?? look.closed} size={180} wide /></div>}
             <div className="secret__shard"><ChestBlock id={item.key} chest={item.chest} author={author} verified place={place} named={false} /></div>
           </>
         ) : item.type === 'audio' && item.audio ? (
@@ -206,7 +206,7 @@ export function SecretModal(): JSX.Element | null {
         {/* The shard itself, turning, as the avatar card shows one (arkinox,
             2026-10-13): what you tapped, seen whole, before who left it. */}
         {item.type === 'shard' && item.shard && (
-          <div className="secret__spin"><ShardSpin shard={item.shard} /></div>
+          <div className="secret__spin"><CardSpin shard={item.shard} /></div>
         )}
 
         {/* LOCAL or LIVE, under the preview, for the one who hid it alone

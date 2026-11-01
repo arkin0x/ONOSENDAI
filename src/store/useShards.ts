@@ -95,13 +95,9 @@ import { useInventory } from './useInventory'
 import { useShardFolders } from './useShardFolders'
 import { creditOf, useWorkshop } from './useWorkshop'
 import { deletionFilters, isDeleted, type Credit, type FeedObject } from 'sno-core/feed'
-<<<<<<< HEAD
 import { ROOM_BAG_SETTINGS, inRoom, newDoorSecret, roomDoorAt, roomEntries, roomKey, roomLookupId, roomOf, type OwnDoor } from '../lib/doors'
 import { doorSecret, keepDoorSecret } from './doorSecrets'
-import { builtInLook, builtInLookTags, doorHeightOf, isDoor, keptInChest, lookOf, lookTags, lookTagsOf, posedLook, posedOpenLook, posedWrapper, type LookName, type LookPose } from '../lib/looks'
-=======
-import { builtInLook, builtInLookTags, isDoor, keptInChest, lookOf, lookTags, lookTagsOf, posedLook, posedWrapper, wireLook, wireOpenLook, type LookName, type LookPose } from '../lib/looks'
->>>>>>> feat/door-reading
+import { builtInLook, builtInLookTags, doorHeightOf, isDoor, keptInChest, lookOf, lookTags, lookTagsOf, posedLook, posedWrapper, wireLook, wireOpenLook, type LookName, type LookPose } from '../lib/looks'
 import { useCeremony } from './useCeremony'
 import { useToast } from './useToast'
 import type { ShardModel } from 'sno-core/shards'
@@ -1486,10 +1482,11 @@ export const useShards = create<ShardsState>((set, get) => {
   /**
    * Whether a door of yours stands in this room that this device has no row for:
    * one sealed from another device and not scanned here yet. A second door here
-   * would choose a second secret, and a finder who opens either marks both opened
-   * under that one secret, so the other room is lost to them (§3.7.5). One read and
-   * one derivation per door sealed. It sees a door in the place's ordinary bag; one
-   * hidden inside another room, LOCAL, or past what can be derived here, it cannot.
+   * would choose a second secret, and §3.7.5 asks for one. A finder holding one key
+   * would see both doors open and reach only the room of the key they hold, until
+   * they hold the other (store/rooms openDoorNow). One read and one derivation per
+   * door sealed. It sees a door in the place's ordinary bag; one hidden inside another
+   * room, LOCAL, or past what can be derived here, it cannot.
    */
   async function unseenDoorHere(at: Position, plane: Plane, height: number): Promise<boolean> {
     const cs = cyber()

@@ -39,7 +39,7 @@ import { ROOM_BAG_SETTINGS, newDoorSecret, roomEntries, roomKey, roomLookupId } 
 import { regionKeyOffThread } from '../../lib/regionKeyOffThread'
 import type { Position } from '../../lib/space'
 import { mount, settled } from '../../test/elementRoot'
-import { resetDoorSecrets } from '../../store/rooms'
+import { doorSecretOnlySaid, resetDoorSecrets } from '../../store/rooms'
 import { useCyberspace } from '../../store/useCyberspace'
 import { useInventory } from '../../store/useInventory'
 import { openedByHand, resetOpenedChests } from '../../store/useOpenedChests'
@@ -54,7 +54,7 @@ const AT: Position = { x: (1n << 40n) + 0x35n, y: (1n << 39n) + 0x12n, z: (1n <<
 const T = 1_800_000_000
 const me = (): string => useCyberspace.getState().identity.pubkey
 
-async function door(): Promise<{ found: Hidden; room: NostrEvent }> {
+async function door(): Promise<{ lock: ReturnType<typeof forgeKey>; found: Hidden; room: NostrEvent }> {
   const lock = forgeKey('Silver Key')
   const held = finalizeEvent({ kind: 3340, created_at: T, content: '', tags: [] }, hider) as NostrEvent
   useInventory.getState().holdForged(held, lock, { lookupId: 'e'.repeat(64), bagId: 'f'.repeat(64), at: { x: '0', y: '0', z: '0' }, plane: 1, height: 3 })
@@ -66,7 +66,7 @@ async function door(): Promise<{ found: Hidden; room: NostrEvent }> {
   const bagKey = (await regionKeyOffThread(AT, 3, 20)).key
   const key = roomKey(bagKey, hexToBytes(secret))
   const room = finalizeEvent(await bagTemplate([rumorOf(messageInnerTemplate('behind it', AT, 1, T), event.pubkey)], key, roomLookupId(key), 3, T, HIDDEN_KIND, ROOM_BAG_SETTINGS), hider) as NostrEvent
-  return { room, found: { eventId: event.id, inner: event, keyHex: bytesToHex(bagKey), bagId: 'f'.repeat(64), lookupId: 'e'.repeat(64), author: event.pubkey, at: AT, plane: 1, height: 3, createdAt: T, type: 'chest', chest: chestItemOf(event)! } }
+  return { lock, room, found: { eventId: event.id, inner: event, keyHex: bytesToHex(bagKey), bagId: 'f'.repeat(64), lookupId: 'e'.repeat(64), author: event.pubkey, at: AT, plane: 1, height: 3, createdAt: T, type: 'chest', chest: chestItemOf(event)! } }
 }
 
 beforeEach(() => {
@@ -75,6 +75,7 @@ beforeEach(() => {
   relay.events = []
   relay.hold = false
   localStorage.removeItem('onosendai:door-secrets')
+  localStorage.removeItem('onosendai:door-secrets-only-said')
   localStorage.removeItem('onosendai:chests-opened')
   resetDoorSecrets()
   resetOpenedChests()
@@ -125,6 +126,35 @@ describe('OPEN on a door', () => {
     await card.press(/^OPEN$/)
     await vi.waitFor(() => expect(useToast.getState().toast?.label).toBe('THE ROOM COULD NOT BE RETRIEVED'))
     expect(openedByHand(me(), found.eventId, found.chest!.lockPubkey)).toBe(true)
+    await card.unmount()
+  })
+
+  it('two secrets at one height: the door opened only by the other gives its own OPEN once its key is held, and its room comes', async () => {
+    const a = await door()
+    const b = await door()
+    // Only a's key: door() holds the same event each time, so b's is not held yet.
+    useShards.setState({ discovered: { [a.found.eventId]: a.found, [b.found.eventId]: b.found }, selectedSecret: a.found.eventId })
+    relay.events = [a.room]
+    const first = await mount(<SecretModal />)
+    await first.press(/^OPEN$/)
+    await settled()
+    await first.unmount()
+    // As §3.7.5 says it is open too, and with no key here there is nothing to press.
+    expect(openedByHand(me(), b.found.eventId, b.found.chest!.lockPubkey)).toBe(true)
+    expect(doorSecretOnlySaid(me(), b.found.eventId)).toBe(true)
+    useShards.setState({ selectedSecret: b.found.eventId })
+    const shut = await mount(<SecretModal />)
+    expect(shut.buttons(/^OPEN$/)).toEqual([])
+    await shut.unmount()
+    // Its key comes.
+    const held = finalizeEvent({ kind: 3340, created_at: T, content: b.lock.itemPubkey, tags: [] }, hider) as NostrEvent
+    useInventory.getState().holdForged(held, b.lock, { lookupId: 'e'.repeat(64), bagId: 'f'.repeat(64), at: { x: '0', y: '0', z: '0' }, plane: 1, height: 3 })
+    relay.events = [b.room]
+    const card = await mount(<SecretModal />)
+    await card.press(/^OPEN$/)
+    await vi.waitFor(() => expect(Object.values(useShards.getState().discovered).some((h) => h.room?.doorId === b.found.eventId)).toBe(true))
+    expect(doorSecretOnlySaid(me(), b.found.eventId)).toBe(false)
+    expect(doorSecretOnlySaid(me(), a.found.eventId)).toBe(false)
     await card.unmount()
   })
 })

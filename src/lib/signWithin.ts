@@ -20,6 +20,23 @@ export class SignerTimeout extends Error {
   }
 }
 
+/**
+ * How long a signer's handshake gets. Longer than one signature: an extension
+ * may be waiting on someone to unlock it or to approve this site.
+ */
+export const HANDSHAKE_PATIENCE_MS = 60_000
+
+/** A handshake's answer, or a SignerTimeout once `ms` has passed. */
+export async function handshakeWithin<T>(handshake: Promise<T>, ms: number = HANDSHAKE_PATIENCE_MS): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined
+  const late = new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new SignerTimeout()), ms) })
+  try {
+    return await Promise.race([handshake, late])
+  } finally {
+    clearTimeout(timer)
+  }
+}
+
 /** The signature, or a SignerTimeout once SIGN_PATIENCE_MS has passed. */
 export async function signWithin(signer: { signEvent: (template: EventTemplate) => Promise<NostrEvent> }, template: EventTemplate, ms: number = SIGN_PATIENCE_MS): Promise<NostrEvent> {
   let timer: ReturnType<typeof setTimeout> | undefined

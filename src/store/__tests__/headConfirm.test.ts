@@ -72,7 +72,7 @@ beforeEach(async () => {
   relay.onAsk = null
   await placeSpawn()
   S().clearFocus()
-  useCyberspace.setState({ proof: { ...S().proof, status: 'idle', message: null }, transit: null, pendingTarget: null, chainConflict: null })
+  useCyberspace.setState({ proof: { ...S().proof, status: 'idle', message: null }, transit: null, pendingTarget: null, chainConflict: null, plan: null })
   vi.useFakeTimers({ toFake: ['Date'] })
   pastWindow()
 })
@@ -212,6 +212,22 @@ describe('a move is signed only from a head the relays confirm', () => {
       S().resumePlan()
       expect(posted).toHaveLength(before + 1)
       expect(S().proof.status).toBe('computing')
+    })
+
+    it('RESUME replans a paused step when another device moved meanwhile, and never proves the old position (review of #581)', async () => {
+      S().moveCursor(moveDirection(S().axes(), 'right'))
+      await S().commit()
+      onRoute()
+      const planned0 = S().plan as unknown as { target: { x: bigint; y: bigint; z: bigint } }
+      await S().applyProofMessage({ type: 'error', id: posted[posted.length - 1].id, message: PROOF_WORKER_FAILED_MESSAGE, elapsedMs: 1 })
+      const standing = S().position
+      const moved = { ...planned0.target, x: planned0.target.x + 3n }
+      useCyberspace.setState({ position: moved })
+      const before = posted.length
+      S().resumePlan()
+      expect(posted).toHaveLength(before + 1)
+      expect((posted[posted.length - 1] as unknown as { from: unknown }).from).toEqual(moved)
+      useCyberspace.setState({ position: standing })
     })
 
     it('says RELOAD on a tab an update left behind', async () => {

@@ -457,6 +457,9 @@ export function saveSignerPref(pref: SignerPref): void {
 export function deferredReconnect(pref: SignerPref, onReady: (s: Signer) => void): Signer {
   let live: Signer | null = null
   let attempt: { done: Promise<Signer>; at: number } | null = null
+  // Whichever attempt answers first answers everyone, those waiting on an older one too.
+  let announce: (s: Signer) => void = () => {}
+  const arrived = new Promise<Signer>((resolve) => { announce = resolve })
   const ensure = (restart = true): Promise<Signer> => {
     if (live) return Promise.resolve(live)
     // A failed reconnect is not kept: the next signature tries again. Kept,
@@ -469,12 +472,16 @@ export function deferredReconnect(pref: SignerPref, onReady: (s: Signer) => void
     // something that wants a signature replaces one past the limit. A wake
     // does not, or every return to the tab would stack another prompt.
     if (!attempt || (restart && Date.now() - attempt.at >= HANDSHAKE_PATIENCE_MS)) {
-      const done = signerFromPref(pref).then((s) => { live ??= s; onReady(s); return live })
+      const done = signerFromPref(pref).then((s) => {
+        if (!live) { live = s; announce(s) }
+        onReady(s)
+        return live
+      })
       const mine = { done, at: Date.now() }
       attempt = mine
       done.catch(() => { if (attempt === mine) attempt = null })
     }
-    return handshakeWithin(attempt.done)
+    return handshakeWithin(Promise.race([attempt.done, arrived]))
   }
   return {
     kind: pref.kind,

@@ -97,6 +97,34 @@ describe('deferredReconnect with an extension (arkinox, 2026-10-13)', () => {
     expect(asked).toBe(1)
   })
 
+  it('two attempts: the first to answer stays the signer, the other is handed on, and an old waiter hears it (review of #581)', async () => {
+    const { HANDSHAKE_PATIENCE_MS } = await import('../signWithin')
+    const approvals: Array<(pk: string) => void> = []
+    win.window = { nostr: { ...extension(sk), getPublicKey: () => new Promise<string>((r) => { approvals.push(r) }) } }
+    const ready: unknown[] = []
+    const signer = await deferredReconnect({ kind: 'nip07', pubkey }, (s) => ready.push(s))
+    vi.useFakeTimers()
+    try {
+      const first = expect(signer.signEvent(template)).rejects.toThrow('did not answer')
+      await vi.advanceTimersByTimeAsync(NIP07_POLL_GRACE + HANDSHAKE_PATIENCE_MS)
+      await first
+      const wake = signer.reconnect!()
+      const second = signer.signEvent(template)
+      await vi.advanceTimersByTimeAsync(0)
+      expect(approvals).toHaveLength(2)
+      approvals[1](pubkey)
+      await vi.advanceTimersByTimeAsync(0)
+      expect(await wake).toBe(ready[0])
+      expect((await second).pubkey).toBe(pubkey)
+      approvals[0](pubkey)
+      await vi.advanceTimersByTimeAsync(0)
+      expect(ready).toHaveLength(2)
+      expect(await signer.reconnect!()).toBe(ready[0])
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   it('refuses an extension now on another account', async () => {
     win.window = { nostr: extension(generateSecretKey()) }
     const signer = await deferredReconnect({ kind: 'nip07', pubkey }, () => {})

@@ -4035,6 +4035,14 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
       void get().finishProof(msg)
       return
     }
+    // A step paused with no proof was planned from where the chain stood then.
+    // Another device or tab may have moved it since: computed as planned, it
+    // would name the new head and the old position, which no reader verifies
+    // (review of #581). finishProof cannot see that, since the head matches.
+    if (plan.step.source === 'local' && !samePosition(plan.step.from, get().position)) {
+      headMovedUnder(false)
+      return
+    }
     set({ plan: { ...plan, status: 'running', message: null } })
     startPlanStep()
   },

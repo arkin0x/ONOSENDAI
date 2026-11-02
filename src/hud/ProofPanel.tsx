@@ -343,7 +343,7 @@ const CLOUD_STAGE: Record<string, string> = {
 /** The running route: where it is, what it is doing, and the two buttons. */
 function RouteView({ plan, proof, cloud, onResume, onCancel }: {
   plan: MovePlan
-  proof: { progress: number; elapsedMs: number }
+  proof: { progress: number; elapsedMs: number; message: string | null }
   cloud: CloudState
   onResume: () => void
   onCancel: () => void
@@ -363,6 +363,8 @@ function RouteView({ plan, proof, cloud, onResume, onCancel }: {
         ? 'failed'
         : plan.status === 'funding'
           ? CLOUD_STAGE[cloud.status] ?? 'quoting the route'
+          : proof.message
+            ? proof.message
           : step.source === 'cloud'
             ? `${CLOUD_STAGE[cloud.status] ?? cloud.status}${cloud.progress !== null ? ` ${Math.round(cloud.progress * 100)}%` : ''}`
             : `${step.kind === 'sidestep' ? 'hashing' : 'computing'} ${Math.round(proof.progress * 100)}%`

@@ -25,7 +25,7 @@ import { DEFAULT_SIGNER_RELAY, normalizeSignerRelay, signerRelays } from './logi
 export { BACKUP_SIGNER_RELAY, DEFAULT_SIGNER_RELAY, loginCredentialKind, normalizeSignerRelay, signerRelays } from './loginCredentials'
 
 export type SignerKind = 'local' | 'nip07' | 'nip46'
-import { handshakeWithin } from './signWithin'
+import { HANDSHAKE_PATIENCE_MS, handshakeWithin } from './signWithin'
 export { SIGN_PATIENCE_MS, HANDSHAKE_PATIENCE_MS, SignerTimeout, signWithin, handshakeWithin } from './signWithin'
 
 export interface Signer {
@@ -455,19 +455,26 @@ export function saveSignerPref(pref: SignerPref): void {
  * memoised, and hands the live signer to onReady so the store can swap it in.
  */
 export function deferredReconnect(pref: SignerPref, onReady: (s: Signer) => void): Signer {
-  let pending: Promise<Signer> | null = null
-  const ensure = (): Promise<Signer> => {
+  let live: Signer | null = null
+  let attempt: { done: Promise<Signer>; at: number } | null = null
+  const ensure = (restart = true): Promise<Signer> => {
+    if (live) return Promise.resolve(live)
     // A failed reconnect is not kept: the next signature tries again. Kept,
     // one early failure (an extension not injected yet, a bunker relay
-    // down) refused every signature until the page was reloaded. A handshake
-    // that never answers is one too, so it has a limit: without it, every
-    // later signature waited on it (arkinox, 2026-11-01).
-    if (!pending) {
-      const attempt = handshakeWithin(signerFromPref(pref)).then((s) => { onReady(s); return s })
-      pending = attempt
-      attempt.catch(() => { if (pending === attempt) pending = null })
+    // down) refused every signature until the page was reloaded.
+    //
+    // A handshake that never answers must not hold anyone either (arkinox,
+    // 2026-11-01), so the limit is on each wait and not on the handshake: a
+    // bunker can answer minutes later, and that answer is still taken. Only
+    // something that wants a signature replaces one past the limit. A wake
+    // does not, or every return to the tab would stack another prompt.
+    if (!attempt || (restart && Date.now() - attempt.at >= HANDSHAKE_PATIENCE_MS)) {
+      const done = signerFromPref(pref).then((s) => { live ??= s; onReady(s); return live })
+      const mine = { done, at: Date.now() }
+      attempt = mine
+      done.catch(() => { if (attempt === mine) attempt = null })
     }
-    return pending
+    return handshakeWithin(attempt.done)
   }
   return {
     kind: pref.kind,
@@ -491,7 +498,7 @@ export function deferredReconnect(pref: SignerPref, onReady: (s: Signer) => void
       return s.nip04Encrypt(pk, pt)
     }),
     heldPubkey: () => ensure().then((s) => (s.heldPubkey ? s.heldPubkey() : s.pubkey)),
-    reconnect: ensure,
+    reconnect: () => ensure(false),
   }
 }
 

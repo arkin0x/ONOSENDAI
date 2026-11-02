@@ -93,8 +93,72 @@ describe('the proof worker', () => {
     expect(FakeWorker.made).toHaveLength(1)
     vi.advanceTimersByTime(1)
     expect(FakeWorker.made).toHaveLength(2)
+    // A slow link gets longer the second time: the same limit would kill the same fetch.
     vi.advanceTimersByTime(w.PROOF_START_MS)
+    expect(heard).toEqual([])
+    vi.advanceTimersByTime(w.PROOF_RETRY_START_MS - w.PROOF_START_MS)
     expect(heard).toEqual([expect.objectContaining({ type: 'error', id: 1 })])
+  })
+
+  it('does not kill a healthy proof when a frozen tab thaws: a late timer gives it time to speak', () => {
+    w.postProof(request(1))
+    latest().say({ type: 'started', id: 1 })
+    const worker = latest()
+    // The tab sleeps for an hour: the clock moves, and the timer only runs on waking.
+    vi.setSystemTime(Date.now() + 60 * 60_000)
+    vi.advanceTimersByTime(w.PROOF_QUIET_MS)
+    expect(worker.terminated).toBe(false)
+    worker.say(done(1))
+    expect(heard.map((m) => m.type)).toEqual(['done'])
+  })
+
+  it('still ends a worker that stays silent after a thaw', () => {
+    w.postProof(request(1))
+    latest().say({ type: 'started', id: 1 })
+    vi.setSystemTime(Date.now() + 60 * 60_000)
+    vi.advanceTimersByTime(w.PROOF_QUIET_MS)
+    vi.advanceTimersByTime(w.PROOF_THAW_MS)
+    expect(heard).toEqual([expect.objectContaining({ type: 'error', id: 1 })])
+  })
+
+  it('does not judge a worker while the tab is hidden', () => {
+    vi.stubGlobal('document', { hidden: true })
+    w.postProof(request(1))
+    vi.advanceTimersByTime(w.PROOF_START_MS + w.PROOF_THAW_MS * 3)
+    expect(FakeWorker.made).toHaveLength(1)
+    vi.stubGlobal('document', { hidden: false })
+    latest().say(done(1))
+    expect(heard.map((m) => m.type)).toEqual(['done'])
+  })
+
+  it('gives a replaced worker no say: no second answer, and no ending the run after it', () => {
+    w.postProof(request(1))
+    const first = latest()
+    first.fail()
+    const second = latest()
+    first.say(done(1))
+    first.fail('late error')
+    expect(heard).toEqual([])
+    expect(second.terminated).toBe(false)
+    second.say(done(1))
+    expect(heard.map((m) => m.type)).toEqual(['done'])
+  })
+
+  it('leaves an idle worker alone on a cancel: it holds code a deploy may have removed', () => {
+    w.postProof(request(1))
+    const worker = latest()
+    worker.say(done(1))
+    w.cancelProof()
+    expect(worker.terminated).toBe(false)
+    expect(FakeWorker.made).toHaveLength(1)
+  })
+
+  it('does not queue a move behind a run still out', () => {
+    w.postProof(request(1))
+    const first = latest()
+    w.postProof(request(2))
+    expect(first.terminated).toBe(true)
+    expect(latest().posted).toEqual([request(2)])
   })
 
   it('does not rerun a proof whose worker died after starting', () => {

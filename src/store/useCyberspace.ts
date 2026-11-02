@@ -48,7 +48,6 @@ import {
   type SignerKind,
   type NostrConnectSession,
   signWithin,
-  handshakeWithin,
 } from '../lib/signers'
 import {
   coordToXyz,
@@ -1637,7 +1636,7 @@ async function signEvent(template: EventTemplate, patienceMs?: number, signer: S
       // once more over fresh ones. Not a signer on another account (a
       // stand-in whose reconnect found one): asking again only asks it again.
       if (err instanceof SignerAccountMismatch || !signer.reconnect) throw err
-      const fresh = await handshakeWithin(signer.reconnect())
+      const fresh = await signer.reconnect()
       if (currentSigner === signer) currentSigner = fresh
       signed = await signWithin(fresh, template, patienceMs)
     }
@@ -1764,6 +1763,15 @@ export const HEAD_RETRYING_MESSAGE = "Can't confirm your latest move; retrying."
 export const CHECKING_RELAYS_MESSAGE = 'Checking the relays.'
 /** Said while a remote signer has a finished proof's event. */
 export const WAITING_SIGNER_MESSAGE = 'Waiting for your signer.'
+/**
+ * What the move button reads while a move is in hand: what it waits on, once
+ * the proof is done, or how far the proof has got.
+ */
+export function busyLabel(proof: { progress: number; message: string | null }): string {
+  if (proof.message === WAITING_SIGNER_MESSAGE) return 'SIGNER'
+  if (proof.message === CHECKING_RELAYS_MESSAGE || proof.message === HEAD_RETRYING_MESSAGE) return 'RELAYS'
+  return `${Math.round(proof.progress * 100)}%`
+}
 /** A worker could not run on a tab an update has left behind: its file may be gone from the server. */
 export const NEW_VERSION_RELOAD_MESSAGE = 'A new version of ONOSENDAI is out. RELOAD to move again.'
 /** Said when the relays still could not confirm it, and the move is refused. */
@@ -2213,6 +2221,8 @@ export function savedChainLoaded(): Promise<void> {
  * check cut the chain under it, and null otherwise.
  */
 async function signaturesChecked(pubkey: string): Promise<string | null> {
+  // What was being said goes back when this is done: a finished proof's look at the relays is still to come.
+  const before = useCyberspace.getState().proof.message
   const say = (): void => useCyberspace.setState({ proof: { ...useCyberspace.getState().proof, message: SIG_CHECK_MESSAGE } })
   const first = sigCheck?.pubkey === pubkey ? sigCheck : null
   if (first) say()
@@ -2224,7 +2234,7 @@ async function signaturesChecked(pubkey: string): Promise<string | null> {
   if (!check) return null
   if (!first) say()
   const cut = await check.done
-  if (useCyberspace.getState().proof.message === SIG_CHECK_MESSAGE) useCyberspace.setState({ proof: { ...useCyberspace.getState().proof, message: null } })
+  if (useCyberspace.getState().proof.message === SIG_CHECK_MESSAGE) useCyberspace.setState({ proof: { ...useCyberspace.getState().proof, message: before === SIG_CHECK_MESSAGE ? null : before } })
   return cut
 }
 
@@ -4132,10 +4142,13 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
 
     if (msg.type === 'error') {
       const { plan } = get()
-      const message = msg.message === PROOF_WORKER_FAILED_MESSAGE && useVersionGate.getState().verdict === 'hint' ? NEW_VERSION_RELOAD_MESSAGE : msg.message
+      // A worker that could not run says nothing about the move: a route is
+      // paused for RESUME, not failed, which would quote it all over again.
+      const noWorker = msg.message === PROOF_WORKER_FAILED_MESSAGE
+      const message = noWorker && useVersionGate.getState().verdict === 'hint' ? NEW_VERSION_RELOAD_MESSAGE : msg.message
       set({
         pendingTarget: null,
-        plan: plan ? { ...plan, status: 'failed', message, awaiting: null } : null,
+        plan: plan ? { ...plan, status: noWorker ? 'paused' : 'failed', message, awaiting: null } : null,
         proof: {
           ...IDLE_PROOF,
           status: 'infeasible',
@@ -4157,7 +4170,8 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
     // wait below (arkinox, 2026-11-01). The words say what it waits on now. A
     // WALK step goes without them, or the panel would jump at every step.
     const walking = isWalkProof(msg.id, msg.source)
-    set({ proof: { ...get().proof, progress: 1, message: walking ? get().proof.message : CHECKING_RELAYS_MESSAGE } })
+    // RESUME comes here from a paused route, so the status is said too.
+    set({ proof: { ...get().proof, status: 'computing', progress: 1, message: walking ? get().proof.message : CHECKING_RELAYS_MESSAGE } })
 
     // The chain as it stands now, not as it stood when the proof started:
     // relay events held back while it computed are folded first. What the
@@ -5263,10 +5277,11 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
    * it, so cancelling costs nothing but the invoice.
    */
   topUp: async (sats) => {
-    const { cloud, cloudPrefs, plan } = get()
+    const { cloud, cloudPrefs, plan, proof } = get()
     // A route in flight owns the cloud flow and its invoice; two invoices at
-    // once would fight over the same modal and the same saved deposit.
-    if (plan !== null || (cloud.status !== 'idle' && cloud.status !== 'error')) {
+    // once would fight over the same modal and the same saved deposit. A hop
+    // in hand has neither, but starting this flow would orphan its proof.
+    if (plan !== null || proof.status === 'computing' || (cloud.status !== 'idle' && cloud.status !== 'error')) {
       set({ cloud: { ...cloud, balanceError: 'Finish or cancel the move in progress first.' } })
       return
     }
@@ -5323,10 +5338,10 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
   },
 
   buyRegionKey: async (at, plane, height) => {
-    const { cloud, cloudPrefs, plan } = get()
+    const { cloud, cloudPrefs, plan, proof } = get()
     if (cloudPrefs.mode === 'off') return { ok: false, error: 'Cloud compute is off in the Cloud compute panel.' }
-    // A route in flight owns the cloud flow and its invoice.
-    if (plan !== null || (cloud.status !== 'idle' && cloud.status !== 'error')) {
+    // A route in flight owns the cloud flow and its invoice, and a hop in hand would lose its proof.
+    if (plan !== null || proof.status === 'computing' || (cloud.status !== 'idle' && cloud.status !== 'error')) {
       return { ok: false, error: 'Finish or cancel the move in progress first.' }
     }
     const client = cloudClient(cloudPrefs.apiUrl)

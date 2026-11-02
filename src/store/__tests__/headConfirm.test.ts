@@ -51,7 +51,7 @@ vi.mock('../../lib/workers', async (orig) => ({
 }))
 vi.mock('../../lib/hyperspace/enter', async (orig) => ({ ...(await orig() as object), computeEnterProof: () => '0'.repeat(64) }))
 
-import { CHECKING_RELAYS_MESSAGE, HEAD_RETRYING_MESSAGE, HEAD_UNCONFIRMED_MESSAGE, NEW_VERSION_RELOAD_MESSAGE, useCyberspace, WAITING_SIGNER_MESSAGE } from '../useCyberspace'
+import { busyLabel, CHECKING_RELAYS_MESSAGE, HEAD_RETRYING_MESSAGE, HEAD_UNCONFIRMED_MESSAGE, NEW_VERSION_RELOAD_MESSAGE, useCyberspace, WAITING_SIGNER_MESSAGE } from '../useCyberspace'
 import { PROOF_WORKER_FAILED_MESSAGE } from '../../lib/workers'
 import { useVersionGate } from '../../lib/versionGate'
 import { placeSpawn } from '../fixtures/placeSpawn'
@@ -166,6 +166,104 @@ describe('a move is signed only from a head the relays confirm', () => {
     } finally {
       useVersionGate.setState({ verdict: 'ok' })
     }
+  })
+
+  it('the move button reads what it waits on', () => {
+    expect(busyLabel({ progress: 0.42, message: null })).toBe('42%')
+    expect(busyLabel({ progress: 1, message: CHECKING_RELAYS_MESSAGE })).toBe('RELAYS')
+    expect(busyLabel({ progress: 1, message: HEAD_RETRYING_MESSAGE })).toBe('RELAYS')
+    expect(busyLabel({ progress: 1, message: WAITING_SIGNER_MESSAGE })).toBe('SIGNER')
+  })
+
+  it('a WALK step goes without the words, or the panel would jump at every step', async () => {
+    const { position } = S()
+    const target = { ...position, x: position.x + 1n }
+    const head = S().prevEventId
+    await S().walkTo(target, () => true)
+    expect(posted).toHaveLength(1)
+    let atRelays: unknown = null
+    relay.onAsk = () => { atRelays = { ...S().proof } }
+    await S().applyProofMessage(done(5, head))
+    expect(atRelays).toMatchObject({ progress: 1, message: null })
+  })
+
+  describe('on a route', () => {
+    const onRoute = (): void => {
+      const { position } = S()
+      const to = { ...position, x: position.x + 1n }
+      useCyberspace.setState({
+        pendingTarget: to,
+        plan: {
+          status: 'running', target: to, done: 0, message: null, awaiting: null, startedAt: 0, requote: false,
+          step: { kind: 'hop', source: 'local', from: position, to, maxHeight: 1 },
+          ceilings: { hop: 17, sidestep: 24 }, summary: { steps: 1, hops: 1, sidesteps: 0, cloudSteps: 0, capped: false },
+        } as never,
+      })
+    }
+    const planned = () => S().plan as unknown as { status: string; message: string | null; awaiting: unknown }
+
+    it('a worker that could not run pauses it for RESUME, which computes the step again with no new quote', async () => {
+      S().moveCursor(moveDirection(S().axes(), 'right'))
+      await S().commit()
+      onRoute()
+      await S().applyProofMessage({ type: 'error', id: posted[posted.length - 1].id, message: PROOF_WORKER_FAILED_MESSAGE, elapsedMs: 1 })
+      expect(planned()).toMatchObject({ status: 'paused', message: PROOF_WORKER_FAILED_MESSAGE, awaiting: null })
+      const before = posted.length
+      S().resumePlan()
+      expect(posted).toHaveLength(before + 1)
+      expect(S().proof.status).toBe('computing')
+    })
+
+    it('says RELOAD on a tab an update left behind', async () => {
+      S().moveCursor(moveDirection(S().axes(), 'right'))
+      await S().commit()
+      onRoute()
+      useVersionGate.setState({ verdict: 'hint' })
+      try {
+        await S().applyProofMessage({ type: 'error', id: posted[posted.length - 1].id, message: PROOF_WORKER_FAILED_MESSAGE, elapsedMs: 1 })
+      } finally {
+        useVersionGate.setState({ verdict: 'ok' })
+      }
+      expect(planned().message).toBe(NEW_VERSION_RELOAD_MESSAGE)
+    })
+
+    it('a declined signature leaves no word behind, and RESUME is computing again while it asks', async () => {
+      S().moveCursor(moveDirection(S().axes(), 'right'))
+      const head = S().prevEventId
+      await S().commit()
+      onRoute()
+      const sign = S().signEvent
+      useCyberspace.setState({ signerKind: 'nip07', signEvent: async () => { throw new Error('no') } })
+      let atSigner: unknown = null
+      try {
+        await S().applyProofMessage(done(5, head))
+        expect(S().proof).toMatchObject({ status: 'idle', progress: 1, message: null })
+        expect(planned().status).toBe('paused')
+        expect(planned().awaiting).not.toBeNull()
+        useCyberspace.setState({ signEvent: (t) => { atSigner = { ...S().proof }; return sign(t) } })
+        S().resumePlan()
+        await vi.waitFor(() => expect(atSigner).not.toBeNull())
+      } finally {
+        useCyberspace.setState({ signerKind: 'local', signEvent: sign })
+      }
+      expect(atSigner).toMatchObject({ status: 'computing', progress: 1, message: WAITING_SIGNER_MESSAGE })
+    })
+  })
+
+  it('a top-up or a region key refuses during a hop, which would otherwise lose its proof for good', async () => {
+    S().moveCursor(moveDirection(S().axes(), 'right'))
+    const head = S().prevEventId
+    const events = S().events.length
+    await S().commit()
+    await S().topUp(1000)
+    expect(S().cloud.balanceError).toBe('Finish or cancel the move in progress first.')
+    const prefs = S().cloudPrefs
+    useCyberspace.setState({ cloudPrefs: { ...prefs, mode: 'auto' as never } })
+    const key = await S().buyRegionKey(S().position, S().plane, 20)
+    useCyberspace.setState({ cloudPrefs: prefs, cloud: { ...S().cloud, balanceError: null } })
+    expect(key).toMatchObject({ ok: false, error: 'Finish or cancel the move in progress first.' })
+    await S().applyProofMessage(done(5, head))
+    expect(S().events).toHaveLength(events + 1)
   })
 
   it('a relay that holds another device\'s newer move: it is adopted and the move refused', async () => {

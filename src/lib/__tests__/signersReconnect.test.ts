@@ -59,12 +59,42 @@ describe('deferredReconnect with an extension (arkinox, 2026-10-13)', () => {
       const refused = expect(first).rejects.toThrow('did not answer')
       await vi.advanceTimersByTimeAsync(NIP07_POLL_GRACE + HANDSHAKE_PATIENCE_MS)
       await refused
+      win.window = { nostr: extension(sk) }
+      const signed = await signer.signEvent(template)
+      expect(signed.pubkey).toBe(pubkey)
     } finally {
       vi.useRealTimers()
     }
+  })
+
+  it('takes a handshake that answers after the limit, and a wake does not ask again (review of #581)', async () => {
+    const { HANDSHAKE_PATIENCE_MS } = await import('../signWithin')
+    let asked = 0
+    let approve: (pk: string) => void = () => {}
+    win.window = { nostr: { ...extension(sk), getPublicKey: () => { asked++; return new Promise<string>((r) => { approve = r }) } } }
+    const ready: unknown[] = []
+    const signer = await deferredReconnect({ kind: 'nip07', pubkey }, (s) => ready.push(s))
+    vi.useFakeTimers()
+    try {
+      const first = expect(signer.signEvent(template)).rejects.toThrow('did not answer')
+      await vi.advanceTimersByTimeAsync(NIP07_POLL_GRACE + HANDSHAKE_PATIENCE_MS)
+      await first
+      // Back to the tab, well past the limit, more than once.
+      for (let i = 0; i < 3; i++) {
+        const wake = signer.reconnect!().catch(() => null)
+        await vi.advanceTimersByTimeAsync(HANDSHAKE_PATIENCE_MS + 1)
+        await wake
+      }
+      expect(asked).toBe(1)
+      approve(pubkey)
+      await vi.advanceTimersByTimeAsync(0)
+    } finally {
+      vi.useRealTimers()
+    }
+    expect(ready).toHaveLength(1)
     win.window = { nostr: extension(sk) }
-    const signed = await signer.signEvent(template)
-    expect(signed.pubkey).toBe(pubkey)
+    expect((await signer.signEvent(template)).pubkey).toBe(pubkey)
+    expect(asked).toBe(1)
   })
 
   it('refuses an extension now on another account', async () => {

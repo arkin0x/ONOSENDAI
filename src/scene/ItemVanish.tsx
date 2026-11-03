@@ -10,6 +10,10 @@
  * The sparkles keep within the region too. On the calm path (reduced motion)
  * it is a short plain fade with no sparkles. A frame writes numbers and
  * allocates nothing. Nothing here is kept: a reload draws the box.
+ *
+ * The box fades in under the item as it goes (WorldMessages PlacedBox
+ * `appear`), see-through until the end, so it hides nothing that is fading;
+ * a name with no model stands just above the box (`clear`), never inside it.
  */
 
 import { useMemo, useRef } from 'react'
@@ -61,7 +65,7 @@ export function wallRoom(region: Box | null | undefined): number {
   return Math.max(0, room)
 }
 
-export function ItemVanish({ id, label, at, wears, region, axes, minPx, play }: {
+export function ItemVanish({ id, label, at, wears, region, axes, minPx, play, clear }: {
   id: string
   label: { text: string; color: string; sub: string; subColor: string }
   at: [number, number, number]
@@ -71,6 +75,11 @@ export function ItemVanish({ id, label, at, wears, region, axes, minPx, play }: 
   /** The smallest its model's box is drawn, as the mark it was (WorldMessages ItemMark). */
   minPx: number
   play: Vanishing
+  /**
+   * The blue box it fades out over (WorldMessages PlacedBox): an item with no
+   * model has its name lifted clear above it, never inside it.
+   */
+  clear?: { trueSide: number; minPx: number }
 }): JSX.Element {
   const model = useItemModel(wears?.model)
   const scaleExp = useCyberspace((s) => s.scaleExp)
@@ -100,7 +109,7 @@ export function ItemVanish({ id, label, at, wears, region, axes, minPx, play }: 
       <group ref={root}>
         {model
           ? <ItemModelMark id={id} model={model} animation={animation} at={at} region={region} axes={axes} minPx={minPx} label={label} vanish={fade} />
-          : <WorldLabel text={label.text} color={label.color} at={at} align="center" px={13} sub={label.sub} subColor={label.subColor} fade={fade} recede="name" />}
+          : <WorldLabel text={label.text} color={label.color} at={at} align="center" px={13} sub={label.sub} subColor={label.subColor} fade={fade} clear={clear} recede="name" />}
       </group>
       {!play.calm && (
         <group ref={sparkles} position={at}>

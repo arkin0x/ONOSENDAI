@@ -4,13 +4,19 @@
  * not its low corner (arkinox, 2026-11-02: the YOU circle hung on the corner
  * of its gibson in VIEW mode).
  */
+import { createElement } from 'react'
+import { PerspectiveCamera } from 'three'
 import { describe, expect, it, vi } from 'vitest'
 
-vi.mock('@react-three/fiber', () => ({ useFrame: () => undefined, useThree: () => undefined }))
+/** The projector's frame, caught so a test can run it against a real camera. */
+const frames: Array<(state: unknown) => void> = []
+vi.mock('@react-three/fiber', () => ({ useFrame: (cb: (state: unknown) => void) => { frames.push(cb) }, useThree: () => undefined }))
 
 import { placeCentre, pointCentre, type Position, type ViewAxes } from '../../lib/space'
-import { alignedOrigin } from '../../store/useCyberspace'
-import { targetPoint } from '../TargetProjector'
+import { targetScreens } from '../../lib/targets'
+import { alignedOrigin, useCyberspace } from '../../store/useCyberspace'
+import { mount } from '../../test/elementRoot'
+import { TargetProjector, targetPoint } from '../TargetProjector'
 
 const AXES: ViewAxes = { right: { axis: 'x', dir: 1 }, up: { axis: 'y', dir: 1 }, out: { axis: 'z', dir: -1 } }
 /** Adding zero folds the -0 a flipped axis makes of a zero offset. */
@@ -48,3 +54,24 @@ describe('an avatar marker', () => {
     }
   })
 })
+
+describe('the projector', () => {
+  it('puts YOU on the centre of your gibson on screen, where the camera looking at that centre points', async () => {
+    useCyberspace.setState({ anchor: { ...me }, scaleExp: 0 })
+    frames.length = 0
+    const m = await mount(createElement(TargetProjector, { axes: AXES, targets: [{ id: 'you', label: 'YOU', color: '#f00', at: { ...me } }] }))
+    // A camera off at an angle, looking at the gibson's centre, render [0, 0, 0].
+    const camera = new PerspectiveCamera(50, 1, 0.1, 6000)
+    camera.position.set(7, 5, 11)
+    camera.lookAt(0, 0, 0)
+    camera.updateMatrixWorld()
+    camera.updateProjectionMatrix()
+    for (const frame of frames) frame({ camera, size: { width: 600, height: 600 } })
+    const s = targetScreens.you
+    expect(s.onScreen).toBe(true)
+    expect(Math.abs(s.x)).toBeLessThan(1e-6)
+    expect(Math.abs(s.y)).toBeLessThan(1e-6)
+    await m.unmount()
+  })
+})
+

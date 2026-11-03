@@ -3,7 +3,6 @@
  * world (arkinox, 2026-11-02). A door, a chest and a sound do not: the name is
  * on the card a tap opens. An item keeps its name until the owner decides.
  */
-import { readFileSync } from 'node:fs'
 import { describe, expect, it, vi } from 'vitest'
 
 ;(globalThis as { window?: unknown }).window ??= globalThis
@@ -35,7 +34,10 @@ import { builtInLook } from '../../lib/looks'
 import type { ViewAxes } from '../../lib/space'
 import { mount, type Mounted } from '../../test/elementRoot'
 import { LookMark } from '../LookMark'
+import { ChestLooks } from '../ChestLooks'
 import { AudioMark, FLOATING_NAME, ItemMark } from '../WorldMessages'
+import { useCyberspace } from '../../store/useCyberspace'
+import { useShards } from '../../store/useShards'
 
 const AXES: ViewAxes = { right: { axis: 'x', dir: 1 }, up: { axis: 'y', dir: 1 }, out: { axis: 'z', dir: -1 } }
 const label = { text: '▣ Wind Chest', color: '#fff', sub: 'by someone', subColor: '#fff' }
@@ -66,11 +68,21 @@ describe('floating names in the world', () => {
     }
   })
 
-  it('the world’s chests and doors ask FLOATING_NAME by their look’s kind', () => {
-    const source = readFileSync(new URL('../ChestLooks.tsx', import.meta.url), 'utf8')
-    expect(source).toMatch(/label=\{FLOATING_NAME\[w\.look\.kind\] \? \{/)
-    expect(builtInLook('treasure').kind).toBe('chest')
-    expect(builtInLook('door').kind).toBe('door')
+  it('the world’s chests and doors are drawn with no name over them', async () => {
+    const here = { x: (1n << 60n) + 9n, y: 1n << 59n, z: 1n << 58n }
+    const near = (dx: bigint) => ({ ...here, x: here.x + dx })
+    useCyberspace.setState({ anchor: { ...here }, anchorPlane: 0, scaleExp: 0 })
+    const author = 'ab'.repeat(32)
+    const chest = (name: string) => ({ name, lockPubkey: 'cd'.repeat(32), senderPubkey: 'ce'.repeat(32), requires: 'a key', payload: '' })
+    const inner = (id: string, tags: string[][]) => ({ id, pubkey: author, kind: 1, created_at: 1, tags, content: '', sig: '0'.repeat(128) })
+    const found = (id: string, name: string, tags: string[][], dx: bigint) => ({ eventId: id, keyHex: '11'.repeat(32), bagId: 'ff'.repeat(32), lookupId: 'ab'.repeat(32), author, at: near(dx), plane: 0, height: 8, createdAt: 1, type: 'chest', chest: chest(name), inner: inner(id, tags) })
+    useShards.getState().addDiscovered([found('a4'.repeat(32), 'Wind Chest', [], 2n), found('a5'.repeat(32), 'Back Door', [['door', '3']], -2n)] as never)
+    const m = await mount(createElement(ChestLooks, { axes: AXES }))
+    // Both are drawn, as their looks...
+    expect(m.all().filter((h) => h.type === 'shardmesh')).toHaveLength(2)
+    // ...and neither has a name floating over it.
+    expect(labels(m)).toHaveLength(0)
+    await m.unmount()
   })
 
   it('an item still has its name and who left it', async () => {

@@ -35,6 +35,21 @@ export function lookRadPerPx(widthPx: number): number {
   return (WALK_LOOK_DEG_PER_WIDTH * Math.PI) / 180 / Math.max(1, widthPx)
 }
 
+/**
+ * LOOK, the ball in WALK's corner (hud/WalkLookSphere.tsx), turns this many
+ * times as far as the same drag on the scene (arkinox, 2026-11-02: "more
+ * sensitive than normal dragging on the screen, or it is only an
+ * affordance"). The ball is about a quarter of a phone's width, so at 3 a
+ * drag across it turns your head about 300 degrees on a 400px phone; the
+ * drag can carry on past the ball for more.
+ */
+export const WALK_LOOK_SPHERE_GAIN = 3
+
+/** Turn WALK's view by a drag of dx, dy CSS pixels on the LOOK ball: the scene's turn, WALK_LOOK_SPHERE_GAIN times over. */
+export function walkLookSphereBy(dx: number, dy: number): void {
+  walkLookBy(dx * WALK_LOOK_SPHERE_GAIN, dy * WALK_LOOK_SPHERE_GAIN)
+}
+
 /** Below this much drag left, in pixels, the coast ends and the rest is spent at once. */
 const SPENT_PX = 0.01
 

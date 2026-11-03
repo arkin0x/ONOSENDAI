@@ -5,10 +5,12 @@
  * back the sphere we have in the workshop and use it to look". It stands
  * above the menu button, on the button's left edge, in the dock the route
  * overlay uses outside WALK (the overlay is never up in WALK). A drag on it
- * turns your head exactly as a drag on the scene does: the same sink and the
- * same gain per screen width (lib/walkLook.ts), so it feels like grabbing
- * the view, and it keeps turning past the ball until the finger lifts. A
- * drag on the scene still looks too. A tap does nothing.
+ * turns your head the way a drag on the scene does, through the same sink
+ * (lib/walkLook.ts), but WALK_LOOK_SPHERE_GAIN times as far, so it is a real
+ * control and not only a sign that you can look (arkinox, 2026-11-02). It
+ * keeps turning past the ball until the finger lifts, and the whole square
+ * around the ball takes the press (hud/ui/OrbitSphere.tsx). A drag on the
+ * scene still looks too. A tap does nothing.
  *
  * Only in WALK, and only while the View panel's "Look sphere in WALK" is on
  * (the default; store/useLayers.ts).
@@ -16,7 +18,7 @@
 
 import { useCyberspace } from '../store/useCyberspace'
 import { useLayers } from '../store/useLayers'
-import { walkLookBy } from '../lib/walkLook'
+import { walkLookSphereBy } from '../lib/walkLook'
 import { OrbitSphere } from './ui/OrbitSphere'
 
 export function WalkLookSphere(): JSX.Element | null {
@@ -25,8 +27,9 @@ export function WalkLookSphere(): JSX.Element | null {
   if (!walking || !on) return null
   return (
     <OrbitSphere
-      className="benchorb--walk"
-      onTurn={walkLookBy}
+      className="walklook"
+      square
+      onTurn={walkLookSphereBy}
       label="LOOK"
       title="Drag to look around; keep dragging past the ball."
       ariaLabel="Look around. Drag to turn your view."

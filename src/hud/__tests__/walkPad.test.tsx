@@ -1,0 +1,211 @@
+/**
+ * walkPad.test.tsx - WALK's own pad (arkinox, 2026-11-02) and the mode
+ * button's ring on screen.
+ *
+ * - No scale keys in WALK: FAR, up and NEAR are one FORWARD; down is
+ *   BACKWARD; + and the 2^ readout are JUMP; - is DOWN.
+ * - Each key takes the step its keyboard key takes (lib/walkKeys.ts), so the
+ *   pad and the keys cannot disagree: pressed from the same place, they land
+ *   on the same place.
+ * - The commit slot reads WALK in WALK, BUILD (lit white) in BUILD, and
+ *   pressing them goes on round the ring; RECALL is there in BUILD too.
+ * - HOP and VIEW keep the pad they had.
+ */
+
+import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { createElement, isValidElement, type ReactElement, type ReactNode } from 'react'
+import { renderToString } from 'react-dom/server'
+
+vi.hoisted(() => {
+  const mem = new Map<string, string>()
+  ;(globalThis as { localStorage?: unknown }).localStorage = {
+    getItem: (k: string) => mem.get(k) ?? null,
+    setItem: (k: string, v: string) => { mem.set(k, String(v)) },
+    removeItem: (k: string) => { mem.delete(k) },
+    clear: () => { mem.clear() },
+  }
+  // No relay is ever dialed from here: a socket that never opens.
+  ;(globalThis as { WebSocket?: unknown }).WebSocket = class {
+    static OPEN = 1
+    readyState = 0
+    onopen = null; onclose = null; onerror = null; onmessage = null
+    send(): void {}
+    close(): void {}
+    addEventListener(): void {}
+    removeEventListener(): void {}
+  }
+  // The pad's hold-to-repeat timers.
+  ;(globalThis as { window?: unknown }).window ??= globalThis
+})
+vi.mock('../../lib/workers', () => ({ postProof: vi.fn(), cancelProof: vi.fn(), setProofHandler: vi.fn() }))
+vi.mock('../../lib/relay', async (orig) => ({
+  ...(await orig() as object),
+  publishMany: vi.fn(async () => ({ ok: true })),
+  query: vi.fn(async () => []),
+  relaySet: () => ['wss://relay.test'],
+}))
+
+// A server render reads a zustand store's initial state; here each hook reads
+// the live state, as a mounted component does.
+vi.mock('zustand', async (importOriginal) => {
+  const real = await importOriginal<typeof import('zustand')>()
+  const live = (init: Parameters<typeof real.create>[0]) => {
+    const hook = real.create(init)
+    return Object.assign((sel: (s: unknown) => unknown = (x) => x) => sel(hook.getState()), hook)
+  }
+  return { ...real, create: (init?: Parameters<typeof real.create>[0]) => (init === undefined ? live : live(init)) }
+})
+
+import { TouchControls } from '../TouchControls'
+import { useCyberspace } from '../../store/useCyberspace'
+import { useBuilder } from '../../store/useBuilder'
+import { useWalk } from '../../store/useWalk'
+import { useShards } from '../../store/useShards'
+import { walkKeyDown } from '../../hooks/useKeyboard'
+import { currentPadMode } from '../../store/padMode'
+import { placeSpawn } from '../../store/fixtures/placeSpawn'
+
+const S = () => useCyberspace.getState()
+
+type Btn = ReactElement<{ className?: string; title?: string; disabled?: boolean; children?: ReactNode; onPointerDown?: (e: unknown) => void; onPointerUp?: () => void }>
+
+/** Every element TouchControls draws itself, its hooks run inside a render. */
+function drawn(): Btn[] {
+  let out: ReactNode = null
+  renderToString(createElement(() => { out = TouchControls(); return null }))
+  const all: Btn[] = []
+  const walk = (n: ReactNode): void => {
+    if (Array.isArray(n)) { n.forEach(walk); return }
+    if (!isValidElement(n)) return
+    all.push(n as Btn)
+    walk((n as Btn).props.children)
+  }
+  walk(out)
+  return all
+}
+const keys = (): Btn[] => drawn().filter((b) => b.props.className?.split(' ').includes('touchpad__key'))
+const cells = (): string[] => keys().map((b) => /touchpad__key--(\S+)/.exec(b.props.className ?? '')?.[1] ?? '')
+const find = (cls: string): Btn => {
+  const b = drawn().find((x) => x.props.className?.split(' ').includes(cls))
+  if (!b) throw new Error(`no ${cls}`)
+  return b
+}
+const press = (b: Btn): void => {
+  b.props.onPointerDown?.({ preventDefault: () => {}, stopPropagation: () => {}, clientX: 0, clientY: 0 })
+  b.props.onPointerUp?.()
+}
+const keyDown = (code: string): void => {
+  walkKeyDown({ code, ctrlKey: false, shiftKey: false, altKey: false, metaKey: false, preventDefault: () => {} })
+}
+
+beforeEach(async () => {
+  useShards.setState({ pending: null, placedLast: null, deployStatus: 'idle' })
+  useWalk.getState().exit()
+  useBuilder.getState().exit()
+  S().clearFocus()
+  await placeSpawn()
+  S().cancel()
+  useWalk.getState().setGravity(false)
+})
+
+describe('the WALK pad', () => {
+  it('has FORWARD, BACKWARD, the sides, JUMP and DOWN, and no scale keys or readout', () => {
+    useWalk.getState().enter()
+    expect(cells()).toEqual(['gravity', 'forward', 'left', 'backward', 'right', 'jump', 'down'])
+    expect(drawn().some((b) => b.props.className === 'touchpad__hub')).toBe(false)
+    expect(find('touchpad__key--forward').props.title).toBe('Forward (W)')
+    expect(find('touchpad__key--backward').props.title).toBe('Backward (S)')
+    expect(find('touchpad__key--jump').props.children).toContain('JUMP')
+  })
+
+  // Each key from a fresh WALK at the same head, against its keyboard key.
+  const pairs: Array<[string, string]> = [
+    ['touchpad__key--forward', 'KeyW'],
+    ['touchpad__key--backward', 'KeyS'],
+    ['touchpad__key--left', 'KeyA'],
+    ['touchpad__key--right', 'KeyD'],
+    ['touchpad__key--jump', 'Space'],
+    ['touchpad__key--jump', 'KeyR'],
+    ['touchpad__key--down', 'KeyC'],
+    ['touchpad__key--down', 'KeyF'],
+  ]
+  for (const [cls, code] of pairs) {
+    it(`${cls.replace('touchpad__key--', '').toUpperCase()} steps where ${code} does`, () => {
+      const home = { ...S().position }
+      useWalk.getState().enter()
+      keyDown(code)
+      const byKey = { ...S().cursor }
+      useWalk.getState().exit()
+      expect(byKey).not.toEqual(home)
+
+      useWalk.getState().enter()
+      press(find(cls))
+      expect(S().cursor).toEqual(byKey)
+      useWalk.getState().exit()
+    })
+  }
+
+  it('FORWARD and BACKWARD are opposite, and JUMP and DOWN are opposite', () => {
+    const home = S().position
+    const delta = (cls: string): bigint[] => {
+      useWalk.getState().enter()
+      press(find(cls))
+      const c = S().cursor
+      useWalk.getState().exit()
+      return [c.x - home.x, c.y - home.y, c.z - home.z]
+    }
+    expect(delta('touchpad__key--backward')).toEqual(delta('touchpad__key--forward').map((d) => -d))
+    expect(delta('touchpad__key--down')).toEqual(delta('touchpad__key--jump').map((d) => -d))
+  })
+
+  it('under GRAVITY DOWN is off and JUMP says jump', () => {
+    useWalk.getState().enter()
+    useWalk.getState().setGravity(true)
+    expect(find('touchpad__key--down').props.disabled).toBe(true)
+    expect(find('touchpad__key--jump').props.title).toBe('Jump (Space or R)')
+    useWalk.getState().setGravity(false)
+    expect(find('touchpad__key--down').props.disabled).toBe(false)
+  })
+})
+
+describe('HOP and VIEW keep their pad', () => {
+  it('six directions, the two scale keys and the readout', () => {
+    expect(cells()).toEqual(expect.arrayContaining(['away', 'up', 'toward', 'left', 'right', 'zoomout', 'down', 'zoomin']))
+    expect(cells()).not.toContain('forward')
+    expect(drawn().some((b) => b.props.className === 'touchpad__hub')).toBe(true)
+  })
+})
+
+describe('the commit slot on screen', () => {
+  it('WALK goes to BUILD, BUILD is lit white and goes to HOP, and BUILD has RECALL', () => {
+    useWalk.getState().enter()
+    expect(find('touchops').props.className).toContain('touchops--mode-walk')
+    press(find('is-walk'))
+    expect(currentPadMode()).toBe('build')
+
+    expect(find('touchpad').props.className).toContain('touchpad--mode-build')
+    expect(find('touchops').props.className).toContain('touchops--mode-build')
+    const build = find('is-build')
+    expect(build.props.className).toContain('is-on')
+    expect(build.props.children).toBe('BUILD')
+    expect(find('touchops__cancel').props.children).toBe('RECALL')
+    press(build)
+    expect(currentPadMode()).toBe('hop')
+  })
+
+  it('RECALL in BUILD goes back to HOP; both wait while a deploy is lined up', () => {
+    useBuilder.getState().enter('build')
+    useShards.setState({ pending: { type: 'message', text: 'hi' } })
+    expect(find('is-build').props.disabled).toBe(true)
+    expect(find('touchops__cancel').props.disabled).toBe(true)
+    press(find('is-build'))
+    expect(useBuilder.getState().active).toBe(true)
+    useShards.getState().cancelDeploy()
+    useBuilder.getState().enter('build')
+
+    expect(find('touchops__cancel').props.disabled).toBe(false)
+    press(find('touchops__cancel'))
+    expect(useBuilder.getState().active).toBe(false)
+    expect(currentPadMode()).toBe('hop')
+  })
+})

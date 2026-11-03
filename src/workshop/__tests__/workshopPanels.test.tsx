@@ -51,7 +51,12 @@ const MOVED: Record<'shard' | 'avatar', string[]> = {
   shard: [
     'className="workshop__name"',
     '<span className="workshop__label">SHARD FEED</span>',
-    'usePublished.getState().publish(shard)',
+    // PUBLISH, and the ask before publishing a shard that carries sealed
+    // parts (#543), whose LEAVE THEM OUT publishes too: so publish(shard)
+    // itself is written twice in the SHARD panel, and the markers are the
+    // button's press and the ask.
+    'onClick={() => { if (carriesSealedParts(shard)) setPublishAsk(shard.id); else void usePublished.getState().publish(shard) }}',
+    '{publishAsk === shard.id && (',
     'onClick={() => setRetractAsk(shard.id)}',
     "{retractAsk === shard.id && (",
     'BYTES ON THE WIRE',
@@ -115,7 +120,7 @@ describe('the workshop top bar', () => {
 
   it('puts SHARD in order: name, Shard Feed, counts, DRAW, OPACITY, CONSTRAIN', () => {
     const s = panel('shard')
-    const order = MOVED.shard.filter((m) => !m.includes('retract') && !m.includes('publish(') && !m.includes('BYTES')).map((m) => s.indexOf(m))
+    const order = MOVED.shard.filter((m) => !m.includes('retract') && !m.includes('publish(') && !m.includes('publishAsk ===') && !m.includes('BYTES')).map((m) => s.indexOf(m))
     expect([...order].sort((a, b) => a - b)).toEqual(order)
   })
 

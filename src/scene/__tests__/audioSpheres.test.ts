@@ -59,3 +59,32 @@ describe('the sound spheres', () => {
     expect(audioSpheres([sound('two', 2)], 0, ORIGIN, 2, FRONT)).toEqual([])
   })
 })
+
+describe('the spheres the world draws: every sound you can hear (review of #584)', () => {
+  const hex = (c: string): string => c.repeat(64)
+  const row = (id: string, type: string, body: Record<string, unknown>, extra: Record<string, unknown> = {}) => ({
+    eventId: hex(id), inner: { id: hex(id), pubkey: hex('a'), tags: [], kind: 1, created_at: 5, content: '' }, keyHex: hex('b'), bagId: hex('c'), lookupId: hex('d'),
+    author: hex('a'), at: AT, plane: 0, height: 4, createdAt: 5, type, ...body, ...extra,
+  })
+  const audio = (title: string, autoplay: boolean) => ({ audio: { title, url: 'http://127.0.0.1/a.mp3', mime: 'audio/mpeg', autoplay, loop: true, fade: 2 } })
+
+  it('includes a sound kept in an opened chest, which is heard but not drawn on its own, and leaves out one that never plays', async () => {
+    const { worldSpheres } = await import('../AudioSpheres')
+    const { useShards } = await import('../../store/useShards')
+    const chest = row('5', 'chest', { chest: { name: 'Box', lockPubkey: hex('9'), senderPubkey: hex('8'), requires: '', payload: '' } })
+    const inChest = row('6', 'audio', audio('In The Box', true), { chestId: hex('5') })
+    const loose = row('7', 'audio', audio('Loose', true))
+    const silent = row('8', 'audio', audio('Tap To Play', false))
+    useShards.setState({ mine: [], curated: null, discovered: Object.fromEntries([chest, inChest, loose, silent].map((r) => [r.eventId, r])) } as never)
+    // The chest's sound is heard, not drawn: the reason spheres follow what is heard.
+    expect(useShards.getState().drawnItems().map((w) => w.key)).not.toContain(hex('6'))
+    expect(useShards.getState().heardAudio().map((w) => w.key)).toContain(hex('6'))
+
+    const keys = worldSpheres(true, ORIGIN, 0, 0, FRONT).map((s) => s.key).sort()
+    expect(keys).toEqual([hex('6'), hex('7')])
+    // Still only at the zooms the notes are drawn at, and never with the switch off.
+    expect(worldSpheres(true, ORIGIN, 0, 1, FRONT)).toHaveLength(2)
+    expect(worldSpheres(true, ORIGIN, 0, 2, FRONT)).toEqual([])
+    expect(worldSpheres(false, ORIGIN, 0, 0, FRONT)).toEqual([])
+  })
+})

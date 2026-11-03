@@ -4,8 +4,11 @@
  * default). Inside the sphere the sound plays at full volume; past it, it
  * fades to silence at its region's walls (DECK-0007 §4.1, `fade`). The same
  * blue rings as on audio being placed (AudioSphereGhost), quieter, around
- * every sound drawn in the scene: the ones you found and the ones you hid,
- * on the plane in view. The radius is the one the ears use
+ * every sound you can hear: the same list HiddenAudio plays from (useShards
+ * heardAudio, AUTOPLAY on), so a sound kept in an opened chest, which is
+ * heard at the chest but not drawn on its own, has its sphere too (review
+ * of #584). The ones you found and the ones you hid, on the plane in view,
+ * at the zooms the notes are drawn at. The radius is the one the ears use
  * (lib/audioWorld hearSource: lib/audioItem fadeRadius), in scene units at
  * the zoom on screen.
  *
@@ -24,7 +27,7 @@ import { useMutes } from '../store/useMutes'
 import { useShards, type WorldItem } from '../store/useShards'
 import { FadeRings } from './AudioSphereGhost'
 
-/** As far out as the notes are drawn (WorldMessages REACH): a sphere with no note in it would be a ring around nothing. */
+/** As far out as the notes are drawn (WorldMessages REACH). */
 const REACH = GRID_RADIUS * 8
 
 /** The world's rings are dimmer than the ghost's, which is the one being worked on. */
@@ -56,20 +59,33 @@ export function audioSpheres(items: readonly WorldItem[], plane: number, origin:
   return out
 }
 
+/**
+ * The spheres the world draws now: none with the Sound spheres switch off;
+ * otherwise one for every sound HiddenAudio would play (heardAudio, with
+ * AUTOPLAY on, as it filters them), chest-held audio included.
+ */
+export function worldSpheres(on: boolean, anchor: Position, plane: number, scaleExp: number, axes: ViewAxes): AudioSphere[] {
+  if (!on) return []
+  const heard = useShards.getState().heardAudio().filter((w) => w.audio?.autoplay)
+  return audioSpheres(heard, plane, alignedOrigin(anchor, scaleExp), scaleExp, axes)
+}
+
 export function AudioSpheres({ axes }: { axes: ViewAxes }): JSX.Element | null {
   const on = useLayers((s) => s.audioSpheres)
   const anchor = useCyberspace((s) => s.anchor)
   const plane = useCyberspace((s) => s.anchorPlane)
   const scaleExp = useCyberspace((s) => s.scaleExp)
+  const me = useCyberspace((s) => s.identity.pubkey)
   const mine = useShards((s) => s.mine)
   const discovered = useShards((s) => s.discovered)
   const curated = useShards((s) => s.curated)
   const muted = useMutes((s) => s.muted)
   const spheres = useMemo(
-    () => (on ? audioSpheres(useShards.getState().drawnItems(), plane, alignedOrigin(anchor, scaleExp), scaleExp, axes) : []),
-    // mine, discovered, curated and muted are what drawnItems reads.
+    () => worldSpheres(on, anchor, plane, scaleExp, axes),
+    // mine, discovered, curated, muted and who you are are what heardAudio
+    // reads, as HiddenAudio keys its own list.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [on, anchor, plane, scaleExp, axes, mine, discovered, curated, muted],
+    [on, anchor, plane, scaleExp, axes, mine, discovered, curated, muted, me],
   )
   if (spheres.length === 0) return null
   return (

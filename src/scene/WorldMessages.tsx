@@ -50,11 +50,12 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { nip19 } from 'nostr-tools'
 import { ACCENT } from '../lib/palette'
 import { useFrame } from '@react-three/fiber'
-import { BoxGeometry, CircleGeometry, EdgesGeometry, OctahedronGeometry, PlaneGeometry, Vector3, type Group, type PerspectiveCamera } from 'three'
+import { BoxGeometry, CircleGeometry, EdgesGeometry, OctahedronGeometry, PlaneGeometry, Vector3, type Group, type LineSegments, type Material, type Mesh, type PerspectiveCamera } from 'three'
 import { decodeText, seedOf, TEXT_DECODE_MS } from '../lib/decode'
 import { useCeremony } from '../store/useCeremony'
 import { useInventory } from '../store/useInventory'
-import { useTakeVanish } from '../store/useOpenCeremony'
+import { useTakeVanish, type Vanishing } from '../store/useOpenCeremony'
+import { vanishOpacity } from '../lib/ceremony'
 import { openedKey } from '../store/useOpenedChests'
 import { GRID_RADIUS, itemCentre, type ViewAxes } from '../lib/space'
 import { alignedOrigin, useCyberspace } from '../store/useCyberspace'
@@ -75,7 +76,7 @@ import { ItemVanish } from './ItemVanish'
 import { useMutes } from '../store/useMutes'
 import { MARK_RECEDE_FLOOR, recedeShare } from '../lib/markerSize'
 import { headlampUniforms } from './headlamp'
-import { basicFaceProps } from './shardFaces'
+import { basicFaceProps, TRANSLUCENT_ORDER } from './shardFaces'
 
 /** A message's tap target, in CSS pixels: a fingertip over the mark, at any zoom. */
 const TAP_PX = 44
@@ -250,8 +251,8 @@ export function WorldMessages({ axes }: Props): JSX.Element | null {
           <group key={w.key}>
             {draw === 'item'
               ? <ItemMark id={w.key} text={w.text} sub={author(w)} at={w.centre} wears={w.wears} region={w.region} axes={axes} onTap={open} />
-              : <PlacedBox at={w.centre} />}
-            {draw === 'vanishing' && <ItemVanish id={w.key} label={{ text: w.text, color: NOTE, sub: author(w), subColor: ACCENT }} at={w.centre} wears={w.wears} region={w.region} axes={axes} minPx={NOTE_EDGE_PX} play={play} />}
+              : <PlacedBox at={w.centre} appear={draw === 'vanishing' ? play : undefined} />}
+            {draw === 'vanishing' && <ItemVanish id={w.key} label={{ text: w.text, color: NOTE, sub: author(w), subColor: ACCENT }} at={w.centre} wears={w.wears} region={w.region} axes={axes} minPx={NOTE_EDGE_PX} play={play} clear={{ trueSide: placedBoxSide(scaleExp), minPx: 0 }} />}
             {/* The mark is a fixed size on screen at any zoom, so its target is
                 too: a fingertip over the mark (TapTarget). */}
             <TapTarget px={TAP_PX} at={w.centre} onTap={open} />
@@ -513,21 +514,62 @@ export function placedBoxProps(opacity: number): Record<string, unknown> {
 }
 
 /**
+ * How much of the box shows `elapsed` ms into TAKE: none, up to all of it,
+ * as the item fades out over it (ItemVanish, lib/ceremony vanishOpacity).
+ */
+export function boxAppearOpacity(elapsed: number, calm: boolean): number {
+  return 1 - vanishOpacity(elapsed, calm)
+}
+
+/** The two looks a box appearing under TAKE moves between: see-through with no depth, then solid. */
+const BOX_SEE_THROUGH = placedBoxProps(0.5)
+const BOX_SOLID = { ...placedBoxProps(1), depthWrite: true }
+
+/**
+ * A box's material and draw order at `opacity` while it appears: below 1 the
+ * see-through face's blend, no depth written and drawn after opaque faces
+ * (TRANSLUCENT_ORDER), so the item fading out inside it and its name stay in
+ * sight; at 1 exactly the solid, tagged box it then stays. Nothing allocated.
+ */
+export function setBoxLook(material: Material, object: { renderOrder: number }, opacity: number): void {
+  const solid = opacity >= 1
+  Object.assign(material, solid ? BOX_SOLID : BOX_SEE_THROUGH)
+  material.opacity = solid ? 1 : Math.max(0, opacity)
+  material.depthWrite = solid
+  object.renderOrder = solid ? 0 : TRANSLUCENT_ORDER
+}
+
+/**
  * Where a held item or a sound stands: a blue box of a fixed size in the world.
  * It is not sized to the screen, so it reads as a thing in the place, and it
  * is solid, so it is the same blue box from every side (placedBoxProps). The
  * faces sit a hair behind their edges (polygonOffset), so the edges always
  * draw over them.
+ *
+ * Under TAKE (`appear`) it fades in as the item fades out, see-through and
+ * writing no depth until the fade is done (setBoxLook): solid from the start,
+ * it hid the item inside it and cut the middle out of its name.
  */
-function PlacedBox({ at, opacity = 1 }: { at: [number, number, number]; opacity?: number }): JSX.Element {
+export function PlacedBox({ at, opacity = 1, appear }: { at: [number, number, number]; opacity?: number; appear?: Vanishing }): JSX.Element {
   const side = placedBoxSide(useCyberspace((s) => s.scaleExp))
+  const fill = useRef<Mesh>(null)
+  const edges = useRef<LineSegments>(null)
+  useFrame(() => {
+    if (!appear) return
+    const o = boxAppearOpacity(performance.now() - appear.at, appear.calm) * opacity
+    if (fill.current) setBoxLook(fill.current.material as Material, fill.current, o)
+    if (edges.current) setBoxLook(edges.current.material as Material, edges.current, o)
+  })
+  // While it appears, its first frame is drawn as it starts: not there yet.
+  const start = appear ? Math.min(opacity, boxAppearOpacity(performance.now() - appear.at, appear.calm) * opacity) : opacity
+  const order = appear && start < 1 ? TRANSLUCENT_ORDER : 0
   return (
     <group position={at} scale={side}>
-      <mesh geometry={PLACED_BOX_FILL}>
-        <meshBasicMaterial color={PLACED_BOX_FACE} toneMapped={false} {...placedBoxProps(opacity)} polygonOffset polygonOffsetFactor={1} polygonOffsetUnits={1} />
+      <mesh ref={fill} geometry={PLACED_BOX_FILL} renderOrder={order}>
+        <meshBasicMaterial color={PLACED_BOX_FACE} toneMapped={false} {...placedBoxProps(start)} polygonOffset polygonOffsetFactor={1} polygonOffsetUnits={1} />
       </mesh>
-      <lineSegments geometry={PLACED_BOX_EDGES} frustumCulled={false}>
-        <lineBasicMaterial color={NOTE_BLUE} toneMapped={false} {...placedBoxProps(opacity)} />
+      <lineSegments ref={edges} geometry={PLACED_BOX_EDGES} frustumCulled={false} renderOrder={order}>
+        <lineBasicMaterial color={NOTE_BLUE} toneMapped={false} {...placedBoxProps(start)} />
       </lineSegments>
     </group>
   )

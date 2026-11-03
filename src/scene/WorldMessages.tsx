@@ -36,9 +36,10 @@
  * keeps its place as a still gray diamond, so a visitor sees that someone was
  * here and the coin is gone, rather than a coin.
  *
- * Hidden audio (DECK-0007) is a small music note inside the note's blue box
- * (arkinox, 2026-10-23), its name under it, drawn when notes are; a tap opens
- * its card, with PLAY and DOWNLOAD.
+ * Hidden audio (DECK-0007) is a small music note on the note's blue box
+ * (arkinox, 2026-10-23), drawn when notes are; a tap opens its card, with
+ * PLAY and DOWNLOAD. Its name is on that card, not floating in the world
+ * (FLOATING_NAME).
  *
  * An item this identity holds is not drawn: the note's blue box alone stays
  * where it was, its tap still opening its card (arkinox, 2026-11-01; lib/
@@ -98,6 +99,17 @@ export const NOTE_EDGE_PX = 0.72 * MARK_PX.note
 const COIN_PX = 31
 /** The note's own color: the box's blue, lit. */
 const AUDIO_BLUE = '#9fd0ff'
+
+/** What carries its name floating in the world, by what it is. */
+export type NamedKind = 'item' | 'chest' | 'door' | 'sound'
+
+/**
+ * Whether a placed thing's name floats beside it in the world. A door, a
+ * chest and a sound do not: the name is on its card, one tap away (arkinox,
+ * 2026-11-02). An item keeps its name until the owner decides otherwise.
+ * Messages, coins and shards are not in this list and are unchanged.
+ */
+export const FLOATING_NAME: Readonly<Record<NamedKind, boolean>> = { item: true, chest: false, door: false, sound: false }
 
 /**
  * A mark's share of its full size at `depth` from the camera: full out to
@@ -294,12 +306,12 @@ export function ItemMark({ id, text, sub, at, opacity = 1, wears, region = null,
   // drawn through, as before.
   const label = { text, color: NOTE, sub, subColor: ACCENT }
   if (model && axes && itemMarkShape(model, axes) === 'model') {
-    return <ItemModelMark id={id ?? text} model={model} animation={wears?.animation ?? NO_MOTION} at={at} region={region} axes={axes} minPx={NOTE_EDGE_PX} opacity={opacity} onTap={onTap} label={label} />
+    return <ItemModelMark id={id ?? text} model={model} animation={wears?.animation ?? NO_MOTION} at={at} region={region} axes={axes} minPx={NOTE_EDGE_PX} opacity={opacity} onTap={onTap} label={FLOATING_NAME.item ? label : undefined} />
   }
   return (
     <>
       <WorldMark kind="note" at={at} opacity={opacity} />
-      <WorldLabel text={label.text} color={label.color} at={at} align="center" px={13} sub={label.sub} subColor={label.subColor} opacity={opacity} recede="name" />
+      {FLOATING_NAME.item && <WorldLabel text={label.text} color={label.color} at={at} align="center" px={13} sub={label.sub} subColor={label.subColor} opacity={opacity} recede="name" />}
     </>
   )
 }
@@ -340,15 +352,15 @@ function NoteItem({ w, birth, onTap }: { w: { key: string; text: string; mine: b
 }
 
 /**
- * Hidden audio in the world: the note's blue box with a music note on it,
- * and the audio's name under it, as a message has its hider's name.
+ * Hidden audio in the world: the note's blue box with a music note on it.
+ * Its name is on its card, not beside it (FLOATING_NAME).
  */
 export function AudioMark({ title, at, opacity = 1, onTap }: { title: string; at: [number, number, number]; opacity?: number; onTap?: () => void }): JSX.Element {
   return (
     <group>
       <PlacedBox at={at} opacity={opacity} />
       <AudioNote at={at} opacity={opacity} />
-      <WorldLabel text={title} color={ACCENT} at={at} align="center" px={10} offsetPx={[0, -26]} opacity={opacity} recede="name" />
+      {FLOATING_NAME.sound && <WorldLabel text={title} color={ACCENT} at={at} align="center" px={10} offsetPx={[0, -26]} opacity={opacity} recede="name" />}
       {onTap && <TapTarget px={TAP_PX} at={at} onTap={onTap} />}
     </group>
   )

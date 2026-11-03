@@ -49,7 +49,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { nip19 } from 'nostr-tools'
 import { ACCENT } from '../lib/palette'
 import { useFrame } from '@react-three/fiber'
-import { BoxGeometry, CircleGeometry, EdgesGeometry, OctahedronGeometry, PlaneGeometry, type Group, type PerspectiveCamera } from 'three'
+import { BoxGeometry, CircleGeometry, EdgesGeometry, OctahedronGeometry, PlaneGeometry, Vector3, type Group, type PerspectiveCamera } from 'three'
 import { decodeText, seedOf, TEXT_DECODE_MS } from '../lib/decode'
 import { useCeremony } from '../store/useCeremony'
 import { useInventory } from '../store/useInventory'
@@ -74,6 +74,7 @@ import { ItemVanish } from './ItemVanish'
 import { useMutes } from '../store/useMutes'
 import { MARK_RECEDE_FLOOR, recedeShare } from '../lib/markerSize'
 import { headlampUniforms } from './headlamp'
+import { basicFaceProps } from './shardFaces'
 
 /** A message's tap target, in CSS pixels: a fingertip over the mark, at any zoom. */
 const TAP_PX = 44
@@ -339,7 +340,7 @@ function NoteItem({ w, birth, onTap }: { w: { key: string; text: string; mine: b
 }
 
 /**
- * Hidden audio in the world: the note's blue box with a music note inside,
+ * Hidden audio in the world: the note's blue box with a music note on it,
  * and the audio's name under it, as a message has its hider's name.
  */
 export function AudioMark({ title, at, opacity = 1, onTap }: { title: string; at: [number, number, number]; opacity?: number; onTap?: () => void }): JSX.Element {
@@ -354,14 +355,24 @@ export function AudioMark({ title, at, opacity = 1, onTap }: { title: string; at
 }
 
 /**
- * The music note inside the box: a tilted oval head, a stem and a flag, flat
+ * How far the music note stands in front of the box's centre, toward the
+ * camera, in the box's own units (its edge is 1): just past half its
+ * diagonal, so the opaque box never hides it from any side.
+ */
+export const NOTE_STANDOFF = (Math.sqrt(3) / 2) * 1.02
+
+/**
+ * The music note on the box: a tilted oval head, a stem and a flag, flat
  * shapes turned to face the camera. Shapes, not a character: the scene's
  * font has no music note, and troika would fetch a fallback font for one.
  * Held to the box's size on screen (in the
  * box's own units its edge is 0.72, so the note stands about half of it).
+ * The box is opaque, so the note stands just outside it on the camera's
+ * side (NOTE_STANDOFF) and, like the box, is out of the bloom.
  */
 function AudioNote({ at, opacity = 1 }: { at: [number, number, number]; opacity?: number }): JSX.Element {
   const group = useRef<Group>(null)
+  const toward = useMemo(() => new Vector3(), [])
   const parts = useMemo(() => ({
     head: new CircleGeometry(0.095, 20),
     stem: new PlaneGeometry(0.035, 0.36),
@@ -373,10 +384,15 @@ function AudioNote({ at, opacity = 1 }: { at: [number, number, number]; opacity?
     if (!g) return
     const cam = state.camera as PerspectiveCamera
     // The box's own size, so the note stands about half of it at any zoom.
-    g.scale.setScalar(placedBoxSide(useCyberspace.getState().scaleExp) / NOTE_BOX_EDGE)
+    const side = placedBoxSide(useCyberspace.getState().scaleExp)
+    g.scale.setScalar(side / NOTE_BOX_EDGE)
     g.quaternion.copy(cam.quaternion)
+    // In front of the box, toward the camera, by NOTE_STANDOFF of its side.
+    g.position.set(at[0], at[1], at[2])
+    toward.copy(cam.position).sub(g.position)
+    if (toward.lengthSq() > 0) g.position.addScaledVector(toward.normalize(), side * NOTE_STANDOFF)
   }, LABEL_PRIORITY)
-  const material = <meshBasicMaterial color={AUDIO_BLUE} toneMapped={false} transparent opacity={0.95 * opacity} depthWrite={false} />
+  const material = <meshBasicMaterial color={AUDIO_BLUE} toneMapped={false} {...basicFaceProps(opacity, { ghost: false, world: true })} />
   return (
     <group ref={group} position={at}>
       <mesh geometry={parts.head} position={[-0.06, -0.15, 0]} rotation={[0, 0, 0.45]} scale={[1.35, 1, 1]} frustumCulled={false}>{material}</mesh>
@@ -456,20 +472,50 @@ export function placedBoxSide(scaleExp: number): number {
 const PLACED_BOX_FILL = new BoxGeometry(1, 1, 1)
 const PLACED_BOX_EDGES = new EdgesGeometry(PLACED_BOX_FILL)
 
+/** The box's faces: the note's blue, darker, so its bright edges read on them. */
+const PLACED_BOX_FACE = '#24527f'
+
+/**
+ * How the box's faces and edges are drawn: as a shard's opaque faces in the
+ * world are (shardFaces basicFaceProps), and both for the same two reasons
+ * (arkinox, 2026-11-01: a white cube, seen only from some angles).
+ *
+ *  - Out of the bloom. A face written with ordinary blending puts its own
+ *    alpha over whatever is behind it, which takes the tag off a room's face
+ *    there, and the bloom then adds up that whole bright face: the box
+ *    turned white in front of a pale room. Written with the tag (colour
+ *    opaque, alpha 0, TAG_BLEND), the faces show their own blue and the room
+ *    behind keeps its tag. The edges take the tag too, so they draw as blue
+ *    lines rather than glowing white across a box this size.
+ *  - Opaque, so it writes depth. A see-through box writes none, and every
+ *    shard face is in three's transparent list sorted by its object's centre:
+ *    a room whose centre sorted nearer was drawn after the box and painted
+ *    over it, which turned with the view. Writing depth, the box hides what
+ *    is behind it and is hidden only by what is in front, from any side.
+ *
+ * Drawn today at full opacity only; an `opacity` under 1 would take the
+ * see-through face's blend instead, which keeps the tag under it.
+ */
+export function placedBoxProps(opacity: number): Record<string, unknown> {
+  return basicFaceProps(opacity, { ghost: false, world: true })
+}
+
 /**
  * Where a held item or a sound stands: a blue box of a fixed size in the world.
- * It is not sized to the screen, so it reads as a thing in the place, and its
- * fill keeps it blue from every side.
+ * It is not sized to the screen, so it reads as a thing in the place, and it
+ * is solid, so it is the same blue box from every side (placedBoxProps). The
+ * faces sit a hair behind their edges (polygonOffset), so the edges always
+ * draw over them.
  */
 function PlacedBox({ at, opacity = 1 }: { at: [number, number, number]; opacity?: number }): JSX.Element {
   const side = placedBoxSide(useCyberspace((s) => s.scaleExp))
   return (
     <group position={at} scale={side}>
       <mesh geometry={PLACED_BOX_FILL}>
-        <meshBasicMaterial color={NOTE_BLUE} toneMapped={false} transparent opacity={0.3 * opacity} depthWrite={false} />
+        <meshBasicMaterial color={PLACED_BOX_FACE} toneMapped={false} {...placedBoxProps(opacity)} polygonOffset polygonOffsetFactor={1} polygonOffsetUnits={1} />
       </mesh>
       <lineSegments geometry={PLACED_BOX_EDGES} frustumCulled={false}>
-        <lineBasicMaterial color={NOTE_BLUE} toneMapped={false} transparent opacity={0.95 * opacity} depthWrite={false} />
+        <lineBasicMaterial color={NOTE_BLUE} toneMapped={false} {...placedBoxProps(opacity)} />
       </lineSegments>
     </group>
   )

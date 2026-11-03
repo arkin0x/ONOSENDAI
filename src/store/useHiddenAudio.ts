@@ -34,6 +34,7 @@ import { hidesThing } from '../lib/muteList'
 import { useMutes } from './useMutes'
 import { useCyberspace } from './useCyberspace'
 import { duckMusic } from './useTvMusic'
+import { trackSilenced, useSoundMutes } from './useSoundMutes'
 import { DUCKED } from '../lib/audioWorld'
 
 export type AudioPhase = 'loading' | 'waiting' | 'playing' | 'error'
@@ -45,6 +46,11 @@ export interface AudioEntry {
   mode: VoiceMode
   /** The world item this is the sound of. */
   itemKey: string
+  /**
+   * The track, as NOW PLAYING mutes it: the item's lineage id, which a move
+   * or an EDIT keeps (store/useSoundMutes). Absent: only MUTE ALL reaches it.
+   */
+  trackId?: string
   /** Why it failed, for the card. */
   error?: string
 }
@@ -70,6 +76,8 @@ interface Voice {
   play: () => void
   /** Hold it where it is, to pick up there. */
   pause: () => void
+  /** What NOW PLAYING mutes it by (AudioEntry trackId). */
+  trackId?: string
 }
 
 const voices = new Map<string, Voice>()
@@ -100,6 +108,44 @@ export function stopMutedVoices(): string[] {
 }
 
 const offMutes = useMutes.subscribe((s, prev) => { if (s.muted !== prev.muted) stopMutedVoices() })
+
+/**
+ * NOW PLAYING's mutes, on the gain (store/useSoundMutes). A muted voice is
+ * never stopped: it plays on, silent, so it still raises NOW PLAYING and
+ * stays listed there, and unmuting it is heard from where it now is. The
+ * gain eases, so neither way is a click. Where there is no Web Audio (a
+ * card on the element alone) the element itself is muted.
+ */
+function muteFactor(trackId: string | undefined): number {
+  return trackSilenced(trackId) ? 0 : 1
+}
+
+/** How loud a voice's gain should be: a world voice's region fade, a card's full, times its mute. */
+function voiceLevel(key: string, v: Voice): number {
+  const base = key.startsWith('world:') ? Math.max(0, Math.min(1, pendingGain.get(key) ?? 0)) : 1
+  return base * muteFactor(v.trackId)
+}
+
+function applyMute(key: string, v: Voice): void {
+  const ctx = audioContext()
+  if (v.node && ctx) v.node.gain.gain.setTargetAtTime(voiceLevel(key, v), ctx.currentTime, 0.08)
+  else if (v.el && !v.node) v.el.muted = trackSilenced(v.trackId)
+}
+
+/** Every voice follows a change of the mutes at once, and TV's ducking with them. */
+export function applySoundMutes(): void {
+  for (const [key, v] of voices) applyMute(key, v)
+  duckFor()
+}
+
+const offSoundMutes = useSoundMutes.subscribe((s, prev) => {
+  if (s.tracks !== prev.tracks || s.master !== prev.master || s.ready !== prev.ready) applySoundMutes()
+})
+
+/** Whether a voice is heard, by its entry: sounding and not muted. */
+export function entryHeard(e: AudioEntry): boolean {
+  return e.phase === 'playing' && !trackSilenced(e.trackId)
+}
 
 /** Voices waiting to be let out: their play, to be called inside a tap. */
 const waitingPlays = new Set<string>()
@@ -168,7 +214,7 @@ const offSession = useHiddenAudio.subscribe((s) => {
 
 const offContext = onAudioContext(syncVoicePhases)
 // A reload in development leaves no second subscription behind.
-if (import.meta.hot) import.meta.hot.dispose(() => { offMutes(); offContext(); offSession(); gestureOff?.() })
+if (import.meta.hot) import.meta.hot.dispose(() => { offMutes(); offSoundMutes(); offContext(); offSession(); gestureOff?.() })
 /** Changes on every start and stop of a key: what an answer for an older one is ignored by. */
 const sessions = new Map<string, number>()
 
@@ -259,7 +305,7 @@ function failWith(err: unknown): string {
  * decode fails as it loads, even while the voice waits for a tap), is a
  * failure of the item and waits out its pause (worldFailure).
  */
-function element(key: string, mine: number, url: string, loop: boolean, title: string, mode: VoiceMode, itemKey: string, onEnded: () => void): HTMLAudioElement {
+function element(key: string, mine: number, url: string, loop: boolean, title: string, mode: VoiceMode, itemKey: string, onEnded: () => void, trackId?: string): HTMLAudioElement {
   const el = new Audio()
   el.loop = loop
   el.preload = 'auto'
@@ -269,7 +315,7 @@ function element(key: string, mine: number, url: string, loop: boolean, title: s
     if (sessions.get(key) !== mine) return
     if (mode === 'world') { worldFailure(itemKey, new Error('This browser cannot play this kind of file.')); return }
     release(key)
-    setEntry(key, { phase: 'error', title, mode, itemKey, error: 'This browser cannot play this kind of file. DOWNLOAD it instead.' })
+    setEntry(key, { phase: 'error', title, mode, itemKey, trackId, error: 'This browser cannot play this kind of file. DOWNLOAD it instead.' })
   })
   return el
 }
@@ -310,7 +356,7 @@ function playerOf(key: string, mine: number, el: HTMLAudioElement, entry: Omit<A
  * going is started over. It plays on when the card closes; NOW PLAYING
  * stops it.
  */
-export async function playAudio(itemKey: string, audio: AudioItem, who?: MuteSubject): Promise<void> {
+export async function playAudio(itemKey: string, audio: AudioItem, who?: MuteSubject, trackId?: string): Promise<void> {
   if (typeof Audio === 'undefined') return
   const key = cardKey(itemKey)
   const mine = (sessions.get(key) ?? 0) + 1
@@ -320,30 +366,33 @@ export async function playAudio(itemKey: string, audio: AudioItem, who?: MuteSub
   // In the tap itself, before any await: the browser lets sound out now.
   const l = audioListener()
   resumeAudio()
-  setEntry(key, { phase: 'loading', title: audio.title, mode: 'card', itemKey })
+  setEntry(key, { phase: 'loading', title: audio.title, mode: 'card', itemKey, trackId })
   try {
     const blob = await openAudio(audio)
     if (sessions.get(key) !== mine) return
     const url = URL.createObjectURL(blob)
-    const el = element(key, mine, url, audio.loop, audio.title, 'card', itemKey, () => stopVoice(key))
+    const el = element(key, mine, url, audio.loop, audio.title, 'card', itemKey, () => stopVoice(key), trackId)
     let node: ThreeAudio<GainNode> | null = null
     if (l) {
       try {
         node = new ThreeAudio(l)
         node.setMediaElementSource(el)
+        // Muted from its first sound when its track is (store/useSoundMutes).
+        node.setVolume(muteFactor(trackId))
       } catch { node = null }
     }
-    const entry = { title: audio.title, mode: 'card' as const, itemKey }
+    if (!node) el.muted = trackSilenced(trackId)
+    const entry = { title: audio.title, mode: 'card' as const, itemKey, trackId }
     const play = playerOf(key, mine, el, entry, node !== null, undefined, (err) => {
       release(key)
       setEntry(key, { ...entry, phase: 'error', error: failWith(err) })
     })
-    voices.set(key, { el, url, node, play, pause: () => el.pause() })
+    voices.set(key, { el, url, node, play, pause: () => el.pause(), trackId })
     play()
   } catch (err) {
     if (sessions.get(key) !== mine) return
     release(key)
-    setEntry(key, { phase: 'error', title: audio.title, mode: 'card', itemKey, error: failWith(err) })
+    setEntry(key, { phase: 'error', title: audio.title, mode: 'card', itemKey, trackId, error: failWith(err) })
   }
 }
 
@@ -353,7 +402,7 @@ export async function playAudio(itemKey: string, audio: AudioItem, who?: MuteSub
  * sound out if it must. `onStarted` runs once it really sounds: a one-shot's
  * once-trigger is marked fired then, not when it would have been heard.
  */
-export async function startWorld(itemKey: string, audio: AudioItem, onStarted?: () => void, who?: MuteSubject): Promise<void> {
+export async function startWorld(itemKey: string, audio: AudioItem, onStarted?: () => void, who?: MuteSubject, trackId?: string): Promise<void> {
   if (typeof Audio === 'undefined') return
   const l = audioListener()
   if (!l) return
@@ -362,7 +411,7 @@ export async function startWorld(itemKey: string, audio: AudioItem, onStarted?: 
   sessions.set(key, mine)
   release(key)
   if (who) subjects.set(key, who)
-  setEntry(key, { phase: 'loading', title: audio.title, mode: 'world', itemKey })
+  setEntry(key, { phase: 'loading', title: audio.title, mode: 'world', itemKey, trackId })
   try {
     const blob = await openAudio(audio)
     if (sessions.get(key) !== mine) return
@@ -377,11 +426,11 @@ export async function startWorld(itemKey: string, audio: AudioItem, onStarted?: 
       node.setRolloffFactor(0)
       node.setBuffer(buffer)
       node.setLoop(audio.loop)
-      node.setVolume(pendingGain.get(key) ?? 0)
+      node.setVolume((pendingGain.get(key) ?? 0) * muteFactor(trackId))
       // A one-shot that reaches its end is let go, as an element's 'ended' does.
       const ended = node.onEnded.bind(node)
       node.onEnded = () => { ended(); if (sessions.get(key) === mine) stopVoice(key) }
-      const entry = { title: audio.title, mode: 'world' as const, itemKey }
+      const entry = { title: audio.title, mode: 'world' as const, itemKey, trackId }
       let started = false
       const play = (): void => {
         if (sessions.get(key) !== mine) return
@@ -393,7 +442,7 @@ export async function startWorld(itemKey: string, audio: AudioItem, onStarted?: 
         failures.delete(itemKey)
         if (!started) { started = true; onStarted?.() }
       }
-      voices.set(key, { node, play, pause: () => { if (node.isPlaying) node.pause() } })
+      voices.set(key, { node, play, pause: () => { if (node.isPlaying) node.pause() }, trackId })
       if (audioRunning()) play()
       else waitForTap(key)
       return
@@ -402,19 +451,19 @@ export async function startWorld(itemKey: string, audio: AudioItem, onStarted?: 
     let el: HTMLAudioElement
     let node: PositionalAudio
     try {
-      el = element(key, mine, url, audio.loop, audio.title, 'world', itemKey, () => stopVoice(key))
+      el = element(key, mine, url, audio.loop, audio.title, 'world', itemKey, () => stopVoice(key), trackId)
       node = new PositionalAudio(l)
       // How loud is the region's fade, on the gain; the panner only places it.
       node.setRolloffFactor(0)
       node.setMediaElementSource(el)
-      node.setVolume(pendingGain.get(key) ?? 0)
+      node.setVolume((pendingGain.get(key) ?? 0) * muteFactor(trackId))
     } catch (err) {
       URL.revokeObjectURL(url)
       throw err
     }
-    const entry = { title: audio.title, mode: 'world' as const, itemKey }
+    const entry = { title: audio.title, mode: 'world' as const, itemKey, trackId }
     const play = playerOf(key, mine, el, entry, true, onStarted, (err) => worldFailure(itemKey, err))
-    voices.set(key, { el, url, node, play, pause: () => el.pause() })
+    voices.set(key, { el, url, node, play, pause: () => el.pause(), trackId })
     if (audioRunning()) play()
     else waitForTap(key)
   } catch (err) {
@@ -563,7 +612,8 @@ export function setWorldGain(itemKey: string, gain: number): void {
   const v = voices.get(key)
   const ctx = audioContext()
   if (!v?.node || !ctx) return
-  v.node.gain.gain.setTargetAtTime(Math.max(0, Math.min(1, gain)), ctx.currentTime, 0.08)
+  // Times its mute: a muted track keeps its fade, unheard (applyMute).
+  v.node.gain.gain.setTargetAtTime(voiceLevel(key, v), ctx.currentTime, 0.08)
 }
 
 /** How loud a world voice was last asked to be, or null when it has none (tests and the browser check). */
@@ -614,9 +664,9 @@ function duckFor(): void {
 const offDuck = useHiddenAudio.subscribe(duckFor)
 if (import.meta.hot) import.meta.hot.dispose(() => offDuck())
 
-/** Whether any card's PLAY is sounding. */
+/** Whether any card's PLAY is sounding, and heard: a muted one does not step TV down. */
 export function cardSounding(): boolean {
-  return Object.values(useHiddenAudio.getState().entries).some((e) => e.mode === 'card' && e.phase === 'playing')
+  return Object.values(useHiddenAudio.getState().entries).some((e) => e.mode === 'card' && entryHeard(e))
 }
 
 /** Save the decrypted file. Resolves to an error sentence, or null when the save began. */

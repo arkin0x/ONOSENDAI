@@ -51,9 +51,8 @@ export function ChainPanel(): JSX.Element {
   const publishError = useCyberspace((s) => s.publishError)
   const live = useCyberspace((s) => s.live)
   const exploreIndex = useCyberspace((s) => s.exploreIndex)
-  // BUILD mode: the ACTIONS tag opens and closes the explorer instead of stepping.
+  // BUILD mode: the ACTIONS tag stands down, as the CHAIN chip does.
   const building = useBuilder((s) => s.active)
-  const explorerOpen = useChainUi((s) => s.explorerOpen)
   const respawns = useCyberspace((s) => s.respawns)
   const held = useCyberspace((s) => s.held)
   const check = useCyberspace((s) => s.selfCheck)
@@ -104,17 +103,22 @@ export function ChainPanel(): JSX.Element {
         <h2>Proof chain</h2>
         {/* The whole chain, spawn included, not this session's proofs; a tap
             opens the chain explorer at the head, a second tap puts it away. */}
-        {/* In BUILD mode a step along the chain aims the build cursor, so the
-            tag only opens and closes the explorer there (review of #235: it
-            sent the build cursor back to your avatar). */}
+        {/* Not in BUILD mode: the explorer is the CHAIN chip's, which is not
+            drawn while building (arkinox, 2026-11-02), and a step here would
+            aim the build cursor (review of #235: it sent the build cursor
+            back to your avatar). It used to open and close the explorer
+            there; with the chip hidden that lit the tag, opened nothing, and
+            left the explorer to spring open when the mode ended. [ ] Home
+            End still walk a chain while building. */}
         <button
           className="tag tag--tap"
+          disabled={building}
           onClick={() => {
-            if (useBuilder.getState().active) useChainUi.getState().setExplorerOpen(!explorerOpen)
-            else walkChain(exploreIndex === null ? Math.max(0, events.length - 1) : null)
+            if (useBuilder.getState().active) return
+            walkChain(exploreIndex === null ? Math.max(0, events.length - 1) : null)
           }}
-          aria-pressed={building ? explorerOpen : exploreIndex !== null}
-          title="Open the chain explorer"
+          aria-pressed={!building && exploreIndex !== null}
+          title={building ? 'Not while building: [ ] Home End aim the build cursor along the chain' : 'Open the chain explorer'}
         >
           {events.length} ACTION{events.length === 1 ? '' : 'S'}
         </button>

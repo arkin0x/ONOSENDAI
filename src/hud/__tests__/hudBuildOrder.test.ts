@@ -152,30 +152,43 @@ function findIn(node: ReactNode, test: (props: Record<string, unknown>) => boole
 }
 
 /** The Chain panel's ACTIONS tag, as the panel renders it now. */
-function actionsTag(): ReactElement<{ onClick: () => void; 'aria-pressed': boolean }> {
+function actionsTag(): ReactElement<{ onClick: () => void; 'aria-pressed': boolean; disabled: boolean }> {
   let tree: ReactNode = null
   renderToString(createElement(() => { tree = ChainPanel(); return null }))
   const tag = findIn(tree, (p) => p.className === 'tag tag--tap' && 'aria-pressed' in p)
   if (!tag) throw new Error('no ACTIONS tag')
-  return tag as unknown as ReactElement<{ onClick: () => void; 'aria-pressed': boolean }>
+  return tag as unknown as ReactElement<{ onClick: () => void; 'aria-pressed': boolean; disabled: boolean }>
 }
 
-describe('review of #235, SHOULD-FIX 2: the Chain panel ACTIONS tag in BUILD mode', () => {
-  afterEach(() => useChainUi.getState().setExplorerOpen(false))
+describe('the Chain panel ACTIONS tag in BUILD mode (review of #584)', () => {
+  afterEach(() => { useBuilder.getState().exit(); useChainUi.getState().setExplorerOpen(false) })
 
-  it('opens and closes the explorer, and leaves the build cursor where it is', () => {
+  // The CHAIN chip, which draws the explorer, is hidden while building: a
+  // tag that toggled the explorer there lit up, opened nothing, and left it
+  // to spring open when the mode ended.
+  it('stands down: disabled, opens nothing, leaves the build cursor, and nothing springs open on exit', () => {
+    useChainUi.getState().setExplorerOpen(false)
     useBuilder.getState().enter('build')
     useCyberspace.getState().moveCursor({ axis: 'x', dir: 1 })
     const aim = { ...useCyberspace.getState().cursor }
+    const tag = actionsTag()
+    expect(tag.props.disabled).toBe(true)
+    expect(tag.props['aria-pressed']).toBe(false)
+    // A press that gets through anyway does nothing.
+    tag.props.onClick()
+    tag.props.onClick()
+    tag.props.onClick()
+    expect(useChainUi.getState().explorerOpen).toBe(false)
     expect(actionsTag().props['aria-pressed']).toBe(false)
-    actionsTag().props.onClick()
-    expect(useChainUi.getState().explorerOpen).toBe(true)
-    expect(actionsTag().props['aria-pressed']).toBe(true)
     expect(useCyberspace.getState().cursor).toEqual(aim)
     expect(useBuilder.getState().scrub).toBeNull()
-    actionsTag().props.onClick()
+    useBuilder.getState().exit()
     expect(useChainUi.getState().explorerOpen).toBe(false)
-    expect(useCyberspace.getState().cursor).toEqual(aim)
+  })
+
+  it('works again once BUILD ends', () => {
+    expect(useBuilder.getState().active).toBe(false)
+    expect(actionsTag().props.disabled).toBe(false)
   })
 })
 

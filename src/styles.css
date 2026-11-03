@@ -7743,6 +7743,12 @@ kbd {
 @media (max-width: 640px) {
   .nearby__row .chest__act, .nearby__row .nearby__view, .secrets__box .secrets__close, .held__acts .chest__act--danger { min-height: 44px; min-width: 44px; }
 }
+/* An item's row of buttons in ITEMS: DETAILS, COPY, PUBLISH and DELETE all
+ * the same fingertip height, not DELETE alone (review of #584). On a narrow
+ * screen, as above, and on any touch screen however wide. */
+@media (max-width: 640px), (pointer: coarse) {
+  .held__row--item .held__acts .chest__act { min-height: 44px; min-width: 44px; }
+}
 /* DELETE on a held item: it destroys something, so it does not read as COPY does. */
 .chest__act.chest__act--danger { color: var(--danger); border-color: color-mix(in srgb, var(--danger) 50%, transparent); background: transparent; }
 .chest__act.chest__act--danger:hover { background: color-mix(in srgb, var(--danger) 14%, transparent); }

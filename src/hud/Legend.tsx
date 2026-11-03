@@ -96,7 +96,7 @@ const KEYS: Array<{ what: string; glyph: JSX.Element }> = [
     ),
   },
   {
-    what: 'Blue rings around audio being placed: its full-volume sphere, and for a one-shot its trigger zone. It fades to silence at the green box\'s walls',
+    what: 'Blue rings around a hidden sound, or one being placed: its full-volume sphere, and for a one-shot its trigger zone. It fades to silence at its region\'s walls. Sound spheres in Settings hides the ones in the world',
     glyph: (
       <svg viewBox="0 0 20 20" aria-hidden="true">
         <g fill="none" stroke="#9fd0ff" strokeWidth="1.1">

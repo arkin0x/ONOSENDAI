@@ -85,6 +85,7 @@ import { WorldShards } from './WorldShards'
 import { WorldMessages } from './WorldMessages'
 import { ChestLooks } from './ChestLooks'
 import { HiddenAudio } from './HiddenAudio'
+import { AudioSpheres } from './AudioSpheres'
 import { StarredMarks } from './StarredMarks'
 import { ShardGhost } from './ShardGhost'
 import { DeployRegionBox } from './DeployRegionBox'
@@ -226,6 +227,8 @@ function World(): JSX.Element {
       <PresenceAvatars axes={axes} />
       <WorldShards axes={axes} />
       <WorldMessages axes={axes} />
+      {/* Each hidden sound's full-volume sphere, behind the Settings switch (AudioSpheres). */}
+      <AudioSpheres axes={axes} />
       <ChestLooks axes={axes} />
       <StarredMarks axes={axes} />
       <ShardGhost axes={axes} />

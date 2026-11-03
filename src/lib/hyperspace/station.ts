@@ -26,6 +26,7 @@ import { findLcaHeight, coordToXyz, xyzToCoord } from 'cyberspace-core'
 import { stepFor } from '../space'
 import { type Stop, stopCoordExact } from './stops'
 import { bigToBytes32 } from './headers'
+import { isqrt } from './interest'
 import {
   LANDFALL_SLACK_BITS,
   appendStops,
@@ -35,6 +36,7 @@ import {
   kindIsPort,
   mergeAll,
   stopAt,
+  xyzAt,
   type StopIndex,
 } from './compactIndex'
 
@@ -158,6 +160,61 @@ export function findStation(index: StopIndex, coord: bigint, maxHeight: number):
 export function findNearestInPlane(index: StopIndex, coord: bigint, plane: 0 | 1, exclude?: bigint): StationResult | null {
   if (plane === 1) return nearestPort(index, coord, Number.POSITIVE_INFINITY, exclude)
   return nearestExact(index, coord, 0, Number.POSITIVE_INFINITY, exclude)
+}
+
+/** The port the NEAREST label names, where it is, and how far it is from the view in gibsons. */
+export interface NearestPort {
+  stop: Stop
+  at: { x: bigint; y: bigint; z: bigint }
+  distance: bigint
+}
+
+/**
+ * The port the NEAREST label names for a view at `view` (the scene's anchor:
+ * your avatar, the spectated avatar, or whatever else the view is centred
+ * on), never the port the view is standing on.
+ *
+ * Nearest by straight-line distance, the distance the label prints, ties to
+ * the lowest height. NOT the station metric (findNearestInPlane): that one
+ * takes the smallest aligned cube holding a port and then the lowest height
+ * in it, so a port one gibson across a cube face loses to one at the far
+ * corner of the view's own cube, and the label read "NEAREST" over a block
+ * with several visibly closer (arkinox, 2026-11-03, spectating at 2^75).
+ *
+ * The station pick seeds the search: it shares the view's cube of side 2^d,
+ * so it is under sqrt(3) 2^d < 2^(d + 1) away on a straight line, and every
+ * port at least as close lies in the 3x3x3 block of cells of side 2^(d + 1)
+ * around the view. Ports are filed at their exact coordinate, so each one in
+ * that block is measured exactly, with nothing derived.
+ */
+export function nearestPortToView(index: StopIndex, view: { x: bigint; y: bigint; z: bigint }): NearestPort | null {
+  const viewCoord = xyzToCoord(view.x, view.y, view.z, 1)
+  const seed = nearestPort(index, viewCoord, Number.POSITIVE_INFINITY, viewCoord)
+  if (!seed) return null
+  const { perm, heights } = index
+  let best = -1
+  let bestD2 = 0n
+  let bestAt = { x: 0n, y: 0n, z: 0n }
+  for (const run of neighborhood(index, viewCoord >> 1n, [view.x, view.y, view.z], seed.distance + 1)) {
+    for (let i = run.start; i < run.end; i++) {
+      const row = perm[i]
+      if (!kindIsPort(index, row)) continue
+      if (coordApproxAt(index, row) === viewCoord) continue
+      const at = xyzAt(index, row)
+      const dx = at.x - view.x
+      const dy = at.y - view.y
+      const dz = at.z - view.z
+      const d2 = dx * dx + dy * dy + dz * dz
+      if (best < 0 || d2 < bestD2 || (d2 === bestD2 && heights[row] < heights[best])) {
+        best = row
+        bestD2 = d2
+        bestAt = { x: at.x, y: at.y, z: at.z }
+      }
+    }
+  }
+  // The seed is in the block, so this only guards an index that changed shape under us.
+  if (best < 0) return null
+  return { stop: stopAt(index, best), at: bestAt, distance: isqrt(bestD2) }
 }
 
 /**

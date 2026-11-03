@@ -48,7 +48,7 @@ import { BufferGeometry, Color, Float32BufferAttribute, Vector3, type Mesh, type
 import { GRID_RADIUS, OCCUPANCY_SCALE_MAX, cellCentre, cellDelta, originShift, pointCentre, type Position, type ViewAxes } from '../lib/space'
 import { ACCENT, SIDESTEP } from '../lib/palette'
 import { heightAt, kindIsPort, stopAt, xyzAt } from '../lib/hyperspace/compactIndex'
-import { ballCoverageRuns, coverageRuns, cubeRun, findNearestInPlane } from '../lib/hyperspace/station'
+import { ballCoverageRuns, coverageRuns, cubeRun, nearestPortToView } from '../lib/hyperspace/station'
 import { cubeSelection, interestSphere, isqrt, portCube, portCubeLabel, sphereDistance2, sphereDotScale, sphereSelection } from '../lib/hyperspace/interest'
 import { formatDistance } from 'sno-core/scale'
 import { WorldLabel } from './WorldLabel'
@@ -59,7 +59,7 @@ import { alignedOrigin, useCyberspace } from '../store/useCyberspace'
 import { getStopIndex, useHyperspace } from '../store/useHyperspace'
 import { selectStopInScene } from '../hud/HyperspacePanel'
 import { LANDFALL_DETAIL_SCALE_MAX, stopCoordExact, stopsDrawn } from '../lib/hyperspace/stops'
-import { coordToXyz, xyzToCoord } from 'cyberspace-core'
+import { coordToXyz } from 'cyberspace-core'
 
 /** Same tap-vs-drag slop as every other clickable thing in the scene. */
 const TAP_SLOP = 8
@@ -200,8 +200,13 @@ interface Built {
    * sphere at the same frame is a different field. */
   sphereKey: string
   /** Inside the sphere, the landfall nearest its centre, with the exact
-   * distance in gibsons; always drawn (interest.ts). */
-  nearest: { height: number; distance: bigint } | null
+   * distance in gibsons; always drawn (interest.ts). In ideaspace, the port
+   * nearest the view, with where it is, so the label measures from the view
+   * as it is now, not as it was at build time. */
+  nearest: { height: number; distance: bigint; at?: Position } | null
+  /** In ideaspace, the height of the port nearest the build's anchor, drawn
+   * or not: a pure translation that changes it is due a rebuild. */
+  nearestPort: number | null
   /** In ideaspace, the port cube's density label and where it sits (interest.ts portCube). */
   cubeLabel: { text: string; at: [number, number, number] } | null
 }
@@ -320,7 +325,11 @@ export function StopField({ axes }: Props): JSX.Element | null {
         Math.abs(cellDelta(anchor.y, cur.anchor.y, scaleExp)),
         Math.abs(cellDelta(anchor.z, cur.anchor.z, scaleExp)),
       )
-      if (drift < REACH / 4) return
+      // The NEAREST port is measured from the view, so a move that makes
+      // another port the nearest is due a rebuild even inside the margin: at
+      // 2^75 the port cube is 8 cells wide and the margin 48 (2026-11-03).
+      const nearestNow = cube ? nearestPortToView(getStopIndex(), anchor)?.stop.height ?? null : null
+      if (drift < REACH / 4 && nearestNow === cur.nearestPort) return
     }
     // Positions from another frame cannot be shown while the rebuild runs;
     // a same-frame rebuild keeps the old cloud visible (rebased) instead.
@@ -485,8 +494,7 @@ export function StopField({ axes }: Props): JSX.Element | null {
     }
     // The port nearest the view, by the protocol's own distance, never the
     // stop being looked at: always drawn when it is on the grid.
-    const viewCoord = xyzToCoord(anchor.x, anchor.y, anchor.z, 1)
-    const nearPort = cube ? findNearestInPlane(index, viewCoord, 1, viewCoord) : null
+    const nearPort = cube ? nearestPortToView(index, anchor) : null
     const w = rows.length
 
     const origin = alignedOrigin(anchor, scaleExp)
@@ -546,11 +554,8 @@ export function StopField({ axes }: Props): JSX.Element | null {
         cubeDrawn = sel.cubeDrawn
         // The nearest port, added as its own point when the samples left it out.
         if (nearPort) {
-          const exact = coordToXyz(stopCoordExact(nearPort.stop))
-          const dx = exact.x - anchor.x
-          const dy = exact.y - anchor.y
-          const dz = exact.z - anchor.z
-          nearest = { height: nearPort.stop.height, distance: isqrt(dx * dx + dy * dy + dz * dz) }
+          const exact = nearPort.at
+          nearest = { height: nearPort.stop.height, distance: nearPort.distance, at: nearPort.at }
           if (!draw.has(nearPort.stop.height)) {
             const c = occupancy ? cellCentre(exact, origin, scaleExp, axes) : pointCentre(exact, origin, scaleExp, axes)
             if (Math.abs(c[0]) <= REACH && Math.abs(c[1]) <= REACH && Math.abs(c[2]) <= REACH) {
@@ -640,6 +645,7 @@ export function StopField({ axes }: Props): JSX.Element | null {
         version: rebuildVersion,
         sphereKey,
         nearest,
+        nearestPort: nearPort?.stop.height ?? null,
         cubeLabel,
       }, sphere ? kept.length : null)
     }
@@ -723,6 +729,17 @@ export function StopField({ axes }: Props): JSX.Element | null {
     () => (built && built.nearest ? vertexOf(built, built.nearest.height) : null),
     [built],
   )
+  // A port's distance from the view as it is now: the build is skipped while
+  // the view drifts inside the margin, and the label must not lag it.
+  const nearestDistance = useMemo(() => {
+    const at = built?.nearest?.at
+    if (!at) return null
+    const dx = at.x - anchor.x
+    const dy = at.y - anchor.y
+    const dz = at.z - anchor.z
+    return isqrt(dx * dx + dy * dy + dz * dz)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [built, anchorKey])
   // Published for StopCubes, which leaves this stop to the NEAREST cube.
   const nearestHeight = built && built.frameKey === frameKey && stopsDrawn(anchorPlane, scaleExp) ? built.nearest?.height ?? null : null
   useEffect(() => { useStopMarks.getState().setNearest(nearestHeight) }, [nearestHeight])
@@ -828,7 +845,7 @@ export function StopField({ axes }: Props): JSX.Element | null {
         <>
           <NearestCube at={nearestAt} gibson={2 ** -scaleExp} />
           <WorldLabel
-            text={`NEAREST · BLOCK ${built.nearest.height} · ${formatDistance(built.nearest.distance)}`}
+            text={`NEAREST · BLOCK ${built.nearest.height} · ${formatDistance(nearestDistance ?? built.nearest.distance)}`}
             color={ACCENT}
             at={nearestAt}
             clear={{ trueSide: 2 ** -scaleExp * 0.5, minPx: FLEET_CUBE_PX }}

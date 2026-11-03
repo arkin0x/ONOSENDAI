@@ -82,7 +82,8 @@ describe('the view moving away ends BUILD mode and keeps the work', () => {
     const toast = useToast.getState().toast
     expect(toast?.mark).toBe('build')
     expect(toast?.label).toBe('BUILD MODE ENDED')
-    expect(toast?.meta).toMatch(/Your message is kept/)
+    // Just the words BUILD MODE ENDED (arkinox, 2026-11-02); the draft is kept all the same.
+    expect(toast?.meta).toBe('')
     // The next composer takes it, once.
     expect(B().takeMessageDraft()).toBe('a long secret message, written with care')
     expect(B().messageDraft).toBeNull()
@@ -96,18 +97,18 @@ describe('the view moving away ends BUILD mode and keeps the work', () => {
     S().focusItem({ x: 1n, y: 2n, z: 3n }, 0, 'a shard')
     expect(B().active).toBe(false)
     expect(useStash.getState().models).toBe(false)
-    expect(useToast.getState().toast?.meta).toMatch(/model is unchanged in your workshop/)
+    expect(useToast.getState().toast).toMatchObject({ label: 'BUILD MODE ENDED', meta: '' })
     expect(useWorkshop.getState().shards[0].id).toBe(shard.id)
   })
 })
 
-describe('your position replaced under BUILD mode ends it, and says why', () => {
+describe('your position replaced under BUILD mode ends it', () => {
   it('a respawn: the mode ends instead of the build cursor following you to the new spawn', async () => {
     B().enter('build')
     up(4)
     await S().respawn()
     expect(B().active).toBe(false)
-    expect(useToast.getState().toast?.meta).toMatch(/Your avatar was moved under it/)
+    expect(useToast.getState().toast).toMatchObject({ label: 'BUILD MODE ENDED', meta: '' })
     // The cursor is on the new head, so the view is simply your head again.
     expect(S().atHead()).toBe(true)
   })

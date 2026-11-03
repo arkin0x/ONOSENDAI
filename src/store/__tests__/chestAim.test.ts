@@ -296,7 +296,7 @@ describe('the seal takes the aimed event as it is', () => {
 })
 
 describe('BUILD mode ending under an aim', () => {
-  it('keeps the chest for SEAL A CHEST, says so, and does not reopen the composer', () => {
+  it('keeps the chest for SEAL A CHEST, and does not reopen the composer', () => {
     const shard = benchShard(3)
     const draft = draftOf([{ kind: 'shard', shardId: shard.id }])
     useStash.getState().aimIntoChest(draft, 0)
@@ -308,8 +308,6 @@ describe('BUILD mode ending under an aim', () => {
     expect(B().itemDraft).toEqual({ type: 'chest', ...draft })
     expect(useStash.getState().chest).toBe(false)
     expect(useStash.getState().returnToChest).toBe(false)
-    const meta = useToast.getState().toast?.meta ?? ''
-    expect(meta).toMatch(/Your chest is kept: SEAL A CHEST in CREATE opens it again/)
-    expect(meta).toMatch(/"Crucifix" is not aimed/)
+    expect(useToast.getState().toast).toMatchObject({ label: 'BUILD MODE ENDED', meta: '' })
   })
 })

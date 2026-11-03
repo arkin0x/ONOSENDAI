@@ -201,8 +201,10 @@ export const useWalk = create<WalkState>((set, get) => ({
     if (cs.walking) return
     forgetWaitingMove()
     // VIEW is a focus, and WALK is taken from your head: the view ends first,
-    // which brings the cursor and the zoom home.
-    if (cs.viewing()) cs.clearFocus()
+    // which brings the cursor home. The zoom stays as it is (arkinox,
+    // 2026-11-02: entering WALK must not reset the zoom to 2^0); without
+    // keepScale it went back to the one VIEW began at.
+    if (cs.viewing()) cs.clearFocus(true)
     if (!useCyberspace.getState().atHead()) return
     const { position } = useCyberspace.getState()
     useCyberspace.setState({ walking: true, cursor: { ...position } })

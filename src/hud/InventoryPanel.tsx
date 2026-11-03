@@ -171,7 +171,10 @@ function KeyRow({ item, opens }: { item: HeldItem; opens: number }): JSX.Element
     if (why) setRefusal(why)
   }
   return (
-    <li className="secrets__row held__row">
+    // The buttons on a row of their own, under the name and its line
+    // (arkinox, 2026-11-03: four buttons beside them squeezed the name to
+    // "Si..." and the details to a word or two a line).
+    <li className="secrets__row held__row held__row--item">
       <ItemFace className="chest__glyph chest__glyph--key" type="key" image={item.key?.image} />
       <span className="item__line">
         <span className="item__name" title={item.name}>{item.name}</span>

@@ -169,7 +169,7 @@ import {
 } from '../lib/cloud'
 import { nextStep, planSummary, type Ceilings, type PlanStep, type PlanSummary } from '../lib/movePlan'
 import { computeEnterProof } from '../lib/hyperspace/enter'
-import { addRecentView } from '../lib/viewAt'
+import { addRecentView, parseViewAt } from '../lib/viewAt'
 import { endOfChainLabel } from '../lib/chainBreak'
 import { buildStepOf } from '../lib/buildCursor'
 import { targetColor, type CyberTarget } from '../lib/targets'
@@ -618,6 +618,13 @@ export interface CyberFocus {
   /** The cursor came along (VIEW): the pad drives it here. */
   drive?: boolean
   /**
+   * The label is the place's name (a starred place, a person, a place on
+   * Earth found by name), not words made from its coordinate. A free view's
+   * VIEWING chip shows it while the cursor is still on the place, and says
+   * A COORD otherwise (arkinox, 2026-11-03; FocusBar.tsx).
+   */
+  named?: boolean
+  /**
    * A hidden item (a shard, a message) is what is being looked at: the camera
    * frames it where it is drawn, its true place (itemCentre), rather than by
    * the stop markers' policy.
@@ -782,7 +789,7 @@ export interface CyberspaceState {
    * Deliberately NOT derived from `focus`, because it has to outlive a focus
    * change: clicking a landfall moves the focus to that block and the pin
    * stays where it was, which is what makes it possible to look around and
-   * come back. Dropped by a click on the globe and by a POSITION panel VIEW
+   * come back. Dropped by a click on the globe and by a View panel VIEW
    * that resolves to a point on Earth; cleared by RETURN (clearFocus) and by
    * REMOVE PIN. One at a time, so a second drop replaces the first.
    */
@@ -887,7 +894,7 @@ export interface CyberspaceState {
   respawn: () => Promise<void>
   /**
    * Respawn from a broken chain (arkinox, 2026-10-07, Q3): first the last
-   * valid position goes into the Position panel's RECENT as "End of Chain"
+   * valid position goes into the View panel's RECENT as "End of Chain"
    * and the first eight hex of the last valid event's id (the invalid
    * spawn's, when no event is valid, Q7), so the place the old chain froze
    * at is one tap away; then an ordinary respawn.
@@ -933,8 +940,8 @@ export interface CyberspaceState {
   /** Whether the pad's VIEW is on: a free view begun from the pad, as opposed to one begun from a pin, a star or BUILD. */
   viewing: () => boolean
   /** Look at a fixed coordinate (a deployed shard), optionally jumping the scale. */
-  /** Look at a place. With `drive` the cursor comes along: the free view, driven from the pad. */
-  focusOn: (position: Position, plane: Plane, label: string, scaleExp?: number, drive?: boolean) => void
+  /** Look at a place. With `drive` the cursor comes along: the free view, driven from the pad. `named`: the label is the place's name (CyberFocus). */
+  focusOn: (position: Position, plane: Plane, label: string, scaleExp?: number, drive?: boolean, named?: boolean) => void
   /** Look at a hidden item: focusOn, framed on the item where it is drawn. */
   focusItem: (position: Position, plane: Plane, label: string, scaleExp?: number) => void
   /**
@@ -4754,12 +4761,14 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
     // BUILD mode starts its build cursor where you are looking (useBuilder,
     // ruling A, 2026-10-07). Standing at the venue is not required to hide
     // something in it.
-    get().focusOn(pin.position, pin.plane, pin.label, pin.scaleExp, true)
+    // A pin dropped for a place found by name carries the name; one dropped
+    // for typed or clicked numbers reads them back as a coordinate.
+    get().focusOn(pin.position, pin.plane, pin.label, pin.scaleExp, true, parseViewAt(pin.label, pin.plane) === null)
   },
 
-  focusOn: (position, plane, label, scaleExp, drive = false) => {
+  focusOn: (position, plane, label, scaleExp, drive = false, named = false) => {
     const next: Partial<CyberspaceState> = {
-      focus: { position: { ...position }, plane, label, drive },
+      focus: { position: { ...position }, plane, label, drive, ...(named ? { named } : {}) },
       // A free view brings the cursor along, so the pad moves it there and a
       // message or a shard placed from the view lands there, not at your head.
       ...(drive ? { cursor: { ...position } } : {}),

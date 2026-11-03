@@ -92,7 +92,7 @@ export function BuildBar(): JSX.Element | null {
       <Explanation>
         <ul className="buildbar__explain">
           <li>The white cube marked BUILD is the build cursor: what you place lands in its cell.</li>
-          <li>Move it with the pad or W A S D (R and F for depth). + and − (Q and E on a keyboard) make the cells bigger or smaller. VIEW in the Position panel jumps it anywhere; P switches the plane.</li>
+          <li>Move it with the pad or W A S D (R and F for depth). + and − (Q and E on a keyboard) make the cells bigger or smaller. VIEW in the View panel jumps it anywhere; P switches the plane.</li>
           <li>[ ] Home End aim it along a chain, yours or a spectated avatar's: each step puts it on that action. Spectating keeps build mode on.</li>
           <li>When you place something, its ghost shows where it lands and the green box is the region someone must compute to find it; the height you hide it at sets that box.</li>
           {/* The cutoff in words a touch screen shows: the deploy bar's chip

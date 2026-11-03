@@ -3,7 +3,7 @@
  *
  * While this is up you are aiming, not moving: a deploy happens in BUILD mode
  * (store/useBuilder.ts), so the build cursor picks the spot (WASD, the pad,
- * the zoom, the Position panel, all of it), the shard ghosts there, and
+ * the zoom, the View panel, all of it), the shard ghosts there, and
  * DEPLOY hides it at the build cursor. Nothing here moves your avatar. The one real choice is the height, which is the discovery
  * radius (spec §7.3): height 0 is a single gibson, so only someone standing on
  * that exact point finds it; each step up doubles the aligned cube it hides in

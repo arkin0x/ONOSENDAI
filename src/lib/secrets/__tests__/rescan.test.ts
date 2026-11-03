@@ -26,11 +26,11 @@ const mem = new Map<string, string>()
   clear: () => { mem.clear() },
 }
 
-type Ev = { id: string; content: string; created_at: number; tags: string[][] }
+type Ev = { id: string; pubkey?: string; content: string; created_at: number; tags: string[][] }
 /** How one stand-in relay behaves. */
 type Behavior = { url: string; cap: number; refuse?: boolean; ignoresUntil?: boolean }
 const relay = vi.hoisted(() => ({
-  events: [] as Array<{ id: string; content: string; created_at: number; tags: string[][] }>,
+  events: [] as Array<{ id: string; pubkey?: string; content: string; created_at: number; tags: string[][] }>,
   calls: [] as Array<{ ids: string[]; until?: number; limit?: number }>,
   relays: [] as Array<{ url: string; cap: number; refuse?: boolean; ignoresUntil?: boolean }>,
   inFlight: 0,
@@ -59,6 +59,8 @@ function answers(ids: string[], until: number | undefined, limit: number | undef
 vi.mock('../../relay', () => ({
   publishMany: vi.fn(async () => ({ ok: true })),
   relaySet: () => relay.relays.map((r) => r.url),
+  // The deletions a scan asks about (lib/bagVersions.ts): none here.
+  query: vi.fn(async () => []),
   queryEach: vi.fn(async (filter: { '#d': string[]; until?: number; limit?: number }) => {
     relay.calls.push({ ids: filter['#d'], until: filter.until, limit: filter.limit })
     relay.inFlight++
@@ -94,7 +96,8 @@ const lookup = (n: number): string => n.toString(16).padStart(64, '0')
 const keyOf = (n: number): string => (n + 1_000_000).toString(16).padStart(64, '0')
 let serial = 0
 /** A bag filed under lookup id `n`, opening with key `n`. */
-const bag = (n: number, createdAt = 1_000): Ev => ({ id: `e${(serial++).toString(16).padStart(63, '0')}`, content: keyOf(n), created_at: createdAt, tags: [['d', lookup(n)]] })
+// Each by its own author: a relay holds one version of an address, so many bags under one id are many hiders' (lib/bagVersions.ts).
+const bag = (n: number, createdAt = 1_000): Ev => { const s = (serial++).toString(16).padStart(63, '0'); return { id: `e${s}`, pubkey: `p${s}`, content: keyOf(n), created_at: createdAt, tags: [['d', lookup(n)]] } }
 
 const heldKey = (n: number, over: Partial<HeldKey> = {}): HeldKey => ({
   lookupId: lookup(n), keyHex: keyOf(n), height: 4, base: { x: '0', y: '0', z: '0' }, plane: 0, source: 'hop', at: 1, ...over,

@@ -1,6 +1,6 @@
 /**
- * nearbyLootTabs.test.tsx: DISCOVERED NEARBY opens on ITEMS with every tab
- * counted, an empty one dimmed; CHESTS and DOORS rows say LOCKED or OPEN from
+ * nearbyLootTabs.test.tsx: DISCOVERED NEARBY opens on the first tab with
+ * anything in it, ITEMS first, with every tab counted, an empty one dimmed; CHESTS and DOORS rows say LOCKED or OPEN from
  * the opened state, a door open only because of another of its room included;
  * DELETE on a held item asks first, naming it. Rendered to a string.
  */
@@ -61,6 +61,31 @@ describe('the tabs of DISCOVERED NEARBY', () => {
     expect(html).not.toContain('Hall Door')
     expect(html).toMatch(/<span>CHESTS<\/span><span class="nearby__count">1</)
     expect(html).toMatch(/<span>DOORS<\/span><span class="nearby__count">1</)
+  })
+
+  it('with no items, opens on the first tab left to right that has something: CHESTS before DOORS', () => {
+    list.items = [door, chest]
+    const html = renderToStaticMarkup(<NearbyList />)
+    expect(html).toMatch(/aria-selected="true"[^>]*><span>CHESTS<\/span><span class="nearby__count">1</)
+    expect(html).toContain('Strongbox')
+    expect(html).not.toContain('Hall Door')
+  })
+
+  it('with only a door, opens on DOORS', () => {
+    list.items = [door]
+    const html = renderToStaticMarkup(<NearbyList />)
+    expect(html).toMatch(/aria-selected="true"[^>]*><span>DOORS<\/span>/)
+    expect(html).toContain('Hall Door')
+  })
+
+  it('with nothing at all, opens on ITEMS', () => {
+    const html = renderToStaticMarkup(<NearbyList />)
+    expect(html).toMatch(/aria-selected="true"[^>]*><span>ITEMS<\/span>/)
+  })
+
+  it('draws the tabs in his order: ITEMS, CHESTS, DOORS, MESSAGES, SOUNDS, SHARDS', () => {
+    const html = renderToStaticMarkup(<NearbyTabs tab="items" counts={{ items: 0, shards: 0, sounds: 0, chests: 0, doors: 0, messages: 0 }} onTab={() => undefined} />)
+    expect([...html.matchAll(/<span>([A-Z]+)<\/span><span class="nearby__count">/g)].map((m) => m[1])).toEqual(['ITEMS', 'CHESTS', 'DOORS', 'MESSAGES', 'SOUNDS', 'SHARDS'])
   })
 
   it('keeps a tab with nothing, dimmed', () => {

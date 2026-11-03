@@ -2785,14 +2785,20 @@ kbd {
 
 /* ---------- Spectate bar ----------
  *
- * Top right on a desktop, flush to the edge: the panels are locked away while
- * this is up, so there is no column to leave room for. Along the bottom on a
- * phone, where the movement pad would be if it were yours to use.
+ * Bottom right at every width, under the zoom keys, its right edge on the
+ * pad's (--controls-right), as the other bottom right controls are (arkinox,
+ * 2026-11-03: top right on a desktop it sat over the axes widget). It hangs
+ * from the right edge and is as wide as what it says, no wider: pinned to
+ * both edges it stretched across the whole bottom with a field of nothing to
+ * the right of the button. The cap keeps it clear of the menu button's
+ * corner on the left (--menu-left and --menu-size, 352px and 46px in on a
+ * desktop).
  */
 .spectate {
   position: fixed;
-  top: 12px;
-  right: 14px;
+  right: var(--controls-right);
+  bottom: 14px;
+  max-width: calc(100vw - var(--controls-right) - var(--menu-left) - var(--menu-size) - 20px);
   z-index: 101;
   display: flex;
   align-items: center;
@@ -2806,7 +2812,16 @@ kbd {
   box-shadow: 0 0 14px rgba(255, 35, 35, 0.18);
   font-size: 9px;
   letter-spacing: 0.1em;
-  max-width: calc(100vw - 24px);
+}
+
+/* The pad stands a gap above the bar, however tall its words make it
+ * (SpectateBar writes --spectate-top); never lower than its own 92px. So
+ * does CONTROLS, which brings a folded pad back from the same corner. */
+.app:has(.spectate) .touchpad {
+  bottom: max(92px, calc(var(--spectate-top, 0px) + 10px));
+}
+.app:has(.spectate) .touchhint {
+  bottom: calc(var(--spectate-top, 0px) + 10px);
 }
 
 .spectate__eye {
@@ -2841,9 +2856,9 @@ kbd {
   white-space: nowrap;
 }
 
+/* Wraps once the bar meets its cap, at any width. */
 .spectate__meta {
   color: var(--dim);
-  white-space: nowrap;
 }
 
 .spectate__end {
@@ -2865,22 +2880,6 @@ kbd {
   background: #ff5c5c;
 }
 
-/* Under 1100px the bar moves to the bottom. It hangs from the right edge and
- * is as wide as what it says, no wider: pinned to both edges it stretched
- * across the whole bottom with a field of nothing to the right of the button.
- * The cap keeps it clear of the menu button's corner on the left. */
-@media (max-width: 1100px) {
-  .spectate {
-    top: auto;
-    right: 14px;
-    bottom: 14px;
-    max-width: calc(100vw - 106px);
-  }
-
-  .spectate__meta {
-    white-space: normal;
-  }
-}
 
 .hamburger-menu:disabled {
   opacity: 0.3;
@@ -7744,6 +7743,12 @@ kbd {
 @media (max-width: 640px) {
   .nearby__row .chest__act, .nearby__row .nearby__view, .secrets__box .secrets__close, .held__acts .chest__act--danger { min-height: 44px; min-width: 44px; }
 }
+/* An item's row of buttons in ITEMS: DETAILS, COPY, PUBLISH and DELETE all
+ * the same fingertip height, not DELETE alone (review of #584). On a narrow
+ * screen, as above, and on any touch screen however wide. */
+@media (max-width: 640px), (pointer: coarse) {
+  .held__row--item .held__acts .chest__act { min-height: 44px; min-width: 44px; }
+}
 /* DELETE on a held item: it destroys something, so it does not read as COPY does. */
 .chest__act.chest__act--danger { color: var(--danger); border-color: color-mix(in srgb, var(--danger) 50%, transparent); background: transparent; }
 .chest__act.chest__act--danger:hover { background: color-mix(in srgb, var(--danger) 14%, transparent); }
@@ -9328,6 +9333,11 @@ a.feed__act { text-decoration: none; }
 .held__row { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 8px; }
 .held__row .chest { grid-column: 2; }
 .held__acts { display: flex; gap: 4px; align-items: center; }
+/* An item you hold: the picture beside the name and its line, both the full
+ * width of the row, and DETAILS, COPY, PUBLISH and DELETE on a row of their
+ * own under them, lined up with the name (arkinox, 2026-11-03). */
+.held__row--item { grid-template-columns: auto minmax(0, 1fr); row-gap: 6px; }
+.held__row--item .held__acts { grid-column: 2 / -1; flex-wrap: wrap; }
 .held__refusal { grid-column: 1 / -1; font-size: 10px; color: var(--danger); padding-left: 22px; }
 .held__details { grid-column: 1 / -1; display: flex; flex-direction: column; gap: 4px; padding: 2px 0 2px 22px; font-size: 10px; }
 .held__details dl { display: grid; grid-template-columns: auto 1fr; gap: 3px 10px; margin: 0; }

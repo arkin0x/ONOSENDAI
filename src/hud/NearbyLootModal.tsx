@@ -9,7 +9,8 @@
  * the thing the way the bag record's VIEW does. A key row has TAKE until it
  * is held; a chest row opens here when you hold what opens it (ItemRows).
  * Tabs sort the list by kind, ITEMS first (lib/nearbyTabs.ts); every opening
- * starts on ITEMS, and RETURN from a VIEW comes back to the tab it left.
+ * starts on the first tab, left to right, with anything in it (arkinox,
+ * 2026-11-01), and RETURN from a VIEW comes back to the tab it left.
  */
 
 import { useEffect, useMemo, useState } from 'react'
@@ -29,7 +30,7 @@ import { rememberNearbyReturn } from '../lib/nearbyReturn'
 import { ProfilePic } from './ProfileBadge'
 import { ChestBlock, KeyLine, listedOnce, useChestOpen } from './ItemRows'
 import { useEscape } from '../hooks/useEscape'
-import { DEFAULT_NEARBY_TAB, NEARBY_TABS, byTab, type NearbyTab } from '../lib/nearbyTabs'
+import { NEARBY_TABS, byTab, firstFilledTab, type NearbyTab } from '../lib/nearbyTabs'
 import { lockWord, useOpenedChests } from '../store/useOpenedChests'
 
 /** Where a nearby item was found, for what is taken out of a chest here. */
@@ -106,18 +107,20 @@ export function NearbyLootModal(): JSX.Element | null {
   return open ? <NearbyList /> : null
 }
 
-/** Mounted only while the list is open, so each opening starts on ITEMS. */
+/** Mounted only while the list is open, so each opening picks its tab afresh. */
 export function NearbyList(): JSX.Element {
   const me = useCyberspace((s) => s.identity.pubkey)
   const items = useNearbyLoot()
   const chestOpen = useChestOpen()
-  const [tab, setTab] = useState<NearbyTab>(() => viewedTab ?? DEFAULT_NEARBY_TAB)
-  useEffect(() => { viewedTab = null }, [])
   // Newest first; sort is stable, so the hook's nearest-first order breaks
   // ties. A thing that came out of a chest open in this list is listed under
   // that chest, with its TAKE, and not again on its own (review of #519).
   const list = useMemo(() => listedOnce(items, (i) => i.key, chestOpen).sort((a, b) => (b.createdAt ?? 0) - (a.createdAt ?? 0)), [items, chestOpen])
   const tabs = useMemo(() => byTab(list), [list])
+  const counts: Record<NearbyTab, number> = { items: tabs.items.length, shards: tabs.shards.length, sounds: tabs.sounds.length, chests: tabs.chests.length, doors: tabs.doors.length, messages: tabs.messages.length }
+  // The tab a VIEW left, or the first with anything in it.
+  const [tab, setTab] = useState<NearbyTab>(() => viewedTab ?? firstFilledTab(counts))
+  useEffect(() => { viewedTab = null }, [])
   const close = (): void => useShards.getState().setNearbyOpen(false)
   const view = (item: NearbyItem): void => {
     // Where to come back to, spectation and link included, before looking away.
@@ -127,7 +130,6 @@ export function NearbyList(): JSX.Element {
     const unit = item.type === 'shard' ? item.shard?.unit ?? 0 : 0
     useCyberspace.getState().focusItem(item.at, item.plane, labelOf(item).toUpperCase(), unit)
   }
-  const counts: Record<NearbyTab, number> = { items: tabs.items.length, shards: tabs.shards.length, sounds: tabs.sounds.length, chests: tabs.chests.length, doors: tabs.doors.length, messages: tabs.messages.length }
   return (
     <div className="modal" role="dialog" aria-label="Discovered nearby" aria-modal="true" onPointerDown={close}>
       <div className="modal__card secrets__box" onPointerDown={(e) => e.stopPropagation()}>

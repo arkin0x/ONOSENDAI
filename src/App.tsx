@@ -336,9 +336,9 @@ export default function App(): JSX.Element {
               {/* Not during the /demo tour (arkinox, 2026-10-15). */}
               {!building && !touring && <LineScrubber />}
               <HyperspaceBar />
-              {/* In BUILD mode too (arkinox, 2026-10-08): scrubbing a chain,
-                  yours or a spectated avatar's, aims the build cursor at the
-                  action instead of going into history (useBuilder walkChain). */}
+              {/* Not in BUILD mode, and neither is NEARBY (arkinox,
+                  2026-11-02); each chip stands down itself. [ ] Home End
+                  still aim the build cursor along a chain (useBuilder walkChain). */}
               <ChainExplorer />
               {!building && <BitReadout />}
               {/* Under XOR BITS while anything is unread (arkinox, 2026-09-28). */}

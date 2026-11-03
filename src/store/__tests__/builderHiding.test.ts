@@ -47,7 +47,7 @@ beforeEach(() => {
 })
 
 describe('the view ending while a message is already being hidden', () => {
-  it('ends BUILD, says the hide finishes, keeps no draft, and the message is hidden once', async () => {
+  it('ends BUILD, keeps no draft, and the message is hidden once', async () => {
     useShards.getState().startDeployMessage('meet me at the fountain')
     const hiding = useShards.getState().deploy()
     expect(useShards.getState().deployStatus).toBe('working')
@@ -55,9 +55,7 @@ describe('the view ending while a message is already being hidden', () => {
     S().focusOn(S().position, 0, 'EARTH · tap')
     expect(B().active).toBe(false)
     expect(B().messageDraft).toBeNull()
-    const meta = useToast.getState().toast?.meta ?? ''
-    expect(meta).toMatch(/already being hidden, and it finishes at the place you chose/)
-    expect(meta).not.toMatch(/kept/)
+    expect(useToast.getState().toast).toMatchObject({ label: 'BUILD MODE ENDED', meta: '' })
     await hiding
     expect(hidden('meet me at the fountain')).toBe(1)
     expect(useShards.getState().pending).toBeNull()
@@ -91,13 +89,12 @@ describe('a deploy lined up while an earlier one is still hiding', () => {
 })
 
 describe('a lined-up deploy BUILD has to end', () => {
-  it('says plainly that its height and bag settings, and the hint message written, were not kept', () => {
+  it('keeps the message and says only BUILD MODE ENDED (arkinox, 2026-11-02)', () => {
     useShards.getState().startDeployMessage('a riddle goes with this')
     useShards.getState().setDeployBag({ riddle: 'under the third lamp' })
     S().focusOn(S().position, 0, 'EARTH · tap')
-    const meta = useToast.getState().toast?.meta ?? ''
-    expect(meta).toMatch(/Your message is kept/)
-    expect(meta).toMatch(/Its height and bag settings, including the hint message you wrote, were not kept/)
+    expect(B().messageDraft).toBe('a riddle goes with this')
+    expect(useToast.getState().toast).toMatchObject({ label: 'BUILD MODE ENDED', meta: '' })
   })
 })
 

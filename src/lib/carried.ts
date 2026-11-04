@@ -11,8 +11,8 @@
  */
 
 import { sha256 } from '@noble/hashes/sha2.js'
-import { carriedTable, carryAll, parseAddress, withAuthor } from 'sno-core/parts'
-import { toPayload, uuid, type ShardModel } from 'sno-core/shards'
+import { carriedTable, carryAll, parseAddress, withAuthor, type CarryChoice } from 'sno-core/parts'
+import { toPayload, uuid, type Ref, type ShardModel } from 'sno-core/shards'
 import { withAuthoredConstrain } from './walkConstrain'
 
 /**
@@ -219,7 +219,28 @@ export function foreignNotice(count: number): string {
  */
 export function placedOnly(model: ShardModel): ShardModel {
   if (!model.objects) return model
-  return carryAll(model, () => null, { prune: true })
+  return carryReached(model, () => null, authorOf(model))
+}
+
+/**
+ * sno-core carryAll with `lookup`, and the entries no placement reaches
+ * pruned (DECK-0003 §1.10), but only when every placement under your key
+ * could be looked inside: one that could not (a LIVE LINK to your own object,
+ * not opened here) may reach an entry through the table, which the root's
+ * table answers at every depth, and what cannot be seen is not pruned. A
+ * placement of someone else's object never blocks it, since keys under
+ * their name in your table count for nothing (review of the stack).
+ */
+export function carryReached(model: ShardModel, lookup: (ref: Ref) => CarryChoice | null, me: string | null): ShardModel {
+  let blind = false
+  const mine = me ? `33331:${me}:` : null
+  const look = (ref: Ref): CarryChoice | null => {
+    const choice = lookup(ref)
+    if (!choice && ref[0] === 'a' && (mine === null || ref[1].startsWith(mine))) blind = true
+    return choice
+  }
+  const carried = carryAll(model, look)
+  return blind ? carried : carryAll(carried, lookup, { prune: true })
 }
 
 /** The bytes a relay is taken to accept for one event, as DECK-0003 §1.8 measures them. */
@@ -230,8 +251,16 @@ const RELAY_EVENT_BYTES = 131_072
  * or null when it fits or carries nothing (D3's words).
  */
 export function clearRefusal(event: { content: string; tags: string[][] }, carries: boolean): string | null {
-  if (!carries) return null
-  // With the fields a signer adds: id, pubkey and sig, a timestamp and a nonce tag.
+  return carries ? relayRefusal(event) : null
+}
+
+/**
+ * Why an event is more than a relay takes, in D3's words, or null when it
+ * fits: measured with the fields a signer adds (id, pubkey and sig, a
+ * timestamp and a nonce tag). Every bag is held to it before it is signed
+ * (store/useShards signBag), so no hide reports done for a bag no relay takes.
+ */
+export function relayRefusal(event: { content: string; tags: string[][] }): string | null {
   const bytes = new TextEncoder().encode(JSON.stringify({ id: '', pubkey: '', sig: '', ...event })).length + 350
   if (bytes <= RELAY_EVENT_BYTES) return null
   return `${Math.ceil(bytes / 1024)}kb of ${RELAY_EVENT_BYTES / 1024}kb may be larger than relays will accept. Keep this part separate.`
@@ -274,42 +303,71 @@ export function rekeyCarried(model: ShardModel, me: string | null): ShardModel {
   return { ...refsOf(model), objects, author: me }
 }
 
-/** A model that came out of a bag or a chest: local only, never on the wire, like `author`. */
-type Taken = ShardModel & { takenFromBag?: true }
+/**
+ * A model that came out of a bag or a chest: local only, never on the wire,
+ * like `author`. The mark names the table entries that came sealed (D1,
+ * arkinox's default of 2026-11-04), so your own pieces placed beside them
+ * are never left out with them. `true` is the mark as #543 wrote it, for
+ * every entry the shard held then (legacyMark reads it so at load).
+ */
+type Taken = ShardModel & { takenFromBag?: true | string[] }
+
+/** The table entries that came to you sealed: the mark's keys the table still holds. */
+export function sealedKeys(model: ShardModel): Set<string> {
+  const mark = (model as Taken).takenFromBag
+  const table = model.objects ?? {}
+  if (mark === true) return new Set(Object.keys(table))
+  return new Set((mark ?? []).filter((k) => Object.prototype.hasOwnProperty.call(table, k)))
+}
+
+/** `model` marked with `keys` sealed beside what it had, or unmarked when none are. */
+export function withSealed(model: ShardModel, keys: Iterable<string>): ShardModel {
+  const all = new Set([...sealedKeys(model), ...keys])
+  const { takenFromBag: _was, ...rest } = model as Taken
+  void _was
+  return all.size ? ({ ...rest, takenFromBag: [...all].sort() } as Taken) : rest
+}
+
+/** A shard as the workshop stored it: #543's `takenFromBag: true` is every key it held when it loads. */
+export function legacyMark(model: ShardModel): ShardModel {
+  return (model as Taken).takenFromBag === true ? withSealed({ ...model, takenFromBag: undefined } as ShardModel, Object.keys(model.objects ?? {})) : model
+}
 
 /**
  * A model taken into your keeping from where it was hidden: its table keyed under
- * you (rekeyCarried), and marked, so that what was sealed does not go public with
- * a PUBLISH (withoutCarried). Only one that carries anything needs the mark, and
- * only one that was sealed: a public object a bag only names (a LIVE LINK) had
- * its table in the clear already (`sealed` false).
+ * you (rekeyCarried), and every entry of it marked, so that what was sealed does
+ * not go public with a PUBLISH (withoutCarried). Only one that carries anything
+ * needs the mark, and only one that was sealed: a public object a bag only names
+ * (a LIVE LINK) had its table in the clear already (`sealed` false).
  */
 export function takeIntoKeeping(model: ShardModel, me: string | null, sealed = true): ShardModel {
   const out = rekeyCarried(model, me)
-  return out.objects && sealed ? ({ ...out, takenFromBag: true } as Taken) : out
+  return out.objects && sealed ? withSealed(out, Object.keys(out.objects)) : out
 }
 
 /** Whether this model carries parts that came to you sealed: publishing them in the clear needs asking. */
 export function carriesSealedParts(model: ShardModel): boolean {
-  return !!(model as Taken).takenFromBag && !!model.objects && Object.keys(model.objects).length > 0
+  return sealedKeys(model).size > 0
 }
 
 /**
  * A model without the parts it carries from where it was hidden, as it goes out in
- * public: the table, the placements that drew on it, and their refs. A placement
- * of a public object stays. The same model when there is nothing to take out.
+ * public: those entries, the placements that drew on them, and their refs. Your
+ * own pieces carried beside them stay, and so does a placement of a public
+ * object. The same model when there is nothing to take out.
  */
 export function withoutCarried(model: ShardModel): ShardModel {
-  if (!carriesSealedParts(model)) return model
-  const carried = new Set(Object.keys(model.objects ?? {}))
+  const sealed = sealedKeys(model)
+  if (sealed.size === 0) return model
   const refs = model.refs ?? []
-  const kept = refs.map((r, i) => [r, i] as const).filter(([r]) => !(r[0] === 'a' && carried.has(r[1])))
+  const kept = refs.map((r, i) => [r, i] as const).filter(([r]) => !(r[0] === 'a' && sealed.has(r[1])))
   const index = new Map(kept.map(([, old], now) => [old, now]))
   const parts = (model.parts ?? []).filter((p) => index.has(p.ref)).map((p) => ({ ...p, ref: index.get(p.ref)! }))
+  const table = Object.fromEntries(Object.entries(model.objects ?? {}).filter(([k]) => !sealed.has(k)))
   const { objects: _table, takenFromBag: _mark, refs: _refs, parts: _parts, ...rest } = model as Taken
   void _table
   void _mark
   void _refs
   void _parts
-  return { ...rest, ...(kept.length ? { refs: kept.map(([r]) => r) } : {}), ...(parts.length ? { parts } : {}) }
+  return { ...rest, ...(Object.keys(table).length ? { objects: table } : {}), ...(kept.length ? { refs: kept.map(([r]) => r) } : {}), ...(parts.length ? { parts } : {}) }
 }

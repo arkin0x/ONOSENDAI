@@ -34,11 +34,43 @@ interface SoundMuteState {
 
 export const useSoundMutes = create<SoundMuteState>(() => ({ tracks: new Set(), master: false, ready: false }))
 
-let db: Promise<IDBDatabase | null> | null = null
+let db: Promise<IDBDatabase> | null = null
 
+/**
+ * The open connection, or null where there is none to be had. Kept only
+ * while it lives, as lib/chainDb.ts keeps its own: an open that failed or
+ * timed out is tried again next time, and a connection the browser drops
+ * (iOS, after a while in the background) or a newer build in another tab
+ * upgrades is let go, and opened again on the next read or write.
+ */
 function database(): Promise<IDBDatabase | null> {
-  if (!db) db = typeof indexedDB === 'undefined' ? Promise.resolve(null) : openSoundMuteDb().catch(() => null)
-  return db
+  if (typeof indexedDB === 'undefined') return Promise.resolve(null)
+  if (!db) {
+    const opening = openSoundMuteDb().then((d) => {
+      d.onversionchange = () => { d.close(); if (db === opening) db = null }
+      d.onclose = () => { if (db === opening) db = null }
+      return d
+    })
+    opening.catch(() => { if (db === opening) db = null })
+    db = opening
+  }
+  return db.catch(() => null)
+}
+
+/** `run` on the open database; on a failure, once more on a fresh connection, since the cached one may be dead. Throws when there is none. */
+async function withDb(run: (d: IDBDatabase) => Promise<void>): Promise<void> {
+  const d = await database()
+  if (!d) throw new Error('No IndexedDB')
+  try {
+    await run(d)
+  } catch {
+    // That connection is let go, closed so it blocks nothing, and a fresh one opened.
+    try { d.close() } catch { /* already closed */ }
+    db = null
+    const again = await database()
+    if (!again) throw new Error('No IndexedDB')
+    await run(again)
+  }
 }
 
 /** Switches flipped before the read landed: they win over what it read. */
@@ -57,11 +89,36 @@ export async function loadSoundMutes(): Promise<void> {
   useSoundMutes.setState({ tracks, master: masterFlipped ?? stored.master, ready: true })
 }
 
+/**
+ * Flips not yet on disk. A write that fails leaves them here, and the next
+ * flip writes them all, so a lost connection loses nothing it can get back.
+ */
+const unsavedTracks = new Map<string, boolean>()
+let unsavedMaster: boolean | null = null
+
 /** The writes, one after another, so two quick flips land in the order made. */
 let writes: Promise<void> = Promise.resolve()
 
-function persist(run: (d: IDBDatabase) => Promise<void>): void {
-  writes = writes.then(() => database()).then((d) => (d ? run(d) : undefined)).catch(() => { /* kept for the session */ })
+async function writeUnsaved(): Promise<void> {
+  if (unsavedTracks.size === 0 && unsavedMaster === null) return
+  const tracks = [...unsavedTracks]
+  const master = unsavedMaster
+  await withDb(async (d) => {
+    for (const [id, on] of tracks) await putTrackMute(d, id, on)
+    if (master !== null) await putMasterMute(d, master)
+  })
+  // Only what was written and not flipped again since.
+  for (const [id, on] of tracks) if (unsavedTracks.get(id) === on) unsavedTracks.delete(id)
+  if (master !== null && unsavedMaster === master) unsavedMaster = null
+}
+
+function persist(): void {
+  writes = writes.then(writeUnsaved).catch(() => { /* kept for the session, and tried again with the next flip */ })
+}
+
+/** The connection as it is now cached, if any (tests). */
+export function soundMuteConnectionForTests(): Promise<IDBDatabase> | null {
+  return db
 }
 
 /** Resolves once every flip so far is written (tests). */
@@ -88,7 +145,8 @@ export function toggleTrackMute(id: string): void {
   else tracks.delete(id)
   if (!useSoundMutes.getState().ready) flipped.set(id, on)
   useSoundMutes.setState({ tracks })
-  persist((d) => putTrackMute(d, id, on))
+  unsavedTracks.set(id, on)
+  persist()
 }
 
 /** Flip MUTE ALL; each track's own switch stays as it is. */
@@ -96,13 +154,16 @@ export function toggleMasterMute(): void {
   const master = !useSoundMutes.getState().master
   if (!useSoundMutes.getState().ready) masterFlipped = master
   useSoundMutes.setState({ master })
-  persist((d) => putMasterMute(d, master))
+  unsavedMaster = master
+  persist()
 }
 
 /** Forget the connection and the early flips (tests). */
 export function resetSoundMutesForTests(): void {
   db = null
   writes = Promise.resolve()
+  unsavedTracks.clear()
+  unsavedMaster = null
   flipped.clear()
   masterFlipped = null
   useSoundMutes.setState({ tracks: new Set(), master: false, ready: false })

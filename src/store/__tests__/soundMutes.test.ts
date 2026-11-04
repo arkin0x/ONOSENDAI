@@ -36,9 +36,13 @@ import type { AudioItem } from '../../lib/audioItem'
 import { sha256Hex } from '../../lib/blossom'
 import { forgetAudioContext } from '../../lib/audioContext'
 import { toneWav } from '../../lib/__tests__/audioFixture'
-import { playingRows } from '../../hud/NowPlaying'
-import { cardKey, cardSounding, playAudio, setWorldGain, startWorld, stopAllAudio, stopWorld, useHiddenAudio, worldKey } from '../useHiddenAudio'
-import { loadSoundMutes, resetSoundMutesForTests, soundMutesSaved, toggleMasterMute, toggleTrackMute, trackSilenced, useSoundMutes } from '../useSoundMutes'
+import { playingRows, waitingCount } from '../../hud/NowPlaying'
+import { applyGains, startPlanned } from '../../scene/HiddenAudio'
+import { triggerFired } from '../../lib/audioTrigger'
+import { shouldDuck } from '../../lib/audioWorld'
+import type { WorldItem } from '../useShards'
+import { cardKey, cardSounding, playAudio, setWorldGain, startWorld, stopAllAudio, stopWorld, useHiddenAudio, worldKey, type AudioEntry } from '../useHiddenAudio'
+import { loadSoundMutes, resetSoundMutesForTests, soundMuteConnectionForTests, soundMutesSaved, toggleMasterMute, toggleTrackMute, trackSilenced, useSoundMutes } from '../useSoundMutes'
 import * as tv from '../useTvMusic'
 
 /** Any Web Audio node or param: every property is another, every call returns another, numbers are 0. */
@@ -52,13 +56,18 @@ function anything(): unknown {
   return p
 }
 
-/** A gain's param, recording the level it was last asked to reach. */
-interface Param { value: number; setTargetAtTime: (v: number) => Param }
+/** A gain's param, recording the level it was last asked to reach, and every call, in order. */
+interface Param { value: number; calls: string[]; setTargetAtTime: (v: number) => Param; setValueAtTime: (v: number) => Param }
 /** Every gain made, in order: the newest after a voice starts is that voice's. */
 const params: Param[] = []
 
 function recordingGain(): unknown {
-  const param: Param = { value: 1, setTargetAtTime: (v: number) => { param.value = v; return param } }
+  const param: Param = {
+    value: 1,
+    calls: [],
+    setTargetAtTime: (v: number) => { param.value = v; param.calls.push(`ease ${v}`); return param },
+    setValueAtTime: (v: number) => { param.value = v; param.calls.push(`set ${v}`); return param },
+  }
   params.push(param)
   const base = anything() as Record<string | symbol, unknown>
   return new Proxy(base, { get: (t, k) => (k === 'gain' ? param : t[k]) })
@@ -93,6 +102,8 @@ class FakeAudio extends EventTarget {
 }
 
 let drip: AudioItem
+/** Long enough (over DECODE_WHOLE_BYTES) to stream from an element, not decode whole. */
+let drone: AudioItem
 const realFetch = globalThis.fetch
 const flush = async (): Promise<void> => { for (let i = 0; i < 8; i++) await Promise.resolve() }
 /** A reload: the store forgets everything and reads it back from this device's database. */
@@ -125,6 +136,8 @@ beforeEach(async () => {
   forgetOpenedAudio()
   const up = await sealAndUpload(new Blob([toneWav(1) as BlobPart], { type: 'audio/wav' }), 'https://blossom.test', async (t) => finalizeEvent(t, generateSecretKey()))
   drip = { ...up, title: 'Drip', about: '', autoplay: true, loop: true, retrigger: 'once', walkOnly: false }
+  const long = await sealAndUpload(new Blob([toneWav(70) as BlobPart], { type: 'audio/ogg' }), 'https://blossom.test', async (t) => finalizeEvent(t, generateSecretKey()))
+  drone = { ...long, title: 'Drone', about: '', autoplay: true, loop: true, retrigger: 'once', walkOnly: false }
   useHiddenAudio.setState({ entries: {} })
   tv.useTvMusic.setState({ track: { title: 'Acid Bench', artist: 'Sethy Bowoy' } as never, muted: false, volume: 0.6 })
 })
@@ -276,5 +289,160 @@ describe('before the switches are read', () => {
     await loadSoundMutes()
     expect(useSoundMutes.getState()).toMatchObject({ master: true, ready: true })
     expect(useSoundMutes.getState().tracks.has('lineage-a')).toBe(true)
+  })
+})
+
+/** A world item as the scene holds one: its key, and the lineage a move keeps. */
+const item = (key: string, lineage: string, audio: AudioItem): WorldItem => ({ key, type: 'audio', audio, lineage } as unknown as WorldItem)
+let seq = 0
+/** A lineage no other test has fired. */
+const fresh = (): string => `lineage-${Date.now()}-${seq++}`
+/** The scene does not wait for a voice to start: wait here until it sounds. */
+const sounding = (key: string): Promise<void> => vi.waitFor(() => expect(useHiddenAudio.getState().entries[worldKey(key)]?.phase).toBe('playing'), { timeout: 3000, interval: 5 })
+
+describe('a streamed world voice (a file too long to decode whole)', () => {
+  it('starts silent when its track is muted, and is heard at its fade when unmuted', async () => {
+    toggleTrackMute('lineage-d')
+    setWorldGain('long-1', 0.6)
+    await startWorld('long-1', drone, undefined, undefined, 'lineage-d')
+    await flush()
+    expect(useHiddenAudio.getState().entries[worldKey('long-1')]?.phase).toBe('playing')
+    const g = lastGain()
+    expect(g.value).toBe(0)
+    expect(g.calls).toEqual(['set 0'])
+    toggleTrackMute('lineage-d')
+    expect(g.value).toBeCloseTo(0.6)
+  })
+})
+
+describe('the scene', () => {
+  it('starts each planned voice muted by its item\'s lineage, not its key', async () => {
+    toggleTrackMute('lineage-moved')
+    setWorldGain('new-key', 0.9)
+    startPlanned([{ key: 'new-key', oneShot: false, lineage: 'lineage-moved' }], new Map([['new-key', item('new-key', 'lineage-moved', drip)]]))
+    await sounding('new-key')
+    expect(useHiddenAudio.getState().entries[worldKey('new-key')]?.trackId).toBe('lineage-moved')
+    expect(lastGain().value).toBe(0)
+  })
+
+  it('steps TV\'s music down only for the voices that are heard', () => {
+    const items = new Map([['a', item('a', 'lineage-a', drip)], ['b', item('b', 'lineage-b', drip)]])
+    toggleTrackMute('lineage-a')
+    expect(applyGains(new Map([['a', 0.9]]), items)).toEqual([])
+    expect(shouldDuck(applyGains(new Map([['a', 0.9]]), items), false)).toBe(false)
+    expect(applyGains(new Map([['a', 0.9], ['b', 0.4]]), items)).toEqual([0.4])
+    toggleMasterMute()
+    expect(applyGains(new Map([['b', 0.4]]), items)).toEqual([])
+  })
+})
+
+describe('a FIRST ENTRY one-shot (once-trigger)', () => {
+  const oneShot = (): AudioItem => ({ ...drip, loop: false, retrigger: 'once' })
+  const startOnce = (key: string, lineage: string): void => {
+    startPlanned([{ key, oneShot: true, lineage }], new Map([[key, item(key, lineage, oneShot())]]))
+  }
+
+  it('heard: spends its trigger as it sounds', async () => {
+    const l = fresh()
+    startOnce('o-1', l)
+    await sounding('o-1')
+    expect(useHiddenAudio.getState().entries[worldKey('o-1')]?.phase).toBe('playing')
+    expect(triggerFired(l)).toBe(true)
+  })
+
+  it('muted: plays unheard and keeps its trigger; unmuted while it plays, it spends it then', async () => {
+    const l = fresh()
+    toggleTrackMute(l)
+    startOnce('o-2', l)
+    await sounding('o-2')
+    expect(useHiddenAudio.getState().entries[worldKey('o-2')]?.phase).toBe('playing')
+    expect(triggerFired(l)).toBe(false)
+    toggleTrackMute(l)
+    expect(triggerFired(l)).toBe(true)
+  })
+
+  it('under MUTE ALL, and stopped before it is heard: the trigger is left for the next entry', async () => {
+    const l = fresh()
+    toggleMasterMute()
+    startOnce('o-3', l)
+    await sounding('o-3')
+    expect(triggerFired(l)).toBe(false)
+    stopWorld('o-3')
+    toggleMasterMute()
+    expect(triggerFired(l)).toBe(false)
+  })
+
+  it('before the switches are read: held, and spent once they are read and it is heard', async () => {
+    const l = fresh()
+    resetSoundMutesForTests()
+    startOnce('o-4', l)
+    await sounding('o-4')
+    expect(useHiddenAudio.getState().entries[worldKey('o-4')]?.phase).toBe('playing')
+    expect(triggerFired(l)).toBe(false)
+    await loadSoundMutes()
+    expect(triggerFired(l)).toBe(true)
+  })
+})
+
+describe('the connection', () => {
+  it('one the browser says it closed is let go at once, and the next flip opens another and is kept', async () => {
+    toggleTrackMute('lineage-a')
+    await soundMutesSaved()
+    const conn = await soundMuteConnectionForTests()!
+    conn.close()
+    conn.onclose?.call(conn, new Event('close'))
+    expect(soundMuteConnectionForTests()).toBeNull()
+    toggleTrackMute('lineage-b')
+    await reload()
+    expect([...useSoundMutes.getState().tracks].sort()).toEqual(['lineage-a', 'lineage-b'])
+  })
+
+  it('one that died with no word (Safari\'s lost connection): the write is tried once more on a fresh one', async () => {
+    toggleTrackMute('lineage-a')
+    await soundMutesSaved()
+    const conn = await soundMuteConnectionForTests()!
+    conn.close()
+    toggleTrackMute('lineage-b')
+    await reload()
+    expect([...useSoundMutes.getState().tracks].sort()).toEqual(['lineage-a', 'lineage-b'])
+  })
+
+  it('an open that fails is tried again, and what it could not write is written with the next flip', async () => {
+    const real = (globalThis as { indexedDB: unknown }).indexedDB
+    ;(globalThis as { indexedDB: unknown }).indexedDB = { open: () => { throw new Error('not now') } }
+    resetSoundMutesForTests()
+    await loadSoundMutes()
+    toggleTrackMute('lineage-a')
+    await soundMutesSaved()
+    ;(globalThis as { indexedDB: unknown }).indexedDB = real
+    toggleTrackMute('lineage-b')
+    await reload()
+    expect([...useSoundMutes.getState().tracks].sort()).toEqual(['lineage-a', 'lineage-b'])
+  })
+})
+
+describe('what NOW PLAYING says before the switches are read, and TAP FOR SOUND', () => {
+  it('rows are silent until the switches are read', () => {
+    const entries: Record<string, AudioEntry> = { [worldKey('w')]: { phase: 'playing', title: 'Drip', mode: 'world', itemKey: 'w', trackId: 'lineage-a' } }
+    expect(playingRows(entries, null, false, { tracks: new Set(), master: false, ready: false })[0]).toMatchObject({ muted: false, silenced: true })
+    expect(playingRows(entries, null, false, { tracks: new Set(), master: false, ready: true })[0]).toMatchObject({ muted: false, silenced: false })
+  })
+
+  it('TAP FOR SOUND counts only voices that would be heard', () => {
+    const entries: Record<string, AudioEntry> = {
+      [worldKey('w1')]: { phase: 'waiting', title: 'A', mode: 'world', itemKey: 'w1', trackId: 'lineage-a' },
+      [worldKey('w2')]: { phase: 'waiting', title: 'B', mode: 'world', itemKey: 'w2', trackId: 'lineage-b' },
+    }
+    toggleTrackMute('lineage-a')
+    expect(waitingCount(entries, (e) => trackSilenced(e.trackId))).toBe(1)
+    toggleMasterMute()
+    expect(waitingCount(entries, (e) => trackSilenced(e.trackId))).toBe(0)
+  })
+
+  it('a muted card starts at silence at once, never eased down from full', async () => {
+    toggleTrackMute('lineage-a')
+    await playAudio('c-1', drip, undefined, 'lineage-a')
+    await flush()
+    expect(lastGain().calls[0]).toBe('set 0')
   })
 })

@@ -27,7 +27,7 @@ import { useState } from 'react'
 import { Volume2, VolumeX, X } from 'lucide-react'
 import { ItemIcon } from './ItemIcon'
 import { letSoundOut, stopVoice, useHiddenAudio, type AudioEntry } from '../store/useHiddenAudio'
-import { toggleMasterMute, toggleTrackMute, useSoundMutes } from '../store/useSoundMutes'
+import { toggleMasterMute, toggleTrackMute, trackSilenced, useSoundMutes } from '../store/useSoundMutes'
 import { toggleMusicMute, useTvMusic } from '../store/useTvMusic'
 import { useShards } from '../store/useShards'
 import { useEscape } from '../hooks/useEscape'
@@ -51,9 +51,9 @@ export interface PlayingRow {
   silenced: boolean
 }
 
-/** NOW PLAYING's mutes as the list reads them (store/useSoundMutes). */
-export interface RowMutes { tracks: ReadonlySet<string>; master: boolean }
-const NO_MUTES: RowMutes = { tracks: new Set(), master: false }
+/** NOW PLAYING's mutes as the list reads them (store/useSoundMutes). `ready` false: not read yet, and every hidden track is held silent. */
+export interface RowMutes { tracks: ReadonlySet<string>; master: boolean; ready?: boolean }
+const NO_MUTES: RowMutes = { tracks: new Set(), master: false, ready: true }
 
 /**
  * What is playing, as the list shows it: the hidden voices, then TV's music.
@@ -68,16 +68,21 @@ export function playingRows(entries: Record<string, AudioEntry>, tv: { title: st
     const held = e.itemKey.startsWith('held:')
     const where = e.mode === 'world' ? 'here' : held ? 'from ITEMS' : 'from its card'
     const muted = !!e.trackId && mutes.tracks.has(e.trackId)
-    const silenced = muted || mutes.master
+    // Before the switches are read every hidden track is silent, and the row says so.
+    const silenced = muted || mutes.master || mutes.ready === false
     rows.push({ key, title: e.title, meta: muted ? `${where} · muted` : silenced ? `${where} · all muted` : where, itemKey: held ? undefined : e.itemKey, stoppable: e.mode === 'card', trackId: e.trackId, muted, silenced })
   }
   if (tv) rows.push({ key: 'tv', title: tv.artist ? `${tv.title} · ${tv.artist}` : tv.title, meta: tvMuted ? 'Cyberspace TV · muted' : 'Cyberspace TV', stoppable: false, muted: tvMuted, silenced: tvMuted })
   return rows
 }
 
-/** How many hidden sounds here wait for the browser to let sound out. */
-export function waitingCount(entries: Record<string, AudioEntry>): number {
-  return Object.values(entries).filter((e) => e.phase === 'waiting').length
+/**
+ * How many hidden sounds here wait for the browser to let sound out, and
+ * would be heard once it does: a muted one is not asked a tap for (with
+ * MUTE ALL on, the tap would let out silence). Any tap still lets it out.
+ */
+export function waitingCount(entries: Record<string, AudioEntry>, silenced: (e: AudioEntry) => boolean = () => false): number {
+  return Object.values(entries).filter((e) => e.phase === 'waiting' && !silenced(e)).length
 }
 
 export function NowPlayingChip(): JSX.Element | null {
@@ -86,8 +91,9 @@ export function NowPlayingChip(): JSX.Element | null {
   const tvMuted = useTvMusic((s) => s.muted)
   const tracks = useSoundMutes((s) => s.tracks)
   const master = useSoundMutes((s) => s.master)
+  const ready = useSoundMutes((s) => s.ready)
   const [open, setOpen] = useState(false)
-  const rows = playingRows(entries, track, tvMuted, { tracks, master })
+  const rows = playingRows(entries, track, tvMuted, { tracks, master, ready })
   useEscape('chip', open && rows.length > 0, () => setOpen(false))
   if (rows.length === 0) return null
   // MUTE ALL while any hidden audio is listed, or while it is on, so it can be turned off; never for TV alone.
@@ -106,7 +112,7 @@ export function NowPlayingChip(): JSX.Element | null {
           {open && <span className="presence__close" aria-hidden="true">✕</span>}
         </button>
         {showAll && (
-          <button className={`held__clear nowplaying__mute nowplaying__all ${master ? 'is-on' : ''}`} onClick={() => toggleMasterMute()} aria-pressed={master} title={master ? 'Unmute all (not TV)' : 'Mute all (not TV)'} aria-label={master ? 'Unmute all' : 'Mute all'}>
+          <button className={`held__clear nowplaying__mute nowplaying__all ${master ? 'is-on' : ''}`} onClick={() => toggleMasterMute()} disabled={!ready} aria-pressed={master} title={master ? 'Unmute all (not TV)' : 'Mute all (not TV)'} aria-label={master ? 'Unmute all' : 'Mute all'}>
             {master ? <VolumeX size={14} aria-hidden /> : <Volume2 size={14} aria-hidden />}
           </button>
         )}
@@ -122,7 +128,7 @@ export function NowPlayingChip(): JSX.Element | null {
                 </span>
               </button>
               {(r.key === 'tv' || r.trackId) && (
-                <button className={`held__clear nowplaying__mute ${r.muted ? 'is-on' : ''}`} onClick={() => (r.key === 'tv' ? toggleMusicMute() : toggleTrackMute(r.trackId!))} aria-pressed={r.muted} title={r.muted ? 'Unmute' : 'Mute'} aria-label={`${r.muted ? 'Unmute' : 'Mute'} ${r.title}`}>
+                <button className={`held__clear nowplaying__mute ${r.muted ? 'is-on' : ''}`} onClick={() => (r.key === 'tv' ? toggleMusicMute() : toggleTrackMute(r.trackId!))} disabled={r.key !== 'tv' && !ready} aria-pressed={r.muted} title={r.muted ? 'Unmute' : 'Mute'} aria-label={`${r.muted ? 'Unmute' : 'Mute'} ${r.title}`}>
                   {r.muted ? <VolumeX size={14} aria-hidden /> : <Volume2 size={14} aria-hidden />}
                 </button>
               )}
@@ -143,7 +149,9 @@ export function NowPlayingChip(): JSX.Element | null {
  * only inside one. Its tap plays them all in that gesture (letSoundOut).
  */
 export function SoundChip(): JSX.Element | null {
-  const waiting = useHiddenAudio((s) => waitingCount(s.entries))
+  const entries = useHiddenAudio((s) => s.entries)
+  const mutes = useSoundMutes()
+  const waiting = waitingCount(entries, (e) => trackSilenced(e.trackId, mutes))
   if (waiting === 0) return null
   return (
     <div className="hyperbar presence hyperbar--found" role="status">

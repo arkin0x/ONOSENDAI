@@ -132,10 +132,46 @@ function applyMute(key: string, v: Voice): void {
   else if (v.el && !v.node) v.el.muted = trackSilenced(v.trackId)
 }
 
+/** A voice's first level, set at once rather than eased from full: a muted one never sounds for a moment. */
+function startLevel(node: ThreeAudio<GainNode | PannerNode>, level: number): void {
+  const ctx = audioContext()
+  if (ctx) node.gain.gain.setValueAtTime(level, ctx.currentTime)
+  else node.setVolume(level)
+}
+
+/**
+ * What waits for a voice to be heard, by voice key: a once-trigger's
+ * onStarted, held while its track is silent (muted, MUTE ALL, or the
+ * switches not read yet), so a one-shot never spends its one play unheard
+ * (lib/audioWorld planWorld keeps the same rule for a tap). It runs the
+ * moment the voice sounds and is heard; a voice stopped first drops it, and
+ * the trigger is left for the next entry.
+ */
+const awaitingHeard = new Map<string, () => void>()
+
+/** Run each held onStarted whose voice now sounds and is heard. */
+function flushHeard(): void {
+  if (awaitingHeard.size === 0) return
+  const entries = useHiddenAudio.getState().entries
+  for (const [key, run] of [...awaitingHeard]) {
+    const e = entries[key]
+    if (!e || !entryHeard(e)) continue
+    awaitingHeard.delete(key)
+    run()
+  }
+}
+
+/** A voice's onStarted, held until it is heard (awaitingHeard). */
+function onceHeard(key: string, run: (() => void) | undefined): (() => void) | undefined {
+  if (!run) return undefined
+  return () => { awaitingHeard.set(key, run); flushHeard() }
+}
+
 /** Every voice follows a change of the mutes at once, and TV's ducking with them. */
 export function applySoundMutes(): void {
   for (const [key, v] of voices) applyMute(key, v)
   duckFor()
+  flushHeard()
 }
 
 const offSoundMutes = useSoundMutes.subscribe((s, prev) => {
@@ -252,6 +288,7 @@ export function moveListener(camera: Camera): void {
 
 function release(key: string): void {
   waitingPlays.delete(key)
+  awaitingHeard.delete(key)
   armGesture()
   const v = voices.get(key)
   if (!v) return
@@ -378,7 +415,7 @@ export async function playAudio(itemKey: string, audio: AudioItem, who?: MuteSub
         node = new ThreeAudio(l)
         node.setMediaElementSource(el)
         // Muted from its first sound when its track is (store/useSoundMutes).
-        node.setVolume(muteFactor(trackId))
+        startLevel(node, muteFactor(trackId))
       } catch { node = null }
     }
     if (!node) el.muted = trackSilenced(trackId)
@@ -399,8 +436,9 @@ export async function playAudio(itemKey: string, audio: AudioItem, who?: MuteSub
 /**
  * Start an item sounding where it is hidden: a positional voice, silent
  * until its gain is set (setWorldGain). It waits for the browser to let
- * sound out if it must. `onStarted` runs once it really sounds: a one-shot's
- * once-trigger is marked fired then, not when it would have been heard.
+ * sound out if it must. `onStarted` runs once it really sounds and is heard:
+ * a one-shot's once-trigger is marked fired then, not when it would have
+ * been heard, and not while its track is muted (awaitingHeard).
  */
 export async function startWorld(itemKey: string, audio: AudioItem, onStarted?: () => void, who?: MuteSubject, trackId?: string): Promise<void> {
   if (typeof Audio === 'undefined') return
@@ -411,6 +449,8 @@ export async function startWorld(itemKey: string, audio: AudioItem, onStarted?: 
   sessions.set(key, mine)
   release(key)
   if (who) subjects.set(key, who)
+  // Run when it sounds and is heard, not merely when it sounds (awaitingHeard).
+  onStarted = onceHeard(key, onStarted)
   setEntry(key, { phase: 'loading', title: audio.title, mode: 'world', itemKey, trackId })
   try {
     const blob = await openAudio(audio)
@@ -426,7 +466,7 @@ export async function startWorld(itemKey: string, audio: AudioItem, onStarted?: 
       node.setRolloffFactor(0)
       node.setBuffer(buffer)
       node.setLoop(audio.loop)
-      node.setVolume((pendingGain.get(key) ?? 0) * muteFactor(trackId))
+      startLevel(node, (pendingGain.get(key) ?? 0) * muteFactor(trackId))
       // A one-shot that reaches its end is let go, as an element's 'ended' does.
       const ended = node.onEnded.bind(node)
       node.onEnded = () => { ended(); if (sessions.get(key) === mine) stopVoice(key) }
@@ -456,7 +496,7 @@ export async function startWorld(itemKey: string, audio: AudioItem, onStarted?: 
       // How loud is the region's fade, on the gain; the panner only places it.
       node.setRolloffFactor(0)
       node.setMediaElementSource(el)
-      node.setVolume((pendingGain.get(key) ?? 0) * muteFactor(trackId))
+      startLevel(node, (pendingGain.get(key) ?? 0) * muteFactor(trackId))
     } catch (err) {
       URL.revokeObjectURL(url)
       throw err
@@ -661,7 +701,7 @@ function duckFor(): void {
   duckMusic(worldDuck || cardSounding() ? DUCKED : 1)
 }
 
-const offDuck = useHiddenAudio.subscribe(duckFor)
+const offDuck = useHiddenAudio.subscribe(() => { duckFor(); flushHeard() })
 if (import.meta.hot) import.meta.hot.dispose(() => offDuck())
 
 /** Whether any card's PLAY is sounding, and heard: a muted one does not step TV down. */

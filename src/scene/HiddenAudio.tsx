@@ -30,7 +30,7 @@ import { useFrame } from '@react-three/fiber'
 import { itemCentre, type ViewAxes } from '../lib/space'
 import { sourceLocal } from '../lib/audioItem'
 import { markFired, triggerFired } from '../lib/audioTrigger'
-import { freshMemory, hearSource, listenerLocal, planWorld, shouldDuck, type WorldSource } from '../lib/audioWorld'
+import { freshMemory, hearSource, listenerLocal, planWorld, shouldDuck, type WorldPlan, type WorldSource } from '../lib/audioWorld'
 import { alignedOrigin, useCyberspace } from '../store/useCyberspace'
 import { muteSubject, useShards, type WorldItem } from '../store/useShards'
 import { useMutes } from '../store/useMutes'
@@ -82,20 +82,33 @@ export function HiddenAudio({ axes }: { axes: ViewAxes }): null {
     }
     const plan = planWorld(sources, worldVoices(), triggerFired, now, memory.current, worldPending())
     for (const key of plan.stop) stopWorld(key)
-    for (const s of plan.start) {
-      const w = items.get(s.key)
-      if (!w?.audio) continue
-      // A once-trigger is marked as it really sounds (startWorld onStarted), not before.
-      const onStarted = s.oneShot && w.audio.retrigger === 'once' ? () => markFired(s.lineage) : undefined
-      void startWorld(s.key, w.audio, onStarted, muteSubject(w), s.lineage)
-    }
-    const heard: number[] = []
-    for (const [key, g] of plan.gains) {
-      setWorldGain(key, g)
-      if (!trackSilenced(items.get(key)?.lineage ?? key)) heard.push(g)
-    }
-    setWorldDuck(shouldDuck(heard, false))
+    startPlanned(plan.start, items)
+    setWorldDuck(shouldDuck(applyGains(plan.gains, items), false))
   })
 
   return null
+}
+
+/**
+ * Start what the plan starts, each muted by its track: the item's lineage
+ * id (store/useSoundMutes). A once-trigger is marked fired as it is really
+ * heard (startWorld onStarted), not before, and never while it is muted.
+ */
+export function startPlanned(starts: WorldPlan['start'], items: ReadonlyMap<string, WorldItem>): void {
+  for (const s of starts) {
+    const w = items.get(s.key)
+    if (!w?.audio) continue
+    const onStarted = s.oneShot && w.audio.retrigger === 'once' ? () => markFired(s.lineage) : undefined
+    void startWorld(s.key, w.audio, onStarted, muteSubject(w), s.lineage)
+  }
+}
+
+/** Set each world voice's gain; resolves to the gains of those heard, the only ones that step TV's music down. */
+export function applyGains(gains: WorldPlan['gains'], items: ReadonlyMap<string, WorldItem>): number[] {
+  const heard: number[] = []
+  for (const [key, g] of gains) {
+    setWorldGain(key, g)
+    if (!trackSilenced(items.get(key)?.lineage ?? key)) heard.push(g)
+  }
+  return heard
 }

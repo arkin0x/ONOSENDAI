@@ -10058,6 +10058,8 @@ html.tv-broadcast body { overflow: hidden; }
 .nowplaying__mute.is-on { color: #ffb547; background: rgba(255, 181, 71, 0.1); border-color: rgba(255, 181, 71, 0.55); opacity: 1; }
 /* A muted track stays listed, dimmer. */
 .nowplaying__row.is-muted .nowplaying__open { opacity: 0.55; }
+/* Before this device's switches are read: silent, and not yet switchable. */
+.nowplaying__mute:disabled { opacity: 0.35; cursor: default; }
 .audio__mark--muted { color: #ffb547; border-color: rgba(255, 181, 71, 0.45); }
 .nowplaying__open {
   flex: 1;

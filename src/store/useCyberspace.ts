@@ -325,6 +325,8 @@ export interface EarthPin {
   scaleExp: number
   /** What to call it: the same "EARTH · 37.8°N 122.4°W" the focus was given. */
   label: string
+  /** The label is the place's name (one found by name, a star's), so viewing the pin says it; a clicked or typed point's is not. */
+  named?: boolean
 }
 
 export interface SpectateState {
@@ -629,12 +631,24 @@ export interface CyberFocus {
   /** The cursor came along (VIEW): the pad drives it here. */
   drive?: boolean
   /**
+   * The place the label names, when the label is a name (a starred place, a
+   * person, a place on Earth found by name) and not words made from its
+   * coordinate. A free view's VIEWING chip shows the name while the cursor
+   * is on this place in this plane, and says A COORD otherwise (arkinox,
+   * 2026-11-03; FocusBar.tsx). Set only by focusOn: `position` and `plane`
+   * above move with the view (a re-anchor, a change of plane), this does not.
+   */
+  named?: NamedPlace
+  /**
    * A hidden item (a shard, a message) is what is being looked at: the camera
    * frames it where it is drawn, its true place (itemCentre), rather than by
    * the stop markers' policy.
    */
   item?: boolean
 }
+
+/** Where a focus's name applies (CyberFocus.named). */
+export interface NamedPlace { position: Position; plane: Plane }
 
 export interface CyberspaceState {
   identity: { pubkey: string; npub: string }
@@ -793,13 +807,13 @@ export interface CyberspaceState {
    * Deliberately NOT derived from `focus`, because it has to outlive a focus
    * change: clicking a landfall moves the focus to that block and the pin
    * stays where it was, which is what makes it possible to look around and
-   * come back. Dropped by a click on the globe and by a POSITION panel VIEW
+   * come back. Dropped by a click on the globe and by a View panel VIEW
    * that resolves to a point on Earth; cleared by RETURN (clearFocus) and by
    * REMOVE PIN. One at a time, so a second drop replaces the first.
    */
   pin: EarthPin | null
   /** Drop the pin at a place on Earth. `scaleExp` defaults to the zoom you are at. */
-  dropPin: (position: Position, label: string, scaleExp?: number) => void
+  dropPin: (position: Position, label: string, scaleExp?: number, named?: boolean) => void
   /** Take the pin away. */
   clearPin: () => void
   /** Look at the pin again, at the zoom it was dropped at. */
@@ -898,7 +912,7 @@ export interface CyberspaceState {
   respawn: () => Promise<void>
   /**
    * Respawn from a broken chain (arkinox, 2026-10-07, Q3): first the last
-   * valid position goes into the Position panel's RECENT as "End of Chain"
+   * valid position goes into the View panel's RECENT as "End of Chain"
    * and the first eight hex of the last valid event's id (the invalid
    * spawn's, when no event is valid, Q7), so the place the old chain froze
    * at is one tap away; then an ordinary respawn.
@@ -944,8 +958,13 @@ export interface CyberspaceState {
   /** Whether the pad's VIEW is on: a free view begun from the pad, as opposed to one begun from a pin, a star or BUILD. */
   viewing: () => boolean
   /** Look at a fixed coordinate (a deployed shard), optionally jumping the scale. */
-  /** Look at a place. With `drive` the cursor comes along: the free view, driven from the pad. */
-  focusOn: (position: Position, plane: Plane, label: string, scaleExp?: number, drive?: boolean) => void
+  /**
+   * Look at a place. With `drive` the cursor comes along: the free view,
+   * driven from the pad. `named`: the label is the place's name, true for
+   * this place, or the place a name was given for (CyberFocus.named, as a
+   * hyperspace view hands a focus back).
+   */
+  focusOn: (position: Position, plane: Plane, label: string, scaleExp?: number, drive?: boolean, named?: boolean | NamedPlace) => void
   /** Look at a hidden item: focusOn, framed on the item where it is drawn. */
   focusItem: (position: Position, plane: Plane, label: string, scaleExp?: number) => void
   /**
@@ -3874,7 +3893,7 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
       // is worthless (retainsRecord drops it).
       noteRefusalBalance(err)
       const keep = retainsRecord(err)
-      if (!keep) clearCloudJob()
+      if (!keep) clearCloudJob(record.pubkey, record.jobId)
       cloudFail(describeCloudError(err), keep)
       return
     } finally {
@@ -3889,7 +3908,7 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
     // it is verified and signed exactly like a finished one and the cubes are
     // collected afterwards (collectCloudKeys).
     if (job.status !== 'completed' && !keysPending(job)) {
-      clearCloudJob()
+      clearCloudJob(final.pubkey, final.jobId)
       cloudFail(`HOSAKA job failed: ${job.error ?? 'no reason given'}. The charge was refunded to your HOSAKA balance.`, false)
       return
     }
@@ -3901,7 +3920,7 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
     // straddlingV1Hop, decision D-A), and the record goes with it.
     const straddled = straddlingV1Hop(final.action, job.result, final.jobId)
     if (straddled) {
-      clearCloudJob()
+      clearCloudJob(final.pubkey, final.jobId)
       cloudFail(straddled, false)
       return
     }
@@ -3916,14 +3935,14 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
     }
     if (id !== requestId) return
     if (failed.length > 0) {
-      clearCloudJob()
+      clearCloudJob(final.pubkey, final.jobId)
       cloudFail(`Cloud proof rejected: ${failed.join(', ')}. Nothing was signed.`, false)
       return
     }
     // The proof binds to the head it was quoted against (spec 5.3). A head
     // that moved since makes it worthless, so it is refused, not appended.
     if (get().prevEventId !== final.prevEventId) {
-      clearCloudJob()
+      clearCloudJob(final.pubkey, final.jobId)
       cloudFail('The chain head moved while HOSAKA was computing; the cloud proof was discarded.', false)
       return
     }
@@ -3998,7 +4017,7 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
     // The event landed, and a route may already have moved on to its next
     // step (which bumps the request id): the bookkeeping below is about the
     // step that landed, so it runs regardless.
-    clearCloudJob()
+    clearCloudJob(final.pubkey, final.jobId)
     const cost = msg.type === 'done' ? msg.costMsats ?? final.costMsats : final.costMsats
     // Spent on this chain, on this device only.
     set({ spentMsats: addSpent(get().genesisId, cost) })
@@ -4034,7 +4053,7 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
    * VERIFYING. A newer cloud flow that owns the panel is left alone.
    */
   const cloudProofOrphaned = (jobId: string, say: boolean): void => {
-    if (loadCloudJob()?.jobId === jobId) clearCloudJob()
+    clearCloudJob(get().identity.pubkey, jobId)
     const cloud = get().cloud
     if (cloud.job !== null && cloud.job.jobId !== jobId) return
     const settled = cloud.status === 'idle' || cloud.status === 'error' || cloud.status === 'paid' || cloud.status === 'verifying'
@@ -4051,7 +4070,7 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
    * this identity, bound to the head the proof was, for the same move.
    */
   const keptJobFor = (msg: Extract<ProofResponse, { type: 'done' }>): PendingCloudJob | null => {
-    const record = loadCloudJob()
+    const record = loadCloudJob(get().identity.pubkey)
     if (!record || record.pubkey !== get().identity.pubkey || !msg.move) return null
     if (record.prevEventId !== msg.prevEventId) return null
     return positionHex(positionFromWire(record.to), record.plane) === msg.move.toHex ? record : null
@@ -4065,7 +4084,7 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
    * keeps its own status and words.
    */
   const keptCloudStepSigned = (record: PendingCloudJob, msg: Extract<ProofResponse, { type: 'done' }>): void => {
-    if (loadCloudJob()?.jobId === record.jobId) clearCloudJob()
+    clearCloudJob(record.pubkey, record.jobId)
     const cost = msg.costMsats ?? record.costMsats
     set({ spentMsats: addSpent(get().genesisId, cost) })
     useToast.getState().show({ label: `CLOUD COMPUTE JOB COMPLETE - ${record.jobId.slice(0, 8)}`, meta: 'Thanks for using HOSAKA!', mark: 'hosaka' })
@@ -4172,7 +4191,7 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
     } catch (err) {
       if (id !== requestId || abort.signal.aborted) return false
       const keep = retainsRecord(err)
-      if (!keep) clearCloudJob()
+      if (!keep) clearCloudJob(record.pubkey, record.jobId)
       rideFail(describeCloudError(err), keep)
       return false
     } finally {
@@ -4186,7 +4205,7 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
     if (job.status !== 'completed') {
       // HOSAKA refunds a failed job to the balance; the same ride asked
       // again names a new job under the same key, paid from that refund.
-      clearCloudJob()
+      clearCloudJob(final.pubkey, final.jobId)
       rideFail(`HOSAKA could not finish the ride: ${job.error ?? 'no reason given'}. The charge was refunded to your HOSAKA balance.`, false)
       return false
     }
@@ -4204,14 +4223,14 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
     }
     if (id !== requestId) return false
     if (failed.length > 0) {
-      clearCloudJob()
+      clearCloudJob(final.pubkey, final.jobId)
       rideFail(`HOSAKA's ride proof failed this device's check (${failed.join('; ')}), so nothing was signed and you did not move. Quote job ${final.jobId.slice(0, 8)} to HOSAKA for a refund.`, false)
       return false
     }
     // Bound to the head it was computed from (§5.3): a head that moved
     // makes it worthless, so it is refused, not signed.
     if (get().prevEventId !== final.prevEventId) {
-      clearCloudJob()
+      clearCloudJob(final.pubkey, final.jobId)
       rideFail('Your chain moved while HOSAKA was computing the ride, and the proof is bound to where it started, so it was discarded.', false)
       return false
     }
@@ -4241,11 +4260,11 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
       // Not signed. A moved head makes the proof worthless; anything else
       // (the signer declined, the relays did not answer) keeps it for RESUME.
       const moved = get().prevEventId !== final.prevEventId
-      if (moved) clearCloudJob()
+      if (moved) clearCloudJob(final.pubkey, final.jobId)
       rideFail(`${refusal ?? 'The hyperjump was not signed.'}${moved ? '' : ' The checked ride proof is kept: RESUME in the Cloud compute panel signs it.'}`, !moved)
       return false
     }
-    clearCloudJob()
+    clearCloudJob(final.pubkey, final.jobId)
     const cost = typeof job.cost_msats === 'number' ? job.cost_msats : final.costMsats
     set({ spentMsats: addSpent(get().genesisId, cost) })
     set({
@@ -5178,7 +5197,7 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
     if (get().cloud.status !== 'idle' || get().cloud.job !== null) {
       stopCloud()
       requestId++
-      clearCloudJob()
+      clearCloudJob(get().identity.pubkey)
     }
     if (get().plan) set({ plan: null })
     const { events, held, selfCheck, identity } = get()
@@ -5487,8 +5506,8 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
 
   pin: null,
 
-  dropPin: (position, label, scaleExp) => set({
-    pin: { position: { ...position }, plane: 0, scaleExp: scaleExp ?? get().scaleExp, label },
+  dropPin: (position, label, scaleExp, named = false) => set({
+    pin: { position: { ...position }, plane: 0, scaleExp: scaleExp ?? get().scaleExp, label, ...(named ? { named } : {}) },
   }),
 
   clearPin: () => set({ pin: null }),
@@ -5501,12 +5520,15 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
     // BUILD mode starts its build cursor where you are looking (useBuilder,
     // ruling A, 2026-10-07). Standing at the venue is not required to hide
     // something in it.
-    get().focusOn(pin.position, pin.plane, pin.label, pin.scaleExp, true)
+    // A pin dropped for a place found by name carries the name; one dropped
+    // by a click on the globe or for typed numbers reads as a coordinate.
+    get().focusOn(pin.position, pin.plane, pin.label, pin.scaleExp, true, pin.named === true)
   },
 
-  focusOn: (position, plane, label, scaleExp, drive = false) => {
+  focusOn: (position, plane, label, scaleExp, drive = false, named = false) => {
+    const place: NamedPlace | null = named === true ? { position: { ...position }, plane } : named || null
     const next: Partial<CyberspaceState> = {
-      focus: { position: { ...position }, plane, label, drive },
+      focus: { position: { ...position }, plane, label, drive, ...(place ? { named: place } : {}) },
       // A free view brings the cursor along, so the pad moves it there and a
       // message or a shard placed from the view lands there, not at your head.
       ...(drive ? { cursor: { ...position } } : {}),
@@ -6284,7 +6306,8 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
     // record is kept: the money is spent and the result can still be claimed.
     // Dismissing an error keeps whatever the failure left behind.
     const keep = cloud.job !== null && (cloud.status === 'error' || cloud.job.stage !== 'awaiting_payment')
-    if (!keep) clearCloudJob()
+    // Only this identity's: another's kept job waits on disk for it (review of #589).
+    if (!keep) clearCloudJob(cloud.job?.pubkey ?? get().identity.pubkey, cloud.job?.jobId)
     set({
       pendingTarget: null,
       proof: IDLE_PROOF,
@@ -6362,7 +6385,7 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
         }
       }
     }
-    const record = loadCloudJob()
+    const record = loadCloudJob(identity.pubkey)
     // Another identity's job stays on disk for when it is back.
     if (!record || record.pubkey !== identity.pubkey) return
     // A paid job is held against the head, so the head it is compared with is
@@ -6380,12 +6403,12 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
     }
     if (get().proof.status === 'computing') return
     if (record.prevEventId !== get().prevEventId) {
-      clearCloudJob()
+      clearCloudJob(record.pubkey, record.jobId)
       set({ cloud: { ...get().cloud, job: null, message: 'A pending cloud job was dropped: the chain head moved since it was created.' } })
       return
     }
     if (record.stage === 'awaiting_payment' && record.deposit && record.deposit.expiresAt * 1000 < Date.now()) {
-      clearCloudJob()
+      clearCloudJob(record.pubkey, record.jobId)
       set({ cloud: { ...get().cloud, job: null, message: 'A pending cloud job was dropped: its invoice expired.' } })
       return
     }
@@ -6436,7 +6459,7 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
   discardCloudJob: () => {
     const { cloud, proof } = get()
     if (cloud.status !== 'idle' && cloud.status !== 'error') return
-    clearCloudJob()
+    clearCloudJob(cloud.job?.pubkey ?? get().identity.pubkey, cloud.job?.jobId)
     set({
       cloud: { ...cloud, status: 'idle', job: null, message: null, quote: null, invoice: null, invoiceOpen: false },
       ...(proof.status === 'infeasible' ? { proof: IDLE_PROOF } : {}),

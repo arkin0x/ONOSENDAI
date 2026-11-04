@@ -220,11 +220,11 @@ export function exitHyperspaceView(): void {
   if (!owned || cs.spectate !== null || cs.focus === null) return
 
   // Hand the camera back to whoever had it, which is not always the avatar.
-  // A place typed into the POSITION panel is a focus of its own, and tapping a
+  // A place typed into the View panel is a focus of its own, and tapping a
   // block from it borrows the camera rather than replacing what the person was
   // doing; closing the overlay is "give it back", not "go home".
   if (returnFocus !== null) {
-    cs.focusOn(returnFocus.position, returnFocus.plane, returnFocus.label, returnScaleExp ?? undefined, returnFocus.drive)
+    cs.focusOn(returnFocus.position, returnFocus.plane, returnFocus.label, returnScaleExp ?? undefined, returnFocus.drive, returnFocus.named)
     return
   }
 

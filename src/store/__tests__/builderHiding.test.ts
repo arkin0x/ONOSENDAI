@@ -47,7 +47,7 @@ beforeEach(() => {
 })
 
 describe('the view ending while a message is already being hidden', () => {
-  it('ends BUILD, keeps no draft, and the message is hidden once', async () => {
+  it('ends BUILD, keeps no draft, says it still lands, and the message is hidden once', async () => {
     useShards.getState().startDeployMessage('meet me at the fountain')
     const hiding = useShards.getState().deploy()
     expect(useShards.getState().deployStatus).toBe('working')
@@ -55,10 +55,24 @@ describe('the view ending while a message is already being hidden', () => {
     S().focusOn(S().position, 0, 'EARTH · tap')
     expect(B().active).toBe(false)
     expect(B().messageDraft).toBeNull()
-    expect(useToast.getState().toast).toMatchObject({ label: 'BUILD MODE ENDED', meta: '' })
+    // One line, so nobody places it again and makes two (his ruling on the pending decision, 2026-11-03).
+    expect(useToast.getState().toast).toMatchObject({ label: 'BUILD MODE ENDED', meta: 'It still lands where you aimed it.' })
     await hiding
     expect(hidden('meet me at the fountain')).toBe(1)
     expect(useShards.getState().pending).toBeNull()
+  })
+
+  it('an identity switch mid-hide promises nothing: the hide is refused unless its bag was signed already', async () => {
+    const was = S().identity
+    useShards.getState().startDeployMessage('signed as whom?')
+    const hiding = useShards.getState().deploy()
+    expect(useShards.getState().deployStatus).toBe('working')
+    useCyberspace.setState({ identity: { pubkey: 'c3'.repeat(32), npub: 'npub-other' } })
+    expect(B().active).toBe(false)
+    expect(useToast.getState().toast).toMatchObject({ label: 'BUILD MODE ENDED', meta: '' })
+    await hiding.catch(() => undefined)
+    useCyberspace.setState({ identity: was })
+    useShards.setState({ pending: null, deployStatus: 'idle', deployError: null })
   })
 })
 

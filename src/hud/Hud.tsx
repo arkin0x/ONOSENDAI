@@ -11,7 +11,9 @@ import { geocode } from '../lib/geocode'
 import { onEarthSurface } from '../lib/hyperspace/interest'
 import { canonicalViewAt, forgetView, parseViewAt, readRecentViews, rememberView, RECENT_VIEWS_EVENT, RECENT_VIEWS_KEY, type RecentView, type ViewTarget } from '../lib/viewAt'
 import { coordLink, placeHex } from '../lib/coordRoute'
-import { useCyberspace } from '../store/useCyberspace'
+import { useCyberspace, type CyberspaceState } from '../store/useCyberspace'
+import { sectorTag, xyzToSectorId, type Plane } from 'cyberspace-core'
+import type { Position } from '../lib/space'
 import { useBuilder } from '../store/useBuilder'
 import { shortHex } from '../lib/time'
 import { ProfilePic } from './ProfileBadge'
@@ -147,8 +149,8 @@ function saveRecent(list: RecentView[]): void {
 }
 
 /**
- * What is typed into the Position panel's VIEW field, kept outside the panel:
- * BUILD mode moves the panel to the top of the menu and back (Hud below),
+ * What is typed into the View panel's VIEW field, kept outside the panel:
+ * BUILD and VIEW move the panel to the top of the menu and back (Hud below),
  * which mounts it afresh, and a coordinate half typed when DEPLOY turned
  * BUILD on was lost with it (review of #235).
  */
@@ -157,17 +159,100 @@ export const useViewDraft = create<{ text: string; setText: (text: string) => vo
   setText: (text) => set({ text }),
 }))
 
+/**
+ * A place as Position and View both show it: X, Y, Z and the sector, each
+ * copied raw on a tap (the grouping commas are for reading, not for pasting
+ * into a filter or a script), then its coordinate and its /C/ link.
+ */
+function PlaceReadout({ position, sector, coordHex, linkHex }: { position: Position; sector: string; coordHex: string; linkHex: string }): JSX.Element {
+  const [copied, copy] = useCopied()
+  const readout = (key: string, label: string, shown: string, raw: string): JSX.Element => (
+    <div key={key}>
+      <dt className={copied === key ? 'is-copied' : ''}>{copied === key ? 'Copied' : label}</dt>
+      <dd><button className="copy" onClick={() => copy(key, raw)} title="Tap to copy">{shown}</button></dd>
+    </div>
+  )
+  return (
+    <>
+      <dl className="stats stats--axes">
+        {readout('x', 'X', formatBig(position.x), position.x.toString())}
+        {readout('y', 'Y', formatBig(position.y), position.y.toString())}
+        {readout('z', 'Z', formatBig(position.z), position.z.toString())}
+        {readout('sector', 'Sector', sector, sector)}
+      </dl>
+
+      <button className="hash copy" onClick={() => copy('coord', coordHex)} title="Tap to copy">
+        <span className={`hash__label ${copied === 'coord' ? 'is-copied' : ''}`}>{copied === 'coord' ? 'copied' : 'coord'}</span>
+        <code>{coordHex}</code>
+      </button>
+      <button className="hash copy" onClick={() => copy('link', coordLink(window.location.origin, linkHex))} title="Copy a link that opens ONOSENDAI looking at this place">
+        <span className={`hash__label ${copied === 'link' ? 'is-copied' : ''}`}>{copied === 'link' ? 'copied' : 'link'}</span>
+        <code>/C/{linkHex}</code>
+      </button>
+    </>
+  )
+}
+
+function PlaneTag({ plane }: { plane: Plane }): JSX.Element {
+  return <span className={`plane plane--${plane}`}>{plane === 0 ? 'DATASPACE' : 'IDEASPACE'}</span>
+}
+
+/**
+ * Where your avatar is. Its link is your chain head's place, always (arkinox,
+ * 2026-11-02): it used to follow a view, and that link now lives in the View
+ * panel. Looking somewhere else is the View panel's too.
+ */
 export function PositionPanel(): JSX.Element {
   const position = useCyberspace((s) => s.position)
   const plane = useCyberspace((s) => s.plane)
+  const coordHex = useCyberspace((s) => s.coordHex())
+  const sector = useCyberspace((s) => s.sector())
+
+  return (
+    <section className="panel">
+      <header className="panel__head">
+        <h2>Position</h2>
+        <PlaneTag plane={plane} />
+      </header>
+      <PlaceReadout position={position} sector={sector} coordHex={coordHex} linkHex={coordHex} />
+      <Explanation>
+        Where your avatar stands: its X, Y and Z, the sector they fall in, and
+        the coordinate of your chain head. Tap any figure to copy it. LINK
+        copies a link that opens ONOSENDAI looking at your avatar. To look
+        somewhere else without moving, use the View panel.
+      </Explanation>
+    </section>
+  )
+}
+
+/**
+ * The place the View panel reads: the place a /C/ link shares
+ * (lib/coordRoute.ts), which is what Position's link was until the two
+ * panels split. Yours at your head; in a free view, the view's cursor, which
+ * is what the pad and the fly move (and BUILD's build cursor); in any other
+ * look (a block, a spectated avatar, your history), what it looks at.
+ */
+export function viewedPlace(s: Pick<CyberspaceState, 'position' | 'plane' | 'cursor' | 'anchor' | 'anchorPlane' | 'focus' | 'atHead'>): { position: Position; plane: Plane } {
+  if (s.atHead()) return { position: s.position, plane: s.plane }
+  return { position: s.focus?.drive ? s.cursor : s.anchor, plane: s.anchorPlane }
+}
+
+/**
+ * The View panel (arkinox, 2026-11-02): exactly like Position, but its
+ * figures are the view's (viewedPlace), and it holds the ways to look
+ * somewhere: VIEW A COORDINATE, RECENT and STARRED PLACES, which were in
+ * Position. Its layout id is `viewat` (store/usePanelLayout.ts). It leads the
+ * menu while a free view or BUILD is up (Hud below).
+ */
+export function ViewAtPanel(): JSX.Element {
+  // Each a stable reference out of the store, so no selector makes a fresh object.
+  const position = useCyberspace((s) => viewedPlace(s).position)
+  const plane = useCyberspace((s) => viewedPlace(s).plane)
+  // At your head the coordinate is the chain's own, plane bit included (coordHex).
+  const coordHex = useCyberspace((s) => (s.atHead() ? s.coordHex() : placeHex(viewedPlace(s).position, viewedPlace(s).plane)))
+  const sector = sectorTag(xyzToSectorId(position.x, position.y, position.z))
   // Decimals go to the plane on show: yours at your head, the view's in a view.
   const lookedPlane = useCyberspace((s) => (s.atHead() ? s.plane : s.anchorPlane))
-  const coordHex = useCyberspace((s) => s.coordHex())
-  // The place a /C/ link shares (lib/coordRoute.ts): yours at your head;
-  // in a view, the view's cursor when it drives, else what it looks at.
-  const linkHex = useCyberspace((s) => (s.atHead() ? s.coordHex() : placeHex(s.focus?.drive ? s.cursor : s.anchor, s.anchorPlane)))
-  const sector = useCyberspace((s) => s.sector())
-  const [copied, copy] = useCopied()
   const viewText = useViewDraft((s) => s.text)
   const setViewText = useViewDraft((s) => s.setText)
   const [viewBad, setViewBad] = useState(false)
@@ -183,13 +268,17 @@ export function PositionPanel(): JSX.Element {
   const [finding, setFinding] = useState(false)
   const [viewNote, setViewNote] = useState<string | null>(null)
   const look = (typed: string, target: ViewTarget): void => {
-    useCyberspace.getState().focusOn(target.position, target.plane, target.label, target.scaleExp, true)
+    // Named when the label is more than the words its coordinate reads as:
+    // a place found by name, a star's name, a recent place's name. VIEWING
+    // then says it (FocusBar viewingLabel).
+    const named = target.label !== parseViewAt(typed, target.plane)?.label
+    useCyberspace.getState().focusOn(target.position, target.plane, target.label, target.scaleExp, true, named)
     // A place on Earth gets the pin: marking the focal point is the whole
     // purpose of typing a latitude and longitude or a place name. A
     // coordinate or a triple of axes that is not on the ground gets none,
     // and leaves any standing pin alone.
     if (target.plane === 0 && onEarthSurface(target.position)) {
-      useCyberspace.getState().dropPin(target.position, target.label, target.scaleExp)
+      useCyberspace.getState().dropPin(target.position, target.label, target.scaleExp, named)
     }
     const next = rememberView(recent, { input: canonicalViewAt(typed), label: target.label, plane: target.plane })
     setRecent(next)
@@ -224,39 +313,13 @@ export function PositionPanel(): JSX.Element {
     }
   }
 
-  // Every figure copies on a tap, raw: the grouping commas are for reading,
-  // not for pasting into a filter or a script.
-  const readout = (key: string, label: string, shown: string, raw: string): JSX.Element => (
-    <div key={key}>
-      <dt className={copied === key ? 'is-copied' : ''}>{copied === key ? 'Copied' : label}</dt>
-      <dd><button className="copy" onClick={() => copy(key, raw)} title="Tap to copy">{shown}</button></dd>
-    </div>
-  )
-
   return (
     <section className="panel">
       <header className="panel__head">
-        <h2>Position</h2>
-        <span className={`plane plane--${plane}`}>
-          {plane === 0 ? 'DATASPACE' : 'IDEASPACE'}
-        </span>
+        <h2>View</h2>
+        <PlaneTag plane={plane} />
       </header>
-
-      <dl className="stats stats--axes">
-        {readout('x', 'X', formatBig(position.x), position.x.toString())}
-        {readout('y', 'Y', formatBig(position.y), position.y.toString())}
-        {readout('z', 'Z', formatBig(position.z), position.z.toString())}
-        {readout('sector', 'Sector', sector, sector)}
-      </dl>
-
-      <button className="hash copy" onClick={() => copy('coord', coordHex)} title="Tap to copy">
-        <span className={`hash__label ${copied === 'coord' ? 'is-copied' : ''}`}>{copied === 'coord' ? 'copied' : 'coord'}</span>
-        <code>{coordHex}</code>
-      </button>
-      <button className="hash copy" onClick={() => copy('link', coordLink(window.location.origin, linkHex))} title="Copy a link that opens ONOSENDAI looking at this place">
-        <span className={`hash__label ${copied === 'link' ? 'is-copied' : ''}`}>{copied === 'link' ? 'copied' : 'link'}</span>
-        <code>/C/{linkHex}</code>
-      </button>
+      <PlaceReadout position={position} sector={sector} coordHex={coordHex} linkHex={coordHex} />
 
       {/* The free view: look at any place without walking there. Three axis
           values, or a coordinate as the tags carry it; the cursor comes along,
@@ -493,6 +556,7 @@ const PANELS: Record<PanelId, () => JSX.Element> = {
   links: LinksPanel,
   scale: ScalePanel,
   position: PositionPanel,
+  viewat: ViewAtPanel,
   proof: ProofPanel,
   cloud: CloudPanel,
   chain: ChainPanel,
@@ -542,12 +606,16 @@ export function Hud({ menuOpen = false }: { menuOpen?: boolean }): JSX.Element {
   // the proof panel is the thing you are watching, so it takes the first
   // position and HOSAKA falls in behind it rather than above it.
   const proofLeads = useCyberspace((s) => s.proof.status === 'computing')
-  // BUILD mode puts the Position panel first, above even a move under way
-  // (arkinox, 2026-10-08): its VIEW, RECENT and starred places are how the
-  // build cursor jumps. The left column comes first on a phone too, where
-  // the columns stack, so it is the first panel on both. Back in its own
-  // place on exit.
+  // A free view puts the View panel first, above even a move under way
+  // (arkinox, 2026-11-02: "rises to position 1 while VIEW mode is active"):
+  // its figures are the view's cursor. BUILD mode does too: it put the
+  // Position panel first (arkinox, 2026-10-08) because VIEW, RECENT and the
+  // starred places there are how the build cursor jumps, and those moved to
+  // the View panel, whose figures are the build cursor. The left column
+  // comes first on a phone too, where the columns stack, so it is the first
+  // panel on both. Back in its own place when the view or the mode ends.
   const building = useBuilder((s) => s.active)
+  const freeView = useCyberspace((s) => s.focus?.drive === true && s.exploreIndex === null)
   // The saved layout (arkinox, 2026-10-10): read before the first render, so
   // a refresh shows the menu as it was left, and written on every fold and
   // move. A priority state above only rearranges what is drawn; it writes
@@ -564,7 +632,7 @@ export function Hud({ menuOpen = false }: { menuOpen?: boolean }): JSX.Element {
   const rightRef = useCover('right', !menuOpen)
 
   const leads: PanelId[] = []
-  if (building) leads.push('position')
+  if (building || freeView) leads.push('viewat')
   if (proofLeads) leads.push('proof')
   if (cloudLeads) leads.push('cloud')
   if (rideSet) leads.push('hyperspace')

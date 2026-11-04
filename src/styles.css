@@ -3761,6 +3761,22 @@ kbd {
   }
   .app:has(.hosaka-pulse) .flyorbs { bottom: var(--menu-bottom); }
 }
+/* That row runs along the bottom where the open chat starts (84px in from
+   641px wide, the desktop's 424px from 1101px), and the chat stands over it
+   (z-index 101): with the buttons up, the chat starts past the row instead
+   (review of #592). */
+@media (max-height: 520px) and (min-width: 641px) {
+  .app:has(.flyorbs) .chatdock {
+    left: calc(var(--menu-left) + 3 * var(--menu-size) + 2 * var(--routeov-gap) + 16px);
+  }
+}
+/* A phone upright: the chat spans the width from 80px up, which is where the
+   column of buttons stands over the menu button. It starts past the column. */
+@media (max-width: 640px) and (min-height: 521px) {
+  .app:has(.flyorbs) .chatdock {
+    left: calc(var(--menu-left) + var(--menu-size) + var(--routeov-gap));
+  }
+}
 
 /* The clipboard row: first in the bottom-left column, so the pad, TURN and
    the color column in the other corner never stand on it. */

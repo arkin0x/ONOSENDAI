@@ -237,6 +237,36 @@ describe('two doors, one room (R5)', () => {
       expect(vi.mocked(query)).not.toHaveBeenCalled()
     })
 
+    it('a door open only because another said its secret, with that door gone: a reload fills the room under it, and the secret stays only said (doors follow-up, 2026-11-01)', async () => {
+      const a = await build(3, 3)
+      const b = await build(3, 3, { x: AT.x + 2n, y: AT.y, z: AT.z }, a.secret)
+      useShards.setState({ discovered: { [a.door.eventId]: a.door, [b.door.eventId]: b.door } })
+      await enterRoom(a.door, a.secret)
+      expect(doorSecretOnlySaid(me(), b.door.eventId)).toBe(true)
+      // The door that said it is gone from here, and its room with it.
+      useShards.setState({ discovered: { [b.door.eventId]: b.door } })
+      resetReopens()
+      vi.mocked(query).mockClear()
+      await reopenRoom(b.door)
+      expect(vi.mocked(query)).toHaveBeenCalled()
+      const behind = Object.values(useShards.getState().discovered).filter((h) => h.room?.doorId === b.door.eventId)
+      expect(behind.map((h) => h.type).sort()).toEqual(['key', 'message'])
+      // Filled, not opened: nothing is rewritten as this door's own.
+      expect(doorSecretOnlySaid(me(), b.door.eventId)).toBe(true)
+      expect(doorSecret(me(), a.door.eventId)).toBe(a.secret)
+    })
+
+    it('a door whose said secret another door here still holds waits for that door, as before', async () => {
+      const a = await build(3, 3)
+      const b = await build(3, 3, { x: AT.x + 2n, y: AT.y, z: AT.z }, a.secret)
+      useShards.setState({ discovered: { [a.door.eventId]: a.door, [b.door.eventId]: b.door } })
+      await enterRoom(a.door, a.secret)
+      resetReopens()
+      vi.mocked(query).mockClear()
+      await reopenRoom(b.door)
+      expect(vi.mocked(query)).not.toHaveBeenCalled()
+    })
+
     it('a door already opened by its own seal keeps its secret when the other opens later, its key gone by then', async () => {
       const { a, b } = await pair()
       hold(a.lock)

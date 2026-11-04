@@ -54,6 +54,9 @@ import { hopTemplate } from '../../lib/events'
 import type { HosakaJob, HosakaLimits } from '../../lib/hosaka'
 import type { Position } from '../../lib/space'
 import { postProof } from '../../lib/workers'
+import { loadCloudJob } from '../../lib/cloud'
+import { generateSecretKey } from 'nostr-tools/pure'
+import { nip19 } from 'nostr-tools'
 import { useCyberspace } from '../useCyberspace'
 import { placeSpawn } from '../fixtures/placeSpawn'
 import { useToast } from '../useToast'
@@ -474,7 +477,7 @@ describe('a cloud step whose proof is refused because the head moved while the s
     // The job is the first identity's, and still signable when it comes back.
     const rec = storage.getItem('onosendai:cloudJob')
     expect(rec).not.toBeNull()
-    expect(JSON.parse(rec!).pubkey).toBe(me)
+    expect(JSON.parse(rec!).jobs[me].pubkey).toBe(me)
     expect(S().cloud.message ?? '').not.toMatch(/discarded|kept/)
     expect(S().cloud.status).not.toBe('error')
   })
@@ -513,7 +516,7 @@ describe('a cloud step whose proof is refused because the head moved while the s
     expect(S().identity.pubkey).not.toBe(me)
     const rec = storage.getItem('onosendai:cloudJob')
     expect(rec).not.toBeNull()
-    expect(JSON.parse(rec!).pubkey).toBe(me)
+    expect(JSON.parse(rec!).jobs[me].pubkey).toBe(me)
     expect(S().cloud.message ?? '').not.toMatch(/discarded/)
   })
 
@@ -540,3 +543,82 @@ describe('a cloud step whose proof is refused because the head moved while the s
   })
 })
 
+describe('two identities on one device, each buying a HOSAKA step (review of #589)', () => {
+  beforeEach(() => {
+    useCalibration.setState({ status: 'measured', hopHeight: 12, sidestepHeight: 12 })
+    S().setMoveMode('auto')
+    for (const fn of Object.values(fake)) if (typeof fn === 'function' && 'mockReset' in fn) fn.mockReset()
+    fake.limits.mockResolvedValue(LIMITS)
+    fake.quote.mockImplementation(async (kind: 'hop' | 'sidestep') => quote(kind))
+    fake.balance.mockImplementation(async () => ({ pubkey: S().identity.pubkey, balance_msats: 5000, ledger: [] }))
+    vi.mocked(postProof).mockClear()
+    storage.removeItem('onosendai:cloudJob')
+    storage.removeItem('onosendai:cloudDeposit')
+  })
+
+  /** Signed in as this key, its chain on the leaf touching an h13 wall, saved as a move would save it (adoptChain). */
+  async function asIdentity(sk: Uint8Array): Promise<{ from: Position; to: Position }> {
+    await S().useNsec(nip19.nsecEncode(sk))
+    await new Promise((r) => setTimeout(r, 20))
+    useCyberspace.setState({
+      cloud: { ...S().cloud, limits: LIMITS, status: 'idle', job: null, message: null, balance: null },
+      cloudPrefs: { mode: 'auto', autoMaxSats: 100, apiUrl: 'http://fake', profile: 'cost' },
+      plan: null,
+    })
+    await placeSpawn()
+    const st = S()
+    const block = (st.position.x >> 13n) << 13n
+    const from = { ...st.position, x: block + 4095n }
+    if (from.x !== st.position.x) {
+      const last = st.events[st.events.length - 1]
+      st.adoptChain([await st.signEvent(hopTemplate({ createdAt: last.created_at + 1, genesisId: st.genesisId, previousId: st.prevEventId, prevCoordHex: st.coordHex(), to: from, plane: st.headPlane, proofHash: '0'.repeat(64), mn: '0'.repeat(16), mp: '00' }))])
+    }
+    expect(S().position).toEqual(from)
+    const to = { ...from, x: from.x ^ (1n << 12n) }
+    useCyberspace.setState({ cursor: to })
+    return { from, to }
+  }
+
+  it('the second identity\'s purchase keeps the first identity\'s paid job; switched back, RESUME finishes it and nothing is bought twice', async () => {
+    const skA = generateSecretKey()
+    const skB = generateSecretKey()
+    const { from, to } = await asIdentity(skA)
+    const A = S().identity.pubkey
+    const headA = S().prevEventId
+    const result = hopResult(from, to, S().plane, headA)
+    // HOSAKA computes job-1 until the test lets it finish; job-2 is still computing at the end.
+    let finishA = false
+    fake.waitForJob.mockImplementation(async (jobId: string) => (jobId === 'job-1' && finishA ? completed(result) : new Promise(() => {})))
+    fake.submitHop.mockResolvedValueOnce(funded())
+    void S().commit()
+    await vi.waitFor(() => { expect(S().cloud.job?.jobId).toBe('job-1') })
+    expect(loadCloudJob(A)?.stage).toBe('computing')
+
+    // Another identity on the same device buys its own step.
+    await asIdentity(skB)
+    const B = S().identity.pubkey
+    expect(B).not.toBe(A)
+    fake.submitHop.mockResolvedValueOnce({ ...funded(), id: 'job-2', poll_token: 'tok-job-2' })
+    void S().commit()
+    await vi.waitFor(() => { expect(S().cloud.job?.jobId).toBe('job-2') })
+    expect(loadCloudJob(B)?.jobId).toBe('job-2')
+    // The first identity's paid job is still on disk, under it.
+    expect(loadCloudJob(A)?.jobId).toBe('job-1')
+
+    // Back to the first identity: its job is picked up, X keeps it, RESUME finishes it.
+    await S().useNsec(nip19.nsecEncode(skA))
+    expect(S().identity.pubkey).toBe(A)
+    expect(S().prevEventId).toBe(headA)
+    await vi.waitFor(() => { expect(S().cloud.job?.jobId).toBe('job-1') })
+    S().cancelCloud()
+    expect(loadCloudJob(A)?.jobId).toBe('job-1')
+    finishA = true
+    await S().resumeCloudJob()
+    await vi.waitFor(() => { expect(S().events.some((e) => e.tags.some((t) => t[0] === 'proof' && t[1] === result.seal))).toBe(true) })
+    expect(S().position).toEqual(to)
+    expect(loadCloudJob(A)).toBeNull()
+    // The other identity's job is untouched, and nothing was bought twice.
+    expect(loadCloudJob(B)?.jobId).toBe('job-2')
+    expect(fake.submitHop).toHaveBeenCalledTimes(2)
+  })
+})

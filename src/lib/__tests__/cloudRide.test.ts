@@ -23,7 +23,7 @@ import { sha256 } from 'cyberspace-core'
 import { rideChoice, rideFits, rideOfferOf, rideServiceOf, verifyCloudRide } from '../cloudRide'
 import { buildRideProof, computeRideLeaf, rideBlocks } from '../hyperspace/ride'
 import { createHosaka, idempotencyKeyFor, rideBody, type HosakaJob, type HosakaProvider } from '../hosaka'
-import { clearCloudJob, loadCloudJob, saveCloudJob, wirePosition, type PendingCloudJob } from '../cloud'
+import { loadCloudJob, saveCloudJob, wirePosition, type PendingCloudJob } from '../cloud'
 import { finalizeEvent, generateSecretKey } from 'nostr-tools/pure'
 
 const PREV = 'ab'.repeat(32)
@@ -133,7 +133,7 @@ describe('a finished HOSAKA ride is checked here before anything is signed', () 
 })
 
 describe('the ride record survives a reload', () => {
-  beforeEach(() => clearCloudJob())
+  beforeEach(() => localStorage.removeItem('onosendai:cloudJob'))
   const record: PendingCloudJob = {
     version: 1, jobId: 'job-ride', pollToken: 'tok', action: 'ride', pubkey: 'p',
     from: wirePosition({ x: 1n, y: 2n, z: 3n }), to: wirePosition({ x: 1n << 84n, y: 5n, z: 6n }), plane: 1,
@@ -143,16 +143,16 @@ describe('the ride record survives a reload', () => {
 
   it('round trips with the ride, its patience and its start', () => {
     saveCloudJob(record)
-    expect(loadCloudJob()).toEqual(record)
+    expect(loadCloudJob('p')).toEqual(record)
   })
 
   it('a ride record without its ride is dropped, never followed blind', () => {
     const { ride: _ride, ...bare } = record
     void _ride
     saveCloudJob(bare as PendingCloudJob)
-    expect(loadCloudJob()).toBeNull()
+    expect(loadCloudJob('p')).toBeNull()
     saveCloudJob({ ...record, ride: { fromHeight: 7, toHeight: 7, toCoordHex: 'cd'.repeat(32) } })
-    expect(loadCloudJob()).toBeNull()
+    expect(loadCloudJob('p')).toBeNull()
   })
 })
 

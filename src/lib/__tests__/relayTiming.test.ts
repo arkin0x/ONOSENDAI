@@ -60,7 +60,8 @@ vi.mock('../../store/useCyberspace', () => ({
   useCyberspace: { getState: () => ({ signEvent: async (t: unknown) => { fake.signed++; await new Promise((r) => setTimeout(r, fake.signerMs)); return t } }) },
 }))
 
-import { authForRead, authPending, publishMany, queryEachSettled } from '../relay'
+import { authForRead, authPending, dropRelays, publishMany, queryEachSettled } from '../relay'
+import { AUTH_STALLED } from '../relayOutcome'
 
 /** Hold the main thread, as drawing and checking a long chain does. */
 const busy = (ms: number): void => { const end = Date.now() + ms; while (Date.now() < end) { /* busy */ } }
@@ -121,5 +122,20 @@ describe('an AUTH the relay never answers (review of #556)', () => {
     await authForRead(url)
     expect(await leftAlone()).toBe(true)
     fake.authTimesOutMs = 0
+  })
+})
+
+describe('an AUTH on an old socket ending (review of #570)', () => {
+  it('does not clear the wait of a newer socket\'s AUTH, so that relay is not read before its signer answers', async () => {
+    const url = 'ws://relay.five/'
+    fake.relays.clear(); fake.challenge = 'c5'; fake.eoseMs = 10; fake.signerMs = 0; fake.authTimesOutMs = 1_500
+    const old = authForRead(url)
+    await new Promise((r) => setTimeout(r, 100))
+    dropRelays([url])
+    fake.authTimesOutMs = 0; fake.signerMs = 4_000
+    const [answer] = await queryEachSettled([url], { kinds: [3333] }, 1_000, url, [])
+    await old
+    expect(answer).toMatchObject({ outcome: 'refused', reason: AUTH_STALLED })
+    fake.signerMs = 0
   })
 })

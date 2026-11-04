@@ -1,3 +1,5 @@
+import { signerWaiting } from '../lib/authOpen'
+import { chainHolders } from '../lib/chainHolders'
 import { bigintBitLimit, movementCapabilityIssue } from '../lib/proofCapability'
 /**
  * useCyberspace.ts - the single source of truth for who you are, where you
@@ -1946,6 +1948,8 @@ export function busyLabel(proof: { progress: number; message: string | null }): 
 export const NEW_VERSION_RELOAD_MESSAGE = 'A new version of ONOSENDAI is out. RELOAD to move again.'
 /** Said when the relays still could not confirm it, and the move is refused. */
 export const HEAD_UNCONFIRMED_MESSAGE = "Can't confirm your latest move. Try again."
+/** The same, when the signer is holding up a relay's AUTH: trying again would not help until it answers. */
+export const HEAD_UNCONFIRMED_SIGNER_MESSAGE = "Can't confirm your latest move. Check your signer."
 /** How many times a move asks before it refuses. */
 const HEAD_CONFIRM_TRIES = 2
 
@@ -2372,7 +2376,8 @@ async function confirmHead(retrying: () => void): Promise<string | null | typeof
       return null
     }
   }
-  return HEAD_UNCONFIRMED_MESSAGE
+  // Only the relays this chain lives on: another relay's refusal is not this move's (review of #570).
+  return signerWaiting(chainHolders(pubkey)) ? HEAD_UNCONFIRMED_SIGNER_MESSAGE : HEAD_UNCONFIRMED_MESSAGE
 }
 
 /**

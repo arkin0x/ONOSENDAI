@@ -25,7 +25,9 @@
 
 import { askChainEvents, fetchChainEvents, watchAuthor } from './chains'
 import { decideSelfCheck } from './chainHold'
-import { onResume } from './relay'
+import { onResume, retryFailedAuth } from './relay'
+import { chainHolders } from './chainHolders'
+import { signerHeld } from './authOpen'
 import { newestSpawn, type NostrEvent } from './events'
 import type { RelayAnswer } from './relayOutcome'
 import { requeueForCanonical } from './publisher'
@@ -76,7 +78,7 @@ async function check(pubkey: string): Promise<void> {
   try {
     const answers = await askChainEvents(pubkey, knownGenesis(pubkey), knownEvents(pubkey))
     if (useCyberspace.getState().identity.pubkey !== pubkey) return
-    useCyberspace.getState().applySelfCheck(pubkey, decideSelfCheck(answers, DEFAULT_RELAY, online()))
+    useCyberspace.getState().applySelfCheck(pubkey, decideSelfCheck(answers, DEFAULT_RELAY, online(), chainHolders(pubkey)))
     requeueMissingOnCanonical(pubkey, answers)
   } catch {
     // The query reports rather than throws; anything that escapes is a
@@ -122,7 +124,15 @@ export function recheckIfUnknown(): void {
 
 /** Ask again now, whatever the last answer was: the CHECK AGAIN button on a held chain. */
 export function recheckNow(): void {
-  void check(useCyberspace.getState().identity.pubkey)
+  // A deliberate tap, as RETRY is: every relay this chain lives on (the
+  // canonical relay and its known holders) whose AUTH the signer turned down
+  // or let run out asks it again, so the check that follows can be read
+  // signed in, and the prompt the panel speaks of is really shown. No other
+  // relay is asked: the check does not wait on it.
+  const pubkey = useCyberspace.getState().identity.pubkey
+  const holders = chainHolders(pubkey)
+  for (const url of [...signerHeld]) if (holders.has(url)) retryFailedAuth(url)
+  void check(pubkey)
 }
 
 /**

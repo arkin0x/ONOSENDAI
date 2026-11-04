@@ -9,13 +9,13 @@
  * keys (W up, S down, R far, F near, Space commit); this map is only read
  * while walking.
  *
- * | Key | Step |
- * |---|---|
- * | W | forward (the pad's FAR) |
- * | S | back (NEAR) |
- * | A / D | left / right |
- * | Space or R | up one cell |
- * | C or F | down one cell |
+ * | Key | Step | The WALK pad's key (hud/TouchControls.tsx walkPad) |
+ * |---|---|---|
+ * | W | forward | FORWARD |
+ * | S | back | BACKWARD |
+ * | A / D | left / right | the side arrows |
+ * | Space or R | up one cell | JUMP |
+ * | C or F | down one cell | DOWN |
  *
  * Under GRAVITY (store/useWalk.ts) up is a jump and down does nothing; Z,
  * answered by the keyboard itself, turns gravity on and off.

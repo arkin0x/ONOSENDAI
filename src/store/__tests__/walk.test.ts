@@ -255,6 +255,29 @@ describe('WALK', () => {
     expect(useCyberspace.getState().viewing()).toBe(false)
   })
 
+  it('keeps the zoom it is entered at: from VIEW, from HOP, never back to 2^0 (arkinox, 2026-11-02)', () => {
+    useWalk.getState().exit()
+    useCyberspace.setState({ scaleExp: 0 })
+    // HOP at 2^0, VIEW, zoomed out to 2^6 there, then WALK.
+    useCyberspace.getState().viewHere()
+    useCyberspace.getState().adjustScale(6)
+    expect(useCyberspace.getState().scaleExp).toBe(6)
+    useWalk.getState().enter()
+    expect(useCyberspace.getState().walking).toBe(true)
+    expect(useCyberspace.getState().viewing()).toBe(false)
+    expect(useCyberspace.getState().scaleExp).toBe(6)
+    // VIEW ended with nothing left to return to.
+    expect(useCyberspace.getState().focusReturnScale).toBeNull()
+    expect(useCyberspace.getState().cursor).toEqual(useCyberspace.getState().position)
+    // Straight from HOP the zoom stays too.
+    useWalk.getState().exit()
+    useCyberspace.getState().adjustScale(-2)
+    useWalk.getState().enter()
+    expect(useCyberspace.getState().scaleExp).toBe(4)
+    useWalk.getState().exit()
+    useCyberspace.setState({ scaleExp: 0 })
+  })
+
   it('ends when the scene leaves your head', () => {
     useCyberspace.getState().focusOn(useCyberspace.getState().position, 0, 'somewhere')
     expect(useCyberspace.getState().walking).toBe(false)

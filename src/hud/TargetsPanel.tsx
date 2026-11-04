@@ -23,6 +23,7 @@ import { profileLabel, useProfiles } from '../store/useProfiles'
 import { ProfileBadge } from './ProfileBadge'
 import { Explanation } from './Explanation'
 import { useMutes } from '../store/useMutes'
+import { everyWhileVisible } from '../lib/whileVisible'
 
 export function TargetsPanel(): JSX.Element {
   const targets = useCyberspace((s) => s.targets)
@@ -37,8 +38,7 @@ export function TargetsPanel(): JSX.Element {
   const profiles = useProfiles((s) => s.profiles)
   const [now, setNow] = useState(() => Date.now() / 1000)
   useEffect(() => {
-    const t = window.setInterval(() => setNow(Date.now() / 1000), 10_000)
-    return () => window.clearInterval(t)
+    return everyWhileVisible(() => setNow(Date.now() / 1000), 10_000)
   }, [])
 
   // Logging in is a new identity: point "Follows of" at it, and drop the old

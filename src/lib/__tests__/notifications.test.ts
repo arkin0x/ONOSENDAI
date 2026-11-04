@@ -25,7 +25,8 @@ describe('toNotification', () => {
   it('a reaction to your hidden shard or object goes to the item, no lookup needed', () => {
     for (const kind of [3330, 33331]) {
       const n = toNotification(sign(reactionTemplate({ id: 'b'.repeat(64), pubkey: me, kind }, '+', 5), them), me)
-      expect(n?.on).toEqual({ type: 'item', id: 'b'.repeat(64), lookupId: undefined })
+      // With the reacted kind, so a shard only published is not called a hidden item (notificationsViewItem.test.ts).
+      expect(n?.on).toEqual({ type: 'item', id: 'b'.repeat(64), lookupId: undefined, kind })
     }
   })
 

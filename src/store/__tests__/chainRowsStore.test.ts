@@ -43,6 +43,12 @@ vi.mock('../../lib/chains', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../lib/chains')>()
   return { ...actual, fetchChainEvents: vi.fn(async () => []), confirmChainEvents: vi.fn(async () => relays.confirm) }
 })
+/** What the relays were sent, by id: every publish is taken. */
+vi.mock('../../lib/relay', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../lib/relay')>()),
+  publish: (e: { id: string }) => { sent.push({ id: e.id }); return Promise.resolve({ ok: true as const }) },
+  publishMany: (urls: string[]) => Promise.resolve({ ok: true as const, accepted: urls }),
+}))
 
 import { finalizeEvent, generateSecretKey, getPublicKey } from 'nostr-tools/pure'
 import { nip19 } from 'nostr-tools'
@@ -139,6 +145,8 @@ async function oldRecord(): Promise<unknown> {
   return r
 }
 
+const tick = (ms = 0): Promise<void> => new Promise((r) => setTimeout(r, ms))
+
 beforeEach(() => {
   posted.length = 0
   sent.length = 0
@@ -156,7 +164,9 @@ beforeEach(() => {
   localStorage.setItem('onosendai:live', '0')
   vi.spyOn(console, 'warn').mockImplementation(() => {})
 })
-afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals() })
+/** What a test broke on purpose and must put back even when it fails part way. */
+const putBack: Array<() => void> = []
+afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); while (putBack.length > 0) putBack.pop()!() })
 
 describe('moving a chain to rows', () => {
   it('copies the chain whole, and the load after it reads the rows', async () => {
@@ -237,16 +247,62 @@ describe('moving a chain to rows', () => {
     expect(localStorage.getItem('onosendai:chain-rows:' + pk)).toBeNull()
   })
 
-  it('a database wiped under the marker: the frozen copy brings the chain back, and it moves again', async () => {
+  it('a database wiped under the marker: the frozen copy is drawn, nothing is signed or moved until the relays answer, it says so, then it moves again', async () => {
     const chain = chainOf(15)
     await seedOldStores(chain, { localToo: true })
     await openTab()
     ;(await import('../../lib/eventDb/connection')).closeEventDb()
     ;(globalThis as { indexedDB?: IDBFactory }).indexedDB = new IDBFactory()
+    relays.confirm = null
     const b = await openTab()
     expect(b.S().events).toHaveLength(15)
-    expect(b.rows.inRows(pk)).toBe(true)
-    expect((await rowsNow())!.events).toHaveLength(15)
+    // Not taken as a first move: the frozen copy is from before the switch, so it is not written as the chain.
+    expect(b.rows.inRows(pk)).toBe(false)
+    expect(await rowsNow()).toBeNull()
+    expect((await import('../useToast')).useToast.getState().toast?.label).toBe('SAVED CHAIN CLEARED')
+    await expect(b.S().signEvent(spawnTemplate(pk, 5_000))).rejects.toThrow(b.store.ROWS_WIPED_MESSAGE)
+    const head = b.S().prevEventId
+    await signMove(b).catch(() => {})
+    expect(b.S().prevEventId).toBe(head)
+    // The relays answer: the move goes on, and the chain is in rows again.
+    relays.confirm = []
+    b.store.useCyberspace.setState({ proof: { ...b.S().proof, status: 'idle', message: null } })
+    const m = await signMove(b)
+    await vi.waitFor(() => expect(b.rows.inRows(pk)).toBe(true))
+    await b.rows.chainRowsSettled()
+    await vi.waitFor(async () => expect((await rowsNow())!.events.map((e) => e.id)).toEqual([...chain.map((e) => e.id), m]))
+  })
+
+  it('wiped with moves made since the switch: the moves are said to be gone, and none is signed from the frozen copy unasked', async () => {
+    const chain = chainOf(6)
+    await seedOldStores(chain, { localToo: true })
+    const a = await openTab()
+    await signMove(a)
+    await signMove(a)
+    await a.rows.chainRowsSettled()
+    ;(await import('../../lib/eventDb/connection')).closeEventDb()
+    ;(globalThis as { indexedDB?: IDBFactory }).indexedDB = new IDBFactory()
+    relays.confirm = null
+    const b = await openTab()
+    // The frozen copy, six actions: the two moves no relay took are gone, and the person is told.
+    expect(b.S().events).toHaveLength(6)
+    expect((await import('../useToast')).useToast.getState().toast?.meta).toContain('Unsent moves may be gone')
+    await expect(b.S().signEvent(spawnTemplate(pk, 5_000))).rejects.toThrow(b.store.ROWS_WIPED_MESSAGE)
+    expect(await rowsNow()).toBeNull()
+  })
+
+  it('wiped, and no copy anywhere: once the relays have answered there is nothing to wait for, and a spawn may be signed', async () => {
+    const chain = chainOf(4)
+    await seedOldStores(chain)
+    await openTab()
+    ;(await import('../../lib/eventDb/connection')).closeEventDb()
+    ;(globalThis as { indexedDB?: IDBFactory }).indexedDB = new IDBFactory()
+    const b = await openTab()
+    expect(b.S().events).toHaveLength(0)
+    await expect(b.S().signEvent(spawnTemplate(pk, 5_000))).rejects.toThrow(b.store.ROWS_WIPED_MESSAGE)
+    relays.confirm = []
+    await b.S().confirmHeadNow()
+    await expect(b.S().signEvent(spawnTemplate(pk, 5_000))).resolves.toBeTruthy()
   })
 
   it('a copy holding other actions is kept as a branch set aside', async () => {
@@ -1122,5 +1178,339 @@ describe('the probe decides before anything is written', () => {
     const open = vi.spyOn((globalThis as { indexedDB: IDBFactory }).indexedDB, 'open')
     await openTab()
     expect(open.mock.calls.map((c) => c[0])).toContain('onosendai:events-probe')
+  })
+})
+
+/**
+ * Another connection holds a write on the rows for `ms`: every commit waits
+ * behind it, as behind a database that is slow to answer; the look before a
+ * move, which reads only the chain record, does not. Resolves once the hold is
+ * on, with what resolves when it lets go.
+ */
+async function holdTheDatabase(ms: number): Promise<{ released: Promise<void> }> {
+  const db = await new Promise<IDBDatabase>((resolve, reject) => {
+    const req = indexedDB.open('onosendai:events')
+    req.onsuccess = () => resolve(req.result)
+    req.onerror = () => reject(req.error)
+  })
+  return new Promise((on) => {
+    const tx = db.transaction(['events'], 'readwrite')
+    const os = tx.objectStore('events')
+    const until = Date.now() + ms
+    const released = new Promise<void>((done) => { tx.oncomplete = () => { db.close(); done() } })
+    let first = true
+    const spin = (): void => {
+      os.get('nobody').onsuccess = () => {
+        if (first) { first = false; on({ released }) }
+        if (Date.now() < until) spin()
+      }
+    }
+    spin()
+  })
+}
+
+describe('after a lost commit (review of 2026-11-04, F1, F1b, F4)', () => {
+  /** Two tabs on one head; A moves first, and B's look is blinded so it signs from the old head too. */
+  /** Reads of the rows fail, as a sick database's do; the look and the commit are untouched. Returns what puts it back. */
+  function breakReads(): () => void {
+    const proto = IDBIndex.prototype as unknown as { getAll: (...x: unknown[]) => unknown }
+    const real = proto.getAll
+    proto.getAll = function (this: IDBIndex, ...x: unknown[]) {
+      if (this.objectStore.transaction.db.name === 'onosendai:events') throw new DOMException('broken', 'UnknownError')
+      return real.apply(this, x)
+    }
+    const mend = (): void => { proto.getAll = real }
+    putBack.push(mend)
+    return mend
+  }
+
+  async function race(opts: { live?: boolean; reads?: 'broken'; land?: number; busy?: number } = {}): Promise<{ a: Tab; b: Tab; moveA: string; moveB: string; chain: NostrEvent[]; mend: () => void }> {
+    const chain = chainOf(12)
+    // On the relays already when LIVE, so B's publisher has only B's move to send.
+    await seedOldStores(chain, opts.live ? { published: chain.map((e) => e.id) } : {})
+    await openTab()
+    const a = await openTab()
+    const b = await openTab()
+    const moveA = await signMove(a)
+    await a.rows.chainRowsSettled()
+    if (opts.live) {
+      ;(await import('../../lib/publisher')).startPublisher()
+      b.store.useCyberspace.setState({ live: true })
+    }
+    const mend = opts.reads === 'broken' ? breakReads() : () => {}
+    if (opts.land !== undefined) b.rows.setRowsPatience({ land: opts.land })
+    const see = blindTheLook()
+    const busy = opts.busy ? (await holdTheDatabase(opts.busy)).released : Promise.resolve()
+    let moveB: string
+    try { moveB = await signMove(b, 'y') } finally { see() }
+    await busy
+    return { a, b, moveA, moveB, chain, mend }
+  }
+
+  it('the moment the answer comes, the move that lost cannot be sent, before anything is read', async () => {
+    const { b, moveB } = await race()
+    let sendable = 0
+    for (let i = 0; i < 400; i++) {
+      if (!b.S().events.some((e) => e.id === moveB)) break
+      const r = await Promise.race([b.rows.chainLanded(pk, moveB), tick(0).then(() => 'pending' as const)])
+      if (r === true && b.S().events.some((e) => e.id === moveB)) sendable++
+      await tick(0)
+    }
+    expect(sendable).toBe(0)
+  })
+
+  it('a take-back whose read fails: the move that lost stays unsendable, nothing is signed, the person is told, and the read is tried until it lands', async () => {
+    const { b, moveA, moveB, mend } = await race({ reads: 'broken' })
+    await b.rows.chainRowsSettled()
+    await tick(300)
+    expect(b.S().events.some((e) => e.id === moveB)).toBe(true)
+    expect(await b.rows.chainLanded(pk, moveB)).toBe(false)
+    expect(b.rows.takingBack(pk)).toBe(true)
+    expect((await import('../useToast')).useToast.getState().toast?.label).toBe('CHAIN HELD')
+    await expect(b.S().signEvent(spawnTemplate(pk, 5_000))).rejects.toThrow(b.store.TAKING_BACK_MESSAGE)
+    // The database answers again: the next try lands, and B goes on from the head that won.
+    mend()
+    await vi.waitFor(() => expect(b.S().events.map((e) => e.id)).not.toContain(moveB), { timeout: 10_000, interval: 50 })
+    expect(b.rows.takingBack(pk)).toBe(false)
+    expect(b.S().prevEventId).toBe(moveA)
+    expect(await b.rows.chainLanded(pk, moveB)).toBe(false)
+    expect(sent.map((s) => s.id)).not.toContain(moveB)
+  }, 30_000)
+
+  it('end to end, LIVE: PUBLISH NOW never sends the move that lost, while its take-back cannot land', async () => {
+    const { b, moveB, mend } = await race({ live: true, reads: 'broken' })
+    await b.rows.chainRowsSettled()
+    await tick(300)
+    b.S().publishNow()
+    await tick(500)
+    expect(b.S().events.some((e) => e.id === moveB)).toBe(true)
+    expect(sent.map((s) => s.id)).not.toContain(moveB)
+    mend()
+  })
+
+  it('a retry armed by a refused write is cleared by a lost commit, and never writes what lost over what won', async () => {
+    const chain = chainOf(12)
+    await seedOldStores(chain)
+    await openTab()
+    const a = await openTab()
+    const b = await openTab()
+    b.rows.setRowsPatience({ retry: 200 })
+    const proto = IDBObjectStore.prototype as unknown as { put: (...x: unknown[]) => unknown }
+    const real = proto.put
+    proto.put = function (this: IDBObjectStore, ...x: unknown[]) {
+      if (this.name === 'chains') throw new DOMException('The quota has been exceeded.', 'QuotaExceededError')
+      return real.apply(this, x)
+    }
+    let x: string
+    try {
+      x = await signMove(b)
+      await b.rows.chainRowsSettled()
+    } finally { proto.put = real }
+    const moveA = await signMove(a, 'y')
+    await a.rows.chainRowsSettled()
+    const see = blindTheLook()
+    let y: string
+    try { y = await signMove(b) } finally { see() }
+    await b.rows.chainRowsSettled()
+    await vi.waitFor(() => expect(b.S().prevEventId).toBe(moveA))
+    // Past the retry: the rows still say A won.
+    await tick(600)
+    await b.rows.chainRowsSettled()
+    const rows = await rowsNow()
+    expect(rows!.events[rows!.events.length - 1].id).toBe(moveA)
+    expect(rows!.events.map((e) => e.id)).not.toContain(x)
+    expect(rows!.events.map((e) => e.id)).not.toContain(y)
+  })
+
+  it('a commit slower than the land patience: the move goes out, and when it then loses, the chain is held and the person told', async () => {
+    const { b, moveB } = await race({ live: true, land: 20, busy: 400 })
+    await vi.waitFor(() => expect(sent.map((s) => s.id)).toContain(moveB), { timeout: 5_000, interval: 20 })
+    await b.rows.chainRowsSettled()
+    await vi.waitFor(() => expect(b.rows.chainHeld(pk)).toBe(true), { timeout: 5_000, interval: 20 })
+    expect((await import('../useToast')).useToast.getState().toast?.label).toBe('CHAIN MAY HAVE FORKED')
+    expect(b.S().proof.message).toBe(b.store.CHAIN_HELD_MESSAGE)
+    await expect(b.S().signEvent(spawnTemplate(pk, 5_000))).rejects.toThrow(b.store.CHAIN_HELD_MESSAGE)
+    // Nothing more goes out from this tab, whatever asks.
+    const before = sent.length
+    b.S().publishNow()
+    await tick(300)
+    expect(sent.length).toBe(before)
+  })
+
+  it('a slow commit that lands is no fork: nothing is held', async () => {
+    const chain = chainOf(6)
+    await seedOldStores(chain)
+    const a = await openTab()
+    ;(await import('../../lib/publisher')).startPublisher()
+    a.store.useCyberspace.setState({ live: true })
+    a.rows.setRowsPatience({ land: 20 })
+    const { released } = await holdTheDatabase(300)
+    const m = await signMove(a)
+    await vi.waitFor(() => expect(sent.map((s) => s.id)).toContain(m), { timeout: 5_000, interval: 20 })
+    await released
+    await a.rows.chainRowsSettled()
+    expect(a.rows.chainHeld(pk)).toBe(false)
+    expect((await rowsNow())!.events.at(-1)?.id).toBe(m)
+  })
+})
+
+describe('the trial is asked for, never set by a link (F2)', () => {
+  const IPHONE = 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Mobile/15E148 Safari/604.1'
+  const at = (search: string): void => { vi.stubGlobal('location', { search, href: `https://onosendai.test/${search}`, pathname: '/', hash: '', origin: 'https://onosendai.test', host: 'onosendai.test', hostname: 'onosendai.test', protocol: 'https:' }) }
+
+  it('a link alone never puts an iPhone on the trial, across loads; only the yes on screen does, and ?chainstore=off ends it', async () => {
+    vi.stubGlobal('navigator', { userAgent: IPHONE })
+    const chain = chainOf(6)
+    await seedOldStores(chain, { localToo: true })
+    at('?chainstore=trial')
+    const a = await openTab()
+    expect(a.rows.trialAskedByLink()).toBe(true)
+    expect(a.rows.storeTrial()).toBe(false)
+    expect(a.rows.inRows(pk)).toBe(false)
+    expect(localStorage.getItem('onosendai:chain-store-trial')).toBeNull()
+    // A plain open after the link: still the old stores.
+    at('')
+    const b = await openTab()
+    expect(b.rows.trialAskedByLink()).toBe(false)
+    expect(b.rows.inRows(pk)).toBe(false)
+    // The yes: the next load is on the trial, and moves the chain.
+    at('?chainstore=trial')
+    const c = await openTab()
+    c.rows.startTrial()
+    expect(c.rows.trialAskedByLink()).toBe(false)
+    at('')
+    const d = await openTab()
+    expect(d.rows.storeTrial()).toBe(true)
+    expect(d.rows.inRows(pk)).toBe(true)
+    // A device already on it is not asked again.
+    at('?chainstore=trial')
+    expect((await openTab()).rows.trialAskedByLink()).toBe(false)
+    at('?chainstore=off')
+    expect((await openTab()).rows.storeTrial()).toBe(false)
+  })
+
+  it('no means nothing is kept', async () => {
+    at('?chainstore=trial')
+    const a = await openTab()
+    a.rows.declineTrial()
+    expect(a.rows.trialAskedByLink()).toBe(false)
+    expect(localStorage.getItem('onosendai:chain-store-trial')).toBeNull()
+  })
+})
+
+describe('a paid cloud job and the head it is held against (J1 to J3)', () => {
+  const jobAt = (prevEventId: string): import('../../lib/cloud').PendingCloudJob => ({
+    version: 1, jobId: 'paid-job', pollToken: 't', action: 'hop', pubkey: pk,
+    from: { x: '0', y: '0', z: '0' }, to: { x: '4104', y: '0', z: '0' }, plane: 0, prevEventId,
+    costMsats: 1000, createdAt: Date.now(), stage: 'computing', deposit: null,
+  })
+
+  it('a switch away and back: the job is compared with the head read from the rows, and kept', async () => {
+    const chain = chainOf(6)
+    await seedOldStores(chain, { localToo: true })
+    const a = await openTab()
+    const moved = await signMove(a)
+    await a.rows.chainRowsSettled()
+    const cloud = await import('../../lib/cloud')
+    cloud.saveCloudJob(jobAt(moved))
+    await a.S().useNsec(nip19.nsecEncode(generateSecretKey()))
+    await a.S().useNsec(nip19.nsecEncode(sk))
+    await tick(50)
+    await a.store.savedChainLoaded()
+    expect(a.S().prevEventId).toBe(moved)
+    expect(a.S().cloud.message ?? '').not.toContain('dropped')
+    expect(cloud.loadCloudJob()?.prevEventId).toBe(moved)
+  })
+
+  it('the kill switch on a load: the frozen copy in hand first does not drop the job', async () => {
+    const chain = chainOf(6)
+    await seedOldStores(chain, { localToo: true })
+    const a = await openTab()
+    const moved = await signMove(a)
+    await a.rows.chainRowsSettled()
+    ;(await import('../../lib/eventDb/connection')).closeEventDb()
+    localStorage.setItem('onosendai:chain-store-off', '1')
+    vi.resetModules()
+    const cloud = await import('../../lib/cloud')
+    cloud.saveCloudJob(jobAt(moved))
+    const store = await import('../useCyberspace')
+    // What App does on mount, before the rows have been read. Kept, the job is
+    // then followed at HOSAKA, which tests cannot reach: only the compare is awaited.
+    void store.useCyberspace.getState().resumeCloudJob()
+    await store.savedChainLoaded()
+    await tick(50)
+    expect(store.useCyberspace.getState().prevEventId).toBe(moved)
+    expect(store.useCyberspace.getState().cloud.message ?? '').not.toContain('dropped')
+    expect(cloud.loadCloudJob()?.prevEventId).toBe(moved)
+  })
+
+  it('rows that cannot be read: a head nobody can vouch for drops nothing, and the job waits', async () => {
+    const chain = chainOf(6)
+    await seedOldStores(chain, { localToo: true })
+    const a = await openTab()
+    const moved = await signMove(a)
+    await a.rows.chainRowsSettled()
+    ;(await import('../../lib/eventDb/connection')).closeEventDb()
+    const proto = IDBIndex.prototype as unknown as { getAll: (...x: unknown[]) => unknown }
+    const real = proto.getAll
+    proto.getAll = function () { throw new DOMException('broken', 'UnknownError') }
+    try {
+      vi.resetModules()
+      const cloud = await import('../../lib/cloud')
+      cloud.saveCloudJob(jobAt(moved))
+      const store = await import('../useCyberspace')
+      await store.savedChainLoaded()
+      await store.useCyberspace.getState().resumeCloudJob()
+      expect(cloud.loadCloudJob()?.prevEventId).toBe(moved)
+      expect(store.useCyberspace.getState().cloud.message).toContain('waits')
+    } finally { proto.getAll = real }
+  })
+
+  it('a job whose head really moved is still dropped, once the rows are read', async () => {
+    const chain = chainOf(6)
+    await seedOldStores(chain, { localToo: true })
+    const a = await openTab()
+    const cloud = await import('../../lib/cloud')
+    cloud.saveCloudJob(jobAt(chain[5].id))
+    await signMove(a)
+    await a.rows.chainRowsSettled()
+    await a.S().resumeCloudJob()
+    expect(a.S().cloud.message).toMatch(/chain head moved/)
+    expect(cloud.loadCloudJob()).toBeNull()
+  })
+})
+
+describe('what another tab saved is not taken as on the relays (A1, A2)', () => {
+  it('a tab folding another tab\'s unsent move writes no acknowledgement for it, and a reload still owes it to the relays', async () => {
+    const chain = chainOf(8)
+    await seedOldStores(chain, { published: chain.map((e) => e.id) })
+    await openTab()
+    const a = await openTab()
+    const b = await openTab()
+    const m = await signMove(a)
+    await a.rows.chainRowsSettled()
+    expect(a.S().published[m]).not.toBe('ok')
+    await press(b)
+    await b.rows.chainRowsSettled()
+    expect(b.S().events.map((e) => e.id)).toContain(m)
+    expect(b.S().published[m]).not.toBe('ok')
+    expect((await rowsNow())!.published).not.toContain(m)
+    const c = await openTab()
+    expect(c.S().published[m]).not.toBe('ok')
+  })
+
+  it('what a relay did take, folded the same way, stays acknowledged', async () => {
+    const chain = chainOf(8)
+    await seedOldStores(chain, { published: chain.map((e) => e.id) })
+    await openTab()
+    const a = await openTab()
+    const b = await openTab()
+    const m = await signMove(a)
+    a.S().setPublishStatus(m, 'ok')
+    await a.rows.chainRowsSettled()
+    await press(b)
+    await b.rows.chainRowsSettled()
+    expect(b.S().published[m]).toBe('ok')
+    expect((await rowsNow())!.published).toContain(m)
   })
 })

@@ -36,18 +36,27 @@
  * keeps its place as a still gray diamond, so a visitor sees that someone was
  * here and the coin is gone, rather than a coin.
  *
- * Hidden audio (DECK-0007) is a small music note inside the note's blue box
- * (arkinox, 2026-10-23), its name under it, drawn when notes are; a tap opens
- * its card, with PLAY and DOWNLOAD.
+ * Hidden audio (DECK-0007) is a small music note on the note's blue box
+ * (arkinox, 2026-10-23), drawn when notes are; a tap opens its card, with
+ * PLAY and DOWNLOAD. Its name is on that card, not floating in the world
+ * (FLOATING_NAME).
+ *
+ * An item this identity holds is not drawn: the note's blue box alone stays
+ * where it was, its tap still opening its card (arkinox, 2026-11-01; lib/
+ * worldMarks itemDrawAs). TAKE fades it out over that box (scene/ItemVanish).
  */
 
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { nip19 } from 'nostr-tools'
 import { ACCENT } from '../lib/palette'
 import { useFrame } from '@react-three/fiber'
-import { BoxGeometry, CircleGeometry, EdgesGeometry, OctahedronGeometry, PlaneGeometry, type Group, type PerspectiveCamera } from 'three'
+import { BoxGeometry, CircleGeometry, EdgesGeometry, OctahedronGeometry, PlaneGeometry, Vector3, type Group, type LineSegments, type Material, type Mesh, type PerspectiveCamera } from 'three'
 import { decodeText, seedOf, TEXT_DECODE_MS } from '../lib/decode'
 import { useCeremony } from '../store/useCeremony'
+import { useInventory } from '../store/useInventory'
+import { useTakeVanish, type Vanishing } from '../store/useOpenCeremony'
+import { vanishOpacity } from '../lib/ceremony'
+import { openedKey } from '../store/useOpenedChests'
 import { GRID_RADIUS, itemCentre, type ViewAxes } from '../lib/space'
 import { alignedOrigin, useCyberspace } from '../store/useCyberspace'
 import { useShards } from '../store/useShards'
@@ -56,16 +65,18 @@ import { findCashuToken } from '../lib/cashu'
 import { NFT_WORDS, replaceNftLinks } from '../lib/nftLink'
 import { useProfile } from '../hooks/useProfile'
 import { profileLabel } from '../store/useProfiles'
-import { coinKind, markShown, type MarkKind } from '../lib/worldMarks'
+import { coinKind, itemDrawAs, markShown, type MarkKind } from '../lib/worldMarks'
 import { useCashu } from '../hud/useCashu'
 import { TapTarget } from './TapTarget'
 import { regionBox, type Box } from '../lib/clip'
 import { useItemModel } from '../hooks/useItemModel'
 import type { ItemAnimation, ItemModelRef } from '../lib/itemModel'
 import { ItemModelMark } from './ItemModel'
+import { ItemVanish } from './ItemVanish'
 import { useMutes } from '../store/useMutes'
 import { MARK_RECEDE_FLOOR, recedeShare } from '../lib/markerSize'
 import { headlampUniforms } from './headlamp'
+import { basicFaceProps, TRANSLUCENT_ORDER } from './shardFaces'
 
 /** A message's tap target, in CSS pixels: a fingertip over the mark, at any zoom. */
 const TAP_PX = 44
@@ -89,6 +100,17 @@ export const NOTE_EDGE_PX = 0.72 * MARK_PX.note
 const COIN_PX = 31
 /** The note's own color: the box's blue, lit. */
 const AUDIO_BLUE = '#9fd0ff'
+
+/** What carries its name floating in the world, by what it is. */
+export type NamedKind = 'item' | 'chest' | 'door' | 'sound'
+
+/**
+ * Whether a placed thing's name floats beside it in the world. A door, a
+ * chest and a sound do not: the name is on its card, one tap away (arkinox,
+ * 2026-11-02). An item keeps its name until the owner decides otherwise.
+ * Messages, coins and shards are not in this list and are unchanged.
+ */
+export const FLOATING_NAME: Readonly<Record<NamedKind, boolean>> = { item: true, chest: false, door: false, sound: false }
 
 /**
  * A mark's share of its full size at `depth` from the camera: full out to
@@ -178,6 +200,11 @@ export function WorldMessages({ axes }: Props): JSX.Element | null {
   // A block or a mute hides what it names (store/useMutes).
   const muted = useMutes((s) => s.muted)
   const births = useCeremony((s) => s.births)
+  const me = useCyberspace((s) => s.identity.pubkey)
+  const held = useInventory((s) => s.items)
+  // Whose ITEMS these are, and whether read: until then nothing held is shown by mistake.
+  const itemsRead = useInventory((s) => s.owner === me && s.storage !== 'loading')
+  const vanishing = useTakeVanish((s) => s.playing)
 
   const placed = useMemo(() => {
     const origin = alignedOrigin(anchor, scaleExp)
@@ -217,10 +244,15 @@ export function WorldMessages({ axes }: Props): JSX.Element | null {
         if (w.coin) return <CoinItem key={w.key} text={w.text} at={w.centre} scaleExp={scaleExp} onTap={open} />
         if (w.type === 'message') return <NoteItem key={w.key} w={w} birth={births[w.key]} onTap={open} />
         if (w.type === 'audio') return <AudioMark key={w.key} title={w.text} at={w.centre} onTap={open} />
-        // A key: the cube and its short name, as before.
+        // A key: the cube and its short name, or the box alone while it is held.
+        const play = vanishing[openedKey(me, w.key)]
+        const draw = itemDrawAs(!!held[w.key], itemsRead, !!play)
         return (
           <group key={w.key}>
-            <ItemMark id={w.key} text={w.text} sub={author(w)} at={w.centre} wears={w.wears} region={w.region} axes={axes} onTap={open} />
+            {draw === 'item'
+              ? <ItemMark id={w.key} text={w.text} sub={author(w)} at={w.centre} wears={w.wears} region={w.region} axes={axes} onTap={open} />
+              : <PlacedBox at={w.centre} appear={draw === 'vanishing' ? play : undefined} />}
+            {draw === 'vanishing' && <ItemVanish id={w.key} label={{ text: w.text, color: NOTE, sub: author(w), subColor: ACCENT }} at={w.centre} wears={w.wears} region={w.region} axes={axes} minPx={NOTE_EDGE_PX} play={play} clear={{ trueSide: placedBoxSide(scaleExp), minPx: 0 }} />}
             {/* The mark is a fixed size on screen at any zoom, so its target is
                 too: a fingertip over the mark (TapTarget). */}
             <TapTarget px={TAP_PX} at={w.centre} onTap={open} />
@@ -275,12 +307,12 @@ export function ItemMark({ id, text, sub, at, opacity = 1, wears, region = null,
   // drawn through, as before.
   const label = { text, color: NOTE, sub, subColor: ACCENT }
   if (model && axes && itemMarkShape(model, axes) === 'model') {
-    return <ItemModelMark id={id ?? text} model={model} animation={wears?.animation ?? NO_MOTION} at={at} region={region} axes={axes} minPx={NOTE_EDGE_PX} opacity={opacity} onTap={onTap} label={label} />
+    return <ItemModelMark id={id ?? text} model={model} animation={wears?.animation ?? NO_MOTION} at={at} region={region} axes={axes} minPx={NOTE_EDGE_PX} opacity={opacity} onTap={onTap} label={FLOATING_NAME.item ? label : undefined} />
   }
   return (
     <>
       <WorldMark kind="note" at={at} opacity={opacity} />
-      <WorldLabel text={label.text} color={label.color} at={at} align="center" px={13} sub={label.sub} subColor={label.subColor} opacity={opacity} recede="name" />
+      {FLOATING_NAME.item && <WorldLabel text={label.text} color={label.color} at={at} align="center" px={13} sub={label.sub} subColor={label.subColor} opacity={opacity} recede="name" />}
     </>
   )
 }
@@ -321,29 +353,39 @@ function NoteItem({ w, birth, onTap }: { w: { key: string; text: string; mine: b
 }
 
 /**
- * Hidden audio in the world: the note's blue box with a music note inside,
- * and the audio's name under it, as a message has its hider's name.
+ * Hidden audio in the world: the note's blue box with a music note on it.
+ * Its name is on its card, not beside it (FLOATING_NAME).
  */
 export function AudioMark({ title, at, opacity = 1, onTap }: { title: string; at: [number, number, number]; opacity?: number; onTap?: () => void }): JSX.Element {
   return (
     <group>
-      <WorldMark kind="note" at={at} opacity={opacity} />
+      <PlacedBox at={at} opacity={opacity} />
       <AudioNote at={at} opacity={opacity} />
-      <WorldLabel text={title} color={ACCENT} at={at} align="center" px={10} offsetPx={[0, -26]} opacity={opacity} recede="name" />
+      {FLOATING_NAME.sound && <WorldLabel text={title} color={ACCENT} at={at} align="center" px={10} offsetPx={[0, -26]} opacity={opacity} recede="name" />}
       {onTap && <TapTarget px={TAP_PX} at={at} onTap={onTap} />}
     </group>
   )
 }
 
 /**
- * The music note inside the box: a tilted oval head, a stem and a flag, flat
+ * How far the music note stands in front of the box's centre, toward the
+ * camera, in the box's own units (its edge is 1): just past half its
+ * diagonal, so the opaque box never hides it from any side.
+ */
+export const NOTE_STANDOFF = (Math.sqrt(3) / 2) * 1.02
+
+/**
+ * The music note on the box: a tilted oval head, a stem and a flag, flat
  * shapes turned to face the camera. Shapes, not a character: the scene's
  * font has no music note, and troika would fetch a fallback font for one.
  * Held to the box's size on screen (in the
  * box's own units its edge is 0.72, so the note stands about half of it).
+ * The box is opaque, so the note stands just outside it on the camera's
+ * side (NOTE_STANDOFF) and, like the box, is out of the bloom.
  */
 function AudioNote({ at, opacity = 1 }: { at: [number, number, number]; opacity?: number }): JSX.Element {
   const group = useRef<Group>(null)
+  const toward = useMemo(() => new Vector3(), [])
   const parts = useMemo(() => ({
     head: new CircleGeometry(0.095, 20),
     stem: new PlaneGeometry(0.035, 0.36),
@@ -354,12 +396,16 @@ function AudioNote({ at, opacity = 1 }: { at: [number, number, number]; opacity?
     const g = group.current
     if (!g) return
     const cam = state.camera as PerspectiveCamera
-    const perPixel = 2 * Math.tan((cam.fov * Math.PI) / 360) / state.size.height
-    const depth = cam.position.distanceTo(g.position)
-    g.scale.setScalar(Math.max(1e-5, depth * perPixel * MARK_PX.note * markRecede(depth)))
+    // The box's own size, so the note stands about half of it at any zoom.
+    const side = placedBoxSide(useCyberspace.getState().scaleExp)
+    g.scale.setScalar(side / NOTE_BOX_EDGE)
     g.quaternion.copy(cam.quaternion)
+    // In front of the box, toward the camera, by NOTE_STANDOFF of its side.
+    g.position.set(at[0], at[1], at[2])
+    toward.copy(cam.position).sub(g.position)
+    if (toward.lengthSq() > 0) g.position.addScaledVector(toward.normalize(), side * NOTE_STANDOFF)
   }, LABEL_PRIORITY)
-  const material = <meshBasicMaterial color={AUDIO_BLUE} toneMapped={false} transparent opacity={0.95 * opacity} depthWrite={false} />
+  const material = <meshBasicMaterial color={AUDIO_BLUE} toneMapped={false} {...basicFaceProps(opacity, { ghost: false, world: true })} />
   return (
     <group ref={group} position={at}>
       <mesh geometry={parts.head} position={[-0.06, -0.15, 0]} rotation={[0, 0, 0.45]} scale={[1.35, 1, 1]} frustumCulled={false}>{material}</mesh>
@@ -427,6 +473,107 @@ function DecodingLabel({ text, seed, birth, at }: { text: string; seed: number; 
   return <WorldLabel text={shown} color={NOTE} at={at} align="center" px={13} recede="name" />
 }
 
+
+/** A held item's and a sound's box: half a gibson, wherever you look from (owner, 2026-11-01). */
+const PLACED_BOX_GIBSONS = 0.5
+/** The edge the music note was drawn against, in its own units. */
+const NOTE_BOX_EDGE = 0.72
+/** The box's side in scene units: a scene unit is 2^scaleExp gibsons. */
+export function placedBoxSide(scaleExp: number): number {
+  return PLACED_BOX_GIBSONS / 2 ** scaleExp
+}
+const PLACED_BOX_FILL = new BoxGeometry(1, 1, 1)
+const PLACED_BOX_EDGES = new EdgesGeometry(PLACED_BOX_FILL)
+
+/** The box's faces: the note's blue, darker, so its bright edges read on them. */
+const PLACED_BOX_FACE = '#24527f'
+
+/**
+ * How the box's faces and edges are drawn: as a shard's opaque faces in the
+ * world are (shardFaces basicFaceProps), and both for the same two reasons
+ * (arkinox, 2026-11-01: a white cube, seen only from some angles).
+ *
+ *  - Out of the bloom. A face written with ordinary blending puts its own
+ *    alpha over whatever is behind it, which takes the tag off a room's face
+ *    there, and the bloom then adds up that whole bright face: the box
+ *    turned white in front of a pale room. Written with the tag (colour
+ *    opaque, alpha 0, TAG_BLEND), the faces show their own blue and the room
+ *    behind keeps its tag. The edges take the tag too, so they draw as blue
+ *    lines rather than glowing white across a box this size.
+ *  - Opaque, so it writes depth. A see-through box writes none, and every
+ *    shard face is in three's transparent list sorted by its object's centre:
+ *    a room whose centre sorted nearer was drawn after the box and painted
+ *    over it, which turned with the view. Writing depth, the box hides what
+ *    is behind it and is hidden only by what is in front, from any side.
+ *
+ * Drawn today at full opacity only; an `opacity` under 1 would take the
+ * see-through face's blend instead, which keeps the tag under it.
+ */
+export function placedBoxProps(opacity: number): Record<string, unknown> {
+  return basicFaceProps(opacity, { ghost: false, world: true })
+}
+
+/**
+ * How much of the box shows `elapsed` ms into TAKE: none, up to all of it,
+ * as the item fades out over it (ItemVanish, lib/ceremony vanishOpacity).
+ */
+export function boxAppearOpacity(elapsed: number, calm: boolean): number {
+  return 1 - vanishOpacity(elapsed, calm)
+}
+
+/** The two looks a box appearing under TAKE moves between: see-through with no depth, then solid. */
+const BOX_SEE_THROUGH = placedBoxProps(0.5)
+const BOX_SOLID = { ...placedBoxProps(1), depthWrite: true }
+
+/**
+ * A box's material and draw order at `opacity` while it appears: below 1 the
+ * see-through face's blend, no depth written and drawn after opaque faces
+ * (TRANSLUCENT_ORDER), so the item fading out inside it and its name stay in
+ * sight; at 1 exactly the solid, tagged box it then stays. Nothing allocated.
+ */
+export function setBoxLook(material: Material, object: { renderOrder: number }, opacity: number): void {
+  const solid = opacity >= 1
+  Object.assign(material, solid ? BOX_SOLID : BOX_SEE_THROUGH)
+  material.opacity = solid ? 1 : Math.max(0, opacity)
+  material.depthWrite = solid
+  object.renderOrder = solid ? 0 : TRANSLUCENT_ORDER
+}
+
+/**
+ * Where a held item or a sound stands: a blue box of a fixed size in the world.
+ * It is not sized to the screen, so it reads as a thing in the place, and it
+ * is solid, so it is the same blue box from every side (placedBoxProps). The
+ * faces sit a hair behind their edges (polygonOffset), so the edges always
+ * draw over them.
+ *
+ * Under TAKE (`appear`) it fades in as the item fades out, see-through and
+ * writing no depth until the fade is done (setBoxLook): solid from the start,
+ * it hid the item inside it and cut the middle out of its name.
+ */
+export function PlacedBox({ at, opacity = 1, appear }: { at: [number, number, number]; opacity?: number; appear?: Vanishing }): JSX.Element {
+  const side = placedBoxSide(useCyberspace((s) => s.scaleExp))
+  const fill = useRef<Mesh>(null)
+  const edges = useRef<LineSegments>(null)
+  useFrame(() => {
+    if (!appear) return
+    const o = boxAppearOpacity(performance.now() - appear.at, appear.calm) * opacity
+    if (fill.current) setBoxLook(fill.current.material as Material, fill.current, o)
+    if (edges.current) setBoxLook(edges.current.material as Material, edges.current, o)
+  })
+  // While it appears, its first frame is drawn as it starts: not there yet.
+  const start = appear ? Math.min(opacity, boxAppearOpacity(performance.now() - appear.at, appear.calm) * opacity) : opacity
+  const order = appear && start < 1 ? TRANSLUCENT_ORDER : 0
+  return (
+    <group position={at} scale={side}>
+      <mesh ref={fill} geometry={PLACED_BOX_FILL} renderOrder={order}>
+        <meshBasicMaterial color={PLACED_BOX_FACE} toneMapped={false} {...placedBoxProps(start)} polygonOffset polygonOffsetFactor={1} polygonOffsetUnits={1} />
+      </mesh>
+      <lineSegments ref={edges} geometry={PLACED_BOX_EDGES} frustumCulled={false} renderOrder={order}>
+        <lineBasicMaterial color={NOTE_BLUE} toneMapped={false} {...placedBoxProps(start)} />
+      </lineSegments>
+    </group>
+  )
+}
 
 /** The line color and opacity of each mark. A spent coin is steel and faint. */
 const MARK_LOOK: Record<MarkKind, { color: string; opacity: number }> = {

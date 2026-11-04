@@ -12,7 +12,10 @@
  * (hud/WalkLookSphere.tsx; arkinox, 2026-10-23); it defaults on. A fifth,
  * headlamp, shades the world's shards as if lit from the camera
  * (scene/headlamp.ts; arkinox, 2026-10-23); it defaults on, and off draws
- * them unlit, exactly as before. These are view
+ * them unlit, exactly as before. A sixth, audioSpheres, draws the blue
+ * rings around each hidden sound in the world: its full-volume sphere,
+ * DECK-0007 `fade` (scene/AudioSpheres.tsx; arkinox, 2026-11-01); it
+ * defaults on. These are view
  * preferences only: nothing about the proof, the movement, the cursor or the
  * chain reads them.
  *
@@ -24,13 +27,13 @@
 
 import { create } from 'zustand'
 
-export type SceneLayer = 'dots' | 'boxes' | 'walkAvatarHidden' | 'walkLookSphere' | 'headlamp'
+export type SceneLayer = 'dots' | 'boxes' | 'walkAvatarHidden' | 'walkLookSphere' | 'headlamp' | 'audioSpheres'
 
 export type SceneLayers = Record<SceneLayer, boolean>
 
 export const LAYERS_KEY = 'onosendai:layers'
 
-export const DEFAULT_LAYERS: SceneLayers = { dots: true, boxes: true, walkAvatarHidden: false, walkLookSphere: true, headlamp: true }
+export const DEFAULT_LAYERS: SceneLayers = { dots: true, boxes: true, walkAvatarHidden: false, walkLookSphere: true, headlamp: true, audioSpheres: true }
 
 /** The stored choice, or the defaults when there is none or it cannot be read. */
 export function loadLayers(): SceneLayers {
@@ -48,6 +51,8 @@ export function loadLayers(): SceneLayers {
       walkLookSphere: p?.walkLookSphere !== false,
       // On unless explicitly off, as the dots and boxes are.
       headlamp: p?.headlamp !== false,
+      // On unless explicitly off.
+      audioSpheres: p?.audioSpheres !== false,
     }
   } catch {
     return { ...DEFAULT_LAYERS }
@@ -65,7 +70,7 @@ interface LayersState extends SceneLayers {
 
 export const useLayers = create<LayersState>((set, get) => {
   const put = (layer: SceneLayer, on: boolean): void => {
-    const next = { dots: get().dots, boxes: get().boxes, walkAvatarHidden: get().walkAvatarHidden, walkLookSphere: get().walkLookSphere, headlamp: get().headlamp, [layer]: on }
+    const next = { dots: get().dots, boxes: get().boxes, walkAvatarHidden: get().walkAvatarHidden, walkLookSphere: get().walkLookSphere, headlamp: get().headlamp, audioSpheres: get().audioSpheres, [layer]: on }
     set({ [layer]: on })
     saveLayers(next)
   }

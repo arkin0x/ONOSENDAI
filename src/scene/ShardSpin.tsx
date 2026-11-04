@@ -1,7 +1,7 @@
 /**
- * ShardSpin.tsx: a shard turning slowly on its own small canvas, for a card
- * that shows someone's avatar (PersonModal; arkinox, 2026-10-11: "an avatar
- * preview (spinning preview)").
+ * ShardSpin.tsx: a shard turning slowly on its own small canvas. A card takes
+ * this through CardSpin, which shares one of these among all cards; TV keeps
+ * its own (arkinox, 2026-10-11: "an avatar preview (spinning preview)").
  *
  * Framed the way the feed's pictures are (ThumbStage frameOf, framedDistance):
  * on the bounds of the shard and everything it places, from a three-quarter
@@ -26,7 +26,7 @@ const FOV = 35
 /** Radians a second: one turn in about twelve seconds. */
 const SPIN_PER_S = 0.5
 
-function Spinning({ shard, ignoreOpacity }: { shard: ShardModel | null; ignoreOpacity: boolean }): JSX.Element | null {
+function Spinning({ shard, ignoreOpacity, onDrawn }: { shard: ShardModel | null; ignoreOpacity: boolean; onDrawn?: () => void }): JSX.Element | null {
   const { camera } = useThree()
   const turn = useRef<Group>(null)
   const [frame, setFrame] = useState<ThumbFrame | null>(null)
@@ -44,7 +44,10 @@ function Spinning({ shard, ignoreOpacity }: { shard: ShardModel | null; ignoreOp
     camera.updateProjectionMatrix()
   }, [frame, camera])
   useFrame((_, dt) => {
-    if (turn.current) turn.current.rotation.y += dt * SPIN_PER_S
+    if (!turn.current) return
+    turn.current.rotation.y += dt * SPIN_PER_S
+    // This frame has the shard in it: anything holding the canvas out of sight can stop.
+    onDrawn?.()
   })
   if (!frame || !shard) return null
   return (
@@ -89,8 +92,12 @@ function Pacer({ pace }: { pace: Pace }): null {
  * were never seen (arkinox, 2026-10-20: "the perf on /tv on my laptop is not
  * satisfactory"). The turn keeps its pace either way: each frame turns by
  * the time since the last.
+ *
+ * `wide`: the whole width of its row, `size` tall, as a chest's or a door's
+ * card shows its look (chest and door design, 4.7: "the door in 3D full
+ * width with its name above it. the chest modal should do the same").
  */
-export function ShardSpin({ shard, size = 160, preserve = false, pace, ignoreOpacity = false }: { shard: ShardModel | null; size?: number; preserve?: boolean; pace?: Pace; ignoreOpacity?: boolean }): JSX.Element {
+export function ShardSpin({ shard, size = 160, preserve = false, pace, ignoreOpacity = false, wide = false, onDrawn, onContext }: { shard: ShardModel | null; size?: number; preserve?: boolean; pace?: Pace; ignoreOpacity?: boolean; wide?: boolean; onDrawn?: () => void; onContext?: (canvas: HTMLCanvasElement, gl: WebGL2RenderingContext) => void }): JSX.Element {
   // A new turn for each shard, inside the same canvas: one shard straight
   // after another would otherwise be built once on the last one's framing,
   // then again on its own (review of #394). Not keyed on the shard's id: an
@@ -98,22 +105,22 @@ export function ShardSpin({ shard, size = 160, preserve = false, pace, ignoreOpa
   const turns = useRef(0)
   const turn = useMemo(() => ++turns.current, [shard])
   return (
-    <div className="shardspin" style={{ width: size, height: size }} aria-label={shard ? `${shard.name}, turning` : undefined} role={shard ? 'img' : undefined}>
+    <div className="shardspin" style={{ width: wide ? '100%' : size, height: size }} aria-label={shard ? `${shard.name}, turning` : undefined} role={shard ? 'img' : undefined}>
       <Canvas
         dpr={[1, 2]}
         gl={{ alpha: true, antialias: true, preserveDrawingBuffer: preserve }}
         camera={{ fov: FOV, near: 0.01, far: 100000 }}
-        style={{ width: size, height: size, pointerEvents: 'none' }}
+        style={{ width: wide ? '100%' : size, height: size, pointerEvents: 'none' }}
         // Nothing to draw between shards: no frames spent on an empty canvas.
         frameloop={!shard ? 'never' : pace ? 'demand' : 'always'}
         // One shard after another on the same canvas: compiled once (lib/keepPrograms).
-        onCreated={({ gl, scene }) => keepPrograms(gl, scene)}
+        onCreated={({ gl, scene }) => { keepPrograms(gl, scene); onContext?.(gl.domElement, gl.getContext() as WebGL2RenderingContext) }}
       >
         {pace && <Pacer pace={pace} />}
         {/* Lit as on the bench, near the world's full color (shardLight.tsx; arkinox, 2026-10-12). */}
         <ShardLights />
         {/* ignoreOpacity: an avatar's preview, opaque as the avatar is (DECK-0003 §3.3). */}
-        <Spinning key={turn} shard={shard} ignoreOpacity={ignoreOpacity} />
+        <Spinning key={turn} shard={shard} ignoreOpacity={ignoreOpacity} onDrawn={onDrawn} />
       </Canvas>
     </div>
   )

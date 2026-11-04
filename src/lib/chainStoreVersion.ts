@@ -31,6 +31,6 @@ export const CHAIN_STORE_VERSION: 1 | 2 = 2
  * rows. Not until a real iPhone has passed: nothing here can test one. iPhones
  * lose nothing meanwhile, because they stay on the old stores. Lifting this is
  * its own PR, which the owner merges. One device can try it first, by opening
- * the app with ?chainstore=trial (lib/chainStore.ts).
+ * the app with ?chainstore=trial and saying yes on screen (lib/chainStore.ts).
  */
 export const CHAIN_ROWS_ON_WEBKIT: boolean = false

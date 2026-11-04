@@ -16,7 +16,7 @@ const QUAD = JSON.stringify({ v: 1, type: 'shard', name: 'q', unit: 0, extent: 8
 
 describe('SUBDIVIDE', () => {
   beforeEach(() => {
-    useWorkshop.setState({ shards: [], currentId: null, selection: [], selectedFace: null, facePick: [], palette: [...DEFAULT_PALETTE], level: 0, color: [0, 0.9, 1], past: [], future: [], aim: null, notice: null, tool: 'select' })
+    useWorkshop.setState({ shards: [], currentId: null, selection: [], selectedFaces: [], facePick: [], palette: [...DEFAULT_PALETTE], level: 0, color: [0, 0.9, 1], past: [], future: [], aim: null, notice: null, tool: 'select' })
     const id = w().importText(QUAD)
     expect(id).not.toBeNull()
     w().select(id!)
@@ -29,7 +29,7 @@ describe('SUBDIVIDE', () => {
     expect(s.vertices).toHaveLength(7)
     expect(s.faces).toHaveLength(6)
     expect(w().selection).toEqual([0, 1, 2, 4, 5, 6])
-    expect(w().selectedFace).toBeNull()
+    expect(w().selectedFaces).toEqual([])
     expect(w().notice).toBe('1 face cut into 4, 1 neighbor split. 3 new points.')
   })
 

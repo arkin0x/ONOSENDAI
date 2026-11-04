@@ -40,6 +40,7 @@ import { MAX_COMPUTE_HEIGHT, useCyberspace } from './useCyberspace'
 import { publishMany, query, queryEach, relaySet } from '../lib/relay'
 import { forgetReference, resolveReference } from '../lib/references'
 import { unbagRemembered } from '../lib/foundCache'
+import { bagAddressOf, bagsToOpen, retractedAt, staleFinds } from '../lib/bagVersions'
 import { itemTargetOf, type ItemTarget } from '../lib/comments'
 import { bytesToHex, hexToBytes, type EventTemplate, type NostrEvent } from '../lib/events'
 import { regionKeyAt } from '../lib/shardCrypto'
@@ -1079,6 +1080,26 @@ interface ShardsState {
    * object is the moved shard's now and must not be retracted.
    */
   deleteInstance: (eventId: string, opts?: { keepObject?: boolean }) => Promise<void>
+  /**
+   * The bag addresses of this identity's own published doors in these
+   * regions: a scan asks about their deletions even when no relay sent a bag,
+   * because a bag retracted whole from another device sends nothing.
+   */
+  ownDoorAddresses: (lookupIds: Iterable<string>) => string[]
+  /**
+   * After a scan: a door of yours whose bag its author (you, from another
+   * device) retracted, with no newer bag standing, is gone (§3.7.8), as
+   * publishing there already finds (gatherInners). `bags` are the bags the
+   * scan opened (lib/bagVersions.ts), `deletions` the ones it was told of.
+   */
+  honorRetractions: (lookupIds: Iterable<string>, bags: readonly NostrEvent[], deletions: readonly NostrEvent[]) => void
+  /**
+   * Before a scan files what it opened: the finds on screen read from an
+   * older version of a bag it opened, or from a bag its author deleted, go
+   * (lib/bagVersions.ts staleFinds). The newer version files again whatever
+   * it still holds.
+   */
+  dropStale: (bags: readonly NostrEvent[], deletions: readonly NostrEvent[]) => void
   /**
    * Take one content out of a chest of yours that this device opened: the
    * chest is sealed again without it and the bag rewritten with the new chest
@@ -3175,7 +3196,8 @@ export const useShards = create<ShardsState>((set, get) => {
     rescan: async (lookupId, keyHex) => {
       set({ scanning: true })
       try {
-        const events = await query({ kinds: [HIDDEN_KIND], '#d': [lookupId] })
+        // One version per bag, the newest, none its author deleted (lib/bagVersions.ts).
+        const { bags: events, deletions } = await bagsToOpen(await query({ kinds: [HIDDEN_KIND], '#d': [lookupId] }), query, get().ownDoorAddresses([lookupId]))
         // The region's height, so a bag without `H` reads at its true size: a
         // held cube's height, or your own deployment's. A box key (one height
         // per axis) is not a cube and says nothing here; `H` then decides.
@@ -3187,13 +3209,41 @@ export const useShards = create<ShardsState>((set, get) => {
         // What this scan opened for the first time gets the ceremony: the
         // decode in the scene and the chip that says how many.
         const fresh = get().freshOf(found)
+        get().dropStale(events, deletions)
         if (found.length > 0) get().addDiscovered(found)
+        get().honorRetractions([lookupId], events, deletions)
         if (fresh.length > 0) useCeremony.getState().mark(fresh)
         return found.length
       } catch {
         return 0
       } finally {
         set({ scanning: false })
+      }
+    },
+
+    ownDoorAddresses: (lookupIds) => {
+      const me = cyber().identity.pubkey
+      const wanted = new Set(lookupIds)
+      const ids = new Set(get().mine.filter((d) => wanted.has(d.lookupId) && d.chest?.door !== undefined && d.inner.pubkey === me && d.published).map((d) => d.lookupId))
+      return [...ids].map((id) => `${HIDDEN_KIND}:${me}:${id}`)
+    },
+
+    dropStale: (bags, deletions) => {
+      const discovered = get().discovered
+      const gone = staleFinds(discovered, bags, deletions)
+      if (gone.length === 0) return
+      const next = { ...discovered }
+      for (const id of gone) delete next[id]
+      set({ discovered: next })
+    },
+
+    honorRetractions: (lookupIds, bags, deletions) => {
+      const me = cyber().identity.pubkey
+      const standing = new Set(bags.map(bagAddressOf))
+      for (const address of get().ownDoorAddresses(lookupIds)) {
+        if (standing.has(address)) continue
+        const at = retractedAt(address, deletions)
+        if (at > 0 && address.split(':')[1] === me) pruneGoneDoors(address.split(':')[2], new Set(), at)
       }
     },
 

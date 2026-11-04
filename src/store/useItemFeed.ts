@@ -37,7 +37,6 @@ interface ItemFeedState {
   listedBy: (itemPubkey: string, lister: string) => boolean
 }
 
-/** Every listing read this session, by event id, so a re-read never loses one a relay forgot. */
 /** Refused for want of AUTH: read again once the relay signs this visit in. Set up on the first read. */
 let watching = false
 function watchSignIn(): void {
@@ -46,6 +45,7 @@ function watchSignIn(): void {
   onCanonicalSignIn(() => { if (useItemFeed.getState().trouble) void useItemFeed.getState().load() })
 }
 
+/** Every listing read this session, by event id, so a re-read never loses one a relay forgot. */
 const seen = new Map<string, import('../lib/events').NostrEvent>()
 
 export const useItemFeed = create<ItemFeedState>((set, get) => ({

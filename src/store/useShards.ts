@@ -1275,9 +1275,10 @@ interface ShardsState {
   /**
    * Ask the relay what is hidden in one region you hold the key to, and open
    * it. The region's height comes from the held key or your own deployment
-   * there, because a bag need not carry `H` (spec §8.6).
+   * there, because a bag need not carry `H` (spec §8.6). Resolves to how
+   * many items it opened, or -1 when the relays could not be read (the
+   * canonical relay refused or was not heard from).
    */
-  /** How many items it opened, or -1 when the relays could not be read (the canonical relay refused or was not heard from). */
   rescan: (lookupId: string, keyHex: string) => Promise<number>
   selectSecret: (eventId: string | null) => void
   /** File what a scan opened. A find this identity wrote joins `mine` as well, whichever device placed it. */
@@ -1307,9 +1308,10 @@ interface ShardsState {
    * Prove the round trip a stranger would make: derive the key from the
    * coordinate, ask the relays, open what comes back. `refused` means the bag
    * came back and this item is in it, but the format refuses it, so no client
-   * can show it; the fix is in the workshop, not on the relay.
+   * can show it; the fix is in the workshop, not on the relay. `unread`:
+   * the canonical relay refused (no AUTH) or was not heard from, so nothing
+   * is known either way.
    */
-  /** `unread`: the canonical relay refused (no AUTH) or was not heard from, so nothing is known either way. */
   testDiscovery: (eventId: string) => Promise<'found' | 'missing' | 'refused' | 'unread'>
   pendingShard: () => ShardModel | null
   worldItems: () => WorldItem[]

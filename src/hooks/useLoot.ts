@@ -125,6 +125,22 @@ export function ensureLoot(relays: string[]): void {
 let reading = false
 let again = false
 
+/**
+ * A backfill the canonical relay did not answer in full is asked again, on
+ * its own, sooner first: a busy socket at startup, a signer still signing in.
+ * The rows it did bring stay meanwhile. An answer ends the retries.
+ */
+const RETRY_AFTER_MS = [3_000, 10_000, 30_000, 60_000, 120_000]
+let retries = 0
+let retryTimer: ReturnType<typeof setTimeout> | null = null
+function scheduleRetry(failed: boolean): void {
+  if (retryTimer) { clearTimeout(retryTimer); retryTimer = null }
+  if (!failed) { retries = 0; return }
+  const wait = RETRY_AFTER_MS[Math.min(retries, RETRY_AFTER_MS.length - 1)]
+  retries++
+  retryTimer = setTimeout(() => { retryTimer = null; askAgainIfRefused() }, wait)
+}
+
 /** Read every bag from the relays, once at a time. */
 function backfill(source: string): void {
   if (reading) { again = true; return }
@@ -143,11 +159,13 @@ function backfill(source: string): void {
         writeCache(items)
         return { items, status: trouble && items.length === 0 ? 'error' : 'ready', trouble }
       })
+      scheduleRetry(trouble !== null)
     },
     () => {
       if (useLootStore.getState().source !== source) return
       // A failed read leaves whatever is already known standing.
       useLootStore.setState((s) => ({ status: s.items.length > 0 ? 'ready' : 'error', trouble: 'unreachable' }))
+      scheduleRetry(true)
     },
   ).finally(done)
 }

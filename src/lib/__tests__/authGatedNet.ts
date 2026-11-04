@@ -61,6 +61,8 @@ export interface AuthGatedNet {
   challengeDelay: number
   /** How long the canonical relay takes to answer an AUTH with OK. */
   authOkDelay: number
+  /** How long the canonical relay takes between one event of an answer and the next (a busy socket). */
+  streamMs: number
   /** The canonical relay drops every open socket, as a phone does to a tab put away. */
   dropCanon(): void
   /** Some kind:33330 bags, held by the canonical relay. */
@@ -85,6 +87,7 @@ export function authGatedNet(): AuthGatedNet {
     failConnects: 0,
     challengeDelay: 0,
     authOkDelay: 0,
+    streamMs: 0,
     dropCanon() { for (const s of [...canonSockets]) s.drop() },
     addBags(n) {
       const made: Ev[] = []
@@ -138,6 +141,8 @@ export function authGatedNet(): AuthGatedNet {
     readyState = 0
     url: string
     challenge = ''
+    /** Every challenge this socket was sent; an AUTH answering any of them signs in. */
+    challenges: string[] = []
     authed = false
     onopen?: (() => void) | null
     onclose?: ((e: { code: number; reason: string }) => void) | null
@@ -158,6 +163,7 @@ export function authGatedNet(): AuthGatedNet {
         this.onopen?.()
         if (this.url === CANON) {
           this.challenge = `c${++challenges}`
+          this.challenges.push(this.challenge)
           const send = (): void => this.deliver(['AUTH', this.challenge])
           if (net.challengeDelay > 0) setTimeout(send, net.challengeDelay)
           else send()
@@ -178,7 +184,7 @@ export function authGatedNet(): AuthGatedNet {
     private canonical(msg: unknown[]): void {
       if (msg[0] === 'AUTH') {
         const e = msg[1] as Ev
-        const ok = verifyEvent(e as never) && e.kind === 22242 && e.tags.some((t) => t[0] === 'challenge' && t[1] === this.challenge)
+        const ok = verifyEvent(e as never) && e.kind === 22242 && e.tags.some((t) => t[0] === 'challenge' && this.challenges.includes(t[1]))
         const answer = (): void => {
           if (ok) { this.authed = true; net.canon.authOk++ }
           this.deliver(['OK', e.id, ok, ok ? '' : 'auth-required: bad auth'])
@@ -189,9 +195,27 @@ export function authGatedNet(): AuthGatedNet {
       }
       if (msg[0] === 'REQ') {
         const id = msg[1] as string
-        if (!this.authed) { net.canon.refusedReqs++; this.deliver(['CLOSED', id, 'auth-required: you must auth']); return }
-        for (const f of msg.slice(2) as F[]) for (const e of net.hold) if (matches(f, e)) this.deliver(['EVENT', id, e])
-        this.deliver(['EOSE', id])
+        if (!this.authed) {
+          // As the real relay does (probed 2026-11-04): a fresh challenge with the refusal. Either still signs in.
+          net.canon.refusedReqs++
+          this.challenges.push(`c${++challenges}`)
+          this.deliver(['AUTH', this.challenges[this.challenges.length - 1]])
+          this.deliver(['CLOSED', id, 'auth-required: you must auth'])
+          return
+        }
+        const out = (msg.slice(2) as F[]).flatMap((f) => net.hold.filter((e) => matches(f, e)))
+        if (net.streamMs <= 0) {
+          for (const e of out) this.deliver(['EVENT', id, e])
+          this.deliver(['EOSE', id])
+          return
+        }
+        let i = 0
+        const next = (): void => {
+          if (this.readyState !== 1) return
+          if (i < out.length) { this.deliver(['EVENT', id, out[i++]]); setTimeout(next, net.streamMs); return }
+          this.deliver(['EOSE', id])
+        }
+        next()
         return
       }
       if (msg[0] === 'EVENT') this.deliver(['OK', (msg[1] as Ev).id, true, ''])

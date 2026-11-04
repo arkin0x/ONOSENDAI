@@ -48,6 +48,7 @@ import {
   type SignerKind,
   type NostrConnectSession,
   signWithin,
+  lateSignsPending,
 } from '../lib/signers'
 import {
   coordToXyz,
@@ -1784,6 +1785,8 @@ function wakeSigner(): void {
   // again, which is the second prompt for the same event. If they really are
   // dead, the pending request's timeout reconnects and asks again itself.
   if (pendingSigns > 0) return
+  // The same for a relay's AUTH given up on but still wanted (signWithin `late`).
+  if (lateSignsPending() > 0) return
   // The fresh signer is taken only if the one that reconnected is still in
   // use: a switch of identity while it reconnected wins.
   const asked = currentSigner

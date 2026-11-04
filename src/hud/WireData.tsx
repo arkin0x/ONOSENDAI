@@ -35,7 +35,7 @@ export const TEST_WORDS: Record<TestState, string> = {
   found: '✓ FOUND & OPENED FROM THE RELAY',
   missing: '✗ NOT FOUND, TAP TO RETRY',
   refused: '✗ ON THE RELAY, BUT NO CLIENT CAN OPEN IT',
-  unread: '✗ THE RELAY DID NOT ANSWER, TAP TO RETRY',
+  unread: '✗ COULD NOT READ THE RELAY, TAP TO RETRY',
 }
 
 /** The relays as they read: no scheme, one to a line. */

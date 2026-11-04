@@ -175,3 +175,32 @@ describe('HIDDEN BAGS when the bunker cannot sign the relay in', () => {
     expect(v.net.bunker.authAsked).toBe(1)
   }, 60_000)
 })
+
+/**
+ * The bug for everyone (2026-11-04, a fresh local key in production too):
+ * a relay still sending when the read's 8 s ran out, or a socket closed
+ * mid-answer, gave the list what had come so far as the whole answer, 29
+ * bags or none, and it was never asked again.
+ */
+describe('HIDDEN BAGS when the answer is slow or cut short', () => {
+  it('a relay sending 105 bags over 10 s is waited for, not cut off at 8 s', async () => {
+    const v = await visit((net) => { net.streamMs = 100 })
+    await v.wait(20_000)
+    expect(v.loot().items).toHaveLength(BAGS)
+    expect(v.loot().trouble).toBeNull()
+  }, 60_000)
+
+  it('a socket closed mid-answer is read again, and the list fills', async () => {
+    const v = await visit((net) => { net.streamMs = 50 })
+    await v.wait(2_000)
+    v.net.dropCanon()
+    await v.wait(1_000)
+    // What came stays, and says the relay was not heard from in full.
+    expect(v.loot().items.length).toBeLessThan(BAGS)
+    expect(v.panel()).not.toContain(NOTHING)
+    v.net.streamMs = 0
+    await v.wait(20_000)
+    expect(v.loot().items).toHaveLength(BAGS)
+    expect(v.loot().trouble).toBeNull()
+  }, 60_000)
+})

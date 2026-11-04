@@ -186,4 +186,28 @@ describe('a read the canonical relay did not answer is not "nothing"', () => {
     await vi.waitFor(() => { expect(useLootStore.getState().items).toHaveLength(1) })
     expect(useLootStore.getState().trouble).toBeNull()
   })
+
+  it('asks again on its own until the relay answers, keeping what came meanwhile', async () => {
+    vi.useFakeTimers()
+    try {
+      events.push({ id: 'a' }, { id: 'b' }, { id: 'c' })
+      trouble = 'unreachable'
+      ensureLoot(['wss://slow-at-startup'])
+      await vi.advanceTimersByTimeAsync(10)
+      expect(useLootStore.getState().trouble).toBe('unreachable')
+      const asked = queryCalls
+      // The relay answers in full now; nobody pressed anything.
+      trouble = null
+      await vi.advanceTimersByTimeAsync(3_100)
+      expect(queryCalls).toBe(asked + 1)
+      expect(useLootStore.getState().items).toHaveLength(3)
+      expect(useLootStore.getState().trouble).toBeNull()
+      // Answered: no more asking.
+      await vi.advanceTimersByTimeAsync(300_000)
+      expect(queryCalls).toBe(asked + 1)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
 })
+

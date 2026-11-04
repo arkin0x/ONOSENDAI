@@ -31,10 +31,10 @@
 
 import { toPayload, type ShardModel } from 'sno-core/shards'
 import { SNO_KIND, objectAddress } from 'sno-core/feed'
-import { MAX_PART_DEPTH, carriedModel, carryAll, parseAddress } from 'sno-core/parts'
+import { MAX_PART_DEPTH, carriedModel, parseAddress } from 'sno-core/parts'
 import { hash53, thumbKeyOf } from '../lib/thumbKey'
 import { localObjectsChanged, setLocalObjects } from '../lib/parts'
-import { dOf, isQuietD, ownKeysOnly, rekeyTable, setLocalAuthor } from '../lib/carried'
+import { carryReached, dOf, isQuietD, ownKeysOnly, rekeyTable, setLocalAuthor } from '../lib/carried'
 import { withAuthoredConstrain } from '../lib/walkConstrain'
 import { usePublished } from './usePublished'
 import { useCyberspace } from './useCyberspace'
@@ -104,13 +104,15 @@ export function localObject(address: { kind: number; pubkey: string; d: string }
  * not carried to every finder.
  */
 export function carryLibrary(shard: ShardModel): ShardModel {
-  const carried = carryAll(shard, (ref) => {
-    if (ref[0] !== 'a' || ref[2]) return null
+  const me = useCyberspace.getState().identity.pubkey
+  // A live link to your own object is looked inside, never carried: what it
+  // places may be answered by this table, and is not pruned (carryReached).
+  const carried = carryReached(shard, (ref) => {
+    if (ref[0] !== 'a') return null
     const a = parseAddress(ref[1])
     const piece = a ? localShard(a) : undefined
-    return piece ? { object: withAuthoredConstrain(piece), carry: true } : null
-  }, { prune: true })
-  const me = useCyberspace.getState().identity.pubkey
+    return piece ? { object: withAuthoredConstrain(piece), carry: !ref[2] } : null
+  }, me || null)
   if (!me) return carried
   const held = shard.objects ?? {}
   const ledger = usePublished.getState().ledger

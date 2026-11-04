@@ -33,14 +33,15 @@ import { useShards } from '../useShards'
 import { useWorkshop } from '../useWorkshop'
 import { usePublished } from '../usePublished'
 import { bagEntries, HIDDEN_KIND, isReference, objectTemplate } from '../../lib/hidden'
-import { CARRY_BUDGET_BYTES, carriesSealedParts, carryRefusal, dOf, isQuietD, ownKeysOnly, payloadBytes, foreignKeys, foreignNotice, rekeyTable, setLocalAuthor, takeIntoKeeping, withoutCarried } from '../../lib/carried'
+import { CARRY_BUDGET_BYTES, carriesSealedParts, carryRefusal, dOf, isQuietD, ownKeysOnly, payloadBytes, foreignKeys, foreignNotice, placedOnly, rekeyTable, sealedKeys, setLocalAuthor, takeIntoKeeping, withoutCarried } from '../../lib/carried'
+import { normalizeOne } from '../workshopStorage'
 import { publishState } from '../../lib/published'
 import { useAvatars } from '../useAvatars'
 import { attributed } from '../../lib/client'
 import { carryLibrary } from '../localObjects'
 import { hexToBytes, type NostrEvent } from '../../lib/events'
 import { avatarTemplate } from '../../lib/avatar'
-import { publicObjectTemplate, shardFingerprint } from '../../lib/published'
+import { publicObjectTemplate, shardFingerprint, shardFingerprints } from '../../lib/published'
 
 const THEM = 'b'.repeat(64)
 const me = (): string => useCyberspace.getState().identity.pubkey
@@ -74,6 +75,7 @@ beforeEach(() => {
   usePublished.setState({ ledger: {} })
   useShards.setState({ mine: [], deleted: {}, discovered: {}, pending: null, deployHeight: 0, deployUnit: 0, deployStatus: 'idle', deployError: null })
   useCyberspace.setState({ live: true })
+  setLocalAuthor(null)
 })
 
 describe('a hide carries your library pieces', () => {
@@ -349,6 +351,8 @@ describe('review of the stack: what goes out', () => {
   })
 
   it('B2: a piece no placement names stays out of a public object, an avatar and a hide', async () => {
+    // You, as localObjects.ts wires it: whose links could reach an entry depends on it (carryReached).
+    setLocalAuthor(() => me())
     const room = leftBehind()
     expect(names(JSON.parse(publicObjectTemplate(room, 1).content).objects)).toEqual(['Kept'])
     expect(names(JSON.parse(avatarTemplate(room, 1).content).objects)).toEqual(['Kept'])
@@ -357,6 +361,7 @@ describe('review of the stack: what goes out', () => {
   })
 
   it('B2: what the publish state compares leaves it out too', () => {
+    setLocalAuthor(() => me())
     const room = leftBehind()
     const { objects, ...rest } = room
     const kept = { ...rest, objects: { [`33331:${me()}:kept`]: (objects as Record<string, unknown>)[`33331:${me()}:kept`] } }
@@ -416,3 +421,58 @@ describe('review of the stack: what goes out', () => {
   })
 })
 
+
+describe('review of the stack, round 2', () => {
+  const found = (author: string | null): ShardModel => ({
+    ...placing('Found', [addr(THEM, 'p')]),
+    objects: { [`33331:${THEM}:p`]: toPayload(tri('Piece')) },
+    ...(author ? { author } : {}),
+  })
+
+  it('#504 3: an entry only a live link of yours reaches is kept, in a hide and in the clear', () => {
+    setLocalAuthor(() => me())
+    try {
+      const hall = { ...placing('Hall', [addr(me(), 'water')]), id: 'hall' }
+      const room: ShardModel = { ...placing('Room', [addr(me(), 'hall', 'wss://relay.test')]), id: 'room', objects: { [`33331:${me()}:water`]: toPayload(tri('Water')), [`33331:${me()}:gone`]: toPayload(tri('Removed')) } }
+      useWorkshop.setState({ shards: [hall, room], currentId: room.id })
+      // A hide looks inside your own link: what it reaches stays, a piece nothing reaches goes.
+      expect(Object.keys(carryLibrary(room).objects ?? {})).toEqual([`33331:${me()}:water`])
+      // In the clear nothing is looked inside, so nothing that may be reached is pruned.
+      expect(Object.keys(placedOnly(room).objects ?? {}).sort()).toEqual([`33331:${me()}:gone`, `33331:${me()}:water`])
+    } finally { setLocalAuthor(null) }
+  })
+
+  it('D1: the mark names the sealed entries; LEAVE THEM OUT keeps your own pieces beside them', () => {
+    const taken = takeIntoKeeping(found(THEM), me())
+    const sealedKey = Object.keys(taken.objects!)[0]
+    const own = `33331:${me()}:mine`
+    const withOwn: ShardModel = { ...taken, refs: [...taken.refs!, ['a', own]], parts: [...taken.parts!, { ref: 1, at: [1, 0, 0], turn: [0, 0, 0], step: 0 }], objects: { ...taken.objects!, [own]: toPayload(tri('Mine')) } }
+    expect([...sealedKeys(withOwn)]).toEqual([sealedKey])
+    const out = withoutCarried(withOwn)
+    expect(Object.keys(out.objects ?? {})).toEqual([own])
+    expect(out.refs).toEqual([['a', own]])
+    expect(out.parts).toHaveLength(1)
+    // The bag piece removed, the mark clears.
+    const { [sealedKey]: _gone, ...rest } = withOwn.objects!
+    void _gone
+    expect(carriesSealedParts({ ...withOwn, objects: rest })).toBe(false)
+  })
+
+  it('D1: a legacy takenFromBag: true reads as every key the shard held when it loads, and none added later', () => {
+    const stored = { ...tri('Old'), id: 'old', objects: { [`33331:${me()}:k1`]: toPayload(tri('K1')), [`33331:${me()}:k2`]: toPayload(tri('K2')) }, takenFromBag: true }
+    const loaded = normalizeOne(JSON.parse(JSON.stringify(stored)))!
+    expect([...sealedKeys(loaded)].sort()).toEqual([`33331:${me()}:k1`, `33331:${me()}:k2`])
+    const later = { ...loaded, objects: { ...loaded.objects!, [`33331:${me()}:k3`]: toPayload(tri('K3')) } }
+    expect(sealedKeys(later).has(`33331:${me()}:k3`)).toBe(false)
+  })
+
+  it('D2: PUBLISH THEM TOO reads PUBLISHED after, as the default does', async () => {
+    setLocalAuthor(() => me())
+    try {
+      const copy = { ...takeIntoKeeping(found(THEM), me()), id: 'taken-too' }
+      await usePublished.getState().send(copy, false, true)
+      expect(publishState(usePublished.getState().ledger['taken-too'], shardFingerprints(copy), me())).toBe('published')
+      expect(publishState(usePublished.getState().ledger['taken-too'], shardFingerprint(copy), me())).toBe('edited')
+    } finally { setLocalAuthor(null) }
+  })
+})

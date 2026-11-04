@@ -18,14 +18,15 @@
  * explanatory paragraphs in the UI).
  */
 
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { nip19 } from 'nostr-tools'
 import { fromPayload, type Ref, type ShardModel } from 'sno-core/shards'
 import type { NostrEvent } from '../lib/events'
 import { fetchRef } from '../lib/parts'
 import { keepOwnTable } from '../lib/carried'
-import { relaySet } from '../lib/relay'
+import { CYBERSPACE_RELAY, relaySet } from '../lib/relay'
+import { learnMine } from '../store/usePublished'
 import { useCyberspace } from '../store/useCyberspace'
 import { useWorkshop, type StampObject } from '../store/useWorkshop'
 import { useEscape } from '../hooks/useEscape'
@@ -87,7 +88,7 @@ type Source = 'yours' | 'feed'
  * carries it (store/localObjects.ts carryLibrary).
  */
 export function liveRef(address: string, relay?: string): Ref {
-  return ['a', address, relay || relaySet()[0] || 'wss://cyberspace.nostr1.com']
+  return ['a', address, relay || relaySet()[0] || CYBERSPACE_RELAY]
 }
 
 export function ObjectPicker({ onClose }: { onClose: () => void }): JSX.Element {
@@ -98,6 +99,11 @@ export function ObjectPicker({ onClose }: { onClose: () => void }): JSX.Element 
   const [address, setAddress] = useState('')
   const [status, setStatus] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
+  // What the relays hold under this key is what SHARD's PUBLISH tag reports
+  // (store/usePublished.ts): an object published from another browser or from
+  // snocrash reads as PUBLISHED from this read on. The feed teaches only what
+  // it lists; this reads every relay you write to and the general ones.
+  useEffect(() => { if (me) void learnMine(me) }, [me])
   // Newest first, a deploy counted as an edit, as every list of your shards (hud/ShardFolders).
   const yours = useNewestFirst(shards, modelRef, modelEditedAt)
 

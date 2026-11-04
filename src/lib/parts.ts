@@ -193,6 +193,18 @@ function cutForReads(placed: readonly Placed[]): boolean {
   return placed.some(function short(p): boolean { return p.missing === 'objects' || p.children.some(short) })
 }
 
+/**
+ * Whether anything a resolve placed, at any depth, found nothing on the relays:
+ * the one reason a scan finding its object again can cure. A part's own part
+ * counts as much as a top one (review of #567: A carries B, B places C, and C,
+ * missing at first, was never asked again until a reload). A loop, the depth,
+ * the scale or the budget is the table's own and stays; a bad payload stays in
+ * fetchRef's cache; reads running out wake it themselves (onReadsBack).
+ */
+function partUnreachable(placed: readonly Placed[]): boolean {
+  return placed.some(function gone(p): boolean { return p.missing === 'unreachable' || p.children.some(gone) })
+}
+
 /** A share of a read pool one resolve reads from, and how much of what it read it has given back. */
 interface Held { pool: ReadPool; meter: Metered; back: number }
 
@@ -284,7 +296,7 @@ export function useResolved(shard: ShardModel | null, pool?: ReadPool): Map<stri
       const wake = [...starvedOf.current].some((p) => readsLeft(p) > 0)
       pending.current = false
       touched.current = touchedKeys(placed, new Set(refs.map(refKey)))
-      missing.current = placed.some((p) => p.missing !== undefined)
+      missing.current = partUnreachable(placed)
       const m = new Map<string, Resolved>()
       placed.forEach((p) => m.set(refKey(p.ref), { model: p.model, missing: p.missing, children: p.children, ...(p.carried ? { carried: p.carried } : {}) }))
       setByRef(m)

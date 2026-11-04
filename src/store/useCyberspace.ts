@@ -2485,7 +2485,10 @@ function startRowsCheck(pubkey: string, read: ChainRead): void {
   for (const e of events) coveredByRows.set(e.id, e)
   const running = sigCheck?.pubkey === pubkey ? sigCheck.done : null
   const entry: { pubkey: string; done: Promise<string | null> } = { pubkey, done: Promise.resolve(null) }
-  const own = checkRowsInTime(pubkey, events.length).then((bad) => new Set(bad), () => checkSignatures(events)).then((bad) => {
+  // The check that needs no database, on the deadline: a row already flagged has only its id recomputed there.
+  const flagged = new Set(read.checked)
+  const known = events.filter((e) => flagged.has(e.id)).map((e) => `${e.id}:${e.sig}`)
+  const own = checkRowsInTime(pubkey, events.length).then((bad) => new Set(bad), () => checkSignatures(events, undefined, known)).then((bad) => {
     const badKeys = new Set(events.filter((e) => bad.has(e.id)).map(sigKey))
     for (const e of events) {
       if (bad.has(e.id)) continue

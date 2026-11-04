@@ -6,10 +6,22 @@
 
 import 'fake-indexeddb/auto'
 import { IDBFactory } from 'fake-indexeddb'
-import { beforeEach, describe, expect, it } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
+
+/** Every Schnorr check and every id recomputed while `on`, in order, with the page's turns between them. */
+const seen = vi.hoisted(() => ({ on: false, log: [] as string[], schnorr: 0 }))
+vi.mock('nostr-tools/pure', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('nostr-tools/pure')>()
+  return {
+    ...actual,
+    verifyEvent: (e: Parameters<typeof actual.verifyEvent>[0]) => { if (seen.on) seen.schnorr++; return actual.verifyEvent(e) },
+    getEventHash: (e: Parameters<typeof actual.getEventHash>[0]) => { if (seen.on) seen.log.push('h'); return actual.getEventHash(e) },
+  }
+})
+
 import { finalizeEvent, generateSecretKey, getPublicKey } from 'nostr-tools/pure'
 import { closeEventDb, withEventDb } from '../connection'
-import { checkChainRows, commitChain, migrateChain, type ChainCommit } from '../chainRows'
+import { checkChainRows, commitChain, flagRows, migrateChain, type ChainCommit } from '../chainRows'
 import { getRows } from '../store'
 import type { NostrEvent } from '../../events'
 
@@ -25,13 +37,61 @@ beforeEach(() => {
   ;(globalThis as { indexedDB?: IDBFactory }).indexedDB = new IDBFactory()
 })
 
+describe('checkChainRows on the main thread (the event worker given up)', () => {
+  it('checks no signature: the rows not flagged come back for the signature worker, and stay unflagged until it says', async () => {
+    const chain = [action(1), action(2), action(3)]
+    await migrate(chain)
+    seen.on = true
+    seen.schnorr = 0
+    const r = await withEventDb((db) => checkChainRows(db, pk, { verify: false }))
+    seen.on = false
+    expect(seen.schnorr).toBe(0)
+    expect(r.signed).toBe(0)
+    expect(r.unchecked.map((e) => e.id)).toEqual(chain.map((e) => e.id))
+    expect(await flagged(chain[0].id)).toBe(0)
+    await withEventDb((db) => flagRows(db, chain.map((e) => e.id)))
+    expect(await flagged(chain[0].id)).toBe(1)
+    expect(await withEventDb((db) => checkChainRows(db, pk, { verify: false }))).toEqual({ bad: [], signed: 0, rehashed: 3, unchecked: [] })
+  })
+
+  it('recomputes ids in chunks, with the page given turns between them', async () => {
+    const chain = Array.from({ length: 450 }, (_, i) => action(i))
+    await migrate(chain)
+    await withEventDb((db) => flagRows(db, chain.map((e) => e.id)))
+    seen.log = []
+    seen.on = true
+    const ticker = setInterval(() => { if (seen.on) seen.log.push('t') }, 0)
+    try {
+      const r = await withEventDb((db) => checkChainRows(db, pk, { verify: false }))
+      expect(r.rehashed).toBe(450)
+    } finally { seen.on = false; clearInterval(ticker) }
+    const first = seen.log.indexOf('h')
+    const last = seen.log.lastIndexOf('h')
+    expect(seen.log.slice(first, last).filter((x) => x === 't').length).toBeGreaterThanOrEqual(2)
+  }, 30_000)
+
+  it('a flagged row whose bytes changed is still caught', async () => {
+    const chain = [action(1), action(2)]
+    await migrate(chain)
+    await withEventDb((db) => flagRows(db, chain.map((e) => e.id)))
+    await withEventDb((db) => new Promise<void>((resolve) => {
+      const tx = db.transaction('events', 'readwrite')
+      const os = tx.objectStore('events')
+      const g = os.get(chain[1].id)
+      g.onsuccess = () => os.put({ ...g.result, content: 'rot' })
+      tx.oncomplete = () => resolve()
+    }))
+    expect((await withEventDb((db) => checkChainRows(db, pk, { verify: false }))).bad).toEqual([chain[1].id])
+  })
+})
+
 describe('checkChainRows', () => {
   it('checks each unflagged row once and flags it; the next check only rehashes', async () => {
     const chain = [action(1), action(2), action(3)]
     await migrate(chain)
-    expect(await check()).toEqual({ bad: [], signed: 3, rehashed: 0 })
+    expect(await check()).toEqual({ bad: [], signed: 3, rehashed: 0, unchecked: [] })
     expect(await flagged(chain[0].id)).toBe(1)
-    expect(await check()).toEqual({ bad: [], signed: 0, rehashed: 3 })
+    expect(await check()).toEqual({ bad: [], signed: 0, rehashed: 3, unchecked: [] })
   })
 
   it('a flagged row whose bytes changed is reported by its id, and nothing checks its signature', async () => {
@@ -45,14 +105,14 @@ describe('checkChainRows', () => {
       g.onsuccess = () => os.put({ ...g.result, content: 'rot' })
       tx.oncomplete = () => resolve()
     }))
-    expect(await check()).toEqual({ bad: [chain[1].id], signed: 0, rehashed: 2 })
+    expect(await check()).toEqual({ bad: [chain[1].id], signed: 0, rehashed: 2, unchecked: [] })
   })
 
   it('a forged row is reported and never flagged', async () => {
     const chain = [action(1), action(2)]
     const forged = { ...chain[1], sig: 'f'.repeat(128) }
     await migrate([chain[0], forged])
-    expect(await check()).toEqual({ bad: [chain[1].id], signed: 1, rehashed: 0 })
+    expect(await check()).toEqual({ bad: [chain[1].id], signed: 1, rehashed: 0, unchecked: [] })
     expect(await flagged(chain[1].id)).toBe(0)
   })
 
@@ -61,7 +121,7 @@ describe('checkChainRows', () => {
     const unsigned = { ...signed, sig: '' }
     const c: ChainCommit = { pubkey: pk, expectHead: null, keep: 0, rows: [{ event: unsigned, nip01: 2, acked: false }], acks: [], length: 1, headId: signed.id, spawnId: signed.id, savedAt: 1, held: false, stats: {} }
     await withEventDb((db) => commitChain(db, c))
-    expect(await check()).toEqual({ bad: [], signed: 0, rehashed: 1 })
+    expect(await check()).toEqual({ bad: [], signed: 0, rehashed: 1, unchecked: [] })
     expect(await flagged(signed.id)).toBe(2)
   })
 
@@ -79,6 +139,6 @@ describe('checkChainRows', () => {
   })
 
   it('no chain: nothing to check', async () => {
-    expect(await check()).toEqual({ bad: [], signed: 0, rehashed: 0 })
+    expect(await check()).toEqual({ bad: [], signed: 0, rehashed: 0, unchecked: [] })
   })
 })

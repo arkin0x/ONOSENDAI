@@ -349,6 +349,11 @@ export async function partedBranches(db: IDBDatabase, pubkey: string): Promise<C
 
 /** How many rows' flags go down in one transaction. */
 const FLAG_BATCH = 100
+/** How many ids are recomputed between two turns given back to the page, when this runs on the main thread. */
+const REHASH_CHUNK = 200
+
+/** One turn of the event loop, so a page this runs on can draw. */
+const givePageATurn = (): Promise<void> => new Promise((resolve) => setTimeout(resolve, 0))
 
 /** What a check of a chain's rows found. */
 export interface ChainCheck {
@@ -358,6 +363,27 @@ export interface ChainCheck {
   signed: number
   /** Rows whose flag was trusted: only their id was recomputed. */
   rehashed: number
+  /**
+   * Rows not flagged yet whose signature was not checked here, because this ran
+   * on the main thread (the event worker given up): the caller hands them to the
+   * signature worker (lib/sigCheck.ts) and raises their flags (flagRows).
+   */
+  unchecked: NostrEvent[]
+}
+
+/** Raise the NIP-01 flag of these rows, in batches: their signatures were checked elsewhere. */
+export async function flagRows(db: IDBDatabase, ids: string[]): Promise<void> {
+  for (let i = 0; i < ids.length; i += FLAG_BATCH) {
+    const batch = ids.slice(i, i + FLAG_BATCH)
+    const tx = db.transaction(EVENTS, 'readwrite')
+    await inTransaction(tx, async () => {
+      const events = tx.objectStore(EVENTS)
+      for (const id of batch) {
+        const row = await request(events.get(id)) as EventRow | undefined
+        if (row && row.nip01 === 0) events.put({ ...row, nip01: 1 })
+      }
+    })
+  }
 }
 
 /**
@@ -366,38 +392,40 @@ export interface ChainCheck {
  * again. Its id is still recomputed on every load, because that costs
  * microseconds and catches a damaged row: the id commits to every field. A row
  * flagged 0 (moved from the old stores, or signed elsewhere and not checked
- * yet) is checked in full here, once, and flagged. What a flag cannot catch is
- * someone rewriting this origin's storage on purpose; such a party already
- * holds the key in localStorage.
+ * yet) is checked in full, once, and flagged.
+ *
+ * What a flag cannot catch is a party that can rewrite this origin's storage on
+ * purpose: it can plant a row flagged 1 under a forged signature, and this
+ * device draws that action as yours without a Schnorr check. With a local key
+ * that party already holds the key itself. With an extension or a bunker it
+ * does not, so for them the flag is a real trade: a forged action can show on
+ * this device. It goes no further: every relay and every other reader checks
+ * signatures itself, and nothing this device signs on top of it verifies for
+ * anyone else.
+ *
+ * `verify` false is the main thread (the event worker given up): no signature
+ * is checked here, the rows not flagged yet come back as `unchecked` for the
+ * signature worker, and ids are recomputed in chunks, with the page given a
+ * turn between them.
  */
-export async function checkChainRows(db: IDBDatabase, pubkey: string): Promise<ChainCheck> {
+export async function checkChainRows(db: IDBDatabase, pubkey: string, opts: { verify: boolean } = { verify: true }): Promise<ChainCheck> {
   const os = db.transaction(EVENTS, 'readonly').objectStore(EVENTS)
   const rows = await request(os.index('byChain').getAll(placesFrom(pubkey, 0))) as EventRow[]
-  const result: ChainCheck = { bad: [], signed: 0, rehashed: 0 }
+  const result: ChainCheck = { bad: [], signed: 0, rehashed: 0, unchecked: [] }
   let flips: string[] = []
-  const flush = async (): Promise<void> => {
-    if (flips.length === 0) return
-    const ids = flips
-    flips = []
-    const tx = db.transaction(EVENTS, 'readwrite')
-    await inTransaction(tx, async () => {
-      const events = tx.objectStore(EVENTS)
-      for (const id of ids) {
-        const row = await request(events.get(id)) as EventRow | undefined
-        if (row && row.nip01 === 0) events.put({ ...row, nip01: 1 })
-      }
-    })
-  }
+  let sinceTurn = 0
   for (const row of rows) {
     const event = eventOf(row)
     if (row.nip01 === 0) {
+      if (!opts.verify) { result.unchecked.push(event); continue }
       if (verifyEvent(event as VerifiedEvent)) { result.signed++; flips.push(row.id) } else result.bad.push(row.id)
-      if (flips.length >= FLAG_BATCH) await flush()
+      if (flips.length >= FLAG_BATCH) { await flagRows(db, flips); flips = [] }
     } else {
+      if (!opts.verify && ++sinceTurn >= REHASH_CHUNK) { sinceTurn = 0; await givePageATurn() }
       result.rehashed++
       if (getEventHash(event) !== row.id) result.bad.push(row.id)
     }
   }
-  await flush()
+  await flagRows(db, flips)
   return result
 }

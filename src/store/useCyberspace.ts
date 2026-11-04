@@ -2326,10 +2326,23 @@ function startSignatureCheck(pubkey: string, unchecked: NostrEvent[]): void {
 }
 
 /**
- * The rows a check of the chain's rows covers: nothing else needs to check them
- * (putInHand), and what the check finds comes from the rows themselves.
+ * The rows a check of the chain's rows covers, by id, as the check read them:
+ * nothing else needs to check them (putInHand), and what the check finds comes
+ * from the rows themselves. Only those exact bytes: a copy under the same id
+ * that differs in any field (another signature of it, a row rewritten since) is
+ * not what was checked, and is checked like any other.
  */
-const coveredByRows = new Set<string>()
+const coveredByRows = new Map<string, NostrEvent>()
+
+/** Whether two copies of an event are the same, field for field: an id does not commit to the signature. */
+function sameBytes(a: NostrEvent | undefined, b: NostrEvent): boolean {
+  return a !== undefined && (a === b || (a.sig === b.sig && a.pubkey === b.pubkey && a.created_at === b.created_at && a.kind === b.kind && a.content === b.content && JSON.stringify(a.tags) === JSON.stringify(b.tags)))
+}
+
+/** Whether a copy is, field for field, the one a check of the rows covered. */
+function coveredAsIs(e: NostrEvent): boolean {
+  return sameBytes(coveredByRows.get(e.id), e)
+}
 
 /**
  * Check a chain just read from its rows, in the worker, instead of every
@@ -2343,7 +2356,7 @@ function startRowsCheck(pubkey: string, read: ChainRead): void {
   const flagged = new Set(read.checked)
   const events = read.events
   for (const e of events) {
-    coveredByRows.add(e.id)
+    coveredByRows.set(e.id, e)
     if (flagged.has(e.id)) {
       verifiedSigs.add(sigKey(e))
       rememberVerified(e.id, e.sig)
@@ -2757,6 +2770,8 @@ function takeParted(pubkey: string, kept: StoredChain, fromDb: LoadedChain, have
 /** The record's chain in hand, in silence: what a load does when IndexedDB holds the chain further on. */
 function putInHand(pubkey: string, fromDb: LoadedChain, have: Set<string>): void {
   const s = useCyberspace.getState()
+  // What was in hand, as it was: a copy here that differs from it under the same id is checked anew.
+  const inHand = new Map(s.events.map((e) => [e.id, e]))
   const d = derive(fromDb)
   // Acknowledged here since the load stays acknowledged.
   const published = { ...d.published }
@@ -2786,7 +2801,7 @@ function putInHand(pubkey: string, fromDb: LoadedChain, have: Set<string>): void
   noteInHand(pubkey, fromDb)
   dbRead.add(pubkey)
   // What localStorage did not have is checked like the rest, off the main thread.
-  startSignatureCheck(pubkey, fromDb.unchecked.filter((e) => !have.has(e.id) && !coveredByRows.has(e.id)))
+  startSignatureCheck(pubkey, fromDb.unchecked.filter((e) => !(have.has(e.id) && sameBytes(inHand.get(e.id), e)) && !coveredAsIs(e)))
 }
 
 /** Resolves once the read of `pubkey`'s chain from IndexedDB has landed (hydrateChain). */

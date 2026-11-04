@@ -29,6 +29,7 @@ import { checkVersion, useVersionGate } from './versionGate'
 import type { ChainCommit, ChainRead, ChainRecord, ChainSource, MigrationResult } from './eventDb/chainRows'
 import type { Nip01Flag } from './eventDb/schema'
 import { CHAIN_ROWS_ON_WEBKIT, CHAIN_STORE_VERSION } from './chainStoreVersion'
+import { checkSignatures } from './sigCheck'
 import type { NostrEvent } from './events'
 
 /** The patience of a read: the same 3 s the old store's reads have (lib/chainDb.ts). */
@@ -233,10 +234,22 @@ export async function migrateToRows(pubkey: string, source: ChainSource, parted:
 /** How long the worker gets to check a chain's rows: the first time it may check every signature of a long chain. */
 const CHECK_PATIENCE_MS = 180_000
 
-/** Check the chain's rows (lib/eventDb/chainRows.ts checkChainRows). Rejects when the database will not do it, and the caller checks by other means. */
+/**
+ * Check the chain's rows (lib/eventDb/chainRows.ts checkChainRows). Rejects
+ * when the database will not do it, and the caller checks by other means. With
+ * the event worker given up, the database runs on the main thread and checks no
+ * signature there: the rows not flagged yet go to the signature worker
+ * (lib/sigCheck.ts), and their flags are raised after. A flag that cannot be
+ * raised now is raised by the next load's check.
+ */
 export async function checkRows(pubkey: string): Promise<string[]> {
   await rowsSettled(pubkey)
-  return (await callEventDb('checkChainRows', [pubkey], CHECK_PATIENCE_MS)).bad
+  const found = await callEventDb('checkChainRows', [pubkey], CHECK_PATIENCE_MS)
+  if (found.unchecked.length === 0) return found.bad
+  const forged = await checkSignatures(found.unchecked)
+  const good = found.unchecked.filter((e) => !forged.has(e.id)).map((e) => e.id)
+  if (good.length > 0) await callEventDb('flagRows', [good]).catch(() => { /* raised by the next check */ })
+  return [...found.bad, ...forged]
 }
 
 /** Set a branch aside. A failure is said, and the branch's old copy (if any) stands. */

@@ -27,6 +27,12 @@ vi.mock('nostr-tools/pure', async (importOriginal) => {
   const actual = await importOriginal<typeof import('nostr-tools/pure')>()
   return { ...actual, verifyEvent: (e: Parameters<typeof actual.verifyEvent>[0]) => { schnorr.n++; return actual.verifyEvent(e) } }
 })
+/** How many events were handed to the signature worker (lib/sigCheck.ts). */
+const sigWorker = vi.hoisted(() => ({ events: 0 }))
+vi.mock('../../lib/sigCheck', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../lib/sigCheck')>()
+  return { ...actual, checkSignatures: (events: Parameters<typeof actual.checkSignatures>[0], deadline?: number) => { sigWorker.events += events.length; return actual.checkSignatures(events, deadline) } }
+})
 vi.mock('../../lib/workers', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../lib/workers')>()
   return { ...actual, postProof: vi.fn(), cancelProof: vi.fn() }
@@ -68,7 +74,8 @@ async function load() {
 /** The chain's actions checked (signaturesChecked), through what a move waits on. */
 const settled = async (store: Awaited<ReturnType<typeof load>>): Promise<void> => {
   await vi.waitFor(() => expect(performance.getEntriesByName('onosendai:chain-verified').length).toBeGreaterThan(0))
-  void store
+  // The mark can come from the load's first, empty check: what a move waits on is the rows' check itself.
+  await store.useCyberspace.getState().confirmHeadNow()
   await new Promise((r) => setTimeout(r, 30))
 }
 
@@ -254,5 +261,67 @@ describe('the NIP-01 flag', () => {
     expect(reads).toBeGreaterThan(0)
     expect(s.useCyberspace.getState().events).toHaveLength(5)
     expect(schnorr.n).toBeGreaterThan(0)
+  })
+
+  it('with the event worker given up, no signature is checked on the main thread: the rows not flagged go to the signature worker, then are flagged', async () => {
+    // Tests have no Worker, so the database runs on the main thread here, as on a page whose event worker was given up.
+    const chain = chainOf(12)
+    await seed(chain)
+    await settled(await load())
+    performance.clearMarks()
+    schnorr.n = 0
+    sigWorker.events = 0
+    await settled(await load())
+    expect(sigWorker.events).toBe(12)
+    expect(schnorr.n).toBe(12)
+    expect((await flags()).filter((r) => r.chainOf === pk).every((r) => r.nip01 === 1)).toBe(true)
+  })
+
+  it('a copy under a checked id with other bytes is checked anew: a row rewritten under another tab\'s move does not slip into hand', async () => {
+    const chain = chainOf(8)
+    await seed(chain)
+    await settled(await load())
+    performance.clearMarks()
+    await settled(await load())
+    const tab = async () => {
+      const store = await load()
+      const rows = await import('../../lib/chainStore')
+      await settled(store)
+      performance.clearMarks()
+      return { store, rows, S: store.useCyberspace.getState }
+    }
+    const move = async (t: Awaited<ReturnType<typeof tab>>, axis: 'x' | 'y'): Promise<string> => {
+      t.store.useCyberspace.setState({ pendingTarget: { ...t.S().position, [axis]: t.S().position[axis] + 1n } })
+      await t.S().applyProofMessage({ type: 'done', id: 0, mode: 'hop', elapsedMs: 1, ...provedHop(t.S()), terrainK: 8, lca: { x: 1, y: 0, z: 0 }, totalOps: 1, prevEventId: t.S().prevEventId })
+      return t.S().prevEventId
+    }
+    const a = await tab()
+    const b = await tab()
+    await move(a, 'x')
+    await a.rows.chainRowsSettled()
+    // A signature rewritten on a row B has already checked, as it read it.
+    const forgedSig = 'f'.repeat(128)
+    const { withEventDb, closeEventDb } = await import('../../lib/eventDb/connection')
+    await withEventDb((db) => new Promise<void>((resolve) => {
+      const tx = db.transaction('events', 'readwrite')
+      const os = tx.objectStore('events')
+      const g = os.get(chain[5].id)
+      g.onsuccess = () => os.put({ ...g.result, sig: forgedSig })
+      tx.oncomplete = () => resolve()
+    }))
+    closeEventDb()
+    // B signs from the old head (its look sees nothing), loses, and takes the rows in hand.
+    const proto = IDBObjectStore.prototype as unknown as { get: (...x: unknown[]) => unknown }
+    const real = proto.get
+    proto.get = function (this: IDBObjectStore, ...x: unknown[]) {
+      const alone = this.name === 'chains' && this.transaction.mode === 'readonly' && this.transaction.objectStoreNames.length === 1
+      return real.apply(this, alone ? ['no such identity'] : x)
+    }
+    try { await move(b, 'y') } finally { proto.get = real }
+    await b.rows.chainRowsSettled()
+    // The take-back puts the rows in hand, and their rewritten row is checked: the chain is cut there.
+    await vi.waitFor(() => expect(b.S().events).toHaveLength(5), { timeout: 5_000, interval: 20 })
+    expect(b.S().events.some((e) => e.sig === forgedSig)).toBe(false)
+    expect(b.S().proof.message).toMatch(/failed the signature check/)
   })
 })

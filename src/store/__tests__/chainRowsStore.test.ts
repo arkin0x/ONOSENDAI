@@ -1419,7 +1419,7 @@ describe('a paid cloud job and the head it is held against (J1 to J3)', () => {
     await a.store.savedChainLoaded()
     expect(a.S().prevEventId).toBe(moved)
     expect(a.S().cloud.message ?? '').not.toContain('dropped')
-    expect(cloud.loadCloudJob()?.prevEventId).toBe(moved)
+    expect(cloud.loadCloudJob(pk)?.prevEventId).toBe(moved)
   })
 
   it('the kill switch on a load: the frozen copy in hand first does not drop the job', async () => {
@@ -1441,7 +1441,7 @@ describe('a paid cloud job and the head it is held against (J1 to J3)', () => {
     await tick(50)
     expect(store.useCyberspace.getState().prevEventId).toBe(moved)
     expect(store.useCyberspace.getState().cloud.message ?? '').not.toContain('dropped')
-    expect(cloud.loadCloudJob()?.prevEventId).toBe(moved)
+    expect(cloud.loadCloudJob(pk)?.prevEventId).toBe(moved)
   })
 
   it('rows that cannot be read: a head nobody can vouch for drops nothing, and the job waits', async () => {
@@ -1461,7 +1461,7 @@ describe('a paid cloud job and the head it is held against (J1 to J3)', () => {
       const store = await import('../useCyberspace')
       await store.savedChainLoaded()
       await store.useCyberspace.getState().resumeCloudJob()
-      expect(cloud.loadCloudJob()?.prevEventId).toBe(moved)
+      expect(cloud.loadCloudJob(pk)?.prevEventId).toBe(moved)
       expect(store.useCyberspace.getState().cloud.message).toContain('waits')
     } finally { proto.getAll = real }
   })
@@ -1476,7 +1476,7 @@ describe('a paid cloud job and the head it is held against (J1 to J3)', () => {
     await a.rows.chainRowsSettled()
     await a.S().resumeCloudJob()
     expect(a.S().cloud.message).toMatch(/chain head moved/)
-    expect(cloud.loadCloudJob()).toBeNull()
+    expect(cloud.loadCloudJob(pk)).toBeNull()
   })
 })
 

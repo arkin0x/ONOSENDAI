@@ -349,7 +349,7 @@ export async function rescanBatches(batches: AsyncIterable<RescanEntry[]>, expec
   // Asked before addDiscovered, which records these as seen.
   const shards = useShards.getState()
   const fresh = shards.freshOf(result.found)
-  shards.dropStale(result.bags, result.deletions)
+  shards.dropStale(result.bags, result.deletions, result.found)
   if (result.found.length > 0) shards.addDiscovered(result.found)
   if (fresh.length > 0) useCeremony.getState().mark(fresh)
   const secrets = useSecrets.getState()

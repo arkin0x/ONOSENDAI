@@ -229,16 +229,61 @@ export function hiddenRowFor<T extends HiddenRowLike>(rows: readonly T[], on: { 
     (on.lookupId ? rows.find((d) => d.lookupId === on.lookupId) : undefined)
 }
 
-/** Whether an item notification is about a kind 33331 object: a shard you published. */
+/** Whether an item notification is about a kind 33331 object: a shard. */
 export function onShard(on: { kind?: number; address?: string }): boolean {
   return on.kind === OBJECT_KIND || on.address?.startsWith(`${OBJECT_KIND}:`) === true
+}
+
+/** The author an address names, `<kind>:<author>:<d>`. */
+function authorOf(address: string): string {
+  return address.split(':')[1] ?? ''
 }
 
 /**
  * Whether an item notification is about a shard you published that this
  * device hid nowhere: other clients show your kind 33331 objects in their
- * feeds, and a reaction there is to the shard, not to a hidden item.
+ * feeds, and a reaction there is to the shard, not to a hidden item. Yours:
+ * a reaction can tag you on someone else's shard (the hider of a shard of
+ * theirs is told too), and that one is no shard of yours (review of #590).
+ * With no `a`, the shard is taken as yours, as the tag that reached you says.
  */
-export function publishedShardOnly(on: NotifOn, rows: readonly HiddenRowLike[]): boolean {
-  return on.type === 'item' && onShard(on) && !hiddenRowFor(rows, on)
+export function publishedShardOnly(on: NotifOn, rows: readonly HiddenRowLike[], me: string): boolean {
+  return on.type === 'item' && onShard(on) && (on.address === undefined || authorOf(on.address) === me) && !hiddenRowFor(rows, on)
+}
+
+/** VIEW ITEM's refusals. */
+export const NOT_HIDDEN_HERE = 'That item is not one this device hid, so it cannot be opened from here.'
+export const SHARD_NOT_HIDDEN = 'That shard is published, not hidden by you on this device, so there is no place to go.'
+export const SHARD_UNCHECKED = 'That shard could not be read from any relay, so this cannot tell whether you hid it on this device. Try again later.'
+
+/** What VIEW ITEM opens, or why it opens nothing. */
+export type ItemView<T> = { row: T } | { why: string }
+
+/**
+ * What VIEW ITEM goes to (hiddenRowFor), or why not. A reaction on a shard
+ * with no `a` (Ditto writes none) names it by id alone, and only the shard
+ * itself says its address, so it is fetched (`fetch`) before anything is
+ * refused. A fetch that fails or finds nothing cannot tell, and says so
+ * rather than claiming the shard was never hidden here (review of #590).
+ */
+export async function itemToView<T extends HiddenRowLike>(
+  rows: () => readonly T[],
+  on: { id: string | null; lookupId?: string; address?: string; kind?: number },
+  me: string,
+  fetch: (id: string) => Promise<{ kind: number; pubkey: string; tags: string[][] } | null>,
+): Promise<ItemView<T>> {
+  const here = hiddenRowFor(rows(), on)
+  if (here) return { row: here }
+  if (!onShard(on)) return { why: NOT_HIDDEN_HERE }
+  let address = on.address
+  if (address === undefined && on.id !== null) {
+    let ev: { kind: number; pubkey: string; tags: string[][] } | null = null
+    try { ev = await fetch(on.id) } catch { ev = null }
+    const d = ev?.tags.find((t) => t[0] === 'd')?.[1]
+    if (!ev || d === undefined) return { why: SHARD_UNCHECKED }
+    address = `${ev.kind}:${ev.pubkey}:${d}`
+    const row = hiddenRowFor(rows(), { id: null, address })
+    if (row) return { row }
+  }
+  return { why: address !== undefined && authorOf(address) === me ? SHARD_NOT_HIDDEN : NOT_HIDDEN_HERE }
 }

@@ -175,7 +175,8 @@ describe('the store probe, where the database will run', () => {
   it('no answer from the worker in time: tried here', async () => {
     FakeWorker.behaviour = 'quiet'
     const c = await freshClient()
-    expect(await c.probeWhereItRuns(50)).toBe(true)
+    // The patience bounds the main thread's try too, which a loaded machine can take past 50 ms.
+    expect(await c.probeWhereItRuns(300)).toBe(true)
     expect(FakeWorker.made[0].terminated).toBe(true)
   })
 

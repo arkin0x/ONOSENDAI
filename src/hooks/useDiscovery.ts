@@ -16,6 +16,7 @@ import { useEffect, useRef } from 'react'
 import { query } from '../lib/relay'
 import { HIDDEN_KIND } from '../lib/hidden'
 import { unbagRemembered } from '../lib/foundCache'
+import { bagsToOpen } from '../lib/bagVersions'
 import { hexToBytes } from '../lib/events'
 import { MAX_COMPUTE_HEIGHT, useCyberspace } from '../store/useCyberspace'
 import { useCeremony } from '../store/useCeremony'
@@ -126,7 +127,12 @@ export function useDiscovery(): void {
       }
 
       // A superseded scan must not write stale finds.
-      const events = await query({ kinds: [HIDDEN_KIND], '#d': [...keys.keys()] })
+      const sent = await query({ kinds: [HIDDEN_KIND], '#d': [...keys.keys()] })
+      if (id !== reqId.current) return
+      // One version per bag, the newest, none its author deleted: relays hold
+      // different versions, and opening all of them drew what a DELETE took
+      // out (lib/bagVersions.ts; arkinox, 2026-11-03).
+      const { bags: events, deletions } = await bagsToOpen(sent, query, useShards.getState().ownDoorAddresses(keys.keys()))
       if (id !== reqId.current) return
 
       const found = []
@@ -190,7 +196,9 @@ export function useDiscovery(): void {
       if (id === reqId.current) {
         // Asked before addDiscovered, which records these as seen.
         const fresh = useShards.getState().freshOf(found)
+        useShards.getState().dropStale(events, deletions, found)
         useShards.getState().addDiscovered(found)
+        useShards.getState().honorRetractions(keys.keys(), events, deletions)
         useShards.getState().setScanning(false)
         // The ceremony: only for what this scan opened for the first time.
         useCeremony.getState().mark(fresh)

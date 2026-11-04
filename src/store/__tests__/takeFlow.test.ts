@@ -91,6 +91,27 @@ describe('found is not held', () => {
   })
 })
 
+describe('DELETE, then finding it again', () => {
+  it('a deleted find stays found, is not held by the next scan, and TAKE holds it', async () => {
+    const { key, event } = keyIn('Lost Key')
+    S().addDiscovered([find(event, { type: 'key', key })])
+    S().takeFound([event.id])
+    await I().remove(event.id)
+    S().addDiscovered([find(event, { type: 'key', key })])
+    expect(I().has(event.id)).toBe(false)
+    expect(S().discovered[event.id]).toBeDefined()
+    expect(S().takeFound([event.id]).map((h) => h.id)).toEqual([event.id])
+  })
+
+  it('one of your own deleted is not held by itself, and TAKE holds it as forged', async () => {
+    const { key, event } = keyIn('My Key')
+    useShards.setState({ mine: [{ eventId: event.id, type: 'key', key, inner: event, lookupId: 'lookup', bagId: 'bag', at: { x: '1', y: '2', z: '3' }, plane: 0, height: 4, createdAt: T0 } as never] })
+    expect(I().has(event.id)).toBe(false)
+    expect(S().takeFound([event.id]).map((h) => h.source)).toEqual(['forged'])
+    expect(S().takeFound([event.id])).toEqual([])
+  })
+})
+
 describe('what another identity found in play (review of #519)', () => {
   it('does not make a key TV showed this identity a played key', () => {
     const k = keyIn('TV Key')

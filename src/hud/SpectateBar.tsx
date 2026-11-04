@@ -5,9 +5,13 @@
  * on screen the whole time the panels are locked, because a scene anchored on
  * a stranger with nothing saying so would read as a bug: your avatar gone,
  * your controls gone, the terrain unfamiliar.
+ *
+ * Bottom right, under the zoom keys (arkinox, 2026-11-03). It says how far
+ * up the screen it reaches in --spectate-top, so the pad stands above it
+ * however many lines its words wrap to (styles.css).
  */
 
-import { useEffect, useState } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { stopSpectating } from '../lib/spectator'
 import { formatAgo, formatStamp } from '../lib/time'
 import { useCyberspace } from '../store/useCyberspace'
@@ -21,6 +25,20 @@ export function SpectateBar(): JSX.Element | null {
     return everyWhileVisible(() => setNow(Date.now() / 1000), 5_000)
   }, [])
 
+  const bar = useRef<HTMLDivElement>(null)
+  const shown = spectate !== null
+  useLayoutEffect(() => {
+    const el = bar.current
+    if (!shown || !el) return
+    const root = document.documentElement.style
+    const measure = (): void => { root.setProperty('--spectate-top', `${Math.ceil(window.innerHeight - el.getBoundingClientRect().top)}px`) }
+    measure()
+    const watch = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(measure)
+    watch?.observe(el)
+    window.addEventListener('resize', measure)
+    return () => { watch?.disconnect(); window.removeEventListener('resize', measure); root.removeProperty('--spectate-top') }
+  }, [shown])
+
   if (!spectate) return null
 
   const status =
@@ -31,7 +49,7 @@ export function SpectateBar(): JSX.Element | null {
           : `${spectate.actions.length} ACTION${spectate.actions.length === 1 ? '' : 'S'}`
 
   return (
-    <div className="spectate" role="status">
+    <div ref={bar} className="spectate" role="status">
       <span className="spectate__eye" aria-hidden="true">◉</span>
       <span className="spectate__text">
         <span className="spectate__label">SPECTATING</span>

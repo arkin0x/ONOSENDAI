@@ -3,7 +3,7 @@
  *
  * The free view (arkinox, 2026-09-07): move the view anywhere in cyberspace
  * without the chain line and the grid coming along, which is what focusing
- * does. This reads what a person types into the POSITION panel: three
+ * does. This reads what a person types into the View panel: three
  * decimal axis values separated by commas or spaces, a 64-hex coordinate as
  * the c and C tags carry it, or a latitude and longitude, which names a
  * point on Earth through the canonical GPS mapping (landfall.ts
@@ -89,7 +89,7 @@ export function rememberView(list: RecentView[], entry: RecentView): RecentView[
   return [front, ...list.filter((r) => !same(r))].filter((r) => r.pinned === true || ++unpinned <= RECENT_VIEWS_KEPT)
 }
 
-/** The stored list, as the Position panel shows it: every pinned place and three others at most; empty when storage cannot be read. */
+/** The stored list, as the View panel shows it: every pinned place and three others at most; empty when storage cannot be read. */
 export function readRecentViews(): RecentView[] {
   try {
     const v = JSON.parse(localStorage.getItem(RECENT_VIEWS_KEY) ?? '[]') as unknown
@@ -111,14 +111,14 @@ export function forgetView(list: RecentView[], entry: Pick<RecentView, 'input' |
   return list.filter((r) => r.input !== entry.input || r.plane !== entry.plane)
 }
 
-/** Where the Position panel keeps its recent places on this device. */
+/** Where the View panel keeps its recent places on this device. */
 export const RECENT_VIEWS_KEY = 'onosendai:view-recent'
 
-/** Sent on window when a place is added to the recent list from outside the Position panel, which reloads it. */
+/** Sent on window when a place is added to the recent list from outside the View panel, which reloads it. */
 export const RECENT_VIEWS_EVENT = 'onosendai:view-recent'
 
 /**
- * Put a place at the front of the Position panel's recent list from
+ * Put a place at the front of the View panel's recent list from
  * anywhere: the stored list, through rememberView like a typed place, and an
  * event so a panel already on screen shows it. The respawn from a broken
  * chain leaves its End of Chain entry here (arkinox, 2026-10-07, Q3), so the

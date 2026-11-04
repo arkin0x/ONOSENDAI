@@ -4,10 +4,22 @@
  */
 
 import { withEventDb } from './connection'
+import type { NostrEvent } from '../events'
 import { postNote } from './channel'
+import { probeStore } from './probe'
+import { markChainVerdicts } from './chainVerdicts'
 import { budget, byAddress, byAuthorKind, byKind, byTag, getRows, ingest, type IngestItem } from './store'
+import { chainHead, checkChainRows, commitChain, flagRows, migrateChain, partedBranches, readChain, setAsideBranch, type ChainCommit, type ChainMigration, type ChainSource } from './chainRows'
+
+/** Whether this runs in a worker (workers/events.worker.ts), and not on the page's main thread. */
+function inWorker(): boolean {
+  const scope = (globalThis as { WorkerGlobalScope?: abstract new () => unknown }).WorkerGlobalScope
+  return typeof scope === 'function' && globalThis instanceof scope
+}
 
 export const eventDbOps = {
+  probeStore: () => probeStore(),
+  markChainVerdicts: (pubkey: string, epoch: number) => withEventDb((db) => markChainVerdicts(db, pubkey, epoch)),
   async ingest(by: string, items: IngestItem[]) {
     const result = await withEventDb((db) => ingest(db, items))
     if (result.added.length > 0 || result.struck.length > 0) postNote({ kind: 'events', by, ids: result.added, struck: result.struck })
@@ -19,6 +31,25 @@ export const eventDbOps = {
   byTag: (tag: string, limit?: number) => withEventDb((db) => byTag(db, tag, limit)),
   byAddress: (addr: string) => withEventDb((db) => byAddress(db, addr)),
   budget: () => withEventDb((db) => budget(db)),
+  async commitChain(by: string, c: ChainCommit) {
+    const result = await withEventDb((db) => commitChain(db, c))
+    // After the commit, so a note never runs ahead of the rows it names.
+    // A repeat too: the first run may have died with its worker before it could say.
+    if (result.status === 'ok' && (result.changed || result.repeated)) postNote({ kind: 'chain', by, pubkey: c.pubkey, headId: c.headId, generation: result.generation, length: c.length })
+    return result
+  },
+  chainHead: (pubkey: string) => withEventDb((db) => chainHead(db, pubkey)),
+  // Signatures are checked only in the event worker: on the main thread they go to the signature worker (lib/chainStore.ts checkRows).
+  checkChainRows: (pubkey: string) => withEventDb((db) => checkChainRows(db, pubkey, { verify: inWorker() })),
+  flagRows: (checked: NostrEvent[]) => withEventDb((db) => flagRows(db, checked)),
+  readChain: (pubkey: string) => withEventDb((db) => readChain(db, pubkey)),
+  async migrateChain(by: string, m: ChainMigration) {
+    const result = await withEventDb((db) => migrateChain(db, m))
+    if (result.status === 'switched') postNote({ kind: 'chain', by, pubkey: m.pubkey, headId: result.headId, generation: 1, length: result.rows })
+    return result
+  },
+  setAsideBranch: (pubkey: string, branch: ChainSource) => withEventDb((db) => setAsideBranch(db, pubkey, branch)),
+  partedBranches: (pubkey: string) => withEventDb((db) => partedBranches(db, pubkey)),
 }
 
 export type EventDbOps = typeof eventDbOps

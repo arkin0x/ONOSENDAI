@@ -15,6 +15,7 @@
  * workshop can keep the button down and say where things are.
  */
 
+import { withoutCarried } from '../lib/carried'
 import { useEffect } from 'react'
 import { create } from 'zustand'
 import { avatarWork, verifyAvatarWork } from 'cyberspace-core'
@@ -25,7 +26,7 @@ import type { NostrEvent } from '../lib/events'
 import { publish, query } from '../lib/relay'
 import { SignerAccountMismatch } from '../lib/signers'
 import { fromPayload, toPayload, type ShardModel } from 'sno-core/shards'
-import { clearRefusal, inTheClear, keepOwnTable, ownKeysOnly } from '../lib/carried'
+import { clearRefusal, keepOwnTable, ownKeysOnly, placedOnly } from '../lib/carried'
 import { useCyberspace } from './useCyberspace'
 
 const MINE_KEY = 'onosendai:avatar'
@@ -164,15 +165,21 @@ export const useAvatars = create<AvatarsState>((set, get) => ({
       .catch(() => { if (!(pubkey in get().shards)) set({ shards: { ...get().shards, [pubkey]: null } }) })
   },
 
-  adopt: async (shard) => {
+  adopt: async (chosen) => {
+    // An avatar is public: what came to you sealed stays out of it.
+    let shard = chosen ? withoutCarried(chosen) : chosen
     // One adopt at a time, through mining, signing and publishing: a second
     // press while the signer's prompt is open would mine and ask again.
     if (get().phase) return false
+    if (chosen && shard && shard !== chosen && shard.vertices.length === 0 && (shard.parts?.length ?? 0) === 0) {
+      set({ adoptError: 'Without what came to you sealed, this shard has no vertices and places nothing.', minedMs: null })
+      return false
+    }
     const cs = useCyberspace.getState()
     const me = cs.identity.pubkey
     // What goes out is what is kept and drawn: every key under the signer's
-    // pubkey, and a table from a bag left out unless its user chose (DECK-0003 §1.10).
-    if (shard) shard = ownKeysOnly(inTheClear(shard), me)
+    // pubkey, and no entry that no placement names (DECK-0003 §1.10).
+    if (shard) shard = ownKeysOnly(placedOnly(shard), me)
     let template = avatarTemplate(shard, Math.floor(Date.now() / 1000))
     // Carrying its pieces it may be more than a relay takes: say so before the work is spent.
     const over = clearRefusal(template, Object.keys(shard?.objects ?? {}).length > 0)

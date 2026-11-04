@@ -43,6 +43,7 @@ import { GLYPHS, hash01 } from '../lib/decode'
 import { glowTexture } from '../lib/glow'
 import { RAIN_MS, RAIN_SPREAD_MS, calmShare, glintLevel, lidTurn, LID_MS, rainCount, swapped as swappedAt } from '../lib/ceremony'
 import type { Look } from '../lib/looks'
+import type { LookFrame } from './LookMark'
 import { ACCENT } from '../lib/palette'
 import { ShardMesh } from './ShardMesh'
 import { breatheMaterial } from './WorldShards'
@@ -55,15 +56,22 @@ interface Props {
   /** performance.now() when the decrypt returned. */
   at: number
   calm: boolean
+  /** The look's cut, stance and budget (scene/LookMark LookFrame). */
+  frame?: LookFrame
+}
+
+/** One mesh's share of a look's frame: its own budget key, so two meshes of one look do not write over each other's demand. */
+export function meshFrame(frame: LookFrame | undefined, part: string): LookFrame {
+  return frame?.budget ? { ...frame, budget: { ...frame.budget, key: `${frame.budget.key}:${part}` } } : frame ?? {}
 }
 
 /** A chest opening, drawn in its look's frame. */
-export function ChestCeremony({ look, at, calm }: Props): JSX.Element {
+export function ChestCeremony({ look, at, calm, frame }: Props): JSX.Element {
   const open = look.open ?? look.closed
-  if (calm || !look.lid || !look.open) return <CalmSwap from={look.closed} to={open} at={at} />
+  if (calm || !look.lid || !look.open) return <CalmSwap from={look.closed} to={open} at={at} frame={frame} />
   return (
     <>
-      <LidOpening look={look} at={at} />
+      <LidOpening look={look} at={at} frame={frame} />
       <Glints model={look.open} at={at} />
       <GlyphRain at={at} />
     </>
@@ -71,7 +79,7 @@ export function ChestCeremony({ look, at, calm }: Props): JSX.Element {
 }
 
 /** The closed chest with its lid turning, then the open look in its place. */
-function LidOpening({ look, at }: { look: Look; at: number }): JSX.Element {
+function LidOpening({ look, at, frame }: { look: Look; at: number; frame?: LookFrame }): JSX.Element {
   const lid = look.lid!
   const turn = useRef<Group>(null)
   const [done, setDone] = useState(() => swappedAt(performance.now() - at))
@@ -83,10 +91,10 @@ function LidOpening({ look, at }: { look: Look; at: number }): JSX.Element {
   useFrame(() => {
     if (turn.current) turn.current.rotation.x = lidTurn(performance.now() - at, lid.hinge.angle)
   })
-  if (done) return <ShardMesh shard={look.open!} world />
+  if (done) return <ShardMesh shard={look.open!} world {...frame} />
   return (
     <>
-      <ShardMesh shard={lid.body} world />
+      <ShardMesh shard={lid.body} world clip={frame?.clip} />
       {/* The lid turns about its hinge line: moved so the hinge is the origin, turned, and moved back. */}
       <group position={[0, lid.hinge.y, lid.hinge.z]}>
         <group ref={turn}>
@@ -99,18 +107,23 @@ function LidOpening({ look, at }: { look: Look; at: number }): JSX.Element {
   )
 }
 
+/** The level fadeAll is writing: one visitor for every call, so a frame's fade allocates nothing. */
+let fadeLevel = 1
+function fadeOne(o: Object3D): void {
+  const m = (o as { material?: Material | Material[] }).material
+  if (!m) return
+  if (Array.isArray(m)) for (let i = 0; i < m.length; i++) breatheMaterial(m[i], fadeLevel)
+  else breatheMaterial(m, fadeLevel)
+}
+
 /** Every material under `root` at opacity `b` (WorldShards breatheMaterial, as EDIT's breath writes it). */
 export function fadeAll(root: Object3D | null, b: number): void {
-  root?.traverse((o) => {
-    const m = (o as { material?: Material | Material[] }).material
-    if (!m) return
-    if (Array.isArray(m)) m.forEach((one) => breatheMaterial(one, b))
-    else breatheMaterial(m, b)
-  })
+  fadeLevel = b
+  root?.traverse(fadeOne)
 }
 
 /** The calm path: one look fading into the other, drawn as ghosts are so their opacity is real. */
-export function CalmSwap({ from, to, at }: { from: ShardModel; to: ShardModel; at: number }): JSX.Element {
+export function CalmSwap({ from, to, at, frame }: { from: ShardModel; to: ShardModel; at: number; frame?: LookFrame }): JSX.Element {
   const a = useRef<Group>(null)
   const b = useRef<Group>(null)
   useFrame(() => {
@@ -120,8 +133,8 @@ export function CalmSwap({ from, to, at }: { from: ShardModel; to: ShardModel; a
   })
   return (
     <>
-      <group ref={a}><ShardMesh shard={from} world ghost /></group>
-      {to !== from && <group ref={b}><ShardMesh shard={to} world ghost /></group>}
+      <group ref={a}><ShardMesh shard={from} world ghost {...meshFrame(frame, 'from')} /></group>
+      {to !== from && <group ref={b}><ShardMesh shard={to} world ghost {...meshFrame(frame, 'to')} /></group>}
     </>
   )
 }
@@ -145,6 +158,11 @@ const GOLD = new Color('#ffd27d')
 /** Points of gold light at the heap, twinkling, fading with the timeline. */
 function Glints({ model, at }: { model: ShardModel; at: number }): JSX.Element | null {
   const positions = useMemo(() => glintPoints(model), [model])
+  return <Twinkles positions={positions} at={at} level={glintLevel} />
+}
+
+/** Points of gold light, each twinkling on its own clock, as bright as `level` says at each moment since `at`. */
+export function Twinkles({ positions, at, level: levelAt }: { positions: Float32Array; at: number; level: (elapsed: number) => number }): JSX.Element | null {
   const count = positions.length / 3
   const geometry = useMemo(() => {
     const g = new BufferGeometry()
@@ -159,7 +177,7 @@ function Glints({ model, at }: { model: ShardModel; at: number }): JSX.Element |
   useEffect(() => () => { geometry.dispose(); material.dispose() }, [geometry, material])
   useFrame(() => {
     const t = performance.now() - at
-    const level = glintLevel(t)
+    const level = levelAt(t)
     const c = geometry.getAttribute('color') as Float32BufferAttribute
     const arr = c.array as Float32Array
     for (let i = 0; i < count; i++) {

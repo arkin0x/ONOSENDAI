@@ -12,13 +12,22 @@
  * and reopening the panel shows what is already known. A relay added in the
  * Relays panel starts a fresh backfill, and the rows already on screen stay
  * there while it runs.
+ *
+ * Only an answer from the canonical relay can say what is there. One it
+ * refused (it gates reads on NIP-42 AUTH, and a bunker away in another app
+ * cannot sign in) or never gave read as an empty answer: the panel said
+ * "Nothing hidden on the relay yet", the rows and their cache were replaced
+ * by nothing, and no later read came for the rest of the visit (the owner's
+ * phone, 2026-11-04, with 105 bags on the relay). Now that read only adds
+ * what it brought, says why (`trouble`), and is asked again when the relay
+ * signs this visit in, when the connection is reissued, and on RETRY.
  */
 
 import { useEffect } from 'react'
 import { create } from 'zustand'
 import { HIDDEN_KIND } from '../lib/hidden'
 import { afterBackfill, mergeLoot, summarizeBag, type LootItem } from '../lib/loot'
-import { query, subscribe } from '../lib/relay'
+import { onCanonicalSignIn, onResume, queryChecked, subscribe, type ReadTrouble } from '../lib/relay'
 import { useRelays } from '../store/useRelays'
 import { useShards } from '../store/useShards'
 
@@ -31,6 +40,8 @@ function standing(items: LootItem[]): LootItem[] {
 export interface Loot {
   items: LootItem[]
   status: 'loading' | 'ready' | 'error'
+  /** Why the canonical relay gave the last backfill nothing, while it has not answered one since. */
+  trouble: ReadTrouble | null
 }
 
 /** The relay holds a few dozen bags today; this leaves room without paging. */
@@ -77,6 +88,7 @@ export const useLootStore = create<LootState>(() => ({
   items: cached,
   // Rows already on screen are not a loading state, whatever the relay is doing.
   status: cached.length > 0 ? 'ready' : 'loading',
+  trouble: null,
   source: '',
 }))
 
@@ -105,28 +117,84 @@ export function ensureLoot(relays: string[]): void {
     }
   })
 
-  query({ kinds: [HIDDEN_KIND], limit: LOOT_BACKFILL }).then(
-    (events) => {
+  watchForAnswers()
+  backfill(source)
+}
+
+/** A backfill is running, and whether another was asked for meanwhile. */
+let reading = false
+let again = false
+
+/**
+ * A backfill the canonical relay did not answer in full is asked again, on
+ * its own, sooner first: a busy socket at startup, a signer still signing in.
+ * The rows it did bring stay meanwhile. An answer ends the retries.
+ */
+const RETRY_AFTER_MS = [3_000, 10_000, 30_000, 60_000, 120_000]
+let retries = 0
+let retryTimer: ReturnType<typeof setTimeout> | null = null
+function scheduleRetry(failed: boolean): void {
+  if (retryTimer) { clearTimeout(retryTimer); retryTimer = null }
+  if (!failed) { retries = 0; return }
+  const wait = RETRY_AFTER_MS[Math.min(retries, RETRY_AFTER_MS.length - 1)]
+  retries++
+  retryTimer = setTimeout(() => { retryTimer = null; askAgainIfRefused() }, wait)
+}
+
+/** Read every bag from the relays, once at a time. */
+function backfill(source: string): void {
+  if (reading) { again = true; return }
+  reading = true
+  const done = (): void => {
+    reading = false
+    if (again) { again = false; backfill(useLootStore.getState().source) }
+  }
+  queryChecked({ kinds: [HIDDEN_KIND], limit: LOOT_BACKFILL }).then(
+    ({ events, trouble }) => {
       if (useLootStore.getState().source !== source) return
       const found = events.map(summarizeBag).filter((x): x is LootItem => x !== null)
       useLootStore.setState((s) => {
-        const items = standing(afterBackfill(s.items, found, LOOT_BACKFILL))
+        // Without the canonical relay's answer nothing is known to be gone: keep every row, add what came.
+        const items = standing(trouble ? mergeLoot(s.items, found) : afterBackfill(s.items, found, LOOT_BACKFILL))
         writeCache(items)
-        return { items, status: 'ready' }
+        return { items, status: trouble && items.length === 0 ? 'error' : 'ready', trouble }
       })
+      scheduleRetry(trouble !== null)
     },
     () => {
       if (useLootStore.getState().source !== source) return
       // A failed read leaves whatever is already known standing.
-      useLootStore.setState((s) => ({ status: s.items.length > 0 ? 'ready' : 'error' }))
+      useLootStore.setState((s) => ({ status: s.items.length > 0 ? 'ready' : 'error', trouble: 'unreachable' }))
+      scheduleRetry(true)
     },
-  )
+  ).finally(done)
+}
+
+/** Read the bags again (RETRY), keeping the rows on screen while it runs. */
+export function refreshLoot(): void {
+  const { source, items } = useLootStore.getState()
+  if (!source) return
+  if (items.length === 0) useLootStore.setState({ status: 'loading' })
+  backfill(source)
+}
+
+/** Asked again once the relay could answer: it signed this visit in, or the connection came back. */
+function askAgainIfRefused(): void {
+  if (useLootStore.getState().trouble) refreshLoot()
+}
+let watching = false
+function watchForAnswers(): void {
+  if (watching) return
+  watching = true
+  onCanonicalSignIn(askAgainIfRefused)
+  onResume(askAgainIfRefused)
 }
 
 export function useLoot(): Loot {
   const relays = useRelays((s) => s.relays)
   const items = useLootStore((s) => s.items)
   const status = useLootStore((s) => s.status)
+  const trouble = useLootStore((s) => s.trouble)
   useEffect(() => { ensureLoot(relays) }, [relays])
-  return { items, status }
+  return { items, status, trouble }
 }

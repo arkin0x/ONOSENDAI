@@ -8,7 +8,7 @@
  * up the "Added to your Starred Places" toast, so the two never compete.
  *
  * The nickname can be changed later from the pencil on the place's row in
- * the POSITION panel, or from its star in the scene.
+ * the View panel, or from its star in the scene.
  */
 
 import { useEffect, useRef, useState } from 'react'

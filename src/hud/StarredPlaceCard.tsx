@@ -10,22 +10,24 @@
 
 import { useEffect, useState } from 'react'
 import { onEarthSurface } from '../lib/hyperspace/interest'
-import { axesLabel, NICKNAME_MAX, placeName, placePosition, starredWhen, type StarredPlace } from '../lib/starred'
+import { axesLabel, NICKNAME_MAX, placeName, placePosition, sceneLabel, starredWhen, type StarredPlace } from '../lib/starred'
 import { useCyberspace } from '../store/useCyberspace'
 import { BRIEF_TOAST_MS, useToast } from '../store/useToast'
 import { useStarred } from '../store/useStarred'
 import { ConfirmModal } from './ConfirmModal'
 
 /**
- * Look at a starred place: the POSITION panel's VIEW, the cursor coming
- * along, at the zoom it was starred at, with the pin when it is on Earth.
+ * Look at a starred place: the View panel's VIEW, the cursor coming along,
+ * at the zoom it was starred at, with the pin when it is on Earth. VIEWING
+ * says its name, unless that name is only its axes (sceneLabel).
  */
 export function viewStarred(place: StarredPlace): void {
   const position = placePosition(place.input)
   if (!position) return
   const cs = useCyberspace.getState()
-  cs.focusOn(position, place.plane, placeName(place), place.scaleExp, true)
-  if (place.plane === 0 && onEarthSurface(position)) cs.dropPin(position, placeName(place), place.scaleExp)
+  const named = sceneLabel(place) !== null
+  cs.focusOn(position, place.plane, placeName(place), place.scaleExp, true, named)
+  if (place.plane === 0 && onEarthSurface(position)) cs.dropPin(position, placeName(place), place.scaleExp, named)
 }
 
 export function StarredPlaceCard(): JSX.Element | null {

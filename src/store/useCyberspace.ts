@@ -2236,6 +2236,19 @@ async function chainHydrated(pubkey: string): Promise<void> {
   if (h && h.pubkey === pubkey) await h.done
 }
 
+/**
+ * Waits for the read of `pubkey`'s saved chain (chainHydrated), then says
+ * whether the chain in hand is the whole of what this device keeps. False
+ * when IndexedDB holds a copy that was not taken in (it did not answer in
+ * time, or could not be read): the chain in hand may then be the old
+ * stretch localStorage kept, and its head proves nothing about where the
+ * chain is.
+ */
+async function wholeChainInHand(pubkey: string): Promise<boolean> {
+  await chainHydrated(pubkey)
+  return !chainDbAvailable() || dbRead.has(pubkey)
+}
+
 /** Resolves once the current identity's whole saved chain is in hand: the IndexedDB read after a load or a switch has landed. */
 export function savedChainLoaded(): Promise<void> {
   return chainHydrated(useCyberspace.getState().identity.pubkey)
@@ -5774,11 +5787,23 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
         }
       }
     }
-    const record = loadCloudJob(identity.pubkey)
     // Another identity's job stays on disk for when it is back.
+    if (!loadCloudJob(identity.pubkey)) return
+    // The head check needs the whole saved chain. At mount the chain in hand
+    // may be the old stretch localStorage kept before the chain outgrew it,
+    // whose head is not the one a paid job was bound to (hydrateChain).
+    const whole = await wholeChainInHand(identity.pubkey)
+    // Switched meanwhile: the switch resumes the new identity's own job.
+    if (get().identity.pubkey !== identity.pubkey) return
+    const record = loadCloudJob(identity.pubkey)
     if (!record || record.pubkey !== identity.pubkey) return
     if (get().proof.status === 'computing') return
     if (record.prevEventId !== get().prevEventId) {
+      if (!whole) {
+        // Nothing proves the head moved: a paid record is never dropped on that.
+        set({ cloud: { ...get().cloud, job: record, message: 'A pending cloud job was kept: your saved chain did not load, so its head could not be checked. RESUME or reload to try again.' } })
+        return
+      }
       clearCloudJob(record.pubkey, record.jobId)
       set({ cloud: { ...get().cloud, job: null, message: 'A pending cloud job was dropped: the chain head moved since it was created.' } })
       return

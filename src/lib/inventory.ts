@@ -23,7 +23,7 @@ import { withAuthoredConstrain } from './walkConstrain'
 import type { NostrEvent } from './events'
 import type { ChestEntry, OpeningKey } from './chests'
 import type { AudioItem } from './audioItem'
-import { KEY_KIND, hiddenLabel, keyItemOf, type ChestItem, type Hidden, type HiddenType, type ItemBody, type KeyItem } from './hidden'
+import { KEY_KIND, hiddenLabel, itemLineage, keyItemOf, type ChestItem, type Hidden, type HiddenType, type ItemBody, type KeyItem } from './hidden'
 
 /** What a key looks like as text, for COPY and PASTE across devices. */
 export const KEY_TEXT_PREFIX = 'cyberspace-key:'
@@ -168,17 +168,50 @@ export function heldFromPasted(owner: string, event: NostrEvent, key: KeyItem, v
 }
 
 /**
- * Hold more items. One row per id: an item already held keeps its row, so a
- * key read twice (a rescan, a second device's bag) is held once, and the
- * place and time of the first holding stand. Returns what was new.
+ * An item's lineage as held: its author and its first version's id
+ * (lib/hidden.ts itemLineage). Only its author can move it, so only an event
+ * by the same author is a version of it: a `d` is a claim anyone can write,
+ * and another key's item carrying this one's id as its `d` is not this item
+ * (review of #595).
+ */
+export function lineageKey(author: string, lineage: string): string {
+  return `${author}:${lineage}`
+}
+
+/**
+ * The lineages of what is held (lineageKey). An item its hider moved (MOVE,
+ * EDIT) is a new event at the new place that carries its first version's id
+ * as `d`, so a version held before the move and the one standing now are one
+ * item: its blue box stays, and TAKE does not hold it a second time.
+ */
+export function heldLineages(items: Record<string, HeldItem>): Set<string> {
+  const out = new Set<string>()
+  for (const it of Object.values(items)) out.add(lineageKey(it.event.pubkey, itemLineage(it.event) ?? it.id))
+  return out
+}
+
+/** Whether this item is held: by its own id, or as a version, by the same author, of one held (heldLineages). */
+export function holdsItem(items: Record<string, HeldItem>, id: string, lineage?: string | null, author?: string | null, lineages?: ReadonlySet<string>): boolean {
+  if (items[id]) return true
+  return !!lineage && !!author && (lineages ?? heldLineages(items)).has(lineageKey(author, lineage))
+}
+
+/**
+ * Hold more items. One row per item: an item already held keeps its row, so
+ * a key read twice (a rescan, a second device's bag) is held once, and so is
+ * a version of it its hider moved (holdsItem), and the place and time of the
+ * first holding stand. Returns what was new.
  */
 export function addHeld(items: Record<string, HeldItem>, add: HeldItem[]): { items: Record<string, HeldItem>; added: HeldItem[] } {
   const added: HeldItem[] = []
   let next = items
+  const lineages = heldLineages(items)
   for (const item of add) {
-    if (next[item.id]) continue
+    const lineage = lineageKey(item.event.pubkey, itemLineage(item.event) ?? item.id)
+    if (next[item.id] || lineages.has(lineage)) continue
     if (next === items) next = { ...items }
     next[item.id] = item
+    lineages.add(lineage)
     added.push(item)
   }
   return { items: next, added }

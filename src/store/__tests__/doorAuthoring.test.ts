@@ -394,6 +394,51 @@ describe('MOVE (R7)', () => {
   })
 })
 
+describe('a row behind a door gone from its bag (review 4 of #595)', () => {
+  /**
+   * Two things behind a door; another device takes one out (the room bag is
+   * rewritten without it); this device still lists it, marked as its next
+   * read of the room bag marks it. The id of the marked row.
+   */
+  async function markedBehind(): Promise<{ door: MyDeployment; keeps: MyDeployment; gone: MyDeployment }> {
+    const door = await sealDoor()
+    const keeps = await hide('stays behind it', HEIGHT)
+    const gone = await hide('taken out elsewhere', HEIGHT)
+    const here = S().mine.map((m) => ({ ...m }))
+    await S().deleteInstance(gone.eventId)
+    const roomBag = relay.events.filter((e) => e.kind === HIDDEN_KIND && e.tags.some((t) => t[0] === 'd' && t[1] === gone.lookupId)).sort((a, b) => b.created_at - a.created_at)[0]
+    useShards.setState({ mine: here.map((m) => (m.eventId === gone.eventId ? { ...m, goneFrom: roomBag.created_at } : m)), deleted: {} })
+    return { door, keeps, gone: row(gone.eventId) }
+  }
+
+  const roomEntryIds = async (d: MyDeployment): Promise<string[]> => {
+    const bag = relay.events.filter((e) => e.kind === HIDDEN_KIND && e.tags.some((t) => t[0] === 'd' && t[1] === d.lookupId)).sort((a, b) => b.created_at - a.created_at)[0]
+    return bag ? (await bagEntries(bag as unknown as NostrEvent, hexToBytes(d.keyHex))).map((e) => (e as NostrEvent).id) : []
+  }
+
+  it('a new lock moves the room without it: it stays behind, marked, and is never staged into the new bag', async () => {
+    const { door, keeps, gone } = await markedBehind()
+    expect(await S().resealDoor(door.eventId, { name: 'North Door', requires: 'the New Key', lock: lockOf(forgeKey('New Key')) })).toBeNull()
+    const moved = S().mine.find((m) => m.text === 'stays behind it')!
+    expect(moved.lookupId).not.toBe(keeps.lookupId)
+    expect(await roomEntryIds(moved)).toEqual([moved.eventId])
+    const still = row(gone.eventId)
+    expect(still.goneFrom).toBeDefined()
+    expect(still.lookupId).toBe(gone.lookupId)
+  })
+
+  it('DELETE of the door without its contents moves out what stands behind it, never the marked row', async () => {
+    const { door, gone } = await markedBehind()
+    expect(await S().deleteDoor(door.eventId, false)).toBeNull()
+    const out = S().mine.find((m) => m.text === 'stays behind it')!
+    expect(out.room).toBeUndefined()
+    expect(await roomEntryIds(out)).toEqual([out.eventId])
+    const still = row(gone.eventId)
+    expect(still.goneFrom).toBeDefined()
+    expect(still.lookupId).toBe(gone.lookupId)
+  })
+})
+
 describe('DELETE (R12, §3.7.8)', () => {
   it('switch off: what was behind it stands where it stood, ordinary; the room bag retracted; the door gone', async () => {
     const d = await sealDoor()

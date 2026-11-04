@@ -22,7 +22,7 @@
  * actions every item has.
  */
 
-import { takeIntoKeeping, you } from '../lib/carried'
+import { keepOwnTable, takeIntoKeeping, you } from '../lib/carried'
 import { useEffect, useState, type ReactNode } from 'react'
 import { Copy, CopyPlus, Move3d, PackagePlus, Pencil, Rotate3d, Target, TvMinimal } from 'lucide-react'
 import { nip19 } from 'nostr-tools'
@@ -166,7 +166,11 @@ export function SecretModal(): JSX.Element | null {
   const words = coin || nft ? textWithoutToken(textWithoutNftLinks(item.text)) : item.text ?? ''
   // A shard copies into your workshop as a model; a message copies its text.
   const copy = (): void => {
-    if (item.type === 'shard' && item.shard) useWorkshop.getState().importShard(takeIntoKeeping(item.shard, you()))
+    // Decrypted from a bag, unless it is a public object the bag only names (a LIVE LINK).
+    const publicLink = item.event?.kind === 33331 && !item.event.tags.some((t) => t[0] === 'encrypted')
+    // Its carried parts keyed under you, so your copy keeps them when you hide it (R15).
+    // Your own deployment is a model made here, with no author on it: its table is yours.
+    if (item.type === 'shard' && item.shard) useWorkshop.getState().importShard(takeIntoKeeping(item.mine ? keepOwnTable(item.shard, item.author) : item.shard, you(), !publicLink))
     else if (words) void navigator.clipboard?.writeText(words)
     setCopied(true)
     window.setTimeout(() => setCopied(false), 1400)

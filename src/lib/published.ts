@@ -59,6 +59,7 @@ import { refTags } from 'sno-core/parts'
 import { SNO_KIND, creditAuthor, creditOf, creditTags, objectAddress, readCredit, type Credit } from 'sno-core/feed'
 import type { EventTemplate } from './events'
 import { withAuthoredConstrain } from './walkConstrain'
+import { carriesSealedParts, ownKeysOnly, placedOnly, withoutCarried, you } from './carried'
 
 const STORAGE = 'onosendai:published'
 
@@ -115,8 +116,10 @@ export function publicObjectTemplate(shard: ShardModel, createdAt: number): Even
       ...refTags(shard),
       ...(credit ? creditTags(credit, { notify: true }) : []),
     ],
-    // OPAQUE for a shard whose author never chose (DECK-0003 §1.12).
-    content: JSON.stringify(toPayload(withAuthoredConstrain(shard))),
+    // OPAQUE for a shard whose author never chose (DECK-0003 §1.12). A table
+    // from a bag is already out unless its user chose to keep it (§1.10;
+    // usePublished send, withoutCarried).
+    content: JSON.stringify(toPayload(withAuthoredConstrain(placedOnly(shard)))),
   }
 }
 
@@ -209,12 +212,13 @@ export function forget(ledger: Ledger, id: string): Ledger {
 }
 
 /** Where an object stands, given the ledger, its current payload and who signs. */
-export function publishState(rec: PublishRecord | undefined, fp: string, pubkey: string | null): PublishState {
+export function publishState(rec: PublishRecord | undefined, fp: string | readonly string[], pubkey: string | null): PublishState {
   if (!rec) return 'never'
   // A key is only compared when there is one to compare against: signed out,
   // what is known is that it went out, not who would send it next.
   if (pubkey && rec.pubkey !== pubkey) return 'other-key'
-  if (rec.fp !== '' && rec.fp !== fp) return 'edited'
+  // Any of the ways it may have gone out (shardFingerprints): the same object, published.
+  if (rec.fp !== '' && !(typeof fp === 'string' ? [fp] : fp).includes(rec.fp)) return 'edited'
   return 'published'
 }
 
@@ -248,7 +252,23 @@ export const STATE_HELP: Record<PublishState, string> = {
  * drifted, so the two can never disagree about what "the same object" means.
  */
 export function shardFingerprint(shard: ShardModel): string {
-  return fingerprint(JSON.stringify(toPayload(withAuthoredConstrain(shard))))
+  // As a PUBLISH writes it by default: what came sealed left out (usePublished send).
+  const clear = placedOnly(withoutCarried(shard))
+  const me = you()
+  return fingerprint(JSON.stringify(toPayload(withAuthoredConstrain(me ? ownKeysOnly(clear, me) : clear))))
+}
+
+/**
+ * Every fingerprint a PUBLISH of `shard` writes: the default, and, for a shard
+ * carrying parts that came sealed, the one with them (PUBLISH THEM TOO), so
+ * that answer reads PUBLISHED and not EDITED (D2, arkinox's default of 2026-11-04).
+ */
+export function shardFingerprints(shard: ShardModel): string[] {
+  const out = [shardFingerprint(shard)]
+  if (!carriesSealedParts(shard)) return out
+  const me = you()
+  const clear = placedOnly(shard)
+  return [...out, fingerprint(JSON.stringify(toPayload(withAuthoredConstrain(me ? ownKeysOnly(clear, me) : clear))))]
 }
 
 /**

@@ -45,7 +45,8 @@ import { itemTargetOf, type ItemTarget } from '../lib/comments'
 import { bytesToHex, hexToBytes, type EventTemplate, type NostrEvent } from '../lib/events'
 import { regionKeyAt } from '../lib/shardCrypto'
 import { regionKeyOffThread } from '../lib/regionKeyOffThread'
-import { signedTableOnly } from '../lib/carried'
+import { carryRefusal, relayRefusal, signedTableOnly } from '../lib/carried'
+import { carryLibrary } from './localObjects'
 import { deployCeiling, deployRoute, localKeyCeiling, needsAsk, regionKeyQuote } from '../lib/deployPlan'
 import { useSecrets } from './useSecrets'
 import {
@@ -90,7 +91,7 @@ import {
 import { retractionTemplate } from '../lib/published'
 import { audioInnerTemplate, fadeAt, type AudioItem } from '../lib/audioItem'
 import { resealCopy } from '../lib/audioFile'
-import { movableIntoRoom, openWithSecret, openWithSigner, openerFor, placeOf as eventPlace, plaintextWithSecret, readContents, resealWithout, revealedIn, sealEntries, sealedInside, sealerOf, type ChestEntry, type OpeningKey } from '../lib/chests'
+import { movableIntoRoom, openWithSecret, openWithSigner, openerFor, placeOf as eventPlace, plaintextBytes, plaintextWithSecret, readContents, resealWithout, revealedIn, sealEntries, sealedInside, sealerOf, sizeRefusal, type ChestEntry, type OpeningKey } from '../lib/chests'
 import { openedByHand, restoreOpened } from './useOpenedChests'
 import { openingKeys, placeOf, type HeldItem, type HeldPlace, type InChest } from '../lib/inventory'
 import { useInventory } from './useInventory'
@@ -1724,7 +1725,12 @@ export const useShards = create<ShardsState>((set, get) => {
       if (mine.length < get().mine.length) { set({ mine }); saveMine(mine) }
     }
     const createdAt = nextBagAt(lookupId)
-    return cyber().signEvent(await bagTemplate(entries, key, lookupId, height, createdAt, HIDDEN_KIND, settings, place))
+    const template = await bagTemplate(entries, key, lookupId, height, createdAt, HIDDEN_KIND, settings, place)
+    // More than a relay takes is refused before it is signed, so no hide, move or
+    // rewrite reports done for a bag no relay would hold (review of the stack).
+    const over = relayRefusal(template)
+    if (over) throw new Error(over)
+    return cyber().signEvent(template)
   }
 
   /**
@@ -2010,9 +2016,11 @@ export const useShards = create<ShardsState>((set, get) => {
           signed.push(c.aimed.signed)
           continue
         }
-        const model = useWorkshop.getState().shards.find((s) => s.id === c.shardId)
-        if (!model) throw new Error('A model in this chest is no longer in your workshop.')
-        const refusal = shardRefusal(model)
+        const found = useWorkshop.getState().shards.find((s) => s.id === c.shardId)
+        if (!found) throw new Error('A model in this chest is no longer in your workshop.')
+        // Carrying the pieces it places from your library, as a hide does (DECK-0003 §1.10).
+        const model = carryLibrary(found)
+        const refusal = carryRefusal(model) ?? shardRefusal(model)
         if (refusal) throw new Error(refusal)
         signed.push(await signAsOwner(shardInnerTemplate(model, at, plane, createdAt, creditOf(model))))
       } else if (c.kind === 'audio') {
@@ -3248,6 +3256,21 @@ export const useShards = create<ShardsState>((set, get) => {
         // The WALK setting goes out like the size (DECK-0003 §1.12): the same
         // object when it is unchanged, so an untouched deploy stays untouched.
         if (!link) shard = withConstrain(shard, deployConstrain)
+        // The pieces it places from your library go inside it (DECK-0003
+        // §1.10), so finders draw them from the bag rather than ask relays
+        // for names nobody published; a live link stays a reference. Over the
+        // budget it is refused in his words (D3). A move moves what was
+        // hidden, as HIDE AGAIN does: nothing is drawn from the workshop
+        // again, so its size and its inline-or-reference choice still hold
+        // (review of the stack).
+        if (!link && !was) {
+          shard = carryLibrary(shard)
+          const over = carryRefusal(shard)
+          if (over) {
+            set({ deployStatus: 'error', deployError: over })
+            return
+          }
+        }
         // The same round trip every reader makes, before the seal: an item the
         // format refuses would deploy, show for its author from this device,
         // and open as nothing for everyone else (a 516-vertex floor, 2026-09-24).
@@ -3297,6 +3320,14 @@ export const useShards = create<ShardsState>((set, get) => {
       // and the chest handed back to its composer (`chestBack`). Nothing is
       // hidden and nothing is published: the chest's own hide seals it.
       if (intoChest && shard && innerTemplate) {
+        // What the chest would hold with this in it: the seal's own limit, said
+        // here rather than after every shard is signed and the chest is hidden.
+        const held = intoChest.draft.contents.flatMap((c, i) => (i !== intoChest.contentIndex && c.kind === 'shard' && c.aimed ? [c.aimed.signed] : []))
+        const tooLarge = sizeRefusal(plaintextBytes([...held, { ...innerTemplate, id: '0'.repeat(64), pubkey: cs.identity.pubkey, sig: '0'.repeat(128) } as NostrEvent]))
+        if (tooLarge) {
+          set({ deployStatus: 'error', deployError: tooLarge })
+          return
+        }
         set({ deployStatus: 'working', deployError: null, deployAsk: null, deployNote: 'Signing for the chest' })
         try {
           const signed = await cs.signEvent(innerTemplate)

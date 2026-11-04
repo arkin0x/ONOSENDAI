@@ -26,7 +26,7 @@ import type { NostrEvent } from '../lib/events'
 import { publish, query } from '../lib/relay'
 import { SignerAccountMismatch } from '../lib/signers'
 import { fromPayload, toPayload, type ShardModel } from 'sno-core/shards'
-import { keepOwnTable } from '../lib/carried'
+import { clearRefusal, keepOwnTable, ownKeysOnly, placedOnly } from '../lib/carried'
 import { useCyberspace } from './useCyberspace'
 
 const MINE_KEY = 'onosendai:avatar'
@@ -167,7 +167,7 @@ export const useAvatars = create<AvatarsState>((set, get) => ({
 
   adopt: async (chosen) => {
     // An avatar is public: what came to you sealed stays out of it.
-    const shard = chosen ? withoutCarried(chosen) : chosen
+    let shard = chosen ? withoutCarried(chosen) : chosen
     // One adopt at a time, through mining, signing and publishing: a second
     // press while the signer's prompt is open would mine and ask again.
     if (get().phase) return false
@@ -177,7 +177,13 @@ export const useAvatars = create<AvatarsState>((set, get) => ({
     }
     const cs = useCyberspace.getState()
     const me = cs.identity.pubkey
+    // What goes out is what is kept and drawn: every key under the signer's
+    // pubkey, and no entry that no placement names (DECK-0003 §1.10).
+    if (shard) shard = ownKeysOnly(placedOnly(shard), me)
     let template = avatarTemplate(shard, Math.floor(Date.now() / 1000))
+    // Carrying its pieces it may be more than a relay takes: say so before the work is spent.
+    const over = clearRefusal(template, Object.keys(shard?.objects ?? {}).length > 0)
+    if (over) { set({ adoptError: over }); return false }
     set({ adoptError: null, minedMs: null })
     if (shard) {
       const required = avatarWork(toPayload(shard))

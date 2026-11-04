@@ -20,7 +20,7 @@
  * the bottom above the two corners.
  */
 
-import { carriesSealedParts } from '../lib/carried'
+import { carriesSealedParts, foreignKeys, foreignNotice, placedOnly } from '../lib/carried'
 import { memo, useEffect, useMemo, useRef, useState } from 'react'
 import { Field, Switch } from '../hud/ui/Switch'
 import { Vector3 } from 'three'
@@ -52,7 +52,7 @@ import { useCyberspace } from '../store/useCyberspace'
 import { ownAddress, useWorkshop, type Tool } from '../store/useWorkshop'
 import { useShards } from '../store/useShards'
 import { usePublished } from '../store/usePublished'
-import { STATE_HELP, STATE_LABEL, STATE_TAG, publishState, shardFingerprint } from '../lib/published'
+import { STATE_HELP, STATE_LABEL, STATE_TAG, publishState, shardFingerprints } from '../lib/published'
 import { ConfirmModal } from '../hud/ConfirmModal'
 import { OrbitSphere } from '../hud/ui/OrbitSphere'
 import { Bench } from './Bench'
@@ -720,10 +720,10 @@ export function Workshop(): JSX.Element | null {
   // shard (a Basilica nave's payload is hundreds of KB), for lines nobody could see.
   const seen = panel === 'shard' ? shard : null
   const pubState = useMemo(
-    () => publishState(seen ? ledger[seen.id] : undefined, seen ? shardFingerprint(seen) : '', me),
+    () => publishState(seen ? ledger[seen.id] : undefined, seen ? shardFingerprints(seen) : '', me),
     [seen, ledger, me],
   )
-  const wireBytes = useMemo(() => (seen ? new TextEncoder().encode(JSON.stringify(toPayload(withAuthoredConstrain(seen)))).length : 0), [seen])
+  const wireBytes = useMemo(() => (seen ? new TextEncoder().encode(JSON.stringify(toPayload(withAuthoredConstrain(placedOnly(seen))))).length : 0), [seen])
   // The moment the work is done: say so, because the signer's prompt may take a
   // while to appear and nothing else marks the end of the mining.
   const lastPhase = useRef<typeof phase>(null)
@@ -755,6 +755,11 @@ export function Workshop(): JSX.Element | null {
   const canRedo = useWorkshop((s) => s.future.length > 0)
   // A RETRACT question belongs to one object in one open menu.
   useEffect(() => { setRetractAsk(null) }, [shard?.id, panel, open])
+  // Opening a shard with pieces under another identity: they read as placeholders here, and go out anyway.
+  useEffect(() => {
+    const count = open && shard && me ? foreignKeys(shard, me) : 0
+    if (count > 0) useWorkshop.setState({ notice: foreignNotice(count) })
+  }, [open, shard?.id, me]) // eslint-disable-line react-hooks/exhaustive-deps
   const [pickerOpen, setPickerOpen] = useState(false)
   // The color bucket's second stage while a face is in hand (FILL or SEAM):
   // put away when the face goes.

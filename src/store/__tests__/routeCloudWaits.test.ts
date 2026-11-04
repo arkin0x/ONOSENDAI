@@ -446,4 +446,97 @@ describe('a cloud step whose proof is refused because the head moved while the s
     expect(S().proof.message ?? '').not.toMatch(/another device|moved/)
     expect(S().spentMsats).toBeGreaterThan(0)
   })
+
+  it('an identity switch while a cloud proof waits on the signer keeps that identity\'s paid job record, and says nothing to the new one (review of #589)', async () => {
+    // An earlier case may have left a fresh identity in hand, with no chain yet.
+    await placeSpawn()
+    const { from, to } = await lineUpH13()
+    const me = S().identity.pubkey
+    fake.submitHop.mockResolvedValue(funded())
+    fake.waitForJob.mockResolvedValue(completed(hopResult(from, to, S().plane, S().prevEventId)))
+    const sign = S().signEvent
+    let asked = false
+    useCyberspace.setState({ signEvent: async () => {
+      asked = true
+      expect(storage.getItem('onosendai:cloudJob')).not.toBeNull()
+      // The person gives up on the slow signer and switches to another key.
+      await S().useNewKey()
+      throw new Error('identity changed')
+    } })
+    try {
+      await S().commit()
+      await vi.waitFor(() => { expect(asked).toBe(true) })
+      await new Promise((r) => setTimeout(r, 200))
+    } finally {
+      useCyberspace.setState({ signEvent: sign })
+    }
+    expect(S().identity.pubkey).not.toBe(me)
+    // The job is the first identity's, and still signable when it comes back.
+    const rec = storage.getItem('onosendai:cloudJob')
+    expect(rec).not.toBeNull()
+    expect(JSON.parse(rec!).pubkey).toBe(me)
+    expect(S().cloud.message ?? '').not.toMatch(/discarded|kept/)
+    expect(S().cloud.status).not.toBe('error')
+  })
+
+  it('the same on SIGN AND CONTINUE: a switch while its signer is asked keeps the first identity\'s job record', async () => {
+    // An earlier case may have left a fresh identity in hand, with no chain yet.
+    await placeSpawn()
+    const { from, to } = await lineUpH13()
+    const me = S().identity.pubkey
+    fake.submitHop.mockResolvedValue(funded())
+    fake.waitForJob.mockResolvedValue(completed(hopResult(from, to, S().plane, S().prevEventId)))
+    const sign = S().signEvent
+    useCyberspace.setState({ signEvent: async () => { throw new Error('user declined') } })
+    try {
+      await S().commit()
+      await vi.waitFor(() => { expect(S().cloud.status).toBe('error') })
+    } finally {
+      useCyberspace.setState({ signEvent: sign })
+    }
+    expect(S().plan?.awaiting).not.toBeNull()
+    let asked = false
+    const finish = S().finishProof
+    let resumed: Promise<void> | null = null
+    useCyberspace.setState({
+      signEvent: async () => { asked = true; await S().useNewKey(); throw new Error('identity changed') },
+      finishProof: (m) => { resumed = finish(m); return resumed },
+    })
+    try {
+      S().resumePlan()
+      await vi.waitFor(() => { expect(asked).toBe(true) })
+      await resumed
+      await new Promise((r) => setTimeout(r, 50))
+    } finally {
+      useCyberspace.setState({ signEvent: sign, finishProof: finish })
+    }
+    expect(S().identity.pubkey).not.toBe(me)
+    const rec = storage.getItem('onosendai:cloudJob')
+    expect(rec).not.toBeNull()
+    expect(JSON.parse(rec!).pubkey).toBe(me)
+    expect(S().cloud.message ?? '').not.toMatch(/discarded/)
+  })
+
+  it('a replanned route that goes on with a local step: the Cloud panel reads funded, not the discarded error, and not VERIFYING', async () => {
+    await placeSpawn()
+    const { from, to } = await lineUpH13()
+    fake.submitHop.mockResolvedValue(funded())
+    fake.waitForJob.mockResolvedValue(completed(hopResult(from, to, S().plane, S().prevEventId)))
+    const sign = S().signEvent
+    // They move to the leaf next to the route's end: what is left is a local hop.
+    const near = { ...to, x: to.x - 1n }
+    useCyberspace.setState({ signEvent: signerWhileTheyMove(sign, near) })
+    try {
+      await S().commit()
+      await vi.waitFor(() => { expect(postProof).toHaveBeenCalled() })
+      await new Promise((r) => setTimeout(r, 50))
+    } finally {
+      useCyberspace.setState({ signEvent: sign })
+    }
+    expect(lastPosted()).toMatchObject({ mode: 'hop', from: near, to })
+    expect(S().plan).toMatchObject({ status: 'running', step: { source: 'local' } })
+    expect(storage.getItem('onosendai:cloudJob')).toBeNull()
+    expect(S().cloud).toMatchObject({ status: 'paid', message: 'Route funded.', job: null })
+  })
 })
+

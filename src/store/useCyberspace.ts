@@ -3363,10 +3363,14 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
     }
     await get().finishProof(msg)
     if (!proofOnChain(get().events, msg)) {
+      // Another identity is in hand now (a switch while the signer was
+      // asked): the job is the first one's, still signable when it comes
+      // back, so its record stays, and nothing is said to this one.
+      if (get().identity.pubkey !== final.pubkey) return
       // Refused because the head moved: the result is bound to a head that is
       // gone, so it is worthless and its record goes (the route, if any, was
       // planned again by finishProof).
-      if (get().prevEventId !== final.prevEventId) { cloudProofOrphaned(final.jobId); return }
+      if (get().prevEventId !== final.prevEventId) { cloudProofOrphaned(final.jobId, id === requestId); return }
       if (id !== requestId) return
       // The signer refused. The verified result is still good, so the record stays for RESUME.
       set({ cloud: { ...get().cloud, status: 'error', message: `${get().plan?.message ?? get().proof.message ?? 'Signing failed.'} The verified cloud result is kept.` } })
@@ -3410,16 +3414,25 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
   }
 
   /**
-   * A HOSAKA proof the head moved under before it was signed: its record is
-   * dropped, and the Cloud panel says so unless a newer cloud flow already
-   * owns it (a next step the replanned route started).
+   * A HOSAKA proof of this identity's that the head moved under before it
+   * was signed: its record is dropped. The caller makes sure the record is
+   * this identity's; another identity's job is never touched. The Cloud
+   * panel says so while this request still owns it (`say`); once the route
+   * was planned again and went on (a newer request id), it is only settled,
+   * so it neither flips to an error under a running local step nor stays on
+   * VERIFYING. A newer cloud flow that owns the panel is left alone.
    */
-  const cloudProofOrphaned = (jobId: string): void => {
+  const cloudProofOrphaned = (jobId: string, say: boolean): void => {
     if (loadCloudJob()?.jobId === jobId) clearCloudJob()
     const cloud = get().cloud
     if (cloud.job !== null && cloud.job.jobId !== jobId) return
     const settled = cloud.status === 'idle' || cloud.status === 'error' || cloud.status === 'paid' || cloud.status === 'verifying'
-    if (settled) set({ cloud: { ...cloud, status: 'error', job: null, message: CLOUD_HEAD_MOVED_AT_SIGNING_MESSAGE, progress: null } })
+    if (!settled) return
+    set({
+      cloud: say
+        ? { ...cloud, status: 'error', job: null, message: CLOUD_HEAD_MOVED_AT_SIGNING_MESSAGE, progress: null }
+        : { ...cloud, status: get().plan ? 'paid' : 'idle', job: null, message: get().plan ? 'Route funded.' : null, progress: null },
+    })
   }
 
   /**
@@ -4148,8 +4161,11 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
       })
       void get().finishProof(msg).then(() => {
         if (!job || msg.type !== 'done') return
+        // Another identity in hand (a switch while the signer was asked): its
+        // job stays for when it comes back, and nothing is said to this one.
+        if (get().identity.pubkey !== job.pubkey) return
         if (proofOnChain(get().events, msg)) keptCloudStepSigned(job, msg)
-        else if (get().prevEventId !== job.prevEventId) cloudProofOrphaned(job.jobId)
+        else if (get().prevEventId !== job.prevEventId) cloudProofOrphaned(job.jobId, msg.id === requestId)
       })
       return
     }

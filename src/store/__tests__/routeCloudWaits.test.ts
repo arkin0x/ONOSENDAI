@@ -54,7 +54,9 @@ import { hopTemplate } from '../../lib/events'
 import type { HosakaJob, HosakaLimits } from '../../lib/hosaka'
 import type { Position } from '../../lib/space'
 import { postProof } from '../../lib/workers'
-import { loadCloudJob } from '../../lib/cloud'
+import { loadCloudDeposit, loadCloudJob, loadKeysTicket, saveKeysTicket, wirePosition } from '../../lib/cloud'
+import type { HosakaDeposit } from '../../lib/hosaka'
+import { useSecrets } from '../useSecrets'
 import { generateSecretKey } from 'nostr-tools/pure'
 import { nip19 } from 'nostr-tools'
 import { useCyberspace } from '../useCyberspace'
@@ -620,5 +622,69 @@ describe('two identities on one device, each buying a HOSAKA step (review of #58
     // The other identity's job is untouched, and nothing was bought twice.
     expect(loadCloudJob(B)?.jobId).toBe('job-2')
     expect(fake.submitHop).toHaveBeenCalledTimes(2)
+  })
+
+  const depositOf = (id: string, status: HosakaDeposit['status'] = 'pending'): HosakaDeposit => ({
+    deposit_id: id, status, amount_msats: 15_000, bolt11: `lnbc-${id}`, payment_hash: 'h', created_at: 1, expires_at: Math.floor(Date.now() / 1000) + 3600, settled_at: null, settled_msats: status === 'settled' ? 15_000 : null, preimage: null,
+  })
+
+  it('a deposit the first identity left unclaimed survives the second one buying; switched back, it is claimed (review of #597)', async () => {
+    const skA = generateSecretKey()
+    const skB = generateSecretKey()
+    await asIdentity(skA)
+    const A = S().identity.pubkey
+    // The first identity's invoice is shown, and the tab goes away before HOSAKA says it settled.
+    fake.deposit.mockResolvedValueOnce(depositOf('dep-a'))
+    fake.waitForDeposit.mockImplementationOnce(() => new Promise(() => {}))
+    void S().topUp(15)
+    await vi.waitFor(() => { expect(S().cloud.status).toBe('awaiting_payment') })
+    expect(loadCloudDeposit(A)?.depositId).toBe('dep-a')
+
+    // Another identity on this device buys, and its own deposit settles and is forgotten.
+    await asIdentity(skB)
+    const B = S().identity.pubkey
+    fake.deposit.mockResolvedValueOnce(depositOf('dep-b'))
+    fake.waitForDeposit.mockResolvedValueOnce(depositOf('dep-b', 'settled'))
+    await S().topUp(15)
+    expect(S().cloud.credited?.msats).toBe(15_000)
+    expect(loadCloudDeposit(B)).toBeNull()
+    expect(loadCloudDeposit(A)?.depositId).toBe('dep-a')
+
+    // Back to the first identity: its deposit is claimed onto its balance.
+    fake.claimDeposit.mockResolvedValue(depositOf('dep-a', 'settled'))
+    await S().useNsec(nip19.nsecEncode(skA))
+    await vi.waitFor(() => { expect(fake.claimDeposit).toHaveBeenCalledWith('dep-a') })
+    await vi.waitFor(() => { expect(S().cloud.message ?? '').toMatch(/15 sat route deposit/) })
+    expect(loadCloudDeposit(A)).toBeNull()
+  })
+
+  it('the cubes of the first identity\'s paid hop survive the second one\'s; switched back, they are collected (review of #597)', async () => {
+    const skA = generateSecretKey()
+    const skB = generateSecretKey()
+    await asIdentity(skA)
+    const A = S().identity.pubkey
+    const at = wirePosition(S().position)
+    // The first identity's hop landed; its cubes were still computing when the socket dropped.
+    saveKeysTicket({ version: 1, pubkey: A, jobId: 'job-a', pollToken: 'tok-a', to: at, plane: S().plane, at: Date.now() })
+    fake.waitForJob.mockRejectedValueOnce(new Error('socket dropped'))
+    await S().collectCloudKeys()
+    expect(loadKeysTicket(A)?.jobId).toBe('job-a')
+
+    // Another identity's paid hop leaves its own ticket, as the hop flow writes it, and collects it.
+    await asIdentity(skB)
+    const B = S().identity.pubkey
+    saveKeysTicket({ version: 1, pubkey: B, jobId: 'job-b', pollToken: 'tok-b', to: at, plane: S().plane, at: Date.now() })
+    fake.waitForJob.mockResolvedValueOnce({ ...completed({ destination_keys: [{ height: 13, secret_key: 'b1'.repeat(32), lookup_id: 'b2'.repeat(32) }] }), id: 'job-b' })
+    await S().collectCloudKeys()
+    expect(useSecrets.getState().keys['b2'.repeat(32)]).toBeTruthy()
+    expect(loadKeysTicket(B)).toBeNull()
+    expect(loadKeysTicket(A)?.jobId).toBe('job-a')
+
+    // Back to the first identity: its ticket is collected on the switch.
+    fake.waitForJob.mockResolvedValueOnce({ ...completed({ destination_keys: [{ height: 13, secret_key: 'a1'.repeat(32), lookup_id: 'a2'.repeat(32) }] }), id: 'job-a' })
+    await S().useNsec(nip19.nsecEncode(skA))
+    await vi.waitFor(() => { expect(useSecrets.getState().keys['a2'.repeat(32)]).toBeTruthy() })
+    expect(fake.waitForJob).toHaveBeenLastCalledWith('job-a', 'tok-a')
+    expect(loadKeysTicket(A)).toBeNull()
   })
 })

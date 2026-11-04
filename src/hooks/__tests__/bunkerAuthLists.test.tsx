@@ -142,8 +142,9 @@ afterEach(() => { vi.useRealTimers(); vi.doUnmock('../useLoot') })
 
 describe('HIDDEN BAGS when the bunker cannot sign the relay in', () => {
   it('says it could not sign in, never that nothing is hidden, and fills once the signer is back', async () => {
-    // DENY twice: the first request and the store's one retry over fresh sockets.
-    const v = await visit((net) => { net.bunker.refuseAuth = 2 })
+    // One DENY. Its sockets worked, so it is not asked again over fresh ones:
+    // until 2026-11-04 the store's retry made every DENY two prompts.
+    const v = await visit((net) => { net.bunker.refuseAuth = 1 })
     await v.wait(10_000)
     expect(v.loot().trouble).toBe('auth')
     expect(v.panel()).toContain(SIGN_IN_FAILED)
@@ -152,7 +153,7 @@ describe('HIDDEN BAGS when the bunker cannot sign the relay in', () => {
     expect(v.panel()).toContain('? HIDDEN')
     // Not asked again on its own: no stack of prompts on a signer that said no.
     await v.wait(60_000)
-    expect(v.net.bunker.authAsked).toBe(2)
+    expect(v.net.bunker.authAsked).toBe(1)
     // Back from the signer's app, which now accepts: the bags come in without a reload.
     await v.away(20_000)
     await v.wait(5_000)
@@ -255,32 +256,32 @@ describe('a signer that said no, or is slow, is not asked again and again', () =
     const v = await visit((net) => { net.bunker.refuseAuth = 1_000 })
     v.net.bunker.onAuthAsked = () => { setTimeout(() => v.focus(), 50) }
     await v.wait(20_000)
-    expect(v.net.bunker.authAsked).toBeLessThanOrEqual(2)
+    expect(v.net.bunker.authAsked).toBe(1)
     expect(v.panel()).toContain(SIGN_IN_FAILED)
     // Clicking around the page is not the person acting on it either.
     for (let i = 0; i < 10; i++) { v.focus(); await v.wait(1_000) }
-    expect(v.net.bunker.authAsked).toBeLessThanOrEqual(2)
+    expect(v.net.bunker.authAsked).toBe(1)
     // Leaving the tab and coming back is: asked once more, and it fills.
     v.net.bunker.refuseAuth = 0
     v.net.bunker.onAuthAsked = null
     await v.away(20_000)
     await v.wait(5_000)
     expect(v.loot().items).toHaveLength(BAGS)
-    expect(v.net.bunker.authAsked).toBe(3)
+    expect(v.net.bunker.authAsked).toBe(2)
   }, 60_000)
 
   it('a tab hidden for less than a real absence does not ask again', async () => {
-    const v = await visit((net) => { net.bunker.refuseAuth = 2 })
+    const v = await visit((net) => { net.bunker.refuseAuth = 1 })
     await v.wait(10_000)
-    expect(v.net.bunker.authAsked).toBe(2)
+    expect(v.net.bunker.authAsked).toBe(1)
     await v.away(5_000)
     await v.wait(5_000)
-    expect(v.net.bunker.authAsked).toBe(2)
+    expect(v.net.bunker.authAsked).toBe(1)
     expect(v.panel()).toContain(SIGN_IN_FAILED)
   }, 60_000)
 
   it('a sign-in with another signer asks again, and the list fills', async () => {
-    const v = await visit((net) => { net.bunker.refuseAuth = 2 })
+    const v = await visit((net) => { net.bunker.refuseAuth = 1 })
     await v.wait(10_000)
     expect(v.loot().trouble).toBe('auth')
     const { useCyberspace } = await import('../../store/useCyberspace')
@@ -352,10 +353,10 @@ describe('a signer that said no, or is slow, is not asked again and again', () =
   }, 60_000)
 
   it('an old socket\'s refused AUTH does not fail the AUTH a newer socket is waiting on', async () => {
-    // The first socket's request is refused at 8 s, and so is the store's one
-    // retry of it; by then that socket is gone, and a new one's request is
-    // waiting on the bunker, which signs it at about 14 s.
-    const v = await visit((net) => { net.bunker.authPlan = [{ delay: 8_000, refuse: true }, { delay: 10_000 }, { delay: 0, refuse: true }] })
+    // The first socket's request is refused at 8 s (and, a DENY, not asked
+    // again); by then that socket is gone, and a new one's request is
+    // waiting on the bunker, which signs it at about 11 s.
+    const v = await visit((net) => { net.bunker.authPlan = [{ delay: 8_000, refuse: true }, { delay: 10_000 }] })
     const { onAuthChange } = await import('../../lib/relay')
     const said: boolean[] = []
     onAuthChange((url, ok) => { if (url === CANON) said.push(ok) })
@@ -364,7 +365,7 @@ describe('a signer that said no, or is slow, is not asked again and again', () =
     // Failed with the old socket's refusal at 8 s, the new socket read "Could
     // not sign in" though the relay took its AUTH at 11 s, until a retry at 22 s.
     await v.wait(13_000)
-    expect(v.net.bunker.authAsked).toBe(3)
+    expect(v.net.bunker.authAsked).toBe(2)
     expect(said).toEqual([true])
     expect(v.loot().items).toHaveLength(BAGS)
     expect(v.loot().trouble).toBeNull()
@@ -591,5 +592,32 @@ describe('review of #603: a new socket, a switch of identity, a socket gone quie
     await v.wait(8_000)
     expect(v.net.canon.sockets).toBe(2)
     expect(v.net.canon.authOk).toBe(2)
+  }, 60_000)
+})
+
+describe('one DENY, one prompt (2026-11-04)', () => {
+  it('a move the signer refuses is asked once, not again over fresh sockets', async () => {
+    const v = await visit(() => {})
+    await v.wait(5_000)
+    const { useCyberspace } = await import('../../store/useCyberspace')
+    v.net.bunker.refuseSigns = 1_000
+    const asked = v.net.bunker.signAsked
+    const move = useCyberspace.getState().signEvent({ kind: 1, created_at: Math.floor(Date.now() / 1000), tags: [], content: 'a move' })
+    const refused = expect(move).rejects.toThrow()
+    await v.wait(5_000)
+    await refused
+    expect(v.net.bunker.signAsked - asked).toBe(1)
+  }, 60_000)
+
+  it('a signature that ran out of time is still asked once more over fresh sockets', async () => {
+    const v = await visit(() => {})
+    await v.wait(5_000)
+    v.net.halfOpenBunker()
+    const { useCyberspace } = await import('../../store/useCyberspace')
+    const asked = v.net.bunker.signAsked
+    const move = useCyberspace.getState().signEvent({ kind: 1, created_at: Math.floor(Date.now() / 1000), tags: [], content: 'a move' })
+    await v.wait(20_000)
+    expect((await move).pubkey).toBe(v.net.userPk)
+    expect(v.net.bunker.signAsked - asked).toBe(1)
   }, 60_000)
 })

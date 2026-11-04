@@ -51,6 +51,7 @@ import {
   type NostrConnectSession,
   signWithin,
   lateSignsPending,
+  SignerTimeout,
 } from '../lib/signers'
 import { onAskAgain, onSignerAnswered, signingFailed } from '../lib/signWithin'
 import {
@@ -1802,9 +1803,10 @@ async function signEvent(template: EventTemplate, patienceMs?: number, signer: S
     } catch (err) {
       // A timeout, or a publish that gave up ("All promises were rejected"):
       // either way the signer's sockets are presumed dead. Drop them and ask
-      // once more over fresh ones. Not a signer on another account (a
-      // stand-in whose reconnect found one): asking again only asks it again.
-      if (err instanceof SignerAccountMismatch || !signer.reconnect) throw err
+      // once more over fresh ones. Only then: a signer's own answer (DENY, a
+      // refusal, another account) came over sockets that work, and asking
+      // again was a second prompt for the one the person just turned down.
+      if (!lostInTransit(err) || !signer.reconnect) throw err
       const fresh = await signer.reconnect()
       if (currentSigner === signer) currentSigner = fresh
       signed = await signWithin(fresh, template, patienceMs, lateFrom(fresh))
@@ -1817,6 +1819,19 @@ async function signEvent(template: EventTemplate, patienceMs?: number, signer: S
     if (late) pendingAuthSigns--
   }
   return checkedAnswer(signed, signer)
+}
+
+/**
+ * Whether a signature failed on the way, not at the signer: it ran out of
+ * time (SignerTimeout), or nostr-tools could not publish the request to any
+ * of the signer's relays (Promise.any's "All promises were rejected"). Only
+ * that is asked again over fresh sockets. A DENY, a refusal or a signer on
+ * another account is the signer's answer: one DENY, one prompt.
+ */
+function lostInTransit(err: unknown): boolean {
+  if (err instanceof SignerTimeout || (err instanceof Error && err.name === 'SignerTimeout')) return true
+  if (typeof AggregateError !== 'undefined' && err instanceof AggregateError) return true
+  return /All promises were rejected/.test(err instanceof Error ? err.message : String(err))
 }
 
 /**

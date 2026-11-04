@@ -2763,7 +2763,10 @@ kbd {
 
 .shards__row--deployed {
   display: grid;
-  grid-template-columns: 1fr auto auto;
+  /* The name, then whatever the row carries (LOCAL / LIVE, MOVE), then the hint, on one line. */
+  grid-template-columns: minmax(0, 1fr);
+  grid-auto-columns: auto;
+  grid-auto-flow: column;
   gap: 8px;
   align-items: center;
   padding: 5px 0;

@@ -2065,6 +2065,15 @@ const unreadSaveKey = (pubkey: string): string => `onosendai:chain-unread-save:$
 function unreadSave(pubkey: string): string | null {
   try { return localStorage.getItem(unreadSaveKey(pubkey)) } catch { return null }
 }
+/**
+ * Whether the one thing keeping the head in hand from being vouched for is an
+ * older build's save the old stores could not be read for: the chain itself
+ * was read, nothing is being taken back.
+ */
+function onlyOlderSaveUnread(pubkey: string): boolean {
+  return unreadSave(pubkey) !== null && !rowsDown.has(pubkey) && !takingBack(pubkey) && (!chainDbAvailable() || dbRead.has(pubkey))
+}
+
 /** Identities told on this page that an older save could not be read. */
 const unreadSaid = new Set<string>()
 
@@ -6619,7 +6628,8 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
     if (record.prevEventId !== get().prevEventId) {
       if (!whole) {
         // Nothing proves the head moved: a paid record is never dropped on that.
-        settle(record, 'A pending cloud job was kept: your saved chain did not load, so its head could not be checked. RESUME or reload to try again.')
+        const why = onlyOlderSaveUnread(identity.pubkey) ? 'an older save of your chain could not be read' : 'your saved chain did not load'
+        settle(record, `A pending cloud job was kept: ${why}, so its head could not be checked. RESUME or reload to try again.`)
         return
       }
       clearCloudJob(record.pubkey, record.jobId)

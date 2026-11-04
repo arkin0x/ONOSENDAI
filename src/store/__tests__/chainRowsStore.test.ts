@@ -1505,7 +1505,7 @@ describe('a paid cloud job and the head it is held against (J1 to J3)', () => {
       await store.savedChainLoaded()
       await store.useCyberspace.getState().resumeCloudJob()
       expect(cloud.loadCloudJob(pk)?.prevEventId).toBe(moved)
-      expect(store.useCyberspace.getState().cloud.message).toContain('was kept')
+      expect(store.useCyberspace.getState().cloud.message).toContain('your saved chain did not load')
     } finally { proto.getAll = real }
   })
 
@@ -1770,6 +1770,8 @@ describe('what an older build or the old stores saved, folded in before anything
     await store.useCyberspace.getState().resumeCloudJob()
     expect(cloud.loadCloudJob(pk)?.prevEventId).toBe(m2)
     expect(store.useCyberspace.getState().cloud.message ?? '').not.toContain('dropped')
+    // It says why: the chain was read; an older save of it was not.
+    expect(store.useCyberspace.getState().cloud.message).toContain('an older save of your chain could not be read')
     proto.get = real
     ;(await import('../../lib/eventDb/connection')).closeEventDb()
     ;(await import('../../lib/chainDb')).closeChainDb()

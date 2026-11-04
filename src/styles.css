@@ -10050,6 +10050,17 @@ html.tv-broadcast body { overflow: hidden; }
 
 /* NOW PLAYING (hud/NowPlaying): a presence pill whose rows open what plays. */
 .nowplaying__row { gap: 6px; }
+/* The head, and MUTE ALL at its top right; the head still takes the rest of the pill's width. */
+.nowplaying__top { display: flex; align-items: center; }
+.nowplaying__top .presence__head { flex: 1 1 auto; min-width: 0; }
+.nowplaying__all { margin-right: 6px; }
+/* A speaker switched off: amber, lit, so a muted track reads at a glance. */
+.nowplaying__mute.is-on { color: #ffb547; background: rgba(255, 181, 71, 0.1); border-color: rgba(255, 181, 71, 0.55); opacity: 1; }
+/* A muted track stays listed, dimmer. */
+.nowplaying__row.is-muted .nowplaying__open { opacity: 0.55; }
+/* Before this device's switches are read: silent, and not yet switchable. */
+.nowplaying__mute:disabled { opacity: 0.35; cursor: default; }
+.audio__mark--muted { color: #ffb547; border-color: rgba(255, 181, 71, 0.45); }
 .nowplaying__open {
   flex: 1;
   min-width: 0;

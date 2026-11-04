@@ -7,8 +7,9 @@
  * included: opened by hand on this device is open, whether a key or a
  * signer opened it (store/useOpenedChests), as WALK's walls have it. Only
  * what this session read floats out of it. Drawn at the zooms
- * a key's cube is (lib/worldMarks.ts markShown), labelled with its name and
- * who left it as a key is, and a tap opens its card, where OPEN is.
+ * a key's cube is (lib/worldMarks.ts markShown), with no name floating over
+ * it (WorldMessages FLOATING_NAME): a tap opens its card, where its name and
+ * OPEN are.
  */
 
 import { useEffect, useMemo, useRef, useSyncExternalStore } from 'react'
@@ -37,7 +38,7 @@ import { sameBox, samePose } from './WorldShards'
 import { placedPose } from '../lib/pose'
 import { trueScale } from '../lib/itemModel'
 import { followsVersion, onFollows, trustedPlacement } from '../lib/trust'
-import { NOTE, NOTE_EDGE_PX, author, itemMarkText } from './WorldMessages'
+import { FLOATING_NAME, NOTE, NOTE_EDGE_PX, author, itemMarkText } from './WorldMessages'
 
 const REACH = GRID_RADIUS * 8
 /**
@@ -158,7 +159,7 @@ export function ChestLooks({ axes }: { axes: ViewAxes }): JSX.Element | null {
             at={w.centre}
             axes={axes}
             minPx={NOTE_EDGE_PX}
-            label={{ text: w.text, color: NOTE, sub: w.sub, subColor: ACCENT }}
+            label={FLOATING_NAME[w.look.kind] ? { text: w.text, color: NOTE, sub: w.sub, subColor: ACCENT } : undefined}
             onTap={() => useShards.getState().selectSecret(w.key)}
             clearTop={loot ? LOOT_TOP : 0}
             frame={w.frame}

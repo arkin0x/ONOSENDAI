@@ -15,8 +15,10 @@
  * cut at its region's walls as a hidden shard is (DECK-0003 §1.6, DECK-0004
  * §3.6), stands as its payload says, and shares the scene's budget (LookFrame).
  *
- * Its name and who left it stand just above it, as an item's model's do
- * (ItemModel); a tap anywhere it draws opens its card.
+ * No name floats over a chest or a door: its name is on its card, and a tap
+ * anywhere it draws opens that card (arkinox, 2026-11-02; WorldMessages
+ * FLOATING_NAME). A caller that hands it a `label` gets one just above it,
+ * as an item's model's is (ItemModel).
  */
 
 import { useMemo, useRef, type ReactNode } from 'react'
@@ -95,7 +97,8 @@ interface Props {
   axes: ViewAxes
   /** The edge of the note's cube on screen, CSS pixels: the smallest the look is ever drawn. */
   minPx: number
-  label: { text: string; color: string; sub: string; subColor: string }
+  /** A name to float just above it; absent, none (FLOATING_NAME). */
+  label?: { text: string; color: string; sub: string; subColor: string }
   onTap?: () => void
   /** How high above the origin, in the look's units, the label must clear: what floats over it (ChestLoot). */
   clearTop?: number
@@ -108,7 +111,7 @@ interface Props {
   frame?: LookFrame
 }
 
-/** A chest or a door as its look, sized, turned with the view, labelled and tappable. */
+/** A chest or a door as its look, sized, turned with the view, and tappable. */
 export function LookMark({ look, model, at, axes, minPx, label, onTap, clearTop = 0, children, frame }: Props): JSX.Element {
   const scaleExp = useCyberspace((s) => s.scaleExp)
   // A standing look's pose is ShardMesh's (LookFrame); any other turns with the view here.
@@ -150,7 +153,7 @@ export function LookMark({ look, model, at, axes, minPx, label, onTap, clearTop 
       </group>
       {/* Outside the scaled group: a target and a label size themselves from the camera. */}
       {onTap && <group position={at}><TapTarget measure={drawn} onTap={onTap} /></group>}
-      <WorldLabel text={label.text} color={label.color} at={at} align="center" px={13} sub={label.sub} subColor={label.subColor} clear={clear} recede="name" />
+      {label && <WorldLabel text={label.text} color={label.color} at={at} align="center" px={13} sub={label.sub} subColor={label.subColor} clear={clear} recede="name" />}
     </>
   )
 }

@@ -48,7 +48,7 @@ vi.mock('../../lib/workers', async (importOriginal) => {
 
 import { cantorPair, computeHopProof, computeHopProofV2, computeSidestepProof, bytesToHex, deriveRegionKeys, encodeNonce, hexToBytes, intToBytesBE, sha256Hex, verifyHopLevel1 } from 'cyberspace-core'
 import { useCalibration } from '../../lib/calibration'
-import { loadCloudJob, saveCloudDeposit, saveCloudJob, type PendingCloudJob } from '../../lib/cloud'
+import { loadCloudDeposit, loadCloudJob, saveCloudDeposit, saveCloudJob, type PendingCloudJob } from '../../lib/cloud'
 import { wallSource } from '../../lib/movePlan'
 import { hopTemplate, parseAction } from '../../lib/events'
 import { HosakaError, idempotencyKeyFor, moveIdentity, type HosakaDeposit, type HosakaJob, type HosakaLimits } from '../../lib/hosaka'
@@ -456,7 +456,7 @@ describe('cloud routes', () => {
     expect(S().cloud.invoiceOpen).toBe(true)
     expect(S().plan?.status).toBe('funding')
     expect(onDiskAtInvoice).not.toBeNull()
-    expect(JSON.parse(onDiskAtInvoice!).depositId).toBe('d1')
+    expect(JSON.parse(onDiskAtInvoice!).deposits[S().identity.pubkey].depositId).toBe('d1')
     expect(fake.submitHop).not.toHaveBeenCalled()
 
     S().setInvoiceOpen(false)
@@ -537,7 +537,7 @@ describe('cloud routes', () => {
     expect(S().proof.status).toBe('idle')
     expect(S().pendingTarget).toBeNull()
     // The deposit record stays: if the wallet paid anyway, the next load claims it.
-    expect(JSON.parse(storage.getItem('onosendai:cloudDeposit')!).depositId).toBe('d1')
+    expect(loadCloudDeposit(S().identity.pubkey)?.depositId).toBe('d1')
     storage.removeItem('onosendai:cloudDeposit')
 
     fake.balance.mockResolvedValue({ pubkey: S().identity.pubkey, balance_msats: 5000, ledger: [] })

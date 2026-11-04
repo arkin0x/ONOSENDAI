@@ -179,4 +179,27 @@ describe('held items in IndexedDB', () => {
     expect(await m.useInventory.getState().remove(find.eventId)).toBe(false)
     expect(m.useInventory.getState().has(find.eventId)).toBe(true)
   })
+
+  it('HIDE AGAIN of a key while another identity is signed in: the hider\'s one row of that keypair follows the copy (review of #599)', async () => {
+    const key = forge('Iron Key')
+    // The hider's own forged events: the first placement, and HIDE AGAIN's fresh copy.
+    const first = { ...finalizeEvent(keyInnerTemplate(key, at, 0, 10), hider), pubkey: ME }
+    const copy = { ...finalizeEvent(keyInnerTemplate(key, at, 0, 20), hider), pubkey: ME }
+    const place = (bagId: string) => ({ lookupId: 'lookup', bagId, at: { x: '1', y: '2', z: '3' }, plane: 0 as const, height: 6 })
+    const m = await boot()
+    m.useInventory.getState().holdForged(first, key, place('bag-1'))
+    await m.useInventory.getState().flush()
+    identity = OTHER
+    await m.useInventory.getState().load(OTHER)
+    await m.useInventory.getState().holdAgain(copy, key, place('bag-2'), ME)
+    // The identity signed in now holds nothing of it.
+    expect(Object.keys(m.useInventory.getState().items)).toEqual([])
+    identity = ME
+    const back = await boot(ME)
+    const ofKey = Object.values(back.useInventory.getState().items).filter((it) => it.key?.itemPubkey === key.itemPubkey)
+    expect(ofKey.map((it) => it.id)).toEqual([copy.id])
+    expect(ofKey[0].place?.bagId).toBe('bag-2')
+    const other = await boot(OTHER)
+    expect(Object.keys(other.useInventory.getState().items)).toEqual([])
+  })
 })

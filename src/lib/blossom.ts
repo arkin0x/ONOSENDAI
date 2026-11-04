@@ -116,30 +116,56 @@ export type Sign = (template: EventTemplate) => Promise<NostrEvent>
 type FetchLike = (url: string, init: RequestInit) => Promise<Response>
 
 /**
- * How long one file transfer (a GET or a PUT of up to MAX_AUDIO_BYTES, its
- * body included) and one probe may take. A server that never answers used to
- * hold whatever waited on it for good, the bag lock among them (HIDE AGAIN of
- * hidden audio reseals the file through here; review of #599).
+ * How long a transfer may go with nothing arriving before it is given up. A
+ * server that never answers used to hold whatever waited on it for good, the
+ * bag lock among them (HIDE AGAIN of hidden audio reseals the file through
+ * here; review of #599). Never a limit on the whole transfer: a 25 MiB file on
+ * a slow line takes as long as it takes, so long as bytes keep coming.
  */
-export const TRANSFER_TIMEOUT_MS = 3 * 60_000
+export const IDLE_TIMEOUT_MS = 30_000
+/** The upload's HEAD: an answer with no body, or nothing. */
 export const PROBE_TIMEOUT_MS = 15_000
+/**
+ * An upload's bytes going out cannot be watched through fetch, so until the
+ * server answers it is waited for as if at this rate, the slowest line this
+ * allows for: a 25 MiB file, about 53 minutes; anything, at least IDLE_TIMEOUT_MS.
+ */
+export const MIN_UPLOAD_BYTES_PER_S = 8 * 1024
 
-/** A transfer given up: `what` did not answer in time. */
+/** The wait for an upload's answer: its bytes at MIN_UPLOAD_BYTES_PER_S, at least IDLE_TIMEOUT_MS. */
+export function uploadWaitMs(bytes: number): number {
+  return Math.max(IDLE_TIMEOUT_MS, Math.ceil(bytes / MIN_UPLOAD_BYTES_PER_S) * 1000)
+}
+
+/** A transfer given up, with the words why. */
 export class TransferTimeout extends Error {
-  constructor(what: string, ms: number) {
-    super(`${what} did not answer within ${ms >= 60_000 ? `${Math.round(ms / 60_000)} minutes` : `${Math.round(ms / 1000)} seconds`}.`)
+  constructor(message: string) {
+    super(message)
     this.name = 'TransferTimeout'
   }
 }
 
-/** Run `work` with an abort signal, given up after `ms`: aborted, and rejected as a TransferTimeout. */
-export function within<T>(ms: number, what: string, work: (signal: AbortSignal) => Promise<T>): Promise<T> {
+/** Seconds or minutes, as a person reads them. */
+export function spanWords(ms: number): string {
+  return ms >= 120_000 ? `${Math.round(ms / 60_000)} minutes` : `${Math.round(ms / 1000)} seconds`
+}
+
+/**
+ * Run `work` with an abort signal and a watchdog: given up, aborted and rejected
+ * as a TransferTimeout with `words(ms)`, once `ms` pass with no `alive()`. Each
+ * `alive(next)` gives it `next` more (the same `ms` when left out).
+ */
+export function watched<T>(ms: number, words: (ms: number) => string, work: (signal: AbortSignal, alive: (next?: number) => void) => Promise<T>): Promise<T> {
   const abort = new AbortController()
   let timer: ReturnType<typeof setTimeout> | undefined
-  const late = new Promise<never>((_, reject) => {
-    timer = setTimeout(() => { abort.abort(); reject(new TransferTimeout(what, ms)) }, ms)
-  })
-  return Promise.race([work(abort.signal), late]).finally(() => clearTimeout(timer))
+  let fail: (err: TransferTimeout) => void = () => {}
+  const late = new Promise<never>((_, reject) => { fail = reject })
+  const alive = (next = ms): void => {
+    clearTimeout(timer)
+    timer = setTimeout(() => { abort.abort(); fail(new TransferTimeout(words(next))) }, next)
+  }
+  alive(ms)
+  return Promise.race([work(abort.signal, alive), late]).finally(() => clearTimeout(timer))
 }
 
 /**
@@ -157,7 +183,7 @@ export async function uploadBlob(server: string, file: Blob, sign: Sign, fetchIm
 
   // Ask first. A refusal here saves sending the bytes; a missing HEAD does not stop anything.
   try {
-    const probe = await within(PROBE_TIMEOUT_MS, 'The server', (signal) => fetchImpl(endpoint, {
+    const probe = await watched(PROBE_TIMEOUT_MS, (ms) => `The server did not answer within ${spanWords(ms)}.`, (signal) => fetchImpl(endpoint, {
       method: 'HEAD',
       headers: { ...headers, 'X-Content-Type': type, 'X-Content-Length': String(bytes.byteLength) },
       signal,
@@ -170,8 +196,11 @@ export async function uploadBlob(server: string, file: Blob, sign: Sign, fetchIm
     // A network or CORS failure on the probe, or no answer in time: the server may still take the PUT.
   }
 
-  const { res, body } = await within(TRANSFER_TIMEOUT_MS, 'The server', async (signal) => {
+  // Until the server answers, as long as the bytes could take at the slowest
+  // line allowed; then its answer, so long as it keeps coming.
+  const { res, body } = await watched(uploadWaitMs(bytes.byteLength), (ms) => `The server did not take the file within ${spanWords(ms)}.`, async (signal, alive) => {
     const res = await fetchImpl(endpoint, { method: 'PUT', headers: { ...headers, 'Content-Type': type }, body: bytes, signal })
+    alive(IDLE_TIMEOUT_MS)
     return { res, body: res.ok ? await res.json().catch(() => null) : null }
   })
   if (!res.ok) throw new BlossomRefusal(res.status, res.headers.get('X-Reason'))

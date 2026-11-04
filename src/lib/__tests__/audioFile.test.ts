@@ -7,7 +7,7 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { finalizeEvent, generateSecretKey } from 'nostr-tools/pure'
-import { TRANSFER_TIMEOUT_MS, sha256Hex } from '../blossom'
+import { IDLE_TIMEOUT_MS, sha256Hex } from '../blossom'
 import { audioFileRefusal, audioTypeOf, iphoneMayNotPlay, forgetOpenedAudio, openAudio, resealCopy, sealAndUpload, AUDIO_UPLOAD_REASON, MAX_CIPHER_BYTES } from '../audioFile'
 import { decryptAudioFile, MAX_AUDIO_BYTES } from '../audioItem'
 import type { EventTemplate } from '../events'
@@ -158,22 +158,53 @@ describe('what the composer takes', () => {
   })
 })
 
-describe('a file server that never answers (review of #599)', () => {
+describe('a file server that stalls, or sends slowly (review of #599)', () => {
   afterEach(() => { vi.useRealTimers() })
 
-  it('opening the file, as HIDE AGAIN\'s reseal does, is given up in words, so the bag lock always frees', async () => {
+  /** A file sealed and stored, and a GET of it that sends `chunks` pieces, `gapMs` apart, stopping for good after `stopAfter`. */
+  async function sealed(gapMs: number, chunks: number, stopAfter = chunks): Promise<{ item: Awaited<ReturnType<typeof sealAndUpload>>; fetch: (url: string, init?: RequestInit) => Promise<Response> }> {
+    const server = mockServer()
+    const item = await sealAndUpload(new Blob([toneWav(0.5, 330) as BlobPart], { type: 'audio/wav' }), 'https://blossom.test', sign, server.fetch)
+    const bytes = server.blobs.get(item.hash)!
+    const size = Math.ceil(bytes.byteLength / chunks)
+    const fetch = async (url: string, init?: RequestInit): Promise<Response> => {
+      if ((init?.method ?? 'GET') !== 'GET') return server.fetch(url, init)
+      let sent = 0
+      const body = new ReadableStream<Uint8Array>({
+        async pull(c) {
+          if (sent >= stopAfter) {
+            // Stalled: nothing more, until the reader gives up.
+            await new Promise<void>((_, reject) => init?.signal?.addEventListener('abort', () => reject(new DOMException('aborted', 'AbortError'))))
+          }
+          await new Promise((r) => setTimeout(r, gapMs))
+          const piece = bytes.slice(sent * size, (sent + 1) * size)
+          sent++
+          if (piece.byteLength > 0) c.enqueue(piece)
+          if (sent >= chunks) c.close()
+        },
+      })
+      return new Response(body, { status: 200 })
+    }
+    return { item, fetch }
+  }
+
+  it('a file sent slowly but steadily opens, though the whole of it takes many minutes', async () => {
+    const { item, fetch } = await sealed(20_000, 30)
     vi.useFakeTimers()
-    forgetOpenedAudio()
-    const hung = vi.fn((_url: string, init?: RequestInit) => new Promise<Response>((_, reject) => {
-      init?.signal?.addEventListener('abort', () => reject(new DOMException('aborted', 'AbortError')))
-    }))
-    const item = { url: 'https://files.test/abc', hash: 'ab'.repeat(32), originalHash: 'cd'.repeat(32), keyHex: '11'.repeat(32), nonceHex: '22'.repeat(12), mime: 'audio/wav' }
-    const sign = async (t: EventTemplate) => finalizeEvent(t, generateSecretKey())
-    const caught = resealCopy(item, sign, 'https://files.test', hung).catch((err: unknown) => err)
-    await vi.advanceTimersByTimeAsync(TRANSFER_TIMEOUT_MS + 10)
+    const opening = openAudio(item, fetch)
+    // Thirty pieces, twenty seconds apart: ten minutes in all, never thirty seconds with nothing.
+    await vi.advanceTimersByTimeAsync(30 * 20_000 + 10)
+    const file = await opening
+    expect(file.type).toBe('audio/wav')
+  })
+
+  it('a file that stops coming is given up in words, so the bag lock always frees', async () => {
+    const { item, fetch } = await sealed(1_000, 30, 3)
+    vi.useFakeTimers()
+    const caught = resealCopy(item, sign, 'https://blossom.test', fetch).catch((err: unknown) => err)
+    await vi.advanceTimersByTimeAsync(3 * 1_000 + IDLE_TIMEOUT_MS + 10)
     const err = await caught
     expect(err).toBeInstanceOf(Error)
-    expect((err as Error).message).toBe('The file\u2019s server did not answer within 3 minutes.')
-    expect(hung.mock.calls[0][1]?.signal?.aborted).toBe(true)
+    expect((err as Error).message).toBe('The file\u2019s server stopped answering for 30 seconds.')
   })
 })

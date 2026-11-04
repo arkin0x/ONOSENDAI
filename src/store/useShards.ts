@@ -1569,7 +1569,7 @@ function placementId(): string {
  * it, in words: a rewrite newer than that would be refused for its date.
  */
 export const BAG_CLOCK_REFUSE_S = 24 * 60 * 60
-export const BAG_CLOCK_AHEAD = 'The relays hold this bag dated more than a day past this device\u2019s clock. Nothing was sent. Check the clock here, then try again.'
+export const BAG_CLOCK_AHEAD = 'A bag from another of your devices is dated more than a day ahead. Nothing was sent. Fix that device\u2019s clock, then try again.'
 const bagClock = new Map<string, number>()
 export function nextBagAt(lookupId: string): number {
   const now = Math.floor(Date.now() / 1000)

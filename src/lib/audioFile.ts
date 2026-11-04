@@ -14,7 +14,7 @@
  * after DOWNLOAD (or the other way round) fetches nothing twice.
  */
 
-import { TRANSFER_TIMEOUT_MS, TransferTimeout, normalizeServer, sha256Hex, uploadBlob, within, type Sign } from './blossom'
+import { IDLE_TIMEOUT_MS, TransferTimeout, normalizeServer, sha256Hex, spanWords, uploadBlob, watched, type Sign } from './blossom'
 import { decryptAudioFile, encryptAudioFile, fetchableUrl, MAX_AUDIO_BYTES, type AudioItem } from './audioItem'
 
 type FetchLike = (url: string, init?: RequestInit) => Promise<Response>
@@ -129,7 +129,7 @@ function trim(): void {
 }
 
 /** The body of a response, refused past `max` bytes (by its length when it says, else as it arrives). */
-async function readCapped(res: Response, max: number): Promise<Uint8Array> {
+async function readCapped(res: Response, max: number, alive: () => void = () => {}): Promise<Uint8Array> {
   const said = Number(res.headers.get('Content-Length'))
   if (Number.isFinite(said) && said > max) throw new AudioFetchError('The file is larger than any this client hides.')
   if (!res.body) {
@@ -143,6 +143,8 @@ async function readCapped(res: Response, max: number): Promise<Uint8Array> {
   for (;;) {
     const { done, value } = await reader.read()
     if (done) break
+    // Bytes came: the server is still sending, however slowly (IDLE_TIMEOUT_MS).
+    alive()
     got += value.byteLength
     if (got > max) { void reader.cancel(); throw new AudioFetchError('The file is larger than any this client hides.') }
     parts.push(value)
@@ -168,9 +170,10 @@ export function openAudio(a: Pick<AudioItem, 'url' | 'hash' | 'originalHash' | '
     return held.file
   }
   const p = (async (): Promise<Blob> => {
-    // The fetch and its body, given up after TRANSFER_TIMEOUT_MS: a server that
-    // never answers held whatever waited on it for good (review of #599).
-    const cipher = await within(TRANSFER_TIMEOUT_MS, 'The file\u2019s server', async (signal) => {
+    // Given up once nothing has arrived for IDLE_TIMEOUT_MS, never for the time the
+    // whole file takes: a server that stops answering held whatever waited on it
+    // for good, the bag lock among them (review of #599).
+    const cipher = await watched(IDLE_TIMEOUT_MS, (ms) => `The file\u2019s server stopped answering for ${spanWords(ms)}.`, async (signal, alive) => {
       let res: Response
       try {
         res = await fetchImpl(a.url, { referrerPolicy: 'no-referrer', signal })
@@ -178,11 +181,12 @@ export function openAudio(a: Pick<AudioItem, 'url' | 'hash' | 'originalHash' | '
         if (signal.aborted) throw err
         throw new AudioFetchError('The file\u2019s server could not be reached.')
       }
+      alive()
       if (!res.ok) throw new AudioFetchError(`The file\u2019s server answered HTTP ${res.status}.`)
       // Never more than the largest file this client hides, nor more than the
       // size the item says (with room for the tag, for a writer that gave the
       // file's own size).
-      return readCapped(res, a.size ? Math.min(a.size + 16, MAX_CIPHER_BYTES) : MAX_CIPHER_BYTES)
+      return readCapped(res, a.size ? Math.min(a.size + 16, MAX_CIPHER_BYTES) : MAX_CIPHER_BYTES, () => alive())
     }).catch((err: unknown) => { throw err instanceof TransferTimeout ? new AudioFetchError(err.message) : err })
     if (sha256Hex(cipher) !== a.hash) throw new AudioFetchError('The server sent other bytes than the ones hidden here.')
     const plain = await decryptAudioFile(cipher, a.keyHex, a.nonceHex)

@@ -1990,13 +1990,36 @@ async function readForMark(pubkey: string, before: string | null | undefined): P
  * Told by its mark, which costs nothing to compare.
  */
 async function foldStaleBuild(pubkey: string): Promise<void> {
+  const running = staleFolds.get(pubkey)
+  if (running) return running
+  if (!staleMarkUnfolded(pubkey)) return
+  const fold = foldStaleBuildNow(pubkey).finally(() => { if (staleFolds.get(pubkey) === fold) staleFolds.delete(pubkey) })
+  staleFolds.set(pubkey, fold)
+  return fold
+}
+
+/** Per identity, the fold of what an older build saved, while it runs: every asker waits for the one fold (chainHydrated, a press). */
+const staleFolds = new Map<string, Promise<void>>()
+
+/** Whether the old stores' mark names a save by an older build that this device has not folded in yet. */
+function staleMarkUnfolded(pubkey: string): boolean {
   const mark = storedMark(pubkey)
-  if (mark === null || mark.endsWith(':r') || markerValue(pubkey) === mark) return
-  setMarker(pubkey, mark)
+  return mark !== null && !mark.endsWith(':r') && markerValue(pubkey) !== mark
+}
+
+/**
+ * The fold itself. The mark is taken as seen only once the old stores have
+ * answered: a read that failed or ran out folds nothing for sure, so the next
+ * load or press reads them again instead of signing from a head they are past.
+ */
+async function foldStaleBuildNow(pubkey: string): Promise<void> {
+  const mark = storedMark(pubkey)
   const local = loadChain(pubkey, true)
   const kept = await readStoredChain(pubkey)
-  const stored = furtherCopy(local, kept && kept !== 'unreadable' && kept !== 'timeout' ? chainFrom(pubkey, kept, true) : null)
+  const answered = kept !== 'unreadable' && kept !== 'timeout'
+  const stored = furtherCopy(local, answered && kept ? chainFrom(pubkey, kept, true) : null)
   if (stored) takeInStored(pubkey, stored)
+  if (answered && useCyberspace.getState().identity.pubkey === pubkey) setMarker(pubkey, mark)
 }
 
 /** Take in what storage holds beyond the chain in hand. True when it was something another tab can have done. */
@@ -2097,7 +2120,7 @@ function endTakeBack(pubkey: string, read: ChainRead, candidates: NostrEvent[] =
   holdChain(pubkey)
   console.warn('[chain] another tab moved first while this tab\'s actions were on their way to the relays: the chain may have forked, and this tab sends nothing more')
   useCyberspace.setState({ proof: { ...IDLE_PROOF, status: 'infeasible', message: CHAIN_HELD_MESSAGE } })
-  useToast.getState().show({ label: 'CHAIN MAY HAVE FORKED', meta: 'Another tab moved first while this one was sending. Nothing more goes out from here. Reload.', mark: 'block', sticky: true })
+  useToast.getState().show({ label: 'CHAIN MAY HAVE FORKED', meta: 'Another tab moved first while this one was sending. Nothing more goes out from here. Reload.', mark: 'block', sticky: true, reload: true })
   return true
 }
 
@@ -2141,7 +2164,7 @@ function takeBackLost(pubkey: string, attempt: number): void {
     if (attempt === 0) {
       console.warn('[chain] another tab moved first, and the chain could not be read back yet: nothing is signed or sent until it is')
       useCyberspace.setState({ proof: { ...IDLE_PROOF, status: 'infeasible', message: TAKING_BACK_MESSAGE } })
-      useToast.getState().show({ label: 'CHAIN HELD', meta: 'Another tab moved first. Reading your chain again. Reload if this stays.', mark: 'block', sticky: true })
+      useToast.getState().show({ label: 'CHAIN HELD', meta: 'Another tab moved first. Reading your chain again. Reload if this stays.', mark: 'block', sticky: true, reload: true })
     }
     setTimeout(() => takeBackLost(pubkey, attempt + 1), Math.min(TAKE_BACK_RETRY_MS * 2 ** attempt, TAKE_BACK_MAX_MS))
   })
@@ -2519,7 +2542,7 @@ async function wipedUnderMarker(pubkey: string, entry: { pubkey: string; dirty: 
 /** The rows are gone under the marker: said once per page, and every move waits for the relays. */
 function sayWiped(pubkey: string): void {
   if (!rowsWiped.has(pubkey)) {
-    useToast.getState().show({ label: 'SAVED CHAIN CLEARED', meta: 'This device lost its copy of your chain. Moves wait for the relays. Unsent moves may be gone.', mark: 'block', sticky: true })
+    useToast.getState().show({ label: 'SAVED CHAIN CLEARED', meta: 'This device lost its copy of your chain. Moves wait for the relays. Unsent moves may be gone.', mark: 'block', sticky: true, reload: true })
   }
   rowsWiped.add(pubkey)
   rowsAreDown(pubkey, 'holds no chain under its marker (it was cleared)')
@@ -2760,6 +2783,9 @@ function putInHand(pubkey: string, fromDb: LoadedChain, have: Set<string>): void
 async function chainHydrated(pubkey: string): Promise<void> {
   const h = hydration
   if (h && h.pubkey === pubkey) await h.done
+  // And the fold of an older build's save that the read hands on to (hydrateChain).
+  const fold = staleFolds.get(pubkey)
+  if (fold) await fold
 }
 
 /**
@@ -2794,6 +2820,8 @@ async function wholeChainInHand(pubkey: string): Promise<boolean> {
   // cleared (the chain in hand is then a frozen copy from before the rows), or
   // a move that lost to another tab's, still in hand.
   if (rowsDown.has(pubkey) || takingBack(pubkey)) return false
+  // An older build's save not folded in yet (its read failed): the head in hand may be behind it.
+  if (rowsWanted() && inRows(pubkey) && staleMarkUnfolded(pubkey)) return false
   return !chainDbAvailable() || dbRead.has(pubkey)
 }
 

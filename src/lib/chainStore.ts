@@ -82,9 +82,13 @@ function trialFromUrl(): void {
 }
 trialFromUrl()
 
-/** Whether this load was opened with ?chainstore=trial on a device not on the trial yet: the confirm shows (hud/ChainStoreTrial.tsx). */
+/**
+ * Whether this load was opened with ?chainstore=trial on a WebKit device not on
+ * the trial yet: the confirm shows (hud/ChainStoreTrial.tsx). Every other
+ * browser keeps chains in rows already, so it is never asked there.
+ */
 export function trialAskedByLink(): boolean {
-  return trialAsked
+  return trialAsked && onWebKit() && !CHAIN_ROWS_ON_WEBKIT
 }
 
 /** The person said yes on screen. Takes effect from the next load, which the confirm starts. */

@@ -20,8 +20,8 @@ export function ChainStoreTrial(): JSX.Element | null {
   if (!open) return null
   return (
     <ConfirmModal
-      title="Try the new chain store on this device?"
-      body={<>This device only. Your old copy stays as it is. Open the app with ?chainstore=off to stop.</>}
+      title="Try the new chain store?"
+      body={<>This device only. To stop, open with ?chainstore=off</>}
       confirmLabel="TRY IT"
       cancelLabel="NOT NOW"
       danger={false}

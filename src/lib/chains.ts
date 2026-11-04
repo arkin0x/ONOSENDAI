@@ -233,7 +233,7 @@ const CHAIN_READ = { evenHung: true }
  * Rejects with ChainGapError when a hole could not be filled.
  */
 export async function fetchChainEvents(pubkey: string, knownSpawnId?: string, have: NostrEvent[] = [], since?: number): Promise<NostrEvent[]> {
-  const { got, whole } = await gatherChain((f) => query(f, CHAIN_READ), (e) => e, mergeEvents, pubkey, knownSpawnId, have, ownEvents, since)
+  const { got, whole } = await gatherChain((f) => query(f, { ...CHAIN_READ, offThread: true }), (e) => e, mergeEvents, pubkey, knownSpawnId, have, ownEvents, since)
   if (!whole) throw new ChainGapError(got)
   return got
 }

@@ -28,15 +28,6 @@ const VERIFIED_KEPT = 10_000
 const verifiedSigs = new Set<string>()
 
 /**
- * A signature this device checked on an earlier page, as a stored row says
- * (lib/eventDb). So an event the relays send again after a reload is not
- * checked again either. A repeat still has its id recomputed (verifyOnce).
- */
-export function rememberVerified(id: string, sig: string): void {
-  if (verifiedSigs.size < VERIFIED_KEPT) verifiedSigs.add(`${id}:${sig}`)
-}
-
-/**
  * verifyEvent, skipping the Schnorr check for a signature already checked
  * here (verifiedSigs). For events freshly parsed, as the pool hands them over
  * (lib/relay.ts verifyRelayEvent) and as a bag's entries come out of its
@@ -45,7 +36,7 @@ export function rememberVerified(id: string, sig: string): void {
  * then changed would be remembered as it is.
  */
 export function verifyOnce(ev: NostrEvent): boolean {
-  const key = typeof ev.id === 'string' && typeof ev.sig === 'string' ? `${ev.id}:${ev.sig}` : null
+  const key = keyOf(ev)
   if (key !== null && verifiedSigs.has(key)) {
     let same = false
     try { same = getEventHash(ev) === ev.id } catch { same = false }
@@ -56,10 +47,72 @@ export function verifyOnce(ev: NostrEvent): boolean {
     }
   }
   const ok = verifyEvent(ev as unknown as VerifiedEvent)
-  if (ok && key !== null && !verifiedSigs.has(key)) {
-    // Oldest first out: a set keeps insertion order.
-    if (verifiedSigs.size >= VERIFIED_KEPT) verifiedSigs.delete(verifiedSigs.values().next().value as string)
-    verifiedSigs.add(key)
-  }
+  if (ok && key !== null) remember(key)
   return ok
+}
+
+function keyOf(ev: NostrEvent): string | null {
+  return typeof ev.id === 'string' && typeof ev.sig === 'string' ? `${ev.id}:${ev.sig}` : null
+}
+
+function remember(key: string): void {
+  if (verifiedSigs.has(key)) return
+  // Oldest first out: a set keeps insertion order.
+  if (verifiedSigs.size >= VERIFIED_KEPT) verifiedSigs.delete(verifiedSigs.values().next().value as string)
+  verifiedSigs.add(key)
+}
+
+/** Of these, the `id:sig` of each whose signature this page has already checked. Its id must still be recomputed. */
+export function alreadyChecked(events: readonly NostrEvent[]): string[] {
+  const known: string[] = []
+  for (const ev of events) {
+    const key = keyOf(ev)
+    if (key !== null && verifiedSigs.has(key)) known.push(key)
+  }
+  return known
+}
+
+/**
+ * A signature this device checked on an earlier page, as a stored row says
+ * (lib/eventDb): remembered (oldest out when full), so an event the relays send
+ * again after a reload is not checked again either. Not marked on the object,
+ * as checkedElsewhere does: the row's id is not recomputed yet, and a repeat
+ * still has its id recomputed (verifyOnce).
+ */
+export function rememberStoredVerdict(ev: NostrEvent): void {
+  const key = keyOf(ev)
+  if (key !== null) remember(key)
+}
+
+/** A check made elsewhere (a worker) came back good: remembered and marked, as verifyEvent would here. */
+export function checkedElsewhere(ev: NostrEvent): void {
+  const key = keyOf(ev)
+  if (key === null) return
+  remember(key)
+  ;(ev as unknown as Record<symbol, boolean>)[verifiedSymbol] = true
+}
+
+/**
+ * The event the socket is handing over right now, whose check is being made later
+ * by whoever asked (relay.ts query with offThread). Only that subscription says so, only
+ * for the one frame in hand: nostr-tools asks alreadyHaveEvent and then verifyEvent
+ * in one stack, and the microtask clears this before any other frame can run. An
+ * event read by any other subscription is checked as it arrives, as ever.
+ */
+let checkedLater: string | null = null
+
+/** For a subscription's alreadyHaveEvent: this frame's event will be checked by the asker. Always false: it is not a repeat. */
+export function deferCheck(id: string): false {
+  checkedLater = id
+  queueMicrotask(() => { checkedLater = null })
+  return false
+}
+
+/** verifyOnce, unless this very event is one whose check was deferred (deferCheck). */
+export function verifyUnlessDeferred(ev: NostrEvent): boolean {
+  if (checkedLater !== null && ev.id === checkedLater) {
+    checkedLater = null
+    return true
+  }
+  return verifyOnce(ev)
 }

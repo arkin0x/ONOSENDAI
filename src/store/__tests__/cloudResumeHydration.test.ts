@@ -12,7 +12,11 @@
  * check waits for the saved chain; and when IndexedDB does not answer, the
  * record is kept and the words say so, since nothing proves the head moved.
  * Hops and rides alike. A record whose head the whole chain has moved past
- * is still dropped. Nothing reaches the network (HOSAKA faked, relays mocked).
+ * is still dropped. While the resume waits, the record is in hand as
+ * CHECKING, and every flow that starts a paid job refuses while a kept
+ * record is on disk: a ride tapped in that wait was submitted and its record
+ * replaced the paid one (review of #598; the reviewer's probe made a test).
+ * Nothing reaches the network (HOSAKA faked, relays mocked).
  */
 import 'fake-indexeddb/auto'
 import { IDBFactory } from 'fake-indexeddb'
@@ -198,5 +202,63 @@ describe('a paid cloud job across a reload of a chain localStorage outgrew', () 
     expect(S().prevEventId).toBe(head.id)
     expect(await recordNow()).toBeNull()
     expect(S().cloud.message).toMatch(/dropped: the chain head moved/)
+  }, 20_000)
+
+  it('a ride tapped while the resume waits for the saved chain is refused, and the paid record stays', async () => {
+    await keepWholeInDb()
+    const rec = await keepJob('hop', head)
+    // A slow IndexedDB: the read takes its full patience, as on a busy phone.
+    ;(globalThis as { indexedDB?: IDBFactory }).indexedDB = silentDb(new IDBFactory())
+    const m = await pageLoad(2_000)
+    const S = m.useCyberspace.getState
+    fake.submitRide.mockClear()
+    const resumed = S().resumeCloudJob()
+    await settle(100)
+    // In hand while it is checked: the guards that protect a kept job apply.
+    expect(S().cloud.status).toBe('checking')
+    expect(S().cloud.job?.jobId).toBe(rec.jobId)
+    fake.submitRide.mockResolvedValue({ id: 'newride', status: 'computing', cost_msats: 6_000, poll_token: 'tok2', result: null, error: null, balance_debited: true })
+    const started = await S().rideViaHosaka({ previousId: S().prevEventId!, fromHeight: 200, toHeight: 210, toCoordHex: 'ab'.repeat(32), estSeconds: null })
+    expect(started).toBe(false)
+    expect(fake.submitRide).not.toHaveBeenCalled()
+    expect((await recordNow())?.jobId).toBe(rec.jobId)
+    await resumed
+    expect((await recordNow())?.jobId).toBe(rec.jobId)
+    expect(S().cloud.job?.jobId).toBe(rec.jobId)
+    expect(S().cloud.status).toBe('idle')
+    expect(S().cloud.message).toMatch(/kept/)
+  }, 20_000)
+
+  it('a kept record on disk alone bars a new ride and a region key buy, before anything is asked of HOSAKA', async () => {
+    storage.setItem(`onosendai:chain:${pk}`, storedJson(KEPT))
+    quota.chainChars = Infinity
+    const m = await pageLoad()
+    await m.savedChainLoaded()
+    const rec = await keepJob('hop', chain[KEPT - 1])
+    const S = m.useCyberspace.getState
+    expect(S().cloud.job).toBeNull()
+    fake.submitRide.mockClear()
+    expect(await S().rideViaHosaka({ previousId: S().prevEventId!, fromHeight: 200, toHeight: 210, toCoordHex: 'ab'.repeat(32), estSeconds: null })).toBe(false)
+    expect(S().cloud.rideError).toMatch(/kept in the Cloud compute panel/)
+    expect(fake.submitRide).not.toHaveBeenCalled()
+    m.useCyberspace.setState({ cloudPrefs: { ...S().cloudPrefs, mode: 'auto' } })
+    const key = await S().buyRegionKey(S().position, S().plane, 10)
+    expect(key).toEqual({ ok: false, error: expect.stringMatching(/kept in the Cloud compute panel/) })
+    expect((await recordNow())?.jobId).toBe(rec.jobId)
+  }, 20_000)
+
+  it('a record whose head the chain has moved past bars nothing: it is spent or worthless', async () => {
+    storage.setItem(`onosendai:chain:${pk}`, storedJson(KEPT))
+    quota.chainChars = Infinity
+    const m = await pageLoad()
+    await m.savedChainLoaded()
+    await keepJob('hop', chain[10])
+    const S = m.useCyberspace.getState
+    fake.submitRide.mockClear()
+    fake.submitRide.mockResolvedValue({ id: 'newride', status: 'computing', cost_msats: 6_000, poll_token: 'tok2', result: null, error: null, balance_debited: true })
+    void S().rideViaHosaka({ previousId: S().prevEventId!, fromHeight: 200, toHeight: 210, toCoordHex: 'ab'.repeat(32), estSeconds: null })
+    await settle(200)
+    expect(S().cloud.rideError ?? '').not.toMatch(/kept/)
+    expect(fake.submitRide).toHaveBeenCalledTimes(1)
   }, 20_000)
 })

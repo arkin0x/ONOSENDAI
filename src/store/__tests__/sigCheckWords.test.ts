@@ -51,14 +51,18 @@ const pk = getPublicKey(sk)
 const home = coordToXyz(hexToCoord(pk))
 const sign = (t: Parameters<typeof finalizeEvent>[0]): NostrEvent => JSON.parse(JSON.stringify(finalizeEvent(t, sk))) as NostrEvent
 
+// The saved chain is in storage before the store loads, so its signature
+// check starts with the page and stays open until the test releases it. The
+// store is loaded here, at the top, so its load is not inside any case's time.
+const spawn = sign(spawnTemplate(pk, 1_000))
+const at = { x: home.x + 1n, y: home.y, z: home.z }
+const hop = sign(hopTemplate({ createdAt: 1_001, genesisId: spawn.id, previousId: spawn.id, prevCoordHex: pk, to: at, plane: home.plane, proofHash: '0'.repeat(64), mn: '0'.repeat(16), mp: '00' }))
+storage.setItem('onosendai:nsec', nip19.nsecEncode(sk))
+storage.setItem(`onosendai:chain:${pk}`, JSON.stringify({ version: 2, events: [spawn, hop], published: [spawn.id, hop.id], stats: {} }))
+const { useCyberspace, CHECKING_RELAYS_MESSAGE, SIG_CHECK_MESSAGE } = await import('../useCyberspace')
+
 describe('the signature check a finished proof waits on', () => {
   it('says so while it runs, then gives back the relays\' words for the look that follows', async () => {
-    const spawn = sign(spawnTemplate(pk, 1_000))
-    const at = { x: home.x + 1n, y: home.y, z: home.z }
-    const hop = sign(hopTemplate({ createdAt: 1_001, genesisId: spawn.id, previousId: spawn.id, prevCoordHex: pk, to: at, plane: home.plane, proofHash: '0'.repeat(64), mn: '0'.repeat(16), mp: '00' }))
-    storage.setItem('onosendai:nsec', nip19.nsecEncode(sk))
-    storage.setItem(`onosendai:chain:${pk}`, JSON.stringify({ version: 2, events: [spawn, hop], published: [spawn.id, hop.id], stats: {} }))
-    const { useCyberspace, CHECKING_RELAYS_MESSAGE, SIG_CHECK_MESSAGE } = await import('../useCyberspace')
     const S = useCyberspace.getState
     expect(ctl.release).not.toBeNull()
 

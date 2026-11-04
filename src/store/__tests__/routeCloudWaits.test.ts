@@ -56,6 +56,7 @@ import type { Position } from '../../lib/space'
 import { postProof } from '../../lib/workers'
 import { useCyberspace } from '../useCyberspace'
 import { placeSpawn } from '../fixtures/placeSpawn'
+import { useToast } from '../useToast'
 import { provedFor } from '../fixtures/provedHop'
 
 const S = useCyberspace.getState
@@ -137,7 +138,7 @@ describe('a route step whose position moved while the route waited', () => {
     expect(postProof).toHaveBeenCalledTimes(1)
     expect(lastPosted()).toMatchObject({ from: there, prevEventId: head })
     expect(S().plan?.step.from).toEqual(there)
-    expect(S().plan?.message).toMatch(/^Your chain moved while this route waited/)
+    expect(S().plan?.message).toMatch(/^Your chain moved on while this route waited\. /)
   })
 
   it('requote: RESUME after HOSAKA paused starts the local step from where the chain stands, under the new head', async () => {
@@ -179,10 +180,13 @@ describe('a route step whose position moved while the route waited', () => {
     balance.resolve({ pubkey: S().identity.pubkey, balance_msats: 5000, ledger: [] })
     await committed
 
-    // Nothing is bought for the old position: whatever HOSAKA is asked for starts where the chain stands.
-    for (const call of fake.submitHop.mock.calls) expect(call[0]).toMatchObject({ x: there.x, y: there.y, z: there.z })
-    expect(S().plan?.step.from).toEqual(there)
-    expect(S().plan?.message).toMatch(/^Your chain moved while this route waited/)
+    // Nothing is bought: the route waits for RESUME to buy the step from where the chain stands.
+    expect(fake.submitHop).not.toHaveBeenCalled()
+    expect(fake.submitSidestep).not.toHaveBeenCalled()
+    expect(S().plan).toMatchObject({ status: 'paused', step: { source: 'cloud', from: there } })
+    expect(S().plan?.message).toMatch(/RESUME buys it from where you stand now\.$/)
+    expect(S().plan?.message).not.toMatch(/another device|again/)
+    expect(S().plan?.message).toMatch(/^Your chain moved on while this route waited\. /)
   })
 })
 
@@ -198,6 +202,40 @@ function hopResult(from: Position, to: Position, plane: 0 | 1, prev: string): Re
 }
 const funded = (): HosakaJob => ({ id: 'job-1', status: 'computing', cost_msats: 1000, poll_token: 'tok-job-1', result: null, error: null, payment_required: false, balance_debited: true })
 const completed = (result: unknown): HosakaJob => ({ id: 'job-1', status: 'completed', cost_msats: 1000, result, error: null })
+
+/** The avatar and the chain on the leaf touching an h13 wall: one HOSAKA hop across it is the whole route. */
+async function lineUpH13(): Promise<{ from: Position; to: Position }> {
+  useCalibration.setState({ status: 'measured', hopHeight: 12, sidestepHeight: 12 })
+  const s = S()
+  const block = (s.position.x >> 13n) << 13n
+  const from = { ...s.position, x: block + 4095n }
+  if (from.x !== s.position.x) await moved(from)
+  const to = { ...from, x: from.x ^ (1n << 12n) }
+  useCyberspace.setState({ cursor: to })
+  return { from, to }
+}
+
+/** A signer that, while it is asked, lets another device's move arrive from the relays first. */
+function signerWhileTheyMove(sign: ReturnType<typeof S>['signEvent'], at: Position): ReturnType<typeof S>['signEvent'] {
+  return async (t) => {
+    const st = S()
+    const last = st.events[st.events.length - 1]
+    const ev = await sign(hopTemplate({ createdAt: last.created_at + 1, genesisId: st.genesisId, previousId: st.prevEventId, prevCoordHex: st.coordHex(), to: at, plane: st.headPlane, proofHash: '0'.repeat(64), mn: '0'.repeat(16), mp: '00' }))
+    st.adoptChain([ev])
+    return sign(t)
+  }
+}
+
+/** Nothing reads as complete for a job whose proof never reached the chain. */
+function nothingCounted(spent: number, lastBefore: unknown, seal: string): void {
+  expect(S().events.some((e) => e.tags.some((t) => t[0] === 'proof' && t[1] === seal))).toBe(false)
+  expect(S().spentMsats).toBe(spent)
+  expect(S().cloud.last).toBe(lastBefore)
+  expect(useToast.getState().toast?.label ?? '').not.toMatch(/CLOUD COMPUTE JOB COMPLETE/)
+  // Bound to a head that is gone: worthless, so it is dropped and said.
+  expect(storage.getItem('onosendai:cloudJob')).toBeNull()
+  expect(S().cloud.message).toBe('The chain head moved before this cloud move was signed; the cloud proof was discarded.')
+}
 
 /** After a cloud step signed by SIGN AND CONTINUE: what runCloud does for one that signed at once. */
 async function signedAndCleaned(spentBefore: number): Promise<void> {
@@ -310,5 +348,102 @@ describe('a funded route that ends or pauses', () => {
     await vi.waitFor(() => { expect(S().events).toHaveLength(before + 1) })
     expect(S().position).toEqual(to)
     await signedAndCleaned(spent)
+  })
+})
+
+describe('a cloud step whose proof is refused because the head moved while the signer was asked (review of #589, F1)', () => {
+  beforeAll(placeSpawn)
+  beforeEach(() => {
+    useCyberspace.setState({
+      cloud: { ...S().cloud, limits: LIMITS, status: 'idle', job: null, message: null, balance: null },
+      cloudPrefs: { mode: 'auto', autoMaxSats: 100, apiUrl: 'http://fake', profile: 'cost' },
+      plan: null,
+      proof: { ...S().proof, status: 'idle', message: null },
+    })
+    S().setMoveMode('auto')
+    for (const fn of Object.values(fake)) if (typeof fn === 'function' && 'mockReset' in fn) fn.mockReset()
+    fake.limits.mockResolvedValue(LIMITS)
+    fake.quote.mockImplementation(async (kind: 'hop' | 'sidestep') => quote(kind))
+    fake.balance.mockResolvedValue({ pubkey: S().identity.pubkey, balance_msats: 5000, ledger: [] })
+    vi.mocked(postProof).mockClear()
+    storage.removeItem('onosendai:cloudJob')
+    storage.removeItem('onosendai:cloudDeposit')
+    useToast.setState({ toast: null })
+  })
+
+  it('SIGN AND CONTINUE: nothing is counted, toasted or called funded (the reviewer\'s repro)', async () => {
+    const { from, to } = await lineUpH13()
+    const spent = S().spentMsats
+    const seal = hopResult(from, to, S().plane, S().prevEventId).seal as string
+    fake.submitHop.mockResolvedValue(funded())
+    fake.waitForJob.mockResolvedValue(completed(hopResult(from, to, S().plane, S().prevEventId)))
+    const sign = S().signEvent
+    useCyberspace.setState({ signEvent: async () => { throw new Error('user declined') } })
+    try {
+      await S().commit()
+      await vi.waitFor(() => { expect(S().cloud.status).toBe('error') })
+    } finally {
+      useCyberspace.setState({ signEvent: sign })
+    }
+    expect(storage.getItem('onosendai:cloudJob')).not.toBeNull()
+    const lastBefore = S().cloud.last
+    useToast.setState({ toast: null })
+    const before = S().events.length
+    useCyberspace.setState({ signEvent: signerWhileTheyMove(sign, { ...from, y: from.y + 1n }) })
+    try {
+      S().resumePlan()
+      await vi.waitFor(() => { expect(S().plan?.status).not.toBe('running') }, { timeout: 3000 })
+      await vi.waitFor(() => { expect(S().cloud.message).not.toMatch(/kept/) })
+    } finally {
+      useCyberspace.setState({ signEvent: sign })
+    }
+    // The chain grew by their move, not by this one.
+    expect(S().events).toHaveLength(before + 1)
+    nothingCounted(spent, lastBefore, seal)
+  })
+
+  it('a cloud step signed at once: the same (runCloud)', async () => {
+    const { from, to } = await lineUpH13()
+    const spent = S().spentMsats
+    const lastBefore = S().cloud.last
+    const seal = hopResult(from, to, S().plane, S().prevEventId).seal as string
+    fake.submitHop.mockResolvedValue(funded())
+    fake.waitForJob.mockResolvedValue(completed(hopResult(from, to, S().plane, S().prevEventId)))
+    const sign = S().signEvent
+    useCyberspace.setState({ signEvent: signerWhileTheyMove(sign, { ...from, y: from.y + 1n }) })
+    try {
+      await S().commit()
+      await vi.waitFor(() => { expect(S().cloud.status).toBe('error') })
+    } finally {
+      useCyberspace.setState({ signEvent: sign })
+    }
+    nothingCounted(spent, lastBefore, seal)
+  })
+
+  it('a kept job already signed from the Cloud panel on this device: RESUME signs nothing again, names no other device, and the route goes on', async () => {
+    const { from, to } = await lineUpH13()
+    fake.submitHop.mockResolvedValue(funded())
+    fake.waitForJob.mockResolvedValue(completed(hopResult(from, to, S().plane, S().prevEventId)))
+    const sign = S().signEvent
+    useCyberspace.setState({ signEvent: async () => { throw new Error('user declined') } })
+    try {
+      await S().commit()
+      await vi.waitFor(() => { expect(S().cloud.status).toBe('error') })
+    } finally {
+      useCyberspace.setState({ signEvent: sign })
+    }
+    expect(S().plan).toMatchObject({ status: 'paused' })
+    const before = S().events.length
+    // The Cloud panel's RESUME finishes the kept job on this device.
+    await S().resumeCloudJob()
+    await vi.waitFor(() => { expect(S().events).toHaveLength(before + 1) })
+    expect(S().position).toEqual(to)
+    // Then the route's SIGN AND CONTINUE.
+    S().resumePlan()
+    await new Promise((r) => setTimeout(r, 50))
+    expect(S().events).toHaveLength(before + 1)
+    expect(S().plan).toBeNull()
+    expect(S().proof.message ?? '').not.toMatch(/another device|moved/)
+    expect(S().spentMsats).toBeGreaterThan(0)
   })
 })

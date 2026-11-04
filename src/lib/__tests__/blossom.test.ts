@@ -1,7 +1,8 @@
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   AUTH_TTL_S, BLOSSOM_AUTH_KIND, BlossomRefusal, DEFAULT_BLOSSOM_SERVERS, authHeader, explainUpload,
   normalizeServer, parseDescriptor, serversFromList, sha256Hex, uploadAuthTemplate, uploadBlob,
+  IDLE_TIMEOUT_MS, PROBE_TIMEOUT_MS, TransferTimeout, uploadWaitMs,
 } from '../blossom'
 import type { EventTemplate, NostrEvent } from '../events'
 
@@ -115,5 +116,48 @@ describe('explainUpload', () => {
     expect(explainUpload(new BlossomRefusal(413, '2 MB max'))).toMatch(/too large.*2 MB max/)
     expect(explainUpload(new TypeError('Failed to fetch'))).toMatch(/reached|browser/)
     expect(explainUpload(new Error('odd'))).toBe('odd')
+  })
+})
+
+describe('a server that never answers, or answers slowly (review of #599)', () => {
+  afterEach(() => { vi.useRealTimers() })
+  /** A fetch that answers only when aborted, as a hung connection does. */
+  const hung = vi.fn((_url: string, init: RequestInit) => new Promise<Response>((_, reject) => {
+    init.signal?.addEventListener('abort', () => reject(new DOMException('aborted', 'AbortError')))
+  }))
+  /** A large file, as hidden audio is: 5 MiB. */
+  const large = new Blob([new Uint8Array(5 * 1024 * 1024)], { type: 'application/octet-stream' })
+
+  it('a stalled upload is given up, in words, once its wait has passed: the probe at 15 seconds, the PUT by its size', async () => {
+    vi.useFakeTimers()
+    hung.mockClear()
+    const caught = uploadBlob('https://s', large, fakeSign, hung).catch((err: unknown) => err)
+    const wait = uploadWaitMs(large.size)
+    expect(wait).toBe(640_000)
+    await vi.advanceTimersByTimeAsync(PROBE_TIMEOUT_MS + wait + 10)
+    const err = await caught
+    expect(err).toBeInstanceOf(TransferTimeout)
+    expect(explainUpload(err)).toBe('The server did not take the file within 11 minutes.')
+    // The probe and the PUT, each aborted.
+    expect(hung).toHaveBeenCalledTimes(2)
+    for (const call of hung.mock.calls) expect(call[1].signal?.aborted).toBe(true)
+  })
+
+  it('a large upload on a slow line completes, though it takes far longer than any fixed limit would allow', async () => {
+    vi.useFakeTimers()
+    const slow = vi.fn(async (_url: string, init: RequestInit): Promise<Response> => {
+      if (init.method === 'HEAD') return new Response(null, { status: 200 })
+      // Nine minutes for 5 MiB: about 78 kbit/s, sustained.
+      await new Promise((r) => setTimeout(r, 9 * 60_000))
+      const hash = sha256Hex(new Uint8Array(init.body as Uint8Array))
+      return new Response(JSON.stringify({ url: `https://s/${hash}`, sha256: hash, size: large.size, type: 'application/octet-stream' }), { status: 200 })
+    })
+    const up = uploadBlob('https://s', large, fakeSign, slow)
+    await vi.advanceTimersByTimeAsync(9 * 60_000 + 10)
+    await expect(up).resolves.toMatchObject({ size: large.size })
+  })
+
+  it('a small file waits at least IDLE_TIMEOUT_MS for its answer', () => {
+    expect(uploadWaitMs(11)).toBe(IDLE_TIMEOUT_MS)
   })
 })

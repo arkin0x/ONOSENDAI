@@ -1658,6 +1658,52 @@ describe('what an older build or the old stores saved, folded in before anything
     expect(prevs.every((p) => p === m2)).toBe(true)
   })
 
+  /** Hold one database busy with a write until let go; resolves once the hold is on. */
+  async function holdDb(dbName: string, store: string): Promise<{ letGo: () => Promise<void> }> {
+    const db = await new Promise<IDBDatabase>((resolve, reject) => {
+      const req = indexedDB.open(dbName)
+      req.onsuccess = () => resolve(req.result)
+      req.onerror = () => reject(req.error)
+    })
+    return new Promise((on) => {
+      const tx = db.transaction([store], 'readwrite')
+      const os = tx.objectStore(store)
+      let holding = true
+      const released = new Promise<void>((done) => { tx.oncomplete = () => { db.close(); done() } })
+      let first = true
+      const spin = (): void => { os.get('nobody').onsuccess = () => { if (first) { first = false; on({ letGo: () => { holding = false; return released } }) } if (holding) spin() } }
+      spin()
+    })
+  }
+
+  it('a fold that ends with nothing of this identity in hand (switched away and back) is not taken as done', { timeout: 30_000 }, async () => {
+    const { m2 } = await offMoveOn({ smallLocal: true })
+    const oldMark = localStorage.getItem(`onosendai:chain-mark:${pk}`)
+    expect(oldMark?.endsWith(':r')).toBe(false)
+    const { META_STORE } = await import('../../lib/idb')
+    // The fold's read of the old stores waits behind this.
+    const chainsHeld = await holdDb('onosendai:chains', META_STORE)
+    vi.resetModules()
+    const store = await import('../useCyberspace')
+    const S = store.useCyberspace.getState
+    await vi.waitFor(() => expect(S().events.length).toBeGreaterThan(0), { timeout: 10_000 })
+    await S().useNsec(nip19.nsecEncode(generateSecretKey()))
+    // Back to A, its rows not read yet when the fold ends.
+    const eventsHeld = await holdDb('onosendai:events', 'events')
+    void S().useNsec(nip19.nsecEncode(sk))
+    await vi.waitFor(() => expect(S().identity.pubkey).toBe(pk))
+    await chainsHeld.letGo()
+    await tick(100)
+    expect(S().identity.pubkey).toBe(pk)
+    expect(S().events).toHaveLength(0)
+    // Nothing was folded, so the older build's save is not marked as seen.
+    expect(localStorage.getItem(`onosendai:chain-rows:${pk}`)).not.toBe(oldMark)
+    await eventsHeld.letGo()
+    await store.savedChainLoaded()
+    await S().confirmHeadNow().catch(() => null)
+    expect(S().events.some((e) => e.id === m2)).toBe(true)
+  })
+
   it('a fold whose read fails is not taken as done: the next load folds it in, and until then a paid job is kept', async () => {
     const { m2 } = await offMoveOn({ smallLocal: true })
     // The old store's reads fail on this load only.

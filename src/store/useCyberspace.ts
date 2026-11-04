@@ -2022,8 +2022,13 @@ async function foldStaleBuildNow(pubkey: string): Promise<void> {
   const kept = await readStoredChain(pubkey)
   const answered = kept !== 'unreadable' && kept !== 'timeout'
   const stored = furtherCopy(local, answered && kept ? chainFrom(pubkey, kept, true) : null)
+  // Nothing of this identity's in hand to fold into (switched away and back,
+  // its rows not read yet): nothing is folded, so nothing is taken as seen,
+  // and the read that brings the chain back folds it in (hydrateChain).
+  const s = useCyberspace.getState()
+  if (s.identity.pubkey !== pubkey || s.events.length === 0 || s.events[0].pubkey !== pubkey) return
   if (stored) takeInStored(pubkey, stored)
-  if (answered && useCyberspace.getState().identity.pubkey === pubkey) setMarker(pubkey, mark)
+  if (answered) setMarker(pubkey, mark)
 }
 
 /** Take in what storage holds beyond the chain in hand. True when it was something another tab can have done. */

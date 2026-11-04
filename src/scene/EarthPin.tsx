@@ -1,7 +1,7 @@
 /**
  * EarthPin.tsx - the place you asked to look at, left standing in the scene.
  *
- * Clicking the globe or typing a place into the POSITION panel moves the
+ * Clicking the globe or typing a place into the View panel moves the
  * camera there, and until now that was all it did: the focal point was
  * implied by where the camera happened to be pointing, and the moment you
  * clicked a landfall to look at it the place you came from was gone. The pin

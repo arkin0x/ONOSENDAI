@@ -13,6 +13,8 @@ export interface SpinClaim {
   id: number
   shard: ShardModel | null
   ignoreOpacity: boolean
+  /** The whole width of its row, as a chest's or a door's card shows its look. */
+  wide?: boolean
   size: number
   slot: HTMLElement
 }

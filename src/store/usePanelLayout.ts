@@ -12,7 +12,7 @@
  * added after the layout was saved) goes to its default column at its default
  * place; an id the app no longer has is dropped.
  *
- * The four priority states (BUILD, a move computing, a cloud job, a ride set)
+ * The priority states (BUILD or a free view, a move computing, a cloud job, a ride set)
  * are not written here: Hud.tsx lays the leading panel at the top of the left
  * column while the state holds and reads this order, untouched, when it ends.
  */
@@ -29,10 +29,17 @@ export const COLUMNS: readonly Column[] = ['left', 'right']
  * bottom. AGENTS came after (arkinox, 2026-10-09, ruling 4: a panel beside
  * IDENTITY and LINKS), right under Identity, and mergeOrder puts it there in
  * a saved layout that predates it.
+ *
+ * `viewat` is the View panel (arkinox, 2026-11-02): Position's twin for the
+ * place being looked at, holding VIEW A COORDINATE, RECENT and STARRED PLACES.
+ * Its id is not `view` because that id is the Settings panel's, titled View
+ * until the same day, and a saved order already holds it there. A saved
+ * order from before has no `viewat`, so mergeOrder puts it right under
+ * Position, its default place.
  */
 export const DEFAULT_ORDER = {
   left: ['identity', 'agents', 'hidden', 'discovered', 'items', 'create', 'avatars', 'targets', 'links'],
-  right: ['scale', 'position', 'proof', 'cloud', 'chain', 'hyperspace', 'view', 'legend', 'controls', 'derezz', 'relays'],
+  right: ['scale', 'position', 'viewat', 'proof', 'cloud', 'chain', 'hyperspace', 'view', 'legend', 'controls', 'derezz', 'relays'],
 } as const satisfies Record<Column, readonly string[]>
 
 export type PanelId = (typeof DEFAULT_ORDER)[Column][number]

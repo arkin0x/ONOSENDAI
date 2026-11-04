@@ -25,8 +25,11 @@ describe('which look a thing wears', () => {
     expect(lookOf({ type: 'shard' })).toBeNull()
   })
 
-  it('reads a door tag in any form, and only an array tag named door', () => {
-    expect(isDoor([['door']])).toBe(true)
+  it('reads a door only from one door tag with a well-formed height (spec #82: a malformed one is dropped)', () => {
+    expect(isDoor([['door']])).toBe(false)
+    expect(isDoor([['door', '04']])).toBe(false)
+    expect(isDoor([['door', '0']])).toBe(false)
+    expect(isDoor([['door', '4'], ['door', '4']])).toBe(false)
     expect(isDoor([['door', '4']])).toBe(true)
     expect(isDoor([['doors', '4'], 'door', ['title', 'door']])).toBe(false)
     expect(isDoor(undefined)).toBe(false)
@@ -119,8 +122,8 @@ describe('what stays in a chest', () => {
   it('a thing out of a chest at the chest\u2019s own place stays in it, to float out as loot', () => {
     expect(keptInChest({ chestId: 'box', at: here }, box)).toBe(true)
   })
-  it('a thing aimed at its own point in the chest\u2019s region is drawn there, as before', () => {
-    expect(keptInChest({ chestId: 'box', at: { ...here, x: 9n } }, box)).toBe(false)
+  it('a thing aimed at its own point stays in the chest too: contents are taken, not placed (spec #82)', () => {
+    expect(keptInChest({ chestId: 'box', at: { ...here, x: 9n } }, box)).toBe(true)
   })
   it('everything behind a door stands in the room, and a thing whose chest is unknown is drawn', () => {
     expect(keptInChest({ chestId: 'gate', at: here }, gate)).toBe(false)

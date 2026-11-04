@@ -134,7 +134,7 @@ function same(a: Position, b: Position): boolean {
   return a.x === b.x && a.y === b.y && a.z === b.z
 }
 
-/** "x, y, z" in full decimals: the same text the POSITION panel reads back. */
+/** "x, y, z" in full decimals: the same text the View panel reads back. */
 export function placeInput(p: Position): string {
   return `${p.x}, ${p.y}, ${p.z}`
 }

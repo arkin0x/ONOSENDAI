@@ -14,11 +14,12 @@
  */
 
 import { create } from 'zustand'
-import { afterOpen, ceremonyLength, type CeremonyKind } from '../lib/ceremony'
+import { VANISH_MS, afterOpen, calmVanish, ceremonyLength, type CeremonyKind } from '../lib/ceremony'
 import { ceremonyFeedback } from '../lib/ceremonySound'
 import { openedKey } from './useOpenedChests'
 import { useLootView } from './useLootView'
 import { useShards } from './useShards'
+import { useCyberspace } from './useCyberspace'
 
 /** One ceremony playing: what plays, from when (performance.now() at the decrypt's return), and whether on the calm path. */
 export interface Playing {
@@ -83,4 +84,43 @@ export function celebrateOpen(o: { me: string; chestId: string; kind: CeremonyKi
   if (plan.ceremony) useOpenCeremony.getState().begin(o.me, o.chestId, o.kind, o.calm)
   if (plan.feedback) ceremonyFeedback(o.kind, Date.now(), plan.ceremony ? o.landMs : undefined)
   return plan
+}
+
+/** One item going out of the world after TAKE: from when, and whether on the calm path. */
+export interface Vanishing {
+  at: number
+  calm: boolean
+}
+
+interface TakeVanishState {
+  /** By openedKey(identity, item id). Never kept: a reload draws a held item as its box at once. */
+  playing: Record<string, Vanishing>
+  begin: (me: string, id: string, calm: boolean, at?: number) => void
+}
+
+export const useTakeVanish = create<TakeVanishState>((set, get) => ({
+  playing: {},
+  begin: (me, id, calm, at = performance.now()) => {
+    const key = openedKey(me, id)
+    set({ playing: { ...get().playing, [key]: { at, calm } } })
+    setTimeout(() => {
+      if (get().playing[key]?.at !== at) return
+      const playing = { ...get().playing }
+      delete playing[key]
+      set({ playing })
+    }, (calm ? calmVanish() : VANISH_MS) + 50)
+  },
+}))
+
+/**
+ * TAKE on an item where it stands (arkinox, 2026-11-01): held, the list or the
+ * card it was tapped in closes, and the item fades out where it stands
+ * (scene/ItemVanish). A bag record stays open: it may be far from the item.
+ */
+export function takeAndVanish(id: string, calm: boolean): void {
+  const shards = useShards.getState()
+  if (shards.takeFound([id]).length === 0) return
+  useTakeVanish.getState().begin(useCyberspace.getState().identity.pubkey, id, calm)
+  if (shards.selectedSecret !== null) shards.selectSecret(null)
+  if (shards.nearbyOpen) shards.setNearbyOpen(false)
 }

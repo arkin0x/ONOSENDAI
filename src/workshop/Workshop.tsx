@@ -21,6 +21,7 @@
  */
 
 import { carriesSealedParts, foreignKeys, foreignNotice, placedOnly } from '../lib/carried'
+import { escapeStep } from './escapeOrder'
 import { memo, useEffect, useMemo, useRef, useState } from 'react'
 import { Field, Switch } from '../hud/ui/Switch'
 import { Vector3 } from 'three'
@@ -52,7 +53,7 @@ import { useCyberspace } from '../store/useCyberspace'
 import { ownAddress, useWorkshop, type Tool } from '../store/useWorkshop'
 import { useShards } from '../store/useShards'
 import { usePublished } from '../store/usePublished'
-import { STATE_HELP, STATE_LABEL, STATE_TAG, publishState, shardFingerprint } from '../lib/published'
+import { STATE_HELP, STATE_LABEL, STATE_TAG, publishState, shardFingerprints } from '../lib/published'
 import { ConfirmModal } from '../hud/ConfirmModal'
 import { OrbitSphere } from '../hud/ui/OrbitSphere'
 import { Bench } from './Bench'
@@ -727,7 +728,7 @@ export function Workshop(): JSX.Element | null {
   // shard (a Basilica nave's payload is hundreds of KB), for lines nobody could see.
   const seen = panel === 'shard' ? root : null
   const pubState = useMemo(
-    () => publishState(seen ? ledger[seen.id] : undefined, seen ? shardFingerprint(seen) : '', me),
+    () => publishState(seen ? ledger[seen.id] : undefined, seen ? shardFingerprints(seen) : '', me),
     [seen, ledger, me],
   )
   const wireBytes = useMemo(() => (seen ? new TextEncoder().encode(JSON.stringify(toPayload(withAuthoredConstrain(placedOnly(seen))))).length : 0), [seen])
@@ -817,11 +818,13 @@ export function Workshop(): JSX.Element | null {
   // handler, which closed the workshop from under an open palette sheet.
   useEscape('modal', open, () => {
     const ws = useWorkshop.getState()
-    if (panel !== null) setPanel(null)
-    else if (viewOpen) setViewOpen(false)
-    else if (ws.selection.length || ws.partSel.length || ws.selectedFaces.length > 0 || ws.facePick.length) { ws.selectVertex(null); ws.clearFacePick() }
+    const depth = ws.insidePath().length
+    const step = escapeStep(panel !== null, viewOpen, !!(ws.selection.length || ws.partSel.length || ws.selectedFaces.length > 0 || ws.facePick.length), depth)
+    if (step === 'panel') setPanel(null)
+    else if (step === 'view') setViewOpen(false)
+    else if (step === 'hand') { ws.selectVertex(null); ws.clearFacePick() }
     // Inside a placed part, out one level, as EXIT does.
-    else if (ws.insidePath().length) ws.exitTo(ws.insidePath().length - 1)
+    else if (step === 'exit') ws.exitTo(depth - 1)
     else ws.closeWorkshop()
   })
 

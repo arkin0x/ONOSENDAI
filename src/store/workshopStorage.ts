@@ -42,6 +42,7 @@
  */
 
 import { GRID_HALF, neededExtent, normalizeStored, type ShardModel } from 'sno-core/shards'
+import { legacyMark } from '../lib/carried'
 import {
   commit, databaseExists, fingerprint, localEntries, mergeLocal, newGen, noteReconciled, restoreInto, openWorkshopDb, readAll, readMigrated, readSome, verifyAndMark,
   type MigratedMeta, type ShardRecord,
@@ -121,7 +122,8 @@ export function normalizeOne(s: unknown): ShardModel | null {
     const x = s as ShardModel | null
     if (!x || typeof x !== 'object' || typeof x.id !== 'string' || !Array.isArray(x.vertices)) return null
     const n = normalizeStored(x)
-    return { ...n, extent: Number.isInteger(n.extent) ? n.extent : Math.max(GRID_HALF, neededExtent(n)) }
+    // #543 marked a whole table `takenFromBag: true`: read as every key it holds now (lib/carried.ts legacyMark).
+    return legacyMark({ ...n, extent: Number.isInteger(n.extent) ? n.extent : Math.max(GRID_HALF, neededExtent(n)) })
   } catch { return null }
 }
 

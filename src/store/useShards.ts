@@ -45,7 +45,7 @@ import { itemTargetOf, type ItemTarget } from '../lib/comments'
 import { bytesToHex, hexToBytes, type EventTemplate, type NostrEvent } from '../lib/events'
 import { regionKeyAt } from '../lib/shardCrypto'
 import { regionKeyOffThread } from '../lib/regionKeyOffThread'
-import { carryRefusal, signedTableOnly } from '../lib/carried'
+import { carryRefusal, relayRefusal, signedTableOnly } from '../lib/carried'
 import { carryLibrary } from './localObjects'
 import { deployCeiling, deployRoute, localKeyCeiling, needsAsk, regionKeyQuote } from '../lib/deployPlan'
 import { useSecrets } from './useSecrets'
@@ -1725,7 +1725,12 @@ export const useShards = create<ShardsState>((set, get) => {
       if (mine.length < get().mine.length) { set({ mine }); saveMine(mine) }
     }
     const createdAt = nextBagAt(lookupId)
-    return cyber().signEvent(await bagTemplate(entries, key, lookupId, height, createdAt, HIDDEN_KIND, settings, place))
+    const template = await bagTemplate(entries, key, lookupId, height, createdAt, HIDDEN_KIND, settings, place)
+    // More than a relay takes is refused before it is signed, so no hide, move or
+    // rewrite reports done for a bag no relay would hold (review of the stack).
+    const over = relayRefusal(template)
+    if (over) throw new Error(over)
+    return cyber().signEvent(template)
   }
 
   /**
@@ -3254,8 +3259,11 @@ export const useShards = create<ShardsState>((set, get) => {
         // The pieces it places from your library go inside it (DECK-0003
         // §1.10), so finders draw them from the bag rather than ask relays
         // for names nobody published; a live link stays a reference. Over the
-        // budget it is refused in his words (D3).
-        if (!link) {
+        // budget it is refused in his words (D3). A move moves what was
+        // hidden, as HIDE AGAIN does: nothing is drawn from the workshop
+        // again, so its size and its inline-or-reference choice still hold
+        // (review of the stack).
+        if (!link && !was) {
           shard = carryLibrary(shard)
           const over = carryRefusal(shard)
           if (over) {

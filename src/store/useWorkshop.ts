@@ -43,9 +43,10 @@ import {
   validPoint,
   type ShardMode,
   type ShardModel,
-  type ShardVertex, type Part, type Ref, cloneVertex, hexToRgb, rgbToHex } from 'sno-core/shards'
+  type ShardVertex, type Part, type Ref, addressesIn, cloneVertex, hexToRgb, rgbToHex } from 'sno-core/shards'
 import { withOpacity } from '../lib/opacityStep'
-import { carriedAnswer, copyInto, detachInto, focusOf, keepOwnTable, noTable, signedTableOnly, writeCopy, you, type InsideStep } from '../lib/carried'
+import { carriedAnswer, copyInto, detachInto, focusOf, keepOwnTable, noTable, placesItself, sealedKeys, signedTableOnly, withSealed, writeCopy, you, type InsideStep } from '../lib/carried'
+import { useToast } from './useToast'
 import { authoredConstrainOf, chosenConstrainOf, withConstrain, type Constrain } from '../lib/walkConstrain'
 import { Fetched, addPart, parseAddress, quarterTurnPart, removeParts } from 'sno-core/parts'
 import { FLOOR, MAX_SIZE, MIN_SIZE, stamp, type Facing, type StampKind, type WorkPlane } from 'sno-core/stamps'
@@ -186,12 +187,30 @@ export interface ClipPoints {
   /** Placed objects in hand, each with the reference it names rather than an index into refs, so it pastes into any object. */
   parts: Array<Omit<Part, 'ref'> & { ref: Ref }>
   /**
+   * The table entries those placements reach, at any depth (DECK-0003 §1.10):
+   * a YOURS copy lives only there, and goes with its placement, or a CUT
+   * would take it away and a PASTE elsewhere would name nothing (review of
+   * the stack). `sealed`: which of them came out of a bag.
+   */
+  objects?: Record<string, unknown>
+  sealed?: string[]
+  /**
    * The unit of the shard it came from, set only when a whole shard was
    * copied (COPY in MENU). PASTE then keeps its true size in a shard on
    * another unit and grows the grid to hold it; a selection pastes tick for
    * tick, as it always has.
    */
   unit?: number
+}
+
+/**
+ * Text and files are signed by nobody, so the copies they carry are left out
+ * (lib/carried.ts noTable, v2's rule against forgery). Said, terse, rather
+ * than lost in silence (review of the stack; Owner decisions).
+ */
+function sayLeftOut(given: ShardModel): void {
+  const n = Object.keys(given.objects ?? {}).length
+  if (n > 0) useToast.getState().show({ label: 'COPIES LEFT OUT', mark: 'build', meta: `${n} carried ${n === 1 ? 'piece' : 'pieces'}: text and files carry none.` })
 }
 
 /** The selected points, exactly where they are, with the faces wholly among them, and the selected placed objects. */
@@ -209,7 +228,24 @@ function clipOf(s: ShardModel, selection: number[], partSel: number[] = []): Cli
     faces: kept.map((i) => s.faces[i].map((v) => local.get(v) as number) as [number, number, number]),
     ...(seams ? { facecolors: kept.map((i) => [...seams[i]] as [number, number, number]) } : {}),
     parts: placed.map((i) => { const q = s.parts![i]; return { ...q, at: [...q.at] as P3, turn: [...q.turn] as [number, number, number], ref: s.refs![q.ref] } }),
+    ...reachedEntries(s, placed.map((i) => s.refs![s.parts![i].ref])),
   }
+}
+
+/** The entries of `s`'s table that `refs` reach, at any depth, and which of them came sealed: nothing when none do. */
+function reachedEntries(s: ShardModel, refs: readonly Ref[]): Pick<ClipPoints, 'objects' | 'sealed'> {
+  const table = s.objects ?? {}
+  const out: Record<string, unknown> = {}
+  const queue = refs.filter((r) => r[0] === 'a').map((r) => r[1])
+  while (queue.length) {
+    const a = queue.pop() as string
+    if (a in out || !Object.prototype.hasOwnProperty.call(table, a)) continue
+    out[a] = table[a]
+    queue.push(...addressesIn(table[a]))
+  }
+  if (Object.keys(out).length === 0) return {}
+  const sealed = [...sealedKeys(s)].filter((k) => k in out)
+  return { objects: out, ...(sealed.length ? { sealed } : {}) }
 }
 
 /**
@@ -942,6 +978,7 @@ export const useWorkshop = create<WorkshopState>((set, get) => {
     const base = s.vertices.length
     const firstPart = s.parts?.length ?? 0
     const many = clip.points.length + clip.parts.length > 1
+    let looped = false
     const added = edit((m) => {
       const pasted = clip.faces.map((f) => f.map((i) => base + i) as [number, number, number])
       const { facecolors: _held, ...bare } = m
@@ -968,6 +1005,15 @@ export const useWorkshop = create<WorkshopState>((set, get) => {
         }
       }
       for (const { ref, ...place } of objects) next = addPart(next, ref, place).shard
+      // The copies they place come with them; an entry already here stays as it is.
+      if (clip.objects) {
+        const held = next.objects ?? {}
+        const brought = Object.entries(clip.objects).filter(([k]) => !Object.prototype.hasOwnProperty.call(held, k))
+        if (brought.length) next = { ...next, objects: { ...held, ...Object.fromEntries(brought) } }
+        const sealed = (clip.sealed ?? []).filter((k) => brought.some(([b]) => b === k))
+        if (sealed.length) next = withSealed(next, sealed)
+      }
+      if (placesItself(next, selfAddress(m), localByAddress)) { looped = true; return null }
       // An import into an empty shard is that shard: it takes the file's
       // name, and a point cloud draws as POINTS rather than as one line
       // through every point in file order.
@@ -980,8 +1026,20 @@ export const useWorkshop = create<WorkshopState>((set, get) => {
     // widens to every vertex sharing a point: pasted exactly, the copy sits
     // on its original and widening would take both, so the nudges could
     // never carry the copy off alone.
+    if (looped) { set({ notice: 'An object cannot place itself.' }); return false }
     if (added) set({ selection: placed.map((_, k) => base + k), partSel: objects.map((_, k) => firstPart + k), selectedFaces: [], facePick: [] })
     return added
+  }
+
+  /** A shard's own address under you, the one a placement of it names. */
+  const selfAddress = (m: ShardModel): string | null => {
+    const me = you()
+    return me ? `33331:${me}:${m.id}` : null
+  }
+  /** Your workshop's shard at an address under your key, for placesItself to look through. */
+  const localByAddress = (address: string): ShardModel | undefined => {
+    const a = parseAddress(address)
+    return a && a.kind === 33331 && a.pubkey === you() ? get().shards.find((x) => x.id === a.d) : undefined
   }
 
   return {
@@ -1030,7 +1088,8 @@ export const useWorkshop = create<WorkshopState>((set, get) => {
       return s.id
     },
 
-    select: (id) => set({ currentId: id, selection: [], partSel: [], selectedFaces: [], facePick: [], past: [], future: [], notice: null }),
+    // Another shard leaves the parts open in this one: coming back opens it at the top (review of the stack).
+    select: (id) => set({ currentId: id, selection: [], partSel: [], selectedFaces: [], facePick: [], past: [], future: [], notice: null, ...(id !== get().currentId ? { inside: null } : {}) }),
 
     rename: (id, name) => {
       const list = get().shards.map((s) => (s.id === id ? { ...s, name: name.slice(0, 64), updatedAt: Date.now() } : s))
@@ -1129,6 +1188,8 @@ export const useWorkshop = create<WorkshopState>((set, get) => {
         ;({ shard: base, ref } = copyInto(s, source, you() ?? stampObject.copy.pubkey))
       }
       const { shard } = addPart(base, ref, { at: [...at] as P3, turn: [0, (90 * stampFacing) % 360, 0], step: 0 })
+      // Round a loop at any depth, the copy's id or not (review of the stack).
+      if (placesItself(shard, selfAddress(s), localByAddress)) { set({ notice: 'An object cannot place itself.' }); return }
       edit(() => shard, `"${stampObject.name}" placed. It is one object: SELECT it to move, turn or copy it.`)
       set({ selection: [], partSel: [], selectedFaces: [], facePick: [] })
     },
@@ -1747,6 +1808,7 @@ export const useWorkshop = create<WorkshopState>((set, get) => {
       if (!read) return null
       // Text nobody signed: nothing it carries is trusted (lib/carried.ts noTable).
       const s = noTable(read)
+      sayLeftOut(read)
       const list = [...get().shards, s]
       set({ shards: list, currentId: s.id, selection: [], partSel: [], selectedFaces: [], facePick: [], past: [], future: [], notice: null })
       save(list)
@@ -1773,6 +1835,7 @@ export const useWorkshop = create<WorkshopState>((set, get) => {
       if (id !== undefined && get().shards.some((s) => s.id === id)) return null
       // An import (a file, a zip): nobody signed it, so nothing it carries is trusted.
       const model = noTable(given)
+      sayLeftOut(given)
       const copy: ShardModel = { ...model, id: id ?? uuid(), name: name.slice(0, 64), vertices: model.vertices.map(cloneVertex), faces: model.faces.map((f) => [...f] as [number, number, number]), updatedAt: Date.now() }
       const list = [...get().shards, copy]
       set({ shards: list })
@@ -1785,6 +1848,7 @@ export const useWorkshop = create<WorkshopState>((set, get) => {
     replaceShard: (id, given) => {
       // An import's UPDATE: nobody signed it, so nothing it carries is trusted.
       const model = noTable(given)
+      sayLeftOut(given)
       const { shards, currentId, past } = get()
       const i = shards.findIndex((s) => s.id === id)
       if (i < 0) return Promise.resolve('missing')

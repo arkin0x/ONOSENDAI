@@ -74,7 +74,7 @@ describe('a paint on the bench', () => {
 describe('the workshop shell, on every tap and paint', () => {
   it('writes the object out for its size and fingerprint only while SHARD shows them', () => {
     expect(workshop).toMatch(/const seen = panel === 'shard' \? root : null/)
-    expect(workshop).toMatch(/shardFingerprint\(seen\)/)
+    expect(workshop).toMatch(/shardFingerprints\(seen\)/)
     expect(workshop).toMatch(/JSON\.stringify\(toPayload\(withAuthoredConstrain\(placedOnly\(seen\)\)\)\)/)
   })
   it('prices the avatar only while AVATAR shows it', () => {

@@ -38,7 +38,7 @@
  * driver below them is the impure part.
  */
 
-import { query, subscribe } from '../relay'
+import { query, queryChecked, subscribe } from '../relay'
 import { stopFromAnchor, type Stop, type StopKind } from './stops'
 import {
   adoptSnapshot,
@@ -562,7 +562,7 @@ export function setSyncPriority(high: boolean): void {
 }
 
 async function processBatch(heights: number[], cb: SyncCallbacks): Promise<void> {
-  const events = await query({ kinds: [321], '#B': heights.map(String), limit: 2000 })
+  const { events, trouble } = await queryChecked({ kinds: [321], '#B': heights.map(String), limit: 2000 })
   const best = new Map<number, { stop: Stop; hasM: boolean }>()
   // Parsed in slices with the loop handed back between them: a batch is up
   // to 2000 events, and rendering must not wait for all of them.
@@ -579,8 +579,10 @@ async function processBatch(heights: number[], cb: SyncCallbacks): Promise<void>
   appendStops(anchorIndex, fresh)
   // The whole batch is covered even where no event came back: the relay may
   // genuinely lack a few heights, and re-querying them forever would pin the
-  // sync just short of done.
-  for (const run of runsOf(heights)) covered = mergeCovered(covered, run)
+  // sync just short of done. Not when the canonical relay refused the read
+  // (no AUTH) or was not heard from: covered is kept across reloads, so those
+  // heights were never asked for again (HIDDEN BAGS audit, 2026-11-04).
+  if (!trouble) for (const run of runsOf(heights)) covered = mergeCovered(covered, run)
   cb.onLoaded(anchorIndex.size)
   scheduleBump(cb)
   pumpMerge(cb)

@@ -120,7 +120,8 @@ describe('where it is used', () => {
     // Checked in the worker, still asking a relay that hung (relayHang.test.ts), and
     // not also as they land: askOne is told, or every event is checked twice.
     expect(relay).toMatch(/return mergeAnswers\(await checks\.kept\(await queryRelays\(relaySet\(\), filter, MAX_WAIT_MS, \{ evenHung: opts\.evenHung, deferChecks: true, onAnswer: checks\.onAnswer \}\)\)\)/)
-    expect(relay).toMatch(/\? askOne\(url, filter, deadline, \{ deferChecks: opts\.deferChecks \}\)\.then\(\(a\) => \{ opts\.onAnswer\?\.\(a\); return a \}\)/)
+    // A list read's `stream` rides along (ReadOptions.stream); the checks are still only deferred when asked.
+    expect(relay).toMatch(/\? askOne\(url, filter, deadline, \{ deferChecks: opts\.deferChecks, \.\.\.\(opts\.stream \? \{ quietMs: opts\.stream\.quietMs, capAt: Date\.now\(\) \+ opts\.stream\.capMs \} : \{\}\) \}\)\.then\(\(a\) => \{ opts\.onAnswer\?\.\(a\); return a \}\)/)
     expect(relay).toMatch(/if \(!opts\.offThread\) return collect\(relaySet\(\), filter, MAX_WAIT_MS, opts\)/)
     const chains = fs.readFileSync(path.join(SRC, 'lib/chains.ts'), 'utf8')
     // Both: every relay, even a hung one (CHAIN_READ, #556), and off the main thread.

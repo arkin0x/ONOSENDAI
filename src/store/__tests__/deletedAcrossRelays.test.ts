@@ -36,6 +36,8 @@ vi.mock('../../lib/relay', () => ({
   query: vi.fn(async (filter: { kinds: number[] }) => relayHolds.filter((e) => filter.kinds.includes(e.kind))),
   queryEach: vi.fn(async (filter: { kinds: number[] }) => [{ url: 'wss://relay.test', outcome: 'answered', events: relayHolds.filter((e) => filter.kinds.includes(e.kind)) }]),
   queryAny: vi.fn(async () => []),
+  // The read that tells a refusal from nothing (rescan): this relay always answers.
+  queryChecked: vi.fn(async (filter: { kinds: number[] }) => ({ events: relayHolds.filter((e) => filter.kinds.includes(e.kind)), trouble: null })),
   relaySet: () => ['wss://relay.test'],
 }))
 

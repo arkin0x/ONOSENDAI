@@ -868,6 +868,39 @@ export function inItsBag(d: Pick<MyDeployment, 'goneFrom'>): boolean {
 
 /** Why a MOVE stopped: what it moves is no longer among your deployments here. */
 export const MOVE_GONE = 'That is no longer among what this device hid, so there is nothing to move.'
+/**
+ * Whether HIDE AGAIN can hide a fresh copy of a row gone from its bag: one
+ * carried inline (a reference names an object of its own: place it again
+ * from the workshop or the feed), and in a room only while its door is here
+ * (never a room bag no door names, §3.7.8).
+ */
+export function againHideable(d: Pick<MyDeployment, 'ref' | 'room'>, mine: readonly Pick<MyDeployment, 'eventId'>[]): boolean {
+  return !d.ref && (!d.room || mine.some((m) => m.eventId === d.room?.doorId))
+}
+
+/**
+ * HIDE AGAIN's fresh copy: the same item where it was, its kind, content and
+ * tags, without the lineage `d` (a placement of its own, not a version of
+ * anything), newer than the one it copies.
+ */
+export function freshCopyTemplate(previous: Pick<NostrEvent, 'kind' | 'content' | 'tags'>, createdAt: number): EventTemplate {
+  return { kind: previous.kind, created_at: createdAt, content: previous.content, tags: previous.tags.filter((t) => !(t[0] === 'd' && /^[0-9a-f]{64}$/.test(t[1] ?? ''))).map((t) => [...t]) }
+}
+
+/**
+ * What a gone row's HIDE AGAIN asks first: a key item, a chest, or a message
+ * carrying a cashu token may already stand somewhere else (another device may
+ * have moved it), and a second copy duplicates a key or a token.
+ */
+export function hideAgainAsks(d: Pick<MyDeployment, 'type' | 'text'>): boolean {
+  return d.type === 'key' || d.type === 'chest' || (d.type === 'message' && findCashuToken(d.text ?? '') !== null)
+}
+
+/** Why HIDE AGAIN does nothing for a row hidden by reference. */
+export const HIDE_AGAIN_REF = 'This one names an object of its own. Place it again from your workshop or the feed.'
+/** Why HIDE AGAIN does nothing for a row whose door is gone. */
+export const HIDE_AGAIN_NO_DOOR = 'Its door is gone, so its room is too.'
+
 /** Why HIDE AGAIN waits: a hide is still going out, and two rewrites at once could drop one. */
 export const HIDE_AGAIN_BUSY = 'A hide is still going out. Try again when it lands.'
 
@@ -1153,9 +1186,9 @@ interface ShardsState {
    */
   startMoveItem: (eventId: string) => void
   /**
-   * HIDE AGAIN on a row GONE FROM ITS BAG: back into its bag at its place,
-   * as a hide, and the mark cleared. Resolves to null when it went out, else
-   * why not (and the row stays marked).
+   * HIDE AGAIN on a row GONE FROM ITS BAG: a fresh copy (new id, no lineage)
+   * hidden in its bag at its place, in the marked row's stead. Resolves to
+   * null when it went out, else why not (and the row stays marked).
    */
   hideAgain: (eventId: string) => Promise<string | null>
   /** FORGET on a row GONE FROM ITS BAG: this device's record of it goes. Nothing is published. */
@@ -2041,9 +2074,12 @@ export const useShards = create<ShardsState>((set, get) => {
         const mine = get().mine.map((m) => (m.room && m.lookupId === lookupId && !doors.has(m.room.doorId) ? { ...m, room: { doorId: d.eventId } } : m))
         set({ mine })
         saveMine(mine)
-        return mine.filter((m) => m.room && (doors.has(m.room.doorId) || m.lookupId === lookupId))
+        return mine.filter((m) => m.room && (doors.has(m.room.doorId) || m.lookupId === lookupId) && inItsBag(m))
       }
-      return held
+      // A row gone from the room's bag (goneFrom) stays behind as it is: never
+      // staged into a rotated or renamed room's new bag, nor out with a door's
+      // contents (review 4 of #595).
+      return held.filter(inItsBag)
     }
     if (!live) return rows()
     const asked = await queryEach({ kinds: [HIDDEN_KIND], authors: [d.inner.pubkey], '#d': [lookupId] })
@@ -2440,21 +2476,47 @@ export const useShards = create<ShardsState>((set, get) => {
       })
     },
     hideAgain: async (eventId) => {
-      const owner = cyber().identity.pubkey
+      const cs = cyber()
+      const owner = cs.identity.pubkey
       const d = rowsOf(owner).find((m) => m.eventId === eventId)
       if (!d || d.goneFrom === undefined) return null
+      if (!againHideable(d, rowsOf(owner))) return d.ref ? HIDE_AGAIN_REF : HIDE_AGAIN_NO_DOOR
       if (get().deployStatus === 'working') return HIDE_AGAIN_BUSY
-      const gone = d.goneFrom
-      // Its last known bag is the version that lacked it, so that version (and
-      // no newer one) reads as one it was hidden into again.
-      const { goneFrom: _was, ...back } = d
-      void _was
-      const restored: MyDeployment = { ...back, bagAt: Math.max(d.bagAt ?? 0, gone) }
-      await commitRows(owner, rowsOf(owner).map((m) => (m.eventId === eventId ? restored : m)))
-      if (await get().broadcast(d.lookupId)) return null
-      // Not out: it stays gone from its bag, and out of every rewrite.
-      await commitRows(owner, rowsOf(owner).map((m) => (m.eventId === eventId && m.goneFrom === undefined ? { ...m, goneFrom: gone } : m)))
-      return get().broadcastError ?? 'No relay took the bag. Try again when one is reachable.'
+      // A FRESH copy where it was: a new id and no lineage `d`, so it is a
+      // placement of its own, listed and deletable on every device, and never
+      // read as the old version of something moved elsewhere (arkinox's
+      // ruling, review 4 of #595). Hidden audio is sealed again under a fresh
+      // key, as PLACE AGAIN's copy is, so no two placements share one.
+      const at = positionOf(d)
+      const now = Math.floor(Date.now() / 1000)
+      try {
+        let audio = d.audio
+        let template: EventTemplate
+        if (d.type === 'audio' && d.audio) {
+          audio = { ...d.audio, ...(await resealCopy(d.audio, (t) => cs.signEvent(t, AUDIO_SIGN_PATIENCE_MS))) }
+          template = audioInnerTemplate(audio, at, d.plane, Math.max(now, d.inner.created_at + 1))
+        } else template = freshCopyTemplate(d.inner, Math.max(now, d.inner.created_at + 1))
+        // A message and hidden audio are rumors, never signed (spec §7.6).
+        const inner = d.type === 'message' || d.type === 'audio' ? rumorOf(template, owner) as NostrEvent : await cs.signEvent(template)
+        const key = hexToBytes(d.keyHex)
+        const existing = await gatherInners(d.lookupId, key, true, d.height)
+        const settings = d.room ? ROOM_BAG_SETTINGS : existing.settings ?? d.bag ?? DEFAULT_BAG_SETTINGS
+        const { event, published } = await publishBag(mergeEntries(existing.entries, [inner]), key, d.lookupId, d.height, true, settings, { at, plane: d.plane }, undefined, existing.entries, owner)
+        if (!published) return 'No relay took the bag. Try again when one is reachable.'
+        const { goneFrom: _was, ...rest } = d
+        void _was
+        const fresh: MyDeployment = { ...rest, eventId: inner.id, inner, ...(audio ? { audio } : {}), createdAt: now, bagId: event.id, bagAt: event.created_at, published: true, bag: settings }
+        // The fresh copy takes the marked row's place; the old id is done with here.
+        await commitRows(owner, rowsOf(owner).map((m) => (m.eventId === eventId ? fresh : m.lookupId === d.lookupId && inItsBag(m) ? { ...m, bagId: event.id, bagAt: event.created_at, published: true, bag: settings } : m)))
+        const deleted = { ...get().deleted, [eventId]: true as const }
+        set({ deleted })
+        saveDeleted(deleted)
+        // A key you hid is yours to hold at once (B1 §3.1), this copy too.
+        if (d.key) useInventory.getState().holdForged(inner, d.key, { lookupId: d.lookupId, bagId: event.id, at: d.at, plane: d.plane, height: d.height })
+        return null
+      } catch (err) {
+        return err instanceof Error ? err.message : String(err)
+      }
     },
     forgetRow: (eventId) => {
       const owner = cyber().identity.pubkey

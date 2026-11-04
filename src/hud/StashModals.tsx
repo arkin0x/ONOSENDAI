@@ -9,7 +9,7 @@ import { useState } from 'react'
 import { createPortal } from 'react-dom'
 import { formatCellSize } from 'sno-core/scale'
 import { cashuLabel } from '../lib/cashu'
-import { inItsBag, movable, useShards, type MyDeployment } from '../store/useShards'
+import { againHideable, hideAgainAsks, inItsBag, movable, useShards, type MyDeployment } from '../store/useShards'
 import { movePlaced } from '../store/useBuilder'
 import { useCashu, cashuStateLabel } from './useCashu'
 import { bagsOf, depName, goToDeployment, useStash, type Bag } from './stash'
@@ -85,12 +85,17 @@ function ItemRow({ d, onGo, onMove }: { d: MyDeployment; onGo: () => void; onMov
   const me = useCyberspace((s) => s.identity.pubkey)
   const [hiding, setHiding] = useState(false)
   const [why, setWhy] = useState<string | null>(null)
+  const [asking, setAsking] = useState(false)
+  const canAgain = useShards((s) => againHideable(d, s.mine))
   // GONE FROM ITS BAG (useShards `goneFrom`): moved or removed from another
   // device, or dropped by a stale rewrite. Not drawn, never written back;
-  // HIDE AGAIN puts it back where it was, FORGET drops this device's record.
+  // HIDE AGAIN hides a fresh copy where it was, FORGET drops this device's
+  // record. A key, a chest or a cashu message asks first: it may stand
+  // somewhere else already, and a copy duplicates a key or a token.
   if (!inItsBag(d)) {
     const again = (): void => {
-      setHiding(true); setWhy(null)
+      if (hideAgainAsks(d) && !asking) { setAsking(true); return }
+      setAsking(false); setHiding(true); setWhy(null)
       void useShards.getState().hideAgain(d.eventId).then((w) => { setHiding(false); setWhy(w) })
     }
     return (
@@ -101,10 +106,13 @@ function ItemRow({ d, onGo, onMove }: { d: MyDeployment; onGo: () => void; onMov
             {coin ? 'cashu token' : depName(d)}
           </span>
           <span className="shards__meta shards__meta--gone">GONE FROM ITS BAG</span>
+          {asking && <span className="shards__meta shards__meta--gone" role="status">MAY ALREADY BE ELSEWHERE</span>}
           {why && <span className="shards__meta shards__meta--gone" role="status">{why}</span>}
         </span>
-        <button className="shards__move" disabled={hiding} onClick={again} title="Put it back in its bag where it was">{hiding ? 'HIDING…' : 'HIDE AGAIN'}</button>
-        <button className="shards__move" disabled={hiding} onClick={() => useShards.getState().forgetRow(d.eventId)} title="Drop it from this list. Nothing is published">FORGET</button>
+        {canAgain && <button className="shards__move" disabled={hiding} onClick={again} title="Hide a fresh copy where it was">{hiding ? 'HIDING…' : asking ? 'HIDE ANOTHER' : 'HIDE AGAIN'}</button>}
+        {asking
+          ? <button className="shards__move" onClick={() => setAsking(false)}>CANCEL</button>
+          : <button className="shards__move" disabled={hiding} onClick={() => useShards.getState().forgetRow(d.eventId)} title="Drop it from this list. Nothing is published">FORGET</button>}
       </li>
     )
   }

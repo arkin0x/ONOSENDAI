@@ -32,6 +32,17 @@ let silent = false
 /** Events the relay holds but does not serve: a lagging relay, or the one with the newest copy not answering. */
 const withheld = new Set<string>()
 const served = (e: { id: string }) => !withheld.has(e.id)
+// HIDE AGAIN of hidden audio seals the file again under a fresh key, as PLACE AGAIN does: no Blossom here.
+const resealed = vi.hoisted(() => ({ n: 0 }))
+vi.mock('../../lib/audioFile', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../lib/audioFile')>()),
+  resealCopy: vi.fn(async (a: { url: string; mime: string; originalHash?: string }) => {
+    resealed.n++
+    const hash = resealed.n.toString(16).padStart(64, '0')
+    return { url: `https://blossom.test/${hash}`, mime: a.mime, hash, originalHash: a.originalHash, size: 2048, keyHex: (resealed.n + 1).toString(16).padStart(64, '0'), nonceHex: '02'.repeat(12) }
+  }),
+}))
+
 vi.mock('../../lib/relay', () => ({
   publishMany: vi.fn(async (_relays: string[], ev: { kind: number; tags: string[][]; id: string }) => {
     if (refused.has(ev.kind)) return { ok: false }
@@ -60,7 +71,7 @@ import { useCyberspace } from '../useCyberspace'
 import { useInventory } from '../useInventory'
 import { movePlaced, useBuilder } from '../useBuilder'
 import { useToast } from '../useToast'
-import { HIDE_AGAIN_BUSY, MOVE_GONE, MOVE_STALE, MOVE_UNANSWERED, inItsBag, movable, movingId, newestOfMoved, oneVersionEach, repeatable, useShards, type MyDeployment } from '../useShards'
+import { HIDE_AGAIN_BUSY, HIDE_AGAIN_NO_DOOR, HIDE_AGAIN_REF, againHideable, hideAgainAsks, MOVE_GONE, MOVE_STALE, MOVE_UNANSWERED, inItsBag, movable, movingId, newestOfMoved, oneVersionEach, repeatable, useShards, type MyDeployment } from '../useShards'
 
 const S = () => useShards.getState()
 const me = () => useCyberspace.getState().identity.pubkey
@@ -570,7 +581,7 @@ describe('review 3 of #595: two writers, nothing lost', () => {
     return { x, z, lookupId, keyHex, device1 }
   }
 
-  it('W1: a stale rewrite elsewhere dropped z; z stays listed, gone from its bag, and HIDE AGAIN puts it back', async () => {
+  it('W1: a stale rewrite elsewhere dropped z; z stays listed, gone from its bag, and HIDE AGAIN hides a fresh copy where it was', async () => {
     const { z, lookupId, keyHex } = await twoWriters()
     const zRow = row(z)
     expect(zRow).toBeDefined()
@@ -578,13 +589,20 @@ describe('review 3 of #595: two writers, nothing lost', () => {
     expect(await bagIdsIn(lookupId, keyHex)).not.toContain(z)
     expect(S().worldItems().some((w) => w.key === z)).toBe(false)
     expect(await S().hideAgain(z)).toBeNull()
-    expect(inItsBag(row(z))).toBe(true)
-    expect(await bagIdsIn(lookupId, keyHex)).toContain(z)
-    expect(S().worldItems().some((w) => w.key === z)).toBe(true)
+    // The marked row is replaced by a fresh copy: a new id, no lineage, the same words at the same place.
+    expect(S().mine.some((d) => d.eventId === z)).toBe(false)
+    const copy = S().mine.find((d) => d.text === zRow.text && d.eventId !== z && tag(d.inner, 'C') === tag(zRow.inner, 'C'))!
+    expect(copy).toBeDefined()
+    expect(inItsBag(copy)).toBe(true)
+    expect(tag(copy.inner, 'd')).toBeUndefined()
+    expect(itemLineage(copy.inner)).toBe(copy.eventId)
+    const inBag = await bagIdsIn(lookupId, keyHex)
+    expect(inBag).toContain(copy.eventId)
+    expect(inBag).not.toContain(z)
+    expect(S().worldItems().some((w) => w.key === copy.eventId)).toBe(true)
     // And it stays in through the next rewrite.
     await hide('message', at(5n))
-    expect(await bagIdsIn(lookupId, keyHex)).toContain(z)
-    expect(inItsBag(row(z))).toBe(true)
+    expect(await bagIdsIn(lookupId, keyHex)).toContain(copy.eventId)
   })
 
   it('HIDE AGAIN that no relay takes leaves it marked and out of the bag', async () => {
@@ -634,5 +652,108 @@ describe('review 3 of #595: two writers, nothing lost', () => {
     await S().deploy()
     expect(S().deployError).toBe(MOVE_STALE)
     expect(sent.length).toBe(mark)
+  })
+})
+
+describe('review 4 of #595: HIDE AGAIN hides a fresh copy', () => {
+  it('R1 + HIDE AGAIN: the stale device\'s copy is a placement of its own, listed, drawn and deletable on the other device too', async () => {
+    const stays = await hide('message', at(2n))
+    const goes = await hide('message', at(1n))
+    const oldRow = row(goes)
+    const device2 = S().mine.map((d) => ({ ...d }))
+    const moved = await move(goes, at(9n))
+    const device1 = { mine: S().mine.map((d) => ({ ...d })), deleted: { ...S().deleted } }
+    // Device 2 missed the move: its next hide in the old region marks the old row.
+    useShards.setState({ mine: device2, deleted: {}, discovered: {} })
+    await hide('message', at(3n))
+    expect(inItsBag(row(goes))).toBe(false)
+    // HIDE AGAIN there: never the old id back, a fresh copy instead.
+    expect(await S().hideAgain(goes)).toBeNull()
+    const inOld = await bagIdsIn(oldRow.lookupId, oldRow.keyHex)
+    expect(inOld).not.toContain(goes)
+    const copy = S().mine.find((d) => d.text === oldRow.text && d.lookupId === oldRow.lookupId && d.eventId !== goes)!
+    expect(inOld).toContain(copy.eventId)
+    expect(tag(copy.inner, 'd')).toBeUndefined()
+    // Device 1 reads the old region: the copy is a find of its own, listed and drawn beside the moved one.
+    useShards.setState({ mine: device1.mine, deleted: device1.deleted, discovered: {} })
+    const bag = newestBag(oldRow.lookupId)!
+    S().addDiscovered([{ ...asFound(copy), bagId: bag.id, bagAt: bag.created_at, bag: copy.bag } as Hidden])
+    expect(S().mine.some((d) => d.eventId === copy.eventId)).toBe(true)
+    expect(S().mine.some((d) => d.eventId === goes)).toBe(false)
+    const drawn = S().worldItems().map((w) => w.key)
+    expect(drawn).toContain(copy.eventId)
+    expect(drawn).toContain(moved.eventId)
+    // And DELETE there takes it down.
+    await S().deleteInstance(copy.eventId)
+    expect(await bagIdsIn(oldRow.lookupId, oldRow.keyHex)).not.toContain(copy.eventId)
+    void stays
+  })
+
+  it('a marked row that was itself a moved version comes back with no lineage: never a ghost of the moved one', async () => {
+    const goes = await hide('message', at(1n))
+    const once = await move(goes, at(9n))
+    expect(tag(once.inner, 'd')).toBe(goes)
+    await hide('message', at(10n))
+    const device2 = S().mine.map((d) => ({ ...d }))
+    const twice = await move(once.eventId, at(17n))
+    const device1 = { mine: S().mine.map((d) => ({ ...d })), deleted: { ...S().deleted } }
+    // Device 2 missed the second move; its next hide in the middle region marks the moved version.
+    useShards.setState({ mine: device2, deleted: {}, discovered: {} })
+    await hide('message', at(11n))
+    expect(row(once.eventId).goneFrom).toBeDefined()
+    expect(await S().hideAgain(once.eventId)).toBeNull()
+    const copy = S().mine.find((d) => d.text === once.text && d.lookupId === once.lookupId && d.eventId !== once.eventId)!
+    expect(tag(copy.inner, 'd')).toBeUndefined()
+    // Device 1, holding the item where it moved it, reads the middle region: both are drawn, neither hides the other.
+    useShards.setState({ mine: device1.mine, deleted: device1.deleted, discovered: {} })
+    const bag = newestBag(once.lookupId)!
+    S().addDiscovered([{ ...asFound(copy), bagId: bag.id, bagAt: bag.created_at, bag: copy.bag } as Hidden])
+    const drawn = S().worldItems().map((w) => w.key)
+    expect(drawn).toContain(copy.eventId)
+    expect(drawn).toContain(twice.eventId)
+  })
+
+  it('hidden audio comes back under a fresh key, never the one it had', async () => {
+    const x = await hide('message', at(1n))
+    const device2 = S().mine.map((d) => ({ ...d }))
+    const snd = await hide('audio', mid(2n))
+    const v2 = newestBag(row(snd).lookupId)!
+    const device1 = S().mine.map((d) => ({ ...d }))
+    useShards.setState({ mine: device2, deleted: {}, discovered: {} })
+    withheld.add(v2.id)
+    await hide('message', at(3n))
+    withheld.clear()
+    useShards.setState({ mine: device1, deleted: {}, discovered: {} })
+    await hide('message', at(4n))
+    const was = row(snd)
+    expect(was.goneFrom).toBeDefined()
+    expect(await S().hideAgain(snd)).toBeNull()
+    const copy = S().mine.find((d) => d.type === 'audio')!
+    expect(copy.eventId).not.toBe(snd)
+    expect(copy.audio?.keyHex).not.toBe(was.audio?.keyHex)
+    expect(copy.inner.tags.find((t) => t[0] === 'decryption-key')?.[1]).toBe(copy.audio?.keyHex)
+    expect('sig' in copy.inner).toBe(false)
+    void x
+  })
+
+  it('asks first for a key item, a chest or a cashu token; not for a plain message, a shard or a sound', () => {
+    const coin = 'cashuA' + btoa(JSON.stringify({ token: [{ mint: 'https://mint.example', proofs: [{ id: '00ad', amount: 21, secret: 'a', C: '02aa' }] }], unit: 'sat' })).replace(/=+$/, '')
+    expect(hideAgainAsks({ type: 'key' })).toBe(true)
+    expect(hideAgainAsks({ type: 'chest' })).toBe(true)
+    expect(hideAgainAsks({ type: 'message', text: `here: ${coin}` })).toBe(true)
+    expect(hideAgainAsks({ type: 'message', text: 'meet at the fountain' })).toBe(false)
+    expect(hideAgainAsks({ type: 'shard' })).toBe(false)
+    expect(hideAgainAsks({ type: 'audio' })).toBe(false)
+  })
+
+  it('a row hidden by reference, or behind a door that is gone, is FORGET only', async () => {
+    const goes = await hide('message', at(1n))
+    const d = row(goes)
+    useShards.setState({ mine: [{ ...d, ref: ['a', '33331:x:y', '', ''], goneFrom: 1 }] })
+    expect(againHideable(row(goes), S().mine)).toBe(false)
+    expect(await S().hideAgain(goes)).toBe(HIDE_AGAIN_REF)
+    useShards.setState({ mine: [{ ...d, room: { doorId: 'f'.repeat(64) }, goneFrom: 1 }] })
+    expect(await S().hideAgain(goes)).toBe(HIDE_AGAIN_NO_DOOR)
+    expect(row(goes).goneFrom).toBe(1)
   })
 })

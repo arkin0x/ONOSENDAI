@@ -56,25 +56,103 @@ export const WORKER_FROM = 32
  * Those of `events` that are authentic, checked off the main thread when there
  * are enough to matter, and remembered (lib/verifiedSigs) so a repeat view skips
  * the Schnorr checks. Whatever fails is dropped, as the pool drops one as it lands.
+ * On the kept worker (checkOnKept): a chain comes a page at a time from each
+ * relay, and a new worker for each was about 120 ms apiece before any check.
  */
 export async function keepAuthentic(events: NostrEvent[]): Promise<NostrEvent[]> {
   if (events.length < WORKER_FROM) return events.filter((e) => verifyOnce(e))
-  const bad = await checkSignatures(events, undefined, alreadyChecked(events))
+  const bad = await checkOnKept(events, alreadyChecked(events))
   const good = events.filter((e) => !bad.has(e.id))
   for (const e of good) checkedElsewhere(e)
   return good
 }
 
 /**
- * Each relay's answer, keeping what is authentic, one relay after another. Before
- * the answers merge, or a forged copy from one relay would stand in for the real
- * event from another, merged by id, and hide it. In turn, so a later relay's copies
- * of what an earlier one proved skip their Schnorr checks.
+ * Each relay's answer checked apart, before the answers merge, or a forged copy
+ * from one relay would stand in for the real event from another, merged by id,
+ * and hide it. `onAnswer` starts a relay's check the moment its answer is in
+ * (relay.ts query), not after the slowest relay has answered; `kept` waits for
+ * every check. The kept worker takes them in turn and checks a later relay's
+ * copy of what it already proved by its id alone.
  */
-export async function keepAuthenticAnswers<A extends { events: NostrEvent[] }>(answers: A[]): Promise<A[]> {
-  const out: A[] = []
-  for (const a of answers) out.push({ ...a, events: await keepAuthentic(a.events) })
-  return out
+export function answerChecks<A extends { events: NostrEvent[] }>(): { onAnswer: (a: A) => void; kept: (answers: A[]) => Promise<A[]> } {
+  const checking = new Map<A, Promise<NostrEvent[]>>()
+  return {
+    onAnswer: (a) => { checking.set(a, keepAuthentic(a.events)) },
+    kept: (answers) => Promise.all(answers.map(async (a) => ({ ...a, events: await (checking.get(a) ?? keepAuthentic(a.events)) }))),
+  }
+}
+
+/** Every answer kept to what is authentic, checked apart (answerChecks), all started at once. */
+export function keepAuthenticAnswers<A extends { events: NostrEvent[] }>(answers: A[]): Promise<A[]> {
+  return answerChecks<A>().kept(answers)
+}
+
+/** How long the kept worker stays after its last answer: a chain is read a few pages in a row. */
+export const KEPT_WORKER_IDLE_MS = 10_000
+
+/** The kept worker, the answers it owes by request, and how many events are queued on it. */
+interface Kept { worker: Worker; waiting: Map<number, (bad: Set<string> | null) => void>; queued: number; idle?: ReturnType<typeof setTimeout> }
+let kept: Kept | null = null
+let lastSeq = 0
+
+/** Ends a kept worker; whatever it still owes is checked on the main thread instead. */
+function dropKept(k: Kept): void {
+  if (kept === k) kept = null
+  clearTimeout(k.idle)
+  k.worker.terminate()
+  const owed = [...k.waiting.values()]
+  k.waiting.clear()
+  for (const answer of owed) answer(null)
+}
+
+/** Ends the kept worker now, if there is one: for tests. */
+export function endKeptWorker(): void {
+  if (kept) dropKept(kept)
+}
+
+function keptWorker(): Kept {
+  if (kept) {
+    clearTimeout(kept.idle)
+    return kept
+  }
+  const k: Kept = { worker: new Worker(new URL('../workers/sig.worker.ts', import.meta.url), { type: 'module' }), waiting: new Map(), queued: 0 }
+  k.worker.onmessage = (message: MessageEvent<SigCheckResponse>) => {
+    const { seq } = message.data
+    const answer = seq === undefined ? undefined : k.waiting.get(seq)
+    if (!answer || seq === undefined) return
+    k.waiting.delete(seq)
+    answer(new Set(message.data.bad))
+    if (k.waiting.size === 0 && kept === k) k.idle = setTimeout(() => dropKept(k), KEPT_WORKER_IDLE_MS)
+  }
+  k.worker.onerror = () => dropKept(k)
+  kept = k
+  return k
+}
+
+/**
+ * checkSignatures on one worker kept for a while, its requests answered in turn.
+ * The same guarantees: never rejects, never waits forever. Its deadline counts
+ * everything queued ahead of it; a worker past one is ended, and everything it
+ * owed is checked on the main thread.
+ */
+function checkOnKept(events: NostrEvent[], known: readonly string[]): Promise<Set<string>> {
+  const knownSet = new Set(known)
+  if (typeof Worker === 'undefined') return inChunks(events, knownSet)
+  let k: Kept
+  try { k = keptWorker() } catch { return inChunks(events, knownSet) }
+  const seq = ++lastSeq
+  k.queued += events.length
+  return new Promise<Set<string> | null>((resolve) => {
+    const timer = setTimeout(() => dropKept(k), sigCheckDeadlineMs(k.queued))
+    k.waiting.set(seq, (bad) => {
+      clearTimeout(timer)
+      k.queued -= events.length
+      resolve(bad)
+    })
+    const request: SigCheckRequest = { events, known, seq }
+    k.worker.postMessage(request)
+  }).then((bad) => bad ?? inChunks(events, knownSet))
 }
 
 /**

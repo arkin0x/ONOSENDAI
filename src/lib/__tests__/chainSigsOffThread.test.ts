@@ -104,7 +104,7 @@ describe('more than one relay', () => {
     expect(answers[1].events.map((e) => e.id)).toEqual([real.id])
   })
 
-  it('a later relay\'s copies of what an earlier one proved are not checked again', async () => {
+  it('what one relay\'s answer proved is remembered here, so a repeat view is free', async () => {
     const events = Array.from({ length: WORKER_FROM }, (_, i) => wire(event(600 + i)))
     await keepAuthenticAnswers([{ url: 'a', events }])
     expect(alreadyChecked(events.map(wire)).length).toBe(events.length)
@@ -119,8 +119,8 @@ describe('where it is used', () => {
     expect(relay.match(/deferChecks: true/g)).toHaveLength(1)
     // Checked in the worker, still asking a relay that hung (relayHang.test.ts), and
     // not also as they land: askOne is told, or every event is checked twice.
-    expect(relay).toMatch(/return mergeAnswers\(await keepAuthenticAnswers\(await queryRelays\(relaySet\(\), filter, MAX_WAIT_MS, \{ evenHung: opts\.evenHung, deferChecks: true \}\)\)\)/)
-    expect(relay).toMatch(/\? askOne\(url, filter, deadline, \{ deferChecks: opts\.deferChecks \}\)/)
+    expect(relay).toMatch(/return mergeAnswers\(await checks\.kept\(await queryRelays\(relaySet\(\), filter, MAX_WAIT_MS, \{ evenHung: opts\.evenHung, deferChecks: true, onAnswer: checks\.onAnswer \}\)\)\)/)
+    expect(relay).toMatch(/\? askOne\(url, filter, deadline, \{ deferChecks: opts\.deferChecks \}\)\.then\(\(a\) => \{ opts\.onAnswer\?\.\(a\); return a \}\)/)
     expect(relay).toMatch(/if \(!opts\.offThread\) return collect\(relaySet\(\), filter, MAX_WAIT_MS, opts\)/)
     const chains = fs.readFileSync(path.join(SRC, 'lib/chains.ts'), 'utf8')
     // Both: every relay, even a hung one (CHAIN_READ, #556), and off the main thread.

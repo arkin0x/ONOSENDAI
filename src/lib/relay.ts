@@ -14,7 +14,7 @@
 import { AbstractSimplePool } from 'nostr-tools/abstract-pool'
 import type { AbstractRelay } from 'nostr-tools/abstract-relay'
 import { deferCheck, verifyOnce, verifyUnlessDeferred } from './verifiedSigs'
-import { keepAuthenticAnswers } from './sigCheck'
+import { answerChecks } from './sigCheck'
 import type { Filter } from 'nostr-tools/filter'
 import type { EventTemplate, VerifiedEvent } from 'nostr-tools/core'
 import type { NostrEvent } from './events'
@@ -347,7 +347,7 @@ interface AskOptions {
   stop?: AbortSignal
   /** Handed every event the moment it lands, before the relay has finished answering. */
   onEvent?: (ev: NostrEvent) => void
-  /** Whoever asked checks the signatures of what comes back (query with offThread, through sigCheck.ts keepAuthenticAnswers): none are checked as they land. */
+  /** Whoever asked checks the signatures of what comes back (query with offThread, through sigCheck.ts answerChecks): none are checked as they land. */
   deferChecks?: boolean
 }
 
@@ -447,6 +447,9 @@ async function askOne(url: string, filter: Filter, deadline: number, opts: AskOp
   })
 }
 
+/** For queryRelays alone: `onAnswer` hears each relay's answer the moment it is in. */
+interface AskAll extends ReadOptions, Pick<AskOptions, 'deferChecks'> { onAnswer?: (a: RelayAnswer) => void }
+
 /**
  * One-shot query, each relay asked and answered on its own, then closed.
  *
@@ -455,13 +458,13 @@ async function askOne(url: string, filter: Filter, deadline: number, opts: AskOp
  * deadline is ours and is the only timer that ends a wait (see
  * NOSTR_TOOLS_EOSE_MS).
  */
-async function queryRelays(relays: string[], filter: Filter, maxWait = MAX_WAIT_MS, opts: ReadOptions & Pick<AskOptions, 'deferChecks'> = {}): Promise<RelayAnswer[]> {
+async function queryRelays(relays: string[], filter: Filter, maxWait = MAX_WAIT_MS, opts: AskAll = {}): Promise<RelayAnswer[]> {
   const urls = [...new Set(relays.map((r) => normalizeURL(r)))]
   const asked = opts.evenHung ? urls : skipHung(urls)
   await authAll(asked)
   const deadline = Date.now() + maxWait
   const answers = await Promise.all(urls.map((url): Promise<RelayAnswer> => asked.includes(url)
-    ? askOne(url, filter, deadline, { deferChecks: opts.deferChecks })
+    ? askOne(url, filter, deadline, { deferChecks: opts.deferChecks }).then((a) => { opts.onAnswer?.(a); return a })
     : Promise.resolve({ url, outcome: 'unreachable', reason: HUNG_REASON, events: [] })))
   // Silent for a whole full-length question, with nothing sent: it hung. A short question says nothing.
   if (maxWait >= CONNECT_MS) for (const a of answers) if (a.outcome === 'unreachable' && a.reason === NO_ANSWER && a.events.length === 0) noteTimeout(a.url)
@@ -488,7 +491,9 @@ async function collect(relays: string[], filter: Filter, maxWait = MAX_WAIT_MS, 
  */
 export async function query(filter: Filter, opts: ReadOptions = {}): Promise<NostrEvent[]> {
   if (!opts.offThread) return collect(relaySet(), filter, MAX_WAIT_MS, opts)
-  return mergeAnswers(await keepAuthenticAnswers(await queryRelays(relaySet(), filter, MAX_WAIT_MS, { evenHung: opts.evenHung, deferChecks: true })))
+  // Each relay's answer is checked the moment it is in, not after the slowest one.
+  const checks = answerChecks<RelayAnswer>()
+  return mergeAnswers(await checks.kept(await queryRelays(relaySet(), filter, MAX_WAIT_MS, { evenHung: opts.evenHung, deferChecks: true, onAnswer: checks.onAnswer })))
 }
 
 /**

@@ -18,6 +18,10 @@
  * stops its sound wherever the card is, open or not, because the voice keeps
  * its item's `who` and the mute list is watched (useHiddenAudio
  * stopMutedVoices).
+ *
+ * NOW PLAYING's mutes are by track (its lineage id, `triggerId`), and reach
+ * its PLAY too: a muted track plays silent, listed in NOW PLAYING, where it
+ * is unmuted. MUTED among the marks says so here.
  */
 
 import { useState, useSyncExternalStore, type ReactNode } from 'react'
@@ -26,6 +30,7 @@ import type { AudioItem } from '../lib/audioItem'
 import { audioExtension } from '../lib/audioItem'
 import { hasTrigger, onTriggers, resetTrigger, triggerFired, triggersVersion } from '../lib/audioTrigger'
 import { cardKey, downloadAudio, playAudio, stopAudio, useHiddenAudio, type MuteSubject } from '../store/useHiddenAudio'
+import { trackSilenced, useSoundMutes } from '../store/useSoundMutes'
 import { ItemIcon } from './ItemIcon'
 
 const ICON = 12
@@ -50,6 +55,7 @@ const MARK_TIPS: Record<string, string> = {
   'FIRST ENTRY': 'Plays the first time you enter its sphere',
   'ON TAP': 'Plays only from here',
   'WALK ONLY': 'Heard only in first person (WALK mode)',
+  MUTED: 'Muted in NOW PLAYING',
 }
 
 export function AudioCard({ id, triggerId, audio, who, moderation }: {
@@ -65,13 +71,15 @@ export function AudioCard({ id, triggerId, audio, who, moderation }: {
   const entry = useHiddenAudio((s) => s.entries[cardKey(id)])
   useSyncExternalStore(onTriggers, triggersVersion, triggersVersion)
   const fired = triggerFired(triggerId)
+  // Once the switches are read: not MUTED for the moment the read takes.
+  const muted = useSoundMutes((s) => s.ready && trackSilenced(triggerId, s))
   const [saving, setSaving] = useState(false)
   const [saveError, setSaveError] = useState<string | null>(null)
 
   const sounding = entry?.phase === 'playing' || entry?.phase === 'loading'
   const toggle = (): void => {
     if (sounding) stopAudio(id)
-    else void playAudio(id, audio, who)
+    else void playAudio(id, audio, who, triggerId)
   }
   const save = (): void => {
     setSaving(true)
@@ -88,7 +96,7 @@ export function AudioCard({ id, triggerId, audio, who, moderation }: {
       </div>
       {audio.about && <span className="audio__about">{audio.about}</span>}
       <span className="audio__marks">
-        {audioMarks(audio).map((m) => <span key={m} className="audio__mark" title={MARK_TIPS[m]}>{m}</span>)}
+        {[...audioMarks(audio), ...(muted ? ['MUTED'] : [])].map((m) => <span key={m} className={`audio__mark${m === 'MUTED' ? ' audio__mark--muted' : ''}`} title={MARK_TIPS[m]}>{m}</span>)}
       </span>
       <div className="secret__actions audio__acts">
         <button className={`secret__act ${sounding ? 'is-on' : ''}`} onClick={toggle} title={sounding ? 'Stop it' : 'Play the file here, as it is'}>

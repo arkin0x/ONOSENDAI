@@ -3651,29 +3651,115 @@ kbd {
    the dock the route overlay uses outside WALK, so it moves with the button
    from a phone's corner to a desktop's scene edge. Beneath the chat (101),
    the instrument stack (102) and the pad (103), like the overlay: unfolded
-   over it, those win. */
-.benchorb.benchorb--walk {
-  position: fixed;
+   over it, those win. The whole square around the ball takes the press
+   (arkinox, 2026-11-02: "the touch area is a full square containing the
+   sphere"): the square is the button and draws nothing of its own, and the
+   ball inside is only a picture. */
+.orbsquare {
+  display: block;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+}
+.orbsquare:active { cursor: grabbing; }
+.orbsquare .benchorb.benchorb--inside {
+  position: relative;
   right: auto;
+  bottom: auto;
+  z-index: auto;
+  width: 100%;
+  height: 100%;
+  box-sizing: border-box;
+  pointer-events: none;
+}
+.orbsquare.walklook {
+  position: fixed;
   left: var(--menu-left);
   bottom: calc(var(--menu-bottom) + var(--menu-size) + var(--routeov-gap));
   z-index: 100;
   width: 112px;
   height: 112px;
-  padding-bottom: 10px;
 }
-/* Over the HOSAKA mark when a job computes in WALK, as the overlay stands. */
-.app:has(.hosaka-pulse) .benchorb--walk {
+.orbsquare.walklook .benchorb--inside { padding-bottom: 10px; }
+.app:has(.hosaka-pulse) .walklook {
   bottom: calc(var(--menu-bottom) + var(--menu-size) * (1 + 334 / 308) + 2 * var(--routeov-gap));
 }
-/* A short screen (a phone on its side) keeps the top left's chips clear:
-   a smaller ball, and beside the HOSAKA mark rather than over it. */
 @media (max-height: 520px) {
-  .benchorb.benchorb--walk { width: 88px; height: 88px; padding-bottom: 6px; }
-  .app:has(.hosaka-pulse) .benchorb--walk {
+  .orbsquare.walklook { width: 88px; height: 88px; }
+  .orbsquare.walklook .benchorb--inside { padding-bottom: 6px; }
+  .app:has(.hosaka-pulse) .walklook {
     left: calc(var(--menu-left) + var(--menu-size) + var(--routeov-gap));
     bottom: calc(var(--menu-bottom) + var(--menu-size) + var(--routeov-gap));
   }
+}
+
+/* VIEW's fly, forward over back (ViewFlyButtons.tsx; arkinox, 2026-11-02):
+   the LOOK ball's glass, at the menu button's size, in the dock above the
+   button that the LOOK ball and the route overlay use. Neither is up in VIEW.
+   Tinted VIEW's amber, the pad's own color for the mode. */
+.flyorbs {
+  position: fixed;
+  left: var(--menu-left);
+  bottom: calc(var(--menu-bottom) + var(--menu-size) + var(--routeov-gap));
+  z-index: 100;
+  display: flex;
+  flex-direction: column;
+  gap: var(--routeov-gap);
+}
+.flyorb {
+  position: relative;
+  width: var(--menu-size);
+  height: var(--menu-size);
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  border: 1px solid rgba(255, 176, 32, 0.45);
+  background: radial-gradient(circle at 36% 32%, rgba(255, 176, 32, 0.26), rgba(6, 14, 22, 0.72) 62%, rgba(6, 14, 22, 0.88));
+  box-shadow: 0 0 12px rgba(255, 176, 32, 0.12), inset 0 0 16px rgba(0, 0, 0, 0.45);
+  backdrop-filter: blur(6px);
+  color: rgb(255, 196, 92);
+  cursor: pointer;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+}
+.flyorb::before,
+.flyorb::after {
+  content: '';
+  position: absolute;
+  inset: 5px;
+  border-radius: 50%;
+  border: 1px solid rgba(200, 245, 255, 0.12);
+  pointer-events: none;
+}
+.flyorb::before { transform: scaleX(0.42); }
+.flyorb::after { transform: scaleY(0.42); }
+.flyorb svg { position: relative; z-index: 1; filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.6)); }
+.flyorb:active {
+  background: radial-gradient(circle at 36% 32%, rgba(255, 176, 32, 0.5), rgba(6, 14, 22, 0.66) 62%, rgba(6, 14, 22, 0.86));
+  border-color: rgba(255, 176, 32, 0.8);
+}
+/* Over the HOSAKA mark while a job computes, as the LOOK ball stands. */
+.app:has(.hosaka-pulse) .flyorbs {
+  bottom: calc(var(--menu-bottom) + var(--menu-size) * (1 + 334 / 308) + 2 * var(--routeov-gap));
+}
+/* A short screen (a phone on its side): side by side, beside the menu
+   button, so the top left's chips keep their room. */
+@media (max-height: 520px) {
+  .flyorbs {
+    flex-direction: row;
+    left: calc(var(--menu-left) + var(--menu-size) + var(--routeov-gap));
+    bottom: var(--menu-bottom);
+  }
+  .app:has(.hosaka-pulse) .flyorbs { bottom: var(--menu-bottom); }
 }
 
 /* The clipboard row: first in the bottom-left column, so the pad, TURN and
@@ -4643,7 +4729,7 @@ kbd {
 /* HOP, the resting mode: blue words on the dark button, and nothing to do
    but turn VIEW on. */
 .touchops__commit.is-hop { color: var(--accent, #00e5ff); border-color: rgba(0, 229, 255, 0.45); }
-/* Under HOP: pressing it switches modes (HOP, VIEW, WALK). */
+/* Under HOP: pressing it switches modes (HOP, VIEW, WALK, BUILD). */
 .touchops__sub { display: block; margin-top: 2px; font-size: 7px; letter-spacing: 0.08em; opacity: 0.7; }
 /* WALK: first person, every press a step. Red, lit, while it is on. */
 .touchops__commit.is-walk.is-on {
@@ -9550,25 +9636,47 @@ a.feed__act { text-decoration: none; }
 }
 
 /* GRAVITY (store/useWalk.ts): a chip across the top of the WALK pad, lit
- * while gravity is on. Its own row, so no key a hand knows moves. */
+ * while gravity is on. Its own row, so no key a hand knows moves.
+ *
+ * WALK's own keys (TouchControls walkPad; arkinox, 2026-11-02): no scale.
+ * FORWARD is one large key across the row FAR, up and NEAR held, taller than
+ * the rest; BACKWARD stands where down was, under it; JUMP takes + and the
+ * readout's cells, and DOWN takes -'s. */
 .touchpad--mode-walk {
-  grid-template-rows: 22px repeat(3, 38px);
+  grid-template-rows: 22px 54px 38px 38px;
   grid-template-areas:
-    "gravity gravity gravity"
-    "away    up      toward"
-    "left    down    right"
-    "zoomout hub     zoomin";
+    "gravity gravity  gravity"
+    "forward forward  forward"
+    "left    backward right"
+    "jump    jump     down";
 }
 /* A pin to remove gets its row back. The pad is anchored at the bottom, so no key moves. */
 .touchpad--mode-walk:has(> .touchpad__key--pin) {
-  grid-template-rows: 22px repeat(4, 38px);
+  grid-template-rows: 22px 38px 54px 38px 38px;
   grid-template-areas:
-    "gravity gravity gravity"
-    "pin     .       ."
-    "away    up      toward"
-    "left    down    right"
-    "zoomout hub     zoomin";
+    "gravity gravity  gravity"
+    "pin     .        ."
+    "forward forward  forward"
+    "left    backward right"
+    "jump    jump     down";
 }
+.touchpad__key--forward,
+.touchpad__key--backward {
+  flex-direction: column;
+  gap: 2px;
+  color: var(--fg, #c8f5ff);
+}
+.touchpad__key--forward { grid-area: forward; }
+.touchpad__key--backward { grid-area: backward; }
+.touchpad__key--backward .touchpad__sub { font-size: 6px; }
+.touchpad__key--jump {
+  grid-area: jump;
+  font-size: 10px;
+  letter-spacing: 0.18em;
+  font-weight: 700;
+}
+/* DOWN under GRAVITY: no flying, so it reads as off rather than as broken. */
+.touchpad--mode-walk .touchpad__key:disabled { opacity: 0.35; cursor: default; }
 .touchpad__key--gravity {
   grid-area: gravity;
   font-size: 9px;
@@ -9580,6 +9688,37 @@ a.feed__act { text-decoration: none; }
   background-image: linear-gradient(rgba(255, 59, 107, 0.55), rgba(255, 59, 107, 0.55));
   border-color: rgba(255, 120, 150, 0.9);
 }
+
+/* BUILD: white, the build cursor's color (--build; lib/palette.ts BUILD), as
+ * HOP is blue, VIEW yellow and WALK red (arkinox, 2026-11-02: "Build mode
+ * theme is white"). The keys, RECALL and the lit BUILD in the commit slot,
+ * and the accents the other modes draw in blue: FAR, NEAR, the readout and
+ * the pressed flash. */
+.touchpad--mode-build .touchpad__key:not(:active),
+.touchops--mode-build .touchops__cancel:not(:active) {
+  background-image: linear-gradient(rgba(242, 247, 255, 0.14), rgba(242, 247, 255, 0.14));
+  border-color: rgba(242, 247, 255, 0.42);
+}
+.touchpad--mode-build .touchpad__key,
+.touchops--mode-build .touchops__cancel { color: var(--build); }
+.touchpad--mode-build .touchpad__key:active {
+  background: rgba(242, 247, 255, 0.32);
+  border-color: var(--build);
+}
+.touchpad--mode-build .touchpad__hub {
+  color: var(--build);
+  background-image: linear-gradient(rgba(242, 247, 255, 0.12), rgba(242, 247, 255, 0.12));
+  border-color: rgba(242, 247, 255, 0.42);
+}
+.touchops__commit.is-build.is-on {
+  color: #05070d;
+  background: var(--build);
+  border-color: var(--build);
+  font-weight: 700;
+}
+/* A deploy lined up: BUILD and RECALL wait for PLACE or CANCEL. */
+.touchops__commit.is-build:disabled,
+.touchops--mode-build .touchops__cancel:disabled { opacity: 0.45; cursor: not-allowed; }
 
 /* ---------- LOSING SYNC ----------
  *
@@ -10050,6 +10189,17 @@ html.tv-broadcast body { overflow: hidden; }
 
 /* NOW PLAYING (hud/NowPlaying): a presence pill whose rows open what plays. */
 .nowplaying__row { gap: 6px; }
+/* The head, and MUTE ALL at its top right; the head still takes the rest of the pill's width. */
+.nowplaying__top { display: flex; align-items: center; }
+.nowplaying__top .presence__head { flex: 1 1 auto; min-width: 0; }
+.nowplaying__all { margin-right: 6px; }
+/* A speaker switched off: amber, lit, so a muted track reads at a glance. */
+.nowplaying__mute.is-on { color: #ffb547; background: rgba(255, 181, 71, 0.1); border-color: rgba(255, 181, 71, 0.55); opacity: 1; }
+/* A muted track stays listed, dimmer. */
+.nowplaying__row.is-muted .nowplaying__open { opacity: 0.55; }
+/* Before this device's switches are read: silent, and not yet switchable. */
+.nowplaying__mute:disabled { opacity: 0.35; cursor: default; }
+.audio__mark--muted { color: #ffb547; border-color: rgba(255, 181, 71, 0.45); }
 .nowplaying__open {
   flex: 1;
   min-width: 0;

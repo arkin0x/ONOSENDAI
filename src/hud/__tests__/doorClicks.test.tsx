@@ -37,6 +37,9 @@ vi.mock('../../lib/relay', () => {
     publishMany: vi.fn(async (_r: string[], ev: (typeof relay.events)[number]) => { relay.events.push(ev); return { ok: true } }),
     query: vi.fn(answer),
     queryAny: vi.fn((_r: string[], f: Parameters<typeof answer>[0]) => answer(f)),
+    // The reads that tell a refusal from nothing: this relay always answers.
+    queryChecked: vi.fn(async (f: Parameters<typeof answer>[0]) => ({ events: await answer(f), trouble: null })),
+    queryAnyChecked: vi.fn(async (_r: string[], f: Parameters<typeof answer>[0]) => ({ events: await answer(f), trouble: null })),
     queryEach: vi.fn(async () => []),
     relaySet: () => ['wss://relay.test'],
   }

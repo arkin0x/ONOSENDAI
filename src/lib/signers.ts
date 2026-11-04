@@ -26,7 +26,7 @@ export { BACKUP_SIGNER_RELAY, DEFAULT_SIGNER_RELAY, loginCredentialKind, normali
 
 export type SignerKind = 'local' | 'nip07' | 'nip46'
 import { HANDSHAKE_PATIENCE_MS, handshakeWithin } from './signWithin'
-export { SIGN_PATIENCE_MS, HANDSHAKE_PATIENCE_MS, SignerTimeout, signWithin, handshakeWithin } from './signWithin'
+export { SIGN_PATIENCE_MS, HANDSHAKE_PATIENCE_MS, SignerTimeout, signWithin, handshakeWithin, lateSignsPending } from './signWithin'
 
 export interface Signer {
   kind: SignerKind

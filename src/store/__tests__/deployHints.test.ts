@@ -22,13 +22,18 @@ if (typeof localStorage === 'undefined') {
 const sent: { kind: number; tags: string[][]; id: string; content: string }[] = []
 /** What the relay holds, answered to every query. */
 let relayBags: unknown[] = []
+/** The canonical relay's trouble on the reads that tell a refusal from nothing; the others still answer. */
+let canonTrouble: 'auth' | 'unreachable' | null = null
 vi.mock('../../lib/relay', () => ({
   publishMany: vi.fn(async (_relays: string[], ev: { kind: number; tags: string[][]; id: string; content: string }) => {
     sent.push(ev)
     return { ok: true }
   }),
   query: vi.fn(async () => relayBags),
+  queryEach: vi.fn(async () => [{ url: 'wss://relay.test', outcome: 'answered', events: relayBags }]),
   queryAny: vi.fn(async () => []),
+  // The read that tells a refusal from nothing (rescan, TEST DISCOVERY).
+  queryChecked: vi.fn(async () => ({ events: relayBags, trouble: canonTrouble })),
   relaySet: () => ['wss://relay.test'],
 }))
 
@@ -60,6 +65,7 @@ async function hide(text: string, patch: Partial<BagSettings> = {}): Promise<voi
 beforeEach(() => {
   sent.length = 0
   relayBags = []
+  canonTrouble = null
   localStorage.clear()
   useShards.setState({ mine: [], deleted: {}, discovered: {}, pending: null, deployHeight: 0, deployStatus: 'idle', deployError: null })
   useCyberspace.setState({ live: true })
@@ -191,5 +197,47 @@ describe('a bag without h', () => {
     expect(found.bag?.heightTag).toBe(false)
     // And it rejoins DEPLOYED at its height, so a later rewrite keys the same region.
     expect(useShards.getState().mine[0]).toMatchObject({ height: HEIGHT, bag: { heightTag: false } })
+  })
+})
+
+/**
+ * Review of #600, round 2: the canonical relay in trouble (no AUTH, not heard
+ * from) while another relay sent the bag. What came is used, as v2 did; only
+ * what is missing reads as trouble.
+ */
+describe('a bag another relay sent, with the canonical relay in trouble', () => {
+  async function freshDevice(): Promise<{ bag: NostrEvent; dep: ReturnType<typeof useShards.getState>['mine'][number] }> {
+    await hide('kept elsewhere')
+    const bag = lastBag()
+    const dep = useShards.getState().mine[0]
+    useShards.setState({ mine: [], discovered: {} })
+    const { useSecrets } = await import('../useSecrets')
+    useSecrets.setState({ keys: { [dep.lookupId]: { lookupId: dep.lookupId, keyHex: dep.keyHex, height: HEIGHT, base: { x: '0', y: '0', z: '0' }, plane: dep.plane, source: 'scan', at: 1 } } })
+    return { bag, dep }
+  }
+
+  it('rescan opens it, and reads FAILED only when nothing came', async () => {
+    const { bag, dep } = await freshDevice()
+    canonTrouble = 'auth'
+    relayBags = [bag]
+    expect(await useShards.getState().rescan(dep.lookupId, dep.keyHex)).toBe(1)
+    expect(Object.keys(useShards.getState().discovered)).toHaveLength(1)
+    relayBags = []
+    expect(await useShards.getState().rescan(dep.lookupId, dep.keyHex)).toBe(-1)
+    // A partial answer drops nothing it did not see.
+    expect(Object.keys(useShards.getState().discovered)).toHaveLength(1)
+  })
+
+  it('TEST DISCOVERY finds it, and says unread only when it is not there', async () => {
+    await hide('tested')
+    const dep = useShards.getState().mine[0]
+    const bag = lastBag()
+    canonTrouble = 'unreachable'
+    relayBags = [bag]
+    expect(await useShards.getState().testDiscovery(dep.eventId)).toBe('found')
+    relayBags = []
+    expect(await useShards.getState().testDiscovery(dep.eventId)).toBe('unread')
+    canonTrouble = null
+    expect(await useShards.getState().testDiscovery(dep.eventId)).toBe('missing')
   })
 })

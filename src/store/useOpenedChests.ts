@@ -85,6 +85,17 @@ export function openedByHand(me: string, chestId: string, lock: string): boolean
 }
 
 /**
+ * The word a list gives a chest or a door: what the world draws (scene/
+ * ChestLooks), so it is OPEN for a door open only because another of its room
+ * was (the secret only said, store/rooms.ts), and LOCKED for one holding
+ * another secret, which that door's opening left shut. Not whether this
+ * session has read the contents: a reload forgets those, and it stays open.
+ */
+export function lockWord(me: string, chestId: string, lock: string): 'OPEN' | 'LOCKED' {
+  return openedByHand(me, chestId, lock) ? 'OPEN' : 'LOCKED'
+}
+
+/**
  * What this identity opened of this chest this session, while its lock is
  * the one it was opened under, or null: what a card lists and the world
  * floats out of it.

@@ -395,33 +395,46 @@ function PickLoop(): JSX.Element | null {
   return line ? <primitive object={line} /> : null
 }
 
-/** The face tapped in FACE mode, lit in the selection color so DELETE FACE has a visible target. */
+/**
+ * The faces tapped in FACE mode, each lit in the selection color so DELETE and
+ * the bucket have a visible target. Every one in hand stays lit (arkinox,
+ * 2026-10-31). One fill and one set of outlines however many there are: made
+ * when the faces in hand or the shard change, never per frame.
+ */
 function FaceHighlight(): JSX.Element | null {
   const shard = useWorkshop((s) => s.current())
-  const face = useWorkshop((s) => s.selectedFace)
+  const faces = useWorkshop((s) => s.selectedFaces)
   const lit = useMemo(() => {
-    const f = face === null ? undefined : shard?.faces[face]
-    if (!shard || !f) return null
-    const pts = f.map((i) => UP(ticksOf(shard.vertices[i])))
-    // Four points: the mesh draws the first three as its one triangle, the line closes the loop.
+    if (!shard || faces.length === 0) return null
+    const fill: number[] = []
+    const lines: number[] = []
+    for (const k of faces) {
+      const f = shard.faces[k]
+      if (!f) continue
+      const [a, b, c] = f.map((i) => UP(ticksOf(shard.vertices[i])))
+      fill.push(...a, ...b, ...c)
+      lines.push(...a, ...b, ...b, ...c, ...c, ...a)
+    }
+    if (fill.length === 0) return null
     const g = new BufferGeometry()
-    g.setAttribute('position', new Float32BufferAttribute([...pts, pts[0]].flat(), 3))
-    // Transparent, at OVERLAY_ORDER like the fill: both draw after a
-    // see-through shard's faces (order 1), or the face blends over them and
-    // the highlight vanishes on a see-through shard (shardFaces.ts).
-    const edge = new Line(g, new LineBasicMaterial({ color: WARN, toneMapped: false, transparent: true }))
-    edge.frustumCulled = false
-    edge.renderOrder = OVERLAY_ORDER
-    return { g, edge }
-  }, [shard, face])
-  useEffect(() => () => { lit?.g.dispose(); lit?.edge.material.dispose() }, [lit])
+    g.setAttribute('position', new Float32BufferAttribute(fill, 3))
+    const e = new BufferGeometry()
+    e.setAttribute('position', new Float32BufferAttribute(lines, 3))
+    return { g, e }
+  }, [shard, faces])
+  useEffect(() => () => { lit?.g.dispose(); lit?.e.dispose() }, [lit])
   if (!lit) return null
+  // Transparent, at OVERLAY_ORDER, the fill and the outlines alike: both draw
+  // after a see-through shard's faces (order 1), or a face blends over them
+  // and the highlight vanishes on a see-through shard (shardFaces.ts).
   return (
     <>
       <mesh geometry={lit.g} frustumCulled={false} renderOrder={OVERLAY_ORDER}>
         <meshBasicMaterial color={WARN} transparent opacity={0.5} side={DoubleSide} forceSinglePass depthWrite={false} polygonOffset polygonOffsetFactor={-4} toneMapped={false} />
       </mesh>
-      <primitive object={lit.edge} />
+      <lineSegments geometry={lit.e} frustumCulled={false} renderOrder={OVERLAY_ORDER}>
+        <lineBasicMaterial color={WARN} toneMapped={false} transparent />
+      </lineSegments>
     </>
   )
 }
@@ -644,7 +657,7 @@ function Keys(): null {
         KeyR: 'away', KeyF: 'toward',
       }
       if (nudge[e.code]) { e.preventDefault(); const n = nudgeFor(benchAxes(camera), nudge[e.code]); w.moveSelected(n.axis, n.delta * w.step()); return }
-      if (e.code === 'Delete' || e.code === 'Backspace') { e.preventDefault(); if (w.selectedFace !== null) w.deleteSelectedFace(); else w.deleteSelected(); return }
+      if (e.code === 'Delete' || e.code === 'Backspace') { e.preventDefault(); if (w.selectedFaces.length > 0) w.deleteSelectedFace(); else w.deleteSelected(); return }
       if (e.code === 'Enter') { e.preventDefault(); if (w.facePick.length >= 3) w.fill(); else if (w.selection.length >= 3) w.fillSelection(); return }
       // Escape is not here: it goes through the Escape stack (useEscape), so
       // the palette sheet and the confirmations over the bench close before

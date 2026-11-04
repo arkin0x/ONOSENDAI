@@ -39,6 +39,7 @@ import { CloudApproval, CreditedModal, InvoiceModal, PaidModal } from './hud/Inv
 import { HosakaOffer } from './hud/HosakaOffer'
 import { ChainConflictPrompt } from './hud/ChainConflict'
 import { ChainStatusModal } from './hud/ChainStatus'
+import { ChainStoreTrial } from './hud/ChainStoreTrial'
 import { BrokenChainChip, BrokenChainModal } from './hud/BrokenChain'
 import { VersionChip } from './hud/VersionChip'
 import { startVersionGate } from './lib/versionGate'
@@ -53,6 +54,7 @@ import { ProfileModal } from './hud/ProfileModal'
 import { useProfileView } from './store/useProfileView'
 import { TouchControls } from './hud/TouchControls'
 import { WalkLookSphere } from './hud/WalkLookSphere'
+import { ViewFlyButtons } from './hud/ViewFlyButtons'
 import { SyncWarning } from './hud/SyncWarning'
 import { RouteOverlay } from './hud/RouteOverlay'
 import { ViewMenu } from './hud/ViewMenu'
@@ -62,7 +64,7 @@ import { startPresence } from './store/usePresence'
 import { hydrateRoster } from './store/useRoster'
 import { ChatDock } from './hud/ChatDock'
 import { useChatFeed } from './hooks/useChatFeed'
-import { watchConnectivity } from './lib/relay'
+import { watchConnectivity, watchTabReturn } from './lib/relay'
 import { Scene } from './scene/Scene'
 import { useCanvasTap } from './hooks/useCanvasTap'
 import { setMenuCovering, useKeyboard } from './hooks/useKeyboard'
@@ -162,18 +164,14 @@ export default function App(): JSX.Element {
   // Back from the wallet: a phone suspends the tab while another app is up,
   // so the invoice poll's timer is still counting when the tab returns. Ask
   // HOSAKA at once instead of waiting the interval out; harmless otherwise.
-  useEffect(() => {
-    const back = (): void => {
-      if (document.visibilityState !== 'visible') return
-      const s = useCyberspace.getState()
-      s.wakeSigner()
-      s.checkCloudPayment()
-    }
-    document.addEventListener('visibilitychange', back)
-    window.addEventListener('pageshow', back)
-    window.addEventListener('focus', back)
-    return () => { document.removeEventListener('visibilitychange', back); window.removeEventListener('pageshow', back); window.removeEventListener('focus', back) }
-  }, [])
+  // After a real absence (not a focus: an extension's DENY gives the focus
+  // back), a relay whose AUTH failed while the signer was away signs in
+  // again, and the lists it refused read again once it does (useLoot).
+  useEffect(() => watchTabReturn(() => {
+    const s = useCyberspace.getState()
+    s.wakeSigner()
+    s.checkCloudPayment()
+  }), [])
 
   const isMobile = useIsMobile()
   // Spectating locks the panels: they describe you, and the scene is not about
@@ -336,9 +334,9 @@ export default function App(): JSX.Element {
               {/* Not during the /demo tour (arkinox, 2026-10-15). */}
               {!building && !touring && <LineScrubber />}
               <HyperspaceBar />
-              {/* In BUILD mode too (arkinox, 2026-10-08): scrubbing a chain,
-                  yours or a spectated avatar's, aims the build cursor at the
-                  action instead of going into history (useBuilder walkChain). */}
+              {/* Not in BUILD mode, and neither is NEARBY (arkinox,
+                  2026-11-02); each chip stands down itself. [ ] Home End
+                  still aim the build cursor along a chain (useBuilder walkChain). */}
               <ChainExplorer />
               {!building && <BitReadout />}
               {/* Under XOR BITS while anything is unread (arkinox, 2026-09-28). */}
@@ -375,6 +373,10 @@ export default function App(): JSX.Element {
             tied to the pad, which a tap on the scene folds; not while the
             menu covers the scene or the deploy bar holds this corner. */}
         {!crowded && !offerUp && !deploying && <WalkLookSphere />}
+        {/* VIEW's fly, forward and back, in the same dock above the menu
+            button (ViewFlyButtons.tsx); the LOOK ball is WALK's, so the two
+            never stand there together. */}
+        {!crowded && !offerUp && !deploying && <ViewFlyButtons />}
       </div>
       {/* Off-head too: tapping a block hides the pad like any scene tap, and
           without this there was no way to bring it back while viewing. */}
@@ -424,6 +426,7 @@ export default function App(): JSX.Element {
       <ChainConflictPrompt />
       {/* The explanation behind the chain status strip under the LIVE/LOCAL switch. */}
       <ChainStatusModal />
+      <ChainStoreTrial />
       {/* Which action broke your chain, why, and RESPAWN behind its warning. */}
       <BrokenChainModal />
       <button

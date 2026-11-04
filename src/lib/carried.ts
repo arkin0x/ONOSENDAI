@@ -11,8 +11,8 @@
  */
 
 import { sha256 } from '@noble/hashes/sha2.js'
-import { carriedModel, carriedPayload, carriedTable, carryAll, carryObject, withAuthor } from 'sno-core/parts'
-import { addressesIn, toPayload, type Ref, type ShardModel } from 'sno-core/shards'
+import { carriedModel, carriedPayload, carriedTable, carryAll, carryObject, parseAddress, withAuthor } from 'sno-core/parts'
+import { addressesIn, toPayload, uuid, type Ref, type ShardModel } from 'sno-core/shards'
 import { withAuthoredConstrain } from './walkConstrain'
 
 /**
@@ -209,52 +209,16 @@ export function foreignNotice(count: number): string {
   return `${count} ${count === 1 ? 'piece here was' : 'pieces here were'} built under another key, so ${count === 1 ? 'it shows' : 'they show'} as a placeholder here. DEPLOY and PUBLISH write ${count === 1 ? 'it' : 'them'} under this key.`
 }
 
-/** A model whose table came out of a bag, as the workshop remembers it: local only, never written. */
-type FromBag = ShardModel & { fromBag?: true }
-
 /**
- * A copy into your workshop of an object taken from a bag or a chest: its
- * table comes with it, under your key (DECK-0004 §3.4, "Taking an object that
- * carries its parts"), and it remembers where it came from, so PUBLISH asks
- * before writing that table in the clear (DECK-0003 §1.10). Only the keys that
- * counted where it was read come in: an object read with no pubkey that counts
- * brings nothing.
+ * `model` as it goes out in the clear, as a public object or an avatar, with
+ * the table entries no placement names left out: an entry no placement names
+ * is carried to everyone and drawn by none (DECK-0003 §1.10), and in the
+ * clear it is a piece its author removed. A fetched object's own table still
+ * answers beneath it, so nothing is lost there. A table taken from a bag is
+ * kept out before this, where its writer is asked (withoutCarried).
  */
-export function takenCopy(model: ShardModel, me: string | null): ShardModel {
-  const author = model.author ?? null
-  const own = ownTableOnly(model, author)
-  if (!own.objects) return own
-  const keyed = me && author !== me ? rekeyTable(own, me, () => true) : own
-  return me ? ({ ...keyed, fromBag: true } as FromBag) : noTable(model)
-}
-
-/** Whether `model` holds a table that came out of a bag and that nobody chose to publish. */
-export function tableFromBag(model: ShardModel): boolean {
-  return (model as FromBag).fromBag === true && Object.keys(model.objects ?? {}).length > 0
-}
-
-/** `model` with its table's origin forgotten: its user chose to keep the table when it is published. */
-export function keepTable(model: ShardModel): ShardModel {
-  const { fromBag: _chosen, ...rest } = model as FromBag
-  return rest
-}
-
-/**
- * `model` as it goes out in the clear, as a public object or an avatar: a table
- * from a bag stays out of it unless its user chose to keep it (DECK-0003 §1.10,
- * "A table taken from a bag stays out of the clear"). Choosing to publish is
- * not that choice, so this is the default at the writer, and only keepTable
- * lifts it.
- */
-export function inTheClear(model: ShardModel): ShardModel {
+export function placedOnly(model: ShardModel): ShardModel {
   if (!model.objects) return model
-  if ((model as FromBag).fromBag) {
-    const { objects: _sealed, ...rest } = model
-    return rest
-  }
-  // An entry no placement names is carried to everyone and drawn by none
-  // (§1.10), and in the clear it is a piece its author removed. A fetched
-  // object's own table still answers beneath it, so nothing is lost there.
   return carryAll(model, () => null, { prune: true })
 }
 
@@ -297,13 +261,13 @@ export function clearRefusal(event: { content: string; tags: string[][] }, carri
  * label, sealed inside with the payload. Written as a hide writes it (OPAQUE
  * where never chosen), and what the source itself carries joins the parent's
  * one table, under your key. A source whose table came out of a bag marks the
- * parent too, so PUBLISH asks before writing it in the clear (§1.10).
+ * parent too (takeIntoKeeping), so PUBLISH asks before writing it in the clear (§1.10).
  */
 export function copyInto(parent: ShardModel, source: ShardModel, pubkey: string): { shard: ShardModel; ref: Ref } {
   const written = withAuthoredConstrain(ownKeysOnly(source, pubkey))
   const text = JSON.stringify(carriedPayload(written))
   const mine = `33331:${pubkey}:`
-  const marked = (s: ShardModel): ShardModel => ((source as FromBag).fromBag ? ({ ...s, fromBag: true } as FromBag) : s)
+  const marked = (s: ShardModel): ShardModel => ((source as Taken).takenFromBag ? ({ ...s, takenFromBag: true } as Taken) : s)
   for (const [key, entry] of Object.entries(parent.objects ?? {})) {
     if (key.startsWith(mine) && JSON.stringify(entry) === text) return { shard: marked(parent), ref: ['a', key] }
   }
@@ -409,8 +373,8 @@ export function writeCopy(root: ShardModel, address: string, next: ShardModel): 
     if (!(a in table) && a in before) table[a] = before[a]
     if (a in table) queue.push(...addressesIn(table[a]))
   }
-  // A piece from a bag stamped inside this copy marks `next`: the root holds its table now (§1.10).
-  return { ...root, objects: table, ...((next as FromBag).fromBag ? { fromBag: true } : {}) } as ShardModel
+  // A piece from a bag stamped inside this copy marks `next`: the root holds its table now (§1.10; takeIntoKeeping).
+  return { ...root, objects: table, ...((next as Taken).takenFromBag ? { takenFromBag: true } : {}) } as ShardModel
 }
 
 /**
@@ -442,4 +406,81 @@ export function detachInto(root: ShardModel, path: readonly InsideStep[], pubkey
   const next: ShardModel = { ...withCopy, refs, ...(withCopy.parts ? { parts: withCopy.parts.map((p) => ({ ...p, ref: moved[p.ref] })) } : {}) }
   const written = above.length ? writeCopy(root, above[above.length - 1].address, next) : next
   return { root: written, path: [...above, { address: ref[1] }] }
+}
+
+/**
+ * A model taken out of a chest (or a bag) into your keeping, its carried
+ * objects keyed under you (DECK-0004 §3.4 "Taking an object that carries its
+ * parts", spec #82; chest and door design, R15). A table counts only under
+ * the pubkey of the event it travels in, so a copy you later hide under your
+ * own key would lose every carried part; instead each carried object keyed
+ * under `model.author` (the event it was read from) gets an address of its
+ * own, `33331:<you>:<fresh d>`, and every `refs` entry naming it, in the
+ * model and in the carried payloads alike, is rewritten to match. Objects
+ * placed by an address that is not in the table are links, and stay as they
+ * are. Returned with you as its author, so the workshop keeps the table
+ * (signedTableOnly). The same model when it carries nothing of its author's.
+ */
+export function rekeyCarried(model: ShardModel, me: string | null): ShardModel {
+  const from = model.author
+  if (!me || !from || !model.objects || from === me) return model
+  const renamed = new Map<string, string>()
+  for (const key of Object.keys(model.objects)) {
+    const a = parseAddress(key)
+    if (a && a.kind === 33331 && a.pubkey === from) renamed.set(key, `33331:${me}:${uuid()}`)
+  }
+  if (renamed.size === 0) return model
+  const refsOf = <T extends { refs?: unknown }>(x: T): T => {
+    if (!Array.isArray(x.refs)) return x
+    return { ...x, refs: x.refs.map((r: unknown) => (Array.isArray(r) && r[0] === 'a' && typeof r[1] === 'string' && renamed.has(r[1]) ? ['a', renamed.get(r[1]), ...r.slice(2)] : r)) }
+  }
+  // The keys go back in code point order (DECK-0003 §1.2): plain string comparison.
+  const rewritten: Array<[string, unknown]> = []
+  for (const [key, payload] of Object.entries(model.objects)) {
+    const next = renamed.get(key)
+    if (next) rewritten.push([next, payload && typeof payload === 'object' && !Array.isArray(payload) ? refsOf(payload as { refs?: unknown }) : payload])
+  }
+  rewritten.sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
+  const objects = Object.fromEntries(rewritten)
+  return { ...refsOf(model), objects, author: me }
+}
+
+/** A model that came out of a bag or a chest: local only, never on the wire, like `author`. */
+type Taken = ShardModel & { takenFromBag?: true }
+
+/**
+ * A model taken into your keeping from where it was hidden: its table keyed under
+ * you (rekeyCarried), and marked, so that what was sealed does not go public with
+ * a PUBLISH (withoutCarried). Only one that carries anything needs the mark, and
+ * only one that was sealed: a public object a bag only names (a LIVE LINK) had
+ * its table in the clear already (`sealed` false).
+ */
+export function takeIntoKeeping(model: ShardModel, me: string | null, sealed = true): ShardModel {
+  const out = rekeyCarried(model, me)
+  return out.objects && sealed ? ({ ...out, takenFromBag: true } as Taken) : out
+}
+
+/** Whether this model carries parts that came to you sealed: publishing them in the clear needs asking. */
+export function carriesSealedParts(model: ShardModel): boolean {
+  return !!(model as Taken).takenFromBag && !!model.objects && Object.keys(model.objects).length > 0
+}
+
+/**
+ * A model without the parts it carries from where it was hidden, as it goes out in
+ * public: the table, the placements that drew on it, and their refs. A placement
+ * of a public object stays. The same model when there is nothing to take out.
+ */
+export function withoutCarried(model: ShardModel): ShardModel {
+  if (!carriesSealedParts(model)) return model
+  const carried = new Set(Object.keys(model.objects ?? {}))
+  const refs = model.refs ?? []
+  const kept = refs.map((r, i) => [r, i] as const).filter(([r]) => !(r[0] === 'a' && carried.has(r[1])))
+  const index = new Map(kept.map(([, old], now) => [old, now]))
+  const parts = (model.parts ?? []).filter((p) => index.has(p.ref)).map((p) => ({ ...p, ref: index.get(p.ref)! }))
+  const { objects: _table, takenFromBag: _mark, refs: _refs, parts: _parts, ...rest } = model as Taken
+  void _table
+  void _mark
+  void _refs
+  void _parts
+  return { ...rest, ...(kept.length ? { refs: kept.map(([r]) => r) } : {}), ...(parts.length ? { parts } : {}) }
 }

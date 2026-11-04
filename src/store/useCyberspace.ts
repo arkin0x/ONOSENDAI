@@ -21,7 +21,7 @@ import { destinationHeights, holdCloudDestinationKeys, holdDestinationCubes } fr
 import { localKeyCeiling, regionKeyQuote } from '../lib/deployPlan'
 import { experienceRatio, recordJobExperience } from '../lib/experience'
 import { lineStateOf, rideStatsOf, zeroLengthRideRefusal } from '../lib/hyperspace/ride'
-import { verifyCloudRide } from '../lib/cloudRide'
+import { checkCloudRide, type CloudRideCheck } from '../lib/cloudRide'
 import { Quaternion } from 'three'
 import { generateSecretKey, getEventHash, verifiedSymbol, verifyEvent, type VerifiedEvent } from 'nostr-tools/pure'
 import { nip19 } from 'nostr-tools'
@@ -48,7 +48,9 @@ import {
   type SignerKind,
   type NostrConnectSession,
   signWithin,
+  lateSignsPending,
 } from '../lib/signers'
+import { onSignerAnswered } from '../lib/signWithin'
 import {
   coordToXyz,
   estimateHopCost,
@@ -81,8 +83,13 @@ import {
   type ViewAxes,
 } from '../lib/space'
 import { confirmChainEvents } from '../lib/chains'
-import { chainDbAvailable, chainWritePause, readStoredChain, setAsideStoredChain, writeStoredChain, type StoredChain } from '../lib/chainDb'
+import { chainDbAvailable, chainWritePause, readStoredChain, setAsideChains, setAsideStoredChain, writeStoredChain, type StoredChain } from '../lib/chainDb'
+import { CHAIN_RULES_EPOCH } from '../lib/chainRulesEpoch'
+import { chainHeld, chainLost, checkRowsInTime, clearMarker, clearTail, committedHead, anyUnvouched, chainStuck, deployAllowsMove, holdChain, holdUntilVouched, inRows, markVerdicts, markerValue, migrateToRows, noteCommitted, onChainLost, onChainRefused, onChainResave, onChainStuck, wentOut, probePassedBefore, readRows, readTail, rowsHead, rowsMarked, rowsWanted, saveRows, setAsideRows, setMarker, storeTrial, storeWorksHere, tailOnSave, takingBack, tookBack, turnRowsOff, vouch, writeTail } from '../lib/chainStore'
+import { eventDbAvailable } from '../lib/eventDb/client'
+import type { ChainRead, ChainSource } from '../lib/eventDb/chainRows'
 import { checkSignatures } from '../lib/sigCheck'
+import { checkedElsewhere } from '../lib/verifiedSigs'
 import {
   firstMove,
   foldHeldConflict,
@@ -110,8 +117,8 @@ import {
   enterHyperspaceTemplate,
   hyperjumpTemplate,
 } from '../lib/events'
-import { lookBeforeMove, movementBlocked, VERSION_BLOCKED_MESSAGE } from '../lib/versionGate'
-import { cancelProof, postProof, type ProofMode, type ProofResponse } from '../lib/workers'
+import { lookBeforeMove, movementBlocked, useVersionGate, VERSION_BLOCKED_MESSAGE } from '../lib/versionGate'
+import { cancelProof, postProof, PROOF_WORKER_FAILED_MESSAGE, type ProofMode, type ProofResponse } from '../lib/workers'
 import { staleFormatCut } from '../lib/staleFormat'
 import { offloadFrom, cloudSeconds } from '../lib/crossover'
 import { recommendedHopHeight, recommendedSidestepHeight, useCalibration } from '../lib/calibration'
@@ -130,6 +137,7 @@ import {
   cloudHopPause,
   cloudHopsSold } from '../lib/hosaka'
 import { cloudVerifyIssue } from '../lib/cloudVerify'
+import { localSidestepFailures } from '../lib/sidestepCheck'
 import {
   clearCloudJob,
   clearKeysTicket,
@@ -288,6 +296,8 @@ const NO_TARGET_MESSAGE = 'This proof was not signed: the move it was computed f
 const CLOUD_MOVE_MISMATCH_MESSAGE = 'This cloud move was not recorded or sent: the signed event does not name the move HOSAKA computed it for. The paid result is kept: RESUME signs it for its own move, from where the job started; moving first makes it worthless.'
 /** A local hop whose proof failed Level 1 under its own signed id: never recorded or sent. */
 const LOCAL_CHECK_FAILED_MESSAGE = 'This hop was not recorded or sent: its proof did not pass the check every reader will make of it'
+/** The same for a sidestep this machine computed (lib/sidestepCheck.ts). */
+const LOCAL_SIDESTEP_CHECK_FAILED_MESSAGE = 'This sidestep was not recorded or sent: its proof did not pass the check every reader will make of it'
 /** A finished proof in the old hop format (no mn, no mp): never signed (hop proof version 2, spec 5.9 to 5.13). */
 const OLD_FORMAT_PROOF_MESSAGE = 'This proof is in the old hop format, which the chain rules no longer accept, so it was not signed. Commit again to make the move with the new proof.'
 /**
@@ -296,6 +306,10 @@ const OLD_FORMAT_PROOF_MESSAGE = 'This proof is in the old hop format, which the
  * head every check of it fails.
  */
 const HEAD_MOVED_MESSAGE = 'Your chain moved while this proof waited to be signed: another device or client of yours published from your head. A proof is bound to the head it was computed from, so this one cannot be signed onto the new head.'
+/** Said when a route step planned before the chain moved is planned again: no proof was computed for it yet, and the move may be this device's own (a kept job signed from the Cloud panel), so it names no other device. */
+const ROUTE_MOVED_MESSAGE = 'Your chain moved on while this route waited.'
+/** A HOSAKA proof the head moved under before it was signed: worthless, so its record goes. */
+const CLOUD_HEAD_MOVED_AT_SIGNING_MESSAGE = 'The chain head moved before this cloud move was signed; the cloud proof was discarded.'
 
 
 /** Matches cyberspace-core's DEFAULT_MAX_COMPUTE_HEIGHT. */
@@ -314,6 +328,8 @@ export interface EarthPin {
   scaleExp: number
   /** What to call it: the same "EARTH · 37.8°N 122.4°W" the focus was given. */
   label: string
+  /** The label is the place's name (one found by name, a star's), so viewing the pin says it; a clicked or typed point's is not. */
+  named?: boolean
 }
 
 export interface SpectateState {
@@ -466,7 +482,7 @@ export function addRespawn(pubkey: string): number {
  * client checking the result before it signs. `error` keeps its message until
  * X or the next commit.
  */
-export type CloudStatus = 'idle' | 'quoting' | 'confirm' | 'funding' | 'awaiting_payment' | 'paid' | 'computing' | 'verifying' | 'error'
+export type CloudStatus = 'idle' | 'checking' | 'quoting' | 'confirm' | 'funding' | 'awaiting_payment' | 'paid' | 'computing' | 'verifying' | 'error'
 
 /** HOSAKA's price for the lined-up move, waiting for PAY or already approved. */
 export interface CloudQuote {
@@ -618,12 +634,24 @@ export interface CyberFocus {
   /** The cursor came along (VIEW): the pad drives it here. */
   drive?: boolean
   /**
+   * The place the label names, when the label is a name (a starred place, a
+   * person, a place on Earth found by name) and not words made from its
+   * coordinate. A free view's VIEWING chip shows the name while the cursor
+   * is on this place in this plane, and says A COORD otherwise (arkinox,
+   * 2026-11-03; FocusBar.tsx). Set only by focusOn: `position` and `plane`
+   * above move with the view (a re-anchor, a change of plane), this does not.
+   */
+  named?: NamedPlace
+  /**
    * A hidden item (a shard, a message) is what is being looked at: the camera
    * frames it where it is drawn, its true place (itemCentre), rather than by
    * the stop markers' policy.
    */
   item?: boolean
 }
+
+/** Where a focus's name applies (CyberFocus.named). */
+export interface NamedPlace { position: Position; plane: Plane }
 
 export interface CyberspaceState {
   identity: { pubkey: string; npub: string }
@@ -782,13 +810,13 @@ export interface CyberspaceState {
    * Deliberately NOT derived from `focus`, because it has to outlive a focus
    * change: clicking a landfall moves the focus to that block and the pin
    * stays where it was, which is what makes it possible to look around and
-   * come back. Dropped by a click on the globe and by a POSITION panel VIEW
+   * come back. Dropped by a click on the globe and by a View panel VIEW
    * that resolves to a point on Earth; cleared by RETURN (clearFocus) and by
    * REMOVE PIN. One at a time, so a second drop replaces the first.
    */
   pin: EarthPin | null
   /** Drop the pin at a place on Earth. `scaleExp` defaults to the zoom you are at. */
-  dropPin: (position: Position, label: string, scaleExp?: number) => void
+  dropPin: (position: Position, label: string, scaleExp?: number, named?: boolean) => void
   /** Take the pin away. */
   clearPin: () => void
   /** Look at the pin again, at the zoom it was dropped at. */
@@ -887,7 +915,7 @@ export interface CyberspaceState {
   respawn: () => Promise<void>
   /**
    * Respawn from a broken chain (arkinox, 2026-10-07, Q3): first the last
-   * valid position goes into the Position panel's RECENT as "End of Chain"
+   * valid position goes into the View panel's RECENT as "End of Chain"
    * and the first eight hex of the last valid event's id (the invalid
    * spawn's, when no event is valid, Q7), so the place the old chain froze
    * at is one tap away; then an ordinary respawn.
@@ -933,8 +961,13 @@ export interface CyberspaceState {
   /** Whether the pad's VIEW is on: a free view begun from the pad, as opposed to one begun from a pin, a star or BUILD. */
   viewing: () => boolean
   /** Look at a fixed coordinate (a deployed shard), optionally jumping the scale. */
-  /** Look at a place. With `drive` the cursor comes along: the free view, driven from the pad. */
-  focusOn: (position: Position, plane: Plane, label: string, scaleExp?: number, drive?: boolean) => void
+  /**
+   * Look at a place. With `drive` the cursor comes along: the free view,
+   * driven from the pad. `named`: the label is the place's name, true for
+   * this place, or the place a name was given for (CyberFocus.named, as a
+   * hyperspace view hands a focus back).
+   */
+  focusOn: (position: Position, plane: Plane, label: string, scaleExp?: number, drive?: boolean, named?: boolean | NamedPlace) => void
   /** Look at a hidden item: focusOn, framed on the item where it is drawn. */
   focusItem: (position: Position, plane: Plane, label: string, scaleExp?: number) => void
   /**
@@ -973,7 +1006,8 @@ export interface CyberspaceState {
   /** Sign a template with this identity's active signer. Async because an
    * extension or a bunker is genuinely remote. The only door to it outside this module. */
   /** Sign as the current identity. `patienceMs` is how long to wait for a remote signer before asking again over fresh sockets; a human-in-the-loop signature (an avatar) deserves more than a hop's. */
-  signEvent: (template: EventTemplate, patienceMs?: number) => Promise<NostrEvent>
+  /** `late`: handed a remote signature that comes after its time ran out, checked like any other (signWithin). */
+  signEvent: (template: EventTemplate, patienceMs?: number, late?: (signed: NostrEvent) => void) => Promise<NostrEvent>
 
   /** How the current identity signs: a local key, an extension, or a bunker. */
   signerKind: SignerKind
@@ -1242,8 +1276,10 @@ export function appMinted(pubkey: string): boolean | null {
  * costs about 2 ms on the main thread, and the same chain is read from
  * storage more than once in a session (at boot by the signer pick and again
  * by the store, and again on every switch back to an identity), so each
- * signature is checked once. Memory only, never written to storage: a flag
- * on disk would be exactly as trustworthy as the disk.
+ * signature is checked once. On the old stores this is memory only: their
+ * copies carry no verdict. A chain's rows do (the owner's ruling, 2026-10-30:
+ * a stored NIP-01 flag), and what that flag lets a load skip, and what it still
+ * recomputes, is said at lib/eventDb/chainRows.ts checkChainRows.
  */
 const verifiedSigs = new Set<string>()
 
@@ -1397,6 +1433,25 @@ function saveChain(events: NostrEvent[], published: Record<string, PublishStatus
   // saves whatever the chain is by then. When the actions changed is noted
   // now, so a respawn made meanwhile is still the newer chain.
   if (hydration?.pubkey === pubkey) { hydration.dirty = true; return }
+  if (foldingStored.has(pubkey)) return
+  // The rows hold this chain and cannot be read. Nothing goes over the frozen
+  // copy or the rows; what no relay holds is kept until they can.
+  if (rowsDown.has(pubkey)) {
+    const unsent = events.filter((e) => published[e.id] !== 'ok')
+    const inHand = new Set(unsent.map((e) => e.id))
+    writeTail(pubkey, readTail(pubkey).filter((e) => !inHand.has(e?.id)).concat(unsent))
+    return
+  }
+  // One row per new action, off the main thread, and no copy of the chain
+  // anywhere else (lib/chainStore.ts): the old stores stay as they are.
+  if (rowsWanted() && inRows(pubkey)) {
+    // The marker says a chain is in rows, so it goes up with the first action.
+    if (!rowsMarked(pubkey)) setMarker(pubkey, storedMark(pubkey))
+    tailOnSave(pubkey, () => events.filter((e) => published[e.id] !== 'ok'))
+    saveRows(pubkey, { events, isPublished: (id) => published[id] === 'ok', nip01Of: (e) => (verifiedSigs.has(sigKey(e)) ? 1 : 0), held: held ?? heldNow(pubkey), stats: { ...stats }, savedAt })
+    markForOldTabs(pubkey, events)
+    return
+  }
   const data: PersistedChain = {
     version: 2,
     events,
@@ -1433,6 +1488,83 @@ function saveChain(events: NostrEvent[], published: Record<string, PublishStatus
     localStorage.setItem(chainMarkKeyFor(pubkey), mark)
     knownMarks.set(pubkey, mark)
   } catch { /* storage full: the other tab learns from the relays instead */ }
+}
+
+/**
+ * Identities whose chain is in rows that cannot be read now: a read answered
+ * `unreadable` or `timeout`. That is never "no chain". There is no second move
+ * into rows, no new spawn, and nothing is written over the rows or the frozen
+ * copy. The chain drawn is the frozen copy, the tail and what the relays bring,
+ * and the frozen copy can be far behind, so signing from it would fork the
+ * chain, and a fork ends it. Nothing is signed until the relays have confirmed
+ * the head on this page (relaysConfirmed), and a spawn not at all.
+ */
+const rowsDown = new Set<string>()
+/** Identities whose head the relays confirmed on this page (confirmHead). */
+const relaysConfirmed = new Set<string>()
+/**
+ * Of those, identities whose rows are gone: this device moved the chain to
+ * rows (the marker says so), and the database answers that it holds none. The
+ * database was cleared under the marker. Every move made since the switch
+ * that no relay took is gone with it, so neither the frozen copy nor the tail
+ * is the chain: the relays are asked first, and only then is the chain in
+ * hand moved into rows again (recoverWiped).
+ */
+const rowsWiped = new Set<string>()
+
+/** Said when a move is refused because the saved chain cannot be read. */
+export const ROWS_DOWN_MESSAGE = 'Your saved chain cannot be read right now. Your move waits until the relays confirm your head.'
+/** Said when a move is refused because the saved chain was cleared from this device. */
+export const ROWS_WIPED_MESSAGE = 'Your saved chain was cleared from this device. Your move waits until the relays confirm your head.'
+
+/** The words a kind 3333 is refused with while the rows are down, or null. */
+function rowsDownRefusal(pubkey: string, events: NostrEvent[]): string | null {
+  if (!rowsDown.has(pubkey)) return null
+  // Gone is not unreadable: once the relays have answered, what they hold is all there is, a spawn included.
+  if (rowsWiped.has(pubkey)) return relaysConfirmed.has(pubkey) ? null : ROWS_WIPED_MESSAGE
+  return events.length === 0 || !relaysConfirmed.has(pubkey) ? ROWS_DOWN_MESSAGE : null
+}
+
+/** Said while a move that lost to another tab's is being taken back. */
+export const TAKING_BACK_MESSAGE = 'Another tab of yours moved first. Your chain is being read again before you can move.'
+/** Said when a move that lost to another tab's may already be on the relays. */
+export const CHAIN_HELD_MESSAGE = 'Another tab of yours moved first while this tab was sending. Your chain may have forked. Nothing more goes out from this tab. Reload to see what the relays hold.'
+
+/** The words a kind 3333 is refused with after a commit lost, or null. */
+function lostRefusal(pubkey: string): string | null {
+  if (chainHeld(pubkey)) return CHAIN_HELD_MESSAGE
+  return takingBack(pubkey) ? TAKING_BACK_MESSAGE : null
+}
+
+/** A read of a chain in rows failed. */
+function rowsAreDown(pubkey: string, why: string): void {
+  if (!rowsDown.has(pubkey)) console.warn(`[chain] the event database ${why}: using the frozen copy and the relays, writing nothing over either, and signing nothing until the relays confirm the head`)
+  rowsDown.add(pubkey)
+  relaysConfirmed.delete(pubkey)
+  frozenCopyInHand(pubkey)
+  tailInHand(pubkey)
+}
+
+/** Per identity, the head the old stores' mark last named here. */
+const markedHead = new Map<string, string>()
+
+/**
+ * A tab of an older build, still open through a deploy, knows only the old
+ * stores. It is told the chain moved the way it understands: its mark. It then
+ * waits for a chain that will not land and goes to the relays, as it does for
+ * any mark whose chain never comes (OTHER_TAB_MARK_PATIENCE_MS). The `:r` says
+ * this came from the rows: a mark without it is that older tab moving
+ * (foldStaleBuild). Only when the head changes.
+ */
+function markForOldTabs(pubkey: string, events: NostrEvent[]): void {
+  const head = events[events.length - 1].id
+  if (markedHead.get(pubkey) === head) return
+  markedHead.set(pubkey, head)
+  try {
+    const mark = `${events.length}:${head.slice(0, 16)}:${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}:r`
+    localStorage.setItem(chainMarkKeyFor(pubkey), mark)
+    knownMarks.set(pubkey, mark)
+  } catch { /* storage full: that tab learns from the relays instead */ }
 }
 
 /**
@@ -1562,7 +1694,7 @@ function pickInitialSigner(): Signer {
   const pref = loadSignerPref()
   // A stored extension/bunker identity whose chain we already hold: reconnect
   // lazily, keeping its pubkey so the chain loads now.
-  if (pref && pref.kind !== 'local' && loadChain(pref.pubkey, true)) {
+  if (pref && pref.kind !== 'local' && (rowsFirst(pref.pubkey) || loadChain(pref.pubkey, true))) {
     // The live signer replaces this stand-in only while the stand-in is still
     // the one in use. A bunker can answer minutes after the first signature
     // asked for it, and by then the identity may have been switched: its late
@@ -1587,6 +1719,17 @@ function pickInitialSigner(): Signer {
  */
 /** Remote signatures in flight: while one waits, a wake must not drop the sockets its answer arrives on. */
 let pendingSigns = 0
+/** Of those, a relay's AUTHs (signed with a `late`). */
+let pendingAuthSigns = 0
+/**
+ * A wake left the signer's sockets alone for an AUTH's answer only (one in
+ * flight, or given up on and still wanted late): if they are dead, the next
+ * signature that is not an AUTH (a move, a HOSAKA request) drops them first,
+ * so it never waits out SIGN_PATIENCE_MS on them (review of #600, round 2).
+ * Any answer from the signer since says they are alive, and clears it.
+ */
+let wakeOwed = false
+onSignerAnswered(() => { wakeOwed = false })
 
 /**
  * The identity whose signer was last found on another account, so that is
@@ -1609,7 +1752,7 @@ function otherAccount(pubkey: string): void {
   useToast.getState().show({ label: 'SIGNER ON ANOTHER ACCOUNT', meta: 'Switch your signer back, or log in again.', mark: 'signer', sticky: true })
 }
 
-async function signEvent(template: EventTemplate, patienceMs?: number, signer: Signer = currentSigner): Promise<NostrEvent> {
+async function signEvent(template: EventTemplate, patienceMs?: number, signer: Signer = currentSigner, late?: (signed: NostrEvent) => void): Promise<NostrEvent> {
   // The last look before a movement event exists, whatever path asked for
   // it (a hop, a sidestep, BOARD, a ride, a spawn, a respawn): a deploy
   // requiring newer chain rules than this build's gets none from this tab
@@ -1617,6 +1760,9 @@ async function signEvent(template: EventTemplate, patienceMs?: number, signer: S
   if (template.kind === ACTION_KIND) {
     const look = lookBeforeMove()
     if (!(look instanceof Promise ? await look : look)) throw new Error(VERSION_BLOCKED_MESSAGE)
+    const s = useCyberspace.getState()
+    const down = rowsDownRefusal(s.identity.pubkey, s.events) ?? lostRefusal(s.identity.pubkey)
+    if (down) throw new Error(down)
   }
   if (signer.kind === 'local') {
     // The local key computes the id and the signature itself, so its events
@@ -1625,11 +1771,29 @@ async function signEvent(template: EventTemplate, patienceMs?: number, signer: S
     verifiedSigs.add(`${own.id}:${own.sig}`)
     return own
   }
+  // A wake skipped for an AUTH's answer, and this is not an AUTH: drop the
+  // signer's sockets now, unless another signature's answer is due on them.
+  const refresh = wakeOwed && !late && pendingSigns === pendingAuthSigns && !!signer.reconnect
+  if (refresh) wakeOwed = false
   pendingSigns++
+  if (late) pendingAuthSigns++
   let signed: NostrEvent
+  // A late answer is checked as an answer in time is, by the signer that gave it.
+  const lateFrom = (by: Signer) => late && ((ev: NostrEvent): void => {
+    let ok: NostrEvent
+    try { ok = checkedAnswer(ev, by) } catch { return }
+    late(ok)
+  })
   try {
+    if (refresh && signer.reconnect) {
+      try {
+        const fresh = await signer.reconnect()
+        if (currentSigner === signer) currentSigner = fresh
+        signer = fresh
+      } catch { /* the signature below says why, or reconnects on its own timeout */ }
+    }
     try {
-      signed = await signWithin(signer, template, patienceMs)
+      signed = await signWithin(signer, template, patienceMs, lateFrom(signer))
     } catch (err) {
       // A timeout, or a publish that gave up ("All promises were rejected"):
       // either way the signer's sockets are presumed dead. Drop them and ask
@@ -1638,13 +1802,14 @@ async function signEvent(template: EventTemplate, patienceMs?: number, signer: S
       if (err instanceof SignerAccountMismatch || !signer.reconnect) throw err
       const fresh = await signer.reconnect()
       if (currentSigner === signer) currentSigner = fresh
-      signed = await signWithin(fresh, template, patienceMs)
+      signed = await signWithin(fresh, template, patienceMs, lateFrom(fresh))
     }
   } catch (err) {
     if (err instanceof SignerAccountMismatch) otherAccount(signer.pubkey)
     throw err
   } finally {
     pendingSigns--
+    if (late) pendingAuthSigns--
   }
   return checkedAnswer(signed, signer)
 }
@@ -1750,7 +1915,12 @@ function wakeSigner(): void {
   // is on its way over these sockets. Dropping them now would lose it and ask
   // again, which is the second prompt for the same event. If they really are
   // dead, the pending request's timeout reconnects and asks again itself.
-  if (pendingSigns > 0) return
+  if (pendingSigns > pendingAuthSigns) return
+  // The same for a relay's AUTH, in flight or given up on but still wanted
+  // (signWithin `late`). Only for the AUTH: if these sockets are dead, the
+  // next signature that is not one drops them first (wakeOwed).
+  if (pendingAuthSigns > 0 || lateSignsPending() > 0) { wakeOwed = true; return }
+  wakeOwed = false
   // The fresh signer is taken only if the one that reconnected is still in
   // use: a switch of identity while it reconnected wins.
   const asked = currentSigner
@@ -1759,6 +1929,21 @@ function wakeSigner(): void {
 
 /** Said while a move asks the relays again for your latest move. */
 export const HEAD_RETRYING_MESSAGE = "Can't confirm your latest move; retrying."
+/** Said once a proof is done and before it is signed: the look at the relays. */
+export const CHECKING_RELAYS_MESSAGE = 'Checking the relays.'
+/** Said while a remote signer has a finished proof's event. */
+export const WAITING_SIGNER_MESSAGE = 'Waiting for your signer.'
+/**
+ * What the move button reads while a move is in hand: what it waits on, once
+ * the proof is done, or how far the proof has got.
+ */
+export function busyLabel(proof: { progress: number; message: string | null }): string {
+  if (proof.message === WAITING_SIGNER_MESSAGE) return 'SIGNER'
+  if (proof.message === CHECKING_RELAYS_MESSAGE || proof.message === HEAD_RETRYING_MESSAGE) return 'RELAYS'
+  return `${Math.round(proof.progress * 100)}%`
+}
+/** A worker could not run on a tab an update has left behind: its file may be gone from the server. */
+export const NEW_VERSION_RELOAD_MESSAGE = 'A new version of ONOSENDAI is out. RELOAD to move again.'
 /** Said when the relays still could not confirm it, and the move is refused. */
 export const HEAD_UNCONFIRMED_MESSAGE = "Can't confirm your latest move. Try again."
 /** How many times a move asks before it refuses. */
@@ -1840,8 +2025,275 @@ async function readForMark(pubkey: string, before: string | null | undefined): P
   }
 }
 
+/**
+ * What a tab of an older build saved to the old stores since this device last
+ * looked, folded in: the moves of a tab still open through a deploy, or of a
+ * build taken back to the old stores for a while (lib/chainStoreVersion.ts).
+ * Told by its mark, which costs nothing to compare.
+ */
+async function foldStaleBuild(pubkey: string): Promise<void> {
+  const running = staleFolds.get(pubkey)
+  if (running) return running
+  if (!staleMarkUnfolded(pubkey)) return
+  const fold = foldStaleBuildNow(pubkey).finally(() => { if (staleFolds.get(pubkey) === fold) staleFolds.delete(pubkey) })
+  staleFolds.set(pubkey, fold)
+  return fold
+}
+
+/** Per identity, the fold of what an older build saved, while it runs: every asker waits for the one fold (chainHydrated, a press). */
+const staleFolds = new Map<string, Promise<void>>()
+
+/**
+ * Whether the old stores hold a save by an older build that this device has
+ * not folded in yet: their mark says so, or an earlier read of them failed
+ * (unreadSaveKey), which this tab's own marks since do not undo.
+ */
+function staleMarkUnfolded(pubkey: string): boolean {
+  if (unreadSave(pubkey) !== null) return true
+  const mark = storedMark(pubkey)
+  return mark !== null && !mark.endsWith(':r') && markerValue(pubkey) !== mark
+}
+
+/**
+ * A save of an older build the old stores could not be read for. Kept in its
+ * own key, apart from the mark, because moves go on meanwhile (they sign from
+ * the chain in hand, the owner's call) and their marks replace the older
+ * build's: once the old stores can be read, that save is folded in, or set
+ * aside as a branch when the chain has moved on past it.
+ */
+const unreadSaveKey = (pubkey: string): string => `onosendai:chain-unread-save:${pubkey}`
+function unreadSave(pubkey: string): string | null {
+  try { return localStorage.getItem(unreadSaveKey(pubkey)) } catch { return null }
+}
+/**
+ * Whether the one thing keeping the head in hand from being vouched for is an
+ * older build's save the old stores could not be read for: the chain itself
+ * was read, nothing is being taken back.
+ */
+function onlyOlderSaveUnread(pubkey: string): boolean {
+  return unreadSave(pubkey) !== null && !rowsDown.has(pubkey) && !takingBack(pubkey) && (!chainDbAvailable() || dbRead.has(pubkey))
+}
+
+/** Identities told on this page that an older save could not be read. */
+const unreadSaid = new Set<string>()
+
+/**
+ * The fold itself. The mark is taken as seen only once the old stores have
+ * answered: a read that failed or ran out folds nothing for sure, so the next
+ * load or press reads them again instead of signing from a head they are past.
+ */
+async function foldStaleBuildNow(pubkey: string): Promise<void> {
+  const mark = storedMark(pubkey)
+  const local = loadChain(pubkey, true)
+  const kept = await readStoredChain(pubkey)
+  const answered = kept !== 'unreadable' && kept !== 'timeout'
+  const stored = furtherCopy(local, answered && kept ? chainFrom(pubkey, kept, true) : null)
+  // Nothing of this identity's in hand to fold into (switched away and back,
+  // its rows not read yet): nothing is folded, so nothing is taken as seen,
+  // and the read that brings the chain back folds it in (hydrateChain).
+  const s = useCyberspace.getState()
+  if (s.identity.pubkey !== pubkey || s.events.length === 0 || s.events[0].pubkey !== pubkey) return
+  if (!answered) {
+    try { if (unreadSave(pubkey) === null) localStorage.setItem(unreadSaveKey(pubkey), mark ?? '') } catch { /* tried again next read anyway */ }
+    if (!unreadSaid.has(pubkey)) {
+      unreadSaid.add(pubkey)
+      console.warn('[chain] the old stores could not be read for a save of an older build: moves go on from the chain in hand, and the read is tried again')
+      useToast.getState().show({ label: 'OLDER SAVE COULD NOT BE READ', meta: 'Moves go on from here. It keeps trying.', mark: 'block' })
+    }
+    if (stored) takeInStored(pubkey, stored)
+    return
+  }
+  const took = stored ? takeInStored(pubkey, stored) : true
+  // The chain moved on past a save that could not be read before: kept as a branch set aside, not lost.
+  if (!took && stored && unreadSave(pubkey) !== null) {
+    console.warn('[chain] a save of an older build, unreadable until now, parted ways with the chain since: it is set aside as a branch')
+    void setAsideRows(pubkey, { events: stored.events, published: stored.published, stats: { ...stored.stats }, held: stored.held === true, savedAt: stored.savedAt ?? 0 })
+  }
+  try { localStorage.removeItem(unreadSaveKey(pubkey)) } catch { /* private mode */ }
+  setMarker(pubkey, mark)
+}
+
+/** Take in what storage holds beyond the chain in hand. True when it was something another tab can have done. */
+function takeInStored(pubkey: string, stored: { events: NostrEvent[]; published: string[] }): boolean {
+  const s = useCyberspace.getState()
+  if (s.identity.pubkey !== pubkey || s.events.length === 0) return true
+  const have = new Set(s.events.map((e) => e.id))
+  const extra = stored.events.filter((e) => !have.has(e.id))
+  if (extra.length === 0) return true
+  // Only what another tab can have done: moved on from this tab's head (the
+  // stored chain holds every event this tab holds), or respawned (a newer
+  // spawn). Storage that disagrees in any other way is not taken on trust
+  // here; what was published is on the relays, and confirmHead asks them.
+  const storedIds = new Set(stored.events.map((e) => e.id))
+  const movedOn = s.events.every((e) => storedIds.has(e.id))
+  const respawned = stored.events[0].id !== s.genesisId && stored.events[0].created_at > s.events[0].created_at
+  if (!movedOn && !respawned) return false
+  // A fold takes what it folds as on the relays, and saves at once. Here that
+  // is not so: what storage holds and no relay has took no relay's word, and
+  // in rows an acknowledgement once written is never taken back. So the fold
+  // saves nothing, and the one save below says what is really on the relays.
+  const onRelays = new Set(stored.published)
+  foldingStored.add(pubkey)
+  try { foldNow(extra) } finally { foldingStored.delete(pubkey) }
+  const now = useCyberspace.getState()
+  const queued = extra.filter((e) => !onRelays.has(e.id) && now.published[e.id] === 'ok')
+  const published = queued.length === 0 ? now.published : { ...now.published }
+  for (const e of queued) published[e.id] = 'queued'
+  if (queued.length > 0) useCyberspace.setState({ published })
+  if (now.events[0]?.pubkey === pubkey) saveChain(now.events, published, now.chain)
+  return true
+}
+
+/** Identities whose fold of another copy is under way: the fold's own save waits for the one that knows what is on the relays (takeInStored). */
+const foldingStored = new Set<string>()
+
+/** Said when another tab's move committed first, and this tab's move was taken back before anything was sent. */
+export const OTHER_TAB_FIRST_MESSAGE = 'Another tab of yours moved first. This move was not sent. Re-aim from where you are now.'
+
+/**
+ * The rows and the chain in hand disagree, and the rows are the order things
+ * committed in: another tab won. The rows go in hand. What this tab holds
+ * beyond them that a relay already has is folded back in as from the relays.
+ * What no relay has was signed from a head that is gone, and sending it would
+ * fork the chain, so it is set aside, signed, unsent, and said so. Null when
+ * nothing of this tab's was taken back.
+ */
+function reconcileWithRows(pubkey: string, read: ChainRead): { taken: boolean; message: string | null } {
+  noteCommitted(pubkey, read.events.map((e) => e.id), read.published)
+  const s = useCyberspace.getState()
+  if (s.identity.pubkey !== pubkey) return { taken: false, message: null }
+  const fromDb = chainFrom(pubkey, read, true)
+  if (!fromDb) return { taken: false, message: null }
+  const recorded = new Set(read.events.map((e) => e.id))
+  const ours = s.events.filter((e) => !recorded.has(e.id))
+  const unsent = ours.filter((e) => s.published[e.id] !== 'ok')
+  // What of this tab's may be on the relays already: sent, on its way, or let go before it landed.
+  const mayBeOut = ours.filter((e) => s.published[e.id] === 'ok' || s.published[e.id] === 'sending' || wentOut(pubkey, e.id))
+  const have = new Set(s.events.map((e) => e.id))
+  if (unsent.length > 0) void setAsideRows(pubkey, { events: s.events, published: s.events.filter((e) => s.published[e.id] === 'ok').map((e) => e.id), stats: { ...s.chain }, held: s.held, savedAt: chainAt.get(pubkey)?.at ?? 0 })
+  putInHand(pubkey, fromDb, have)
+  chainAt.delete(pubkey)
+  // A lost action is never folded back, whatever it is marked: the relays bring it if they have it.
+  foldNow(ours.filter((e) => s.published[e.id] === 'ok' && !chainLost(pubkey, e.id)))
+  if (endTakeBack(pubkey, read, mayBeOut)) return { taken: true, message: CHAIN_HELD_MESSAGE }
+  if (unsent.length === 0) return { taken: true, message: null }
+  console.warn(`[chain] another tab moved first: ${unsent.length} action(s) of this tab were set aside, unsent`)
+  useCyberspace.setState({ proof: { ...IDLE_PROOF, status: 'infeasible', message: OTHER_TAB_FIRST_MESSAGE } })
+  return { taken: true, message: OTHER_TAB_FIRST_MESSAGE }
+}
+
+/**
+ * Per identity, the lost actions that may already be on the relays
+ * (lib/chainStore.ts onChainLost), until the rows are in hand to compare.
+ */
+const lostOut = new Map<string, Set<string>>()
+
+/**
+ * The rows are in hand after another tab moved first, and nothing that lost
+ * is: a take-back is done. An action of this tab that may be on the relays,
+ * is not in the rows and does not carry them on in one line is the other side
+ * of a fork the relays may already hold: then nothing more goes out from this
+ * tab, and the person is told. `candidates` are this tab's actions the rows
+ * lack that may be out; lostOut adds those a lost commit named. True when it held.
+ */
+function endTakeBack(pubkey: string, read: ChainRead, candidates: NostrEvent[] = []): boolean {
+  if (useCyberspace.getState().events.some((e) => chainLost(pubkey, e.id))) return false
+  if (takingBack(pubkey)) tookBack(pubkey)
+  const named = lostOut.get(pubkey) ?? new Set<string>()
+  lostOut.delete(pubkey)
+  const recorded = new Set(read.events.map((e) => e.id))
+  const known = new Set(candidates.map((e) => e.id))
+  const out = candidates.filter((e) => !recorded.has(e.id))
+  // A named action this tab no longer holds cannot be compared, and may be anywhere.
+  const unseen = [...named].filter((id) => !recorded.has(id) && !known.has(id))
+  const outside = unseen.length > 0 || (out.length > 0 && !oneLine(pubkey, read.events.concat(out)))
+  if (!outside) return false
+  holdChain(pubkey)
+  console.warn('[chain] another tab moved first while this tab\'s actions were on their way to the relays: the chain may have forked, and this tab sends nothing more')
+  useCyberspace.setState({ proof: { ...IDLE_PROOF, status: 'infeasible', message: CHAIN_HELD_MESSAGE } })
+  useToast.getState().show({ label: 'CHAIN MAY HAVE FORKED', meta: 'Another tab moved first while this one was sending. Nothing more goes out from here. Reload.', mark: 'block', sticky: true, reload: true })
+  return true
+}
+
+/**
+ * Before a move, in rows: the record says at once whether another tab
+ * committed since this tab last looked. Nothing here waits for a chain to
+ * land, because the record only ever names what has landed, whole. A record
+ * that cannot be read proves nothing, and the relays are asked, as ever; the
+ * commit itself still refuses a head that is gone.
+ */
+async function foldRowsOfOtherTabs(pubkey: string): Promise<string | null> {
+  await foldStaleBuild(pubkey)
+  const record = await rowsHead(pubkey)
+  if (record === null || record === 'unreadable') return null
+  const known = committedHead(pubkey)
+  if (record.headId === known.headId && record.length === known.length) return null
+  const read = await readRows(pubkey)
+  if (read === null || read === 'unreadable' || read === 'timeout') return null
+  if (useCyberspace.getState().identity.pubkey !== pubkey) return null
+  noteCommitted(pubkey, read.events.map((e) => e.id), read.published)
+  markedHead.set(pubkey, read.headId)
+  if (takeInStored(pubkey, read)) return endTakeBack(pubkey, read) ? CHAIN_HELD_MESSAGE : null
+  return reconcileWithRows(pubkey, read).message
+}
+
+/** How long the first take-back retry waits; it doubles to TAKE_BACK_MAX_MS. */
+const TAKE_BACK_RETRY_MS = 1_000
+const TAKE_BACK_MAX_MS = 30_000
+
+/**
+ * A commit lost: another tab's landed first. The lost actions were refused
+ * the moment the answer came (lib/chainStore.ts), so this only puts the rows in
+ * hand. A read that fails is tried again until one lands; meanwhile no move is
+ * signed, nothing is sent, and the person is told. A switch to another
+ * identity ends the tries: the load of this one reads its rows afresh.
+ */
+function takeBackLost(pubkey: string, attempt: number): void {
+  void readRows(pubkey).then((read) => {
+    if (!takingBack(pubkey) || useCyberspace.getState().identity.pubkey !== pubkey) return
+    if (read !== null && read !== 'unreadable' && read !== 'timeout' && reconcileWithRows(pubkey, read).taken && !takingBack(pubkey)) return
+    if (attempt === 0) {
+      console.warn('[chain] another tab moved first, and the chain could not be read back yet: nothing is signed or sent until it is')
+      useCyberspace.setState({ proof: { ...IDLE_PROOF, status: 'infeasible', message: TAKING_BACK_MESSAGE } })
+      useToast.getState().show({ label: 'CHAIN HELD', meta: 'Another tab moved first. Reading your chain again. Reload if this stays.', mark: 'block', sticky: true, reload: true })
+    }
+    setTimeout(() => takeBackLost(pubkey, attempt + 1), Math.min(TAKE_BACK_RETRY_MS * 2 ** attempt, TAKE_BACK_MAX_MS))
+  })
+}
+
+/** Said while actions that must land wait on a store that stopped answering (lib/chainStore.ts onChainStuck). */
+const STORE_STUCK_META = 'This device\'s store stopped answering. Moves wait here, unsent.'
+function sayStoreStuck(): void {
+  useToast.getState().show({ label: 'CHAIN HELD', meta: STORE_STUCK_META, mark: 'block', sticky: true, reload: true })
+}
+onChainStuck((pubkey, stuck) => {
+  if (useCyberspace.getState().identity.pubkey !== pubkey) return
+  if (stuck) { sayStoreStuck(); return }
+  if (useToast.getState().toast?.meta === STORE_STUCK_META) useToast.getState().dismiss()
+})
+
+onChainResave((pubkey) => {
+  const s = useCyberspace.getState()
+  if (s.identity.pubkey !== pubkey || s.events[0]?.pubkey !== pubkey) return false
+  saveChain(s.events, s.published, s.chain, s.held)
+  return true
+})
+
+onChainLost((pubkey, out) => {
+  if (out.length > 0) lostOut.set(pubkey, new Set([...(lostOut.get(pubkey) ?? []), ...out]))
+  takeBackLost(pubkey, 0)
+})
+
+onChainRefused((pubkey, quota) => {
+  if (useCyberspace.getState().identity.pubkey !== pubkey) return
+  useToast.getState().show(quota
+    ? { label: 'STORAGE FULL', meta: 'Your moves stay in this tab. Free up space, or stay LIVE.', mark: 'block', sticky: true }
+    : { label: 'CHAIN NOT SAVED', meta: 'Your moves stay in this tab. It keeps trying.', mark: 'block', sticky: true })
+})
+
 async function foldOtherTabs(pubkey: string): Promise<string | null> {
   if (useCyberspace.getState().events.length === 0) return null
+  if (rowsWanted() && inRows(pubkey)) return foldRowsOfOtherTabs(pubkey)
   // Only when another tab has saved since this one last wrote or read the
   // chain: comparing the mark costs nothing, and reading, hashing and
   // rebuilding a long saved chain before every move cost about 190 ms on a
@@ -1856,27 +2308,7 @@ async function foldOtherTabs(pubkey: string): Promise<string | null> {
   // it could overwrite the newer mark of a save this tab made meanwhile.
   const { stored, behind } = await readForMark(pubkey, before)
   if (behind) return OTHER_TAB_SAVING_MESSAGE
-  const s = useCyberspace.getState()
-  if (!stored || s.identity.pubkey !== pubkey || s.events.length === 0) return null
-  const have = new Set(s.events.map((e) => e.id))
-  const extra = stored.events.filter((e) => !have.has(e.id))
-  if (extra.length === 0) return null
-  // Only what another tab can have done: moved on from this tab's head (the
-  // stored chain holds every event this tab holds), or respawned (a newer
-  // spawn). Storage that disagrees in any other way is not taken on trust
-  // here; what was published is on the relays, and confirmHead asks them.
-  const storedIds = new Set(stored.events.map((e) => e.id))
-  const movedOn = s.events.every((e) => storedIds.has(e.id))
-  const respawned = stored.events[0].id !== s.genesisId && stored.events[0].created_at > s.events[0].created_at
-  if (!movedOn && !respawned) return null
-  foldNow(extra)
-  const now = useCyberspace.getState()
-  const queued = extra.filter((e) => !stored.published.includes(e.id) && now.published[e.id] === 'ok')
-  if (queued.length === 0) return null
-  const published = { ...now.published }
-  for (const e of queued) published[e.id] = 'queued'
-  useCyberspace.setState({ published })
-  saveChain(now.events, published, now.chain)
+  if (stored) takeInStored(pubkey, stored)
   return null
 }
 
@@ -1932,7 +2364,11 @@ async function confirmHead(retrying: () => void): Promise<string | null | typeof
     if (chainEpoch !== epoch) return STALE_CONFIRMATION
     if (useCyberspace.getState().identity.pubkey !== pubkey) return HEAD_UNCONFIRMED_MESSAGE
     if (got) {
+      relaysConfirmed.add(pubkey)
       foldNow(got)
+      // The relays answered for the head: what the spare key brought back may go (a fork against them stops the drain itself).
+      vouch(pubkey)
+      if (rowsWiped.has(pubkey)) void recoverWiped(pubkey)
       return null
     }
   }
@@ -2030,6 +2466,70 @@ function startSignatureCheck(pubkey: string, unchecked: NostrEvent[]): void {
 }
 
 /**
+ * The rows a check of the chain's rows covers, by id, as the check read them:
+ * nothing else needs to check them (putInHand), and what the check finds comes
+ * from the rows themselves. Only those exact bytes: a copy under the same id
+ * that differs in any field (another signature of it, a row rewritten since) is
+ * not what was checked, and is checked like any other.
+ */
+const coveredByRows = new Map<string, NostrEvent>()
+/** The identity whose rows coveredByRows holds: a switch clears it, so it never grows across identities. */
+let coveredFor: string | null = null
+
+/** For tests: how many rows a check of the rows covers now. */
+export function rowsCoverage(): number {
+  return coveredByRows.size
+}
+
+/** Whether two copies of an event are the same, field for field: an id does not commit to the signature. */
+function sameBytes(a: NostrEvent | undefined, b: NostrEvent): boolean {
+  return a !== undefined && (a === b || (a.sig === b.sig && a.pubkey === b.pubkey && a.created_at === b.created_at && a.kind === b.kind && a.content === b.content && JSON.stringify(a.tags) === JSON.stringify(b.tags)))
+}
+
+/** Whether a copy is, field for field, the one a check of the rows covered. */
+function coveredAsIs(e: NostrEvent): boolean {
+  return sameBytes(coveredByRows.get(e.id), e)
+}
+
+/**
+ * Check a chain just read from its rows, in the worker, instead of every
+ * signature on every load: flagged rows have only their id recomputed, and a
+ * row not flagged yet has its signature checked, once, and is flagged. Chain
+ * actions wait for it as they wait for startSignatureCheck, and the chain is
+ * cut the same way. A database that will not do it hands the job to the check
+ * that needs no database.
+ */
+function startRowsCheck(pubkey: string, read: ChainRead): void {
+  const events = read.events
+  // Covered for this identity only: another identity's rows say nothing here.
+  if (coveredFor !== pubkey) { coveredByRows.clear(); coveredFor = pubkey }
+  // Covered, not trusted: a row's flag is trusted once the check has recomputed its id.
+  for (const e of events) coveredByRows.set(e.id, e)
+  const running = sigCheck?.pubkey === pubkey ? sigCheck.done : null
+  const entry: { pubkey: string; done: Promise<string | null> } = { pubkey, done: Promise.resolve(null) }
+  // The check that needs no database, on the deadline: a row already flagged has only its id recomputed there.
+  const flagged = new Set(read.checked)
+  const known = events.filter((e) => flagged.has(e.id)).map((e) => `${e.id}:${e.sig}`)
+  const own = checkRowsInTime(pubkey, events.length).then((bad) => new Set(bad), () => checkSignatures(events, undefined, known)).then((bad) => {
+    const badKeys = new Set(events.filter((e) => bad.has(e.id)).map(sigKey))
+    for (const e of events) {
+      if (bad.has(e.id)) continue
+      verifiedSigs.add(sigKey(e))
+      checkedElsewhere(e)
+    }
+    return badKeys.size === 0 ? null : cutInauthentic(pubkey, badKeys)
+  })
+  entry.done = (running ? Promise.all([running, own]).then(([a, b]) => a ?? b) : own).then((cut) => {
+    if (sigCheck === entry) sigCheck = null
+    mark('onosendai:chain-verified')
+    // Only over signatures that held: a verdict is about authentic events (a cut has already changed the chain).
+    void markVerdicts(pubkey, CHAIN_RULES_EPOCH)
+    return cut
+  })
+  sigCheck = entry
+}
+
+/**
  * After a load has drawn the chain localStorage kept, read the one IndexedDB
  * keeps (lib/chainDb.ts) and take it when it is further on (furtherCopy):
  * localStorage stops taking a chain that outgrew its few megabytes, and its
@@ -2058,26 +2558,11 @@ function hydrateChain(pubkey: string): void {
   // When the chain in hand last changed as the read went out: a late answer
   // that disagrees with moves made after that is not taken over them.
   const startedAt = chainAt.get(pubkey)?.at ?? 0
-  entry.done = readStoredChain(pubkey, (late) => {
-    if (ticket !== hydrateTicket || late === 'unreadable') return
-    if (useCyberspace.getState().identity.pubkey !== pubkey) return
-    if (!takeStoredChain(pubkey, late, startedAt)) return
-    // Taken in: IndexedDB now gets whatever the chain is.
-    const s = useCyberspace.getState()
-    if (s.events[0]?.pubkey === pubkey) saveChain(s.events, s.published, s.chain, s.held)
-  }).then((kept) => {
-    if (hydration !== entry || ticket !== hydrateTicket) return
-    if (kept === 'timeout' || kept === 'unreadable') {
-      console.warn(`[chain] IndexedDB ${kept === 'timeout' ? 'did not answer in time' : 'could not be read'}: using the chain localStorage kept, and writing nothing to IndexedDB until it answers`)
-      return
-    }
-    if (useCyberspace.getState().identity.pubkey !== pubkey) return
-    // A respawn while the read was out is a new chain, never one to replace.
-    if (chainEpoch !== epoch) { dbRead.add(pubkey); return }
-    takeStoredChain(pubkey, kept, null)
-  }).catch(() => { /* the chain in hand stands */ }).finally(() => {
+  const read = rowsWanted() ? hydrateFromRows(pubkey, entry, ticket, epoch, startedAt) : hydrateFromOldStores(pubkey, entry, ticket, epoch, startedAt).then(() => takeRowsBack(pubkey, entry, ticket, startedAt))
+  entry.done = read.catch(() => { /* the chain in hand stands */ }).finally(() => {
     if (hydration !== entry) return
     hydration = null
+    mark('onosendai:chain-read')
     const s = useCyberspace.getState()
     if (s.identity.pubkey !== pubkey) { awaitingHydration = []; return }
     // The save that waited. To localStorage either way; to IndexedDB only
@@ -2086,8 +2571,308 @@ function hydrateChain(pubkey: string): void {
     const waiting = awaitingHydration
     awaitingHydration = []
     if (waiting.length > 0) s.adoptChain(waiting)
+    if (rowsWanted() && inRows(pubkey)) void foldStaleBuild(pubkey)
+    if (storeTrial()) sayTrial(pubkey)
+    confirmHeldOnLoad(pubkey)
   })
   hydration = entry
+}
+
+/** Identities whose held moves were confirmed with the relays on this page (confirmHeldOnLoad). */
+const heldConfirmedOnLoad = new Set<string>()
+
+/**
+ * Once per page, LIVE, after the chain is read and with no proof running: when
+ * moves the spare key brought back are held for want of an answer (the rows
+ * could not be read), the relays are asked for the head now, as a press would,
+ * so those moves are free before the next press. Its refusal is nobody's
+ * business here: a move asks again. Never confirmHeadNow, which would put its
+ * words over a proof the person just started. The release gate still decides
+ * when they go (lib/release.ts): the next action, or PUBLISH NOW.
+ */
+function confirmHeldOnLoad(pubkey: string): void {
+  if (heldConfirmedOnLoad.has(pubkey)) return
+  const s = useCyberspace.getState()
+  if (!s.live || s.identity.pubkey !== pubkey || s.proof.status === 'computing' || !anyUnvouched(pubkey)) return
+  heldConfirmedOnLoad.add(pubkey)
+  void confirmHead(() => {}).catch(() => { /* a move asks again */ })
+}
+
+/** What a device on the trial sees after each load (?chainstore=trial): what the store did, and the head to compare by hand. */
+function sayTrial(pubkey: string): void {
+  const s = useCyberspace.getState()
+  const head = s.prevEventId ? s.prevEventId.slice(0, 8) : 'none'
+  const state = rowsDown.has(pubkey) ? 'UNREADABLE' : !rowsWanted() ? 'OFF' : inRows(pubkey) ? 'ROWS' : 'OLD STORES'
+  useToast.getState().show({ label: `STORE ${state}`, meta: `probe ${probePassedBefore() ? 'pass' : 'FAIL'}, ${s.events.length} actions, head ${head}`, mark: 'build', sticky: true })
+}
+
+/** The read of the old stores. True when it was taken in. */
+async function hydrateFromOldStores(pubkey: string, entry: { pubkey: string }, ticket: number, epoch: number, startedAt: number): Promise<boolean> {
+  const kept = await readStoredChain(pubkey, (late) => {
+    if (ticket !== hydrateTicket || late === 'unreadable') return
+    if (useCyberspace.getState().identity.pubkey !== pubkey) return
+    if (!takeStoredChain(pubkey, late, startedAt)) return
+    // Taken in: IndexedDB now gets whatever the chain is.
+    const s = useCyberspace.getState()
+    if (s.events[0]?.pubkey === pubkey) saveChain(s.events, s.published, s.chain, s.held)
+  })
+  if (hydration !== entry || ticket !== hydrateTicket) return false
+  if (kept === 'timeout' || kept === 'unreadable') {
+    console.warn(`[chain] IndexedDB ${kept === 'timeout' ? 'did not answer in time' : 'could not be read'}: using the chain localStorage kept, and writing nothing to IndexedDB until it answers`)
+    return false
+  }
+  if (useCyberspace.getState().identity.pubkey !== pubkey) return false
+  // A respawn while the read was out is a new chain, never one to replace.
+  if (chainEpoch !== epoch) { dbRead.add(pubkey); return true }
+  return takeStoredChain(pubkey, kept, null)
+}
+
+/** How long moves wait for a chain's first move into rows. Past this they go on, to the old stores, and the rows catch up on the next save. */
+const MIGRATE_HOLD_MS = 15_000
+
+/** The frozen copy in hand, when the rows did not bring the chain and nothing is in hand yet. */
+function frozenCopyInHand(pubkey: string): void {
+  const s = useCyberspace.getState()
+  if (s.events.length > 0 || s.identity.pubkey !== pubkey) return
+  const local = loadChain(pubkey, true)
+  if (local) putInHand(pubkey, local, new Set())
+  tailInHand(pubkey)
+}
+
+/**
+ * Whether these actions read as one chain with no fork: a sibling of the head
+ * joining them would show a fork that never happened, and a fork ends a chain.
+ * A tail can hold one: a tab closed with a commit on its way that then lost.
+ */
+function oneLine(pubkey: string, events: NostrEvent[]): boolean {
+  const order = buildChain(events, pubkey)
+  return order.length === events.length && order[0]?.fork === undefined
+}
+
+/** Actions no store has yet, joined to the chain in hand when they carry it on. When they do not, they stay where they are. */
+function tailInHand(pubkey: string): void {
+  const s = useCyberspace.getState()
+  if (s.identity.pubkey !== pubkey) return
+  const have = new Set(s.events.map((e) => e.id))
+  const tail = readTail(pubkey).filter((e) => e?.id && !have.has(e.id))
+  if (tail.length === 0) return
+  const events = s.events.concat(tail)
+  if (!oneLine(pubkey, events)) return
+  const merged = chainFrom(pubkey, { events, published: s.events.filter((e) => s.published[e.id] === 'ok').map((e) => e.id), stats: s.chain, held: s.held, savedAt: chainAt.get(pubkey)?.at ?? 0 }, true)
+  if (!merged) return
+  // Rows that cannot be read: nobody compared these with another tab's commit.
+  // None goes out until a commit or the relays have answered for the head.
+  if (rowsDown.has(pubkey)) holdUntilVouched(pubkey, tail.map((e) => e.id))
+  putInHand(pubkey, merged, have)
+}
+
+/**
+ * The rows, when this device has them; and when it does not, the old stores
+ * as ever, and then the chain moves over: copied, read back, compared and
+ * switched (lib/eventDb/chainRows.ts), with the hold on moves still up. The
+ * old stores are never written again for an identity once it is in rows.
+ */
+async function hydrateFromRows(pubkey: string, entry: { pubkey: string; dirty: boolean }, ticket: number, epoch: number, startedAt: number): Promise<void> {
+  // Before anything is written or moved. A browser that fails stays on the old
+  // stores, as a build of version 1 does: no marker, no record, the old stores
+  // written whole. Asked afresh unless this identity's rows are already there.
+  if (!await storeWorksHere(!rowsMarked(pubkey))) {
+    turnRowsOff()
+    if (hydration !== entry || ticket !== hydrateTicket || useCyberspace.getState().identity.pubkey !== pubkey) return
+    await hydrateFromOldStores(pubkey, entry, ticket, epoch, startedAt)
+    await takeRowsBack(pubkey, entry, ticket, startedAt)
+    return
+  }
+  const read = await readRows(pubkey, (late) => {
+    if (ticket !== hydrateTicket || late === 'unreadable' || late === null) return
+    if (useCyberspace.getState().identity.pubkey !== pubkey) return
+    takeRows(pubkey, late, startedAt)
+    const s = useCyberspace.getState()
+    if (s.events[0]?.pubkey === pubkey) saveChain(s.events, s.published, s.chain, s.held)
+  })
+  if (hydration !== entry || ticket !== hydrateTicket) return
+  if (useCyberspace.getState().identity.pubkey !== pubkey) return
+  if (read === 'timeout' || read === 'unreadable') {
+    if (rowsMarked(pubkey)) rowsAreDown(pubkey, read === 'timeout' ? 'did not answer in time' : 'could not be read')
+    else await hydrateFromOldStores(pubkey, entry, ticket, epoch, startedAt)
+    return
+  }
+  if (read !== null) {
+    if (chainEpoch !== epoch) { noteCommitted(pubkey, read.events.map((e) => e.id), read.published); dbRead.add(pubkey); return }
+    if (takeRows(pubkey, read, null)) entry.dirty = true
+    return
+  }
+  // No rows under a marker: this device moved the chain here, and the database
+  // was cleared since. The old copies are from before the switch, so neither
+  // they nor the tail are the chain: the relays are, and nothing is signed or
+  // moved until they have answered (recoverWiped).
+  if (rowsMarked(pubkey)) {
+    await wipedUnderMarker(pubkey, entry, ticket, epoch, startedAt)
+    return
+  }
+  // No rows, never moved here: the old copies say.
+  if (!await hydrateFromOldStores(pubkey, entry, ticket, epoch, startedAt)) return
+  tailInHand(pubkey)
+  // Only on the deploy's yes, asked now, so a bad move can be stopped from the version file.
+  if (!await deployAllowsMove()) return
+  if (hydration !== entry || ticket !== hydrateTicket) return
+  const moving = moveToRows(pubkey, startedAt)
+  await Promise.race([moving, new Promise((resolve) => setTimeout(resolve, MIGRATE_HOLD_MS))])
+}
+
+/**
+ * The rows are gone under the marker (rowsWiped). The furthest of the frozen
+ * copies and the tail are drawn, nothing is written over either, and nothing
+ * is signed until the relays have answered for the head.
+ */
+async function wipedUnderMarker(pubkey: string, entry: { pubkey: string; dirty: boolean }, ticket: number, epoch: number, startedAt: number): Promise<void> {
+  sayWiped(pubkey)
+  await hydrateFromOldStores(pubkey, entry, ticket, epoch, startedAt)
+  if (hydration !== entry || ticket !== hydrateTicket || useCyberspace.getState().identity.pubkey !== pubkey) return
+  tailInHand(pubkey)
+}
+
+/** The rows are gone under the marker: said once per page, and every move waits for the relays. */
+function sayWiped(pubkey: string): void {
+  if (!rowsWiped.has(pubkey)) {
+    useToast.getState().show({ label: 'SAVED CHAIN CLEARED', meta: 'This device lost its copy of your chain. Moves wait for the relays. Unsent moves may be gone.', mark: 'block', sticky: true, reload: true })
+  }
+  rowsWiped.add(pubkey)
+  rowsAreDown(pubkey, 'holds no chain under its marker (it was cleared)')
+}
+
+/**
+ * The relays have answered for a chain whose rows were gone: what is in hand
+ * now is all there is. It goes into rows again (or, with the rows off, whole
+ * into the old stores, and the marker goes), and moves are free again.
+ */
+async function recoverWiped(pubkey: string): Promise<void> {
+  if (!rowsWiped.has(pubkey) || useCyberspace.getState().identity.pubkey !== pubkey) return
+  await chainHydrated(pubkey)
+  if (!rowsWiped.has(pubkey) || useCyberspace.getState().identity.pubkey !== pubkey) return
+  if (!rowsWanted()) {
+    rowsWiped.delete(pubkey)
+    rowsDown.delete(pubkey)
+    clearMarker(pubkey)
+    const s = useCyberspace.getState()
+    if (s.events[0]?.pubkey === pubkey) saveChain(s.events, s.published, s.chain, s.held)
+    return
+  }
+  if (!await deployAllowsMove()) return
+  await moveToRows(pubkey, chainAt.get(pubkey)?.at ?? 0)
+}
+
+/** Copies that hold actions the chain moved to rows does not. They stay where they are too; a branch set aside can be found from the rows. */
+async function otherCopies(pubkey: string, source: ChainSource): Promise<ChainSource[]> {
+  const ids = new Set(source.events.map((e) => e.id))
+  const beyond = (c: { events: NostrEvent[] }): boolean => c.events.some((e) => !ids.has(e?.id))
+  const local = loadChain(pubkey, true)
+  const kept = await readStoredChain(pubkey)
+  const asSource = (c: { events: NostrEvent[]; published?: string[]; stats?: unknown; held?: boolean; savedAt?: number }): ChainSource => ({ events: c.events, published: c.published ?? [], stats: { ...(c.stats as Record<string, unknown> | undefined) }, held: c.held === true, savedAt: c.savedAt ?? 0 })
+  const out: ChainSource[] = []
+  if (local && beyond(local)) out.push(asSource(local))
+  if (kept && kept !== 'unreadable' && kept !== 'timeout' && beyond(kept)) out.push(asSource(kept))
+  for (const branch of await setAsideChains(pubkey).catch(() => [])) out.push(asSource(branch))
+  return out
+}
+
+/** Move the chain in hand to rows. What fails here leaves the identity on the old stores, and the next load tries again. */
+async function moveToRows(pubkey: string, startedAt: number): Promise<void> {
+  const s = useCyberspace.getState()
+  if (s.identity.pubkey !== pubkey) return
+  const legacyMark = storedMark(pubkey)
+  // Nothing to move: an identity with no chain is in rows from its first action.
+  if (s.events.length === 0 || s.events[0].pubkey !== pubkey) { noteCommitted(pubkey, [], []); rowsWiped.delete(pubkey); rowsDown.delete(pubkey); return }
+  const events = s.events
+  const published = events.filter((e) => s.published[e.id] === 'ok').map((e) => e.id)
+  const source: ChainSource = { events, published, stats: { ...s.chain }, held: s.held, savedAt: chainAt.get(pubkey)?.at ?? 0 }
+  const parted = await otherCopies(pubkey, source).catch(() => [])
+  const result = await migrateToRows(pubkey, source, parted, ['onosendai:chain', 'onosendai:chains'])
+  if (result.status === 'exists') {
+    const read = await readRows(pubkey)
+    if (read !== null && read !== 'unreadable' && read !== 'timeout' && useCyberspace.getState().identity.pubkey === pubkey) {
+      takeRows(pubkey, read, startedAt)
+      setMarker(pubkey, legacyMark)
+    }
+    return
+  }
+  if (result.status !== 'switched') {
+    console.warn(`[chain] the chain could not be moved to the event database (${result.status === 'failed' ? result.reason : `a row read back differently: ${result.id}`}): it stays in the old stores, and the next load tries again`)
+    return
+  }
+  noteCommitted(pubkey, events.map((e) => e.id), published)
+  setMarker(pubkey, legacyMark)
+  clearTail(pubkey)
+  // A chain whose rows were gone is in rows again (recoverWiped).
+  rowsWiped.delete(pubkey)
+  rowsDown.delete(pubkey)
+  mark('onosendai:chain-moved')
+  // Moves made after the hold gave out go in now, as the next save would take them.
+  const now = useCyberspace.getState()
+  if (now.identity.pubkey === pubkey && now.events !== events && now.events[0]?.pubkey === pubkey) saveChain(now.events, now.published, now.chain, now.held)
+}
+
+/**
+ * Take in what the rows answered. Actions that had no store when they were
+ * made (a full disk, a page closed mid-write) join them when they still
+ * reassemble, and are set aside when they do not. True when such actions were
+ * added, so they are written now.
+ */
+function takeRows(pubkey: string, read: ChainRead, blindSince: number | null): boolean {
+  rowsDown.delete(pubkey)
+  // The rows answer again: what the spare key brought back is now compared and committed like any save.
+  vouch(pubkey)
+  rowsWiped.delete(pubkey)
+  noteCommitted(pubkey, read.events.map((e) => e.id), read.published)
+  startRowsCheck(pubkey, read)
+  markedHead.set(pubkey, read.headId)
+  if (!rowsMarked(pubkey)) setMarker(pubkey, storedMark(pubkey))
+  const held = new Set(read.events.map((e) => e.id))
+  const tail = readTail(pubkey).filter((e) => e?.id && !held.has(e.id))
+  if (tail.length === 0) {
+    clearTail(pubkey)
+    takeStoredChain(pubkey, read, blindSince)
+    endTakeBack(pubkey, read)
+    return false
+  }
+  const merged: ChainRead = { ...read, events: read.events.concat(tail) }
+  if (oneLine(pubkey, merged.events) && chainFrom(pubkey, merged, true)) {
+    takeStoredChain(pubkey, merged, blindSince)
+    endTakeBack(pubkey, read)
+    return true
+  }
+  void setAsideRows(pubkey, { events: tail, published: [], stats: {}, held: false, savedAt: Date.now() })
+  clearTail(pubkey)
+  takeStoredChain(pubkey, read, blindSince)
+  endTakeBack(pubkey, read)
+  return false
+}
+
+/**
+ * The rows are off (lib/chainStoreVersion.ts: a build on version 1, or the
+ * deploy's kill switch, or a browser that no longer passes the probe), after
+ * they were in use on this device: they may be further on than the old stores,
+ * by every move made since. Taken like any other copy, and the old stores are
+ * written from it at once.
+ */
+async function takeRowsBack(pubkey: string, entry: { dirty: boolean }, ticket: number, startedAt: number): Promise<void> {
+  // Only a device that has used the rows opens them: everywhere else this is the old build, to the letter.
+  if (rowsWanted() || !eventDbAvailable() || !rowsMarked(pubkey)) return
+  const read = await readRows(pubkey, (late) => {
+    if (ticket !== hydrateTicket || late === 'unreadable' || late === null) return
+    if (useCyberspace.getState().identity.pubkey !== pubkey) return
+    rowsDown.delete(pubkey)
+    takeStoredChain(pubkey, late, startedAt)
+    const s = useCyberspace.getState()
+    if (s.events[0]?.pubkey === pubkey) saveChain(s.events, s.published, s.chain, s.held)
+  })
+  if (ticket !== hydrateTicket || useCyberspace.getState().identity.pubkey !== pubkey) return
+  // Gone under the marker: the old stores were frozen at the switch, so what they hold is not the chain either.
+  if (read === null) { sayWiped(pubkey); return }
+  // Unreadable is never "no chain": moves only in the rows would be lost if the old stores went on without them.
+  if (read === 'unreadable' || read === 'timeout') { rowsAreDown(pubkey, read === 'timeout' ? 'did not answer in time' : 'could not be read'); return }
+  takeStoredChain(pubkey, read, null)
+  entry.dirty = true
 }
 
 /**
@@ -2148,7 +2933,8 @@ function takeParted(pubkey: string, kept: StoredChain, fromDb: LoadedChain, have
     useCyberspace.getState().adoptChain(ours)
     return true
   }
-  setAsideStoredChain(pubkey, kept)
+  if (rowsWanted() && inRows(pubkey)) void setAsideRows(pubkey, { events: kept.events, published: kept.published, stats: kept.stats, held: kept.held, savedAt: kept.savedAt ?? 0 })
+  else setAsideStoredChain(pubkey, kept)
   console.warn('[chain] IndexedDB answered late with a branch that parted ways with unpublished moves made meanwhile; the chain in hand stays, and that branch is kept aside in IndexedDB')
   dbRead.add(pubkey)
   return true
@@ -2157,6 +2943,8 @@ function takeParted(pubkey: string, kept: StoredChain, fromDb: LoadedChain, have
 /** The record's chain in hand, in silence: what a load does when IndexedDB holds the chain further on. */
 function putInHand(pubkey: string, fromDb: LoadedChain, have: Set<string>): void {
   const s = useCyberspace.getState()
+  // What was in hand, as it was: a copy here that differs from it under the same id is checked anew.
+  const inHand = new Map(s.events.map((e) => [e.id, e]))
   const d = derive(fromDb)
   // Acknowledged here since the load stays acknowledged.
   const published = { ...d.published }
@@ -2186,13 +2974,85 @@ function putInHand(pubkey: string, fromDb: LoadedChain, have: Set<string>): void
   noteInHand(pubkey, fromDb)
   dbRead.add(pubkey)
   // What localStorage did not have is checked like the rest, off the main thread.
-  startSignatureCheck(pubkey, fromDb.unchecked.filter((e) => !have.has(e.id)))
+  startSignatureCheck(pubkey, fromDb.unchecked.filter((e) => !(have.has(e.id) && sameBytes(inHand.get(e.id), e)) && !coveredAsIs(e)))
 }
 
 /** Resolves once the read of `pubkey`'s chain from IndexedDB has landed (hydrateChain). */
 async function chainHydrated(pubkey: string): Promise<void> {
   const h = hydration
   if (h && h.pubkey === pubkey) await h.done
+  // And the fold of an older build's save that the read hands on to (hydrateChain).
+  const fold = staleFolds.get(pubkey)
+  if (fold) await fold
+}
+
+/**
+ * Whether a load reads this identity's chain from its rows alone: it has moved
+ * there, so the old copy is an old stretch not worth parsing and drawing.
+ */
+function rowsFirst(pubkey: string): boolean {
+  return rowsWanted() && rowsMarked(pubkey) && probePassedBefore()
+}
+
+/**
+ * What the first draw waits for: nothing when the chain is already in hand,
+ * and otherwise the read of its rows, so nothing is drawn as the chain until
+ * the chain is here (onosendai/event-db-design.md, 3.7). main.tsx bounds it.
+ */
+export function chainReadyToDraw(): Promise<void> {
+  const s = useCyberspace.getState()
+  return s.events.length > 0 || !rowsFirst(s.identity.pubkey) ? Promise.resolve() : chainHydrated(s.identity.pubkey)
+}
+
+/**
+ * Waits for the read of `pubkey`'s saved chain (chainHydrated), then says
+ * whether the chain in hand is the whole of what this device keeps. False
+ * when IndexedDB holds a copy that was not taken in (it did not answer in
+ * time, or could not be read): the chain in hand may then be the old
+ * stretch localStorage kept, and its head proves nothing about where the
+ * chain is.
+ */
+async function wholeChainInHand(pubkey: string): Promise<boolean> {
+  await chainHydrated(pubkey)
+  // In rows, a head nobody can vouch for: rows that cannot be read or were
+  // cleared (the chain in hand is then a frozen copy from before the rows), or
+  // a move that lost to another tab's, still in hand.
+  if (rowsDown.has(pubkey) || takingBack(pubkey)) return false
+  // An older build's save not folded in yet (its read failed): the head in hand may be behind it.
+  if (rowsWanted() && inRows(pubkey) && staleMarkUnfolded(pubkey)) return false
+  return !chainDbAvailable() || dbRead.has(pubkey)
+}
+
+/** What a new paid cloud job is refused with while a kept one would be written over. */
+const KEPT_JOB_MESSAGE = 'A HOSAKA job is kept in the Cloud compute panel. RESUME or DISCARD it first.'
+
+/**
+ * This identity's job record on disk while it may still be paid work: bound
+ * to the head in hand, or to a head not in hand (the saved chain may not be
+ * read yet). A record whose head the chain in hand has moved past is spent
+ * or worthless, and bars nothing: a route's step that just landed leaves its
+ * record a moment after the next step starts (runCloud).
+ */
+function liveKeptJob(): PendingCloudJob | null {
+  const { identity, events, prevEventId } = useCyberspace.getState()
+  const r = loadCloudJob(identity.pubkey)
+  if (!r) return null
+  if (r.prevEventId !== prevEventId && events.some((e) => e.id === r.prevEventId)) return null
+  return r
+}
+
+/**
+ * Whether a new paid job must be refused over a kept one (KEPT_JOB_MESSAGE). The
+ * refusal says RESUME or DISCARD it, and the panel shows those only for a job it
+ * holds: a record that is only on disk is put in the panel, so both are there.
+ */
+function refusesOverKeptJob(): boolean {
+  const s = useCyberspace.getState()
+  if (s.cloud.job !== null) return true
+  const kept = liveKeptJob()
+  if (!kept) return false
+  if (s.cloud.status === 'idle' || s.cloud.status === 'error') useCyberspace.setState({ cloud: { ...s.cloud, job: kept } })
+  return true
 }
 
 /** Resolves once the current identity's whole saved chain is in hand: the IndexedDB read after a load or a switch has landed. */
@@ -2206,6 +3066,8 @@ export function savedChainLoaded(): Promise<void> {
  * check cut the chain under it, and null otherwise.
  */
 async function signaturesChecked(pubkey: string): Promise<string | null> {
+  // What was being said goes back when this is done: a finished proof's look at the relays is still to come.
+  const before = useCyberspace.getState().proof.message
   const say = (): void => useCyberspace.setState({ proof: { ...useCyberspace.getState().proof, message: SIG_CHECK_MESSAGE } })
   const first = sigCheck?.pubkey === pubkey ? sigCheck : null
   if (first) say()
@@ -2217,7 +3079,7 @@ async function signaturesChecked(pubkey: string): Promise<string | null> {
   if (!check) return null
   if (!first) say()
   const cut = await check.done
-  if (useCyberspace.getState().proof.message === SIG_CHECK_MESSAGE) useCyberspace.setState({ proof: { ...useCyberspace.getState().proof, message: null } })
+  if (useCyberspace.getState().proof.message === SIG_CHECK_MESSAGE) useCyberspace.setState({ proof: { ...useCyberspace.getState().proof, message: before === SIG_CHECK_MESSAGE ? null : before } })
   return cut
 }
 
@@ -2269,6 +3131,22 @@ function cutInauthentic(pubkey: string, badKeys: Set<string>): string | null {
   useCyberspace.setState({ ...d, cursor: d.position, pendingTarget: null, proof: { ...IDLE_PROOF, status: 'infeasible', message: words } })
   saveChain(d.events, d.published, d.chain, s.held)
   return words
+}
+
+/**
+ * Whether this proof is on the chain: an event whose proof tag is the
+ * proof's own and whose previous is the head it was computed from. The one
+ * sound answer to "was it signed", since the chain can also grow under a
+ * signature by what the relays brought (foldDeferred) while the proof itself
+ * is refused (review of #589).
+ */
+function proofOnChain(events: NostrEvent[], msg: ProofResponse): boolean {
+  if (msg.type !== 'done' || msg.prevEventId === undefined) return false
+  for (let i = events.length - 1; i >= 0; i--) {
+    const tags = events[i].tags
+    if (tags.some((t) => t[0] === 'proof' && t[1] === msg.proofHash) && tags.some((t) => t[0] === 'e' && t[3] === 'previous' && t[1] === msg.prevEventId)) return true
+  }
+  return false
 }
 
 /** Whether a signed cloud move names the job's move: c at its start (x, y, z), C exactly its destination hex. */
@@ -2507,7 +3385,7 @@ function derive(saved: PersistedChain): {
  */
 // Drawn at once, unchecked: the signatures are checked in the background
 // (startSignatureCheck, below the store), and every chain action waits.
-const saved = loadChain(pubkeyHex, true)
+const saved = rowsFirst(pubkeyHex) ? null : loadChain(pubkeyHex, true)
 const initial = saved ? derive(saved) : provisionalChain(pubkeyHex)
 noteInHand(pubkeyHex, saved)
 // And the rest of it, if localStorage could only keep an old stretch:
@@ -2550,7 +3428,8 @@ function foldDeferred(): void {
 /** The cloud flow in progress: its fetches, and the claim-poll sleep a button can cut short. */
 let cloudAbort: AbortController | null = null
 // One collector at a time: the startup call and a just-landed hop can both ask.
-let collectingKeys = false
+/** The identities whose cubes ticket is being collected now: one wait per identity. */
+const collectingKeys = new Set<string>()
 let cloudWaker: Waker | null = null
 let hosaka: { url: string; client: HosakaClient } | null = null
 /** The caps request out right now, and the API URL it was sent to. */
@@ -2571,6 +3450,8 @@ function claimIntervalFor(kind: SignerKind): number {
 
 /** Installed by the store below: how a cloud step of a route is run (startCloudStep). */
 let cloudStepStarter: ((step: PlanStep, id: number) => Promise<void>) | null = null
+/** The store's headMovedUnder, for startPlanStep: a step whose position moved is planned again from where the chain stands. */
+let stepReplanner: ((walk: boolean, lead?: string) => void) | null = null
 /** Installed by the store below: how a HOSAKA ride record is run to a hyperjump (runCloudRide). */
 let cloudRideRunner: ((record: PendingCloudJob, id: number) => Promise<boolean>) | null = null
 /** How long a finished HOSAKA ride waits for the line to hold a sampled block before it is kept for RESUME. */
@@ -2757,7 +3638,7 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
    * relays there (arkinox, 2026-10-31). Nothing starts again without a
    * press, and the next press walks on from the new head.
    */
-  const headMovedUnder = (walk: boolean): void => {
+  const headMovedUnder = (walk: boolean, lead: string = HEAD_MOVED_MESSAGE): void => {
     const { plan, position } = get()
     if (walk) {
       const message = headMovedWords(get().events, 'Re-aim from where you are now.')
@@ -2769,23 +3650,31 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
       return
     }
     if (!plan) {
-      set({ pendingTarget: null, proof: { ...IDLE_PROOF, status: 'infeasible', message: `${HEAD_MOVED_MESSAGE} Your aim is kept: commit again to compute the move from where you stand now.` } })
+      set({ pendingTarget: null, proof: { ...IDLE_PROOF, status: 'infeasible', message: `${lead} Your aim is kept: commit again to compute the move from where you stand now.` } })
       return
     }
     const next = nextStep(position, plan.target, plan.ceilings)
     if (!next) {
-      set({ plan: null, pendingTarget: null, proof: { ...IDLE_PROOF, status: 'infeasible', message: `${HEAD_MOVED_MESSAGE} Where you stand now is already the end of the route.` } })
+      // A funded route has nothing left to buy: its cloud flow ends with it, as
+      // when its last step lands (finishProof), not at the next X.
+      const cloud = get().cloud
+      set({
+        plan: null,
+        pendingTarget: null,
+        proof: { ...IDLE_PROOF, status: 'infeasible', message: `${lead} Where you stand now is already the end of the route.` },
+        ...(cloud.status === 'paid' ? { cloud: { ...cloud, status: 'idle', message: null } } : {}),
+      })
       return
     }
     if (next.source === 'cloud') {
       set({
-        plan: { ...plan, status: 'paused', step: next, awaiting: null, message: `${HEAD_MOVED_MESSAGE} The next step is one HOSAKA computes, so RESUME pays for it again from where you stand now.` },
+        plan: { ...plan, status: 'paused', step: next, awaiting: null, message: `${lead} The next step is one HOSAKA computes, so RESUME buys it from where you stand now.` },
         pendingTarget: null,
         proof: IDLE_PROOF,
       })
       return
     }
-    set({ plan: { ...plan, status: 'running', step: next, awaiting: null, message: `${HEAD_MOVED_MESSAGE} This step is being computed again from where you stand now.` } })
+    set({ plan: { ...plan, status: 'running', step: next, awaiting: null, message: `${lead} This step is being computed again from where you stand now.` } })
     startPlanStep()
   }
 
@@ -3029,7 +3918,9 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
         if (id !== requestId) return
         const invoice = invoiceOf(dep)
         // On disk before the invoice is on screen: a reload after paying claims it.
-        saveCloudDeposit({ depositId: dep.deposit_id, pubkey: get().identity.pubkey, amountMsats: shortfall, expiresAt: invoice.expiresAt, bolt11: invoice.bolt11 })
+        // Under the identity that asked, and only its own is forgotten below.
+        const payer = get().identity.pubkey
+        saveCloudDeposit({ depositId: dep.deposit_id, pubkey: payer, amountMsats: shortfall, expiresAt: invoice.expiresAt, bolt11: invoice.bolt11 })
         set({ cloud: { ...get().cloud, status: 'awaiting_payment', invoice, invoiceOpen: true, message: null, checking: false, lastCheck: null } })
         const settled = await client.waitForDeposit(dep.deposit_id, {
           signal: abort.signal,
@@ -3042,11 +3933,11 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
         if (typeof settled.balance_msats === 'number') get().noteBalance(settled.balance_msats)
         if (id !== requestId) return
         if (settled.status !== 'settled') {
-          clearCloudDeposit()
+          clearCloudDeposit(payer, dep.deposit_id)
           routeFail('The invoice expired unpaid. Commit again for a fresh quote.')
           return
         }
-        clearCloudDeposit()
+        clearCloudDeposit(payer, dep.deposit_id)
       }
     } catch (err) {
       if (id !== requestId || abort.signal.aborted) return
@@ -3077,6 +3968,16 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
     const { plane, prevEventId, identity, cloudPrefs } = get()
     const issue = movementCapabilityIssue(step.kind, step.from, step.to, plane, 'cloud')
     if (issue) { routeFail(issue); return }
+    // The record this step writes would replace a kept one, which is paid
+    // work. The same step bought again is no bar: its idempotency key names
+    // the same job (a step whose signature was declined, run again).
+    const kept = liveKeptJob()
+    if (kept && !(kept.action === step.kind && kept.prevEventId === prevEventId && samePosition(positionFromWire(kept.to), step.to))) {
+      routeFail(KEPT_JOB_MESSAGE)
+      // Out of the route's flow now: the record goes in the panel, so RESUME and DISCARD show.
+      if (get().cloud.job === null) set({ cloud: { ...get().cloud, job: kept } })
+      return
+    }
     // The same three checks quoteRoute made, again at the moment of buying:
     // the limits may have changed since (a HOSAKA rolled back, or paused).
     if (step.kind === 'hop') {
@@ -3213,7 +4114,7 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
       // is worthless (retainsRecord drops it).
       noteRefusalBalance(err)
       const keep = retainsRecord(err)
-      if (!keep) clearCloudJob()
+      if (!keep) clearCloudJob(record.pubkey, record.jobId)
       cloudFail(describeCloudError(err), keep)
       return
     } finally {
@@ -3228,7 +4129,7 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
     // it is verified and signed exactly like a finished one and the cubes are
     // collected afterwards (collectCloudKeys).
     if (job.status !== 'completed' && !keysPending(job)) {
-      clearCloudJob()
+      clearCloudJob(final.pubkey, final.jobId)
       cloudFail(`HOSAKA job failed: ${job.error ?? 'no reason given'}. The charge was refunded to your HOSAKA balance.`, false)
       return
     }
@@ -3240,7 +4141,7 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
     // straddlingV1Hop, decision D-A), and the record goes with it.
     const straddled = straddlingV1Hop(final.action, job.result, final.jobId)
     if (straddled) {
-      clearCloudJob()
+      clearCloudJob(final.pubkey, final.jobId)
       cloudFail(straddled, false)
       return
     }
@@ -3255,14 +4156,14 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
     }
     if (id !== requestId) return
     if (failed.length > 0) {
-      clearCloudJob()
+      clearCloudJob(final.pubkey, final.jobId)
       cloudFail(`Cloud proof rejected: ${failed.join(', ')}. Nothing was signed.`, false)
       return
     }
     // The proof binds to the head it was quoted against (spec 5.3). A head
     // that moved since makes it worthless, so it is refused, not appended.
     if (get().prevEventId !== final.prevEventId) {
-      clearCloudJob()
+      clearCloudJob(final.pubkey, final.jobId)
       cloudFail('The chain head moved while HOSAKA was computing; the cloud proof was discarded.', false)
       return
     }
@@ -3311,9 +4212,16 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
         stagedCubes = r.keys_pending === true
       }
     }
-    const before = get().events.length
     await get().finishProof(msg)
-    if (get().events.length === before) {
+    if (!proofOnChain(get().events, msg)) {
+      // Another identity is in hand now (a switch while the signer was
+      // asked): the job is the first one's, still signable when it comes
+      // back, so its record stays, and nothing is said to this one.
+      if (get().identity.pubkey !== final.pubkey) return
+      // Refused because the head moved: the result is bound to a head that is
+      // gone, so it is worthless and its record goes (the route, if any, was
+      // planned again by finishProof).
+      if (get().prevEventId !== final.prevEventId) { cloudProofOrphaned(final.jobId, id === requestId); return }
       if (id !== requestId) return
       // The signer refused. The verified result is still good, so the record stays for RESUME.
       set({ cloud: { ...get().cloud, status: 'error', message: `${get().plan?.message ?? get().proof.message ?? 'Signing failed.'} The verified cloud result is kept.` } })
@@ -3324,13 +4232,13 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
     // which arrive on the same job minutes later. The ticket outlives this
     // tab, so a phone put away mid job collects them when it comes back.
     if (stagedCubes) {
-      saveKeysTicket({ version: 1, jobId: final.jobId, pollToken: final.pollToken, to: wirePosition(move.to), plane: move.plane, at: Date.now() })
+      saveKeysTicket({ version: 1, pubkey: final.pubkey, jobId: final.jobId, pollToken: final.pollToken, to: wirePosition(move.to), plane: move.plane, at: Date.now() })
       void get().collectCloudKeys()
     }
     // The event landed, and a route may already have moved on to its next
     // step (which bumps the request id): the bookkeeping below is about the
     // step that landed, so it runs regardless.
-    clearCloudJob()
+    clearCloudJob(final.pubkey, final.jobId)
     const cost = msg.type === 'done' ? msg.costMsats ?? final.costMsats : final.costMsats
     // Spent on this chain, on this device only.
     set({ spentMsats: addSpent(get().genesisId, cost) })
@@ -3356,7 +4264,71 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
     })
   }
 
+  /**
+   * A HOSAKA proof of this identity's that the head moved under before it
+   * was signed: its record is dropped. The caller makes sure the record is
+   * this identity's; another identity's job is never touched. The Cloud
+   * panel says so while this request still owns it (`say`); once the route
+   * was planned again and went on (a newer request id), it is only settled,
+   * so it neither flips to an error under a running local step nor stays on
+   * VERIFYING. A newer cloud flow that owns the panel is left alone.
+   */
+  const cloudProofOrphaned = (jobId: string, say: boolean): void => {
+    clearCloudJob(get().identity.pubkey, jobId)
+    const cloud = get().cloud
+    if (cloud.job !== null && cloud.job.jobId !== jobId) return
+    const settled = cloud.status === 'idle' || cloud.status === 'error' || cloud.status === 'paid' || cloud.status === 'verifying'
+    if (!settled) return
+    set({
+      cloud: say
+        ? { ...cloud, status: 'error', job: null, message: CLOUD_HEAD_MOVED_AT_SIGNING_MESSAGE, progress: null }
+        : { ...cloud, status: get().plan ? 'paid' : 'idle', job: null, message: get().plan ? 'Route funded.' : null, progress: null },
+    })
+  }
+
+  /**
+   * The kept job a declined cloud proof came from: the record on disk for
+   * this identity, bound to the head the proof was, for the same move.
+   */
+  const keptJobFor = (msg: Extract<ProofResponse, { type: 'done' }>): PendingCloudJob | null => {
+    const record = loadCloudJob(get().identity.pubkey)
+    if (!record || record.pubkey !== get().identity.pubkey || !msg.move) return null
+    if (record.prevEventId !== msg.prevEventId) return null
+    return positionHex(positionFromWire(record.to), record.plane) === msg.move.toHex ? record : null
+  }
+
+  /**
+   * A kept HOSAKA proof signed by SIGN AND CONTINUE: the same bookkeeping
+   * runCloud does for one signed at once. The record goes, the cost joins
+   * the spent tally, the job is the last one, and the words that said the
+   * result was kept go with it. A next cloud step the route already started
+   * keeps its own status and words.
+   */
+  const keptCloudStepSigned = (record: PendingCloudJob, msg: Extract<ProofResponse, { type: 'done' }>): void => {
+    clearCloudJob(record.pubkey, record.jobId)
+    const cost = msg.costMsats ?? record.costMsats
+    set({ spentMsats: addSpent(get().genesisId, cost) })
+    useToast.getState().show({ label: `CLOUD COMPUTE JOB COMPLETE - ${record.jobId.slice(0, 8)}`, meta: 'Thanks for using HOSAKA!', mark: 'hosaka' })
+    const cloud = get().cloud
+    const last = { jobId: record.jobId, action: record.action, costMsats: cost, lookupId: msg.lookupId ?? null, at: Date.now() }
+    const settled = cloud.status === 'idle' || cloud.status === 'error' || cloud.status === 'paid'
+    set({
+      cloud: settled
+        ? {
+          ...IDLE_CLOUD,
+          balance: cloud.balance,
+          limits: cloud.limits,
+          provider: cloud.provider,
+          status: get().plan ? 'paid' : 'idle',
+          message: get().plan ? 'Route funded.' : null,
+          last,
+        }
+        : { ...cloud, last },
+    })
+  }
+
   cloudStepStarter = startCloudStep
+  stepReplanner = headMovedUnder
 
   /**
    * A HOSAKA ride that ended without a hyperjump. The head is let go (the
@@ -3440,7 +4412,7 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
     } catch (err) {
       if (id !== requestId || abort.signal.aborted) return false
       const keep = retainsRecord(err)
-      if (!keep) clearCloudJob()
+      if (!keep) clearCloudJob(record.pubkey, record.jobId)
       rideFail(describeCloudError(err), keep)
       return false
     } finally {
@@ -3454,15 +4426,15 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
     if (job.status !== 'completed') {
       // HOSAKA refunds a failed job to the balance; the same ride asked
       // again names a new job under the same key, paid from that refund.
-      clearCloudJob()
+      clearCloudJob(final.pubkey, final.jobId)
       rideFail(`HOSAKA could not finish the ride: ${job.error ?? 'no reason given'}. The charge was refunded to your HOSAKA balance.`, false)
       return false
     }
 
     set({ cloud: { ...get().cloud, status: 'verifying', invoice: null, invoiceOpen: false, progress: null, message: 'Checking HOSAKA\'s ride proof on this device.' } })
-    let failed: string[]
+    let check: CloudRideCheck
     try {
-      failed = await verifyCloudRide(job, { previousId: final.prevEventId, fromHeight: ride.fromHeight, toHeight: ride.toHeight }, rideBlockHash(id))
+      check = await checkCloudRide(job, { previousId: final.prevEventId, fromHeight: ride.fromHeight, toHeight: ride.toHeight }, rideBlockHash(id))
     } catch (err) {
       // Not judged (the line has not synced a sampled block, the verifier
       // broke): kept, never signed unchecked and never thrown away paid.
@@ -3471,15 +4443,25 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
       return false
     }
     if (id !== requestId) return false
+    const failed = check.failed
+    if (check.disagreesAt !== null) {
+      // The proof and this device's copy of a block disagree, and this device's
+      // copy may be the stale one. A paid proof is never thrown away for that.
+      // RESUME is no cure: stored line rows are append-only (the first row at a
+      // height wins, and they persist across reloads), so it reads the same
+      // copy and fails the same way until that copy is corrected.
+      rideFail(`HOSAKA's ride proof disagrees with this device's copy of block ${check.disagreesAt}, so nothing was signed and you did not move, and the proof is kept. RESUME fails the same way until this device's copy of that block is corrected. Quote job ${final.jobId.slice(0, 8)} to HOSAKA for a refund.`, true)
+      return false
+    }
     if (failed.length > 0) {
-      clearCloudJob()
+      clearCloudJob(final.pubkey, final.jobId)
       rideFail(`HOSAKA's ride proof failed this device's check (${failed.join('; ')}), so nothing was signed and you did not move. Quote job ${final.jobId.slice(0, 8)} to HOSAKA for a refund.`, false)
       return false
     }
     // Bound to the head it was computed from (§5.3): a head that moved
     // makes it worthless, so it is refused, not signed.
     if (get().prevEventId !== final.prevEventId) {
-      clearCloudJob()
+      clearCloudJob(final.pubkey, final.jobId)
       rideFail('Your chain moved while HOSAKA was computing the ride, and the proof is bound to where it started, so it was discarded.', false)
       return false
     }
@@ -3509,11 +4491,11 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
       // Not signed. A moved head makes the proof worthless; anything else
       // (the signer declined, the relays did not answer) keeps it for RESUME.
       const moved = get().prevEventId !== final.prevEventId
-      if (moved) clearCloudJob()
+      if (moved) clearCloudJob(final.pubkey, final.jobId)
       rideFail(`${refusal ?? 'The hyperjump was not signed.'}${moved ? '' : ' The checked ride proof is kept: RESUME in the Cloud compute panel signs it.'}`, !moved)
       return false
     }
-    clearCloudJob()
+    clearCloudJob(final.pubkey, final.jobId)
     const cost = typeof job.cost_msats === 'number' ? job.cost_msats : final.costMsats
     set({ spentMsats: addSpent(get().genesisId, cost) })
     set({
@@ -3570,6 +4552,8 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
 
   const switchTo = async (signer: Signer): Promise<void> => {
     switchCount++
+    // The rows a check covered were the old identity's.
+    if (coveredFor !== signer.pubkey) { coveredByRows.clear(); coveredFor = null }
     // Whatever was waiting to sign as the old identity ends without a word.
     chainEpoch++
     // A cloud flow in progress was signing as the old identity; it ends here.
@@ -3586,7 +4570,7 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
     // its spawn coordinate until its first move. So switching to a bunker or an
     // extension never makes it sign anything just to log in.
     // Drawn at once, its signatures checked in the background (below).
-    const local = loadChain(signer.pubkey, true)
+    const local = rowsFirst(signer.pubkey) ? null : loadChain(signer.pubkey, true)
     const base = local ? derive(local) : provisionalChain(signer.pubkey)
     noteInHand(signer.pubkey, local)
     // A broken-chain notice or respawn confirm left open was about the old
@@ -3614,13 +4598,19 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
       chainConflict: null,
       forkNotice: null,
     })
+    // CHAIN HELD for a store that stopped answering is about the identity it was
+    // said for: it goes with it, and comes back with it while still so.
+    if (useToast.getState().toast?.meta === STORE_STUCK_META) useToast.getState().dismiss()
+    if (chainStuck(signer.pubkey)) sayStoreStuck()
     // Before the save below: until IndexedDB has been read, that save must not
     // put this copy over the one kept there (hydrateChain).
     hydrateChain(signer.pubkey)
     if (local) saveChain(base.events, base.published, base.chain, base.held)
     startSignatureCheck(signer.pubkey, local?.unchecked ?? [])
-    // A pending cloud job of THIS identity, if there is one, picks up where it stopped.
+    // A pending cloud job of THIS identity, if there is one, picks up where it stopped,
+    // and so do the cubes of its last paid hop.
     void get().resumeCloudJob()
+    void get().collectCloudKeys()
   }
 
   /**
@@ -3860,6 +4850,12 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
       set({ plan: null, proof: { ...IDLE_PROOF, status: 'infeasible', message: WALK_NEEDS_HOSAKA_MESSAGE } })
       return
     }
+    // A route HOSAKA sells steps of would write over a kept job: refused
+    // before any quote or invoice, as rideViaHosaka refuses.
+    if (!funded && refusesOverKeptJob()) {
+      set({ plan: null, proof: { ...IDLE_PROOF, status: 'infeasible', message: KEPT_JOB_MESSAGE } })
+      return
+    }
     set({
       plan: {
         target,
@@ -4007,7 +5003,30 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
       return
     }
     if (plan.awaiting) {
-      const msg = plan.awaiting
+      // RESUME is a new press. Whatever bumped the request id while the route
+      // was paused (a dismissed cloud error, cancelCloud, a top-up) would make
+      // finishProof drop the kept proof without a word, and the route would
+      // read running until STOP ROUTE: it is signed under a fresh id instead,
+      // which also stops anything that started meanwhile. finishProof still
+      // refuses it if the head has moved.
+      const kept = plan.awaiting
+      // Already signed: the Cloud panel's RESUME finished the same kept job on
+      // this device. Nothing is signed twice and no other device is named;
+      // the route goes on from where that step landed.
+      if (proofOnChain(get().events, kept)) {
+        const next = nextStep(get().position, plan.target, plan.ceilings)
+        if (!next) {
+          const cloud = get().cloud
+          set({ plan: null, pendingTarget: null, ...(cloud.status === 'paid' ? { cloud: { ...cloud, status: 'idle', message: null } } : {}) })
+          return
+        }
+        set({ plan: { ...plan, status: 'running', message: null, awaiting: null, done: plan.done + 1, step: next } })
+        startPlanStep()
+        return
+      }
+      const msg = kept.id === requestId ? kept : { ...kept, id: ++requestId }
+      // A kept HOSAKA proof's job, for the bookkeeping once it is signed.
+      const job = msg.type === 'done' && msg.source === 'cloud' ? keptJobFor(msg) : null
       // The kept proof is for the paused step: its destination is the step's.
       set({
         plan: { ...plan, status: 'running', message: null, awaiting: null },
@@ -4015,9 +5034,18 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
         // A kept cloud proof goes in its job's plane (finishProof signs it there either way).
         ...(msg.type === 'done' && msg.move ? { plane: coordToXyz(hexToCoord(msg.move.toHex)).plane } : {}),
       })
-      void get().finishProof(msg)
+      void get().finishProof(msg).then(() => {
+        if (!job || msg.type !== 'done') return
+        // Another identity in hand (a switch while the signer was asked): its
+        // job stays for when it comes back, and nothing is said to this one.
+        if (get().identity.pubkey !== job.pubkey) return
+        if (proofOnChain(get().events, msg)) keptCloudStepSigned(job, msg)
+        else if (get().prevEventId !== job.prevEventId) cloudProofOrphaned(job.jobId, msg.id === requestId)
+      })
       return
     }
+    // A step planned before another device moved the chain is planned again
+    // from where it stands now (startPlanStep).
     set({ plan: { ...plan, status: 'running', message: null } })
     startPlanStep()
   },
@@ -4125,14 +5153,18 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
 
     if (msg.type === 'error') {
       const { plan } = get()
+      // A worker that could not run says nothing about the move: a route is
+      // paused for RESUME, not failed, which would quote it all over again.
+      const noWorker = msg.message === PROOF_WORKER_FAILED_MESSAGE
+      const message = noWorker && useVersionGate.getState().verdict === 'hint' ? NEW_VERSION_RELOAD_MESSAGE : msg.message
       set({
         pendingTarget: null,
-        plan: plan ? { ...plan, status: 'failed', message: msg.message, awaiting: null } : null,
+        plan: plan ? { ...plan, status: noWorker ? 'paused' : 'failed', message, awaiting: null } : null,
         proof: {
           ...IDLE_PROOF,
           status: 'infeasible',
           elapsedMs: msg.elapsedMs,
-          message: msg.message,
+          message,
         },
       })
       return
@@ -4143,6 +5175,14 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
 
   finishProof: async (msg) => {
     if (msg.type !== 'done' || msg.id !== requestId) return
+
+    // The proof is done, whatever the bar last heard: a short one finishes
+    // inside the worker's progress throttle, and the bar read 0% through every
+    // wait below (arkinox, 2026-11-01). The words say what it waits on now. A
+    // WALK step goes without them, or the panel would jump at every step.
+    const walking = isWalkProof(msg.id, msg.source)
+    // RESUME comes here from a paused route, so the status is said too.
+    set({ proof: { ...get().proof, status: 'computing', progress: 1, message: walking ? get().proof.message : CHECKING_RELAYS_MESSAGE } })
 
     // The chain as it stands now, not as it stood when the proof started:
     // relay events held back while it computed are folded first. What the
@@ -4215,6 +5255,7 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
     }
     if (!template) { refuseSigning(msg, OLD_FORMAT_PROOF_MESSAGE, false); return }
 
+    set({ proof: { ...get().proof, message: walking || get().signerKind === 'local' ? null : WAITING_SIGNER_MESSAGE } })
     let event: NostrEvent
     try {
       event = await get().signEvent(template)
@@ -4228,7 +5269,7 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
         // The proof is done and kept; RESUME asks for the signature again.
         set({
           plan: { ...plan, status: 'paused', message: `Signature declined: ${reason}`, awaiting: msg },
-          proof: { ...get().proof, status: 'idle', progress: 1, elapsedMs: msg.elapsedMs },
+          proof: { ...get().proof, status: 'idle', progress: 1, elapsedMs: msg.elapsedMs, message: null },
         })
         return
       }
@@ -4254,6 +5295,14 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
     if (msg.mode === 'hop' && msg.source !== 'cloud') {
       const failed = localHopFailures(event, standing?.coordHex ?? '', newPosition, plane, prevEventId)
       if (failed.length > 0) { refuseSigning(msg, `${LOCAL_CHECK_FAILED_MESSAGE} (${failed.join(', ')})`, false); return }
+    }
+    // A sidestep computed here is checked the same way (spec 8.7.2), off the
+    // main thread, since its temporal root can take a second on a phone
+    // (lib/sidestepCheck.ts). A cloud sidestep was checked before signing.
+    if (msg.mode === 'sidestep' && msg.source !== 'cloud') {
+      const failed = await localSidestepFailures(event, standing?.coordHex ?? '', newPosition, plane, prevEventId)
+      if (msg.id !== requestId) return
+      if (failed.length > 0) { refuseSigning(msg, `${LOCAL_SIDESTEP_CHECK_FAILED_MESSAGE} (${failed.join(', ')})`, false); return }
     }
     // A cloud move was verified for the move its job was bought for; the
     // event just signed must be that move: its c where the job started (x, y
@@ -4393,7 +5442,7 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
     if (get().cloud.status !== 'idle' || get().cloud.job !== null) {
       stopCloud()
       requestId++
-      clearCloudJob()
+      clearCloudJob(get().identity.pubkey)
     }
     if (get().plan) set({ plan: null })
     const { events, held, selfCheck, identity } = get()
@@ -4702,8 +5751,8 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
 
   pin: null,
 
-  dropPin: (position, label, scaleExp) => set({
-    pin: { position: { ...position }, plane: 0, scaleExp: scaleExp ?? get().scaleExp, label },
+  dropPin: (position, label, scaleExp, named = false) => set({
+    pin: { position: { ...position }, plane: 0, scaleExp: scaleExp ?? get().scaleExp, label, ...(named ? { named } : {}) },
   }),
 
   clearPin: () => set({ pin: null }),
@@ -4716,12 +5765,15 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
     // BUILD mode starts its build cursor where you are looking (useBuilder,
     // ruling A, 2026-10-07). Standing at the venue is not required to hide
     // something in it.
-    get().focusOn(pin.position, pin.plane, pin.label, pin.scaleExp, true)
+    // A pin dropped for a place found by name carries the name; one dropped
+    // by a click on the globe or for typed numbers reads as a coordinate.
+    get().focusOn(pin.position, pin.plane, pin.label, pin.scaleExp, true, pin.named === true)
   },
 
-  focusOn: (position, plane, label, scaleExp, drive = false) => {
+  focusOn: (position, plane, label, scaleExp, drive = false, named = false) => {
+    const place: NamedPlace | null = named === true ? { position: { ...position }, plane } : named || null
     const next: Partial<CyberspaceState> = {
-      focus: { position: { ...position }, plane, label, drive },
+      focus: { position: { ...position }, plane, label, drive, ...(place ? { named: place } : {}) },
       // A free view brings the cursor along, so the pad moves it there and a
       // message or a shard placed from the view lands there, not at your head.
       ...(drive ? { cursor: { ...position } } : {}),
@@ -5128,7 +6180,7 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
       at: t.position,
     })),
 
-  signEvent,
+  signEvent: (template, patienceMs, late) => signEvent(template, patienceMs, undefined, late),
 
   initSigner: async () => {
     // Local identities are live from module load; an extension or bunker was
@@ -5247,10 +6299,11 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
    * it, so cancelling costs nothing but the invoice.
    */
   topUp: async (sats) => {
-    const { cloud, cloudPrefs, plan } = get()
+    const { cloud, cloudPrefs, plan, proof } = get()
     // A route in flight owns the cloud flow and its invoice; two invoices at
-    // once would fight over the same modal and the same saved deposit.
-    if (plan !== null || (cloud.status !== 'idle' && cloud.status !== 'error')) {
+    // once would fight over the same modal and the same saved deposit. A hop
+    // in hand has neither, but starting this flow would orphan its proof.
+    if (plan !== null || proof.status === 'computing' || (cloud.status !== 'idle' && cloud.status !== 'error')) {
       set({ cloud: { ...cloud, balanceError: 'Finish or cancel the move in progress first.' } })
       return
     }
@@ -5269,13 +6322,17 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
     const waker = createWaker()
     cloudAbort = abort
     cloudWaker = waker
+    let payer: { pubkey: string; depositId: string } | null = null
     try {
       set({ cloud: { ...get().cloud, status: 'funding', balanceError: null, message: currentSigner.kind === 'local' ? 'Asking HOSAKA for an invoice.' : 'Waiting for your signer to approve the request.' } })
       const dep = await client.deposit(msats, abort.signal)
       if (id !== requestId) return
       const invoice = invoiceOf(dep)
       // On disk before the invoice is on screen: a reload after paying claims it.
-      saveCloudDeposit({ depositId: dep.deposit_id, pubkey: get().identity.pubkey, amountMsats: msats, expiresAt: invoice.expiresAt, bolt11: invoice.bolt11 })
+      // Under the identity that asked, and only its own is forgotten below.
+      const asked = { pubkey: get().identity.pubkey, depositId: dep.deposit_id }
+      payer = asked
+      saveCloudDeposit({ depositId: dep.deposit_id, pubkey: asked.pubkey, amountMsats: msats, expiresAt: invoice.expiresAt, bolt11: invoice.bolt11 })
       set({ cloud: { ...get().cloud, status: 'awaiting_payment', invoice, invoiceOpen: true, message: null, checking: false, lastCheck: null } })
 
       const settled = await client.waitForDeposit(dep.deposit_id, {
@@ -5288,7 +6345,7 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
       })
       if (typeof settled.balance_msats === 'number') get().noteBalance(settled.balance_msats)
       if (id !== requestId) return
-      clearCloudDeposit()
+      clearCloudDeposit(asked.pubkey, asked.depositId)
       if (settled.status !== 'settled') {
         set({ cloud: { ...get().cloud, status: 'idle', invoice: null, invoiceOpen: false, message: null, balanceError: 'The invoice expired unpaid. Nothing was charged.' } })
         return
@@ -5299,7 +6356,7 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
       void get().refreshBalance()
     } catch (err) {
       if (id !== requestId || abort.signal.aborted) return
-      clearCloudDeposit()
+      if (payer) clearCloudDeposit(payer.pubkey, payer.depositId)
       set({ cloud: { ...get().cloud, status: 'idle', invoice: null, invoiceOpen: false, message: null, balanceError: describeCloudError(err) } })
     } finally {
       if (cloudAbort === abort) { cloudAbort = null; cloudWaker = null }
@@ -5307,12 +6364,14 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
   },
 
   buyRegionKey: async (at, plane, height) => {
-    const { cloud, cloudPrefs, plan } = get()
+    const { cloud, cloudPrefs, plan, proof } = get()
     if (cloudPrefs.mode === 'off') return { ok: false, error: 'Cloud compute is off in the Cloud compute panel.' }
-    // A route in flight owns the cloud flow and its invoice.
-    if (plan !== null || (cloud.status !== 'idle' && cloud.status !== 'error')) {
+    // A route in flight owns the cloud flow and its invoice, and a hop in hand would lose its proof.
+    if (plan !== null || proof.status === 'computing' || (cloud.status !== 'idle' && cloud.status !== 'error')) {
       return { ok: false, error: 'Finish or cancel the move in progress first.' }
     }
+    // Not persisted itself, but it takes the cloud flow over, and the kept job with it.
+    if (refusesOverKeptJob()) return { ok: false, error: KEPT_JOB_MESSAGE }
     const client = cloudClient(cloudPrefs.apiUrl)
     stopCloud()
     const id = ++requestId
@@ -5390,7 +6449,7 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
       return refuse('Finish or cancel the move in progress first.')
     }
     // A kept job is paid work; a new record would overwrite it.
-    if (cloud.job !== null) return refuse('A HOSAKA job is kept in the Cloud compute panel. RESUME or DISCARD it first.')
+    if (refusesOverKeptJob()) return refuse(KEPT_JOB_MESSAGE)
     if (ask.previousId !== prevEventId) return refuse('Your chain moved since this ride was planned. Ride again from here.')
     if (whyNoMove(get().actions())) return refuse(whyNoMove(get().actions())!)
 
@@ -5496,9 +6555,12 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
     stopCloud()
     // Unpaid, the job simply expires on the server. Paid or computing, the
     // record is kept: the money is spent and the result can still be claimed.
-    // Dismissing an error keeps whatever the failure left behind.
-    const keep = cloud.job !== null && (cloud.status === 'error' || cloud.job.stage !== 'awaiting_payment')
-    if (!keep) clearCloudJob()
+    // Dismissing an error keeps whatever the failure left behind. A record still
+    // being checked (resumeCloudJob) was read from disk, never offered here: its
+    // invoice may be paid already, so it is kept whatever its stage says.
+    const keep = cloud.job !== null && (cloud.status === 'error' || cloud.status === 'checking' || cloud.job.stage !== 'awaiting_payment')
+    // Only this identity's: another's kept job waits on disk for it (review of #589).
+    if (!keep) clearCloudJob(cloud.job?.pubkey ?? get().identity.pubkey, cloud.job?.jobId)
     set({
       pendingTarget: null,
       proof: IDLE_PROOF,
@@ -5519,35 +6581,40 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
   },
 
   collectCloudKeys: async () => {
-    const ticket = loadKeysTicket()
-    if (!ticket || collectingKeys) return
-    collectingKeys = true
+    // The signed-in identity's ticket: another identity's waits on disk for it (review of #597).
+    const owner = get().identity.pubkey
+    const ticket = loadKeysTicket(owner)
+    if (!ticket || collectingKeys.has(owner)) return
+    collectingKeys.add(owner)
+    const done = (): void => clearKeysTicket(owner, ticket.jobId)
+    // Said only to the identity whose hop it was; the keys are held on this device either way.
+    const say = (toast: Parameters<ReturnType<typeof useToast.getState>['show']>[0]): void => { if (get().identity.pubkey === owner) useToast.getState().show(toast) }
     try {
       const job = await cloudClient(get().cloudPrefs.apiUrl).waitForJob(ticket.jobId, ticket.pollToken)
       const r = job.result as CloudHopResult | null
       if (job.status === 'completed' && r?.destination_keys && r.destination_keys.length > 0) {
         const n = holdCloudDestinationKeys(r.destination_keys, positionFromWire(ticket.to), ticket.plane)
-        clearKeysTicket()
-        if (n > 0) useToast.getState().show({ label: `${n} REGION KEYS FROM HOSAKA`, meta: 'The cubes around your paid hop are open. Anything hidden in them is yours to find.', mark: 'hosaka' })
+        done()
+        if (n > 0) say({ label: `${n} REGION KEYS FROM HOSAKA`, meta: 'The cubes around your paid hop are open. Anything hidden in them is yours to find.', mark: 'hosaka' })
       } else if (r?.keys_error) {
         // The hop stands and is already signed: only the extra work failed,
         // and HOSAKA credited its surcharge back.
-        clearKeysTicket()
+        done()
         const back = Math.round((r.keys_credit_msats ?? 0) / 1000)
-        useToast.getState().show({
+        say({
           label: 'CUBES NOT COMPUTED',
           meta: back > 0 ? `Your hop stands. ${back} sats came back to your HOSAKA balance.` : 'Your hop stands. Nothing extra was charged.',
           mark: 'hosaka',
         })
       } else if (job.status === 'completed' || job.status === 'failed') {
         // Nothing is coming on this job.
-        clearKeysTicket()
+        done()
       }
     } catch {
       // A dropped socket or a tab put away: the ticket keeps, and the next
       // load picks it up again.
     } finally {
-      collectingKeys = false
+      collectingKeys.delete(owner)
     }
   },
 
@@ -5556,38 +6623,66 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
     if (cloudPrefs.mode !== 'off') void ensureCloudLimits()
     // A route deposit that was paid (or not) while the tab was away: claim it
     // so the sats reach the balance, or forget it once its invoice expired.
-    const dep = loadCloudDeposit()
+    // Only this identity's: another's waits on disk for it (review of #597).
+    const dep = loadCloudDeposit(identity.pubkey)
     if (dep && dep.pubkey === identity.pubkey) {
       if (dep.expiresAt * 1000 < Date.now()) {
-        clearCloudDeposit()
+        clearCloudDeposit(dep.pubkey, dep.depositId)
       } else {
         try {
           const claimed = await cloudClient(cloudPrefs.apiUrl).claimDeposit(dep.depositId)
           if (typeof claimed.balance_msats === 'number') get().noteBalance(claimed.balance_msats)
           if (claimed.status === 'settled') {
-            clearCloudDeposit()
+            clearCloudDeposit(dep.pubkey, dep.depositId)
             const msats = claimed.settled_msats ?? dep.amountMsats
             set({ cloud: { ...get().cloud, message: `A ${satsOf(msats)} sat route deposit from an interrupted commit was credited to your HOSAKA balance.`, credited: { msats, at: Date.now() } } })
           } else if (claimed.status === 'expired') {
-            clearCloudDeposit()
+            clearCloudDeposit(dep.pubkey, dep.depositId)
           }
         } catch {
           // Unreachable now; the record stays for the next load.
         }
       }
     }
-    const record = loadCloudJob()
     // Another identity's job stays on disk for when it is back.
-    if (!record || record.pubkey !== identity.pubkey) return
+    const kept = loadCloudJob(identity.pubkey)
+    if (!kept || kept.pubkey !== identity.pubkey) return
     if (get().proof.status === 'computing') return
+    const { status } = get().cloud
+    if (status !== 'idle' && status !== 'error') return
+    // In hand while the saved chain loads, so every flow that would start a
+    // paid job and write over this record refuses (liveKeptJob, cloud.job).
+    set({ cloud: { ...get().cloud, status: 'checking', job: kept, message: null, rideError: null } })
+    // The head check needs the whole saved chain. At mount the chain in hand
+    // may be the old stretch localStorage kept before the chain outgrew it,
+    // whose head is not the one a paid job was bound to (hydrateChain).
+    const whole = await wholeChainInHand(identity.pubkey)
+    const c = get().cloud
+    // CANCEL during the wait, or a switch's own resume, took the cloud flow over.
+    if (c.status !== 'checking' || c.job?.jobId !== kept.jobId) return
+    /** Out of the check: the record stays in hand as kept, or goes, with the words why. */
+    const settle = (job: PendingCloudJob | null, message: string | null): void => {
+      set({ cloud: { ...get().cloud, status: 'idle', job, message } })
+    }
+    // Switched meanwhile: the record waits on disk for that identity.
+    if (get().identity.pubkey !== identity.pubkey) { settle(null, null); return }
+    const record = loadCloudJob(identity.pubkey)
+    if (!record || record.jobId !== kept.jobId) { settle(record, null); return }
+    if (get().proof.status === 'computing') { settle(record, null); return }
     if (record.prevEventId !== get().prevEventId) {
-      clearCloudJob()
-      set({ cloud: { ...get().cloud, job: null, message: 'A pending cloud job was dropped: the chain head moved since it was created.' } })
+      if (!whole) {
+        // Nothing proves the head moved: a paid record is never dropped on that.
+        const why = onlyOlderSaveUnread(identity.pubkey) ? 'an older save of your chain could not be read' : 'your saved chain did not load'
+        settle(record, `A pending cloud job was kept: ${why}, so its head could not be checked. RESUME or reload to try again.`)
+        return
+      }
+      clearCloudJob(record.pubkey, record.jobId)
+      settle(null, 'A pending cloud job was dropped: the chain head moved since it was created.')
       return
     }
     if (record.stage === 'awaiting_payment' && record.deposit && record.deposit.expiresAt * 1000 < Date.now()) {
-      clearCloudJob()
-      set({ cloud: { ...get().cloud, job: null, message: 'A pending cloud job was dropped: its invoice expired.' } })
+      clearCloudJob(record.pubkey, record.jobId)
+      settle(null, 'A pending cloud job was dropped: its invoice expired.')
       return
     }
     const id = ++requestId
@@ -5637,7 +6732,7 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
   discardCloudJob: () => {
     const { cloud, proof } = get()
     if (cloud.status !== 'idle' && cloud.status !== 'error') return
-    clearCloudJob()
+    clearCloudJob(cloud.job?.pubkey ?? get().identity.pubkey, cloud.job?.jobId)
     set({
       cloud: { ...cloud, status: 'idle', job: null, message: null, quote: null, invoice: null, invoiceOpen: false },
       ...(proof.status === 'infeasible' ? { proof: IDLE_PROOF } : {}),
@@ -5854,6 +6949,18 @@ function startPlanStep(): void {
       pendingTarget: null,
       proof: { ...IDLE_PROOF, status: 'infeasible', message: noMove },
     })
+    return
+  }
+  // The step was planned from where the chain stood then. Another device or
+  // tab may have moved it while the route waited (a quote, PAY, a deposit, a
+  // RESUME): computed here as planned, it would name the new head and the old
+  // position, which no reader verifies (review of #581); bought from HOSAKA,
+  // the job would be paid for and then refused at signing (cloud move
+  // mismatch). It is planned again from where the chain stands now. Every way
+  // a step starts comes here, and this is the only door to a cloud submit
+  // (cloudStepStarter).
+  if (!samePosition(plan.step.from, s.position)) {
+    stepReplanner?.(plan.walk === true, ROUTE_MOVED_MESSAGE)
     return
   }
   const issue = movementCapabilityIssue(plan.step.kind, plan.step.from, plan.step.to, s.plane, plan.step.source === 'cloud' ? 'cloud' : 'local')

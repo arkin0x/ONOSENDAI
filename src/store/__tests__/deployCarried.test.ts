@@ -33,7 +33,7 @@ import { useShards } from '../useShards'
 import { useWorkshop } from '../useWorkshop'
 import { usePublished } from '../usePublished'
 import { bagEntries, HIDDEN_KIND, isReference, objectTemplate } from '../../lib/hidden'
-import { CARRY_BUDGET_BYTES, carryRefusal, dOf, inTheClear, isQuietD, keepTable, ownKeysOnly, payloadBytes, foreignKeys, foreignNotice, rekeyTable, setLocalAuthor, tableFromBag, takenCopy } from '../../lib/carried'
+import { CARRY_BUDGET_BYTES, carriesSealedParts, carryRefusal, dOf, isQuietD, ownKeysOnly, payloadBytes, foreignKeys, foreignNotice, rekeyTable, setLocalAuthor, takeIntoKeeping, withoutCarried } from '../../lib/carried'
 import { publishState } from '../../lib/published'
 import { useAvatars } from '../useAvatars'
 import { attributed } from '../../lib/client'
@@ -252,68 +252,81 @@ describe('every key under the signer (§1.10: a publisher MUST write only those)
   })
 })
 
-describe('a table taken from a bag (DECK-0004 §3.4, DECK-0003 §1.10)', () => {
+describe('a table taken from a bag (DECK-0004 §3.4, DECK-0003 §1.10), on v2\'s takeIntoKeeping (#543)', () => {
   const found = (author: string | null): ShardModel => ({
     ...placing('Found', [addr(THEM, 'p'), addr(THEM, 'live', 'wss://relay.test')]),
     objects: { [`33331:${THEM}:p`]: toPayload(tri('Piece')) },
     ...(author ? { author } : {}),
   })
+  /** What COPY TO WORKSHOP keeps: the taken copy, through the workshop's import. */
+  const taken = (m: ShardModel, sealed = true): ShardModel => {
+    // You, as localObjects.ts wires it in the app.
+    setLocalAuthor(() => me())
+    try {
+      const id = useWorkshop.getState().importShard(takeIntoKeeping(m, me(), sealed))
+      return useWorkshop.getState().shards.find((s) => s.id === id)!
+    } finally { setLocalAuthor(null) }
+  }
 
   it('comes with a taken copy, re-keyed under the taker, and every ref follows', () => {
-    const copy = takenCopy(found(THEM), me())
+    const copy = taken(found(THEM))
     const key = Object.keys(copy.objects as object)[0]
     expect(key.startsWith(`33331:${me()}:`)).toBe(true)
     expect(isQuietD(dOf(key))).toBe(true)
     expect(copy.refs![0]).toEqual(['a', key])
     expect(copy.refs![1]).toEqual(addr(THEM, 'live', 'wss://relay.test'))
-    expect(tableFromBag(copy)).toBe(true)
+    expect(carriesSealedParts(copy)).toBe(true)
   })
 
   it('your own object taken back keeps its keys, and still remembers the bag', () => {
     const mine = { ...placing('Mine', [addr(me(), 'p')]), objects: { [`33331:${me()}:p`]: toPayload(tri('Piece')) }, author: me() }
-    const copy = takenCopy(mine, me())
+    const copy = taken(mine)
     expect(Object.keys(copy.objects as object)).toEqual([`33331:${me()}:p`])
-    expect(tableFromBag(copy)).toBe(true)
+    expect(carriesSealedParts(copy)).toBe(true)
   })
 
   it('an object read with no pubkey that counts brings nothing, and nothing to ask', () => {
-    const copy = takenCopy(found(null), me())
+    const copy = taken(found(null))
     expect(copy.objects).toBeUndefined()
-    expect(tableFromBag(copy)).toBe(false)
+    expect(carriesSealedParts(copy)).toBe(false)
   })
 
-  it('stays out of a public object and an avatar until its user keeps it', () => {
-    const copy = takenCopy(found(THEM), me())
-    expect(JSON.parse(publicObjectTemplate(copy, 1).content).objects).toBeUndefined()
-    expect(JSON.parse(avatarTemplate(copy, 1).content).objects).toBeUndefined()
-    expect(inTheClear(copy).objects).toBeUndefined()
-    const kept = keepTable(copy)
-    expect(tableFromBag(kept)).toBe(false)
-    expect(Object.keys(JSON.parse(publicObjectTemplate(kept, 1).content).objects)).toHaveLength(1)
-    expect(Object.keys(JSON.parse(avatarTemplate(kept, 1).content).objects)).toHaveLength(1)
+  it('a public object a bag only names (a LIVE LINK) keeps its table, re-keyed, and is not asked about', () => {
+    const copy = taken(found(THEM), false)
+    expect(Object.keys(copy.objects as object)[0].startsWith(`33331:${me()}:`)).toBe(true)
+    expect(carriesSealedParts(copy)).toBe(false)
   })
 
-  it('what the publish state compares is what goes out, so leaving it out does not read as edited', () => {
-    const copy = takenCopy(found(THEM), me())
-    const out = publicObjectTemplate(copy, 1)
-    expect(shardFingerprint(copy)).toBe(shardFingerprint({ ...copy, objects: undefined }))
-    expect(JSON.parse(out.content).objects).toBeUndefined()
-  })
-
-  it('stays out through an edit, a save and a reload, in the workshop', () => {
+  it('PUBLISH leaves it out unless the question is answered PUBLISH THEM TOO, and an avatar always does', async () => {
     setLocalAuthor(() => me())
-    const id = useWorkshop.getState().importShard(found(THEM), undefined, undefined, true)
-    const held = useWorkshop.getState().shards.find((s) => s.id === id)!
-    expect(tableFromBag(held)).toBe(true)
+    try {
+      const copy = { ...taken(found(THEM)), id: 'taken-pub' }
+      await usePublished.getState().send(copy)
+      expect(JSON.parse(sent[sent.length - 1].content).objects).toBeUndefined()
+      await usePublished.getState().send(copy, false, true)
+      expect(Object.keys(JSON.parse(sent[sent.length - 1].content).objects)).toHaveLength(1)
+      expect(JSON.parse(avatarTemplate(withoutCarried(copy), 1).content).objects).toBeUndefined()
+    } finally { setLocalAuthor(null) }
+  })
+
+  it('a default PUBLISH reads PUBLISHED after, not edited: the publish state compares what goes out', async () => {
+    setLocalAuthor(() => me())
+    try {
+      const copy = { ...taken(found(THEM)), id: 'taken-state' }
+      expect(shardFingerprint(copy)).toBe(shardFingerprint(withoutCarried(copy)))
+      await usePublished.getState().send(copy)
+      expect(publishState(usePublished.getState().ledger['taken-state'], shardFingerprint(copy), me())).toBe('published')
+    } finally { setLocalAuthor(null) }
+  })
+
+  it('stays marked through an edit, a save and a reload, in the workshop', () => {
+    setLocalAuthor(() => me())
+    const held = taken(found(THEM))
     // What the workshop stores: the model as JSON.
-    const back = JSON.parse(JSON.stringify(held)) as ShardModel
-    expect(tableFromBag(back)).toBe(true)
-    useWorkshop.setState({ currentId: id })
+    expect(carriesSealedParts(JSON.parse(JSON.stringify(held)) as ShardModel)).toBe(true)
+    useWorkshop.setState({ currentId: held.id })
     useWorkshop.getState().setMode('lines')
-    expect(tableFromBag(useWorkshop.getState().current()!)).toBe(true)
-    // The question's yes: asked once, and the shard is like any other after it.
-    useWorkshop.getState().keepCarried(id)
-    expect(tableFromBag(useWorkshop.getState().current()!)).toBe(false)
+    expect(carriesSealedParts(useWorkshop.getState().current()!)).toBe(true)
     setLocalAuthor(null)
   })
 
@@ -321,7 +334,7 @@ describe('a table taken from a bag (DECK-0004 §3.4, DECK-0003 §1.10)', () => {
     const id = useWorkshop.getState().importShard(found(THEM))
     const held = useWorkshop.getState().shards.find((s) => s.id === id)!
     expect(held.objects).toBeUndefined()
-    expect(tableFromBag(held)).toBe(false)
+    expect(carriesSealedParts(held)).toBe(false)
   })
 })
 
@@ -371,7 +384,7 @@ describe('review of the stack: what goes out', () => {
     expect(Object.keys(ownKeysOnly(built, me()).objects!)).toEqual(Object.keys(ownKeysOnly(built, me()).objects!))
     expect(Object.keys(ownKeysOnly(built, me()).objects!)).not.toEqual(Object.keys(ownKeysOnly(built, THEM).objects!))
     const found = { ...built, author: OLD }
-    expect(Object.keys(takenCopy(found, me()).objects!)).not.toEqual(Object.keys(takenCopy(found, me()).objects!))
+    expect(Object.keys(takeIntoKeeping(found, me()).objects!)).not.toEqual(Object.keys(takeIntoKeeping(found, me()).objects!))
   })
 
   it('PUT IN CHEST says a shard is too large to seal before it signs anything', async () => {

@@ -55,6 +55,12 @@ export interface CommentSubject {
   /** Where the bag is hidden and the height it is encrypted to: what the region key derives from. */
   at: Position
   height: number
+  /**
+   * For something in a room: the room key, which seals its comments instead
+   * of the region's (DECK-0004 §3.7.2), so a reader at the place who has not
+   * opened the door cannot read them.
+   */
+  roomKeyHex?: string
 }
 
 /** What a comment answers: the item, or another comment. */

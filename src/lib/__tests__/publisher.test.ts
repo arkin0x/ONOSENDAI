@@ -30,6 +30,13 @@ vi.mock('../relay', async (importOriginal) => ({
   },
 }))
 
+// Whether an action has landed on this device (lib/chainStore.ts): true unless a test says it lost.
+const landing = vi.hoisted(() => ({ lost: new Set<string>(), asked: [] as string[] }))
+vi.mock('../chainStore', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../chainStore')>()),
+  chainLanded: async (_pubkey: string, id: string) => { landing.asked.push(id); return !landing.lost.has(id) },
+}))
+
 // The look at the relays before a backlog finds nothing here: no relay.
 // `canonical.answers` says whether the canonical relay answers it.
 const canonical = vi.hoisted(() => ({ answers: true }))
@@ -103,6 +110,20 @@ describe('the publisher and the release gate', () => {
     await idle()
     expect(sent).toEqual([])
     expect(useCyberspace.getState().published[ev('a1').id]).toBe('queued')
+  })
+
+  it('an action another tab beat to the head is never sent, and asks nothing of a relay', async () => {
+    setChain(['a1'])
+    useCyberspace.setState({ live: true })
+    await idle()
+    const lost = ev('b2').id
+    landing.lost.add(lost)
+    append('b2')
+    await idle()
+    expect(landing.asked).toContain(lost)
+    expect(sent).not.toContain(lost)
+    expect(useCyberspace.getState().published[lost]).not.toBe('sending')
+    landing.lost.delete(lost)
   })
 
   it('sends the whole backlog, oldest first, once an action is taken while Live', async () => {

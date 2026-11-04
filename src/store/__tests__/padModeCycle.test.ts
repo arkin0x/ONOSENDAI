@@ -1,0 +1,203 @@
+/**
+ * padModeCycle.test.ts - the mode button's ring, HOP, VIEW, WALK, BUILD and
+ * back to HOP (arkinox, 2026-11-02: "WALK mode button switches to BUILD
+ * mode; pressing again cycles back to HOP mode. RECALL still goes back to
+ * HOP as usual"), and every other way in and out of BUILD still working
+ * beside it: B, Esc, EXIT, RECALL, a deploy lined up, and spectating.
+ */
+
+import { beforeEach, describe, expect, it, vi } from 'vitest'
+
+vi.hoisted(() => {
+  // No relay is ever dialed from here: a socket that never opens.
+  ;(globalThis as { WebSocket?: unknown }).WebSocket = class {
+    static OPEN = 1
+    readyState = 0
+    onopen = null; onclose = null; onerror = null; onmessage = null
+    send(): void {}
+    close(): void {}
+    addEventListener(): void {}
+    removeEventListener(): void {}
+  }
+  const m = new Map<string, string>()
+  ;(globalThis as { localStorage?: Storage }).localStorage = {
+    get length() { return m.size },
+    clear: () => m.clear(),
+    getItem: (k: string) => m.get(k) ?? null,
+    key: (i: number) => [...m.keys()][i] ?? null,
+    removeItem: (k: string) => { m.delete(k) },
+    setItem: (k: string, v: string) => { m.set(k, String(v)) },
+  }
+})
+
+vi.mock('../../lib/workers', () => ({ postProof: vi.fn(), cancelProof: vi.fn(), setProofHandler: vi.fn() }))
+vi.mock('../../lib/relay', () => ({
+  publishMany: vi.fn(async () => ({ ok: true })),
+  query: vi.fn(async () => []),
+  relaySet: () => ['wss://relay.test'],
+}))
+// A spectated avatar with nothing on the relay: the scene watches their spawn.
+vi.mock('../../lib/chains', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../lib/chains')>()),
+  fetchChainEvents: vi.fn(async () => []),
+  confirmChainEvents: vi.fn(async () => []),
+  watchAuthor: vi.fn(() => () => {}),
+}))
+
+import { generateSecretKey, getPublicKey } from 'nostr-tools/pure'
+import { useCyberspace } from '../useCyberspace'
+import { useBuilder } from '../useBuilder'
+import { useShards } from '../useShards'
+import { useWalk } from '../useWalk'
+import { useToast } from '../useToast'
+import { buildHeld, buildToHop, currentPadMode, cycleMode, padMode, walkToBuild } from '../padMode'
+import { walkCancel } from '../../hooks/useKeyboard'
+import { escapeTop } from '../../hooks/useEscape'
+import { spectate, stopSpectating } from '../../lib/spectator'
+import { placeSpawn } from '../fixtures/placeSpawn'
+
+const S = () => useCyberspace.getState()
+const B = () => useBuilder.getState()
+
+beforeEach(async () => {
+  stopSpectating()
+  useShards.setState({ pending: null, placedLast: null, deployStatus: 'idle', deployError: null })
+  useWalk.getState().exit()
+  B().exit()
+  S().clearFocus()
+  useToast.getState().dismiss()
+  await placeSpawn()
+  S().cancel()
+  useCyberspace.setState({ scaleExp: 0 })
+  expect(currentPadMode()).toBe('hop')
+})
+
+describe('the mode button', () => {
+  it('goes HOP, VIEW, WALK, BUILD and back to HOP, one press each', () => {
+    const home = { ...S().position }
+    cycleMode()
+    expect(currentPadMode()).toBe('view')
+    expect(S().viewing()).toBe(true)
+
+    cycleMode()
+    expect(currentPadMode()).toBe('walk')
+    expect(S().walking).toBe(true)
+
+    // WALK used to go back to HOP here.
+    cycleMode()
+    expect(currentPadMode()).toBe('build')
+    expect(S().walking).toBe(false)
+    expect(B().active).toBe(true)
+    expect(B().via).toBe('build')
+    // BUILD starts on your avatar.
+    expect(S().cursor).toEqual(home)
+
+    cycleMode()
+    expect(currentPadMode()).toBe('hop')
+    expect(B().active).toBe(false)
+    expect(S().focus).toBeNull()
+    expect(S().atHead()).toBe(true)
+    expect(S().cursor).toEqual(home)
+  })
+
+  it('keeps the zoom all the way round', () => {
+    useCyberspace.setState({ scaleExp: 5 })
+    for (const mode of ['view', 'walk', 'build', 'hop'] as const) {
+      cycleMode()
+      expect(currentPadMode()).toBe(mode)
+      expect(S().scaleExp).toBe(5)
+    }
+  })
+
+  it('from BUILD goes home to HOP even with the build cursor moved away, where EXIT leaves the view', () => {
+    const home = { ...S().position }
+    B().enter('build')
+    S().moveCursor({ axis: 'x', dir: 1 })
+    S().moveCursor({ axis: 'x', dir: 1 })
+    expect(B().leftAvatar).toBe(true)
+    // EXIT (and B, and Esc) leave the view where it is (R6).
+    B().exit()
+    expect(S().focus?.drive).toBe(true)
+    S().clearFocus()
+
+    B().enter('build')
+    S().moveCursor({ axis: 'x', dir: 1 })
+    cycleMode()
+    expect(B().active).toBe(false)
+    expect(S().focus).toBeNull()
+    expect(S().cursor).toEqual(home)
+    expect(currentPadMode()).toBe('hop')
+    // A mode ended on purpose is no BUILD MODE ENDED.
+    expect(useToast.getState().toast?.label).not.toBe('BUILD MODE ENDED')
+  })
+
+  it('waits in BUILD while a deploy is lined up, and a copy lined up after a placement does not hold it', () => {
+    B().enter('build')
+    const pending = { type: 'message' as const, text: 'hi' }
+    useShards.setState({ pending })
+    expect(buildHeld()).toBe(true)
+    cycleMode()
+    expect(B().active).toBe(true)
+    buildToHop()
+    expect(B().active).toBe(true)
+    // A copy lined up again after a placement: leaving stands it down.
+    useShards.setState({ placedLast: { pending } as never })
+    expect(buildHeld()).toBe(false)
+    cycleMode()
+    expect(B().active).toBe(false)
+    expect(useShards.getState().pending).toBeNull()
+    expect(currentPadMode()).toBe('hop')
+  })
+
+  it('while spectating, leaves BUILD back to watching them: there is no HOP to go to', async () => {
+    const pk = getPublicKey(generateSecretKey())
+    B().enter('build')
+    await spectate(pk)
+    expect(B().active).toBe(true)
+    cycleMode()
+    expect(B().active).toBe(false)
+    expect(S().spectate?.pubkey).toBe(pk)
+    expect(S().focus).toBeNull()
+  })
+})
+
+describe('the other ways in and out still work', () => {
+  it('RECALL (X) in WALK goes back to HOP, not to BUILD', () => {
+    useWalk.getState().enter()
+    walkCancel()
+    expect(S().walking).toBe(false)
+    expect(B().active).toBe(false)
+    expect(currentPadMode()).toBe('hop')
+  })
+
+  it('B goes from WALK into BUILD and back out, and Esc leaves BUILD', () => {
+    useWalk.getState().enter()
+    B().toggle()
+    expect(S().walking).toBe(false)
+    expect(B().active).toBe(true)
+    B().toggle()
+    expect(B().active).toBe(false)
+    expect(currentPadMode()).toBe('hop')
+
+    B().toggle()
+    expect(B().active).toBe(true)
+    escapeTop()
+    expect(B().active).toBe(false)
+  })
+
+  it('WALK to BUILD only from WALK', () => {
+    walkToBuild()
+    expect(B().active).toBe(false)
+    useWalk.getState().enter()
+    walkToBuild()
+    expect(B().active).toBe(true)
+  })
+
+  it('names the mode with WALK first, then BUILD, then VIEW', () => {
+    expect(padMode(true, false, false)).toBe('walk')
+    expect(padMode(false, true, false)).toBe('build')
+    expect(padMode(false, true, true)).toBe('build')
+    expect(padMode(false, false, true)).toBe('view')
+    expect(padMode(false, false, false)).toBe('hop')
+  })
+})

@@ -53,7 +53,7 @@ function strip(): ShardModel {
     faces: [[0, 1, 4], [0, 4, 3], [1, 2, 5], [1, 5, 4]],
     facecolors: [RED, BLUE, GREEN, GOLD].map(hexToRgb),
   }
-  useWorkshop.setState({ shards: [s], currentId: s.id, selection: [], partSel: [], selectedFace: null, facePick: [], clip: null, past: [], future: [], notice: null, color: hexToRgb(WHITE), level: 0, stampKind: 'block', stampSize: 1, stampFacing: 0 })
+  useWorkshop.setState({ shards: [s], currentId: s.id, selection: [], partSel: [], selectedFaces: [], facePick: [], clip: null, past: [], future: [], notice: null, color: hexToRgb(WHITE), level: 0, stampKind: 'block', stampSize: 1, stampFacing: 0 })
   return s
 }
 
@@ -104,7 +104,7 @@ describe('taking faces away', () => {
 
   it('deleteSelectedFace keeps them too, and UNDO puts the face back with its own seam', () => {
     const before = w().current()!
-    useWorkshop.setState({ selectedFace: 0 })
+    useWorkshop.setState({ selectedFaces: [0] })
     w().deleteSelectedFace()
     keptSeams(before, w().current()!)
     w().undo()

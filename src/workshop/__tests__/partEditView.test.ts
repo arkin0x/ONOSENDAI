@@ -26,7 +26,7 @@ vi.mock('../../lib/relay', () => ({
 import { fromPayload, newShard, toPayload, type ShardModel } from 'sno-core/shards'
 import { useWorkshop, LIVE_LINK_NOTICE } from '../../store/useWorkshop'
 import { fetchRef, primeRef } from '../../lib/parts'
-import { setLocalAuthor, takenCopy } from '../../lib/carried'
+import { carriesSealedParts, setLocalAuthor, takeIntoKeeping, withoutCarried } from '../../lib/carried'
 import { publicObjectTemplate } from '../../lib/published'
 
 const ME = 'a'.repeat(64)
@@ -216,13 +216,15 @@ describe('review of the stack: the edit view', () => {
   const place = (s: ShardModel, ...refs: ShardModel['refs'] & object): ShardModel => ({ ...s, refs, parts: refs.map((_, i) => ({ ref: i, at: [0, 0, 0] as [number, number, number], turn: [0, 0, 0] as [number, number, number], step: 0 })) })
 
   it('B1: a piece from a bag stamped INSIDE a part marks the shard, and stays out of a public object', async () => {
-    const bagPiece = { ...takenCopy({ ...place(tri('Sealed'), ['a', `33331:${THEM}:secret`]), objects: { [`33331:${THEM}:secret`]: toPayload(tri('SECRET GEOMETRY')) }, author: THEM }, ME), id: 'bag-piece' }
+    const bagPiece = { ...takeIntoKeeping({ ...place(tri('Sealed'), ['a', `33331:${THEM}:secret`]), objects: { [`33331:${THEM}:secret`]: toPayload(tri('SECRET GEOMETRY')) }, author: THEM }, ME), id: 'bag-piece' }
     useWorkshop.setState({ shards: [...w().shards, bagPiece] })
     await w().enterPart(0)
     w().setStampObject({ ref: ['a', `33331:${ME}:bag-piece`], name: 'Sealed', shard: bagPiece, copy: { sourceId: 'bag-piece', pubkey: ME } })
     w().placeObject([120, 0, 0])
     w().exitTo(0)
-    const content = publicObjectTemplate(w().rootShard()!, 1).content
+    // Marked, so PUBLISH asks; left out, which is the default, the secret is not written.
+    expect(carriesSealedParts(w().rootShard()!)).toBe(true)
+    const content = publicObjectTemplate(withoutCarried(w().rootShard()!), 1).content
     expect(content).not.toContain('SECRET GEOMETRY')
   })
 

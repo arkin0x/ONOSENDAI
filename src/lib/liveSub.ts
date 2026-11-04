@@ -112,6 +112,22 @@ export class LiveRegistry {
     }
   }
 
+  /**
+   * Reopen now the subscriptions waiting out a backoff, and leave the open
+   * ones be: the relay that kept closing them can now be asked (it signed
+   * this visit in). Their backoff stands, so a relay that closes them again
+   * is asked no faster than before.
+   */
+  retryWaiting(): void {
+    for (const live of this.records.values()) {
+      if (live.closed || !live.timer) continue
+      clearTimeout(live.timer)
+      live.timer = null
+      live.reopens++
+      void this.open(live)
+    }
+  }
+
   private async open(live: Live): Promise<void> {
     if (live.closed || live.opening) return
     live.opening = true

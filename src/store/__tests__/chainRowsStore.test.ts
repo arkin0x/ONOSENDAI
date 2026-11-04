@@ -1872,3 +1872,41 @@ describe('what went out and what lost, noted where it matters (review round 2, N
     expect(b.rows.readTail(pk)).toHaveLength(1)
   })
 })
+
+describe('follow-ups of #574', () => {
+  /** Hold one store of a database busy with a write until let go; resolves once the hold is on. */
+  async function holdStore(dbName: string, store: string): Promise<{ letGo: () => Promise<void> }> {
+    const db = await new Promise<IDBDatabase>((resolve, reject) => {
+      const req = indexedDB.open(dbName)
+      req.onsuccess = () => resolve(req.result)
+      req.onerror = () => reject(req.error)
+    })
+    return new Promise((on) => {
+      const tx = db.transaction([store], 'readwrite')
+      const os = tx.objectStore(store)
+      let holding = true
+      const released = new Promise<void>((done) => { tx.oncomplete = () => { db.close(); done() } })
+      let first = true
+      const spin = (): void => { os.get('nobody').onsuccess = () => { if (first) { first = false; on({ letGo: () => { holding = false; return released } }) } if (holding) spin() } }
+      spin()
+    })
+  }
+
+  it('a move signed after a look that ran out of time goes out only once its commit has answered, and stays queued till then', { timeout: 30_000 }, async () => {
+    const chain = chainOf(6)
+    await seedOldStores(chain, { published: chain.map((e) => e.id) })
+    const a = await openTab()
+    ;(await import('../../lib/publisher')).startPublisher()
+    a.store.useCyberspace.setState({ live: true })
+    a.rows.setRowsPatience({ read: 100, land: 20 })
+    // The chain records are busy: the look before the move runs out, and the commit waits.
+    const held = await holdStore('onosendai:events', 'chains')
+    const m = await signMove(a)
+    await tick(500)
+    expect(a.S().events.map((e) => e.id)).toContain(m)
+    expect(a.S().published[m]).not.toBe('ok')
+    expect(sent.map((x) => x.id)).not.toContain(m)
+    await held.letGo()
+    await vi.waitFor(() => expect(sent.map((x) => x.id)).toContain(m), { timeout: 10_000, interval: 20 })
+  })
+})

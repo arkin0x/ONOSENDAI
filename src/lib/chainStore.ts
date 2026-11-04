@@ -234,7 +234,12 @@ export async function rowsHead(pubkey: string): Promise<ChainRecord | null | 'un
       return await callEventDb('chainHead', [pubkey])
     } catch { return 'unreadable' }
   })()
-  try { return await Promise.race([look, late]) } finally { clearTimeout(timer) }
+  try {
+    const answer = await Promise.race([look, late.then(() => 'late' as const)])
+    const t = tracks.get(pubkey)
+    if (t) t.lookBlind = answer === 'late'
+    return answer === 'late' ? 'unreadable' : answer
+  } finally { clearTimeout(timer) }
 }
 
 /** Copy, read back, compare, switch (lib/eventDb/chainRows.ts). Never rejects: 'failed' leaves the old copies in charge. */
@@ -341,6 +346,14 @@ interface Track {
   blind: Set<string>
   /** Nothing at all goes out from this tab: a lost action may be on the relays beside the winner (holdChain). */
   held: boolean
+  /** The last look before a move ran out of time (rowsHead): the next save's new actions must land before they go out. */
+  lookBlind: boolean
+  /**
+   * Actions signed after a look that ran out of time: nobody compared them with
+   * another tab's head, so only their commit can say they won. They wait for its
+   * answer, however long, and stay signed and queued meanwhile, never sent blind.
+   */
+  mustLand: Set<string>
 }
 
 const tracks = new Map<string, Track>()
@@ -348,7 +361,7 @@ const tracks = new Map<string, Track>()
 function trackOf(pubkey: string): Track {
   let t = tracks.get(pubkey)
   if (!t) {
-    t = { committed: [], committedIds: new Set(), acked: new Set(), wanted: null, running: null, latest: null, landers: new Map(), retry: null, refusedSaid: false, lost: new Set(), takingBack: false, blind: new Set(), held: false }
+    t = { committed: [], committedIds: new Set(), acked: new Set(), wanted: null, running: null, latest: null, landers: new Map(), retry: null, refusedSaid: false, lost: new Set(), takingBack: false, blind: new Set(), held: false, lookBlind: false, mustLand: new Set() }
     tracks.set(pubkey, t)
   }
   return t
@@ -509,7 +522,7 @@ async function run(pubkey: string, t: Track): Promise<void> {
       for (const id of commit.acks) t.acked.add(id)
       t.refusedSaid = false
       if (t.retry) { clearTimeout(t.retry); t.retry = null }
-      for (const id of t.committedIds) t.blind.delete(id)
+      for (const id of t.committedIds) { t.blind.delete(id); t.mustLand.delete(id) }
       clearTail(pubkey)
       settleLanders(t, (id) => (t.committedIds.has(id) ? true : null))
     } catch (err) {
@@ -540,6 +553,11 @@ export function saveRows(pubkey: string, w: ChainWant): void {
   const t = trackOf(pubkey)
   // What follows an action that lost is refused at once, before any write.
   markAfterLost(t, w.events)
+  // Signed after a look that ran out of time: these go out only once their commit has answered.
+  if (t.lookBlind) {
+    for (const e of w.events) if (!t.committedIds.has(e.id)) t.mustLand.add(e.id)
+    t.lookBlind = false
+  }
   t.wanted = w
   t.latest = w
   if (t.running) return
@@ -568,8 +586,10 @@ export function chainLanded(pubkey: string, id: string): Promise<boolean> {
   if (t.committedIds.has(id)) return Promise.resolve(true)
   if (t.takingBack) return Promise.resolve(false)
   if (!t.running) { t.blind.add(id); return Promise.resolve(true) }
+  // Signed after a look that ran out of time: no patience, only the commit's answer lets it go.
+  const patient = !t.mustLand.has(id)
   return new Promise((resolve) => {
-    const timer = setTimeout(() => {
+    const timer = !patient ? undefined : setTimeout(() => {
       const waiting = t.landers.get(id)
       if (waiting) { t.landers.set(id, waiting.filter((r) => r !== settle)); if (t.landers.get(id)?.length === 0) t.landers.delete(id) }
       // Its commit may still lose: then it is noted as out, and the store holds the chain and says so.

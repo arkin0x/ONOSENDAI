@@ -11,7 +11,7 @@
  */
 
 import { sha256 } from '@noble/hashes/sha2.js'
-import { carriedTable, carryAll, parseAddress, withAuthor, type CarryChoice } from 'sno-core/parts'
+import { carriedModel, carriedPayload, carriedTable, carryAll, carryObject, parseAddress, withAuthor, type CarryChoice } from 'sno-core/parts'
 import { toPayload, uuid, type Ref, type ShardModel } from 'sno-core/shards'
 import { withAuthoredConstrain } from './walkConstrain'
 
@@ -243,6 +243,39 @@ export function carryReached(model: ShardModel, lookup: (ref: Ref) => CarryChoic
   return blind ? carried : carryAll(carried, lookup, { prune: true })
 }
 
+/**
+ * Whether `model` would place itself, at any depth: a placement that leads
+ * back to `self` (its own address), or round a loop, through its own table
+ * or through `local`, your workshop's shards by address. No reader can draw
+ * that (DECK-0003 §1.9), and inside a copy the copy's id is not the shard's,
+ * so comparing ids alone let the root be stamped into a copy inside itself
+ * (review of the stack).
+ */
+export function placesItself(model: ShardModel, self: string | null, local: (address: string) => ShardModel | undefined = () => undefined): boolean {
+  const table = model.objects ?? {}
+  const done = new Set<string>()
+  const open = new Set<string>()
+  const next = (a: string): ShardModel | undefined => (Object.prototype.hasOwnProperty.call(table, a) ? carriedModel(table, a) ?? undefined : local(a))
+  const walk = (m: ShardModel): boolean => {
+    const used = new Set((m.parts ?? []).map((p) => p.ref))
+    for (const [i, r] of (m.refs ?? []).entries()) {
+      if (!used.has(i) || r[0] !== 'a') continue
+      const a = r[1]
+      if (a === self || open.has(a)) return true
+      if (done.has(a)) continue
+      const n = next(a)
+      if (n) {
+        open.add(a)
+        if (walk(n)) return true
+        open.delete(a)
+      }
+      done.add(a)
+    }
+    return false
+  }
+  return walk(model)
+}
+
 /** The bytes a relay is taken to accept for one event, as DECK-0003 §1.8 measures them. */
 const RELAY_EVENT_BYTES = 131_072
 
@@ -264,6 +297,49 @@ export function relayRefusal(event: { content: string; tags: string[][] }): stri
   const bytes = new TextEncoder().encode(JSON.stringify({ id: '', pubkey: '', sig: '', ...event })).length + 350
   if (bytes <= RELAY_EVENT_BYTES) return null
   return `${Math.ceil(bytes / 1024)}kb of ${RELAY_EVENT_BYTES / 1024}kb may be larger than relays will accept. Keep this part separate.`
+}
+
+/**
+ * `parent` carrying a copy of `source`, a piece of your workshop, and the
+ * reference a placement of it names (STAMP > OBJECT, YOURS; arkinox
+ * 2026-10-25: "once copied we should just edit the copy directly").
+ *
+ * The copy is keyed under a `d` of its own, sixteen random hex digits, never
+ * under the source's own address, and never one that names it:
+ * - every reader that does not know `objects` asks public relays for that
+ *   address, so the `d` says nothing about the piece (DECK-0003 §1.10, "What an
+ *   older reader asks relays for"), and finds nothing there, rather than the
+ *   source as it is published today;
+ * - the workshop never answers for it (lib/parts.ts fetchOwnFirst), so the
+ *   bench draws the copy, which is the parent's own data;
+ * - stamping the source again after the copy was edited makes a new copy
+ *   rather than another placement of the edited one;
+ * - two parents' copies of one piece, made at different times, never collide
+ *   when both are carried in one hide (a writer flattens into one table).
+ *
+ * A copy of the source exactly as it is now, already in this parent under your
+ * key, is used again, so a piece stamped ten times in one parent travels once
+ * and its placements edit together. The copy keeps the source's name, as a
+ * label, sealed inside with the payload. Written as a hide writes it (OPAQUE
+ * where never chosen), and what the source itself carries joins the parent's
+ * one table, under your key. What came sealed in the source is marked sealed in
+ * the parent, with the copy (takeIntoKeeping), so PUBLISH asks before writing it
+ * in the clear (§1.10).
+ */
+export function copyInto(parent: ShardModel, source: ShardModel, pubkey: string): { shard: ShardModel; ref: Ref } {
+  const written = withAuthoredConstrain(ownKeysOnly(source, pubkey))
+  const text = JSON.stringify(carriedPayload(written))
+  const mine = `33331:${pubkey}:`
+  // What came sealed in the source stays sealed in the parent, under the keys
+  // ownKeysOnly gave it, and so does the copy itself: its payload came out of
+  // a bag too (D1). Nothing else of the parent is marked.
+  const sealed = [...sealedKeys(source)].map((k) => (k.startsWith(mine) ? k : `${mine}${steadyD(k, pubkey)}`))
+  const marked = (s: ShardModel, at: string): ShardModel => (sealed.length ? withSealed(s, [...sealed, at]) : s)
+  for (const [key, entry] of Object.entries(parent.objects ?? {})) {
+    if (key.startsWith(mine) && JSON.stringify(entry) === text) return { shard: marked(parent, key), ref: ['a', key] }
+  }
+  const address = `${mine}${quietD()}`
+  return { shard: marked(carryObject(parent, address, written), address), ref: ['a', address] }
 }
 
 /**

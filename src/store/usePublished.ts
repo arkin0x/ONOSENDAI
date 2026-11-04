@@ -27,7 +27,8 @@ import { withoutCarried } from '../lib/carried'
 import { create } from 'zustand'
 import type { ShardModel } from 'sno-core/shards'
 import { SNO_KIND, objectAddress } from 'sno-core/feed'
-import { publishMany, relaySet } from '../lib/relay'
+import { publishMany, queryAny, relaySet } from '../lib/relay'
+import { GENERAL_RELAYS } from '../lib/contacts'
 import { shardRefusal } from '../lib/hidden'
 import { forgetRef } from '../lib/parts'
 import { ownKeysOnly } from '../lib/carried'
@@ -240,6 +241,20 @@ export const usePublished = create<PublishedState>((set, get) => ({
     set({ ledger })
   },
 }))
+
+/** How long the read of your own objects waits for the relays. */
+const LEARN_WAIT_MS = 5000
+
+/**
+ * Read every object of yours on the relays you write to and the general ones,
+ * and learn them (`learn`): an object published from another browser or from
+ * snocrash reads as PUBLISHED from then on. The OBJECT picker asks this when
+ * it opens; the feed teaches only what it lists (review of the stack).
+ */
+export function learnMine(pubkey: string): Promise<void> {
+  return queryAny([...new Set([...relaySet(), ...GENERAL_RELAYS])], { kinds: [33331], authors: [pubkey] }, LEARN_WAIT_MS)
+    .then((events) => usePublished.getState().learn(events), () => { /* the tag stays as this device knows it */ })
+}
 
 // The Shard Feed is a read of the relays like any other: an object of yours
 // in it was published, whichever browser or app published it.

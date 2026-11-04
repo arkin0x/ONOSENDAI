@@ -178,6 +178,8 @@ afterEach(async () => {
   // a test left without relays or rows answers within its own patience.
   for (const t of opened.splice(0)) {
     await Promise.race([t.S().confirmHeadNow().catch(() => null).then(() => t.rows.chainRowsSettled()), tick(3_000)])
+    // LOCAL again: a publisher a test started stops retrying, so nothing of it runs on into the next file.
+    t.store.useCyberspace.setState({ live: false })
   }
   await tick(30)
   vi.restoreAllMocks()
@@ -1976,3 +1978,138 @@ describe('follow-ups of #574', () => {
 function readTailIds(): string[] {
   return (JSON.parse(localStorage.getItem(`onosendai:chain-unsaved:${pk}`) ?? '[]') as NostrEvent[]).map((e) => e.id)
 }
+
+describe('follow-ups of #576', () => {
+  /** Hold one store of a database busy with a write until let go; resolves once the hold is on. */
+  async function holdStore(dbName: string, store: string): Promise<{ letGo: () => Promise<void> }> {
+    const db = await new Promise<IDBDatabase>((resolve, reject) => {
+      const req = indexedDB.open(dbName)
+      req.onsuccess = () => resolve(req.result)
+      req.onerror = () => reject(req.error)
+    })
+    return new Promise((on) => {
+      const tx = db.transaction([store], 'readwrite')
+      const os = tx.objectStore(store)
+      let holding = true
+      const released = new Promise<void>((done) => { tx.oncomplete = () => { db.close(); done() } })
+      let first = true
+      const spin = (): void => { os.get('nobody').onsuccess = () => { if (first) { first = false; on({ letGo: () => { holding = false; return released } }) } if (holding) spin() } }
+      spin()
+    })
+  }
+
+  /** A move signed on a full disk: in the spare key, in no row. */
+  async function moveOnlyInSpareKey(): Promise<{ chain: NostrEvent[]; m: string }> {
+    const chain = chainOf(6)
+    await seedOldStores(chain, { published: chain.map((e) => e.id), localToo: true })
+    const a = await openTab()
+    const proto = IDBObjectStore.prototype as unknown as { put: (...x: unknown[]) => unknown }
+    const realPut = proto.put
+    proto.put = function (this: IDBObjectStore, ...x: unknown[]) {
+      if (this.name === 'chains') throw new DOMException('The quota has been exceeded.', 'QuotaExceededError')
+      return realPut.apply(this, x)
+    }
+    putBack.push(() => { proto.put = realPut })
+    let m: string
+    try {
+      m = await signMove(a)
+      await a.rows.chainRowsSettled()
+    } finally { proto.put = realPut }
+    expect(readTailIds()).toContain(m)
+    ;(await import('../../lib/eventDb/connection')).closeEventDb()
+    return { chain, m }
+  }
+
+  /** The next loads cannot read the rows. */
+  function breakRowReads(): void {
+    const index = IDBIndex.prototype as unknown as { getAll: (...x: unknown[]) => unknown }
+    const realGetAll = index.getAll
+    index.getAll = function (this: IDBIndex, ...x: unknown[]) {
+      if (this.objectStore.transaction.db.name === 'onosendai:events') throw new DOMException('broken', 'UnknownError')
+      return realGetAll.apply(this, x)
+    }
+    putBack.push(() => { index.getAll = realGetAll })
+  }
+
+  it('held moves are free once the rows answer again, with the relays silent', { timeout: 30_000 }, async () => {
+    const { m } = await moveOnlyInSpareKey()
+    relays.confirm = null
+    // This load cannot read the rows: the move the spare key brings back is held.
+    const index = IDBIndex.prototype as unknown as { getAll: (...x: unknown[]) => unknown }
+    const realGetAll = index.getAll
+    index.getAll = function (this: IDBIndex, ...x: unknown[]) {
+      if (this.objectStore.transaction.db.name === 'onosendai:events') throw new DOMException('broken', 'UnknownError')
+      return realGetAll.apply(this, x)
+    }
+    putBack.push(() => { index.getAll = realGetAll })
+    const b = await openTab()
+    expect(b.S().events.map((e) => e.id)).toContain(m)
+    expect(b.rows.unvouchedAction(pk, m)).toBe(true)
+    ;(await import('../../lib/publisher')).startPublisher()
+    b.store.useCyberspace.setState({ live: true })
+    b.S().publishNow()
+    await tick(300)
+    expect(sent.map((x) => x.id)).not.toContain(m)
+    // The rows answer again: away and back, this identity's chain is read from them, the move committed like any save.
+    index.getAll = realGetAll
+    await b.S().useNsec(nip19.nsecEncode(generateSecretKey()))
+    await b.S().useNsec(nip19.nsecEncode(sk))
+    await b.store.savedChainLoaded()
+    expect(b.rows.unvouchedAction(pk, m)).toBe(false)
+    b.S().publishNow()
+    await vi.waitFor(() => expect(sent.map((x) => x.id)).toContain(m), { timeout: 10_000, interval: 20 })
+  })
+
+  it('LIVE, a load that brings back held moves asks the relays once by itself: they are free with no press, and PUBLISH NOW sends them', { timeout: 30_000 }, async () => {
+    const { m } = await moveOnlyInSpareKey()
+    breakRowReads()
+    relays.confirm = []
+    localStorage.setItem('onosendai:live', '1')
+    const b = await openTab()
+    expect(b.S().events.map((e) => e.id)).toContain(m)
+    await vi.waitFor(() => expect(b.rows.unvouchedAction(pk, m)).toBe(false), { timeout: 5_000, interval: 20 })
+    ;(await import('../../lib/publisher')).startPublisher()
+    b.S().publishNow()
+    await vi.waitFor(() => expect(sent.map((x) => x.id)).toContain(m), { timeout: 5_000, interval: 20 })
+  })
+
+  it('the relays answer with a sibling of a held move: nothing goes out, and the person is asked to choose', { timeout: 30_000 }, async () => {
+    const { chain, m } = await moveOnlyInSpareKey()
+    breakRowReads()
+    // Another device's move from the same head, already on the relays.
+    const sibling = finalizeEvent(hopTemplate({
+      createdAt: 1_000 + 60, genesisId: chain[0].id, previousId: chain[5].id,
+      prevCoordHex: positionHex(at(5), home.plane), to: { ...at(5), y: home.y + 1n }, plane: home.plane, proofHash: '0'.repeat(64), mn: '0'.repeat(16), mp: '00',
+    }), sk) as NostrEvent
+    relays.confirm = [sibling]
+    localStorage.setItem('onosendai:live', '1')
+    const b = await openTab()
+    expect(b.S().events.map((e) => e.id)).toContain(m)
+    ;(await import('../../lib/publisher')).startPublisher()
+    // The relays' answer on load (or a press) brings the sibling in: a fork against the held move.
+    await vi.waitFor(() => expect(b.S().chainConflict).toMatchObject({ kind: 'branch', forkId: chain[5].id }), { timeout: 5_000, interval: 20 })
+    b.S().publishNow()
+    await tick(400)
+    expect(sent.map((x) => x.id)).not.toContain(m)
+  })
+
+  it('CHAIN HELD for a store that stopped answering goes with its identity, and comes back with it', { timeout: 30_000 }, async () => {
+    const chain = chainOf(6)
+    await seedOldStores(chain, { published: chain.map((e) => e.id) })
+    const a = await openTab()
+    ;(await import('../../lib/publisher')).startPublisher()
+    a.store.useCyberspace.setState({ live: true })
+    a.rows.setRowsPatience({ read: 100, land: 20, stuck: 300 })
+    const toast = (await import('../useToast')).useToast
+    toast.getState().dismiss()
+    const held = await holdStore('onosendai:events', 'chains')
+    putBack.push(() => { void held.letGo() })
+    await signMove(a)
+    const said = { label: 'CHAIN HELD', meta: 'This device\'s store stopped answering. Moves wait here, unsent.' }
+    await vi.waitFor(() => expect(toast.getState().toast).toMatchObject(said), { timeout: 5_000, interval: 20 })
+    await a.S().useNsec(nip19.nsecEncode(generateSecretKey()))
+    expect(toast.getState().toast?.meta).not.toBe(said.meta)
+    await a.S().useNsec(nip19.nsecEncode(sk))
+    expect(toast.getState().toast).toMatchObject(said)
+  })
+})

@@ -84,7 +84,8 @@ import {
 } from '../lib/space'
 import { confirmChainEvents } from '../lib/chains'
 import { chainDbAvailable, chainWritePause, readStoredChain, setAsideChains, setAsideStoredChain, writeStoredChain, type StoredChain } from '../lib/chainDb'
-import { chainHeld, chainLost, checkRowsInTime, clearMarker, clearTail, committedHead, deployAllowsMove, holdChain, inRows, markerValue, migrateToRows, noteCommitted, onChainLost, onChainRefused, onChainResave, wentOut, probePassedBefore, readRows, readTail, rowsHead, rowsMarked, rowsWanted, saveRows, setAsideRows, setMarker, storeTrial, storeWorksHere, tailOnSave, takingBack, tookBack, turnRowsOff, writeTail } from '../lib/chainStore'
+import { CHAIN_RULES_EPOCH } from '../lib/chainRulesEpoch'
+import { chainHeld, chainLost, checkRowsInTime, clearMarker, clearTail, committedHead, deployAllowsMove, holdChain, holdUntilVouched, inRows, markVerdicts, markerValue, migrateToRows, noteCommitted, onChainLost, onChainRefused, onChainResave, onChainStuck, wentOut, probePassedBefore, readRows, readTail, rowsHead, rowsMarked, rowsWanted, saveRows, setAsideRows, setMarker, storeTrial, storeWorksHere, tailOnSave, takingBack, tookBack, turnRowsOff, vouch, writeTail } from '../lib/chainStore'
 import { eventDbAvailable } from '../lib/eventDb/client'
 import type { ChainRead, ChainSource } from '../lib/eventDb/chainRows'
 import { checkSignatures } from '../lib/sigCheck'
@@ -2064,6 +2065,15 @@ const unreadSaveKey = (pubkey: string): string => `onosendai:chain-unread-save:$
 function unreadSave(pubkey: string): string | null {
   try { return localStorage.getItem(unreadSaveKey(pubkey)) } catch { return null }
 }
+/**
+ * Whether the one thing keeping the head in hand from being vouched for is an
+ * older build's save the old stores could not be read for: the chain itself
+ * was read, nothing is being taken back.
+ */
+function onlyOlderSaveUnread(pubkey: string): boolean {
+  return unreadSave(pubkey) !== null && !rowsDown.has(pubkey) && !takingBack(pubkey) && (!chainDbAvailable() || dbRead.has(pubkey))
+}
+
 /** Identities told on this page that an older save could not be read. */
 const unreadSaid = new Set<string>()
 
@@ -2088,7 +2098,7 @@ async function foldStaleBuildNow(pubkey: string): Promise<void> {
     if (!unreadSaid.has(pubkey)) {
       unreadSaid.add(pubkey)
       console.warn('[chain] the old stores could not be read for a save of an older build: moves go on from the chain in hand, and the read is tried again')
-      useToast.getState().show({ label: 'OLDER SAVE COULD NOT BE READ', meta: 'Moves go on from the chain you see. It is tried again.', mark: 'block' })
+      useToast.getState().show({ label: 'OLDER SAVE COULD NOT BE READ', meta: 'Moves go on from here. It keeps trying.', mark: 'block' })
     }
     if (stored) takeInStored(pubkey, stored)
     return
@@ -2251,6 +2261,14 @@ function takeBackLost(pubkey: string, attempt: number): void {
   })
 }
 
+/** Said while actions that must land wait on a store that stopped answering (lib/chainStore.ts onChainStuck). */
+const STORE_STUCK_META = 'This device\'s store stopped answering. Moves wait here, unsent.'
+onChainStuck((pubkey, stuck) => {
+  if (useCyberspace.getState().identity.pubkey !== pubkey) return
+  if (stuck) { useToast.getState().show({ label: 'CHAIN HELD', meta: STORE_STUCK_META, mark: 'block', sticky: true, reload: true }); return }
+  if (useToast.getState().toast?.meta === STORE_STUCK_META) useToast.getState().dismiss()
+})
+
 onChainResave((pubkey) => {
   const s = useCyberspace.getState()
   if (s.identity.pubkey !== pubkey || s.events[0]?.pubkey !== pubkey) return false
@@ -2345,6 +2363,8 @@ async function confirmHead(retrying: () => void): Promise<string | null | typeof
     if (got) {
       relaysConfirmed.add(pubkey)
       foldNow(got)
+      // The relays answered for the head: what the spare key brought back may go (a fork against them stops the drain itself).
+      vouch(pubkey)
       if (rowsWiped.has(pubkey)) void recoverWiped(pubkey)
       return null
     }
@@ -2484,7 +2504,10 @@ function startRowsCheck(pubkey: string, read: ChainRead): void {
   for (const e of events) coveredByRows.set(e.id, e)
   const running = sigCheck?.pubkey === pubkey ? sigCheck.done : null
   const entry: { pubkey: string; done: Promise<string | null> } = { pubkey, done: Promise.resolve(null) }
-  const own = checkRowsInTime(pubkey, events.length).then((bad) => new Set(bad), () => checkSignatures(events)).then((bad) => {
+  // The check that needs no database, on the deadline: a row already flagged has only its id recomputed there.
+  const flagged = new Set(read.checked)
+  const known = events.filter((e) => flagged.has(e.id)).map((e) => `${e.id}:${e.sig}`)
+  const own = checkRowsInTime(pubkey, events.length).then((bad) => new Set(bad), () => checkSignatures(events, undefined, known)).then((bad) => {
     const badKeys = new Set(events.filter((e) => bad.has(e.id)).map(sigKey))
     for (const e of events) {
       if (bad.has(e.id)) continue
@@ -2496,6 +2519,8 @@ function startRowsCheck(pubkey: string, read: ChainRead): void {
   entry.done = (running ? Promise.all([running, own]).then(([a, b]) => a ?? b) : own).then((cut) => {
     if (sigCheck === entry) sigCheck = null
     mark('onosendai:chain-verified')
+    // Only over signatures that held: a verdict is about authentic events (a cut has already changed the chain).
+    void markVerdicts(pubkey, CHAIN_RULES_EPOCH)
     return cut
   })
   sigCheck = entry
@@ -2610,7 +2635,11 @@ function tailInHand(pubkey: string): void {
   const events = s.events.concat(tail)
   if (!oneLine(pubkey, events)) return
   const merged = chainFrom(pubkey, { events, published: s.events.filter((e) => s.published[e.id] === 'ok').map((e) => e.id), stats: s.chain, held: s.held, savedAt: chainAt.get(pubkey)?.at ?? 0 }, true)
-  if (merged) putInHand(pubkey, merged, have)
+  if (!merged) return
+  // Rows that cannot be read: nobody compared these with another tab's commit.
+  // None goes out until a commit or the relays have answered for the head.
+  if (rowsDown.has(pubkey)) holdUntilVouched(pubkey, tail.map((e) => e.id))
+  putInHand(pubkey, merged, have)
 }
 
 /**
@@ -2767,6 +2796,8 @@ async function moveToRows(pubkey: string, startedAt: number): Promise<void> {
  */
 function takeRows(pubkey: string, read: ChainRead, blindSince: number | null): boolean {
   rowsDown.delete(pubkey)
+  // The rows answer again: what the spare key brought back is now compared and committed like any save.
+  vouch(pubkey)
   rowsWiped.delete(pubkey)
   noteCommitted(pubkey, read.events.map((e) => e.id), read.published)
   startRowsCheck(pubkey, read)
@@ -6613,7 +6644,8 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
     if (record.prevEventId !== get().prevEventId) {
       if (!whole) {
         // Nothing proves the head moved: a paid record is never dropped on that.
-        settle(record, 'A pending cloud job was kept: your saved chain did not load, so its head could not be checked. RESUME or reload to try again.')
+        const why = onlyOlderSaveUnread(identity.pubkey) ? 'an older save of your chain could not be read' : 'your saved chain did not load'
+        settle(record, `A pending cloud job was kept: ${why}, so its head could not be checked. RESUME or reload to try again.`)
         return
       }
       clearCloudJob(record.pubkey, record.jobId)

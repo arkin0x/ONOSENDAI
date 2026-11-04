@@ -1505,7 +1505,7 @@ describe('a paid cloud job and the head it is held against (J1 to J3)', () => {
       await store.savedChainLoaded()
       await store.useCyberspace.getState().resumeCloudJob()
       expect(cloud.loadCloudJob(pk)?.prevEventId).toBe(moved)
-      expect(store.useCyberspace.getState().cloud.message).toContain('was kept')
+      expect(store.useCyberspace.getState().cloud.message).toContain('your saved chain did not load')
     } finally { proto.getAll = real }
   })
 
@@ -1677,7 +1677,7 @@ describe('what an older build or the old stores saved, folded in before anything
     const b = await openTab()
     await tick(100)
     const toast = (await import('../useToast')).useToast
-    expect(toast.getState().toast?.label).toBe('OLDER SAVE COULD NOT BE READ')
+    expect(toast.getState().toast).toMatchObject({ label: 'OLDER SAVE COULD NOT BE READ', meta: 'Moves go on from here. It keeps trying.' })
     expect(localStorage.getItem(`onosendai:chain-unread-save:${pk}`)).not.toBeNull()
     // A press tries the read again, and says nothing more.
     toast.getState().dismiss()
@@ -1770,6 +1770,8 @@ describe('what an older build or the old stores saved, folded in before anything
     await store.useCyberspace.getState().resumeCloudJob()
     expect(cloud.loadCloudJob(pk)?.prevEventId).toBe(m2)
     expect(store.useCyberspace.getState().cloud.message ?? '').not.toContain('dropped')
+    // It says why: the chain was read; an older save of it was not.
+    expect(store.useCyberspace.getState().cloud.message).toContain('an older save of your chain could not be read')
     proto.get = real
     ;(await import('../../lib/eventDb/connection')).closeEventDb()
     ;(await import('../../lib/chainDb')).closeChainDb()
@@ -1872,3 +1874,105 @@ describe('what went out and what lost, noted where it matters (review round 2, N
     expect(b.rows.readTail(pk)).toHaveLength(1)
   })
 })
+
+describe('follow-ups of #574', () => {
+  /** Hold one store of a database busy with a write until let go; resolves once the hold is on. */
+  async function holdStore(dbName: string, store: string): Promise<{ letGo: () => Promise<void> }> {
+    const db = await new Promise<IDBDatabase>((resolve, reject) => {
+      const req = indexedDB.open(dbName)
+      req.onsuccess = () => resolve(req.result)
+      req.onerror = () => reject(req.error)
+    })
+    return new Promise((on) => {
+      const tx = db.transaction([store], 'readwrite')
+      const os = tx.objectStore(store)
+      let holding = true
+      const released = new Promise<void>((done) => { tx.oncomplete = () => { db.close(); done() } })
+      let first = true
+      const spin = (): void => { os.get('nobody').onsuccess = () => { if (first) { first = false; on({ letGo: () => { holding = false; return released } }) } if (holding) spin() } }
+      spin()
+    })
+  }
+
+  it('a move signed after a look that ran out of time goes out only once its commit has answered, and stays queued till then', { timeout: 30_000 }, async () => {
+    const chain = chainOf(6)
+    await seedOldStores(chain, { published: chain.map((e) => e.id) })
+    const a = await openTab()
+    ;(await import('../../lib/publisher')).startPublisher()
+    a.store.useCyberspace.setState({ live: true })
+    a.rows.setRowsPatience({ read: 100, land: 20 })
+    // The chain records are busy: the look before the move runs out, and the commit waits.
+    const held = await holdStore('onosendai:events', 'chains')
+    const m = await signMove(a)
+    await tick(500)
+    expect(a.S().events.map((e) => e.id)).toContain(m)
+    expect(a.S().published[m]).not.toBe('ok')
+    expect(sent.map((x) => x.id)).not.toContain(m)
+    await held.letGo()
+    await vi.waitFor(() => expect(sent.map((x) => x.id)).toContain(m), { timeout: 10_000, interval: 20 })
+  })
+
+  it('a move held for a store that stopped answering is said, with RELOAD, and the word goes when the commit answers', { timeout: 30_000 }, async () => {
+    const chain = chainOf(6)
+    await seedOldStores(chain, { published: chain.map((e) => e.id) })
+    const a = await openTab()
+    ;(await import('../../lib/publisher')).startPublisher()
+    a.store.useCyberspace.setState({ live: true })
+    a.rows.setRowsPatience({ read: 100, land: 20, stuck: 300 })
+    const toast = (await import('../useToast')).useToast
+    toast.getState().dismiss()
+    const held = await holdStore('onosendai:events', 'chains')
+    putBack.push(() => { void held.letGo() })
+    const m = await signMove(a)
+    await vi.waitFor(() => expect(toast.getState().toast).toMatchObject({ label: 'CHAIN HELD', meta: 'This device\'s store stopped answering. Moves wait here, unsent.', sticky: true, reload: true }), { timeout: 5_000, interval: 20 })
+    expect(sent.map((x) => x.id)).not.toContain(m)
+    await held.letGo()
+    await vi.waitFor(() => expect(sent.map((x) => x.id)).toContain(m), { timeout: 10_000, interval: 20 })
+    expect(toast.getState().toast).toBeNull()
+  })
+
+  it('a move the spare key brings back while the rows cannot be read waits for the relays before it goes out', { timeout: 30_000 }, async () => {
+    const chain = chainOf(6)
+    await seedOldStores(chain, { published: chain.map((e) => e.id), localToo: true })
+    const a = await openTab()
+    // A full disk: the move is signed and kept in the spare key, and no row has it.
+    const proto = IDBObjectStore.prototype as unknown as { put: (...x: unknown[]) => unknown }
+    const realPut = proto.put
+    proto.put = function (this: IDBObjectStore, ...x: unknown[]) {
+      if (this.name === 'chains') throw new DOMException('The quota has been exceeded.', 'QuotaExceededError')
+      return realPut.apply(this, x)
+    }
+    putBack.push(() => { proto.put = realPut })
+    let m: string
+    try {
+      m = await signMove(a)
+      await a.rows.chainRowsSettled()
+    } finally { proto.put = realPut }
+    expect(readTailIds()).toContain(m)
+    // The next load cannot read the rows; the relays are silent.
+    ;(await import('../../lib/eventDb/connection')).closeEventDb()
+    const index = IDBIndex.prototype as unknown as { getAll: (...x: unknown[]) => unknown }
+    const realGetAll = index.getAll
+    index.getAll = function (this: IDBIndex, ...x: unknown[]) {
+      if (this.objectStore.transaction.db.name === 'onosendai:events') throw new DOMException('broken', 'UnknownError')
+      return realGetAll.apply(this, x)
+    }
+    putBack.push(() => { index.getAll = realGetAll })
+    relays.confirm = null
+    const b = await openTab()
+    expect(b.S().events.map((e) => e.id)).toContain(m)
+    ;(await import('../../lib/publisher')).startPublisher()
+    b.store.useCyberspace.setState({ live: true })
+    b.S().publishNow()
+    await tick(400)
+    expect(sent.map((x) => x.id)).not.toContain(m)
+    // The relays answer for the head: it goes.
+    relays.confirm = []
+    await b.S().confirmHeadNow()
+    await vi.waitFor(() => expect(sent.map((x) => x.id)).toContain(m), { timeout: 10_000, interval: 20 })
+  })
+})
+
+function readTailIds(): string[] {
+  return (JSON.parse(localStorage.getItem(`onosendai:chain-unsaved:${pk}`) ?? '[]') as NostrEvent[]).map((e) => e.id)
+}

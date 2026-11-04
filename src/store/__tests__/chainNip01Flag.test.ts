@@ -31,7 +31,7 @@ vi.mock('nostr-tools/pure', async (importOriginal) => {
 const sigWorker = vi.hoisted(() => ({ events: 0 }))
 vi.mock('../../lib/sigCheck', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../lib/sigCheck')>()
-  return { ...actual, checkSignatures: (events: Parameters<typeof actual.checkSignatures>[0], deadline?: number) => { sigWorker.events += events.length; return actual.checkSignatures(events, deadline) } }
+  return { ...actual, checkSignatures: (...x: Parameters<typeof actual.checkSignatures>) => { sigWorker.events += x[0].length; return actual.checkSignatures(...x) } }
 })
 vi.mock('../../lib/workers', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../lib/workers')>()
@@ -374,5 +374,51 @@ describe('the NIP-01 flag', () => {
     expect(store.rowsCoverage()).toBe(6)
     await store.useCyberspace.getState().useNsec(nip19.nsecEncode(generateSecretKey()))
     expect(store.rowsCoverage()).toBe(0)
+  })
+
+  it('on the deadline, the check that needs no database runs the full check only on rows not flagged yet', { timeout: 30_000 }, async () => {
+    const chain = chainOf(8)
+    await seed(chain)
+    await settled(await load())
+    // The next load flags them.
+    await settled(await load())
+    expect((await flags()).filter((r) => r.chainOf === pk).every((r) => r.nip01 === 1)).toBe(true)
+    const proto = IDBIndex.prototype as unknown as { getAll: (...x: unknown[]) => unknown }
+    const real = proto.getAll
+    proto.getAll = function (this: IDBIndex, ...x: unknown[]) {
+      const tx = this.objectStore.transaction
+      if (tx.db.name === 'onosendai:events' && this.name === 'byChain' && tx.objectStoreNames.length === 1) return {}
+      return real.apply(this, x)
+    }
+    try {
+      vi.resetModules()
+      const store = await import('../useCyberspace')
+      loaded.push(store)
+      ;(await import('../../lib/chainStore')).setRowsPatience({ check: 300, read: 500 })
+      await store.savedChainLoaded()
+      store.useCyberspace.setState({ selfCheck: { pubkey: pk, status: 'none' } })
+      schnorr.n = 0
+      const r = await Promise.race([store.useCyberspace.getState().confirmHeadNow().then(() => 'answered'), new Promise((res) => setTimeout(() => res('still held'), 5_000))])
+      expect(r).toBe('answered')
+      // Every row was flagged: their ids recomputed, no signature checked again.
+      expect(schnorr.n).toBe(0)
+      expect(store.useCyberspace.getState().events).toHaveLength(8)
+    } finally { proto.getAll = real }
+  })
+
+  it('a load\'s check of the rows is followed by the chain\'s verdicts, on its rows and its record', async () => {
+    const chain = chainOf(6)
+    await seed(chain)
+    await settled(await load())
+    await settled(await load())
+    const { CHAIN_RULES_EPOCH } = await import('../../lib/chainRulesEpoch')
+    const { CHAIN_RULES_REVISION } = await import('../../lib/events')
+    const readRecord = async (): Promise<{ verdict?: { epoch: number; rev: string; validThrough: { id: string } | null } } | undefined> => {
+      const { withEventDb, closeEventDb } = await import('../../lib/eventDb/connection')
+      const r = await withEventDb((db) => new Promise<unknown>((resolve) => { const g = db.transaction('chains').objectStore('chains').get(pk); g.onsuccess = () => resolve(g.result) }))
+      closeEventDb()
+      return r as { verdict?: { epoch: number; rev: string; validThrough: { id: string } | null } } | undefined
+    }
+    await vi.waitFor(async () => expect((await readRecord())?.verdict).toMatchObject({ epoch: CHAIN_RULES_EPOCH, rev: CHAIN_RULES_REVISION, validThrough: { id: chain[5].id } }), { timeout: 10_000, interval: 50 })
   })
 })

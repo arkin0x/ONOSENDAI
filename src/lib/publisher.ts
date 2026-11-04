@@ -31,7 +31,7 @@ import { normalizeURL } from 'nostr-tools/utils'
 import { CYBERSPACE_RELAY, publish, publishMany } from './relay'
 import { confirmChainEvents } from './chains'
 import { noteChainHolders } from './chainHolders'
-import { chainLanded } from './chainStore'
+import { chainLanded, onReleased } from './chainStore'
 import type { NostrEvent } from './events'
 import { chainFacts, gateAfter, maySend } from './release'
 import { newestEventOnRelays, noteStaleFormatStuck, retireStaleFormat, useCyberspace } from '../store/useCyberspace'
@@ -275,6 +275,8 @@ async function retryCanonical(): Promise<void> {
 export function startPublisher(): void {
   if (started) return
   started = true
+  // Actions held back until a commit or the relays answered are free: the drain goes on, behind the same gate.
+  onReleased(() => { if (maySend(useCyberspace.getState(), released)) void pump() })
   // What a reload left waiting for the canonical relay is asked for again.
   restorePending()
 

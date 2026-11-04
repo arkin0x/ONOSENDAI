@@ -19,6 +19,7 @@ import { getEventHash, verifyEvent, type VerifiedEvent } from 'nostr-tools/pure'
 import { request } from '../idb'
 import type { NostrEvent } from '../events'
 import { carried, countRow, inTransaction } from './store'
+import type { ChainVerdict } from './chainVerdicts'
 import { BUDGET_KEY, CHAINS, EMPTY_BUDGET, EVENTS, META, PARTED, eventOf, nip01Rank, rowOf, type BudgetTotals, type EventRow, type Nip01Flag } from './schema'
 
 /** The small record of one identity's chain. */
@@ -34,6 +35,8 @@ export interface ChainRecord {
   savedAt: number
   held: boolean
   stats: Record<string, unknown>
+  /** Where the chain's verdicts stand (chainVerdicts.ts): it names the head it was reached at, so a move leaves it honest. */
+  verdict?: ChainVerdict
 }
 
 /** One action as a commit or a copy hands it in. */
@@ -152,7 +155,7 @@ export async function commitChain(db: IDBDatabase, c: ChainCommit, now = Date.no
     // A commit with no change from a tab behind the head (its acknowledgement
     // arrived after another tab moved) leaves the record to the chain's own tab.
     if (changed || at === c.headId) {
-      const next: ChainRecord = { pubkey: c.pubkey, own: true, spawnId: c.spawnId, headId: c.headId, length: c.length, generation, savedAt: c.savedAt, held: c.held, stats: c.stats }
+      const next: ChainRecord = { ...record, pubkey: c.pubkey, own: true, spawnId: c.spawnId, headId: c.headId, length: c.length, generation, savedAt: c.savedAt, held: c.held, stats: c.stats }
       chains.put(next)
     }
     return { status: 'ok', changed, repeated: wantsChange && already, generation }

@@ -691,7 +691,8 @@ async function publishOnce(listed: string[], event: NostrEvent): Promise<Publish
   // retry does not ask the signer again over a fresh socket (review of #570).
   const why = (r: PromiseSettledResult<string>, i: number): string | null => {
     const f = failed(r)
-    return f !== null && r.status === 'rejected' && signerHolds(relays[i]) ? AUTH_STALLED : f
+    // A socket that took the EVENT and never said OK is the socket, not the signer: retried as before.
+    return f !== null && r.status === 'rejected' && !/publish timed out/.test(f) && signerHolds(relays[i]) ? AUTH_STALLED : f
   }
   const reason = results.map(why).find(Boolean)
   return { ok: false, reason: reason || 'no relay accepted it' }

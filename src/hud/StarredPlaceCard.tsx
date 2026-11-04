@@ -25,8 +25,9 @@ export function viewStarred(place: StarredPlace): void {
   const position = placePosition(place.input)
   if (!position) return
   const cs = useCyberspace.getState()
-  cs.focusOn(position, place.plane, placeName(place), place.scaleExp, true, sceneLabel(place) !== null)
-  if (place.plane === 0 && onEarthSurface(position)) cs.dropPin(position, placeName(place), place.scaleExp)
+  const named = sceneLabel(place) !== null
+  cs.focusOn(position, place.plane, placeName(place), place.scaleExp, true, named)
+  if (place.plane === 0 && onEarthSurface(position)) cs.dropPin(position, placeName(place), place.scaleExp, named)
 }
 
 export function StarredPlaceCard(): JSX.Element | null {

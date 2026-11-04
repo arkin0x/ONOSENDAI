@@ -278,7 +278,7 @@ export function ViewAtPanel(): JSX.Element {
     // coordinate or a triple of axes that is not on the ground gets none,
     // and leaves any standing pin alone.
     if (target.plane === 0 && onEarthSurface(target.position)) {
-      useCyberspace.getState().dropPin(target.position, target.label, target.scaleExp)
+      useCyberspace.getState().dropPin(target.position, target.label, target.scaleExp, named)
     }
     const next = rememberView(recent, { input: canonicalViewAt(typed), label: target.label, plane: target.plane })
     setRecent(next)

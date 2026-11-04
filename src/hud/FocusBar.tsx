@@ -24,14 +24,16 @@ export const FREE_VIEW_LABEL = 'A COORD'
  * only that it is on a coordinate, not which: the pad moves it, and the axes
  * made the chip too long (arkinox, 2026-11-02). Unless the view has a name,
  * a starred place or a person (arkinox, 2026-11-03, ruled): then the name,
- * for as long as the cursor is still on that place. Once the pad drives it
- * off, the name would be wrong, so it is A COORD again.
+ * for as long as the cursor is on the very place the name was given for, in
+ * its plane (CyberFocus.named). Driven off it, re-anchored past it or turned
+ * to the other plane, it is A COORD again.
  */
 export function viewingLabel(focus: CyberFocus | null, cursor: Position, plane: number): string | null {
   if (focus === null) return null
   if (!focus.drive) return focus.label
-  const onIt = focus.position.x === cursor.x && focus.position.y === cursor.y && focus.position.z === cursor.z && focus.plane === plane
-  return focus.named && onIt && focus.label.trim() !== '' ? focus.label : FREE_VIEW_LABEL
+  const at = focus.named
+  const onIt = at !== undefined && at.position.x === cursor.x && at.position.y === cursor.y && at.position.z === cursor.z && at.plane === plane
+  return onIt && focus.label.trim() !== '' ? focus.label : FREE_VIEW_LABEL
 }
 
 export function FocusBar(): JSX.Element | null {

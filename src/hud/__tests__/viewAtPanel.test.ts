@@ -54,6 +54,7 @@ import { useStarred } from '../../store/useStarred'
 import { placeHex } from '../../lib/coordRoute'
 import { RECENT_VIEWS_KEY } from '../../lib/viewAt'
 import { placeInput } from '../../lib/starred'
+import { formatLatLonDeg } from '../../lib/earthSurface'
 
 function nameOf(k: ReactElement): string {
   const inner = k.type === PanelSlot ? (k as ReactElement<{ children: ReactElement }>).props.children : k
@@ -217,7 +218,7 @@ describe('VIEW A COORDINATE, RECENT and STARRED PLACES moved to View', () => {
       onGo(place, { position: { x: 4n, y: 5n, z: 6n }, plane: 0, label: nickname ?? '4, 5, 6' })
     }
     go('ROOFTOP')
-    expect(cs().focus).toMatchObject({ drive: true, label: 'ROOFTOP', named: true })
+    expect(cs().focus).toMatchObject({ drive: true, label: 'ROOFTOP', named: { position: { x: 4n, y: 5n, z: 6n }, plane: 0 } })
     expect(cs().cursor).toEqual({ x: 4n, y: 5n, z: 6n })
     expect(viewingLabel(cs().focus, cs().cursor, cs().anchorPlane)).toBe('ROOFTOP')
     go()
@@ -257,10 +258,47 @@ describe('the VIEWING chip (arkinox, 2026-11-03, ruled)', () => {
   })
 
   it('a pin for a place found by name reads the name; a pin for typed numbers reads A COORD', () => {
-    cs().dropPin({ x: 7n, y: 8n, z: 9n }, 'PARIS')
+    cs().dropPin({ x: 7n, y: 8n, z: 9n }, 'PARIS', undefined, true)
     cs().viewPin()
     expect(label()).toBe('PARIS')
     cs().dropPin({ x: 7n, y: 8n, z: 9n }, '48.8566, 2.3522')
+    cs().viewPin()
+    expect(label()).toBe(FREE_VIEW_LABEL)
+  })
+
+  // Review of #591, P1 to P3: the name is the place's, not the view's.
+  it('P1: driven 25 cells off a named place, past a re-anchor, the name does not come back', () => {
+    viewStarred({ input: placeInput({ x: 4n, y: 5n, z: 6n }), label: '4, 5, 6', plane: 0, at: 1, nickname: 'ROOFTOP' })
+    expect(label()).toBe('ROOFTOP')
+    const seen: string[] = []
+    for (let i = 0; i < 25; i++) { cs().moveCursor({ axis: 'x', dir: 1 }); seen.push(String(label())) }
+    // The view re-anchored on the way (rideView moved focus.position to the cursor).
+    expect(cs().focus?.position).toEqual(cs().cursor)
+    expect(seen.every((l) => l === FREE_VIEW_LABEL)).toBe(true)
+    // Back on the place, the name is back.
+    for (let i = 0; i < 25; i++) cs().moveCursor({ axis: 'x', dir: -1 })
+    expect(label()).toBe('ROOFTOP')
+  })
+
+  it('P1, flying: a long fly re-anchors many times and the name never flashes', () => {
+    viewStarred({ input: placeInput({ x: 4n, y: 5n, z: 6n }), label: '4, 5, 6', plane: 0, at: 1, nickname: 'ROOFTOP' })
+    const plane = cs().anchorPlane
+    const seen = new Set<string | null>()
+    for (let i = 1; i <= 200; i++) { cs().aimView({ x: 4n + BigInt(i), y: 5n, z: 6n }, plane); seen.add(label()) }
+    expect([...seen]).toEqual([FREE_VIEW_LABEL])
+  })
+
+  it('P2: turned to the other plane on a named place, it reads A COORD', () => {
+    viewStarred({ input: placeInput({ x: 4n, y: 5n, z: 6n }), label: '4, 5, 6', plane: 0, at: 1, nickname: 'ROOFTOP' })
+    cs().setPlane(1)
+    expect(cs().anchorPlane).toBe(1)
+    expect(label()).toBe(FREE_VIEW_LABEL)
+    cs().setPlane(0)
+    expect(label()).toBe('ROOFTOP')
+  })
+
+  it('P3: a pin dropped by clicking Earth reads A COORD', () => {
+    cs().dropPin({ x: 7n, y: 8n, z: 9n }, `EARTH · ${formatLatLonDeg(48.8566, 2.3522)}`)
     cs().viewPin()
     expect(label()).toBe(FREE_VIEW_LABEL)
   })

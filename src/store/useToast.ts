@@ -23,6 +23,8 @@ export interface Toast {
    * block a /C/ link named should not vanish before it is read).
    */
   sticky?: boolean
+  /** A RELOAD button: for a state only a fresh load gets out of (a chain held, a saved chain cleared). */
+  reload?: boolean
   at: number
 }
 

@@ -1,12 +1,13 @@
 /**
- * viewPanel.test.ts - the View panel, the one home of the scene's switches
+ * viewPanel.test.ts - the Settings panel (titled View until arkinox renamed
+ * it, 2026-11-02), the one home of the scene's switches
  * (arkinox, 2026-10-09: toggles "in the style of the Proof Chain panel's show
  * chain trail toggle, not buttons. Each on its own row, each with a title and
  * short subtitle in gray", then moved together into a View panel).
  *
- * Eight Field rows with a Switch each: Terrain dots, hX boxes, Hide avatar in
- * WALK, Look sphere in WALK, Gravity in WALK, Chain trail, Region keys and
- * Headlamp. Each
+ * Nine Field rows with a Switch each: Terrain dots, hX boxes, Hide avatar in
+ * WALK, Look sphere in WALK, Gravity in WALK, Chain trail, Region keys,
+ * Headlamp and Sound spheres. Each
  * drives the flag its old control drove and is remembered
  * the same way. The old controls are gone: no chips under Movement proof, no
  * trail switch in Proof chain, no checkbox in the Region keys list.
@@ -92,17 +93,19 @@ const ROWS: Array<[string, string, string]> = [
   ['view-hx-boxes', '<span class="view__hx">h</span>X boxes', 'The math barriers where moving costs increase.'],
   ['view-walk-avatar', 'Hide avatar in WALK', 'Walk without your own avatar around the camera.'],
   ['view-walk-look', 'Look sphere in WALK', 'A ball above the menu button to drag and look around.'],
-  ['view-walk-gravity', 'Gravity in WALK', 'Fall, land and jump. Z.'],
+  ['view-walk-gravity', 'Gravity in WALK', 'Fall, land and jump.'],
   ['view-chain-trail', 'Chain trail', 'The red line of your movement history.'],
   ['view-region-keys', 'Region keys', 'Green cages on the regions you hold keys for.'],
   ['view-headlamp', 'Headlamp', 'Light shards from your view so their shape and depth show.'],
+  ['view-audio-spheres', 'Sound spheres', 'Blue rings where a hidden sound plays at full volume.'],
 ]
 
-describe('the View panel', () => {
-  it('is a panel titled View with eight switches, one to a row, each a title and a gray subtitle, in order', () => {
+describe('the Settings panel', () => {
+  it('is a panel titled Settings with nine switches, one to a row, each a title and a gray subtitle, in order', () => {
     const html = view()
     expect(html).toMatch(/^<section class="panel panel--view">/)
-    expect(html).toContain('<h2>View</h2>')
+    expect(html).toContain('<h2>Settings</h2>')
+    expect(html).not.toContain('<h2>View</h2>')
     expect(html.match(/class="ui-field"/g)).toHaveLength(ROWS.length)
     expect(html.match(/role="switch"/g)).toHaveLength(ROWS.length)
     let at = 0
@@ -121,14 +124,14 @@ describe('the View panel', () => {
 
     viewSwitch('view-terrain-dots').props.onCheckedChange(false)
     expect(useLayers.getState()).toMatchObject({ dots: false, boxes: true })
-    expect(JSON.parse(localStorage.getItem(LAYERS_KEY) ?? 'null')).toEqual({ dots: false, boxes: true, walkAvatarHidden: false, walkLookSphere: true, headlamp: true })
+    expect(JSON.parse(localStorage.getItem(LAYERS_KEY) ?? 'null')).toEqual({ dots: false, boxes: true, walkAvatarHidden: false, walkLookSphere: true, headlamp: true, audioSpheres: true })
     expect(switchTag(view(), 'view-terrain-dots')).toContain('aria-checked="false"')
     expect(switchTag(view(), 'view-hx-boxes')).toContain('aria-checked="true"')
 
     viewSwitch('view-hx-boxes').props.onCheckedChange(false)
     viewSwitch('view-terrain-dots').props.onCheckedChange(true)
     expect(useLayers.getState()).toMatchObject({ dots: true, boxes: false })
-    expect(JSON.parse(localStorage.getItem(LAYERS_KEY) ?? 'null')).toEqual({ dots: true, boxes: false, walkAvatarHidden: false, walkLookSphere: true, headlamp: true })
+    expect(JSON.parse(localStorage.getItem(LAYERS_KEY) ?? 'null')).toEqual({ dots: true, boxes: false, walkAvatarHidden: false, walkLookSphere: true, headlamp: true, audioSpheres: true })
     expect(viewSwitch('view-hx-boxes').props.checked).toBe(false)
 
     viewSwitch('view-hx-boxes').props.onCheckedChange(true)
@@ -167,6 +170,23 @@ describe('the View panel', () => {
     viewSwitch('view-headlamp').props.onCheckedChange(true)
     expect(useLayers.getState().headlamp).toBe(true)
     expect(JSON.parse(localStorage.getItem(LAYERS_KEY) ?? 'null')).toMatchObject({ headlamp: true })
+  })
+
+  it('Gravity in WALK says no key in its subtitle (arkinox, 2026-11-02: no trailing Z)', () => {
+    expect(view()).toContain('<span class="ui-field__hint">Fall, land and jump.</span>')
+    expect(view()).not.toContain('jump. Z.')
+  })
+
+  it('Sound spheres starts on and drives the layer store, remembered on this device', () => {
+    expect(useLayers.getState().audioSpheres).toBe(true)
+    expect(switchTag(view(), 'view-audio-spheres')).toContain('aria-checked="true"')
+    viewSwitch('view-audio-spheres').props.onCheckedChange(false)
+    expect(useLayers.getState().audioSpheres).toBe(false)
+    expect(JSON.parse(localStorage.getItem(LAYERS_KEY) ?? 'null')).toMatchObject({ audioSpheres: false })
+    expect(switchTag(view(), 'view-audio-spheres')).toContain('aria-checked="false"')
+    viewSwitch('view-audio-spheres').props.onCheckedChange(true)
+    expect(useLayers.getState().audioSpheres).toBe(true)
+    expect(JSON.parse(localStorage.getItem(LAYERS_KEY) ?? 'null')).toMatchObject({ audioSpheres: true })
   })
 
   it('Gravity in WALK starts off and drives the walk, remembered on this device', () => {

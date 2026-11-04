@@ -221,8 +221,8 @@ async function gatherChain<T>(
 
 /**
  * A chain is read from every configured relay, even one that hung: it may hold
- * a newer move (relay.ts skipHung). And a relay still waiting on the signer is
- * not an empty chain, so a fetch rejects rather than say so.
+ * a newer move (relay.ts skipHung). And a relay the signer kept from being
+ * read (AUTH_STALLED) is not an empty chain, so a fetch rejects rather than say so.
  */
 const CHAIN_READ = { evenHung: true, failIfStalled: true }
 
@@ -237,7 +237,7 @@ const CHAIN_READ = { evenHung: true, failIfStalled: true }
  * Rejects with ChainGapError when a hole could not be filled.
  */
 export async function fetchChainEvents(pubkey: string, knownSpawnId?: string, have: NostrEvent[] = [], since?: number): Promise<NostrEvent[]> {
-  const { got, whole } = await gatherChain((f) => query(f, CHAIN_READ), (e) => e, mergeEvents, pubkey, knownSpawnId, have, ownEvents, since)
+  const { got, whole } = await gatherChain((f) => query(f, { ...CHAIN_READ, offThread: true }), (e) => e, mergeEvents, pubkey, knownSpawnId, have, ownEvents, since)
   if (!whole) throw new ChainGapError(got)
   return got
 }
@@ -362,8 +362,8 @@ export async function confirmChainEvents(
     noteHoldersFrom(pubkey, got)
     if (!whole) return null
     const merged = mergeAnswers(got)
-    // A holder, the canonical relay among them, behind a signer that has not answered may hold a newer move. Not read, it says nothing, so the move waits.
-    if (got.some((a) => waitFor.includes(a.url) && a.outcome === 'refused' && a.reason === AUTH_STALLED)) return extendsChain(merged, have) ? merged : null
+    // The canonical relay, or a relay holding this chain, that the signer kept from being read may hold a newer move. Not read, it says nothing, so the move waits.
+    if (got.some((a) => (a.url === canonical || waitFor.includes(a.url)) && a.outcome === 'refused' && a.reason === AUTH_STALLED)) return extendsChain(merged, have) ? merged : null
     if (got.some((a) => a.url === canonical && a.outcome === 'answered')) return merged
     const holdsChain = (a: RelayAnswer): boolean => opts.anchorId === undefined || a.events.some((e) => e.id === opts.anchorId)
     if (got.some((a) => a.url !== canonical && a.outcome === 'answered' && holdsChain(a))) return merged

@@ -6,12 +6,19 @@
  */
 
 import { useEffect } from 'react'
-import { setProofHandler } from '../lib/workers'
+import { preloadProofWorker, setProofHandler } from '../lib/workers'
 import { useCyberspace } from '../store/useCyberspace'
+
+const PRELOAD_DELAY_MS = 3000
 
 export function useProofListener(): void {
   useEffect(() => {
     setProofHandler((msg) => useCyberspace.getState().applyProofMessage(msg))
-    return () => setProofHandler(null)
+    // After the start-up burst: nothing can hop in the first seconds anyway.
+    const preload = setTimeout(preloadProofWorker, PRELOAD_DELAY_MS)
+    return () => {
+      clearTimeout(preload)
+      setProofHandler(null)
+    }
   }, [])
 }

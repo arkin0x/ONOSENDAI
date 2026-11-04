@@ -11,8 +11,8 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { MAX_COMMENT_LENGTH, commentsFilter, itemParent, openComments, sealedComment, threadComments, type Comment, type CommentParent, type CommentSubject } from '../lib/comments'
-import type { NostrEvent } from '../lib/events'
-import { publish, query } from '../lib/relay'
+import { hexToBytes, type NostrEvent } from '../lib/events'
+import { onCanonicalSignIn, publish, queryChecked, type ReadTrouble } from '../lib/relay'
 import { regionKeyAt } from '../lib/shardCrypto'
 import { MAX_COMPUTE_HEIGHT, useCyberspace } from '../store/useCyberspace'
 import { useMutes } from '../store/useMutes'
@@ -22,6 +22,8 @@ export interface CommentsState {
   comments: Comment[]
   loading: boolean
   error: string | null
+  /** Why the canonical relay gave the last read nothing, if it did not answer (it is not "no comments"). */
+  trouble: ReadTrouble | null
   posting: boolean
   /** Post a comment on the item, or a reply to one of its comments. Resolves true when a relay accepted it. */
   post: (text: string, parent?: CommentParent) => Promise<boolean>
@@ -33,24 +35,29 @@ export function useComments(subject: CommentSubject | null): CommentsState {
   const [opened, setOpened] = useState<Map<string, string>>(new Map())
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [trouble, setTrouble] = useState<ReadTrouble | null>(null)
   const [posting, setPosting] = useState(false)
   const [tick, setTick] = useState(0)
   const key = subject ? `${subject.author}:${subject.lookupId}:${subject.itemId}` : null
   // The region key is a function of the bag (its place and height), so it is derived once per subject.
+  // In a room it is the room key, which the find already carries.
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  const regionKey = useMemo(() => (subject ? regionKeyAt(subject.at, subject.height, MAX_COMPUTE_HEIGHT).key : null), [key])
+  const regionKey = useMemo(() => (subject ? (subject.roomKeyHex ? hexToBytes(subject.roomKeyHex) : regionKeyAt(subject.at, subject.height, MAX_COMPUTE_HEIGHT).key) : null), [key])
 
   useEffect(() => {
     if (!subject || !regionKey) return
     let alive = true
     setLoading(true); setError(null); setEvents([]); setOpened(new Map())
-    query(commentsFilter(subject))
-      .then(async (found) => { const words = await openComments(found, regionKey); if (alive) { setEvents(found); setOpened(words) } })
+    queryChecked(commentsFilter(subject))
+      .then(async ({ events: found, trouble: why }) => { const words = await openComments(found, regionKey); if (alive) { setEvents(found); setOpened(words); setTrouble(why) } })
       .catch((err: unknown) => { if (alive) setError(err instanceof Error ? err.message : String(err)) })
       .finally(() => { if (alive) setLoading(false) })
     return () => { alive = false }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [key, tick])
+
+  // Refused for want of AUTH: read again once the relay signs this visit in.
+  useEffect(() => (trouble ? onCanonicalSignIn(() => setTick((t) => t + 1)) : undefined), [trouble])
 
   const post = useCallback(async (text: string, parent?: CommentParent): Promise<boolean> => {
     if (!subject || !regionKey) return false
@@ -76,5 +83,5 @@ export function useComments(subject: CommentSubject | null): CommentsState {
   const muted = useMutes((s) => s.muted)
   const me = useCyberspace((s) => s.identity.pubkey)
   const comments = subject ? pruneThread(threadComments(events, subject, opened), muted, me) : []
-  return { comments, loading, error, posting, post, refresh: () => setTick((t) => t + 1) }
+  return { comments, loading, error, trouble, posting, post, refresh: () => setTick((t) => t + 1) }
 }

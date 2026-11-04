@@ -23,7 +23,8 @@ import {
 } from '../lib/terrainCache'
 import { clearRunQueue } from '../lib/workers'
 import { UNKNOWN } from '../workers/terrain.worker'
-import { CURSOR_SETTLE_MS } from './useViewWindow'
+import { settleWait } from './useViewWindow'
+import { flyDir } from '../lib/viewFly'
 import type { Position } from '../lib/space'
 import type { ViewWindow } from './useViewWindow'
 import type { Plane } from 'cyberspace-core'
@@ -258,12 +259,16 @@ export function useTerrainVolume(win: ViewWindow, axes: ViewAxes, suspend = fals
     const unsubMove = useCyberspace.subscribe((s, prev) => {
       if (s.cursor !== prev.cursor) lastMove = performance.now()
     })
+    // While VIEW flies, the data catches up every FLY_REFRESH_MS instead (settleWait).
+    let lastFlush = -Infinity
     const fire = (): void => {
-      const since = performance.now() - lastMove
-      if (since < CURSOR_SETTLE_MS) {
-        flushHandle.current = window.setTimeout(fire, CURSOR_SETTLE_MS - since)
+      const now = performance.now()
+      const wait = settleWait(now - lastMove, now - lastFlush, flyDir() !== 0)
+      if (wait > 0) {
+        flushHandle.current = window.setTimeout(fire, wait)
         return
       }
+      lastFlush = now
       flushHandle.current = null
       setDataVersion((v) => v + 1)
     }

@@ -54,7 +54,7 @@ afterEach(() => {
 
 describe('the version file', () => {
   it('is the build id and the epoch this build requires', () => {
-    expect(versionFileOf('abc123')).toEqual({ build: 'abc123', minChainEpoch: CHAIN_RULES_EPOCH })
+    expect(versionFileOf('abc123')).toEqual({ build: 'abc123', minChainEpoch: CHAIN_RULES_EPOCH, chainStore: 2 })
     expect(VERSION_FILE).toBe('version.json')
   })
 
@@ -92,7 +92,7 @@ describe('the look before a move', () => {
     expect(await mayMove()).toBe(false)
     expect(movementBlocked()).toBe(true)
     expect(useVersionGate.getState().verdict).toBe('blocked')
-    expect(useVersionGate.getState().deployed).toEqual({ build: 'cutover-build', minChainEpoch: CHAIN_RULES_EPOCH + 1 })
+    expect(useVersionGate.getState().deployed).toMatchObject({ build: 'cutover-build', minChainEpoch: CHAIN_RULES_EPOCH + 1 })
   })
 
   it('a fetch error (offline): allowed', async () => {

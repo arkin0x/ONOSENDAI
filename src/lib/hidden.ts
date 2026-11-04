@@ -44,6 +44,8 @@
  * and finished events only.
  */
 
+import { doorHeightOf, isDoor } from './looks'
+import { doorRefusal } from './doors'
 import { getEventHash, getPublicKey } from 'nostr-tools/pure'
 import { verifyOnce } from './verifiedSigs'
 import { coordToXyz, hexToCoord, type Plane } from 'cyberspace-core'
@@ -51,6 +53,7 @@ import { bytesToHex, hexToBytes, positionHex, type EventTemplate, type NostrEven
 import { fromPayload, toPayload, type ShardModel } from 'sno-core/shards'
 import { withAuthoredConstrain } from './walkConstrain'
 import { keepOwnTable } from './carried'
+import { signalRescan } from './rescanSignal'
 import { creditTags, type Credit } from 'sno-core/feed'
 import { ALGO, decryptForRegion, encryptForRegion } from './shardCrypto'
 import { hintFits, hintTags, parseHint, type HintHeights } from './hint'
@@ -246,6 +249,14 @@ export interface ChestItem {
   requires: string
   /** The NIP-44 v2 payload, base64, as the chest carries it. */
   payload: string
+  /**
+   * The chest's `look` tags exactly as they were read (DECK-0004 §3.6), so
+   * every reseal and move writes them back unchanged; lib/looks.ts lookTagsOf
+   * reads them. Absent: it wears the built-in.
+   */
+  look?: string[][]
+  /** A door's height, from its `door` tag (DECK-0004 §3.7.1). Absent on a chest. */
+  door?: number
 }
 
 const HEX_64 = /^[0-9a-f]{64}$/
@@ -320,7 +331,11 @@ export function chestItemOf(ev: Pick<NostrEvent, 'kind' | 'content' | 'tags'>): 
   const lock = ev.tags.find((t) => Array.isArray(t) && t[0] === 'lock')
   if (!lock || typeof lock[1] !== 'string' || typeof lock[2] !== 'string' || !HEX_64.test(lock[1]) || !HEX_64.test(lock[2])) return null
   if (!ev.content) return null
-  return { name: nameOf(ev.tags, 'chest'), lockPubkey: lock[1], senderPubkey: lock[2], requires: capped(ev.tags, 'requires', MAX_ITEM_NAME), payload: ev.content }
+  // A door whose `door` tag lacks a well-formed height is dropped, never read as a chest (DECK-0004 §3.7.1).
+  if (doorHeightOf(ev.tags) === 'malformed') return null
+  const look = ev.tags.filter((t) => Array.isArray(t) && t[0] === 'look' && typeof t[1] === 'string')
+  const door = doorHeightOf(ev.tags)
+  return { name: nameOf(ev.tags, 'chest'), lockPubkey: lock[1], senderPubkey: lock[2], requires: capped(ev.tags, 'requires', MAX_ITEM_NAME), payload: ev.content, ...(look.length ? { look } : {}), ...(typeof door === 'number' ? { door } : {}) }
 }
 
 /** What an inline item is, by its kind: the part of a Hidden that is not about where or who. */
@@ -453,6 +468,17 @@ export interface Hidden {
    * against the bag's signer or dropped.
    */
   claim?: true
+  /**
+   * Set when this was read from a room bag (DECK-0004 §3.7.2): the door whose
+   * room it stands in. Its `lookupId` and `keyHex` are then the room bag's
+   * and the room key, and its `height` the room's.
+   */
+  room?: { doorId: string }
+  /**
+   * When the bag it was read from was written: what says a bag read now is newer
+   * than something this device thinks is in it (useShards pruneGoneDoors).
+   */
+  bagAt?: number
 }
 
 /**
@@ -529,6 +555,36 @@ export function editedTemplate(next: EventTemplate, previous: Pick<NostrEvent, '
   return { ...next, tags: [...(at ? [at] : []), ['d', lineage], ...kept, ...protect] }
 }
 
+/**
+ * MOVE of an item carried inline that is not a shard (a key item, a message,
+ * hidden audio): the same item at a new place. Its kind, content and every
+ * tag stay exactly as the version it replaces had them, so nothing about it
+ * changes but where it is; editedTemplate gives it the new `C` and the
+ * lineage `d`. `replace` names tags the move sets afresh (hidden audio's
+ * `fade`, clamped to the room it has at the new place): `tags` stand where
+ * the first old one of those names stood, or at the end when there was
+ * none, and the old ones go.
+ */
+export function movedTemplate(
+  previous: Pick<NostrEvent, 'id' | 'kind' | 'tags' | 'content'>,
+  at: Position,
+  plane: Plane,
+  createdAt: number,
+  replace: { names: readonly string[]; tags: readonly string[][] } = { names: [], tags: [] },
+): EventTemplate {
+  const fresh = replace.tags.map((t) => [...t])
+  let placed = false
+  const kept = previous.tags.flatMap((t) => {
+    if (!replace.names.includes(t[0])) return [t]
+    if (placed) return []
+    placed = true
+    return fresh
+  })
+  const next: EventTemplate = { kind: previous.kind, created_at: createdAt, content: previous.content, tags: [['C', positionHex(at, plane)], [...PROTECTED_TAG]] }
+  const edited = editedTemplate(next, { id: previous.id, kind: previous.kind, tags: kept })
+  return placed ? edited : { ...edited, tags: [...edited.tags, ...fresh] }
+}
+
 /** The `d` of an addressable event, or ''. */
 export function dOf(ev: Pick<NostrEvent, 'tags'>): string {
   return ev.tags.find((t) => t[0] === 'd')?.[1] ?? ''
@@ -580,8 +636,9 @@ export function keyInnerTemplate(key: KeyItem, at: Position, plane: Plane, creat
  * The inner chest event template (kind 3341), signed by the hider (B1 §2.2).
  * The content is the sealed payload (lib/chests.ts sealEntries); `lock` names
  * the public key it is sealed to and the one-time sender's public key, and
- * `requires` is the hider's label of what opens it. `-` is NIP-70, as on
- * every item. A chest stays signed: its signature is what vouches for the
+ * `requires` is the hider's label of what opens it, and `look` what it is
+ * drawn as, closed and open (DECK-0004 §3.6), carried as read. On a door,
+ * `door` gives its height (§3.7.1). `-` is NIP-70, as on every item. A chest stays signed: its signature is what vouches for the
  * messages sealed inside it, which are rumors (lib/chests.ts readContents).
  */
 export function chestInnerTemplate(chest: ChestItem, at: Position, plane: Plane, createdAt: number): EventTemplate {
@@ -589,7 +646,7 @@ export function chestInnerTemplate(chest: ChestItem, at: Position, plane: Plane,
     kind: CHEST_KIND,
     created_at: createdAt,
     content: chest.payload,
-    tags: [['C', positionHex(at, plane)], ['title', chest.name.slice(0, MAX_ITEM_NAME)], ['lock', chest.lockPubkey, chest.senderPubkey], ['requires', chest.requires], [...PROTECTED_TAG]],
+    tags: [['C', positionHex(at, plane)], ['title', chest.name.slice(0, MAX_ITEM_NAME)], ['lock', chest.lockPubkey, chest.senderPubkey], ['requires', chest.requires], ...(chest.look ?? []).map((t) => [...t]), ...(chest.door !== undefined ? [['door', String(chest.door)]] : []), [...PROTECTED_TAG]],
   }
 }
 
@@ -725,16 +782,17 @@ export const DEFAULT_BAG_SETTINGS: BagSettings = { heightTag: true, hint: null, 
  * keys, chests, hidden audio, and the cashu tokens and nonfungible.cash claim links (NFTs,
  * lib/nftLink) written in its messages.
  */
-export interface BagContents { shard: number; message: number; key: number; chest: number; cashu: number; nft: number; audio: number }
+export interface BagContents { shard: number; message: number; key: number; chest: number; cashu: number; nft: number; audio: number; door: number }
 
 export function bagContents(inners: readonly (BagEntry | ChatRumor)[]): BagContents {
-  const out: BagContents = { shard: 0, message: 0, key: 0, chest: 0, cashu: 0, nft: 0, audio: 0 }
+  const out: BagContents = { shard: 0, message: 0, key: 0, chest: 0, cashu: 0, nft: 0, audio: 0, door: 0 }
   for (const e of inners) {
     if (isReference(e)) { out.shard++; continue }
     if (e.kind === SHARD_KIND) out.shard++
     else if (e.kind === MESSAGE_KIND) { out.message++; out.cashu += cashuTokensAsWritten(e.content).length; out.nft += countNftLinks(e.content) }
     else if (e.kind === KEY_KIND) out.key++
-    else if (e.kind === CHEST_KIND) out.chest++
+    // A door counts as `door`, never as `chest` (spec §7.7, #82); what its room holds is never counted.
+    else if (e.kind === CHEST_KIND) { if (isDoor(e.tags)) out.door++; else out.chest++ }
     else if (e.kind === AUDIO_KIND) out.audio++
   }
   return out
@@ -743,9 +801,10 @@ export function bagContents(inners: readonly (BagEntry | ChatRumor)[]): BagConte
 /**
  * The order a bag's `contents` tags are written in, and read in. Hidden audio
  * (DECK-0007) came last, after the money kinds, so every bag written before
- * it keeps the order spec §7.7 gives.
+ * it keeps the order spec §7.7 gives; `door` (DECK-0004 §3.7, spec #82)
+ * after it, for the same reason.
  */
-export const CONTENTS_KINDS = ['shard', 'message', 'key', 'chest', 'cashu', 'nft', 'audio'] as const
+export const CONTENTS_KINDS = ['shard', 'message', 'key', 'chest', 'cashu', 'nft', 'audio', 'door'] as const
 
 /**
  * The public tags a bag's contents settings write (arkinox, 2026-10-18:
@@ -918,10 +977,10 @@ export function heightHint(ev: Pick<NostrEvent, 'tags'>): number | null {
 }
 
 /** What every item of one bag shares: its region's height and its public settings. */
-interface BagFacts { height: number; bag: BagSettings }
+interface BagFacts { height: number; bag: BagSettings; room?: { doorId: string } }
 
 /** One inner event of a bag -> a Hidden, or null if it does not verify. `keyHex` is the key that opened the bag. */
-function fromInner(inner: Rumor, outer: NostrEvent, keyHex: string, facts: BagFacts): Hidden | null {
+function fromInner(inner: Rumor, outer: NostrEvent, keyHex: string, facts: BagFacts, heightKnown = true, origin?: RegionOrigin): Hidden | null {
   // By the same key that wrapped it, and signed, or a message sealed as a
   // rumor (innerAuthentic).
   if (!innerAuthentic(inner, outer.pubkey)) return null
@@ -934,6 +993,7 @@ function fromInner(inner: Rumor, outer: NostrEvent, keyHex: string, facts: BagFa
     inner,
     keyHex,
     bagId: outer.id,
+    bagAt: outer.created_at,
     lookupId: tag(outer, 'd') ?? '',
     author: outer.pubkey,
     at: { x, y, z },
@@ -942,6 +1002,17 @@ function fromInner(inner: Rumor, outer: NostrEvent, keyHex: string, facts: BagFa
     createdAt: inner.created_at,
   }
 
+  // A door must stand where it was found (DECK-0004 §3.7.1): no higher than
+  // its bag, and inside a room lower than the room. One that breaks either is
+  // dropped, never read as a chest.
+  // A bag of no known height has no bound to hold it to; the same for its place.
+  if (inner.kind === CHEST_KIND && isDoor(inner.tags)) {
+    if (heightKnown && doorRefusal(inner.tags, facts.height, facts.room ? facts.height : null)) return null
+    if (heightKnown && origin) {
+      const s = BigInt(facts.height)
+      if ((x >> s) !== (origin.at.x >> s) || (y >> s) !== (origin.at.y >> s) || (z >> s) !== (origin.at.z >> s)) return null
+    }
+  } else if (inner.kind === CHEST_KIND && doorRefusal(inner.tags, facts.height, null)) return null
   // innerAuthentic held it to the bag's signer, so that is whose it is.
   const body = readItem(inner, outer.pubkey)
   return body ? { ...base, ...body } : null
@@ -999,7 +1070,7 @@ function noteReading(bagId: string, reading: BagReading): void {
  * opening, since a reference may open differently next time (a newer version
  * of the object, or one fetched that could not be before).
  */
-export async function unbag(outer: NostrEvent, regionKey: Uint8Array, resolve?: ResolveReference, origin?: RegionOrigin, height?: number, seen?: { references: number }): Promise<Hidden[]> {
+export async function unbag(outer: NostrEvent, regionKey: Uint8Array, resolve?: ResolveReference, origin?: RegionOrigin, height?: number, seen?: { references: number }, room?: { doorId: string }): Promise<Hidden[]> {
   const ct = ciphertextOf(outer)
   if (!ct) return []
   const json = await decryptForRegion(regionKey, ct)
@@ -1010,8 +1081,9 @@ export async function unbag(outer: NostrEvent, regionKey: Uint8Array, resolve?: 
   if (seen) seen.references = entries.filter(isReference).length
   const keyHex = bytesToHex(regionKey)
   const regionHeight = height ?? heightHint(outer) ?? 0
-  const facts: BagFacts = { height: regionHeight, bag: bagSettingsOf(outer, regionHeight) }
-  const out: (Hidden | null)[] = entries.map((entry) => (Array.isArray(entry) ? null : fromInner(entry as Rumor, outer, keyHex, facts)))
+  const facts: BagFacts = { height: regionHeight, bag: bagSettingsOf(outer, regionHeight), ...(room ? { room } : {}) }
+  const heightKnown = height !== undefined || heightHint(outer) !== null
+  const out: (Hidden | null)[] = entries.map((entry) => (Array.isArray(entry) ? null : fromInner(entry as Rumor, outer, keyHex, facts, heightKnown, origin)))
   // References are fetched a few at a time, and only so many per bag; an
   // entry that cannot be fetched or opened is a missing entry, dropped like
   // an item that fails to verify.
@@ -1029,6 +1101,57 @@ export async function unbag(outer: NostrEvent, regionKey: Uint8Array, resolve?: 
   const items = out.filter((h): h is Hidden => h !== null)
   noteReading(outer.id, { entries: entries.length, readable: items.length, opaque: false })
   return items
+}
+
+/**
+ * The objects references have opened to, so a scan that finds the same signed
+ * event does not decrypt and parse it again.
+ *
+ * A bag holding references is opened again at every scan, rightly: a reference
+ * may name a newer version now (lib/foundCache.ts). But what comes back is nearly
+ * always the same event, and a city is mostly references. Parsed again, each one
+ * was a new model with new arrays, so ShardMesh, which keys its geometry on those
+ * arrays, cut and uploaded it again too. An edit is a new event, so a new key.
+ *
+ * Bounded by the events' own size, sealed text included, least recently found
+ * first out, at the same bound as opened bags (foundCache OPENED_KEPT_CHARS).
+ * About 6 bytes of heap to a sealed character, so about 48 MB at most. Holds
+ * plaintext, so it goes with the identity (forgetParsedObjects).
+ */
+export const PARSED_KEPT_CHARS = 8 * 1024 * 1024
+let parsedBudget = PARSED_KEPT_CHARS
+const parsedObjects = new Map<string, { shard: ShardModel; size: number }>()
+let parsedChars = 0
+
+function parsedObject(key: string): ShardModel | undefined {
+  const hit = parsedObjects.get(key)
+  if (!hit) return undefined
+  // The most recently found goes last, so it is the last to go.
+  parsedObjects.delete(key)
+  parsedObjects.set(key, hit)
+  return hit.shard
+}
+
+function keepParsed(key: string, shard: ShardModel, size: number): void {
+  if (size > parsedBudget) return
+  const was = parsedObjects.get(key)
+  if (was) { parsedObjects.delete(key); parsedChars -= was.size }
+  parsedObjects.set(key, { shard, size })
+  parsedChars += size
+  for (const [k, v] of parsedObjects) {
+    if (parsedChars <= parsedBudget) break
+    parsedObjects.delete(k)
+    parsedChars -= v.size
+  }
+}
+
+/** Forget every object parsed, and say how many there were: on a change of identity, and in tests, where `budget` sets the bound. */
+export function forgetParsedObjects(budget: number = PARSED_KEPT_CHARS): number {
+  const n = parsedObjects.size
+  parsedObjects.clear()
+  parsedChars = 0
+  parsedBudget = budget
+  return n
 }
 
 /**
@@ -1055,8 +1178,13 @@ async function fromReference(ref: Reference, outer: NostrEvent, regionKey: Uint8
   // placed by reference (§3.1, §3.2: a LIVE LINK from the Shard Feed), whose
   // payload is its content as published.
   const enc = target.tags.find((t) => t[0] === 'encrypted')
+  // The same signed event under the same key opens to the same object.
+  const parsedKey = `${target.id}:${target.sig}:${keyHex}`
+  const kept = target.kind === OBJECT_KIND ? parsedObject(parsedKey) : undefined
   let plain: string | null
-  if (enc) {
+  if (kept) {
+    plain = ''
+  } else if (enc) {
     if (enc[1] !== ALGO || !enc[2]) return null
     plain = await decryptForRegion(regionKey, enc[2])
   } else {
@@ -1082,11 +1210,19 @@ async function fromReference(ref: Reference, outer: NostrEvent, regionKey: Uint8
     createdAt: target.created_at,
   }
   if (target.kind === OBJECT_KIND) {
+    if (kept) {
+      // No new table this time, so a part still missing needs telling to ask again.
+      if (kept.objects) signalRescan()
+      return { ...base, type: 'shard', shard: kept }
+    }
     let raw: unknown
     try { raw = JSON.parse(plain) } catch { return null }
     const shard = fromPayload(raw, target.id)
     if (!shard) return null
-    return { ...base, type: 'shard', shard: keepOwnTable(shard, target.pubkey) }
+    const own = keepOwnTable(shard, target.pubkey)
+    // Sealed, its size is in the tag: the content is only a short public preview.
+    keepParsed(parsedKey, own, (enc?.[2]?.length ?? 0) + target.content.length)
+    return { ...base, type: 'shard', shard: own }
   }
   if (target.kind === MESSAGE_KIND) {
     if (!plain) return null

@@ -4,8 +4,9 @@
  * nostr-tools pool, on a fake clock, with fake sockets and a fake signer.
  *
  * What would go wrong silently: nostr-tools never settles an AUTH whose signer
- * rejected, so a publish or a read waited forever. A plain timer on that wait
- * is worse. A relay read before its AUTH can answer with nothing, the self-check
+ * rejected, so a publish or a read waited forever (v2 bounds that wait since
+ * #581 and #600: the store's signWithin, and relay.ts signFailed). A bound
+ * alone is not enough. A relay read before its AUTH can answer with nothing, the self-check
  * reads that as "no chain", and the first move signs a rival spawn over a real
  * chain. And dropping the socket throws the AUTH away and prompts a person again.
  */
@@ -103,19 +104,26 @@ const net = vi.hoisted(() => {
   ;(globalThis as { WebSocket?: unknown }).WebSocket = FakeSocket
   return { sockets, events, rules, signer }
 })
-vi.mock('../../store/useCyberspace', () => ({
-  useCyberspace: {
-    getState: () => ({
-      signEvent: async (t: Record<string, unknown>) => {
-        net.signer.prompts++
-        if (net.signer.mode === 'reject') throw new Error('the signer said no')
-        if (net.signer.mode === 'stall') await new Promise<void>((resolve) => { net.signer.waiting.push(resolve) })
-        else if (net.signer.ms) await new Promise((resolve) => setTimeout(resolve, net.signer.ms))
-        return { ...t, id: Math.random().toString(16).slice(2).padEnd(64, '0'), pubkey: 'b'.repeat(64), sig: 'c'.repeat(128) }
-      },
-    }),
-  },
-}))
+// The store's signEvent, as far as an AUTH sees it: the signer, bounded by signWithin (15 s), and a late answer handed on.
+vi.mock('../../store/useCyberspace', async () => {
+  const { signWithin } = await import('../signWithin')
+  const signer = {
+    signEvent: async (t: Record<string, unknown>) => {
+      net.signer.prompts++
+      if (net.signer.mode === 'reject') throw new Error('the signer said no')
+      if (net.signer.mode === 'stall') await new Promise<void>((resolve) => { net.signer.waiting.push(resolve) })
+      else if (net.signer.ms) await new Promise((resolve) => setTimeout(resolve, net.signer.ms))
+      return { ...t, id: Math.random().toString(16).slice(2).padEnd(64, '0'), pubkey: 'b'.repeat(64), sig: 'c'.repeat(128) }
+    },
+  }
+  return {
+    useCyberspace: {
+      getState: () => ({
+        signEvent: (t: never, patienceMs?: number, late?: (ev: never) => void) => signWithin(signer as never, t, patienceMs, late as never),
+      }),
+    },
+  }
+})
 
 import { finalizeEvent, generateSecretKey, getPublicKey } from 'nostr-tools/pure'
 import { useRelays } from '../../store/useRelays'
@@ -125,14 +133,17 @@ import { askChainEvents, confirmChainEvents, fetchChainEvents } from '../chains'
 import { hopTemplate, spawnTemplate, type NostrEvent } from '../events'
 import { CYBERSPACE_RELAY, dropRelays, publishMany, queryEachAt } from '../relay'
 import { AUTH_STALLED } from '../relayOutcome'
+import { SIGN_PATIENCE_MS } from '../signWithin'
+import { signerHeld } from '../authOpen'
+import { normalizeURL } from 'nostr-tools/utils'
 
 const CANON = `${CYBERSPACE_RELAY}/`
 const anEvent = (): NostrEvent => finalizeEvent({ kind: 3333, created_at: 1_000, tags: [], content: '' }, generateSecretKey()) as unknown as NostrEvent
 const dials = (url: string): number => net.sockets.filter((u) => u === url).length
 const sent = (url: string): number => net.events.filter((e) => e.url === url).length
 const FILTER = { kinds: [0], limit: 1 }
-/** The bound on waiting for the signer. */
-const AUTH_WAIT = 8000
+/** The bound on waiting for the signer: the store's signWithin. */
+const AUTH_WAIT = SIGN_PATIENCE_MS
 
 async function within<T>(ms: number, p: Promise<T>): Promise<{ settled: boolean; value?: T; error?: unknown }> {
   const seen: { settled: boolean; value?: T; error?: unknown } = { settled: false }
@@ -177,7 +188,7 @@ afterEach(async () => {
 })
 
 describe('publishing to a gated relay while the signer has not answered', () => {
-  it('gives up at 8 s, sends nothing, keeps the socket, and prompts once', async () => {
+  it('gives up at 15 s, sends nothing, keeps the socket, and prompts once', async () => {
     net.signer.mode = 'stall'
     const publishing = publishMany([CANON], anEvent())
     const early = await within(AUTH_WAIT - 100, publishing)
@@ -187,6 +198,8 @@ describe('publishing to a gated relay while the signer has not answered', () => 
     expect(sent(CANON)).toBe(0)
     expect(dials(CANON)).toBe(1)
     expect(net.signer.prompts).toBe(1)
+    // What the store reads to say "Check your signer."
+    expect(signerHeld.has(normalizeURL(CANON))).toBe(true)
   })
 
   it('leaves that relay out and takes the others\' word', async () => {
@@ -293,12 +306,11 @@ describe('head confirmation and a chain holder behind the signer: the canonical 
     return { c, confirming: () => confirmChainEvents(c.pubkey, c.spawn.id, [c.spawn, c.hop1], { since: c.hop1.created_at, anchorId: c.hop1.id }) }
   }
 
-  it('a signer that rejected refuses the move at 5 s', async () => {
+  it('a signer that rejected refuses the move, by 5 s (a rejection is known at once, so it need not wait)', async () => {
     const { confirming } = await holderBehindSigner('wss://holder.rejected.example/')
     net.signer.mode = 'reject'
     const asking = confirming()
-    expect((await within(4800, asking)).settled).toBe(false)
-    const got = await within(500, asking)
+    const got = await within(5300, asking)
     expect(got.settled).toBe(true)
     expect(got.value).toBeNull()
   })
@@ -469,6 +481,7 @@ describe('a slow signer', () => {
     expect(next.value).toEqual({ ok: true, accepted: [CANON] })
     expect(dials(CANON)).toBe(1)
     expect(net.signer.prompts).toBe(1)
+    expect(signerHeld.has(normalizeURL(CANON))).toBe(false)
   })
 })
 

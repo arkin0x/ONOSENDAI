@@ -1,13 +1,15 @@
 /**
- * authOpen.ts - the relays whose AUTH is not finished, normalized URL to the
- * relay it is on. A signer can take as long as a person takes, and nostr-tools
- * never settles an AUTH whose signer rejected. Keyed per relay, so an old
- * socket's AUTH ending cannot clear a newer socket's. Its own module, so the
- * store can tell a person to check their signer without importing lib/relay.
+ * authOpen.ts - the relays whose NIP-42 AUTH the signer is holding up
+ * (normalized URL): still signing it, or its last signature ran out of time
+ * or was refused. relay.ts keeps this in step; a relay leaves it when it
+ * signs in, or when its AUTH ends for a reason that is not the signer's.
+ *
+ * Its own module so the store can tell a person to check their signer
+ * without importing lib/relay, which most test files mock.
  */
-export const authOpen = new Map<string, object>()
+export const signerHeld = new Set<string>()
 
-/** Whether a relay is waiting on the signer right now. */
+/** Whether the signer is holding up any relay's AUTH right now. */
 export function signerWaiting(): boolean {
-  return authOpen.size > 0
+  return signerHeld.size > 0
 }

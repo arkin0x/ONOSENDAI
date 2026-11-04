@@ -48,7 +48,7 @@ vi.mock('../../lib/workers', async (importOriginal) => {
 
 import { cantorPair, computeHopProof, computeHopProofV2, computeSidestepProof, bytesToHex, deriveRegionKeys, encodeNonce, hexToBytes, intToBytesBE, sha256Hex, verifyHopLevel1 } from 'cyberspace-core'
 import { useCalibration } from '../../lib/calibration'
-import { saveCloudDeposit, saveCloudJob, type PendingCloudJob } from '../../lib/cloud'
+import { loadCloudDeposit, loadCloudJob, saveCloudDeposit, saveCloudJob, type PendingCloudJob } from '../../lib/cloud'
 import { wallSource } from '../../lib/movePlan'
 import { hopTemplate, parseAction } from '../../lib/events'
 import { HosakaError, idempotencyKeyFor, moveIdentity, type HosakaDeposit, type HosakaJob, type HosakaLimits } from '../../lib/hosaka'
@@ -456,7 +456,7 @@ describe('cloud routes', () => {
     expect(S().cloud.invoiceOpen).toBe(true)
     expect(S().plan?.status).toBe('funding')
     expect(onDiskAtInvoice).not.toBeNull()
-    expect(JSON.parse(onDiskAtInvoice!).depositId).toBe('d1')
+    expect(JSON.parse(onDiskAtInvoice!).deposits[S().identity.pubkey].depositId).toBe('d1')
     expect(fake.submitHop).not.toHaveBeenCalled()
 
     S().setInvoiceOpen(false)
@@ -537,7 +537,7 @@ describe('cloud routes', () => {
     expect(S().proof.status).toBe('idle')
     expect(S().pendingTarget).toBeNull()
     // The deposit record stays: if the wallet paid anyway, the next load claims it.
-    expect(JSON.parse(storage.getItem('onosendai:cloudDeposit')!).depositId).toBe('d1')
+    expect(loadCloudDeposit(S().identity.pubkey)?.depositId).toBe('d1')
     storage.removeItem('onosendai:cloudDeposit')
 
     fake.balance.mockResolvedValue({ pubkey: S().identity.pubkey, balance_msats: 5000, ledger: [] })
@@ -553,7 +553,7 @@ describe('cloud routes', () => {
     expect(S().cloud.status).toBe('idle')
     expect(S().cloud.job?.jobId).toBe('job-3')
     expect(S().cloud.job?.stage).toBe('computing')
-    expect(JSON.parse(storage.getItem('onosendai:cloudJob')!).jobId).toBe('job-3')
+    expect(loadCloudJob(S().identity.pubkey)?.jobId).toBe('job-3')
     expect(S().position).toEqual(from)
 
     // RESUME picks the kept job up and lands it.
@@ -861,7 +861,7 @@ describe('cloud routes', () => {
     await S().resumeCloudJob()
     expect(S().cloud.status).toBe('error')
     expect(S().cloud.message).toContain('RESUME tries again once HOSAKA reopens')
-    expect(JSON.parse(storage.getItem('onosendai:cloudJob')!).jobId).toBe('job-k')
+    expect(loadCloudJob(S().identity.pubkey)?.jobId).toBe('job-k')
   })
 
   it('a 400 job_not_runnable shows HOSAKA\'s hint, notes the balance it returned, and drops the record', async () => {

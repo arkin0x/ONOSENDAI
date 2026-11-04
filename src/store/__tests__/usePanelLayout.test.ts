@@ -45,9 +45,9 @@ function saved(order: PanelOrder, collapsed: Partial<Record<PanelId, boolean>> =
 describe('the default order', () => {
   it('is the menu as it was, every panel once, in one column', () => {
     expect(DEFAULT_ORDER.left).toEqual(['identity', 'agents', 'hidden', 'discovered', 'items', 'create', 'avatars', 'targets', 'links'])
-    expect(DEFAULT_ORDER.right).toEqual(['scale', 'position', 'proof', 'cloud', 'chain', 'hyperspace', 'view', 'legend', 'controls', 'derezz', 'relays'])
+    expect(DEFAULT_ORDER.right).toEqual(['scale', 'position', 'viewat', 'proof', 'cloud', 'chain', 'hyperspace', 'view', 'legend', 'controls', 'derezz', 'relays'])
     expect(new Set(PANEL_IDS).size).toBe(PANEL_IDS.length)
-    expect(PANEL_IDS).toHaveLength(20)
+    expect(PANEL_IDS).toHaveLength(21)
   })
 
   it('comes as a fresh copy each time', () => {
@@ -107,7 +107,7 @@ describe('moveBefore', () => {
 
 describe('mergeOrder: a saved order against the defaults', () => {
   it('keeps a complete saved order as it is', () => {
-    const o: PanelOrder = { left: ['links', 'identity', 'agents', 'hidden', 'discovered', 'items', 'create', 'avatars', 'targets', 'scale'], right: ['position', 'proof', 'cloud', 'chain', 'hyperspace', 'view', 'legend', 'controls', 'derezz', 'relays'] }
+    const o: PanelOrder = { left: ['links', 'identity', 'agents', 'hidden', 'discovered', 'items', 'create', 'avatars', 'targets', 'scale'], right: ['position', 'viewat', 'proof', 'cloud', 'chain', 'hyperspace', 'view', 'legend', 'controls', 'derezz', 'relays'] }
     expect(mergeOrder(o)).toEqual(o)
   })
 
@@ -124,7 +124,7 @@ describe('mergeOrder: a saved order against the defaults', () => {
     const o = defaultOrder()
     o.right = o.right.filter((id) => id !== 'view' && id !== 'hyperspace')
     o.left.push('hyperspace')
-    expect(mergeOrder(o).right).toEqual(['scale', 'position', 'proof', 'cloud', 'chain', 'view', 'legend', 'controls', 'derezz', 'relays'])
+    expect(mergeOrder(o).right).toEqual(['scale', 'position', 'viewat', 'proof', 'cloud', 'chain', 'view', 'legend', 'controls', 'derezz', 'relays'])
   })
 
   it('puts a missing panel at the top of its column when nothing above it in the defaults is there', () => {
@@ -167,6 +167,54 @@ describe('mergeOrder: a saved order against the defaults', () => {
 
   it('an empty saved order is the defaults', () => {
     expect(mergeOrder({ left: [], right: [] })).toEqual(defaultOrder())
+  })
+})
+
+/**
+ * The View panel came on 2026-11-03 under the id `viewat`, because `view`
+ * was already saved for the panel now titled Settings. Every saved layout
+ * before it is one of these.
+ */
+describe('a layout saved before the View panel (viewat)', () => {
+  /** The defaults as they were the day before: no viewat. */
+  const before = (): { left: string[]; right: string[] } => ({
+    left: ['identity', 'agents', 'hidden', 'discovered', 'items', 'create', 'avatars', 'targets', 'links'],
+    right: ['scale', 'position', 'proof', 'cloud', 'chain', 'hyperspace', 'view', 'legend', 'controls', 'derezz', 'relays'],
+  })
+
+  it('gets the View panel right under Position, and Settings (view) where it was', () => {
+    const merged = mergeOrder(before())
+    expect(merged.right).toEqual(['scale', 'position', 'viewat', 'proof', 'cloud', 'chain', 'hyperspace', 'view', 'legend', 'controls', 'derezz', 'relays'])
+    expect(merged.left).toEqual(before().left)
+  })
+
+  it('follows Position wherever it was dragged in the right column, and keeps every other saved place', () => {
+    const o = before()
+    o.right = ['relays', 'view', 'scale', 'legend', 'proof', 'cloud', 'chain', 'hyperspace', 'controls', 'derezz', 'position']
+    expect(mergeOrder(o).right).toEqual([...o.right, 'viewat'])
+    const o2 = before()
+    o2.right = ['view', 'position', 'relays', 'scale', 'legend', 'proof', 'cloud', 'chain', 'hyperspace', 'controls', 'derezz']
+    expect(mergeOrder(o2).right.slice(0, 3)).toEqual(['view', 'position', 'viewat'])
+  })
+
+  it('with Position dragged to the left column, goes to its own column under the nearest panel above it there', () => {
+    const o = before()
+    o.right = o.right.filter((id) => id !== 'position')
+    o.left.push('position')
+    const merged = mergeOrder(o)
+    expect(merged.left).toEqual(o.left)
+    expect(merged.right.slice(0, 2)).toEqual(['scale', 'viewat'])
+  })
+
+  it('keeps a fold saved on Settings (view) on Settings, and the View panel opens', async () => {
+    mem.clear()
+    g.localStorage = working
+    mem.set(PANEL_LAYOUT_KEY, JSON.stringify({ order: before(), collapsed: { view: true, position: true } }))
+    const S = await load()
+    expect(S.getState().order.right.slice(1, 3)).toEqual(['position', 'viewat'])
+    expect(S.getState().order.right.indexOf('view')).toBe(S.getState().order.right.indexOf('hyperspace') + 1)
+    expect(S.getState().collapsed).toEqual({ view: true, position: true })
+    expect(S.getState().collapsed.viewat).toBeUndefined()
   })
 })
 

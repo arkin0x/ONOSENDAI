@@ -19,7 +19,7 @@
 
 import { COMMENT_KIND, parseComment } from './comments'
 import type { NostrEvent } from './events'
-import { HIDDEN_KIND, MESSAGE_KIND, SHARD_KIND } from './hidden'
+import { HIDDEN_KIND, MESSAGE_KIND, SHARD_KIND, itemLineage } from './hidden'
 import { ACTION_KIND, REACTION_KIND, parseReaction } from './social'
 
 /** An object hidden by reference is its own addressable event (spec §7.6). */
@@ -27,7 +27,12 @@ const OBJECT_KIND = 33331
 
 export type NotifOn =
   | { type: 'action'; id: string }
-  | { type: 'item'; id: string; lookupId?: string }
+  /**
+   * `address`: the reaction's `a`, for a shard hidden by reference, whose id
+   * changes each time the object is published again under that address.
+   * `kind`: the reacted event's, from `k`, when given.
+   */
+  | { type: 'item'; id: string; lookupId?: string; address?: string; kind?: number }
   | { type: 'comment'; id: string }
   /** A local chat line that tagged you: its inner event id (arkinox, 2026-10-13). */
   | { type: 'chat'; id: string }
@@ -110,13 +115,13 @@ export function classify(ev: NostrEvent, me: string, known: Known = NOTHING_KNOW
     if (!r) return null
     const base = { id: ev.id, from: ev.pubkey, createdAt: ev.created_at, what: 'reaction' as const, content: r.content, image: r.image, sealed: false, ciphertext: null, bag: null }
     const mineItem = known.items.has(r.targetId)
-    const item: NotifOn = { type: 'item', id: r.targetId, lookupId: known.items.get(r.targetId) }
+    const item: NotifOn = { type: 'item', id: r.targetId, lookupId: known.items.get(r.targetId), ...(r.targetAddress ? { address: r.targetAddress } : {}), ...(r.targetKind !== null ? { kind: r.targetKind } : {}) }
     if (known.actions.has(r.targetId)) return { n: { ...base, on: { type: 'action', id: r.targetId } }, lookup: null }
     if (mineItem) return { n: { ...base, on: item }, lookup: null }
     if (r.targetKind === MESSAGE_KIND) return { n: { ...base, on: item, guessed: true }, lookup: { id: r.targetId, rule: 'kind1' } }
     if (r.targetKind === COMMENT_KIND) return { n: { ...base, on: { type: 'comment', id: r.targetId } }, lookup: { id: r.targetId, rule: 'comment' } }
     if (r.targetKind === null) return { n: { ...base, on: item, guessed: true }, lookup: { id: r.targetId, rule: 'unknown' } }
-    const on = kindOn(r.targetKind, r.targetId)
+    const on = r.targetKind === SHARD_KIND || r.targetKind === OBJECT_KIND ? item : kindOn(r.targetKind, r.targetId)
     return on ? { n: { ...base, on }, lookup: null } : null
   }
 
@@ -189,4 +194,96 @@ export function fromRelays(list: readonly Notification[]): Notification[] {
 /** How many arrived after you last looked. */
 export function unreadCount(list: Notification[], lastSeen: number): number {
   return list.filter((n) => n.createdAt > lastSeen).length
+}
+
+/** What hiddenRowFor needs of a row of yours (store/useShards MyDeployment). */
+export interface HiddenRowLike {
+  eventId: string
+  lookupId: string
+  inner?: { id?: string; kind: number; tags: string[][] }
+  ref?: string[]
+}
+
+/**
+ * The row of yours an item notification is about, or undefined when this
+ * device hid no such thing (arkinox, 2026-11-02: four of four refused, on the
+ * phone that hid them). A reaction names an item by:
+ *
+ * | It names | Row it is |
+ * |---|---|
+ * | the row's own id | that row |
+ * | the inner event as this device holds it now | a shard by reference, refreshed since it was hidden |
+ * | the first version's id (`d`) | an item carried inline and moved by EDIT (itemLineage) |
+ * | the object's address (`a`) | a shard by reference, republished under that address since |
+ * | the bag (a comment's `A`) | the first row in that bag |
+ */
+export function hiddenRowFor<T extends HiddenRowLike>(rows: readonly T[], on: { id: string | null; lookupId?: string; address?: string }): T | undefined {
+  const id = on.id
+  const byId = id
+    ? rows.find((d) => d.eventId === id) ??
+      rows.find((d) => d.inner?.id === id) ??
+      rows.find((d) => !d.ref && d.inner?.id !== undefined && itemLineage(d.inner as { id: string; kind: number; tags: string[][] }) === id)
+    : undefined
+  return byId ??
+    (on.address ? rows.find((d) => d.ref?.[0] === 'a' && d.ref[1] === on.address) : undefined) ??
+    (on.lookupId ? rows.find((d) => d.lookupId === on.lookupId) : undefined)
+}
+
+/** Whether an item notification is about a kind 33331 object: a shard. */
+export function onShard(on: { kind?: number; address?: string }): boolean {
+  return on.kind === OBJECT_KIND || on.address?.startsWith(`${OBJECT_KIND}:`) === true
+}
+
+/** The author an address names, `<kind>:<author>:<d>`. */
+function authorOf(address: string): string {
+  return address.split(':')[1] ?? ''
+}
+
+/**
+ * Whether an item notification is about a shard you published that this
+ * device hid nowhere: other clients show your kind 33331 objects in their
+ * feeds, and a reaction there is to the shard, not to a hidden item. Yours:
+ * a reaction can tag you on someone else's shard (the hider of a shard of
+ * theirs is told too), and that one is no shard of yours (review of #590).
+ * With no `a`, the shard is taken as yours, as the tag that reached you says.
+ */
+export function publishedShardOnly(on: NotifOn, rows: readonly HiddenRowLike[], me: string): boolean {
+  return on.type === 'item' && onShard(on) && (on.address === undefined || authorOf(on.address) === me) && !hiddenRowFor(rows, on)
+}
+
+/** VIEW ITEM's refusals. */
+export const NOT_HIDDEN_HERE = 'That item is not one this device hid, so it cannot be opened from here.'
+export const SHARD_NOT_HIDDEN = 'That shard is published, not hidden by you on this device, so there is no place to go.'
+export const SHARD_UNCHECKED = 'That shard could not be read from any relay, so this cannot tell whether you hid it on this device. Try again later.'
+
+/** What VIEW ITEM opens, or why it opens nothing. */
+export type ItemView<T> = { row: T } | { why: string }
+
+/**
+ * What VIEW ITEM goes to (hiddenRowFor), or why not. A reaction on a shard
+ * with no `a` (Ditto writes none) names it by id alone, and only the shard
+ * itself says its address, so it is fetched (`fetch`) before anything is
+ * refused. A fetch that fails or finds nothing cannot tell, and says so
+ * rather than claiming the shard was never hidden here (review of #590).
+ */
+export async function itemToView<T extends HiddenRowLike>(
+  rows: () => readonly T[],
+  on: { id: string | null; lookupId?: string; address?: string; kind?: number },
+  me: string,
+  fetch: (id: string) => Promise<{ kind: number; pubkey: string; tags: string[][] } | null>,
+): Promise<ItemView<T>> {
+  const here = hiddenRowFor(rows(), on)
+  if (here) return { row: here }
+  if (!onShard(on)) return { why: NOT_HIDDEN_HERE }
+  let address = on.address
+  if (address === undefined && on.id !== null) {
+    let ev: { kind: number; pubkey: string; tags: string[][] } | null = null
+    try { ev = await fetch(on.id) } catch { ev = null }
+    const d = ev?.tags.find((t) => t[0] === 'd')?.[1]
+    if (!ev || d === undefined) return { why: SHARD_UNCHECKED }
+    address = `${ev.kind}:${ev.pubkey}:${d}`
+    const row = hiddenRowFor(rows(), { id: null, address })
+    if (row) return { row }
+  }
+  return { why: address !== undefined && authorOf(address) === me ? SHARD_NOT_HIDDEN : NOT_HIDDEN_HERE }
 }

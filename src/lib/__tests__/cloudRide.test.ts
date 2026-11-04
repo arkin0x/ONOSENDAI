@@ -20,10 +20,10 @@ vi.hoisted(() => {
 })
 
 import { sha256 } from 'cyberspace-core'
-import { rideChoice, rideFits, rideOfferOf, rideServiceOf, verifyCloudRide } from '../cloudRide'
+import { checkCloudRide, rideChoice, rideFits, rideOfferOf, rideServiceOf, verifyCloudRide } from '../cloudRide'
 import { buildRideProof, computeRideLeaf, rideBlocks } from '../hyperspace/ride'
 import { createHosaka, idempotencyKeyFor, rideBody, type HosakaJob, type HosakaProvider } from '../hosaka'
-import { clearCloudJob, loadCloudJob, saveCloudJob, wirePosition, type PendingCloudJob } from '../cloud'
+import { loadCloudJob, saveCloudJob, wirePosition, type PendingCloudJob } from '../cloud'
 import { finalizeEvent, generateSecretKey } from 'nostr-tools/pure'
 
 const PREV = 'ab'.repeat(32)
@@ -33,13 +33,21 @@ function fakeHash(height: number): string {
   return Array.from(sha256(bytes), (b) => b.toString(16).padStart(2, '0')).join('')
 }
 
+/** Each ride's proof, built once per file: a build takes a second or two, more under a loaded gate. */
+const builtRides = new Map<string, ReturnType<typeof buildRideProof> & { blocks: number }>()
+
 /** HOSAKA's completed job for a ride, computed here the way HOSAKA computes it. */
 function completedRide(prev: string, from: number, to: number, over: Record<string, unknown> = {}): HosakaJob {
-  const leaves = rideBlocks(from, to).map((h) => computeRideLeaf(prev, h, fakeHash(h)))
-  const p = buildRideProof(prev, leaves)
+  const key = `${prev}:${from}:${to}`
+  let p = builtRides.get(key)
+  if (!p) {
+    const leaves = rideBlocks(from, to).map((h) => computeRideLeaf(prev, h, fakeHash(h)))
+    p = { ...buildRideProof(prev, leaves), blocks: leaves.length }
+    builtRides.set(key, p)
+  }
   return {
     id: 'job-ride', status: 'completed', cost_msats: 944_000, error: null,
-    result: { root: p.rootHex, mp: p.mp, mn: p.mnHex, previous_event_id: prev, from_height: from, to_height: to, blocks: leaves.length, openings_version: 2, proof_type: 'ride', ...over },
+    result: { root: p.rootHex, mp: p.mp, mn: p.mnHex, previous_event_id: prev, from_height: from, to_height: to, blocks: p.blocks, openings_version: 2, proof_type: 'ride', ...over },
   }
 }
 
@@ -92,7 +100,9 @@ describe('which way to ride is highlighted', () => {
   })
 })
 
-describe('a finished HOSAKA ride is checked here before anything is signed', () => {
+// A ride proof build is CPU bound: the first test to need each ride pays for it,
+// which under a loaded gate can pass the 5 s default.
+describe('a finished HOSAKA ride is checked here before anything is signed', { timeout: 20_000 }, () => {
   const asked = { previousId: PREV, fromHeight: 100, toHeight: 105 }
 
   it('a true proof passes Level 1 against this device\'s own block hashes', async () => {
@@ -114,6 +124,30 @@ describe('a finished HOSAKA ride is checked here before anything is signed', () 
     expect(await verifyCloudRide(completedRide(PREV, 100, 105), asked, otherLine)).not.toEqual([])
   })
 
+  it('a disagreement over a block says which block, because this device\'s copy may be the wrong one', async () => {
+    const otherLine = (h: number): string => fakeHash(h + 1)
+    const check = await checkCloudRide(completedRide(PREV, 100, 105), asked, otherLine)
+    expect(check.failed).not.toEqual([])
+    expect(check.disagreesAt).toBeGreaterThanOrEqual(100)
+    expect(check.disagreesAt).toBeLessThanOrEqual(105)
+  })
+
+  it('only a block disagreement says so: what is wrong with the proof itself is not this device\'s line', async () => {
+    // One ride is built (a build takes a second or two) and relabeled: a proof
+    // for another head or other blocks is refused on its labels alone, before
+    // any block is read, so a relabeled one takes the same path.
+    const good = completedRide(PREV, 100, 105)
+    const r = good.result as { mp: string; root: string; mn: string }
+    expect((await checkCloudRide(good, asked, fakeHash)).disagreesAt).toBeNull()
+    expect((await checkCloudRide({ ...good, result: { ...r, root: 'not a root' } }, asked, fakeHash)).disagreesAt).toBeNull()
+    expect((await checkCloudRide({ ...good, result: { ...r, mn: 'nope' } }, asked, fakeHash)).disagreesAt).toBeNull()
+    const otherHead = await checkCloudRide({ ...good, result: { ...r, previous_event_id: 'cd'.repeat(32) } }, asked, fakeHash)
+    expect(otherHead).toEqual({ failed: ['the proof is bound to another chain head'], disagreesAt: null })
+    const otherBlocks = await checkCloudRide({ ...good, result: { ...r, to_height: 106 } }, asked, fakeHash)
+    expect(otherBlocks.failed[0]).toMatch(/from block 100 to block 106/)
+    expect(otherBlocks.disagreesAt).toBeNull()
+  })
+
   it('a valid proof for another head or other blocks is refused', async () => {
     expect(await verifyCloudRide(completedRide('cd'.repeat(32), 100, 105), asked, fakeHash)).toEqual(['the proof is bound to another chain head'])
     const elsewhere = await verifyCloudRide(completedRide(PREV, 100, 106), asked, fakeHash)
@@ -133,7 +167,7 @@ describe('a finished HOSAKA ride is checked here before anything is signed', () 
 })
 
 describe('the ride record survives a reload', () => {
-  beforeEach(() => clearCloudJob())
+  beforeEach(() => localStorage.removeItem('onosendai:cloudJob'))
   const record: PendingCloudJob = {
     version: 1, jobId: 'job-ride', pollToken: 'tok', action: 'ride', pubkey: 'p',
     from: wirePosition({ x: 1n, y: 2n, z: 3n }), to: wirePosition({ x: 1n << 84n, y: 5n, z: 6n }), plane: 1,
@@ -143,16 +177,16 @@ describe('the ride record survives a reload', () => {
 
   it('round trips with the ride, its patience and its start', () => {
     saveCloudJob(record)
-    expect(loadCloudJob()).toEqual(record)
+    expect(loadCloudJob('p')).toEqual(record)
   })
 
   it('a ride record without its ride is dropped, never followed blind', () => {
     const { ride: _ride, ...bare } = record
     void _ride
     saveCloudJob(bare as PendingCloudJob)
-    expect(loadCloudJob()).toBeNull()
+    expect(loadCloudJob('p')).toBeNull()
     saveCloudJob({ ...record, ride: { fromHeight: 7, toHeight: 7, toCoordHex: 'cd'.repeat(32) } })
-    expect(loadCloudJob()).toBeNull()
+    expect(loadCloudJob('p')).toBeNull()
   })
 })
 

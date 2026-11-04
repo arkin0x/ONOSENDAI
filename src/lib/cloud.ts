@@ -188,11 +188,35 @@ function rideOfRecord(raw: unknown): PendingRide | null {
   return { fromHeight: r.fromHeight, toHeight: r.toHeight, toCoordHex: r.toCoordHex, ...(r.asOf !== undefined ? { asOf: r.asOf } : {}) }
 }
 
-export function loadCloudJob(): PendingCloudJob | null {
+/**
+ * The kept job records, one per identity, as stored under JOB_KEY: `{ version: 2,
+ * jobs: { [pubkey]: record } }`. Before this the key held one record, version 1,
+ * for whoever bought last, so a second identity buying on the same device wrote
+ * over the first identity's paid job and its RESUME was gone. That old shape is
+ * still read, as the one record of the identity it names.
+ */
+interface StoredCloudJobs { version: 2; jobs: Record<string, unknown> }
+
+function readCloudJobs(): StoredCloudJobs {
+  const raw = localStorage.getItem(JOB_KEY)
+  if (!raw) return { version: 2, jobs: {} }
+  const r = JSON.parse(raw) as { version?: unknown; jobs?: unknown; pubkey?: unknown }
+  if (r?.version === 2 && r.jobs && typeof r.jobs === 'object' && !Array.isArray(r.jobs)) return { version: 2, jobs: { ...(r.jobs as Record<string, unknown>) } }
+  // The single record of before, filed under the identity it names.
+  if (r?.version === 1 && typeof r.pubkey === 'string') return { version: 2, jobs: { [r.pubkey]: r } }
+  return { version: 2, jobs: {} }
+}
+
+function writeCloudJobs(all: StoredCloudJobs): void {
+  if (Object.keys(all.jobs).length === 0) localStorage.removeItem(JOB_KEY)
+  else localStorage.setItem(JOB_KEY, JSON.stringify(all))
+}
+
+/** This identity's kept HOSAKA job, or null. Another identity's record is never returned, and never touched by the two below. */
+export function loadCloudJob(pubkey: string): PendingCloudJob | null {
   try {
-    const raw = localStorage.getItem(JOB_KEY)
-    if (!raw) return null
-    const r = JSON.parse(raw) as Partial<PendingCloudJob>
+    const r = readCloudJobs().jobs[pubkey] as Partial<PendingCloudJob> | undefined
+    if (!r || r.pubkey !== pubkey) return null
     if (r.version !== 1 || typeof r.jobId !== 'string' || typeof r.pollToken !== 'string') return null
     if (r.action !== 'hop' && r.action !== 'sidestep' && r.action !== 'ride') return null
     // A ride's record is worthless without the ride it was bought for.
@@ -228,12 +252,29 @@ export function loadCloudJob(): PendingCloudJob | null {
   }
 }
 
+/** Kept under the identity that bought it, beside any other identity's. */
 export function saveCloudJob(record: PendingCloudJob): void {
-  try { localStorage.setItem(JOB_KEY, JSON.stringify(record)) } catch { /* private mode */ }
+  try {
+    let all: StoredCloudJobs
+    // Unreadable as a whole: nothing in it can be resumed, so it is started again.
+    try { all = readCloudJobs() } catch { all = { version: 2, jobs: {} } }
+    all.jobs[record.pubkey] = record
+    writeCloudJobs(all)
+  } catch { /* private mode */ }
 }
 
-export function clearCloudJob(): void {
-  try { localStorage.removeItem(JOB_KEY) } catch { /* private mode */ }
+/**
+ * Forget this identity's record; with `jobId`, only while it is still that job,
+ * so a flow that ended never takes a newer job of the same identity with it.
+ */
+export function clearCloudJob(pubkey: string, jobId?: string): void {
+  try {
+    const all = readCloudJobs()
+    const r = all.jobs[pubkey] as { jobId?: unknown } | undefined
+    if (!r || (jobId !== undefined && r.jobId !== jobId)) return
+    delete all.jobs[pubkey]
+    writeCloudJobs(all)
+  } catch { /* private mode, or a record that cannot be read */ }
 }
 
 /**
@@ -249,6 +290,8 @@ export function clearCloudJob(): void {
  */
 export interface PendingKeys {
   version: 1
+  /** The identity whose hop this was. A ticket kept before tickets were per identity has none (StoredKeys `unowned`). */
+  pubkey: string
   jobId: string
   pollToken: string
   /** Where the hop landed: the cubes are around this point. */
@@ -258,26 +301,71 @@ export interface PendingKeys {
   at: number
 }
 
-export function loadKeysTicket(): PendingKeys | null {
+/**
+ * The tickets, one per identity, as stored under KEYS_TICKET_KEY: `{ version: 2,
+ * tickets: { [pubkey]: ticket }, unowned? }`. The key used to hold one ticket for
+ * whoever hopped last, so a second identity's paid hop wrote over the first one's
+ * cubes. That old ticket names no identity: it is kept as `unowned`, for whichever
+ * identity collects first, as it was before, and never written over.
+ */
+interface StoredKeys { version: 2; tickets: Record<string, unknown>; unowned?: unknown }
+
+function readKeysTickets(): StoredKeys {
+  const raw = localStorage.getItem(KEYS_TICKET_KEY)
+  if (!raw) return { version: 2, tickets: {} }
+  const r = JSON.parse(raw) as { version?: unknown; tickets?: unknown; unowned?: unknown }
+  if (r?.version === 2 && r.tickets && typeof r.tickets === 'object' && !Array.isArray(r.tickets)) {
+    return { version: 2, tickets: { ...(r.tickets as Record<string, unknown>) }, ...(r.unowned !== undefined ? { unowned: r.unowned } : {}) }
+  }
+  if (r?.version === 1) return { version: 2, tickets: {}, unowned: r }
+  return { version: 2, tickets: {} }
+}
+
+function writeKeysTickets(all: StoredKeys): void {
+  if (Object.keys(all.tickets).length === 0 && all.unowned === undefined) localStorage.removeItem(KEYS_TICKET_KEY)
+  else localStorage.setItem(KEYS_TICKET_KEY, JSON.stringify(all))
+}
+
+function ticketOf(raw: unknown, pubkey: string): PendingKeys | null {
+  const r = raw as Partial<PendingKeys> | undefined
+  if (!r || r.version !== 1 || typeof r.jobId !== 'string' || typeof r.pollToken !== 'string') return null
+  if (!r.to || (r.plane !== 0 && r.plane !== 1)) return null
+  positionFromWire(r.to)
+  return { version: 1, pubkey, jobId: r.jobId, pollToken: r.pollToken, to: r.to, plane: r.plane, at: typeof r.at === 'number' ? r.at : Date.now() }
+}
+
+/** This identity's ticket, else the one kept before tickets were per identity. Never another identity's. */
+export function loadKeysTicket(pubkey: string): PendingKeys | null {
   try {
-    const raw = localStorage.getItem(KEYS_TICKET_KEY)
-    if (!raw) return null
-    const r = JSON.parse(raw) as Partial<PendingKeys>
-    if (r.version !== 1 || typeof r.jobId !== 'string' || typeof r.pollToken !== 'string') return null
-    if (!r.to || (r.plane !== 0 && r.plane !== 1)) return null
-    positionFromWire(r.to)
-    return { version: 1, jobId: r.jobId, pollToken: r.pollToken, to: r.to, plane: r.plane, at: typeof r.at === 'number' ? r.at : Date.now() }
+    const all = readKeysTickets()
+    const own = all.tickets[pubkey] as { pubkey?: unknown } | undefined
+    if (own && own.pubkey === pubkey) return ticketOf(own, pubkey)
+    return all.unowned !== undefined ? ticketOf(all.unowned, pubkey) : null
   } catch {
     return null
   }
 }
 
+/** Kept under the identity that hopped, beside any other identity's. */
 export function saveKeysTicket(t: PendingKeys): void {
-  try { localStorage.setItem(KEYS_TICKET_KEY, JSON.stringify(t)) } catch { /* private mode */ }
+  try {
+    let all: StoredKeys
+    try { all = readKeysTickets() } catch { all = { version: 2, tickets: {} } }
+    all.tickets[t.pubkey] = t
+    writeKeysTickets(all)
+  } catch { /* private mode */ }
 }
 
-export function clearKeysTicket(): void {
-  try { localStorage.removeItem(KEYS_TICKET_KEY) } catch { /* private mode */ }
+/** Forget this job's ticket: this identity's, or the unowned one, only while it is still that job. */
+export function clearKeysTicket(pubkey: string, jobId: string): void {
+  try {
+    const all = readKeysTickets()
+    const own = all.tickets[pubkey] as { jobId?: unknown } | undefined
+    if (own?.jobId === jobId) delete all.tickets[pubkey]
+    else if ((all.unowned as { jobId?: unknown } | undefined)?.jobId === jobId) delete all.unowned
+    else return
+    writeKeysTickets(all)
+  } catch { /* private mode, or a ticket that cannot be read */ }
 }
 
 /**
@@ -715,23 +803,59 @@ export interface PendingCloudDeposit {
   bolt11: string
 }
 
-export function loadCloudDeposit(): PendingCloudDeposit | null {
+/**
+ * The deposits, one per identity, as stored under DEPOSIT_KEY: `{ version: 2,
+ * deposits: { [pubkey]: deposit } }`. The key used to hold one deposit, so a
+ * second identity buying on the same device wrote over the first one's paid,
+ * unclaimed deposit. That old shape is still read, as the deposit of the
+ * identity it names.
+ */
+interface StoredDeposits { version: 2; deposits: Record<string, unknown> }
+
+function readDeposits(): StoredDeposits {
+  const raw = localStorage.getItem(DEPOSIT_KEY)
+  if (!raw) return { version: 2, deposits: {} }
+  const r = JSON.parse(raw) as { version?: unknown; deposits?: unknown; depositId?: unknown; pubkey?: unknown }
+  if (r?.version === 2 && r.deposits && typeof r.deposits === 'object' && !Array.isArray(r.deposits)) return { version: 2, deposits: { ...(r.deposits as Record<string, unknown>) } }
+  // The single deposit of before, filed under the identity it names.
+  if (typeof r?.depositId === 'string' && typeof r.pubkey === 'string') return { version: 2, deposits: { [r.pubkey]: r } }
+  return { version: 2, deposits: {} }
+}
+
+function writeDeposits(all: StoredDeposits): void {
+  if (Object.keys(all.deposits).length === 0) localStorage.removeItem(DEPOSIT_KEY)
+  else localStorage.setItem(DEPOSIT_KEY, JSON.stringify(all))
+}
+
+/** This identity's deposit in flight, or null. Another identity's is never returned, and never touched by the two below. */
+export function loadCloudDeposit(pubkey: string): PendingCloudDeposit | null {
   try {
-    const raw = localStorage.getItem(DEPOSIT_KEY)
-    if (!raw) return null
-    const d = JSON.parse(raw) as PendingCloudDeposit
-    return d && typeof d.depositId === 'string' && typeof d.pubkey === 'string' ? d : null
+    const d = readDeposits().deposits[pubkey] as PendingCloudDeposit | undefined
+    return d && typeof d.depositId === 'string' && d.pubkey === pubkey ? d : null
   } catch {
     return null
   }
 }
 
+/** Kept under the identity that asked for the invoice, beside any other identity's. */
 export function saveCloudDeposit(d: PendingCloudDeposit): void {
-  try { localStorage.setItem(DEPOSIT_KEY, JSON.stringify(d)) } catch { /* storage unavailable */ }
+  try {
+    let all: StoredDeposits
+    try { all = readDeposits() } catch { all = { version: 2, deposits: {} } }
+    all.deposits[d.pubkey] = d
+    writeDeposits(all)
+  } catch { /* storage unavailable */ }
 }
 
-export function clearCloudDeposit(): void {
-  try { localStorage.removeItem(DEPOSIT_KEY) } catch { /* storage unavailable */ }
+/** Forget this identity's deposit, only while it is still `depositId`, so a newer one of the same identity stays. */
+export function clearCloudDeposit(pubkey: string, depositId: string): void {
+  try {
+    const all = readDeposits()
+    const d = all.deposits[pubkey] as { depositId?: unknown } | undefined
+    if (!d || d.depositId !== depositId) return
+    delete all.deposits[pubkey]
+    writeDeposits(all)
+  } catch { /* storage unavailable, or a record that cannot be read */ }
 }
 
 /**

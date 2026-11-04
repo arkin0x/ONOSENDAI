@@ -45,6 +45,10 @@ beforeAll(async () => {
 })
 
 describe('the proof worker, for a hop', () => {
+  it('says it has the request before anything else, which is how the page knows it loaded', () => {
+    expect(posts[0]).toMatchObject({ type: 'started' })
+  })
+
   it('answers with the seal as proof and the three tags of 8.4', () => {
     expect(done).toBeDefined()
     expect(done.mode).toBe('hop')

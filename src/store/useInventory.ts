@@ -27,7 +27,7 @@
 import { create } from 'zustand'
 import type { NostrEvent } from '../lib/events'
 import type { ChestEntry } from '../lib/chests'
-import type { Hidden, KeyItem } from '../lib/hidden'
+import { itemLineage, type Hidden, type KeyItem } from '../lib/hidden'
 import { KEY_TEXT_PREFIX, addHeld, heldFromEntry, heldFromFind, heldFromForged, heldFromPasted, holdsModel, parseKeyText, type HeldFrom, type HeldItem, type HeldPlace, type InChest } from '../lib/inventory'
 import { describeError } from '../lib/secrets/db'
 import { deleteHeld, openInventoryDb, readHeld, writeHeld } from '../lib/inventoryDb'
@@ -68,6 +68,12 @@ interface InventoryState {
   markPlayed: (finds: Hidden[]) => void
   /** Hold a key this identity forged and hid, at once (B1 §3.1). */
   holdForged: (event: NostrEvent, key: KeyItem, place: HeldPlace) => HeldItem
+  /**
+   * A key this identity forged and has now MOVED: its row, held by whichever
+   * version was forged, says where it stands now. Nothing new is held, since
+   * the moved version is the same item (lib/inventory.ts holdsItem).
+   */
+  relocate: (lineage: string, place: HeldPlace) => void
   /** TAKE: hold contents out of an opened chest. */
   take: (entries: ChestEntry[], from: HeldFrom, place: HeldPlace | null) => HeldItem[]
   /** Take these rows off the TAKEN list, keeping them held (moved into the workshop, or cleared). */
@@ -207,6 +213,19 @@ export const useInventory = create<InventoryState>((set, get) => {
     const item = heldFromForged(ownerNow(), event, key, place, now())
     get().add([item])
     return get().items[item.id] ?? item
+  },
+
+  relocate: (lineage, place) => {
+    const items = { ...get().items }
+    const changed: HeldItem[] = []
+    for (const it of Object.values(items)) {
+      if (it.source !== 'forged' || (itemLineage(it.event) ?? it.id) !== lineage) continue
+      items[it.id] = { ...it, place }
+      changed.push(items[it.id])
+    }
+    if (changed.length === 0) return
+    set({ items })
+    void persist(changed)
   },
 
   take: (entries, from, place) => {

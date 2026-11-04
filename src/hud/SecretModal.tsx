@@ -36,8 +36,8 @@ import { itemKind } from '../lib/comments'
 import { useProfile } from '../hooks/useProfile'
 import { profileLabel } from '../store/useProfiles'
 import { useCyberspace } from '../store/useCyberspace'
-import { editable, muteSubject, useShards, type WorldItem } from '../store/useShards'
-import { addToRoom, editPlaced } from '../store/useBuilder'
+import { editable, movable as movableDep, muteSubject, useShards, type WorldItem } from '../store/useShards'
+import { addToRoom, editPlaced, movePlaced } from '../store/useBuilder'
 import { DeleteDoorCard, DoorOwnerBlock } from './DoorOwner'
 import { doorSecret } from '../store/doorSecrets'
 import { useStash } from './stash'
@@ -109,6 +109,8 @@ export function SecretModal(): JSX.Element | null {
   const wire = useShards((s) => (item && !item.chestId ? s.mine.find((d) => d.eventId === item.key) ?? null : null))
   // EDIT: a shard of yours this device can move (useShards editable).
   const movable = !!wire && editable(wire, me)
+  // MOVE: a key item, a message or hidden audio of yours, as EDIT moves a shard.
+  const itemMoves = !!wire && wire.type !== 'shard' && wire.type !== 'chest' && movableDep(wire, me)
   // A chest this device hid, signed by you: EDIT, MOVE and ADD.
   const chestOfMine = !!wire && wire.type === 'chest' && !!wire.chest && wire.inner.pubkey === me
   // A door of yours: everything but DELETE needs its secret, known here from
@@ -298,6 +300,11 @@ export function SecretModal(): JSX.Element | null {
           {movable && (
             <button className="secret__act" title="Move it: aim the ghost, then deploy. The old one is taken down and its comments and reactions stay with it" onClick={() => { close(); editPlaced(item.key) }}><Move3d size={ICON} strokeWidth={2.25} aria-hidden />EDIT</button>
           )}
+          {/* MOVE: the same, for an item, a message or a sound of yours. It
+              keeps its reactions, mutes and once-trigger (its lineage). */}
+          {itemMoves && (
+            <button className="secret__act" title="Place it somewhere else. The old one is taken down once the new one is out" onClick={() => { close(); movePlaced(item.key) }}><Move3d size={ICON} strokeWidth={2.25} aria-hidden />MOVE</button>
+          )}
           {/* A chest of yours (R18, 4.8): EDIT its name, lock and label, MOVE
               it anywhere on the hide bar (its model, SCALE, TURN and WALK
               there too), ADD to what it holds. Each seals it again where it
@@ -306,7 +313,7 @@ export function SecretModal(): JSX.Element | null {
           {mine && chestOfMine && (!doorOfMine || editsDoor) && (
             <>
               <button className="secret__act" title="Its name, its lock and what opens it" onClick={() => useStash.getState().openChestEdit(item.key, true)}><Pencil size={ICON} strokeWidth={2.25} aria-hidden />EDIT</button>
-              <button className="secret__act" title="Place it somewhere else, in another model if you like" onClick={() => { close(); useShards.getState().startMoveChest(item.key) }}><Move3d size={ICON} strokeWidth={2.25} aria-hidden />MOVE</button>
+              <button className="secret__act" title="Place it somewhere else, in another model if you like" onClick={() => { close(); movePlaced(item.key) }}><Move3d size={ICON} strokeWidth={2.25} aria-hidden />MOVE</button>
               <button className="secret__act" title="Put more in it" onClick={() => { if (doorOfMine) { close(); addToRoom(item.key) } else useStash.getState().openChestEdit(item.key, false) }}><PackagePlus size={ICON} strokeWidth={2.25} aria-hidden />ADD</button>
               {!doorOfMine && <button className="secret__act" disabled={converting} title="Make it a door where it stands, the same lock, what it holds behind it" onClick={() => { setConverting(true); setConvertWhy(null); void useShards.getState().convertToDoor(item.key).then((why) => { setConverting(false); setConvertWhy(why) }) }}>{converting ? 'CONVERTING…' : 'CONVERT TO DOOR'}</button>}
             </>

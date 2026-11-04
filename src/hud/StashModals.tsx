@@ -8,7 +8,8 @@
 import { createPortal } from 'react-dom'
 import { formatCellSize } from 'sno-core/scale'
 import { cashuLabel } from '../lib/cashu'
-import { useShards, type MyDeployment } from '../store/useShards'
+import { movable, useShards, type MyDeployment } from '../store/useShards'
+import { movePlaced } from '../store/useBuilder'
 import { useCashu, cashuStateLabel } from './useCashu'
 import { bagsOf, depName, goToDeployment, useStash, type Bag } from './stash'
 import { PublishSwitch } from './PublishSwitch'
@@ -72,9 +73,15 @@ export function BagRow({ bag, onOpen }: { bag: Bag; onOpen: () => void }): JSX.E
   )
 }
 
-function ItemRow({ d, onGo }: { d: MyDeployment; onGo: () => void }): JSX.Element {
+/**
+ * One deployment in its bag: tap it to fly there and open its card. MOVE,
+ * on anything of yours that can move (useShards movable), brings BUILD up on
+ * it where it stands, as MOVE or EDIT on its card does (useBuilder movePlaced).
+ */
+function ItemRow({ d, onGo, onMove }: { d: MyDeployment; onGo: () => void; onMove: () => void }): JSX.Element {
   const cashu = useCashu(d.type === 'message' ? d.text : null)
   const coin = cashu.found
+  const me = useCyberspace((s) => s.identity.pubkey)
   return (
     <li className="shards__row shards__row--deployed">
       <button className="shards__goto" onClick={onGo} title="Fly to it and see its record">
@@ -89,6 +96,7 @@ function ItemRow({ d, onGo }: { d: MyDeployment; onGo: () => void }): JSX.Elemen
         </span>
       </button>
       {!d.published && <PublishSwitch lookupId={d.lookupId} published={false} />}
+      {movable(d, me) && <button className="shards__move" onClick={onMove} title="Place it somewhere else: BUILD comes up on it where it stands">MOVE</button>}
       <span className="shards__goto-hint" aria-hidden="true">▸</span>
     </li>
   )
@@ -151,7 +159,7 @@ export function StashModals(): JSX.Element | null {
           {b.items.length} item{b.items.length === 1 ? '' : 's'} sealed to {b.height === 0 ? 'one exact gibson' : `a ${formatCellSize(b.height)} region`}. Tap one to fly to it and see its record.
         </p>
         <ul className="avatars__list">
-          {b.items.map((d) => <ItemRow key={d.eventId} d={d} onGo={() => { close(); goToDeployment(d) }} />)}
+          {b.items.map((d) => <ItemRow key={d.eventId} d={d} onGo={() => { close(); goToDeployment(d) }} onMove={() => { close(); movePlaced(d.eventId) }} />)}
         </ul>
         <button className="secret__act login__act" onClick={() => useStash.getState().openBags()}>ALL BAGS</button>
       </Shell>

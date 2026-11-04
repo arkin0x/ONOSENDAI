@@ -157,6 +157,33 @@ describe('a route step whose position moved while the route waited', () => {
     expect(lastPosted()).toMatchObject({ from: there, prevEventId: head })
     expect(S().plan?.step.from).toEqual(there)
   })
+
+  it('funding: a HOSAKA first step is not bought for the old position; it is planned again from where the chain stands', async () => {
+    useCalibration.setState({ status: 'measured', hopHeight: 12, sidestepHeight: 12 })
+    // On the leaf touching an h13 wall: one HOSAKA hop across it is the whole route.
+    const s = S()
+    const block = (s.position.x >> 13n) << 13n
+    const from = { ...s.position, x: block + 4095n }
+    if (from.x !== s.position.x) await moved(from)
+    useCyberspace.setState({ cursor: { ...from, x: from.x ^ (1n << 12n) } })
+    const balance = deferred<{ pubkey: string; balance_msats: number; ledger: never[] }>()
+    fake.balance.mockReturnValue(balance.promise)
+    fake.submitHop.mockResolvedValue({ id: 'job-s', status: 'computing', cost_msats: 1000, poll_token: 'tok', result: null, error: null, payment_required: false, balance_debited: true })
+    fake.waitForJob.mockReturnValue(new Promise(() => {}))
+    const committed = S().commit()
+    await vi.waitFor(() => { expect(S().cloud.status).toBe('funding') })
+    expect(S().plan?.step).toMatchObject({ source: 'cloud', from })
+
+    const there = { ...from, y: from.y + 1n }
+    await moved(there)
+    balance.resolve({ pubkey: S().identity.pubkey, balance_msats: 5000, ledger: [] })
+    await committed
+
+    // Nothing is bought for the old position: whatever HOSAKA is asked for starts where the chain stands.
+    for (const call of fake.submitHop.mock.calls) expect(call[0]).toMatchObject({ x: there.x, y: there.y, z: there.z })
+    expect(S().plan?.step.from).toEqual(there)
+    expect(S().plan?.message).toMatch(/^Your chain moved while this route waited/)
+  })
 })
 
 /** What HOSAKA's completed hop job carries for this move (hop proof version 2), proved here by core at h13. */
@@ -171,6 +198,16 @@ function hopResult(from: Position, to: Position, plane: 0 | 1, prev: string): Re
 }
 const funded = (): HosakaJob => ({ id: 'job-1', status: 'computing', cost_msats: 1000, poll_token: 'tok-job-1', result: null, error: null, payment_required: false, balance_debited: true })
 const completed = (result: unknown): HosakaJob => ({ id: 'job-1', status: 'completed', cost_msats: 1000, result, error: null })
+
+/** After a cloud step signed by SIGN AND CONTINUE: what runCloud does for one that signed at once. */
+async function signedAndCleaned(spentBefore: number): Promise<void> {
+  await vi.waitFor(() => { expect(storage.getItem('onosendai:cloudJob')).toBeNull() })
+  expect(S().cloud.job).toBeNull()
+  expect(S().cloud.status).toBe('idle')
+  expect(S().cloud.message).toBeNull()
+  expect(S().cloud.last).toMatchObject({ jobId: 'job-1', action: 'hop', costMsats: 1000 })
+  expect(S().spentMsats).toBe(spentBefore + 1000)
+}
 
 describe('a funded route that ends or pauses', () => {
   beforeAll(placeSpawn)
@@ -218,6 +255,7 @@ describe('a funded route that ends or pauses', () => {
     useCyberspace.setState({ cursor: to })
     const head = S().prevEventId
     const before = S().events.length
+    const spent = S().spentMsats
     fake.submitHop.mockResolvedValue(funded())
     fake.waitForJob.mockResolvedValue(completed(hopResult(from, to, S().plane, head)))
     const sign = S().signEvent
@@ -241,5 +279,36 @@ describe('a funded route that ends or pauses', () => {
     expect(S().position).toEqual(to)
     expect(S().plan).toBeNull()
     expect(fake.submitHop).toHaveBeenCalledTimes(1)
+    await signedAndCleaned(spent)
+  })
+
+  it('SIGN AND CONTINUE on a cloud step cleans up as a cloud step that signed at once does: no kept job, no kept words, the cost counted', async () => {
+    useCalibration.setState({ status: 'measured', hopHeight: 12, sidestepHeight: 12 })
+    const s = S()
+    const block = (s.position.x >> 13n) << 13n
+    const from = { ...s.position, x: block + 4095n }
+    if (from.x !== s.position.x) await moved(from)
+    const to = { ...from, x: from.x ^ (1n << 12n) }
+    useCyberspace.setState({ cursor: to })
+    const before = S().events.length
+    const spent = S().spentMsats
+    fake.submitHop.mockResolvedValue(funded())
+    fake.waitForJob.mockResolvedValue(completed(hopResult(from, to, S().plane, S().prevEventId)))
+    const sign = S().signEvent
+    useCyberspace.setState({ signEvent: async () => { throw new Error('user declined') } })
+    try {
+      await S().commit()
+      await vi.waitFor(() => { expect(S().cloud.status).toBe('error') })
+    } finally {
+      useCyberspace.setState({ signEvent: sign })
+    }
+    expect(storage.getItem('onosendai:cloudJob')).not.toBeNull()
+    expect(S().cloud.message).toMatch(/The verified cloud result is kept\.$/)
+    expect(S().spentMsats).toBe(spent)
+
+    S().resumePlan()
+    await vi.waitFor(() => { expect(S().events).toHaveLength(before + 1) })
+    expect(S().position).toEqual(to)
+    await signedAndCleaned(spent)
   })
 })

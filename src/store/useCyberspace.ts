@@ -3388,6 +3388,47 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
     })
   }
 
+  /**
+   * The kept job a declined cloud proof came from: the record on disk for
+   * this identity, bound to the head the proof was, for the same move.
+   */
+  const keptJobFor = (msg: Extract<ProofResponse, { type: 'done' }>): PendingCloudJob | null => {
+    const record = loadCloudJob()
+    if (!record || record.pubkey !== get().identity.pubkey || !msg.move) return null
+    if (record.prevEventId !== msg.prevEventId) return null
+    return positionHex(positionFromWire(record.to), record.plane) === msg.move.toHex ? record : null
+  }
+
+  /**
+   * A kept HOSAKA proof signed by SIGN AND CONTINUE: the same bookkeeping
+   * runCloud does for one signed at once. The record goes, the cost joins
+   * the spent tally, the job is the last one, and the words that said the
+   * result was kept go with it. A next cloud step the route already started
+   * keeps its own status and words.
+   */
+  const keptCloudStepSigned = (record: PendingCloudJob, msg: Extract<ProofResponse, { type: 'done' }>): void => {
+    if (loadCloudJob()?.jobId === record.jobId) clearCloudJob()
+    const cost = msg.costMsats ?? record.costMsats
+    set({ spentMsats: addSpent(get().genesisId, cost) })
+    useToast.getState().show({ label: `CLOUD COMPUTE JOB COMPLETE - ${record.jobId.slice(0, 8)}`, meta: 'Thanks for using HOSAKA!', mark: 'hosaka' })
+    const cloud = get().cloud
+    const last = { jobId: record.jobId, action: record.action, costMsats: cost, lookupId: msg.lookupId ?? null, at: Date.now() }
+    const settled = cloud.status === 'idle' || cloud.status === 'error' || cloud.status === 'paid'
+    set({
+      cloud: settled
+        ? {
+          ...IDLE_CLOUD,
+          balance: cloud.balance,
+          limits: cloud.limits,
+          provider: cloud.provider,
+          status: get().plan ? 'paid' : 'idle',
+          message: get().plan ? 'Route funded.' : null,
+          last,
+        }
+        : { ...cloud, last },
+    })
+  }
+
   cloudStepStarter = startCloudStep
   stepReplanner = headMovedUnder
 
@@ -4048,6 +4089,9 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
       // refuses it if the head has moved.
       const kept = plan.awaiting
       const msg = kept.id === requestId ? kept : { ...kept, id: ++requestId }
+      // A kept HOSAKA proof's job, for the bookkeeping once it is signed.
+      const job = msg.type === 'done' && msg.source === 'cloud' ? keptJobFor(msg) : null
+      const before = get().events.length
       // The kept proof is for the paused step: its destination is the step's.
       set({
         plan: { ...plan, status: 'running', message: null, awaiting: null },
@@ -4055,7 +4099,9 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
         // A kept cloud proof goes in its job's plane (finishProof signs it there either way).
         ...(msg.type === 'done' && msg.move ? { plane: coordToXyz(hexToCoord(msg.move.toHex)).plane } : {}),
       })
-      void get().finishProof(msg)
+      void get().finishProof(msg).then(() => {
+        if (job && msg.type === 'done' && get().events.length > before) keptCloudStepSigned(job, msg)
+      })
       return
     }
     // A step planned before another device moved the chain is planned again
@@ -5922,10 +5968,13 @@ function startPlanStep(): void {
   }
   // The step was planned from where the chain stood then. Another device or
   // tab may have moved it while the route waited (a quote, PAY, a deposit, a
-  // RESUME): computed as planned, it would name the new head and the old
-  // position, which no reader verifies (review of #581). It is planned again
-  // from where the chain stands now. Every way a step starts comes here.
-  if (plan.step.source === 'local' && !samePosition(plan.step.from, s.position)) {
+  // RESUME): computed here as planned, it would name the new head and the old
+  // position, which no reader verifies (review of #581); bought from HOSAKA,
+  // the job would be paid for and then refused at signing (cloud move
+  // mismatch). It is planned again from where the chain stands now. Every way
+  // a step starts comes here, and this is the only door to a cloud submit
+  // (cloudStepStarter).
+  if (!samePosition(plan.step.from, s.position)) {
     stepReplanner?.(plan.walk === true, ROUTE_MOVED_MESSAGE)
     return
   }

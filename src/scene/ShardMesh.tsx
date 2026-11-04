@@ -33,6 +33,7 @@ import {
 import { easeOutCubic, hash01, scrambleOffset, seedOf, SHARD_DECODE_MS } from '../lib/decode'
 import { dissolveShare } from '../lib/ceremony'
 import { MAX_UNIT, expandFaceColors, flatten, toRender, type Part, type Ref, type ShardModel } from 'sno-core/shards'
+import { linearColors } from './shardColors'
 import { parseAddress, partMatrix, placedBounds, refKey, type Placed } from 'sno-core/parts'
 import { useResolved, type Resolved } from '../lib/parts'
 import { dropDemand, provisional, setDemand, useAllowance, type Allowance } from './meshBudget'
@@ -216,7 +217,9 @@ function useSame<T extends ArrayLike<number>>(next: T): T {
  * with no faces, its own points inside the walls.
  */
 export function shardGeometry(shard: ShardModel, clip?: Box, pose?: Pose): { positions: Float32Array; colors: Float32Array; index: number[]; faces: number[][]; drawn: number[] } {
-  const f = flatten(shard, pose)
+  // The model's colors are sRGB and three reads a vertex color as linear (shardColors.ts).
+  const flat = flatten(shard, pose)
+  const f = { ...flat, colors: linearColors(flat.colors) }
   if (!clip || boxContains(clip, f.positions)) return { ...f, faces: shard.faces as number[][], drawn: shard.faces.map((_, i) => i) }
   if (shard.faces.length === 0) {
     const pts = clipPoints(f.positions, f.colors, clip)

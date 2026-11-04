@@ -42,7 +42,8 @@ import {
   type PendingCloudJob,
   wirePosition,
   formatWait,
-  jobPatienceMs } from '../cloud'
+  jobPatienceMs,
+  loadCloudDeposit, saveCloudDeposit, clearCloudDeposit, loadKeysTicket, saveKeysTicket, clearKeysTicket, type PendingCloudDeposit, type PendingKeys } from '../cloud'
 import { HosakaError, cloudHopPause, cloudHopsSold, type HosakaClient, type HosakaDeposit, type HosakaJob, type HosakaLimits } from '../hosaka'
 
 const LIMITS: HosakaLimits = { max_hop_height: 25, max_sidestep_height: 29, hop_min_msats: 1000, deposit_min_msats: 1000, deposit_max_msats: 5_000_000_000, invoice_ttl_seconds: 3600, hop_proof_version: 2 }
@@ -140,6 +141,67 @@ describe('persistence', () => {
     expect(loadCloudJob('p')).toBeNull()
     localStorage.setItem('onosendai:cloudJob', JSON.stringify({ version: 1, jobId: 'j', pubkey: 'p', stage: 'flying' }))
     expect(loadCloudJob('p')).toBeNull()
+  })
+
+  describe('one route deposit per identity (review of #597)', () => {
+    const dep = (pubkey: string, depositId: string): PendingCloudDeposit => ({ depositId, pubkey, amountMsats: 1000, expiresAt: 9_999_999_999, bolt11: `lnbc-${depositId}` })
+    beforeEach(() => localStorage.removeItem('onosendai:cloudDeposit'))
+
+    it('a second identity buying keeps the first identity\'s unclaimed deposit, and forgets only its own', () => {
+      saveCloudDeposit(dep('A', 'dep-a'))
+      saveCloudDeposit(dep('B', 'dep-b'))
+      expect(loadCloudDeposit('A')?.depositId).toBe('dep-a')
+      expect(loadCloudDeposit('B')?.depositId).toBe('dep-b')
+      clearCloudDeposit('B', 'an-older-deposit')
+      expect(loadCloudDeposit('B')?.depositId).toBe('dep-b')
+      clearCloudDeposit('B', 'dep-b')
+      expect(loadCloudDeposit('B')).toBeNull()
+      expect(loadCloudDeposit('A')?.depositId).toBe('dep-a')
+      clearCloudDeposit('A', 'dep-a')
+      expect(localStorage.getItem('onosendai:cloudDeposit')).toBeNull()
+    })
+
+    it('the single deposit an earlier version kept is read as its identity\'s, and kept when another identity buys', () => {
+      localStorage.setItem('onosendai:cloudDeposit', JSON.stringify(dep('A', 'dep-a')))
+      expect(loadCloudDeposit('A')?.depositId).toBe('dep-a')
+      expect(loadCloudDeposit('B')).toBeNull()
+      saveCloudDeposit(dep('B', 'dep-b'))
+      clearCloudDeposit('B', 'dep-b')
+      expect(loadCloudDeposit('A')?.depositId).toBe('dep-a')
+    })
+  })
+
+  describe('one cubes ticket per identity (review of #597)', () => {
+    const ticket = (pubkey: string, jobId: string): PendingKeys => ({ version: 1, pubkey, jobId, pollToken: `tok-${jobId}`, to: { x: '1', y: '2', z: '3' }, plane: 0, at: 5 })
+    beforeEach(() => localStorage.removeItem('onosendai:cloudKeys'))
+
+    it('a second identity\'s paid hop keeps the first identity\'s ticket, and forgets only its own', () => {
+      saveKeysTicket(ticket('A', 'job-a'))
+      saveKeysTicket(ticket('B', 'job-b'))
+      expect(loadKeysTicket('A')?.jobId).toBe('job-a')
+      expect(loadKeysTicket('B')?.jobId).toBe('job-b')
+      clearKeysTicket('B', 'job-a')
+      expect(loadKeysTicket('A')?.jobId).toBe('job-a')
+      expect(loadKeysTicket('B')?.jobId).toBe('job-b')
+      clearKeysTicket('B', 'job-b')
+      expect(loadKeysTicket('B')).toBeNull()
+      expect(loadKeysTicket('A')?.jobId).toBe('job-a')
+      clearKeysTicket('A', 'job-a')
+      expect(localStorage.getItem('onosendai:cloudKeys')).toBeNull()
+    })
+
+    it('the single ticket an earlier version kept, which names no identity, is read by whoever collects, and never written over', () => {
+      const { pubkey: _none, ...old } = ticket('A', 'job-old')
+      void _none
+      localStorage.setItem('onosendai:cloudKeys', JSON.stringify(old))
+      expect(loadKeysTicket('A')?.jobId).toBe('job-old')
+      saveKeysTicket(ticket('B', 'job-b'))
+      expect(loadKeysTicket('B')?.jobId).toBe('job-b')
+      expect(loadKeysTicket('A')?.jobId).toBe('job-old')
+      clearKeysTicket('A', 'job-old')
+      expect(loadKeysTicket('A')).toBeNull()
+      expect(loadKeysTicket('B')?.jobId).toBe('job-b')
+    })
   })
 
   describe('one kept job per identity (review of #589)', () => {

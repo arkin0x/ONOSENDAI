@@ -121,12 +121,13 @@ async function keepWholeInDb(): Promise<void> {
 }
 
 /** The paid job record for `action`, bound to `prev`. */
-async function keepJob(action: 'hop' | 'ride', prev: NostrEvent): Promise<PendingCloudJob> {
+async function keepJob(action: 'hop' | 'ride', prev: NostrEvent, stage: PendingCloudJob['stage'] = 'computing'): Promise<PendingCloudJob> {
   const cloud = await import('../../lib/cloud')
   const rec: PendingCloudJob = {
     version: 1, jobId: `paid${action}1`, pollToken: 'tok', action, pubkey: pk,
     from: cloud.wirePosition(placeOf.get(prev.id)!), to: cloud.wirePosition(at(BigInt(FULL) << 20n)), plane: home.plane,
-    prevEventId: prev.id, costMsats: 21_000, createdAt: Date.now(), stage: 'computing', deposit: null,
+    prevEventId: prev.id, costMsats: 21_000, createdAt: Date.now(), stage,
+    deposit: stage === 'awaiting_payment' ? { depositId: 'dep1', bolt11: 'lnbc-dep1', amountMsats: 21_000, expiresAt: Math.floor(Date.now() / 1000) + 3_600, paymentHash: 'h' } : null,
     ...(action === 'ride' ? { ride: { fromHeight: 100, toHeight: 105, toCoordHex: 'cd'.repeat(32) } } : {}),
   }
   cloud.saveCloudJob(rec)
@@ -260,5 +261,42 @@ describe('a paid cloud job across a reload of a chain localStorage outgrew', () 
     await settle(200)
     expect(S().cloud.rideError ?? '').not.toMatch(/kept/)
     expect(fake.submitRide).toHaveBeenCalledTimes(1)
+  }, 20_000)
+
+  it('CANCEL while a record still at awaiting_payment is being checked keeps it: its invoice may be paid already (identity PR item 7)', async () => {
+    await keepWholeInDb()
+    const rec = await keepJob('hop', head, 'awaiting_payment')
+    ;(globalThis as { indexedDB?: IDBFactory }).indexedDB = silentDb(new IDBFactory())
+    const m = await pageLoad(2_000)
+    const S = m.useCyberspace.getState
+    const resumed = S().resumeCloudJob()
+    await settle(100)
+    expect(S().cloud.status).toBe('checking')
+    S().cancelCloud()
+    expect((await recordNow())?.jobId).toBe(rec.jobId)
+    expect(S().cloud.job?.jobId).toBe(rec.jobId)
+    expect(S().cloud.message).toMatch(/kept/)
+    await resumed
+    expect((await recordNow())?.jobId).toBe(rec.jobId)
+  }, 20_000)
+
+  it('a refusal over a kept record on disk alone puts it in the panel, so RESUME and DISCARD show (identity PR item 8)', async () => {
+    storage.setItem(`onosendai:chain:${pk}`, storedJson(KEPT))
+    quota.chainChars = Infinity
+    const m = await pageLoad()
+    await m.savedChainLoaded()
+    const rec = await keepJob('hop', chain[KEPT - 1])
+    const S = m.useCyberspace.getState
+    expect(S().cloud.job).toBeNull()
+    expect(await S().rideViaHosaka({ previousId: S().prevEventId!, fromHeight: 200, toHeight: 210, toCoordHex: 'ab'.repeat(32), estSeconds: null })).toBe(false)
+    expect(S().cloud.rideError).toMatch(/RESUME or DISCARD/)
+    // The panel shows RESUME and DISCARD for the job it holds, while nothing is active.
+    expect(S().cloud.job?.jobId).toBe(rec.jobId)
+    expect(['idle', 'error']).toContain(S().cloud.status)
+    m.useCyberspace.setState({ cloud: { ...S().cloud, job: null } })
+    m.useCyberspace.setState({ cloudPrefs: { ...S().cloudPrefs, mode: 'auto' } })
+    expect(await S().buyRegionKey(S().position, S().plane, 10)).toEqual({ ok: false, error: expect.stringMatching(/RESUME or DISCARD/) })
+    expect(S().cloud.job?.jobId).toBe(rec.jobId)
+    expect((await recordNow())?.jobId).toBe(rec.jobId)
   }, 20_000)
 })

@@ -2815,6 +2815,20 @@ function liveKeptJob(): PendingCloudJob | null {
   return r
 }
 
+/**
+ * Whether a new paid job must be refused over a kept one (KEPT_JOB_MESSAGE). The
+ * refusal says RESUME or DISCARD it, and the panel shows those only for a job it
+ * holds: a record that is only on disk is put in the panel, so both are there.
+ */
+function refusesOverKeptJob(): boolean {
+  const s = useCyberspace.getState()
+  if (s.cloud.job !== null) return true
+  const kept = liveKeptJob()
+  if (!kept) return false
+  if (s.cloud.status === 'idle' || s.cloud.status === 'error') useCyberspace.setState({ cloud: { ...s.cloud, job: kept } })
+  return true
+}
+
 /** Resolves once the current identity's whole saved chain is in hand: the IndexedDB read after a load or a switch has landed. */
 export function savedChainLoaded(): Promise<void> {
   return chainHydrated(useCyberspace.getState().identity.pubkey)
@@ -3188,7 +3202,8 @@ function foldDeferred(): void {
 /** The cloud flow in progress: its fetches, and the claim-poll sleep a button can cut short. */
 let cloudAbort: AbortController | null = null
 // One collector at a time: the startup call and a just-landed hop can both ask.
-let collectingKeys = false
+/** The identities whose cubes ticket is being collected now: one wait per identity. */
+const collectingKeys = new Set<string>()
 let cloudWaker: Waker | null = null
 let hosaka: { url: string; client: HosakaClient } | null = null
 /** The caps request out right now, and the API URL it was sent to. */
@@ -3677,7 +3692,9 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
         if (id !== requestId) return
         const invoice = invoiceOf(dep)
         // On disk before the invoice is on screen: a reload after paying claims it.
-        saveCloudDeposit({ depositId: dep.deposit_id, pubkey: get().identity.pubkey, amountMsats: shortfall, expiresAt: invoice.expiresAt, bolt11: invoice.bolt11 })
+        // Under the identity that asked, and only its own is forgotten below.
+        const payer = get().identity.pubkey
+        saveCloudDeposit({ depositId: dep.deposit_id, pubkey: payer, amountMsats: shortfall, expiresAt: invoice.expiresAt, bolt11: invoice.bolt11 })
         set({ cloud: { ...get().cloud, status: 'awaiting_payment', invoice, invoiceOpen: true, message: null, checking: false, lastCheck: null } })
         const settled = await client.waitForDeposit(dep.deposit_id, {
           signal: abort.signal,
@@ -3690,11 +3707,11 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
         if (typeof settled.balance_msats === 'number') get().noteBalance(settled.balance_msats)
         if (id !== requestId) return
         if (settled.status !== 'settled') {
-          clearCloudDeposit()
+          clearCloudDeposit(payer, dep.deposit_id)
           routeFail('The invoice expired unpaid. Commit again for a fresh quote.')
           return
         }
-        clearCloudDeposit()
+        clearCloudDeposit(payer, dep.deposit_id)
       }
     } catch (err) {
       if (id !== requestId || abort.signal.aborted) return
@@ -3729,7 +3746,12 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
     // work. The same step bought again is no bar: its idempotency key names
     // the same job (a step whose signature was declined, run again).
     const kept = liveKeptJob()
-    if (kept && !(kept.action === step.kind && kept.prevEventId === prevEventId && samePosition(positionFromWire(kept.to), step.to))) { routeFail(KEPT_JOB_MESSAGE); return }
+    if (kept && !(kept.action === step.kind && kept.prevEventId === prevEventId && samePosition(positionFromWire(kept.to), step.to))) {
+      routeFail(KEPT_JOB_MESSAGE)
+      // Out of the route's flow now: the record goes in the panel, so RESUME and DISCARD show.
+      if (get().cloud.job === null) set({ cloud: { ...get().cloud, job: kept } })
+      return
+    }
     // The same three checks quoteRoute made, again at the moment of buying:
     // the limits may have changed since (a HOSAKA rolled back, or paused).
     if (step.kind === 'hop') {
@@ -3984,7 +4006,7 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
     // which arrive on the same job minutes later. The ticket outlives this
     // tab, so a phone put away mid job collects them when it comes back.
     if (stagedCubes) {
-      saveKeysTicket({ version: 1, jobId: final.jobId, pollToken: final.pollToken, to: wirePosition(move.to), plane: move.plane, at: Date.now() })
+      saveKeysTicket({ version: 1, pubkey: final.pubkey, jobId: final.jobId, pollToken: final.pollToken, to: wirePosition(move.to), plane: move.plane, at: Date.now() })
       void get().collectCloudKeys()
     }
     // The event landed, and a route may already have moved on to its next
@@ -4353,8 +4375,10 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
     hydrateChain(signer.pubkey)
     if (local) saveChain(base.events, base.published, base.chain, base.held)
     startSignatureCheck(signer.pubkey, local?.unchecked ?? [])
-    // A pending cloud job of THIS identity, if there is one, picks up where it stopped.
+    // A pending cloud job of THIS identity, if there is one, picks up where it stopped,
+    // and so do the cubes of its last paid hop.
     void get().resumeCloudJob()
+    void get().collectCloudKeys()
   }
 
   /**
@@ -4596,7 +4620,7 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
     }
     // A route HOSAKA sells steps of would write over a kept job: refused
     // before any quote or invoice, as rideViaHosaka refuses.
-    if (!funded && (get().cloud.job !== null || liveKeptJob() !== null)) {
+    if (!funded && refusesOverKeptJob()) {
       set({ plan: null, proof: { ...IDLE_PROOF, status: 'infeasible', message: KEPT_JOB_MESSAGE } })
       return
     }
@@ -6066,13 +6090,17 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
     const waker = createWaker()
     cloudAbort = abort
     cloudWaker = waker
+    let payer: { pubkey: string; depositId: string } | null = null
     try {
       set({ cloud: { ...get().cloud, status: 'funding', balanceError: null, message: currentSigner.kind === 'local' ? 'Asking HOSAKA for an invoice.' : 'Waiting for your signer to approve the request.' } })
       const dep = await client.deposit(msats, abort.signal)
       if (id !== requestId) return
       const invoice = invoiceOf(dep)
       // On disk before the invoice is on screen: a reload after paying claims it.
-      saveCloudDeposit({ depositId: dep.deposit_id, pubkey: get().identity.pubkey, amountMsats: msats, expiresAt: invoice.expiresAt, bolt11: invoice.bolt11 })
+      // Under the identity that asked, and only its own is forgotten below.
+      const asked = { pubkey: get().identity.pubkey, depositId: dep.deposit_id }
+      payer = asked
+      saveCloudDeposit({ depositId: dep.deposit_id, pubkey: asked.pubkey, amountMsats: msats, expiresAt: invoice.expiresAt, bolt11: invoice.bolt11 })
       set({ cloud: { ...get().cloud, status: 'awaiting_payment', invoice, invoiceOpen: true, message: null, checking: false, lastCheck: null } })
 
       const settled = await client.waitForDeposit(dep.deposit_id, {
@@ -6085,7 +6113,7 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
       })
       if (typeof settled.balance_msats === 'number') get().noteBalance(settled.balance_msats)
       if (id !== requestId) return
-      clearCloudDeposit()
+      clearCloudDeposit(asked.pubkey, asked.depositId)
       if (settled.status !== 'settled') {
         set({ cloud: { ...get().cloud, status: 'idle', invoice: null, invoiceOpen: false, message: null, balanceError: 'The invoice expired unpaid. Nothing was charged.' } })
         return
@@ -6096,7 +6124,7 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
       void get().refreshBalance()
     } catch (err) {
       if (id !== requestId || abort.signal.aborted) return
-      clearCloudDeposit()
+      if (payer) clearCloudDeposit(payer.pubkey, payer.depositId)
       set({ cloud: { ...get().cloud, status: 'idle', invoice: null, invoiceOpen: false, message: null, balanceError: describeCloudError(err) } })
     } finally {
       if (cloudAbort === abort) { cloudAbort = null; cloudWaker = null }
@@ -6111,7 +6139,7 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
       return { ok: false, error: 'Finish or cancel the move in progress first.' }
     }
     // Not persisted itself, but it takes the cloud flow over, and the kept job with it.
-    if (cloud.job !== null || liveKeptJob() !== null) return { ok: false, error: KEPT_JOB_MESSAGE }
+    if (refusesOverKeptJob()) return { ok: false, error: KEPT_JOB_MESSAGE }
     const client = cloudClient(cloudPrefs.apiUrl)
     stopCloud()
     const id = ++requestId
@@ -6189,7 +6217,7 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
       return refuse('Finish or cancel the move in progress first.')
     }
     // A kept job is paid work; a new record would overwrite it.
-    if (cloud.job !== null || liveKeptJob() !== null) return refuse(KEPT_JOB_MESSAGE)
+    if (refusesOverKeptJob()) return refuse(KEPT_JOB_MESSAGE)
     if (ask.previousId !== prevEventId) return refuse('Your chain moved since this ride was planned. Ride again from here.')
     if (whyNoMove(get().actions())) return refuse(whyNoMove(get().actions())!)
 
@@ -6295,8 +6323,10 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
     stopCloud()
     // Unpaid, the job simply expires on the server. Paid or computing, the
     // record is kept: the money is spent and the result can still be claimed.
-    // Dismissing an error keeps whatever the failure left behind.
-    const keep = cloud.job !== null && (cloud.status === 'error' || cloud.job.stage !== 'awaiting_payment')
+    // Dismissing an error keeps whatever the failure left behind. A record still
+    // being checked (resumeCloudJob) was read from disk, never offered here: its
+    // invoice may be paid already, so it is kept whatever its stage says.
+    const keep = cloud.job !== null && (cloud.status === 'error' || cloud.status === 'checking' || cloud.job.stage !== 'awaiting_payment')
     // Only this identity's: another's kept job waits on disk for it (review of #589).
     if (!keep) clearCloudJob(cloud.job?.pubkey ?? get().identity.pubkey, cloud.job?.jobId)
     set({
@@ -6319,35 +6349,40 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
   },
 
   collectCloudKeys: async () => {
-    const ticket = loadKeysTicket()
-    if (!ticket || collectingKeys) return
-    collectingKeys = true
+    // The signed-in identity's ticket: another identity's waits on disk for it (review of #597).
+    const owner = get().identity.pubkey
+    const ticket = loadKeysTicket(owner)
+    if (!ticket || collectingKeys.has(owner)) return
+    collectingKeys.add(owner)
+    const done = (): void => clearKeysTicket(owner, ticket.jobId)
+    // Said only to the identity whose hop it was; the keys are held on this device either way.
+    const say = (toast: Parameters<ReturnType<typeof useToast.getState>['show']>[0]): void => { if (get().identity.pubkey === owner) useToast.getState().show(toast) }
     try {
       const job = await cloudClient(get().cloudPrefs.apiUrl).waitForJob(ticket.jobId, ticket.pollToken)
       const r = job.result as CloudHopResult | null
       if (job.status === 'completed' && r?.destination_keys && r.destination_keys.length > 0) {
         const n = holdCloudDestinationKeys(r.destination_keys, positionFromWire(ticket.to), ticket.plane)
-        clearKeysTicket()
-        if (n > 0) useToast.getState().show({ label: `${n} REGION KEYS FROM HOSAKA`, meta: 'The cubes around your paid hop are open. Anything hidden in them is yours to find.', mark: 'hosaka' })
+        done()
+        if (n > 0) say({ label: `${n} REGION KEYS FROM HOSAKA`, meta: 'The cubes around your paid hop are open. Anything hidden in them is yours to find.', mark: 'hosaka' })
       } else if (r?.keys_error) {
         // The hop stands and is already signed: only the extra work failed,
         // and HOSAKA credited its surcharge back.
-        clearKeysTicket()
+        done()
         const back = Math.round((r.keys_credit_msats ?? 0) / 1000)
-        useToast.getState().show({
+        say({
           label: 'CUBES NOT COMPUTED',
           meta: back > 0 ? `Your hop stands. ${back} sats came back to your HOSAKA balance.` : 'Your hop stands. Nothing extra was charged.',
           mark: 'hosaka',
         })
       } else if (job.status === 'completed' || job.status === 'failed') {
         // Nothing is coming on this job.
-        clearKeysTicket()
+        done()
       }
     } catch {
       // A dropped socket or a tab put away: the ticket keeps, and the next
       // load picks it up again.
     } finally {
-      collectingKeys = false
+      collectingKeys.delete(owner)
     }
   },
 
@@ -6356,20 +6391,21 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
     if (cloudPrefs.mode !== 'off') void ensureCloudLimits()
     // A route deposit that was paid (or not) while the tab was away: claim it
     // so the sats reach the balance, or forget it once its invoice expired.
-    const dep = loadCloudDeposit()
+    // Only this identity's: another's waits on disk for it (review of #597).
+    const dep = loadCloudDeposit(identity.pubkey)
     if (dep && dep.pubkey === identity.pubkey) {
       if (dep.expiresAt * 1000 < Date.now()) {
-        clearCloudDeposit()
+        clearCloudDeposit(dep.pubkey, dep.depositId)
       } else {
         try {
           const claimed = await cloudClient(cloudPrefs.apiUrl).claimDeposit(dep.depositId)
           if (typeof claimed.balance_msats === 'number') get().noteBalance(claimed.balance_msats)
           if (claimed.status === 'settled') {
-            clearCloudDeposit()
+            clearCloudDeposit(dep.pubkey, dep.depositId)
             const msats = claimed.settled_msats ?? dep.amountMsats
             set({ cloud: { ...get().cloud, message: `A ${satsOf(msats)} sat route deposit from an interrupted commit was credited to your HOSAKA balance.`, credited: { msats, at: Date.now() } } })
           } else if (claimed.status === 'expired') {
-            clearCloudDeposit()
+            clearCloudDeposit(dep.pubkey, dep.depositId)
           }
         } catch {
           // Unreachable now; the record stays for the next load.

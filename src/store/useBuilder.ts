@@ -107,7 +107,7 @@ import { copyLinedUp, positionOf, useShards, type DeployPending } from './useSha
 import { useWorkshop } from './useWorkshop'
 import { placedStep } from '../lib/space'
 import { useHyperspace } from './useHyperspace'
-import { useToast } from './useToast'
+import { BRIEF_TOAST_MS, useToast } from './useToast'
 import { useStash } from '../hud/stash'
 import { registerEscape } from '../hooks/useEscape'
 import { buildPlane, placedCursor } from '../lib/buildCursor'
@@ -117,9 +117,6 @@ export type BuildEntry = 'build' | 'deploy'
 
 /** The label the free view carries while it is the build cursor. */
 export const BUILD_FOCUS_LABEL = 'BUILD'
-
-/** Why BUILD mode ended without EXIT, for the toast that says so. */
-export type BuildEndReason = 'view' | 'moved' | 'identity'
 
 export interface BuilderState {
   /** BUILD mode is on: the free view is the build cursor and placements land there. */
@@ -220,12 +217,6 @@ function settleView(scrub: number | null): void {
     return
   }
   if (onAvatar(cs)) cs.clearFocus(true)
-}
-
-const END_REASON: Record<BuildEndReason, string> = {
-  view: 'The view moved somewhere you cannot build from (Earth, a stop, a deployment).',
-  moved: 'Your avatar was moved under it (a respawn, a ride arriving, or the relays\' version of your chain), and the build cursor went with it.',
-  identity: 'You switched identity; the build cursor belonged to the one you left.',
 }
 
 export const useBuilder = create<BuilderState>((set, get) => ({
@@ -336,61 +327,49 @@ export const useBuilder = create<BuilderState>((set, get) => ({
 }))
 
 /**
- * BUILD mode ended by something other than EXIT. The deploy lined up at the
- * build cursor cannot stay, but what went into it is kept, and the toast says
- * why the mode ended and where the work is.
+ * BUILD mode ended by something other than EXIT: the view moved somewhere
+ * you cannot build from, your avatar was moved under it, or you switched
+ * identity. The deploy lined up at the build cursor cannot stay, but what
+ * went into it is kept for the composer that opens next. The toast says
+ * only BUILD MODE ENDED (arkinox, 2026-11-02: "none of the other text"),
+ * except when a placement already on its way still lands where it was aimed:
+ * then one line says so, so nobody places it again and makes two.
  */
-function endUnder(reason: BuildEndReason): void {
+function endUnder(switched = false): void {
   // A copy lined up after a placement was placed already: asked before the
   // mode goes off, which forgets `placedLast`. It stands down quietly, with
-  // no draft kept and nothing said about it.
+  // no draft kept.
   const copy = copyLinedUp(useShards.getState())
   useBuilder.setState({ active: false, via: null, leftAvatar: false, scrub: null })
   if (copy) useShards.getState().cancelDeploy()
   const shards = useShards.getState()
   const pending = shards.pending
-  let kept = ''
-  if (pending && shards.deployStatus === 'working') {
-    // Already hiding: the key is being computed for the place it was aimed
-    // at, and it finishes there. Nothing to keep and nothing to cancel, only
-    // to say (found in review, 2026-10-07: it used to say "kept" and publish).
-    kept = pending.type === 'message'
-      ? ' Your message was already being hidden, and it finishes at the place you chose.'
-      : pending.type === 'key' || pending.type === 'chest' || pending.type === 'audio'
-        ? ` Your ${pending.type === 'key' ? 'item' : pending.type} was already being hidden, and it finishes at the place you chose.`
-        : ` "${shards.pendingShard()?.name ?? 'The object'}" was already being hidden, and it finishes at the place you chose.`
-  } else if (pending) {
-    // What was set for this one deploy goes with it; say so plainly.
-    const riddle = shards.deployBag.riddle.trim() !== ''
-    const dropped = ` Its height and bag settings${riddle ? ', including the hint message you wrote,' : ''} were not kept.`
-    if (pending.type === 'message') {
-      useBuilder.setState({ messageDraft: pending.text })
-      // The panel is CREATE and the forged thing is an item (arkinox, 2026-10-10); the type still says key.
-      kept = ' Your message is kept: WRITE A MESSAGE in CREATE, or HIDE MESSAGE in build mode, opens it again.' + dropped
-    } else if (pending.type === 'key' || pending.type === 'chest') {
-      // Kept whole, as a message is: the item's pair, name and picture, or the chest's lock and contents.
-      useBuilder.setState({ itemDraft: pending })
-      kept = ` Your ${pending.type === 'key' ? 'item' : 'chest'} is kept: ${pending.type === 'key' ? 'FORGE AN ITEM' : 'SEAL A CHEST'} in CREATE opens it again.` + dropped
-    } else if (pending.type === 'audio') {
-      // The file is encrypted and uploaded already: the item is kept whole, so PLACE AUDIO starts from it.
-      useBuilder.setState({ itemDraft: pending })
-      kept = ' Your audio is kept: PLACE AUDIO in CREATE opens it again.' + dropped
-    } else if (pending.intoChest) {
-      // A shard being aimed into a chest: the chest comes back whole through
-      // cancelDeploy (chestBack, moved into itemDraft below), that shard not
-      // aimed. An aim has no height or bag settings of its own to lose.
-      const name = shards.pendingShard()?.name ?? 'the object'
-      kept = ` Your chest is kept: SEAL A CHEST in CREATE opens it again. "${name}" is not aimed; AIM it again from there.`
-    } else {
-      const name = shards.pendingShard()?.name ?? 'the object'
-      kept = ` The deploy of "${name}" was canceled; the model is unchanged in your workshop.` + dropped
-    }
+  // Already hiding (deployStatus working): the key is being computed for the
+  // place it was aimed at, and it finishes there, so nothing is kept or
+  // canceled (found in review, 2026-10-07: it used to say "kept" and publish).
+  const working = pending !== null && shards.deployStatus === 'working'
+  if (pending && !working) {
+    // A message, a key, a chest or hidden audio is kept whole for the
+    // composer that opens next (audio's file is uploaded already). A door
+    // holds nothing yet; a chest's move leaves it where it stood; a shard
+    // aimed into a chest gives the chest back through cancelDeploy
+    // (chestBack); a shard's deploy leaves its model unchanged in the
+    // workshop. The deploy's height and bag settings go with it.
+    if (pending.type === 'message') useBuilder.setState({ messageDraft: pending.text })
+    else if (pending.type === 'audio' || pending.type === 'key' || (pending.type === 'chest' && !pending.door && !pending.move)) useBuilder.setState({ itemDraft: pending })
     // Not back to the Models modal, or the chest composer: the view went somewhere on purpose.
     useStash.setState({ returnToModels: false, returnToFeed: false, returnToChest: false })
     shards.cancelDeploy()
   }
-  useToast.getState().show({ label: 'BUILD MODE ENDED', meta: END_REASON[reason] + kept + ' Press BUILD to start again.', mark: 'build' })
+  // A shard being signed into a chest publishes nothing: it goes back to the
+  // chest composer. After an identity switch the hide is refused unless its bag
+  // was signed already (useShards signBag), so nothing is promised then.
+  const lands = !switched && pending !== null && working && !(pending.type === 'shard' && pending.intoChest)
+  useToast.getState().show({ label: 'BUILD MODE ENDED', meta: lands ? STILL_LANDS : '', mark: 'build', ms: BRIEF_TOAST_MS })
 }
+
+/** BUILD MODE ENDED's one extra line, while a placement already on its way finishes where it was aimed. */
+export const STILL_LANDS = 'It still lands where you aimed it.'
 
 useCyberspace.subscribe((s, prev) => {
   const b = useBuilder.getState()
@@ -399,19 +378,19 @@ useCyberspace.subscribe((s, prev) => {
   // identity switch and a chain chosen from the relays also clear the view:
   // reading them as the view moving away gave the wrong reason (review of
   // #235). Another identity first: everything about the old one is gone.
-  if (s.identity.pubkey !== prev.identity.pubkey) { endUnder('identity'); settleView(null); return }
+  if (s.identity.pubkey !== prev.identity.pubkey) { endUnder(true); settleView(null); return }
   // Your position replaced under the mode, carrying the cursor to the new
   // head: a new chain head that also wrote the cursor. Only a respawn, a ride
   // arriving and a chain chosen from the relays do both. A move committed
   // before building lands without touching the cursor, and the mode stays.
   const headChanged = s.prevEventId !== prev.prevEventId || s.genesisId !== prev.genesisId
   if (headChanged && s.cursor !== prev.cursor) {
-    endUnder('moved')
+    endUnder()
     settleView(null)
     return
   }
   // The view the build cursor rides ended some other way.
-  if (!viewStands(s)) { endUnder('view'); return }
+  if (!viewStands(s)) { endUnder(); return }
   // The mark is an index into the chain on show; it stands only while that
   // index is still the same action. Another chain on show (a spectation
   // begun, switched or ended), or the same avatar's chain replaced (they
@@ -436,6 +415,14 @@ useShards.subscribe((s, prev) => {
   if (s.chestBack !== null && s.chestBack !== prev.chestBack) {
     const draft = useShards.getState().takeChestBack()
     if (draft) useBuilder.setState({ itemDraft: { type: 'chest', ...draft } })
+  }
+  // A door sealed: "then build" (chest and door design, 4.2). The mode stays on
+  // however it started, the red cube up, and the next placement starts at the
+  // door's height, so what is placed next is sealed to it.
+  if (s.pending === null && prev.pending?.type === 'chest' && prev.pending.door && !prev.pending.move && s.deployStatus === 'done' && prev.deployStatus !== 'idle') {
+    const height = s.mine[s.mine.length - 1]?.chest?.door
+    if (useBuilder.getState().active) useBuilder.setState({ via: 'build' })
+    if (height !== undefined) useShards.setState({ deployInto: height })
   }
   // A placement lines the same thing up again (useShards `placedLast`) only
   // where BUILD mode goes on after it. Where the mode ends with the placement
@@ -530,4 +517,32 @@ useBuilder.subscribe((s, prev) => {
   offEscape = s.active ? registerEscape('chip', () => useBuilder.getState().exit()) : null
   // What PLACE AGAIN would place belongs to one session: each starts fresh.
   if (useShards.getState().placedLast !== null) useShards.setState({ placedLast: null })
+})
+
+/**
+ * ADD on a door of yours (chest and door design, 4.8): BUILD with the cursor
+ * inside its red cube and the next placement starting at the door's height,
+ * so what you place is sealed to it; the bar's place actions are ready.
+ */
+export function addToRoom(eventId: string): void {
+  let shards = useShards.getState()
+  const d = shards.mine.find((m) => m.eventId === eventId)
+  const height = d?.chest?.door
+  if (!d || height === undefined) return
+  if (copyLinedUp(shards)) {
+    shards.cancelDeploy()
+    shards = useShards.getState()
+  }
+  if (shards.pending) return
+  const b = useBuilder.getState()
+  if (b.active) b.exit()
+  const at = positionOf(d)
+  useCyberspace.getState().focusItem(at, d.plane, d.chest?.name || 'door', placedStep(at, height))
+  useBuilder.getState().enter('build')
+  useShards.setState({ deployInto: height })
+}
+
+// ADD's height lasts as long as the BUILD it started.
+useBuilder.subscribe((s, prev) => {
+  if (prev.active && !s.active && useShards.getState().deployInto !== null) useShards.setState({ deployInto: null })
 })

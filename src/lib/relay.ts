@@ -30,14 +30,89 @@ export const CYBERSPACE_RELAY = DEFAULT_RELAY
 const MAX_WAIT_MS = 8000
 
 /**
- * The pool, refusing a retired relay. Every connection comes through
- * ensureRelay, publishing and live subscriptions included, so no list and no
- * event's hint can bring one back, and a refusal costs no wait at all.
+ * How long a connection to a player's relay may take when its caller names no
+ * time of its own. nostr-tools sets no timer on a connect without a timeout,
+ * and every caller on a socket shares the first caller's connect, so one untimed
+ * connect to a relay that accepts and never answers took the time limit from
+ * all of them: a publish or a read then waited as long as the socket did. The
+ * canonical relay gets MAX_WAIT_MS, because it has taken 4.6 s to connect.
  */
+const CONNECT_MS = 5000
+/** How many full timeouts in a row, with no answer between them, make a relay hung. */
+const HUNG_AFTER = 2
+/** How long a hung relay is left alone by the paths that skip it. */
+const HUNG_MS = 5 * 60_000
+const HUNG_REASON = 'relay hung, left alone for now'
+/** Relays that hung (normalized URL to when they may be asked again). */
+const hungUntil = new Map<string, number>()
+/** Full timeouts in a row, per relay. */
+const timeoutsInARow = new Map<string, number>()
+/** When each relay's last full timeout was counted. */
+const lastTimeoutAt = new Map<string, number>()
+
+/** A full wait ran out. One says little, since a slow relay misses an OK now and then; two in a row is a relay that hung. */
+function noteTimeout(url: string): void {
+  const norm = normalizeURL(url)
+  // Never the canonical relay: it is where everyone meets, so it is always asked.
+  if (norm === normalizeURL(CYBERSPACE_RELAY)) return
+  // Callers sharing one connect or one AUTH all hear the same rejection: that is one wait.
+  const now = Date.now()
+  if (now - (lastTimeoutAt.get(norm) ?? -Infinity) < 1000) return
+  lastTimeoutAt.set(norm, now)
+  const count = (timeoutsInARow.get(norm) ?? 0) + 1
+  timeoutsInARow.set(norm, count)
+  if (count >= HUNG_AFTER) hungUntil.set(norm, now + HUNG_MS)
+}
+
+/** The relay answered: it is not hung, whatever it did before. */
+function noteAnswered(url: string): void {
+  const norm = normalizeURL(url)
+  timeoutsInARow.delete(norm)
+  hungUntil.delete(norm)
+}
+
+/** What timed out may have been this device, not the relay. */
+function forgetHung(): void {
+  hungUntil.clear()
+  timeoutsInARow.clear()
+  lastTimeoutAt.clear()
+}
+
+function isHung(url: string): boolean {
+  try { return (hungUntil.get(normalizeURL(url)) ?? 0) > Date.now() } catch { return false }
+}
+
+/**
+ * These relays, without the hung ones: for publishing and for reads that can do
+ * without a relay. Never for reading a chain. A relay that hung can come back
+ * holding another device's newer move, and a head confirmed without it signs a
+ * fork, so chain reads ask it anyway (evenHung, and queryEachSettled) and a hung
+ * holder costs a move at most HEAD_CONFIRM_MS (arkinox's ruling of 2026-10-08).
+ */
+function skipHung(urls: string[]): string[] {
+  return urls.filter((url) => !isHung(url))
+}
+
+/** Every connection comes through ensureRelay, publishing and live subscriptions included. */
 class Pool extends AbstractSimplePool {
-  override ensureRelay(...args: Parameters<AbstractSimplePool['ensureRelay']>): ReturnType<AbstractSimplePool['ensureRelay']> {
-    if (isRetiredRelay(args[0])) return Promise.reject(new Error('retired relay, not dialed'))
-    return super.ensureRelay(...args)
+  override async ensureRelay(...[url, params]: Parameters<AbstractSimplePool['ensureRelay']>): ReturnType<AbstractSimplePool['ensureRelay']> {
+    if (isRetiredRelay(url)) throw new Error('retired relay, not dialed')
+    const norm = normalizeURL(url)
+    const started = Date.now()
+    const pending = super.ensureRelay(url, { ...params, connectionTimeout: params?.connectionTimeout ?? (norm === normalizeURL(CYBERSPACE_RELAY) ? MAX_WAIT_MS : CONNECT_MS) })
+    // Registered before the connect's first await, and gone from the pool by the time it fails.
+    const relay = this.relays?.get(norm)
+    try {
+      return await pending
+    } catch (err) {
+      if (/timed out/.test(String(err))) {
+        // nostr-tools detaches its handlers from a socket that timed out and never closes it.
+        try { (relay as unknown as { ws?: WebSocket } | undefined)?.ws?.close() } catch { /* already gone */ }
+        // Only a full wait counts: a caller's short question may run out on a healthy relay.
+        if (Date.now() - started >= CONNECT_MS) noteTimeout(url)
+      }
+      throw err
+    }
   }
 }
 
@@ -134,6 +209,7 @@ const noChallenge = new Set<string>()
 async function authRelay(url: string): Promise<void> {
   // A relay that never challenged before will not now: skip the wait.
   if (noChallenge.has(url)) return
+  const started = Date.now()
   try {
     const relay = (await getPool().ensureRelay(url)) as unknown as AuthRelay
     for (let i = 0; i < 10 && !relay.challenge; i++) await new Promise((r) => setTimeout(r, 40))
@@ -145,7 +221,11 @@ async function authRelay(url: string): Promise<void> {
     } else {
       noChallenge.add(url)
     }
-  } catch { /* relay down, or does not require auth */ }
+  } catch (err) {
+    // Relay down, or does not require auth; or it took the socket and never answered its AUTH.
+    // nostr-tools hands back the same rejection at once afterwards, which is not another wait.
+    if (/auth timed out/.test(String(err)) && Date.now() - started >= 1000) noteTimeout(url)
+  }
 }
 
 async function authAll(relays: string[]): Promise<void> {
@@ -178,7 +258,9 @@ export function dropRelays(relays: string[]): void {
 /** What nostr-tools resolves a publish with when the relay could not be reached. */
 const CONNECTION_FAILURE = 'connection failure'
 
-async function publishOnce(relays: string[], event: NostrEvent): Promise<PublishResult> {
+async function publishOnce(listed: string[], event: NostrEvent): Promise<PublishResult> {
+  const relays = skipHung(listed)
+  if (relays.length === 0) return { ok: false, reason: HUNG_REASON }
   // Protected events (the `-` tag) are only accepted from an authenticated
   // author, and the relay does not challenge on the EVENT itself, so we must
   // already be authed before publishing.
@@ -192,6 +274,10 @@ async function publishOnce(relays: string[], event: NostrEvent): Promise<Publish
     r.status === 'rejected'
       ? String(r.reason?.message ?? r.reason)
       : String(r.value).startsWith(CONNECTION_FAILURE) ? String(r.value) : null
+  results.forEach((r, i) => {
+    if (r.status === 'rejected' && /publish timed out/.test(String(r.reason))) noteTimeout(relays[i])
+    else if (failed(r) === null) noteAnswered(relays[i])
+  })
   const accepted = relays.filter((_, i) => results[i] !== undefined && failed(results[i]) === null).map((r) => normalizeURL(r))
   if (accepted.length > 0) return { ok: true, accepted }
   const reason = results.map(failed).find(Boolean)
@@ -272,10 +358,15 @@ interface AskOptions {
  * the relay auth-gates reads and a fresh socket's first REQ can beat the
  * challenge.
  */
+const NO_ANSWER = 'no answer in time'
+
+/** `evenHung`: ask a hung relay too. Reading a chain needs it (skipHung). */
+export interface ReadOptions { evenHung?: boolean }
+
 async function askOne(url: string, filter: Filter, deadline: number, opts: AskOptions = {}): Promise<RelayAnswer> {
   const { answerMs, onSent, stop, onEvent } = opts
   const remaining = (): number => Math.max(0, deadline - Date.now())
-  const late = (events: NostrEvent[] = []): RelayAnswer => ({ url, outcome: 'unreachable', reason: 'no answer in time', events })
+  const late = (events: NostrEvent[] = []): RelayAnswer => ({ url, outcome: 'unreachable', reason: NO_ANSWER, events })
   if (stop?.aborted) return late()
   let relay: AbstractRelay
   try {
@@ -324,7 +415,7 @@ async function askOne(url: string, filter: Filter, deadline: number, opts: AskOp
             events.set(e.id, e as NostrEvent)
             onEvent?.(e as NostrEvent)
           },
-          oneose: () => finish({ url, outcome: 'answered', events: got() }),
+          oneose: () => { noteAnswered(url); finish({ url, outcome: 'answered', events: got() }) },
           onclose: (reason) => {
             if (settled) return
             if (/^auth-required:/i.test(reason) && !authTried) {
@@ -357,11 +448,17 @@ async function askOne(url: string, filter: Filter, deadline: number, opts: AskOp
  * deadline is ours and is the only timer that ends a wait (see
  * NOSTR_TOOLS_EOSE_MS).
  */
-async function queryRelays(relays: string[], filter: Filter, maxWait = MAX_WAIT_MS): Promise<RelayAnswer[]> {
+async function queryRelays(relays: string[], filter: Filter, maxWait = MAX_WAIT_MS, opts: ReadOptions = {}): Promise<RelayAnswer[]> {
   const urls = [...new Set(relays.map((r) => normalizeURL(r)))]
-  await authAll(urls)
+  const asked = opts.evenHung ? urls : skipHung(urls)
+  await authAll(asked)
   const deadline = Date.now() + maxWait
-  return Promise.all(urls.map((url) => askOne(url, filter, deadline)))
+  const answers = await Promise.all(urls.map((url): Promise<RelayAnswer> => asked.includes(url)
+    ? askOne(url, filter, deadline)
+    : Promise.resolve({ url, outcome: 'unreachable', reason: HUNG_REASON, events: [] })))
+  // Silent for a whole full-length question, with nothing sent: it hung. A short question says nothing.
+  if (maxWait >= CONNECT_MS) for (const a of answers) if (a.outcome === 'unreachable' && a.reason === NO_ANSWER && a.events.length === 0) noteTimeout(a.url)
+  return answers
 }
 
 /**
@@ -371,13 +468,13 @@ async function queryRelays(relays: string[], filter: Filter, maxWait = MAX_WAIT_
  * did by a timer inside nostr-tools, but by our deadline. The events a slow
  * relay sent before the deadline still count.
  */
-async function collect(relays: string[], filter: Filter, maxWait = MAX_WAIT_MS): Promise<NostrEvent[]> {
-  return mergeAnswers(await queryRelays(relays, filter, maxWait))
+async function collect(relays: string[], filter: Filter, maxWait = MAX_WAIT_MS, opts: ReadOptions = {}): Promise<NostrEvent[]> {
+  return mergeAnswers(await queryRelays(relays, filter, maxWait, opts))
 }
 
 /** Query the configured relays. */
-export function query(filter: Filter): Promise<NostrEvent[]> {
-  return collect(relaySet(), filter)
+export function query(filter: Filter, opts: ReadOptions = {}): Promise<NostrEvent[]> {
+  return collect(relaySet(), filter, MAX_WAIT_MS, opts)
 }
 
 /**
@@ -385,8 +482,8 @@ export function query(filter: Filter): Promise<NostrEvent[]> {
  * or unreachable (relayOutcome.ts). For the reads where "nothing" and "no
  * answer" lead to different actions.
  */
-export function queryEach(filter: Filter, maxWait = MAX_WAIT_MS): Promise<RelayAnswer[]> {
-  return queryRelays(relaySet(), filter, maxWait)
+export function queryEach(filter: Filter, maxWait = MAX_WAIT_MS, opts: ReadOptions = {}): Promise<RelayAnswer[]> {
+  return queryRelays(relaySet(), filter, maxWait, opts)
 }
 
 /**
@@ -554,7 +651,7 @@ const deadUntil = new Map<string, number>()
 async function reachable(relays: string[]): Promise<string[]> {
   const now = Date.now()
   const out: string[] = []
-  await Promise.all(relays.map(async (url) => {
+  await Promise.all(skipHung(relays).map(async (url) => {
     if ((deadUntil.get(url) ?? 0) > now) return
     try { await getPool().ensureRelay(url); out.push(url) } catch { deadUntil.set(url, now + DEAD_MS) }
   }))
@@ -622,7 +719,7 @@ const liveTransport: Transport = {
     const relays = relaySet()
     // Authenticate first; a live subscription opened on an unauthed socket is
     // closed by the relay before it delivers anything.
-    await authAll(relays)
+    await authAll(skipHung(relays))
     const sub = getPool().subscribe(relays, filter, {
       onevent: handlers.onEvent,
       oneose: handlers.onEose,
@@ -712,7 +809,7 @@ export async function probeLiveness(): Promise<'alive' | 'dead' | 'skipped'> {
   if (probing || live.list().length === 0 || !connected()) return 'skipped'
   probing = true
   try {
-    const relays = relaySet()
+    const relays = skipHung(relaySet())
     const answered = await new Promise<boolean>((resolve) => {
       let settled = false
       const done = (ok: boolean): void => { if (!settled) { settled = true; resolve(ok) } }
@@ -740,10 +837,14 @@ export async function probeLiveness(): Promise<'alive' | 'dead' | 'skipped'> {
 export function watchConnectivity(): () => void {
   const onVisibility = (): void => {
     if (document.visibilityState === 'hidden') { hiddenAt = Date.now(); return }
-    if (hiddenAt !== null && Date.now() - hiddenAt >= RESUME_AFTER_HIDDEN_MS) resumeLive()
+    if (hiddenAt !== null && Date.now() - hiddenAt >= RESUME_AFTER_HIDDEN_MS) {
+      // A device coming back has half-open sockets, so what timed out was not the relay's doing.
+      forgetHung()
+      resumeLive()
+    }
     hiddenAt = null
   }
-  const onOnline = (): void => resumeLive()
+  const onOnline = (): void => { forgetHung(); resumeLive() }
   // Not while hidden: a background tab's timers are throttled anyway, and the
   // return is handled above.
   const tick = (): void => { if (document.visibilityState === 'visible') void probeLiveness() }

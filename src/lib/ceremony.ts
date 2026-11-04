@@ -120,6 +120,23 @@ export function glintLevel(elapsed: number, calm = false): number {
   return Math.min(1, t / 150) * (1 - (t / end) ** 2)
 }
 
+/** How long a taken item takes to leave the world (arkinox, 2026-11-01: "over 4 seconds"). */
+export const VANISH_MS = 4000
+/** The calm path's length: a plain fade, no sparkles. */
+export const calmVanish = (): number => CALM_FADE_MS
+
+/** How much of a taken item is left `elapsed` ms after TAKE: all of it, down to none. */
+export function vanishOpacity(elapsed: number, calm = false): number {
+  const share = Math.min(1, Math.max(0, elapsed / (calm ? calmVanish() : VANISH_MS)))
+  return 1 - share
+}
+
+/** How bright its sparkles are: up at once, and gone with the last of it. */
+export function vanishSparkle(elapsed: number): number {
+  if (elapsed <= 0 || elapsed >= VANISH_MS) return 0
+  return Math.min(1, elapsed / 150) * (1 - (elapsed / VANISH_MS) ** 3)
+}
+
 /** What OPEN does once the decrypt has returned. */
 export interface AfterOpen {
   /** The card (and any list it was in) closes, so the chest is seen. */

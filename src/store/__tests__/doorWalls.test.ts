@@ -3,8 +3,8 @@
  * closed look, and OPEN takes it out of the walls at once (chest and door
  * design, R11: "a locked door blocks per its model's collision until
  * opened"; the ceremony ruling: "WALK lets you through immediately"). A
- * chest never joins the walls here, and another identity's opening opens
- * nothing for you. No relay is touched (src/test/noNetwork.ts).
+ * chest's look is a wall at all times (DECK-0004 §3.6 Walkers, spec #82),
+ * and another identity's opening opens nothing for you. No relay is touched (src/test/noNetwork.ts).
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -27,15 +27,16 @@ import { useCyberspace } from '../useCyberspace'
 import { openedByHand, openedContents, rememberOpened, resetOpenedChests, useOpenedChests } from '../useOpenedChests'
 import { useShards } from '../useShards'
 import { doorWallKey, stepLimit, wallItems, wallItemsAt } from '../walkWalls'
+import { builtInLookTags } from '../../lib/looks'
 
 const AT: Position = { x: 1n << 40n, y: 1n << 39n, z: 1n << 38n }
 const ME = 'a'.repeat(64)
 const HIDER = 'b'.repeat(64)
 
-function chest(id: string, tags: string[][]): Hidden {
+function chest(id: string, tags: string[][], at: Position = AT): Hidden {
   const inner = { id, pubkey: HIDER, created_at: 1, kind: 3341, tags, content: 'sealed' }
   return {
-    eventId: id, inner, bagId: 'f'.repeat(64), lookupId: 'e'.repeat(64), author: HIDER, at: AT, plane: 1, height: 6, createdAt: 1,
+    eventId: id, inner, bagId: 'f'.repeat(64), lookupId: 'e'.repeat(64), author: HIDER, at, plane: 1, height: 6, createdAt: 1,
     type: 'chest', chest: { name: id, lockPubkey: LOCK, senderPubkey: 'd'.repeat(64), requires: '', payload: 'sealed' },
   }
 }
@@ -44,6 +45,9 @@ const DOOR = '1'.repeat(64)
 /** The lock every chest here is sealed to. */
 const LOCK = 'c'.repeat(64)
 const CHEST = '2'.repeat(64)
+/** The chest stands well away from the door, so each test reads one of them. */
+const CHEST_AT: Position = { x: AT.x + 4096n, y: AT.y, z: AT.z }
+const doorWalls = (plane: number): string[] => wallItems(plane).map((w) => w.key).filter((k) => k === doorWallKey(DOOR))
 /** In front of the door's outer face (+z), in the opening, a gibson above the sill. */
 const FRONT: Position = { x: AT.x, y: AT.y + 1n, z: AT.z + 3n }
 
@@ -51,15 +55,21 @@ beforeEach(() => {
   localStorage.removeItem('onosendai:chests-opened')
   resetOpenedChests()
   useCyberspace.setState({ identity: { ...useCyberspace.getState().identity, pubkey: ME } })
-  useShards.setState({ mine: [], discovered: { [DOOR]: chest(DOOR, [['title', 'Gate'], ['door', '6']]), [CHEST]: chest(CHEST, [['title', 'Box']]) } })
+  useShards.setState({ mine: [], discovered: { [DOOR]: chest(DOOR, [['title', 'Gate'], ['door', '6']]), [CHEST]: chest(CHEST, [['title', 'Box']], CHEST_AT) } })
 })
 
 describe('a door in WALK', () => {
-  it('stands in the walls as its closed look, and a chest does not', () => {
+  it('stands in the walls as its closed look, and a chest as its look too (spec #82: a chest\u2019s look always)', () => {
     const items = wallItems(1)
-    expect(items.map((w) => w.key)).toEqual([doorWallKey(DOOR)])
-    expect(items[0].shard.name).toMatch(/door/)
+    expect(items.map((w) => w.key).sort()).toEqual([doorWallKey(DOOR), doorWallKey(CHEST)].sort())
+    expect(items.find((w) => w.key === doorWallKey(DOOR))!.shard.name).toMatch(/door/)
+    expect(items.find((w) => w.key === doorWallKey(CHEST))!.shard.name).toMatch(/Treasure/)
     expect(wallItems(0)).toEqual([])
+  })
+
+  it('a chest stays a wall once opened: its open look is solid too', () => {
+    rememberOpened(ME, CHEST, LOCK, [])
+    expect(wallItems(1).find((w) => w.key === doorWallKey(CHEST))!.shard.name).toMatch(/open/)
   })
 
   it('stops a step through the doorway while closed', () => {
@@ -68,20 +78,20 @@ describe('a door in WALK', () => {
 
   it('lets you through at once once you open it', () => {
     rememberOpened(ME, DOOR, LOCK, [])
-    expect(wallItems(1)).toEqual([])
+    expect(doorWalls(1)).toEqual([])
     expect(stepLimit(FRONT, 'z', -1, 10n, wallItems(1)).reach).toBe(10n)
   })
 
   it('stays shut for you when someone else on this device opened it', () => {
     rememberOpened('9'.repeat(64), DOOR, LOCK, [])
-    expect(wallItems(1).map((w) => w.key)).toEqual([doorWallKey(DOOR)])
+    expect(doorWalls(1)).toEqual([doorWallKey(DOOR)])
   })
 
   it('stays open after a reload however it was opened, a signer\u2019s door too (review of #532)', () => {
     rememberOpened(ME, DOOR, LOCK, [])
     // A reload: the session forgets what was inside; the ids opened by hand are kept.
     resetOpenedChests()
-    expect(wallItems(1)).toEqual([])
+    expect(doorWalls(1)).toEqual([])
   })
 })
 
@@ -95,18 +105,18 @@ describe('a new lock (R10: "earlier openers lose the room from then on")', () =>
   it('closes it again for whoever opened it under the old one, after a reload too', () => {
     rememberOpened(ME, DOOR, LOCK, [])
     relocked(NEW)
-    expect(wallItems(1).map((w) => w.key)).toEqual([doorWallKey(DOOR)])
+    expect(doorWalls(1)).toEqual([doorWallKey(DOOR)])
     expect(openedByHand(ME, DOOR, NEW)).toBe(false)
     expect(openedContents(useOpenedChests.getState().opened, ME, DOOR, NEW)).toBeNull()
     resetOpenedChests()
-    expect(wallItems(1).map((w) => w.key)).toEqual([doorWallKey(DOOR)])
+    expect(doorWalls(1)).toEqual([doorWallKey(DOOR)])
   })
 
   it('opened again under the new one, it is open under that one only', () => {
     rememberOpened(ME, DOOR, LOCK, [])
     relocked(NEW)
     rememberOpened(ME, DOOR, NEW, [])
-    expect(wallItems(1)).toEqual([])
+    expect(doorWalls(1)).toEqual([])
     expect(openedByHand(ME, DOOR, LOCK)).toBe(false)
     expect(JSON.parse(localStorage.getItem('onosendai:chests-opened')!)[ME]).toEqual([`${DOOR}:${NEW}`])
   })
@@ -114,18 +124,18 @@ describe('a new lock (R10: "earlier openers lose the room from then on")', () =>
   it('an opening kept before locks were kept stays open: its id names its lock', () => {
     localStorage.setItem('onosendai:chests-opened', JSON.stringify({ [ME]: [DOOR] }))
     resetOpenedChests()
-    expect(wallItems(1)).toEqual([])
+    expect(doorWalls(1)).toEqual([])
   })
 
   it('and is kept from then on with that lock, so a new lock closes it too', () => {
     localStorage.setItem('onosendai:chests-opened', JSON.stringify({ [ME]: ['5'.repeat(64), DOOR] }))
     resetOpenedChests()
-    expect(wallItems(1)).toEqual([])
+    expect(doorWalls(1)).toEqual([])
     expect(JSON.parse(localStorage.getItem('onosendai:chests-opened')!)[ME]).toEqual(['5'.repeat(64), `${DOOR}:${LOCK}`])
     relocked(NEW)
-    expect(wallItems(1).map((w) => w.key)).toEqual([doorWallKey(DOOR)])
+    expect(doorWalls(1)).toEqual([doorWallKey(DOOR)])
     resetOpenedChests()
-    expect(wallItems(1).map((w) => w.key)).toEqual([doorWallKey(DOOR)])
+    expect(doorWalls(1)).toEqual([doorWallKey(DOOR)])
   })
 })
 
@@ -198,5 +208,39 @@ describe('a door is a wall where it is drawn (review of #532)', () => {
     useShards.setState({ discovered: { [DOOR]: { ...chest(DOOR, [['title', 'Gate'], ['door', '1']]), height: 1 } } })
     const high: Position = { x: AT.x, y: AT.y + 2n, z: AT.z + 3n }
     expect(stepLimit(high, 'z', -1, 10n, wallItemsAt(1, high)).reach).toBeLessThan(10n)
+  })
+})
+
+describe('a door written with look tags', () => {
+  const TAGS = builtInLookTags('door', { unit: 0, turn: [0, 0, 0], constrain: 'all' })
+  const IN: Position = { x: AT.x, y: AT.y + 1n, z: AT.z }
+  const SIX = [['x', 1], ['x', -1], ['y', 1], ['y', -1], ['z', 1], ['z', -1]] as const
+
+  it('lets a walker inside it step out, as a door with no tags does (review of #543)', () => {
+    useShards.setState({ mine: [], discovered: { [DOOR]: chest(DOOR, [['door', '6'], ...TAGS]) } })
+    const items = wallItemsAt(1, IN)
+    expect(items.map((w) => w.inside)).toEqual([true])
+    const after = Object.fromEntries(SIX.map(([a, d]) => [`${d > 0 ? '+' : '-'}${a}`, stepLimit(IN, a, d, 5n, items).reach]))
+    // Out the side they are on, sideways, up and down; never across it.
+    expect(after).toMatchObject({ '+x': 5n, '-x': 5n, '+y': 5n, '-y': 5n, '-z': 5n })
+    expect(after['+z']).toBe(0n)
+    // Without the walker's place it is a wall all round them: what the rule is for.
+    expect(SIX.map(([a, d]) => stepLimit(IN, a, d, 5n, wallItems(1)).reach).some((r) => r === 0n)).toBe(true)
+  })
+
+  it('a chest\u2019s look gets no such pass: only a door lets go of who is inside', () => {
+    useShards.setState({ mine: [], discovered: { [CHEST]: chest(CHEST, builtInLookTags('treasure', { unit: 3, turn: [0, 0, 0], constrain: 'all' })) } })
+    expect(wallItemsAt(1, { x: AT.x, y: AT.y + 2n, z: AT.z }).map((w) => w.inside)).toEqual([undefined])
+  })
+
+  it('is cut at its region\u2019s walls, as it is drawn: past them a walker is held by nothing', () => {
+    // A height-1 bag: a 2-gibson region, and the door 3 tall in it. Two gibsons up is out of the region.
+    const high: Position = { x: AT.x, y: AT.y + 2n, z: AT.z + 3n }
+    useShards.setState({ mine: [], discovered: { [DOOR]: { ...chest(DOOR, [['door', '1'], ...TAGS]), height: 1 } } })
+    expect(wallItems(1)[0].uncut).toBe(false)
+    expect(stepLimit(high, 'z', -1, 10n, wallItemsAt(1, high)).reach).toBe(10n)
+    // Inside the region, the same wall holds: the cut is what let it through.
+    const low: Position = { x: AT.x, y: AT.y + 1n, z: AT.z + 3n }
+    expect(stepLimit(low, 'z', -1, 10n, wallItemsAt(1, low)).reach).toBeLessThan(10n)
   })
 })

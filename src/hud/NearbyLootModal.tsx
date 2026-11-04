@@ -8,9 +8,12 @@
  * which says how many, and from NEARBY on the DISCOVERED panel. VIEW flies to
  * the thing the way the bag record's VIEW does. A key row has TAKE until it
  * is held; a chest row opens here when you hold what opens it (ItemRows).
+ * Tabs sort the list by kind, ITEMS first (lib/nearbyTabs.ts); every opening
+ * starts on the first tab, left to right, with anything in it (arkinox,
+ * 2026-11-01), and RETURN from a VIEW comes back to the tab it left.
  */
 
-import { useMemo } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useNearbyLoot, type NearbyItem } from '../hooks/useNearbyLoot'
 import { useProfile } from '../hooks/useProfile'
 import { findCashuToken } from '../lib/cashu'
@@ -27,6 +30,8 @@ import { rememberNearbyReturn } from '../lib/nearbyReturn'
 import { ProfilePic } from './ProfileBadge'
 import { ChestBlock, KeyLine, listedOnce, useChestOpen } from './ItemRows'
 import { useEscape } from '../hooks/useEscape'
+import { NEARBY_TABS, byTab, firstFilledTab, type NearbyTab } from '../lib/nearbyTabs'
+import { lockWord, useOpenedChests } from '../store/useOpenedChests'
 
 /** Where a nearby item was found, for what is taken out of a chest here. */
 function placeOf(item: NearbyItem): HeldPlace {
@@ -46,7 +51,14 @@ function whereOf(item: NearbyItem): string {
   return `${item.plane === 1 ? 'Ideaspace' : 'Dataspace'}, height ${item.height}`
 }
 
-function Row({ item, me, onView }: { item: NearbyItem; me: string; onView: (item: NearbyItem) => void }): JSX.Element {
+/** LOCKED or OPEN, as the world draws it (store/useOpenedChests lockWord). */
+function LockStatus({ id, lock, me }: { id: string; lock: string; me: string }): JSX.Element {
+  useOpenedChests((s) => s.opened)
+  const word = lockWord(me, id, lock)
+  return <span className={`nearby__lock nearby__lock--${word.toLowerCase()}`}>{word}</span>
+}
+
+export function Row({ item, me, onView }: { item: NearbyItem; me: string; onView: (item: NearbyItem) => void }): JSX.Element {
   const profile = useProfile(item.author ?? null)
   const author = item.author ?? ''
   const name = author === me ? 'you' : profileLabel(profile, safeNpub(author))
@@ -59,7 +71,7 @@ function Row({ item, me, onView }: { item: NearbyItem; me: string; onView: (item
           : item.type === 'chest' && item.chest
             ? <ChestBlock id={item.key} chest={item.chest} author={author} verified place={placeOf(item)} />
             : <span className="nearby__label">{labelOf(item)}</span>}
-        <span className="nearby__where">{whereOf(item)}</span>
+        <span className="nearby__where">{whereOf(item)}{item.type === 'chest' && item.chest && <> · <LockStatus id={item.key} lock={item.chest.lockPubkey} me={me} /></>}</span>
         <span className="nearby__meta">
           {author && <ProfilePic pubkey={author} size={14} />}
           <span>{name}</span>
@@ -71,8 +83,32 @@ function Row({ item, me, onView }: { item: NearbyItem; me: string; onView: (item
   )
 }
 
+/** The tab a VIEW left, for the list RETURN reopens. */
+let viewedTab: NearbyTab | null = null
+
+/** The tabs: each with its count, an empty one dimmed and still there. */
+export function NearbyTabs({ tab, counts, onTab }: { tab: NearbyTab; counts: Record<NearbyTab, number>; onTab: (t: NearbyTab) => void }): JSX.Element {
+  return (
+    <div className="nearby__tabs" role="tablist" aria-label="Kinds found">
+      {NEARBY_TABS.map(({ id, label }) => (
+        <button key={id} role="tab" aria-selected={tab === id} className={`nearby__tab${tab === id ? ' is-on' : ''}${counts[id] === 0 ? ' is-empty' : ''}`} onClick={() => onTab(id)}>
+          <span>{label}</span>
+          <span className="nearby__count">{counts[id]}</span>
+        </button>
+      ))}
+    </div>
+  )
+}
+
 export function NearbyLootModal(): JSX.Element | null {
   const open = useShards((s) => s.nearbyOpen)
+  // Escape closes it as a tap outside does (arkinox, 2026-10-01).
+  useEscape('modal', open, () => useShards.getState().setNearbyOpen(false))
+  return open ? <NearbyList /> : null
+}
+
+/** Mounted only while the list is open, so each opening picks its tab afresh. */
+export function NearbyList(): JSX.Element {
   const me = useCyberspace((s) => s.identity.pubkey)
   const items = useNearbyLoot()
   const chestOpen = useChestOpen()
@@ -80,13 +116,16 @@ export function NearbyLootModal(): JSX.Element | null {
   // ties. A thing that came out of a chest open in this list is listed under
   // that chest, with its TAKE, and not again on its own (review of #519).
   const list = useMemo(() => listedOnce(items, (i) => i.key, chestOpen).sort((a, b) => (b.createdAt ?? 0) - (a.createdAt ?? 0)), [items, chestOpen])
-  // Escape closes it as a tap outside does (arkinox, 2026-10-01).
-  useEscape('modal', open, () => useShards.getState().setNearbyOpen(false))
-  if (!open) return null
+  const tabs = useMemo(() => byTab(list), [list])
+  const counts: Record<NearbyTab, number> = { items: tabs.items.length, shards: tabs.shards.length, sounds: tabs.sounds.length, chests: tabs.chests.length, doors: tabs.doors.length, messages: tabs.messages.length }
+  // The tab a VIEW left, or the first with anything in it.
+  const [tab, setTab] = useState<NearbyTab>(() => viewedTab ?? firstFilledTab(counts))
+  useEffect(() => { viewedTab = null }, [])
   const close = (): void => useShards.getState().setNearbyOpen(false)
   const view = (item: NearbyItem): void => {
     // Where to come back to, spectation and link included, before looking away.
     rememberNearbyReturn()
+    viewedTab = tab
     close()
     const unit = item.type === 'shard' ? item.shard?.unit ?? 0 : 0
     useCyberspace.getState().focusItem(item.at, item.plane, labelOf(item).toUpperCase(), unit)
@@ -102,9 +141,11 @@ export function NearbyLootModal(): JSX.Element | null {
         <div className="secrets__summary">
           <span>Hop actions produce region keys that decrypt hidden things nearby.</span>
         </div>
-        <ul className="secrets__list">
+        <NearbyTabs tab={tab} counts={counts} onTab={setTab} />
+        <ul className="secrets__list" role="tabpanel">
           {list.length === 0 && <li className="secrets__empty">Nothing decrypted in this region. A rescan is triggered after every movement action.</li>}
-          {list.map((item) => <Row key={item.key} item={item} me={me} onView={view} />)}
+          {list.length > 0 && tabs[tab].length === 0 && <li className="secrets__empty">None here.</li>}
+          {tabs[tab].map((item) => <Row key={item.key} item={item} me={me} onView={view} />)}
         </ul>
       </div>
     </div>

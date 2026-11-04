@@ -47,7 +47,8 @@ export function ToastChip(): JSX.Element | null {
         : <img className="hyperbar__mark" src={provider?.logo ?? '/hosaka-mark.png'} alt={provider?.name ?? 'HOSAKA'} width={308} height={334} decoding="async" />}
       <span className="hyperbar__text">
         <span className="hyperbar__label">{toast.label}</span>
-        <span className="hyperbar__meta">{toast.meta}</span>
+        {/* BUILD MODE ENDED says nothing more (arkinox, 2026-11-02), no empty line under it, unless a placement on its way still lands (store/useBuilder endUnder). */}
+        {toast.meta && <span className="hyperbar__meta">{toast.meta}</span>}
       </span>
       {toast.sticky && <span className="toast__dismiss" aria-hidden="true">✕</span>}
     </div>

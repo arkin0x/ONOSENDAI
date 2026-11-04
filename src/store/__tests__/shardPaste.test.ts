@@ -44,7 +44,7 @@ function buildSource(): string {
 
 describe('shard COPY into the bench clipboard', () => {
   beforeEach(() => {
-    useWorkshop.setState({ shards: [], currentId: null, selection: [], partSel: [], selectedFace: null, facePick: [], clip: null, level: 0, plane: 1, past: [], future: [], notice: null, tool: 'select', stampKind: 'block', stampSize: 2, stampFacing: 0, stampMode: 'shape', stampObject: null })
+    useWorkshop.setState({ shards: [], currentId: null, selection: [], partSel: [], selectedFaces: [], facePick: [], clip: null, level: 0, plane: 1, past: [], future: [], notice: null, tool: 'select', stampKind: 'block', stampSize: 2, stampFacing: 0, stampMode: 'shape', stampObject: null })
   })
 
   it('PASTE in another shard puts down identical geometry, selected, and one UNDO takes it all back', () => {

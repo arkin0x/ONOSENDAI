@@ -77,11 +77,13 @@ interface MotionProps {
   /** Lit as on the bench (the composer's preview); the world draws unlit under its bloom. */
   lit?: boolean
   opacity?: number
+  /** Drawn as a ghost, so a fade of its materials is real (scene/ItemVanish). */
+  ghost?: boolean
   frameRef?: MutableRefObject<Group | null>
 }
 
 /** The box and the model in motion, in the model's own units, centred on the place. */
-export function ModelInMotion({ model, animation, id, box, amplitude, planes, lit = false, opacity = 1, frameRef }: MotionProps): JSX.Element {
+export function ModelInMotion({ model, animation, id, box, amplitude, planes, lit = false, opacity = 1, ghost = false, frameRef }: MotionProps): JSX.Element {
   const bob = useRef<Group>(null)
   const turnY = useRef<Group>(null)
   const turnX = useRef<Group>(null)
@@ -100,13 +102,13 @@ export function ModelInMotion({ model, animation, id, box, amplitude, planes, li
   return (
     <group ref={frameRef}>
       <lineSegments geometry={CUBE_EDGES} position={shape.centre} scale={shape.size} frustumCulled={false}>
-        <lineBasicMaterial color={ITEM_BOX_BLUE} toneMapped={false} transparent opacity={BOX_OPACITY * opacity} depthWrite={false} />
+        <lineBasicMaterial color={ITEM_BOX_BLUE} toneMapped={false} transparent opacity={BOX_OPACITY * opacity} depthWrite={false} userData-share={BOX_OPACITY} />
       </lineSegments>
       <group ref={bob}>
         <group ref={turnY}>
           <group ref={turnX}>
             <group position={[-c[0], -c[1], -c[2]]}>
-              <ShardMesh shard={model.shard} world={!lit} lit={lit} clipPlanes={planes} />
+              <ShardMesh shard={model.shard} world={!lit} lit={lit} ghost={ghost} clipPlanes={planes} />
             </group>
           </group>
         </group>
@@ -136,10 +138,12 @@ interface MarkProps {
   onTap?: () => void
   /** The item's name and who left it, stood just above the box. */
   label?: { text: string; color: string; sub: string; subColor: string }
+  /** Going out after a TAKE: the model drawn as a ghost, the label read from this each frame (scene/ItemVanish). */
+  vanish?: MutableRefObject<number>
 }
 
 /** An item in the world as the model it wears: the scene's and Cyberspace TV's (WorldMessages ItemMark). */
-export function ItemModelMark({ id, model, animation, at, region, axes, minPx, opacity = 1, onTap, label }: MarkProps): JSX.Element {
+export function ItemModelMark({ id, model, animation, at, region, axes, minPx, opacity = 1, onTap, label, vanish }: MarkProps): JSX.Element {
   const scaleExp = useCyberspace((s) => s.scaleExp)
   const gl = useThree((s) => s.gl)
   const unit = model.shard.unit
@@ -198,7 +202,7 @@ export function ItemModelMark({ id, model, animation, at, region, axes, minPx, o
     <>
       <group ref={outer} position={at}>
         <group matrix={turn} matrixAutoUpdate={false}>
-          <ModelInMotion model={model} animation={animation} id={id} box={cut.box} amplitude={size.amplitude} planes={planes?.world} opacity={opacity} frameRef={frame} />
+          <ModelInMotion model={model} animation={animation} id={id} box={cut.box} amplitude={size.amplitude} planes={planes?.world} opacity={opacity} ghost={!!vanish} frameRef={frame} />
         </group>
       </group>
       {/* Outside the scaled group: a target and a label size themselves from
@@ -206,7 +210,7 @@ export function ItemModelMark({ id, model, animation, at, region, axes, minPx, o
           model draws can be far larger than the cube was, so the box takes
           taps as a shard's does. */}
       {onTap && <group position={at}><TapTarget measure={frame} onTap={onTap} /></group>}
-      {label && <WorldLabel text={label.text} color={label.color} at={at} align="center" px={13} sub={label.sub} subColor={label.subColor} opacity={opacity} clear={clear} recede="name" />}
+      {label && <WorldLabel text={label.text} color={label.color} at={at} align="center" px={13} sub={label.sub} subColor={label.subColor} opacity={opacity} fade={vanish} clear={clear} recede="name" />}
     </>
   )
 }

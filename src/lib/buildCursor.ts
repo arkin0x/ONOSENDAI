@@ -4,7 +4,7 @@
  * The Builder does not keep a second cursor or a second camera. It rides the
  * free view (useCyberspace `focus` with `drive`), which already carries a
  * cursor of its own, independent of the avatar and of the chain: the pad, the
- * keys and the Position panel move it, the zoom sets its step and its cell
+ * keys and the View panel move it, the zoom sets its step and its cell
  * (or the finer build STEP while a deploy is lined up, buildStepOf), and
  * nothing in it can commit a move, because a commit is only taken from
  * your own head (`atHead`). So the build cursor is the free view's `cursor`,

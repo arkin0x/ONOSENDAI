@@ -32,6 +32,15 @@ export const FLY_HOLD_MS = 160
 export const PINCH_SLOP_PX = 8
 export const PINCH_SLOP_SHARE = 0.04
 
+/**
+ * How often a fly writes the cursor to the store, in ms: 20 a second. Every
+ * write re-renders whatever reads the cursor (the pad, the proof panel, the
+ * cursor box, the rooms), and at a zoom where each frame reaches a new gibson
+ * that was every frame. The camera eases toward the cursor (FOLLOW_TAU), so
+ * a step every 50 ms still reads as a glide.
+ */
+export const FLY_WRITE_MS = 50
+
 /** Forward, back, or not flying. */
 export type FlyDir = 1 | -1 | 0
 
@@ -101,10 +110,14 @@ export function flyStep(
  * close past the slop are a pinch, the camera's zoom, and do not fly for the
  * rest of that touch, even if they come to rest; a fly already under way
  * stops when they do. One finger is the camera's orbit and never flies, and
- * neither do four. Every change in the number of fingers starts the count
- * again, so lifting three fingers one at a time does not fly forward on the
- * way down unless two are left resting for the whole hold.
+ * neither do four. A finger landing starts the count again; a finger
+ * lifting stops any fly and starts none, so lifting three fingers one at a
+ * time never flies forward on the way down, and neither does a touch whose
+ * other lift was never heard (review of #592, F3).
  *
+ * The page also says how many fingers are still on the screen after each
+ * lift (touchesLeft). Fewer than are counted means a lift went unheard: the
+ * count starts again from nothing.
  * Fed pointer events by the scene (only touches that began on it) and asked
  * for its direction every frame with the time; it keeps no timers.
  */
@@ -115,7 +128,7 @@ export class FlyGesture {
 
   down(id: number, x: number, y: number, now: number): void {
     this.points.set(id, { x, y })
-    this.restart(now)
+    this.restart(now, true)
   }
 
   move(id: number, x: number, y: number): void {
@@ -130,7 +143,12 @@ export class FlyGesture {
 
   up(id: number, now: number): void {
     if (!this.points.delete(id)) return
-    this.restart(now)
+    this.restart(now, false)
+  }
+
+  /** The page's own count of fingers still down, after a lift: fewer than counted here means a lift was lost. */
+  touchesLeft(onScreen: number): void {
+    if (onScreen < this.points.size) this.clear()
   }
 
   /** Every finger gone at once (the page lost focus, the mode ended). */
@@ -152,9 +170,9 @@ export class FlyGesture {
     return this.points.size
   }
 
-  private restart(now: number): void {
+  private restart(now: number, landing: boolean): void {
     const count = this.points.size
-    this.base = count === 2 || count === 3 ? { count, spread: this.spread(), at: now } : null
+    this.base = landing && (count === 2 || count === 3) ? { count, spread: this.spread(), at: now } : null
     this.mode = this.base ? 'wait' : 'idle'
   }
 
@@ -186,4 +204,34 @@ export const useViewFly = create<ViewFlyState>((set, get) => ({
 /** The way being flown now, from whichever asks. */
 export function flyDir(s: Pick<ViewFlyState, 'button' | 'touch'> = useViewFly.getState()): FlyDir {
   return s.button !== 0 ? s.button : s.touch
+}
+
+/**
+ * Whether the rig's camera follows the cursor (locked) across a fly. A fly
+ * locks it, so the cursor keeps its place in front of the camera; when the
+ * fly ends the camera goes back to what it was doing before (review of #592):
+ * following the cursor, or standing where an orbit left it and only turning
+ * to it.
+ *
+ * "Before" is read while no finger is on the scene: the first finger of a
+ * touch is the orbit's, which unlocks the camera the moment it lands
+ * (OrbitControls onStart), and a two-finger fly would otherwise hand back an
+ * unlock the user never asked for.
+ */
+export class FlyFollow {
+  private flying = false
+  private was = true
+  private steady = true
+
+  /** This frame's lock, given the rig's lock, whether a fly is under way and whether a finger is on the scene. */
+  frame(locked: boolean, flying: boolean, fingersDown: boolean): boolean {
+    if (flying) {
+      if (!this.flying) { this.flying = true; this.was = this.steady }
+      return true
+    }
+    let out = locked
+    if (this.flying) { this.flying = false; out = this.was }
+    if (!fingersDown) this.steady = out
+    return out
+  }
 }

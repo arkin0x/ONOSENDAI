@@ -10,7 +10,8 @@
  * RETURN puts the anchor back on your avatar at the zoom you left.
  */
 
-import { useCyberspace } from '../store/useCyberspace'
+import { useCyberspace, type CyberFocus } from '../store/useCyberspace'
+import type { Position } from '../lib/space'
 import { useHyperspace } from '../store/useHyperspace'
 import { useEscape } from '../hooks/useEscape'
 import { useBuilder } from '../store/useBuilder'
@@ -18,11 +19,26 @@ import { useBuilder } from '../store/useBuilder'
 /** What VIEWING says for a free view (VIEW, or what BUILD mode leaves behind). */
 export const FREE_VIEW_LABEL = 'A COORD'
 
+/**
+ * What VIEWING says. A fixed look says what it looks at. A free view says
+ * only that it is on a coordinate, not which: the pad moves it, and the axes
+ * made the chip too long (arkinox, 2026-11-02). Unless the view has a name,
+ * a starred place or a person (arkinox, 2026-11-03, ruled): then the name,
+ * for as long as the cursor is on the very place the name was given for, in
+ * its plane (CyberFocus.named). Driven off it, re-anchored past it or turned
+ * to the other plane, it is A COORD again.
+ */
+export function viewingLabel(focus: CyberFocus | null, cursor: Position, plane: number): string | null {
+  if (focus === null) return null
+  if (!focus.drive) return focus.label
+  const at = focus.named
+  const onIt = at !== undefined && at.position.x === cursor.x && at.position.y === cursor.y && at.position.z === cursor.z && at.plane === plane
+  return onIt && focus.label.trim() !== '' ? focus.label : FREE_VIEW_LABEL
+}
+
 export function FocusBar(): JSX.Element | null {
   const focus = useCyberspace((s) => s.focus)
-  // A free view says only that it is on a coordinate, not which: the pad
-  // moves it, and the axes made the chip too long (arkinox, 2026-11-02).
-  const focusLabel = focus === null ? null : focus.drive ? FREE_VIEW_LABEL : focus.label
+  const focusLabel = useCyberspace((s) => viewingLabel(s.focus, s.cursor, s.anchorPlane))
   const spectating = useCyberspace((s) => s.spectate !== null)
   const viewOwned = useHyperspace((s) => s.viewOwned)
   // BUILD mode rides the free view and has its own bar (BuildBar), with its

@@ -24,7 +24,7 @@ const KEYS: Array<{ what: string; glyph: JSX.Element }> = [
   { what: 'Red icosahedron: your avatar', glyph: ball('#ff2323') },
   { what: "White icosahedron: another identity's avatar", glyph: ball('#ffffff') },
   {
-    what: 'Small glowing yellow star: one of your Starred Places (POSITION panel), with its nickname under it when it has one. Tap it to rename it, view it, or unstar it',
+    what: 'Small glowing yellow star: one of your Starred Places (VIEW panel), with its nickname under it when it has one. Tap it to rename it, view it, or unstar it',
     glyph: (
       <svg viewBox="0 0 20 20" aria-hidden="true">
         <circle cx="10" cy="10" r="8.5" fill="rgba(255, 216, 77, 0.16)" />

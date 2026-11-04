@@ -310,4 +310,14 @@ describe('BUILD mode ending under an aim', () => {
     expect(useStash.getState().returnToChest).toBe(false)
     expect(useToast.getState().toast).toMatchObject({ label: 'BUILD MODE ENDED', meta: '' })
   })
+
+  it('while PUT IN CHEST signs the shard: nothing is said to still land, since nothing is placed', async () => {
+    const shard = benchShard(3)
+    useStash.getState().aimIntoChest(draftOf([{ kind: 'shard', shardId: shard.id }]), 0)
+    const signing = S().deploy()
+    expect(S().deployStatus).toBe('working')
+    C().focusOn(C().position, 0, 'EARTH · tap')
+    expect(useToast.getState().toast).toMatchObject({ label: 'BUILD MODE ENDED', meta: '' })
+    await signing
+  })
 })

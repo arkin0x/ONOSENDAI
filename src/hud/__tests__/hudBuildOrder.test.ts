@@ -1,8 +1,10 @@
 /**
- * hudBuildOrder.test.ts - in BUILD mode the Position panel is the first
- * panel in the menu (arkinox, 2026-10-08: "Position panel gets promoted to
- * top/first panel while active"), on a phone and a desktop alike, and it
- * goes back to its own place when the mode ends.
+ * hudBuildOrder.test.ts - in BUILD mode the View panel is the first panel in
+ * the menu, on a phone and a desktop alike, and it goes back to its own
+ * place when the mode ends. It was the Position panel (arkinox, 2026-10-08:
+ * "Position panel gets promoted to top/first panel while active"), for its
+ * VIEW, RECENT and starred places, which moved to the View panel
+ * (2026-11-02); Position now stays in its place.
  *
  * The left column comes first on both: side by side on a desktop, stacked
  * above the right column on a phone (styles.css, max-width 1100px). So
@@ -43,7 +45,7 @@ vi.mock('zustand', async (importOriginal) => {
   return { ...real, create: (init?: Parameters<typeof real.create>[0]) => (init === undefined ? live : live(init)) }
 })
 
-import { Hud, PositionPanel, useViewDraft } from '../Hud'
+import { Hud, ViewAtPanel, useViewDraft } from '../Hud'
 import { PanelSlot } from '../PanelSlot'
 import { ChainPanel } from '../ChainPanel'
 import { useChainUi } from '../../store/useChainUi'
@@ -79,18 +81,20 @@ afterEach(() => {
   useCyberspace.getState().clearFocus()
 })
 
-describe('the Position panel in BUILD mode', () => {
-  it('is in its own place, in the right column, while the mode is off', () => {
+describe('the View panel in BUILD mode', () => {
+  it('is in its own place, in the right column under Position, while the mode is off', () => {
     const { left, right } = columns()
-    expect(left).not.toContain('PositionPanel')
-    expect(right).toContain('PositionPanel')
+    expect(left).not.toContain('ViewAtPanel')
+    expect(right.slice(1, 3)).toEqual(['PositionPanel', 'ViewAtPanel'])
   })
 
-  it('is the first panel, under the brand, while the mode is on, and only there', () => {
+  it('is the first panel, under the brand, while the mode is on, and only there; Position stays put', () => {
     useBuilder.getState().enter('build')
     const { left, right } = columns()
-    expect(left.slice(0, 2)).toEqual(['Brand', 'PositionPanel'])
-    expect(right).not.toContain('PositionPanel')
+    expect(left.slice(0, 2)).toEqual(['Brand', 'ViewAtPanel'])
+    expect(right).not.toContain('ViewAtPanel')
+    expect(left).not.toContain('PositionPanel')
+    expect(right).toContain('PositionPanel')
   })
 
   it('outranks a move under way, which otherwise leads the menu', () => {
@@ -98,7 +102,7 @@ describe('the Position panel in BUILD mode', () => {
     try {
       expect(columns().left.slice(0, 2)).toEqual(['Brand', 'ProofPanel'])
       useBuilder.getState().enter('build')
-      expect(columns().left.slice(0, 3)).toEqual(['Brand', 'PositionPanel', 'ProofPanel'])
+      expect(columns().left.slice(0, 3)).toEqual(['Brand', 'ViewAtPanel', 'ProofPanel'])
     } finally {
       useCyberspace.setState({ proof: { ...useCyberspace.getState().proof, status: 'idle' } })
     }
@@ -107,9 +111,10 @@ describe('the Position panel in BUILD mode', () => {
   it('goes back to its own place on exit', () => {
     useBuilder.getState().enter('build')
     useBuilder.getState().exit()
+    useCyberspace.getState().clearFocus()
     const { left, right } = columns()
-    expect(left).not.toContain('PositionPanel')
-    expect(right).toContain('PositionPanel')
+    expect(left).not.toContain('ViewAtPanel')
+    expect(right).toContain('ViewAtPanel')
   })
 })
 
@@ -192,16 +197,16 @@ describe('the Chain panel ACTIONS tag in BUILD mode (review of #584)', () => {
   })
 })
 
-describe('review of #235, NIT 6: the Position panel keeps a half-typed VIEW across BUILD', () => {
+describe('review of #235, NIT 6: the View panel keeps a half-typed VIEW across BUILD', () => {
   afterEach(() => useViewDraft.getState().setText(''))
 
   it('the text typed survives the panel moving to the top and back', () => {
     useViewDraft.getState().setText('12, 34')
-    const typed = (): boolean => renderToString(createElement(PositionPanel)).includes('value="12, 34"')
+    const typed = (): boolean => renderToString(createElement(ViewAtPanel)).includes('value="12, 34"')
     expect(typed()).toBe(true)
     // DEPLOY turning BUILD on moves the panel, which mounts it afresh.
     useBuilder.getState().enter('deploy')
-    expect(columns().left).toContain('PositionPanel')
+    expect(columns().left).toContain('ViewAtPanel')
     expect(typed()).toBe(true)
     useBuilder.getState().exit()
     expect(typed()).toBe(true)
@@ -215,7 +220,7 @@ describe('the saved panel layout (arkinox, 2026-10-10)', () => {
     usePanelLayout.setState({ order: moveBefore(moveBefore(defaultOrder(), 'relays', 'identity', 'left'), 'hidden', null, 'right') })
     const { left, right } = columns()
     expect(left).toEqual(['Brand', 'RelaysPanel', 'IdentityPanel', 'AgentsPanel', 'DiscoveredPanel', 'InventoryPanel', 'ShardsPanel', 'AvatarsPanel', 'TargetsPanel', 'LinksPanel'])
-    expect(right).toEqual(['ScalePanel', 'PositionPanel', 'ProofPanel', 'CloudPanel', 'ChainPanel', 'HyperspacePanel', 'ViewPanel', 'Legend', 'Controls', 'DerezzPanel', 'HiddenPanel'])
+    expect(right).toEqual(['ScalePanel', 'PositionPanel', 'ViewAtPanel', 'ProofPanel', 'CloudPanel', 'ChainPanel', 'HyperspacePanel', 'ViewPanel', 'Legend', 'Controls', 'DerezzPanel', 'HiddenPanel'])
   })
 
   it('AGENTS is drawn for everyone, with no agent, in its saved place (arkinox, 2026-10-13)', () => {
@@ -231,15 +236,16 @@ describe('the saved panel layout (arkinox, 2026-10-10)', () => {
   })
 
   it('a priority state draws its panel first without writing to the saved order, which applies again when it ends', () => {
-    const order = moveBefore(defaultOrder(), 'position', 'relays', 'right')
+    const order = moveBefore(defaultOrder(), 'viewat', 'relays', 'right')
     usePanelLayout.setState({ order })
     useBuilder.getState().enter('build')
-    expect(columns().left.slice(0, 2)).toEqual(['Brand', 'PositionPanel'])
-    expect(columns().right).not.toContain('PositionPanel')
+    expect(columns().left.slice(0, 2)).toEqual(['Brand', 'ViewAtPanel'])
+    expect(columns().right).not.toContain('ViewAtPanel')
     expect(usePanelLayout.getState().order).toBe(order)
     useBuilder.getState().exit()
+    useCyberspace.getState().clearFocus()
     const { right } = columns()
-    expect(right.slice(-2)).toEqual(['PositionPanel', 'RelaysPanel'])
+    expect(right.slice(-2)).toEqual(['ViewAtPanel', 'RelaysPanel'])
     expect(usePanelLayout.getState().order).toBe(order)
   })
 

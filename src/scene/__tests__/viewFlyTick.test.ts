@@ -52,6 +52,8 @@ beforeEach(() => {
   useCyberspace.setState({ scaleExp: 0 })
   useViewFly.setState({ button: 0, touch: 0 })
   flyGesture.clear()
+  // A frame with no fly ends whatever the last test left flying.
+  tickViewFly(eye, target, 0, 0)
 })
 afterEach(() => {
   useViewFly.setState({ button: 0, touch: 0 })
@@ -66,7 +68,7 @@ describe('the fly buttons in VIEW', () => {
     const from = { ...cs().cursor }
     useViewFly.getState().setButton(1)
     // Half a second in 1/20 s frames.
-    for (let i = 0; i < 10; i++) expect(tickViewFly(eye, target, 0.05, 0)).toBe(true)
+    for (let i = 0; i < 10; i++) expect(tickViewFly(eye, target, 0.05, i * 50)).toBe(true)
     const d = ahead().map((k) => k * FLY_CELLS_PER_SECOND * 0.5)
     expect(moved(from)).toEqual(d)
   })
@@ -75,7 +77,7 @@ describe('the fly buttons in VIEW', () => {
     cs().viewHere()
     const from = { ...cs().cursor }
     useViewFly.getState().setButton(-1)
-    for (let i = 0; i < 10; i++) tickViewFly(eye, target, 0.05, 0)
+    for (let i = 0; i < 10; i++) tickViewFly(eye, target, 0.05, i * 50)
     expect(moved(from)).toEqual(ahead().map((k) => -k * FLY_CELLS_PER_SECOND * 0.5 + 0))
   })
 
@@ -85,7 +87,11 @@ describe('the fly buttons in VIEW', () => {
     const run = (scaleExp: number): number => {
       useCyberspace.setState({ scaleExp })
       const from = { ...cs().cursor }
-      for (let i = 0; i < 10; i++) tickViewFly(eye, target, 0.05, 0)
+      for (let i = 0; i < 10; i++) tickViewFly(eye, target, 0.05, i * 50)
+      // Let go: the last of the way is written, and the next run starts fresh.
+      useViewFly.getState().setButton(0)
+      tickViewFly(eye, target, 0, 500)
+      useViewFly.getState().setButton(1)
       return Math.max(...moved(from).map(Math.abs))
     }
     const fine = run(0)
@@ -147,11 +153,11 @@ describe('two and three fingers on the scene', () => {
     touch(2)
     expect(tickViewFly(eye, target, 0.05, FLY_HOLD_MS - 1)).toBe(false)
     expect(cs().cursor).toEqual(from)
-    for (let i = 0; i < 10; i++) tickViewFly(eye, target, 0.05, FLY_HOLD_MS + i)
+    for (let i = 0; i < 10; i++) tickViewFly(eye, target, 0.05, FLY_HOLD_MS + 50 * i)
     expect(moved(from)).toEqual(ahead().map((k) => k * FLY_CELLS_PER_SECOND * 0.5))
-    flyGesture.up(2, FLY_HOLD_MS + 20)
+    flyGesture.up(2, FLY_HOLD_MS + 500)
     const at = { ...cs().cursor }
-    expect(tickViewFly(eye, target, 0.05, FLY_HOLD_MS + 30)).toBe(false)
+    expect(tickViewFly(eye, target, 0.05, FLY_HOLD_MS + 510)).toBe(false)
     expect(cs().cursor).toEqual(at)
   })
 
@@ -159,7 +165,7 @@ describe('two and three fingers on the scene', () => {
     cs().viewHere()
     const from = { ...cs().cursor }
     touch(3)
-    for (let i = 0; i < 10; i++) tickViewFly(eye, target, 0.05, FLY_HOLD_MS + i)
+    for (let i = 0; i < 10; i++) tickViewFly(eye, target, 0.05, FLY_HOLD_MS + 50 * i)
     expect(moved(from)).toEqual(ahead().map((k) => -k * FLY_CELLS_PER_SECOND * 0.5 + 0))
   })
 

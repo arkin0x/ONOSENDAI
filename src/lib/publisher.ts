@@ -31,6 +31,7 @@ import { normalizeURL } from 'nostr-tools/utils'
 import { CYBERSPACE_RELAY, publish, publishMany } from './relay'
 import { confirmChainEvents } from './chains'
 import { noteChainHolders } from './chainHolders'
+import { chainLanded } from './chainStore'
 import type { NostrEvent } from './events'
 import { chainFacts, gateAfter, maySend } from './release'
 import { newestEventOnRelays, noteStaleFormatStuck, retireStaleFormat, useCyberspace } from '../store/useCyberspace'
@@ -121,6 +122,18 @@ async function pump(): Promise<void> {
   // is never sent, the player is told once, and this chain's queue waits
   // (nothing else does; other publishing goes out by its own paths).
   if (staleHopFormat(next)) { if (retireStaleFormat() === null) noteStaleFormatStuck(next); return }
+
+  // An action goes out only once it has landed on this device, because that
+  // is where two tabs that signed from one head find out which of them won.
+  // The loser's action never leaves (lib/chainStore.ts), and the store update
+  // that takes it back asks for the next drain. The microtask lets the save
+  // that follows the store update which got us here be made first.
+  inFlight = true
+  await Promise.resolve()
+  const landed = await chainLanded(next.pubkey, next.id)
+  inFlight = false
+  s = useCyberspace.getState()
+  if (!landed || !maySend(s, released) || movementBlocked() || !s.events.some((e) => e.id === next.id)) return
 
   inFlight = true
   s.setPublishStatus(next.id, 'sending')

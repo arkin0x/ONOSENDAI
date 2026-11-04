@@ -6,6 +6,7 @@ import { installTapGuard } from './lib/tapGuard'
 import { isBroadcast, markBroadcastPage } from './lib/tv/broadcast'
 import { TvStandby } from './hud/TvStandby'
 import { hydrateWorkshop } from './store/useWorkshop'
+import { chainReadyToDraw } from './store/useCyberspace'
 import { hydrateHidden } from './store/hiddenStorage'
 import { wireLocalObjects } from './store/localObjects'
 import { diagWanted } from './lib/diagGate'
@@ -42,7 +43,8 @@ const DIAG_WAIT_MS = 3_000
 
 function boot(): void {
   setTimeout(draw, HYDRATE_WAIT_MS)
-  void Promise.allSettled([hydrateWorkshop(), hydrateHidden()]).then(draw, draw)
+  // The chain likewise, when it is read from its rows (store/useCyberspace.ts chainReadyToDraw).
+  void Promise.allSettled([hydrateWorkshop(), hydrateHidden(), chainReadyToDraw()]).then(draw, draw)
 }
 
 /**

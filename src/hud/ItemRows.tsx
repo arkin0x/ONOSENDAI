@@ -28,10 +28,10 @@ import { useProfile } from '../hooks/useProfile'
 import { cashuLabel, readCashuToken } from '../lib/cashu'
 import { chestSealer, openWithSecret, openWithSigner, openerFor, readContents, requiresLabel, revealedIn, type ChestEntry, type Opener } from '../lib/chests'
 import { positionOf, useShards } from '../store/useShards'
-import { hiddenLabel, type ChestItem } from '../lib/hidden'
+import { hiddenLabel, itemLineage, type ChestItem } from '../lib/hidden'
 import { ItemFace } from './ItemIcon'
 import { ShardThumb } from './ShardThumb'
-import { holdsEntry, openingKeys, type HeldFrom, type HeldItem, type HeldPlace } from '../lib/inventory'
+import { holdsEntry, holdsItem, openingKeys, type HeldFrom, type HeldItem, type HeldPlace } from '../lib/inventory'
 import { safeNpub } from '../lib/npub'
 import { useCyberspace } from '../store/useCyberspace'
 import { useInventory } from '../store/useInventory'
@@ -71,7 +71,10 @@ export function useWho(pubkey: string): string {
  */
 export function KeyLine({ id, name, author }: { id?: string; name: string; author: string }): JSX.Element {
   const who = useWho(author)
-  const held = useInventory((s) => (id ? !!s.items[id] : false))
+  // Held by its own id, or by the lineage a version its hider moved shares
+  // with the one held (lib/inventory.ts holdsItem): never TAKE twice.
+  const inner = useShards((s) => (id ? s.discovered[id]?.inner ?? s.mine.find((d) => d.eventId === id)?.inner : undefined))
+  const held = useInventory((s) => (id ? holdsItem(s.items, id, itemLineage(inner), inner?.pubkey) : false))
   const found = useShards((s) => (id ? !!s.discovered[id] || s.mine.some((d) => d.eventId === id && !!d.key && !!d.inner) : false))
   return (
     <span className="keyline">

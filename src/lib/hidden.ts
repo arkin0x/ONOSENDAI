@@ -554,6 +554,36 @@ export function editedTemplate(next: EventTemplate, previous: Pick<NostrEvent, '
   return { ...next, tags: [...(at ? [at] : []), ['d', lineage], ...kept, ...protect] }
 }
 
+/**
+ * MOVE of an item carried inline that is not a shard (a key item, a message,
+ * hidden audio): the same item at a new place. Its kind, content and every
+ * tag stay exactly as the version it replaces had them, so nothing about it
+ * changes but where it is; editedTemplate gives it the new `C` and the
+ * lineage `d`. `replace` names tags the move sets afresh (hidden audio's
+ * `fade`, clamped to the room it has at the new place): `tags` stand where
+ * the first old one of those names stood, or at the end when there was
+ * none, and the old ones go.
+ */
+export function movedTemplate(
+  previous: Pick<NostrEvent, 'id' | 'kind' | 'tags' | 'content'>,
+  at: Position,
+  plane: Plane,
+  createdAt: number,
+  replace: { names: readonly string[]; tags: readonly string[][] } = { names: [], tags: [] },
+): EventTemplate {
+  const fresh = replace.tags.map((t) => [...t])
+  let placed = false
+  const kept = previous.tags.flatMap((t) => {
+    if (!replace.names.includes(t[0])) return [t]
+    if (placed) return []
+    placed = true
+    return fresh
+  })
+  const next: EventTemplate = { kind: previous.kind, created_at: createdAt, content: previous.content, tags: [['C', positionHex(at, plane)], [...PROTECTED_TAG]] }
+  const edited = editedTemplate(next, { id: previous.id, kind: previous.kind, tags: kept })
+  return placed ? edited : { ...edited, tags: [...edited.tags, ...fresh] }
+}
+
 /** The `d` of an addressable event, or ''. */
 export function dOf(ev: Pick<NostrEvent, 'tags'>): string {
   return ev.tags.find((t) => t[0] === 'd')?.[1] ?? ''

@@ -21,7 +21,7 @@ import { destinationHeights, holdCloudDestinationKeys, holdDestinationCubes } fr
 import { localKeyCeiling, regionKeyQuote } from '../lib/deployPlan'
 import { experienceRatio, recordJobExperience } from '../lib/experience'
 import { lineStateOf, rideStatsOf, zeroLengthRideRefusal } from '../lib/hyperspace/ride'
-import { verifyCloudRide } from '../lib/cloudRide'
+import { checkCloudRide, type CloudRideCheck } from '../lib/cloudRide'
 import { Quaternion } from 'three'
 import { generateSecretKey, getEventHash, verifiedSymbol, verifyEvent, type VerifiedEvent } from 'nostr-tools/pure'
 import { nip19 } from 'nostr-tools'
@@ -4211,9 +4211,9 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
     }
 
     set({ cloud: { ...get().cloud, status: 'verifying', invoice: null, invoiceOpen: false, progress: null, message: 'Checking HOSAKA\'s ride proof on this device.' } })
-    let failed: string[]
+    let check: CloudRideCheck
     try {
-      failed = await verifyCloudRide(job, { previousId: final.prevEventId, fromHeight: ride.fromHeight, toHeight: ride.toHeight }, rideBlockHash(id))
+      check = await checkCloudRide(job, { previousId: final.prevEventId, fromHeight: ride.fromHeight, toHeight: ride.toHeight }, rideBlockHash(id))
     } catch (err) {
       // Not judged (the line has not synced a sampled block, the verifier
       // broke): kept, never signed unchecked and never thrown away paid.
@@ -4222,6 +4222,16 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
       return false
     }
     if (id !== requestId) return false
+    const failed = check.failed
+    if (check.disagreesAt !== null) {
+      // The proof and this device's copy of a block disagree, and this device's
+      // copy may be the stale one. A paid proof is never thrown away for that.
+      // RESUME is no cure: stored line rows are append-only (the first row at a
+      // height wins, and they persist across reloads), so it reads the same
+      // copy and fails the same way until that copy is corrected.
+      rideFail(`HOSAKA's ride proof disagrees with this device's copy of block ${check.disagreesAt}, so nothing was signed and you did not move, and the proof is kept. RESUME fails the same way until this device's copy of that block is corrected. Quote job ${final.jobId.slice(0, 8)} to HOSAKA for a refund.`, true)
+      return false
+    }
     if (failed.length > 0) {
       clearCloudJob(final.pubkey, final.jobId)
       rideFail(`HOSAKA's ride proof failed this device's check (${failed.join('; ')}), so nothing was signed and you did not move. Quote job ${final.jobId.slice(0, 8)} to HOSAKA for a refund.`, false)

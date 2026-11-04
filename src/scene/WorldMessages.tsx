@@ -59,7 +59,8 @@ import { vanishOpacity } from '../lib/ceremony'
 import { openedKey } from '../store/useOpenedChests'
 import { GRID_RADIUS, itemCentre, type ViewAxes } from '../lib/space'
 import { alignedOrigin, useCyberspace } from '../store/useCyberspace'
-import { useShards } from '../store/useShards'
+import { itemMovingId, useShards } from '../store/useShards'
+import { heldLineages, holdsItem } from '../lib/inventory'
 import { LABEL_PRIORITY, WorldLabel } from './WorldLabel'
 import { findCashuToken } from '../lib/cashu'
 import { NFT_WORDS, replaceNftLinks } from '../lib/nftLink'
@@ -86,6 +87,9 @@ const REACH = GRID_RADIUS * 8
 export const NOTE = '#ffd27d'
 /** Bitcoin's own orange, for a coin left in cyberspace. */
 const BITCOIN = '#f7931a'
+/** How strongly an item being moved is drawn where it stood: its box, faint. */
+export const MOVING_OPACITY = 0.35
+
 /** The note's own blue, for the cube a message hangs on. */
 const NOTE_BLUE = '#4aa3ff'
 /** Steel, for a coin that has been redeemed: the shape stays, the money is gone. */
@@ -202,6 +206,12 @@ export function WorldMessages({ axes }: Props): JSX.Element | null {
   const births = useCeremony((s) => s.births)
   const me = useCyberspace((s) => s.identity.pubkey)
   const held = useInventory((s) => s.items)
+  // A key its hider moved is the same item under a new id: held by its lineage too (lib/inventory.ts holdsItem).
+  const heldLin = useMemo(() => heldLineages(held), [held])
+  // MOVE (useShards startMoveItem): the original stays where it stands, as
+  // its faint box and not tappable, while the ghost is aimed; it goes once
+  // the new one is out.
+  const moving = useShards((s) => itemMovingId(s.pending))
   // Whose ITEMS these are, and whether read: until then nothing held is shown by mistake.
   const itemsRead = useInventory((s) => s.owner === me && s.storage !== 'loading')
   const vanishing = useTakeVanish((s) => s.playing)
@@ -221,6 +231,9 @@ export function WorldMessages({ axes }: Props): JSX.Element | null {
       .map((w) => ({
         key: w.key,
         type: w.type,
+        lineage: w.lineage,
+        // Who wrote the item, whose versions alone share its lineage (lib/inventory.ts lineageKey).
+        itemAuthor: w.event?.pubkey ?? w.author,
         // The SNO a key wears, and its region's walls about it (ItemModel).
         wears: w.type === 'key' && w.keyItem?.model ? { model: w.keyItem.model, animation: w.keyItem.animation ?? NO_MOTION } : undefined,
         region: w.type === 'key' && w.keyItem?.model ? regionBox(w.at, w.height, 0, axes) : null,
@@ -241,12 +254,13 @@ export function WorldMessages({ axes }: Props): JSX.Element | null {
     <>
       {placed.map((w) => {
         const open = (): void => useShards.getState().selectSecret(w.key)
+        if (w.key === moving) return <PlacedBox key={w.key} at={w.centre} opacity={MOVING_OPACITY} />
         if (w.coin) return <CoinItem key={w.key} text={w.text} at={w.centre} scaleExp={scaleExp} onTap={open} />
         if (w.type === 'message') return <NoteItem key={w.key} w={w} birth={births[w.key]} onTap={open} />
         if (w.type === 'audio') return <AudioMark key={w.key} title={w.text} at={w.centre} onTap={open} />
         // A key: the cube and its short name, or the box alone while it is held.
         const play = vanishing[openedKey(me, w.key)]
-        const draw = itemDrawAs(!!held[w.key], itemsRead, !!play)
+        const draw = itemDrawAs(holdsItem(held, w.key, w.lineage, w.itemAuthor, heldLin), itemsRead, !!play)
         return (
           <group key={w.key}>
             {draw === 'item'

@@ -1677,7 +1677,7 @@ describe('what an older build or the old stores saved, folded in before anything
     const b = await openTab()
     await tick(100)
     const toast = (await import('../useToast')).useToast
-    expect(toast.getState().toast?.label).toBe('OLDER SAVE COULD NOT BE READ')
+    expect(toast.getState().toast).toMatchObject({ label: 'OLDER SAVE COULD NOT BE READ', meta: 'Moves go on from here. It keeps trying.' })
     expect(localStorage.getItem(`onosendai:chain-unread-save:${pk}`)).not.toBeNull()
     // A press tries the read again, and says nothing more.
     toast.getState().dismiss()

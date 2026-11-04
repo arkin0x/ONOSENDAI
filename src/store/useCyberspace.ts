@@ -2089,7 +2089,7 @@ async function foldStaleBuildNow(pubkey: string): Promise<void> {
     if (!unreadSaid.has(pubkey)) {
       unreadSaid.add(pubkey)
       console.warn('[chain] the old stores could not be read for a save of an older build: moves go on from the chain in hand, and the read is tried again')
-      useToast.getState().show({ label: 'OLDER SAVE COULD NOT BE READ', meta: 'Moves go on from the chain you see. It is tried again.', mark: 'block' })
+      useToast.getState().show({ label: 'OLDER SAVE COULD NOT BE READ', meta: 'Moves go on from here. It keeps trying.', mark: 'block' })
     }
     if (stored) takeInStored(pubkey, stored)
     return

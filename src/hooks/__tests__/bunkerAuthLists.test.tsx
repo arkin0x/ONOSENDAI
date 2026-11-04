@@ -45,7 +45,7 @@ vi.mock('../../lib/chains', async (o) => ({ ...(await o<typeof import('../../lib
 import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { finalizeEvent } from 'nostr-tools/pure'
-import { authGatedNet, type AuthGatedNet } from '../../lib/__tests__/authGatedNet'
+import { authGatedNet, CANON, type AuthGatedNet } from '../../lib/__tests__/authGatedNet'
 import { spawnTemplate } from '../../lib/events'
 
 const BAGS = 105
@@ -60,8 +60,27 @@ interface Visit {
   loot: () => { items: unknown[]; status: string; trouble: string | null }
   /** HIDDEN BAGS as it renders now. */
   panel: () => string
-  /** The tab coming back from another app, as App.tsx handles it. */
-  back: () => void
+  /** The tab put away for `ms` (another app: the signer's, a wallet), then back, as App.tsx sees it. */
+  away: (ms: number) => Promise<void>
+  /** The window given the focus back, with the tab never hidden (an extension's popup closing). */
+  focus: () => void
+  /** The canonical socket's count of operations and its open subscriptions, as nostr-tools keeps them. */
+  canonOps: () => { ops: number; subs: number } | null
+}
+
+/** A page's document and window for watchTabReturn, in a test without a DOM. */
+function fakeTab(): { doc: EventTarget & { visibilityState: string }; win: EventTarget; show: (visible: boolean) => void } {
+  const doc = Object.assign(new EventTarget(), { visibilityState: 'visible' })
+  const win = new EventTarget()
+  return {
+    doc,
+    win,
+    show: (visible) => {
+      doc.visibilityState = visible ? 'visible' : 'hidden'
+      doc.dispatchEvent(new Event('visibilitychange'))
+      if (visible) win.dispatchEvent(new Event('focus'))
+    },
+  }
 }
 
 /** A page load with this bunker remembered and its chain saved, HIDDEN BAGS open. */
@@ -84,18 +103,30 @@ async function visit(setup: (net: AuthGatedNet) => void): Promise<Visit> {
   net.install()
   const { useCyberspace } = await import('../../store/useCyberspace')
   const { ensureLoot, useLootStore } = await import('../useLoot')
-  const { CYBERSPACE_RELAY, retryFailedAuth } = await import('../../lib/relay')
+  const { CYBERSPACE_RELAY, getPool, watchTabReturn } = await import('../../lib/relay')
   const { HiddenPanel } = await import('../../hud/DiscoveredPanel')
   void useCyberspace.getState().initSigner()
   ensureLoot([CYBERSPACE_RELAY])
+  // As App.tsx wires it.
+  const tab = fakeTab()
+  stopTab?.()
+  stopTab = watchTabReturn(() => { useCyberspace.getState().wakeSigner() }, tab)
+  const wait = (ms: number): Promise<void> => vi.advanceTimersByTimeAsync(ms).then(() => {})
   return {
     net,
-    wait: (ms) => vi.advanceTimersByTimeAsync(ms).then(() => {}),
+    wait,
     loot: () => useLootStore.getState(),
     panel: () => renderToStaticMarkup(createElement(HiddenPanel)),
-    back: () => { useCyberspace.getState().wakeSigner(); setTimeout(retryFailedAuth, 0) },
+    away: async (ms) => { tab.show(false); await wait(ms); tab.show(true) },
+    focus: () => { tab.win.dispatchEvent(new Event('focus')) },
+    canonOps: () => {
+      const r = (getPool() as unknown as { relays: Map<string, { ongoingOperations: number; openSubs: Map<string, unknown> }> }).relays.get(CANON)
+      return r ? { ops: r.ongoingOperations, subs: r.openSubs.size } : null
+    },
   }
 }
+
+let stopTab: (() => void) | undefined
 
 beforeEach(() => { vi.useFakeTimers() })
 afterEach(() => { vi.useRealTimers(); vi.doUnmock('../useLoot') })
@@ -114,7 +145,7 @@ describe('HIDDEN BAGS when the bunker cannot sign the relay in', () => {
     await v.wait(60_000)
     expect(v.net.bunker.authAsked).toBe(2)
     // Back from the signer's app, which now accepts: the bags come in without a reload.
-    v.back()
+    await v.away(20_000)
     await v.wait(5_000)
     expect(v.loot()).toMatchObject({ status: 'ready', trouble: null })
     expect(v.loot().items).toHaveLength(BAGS)
@@ -200,6 +231,111 @@ describe('HIDDEN BAGS when the answer is slow or cut short', () => {
     expect(v.panel()).not.toContain(NOTHING)
     v.net.streamMs = 0
     await v.wait(20_000)
+    expect(v.loot().items).toHaveLength(BAGS)
+    expect(v.loot().trouble).toBeNull()
+  }, 60_000)
+})
+
+/**
+ * Review of #600, round 2. Each of these failed on 440ac89b.
+ */
+describe('a signer that said no, or is slow, is not asked again and again', () => {
+  it('a DENY in a popup that gives the focus back is not followed by another popup', async () => {
+    // An extension's popup: the page loses the focus while it is up and gets
+    // it back when DENY closes it. Asking again on that focus was 426 popups in 20 s.
+    const v = await visit((net) => { net.bunker.refuseAuth = 1_000 })
+    v.net.bunker.onAuthAsked = () => { setTimeout(() => v.focus(), 50) }
+    await v.wait(20_000)
+    expect(v.net.bunker.authAsked).toBeLessThanOrEqual(2)
+    expect(v.panel()).toContain(SIGN_IN_FAILED)
+    // Clicking around the page is not the person acting on it either.
+    for (let i = 0; i < 10; i++) { v.focus(); await v.wait(1_000) }
+    expect(v.net.bunker.authAsked).toBeLessThanOrEqual(2)
+    // Leaving the tab and coming back is: asked once more, and it fills.
+    v.net.bunker.refuseAuth = 0
+    v.net.bunker.onAuthAsked = null
+    await v.away(20_000)
+    await v.wait(5_000)
+    expect(v.loot().items).toHaveLength(BAGS)
+    expect(v.net.bunker.authAsked).toBe(3)
+  }, 60_000)
+
+  it('a tab hidden for less than a real absence does not ask again', async () => {
+    const v = await visit((net) => { net.bunker.refuseAuth = 2 })
+    await v.wait(10_000)
+    expect(v.net.bunker.authAsked).toBe(2)
+    await v.away(5_000)
+    await v.wait(5_000)
+    expect(v.net.bunker.authAsked).toBe(2)
+    expect(v.panel()).toContain(SIGN_IN_FAILED)
+  }, 60_000)
+
+  it('a sign-in with another signer asks again, and the list fills', async () => {
+    const v = await visit((net) => { net.bunker.refuseAuth = 2 })
+    await v.wait(10_000)
+    expect(v.loot().trouble).toBe('auth')
+    const { useCyberspace } = await import('../../store/useCyberspace')
+    await useCyberspace.getState().useNewKey()
+    await v.wait(5_000)
+    expect(v.loot().items).toHaveLength(BAGS)
+    expect(v.loot().trouble).toBeNull()
+  }, 60_000)
+
+  it('a bunker that signs at 200 s: one socket and two requests through 260 s, never fewer operations than subscriptions', async () => {
+    const v = await visit((net) => { net.bunker.authDelay = 200_000 })
+    for (let t = 10; t <= 260; t += 10) {
+      await v.wait(10_000)
+      const c = v.canonOps()
+      // A ping the relay CLOSEd was counted down again by its own EOSE timer:
+      // the count fell below what was open, and the socket closed as idle under them.
+      if (c) expect(c.ops, `at ${t} s`).toBeGreaterThanOrEqual(c.subs)
+    }
+    expect(v.loot().items).toHaveLength(BAGS)
+    expect(v.loot().trouble).toBeNull()
+    // The feeds closed for want of AUTH reopened on the sign-in, so the socket was never left empty.
+    expect(v.net.canon.sockets).toBe(1)
+    expect(v.net.bunker.authAsked).toBe(2)
+  }, 120_000)
+
+  it('an AUTH still wanted late does not keep a move waiting on dead sockets to the bunker', async () => {
+    const v = await visit((net) => { net.bunker.authDelay = Infinity })
+    await v.wait(40_000)
+    expect(v.loot().trouble).toBe('auth')
+    // The phone is put away: every socket to the bunker's relay is half-open when it comes back.
+    v.net.halfOpenBunker()
+    await v.away(20_000)
+    const { useCyberspace } = await import('../../store/useCyberspace')
+    let signed = false
+    void useCyberspace.getState().signEvent({ kind: 1, created_at: Math.floor(Date.now() / 1000), tags: [], content: 'a move' }).then(() => { signed = true })
+    // Not SIGN_PATIENCE_MS on the dead sockets first: the bunker answers over fresh ones at once.
+    await v.wait(3_000)
+    expect(signed).toBe(true)
+  }, 60_000)
+
+  it('an AUTH the relay failed (a slow OK) does not stop the liveness probe, and its auth-required is an answer', async () => {
+    // nostr-tools gives an AUTH's OK 4.4 s; this relay takes 6 s, and signs the socket in then.
+    const v = await visit((net) => { net.authOkDelay = 6_000 })
+    const { onAuthChange, probeLiveness } = await import('../../lib/relay')
+    const said: boolean[] = []
+    onAuthChange((url, ok) => { if (url === CANON) said.push(ok) })
+    await v.wait(15_000)
+    expect(said).toEqual([false])
+    const outcome = probeLiveness()
+    await v.wait(10_000)
+    expect(await outcome).toBe('alive')
+    // And the socket was kept: no new socket, no new AUTH.
+    expect(v.net.canon.sockets).toBe(1)
+  }, 60_000)
+
+  it('an old socket\'s refused AUTH does not fail the AUTH a newer socket is waiting on', async () => {
+    // The first socket's request is refused at 8 s, and so is the store's one
+    // retry of it; by then that socket is gone, and a new one's request is
+    // waiting on the bunker, which signs it at about 14 s.
+    const v = await visit((net) => { net.bunker.authPlan = [{ delay: 8_000, refuse: true }, { delay: 10_000 }, { delay: 0, refuse: true }] })
+    await v.wait(1_000)
+    v.net.dropCanon()
+    await v.wait(30_000)
+    expect(v.net.bunker.authAsked).toBe(3)
     expect(v.loot().items).toHaveLength(BAGS)
     expect(v.loot().trouble).toBeNull()
   }, 60_000)

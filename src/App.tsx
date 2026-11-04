@@ -63,7 +63,7 @@ import { startPresence } from './store/usePresence'
 import { hydrateRoster } from './store/useRoster'
 import { ChatDock } from './hud/ChatDock'
 import { useChatFeed } from './hooks/useChatFeed'
-import { watchConnectivity, retryFailedAuth } from './lib/relay'
+import { watchConnectivity, watchTabReturn } from './lib/relay'
 import { Scene } from './scene/Scene'
 import { useCanvasTap } from './hooks/useCanvasTap'
 import { setMenuCovering, useKeyboard } from './hooks/useKeyboard'
@@ -163,23 +163,14 @@ export default function App(): JSX.Element {
   // Back from the wallet: a phone suspends the tab while another app is up,
   // so the invoice poll's timer is still counting when the tab returns. Ask
   // HOSAKA at once instead of waiting the interval out; harmless otherwise.
-  useEffect(() => {
-    const back = (): void => {
-      if (document.visibilityState !== 'visible') return
-      const s = useCyberspace.getState()
-      s.wakeSigner()
-      // A relay whose AUTH failed while the signer was away signs in again,
-      // and the lists it refused read again once it does (useLoot). After
-      // wakeSigner has dropped the signer's old sockets, so the request goes
-      // out over fresh ones.
-      setTimeout(retryFailedAuth, 0)
-      s.checkCloudPayment()
-    }
-    document.addEventListener('visibilitychange', back)
-    window.addEventListener('pageshow', back)
-    window.addEventListener('focus', back)
-    return () => { document.removeEventListener('visibilitychange', back); window.removeEventListener('pageshow', back); window.removeEventListener('focus', back) }
-  }, [])
+  // After a real absence (not a focus: an extension's DENY gives the focus
+  // back), a relay whose AUTH failed while the signer was away signs in
+  // again, and the lists it refused read again once it does (useLoot).
+  useEffect(() => watchTabReturn(() => {
+    const s = useCyberspace.getState()
+    s.wakeSigner()
+    s.checkCloudPayment()
+  }), [])
 
   const isMobile = useIsMobile()
   // Spectating locks the panels: they describe you, and the scene is not about

@@ -1277,7 +1277,8 @@ interface ShardsState {
    * it. The region's height comes from the held key or your own deployment
    * there, because a bag need not carry `H` (spec §8.6). Resolves to how
    * many items it opened, or -1 when the relays could not be read (the
-   * canonical relay refused or was not heard from).
+   * canonical relay refused or was not heard from, and no other relay's bag
+   * opened anything).
    */
   rescan: (lookupId: string, keyHex: string) => Promise<number>
   selectSecret: (eventId: string | null) => void
@@ -1309,8 +1310,8 @@ interface ShardsState {
    * coordinate, ask the relays, open what comes back. `refused` means the bag
    * came back and this item is in it, but the format refuses it, so no client
    * can show it; the fix is in the workshop, not on the relay. `unread`:
-   * the canonical relay refused (no AUTH) or was not heard from, so nothing
-   * is known either way.
+   * no relay's bag held it, and the canonical relay refused (no AUTH) or was
+   * not heard from, so nothing is known either way.
    */
   testDiscovery: (eventId: string) => Promise<'found' | 'missing' | 'refused' | 'unread'>
   pendingShard: () => ShardModel | null
@@ -3700,9 +3701,10 @@ export const useShards = create<ShardsState>((set, get) => {
       set({ scanning: true })
       try {
         // The canonical relay refused (no AUTH) or was not heard from: that is
-        // not "nothing there", so it reads FAILED, not NONE, and nothing is dropped.
+        // not "nothing there". What another relay sent is opened, as before;
+        // with nothing opened it reads FAILED, not NONE, and nothing is dropped.
         const asked = await queryChecked({ kinds: [HIDDEN_KIND], '#d': [lookupId] })
-        if (asked.trouble) return -1
+        if (asked.trouble && asked.events.length === 0) return -1
         // One version per bag, the newest, none its author deleted (lib/bagVersions.ts).
         const { bags: events, deletions } = await bagsToOpen(asked.events, query, get().ownDoorAddresses([lookupId]))
         // The region's height, so a bag without `H` reads at its true size: a
@@ -3716,11 +3718,12 @@ export const useShards = create<ShardsState>((set, get) => {
         // What this scan opened for the first time gets the ceremony: the
         // decode in the scene and the chip that says how many.
         const fresh = get().freshOf(found)
-        get().dropStale(events, deletions, found)
+        // What is gone from the bag is known only from the canonical relay's answer.
+        if (!asked.trouble) get().dropStale(events, deletions, found)
         if (found.length > 0) get().addDiscovered(found)
         get().honorRetractions([lookupId], events, deletions)
         if (fresh.length > 0) useCeremony.getState().mark(fresh)
-        return found.length
+        return asked.trouble && found.length === 0 ? -1 : found.length
       } catch {
         return -1
       } finally {
@@ -4042,8 +4045,9 @@ export const useShards = create<ShardsState>((set, get) => {
       // Region key derived fresh from the coordinate, as a stranger would.
       // In a room, its key is the room key, which no coordinate alone gives.
       const rk = item.room ? { key: hexToBytes(item.keyHex), lookupId: item.lookupId } : regionKeyAt(positionOf(item), item.height, MAX_COMPUTE_HEIGHT)
+      // Any relay's bag answers it. Only a miss with the canonical relay in
+      // trouble (no AUTH, not heard from) is unread rather than missing.
       const { events, trouble } = await queryChecked({ kinds: [HIDDEN_KIND], '#d': [rk.lookupId] })
-      if (trouble) return 'unread'
       let refused = false
       for (const ev of events) {
         const h = BigInt(item.height)
@@ -4054,7 +4058,7 @@ export const useShards = create<ShardsState>((set, get) => {
         // the format refused it, and every other client will too.
         if (!refused) refused = (await bagInners(ev, rk.key)).some((e) => e.id === eventId)
       }
-      return refused ? 'refused' : 'missing'
+      return refused ? 'refused' : trouble ? 'unread' : 'missing'
     },
 
     pendingShard: () => {

@@ -94,7 +94,8 @@ function refRow(author: string, id: string): MyDeployment {
 }
 
 function bagBy(sk: Uint8Array, ...entries: Reference[]): Promise<unknown> {
-  return bagTemplate(entries, rk.key, rk.lookupId, HEIGHT, 2_000_000_000).then((tpl) => finalizeEvent(tpl, sk))
+  // A minute ago: a bag dated more than a day ahead is refused before any rewrite (nextBagAt, review of #599).
+  return bagTemplate(entries, rk.key, rk.lookupId, HEIGHT, Math.floor(Date.now() / 1000) - 60).then((tpl) => finalizeEvent(tpl, sk))
 }
 
 /** Hold what is sent to the relays. `reached` is when something got there; `release` lets it go. */

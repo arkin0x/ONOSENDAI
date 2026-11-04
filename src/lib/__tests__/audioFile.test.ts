@@ -5,10 +5,10 @@
  * with the key. Blossom is a mock here: nothing leaves the machine.
  */
 
-import { beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { finalizeEvent, generateSecretKey } from 'nostr-tools/pure'
-import { sha256Hex } from '../blossom'
-import { audioFileRefusal, audioTypeOf, iphoneMayNotPlay, forgetOpenedAudio, openAudio, sealAndUpload, AUDIO_UPLOAD_REASON, MAX_CIPHER_BYTES } from '../audioFile'
+import { TRANSFER_TIMEOUT_MS, sha256Hex } from '../blossom'
+import { audioFileRefusal, audioTypeOf, iphoneMayNotPlay, forgetOpenedAudio, openAudio, resealCopy, sealAndUpload, AUDIO_UPLOAD_REASON, MAX_CIPHER_BYTES } from '../audioFile'
 import { decryptAudioFile, MAX_AUDIO_BYTES } from '../audioItem'
 import type { EventTemplate } from '../events'
 import { toneWav } from './audioFixture'
@@ -155,5 +155,25 @@ describe('what the composer takes', () => {
     expect(audioFileRefusal({ type: 'image/png', size: 1000 })).toMatch('Not an audio file')
     expect(audioFileRefusal({ type: 'audio/mpeg', size: 0 })).toMatch('empty')
     expect(audioFileRefusal({ type: 'audio/mpeg', size: MAX_AUDIO_BYTES + 1 })).toMatch('Too large')
+  })
+})
+
+describe('a file server that never answers (review of #599)', () => {
+  afterEach(() => { vi.useRealTimers() })
+
+  it('opening the file, as HIDE AGAIN\'s reseal does, is given up in words, so the bag lock always frees', async () => {
+    vi.useFakeTimers()
+    forgetOpenedAudio()
+    const hung = vi.fn((_url: string, init?: RequestInit) => new Promise<Response>((_, reject) => {
+      init?.signal?.addEventListener('abort', () => reject(new DOMException('aborted', 'AbortError')))
+    }))
+    const item = { url: 'https://files.test/abc', hash: 'ab'.repeat(32), originalHash: 'cd'.repeat(32), keyHex: '11'.repeat(32), nonceHex: '22'.repeat(12), mime: 'audio/wav' }
+    const sign = async (t: EventTemplate) => finalizeEvent(t, generateSecretKey())
+    const caught = resealCopy(item, sign, 'https://files.test', hung).catch((err: unknown) => err)
+    await vi.advanceTimersByTimeAsync(TRANSFER_TIMEOUT_MS + 10)
+    const err = await caught
+    expect(err).toBeInstanceOf(Error)
+    expect((err as Error).message).toBe('The file\u2019s server did not answer within 3 minutes.')
+    expect(hung.mock.calls[0][1]?.signal?.aborted).toBe(true)
   })
 })

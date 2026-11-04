@@ -116,6 +116,33 @@ export type Sign = (template: EventTemplate) => Promise<NostrEvent>
 type FetchLike = (url: string, init: RequestInit) => Promise<Response>
 
 /**
+ * How long one file transfer (a GET or a PUT of up to MAX_AUDIO_BYTES, its
+ * body included) and one probe may take. A server that never answers used to
+ * hold whatever waited on it for good, the bag lock among them (HIDE AGAIN of
+ * hidden audio reseals the file through here; review of #599).
+ */
+export const TRANSFER_TIMEOUT_MS = 3 * 60_000
+export const PROBE_TIMEOUT_MS = 15_000
+
+/** A transfer given up: `what` did not answer in time. */
+export class TransferTimeout extends Error {
+  constructor(what: string, ms: number) {
+    super(`${what} did not answer within ${ms >= 60_000 ? `${Math.round(ms / 60_000)} minutes` : `${Math.round(ms / 1000)} seconds`}.`)
+    this.name = 'TransferTimeout'
+  }
+}
+
+/** Run `work` with an abort signal, given up after `ms`: aborted, and rejected as a TransferTimeout. */
+export function within<T>(ms: number, what: string, work: (signal: AbortSignal) => Promise<T>): Promise<T> {
+  const abort = new AbortController()
+  let timer: ReturnType<typeof setTimeout> | undefined
+  const late = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => { abort.abort(); reject(new TransferTimeout(what, ms)) }, ms)
+  })
+  return Promise.race([work(abort.signal), late]).finally(() => clearTimeout(timer))
+}
+
+/**
  * Put one file on a server. Resolves to where it now lives; throws a
  * BlossomRefusal or a network error. `reason` is the sentence the signer
  * shows for the upload token (kind 24242 content).
@@ -130,21 +157,25 @@ export async function uploadBlob(server: string, file: Blob, sign: Sign, fetchIm
 
   // Ask first. A refusal here saves sending the bytes; a missing HEAD does not stop anything.
   try {
-    const probe = await fetchImpl(endpoint, {
+    const probe = await within(PROBE_TIMEOUT_MS, 'The server', (signal) => fetchImpl(endpoint, {
       method: 'HEAD',
       headers: { ...headers, 'X-Content-Type': type, 'X-Content-Length': String(bytes.byteLength) },
-    })
+      signal,
+    }))
     if (!probe.ok && probe.status !== 404 && probe.status !== 405 && probe.status !== 501) {
       throw new BlossomRefusal(probe.status, probe.headers.get('X-Reason'))
     }
   } catch (err) {
     if (err instanceof BlossomRefusal) throw err
-    // A network or CORS failure on the probe: the server may still take the PUT.
+    // A network or CORS failure on the probe, or no answer in time: the server may still take the PUT.
   }
 
-  const res = await fetchImpl(endpoint, { method: 'PUT', headers: { ...headers, 'Content-Type': type }, body: bytes })
+  const { res, body } = await within(TRANSFER_TIMEOUT_MS, 'The server', async (signal) => {
+    const res = await fetchImpl(endpoint, { method: 'PUT', headers: { ...headers, 'Content-Type': type }, body: bytes, signal })
+    return { res, body: res.ok ? await res.json().catch(() => null) : null }
+  })
   if (!res.ok) throw new BlossomRefusal(res.status, res.headers.get('X-Reason'))
-  const desc = parseDescriptor(await res.json().catch(() => null))
+  const desc = parseDescriptor(body)
   if (!desc) throw new BlossomRefusal(res.status, 'the server answered without a blob descriptor')
   if (desc.sha256 !== hash) throw new BlossomRefusal(res.status, 'the server stored different bytes than were sent')
   return desc

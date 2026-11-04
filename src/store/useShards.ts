@@ -1423,6 +1423,10 @@ export function storedMine(mine: readonly MyDeployment[]): string {
 
 const BAG_NOT_READ = 'No relay answered, so this bag could not be read. Nothing was changed. Try again when one answers.'
 const SWITCHED = 'You switched identity while this was on its way, so it was not sent.'
+/** The deploy bar's note while a hide waits for a HIDE AGAIN or BROADCAST to land (holdBags). */
+const BAG_WAIT_NOTE = 'Waiting for a bag already going out'
+/** The hide waiting on the bag lock, if one is: CANCEL may end it, since it has signed nothing yet. */
+let deployWaiting: DeployPending | null = null
 
 /** What this list leaves out but must stay stored: rows no list shows. */
 const notShown = (d: MyDeployment | null): boolean => !isListed(d) || unreadable(d)
@@ -1556,21 +1560,26 @@ function placementId(): string {
  * the greatest created_at). Session-local; seeded from what is already on disk,
  * and moved past the relay's newest bag (gatherInners).
  *
- * Never more than BAG_CLOCK_LEAD_S past this device's wall clock: a bag signed
- * by a device whose clock runs fast would otherwise carry every later rewrite,
- * from every device, as far into the future, and a strict relay refuses an
- * event dated too far ahead (review of #597).
+ * It follows the relay's newest bag wherever that is, even past this device's
+ * clock: a bag dated older than the one the relays hold is dropped by some
+ * relays without a word and refused by others, and either way the hide is lost
+ * (review of #599). It moves past this device's clock only by what the relays
+ * hold or by one second a rewrite, never by a guess. Only a bag the relays
+ * hold dated more than BAG_CLOCK_REFUSE_S ahead of this device's clock stops
+ * it, in words: a rewrite newer than that would be refused for its date.
  */
-export const BAG_CLOCK_LEAD_S = 5 * 60
+export const BAG_CLOCK_REFUSE_S = 24 * 60 * 60
+export const BAG_CLOCK_AHEAD = 'The relays hold this bag dated more than a day past this device\u2019s clock. Nothing was sent. Check the clock here, then try again.'
 const bagClock = new Map<string, number>()
 export function nextBagAt(lookupId: string): number {
   const now = Math.floor(Date.now() / 1000)
-  const at = Math.min(now + BAG_CLOCK_LEAD_S, Math.max(now, (bagClock.get(lookupId) ?? 0) + 1))
+  const at = Math.max(now, (bagClock.get(lookupId) ?? 0) + 1)
+  if (at > now + BAG_CLOCK_REFUSE_S) throw new Error(BAG_CLOCK_AHEAD)
   bagClock.set(lookupId, at)
   return at
 }
 
-/** Note a bag the relays hold, so the next rewrite here is newer than it (nextBagAt caps how far). */
+/** Note a bag the relays hold, so the next rewrite here is newer than it (nextBagAt). */
 export function noteBagAt(lookupId: string, createdAt: number): void {
   bagClock.set(lookupId, Math.max(bagClock.get(lookupId) ?? 0, createdAt))
 }
@@ -1966,8 +1975,13 @@ export const useShards = create<ShardsState>((set, get) => {
    * Returns the chest item for the inner template and the keys forged inside,
    * each with its signed event, for the inventory.
    */
-  async function sealChest(draft: ChestDraft, at: Position, plane: Plane, createdAt: number): Promise<{ chest: ChestItem; forged: Array<{ event: NostrEvent; key: KeyItem }>; entries: BagEntry[] }> {
+  async function sealChest(draft: ChestDraft, at: Position, plane: Plane, createdAt: number, owner = cyber().identity.pubkey): Promise<{ chest: ChestItem; forged: Array<{ event: NostrEvent; key: KeyItem }>; entries: BagEntry[] }> {
     const cs = cyber()
+    /** Before each signature: one signed in since never signs the chest's contents (review of #599). */
+    const signAsOwner = (t: EventTemplate): Promise<NostrEvent> => {
+      if (cyber().identity.pubkey !== owner) throw new Error(SWITCHED)
+      return cs.signEvent(t)
+    }
     if (!draft.lock) throw new Error('The chest has no lock.')
     const signed: BagEntry[] = []
     const forged: Array<{ event: NostrEvent; key: KeyItem }> = []
@@ -1995,12 +2009,12 @@ export const useShards = create<ShardsState>((set, get) => {
         if (!model) throw new Error('A model in this chest is no longer in your workshop.')
         const refusal = shardRefusal(model)
         if (refusal) throw new Error(refusal)
-        signed.push(await cs.signEvent(shardInnerTemplate(model, at, plane, createdAt, creditOf(model))))
+        signed.push(await signAsOwner(shardInnerTemplate(model, at, plane, createdAt, creditOf(model))))
       } else if (c.kind === 'audio') {
         // A rumor, as in a bag (DECK-0007 §3): the chest's signature vouches for it.
         signed.push(rumorOf(audioInnerTemplate(c.audio, at, plane, createdAt), cs.identity.pubkey))
       } else {
-        const event = await cs.signEvent(keyInnerTemplate(c.key, at, plane, createdAt))
+        const event = await signAsOwner(keyInnerTemplate(c.key, at, plane, createdAt))
         signed.push(event)
         forged.push({ event, key: c.key })
       }
@@ -2211,7 +2225,11 @@ export const useShards = create<ShardsState>((set, get) => {
     for (const r of rows) {
       if (r.ref && r.shard && r.inner.pubkey === me && r.inner.kind === OBJECT_KIND && r.inner.tags.some((t) => t[0] === 'encrypted')) {
         const at = Math.max(now, r.inner.created_at + 1)
-        const next = await cs.signEvent(await objectTemplate(r.shard, to.key, dOf(r.inner), at))
+        // Before each signature, as each follows a wait: one signed in since is never asked (review of #599).
+        const template = await objectTemplate(r.shard, to.key, dOf(r.inner), at)
+        if (cyber().identity.pubkey !== owner) throw new Error(SWITCHED)
+        const next = await cs.signEvent(template)
+        if (cyber().identity.pubkey !== owner) throw new Error(SWITCHED)
         const back = await cs.signEvent({ kind: r.inner.kind, created_at: at + 1, content: r.inner.content, tags: r.inner.tags })
         const ref = referenceTo(next, positionOf(r), r.plane, relaySet()[0] ?? '')
         objects.push({ rowId: r.eventId, next, back })
@@ -2352,8 +2370,9 @@ export const useShards = create<ShardsState>((set, get) => {
       saveDeleted(deleted)
       // A key you hid is yours to hold at once (B1 §3.1), this copy too, in
       // the place of the version before: one ITEMS row per keypair (review of
-      // #595). Only into the items of the identity that hid it.
-      if (d.key && cyber().identity.pubkey === owner) useInventory.getState().holdAgain(inner, d.key, { lookupId: d.lookupId, bagId: event.id, at: d.at, plane: d.plane, height: d.height })
+      // #595). In the items of the identity that hid it, whoever is signed in
+      // by now (review of #599).
+      if (d.key) void useInventory.getState().holdAgain(inner, d.key, { lookupId: d.lookupId, bagId: event.id, at: d.at, plane: d.plane, height: d.height }, owner)
       return null
     } catch (err) {
       return err instanceof Error ? err.message : String(err)
@@ -2762,6 +2781,8 @@ export const useShards = create<ShardsState>((set, get) => {
           const sealed = sealEntries(roomEntries(nextSecret) as BagEntry[], lockPubkey)
           const next = { ...(door.eventId === eventId ? named : door.chest!), lockPubkey, senderPubkey: sealed.senderPubkey, payload: sealed.payload }
           const createdAt = Math.max(Math.floor(Date.now() / 1000), door.createdAt + 1)
+          // Before each door's signature: a switch during the last one stops it here (review of #599).
+          if (cyber().identity.pubkey !== me) throw new Error(SWITCHED)
           signed.set(door.eventId, { row: door, next, createdAt, inner: await cs.signEvent(chestInnerTemplate(next, positionOf(door), door.plane, createdAt)) })
         }
         const editedId = signed.get(eventId)!.inner.id
@@ -3037,7 +3058,9 @@ export const useShards = create<ShardsState>((set, get) => {
       return deployCeiling({ localMax: localKeyCeiling(), cloudMode: cs.cloudPrefs.mode, cloudCap: cs.cloud.limits?.max_hop_height ?? null })
     },
     cancelDeploy: (asked = false) => {
-      if (get().deployStatus === 'working') return
+      // Working, it is not stopped, except while it waits on the bag lock having signed nothing (review of #599).
+      if (get().deployStatus === 'working' && !(deployWaiting !== null && deployWaiting === get().pending)) return
+      deployWaiting = null
       // A shard being aimed into a chest gives the chest back as it was: the
       // composer reopens with the draft intact and that shard as before.
       const { pending } = get()
@@ -3285,15 +3308,30 @@ export const useShards = create<ShardsState>((set, get) => {
       }
 
       set({ deployStatus: 'working', deployError: null, deployAsk: null })
+      // Whose hide this is, fixed now. Every signature and publish below is
+      // this identity's, or nothing: after any wait (the bag lock, a key
+      // computed, a signer), one signed in since stops it here in words, so
+      // its signer never sees a request of this one's (review of #599).
+      const owner = cs.identity.pubkey
+      const still = (): void => { if (cyber().identity.pubkey !== owner) throw new Error(SWITCHED) }
+      const signAsOwner = (t: EventTemplate, patienceMs?: number): Promise<NostrEvent> => { still(); return cs.signEvent(t, patienceMs) }
       try {
         // A HIDE AGAIN or BROADCAST rewriting a bag: this waits for it before
         // reading any bag, so neither write drops what the other added. While
-        // this one works, neither starts (holdBags).
+        // this one works, neither starts (holdBags). CANCEL works while it waits.
         if (bagWork) {
-          set({ deployNote: 'Waiting for a bag already going out' })
-          while (bagWork) await bagWork.catch(() => undefined)
+          set({ deployNote: BAG_WAIT_NOTE })
+          deployWaiting = pending
+          try {
+            while (bagWork) await bagWork.catch(() => undefined)
+          } finally {
+            if (deployWaiting === pending) deployWaiting = null
+          }
+          // Cancelled while it waited: nothing was signed, and the bar is someone else's now.
+          if (get().pending !== pending) return
           set({ deployNote: null })
         }
+        still()
         if (pending.type === 'chest') {
           set({ deployNote: pending.door ? 'Sealing the door' : 'Signing and sealing the chest' })
           // What it wears, posed by the bar (DECK-0004 §3.6), before anything is sealed.
@@ -3316,7 +3354,7 @@ export const useShards = create<ShardsState>((set, get) => {
             const sealed = sealEntries(roomEntries(doorSecretHex) as BagEntry[], pending.lock!.pubkey)
             chest = { name: pending.name.trim(), lockPubkey: pending.lock!.pubkey, senderPubkey: sealed.senderPubkey, requires: pending.requires.trim(), payload: sealed.payload, look, door: doorHeight }
           } else {
-            const sealed = await sealChest(pending, at, plane, createdAt)
+            const sealed = await sealChest(pending, at, plane, createdAt, owner)
             chest = { ...sealed.chest, look }
             forgedInside = sealed.forged
             sealedInside = sealed.entries
@@ -3326,12 +3364,14 @@ export const useShards = create<ShardsState>((set, get) => {
         if (pending.type === 'audio' && pending.reseal && audio) {
           // PLACE AGAIN's copy: its own key, its own ciphertext (repeatable).
           set({ deployNote: 'Encrypting a fresh copy of the file' })
-          audio = { ...audio, ...(await resealCopy(audio, (t) => cs.signEvent(t, AUDIO_SIGN_PATIENCE_MS), pending.server)) }
+          audio = { ...audio, ...(await resealCopy(audio, (t) => signAsOwner(t, AUDIO_SIGN_PATIENCE_MS), pending.server)) }
           innerTemplate = audioInnerTemplate(audio, at, plane, createdAt)
         }
         let rk: { key: Uint8Array; lookupId: string }
         if (route === 'cloud') {
           set({ deployNote: `HOSAKA has the 2^${deployHeight} key` })
+          // HOSAKA's requests are signed too.
+          still()
           const held = await useSecrets.getState().buy(at, plane, deployHeight)
           if (!held) throw new Error(useSecrets.getState().buyError ?? 'HOSAKA could not compute the key.')
           rk = { key: hexToBytes(held.keyHex), lookupId: held.lookupId }
@@ -3375,6 +3415,7 @@ export const useShards = create<ShardsState>((set, get) => {
             // The copy made when LIVE LINK was picked, or one made now; never
             // of what its author deleted (NIP-09). One that no relay took is
             // tried once more here before the deploy is refused.
+            still()
             let copy = await copyForLink(object)
             if (!copy.hint && !copy.deleted) { linkCopies.delete(object.id); copy = await copyForLink(object) }
             if (copy.deleted) throw new Error(LINK_DELETED)
@@ -3395,7 +3436,7 @@ export const useShards = create<ShardsState>((set, get) => {
           // Newer than the version it replaces even within the same second
           // (a retry right after a rollback), or relays would keep that one.
           const objectAt = was ? Math.max(createdAt, was.inner.created_at + 1) : createdAt
-          inner = await cs.signEvent(await objectTemplate(shard, rk.key, was ? dOf(was.inner) : placementId(), objectAt))
+          inner = await signAsOwner(await objectTemplate(shard, rk.key, was ? dOf(was.inner) : placementId(), objectAt))
           if (was && live) {
             // A move publishes nothing until everything is signed: the
             // object goes out after the bag is signed (publishBag's
@@ -3403,8 +3444,9 @@ export const useShards = create<ShardsState>((set, get) => {
             // is what goes back if the new bag reaches no relay, so a failed
             // move never leaves the old place unreadable (review of #369).
             // Only while live: LOCAL publishes nothing, so there is nothing to put back.
-            rollback = await cs.signEvent({ kind: was.inner.kind, created_at: objectAt + 1, content: was.inner.content, tags: was.inner.tags })
+            rollback = await signAsOwner({ kind: was.inner.kind, created_at: objectAt + 1, content: was.inner.content, tags: was.inner.tags })
           } else if (live) {
+            still()
             const sent = await publishMany(relaySet(), inner)
             if (!sent.ok) throw new Error('No relay took the shard. Try again when one is reachable.')
           }
@@ -3419,7 +3461,7 @@ export const useShards = create<ShardsState>((set, get) => {
           // (DECK-0007 §3). The bag's signature vouches for both.
           // Typed as the signed event the rest of this path carries; a rumor
           // only ever goes into the bag as its entry, never out on its own.
-          inner = pending.type === 'message' || pending.type === 'audio' ? rumorOf(innerTemplate, cs.identity.pubkey) as NostrEvent : await cs.signEvent(innerTemplate)
+          inner = pending.type === 'message' || pending.type === 'audio' ? rumorOf(innerTemplate, owner) as NostrEvent : await signAsOwner(innerTemplate)
         }
         // A door's secret reaches disk before the door goes anywhere. Its id needs the
         // signature, and a signature sends nothing. If this device cannot keep it, nothing goes out.
@@ -3446,6 +3488,7 @@ export const useShards = create<ShardsState>((set, get) => {
           settings = into ? ROOM_BAG_SETTINGS : resolveBagSettings(deployBag, base, existing.settings, deployHeight)
           const sendObject = was && rollback && live
             ? async () => {
+              still()
               const sent = await publishMany(relaySet(), inner)
               if (!sent.ok) throw new Error('No relay took the moved shard. It stays where it was.')
               objectSent = true
@@ -3760,9 +3803,11 @@ export const useShards = create<ShardsState>((set, get) => {
         // The last thing in the region: delete the envelope itself (NIP-09).
         if (wasPublic) {
           if (cyber().identity.pubkey !== me) { refused(new Error(SWITCHED)); return }
+          let deletedAt: number
+          try { deletedAt = nextBagAt(item.lookupId) } catch (err) { refused(err); return }
           const del = await cs.signEvent({
             kind: 5,
-            created_at: nextBagAt(item.lookupId),
+            created_at: deletedAt,
             content: 'hidden content removed',
             // kind 33330 is addressable, so the address is what a relay
             // replaces and what NIP-09 asks for; the event id goes too, for

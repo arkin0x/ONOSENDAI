@@ -79,8 +79,10 @@ interface InventoryState {
    * event with no lineage, so relocate cannot find it. The one row of its keypair
    * holds the copy at its place, and the row of the version before goes, so ITEMS
    * never lists one keypair twice (review of #595). Held since when it was first held.
+   * `owner` is the identity that hid it: when another is signed in by now, its
+   * rows are changed where they are kept, not skipped (review of #599).
    */
-  holdAgain: (event: NostrEvent, key: KeyItem, place: HeldPlace) => HeldItem
+  holdAgain: (event: NostrEvent, key: KeyItem, place: HeldPlace, owner?: string) => Promise<void>
   /** TAKE: hold contents out of an opened chest. */
   take: (entries: ChestEntry[], from: HeldFrom, place: HeldPlace | null) => HeldItem[]
   /** Take these rows off the TAKEN list, keeping them held (moved into the workshop, or cleared). */
@@ -235,24 +237,43 @@ export const useInventory = create<InventoryState>((set, get) => {
     void persist(changed)
   },
 
-  holdAgain: (event, key, place) => {
-    const owner = ownerNow()
-    const before = Object.values(get().items).filter((it) => it.id !== event.id && it.type === 'key' && it.key?.itemPubkey === key.itemPubkey && it.event.pubkey === owner)
-    const item = heldFromForged(owner, event, key, place, before.reduce((at, it) => Math.min(at, it.at), now()))
-    const items = { ...get().items }
-    for (const it of before) { delete items[it.id]; removed.add(it.rowKey) }
-    items[item.id] = item
-    removed.delete(item.rowKey)
-    set({ items })
-    // The copy on disk first, then the old row off it: a failure between keeps both, never neither.
-    void persist([item])
-    for (const it of before) {
-      writes = writes
-        .then(() => database())
-        .then((d) => (d ? deleteHeld(d, it.rowKey) : undefined))
-        .catch((err: unknown) => { console.warn(`[inventory] could not delete an item: ${describeError(err)}`) })
+  holdAgain: async (event, key, place, owner) => {
+    const who = owner ?? ownerNow()
+    /** One identity's rows of this keypair other than the copy, and the copy in their place. */
+    const swap = (rows: HeldItem[]): { before: HeldItem[]; item: HeldItem } => {
+      const before = rows.filter((it) => it.id !== event.id && it.type === 'key' && it.key?.itemPubkey === key.itemPubkey && it.event.pubkey === who)
+      return { before, item: heldFromForged(who, event, key, place, before.reduce((at, it) => Math.min(at, it.at), now())) }
     }
-    return item
+    /** The copy on disk first, then the old rows off it: a failure between keeps both, never neither. */
+    const write = (item: HeldItem, before: HeldItem[]): Promise<void> => {
+      void persist([item])
+      for (const it of before) {
+        writes = writes
+          .then(() => database())
+          .then((d) => (d ? deleteHeld(d, it.rowKey) : undefined))
+          .catch((err: unknown) => { console.warn(`[inventory] could not delete an item: ${describeError(err)}`) })
+      }
+      return writes
+    }
+    if (who === ownerNow()) {
+      const { before, item } = swap(Object.values(get().items))
+      const items = { ...get().items }
+      for (const it of before) { delete items[it.id]; removed.add(it.rowKey) }
+      items[item.id] = item
+      removed.delete(item.rowKey)
+      set({ items })
+      await write(item, before)
+      return
+    }
+    // Another identity is signed in: the hider's rows are only on disk.
+    const d = await database()
+    if (!d) return
+    let rows: HeldItem[]
+    try { rows = await readHeld(d, who) } catch (err) { console.warn(`[inventory] could not read items: ${describeError(err)}`); return }
+    const { before, item } = swap(rows)
+    for (const it of before) removed.add(it.rowKey)
+    removed.delete(item.rowKey)
+    await write(item, before)
   },
 
   take: (entries, from, place) => {

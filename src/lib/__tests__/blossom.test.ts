@@ -1,7 +1,8 @@
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   AUTH_TTL_S, BLOSSOM_AUTH_KIND, BlossomRefusal, DEFAULT_BLOSSOM_SERVERS, authHeader, explainUpload,
   normalizeServer, parseDescriptor, serversFromList, sha256Hex, uploadAuthTemplate, uploadBlob,
+  PROBE_TIMEOUT_MS, TRANSFER_TIMEOUT_MS, TransferTimeout,
 } from '../blossom'
 import type { EventTemplate, NostrEvent } from '../events'
 
@@ -115,5 +116,27 @@ describe('explainUpload', () => {
     expect(explainUpload(new BlossomRefusal(413, '2 MB max'))).toMatch(/too large.*2 MB max/)
     expect(explainUpload(new TypeError('Failed to fetch'))).toMatch(/reached|browser/)
     expect(explainUpload(new Error('odd'))).toBe('odd')
+  })
+})
+
+describe('a server that never answers (review of #599)', () => {
+  afterEach(() => { vi.useRealTimers() })
+  /** A fetch that answers only when aborted, as a hung connection does. */
+  const hung = vi.fn((_url: string, init: RequestInit) => new Promise<Response>((_, reject) => {
+    init.signal?.addEventListener('abort', () => reject(new DOMException('aborted', 'AbortError')))
+  }))
+
+  it('an upload is given up, in words, so nothing waits on it for good', async () => {
+    vi.useFakeTimers()
+    hung.mockClear()
+    const up = uploadBlob('https://s', png, fakeSign, hung)
+    const caught = up.catch((err: unknown) => err)
+    await vi.advanceTimersByTimeAsync(PROBE_TIMEOUT_MS + TRANSFER_TIMEOUT_MS + 10)
+    const err = await caught
+    expect(err).toBeInstanceOf(TransferTimeout)
+    expect(explainUpload(err)).toBe('The server did not answer within 3 minutes.')
+    // The probe and the PUT, each aborted.
+    expect(hung).toHaveBeenCalledTimes(2)
+    for (const call of hung.mock.calls) expect(call[1].signal?.aborted).toBe(true)
   })
 })

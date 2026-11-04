@@ -14,7 +14,7 @@
  * after DOWNLOAD (or the other way round) fetches nothing twice.
  */
 
-import { normalizeServer, sha256Hex, uploadBlob, type Sign } from './blossom'
+import { TRANSFER_TIMEOUT_MS, TransferTimeout, normalizeServer, sha256Hex, uploadBlob, within, type Sign } from './blossom'
 import { decryptAudioFile, encryptAudioFile, fetchableUrl, MAX_AUDIO_BYTES, type AudioItem } from './audioItem'
 
 type FetchLike = (url: string, init?: RequestInit) => Promise<Response>
@@ -168,17 +168,22 @@ export function openAudio(a: Pick<AudioItem, 'url' | 'hash' | 'originalHash' | '
     return held.file
   }
   const p = (async (): Promise<Blob> => {
-    let res: Response
-    try {
-      res = await fetchImpl(a.url, { referrerPolicy: 'no-referrer' })
-    } catch {
-      throw new AudioFetchError('The file’s server could not be reached.')
-    }
-    if (!res.ok) throw new AudioFetchError(`The file’s server answered HTTP ${res.status}.`)
-    // Never more than the largest file this client hides, nor more than the
-    // size the item says (with room for the tag, for a writer that gave the
-    // file's own size).
-    const cipher = await readCapped(res, a.size ? Math.min(a.size + 16, MAX_CIPHER_BYTES) : MAX_CIPHER_BYTES)
+    // The fetch and its body, given up after TRANSFER_TIMEOUT_MS: a server that
+    // never answers held whatever waited on it for good (review of #599).
+    const cipher = await within(TRANSFER_TIMEOUT_MS, 'The file\u2019s server', async (signal) => {
+      let res: Response
+      try {
+        res = await fetchImpl(a.url, { referrerPolicy: 'no-referrer', signal })
+      } catch (err) {
+        if (signal.aborted) throw err
+        throw new AudioFetchError('The file\u2019s server could not be reached.')
+      }
+      if (!res.ok) throw new AudioFetchError(`The file\u2019s server answered HTTP ${res.status}.`)
+      // Never more than the largest file this client hides, nor more than the
+      // size the item says (with room for the tag, for a writer that gave the
+      // file's own size).
+      return readCapped(res, a.size ? Math.min(a.size + 16, MAX_CIPHER_BYTES) : MAX_CIPHER_BYTES)
+    }).catch((err: unknown) => { throw err instanceof TransferTimeout ? new AudioFetchError(err.message) : err })
     if (sha256Hex(cipher) !== a.hash) throw new AudioFetchError('The server sent other bytes than the ones hidden here.')
     const plain = await decryptAudioFile(cipher, a.keyHex, a.nonceHex)
     if (!plain) throw new AudioFetchError('The file does not open with the key hidden here.')

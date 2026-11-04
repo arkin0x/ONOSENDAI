@@ -149,7 +149,7 @@ describe('the NIP-01 flag', () => {
     expect(schnorr.n).toBe(12)
   })
 
-  it('a relay that sends a flagged event while the check is still running is not checked again', async () => {
+  it('a flagged row is not trusted before its check has run: a relay\'s copy that lands meanwhile is checked in full', async () => {
     const chain = chainOf(60)
     await seed(chain)
     await settled(await load())
@@ -167,7 +167,8 @@ describe('the NIP-01 flag', () => {
       const { verifyOnce } = await import('../../lib/verifiedSigs')
       schnorr.n = 0
       expect(verifyOnce(JSON.parse(JSON.stringify(chain[2])) as NostrEvent)).toBe(true)
-      expect(schnorr.n).toBe(0)
+      // The row's flag says it was checked once, but its id has not been recomputed yet on this load.
+      expect(schnorr.n).toBe(1)
     } finally { proto.transaction = real }
     await new Promise((r) => setTimeout(r, 100))
   })
@@ -335,5 +336,43 @@ describe('the NIP-01 flag', () => {
     await vi.waitFor(() => expect(b.S().events).toHaveLength(5), { timeout: 5_000, interval: 20 })
     expect(b.S().events.some((e) => e.sig === forgedSig)).toBe(false)
     expect(b.S().proof.message).toMatch(/failed the signature check/)
+  })
+
+  it('a rows check that never answers holds moves no longer than its deadline, then the check that needs no database runs', { timeout: 30_000 }, async () => {
+    const chain = chainOf(8)
+    await seed(chain)
+    await settled(await load())
+    // The rows check's own read (one store, the chain index) never answers; the chain's read still does.
+    const proto = IDBIndex.prototype as unknown as { getAll: (...x: unknown[]) => unknown }
+    const real = proto.getAll
+    proto.getAll = function (this: IDBIndex, ...x: unknown[]) {
+      const tx = this.objectStore.transaction
+      if (tx.db.name === 'onosendai:events' && this.name === 'byChain' && tx.objectStoreNames.length === 1) return {}
+      return real.apply(this, x)
+    }
+    try {
+      vi.resetModules()
+      const store = await import('../useCyberspace')
+      loaded.push(store)
+      // The check's deadline, and the look's patience, short for the test.
+      ;(await import('../../lib/chainStore')).setRowsPatience({ check: 300, read: 500 })
+      await store.savedChainLoaded()
+      store.useCyberspace.setState({ selfCheck: { pubkey: pk, status: 'none' } })
+      schnorr.n = 0
+      const r = await Promise.race([store.useCyberspace.getState().confirmHeadNow().then(() => 'answered'), new Promise((res) => setTimeout(() => res('still held'), 5_000))])
+      expect(r).toBe('answered')
+      expect(schnorr.n).toBe(8)
+    } finally { proto.getAll = real }
+  })
+
+  it('what a check of the rows covered is forgotten on a switch to another identity', async () => {
+    const chain = chainOf(6)
+    await seed(chain)
+    await settled(await load())
+    const store = await load()
+    await settled(store)
+    expect(store.rowsCoverage()).toBe(6)
+    await store.useCyberspace.getState().useNsec(nip19.nsecEncode(generateSecretKey()))
+    expect(store.rowsCoverage()).toBe(0)
   })
 })

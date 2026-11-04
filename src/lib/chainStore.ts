@@ -29,7 +29,7 @@ import { checkVersion, useVersionGate } from './versionGate'
 import type { ChainCommit, ChainRead, ChainRecord, ChainSource, MigrationResult } from './eventDb/chainRows'
 import type { Nip01Flag } from './eventDb/schema'
 import { CHAIN_ROWS_ON_WEBKIT, CHAIN_STORE_VERSION } from './chainStoreVersion'
-import { checkSignatures } from './sigCheck'
+import { checkSignatures, sigCheckDeadlineMs } from './sigCheck'
 import type { NostrEvent } from './events'
 
 /** The patience of a read: the same 3 s the old store's reads have (lib/chainDb.ts). */
@@ -218,12 +218,23 @@ export function readRows(pubkey: string, onLate?: (late: ChainRead | null | 'unr
   })
 }
 
-/** The record alone, or 'unreadable'. Waits for this tab's own writes first, so what it says is about other tabs. */
+/**
+ * The record alone, or 'unreadable'. Waits for this tab's own writes first, so
+ * what it says is about other tabs. Within the read's patience, as readRows: a
+ * database stuck on another call (one that never answers, behind which calls
+ * on the main thread queue) must not hold a move; a look that does not answer
+ * proves nothing, and the relays are asked as ever.
+ */
 export async function rowsHead(pubkey: string): Promise<ChainRecord | null | 'unreadable'> {
-  try {
-    await rowsSettled(pubkey)
-    return await callEventDb('chainHead', [pubkey])
-  } catch { return 'unreadable' }
+  let timer: ReturnType<typeof setTimeout> | undefined
+  const late = new Promise<'unreadable'>((resolve) => { timer = setTimeout(() => resolve('unreadable'), readPatienceMs) })
+  const look = (async (): Promise<ChainRecord | null | 'unreadable'> => {
+    try {
+      await rowsSettled(pubkey)
+      return await callEventDb('chainHead', [pubkey])
+    } catch { return 'unreadable' }
+  })()
+  try { return await Promise.race([look, late]) } finally { clearTimeout(timer) }
 }
 
 /** Copy, read back, compare, switch (lib/eventDb/chainRows.ts). Never rejects: 'failed' leaves the old copies in charge. */
@@ -251,9 +262,27 @@ export async function checkRows(pubkey: string): Promise<string[]> {
   const found = await callEventDb('checkChainRows', [pubkey], CHECK_PATIENCE_MS)
   if (found.unchecked.length === 0) return found.bad
   const forged = await checkSignatures(found.unchecked)
-  const good = found.unchecked.filter((e) => !forged.has(e.id)).map((e) => e.id)
+  const good = found.unchecked.filter((e) => !forged.has(e.id))
   if (good.length > 0) await callEventDb('flagRows', [good]).catch(() => { /* raised by the next check */ })
   return [...found.bad, ...forged]
+}
+
+/** For tests: the deadline a rows check gets, in place of the signature check's own. */
+let checkDeadlineMs: number | null = null
+
+/**
+ * checkRows, given no longer than the signature check that needs no database
+ * would take (lib/sigCheck.ts sigCheckDeadlineMs): a stuck worker or a database
+ * that stops answering must not hold every move for minutes. Rejects on the
+ * deadline, and the caller checks by other means. A check that answers late
+ * still raises its flags.
+ */
+export function checkRowsInTime(pubkey: string, count: number): Promise<string[]> {
+  const ms = checkDeadlineMs ?? sigCheckDeadlineMs(count)
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error('the rows check ran out of time')), ms)
+    checkRows(pubkey).then((bad) => { clearTimeout(timer); resolve(bad) }, (err) => { clearTimeout(timer); reject(err) })
+  })
 }
 
 /** Set a branch aside. A failure is said, and the branch's old copy (if any) stands. */
@@ -599,7 +628,8 @@ export async function chainRowsSettled(): Promise<void> {
 }
 
 /** For tests. */
-export function setRowsPatience(p: { read?: number; land?: number; retry?: number; deploy?: number }): void {
+export function setRowsPatience(p: { read?: number; land?: number; retry?: number; deploy?: number; check?: number | null }): void {
+  if (p.check !== undefined) checkDeadlineMs = p.check
   if (p.deploy !== undefined) deployPatienceMs = p.deploy
   if (p.read !== undefined) readPatienceMs = p.read
   if (p.land !== undefined) landPatienceMs = p.land

@@ -2034,9 +2034,14 @@ describe('follow-ups of #576', () => {
   it('held moves are free once the rows answer again, with the relays silent', { timeout: 30_000 }, async () => {
     const { m } = await moveOnlyInSpareKey()
     relays.confirm = null
-    // The rows are busy past the read's patience: this load takes them as unreadable.
-    const held = await holdStore('onosendai:events', 'events')
-    putBack.push(() => { void held.letGo() })
+    // This load cannot read the rows: the move the spare key brings back is held.
+    const index = IDBIndex.prototype as unknown as { getAll: (...x: unknown[]) => unknown }
+    const realGetAll = index.getAll
+    index.getAll = function (this: IDBIndex, ...x: unknown[]) {
+      if (this.objectStore.transaction.db.name === 'onosendai:events') throw new DOMException('broken', 'UnknownError')
+      return realGetAll.apply(this, x)
+    }
+    putBack.push(() => { index.getAll = realGetAll })
     const b = await openTab()
     expect(b.S().events.map((e) => e.id)).toContain(m)
     expect(b.rows.unvouchedAction(pk, m)).toBe(true)
@@ -2045,8 +2050,13 @@ describe('follow-ups of #576', () => {
     b.S().publishNow()
     await tick(300)
     expect(sent.map((x) => x.id)).not.toContain(m)
-    // The late answer: the rows are read, the move is committed like any save, and goes.
-    await held.letGo()
+    // The rows answer again: away and back, this identity's chain is read from them, the move committed like any save.
+    index.getAll = realGetAll
+    await b.S().useNsec(nip19.nsecEncode(generateSecretKey()))
+    await b.S().useNsec(nip19.nsecEncode(sk))
+    await b.store.savedChainLoaded()
+    expect(b.rows.unvouchedAction(pk, m)).toBe(false)
+    b.S().publishNow()
     await vi.waitFor(() => expect(sent.map((x) => x.id)).toContain(m), { timeout: 10_000, interval: 20 })
   })
 

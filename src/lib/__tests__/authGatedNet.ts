@@ -49,6 +49,10 @@ export interface AuthGatedNet {
     authPlan: { delay: number; refuse?: boolean }[]
     /** Called on each AUTH request the bunker receives (an extension's popup opening). */
     onAuthAsked: (() => void) | null
+    /** How many of the next sign_events of any kind the bunker refuses (DENY). */
+    refuseSigns: number
+    /** sign_event requests of any kind the bunker received. */
+    signAsked: number
     /** sign_event requests for an AUTH the bunker received. */
     authAsked: number
     /** AUTHs it answered. */
@@ -99,7 +103,7 @@ export function authGatedNet(): AuthGatedNet {
     userPk,
     pref: { kind: 'nip46', pubkey: userPk, bunkerUri: `bunker://${bunkerPk}?relay=${encodeURIComponent(BUNKER_RELAY.replace(/\/$/, ''))}`, clientNsec: nip19.nsecEncode(clientSk) },
     hold: [],
-    bunker: { authDelay: 0, refuseAuth: 0, authPlan: [], onAuthAsked: null, authAsked: 0, authSigned: 0 },
+    bunker: { authDelay: 0, refuseAuth: 0, authPlan: [], refuseSigns: 0, signAsked: 0, onAuthAsked: null, authAsked: 0, authSigned: 0 },
     canon: { refusedReqs: 0, authOk: 0, sockets: 0 },
     failConnects: 0,
     challengeDelay: 0,
@@ -142,6 +146,8 @@ export function authGatedNet(): AuthGatedNet {
     if (method === 'sign_event') {
       const template = JSON.parse(params[0]) as { kind: number; created_at: number; tags: string[][]; content: string }
       const sign = (): void => reply(JSON.stringify(finalizeEvent(template, userSk)))
+      net.bunker.signAsked++
+      if (net.bunker.refuseSigns > 0) { net.bunker.refuseSigns--; return reply('', 'denied') }
       if (template.kind !== 22242) return sign()
       net.bunker.authAsked++
       net.bunker.onAuthAsked?.()

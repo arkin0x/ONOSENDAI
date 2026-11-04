@@ -27,7 +27,7 @@ describe('a door that goes takes its room with it', () => {
       inChestInRoom: { eventId: 'inChestInRoom', author: AUTHOR, lookupId: 'r'.repeat(64), bagId: 'x'.repeat(64), bagAt: 100, chestId: 'inRoom' },
       elsewhere: { eventId: 'elsewhere', author: AUTHOR, lookupId: 'r'.repeat(64), bagId: 'x'.repeat(64), bagAt: 100, room: { doorId: 'another door' } },
     }
-    expect(staleFinds(finds, [], [del]).sort()).toEqual(['door', 'inChestInRoom', 'inRoom'])
+    expect(staleFinds(finds, [], [del], new Set()).sort()).toEqual(['door', 'inChestInRoom', 'inRoom'])
   })
 
   it('a door still standing keeps its room', () => {
@@ -36,7 +36,7 @@ describe('a door that goes takes its room with it', () => {
       door: { eventId: 'door', author: AUTHOR, lookupId: L, bagId: v1.id, bagAt: 100 },
       inRoom: { eventId: 'inRoom', author: AUTHOR, lookupId: 'r'.repeat(64), bagId: 'x'.repeat(64), bagAt: 100, room: { doorId: 'door' } },
     }
-    expect(staleFinds(finds, [v1], [])).toEqual([])
+    expect(staleFinds(finds, [v1], [], new Set(['door']))).toEqual([])
   })
 })
 
@@ -63,7 +63,44 @@ describe('one deletion rule for the scan and the found cache', () => {
   it('a find whose bag was deleted by id goes, by an older retraction it stays', () => {
     const b = bag(300)
     const find: Record<string, FindOfBag> = { f: { eventId: 'f', author: AUTHOR, lookupId: L, bagId: b.id, bagAt: 300 } }
-    expect(staleFinds(find, [], [retract(100, [['e', b.id]])])).toEqual(['f'])
-    expect(staleFinds(find, [], [retract(299, [['a', ADDRESS]])])).toEqual([])
+    expect(staleFinds(find, [], [retract(100, [['e', b.id]])], new Set())).toEqual(['f'])
+    expect(staleFinds(find, [], [retract(299, [['a', ADDRESS]])], new Set())).toEqual([])
+  })
+})
+
+describe('a holder only re-filed keeps what is in it (review of #593)', () => {
+  // The reviewer's probe: the hider changed something else in the door's bag.
+  it('a door whose bag has a newer version that still holds it keeps its room', () => {
+    const v1 = bag(100, 'door')
+    const v2 = bag(200, 'door, plus something new beside it')
+    const finds: Record<string, FindOfBag> = {
+      door: { eventId: 'door', author: AUTHOR, lookupId: L, bagId: v1.id, bagAt: 100 },
+      inRoom: { eventId: 'inRoom', author: AUTHOR, lookupId: 'r'.repeat(64), bagId: 'x'.repeat(64), bagAt: 150, room: { doorId: 'door' } },
+    }
+    // The door itself goes only to be filed again under v2, by the same scan.
+    expect(staleFinds(finds, [v2], [], new Set(['door']))).toEqual(['door'])
+  })
+
+  it('a chest whose bag has a newer version that still holds it keeps what came out of it', () => {
+    const v1 = bag(100, 'chest')
+    const v2 = bag(200, 'chest, plus something new beside it')
+    const finds: Record<string, FindOfBag> = {
+      chest: { eventId: 'chest', author: AUTHOR, lookupId: L, bagId: v1.id, bagAt: 100 },
+      inside: { eventId: 'inside', author: AUTHOR, lookupId: L, bagId: v1.id, bagAt: 100, chestId: 'chest' },
+      deeper: { eventId: 'deeper', author: AUTHOR, lookupId: L, bagId: v1.id, bagAt: 100, chestId: 'inside' },
+    }
+    expect(staleFinds(finds, [v2], [], new Set(['chest']))).toEqual(['chest'])
+  })
+
+  it('a newer version that no longer holds the door or the chest takes what is in them', () => {
+    const v1 = bag(100, 'door and chest')
+    const v2 = bag(200, 'both taken out')
+    const finds: Record<string, FindOfBag> = {
+      door: { eventId: 'door', author: AUTHOR, lookupId: L, bagId: v1.id, bagAt: 100 },
+      inRoom: { eventId: 'inRoom', author: AUTHOR, lookupId: 'r'.repeat(64), bagId: 'x'.repeat(64), bagAt: 150, room: { doorId: 'door' } },
+      chest: { eventId: 'chest', author: AUTHOR, lookupId: L, bagId: v1.id, bagAt: 100 },
+      inside: { eventId: 'inside', author: AUTHOR, lookupId: L, bagId: v1.id, bagAt: 100, chestId: 'chest' },
+    }
+    expect(staleFinds(finds, [v2], [], new Set()).sort()).toEqual(['chest', 'door', 'inRoom', 'inside'])
   })
 })

@@ -114,13 +114,18 @@ export interface FindOfBag {
  * The finds already on screen that a scan's answer takes away: one read from
  * a bag whose address now holds a newer version (the scan opens that one and
  * files again whatever it still holds), or whose author deleted it with no
- * newer version standing. A find out of a chest goes with its chest, and a
- * find in a room with the door that opened it: the room is read by its door
- * (store/rooms.ts), never by a scan, and a door that went leaves its room's
- * finds drawn for the session otherwise (review of #587). Anything whose
- * address the answer says nothing about stays, since silence removes nothing.
+ * newer version standing. Anything whose address the answer says nothing
+ * about stays, since silence removes nothing.
+ *
+ * `refiled`: the finds the scan read out of the bags it opened, which it
+ * files again at once. A chest or a door among them was only re-filed under
+ * its newer bag, not taken away, so what is in it stays: the hider changing
+ * something else in that bag must not empty a room a finder has open, maybe
+ * from inside (a room is read by its door, store/rooms.ts, and reopenRoom
+ * does not read it again for minutes). A chest or a door that went and was
+ * not re-filed takes what is in it, however deep (review of #593).
  */
-export function staleFinds(finds: Readonly<Record<string, FindOfBag>>, bags: readonly NostrEvent[], deletions: readonly NostrEvent[]): string[] {
+export function staleFinds(finds: Readonly<Record<string, FindOfBag>>, bags: readonly NostrEvent[], deletions: readonly NostrEvent[], refiled: ReadonlySet<string>): string[] {
   const current = new Map(bags.map((b) => [bagAddressOf(b), b]))
   const valid = validDeletions(deletions)
   const out = new Set<string>()
@@ -135,12 +140,14 @@ export function staleFinds(finds: Readonly<Record<string, FindOfBag>>, bags: rea
     // The bag it was read from, as far as the find knows it: the same rule as any bag's.
     if (deletedAmong({ id: h.bagId, pubkey: h.author, created_at: h.bagAt ?? 0, tags: [['d', h.lookupId]] }, valid)) out.add(h.eventId)
   }
-  // What came out of a chest that went, or stood behind a door that went, however deep.
-  for (let grew = out.size > 0; grew;) {
+  // What came out of a chest that went, or stood behind a door that went,
+  // however deep; never through one the newer bag still holds.
+  const gone = new Set([...out].filter((id) => !refiled.has(id)))
+  for (let grew = gone.size > 0; grew;) {
     grew = false
     for (const h of Object.values(finds)) {
       const holder = h.chestId ?? h.room?.doorId
-      if (holder !== undefined && out.has(holder) && !out.has(h.eventId)) { out.add(h.eventId); grew = true }
+      if (holder !== undefined && gone.has(holder) && !gone.has(h.eventId)) { gone.add(h.eventId); out.add(h.eventId); grew = true }
     }
   }
   return [...out]

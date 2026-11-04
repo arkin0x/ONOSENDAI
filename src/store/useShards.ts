@@ -1097,9 +1097,10 @@ interface ShardsState {
    * Before a scan files what it opened: the finds on screen read from an
    * older version of a bag it opened, or from a bag its author deleted, go
    * (lib/bagVersions.ts staleFinds). The newer version files again whatever
-   * it still holds.
+   * it still holds (`refiled`, what the scan read), and a chest or a door it
+   * still holds keeps what is in it.
    */
-  dropStale: (bags: readonly NostrEvent[], deletions: readonly NostrEvent[]) => void
+  dropStale: (bags: readonly NostrEvent[], deletions: readonly NostrEvent[], refiled: readonly Hidden[]) => void
   /**
    * Take one content out of a chest of yours that this device opened: the
    * chest is sealed again without it and the bag rewritten with the new chest
@@ -3209,7 +3210,7 @@ export const useShards = create<ShardsState>((set, get) => {
         // What this scan opened for the first time gets the ceremony: the
         // decode in the scene and the chip that says how many.
         const fresh = get().freshOf(found)
-        get().dropStale(events, deletions)
+        get().dropStale(events, deletions, found)
         if (found.length > 0) get().addDiscovered(found)
         get().honorRetractions([lookupId], events, deletions)
         if (fresh.length > 0) useCeremony.getState().mark(fresh)
@@ -3228,9 +3229,9 @@ export const useShards = create<ShardsState>((set, get) => {
       return [...ids].map((id) => `${HIDDEN_KIND}:${me}:${id}`)
     },
 
-    dropStale: (bags, deletions) => {
+    dropStale: (bags, deletions, refiled) => {
       const discovered = get().discovered
-      const gone = staleFinds(discovered, bags, deletions)
+      const gone = staleFinds(discovered, bags, deletions, new Set(refiled.map((h) => h.eventId)))
       if (gone.length === 0) return
       const next = { ...discovered }
       for (const id of gone) delete next[id]

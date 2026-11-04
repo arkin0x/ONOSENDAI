@@ -100,6 +100,7 @@ import { useTv } from '../store/useTv'
 import { CAMERA_NEAR, FOV } from './camera'
 import { headlampReach, headlampUniforms } from './headlamp'
 import { composerSamples, screenPixels } from './composerBudget'
+import { tickViewFly, useFlyTouches } from './ViewFly'
 
 /** Starting distance from the cursor, in cells. Orbit takes over from here. */
 const START_DISTANCE = 26
@@ -770,6 +771,8 @@ function Rig(): JSX.Element {
       doc.removeEventListener('pointercancel', up, true)
     }
   }, [surface])
+  // VIEW's fly: two fingers at rest on the scene fly forward, three back (scene/ViewFly.ts).
+  useFlyTouches(surface)
 
   useFrame((state, dt) => {
     const c = controls.current
@@ -777,6 +780,13 @@ function Rig(): JSX.Element {
     // GRAVITY's fall (store/useWalk.ts) takes its frame first: it can land,
     // which moves the cursor read below.
     tickFall()
+    // So does VIEW's fly, which moves the cursor along the camera's line of
+    // sight. While it flies the camera rides with the cursor, locked, even
+    // after an orbit, so the cursor keeps its place in front of it. Nor does
+    // it glide: the view re-anchors every field width of a long fly (the
+    // store's rideView), which the focus effect above takes for a new subject
+    // and eases toward over GLIDE_SECONDS, and the cursor would pull ahead.
+    if (tickViewFly(c.object.position, c.target, dt)) { locked.current = true; glideLeft.current = 0 }
     const s = useCyberspace.getState()
     lastOffset.current.copy(c.object.position).sub(c.target)
     // The anchor, not the position: in history the scene is drawn from the

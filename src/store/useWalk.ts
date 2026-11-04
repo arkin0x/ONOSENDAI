@@ -132,26 +132,36 @@ export interface WalkSegment {
 
 /**
  * Whether a straight hop from `from` to `to` costs no more than
- * WALK_SEGMENT_BUDGET_MS here. The cost is set by the highest per-axis LCA of
- * the two ends, the Cantor tree a proof has to compute; measured times
- * project it when calibration has run, and before that each height is taken
- * to double the time of the one under it from the conservative hop ceiling.
+ * WALK_SEGMENT_BUDGET_MS here. A proof computes a Cantor tree for every axis
+ * the hop changes, at that axis's LCA of the two ends, so the cost is their
+ * sum: one tree for a level step, two for a diagonal (review of #594), and
+ * the rise's too on a stair. Measured times project each tree when
+ * calibration has run, and before that each height is taken to double the
+ * time of the one under it from the conservative hop ceiling.
  */
 export function segmentAffordable(from: Position, to: Position, plane: number): boolean {
   const est = estimateHopCost(from.x, from.y, from.z, to.x, to.y, to.z, plane as 0 | 1, MAX_COMPUTE_HEIGHT)
-  const h = Math.max(est.lcaX, est.lcaY, est.lcaZ)
+  const lca: Record<AxisName, number> = { x: est.lcaX, y: est.lcaY, z: est.lcaZ }
+  const heights = (['x', 'y', 'z'] as const).filter((a) => from[a] !== to[a]).map((a) => lca[a])
+  if (heights.length === 0) return true
   const measured = useCalibration.getState().cantorMsByHeight
   if (measured && Object.keys(measured).length > 0) {
-    const ms = projectCantorMs(measured, h)
+    const ms = heights.reduce((sum, h) => sum + projectCantorMs(measured, h), 0)
     if (Number.isFinite(ms)) return ms <= WALK_SEGMENT_BUDGET_MS
   }
-  return h <= recommendedHopHeight() - Math.log2(HOP_AXIS_BUDGET_MS / WALK_SEGMENT_BUDGET_MS)
+  return Math.log2(heights.reduce((sum, h) => sum + 2 ** h, 0)) <= recommendedHopHeight() - Math.log2(HOP_AXIS_BUDGET_MS / WALK_SEGMENT_BUDGET_MS)
 }
 
-/** Whether two diagonal sides are the same: both none, or the same axis the same way. */
-function sameWay(a: AxisDirection | null | undefined, b: AxisDirection | null | undefined): boolean {
-  if (!a || !b) return !a && !b
-  return a.axis === b.axis && a.dir === b.dir
+/**
+ * Whether a step keeps to the open segment's heading: the same axis the same
+ * way, and for a diagonal the same two axes, in either order (review of
+ * #594: facing 50 and then 40 is one diagonal, and one hop).
+ */
+function sameHeading(open: WalkSegment, along: AxisDirection, side: AxisDirection | null): boolean {
+  const same = (a: AxisDirection, b: AxisDirection): boolean => a.axis === b.axis && a.dir === b.dir
+  const was = { axis: open.axis, dir: open.dir }
+  if (!open.side || !side) return !open.side && !side && same(was, along)
+  return (same(was, along) && same(open.side, side)) || (same(was, side) && same(open.side, along))
 }
 
 /** The stillness timer that closes the open segment. */
@@ -302,7 +312,9 @@ export const useWalk = create<WalkState>((set, get) => ({
       return n === 0n ? { to: at, by: null } : walkStep(at, axis, sign, n, items, gravity)
     }
     takeWallWait()
-    const move = planWalkMove(from, heading ?? { main: dir, side: null, lean: null }, length, stepAlong)
+    // Under gravity a diagonal also needs both side cells to hold you (lib/walkSlide.ts).
+    const stands = gravity ? (at: Position): boolean => standing(at, items, true) : undefined
+    const move = planWalkMove(from, heading ?? { main: dir, side: null, lean: null }, length, stepAlong, { stands })
     if (waitedForWalls(() => get().press(name, strafe))) return
     if (move.by) wallChip(move.by)
     if (!move.along || samePosition(move.to, from)) return
@@ -313,7 +325,7 @@ export const useWalk = create<WalkState>((set, get) => ({
     // a flight is one hop (the same work per axis as its steps, in fewer
     // events). A diagonal heading is two axes, still one hop; a slide along a
     // wall is a heading of its own, so a long slide is one hop too.
-    if (open && open.axis === move.along.axis && open.dir === sign && sameWay(open.side, side) && segmentAffordable(open.from, next, cs.plane)) {
+    if (open && sameHeading(open, move.along, side) && segmentAffordable(open.from, next, cs.plane)) {
       // On the same way: the open segment grows.
       set({ open: { ...open, end: next } })
     } else {

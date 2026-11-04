@@ -11,7 +11,7 @@
  * - nothing ever moves backward; BACKWARD mirrors all of it.
  */
 import { describe, expect, it } from 'vitest'
-import { DIAGONAL_HALF_DEG, SLIDE_MIN_DEG, planWalkMove, walkHeading, type Stepper, type Vec3, type WalkHeading } from '../walkSlide'
+import { DIAGONAL_HALF_DEG, DIAGONAL_MAX, SLIDE_MIN_DEG, planWalkMove, walkHeading, type Stepper, type Vec3, type WalkHeading } from '../walkSlide'
 import type { AxisName, Position } from '../space'
 
 /**
@@ -192,6 +192,43 @@ describe('a press among walls', () => {
     // A backward diagonal: south and west.
     const g = grid(['.@.', '...'])
     expect(rel(g.from, planWalkMove(g.from, head(45, -1)!, 1n, g.step).to)).toEqual([-1, 1])
+  })
+
+  it('a long diagonal goes gibson by gibson: a wall inside its square holds it there (review of #594)', () => {
+    // A 4-gibson diagonal with a wall cell on the way at (2, -2) from the walker.
+    const g = grid(['......', '......', '..#...', '......', '@.....'])
+    const m = planWalkMove(g.from, head(45)!, 4n, g.step)
+    expect(m).toMatchObject({ kind: 'diagonal', by: 'wall' })
+    expect(rel(g.from, m.to)).toEqual([1, -1])
+    // Held on its first gibson, it is no diagonal: the straight step or the slide.
+    const h = grid(['......', '......', '......', '.#....', '@.....'])
+    expect(planWalkMove(h.from, head(45)!, 4n, h.step).kind).toBe('slide')
+  })
+
+  it('a press longer than DIAGONAL_MAX (16, as walkStep substeps) is never a diagonal', () => {
+    const rows = Array.from({ length: 40 }, () => '.'.repeat(40))
+    rows[39] = '@' + '.'.repeat(39)
+    const g = grid(rows)
+    expect(DIAGONAL_MAX).toBe(16n)
+    expect(planWalkMove(g.from, head(45)!, 16n, g.step).kind).toBe('diagonal')
+    const m = planWalkMove(g.from, head(40)!, 32n, g.step)
+    expect(m.kind).toBe('slide')
+    expect(rel(g.from, m.to)).toEqual([0, -32])
+  })
+
+  it('under GRAVITY (stands) both side cells must hold you, and it stops where it walks off', () => {
+    const g = grid(['...', '...', '.@.'])
+    // Only the start and the diagonal cell hold you: the sides are pits.
+    const floorAt = (cells: string[], o: Position = g.from) => (at: Position) => cells.includes(`${at.x - o.x},${at.z - o.z}`)
+    const pits = planWalkMove(g.from, head(45)!, 1n, g.step, { stands: floorAt(['0,0', '1,-1']) })
+    expect(pits.kind).not.toBe('diagonal')
+    const sides = planWalkMove(g.from, head(45)!, 1n, g.step, { stands: floorAt(['0,0', '1,0', '0,-1']) })
+    expect(sides.kind).toBe('diagonal')
+    // Two gibsons, the first diagonal cell off the floor: it ends there, where the fall starts.
+    const big = grid(['....', '....', '@...'])
+    const off = planWalkMove(big.from, head(45)!, 2n, big.step, { stands: floorAt(['0,0', '1,0', '0,-1'], big.from) })
+    expect(off).toMatchObject({ kind: 'diagonal' })
+    expect(rel(big.from, off.to)).toEqual([1, -1])
   })
 
   it('never moves backward, among random walls at any angle', () => {

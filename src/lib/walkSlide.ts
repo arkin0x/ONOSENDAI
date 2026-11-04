@@ -20,9 +20,10 @@
  * | straight | open (or open part way) | the straight step, as before |
  * | straight, angled 5 degrees or more to a side | blocked | one step to that side, if it is open: a slide along the wall |
  * | straight on (under 5 degrees) | blocked | nothing, as before |
- * | diagonal | both side cells and the diagonal cell open | ONE step changing two axes: one hop, one chain event |
- * | diagonal | a side cell blocked, or the diagonal cell | a slide along the side that is open (the nearer to your facing first); no corner is ever cut |
+ * | diagonal | both side cells and the diagonal cell open, gibson by gibson | ONE step changing two axes: one hop, one chain event |
+ * | diagonal | a side cell blocked, or the diagonal cell (under GRAVITY, a side cell you would not stand in) | a slide along the side that is open (the nearer to your facing first); no corner is ever cut |
  * | diagonal | both sides blocked | nothing |
+ * | diagonal, a press longer than 16 gibsons | any | no diagonal: the straight step, or the slide |
  *
  * Every move it makes is along an axis your heading leans toward, so a press
  * never takes you backward. Nothing here decides what a wall is.
@@ -122,17 +123,44 @@ const whole = (at: Position, r: StepResult<unknown>, d: AxisDirection, length: b
   r.to[d.axis] - at[d.axis] === BigInt(d.dir) * length
 
 /**
+ * The longest press walked as a diagonal, in gibsons: one Maze Kit tile, as
+ * store/walkStep.ts STEP_SUBSTEP_MAX substeps a straight press. Past it a
+ * press is never a diagonal (review of #594): it is the straight step, or
+ * the slide.
+ */
+export const DIAGONAL_MAX = 16n
+
+/** What the planner may also ask of the world. */
+export interface WalkPlanOptions {
+  /**
+   * Under GRAVITY: whether you stand at a point (store/walkStep.ts standing).
+   * A diagonal then needs both side cells standing, so it never crosses a
+   * gap a straight step into either side would fall through (review of
+   * #594), and it ends on the first gibson past an edge, where the fall starts.
+   */
+  stands?: (at: Position) => boolean
+}
+
+/**
  * Where a press of `length` from `from` along `heading` lands, asking `step`
  * how far each straight step goes. The decision is all here; what is a wall,
  * and the stairs, are `step`'s.
  *
- * A diagonal is the two L-shaped ways round its square, each a straight step
- * `step` has cleared: both must go their whole way and meet at one place, so
- * both side cells are open and the corner is never cut, and a stair on the
- * way is climbed the same on both. It is all or nothing; refused, the press
- * slides instead.
+ * A diagonal is walked one gibson at a time (review of #594: a whole press's
+ * square left its inside untested, so a pillar in the middle of a coarse
+ * step was walked through). Each one-gibson diagonal is the two L-shaped ways
+ * round its square, each a straight step `step` has cleared: both must go
+ * their gibson and meet at one place, so both side cells are open, the
+ * corner is never cut, and a stair on the way is climbed the same on both.
+ * What `step` cannot see is a post wholly inside one gibson's square,
+ * touching neither way round: the walls are asked along axes only.
+ *
+ * Held part way, the diagonal stops on the last gibson it reached. Held on
+ * its first gibson, or longer than DIAGONAL_MAX, it is no diagonal: the
+ * straight step if it goes its whole way, else the slide along the side,
+ * else whichever goes at all.
  */
-export function planWalkMove<B>(from: Position, heading: WalkHeading, length: bigint, step: Stepper<B>): WalkMove<B> {
+export function planWalkMove<B>(from: Position, heading: WalkHeading, length: bigint, step: Stepper<B>, options: WalkPlanOptions = {}): WalkMove<B> {
   const { main, side, lean } = heading
   if (!side) {
     const ahead = step(from, main.axis, main.dir, length)
@@ -143,19 +171,34 @@ export function planWalkMove<B>(from: Position, heading: WalkHeading, length: bi
     }
     return { to: from, by: ahead.by, kind: 'held', along: null, side: null }
   }
+  const { stands } = options
+  /** One gibson diagonally from `at`, or what held it. */
+  const oneGibson = (at: Position): { to: Position } | { by: B | null } => {
+    const a = step(at, main.axis, main.dir, 1n)
+    const b = step(at, side.axis, side.dir, 1n)
+    if (!whole(at, a, main, 1n) || !whole(at, b, side, 1n)) return { by: a.by ?? b.by }
+    if (stands && (!stands(a.to) || !stands(b.to))) return { by: null }
+    const ab = step(a.to, side.axis, side.dir, 1n)
+    const ba = step(b.to, main.axis, main.dir, 1n)
+    if (!whole(a.to, ab, side, 1n) || !whole(b.to, ba, main, 1n) || !samePlace(ab.to, ba.to)) return { by: ab.by ?? ba.by }
+    return { to: ab.to }
+  }
+  if (length <= DIAGONAL_MAX) {
+    let at = from
+    let by: B | null = null
+    for (let n = 0n; n < length; n++) {
+      const next = oneGibson(at)
+      if (!('to' in next)) { by = next.by; break }
+      at = next.to
+      // Off an edge under gravity: the press ends here, and the fall starts.
+      if (stands && !stands(at)) break
+    }
+    if (!samePlace(at, from)) return { to: at, by, kind: 'diagonal', along: main, side }
+  }
+  // No diagonal: straight if that goes its whole way, else along the side; then whichever goes part way.
   const a = step(from, main.axis, main.dir, length)
   const b = step(from, side.axis, side.dir, length)
-  const aOpen = whole(from, a, main, length)
-  const bOpen = whole(from, b, side, length)
-  if (aOpen && bOpen) {
-    const ab = step(a.to, side.axis, side.dir, length)
-    const ba = step(b.to, main.axis, main.dir, length)
-    if (whole(a.to, ab, side, length) && whole(b.to, ba, main, length) && samePlace(ab.to, ba.to)) {
-      return { to: ab.to, by: null, kind: 'diagonal', along: main, side }
-    }
-  }
-  // No diagonal: along whichever side is open, the nearer first; then one open part way.
-  const ways: Array<[StepResult<B>, AxisDirection, boolean]> = [[a, main, aOpen], [b, side, bOpen]]
+  const ways: Array<[StepResult<B>, AxisDirection, boolean]> = [[a, main, whole(from, a, main, length)], [b, side, whole(from, b, side, length)]]
   const go = ways.find(([, , open]) => open) ?? ways.find(([r]) => !samePlace(r.to, from))
   if (go) return { to: go[0].to, by: go[0].by, kind: 'slide', along: go[1], side: null }
   return { to: from, by: a.by ?? b.by, kind: 'held', along: null, side: null }

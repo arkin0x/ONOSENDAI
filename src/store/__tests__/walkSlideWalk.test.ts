@@ -14,6 +14,12 @@
  *   per axis what the two straight steps would;
  * - under GRAVITY a diagonal off a ledge stops past the edge and falls;
  * - W with D held, and the facing, both make the diagonal; S mirrors W.
+ *
+ * Review of #594 (the reviewer's probes, now with what they must do): a
+ * diagonal is walked gibson by gibson, so a pillar inside a coarse step's
+ * square holds it; past 16 gibsons a press is no diagonal; under GRAVITY
+ * both side cells must hold you; facing 50 then 40 is one diagonal, one hop;
+ * and a diagonal segment is budgeted for both its trees.
  */
 import { provedFor } from '../fixtures/provedHop'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
@@ -50,7 +56,7 @@ vi.mock('../../lib/relay', async (orig) => {
 import { estimateHopCost } from 'cyberspace-core'
 import { newShard, type ShardModel } from 'sno-core/shards'
 import { useCyberspace } from '../useCyberspace'
-import { fallState, useWalk } from '../useWalk'
+import { WALK_SEGMENT_BUDGET_MS, fallState, segmentAffordable, useWalk } from '../useWalk'
 import { useShards, type WorldItem } from '../useShards'
 import { useToast } from '../useToast'
 import { clearWalls } from '../walkWalls'
@@ -311,9 +317,9 @@ describe('a slide', () => {
 })
 
 describe('under GRAVITY', () => {
-  it('a diagonal off a ledge stops past the edge, and the fall starts there', () => {
-    // A ledge under the walker ending half a gibson to its right (+X), and a floor 4 further down.
-    world(start, boxes('Ledge', 'all', [[[-10, -2, -10], [0.5, -1, 10]]]), boxes('Low', 'all', [[[-10, -6, -10], [20, -5, 10]]]))
+  it('a diagonal off a floor\'s outside corner stops past the edge, and the fall starts there', () => {
+    // A floor under the walker with its -Z, +X quarter cut away past half a gibson, and a floor 4 further down.
+    world(start, boxes('Ledge', 'all', [[[-10, -2, -10], [0.5, -1, 10]], [[0.5, -2, -0.5], [10, -1, 10]]]), boxes('Low', 'all', [[[-10, -6, -10], [20, -5, 10]]]))
     useWalk.getState().setGravity(true)
     walk()
     face(45)
@@ -322,6 +328,17 @@ describe('under GRAVITY', () => {
     expect(fallState()).not.toBeNull()
     // The step that walked off is a hop of its own, queued now.
     expect(useWalk.getState().queue.map((p) => moved(start, p))).toEqual([[1, 0, -1]])
+  })
+
+  it('a diagonal whose side cell is past a ledge\'s edge is the straight step instead: no diagonal over a gap (review of #594)', () => {
+    world(start, boxes('Ledge', 'all', [[[-10, -2, -10], [0.5, -1, 10]]]), boxes('Low', 'all', [[[-10, -6, -10], [20, -5, 10]]]))
+    useWalk.getState().setGravity(true)
+    walk()
+    face(45)
+    forward(1)
+    expect(moved(start)).not.toEqual([1, 0, -1])
+    const m = moved(start)
+    expect(Math.abs(m[0]) + Math.abs(m[2])).toBe(1)
   })
 })
 
@@ -361,5 +378,105 @@ describe('the keyboard', () => {
     expect(moved(start)).toEqual([1, 0, -1])
     walkKeyDown(key('KeyS'))
     expect(moved(start)).toEqual([0, 0, 0])
+  })
+})
+
+describe('review of #594', () => {
+  it('a post across either way round a one-gibson diagonal holds it: the press slides instead', () => {
+    // Across the way that goes +X first and then -Z, along x 1.
+    world(start, floor(), boxes('Post', 'all', [[[0.8, -1, -0.7], [1.2, 3, -0.3]]]))
+    walk()
+    face(45)
+    forward(1)
+    const m = moved(start)
+    expect(m).not.toEqual([1, 0, -1])
+    expect(Math.abs(m[0]) + Math.abs(m[2])).toBe(1)
+  })
+
+  it('known limit: a post wholly inside one gibson\'s square, touching neither way round, is not seen (the walls are asked along axes)', () => {
+    world(start, floor(), boxes('Post', 'all', [[[0.3, -1, -0.7], [0.7, 3, -0.3]]]))
+    walk()
+    face(45)
+    forward(1)
+    expect(moved(start)).toEqual([1, 0, -1])
+  })
+
+  it('at 2^3 a 2x2 pillar in the middle of the 8x8 square holds the diagonal short of it', () => {
+    world(start, floor(), boxes('Pillar', 'all', [[[3, -1, -5], [5, 3, -3]]]))
+    walk()
+    useCyberspace.setState({ scaleExp: 3 })
+    face(45)
+    forward(1)
+    expect(moved(start)).toEqual([2, 0, -2])
+    expect(useToast.getState().toast).toMatchObject({ label: 'WALL', meta: 'Pillar' })
+  })
+
+  it('the same pillar on a straight line holds a straight step (control)', () => {
+    world(start, floor(), boxes('Pillar', 'all', [[[-1, -1, -5], [1, 3, -3]]]))
+    walk()
+    useCyberspace.setState({ scaleExp: 3 })
+    face(0)
+    forward(1)
+    expect(moved(start)[2]).toBeGreaterThan(-8)
+  })
+
+  it('past 16 gibsons (2^5) a press is no diagonal: the straight step along one axis', () => {
+    world(start, floor())
+    walk()
+    useCyberspace.setState({ scaleExp: 5 })
+    face(40)
+    forward(1)
+    expect(moved(start)).toEqual([0, 0, -32])
+  })
+
+  it('under GRAVITY no diagonal crosses between two pits onto a floor that touches only at a corner', () => {
+    world(start,
+      boxes('A', 'all', [[[-0.5, -2, -0.5], [0.5, -1, 0.5]]]),
+      boxes('D', 'all', [[[0.5, -2, -1.5], [1.5, -1, -0.5]]]),
+      boxes('Low', 'all', [[[-10, -8, -10], [20, -7, 10]]]))
+    useWalk.getState().setGravity(true)
+    walk()
+    face(45)
+    forward(1)
+    const m = moved(start)
+    // The straight step instead: one axis, off the edge, and the fall starts.
+    expect(m).not.toEqual([1, 0, -1])
+    expect(Math.abs(m[0]) + Math.abs(m[2])).toBe(1)
+    expect(fallState()).not.toBeNull()
+  })
+
+  it('under GRAVITY straight into either side cell falls (control)', () => {
+    world(start,
+      boxes('A', 'all', [[[-0.5, -2, -0.5], [0.5, -1, 0.5]]]),
+      boxes('D', 'all', [[[0.5, -2, -1.5], [1.5, -1, -0.5]]]),
+      boxes('Low', 'all', [[[-10, -8, -10], [20, -7, 10]]]))
+    useWalk.getState().setGravity(true)
+    walk()
+    face(0)
+    forward(1)
+    expect(fallState()).not.toBeNull()
+  })
+
+  it('facing 50 and then 40 is one diagonal: one segment, one hop', () => {
+    world(start, floor())
+    walk()
+    face(50)
+    forward(2)
+    face(40)
+    forward(2)
+    expect(moved(start)).toEqual([4, 0, -4])
+    expect(useWalk.getState().queue).toHaveLength(0)
+    expect(useWalk.getState().open).toMatchObject({ from: start })
+  })
+
+  it('a diagonal segment is budgeted for both its trees: one tree fits where two do not', () => {
+    const plane = useCyberspace.getState().plane
+    const diag = { x: start.x + 1n, y: start.y, z: start.z - 1n }
+    const est = estimateHopCost(start.x, start.y, start.z, diag.x, diag.y, diag.z, plane as 0 | 1, 40)
+    // Each tree 60% of the budget, measured.
+    useCalibration.setState({ cantorMsByHeight: { [est.lcaX]: WALK_SEGMENT_BUDGET_MS * 0.6, [est.lcaZ]: WALK_SEGMENT_BUDGET_MS * 0.6 } })
+    expect(segmentAffordable(start, { ...start, x: diag.x }, plane)).toBe(true)
+    expect(segmentAffordable(start, { ...start, z: diag.z }, plane)).toBe(true)
+    expect(segmentAffordable(start, diag, plane)).toBe(false)
   })
 })

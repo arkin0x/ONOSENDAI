@@ -999,7 +999,8 @@ export interface CyberspaceState {
   /** Sign a template with this identity's active signer. Async because an
    * extension or a bunker is genuinely remote. The only door to it outside this module. */
   /** Sign as the current identity. `patienceMs` is how long to wait for a remote signer before asking again over fresh sockets; a human-in-the-loop signature (an avatar) deserves more than a hop's. */
-  signEvent: (template: EventTemplate, patienceMs?: number) => Promise<NostrEvent>
+  /** `late`: handed a remote signature that comes after its time ran out, checked like any other (signWithin). */
+  signEvent: (template: EventTemplate, patienceMs?: number, late?: (signed: NostrEvent) => void) => Promise<NostrEvent>
 
   /** How the current identity signs: a local key, an extension, or a bunker. */
   signerKind: SignerKind
@@ -1635,7 +1636,7 @@ function otherAccount(pubkey: string): void {
   useToast.getState().show({ label: 'SIGNER ON ANOTHER ACCOUNT', meta: 'Switch your signer back, or log in again.', mark: 'signer', sticky: true })
 }
 
-async function signEvent(template: EventTemplate, patienceMs?: number, signer: Signer = currentSigner): Promise<NostrEvent> {
+async function signEvent(template: EventTemplate, patienceMs?: number, signer: Signer = currentSigner, late?: (signed: NostrEvent) => void): Promise<NostrEvent> {
   // The last look before a movement event exists, whatever path asked for
   // it (a hop, a sidestep, BOARD, a ride, a spawn, a respawn): a deploy
   // requiring newer chain rules than this build's gets none from this tab
@@ -1653,9 +1654,15 @@ async function signEvent(template: EventTemplate, patienceMs?: number, signer: S
   }
   pendingSigns++
   let signed: NostrEvent
+  // A late answer is checked as an answer in time is, by the signer that gave it.
+  const lateFrom = (by: Signer) => late && ((ev: NostrEvent): void => {
+    let ok: NostrEvent
+    try { ok = checkedAnswer(ev, by) } catch { return }
+    late(ok)
+  })
   try {
     try {
-      signed = await signWithin(signer, template, patienceMs)
+      signed = await signWithin(signer, template, patienceMs, lateFrom(signer))
     } catch (err) {
       // A timeout, or a publish that gave up ("All promises were rejected"):
       // either way the signer's sockets are presumed dead. Drop them and ask
@@ -1664,7 +1671,7 @@ async function signEvent(template: EventTemplate, patienceMs?: number, signer: S
       if (err instanceof SignerAccountMismatch || !signer.reconnect) throw err
       const fresh = await signer.reconnect()
       if (currentSigner === signer) currentSigner = fresh
-      signed = await signWithin(fresh, template, patienceMs)
+      signed = await signWithin(fresh, template, patienceMs, lateFrom(fresh))
     }
   } catch (err) {
     if (err instanceof SignerAccountMismatch) otherAccount(signer.pubkey)
@@ -5400,7 +5407,7 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
       at: t.position,
     })),
 
-  signEvent,
+  signEvent: (template, patienceMs, late) => signEvent(template, patienceMs, undefined, late),
 
   initSigner: async () => {
     // Local identities are live from module load; an extension or bunker was

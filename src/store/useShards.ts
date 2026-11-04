@@ -37,7 +37,7 @@ import { clampUnit, normalizeStored } from 'sno-core/shards'
 import { snapOffered, wrapSpin } from '../lib/pose'
 import { create } from 'zustand'
 import { MAX_COMPUTE_HEIGHT, useCyberspace } from './useCyberspace'
-import { publishMany, query, queryEach, relaySet } from '../lib/relay'
+import { publishMany, query, queryChecked, queryEach, relaySet } from '../lib/relay'
 import { forgetReference, resolveReference } from '../lib/references'
 import { unbagRemembered } from '../lib/foundCache'
 import { bagAddressOf, bagsToOpen, retractedAt, staleFinds } from '../lib/bagVersions'
@@ -1277,6 +1277,7 @@ interface ShardsState {
    * it. The region's height comes from the held key or your own deployment
    * there, because a bag need not carry `H` (spec §8.6).
    */
+  /** How many items it opened, or -1 when the relays could not be read (the canonical relay refused or was not heard from). */
   rescan: (lookupId: string, keyHex: string) => Promise<number>
   selectSecret: (eventId: string | null) => void
   /** File what a scan opened. A find this identity wrote joins `mine` as well, whichever device placed it. */
@@ -1308,7 +1309,8 @@ interface ShardsState {
    * came back and this item is in it, but the format refuses it, so no client
    * can show it; the fix is in the workshop, not on the relay.
    */
-  testDiscovery: (eventId: string) => Promise<'found' | 'missing' | 'refused'>
+  /** `unread`: the canonical relay refused (no AUTH) or was not heard from, so nothing is known either way. */
+  testDiscovery: (eventId: string) => Promise<'found' | 'missing' | 'refused' | 'unread'>
   pendingShard: () => ShardModel | null
   worldItems: () => WorldItem[]
   /**
@@ -3695,8 +3697,12 @@ export const useShards = create<ShardsState>((set, get) => {
     rescan: async (lookupId, keyHex) => {
       set({ scanning: true })
       try {
+        // The canonical relay refused (no AUTH) or was not heard from: that is
+        // not "nothing there", so it reads FAILED, not NONE, and nothing is dropped.
+        const asked = await queryChecked({ kinds: [HIDDEN_KIND], '#d': [lookupId] })
+        if (asked.trouble) return -1
         // One version per bag, the newest, none its author deleted (lib/bagVersions.ts).
-        const { bags: events, deletions } = await bagsToOpen(await query({ kinds: [HIDDEN_KIND], '#d': [lookupId] }), query, get().ownDoorAddresses([lookupId]))
+        const { bags: events, deletions } = await bagsToOpen(asked.events, query, get().ownDoorAddresses([lookupId]))
         // The region's height, so a bag without `H` reads at its true size: a
         // held cube's height, or your own deployment's. A box key (one height
         // per axis) is not a cube and says nothing here; `H` then decides.
@@ -3714,7 +3720,7 @@ export const useShards = create<ShardsState>((set, get) => {
         if (fresh.length > 0) useCeremony.getState().mark(fresh)
         return found.length
       } catch {
-        return 0
+        return -1
       } finally {
         set({ scanning: false })
       }
@@ -4034,7 +4040,8 @@ export const useShards = create<ShardsState>((set, get) => {
       // Region key derived fresh from the coordinate, as a stranger would.
       // In a room, its key is the room key, which no coordinate alone gives.
       const rk = item.room ? { key: hexToBytes(item.keyHex), lookupId: item.lookupId } : regionKeyAt(positionOf(item), item.height, MAX_COMPUTE_HEIGHT)
-      const events = await query({ kinds: [HIDDEN_KIND], '#d': [rk.lookupId] })
+      const { events, trouble } = await queryChecked({ kinds: [HIDDEN_KIND], '#d': [rk.lookupId] })
+      if (trouble) return 'unread'
       let refused = false
       for (const ev of events) {
         const h = BigInt(item.height)

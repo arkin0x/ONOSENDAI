@@ -63,7 +63,7 @@ import { startPresence } from './store/usePresence'
 import { hydrateRoster } from './store/useRoster'
 import { ChatDock } from './hud/ChatDock'
 import { useChatFeed } from './hooks/useChatFeed'
-import { watchConnectivity } from './lib/relay'
+import { watchConnectivity, retryFailedAuth } from './lib/relay'
 import { Scene } from './scene/Scene'
 import { useCanvasTap } from './hooks/useCanvasTap'
 import { setMenuCovering, useKeyboard } from './hooks/useKeyboard'
@@ -168,6 +168,11 @@ export default function App(): JSX.Element {
       if (document.visibilityState !== 'visible') return
       const s = useCyberspace.getState()
       s.wakeSigner()
+      // A relay whose AUTH failed while the signer was away signs in again,
+      // and the lists it refused read again once it does (useLoot). After
+      // wakeSigner has dropped the signer's old sockets, so the request goes
+      // out over fresh ones.
+      setTimeout(retryFailedAuth, 0)
       s.checkCloudPayment()
     }
     document.addEventListener('visibilitychange', back)

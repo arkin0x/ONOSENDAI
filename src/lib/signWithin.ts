@@ -37,12 +37,43 @@ export async function handshakeWithin<T>(handshake: Promise<T>, ms: number = HAN
   }
 }
 
-/** The signature, or a SignerTimeout once SIGN_PATIENCE_MS has passed. */
-export async function signWithin(signer: { signEvent: (template: EventTemplate) => Promise<NostrEvent> }, template: EventTemplate, ms: number = SIGN_PATIENCE_MS): Promise<NostrEvent> {
+const answeredListeners = new Set<() => void>()
+
+/**
+ * Be told whenever a remote signer answers a signature, in time or late: it
+ * is there again. A relay whose NIP-42 AUTH failed while it was away signs in
+ * once more (relay.ts). Returns the unsubscribe.
+ */
+export function onSignerAnswered(fn: () => void): () => void {
+  answeredListeners.add(fn)
+  return () => { answeredListeners.delete(fn) }
+}
+
+function signerAnswered(): void {
+  for (const fn of [...answeredListeners]) {
+    try { fn() } catch { /* one listener's failure is not the others' */ }
+  }
+}
+
+/**
+ * The signature, or a SignerTimeout once SIGN_PATIENCE_MS has passed.
+ *
+ * `late`, when given, is handed the signature if it still comes after the
+ * timeout. A move never takes one (its caller has moved on); a relay's AUTH
+ * does, since signing in late beats not signing in (relay.ts authSign).
+ */
+export async function signWithin(signer: { signEvent: (template: EventTemplate) => Promise<NostrEvent> }, template: EventTemplate, ms: number = SIGN_PATIENCE_MS, late?: (signed: NostrEvent) => void): Promise<NostrEvent> {
   let timer: ReturnType<typeof setTimeout> | undefined
-  const late = new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new SignerTimeout()), ms) })
+  let timedOut = false
+  const limit = new Promise<never>((_, reject) => { timer = setTimeout(() => { timedOut = true; reject(new SignerTimeout()) }, ms) })
+  const signing = signer.signEvent(template)
+  void signing.then((signed) => {
+    // The late answer first: what is waiting on it is better served by it than by a fresh request.
+    if (timedOut) late?.(signed)
+    signerAnswered()
+  }, () => { /* the caller hears the failure, or has moved on */ })
   try {
-    return await Promise.race([signer.signEvent(template), late])
+    return await Promise.race([signing, limit])
   } finally {
     clearTimeout(timer)
   }

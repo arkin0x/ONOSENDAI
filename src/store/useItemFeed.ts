@@ -12,7 +12,7 @@
  */
 
 import { create } from 'zustand'
-import { publishMany, query, relaySet } from '../lib/relay'
+import { onCanonicalSignIn, publishMany, queryChecked, relaySet, type ReadTrouble } from '../lib/relay'
 import type { KeyItem } from '../lib/hidden'
 import { ITEM_LISTING_KIND, feedListings, listingTemplate, type ItemListing } from '../lib/itemListing'
 import { useCyberspace } from './useCyberspace'
@@ -23,8 +23,10 @@ const FEED_LIMIT = 500
 interface ItemFeedState {
   listings: ItemListing[]
   loading: boolean
-  /** When the feed was last read, or 0 for never. */
+  /** When the feed was last read, or 0 for never. Only an answer from the canonical relay counts. */
   readAt: number
+  /** Why the canonical relay gave the last read nothing, if it did not answer (it is not "nothing listed"). */
+  trouble: ReadTrouble | null
   /** The item public key being listed right now, or null. */
   publishing: string | null
   /** Read the feed from your relays. */
@@ -36,23 +38,34 @@ interface ItemFeedState {
 }
 
 /** Every listing read this session, by event id, so a re-read never loses one a relay forgot. */
+/** Refused for want of AUTH: read again once the relay signs this visit in. Set up on the first read. */
+let watching = false
+function watchSignIn(): void {
+  if (watching) return
+  watching = true
+  onCanonicalSignIn(() => { if (useItemFeed.getState().trouble) void useItemFeed.getState().load() })
+}
+
 const seen = new Map<string, import('../lib/events').NostrEvent>()
 
 export const useItemFeed = create<ItemFeedState>((set, get) => ({
   listings: [],
   loading: false,
   readAt: 0,
+  trouble: null,
   publishing: null,
 
   load: async () => {
+    watchSignIn()
     if (get().loading) return
     set({ loading: true })
     try {
-      const events = await query({ kinds: [ITEM_LISTING_KIND], limit: FEED_LIMIT })
+      const { events, trouble } = await queryChecked({ kinds: [ITEM_LISTING_KIND], limit: FEED_LIMIT })
       for (const ev of events) seen.set(ev.id, ev)
-      set({ listings: feedListings([...seen.values()]), readAt: Date.now() })
+      set({ listings: feedListings([...seen.values()]), trouble, ...(trouble ? {} : { readAt: Date.now() }) })
     } catch {
-      // Unreachable relays leave what was read; the picker says when it is empty.
+      // Unreachable relays leave what was read; the picker says so.
+      set({ trouble: 'unreachable' })
     } finally {
       set({ loading: false })
     }

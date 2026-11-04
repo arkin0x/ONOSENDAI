@@ -30,6 +30,8 @@ vi.mock('../../lib/relay', () => ({
   query: vi.fn(async () => relayBags),
   queryEach: vi.fn(async () => [{ url: 'wss://relay.test', outcome: 'answered', events: relayBags }]),
   queryAny: vi.fn(async () => []),
+  // The read that tells a refusal from nothing (rescan): this relay always answers.
+  queryChecked: vi.fn(async () => ({ events: relayBags, trouble: null })),
   relaySet: () => ['wss://relay.test'],
 }))
 

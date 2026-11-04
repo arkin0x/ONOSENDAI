@@ -26,6 +26,8 @@ vi.mock('../../lib/relay', () => ({
   publishMany: vi.fn(async () => ({ ok: true })),
   query: vi.fn(() => { relay.asked++; return relay.hold ? new Promise((r) => { relay.answer = r }) : Promise.resolve(relay.events) }),
   queryAny: vi.fn(async () => []),
+  queryAnyChecked: vi.fn(async () => ({ events: [], trouble: null })),
+  queryChecked: vi.fn(async () => ({ events: [], trouble: null })),
   queryEach: vi.fn(async () => []),
   relaySet: () => ['wss://relay.test'],
 }))

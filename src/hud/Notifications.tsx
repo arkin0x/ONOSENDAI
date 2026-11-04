@@ -24,6 +24,7 @@
  * this device as the line arrives and kept there (useNotifications).
  */
 
+import { RelayTrouble } from './RelayTrouble'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { AtSign, MessageCircle, MessageSquare } from 'lucide-react'
@@ -260,6 +261,7 @@ export function NotificationsModal(): JSX.Element | null {
   const opened = useNotifications((s) => s.opened)
   const loading = useNotifications((s) => s.loading)
   const done = useNotifications((s) => s.done)
+  const trouble = useNotifications((s) => s.trouble)
   const list = useRef<HTMLDivElement>(null)
   const end = useRef<HTMLDivElement>(null)
 
@@ -284,7 +286,8 @@ export function NotificationsModal(): JSX.Element | null {
           <button className="secret__close" onClick={close} aria-label="Close">✕</button>
         </div>
         <div className="notif__scroll" ref={list}>
-          {items.length === 0 && !loading && <p className="comments__empty">Nothing yet. Reactions and comments on your moves and hidden items, and chat lines that tag you, land here.</p>}
+          {trouble && !loading && <RelayTrouble trouble={trouble} onRetry={() => void useNotifications.getState().poll()} />}
+          {items.length === 0 && !loading && !trouble && <p className="comments__empty">Nothing yet. Reactions and comments on your moves and hidden items, and chat lines that tag you, land here.</p>}
           <ul className="notif__list">
             {items.map((n) => <Row key={n.id} n={n} words={opened[n.id]} />)}
           </ul>

@@ -610,4 +610,25 @@ describe('small things', () => {
     expect(after.count).toBe(1)
     expect(after.settings.heightTag).toBe(true)
   })
+
+  it('the refusal when one relay of two is silent names that relay (doors follow-up, 2026-11-01)', async () => {
+    const d = await sealDoor()
+    await hide('behind it', HEIGHT)
+    relay.partial = true
+    const why = await S().deleteDoor(d.eventId, false)
+    relay.partial = false
+    expect(why).toBe('wss://down.test did not answer, and it may hold what is behind the door. Nothing has changed. Try again when it answers.')
+  }, 30000)
+
+  it('a bag another device wrote with its clock ahead: the next rewrite here is newer still, so the relay keeps it (doors follow-up)', async () => {
+    // Another height than the cases above, so this bag's clock is its own.
+    const first = await hide('one', 6)
+    const theirs = newestBag(first.lookupId)!
+    const ahead = theirs.created_at + 1000
+    relay.events.push({ ...theirs, id: 'a'.repeat(64), created_at: ahead })
+    await hide('two', 6)
+    const newest = relay.events.filter((e) => e.kind === HIDDEN_KIND && dOf(e) === first.lookupId).sort((a, b) => b.created_at - a.created_at)[0]
+    expect(newest.id).not.toBe('a'.repeat(64))
+    expect(newest.created_at).toBeGreaterThan(ahead)
+  }, 30000)
 })

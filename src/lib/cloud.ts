@@ -188,11 +188,35 @@ function rideOfRecord(raw: unknown): PendingRide | null {
   return { fromHeight: r.fromHeight, toHeight: r.toHeight, toCoordHex: r.toCoordHex, ...(r.asOf !== undefined ? { asOf: r.asOf } : {}) }
 }
 
-export function loadCloudJob(): PendingCloudJob | null {
+/**
+ * The kept job records, one per identity, as stored under JOB_KEY: `{ version: 2,
+ * jobs: { [pubkey]: record } }`. Before this the key held one record, version 1,
+ * for whoever bought last, so a second identity buying on the same device wrote
+ * over the first identity's paid job and its RESUME was gone. That old shape is
+ * still read, as the one record of the identity it names.
+ */
+interface StoredCloudJobs { version: 2; jobs: Record<string, unknown> }
+
+function readCloudJobs(): StoredCloudJobs {
+  const raw = localStorage.getItem(JOB_KEY)
+  if (!raw) return { version: 2, jobs: {} }
+  const r = JSON.parse(raw) as { version?: unknown; jobs?: unknown; pubkey?: unknown }
+  if (r?.version === 2 && r.jobs && typeof r.jobs === 'object' && !Array.isArray(r.jobs)) return { version: 2, jobs: { ...(r.jobs as Record<string, unknown>) } }
+  // The single record of before, filed under the identity it names.
+  if (r?.version === 1 && typeof r.pubkey === 'string') return { version: 2, jobs: { [r.pubkey]: r } }
+  return { version: 2, jobs: {} }
+}
+
+function writeCloudJobs(all: StoredCloudJobs): void {
+  if (Object.keys(all.jobs).length === 0) localStorage.removeItem(JOB_KEY)
+  else localStorage.setItem(JOB_KEY, JSON.stringify(all))
+}
+
+/** This identity's kept HOSAKA job, or null. Another identity's record is never returned, and never touched by the two below. */
+export function loadCloudJob(pubkey: string): PendingCloudJob | null {
   try {
-    const raw = localStorage.getItem(JOB_KEY)
-    if (!raw) return null
-    const r = JSON.parse(raw) as Partial<PendingCloudJob>
+    const r = readCloudJobs().jobs[pubkey] as Partial<PendingCloudJob> | undefined
+    if (!r || r.pubkey !== pubkey) return null
     if (r.version !== 1 || typeof r.jobId !== 'string' || typeof r.pollToken !== 'string') return null
     if (r.action !== 'hop' && r.action !== 'sidestep' && r.action !== 'ride') return null
     // A ride's record is worthless without the ride it was bought for.
@@ -228,12 +252,29 @@ export function loadCloudJob(): PendingCloudJob | null {
   }
 }
 
+/** Kept under the identity that bought it, beside any other identity's. */
 export function saveCloudJob(record: PendingCloudJob): void {
-  try { localStorage.setItem(JOB_KEY, JSON.stringify(record)) } catch { /* private mode */ }
+  try {
+    let all: StoredCloudJobs
+    // Unreadable as a whole: nothing in it can be resumed, so it is started again.
+    try { all = readCloudJobs() } catch { all = { version: 2, jobs: {} } }
+    all.jobs[record.pubkey] = record
+    writeCloudJobs(all)
+  } catch { /* private mode */ }
 }
 
-export function clearCloudJob(): void {
-  try { localStorage.removeItem(JOB_KEY) } catch { /* private mode */ }
+/**
+ * Forget this identity's record; with `jobId`, only while it is still that job,
+ * so a flow that ended never takes a newer job of the same identity with it.
+ */
+export function clearCloudJob(pubkey: string, jobId?: string): void {
+  try {
+    const all = readCloudJobs()
+    const r = all.jobs[pubkey] as { jobId?: unknown } | undefined
+    if (!r || (jobId !== undefined && r.jobId !== jobId)) return
+    delete all.jobs[pubkey]
+    writeCloudJobs(all)
+  } catch { /* private mode, or a record that cannot be read */ }
 }
 
 /**

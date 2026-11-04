@@ -14,6 +14,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { originShift, type Position } from '../lib/space'
 import { alignedOrigin, useCyberspace } from '../store/useCyberspace'
+import { flyDir } from '../lib/viewFly'
 
 export interface ViewWindow {
   right: number
@@ -38,6 +39,25 @@ export interface ViewWindow {
  * quarter second.
  */
 export const CURSOR_SETTLE_MS = 250
+
+/**
+ * A fly (VIEW's, lib/viewFly.ts) never comes to rest while it is held, so
+ * waiting for rest meant nothing new was drawn or loaded until it stopped
+ * (review of #592). While it flies, the window and the terrain's new data
+ * catch up at most this often instead: one rescan of 30 to 60 ms in every
+ * 600 ms, about a twentieth of the main thread, where per-frame was all of it.
+ */
+export const FLY_REFRESH_MS = 600
+
+/**
+ * How long to wait before following the cursor, in ms (0: now): until it
+ * has been still for CURSOR_SETTLE_MS, or, while a fly is under way, no longer
+ * than FLY_REFRESH_MS after the last time it was followed.
+ */
+export function settleWait(sinceMove: number, sinceRefresh: number, flying: boolean): number {
+  const rest = Math.max(0, CURSOR_SETTLE_MS - sinceMove)
+  return flying ? Math.min(rest, Math.max(0, FLY_REFRESH_MS - sinceRefresh)) : rest
+}
 
 /**
  * A window as read: its offsets, and the render origin, zoom and view they
@@ -97,46 +117,54 @@ export function useViewWindow(): ViewWindow {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [win, scaleExp, view, origin.x, origin.y, origin.z])
 
-  useEffect(() => {
-    let handle: number | null = null
-
-    const fire = (): void => {
-      handle = null
-      const next = read()
-      setWin((prev) =>
-        prev.right === next.right && prev.up === next.up && prev.out === next.out &&
-        prev.scaleExp === next.scaleExp && prev.view === next.view && sameOrigin(prev.origin, next.origin) ? prev : next,
-      )
-    }
-    const schedule = (): void => {
-      if (handle !== null) clearTimeout(handle)
-      handle = window.setTimeout(fire, CURSOR_SETTLE_MS)
-    }
-
-    // A transient store subscription rather than selector hooks. Subscribing
-    // this hook to `cursor` re-rendered the entire World subtree on every
-    // keypress just to restart a timer, so each move paid a React commit it
-    // did not need. The subscription restarts the timer without rendering
-    // anything, and the only render is the setWin once the cursor settles.
-    const unsubscribe = useCyberspace.subscribe((s, prev) => {
-      if (
-        s.cursor !== prev.cursor ||
-        s.anchor !== prev.anchor ||
-        s.exploreIndex !== prev.exploreIndex ||
-        s.scaleExp !== prev.scaleExp ||
-        s.view !== prev.view
-      ) schedule()
-    })
-
-    // The store may have moved between the initial state read and this effect
-    // attaching, so reconcile once on mount.
-    schedule()
-
-    return () => {
-      unsubscribe()
-      if (handle !== null) clearTimeout(handle)
-    }
-  }, [])
+  useEffect(() => watchCursorSettle(() => {
+    const next = read()
+    setWin((prev) =>
+      prev.right === next.right && prev.up === next.up && prev.out === next.out &&
+      prev.scaleExp === next.scaleExp && prev.view === next.view && sameOrigin(prev.origin, next.origin) ? prev : next,
+    )
+  }), [])
 
   return carried
+}
+
+/**
+ * Call `fire` once the cursor (or the anchor, the history step, the zoom or
+ * the view) has settled (CURSOR_SETTLE_MS), and while VIEW flies, at most
+ * FLY_REFRESH_MS apart (settleWait). Once on install too: the store may have
+ * moved before it. Returns the uninstall.
+ *
+ * A transient store subscription rather than selector hooks. Subscribing the
+ * window to `cursor` re-rendered the entire World subtree on every keypress
+ * just to restart a timer, so each move paid a React commit it did not need.
+ * The subscription restarts the timer without rendering anything, and the
+ * only render is the window's own once `fire` runs.
+ */
+export function watchCursorSettle(fire: () => void, clock: () => number = () => performance.now()): () => void {
+  let handle: ReturnType<typeof setTimeout> | null = null
+  // When `fire` last ran, for a fly's refresh.
+  let lastFire = -Infinity
+  const run = (): void => {
+    handle = null
+    lastFire = clock()
+    fire()
+  }
+  const schedule = (): void => {
+    if (handle !== null) clearTimeout(handle)
+    handle = setTimeout(run, settleWait(0, clock() - lastFire, flyDir() !== 0))
+  }
+  const unsubscribe = useCyberspace.subscribe((s, prev) => {
+    if (
+      s.cursor !== prev.cursor ||
+      s.anchor !== prev.anchor ||
+      s.exploreIndex !== prev.exploreIndex ||
+      s.scaleExp !== prev.scaleExp ||
+      s.view !== prev.view
+    ) schedule()
+  })
+  schedule()
+  return () => {
+    unsubscribe()
+    if (handle !== null) clearTimeout(handle)
+  }
 }

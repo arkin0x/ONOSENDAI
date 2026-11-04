@@ -24,6 +24,8 @@ function make(): PlacedBuffers<{ id: string }> {
   }
 }
 
+const CANVAS = {}
+
 beforeEach(() => vi.useFakeTimers())
 afterEach(() => vi.useRealTimers())
 
@@ -32,45 +34,45 @@ describe('sharing one object among its placements', () => {
     const model = {}
     const build = vi.fn(make)
     const seen = new Set<unknown>()
-    for (let i = 0; i < 1000; i++) seen.add(placedBuffers(model, build))
+    for (let i = 0; i < 1000; i++) seen.add(placedBuffers(model, CANVAS, build))
     expect(build).toHaveBeenCalledTimes(1)
     expect(seen.size).toBe(1)
   })
 
   it('two objects never share', () => {
-    expect(placedBuffers({}, make)).not.toBe(placedBuffers({}, make))
+    expect(placedBuffers({}, CANVAS, make)).not.toBe(placedBuffers({}, CANVAS, make))
   })
 
   it('stays while any placement holds it, and lets go of every GL buffer after the last', () => {
     const model = {}
-    const b = placedBuffers(model, make)
+    const b = placedBuffers(model, CANVAS, make)
     const disposed = vi.fn()
     for (const g of b.geometries()) g.addEventListener('dispose', disposed)
-    const first = holdPlaced(model, b)
-    const second = holdPlaced(model, b)
+    const first = holdPlaced(model, CANVAS, b)
+    const second = holdPlaced(model, CANVAS, b)
     first()
     vi.runAllTimers()
     expect(disposed).not.toHaveBeenCalled()
-    expect(placedBuffers(model, make)).toBe(b)
+    expect(placedBuffers(model, CANVAS, make)).toBe(b)
     second()
     vi.runAllTimers()
     expect(disposed).toHaveBeenCalledTimes(3)
     // Gone: the next placement builds it again.
-    expect(placedBuffers(model, make)).not.toBe(b)
+    expect(placedBuffers(model, CANVAS, make)).not.toBe(b)
   })
 
   it('a placement replaced by another in one commit does not lose the buffers', () => {
     const model = {}
-    const b = placedBuffers(model, make)
+    const b = placedBuffers(model, CANVAS, make)
     const disposed = vi.fn()
     b.plain.addEventListener('dispose', disposed)
-    const old = holdPlaced(model, b)
+    const old = holdPlaced(model, CANVAS, b)
     // A commit runs every cleanup, then every new effect.
     old()
-    const next = holdPlaced(model, b)
+    const next = holdPlaced(model, CANVAS, b)
     vi.runAllTimers()
     expect(disposed).not.toHaveBeenCalled()
-    expect(placedBuffers(model, make)).toBe(b)
+    expect(placedBuffers(model, CANVAS, make)).toBe(b)
     next()
     vi.runAllTimers()
     expect(disposed).toHaveBeenCalledTimes(1)
@@ -78,10 +80,10 @@ describe('sharing one object among its placements', () => {
 
   it('many placements leaving at once dispose once', () => {
     const model = {}
-    const b = placedBuffers(model, make)
+    const b = placedBuffers(model, CANVAS, make)
     const disposed = vi.fn()
     b.plain.addEventListener('dispose', disposed)
-    const holds = Array.from({ length: 50 }, () => holdPlaced(model, b))
+    const holds = Array.from({ length: 50 }, () => holdPlaced(model, CANVAS, b))
     for (const h of holds) h()
     vi.runAllTimers()
     expect(disposed).toHaveBeenCalledTimes(1)
@@ -89,16 +91,42 @@ describe('sharing one object among its placements', () => {
 
   it('a hold on buffers let go between render and effect owns them again', () => {
     const model = {}
-    const b = placedBuffers(model, make)
-    holdPlaced(model, b)()
+    const b = placedBuffers(model, CANVAS, make)
+    holdPlaced(model, CANVAS, b)()
     vi.runAllTimers()
-    const again = holdPlaced(model, b)
-    expect(placedBuffers(model, make)).toBe(b)
+    const again = holdPlaced(model, CANVAS, b)
+    expect(placedBuffers(model, CANVAS, make)).toBe(b)
     const disposed = vi.fn()
     b.plain.addEventListener('dispose', disposed)
     again()
     vi.runAllTimers()
     expect(disposed).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe('one set per canvas (review of #563)', () => {
+  it('two canvases drawing one object each have their own', () => {
+    const model = {}, a = {}, b = {}
+    expect(placedBuffers(model, a, make)).not.toBe(placedBuffers(model, b, make))
+    const again = placedBuffers(model, a, make)
+    expect(placedBuffers(model, a, make)).toBe(again)
+  })
+
+  it('a canvas frees its copy when its own placements leave, while another still draws the object', () => {
+    const model = {}, parked = {}, world = {}
+    const small = placedBuffers(model, parked, make), big = placedBuffers(model, world, make)
+    const freedSmall = vi.fn(), freedBig = vi.fn()
+    small.plain.addEventListener('dispose', freedSmall)
+    big.plain.addEventListener('dispose', freedBig)
+    const leaving = holdPlaced(model, parked, small)
+    const staying = holdPlaced(model, world, big)
+    leaving()
+    vi.runAllTimers()
+    expect(freedSmall).toHaveBeenCalledTimes(1)
+    expect(freedBig).not.toHaveBeenCalled()
+    staying()
+    vi.runAllTimers()
+    expect(freedBig).toHaveBeenCalledTimes(1)
   })
 })
 

@@ -86,7 +86,7 @@ import { chainHeld, chainLost, checkRows, clearMarker, clearTail, committedHead,
 import { eventDbAvailable } from '../lib/eventDb/client'
 import type { ChainRead, ChainSource } from '../lib/eventDb/chainRows'
 import { checkSignatures } from '../lib/sigCheck'
-import { rememberVerified } from '../lib/verifiedSigs'
+import { checkedElsewhere, rememberStoredVerdict } from '../lib/verifiedSigs'
 import {
   firstMove,
   foldHeldConflict,
@@ -2375,7 +2375,7 @@ function startRowsCheck(pubkey: string, read: ChainRead): void {
     coveredByRows.set(e.id, e)
     if (flagged.has(e.id)) {
       verifiedSigs.add(sigKey(e))
-      rememberVerified(e.id, e.sig)
+      rememberStoredVerdict(e)
     }
   }
   const running = sigCheck?.pubkey === pubkey ? sigCheck.done : null
@@ -2385,7 +2385,7 @@ function startRowsCheck(pubkey: string, read: ChainRead): void {
     for (const e of events) {
       if (bad.has(e.id)) continue
       verifiedSigs.add(sigKey(e))
-      rememberVerified(e.id, e.sig)
+      checkedElsewhere(e)
     }
     return badKeys.size === 0 ? null : cutInauthentic(pubkey, badKeys)
   })

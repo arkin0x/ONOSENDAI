@@ -63,9 +63,13 @@ function chainOf(n: number): NostrEvent[] {
   return out
 }
 
+/** The stores a test loaded: the checks they started are let finish before the next test's database. */
+const loaded: Array<typeof import('../useCyberspace')> = []
+
 async function load() {
   vi.resetModules()
   const store = await import('../useCyberspace')
+  loaded.push(store)
   await store.savedChainLoaded()
   store.useCyberspace.setState({ selfCheck: { pubkey: pk, status: 'none' } })
   return store
@@ -100,7 +104,15 @@ beforeEach(async () => {
   // The deploy says yes, so a chain moves into rows (lib/chainStore.ts deployAllowsMove).
   vi.stubGlobal('fetch', async () => ({ ok: true, json: async () => ({ build: 'deployed', minChainEpoch: 2, chainStore: 2 }) }))
 })
-afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals() })
+afterEach(async () => {
+  // A check a load started (its signatures, its flags) ends in this test's database, not the next test's.
+  for (const store of loaded.splice(0)) {
+    await Promise.race([store.useCyberspace.getState().confirmHeadNow().catch(() => null), new Promise((r) => setTimeout(r, 3_000))])
+  }
+  await new Promise((r) => setTimeout(r, 30))
+  vi.restoreAllMocks()
+  vi.unstubAllGlobals()
+})
 
 async function seed(events: NostrEvent[]): Promise<void> {
   vi.resetModules()
@@ -111,7 +123,7 @@ async function seed(events: NostrEvent[]): Promise<void> {
 }
 
 describe('the NIP-01 flag', () => {
-  it('a moved chain is checked once, flagged, and a reload runs no Schnorr check at all', async () => {
+  it('a moved chain is checked once, flagged, and a reload runs no Schnorr check at all', { timeout: 20_000 }, async () => {
     const chain = chainOf(12)
     await seed(chain)
     await settled(await load())

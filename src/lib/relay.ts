@@ -497,6 +497,23 @@ export function retryFailedAuth(only?: string, when: 'back' | 'signer' | 'answer
 // Any answer from the signer is the signer being back.
 onSignerAnswered(() => { if (authFailed.size > 0) retryFailedAuth(undefined, 'answered') })
 
+let watchingSigner = false
+
+/**
+ * A sign-in or another signer: an AUTH the old one refused or let run out is
+ * asked of this one. Tried on each getPool until the store can be subscribed
+ * to: a pool asked for while the store module is still loading finds it not
+ * there yet.
+ */
+function watchSigner(): void {
+  try {
+    useCyberspace.subscribe?.((now, before) => {
+      if (now.identity.pubkey !== before.identity.pubkey || now.signerKind !== before.signerKind) retryFailedAuth(undefined, 'signer')
+    })
+    watchingSigner = true
+  } catch { /* the store is still loading: the next getPool tries again */ }
+}
+
 /** verifyEvent, skipping the Schnorr check for a signature this page already checked (lib/verifiedSigs.ts). */
 export const verifyRelayEvent = verifyOnce
 
@@ -531,11 +548,8 @@ export function getPool(): AbstractSimplePool {
     // Not in SimplePool's constructor options, but the abstract pool honours it:
     // when a relay proactively sends an AUTH challenge, authenticate with it.
     ;(pool as unknown as { automaticallyAuth?: () => typeof authSign }).automaticallyAuth = () => autoAuthSign
-    // A sign-in or another signer: an AUTH the old one refused or let run out is asked of this one.
-    useCyberspace.subscribe?.((now, before) => {
-      if (now.identity.pubkey !== before.identity.pubkey || now.signerKind !== before.signerKind) retryFailedAuth(undefined, 'signer')
-    })
   }
+  if (!watchingSigner) watchSigner()
   return pool
 }
 

@@ -1667,14 +1667,8 @@ async function signEvent(template: EventTemplate, patienceMs?: number, signer: S
   }
   // A wake skipped for an AUTH's answer, and this is not an AUTH: drop the
   // signer's sockets now, unless another signature's answer is due on them.
-  if (wakeOwed && !late && pendingSigns === pendingAuthSigns && signer.reconnect) {
-    wakeOwed = false
-    try {
-      const fresh = await signer.reconnect()
-      if (currentSigner === signer) currentSigner = fresh
-      signer = fresh
-    } catch { /* the signature below says why, or reconnects on its own timeout */ }
-  }
+  const refresh = wakeOwed && !late && pendingSigns === pendingAuthSigns && !!signer.reconnect
+  if (refresh) wakeOwed = false
   pendingSigns++
   if (late) pendingAuthSigns++
   let signed: NostrEvent
@@ -1685,6 +1679,13 @@ async function signEvent(template: EventTemplate, patienceMs?: number, signer: S
     late(ok)
   })
   try {
+    if (refresh && signer.reconnect) {
+      try {
+        const fresh = await signer.reconnect()
+        if (currentSigner === signer) currentSigner = fresh
+        signer = fresh
+      } catch { /* the signature below says why, or reconnects on its own timeout */ }
+    }
     try {
       signed = await signWithin(signer, template, patienceMs, lateFrom(signer))
     } catch (err) {

@@ -145,9 +145,19 @@ export interface MyDeployment {
    * here or read from the relays: only a newer version that no longer holds
    * it says it is gone (pruneGoneRows). The bag clock runs ahead of the wall
    * clock after quick hides (nextBagAt), so `createdAt` cannot say this.
-   * Absent on rows from before it was kept: such a row is never pruned.
+   * Absent on rows from before it was kept: such a row is never marked gone.
    */
   bagAt?: number
+  /**
+   * GONE FROM ITS BAG: a version of its bag newer than the one that last held
+   * it (this created_at) no longer holds it. Moved or removed from another
+   * device, or dropped by another device's stale rewrite: the two cannot be
+   * told apart, so it is kept, never written back into its bag (where a stale
+   * device would bring a moved copy back), and its owner chooses: HIDE AGAIN
+   * or FORGET (arkinox's ruling, review 3 of #595). A later version that
+   * holds it again clears it. Never on a door, which goes as it always did.
+   */
+  goneFrom?: number
   type: HiddenType
   shard?: ShardModel
   text?: string
@@ -530,8 +540,8 @@ export function editable(d: Pick<MyDeployment, 'type' | 'shard' | 'ref' | 'inner
  * revealed from a chest is part of that chest, not a bag entry, and never
  * has a row of its own here.
  */
-export function movable(d: Pick<MyDeployment, 'type' | 'shard' | 'ref' | 'inner' | 'chest' | 'eventId' | 'key' | 'text' | 'audio'>, me: string): boolean {
-  if (!me || d.inner?.pubkey !== me) return false
+export function movable(d: Pick<MyDeployment, 'type' | 'shard' | 'ref' | 'inner' | 'chest' | 'eventId' | 'key' | 'text' | 'audio' | 'goneFrom'>, me: string): boolean {
+  if (!me || d.inner?.pubkey !== me || d.goneFrom !== undefined) return false
   if (d.type === 'shard') return editable(d, me)
   if (d.type === 'chest') return !!d.chest && (d.chest.door === undefined || !!doorSecret(me, d.eventId))
   if (d.ref) return false
@@ -851,8 +861,16 @@ export function oneVersionEach(items: WorldItem[]): WorldItem[] {
   })
 }
 
+/** Whether a row is still in its bag as far as this device knows: not marked GONE FROM ITS BAG (MyDeployment `goneFrom`). */
+export function inItsBag(d: Pick<MyDeployment, 'goneFrom'>): boolean {
+  return d.goneFrom === undefined
+}
+
 /** Why a MOVE stopped: what it moves is no longer among your deployments here. */
 export const MOVE_GONE = 'That is no longer among what this device hid, so there is nothing to move.'
+/** Why HIDE AGAIN waits: a hide is still going out, and two rewrites at once could drop one. */
+export const HIDE_AGAIN_BUSY = 'A hide is still going out. Try again when it lands.'
+
 /** Why a MOVE stopped: its bag on the relays no longer holds it (review of #595). */
 export const MOVE_STALE = 'Moved or removed from another device since this one saw it. Find it where it stands now.'
 /** Why a MOVE stopped: no relay answered whether its bag still holds it. */
@@ -1134,6 +1152,14 @@ interface ShardsState {
    * bag's settings, so PLACE where it is changes nothing but its version.
    */
   startMoveItem: (eventId: string) => void
+  /**
+   * HIDE AGAIN on a row GONE FROM ITS BAG: back into its bag at its place,
+   * as a hide, and the mark cleared. Resolves to null when it went out, else
+   * why not (and the row stays marked).
+   */
+  hideAgain: (eventId: string) => Promise<string | null>
+  /** FORGET on a row GONE FROM ITS BAG: this device's record of it goes. Nothing is published. */
+  forgetRow: (eventId: string) => void
   /** What a chest of yours holds, as sealed: kept from sealing, else opened with what opens it; a refusal in words otherwise. */
   chestEntries: (eventId: string) => Promise<BagEntry[] | string>
   /** EDIT and ADD on a chest of yours: sealed again with this draft (name, lock, label, contents) where it stands. A refusal in words, or null. */
@@ -1646,7 +1672,8 @@ export const useShards = create<ShardsState>((set, get) => {
    */
   async function gatherInners(lookupId: string, key: Uint8Array, live: boolean, height: number): Promise<{ entries: BagEntry[]; settings: BagSettings | null }> {
     const items = get().mine.filter((d) => d.lookupId === lookupId)
-    const local = items.map(entryOf)
+    // A row gone from its bag is never written back into it (goneFrom).
+    const local = items.filter(inItsBag).map(entryOf)
     const localSettings = items.length > 0 ? items.reduce((a, b) => (b.createdAt > a.createdAt ? b : a)).bag ?? DEFAULT_BAG_SETTINGS : null
     if (!live) return { entries: local, settings: localSettings }
     let relay: BagEntry[] = []
@@ -1665,7 +1692,7 @@ export const useShards = create<ShardsState>((set, get) => {
       const retractedAt = await bagRetractedAt(lookupId, items)
       if (retractedAt > (newest?.created_at ?? 0)) {
         pruneGoneRows(lookupId, new Set(), retractedAt)
-        return { entries: get().mine.filter((d) => d.lookupId === lookupId).map(entryOf), settings: localSettings }
+        return { entries: get().mine.filter((d) => d.lookupId === lookupId && inItsBag(d)).map(entryOf), settings: localSettings }
       }
       // What a rotation that did not finish replaced stays out, whichever write comes first.
       const replaced = new Set(items.flatMap((d) => d.rotating ?? []).map((o) => o.doorId))
@@ -1684,7 +1711,7 @@ export const useShards = create<ShardsState>((set, get) => {
     // bag for good, or delete the whole bag as empty. A relay that answers with
     // nothing is an answer: there is no bag to lose.
     if (relay.length === 0 && !heard && claimableRows().some((d) => d.lookupId === lookupId && d.published)) throw new Error(BAG_NOT_READ)
-    return { entries: mergeEntries(relay, get().mine.filter((d) => d.lookupId === lookupId).map(entryOf)), settings }
+    return { entries: mergeEntries(relay, get().mine.filter((d) => d.lookupId === lookupId && inItsBag(d)).map(entryOf)), settings }
   }
 
   /** When this bag's address was last retracted, 0 if never. Asked only of a bag holding a door of yours, the one row a retraction can leave standing here. */
@@ -1716,12 +1743,14 @@ export const useShards = create<ShardsState>((set, get) => {
   }
 
   /**
-   * What a version of a bag read just now says of your rows in it. `held`
+   * What a version of a bag read just now says of your rows in it. A row it
+   * holds knows that version held it (`bagAt`), and loses a GONE FROM ITS
+   * BAG mark that version is newer than. For what it no longer holds, `held`
    * must be its WHOLE entry list (or empty, for a bag its author retracted
-   * at `bagAt`): a row it holds now knows that version held it (`bagAt`),
-   * and a row it no longer holds is gone, since another device moved (MOVE,
-   * EDIT) or removed the thing, or rotated, renamed or removed a door. Gone
-   * only when that version is NEWER than the one that last held the row, so
+   * at `bagAt`): a door row goes (another device rotated, renamed or removed
+   * it), and any other row is kept and marked `goneFrom` (moved or removed
+   * elsewhere, or dropped by a stale rewrite; never lost). Only when that
+   * version is NEWER than the one that last held the row, so
    * a relay's older copy never takes away what was hidden here, however far
    * the bag clock ran ahead of the wall clock; only a published row; never
    * one with a move to put back or a rotation under way, nor one from before
@@ -1729,22 +1758,33 @@ export const useShards = create<ShardsState>((set, get) => {
    * that missed a move never writes the old copy back into the bag, where no
    * device would list it any more (review of #595). `doorsOnly`: what a scan
    * reads, which may be only some of a bag's entries (TV's fresh finds, a
-   * reference that could not be fetched), says nothing of anything else.
+   * reference that could not be fetched), says nothing of what it lacks but
+   * doors.
    */
   function pruneGoneRows(lookupId: string, held: ReadonlySet<string>, bagAt: number, opts?: { doorsOnly?: boolean }): void {
     let changed = false
     const mine = get().mine.flatMap((d) => {
-      if (d.lookupId !== lookupId || (opts?.doorsOnly && d.chest?.door === undefined)) return [d]
+      if (d.lookupId !== lookupId) return [d]
+      const door = d.chest?.door !== undefined
+      // Held: that version knows it, and one newer than the version that lacked it clears the mark.
+      // A scan (doorsOnly) touches no other row it finds, unless to clear its mark.
       if (held.has(entryKey(entryOf(d)))) {
-        if (d.bagAt !== undefined && d.bagAt >= bagAt) return [d]
+        if (opts?.doorsOnly && !door && d.goneFrom === undefined) return [d]
+        const clears = d.goneFrom !== undefined && bagAt > d.goneFrom
+        if (!clears && d.bagAt !== undefined && d.bagAt >= bagAt) return [d]
         changed = true
-        return [{ ...d, bagAt }]
+        const { goneFrom: _was, ...rest } = d
+        void _was
+        return [{ ...(clears ? rest : d), bagAt: Math.max(bagAt, d.bagAt ?? 0) }]
       }
+      if (opts?.doorsOnly && !door) return [d]
       // A door row from before `bagAt` was kept goes by its old rule, its own time.
-      const last = d.bagAt ?? (d.chest?.door !== undefined ? d.createdAt : undefined)
+      const last = d.bagAt ?? (door ? d.createdAt : undefined)
       if (!d.published || d.putBack || d.rotating || last === undefined || last >= bagAt) return [d]
+      if (!door && d.goneFrom !== undefined && d.goneFrom >= bagAt) return [d]
       changed = true
-      return []
+      // A door goes, as doors always did; anything else is kept, marked.
+      return door ? [] : [{ ...d, goneFrom: bagAt }]
     })
     if (!changed) return
     set({ mine })
@@ -2399,6 +2439,28 @@ export const useShards = create<ShardsState>((set, get) => {
         deployAsk: null,
       })
     },
+    hideAgain: async (eventId) => {
+      const owner = cyber().identity.pubkey
+      const d = rowsOf(owner).find((m) => m.eventId === eventId)
+      if (!d || d.goneFrom === undefined) return null
+      if (get().deployStatus === 'working') return HIDE_AGAIN_BUSY
+      const gone = d.goneFrom
+      // Its last known bag is the version that lacked it, so that version (and
+      // no newer one) reads as one it was hidden into again.
+      const { goneFrom: _was, ...back } = d
+      void _was
+      const restored: MyDeployment = { ...back, bagAt: Math.max(d.bagAt ?? 0, gone) }
+      await commitRows(owner, rowsOf(owner).map((m) => (m.eventId === eventId ? restored : m)))
+      if (await get().broadcast(d.lookupId)) return null
+      // Not out: it stays gone from its bag, and out of every rewrite.
+      await commitRows(owner, rowsOf(owner).map((m) => (m.eventId === eventId && m.goneFrom === undefined ? { ...m, goneFrom: gone } : m)))
+      return get().broadcastError ?? 'No relay took the bag. Try again when one is reachable.'
+    },
+    forgetRow: (eventId) => {
+      const owner = cyber().identity.pubkey
+      if (!rowsOf(owner).some((m) => m.eventId === eventId && m.goneFrom !== undefined)) return
+      void commitRows(owner, rowsOf(owner).filter((m) => m.eventId !== eventId))
+    },
     chestEntries: async (eventId) => {
       const d = get().mine.find((m) => m.eventId === eventId)
       if (!d?.chest) return 'Only the chest’s hider can change what is inside it, from the device that hid it.'
@@ -2835,7 +2897,7 @@ export const useShards = create<ShardsState>((set, get) => {
       const itemMoveId = itemMovingId(pending)
       const movedItem = itemMoveId ? get().mine.find((d) => d.eventId === itemMoveId) : undefined
       if (itemMoveId && (!movedItem || movedItem.type !== pending.type || !movable(movedItem, cs.identity.pubkey))) {
-        set({ deployStatus: 'error', deployError: MOVE_GONE })
+        set({ deployStatus: 'error', deployError: movedItem && !inItsBag(movedItem) ? MOVE_STALE : MOVE_GONE })
         return
       }
       // Newer than the version it replaces even within the same second, so
@@ -2877,6 +2939,10 @@ export const useShards = create<ShardsState>((set, get) => {
       // live copy of it (a cashu token at two places). Refused, in words, when
       // its bag no longer holds it, or when no relay answers (review of #595).
       const checked = movedItem ?? (was && !was.ref ? was : undefined)
+      if (checked?.goneFrom !== undefined) {
+        set({ deployStatus: 'error', deployNote: null, deployError: MOVE_STALE })
+        return
+      }
       if (checked?.published) {
         set({ deployStatus: 'working', deployError: null, deployNote: 'Checking it is still where it was' })
         const still = await stillInItsBag(checked)
@@ -3401,7 +3467,9 @@ export const useShards = create<ShardsState>((set, get) => {
           if (d.ref[0] === 'a' && d.ref[2] !== took) hinted.set(d.eventId, [d.ref[0], d.ref[1], took, ...d.ref.slice(3)] as Reference)
         }
         if (hinted.size > 0) void commitRows(owner, rowsOf(owner).map((d) => (hinted.has(d.eventId) ? { ...d, ref: hinted.get(d.eventId) } : d)))
-        const fresh = items.map((d) => (hinted.has(d.eventId) ? { ...d, ref: hinted.get(d.eventId) } : d))
+        // Not what the read above found gone from this bag (goneFrom): never written back.
+        const gone = new Set(rowsOf(owner).filter((d) => !inItsBag(d)).map((d) => d.eventId))
+        const fresh = items.filter((d) => !gone.has(d.eventId)).map((d) => (hinted.has(d.eventId) ? { ...d, ref: hinted.get(d.eventId) } : d))
         // The re-hinted entries replace the bag's older ones for the same placement.
         const keep = existing.entries.filter((e) => !fresh.some((d) => d.ref && entryKey(e) === entryKey(d.ref)))
         const allInners = mergeEntries(keep, fresh.map(entryOf))
@@ -3822,6 +3890,8 @@ export const useShards = create<ShardsState>((set, get) => {
     const me = useCyberspace.getState().identity.pubkey
     for (const d of state.mine) {
       seen.add(d.eventId)
+      // Gone from its bag: not there to draw (DEPLOYED lists it, with HIDE AGAIN and FORGET).
+      if (!inItsBag(d)) continue
       out.push({ key: d.eventId, type: d.type, at: positionOf(d), plane: d.plane, height: d.height, mine: true, author: me, shard: d.shard, text: d.text, keyItem: d.key, chest: d.chest, audio: d.audio, createdAt: d.createdAt, lookupId: d.lookupId, bagId: d.bagId, ...(d.room ? { roomKeyHex: d.keyHex } : {}), target: itemTargetOf(d.inner, d.ref), event: d.inner as NostrEvent, ...lineageOf(d.inner, d.ref) })
     }
     for (const h of Object.values(state.discovered)) {

@@ -5,10 +5,11 @@
  * State in hud/stash.ts; mounted once at the app root.
  */
 
+import { useState } from 'react'
 import { createPortal } from 'react-dom'
 import { formatCellSize } from 'sno-core/scale'
 import { cashuLabel } from '../lib/cashu'
-import { movable, useShards, type MyDeployment } from '../store/useShards'
+import { inItsBag, movable, useShards, type MyDeployment } from '../store/useShards'
 import { movePlaced } from '../store/useBuilder'
 import { useCashu, cashuStateLabel } from './useCashu'
 import { bagsOf, depName, goToDeployment, useStash, type Bag } from './stash'
@@ -82,6 +83,31 @@ function ItemRow({ d, onGo, onMove }: { d: MyDeployment; onGo: () => void; onMov
   const cashu = useCashu(d.type === 'message' ? d.text : null)
   const coin = cashu.found
   const me = useCyberspace((s) => s.identity.pubkey)
+  const [hiding, setHiding] = useState(false)
+  const [why, setWhy] = useState<string | null>(null)
+  // GONE FROM ITS BAG (useShards `goneFrom`): moved or removed from another
+  // device, or dropped by a stale rewrite. Not drawn, never written back;
+  // HIDE AGAIN puts it back where it was, FORGET drops this device's record.
+  if (!inItsBag(d)) {
+    const again = (): void => {
+      setHiding(true); setWhy(null)
+      void useShards.getState().hideAgain(d.eventId).then((w) => { setHiding(false); setWhy(w) })
+    }
+    return (
+      <li className="shards__row shards__row--deployed shards__row--gone">
+        <span className="shards__goto shards__goto--gone">
+          <span className="avatars__who">
+            <ItemIcon className={`shards__type shards__type--${coin ? 'cashu' : d.type}`} type={d.type} coin={coin} size={12} />
+            {coin ? 'cashu token' : depName(d)}
+          </span>
+          <span className="shards__meta shards__meta--gone">GONE FROM ITS BAG</span>
+          {why && <span className="shards__meta shards__meta--gone" role="status">{why}</span>}
+        </span>
+        <button className="shards__move" disabled={hiding} onClick={again} title="Put it back in its bag where it was">{hiding ? 'HIDING…' : 'HIDE AGAIN'}</button>
+        <button className="shards__move" disabled={hiding} onClick={() => useShards.getState().forgetRow(d.eventId)} title="Drop it from this list. Nothing is published">FORGET</button>
+      </li>
+    )
+  }
   return (
     <li className="shards__row shards__row--deployed">
       <button className="shards__goto" onClick={onGo} title="Fly to it and see its record">

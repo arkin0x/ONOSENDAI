@@ -2109,6 +2109,10 @@ kbd {
   cursor: pointer;
 }
 .shards__move:hover { background: rgba(0, 229, 255, 0.12); }
+.shards__move:disabled { opacity: 0.5; cursor: default; }
+/* GONE FROM ITS BAG: the row is not a link (nothing to fly to), its state in the warning colour. */
+.shards__goto--gone { cursor: default; }
+.shards__meta--gone { color: var(--warn); letter-spacing: 0.08em; }
 
 /* ---------- Shards & messages panel additions ---------- */
 .tag--scan {

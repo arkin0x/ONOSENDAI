@@ -60,7 +60,7 @@ import { useCyberspace } from '../useCyberspace'
 import { useInventory } from '../useInventory'
 import { movePlaced, useBuilder } from '../useBuilder'
 import { useToast } from '../useToast'
-import { MOVE_GONE, MOVE_STALE, MOVE_UNANSWERED, movable, movingId, newestOfMoved, oneVersionEach, repeatable, useShards, type MyDeployment } from '../useShards'
+import { HIDE_AGAIN_BUSY, MOVE_GONE, MOVE_STALE, MOVE_UNANSWERED, inItsBag, movable, movingId, newestOfMoved, oneVersionEach, repeatable, useShards, type MyDeployment } from '../useShards'
 
 const S = () => useShards.getState()
 const me = () => useCyberspace.getState().identity.pubkey
@@ -418,7 +418,7 @@ async function bagIdsIn(lookupId: string, keyHex: string): Promise<string[]> {
 }
 
 describe('review of #595: a second device that missed the move', () => {
-  it('R1: hiding in the old region from that device never writes the old copy back, and drops its stale row', async () => {
+  it('R1: hiding in the old region from that device never writes the old copy back; its row is kept, gone from its bag', async () => {
     const stays = await hide('message', at(2n))
     const goes = await hide('message', at(1n))
     const oldRow = row(goes)
@@ -432,7 +432,16 @@ describe('review of #595: a second device that missed the move', () => {
     const oldBagNow = await bagIdsIn(oldRow.lookupId, oldRow.keyHex)
     expect(oldBagNow).not.toContain(goes)
     expect(oldBagNow.sort()).toEqual([stays, added].sort())
-    expect(S().mine.some((d) => d.eventId === goes)).toBe(false)
+    // Kept, marked, not drawn, and not movable: the copy at the new place is the one.
+    const stale = row(goes)
+    expect(stale.goneFrom).toBeDefined()
+    expect(S().worldItems().some((w) => w.key === goes)).toBe(false)
+    expect(movable(stale, me())).toBe(false)
+    S().startMoveItem(goes)
+    expect(S().pending).toBeNull()
+    // A later rewrite from that device still leaves it out.
+    await hide('message', at(4n))
+    expect(await bagIdsIn(oldRow.lookupId, oldRow.keyHex)).not.toContain(goes)
   })
 
   it('P1: a scan reads only some of a bag (TV\'s fresh finds), so it takes no row away, however new the bag', async () => {
@@ -538,5 +547,92 @@ describe('review 2 of #595: the bag clock runs ahead of the wall clock', () => {
     await hide('message', at(5n))
     expect(S().mine.some((d) => d.eventId === z)).toBe(true)
     void x
+  })
+})
+
+describe('review 3 of #595: two writers, nothing lost', () => {
+  /** Device 1 hides x then z; device 2, whose read never saw z's bag, hides w; device 1 then hides q. */
+  async function twoWriters(): Promise<{ x: string; z: string; lookupId: string; keyHex: string; device1: MyDeployment[] }> {
+    const x = await hide('message', at(1n))
+    const device2 = S().mine.map((d) => ({ ...d }))
+    const z = await hide('message', at(2n))
+    const lookupId = row(z).lookupId
+    const keyHex = row(z).keyHex
+    const v2 = newestBag(lookupId)!
+    const device1 = S().mine.map((d) => ({ ...d }))
+    useShards.setState({ mine: device2, deleted: {}, discovered: {} })
+    withheld.add(v2.id)
+    await hide('message', at(3n))
+    withheld.clear()
+    expect(await bagIdsIn(lookupId, keyHex)).not.toContain(z)
+    useShards.setState({ mine: device1, deleted: {}, discovered: {} })
+    await hide('message', at(4n))
+    return { x, z, lookupId, keyHex, device1 }
+  }
+
+  it('W1: a stale rewrite elsewhere dropped z; z stays listed, gone from its bag, and HIDE AGAIN puts it back', async () => {
+    const { z, lookupId, keyHex } = await twoWriters()
+    const zRow = row(z)
+    expect(zRow).toBeDefined()
+    expect(zRow.goneFrom).toBeDefined()
+    expect(await bagIdsIn(lookupId, keyHex)).not.toContain(z)
+    expect(S().worldItems().some((w) => w.key === z)).toBe(false)
+    expect(await S().hideAgain(z)).toBeNull()
+    expect(inItsBag(row(z))).toBe(true)
+    expect(await bagIdsIn(lookupId, keyHex)).toContain(z)
+    expect(S().worldItems().some((w) => w.key === z)).toBe(true)
+    // And it stays in through the next rewrite.
+    await hide('message', at(5n))
+    expect(await bagIdsIn(lookupId, keyHex)).toContain(z)
+    expect(inItsBag(row(z))).toBe(true)
+  })
+
+  it('HIDE AGAIN that no relay takes leaves it marked and out of the bag', async () => {
+    const { z, lookupId, keyHex } = await twoWriters()
+    refused.add(HIDDEN_KIND)
+    expect(await S().hideAgain(z)).toMatch(/No relay took/)
+    expect(row(z).goneFrom).toBeDefined()
+    refused.clear()
+    await hide('message', at(5n))
+    expect(await bagIdsIn(lookupId, keyHex)).not.toContain(z)
+  })
+
+  it('HIDE AGAIN waits while a hide is going out', async () => {
+    const { z } = await twoWriters()
+    useShards.setState({ deployStatus: 'working' })
+    expect(await S().hideAgain(z)).toBe(HIDE_AGAIN_BUSY)
+    expect(row(z).goneFrom).toBeDefined()
+  })
+
+  it('FORGET drops only this device\'s record, and publishes nothing', async () => {
+    const { z, x } = await twoWriters()
+    const mark = sent.length
+    S().forgetRow(z)
+    expect(S().mine.some((d) => d.eventId === z)).toBe(false)
+    expect(S().mine.some((d) => d.eventId === x)).toBe(true)
+    expect(sent.length).toBe(mark)
+    // Never a row still in its bag.
+    S().forgetRow(x)
+    expect(S().mine.some((d) => d.eventId === x)).toBe(true)
+  })
+
+  it('a newer version of its bag that holds it again clears the mark; an older one does not', async () => {
+    const { z } = await twoWriters()
+    const zRow = row(z)
+    const gone = zRow.goneFrom!
+    S().addDiscovered([{ ...asFound(zRow), bag: zRow.bag, bagAt: gone - 1 } as Hidden])
+    expect(row(z).goneFrom).toBe(gone)
+    S().addDiscovered([{ ...asFound(zRow), bag: zRow.bag, bagAt: gone + 1 } as Hidden])
+    expect(inItsBag(row(z))).toBe(true)
+  })
+
+  it('a marked row cannot be moved, even with a move lined up', async () => {
+    const { z } = await twoWriters()
+    useShards.setState({ pending: { type: 'message', text: 'meet at the fountain', move: { eventId: z } }, deployStatus: 'idle', deployError: null })
+    aim(at(9n))
+    const mark = sent.length
+    await S().deploy()
+    expect(S().deployError).toBe(MOVE_STALE)
+    expect(sent.length).toBe(mark)
   })
 })

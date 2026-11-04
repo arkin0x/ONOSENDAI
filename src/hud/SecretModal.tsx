@@ -63,6 +63,9 @@ import { useMutes } from '../store/useMutes'
 
 const ICON = 12
 
+/** Why DELETE waits: a hide is still going out (SecretModal `hiding`). */
+export const DELETE_WAITS = 'A hide is still going out. DELETE when it lands.'
+
 /** The id a MUTE THIS ITEM names: the lineage, else the item's own id, else (a LIVE LINK) the object's event id. */
 export function muteIdOf(item: Pick<WorldItem, 'lineage' | 'key' | 'event'>): string {
   const hex = (v: string | undefined): v is string => !!v && /^[0-9a-f]{64}$/.test(v)
@@ -117,6 +120,10 @@ export function SecretModal(): JSX.Element | null {
   // sealing it or from opening it (4.11).
   const doorOfMine = chestOfMine && wire?.chest?.door !== undefined
   const editsDoor = doorOfMine && !!wire && !!doorSecret(me, wire.eventId)
+  // A hide still going out: a DELETE now would rewrite the same bag at the
+  // same moment, and one of the two could drop the other's change (review 3
+  // of #595). DELETE waits for it.
+  const hiding = useShards((s) => s.deployStatus === 'working')
   const [converting, setConverting] = useState(false)
   const [convertWhy, setConvertWhy] = useState<string | null>(null)
   // The chest a revealed thing came out of, by name, for the card's question.
@@ -171,7 +178,10 @@ export function SecretModal(): JSX.Element | null {
   const card = confirming === 'delete' ? deleteWords(item) : confirming === 'remove' ? removeWords(item, chestName) : null
   const confirmed = (): void => {
     setConfirming(null)
-    if (confirming === 'delete') { close(); void useShards.getState().deleteInstance(item.key); return }
+    if (confirming === 'delete') {
+      if (useShards.getState().deployStatus === 'working') { setRefusal(DELETE_WAITS); return }
+      close(); void useShards.getState().deleteInstance(item.key); return
+    }
     setRemoving(true); setRefusal(null)
     void useShards.getState().removeFromChest(item.key).then((why) => { setRemoving(false); if (why) setRefusal(why); else close() }, (err: unknown) => { setRemoving(false); setRefusal(err instanceof Error ? err.message : String(err)) })
   }
@@ -321,7 +331,8 @@ export function SecretModal(): JSX.Element | null {
           {mine && !item.chestId && (
             <button
               className="secret__act secret__act--danger"
-              title="Rewrite this region's bag without it, or delete the whole envelope when it is the last thing of yours there. Copies others already took stay with them. This cannot be undone."
+              disabled={hiding}
+              title={hiding ? DELETE_WAITS : "Rewrite this region's bag without it, or delete the whole envelope when it is the last thing of yours there. Copies others already took stay with them. This cannot be undone."}
               onClick={() => setConfirming('delete')}
             >DELETE</button>
           )}

@@ -84,10 +84,11 @@ import {
 } from '../lib/space'
 import { confirmChainEvents } from '../lib/chains'
 import { chainDbAvailable, chainWritePause, readStoredChain, setAsideChains, setAsideStoredChain, writeStoredChain, type StoredChain } from '../lib/chainDb'
-import { chainHeld, chainLost, clearMarker, clearTail, committedHead, deployAllowsMove, holdChain, inRows, markerValue, migrateToRows, noteCommitted, onChainLost, onChainRefused, onChainResave, wentOut, probePassedBefore, readRows, readTail, rowsHead, rowsMarked, rowsWanted, saveRows, setAsideRows, setMarker, storeTrial, storeWorksHere, tailOnSave, takingBack, tookBack, turnRowsOff, writeTail } from '../lib/chainStore'
+import { chainHeld, chainLost, checkRowsInTime, clearMarker, clearTail, committedHead, deployAllowsMove, holdChain, inRows, markerValue, migrateToRows, noteCommitted, onChainLost, onChainRefused, onChainResave, wentOut, probePassedBefore, readRows, readTail, rowsHead, rowsMarked, rowsWanted, saveRows, setAsideRows, setMarker, storeTrial, storeWorksHere, tailOnSave, takingBack, tookBack, turnRowsOff, writeTail } from '../lib/chainStore'
 import { eventDbAvailable } from '../lib/eventDb/client'
 import type { ChainRead, ChainSource } from '../lib/eventDb/chainRows'
 import { checkSignatures } from '../lib/sigCheck'
+import { checkedElsewhere } from '../lib/verifiedSigs'
 import {
   firstMove,
   foldHeldConflict,
@@ -1274,8 +1275,10 @@ export function appMinted(pubkey: string): boolean | null {
  * costs about 2 ms on the main thread, and the same chain is read from
  * storage more than once in a session (at boot by the signer pick and again
  * by the store, and again on every switch back to an identity), so each
- * signature is checked once. Memory only, never written to storage: a flag
- * on disk would be exactly as trustworthy as the disk.
+ * signature is checked once. On the old stores this is memory only: their
+ * copies carry no verdict. A chain's rows do (the owner's ruling, 2026-10-30:
+ * a stored NIP-01 flag), and what that flag lets a load skip, and what it still
+ * recomputes, is said at lib/eventDb/chainRows.ts checkChainRows.
  */
 const verifiedSigs = new Set<string>()
 
@@ -2039,11 +2042,30 @@ async function foldStaleBuild(pubkey: string): Promise<void> {
 /** Per identity, the fold of what an older build saved, while it runs: every asker waits for the one fold (chainHydrated, a press). */
 const staleFolds = new Map<string, Promise<void>>()
 
-/** Whether the old stores' mark names a save by an older build that this device has not folded in yet. */
+/**
+ * Whether the old stores hold a save by an older build that this device has
+ * not folded in yet: their mark says so, or an earlier read of them failed
+ * (unreadSaveKey), which this tab's own marks since do not undo.
+ */
 function staleMarkUnfolded(pubkey: string): boolean {
+  if (unreadSave(pubkey) !== null) return true
   const mark = storedMark(pubkey)
   return mark !== null && !mark.endsWith(':r') && markerValue(pubkey) !== mark
 }
+
+/**
+ * A save of an older build the old stores could not be read for. Kept in its
+ * own key, apart from the mark, because moves go on meanwhile (they sign from
+ * the chain in hand, the owner's call) and their marks replace the older
+ * build's: once the old stores can be read, that save is folded in, or set
+ * aside as a branch when the chain has moved on past it.
+ */
+const unreadSaveKey = (pubkey: string): string => `onosendai:chain-unread-save:${pubkey}`
+function unreadSave(pubkey: string): string | null {
+  try { return localStorage.getItem(unreadSaveKey(pubkey)) } catch { return null }
+}
+/** Identities told on this page that an older save could not be read. */
+const unreadSaid = new Set<string>()
 
 /**
  * The fold itself. The mark is taken as seen only once the old stores have
@@ -2056,8 +2078,29 @@ async function foldStaleBuildNow(pubkey: string): Promise<void> {
   const kept = await readStoredChain(pubkey)
   const answered = kept !== 'unreadable' && kept !== 'timeout'
   const stored = furtherCopy(local, answered && kept ? chainFrom(pubkey, kept, true) : null)
-  if (stored) takeInStored(pubkey, stored)
-  if (answered && useCyberspace.getState().identity.pubkey === pubkey) setMarker(pubkey, mark)
+  // Nothing of this identity's in hand to fold into (switched away and back,
+  // its rows not read yet): nothing is folded, so nothing is taken as seen,
+  // and the read that brings the chain back folds it in (hydrateChain).
+  const s = useCyberspace.getState()
+  if (s.identity.pubkey !== pubkey || s.events.length === 0 || s.events[0].pubkey !== pubkey) return
+  if (!answered) {
+    try { if (unreadSave(pubkey) === null) localStorage.setItem(unreadSaveKey(pubkey), mark ?? '') } catch { /* tried again next read anyway */ }
+    if (!unreadSaid.has(pubkey)) {
+      unreadSaid.add(pubkey)
+      console.warn('[chain] the old stores could not be read for a save of an older build: moves go on from the chain in hand, and the read is tried again')
+      useToast.getState().show({ label: 'OLDER SAVE COULD NOT BE READ', meta: 'Moves go on from the chain you see. It is tried again.', mark: 'block' })
+    }
+    if (stored) takeInStored(pubkey, stored)
+    return
+  }
+  const took = stored ? takeInStored(pubkey, stored) : true
+  // The chain moved on past a save that could not be read before: kept as a branch set aside, not lost.
+  if (!took && stored && unreadSave(pubkey) !== null) {
+    console.warn('[chain] a save of an older build, unreadable until now, parted ways with the chain since: it is set aside as a branch')
+    void setAsideRows(pubkey, { events: stored.events, published: stored.published, stats: { ...stored.stats }, held: stored.held === true, savedAt: stored.savedAt ?? 0 })
+  }
+  try { localStorage.removeItem(unreadSaveKey(pubkey)) } catch { /* private mode */ }
+  setMarker(pubkey, mark)
 }
 
 /** Take in what storage holds beyond the chain in hand. True when it was something another tab can have done. */
@@ -2400,6 +2443,65 @@ function startSignatureCheck(pubkey: string, unchecked: NostrEvent[]): void {
 }
 
 /**
+ * The rows a check of the chain's rows covers, by id, as the check read them:
+ * nothing else needs to check them (putInHand), and what the check finds comes
+ * from the rows themselves. Only those exact bytes: a copy under the same id
+ * that differs in any field (another signature of it, a row rewritten since) is
+ * not what was checked, and is checked like any other.
+ */
+const coveredByRows = new Map<string, NostrEvent>()
+/** The identity whose rows coveredByRows holds: a switch clears it, so it never grows across identities. */
+let coveredFor: string | null = null
+
+/** For tests: how many rows a check of the rows covers now. */
+export function rowsCoverage(): number {
+  return coveredByRows.size
+}
+
+/** Whether two copies of an event are the same, field for field: an id does not commit to the signature. */
+function sameBytes(a: NostrEvent | undefined, b: NostrEvent): boolean {
+  return a !== undefined && (a === b || (a.sig === b.sig && a.pubkey === b.pubkey && a.created_at === b.created_at && a.kind === b.kind && a.content === b.content && JSON.stringify(a.tags) === JSON.stringify(b.tags)))
+}
+
+/** Whether a copy is, field for field, the one a check of the rows covered. */
+function coveredAsIs(e: NostrEvent): boolean {
+  return sameBytes(coveredByRows.get(e.id), e)
+}
+
+/**
+ * Check a chain just read from its rows, in the worker, instead of every
+ * signature on every load: flagged rows have only their id recomputed, and a
+ * row not flagged yet has its signature checked, once, and is flagged. Chain
+ * actions wait for it as they wait for startSignatureCheck, and the chain is
+ * cut the same way. A database that will not do it hands the job to the check
+ * that needs no database.
+ */
+function startRowsCheck(pubkey: string, read: ChainRead): void {
+  const events = read.events
+  // Covered for this identity only: another identity's rows say nothing here.
+  if (coveredFor !== pubkey) { coveredByRows.clear(); coveredFor = pubkey }
+  // Covered, not trusted: a row's flag is trusted once the check has recomputed its id.
+  for (const e of events) coveredByRows.set(e.id, e)
+  const running = sigCheck?.pubkey === pubkey ? sigCheck.done : null
+  const entry: { pubkey: string; done: Promise<string | null> } = { pubkey, done: Promise.resolve(null) }
+  const own = checkRowsInTime(pubkey, events.length).then((bad) => new Set(bad), () => checkSignatures(events)).then((bad) => {
+    const badKeys = new Set(events.filter((e) => bad.has(e.id)).map(sigKey))
+    for (const e of events) {
+      if (bad.has(e.id)) continue
+      verifiedSigs.add(sigKey(e))
+      checkedElsewhere(e)
+    }
+    return badKeys.size === 0 ? null : cutInauthentic(pubkey, badKeys)
+  })
+  entry.done = (running ? Promise.all([running, own]).then(([a, b]) => a ?? b) : own).then((cut) => {
+    if (sigCheck === entry) sigCheck = null
+    mark('onosendai:chain-verified')
+    return cut
+  })
+  sigCheck = entry
+}
+
+/**
  * After a load has drawn the chain localStorage kept, read the one IndexedDB
  * keeps (lib/chainDb.ts) and take it when it is further on (furtherCopy):
  * localStorage stops taking a chain that outgrew its few megabytes, and its
@@ -2667,6 +2769,7 @@ function takeRows(pubkey: string, read: ChainRead, blindSince: number | null): b
   rowsDown.delete(pubkey)
   rowsWiped.delete(pubkey)
   noteCommitted(pubkey, read.events.map((e) => e.id), read.published)
+  startRowsCheck(pubkey, read)
   markedHead.set(pubkey, read.headId)
   if (!rowsMarked(pubkey)) setMarker(pubkey, storedMark(pubkey))
   const held = new Set(read.events.map((e) => e.id))
@@ -2785,6 +2888,8 @@ function takeParted(pubkey: string, kept: StoredChain, fromDb: LoadedChain, have
 /** The record's chain in hand, in silence: what a load does when IndexedDB holds the chain further on. */
 function putInHand(pubkey: string, fromDb: LoadedChain, have: Set<string>): void {
   const s = useCyberspace.getState()
+  // What was in hand, as it was: a copy here that differs from it under the same id is checked anew.
+  const inHand = new Map(s.events.map((e) => [e.id, e]))
   const d = derive(fromDb)
   // Acknowledged here since the load stays acknowledged.
   const published = { ...d.published }
@@ -2814,7 +2919,7 @@ function putInHand(pubkey: string, fromDb: LoadedChain, have: Set<string>): void
   noteInHand(pubkey, fromDb)
   dbRead.add(pubkey)
   // What localStorage did not have is checked like the rest, off the main thread.
-  startSignatureCheck(pubkey, fromDb.unchecked.filter((e) => !have.has(e.id)))
+  startSignatureCheck(pubkey, fromDb.unchecked.filter((e) => !(have.has(e.id) && sameBytes(inHand.get(e.id), e)) && !coveredAsIs(e)))
 }
 
 /** Resolves once the read of `pubkey`'s chain from IndexedDB has landed (hydrateChain). */
@@ -4392,6 +4497,8 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
 
   const switchTo = async (signer: Signer): Promise<void> => {
     switchCount++
+    // The rows a check covered were the old identity's.
+    if (coveredFor !== signer.pubkey) { coveredByRows.clear(); coveredFor = null }
     // Whatever was waiting to sign as the old identity ends without a word.
     chainEpoch++
     // A cloud flow in progress was signing as the old identity; it ends here.

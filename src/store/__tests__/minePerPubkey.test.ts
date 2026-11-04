@@ -35,9 +35,11 @@ let relayAnswers: 'answered' | 'unreachable' = 'answered'
 const sent: { kind: number }[] = []
 /** When set, a bag or a retraction waits here on its way to the relays, after its signature. */
 let held: { reached: () => void; until: Promise<void> } | null = null
+/** The kinds held: a bag and a retraction, unless a case asks for others. */
+let holdKinds = [33330, 5]
 vi.mock('../../lib/relay', () => ({
   publishMany: vi.fn(async (_relays: string[], ev: { kind: number }) => {
-    if ((ev.kind === 33330 || ev.kind === 5) && held) { held.reached(); await held.until }
+    if (holdKinds.includes(ev.kind) && held) { held.reached(); await held.until }
     sent.push(ev)
     return { ok: true }
   }),
@@ -120,6 +122,7 @@ beforeEach(() => {
   relayAnswers = 'answered'
   sent.length = 0
   held = null
+  holdKinds = [33330, 5]
   localStorage.clear()
   reloadLocalView()
   useCyberspace.setState({ identity: { pubkey: home, npub: 'npub-home' }, live: true })
@@ -507,3 +510,48 @@ describe('what relays and other identities see', () => {
   })
 })
 
+describe('work begun before a switch writes the rows of the identity it began as (#559 follow-up)', () => {
+  /** Two identities with a row each in one region: a region's lookup id is the same whoever hides there. */
+  const both = (): void => {
+    seed(keyOf(home), JSON.stringify([row(home, 'h1', { published: false, bagId: 'bag-h1' })]))
+    seed(keyOf(Y), JSON.stringify([row(Y, 'y1', { published: false, bagId: 'bag-y1' })]))
+    signIn(Y); signIn(home)
+  }
+
+  it('BROADCAST: the bag that went out is recorded on the rows it was sent for, not on the next identity\'s', async () => {
+    both()
+    const relays = holdRelays()
+    const broadcasting = useShards.getState().broadcast(rk.lookupId)
+    await relays.reached
+    signIn(Y)
+    relays.release()
+    expect(await broadcasting).toBe(true)
+    const bag = sent.find((e) => e.kind === 33330) as { id: string } | undefined
+    expect(bag).toBeDefined()
+    expect(stored(keyOf(Y))).toMatchObject([{ eventId: 'y1', published: false, bagId: 'bag-y1' }])
+    expect(stored(keyOf(home))).toMatchObject([{ eventId: 'h1', published: true, bagId: bag!.id }])
+    expect(ids(useShards.getState().mine)).toEqual(['y1'])
+  })
+
+  it('a failed move put back on BROADCAST: the row follows on its own list, and nothing goes out as the next identity', async () => {
+    const back = finalizeEvent({ kind: 33331, created_at: 1_900_000_000, content: '', tags: [['d', 'thing']] }, generateSecretKey()) as unknown as NonNullable<MyDeployment['putBack']>
+    seed(keyOf(home), JSON.stringify([row(home, 'h1', { published: false, bagId: 'bag-h1', putBack: back })]))
+    seed(keyOf(Y), JSON.stringify([row(Y, 'y1', { published: false, bagId: 'bag-y1' })]))
+    signIn(Y); signIn(home)
+    holdKinds = [33331]
+    const relays = holdRelays()
+    const broadcasting = useShards.getState().broadcast(rk.lookupId)
+    await relays.reached
+    signIn(Y)
+    relays.release()
+    expect(await broadcasting).toBe(false)
+    expect(useShards.getState().broadcastError).toContain('switched identity')
+    // Only the old version went back; no bag was sent for either identity.
+    expect(sent.map((e) => e.kind)).toEqual([33331])
+    const mine = stored(keyOf(home))
+    expect(mine).toHaveLength(1)
+    expect(mine[0].eventId).toBe(back.id)
+    expect(mine[0].putBack).toBeUndefined()
+    expect(stored(keyOf(Y))).toMatchObject([{ eventId: 'y1', published: false, bagId: 'bag-y1' }])
+  })
+})

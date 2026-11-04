@@ -331,9 +331,11 @@ export const useBuilder = create<BuilderState>((set, get) => ({
  * you cannot build from, your avatar was moved under it, or you switched
  * identity. The deploy lined up at the build cursor cannot stay, but what
  * went into it is kept for the composer that opens next. The toast says
- * only BUILD MODE ENDED (arkinox, 2026-11-02: "none of the other text").
+ * only BUILD MODE ENDED (arkinox, 2026-11-02: "none of the other text"),
+ * except when a placement already on its way still lands where it was aimed:
+ * then one line says so, so nobody places it again and makes two.
  */
-function endUnder(): void {
+function endUnder(switched = false): void {
   // A copy lined up after a placement was placed already: asked before the
   // mode goes off, which forgets `placedLast`. It stands down quietly, with
   // no draft kept.
@@ -345,7 +347,8 @@ function endUnder(): void {
   // Already hiding (deployStatus working): the key is being computed for the
   // place it was aimed at, and it finishes there, so nothing is kept or
   // canceled (found in review, 2026-10-07: it used to say "kept" and publish).
-  if (pending && shards.deployStatus !== 'working') {
+  const working = pending !== null && shards.deployStatus === 'working'
+  if (pending && !working) {
     // A message, a key, a chest or hidden audio is kept whole for the
     // composer that opens next (audio's file is uploaded already). A door
     // holds nothing yet; a chest's move leaves it where it stood; a shard
@@ -361,8 +364,15 @@ function endUnder(): void {
     useStash.setState({ returnToModels: false, returnToFeed: false, returnToChest: false })
     shards.cancelDeploy()
   }
-  useToast.getState().show({ label: 'BUILD MODE ENDED', meta: '', mark: 'build', ms: BRIEF_TOAST_MS })
+  // A shard being signed into a chest publishes nothing: it goes back to the
+  // chest composer. After an identity switch the hide is refused unless its bag
+  // was signed already (useShards signBag), so nothing is promised then.
+  const lands = !switched && pending !== null && working && !(pending.type === 'shard' && pending.intoChest)
+  useToast.getState().show({ label: 'BUILD MODE ENDED', meta: lands ? STILL_LANDS : '', mark: 'build', ms: BRIEF_TOAST_MS })
 }
+
+/** BUILD MODE ENDED's one extra line, while a placement already on its way finishes where it was aimed. */
+export const STILL_LANDS = 'It still lands where you aimed it.'
 
 useCyberspace.subscribe((s, prev) => {
   const b = useBuilder.getState()
@@ -371,7 +381,7 @@ useCyberspace.subscribe((s, prev) => {
   // identity switch and a chain chosen from the relays also clear the view:
   // reading them as the view moving away gave the wrong reason (review of
   // #235). Another identity first: everything about the old one is gone.
-  if (s.identity.pubkey !== prev.identity.pubkey) { endUnder(); settleView(null); return }
+  if (s.identity.pubkey !== prev.identity.pubkey) { endUnder(true); settleView(null); return }
   // Your position replaced under the mode, carrying the cursor to the new
   // head: a new chain head that also wrote the cursor. Only a respawn, a ride
   // arriving and a chain chosen from the relays do both. A move committed

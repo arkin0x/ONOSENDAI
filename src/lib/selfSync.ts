@@ -124,11 +124,15 @@ export function recheckIfUnknown(): void {
 
 /** Ask again now, whatever the last answer was: the CHECK AGAIN button on a held chain. */
 export function recheckNow(): void {
-  // A deliberate tap, as RETRY is: every relay whose AUTH the signer turned
-  // down or let run out asks it again, so the check that follows can be
-  // read signed in, and the prompt the panel speaks of is really shown.
-  for (const url of [...signerHeld]) retryFailedAuth(url)
-  void check(useCyberspace.getState().identity.pubkey)
+  // A deliberate tap, as RETRY is: every relay this chain lives on (the
+  // canonical relay and its known holders) whose AUTH the signer turned down
+  // or let run out asks it again, so the check that follows can be read
+  // signed in, and the prompt the panel speaks of is really shown. No other
+  // relay is asked: the check does not wait on it.
+  const pubkey = useCyberspace.getState().identity.pubkey
+  const holders = chainHolders(pubkey)
+  for (const url of [...signerHeld]) if (holders.has(url)) retryFailedAuth(url)
+  void check(pubkey)
 }
 
 /**

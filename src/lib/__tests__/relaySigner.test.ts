@@ -349,19 +349,18 @@ describe('head confirmation and a chain holder behind the signer: as on v2, a si
     expect(got.settled).toBe(true)
     expect(got.value?.map((e) => e.id)).not.toContain(c.hop2.id)
   })
-  it('the canonical relay stalled, with an open relay holding the anchor, refuses the move at 5 s', async () => {
+  it('the canonical relay stalled, with an open relay holding the anchor: option B\'s degraded pass, as on v2, and never on the stalled relay\'s empty answer', async () => {
     const open = 'wss://open.anchor.example/'
     const c = aChain()
     useRelays.getState().add(open)
     net.rules.hold.set(CANON, [c.spawn, c.hop1, c.hop2])
     net.rules.hold.set(open, [c.spawn, c.hop1])
     net.signer.mode = 'stall'
-    const asking = confirmChainEvents(c.pubkey, c.spawn.id, [c.spawn, c.hop1], { since: c.hop1.created_at, anchorId: c.hop1.id })
-    expect((await within(4800, asking)).settled).toBe(false)
-    const got = await within(500, asking)
+    const got = await within(5300, confirmChainEvents(c.pubkey, c.spawn.id, [c.spawn, c.hop1], { since: c.hop1.created_at, anchorId: c.hop1.id }))
     expect(got.settled).toBe(true)
-    expect(got.value).toBeNull()
+    expect(got.value?.map((e) => e.id).sort()).toEqual([c.spawn.id, c.hop1.id].sort())
   })
+
 })
 
 describe('a publish to a dead relay and a gated one', () => {
@@ -625,18 +624,26 @@ describe('review of #570 (2026-11-04): each as on v2, or safer for the canonical
     })
   }
 
-  it('the canonical relay kept from being read by the signer refuses the move, though another relay answered holding the anchor (v2 would pass)', async () => {
+  it('P8: the canonical relay kept from being read by the signer counts as no answer, and option B\'s degraded pass applies, as on v2', async () => {
     const open = 'wss://open.anchor2.example/'
     const c = aChain()
     useRelays.getState().add(open)
     net.rules.hold.set(CANON, [c.spawn, c.hop1, c.hop2])
     net.rules.hold.set(open, [c.spawn, c.hop1])
     net.signer.rejectFor.add(CYBERSPACE_RELAY)
-    const got = await within(5300, confirmChainEvents(c.pubkey, c.spawn.id, [c.spawn, c.hop1], { since: c.hop1.created_at, anchorId: c.hop1.id }))
+    const got = await within(6000, confirmChainEvents(c.pubkey, c.spawn.id, [c.spawn, c.hop1], { since: c.hop1.created_at, anchorId: c.hop1.id }))
+    expect(got.settled).toBe(true)
+    expect(got.value?.map((e) => e.id).sort()).toEqual([c.spawn.id, c.hop1.id].sort())
+  })
+
+  it('the gain kept: a canonical relay\'s empty answer read before its AUTH is never "answered", so with no other relay the move is refused', async () => {
+    const c = aChain()
+    net.rules.hold.set(CANON, [c.spawn, c.hop1, c.hop2])
+    net.signer.rejectFor.add(CYBERSPACE_RELAY)
+    const got = await within(6000, confirmChainEvents(c.pubkey, c.spawn.id, [c.spawn, c.hop1], { since: c.hop1.created_at, anchorId: c.hop1.id }))
     expect(got.settled).toBe(true)
     expect(got.value).toBeNull()
   })
-
   it('a question ended before the canonical relay answered, its AUTH still signing, says the signer, not silence', async () => {
     net.signer.mode = 'stall'
     const stop = new AbortController()

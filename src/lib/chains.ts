@@ -358,11 +358,6 @@ export async function confirmChainEvents(
     noteHoldersFrom(pubkey, got)
     if (!whole) return null
     const merged = mergeAnswers(got)
-    // The canonical relay, kept from being read by the signer, may hold a newer
-    // move: not read, it says nothing, so the move waits, rather than pass on
-    // another relay's word. Any other chain holder is as on v2: a silent one
-    // never stops the pass (arkinox's ruling of 2026-10-08, option B).
-    if (got.some((a) => a.url === canonical && a.outcome === 'refused' && a.reason === AUTH_STALLED)) return extendsChain(merged, have) ? merged : null
     if (got.some((a) => a.url === canonical && a.outcome === 'answered')) return merged
     const holdsChain = (a: RelayAnswer): boolean => opts.anchorId === undefined || a.events.some((e) => e.id === opts.anchorId)
     if (got.some((a) => a.url !== canonical && a.outcome === 'answered' && holdsChain(a))) return merged

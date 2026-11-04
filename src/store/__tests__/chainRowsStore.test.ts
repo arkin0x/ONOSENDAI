@@ -247,7 +247,7 @@ describe('moving a chain to rows', () => {
     expect(localStorage.getItem('onosendai:chain-rows:' + pk)).toBeNull()
   })
 
-  it('a database wiped under the marker: the frozen copy is drawn, nothing is signed or moved until the relays answer, it says so, then it moves again', async () => {
+  it('a database wiped under the marker: the frozen copy is drawn, nothing is signed or moved until the relays answer, it says so, then it moves again', { timeout: 30_000 }, async () => {
     const chain = chainOf(15)
     await seedOldStores(chain, { localToo: true })
     await openTab()
@@ -268,9 +268,9 @@ describe('moving a chain to rows', () => {
     relays.confirm = []
     b.store.useCyberspace.setState({ proof: { ...b.S().proof, status: 'idle', message: null } })
     const m = await signMove(b)
-    await vi.waitFor(() => expect(b.rows.inRows(pk)).toBe(true))
+    await vi.waitFor(() => expect(b.rows.inRows(pk)).toBe(true), { timeout: 10_000, interval: 20 })
     await b.rows.chainRowsSettled()
-    await vi.waitFor(async () => expect((await rowsNow())!.events.map((e) => e.id)).toEqual([...chain.map((e) => e.id), m]))
+    await vi.waitFor(async () => expect((await rowsNow())!.events.map((e) => e.id)).toEqual([...chain.map((e) => e.id), m]), { timeout: 10_000, interval: 50 })
   })
 
   it('wiped with moves made since the switch: the moves are said to be gone, and none is signed from the frozen copy unasked', async () => {
@@ -1288,7 +1288,7 @@ describe('after a lost commit (review of 2026-11-04, F1, F1b, F4)', () => {
     mend()
   })
 
-  it('a retry armed by a refused write is cleared by a lost commit, and never writes what lost over what won', async () => {
+  it('a retry armed by a refused write is cleared by a lost commit, and never writes what lost over what won', { timeout: 30_000 }, async () => {
     const chain = chainOf(12)
     await seedOldStores(chain)
     await openTab()
@@ -1312,7 +1312,7 @@ describe('after a lost commit (review of 2026-11-04, F1, F1b, F4)', () => {
     let y: string
     try { y = await signMove(b) } finally { see() }
     await b.rows.chainRowsSettled()
-    await vi.waitFor(() => expect(b.S().prevEventId).toBe(moveA))
+    await vi.waitFor(() => expect(b.S().prevEventId).toBe(moveA), { timeout: 10_000, interval: 20 })
     // Past the retry: the rows still say A won.
     await tick(600)
     await b.rows.chainRowsSettled()

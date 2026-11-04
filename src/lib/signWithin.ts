@@ -20,11 +20,31 @@ export class SignerTimeout extends Error {
   }
 }
 
+/** What a move says when its signer ran out of time: what to do, not only what happened. */
+export const SIGNER_GONE_MESSAGE = 'Signer not answering. Open your signer app, then try again.'
+
+/** The words for a signature that failed: a signer that ran out of time gets SIGNER_GONE_MESSAGE. */
+export function signingFailed(err: unknown): string {
+  // By name too: a SignerTimeout from another copy of this module (a test's reset) is still one.
+  if (err instanceof SignerTimeout || (err instanceof Error && err.name === 'SignerTimeout')) return SIGNER_GONE_MESSAGE
+  return `Signing failed: ${err instanceof Error ? err.message : String(err)}`
+}
+
 /**
  * How long a signer's handshake gets. Longer than one signature: an extension
  * may be waiting on someone to unlock it or to approve this site.
  */
 export const HANDSHAKE_PATIENCE_MS = 60_000
+
+/**
+ * How long each step of a bunker's handshake (connect, then get_public_key)
+ * gets before the attempt is given up as lost. A NIP-46 request lost in
+ * transit (the bunker's relay socket dropped while it was away) is never
+ * answered, and a handshake waiting on it held every RETRY for a minute and
+ * more (the real-bunker run of 2026-11-04). Given up, it can be replaced;
+ * its answer, if it still comes, is still taken (signers.ts deferredReconnect).
+ */
+export const HANDSHAKE_STEP_MS = SIGN_PATIENCE_MS
 
 /** A handshake's answer, or a SignerTimeout once `ms` has passed. */
 export async function handshakeWithin<T>(handshake: Promise<T>, ms: number = HANDSHAKE_PATIENCE_MS): Promise<T> {
@@ -51,6 +71,25 @@ export function onSignerAnswered(fn: () => void): () => void {
 
 function signerAnswered(): void {
   for (const fn of [...answeredListeners]) {
+    try { fn() } catch { /* one listener's failure is not the others' */ }
+  }
+}
+
+const askAgainListeners = new Set<() => void>()
+
+/**
+ * Be told when a person asks the signer again on purpose (RETRY, CHECK
+ * AGAIN): the store gives up a handshake or a channel that never answered,
+ * so the request that follows goes out fresh. Returns the unsubscribe.
+ */
+export function onAskAgain(fn: () => void): () => void {
+  askAgainListeners.add(fn)
+  return () => { askAgainListeners.delete(fn) }
+}
+
+/** A deliberate tap asks the signer again (relay.ts retryFailedAuth). */
+export function askAgain(): void {
+  for (const fn of [...askAgainListeners]) {
     try { fn() } catch { /* one listener's failure is not the others' */ }
   }
 }

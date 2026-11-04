@@ -49,6 +49,17 @@ export interface AuthGatedNet {
     authPlan: { delay: number; refuse?: boolean }[]
     /** Called on each AUTH request the bunker receives (an extension's popup opening). */
     onAuthAsked: (() => void) | null
+    /**
+     * Per connect request, in order: how long the bunker takes to answer it
+     * (Infinity: the request is lost in transit, never answered), and
+     * whether it then refuses ("unauthorized", a signer that does not know
+     * this client). Once used up, connect is answered at once.
+     */
+    connectPlan: { delay: number; refuse?: boolean }[]
+    /** connect requests the bunker received. */
+    connects: number
+    /** How long the bunker takes to answer get_public_key. */
+    pubkeyDelay: number
     /** sign_event requests for an AUTH the bunker received. */
     authAsked: number
     /** AUTHs it answered. */
@@ -61,6 +72,8 @@ export interface AuthGatedNet {
     authOk: number
     /** Sockets opened to it. */
     sockets: number
+    /** The pubkey of every AUTH the relay was sent, in order, accepted or not. */
+    authBy: string[]
   }
   /** How many of the next connections to the canonical relay fail. */
   failConnects: number
@@ -99,8 +112,8 @@ export function authGatedNet(): AuthGatedNet {
     userPk,
     pref: { kind: 'nip46', pubkey: userPk, bunkerUri: `bunker://${bunkerPk}?relay=${encodeURIComponent(BUNKER_RELAY.replace(/\/$/, ''))}`, clientNsec: nip19.nsecEncode(clientSk) },
     hold: [],
-    bunker: { authDelay: 0, refuseAuth: 0, authPlan: [], onAuthAsked: null, authAsked: 0, authSigned: 0 },
-    canon: { refusedReqs: 0, authOk: 0, sockets: 0 },
+    bunker: { authDelay: 0, refuseAuth: 0, authPlan: [], connectPlan: [], connects: 0, pubkeyDelay: 0, onAuthAsked: null, authAsked: 0, authSigned: 0 },
+    canon: { refusedReqs: 0, authOk: 0, sockets: 0, authBy: [] },
     failConnects: 0,
     challengeDelay: 0,
     authOkDelay: 0,
@@ -136,8 +149,18 @@ export function authGatedNet(): AuthGatedNet {
       const content = nip44.v2.encrypt(JSON.stringify(error ? { id, result: '', error } : { id, result }), ck)
       broadcast(finalizeEvent({ kind: 24133, created_at: Math.floor(Date.now() / 1000), tags: [['p', req.pubkey]], content }, bunkerSk) as unknown as Ev)
     }
-    if (method === 'connect') return reply('ack')
-    if (method === 'get_public_key') return reply(userPk)
+    if (method === 'connect') {
+      net.bunker.connects++
+      const planned = net.bunker.connectPlan.shift()
+      if (!planned) return reply('ack')
+      if (!Number.isFinite(planned.delay)) return
+      setTimeout(() => { if (planned.refuse) reply('', 'unauthorized'); else reply('ack') }, planned.delay)
+      return
+    }
+    if (method === 'get_public_key') {
+      if (net.bunker.pubkeyDelay > 0) { setTimeout(() => reply(userPk), net.bunker.pubkeyDelay); return }
+      return reply(userPk)
+    }
     if (method === 'ping') return reply('pong')
     if (method === 'sign_event') {
       const template = JSON.parse(params[0]) as { kind: number; created_at: number; tags: string[][]; content: string }
@@ -214,6 +237,7 @@ export function authGatedNet(): AuthGatedNet {
     private canonical(msg: unknown[]): void {
       if (msg[0] === 'AUTH') {
         const e = msg[1] as Ev
+        net.canon.authBy.push(e.pubkey)
         const ok = !net.rejectAuth && verifyEvent(e as never) && e.kind === 22242 && e.tags.some((t) => t[0] === 'challenge' && this.challenges.includes(t[1]))
         const answer = (): void => {
           if (ok) { this.authed = true; net.canon.authOk++ }

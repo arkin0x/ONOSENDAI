@@ -44,7 +44,8 @@ vi.mock('../../lib/chains', async (o) => ({ ...(await o<typeof import('../../lib
 
 import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
-import { finalizeEvent } from 'nostr-tools/pure'
+import { finalizeEvent, generateSecretKey, getPublicKey } from 'nostr-tools/pure'
+import { nip19 } from 'nostr-tools'
 import { authGatedNet, CANON, type AuthGatedNet } from '../../lib/__tests__/authGatedNet'
 import { spawnTemplate } from '../../lib/events'
 
@@ -83,15 +84,21 @@ function fakeTab(): { doc: EventTarget & { visibilityState: string }; win: Event
   }
 }
 
-/** A page load with this bunker remembered and its chain saved, HIDDEN BAGS open. */
-async function visit(setup: (net: AuthGatedNet) => void): Promise<Visit> {
+/**
+ * A page load with this bunker remembered and its chain saved, HIDDEN BAGS open.
+ * `chain: false`: the bunker identity has no moves yet on this device.
+ * `connectivity`: App.tsx's watchConnectivity is wired to the tab too.
+ */
+async function visit(setup: (net: AuthGatedNet) => void, opts: { chain?: boolean; connectivity?: boolean } = {}): Promise<Visit> {
   const net = authGatedNet()
   net.addBags(BAGS)
   setup(net)
   storage.clear()
   storage.setItem('onosendai:signer', JSON.stringify(net.pref))
-  const spawn = finalizeEvent(spawnTemplate(net.userPk, 1_000), net.userSk)
-  storage.setItem(`onosendai:chain:${net.userPk}`, JSON.stringify({ version: 2, events: [spawn], published: [spawn.id], stats: {} }))
+  if (opts.chain !== false) {
+    const spawn = finalizeEvent(spawnTemplate(net.userPk, 1_000), net.userSk)
+    storage.setItem(`onosendai:chain:${net.userPk}`, JSON.stringify({ version: 2, events: [spawn], published: [spawn.id], stats: {} }))
+  }
   vi.resetModules()
   // A server render reads a zustand store's first state, not its live one:
   // the panel is handed the live list, the store and the read under it real.
@@ -103,14 +110,16 @@ async function visit(setup: (net: AuthGatedNet) => void): Promise<Visit> {
   net.install()
   const { useCyberspace } = await import('../../store/useCyberspace')
   const { ensureLoot, useLootStore } = await import('../useLoot')
-  const { CYBERSPACE_RELAY, getPool, watchTabReturn } = await import('../../lib/relay')
+  const { CYBERSPACE_RELAY, getPool, watchConnectivity, watchTabReturn } = await import('../../lib/relay')
   const { HiddenPanel } = await import('../../hud/DiscoveredPanel')
   void useCyberspace.getState().initSigner()
   ensureLoot([CYBERSPACE_RELAY])
   // As App.tsx wires it.
   const tab = fakeTab()
   stopTab?.()
-  stopTab = watchTabReturn(() => { useCyberspace.getState().wakeSigner() }, tab)
+  const stopReturn = watchTabReturn(() => { useCyberspace.getState().wakeSigner() }, tab)
+  const stopConnectivity = opts.connectivity ? watchConnectivity(tab) : () => {}
+  stopTab = () => { stopReturn(); stopConnectivity() }
   const wait = (ms: number): Promise<void> => vi.advanceTimersByTimeAsync(ms).then(() => {})
   return {
     net,
@@ -360,4 +369,136 @@ describe('a signer that said no, or is slow, is not asked again and again', () =
     expect(v.loot().items).toHaveLength(BAGS)
     expect(v.loot().trouble).toBeNull()
   }, 60_000)
+})
+
+/** RETRY under "Could not sign in", as the button does it (RelayTrouble). */
+async function tapRetry(): Promise<void> {
+  const { retryRead } = await import('../../hud/RelayTrouble')
+  const { refreshLoot } = await import('../useLoot')
+  retryRead(refreshLoot)
+}
+
+/**
+ * The real-bunker run (2026-11-04, /data/projects/onosendai-bunker-e2e): the
+ * built app against `nak bunker` and local relays. Each of these failed on
+ * 04aab849.
+ */
+describe('a real bunker: one prompt per thing asked, and RETRY that works', () => {
+  it('a handshake that answers as the AUTH runs out of time sends that AUTH once: the store\'s retry joins it (1)', async () => {
+    // get_public_key answered at 14.9 s: the AUTH that waited on the handshake
+    // goes out then, and the store's retry at 15 s asked for it again, so the
+    // bunker was asked twice at the same instant.
+    const v = await visit((net) => { net.bunker.pubkeyDelay = 14_900; net.bunker.authDelay = 2_000 })
+    await v.wait(30_000)
+    expect(v.net.bunker.authAsked).toBe(1)
+    expect(v.loot().items).toHaveLength(BAGS)
+    expect(v.loot().trouble).toBeNull()
+  }, 60_000)
+
+  it('a signer that refuses the connection is asked once, not on each focus or short hide, and once per RETRY (2)', async () => {
+    const v = await visit((net) => { net.bunker.connectPlan = Array.from({ length: 50 }, () => ({ delay: 0, refuse: true })) })
+    await v.wait(10_000)
+    expect(v.loot().trouble).toBe('auth')
+    expect(v.net.bunker.connects).toBe(1)
+    // A refusing signer (Amber, nsec.app) shows a new approval prompt for each connect.
+    for (let i = 0; i < 6; i++) { v.focus(); await v.wait(1_500) }
+    expect(v.net.bunker.connects).toBe(1)
+    await v.away(5_000)
+    await v.wait(5_000)
+    expect(v.net.bunker.connects).toBe(1)
+    await tapRetry()
+    await v.wait(5_000)
+    expect(v.net.bunker.connects).toBe(2)
+    await v.wait(15_000)
+    expect(v.net.bunker.connects).toBe(2)
+    // The signer now allows this client: RETRY signs in, and the list fills.
+    v.net.bunker.connectPlan = []
+    await tapRetry()
+    await v.wait(5_000)
+    expect(v.net.bunker.connects).toBe(3)
+    expect(v.loot().items).toHaveLength(BAGS)
+    expect(v.loot().trouble).toBeNull()
+  }, 60_000)
+
+  it('a connect lost in transit is given up at its step limit, and the first RETRY works at once (3)', async () => {
+    const v = await visit((net) => { net.bunker.connectPlan = [{ delay: Infinity }] })
+    const { authPending } = await import('../../lib/relay')
+    await v.wait(20_000)
+    // Not held for a whole handshake's minute, which skipped every RETRY meanwhile.
+    expect(authPending(CANON)).toBe(false)
+    expect(v.loot().trouble).toBe('auth')
+    expect(v.net.bunker.connects).toBe(1)
+    await tapRetry()
+    await v.wait(3_000)
+    expect(v.net.bunker.connects).toBe(2)
+    expect(v.loot().items).toHaveLength(BAGS)
+  }, 60_000)
+
+  it('RETRY gives up a handshake still inside its step limit and starts afresh (3)', async () => {
+    const v = await visit((net) => { net.bunker.connectPlan = [{ delay: Infinity }, { delay: Infinity }] })
+    await v.wait(20_000)
+    // A real absence asks again: a second connect, lost too.
+    await v.away(16_000)
+    await v.wait(2_000)
+    expect(v.net.bunker.connects).toBe(2)
+    // 2 s into that one's 15 s: RETRY does not wait it out.
+    await tapRetry()
+    await v.wait(3_000)
+    expect(v.net.bunker.connects).toBe(3)
+    expect(v.loot().items).toHaveLength(BAGS)
+    // The AUTH the return asked for waited on the handshake RETRY gave up:
+    // it and RETRY's own are one request, not two prompts at once.
+    expect(v.net.bunker.authAsked).toBe(1)
+  }, 60_000)
+
+  it('a saved bunker login with no moves yet loads as itself and signs the relay in as itself, never as a throwaway key (4)', async () => {
+    const v = await visit(() => {}, { chain: false })
+    const { useCyberspace } = await import('../../store/useCyberspace')
+    expect(useCyberspace.getState().identity.pubkey).toBe(v.net.userPk)
+    await v.wait(10_000)
+    expect(v.loot().items).toHaveLength(BAGS)
+    expect(v.net.canon.authBy.length).toBeGreaterThan(0)
+    expect(v.net.canon.authBy.every((pk) => pk === v.net.userPk)).toBe(true)
+  }, 60_000)
+
+  it('a switch of identity signs the relay in again as the new one, and never as the old one after it (4)', async () => {
+    const v = await visit(() => {})
+    await v.wait(5_000)
+    expect(v.net.canon.authBy).toEqual([v.net.userPk])
+    const { useCyberspace } = await import('../../store/useCyberspace')
+    const sk = generateSecretKey()
+    await useCyberspace.getState().useNsec(nip19.nsecEncode(sk))
+    const before = v.net.canon.authBy.length
+    await v.wait(5_000)
+    const after = v.net.canon.authBy.slice(before)
+    expect(after).toContain(getPublicKey(sk))
+    expect(after).not.toContain(v.net.userPk)
+  }, 60_000)
+
+  it('back after 16 s with the socket still signed in: it is asked first and kept, so no new AUTH and no prompt (5)', async () => {
+    const v = await visit(() => {}, { connectivity: true })
+    await v.wait(5_000)
+    expect(v.net.canon.sockets).toBe(1)
+    expect(v.net.bunker.authAsked).toBe(1)
+    await v.away(16_000)
+    await v.wait(10_000)
+    expect(v.net.canon.sockets).toBe(1)
+    expect(v.net.bunker.authAsked).toBe(1)
+    expect(v.loot().items).toHaveLength(BAGS)
+  }, 60_000)
+
+  it('while the signer refuses, the feeds wait for a sign-in instead of asking every 30 s, and never reach the signer (6)', async () => {
+    const v = await visit((net) => { net.bunker.refuseAuth = 1_000 })
+    const { subscribe } = await import('../../lib/relay')
+    for (let k = 0; k < 5; k++) subscribe({ kinds: [40_000 + k] }, () => {})
+    await v.wait(10_000)
+    expect(v.loot().trouble).toBe('auth')
+    const asked = v.net.bunker.authAsked
+    const refused = v.net.canon.refusedReqs
+    // Past the five minutes a feed waits: the socket the pool closed as idle
+    // meanwhile is dialled again, and its AUTH must not ask the signer.
+    await v.wait(310_000)
+    expect(v.net.canon.refusedReqs - refused).toBeLessThan(20)
+    expect(v.net.bunker.authAsked).toBe(asked)
+  }, 120_000)
 })

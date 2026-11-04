@@ -1300,9 +1300,7 @@ export async function probeLiveness(): Promise<'alive' | 'dead' | 'skipped'> {
       const sub = getPool().subscribe(relays, { ids: [NO_SUCH_ID] }, {
         onevent: () => {},
         oneose: () => { clearTimeout(timer); done(true); sub.close() },
-        // A relay that said auth-required is there (nostr-tools rewords it when
-        // its AUTH then fails): that answer is not a dead socket.
-        onclose: (reasons) => { clearTimeout(timer); done(reasons.some((r) => /^auth-required:|^auth was required/i.test(r.reason))) },
+        onclose: () => { clearTimeout(timer); done(false) },
         onauth: authSign,
         maxWait: PROBE_TIMEOUT_MS,
       })

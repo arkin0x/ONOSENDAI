@@ -312,7 +312,7 @@ describe('a signer that said no, or is slow, is not asked again and again', () =
     expect(signed).toBe(true)
   }, 60_000)
 
-  it('an AUTH the relay failed (a slow OK) does not stop the liveness probe, and its auth-required is an answer', async () => {
+  it('an AUTH the relay failed (a slow OK) does not stop the liveness probe', async () => {
     // nostr-tools gives an AUTH's OK 4.4 s; this relay takes 6 s, and signs the socket in then.
     const v = await visit((net) => { net.authOkDelay = 6_000 })
     const { onAuthChange, probeLiveness } = await import('../../lib/relay')
@@ -327,7 +327,7 @@ describe('a signer that said no, or is slow, is not asked again and again', () =
     expect(v.net.canon.sockets).toBe(1)
   }, 60_000)
 
-  it('a relay that turns the AUTH down is probed, and its auth-required keeps the socket: no new AUTH each probe', async () => {
+  it('a relay that turns the AUTH down is still probed, and its refusal keeps the socket: no new AUTH each probe', async () => {
     const v = await visit((net) => { net.rejectAuth = true })
     const { probeLiveness } = await import('../../lib/relay')
     await v.wait(15_000)

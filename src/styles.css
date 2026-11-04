@@ -2096,6 +2096,24 @@ kbd {
   padding-right: 4px;
 }
 
+/* MOVE on a DEPLOYED row: the publish switch's small capitals, one button. */
+.shards__move {
+  padding: 3px 8px;
+  font-family: var(--mono);
+  font-size: 8px;
+  letter-spacing: 0.14em;
+  color: var(--accent);
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  cursor: pointer;
+}
+.shards__move:hover { background: rgba(0, 229, 255, 0.12); }
+.shards__move:disabled { opacity: 0.5; cursor: default; }
+/* GONE FROM ITS BAG: the row is not a link (nothing to fly to), its state in the warning colour. */
+.shards__goto--gone { cursor: default; }
+.shards__meta--gone { color: var(--warn); letter-spacing: 0.08em; }
+
 /* ---------- Shards & messages panel additions ---------- */
 .tag--scan {
   color: var(--warn);
@@ -2749,7 +2767,10 @@ kbd {
 
 .shards__row--deployed {
   display: grid;
-  grid-template-columns: 1fr auto auto;
+  /* The name, then whatever the row carries (LOCAL / LIVE, MOVE), then the hint, on one line. */
+  grid-template-columns: minmax(0, 1fr);
+  grid-auto-columns: auto;
+  grid-auto-flow: column;
   gap: 8px;
   align-items: center;
   padding: 5px 0;

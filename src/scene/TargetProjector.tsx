@@ -7,15 +7,16 @@
  *
  * Positions are computed from the raw coordinates rather than from anything
  * already in render space, because a target is usually far outside the drawn
- * volume. cellDelta does the division in fixed-point bigint, so a landmark 10^25
- * gibsons away still lands on a real number instead of collapsing to Infinity.
+ * volume. cellDelta (under placeCentre and pointCentre) does the division in
+ * fixed-point bigint, so a landmark 10^25 gibsons away still lands on a real
+ * number instead of collapsing to Infinity.
  */
 
 import { useFrame } from '@react-three/fiber'
 import { useMemo } from 'react'
 import { Box3, Vector3 } from 'three'
 
-import { cellDelta, stepFor, type ViewAxes } from '../lib/space'
+import { placeCentre, pointCentre, stepFor, type Position, type ViewAxes } from '../lib/space'
 import { drawnAvatars, targetScreens, viewAxis, type CyberTarget } from '../lib/targets'
 import { viewAxisNdc } from '../lib/coverBand'
 import { labelAnchor, type LabelAnchor } from '../lib/avatarLabel'
@@ -24,6 +25,24 @@ import { alignedOrigin, useCyberspace } from '../store/useCyberspace'
 interface Props {
   axes: ViewAxes
   targets: CyberTarget[]
+}
+
+/**
+ * Where a target's marker points, in render space: where the scene draws it.
+ *
+ * A person (you, a target, anyone present) is drawn at placeCentre, the
+ * centre of their gibson's cell at this zoom (Avatar, OtherAvatar), so the
+ * marker is too. It used to be the raw coordinate less half a cell, which
+ * is the cell's low corner: the YOU circle and every other avatar's hung on
+ * the corner of the cube they stood in (arkinox, 2026-11-02). Something with
+ * an extent (Earth) keeps the continuous point its sphere is drawn about.
+ * From CONTINUOUS_SCALE_MIN up the two agree, as placeCentre is pointCentre
+ * there.
+ */
+export function targetPoint(
+  t: { at: Position; radius?: bigint }, origin: Position, scaleExp: number, axes: ViewAxes,
+): [number, number, number] {
+  return t.radius === undefined ? placeCentre(t.at, origin, scaleExp, axes) : pointCentre(t.at, origin, scaleExp, axes)
 }
 
 export function TargetProjector({ axes, targets }: Props): null {
@@ -48,9 +67,7 @@ export function TargetProjector({ axes, targets }: Props): null {
     const axis = viewAxisNdc(state.camera.projectionMatrix, viewAxis)
 
     for (const t of targets) {
-      const [x, y, z] = [axes.right, axes.up, axes.out].map(
-        (a) => (cellDelta(t.at[a.axis], origin[a.axis], s.scaleExp) - 0.5) * a.dir,
-      )
+      const [x, y, z] = targetPoint(t, origin, s.scaleExp, axes)
       scratch.set(x, y, z)
 
       const depth = Math.max(0.001, cam.position.distanceTo(scratch))
@@ -85,8 +102,8 @@ export function TargetProjector({ axes, targets }: Props): null {
 
       // The avatar as drawn, when the scene draws one for this target: the
       // label goes under its lowest point, centered on it (lib/avatarLabel;
-      // arkinox, 2026-10-11), not at its cell's corner, which is where the
-      // raw coordinate above lands.
+      // arkinox, 2026-10-11). Without one (your own, or one not drawn) the
+      // marker is the point above, the centre of the avatar's cell.
       let avatar: LabelAnchor | undefined
       const drawn = drawnAvatars[t.id]
       if (drawn) {

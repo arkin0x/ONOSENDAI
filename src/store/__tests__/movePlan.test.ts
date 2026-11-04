@@ -4,7 +4,7 @@ import * as proofCapability from '../../lib/proofCapability'
  * way there, one signature, pausing on a declined signature; the next commit
  * takes the next step.
  */
-import { provedFor } from '../fixtures/provedHop'
+import { provedFor, provedHop } from '../fixtures/provedHop'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 vi.hoisted(() => {
@@ -19,7 +19,7 @@ vi.hoisted(() => {
   }
 })
 
-const posted: Array<{ id: number; mode: string; from: { x: bigint }; to: { x: bigint }; maxComputeHeight: number }> = []
+const posted: Array<{ id: number; mode: string; from: { x: bigint; y: bigint; z: bigint }; to: { x: bigint; y: bigint; z: bigint }; maxComputeHeight: number }> = []
 vi.mock('../../lib/workers', () => ({
   postProof: vi.fn((req: (typeof posted)[number]) => { posted.push(req) }),
   cancelProof: vi.fn(),
@@ -30,14 +30,23 @@ vi.mock('../../lib/calibration', async (orig) => {
   return { ...mod, recommendedHopHeight: () => 2 }
 })
 
-import { parseAction } from '../../lib/events'
+import { hopTemplate, parseAction } from '../../lib/events'
 import { useCyberspace } from '../useCyberspace'
 
 function done(req: (typeof posted)[number]) {
-  const sidestep = req.mode === 'sidestep'
-    ? { merkleRoots: ['aa'.repeat(32), 'bb'.repeat(32), 'cc'.repeat(32)] as [string, string, string], openings: ['', '', ''] as [string, string, string], mnHex: '0'.repeat(16), lcaHeights: [1, 0, 0] as [number, number, number] }
-    : undefined
-  return { type: 'done' as const, id: req.id, mode: req.mode as 'hop' | 'sidestep', elapsedMs: 5, ...provedFor(req, useCyberspace.getState().events), terrainK: 3, lca: { x: 1, y: 0, z: 0 }, totalOps: 4, sidestep }
+  // A sidestep's proof is real too: finishProof checks it at Level 1 (lib/sidestepCheck.ts).
+  return { type: 'done' as const, id: req.id, mode: req.mode as 'hop' | 'sidestep', elapsedMs: 5, ...provedFor(req, useCyberspace.getState().events), terrainK: 3, lca: { x: 1, y: 0, z: 0 }, totalOps: 4 }
+}
+
+/** Stand the chain itself at `to`: a stand-in move already on the relays, so the next move's c is there. */
+async function standAt(to: { x: bigint; y: bigint; z: bigint }): Promise<void> {
+  const s = useCyberspace.getState()
+  const last = s.events[s.events.length - 1]
+  const ev = await s.signEvent(hopTemplate({
+    createdAt: last.created_at + 1, genesisId: s.genesisId, previousId: s.prevEventId, prevCoordHex: s.coordHex(),
+    to, plane: s.headPlane, proofHash: '0'.repeat(64), mn: '0'.repeat(16), mp: '00',
+  }))
+  useCyberspace.setState({ events: [...s.events, ev], prevEventId: ev.id, published: { ...s.published, [ev.id]: 'ok' }, position: to })
 }
 
 async function land(): Promise<void> {
@@ -109,7 +118,10 @@ describe('a commit beyond the ceiling', () => {
   it('pauses on a declined signature and continues with the same proof on resume', async () => {
     const s = useCyberspace.getState()
     const x0 = (s.position.x >> 4n) << 4n
-    useCyberspace.setState({ position: { ...s.position, x: x0 + 7n }, cursor: { ...s.position, x: x0 + 9n } })
+    // The chain stands on the wall's leaf, not only the avatar: a sidestep's
+    // c is where the chain stands, and its proof is checked from there.
+    await standAt({ ...s.position, x: x0 + 7n })
+    useCyberspace.setState({ cursor: { ...s.position, x: x0 + 9n } })
     await useCyberspace.getState().commit()
     expect(posted[0].mode).toBe('sidestep')
 
@@ -121,7 +133,7 @@ describe('a commit beyond the ceiling', () => {
     expect(st.plan!.awaiting).not.toBeNull()
     expect(st.plan!.message).toContain('declined')
     expect(st.position.x).toBe(x0 + 7n)
-    expect(st.events).toHaveLength(1)
+    expect(st.events).toHaveLength(2)
     expect(posted).toHaveLength(1)                     // nothing recomputed
 
     useCyberspace.setState({ signEvent: realSign })
@@ -158,5 +170,55 @@ describe('a commit beyond the ceiling', () => {
     await useCyberspace.getState().commit()
     expect(useCyberspace.getState().plan).toBeNull()
     expect(posted[0].mode).toBe('hop')
+  })
+})
+
+describe('a sidestep this machine computed is checked at Level 1 before it is kept or queued', () => {
+  beforeEach(async () => {
+    posted.length = 0
+    useCyberspace.setState({ cloudPrefs: { ...useCyberspace.getState().cloudPrefs, mode: 'off' } })
+    await useCyberspace.getState().respawn()
+  })
+
+  /** A sidestep committed from the leaf touching an h4 wall, landed with the proof fields `proved`. */
+  async function landWith(proved: (req: (typeof posted)[number], head: string, plane: 0 | 1) => ReturnType<typeof provedHop>) {
+    const s = useCyberspace.getState()
+    const x0 = (s.position.x >> 4n) << 4n
+    await standAt({ ...s.position, x: x0 + 7n })
+    useCyberspace.setState({ cursor: { ...s.position, x: x0 + 9n } })
+    await useCyberspace.getState().commit()
+    const req = posted[posted.length - 1]
+    expect(req.mode).toBe('sidestep')
+    const before = useCyberspace.getState()
+    await useCyberspace.getState().applyProofMessage({ type: 'done', id: req.id, mode: 'sidestep', elapsedMs: 5, ...proved(req, before.prevEventId, before.plane), terrainK: 3, lca: { x: 4, y: 0, z: 0 }, totalOps: 4, prevEventId: before.prevEventId })
+    return { before, after: useCyberspace.getState(), x0 }
+  }
+
+  const refused = (r: Awaited<ReturnType<typeof landWith>>, what: string) => {
+    expect(r.after.events).toHaveLength(r.before.events.length)
+    expect(Object.keys(r.after.published)).toEqual(Object.keys(r.before.published))
+    expect(r.after.prevEventId).toBe(r.before.prevEventId)
+    expect(r.after.position.x).toBe(r.x0 + 7n)
+    expect(r.after.proof.status).toBe('infeasible')
+    expect(r.after.proof.message).toMatch(/^This sidestep was not recorded or sent: its proof did not pass the check every reader will make of it \(.+\)$/)
+    expect(r.after.proof.message!.slice(r.after.proof.message!.indexOf('(') + 1, -1).split(', ')).toContain(what)
+  }
+
+  it('proved from a position the chain does not stand at, under the current head: refused (review of #581, N1)', async () => {
+    // What a stale route step made: the old position proved under the new head, signed with c where the chain stands.
+    const r = await landWith((req, head, plane) => provedHop({ position: { ...req.from, y: req.from.y + 1n }, pendingTarget: req.to, plane, prevEventId: head }, 'sidestep'))
+    refused(r, 'hy')
+  })
+
+  it('proved under another previous event: refused', async () => {
+    const r = await landWith((req, _head, plane) => provedHop({ position: req.from, pendingTarget: req.to, plane, prevEventId: 'ab'.repeat(32) }, 'sidestep'))
+    refused(r, 'openings:x')
+  })
+
+  it('a proof that holds for it is kept and queued', async () => {
+    const r = await landWith((req, head, plane) => provedHop({ position: req.from, pendingTarget: req.to, plane, prevEventId: head }, 'sidestep'))
+    expect(r.after.events).toHaveLength(r.before.events.length + 1)
+    expect(r.after.published[r.after.prevEventId]).toBe('queued')
+    expect(r.after.position.x).toBe(r.x0 + 8n)
   })
 })

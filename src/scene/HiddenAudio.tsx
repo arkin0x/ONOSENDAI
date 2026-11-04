@@ -18,6 +18,11 @@
  * worldItems); one muted while it plays stops at once (useHiddenAudio
  * stopMutedVoices), and is not started again. TV's own music is stepped down while any of it is heard
  * (useTvMusic duckMusic).
+ *
+ * NOW PLAYING's mutes are not the mute list: a track muted there is started
+ * and played as any other, silent (store/useSoundMutes), by its lineage id,
+ * so it still raises NOW PLAYING. Only it does not step TV's music down,
+ * since it is not heard.
  */
 
 import { useEffect, useRef } from 'react'
@@ -25,11 +30,12 @@ import { useFrame } from '@react-three/fiber'
 import { itemCentre, type ViewAxes } from '../lib/space'
 import { sourceLocal } from '../lib/audioItem'
 import { markFired, triggerFired } from '../lib/audioTrigger'
-import { freshMemory, hearSource, listenerLocal, planWorld, shouldDuck, type WorldSource } from '../lib/audioWorld'
+import { freshMemory, hearSource, listenerLocal, planWorld, shouldDuck, type WorldPlan, type WorldSource } from '../lib/audioWorld'
 import { alignedOrigin, useCyberspace } from '../store/useCyberspace'
 import { muteSubject, useShards, type WorldItem } from '../store/useShards'
 import { useMutes } from '../store/useMutes'
 import { audioListener, moveListener, placeWorld, setWorldDuck, setWorldGain, startWorld, stopWorld, worldFailed, worldPending, worldVoices } from '../store/useHiddenAudio'
+import { trackSilenced } from '../store/useSoundMutes'
 
 /** How often the world is planned, ms: often enough that a step into a sphere sounds at once. */
 const PLAN_MS = 100
@@ -76,16 +82,33 @@ export function HiddenAudio({ axes }: { axes: ViewAxes }): null {
     }
     const plan = planWorld(sources, worldVoices(), triggerFired, now, memory.current, worldPending())
     for (const key of plan.stop) stopWorld(key)
-    for (const s of plan.start) {
-      const w = items.get(s.key)
-      if (!w?.audio) continue
-      // A once-trigger is marked as it really sounds (startWorld onStarted), not before.
-      const onStarted = s.oneShot && w.audio.retrigger === 'once' ? () => markFired(s.lineage) : undefined
-      void startWorld(s.key, w.audio, onStarted, muteSubject(w))
-    }
-    for (const [key, g] of plan.gains) setWorldGain(key, g)
-    setWorldDuck(shouldDuck(plan.gains.values(), false))
+    startPlanned(plan.start, items)
+    setWorldDuck(shouldDuck(applyGains(plan.gains, items), false))
   })
 
   return null
+}
+
+/**
+ * Start what the plan starts, each muted by its track: the item's lineage
+ * id (store/useSoundMutes). A once-trigger is marked fired as it is really
+ * heard (startWorld onStarted), not before, and never while it is muted.
+ */
+export function startPlanned(starts: WorldPlan['start'], items: ReadonlyMap<string, WorldItem>): void {
+  for (const s of starts) {
+    const w = items.get(s.key)
+    if (!w?.audio) continue
+    const onStarted = s.oneShot && w.audio.retrigger === 'once' ? () => markFired(s.lineage) : undefined
+    void startWorld(s.key, w.audio, onStarted, muteSubject(w), s.lineage)
+  }
+}
+
+/** Set each world voice's gain; resolves to the gains of those heard, the only ones that step TV's music down. */
+export function applyGains(gains: WorldPlan['gains'], items: ReadonlyMap<string, WorldItem>): number[] {
+  const heard: number[] = []
+  for (const [key, g] of gains) {
+    setWorldGain(key, g)
+    if (!trackSilenced(items.get(key)?.lineage ?? key)) heard.push(g)
+  }
+  return heard
 }

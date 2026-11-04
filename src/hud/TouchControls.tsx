@@ -1,5 +1,5 @@
 /**
- * TouchControls.tsx — cyberspace operations for touch, as an overlay.
+ * TouchControls.tsx - cyberspace operations for touch, as an overlay.
  *
  * The camera is untouched: OrbitControls already handles touch on the canvas,
  * and orbiting is the one thing that already worked on a phone. What was
@@ -21,19 +21,26 @@
  * already signed out with it (see lib/release.ts). Cancelling leaves the
  * switch exactly where it was, on LOCAL.
  *
- * The commit slot is also the pad's mode switch, three states in a ring
- * (arkinox, 2026-10-13): HOP, the resting state, where the pad lines up a
- * move and COMMIT sends it; VIEW, a free look from your head; WALK, first
- * person, where every press is a step (store/useWalk.ts). HOP turns VIEW
- * on, VIEW turns WALK on, WALK goes back to HOP, and RECALL goes back to HOP
- * from either. Each mode tints the pad's keys its own color, blue, yellow,
- * red, so the hand knows what a press will do before it presses.
+ * The commit slot is also the pad's mode switch, four states in a ring
+ * (arkinox, 2026-10-13 and 2026-11-02; store/padMode.ts): HOP, the resting
+ * state, where the pad lines up a move and COMMIT sends it; VIEW, a free
+ * look from your head; WALK, first person, where every press is a step
+ * (store/useWalk.ts); BUILD, placing things at a build cursor
+ * (store/useBuilder.ts). HOP turns VIEW on, VIEW turns WALK on, WALK turns
+ * BUILD on, BUILD goes back to HOP, and RECALL goes back to HOP from any of
+ * them. Each mode tints the pad's keys its own color, blue, yellow, red,
+ * white, so the hand knows what a press will do before it presses.
+ *
+ * WALK's pad is its own (arkinox, 2026-11-02): no scale keys, one large
+ * FORWARD where FAR, up and NEAR were, BACKWARD where down was, JUMP where
+ * + and the scale readout were, and DOWN where - was. The keys are the same
+ * as before (lib/walkKeys.ts): W, S, A, D, Space or R, C or F.
  */
 
-import { useState } from 'react'
+import { useState, type ReactNode } from 'react'
 import { Box, Globe, MapPinOff } from 'lucide-react'
 import { ConfirmModal } from './ConfirmModal'
-import { useCyberspace } from '../store/useCyberspace'
+import { busyLabel, useCyberspace } from '../store/useCyberspace'
 import { DEFAULT_RELAY } from '../store/useRelays'
 import { moveDirection, type MoveName } from '../lib/moves'
 import { MAX_SCALE_EXP } from '../lib/space'
@@ -45,7 +52,10 @@ import { useUiHints } from '../store/useUiHints'
 import { noCallout, useRepeatable } from '../hooks/useRepeatable'
 import { ChainStatusStrip, useChainStatus } from './ChainStatus'
 import { useWalk } from '../store/useWalk'
+import { useBuilder } from '../store/useBuilder'
+import { buildHeld, buildToHop, cycleMode, padMode } from '../store/padMode'
 import { useCover } from '../hooks/useCover'
+import { ForwardArrow3D, ReverseArrow3D } from './ui/FlyArrows'
 
 /**
  * arkinox's wording, kept exactly as he wrote it, bullet shapes and blank
@@ -61,6 +71,46 @@ export const GO_LIVE_BODY = [
   '',
   'Switch to LIVE now?',
 ].join('\n')
+
+/** One key of the pad: the grid cell it stands in, what it shows, and what a press does. */
+export interface PadKey {
+  cell: string
+  glyph: ReactNode
+  sub?: string
+  title: string
+  act: () => void
+  disabled?: boolean
+  hint?: boolean
+  scale?: boolean
+}
+
+/**
+ * WALK's keys (arkinox, 2026-11-02), each the same step its key on the
+ * keyboard takes (lib/walkKeys.ts), so the pad and the keys never disagree:
+ *
+ * | Key | Keyboard | Was |
+ * |---|---|---|
+ * | FORWARD, one large key | W | FAR, up and NEAR |
+ * | BACKWARD | S | down |
+ * | left, right | A, D | the same |
+ * | JUMP | Space or R | + and the 2^ readout |
+ * | DOWN | C or F | - |
+ *
+ * Under GRAVITY JUMP is a jump and DOWN does nothing (store/useWalk.ts), so
+ * DOWN is off. With gravity off, JUMP and DOWN are one cell up and down.
+ * The forward and reverse arrows are the pair VIEW's fly keys wear too
+ * (hud/ui/FlyArrows.tsx).
+ */
+export function walkPad(gravity: boolean, move: (name: MoveName) => () => void): PadKey[] {
+  return [
+    { cell: 'forward', glyph: <ForwardArrow3D size={26} />, sub: 'FORWARD', title: 'Forward (W)', act: move('away') },
+    { cell: 'left', glyph: '◀', title: 'Left (A)', act: move('left') },
+    { cell: 'backward', glyph: <ReverseArrow3D size={20} />, sub: 'BACK', title: 'Backward (S)', act: move('toward') },
+    { cell: 'right', glyph: '▶', title: 'Right (D)', act: move('right') },
+    { cell: 'jump', glyph: 'JUMP', title: gravity ? 'Jump (Space or R)' : 'Jump: up one cell (Space or R)', act: move('up') },
+    { cell: 'down', glyph: '▼', title: gravity ? 'Down: off under gravity (C or F)' : 'Down one cell (C or F)', act: move('down'), disabled: gravity },
+  ]
+}
 
 export function TouchControls(): JSX.Element {
   // The pad and the block under it cover the scene from below: BUILD frames
@@ -103,10 +153,21 @@ export function TouchControls(): JSX.Element {
   // Steps pressed in WALK and not yet proven, queued or still being walked:
   // STOP has something to stop.
   const behind = useWalk((s) => s.behind + (s.open ? 1 : 0) + (s.falling ? 1 : 0))
-  // GRAVITY in WALK (store/useWalk.ts): Up jumps, Down does nothing.
+  // GRAVITY in WALK (store/useWalk.ts): JUMP jumps, DOWN does nothing.
   const gravity = useWalk((s) => s.gravity)
-  const fallen = walking && gravity
-  const mode = walking ? 'walk' : viewing ? 'view' : 'hop'
+  const building = useBuilder((s) => s.active)
+  // A deploy lined up that leaving BUILD would cancel: BUILD and RECALL wait
+  // for PLACE or CANCEL (store/padMode.ts buildHeld).
+  const held = useShards((s) => buildHeld(s))
+  const mode = padMode(walking, building, viewing)
+  // The commit block under the pad: at your head, in VIEW, and in BUILD, but
+  // not while spectating, where the SPECTATING bar holds that corner (BUILD
+  // is left there by EXIT, B or Esc, as before). Whenever it is drawn with
+  // the chain status strip it is a row taller, and the pad is lifted by that
+  // row, or RECALL and the mode button stand over the pad's bottom row
+  // (review of #588: in BUILD a low tap on a scale key left BUILD).
+  const spectating = useCyberspace((s) => s.spectate !== null)
+  const opsUp = home || viewing || (building && !spectating)
 
   const computing = proof.status === 'computing'
   const armed = !(position.x === cursor.x && position.y === cursor.y && position.z === cursor.z)
@@ -128,22 +189,16 @@ export function TouchControls(): JSX.Element {
   const scale = (delta: number) => () => useCyberspace.getState().adjustScale(delta)
 
   // Six directions plus the two scale steps: exactly nine things, which is
-  // exactly how many cells a 3x3 pad has.
-  const pad: Array<{
-    cell: string; glyph: string; sub?: string; title: string
-    act: () => void; disabled?: boolean; hint?: boolean; scale?: boolean
-  }> = [
+  // exactly how many cells a 3x3 pad has. WALK's are its own (walkPad).
+  const pad: PadKey[] = walking ? walkPad(gravity, move) : [
     // The physics convention for a vector through the page: a tail seen from
     // behind going in, an arrow tip seen head-on coming out. It is the right
     // symbol and it is not enough on its own, because the two differ only by a
     // small mark inside the circle and that mark is the first thing to go at
     // this size. The word carries the meaning; the glyph carries the convention.
-    //
-    // The keys in the titles are the mode's own: WALK's are first person
-    // (lib/walkKeys.ts).
-    { cell: 'away', glyph: '⊗', sub: 'FAR', title: walking ? 'Forward (W)' : 'Away from camera (R)', act: move('away') },
-    { cell: 'up', glyph: '▲', title: fallen ? 'Jump (Space or R)' : walking ? 'Up (Space or R)' : 'Up (W)', act: move('up') },
-    { cell: 'toward', glyph: '⊙', sub: 'NEAR', title: walking ? 'Back (S)' : 'Toward camera (F)', act: move('toward') },
+    { cell: 'away', glyph: '⊗', sub: 'FAR', title: 'Away from camera (R)', act: move('away') },
+    { cell: 'up', glyph: '▲', title: 'Up (W)', act: move('up') },
+    { cell: 'toward', glyph: '⊙', sub: 'NEAR', title: 'Toward camera (F)', act: move('toward') },
     { cell: 'left', glyph: '◀', title: 'Left (A)', act: move('left') },
     { cell: 'right', glyph: '▶', title: 'Right (D)', act: move('right') },
     // Left is Q and right is E, matching where those keys sit on a keyboard.
@@ -159,13 +214,13 @@ export function TouchControls(): JSX.Element {
     // would promise a remedy it cannot deliver.
     { cell: 'zoomout', glyph: '+', title: 'Coarser scale (Q)', act: scale(1), disabled: scaleExp >= MAX_SCALE_EXP,
       hint: coveringClipped && scaleExp < MAX_SCALE_EXP, scale: true },
-    { cell: 'down', glyph: '▼', title: walking ? 'Down (C or F)' : 'Down (S)', act: move('down'), disabled: fallen },
+    { cell: 'down', glyph: '▼', title: 'Down (S)', act: move('down') },
     { cell: 'zoomin', glyph: '−', title: 'Finer scale (E)', act: scale(-1), disabled: scaleExp <= 0, scale: true },
   ]
 
   return (
     <>
-      <div ref={padRef} className={`touchpad touchpad--mode-${mode}${atHead ? '' : ' touchpad--scale'}${home && chainStatus ? ' is-lifted' : ''}`} role="group" aria-label={walking ? 'Walk and change scale' : 'Move cursor and change scale'}>
+      <div ref={padRef} className={`touchpad touchpad--mode-${mode}${atHead ? '' : ' touchpad--scale'}${opsUp && chainStatus ? ' is-lifted' : ''}`} role="group" aria-label={walking ? 'Walk' : 'Move cursor and change scale'}>
         {/* The purple cube: the scale key taken to its end, 2^84, in one press.
             It changes the scale and nothing else, so whatever you are looking
             at stays what you are looking at, only seen from the top of the
@@ -192,12 +247,17 @@ export function TouchControls(): JSX.Element {
             centre, so pressing it while looking at a place threw the place
             away (arkinox, 2026-09-14). adjustScale takes a delta, so the
             delta is whatever gets this view to EARTH_SCALE_EXP. */}
-        <button className="touchpad__key touchpad__key--earth" title="Zoom to Earth's scale (2^52)" aria-label="Zoom to 2^52" {...noCallout} onPointerDown={(e) => { e.preventDefault(); e.stopPropagation(); const s = useCyberspace.getState(); s.adjustScale(EARTH_SCALE_EXP - s.scaleExp) }}>
-          <Globe size={16} strokeWidth={2.25} aria-hidden />
-        </button>
-        <button className="touchpad__key touchpad__key--cube" title="Zoom all the way out (2^84)" aria-label="Zoom out to 2^84" {...noCallout} onPointerDown={(e) => { e.preventDefault(); e.stopPropagation(); useCyberspace.getState().adjustScale(MAX_SCALE_EXP) }}>
-          <Box size={16} strokeWidth={2.25} aria-hidden />
-        </button>
+        {/* WALK has no one-press zoom: the owner removed both (2026-11-01). */}
+        {!walking && (
+          <>
+            <button className="touchpad__key touchpad__key--earth" title="Zoom to Earth's scale (2^52)" aria-label="Zoom to 2^52" {...noCallout} onPointerDown={(e) => { e.preventDefault(); e.stopPropagation(); const s = useCyberspace.getState(); s.adjustScale(EARTH_SCALE_EXP - s.scaleExp) }}>
+              <Globe size={16} strokeWidth={2.25} aria-hidden />
+            </button>
+            <button className="touchpad__key touchpad__key--cube" title="Zoom all the way out (2^84)" aria-label="Zoom out to 2^84" {...noCallout} onPointerDown={(e) => { e.preventDefault(); e.stopPropagation(); useCyberspace.getState().adjustScale(MAX_SCALE_EXP) }}>
+              <Box size={16} strokeWidth={2.25} aria-hidden />
+            </button>
+          </>
+        )}
         {walking && (
           <button
             className={`touchpad__key touchpad__key--gravity${gravity ? ' is-on' : ''}`}
@@ -229,8 +289,9 @@ export function TouchControls(): JSX.Element {
         ))}
         {/* The hub doubles as the scale readout and its reset: a tap returns
             to 2^0, the finest scale. Hiding the pad lives on the canvas tap,
-            where it always also lived, so nothing is lost to the reset. */}
-        <button
+            where it always also lived, so nothing is lost to the reset.
+            Not in WALK, where JUMP has its cell (walkPad). */}
+        {!walking && <button
           className="touchpad__hub"
           aria-label={`Scale 2^${scaleExp}. Tap to reset scale to 2^0.`}
           title="Reset scale to 2^0"
@@ -240,15 +301,18 @@ export function TouchControls(): JSX.Element {
             const s = useCyberspace.getState()
             s.adjustScale(-s.scaleExp)
           }}
-        >2^{scaleExp}</button>
+        >2^{scaleExp}</button>}
       </div>
 
-      {(home || viewing) && <div ref={opsRef} className={`touchops touchops--mode-${mode}${chainStatus ? ' touchops--status' : ''}`}>
+      {opsUp && <div ref={opsRef} className={`touchops touchops--mode-${mode}${chainStatus ? ' touchops--status' : ''}`}>
         <button
           className="touchops__cancel"
           title={walking
             ? (computing || behind > 0 ? 'Stop the walk where the chain is now (X)' : 'End WALK and go back to HOP (X)')
-            : computing ? 'Cancel proof (X)' : viewing ? 'Recall the cursor and end VIEW (X)' : 'Recall cursor (X)'}
+            : computing ? 'Cancel proof (X)'
+            : building ? (held ? 'Place or cancel what is lined up first' : 'End BUILD and go back to HOP')
+            : viewing ? 'Recall the cursor and end VIEW (X)' : 'Recall cursor (X)'}
+          disabled={building && !computing && held}
           {...noCallout}
           onPointerDown={(e) => {
             e.preventDefault(); e.stopPropagation()
@@ -257,38 +321,52 @@ export function TouchControls(): JSX.Element {
               else useWalk.getState().exit()
               return
             }
+            // BUILD's RECALL goes back to HOP, as the mode button does; a
+            // proof from before building is still STOP's (X).
+            if (building && !computing) { buildToHop(); return }
             useCyberspace.getState().cancel()
           }}
         >
           {computing || (walking && behind > 0) ? 'STOP' : 'RECALL'}
         </button>
         {/* The mode switch, in the commit slot while there is nothing to
-            commit: HOP to VIEW to WALK and back to HOP. VIEW (arkinox,
-            2026-10-10) is a free view from your head, the pad moving the
-            cursor to look around without planning a hop; WALK (2026-10-13)
-            is first person, every press a step. */}
+            commit: HOP to VIEW to WALK to BUILD and back to HOP
+            (store/padMode.ts). VIEW (arkinox, 2026-10-10) is a free view
+            from your head, the pad moving the cursor to look around without
+            planning a hop; WALK (2026-10-13) is first person, every press a
+            step; BUILD (2026-11-02 in the ring) places things and never moves
+            you. */}
         {walking ? (
           <button
             className="touchops__commit is-walk is-on"
             aria-pressed
-            title="Walking: every press is a step, proved behind you. Keys: W forward, S back, A and D sideways, Space or R up, C or F down. Press to go back to HOP"
+            title="Walking: every press is a step, proved behind you. Keys: W forward, S back, A and D sideways, Space or R jump, C or F down. Press for BUILD, or RECALL for HOP"
             {...noCallout}
-            onPointerDown={(e) => { e.preventDefault(); e.stopPropagation(); useWalk.getState().exit() }}
+            onPointerDown={(e) => { e.preventDefault(); e.stopPropagation(); cycleMode() }}
           >WALK</button>
+        ) : building ? (
+          <button
+            className="touchops__commit is-build is-on"
+            aria-pressed
+            disabled={held}
+            title={held ? 'Place or cancel what is lined up first' : 'Building: the pad moves the build cursor and never you. Press to go back to HOP'}
+            {...noCallout}
+            onPointerDown={(e) => { e.preventDefault(); e.stopPropagation(); if (!held) cycleMode() }}
+          >BUILD</button>
         ) : viewing ? (
           <button
             className="touchops__commit is-view is-on"
             aria-pressed
             title="Viewing: the pad moves the cursor without planning a hop. Press for WALK, or RECALL to end it"
             {...noCallout}
-            onPointerDown={(e) => { e.preventDefault(); e.stopPropagation(); useWalk.getState().enter() }}
+            onPointerDown={(e) => { e.preventDefault(); e.stopPropagation(); cycleMode() }}
           >VIEW</button>
         ) : (!armed && !deploying && !computing) ? (
           <button
             className="touchops__commit is-hop"
             title="Hop: the pad lines up a move and COMMIT sends it. Press for VIEW, a free look that moves nothing"
             {...noCallout}
-            onPointerDown={(e) => { e.preventDefault(); e.stopPropagation(); useCyberspace.getState().viewHere() }}
+            onPointerDown={(e) => { e.preventDefault(); e.stopPropagation(); cycleMode() }}
           >HOP<span className="touchops__sub">(MODES)</span></button>
         ) : (
         <button
@@ -303,7 +381,7 @@ export function TouchControls(): JSX.Element {
             else useCyberspace.getState().commit()
           }}
         >
-          {deploying ? (placedHere ? 'PLACED' : 'PLACE') : computing ? `${Math.round(proof.progress * 100)}%` : action ? ACTION_LABEL[action] : 'COMMIT'}
+          {deploying ? (placedHere ? 'PLACED' : 'PLACE') : computing ? busyLabel(proof) : action ? ACTION_LABEL[action] : 'COMMIT'}
         </button>
         )}
         {/* Whether a commit leaves the device. Under COMMIT because that is the

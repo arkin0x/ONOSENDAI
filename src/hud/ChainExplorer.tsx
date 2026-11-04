@@ -14,11 +14,13 @@
  * Off the head the controls are withdrawn, because nothing in history is a
  * place you can move from; LATEST brings them back.
  *
- * In BUILD mode it aims the build cursor instead (arkinox, 2026-10-08): a
- * step puts the build cursor on that action's place, in its plane, and the
- * scene stays on the build cursor rather than going into history, so the
- * mark is the Builder's `scrub` and nothing is withdrawn (store/useBuilder.ts
- * walkChain). It says LATEST, not LIVE,
+ * In BUILD mode it is not drawn (arkinox, 2026-11-02: the Nearby and Chain
+ * chips hidden while building). [ ] Home End still aim the build cursor
+ * along the chain there (store/useBuilder.ts walkChain): a step puts it on
+ * that action's place, in its plane, and the scene stays on the build cursor
+ * rather than going into history. The body below still reads the Builder's
+ * `scrub` as its mark in BUILD mode, from when the chip stood there
+ * (arkinox, 2026-10-08). It says LATEST, not LIVE,
  * because LIVE is the publishing setting: this is the newest action on the
  * chain, whether or not any of it has been sent to a relay.
  *
@@ -60,6 +62,7 @@ import { useSocialUi } from '../store/useSocialUi'
 import { useEscape } from '../hooks/useEscape'
 import { useChainUi } from '../store/useChainUi'
 import { stepChain, useBuilder, walkChain } from '../store/useBuilder'
+import { everyWhileVisible } from '../lib/whileVisible'
 
 // Spectating opens the chain explorer: the chain is the thing you came to
 // look at. What you had it set to is put back when the spectation ends, and
@@ -86,7 +89,13 @@ const COUNT_AFTER_MS = 450
 /** How long an adoption stays on the chip: long enough to explain the move it caused. */
 const ADOPTED_MS = 8000
 
-export function ChainExplorer(): JSX.Element {
+/** The chain's chip and its body; not while BUILD mode is on (ChainExplorerChip). */
+export function ChainExplorer(): JSX.Element | null {
+  const building = useBuilder((s) => s.active)
+  return building ? null : <ChainExplorerChip />
+}
+
+function ChainExplorerChip(): JSX.Element {
   const events = useCyberspace((s) => s.events)
   const fork = useCyberspace((s) => s.forkNotice)
   const [showFork, setShowFork] = useState(false)
@@ -153,8 +162,7 @@ export function ChainExplorer(): JSX.Element {
   // Relative times drift; refresh them on a slow clock rather than per frame.
   const [now, setNow] = useState(() => Date.now() / 1000)
   useEffect(() => {
-    const t = window.setInterval(() => setNow(Date.now() / 1000), 10_000)
-    return () => window.clearInterval(t)
+    return everyWhileVisible(() => setNow(Date.now() / 1000), 10_000)
   }, [])
 
   const bind = useRepeatable()

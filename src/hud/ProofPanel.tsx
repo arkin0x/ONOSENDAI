@@ -340,10 +340,26 @@ const CLOUD_STAGE: Record<string, string> = {
   error: 'cloud error',
 }
 
+/** What the running route is doing right now, in a few words: what it waits on, when it says. */
+export function routeDoing(plan: MovePlan, proof: { progress: number; message: string | null }, cloud: CloudState): string {
+  const step = plan.step
+  return plan.status === 'paused'
+    ? plan.awaiting ? 'proof done, waiting for your signature' : 'paused'
+    : plan.status === 'failed'
+      ? 'failed'
+      : plan.status === 'funding'
+        ? CLOUD_STAGE[cloud.status] ?? 'quoting the route'
+        : proof.message
+          ? proof.message
+        : step.source === 'cloud'
+          ? `${CLOUD_STAGE[cloud.status] ?? cloud.status}${cloud.progress !== null ? ` ${Math.round(cloud.progress * 100)}%` : ''}`
+          : `${step.kind === 'sidestep' ? 'hashing' : 'computing'} ${Math.round(proof.progress * 100)}%`
+}
+
 /** The running route: where it is, what it is doing, and the two buttons. */
 function RouteView({ plan, proof, cloud, onResume, onCancel }: {
   plan: MovePlan
-  proof: { progress: number; elapsedMs: number }
+  proof: { progress: number; elapsedMs: number; message: string | null }
   cloud: CloudState
   onResume: () => void
   onCancel: () => void
@@ -356,16 +372,7 @@ function RouteView({ plan, proof, cloud, onResume, onCancel }: {
     step.kind === 'sidestep'
       ? `1 gibson through the 2^${step.maxHeight} boundary`
       : `up to the ${step.maxHeight === 0 ? 'same block' : `2^${step.maxHeight} block edge`}`
-  const doing =
-    plan.status === 'paused'
-      ? plan.awaiting ? 'proof done, waiting for your signature' : 'paused'
-      : plan.status === 'failed'
-        ? 'failed'
-        : plan.status === 'funding'
-          ? CLOUD_STAGE[cloud.status] ?? 'quoting the route'
-          : step.source === 'cloud'
-            ? `${CLOUD_STAGE[cloud.status] ?? cloud.status}${cloud.progress !== null ? ` ${Math.round(cloud.progress * 100)}%` : ''}`
-            : `${step.kind === 'sidestep' ? 'hashing' : 'computing'} ${Math.round(proof.progress * 100)}%`
+  const doing = routeDoing(plan, proof, cloud)
   const routeCost = cloud.quote?.route ? satsOf(cloud.quote.costMsats) : null
   return (
     <>

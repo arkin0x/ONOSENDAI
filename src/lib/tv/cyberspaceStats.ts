@@ -117,12 +117,12 @@ export const BOARD_ORDER: BoardId[] = ['longest-chain', 'active-users', 'most-ba
 
 /** A ranking's title, its one qualifier line, and its card's colours. */
 export const BOARD_WORDS: Record<BoardId, { title: string; qualifier: string; theme: AdTheme }> = {
-  'longest-chain': { title: 'LONGEST CHAIN', qualifier: 'VALID ACTIONS SINCE LAST SPAWN', theme: 'teal' },
+  'longest-chain': { title: 'LONGEST CHAIN', qualifier: 'ACTIONS IN CYBERSPACE', theme: 'teal' },
   'active-users': { title: 'ACTIVE USERS', qualifier: 'LAST 7 DAYS', theme: 'night' },
-  'most-bags': { title: 'MOST BAGS HIDDEN', qualifier: 'BAGS SEALED, EACH IN ITS OWN PLACE', theme: 'magenta' },
+  'most-bags': { title: 'MOST BAGS HIDDEN', qualifier: 'CAN YOU FIND THEM ALL?', theme: 'magenta' },
   'new-arrivals': { title: 'NEW ARRIVALS', qualifier: 'THIS WEEK', theme: 'teal' },
-  'most-respawns': { title: 'MOST RESPAWNS', qualifier: 'RESPAWNED AND KEPT GOING', theme: 'night' },
-  'most-objects': { title: 'MOST OBJECTS PUBLISHED', qualifier: 'OBJECTS PUBLISHED, EACH A NEW SHAPE', theme: 'magenta' },
+  'most-respawns': { title: 'MOST RESPAWNS', qualifier: 'NEVER GIVE UP', theme: 'night' },
+  'most-objects': { title: 'MOST OBJECTS PUBLISHED', qualifier: 'CONTRIBUTING NEW GEOMETRY', theme: 'magenta' },
 }
 
 /** One row of a ranking: where, who, how many. Nothing else, ever (design 3.3 L1, L2). */

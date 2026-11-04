@@ -74,6 +74,13 @@ interface InventoryState {
    * the moved version is the same item (lib/inventory.ts holdsItem).
    */
   relocate: (lineage: string, place: HeldPlace) => void
+  /**
+   * A key this identity forged, hidden AGAIN as a fresh copy (HIDE AGAIN): a new
+   * event with no lineage, so relocate cannot find it. The one row of its keypair
+   * holds the copy at its place, and the row of the version before goes, so ITEMS
+   * never lists one keypair twice (review of #595). Held since when it was first held.
+   */
+  holdAgain: (event: NostrEvent, key: KeyItem, place: HeldPlace) => HeldItem
   /** TAKE: hold contents out of an opened chest. */
   take: (entries: ChestEntry[], from: HeldFrom, place: HeldPlace | null) => HeldItem[]
   /** Take these rows off the TAKEN list, keeping them held (moved into the workshop, or cleared). */
@@ -226,6 +233,26 @@ export const useInventory = create<InventoryState>((set, get) => {
     if (changed.length === 0) return
     set({ items })
     void persist(changed)
+  },
+
+  holdAgain: (event, key, place) => {
+    const owner = ownerNow()
+    const before = Object.values(get().items).filter((it) => it.id !== event.id && it.type === 'key' && it.key?.itemPubkey === key.itemPubkey && it.event.pubkey === owner)
+    const item = heldFromForged(owner, event, key, place, before.reduce((at, it) => Math.min(at, it.at), now()))
+    const items = { ...get().items }
+    for (const it of before) { delete items[it.id]; removed.add(it.rowKey) }
+    items[item.id] = item
+    removed.delete(item.rowKey)
+    set({ items })
+    // The copy on disk first, then the old row off it: a failure between keeps both, never neither.
+    void persist([item])
+    for (const it of before) {
+      writes = writes
+        .then(() => database())
+        .then((d) => (d ? deleteHeld(d, it.rowKey) : undefined))
+        .catch((err: unknown) => { console.warn(`[inventory] could not delete an item: ${describeError(err)}`) })
+    }
+    return item
   },
 
   take: (entries, from, place) => {

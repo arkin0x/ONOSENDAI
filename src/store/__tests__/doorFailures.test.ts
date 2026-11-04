@@ -624,7 +624,8 @@ describe('small things', () => {
     // Another height than the cases above, so this bag's clock is its own.
     const first = await hide('one', 6)
     const theirs = newestBag(first.lookupId)!
-    const ahead = theirs.created_at + 1000
+    // A couple of minutes ahead: within how far the bag clock follows (BAG_CLOCK_LEAD_S; identitySafety.test.ts has a clock past it).
+    const ahead = theirs.created_at + 120
     relay.events.push({ ...theirs, id: 'a'.repeat(64), created_at: ahead })
     await hide('two', 6)
     const newest = relay.events.filter((e) => e.kind === HIDDEN_KIND && dOf(e) === first.lookupId).sort((a, b) => b.created_at - a.created_at)[0]

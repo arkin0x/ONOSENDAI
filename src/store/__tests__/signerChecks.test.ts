@@ -63,7 +63,7 @@ vi.mock('../../lib/hyperspace/enter', async (importOriginal) => {
  * The extension: signs with its own key, fixed so it survives the module
  * resets each boot does, and can be told to spoil its signatures.
  */
-const ext = vi.hoisted(() => ({ spoil: false, key: Uint8Array.from({ length: 32 }, (_, i) => i + 1) }))
+const ext = vi.hoisted(() => ({ spoil: false, late: false, key: Uint8Array.from({ length: 32 }, (_, i) => i + 1) }))
 
 vi.mock('../../lib/signers', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../lib/signers')>()
@@ -74,6 +74,8 @@ vi.mock('../../lib/signers', async (importOriginal) => {
     pubkey: getPublicKey(extKey),
     // A real extension answers with plain JSON: nothing on it says it was checked.
     signEvent: async (t: Parameters<typeof finalizeEvent>[0]) => {
+      // A signer that ran out of time (signWithin's SignerTimeout), as a phone's does with the signer app shut.
+      if (ext.late) throw new actual.SignerTimeout()
       const e = JSON.parse(JSON.stringify(finalizeEvent(t, extKey))) as ReturnType<typeof finalizeEvent>
       return ext.spoil ? { ...e, sig: e.sig.replace(/^./, (c) => (c === '0' ? '1' : '0')) } : e
     },
@@ -153,7 +155,15 @@ describe('a stored chain is checked once a session (review of #236, item 2)', ()
 })
 
 describe("a remote signer's answer is checked on every path, and a refusal is said (review of #236, items 1 and 3)", () => {
-  beforeEach(() => { ext.spoil = false })
+  beforeEach(() => { ext.spoil = false; ext.late = false })
+
+  it('a respawn whose signer did not answer in time says what to do, in one line (the real-bunker run, 2026-11-04)', async () => {
+    const S = await boot()
+    ext.late = true
+    await expect(S().respawn()).rejects.toThrow()
+    expect(S().proof.message).toBe('Signer not answering. Open your signer app, then try again.')
+    expect(S().events.map((e) => e.id)).toEqual(stored.map((e) => e.id))
+  })
 
   it('a respawn whose spawn comes back with a bad signature is refused, not shown or saved, and says Signing failed', async () => {
     const S = await boot()

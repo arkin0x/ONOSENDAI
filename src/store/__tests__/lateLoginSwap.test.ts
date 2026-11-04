@@ -1,8 +1,9 @@
 /**
  * A login that finishes late never undoes a newer choice (review of #353,
  * 2026-10-15). Two paths: initSigner reconnecting a saved identity whose
- * chain this device does not hold (the screen shows a random local identity
- * meanwhile), and a login the user gave up on by choosing another.
+ * chain this device does not hold (its stand-in is on screen meanwhile: a
+ * random local key was, until the real-bunker run of 2026-11-04 found it
+ * signing the relay's AUTH), and a login the user gave up on by choosing another.
  */
 import { describe, expect, it } from 'vitest'
 import { finalizeEvent, generateSecretKey, getPublicKey, nip19, type EventTemplate } from 'nostr-tools'
@@ -31,7 +32,9 @@ const settle = (): Promise<void> => new Promise((r) => setTimeout(r, 50))
 
 describe('a late login never undoes a newer one', () => {
   it('initSigner: a switch made while the saved identity reconnects wins', async () => {
-    expect(useCyberspace.getState().identity.pubkey).not.toBe(pkA)
+    // The saved identity loads as itself, chain or not, never as a throwaway key.
+    expect(useCyberspace.getState().identity.pubkey).toBe(pkA)
+    expect(useCyberspace.getState().signerKind).toBe('nip07')
     const reconnecting = useCyberspace.getState().initSigner()
     const skB = generateSecretKey()
     await useCyberspace.getState().useNsec(nip19.nsecEncode(skB))

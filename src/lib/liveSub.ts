@@ -64,6 +64,14 @@ export function resumedFilter(filter: Filter, lastSeen: number | null): Filter {
   return { ...filter, since }
 }
 
+/**
+ * How long a reopen waits while the relay is held up by a failed sign-in
+ * (`held`): the relay would only refuse it again. The sign-in, when it
+ * comes, reopens what waits at once (retryWaiting), and so does a return to
+ * the tab (resumeAll); this is the floor for neither happening.
+ */
+export const HELD_BACKOFF_MS = 5 * 60_000
+
 export function backoffFor(attempts: number): number {
   return BACKOFF_MS[Math.min(Math.max(0, attempts - 1), BACKOFF_MS.length - 1)]
 }
@@ -72,7 +80,12 @@ export class LiveRegistry {
   private records = new Map<number, Live>()
   private nextId = 1
 
-  constructor(private transport: Transport) {}
+  /**
+   * `held`, when given, says the relay cannot be read now for want of a
+   * sign-in: a reopen then waits HELD_BACKOFF_MS. While not signed in, the
+   * feeds were about 20 refused REQs a minute (the real-bunker run, 2026-11-04).
+   */
+  constructor(private transport: Transport, private held: () => boolean = () => false) {}
 
   /** Open a subscription that will be kept open. Returns its closer. */
   subscribe(filter: Filter, handlers: Handlers): () => void {
@@ -176,7 +189,7 @@ export class LiveRegistry {
       live.timer = null
       live.reopens++
       void this.open(live)
-    }, backoffFor(live.attempts))
+    }, this.held() ? HELD_BACKOFF_MS : backoffFor(live.attempts))
   }
 
   private close(live: Live): void {

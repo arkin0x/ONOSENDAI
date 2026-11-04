@@ -19,14 +19,16 @@ import * as nip04 from 'nostr-tools/nip04'
 import * as nip46 from 'nostr-tools/nip46'
 import * as nip49 from 'nostr-tools/nip49'
 import { getPool } from './relay'
+import type { AbstractSimplePool, SubscribeManyParams } from 'nostr-tools/abstract-pool'
+import type { Filter } from 'nostr-tools/filter'
 import type { EventTemplate, NostrEvent } from './events'
 import { attributed } from './client'
 import { DEFAULT_SIGNER_RELAY, normalizeSignerRelay, signerRelays } from './loginCredentials'
 export { BACKUP_SIGNER_RELAY, DEFAULT_SIGNER_RELAY, loginCredentialKind, normalizeSignerRelay, signerRelays } from './loginCredentials'
 
 export type SignerKind = 'local' | 'nip07' | 'nip46'
-import { HANDSHAKE_PATIENCE_MS, handshakeWithin } from './signWithin'
-export { SIGN_PATIENCE_MS, HANDSHAKE_PATIENCE_MS, SignerTimeout, signWithin, handshakeWithin, lateSignsPending } from './signWithin'
+import { HANDSHAKE_PATIENCE_MS, HANDSHAKE_STEP_MS, SignerTimeout, handshakeWithin } from './signWithin'
+export { SIGN_PATIENCE_MS, HANDSHAKE_PATIENCE_MS, HANDSHAKE_STEP_MS, SignerTimeout, signWithin, handshakeWithin, lateSignsPending } from './signWithin'
 
 export interface Signer {
   kind: SignerKind
@@ -76,7 +78,17 @@ export interface Signer {
   close?: () => Promise<void>
   /** For a deferred signer: force the reconnection and return the real one. */
   reconnect?: () => Promise<Signer>
+  /**
+   * For a deferred signer not yet live: a person asked again on purpose
+   * (RETRY), so a handshake that failed or never answered is given up and
+   * the next request starts a fresh one. Nothing else starts one after a
+   * failure but a signature (deferredReconnect).
+   */
+  retry?: () => void
 }
+
+/** A step of a bunker's handshake starting (null: it is done), so its wait can be bounded. */
+export type HandshakeStep = (step: 'connect' | 'get_public_key' | null) => void
 
 /** The browser extension, if one is installed. */
 interface WindowNostr {
@@ -221,18 +233,52 @@ export async function nip07Signer(waitMs = 0): Promise<Signer> {
   }
 }
 
+/** How long a request to a bunker waits for its answer subscription to be in place. */
+export const ANSWERS_READY_MS = 3000
+
+/**
+ * The pool, as a bunker signer uses it, with each request held until the
+ * subscription its answer comes on is in place (its EOSE), at most
+ * ANSWERS_READY_MS. nostr-tools opens that subscription and sends the
+ * request at once, and a relay may handle the two in either order: a
+ * bunker that answers at once had its answer broadcast before anyone was
+ * listening, and the handshake waited for an answer already lost. Every
+ * fresh socket to the bunker's relay (a RETRY, a reconnect) ran that race
+ * (the real-bunker run, 2026-11-04).
+ */
+function answersFirst(): unknown {
+  const pool = getPool()
+  let ready: Promise<void> = Promise.resolve()
+  const bounded = (p: Promise<void>): Promise<void> => Promise.race([p, new Promise<void>((r) => setTimeout(r, ANSWERS_READY_MS))])
+  return {
+    subscribe: (relays: string[], filter: Filter, params: SubscribeManyParams) => {
+      let heard: () => void = () => {}
+      ready = bounded(new Promise<void>((r) => { heard = r }))
+      return pool.subscribe(relays, filter, { ...params, oneose: () => { heard(); params?.oneose?.() } })
+    },
+    publish: (relays: string[], event: NostrEvent, params?: Parameters<AbstractSimplePool['publish']>[2]) => {
+      const waited = ready
+      return relays.map((url) => waited.then(() => pool.publish([url], event as never, params)[0]))
+    },
+  }
+}
+
 /**
  * A remote bunker (NIP-46). Takes a `bunker://…` URI (or a nostrconnect one),
  * and an optional client secret key so a reconnect keeps the same client
  * identity. Connects, learns the remote pubkey, and signs through it.
+ * `onStep` hears each step of the handshake start, so a caller can bound it.
  */
-export async function nip46Signer(bunkerUri: string, clientSecretKey?: Uint8Array): Promise<Signer> {
+export async function nip46Signer(bunkerUri: string, clientSecretKey?: Uint8Array, onStep?: HandshakeStep): Promise<Signer> {
   const clientSk = clientSecretKey ?? generateSecretKey()
   const bp = await nip46.parseBunkerInput(bunkerUri.trim())
   if (!bp) throw new Error('Not a valid bunker URI')
-  const bunker = nip46.BunkerSigner.fromBunker(clientSk, bp, { pool: getPool() as never })
+  const bunker = nip46.BunkerSigner.fromBunker(clientSk, bp, { pool: answersFirst() as never })
+  onStep?.('connect')
   await bunker.connect()
+  onStep?.('get_public_key')
   const pubkey = await bunker.getPublicKey()
+  onStep?.(null)
   const signer: Signer = {
     kind: 'nip46',
     pubkey,
@@ -346,7 +392,7 @@ export function createNostrConnectSession(relayInput = DEFAULT_SIGNER_RELAY): No
         // Automatic switch_relays interoperability varies between signers and
         // can strand the get_public_key response on a relay we never selected;
         // the QR names two relays by default so neither is a single point.
-        { pool: getPool() as never, skipSwitchRelays: true },
+        { pool: answersFirst() as never, skipSwitchRelays: true },
         signal ?? 300_000,
       )
       onConnected?.()
@@ -375,7 +421,7 @@ export function createNostrConnectSession(relayInput = DEFAULT_SIGNER_RELAY): No
 async function nostrConnectSessionSigner(bunkerUri: string, clientSecretKey: Uint8Array, pubkey: string): Promise<Signer> {
   const bp = await nip46.parseBunkerInput(bunkerUri)
   if (!bp) throw new Error('The saved Nostr Connect session is invalid.')
-  const bunker = nip46.BunkerSigner.fromBunker(clientSecretKey, bp, { pool: getPool() as never })
+  const bunker = nip46.BunkerSigner.fromBunker(clientSecretKey, bp, { pool: answersFirst() as never })
   return wrapBunkerSigner(bunker, clientSecretKey, pubkey, bunkerUri, true)
 }
 
@@ -403,7 +449,7 @@ export function prefOf(signer: Signer): SignerPref {
 }
 
 /** Rebuild a signer from a persisted preference. Local is instant; the others reconnect. */
-export async function signerFromPref(pref: SignerPref): Promise<Signer> {
+export async function signerFromPref(pref: SignerPref, onStep?: HandshakeStep): Promise<Signer> {
   if (pref.kind === 'local' && pref.nsec) return signerFromNsec(pref.nsec)
   if (pref.kind === 'nip07') {
     const signer = await nip07Signer(NIP07_WAIT_MS)
@@ -418,7 +464,7 @@ export async function signerFromPref(pref: SignerPref): Promise<Signer> {
     // A bunker still does its handshake, and answers with the account it holds
     // now. Refuse one that is not the account saved here: signing as it would
     // continue this pubkey's chain under another key.
-    const signer = await nip46Signer(pref.bunkerUri, clientSk)
+    const signer = await nip46Signer(pref.bunkerUri, clientSk, onStep)
     if (signer.pubkey !== pref.pubkey) {
       await signer.close?.()
       throw new SignerAccountMismatch()
@@ -455,38 +501,138 @@ export function saveSignerPref(pref: SignerPref): void {
  * memoised, and hands the live signer to onReady so the store can swap it in.
  */
 export function deferredReconnect(pref: SignerPref, onReady: (s: Signer) => void): Signer {
+  /** The live signer as handed out (signs through `queued` first), and as the handshake made it. */
   let live: Signer | null = null
-  let attempt: { done: Promise<Signer>; at: number } | null = null
+  let liveRaw: Signer | null = null
+  interface Attempt {
+    done: Promise<Signer>
+    at: number
+    /** A step ran out of time (HANDSHAKE_STEP_MS), or RETRY gave it up: it may be replaced, and its answer is still taken. */
+    stale: boolean
+    /** Rejects when it goes stale: what a wake waits on besides the answer. */
+    gaveUp: Promise<never>
+    giveUp: () => void
+  }
+  let attempt: Attempt | null = null
+  /**
+   * Why the last handshake failed (a refusal, a relay down), until another
+   * starts. Only a signature or a RETRY starts one after a failure: a wake
+   * does not. A refusing signer asked again on every return to the tab was
+   * a new approval prompt on every focus (the real-bunker run, 2026-11-04).
+   */
+  let failed: { err: unknown } | null = null
   // Whichever attempt answers first answers everyone, those waiting on an older one too.
   let announce: (s: Signer) => void = () => {}
   const arrived = new Promise<Signer>((resolve) => { announce = resolve })
+  /**
+   * Signatures asked for while the handshake ran, by template, until they
+   * settle. A signature that ran out of time waiting on the handshake was
+   * asked again by the store's retry, and both went out the moment the
+   * handshake answered: two prompts for one AUTH (the real-bunker run,
+   * 2026-11-04). The same template asked for while it still waits, or within
+   * SAME_REQUEST_MS of its going out, joins it. Later than that, asking
+   * again is the store's retry over fresh sockets, and goes out.
+   *
+   * A relay's AUTHs are one request per relay while they wait: each newer
+   * one (a real absence's, a RETRY's) takes the place of the one before, as
+   * a relay's newer challenge takes the place of its older one (NIP-42).
+   * Three of them waited on one lost handshake and went out together, three
+   * prompts at once, when the next handshake answered. Once one has gone
+   * out, only an AUTH for its own challenge joins it: a newer challenge is a
+   * newer socket (review of #603), and its signature would not sign it in.
+   */
+  type Send = (s: Signer) => Promise<NostrEvent>
+  interface Queued { signing: Promise<NostrEvent>; sentAt: number | null; send: Send; template: EventTemplate }
+  const queued = new Map<string, Queued>()
+  const challengeOf = (t: EventTemplate): string | undefined => t.tags.find((x) => x[0] === 'challenge')?.[1]
+  const joinable = (t: EventTemplate, send?: Send): Promise<NostrEvent> | null => {
+    const q = queued.get(keyOf(t))
+    if (!q) return null
+    // Still waiting: the newest of a relay's AUTHs is the one that goes out.
+    if (q.sentAt === null) { if (send) { q.send = send; q.template = t } return q.signing }
+    if (t.kind === 22242 && challengeOf(t) !== challengeOf(q.template)) return null
+    return Date.now() - q.sentAt < SAME_REQUEST_MS ? q.signing : null
+  }
+  /** Sign through the live signer, or wait for the handshake, joining what waits already (`queued`). */
+  const viaHandshake = (template: EventTemplate, send: Send): Promise<NostrEvent> => {
+    if (live) return send(live)
+    const waiting = joinable(template, send)
+    // Joined, it still asks for a handshake: the one it waited on may have
+    // been given up (RETRY, a lost step), and a fresh one answers it too.
+    if (waiting) { ensure().catch(() => { /* the joined request says why */ }); return waiting }
+    const key = keyOf(template)
+    const entry: Queued = { signing: Promise.resolve(null as unknown as NostrEvent), sentAt: null, send, template }
+    entry.signing = ensure().then(() => { entry.sentAt = Date.now(); return entry.send(liveRaw!) })
+    queued.set(key, entry)
+    const forget = (): void => { if (queued.get(key) === entry) queued.delete(key) }
+    entry.signing.then(forget, forget)
+    return entry.signing
+  }
+  // A relay's AUTH is the same request for the same relay, whatever its challenge and time.
+  const keyOf = (t: EventTemplate): string => t.kind === 22242
+    ? JSON.stringify([t.kind, t.tags.find((x) => x[0] === 'relay')?.[1]])
+    : JSON.stringify([t.kind, t.created_at, t.tags, t.content])
+  const adopt = (s: Signer): Signer => {
+    if (!live) {
+      liveRaw = s
+      live = { ...s, signEvent: (t) => joinable(t) ?? s.signEvent(t) }
+      failed = null
+      announce(live)
+      onReady(live)
+    } else {
+      onReady(s)
+    }
+    return live
+  }
+  const start = (): Attempt => {
+    let timer: ReturnType<typeof setTimeout> | undefined
+    let reject: (err: unknown) => void = () => {}
+    const gaveUp = new Promise<never>((_, r) => { reject = r })
+    gaveUp.catch(() => { /* only a wake waits on it */ })
+    const mine: Attempt = {
+      done: Promise.resolve(null as unknown as Signer),
+      at: Date.now(),
+      stale: false,
+      gaveUp,
+      giveUp: () => { clearTimeout(timer); if (!mine.stale) { mine.stale = true; reject(new SignerTimeout()) } },
+    }
+    // Each step of a bunker's handshake gets HANDSHAKE_STEP_MS: a request
+    // lost in transit is never answered, and nothing else would end the wait.
+    const step: HandshakeStep = (name) => {
+      clearTimeout(timer)
+      if (name) timer = setTimeout(mine.giveUp, HANDSHAKE_STEP_MS)
+    }
+    mine.done = signerFromPref(pref, step).then(adopt)
+    mine.done.then(() => clearTimeout(timer), (err: unknown) => {
+      clearTimeout(timer)
+      if (attempt === mine) { attempt = null; failed = { err } }
+    })
+    return mine
+  }
   const ensure = (restart = true): Promise<Signer> => {
     if (live) return Promise.resolve(live)
-    // A failed reconnect is not kept: the next signature tries again. Kept,
-    // one early failure (an extension not injected yet, a bunker relay
-    // down) refused every signature until the page was reloaded.
+    // A failed reconnect is not kept for a signature: the next one tries
+    // again. Kept, one early failure (an extension not injected yet, a bunker
+    // relay down) refused every signature until the page was reloaded.
     //
     // A handshake that never answers must not hold anyone either (arkinox,
     // 2026-11-01), so the limit is on each wait and not on the handshake: a
     // bunker can answer minutes later, and that answer is still taken. Only
-    // something that wants a signature replaces one past the limit. A wake
-    // does not, or every return to the tab would stack another prompt.
-    if (!attempt || (restart && Date.now() - attempt.at >= HANDSHAKE_PATIENCE_MS)) {
-      const done = signerFromPref(pref).then((s) => {
-        if (!live) { live = s; announce(s) }
-        onReady(s)
-        return live
-      })
-      const mine = { done, at: Date.now() }
-      attempt = mine
-      done.catch(() => { if (attempt === mine) attempt = null })
-    }
-    return handshakeWithin(Promise.race([attempt.done, arrived]))
+    // something that wants a signature replaces one that went stale or is
+    // past the limit. A wake does not, or every return to the tab would
+    // stack another prompt; nor does a wake start one after a failure.
+    const replace = !attempt || attempt.stale || (restart && Date.now() - attempt.at >= HANDSHAKE_PATIENCE_MS)
+    if (replace && !restart && (failed || attempt?.stale)) return Promise.reject(failed ? failed.err : new SignerTimeout())
+    if (replace) { failed = null; attempt = start() }
+    const a = attempt!
+    // A signature waits for the handshake's answer, late or not, up to the
+    // limit. A wake (and the store's retry) stops waiting once it goes stale.
+    return handshakeWithin(Promise.race(restart ? [a.done, arrived] : [a.done, arrived, a.gaveUp]))
   }
   return {
     kind: pref.kind,
     pubkey: pref.pubkey,
-    signEvent: (template) => ensure().then((s) => s.signEvent(template)),
+    signEvent: (template) => viaHandshake(template, (s) => s.signEvent(template)),
     // Whether the live signer offers NIP-44 is known only once it is up.
     nip44Decrypt: (pk, ct) => ensure().then((s) => {
       if (!s.nip44Decrypt) throw new Error(NIP44_UNAVAILABLE)
@@ -506,7 +652,25 @@ export function deferredReconnect(pref: SignerPref, onReady: (s: Signer) => void
     }),
     heldPubkey: () => ensure().then((s) => (s.heldPubkey ? s.heldPubkey() : s.pubkey)),
     reconnect: () => ensure(false),
+    retry: () => {
+      if (live) return
+      failed = null
+      if (attempt) { attempt.giveUp(); attempt = null }
+      // Its sockets to the bunker's relays may be the half-open ones that
+      // lost the request: the fresh attempt opens its own.
+      const relays = bunkerRelaysOf(pref)
+      if (relays.length > 0) { try { getPool().close(relays) } catch { /* nothing open */ } }
+    },
   }
+}
+
+/** How soon after a signature goes out the same one asked again is the same request (deferredReconnect). */
+const SAME_REQUEST_MS = 1000
+
+/** The relays a saved bunker login talks over, read without a lookup. */
+function bunkerRelaysOf(pref: SignerPref): string[] {
+  if (pref.kind !== 'nip46' || !pref.bunkerUri) return []
+  try { return new URL(pref.bunkerUri.trim()).searchParams.getAll('relay') } catch { return [] }
 }
 
 /**

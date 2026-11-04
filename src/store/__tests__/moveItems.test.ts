@@ -23,17 +23,26 @@ if (typeof localStorage === 'undefined') {
 }
 
 const sent: { kind: number; tags: string[][]; id: string; content?: string; created_at?: number }[] = []
+/** What the fake relay holds: everything it took, whatever a test clears from `sent`, its log. */
+const held: typeof sent = []
 /** Kinds every relay refuses in the current test. */
 const refused = new Set<number>()
+/** No relay answers a bag query while set. */
+let silent = false
 vi.mock('../../lib/relay', () => ({
   publishMany: vi.fn(async (_relays: string[], ev: { kind: number; tags: string[][]; id: string }) => {
     if (refused.has(ev.kind)) return { ok: false }
     sent.push(ev)
+    held.push(ev)
     return { ok: true }
   }),
-  query: vi.fn(async () => []),
+  // What the relay holds, by kind, author, address and d: a deletion (NIP-09) among it.
+  query: vi.fn(async (f: { kinds?: number[]; authors?: string[]; '#a'?: string[]; '#d'?: string[] }) => held.filter((e) => (!f.kinds || f.kinds.includes(e.kind))
+    && (!f.authors || f.authors.includes((e as { pubkey?: string }).pubkey ?? ''))
+    && (!f['#a'] || e.tags.some((t) => t[0] === 'a' && f['#a']!.includes(t[1])))
+    && (!f['#d'] || e.tags.some((t) => t[0] === 'd' && f['#d']!.includes(t[1]))))),
   // What the relay holds at an address: the bags it took.
-  queryEach: vi.fn(async (f: { kinds: number[]; '#d': string[] }) => [{ url: 'wss://relay.test', outcome: 'answered', events: sent.filter((e) => f.kinds.includes(e.kind) && e.tags.some((t) => t[0] === 'd' && f['#d'].includes(t[1]))) }]),
+  queryEach: vi.fn(async (f: { kinds: number[]; '#d': string[] }) => silent ? [{ url: 'wss://relay.test', outcome: 'unreachable', reason: 'down', events: [] }] : [{ url: 'wss://relay.test', outcome: 'answered', events: held.filter((e) => f.kinds.includes(e.kind) && e.tags.some((t) => t[0] === 'd' && f['#d'].includes(t[1]))) }]),
   queryAny: vi.fn(async () => []),
   relaySet: () => ['wss://relay.test'],
 }))
@@ -48,7 +57,7 @@ import { useCyberspace } from '../useCyberspace'
 import { useInventory } from '../useInventory'
 import { movePlaced, useBuilder } from '../useBuilder'
 import { useToast } from '../useToast'
-import { MOVE_GONE, movable, movingId, newestOfMoved, oneVersionEach, repeatable, useShards, type MyDeployment } from '../useShards'
+import { MOVE_GONE, MOVE_STALE, MOVE_UNANSWERED, movable, movingId, newestOfMoved, oneVersionEach, repeatable, useShards, type MyDeployment } from '../useShards'
 
 const S = () => useShards.getState()
 const me = () => useCyberspace.getState().identity.pubkey
@@ -113,7 +122,9 @@ const realSign = useCyberspace.getState().signEvent
 
 beforeEach(() => {
   sent.length = 0
+  held.length = 0
   refused.clear()
+  silent = false
   useCyberspace.setState({ signEvent: realSign, live: true, scaleExp: 0, buildStep: null })
   useShards.setState({ mine: [], deleted: {}, discovered: {}, pending: null, placedLast: null, deployHeight: 0, deployUnit: 0, deployStatus: 'idle', deployError: null, selectedSecret: null })
   useBuilder.setState({ active: false, via: null, leftAvatar: false, itemDraft: null, messageDraft: null })
@@ -224,7 +235,7 @@ describe('a moved key is the same item', () => {
     expect(items[first].place?.at).toEqual(moved.at)
     // The world reads it as held (WorldMessages itemDrawAs), and KeyLine offers no TAKE.
     const w = S().worldItems().find((x) => x.key === moved.eventId)!
-    expect(holdsItem(items, w.key, w.lineage)).toBe(true)
+    expect(holdsItem(items, w.key, w.lineage, w.event?.pubkey)).toBe(true)
   })
 
   it('a finder who took the old version holds the moved one already: TAKE adds nothing', async () => {
@@ -237,7 +248,7 @@ describe('a moved key is the same item', () => {
     const after = addHeld(held, [again])
     expect(after.added).toEqual([])
     expect(Object.keys(after.items)).toEqual([first])
-    expect(holdsItem(held, moved.eventId, itemLineage(moved.inner))).toBe(true)
+    expect(holdsItem(held, moved.eventId, itemLineage(moved.inner), moved.inner.pubkey)).toBe(true)
   })
 })
 
@@ -390,5 +401,103 @@ describe('what can move', () => {
     expect(tag(moved.inner, 'C')).toBe(tag(old.inner, 'C'))
     expect(moved.lookupId).toBe(old.lookupId)
     expect(tag(moved.inner, 'd')).toBe(first)
+  })
+})
+
+/** The newest bag the fake relay holds at a lookup id. */
+const newestBag = (lookupId: string) => held.filter((e) => e.kind === HIDDEN_KIND && tag(e, 'd') === lookupId).sort((a, b) => (b.created_at ?? 0) - (a.created_at ?? 0))[0] as unknown as NostrEvent | undefined
+
+/** The newest bag the fake relay holds at a lookup id, opened: its entries' ids. */
+async function bagIdsIn(lookupId: string, keyHex: string): Promise<string[]> {
+  const bag = newestBag(lookupId)
+  return bag ? (await bagEntries(bag, hexToBytes(keyHex))).map((e) => (e as NostrEvent).id) : []
+}
+
+describe('review of #595: a second device that missed the move', () => {
+  it('R1: hiding in the old region from that device never writes the old copy back, and drops its stale row', async () => {
+    const stays = await hide('message', at(2n))
+    const goes = await hide('message', at(1n))
+    const oldRow = row(goes)
+    const device2 = S().mine.map((d) => ({ ...d }))
+    // Device 1 moves it into the next region.
+    await move(goes, at(9n))
+    expect(await bagIdsIn(oldRow.lookupId, oldRow.keyHex)).toEqual([stays])
+    // Device 2, which has not scanned since, hides something else in the old region.
+    useShards.setState({ mine: device2, deleted: {}, discovered: {} })
+    const added = await hide('message', at(3n))
+    const oldBagNow = await bagIdsIn(oldRow.lookupId, oldRow.keyHex)
+    expect(oldBagNow).not.toContain(goes)
+    expect(oldBagNow.sort()).toEqual([stays, added].sort())
+    expect(S().mine.some((d) => d.eventId === goes)).toBe(false)
+  })
+
+  it('R1, by a scan: a newer version of the old bag that no longer holds the row takes the row away', async () => {
+    const stays = await hide('message', at(2n))
+    const goes = await hide('message', at(1n))
+    const device2 = S().mine.map((d) => ({ ...d }))
+    await move(goes, at(9n))
+    const bag = newestBag(row(stays).lookupId)!
+    const staysRow = row(stays)
+    useShards.setState({ mine: device2, deleted: {}, discovered: {} })
+    S().addDiscovered([{ ...asFound(staysRow), bagId: bag.id, bagAt: bag.created_at, bag: staysRow.bag } as Hidden])
+    expect(S().mine.map((d) => d.eventId)).toEqual([stays])
+  })
+
+  it('a relay\'s older copy of the bag takes nothing away', async () => {
+    const stays = await hide('message', at(2n))
+    const goes = await hide('message', at(1n))
+    S().addDiscovered([{ ...asFound(row(stays)), bagAt: row(goes).createdAt - 5 } as Hidden])
+    expect(S().mine.map((d) => d.eventId).sort()).toEqual([stays, goes].sort())
+  })
+
+  it('R2: MOVE of the old row is refused once its bag no longer holds it: no second live copy', async () => {
+    const goes = await hide('key', at(1n))
+    const device2 = S().mine.map((d) => ({ ...d }))
+    await move(goes, at(9n))
+    useShards.setState({ mine: device2, deleted: {}, discovered: {} })
+    const mark = sent.length
+    expect(await failedMove(goes, at(17n))).toBe(MOVE_STALE)
+    expect(sent.length).toBe(mark)
+    expect(S().mine.map((d) => d.eventId)).toEqual([goes])
+  })
+
+  it('R2: the same for a message (a cashu token never stands at two places)', async () => {
+    const goes = await hide('message', at(1n))
+    const device2 = S().mine.map((d) => ({ ...d }))
+    await move(goes, at(9n))
+    useShards.setState({ mine: device2, deleted: {}, discovered: {} })
+    expect(await failedMove(goes, at(5n))).toBe(MOVE_STALE)
+  })
+
+  it('a move refuses, rather than risk a second copy, when no relay answers', async () => {
+    const goes = await hide('audio', at(1n))
+    const mark = sent.length
+    silent = true
+    expect(await failedMove(goes, at(9n))).toBe(MOVE_UNANSWERED)
+    expect(sent.length).toBe(mark)
+    expect(S().mine.map((d) => d.eventId)).toEqual([goes])
+  })
+
+  it('a LOCAL row asks no relay before it moves', async () => {
+    useCyberspace.setState({ live: false })
+    const goes = await hide('message', at(1n))
+    silent = true
+    await move(goes, at(9n))
+    expect(tag(S().mine[0].inner, 'd')).toBe(goes)
+  })
+})
+
+describe('review of #595: a forged lineage on a held item', () => {
+  it('R3: another author\'s key carrying my key\'s id as its d does not block TAKE of mine', async () => {
+    const mineKey = await hide('key', at(1n))
+    const real = row(mineKey)
+    const mallory = 'b'.repeat(64)
+    const decoyInner = { ...real.inner, id: 'c'.repeat(64), pubkey: mallory, tags: [['d', mineKey], ...real.inner.tags.filter((t) => t[0] !== 'd')] }
+    const decoy = { ...asFound(real), eventId: decoyInner.id, inner: decoyInner, author: mallory, key: forgeKey('Fake', 'x') } as Hidden
+    const tookDecoy = heldFromFind('finder', decoy, 1, false, null)!
+    const holding: Record<string, HeldItem> = { [tookDecoy.id]: tookDecoy }
+    const realFind = heldFromFind('finder', asFound(real), 2, false, null)!
+    expect(holdsItem(holding, real.eventId, itemLineage(real.inner), real.inner.pubkey)).toBe(false)
+    expect(addHeld(holding, [realFind]).added.map((h) => h.id)).toEqual([mineKey])
   })
 })

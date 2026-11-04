@@ -168,22 +168,32 @@ export function heldFromPasted(owner: string, event: NostrEvent, key: KeyItem, v
 }
 
 /**
- * The lineages of what is held (lib/hidden.ts itemLineage). An item its
- * hider moved (MOVE, EDIT) is a new event at the new place that carries its
- * first version's id as `d`, so a version held before the move and the one
- * standing now are one item: its blue box stays, and TAKE does not hold it
- * a second time.
+ * An item's lineage as held: its author and its first version's id
+ * (lib/hidden.ts itemLineage). Only its author can move it, so only an event
+ * by the same author is a version of it: a `d` is a claim anyone can write,
+ * and another key's item carrying this one's id as its `d` is not this item
+ * (review of #595).
+ */
+export function lineageKey(author: string, lineage: string): string {
+  return `${author}:${lineage}`
+}
+
+/**
+ * The lineages of what is held (lineageKey). An item its hider moved (MOVE,
+ * EDIT) is a new event at the new place that carries its first version's id
+ * as `d`, so a version held before the move and the one standing now are one
+ * item: its blue box stays, and TAKE does not hold it a second time.
  */
 export function heldLineages(items: Record<string, HeldItem>): Set<string> {
   const out = new Set<string>()
-  for (const it of Object.values(items)) out.add(itemLineage(it.event) ?? it.id)
+  for (const it of Object.values(items)) out.add(lineageKey(it.event.pubkey, itemLineage(it.event) ?? it.id))
   return out
 }
 
-/** Whether this item is held: by its own id, or by the lineage a moved version shares with one held (heldLineages). */
-export function holdsItem(items: Record<string, HeldItem>, id: string, lineage?: string | null, lineages?: ReadonlySet<string>): boolean {
+/** Whether this item is held: by its own id, or as a version, by the same author, of one held (heldLineages). */
+export function holdsItem(items: Record<string, HeldItem>, id: string, lineage?: string | null, author?: string | null, lineages?: ReadonlySet<string>): boolean {
   if (items[id]) return true
-  return !!lineage && (lineages ?? heldLineages(items)).has(lineage)
+  return !!lineage && !!author && (lineages ?? heldLineages(items)).has(lineageKey(author, lineage))
 }
 
 /**
@@ -197,7 +207,7 @@ export function addHeld(items: Record<string, HeldItem>, add: HeldItem[]): { ite
   let next = items
   const lineages = heldLineages(items)
   for (const item of add) {
-    const lineage = itemLineage(item.event) ?? item.id
+    const lineage = lineageKey(item.event.pubkey, itemLineage(item.event) ?? item.id)
     if (next[item.id] || lineages.has(lineage)) continue
     if (next === items) next = { ...items }
     next[item.id] = item

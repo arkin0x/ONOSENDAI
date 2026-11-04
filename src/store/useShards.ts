@@ -845,6 +845,10 @@ export function oneVersionEach(items: WorldItem[]): WorldItem[] {
 
 /** Why a MOVE stopped: what it moves is no longer among your deployments here. */
 export const MOVE_GONE = 'That is no longer among what this device hid, so there is nothing to move.'
+/** Why a MOVE stopped: its bag on the relays no longer holds it (review of #595). */
+export const MOVE_STALE = 'Moved or removed from another device since this one saw it. Find it where it stands now.'
+/** Why a MOVE stopped: no relay answered whether its bag still holds it. */
+export const MOVE_UNANSWERED = 'No relay answered, so this cannot tell whether it was moved from another device. Nothing was moved. Try again when one is reachable.'
 
 /** What a moved thing is called where a move says what happened to it. */
 function movedNoun(type: HiddenType): string {
@@ -1642,7 +1646,7 @@ export const useShards = create<ShardsState>((set, get) => {
       // A bag written in the same second as a retraction is the newer word.
       const retractedAt = await bagRetractedAt(lookupId, items)
       if (retractedAt > (newest?.created_at ?? 0)) {
-        pruneGoneDoors(lookupId, new Set(), retractedAt)
+        pruneGoneRows(lookupId, new Set(), retractedAt)
         return { entries: get().mine.filter((d) => d.lookupId === lookupId).map(entryOf), settings: localSettings }
       }
       // What a rotation that did not finish replaced stays out, whichever write comes first.
@@ -1651,9 +1655,10 @@ export const useShards = create<ShardsState>((set, get) => {
       // A relay copy that does not open with this key is not this bag.
       if (newest && relay.length > 0) {
         settings = bagSettingsOf(newest, height)
-        // A door of yours the relays' newer bag no longer holds was changed from
-        // another device: its old self does not go back in beside the new one (§3.7.5).
-        pruneGoneDoors(lookupId, new Set(relay.map(entryKey)), newest.created_at)
+        // A row the relays' newer bag no longer holds was changed from another
+        // device: its old self does not go back in beside the new one (§3.7.5;
+        // a moved item, review of #595).
+        pruneGoneRows(lookupId, new Set(relay.map(entryKey)), newest.created_at)
       }
     } catch { relay = []; heard = false }
     // No relay answered, and a published bag here may name a row this device
@@ -1693,13 +1698,16 @@ export const useShards = create<ShardsState>((set, get) => {
   }
 
   /**
-   * Your door rows a bag read just now no longer holds, gone: another device
-   * rotated, renamed or removed the door. Only a published row, under a bag newer
-   * than it, so a relay's stale copy never takes away what was just hidden here.
+   * Your rows a bag read just now no longer holds, gone: another device moved
+   * (MOVE, EDIT) or removed the thing, or rotated, renamed or removed a door.
+   * Only a published row, under a bag newer than it, so a relay's stale copy
+   * never takes away what was just hidden here; never one with a move to put
+   * back or a rotation under way. Read before every rewrite (gatherInners), so
+   * a device that missed a move never writes the old copy back into the bag,
+   * where no device would list it any more (review of #595).
    */
-  function pruneGoneDoors(lookupId: string, held: ReadonlySet<string>, bagAt: number): void {
-    const me = cyber().identity.pubkey
-    const gone = get().mine.filter((d) => d.lookupId === lookupId && d.chest?.door !== undefined && d.inner.pubkey === me && d.published && d.createdAt < bagAt && !held.has(entryKey(entryOf(d))))
+  function pruneGoneRows(lookupId: string, held: ReadonlySet<string>, bagAt: number): void {
+    const gone = get().mine.filter((d) => d.lookupId === lookupId && d.published && !d.putBack && !d.rotating && d.createdAt < bagAt && !held.has(entryKey(entryOf(d))))
     if (gone.length === 0) return
     const ids = new Set(gone.map((d) => d.eventId))
     const mine = get().mine.filter((d) => !ids.has(d.eventId))
@@ -1721,7 +1729,7 @@ export const useShards = create<ShardsState>((set, get) => {
    */
   function claimOwn(items: Hidden[]): void {
     const me = cyber().identity.pubkey
-    // A bag read just now says what it holds: a door of yours no longer in it was changed elsewhere.
+    // A bag read just now says what it holds: a row of yours no longer in it was changed elsewhere.
     const read = new Map<string, { at: number; held: Set<string> }>()
     for (const h of items) {
       if (h.chestId || h.author !== me || !h.inner || h.bagAt === undefined) continue
@@ -1729,7 +1737,7 @@ export const useShards = create<ShardsState>((set, get) => {
       r.held.add(entryKey(h.ref ?? h.inner))
       read.set(h.lookupId, r)
     }
-    for (const [lookupId, r] of read) pruneGoneDoors(lookupId, r.held, r.at)
+    for (const [lookupId, r] of read) pruneGoneRows(lookupId, r.held, r.at)
     const { mine, deleted } = get()
     const have = new Set(mine.map((d) => d.eventId))
     const own: MyDeployment[] = []
@@ -1772,6 +1780,26 @@ export const useShards = create<ShardsState>((set, get) => {
     const next = newestOfMoved(kept, own)
     set({ mine: next })
     saveMine(next)
+  }
+
+  /**
+   * Whether the relays' newest version of a row's bag still holds it: 'gone'
+   * when it does not (moved or removed from another device), or when its
+   * author deleted the bag since; 'silent' when no relay answered.
+   */
+  async function stillInItsBag(d: MyDeployment): Promise<'this' | 'gone' | 'silent'> {
+    const me = cyber().identity.pubkey
+    let answers: Awaited<ReturnType<typeof queryEach>>
+    try { answers = await queryEach({ kinds: [HIDDEN_KIND], authors: [me], '#d': [d.lookupId] }) } catch { return 'silent' }
+    if (!answers.some((a) => a.outcome === 'answered')) return 'silent'
+    const newest = answers.flatMap((a) => a.events).filter((e) => e.pubkey === me).sort((a, b) => b.created_at - a.created_at)[0]
+    if (!newest) return 'gone'
+    const address = `${HIDDEN_KIND}:${me}:${d.lookupId}`
+    const deletions = await query({ kinds: [5], authors: [me], '#a': [address] }).catch(() => [] as NostrEvent[])
+    if (retractedAt(address, deletions) >= newest.created_at) return 'gone'
+    const entries = await bagEntries(newest, hexToBytes(d.keyHex)).catch(() => [] as BagEntry[])
+    const want = entryKey(entryOf(d))
+    return entries.some((e) => entryKey(e) === want) ? 'this' : 'gone'
   }
 
   /** A look's own size and WALK setting, where SCALE and WALK start when it is picked. */
@@ -1925,7 +1953,7 @@ export const useShards = create<ShardsState>((set, get) => {
     const place = await doorLocation(d)
     const key = roomKey(place.key, hexToBytes(secretHex))
     const lookupId = roomLookupId(key)
-    // Whichever door a row names: one replaced from another device leaves them naming it (pruneGoneDoors).
+    // Whichever door a row names: one replaced from another device leaves them naming it (pruneGoneRows).
     // In the room's own bag is what makes them this room's.
     const rows = (): MyDeployment[] => {
       const doors = new Set(doorRowsOfRoom(d).map((x) => x.eventId))
@@ -2804,6 +2832,21 @@ export const useShards = create<ShardsState>((set, get) => {
         was = back
       }
 
+      // A move of something the relays hold is checked against them first: a
+      // device that missed a move made elsewhere would otherwise hide a second
+      // live copy of it (a cashu token at two places). Refused, in words, when
+      // its bag no longer holds it, or when no relay answers (review of #595).
+      const checked = movedItem ?? (was && !was.ref ? was : undefined)
+      if (checked?.published) {
+        set({ deployStatus: 'working', deployError: null, deployNote: 'Checking it is still where it was' })
+        const still = await stillInItsBag(checked)
+        if (still !== 'this') {
+          set({ deployStatus: 'error', deployNote: null, deployError: still === 'gone' ? MOVE_STALE : MOVE_UNANSWERED })
+          return
+        }
+        set({ deployStatus: 'idle', deployNote: null })
+      }
+
       // Where the key comes from. Above this machine's ceiling it is HOSAKA's,
       // priced from its region key ladder (lib/deployPlan.ts regionKeyLadder),
       // and the Cloud compute panel's mode says whether to ask first.
@@ -3390,7 +3433,7 @@ export const useShards = create<ShardsState>((set, get) => {
       for (const address of get().ownDoorAddresses(lookupIds)) {
         if (standing.has(address)) continue
         const at = retractedAt(address, deletions)
-        if (at > 0 && address.split(':')[1] === me) pruneGoneDoors(address.split(':')[2], new Set(), at)
+        if (at > 0 && address.split(':')[1] === me) pruneGoneRows(address.split(':')[2], new Set(), at)
       }
     },
 

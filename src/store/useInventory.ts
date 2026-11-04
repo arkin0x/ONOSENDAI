@@ -219,7 +219,7 @@ export const useInventory = create<InventoryState>((set, get) => {
     const items = { ...get().items }
     const changed: HeldItem[] = []
     for (const it of Object.values(items)) {
-      if (it.source !== 'forged' || (itemLineage(it.event) ?? it.id) !== lineage) continue
+      if (it.source !== 'forged' || it.event.pubkey !== it.owner || (itemLineage(it.event) ?? it.id) !== lineage) continue
       items[it.id] = { ...it, place }
       changed.push(items[it.id])
     }

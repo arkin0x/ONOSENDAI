@@ -232,6 +232,8 @@ export function WorldMessages({ axes }: Props): JSX.Element | null {
         key: w.key,
         type: w.type,
         lineage: w.lineage,
+        // Who wrote the item, whose versions alone share its lineage (lib/inventory.ts lineageKey).
+        itemAuthor: w.event?.pubkey ?? w.author,
         // The SNO a key wears, and its region's walls about it (ItemModel).
         wears: w.type === 'key' && w.keyItem?.model ? { model: w.keyItem.model, animation: w.keyItem.animation ?? NO_MOTION } : undefined,
         region: w.type === 'key' && w.keyItem?.model ? regionBox(w.at, w.height, 0, axes) : null,
@@ -258,7 +260,7 @@ export function WorldMessages({ axes }: Props): JSX.Element | null {
         if (w.type === 'audio') return <AudioMark key={w.key} title={w.text} at={w.centre} onTap={open} />
         // A key: the cube and its short name, or the box alone while it is held.
         const play = vanishing[openedKey(me, w.key)]
-        const draw = itemDrawAs(holdsItem(held, w.key, w.lineage, heldLin), itemsRead, !!play)
+        const draw = itemDrawAs(holdsItem(held, w.key, w.lineage, w.itemAuthor, heldLin), itemsRead, !!play)
         return (
           <group key={w.key}>
             {draw === 'item'

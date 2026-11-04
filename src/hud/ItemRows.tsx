@@ -73,8 +73,8 @@ export function KeyLine({ id, name, author }: { id?: string; name: string; autho
   const who = useWho(author)
   // Held by its own id, or by the lineage a version its hider moved shares
   // with the one held (lib/inventory.ts holdsItem): never TAKE twice.
-  const lineage = useShards((s) => (id ? itemLineage(s.discovered[id]?.inner ?? s.mine.find((d) => d.eventId === id)?.inner) : null))
-  const held = useInventory((s) => (id ? holdsItem(s.items, id, lineage) : false))
+  const inner = useShards((s) => (id ? s.discovered[id]?.inner ?? s.mine.find((d) => d.eventId === id)?.inner : undefined))
+  const held = useInventory((s) => (id ? holdsItem(s.items, id, itemLineage(inner), inner?.pubkey) : false))
   const found = useShards((s) => (id ? !!s.discovered[id] || s.mine.some((d) => d.eventId === id && !!d.key && !!d.inner) : false))
   return (
     <span className="keyline">

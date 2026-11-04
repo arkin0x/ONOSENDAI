@@ -299,7 +299,7 @@ function selectBlock(sel: NonNullable<DemoScene['select']>, scaleExp: number | u
     if (useHyperspace.getState().destination === sel.height) useHyperspace.getState().setDestination(prevDest)
     const pin = useCyberspace.getState().pin
     if (pin && pin.label === sel.label) {
-      if (prevPin) useCyberspace.getState().dropPin(prevPin.position, prevPin.label, prevPin.scaleExp)
+      if (prevPin) useCyberspace.getState().dropPin(prevPin.position, prevPin.label, prevPin.scaleExp, prevPin.named)
       else useCyberspace.getState().clearPin()
     }
   })

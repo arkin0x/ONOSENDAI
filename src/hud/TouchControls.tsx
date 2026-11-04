@@ -229,7 +229,7 @@ export function TouchControls(): JSX.Element {
             On every pad, at your head or off it. */}
         {/* REMOVE PIN: only while there is a pin to remove, so the cell is
             empty the rest of the time and nothing moves when it appears.
-            The pin itself is dropped by a click on the globe or a POSITION
+            The pin itself is dropped by a click on the globe or a View
             panel VIEW, and RETURN already clears it; this is the way to put
             a look down without leaving the place you are looking at. */}
         {pin && (

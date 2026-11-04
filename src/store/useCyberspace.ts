@@ -321,6 +321,8 @@ export interface EarthPin {
   scaleExp: number
   /** What to call it: the same "EARTH · 37.8°N 122.4°W" the focus was given. */
   label: string
+  /** The label is the place's name (one found by name, a star's), so viewing the pin says it; a clicked or typed point's is not. */
+  named?: boolean
 }
 
 export interface SpectateState {
@@ -625,12 +627,24 @@ export interface CyberFocus {
   /** The cursor came along (VIEW): the pad drives it here. */
   drive?: boolean
   /**
+   * The place the label names, when the label is a name (a starred place, a
+   * person, a place on Earth found by name) and not words made from its
+   * coordinate. A free view's VIEWING chip shows the name while the cursor
+   * is on this place in this plane, and says A COORD otherwise (arkinox,
+   * 2026-11-03; FocusBar.tsx). Set only by focusOn: `position` and `plane`
+   * above move with the view (a re-anchor, a change of plane), this does not.
+   */
+  named?: NamedPlace
+  /**
    * A hidden item (a shard, a message) is what is being looked at: the camera
    * frames it where it is drawn, its true place (itemCentre), rather than by
    * the stop markers' policy.
    */
   item?: boolean
 }
+
+/** Where a focus's name applies (CyberFocus.named). */
+export interface NamedPlace { position: Position; plane: Plane }
 
 export interface CyberspaceState {
   identity: { pubkey: string; npub: string }
@@ -789,13 +803,13 @@ export interface CyberspaceState {
    * Deliberately NOT derived from `focus`, because it has to outlive a focus
    * change: clicking a landfall moves the focus to that block and the pin
    * stays where it was, which is what makes it possible to look around and
-   * come back. Dropped by a click on the globe and by a POSITION panel VIEW
+   * come back. Dropped by a click on the globe and by a View panel VIEW
    * that resolves to a point on Earth; cleared by RETURN (clearFocus) and by
    * REMOVE PIN. One at a time, so a second drop replaces the first.
    */
   pin: EarthPin | null
   /** Drop the pin at a place on Earth. `scaleExp` defaults to the zoom you are at. */
-  dropPin: (position: Position, label: string, scaleExp?: number) => void
+  dropPin: (position: Position, label: string, scaleExp?: number, named?: boolean) => void
   /** Take the pin away. */
   clearPin: () => void
   /** Look at the pin again, at the zoom it was dropped at. */
@@ -894,7 +908,7 @@ export interface CyberspaceState {
   respawn: () => Promise<void>
   /**
    * Respawn from a broken chain (arkinox, 2026-10-07, Q3): first the last
-   * valid position goes into the Position panel's RECENT as "End of Chain"
+   * valid position goes into the View panel's RECENT as "End of Chain"
    * and the first eight hex of the last valid event's id (the invalid
    * spawn's, when no event is valid, Q7), so the place the old chain froze
    * at is one tap away; then an ordinary respawn.
@@ -940,8 +954,13 @@ export interface CyberspaceState {
   /** Whether the pad's VIEW is on: a free view begun from the pad, as opposed to one begun from a pin, a star or BUILD. */
   viewing: () => boolean
   /** Look at a fixed coordinate (a deployed shard), optionally jumping the scale. */
-  /** Look at a place. With `drive` the cursor comes along: the free view, driven from the pad. */
-  focusOn: (position: Position, plane: Plane, label: string, scaleExp?: number, drive?: boolean) => void
+  /**
+   * Look at a place. With `drive` the cursor comes along: the free view,
+   * driven from the pad. `named`: the label is the place's name, true for
+   * this place, or the place a name was given for (CyberFocus.named, as a
+   * hyperspace view hands a focus back).
+   */
+  focusOn: (position: Position, plane: Plane, label: string, scaleExp?: number, drive?: boolean, named?: boolean | NamedPlace) => void
   /** Look at a hidden item: focusOn, framed on the item where it is drawn. */
   focusItem: (position: Position, plane: Plane, label: string, scaleExp?: number) => void
   /**
@@ -4876,8 +4895,8 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
 
   pin: null,
 
-  dropPin: (position, label, scaleExp) => set({
-    pin: { position: { ...position }, plane: 0, scaleExp: scaleExp ?? get().scaleExp, label },
+  dropPin: (position, label, scaleExp, named = false) => set({
+    pin: { position: { ...position }, plane: 0, scaleExp: scaleExp ?? get().scaleExp, label, ...(named ? { named } : {}) },
   }),
 
   clearPin: () => set({ pin: null }),
@@ -4890,12 +4909,15 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
     // BUILD mode starts its build cursor where you are looking (useBuilder,
     // ruling A, 2026-10-07). Standing at the venue is not required to hide
     // something in it.
-    get().focusOn(pin.position, pin.plane, pin.label, pin.scaleExp, true)
+    // A pin dropped for a place found by name carries the name; one dropped
+    // by a click on the globe or for typed numbers reads as a coordinate.
+    get().focusOn(pin.position, pin.plane, pin.label, pin.scaleExp, true, pin.named === true)
   },
 
-  focusOn: (position, plane, label, scaleExp, drive = false) => {
+  focusOn: (position, plane, label, scaleExp, drive = false, named = false) => {
+    const place: NamedPlace | null = named === true ? { position: { ...position }, plane } : named || null
     const next: Partial<CyberspaceState> = {
-      focus: { position: { ...position }, plane, label, drive },
+      focus: { position: { ...position }, plane, label, drive, ...(place ? { named: place } : {}) },
       // A free view brings the cursor along, so the pad moves it there and a
       // message or a shard placed from the view lands there, not at your head.
       ...(drive ? { cursor: { ...position } } : {}),

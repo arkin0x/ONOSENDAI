@@ -216,19 +216,23 @@ describe('RIDE VIA HOSAKA', () => {
     expect(s.cloud.rideError).toMatch(/disagrees with this device's copy of block \d+/)
     expect(s.cloud.rideError).toMatch(/nothing was signed/)
     expect(s.cloud.rideError).toMatch(/the proof is kept/)
-    expect(s.cloud.rideError).toMatch(/RESUME/)
+    // Stored line rows are append-only, so RESUME reads the same copy: the
+    // message must not promise that it checks anything anew.
+    expect(s.cloud.rideError).toMatch(/RESUME fails the same way/)
+    expect(s.cloud.rideError).not.toMatch(/checks it again/)
     expect(s.cloud.rideError).toMatch(/job-ride|job-rid/)
     expect(s.proof.status).toBe('idle')
     // The paid record is still there for RESUME.
-    expect(loadCloudJob()?.ride).toBeTruthy()
+    expect(loadCloudJob(useCyberspace.getState().identity.pubkey)?.ride).toBeTruthy()
     expect(s.cloud.job).toBeTruthy()
 
-    // RESUME checks it again, and this time it agrees: signed, on the proof already paid for.
+    // Once this device's copy is corrected (here, standing in: the proof made to agree),
+    // RESUME signs on the proof already paid for.
     fake.waitForJob.mockResolvedValue(good)
     fake.limits.mockResolvedValue(null)
     await useCyberspace.getState().resumeCloudJob()
     expect(tag(head(), 'A')).toBe('hyperjump')
-    expect(loadCloudJob()).toBeNull()
+    expect(loadCloudJob(useCyberspace.getState().identity.pubkey)).toBeNull()
     expect(fake.submitRide).toHaveBeenCalledTimes(1)
   })
 

@@ -198,8 +198,10 @@ export interface CloudRideCheck {
   /**
    * The block whose opening disagreed with this device's own hash for it, or null.
    * This device's line may be what is wrong, and the proof was paid for, so the
-   * record is kept for the check to run again. Whatever else fails does not depend
-   * on this device's line: the proof is wrong as it stands.
+   * record is kept. A check run again reads the same stored copy (line rows are
+   * append-only) and fails the same way until that copy is corrected. Whatever
+   * else fails does not depend on this device's line: the proof is wrong as it
+   * stands.
    */
   disagreesAt: number | null
 }

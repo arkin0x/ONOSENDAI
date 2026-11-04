@@ -3615,7 +3615,10 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
     if (check.disagreesAt !== null) {
       // The proof and this device's copy of a block disagree, and this device's
       // copy may be the stale one. A paid proof is never thrown away for that.
-      rideFail(`HOSAKA's ride proof disagrees with this device's copy of block ${check.disagreesAt}, so nothing was signed and you did not move. This device's copy may be the wrong one, so the proof is kept: RESUME in the Cloud compute panel checks it again. If it keeps failing, quote job ${final.jobId.slice(0, 8)} to HOSAKA for a refund.`, true)
+      // RESUME is no cure: stored line rows are append-only (the first row at a
+      // height wins, and they persist across reloads), so it reads the same
+      // copy and fails the same way until that copy is corrected.
+      rideFail(`HOSAKA's ride proof disagrees with this device's copy of block ${check.disagreesAt}, so nothing was signed and you did not move, and the proof is kept. RESUME fails the same way until this device's copy of that block is corrected. Quote job ${final.jobId.slice(0, 8)} to HOSAKA for a refund.`, true)
       return false
     }
     if (failed.length > 0) {

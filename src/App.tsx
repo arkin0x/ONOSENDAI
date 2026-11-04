@@ -39,6 +39,7 @@ import { CloudApproval, CreditedModal, InvoiceModal, PaidModal } from './hud/Inv
 import { HosakaOffer } from './hud/HosakaOffer'
 import { ChainConflictPrompt } from './hud/ChainConflict'
 import { ChainStatusModal } from './hud/ChainStatus'
+import { ChainStoreTrial } from './hud/ChainStoreTrial'
 import { BrokenChainChip, BrokenChainModal } from './hud/BrokenChain'
 import { VersionChip } from './hud/VersionChip'
 import { startVersionGate } from './lib/versionGate'
@@ -429,6 +430,7 @@ export default function App(): JSX.Element {
       <ChainConflictPrompt />
       {/* The explanation behind the chain status strip under the LIVE/LOCAL switch. */}
       <ChainStatusModal />
+      <ChainStoreTrial />
       {/* Which action broke your chain, why, and RESPAWN behind its warning. */}
       <BrokenChainModal />
       <button

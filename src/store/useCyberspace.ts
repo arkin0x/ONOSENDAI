@@ -82,7 +82,7 @@ import {
 } from '../lib/space'
 import { confirmChainEvents } from '../lib/chains'
 import { chainDbAvailable, chainWritePause, readStoredChain, setAsideChains, setAsideStoredChain, writeStoredChain, type StoredChain } from '../lib/chainDb'
-import { clearTail, committedHead, deployAllowsMove, inRows, markerValue, migrateToRows, noteCommitted, onChainLost, onChainRefused, probePassedBefore, readRows, readTail, rowsHead, rowsMarked, rowsWanted, saveRows, setAsideRows, setMarker, storeTrial, storeWorksHere, tailOnSave, turnRowsOff, writeTail } from '../lib/chainStore'
+import { chainHeld, chainLost, clearMarker, clearTail, committedHead, deployAllowsMove, holdChain, inRows, markerValue, migrateToRows, noteCommitted, onChainLost, onChainRefused, onChainResave, wentOut, probePassedBefore, readRows, readTail, rowsHead, rowsMarked, rowsWanted, saveRows, setAsideRows, setMarker, storeTrial, storeWorksHere, tailOnSave, takingBack, tookBack, turnRowsOff, writeTail } from '../lib/chainStore'
 import { eventDbAvailable } from '../lib/eventDb/client'
 import type { ChainRead, ChainSource } from '../lib/eventDb/chainRows'
 import { checkSignatures } from '../lib/sigCheck'
@@ -1407,6 +1407,7 @@ function saveChain(events: NostrEvent[], published: Record<string, PublishStatus
   // saves whatever the chain is by then. When the actions changed is noted
   // now, so a respawn made meanwhile is still the newer chain.
   if (hydration?.pubkey === pubkey) { hydration.dirty = true; return }
+  if (foldingStored.has(pubkey)) return
   // The rows hold this chain and cannot be read. Nothing goes over the frozen
   // copy or the rows; what no relay holds is kept until they can.
   if (rowsDown.has(pubkey)) {
@@ -1475,14 +1476,38 @@ function saveChain(events: NostrEvent[], published: Record<string, PublishStatus
 const rowsDown = new Set<string>()
 /** Identities whose head the relays confirmed on this page (confirmHead). */
 const relaysConfirmed = new Set<string>()
+/**
+ * Of those, identities whose rows are gone: this device moved the chain to
+ * rows (the marker says so), and the database answers that it holds none. The
+ * database was cleared under the marker. Every move made since the switch
+ * that no relay took is gone with it, so neither the frozen copy nor the tail
+ * is the chain: the relays are asked first, and only then is the chain in
+ * hand moved into rows again (recoverWiped).
+ */
+const rowsWiped = new Set<string>()
 
 /** Said when a move is refused because the saved chain cannot be read. */
 export const ROWS_DOWN_MESSAGE = 'Your saved chain cannot be read right now. Your move waits until the relays confirm your head.'
+/** Said when a move is refused because the saved chain was cleared from this device. */
+export const ROWS_WIPED_MESSAGE = 'Your saved chain was cleared from this device. Your move waits until the relays confirm your head.'
 
 /** The words a kind 3333 is refused with while the rows are down, or null. */
 function rowsDownRefusal(pubkey: string, events: NostrEvent[]): string | null {
   if (!rowsDown.has(pubkey)) return null
+  // Gone is not unreadable: once the relays have answered, what they hold is all there is, a spawn included.
+  if (rowsWiped.has(pubkey)) return relaysConfirmed.has(pubkey) ? null : ROWS_WIPED_MESSAGE
   return events.length === 0 || !relaysConfirmed.has(pubkey) ? ROWS_DOWN_MESSAGE : null
+}
+
+/** Said while a move that lost to another tab's is being taken back. */
+export const TAKING_BACK_MESSAGE = 'Another tab of yours moved first. Your chain is being read again before you can move.'
+/** Said when a move that lost to another tab's may already be on the relays. */
+export const CHAIN_HELD_MESSAGE = 'Another tab of yours moved first while this tab was sending. Your chain may have forked. Nothing more goes out from this tab. Reload to see what the relays hold.'
+
+/** The words a kind 3333 is refused with after a commit lost, or null. */
+function lostRefusal(pubkey: string): string | null {
+  if (chainHeld(pubkey)) return CHAIN_HELD_MESSAGE
+  return takingBack(pubkey) ? TAKING_BACK_MESSAGE : null
 }
 
 /** A read of a chain in rows failed. */
@@ -1493,6 +1518,9 @@ function rowsAreDown(pubkey: string, why: string): void {
   frozenCopyInHand(pubkey)
   tailInHand(pubkey)
 }
+
+/** Identities whose pending cloud job waits for their rows to be read (resumeCloudJob). */
+const cloudJobWaits = new Set<string>()
 
 /** Per identity, the head the old stores' mark last named here. */
 const markedHead = new Map<string, string>()
@@ -1699,7 +1727,7 @@ async function signEvent(template: EventTemplate, patienceMs?: number, signer: S
     const look = lookBeforeMove()
     if (!(look instanceof Promise ? await look : look)) throw new Error(VERSION_BLOCKED_MESSAGE)
     const s = useCyberspace.getState()
-    const down = rowsDownRefusal(s.identity.pubkey, s.events)
+    const down = rowsDownRefusal(s.identity.pubkey, s.events) ?? lostRefusal(s.identity.pubkey)
     if (down) throw new Error(down)
   }
   if (signer.kind === 'local') {
@@ -1970,16 +1998,24 @@ function takeInStored(pubkey: string, stored: { events: NostrEvent[]; published:
   const movedOn = s.events.every((e) => storedIds.has(e.id))
   const respawned = stored.events[0].id !== s.genesisId && stored.events[0].created_at > s.events[0].created_at
   if (!movedOn && !respawned) return false
-  foldNow(extra)
+  // A fold takes what it folds as on the relays, and saves at once. Here that
+  // is not so: what storage holds and no relay has took no relay's word, and
+  // in rows an acknowledgement once written is never taken back. So the fold
+  // saves nothing, and the one save below says what is really on the relays.
+  const onRelays = new Set(stored.published)
+  foldingStored.add(pubkey)
+  try { foldNow(extra) } finally { foldingStored.delete(pubkey) }
   const now = useCyberspace.getState()
-  const queued = extra.filter((e) => !stored.published.includes(e.id) && now.published[e.id] === 'ok')
-  if (queued.length === 0) return true
-  const published = { ...now.published }
+  const queued = extra.filter((e) => !onRelays.has(e.id) && now.published[e.id] === 'ok')
+  const published = queued.length === 0 ? now.published : { ...now.published }
   for (const e of queued) published[e.id] = 'queued'
-  useCyberspace.setState({ published })
-  saveChain(now.events, published, now.chain)
+  if (queued.length > 0) useCyberspace.setState({ published })
+  if (now.events[0]?.pubkey === pubkey) saveChain(now.events, published, now.chain)
   return true
 }
+
+/** Identities whose fold of another copy is under way: the fold's own save waits for the one that knows what is on the relays (takeInStored). */
+const foldingStored = new Set<string>()
 
 /** Said when another tab's move committed first, and this tab's move was taken back before anything was sent. */
 export const OTHER_TAB_FIRST_MESSAGE = 'Another tab of yours moved first. This move was not sent. Re-aim from where you are now.'
@@ -1992,24 +2028,61 @@ export const OTHER_TAB_FIRST_MESSAGE = 'Another tab of yours moved first. This m
  * fork the chain, so it is set aside, signed, unsent, and said so. Null when
  * nothing of this tab's was taken back.
  */
-function reconcileWithRows(pubkey: string, read: ChainRead): string | null {
+function reconcileWithRows(pubkey: string, read: ChainRead): { taken: boolean; message: string | null } {
   noteCommitted(pubkey, read.events.map((e) => e.id), read.published)
   const s = useCyberspace.getState()
-  if (s.identity.pubkey !== pubkey) return null
+  if (s.identity.pubkey !== pubkey) return { taken: false, message: null }
   const fromDb = chainFrom(pubkey, read, true)
-  if (!fromDb) return null
+  if (!fromDb) return { taken: false, message: null }
   const recorded = new Set(read.events.map((e) => e.id))
   const ours = s.events.filter((e) => !recorded.has(e.id))
   const unsent = ours.filter((e) => s.published[e.id] !== 'ok')
+  // What of this tab's may be on the relays already: sent, on its way, or let go before it landed.
+  const mayBeOut = ours.filter((e) => s.published[e.id] === 'ok' || s.published[e.id] === 'sending' || wentOut(pubkey, e.id))
   const have = new Set(s.events.map((e) => e.id))
   if (unsent.length > 0) void setAsideRows(pubkey, { events: s.events, published: s.events.filter((e) => s.published[e.id] === 'ok').map((e) => e.id), stats: { ...s.chain }, held: s.held, savedAt: chainAt.get(pubkey)?.at ?? 0 })
   putInHand(pubkey, fromDb, have)
   chainAt.delete(pubkey)
-  foldNow(ours.filter((e) => s.published[e.id] === 'ok'))
-  if (unsent.length === 0) return null
+  // A lost action is never folded back, whatever it is marked: the relays bring it if they have it.
+  foldNow(ours.filter((e) => s.published[e.id] === 'ok' && !chainLost(pubkey, e.id)))
+  if (endTakeBack(pubkey, read, mayBeOut)) return { taken: true, message: CHAIN_HELD_MESSAGE }
+  if (unsent.length === 0) return { taken: true, message: null }
   console.warn(`[chain] another tab moved first: ${unsent.length} action(s) of this tab were set aside, unsent`)
   useCyberspace.setState({ proof: { ...IDLE_PROOF, status: 'infeasible', message: OTHER_TAB_FIRST_MESSAGE } })
-  return OTHER_TAB_FIRST_MESSAGE
+  return { taken: true, message: OTHER_TAB_FIRST_MESSAGE }
+}
+
+/**
+ * Per identity, the lost actions that may already be on the relays
+ * (lib/chainStore.ts onChainLost), until the rows are in hand to compare.
+ */
+const lostOut = new Map<string, Set<string>>()
+
+/**
+ * The rows are in hand after another tab moved first, and nothing that lost
+ * is: a take-back is done. An action of this tab that may be on the relays,
+ * is not in the rows and does not carry them on in one line is the other side
+ * of a fork the relays may already hold: then nothing more goes out from this
+ * tab, and the person is told. `candidates` are this tab's actions the rows
+ * lack that may be out; lostOut adds those a lost commit named. True when it held.
+ */
+function endTakeBack(pubkey: string, read: ChainRead, candidates: NostrEvent[] = []): boolean {
+  if (useCyberspace.getState().events.some((e) => chainLost(pubkey, e.id))) return false
+  if (takingBack(pubkey)) tookBack(pubkey)
+  const named = lostOut.get(pubkey) ?? new Set<string>()
+  lostOut.delete(pubkey)
+  const recorded = new Set(read.events.map((e) => e.id))
+  const known = new Set(candidates.map((e) => e.id))
+  const out = candidates.filter((e) => !recorded.has(e.id))
+  // A named action this tab no longer holds cannot be compared, and may be anywhere.
+  const unseen = [...named].filter((id) => !recorded.has(id) && !known.has(id))
+  const outside = unseen.length > 0 || (out.length > 0 && !oneLine(pubkey, read.events.concat(out)))
+  if (!outside) return false
+  holdChain(pubkey)
+  console.warn('[chain] another tab moved first while this tab\'s actions were on their way to the relays: the chain may have forked, and this tab sends nothing more')
+  useCyberspace.setState({ proof: { ...IDLE_PROOF, status: 'infeasible', message: CHAIN_HELD_MESSAGE } })
+  useToast.getState().show({ label: 'CHAIN MAY HAVE FORKED', meta: 'Another tab moved first while this one was sending. Nothing more goes out from here. Reload.', mark: 'block', sticky: true })
+  return true
 }
 
 /**
@@ -2030,15 +2103,44 @@ async function foldRowsOfOtherTabs(pubkey: string): Promise<string | null> {
   if (useCyberspace.getState().identity.pubkey !== pubkey) return null
   noteCommitted(pubkey, read.events.map((e) => e.id), read.published)
   markedHead.set(pubkey, read.headId)
-  if (takeInStored(pubkey, read)) return null
-  return reconcileWithRows(pubkey, read)
+  if (takeInStored(pubkey, read)) return endTakeBack(pubkey, read) ? CHAIN_HELD_MESSAGE : null
+  return reconcileWithRows(pubkey, read).message
 }
 
-onChainLost((pubkey) => {
+/** How long the first take-back retry waits; it doubles to TAKE_BACK_MAX_MS. */
+const TAKE_BACK_RETRY_MS = 1_000
+const TAKE_BACK_MAX_MS = 30_000
+
+/**
+ * A commit lost: another tab's landed first. The lost actions were refused
+ * the moment the answer came (lib/chainStore.ts), so this only puts the rows in
+ * hand. A read that fails is tried again until one lands; meanwhile no move is
+ * signed, nothing is sent, and the person is told. A switch to another
+ * identity ends the tries: the load of this one reads its rows afresh.
+ */
+function takeBackLost(pubkey: string, attempt: number): void {
   void readRows(pubkey).then((read) => {
-    if (read === null || read === 'unreadable' || read === 'timeout') return
-    reconcileWithRows(pubkey, read)
+    if (!takingBack(pubkey) || useCyberspace.getState().identity.pubkey !== pubkey) return
+    if (read !== null && read !== 'unreadable' && read !== 'timeout' && reconcileWithRows(pubkey, read).taken && !takingBack(pubkey)) return
+    if (attempt === 0) {
+      console.warn('[chain] another tab moved first, and the chain could not be read back yet: nothing is signed or sent until it is')
+      useCyberspace.setState({ proof: { ...IDLE_PROOF, status: 'infeasible', message: TAKING_BACK_MESSAGE } })
+      useToast.getState().show({ label: 'CHAIN HELD', meta: 'Another tab moved first. Reading your chain again. Reload if this stays.', mark: 'block', sticky: true })
+    }
+    setTimeout(() => takeBackLost(pubkey, attempt + 1), Math.min(TAKE_BACK_RETRY_MS * 2 ** attempt, TAKE_BACK_MAX_MS))
   })
+}
+
+onChainResave((pubkey) => {
+  const s = useCyberspace.getState()
+  if (s.identity.pubkey !== pubkey || s.events[0]?.pubkey !== pubkey) return false
+  saveChain(s.events, s.published, s.chain, s.held)
+  return true
+})
+
+onChainLost((pubkey, out) => {
+  if (out.length > 0) lostOut.set(pubkey, new Set([...(lostOut.get(pubkey) ?? []), ...out]))
+  takeBackLost(pubkey, 0)
 })
 
 onChainRefused((pubkey, quota) => {
@@ -2123,6 +2225,7 @@ async function confirmHead(retrying: () => void): Promise<string | null | typeof
     if (got) {
       relaysConfirmed.add(pubkey)
       foldNow(got)
+      if (rowsWiped.has(pubkey)) void recoverWiped(pubkey)
       return null
     }
   }
@@ -2367,8 +2470,15 @@ async function hydrateFromRows(pubkey: string, entry: { pubkey: string; dirty: b
     if (takeRows(pubkey, read, null)) entry.dirty = true
     return
   }
-  // No rows: never moved here, or the database was wiped. The old copies say.
-  if (rowsMarked(pubkey)) frozenCopyInHand(pubkey)
+  // No rows under a marker: this device moved the chain here, and the database
+  // was cleared since. The old copies are from before the switch, so neither
+  // they nor the tail are the chain: the relays are, and nothing is signed or
+  // moved until they have answered (recoverWiped).
+  if (rowsMarked(pubkey)) {
+    await wipedUnderMarker(pubkey, entry, ticket, epoch, startedAt)
+    return
+  }
+  // No rows, never moved here: the old copies say.
   if (!await hydrateFromOldStores(pubkey, entry, ticket, epoch, startedAt)) return
   tailInHand(pubkey)
   // Only on the deploy's yes, asked now, so a bad move can be stopped from the version file.
@@ -2376,6 +2486,48 @@ async function hydrateFromRows(pubkey: string, entry: { pubkey: string; dirty: b
   if (hydration !== entry || ticket !== hydrateTicket) return
   const moving = moveToRows(pubkey, startedAt)
   await Promise.race([moving, new Promise((resolve) => setTimeout(resolve, MIGRATE_HOLD_MS))])
+}
+
+/**
+ * The rows are gone under the marker (rowsWiped). The furthest of the frozen
+ * copies and the tail are drawn, nothing is written over either, and nothing
+ * is signed until the relays have answered for the head.
+ */
+async function wipedUnderMarker(pubkey: string, entry: { pubkey: string; dirty: boolean }, ticket: number, epoch: number, startedAt: number): Promise<void> {
+  sayWiped(pubkey)
+  await hydrateFromOldStores(pubkey, entry, ticket, epoch, startedAt)
+  if (hydration !== entry || ticket !== hydrateTicket || useCyberspace.getState().identity.pubkey !== pubkey) return
+  tailInHand(pubkey)
+}
+
+/** The rows are gone under the marker: said once per page, and every move waits for the relays. */
+function sayWiped(pubkey: string): void {
+  if (!rowsWiped.has(pubkey)) {
+    useToast.getState().show({ label: 'SAVED CHAIN CLEARED', meta: 'This device lost its copy of your chain. Moves wait for the relays. Unsent moves may be gone.', mark: 'block', sticky: true })
+  }
+  rowsWiped.add(pubkey)
+  rowsAreDown(pubkey, 'holds no chain under its marker (it was cleared)')
+}
+
+/**
+ * The relays have answered for a chain whose rows were gone: what is in hand
+ * now is all there is. It goes into rows again (or, with the rows off, whole
+ * into the old stores, and the marker goes), and moves are free again.
+ */
+async function recoverWiped(pubkey: string): Promise<void> {
+  if (!rowsWiped.has(pubkey) || useCyberspace.getState().identity.pubkey !== pubkey) return
+  await chainHydrated(pubkey)
+  if (!rowsWiped.has(pubkey) || useCyberspace.getState().identity.pubkey !== pubkey) return
+  if (!rowsWanted()) {
+    rowsWiped.delete(pubkey)
+    rowsDown.delete(pubkey)
+    clearMarker(pubkey)
+    const s = useCyberspace.getState()
+    if (s.events[0]?.pubkey === pubkey) saveChain(s.events, s.published, s.chain, s.held)
+    return
+  }
+  if (!await deployAllowsMove()) return
+  await moveToRows(pubkey, chainAt.get(pubkey)?.at ?? 0)
 }
 
 /** Copies that hold actions the chain moved to rows does not. They stay where they are too; a branch set aside can be found from the rows. */
@@ -2398,7 +2550,7 @@ async function moveToRows(pubkey: string, startedAt: number): Promise<void> {
   if (s.identity.pubkey !== pubkey) return
   const legacyMark = storedMark(pubkey)
   // Nothing to move: an identity with no chain is in rows from its first action.
-  if (s.events.length === 0 || s.events[0].pubkey !== pubkey) { noteCommitted(pubkey, [], []); return }
+  if (s.events.length === 0 || s.events[0].pubkey !== pubkey) { noteCommitted(pubkey, [], []); rowsWiped.delete(pubkey); rowsDown.delete(pubkey); return }
   const events = s.events
   const published = events.filter((e) => s.published[e.id] === 'ok').map((e) => e.id)
   const source: ChainSource = { events, published, stats: { ...s.chain }, held: s.held, savedAt: chainAt.get(pubkey)?.at ?? 0 }
@@ -2419,6 +2571,9 @@ async function moveToRows(pubkey: string, startedAt: number): Promise<void> {
   noteCommitted(pubkey, events.map((e) => e.id), published)
   setMarker(pubkey, legacyMark)
   clearTail(pubkey)
+  // A chain whose rows were gone is in rows again (recoverWiped).
+  rowsWiped.delete(pubkey)
+  rowsDown.delete(pubkey)
   mark('onosendai:chain-moved')
   // Moves made after the hold gave out go in now, as the next save would take them.
   const now = useCyberspace.getState()
@@ -2432,7 +2587,10 @@ async function moveToRows(pubkey: string, startedAt: number): Promise<void> {
  * added, so they are written now.
  */
 function takeRows(pubkey: string, read: ChainRead, blindSince: number | null): boolean {
-  rowsDown.delete(pubkey)
+  const wasDown = rowsDown.delete(pubkey)
+  rowsWiped.delete(pubkey)
+  // A cloud job that waited for a head someone could vouch for (resumeCloudJob).
+  if (wasDown && cloudJobWaits.delete(pubkey)) queueMicrotask(() => { void useCyberspace.getState().resumeCloudJob() })
   noteCommitted(pubkey, read.events.map((e) => e.id), read.published)
   markedHead.set(pubkey, read.headId)
   if (!rowsMarked(pubkey)) setMarker(pubkey, storedMark(pubkey))
@@ -2441,16 +2599,19 @@ function takeRows(pubkey: string, read: ChainRead, blindSince: number | null): b
   if (tail.length === 0) {
     clearTail(pubkey)
     takeStoredChain(pubkey, read, blindSince)
+    endTakeBack(pubkey, read)
     return false
   }
   const merged: ChainRead = { ...read, events: read.events.concat(tail) }
   if (oneLine(pubkey, merged.events) && chainFrom(pubkey, merged, true)) {
     takeStoredChain(pubkey, merged, blindSince)
+    endTakeBack(pubkey, read)
     return true
   }
   void setAsideRows(pubkey, { events: tail, published: [], stats: {}, held: false, savedAt: Date.now() })
   clearTail(pubkey)
   takeStoredChain(pubkey, read, blindSince)
+  endTakeBack(pubkey, read)
   return false
 }
 
@@ -2467,13 +2628,14 @@ async function takeRowsBack(pubkey: string, entry: { dirty: boolean }, ticket: n
   const read = await readRows(pubkey, (late) => {
     if (ticket !== hydrateTicket || late === 'unreadable' || late === null) return
     if (useCyberspace.getState().identity.pubkey !== pubkey) return
-    rowsDown.delete(pubkey)
+    if (rowsDown.delete(pubkey) && cloudJobWaits.delete(pubkey)) queueMicrotask(() => { void useCyberspace.getState().resumeCloudJob() })
     takeStoredChain(pubkey, late, startedAt)
     const s = useCyberspace.getState()
     if (s.events[0]?.pubkey === pubkey) saveChain(s.events, s.published, s.chain, s.held)
   })
   if (ticket !== hydrateTicket || useCyberspace.getState().identity.pubkey !== pubkey) return
-  if (read === null) return
+  // Gone under the marker: the old stores were frozen at the switch, so what they hold is not the chain either.
+  if (read === null) { sayWiped(pubkey); return }
   // Unreadable is never "no chain": moves only in the rows would be lost if the old stores went on without them.
   if (read === 'unreadable' || read === 'timeout') { rowsAreDown(pubkey, read === 'timeout' ? 'did not answer in time' : 'could not be read'); return }
   takeStoredChain(pubkey, read, null)
@@ -6141,6 +6303,19 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
     const record = loadCloudJob()
     // Another identity's job stays on disk for when it is back.
     if (!record || record.pubkey !== identity.pubkey) return
+    // A paid job is held against the head, so the head it is compared with is
+    // the saved chain's: read in whole first, never a copy drawn while the read
+    // is out (a provisional chain after a switch, a frozen copy from before the
+    // rows). A head nobody can vouch for (rows that cannot be read, or that
+    // were cleared, or a move that lost to another tab's still in hand) drops
+    // nothing: the job waits, and is resumed once the rows are read.
+    await chainHydrated(identity.pubkey)
+    if (get().identity.pubkey !== identity.pubkey) return
+    if (rowsDown.has(identity.pubkey) || takingBack(identity.pubkey)) {
+      cloudJobWaits.add(identity.pubkey)
+      set({ cloud: { ...get().cloud, message: 'A pending cloud job waits: your saved chain cannot be read yet. RESUME tries again.' } })
+      return
+    }
     if (get().proof.status === 'computing') return
     if (record.prevEventId !== get().prevEventId) {
       clearCloudJob()

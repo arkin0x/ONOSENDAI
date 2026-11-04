@@ -28,7 +28,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { AtSign, MessageCircle, MessageSquare } from 'lucide-react'
 import { nip19 } from 'nostr-tools'
-import { hiddenRowFor, onShard, publishedShardOnly, type Notification } from '../lib/notifications'
+import { itemToView, publishedShardOnly, type Notification } from '../lib/notifications'
 import { reactionGlyph } from '../lib/social'
 import { parseAction } from '../lib/events'
 import { COMMENT_KIND, PLACEHOLDER } from '../lib/comments'
@@ -74,7 +74,7 @@ function verbOf(n: Notification): string {
   if (n.what === 'mention') return 'tagged you in local chat'
   // A shard you published and never hid here is seen in other clients' feeds,
   // and reacted to there: it is your shard, not a hidden item (2026-11-02).
-  const shardOnly = publishedShardOnly(n.on, useShards.getState().mine)
+  const shardOnly = publishedShardOnly(n.on, useShards.getState().mine, useCyberspace.getState().identity.pubkey)
   // A target found nowhere is kept rather than missed, and said as a possibility.
   const on = n.on.type === 'action' ? 'your move' : n.on.type === 'item' ? (shardOnly ? 'your shard' : n.guessed ? 'what may be your hidden message' : 'your hidden item') : 'your comment'
   if (n.what === 'reaction') return `reacted to ${on}`
@@ -184,18 +184,11 @@ async function openMove(id: string): Promise<string | null> {
   return null
 }
 
-/** Open one of your deployments by what a notification names: an id, an address or its bag (lib/notifications hiddenRowFor). */
+/** Open one of your deployments by what a notification names: an id, an address or its bag (lib/notifications itemToView). */
 async function openItem(on: { id: string | null; lookupId?: string; address?: string; kind?: number }): Promise<string | null> {
-  let dep = hiddenRowFor(useShards.getState().mine, on)
-  // A shard named by id alone (Ditto writes no `a`): its address says whether it is hidden here by reference.
-  const shard = onShard(on)
-  if (!dep && shard && !on.address && on.id !== null) {
-    const ev = await fetchById(on.id)
-    const d = ev?.tags.find((t) => t[0] === 'd')?.[1]
-    if (ev && d !== undefined) dep = hiddenRowFor(useShards.getState().mine, { id: null, address: `${ev.kind}:${ev.pubkey}:${d}` })
-  }
-  if (!dep) return shard ? 'That shard is published, not hidden by you on this device, so there is no place to go.' : 'That item is not one this device hid, so it cannot be opened from here.'
-  goToDeployment(dep)
+  const got = await itemToView(() => useShards.getState().mine, on, useCyberspace.getState().identity.pubkey, fetchById)
+  if ('why' in got) return got.why
+  goToDeployment(got.row)
   return null
 }
 
@@ -223,7 +216,8 @@ function Row({ n, words }: { n: Notification; words?: string }): JSX.Element {
   const [problem, setProblem] = useState<string | null>(null)
   const who = profileLabel(profile, nip19.npubEncode(n.from))
   // Your rows load per identity after the list may already be up (#559): their arrival rewords a shard you hid.
-  const shardOnly = useShards((s) => publishedShardOnly(n.on, s.mine))
+  const me = useCyberspace((s) => s.identity.pubkey)
+  const shardOnly = useShards((s) => publishedShardOnly(n.on, s.mine, me))
   const go = async (): Promise<void> => {
     setBusy(true); setProblem(null)
     const why = await view(n)

@@ -178,6 +178,8 @@ afterEach(async () => {
   // a test left without relays or rows answers within its own patience.
   for (const t of opened.splice(0)) {
     await Promise.race([t.S().confirmHeadNow().catch(() => null).then(() => t.rows.chainRowsSettled()), tick(3_000)])
+    // LOCAL again: a publisher a test started stops retrying, so nothing of it runs on into the next file.
+    t.store.useCyberspace.setState({ live: false })
   }
   await tick(30)
   vi.restoreAllMocks()
@@ -2029,19 +2031,6 @@ describe('follow-ups of #576', () => {
     putBack.push(() => { index.getAll = realGetAll })
   }
 
-  it('LIVE, a load that brings back held moves asks the relays once by itself: they are free with no press, and PUBLISH NOW sends them', { timeout: 30_000 }, async () => {
-    const { m } = await moveOnlyInSpareKey()
-    breakRowReads()
-    relays.confirm = []
-    localStorage.setItem('onosendai:live', '1')
-    const b = await openTab()
-    expect(b.S().events.map((e) => e.id)).toContain(m)
-    await vi.waitFor(() => expect(b.rows.unvouchedAction(pk, m)).toBe(false), { timeout: 5_000, interval: 20 })
-    ;(await import('../../lib/publisher')).startPublisher()
-    b.S().publishNow()
-    await vi.waitFor(() => expect(sent.map((x) => x.id)).toContain(m), { timeout: 5_000, interval: 20 })
-  })
-
   it('held moves are free once the rows answer again, with the relays silent', { timeout: 30_000 }, async () => {
     const { m } = await moveOnlyInSpareKey()
     relays.confirm = null
@@ -2059,6 +2048,19 @@ describe('follow-ups of #576', () => {
     // The late answer: the rows are read, the move is committed like any save, and goes.
     await held.letGo()
     await vi.waitFor(() => expect(sent.map((x) => x.id)).toContain(m), { timeout: 10_000, interval: 20 })
+  })
+
+  it('LIVE, a load that brings back held moves asks the relays once by itself: they are free with no press, and PUBLISH NOW sends them', { timeout: 30_000 }, async () => {
+    const { m } = await moveOnlyInSpareKey()
+    breakRowReads()
+    relays.confirm = []
+    localStorage.setItem('onosendai:live', '1')
+    const b = await openTab()
+    expect(b.S().events.map((e) => e.id)).toContain(m)
+    await vi.waitFor(() => expect(b.rows.unvouchedAction(pk, m)).toBe(false), { timeout: 5_000, interval: 20 })
+    ;(await import('../../lib/publisher')).startPublisher()
+    b.S().publishNow()
+    await vi.waitFor(() => expect(sent.map((x) => x.id)).toContain(m), { timeout: 5_000, interval: 20 })
   })
 
   it('the relays answer with a sibling of a held move: nothing goes out, and the person is asked to choose', { timeout: 30_000 }, async () => {

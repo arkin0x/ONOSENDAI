@@ -305,13 +305,17 @@ export async function askAndOpen(
       const opened = new Set<string>()
       // One version per bag, the newest, and none its author deleted (lib/bagVersions.ts).
       const { bags, deletions } = await bagsToOpen(got.events, askEvents)
-      out.bags.push(...bags)
       out.deletions.push(...deletions)
       for (const ev of bags) {
         const id = ev.tags.find((t) => t[0] === 'd')?.[1]
         const entry = id ? byId.get(id) : undefined
         if (!entry) continue
-        const items = await open(ev, entry).catch(() => [] as Hidden[])
+        const items = await open(ev, entry).catch(() => null)
+        // Current only once it opened. A newest bag that would not open
+        // re-files nothing, and counted as current it took every find of the
+        // older one with it, a room behind a door in it too (review of #593).
+        if (items === null) continue
+        out.bags.push(ev)
         if (items.length > 0 && !opened.has(entry.lookupId)) { opened.add(entry.lookupId); out.opened.push(entry) }
         out.found.push(...items)
       }

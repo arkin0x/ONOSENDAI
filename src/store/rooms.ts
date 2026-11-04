@@ -205,15 +205,20 @@ export function resetReopens(): void { lastReopen.clear() }
 export async function reopenRoom(door: Hidden): Promise<void> {
   const me = useCyberspace.getState().identity.pubkey
   const secret = doorSecret(me, door.eventId)
-  // A secret only said is the room of the door that said it, which opens it again itself.
-  if (!secret || doorSecretOnlySaid(me, door.eventId)) return
+  if (!secret) return
+  // A secret only said is the room of the door that said it, which opens it
+  // again itself. With no such door left here (it went, or is not found any
+  // more), this one fills that room, and only fills it: opening it would keep
+  // the secret as this door's own and say it to the rest of the room.
+  const said = doorSecretOnlySaid(me, door.eventId)
+  if (said && doorsOfRoom(door).some((d) => d.eventId !== door.eventId && doorSecret(me, d.eventId) === secret && !doorSecretOnlySaid(me, d.eventId))) return
   const key = `${me}/${door.eventId}`
   const was = lastReopen.get(key)
   if (was && Date.now() - was.at < (was.found ? REOPEN_FOUND_MS : REOPEN_MISSING_MS)) return
   // Claimed before the wait: scans do not stack up behind a slow relay.
   lastReopen.set(key, { at: Date.now(), found: was?.found ?? false })
   try {
-    const opened = await enterRoom(door, secret)
+    const opened = said ? await fillRoom(door, secret) : await enterRoom(door, secret)
     if (opened) lastReopen.set(key, { at: Date.now(), found: opened.found })
   } catch { /* unreachable now: the next scan asks again */ }
 }

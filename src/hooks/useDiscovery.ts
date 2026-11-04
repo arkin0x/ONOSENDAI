@@ -196,7 +196,7 @@ export function useDiscovery(): void {
       if (id === reqId.current) {
         // Asked before addDiscovered, which records these as seen.
         const fresh = useShards.getState().freshOf(found)
-        useShards.getState().dropStale(events, deletions)
+        useShards.getState().dropStale(events, deletions, found)
         useShards.getState().addDiscovered(found)
         useShards.getState().honorRetractions(keys.keys(), events, deletions)
         useShards.getState().setScanning(false)

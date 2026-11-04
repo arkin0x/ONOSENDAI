@@ -130,6 +130,7 @@ import {
   cloudHopPause,
   cloudHopsSold } from '../lib/hosaka'
 import { cloudVerifyIssue } from '../lib/cloudVerify'
+import { localSidestepFailures } from '../lib/sidestepCheck'
 import {
   clearCloudJob,
   clearKeysTicket,
@@ -288,6 +289,8 @@ const NO_TARGET_MESSAGE = 'This proof was not signed: the move it was computed f
 const CLOUD_MOVE_MISMATCH_MESSAGE = 'This cloud move was not recorded or sent: the signed event does not name the move HOSAKA computed it for. The paid result is kept: RESUME signs it for its own move, from where the job started; moving first makes it worthless.'
 /** A local hop whose proof failed Level 1 under its own signed id: never recorded or sent. */
 const LOCAL_CHECK_FAILED_MESSAGE = 'This hop was not recorded or sent: its proof did not pass the check every reader will make of it'
+/** The same for a sidestep this machine computed (lib/sidestepCheck.ts). */
+const LOCAL_SIDESTEP_CHECK_FAILED_MESSAGE = 'This sidestep was not recorded or sent: its proof did not pass the check every reader will make of it'
 /** A finished proof in the old hop format (no mn, no mp): never signed (hop proof version 2, spec 5.9 to 5.13). */
 const OLD_FORMAT_PROOF_MESSAGE = 'This proof is in the old hop format, which the chain rules no longer accept, so it was not signed. Commit again to make the move with the new proof.'
 /**
@@ -296,6 +299,10 @@ const OLD_FORMAT_PROOF_MESSAGE = 'This proof is in the old hop format, which the
  * head every check of it fails.
  */
 const HEAD_MOVED_MESSAGE = 'Your chain moved while this proof waited to be signed: another device or client of yours published from your head. A proof is bound to the head it was computed from, so this one cannot be signed onto the new head.'
+/** Said when a route step planned before the chain moved is planned again: no proof was computed for it yet, and the move may be this device's own (a kept job signed from the Cloud panel), so it names no other device. */
+const ROUTE_MOVED_MESSAGE = 'Your chain moved on while this route waited.'
+/** A HOSAKA proof the head moved under before it was signed: worthless, so its record goes. */
+const CLOUD_HEAD_MOVED_AT_SIGNING_MESSAGE = 'The chain head moved before this cloud move was signed; the cloud proof was discarded.'
 
 
 /** Matches cyberspace-core's DEFAULT_MAX_COMPUTE_HEIGHT. */
@@ -2288,6 +2295,22 @@ function cutInauthentic(pubkey: string, badKeys: Set<string>): string | null {
   return words
 }
 
+/**
+ * Whether this proof is on the chain: an event whose proof tag is the
+ * proof's own and whose previous is the head it was computed from. The one
+ * sound answer to "was it signed", since the chain can also grow under a
+ * signature by what the relays brought (foldDeferred) while the proof itself
+ * is refused (review of #589).
+ */
+function proofOnChain(events: NostrEvent[], msg: ProofResponse): boolean {
+  if (msg.type !== 'done' || msg.prevEventId === undefined) return false
+  for (let i = events.length - 1; i >= 0; i--) {
+    const tags = events[i].tags
+    if (tags.some((t) => t[0] === 'proof' && t[1] === msg.proofHash) && tags.some((t) => t[0] === 'e' && t[3] === 'previous' && t[1] === msg.prevEventId)) return true
+  }
+  return false
+}
+
 /** Whether a signed cloud move names the job's move: c at its start (x, y, z), C exactly its destination hex. */
 function cloudMoveMatches(event: NostrEvent, move: { fromHex: string; toHex: string } | undefined): boolean {
   if (!move) return false
@@ -2588,6 +2611,8 @@ function claimIntervalFor(kind: SignerKind): number {
 
 /** Installed by the store below: how a cloud step of a route is run (startCloudStep). */
 let cloudStepStarter: ((step: PlanStep, id: number) => Promise<void>) | null = null
+/** The store's headMovedUnder, for startPlanStep: a step whose position moved is planned again from where the chain stands. */
+let stepReplanner: ((walk: boolean, lead?: string) => void) | null = null
 /** Installed by the store below: how a HOSAKA ride record is run to a hyperjump (runCloudRide). */
 let cloudRideRunner: ((record: PendingCloudJob, id: number) => Promise<boolean>) | null = null
 /** How long a finished HOSAKA ride waits for the line to hold a sampled block before it is kept for RESUME. */
@@ -2774,7 +2799,7 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
    * relays there (arkinox, 2026-10-31). Nothing starts again without a
    * press, and the next press walks on from the new head.
    */
-  const headMovedUnder = (walk: boolean): void => {
+  const headMovedUnder = (walk: boolean, lead: string = HEAD_MOVED_MESSAGE): void => {
     const { plan, position } = get()
     if (walk) {
       const message = headMovedWords(get().events, 'Re-aim from where you are now.')
@@ -2786,23 +2811,31 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
       return
     }
     if (!plan) {
-      set({ pendingTarget: null, proof: { ...IDLE_PROOF, status: 'infeasible', message: `${HEAD_MOVED_MESSAGE} Your aim is kept: commit again to compute the move from where you stand now.` } })
+      set({ pendingTarget: null, proof: { ...IDLE_PROOF, status: 'infeasible', message: `${lead} Your aim is kept: commit again to compute the move from where you stand now.` } })
       return
     }
     const next = nextStep(position, plan.target, plan.ceilings)
     if (!next) {
-      set({ plan: null, pendingTarget: null, proof: { ...IDLE_PROOF, status: 'infeasible', message: `${HEAD_MOVED_MESSAGE} Where you stand now is already the end of the route.` } })
+      // A funded route has nothing left to buy: its cloud flow ends with it, as
+      // when its last step lands (finishProof), not at the next X.
+      const cloud = get().cloud
+      set({
+        plan: null,
+        pendingTarget: null,
+        proof: { ...IDLE_PROOF, status: 'infeasible', message: `${lead} Where you stand now is already the end of the route.` },
+        ...(cloud.status === 'paid' ? { cloud: { ...cloud, status: 'idle', message: null } } : {}),
+      })
       return
     }
     if (next.source === 'cloud') {
       set({
-        plan: { ...plan, status: 'paused', step: next, awaiting: null, message: `${HEAD_MOVED_MESSAGE} The next step is one HOSAKA computes, so RESUME pays for it again from where you stand now.` },
+        plan: { ...plan, status: 'paused', step: next, awaiting: null, message: `${lead} The next step is one HOSAKA computes, so RESUME buys it from where you stand now.` },
         pendingTarget: null,
         proof: IDLE_PROOF,
       })
       return
     }
-    set({ plan: { ...plan, status: 'running', step: next, awaiting: null, message: `${HEAD_MOVED_MESSAGE} This step is being computed again from where you stand now.` } })
+    set({ plan: { ...plan, status: 'running', step: next, awaiting: null, message: `${lead} This step is being computed again from where you stand now.` } })
     startPlanStep()
   }
 
@@ -3328,9 +3361,16 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
         stagedCubes = r.keys_pending === true
       }
     }
-    const before = get().events.length
     await get().finishProof(msg)
-    if (get().events.length === before) {
+    if (!proofOnChain(get().events, msg)) {
+      // Another identity is in hand now (a switch while the signer was
+      // asked): the job is the first one's, still signable when it comes
+      // back, so its record stays, and nothing is said to this one.
+      if (get().identity.pubkey !== final.pubkey) return
+      // Refused because the head moved: the result is bound to a head that is
+      // gone, so it is worthless and its record goes (the route, if any, was
+      // planned again by finishProof).
+      if (get().prevEventId !== final.prevEventId) { cloudProofOrphaned(final.jobId, id === requestId); return }
       if (id !== requestId) return
       // The signer refused. The verified result is still good, so the record stays for RESUME.
       set({ cloud: { ...get().cloud, status: 'error', message: `${get().plan?.message ?? get().proof.message ?? 'Signing failed.'} The verified cloud result is kept.` } })
@@ -3373,7 +3413,71 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
     })
   }
 
+  /**
+   * A HOSAKA proof of this identity's that the head moved under before it
+   * was signed: its record is dropped. The caller makes sure the record is
+   * this identity's; another identity's job is never touched. The Cloud
+   * panel says so while this request still owns it (`say`); once the route
+   * was planned again and went on (a newer request id), it is only settled,
+   * so it neither flips to an error under a running local step nor stays on
+   * VERIFYING. A newer cloud flow that owns the panel is left alone.
+   */
+  const cloudProofOrphaned = (jobId: string, say: boolean): void => {
+    if (loadCloudJob()?.jobId === jobId) clearCloudJob()
+    const cloud = get().cloud
+    if (cloud.job !== null && cloud.job.jobId !== jobId) return
+    const settled = cloud.status === 'idle' || cloud.status === 'error' || cloud.status === 'paid' || cloud.status === 'verifying'
+    if (!settled) return
+    set({
+      cloud: say
+        ? { ...cloud, status: 'error', job: null, message: CLOUD_HEAD_MOVED_AT_SIGNING_MESSAGE, progress: null }
+        : { ...cloud, status: get().plan ? 'paid' : 'idle', job: null, message: get().plan ? 'Route funded.' : null, progress: null },
+    })
+  }
+
+  /**
+   * The kept job a declined cloud proof came from: the record on disk for
+   * this identity, bound to the head the proof was, for the same move.
+   */
+  const keptJobFor = (msg: Extract<ProofResponse, { type: 'done' }>): PendingCloudJob | null => {
+    const record = loadCloudJob()
+    if (!record || record.pubkey !== get().identity.pubkey || !msg.move) return null
+    if (record.prevEventId !== msg.prevEventId) return null
+    return positionHex(positionFromWire(record.to), record.plane) === msg.move.toHex ? record : null
+  }
+
+  /**
+   * A kept HOSAKA proof signed by SIGN AND CONTINUE: the same bookkeeping
+   * runCloud does for one signed at once. The record goes, the cost joins
+   * the spent tally, the job is the last one, and the words that said the
+   * result was kept go with it. A next cloud step the route already started
+   * keeps its own status and words.
+   */
+  const keptCloudStepSigned = (record: PendingCloudJob, msg: Extract<ProofResponse, { type: 'done' }>): void => {
+    if (loadCloudJob()?.jobId === record.jobId) clearCloudJob()
+    const cost = msg.costMsats ?? record.costMsats
+    set({ spentMsats: addSpent(get().genesisId, cost) })
+    useToast.getState().show({ label: `CLOUD COMPUTE JOB COMPLETE - ${record.jobId.slice(0, 8)}`, meta: 'Thanks for using HOSAKA!', mark: 'hosaka' })
+    const cloud = get().cloud
+    const last = { jobId: record.jobId, action: record.action, costMsats: cost, lookupId: msg.lookupId ?? null, at: Date.now() }
+    const settled = cloud.status === 'idle' || cloud.status === 'error' || cloud.status === 'paid'
+    set({
+      cloud: settled
+        ? {
+          ...IDLE_CLOUD,
+          balance: cloud.balance,
+          limits: cloud.limits,
+          provider: cloud.provider,
+          status: get().plan ? 'paid' : 'idle',
+          message: get().plan ? 'Route funded.' : null,
+          last,
+        }
+        : { ...cloud, last },
+    })
+  }
+
   cloudStepStarter = startCloudStep
+  stepReplanner = headMovedUnder
 
   /**
    * A HOSAKA ride that ended without a hyperjump. The head is let go (the
@@ -4024,7 +4128,30 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
       return
     }
     if (plan.awaiting) {
-      const msg = plan.awaiting
+      // RESUME is a new press. Whatever bumped the request id while the route
+      // was paused (a dismissed cloud error, cancelCloud, a top-up) would make
+      // finishProof drop the kept proof without a word, and the route would
+      // read running until STOP ROUTE: it is signed under a fresh id instead,
+      // which also stops anything that started meanwhile. finishProof still
+      // refuses it if the head has moved.
+      const kept = plan.awaiting
+      // Already signed: the Cloud panel's RESUME finished the same kept job on
+      // this device. Nothing is signed twice and no other device is named;
+      // the route goes on from where that step landed.
+      if (proofOnChain(get().events, kept)) {
+        const next = nextStep(get().position, plan.target, plan.ceilings)
+        if (!next) {
+          const cloud = get().cloud
+          set({ plan: null, pendingTarget: null, ...(cloud.status === 'paid' ? { cloud: { ...cloud, status: 'idle', message: null } } : {}) })
+          return
+        }
+        set({ plan: { ...plan, status: 'running', message: null, awaiting: null, done: plan.done + 1, step: next } })
+        startPlanStep()
+        return
+      }
+      const msg = kept.id === requestId ? kept : { ...kept, id: ++requestId }
+      // A kept HOSAKA proof's job, for the bookkeeping once it is signed.
+      const job = msg.type === 'done' && msg.source === 'cloud' ? keptJobFor(msg) : null
       // The kept proof is for the paused step: its destination is the step's.
       set({
         plan: { ...plan, status: 'running', message: null, awaiting: null },
@@ -4032,17 +4159,18 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
         // A kept cloud proof goes in its job's plane (finishProof signs it there either way).
         ...(msg.type === 'done' && msg.move ? { plane: coordToXyz(hexToCoord(msg.move.toHex)).plane } : {}),
       })
-      void get().finishProof(msg)
+      void get().finishProof(msg).then(() => {
+        if (!job || msg.type !== 'done') return
+        // Another identity in hand (a switch while the signer was asked): its
+        // job stays for when it comes back, and nothing is said to this one.
+        if (get().identity.pubkey !== job.pubkey) return
+        if (proofOnChain(get().events, msg)) keptCloudStepSigned(job, msg)
+        else if (get().prevEventId !== job.prevEventId) cloudProofOrphaned(job.jobId, msg.id === requestId)
+      })
       return
     }
-    // A step paused with no proof was planned from where the chain stood then.
-    // Another device or tab may have moved it since: computed as planned, it
-    // would name the new head and the old position, which no reader verifies
-    // (review of #581). finishProof cannot see that, since the head matches.
-    if (plan.step.source === 'local' && !samePosition(plan.step.from, get().position)) {
-      headMovedUnder(false)
-      return
-    }
+    // A step planned before another device moved the chain is planned again
+    // from where it stands now (startPlanStep).
     set({ plan: { ...plan, status: 'running', message: null } })
     startPlanStep()
   },
@@ -4292,6 +4420,14 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
     if (msg.mode === 'hop' && msg.source !== 'cloud') {
       const failed = localHopFailures(event, standing?.coordHex ?? '', newPosition, plane, prevEventId)
       if (failed.length > 0) { refuseSigning(msg, `${LOCAL_CHECK_FAILED_MESSAGE} (${failed.join(', ')})`, false); return }
+    }
+    // A sidestep computed here is checked the same way (spec 8.7.2), off the
+    // main thread, since its temporal root can take a second on a phone
+    // (lib/sidestepCheck.ts). A cloud sidestep was checked before signing.
+    if (msg.mode === 'sidestep' && msg.source !== 'cloud') {
+      const failed = await localSidestepFailures(event, standing?.coordHex ?? '', newPosition, plane, prevEventId)
+      if (msg.id !== requestId) return
+      if (failed.length > 0) { refuseSigning(msg, `${LOCAL_SIDESTEP_CHECK_FAILED_MESSAGE} (${failed.join(', ')})`, false); return }
     }
     // A cloud move was verified for the move its job was bought for; the
     // event just signed must be that move: its c where the job started (x, y
@@ -5893,6 +6029,18 @@ function startPlanStep(): void {
       pendingTarget: null,
       proof: { ...IDLE_PROOF, status: 'infeasible', message: noMove },
     })
+    return
+  }
+  // The step was planned from where the chain stood then. Another device or
+  // tab may have moved it while the route waited (a quote, PAY, a deposit, a
+  // RESUME): computed here as planned, it would name the new head and the old
+  // position, which no reader verifies (review of #581); bought from HOSAKA,
+  // the job would be paid for and then refused at signing (cloud move
+  // mismatch). It is planned again from where the chain stands now. Every way
+  // a step starts comes here, and this is the only door to a cloud submit
+  // (cloudStepStarter).
+  if (!samePosition(plan.step.from, s.position)) {
+    stepReplanner?.(plan.walk === true, ROUTE_MOVED_MESSAGE)
     return
   }
   const issue = movementCapabilityIssue(plan.step.kind, plan.step.from, plan.step.to, s.plane, plan.step.source === 'cloud' ? 'cloud' : 'local')

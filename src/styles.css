@@ -3715,6 +3715,70 @@ kbd {
   }
 }
 
+/* VIEW's fly, forward over back (ViewFlyButtons.tsx; arkinox, 2026-11-02):
+   the LOOK ball's glass, at the menu button's size, in the dock above the
+   button that the LOOK ball and the route overlay use. Neither is up in VIEW.
+   Tinted VIEW's amber, the pad's own color for the mode. */
+.flyorbs {
+  position: fixed;
+  left: var(--menu-left);
+  bottom: calc(var(--menu-bottom) + var(--menu-size) + var(--routeov-gap));
+  z-index: 100;
+  display: flex;
+  flex-direction: column;
+  gap: var(--routeov-gap);
+}
+.flyorb {
+  position: relative;
+  width: var(--menu-size);
+  height: var(--menu-size);
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  border: 1px solid rgba(255, 176, 32, 0.45);
+  background: radial-gradient(circle at 36% 32%, rgba(255, 176, 32, 0.26), rgba(6, 14, 22, 0.72) 62%, rgba(6, 14, 22, 0.88));
+  box-shadow: 0 0 12px rgba(255, 176, 32, 0.12), inset 0 0 16px rgba(0, 0, 0, 0.45);
+  backdrop-filter: blur(6px);
+  color: rgb(255, 196, 92);
+  cursor: pointer;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+}
+.flyorb::before,
+.flyorb::after {
+  content: '';
+  position: absolute;
+  inset: 5px;
+  border-radius: 50%;
+  border: 1px solid rgba(200, 245, 255, 0.12);
+  pointer-events: none;
+}
+.flyorb::before { transform: scaleX(0.42); }
+.flyorb::after { transform: scaleY(0.42); }
+.flyorb svg { position: relative; z-index: 1; filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.6)); }
+.flyorb:active {
+  background: radial-gradient(circle at 36% 32%, rgba(255, 176, 32, 0.5), rgba(6, 14, 22, 0.66) 62%, rgba(6, 14, 22, 0.86));
+  border-color: rgba(255, 176, 32, 0.8);
+}
+/* Over the HOSAKA mark while a job computes, as the LOOK ball stands. */
+.app:has(.hosaka-pulse) .flyorbs {
+  bottom: calc(var(--menu-bottom) + var(--menu-size) * (1 + 334 / 308) + 2 * var(--routeov-gap));
+}
+/* A short screen (a phone on its side): side by side, beside the menu
+   button, so the top left's chips keep their room. */
+@media (max-height: 520px) {
+  .flyorbs {
+    flex-direction: row;
+    left: calc(var(--menu-left) + var(--menu-size) + var(--routeov-gap));
+    bottom: var(--menu-bottom);
+  }
+  .app:has(.hosaka-pulse) .flyorbs { bottom: var(--menu-bottom); }
+}
+
 /* The clipboard row: first in the bottom-left column, so the pad, TURN and
    the color column in the other corner never stand on it. */
 .benchclip {

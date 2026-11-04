@@ -22,7 +22,7 @@
 import type { Filter } from 'nostr-tools/filter'
 import { HIDDEN_KIND } from './hidden'
 import type { NostrEvent } from './events'
-import { keepsOver, lookupOf, verifiedFresh } from './foundCache'
+import { deletedAmong, keepsOver, lookupOf, validDeletions, verifiedFresh } from './foundCache'
 
 /** NIP-09's kind. */
 const DELETION = 5
@@ -46,11 +46,9 @@ export function retractedAt(address: string, deletions: readonly NostrEvent[]): 
   return at
 }
 
-/** Whether a bag's own author deleted it: by its id, or by its address at a time no earlier than it. */
+/** Whether a bag's own author deleted it: the found cache's rule (foundCache.ts deletedAmong). */
 export function bagDeleted(bag: NostrEvent, deletions: readonly NostrEvent[]): boolean {
-  const address = bagAddressOf(bag)
-  return deletions.some((d) => d.kind === DELETION && d.pubkey === bag.pubkey && d.tags.some((t) =>
-    (t[0] === 'e' && t[1] === bag.id) || (t[0] === 'a' && t[1] === address && d.created_at >= bag.created_at)) && verifiedFresh(d))
+  return deletedAmong(bag, validDeletions(deletions))
 }
 
 /** The newest version of each bag address, in the order first seen; a bag without a `d` is not a bag and is left out. */
@@ -67,7 +65,8 @@ export function newestBags(events: readonly NostrEvent[]): NostrEvent[] {
 
 /** The bags to open: the newest of each address, unless its author deleted it. */
 export function currentBags(events: readonly NostrEvent[], deletions: readonly NostrEvent[]): NostrEvent[] {
-  return newestBags(events).filter((b) => !bagDeleted(b, deletions))
+  const valid = validDeletions(deletions)
+  return newestBags(events).filter((b) => !deletedAmong(b, valid))
 }
 
 /** One read of the relays, merged (lib/relay query). */
@@ -96,7 +95,8 @@ export async function bagsToOpen(events: readonly NostrEvent[], ask: AskEvents, 
   const newest = newestBags(events)
   if (newest.length === 0 && alsoAddresses.length === 0) return { bags: [], deletions: [] }
   const deletions = await askBagDeletions(newest, ask, alsoAddresses)
-  return { bags: newest.filter((b) => !bagDeleted(b, deletions)), deletions }
+  const valid = validDeletions(deletions)
+  return { bags: newest.filter((b) => !deletedAmong(b, valid)), deletions }
 }
 
 /** What staleFinds needs of a find (lib/hidden Hidden). */
@@ -107,20 +107,27 @@ export interface FindOfBag {
   bagId: string
   bagAt?: number
   chestId?: string
-  room?: unknown
+  room?: { doorId: string }
 }
 
 /**
  * The finds already on screen that a scan's answer takes away: one read from
  * a bag whose address now holds a newer version (the scan opens that one and
  * files again whatever it still holds), or whose author deleted it with no
- * newer version standing. A find out of a chest goes with its chest. Finds
- * in a room are read by their door (store/rooms.ts), not by a scan, and are
- * left as they are; so is anything whose address the answer says nothing
- * about, since silence removes nothing.
+ * newer version standing. Anything whose address the answer says nothing
+ * about stays, since silence removes nothing.
+ *
+ * `refiled`: the finds the scan read out of the bags it opened, which it
+ * files again at once. A chest or a door among them was only re-filed under
+ * its newer bag, not taken away, so what is in it stays: the hider changing
+ * something else in that bag must not empty a room a finder has open, maybe
+ * from inside (a room is read by its door, store/rooms.ts, and reopenRoom
+ * does not read it again for minutes). A chest or a door that went and was
+ * not re-filed takes what is in it, however deep (review of #593).
  */
-export function staleFinds(finds: Readonly<Record<string, FindOfBag>>, bags: readonly NostrEvent[], deletions: readonly NostrEvent[]): string[] {
+export function staleFinds(finds: Readonly<Record<string, FindOfBag>>, bags: readonly NostrEvent[], deletions: readonly NostrEvent[], refiled: ReadonlySet<string>): string[] {
   const current = new Map(bags.map((b) => [bagAddressOf(b), b]))
+  const valid = validDeletions(deletions)
   const out = new Set<string>()
   for (const h of Object.values(finds)) {
     if (h.chestId || h.room) continue
@@ -130,15 +137,17 @@ export function staleFinds(finds: Readonly<Record<string, FindOfBag>>, bags: rea
       if (now.id !== h.bagId && now.created_at > (h.bagAt ?? 0)) out.add(h.eventId)
       continue
     }
-    const byId = deletions.some((d) => d.kind === DELETION && d.pubkey === h.author && d.tags.some((t) => t[0] === 'e' && t[1] === h.bagId) && verifiedFresh(d))
-    const at = retractedAt(address, deletions)
-    if (byId || (at > 0 && at >= (h.bagAt ?? 0))) out.add(h.eventId)
+    // The bag it was read from, as far as the find knows it: the same rule as any bag's.
+    if (deletedAmong({ id: h.bagId, pubkey: h.author, created_at: h.bagAt ?? 0, tags: [['d', h.lookupId]] }, valid)) out.add(h.eventId)
   }
-  // What came out of a chest that went, however deep.
-  for (let grew = out.size > 0; grew;) {
+  // What came out of a chest that went, or stood behind a door that went,
+  // however deep; never through one the newer bag still holds.
+  const gone = new Set([...out].filter((id) => !refiled.has(id)))
+  for (let grew = gone.size > 0; grew;) {
     grew = false
     for (const h of Object.values(finds)) {
-      if (h.chestId && out.has(h.chestId) && !out.has(h.eventId)) { out.add(h.eventId); grew = true }
+      const holder = h.chestId ?? h.room?.doorId
+      if (holder !== undefined && gone.has(holder) && !gone.has(h.eventId)) { gone.add(h.eventId); out.add(h.eventId); grew = true }
     }
   }
   return [...out]

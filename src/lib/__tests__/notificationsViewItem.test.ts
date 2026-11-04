@@ -13,7 +13,7 @@
  * shard that is only published, hidden nowhere, is no hidden item at all.
  */
 import { describe, expect, it } from 'vitest'
-import { classify, hiddenRowFor, publishedShardOnly, type Notification } from '../notifications'
+import { NOT_HIDDEN_HERE, SHARD_NOT_HIDDEN, SHARD_UNCHECKED, classify, hiddenRowFor, itemToView, publishedShardOnly, type Notification } from '../notifications'
 import type { NostrEvent } from '../events'
 
 const ME = 'e8ed3798c6ffebffa08501ac39e271662bfd160f688f94c45d692d8767dd345a'
@@ -63,11 +63,62 @@ describe('a reaction to a shard that is only published', () => {
   it('is not called a hidden item, and is no refusal waiting to happen', () => {
     const on = onOf(reaction([['e', 'd434cce2'.padEnd(64, '0')], ['k', '33331']], '❤️'))
     expect(hiddenRowFor([byReference, moved], on as never)).toBeUndefined()
-    expect(publishedShardOnly(on, [byReference, moved])).toBe(true)
+    expect(publishedShardOnly(on, [byReference, moved], ME)).toBe(true)
   })
 
   it('a hidden one is not "only published"', () => {
     const on = onOf(reaction([['e', NOW], ['a', ADDRESS], ['k', '33331']]))
-    expect(publishedShardOnly(on, [byReference])).toBe(false)
+    expect(publishedShardOnly(on, [byReference], ME)).toBe(false)
+  })
+})
+
+describe('review of #590', () => {
+  const OTHER = '99'.padEnd(64, '9')
+
+  it('a reaction tagging him on SOMEONE ELSE\'s shard is not "your shard"', () => {
+    const on = onOf(reaction([['e', '5'.repeat(64)], ['a', `33331:${OTHER}:their-thing`], ['k', '33331']]))
+    expect(publishedShardOnly(on, [], ME)).toBe(false)
+  })
+
+  /** A fetch that answers with the shard the id names, and counts its calls. */
+  function fetching(answer: { kind: number; pubkey: string; tags: string[][] } | null | Error): { fetch: (id: string) => Promise<{ kind: number; pubkey: string; tags: string[][] } | null>; calls: string[] } {
+    const calls: string[] = []
+    return { calls, fetch: async (id) => { calls.push(id); if (answer instanceof Error) throw answer; return answer } }
+  }
+  const skulls = { kind: 33331, pubkey: ME, tags: [['d', 'maze-kit/cistern/decor/bones/cistern-decor-bones-skulls']] }
+
+  it('Ditto, no `a`: the shard is fetched and its address finds the row', async () => {
+    const f = fetching(skulls)
+    const on = onOf(reaction([['e', NOW], ['k', '33331']]))
+    expect(await itemToView(() => [moved, byReference], on as never, ME, f.fetch)).toEqual({ row: byReference })
+    expect(f.calls).toEqual([NOW])
+  })
+
+  it('Ditto, no `a`: a shard of his hidden nowhere here says it is only published', async () => {
+    const f = fetching({ ...skulls, tags: [['d', 'maze-kit/locks/doors/door-hall/door-hall-open']] })
+    const on = onOf(reaction([['e', NOW], ['k', '33331']]))
+    expect(await itemToView(() => [byReference], on as never, ME, f.fetch)).toEqual({ why: SHARD_NOT_HIDDEN })
+  })
+
+  it('the fetch fails, or finds nothing: it says it could not check, never that it was not hidden', async () => {
+    const on = onOf(reaction([['e', NOW], ['k', '33331']]))
+    expect(await itemToView(() => [moved], on as never, ME, fetching(new Error('no relay answered')).fetch)).toEqual({ why: SHARD_UNCHECKED })
+    expect(await itemToView(() => [moved], on as never, ME, fetching(null).fetch)).toEqual({ why: SHARD_UNCHECKED })
+  })
+
+  it('with an `a`, nothing is fetched: his own shard is "published", someone else\'s is the plain refusal', async () => {
+    const f = fetching(skulls)
+    const own = onOf(reaction([['e', NOW], ['a', `33331:${ME}:not-hidden`], ['k', '33331']]))
+    const theirs = onOf(reaction([['e', NOW], ['a', `33331:${OTHER}:their-thing`], ['k', '33331']]))
+    expect(await itemToView(() => [byReference], own as never, ME, f.fetch)).toEqual({ why: SHARD_NOT_HIDDEN })
+    expect(await itemToView(() => [byReference], theirs as never, ME, f.fetch)).toEqual({ why: NOT_HIDDEN_HERE })
+    expect(f.calls).toEqual([])
+  })
+
+  it('anything that is not a shard is the plain refusal, and is not fetched', async () => {
+    const f = fetching(skulls)
+    const on = onOf(reaction([['e', '6'.repeat(64)], ['k', '3330']]))
+    expect(await itemToView(() => [moved], on as never, ME, f.fetch)).toEqual({ why: NOT_HIDDEN_HERE })
+    expect(f.calls).toEqual([])
   })
 })

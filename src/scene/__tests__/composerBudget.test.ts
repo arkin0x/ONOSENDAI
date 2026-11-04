@@ -6,7 +6,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { describe, expect, it } from 'vitest'
-import { composerBytes, composerSamples, screenPixels } from '../composerBudget'
+import { canvasPixels, composerBytes, composerSamples } from '../composerBudget'
 
 const MB = 1e6
 const P_1080 = 1920 * 1080
@@ -14,14 +14,14 @@ const P_1440 = 2560 * 1440
 const P_4K = 3840 * 2160
 
 describe('the composer budget', () => {
-  it('keeps the scene buffer under 210 MB at 1440p, where 8 samples asked for 383 MB', () => {
-    expect(composerBytes(P_1440, 8) / MB).toBeCloseTo(383.5, 0)
-    expect(composerBytes(P_1440, composerSamples(P_1440)) / MB).toBeLessThan(210)
+  it('keeps the scene buffer under 225 MB at 1440p, where 8 samples asked for 398 MB', () => {
+    expect(composerBytes(P_1440, 8) / MB).toBeCloseTo(398.1, 0)
+    expect(composerBytes(P_1440, composerSamples(P_1440)) / MB).toBeLessThan(225)
   })
 
-  it('keeps the scene buffer under 270 MB at 4K, where 8 samples asked for 863 MB', () => {
-    expect(composerBytes(P_4K, 8) / MB).toBeCloseTo(862.9, 0)
-    expect(composerBytes(P_4K, composerSamples(P_4K)) / MB).toBeLessThan(270)
+  it('keeps the scene buffer under 300 MB at 4K, where 8 samples asked for 896 MB', () => {
+    expect(composerBytes(P_4K, 8) / MB).toBeCloseTo(895.8, 0)
+    expect(composerBytes(P_4K, composerSamples(P_4K)) / MB).toBeLessThan(300)
   })
 
   it('leaves 1080p and below four samples, so a phone sees no change from what its GPU allowed', () => {
@@ -32,11 +32,17 @@ describe('the composer budget', () => {
   })
 
   it('counts the device pixels the canvas draws, at the ratio it clamps to', () => {
-    expect(screenPixels({ screen: { width: 2560, height: 1440 }, devicePixelRatio: 1 })).toBe(P_1440)
-    expect(screenPixels({ screen: { width: 2560, height: 1440 }, devicePixelRatio: 1.5 })).toBe(P_4K)
+    expect(canvasPixels({ innerWidth: 2560, innerHeight: 1440, devicePixelRatio: 1 })).toBe(P_1440)
+    expect(canvasPixels({ innerWidth: 2560, innerHeight: 1440, devicePixelRatio: 1.5 })).toBe(P_4K)
     // Scene.tsx draws at 1 to 2, whatever the device says.
-    expect(screenPixels({ screen: { width: 1000, height: 1000 }, devicePixelRatio: 3 })).toBe(4_000_000)
-    expect(screenPixels({ screen: { width: 1000, height: 1000 }, devicePixelRatio: 0.5 })).toBe(1_000_000)
+    expect(canvasPixels({ innerWidth: 1000, innerHeight: 1000, devicePixelRatio: 3 })).toBe(4_000_000)
+    expect(canvasPixels({ innerWidth: 1000, innerHeight: 1000, devicePixelRatio: 0.5 })).toBe(1_000_000)
+  })
+
+  it('browser zoom changes nothing: 1440p at 125% is the same canvas (review of #561)', () => {
+    const zoomed = canvasPixels({ innerWidth: 2048, innerHeight: 1152, devicePixelRatio: 1.25 })
+    expect(zoomed).toBe(P_1440)
+    expect(composerSamples(zoomed)).toBe(4)
   })
 })
 

@@ -37,7 +37,7 @@ import { BG } from '../lib/palette'
 import { GRID_RADIUS, cellDelta, claimScreenAxes, levelScreenAxes, originShift, renderDirection, viewAxes, type Position } from '../lib/space'
 import { carryOrbit } from '../lib/zoomOrbit'
 import { AVATAR_LERP_MS, lerpRemaining } from '../lib/avatarLerp'
-import { walkEye, walkFall } from '../lib/walkEye'
+import { setWalkFacing, walkEye, walkFacing, walkFall } from '../lib/walkEye'
 import { carryLook, clearWalkLook, lookRadPerPx, takeKeepWalkLook, takeWalkLook, takeWalkLookRad, walkLookBy } from '../lib/walkLook'
 import { tickFall, useWalk } from '../store/useWalk'
 import { orbitOffset } from '../workshop/benchAxes'
@@ -273,11 +273,17 @@ function ScreenAxes(): null {
     // axis the other two did not claim" kept its original sign, so R and F
     // pushed the wrong way once an orbit flipped that axis.
     state.camera.matrixWorld.extractBasis(right.current, up.current, out.current)
+    // WALK's facing, unsnapped, for a forward or backward press's diagonal
+    // and wall slide (lib/walkSlide.ts); read before levelScreenAxes lays
+    // the basis flat in place.
+    const walking = useCyberspace.getState().walking
+    if (walking) setWalkFacing(right.current, out.current, axes)
+    else walkFacing.valid = false
     // The permutation itself is claimScreenAxes, in space.ts, so the property
     // that makes it correct (three different axes for any camera angle) can be
     // asserted without a camera. Under GRAVITY in WALK the keys are level
     // (levelScreenAxes): looking down a stair never turns W into down.
-    const screen = useCyberspace.getState().walking && useWalk.getState().gravity
+    const screen = walking && useWalk.getState().gravity
       ? levelScreenAxes(right.current, up.current, out.current, axes)
       : claimScreenAxes(right.current, up.current, out.current, axes)
     useCyberspace.getState().setScreenAxes(screen)

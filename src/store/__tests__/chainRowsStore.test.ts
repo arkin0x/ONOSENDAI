@@ -1308,9 +1308,11 @@ describe('after a lost commit (review of 2026-11-04, F1, F1b, F4)', () => {
     } finally { proto.put = real }
     const moveA = await signMove(a, 'y')
     await a.rows.chainRowsSettled()
-    // Who won is A's own commit's answer. On a loaded machine B's retry can land
-    // its refused move first; then A's move is the one that lost, which is no fork either.
-    const aWon = a.rows.committedHead(pk).headId === moveA
+    // Who won is what the rows took first. On a loaded machine B's retry can land
+    // its refused move before A's; then A's move is the one that lost, which is no fork either.
+    let ids: string[] = []
+    await vi.waitFor(async () => { ids = (await rowsNow())!.events.map((e) => e.id); expect(ids.includes(moveA) || ids.includes(x)).toBe(true) }, { timeout: 10_000, interval: 50 })
+    const aWon = ids.includes(moveA)
     const see = blindTheLook()
     let y: string
     try { y = await signMove(b) } finally { see() }

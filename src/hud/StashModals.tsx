@@ -5,10 +5,12 @@
  * State in hud/stash.ts; mounted once at the app root.
  */
 
+import { useState } from 'react'
 import { createPortal } from 'react-dom'
 import { formatCellSize } from 'sno-core/scale'
 import { cashuLabel } from '../lib/cashu'
-import { useShards, type MyDeployment } from '../store/useShards'
+import { againHideable, hideAgainAsks, inItsBag, movable, useShards, type MyDeployment } from '../store/useShards'
+import { movePlaced } from '../store/useBuilder'
 import { useCashu, cashuStateLabel } from './useCashu'
 import { bagsOf, depName, goToDeployment, useStash, type Bag } from './stash'
 import { PublishSwitch } from './PublishSwitch'
@@ -72,9 +74,48 @@ export function BagRow({ bag, onOpen }: { bag: Bag; onOpen: () => void }): JSX.E
   )
 }
 
-function ItemRow({ d, onGo }: { d: MyDeployment; onGo: () => void }): JSX.Element {
+/**
+ * One deployment in its bag: tap it to fly there and open its card. MOVE,
+ * on anything of yours that can move (useShards movable), brings BUILD up on
+ * it where it stands, as MOVE or EDIT on its card does (useBuilder movePlaced).
+ */
+function ItemRow({ d, onGo, onMove }: { d: MyDeployment; onGo: () => void; onMove: () => void }): JSX.Element {
   const cashu = useCashu(d.type === 'message' ? d.text : null)
   const coin = cashu.found
+  const me = useCyberspace((s) => s.identity.pubkey)
+  const [hiding, setHiding] = useState(false)
+  const [why, setWhy] = useState<string | null>(null)
+  const [asking, setAsking] = useState(false)
+  const canAgain = useShards((s) => againHideable(d, s.mine))
+  // GONE FROM ITS BAG (useShards `goneFrom`): moved or removed from another
+  // device, or dropped by a stale rewrite. Not drawn, never written back;
+  // HIDE AGAIN hides a fresh copy where it was, FORGET drops this device's
+  // record. A key, a chest or a cashu message asks first: it may stand
+  // somewhere else already, and a copy duplicates a key or a token.
+  if (!inItsBag(d)) {
+    const again = (): void => {
+      if (hideAgainAsks(d) && !asking) { setAsking(true); return }
+      setAsking(false); setHiding(true); setWhy(null)
+      void useShards.getState().hideAgain(d.eventId).then((w) => { setHiding(false); setWhy(w) })
+    }
+    return (
+      <li className="shards__row shards__row--deployed shards__row--gone">
+        <span className="shards__goto shards__goto--gone">
+          <span className="avatars__who">
+            <ItemIcon className={`shards__type shards__type--${coin ? 'cashu' : d.type}`} type={d.type} coin={coin} size={12} />
+            {coin ? 'cashu token' : depName(d)}
+          </span>
+          <span className="shards__meta shards__meta--gone">GONE FROM ITS BAG</span>
+          {asking && <span className="shards__meta shards__meta--gone" role="status">MAY ALREADY BE ELSEWHERE</span>}
+          {why && <span className="shards__meta shards__meta--gone" role="status">{why}</span>}
+        </span>
+        {canAgain && <button className="shards__move" disabled={hiding} onClick={again} title="Hide a fresh copy where it was">{hiding ? 'HIDING…' : asking ? 'HIDE ANOTHER' : 'HIDE AGAIN'}</button>}
+        {asking
+          ? <button className="shards__move" onClick={() => setAsking(false)}>CANCEL</button>
+          : <button className="shards__move" disabled={hiding} onClick={() => useShards.getState().forgetRow(d.eventId)} title="Drop it from this list. Nothing is published">FORGET</button>}
+      </li>
+    )
+  }
   return (
     <li className="shards__row shards__row--deployed">
       <button className="shards__goto" onClick={onGo} title="Fly to it and see its record">
@@ -89,6 +130,7 @@ function ItemRow({ d, onGo }: { d: MyDeployment; onGo: () => void }): JSX.Elemen
         </span>
       </button>
       {!d.published && <PublishSwitch lookupId={d.lookupId} published={false} />}
+      {movable(d, me) && <button className="shards__move" onClick={onMove} title="Place it somewhere else: BUILD comes up on it where it stands">MOVE</button>}
       <span className="shards__goto-hint" aria-hidden="true">▸</span>
     </li>
   )
@@ -151,7 +193,7 @@ export function StashModals(): JSX.Element | null {
           {b.items.length} item{b.items.length === 1 ? '' : 's'} sealed to {b.height === 0 ? 'one exact gibson' : `a ${formatCellSize(b.height)} region`}. Tap one to fly to it and see its record.
         </p>
         <ul className="avatars__list">
-          {b.items.map((d) => <ItemRow key={d.eventId} d={d} onGo={() => { close(); goToDeployment(d) }} />)}
+          {b.items.map((d) => <ItemRow key={d.eventId} d={d} onGo={() => { close(); goToDeployment(d) }} onMove={() => { close(); movePlaced(d.eventId) }} />)}
         </ul>
         <button className="secret__act login__act" onClick={() => useStash.getState().openBags()}>ALL BAGS</button>
       </Shell>

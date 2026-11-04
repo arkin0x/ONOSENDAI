@@ -177,12 +177,12 @@ describe('RIDE VIA HOSAKA', () => {
     expect(fake.submitRide).toHaveBeenCalledTimes(1)
   })
 
-  it('a forged proof is never signed, and the person is told', async () => {
+  it('a proof wrong in itself is never signed, the person is told, and it is let go', async () => {
     const prev = await boarded()
     const before = useCyberspace.getState().events.length
     const good = completed(prev)
-    const r = good.result as { mp: string }
-    const forged = { ...good, result: { ...(good.result as object), mp: (r.mp[0] === '0' ? '1' : '0') + r.mp.slice(1) } }
+    // Not a nonce at all: nothing about it depends on what this device holds.
+    const forged = { ...good, result: { ...(good.result as object), mn: 'nope' } }
     fake.submitRide.mockResolvedValue({ id: 'job-ride', status: 'computing', cost_msats: 6_000, poll_token: 'tok', result: null, error: null, balance_debited: true })
     fake.waitForJob.mockResolvedValue(forged)
 
@@ -197,6 +197,43 @@ describe('RIDE VIA HOSAKA', () => {
     expect(s.proof.status).toBe('idle')
     expect(loadCloudJob(useCyberspace.getState().identity.pubkey)).toBeNull()
     expect(useHyperspace.getState().destination).toBe(105)
+  })
+
+  it('a proof that disagrees with this device\'s copy of a block is never signed, and is kept: that copy may be the stale one', async () => {
+    const prev = await boarded()
+    const before = useCyberspace.getState().events.length
+    const good = completed(prev)
+    const r = good.result as { mp: string }
+    const disagrees = { ...good, result: { ...(good.result as object), mp: (r.mp[0] === '0' ? '1' : '0') + r.mp.slice(1) } }
+    fake.submitRide.mockResolvedValue({ id: 'job-ride', status: 'computing', cost_msats: 6_000, poll_token: 'tok', result: null, error: null, balance_debited: true })
+    fake.waitForJob.mockResolvedValue(disagrees)
+
+    await startHosakaRide(OFFER)
+
+    const s = useCyberspace.getState()
+    expect(s.events).toHaveLength(before)
+    expect(s.cloud.status).toBe('error')
+    expect(s.cloud.rideError).toMatch(/disagrees with this device's copy of block \d+/)
+    expect(s.cloud.rideError).toMatch(/nothing was signed/)
+    expect(s.cloud.rideError).toMatch(/the proof is kept/)
+    // Stored line rows are append-only, so RESUME reads the same copy: the
+    // message must not promise that it checks anything anew.
+    expect(s.cloud.rideError).toMatch(/RESUME fails the same way/)
+    expect(s.cloud.rideError).not.toMatch(/checks it again/)
+    expect(s.cloud.rideError).toMatch(/job-ride|job-rid/)
+    expect(s.proof.status).toBe('idle')
+    // The paid record is still there for RESUME.
+    expect(loadCloudJob(useCyberspace.getState().identity.pubkey)?.ride).toBeTruthy()
+    expect(s.cloud.job).toBeTruthy()
+
+    // Once this device's copy is corrected (here, standing in: the proof made to agree),
+    // RESUME signs on the proof already paid for.
+    fake.waitForJob.mockResolvedValue(good)
+    fake.limits.mockResolvedValue(null)
+    await useCyberspace.getState().resumeCloudJob()
+    expect(tag(head(), 'A')).toBe('hyperjump')
+    expect(loadCloudJob(useCyberspace.getState().identity.pubkey)).toBeNull()
+    expect(fake.submitRide).toHaveBeenCalledTimes(1)
   })
 
   it('a proof for another head is never signed, however valid it is', async () => {

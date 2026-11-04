@@ -78,13 +78,18 @@ interface Tab {
   S: () => ReturnType<typeof import('../useCyberspace')['useCyberspace']['getState']>
 }
 
+/** The tabs a test opened: their background work (a rows check, its flags) is let finish before the next test's database. */
+const opened: Tab[] = []
+
 async function openTab(): Promise<Tab> {
   vi.resetModules()
   const store = await import('../useCyberspace')
   const rows = await import('../../lib/chainStore')
   await store.savedChainLoaded()
   store.useCyberspace.setState({ selfCheck: { pubkey: pk, status: 'none' } })
-  return { store, rows, S: store.useCyberspace.getState }
+  const tab = { store, rows, S: store.useCyberspace.getState }
+  opened.push(tab)
+  return tab
 }
 
 /** A proof landing in `tab`: signed from the head it holds, saved at once. */
@@ -166,7 +171,18 @@ beforeEach(() => {
 })
 /** What a test broke on purpose and must put back even when it fails part way. */
 const putBack: Array<() => void> = []
-afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); while (putBack.length > 0) putBack.pop()!() })
+afterEach(async () => {
+  while (putBack.length > 0) putBack.pop()!()
+  // A check a tab started (its signatures, its flags, what follows them) ends
+  // in this test's database, not in the next test's fresh one. Bounded: a tab
+  // a test left without relays or rows answers within its own patience.
+  for (const t of opened.splice(0)) {
+    await Promise.race([t.S().confirmHeadNow().catch(() => null).then(() => t.rows.chainRowsSettled()), tick(3_000)])
+  }
+  await tick(30)
+  vi.restoreAllMocks()
+  vi.unstubAllGlobals()
+})
 
 describe('moving a chain to rows', () => {
   it('copies the chain whole, and the load after it reads the rows', async () => {

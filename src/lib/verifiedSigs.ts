@@ -72,18 +72,6 @@ export function alreadyChecked(events: readonly NostrEvent[]): string[] {
   return known
 }
 
-/**
- * A signature this device checked on an earlier page, as a stored row says
- * (lib/eventDb): remembered (oldest out when full), so an event the relays send
- * again after a reload is not checked again either. Not marked on the object,
- * as checkedElsewhere does: the row's id is not recomputed yet, and a repeat
- * still has its id recomputed (verifyOnce).
- */
-export function rememberStoredVerdict(ev: NostrEvent): void {
-  const key = keyOf(ev)
-  if (key !== null) remember(key)
-}
-
 /** A check made elsewhere (a worker) came back good: remembered and marked, as verifyEvent would here. */
 export function checkedElsewhere(ev: NostrEvent): void {
   const key = keyOf(ev)

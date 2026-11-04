@@ -374,16 +374,22 @@ export interface ChainCheck {
   unchecked: NostrEvent[]
 }
 
-/** Raise the NIP-01 flag of these rows, in batches: their signatures were checked elsewhere. */
-export async function flagRows(db: IDBDatabase, ids: string[]): Promise<void> {
-  for (let i = 0; i < ids.length; i += FLAG_BATCH) {
-    const batch = ids.slice(i, i + FLAG_BATCH)
+/**
+ * Raise the NIP-01 flag of these rows, in batches: their signatures were
+ * checked, as these exact events. A row is flagged only while it still holds
+ * those bytes, compared in the same transaction that flags it: the check ran
+ * before, and a row can be dropped and come back meanwhile under the same id
+ * with another signature (a take-back, a damaged copy), which nobody checked.
+ */
+export async function flagRows(db: IDBDatabase, checked: NostrEvent[]): Promise<void> {
+  for (let i = 0; i < checked.length; i += FLAG_BATCH) {
+    const batch = checked.slice(i, i + FLAG_BATCH)
     const tx = db.transaction(EVENTS, 'readwrite')
     await inTransaction(tx, async () => {
       const events = tx.objectStore(EVENTS)
-      for (const id of batch) {
-        const row = await request(events.get(id)) as EventRow | undefined
-        if (row && row.nip01 === 0) events.put({ ...row, nip01: 1 })
+      for (const e of batch) {
+        const row = await request(events.get(e.id)) as EventRow | undefined
+        if (row && row.nip01 === 0 && sameEvent(row, e)) events.put({ ...row, nip01: 1 })
       }
     })
   }
@@ -415,13 +421,13 @@ export async function checkChainRows(db: IDBDatabase, pubkey: string, opts: { ve
   const os = db.transaction(EVENTS, 'readonly').objectStore(EVENTS)
   const rows = await request(os.index('byChain').getAll(placesFrom(pubkey, 0))) as EventRow[]
   const result: ChainCheck = { bad: [], signed: 0, rehashed: 0, unchecked: [] }
-  let flips: string[] = []
+  let flips: NostrEvent[] = []
   let sinceTurn = 0
   for (const row of rows) {
     const event = eventOf(row)
     if (row.nip01 === 0) {
       if (!opts.verify) { result.unchecked.push(event); continue }
-      if (verifyEvent(event as VerifiedEvent)) { result.signed++; flips.push(row.id) } else result.bad.push(row.id)
+      if (verifyEvent(event as VerifiedEvent)) { result.signed++; flips.push(event) } else result.bad.push(row.id)
       if (flips.length >= FLAG_BATCH) { await flagRows(db, flips); flips = [] }
     } else {
       if (!opts.verify && ++sinceTurn >= REHASH_CHUNK) { sinceTurn = 0; await givePageATurn() }

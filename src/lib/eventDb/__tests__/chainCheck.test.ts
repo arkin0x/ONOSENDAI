@@ -49,7 +49,7 @@ describe('checkChainRows on the main thread (the event worker given up)', () => 
     expect(r.signed).toBe(0)
     expect(r.unchecked.map((e) => e.id)).toEqual(chain.map((e) => e.id))
     expect(await flagged(chain[0].id)).toBe(0)
-    await withEventDb((db) => flagRows(db, chain.map((e) => e.id)))
+    await withEventDb((db) => flagRows(db, chain))
     expect(await flagged(chain[0].id)).toBe(1)
     expect(await withEventDb((db) => checkChainRows(db, pk, { verify: false }))).toEqual({ bad: [], signed: 0, rehashed: 3, unchecked: [] })
   })
@@ -57,7 +57,7 @@ describe('checkChainRows on the main thread (the event worker given up)', () => 
   it('recomputes ids in chunks, with the page given turns between them', async () => {
     const chain = Array.from({ length: 450 }, (_, i) => action(i))
     await migrate(chain)
-    await withEventDb((db) => flagRows(db, chain.map((e) => e.id)))
+    await withEventDb((db) => flagRows(db, chain))
     seen.log = []
     seen.on = true
     const ticker = setInterval(() => { if (seen.on) seen.log.push('t') }, 0)
@@ -73,7 +73,7 @@ describe('checkChainRows on the main thread (the event worker given up)', () => 
   it('a flagged row whose bytes changed is still caught', async () => {
     const chain = [action(1), action(2)]
     await migrate(chain)
-    await withEventDb((db) => flagRows(db, chain.map((e) => e.id)))
+    await withEventDb((db) => flagRows(db, chain))
     await withEventDb((db) => new Promise<void>((resolve) => {
       const tx = db.transaction('events', 'readwrite')
       const os = tx.objectStore('events')
@@ -82,6 +82,31 @@ describe('checkChainRows on the main thread (the event worker given up)', () => 
       tx.oncomplete = () => resolve()
     }))
     expect((await withEventDb((db) => checkChainRows(db, pk, { verify: false }))).bad).toEqual([chain[1].id])
+  })
+})
+
+const commit = (c: Partial<ChainCommit> & Pick<ChainCommit, 'expectHead' | 'keep' | 'rows' | 'length' | 'headId'>) =>
+  withEventDb((db) => commitChain(db, { pubkey: pk, acks: [], spawnId: 'x', savedAt: 1, held: false, stats: {}, ...c } as ChainCommit))
+
+describe('a flag is raised only on the bytes that were checked (review of #574, F1)', () => {
+  it('a row dropped and back under the same id with another signature while the check ran is never flagged', async () => {
+    const a = [action(0), action(1), action(2)]
+    await migrate(a)
+    // The main-thread check hands all three out for the signature worker.
+    const found = await withEventDb((db) => checkChainRows(db, pk, { verify: false }))
+    expect(found.unchecked.map((e) => e.id)).toEqual(a.map((e) => e.id))
+    // Meanwhile the head is taken back, and a copy with a bad signature comes back under its id.
+    expect((await commit({ expectHead: a[2].id, keep: 2, rows: [], length: 2, headId: a[1].id })).status).toBe('ok')
+    const forged = { ...a[2], sig: 'f'.repeat(128) }
+    expect((await commit({ expectHead: a[1].id, keep: 2, rows: [{ event: forged, nip01: 0, acked: false }], length: 3, headId: a[2].id })).status).toBe('ok')
+    // The signature worker says the three it was handed are good.
+    await withEventDb((db) => flagRows(db, found.unchecked))
+    expect(await flagged(a[0].id)).toBe(1)
+    const row = (await withEventDb((db) => getRows(db, [a[2].id])))[0]
+    expect(row.sig).toBe(forged.sig)
+    expect(row.nip01).toBe(0)
+    // So the next check verifies it in full, and finds it.
+    expect((await check()).bad).toEqual([a[2].id])
   })
 })
 

@@ -4,6 +4,7 @@
  */
 
 import { withEventDb } from './connection'
+import type { NostrEvent } from '../events'
 import { postNote } from './channel'
 import { probeStore } from './probe'
 import { markChainVerdicts } from './chainVerdicts'
@@ -40,7 +41,7 @@ export const eventDbOps = {
   chainHead: (pubkey: string) => withEventDb((db) => chainHead(db, pubkey)),
   // Signatures are checked only in the event worker: on the main thread they go to the signature worker (lib/chainStore.ts checkRows).
   checkChainRows: (pubkey: string) => withEventDb((db) => checkChainRows(db, pubkey, { verify: inWorker() })),
-  flagRows: (ids: string[]) => withEventDb((db) => flagRows(db, ids)),
+  flagRows: (checked: NostrEvent[]) => withEventDb((db) => flagRows(db, checked)),
   readChain: (pubkey: string) => withEventDb((db) => readChain(db, pubkey)),
   async migrateChain(by: string, m: ChainMigration) {
     const result = await withEventDb((db) => migrateChain(db, m))

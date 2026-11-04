@@ -10,6 +10,10 @@
  * - The commit slot reads WALK in WALK, BUILD (lit white) in BUILD, and
  *   pressing them goes on round the ring; RECALL is there in BUILD too.
  * - HOP and VIEW keep the pad they had.
+ * - With the chain status strip up the commit block is a row taller, and the
+ *   pad is lifted by that row wherever the block is drawn, BUILD included
+ *   (review of #588: RECALL and BUILD stood over the scale keys). While
+ *   spectating the SPECTATING bar holds that corner, so BUILD draws no block.
  */
 
 import { beforeEach, describe, expect, it, vi } from 'vitest'
@@ -45,6 +49,14 @@ vi.mock('../../lib/relay', async (orig) => ({
   relaySet: () => ['wss://relay.test'],
 }))
 
+// A spectated avatar with nothing on the relay: the scene watches their spawn.
+vi.mock('../../lib/chains', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../lib/chains')>()),
+  fetchChainEvents: vi.fn(async () => []),
+  confirmChainEvents: vi.fn(async () => []),
+  watchAuthor: vi.fn(() => () => {}),
+}))
+
 // A server render reads a zustand store's initial state; here each hook reads
 // the live state, as a mounted component does.
 vi.mock('zustand', async (importOriginal) => {
@@ -64,6 +76,8 @@ import { useShards } from '../../store/useShards'
 import { walkKeyDown } from '../../hooks/useKeyboard'
 import { currentPadMode } from '../../store/padMode'
 import { placeSpawn } from '../../store/fixtures/placeSpawn'
+import { spectate, stopSpectating } from '../../lib/spectator'
+import { generateSecretKey, getPublicKey } from 'nostr-tools/pure'
 
 const S = () => useCyberspace.getState()
 
@@ -99,6 +113,8 @@ const keyDown = (code: string): void => {
 }
 
 beforeEach(async () => {
+  stopSpectating()
+  useCyberspace.setState({ held: false })
   useShards.setState({ pending: null, placedLast: null, deployStatus: 'idle' })
   useWalk.getState().exit()
   useBuilder.getState().exit()
@@ -207,5 +223,35 @@ describe('the commit slot on screen', () => {
     press(find('touchops__cancel'))
     expect(useBuilder.getState().active).toBe(false)
     expect(currentPadMode()).toBe('hop')
+  })
+})
+
+describe('the pad and the commit block with the chain status strip up', () => {
+  const lifted = (): boolean => (find('touchpad').props.className ?? '').split(' ').includes('is-lifted')
+  const opsDrawn = (): boolean => drawn().some((b) => b.props.className?.split(' ').includes('touchops'))
+
+  it('lifts the pad in HOP, VIEW, WALK and BUILD alike, and not without the strip', () => {
+    useCyberspace.setState({ held: true })
+    for (const mode of ['hop', 'view', 'walk', 'build', 'hop'] as const) {
+      expect(currentPadMode()).toBe(mode)
+      expect(opsDrawn()).toBe(true)
+      expect(find('touchops').props.className).toContain('touchops--status')
+      expect(lifted()).toBe(true)
+      press(find('touchops__commit'))
+    }
+    // Nothing to report: no hold, no conflict, LOCAL.
+    useCyberspace.setState({ held: false, chainConflict: null, canonicalLate: 0, live: false })
+    useBuilder.getState().enter('build')
+    expect(find('touchops').props.className).not.toContain('touchops--status')
+    expect(lifted()).toBe(false)
+  })
+
+  it('draws no commit block in BUILD while spectating, and so lifts nothing', async () => {
+    useCyberspace.setState({ held: true })
+    useBuilder.getState().enter('build')
+    await spectate(getPublicKey(generateSecretKey()))
+    expect(useBuilder.getState().active).toBe(true)
+    expect(opsDrawn()).toBe(false)
+    expect(lifted()).toBe(false)
   })
 })

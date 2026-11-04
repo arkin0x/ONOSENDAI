@@ -38,7 +38,7 @@ import { GRID_RADIUS, cellDelta, claimScreenAxes, levelScreenAxes, originShift, 
 import { carryOrbit } from '../lib/zoomOrbit'
 import { AVATAR_LERP_MS, lerpRemaining } from '../lib/avatarLerp'
 import { walkEye, walkFall } from '../lib/walkEye'
-import { carryLook, clearWalkLook, lookRadPerPx, takeKeepWalkLook, takeWalkLook, walkLookBy } from '../lib/walkLook'
+import { carryLook, clearWalkLook, lookRadPerPx, takeKeepWalkLook, takeWalkLook, takeWalkLookRad, walkLookBy } from '../lib/walkLook'
 import { tickFall, useWalk } from '../store/useWalk'
 import { orbitOffset } from '../workshop/benchAxes'
 import { WalkProbe } from './WalkProbe'
@@ -936,6 +936,9 @@ function Rig(): JSX.Element {
       if (s.walking && walkLook.current) {
         const [lx, ly] = takeWalkLook(dt)
         if (lx !== 0 || ly !== 0) along.copy(orbitOffset(along, lx, ly, lookRadPerPx(state.size.width)))
+        // LOOK's drags (hud/WalkLookSphere.tsx), already in radians.
+        const [rx, ry] = takeWalkLookRad(dt)
+        if (rx !== 0 || ry !== 0) along.copy(orbitOffset(along, rx, ry, 1))
       }
       c.object.position.copy(smooth.current).addScaledVector(along.normalize(), d)
       c.minDistance = Math.min(ORBIT_MIN_DISTANCE, d * 0.5)

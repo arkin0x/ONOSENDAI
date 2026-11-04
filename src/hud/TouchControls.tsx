@@ -160,6 +160,14 @@ export function TouchControls(): JSX.Element {
   // for PLACE or CANCEL (store/padMode.ts buildHeld).
   const held = useShards((s) => buildHeld(s))
   const mode = padMode(walking, building, viewing)
+  // The commit block under the pad: at your head, in VIEW, and in BUILD, but
+  // not while spectating, where the SPECTATING bar holds that corner (BUILD
+  // is left there by EXIT, B or Esc, as before). Whenever it is drawn with
+  // the chain status strip it is a row taller, and the pad is lifted by that
+  // row, or RECALL and the mode button stand over the pad's bottom row
+  // (review of #588: in BUILD a low tap on a scale key left BUILD).
+  const spectating = useCyberspace((s) => s.spectate !== null)
+  const opsUp = home || viewing || (building && !spectating)
 
   const computing = proof.status === 'computing'
   const armed = !(position.x === cursor.x && position.y === cursor.y && position.z === cursor.z)
@@ -212,7 +220,7 @@ export function TouchControls(): JSX.Element {
 
   return (
     <>
-      <div ref={padRef} className={`touchpad touchpad--mode-${mode}${atHead ? '' : ' touchpad--scale'}${home && chainStatus ? ' is-lifted' : ''}`} role="group" aria-label={walking ? 'Walk' : 'Move cursor and change scale'}>
+      <div ref={padRef} className={`touchpad touchpad--mode-${mode}${atHead ? '' : ' touchpad--scale'}${opsUp && chainStatus ? ' is-lifted' : ''}`} role="group" aria-label={walking ? 'Walk' : 'Move cursor and change scale'}>
         {/* The purple cube: the scale key taken to its end, 2^84, in one press.
             It changes the scale and nothing else, so whatever you are looking
             at stays what you are looking at, only seen from the top of the
@@ -296,7 +304,7 @@ export function TouchControls(): JSX.Element {
         >2^{scaleExp}</button>}
       </div>
 
-      {(home || viewing || building) && <div ref={opsRef} className={`touchops touchops--mode-${mode}${chainStatus ? ' touchops--status' : ''}`}>
+      {opsUp && <div ref={opsRef} className={`touchops touchops--mode-${mode}${chainStatus ? ' touchops--status' : ''}`}>
         <button
           className="touchops__cancel"
           title={walking

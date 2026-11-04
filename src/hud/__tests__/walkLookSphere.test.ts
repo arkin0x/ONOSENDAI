@@ -8,12 +8,14 @@
  * it is followed on the document; a capture lost while the ball is still on
  * screen changes nothing, and the ball going away ends the drag with no tap.
  * One finger drives it, whichever: a finger on LOOK while a thumb holds a pad
- * key is not the primary pointer, and it used to be ignored.
+ * key is not the primary pointer, and it used to be ignored. A new press
+ * takes over from a drag whose release was never heard, and a mouse that
+ * moves with no button held ends its drag (review of #588).
  *
  * The look sphere is up only while walking with its View switch on, takes
- * the press anywhere in the square around the ball, and turns through
- * walkLookBy, the sink a drag on the scene uses, WALK_LOOK_SPHERE_GAIN times
- * as far.
+ * the press anywhere in the square around the ball, and turns a drag across
+ * the ball WALK_LOOK_SPHERE_DEG_PER_BALL on every screen, more than the same
+ * drag on the scene.
  */
 
 import { describe, expect, it, vi } from 'vitest'
@@ -44,7 +46,7 @@ vi.mock('zustand', async (importOriginal) => {
 
 import { OrbitSphere } from '../ui/OrbitSphere'
 import { WalkLookSphere } from '../WalkLookSphere'
-import { clearWalkLook, takeWalkLook, walkLookBy, walkLookSphereBy, WALK_LOOK_SPHERE_GAIN } from '../../lib/walkLook'
+import { clearWalkLook, lookRadPerPx, sphereRadPerPx, takeWalkLook, takeWalkLookRad, walkLookBy, walkLookSphereBy, WALK_LOOK_SPHERE_DEG_PER_BALL } from '../../lib/walkLook'
 import { useCyberspace } from '../../store/useCyberspace'
 import { useLayers } from '../../store/useLayers'
 
@@ -83,11 +85,12 @@ function page(opts: { refuseCapture?: boolean } = {}) {
     ownerDocument: doc,
     isConnected: true,
     shown: true,
+    getBoundingClientRect: () => ({ width: 112, height: 112 }),
     getClientRects() { return this.shown ? [{}] : [] },
     setPointerCapture: (id: number) => { if (opts.refuseCapture) throw new Error('NotFoundError'); captured.push(id) },
   }
-  const fire = (type: string, x: number, y: number, pointerId = 1): void => {
-    for (const f of [...(listeners.get(type) ?? [])]) f({ type, pointerId, clientX: x, clientY: y })
+  const fire = (type: string, x: number, y: number, pointerId = 1, more: Record<string, unknown> = {}): void => {
+    for (const f of [...(listeners.get(type) ?? [])]) f({ type, pointerId, pointerType: 'touch', buttons: 1, clientX: x, clientY: y, ...more })
   }
   const listening = (): number => [...listeners.values()].reduce((n, s) => n + s.size, 0)
   const down = (x: number, y: number, more: Record<string, unknown> = {}): unknown => ({
@@ -100,9 +103,10 @@ function page(opts: { refuseCapture?: boolean } = {}) {
 describe('the orbit ball', () => {
   const make = () => {
     const turns: Array<[number, number]> = []
+    const sizes: number[] = []
     let taps = 0
-    const h = ball({ onTurn: (dx, dy) => { turns.push([dx, dy]) }, onTap: () => { taps++ }, label: 'X', title: 't', ariaLabel: 'a' })
-    return { h, turns, taps: () => taps }
+    const h = ball({ onTurn: (dx, dy, size) => { turns.push([dx, dy]); sizes.push(size) }, onTap: () => { taps++ }, label: 'X', title: 't', ariaLabel: 'a' })
+    return { h, turns, sizes, taps: () => taps }
   }
 
   it('a press with no move is one tap and no turn', () => {
@@ -114,13 +118,14 @@ describe('the orbit ball', () => {
     expect(p.listening()).toBe(0)
   })
 
-  it('a drag turns by each move in pixels and is no tap', () => {
-    const { h, turns, taps } = make()
+  it('a drag turns by each move in pixels, on a ball as wide as it is drawn, and is no tap', () => {
+    const { h, turns, sizes, taps } = make()
     const p = page()
     h.onPointerDown(p.down(50, 50))
     expect(p.captured).toEqual([1])
     p.fire('pointermove', 60, 47); p.fire('pointermove', 60, 47); p.fire('pointermove', 55, 52); p.fire('pointerup', 55, 52)
     expect(turns).toEqual([[10, -3], [-5, 5]])
+    expect(sizes).toEqual([112, 112])
     expect(taps()).toBe(0)
   })
 
@@ -141,18 +146,48 @@ describe('the orbit ball', () => {
     }
   })
 
-  it('is driven by one finger, whichever: a second is ignored, and a finger that is not primary still drives it', () => {
+  it('is driven by a finger that is not primary, and by one finger at a time', () => {
     const { h, turns } = make()
     const p = page()
     // A thumb already on a pad key makes this finger non-primary.
     h.onPointerDown(p.down(0, 0, { pointerId: 7, isPrimary: false }))
     p.fire('pointermove', 9, 0, 7)
-    // A second finger down on the ball, and moving: not this drag's.
-    h.onPointerDown(p.down(0, 0, { pointerId: 8 }))
+    // Another finger, not on the ball: not this drag's.
     p.fire('pointermove', 50, 50, 8)
     p.fire('pointermove', 12, 1, 7)
     p.fire('pointerup', 12, 1, 7)
     expect(turns).toEqual([[9, 0], [3, 1]])
+    expect(p.listening()).toBe(0)
+  })
+
+  it('a drag whose release was never heard gives way to the next press, which drives at once', () => {
+    const { h, turns } = make()
+    const p = page()
+    h.onPointerDown(p.down(0, 0, { pointerId: 3 }))
+    p.fire('pointermove', 5, 0, 3)
+    // Finger 3 lifted where the page never heard it. The next press works first time.
+    h.onPointerDown(p.down(100, 100, { pointerId: 4 }))
+    p.fire('pointermove', 107, 100, 4)
+    // Whatever finger 3 still sends is not a drag any more.
+    p.fire('pointermove', 60, 0, 3)
+    p.fire('pointerup', 107, 100, 4)
+    expect(turns).toEqual([[5, 0], [7, 0]])
+    expect(p.listening()).toBe(0)
+  })
+
+  it('a mouse that moves with no button held ends its drag, with no tap', () => {
+    const { h, turns, taps } = make()
+    const p = page()
+    const mouse = { pointerType: 'mouse' }
+    h.onPointerDown(p.down(0, 0, mouse))
+    p.fire('pointermove', 4, 0, 1, mouse)
+    // Released outside the window: the next move arrives with no button held.
+    p.fire('pointermove', 40, 0, 1, { ...mouse, buttons: 0 })
+    p.fire('pointermove', 80, 0, 1, mouse)
+    p.fire('pointerup', 80, 0, 1, mouse)
+    expect(turns).toEqual([[4, 0]])
+    expect(taps()).toBe(0)
+    expect(p.listening()).toBe(0)
   })
 
   it('ends a drag, with no tap, when the ball is hidden or a pointer is cancelled', () => {
@@ -192,7 +227,7 @@ describe('the orbit ball', () => {
 })
 
 describe('WALK\'s look sphere', () => {
-  it('is up only while walking with its View switch on, a square, and turns through the LOOK gain', () => {
+  it('is up only while walking with its View switch on, a square, and turns through walkLookSphereBy', () => {
     useCyberspace.setState({ walking: false })
     useLayers.getState().setLayer('walkLookSphere', true)
     expect(rendered(WalkLookSphere, {})).toBeNull()
@@ -212,19 +247,29 @@ describe('WALK\'s look sphere', () => {
     useCyberspace.setState({ walking: false })
   })
 
-  it('turns more than the same drag on the scene', () => {
-    expect(WALK_LOOK_SPHERE_GAIN).toBeGreaterThan(1)
-    const spent = (turn: (dx: number, dy: number) => void): [number, number] => {
-      clearWalkLook()
-      turn(10, -4)
+  it('turns a drag across the ball the same on every screen, and more than the same drag on the scene', () => {
+    const spent = (take: (dt: number) => [number, number]): [number, number] => {
       let x = 0, y = 0
-      for (let i = 0; i < 200; i++) { const [a, b] = takeWalkLook(0.05); x += a; y += b }
+      for (let i = 0; i < 400; i++) { const [a, b] = take(0.05); x += a; y += b }
       return [x, y]
     }
-    const scene = spent(walkLookBy)
-    const sphere = spent(walkLookSphereBy)
-    expect(sphere[0]).toBeCloseTo(scene[0] * WALK_LOOK_SPHERE_GAIN, 6)
-    expect(sphere[1]).toBeCloseTo(scene[1] * WALK_LOOK_SPHERE_GAIN, 6)
-    expect(Math.abs(sphere[0])).toBeGreaterThan(Math.abs(scene[0]))
+    for (const ball of [112, 88]) {
+      clearWalkLook()
+      // Across the ball in two moves, and a little down.
+      walkLookSphereBy(ball / 2, 0, ball); walkLookSphereBy(ball / 2, -4, ball)
+      const [rx, ry] = spent(takeWalkLookRad)
+      expect(rx * 180 / Math.PI).toBeCloseTo(WALK_LOOK_SPHERE_DEG_PER_BALL, 6)
+      expect(ry).toBeCloseTo(-4 * sphereRadPerPx(ball), 9)
+      // Nothing went through the scene's channel.
+      expect(spent(takeWalkLook)).toEqual([0, 0])
+      // A phone upright and on its side, a tablet, a desktop: LOOK turns more per pixel.
+      for (const width of [360, 412, 740, 860, 1400]) expect(sphereRadPerPx(ball)).toBeGreaterThan(lookRadPerPx(width))
+    }
+    // The scene's drag is unchanged: pixels, turned at the screen's width by the rig.
+    clearWalkLook()
+    walkLookBy(10, -4)
+    expect(spent(takeWalkLook)[0]).toBeCloseTo(10, 6)
+    expect(spent(takeWalkLookRad)).toEqual([0, 0])
+    clearWalkLook()
   })
 })

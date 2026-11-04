@@ -16,7 +16,12 @@
  * One finger drives it at a time, whichever finger that is. It used to take
  * only the primary pointer, which is the first finger on the screen: with a
  * thumb already holding a pad key, a finger on LOOK was never primary and the
- * ball did nothing, so you could not walk and look at once.
+ * ball did nothing, so you could not walk and look at once. A new press on
+ * the ball takes over from a drag still running, as the scene's own look
+ * lets go of one (scene/Scene.tsx): a release the page never heard (the
+ * finger lifted outside the window, a dropped event) must not leave the ball
+ * dead. A mouse that moves with no button held has let go somewhere unheard,
+ * and its drag ends there.
  *
  * `square` makes the whole square around the ball the thing you press
  * (arkinox, 2026-11-02: "the touch area is a full square containing the
@@ -27,8 +32,8 @@ import { useEffect, useRef } from 'react'
 import { noCallout } from '../../hooks/useRepeatable'
 
 interface OrbitSphereProps {
-  /** A drag of dx, dy CSS pixels since the last move. */
-  onTurn: (dx: number, dy: number) => void
+  /** A drag of dx, dy CSS pixels since the last move, on a ball `size` CSS pixels wide. */
+  onTurn: (dx: number, dy: number, size: number) => void
   /** A tap with no drag. Nothing when absent. */
   onTap?: () => void
   /** The small word on the ball. */
@@ -50,7 +55,7 @@ export function OrbitSphere({ onTurn, onTap, label, title, ariaLabel, className,
   turn.current = onTurn
   const tap = useRef(onTap)
   tap.current = onTap
-  const drag = useRef<{ id: number; x: number; y: number; moved: boolean; off: () => void } | null>(null)
+  const drag = useRef<{ id: number; x: number; y: number; size: number; moved: boolean; off: () => void } | null>(null)
 
   const end = (): void => {
     const d = drag.current
@@ -62,9 +67,9 @@ export function OrbitSphere({ onTurn, onTap, label, title, ariaLabel, className,
   useEffect(() => end, [])
 
   const down = (e: React.PointerEvent<HTMLButtonElement>): void => {
-    if (drag.current && drag.current.id !== e.pointerId) return
     if (e.pointerType === 'mouse' && e.button !== 0) return
     e.preventDefault()
+    // A drag still running, its release never heard, gives way to this press.
     end()
     const el = e.currentTarget
     try { el.setPointerCapture(e.pointerId) } catch { /* followed on the document anyway */ }
@@ -75,13 +80,15 @@ export function OrbitSphere({ onTurn, onTap, label, title, ariaLabel, className,
       const d = drag.current
       if (!d || p.pointerId !== id) return
       if (p.type === 'pointermove') {
+        // A mouse moving with no button held let go where the page did not hear it.
+        if (p.pointerType === 'mouse' && (p.buttons & 1) === 0) { end(); return }
         const dx = p.clientX - d.x
         const dy = p.clientY - d.y
         if (dx === 0 && dy === 0) return
         d.x = p.clientX
         d.y = p.clientY
         d.moved = true
-        turn.current(dx, dy)
+        turn.current(dx, dy, d.size)
         return
       }
       // Lifted, or taken by the browser: the drag is over, and with no move it was a tap.
@@ -91,7 +98,7 @@ export function OrbitSphere({ onTurn, onTap, label, title, ariaLabel, className,
     }
     for (const t of FOLLOWED) doc.addEventListener(t, listener, true)
     drag.current = {
-      id, x: e.clientX, y: e.clientY, moved: false,
+      id, x: e.clientX, y: e.clientY, size: el.getBoundingClientRect().width, moved: false,
       off: () => { for (const t of FOLLOWED) doc.removeEventListener(t, listener, true) },
     }
   }

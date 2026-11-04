@@ -5,9 +5,10 @@
  * back the sphere we have in the workshop and use it to look". It stands
  * above the menu button, on the button's left edge, in the dock the route
  * overlay uses outside WALK (the overlay is never up in WALK). A drag on it
- * turns your head the way a drag on the scene does, through the same sink
- * (lib/walkLook.ts), but WALK_LOOK_SPHERE_GAIN times as far, so it is a real
- * control and not only a sign that you can look (arkinox, 2026-11-02). It
+ * turns your head the way a drag on the scene does (lib/walkLook.ts), but
+ * further: a drag across the ball turns WALK_LOOK_SPHERE_DEG_PER_BALL on
+ * every screen, so it is a real control and not only a sign that you can
+ * look (arkinox, 2026-11-02). It
  * keeps turning past the ball until the finger lifts, and the whole square
  * around the ball takes the press (hud/ui/OrbitSphere.tsx). A drag on the
  * scene still looks too. A tap does nothing.

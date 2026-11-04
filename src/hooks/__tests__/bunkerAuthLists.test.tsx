@@ -327,15 +327,36 @@ describe('a signer that said no, or is slow, is not asked again and again', () =
     expect(v.net.canon.sockets).toBe(1)
   }, 60_000)
 
+  it('a relay that turns the AUTH down is probed, and its auth-required keeps the socket: no new AUTH each probe', async () => {
+    const v = await visit((net) => { net.rejectAuth = true })
+    const { probeLiveness } = await import('../../lib/relay')
+    await v.wait(15_000)
+    expect(v.loot().trouble).toBe('auth')
+    const asked = v.net.bunker.authAsked
+    for (let i = 0; i < 3; i++) {
+      const outcome = probeLiveness()
+      await v.wait(10_000)
+      expect(await outcome).toBe('alive')
+    }
+    expect(v.net.canon.sockets).toBe(1)
+    expect(v.net.bunker.authAsked).toBe(asked)
+  }, 60_000)
+
   it('an old socket\'s refused AUTH does not fail the AUTH a newer socket is waiting on', async () => {
     // The first socket's request is refused at 8 s, and so is the store's one
     // retry of it; by then that socket is gone, and a new one's request is
     // waiting on the bunker, which signs it at about 14 s.
     const v = await visit((net) => { net.bunker.authPlan = [{ delay: 8_000, refuse: true }, { delay: 10_000 }, { delay: 0, refuse: true }] })
+    const { onAuthChange } = await import('../../lib/relay')
+    const said: boolean[] = []
+    onAuthChange((url, ok) => { if (url === CANON) said.push(ok) })
     await v.wait(1_000)
     v.net.dropCanon()
-    await v.wait(30_000)
+    // Failed with the old socket's refusal at 8 s, the new socket read "Could
+    // not sign in" though the relay took its AUTH at 11 s, until a retry at 22 s.
+    await v.wait(13_000)
     expect(v.net.bunker.authAsked).toBe(3)
+    expect(said).toEqual([true])
     expect(v.loot().items).toHaveLength(BAGS)
     expect(v.loot().trouble).toBeNull()
   }, 60_000)

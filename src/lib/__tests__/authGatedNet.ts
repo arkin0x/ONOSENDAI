@@ -68,6 +68,8 @@ export interface AuthGatedNet {
   challengeDelay: number
   /** How long the canonical relay takes to answer an AUTH with OK. */
   authOkDelay: number
+  /** The canonical relay turns every AUTH down (OK false), whoever signed it. */
+  rejectAuth: boolean
   /** How long the canonical relay takes between one event of an answer and the next (a busy socket). */
   streamMs: number
   /** The canonical relay drops every open socket, as a phone does to a tab put away. */
@@ -102,6 +104,7 @@ export function authGatedNet(): AuthGatedNet {
     failConnects: 0,
     challengeDelay: 0,
     authOkDelay: 0,
+    rejectAuth: false,
     streamMs: 0,
     dropCanon() { for (const s of [...canonSockets]) s.drop() },
     halfOpenBunker() { for (const s of [...bunkerSockets]) s.halfOpen = true },
@@ -211,7 +214,7 @@ export function authGatedNet(): AuthGatedNet {
     private canonical(msg: unknown[]): void {
       if (msg[0] === 'AUTH') {
         const e = msg[1] as Ev
-        const ok = verifyEvent(e as never) && e.kind === 22242 && e.tags.some((t) => t[0] === 'challenge' && this.challenges.includes(t[1]))
+        const ok = !net.rejectAuth && verifyEvent(e as never) && e.kind === 22242 && e.tags.some((t) => t[0] === 'challenge' && this.challenges.includes(t[1]))
         const answer = (): void => {
           if (ok) { this.authed = true; net.canon.authOk++ }
           this.deliver(['OK', e.id, ok, ok ? '' : 'auth-required: bad auth'])

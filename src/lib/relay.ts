@@ -250,6 +250,11 @@ function signerHolds(url: string): boolean {
   return authSigning.has(key) || !!authFailed.get(key)?.bySigner
 }
 
+/** Whether the relay itself turned this socket's AUTH down (or never said OK): the signer was not the cause. */
+function relayTurnedDown(relay: AuthRelay, url: string): boolean {
+  return isDead(relay) && !authSigning.has(normalizeURL(url)) && !authFailed.get(normalizeURL(url))?.bySigner
+}
+
 /** Keep authOpen.ts's list, which the store reads, in step with signerHolds. */
 function syncHeld(url: string): void {
   const key = normalizeURL(url)
@@ -707,14 +712,12 @@ async function publishOnce(listed: string[], event: NostrEvent): Promise<Publish
 export async function publishMany(relays: string[], event: NostrEvent): Promise<PublishResult> {
   if (relays.length === 0) return { ok: false, reason: 'no relays configured' }
   const first = await publishOnce(relays, event)
-  // Not signed in: a fresh socket brings a fresh challenge, and asks the signer
-  // again for every publish that failed so, which only the RETRY paths may do
-  // (retryFailedAuth). A socket whose AUTH is still being signed, or held for
-  // a late answer, is kept, or that AUTH is thrown away (verification of #236,
-  // finding 4).
-  if (first.ok || REFUSED.test(first.reason) || /^auth-required\b/i.test(first.reason)) return first
-  // Only the others are asked again: a relay the signer holds up would only
-  // be asked again of the signer, and its socket is held for a late answer.
+  if (first.ok || REFUSED.test(first.reason)) return first
+  // Only the others are asked again, over fresh sockets, as on v2, a relay
+  // that turned its AUTH down among them. A relay the signer holds up is not:
+  // a fresh socket brings a fresh challenge and asks the signer again, which
+  // only the RETRY paths may do (retryFailedAuth), and its socket is held for
+  // a late answer (verification of #236, finding 4; review of #570).
   const again = relays.filter((url) => !signerHolds(url))
   if (again.length === 0) return first
   dropRelays(again)
@@ -797,22 +800,7 @@ const NO_ANSWER = 'no answer in time'
  * page, and its first events alone were taken for the whole answer: 29 bags
  * of 105, or none (the owner, 2026-11-04).
  */
-export interface ReadOptions { evenHung?: boolean; offThread?: boolean; stream?: { quietMs: number; capMs: number }; failIfStalled?: boolean }
-
-/**
- * `failIfStalled`: reject when the signer kept a relay from being read (its
- * answer is AUTH_STALLED), for a caller that would otherwise read the merged
- * silence as an empty list: a chain fetch (chains.ts CHAIN_READ).
- */
-function unlessStalled(answers: RelayAnswer[], opts: ReadOptions): RelayAnswer[] {
-  if (opts.failIfStalled && answers.some(stalled)) throw new Error(AUTH_STALLED)
-  return answers
-}
-
-/** A relay the signer kept from being read: refused, and the signer is why. */
-function stalled(a: RelayAnswer): boolean {
-  return a.outcome === 'refused' && a.reason === AUTH_STALLED
-}
+export interface ReadOptions { evenHung?: boolean; offThread?: boolean; stream?: { quietMs: number; capMs: number } }
 
 async function askOne(url: string, filter: Filter, deadline: number, opts: AskOptions = {}): Promise<RelayAnswer> {
   const { answerMs, onSent, stop, onEvent, deferChecks, quietMs, capAt } = opts
@@ -889,12 +877,15 @@ async function askOne(url: string, filter: Filter, deadline: number, opts: AskOp
             onEvent?.(e as NostrEvent)
           },
           oneose: () => {
-            // A challenge this socket has not signed in with, and nothing sent:
+            // A challenge this read was not signed in with, and nothing sent:
             // a gated relay may answer a reader it does not know with an empty
             // EOSE rather than a CLOSED. Sign in and ask again, as for a
-            // CLOSED, so "nothing" is never taken from it (review of #570).
+            // CLOSED, so "nothing" is never taken from it. Signed in since (the
+            // pool answers a challenge on its own) it costs nothing; with the
+            // signer the cause it is refused as AUTH_STALLED. A relay that
+            // turned the AUTH down itself answers as on v2 (review of #570).
             const challenge = (relay as unknown as AuthRelay).challenge
-            if (events.size === 0 && challenge && authedFor.get(url) !== challenge && !authTried) {
+            if (events.size === 0 && challenge && authedFor.get(url) !== challenge && !authTried && !relayTurnedDown(relay as unknown as AuthRelay, url)) {
               authTried = true
               signingIn = true
               current = false
@@ -976,7 +967,7 @@ async function queryRelays(relays: string[], filter: Filter, maxWait = MAX_WAIT_
  * relay sent before the deadline still count.
  */
 async function collect(relays: string[], filter: Filter, maxWait = MAX_WAIT_MS, opts: ReadOptions = {}): Promise<NostrEvent[]> {
-  return mergeAnswers(unlessStalled(await queryRelays(relays, filter, maxWait, opts), opts))
+  return mergeAnswers(await queryRelays(relays, filter, maxWait, opts))
 }
 
 /**
@@ -990,7 +981,7 @@ export async function query(filter: Filter, opts: ReadOptions = {}): Promise<Nos
   if (!opts.offThread) return collect(relaySet(), filter, MAX_WAIT_MS, opts)
   // Each relay's answer is checked the moment it is in, not after the slowest one.
   const checks = answerChecks<RelayAnswer>()
-  return mergeAnswers(await checks.kept(unlessStalled(await queryRelays(relaySet(), filter, MAX_WAIT_MS, { evenHung: opts.evenHung, deferChecks: true, onAnswer: checks.onAnswer }), opts)))
+  return mergeAnswers(await checks.kept(await queryRelays(relaySet(), filter, MAX_WAIT_MS, { evenHung: opts.evenHung, deferChecks: true, onAnswer: checks.onAnswer })))
 }
 
 /**
@@ -1205,14 +1196,7 @@ export function queryEachSettled(
           answers.set(url, answer)
           if (url === main && answer.outcome === 'answered') {
             primaryAnswered = true
-            // A relay of `waitFor` whose AUTH is still being signed gets one
-            // more `maxWait`, so a signer a little slower than that lands
-            // rather than the holder being passed over (review of #570).
-            const sentAt = firstSent ?? Date.now()
-            cap = setTimeout(() => {
-              if ([...held].some((u) => authPending(u) && !answers.has(u))) cap = setTimeout(settle, Math.max(0, sentAt + 2 * maxWait - Date.now()))
-              else settle()
-            }, Math.max(0, sentAt + maxWait - Date.now()))
+            cap = setTimeout(settle, Math.max(0, (firstSent ?? Date.now()) + maxWait - Date.now()))
           }
           if (enough()) settle()
         })

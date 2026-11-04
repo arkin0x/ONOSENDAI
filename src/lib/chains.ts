@@ -219,12 +219,8 @@ async function gatherChain<T>(
   return { got, whole: hole() === null }
 }
 
-/**
- * A chain is read from every configured relay, even one that hung: it may hold
- * a newer move (relay.ts skipHung). And a relay the signer kept from being
- * read (AUTH_STALLED) is not an empty chain, so a fetch rejects rather than say so.
- */
-const CHAIN_READ = { evenHung: true, failIfStalled: true }
+/** A chain is read from every configured relay, even one that hung: it may hold a newer move (relay.ts skipHung). */
+const CHAIN_READ = { evenHung: true }
 
 /**
  * Everything the relays have for one pubkey's current chain, raw: every
@@ -362,8 +358,11 @@ export async function confirmChainEvents(
     noteHoldersFrom(pubkey, got)
     if (!whole) return null
     const merged = mergeAnswers(got)
-    // The canonical relay, or a relay holding this chain, that the signer kept from being read may hold a newer move. Not read, it says nothing, so the move waits.
-    if (got.some((a) => (a.url === canonical || waitFor.includes(a.url)) && a.outcome === 'refused' && a.reason === AUTH_STALLED)) return extendsChain(merged, have) ? merged : null
+    // The canonical relay, kept from being read by the signer, may hold a newer
+    // move: not read, it says nothing, so the move waits, rather than pass on
+    // another relay's word. Any other chain holder is as on v2: a silent one
+    // never stops the pass (arkinox's ruling of 2026-10-08, option B).
+    if (got.some((a) => a.url === canonical && a.outcome === 'refused' && a.reason === AUTH_STALLED)) return extendsChain(merged, have) ? merged : null
     if (got.some((a) => a.url === canonical && a.outcome === 'answered')) return merged
     const holdsChain = (a: RelayAnswer): boolean => opts.anchorId === undefined || a.events.some((e) => e.id === opts.anchorId)
     if (got.some((a) => a.url !== canonical && a.outcome === 'answered' && holdsChain(a))) return merged

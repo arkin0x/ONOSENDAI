@@ -1,4 +1,5 @@
 import { signerWaiting } from '../lib/authOpen'
+import { chainHolders } from '../lib/chainHolders'
 import { bigintBitLimit, movementCapabilityIssue } from '../lib/proofCapability'
 /**
  * useCyberspace.ts - the single source of truth for who you are, where you
@@ -2375,7 +2376,8 @@ async function confirmHead(retrying: () => void): Promise<string | null | typeof
       return null
     }
   }
-  return signerWaiting() ? HEAD_UNCONFIRMED_SIGNER_MESSAGE : HEAD_UNCONFIRMED_MESSAGE
+  // Only the relays this chain lives on: another relay's refusal is not this move's (review of #570).
+  return signerWaiting(chainHolders(pubkey)) ? HEAD_UNCONFIRMED_SIGNER_MESSAGE : HEAD_UNCONFIRMED_MESSAGE
 }
 
 /**

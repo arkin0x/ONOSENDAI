@@ -20,7 +20,7 @@
  * |---|---|
  * | the chain came back with a hole no question could fill | unknown: unreachable, only part of the chain |
  * | any relay returned events that make a chain | found |
- * | the signer kept a relay from being read (signing, out of time, or refused) | unknown: refused, with its reason |
+ * | the signer kept a relay that holds this chain from being read (signing, out of time, or refused) | unknown: refused, with its reason |
  * | the canonical relay answered (a real EOSE) and no relay returned a chain | none |
  * | anything else, with navigator.onLine false | unknown: offline |
  * | the canonical relay refused | unknown: refused, with its reason |
@@ -58,7 +58,7 @@ export type SelfCheck =
   | { pubkey: string; status: 'unknown'; cause: CheckCause }
 
 /** The table in the header, as a function. */
-export function decideSelfCheck(answers: RelayAnswer[], canonical: string, online: boolean): CheckVerdict {
+export function decideSelfCheck(answers: RelayAnswer[], canonical: string, online: boolean, holders: ReadonlySet<string> = new Set()): CheckVerdict {
   const events = mergeAnswers(answers)
   // A chain with a hole resolves to the stretch before the hole, which is
   // not its head: continuing it would fork from an earlier point. Nobody
@@ -70,9 +70,13 @@ export function decideSelfCheck(answers: RelayAnswer[], canonical: string, onlin
   // are not a chain anyone can follow or continue, so they do not count as
   // one; the verdict falls to what the canonical relay said.
   if (events.length > 0 && buildChain(events).length > 0) return { status: 'found', events }
-  // A relay the signer kept from being read may hold the chain, and this
-  // says nothing until it is read, whatever the canonical relay said.
-  const waiting = answers.find((a) => a.outcome === 'refused' && a.reason === AUTH_STALLED)
+  // A relay known to hold this chain (chainHolders.ts), kept from being read
+  // by the signer, may hold what the others did not: this says nothing until
+  // it is read, whatever the canonical relay said. Any other relay only knows
+  // about itself, as when it is unreachable, so a new identity is not held
+  // for a relay that never had its chain (review of #570).
+  const home0 = normalizeURL(canonical)
+  const waiting = answers.find((a) => a.outcome === 'refused' && a.reason === AUTH_STALLED && normalizeURL(a.url) !== home0 && holders.has(normalizeURL(a.url)))
   if (waiting?.outcome === 'refused') return { status: 'unknown', cause: { kind: 'refused', url: waiting.url, reason: waiting.reason } }
   const home = normalizeURL(canonical)
   const answer = answers.find((a) => normalizeURL(a.url) === home)

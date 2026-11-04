@@ -52,6 +52,8 @@ vi.mock('../../lib/workers', async (orig) => ({
 vi.mock('../../lib/hyperspace/enter', async (orig) => ({ ...(await orig() as object), computeEnterProof: () => '0'.repeat(64) }))
 
 import { signerHeld } from '../../lib/authOpen'
+import { normalizeURL } from 'nostr-tools/utils'
+import { DEFAULT_RELAY } from '../useRelays'
 import { busyLabel, CHECKING_RELAYS_MESSAGE, HEAD_RETRYING_MESSAGE, HEAD_UNCONFIRMED_MESSAGE, HEAD_UNCONFIRMED_SIGNER_MESSAGE, NEW_VERSION_RELOAD_MESSAGE, useCyberspace, WAITING_SIGNER_MESSAGE } from '../useCyberspace'
 import { PROOF_WORKER_FAILED_MESSAGE } from '../../lib/workers'
 import { useVersionGate } from '../../lib/versionGate'
@@ -92,15 +94,24 @@ describe('a move is signed only from a head the relays confirm', () => {
     expect(S().proof.message).toBe("Can't confirm your latest move. Try again.")
   })
 
-  it('says to check the signer when a relay is waiting on it, since trying again would not help', async () => {
+  it('says to check the signer when the canonical relay is waiting on it, since trying again would not help', async () => {
     relay.answers = [null, null]
-    signerHeld.add('wss://gated.example/')
+    signerHeld.add(normalizeURL(DEFAULT_RELAY))
     S().moveCursor(moveDirection(S().axes(), 'right'))
     await S().commit()
     signerHeld.clear()
     expect(posted).toEqual([])
     expect(S().proof.message).toBe(HEAD_UNCONFIRMED_SIGNER_MESSAGE)
     expect(S().proof.message).toBe("Can't confirm your latest move. Check your signer.")
+  })
+
+  it('does not blame the signer for a relay that holds nothing of this chain', async () => {
+    relay.answers = [null, null]
+    signerHeld.add('wss://unrelated.example/')
+    S().moveCursor(moveDirection(S().axes(), 'right'))
+    await S().commit()
+    signerHeld.clear()
+    expect(S().proof.message).toBe(HEAD_UNCONFIRMED_MESSAGE)
   })
 
   it('says it is retrying while it asks again, and moves once the relay answers', async () => {

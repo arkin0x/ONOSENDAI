@@ -39,9 +39,15 @@ const net = vi.hoisted(() => {
     eoseMs: new Map<string, number>(),
     /** Refuses the connection. */
     refuse: new Set<string>(),
+    /** Open: serves reads and takes events unauthenticated, but challenges on connect. */
+    openChallenger: new Set<string>(),
+    /** The relay itself turns down the first socket's AUTH (not the signer). */
+    refuseFirstAuth: new Set<string>(),
+    /** Takes the first socket's EVENTs and never says OK. */
+    swallowFirstEvent: new Set<string>(),
     hold: new Map<string, Ev[]>(),
   }
-  const signer = { prompts: 0, mode: 'ok' as 'ok' | 'stall' | 'reject', ms: 0, waiting: [] as (() => void)[] }
+  const signer = { rejectFor: new Set<string>(), prompts: 0, mode: 'ok' as 'ok' | 'stall' | 'reject', ms: 0, waiting: [] as (() => void)[] }
   const match = (f: Record<string, unknown>, e: Ev): boolean => {
     if (Array.isArray(f.kinds) && !f.kinds.includes(e.kind)) return false
     if (Array.isArray(f.authors) && !f.authors.includes(e.pubkey)) return false
@@ -73,6 +79,7 @@ const net = vi.hoisted(() => {
         this.onopen?.()
         // A new challenge per connection, as a real relay gives: the client keys what it has answered on it.
         if (rules.emptyUntilAuthed.has(this.url)) this.say(['AUTH', `challenge-${++challenges}`])
+        if (rules.openChallenger.has(this.url)) this.say(['AUTH', `open-${++challenges}`])
       }, 0)
     }
     say(msg: unknown[]): void { this.onmessage?.({ data: JSON.stringify(msg) }) }
@@ -80,6 +87,9 @@ const net = vi.hoisted(() => {
       const msg = JSON.parse(raw) as unknown[]
       setTimeout(() => {
         const gated = rules.emptyUntilAuthed.has(this.url) || rules.challengesLate.has(this.url) || rules.challengeAfterMs.has(this.url)
+        const firstSocket = sockets.filter((u) => u === this.url).length === 1
+        if (msg[0] === 'AUTH' && rules.refuseFirstAuth.has(this.url) && firstSocket) { this.say(['OK', (msg[1] as { id: string }).id, false, 'restricted: try again later']); return }
+        if (msg[0] === 'EVENT' && rules.swallowFirstEvent.has(this.url) && firstSocket) return
         if (msg[0] === 'AUTH') { this.authed = true; this.say(['OK', (msg[1] as { id: string }).id, true, '']); return }
         if (msg[0] === 'REQ') {
           if (!gated || this.authed) {
@@ -110,6 +120,8 @@ vi.mock('../../store/useCyberspace', async () => {
   const signer = {
     signEvent: async (t: Record<string, unknown>) => {
       net.signer.prompts++
+      const forRelay = ((t.tags as string[][] | undefined) ?? []).find((x) => x[0] === 'relay')?.[1]?.replace(/\/$/, '')
+      if (forRelay && net.signer.rejectFor.has(forRelay)) throw new Error('the signer said no to ' + forRelay)
       if (net.signer.mode === 'reject') throw new Error('the signer said no')
       if (net.signer.mode === 'stall') await new Promise<void>((resolve) => { net.signer.waiting.push(resolve) })
       else if (net.signer.ms) await new Promise((resolve) => setTimeout(resolve, net.signer.ms))
@@ -128,10 +140,10 @@ vi.mock('../../store/useCyberspace', async () => {
 import { finalizeEvent, generateSecretKey, getPublicKey } from 'nostr-tools/pure'
 import { useRelays } from '../../store/useRelays'
 import { decideSelfCheck } from '../chainHold'
-import { noteChainHolders } from '../chainHolders'
+import { chainHolders, noteChainHolders } from '../chainHolders'
 import { askChainEvents, confirmChainEvents, fetchChainEvents } from '../chains'
 import { hopTemplate, spawnTemplate, type NostrEvent } from '../events'
-import { CYBERSPACE_RELAY, dropRelays, publishMany, queryEachAt } from '../relay'
+import { CYBERSPACE_RELAY, dropRelays, publishMany, queryEachAt, queryEachSettled, retryFailedAuth } from '../relay'
 import { AUTH_STALLED } from '../relayOutcome'
 import { SIGN_PATIENCE_MS } from '../signWithin'
 import { signerHeld } from '../authOpen'
@@ -177,6 +189,10 @@ beforeEach(() => {
   net.rules.challengeAfterMs.clear()
   net.rules.eoseMs.clear()
   net.rules.refuse.clear()
+  net.rules.openChallenger.clear()
+  net.rules.refuseFirstAuth.clear()
+  net.rules.swallowFirstEvent.clear()
+  net.signer.rejectFor.clear()
   net.signer.prompts = 0
   net.signer.mode = 'ok'
   net.signer.ms = 0
@@ -250,15 +266,15 @@ describe('the self-check while the signer has not answered: a wrong answer forks
     expect(dials(CANON)).toBe(1)
   })
 
-  it('the canonical relay answering with nothing does not make it none while another relay is waiting on the signer', () => {
+  it('the canonical relay answering with nothing is not none while a relay known to hold this chain waits on the signer; any other relay does not hold it', () => {
     const answers = [
       { url: CANON, outcome: 'answered' as const, events: [] },
       { url: 'wss://mine.example/', outcome: 'refused' as const, reason: AUTH_STALLED, events: [] },
     ]
-    expect(decideSelfCheck(answers, CANON, true).status).toBe('unknown')
-    expect(decideSelfCheck(answers.slice(0, 1), CANON, true).status).toBe('none')
+    expect(decideSelfCheck(answers, CANON, true, new Set(['wss://mine.example/'])).status).toBe('unknown')
+    expect(decideSelfCheck(answers, CANON, true, new Set()).status).toBe('none')
+    expect(decideSelfCheck(answers.slice(0, 1), CANON, true, new Set(['wss://mine.example/'])).status).toBe('none')
   })
-
   it('a signer that rejected is the same: unknown, never none, and bounded', async () => {
     const c = aChain()
     net.rules.hold.set(CANON, [c.spawn, c.hop1])
@@ -270,14 +286,20 @@ describe('the self-check while the signer has not answered: a wrong answer forks
     expect(publishing.value).toEqual({ ok: false, reason: AUTH_STALLED })
   })
 
-  it('a chain fetch rejects rather than call it an empty chain', async () => {
+  it('a chain fetch is as on v2: another player\'s chain on the canonical relay comes back whole, whatever your signer did elsewhere (P3, P3b)', async () => {
+    const gated = 'wss://mine3.example/'
+    const open = 'wss://open3.challenger.example/'
+    net.rules.emptyUntilAuthed.add(gated)
+    net.rules.openChallenger.add(open)
+    useRelays.getState().add(gated)
+    useRelays.getState().add(open)
+    net.signer.rejectFor.add('wss://mine3.example')
+    net.signer.rejectFor.add('wss://open3.challenger.example')
     const c = aChain()
-    net.rules.hold.set(CANON, [c.spawn, c.hop1])
-    net.signer.mode = 'stall'
-    const fetched = await within(AUTH_WAIT + 100, fetchChainEvents(c.pubkey))
-    expect(fetched.settled).toBe(true)
-    expect(fetched.value).toBeUndefined()
-    expect(String(fetched.error)).toContain(AUTH_STALLED)
+    net.rules.hold.set(CANON, [c.spawn, c.hop1, c.hop2])
+    const fetched = await within(10_000, fetchChainEvents(c.pubkey))
+    expect(fetched.error).toBeUndefined()
+    expect(fetched.value).toHaveLength(3)
   })
 })
 
@@ -292,7 +314,7 @@ describe('head confirmation while the signer has not answered: a wrong answer fo
   })
 })
 
-describe('head confirmation and a chain holder behind the signer: the canonical relay answering must not pass over it', () => {
+describe('head confirmation and a chain holder behind the signer: as on v2, a silent holder never stops the pass (ruling of 2026-10-08, option B)', () => {
   /** The canonical relay signed in, and a gated holder with a new socket: another device's newer move is only there. */
   async function holderBehindSigner(url: string): Promise<{ confirming: () => Promise<NostrEvent[] | null>; c: ReturnType<typeof aChain> }> {
     await within(1000, publishMany([CANON], anEvent()))
@@ -306,34 +328,27 @@ describe('head confirmation and a chain holder behind the signer: the canonical 
     return { c, confirming: () => confirmChainEvents(c.pubkey, c.spawn.id, [c.spawn, c.hop1], { since: c.hop1.created_at, anchorId: c.hop1.id }) }
   }
 
-  it('a signer that rejected refuses the move, by 5 s (a rejection is known at once, so it need not wait)', async () => {
-    const { confirming } = await holderBehindSigner('wss://holder.rejected.example/')
+  it('a signer that rejected: the move passes on the canonical relay\'s answer (P4)', async () => {
+    const { confirming, c } = await holderBehindSigner('wss://holder.rejected.example/')
     net.signer.mode = 'reject'
-    const asking = confirming()
-    const got = await within(5300, asking)
+    const got = await within(5300, confirming())
     expect(got.settled).toBe(true)
-    expect(got.value).toBeNull()
+    expect(got.value?.map((e) => e.id)).toContain(c.hop1.id)
   })
-
-  it('a signer that never answers refuses the move at 5 s', async () => {
+  it('a signer that never answers: the move passes once HEAD_CONFIRM_MS is up', async () => {
     const { confirming } = await holderBehindSigner('wss://holder.stalled.example/')
     net.signer.mode = 'stall'
-    const asking = confirming()
-    expect((await within(4800, asking)).settled).toBe(false)
-    const got = await within(500, asking)
+    const got = await within(3000, confirming())
     expect(got.settled).toBe(true)
-    expect(got.value).toBeNull()
+    expect(got.value).not.toBeNull()
   })
-
-  it('a signer that takes 3 s finds the newer move, with one prompt, so the move is refused, not forked', async () => {
+  it('a signer that takes 3 s: the move passes at 2.5 s, without waiting for it, as on v2', async () => {
     const { confirming, c } = await holderBehindSigner('wss://holder.slow.example/')
     net.signer.ms = 3000
-    const got = await within(3500, confirming())
+    const got = await within(2700, confirming())
     expect(got.settled).toBe(true)
-    expect(got.value?.map((e) => e.id)).toContain(c.hop2.id)
-    expect(net.signer.prompts).toBe(1)
+    expect(got.value?.map((e) => e.id)).not.toContain(c.hop2.id)
   })
-
   it('the canonical relay stalled, with an open relay holding the anchor, refuses the move at 5 s', async () => {
     const open = 'wss://open.anchor.example/'
     const c = aChain()
@@ -499,7 +514,7 @@ describe('dropping the sockets', () => {
 })
 
 describe('a canonical relay that does not gate, and another relay that does', () => {
-  it('still answers unknown over the real pool while the other relay may hold the chain', async () => {
+  it('answers unknown over the real pool while a relay known to hold this chain waits on the signer, and none for one that never held it', async () => {
     const mine = 'wss://mine.mixed.example/'
     const c = aChain()
     net.rules.emptyUntilAuthed.add(mine)
@@ -509,6 +524,149 @@ describe('a canonical relay that does not gate, and another relay that does', ()
     net.signer.mode = 'stall'
     const answers = await within(AUTH_WAIT + 2000, askChainEvents(c.pubkey))
     expect(answers.value?.find((a) => a.url === CANON)?.outcome).toBe('answered')
-    expect(decideSelfCheck(answers.value ?? [], CANON, true).status).toBe('unknown')
+    expect(decideSelfCheck(answers.value ?? [], CANON, true, new Set([mine])).status).toBe('unknown')
+    expect(decideSelfCheck(answers.value ?? [], CANON, true, new Set()).status).toBe('none')
+  })
+})
+
+describe('review of #570 (2026-11-04): each as on v2, or safer for the canonical relay', () => {
+  it('P1: a new identity, with a gated relay of its own that never held its chain and whose AUTH the signer turned down, says none', async () => {
+    const mine = 'wss://mine.example/'
+    net.rules.emptyUntilAuthed.add(mine)
+    useRelays.getState().add(mine)
+    net.signer.rejectFor.add('wss://mine.example')
+    const c = aChain()
+    const answers = await within(8000, askChainEvents(c.pubkey))
+    expect(decideSelfCheck(answers.value ?? [], CANON, true, chainHolders(c.pubkey)).status).toBe('none')
+  })
+
+  it('P1, a holder: unknown, and CHECK AGAIN asks the signer again for that relay, and then reads it', async () => {
+    const mine = 'wss://mine.holder.example/'
+    const c = aChain()
+    net.rules.emptyUntilAuthed.add(mine)
+    useRelays.getState().add(mine)
+    noteChainHolders(c.pubkey, [mine])
+    net.rules.hold.set(mine, [c.spawn, c.hop1])
+    net.signer.rejectFor.add('wss://mine.holder.example')
+    const first = await within(8000, askChainEvents(c.pubkey))
+    expect(decideSelfCheck(first.value ?? [], CANON, true, chainHolders(c.pubkey)).status).toBe('unknown')
+    expect(signerHeld.has(mine)).toBe(true)
+    const before = net.signer.prompts
+    net.signer.rejectFor.clear()
+    // What CHECK AGAIN does (selfSync recheckNow), then its check.
+    for (const url of [...signerHeld]) retryFailedAuth(url)
+    const again = await within(8000, askChainEvents(c.pubkey))
+    expect(net.signer.prompts).toBeGreaterThan(before)
+    expect(decideSelfCheck(again.value ?? [], CANON, true, chainHolders(c.pubkey)).status).toBe('found')
+  })
+
+  it('P1b: an open relay that challenges on connect, its AUTH turned down by the signer, does not hold a new identity', async () => {
+    const open = 'wss://open.challenger.example/'
+    net.rules.openChallenger.add(open)
+    useRelays.getState().add(open)
+    net.signer.rejectFor.add('wss://open.challenger.example')
+    const c = aChain()
+    const answers = await within(8000, askChainEvents(c.pubkey))
+    expect(decideSelfCheck(answers.value ?? [], CANON, true, chainHolders(c.pubkey)).status).toBe('none')
+  })
+
+  it('a relay that turned its AUTH down itself (not the signer) answers as on v2: its empty EOSE is its answer', async () => {
+    const own = 'wss://relay.refuses.example/'
+    net.rules.emptyUntilAuthed.add(own)
+    net.rules.refuseFirstAuth.add(own)
+    const [answer] = (await within(3000, queryEachAt([own], FILTER))).value ?? []
+    expect(answer).toMatchObject({ outcome: 'answered' })
+    expect(signerHeld.has(own)).toBe(false)
+  })
+  it('P2: a relay that turned the first socket\'s AUTH down itself is asked again over a fresh socket, as on v2', async () => {
+    net.rules.refuseFirstAuth.add(CANON)
+    const first = await within(20_000, publishMany([CANON], anEvent()))
+    expect(first.value).toEqual({ ok: true, accepted: [CANON] })
+    expect(dials(CANON)).toBe(2)
+    const second = await within(20_000, publishMany([CANON], anEvent()))
+    expect(second.value).toEqual({ ok: true, accepted: [CANON] })
+  })
+
+  it('P4: a move with a holder whose AUTH the signer turned down passes on both tries, as on v2', async () => {
+    await within(1000, publishMany([CANON], anEvent()))
+    const holder = 'wss://holder.p4.example/'
+    const c = aChain()
+    net.rules.emptyUntilAuthed.add(holder)
+    useRelays.getState().add(holder)
+    noteChainHolders(c.pubkey, [holder])
+    net.rules.hold.set(CANON, [c.spawn, c.hop1])
+    net.rules.hold.set(holder, [c.spawn, c.hop1])
+    net.signer.rejectFor.add('wss://holder.p4.example')
+    const opts = { since: c.hop1.created_at, anchorId: c.hop1.id }
+    const t1 = await within(6000, confirmChainEvents(c.pubkey, c.spawn.id, [c.spawn, c.hop1], opts))
+    const t2 = await within(6000, confirmChainEvents(c.pubkey, c.spawn.id, [c.spawn, c.hop1], { ...opts, reconnect: true }))
+    expect(t1.value).toHaveLength(2)
+    expect(t2.value).toHaveLength(2)
+  })
+
+  for (const ms of [6000, 9000, 12_000]) {
+    // The second try (reconnect) drops the canonical socket, as on v2, and its new AUTH may still be signing: then it
+    // refuses rather than pass on an empty answer read before the AUTH, which v2 took (safer for the canonical relay).
+    it(`P6: a working bunker taking ${ms} ms per AUTH, holder on a new socket: the move passes, as on v2`, async () => {
+      net.signer.ms = 3000
+      await within(4000, publishMany([CANON], anEvent()))
+      const holder = `wss://bunker${ms}.holder.example/`
+      const c = aChain()
+      net.rules.emptyUntilAuthed.add(holder)
+      useRelays.getState().add(holder)
+      noteChainHolders(c.pubkey, [holder])
+      net.rules.hold.set(CANON, [c.spawn, c.hop1])
+      net.rules.hold.set(holder, [c.spawn, c.hop1])
+      net.signer.ms = ms
+      const opts = { since: c.hop1.created_at, anchorId: c.hop1.id }
+      const t1 = await within(5300, confirmChainEvents(c.pubkey, c.spawn.id, [c.spawn, c.hop1], opts))
+      expect(t1.settled).toBe(true)
+      expect(t1.value).not.toBeNull()
+    })
+  }
+
+  it('the canonical relay kept from being read by the signer refuses the move, though another relay answered holding the anchor (v2 would pass)', async () => {
+    const open = 'wss://open.anchor2.example/'
+    const c = aChain()
+    useRelays.getState().add(open)
+    net.rules.hold.set(CANON, [c.spawn, c.hop1, c.hop2])
+    net.rules.hold.set(open, [c.spawn, c.hop1])
+    net.signer.rejectFor.add(CYBERSPACE_RELAY)
+    const got = await within(5300, confirmChainEvents(c.pubkey, c.spawn.id, [c.spawn, c.hop1], { since: c.hop1.created_at, anchorId: c.hop1.id }))
+    expect(got.settled).toBe(true)
+    expect(got.value).toBeNull()
+  })
+
+  it('a question ended before the canonical relay answered, its AUTH still signing, says the signer, not silence', async () => {
+    net.signer.mode = 'stall'
+    const stop = new AbortController()
+    const asking = queryEachSettled([CANON], FILTER, 2500, CANON, [], { stop: stop.signal })
+    await vi.advanceTimersByTimeAsync(600)
+    stop.abort()
+    const [answer] = (await within(10, asking)).value ?? []
+    expect(answer).toMatchObject({ outcome: 'refused', reason: AUTH_STALLED })
+  })
+
+  it('a publish that timed out on its socket says so, even on a relay the signer turned down before', async () => {
+    const x = 'wss://open.swallow.example/'
+    net.rules.openChallenger.add(x)
+    net.rules.swallowFirstEvent.add(x)
+    net.signer.rejectFor.add('wss://open.swallow.example')
+    await within(1000, queryEachAt([x], FILTER))
+    expect(signerHeld.has(x)).toBe(true)
+    const result = await within(20_000, publishMany([x], anEvent()))
+    expect(result.value).toMatchObject({ ok: false, reason: expect.stringMatching(/publish timed out/) })
+  })
+
+  it('a relay the signer holds up does not keep the others from being asked again over fresh sockets, as on v2', async () => {
+    const held = 'wss://held.first.example/'
+    const other = 'wss://other.swallow.example/'
+    net.rules.emptyUntilAuthed.add(held)
+    net.rules.swallowFirstEvent.add(other)
+    net.signer.rejectFor.add('wss://held.first.example')
+    const result = await within(40_000, publishMany([held, other], anEvent()))
+    expect(result.value).toEqual({ ok: true, accepted: [other] })
+    expect(dials(held)).toBe(1)
+    expect(dials(other)).toBe(2)
   })
 })

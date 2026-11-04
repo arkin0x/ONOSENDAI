@@ -36,6 +36,8 @@ import type { NostrEvent } from './events'
 let readPatienceMs = 3_000
 /** How long the publisher waits for an action to land before it goes on without knowing. */
 let landPatienceMs = 3_000
+/** How long an action that must land may wait before the person is told the store stopped answering. */
+let stuckMs = 10_000
 /** How often a write that was refused is tried again while nothing else asks. */
 let retryMs = 30_000
 /** The worker's patience for a migration, which is a once-per-identity copy of the whole chain. */
@@ -354,6 +356,9 @@ interface Track {
    * answer, however long, and stay signed and queued meanwhile, never sent blind.
    */
   mustLand: Set<string>
+  /** Said once those have waited stuckMs: the store has stopped answering (onChainStuck). */
+  stuckTimer: ReturnType<typeof setTimeout> | null
+  stuckSaid: boolean
 }
 
 const tracks = new Map<string, Track>()
@@ -361,7 +366,7 @@ const tracks = new Map<string, Track>()
 function trackOf(pubkey: string): Track {
   let t = tracks.get(pubkey)
   if (!t) {
-    t = { committed: [], committedIds: new Set(), acked: new Set(), wanted: null, running: null, latest: null, landers: new Map(), retry: null, refusedSaid: false, lost: new Set(), takingBack: false, blind: new Set(), held: false, lookBlind: false, mustLand: new Set() }
+    t = { committed: [], committedIds: new Set(), acked: new Set(), wanted: null, running: null, latest: null, landers: new Map(), retry: null, refusedSaid: false, lost: new Set(), takingBack: false, blind: new Set(), held: false, lookBlind: false, mustLand: new Set(), stuckTimer: null, stuckSaid: false }
     tracks.set(pubkey, t)
   }
   return t
@@ -447,6 +452,49 @@ export function onChainLost(handler: (pubkey: string, out: string[]) => void): v
 let resaveHandler: ((pubkey: string) => boolean) | null = null
 export function onChainResave(handler: (pubkey: string) => boolean): void { resaveHandler = handler }
 
+/**
+ * What the store says when actions that must land have waited stuckMs for a
+ * commit that does not answer (true), and when one does answer again (false).
+ * Installed by the store.
+ */
+let stuckHandler: ((pubkey: string, stuck: boolean) => void) | null = null
+export function onChainStuck(handler: (pubkey: string, stuck: boolean) => void): void { stuckHandler = handler }
+
+/** A commit answered, whatever it said: no store is stuck for `pubkey` now. */
+function commitAnswered(pubkey: string, t: Track): void {
+  if (t.stuckTimer) { clearTimeout(t.stuckTimer); t.stuckTimer = null }
+  if (t.stuckSaid) { t.stuckSaid = false; stuckHandler?.(pubkey, false) }
+}
+
+/**
+ * Actions put in hand from the spare key while the rows could not be read:
+ * nobody could compare them with another tab's commit. None goes out until a
+ * commit or the relays have answered for the head (vouch). Per identity.
+ */
+const unvouched = new Map<string, Set<string>>()
+/** What runs when actions held back are free to go: the publisher's drain. Installed by the publisher. */
+let releasedHandler: (() => void) | null = null
+export function onReleased(handler: () => void): void { releasedHandler = handler }
+
+/** Hold these actions back until a commit or the relays answer for `pubkey`'s head. */
+export function holdUntilVouched(pubkey: string, ids: string[]): void {
+  if (ids.length === 0) return
+  const held = unvouched.get(pubkey) ?? new Set<string>()
+  for (const id of ids) held.add(id)
+  unvouched.set(pubkey, held)
+}
+
+/** A commit or the relays answered for `pubkey`'s head: what was held back may go, and the drain is asked for. */
+export function vouch(pubkey: string): void {
+  if (!unvouched.delete(pubkey)) return
+  releasedHandler?.()
+}
+
+/** Whether this action waits for a commit or the relays to answer (holdUntilVouched). */
+export function unvouchedAction(pubkey: string, id: string): boolean {
+  return unvouched.get(pubkey)?.has(id) === true
+}
+
 /** Whether this action was let go before it landed: it may be on the relays though no commit has it. */
 export function wentOut(pubkey: string, id: string): boolean {
   return tracks.get(pubkey)?.blind.has(id) === true
@@ -500,6 +548,7 @@ async function run(pubkey: string, t: Track): Promise<void> {
     const commit = commitFor(pubkey, t, w)
     try {
       const result = await callEventDb('commitChain', [TAB_ID, commit])
+      commitAnswered(pubkey, t)
       if (result.status === 'lost') {
         // Nothing of this landed, and what waits behind it extends the same
         // lost head. All of it is refused from now, before anything is read:
@@ -529,6 +578,7 @@ async function run(pubkey: string, t: Track): Promise<void> {
       // A full disk, or a database that will not answer. The chain in hand is
       // untouched. An action that cannot be saved may still go to the relays,
       // and there it is safe, so nothing waits on this.
+      commitAnswered(pubkey, t)
       const name = (err as { name?: string }).name
       console.warn(`[chain] a save could not be written (${name ?? 'error'}): the chain stays in this tab, and it is tried again`)
       const notCommitted = (t.wanted ?? w).events.filter((e) => !t.committedIds.has(e.id))
@@ -580,6 +630,7 @@ export async function rowsSettled(pubkey: string): Promise<void> {
  * commit waits to be taken back. Those must never leave this device.
  */
 export function chainLanded(pubkey: string, id: string): Promise<boolean> {
+  if (unvouchedAction(pubkey, id)) return Promise.resolve(false)
   const t = tracks.get(pubkey)
   if (!t) return Promise.resolve(true)
   if (t.held || t.lost.has(id)) return Promise.resolve(false)
@@ -587,7 +638,14 @@ export function chainLanded(pubkey: string, id: string): Promise<boolean> {
   if (t.takingBack) return Promise.resolve(false)
   if (!t.running) { t.blind.add(id); return Promise.resolve(true) }
   // Signed after a look that ran out of time: no patience, only the commit's answer lets it go.
+  // Held, not hidden: past stuckMs the person is told, once, until a commit answers.
   const patient = !t.mustLand.has(id)
+  if (!patient && !t.stuckTimer && !t.stuckSaid) {
+    t.stuckTimer = setTimeout(() => {
+      t.stuckTimer = null
+      if ([...t.mustLand].some((m) => !t.committedIds.has(m) && !t.lost.has(m))) { t.stuckSaid = true; stuckHandler?.(pubkey, true) }
+    }, stuckMs)
+  }
   return new Promise((resolve) => {
     const timer = !patient ? undefined : setTimeout(() => {
       const waiting = t.landers.get(id)
@@ -656,7 +714,8 @@ export async function chainRowsSettled(): Promise<void> {
 }
 
 /** For tests. */
-export function setRowsPatience(p: { read?: number; land?: number; retry?: number; deploy?: number; check?: number | null }): void {
+export function setRowsPatience(p: { read?: number; land?: number; retry?: number; deploy?: number; check?: number | null; stuck?: number }): void {
+  if (p.stuck !== undefined) stuckMs = p.stuck
   if (p.check !== undefined) checkDeadlineMs = p.check
   if (p.deploy !== undefined) deployPatienceMs = p.deploy
   if (p.read !== undefined) readPatienceMs = p.read

@@ -85,7 +85,7 @@ import {
 import { confirmChainEvents } from '../lib/chains'
 import { chainDbAvailable, chainWritePause, readStoredChain, setAsideChains, setAsideStoredChain, writeStoredChain, type StoredChain } from '../lib/chainDb'
 import { CHAIN_RULES_EPOCH } from '../lib/chainRulesEpoch'
-import { chainHeld, chainLost, checkRowsInTime, clearMarker, clearTail, committedHead, deployAllowsMove, holdChain, inRows, markVerdicts, markerValue, migrateToRows, noteCommitted, onChainLost, onChainRefused, onChainResave, wentOut, probePassedBefore, readRows, readTail, rowsHead, rowsMarked, rowsWanted, saveRows, setAsideRows, setMarker, storeTrial, storeWorksHere, tailOnSave, takingBack, tookBack, turnRowsOff, writeTail } from '../lib/chainStore'
+import { chainHeld, chainLost, checkRowsInTime, clearMarker, clearTail, committedHead, deployAllowsMove, holdChain, holdUntilVouched, inRows, markVerdicts, markerValue, migrateToRows, noteCommitted, onChainLost, onChainRefused, onChainResave, onChainStuck, wentOut, probePassedBefore, readRows, readTail, rowsHead, rowsMarked, rowsWanted, saveRows, setAsideRows, setMarker, storeTrial, storeWorksHere, tailOnSave, takingBack, tookBack, turnRowsOff, vouch, writeTail } from '../lib/chainStore'
 import { eventDbAvailable } from '../lib/eventDb/client'
 import type { ChainRead, ChainSource } from '../lib/eventDb/chainRows'
 import { checkSignatures } from '../lib/sigCheck'
@@ -2261,6 +2261,14 @@ function takeBackLost(pubkey: string, attempt: number): void {
   })
 }
 
+/** Said while actions that must land wait on a store that stopped answering (lib/chainStore.ts onChainStuck). */
+const STORE_STUCK_META = 'This device\'s store stopped answering. Moves wait here, unsent.'
+onChainStuck((pubkey, stuck) => {
+  if (useCyberspace.getState().identity.pubkey !== pubkey) return
+  if (stuck) { useToast.getState().show({ label: 'CHAIN HELD', meta: STORE_STUCK_META, mark: 'block', sticky: true, reload: true }); return }
+  if (useToast.getState().toast?.meta === STORE_STUCK_META) useToast.getState().dismiss()
+})
+
 onChainResave((pubkey) => {
   const s = useCyberspace.getState()
   if (s.identity.pubkey !== pubkey || s.events[0]?.pubkey !== pubkey) return false
@@ -2355,6 +2363,8 @@ async function confirmHead(retrying: () => void): Promise<string | null | typeof
     if (got) {
       relaysConfirmed.add(pubkey)
       foldNow(got)
+      // The relays answered for the head: what the spare key brought back may go (a fork against them stops the drain itself).
+      vouch(pubkey)
       if (rowsWiped.has(pubkey)) void recoverWiped(pubkey)
       return null
     }
@@ -2625,7 +2635,11 @@ function tailInHand(pubkey: string): void {
   const events = s.events.concat(tail)
   if (!oneLine(pubkey, events)) return
   const merged = chainFrom(pubkey, { events, published: s.events.filter((e) => s.published[e.id] === 'ok').map((e) => e.id), stats: s.chain, held: s.held, savedAt: chainAt.get(pubkey)?.at ?? 0 }, true)
-  if (merged) putInHand(pubkey, merged, have)
+  if (!merged) return
+  // Rows that cannot be read: nobody compared these with another tab's commit.
+  // None goes out until a commit or the relays have answered for the head.
+  if (rowsDown.has(pubkey)) holdUntilVouched(pubkey, tail.map((e) => e.id))
+  putInHand(pubkey, merged, have)
 }
 
 /**
@@ -2782,6 +2796,8 @@ async function moveToRows(pubkey: string, startedAt: number): Promise<void> {
  */
 function takeRows(pubkey: string, read: ChainRead, blindSince: number | null): boolean {
   rowsDown.delete(pubkey)
+  // The rows answer again: what the spare key brought back is now compared and committed like any save.
+  vouch(pubkey)
   rowsWiped.delete(pubkey)
   noteCommitted(pubkey, read.events.map((e) => e.id), read.published)
   startRowsCheck(pubkey, read)

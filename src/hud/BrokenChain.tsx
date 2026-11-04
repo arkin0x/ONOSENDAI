@@ -109,7 +109,7 @@ export function BrokenChainNotice({ broken, actions }: { broken: NonNullable<Ret
         new chain at your spawn point, the coordinate your public key decodes
         to, and the broken chain stays on the relays as history that no
         longer places you. Before it respawns, ONOSENDAI adds{' '}
-        {endOfChainLabel((lastValid ?? action).id)} to RECENT in the Position panel, at the
+        {endOfChainLabel((lastValid ?? action).id)} to RECENT in the View panel, at the
         place this chain froze, so you can look at it again and travel back.
         It is marked KEPT and stays in RECENT until you remove it.
         <br /><br />
@@ -158,7 +158,7 @@ function RespawnWarning({ lastValid, place }: { lastValid: ActionEvent; place: s
         <li><b>The old chain stays on the relays as history.</b> All {events} of its actions remain there, but from now on it no longer places you anywhere, for anyone.</li>
         <li><b>The travel on the old chain is lost.</b> You do not keep the position it reached; getting back there means traveling there again on the new chain.</li>
         <li><b>Your region keys and your items are kept.</b> A region key is knowledge, not chain state, and nothing you hold is stored on the chain.</li>
-        <li><b>Before it respawns, ONOSENDAI adds {endOfChainLabel(lastValid.id)} to RECENT</b> in the Position panel, {place}, so you can view that place again and find your way back. It is marked KEPT and stays there until you remove it, however many other places you look at.</li>
+        <li><b>Before it respawns, ONOSENDAI adds {endOfChainLabel(lastValid.id)} to RECENT</b> in the View panel, {place}, so you can view that place again and find your way back. It is marked KEPT and stays there until you remove it, however many other places you look at.</li>
       </ul>
     </>
   )
@@ -171,7 +171,7 @@ function RespawnWarning({ lastValid, place }: { lastValid: ActionEvent; place: s
 export function respawnFailed(err: unknown, lastValidId?: string): string {
   // A reason that is a sentence already keeps one full stop, not two.
   const reason = (err instanceof Error ? err.message : String(err)).replace(/\.$/, '')
-  const kept = lastValidId ? ` ${endOfChainLabel(lastValidId)} stays in RECENT in the Position panel.` : ''
+  const kept = lastValidId ? ` ${endOfChainLabel(lastValidId)} stays in RECENT in the View panel.` : ''
   return `Respawn failed: ${reason}. Nothing was signed, and your chain is as it was.${kept} You can try again.`
 }
 

@@ -7,7 +7,8 @@
  * until Space commits the hop.
  *
  * WALK has its own keys, first-person style (lib/walkKeys.ts): W forward,
- * S back, A and D sideways, Space or R up, C or F down, every press a step. They are answered before anything else, so in WALK Space never
+ * S back, A and D sideways, Space or R up, C or F down, every press a step;
+ * W or S with A or D held steps diagonally, 45 degrees to that side. They are answered before anything else, so in WALK Space never
  * commits, scrolls or presses a focused button. Z switches WALK's GRAVITY
  * (store/useWalk.ts); the workshop bench's own Z (undo) is never reached
  * from here, since nothing of WALK's is answered with the workshop open.
@@ -27,7 +28,7 @@ import { moveDirection, type MoveName } from '../lib/moves'
 import type { RotateDirection } from '../lib/space'
 import { stepBuild } from '../store/buildStep'
 import { useWalk } from '../store/useWalk'
-import { walkMove } from '../lib/walkKeys'
+import { walkMove, walkPress } from '../lib/walkKeys'
 
 const MOVE_KEYS: Record<string, MoveName> = {
   KeyW: 'up',
@@ -82,7 +83,9 @@ export function walkKeyDown(event: Pick<KeyboardEvent, 'code' | 'ctrlKey' | 'shi
   const step = walkMove(event)
   if (step) {
     event.preventDefault()
-    useWalk.getState().press(step)
+    if (WALK_LETTERS.has(event.code)) walkHeld.add(event.code)
+    const press = walkPress(step, event.code, walkHeld)
+    useWalk.getState().press(press.name, press.strafe)
     return true
   }
   // Space is WALK's up even when it is not a step (a modifier held):
@@ -98,6 +101,20 @@ export function walkKeyDown(event: Pick<KeyboardEvent, 'code' | 'ctrlKey' | 'shi
     return true
   }
   return false
+}
+
+/** The letters that combine into a diagonal (lib/walkKeys.ts walkPress), and those of them held down now. */
+const WALK_LETTERS = new Set(['KeyW', 'KeyA', 'KeyS', 'KeyD'])
+const walkHeld = new Set<string>()
+
+/** A key let go: no longer held for a diagonal. */
+export function walkKeyUp(code: string): void {
+  walkHeld.delete(code)
+}
+
+/** Every key let go: the window lost focus, so no keyup will come for what was held. */
+export function walkKeysReleased(): void {
+  walkHeld.clear()
 }
 
 /** X in WALK: stop the steps still to prove (a fall still in the air is some), or with none, back to HOP. */
@@ -285,15 +302,18 @@ export function useKeyboard(): void {
     }
 
     const onKeyUp = (event: KeyboardEvent) => {
+      walkKeyUp(event.code)
       // A button with focus activates on Space's keyup: in WALK that Space
       // was a step up, not a press of the button.
       if (event.code === 'Space' && useCyberspace.getState().walking) event.preventDefault()
     }
     window.addEventListener('keydown', onKeyDown)
     window.addEventListener('keyup', onKeyUp)
+    window.addEventListener('blur', walkKeysReleased)
     return () => {
       window.removeEventListener('keydown', onKeyDown)
       window.removeEventListener('keyup', onKeyUp)
+      window.removeEventListener('blur', walkKeysReleased)
     }
   }, [])
 }

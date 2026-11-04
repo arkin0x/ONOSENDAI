@@ -117,9 +117,15 @@ describe('where it is used', () => {
     const relay = fs.readFileSync(path.join(SRC, 'lib/relay.ts'), 'utf8')
     expect(relay.match(/alreadyHaveEvent: deferCheck/g)).toHaveLength(1)
     expect(relay.match(/deferChecks: true/g)).toHaveLength(1)
-    expect(relay).toMatch(/return mergeAnswers\(await keepAuthenticAnswers\(await queryRelays\(relaySet\(\), filter, MAX_WAIT_MS, \{ deferChecks: true \}\)\)\)/)
+    // Checked in the worker, still asking a relay that hung (relayHang.test.ts), and
+    // not also as they land: askOne is told, or every event is checked twice.
+    expect(relay).toMatch(/return mergeAnswers\(await keepAuthenticAnswers\(await queryRelays\(relaySet\(\), filter, MAX_WAIT_MS, \{ evenHung: opts\.evenHung, deferChecks: true \}\)\)\)/)
+    expect(relay).toMatch(/\? askOne\(url, filter, deadline, \{ deferChecks: opts\.deferChecks \}\)/)
+    expect(relay).toMatch(/if \(!opts\.offThread\) return collect\(relaySet\(\), filter, MAX_WAIT_MS, opts\)/)
     const chains = fs.readFileSync(path.join(SRC, 'lib/chains.ts'), 'utf8')
-    expect(chains).toMatch(/gatherChain\(\(f\) => query\(f, \{ offThread: true \}\)/)
+    // Both: every relay, even a hung one (CHAIN_READ, #556), and off the main thread.
+    expect(chains).toMatch(/const CHAIN_READ = \{ evenHung: true \}/)
+    expect(chains).toMatch(/gatherChain\(\(f\) => query\(f, \{ \.\.\.CHAIN_READ, offThread: true \}\)/)
     expect(chains.match(/offThread: true/g)).toHaveLength(1)
   })
   it('the pool checks everything else as it lands', () => {

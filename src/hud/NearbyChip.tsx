@@ -7,17 +7,20 @@
  * while spectating, when the menu is locked, and after the find chip has
  * been tapped away. Built on the same markup as the scan chip beside it,
  * so the two read as one row of the same instrument: the same 9px label,
- * the same 29px height, a 12px mark.
+ * the same 29px height, a 12px mark. Not in BUILD mode (arkinox, 2026-11-02:
+ * the Nearby and Chain chips hidden while building).
  */
 
 import { Gem } from 'lucide-react'
 import { useNearbyLoot } from '../hooks/useNearbyLoot'
 import { useShards } from '../store/useShards'
+import { useBuilder } from '../store/useBuilder'
 
 export function NearbyChip(): JSX.Element | null {
   const count = useNearbyLoot().length
   const open = useShards((s) => s.nearbyOpen)
-  if (count === 0 || open) return null
+  const building = useBuilder((s) => s.active)
+  if (count === 0 || open || building) return null
   return (
     <div className="hyperbar presence hyperbar--found nearby__chip" role="status">
       <button className="presence__head" onClick={() => useShards.getState().setNearbyOpen(true)} title="What your keys open where you stand">

@@ -6,6 +6,7 @@ import { installTapGuard } from './lib/tapGuard'
 import { isBroadcast, markBroadcastPage } from './lib/tv/broadcast'
 import { TvStandby } from './hud/TvStandby'
 import { hydrateWorkshop } from './store/useWorkshop'
+import { hydrateHidden } from './store/hiddenStorage'
 import { wireLocalObjects } from './store/localObjects'
 import { diagWanted } from './lib/diagGate'
 
@@ -41,7 +42,7 @@ const DIAG_WAIT_MS = 3_000
 
 function boot(): void {
   setTimeout(draw, HYDRATE_WAIT_MS)
-  hydrateWorkshop().then(draw, draw)
+  void Promise.allSettled([hydrateWorkshop(), hydrateHidden()]).then(draw, draw)
 }
 
 /**

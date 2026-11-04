@@ -50,7 +50,7 @@ vi.mock('../../lib/chains', async (o) => ({ ...(await o() as object), fetchChain
 import { bytesToHex, coordToXyz, hexToCoord, sha256 } from 'cyberspace-core'
 import { enterHyperspaceTemplate, type NostrEvent } from '../../lib/events'
 import { buildRideProof, computeRideLeaf, lineTerrainK, rideBlocks } from '../../lib/hyperspace/ride'
-import { clearCloudJob, loadCloudJob, saveCloudJob, wirePosition, type PendingCloudJob } from '../../lib/cloud'
+import { loadCloudJob, saveCloudJob, wirePosition, type PendingCloudJob } from '../../lib/cloud'
 import type { HosakaDeposit, HosakaJob } from '../../lib/hosaka'
 import { useCyberspace } from '../../store/useCyberspace'
 import { useHyperspace } from '../../store/useHyperspace'
@@ -105,7 +105,7 @@ beforeAll(() => {
 
 beforeEach(() => {
   for (const f of Object.values(fake)) if (typeof f === 'function') f.mockReset()
-  clearCloudJob()
+  localStorage.removeItem('onosendai:cloudJob')
   useRideRun.setState({ error: null, progress: null, hosaka: false, path: null })
   useCyberspace.setState({
     cloudPrefs: { mode: 'auto', autoMaxSats: 0, apiUrl: 'http://fake', profile: 'time' },
@@ -145,7 +145,7 @@ describe('RIDE VIA HOSAKA', () => {
     expect(s.cloud.last?.action).toBe('ride')
     expect(s.cloud.balance?.msats).toBe(94_000)
     expect(s.proof.status).toBe('idle')
-    expect(loadCloudJob()).toBeNull()
+    expect(loadCloudJob(useCyberspace.getState().identity.pubkey)).toBeNull()
     expect(useHyperspace.getState().destination).toBeNull()
   })
 
@@ -163,8 +163,8 @@ describe('RIDE VIA HOSAKA', () => {
     const c = useCyberspace.getState().cloud
     expect(c.invoiceOpen).toBe(true)
     expect(c.invoice?.bolt11).toBe('lnbc60n1fake')
-    expect(loadCloudJob()?.stage).toBe('awaiting_payment')
-    expect(loadCloudJob()?.ride).toEqual({ fromHeight: 100, toHeight: 105, asOf: 110, toCoordHex: expect.stringMatching(/^[0-9a-f]{64}$/) })
+    expect(loadCloudJob(useCyberspace.getState().identity.pubkey)?.stage).toBe('awaiting_payment')
+    expect(loadCloudJob(useCyberspace.getState().identity.pubkey)?.ride).toEqual({ fromHeight: 100, toHeight: 105, asOf: 110, toCoordHex: expect.stringMatching(/^[0-9a-f]{64}$/) })
     // The head is held: a commit is refused while it computes.
     expect(useCyberspace.getState().proof.status).toBe('computing')
     expect(fake.startJob).not.toHaveBeenCalled()
@@ -177,12 +177,12 @@ describe('RIDE VIA HOSAKA', () => {
     expect(fake.submitRide).toHaveBeenCalledTimes(1)
   })
 
-  it('a forged proof is never signed, and the person is told', async () => {
+  it('a proof wrong in itself is never signed, the person is told, and it is let go', async () => {
     const prev = await boarded()
     const before = useCyberspace.getState().events.length
     const good = completed(prev)
-    const r = good.result as { mp: string }
-    const forged = { ...good, result: { ...(good.result as object), mp: (r.mp[0] === '0' ? '1' : '0') + r.mp.slice(1) } }
+    // Not a nonce at all: nothing about it depends on what this device holds.
+    const forged = { ...good, result: { ...(good.result as object), mn: 'nope' } }
     fake.submitRide.mockResolvedValue({ id: 'job-ride', status: 'computing', cost_msats: 6_000, poll_token: 'tok', result: null, error: null, balance_debited: true })
     fake.waitForJob.mockResolvedValue(forged)
 
@@ -195,8 +195,45 @@ describe('RIDE VIA HOSAKA', () => {
     expect(s.cloud.rideError).toMatch(/nothing was signed/)
     expect(s.cloud.rideError).toMatch(/job-ride|job-rid/)
     expect(s.proof.status).toBe('idle')
-    expect(loadCloudJob()).toBeNull()
+    expect(loadCloudJob(useCyberspace.getState().identity.pubkey)).toBeNull()
     expect(useHyperspace.getState().destination).toBe(105)
+  })
+
+  it('a proof that disagrees with this device\'s copy of a block is never signed, and is kept: that copy may be the stale one', async () => {
+    const prev = await boarded()
+    const before = useCyberspace.getState().events.length
+    const good = completed(prev)
+    const r = good.result as { mp: string }
+    const disagrees = { ...good, result: { ...(good.result as object), mp: (r.mp[0] === '0' ? '1' : '0') + r.mp.slice(1) } }
+    fake.submitRide.mockResolvedValue({ id: 'job-ride', status: 'computing', cost_msats: 6_000, poll_token: 'tok', result: null, error: null, balance_debited: true })
+    fake.waitForJob.mockResolvedValue(disagrees)
+
+    await startHosakaRide(OFFER)
+
+    const s = useCyberspace.getState()
+    expect(s.events).toHaveLength(before)
+    expect(s.cloud.status).toBe('error')
+    expect(s.cloud.rideError).toMatch(/disagrees with this device's copy of block \d+/)
+    expect(s.cloud.rideError).toMatch(/nothing was signed/)
+    expect(s.cloud.rideError).toMatch(/the proof is kept/)
+    // Stored line rows are append-only, so RESUME reads the same copy: the
+    // message must not promise that it checks anything anew.
+    expect(s.cloud.rideError).toMatch(/RESUME fails the same way/)
+    expect(s.cloud.rideError).not.toMatch(/checks it again/)
+    expect(s.cloud.rideError).toMatch(/job-ride|job-rid/)
+    expect(s.proof.status).toBe('idle')
+    // The paid record is still there for RESUME.
+    expect(loadCloudJob(useCyberspace.getState().identity.pubkey)?.ride).toBeTruthy()
+    expect(s.cloud.job).toBeTruthy()
+
+    // Once this device's copy is corrected (here, standing in: the proof made to agree),
+    // RESUME signs on the proof already paid for.
+    fake.waitForJob.mockResolvedValue(good)
+    fake.limits.mockResolvedValue(null)
+    await useCyberspace.getState().resumeCloudJob()
+    expect(tag(head(), 'A')).toBe('hyperjump')
+    expect(loadCloudJob(useCyberspace.getState().identity.pubkey)).toBeNull()
+    expect(fake.submitRide).toHaveBeenCalledTimes(1)
   })
 
   it('a proof for another head is never signed, however valid it is', async () => {
@@ -215,7 +252,7 @@ describe('RIDE VIA HOSAKA', () => {
     fake.waitForJob.mockResolvedValue({ id: 'job-ride', status: 'failed', cost_msats: 6_000, result: null, error: 'ride_leaves timed out' })
     await startHosakaRide(OFFER)
     expect(useCyberspace.getState().cloud.rideError).toMatch(/ride_leaves timed out.*refunded to your HOSAKA balance/)
-    expect(loadCloudJob()).toBeNull()
+    expect(loadCloudJob(useCyberspace.getState().identity.pubkey)).toBeNull()
   })
 
   it('while HOSAKA computes, nothing else takes the head: no second ride of either kind', async () => {
@@ -302,7 +339,7 @@ describe('a reload while HOSAKA computes', () => {
     expect(tag(e, 'A')).toBe('hyperjump')
     expect(tag(e, 'C')).toBe('cd'.repeat(32))
     expect(tag(e, 'as_of')).toBe('110')
-    expect(loadCloudJob()).toBeNull()
+    expect(loadCloudJob(useCyberspace.getState().identity.pubkey)).toBeNull()
   })
 
   it('a record whose head has moved is dropped, never signed', async () => {
@@ -317,6 +354,6 @@ describe('a reload while HOSAKA computes', () => {
     await useCyberspace.getState().resumeCloudJob()
     expect(fake.waitForJob).not.toHaveBeenCalled()
     expect(useCyberspace.getState().events).toHaveLength(before)
-    expect(loadCloudJob()).toBeNull()
+    expect(loadCloudJob(useCyberspace.getState().identity.pubkey)).toBeNull()
   })
 })

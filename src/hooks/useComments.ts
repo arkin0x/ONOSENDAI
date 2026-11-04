@@ -11,7 +11,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { MAX_COMMENT_LENGTH, commentsFilter, itemParent, openComments, sealedComment, threadComments, type Comment, type CommentParent, type CommentSubject } from '../lib/comments'
-import type { NostrEvent } from '../lib/events'
+import { hexToBytes, type NostrEvent } from '../lib/events'
 import { publish, query } from '../lib/relay'
 import { regionKeyAt } from '../lib/shardCrypto'
 import { MAX_COMPUTE_HEIGHT, useCyberspace } from '../store/useCyberspace'
@@ -37,8 +37,9 @@ export function useComments(subject: CommentSubject | null): CommentsState {
   const [tick, setTick] = useState(0)
   const key = subject ? `${subject.author}:${subject.lookupId}:${subject.itemId}` : null
   // The region key is a function of the bag (its place and height), so it is derived once per subject.
+  // In a room it is the room key, which the find already carries.
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  const regionKey = useMemo(() => (subject ? regionKeyAt(subject.at, subject.height, MAX_COMPUTE_HEIGHT).key : null), [key])
+  const regionKey = useMemo(() => (subject ? (subject.roomKeyHex ? hexToBytes(subject.roomKeyHex) : regionKeyAt(subject.at, subject.height, MAX_COMPUTE_HEIGHT).key) : null), [key])
 
   useEffect(() => {
     if (!subject || !regionKey) return

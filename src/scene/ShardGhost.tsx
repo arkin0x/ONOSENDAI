@@ -39,7 +39,7 @@ import { deployPoint, itemCentre, type ViewAxes } from '../lib/space'
 import { buildPlane, buildStepOf } from '../lib/buildCursor'
 import { bearingOf, csDirection, frameOf, placedPose, snapOffered, type V3 } from '../lib/pose'
 import { alignedOrigin, useCyberspace } from '../store/useCyberspace'
-import { useShards } from '../store/useShards'
+import { lookModelOf, sealingDoor, useShards } from '../store/useShards'
 import { messagePreview } from '../lib/hidden'
 import { ShardMesh } from './ShardMesh'
 import { regionBox } from '../lib/clip'
@@ -53,7 +53,12 @@ interface Props {
 
 export function ShardGhost({ axes }: Props): JSX.Element | null {
   const pending = useShards((s) => s.pending)
-  const model = useShards((s) => (s.pending?.type === 'shard' ? s.pendingShard() : null))
+  // A chest ghosts as the model it wears (the hide bar's model row), placed
+  // as a shard is, so the ghost shows exactly where it lands (D2).
+  const look = useShards((s) => (s.pending?.type === 'chest' ? s.pending.look ?? null : null))
+  const lookModel = useMemo(() => (look ? lookModelOf(look) : null), [look])
+  const shardModel = useShards((s) => (s.pending?.type === 'shard' ? s.pendingShard() : null))
+  const model = shardModel ?? lookModel
   // What will land: the model turned by the deploy bar's TURN row, the same function the deploy uses.
   const deployTurn = useShards((s) => s.deployTurn)
   const shard = useMemo(() => (model ? turnShard(model, deployTurn) : null), [model, deployTurn])
@@ -96,7 +101,10 @@ export function ShardGhost({ axes }: Props): JSX.Element | null {
   // from the stores each frame like the cursor cube, not from a React commit.
   const landingAt = (): [number, number, number] => {
     const st = useCyberspace.getState()
-    const p = deployPoint(st.cursor, buildStepOf(st), useShards.getState().deployHeight)
+    // A chest placed first (R18) stays where PLACE CHEST put it while its modal is filled.
+    const pd = useShards.getState().pending
+    const spot = pd?.type === 'chest' ? pd.spot : undefined
+    const p = spot?.at ?? deployPoint(st.cursor, buildStepOf(st), useShards.getState().deployHeight)
     return itemCentre(p, alignedOrigin(st.anchor, st.scaleExp), st.scaleExp, axes)
   }
 
@@ -120,14 +128,20 @@ export function ShardGhost({ axes }: Props): JSX.Element | null {
   })
 
 
+  // The door's name under what is sealed to it (4.3); its X is on the bar's chip.
+  const me = useCyberspace((s) => s.identity.pubkey)
+  const sealing = useShards((s) => (s.pending ? sealingDoor(s, me, (s.pending.type === 'chest' && s.pending.spot?.at) || at, plane, deployHeight)?.name ?? null : null))
+  const sealed = sealing !== null && <WorldLabel text={sealing} color="#ff3b4e" follow={landingAt} align="center" px={11} />
+
   // A message ghosts as a dim note that follows the cursor; a key, a chest
   // and hidden audio ghost as their mark and name, the way the world draws
   // them once hidden.
-  if (pending?.type === 'message' || pending?.type === 'key' || pending?.type === 'chest' || pending?.type === 'audio') {
+  if (pending?.type === 'message' || pending?.type === 'key' || (pending?.type === 'chest' && !shard) || pending?.type === 'audio') {
     return (
       <>
       {/* Hidden audio's sphere: full volume inside, a one-shot's trigger zone (AudioSphereGhost). */}
       {pending.type === 'audio' && <AudioSphereGhost landingAt={landingAt} />}
+      {sealed}
       <WorldLabel
         text={pending.type === 'message' ? messagePreview(pending.text, 40) : pending.type === 'key' ? `⚷ ${pending.key.name}` : pending.type === 'audio' ? `AUDIO · ${pending.audio.title}` : `▣ ${pending.name}`}
         color="#ffd27d"
@@ -140,11 +154,15 @@ export function ShardGhost({ axes }: Props): JSX.Element | null {
     )
   }
 
-  if (!shard || pending?.type !== 'shard' || !Number.isFinite(scale)) return null
+  if (!shard || (pending?.type !== 'shard' && pending?.type !== 'chest') || !Number.isFinite(scale)) return null
 
   return (
-    <group ref={group}>
-      <ShardMesh shard={shard} scale={scale} ghost headlamp clip={clip} pose={pose} />
-    </group>
+    <>
+      <group ref={group}>
+        <ShardMesh shard={shard} scale={scale} ghost headlamp clip={clip} pose={pose} />
+      </group>
+      {sealed}
+      {pending.type === 'chest' && pending.name && <WorldLabel text={`▣ ${pending.name}`} color="#ffd27d" follow={landingAt} align="center" px={13} opacity={0.5} />}
+    </>
   )
 }

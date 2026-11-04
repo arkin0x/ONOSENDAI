@@ -163,7 +163,7 @@ describe('review of #227: a failed respawn says so, and DEREZZ on a broken chain
     } finally {
       useCyberspace.setState({ respawn: realRespawn })
     }
-    expect(failure).toBe(`Respawn failed: the signer declined. Nothing was signed, and your chain is as it was. End of Chain ${lastValid.id.slice(0, 8)} stays in RECENT in the Position panel. You can try again.`)
+    expect(failure).toBe(`Respawn failed: the signer declined. Nothing was signed, and your chain is as it was. End of Chain ${lastValid.id.slice(0, 8)} stays in RECENT in the View panel. You can try again.`)
     expect(recent()[0]).toMatchObject({ label: `End of Chain ${lastValid.id.slice(0, 8)}`, pinned: true })
     expect(whyNoMove(S().actions())).toBe(BROKEN_CHAIN_MESSAGE)
   })

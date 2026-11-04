@@ -82,7 +82,7 @@ export function checkedElsewhere(ev: NostrEvent): void {
 
 /**
  * The event the socket is handing over right now, whose check is being made later
- * by whoever asked (relay.ts queryChecked). Only that subscription says so, only
+ * by whoever asked (relay.ts query with offThread). Only that subscription says so, only
  * for the one frame in hand: nostr-tools asks alreadyHaveEvent and then verifyEvent
  * in one stack, and the microtask clears this before any other frame can run. An
  * event read by any other subscription is checked as it arrives, as ever.

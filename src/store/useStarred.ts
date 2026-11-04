@@ -88,7 +88,7 @@ export const useStarred = create<StarredState>((set, get) => {
       set({ naming: null })
       const place = find(get().places, naming)
       if (!place) return
-      useToast.getState().show({ label: 'Added to your Starred Places in the Position panel', meta: placeName(place), mark: 'star', ms: BRIEF_TOAST_MS })
+      useToast.getState().show({ label: 'Added to your Starred Places in the View panel', meta: placeName(place), mark: 'star', ms: BRIEF_TOAST_MS })
     },
     selected: null,
     select: (entry) => set({ selected: entry ? { input: entry.input, plane: entry.plane } : null }),

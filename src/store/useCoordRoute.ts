@@ -2,7 +2,7 @@
  * useCoordRoute.ts: what onosendai.tech/C/<hex> opens on (lib/coordRoute.ts).
  *
  * Read once, when the app starts. A full coordinate becomes a free view of
- * that place, the same focus the POSITION panel's VIEW makes, so the pad can
+ * that place, the same focus the View panel's VIEW makes, so the pad can
  * look around from there and the discovery scan, which follows the anchor
  * wherever it goes (hooks/useDiscovery.ts), runs there exactly as after a
  * hop. Nothing is signed and your own avatar does not move.

@@ -139,7 +139,7 @@ function takeSession(): TourSession {
   const l = useLayers.getState()
   return {
     scaleExp: cs.scaleExp,
-    layers: { dots: l.dots, boxes: l.boxes, walkAvatarHidden: l.walkAvatarHidden, walkLookSphere: l.walkLookSphere, headlamp: l.headlamp },
+    layers: { dots: l.dots, boxes: l.boxes, walkAvatarHidden: l.walkAvatarHidden, walkLookSphere: l.walkLookSphere, headlamp: l.headlamp, audioSpheres: l.audioSpheres },
     chatOpen: useChat.getState().open,
     hadHops: hasHop(cs.events),
     spectate: cs.spectate?.pubkey ?? null,
@@ -299,7 +299,7 @@ function selectBlock(sel: NonNullable<DemoScene['select']>, scaleExp: number | u
     if (useHyperspace.getState().destination === sel.height) useHyperspace.getState().setDestination(prevDest)
     const pin = useCyberspace.getState().pin
     if (pin && pin.label === sel.label) {
-      if (prevPin) useCyberspace.getState().dropPin(prevPin.position, prevPin.label, prevPin.scaleExp)
+      if (prevPin) useCyberspace.getState().dropPin(prevPin.position, prevPin.label, prevPin.scaleExp, prevPin.named)
       else useCyberspace.getState().clearPin()
     }
   })

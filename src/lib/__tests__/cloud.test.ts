@@ -131,15 +131,51 @@ describe('persistence', () => {
       plane: 1, prevEventId: 'ab'.repeat(32), costMsats: 1000, createdAt: 5, stage: 'awaiting_payment',
       deposit: { depositId: 'd', bolt11: 'lnbc', amountMsats: 1000, expiresAt: 9, paymentHash: 'h' },
     }
-    expect(loadCloudJob()).toBeNull()
+    expect(loadCloudJob('p')).toBeNull()
     saveCloudJob(record)
-    const back = loadCloudJob()
+    const back = loadCloudJob('p')
     expect(back).toEqual(record)
     expect(positionFromWire(back!.from)).toEqual(big)
-    clearCloudJob()
-    expect(loadCloudJob()).toBeNull()
-    localStorage.setItem('onosendai:cloudJob', JSON.stringify({ version: 1, jobId: 'j', stage: 'flying' }))
-    expect(loadCloudJob()).toBeNull()
+    clearCloudJob('p')
+    expect(loadCloudJob('p')).toBeNull()
+    localStorage.setItem('onosendai:cloudJob', JSON.stringify({ version: 1, jobId: 'j', pubkey: 'p', stage: 'flying' }))
+    expect(loadCloudJob('p')).toBeNull()
+  })
+
+  describe('one kept job per identity (review of #589)', () => {
+    const job = (pubkey: string, jobId: string): PendingCloudJob => ({
+      version: 1, jobId, pollToken: 't', action: 'hop', pubkey, from: wirePosition({ x: 1n, y: 2n, z: 3n }), to: wirePosition({ x: 4n, y: 2n, z: 3n }),
+      plane: 0, prevEventId: 'ab'.repeat(32), costMsats: 1000, createdAt: 5, stage: 'paid', deposit: null,
+    })
+    beforeEach(() => localStorage.removeItem('onosendai:cloudJob'))
+
+    it('a second identity buying keeps the first identity\'s paid record', () => {
+      saveCloudJob(job('A', 'job-a'))
+      saveCloudJob(job('B', 'job-b'))
+      expect(loadCloudJob('A')?.jobId).toBe('job-a')
+      expect(loadCloudJob('B')?.jobId).toBe('job-b')
+    })
+
+    it('forgetting one identity\'s job leaves the other, and a job id that is not the record\'s forgets nothing', () => {
+      saveCloudJob(job('A', 'job-a'))
+      saveCloudJob(job('B', 'job-b'))
+      clearCloudJob('B', 'an-older-job')
+      expect(loadCloudJob('B')?.jobId).toBe('job-b')
+      clearCloudJob('B')
+      expect(loadCloudJob('B')).toBeNull()
+      expect(loadCloudJob('A')?.jobId).toBe('job-a')
+      clearCloudJob('A', 'job-a')
+      expect(localStorage.getItem('onosendai:cloudJob')).toBeNull()
+    })
+
+    it('the single record an earlier version kept is read as its identity\'s, and kept when another identity buys', () => {
+      localStorage.setItem('onosendai:cloudJob', JSON.stringify(job('A', 'job-a')))
+      expect(loadCloudJob('A')?.jobId).toBe('job-a')
+      expect(loadCloudJob('B')).toBeNull()
+      saveCloudJob(job('B', 'job-b'))
+      expect(loadCloudJob('A')?.jobId).toBe('job-a')
+      expect(loadCloudJob('B')?.jobId).toBe('job-b')
+    })
   })
 })
 

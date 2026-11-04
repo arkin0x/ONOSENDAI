@@ -405,4 +405,20 @@ describe('the NIP-01 flag', () => {
       expect(store.useCyberspace.getState().events).toHaveLength(8)
     } finally { proto.getAll = real }
   })
+
+  it('a load\'s check of the rows is followed by the chain\'s verdicts, on its rows and its record', async () => {
+    const chain = chainOf(6)
+    await seed(chain)
+    await settled(await load())
+    await settled(await load())
+    const { CHAIN_RULES_EPOCH } = await import('../../lib/chainRulesEpoch')
+    const { CHAIN_RULES_REVISION } = await import('../../lib/events')
+    const readRecord = async (): Promise<{ verdict?: { epoch: number; rev: string; validThrough: { id: string } | null } } | undefined> => {
+      const { withEventDb, closeEventDb } = await import('../../lib/eventDb/connection')
+      const r = await withEventDb((db) => new Promise<unknown>((resolve) => { const g = db.transaction('chains').objectStore('chains').get(pk); g.onsuccess = () => resolve(g.result) }))
+      closeEventDb()
+      return r as { verdict?: { epoch: number; rev: string; validThrough: { id: string } | null } } | undefined
+    }
+    await vi.waitFor(async () => expect((await readRecord())?.verdict).toMatchObject({ epoch: CHAIN_RULES_EPOCH, rev: CHAIN_RULES_REVISION, validThrough: { id: chain[5].id } }), { timeout: 10_000, interval: 50 })
+  })
 })

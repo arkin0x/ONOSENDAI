@@ -33,3 +33,18 @@ export function coinKind(state: CoinState): 'coin' | 'spent' {
 export function markShown(kind: MarkKind, scaleExp: number): boolean {
   return kind === 'coin' || scaleExp <= MESSAGE_SCALE_MAX
 }
+
+/** How the world draws an item: as itself, going out after a TAKE, or as the blue box it leaves. */
+export type ItemDraw = 'item' | 'vanishing' | 'box'
+
+/**
+ * Holding an item takes it out of this identity's world: its model and name
+ * go, and the note's blue box stays where it was (arkinox, 2026-11-01). A
+ * local reading; nothing is published and nobody else's world changes. Until
+ * ITEMS is read it is the box, so a reload never shows what is held, and only
+ * a TAKE this session plays the fade.
+ */
+export function itemDrawAs(held: boolean, itemsRead: boolean, vanishing: boolean): ItemDraw {
+  if (held && vanishing) return 'vanishing'
+  return held || !itemsRead ? 'box' : 'item'
+}

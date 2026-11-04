@@ -144,7 +144,7 @@ describe('Starred Places', () => {
     S.getState().finishNaming('  Rooftop ')
     expect(S.getState().naming).toBeNull()
     expect(S.getState().places[0].nickname).toBe('Rooftop')
-    expect(useToast.getState().toast).toMatchObject({ label: 'Added to your Starred Places in the Position panel', meta: 'Rooftop', mark: 'star' })
+    expect(useToast.getState().toast).toMatchObject({ label: 'Added to your Starred Places in the View panel', meta: 'Rooftop', mark: 'star' })
   })
 
   it('keeps the place starred under its own label when the nickname is skipped', async () => {

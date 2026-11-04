@@ -51,6 +51,13 @@ export interface StopIndex {
   size: number
   /** Allocated row capacity of the columns. */
   capacity: number
+  /**
+   * Rows to grow by, once adopted; 0 while building, which doubles. An adopted
+   * index holds the whole line and gains a block every ten minutes: doubling at
+   * its first new row took its columns from 137 to 270 MB, for rows that would
+   * take decades to arrive.
+   */
+  growStep: number
   keys: Uint8Array
   coords: Uint8Array
   merkles: Uint8Array
@@ -80,6 +87,7 @@ export function createStopIndex(): StopIndex {
   return {
     size: 0,
     capacity: 0,
+    growStep: 0,
     keys: new Uint8Array(0),
     coords: new Uint8Array(0),
     merkles: new Uint8Array(0),
@@ -106,7 +114,7 @@ function grow<T extends Uint8Array | Uint32Array>(old: T, length: number, make: 
 function ensureCapacity(index: StopIndex, extra: number): void {
   const needed = index.size + extra
   if (needed <= index.capacity) return
-  const cap = Math.max(needed, index.capacity * 2, 65536)
+  const cap = index.growStep > 0 ? Math.max(needed, index.capacity + index.growStep) : Math.max(needed, index.capacity * 2, 65536)
   index.keys = grow(index.keys, cap * 32, (n) => new Uint8Array(n))
   index.coords = grow(index.coords, cap * 32, (n) => new Uint8Array(n))
   index.merkles = grow(index.merkles, cap * 32, (n) => new Uint8Array(n))
@@ -118,7 +126,7 @@ function ensureCapacity(index: StopIndex, extra: number): void {
 
 function ensureByHeight(index: StopIndex, height: number): void {
   if (height < index.byHeight.length) return
-  const cap = Math.max(height + 1, index.byHeight.length * 2, 65536)
+  const cap = index.growStep > 0 ? Math.max(height + 1, index.byHeight.length + index.growStep) : Math.max(height + 1, index.byHeight.length * 2, 65536)
   index.byHeight = grow(index.byHeight, cap, (n) => new Uint32Array(n))
 }
 
@@ -433,7 +441,8 @@ export function insertRow(index: StopIndex, stop: Stop): void {
     else hi = mid
   }
   if (index.permCount === index.perm.length) {
-    index.perm = grow(index.perm, Math.max(index.permCount + 1, index.perm.length * 2, 1024), (n) => new Uint32Array(n))
+    const room = index.growStep > 0 ? index.perm.length + index.growStep : Math.max(index.perm.length * 2, 1024)
+    index.perm = grow(index.perm, Math.max(index.permCount + 1, room), (n) => new Uint32Array(n))
   }
   index.perm.copyWithin(lo + 1, lo, index.permCount)
   index.perm[lo] = row
@@ -588,6 +597,27 @@ function bufferOf(v: unknown, byteLength: number): ArrayBuffer | null {
 }
 
 /**
+ * serializeIndex, a slice at a time, so copying a million rows leaves room for
+ * frames. Everything the sort and the row count depend on is copied in the same
+ * tick, and `perm` is among them because an insert moves it in place. The four
+ * 32-byte columns can wait: a row is written once, as it is appended, and never
+ * moves, and only the first `count` are read. Null as serializeIndex is.
+ */
+export async function serializeIndexSliced(index: StopIndex, copy: (column: Uint8Array, bytes: number, rowBytes: number) => Promise<ArrayBuffer>): Promise<IndexSnapshot | null> {
+  if (hasPending(index) || index.permCount !== index.size) return null
+  const count = index.size
+  const maxHeight = index.maxHeight
+  const kinds = index.kinds.slice(0, count).buffer
+  const heights = index.heights.slice(0, count).buffer
+  const perm = index.perm.slice(0, count).buffer
+  const keys = await copy(index.keys, count * 32, 32)
+  const coords = await copy(index.coords, count * 32, 32)
+  const merkles = await copy(index.merkles, count * 32, 32)
+  const hashes = await copy(index.hashes, count * 32, 32)
+  return { version: 1, count, maxHeight, keys, coords, merkles, hashes, kinds, heights, perm }
+}
+
+/**
  * Adopt a stored snapshot into an EMPTY index. Everything is validated before
  * the first mutation (shape, version, exact buffer lengths, perm being a real
  * permutation, heights unique and consistent with maxHeight), because a
@@ -599,6 +629,9 @@ function bufferOf(v: unknown, byteLength: number): ArrayBuffer | null {
  * never mutate, and adoption leaves capacity === count so the next append
  * grows into fresh buffers before writing).
  */
+/** Rows an adopted index grows by at a time: about four months of blocks, 2 MB of columns. */
+export const ADOPTED_GROW_ROWS = 16384
+
 export function adoptSnapshot(index: StopIndex, snap: unknown): boolean {
   if (index.size !== 0 || index.permCount !== 0 || hasPending(index)) return false
   if (typeof snap !== 'object' || snap === null) return false
@@ -633,8 +666,19 @@ export function adoptSnapshot(index: StopIndex, snap: unknown): boolean {
     seen[p] = 1
   }
   if (highest !== maxHeight) return false
+  // The sorted view must really sort the keys: nearest-stop answers trust it.
+  const keyCol = new Uint8Array(keys)
+  for (let i = 1; i < count; i++) {
+    const a = permCol[i - 1] * 32
+    const b = permCol[i] * 32
+    for (let k = 0; k < 32; k++) {
+      const d = keyCol[a + k] - keyCol[b + k]
+      if (d < 0) break
+      if (d > 0) return false
+    }
+  }
 
-  index.keys = new Uint8Array(keys)
+  index.keys = keyCol
   index.coords = new Uint8Array(coords)
   index.merkles = new Uint8Array(merkles)
   index.hashes = new Uint8Array(hashes)
@@ -646,5 +690,6 @@ export function adoptSnapshot(index: StopIndex, snap: unknown): boolean {
   index.maxHeight = maxHeight
   index.size = count
   index.capacity = count
+  index.growStep = ADOPTED_GROW_ROWS
   return true
 }

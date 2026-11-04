@@ -80,7 +80,7 @@ export function StarChip(): JSX.Element | null {
       onClick={press}
       aria-pressed={starred}
       aria-label={starred ? `Remove ${name} from your Starred Places` : `Add ${name} to your Starred Places`}
-      title={starred ? 'Starred. Tap to remove it from your Starred Places' : 'Star this place: it is added to Starred Places in the Position panel'}
+      title={starred ? 'Starred. Tap to remove it from your Starred Places' : 'Star this place: it is added to Starred Places in the View panel'}
     >
       <Star key={`g${lit ? flare.n : 0}`} className={`starchip__glyph ${lit ? 'is-lit' : ''}`} size={13} strokeWidth={2.25} fill={starred ? 'currentColor' : 'none'} aria-hidden />
       {lit && (

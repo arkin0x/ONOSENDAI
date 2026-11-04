@@ -1,10 +1,28 @@
 /// <reference types="vitest/config" />
 import { execSync } from 'node:child_process'
+import { fileURLToPath } from 'node:url'
 import { defineConfig, type Plugin } from 'vite'
 import react from '@vitejs/plugin-react'
 import { resolveVersion, UNVERSIONED } from './src/lib/version'
 import { ROUTE_PAGES, withCard } from './src/lib/routeCard'
 import { VERSION_FILE, versionFileOf } from './src/lib/chainRulesEpoch'
+
+/**
+ * cyberspace-core's own import of its version 1 hop list resolves to a guard,
+ * so the 97 KB gzipped list stays out of the first load and out of the workers
+ * (lib/v1HopListGuard). Tests load core as it is, with its real default; a test
+ * holds every call in the app to passing its own list (lib/__tests__/v1HopList).
+ */
+function v1HopListGuard(): Plugin {
+  const guard = fileURLToPath(new URL('./src/lib/v1HopListGuard.ts', import.meta.url))
+  return {
+    name: 'onosendai-v1-hop-list-guard',
+    enforce: 'pre',
+    resolveId(source, importer) {
+      return source === './grandfathered_v1_hops.js' && importer && /cyberspace-core[\\/]dist[\\/]/.test(importer) ? guard : null
+    },
+  }
+}
 
 /** tv.html and workshop.html: the built page with each route's link preview, served at /tv and /workshop (src/lib/routeCard.ts). */
 function routeCards(): Plugin {
@@ -93,7 +111,7 @@ function commitMessage(): string | null {
 const BUILD = process.env.VITEST ? 'test' : buildId()
 
 export default defineConfig(async () => ({
-  plugins: [react(), routeCards(), composerKnowsWebGL2(), versionFile(BUILD)],
+  plugins: [react(), routeCards(), composerKnowsWebGL2(), versionFile(BUILD), v1HopListGuard()],
   define: {
     // The same id version.json names, so a tab can tell a newer deploy from its own.
     __ONOSENDAI_BUILD__: JSON.stringify(BUILD),
@@ -120,6 +138,7 @@ export default defineConfig(async () => ({
   },
   worker: {
     format: 'es',
+    plugins: () => [v1HopListGuard()],
   },
   test: {
     // Tests never touch a live relay: a WebSocket opened in one fails it (src/test/noNetwork.ts).

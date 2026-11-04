@@ -3,8 +3,8 @@
  * is always in it.
  */
 
-import { describe, it, expect } from 'vitest'
-import { DEFAULT_RELAY, normalizeRelay } from '../useRelays'
+import { describe, it, expect, vi } from 'vitest'
+import { DEFAULT_RELAY, RETIRED_HOSTS, isRetiredRelay, normalizeRelay } from '../useRelays'
 
 describe('normalizeRelay', () => {
   it('accepts and completes real relay hosts', () => {
@@ -28,5 +28,43 @@ describe('normalizeRelay', () => {
   it('has one canonical relay as the default: a wss:// address, already normalized', () => {
     expect(DEFAULT_RELAY).toMatch(/^wss:\/\/[a-z0-9.-]+$/)
     expect(normalizeRelay(DEFAULT_RELAY)).toBe(DEFAULT_RELAY)
+  })
+})
+
+describe('a retired relay', () => {
+  const RETIRED = 'wss://onosendai.feeds.relay.tools'
+
+  /** The store as a new page gets it, with this list already saved. */
+  async function loadWith(saved: unknown[]): Promise<{ store: typeof import('../useRelays')['useRelays']; storage: Map<string, string> }> {
+    const storage = new Map([['onosendai:relays', JSON.stringify(saved)]])
+    vi.stubGlobal('localStorage', { getItem: (k: string) => storage.get(k) ?? null, setItem: (k: string, v: string) => { storage.set(k, v) } })
+    vi.resetModules()
+    return { store: (await import('../useRelays')).useRelays, storage }
+  }
+
+  it('is wss://onosendai.feeds.relay.tools (the owner, 2026-10-31), however the URL is written', () => {
+    expect(RETIRED_HOSTS).toEqual(['onosendai.feeds.relay.tools'])
+    const host = 'onosendai.feeds.relay.tools'
+    for (const spelled of [RETIRED, `${RETIRED}/`, host, 'WSS://Onosendai.Feeds.Relay.Tools', ` ${RETIRED} `,
+      `wss://${host}//`, `https://${host}`, `http://${host}`, `ws://${host}`, `wss://${host}.`, `wss://${host}/x`, `wss://${host}:443`, `wss://${host}/?a=1`]) {
+      expect(isRetiredRelay(spelled), spelled).toBe(true)
+    }
+    for (const other of [DEFAULT_RELAY, 'not a url', '', `wss://x.${host}`, 'wss://feeds.relay.tools', `wss://${host}.evil.example`, 'wss://relay.onosendai.tech']) {
+      expect(isRetiredRelay(other), other).toBe(false)
+    }
+  })
+
+  it('leaves a saved list on load, on disk too, and the other relays stay', async () => {
+    const { store, storage } = await loadWith([`${RETIRED}/`, 'wss://mine.example'])
+    expect(store.getState().relays).toEqual([DEFAULT_RELAY, 'wss://mine.example'])
+    expect(JSON.parse(storage.get('onosendai:relays')!)).toEqual(['wss://mine.example'])
+    vi.unstubAllGlobals()
+  })
+
+  it('cannot be added back', async () => {
+    const { store } = await loadWith([])
+    expect(store.getState().add(RETIRED)).toBeNull()
+    expect(store.getState().relays).toEqual([DEFAULT_RELAY])
+    vi.unstubAllGlobals()
   })
 })

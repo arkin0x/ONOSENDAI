@@ -24,7 +24,7 @@ const KEYS: Array<{ what: string; glyph: JSX.Element }> = [
   { what: 'Red icosahedron: your avatar', glyph: ball('#ff2323') },
   { what: "White icosahedron: another identity's avatar", glyph: ball('#ffffff') },
   {
-    what: 'Small glowing yellow star: one of your Starred Places (POSITION panel), with its nickname under it when it has one. Tap it to rename it, view it, or unstar it',
+    what: 'Small glowing yellow star: one of your Starred Places (VIEW panel), with its nickname under it when it has one. Tap it to rename it, view it, or unstar it',
     glyph: (
       <svg viewBox="0 0 20 20" aria-hidden="true">
         <circle cx="10" cy="10" r="8.5" fill="rgba(255, 216, 77, 0.16)" />
@@ -96,7 +96,7 @@ const KEYS: Array<{ what: string; glyph: JSX.Element }> = [
     ),
   },
   {
-    what: 'Blue rings around audio being placed: its full-volume sphere, and for a one-shot its trigger zone. It fades to silence at the green box\'s walls',
+    what: 'Blue rings around a hidden sound, or one being placed: its full-volume sphere, and for a one-shot its trigger zone. It fades to silence at its region\'s walls. Sound spheres in Settings hides the ones in the world',
     glyph: (
       <svg viewBox="0 0 20 20" aria-hidden="true">
         <g fill="none" stroke="#9fd0ff" strokeWidth="1.1">

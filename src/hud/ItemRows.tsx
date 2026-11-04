@@ -36,9 +36,12 @@ import { safeNpub } from '../lib/npub'
 import { useCyberspace } from '../store/useCyberspace'
 import { useInventory } from '../store/useInventory'
 import { forgetRefusal, openedByHand, openedContents, openedKey, readRefused, refuseRead, rememberOpened, useOpenedChests } from '../store/useOpenedChests'
-import { celebrateOpen } from '../store/useOpenCeremony'
+import { celebrateOpen, takeAndVanish } from '../store/useOpenCeremony'
 import { useCeremony } from '../store/useCeremony'
-import { lookOf } from '../lib/looks'
+import { isDoor, lookOf } from '../lib/looks'
+import { doorSecretWithKey, doorSecretWithSigner } from '../lib/doors'
+import { doorAsFound, fillRoom, ownOpenOwed, openDoorNow } from '../store/rooms'
+import { useToast } from '../store/useToast'
 import { chestLoot } from '../lib/lootObjects'
 import { landedAt } from '../lib/ceremony'
 import { resumeAudio } from '../lib/audioContext'
@@ -62,13 +65,14 @@ export function useWho(pubkey: string): string {
 /**
  * A keypair item where it was found: its name, who forged it, and TAKE, or
  * IN YOUR ITEMS once it is held. `id` is the find's event id; without one,
- * or for a thing that is not among this device's finds (one of your own,
- * held since you forged it), there is nothing to take.
+ * or for a thing that is neither among this device's finds nor one of your
+ * own (deleted from ITEMS, it is yours to take again), there is nothing to
+ * take. TAKE closes the list and the item fades out where it stands.
  */
 export function KeyLine({ id, name, author }: { id?: string; name: string; author: string }): JSX.Element {
   const who = useWho(author)
   const held = useInventory((s) => (id ? !!s.items[id] : false))
-  const found = useShards((s) => (id ? !!s.discovered[id] : false))
+  const found = useShards((s) => (id ? !!s.discovered[id] || s.mine.some((d) => d.eventId === id && !!d.key && !!d.inner) : false))
   return (
     <span className="keyline">
       <span className="item__line">
@@ -76,7 +80,7 @@ export function KeyLine({ id, name, author }: { id?: string; name: string; autho
         <span className="item__meta">forged by {who}{held && <> · <span className="item__held" title="It is in your ITEMS">IN YOUR ITEMS</span></>}</span>
       </span>
       {id && found && !held && (
-        <button className="chest__act chest__act--take" onClick={() => { useShards.getState().takeFound([id]) }} title="Put it in your ITEMS">TAKE</button>
+        <button className="chest__act chest__act--take" onClick={() => takeAndVanish(id, prefersReducedMotion())} title="Put it in your ITEMS">TAKE</button>
       )}
     </span>
   )
@@ -177,7 +181,7 @@ export function entryLabel(entry: ChestEntry): { label: string; coin: boolean } 
  * finds and deployments by `id`, and rumors read as claims if it is not
  * there. Never the bag's author: a chest inside a chest may be another's.
  */
-export function ChestBlock({ id, chest, author, verified, place, sealer: given }: { id: string; chest: ChestItem; author: string; verified: boolean; place: HeldPlace | null; sealer?: string }): JSX.Element {
+export function ChestBlock({ id, chest, author, verified, place, sealer: given, named = true, inChest = false }: { id: string; chest: ChestItem; author: string; verified: boolean; place: HeldPlace | null; sealer?: string; named?: boolean; inChest?: boolean }): JSX.Element {
   const items = useInventory((s) => s.items)
   const me = useCyberspace((s) => s.identity.pubkey)
   const keys = useMemo(() => openingKeys(items), [items])
@@ -195,15 +199,22 @@ export function ChestBlock({ id, chest, author, verified, place, sealer: given }
   const muted = useMutes((s) => s.muted)
   const shownOf = (list: ChestEntry[], m: Muted): ChestEntry[] => list.filter((e) => !hidesThing(m, { authors: [author, e.event.pubkey], ids: [e.id] }, me))
   const shown = entries ? shownOf(entries, muted) : null
+  // A door locks a room where it stands (DECK-0004 §3.7): OPEN reads its
+  // secret and opens the room. One found inside a chest never opens its room
+  // (§3.7.1: a chest's contents are taken, not placed), whichever list or card it is opened from.
+  const door = isDoor((found?.inner ?? ownInner)?.tags) && !inChest && !found?.chestId && !!place
   // Opened by hand before, under this lock: never OPEN again. What is inside
   // is read again once, as OPEN read it (readAgain); OPEN comes back only if
   // that fails, a signer refusing, and the refusal holds for the session
   // until OPEN is tapped (store/useOpenedChests readRefused).
   const handOpened = openedByHand(me, id, chest.lockPubkey)
+  // Open only because another door of its room was, and its own key is here now (§3.7.5).
+  const owed = door && handOpened && ownOpenOwed(me, id, chest, opener)
   const readKey = `${openedKey(me, id)}:${chest.lockPubkey}`
   const tried = useRef<string | null>(null)
   const [, setRefusals] = useState(0)
-  const rereading = handOpened && !entries && !!opener && !readRefused(me, id, chest.lockPubkey)
+  // Not a door: it holds no list to read again, and its room opens again from the kept secret (store/rooms reopenRoom).
+  const rereading = !door && handOpened && !entries && !!opener && !readRefused(me, id, chest.lockPubkey)
   useEffect(() => {
     if (!rereading || !opener || tried.current === readKey) return
     tried.current = readKey
@@ -214,25 +225,45 @@ export function ChestBlock({ id, chest, author, verified, place, sealer: given }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [rereading, readKey])
 
+  const openDoor = async (first: boolean): Promise<void> => {
+    if (!opener) return
+    const secret = opener.by === 'key' ? doorSecretWithKey(chest, opener.key.secretHex) : await doorSecretWithSigner(chest, useCyberspace.getState().decryptSealed)
+    if (useCyberspace.getState().identity.pubkey !== me) return
+    if (!secret) { setStatus('This door holds nothing this client can read.'); return }
+    const at = doorAsFound(id)
+    if (!at) { setStatus('This door is no longer here.'); return }
+    // Open at once, before any relay is asked (his ruling: "OPEN closes the
+    // modal", WALK passes at once): remembered, the card yielding, the slab going.
+    openDoorNow(at, secret)
+    celebrateOpen({ me, chestId: id, kind: 'door', first, calm: prefersReducedMotion() })
+    // Then the room: what is behind it settles out of static where it stands
+    // (door A), the first time only. The card has gone by now, so what went wrong
+    // is said where it can be seen (§3.7.3: not found is not the same as empty).
+    const opened = await fillRoom(at, secret, first ? (items) => useCeremony.getState().mark(items) : undefined).catch(() => undefined)
+    if (opened === null) return
+    if (!opened?.found) useToast.getState().show({ label: 'THE ROOM COULD NOT BE RETRIEVED', meta: `${chest.name} is open, but what is behind it did not come back from your relays. It may only be missing from them.`, mark: 'build' })
+  }
+
   const open = async (): Promise<void> => {
     if (!opener || busy) return
     // Inside the tap, so a phone lets the ceremony's sound out (lib/audioContext).
     resumeAudio()
     // Once per chest, per identity, per device: a chest opened by hand before plays nothing.
-    const first = !openedByHand(me, id, chest.lockPubkey)
+    const first = !openedByHand(me, id, chest.lockPubkey) || owed
     forgetRefusal(me, id, chest.lockPubkey)
     setBusy(true)
     setStatus(null)
     try {
+      if (door) { await openDoor(first); return }
       const look = lookOf({ type: 'chest', event: found?.inner ?? ownInner })
-      const contents = await openChestHere({ id, chest, author, place, sealer, door: look?.name === 'door' && first }, opener)
+      const contents = await openChestHere({ id, chest, author, place, sealer, door: look?.kind === 'door' && first }, opener)
       if (contents) {
         // The card yields and the chest or door opens where it stands (store/useOpenCeremony).
-        if (look?.name === 'door') celebrateOpen({ me, chestId: id, kind: 'door', first, calm: prefersReducedMotion() })
-        else if (look?.name === 'treasure') {
+        if (look?.kind === 'door') celebrateOpen({ me, chestId: id, kind: 'door', first, calm: prefersReducedMotion() })
+        else if (look?.kind === 'chest') {
           // The chime sounds as the last loot object lands over the chest.
           // The same loot the world draws over it (scene/ChestLooks), so the chime lands with the last of it.
-          const loot = place ? chestLoot({ look: 'treasure', entries: shownOf(contents, useMutes.getState().muted), held: (e) => holdsEntry(useInventory.getState().items, e), chest: { at: positionOf(place), plane: place.plane, height: place.height }, itemsReady: true }) : []
+          const loot = place ? chestLoot({ look: 'chest', entries: shownOf(contents, useMutes.getState().muted), held: (e) => holdsEntry(useInventory.getState().items, e), itemsReady: true }) : []
           celebrateOpen({ me, chestId: id, kind: 'chest', first, calm: prefersReducedMotion(), landMs: loot.length > 0 ? landedAt(loot.length) : undefined })
         }
       }
@@ -251,12 +282,13 @@ export function ChestBlock({ id, chest, author, verified, place, sealer: given }
     <div className="chest">
       <div className="chest__head">
         <span className="item__line">
-          <span className="item__name" title={chest.name}>{chest.name}</span>
+          {/* The card names it above its look (SecretModal); every list names it here. */}
+          {named && <span className="item__name" title={chest.name}>{chest.name}</span>}
           <span className="item__meta" title={opensWith ? `Opens with ${opensWith}` : 'The hider’s label of what opens it'}>
             {entries || rereading ? 'OPEN' : `REQUIRES: ${requiresLabel(chest)}`} · hidden by {who}{!verified && <> · <Unsigned /></>}
           </span>
         </span>
-        {opener && !entries && (
+        {opener && (!entries || owed) && (
           <button className="chest__act" onClick={() => void open()} disabled={busy || rereading} title={`Decrypt it here with ${opensWith}`}>{busy || rereading ? 'OPENING' : 'OPEN'}</button>
         )}
       </div>
@@ -304,7 +336,7 @@ function ContentRow({ entry, from, place }: { entry: ChestEntry; from: HeldFrom;
     <li className="chest__row">
       {type === 'shard' && entry.body.shard ? <ShardThumb shard={entry.body.shard} /> : <ItemFace className={`chest__glyph chest__glyph--${coin ? 'cashu' : type}`} type={type} coin={coin} image={entry.body.key?.image} />}
       {type === 'chest' && entry.body.chest
-        ? <ChestBlock id={entry.id} chest={entry.body.chest} author={entry.event.pubkey} verified={entry.verified} place={place} sealer={entry.verified ? entry.event.pubkey : undefined} />
+        ? <ChestBlock id={entry.id} chest={entry.body.chest} author={entry.event.pubkey} verified={entry.verified} place={place} sealer={entry.verified ? entry.event.pubkey : undefined} inChest />
         : (
           <span className="item__line">
             <span className="item__name" title={label}>{label}</span>

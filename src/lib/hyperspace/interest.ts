@@ -20,7 +20,7 @@
  *           That is every landfall (their coordinates lie on the ellipsoid
  *           to a nanometer), every point clicked on the globe (snapped to
  *           the surface by construction), and every place typed into the
- *           POSITION panel, which since the GO TO merge is how a latitude
+ *           View panel, which since the GO TO merge is how a latitude
  *           and longitude or a place by name is reached. A driven focus
  *           (the free VIEW, which brings the cursor along) counts: its
  *           position is a chosen point, and useCyberspace's rideView moves

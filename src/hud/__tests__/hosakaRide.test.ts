@@ -50,7 +50,7 @@ vi.mock('../../lib/chains', async (o) => ({ ...(await o() as object), fetchChain
 import { bytesToHex, coordToXyz, hexToCoord, sha256 } from 'cyberspace-core'
 import { enterHyperspaceTemplate, type NostrEvent } from '../../lib/events'
 import { buildRideProof, computeRideLeaf, lineTerrainK, rideBlocks } from '../../lib/hyperspace/ride'
-import { clearCloudJob, loadCloudJob, saveCloudJob, wirePosition, type PendingCloudJob } from '../../lib/cloud'
+import { loadCloudJob, saveCloudJob, wirePosition, type PendingCloudJob } from '../../lib/cloud'
 import type { HosakaDeposit, HosakaJob } from '../../lib/hosaka'
 import { useCyberspace } from '../../store/useCyberspace'
 import { useHyperspace } from '../../store/useHyperspace'
@@ -105,7 +105,7 @@ beforeAll(() => {
 
 beforeEach(() => {
   for (const f of Object.values(fake)) if (typeof f === 'function') f.mockReset()
-  clearCloudJob()
+  localStorage.removeItem('onosendai:cloudJob')
   useRideRun.setState({ error: null, progress: null, hosaka: false, path: null })
   useCyberspace.setState({
     cloudPrefs: { mode: 'auto', autoMaxSats: 0, apiUrl: 'http://fake', profile: 'time' },
@@ -145,7 +145,7 @@ describe('RIDE VIA HOSAKA', () => {
     expect(s.cloud.last?.action).toBe('ride')
     expect(s.cloud.balance?.msats).toBe(94_000)
     expect(s.proof.status).toBe('idle')
-    expect(loadCloudJob()).toBeNull()
+    expect(loadCloudJob(useCyberspace.getState().identity.pubkey)).toBeNull()
     expect(useHyperspace.getState().destination).toBeNull()
   })
 
@@ -163,8 +163,8 @@ describe('RIDE VIA HOSAKA', () => {
     const c = useCyberspace.getState().cloud
     expect(c.invoiceOpen).toBe(true)
     expect(c.invoice?.bolt11).toBe('lnbc60n1fake')
-    expect(loadCloudJob()?.stage).toBe('awaiting_payment')
-    expect(loadCloudJob()?.ride).toEqual({ fromHeight: 100, toHeight: 105, asOf: 110, toCoordHex: expect.stringMatching(/^[0-9a-f]{64}$/) })
+    expect(loadCloudJob(useCyberspace.getState().identity.pubkey)?.stage).toBe('awaiting_payment')
+    expect(loadCloudJob(useCyberspace.getState().identity.pubkey)?.ride).toEqual({ fromHeight: 100, toHeight: 105, asOf: 110, toCoordHex: expect.stringMatching(/^[0-9a-f]{64}$/) })
     // The head is held: a commit is refused while it computes.
     expect(useCyberspace.getState().proof.status).toBe('computing')
     expect(fake.startJob).not.toHaveBeenCalled()
@@ -195,7 +195,7 @@ describe('RIDE VIA HOSAKA', () => {
     expect(s.cloud.rideError).toMatch(/nothing was signed/)
     expect(s.cloud.rideError).toMatch(/job-ride|job-rid/)
     expect(s.proof.status).toBe('idle')
-    expect(loadCloudJob()).toBeNull()
+    expect(loadCloudJob(useCyberspace.getState().identity.pubkey)).toBeNull()
     expect(useHyperspace.getState().destination).toBe(105)
   })
 
@@ -215,7 +215,7 @@ describe('RIDE VIA HOSAKA', () => {
     fake.waitForJob.mockResolvedValue({ id: 'job-ride', status: 'failed', cost_msats: 6_000, result: null, error: 'ride_leaves timed out' })
     await startHosakaRide(OFFER)
     expect(useCyberspace.getState().cloud.rideError).toMatch(/ride_leaves timed out.*refunded to your HOSAKA balance/)
-    expect(loadCloudJob()).toBeNull()
+    expect(loadCloudJob(useCyberspace.getState().identity.pubkey)).toBeNull()
   })
 
   it('while HOSAKA computes, nothing else takes the head: no second ride of either kind', async () => {
@@ -302,7 +302,7 @@ describe('a reload while HOSAKA computes', () => {
     expect(tag(e, 'A')).toBe('hyperjump')
     expect(tag(e, 'C')).toBe('cd'.repeat(32))
     expect(tag(e, 'as_of')).toBe('110')
-    expect(loadCloudJob()).toBeNull()
+    expect(loadCloudJob(useCyberspace.getState().identity.pubkey)).toBeNull()
   })
 
   it('a record whose head has moved is dropped, never signed', async () => {
@@ -317,6 +317,6 @@ describe('a reload while HOSAKA computes', () => {
     await useCyberspace.getState().resumeCloudJob()
     expect(fake.waitForJob).not.toHaveBeenCalled()
     expect(useCyberspace.getState().events).toHaveLength(before)
-    expect(loadCloudJob()).toBeNull()
+    expect(loadCloudJob(useCyberspace.getState().identity.pubkey)).toBeNull()
   })
 })

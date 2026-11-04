@@ -12,7 +12,7 @@
  * lag behind the cube it is supposed to be stuck to.
  */
 
-import { useMemo, useRef } from 'react'
+import { useMemo, useRef, type MutableRefObject } from 'react'
 import { Text } from '@react-three/drei'
 import { useFrame, type RootState } from '@react-three/fiber'
 import { Group, Quaternion, Vector3, type Object3D } from 'three'
@@ -76,6 +76,8 @@ interface Props {
   /** Height in CSS pixels, held constant at any camera distance. */
   px?: number
   opacity?: number
+  /** A fade read each frame, for one driven per frame and not by React (scene/ItemVanish). Needs `recede`. */
+  fade?: MutableRefObject<number>
   /** Left for labels that hang off a point, centre for labels that cap a face. */
   align?: 'left' | 'center'
   /**
@@ -139,7 +141,7 @@ interface Props {
 }
 
 export function WorldLabel({
-  text, color, at, follow, offset = [0, 0, 0], offsetPx = [0, 0], px = 14, opacity = 1, align = 'left',
+  text, color, at, follow, offset = [0, 0, 0], offsetPx = [0, 0], px = 14, opacity = 1, fade, align = 'left',
   small, smallScale = 0.68, sub, subScale = 0.72, subColor, subOpacity = 0.7, clear, fromCamera, recede,
 }: Props): JSX.Element {
   const group = useRef<Group>(null)
@@ -183,9 +185,10 @@ export function WorldLabel({
     // Far off a name fades, its credit line first (lib/markerSize.ts fadeShare).
     if (recede === 'name' || recede === 'credit') {
       const own = recede === 'name' ? fadeShare(depth, reach, NAME_FADE[0], NAME_FADE[1]) : fadeShare(depth, reach, CREDIT_FADE[0], CREDIT_FADE[1])
-      fadeTo(line.current, opacity, own)
-      fadeTo(second.current, opacity, own)
-      fadeTo(caption.current, opacity * subOpacity, Math.min(own, fadeShare(depth, reach, CREDIT_FADE[0], CREDIT_FADE[1])))
+      const level = fade?.current ?? 1
+      fadeTo(line.current, opacity, own * level)
+      fadeTo(second.current, opacity, own * level)
+      fadeTo(caption.current, opacity * subOpacity, Math.min(own, fadeShare(depth, reach, CREDIT_FADE[0], CREDIT_FADE[1])) * level)
     }
     // Face the camera exactly as it is drawn: the camera's own turn, undone
     // by whatever turns the label's parents. drei's Billboard did this at

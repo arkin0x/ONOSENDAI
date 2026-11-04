@@ -12,6 +12,7 @@
  * words, since the action they answer is public.
  */
 
+import { RelayTrouble } from './RelayTrouble'
 import { useState } from 'react'
 import { nip19 } from 'nostr-tools'
 import { MAX_COMMENT_LENGTH, commentParent, countComments, type Comment, type CommentParent, type CommentSubject } from '../lib/comments'
@@ -84,7 +85,7 @@ function CommentRow({ c, me, depth, posting, onPost }: { c: Comment; me: string;
 function CommentSection({ state, placeholder, note }: { state: CommentsState; placeholder: string; note: string[] }): JSX.Element {
   const me = useCyberspace((s) => s.identity.pubkey)
   const signerKind = useCyberspace((s) => s.signerKind)
-  const { comments, loading, error, posting, post, refresh } = state
+  const { comments, loading, error, trouble, posting, post, refresh } = state
   const n = countComments(comments)
   return (
     <section className="comments" aria-label="Comments">
@@ -92,7 +93,8 @@ function CommentSection({ state, placeholder, note }: { state: CommentsState; pl
         <span className="secret__label">Comments{n > 0 ? ` (${n})` : ''}</span>
         <button className="comment__reply" onClick={refresh} disabled={loading}>{loading ? 'LOADING…' : 'REFRESH'}</button>
       </div>
-      {comments.length === 0 && !loading && <p className="comments__empty">No comments yet.</p>}
+      {trouble && !loading && <RelayTrouble trouble={trouble} onRetry={refresh} />}
+      {comments.length === 0 && !loading && !trouble && <p className="comments__empty">No comments yet.</p>}
       {comments.length > 0 && (
         <ul className="comments__list">
           {comments.map((c) => <CommentRow key={c.id} c={c} me={me} depth={0} posting={posting} onPost={post} />)}

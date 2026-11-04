@@ -26,7 +26,8 @@ import { findCashuToken } from '../lib/cashu'
 import { Box } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { useLoot } from '../hooks/useLoot'
+import { refreshLoot, useLoot } from '../hooks/useLoot'
+import { RelayTrouble } from './RelayTrouble'
 import { bagReading, messagePreview } from '../lib/hidden'
 import { NFT_WORDS, replaceNftLinks } from '../lib/nftLink'
 import { useBagReadingsVersion } from '../hooks/useBagReadings'
@@ -80,7 +81,7 @@ export function DiscoveredPanel(): JSX.Element {
 }
 
 function BagList({ mode }: { mode: Mode }): JSX.Element {
-  const { items, status } = useLoot()
+  const { items, status, trouble } = useLoot()
   const [more, setMore] = useState(false)
   // The VIEW MORE list is a modal: Escape closes it as a tap outside does (arkinox, 2026-10-01).
   useEscape('modal', more, () => setMore(false))
@@ -123,9 +124,11 @@ function BagList({ mode }: { mode: Mode }): JSX.Element {
   // "Bags" in the title (arkinox, 2026-10-10): every row is a bag, and the
   // word says so before the explanation does.
   const title = mode === 'discovered' ? 'Discovered bags' : 'Hidden bags'
+  // A relay that did not answer is not zero bags: the count says it does not know.
+  const n = trouble && items.length === 0 ? '?' : String(shown.length)
   const count = status === 'loading'
     ? 'LOADING'
-    : mode === 'discovered' ? `${shown.length} OPENED` : `${shown.length} HIDDEN`
+    : mode === 'discovered' ? `${n} OPENED` : `${n} HIDDEN`
   const countTitle = mode === 'discovered'
     ? 'Bags on the relay your keys have opened'
     : 'Bags on the relay your keys have not opened yet'
@@ -164,11 +167,13 @@ function BagList({ mode }: { mode: Mode }): JSX.Element {
         </span>
       </header>
 
-      {status === 'error' && <p className="notice">Could not reach {relayName}.</p>}
+      {trouble
+        ? <RelayTrouble trouble={trouble} onRetry={refreshLoot} />
+        : status === 'error' && <p className="notice">Could not reach {relayName}.</p>}
 
       <ul className="avatars__list loot__list">
         {shown.slice(0, SHOWN).map(row)}
-        {status === 'ready' && shown.length === 0 && (
+        {status === 'ready' && !trouble && shown.length === 0 && (
           <li className="avatars__empty">
             {mode === 'discovered'
               ? 'Nothing opened yet.'

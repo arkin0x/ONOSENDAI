@@ -18,6 +18,7 @@
  * bag is on no relay to find.
  */
 
+import { CYBERSPACE_RELAY, retryFailedAuth } from '../lib/relay'
 import { useState } from 'react'
 import { Radar } from 'lucide-react'
 import { positionHex } from '../lib/events'
@@ -25,7 +26,7 @@ import { shardRefusal } from '../lib/hidden'
 import { positionOf, useShards, type MyDeployment } from '../store/useShards'
 import { CopyValue } from './EventData'
 
-export type TestState = 'idle' | 'testing' | 'found' | 'missing' | 'refused'
+export type TestState = 'idle' | 'testing' | 'found' | 'missing' | 'refused' | 'unread'
 
 /** What TEST DISCOVERY says in each state. */
 export const TEST_WORDS: Record<TestState, string> = {
@@ -34,6 +35,7 @@ export const TEST_WORDS: Record<TestState, string> = {
   found: '✓ FOUND & OPENED FROM THE RELAY',
   missing: '✗ NOT FOUND, TAP TO RETRY',
   refused: '✗ ON THE RELAY, BUT NO CLIENT CAN OPEN IT',
+  unread: '✗ COULD NOT READ THE RELAY, TAP TO RETRY',
 }
 
 /** The relays as they read: no scheme, one to a line. */
@@ -48,6 +50,8 @@ export function WireData({ dep, initialTest = 'idle' }: { dep: MyDeployment; ini
   const relays = relayNames(dep)
   const runTest = async (): Promise<void> => {
     setTest('testing')
+    // A sign-in that failed is asked for again first (no-op otherwise).
+    retryFailedAuth(CYBERSPACE_RELAY)
     // A relay that throws reads as not found: the button offers the retry.
     setTest(await useShards.getState().testDiscovery(dep.eventId).catch(() => 'missing' as const))
   }

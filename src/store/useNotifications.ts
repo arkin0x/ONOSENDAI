@@ -23,7 +23,7 @@ import { COMMENT_KIND } from '../lib/comments'
 import { relaysFor } from '../lib/inbox'
 import { classify, fromRelays, mergeNotifications, resolve, unreadCount, type Candidate, type Known, type Notification, type Target } from '../lib/notifications'
 import { GENERAL_RELAYS } from '../lib/contacts'
-import { queryAny } from '../lib/relay'
+import { onCanonicalSignIn, queryAny, queryAnyChecked, type ReadTrouble } from '../lib/relay'
 import { decryptForRegion, regionKeyAt } from '../lib/shardCrypto'
 import { REACTION_KIND } from '../lib/social'
 import { MAX_COMPUTE_HEIGHT, useCyberspace } from './useCyberspace'
@@ -71,6 +71,8 @@ interface NotificationsState {
   loading: boolean
   /** No older page left. */
   done: boolean
+  /** Why the canonical relay gave the last read nothing, if it did not answer (it is not "nothing yet"). */
+  trouble: ReadTrouble | null
   open: boolean
   unread: () => number
   start: (me: string) => Promise<void>
@@ -90,9 +92,9 @@ function knownHere(): Known {
   }
 }
 
-async function fetchPage(me: string, bounds: { until?: number; since?: number }): Promise<Notification[]> {
+async function fetchPage(me: string, bounds: { until?: number; since?: number }): Promise<{ page: Notification[]; trouble: ReadTrouble | null }> {
   const relays = await relaysFor([me])
-  const found = await queryAny(relays, { kinds: [REACTION_KIND, COMMENT_KIND], '#p': [me], limit: PAGE, ...bounds })
+  const { events: found, trouble } = await queryAnyChecked(relays, { kinds: [REACTION_KIND, COMMENT_KIND], '#p': [me], limit: PAGE, ...bounds })
   const known = knownHere()
   const candidates = found.map((ev) => classify(ev, me, known)).filter((c): c is Candidate => c !== null)
   // The targets that decide whether a notification is ONOSENDAI's, looked up
@@ -103,7 +105,7 @@ async function fetchPage(me: string, bounds: { until?: number; since?: number })
     const events = await queryAny([...new Set([...relays, ...GENERAL_RELAYS])], { ids, limit: ids.length }).catch(() => [])
     for (const ev of events) targets.set(ev.id, { kind: ev.kind, tags: ev.tags })
   }
-  return candidates.map((c) => resolve(c, targets)).filter((n): n is Notification => n !== null)
+  return { page: candidates.map((c) => resolve(c, targets)).filter((n): n is Notification => n !== null), trouble }
 }
 
 /** The words of sealed comments on your own bags, by notification id. */
@@ -120,6 +122,14 @@ async function openSealed(list: Notification[], me: string): Promise<Record<stri
     if (words?.trim()) out[n.id] = words.trim()
   }))
   return out
+}
+
+/** Refused for want of AUTH: read again once the relay signs this visit in. Set up on the first read. */
+let watching = false
+function watchSignIn(): void {
+  if (watching) return
+  watching = true
+  onCanonicalSignIn(() => { if (useNotifications.getState().trouble) void useNotifications.getState().poll() })
 }
 
 export const useNotifications = create<NotificationsState>((set, get) => {
@@ -139,16 +149,19 @@ export const useNotifications = create<NotificationsState>((set, get) => {
     lastSeen: 0,
     loading: false,
     done: false,
+    trouble: null,
     open: false,
     unread: () => unreadCount(get().items, get().lastSeen),
 
     start: async (me) => {
+      watchSignIn()
       if (get().me === me) return
-      set({ me, items: mergeNotifications([], loadMentions(me)), opened: {}, lastSeen: loadSeen(me), loading: true, done: false })
+      set({ me, items: mergeNotifications([], loadMentions(me)), opened: {}, lastSeen: loadSeen(me), loading: true, done: false, trouble: null })
       try {
-        const page = await fetchPage(me, {})
+        const { page, trouble } = await fetchPage(me, {})
         await take(me, page)
-        if (get().me === me) set({ done: page.length === 0 })
+        // A page the canonical relay did not answer is not the end of the list.
+        if (get().me === me) set({ done: !trouble && page.length === 0, trouble })
       } catch { /* offline: the next poll tries again */ } finally {
         if (get().me === me) set({ loading: false })
       }
@@ -160,7 +173,11 @@ export const useNotifications = create<NotificationsState>((set, get) => {
       // Paged by what the relays hold: a chat mention newer than every
       // reaction would otherwise move `since` past ones not fetched yet.
       const items = fromRelays(get().items)
-      try { await take(me, await fetchPage(me, items.length ? { since: items[0].createdAt } : {})) } catch { /* next time */ }
+      try {
+        const { page, trouble } = await fetchPage(me, items.length ? { since: items[0].createdAt } : {})
+        await take(me, page)
+        if (get().me === me) set({ trouble })
+      } catch { /* next time */ }
     },
 
     loadMore: async () => {
@@ -172,8 +189,9 @@ export const useNotifications = create<NotificationsState>((set, get) => {
         // Inclusive, so events sharing the oldest second are not skipped; the
         // merge drops the ones already held, and a page that adds nothing is the end.
         const until = items.length ? items[items.length - 1].createdAt : undefined
-        const added = await take(me, await fetchPage(me, until === undefined ? {} : { until }))
-        if (get().me === me && added === 0) set({ done: true })
+        const { page, trouble } = await fetchPage(me, until === undefined ? {} : { until })
+        const added = await take(me, page)
+        if (get().me === me) set({ trouble, ...(added === 0 && !trouble ? { done: true } : {}) })
       } catch { /* leave `done` alone: scrolling again retries */ } finally {
         if (get().me === me) set({ loading: false })
       }

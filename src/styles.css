@@ -750,6 +750,14 @@ body {
   border-left: 2px solid var(--danger);
 }
 
+/* A list's read the canonical relay did not answer: the words, and RETRY at the end of the line. */
+.relay-trouble {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
 /* Variants after the base rule, which otherwise wins the tie. */
 .notice--sidestep {
   color: var(--sidestep);

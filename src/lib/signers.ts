@@ -19,6 +19,8 @@ import * as nip04 from 'nostr-tools/nip04'
 import * as nip46 from 'nostr-tools/nip46'
 import * as nip49 from 'nostr-tools/nip49'
 import { getPool } from './relay'
+import type { AbstractSimplePool, SubscribeManyParams } from 'nostr-tools/abstract-pool'
+import type { Filter } from 'nostr-tools/filter'
 import type { EventTemplate, NostrEvent } from './events'
 import { attributed } from './client'
 import { DEFAULT_SIGNER_RELAY, normalizeSignerRelay, signerRelays } from './loginCredentials'
@@ -231,6 +233,36 @@ export async function nip07Signer(waitMs = 0): Promise<Signer> {
   }
 }
 
+/** How long a request to a bunker waits for its answer subscription to be in place. */
+export const ANSWERS_READY_MS = 3000
+
+/**
+ * The pool, as a bunker signer uses it, with each request held until the
+ * subscription its answer comes on is in place (its EOSE), at most
+ * ANSWERS_READY_MS. nostr-tools opens that subscription and sends the
+ * request at once, and a relay may handle the two in either order: a
+ * bunker that answers at once had its answer broadcast before anyone was
+ * listening, and the handshake waited for an answer already lost. Every
+ * fresh socket to the bunker's relay (a RETRY, a reconnect) ran that race
+ * (the real-bunker run, 2026-11-04).
+ */
+function answersFirst(): unknown {
+  const pool = getPool()
+  let ready: Promise<void> = Promise.resolve()
+  const bounded = (p: Promise<void>): Promise<void> => Promise.race([p, new Promise<void>((r) => setTimeout(r, ANSWERS_READY_MS))])
+  return {
+    subscribe: (relays: string[], filter: Filter, params: SubscribeManyParams) => {
+      let heard: () => void = () => {}
+      ready = bounded(new Promise<void>((r) => { heard = r }))
+      return pool.subscribe(relays, filter, { ...params, oneose: () => { heard(); params?.oneose?.() } })
+    },
+    publish: (relays: string[], event: NostrEvent, params?: Parameters<AbstractSimplePool['publish']>[2]) => {
+      const waited = ready
+      return relays.map((url) => waited.then(() => pool.publish([url], event as never, params)[0]))
+    },
+  }
+}
+
 /**
  * A remote bunker (NIP-46). Takes a `bunker://…` URI (or a nostrconnect one),
  * and an optional client secret key so a reconnect keeps the same client
@@ -241,7 +273,7 @@ export async function nip46Signer(bunkerUri: string, clientSecretKey?: Uint8Arra
   const clientSk = clientSecretKey ?? generateSecretKey()
   const bp = await nip46.parseBunkerInput(bunkerUri.trim())
   if (!bp) throw new Error('Not a valid bunker URI')
-  const bunker = nip46.BunkerSigner.fromBunker(clientSk, bp, { pool: getPool() as never })
+  const bunker = nip46.BunkerSigner.fromBunker(clientSk, bp, { pool: answersFirst() as never })
   onStep?.('connect')
   await bunker.connect()
   onStep?.('get_public_key')
@@ -360,7 +392,7 @@ export function createNostrConnectSession(relayInput = DEFAULT_SIGNER_RELAY): No
         // Automatic switch_relays interoperability varies between signers and
         // can strand the get_public_key response on a relay we never selected;
         // the QR names two relays by default so neither is a single point.
-        { pool: getPool() as never, skipSwitchRelays: true },
+        { pool: answersFirst() as never, skipSwitchRelays: true },
         signal ?? 300_000,
       )
       onConnected?.()
@@ -389,7 +421,7 @@ export function createNostrConnectSession(relayInput = DEFAULT_SIGNER_RELAY): No
 async function nostrConnectSessionSigner(bunkerUri: string, clientSecretKey: Uint8Array, pubkey: string): Promise<Signer> {
   const bp = await nip46.parseBunkerInput(bunkerUri)
   if (!bp) throw new Error('The saved Nostr Connect session is invalid.')
-  const bunker = nip46.BunkerSigner.fromBunker(clientSecretKey, bp, { pool: getPool() as never })
+  const bunker = nip46.BunkerSigner.fromBunker(clientSecretKey, bp, { pool: answersFirst() as never })
   return wrapBunkerSigner(bunker, clientSecretKey, pubkey, bunkerUri, true)
 }
 
@@ -505,15 +537,20 @@ export function deferredReconnect(pref: SignerPref, onReady: (s: Signer) => void
    * one (a real absence's, a RETRY's) takes the place of the one before, as
    * a relay's newer challenge takes the place of its older one (NIP-42).
    * Three of them waited on one lost handshake and went out together, three
-   * prompts at once, when the next handshake answered.
+   * prompts at once, when the next handshake answered. Once one has gone
+   * out, only an AUTH for its own challenge joins it: a newer challenge is a
+   * newer socket (review of #603), and its signature would not sign it in.
    */
   type Send = (s: Signer) => Promise<NostrEvent>
-  const queued = new Map<string, { signing: Promise<NostrEvent>; sentAt: number | null; send: Send }>()
+  interface Queued { signing: Promise<NostrEvent>; sentAt: number | null; send: Send; template: EventTemplate }
+  const queued = new Map<string, Queued>()
+  const challengeOf = (t: EventTemplate): string | undefined => t.tags.find((x) => x[0] === 'challenge')?.[1]
   const joinable = (t: EventTemplate, send?: Send): Promise<NostrEvent> | null => {
     const q = queued.get(keyOf(t))
     if (!q) return null
     // Still waiting: the newest of a relay's AUTHs is the one that goes out.
-    if (q.sentAt === null) { if (send) q.send = send; return q.signing }
+    if (q.sentAt === null) { if (send) { q.send = send; q.template = t } return q.signing }
+    if (t.kind === 22242 && challengeOf(t) !== challengeOf(q.template)) return null
     return Date.now() - q.sentAt < SAME_REQUEST_MS ? q.signing : null
   }
   /** Sign through the live signer, or wait for the handshake, joining what waits already (`queued`). */
@@ -524,7 +561,7 @@ export function deferredReconnect(pref: SignerPref, onReady: (s: Signer) => void
     // been given up (RETRY, a lost step), and a fresh one answers it too.
     if (waiting) { ensure().catch(() => { /* the joined request says why */ }); return waiting }
     const key = keyOf(template)
-    const entry: { signing: Promise<NostrEvent>; sentAt: number | null; send: Send } = { signing: Promise.resolve(null as unknown as NostrEvent), sentAt: null, send }
+    const entry: Queued = { signing: Promise.resolve(null as unknown as NostrEvent), sentAt: null, send, template }
     entry.signing = ensure().then(() => { entry.sentAt = Date.now(); return entry.send(liveRaw!) })
     queued.set(key, entry)
     const forget = (): void => { if (queued.get(key) === entry) queued.delete(key) }

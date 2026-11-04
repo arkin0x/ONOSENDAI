@@ -95,6 +95,12 @@ export interface AuthGatedNet {
   halfOpenBunker(): void
   /** Sockets opened to the bunker's relay. */
   bunkerSockets: number
+  /**
+   * How long the bunker's relay takes to put a subscription in place (then
+   * its EOSE): a relay that handles a REQ and the EVENT after it in either
+   * order, so an answer sent meanwhile reaches nobody.
+   */
+  subscribeDelay: number
   /** Some kind:33330 bags, held by the canonical relay. */
   addBags(n: number): Ev[]
   /** Put the fake WebSocket in place (after noNetwork.ts put its own). */
@@ -122,6 +128,7 @@ export function authGatedNet(): AuthGatedNet {
     dropCanon() { for (const s of [...canonSockets]) s.drop() },
     halfOpenBunker() { for (const s of [...bunkerSockets]) s.halfOpen = true },
     bunkerSockets: 0,
+    subscribeDelay: 0,
     addBags(n) {
       const made: Ev[] = []
       for (let i = 0; i < n; i++) {
@@ -276,8 +283,12 @@ export function authGatedNet(): AuthGatedNet {
     }
     private bunkerRelay(msg: unknown[]): void {
       if (msg[0] === 'REQ') {
-        bunkerSubs.add({ socket: this, id: msg[1] as string, filters: msg.slice(2) as F[] })
-        this.deliver(['EOSE', msg[1]])
+        const add = (): void => {
+          bunkerSubs.add({ socket: this, id: msg[1] as string, filters: msg.slice(2) as F[] })
+          this.deliver(['EOSE', msg[1]])
+        }
+        if (net.subscribeDelay > 0) setTimeout(add, net.subscribeDelay)
+        else add()
         return
       }
       if (msg[0] === 'CLOSE') { for (const s of bunkerSubs) if (s.socket === this && s.id === msg[1]) bunkerSubs.delete(s); return }

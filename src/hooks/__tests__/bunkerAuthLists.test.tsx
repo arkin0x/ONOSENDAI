@@ -502,3 +502,94 @@ describe('a real bunker: one prompt per thing asked, and RETRY that works', () =
     expect(v.net.bunker.authAsked).toBe(asked)
   }, 120_000)
 })
+
+/** Review of #603 (2026-11-04): each of these failed at a35ef64f, or with the line it names removed. */
+describe('review of #603: a new socket, a switch of identity, a socket gone quiet', () => {
+  it('the canonical socket replaced 200 ms after its AUTH went out: the new one signs in with its own challenge', async () => {
+    const v = await visit((net) => { net.bunker.authDelay = 3_000 })
+    const { resumeLive } = await import('../../lib/relay')
+    let fired = false
+    v.net.bunker.onAuthAsked = () => { if (!fired) { fired = true; setTimeout(() => resumeLive(), 200) } }
+    await v.wait(30_000)
+    expect(v.net.canon.sockets).toBe(2)
+    expect(v.net.bunker.authAsked).toBe(2)
+    expect(v.loot().trouble).toBeNull()
+    expect(v.loot().items).toHaveLength(BAGS)
+  }, 60_000)
+
+  it('a switch of identity while the bunker signs the AUTH: the old signature is never sent, and the new identity signs in by itself', async () => {
+    const v = await visit((net) => { net.bunker.authDelay = 8_000 })
+    await v.wait(2_000)
+    const { useCyberspace } = await import('../../store/useCyberspace')
+    const sk = generateSecretKey()
+    await useCyberspace.getState().useNsec(nip19.nsecEncode(sk))
+    const from = v.net.canon.authBy.length
+    await v.wait(20_000)
+    const after = v.net.canon.authBy.slice(from)
+    expect(after).not.toContain(v.net.userPk)
+    expect(after).toContain(getPublicKey(sk))
+    expect(v.loot().trouble).toBeNull()
+    expect(v.panel()).not.toContain(SIGN_IN_FAILED)
+  }, 60_000)
+
+  it('a late answer for the identity before a switch is never sent to sign in with', async () => {
+    // The bunker's AUTH runs out of time (15 s, then the store's retry to
+    // 30 s) and is kept for its late answer: the retry's, due at 35 s. At 31 s the
+    // identity is switched, and the relay turns the new identity down.
+    const v = await visit((net) => { net.bunker.authPlan = [{ delay: 600_000 }, { delay: 20_000 }] })
+    await v.wait(31_000)
+    expect(v.loot().trouble).toBe('auth')
+    v.net.rejectAuth = true
+    const { useCyberspace } = await import('../../store/useCyberspace')
+    await useCyberspace.getState().useNsec(nip19.nsecEncode(generateSecretKey()))
+    const from = v.net.canon.authBy.length
+    await v.wait(10_000)
+    expect(v.net.bunker.authSigned).toBeGreaterThan(0)
+    expect(v.net.canon.authBy.slice(from)).not.toContain(v.net.userPk)
+  }, 60_000)
+
+  it('a switch while the relay\'s OK for the old identity is on its way: not counted, and the new identity signs in', async () => {
+    const v = await visit((net) => { net.authOkDelay = 2_000 })
+    await v.wait(1_000)
+    expect(v.net.canon.authBy).toEqual([v.net.userPk])
+    const { useCyberspace } = await import('../../store/useCyberspace')
+    const sk = generateSecretKey()
+    await useCyberspace.getState().useNsec(nip19.nsecEncode(sk))
+    await v.wait(10_000)
+    expect(v.net.canon.authBy).toContain(getPublicKey(sk))
+    expect(v.loot().trouble).toBeNull()
+  }, 60_000)
+
+  it('a bunker relay slow to put the answer subscription in place: each request waits for it, so an instant answer is heard', async () => {
+    // As nak's relay did on a fresh socket: the connect was answered at once
+    // and the answer reached nobody (the real-bunker run, never, after RETRY).
+    const v = await visit((net) => { net.subscribeDelay = 50 })
+    await v.wait(10_000)
+    expect(v.loot().items).toHaveLength(BAGS)
+    expect(v.net.bunker.connects).toBe(1)
+    expect(v.net.bunker.authAsked).toBe(1)
+  }, 60_000)
+
+  it('RETRY drops the half-open sockets a lost handshake went over, so the fresh one is heard', async () => {
+    const v = await visit((net) => { net.bunker.connectPlan = [{ delay: Infinity }] })
+    await v.wait(20_000)
+    expect(v.loot().trouble).toBe('auth')
+    // The phone was put away: every socket to the bunker's relay is half-open now.
+    v.net.halfOpenBunker()
+    await tapRetry()
+    await v.wait(3_000)
+    expect(v.loot().items).toHaveLength(BAGS)
+  }, 60_000)
+
+  it('back after 16 s with the canonical socket half-open: the return asks it, hears nothing, and replaces it', async () => {
+    const v = await visit(() => {}, { connectivity: true })
+    await v.wait(5_000)
+    const { getPool } = await import('../../lib/relay')
+    const r = (getPool() as unknown as { relays: Map<string, { ws: { halfOpen: boolean } }> }).relays.get(CANON)
+    r!.ws.halfOpen = true
+    await v.away(16_000)
+    await v.wait(8_000)
+    expect(v.net.canon.sockets).toBe(2)
+    expect(v.net.canon.authOk).toBe(2)
+  }, 60_000)
+})

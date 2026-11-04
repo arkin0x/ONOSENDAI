@@ -10,7 +10,7 @@
  * harness) left "WebSocket is already in CLOSING or CLOSED state" uncaught.
  */
 
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterAll, describe, expect, it, vi } from 'vitest'
 
 // relay.ts itself, not the tests' offline relay (src/test/noNetwork.ts).
 vi.unmock('../relay')
@@ -64,7 +64,7 @@ const RELAY = 'wss://bunker.example/'
 const uncaught: unknown[] = []
 const onUnhandled = (reason: unknown): void => { uncaught.push(reason) }
 process.on('unhandledRejection', onUnhandled)
-afterEach(() => { process.off('unhandledRejection', onUnhandled) })
+afterAll(() => { process.off('unhandledRejection', onUnhandled) })
 
 describe('a relay closed with subscriptions open', () => {
   it('throws nothing uncaught (6)', async () => {
@@ -75,6 +75,20 @@ describe('a relay closed with subscriptions open', () => {
     await new Promise((r) => setTimeout(r, 20))
     expect(sent.frames.filter((f) => f.startsWith('["REQ"'))).toHaveLength(2)
     pool.close([RELAY])
+    await new Promise((r) => setTimeout(r, 50))
+    expect(uncaught.map(String)).toEqual([])
+  })
+
+  it('an AUTH signed after its socket closed throws nothing uncaught (review of #603)', async () => {
+    const pool = getPool()
+    const relay = await pool.ensureRelay(RELAY)
+    ;(relay as unknown as { challenge: string }).challenge = 'c'
+    let sign: (ev: unknown) => void = () => {}
+    void relay.auth(() => new Promise((r) => { sign = r as never }))
+    await new Promise((r) => setTimeout(r, 10))
+    pool.close([RELAY])
+    await new Promise((r) => setTimeout(r, 10))
+    sign({ id: 'a'.repeat(64), kind: 22242, pubkey: 'b'.repeat(64), created_at: 1, tags: [], content: '', sig: 'c'.repeat(128) })
     await new Promise((r) => setTimeout(r, 50))
     expect(uncaught.map(String)).toEqual([])
   })

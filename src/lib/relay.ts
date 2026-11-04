@@ -169,12 +169,21 @@ function guardSend(relay: AbstractRelay): void {
   sendGuarded.add(relay)
   const r = relay as unknown as { send: (message: string) => Promise<void>; connectionPromise?: Promise<void>; ws?: WebSocket }
   const send = r.send.bind(relay)
-  r.send = async (message) => {
-    // No connection at all: nostr-tools' own refusal (SendingOnClosedConnection), as before.
-    if (!r.connectionPromise) return send(message)
+  // Not async: its own promise would carry the refusal on, unhandled.
+  r.send = (message) => {
+    // No connection at all: nostr-tools' own refusal (SendingOnClosedConnection),
+    // as before, to a caller that awaits it (publish, count). An AUTH signed
+    // after its socket closed, a REQ or a CLOSE does not await it: marked
+    // handled, so it is not an unhandled rejection (review of #603).
+    if (!r.connectionPromise) {
+      const refused = send(message)
+      refused.catch(() => { /* said to whoever awaits it */ })
+      return refused
+    }
     r.connectionPromise.then(() => {
       try { r.ws?.send(message) } catch { /* the socket closed meanwhile */ }
     }, () => { /* the connect failed: said to whoever awaited it */ })
+    return Promise.resolve()
   }
 }
 
@@ -379,6 +388,8 @@ function authSign(template: EventTemplate): Promise<VerifiedEvent> {
   const ws = socket?.ws
   const k = key ?? ''
   const failKey = socketKey(socket)
+  // Who asked: an answer, or a failure, for an identity no longer on screen is not this one's.
+  const askedAs = identityNow()
   let settled = false
   const signed = new Promise<VerifiedEvent>((resolve, reject) => {
     const take = (ev: NostrEvent): void => {
@@ -386,7 +397,7 @@ function authSign(template: EventTemplate): Promise<VerifiedEvent> {
       settled = true
       // Signed as a key that is no longer the identity on screen (a switch while it signed): never sent.
       const me = identityNow()
-      if (me && ev.pubkey !== me) { reject(new Error('signed as another identity than this one')); return }
+      if (me && ev.pubkey !== me) { reject(new StaleIdentity()); return }
       if (ws && typeof ws === 'object') signedBy.set(ws, ev.pubkey)
       resolve(ev as unknown as VerifiedEvent)
     }
@@ -404,6 +415,16 @@ function authSign(template: EventTemplate): Promise<VerifiedEvent> {
   return signed.then((ev) => ev, (err: unknown) => {
     // Out of time, not refused: its answer may still come, and the socket is held for it (signInLate).
     heldForLate = err instanceof SignerTimeout
+    // The identity changed while it signed: no failure of the signer on
+    // screen, which never refused anything. Recorded as one, the new
+    // identity was never signed in until RETRY (review of #603). The socket
+    // is replaced instead, and the new one signs in as the identity on screen.
+    const me = identityNow()
+    if (key && (err instanceof StaleIdentity || (askedAs && me && askedAs !== me))) {
+      replaceStale(key, ws)
+      for (const fail of [...((failKey && signFailed.get(failKey)) ?? [])]) fail(err)
+      throw err
+    }
     if (key) {
       const relay = socketOf(key)
       // A socket since replaced has its own AUTH: this one's failure is not the relay's state.
@@ -424,6 +445,25 @@ function authSign(template: EventTemplate): Promise<VerifiedEvent> {
     else authSigning.delete(key)
     syncHeld(key)
   })
+}
+
+/** An AUTH signed, or about to count, as an identity that is no longer the one on screen. */
+class StaleIdentity extends Error {
+  constructor() {
+    super('signed as another identity than this one')
+    this.name = 'StaleIdentity'
+  }
+}
+
+/**
+ * This relay's socket `ws` is for an identity no longer on screen: replace
+ * it, and reissue the feeds over the new one, whose AUTH asks the signer of
+ * the identity now (dropRelays lets it). Never left signed in as the old one.
+ */
+function replaceStale(url: string, ws: unknown): void {
+  const relay = socketOf(url)
+  if (relay && relay.ws !== ws) return
+  live.resumeAll(() => dropRelays([url]))
 }
 
 const authListeners = new Set<(url: string, ok: boolean) => void>()
@@ -483,6 +523,13 @@ const AUTH_SOCKET_CHECK_MS = 500
 function settleAuth(relay: AuthRelay, key: string, challenge: string, lib: Promise<unknown>): Promise<void> {
   return untilSettled(relay, lib).then(() => {
     const as = typeof relay.ws === 'object' && relay.ws !== null ? signedBy.get(relay.ws) : undefined
+    // Signed in as the identity before a switch made while the relay's OK
+    // was on its way: not counted, and the socket is replaced.
+    const me = identityNow()
+    if (as && me && as !== me) {
+      replaceStale(key, relay.ws)
+      throw new StaleIdentity()
+    }
     if (as) authedAs.set(key, as)
     if (authedFor.get(key) !== challenge) {
       authedFor.set(key, challenge)
@@ -719,10 +766,6 @@ async function challengeOf(relay: AuthRelay, ms: number): Promise<string | undef
  */
 async function authRelay(url: string, retry = false): Promise<void> {
   const started = Date.now()
-  // A socket signed in as a key that is not the identity now is not used: a new one signs in as it.
-  const me = identityNow()
-  const as = authedAs.get(normalizeURL(url))
-  if (me && as && as !== me) dropRelays([url])
   // A relay that never challenged is not dialled for its AUTH alone: the read
   // or write that follows connects. One open with a challenge since is answered.
   if (noChallenge.has(url)) {

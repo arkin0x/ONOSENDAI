@@ -53,7 +53,7 @@ import {
   lateSignsPending,
   SignerTimeout,
 } from '../lib/signers'
-import { onSignerAnswered } from '../lib/signWithin'
+import { onAskAgain, onSignerAnswered, signingFailed } from '../lib/signWithin'
 import {
   coordToXyz,
   estimateHopCost,
@@ -1695,9 +1695,12 @@ let currentSigner: Signer = pickInitialSigner()
 
 function pickInitialSigner(): Signer {
   const pref = loadSignerPref()
-  // A stored extension/bunker identity whose chain we already hold: reconnect
-  // lazily, keeping its pubkey so the chain loads now.
-  if (pref && pref.kind !== 'local' && (rowsFirst(pref.pubkey) || loadChain(pref.pubkey, true))) {
+  // A stored extension/bunker identity: reconnect lazily, keeping its pubkey
+  // so its chain (or its spawn, with no moves yet) loads now. Not only when
+  // a chain is held here: an identity with no moves yet came back as a
+  // throwaway local key, which signed the canonical relay's AUTH while the
+  // screen showed the bunker's identity (the real-bunker run, 2026-11-04).
+  if (pref && (pref.kind === 'nip07' || (pref.kind === 'nip46' && pref.bunkerUri))) {
     // The live signer replaces this stand-in only while the stand-in is still
     // the one in use. A bunker can answer minutes after the first signature
     // asked for it, and by then the identity may have been switched: its late
@@ -1943,6 +1946,23 @@ function wakeSigner(): void {
   const asked = currentSigner
   void asked.reconnect?.().then((fresh) => { if (currentSigner === asked && fresh !== asked) currentSigner = fresh }).catch(() => { /* the next signature reconnects and says why */ })
 }
+
+/**
+ * RETRY, or CHECK AGAIN: a person asks the signer again on purpose. A
+ * handshake that failed or never answered is given up (a stand-in's retry),
+ * and the signer's sockets are dropped even while an AUTH waits on them, so
+ * the request that follows goes out fresh instead of joining one lost in
+ * transit. Its own late answer is still taken (relay.ts signInLate). Not
+ * while a move waits on those sockets: its own timeout reconnects.
+ */
+onAskAgain(() => {
+  if (currentSigner.kind === 'local') return
+  currentSigner.retry?.()
+  if (pendingSigns > pendingAuthSigns) return
+  wakeOwed = false
+  const asked = currentSigner
+  void asked.reconnect?.().then((fresh) => { if (currentSigner === asked && fresh !== asked) currentSigner = fresh }).catch(() => { /* the request that follows says why */ })
+})
 
 /** Said while a move asks the relays again for your latest move. */
 export const HEAD_RETRYING_MESSAGE = "Can't confirm your latest move; retrying."
@@ -3563,7 +3583,7 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
       try {
         spawn = await signEvent(spawnTemplate(pubkey, Math.floor(Date.now() / 1000)))
       } catch (err) {
-        set({ proof: { ...IDLE_PROOF, status: 'infeasible', message: `Signing failed: ${err instanceof Error ? err.message : String(err)}` } })
+        set({ proof: { ...IDLE_PROOF, status: 'infeasible', message: signingFailed(err) } })
         return false
       }
       if (get().identity.pubkey !== pubkey) return false
@@ -5299,7 +5319,7 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
           ...IDLE_PROOF,
           status: 'infeasible',
           elapsedMs: msg.elapsedMs,
-          message: `Signing failed: ${reason}`,
+          message: signingFailed(err),
         },
       })
       return
@@ -5480,7 +5500,7 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
       // verify: nothing is respawned, and it says so where a hop's refusal
       // is said, as well as to whoever asked for the respawn.
       const reason = err instanceof Error ? err.message : String(err)
-      if (get().identity.pubkey === identity.pubkey) set({ proof: { ...IDLE_PROOF, status: 'infeasible', message: `Signing failed: ${reason}` } })
+      if (get().identity.pubkey === identity.pubkey) set({ proof: { ...IDLE_PROOF, status: 'infeasible', message: signingFailed(err) } })
       throw new Error(`signing failed: ${reason}`)
     }
     // A remote signer can wait minutes for an approval on a phone. If the
@@ -5880,7 +5900,7 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
       // verify: no boarding, said where a hop's refusal is said. Unless the
       // chain moved on meanwhile, when this refusal is about nothing current.
       if (get().prevEventId !== prevEventId) return
-      set({ proof: { ...IDLE_PROOF, status: 'infeasible', message: `Signing failed: ${err instanceof Error ? err.message : String(err)}` } })
+      set({ proof: { ...IDLE_PROOF, status: 'infeasible', message: signingFailed(err) } })
       return
     }
     // The chain may have advanced while a remote signer thought about it.
@@ -5960,7 +5980,7 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
       // verify: no ride. Thrown with the words a hop's refusal uses, so the
       // Hyperspace panel shows it where the ride ran and keeps the
       // destination, instead of clearing it as if the ride had gone.
-      throw new Error(`Signing failed: ${err instanceof Error ? err.message : String(err)}`)
+      throw new Error(signingFailed(err))
     }
     if (get().prevEventId !== prevEventId) return
     const dest = coordToXyz(hexToCoord(ride.toCoordHex))

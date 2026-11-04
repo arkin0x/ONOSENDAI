@@ -28,7 +28,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { AtSign, MessageCircle, MessageSquare } from 'lucide-react'
 import { nip19 } from 'nostr-tools'
-import type { Notification } from '../lib/notifications'
+import { itemToView, publishedShardOnly, type Notification } from '../lib/notifications'
 import { reactionGlyph } from '../lib/social'
 import { parseAction } from '../lib/events'
 import { COMMENT_KIND, PLACEHOLDER } from '../lib/comments'
@@ -72,8 +72,11 @@ function mentionWords(n: Notification, max = 60): string {
 
 function verbOf(n: Notification): string {
   if (n.what === 'mention') return 'tagged you in local chat'
+  // A shard you published and never hid here is seen in other clients' feeds,
+  // and reacted to there: it is your shard, not a hidden item (2026-11-02).
+  const shardOnly = publishedShardOnly(n.on, useShards.getState().mine, useCyberspace.getState().identity.pubkey)
   // A target found nowhere is kept rather than missed, and said as a possibility.
-  const on = n.on.type === 'action' ? 'your move' : n.on.type === 'item' ? (n.guessed ? 'what may be your hidden message' : 'your hidden item') : 'your comment'
+  const on = n.on.type === 'action' ? 'your move' : n.on.type === 'item' ? (shardOnly ? 'your shard' : n.guessed ? 'what may be your hidden message' : 'your hidden item') : 'your comment'
   if (n.what === 'reaction') return `reacted to ${on}`
   return n.on.type === 'comment' ? 'replied to your comment' : `commented on ${on}`
 }
@@ -155,7 +158,7 @@ export function NotificationsToast(): JSX.Element | null {
 }
 
 /** Fetch one event by id from your relays and inbox. */
-async function fetchById(id: string): Promise<{ kind: number; tags: string[][] } | null> {
+async function fetchById(id: string): Promise<{ kind: number; pubkey: string; tags: string[][] } | null> {
   const me = useCyberspace.getState().identity.pubkey
   const found = await queryAny(await relaysFor([me]), { ids: [id], limit: 1 })
   return found[0] ?? null
@@ -181,12 +184,11 @@ async function openMove(id: string): Promise<string | null> {
   return null
 }
 
-/** Open one of your deployments by its item id, or by its bag. */
-function openItem(id: string | null, lookupId?: string): string | null {
-  const mine = useShards.getState().mine
-  const dep = mine.find((d) => d.eventId === id) ?? (lookupId ? mine.find((d) => d.lookupId === lookupId) : undefined)
-  if (!dep) return 'That item is not one this device hid, so it cannot be opened from here.'
-  goToDeployment(dep)
+/** Open one of your deployments by what a notification names: an id, an address or its bag (lib/notifications itemToView). */
+async function openItem(on: { id: string | null; lookupId?: string; address?: string; kind?: number }): Promise<string | null> {
+  const got = await itemToView(() => useShards.getState().mine, on, useCyberspace.getState().identity.pubkey, fetchById)
+  if ('why' in got) return got.why
+  goToDeployment(got.row)
   return null
 }
 
@@ -195,7 +197,7 @@ async function view(n: Notification): Promise<string | null> {
   // A tag in local chat: the dock, scrolled to that line.
   if (n.on.type === 'chat') { useChat.getState().reveal(n.on.id); return null }
   if (n.on.type === 'action') return openMove(n.on.id)
-  if (n.on.type === 'item') return openItem(n.on.id, n.on.lookupId)
+  if (n.on.type === 'item') return openItem(n.on)
   // A reply or a reaction to your comment: go where that comment was made.
   const comment = await fetchById(n.on.id)
   if (!comment || comment.kind !== COMMENT_KIND) return 'That comment could not be found on any relay.'
@@ -205,7 +207,7 @@ async function view(n: Notification): Promise<string | null> {
     return root ? openMove(root) : 'That comment names no move.'
   }
   const bag = comment.tags.find((t) => t[0] === 'A')?.[1]
-  return openItem(null, bag?.split(':')[2])
+  return openItem({ id: null, lookupId: bag?.split(':')[2] })
 }
 
 function Row({ n, words }: { n: Notification; words?: string }): JSX.Element {
@@ -213,6 +215,9 @@ function Row({ n, words }: { n: Notification; words?: string }): JSX.Element {
   const [busy, setBusy] = useState(false)
   const [problem, setProblem] = useState<string | null>(null)
   const who = profileLabel(profile, nip19.npubEncode(n.from))
+  // Your rows load per identity after the list may already be up (#559): their arrival rewords a shard you hid.
+  const me = useCyberspace((s) => s.identity.pubkey)
+  const shardOnly = useShards((s) => publishedShardOnly(n.on, s.mine, me))
   const go = async (): Promise<void> => {
     setBusy(true); setProblem(null)
     const why = await view(n)
@@ -238,7 +243,7 @@ function Row({ n, words }: { n: Notification; words?: string }): JSX.Element {
             : <p className="notif__words notif__words--sealed">{n.sealed ? 'Sealed to the place it answers: go there to read it.' : PLACEHOLDER}</p>
         )}
         <button className="secret__act notif__view" disabled={busy} onClick={() => void go()}>
-          {busy ? 'OPENING…' : n.on.type === 'action' ? 'VIEW MOVE' : n.on.type === 'item' ? 'VIEW ITEM' : n.on.type === 'chat' ? 'VIEW IN CHAT' : 'VIEW THREAD'}
+          {busy ? 'OPENING…' : n.on.type === 'action' ? 'VIEW MOVE' : n.on.type === 'item' ? (shardOnly ? 'VIEW SHARD' : 'VIEW ITEM') : n.on.type === 'chat' ? 'VIEW IN CHAT' : 'VIEW THREAD'}
         </button>
         {problem && <p className="comments__error">{problem}</p>}
       </div>

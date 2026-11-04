@@ -35,38 +35,86 @@ export function lookRadPerPx(widthPx: number): number {
   return (WALK_LOOK_DEG_PER_WIDTH * Math.PI) / 180 / Math.max(1, widthPx)
 }
 
-/** Below this much drag left, in pixels, the coast ends and the rest is spent at once. */
+/**
+ * LOOK, the ball in WALK's corner (hud/WalkLookSphere.tsx): a drag across
+ * the ball turns your head this far, on every screen (arkinox, 2026-11-02:
+ * "more sensitive than normal dragging on the screen, or it is only an
+ * affordance"). Set per ball width, not per screen width as the scene's
+ * drag is, because the ball is the same size on every screen: a gain per
+ * screen pixel turned a drag across it 336 degrees on a 360px phone and 111
+ * on a phone on its side (review of #588). 300 is about what a 412px phone
+ * had. The drag can carry on past the ball for more.
+ */
+export const WALK_LOOK_SPHERE_DEG_PER_BALL = 300
+
+/** Radians of turn per CSS pixel of drag on a LOOK ball `ballPx` wide. */
+export function sphereRadPerPx(ballPx: number): number {
+  return (WALK_LOOK_SPHERE_DEG_PER_BALL * Math.PI) / 180 / Math.max(1, ballPx)
+}
+
+/** Below this much left to turn, the coast ends and the rest is spent at once: pixels for the scene's drag, radians for LOOK's. */
 const SPENT_PX = 0.01
+const SPENT_RAD = 1e-5
 
-let pendingX = 0
-let pendingY = 0
+/** A drag still to be spent, coasting out (WALK_LOOK_TAU_S). */
+interface Pending { x: number; y: number; spent: number }
+/** The scene's drags, in CSS pixels the rig turns at the screen's width. */
+const scenePending: Pending = { x: 0, y: 0, spent: SPENT_PX }
+/** LOOK's drags, already in radians. */
+const spherePending: Pending = { x: 0, y: 0, spent: SPENT_RAD }
 
-/** Turn WALK's view by a drag of dx, dy CSS pixels, in the senses a drag on the scene has always turned it. */
-export function walkLookBy(dx: number, dy: number): void {
+function add(p: Pending, dx: number, dy: number): void {
   if (!Number.isFinite(dx) || !Number.isFinite(dy)) return
-  pendingX += dx
-  pendingY += dy
+  p.x += dx
+  p.y += dy
 }
 
 /**
- * The part of the drag still to come that this frame turns, `dt` seconds
+ * The part of a drag still to come that this frame turns, `dt` seconds
  * after the last: a share that only grows with dt and never passes one.
  */
-export function takeWalkLook(dt: number): [number, number] {
-  if (pendingX === 0 && pendingY === 0) return [0, 0]
+function take(p: Pending, dt: number): [number, number] {
+  if (p.x === 0 && p.y === 0) return [0, 0]
   const k = dt > 0 ? 1 - Math.exp(-dt / WALK_LOOK_TAU_S) : 0
-  let x = pendingX * k
-  let y = pendingY * k
-  if (k > 0 && Math.abs(pendingX) < SPENT_PX && Math.abs(pendingY) < SPENT_PX) { x = pendingX; y = pendingY }
-  pendingX -= x
-  pendingY -= y
+  let x = p.x * k
+  let y = p.y * k
+  if (k > 0 && Math.abs(p.x) < p.spent && Math.abs(p.y) < p.spent) { x = p.x; y = p.y }
+  p.x -= x
+  p.y -= y
   return [x, y]
+}
+
+/** Turn WALK's view by a drag of dx, dy CSS pixels, in the senses a drag on the scene has always turned it. */
+export function walkLookBy(dx: number, dy: number): void {
+  add(scenePending, dx, dy)
+}
+
+/** This frame's share of the scene's drags, in CSS pixels (lookRadPerPx turns them). */
+export function takeWalkLook(dt: number): [number, number] {
+  return take(scenePending, dt)
+}
+
+/**
+ * Turn WALK's view by a drag of dx, dy CSS pixels on a LOOK ball `ballPx`
+ * wide, in the scene's senses: across the whole ball is
+ * WALK_LOOK_SPHERE_DEG_PER_BALL, whatever the screen.
+ */
+export function walkLookSphereBy(dx: number, dy: number, ballPx: number): void {
+  const k = sphereRadPerPx(ballPx)
+  add(spherePending, dx * k, dy * k)
+}
+
+/** This frame's share of LOOK's drags, in radians. */
+export function takeWalkLookRad(dt: number): [number, number] {
+  return take(spherePending, dt)
 }
 
 /** Forget a drag not yet spent: leaving WALK must not turn the view outside it. */
 export function clearWalkLook(): void {
-  pendingX = 0
-  pendingY = 0
+  scenePending.x = 0
+  scenePending.y = 0
+  spherePending.x = 0
+  spherePending.y = 0
 }
 
 /**

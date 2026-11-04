@@ -100,7 +100,8 @@ describe('the audio card', () => {
     // The card's play outlives the card since step 2 (NOW PLAYING stops it),
     // so the voice keeps who it is from and a mute stops it wherever it is
     // (store/__tests__/audioMute.test.ts proves the stopping).
-    expect(cardSource).toMatch(/playAudio\(id, audio, who\)/)
+    // It also names its track, which NOW PLAYING mutes it by (store/useSoundMutes).
+    expect(cardSource).toMatch(/playAudio\(id, audio, who, triggerId\)/)
     // The item modal renders nothing for an item worldItems no longer holds.
     expect(source).toMatch(/useMutes\(\(s\) => s\.muted\)/)
     expect(source).toMatch(/if \(!item \|\| !author\) return null/)

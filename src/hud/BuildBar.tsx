@@ -5,7 +5,8 @@
  * It stands in the instrument stack where the free view's FocusBar would,
  * since BUILD mode rides that view (store/useBuilder.ts). Minimal by
  * arkinox's ruling (2026-10-07): the wrench and BUILD with EXIT, one line
- * with the cursor's place, plane and cell size, and the buttons. That
+ * with the plane and cell size (the cursor's coordinate left it on
+ * 2026-11-02), and the buttons. That
  * building does not move your avatar (design note §4.2) is said in EXPLAIN,
  * kept to short lines under a cap that fits a phone. EXIT leaves the view where it is (R6), like
  * the workshop's close; Escape does the same, as a chip on the Escape stack
@@ -23,7 +24,6 @@ import { useBuilder } from '../store/useBuilder'
 import { SCAN_MAX_HEIGHT, useAgainName, useShards } from '../store/useShards'
 import { buildPlane, moveUnderWay } from '../lib/buildCursor'
 import { axisDistance } from '../lib/nearby'
-import { shortAxis } from '../lib/viewAt'
 import { Explanation } from './Explanation'
 import { useStash } from './stash'
 import { useCover } from '../hooks/useCover'
@@ -65,10 +65,10 @@ export function BuildBar(): JSX.Element | null {
         <Wrench className="buildbar__glyph" size={14} strokeWidth={2.25} aria-hidden />
         <span className="hyperbar__text">
           <span className="hyperbar__label">BUILD</span>
-          {/* Where the build cursor is, in which plane, and the cell a
-              placement lands in, which the zoom sets: one line. */}
+          {/* The plane, and the cell a placement lands in, which the zoom
+              sets: one line. No coordinate (arkinox, 2026-11-02). */}
           <span className="hyperbar__meta">
-            {[cursor.x, cursor.y, cursor.z].map(shortAxis).join(', ')} · {plane === 0 ? 'DATASPACE' : 'IDEASPACE'} · 2^{scaleExp} · {formatCellSize(scaleExp)}
+            {plane === 0 ? 'DATASPACE' : 'IDEASPACE'} · 2^{scaleExp} · {formatCellSize(scaleExp)}
           </span>
         </span>
         <button className="hyperbar__end buildbar__exit" onClick={() => useBuilder.getState().exit()} title="Leave build mode. The view stays where it is (Esc, or B)">EXIT</button>
@@ -93,7 +93,7 @@ export function BuildBar(): JSX.Element | null {
         <ul className="buildbar__explain">
           <li>The white cube marked BUILD is the build cursor: what you place lands in its cell.</li>
           <li>Move it with the pad or W A S D (R and F for depth). + and − (Q and E on a keyboard) make the cells bigger or smaller. VIEW in the Position panel jumps it anywhere; P switches the plane.</li>
-          <li>CHAIN aims it too: each step along a chain, yours or a spectated avatar's ([ ] Home End), puts it on that action. Spectating keeps build mode on.</li>
+          <li>[ ] Home End aim it along a chain, yours or a spectated avatar's: each step puts it on that action. Spectating keeps build mode on.</li>
           <li>When you place something, its ghost shows where it lands and the green box is the region someone must compute to find it; the height you hide it at sets that box.</li>
           {/* The cutoff in words a touch screen shows: the deploy bar's chip
               explains itself only in a tooltip (arkinox, 2026-10-19). */}

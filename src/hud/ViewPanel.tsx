@@ -1,5 +1,9 @@
 /**
- * ViewPanel.tsx - VIEW: what the scene draws, one switch to a row.
+ * ViewPanel.tsx - SETTINGS: what the scene draws, one switch to a row.
+ *
+ * Titled View until arkinox renamed it Settings (2026-11-02); its layout id
+ * is still `view` (store/usePanelLayout.ts), so a saved menu order keeps it
+ * where it was.
  *
  * Four things drawn in the scene can be turned off: the terrain dots, the hX
  * boxes, the chain trail and the region key cages. Another switch shades the
@@ -37,6 +41,7 @@ export function ViewPanel(): JSX.Element {
   const walkAvatarHidden = useLayers((s) => s.walkAvatarHidden)
   const walkLookSphere = useLayers((s) => s.walkLookSphere)
   const headlamp = useLayers((s) => s.headlamp)
+  const audioSpheres = useLayers((s) => s.audioSpheres)
   const gravity = useWalk((s) => s.gravity)
   const showTrail = useCyberspace((s) => s.showTrail)
   const showSecrets = useCyberspace((s) => s.showSecrets)
@@ -86,7 +91,7 @@ export function ViewPanel(): JSX.Element {
     {
       id: 'view-walk-gravity',
       title: 'Gravity in WALK',
-      hint: 'Fall, land and jump. Z.',
+      hint: 'Fall, land and jump.',
       on: gravity,
       set: (v) => useWalk.getState().setGravity(v),
     },
@@ -113,12 +118,23 @@ export function ViewPanel(): JSX.Element {
       on: headlamp,
       set: (v) => useLayers.getState().setLayer('headlamp', v),
     },
+    // The blue rings around each hidden sound in the world, where it plays
+    // at full volume (DECK-0007 `fade`; scene/AudioSpheres.tsx). On by
+    // default (arkinox, 2026-11-01). The rings on audio being placed stay
+    // either way: they are what the FADE stepper sets.
+    {
+      id: 'view-audio-spheres',
+      title: 'Sound spheres',
+      hint: 'Blue rings where a hidden sound plays at full volume.',
+      on: audioSpheres,
+      set: (v) => useLayers.getState().setLayer('audioSpheres', v),
+    },
   ]
 
   return (
     <section className="panel panel--view">
       <header className="panel__head">
-        <h2>View</h2>
+        <h2>Settings</h2>
       </header>
       {rows.map((r) => (
         <Field key={r.id} id={r.id} label={r.title} hint={r.hint}>
@@ -142,7 +158,9 @@ export function ViewPanel(): JSX.Element {
         each region you hold the key for. Headlamp lights shards from your view,
         as a flashlight would: a face turned away from you, or far off, is
         darker, so shapes of one color show their depth; off, every face is
-        exactly its own color.
+        exactly its own color. Sound spheres are blue rings around each hidden
+        sound you have found or placed: inside one it plays at full volume, and
+        it fades to silence at its region's walls.
       </Explanation>
     </section>
   )

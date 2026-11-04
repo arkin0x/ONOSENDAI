@@ -8,7 +8,7 @@
  * identity opens it, and only where the world draws it.
  */
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { CALM_FADE_MS, GLINT_MS, LID_MS, RISE_MS, afterOpen, calmShare, ceremonyLength, glintLevel, landedAt, lidTurn, rainCount, riseShare, riseStart, swapped } from '../ceremony'
+import { VANISH_MS, vanishOpacity, vanishSparkle, CALM_FADE_MS, GLINT_MS, LID_MS, RISE_MS, afterOpen, calmShare, ceremonyLength, glintLevel, landedAt, lidTurn, rainCount, riseShare, riseStart, swapped } from '../ceremony'
 import { CEREMONY_BUZZ, CEREMONY_GAP_MS, ceremonyFeedback, resetCeremonySound } from '../ceremonySound'
 import { buzzGate, onceEvery } from '../buzz'
 
@@ -123,5 +123,20 @@ describe('sound and buzz, each at most once per 10 s', () => {
     vi.stubGlobal('document', { visibilityState: 'visible' })
     expect(buzzGate(['hidden-tab'], t + 1000, CEREMONY_GAP_MS, 30)).toBe(false)
     expect(vibrate).not.toHaveBeenCalled()
+  })
+})
+
+describe('a taken item going out', () => {
+  it('fades over four seconds, and briefly on the calm path', () => {
+    expect(VANISH_MS).toBe(4000)
+    expect(vanishOpacity(0)).toBe(1)
+    expect(vanishOpacity(2000)).toBeCloseTo(0.5)
+    expect(vanishOpacity(4000)).toBe(0)
+    expect(vanishOpacity(CALM_FADE_MS, true)).toBe(0)
+  })
+  it('sparkles while it does, and not after', () => {
+    expect(vanishSparkle(0)).toBe(0)
+    expect(vanishSparkle(1000)).toBeGreaterThan(0.5)
+    expect(vanishSparkle(4000)).toBe(0)
   })
 })

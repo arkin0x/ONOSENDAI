@@ -123,7 +123,7 @@ describe('AIM from the chest composer', () => {
   it('closes the composer and lines the shard up as a shard deploy carrying the chest, at the model\'s own size', () => {
     const shard = benchShard(3)
     const draft = draftOf([{ kind: 'shard', shardId: shard.id }, { kind: 'message', text: 'hello' }])
-    useStash.getState().openChest()
+    useStash.setState({ chest: true })
     useStash.getState().aimIntoChest(draft, 0)
     expect(useStash.getState().chest).toBe(false)
     expect(useStash.getState().returnToChest).toBe(true)
@@ -287,16 +287,16 @@ describe('the seal takes the aimed event as it is', () => {
     expect(S().mine).toHaveLength(0)
   })
 
-  it('a chest with nothing aimed inside keeps its height where the composer left it', () => {
+  it('a chest with nothing aimed inside still fits its height, to the model it wears (D2: placed like a shard)', () => {
     const shard = benchShard(3)
     const lock = forgeKey('Wind Key')
     S().startDeployChest({ ...draftOf([{ kind: 'shard', shardId: shard.id }]), lock: { pubkey: lock.itemPubkey, label: 'Wind Key' } })
-    expect(S().deployHeightAuto).toBe(false)
+    expect(S().deployHeightAuto).toBe(true)
   })
 })
 
 describe('BUILD mode ending under an aim', () => {
-  it('keeps the chest for SEAL A CHEST, says so, and does not reopen the composer', () => {
+  it('keeps the chest for SEAL A CHEST, and does not reopen the composer', () => {
     const shard = benchShard(3)
     const draft = draftOf([{ kind: 'shard', shardId: shard.id }])
     useStash.getState().aimIntoChest(draft, 0)
@@ -308,8 +308,6 @@ describe('BUILD mode ending under an aim', () => {
     expect(B().itemDraft).toEqual({ type: 'chest', ...draft })
     expect(useStash.getState().chest).toBe(false)
     expect(useStash.getState().returnToChest).toBe(false)
-    const meta = useToast.getState().toast?.meta ?? ''
-    expect(meta).toMatch(/Your chest is kept: SEAL A CHEST in CREATE opens it again/)
-    expect(meta).toMatch(/"Crucifix" is not aimed/)
+    expect(useToast.getState().toast).toMatchObject({ label: 'BUILD MODE ENDED', meta: '' })
   })
 })

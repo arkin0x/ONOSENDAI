@@ -1,48 +1,76 @@
 /**
  * looks.ts: what a chest or a door looks like in the world (chest and door
- * design, D2, D3, R14; arkinox, 2026-10-26).
+ * design, D2, D3, R14; arkinox, 2026-10-26), and the `look` tag that says so
+ * on the wire (DECK-0004 §3.6).
  *
  * A chest used to be the note's cube. It is now a model, placed like a
- * shard: its origin on the chest's place, at its true size. Two built-in
+ * shard: its origin on the chest's place, at its true size. The built-in
  * looks, each with an open version that swaps in once this identity has
  * opened it (R14):
  *
  *   TREASURE  the owner's own treasure chest (treasure-chest-arkinox.json),
  *             closed, and open with the lid up and gold inside.
- *   DOOR      the Maze Kit's 2 x 3 door slab, closed, and open: slid up into
- *             the lintel, its bottom rail all that shows.
+ *   CRAWL     the Maze Kit's 2 x 2 crawl door slab, closed and open.
+ *   DOOR      the Maze Kit's 2 x 3 door slab, closed and open.
+ *   HALL      the Maze Kit's 4 x 6 hall gate, closed and open.
  *
  * The models are the Maze Kit's files as built and checked there
  * (onosendai/chest-door/models/README.md), bundled with the app and read
- * once by sno-core like any payload. Nothing here is written to the wire,
- * and nothing is fetched.
+ * once by sno-core like any payload.
  *
- * A door is a chest that carries a `door` tag (DECK-0004 §3.7, cyberspace
- * PR #82, not yet merged). That tag is only read here, never written: no
- * client writes one until SEAL A DOOR lands. Every chest without it is a
- * chest.
+ * On the wire a look is a tag: `["look", payload]` closed and `["look",
+ * payload, "open"]` open, each payload a SNO object exactly as a kind 3330
+ * carries it (DECK-0003 §1.1). A built-in goes out as a small wrapper placing
+ * its public object, posed by the hide bar's SCALE and TURN, the kind 33331 the
+ * owner publishes at each address in DEFAULT_LOOK_DS (his ruling, 2026-11-01:
+ * a look's bytes in every bag were what filled it). Another client fetches the
+ * object. Here an exact match on one of the eight addresses is the bundled file,
+ * with no fetch and no relay asked (expandDefault), and from there on a real
+ * model: its walls, its lid and its drawing are as they were. Custom looks stay
+ * inline, and an inline look of any shape is still read. A chest written before
+ * looks has none, and wears TREASURE, or DOOR when it is a door.
  *
- * THE SEAM for custom looks: `lookOf`. Spec PR #82's `["look", payload]` and
- * `["look", payload, "open"]` tags, once merged, are read there and win over
- * the built-in, with a custom closed look and no open one keeping its closed
- * look when opened (§5.4). Everything that draws a chest or a door asks
- * `lookOf`, so a custom look plugs in at that one function. `lid` is the
- * built-in TREASURE's alone: the hinge is only ever applied to a look whose
- * lid is known.
+ * A door is a chest that carries a `door` tag (DECK-0004 §3.7). Every chest
+ * without one is a chest.
+ *
+ * THE SEAM: `lookOf`. Everything that draws a chest or a door asks it, and
+ * it reads the `look` tags first (lookTagsOf), then the built-in. `lid` is
+ * TREASURE's alone: by its address when it goes by reference, by its exact
+ * shape for one written inline before that. Turned, it has none: the hinge is
+ * only ever applied to a look whose lid is known.
  */
 
-import { fromPayload, ticksOf, type ShardModel } from 'sno-core/shards'
+import { MAX_UNIT, fromPayload, ticksOf, toPayload, type ShardModel } from 'sno-core/shards'
+import { keepOwnTable } from './carried'
+import { turnShard, type Turns } from './turn'
+import { chosenConstrainOf, withConstrain, type Constrain } from './walkConstrain'
 import chestClosed from './looks/chest.json'
 import chestOpen from './looks/chest-open.json'
+import crawlClosed from './looks/door-crawl.json'
+import crawlOpen from './looks/door-crawl-open.json'
 import doorClosed from './looks/door-standard.json'
 import doorOpen from './looks/door-standard-open.json'
+import hallClosed from './looks/door-hall.json'
+import hallOpen from './looks/door-hall-open.json'
 
 /** The built-in looks. */
-export type LookName = 'treasure' | 'door'
+export type LookName = 'treasure' | 'crawl' | 'door' | 'hall'
+
+/** The built-in looks a door offers on the hide bar, in its model row's order (D2). */
+export const DOOR_LOOKS: readonly LookName[] = ['crawl', 'door', 'hall']
+
+/** The built-in looks a chest offers (the chest model ruling). */
+export const CHEST_LOOKS: readonly LookName[] = ['treasure']
+
+/** What a look wears: a chest, or a door. */
+export type LookKind = 'chest' | 'door'
 
 /** A look: what is drawn while closed, and once opened (null: an opened look is not drawn at all). */
 export interface Look {
-  name: LookName
+  /** A built-in, or `custom`: read from the thing's own `look` tags. */
+  name: LookName | 'custom'
+  /** Whether a chest or a door wears it: what OPEN plays, and whether an opened look with no open version is drawn (§3.6). */
+  kind: LookKind
   closed: ShardModel
   open: ShardModel | null
   /** The closed look cut into its body and its lid, with the lid's hinge: the built-in TREASURE's alone. */
@@ -111,17 +139,74 @@ export function splitAt(shard: ShardModel, cutTicks: number): { below: ShardMode
   return { below: part(false, 'body'), above: part(true, 'lid') }
 }
 
-/** The tag that marks a chest as a door (DECK-0004 §3.7). Read only. */
+/** The tag that marks a chest as a door (DECK-0004 §3.7). */
 export const DOOR_TAG = 'door'
 
-/** Whether a chest's tags mark it a door: any `door` tag. */
-export function isDoor(tags: readonly unknown[] | undefined): boolean {
-  return !!tags && tags.some((t) => Array.isArray(t) && t[0] === DOOR_TAG)
+/** A height as a bag writes one: a decimal string, no sign, no leading zeros (CYBERSPACE_V2.md §8.6); a door's is at least 1. */
+const DOOR_HEIGHT_RE = /^[1-9][0-9]*$/
+
+/**
+ * A chest's door height (DECK-0004 §3.7.1): the number in its one `door`
+ * tag; null when it carries no `door` tag (a chest); `malformed` when the
+ * tag is there but its height is not a well-formed height of at least 1,
+ * or there is more than one `door` tag. A reader MUST drop a malformed door
+ * (lib/hidden.ts chestItemOf), never read it as a chest or as a door.
+ */
+export function doorHeightOf(tags: readonly unknown[] | undefined): number | null | 'malformed' {
+  if (!tags) return null
+  const doors = tags.filter((t): t is unknown[] => Array.isArray(t) && t[0] === DOOR_TAG)
+  if (doors.length === 0) return null
+  if (doors.length > 1) return 'malformed'
+  const h = doors[0][1]
+  if (typeof h !== 'string' || !DOOR_HEIGHT_RE.test(h) || h.length > 3) return 'malformed'
+  return Number(h)
 }
 
-const PAYLOADS: Record<LookName, { closed: unknown; open: unknown }> = {
-  treasure: { closed: chestClosed, open: chestOpen },
-  door: { closed: doorClosed, open: doorOpen },
+/** Whether a chest's tags mark it a door: exactly one `door` tag with a well-formed height (§3.7.1). */
+export function isDoor(tags: readonly unknown[] | undefined): boolean {
+  return typeof doorHeightOf(tags) === 'number'
+}
+
+const PAYLOADS: Record<LookName, { closed: unknown; open: unknown; kind: LookKind }> = {
+  treasure: { closed: chestClosed, open: chestOpen, kind: 'chest' },
+  crawl: { closed: crawlClosed, open: crawlOpen, kind: 'door' },
+  door: { closed: doorClosed, open: doorOpen, kind: 'door' },
+  hall: { closed: hallClosed, open: hallOpen, kind: 'door' },
+}
+
+/** What each built-in is called on the hide bar's model row. */
+export const LOOK_LABELS: Readonly<Record<LookName, string>> = { treasure: 'TREASURE', crawl: 'CRAWL', door: 'DOOR', hall: 'HALL' }
+
+/** Who publishes the eight default models. */
+export const DEFAULT_LOOK_AUTHOR = 'e8ed3798c6ffebffa08501ac39e271662bfd160f688f94c45d692d8767dd345a'
+
+/** Each default's `d`, as the real import names them from maze-kit-locks.zip (lib/shardZip.ts kitIds; lookDefaults.test.ts). */
+export const DEFAULT_LOOK_DS: Readonly<Record<LookName, { closed: string; open: string }>> = {
+  treasure: { closed: 'maze-kit/locks/chests/chest/chest', open: 'maze-kit/locks/chests/chest/chest-open' },
+  crawl: { closed: 'maze-kit/locks/doors/door-crawl/door-crawl', open: 'maze-kit/locks/doors/door-crawl/door-crawl-open' },
+  door: { closed: 'maze-kit/locks/doors/door-standard/door-standard', open: 'maze-kit/locks/doors/door-standard/door-standard-open' },
+  hall: { closed: 'maze-kit/locks/doors/door-hall/door-hall', open: 'maze-kit/locks/doors/door-hall/door-hall-open' },
+}
+
+export const defaultLookAddress = (d: string): string => `33331:${DEFAULT_LOOK_AUTHOR}:${d}`
+
+/** The eight addresses, and which bundled file each one is. */
+export const DEFAULT_LOOK_ADDRESSES: ReadonlyMap<string, { name: LookName; part: 'closed' | 'open' }> = new Map(
+  (Object.keys(DEFAULT_LOOK_DS) as LookName[]).flatMap((name) => (['closed', 'open'] as const).map((part) => [defaultLookAddress(DEFAULT_LOOK_DS[name][part]), { name, part }] as const)),
+)
+
+/** A default model as this client holds it: which it is, and the wrapper that says so on the wire. */
+interface DefaultLook { name: LookName; part: 'closed' | 'open'; wrapper: ShardModel; turned: boolean }
+const defaultOf = new WeakMap<ShardModel, DefaultLook>()
+
+/** A wrapper placing one model at its origin, at its own size (the FEED wrapper's shape, useShards feedWrapper). */
+function wrapperOf(model: ShardModel, address: string): ShardModel {
+  return {
+    id: `look:${address}`, name: model.name, unit: model.unit, extent: model.extent, mode: 'solid',
+    vertices: [], faces: [], up: false, spin: 0, updatedAt: 0,
+    refs: [['a', address]],
+    parts: [{ ref: 0, at: [0, 0, 0], turn: [0, 0, 0], step: 0 }],
+  }
 }
 
 const cache = new Map<LookName, Look>()
@@ -133,53 +218,332 @@ export function builtInLook(name: LookName): Look {
   const p = PAYLOADS[name]
   const closed = fromPayload(p.closed, `look:${name}`)
   if (!closed) throw new Error(`the built-in ${name} look does not parse`)
-  const look: Look = { name, closed, open: fromPayload(p.open, `look:${name}:open`) }
-  if (name === 'treasure') {
-    const { below, above } = splitAt(closed, TREASURE_LID_CUT)
-    look.lid = { body: below, lid: above, hinge: TREASURE_HINGE }
+  const look: Look = { name, kind: p.kind, closed, open: fromPayload(p.open, `look:${name}:open`) }
+  if (name === 'treasure') look.lid = treasureLid(closed)
+  for (const part of ['closed', 'open'] as const) {
+    const model = look[part]
+    if (model) defaultOf.set(model, { name, part, wrapper: wrapperOf(model, defaultLookAddress(DEFAULT_LOOK_DS[name][part])), turned: false })
   }
   cache.set(name, look)
   return look
 }
 
-/** What lookOf reads: a chest, and its event's tags when known. */
-export interface LookSubject {
-  type: string
-  event?: { tags: readonly unknown[] } | null
+/** The treasure chest's closed look cut into its body and its lid, with the hinge. */
+function treasureLid(closed: ShardModel): Lid {
+  const { below, above } = splitAt(closed, TREASURE_LID_CUT)
+  return { body: below, lid: above, hinge: TREASURE_HINGE }
+}
+
+/** The tag a look rides in (DECK-0004 §3.6). */
+export const LOOK_TAG = 'look'
+
+/**
+ * The largest look ONOSENDAI reads or writes, in bytes of its payload: past
+ * it, a shard is hidden by reference instead of inline (lib/hidden.ts
+ * REFERENCE_THRESHOLD_BYTES), and a look rides inline in every rewrite of its
+ * bag (§3.6 Size).
+ */
+export const MAX_LOOK_BYTES = 16_384
+
+const bytesOf = (s: string): number => new TextEncoder().encode(s).length
+
+/** Why a look of this many bytes is refused, in words, or null when it fits. */
+export function lookRefusal(bytes: number): string | null {
+  if (bytes <= MAX_LOOK_BYTES) return null
+  return `This model is too large to wear: ${bytes.toLocaleString('en-US')} of ${MAX_LOOK_BYTES.toLocaleString('en-US')} bytes.`
+}
+
+/** One look tag's payload read as a model, or null: malformed, over MAX_LOOK_BYTES, or refused by the format (DECK-0003 §1.9). */
+const parsed = new Map<string, ShardModel | null>()
+const PARSED_MAX = 256
+function readLookPayload(payload: string): ShardModel | null {
+  if (parsed.has(payload)) return parsed.get(payload)!
+  // Too large is refused before it is kept: a key this size in the cache would hold what the limit refuses.
+  if (bytesOf(payload) > MAX_LOOK_BYTES) return null
+  let model: ShardModel | null = null
+  try { model = fromPayload(JSON.parse(payload), `look:${payload.length}:${payload.slice(-16)}`) } catch { model = null }
+  if (parsed.size >= PARSED_MAX) parsed.delete(parsed.keys().next().value as string)
+  parsed.set(payload, model)
+  return model
+}
+
+/** One object per model and author, so whatever keys on a model's identity (geometry, measures) holds across reads. */
+const owned = new WeakMap<ShardModel, Map<string | null, ShardModel>>()
+function ownedLook(model: ShardModel, author: string | null): ShardModel {
+  let byAuthor = owned.get(model)
+  if (!byAuthor) owned.set(model, byAuthor = new Map())
+  let held = byAuthor.get(author)
+  if (!held) byAuthor.set(author, held = keepOwnTable(model, author))
+  return held
+}
+
+/** Every way a wrapper's one placement can be turned, as the bar writes it (turnShard), found by asking. */
+let partTurns: Map<string, Turns> | null = null
+function turnsOfPart(turn: unknown): Turns | null {
+  if (!partTurns) {
+    partTurns = new Map()
+    const blank = wrapperOf(builtInLook('door').closed, 'table')
+    for (let x = 0; x < 4; x++) for (let y = 0; y < 4; y++) for (let z = 0; z < 4; z++) {
+      const key = JSON.stringify(turnShard(blank, [x, y, z]).parts?.[0].turn)
+      if (!partTurns.has(key)) partTurns.set(key, [x, y, z])
+    }
+  }
+  return partTurns.get(JSON.stringify(turn)) ?? null
 }
 
 /**
- * The look a chest or a door wears, or null for anything else. The built-in
- * for now: TREASURE for a chest, DOOR for a door. A custom `look` (spec PR
- * #82) will be read here, first.
+ * A wrapper of exactly one default model, as that model posed: the bundled file,
+ * so nothing is fetched and no relay is asked, and walls and a lid have a real
+ * model to read (a wrapper's `constrain` does not reach what it places, §1.12).
+ * Null for anything else: more than one placement, a placement moved off the
+ * origin or carrying anything but its step and turn, a turn that is not quarter
+ * turns, a size past the limit, or any other address. Those are ordinary wrappers,
+ * fetched as any other. Its WALK is the wrapper's when it says, else the model's.
+ */
+const expanded = new WeakMap<ShardModel, ShardModel | null>()
+function expandDefault(w: ShardModel): ShardModel | null {
+  const held = expanded.get(w)
+  if (held !== undefined) return held
+  let out: ShardModel | null = null
+  const part = w.parts?.length === 1 ? w.parts[0] : null
+  const ref = w.refs?.length === 1 ? w.refs[0] : null
+  const hit = ref && ref[0] === 'a' ? DEFAULT_LOOK_ADDRESSES.get(String(ref[1])) : undefined
+  const plain = !!part && part.ref === 0 && part.at.every((n) => n === 0) && Object.keys(part).every((k) => k === 'ref' || k === 'at' || k === 'turn' || k === 'step')
+  if (hit && part && plain && w.vertices.length === 0 && w.faces.length === 0 && !w.objects) {
+    const base = builtInLook(hit.name)[hit.part]
+    const turns = turnsOfPart(part.turn)
+    const unit = (base?.unit ?? 0) + part.step
+    if (base && turns && unit >= 0 && unit <= MAX_UNIT) {
+      const shaped: ShardModel = { ...turnShard(base, turns), id: w.id, unit, up: w.up, spin: w.spin }
+      const chosen = chosenConstrainOf(w)
+      out = chosen ? withConstrain(shaped, chosen) : shaped
+      defaultOf.set(out, { name: hit.name, part: hit.part, wrapper: { ...w, unit }, turned: turns.some((t) => t % 4 !== 0) })
+    }
+  }
+  expanded.set(w, out)
+  return out
+}
+
+/** A thing's own looks, read from its tags: each null when it carries no well-formed one. */
+export interface LookTags {
+  closed: ShardModel | null
+  open: ShardModel | null
+}
+
+/**
+ * The `look` tags of a chest or a door (§3.6), chosen by shape before any
+ * payload is read: a tag is well-formed when its second element is a
+ * string and it has exactly two elements (a closed look), or exactly three
+ * with `open` as the third (an open look); the first well-formed tag of each counts, and every
+ * other `look` tag is ignored, one whose third element is a word not known
+ * among them. Only then is each counted payload checked (DECK-0003 §1.9, and
+ * MAX_LOOK_BYTES here): one that fails is no look of that kind, never a fall
+ * back to a later tag, and never a reason to drop the chest. `author` is the
+ * chest's (or door's) verified signer, the only key whose carried objects
+ * count (DECK-0003 §1.10, lib/carried.ts keepOwnTable); null, for an
+ * unsigned chest, honours no key.
+ */
+export function lookTagsOf(tags: readonly unknown[] | undefined, author: string | null = null): LookTags {
+  const out: LookTags = { closed: null, open: null }
+  if (!tags) return out
+  let closed: string | null = null
+  let open: string | null = null
+  for (const t of tags) {
+    if (!Array.isArray(t) || t[0] !== LOOK_TAG || typeof t[1] !== 'string') continue
+    if (t.length === 2) closed ??= t[1]
+    else if (t.length === 3 && t[2] === 'open') open ??= t[1]
+  }
+  const read = (payload: string | null): ShardModel | null => {
+    const model = payload === null ? null : readLookPayload(payload)
+    if (!model) return null
+    return expandDefault(model) ?? ownedLook(model, author)
+  }
+  return { closed: read(closed), open: read(open) }
+}
+
+/** What lookOf reads: a chest, and its event's tags (and signer, and signature) when known. */
+export interface LookSubject {
+  type: string
+  event?: { tags: readonly unknown[]; pubkey?: string; sig?: string } | null
+}
+
+/** Whose carried objects a look's table honours: the chest event's signer when it is signed, else nobody (§3.6, DECK-0003 §1.10). */
+function lookAuthor(event: LookSubject['event']): string | null {
+  return event?.pubkey && event.sig ? event.pubkey : null
+}
+
+/** Whether a model is the built-in TREASURE's shape exactly, at any unit: its lid is then known. */
+export function isTreasureShape(model: ShardModel): boolean {
+  const t = builtInLook('treasure').closed
+  if (model.vertices.length !== t.vertices.length || model.faces.length !== t.faces.length) return false
+  for (let i = 0; i < t.vertices.length; i++) {
+    const a = ticksOf(model.vertices[i]), b = ticksOf(t.vertices[i])
+    if (a[0] !== b[0] || a[1] !== b[1] || a[2] !== b[2]) return false
+  }
+  return model.faces.every((f, i) => f[0] === t.faces[i][0] && f[1] === t.faces[i][1] && f[2] === t.faces[i][2])
+}
+
+const custom = new WeakMap<readonly unknown[], Look>()
+
+/**
+ * The look a chest or a door wears, or null for anything else: its own
+ * `look` tags first (§3.6), else the built-in, TREASURE for a chest and DOOR
+ * for a door. A custom closed look with no open one has none: an opened
+ * DOOR is then not drawn at all, and only an opened chest keeps its closed
+ * look (drawnLook). A custom open look with no closed one is drawn over the
+ * built-in closed one ("with no closed look, a reader draws whatever it
+ * draws for a chest"). Read once per tag list.
  */
 export function lookOf(item: LookSubject): Look | null {
   if (item.type !== 'chest') return null
-  return builtInLook(isDoor(item.event?.tags) ? 'door' : 'treasure')
+  const tags = item.event?.tags
+  const kind: LookKind = isDoor(tags) ? 'door' : 'chest'
+  const builtIn = builtInLook(kind === 'door' ? 'door' : 'treasure')
+  if (!tags || !tags.some((t) => Array.isArray(t) && t[0] === LOOK_TAG)) return builtIn
+  const held = custom.get(tags)
+  if (held) return held
+  const own = lookTagsOf(tags, lookAuthor(item.event))
+  let look: Look
+  if (!own.closed && !own.open) look = builtIn
+  else if (!own.closed) look = { ...builtIn, name: 'custom', kind, open: own.open, lid: undefined }
+  else {
+    look = { name: 'custom', kind, closed: own.closed, open: own.open }
+    // TREASURE by reference, by its address and unturned; one written inline before that, by its shape.
+    const known = defaultOf.get(own.closed)
+    if (kind === 'chest' && (known ? known.name === 'treasure' && known.part === 'closed' && !known.turned : isTreasureShape(own.closed))) look.lid = treasureLid(own.closed)
+  }
+  custom.set(tags, look)
+  return look
+}
+
+/**
+ * How a look stands, by its own payload's `up` and `spin` (§3.6, DECK-0003
+ * §1.7): on the ground where it is placed, in dataspace, as a hidden shard
+ * does. Undefined: on cyberspace axes as built.
+ */
+export function lookStand<P>(model: Pick<ShardModel, 'up' | 'spin'>, plane: number, at: P): { at: P; spin: number } | undefined {
+  return model.up && plane === 0 ? { at, spin: model.spin } : undefined
+}
+
+/** How a look goes out from the hide bar: its size, its quarter turns and its WALK setting, as a shard's do. */
+export interface LookPose {
+  unit: number
+  turn: Turns
+  constrain: Constrain
+}
+
+/**
+ * A model posed by the bar, its WALK aside: turned (lib/turn.ts), at the bar's
+ * unit, on cyberspace axes (the bar offers no snap, so whatever the model stood
+ * as on the bench does not come along). A wrapper, a look of placements alone,
+ * is scaled by its placements' steps, since a placed object is drawn at its own
+ * unit plus the step (DECK-0003 §1.10) and the wrapper's unit says nothing of it.
+ */
+function posedShape(model: ShardModel, pose: Pick<LookPose, 'unit' | 'turn'>): ShardModel {
+  const turned = turnShard(model, pose.turn)
+  const by = pose.unit - model.unit
+  const parts = by !== 0 && turned.vertices.length === 0 && turned.parts ? turned.parts.map((p) => ({ ...p, step: p.step + by })) : turned.parts
+  return { ...turned, ...(parts ? { parts } : {}), unit: pose.unit, up: false, spin: 0 }
+}
+
+/** A model posed for the wire: posedShape, with the bar's WALK setting. */
+export function posedLook(model: ShardModel, pose: LookPose): ShardModel {
+  return withConstrain(posedShape(model, pose), pose.constrain)
+}
+
+/**
+ * An open look posed alike, so it stands exactly where the closed one stood.
+ * The bar's WALK reaches one that has a setting (a chest's); one with none (a
+ * built-in slab's) keeps none, so an opened door holds nobody.
+ */
+export function posedOpenLook(model: ShardModel, pose: LookPose): ShardModel {
+  const shape = posedShape(model, pose)
+  return chosenConstrainOf(model) === undefined ? shape : withConstrain(shape, pose.constrain)
+}
+
+/** A FEED wrapper posed: its WALK setting is its object's author's, and the wrapper writes none (DECK-0003 §1.12). */
+export function posedWrapper(model: ShardModel, pose: Pick<LookPose, 'unit' | 'turn'>): ShardModel {
+  return posedShape(model, pose)
+}
+
+/**
+ * A closed look as it goes out: a default model by reference, posed from the
+ * wrapper it came from, or any other as posedLook writes it inline.
+ */
+export function wireLook(model: ShardModel, pose: LookPose): ShardModel {
+  const known = defaultOf.get(model)
+  return known ? withConstrain(posedShape(known.wrapper, pose), pose.constrain) : posedLook(model, pose)
+}
+
+/**
+ * An open look as it goes out, posed alike. The bar's WALK reaches a default that
+ * can hold a walker (TREASURE open), and never one authored `off`: an opened door
+ * holds nobody, whatever the closed one was set to.
+ */
+export function wireOpenLook(model: ShardModel, pose: LookPose): ShardModel {
+  const known = defaultOf.get(model)
+  if (!known) return posedOpenLook(model, pose)
+  const shape = posedShape(known.wrapper, pose)
+  return chosenConstrainOf(builtInLook(known.name).open ?? model) === 'off' ? shape : withConstrain(shape, pose.constrain)
+}
+
+/**
+ * A look as tags (§3.6): the closed look, and the open one when there is
+ * one, each the payload a kind 3330 would carry. Throws with lookRefusal's
+ * words when either is over MAX_LOOK_BYTES, so the hide bar and the seal
+ * refuse the same way.
+ */
+export function lookTags(closed: ShardModel, open: ShardModel | null): string[][] {
+  const out: string[][] = []
+  for (const [model, extra] of [[closed, []], [open, ['open']]] as const) {
+    if (!model) continue
+    const payload = JSON.stringify(toPayload(model))
+    const refusal = lookRefusal(bytesOf(payload))
+    if (refusal) throw new Error(refusal)
+    out.push([LOOK_TAG, payload, ...extra])
+  }
+  return out
+}
+
+/** The bytes of a model as a look's payload: what MAX_LOOK_BYTES is measured against. */
+export function lookBytes(model: ShardModel): number {
+  return bytesOf(JSON.stringify(toPayload(model)))
+}
+
+/**
+ * A built-in look as it goes out: closed and open, each a wrapper of its public
+ * object, both posed alike (wireLook, wireOpenLook).
+ */
+export function builtInLookTags(name: LookName, pose: LookPose): string[][] {
+  const look = builtInLook(name)
+  return lookTags(wireLook(look.closed, pose), look.open ? wireOpenLook(look.open, pose) : null)
 }
 
 /** A point, as a world item's place is. */
 interface At { x: bigint; y: bigint; z: bigint }
 
 /**
- * Whether a thing that came out of an opened chest stays in the chest: it
- * is listed under the chest's rows and floats out as loot, and is not drawn
- * again in the world on top of the chest. That is anything out of a chest
- * (not a door) that stands at the chest's own place. One aimed at its own
- * point (a room built in a chest's region, lib/chests.ts revealedIn) is
- * drawn where it stands, as before, until CONVERT TO DOOR moves such rooms
- * behind doors (chest and door design, P4b). Everything behind a door
- * stands in the room. A thing whose chest is not known is drawn, as before.
+ * Whether a thing that came out of an opened chest stays in the chest: it is
+ * listed under the chest's rows and floats out as loot, and is not drawn in
+ * the world (DECK-0004 §3.4: "a chest's contents are taken, not placed"; a
+ * hider who wants things to appear where they stand uses a door, and CONVERT
+ * TO DOOR moves an old room-chest behind one, R13). Anything out of a chest,
+ * wherever it was aimed. A thing whose chest is not known is drawn, as
+ * before; a door's room never comes this way.
  */
 export function keptInChest(item: { chestId?: string; at: At }, parent: { at: At; tags?: readonly unknown[] } | undefined): boolean {
-  if (!item.chestId || !parent || isDoor(parent.tags)) return false
-  return item.at.x === parent.at.x && item.at.y === parent.at.y && item.at.z === parent.at.z
+  return !!item.chestId && !!parent && !isDoor(parent.tags)
 }
 
-/** The model drawn for a look: the open one once opened, when it has one, else the closed one; null when an opened look is not drawn. */
+/**
+ * The model drawn for a look (§3.6 Drawing it): the closed one until opened;
+ * once opened, the open one when there is one, else nothing for a door (an
+ * opened door with no open look is not drawn at all) and the closed one for
+ * a chest, which alone keeps its closed look.
+ */
 export function drawnLook(look: Look, opened: boolean): ShardModel | null {
   if (!opened) return look.closed
   if (look.open) return look.open
-  // A door with no open look is not drawn once opened; a chest keeps its closed look (§5.4).
-  return look.name === 'door' ? null : look.closed
+  // A door with no open look is not drawn once opened; a chest keeps its closed look (§3.6).
+  return look.kind === 'door' ? null : look.closed
 }

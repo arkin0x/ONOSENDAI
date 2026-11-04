@@ -8,7 +8,13 @@ import { postNote } from './channel'
 import { probeStore } from './probe'
 import { markChainVerdicts } from './chainVerdicts'
 import { budget, byAddress, byAuthorKind, byKind, byTag, getRows, ingest, type IngestItem } from './store'
-import { chainHead, checkChainRows, commitChain, migrateChain, partedBranches, readChain, setAsideBranch, type ChainCommit, type ChainMigration, type ChainSource } from './chainRows'
+import { chainHead, checkChainRows, commitChain, flagRows, migrateChain, partedBranches, readChain, setAsideBranch, type ChainCommit, type ChainMigration, type ChainSource } from './chainRows'
+
+/** Whether this runs in a worker (workers/events.worker.ts), and not on the page's main thread. */
+function inWorker(): boolean {
+  const scope = (globalThis as { WorkerGlobalScope?: abstract new () => unknown }).WorkerGlobalScope
+  return typeof scope === 'function' && globalThis instanceof scope
+}
 
 export const eventDbOps = {
   probeStore: () => probeStore(),
@@ -32,7 +38,9 @@ export const eventDbOps = {
     return result
   },
   chainHead: (pubkey: string) => withEventDb((db) => chainHead(db, pubkey)),
-  checkChainRows: (pubkey: string) => withEventDb((db) => checkChainRows(db, pubkey)),
+  // Signatures are checked only in the event worker: on the main thread they go to the signature worker (lib/chainStore.ts checkRows).
+  checkChainRows: (pubkey: string) => withEventDb((db) => checkChainRows(db, pubkey, { verify: inWorker() })),
+  flagRows: (ids: string[]) => withEventDb((db) => flagRows(db, ids)),
   readChain: (pubkey: string) => withEventDb((db) => readChain(db, pubkey)),
   async migrateChain(by: string, m: ChainMigration) {
     const result = await withEventDb((db) => migrateChain(db, m))

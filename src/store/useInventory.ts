@@ -14,6 +14,10 @@
  * when it does, so nothing taken in the first second is lost. Where
  * IndexedDB cannot be opened, items last the session and the panel says so.
  *
+ * DELETE (remove) takes a row off this identity's ITEMS, here and on disk,
+ * and publishes nothing. The item is then not held: it can be found and TAKEN
+ * again, and nothing brings it back but a TAKE, a PASTE or forging it.
+ *
  * The identity is watched from load() rather than at module load, because
  * this store sits inside the stores' import cycle (useCyberspace imports the
  * secrets store, which imports the shards store, which imports this one) and
@@ -26,7 +30,7 @@ import type { ChestEntry } from '../lib/chests'
 import type { Hidden, KeyItem } from '../lib/hidden'
 import { KEY_TEXT_PREFIX, addHeld, heldFromEntry, heldFromFind, heldFromForged, heldFromPasted, holdsModel, parseKeyText, type HeldFrom, type HeldItem, type HeldPlace, type InChest } from '../lib/inventory'
 import { describeError } from '../lib/secrets/db'
-import { openInventoryDb, readHeld, writeHeld } from '../lib/inventoryDb'
+import { deleteHeld, openInventoryDb, readHeld, writeHeld } from '../lib/inventoryDb'
 import { useCyberspace } from './useCyberspace'
 
 export type InventoryStorage = 'loading' | 'indexeddb' | 'memory'
@@ -68,6 +72,12 @@ interface InventoryState {
   take: (entries: ChestEntry[], from: HeldFrom, place: HeldPlace | null) => HeldItem[]
   /** Take these rows off the TAKEN list, keeping them held (moved into the workshop, or cleared). */
   clearTaken: (ids: string[]) => void
+  /**
+   * DELETE: stop holding this item, on disk first, then here. False when the
+   * database refused, and the item is still held, so a reload cannot bring
+   * back what the panel said was gone.
+   */
+  remove: (id: string) => Promise<boolean>
   /** PASTE: hold a key from its text. */
   paste: (text: string) => PasteResult
   has: (id: string) => boolean
@@ -99,6 +109,9 @@ function persist(rows: HeldItem[]): Promise<void> {
     })
   return writes
 }
+
+/** Rows deleted this session: a read begun before the delete must not bring one back. A TAKE or PASTE lifts it. */
+const removed = new Set<string>()
 
 let watching = false
 const now = (): number => Math.floor(Date.now() / 1000)
@@ -143,7 +156,7 @@ export const useInventory = create<InventoryState>((set, get) => {
     // What was held while the read ran (a scan's finds) joins what was on disk
     // and is written, since add() may have run before the database answered.
     const onDisk: Record<string, HeldItem> = {}
-    for (const r of rows) onDisk[r.id] = r
+    for (const r of rows) if (!removed.has(r.rowKey)) onDisk[r.id] = r
     const { items, added } = addHeld(onDisk, Object.values(get().items))
     set({ items, storage: 'indexeddb' })
     void persist(added)
@@ -153,6 +166,7 @@ export const useInventory = create<InventoryState>((set, get) => {
     // Every row is built for the owner as it stands (ownerNow), so all of them are this identity's.
     ownerNow()
     const { items, added } = addHeld(get().items, list)
+    for (const r of added) removed.delete(r.rowKey)
     if (added.length > 0) set({ items })
     void persist(added)
     return added
@@ -225,6 +239,29 @@ export const useInventory = create<InventoryState>((set, get) => {
     if (changed.length === 0) return
     set({ items })
     void persist(changed)
+  },
+
+  remove: async (id) => {
+    const item = get().items[id]
+    if (!item) return true
+    let ok = true
+    writes = writes
+      .then(() => database())
+      .then((d) => (d ? deleteHeld(d, item.rowKey) : undefined))
+      .catch((err: unknown) => {
+        ok = false
+        console.warn(`[inventory] could not delete an item: ${describeError(err)}`)
+      })
+    await writes
+    if (!ok) return false
+    removed.add(item.rowKey)
+    // The identity may have changed while the database answered: its list is not this row's.
+    if (get().items[id]?.rowKey === item.rowKey) {
+      const items = { ...get().items }
+      delete items[id]
+      set({ items })
+    }
+    return true
   },
 
   paste: (text) => {

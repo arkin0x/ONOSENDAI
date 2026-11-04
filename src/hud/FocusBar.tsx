@@ -10,21 +10,19 @@
  * RETURN puts the anchor back on your avatar at the zoom you left.
  */
 
-import { shortAxis } from '../lib/viewAt'
 import { useCyberspace } from '../store/useCyberspace'
 import { useHyperspace } from '../store/useHyperspace'
 import { useEscape } from '../hooks/useEscape'
 import { useBuilder } from '../store/useBuilder'
 
+/** What VIEWING says for a free view (VIEW, or what BUILD mode leaves behind). */
+export const FREE_VIEW_LABEL = 'A COORD'
+
 export function FocusBar(): JSX.Element | null {
   const focus = useCyberspace((s) => s.focus)
-  // The cursor, not the anchor: the anchor catches up after the presses settle.
-  const anchor = useCyberspace((s) => (s.focus?.drive ? s.cursor : s.anchor))
-  const anchorPlane = useCyberspace((s) => s.anchorPlane)
-  // A free view reads where it is now, and in which plane, since the pad moves it.
-  const focusLabel = focus === null ? null : focus.drive
-    ? `${[anchor.x, anchor.y, anchor.z].map(shortAxis).join(', ')} · ${anchorPlane === 0 ? 'DATASPACE' : 'IDEASPACE'}`
-    : focus.label
+  // A free view says only that it is on a coordinate, not which: the pad
+  // moves it, and the axes made the chip too long (arkinox, 2026-11-02).
+  const focusLabel = focus === null ? null : focus.drive ? FREE_VIEW_LABEL : focus.label
   const spectating = useCyberspace((s) => s.spectate !== null)
   const viewOwned = useHyperspace((s) => s.viewOwned)
   // BUILD mode rides the free view and has its own bar (BuildBar), with its

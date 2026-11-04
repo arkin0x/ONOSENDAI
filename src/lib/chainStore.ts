@@ -9,7 +9,11 @@
  *
  * The publisher waits for an action to land before it sends it (chainLanded).
  * That is the moment a loser of a race between two tabs is found: its action
- * has never left this device, and the store takes it back (onChainLost).
+ * has never left this device, and the store takes it back (onChainLost). From
+ * the answer on, that action and every action after it in hand can never be
+ * sent or written from this tab, whatever asks and however long the take-back
+ * takes: they were signed from a head that is gone, and sent they would fork
+ * the chain.
  *
  * Nothing here can cost the chain in memory. A commit that fails leaves the
  * chain in hand where it is, and what has not landed is kept in a small
@@ -25,6 +29,7 @@ import { checkVersion, useVersionGate } from './versionGate'
 import type { ChainCommit, ChainRead, ChainRecord, ChainSource, MigrationResult } from './eventDb/chainRows'
 import type { Nip01Flag } from './eventDb/schema'
 import { CHAIN_ROWS_ON_WEBKIT, CHAIN_STORE_VERSION } from './chainStoreVersion'
+import { checkSignatures } from './sigCheck'
 import type { NostrEvent } from './events'
 
 /** The patience of a read: the same 3 s the old store's reads have (lib/chainDb.ts). */
@@ -62,15 +67,37 @@ export function onWebKit(): boolean {
   return /AppleWebKit\//.test(ua) && !/(?:Chrome|Chromium)\//.test(ua)
 }
 
-/** One device trying the rows before WebKit is let in: ?chainstore=trial sets it, ?chainstore=off ends it. */
+/**
+ * One device trying the rows before WebKit is let in. ?chainstore=trial only
+ * asks: the device joins when the person says yes on screen (startTrial), so a
+ * shared link alone never puts a phone on a store nobody has proven there.
+ * ?chainstore=off ends it, which is always safe, so a link may do that.
+ */
+let trialAsked = false
 function trialFromUrl(): void {
   try {
     const asked = new URLSearchParams(location.search).get('chainstore')
-    if (asked === 'trial') localStorage.setItem(TRIAL_KEY, '1')
+    if (asked === 'trial') trialAsked = localStorage.getItem(TRIAL_KEY) === null
     else if (asked === 'off') localStorage.removeItem(TRIAL_KEY)
   } catch { /* no location, or no storage: no trial */ }
 }
 trialFromUrl()
+
+/** Whether this load was opened with ?chainstore=trial on a device not on the trial yet: the confirm shows (hud/ChainStoreTrial.tsx). */
+export function trialAskedByLink(): boolean {
+  return trialAsked
+}
+
+/** The person said yes on screen. Takes effect from the next load, which the confirm starts. */
+export function startTrial(): void {
+  trialAsked = false
+  try { localStorage.setItem(TRIAL_KEY, '1') } catch { /* no storage: no trial */ }
+}
+
+/** The person said no: nothing is kept. */
+export function declineTrial(): void {
+  trialAsked = false
+}
 
 /** Whether this device is running the trial: it then says what the store did (store/useCyberspace.ts). */
 export function storeTrial(): boolean {
@@ -163,6 +190,11 @@ export function setMarker(pubkey: string, legacyMark: string | null): void {
   try { localStorage.setItem(markerKey(pubkey), legacyMark ?? '') } catch { /* private mode: the load reads the rows after the old copy, as a first load does */ }
 }
 
+/** The rows are gone and the old stores hold the chain again: this device no longer has it in rows. */
+export function clearMarker(pubkey: string): void {
+  try { localStorage.removeItem(markerKey(pubkey)) } catch { /* private mode */ }
+}
+
 /** What a read found. As with lib/chainDb.ts: `unreadable` and `timeout` are never "none". */
 export type RowsRead = ChainRead | null | 'unreadable' | 'timeout'
 
@@ -202,10 +234,22 @@ export async function migrateToRows(pubkey: string, source: ChainSource, parted:
 /** How long the worker gets to check a chain's rows: the first time it may check every signature of a long chain. */
 const CHECK_PATIENCE_MS = 180_000
 
-/** Check the chain's rows (lib/eventDb/chainRows.ts checkChainRows). Rejects when the database will not do it, and the caller checks by other means. */
+/**
+ * Check the chain's rows (lib/eventDb/chainRows.ts checkChainRows). Rejects
+ * when the database will not do it, and the caller checks by other means. With
+ * the event worker given up, the database runs on the main thread and checks no
+ * signature there: the rows not flagged yet go to the signature worker
+ * (lib/sigCheck.ts), and their flags are raised after. A flag that cannot be
+ * raised now is raised by the next load's check.
+ */
 export async function checkRows(pubkey: string): Promise<string[]> {
   await rowsSettled(pubkey)
-  return (await callEventDb('checkChainRows', [pubkey], CHECK_PATIENCE_MS)).bad
+  const found = await callEventDb('checkChainRows', [pubkey], CHECK_PATIENCE_MS)
+  if (found.unchecked.length === 0) return found.bad
+  const forged = await checkSignatures(found.unchecked)
+  const good = found.unchecked.filter((e) => !forged.has(e.id)).map((e) => e.id)
+  if (good.length > 0) await callEventDb('flagRows', [good]).catch(() => { /* raised by the next check */ })
+  return [...found.bad, ...forged]
 }
 
 /** Bring the chain's verdict flags up to date, in the worker, in the background (lib/eventDb/chainVerdicts.ts). Never rejects: a verdict not written reads as not checked. */
@@ -249,6 +293,21 @@ interface Track {
   landers: Map<string, Array<(landed: boolean) => void>>
   retry: ReturnType<typeof setTimeout> | null
   refusedSaid: boolean
+  /**
+   * Actions of this tab whose commit lost to another tab's, and every action
+   * after one in hand: signed from a head that is gone. Never sent, never
+   * written to the rows or the spare key. Only rows that hold one take it out.
+   */
+  lost: Set<string>
+  /**
+   * A commit lost, and the store has not yet put the rows in hand
+   * (tookBack): nothing that has not committed may go out meanwhile.
+   */
+  takingBack: boolean
+  /** Actions let go before their commit answered: on a lost commit, they may already be on the relays. */
+  blind: Set<string>
+  /** Nothing at all goes out from this tab: a lost action may be on the relays beside the winner (holdChain). */
+  held: boolean
 }
 
 const tracks = new Map<string, Track>()
@@ -256,7 +315,7 @@ const tracks = new Map<string, Track>()
 function trackOf(pubkey: string): Track {
   let t = tracks.get(pubkey)
   if (!t) {
-    t = { committed: [], committedIds: new Set(), acked: new Set(), wanted: null, running: null, latest: null, landers: new Map(), retry: null, refusedSaid: false }
+    t = { committed: [], committedIds: new Set(), acked: new Set(), wanted: null, running: null, latest: null, landers: new Map(), retry: null, refusedSaid: false, lost: new Set(), takingBack: false, blind: new Set(), held: false }
     tracks.set(pubkey, t)
   }
   return t
@@ -273,6 +332,49 @@ export function noteCommitted(pubkey: string, ids: string[], published: string[]
   t.committed = ids
   t.committedIds = new Set(ids)
   t.acked = new Set(published)
+  for (const id of ids) t.lost.delete(id)
+}
+
+/**
+ * The store has put the rows in hand after a lost commit: what it now holds
+ * was read from them, and the actions that lost are out of it. Saves and sends
+ * go on from here. The lost actions stay refused.
+ */
+export function tookBack(pubkey: string): void {
+  const t = tracks.get(pubkey)
+  if (t) t.takingBack = false
+}
+
+/**
+ * Nothing more goes out from this tab for `pubkey`, committed or not, until a
+ * load: an action that lost may be on the relays beside the one that won, and
+ * what the relays hold decides that, not this tab.
+ */
+export function holdChain(pubkey: string): void {
+  const t = tracks.get(pubkey)
+  if (t) t.held = true
+}
+
+export function chainHeld(pubkey: string): boolean {
+  return tracks.get(pubkey)?.held === true
+}
+
+/** Whether a lost commit of `pubkey` is still waiting to be taken back. */
+export function takingBack(pubkey: string): boolean {
+  return tracks.get(pubkey)?.takingBack === true
+}
+
+/** Whether this action lost to another tab, or follows one that did. */
+export function chainLost(pubkey: string, id: string): boolean {
+  return tracks.get(pubkey)?.lost.has(id) === true
+}
+
+/** Every action of `events` from the first that lost: none of it may leave or be kept as the chain. */
+function markAfterLost(t: Track, events: NostrEvent[]): boolean {
+  const from = events.findIndex((e) => t.lost.has(e.id))
+  if (from < 0) return false
+  for (let i = from; i < events.length; i++) if (!t.committedIds.has(events[i].id)) t.lost.add(events[i].id)
+  return true
 }
 
 /** The head this tab last committed or read, or null. */
@@ -281,9 +383,28 @@ export function committedHead(pubkey: string): { headId: string | null; length: 
   return { headId: t?.committed[t.committed.length - 1] ?? null, length: t?.committed.length ?? 0 }
 }
 
-/** What the store does when a commit lost to another tab. Installed by the store. */
-let lostHandler: ((pubkey: string) => void) | null = null
-export function onChainLost(handler: (pubkey: string) => void): void { lostHandler = handler }
+/**
+ * What the store does when a commit lost to another tab. Installed by the
+ * store. `out` names the lost actions that may already be on the relays: let
+ * go before the answer came (a commit slower than landPatienceMs, or a write
+ * refused earlier), or marked published. Empty, nothing of this has left.
+ */
+let lostHandler: ((pubkey: string, out: string[]) => void) | null = null
+export function onChainLost(handler: (pubkey: string, out: string[]) => void): void { lostHandler = handler }
+
+/**
+ * What a retry saves: the chain as the store holds it now, installed by the
+ * store. Never a want kept from before: a read may have replaced the chain in
+ * hand since (another tab's move taken in), and that want would write what was
+ * taken back over what won. False when the store has nothing to save for it.
+ */
+let resaveHandler: ((pubkey: string) => boolean) | null = null
+export function onChainResave(handler: (pubkey: string) => boolean): void { resaveHandler = handler }
+
+/** Whether this action was let go before it landed: it may be on the relays though no commit has it. */
+export function wentOut(pubkey: string, id: string): boolean {
+  return tracks.get(pubkey)?.blind.has(id) === true
+}
 
 /** What the store does when a write was refused: once per identity per page, until one lands. */
 let refusedHandler: ((pubkey: string, quota: boolean) => void) | null = null
@@ -327,17 +448,26 @@ async function run(pubkey: string, t: Track): Promise<void> {
   while (t.wanted) {
     const w = t.wanted
     t.wanted = null
+    // A save made before the take-back (a retry armed earlier, a save while it
+    // is under way) still holds what lost: never written, whatever head it names.
+    if (t.takingBack || markAfterLost(t, w.events)) continue
     const commit = commitFor(pubkey, t, w)
     try {
       const result = await callEventDb('commitChain', [TAB_ID, commit])
       if (result.status === 'lost') {
         // Nothing of this landed, and what waits behind it extends the same
-        // lost head. The store reads what did land and takes it from there.
+        // lost head. All of it is refused from now, before anything is read:
+        // the store reads what did land and takes it from there.
+        const behind = t.wanted ?? w
         t.wanted = null
         t.latest = null
-        const inThis = new Set(w.events.map((e) => e.id))
-        settleLanders(t, (id) => (inThis.has(id) && !t.committedIds.has(id) ? false : null))
-        lostHandler?.(pubkey)
+        if (t.retry) { clearTimeout(t.retry); t.retry = null }
+        const lostNow = [...w.events, ...behind.events].filter((e) => !t.committedIds.has(e.id))
+        for (const e of lostNow) t.lost.add(e.id)
+        t.takingBack = true
+        const out = [...new Set(lostNow.filter((e) => w.isPublished(e.id) || behind.isPublished(e.id) || t.blind.has(e.id)).map((e) => e.id))]
+        settleLanders(t, (id) => (t.committedIds.has(id) ? true : false))
+        lostHandler?.(pubkey, out)
         return
       }
       t.committed = w.events.map((e) => e.id)
@@ -346,6 +476,7 @@ async function run(pubkey: string, t: Track): Promise<void> {
       for (const id of commit.acks) t.acked.add(id)
       t.refusedSaid = false
       if (t.retry) { clearTimeout(t.retry); t.retry = null }
+      for (const id of t.committedIds) t.blind.delete(id)
       clearTail(pubkey)
       settleLanders(t, (id) => (t.committedIds.has(id) ? true : null))
     } catch (err) {
@@ -356,13 +487,14 @@ async function run(pubkey: string, t: Track): Promise<void> {
       console.warn(`[chain] a save could not be written (${name ?? 'error'}): the chain stays in this tab, and it is tried again`)
       const notCommitted = (t.wanted ?? w).events.filter((e) => !t.committedIds.has(e.id))
       writeTail(pubkey, notCommitted)
+      for (const id of t.landers.keys()) t.blind.add(id)
       settleLanders(t, () => true)
       if (!t.refusedSaid) { t.refusedSaid = true; refusedHandler?.(pubkey, name === 'QuotaExceededError') }
       // What waits is newer, and carries everything this one did: the next
       // try is the newest, a while from now. Not at once: a full disk stays full.
       const again = t.wanted ?? w
       t.wanted = null
-      if (!t.retry) t.retry = setTimeout(() => { t.retry = null; saveRows(pubkey, t.latest ?? again) }, retryMs)
+      if (!t.retry) t.retry = setTimeout(() => { t.retry = null; if (!(resaveHandler?.(pubkey) ?? false)) saveRows(pubkey, t.latest ?? again) }, retryMs)
       return
     }
   }
@@ -373,6 +505,8 @@ async function run(pubkey: string, t: Track): Promise<void> {
 export function saveRows(pubkey: string, w: ChainWant): void {
   if (w.events.length === 0) return
   const t = trackOf(pubkey)
+  // What follows an action that lost is refused at once, before any write.
+  markAfterLost(t, w.events)
   t.wanted = w
   t.latest = w
   if (t.running) return
@@ -390,16 +524,24 @@ export async function rowsSettled(pubkey: string): Promise<void> {
  * Whether the publisher may send this action. True once it has landed, or
  * when landing cannot be known (no rows here, a refused write, a database that
  * has not answered in time: the relays are then the safer place for it). False
- * only when another tab's commit won, and the action must never leave this device.
+ * when another tab's commit won, for the action that lost and every action
+ * after it, at once and for good; and for anything not committed while a lost
+ * commit waits to be taken back. Those must never leave this device.
  */
 export function chainLanded(pubkey: string, id: string): Promise<boolean> {
   const t = tracks.get(pubkey)
-  if (!t || t.committedIds.has(id) || !t.running) return Promise.resolve(true)
+  if (!t) return Promise.resolve(true)
+  if (t.held || t.lost.has(id)) return Promise.resolve(false)
+  if (t.committedIds.has(id)) return Promise.resolve(true)
+  if (t.takingBack) return Promise.resolve(false)
+  if (!t.running) { t.blind.add(id); return Promise.resolve(true) }
   return new Promise((resolve) => {
     const timer = setTimeout(() => {
       const waiting = t.landers.get(id)
       if (waiting) { t.landers.set(id, waiting.filter((r) => r !== settle)); if (t.landers.get(id)?.length === 0) t.landers.delete(id) }
+      // Its commit may still lose: then it is noted as out, and the store holds the chain and says so.
       console.warn('[chain] an action did not land in time: sending it anyway, as it was before rows')
+      t.blind.add(id)
       resolve(true)
     }, landPatienceMs)
     const settle = (landed: boolean): void => { clearTimeout(timer); resolve(landed) }
@@ -409,9 +551,12 @@ export function chainLanded(pubkey: string, id: string): Promise<boolean> {
 
 /** Actions no store has yet, in one small key, while that is so. */
 export function writeTail(pubkey: string, events: NostrEvent[]): void {
+  // An action that lost is never kept to come back on a load.
+  const lost = tracks.get(pubkey)?.lost
+  const keep = lost && lost.size > 0 ? events.filter((e) => !lost.has(e?.id)) : events
   try {
-    if (events.length === 0) localStorage.removeItem(tailKey(pubkey))
-    else localStorage.setItem(tailKey(pubkey), JSON.stringify(events))
+    if (keep.length === 0) localStorage.removeItem(tailKey(pubkey))
+    else localStorage.setItem(tailKey(pubkey), JSON.stringify(keep))
   } catch { /* localStorage is full too: the chain stays in this tab, and the toast has said so */ }
 }
 

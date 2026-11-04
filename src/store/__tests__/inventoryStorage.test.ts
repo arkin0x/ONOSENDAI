@@ -127,4 +127,56 @@ describe('held items in IndexedDB', () => {
     await m.useInventory.getState().load()
     expect(Object.keys(m.useInventory.getState().items)).toEqual([mine.eventId])
   })
+
+  it('DELETE takes an item off for good: a reload does not bring it back', async () => {
+    const m = await boot()
+    const gone = keyFind(forge('Gone'))
+    const kept = keyFind(forge('Kept'), 11)
+    m.useInventory.getState().holdFinds([gone, kept])
+    await m.useInventory.getState().flush()
+    expect(await m.useInventory.getState().remove(gone.eventId)).toBe(true)
+    expect(m.useInventory.getState().has(gone.eventId)).toBe(false)
+    const again = await boot()
+    expect(Object.keys(again.useInventory.getState().items)).toEqual([kept.eventId])
+  })
+
+  it('DELETE comes back through no scan, and through TAKE when he asks', async () => {
+    const m = await boot()
+    const find = keyFind(forge('Again'))
+    const inv = (): ReturnType<typeof m.useInventory.getState> => m.useInventory.getState()
+    inv().holdFinds([find])
+    await inv().flush()
+    await inv().remove(find.eventId)
+    // What a scan does with what it finds: never a hold.
+    inv().markPlayed([find])
+    await inv().load()
+    expect(inv().has(find.eventId)).toBe(false)
+    expect(inv().holdFinds([find]).map((r) => r.id)).toEqual([find.eventId])
+    await inv().flush()
+    const again = await boot()
+    expect(again.useInventory.getState().has(find.eventId)).toBe(true)
+  })
+
+  it('a read begun before DELETE does not bring it back', async () => {
+    const m = await boot()
+    const find = keyFind(forge('Racing'))
+    m.useInventory.getState().holdFinds([find])
+    await m.useInventory.getState().flush()
+    const reading = m.useInventory.getState().load()
+    await m.useInventory.getState().remove(find.eventId)
+    await reading
+    expect(m.useInventory.getState().has(find.eventId)).toBe(false)
+  })
+
+  it('a DELETE the database refuses leaves it held, and says so', async () => {
+    const m = await boot()
+    const find = keyFind(forge('Stuck'))
+    m.useInventory.getState().holdFinds([find])
+    await m.useInventory.getState().flush()
+    const db = await import('../../lib/inventoryDb')
+    vi.spyOn(IDBDatabase.prototype, 'transaction').mockImplementation(() => { throw new Error('no') })
+    expect(db.INVENTORY_DB).toBeTruthy()
+    expect(await m.useInventory.getState().remove(find.eventId)).toBe(false)
+    expect(m.useInventory.getState().has(find.eventId)).toBe(true)
+  })
 })

@@ -37,8 +37,8 @@ import { BG } from '../lib/palette'
 import { GRID_RADIUS, cellDelta, claimScreenAxes, levelScreenAxes, originShift, renderDirection, viewAxes, type Position } from '../lib/space'
 import { carryOrbit } from '../lib/zoomOrbit'
 import { AVATAR_LERP_MS, lerpRemaining } from '../lib/avatarLerp'
-import { walkEye, walkFall } from '../lib/walkEye'
-import { carryLook, clearWalkLook, lookRadPerPx, takeKeepWalkLook, takeWalkLook, walkLookBy } from '../lib/walkLook'
+import { setWalkFacing, walkEye, walkFacing, walkFall } from '../lib/walkEye'
+import { carryLook, clearWalkLook, lookRadPerPx, takeKeepWalkLook, takeWalkLook, takeWalkLookRad, walkLookBy } from '../lib/walkLook'
 import { tickFall, useWalk } from '../store/useWalk'
 import { orbitOffset } from '../workshop/benchAxes'
 import { WalkProbe } from './WalkProbe'
@@ -85,9 +85,11 @@ import { WorldShards } from './WorldShards'
 import { WorldMessages } from './WorldMessages'
 import { ChestLooks } from './ChestLooks'
 import { HiddenAudio } from './HiddenAudio'
+import { AudioSpheres } from './AudioSpheres'
 import { StarredMarks } from './StarredMarks'
 import { ShardGhost } from './ShardGhost'
 import { DeployRegionBox } from './DeployRegionBox'
+import { DoorRooms } from './DoorRooms'
 import { StepBox } from './StepBox'
 import { ChatRoomBox } from './ChatRoomBox'
 import { TargetProjector } from './TargetProjector'
@@ -98,6 +100,7 @@ import { useTv } from '../store/useTv'
 import { CAMERA_NEAR, FOV } from './camera'
 import { headlampReach, headlampUniforms } from './headlamp'
 import { composerSamples, screenPixels } from './composerBudget'
+import { tickViewFly, useFlyTouches } from './ViewFly'
 
 /** Starting distance from the cursor, in cells. Orbit takes over from here. */
 const START_DISTANCE = 26
@@ -225,10 +228,13 @@ function World(): JSX.Element {
       <PresenceAvatars axes={axes} />
       <WorldShards axes={axes} />
       <WorldMessages axes={axes} />
+      {/* Each hidden sound's full-volume sphere, behind the Settings switch (AudioSpheres). */}
+      <AudioSpheres axes={axes} />
       <ChestLooks axes={axes} />
       <StarredMarks axes={axes} />
       <ShardGhost axes={axes} />
       <DeployRegionBox axes={axes} />
+      <DoorRooms axes={axes} />
       <StepBox axes={axes} />
       <ChatRoomBox axes={axes} />
       <SecretRegions axes={axes} />
@@ -268,11 +274,17 @@ function ScreenAxes(): null {
     // axis the other two did not claim" kept its original sign, so R and F
     // pushed the wrong way once an orbit flipped that axis.
     state.camera.matrixWorld.extractBasis(right.current, up.current, out.current)
+    // WALK's facing, unsnapped, for a forward or backward press's diagonal
+    // and wall slide (lib/walkSlide.ts); read before levelScreenAxes lays
+    // the basis flat in place.
+    const walking = useCyberspace.getState().walking
+    if (walking) setWalkFacing(right.current, out.current, axes)
+    else walkFacing.valid = false
     // The permutation itself is claimScreenAxes, in space.ts, so the property
     // that makes it correct (three different axes for any camera angle) can be
     // asserted without a camera. Under GRAVITY in WALK the keys are level
     // (levelScreenAxes): looking down a stair never turns W into down.
-    const screen = useCyberspace.getState().walking && useWalk.getState().gravity
+    const screen = walking && useWalk.getState().gravity
       ? levelScreenAxes(right.current, up.current, out.current, axes)
       : claimScreenAxes(right.current, up.current, out.current, axes)
     useCyberspace.getState().setScreenAxes(screen)
@@ -765,6 +777,8 @@ function Rig(): JSX.Element {
       doc.removeEventListener('pointercancel', up, true)
     }
   }, [surface])
+  // VIEW's fly: two fingers at rest on the scene fly forward, three back (scene/ViewFly.ts).
+  useFlyTouches(surface)
 
   useFrame((state, dt) => {
     const c = controls.current
@@ -772,6 +786,13 @@ function Rig(): JSX.Element {
     // GRAVITY's fall (store/useWalk.ts) takes its frame first: it can land,
     // which moves the cursor read below.
     tickFall()
+    // So does VIEW's fly, which moves the cursor along the camera's line of
+    // sight. While it flies the camera rides with the cursor, locked, even
+    // after an orbit, so the cursor keeps its place in front of it. Nor does
+    // it glide: the view re-anchors every field width of a long fly (the
+    // store's rideView), which the focus effect above takes for a new subject
+    // and eases toward over GLIDE_SECONDS, and the cursor would pull ahead.
+    if (tickViewFly(c.object.position, c.target, dt)) { locked.current = true; glideLeft.current = 0 }
     const s = useCyberspace.getState()
     lastOffset.current.copy(c.object.position).sub(c.target)
     // The anchor, not the position: in history the scene is drawn from the
@@ -931,6 +952,9 @@ function Rig(): JSX.Element {
       if (s.walking && walkLook.current) {
         const [lx, ly] = takeWalkLook(dt)
         if (lx !== 0 || ly !== 0) along.copy(orbitOffset(along, lx, ly, lookRadPerPx(state.size.width)))
+        // LOOK's drags (hud/WalkLookSphere.tsx), already in radians.
+        const [rx, ry] = takeWalkLookRad(dt)
+        if (rx !== 0 || ry !== 0) along.copy(orbitOffset(along, rx, ry, 1))
       }
       c.object.position.copy(smooth.current).addScaledVector(along.normalize(), d)
       c.minDistance = Math.min(ORBIT_MIN_DISTANCE, d * 0.5)

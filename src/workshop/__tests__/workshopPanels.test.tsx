@@ -96,7 +96,7 @@ describe('the workshop top bar', () => {
   it('opens one panel at a time, from one piece of state', () => {
     expect(SOURCE).toContain("type Panel = 'menu' | 'tools' | 'grid' | 'shard' | 'avatar'")
     // Escape closes whichever is open, before anything else in the workshop.
-    expect(SOURCE).toContain('if (panel !== null) setPanel(null)')
+    expect(SOURCE).toContain("if (step === 'panel') setPanel(null)")
   })
 
   it('puts each moved control in its new panel, once, and none of them in MENU', () => {
@@ -113,7 +113,7 @@ describe('the workshop top bar', () => {
 
   it('keeps the list and the ways in under MENU', () => {
     const menu = panel('menu')
-    for (const m of ['SHARDS ({shardCount})', '+ NEW SHARD', '>PASTE</button>', "{importing ? 'READING' : 'IMPORT'}", '{pasteOpen && (', '<ShardList currentId={shard.id} />', 'CLEAR THIS SCENE', '<Explanation>']) {
+    for (const m of ['SHARDS ({shardCount})', '+ NEW SHARD', '>PASTE</button>', "{importing ? 'READING' : 'IMPORT'}", '{pasteOpen && (', '<ShardList currentId={root?.id ?? shard.id} />', 'CLEAR THIS SCENE', '<Explanation>']) {
       expect(menu).toContain(m)
     }
   })

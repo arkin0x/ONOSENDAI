@@ -73,16 +73,16 @@ describe('a paint on the bench', () => {
 
 describe('the workshop shell, on every tap and paint', () => {
   it('writes the object out for its size and fingerprint only while SHARD shows them', () => {
-    expect(workshop).toMatch(/const seen = panel === 'shard' \? shard : null/)
+    expect(workshop).toMatch(/const seen = panel === 'shard' \? root : null/)
     expect(workshop).toMatch(/shardFingerprints\(seen\)/)
     expect(workshop).toMatch(/JSON\.stringify\(toPayload\(withAuthoredConstrain\(placedOnly\(seen\)\)\)\)/)
   })
   it('prices the avatar only while AVATAR shows it', () => {
-    expect(workshop).toMatch(/if \(!pricing \|\| !shard \|\| !buildable\)/)
+    expect(workshop).toMatch(/if \(!pricing \|\| !root \|\| !buildable\)/)
   })
   it('keeps the shard list out of its own render: memoized, reading the shards itself', () => {
     expect(workshop).toMatch(/const ShardList = memo\(function ShardList\(\{ currentId \}: \{ currentId: string \}\)/)
-    expect(workshop).toMatch(/<ShardList currentId=\{shard\.id\} \/>/)
+    expect(workshop).toMatch(/<ShardList currentId=\{root\?\.id \?\? shard\.id\} \/>/)
     const shell = workshop.slice(workshop.indexOf('export function Workshop('))
     expect(shell).not.toMatch(/useWorkshop\(\(s\) => s\.shards\)/)
     expect(shell).not.toMatch(/useNewestFirst\(/)

@@ -21,6 +21,7 @@
  */
 
 import { carriesSealedParts, foreignKeys, foreignNotice, placedOnly } from '../lib/carried'
+import { escapeStep } from './escapeOrder'
 import { memo, useEffect, useMemo, useRef, useState } from 'react'
 import { Field, Switch } from '../hud/ui/Switch'
 import { Vector3 } from 'three'
@@ -59,6 +60,7 @@ import { Bench } from './Bench'
 import { benchPose, nudgeFor, nudgeLabel, orbitBy, planeAfter, requestView, useBenchView, type NudgeName } from './benchAxes'
 import { stackedSpots } from '../lib/weld'
 import { ObjectPicker } from './ObjectPicker'
+import { PartCrumbs } from './PartCrumbs'
 import { ShardFolders, modelEditedAt, modelName, modelRef, useNewestFirst, type DeleteContents } from '../hud/ShardFolders'
 import { useEscape } from '../hooks/useEscape'
 import { ShardThumb } from '../hud/ShardThumb'
@@ -678,8 +680,14 @@ const ShardList = memo(function ShardList({ currentId }: { currentId: string }):
 
 export function Workshop(): JSX.Element | null {
   const open = useWorkshop((s) => s.open)
+  // What the tools edit: the shard, or the placed part open in it (enterPart).
   const shard = useWorkshop((s) => s.current())
+  // The shard itself: what PUBLISH, DEPLOY, the avatar and the list act on.
+  const root = useWorkshop((s) => s.rootShard())
+  const inside = useWorkshop((s) => s.inside)
   const shardCount = useWorkshop((s) => s.shards.length)
+  // The root and `inside` are all a path is read from (useWorkshop insidePath).
+  const path = useMemo(() => useWorkshop.getState().insidePath(), [inside, root])
   const tool = useWorkshop((s) => s.tool)
   const selection = useWorkshop((s) => s.selection)
   const partSel = useWorkshop((s) => s.partSel)
@@ -718,7 +726,7 @@ export function Workshop(): JSX.Element | null {
   // Only while SHARD is open, the one panel that shows them. Each is the whole
   // object written out and measured or hashed: a cost on every paint of a big
   // shard (a Basilica nave's payload is hundreds of KB), for lines nobody could see.
-  const seen = panel === 'shard' ? shard : null
+  const seen = panel === 'shard' ? root : null
   const pubState = useMemo(
     () => publishState(seen ? ledger[seen.id] : undefined, seen ? shardFingerprints(seen) : '', me),
     [seen, ledger, me],
@@ -734,19 +742,19 @@ export function Workshop(): JSX.Element | null {
   }, [phase])
   const sha256PerSec = useCalibration((s) => s.sha256PerSec)
   // The avatar's price (spec 8.10), memoised on the geometry; a hook, so it sits with the others.
-  const buildable = shard !== null && shard.vertices.length > 0 && shard.faces.length > 0
+  const buildable = root !== null && root.vertices.length > 0 && root.faces.length > 0
   // Something to deploy or clear: its own vertices, or objects it places (DECK-0003 §1.9 rule 13).
-  const hasContent = shard !== null && (shard.vertices.length > 0 || (shard.parts?.length ?? 0) > 0)
+  const hasContent = root !== null && (root.vertices.length > 0 || (root.parts?.length ?? 0) > 0)
   // Only while AVATAR is open, which is what shows it and acts on it.
   const pricing = panel === 'avatar'
   const work = useMemo(() => {
-    if (!pricing || !shard || !buildable) return { required: 0, reach: 0, detail: 0, bytes: 0 }
-    const payload = toPayload(shard)
+    if (!pricing || !root || !buildable) return { required: 0, reach: 0, detail: 0, bytes: 0 }
+    const payload = toPayload(root)
     // The bytes hashed per try: the serialized event with a nonce tag of typical width.
-    const bytes = new TextEncoder().encode(serializeEvent({ ...avatarTemplate(shard, 1_800_000_000), pubkey: me })).length + 40
-    return { required: avatarWork(payload), reach: Math.max(1, avatarReach(payload)), detail: shard.vertices.length + shard.faces.length, bytes }
+    const bytes = new TextEncoder().encode(serializeEvent({ ...avatarTemplate(root, 1_800_000_000), pubkey: me })).length + 40
+    return { required: avatarWork(payload), reach: Math.max(1, avatarReach(payload)), detail: root.vertices.length + root.faces.length, bytes }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pricing, buildable, shard?.vertices, shard?.faces, shard?.unit, shard?.name, me])
+  }, [pricing, buildable, root?.vertices, root?.faces, root?.unit, root?.name, me])
   const color = useWorkshop((s) => s.color)
   const stampKind = useWorkshop((s) => s.stampKind)
   const stampSize = useWorkshop((s) => s.stampSize)
@@ -754,12 +762,12 @@ export function Workshop(): JSX.Element | null {
   const canUndo = useWorkshop((s) => s.past.length > 0)
   const canRedo = useWorkshop((s) => s.future.length > 0)
   // A RETRACT question belongs to one object in one open menu.
-  useEffect(() => { setRetractAsk(null) }, [shard?.id, panel, open])
+  useEffect(() => { setRetractAsk(null) }, [root?.id, panel, open])
   // Opening a shard with pieces under another identity: they read as placeholders here, and go out anyway.
   useEffect(() => {
-    const count = open && shard && me ? foreignKeys(shard, me) : 0
+    const count = open && root && me ? foreignKeys(root, me) : 0
     if (count > 0) useWorkshop.setState({ notice: foreignNotice(count) })
-  }, [open, shard?.id, me]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [open, root?.id, me]) // eslint-disable-line react-hooks/exhaustive-deps
   const [pickerOpen, setPickerOpen] = useState(false)
   // The color bucket's second stage while a face is in hand (FILL or SEAM):
   // put away when the face goes.
@@ -810,9 +818,13 @@ export function Workshop(): JSX.Element | null {
   // handler, which closed the workshop from under an open palette sheet.
   useEscape('modal', open, () => {
     const ws = useWorkshop.getState()
-    if (panel !== null) setPanel(null)
-    else if (viewOpen) setViewOpen(false)
-    else if (ws.selection.length || ws.partSel.length || ws.selectedFaces.length > 0 || ws.facePick.length) { ws.selectVertex(null); ws.clearFacePick() }
+    const depth = ws.insidePath().length
+    const step = escapeStep(panel !== null, viewOpen, !!(ws.selection.length || ws.partSel.length || ws.selectedFaces.length > 0 || ws.facePick.length), depth)
+    if (step === 'panel') setPanel(null)
+    else if (step === 'view') setViewOpen(false)
+    else if (step === 'hand') { ws.selectVertex(null); ws.clearFacePick() }
+    // Inside a placed part, out one level, as EXIT does.
+    else if (step === 'exit') ws.exitTo(depth - 1)
     else ws.closeWorkshop()
   })
 
@@ -932,6 +944,8 @@ export function Workshop(): JSX.Element | null {
       {/* The grid floor's level, under the chips on every tool. Out of the way
           while a panel is open, as undo and redo are: GRID has its own LEVEL
           row, and the others need the room. */}
+      {/* Inside a placed part: where you are, and the way back out. */}
+      {root && path.length > 0 && <PartCrumbs root={root} path={path} />}
       {!panel && shard && <LevelStack />}
       {/* MENU (arkinox, 2026-10-23): the shard list and the ways in, NEW,
           PASTE and IMPORT. The open shard's own settings are under SHARD,
@@ -953,7 +967,7 @@ export function Workshop(): JSX.Element | null {
               </div>
             </div>
           )}
-          <ShardList currentId={shard.id} />
+          <ShardList currentId={root?.id ?? shard.id} />
           <div className="workshop__row">
             <button className="workshop__btn workshop__btn--danger" disabled={!hasContent} onClick={() => { if (window.confirm('Delete all vertices, faces and placed objects in the scene?')) w().clearShard() }} title="Empty this scene (undoable)">CLEAR THIS SCENE</button>
             <span className="workshop__gap" />
@@ -985,7 +999,8 @@ export function Workshop(): JSX.Element | null {
           Shard Feed, its counts, how it draws and whether it walls a walker. */}
       {panel === 'shard' && shard && (
         <div className="ws__panel" role="region" aria-label="Shard">
-          <input className="workshop__name" value={shard.name} onChange={(e) => w().rename(shard.id, e.target.value)} aria-label="Object name" spellCheck={false} />
+          {/* Inside a copy, its name is a label: the name of the piece it was copied from. */}
+          <input className="workshop__name" value={shard.name} readOnly={path.length > 0} onChange={(e) => { if (root && path.length === 0) w().rename(root.id, e.target.value) }} aria-label="Object name" title={path.length > 0 ? 'The name of the piece this part was copied from' : undefined} spellCheck={false} />
           {/* PUBLISH: this shard as a public kind 33331 object, listed by the
               Shard Feed and read by other apps (DECK-0003 §3.1), the way
               snocrash.art publishes one (arkinox, 2026-10-10: "I want to make
@@ -993,7 +1008,7 @@ export function Workshop(): JSX.Element | null {
               shard feed instantly"). Hiding seals a copy at a place; this puts
               the object itself on your relays for anyone to place. The tag is
               the ledger's word (lib/published.ts), since no relay keeps one. */}
-          <div className="workshop__avatar" role="group" aria-label="Publishing">
+          {path.length === 0 && <div className="workshop__avatar" role="group" aria-label="Publishing">
             <div className="workshop__row">
               <span className="workshop__label">SHARD FEED</span>
               <span className={`tag ${STATE_TAG[pubState]}`} title={STATE_HELP[pubState]}>{STATE_LABEL[pubState]}</span>
@@ -1020,7 +1035,7 @@ export function Workshop(): JSX.Element | null {
               )}
             </div>
             <span className="workshop__work">{wireBytes.toLocaleString('en-US')} BYTES ON THE WIRE · {shard.vertices.length} VERTICES + {shard.faces.length} FACES{shard.parts?.length ? ` + ${shard.parts.length} PLACED` : ''}</span>
-          </div>
+          </div>}
           {publishAsk === shard.id && (
             <ConfirmModal
               title={`Publish "${shard.name}"?`}
@@ -1143,14 +1158,15 @@ export function Workshop(): JSX.Element | null {
                 className="workshop__btn"
                 disabled={!buildable}
                 onClick={() => {
+                  if (!root) return
                   const started = Date.now()
-                  void useAvatars.getState().adopt(shard).then((ok) => {
+                  void useAvatars.getState().adopt(root).then((ok) => {
                     const st = useAvatars.getState()
                     const took = describeDuration((Date.now() - started) / 1000).replace('about ', '')
                     if (!ok) { say(st.adoptError ?? 'Mining cancelled. Your avatar is as it was.'); return }
                     say(st.minePublished
-                      ? `"${shard.name}" is your avatar now: ${work.required} bits of work in ${took}.`
-                      : `"${shard.name}" is your avatar on this device: ${work.required} bits of work in ${took}. You are LOCAL, so no relay has it. BROADCAST sends it when you go LIVE.`)
+                      ? `"${root.name}" is your avatar now: ${work.required} bits of work in ${took}.`
+                      : `"${root.name}" is your avatar on this device: ${work.required} bits of work in ${took}. You are LOCAL, so no relay has it. BROADCAST sends it when you go LIVE.`)
                   })
                 }}
                 title="Publish this object as the shape others see for you, at true scale: the white avatar on the grid is the size of one cell. Its size and detail are paid for in proof of work first."
@@ -1222,7 +1238,7 @@ export function Workshop(): JSX.Element | null {
         <button
           className="workshop__deploy"
           disabled={!hasContent}
-          onClick={() => { if (shard) { useShards.getState().startDeployShard(shard.id, 'workshop'); w().closeWorkshop() } }}
+          onClick={() => { if (root) { useShards.getState().startDeployShard(root.id, 'workshop'); w().closeWorkshop() } }}
           title="Place this object in the world"
         >DEPLOY ▸</button>
         <button className="chip ws__icon" onClick={() => w().closeWorkshop()} title="Close the workshop (Esc)" aria-label="Close"><X size={15} strokeWidth={2.25} aria-hidden /></button>

@@ -490,6 +490,16 @@ export function vouch(pubkey: string): void {
   releasedHandler?.()
 }
 
+/** Whether any action of `pubkey` waits for a commit or the relays to answer (holdUntilVouched). */
+export function anyUnvouched(pubkey: string): boolean {
+  return (unvouched.get(pubkey)?.size ?? 0) > 0
+}
+
+/** Whether `pubkey`'s actions wait on a store that stopped answering, and the person has been told (onChainStuck). */
+export function chainStuck(pubkey: string): boolean {
+  return tracks.get(pubkey)?.stuckSaid === true
+}
+
 /** Whether this action waits for a commit or the relays to answer (holdUntilVouched). */
 export function unvouchedAction(pubkey: string, id: string): boolean {
   return unvouched.get(pubkey)?.has(id) === true

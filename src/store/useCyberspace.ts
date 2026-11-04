@@ -85,7 +85,7 @@ import {
 import { confirmChainEvents } from '../lib/chains'
 import { chainDbAvailable, chainWritePause, readStoredChain, setAsideChains, setAsideStoredChain, writeStoredChain, type StoredChain } from '../lib/chainDb'
 import { CHAIN_RULES_EPOCH } from '../lib/chainRulesEpoch'
-import { chainHeld, chainLost, checkRowsInTime, clearMarker, clearTail, committedHead, deployAllowsMove, holdChain, holdUntilVouched, inRows, markVerdicts, markerValue, migrateToRows, noteCommitted, onChainLost, onChainRefused, onChainResave, onChainStuck, wentOut, probePassedBefore, readRows, readTail, rowsHead, rowsMarked, rowsWanted, saveRows, setAsideRows, setMarker, storeTrial, storeWorksHere, tailOnSave, takingBack, tookBack, turnRowsOff, vouch, writeTail } from '../lib/chainStore'
+import { chainHeld, chainLost, checkRowsInTime, clearMarker, clearTail, committedHead, anyUnvouched, chainStuck, deployAllowsMove, holdChain, holdUntilVouched, inRows, markVerdicts, markerValue, migrateToRows, noteCommitted, onChainLost, onChainRefused, onChainResave, onChainStuck, wentOut, probePassedBefore, readRows, readTail, rowsHead, rowsMarked, rowsWanted, saveRows, setAsideRows, setMarker, storeTrial, storeWorksHere, tailOnSave, takingBack, tookBack, turnRowsOff, vouch, writeTail } from '../lib/chainStore'
 import { eventDbAvailable } from '../lib/eventDb/client'
 import type { ChainRead, ChainSource } from '../lib/eventDb/chainRows'
 import { checkSignatures } from '../lib/sigCheck'
@@ -2263,9 +2263,12 @@ function takeBackLost(pubkey: string, attempt: number): void {
 
 /** Said while actions that must land wait on a store that stopped answering (lib/chainStore.ts onChainStuck). */
 const STORE_STUCK_META = 'This device\'s store stopped answering. Moves wait here, unsent.'
+function sayStoreStuck(): void {
+  useToast.getState().show({ label: 'CHAIN HELD', meta: STORE_STUCK_META, mark: 'block', sticky: true, reload: true })
+}
 onChainStuck((pubkey, stuck) => {
   if (useCyberspace.getState().identity.pubkey !== pubkey) return
-  if (stuck) { useToast.getState().show({ label: 'CHAIN HELD', meta: STORE_STUCK_META, mark: 'block', sticky: true, reload: true }); return }
+  if (stuck) { sayStoreStuck(); return }
   if (useToast.getState().toast?.meta === STORE_STUCK_META) useToast.getState().dismiss()
 })
 
@@ -2570,8 +2573,29 @@ function hydrateChain(pubkey: string): void {
     if (waiting.length > 0) s.adoptChain(waiting)
     if (rowsWanted() && inRows(pubkey)) void foldStaleBuild(pubkey)
     if (storeTrial()) sayTrial(pubkey)
+    confirmHeldOnLoad(pubkey)
   })
   hydration = entry
+}
+
+/** Identities whose held moves were confirmed with the relays on this page (confirmHeldOnLoad). */
+const heldConfirmedOnLoad = new Set<string>()
+
+/**
+ * Once per page, LIVE, after the chain is read and with no proof running: when
+ * moves the spare key brought back are held for want of an answer (the rows
+ * could not be read), the relays are asked for the head now, as a press would,
+ * so those moves are free before the next press. Its refusal is nobody's
+ * business here: a move asks again. Never confirmHeadNow, which would put its
+ * words over a proof the person just started. The release gate still decides
+ * when they go (lib/release.ts): the next action, or PUBLISH NOW.
+ */
+function confirmHeldOnLoad(pubkey: string): void {
+  if (heldConfirmedOnLoad.has(pubkey)) return
+  const s = useCyberspace.getState()
+  if (!s.live || s.identity.pubkey !== pubkey || s.proof.status === 'computing' || !anyUnvouched(pubkey)) return
+  heldConfirmedOnLoad.add(pubkey)
+  void confirmHead(() => {}).catch(() => { /* a move asks again */ })
 }
 
 /** What a device on the trial sees after each load (?chainstore=trial): what the store did, and the head to compare by hand. */
@@ -4574,6 +4598,10 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
       chainConflict: null,
       forkNotice: null,
     })
+    // CHAIN HELD for a store that stopped answering is about the identity it was
+    // said for: it goes with it, and comes back with it while still so.
+    if (useToast.getState().toast?.meta === STORE_STUCK_META) useToast.getState().dismiss()
+    if (chainStuck(signer.pubkey)) sayStoreStuck()
     // Before the save below: until IndexedDB has been read, that save must not
     // put this copy over the one kept there (hydrateChain).
     hydrateChain(signer.pubkey)

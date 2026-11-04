@@ -140,6 +140,14 @@ export interface MyDeployment {
   ref?: Reference
   /** The envelope currently holding it; changes when the bag is rewritten. */
   bagId: string
+  /**
+   * The created_at of the version of its bag that last held it, as written
+   * here or read from the relays: only a newer version that no longer holds
+   * it says it is gone (pruneGoneRows). The bag clock runs ahead of the wall
+   * clock after quick hides (nextBagAt), so `createdAt` cannot say this.
+   * Absent on rows from before it was kept: such a row is never pruned.
+   */
+  bagAt?: number
   type: HiddenType
   shard?: ShardModel
   text?: string
@@ -1698,19 +1706,37 @@ export const useShards = create<ShardsState>((set, get) => {
   }
 
   /**
-   * Your rows a bag read just now no longer holds, gone: another device moved
-   * (MOVE, EDIT) or removed the thing, or rotated, renamed or removed a door.
-   * Only a published row, under a bag newer than it, so a relay's stale copy
-   * never takes away what was just hidden here; never one with a move to put
-   * back or a rotation under way. Read before every rewrite (gatherInners), so
-   * a device that missed a move never writes the old copy back into the bag,
-   * where no device would list it any more (review of #595).
+   * What a version of a bag read just now says of your rows in it. `held`
+   * must be its WHOLE entry list (or empty, for a bag its author retracted
+   * at `bagAt`): a row it holds now knows that version held it (`bagAt`),
+   * and a row it no longer holds is gone, since another device moved (MOVE,
+   * EDIT) or removed the thing, or rotated, renamed or removed a door. Gone
+   * only when that version is NEWER than the one that last held the row, so
+   * a relay's older copy never takes away what was hidden here, however far
+   * the bag clock ran ahead of the wall clock; only a published row; never
+   * one with a move to put back or a rotation under way, nor one from before
+   * `bagAt` was kept (but a door, by its own time, as doors always were). Read before every rewrite (gatherInners), so a device
+   * that missed a move never writes the old copy back into the bag, where no
+   * device would list it any more (review of #595). `doorsOnly`: what a scan
+   * reads, which may be only some of a bag's entries (TV's fresh finds, a
+   * reference that could not be fetched), says nothing of anything else.
    */
-  function pruneGoneRows(lookupId: string, held: ReadonlySet<string>, bagAt: number): void {
-    const gone = get().mine.filter((d) => d.lookupId === lookupId && d.published && !d.putBack && !d.rotating && d.createdAt < bagAt && !held.has(entryKey(entryOf(d))))
-    if (gone.length === 0) return
-    const ids = new Set(gone.map((d) => d.eventId))
-    const mine = get().mine.filter((d) => !ids.has(d.eventId))
+  function pruneGoneRows(lookupId: string, held: ReadonlySet<string>, bagAt: number, opts?: { doorsOnly?: boolean }): void {
+    let changed = false
+    const mine = get().mine.flatMap((d) => {
+      if (d.lookupId !== lookupId || (opts?.doorsOnly && d.chest?.door === undefined)) return [d]
+      if (held.has(entryKey(entryOf(d)))) {
+        if (d.bagAt !== undefined && d.bagAt >= bagAt) return [d]
+        changed = true
+        return [{ ...d, bagAt }]
+      }
+      // A door row from before `bagAt` was kept goes by its old rule, its own time.
+      const last = d.bagAt ?? (d.chest?.door !== undefined ? d.createdAt : undefined)
+      if (!d.published || d.putBack || d.rotating || last === undefined || last >= bagAt) return [d]
+      changed = true
+      return []
+    })
+    if (!changed) return
     set({ mine })
     saveMine(mine)
   }
@@ -1729,7 +1755,8 @@ export const useShards = create<ShardsState>((set, get) => {
    */
   function claimOwn(items: Hidden[]): void {
     const me = cyber().identity.pubkey
-    // A bag read just now says what it holds: a row of yours no longer in it was changed elsewhere.
+    // A bag read just now says what it holds: a door of yours no longer in it was changed elsewhere.
+    // Only doors: a scan's finds may be some of a bag's entries, not all (pruneGoneRows).
     const read = new Map<string, { at: number; held: Set<string> }>()
     for (const h of items) {
       if (h.chestId || h.author !== me || !h.inner || h.bagAt === undefined) continue
@@ -1737,7 +1764,7 @@ export const useShards = create<ShardsState>((set, get) => {
       r.held.add(entryKey(h.ref ?? h.inner))
       read.set(h.lookupId, r)
     }
-    for (const [lookupId, r] of read) pruneGoneRows(lookupId, r.held, r.at)
+    for (const [lookupId, r] of read) pruneGoneRows(lookupId, r.held, r.at, { doorsOnly: true })
     const { mine, deleted } = get()
     const have = new Set(mine.map((d) => d.eventId))
     const own: MyDeployment[] = []
@@ -1755,7 +1782,7 @@ export const useShards = create<ShardsState>((set, get) => {
       const h = items.find((x) => x.eventId === d.eventId && x.room && x.keyHex)
       if (!h?.room || (d.room?.doorId === h.room.doorId && d.lookupId === h.lookupId)) return d
       refreshed = true
-      return { ...d, room: h.room, lookupId: h.lookupId, keyHex: h.keyHex!, bagId: h.bagId, height: h.height, bag: h.bag, published: true }
+      return { ...d, room: h.room, lookupId: h.lookupId, keyHex: h.keyHex!, bagId: h.bagId, ...(h.bagAt !== undefined ? { bagAt: h.bagAt } : {}), height: h.height, bag: h.bag, published: true }
     })
     for (const h of items) {
       // What came out of a chest is the chest's, not an entry of the bag:
@@ -1766,7 +1793,7 @@ export const useShards = create<ShardsState>((set, get) => {
       if (h.author !== me || !h.inner || !h.keyHex || have.has(h.eventId) || deleted[h.eventId]) continue
       have.add(h.eventId)
       own.push({
-        eventId: h.eventId, inner: h.inner, ref: h.ref, bagId: h.bagId, type: h.type, shard: h.shard, text: h.text, key: h.key, chest: h.chest, audio: h.audio,
+        eventId: h.eventId, inner: h.inner, ref: h.ref, bagId: h.bagId, ...(h.bagAt !== undefined ? { bagAt: h.bagAt } : {}), type: h.type, shard: h.shard, text: h.text, key: h.key, chest: h.chest, audio: h.audio,
         at: storedAt(h.at), plane: h.plane, height: h.height, lookupId: h.lookupId, keyHex: h.keyHex,
         relays: relaySet(), createdAt: h.createdAt, published: true, bag: h.bag, ...(h.room ? { room: h.room } : {}),
       })
@@ -1899,11 +1926,11 @@ export const useShards = create<ShardsState>((set, get) => {
     let row: MyDeployment = chest
     const mine = rowsOf(me).map((d) => {
       if (d.eventId === chest.eventId) {
-        row = { ...d, eventId: inner.id, inner, chest: next, createdAt, bagId: event.id, published, bag: settings, ...(sealed ? { sealed } : {}) }
+        row = { ...d, eventId: inner.id, inner, chest: next, createdAt, bagId: event.id, bagAt: event.created_at, published, bag: settings, ...(sealed ? { sealed } : {}) }
         if (!sealed) delete row.sealed
         return row
       }
-      return d.lookupId === chest.lookupId ? { ...d, bagId: event.id, published, bag: settings } : d
+      return d.lookupId === chest.lookupId ? { ...d, bagId: event.id, bagAt: event.created_at, published, bag: settings } : d
     })
     const discovered: Record<string, Hidden> = {}
     for (const h of Object.values(get().discovered)) {
@@ -2109,13 +2136,13 @@ export const useShards = create<ShardsState>((set, get) => {
       const { room: _was, putBack: _done, ...rest } = r
       void _was
       void _done
-      return { ...rest, ...(stage.to.room ? { room: stage.to.room } : {}), lookupId: stage.to.lookupId, keyHex, height: stage.to.height, bagId: stage.bag.id, published: stage.targetLive, bag: stage.settings }
+      return { ...rest, ...(stage.to.room ? { room: stage.to.room } : {}), lookupId: stage.to.lookupId, keyHex, height: stage.to.height, bagId: stage.bag.id, bagAt: stage.bag.created_at, published: stage.targetLive, bag: stage.settings }
     })
     const wasLive = before.some((d) => d.lookupId === src.lookupId && d.published)
     const mine = [
       ...rowsOf(stage.owner).filter((d) => !leaving.has(d.eventId)).map((d) => {
-        if (d.lookupId === stage.to.lookupId) return { ...d, bagId: stage.bag.id, published: stage.targetLive, bag: stage.settings }
-        return d.lookupId === src.lookupId && stage.source?.bag ? { ...d, bagId: stage.source.bag.id, published: sourcePublished } : d
+        if (d.lookupId === stage.to.lookupId) return { ...d, bagId: stage.bag.id, bagAt: stage.bag.created_at, published: stage.targetLive, bag: stage.settings }
+        return d.lookupId === src.lookupId && stage.source?.bag ? { ...d, bagId: stage.source.bag.id, bagAt: stage.source.bag.created_at, published: sourcePublished } : d
       }),
       ...fresh,
     ]
@@ -2500,9 +2527,9 @@ export const useShards = create<ShardsState>((set, get) => {
             void _gone
             void _done
             const sent = out.has(m.lookupId)
-            return { ...rest, eventId: was.inner.id, inner: was.inner, chest: was.next, createdAt: was.createdAt, bagId: bag.event.id, published: bag.publicly && sent, bag: bag.settings, ...(sent ? {} : { rotating: [...owed, { lookupId: oldLookup, bagId: oldBagId, doorId: m.eventId }] }) }
+            return { ...rest, eventId: was.inner.id, inner: was.inner, chest: was.next, createdAt: was.createdAt, bagId: bag.event.id, bagAt: bag.event.created_at, published: bag.publicly && sent, bag: bag.settings, ...(sent ? {} : { rotating: [...owed, { lookupId: oldLookup, bagId: oldBagId, doorId: m.eventId }] }) }
           }
-          return bag ? { ...m, bagId: bag.event.id, published: bag.publicly && out.has(m.lookupId), bag: bag.settings } : m
+          return bag ? { ...m, bagId: bag.event.id, bagAt: bag.event.created_at, published: bag.publicly && out.has(m.lookupId), bag: bag.settings } : m
         })
         await commitRows(me, doorMine)
         const discovered = { ...get().discovered }
@@ -2611,7 +2638,7 @@ export const useShards = create<ShardsState>((set, get) => {
         if (before.length === 0) { await retractBag(lookupId, bagId); return }
         const back = await publishBag(before, key, lookupId, d.height, live, ROOM_BAG_SETTINGS, { at: here, plane: d.plane }, undefined, before, me).catch(() => null)
         if (!back?.published) return
-        await commitRows(me, rowsOf(me).map((m) => (m.lookupId === lookupId ? { ...m, bagId: back.event.id } : m)))
+        await commitRows(me, rowsOf(me).map((m) => (m.lookupId === lookupId ? { ...m, bagId: back.event.id, bagAt: back.event.created_at } : m)))
       }
       try {
         if (inside.length > 0) {
@@ -3170,6 +3197,7 @@ export const useShards = create<ShardsState>((set, get) => {
           inner,
           ref,
           bagId: event.id,
+          bagAt: event.created_at,
           type: pending.type,
           shard,
           text,
@@ -3204,7 +3232,7 @@ export const useShards = create<ShardsState>((set, get) => {
             .filter((d) => !(was && was.lookupId === rk.lookupId && d.eventId === was.eventId))
             .filter((d) => !(movedChest && movedChest.lookupId === rk.lookupId && d.eventId === movedChest.eventId))
             .filter((d) => !(movedItem && movedItem.lookupId === rk.lookupId && d.eventId === movedItem.eventId))
-            .map((d) => (d.lookupId === rk.lookupId ? { ...d, bagId: event.id, published, bag: settings } : d)),
+            .map((d) => (d.lookupId === rk.lookupId ? { ...d, bagId: event.id, bagAt: event.created_at, published, bag: settings } : d)),
           item,
         ]
         commitRows(cs.identity.pubkey, mine)
@@ -3368,7 +3396,7 @@ export const useShards = create<ShardsState>((set, get) => {
           return false
         }
         const relays = relaySet()
-        const mine = get().mine.map((d) => (d.lookupId === lookupId ? { ...d, bagId: event.id, published: true, relays, bag: settings } : d))
+        const mine = get().mine.map((d) => (d.lookupId === lookupId ? { ...d, bagId: event.id, bagAt: event.created_at, published: true, relays, bag: settings } : d))
         set({ mine, broadcasting: null })
         saveMine(mine)
         return true
@@ -3489,7 +3517,7 @@ export const useShards = create<ShardsState>((set, get) => {
         if (!sent) return
         const { event, published } = sent
         unnamed = published
-        after = (rows) => rows.filter((d) => d.eventId !== eventId).map((d) => (d.lookupId === item.lookupId ? { ...d, bagId: event.id, published, bag: settings } : d))
+        after = (rows) => rows.filter((d) => d.eventId !== eventId).map((d) => (d.lookupId === item.lookupId ? { ...d, bagId: event.id, bagAt: event.created_at, published, bag: settings } : d))
       } else {
         // The last thing in the region: delete the envelope itself (NIP-09).
         if (wasPublic) {

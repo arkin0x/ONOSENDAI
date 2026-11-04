@@ -29,6 +29,9 @@ const held: typeof sent = []
 const refused = new Set<number>()
 /** No relay answers a bag query while set. */
 let silent = false
+/** Events the relay holds but does not serve: a lagging relay, or the one with the newest copy not answering. */
+const withheld = new Set<string>()
+const served = (e: { id: string }) => !withheld.has(e.id)
 vi.mock('../../lib/relay', () => ({
   publishMany: vi.fn(async (_relays: string[], ev: { kind: number; tags: string[][]; id: string }) => {
     if (refused.has(ev.kind)) return { ok: false }
@@ -37,12 +40,12 @@ vi.mock('../../lib/relay', () => ({
     return { ok: true }
   }),
   // What the relay holds, by kind, author, address and d: a deletion (NIP-09) among it.
-  query: vi.fn(async (f: { kinds?: number[]; authors?: string[]; '#a'?: string[]; '#d'?: string[] }) => held.filter((e) => (!f.kinds || f.kinds.includes(e.kind))
+  query: vi.fn(async (f: { kinds?: number[]; authors?: string[]; '#a'?: string[]; '#d'?: string[] }) => held.filter(served).filter((e) => (!f.kinds || f.kinds.includes(e.kind))
     && (!f.authors || f.authors.includes((e as { pubkey?: string }).pubkey ?? ''))
     && (!f['#a'] || e.tags.some((t) => t[0] === 'a' && f['#a']!.includes(t[1])))
     && (!f['#d'] || e.tags.some((t) => t[0] === 'd' && f['#d']!.includes(t[1]))))),
   // What the relay holds at an address: the bags it took.
-  queryEach: vi.fn(async (f: { kinds: number[]; '#d': string[] }) => silent ? [{ url: 'wss://relay.test', outcome: 'unreachable', reason: 'down', events: [] }] : [{ url: 'wss://relay.test', outcome: 'answered', events: held.filter((e) => f.kinds.includes(e.kind) && e.tags.some((t) => t[0] === 'd' && f['#d'].includes(t[1]))) }]),
+  queryEach: vi.fn(async (f: { kinds: number[]; '#d': string[] }) => silent ? [{ url: 'wss://relay.test', outcome: 'unreachable', reason: 'down', events: [] }] : [{ url: 'wss://relay.test', outcome: 'answered', events: held.filter(served).filter((e) => f.kinds.includes(e.kind) && e.tags.some((t) => t[0] === 'd' && f['#d'].includes(t[1]))) }]),
   queryAny: vi.fn(async () => []),
   relaySet: () => ['wss://relay.test'],
 }))
@@ -125,6 +128,7 @@ beforeEach(() => {
   held.length = 0
   refused.clear()
   silent = false
+  withheld.clear()
   useCyberspace.setState({ signEvent: realSign, live: true, scaleExp: 0, buildStep: null })
   useShards.setState({ mine: [], deleted: {}, discovered: {}, pending: null, placedLast: null, deployHeight: 0, deployUnit: 0, deployStatus: 'idle', deployError: null, selectedSecret: null })
   useBuilder.setState({ active: false, via: null, leftAvatar: false, itemDraft: null, messageDraft: null })
@@ -431,16 +435,18 @@ describe('review of #595: a second device that missed the move', () => {
     expect(S().mine.some((d) => d.eventId === goes)).toBe(false)
   })
 
-  it('R1, by a scan: a newer version of the old bag that no longer holds the row takes the row away', async () => {
-    const stays = await hide('message', at(2n))
-    const goes = await hide('message', at(1n))
-    const device2 = S().mine.map((d) => ({ ...d }))
-    await move(goes, at(9n))
-    const bag = newestBag(row(stays).lookupId)!
-    const staysRow = row(stays)
-    useShards.setState({ mine: device2, deleted: {}, discovered: {} })
-    S().addDiscovered([{ ...asFound(staysRow), bagId: bag.id, bagAt: bag.created_at, bag: staysRow.bag } as Hidden])
-    expect(S().mine.map((d) => d.eventId)).toEqual([stays])
+  it('P1: a scan reads only some of a bag (TV\'s fresh finds), so it takes no row away, however new the bag', async () => {
+    const a = await hide('message', at(1n))
+    const b = await hide('message', at(2n))
+    const rowB = row(b)
+    const bag = newestBag(rowB.lookupId)!
+    // A row that last saw an older version of the bag.
+    useShards.setState({ mine: S().mine.map((d) => (d.eventId === a ? { ...d, bagAt: bag.created_at - 5, createdAt: bag.created_at - 5 } : d)) })
+    S().addDiscovered([{ ...asFound(rowB), bag: rowB.bag, bagAt: bag.created_at + 10 } as Hidden], { watched: true })
+    expect(S().mine.map((d) => d.eventId).sort()).toEqual([a, b].sort())
+    // Not by a played scan either: only a whole bag, read for a rewrite, says what is gone.
+    S().addDiscovered([{ ...asFound(rowB), bag: rowB.bag, bagAt: bag.created_at + 10 } as Hidden])
+    expect(S().mine.map((d) => d.eventId).sort()).toEqual([a, b].sort())
   })
 
   it('a relay\'s older copy of the bag takes nothing away', async () => {
@@ -499,5 +505,38 @@ describe('review of #595: a forged lineage on a held item', () => {
     const realFind = heldFromFind('finder', asFound(real), 2, false, null)!
     expect(holdsItem(holding, real.eventId, itemLineage(real.inner), real.inner.pubkey)).toBe(false)
     expect(addHeld(holding, [realFind]).added.map((h) => h.id)).toEqual([mineKey])
+  })
+})
+
+describe('review 2 of #595: the bag clock runs ahead of the wall clock', () => {
+  it('P2: quick hides, then a relay serving an older bag: the next hide loses nothing', async () => {
+    const x = await hide('message', at(1n))
+    const y = await hide('message', at(2n))
+    const z = await hide('message', at(3n))
+    const lookupId = row(z).lookupId
+    const bags = held.filter((e) => e.kind === HIDDEN_KIND && tag(e, 'd') === lookupId).sort((p, q) => (p.created_at ?? 0) - (q.created_at ?? 0))
+    expect(bags).toHaveLength(3)
+    // The bag clock ran ahead: z's own time is not after the second bag.
+    expect(row(z).createdAt).toBeLessThanOrEqual(bags[1].created_at ?? 0)
+    // The relays serve the second bag, not the newest.
+    withheld.add(bags[2].id)
+    const w = await hide('message', at(4n))
+    expect(S().mine.map((d) => d.eventId).sort()).toEqual([x, y, z, w].sort())
+    expect((await bagIdsIn(lookupId, row(z).keyHex)).sort()).toEqual([x, y, z, w].sort())
+  })
+
+  it('a row the newest bag holds, read later from an older copy, is kept', async () => {
+    const x = await hide('message', at(1n))
+    const z = await hide('message', at(3n))
+    const lookupId = row(z).lookupId
+    const zAt = row(z).bagAt!
+    expect(zAt).toBe(newestBag(lookupId)!.created_at)
+    // An older copy without z: kept.
+    const older = held.filter((e) => e.kind === HIDDEN_KIND && tag(e, 'd') === lookupId).sort((p, q) => (p.created_at ?? 0) - (q.created_at ?? 0))[0]
+    withheld.add(newestBag(lookupId)!.id)
+    expect(older.created_at).toBeLessThan(zAt)
+    await hide('message', at(5n))
+    expect(S().mine.some((d) => d.eventId === z)).toBe(true)
+    void x
   })
 })

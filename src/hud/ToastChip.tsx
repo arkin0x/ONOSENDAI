@@ -50,6 +50,7 @@ export function ToastChip(): JSX.Element | null {
         {/* BUILD MODE ENDED says nothing more (arkinox, 2026-11-02), no empty line under it, unless a placement on its way still lands (store/useBuilder endUnder). */}
         {toast.meta && <span className="hyperbar__meta">{toast.meta}</span>}
       </span>
+      {toast.reload && <button className="hyperbar__end" onClick={(e) => { e.stopPropagation(); location.reload() }}>RELOAD</button>}
       {toast.sticky && <span className="toast__dismiss" aria-hidden="true">✕</span>}
     </div>
   )

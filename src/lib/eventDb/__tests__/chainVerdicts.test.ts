@@ -10,7 +10,7 @@ import { IDBFactory } from 'fake-indexeddb'
 import { beforeEach, describe, expect, it } from 'vitest'
 import { finalizeEvent, generateSecretKey, getPublicKey } from 'nostr-tools/pure'
 import { coordToXyz, hexToCoord } from 'cyberspace-core'
-import { hopTemplate, positionHex, spawnTemplate, type NostrEvent } from '../../events'
+import { CHAIN_RULES_REVISION, hopTemplate, positionHex, spawnTemplate, type NostrEvent } from '../../events'
 import { closeEventDb, withEventDb } from '../connection'
 import { commitChain, migrateChain, type ChainCommit } from '../chainRows'
 import { markChainVerdicts, verdictOf } from '../chainVerdicts'
@@ -136,6 +136,19 @@ describe('chain verdicts', () => {
     const run = await mark(3)
     expect(run.written).toBe(4)
     expect((await rowsOf(chain))[0]).toMatchObject({ chain: 1, chainEpoch: 3 })
+  })
+
+  it('a new rules revision under the same epoch rebuilds the verdicts, and the old ones read as not checked', async () => {
+    const chain = chainOf(6)
+    await seed(chain)
+    const first = await mark()
+    expect(first.verdict?.rev).toBe(CHAIN_RULES_REVISION)
+    const again = await withEventDb((db) => markChainVerdicts(db, pk, 2, 'a-later-revision'))
+    expect(again.written).toBe(6)
+    expect(again.verdict).toMatchObject({ epoch: 2, rev: 'a-later-revision', validThrough: { id: chain[5].id } })
+    const row = (await withEventDb((db) => getRows(db, [chain[3].id])))[0]
+    expect(verdictOf(row, 2, 'a-later-revision')).toBe(1)
+    expect(verdictOf(row, 2)).toBe(0)
   })
 
   it('a row no longer broken loses the old reason', async () => {

@@ -25,6 +25,12 @@ import type { ChainRecord } from './chainRows'
 /** Where a chain's verdicts stand, on its record. */
 export interface ChainVerdict {
   epoch: number
+  /**
+   * The rules revision it was reached under (CHAIN_RULES_REVISION). The rules
+   * have changed within one epoch before, so a verdict is current only under
+   * both: a new revision rebuilds the verdicts as a new epoch does.
+   */
+  rev: string
   /** The head the verdict was reached at. */
   headId: string
   /** The newest action valid under `epoch`, and its place. Null when not even the spawn is. */
@@ -65,30 +71,38 @@ export function verdictsFor(pubkey: string, rows: EventRow[]): { flags: Map<stri
  * is still at the head it was reached at: a move made meanwhile has its turn
  * next time, and its row simply reads as not checked until then.
  */
-export async function markChainVerdicts(db: IDBDatabase, pubkey: string, epoch: number): Promise<VerdictRun> {
+export async function markChainVerdicts(db: IDBDatabase, pubkey: string, epoch: number, rev: string = CHAIN_RULES_REVISION): Promise<VerdictRun> {
   const first = db.transaction([CHAINS, EVENTS], 'readonly')
   const record = await request(first.objectStore(CHAINS).get(pubkey)) as ChainRecord | undefined
   if (!record) return { verdict: null, written: 0 }
-  if (record.verdict?.epoch === epoch && record.verdict.headId === record.headId) return { verdict: record.verdict, written: 0 }
+  if (record.verdict?.epoch === epoch && record.verdict.rev === rev && record.verdict.headId === record.headId) return { verdict: record.verdict, written: 0 }
   const rows = await request(first.objectStore(EVENTS).index('byChain').getAll(placesOf(pubkey))) as EventRow[]
   const { flags, validThrough, firstBreak: broke } = verdictsFor(pubkey, rows)
-  const stale = rows.filter((r) => r.chain !== flags.get(r.id) || r.chainEpoch !== epoch)
+  const stale = rows.filter((r) => r.chain !== flags.get(r.id) || r.chainEpoch !== epoch || r.chainRev !== rev)
   for (let i = 0; i < stale.length; i += VERDICT_BATCH) {
     const tx = db.transaction(EVENTS, 'readwrite')
     await inTransaction(tx, async () => {
       const os = tx.objectStore(EVENTS)
       for (const seen of stale.slice(i, i + VERDICT_BATCH)) {
         const row = await request(os.get(seen.id)) as EventRow | undefined
-        if (!row) continue
+        // Written only on the row as it was read, compared in this transaction,
+        // as the NIP-01 flag is (chainRows.ts flagRows). A structural verdict
+        // depends only on fields the id covers (kind, tags, content, time, the
+        // author) and on the actions before it, which the row's tags name by
+        // id; it never reads the signature, whose check is the NIP-01 flag's.
+        // So a row back under the same id holds the same verdict, unless its
+        // place moved: then it is left for the next run, which the record,
+        // not written for a head that moved, asks for.
+        if (!row || row.chainN !== seen.chainN || row.chainOf !== seen.chainOf || JSON.stringify(eventOf(row)) !== JSON.stringify(eventOf(seen))) continue
         const { breakAt: _old, ...rest } = row
         void _old
-        const next: EventRow = { ...rest, chain: flags.get(seen.id) ?? 0, chainEpoch: epoch, chainRev: CHAIN_RULES_REVISION }
+        const next: EventRow = { ...rest, chain: flags.get(seen.id) ?? 0, chainEpoch: epoch, chainRev: rev }
         if (broke?.id === seen.id) next.breakAt = broke.reason
         os.put(next)
       }
     })
   }
-  const verdict: ChainVerdict = { epoch, headId: record.headId, validThrough, firstBreak: broke }
+  const verdict: ChainVerdict = { epoch, rev, headId: record.headId, validThrough, firstBreak: broke }
   const last = db.transaction(CHAINS, 'readwrite')
   await inTransaction(last, async () => {
     const os = last.objectStore(CHAINS)
@@ -98,7 +112,7 @@ export async function markChainVerdicts(db: IDBDatabase, pubkey: string, epoch: 
   return { verdict, written: stale.length }
 }
 
-/** A row's verdict as of the running epoch: one reached under an older epoch reads as not checked. */
-export function verdictOf(row: Pick<EventRow, 'chain' | 'chainEpoch'>, epoch: number): ChainFlag {
-  return row.chainEpoch === epoch ? row.chain : 0
+/** A row's verdict as of the running epoch and rules revision: one reached under another reads as not checked. */
+export function verdictOf(row: Pick<EventRow, 'chain' | 'chainEpoch' | 'chainRev'>, epoch: number, rev: string = CHAIN_RULES_REVISION): ChainFlag {
+  return row.chainEpoch === epoch && row.chainRev === rev ? row.chain : 0
 }

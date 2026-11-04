@@ -184,37 +184,110 @@ export interface NearestPort {
  * The station pick seeds the search: it shares the view's cube of side 2^d,
  * so it is under sqrt(3) 2^d < 2^(d + 1) away on a straight line, and every
  * port at least as close lies in the 3x3x3 block of cells of side 2^(d + 1)
- * around the view. Ports are filed at their exact coordinate, so each one in
- * that block is measured exactly, with nothing derived.
+ * around the view. Those cells are searched nearest first, by the least
+ * distance any point of a cell can have from the view, worked out from the
+ * cell's bounds alone: a cell that cannot beat the best so far is never
+ * opened, a large one is split into its eight children, and only a cell of a
+ * few rows is read. Reading a row is the costly part (de-interleaving its
+ * coordinate, the first time), so on the 460,000-port line this reads a
+ * handful of rows where reading the whole block read hundreds (review of
+ * #585). Ports are filed at their exact coordinate, so what is read is exact.
  */
 export function nearestPortToView(index: StopIndex, view: { x: bigint; y: bigint; z: bigint }): NearestPort | null {
   const viewCoord = xyzToCoord(view.x, view.y, view.z, 1)
-  const seed = nearestPort(index, viewCoord, Number.POSITIVE_INFINITY, viewCoord)
+  const seed = nearestPortRow(index, viewCoord, Number.POSITIVE_INFINITY, viewCoord)
   if (!seed) return null
   const { perm, heights } = index
-  let best = -1
-  let bestD2 = 0n
-  let bestAt = { x: 0n, y: 0n, z: 0n }
-  for (const run of neighborhood(index, viewCoord >> 1n, [view.x, view.y, view.z], seed.distance + 1)) {
-    for (let i = run.start; i < run.end; i++) {
-      const row = perm[i]
-      if (!kindIsPort(index, row)) continue
-      if (coordApproxAt(index, row) === viewCoord) continue
-      const at = xyzAt(index, row)
-      const dx = at.x - view.x
-      const dy = at.y - view.y
-      const dz = at.z - view.z
-      const d2 = dx * dx + dy * dy + dz * dz
-      if (best < 0 || d2 < bestD2 || (d2 === bestD2 && heights[row] < heights[best])) {
-        best = row
-        bestD2 = d2
-        bestAt = { x: at.x, y: at.y, z: at.z }
+  const v = [view.x, view.y, view.z] as const
+  const seedAt = xyzAt(index, seed.row)
+  let bestRow = seed.row
+  let bestHeight = heights[seed.row]
+  let bestAt = { x: seedAt.x, y: seedAt.y, z: seedAt.z }
+  let bestD2 = dist2(seedAt, view)
+
+  const level = Math.min(85, seed.distance + 1)
+  const queue: SearchCell[] = []
+  for (const run of neighborhood(index, viewCoord >> 1n, v, level)) {
+    const base = v.map((c, a) => ((c >> BigInt(level)) << BigInt(level)) + BigInt(run.off[a]) * (1n << BigInt(level)))
+    const min = cellMin2(v, base, level)
+    if (min <= bestD2) queue.push({ key: run.key, level, base, start: run.start, end: run.end, min })
+  }
+  while (queue.length > 0) {
+    // Nearest first; a few dozen cells at most, so a scan for the least is enough.
+    let k = 0
+    for (let i = 1; i < queue.length; i++) if (queue[i].min < queue[k].min) k = i
+    const cell = queue[k]
+    queue[k] = queue[queue.length - 1]
+    queue.pop()
+    if (cell.min > bestD2) break
+    if (cell.end - cell.start <= SEARCH_LEAF_ROWS || cell.level === 0) {
+      for (let i = cell.start; i < cell.end; i++) {
+        const row = perm[i]
+        if (!kindIsPort(index, row)) continue
+        const at = xyzAt(index, row)
+        const d2 = dist2(at, view)
+        // Never the port the view stands on.
+        if (d2 === 0n) continue
+        if (d2 < bestD2 || (d2 === bestD2 && heights[row] < bestHeight)) {
+          bestRow = row
+          bestHeight = heights[row]
+          bestD2 = d2
+          bestAt = { x: at.x, y: at.y, z: at.z }
+        }
       }
+      continue
+    }
+    const bit = cell.level - 1
+    for (let b = 0; b < 8; b++) {
+      const child = cell.key.slice()
+      const base = cell.base.slice()
+      for (let a = 0; a < 3; a++) {
+        const on = (b >> a) & 1
+        const j = 3 * bit + AXIS_LANE[a]
+        const byte = 31 - (j >> 3)
+        child[byte] = on ? child[byte] | (1 << (j & 7)) : child[byte] & ~(1 << (j & 7))
+        if (on) base[a] += 1n << BigInt(bit)
+      }
+      const min = cellMin2(v, base, bit)
+      if (min > bestD2) continue
+      const [start, end] = prefixRange(index, child, bit)
+      if (end > start) queue.push({ key: child, level: bit, base, start, end, min })
     }
   }
-  // The seed is in the block, so this only guards an index that changed shape under us.
-  if (best < 0) return null
-  return { stop: stopAt(index, best), at: bestAt, distance: isqrt(bestD2) }
+  return { stop: stopAt(index, bestRow), at: bestAt, distance: isqrt(bestD2) }
+}
+
+/** One aligned cell of the nearest-port search: its key, side 2^level, lowest corner, sorted run, and least squared distance from the view. */
+interface SearchCell {
+  key: Uint8Array
+  level: number
+  base: bigint[]
+  start: number
+  end: number
+  min: bigint
+}
+
+/** At or below this many rows a cell is read rather than split. */
+const SEARCH_LEAF_ROWS = 8
+
+function dist2(p: { x: bigint; y: bigint; z: bigint }, q: { x: bigint; y: bigint; z: bigint }): bigint {
+  const dx = p.x - q.x
+  const dy = p.y - q.y
+  const dz = p.z - q.z
+  return dx * dx + dy * dy + dz * dz
+}
+
+/** The least squared distance from `v` to any point of the aligned cell at `base` of side 2^level. */
+function cellMin2(v: readonly bigint[], base: readonly bigint[], level: number): bigint {
+  const top = (1n << BigInt(level)) - 1n
+  let sum = 0n
+  for (let a = 0; a < 3; a++) {
+    const lo = base[a]
+    const hi = lo + top
+    const d = v[a] < lo ? lo - v[a] : v[a] > hi ? v[a] - hi : 0n
+    sum += d * d
+  }
+  return sum
 }
 
 /**
@@ -226,6 +299,12 @@ export function nearestPortToView(index: StopIndex, view: { x: bigint; y: bigint
  * one run, with nothing derived.
  */
 function nearestPort(index: StopIndex, coord: bigint, maxHeight: number, exclude?: bigint): StationResult | null {
+  const r = nearestPortRow(index, coord, maxHeight, exclude)
+  return r ? { stop: stopAt(index, r.row), distance: r.distance } : null
+}
+
+/** nearestPort, as the winning row of the index rather than a Stop. */
+function nearestPortRow(index: StopIndex, coord: bigint, maxHeight: number, exclude?: bigint): { row: number; distance: number } | null {
   if (index.permCount === 0) return null
   const key = bigToBytes32(coord >> 1n)
   const { perm, heights } = index
@@ -252,7 +331,7 @@ function nearestPort(index: StopIndex, coord: bigint, maxHeight: number, exclude
     const row = perm[i]
     if ((best < 0 || heights[row] < heights[best]) && qualifies(row)) best = row
   }
-  return best < 0 ? null : { stop: stopAt(index, best), distance }
+  return best < 0 ? null : { row: best, distance }
 }
 
 /**

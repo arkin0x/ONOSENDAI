@@ -164,7 +164,7 @@ const HARD_CAP_SLACK = 1.1
 export const ADMIT_ALL = 0x1_0000_0000
 
 /** DEV only: the previous rebuild's drawn set, for the eviction counter. */
-let lastDrawn: { frameKey: string; set: Set<number>; extra: number | null } | null = null
+let lastDrawn: { frameKey: string; set: Set<number> } | null = null
 
 const REBUILD_MIN_GROWTH = 50_000
 const REBUILD_GROWTH_FRACTION = 0.15
@@ -200,13 +200,9 @@ interface Built {
    * sphere at the same frame is a different field. */
   sphereKey: string
   /** Inside the sphere, the landfall nearest its centre, with the exact
-   * distance in gibsons; always drawn (interest.ts). In ideaspace, the port
-   * nearest the view, with where it is, so the label measures from the view
-   * as it is now, not as it was at build time. */
-  nearest: { height: number; distance: bigint; at?: Position } | null
-  /** In ideaspace, the height of the port nearest the build's anchor, drawn
-   * or not: a pure translation that changes it is due a rebuild. */
-  nearestPort: number | null
+   * distance in gibsons; always drawn (interest.ts). The port nearest the
+   * view is not the build's: it follows the view (NearestPort below). */
+  nearest: { height: number; distance: bigint } | null
   /** In ideaspace, the port cube's density label and where it sits (interest.ts portCube). */
   cubeLabel: { text: string; at: [number, number, number] } | null
 }
@@ -325,11 +321,7 @@ export function StopField({ axes }: Props): JSX.Element | null {
         Math.abs(cellDelta(anchor.y, cur.anchor.y, scaleExp)),
         Math.abs(cellDelta(anchor.z, cur.anchor.z, scaleExp)),
       )
-      // The NEAREST port is measured from the view, so a move that makes
-      // another port the nearest is due a rebuild even inside the margin: at
-      // 2^75 the port cube is 8 cells wide and the margin 48 (2026-11-03).
-      const nearestNow = cube ? nearestPortToView(getStopIndex(), anchor)?.stop.height ?? null : null
-      if (drift < REACH / 4 && nearestNow === cur.nearestPort) return
+      if (drift < REACH / 4) return
     }
     // Positions from another frame cannot be shown while the rebuild runs;
     // a same-frame rebuild keeps the old cloud visible (rebased) instead.
@@ -492,9 +484,6 @@ export function StopField({ axes }: Props): JSX.Element | null {
         if (hashHeight(heightAt(index, row)) < cubeThreshold) rows.push(row)
       }
     }
-    // The port nearest the view, by the protocol's own distance, never the
-    // stop being looked at: always drawn when it is on the grid.
-    const nearPort = cube ? nearestPortToView(index, anchor) : null
     const w = rows.length
 
     const origin = alignedOrigin(anchor, scaleExp)
@@ -534,9 +523,6 @@ export function StopField({ axes }: Props): JSX.Element | null {
       // at the port budget is the whole decimation, exact and nested
       // (interest.ts), with the nearest stop riding on top of it.
       let draw: Set<number>
-      // The nearest port when it joined the drawn set on its own, outside the
-      // sample: not churn when it changes, so the diagnostic leaves it out.
-      let extra: number | null = null
       let nearest: Built['nearest'] = null
       let cubeDrawn = 0
       if (sphere) {
@@ -552,24 +538,6 @@ export function StopField({ axes }: Props): JSX.Element | null {
         const sel = cubeSelection(outsideHeights, cubeHeights, Math.ceil(budget * HARD_CAP_SLACK), SPHERE_MAX_POINTS)
         draw = sel.drawn
         cubeDrawn = sel.cubeDrawn
-        // The nearest port, added as its own point when the samples left it out.
-        if (nearPort) {
-          const exact = nearPort.at
-          nearest = { height: nearPort.stop.height, distance: nearPort.distance, at: nearPort.at }
-          if (!draw.has(nearPort.stop.height)) {
-            const c = occupancy ? cellCentre(exact, origin, scaleExp, axes) : pointCentre(exact, origin, scaleExp, axes)
-            if (Math.abs(c[0]) <= REACH && Math.abs(c[1]) <= REACH && Math.abs(c[2]) <= REACH) {
-              kept.push(-1)
-              keptHeights.push(nearPort.stop.height)
-              keptInCube.push(false)
-              centres.push(c[0], c[1], c[2])
-              draw.add(nearPort.stop.height)
-              extra = nearPort.stop.height
-            } else {
-              nearest = null
-            }
-          }
-        }
       } else {
         draw = drawnSet(keptHeights, Math.ceil(budget * HARD_CAP_SLACK))
       }
@@ -583,7 +551,7 @@ export function StopField({ axes }: Props): JSX.Element | null {
         positions[v * 3] = centres[k * 3]
         positions[v * 3 + 1] = centres[k * 3 + 1]
         positions[v * 3 + 2] = centres[k * 3 + 2]
-        // One plane per build, so the plane says the colour (a row of -1 is the nearest port added on its own).
+        // One plane per build, so the plane says the colour.
         const col = wantPort ? PORT_COLOR : LANDFALL_COLOR
         colors[v * 3] = col.r
         colors[v * 3 + 1] = col.g
@@ -602,14 +570,14 @@ export function StopField({ axes }: Props): JSX.Element | null {
         // `removed` here is a dot that was drawn and then taken away.
         // Only the sample's own churn counts: the same frame over the same
         // line. A line still syncing grows between rebuilds and rightly adds
-        // and swaps stops, and the nearest port added on its own changes
-        // whenever a nearer one arrives; counting either reported "evicted
-        // 1 of 1" on every view while the line synced (2026-10-15).
+        // and swaps stops; counting that reported "evicted 1 of 1" on every
+        // view while the line synced (2026-10-15). The nearest port is drawn
+        // apart from the field (NearestPort), so it is never in the set.
         const prev = lastDrawn
         let removed = 0
         const drawKey = `${frameKey} | ${sphereKey} | ${index.size}`
-        if (prev && prev.frameKey === drawKey) for (const h of prev.set) if (h !== prev.extra && !draw.has(h)) removed++
-        lastDrawn = { frameKey: drawKey, set: draw, extra }
+        if (prev && prev.frameKey === drawKey) for (const h of prev.set) if (!draw.has(h)) removed++
+        lastDrawn = { frameKey: drawKey, set: draw }
         const w = window as unknown as { __stopField?: unknown; __stopFieldLog?: unknown[] }
         const entry = {
           rendered: count, inRange: kept.length, threshold, runTotal,
@@ -619,13 +587,13 @@ export function StopField({ axes }: Props): JSX.Element | null {
             ? { height: sphere.height, inside: kept.length, nearest: nearest?.height ?? null, nearestGibsons: nearest?.distance.toString() ?? null }
             : null,
           cube: cube
-            ? { height: cube.height, inside: cubeTotal, drawn: cubeDrawn, nearest: nearest?.height ?? null, nearestGibsons: nearest?.distance.toString() ?? null }
+            ? { height: cube.height, inside: cubeTotal, drawn: cubeDrawn }
             : null,
         }
         w.__stopField = entry
         const log = (w.__stopFieldLog ??= []) as unknown[]
         log.push(entry)
-        if (removed > 0) console.warn(`[stopField] rebuild evicted ${removed} of ${(prev?.set.size ?? 0) - (prev?.extra != null ? 1 : 0)} sampled dots`, entry)
+        if (removed > 0) console.warn(`[stopField] rebuild evicted ${removed} of ${prev?.set.size ?? 0} sampled dots`, entry)
       }
       // The cube's label, centred under it: the cube's middle, half a side down the screen.
       let cubeLabel: Built['cubeLabel'] = null
@@ -645,7 +613,6 @@ export function StopField({ axes }: Props): JSX.Element | null {
         version: rebuildVersion,
         sphereKey,
         nearest,
-        nearestPort: nearPort?.stop.height ?? null,
         cubeLabel,
       }, sphere ? kept.length : null)
     }
@@ -729,19 +696,33 @@ export function StopField({ axes }: Props): JSX.Element | null {
     () => (built && built.nearest ? vertexOf(built, built.nearest.height) : null),
     [built],
   )
-  // A port's distance from the view as it is now: the build is skipped while
-  // the view drifts inside the margin, and the label must not lag it.
-  const nearestDistance = useMemo(() => {
-    const at = built?.nearest?.at
-    if (!at) return null
-    const dx = at.x - anchor.x
-    const dy = at.y - anchor.y
-    const dz = at.z - anchor.z
-    return isqrt(dx * dx + dy * dy + dz * dz)
+  // In ideaspace, the port nearest the view by straight-line distance
+  // (station.ts nearestPortToView): found once per view, and drawn apart from
+  // the field, so a view whose nearest port changes (above about 2^79, nearly
+  // every step) moves the marker, never rebuilds the field (review of #585).
+  const portNear = useMemo(
+    () => (cube !== null && stopsDrawn(anchorPlane, scaleExp) ? nearestPortToView(getStopIndex(), anchor) : null),
+    // The anchor rides in its key; the cube follows the anchor, plane and zoom.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [built, anchorKey])
+    [anchorKey, anchorPlane, scaleExp, cube !== null, rebuildVersion],
+  )
+  // Where it is in the frame on screen: against the current origin, as the
+  // rebased field is, and nowhere when it is off the grid.
+  const portNearAt = useMemo((): [number, number, number] | null => {
+    if (!portNear) return null
+    const origin = alignedOrigin(anchor, scaleExp)
+    const c = scaleExp <= OCCUPANCY_SCALE_MAX ? cellCentre(portNear.at, origin, scaleExp, axes) : pointCentre(portNear.at, origin, scaleExp, axes)
+    return Math.abs(c[0]) <= REACH && Math.abs(c[1]) <= REACH && Math.abs(c[2]) <= REACH ? c : null
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [portNear, anchorKey, scaleExp, axes])
+  // The sample may have left it out: then it gets a dot of its own, clickable like the field's.
+  const portNearSampled = !!portNear && !!built && built.heights.includes(portNear.stop.height)
+  const portNearDot = usePointGeometry(portNearAt && !portNearSampled ? portNearAt : null)
+  const portNearPicked = usePointGeometry(portNearAt && !portNearSampled && destination === portNear?.stop.height ? portNearAt : null)
   // Published for StopCubes, which leaves this stop to the NEAREST cube.
-  const nearestHeight = built && built.frameKey === frameKey && stopsDrawn(anchorPlane, scaleExp) ? built.nearest?.height ?? null : null
+  const nearestHeight = built && built.frameKey === frameKey && stopsDrawn(anchorPlane, scaleExp)
+    ? built.nearest?.height ?? (portNearAt ? portNear?.stop.height ?? null : null)
+    : null
   useEffect(() => { useStopMarks.getState().setNearest(nearestHeight) }, [nearestHeight])
   useEffect(() => () => useStopMarks.getState().setNearest(null), [])
 
@@ -789,7 +770,15 @@ export function StopField({ axes }: Props): JSX.Element | null {
   // their own sizing and are left alone.
   const fine = !portView && sphere === null && scaleExp > LANDFALL_DETAIL_SCALE_MAX
 
+  const pickNearest = (e: ThreeEvent<MouseEvent>): void => {
+    if (e.delta > TAP_SLOP || !portNear) return
+    e.stopPropagation()
+    markSceneTapHandled()
+    selectStopInScene(portNear.stop.height)
+  }
+
   return (
+    <>
     <group position={rebase}>
       <points geometry={built.geometry} onClick={pick} frustumCulled={false}>
         {/*
@@ -845,7 +834,7 @@ export function StopField({ axes }: Props): JSX.Element | null {
         <>
           <NearestCube at={nearestAt} gibson={2 ** -scaleExp} />
           <WorldLabel
-            text={`NEAREST · BLOCK ${built.nearest.height} · ${formatDistance(nearestDistance ?? built.nearest.distance)}`}
+            text={`NEAREST · BLOCK ${built.nearest.height} · ${formatDistance(built.nearest.distance)}`}
             color={ACCENT}
             at={nearestAt}
             clear={{ trueSide: 2 ** -scaleExp * 0.5, minPx: FLEET_CUBE_PX }}
@@ -856,5 +845,31 @@ export function StopField({ axes }: Props): JSX.Element | null {
         </>
       )}
     </group>
+    {/* The port nearest the view: in the current frame, outside the rebased field. */}
+    {portNear && portNearAt && (
+      <>
+        {portNearDot && (
+          <points geometry={portNearDot} onClick={pickNearest} frustumCulled={false}>
+            <pointsMaterial color={PORT_COLOR} size={3 * dpr} sizeAttenuation={false} transparent opacity={0.95} depthWrite={false} toneMapped={false} fog={false} />
+          </points>
+        )}
+        {portNearPicked && (
+          <points geometry={portNearPicked} frustumCulled={false}>
+            <pointsMaterial color={ACCENT} size={9 * dpr} sizeAttenuation={false} transparent opacity={0.9} depthWrite={false} toneMapped={false} fog={false} />
+          </points>
+        )}
+        <NearestCube at={portNearAt} gibson={2 ** -scaleExp} />
+        <WorldLabel
+          text={`NEAREST · BLOCK ${portNear.stop.height} · ${formatDistance(portNear.distance)}`}
+          color={ACCENT}
+          at={portNearAt}
+          clear={{ trueSide: 2 ** -scaleExp * 0.5, minPx: FLEET_CUBE_PX }}
+          align="center"
+          px={10}
+          opacity={0.95}
+        />
+      </>
+    )}
+    </>
   )
 }

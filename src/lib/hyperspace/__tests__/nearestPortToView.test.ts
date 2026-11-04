@@ -98,3 +98,21 @@ describe('nearestPortToView', () => {
     }
   })
 })
+
+describe('nearestPortToView reads only the rows that could win (review of #585)', () => {
+  it('decodes a handful of rows per view, not the whole block around it', () => {
+    // Uniform ports, as proof of work scatters them. Reading a row is the
+    // cost (de-interleaving its coordinate, cached per row in index.xyz), and
+    // reading the whole 3x3x3 block of side 2^(d + 1) read hundreds per view:
+    // 65 ms at p90 on the 460,000-port line, against 0.01 ms for the old pick.
+    const rng = mulberry32(5)
+    const r85 = (): bigint => (BigInt(Math.floor(rng() * 2 ** 30)) << 55n) | (BigInt(Math.floor(rng() * 2 ** 30)) << 25n) | BigInt(Math.floor(rng() * 2 ** 25))
+    const stops: Stop[] = []
+    for (let i = 0; i < 40_000; i++) stops.push(port(i + 1, r85(), r85(), r85()))
+    const index = buildIndex(stops)
+    const VIEWS = 50
+    for (let q = 0; q < VIEWS; q++) nearestPortToView(index, { x: r85(), y: r85(), z: r85() })
+    const decoded = index.xyz.filter((d) => d !== undefined).length
+    expect(decoded / VIEWS).toBeLessThan(40)
+  })
+})

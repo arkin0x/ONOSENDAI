@@ -1322,14 +1322,21 @@ describe('after a lost commit (review of 2026-11-04, F1, F1b, F4)', () => {
       expect((await rowsNow())!.events.map((e) => e.id)).toContain(x)
       return
     }
-    await vi.waitFor(() => expect(b.S().prevEventId).toBe(moveA), { timeout: 10_000, interval: 20 })
-    // Past the retry: the rows still say A won.
+    // B ends on A's move, or, when its retry lost and was taken back before it
+    // signed again, on its next move made from A's: either way never on x.
+    await vi.waitFor(() => {
+      expect(b.rows.takingBack(pk)).toBe(false)
+      expect(b.S().events.map((e) => e.id)).toContain(moveA)
+      expect(b.S().events.map((e) => e.id)).not.toContain(x)
+    }, { timeout: 10_000, interval: 20 })
+    expect([moveA, y]).toContain(b.S().prevEventId)
+    // Past the retry: the rows still say A won, and nothing of B's line through x is in them.
     await tick(600)
     await b.rows.chainRowsSettled()
-    const rows = await rowsNow()
-    expect(rows!.events[rows!.events.length - 1].id).toBe(moveA)
-    expect(rows!.events.map((e) => e.id)).not.toContain(x)
-    expect(rows!.events.map((e) => e.id)).not.toContain(y)
+    const rows = (await rowsNow())!.events.map((e) => e.id)
+    expect(rows).not.toContain(x)
+    expect(rows.slice(0, chain.length + 1)).toEqual([...chain.map((e) => e.id), moveA])
+    expect(rows.length === chain.length + 1 || (rows.length === chain.length + 2 && rows[chain.length + 1] === y)).toBe(true)
   })
 
   it('a commit slower than the land patience: the move goes out, and when it then loses, the chain is held and the person told', async () => {
@@ -1472,8 +1479,28 @@ describe('a paid cloud job and the head it is held against (J1 to J3)', () => {
       await store.savedChainLoaded()
       await store.useCyberspace.getState().resumeCloudJob()
       expect(cloud.loadCloudJob(pk)?.prevEventId).toBe(moved)
-      expect(store.useCyberspace.getState().cloud.message).toContain('waits')
+      expect(store.useCyberspace.getState().cloud.message).toContain('was kept')
     } finally { proto.getAll = real }
+  })
+
+  it('rows cleared under the marker: the frozen copy\'s head drops nothing', async () => {
+    const chain = chainOf(6)
+    await seedOldStores(chain, { localToo: true })
+    const a = await openTab()
+    const moved = await signMove(a)
+    await a.rows.chainRowsSettled()
+    ;(await import('../../lib/eventDb/connection')).closeEventDb()
+    ;(globalThis as { indexedDB?: IDBFactory }).indexedDB = new IDBFactory()
+    relays.confirm = null
+    vi.resetModules()
+    const cloud = await import('../../lib/cloud')
+    cloud.saveCloudJob(jobAt(moved))
+    const store = await import('../useCyberspace')
+    await store.savedChainLoaded()
+    expect(store.useCyberspace.getState().prevEventId).toBe(chain[5].id)
+    await store.useCyberspace.getState().resumeCloudJob()
+    expect(cloud.loadCloudJob(pk)?.prevEventId).toBe(moved)
+    expect(store.useCyberspace.getState().cloud.message).toContain('was kept')
   })
 
   it('a job whose head really moved is still dropped, once the rows are read', async () => {

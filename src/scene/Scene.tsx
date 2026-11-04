@@ -37,7 +37,7 @@ import { BG } from '../lib/palette'
 import { GRID_RADIUS, cellDelta, claimScreenAxes, levelScreenAxes, originShift, renderDirection, viewAxes, type Position } from '../lib/space'
 import { carryOrbit } from '../lib/zoomOrbit'
 import { AVATAR_LERP_MS, lerpRemaining } from '../lib/avatarLerp'
-import { walkEye, walkFall } from '../lib/walkEye'
+import { setWalkFacing, walkEye, walkFacing, walkFall } from '../lib/walkEye'
 import { carryLook, clearWalkLook, lookRadPerPx, takeKeepWalkLook, takeWalkLook, takeWalkLookRad, walkLookBy } from '../lib/walkLook'
 import { tickFall, useWalk } from '../store/useWalk'
 import { orbitOffset } from '../workshop/benchAxes'
@@ -100,7 +100,7 @@ import { useTv } from '../store/useTv'
 import { CAMERA_NEAR, FOV } from './camera'
 import { headlampReach, headlampUniforms } from './headlamp'
 import { composerSamples, screenPixels } from './composerBudget'
-import { tickViewFly, useFlyTouches } from './ViewFly'
+import { rigViewFly, useFlyTouches, type FlyRig } from './ViewFly'
 
 /** Starting distance from the cursor, in cells. Orbit takes over from here. */
 const START_DISTANCE = 26
@@ -274,11 +274,17 @@ function ScreenAxes(): null {
     // axis the other two did not claim" kept its original sign, so R and F
     // pushed the wrong way once an orbit flipped that axis.
     state.camera.matrixWorld.extractBasis(right.current, up.current, out.current)
+    // WALK's facing, unsnapped, for a forward or backward press's diagonal
+    // and wall slide (lib/walkSlide.ts); read before levelScreenAxes lays
+    // the basis flat in place.
+    const walking = useCyberspace.getState().walking
+    if (walking) setWalkFacing(right.current, out.current, axes)
+    else walkFacing.valid = false
     // The permutation itself is claimScreenAxes, in space.ts, so the property
     // that makes it correct (three different axes for any camera angle) can be
     // asserted without a camera. Under GRAVITY in WALK the keys are level
     // (levelScreenAxes): looking down a stair never turns W into down.
-    const screen = useCyberspace.getState().walking && useWalk.getState().gravity
+    const screen = walking && useWalk.getState().gravity
       ? levelScreenAxes(right.current, up.current, out.current, axes)
       : claimScreenAxes(right.current, up.current, out.current, axes)
     useCyberspace.getState().setScreenAxes(screen)
@@ -773,6 +779,8 @@ function Rig(): JSX.Element {
   }, [surface])
   // VIEW's fly: two fingers at rest on the scene fly forward, three back (scene/ViewFly.ts).
   useFlyTouches(surface)
+  // The refs the fly drives, gathered once so the frame allocates nothing.
+  const flyRig = useMemo<FlyRig>(() => ({ locked, glideLeft }), [])
 
   useFrame((state, dt) => {
     const c = controls.current
@@ -781,12 +789,9 @@ function Rig(): JSX.Element {
     // which moves the cursor read below.
     tickFall()
     // So does VIEW's fly, which moves the cursor along the camera's line of
-    // sight. While it flies the camera rides with the cursor, locked, even
-    // after an orbit, so the cursor keeps its place in front of it. Nor does
-    // it glide: the view re-anchors every field width of a long fly (the
-    // store's rideView), which the focus effect above takes for a new subject
-    // and eases toward over GLIDE_SECONDS, and the cursor would pull ahead.
-    if (tickViewFly(c.object.position, c.target, dt)) { locked.current = true; glideLeft.current = 0 }
+    // sight, locks the camera to it while it flies, hands the camera back its
+    // own follow after, and keeps the re-anchor glide out of it (ViewFly.ts).
+    rigViewFly(flyRig, c.object.position, c.target, dt)
     const s = useCyberspace.getState()
     lastOffset.current.copy(c.object.position).sub(c.target)
     // The anchor, not the position: in history the scene is drawn from the

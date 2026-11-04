@@ -43,6 +43,15 @@
  * hop: a flight of stairs is one event instead of one per turn, at the same
  * work per axis (spec §4.8). Off a floor, nothing changes: this is not gravity.
  *
+ * Forward and backward go the way you face, snapped to 8 directions
+ * (arkinox, RULED 2026-11-03; lib/walkSlide.ts, where the whole decision
+ * is): near 45 degrees a press is one diagonal step, both axes in one hop,
+ * allowed only when both side cells are open; blocked ahead while angled to
+ * a side, it slides one step along the wall to that side. Each piece is a
+ * walkStep, so stairs, walls and gravity hold exactly as for a straight step.
+ * A diagonal heading is one segment like any other: a run of diagonal steps
+ * is one hop, and a run of slides along one wall is one hop.
+ *
  * GRAVITY (arkinox, rulings of 2026-10-24; store/walkGravity.ts): off by
  * default and kept on this device, switched by Z, the pad's GRAVITY chip or
  * the View panel. With it on, down is cyberspace -Y:
@@ -83,14 +92,15 @@ import { create } from 'zustand'
 import { estimateHopCost } from 'cyberspace-core'
 import { HOP_AXIS_BUDGET_MS, projectCantorMs, recommendedHopHeight, useCalibration } from '../lib/calibration'
 import { moveDirection, type MoveName } from '../lib/moves'
-import { clampAxis, levelQuaternion, stepFor, type AxisName, type Position } from '../lib/space'
+import { clampAxis, levelQuaternion, stepFor, type AxisDirection, type AxisName, type Position } from '../lib/space'
 import { keepWalkLook } from '../lib/walkLook'
 import { MAX_COMPUTE_HEIGHT, samePosition, useCyberspace } from './useCyberspace'
 import { BRIEF_TOAST_MS, useToast } from './useToast'
-import { standing, walkStep } from './walkStep'
+import { standing, walkStep, type WalkStep } from './walkStep'
+import { planWalkMove, walkHeading } from '../lib/walkSlide'
 import { stepLimit, takeWallWait, wallItemsAt, wallsBuilt, warmWalls, type WallItem } from './walkWalls'
 import { JUMP_SPEED, WALK_GRAVITY, arcApex, arcHeight, arcPeak, arcSpeed, fallLimit, jumpRise, loadGravity, reachedHeight, saveGravity } from './walkGravity'
-import { walkFall } from '../lib/walkEye'
+import { walkFacing, walkFall } from '../lib/walkEye'
 
 /** What the LOSING SYNC warning waits for: this many moves not yet proven. */
 export const SYNC_WARN_AT = 3
@@ -112,6 +122,8 @@ export interface WalkSegment {
   /** Its heading. A level heading may rise and fall as it climbs or settles (store/walkStep.ts). */
   axis: AxisName
   dir: 1 | -1
+  /** A diagonal heading's second axis (lib/walkSlide.ts): each step changes both, and the segment is still one hop. */
+  side?: AxisDirection
   /** Where it starts: the end of the move before it, or your head. */
   from: Position
   /** Where it ends now: the view is here. */
@@ -120,20 +132,36 @@ export interface WalkSegment {
 
 /**
  * Whether a straight hop from `from` to `to` costs no more than
- * WALK_SEGMENT_BUDGET_MS here. The cost is set by the highest per-axis LCA of
- * the two ends, the Cantor tree a proof has to compute; measured times
- * project it when calibration has run, and before that each height is taken
- * to double the time of the one under it from the conservative hop ceiling.
+ * WALK_SEGMENT_BUDGET_MS here. A proof computes a Cantor tree for every axis
+ * the hop changes, at that axis's LCA of the two ends, so the cost is their
+ * sum: one tree for a level step, two for a diagonal (review of #594), and
+ * the rise's too on a stair. Measured times project each tree when
+ * calibration has run, and before that each height is taken to double the
+ * time of the one under it from the conservative hop ceiling.
  */
 export function segmentAffordable(from: Position, to: Position, plane: number): boolean {
   const est = estimateHopCost(from.x, from.y, from.z, to.x, to.y, to.z, plane as 0 | 1, MAX_COMPUTE_HEIGHT)
-  const h = Math.max(est.lcaX, est.lcaY, est.lcaZ)
+  const lca: Record<AxisName, number> = { x: est.lcaX, y: est.lcaY, z: est.lcaZ }
+  const heights = (['x', 'y', 'z'] as const).filter((a) => from[a] !== to[a]).map((a) => lca[a])
+  if (heights.length === 0) return true
   const measured = useCalibration.getState().cantorMsByHeight
   if (measured && Object.keys(measured).length > 0) {
-    const ms = projectCantorMs(measured, h)
+    const ms = heights.reduce((sum, h) => sum + projectCantorMs(measured, h), 0)
     if (Number.isFinite(ms)) return ms <= WALK_SEGMENT_BUDGET_MS
   }
-  return h <= recommendedHopHeight() - Math.log2(HOP_AXIS_BUDGET_MS / WALK_SEGMENT_BUDGET_MS)
+  return Math.log2(heights.reduce((sum, h) => sum + 2 ** h, 0)) <= recommendedHopHeight() - Math.log2(HOP_AXIS_BUDGET_MS / WALK_SEGMENT_BUDGET_MS)
+}
+
+/**
+ * Whether a step keeps to the open segment's heading: the same axis the same
+ * way, and for a diagonal the same two axes, in either order (review of
+ * #594: facing 50 and then 40 is one diagonal, and one hop).
+ */
+function sameHeading(open: WalkSegment, along: AxisDirection, side: AxisDirection | null): boolean {
+  const same = (a: AxisDirection, b: AxisDirection): boolean => a.axis === b.axis && a.dir === b.dir
+  const was = { axis: open.axis, dir: open.dir }
+  if (!open.side || !side) return !open.side && !side && same(was, along)
+  return (same(was, along) && same(open.side, side)) || (same(was, side) && same(open.side, along))
 }
 
 /** The stillness timer that closes the open segment. */
@@ -164,8 +192,13 @@ interface WalkState {
   exit: () => void
   /** Stop the walk where the chain is now, and stay in WALK. */
   stop: (message?: string | null) => void
-  /** A direction press: one step that way, shown at once, added to the open segment or starting one. */
-  press: (name: MoveName) => void
+  /**
+   * A direction press: one step that way, shown at once, added to the open
+   * segment or starting one. Forward and backward go the way you face,
+   * diagonally or sliding along a wall (lib/walkSlide.ts); `strafe` is a
+   * side key held with them (+1 right, -1 left).
+   */
+  press: (name: MoveName, strafe?: -1 | 0 | 1) => void
   /** Close the open segment and queue it to be proved (stillness, a turn, the cost cap). */
   settle: () => void
 }
@@ -245,13 +278,14 @@ export const useWalk = create<WalkState>((set, get) => ({
     if (message) useToast.getState().show({ label: 'WALK STOPPED', meta: message, mark: 'walk', ms: BRIEF_TOAST_MS * 2 })
   },
 
-  press: (name) => {
+  press: (name, strafe = 0) => {
     const cs = useCyberspace.getState()
     if (!cs.walking || !cs.atHead()) return
     // A press waiting for walls on their way (waitedForWalls) goes first; a
     // held key's repeats meanwhile are not stacked behind it.
     if (againWhenBuilt) return
-    const dir = moveDirection(cs.screenAxes ?? cs.axes(), name)
+    const axes = cs.screenAxes ?? cs.axes()
+    const dir = moveDirection(axes, name)
     const gravity = get().gravity
     // In the air: a level press is a move in mid-air (B); up and down do nothing.
     if (fall) { if (dir.axis !== 'y') airPress(fall, dir.axis, dir.dir > 0 ? 1 : -1); return }
@@ -259,32 +293,46 @@ export const useWalk = create<WalkState>((set, get) => ({
     const from = open?.end ?? queue[queue.length - 1] ?? cs.position
     // Under gravity Up is a jump, and Down does nothing: no flying.
     if (gravity && dir.axis === 'y') { if (dir.dir > 0) jump(from); return }
-    const next: Position = { ...from }
-    next[dir.axis] = clampAxis(from[dir.axis] + stepFor(cs.scaleExp) * BigInt(dir.dir))
-    // Against the axis wall: nowhere to step.
-    if (next[dir.axis] === from[dir.axis]) return
-    const sign = dir.dir > 0 ? 1 : -1
+    // Forward and backward go the way you face, snapped to 8 directions: a
+    // diagonal, or a slide along a wall you are angled into (lib/walkSlide.ts).
+    // With no facing to go by, the screen's axis, as always.
+    const heading = walkFacing.valid && (name === 'away' || name === 'toward')
+      ? walkHeading(walkFacing.forward, walkFacing.right, axes.up.axis, name === 'away' ? 1 : -1, strafe)
+      : null
+    const length = stepFor(cs.scaleExp)
+    const items = wallItemsAt(cs.plane, from)
     // A shard that constrains WALK (DECK-0003 §1.12, store/walkWalls.ts):
     // the step stops short of its face (a gibson short at a fine zoom), or does not go.
     // Standing on such a shard, a level step also climbs what is in its way
     // (2 gibsons at most) and settles onto a floor up to 2 below (store/walkStep.ts).
-    const length = sign > 0 ? next[dir.axis] - from[dir.axis] : from[dir.axis] - next[dir.axis]
+    // Against the axis wall: nowhere to step.
+    const stepAlong = (at: Position, axis: AxisName, sign: 1 | -1, want: bigint): WalkStep => {
+      const edge = clampAxis(at[axis] + want * BigInt(sign))
+      const n = sign > 0 ? edge - at[axis] : at[axis] - edge
+      return n === 0n ? { to: at, by: null } : walkStep(at, axis, sign, n, items, gravity)
+    }
     takeWallWait()
-    const step = walkStep(from, dir.axis, sign, length, wallItemsAt(cs.plane, from), gravity)
-    if (waitedForWalls(() => get().press(name))) return
-    if (step.by) wallChip(step.by)
-    if (samePosition(step.to, from)) return
-    Object.assign(next, step.to)
+    // Under gravity a diagonal also needs both side cells to hold you (lib/walkSlide.ts).
+    const stands = gravity ? (at: Position): boolean => standing(at, items, true) : undefined
+    const move = planWalkMove(from, heading ?? { main: dir, side: null, lean: null }, length, stepAlong, { stands })
+    if (waitedForWalls(() => get().press(name, strafe))) return
+    if (move.by) wallChip(move.by)
+    if (!move.along || samePosition(move.to, from)) return
+    const next: Position = { ...move.to }
+    const sign = move.along.dir
+    const side = move.side
     // A segment is one heading: a step up or down a stair keeps it open, so
-    // a flight is one hop (the same work per axis as its steps, in fewer events).
-    if (open && open.axis === dir.axis && open.dir === sign && segmentAffordable(open.from, next, cs.plane)) {
+    // a flight is one hop (the same work per axis as its steps, in fewer
+    // events). A diagonal heading is two axes, still one hop; a slide along a
+    // wall is a heading of its own, so a long slide is one hop too.
+    if (open && sameHeading(open, move.along, side) && segmentAffordable(open.from, next, cs.plane)) {
       // On the same way: the open segment grows.
       set({ open: { ...open, end: next } })
     } else {
       // A turn, or one step more than a segment may cost: the open one goes to
       // be proved and this step starts the next.
       if (open) closeOpen()
-      set({ open: { axis: dir.axis, dir: sign, from, end: next } })
+      set({ open: { axis: move.along.axis, dir: sign, ...(side ? { side } : {}), from, end: next } })
       if (open) pump()
     }
     // The view and the avatar go now; the proof catches up.

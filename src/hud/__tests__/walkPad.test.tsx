@@ -73,7 +73,8 @@ import { useCyberspace } from '../../store/useCyberspace'
 import { useBuilder } from '../../store/useBuilder'
 import { useWalk } from '../../store/useWalk'
 import { useShards } from '../../store/useShards'
-import { walkKeyDown } from '../../hooks/useKeyboard'
+import { walkKeyDown, walkKeysReleased } from '../../hooks/useKeyboard'
+import { walkFacing } from '../../lib/walkEye'
 import { currentPadMode } from '../../store/padMode'
 import { placeSpawn } from '../../store/fixtures/placeSpawn'
 import { spectate, stopSpectating } from '../../lib/spectator'
@@ -109,6 +110,8 @@ const press = (b: Btn): void => {
   b.props.onPointerUp?.()
 }
 const keyDown = (code: string): void => {
+  // One key at a time, each let go before the next: none is held into a diagonal.
+  walkKeysReleased()
   walkKeyDown({ code, ctrlKey: false, shiftKey: false, altKey: false, metaKey: false, preventDefault: () => {} })
 }
 
@@ -172,6 +175,25 @@ describe('the WALK pad', () => {
     }
     expect(delta('touchpad__key--backward')).toEqual(delta('touchpad__key--forward').map((d) => -d))
     expect(delta('touchpad__key--down')).toEqual(delta('touchpad__key--jump').map((d) => -d))
+  })
+
+  it('FORWARD and BACKWARD go the way you face, as W and S do: at 45 degrees, diagonally, mirrored', () => {
+    const home = S().position
+    const delta = (act: () => void): bigint[] => {
+      useWalk.getState().enter()
+      useCyberspace.setState({ screenAxes: { right: { axis: 'x', dir: 1 }, up: { axis: 'y', dir: 1 }, out: { axis: 'z', dir: 1 } } })
+      const t = Math.PI / 4
+      Object.assign(walkFacing, { valid: true, forward: { x: Math.sin(t), y: 0, z: -Math.cos(t) }, right: { x: Math.cos(t), y: 0, z: Math.sin(t) } })
+      act()
+      const c = S().cursor
+      useWalk.getState().exit()
+      walkFacing.valid = false
+      return [c.x - home.x, c.y - home.y, c.z - home.z]
+    }
+    expect(delta(() => press(find('touchpad__key--forward')))).toEqual([1n, 0n, -1n])
+    expect(delta(() => press(find('touchpad__key--backward')))).toEqual([-1n, 0n, 1n])
+    expect(delta(() => keyDown('KeyW'))).toEqual([1n, 0n, -1n])
+    expect(delta(() => keyDown('KeyS'))).toEqual([-1n, 0n, 1n])
   })
 
   it('under GRAVITY DOWN is off and JUMP says jump', () => {

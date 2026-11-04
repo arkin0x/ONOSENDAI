@@ -43,6 +43,7 @@ const STAGE_LABEL: Record<string, string> = {
 
 const STATUS_LABEL: Record<string, string> = {
   idle: 'IDLE',
+  checking: 'CHECKING',
   quoting: 'QUOTING',
   confirm: 'CONFIRM',
   awaiting_payment: 'AWAITING PAYMENT',

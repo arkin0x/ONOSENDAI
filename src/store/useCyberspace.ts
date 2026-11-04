@@ -479,7 +479,7 @@ export function addRespawn(pubkey: string): number {
  * client checking the result before it signs. `error` keeps its message until
  * X or the next commit.
  */
-export type CloudStatus = 'idle' | 'quoting' | 'confirm' | 'funding' | 'awaiting_payment' | 'paid' | 'computing' | 'verifying' | 'error'
+export type CloudStatus = 'idle' | 'checking' | 'quoting' | 'confirm' | 'funding' | 'awaiting_payment' | 'paid' | 'computing' | 'verifying' | 'error'
 
 /** HOSAKA's price for the lined-up move, waiting for PAY or already approved. */
 export interface CloudQuote {
@@ -1540,9 +1540,6 @@ function rowsAreDown(pubkey: string, why: string): void {
   frozenCopyInHand(pubkey)
   tailInHand(pubkey)
 }
-
-/** Identities whose pending cloud job waits for their rows to be read (resumeCloudJob). */
-const cloudJobWaits = new Set<string>()
 
 /** Per identity, the head the old stores' mark last named here. */
 const markedHead = new Map<string, string>()
@@ -2665,10 +2662,8 @@ async function moveToRows(pubkey: string, startedAt: number): Promise<void> {
  * added, so they are written now.
  */
 function takeRows(pubkey: string, read: ChainRead, blindSince: number | null): boolean {
-  const wasDown = rowsDown.delete(pubkey)
+  rowsDown.delete(pubkey)
   rowsWiped.delete(pubkey)
-  // A cloud job that waited for a head someone could vouch for (resumeCloudJob).
-  if (wasDown && cloudJobWaits.delete(pubkey)) queueMicrotask(() => { void useCyberspace.getState().resumeCloudJob() })
   noteCommitted(pubkey, read.events.map((e) => e.id), read.published)
   startRowsCheck(pubkey, read)
   markedHead.set(pubkey, read.headId)
@@ -2707,7 +2702,7 @@ async function takeRowsBack(pubkey: string, entry: { dirty: boolean }, ticket: n
   const read = await readRows(pubkey, (late) => {
     if (ticket !== hydrateTicket || late === 'unreadable' || late === null) return
     if (useCyberspace.getState().identity.pubkey !== pubkey) return
-    if (rowsDown.delete(pubkey) && cloudJobWaits.delete(pubkey)) queueMicrotask(() => { void useCyberspace.getState().resumeCloudJob() })
+    rowsDown.delete(pubkey)
     takeStoredChain(pubkey, late, startedAt)
     const s = useCyberspace.getState()
     if (s.events[0]?.pubkey === pubkey) saveChain(s.events, s.published, s.chain, s.held)
@@ -2845,6 +2840,41 @@ function rowsFirst(pubkey: string): boolean {
 export function chainReadyToDraw(): Promise<void> {
   const s = useCyberspace.getState()
   return s.events.length > 0 || !rowsFirst(s.identity.pubkey) ? Promise.resolve() : chainHydrated(s.identity.pubkey)
+}
+
+/**
+ * Waits for the read of `pubkey`'s saved chain (chainHydrated), then says
+ * whether the chain in hand is the whole of what this device keeps. False
+ * when IndexedDB holds a copy that was not taken in (it did not answer in
+ * time, or could not be read): the chain in hand may then be the old
+ * stretch localStorage kept, and its head proves nothing about where the
+ * chain is.
+ */
+async function wholeChainInHand(pubkey: string): Promise<boolean> {
+  await chainHydrated(pubkey)
+  // In rows, a head nobody can vouch for: rows that cannot be read or were
+  // cleared (the chain in hand is then a frozen copy from before the rows), or
+  // a move that lost to another tab's, still in hand.
+  if (rowsDown.has(pubkey) || takingBack(pubkey)) return false
+  return !chainDbAvailable() || dbRead.has(pubkey)
+}
+
+/** What a new paid cloud job is refused with while a kept one would be written over. */
+const KEPT_JOB_MESSAGE = 'A HOSAKA job is kept in the Cloud compute panel. RESUME or DISCARD it first.'
+
+/**
+ * This identity's job record on disk while it may still be paid work: bound
+ * to the head in hand, or to a head not in hand (the saved chain may not be
+ * read yet). A record whose head the chain in hand has moved past is spent
+ * or worthless, and bars nothing: a route's step that just landed leaves its
+ * record a moment after the next step starts (runCloud).
+ */
+function liveKeptJob(): PendingCloudJob | null {
+  const { identity, events, prevEventId } = useCyberspace.getState()
+  const r = loadCloudJob(identity.pubkey)
+  if (!r) return null
+  if (r.prevEventId !== prevEventId && events.some((e) => e.id === r.prevEventId)) return null
+  return r
 }
 
 /** Resolves once the current identity's whole saved chain is in hand: the IndexedDB read after a load or a switch has landed. */
@@ -3757,6 +3787,11 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
     const { plane, prevEventId, identity, cloudPrefs } = get()
     const issue = movementCapabilityIssue(step.kind, step.from, step.to, plane, 'cloud')
     if (issue) { routeFail(issue); return }
+    // The record this step writes would replace a kept one, which is paid
+    // work. The same step bought again is no bar: its idempotency key names
+    // the same job (a step whose signature was declined, run again).
+    const kept = liveKeptJob()
+    if (kept && !(kept.action === step.kind && kept.prevEventId === prevEventId && samePosition(positionFromWire(kept.to), step.to))) { routeFail(KEPT_JOB_MESSAGE); return }
     // The same three checks quoteRoute made, again at the moment of buying:
     // the limits may have changed since (a HOSAKA rolled back, or paused).
     if (step.kind === 'hop') {
@@ -4619,6 +4654,12 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
     // walk here, and HOP is where the offer is made.
     if (walk && !funded) {
       set({ plan: null, proof: { ...IDLE_PROOF, status: 'infeasible', message: WALK_NEEDS_HOSAKA_MESSAGE } })
+      return
+    }
+    // A route HOSAKA sells steps of would write over a kept job: refused
+    // before any quote or invoice, as rideViaHosaka refuses.
+    if (!funded && (get().cloud.job !== null || liveKeptJob() !== null)) {
+      set({ plan: null, proof: { ...IDLE_PROOF, status: 'infeasible', message: KEPT_JOB_MESSAGE } })
       return
     }
     set({
@@ -6131,6 +6172,8 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
     if (plan !== null || proof.status === 'computing' || (cloud.status !== 'idle' && cloud.status !== 'error')) {
       return { ok: false, error: 'Finish or cancel the move in progress first.' }
     }
+    // Not persisted itself, but it takes the cloud flow over, and the kept job with it.
+    if (cloud.job !== null || liveKeptJob() !== null) return { ok: false, error: KEPT_JOB_MESSAGE }
     const client = cloudClient(cloudPrefs.apiUrl)
     stopCloud()
     const id = ++requestId
@@ -6208,7 +6251,7 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
       return refuse('Finish or cancel the move in progress first.')
     }
     // A kept job is paid work; a new record would overwrite it.
-    if (cloud.job !== null) return refuse('A HOSAKA job is kept in the Cloud compute panel. RESUME or DISCARD it first.')
+    if (cloud.job !== null || liveKeptJob() !== null) return refuse(KEPT_JOB_MESSAGE)
     if (ask.previousId !== prevEventId) return refuse('Your chain moved since this ride was planned. Ride again from here.')
     if (whyNoMove(get().actions())) return refuse(whyNoMove(get().actions())!)
 
@@ -6395,31 +6438,44 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
         }
       }
     }
-    const record = loadCloudJob(identity.pubkey)
     // Another identity's job stays on disk for when it is back.
-    if (!record || record.pubkey !== identity.pubkey) return
-    // A paid job is held against the head, so the head it is compared with is
-    // the saved chain's: read in whole first, never a copy drawn while the read
-    // is out (a provisional chain after a switch, a frozen copy from before the
-    // rows). A head nobody can vouch for (rows that cannot be read, or that
-    // were cleared, or a move that lost to another tab's still in hand) drops
-    // nothing: the job waits, and is resumed once the rows are read.
-    await chainHydrated(identity.pubkey)
-    if (get().identity.pubkey !== identity.pubkey) return
-    if (rowsDown.has(identity.pubkey) || takingBack(identity.pubkey)) {
-      cloudJobWaits.add(identity.pubkey)
-      set({ cloud: { ...get().cloud, message: 'A pending cloud job waits: your saved chain cannot be read yet. RESUME tries again.' } })
-      return
-    }
+    const kept = loadCloudJob(identity.pubkey)
+    if (!kept || kept.pubkey !== identity.pubkey) return
     if (get().proof.status === 'computing') return
+    const { status } = get().cloud
+    if (status !== 'idle' && status !== 'error') return
+    // In hand while the saved chain loads, so every flow that would start a
+    // paid job and write over this record refuses (liveKeptJob, cloud.job).
+    set({ cloud: { ...get().cloud, status: 'checking', job: kept, message: null, rideError: null } })
+    // The head check needs the whole saved chain. At mount the chain in hand
+    // may be the old stretch localStorage kept before the chain outgrew it,
+    // whose head is not the one a paid job was bound to (hydrateChain).
+    const whole = await wholeChainInHand(identity.pubkey)
+    const c = get().cloud
+    // CANCEL during the wait, or a switch's own resume, took the cloud flow over.
+    if (c.status !== 'checking' || c.job?.jobId !== kept.jobId) return
+    /** Out of the check: the record stays in hand as kept, or goes, with the words why. */
+    const settle = (job: PendingCloudJob | null, message: string | null): void => {
+      set({ cloud: { ...get().cloud, status: 'idle', job, message } })
+    }
+    // Switched meanwhile: the record waits on disk for that identity.
+    if (get().identity.pubkey !== identity.pubkey) { settle(null, null); return }
+    const record = loadCloudJob(identity.pubkey)
+    if (!record || record.jobId !== kept.jobId) { settle(record, null); return }
+    if (get().proof.status === 'computing') { settle(record, null); return }
     if (record.prevEventId !== get().prevEventId) {
+      if (!whole) {
+        // Nothing proves the head moved: a paid record is never dropped on that.
+        settle(record, 'A pending cloud job was kept: your saved chain did not load, so its head could not be checked. RESUME or reload to try again.')
+        return
+      }
       clearCloudJob(record.pubkey, record.jobId)
-      set({ cloud: { ...get().cloud, job: null, message: 'A pending cloud job was dropped: the chain head moved since it was created.' } })
+      settle(null, 'A pending cloud job was dropped: the chain head moved since it was created.')
       return
     }
     if (record.stage === 'awaiting_payment' && record.deposit && record.deposit.expiresAt * 1000 < Date.now()) {
       clearCloudJob(record.pubkey, record.jobId)
-      set({ cloud: { ...get().cloud, job: null, message: 'A pending cloud job was dropped: its invoice expired.' } })
+      settle(null, 'A pending cloud job was dropped: its invoice expired.')
       return
     }
     const id = ++requestId

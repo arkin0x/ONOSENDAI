@@ -18,7 +18,7 @@ const quota = vi.hoisted(() => ({ chainChars: Infinity }))
 /** What the deploy's /version.json answers: a value, or nothing at all (offline). */
 const deploy = vi.hoisted(() => ({ answer: null as unknown }))
 /** What the relays answer a head confirmation: the events, or null when nobody counted. */
-const relays = vi.hoisted(() => ({ confirm: [] as unknown }))
+const relays = vi.hoisted(() => ({ confirm: [] as unknown, asked: 0 }))
 vi.hoisted(() => {
   const m = new Map<string, string>()
   const storage: Storage = {
@@ -41,7 +41,7 @@ vi.mock('../../lib/workers', async (importOriginal) => {
 })
 vi.mock('../../lib/chains', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../lib/chains')>()
-  return { ...actual, fetchChainEvents: vi.fn(async () => []), confirmChainEvents: vi.fn(async () => relays.confirm) }
+  return { ...actual, fetchChainEvents: vi.fn(async () => []), confirmChainEvents: vi.fn(async () => { relays.asked++; return relays.confirm }) }
 })
 /** What the relays were sent, by id: every publish is taken. */
 vi.mock('../../lib/relay', async (importOriginal) => ({
@@ -2071,6 +2071,18 @@ describe('follow-ups of #576', () => {
     ;(await import('../../lib/publisher')).startPublisher()
     b.S().publishNow()
     await vi.waitFor(() => expect(sent.map((x) => x.id)).toContain(m), { timeout: 5_000, interval: 20 })
+  })
+
+  it('a LIVE load with nothing held asks the relays nothing by itself', async () => {
+    const chain = chainOf(6)
+    await seedOldStores(chain, { published: chain.map((e) => e.id), localToo: true })
+    await openTab()
+    localStorage.setItem('onosendai:live', '1')
+    relays.asked = 0
+    const b = await openTab()
+    await tick(500)
+    expect(b.S().live).toBe(true)
+    expect(relays.asked).toBe(0)
   })
 
   it('the relays answer with a sibling of a held move: nothing goes out, and the person is asked to choose', { timeout: 30_000 }, async () => {

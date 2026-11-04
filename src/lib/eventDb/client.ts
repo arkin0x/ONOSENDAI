@@ -54,6 +54,13 @@ function started(): Worker | null {
     const w = new Worker(new URL('../../workers/events.worker.ts', import.meta.url), { type: 'module' })
     w.onmessage = (message: MessageEvent<EventDbResponse>) => {
       const entry = waiting.get(message.data.call)
+      // A worker that cannot do what it was asked is given up, as one that went
+      // quiet is, and the same call runs here with what it had not answered. A
+      // full disk is the disk's doing, and would be just as full here.
+      if (entry && !message.data.ok && message.data.name !== 'QuotaExceededError') {
+        giveUp(`answered ${message.data.name}`)
+        return
+      }
       if (entry) {
         waiting.delete(message.data.call)
         if (entry.timer) clearTimeout(entry.timer)
@@ -92,6 +99,26 @@ export function callEventDb<K extends EventDbOp>(op: K, args: Parameters<EventDb
     if (response.ok) return response.value as Awaited<ReturnType<EventDbOps[K]>>
     throw Object.assign(new Error(response.message), { name: response.name })
   })
+}
+
+/** How long the store gets to show it works, wherever it is tried. No answer in time means it does not. */
+export const PROBE_PATIENCE_MS = 3_000
+
+/**
+ * Whether the store works where it will run. The worker is asked first. One that
+ * fails or does not answer in time is given up, and the same probe runs on the
+ * main thread, where the database then lives for this page.
+ */
+export async function probeWhereItRuns(patienceMs = PROBE_PATIENCE_MS): Promise<boolean> {
+  const within = (p: Promise<boolean>): Promise<boolean> => {
+    let timer: ReturnType<typeof setTimeout> | undefined
+    return Promise.race([p, new Promise<boolean>((resolve) => { timer = setTimeout(() => resolve(false), patienceMs) })]).finally(() => clearTimeout(timer))
+  }
+  if (started()) {
+    if (await within(callEventDb('probeStore', []).catch(() => false))) return true
+    giveUp('failed the store probe')
+  }
+  return within(runHere({ call: ++calls, op: 'probeStore', args: [] }).then((r) => r.ok && r.value === true))
 }
 
 /** Hear what other tabs committed: this tab's own writes are left out. The returned function stops listening. */

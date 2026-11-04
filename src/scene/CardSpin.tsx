@@ -107,7 +107,7 @@ function Host(): JSX.Element {
   // The canvas keeps showing its last frame until it draws again, so it is out
   // of sight from the moment it moves until the next card's shard is drawn.
   const shown = (): void => { if (host) host.style.visibility = 'visible' }
-  return <ShardSpin shard={shard} size={top?.size ?? 160} pace={pace} ignoreOpacity={top?.ignoreOpacity ?? false} onDrawn={shown} onContext={created} />
+  return <ShardSpin shard={shard} size={top?.size ?? 160} pace={pace} ignoreOpacity={top?.ignoreOpacity ?? false} wide={top?.wide ?? false} onDrawn={shown} onContext={created} />
 }
 
 /**
@@ -161,21 +161,21 @@ function place(): void {
 useSpinStack.subscribe(place)
 
 /** A shard turning in a card, for as long as the card shows it. Takes the place of ShardSpin in a card. */
-export function CardSpin({ shard, size = 160, ignoreOpacity = false }: { shard: ShardModel | null; size?: number; ignoreOpacity?: boolean }): JSX.Element {
+export function CardSpin({ shard, size = 160, ignoreOpacity = false, wide = false }: { shard: ShardModel | null; size?: number; ignoreOpacity?: boolean; wide?: boolean }): JSX.Element {
   const slot = useRef<HTMLDivElement>(null)
   const id = useRef<number | null>(null)
   useLayoutEffect(() => {
     hostElement()
     // A canvas that threw, or whose context is gone, is made again for this card.
     if (needsRemake(broken, context)) { broken = false; context = null; useSpinStack.getState().remake() }
-    const mine = useSpinStack.getState().claim({ shard, size, ignoreOpacity, slot: slot.current! })
+    const mine = useSpinStack.getState().claim({ shard, size, ignoreOpacity, wide, slot: slot.current! })
     id.current = mine
     return () => { id.current = null; useSpinStack.getState().release(mine) }
     // The claim lives as long as the card; a new shard updates it below.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
   useLayoutEffect(() => {
-    if (id.current !== null) useSpinStack.getState().update(id.current, { shard, size, ignoreOpacity })
-  }, [shard, size, ignoreOpacity])
-  return <div ref={slot} style={{ width: size, height: size }} />
+    if (id.current !== null) useSpinStack.getState().update(id.current, { shard, size, ignoreOpacity, wide })
+  }, [shard, size, ignoreOpacity, wide])
+  return <div ref={slot} style={{ width: wide ? '100%' : size, height: size }} />
 }

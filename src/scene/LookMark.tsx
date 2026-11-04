@@ -11,27 +11,33 @@
  * closed look's, so the open look swaps in without the chest changing size.
  *
  * Not cut at its region: a built-in look carries nothing secret, and a chest
- * cut in half at a small bag's wall would read as broken. A custom look
- * (spec PR #82, the seam in lib/looks.ts) is cut as a shard is when it lands.
+ * cut in half at a small bag's wall would read as broken. A custom look is
+ * cut at its region's walls as a hidden shard is (DECK-0003 §1.6, DECK-0004
+ * §3.6), stands as its payload says, and shares the scene's budget (LookFrame).
  *
- * Its name and who left it stand just above it, as an item's model's do
- * (ItemModel); a tap anywhere it draws opens its card.
+ * No name floats over a chest or a door: its name is on its card, and a tap
+ * anywhere it draws opens that card (arkinox, 2026-11-02; WorldMessages
+ * FLOATING_NAME). A caller that hands it a `label` gets one just above it,
+ * as an item's model's is (ItemModel).
  */
 
 import { useMemo, useRef, type ReactNode } from 'react'
 import { useFrame } from '@react-three/fiber'
-import type { Group, PerspectiveCamera } from 'three'
+import { Matrix4, type Group, type PerspectiveCamera } from 'three'
 import { flatten, type ShardModel } from 'sno-core/shards'
 import { extentOf, trueScale } from '../lib/itemModel'
-import { renderPose, viewPose } from '../lib/pose'
+import { renderPose, viewPose, type Pose } from '../lib/pose'
 import { CUBE_REACH, MARK_RECEDE_FLOOR, recedeShare } from '../lib/markerSize'
 import type { ViewAxes } from '../lib/space'
+import type { Box } from '../lib/clip'
 import type { Look } from '../lib/looks'
 import { useCyberspace } from '../store/useCyberspace'
 import { headlampUniforms } from './headlamp'
 import { ShardMesh } from './ShardMesh'
 import { TapTarget } from './TapTarget'
 import { LABEL_PRIORITY, WorldLabel } from './WorldLabel'
+
+const IDENTITY = new Matrix4()
 
 /** A look's bounds about its origin, in model units, render frame: what it is sized and labelled by. */
 export interface LookBounds {
@@ -69,6 +75,19 @@ export function lookScale(atTrue: number, longest: number, floorPx: number, perP
   return Math.max(atTrue, (floorPx * perPx) / longest)
 }
 
+/**
+ * What every mesh of a look is drawn with (scene/ShardMesh). `clip` is in the
+ * frame the mesh is drawn in. A standing look carries `pose`, and the frame
+ * around it is left unturned, so the pose and the view-frame cut are ShardMesh's
+ * own, exactly as a standing hidden shard's are (WorldShards placeShard).
+ */
+export interface LookFrame {
+  clip?: Box
+  pose?: Pose
+  /** Its placed objects are drawn within the scene's budget, by trust and nearest first (scene/meshBudget.ts). */
+  budget?: { key: string; trusted: boolean; centre: [number, number, number]; scale: number }
+}
+
 interface Props {
   look: Look
   /** What is drawn now: the closed model, the open one, or nothing. */
@@ -78,7 +97,8 @@ interface Props {
   axes: ViewAxes
   /** The edge of the note's cube on screen, CSS pixels: the smallest the look is ever drawn. */
   minPx: number
-  label: { text: string; color: string; sub: string; subColor: string }
+  /** A name to float just above it; absent, none (FLOATING_NAME). */
+  label?: { text: string; color: string; sub: string; subColor: string }
   onTap?: () => void
   /** How high above the origin, in the look's units, the label must clear: what floats over it (ChestLoot). */
   clearTop?: number
@@ -86,15 +106,21 @@ interface Props {
    * What else is drawn in the look's own frame, scaled and turned with it:
    * the model is the default, and a ceremony draws its own instead.
    */
-  children?: (frame: { model: ShardModel | null }) => ReactNode
+  children?: (frame: { model: ShardModel | null } & LookFrame) => ReactNode
+  /** How a custom look is drawn: where it is cut, how it stands, and its share of the scene's budget. */
+  frame?: LookFrame
 }
 
-/** A chest or a door as its look, sized, turned with the view, labelled and tappable. */
-export function LookMark({ look, model, at, axes, minPx, label, onTap, clearTop = 0, children }: Props): JSX.Element {
+/** A chest or a door as its look, sized, turned with the view, and tappable. */
+export function LookMark({ look, model, at, axes, minPx, label, onTap, clearTop = 0, children, frame }: Props): JSX.Element {
   const scaleExp = useCyberspace((s) => s.scaleExp)
-  const turn = useMemo(() => renderPose(viewPose(axes)), [axes])
+  // A standing look's pose is ShardMesh's (LookFrame); any other turns with the view here.
+  const standing = !!frame?.pose
+  const turn = useMemo(() => (standing ? IDENTITY : renderPose(viewPose(axes))), [axes, standing])
   const bounds = lookBounds(look.closed)
-  const atTrue = useMemo(() => trueScale(look.closed.unit, scaleExp), [look.closed.unit, scaleExp])
+  // Sized by what is drawn: an open look may be of another unit than the closed one.
+  const drawnUnit = (model ?? look.closed).unit
+  const atTrue = useMemo(() => trueScale(drawnUnit, scaleExp), [drawnUnit, scaleExp])
   // The label clears the look from any side at the scale it is drawn at
   // (WorldLabel `clear`, the rule ItemModel follows): the farthest corner of
   // its bounds from the origin, at true size and at the floor alike.
@@ -121,13 +147,13 @@ export function LookMark({ look, model, at, axes, minPx, label, onTap, clearTop 
       <group ref={outer} position={at}>
         <group matrix={turn} matrixAutoUpdate={false}>
           <group ref={drawn}>
-            {children ? children({ model }) : model && <ShardMesh shard={model} world />}
+            {children ? children({ model, ...frame }) : model && <ShardMesh shard={model} world {...frame} />}
           </group>
         </group>
       </group>
       {/* Outside the scaled group: a target and a label size themselves from the camera. */}
       {onTap && <group position={at}><TapTarget measure={drawn} onTap={onTap} /></group>}
-      <WorldLabel text={label.text} color={label.color} at={at} align="center" px={13} sub={label.sub} subColor={label.subColor} clear={clear} recede="name" />
+      {label && <WorldLabel text={label.text} color={label.color} at={at} align="center" px={13} sub={label.sub} subColor={label.subColor} clear={clear} recede="name" />}
     </>
   )
 }

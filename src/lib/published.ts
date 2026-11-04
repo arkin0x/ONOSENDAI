@@ -59,7 +59,7 @@ import { refTags } from 'sno-core/parts'
 import { SNO_KIND, creditAuthor, creditOf, creditTags, objectAddress, readCredit, type Credit } from 'sno-core/feed'
 import type { EventTemplate } from './events'
 import { withAuthoredConstrain } from './walkConstrain'
-import { inTheClear, ownKeysOnly, you } from './carried'
+import { ownKeysOnly, placedOnly, withoutCarried, you } from './carried'
 
 const STORAGE = 'onosendai:published'
 
@@ -117,8 +117,9 @@ export function publicObjectTemplate(shard: ShardModel, createdAt: number): Even
       ...(credit ? creditTags(credit, { notify: true }) : []),
     ],
     // OPAQUE for a shard whose author never chose (DECK-0003 §1.12). A table
-    // from a bag stays out unless its user chose to keep it (§1.10).
-    content: JSON.stringify(toPayload(withAuthoredConstrain(inTheClear(shard)))),
+    // from a bag is already out unless its user chose to keep it (§1.10;
+    // usePublished send, withoutCarried).
+    content: JSON.stringify(toPayload(withAuthoredConstrain(placedOnly(shard)))),
   }
 }
 
@@ -250,7 +251,8 @@ export const STATE_HELP: Record<PublishState, string> = {
  * drifted, so the two can never disagree about what "the same object" means.
  */
 export function shardFingerprint(shard: ShardModel): string {
-  const clear = inTheClear(shard)
+  // As a PUBLISH writes it by default: what came sealed left out (usePublished send).
+  const clear = placedOnly(withoutCarried(shard))
   const me = you()
   return fingerprint(JSON.stringify(toPayload(withAuthoredConstrain(me ? ownKeysOnly(clear, me) : clear))))
 }

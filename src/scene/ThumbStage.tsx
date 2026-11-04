@@ -19,7 +19,7 @@ import { placedBounds, resolveParts, type Placed } from 'sno-core/parts'
 import { OwnPartsContext, fetchOwnFirst, fetchRef } from '../lib/parts'
 import { authorOf } from '../lib/carried'
 import { keepPrograms } from '../lib/keepPrograms'
-import { ShardMesh } from './ShardMesh'
+import { ShardMeshBody } from './ShardMesh'
 import { ShardLights } from './shardLight'
 import { useThumbs, type ThumbJob } from '../store/useThumbs'
 
@@ -150,7 +150,8 @@ function Capture({ job }: { job: ThumbJob }): JSX.Element | null {
   return (
     <group position={[-frame.centre[0], -frame.centre[1], -frame.centre[2]]}>
       <OwnPartsContext.Provider value={!!job.own}>
-        <ShardMesh key={job.key} shard={job.shard} lit />
+        {/* The body, not ShardMesh: StageBoundary must see a throw, so a bad shard fails at once and is not retried. */}
+        <ShardMeshBody key={job.key} shard={job.shard} lit />
       </OwnPartsContext.Provider>
     </group>
   )

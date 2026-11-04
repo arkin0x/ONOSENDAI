@@ -16,11 +16,11 @@ if (typeof localStorage === 'undefined') {
 }
 
 import { nip19 } from 'nostr-tools'
-import { fromPayload } from 'sno-core/shards'
+import { fromPayload, type Ref } from 'sno-core/shards'
 import { liveRef, objectsOf, parseObjectAddress } from '../ObjectPicker'
 import { useWorkshop } from '../../store/useWorkshop'
 import type { NostrEvent } from '../../lib/events'
-import { copyInto, keepTable, setLocalAuthor, tableFromBag, takenCopy } from '../../lib/carried'
+import { carriesSealedParts, copyInto, setLocalAuthor, takeIntoKeeping } from '../../lib/carried'
 
 const PK = 'e8ed3798c6ffebffa08501ac39e271662bfd160f688f94c45d692d8767dd345a'
 const COLUMN = { v: 2, name: 'Column', unit: 0, mode: 'solid', vertices: [[0, 0, 0], [1, 0, 0], [0, 4, 0]], colors: [5, 5, 5], faces: [[0, 1, 2]] }
@@ -138,12 +138,12 @@ describe('YOURS: a copy goes inside (DECK-0003 §1.10; arkinox 2026-10-25, the s
     } finally { setLocalAuthor(null) }
   })
 
-  it('a piece taken from a bag marks what it is stamped into, so PUBLISH asks; a piece that was kept does not', () => {
+  it('a piece taken from a bag marks what it is stamped into, so PUBLISH asks; a LIVE LINK\'s copy does not', () => {
     const THEM = 'd'.repeat(64)
-    const taken = takenCopy({ ...fromPayload(COLUMN, 'c')!, refs: [['a', `33331:${THEM}:p`]], parts: [{ ref: 0, at: [0, 0, 0], turn: [0, 0, 0], step: 0 }], objects: { [`33331:${THEM}:p`]: COLUMN }, author: THEM }, PK)
-    const { shard } = copyInto(w().current()!, taken, PK)
-    expect(tableFromBag(shard)).toBe(true)
-    expect(tableFromBag(copyInto(w().current()!, keepTable(taken), PK).shard)).toBe(false)
+    const found = { ...fromPayload(COLUMN, 'c')!, refs: [['a', `33331:${THEM}:p`]] as Ref[], parts: [{ ref: 0, at: [0, 0, 0] as [number, number, number], turn: [0, 0, 0] as [number, number, number], step: 0 }], objects: { [`33331:${THEM}:p`]: COLUMN }, author: THEM }
+    const { shard } = copyInto(w().current()!, takeIntoKeeping(found, PK), PK)
+    expect(carriesSealedParts(shard)).toBe(true)
+    expect(carriesSealedParts(copyInto(w().current()!, takeIntoKeeping(found, PK, false), PK).shard)).toBe(false)
   })
 
   it('a source built under another identity brings its pieces under yours', () => {

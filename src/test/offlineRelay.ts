@@ -22,6 +22,8 @@ export const offlineRelay = {
   query: async (_filter: Filter): Promise<NostrEvent[]> => [],
   queryAny: async (_relays: string[], _filter: Filter, _maxWait?: number): Promise<NostrEvent[]> => [],
   queryEach: async (_filter: Filter, _maxWait?: number): Promise<RelayAnswer[]> => [nothing('wss://offline.invalid')],
+  queryChecked: async (_filter: Filter): Promise<{ events: NostrEvent[]; trouble: null }> => ({ events: [], trouble: null }),
+  queryAnyChecked: async (_relays: string[], _filter: Filter, _maxWait?: number): Promise<{ events: NostrEvent[]; trouble: null }> => ({ events: [], trouble: null }),
   queryEachAt: async (relays: string[], _filter: Filter, _maxWait?: number): Promise<RelayAnswer[]> => relays.map(nothing),
   queryEachSettled: async (relays: string[], _filter: Filter, _maxWait: number, _primary: string, _waitFor: string[], opts: { onSent?: () => void } = {}): Promise<RelayAnswer[]> => {
     opts.onSent?.()

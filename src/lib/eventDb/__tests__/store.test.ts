@@ -560,12 +560,16 @@ describe('reads', () => {
 describe('limited reads', () => {
   const fake = (i: number): NostrEvent => ({ id: i.toString(16).padStart(64, '0'), pubkey: alicePk, created_at: 1000 + i, kind: 7, tags: [['t', 'x']], content: '', sig: '' })
 
+  // Three reads of READ_LIMIT_DEFAULT rows each, on three indexes, in fake-indexeddb:
+  // about 2 s alone (the put is 0.1 s, each read 0.5 to 0.7 s), and past vitest's 5 s
+  // under a loaded machine's full suite. Every read must reach the real default to
+  // show it stops there, so the rows stay and the wait is longer.
   it('each read stops at its default limit when it does not say', async () => {
     await put(Array.from({ length: READ_LIMIT_DEFAULT + 3 }, (_, i) => fake(i)))
     expect(await withEventDb((db) => byKind(db, 7))).toHaveLength(READ_LIMIT_DEFAULT)
     expect(await withEventDb((db) => byAuthorKind(db, alicePk, 7))).toHaveLength(READ_LIMIT_DEFAULT)
     expect(await withEventDb((db) => byTag(db, 't:x'))).toHaveLength(READ_LIMIT_DEFAULT)
-  })
+  }, 30_000)
 
   it('a limit of nothing reads nothing', async () => {
     await put([fake(1)])

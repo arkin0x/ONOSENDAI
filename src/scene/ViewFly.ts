@@ -103,7 +103,8 @@ export interface FlyRig {
  */
 export function rigViewFly(rig: FlyRig, eye: Vector3, target: Vector3, dt: number, now: number = performance.now()): boolean {
   const flying = tickViewFly(eye, target, dt, now)
-  rig.locked.current = flyFollow.frame(rig.locked.current, flying, flyGesture.count > 0)
+  const viewOpen = canFly(useCyberspace.getState(), useBuilder.getState().active)
+  rig.locked.current = flyFollow.frame(rig.locked.current, flying, flyGesture.count > 0, flyGesture.orbited, viewOpen)
   if (flying) rig.glideLeft.current = 0
   return flying
 }

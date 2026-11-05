@@ -35,8 +35,14 @@ const net = vi.hoisted(() => {
     silent: new Set<string>(),
     /** Takes EVENTs and answers no OK; reads are fine. */
     noOk: new Set<string>(),
-    /** Sends a challenge, and answers its AUTH. The canonical relay gates reads, so it always does. */
-    challenge: new Set<string>(['wss://cyberspace.nostr1.com/']),
+    /** Answers every EVENT as grain answers one it already holds: OK false, "duplicate:". */
+    duplicate: new Set<string>(),
+    /**
+     * Sends a challenge, and answers its AUTH. Both pinned relays do: the
+     * canonical one (grain) challenges every socket though its reads are open,
+     * and the former one gates reads.
+     */
+    challenge: new Set<string>(['wss://relay.onosendai.tech/', 'wss://cyberspace.nostr1.com/']),
     hold: new Map<string, { kind: number; pubkey: string; id: string; created_at: number; tags: string[][] }[]>(),
   }
   const match = (f: Record<string, unknown>, e: { kind: number; pubkey: string; id: string; created_at: number; tags: string[][] }): boolean => {
@@ -81,7 +87,8 @@ const net = vi.hoisted(() => {
           this.onmessage?.({ data: JSON.stringify(['EOSE', msg[1]]) })
         }
         if (msg[0] === 'AUTH') this.onmessage?.({ data: JSON.stringify(['OK', (msg[1] as { id: string }).id, true, '']) })
-        if (msg[0] === 'EVENT' && !rules.noOk.has(this.url)) this.onmessage?.({ data: JSON.stringify(['OK', (msg[1] as { id: string }).id, true, '']) })
+        if (msg[0] === 'EVENT' && rules.duplicate.has(this.url)) this.onmessage?.({ data: JSON.stringify(['OK', (msg[1] as { id: string }).id, false, 'duplicate: already have this event']) })
+        else if (msg[0] === 'EVENT' && !rules.noOk.has(this.url)) this.onmessage?.({ data: JSON.stringify(['OK', (msg[1] as { id: string }).id, true, '']) })
       }, 0)
     }
     close(): void { this.record.closes++; this.readyState = 3; this.onclose?.({ code: 1000, reason: '' }) }
@@ -94,7 +101,7 @@ vi.mock('../../store/useCyberspace', () => ({
 }))
 
 import { finalizeEvent, generateSecretKey, getPublicKey } from 'nostr-tools/pure'
-import { useRelays } from '../../store/useRelays'
+import { SECOND_RELAY, useRelays } from '../../store/useRelays'
 import { decideSelfCheck } from '../chainHold'
 import { askChainEvents, confirmChainEvents, fetchChainEvents, HEAD_CONFIRM_MS } from '../chains'
 import { noteChainHolders } from '../chainHolders'
@@ -102,6 +109,7 @@ import { hopTemplate, spawnTemplate, type NostrEvent } from '../events'
 import { connectRelay, CYBERSPACE_RELAY, dropRelays, publishMany, queryAny, queryEachAt, subscribeOne, watchConnectivity } from '../relay'
 
 const CANON = `${CYBERSPACE_RELAY}/`
+const SECOND = `${SECOND_RELAY}/`
 const MINE = 'wss://mine.example/'
 const FILTER = { kinds: [0], limit: 1 }
 /** The 5 s connect limit, and room for what follows it on a fake clock. */
@@ -279,7 +287,7 @@ describe('a relay that accepts and never finishes the handshake', () => {
 })
 
 describe('the canonical relay', () => {
-  afterEach(() => { net.rules.neverOpen.delete(CANON); net.rules.connectMs.delete(CANON); dropRelays([CANON]) })
+  afterEach(() => { net.rules.neverOpen.delete(CANON); net.rules.neverOpen.delete(SECOND); net.rules.connectMs.delete(CANON); dropRelays([CANON, SECOND]) })
 
   it('is never left alone: a publish there is bounded, and the next one still dials it', async () => {
     dropRelays([CANON])
@@ -295,6 +303,11 @@ describe('the canonical relay', () => {
 
   it('may take 6 s to connect: a publish lands, and head confirmation passes rather than refusing', async () => {
     dropRelays([CANON])
+    // The pinned former canonical relay down: a relay that connects first arms
+    // the confirmation's deadline from its REQ (verification of #236, finding
+    // 6), so this is the canonical relay alone, as the question is about it.
+    net.rules.neverOpen.add(SECOND)
+    dropRelays([SECOND])
     net.rules.connectMs.set(CANON, 6000)
     expect((await within(6500, publishMany([CANON], anEvent()))).value).toEqual({ ok: true, accepted: [CANON] })
     dropRelays([CANON])
@@ -373,5 +386,48 @@ describe('a relay that opens and then says nothing', () => {
       const again = await within(1000, queryEachAt([silent], FILTER, 500))
       expect(again.value?.[0]).toMatchObject({ outcome: 'unreachable', reason: 'no answer in time' })
     }
+  })
+})
+
+describe('the canonical relay slow to connect (6 s) with the pinned former one up (review of #606)', () => {
+  afterEach(() => { net.rules.connectMs.delete(CANON); net.rules.hold.delete(SECOND); net.rules.hold.delete(CANON); dropRelays([CANON, SECOND]) })
+
+  it('passes, degraded, on the former canonical relay\'s answer when it holds the anchor', async () => {
+    dropRelays([CANON, SECOND])
+    const c = aChain()
+    net.rules.connectMs.set(CANON, 6000)
+    net.rules.hold.set(SECOND, [c.spawn, c.hop1])
+    const got = await within(6500, confirmChainEvents(c.pubkey, c.spawn.id, [c.spawn, c.hop1], { since: c.hop1.created_at, anchorId: c.hop1.id }))
+    expect(got.settled).toBe(true)
+    expect(got.value).not.toBeNull()
+  })
+
+  it('refuses when the former canonical relay answers without the anchor: its silence says nothing about a newer move', async () => {
+    dropRelays([CANON, SECOND])
+    const c = aChain()
+    net.rules.connectMs.set(CANON, 6000)
+    const got = await within(6500, confirmChainEvents(c.pubkey, c.spawn.id, [c.spawn, c.hop1], { since: c.hop1.created_at, anchorId: c.hop1.id }))
+    expect(got.settled).toBe(true)
+    expect(got.value).toBeNull()
+  })
+
+  it('finds a newer move only the former canonical relay holds, and hands it back', async () => {
+    dropRelays([CANON, SECOND])
+    const c = aChain()
+    net.rules.connectMs.set(CANON, 6000)
+    net.rules.hold.set(SECOND, [c.spawn, c.hop1, c.hop2])
+    const got = await within(6500, confirmChainEvents(c.pubkey, c.spawn.id, [c.spawn, c.hop1], { since: c.hop1.created_at, anchorId: c.hop1.id }))
+    expect(got.value?.some((e) => e.id === c.hop2.id)).toBe(true)
+  })
+})
+
+describe('a relay that already holds the event (grain, the canonical relay since 2026-11-05)', () => {
+  afterEach(() => { net.rules.duplicate.delete(CANON); dropRelays([CANON]) })
+
+  it('took it: OK false "duplicate:" counts as accepted, so the canonical retry ends', async () => {
+    dropRelays([CANON])
+    net.rules.duplicate.add(CANON)
+    const got = await within(10_000, publishMany([CANON], anEvent()))
+    expect(got.value).toEqual({ ok: true, accepted: [CANON] })
   })
 })

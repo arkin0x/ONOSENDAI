@@ -28,7 +28,8 @@ const [base, out, label, stepsFile] = process.argv.slice(2)
 fs.mkdirSync(out, { recursive: true })
 const { steps, district } = JSON.parse(fs.readFileSync(stepsFile, 'utf8'))
 const viewport = label === 'phone' ? { width: 412, height: 915 } : { width: 1920, height: 1080 }
-const CANON = /cyberspace\.nostr1\.com/
+// Both pinned relays (useRelays PINNED_RELAYS) are answered here, never dialed.
+const CANON = /relay\.onosendai\.tech|cyberspace\.nostr1\.com/
 const dropped = { EVENT: 0, AUTH: 0 }
 const consoleErrors = []
 const report = { label, viewport, runs: {}, keys: {}, speak: {}, exit: {}, deepLinks: [], dropped, consoleErrors }

@@ -26,6 +26,8 @@ const net = vi.hoisted(() => ({
 }))
 vi.mock('../../store/useRelays', () => ({
   DEFAULT_RELAY: 'ws://canonical.test',
+  // Pinned second after the 2026-11-05 switch; not in these tests' relay set, so never waited for.
+  SECOND_RELAY: 'ws://second.test',
   currentRelays: () => net.relays,
   isRetiredRelay: () => false,
 }))

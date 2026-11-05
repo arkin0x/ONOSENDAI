@@ -1,7 +1,10 @@
 /**
  * authGatedNet.ts - a fake network for the tests of reads behind NIP-42 AUTH:
- * the canonical relay as it behaves today (a challenge on every socket, and a
- * REQ before AUTH closed with "auth-required: you must auth"), and a NIP-46
+ * a canonical relay that gates reads, as cyberspace.nostr1.com did while it
+ * was canonical (a challenge on every socket, and a REQ before AUTH closed
+ * with "auth-required: you must auth"), or, with `openReads`, one that
+ * challenges every socket and serves reads anyway, as relay.onosendai.tech
+ * (grain) does since 2026-11-05; and a NIP-46
  * bunker on a relay of its own, answering over the same fake sockets with
  * real nip44 and real signatures. No socket leaves the process.
  *
@@ -14,8 +17,11 @@ import { finalizeEvent, generateSecretKey, getPublicKey, verifyEvent } from 'nos
 import * as nip44 from 'nostr-tools/nip44'
 import { nip19 } from 'nostr-tools'
 
-export const CANON = 'wss://cyberspace.nostr1.com/'
+/** The canonical relay's URL as the pool opens it (useRelays DEFAULT_RELAY). */
+export const CANON = 'wss://relay.onosendai.tech/'
 export const BUNKER_RELAY = 'wss://bunker.example/'
+/** The pinned backup relay (useRelays SECOND_RELAY): with `gatedBackup`, it gates reads as it really does. */
+export const BACKUP = 'wss://cyberspace.nostr1.com/'
 
 type Ev = { id: string; pubkey: string; kind: number; created_at: number; tags: string[][]; content: string; sig: string }
 type F = Record<string, unknown>
@@ -87,6 +93,14 @@ export interface AuthGatedNet {
   authOkDelay: number
   /** The canonical relay turns every AUTH down (OK false), whoever signed it. */
   rejectAuth: boolean
+  /** The canonical relay serves REQs before AUTH (it still sends its challenge), as grain does. */
+  openReads: boolean
+  /**
+   * The backup relay is served too, gating reads as cyberspace.nostr1.com
+   * does (a challenge on every socket, REQs refused until AUTH), from the
+   * same events. Off, it is not on this network at all.
+   */
+  gatedBackup: boolean
   /** How long the canonical relay takes between one event of an answer and the next (a busy socket). */
   streamMs: number
   /** The canonical relay drops every open socket, as a phone does to a tab put away. */
@@ -128,6 +142,8 @@ export function authGatedNet(): AuthGatedNet {
     challengeDelay: 0,
     authOkDelay: 0,
     rejectAuth: false,
+    openReads: false,
+    gatedBackup: false,
     streamMs: 0,
     dropCanon() { for (const s of [...canonSockets]) s.drop() },
     halfOpenBunker() { for (const s of [...bunkerSockets]) s.halfOpen = true },
@@ -215,19 +231,20 @@ export function authGatedNet(): AuthGatedNet {
     onerror?: ((e: unknown) => void) | null
     constructor(url: string | URL) {
       this.url = String(url)
-      if (this.url !== CANON && this.url !== BUNKER_RELAY) throw new Error(`authGatedNet: no relay at ${this.url}`)
+      const backup = net.gatedBackup && this.url === BACKUP
+      if (this.url !== CANON && this.url !== BUNKER_RELAY && !backup) throw new Error(`authGatedNet: no relay at ${this.url}`)
       if (this.url === CANON) net.canon.sockets++
       if (this.url === CANON && net.failConnects > 0) {
         net.failConnects--
         setTimeout(() => { this.readyState = 3; this.onerror?.(new Error('connection refused')); this.onclose?.({ code: 1006, reason: '' }) }, 5)
         return
       }
-      if (this.url === CANON) canonSockets.add(this)
+      if (this.url === CANON || backup) canonSockets.add(this)
       else { bunkerSockets.add(this); net.bunkerSockets++ }
       setTimeout(() => {
         this.readyState = 1
         this.onopen?.()
-        if (this.url === CANON) {
+        if (this.url === CANON || backup) {
           this.challenge = `c${++challenges}`
           this.challenges.push(this.challenge)
           const send = (): void => this.deliver(['AUTH', this.challenge])
@@ -243,7 +260,7 @@ export function authGatedNet(): AuthGatedNet {
       const msg = JSON.parse(raw) as unknown[]
       setTimeout(() => {
         if (this.readyState !== 1 || this.halfOpen) return
-        if (this.url === CANON) this.canonical(msg)
+        if (this.url === CANON || this.url === BACKUP) this.canonical(msg)
         else this.bunkerRelay(msg)
       }, 1)
     }
@@ -262,7 +279,7 @@ export function authGatedNet(): AuthGatedNet {
       }
       if (msg[0] === 'REQ') {
         const id = msg[1] as string
-        if (!this.authed) {
+        if (!this.authed && !(net.openReads && this.url === CANON)) {
           // As the real relay does (probed 2026-11-04): a fresh challenge with the refusal. Either still signs in.
           net.canon.refusedReqs++
           this.challenges.push(`c${++challenges}`)

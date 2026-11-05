@@ -7,7 +7,8 @@
  * slow-relay grace). A relay holds the chain once
  * it has taken one of this identity's chain events (OK true on a publish) or
  * sent one back in a fetch, in this session or an earlier one. The canonical
- * relay always does.
+ * relay always does, and so does the former canonical relay while it is
+ * pinned (useRelays SECOND_RELAY).
  *
  * Kept per identity beside the saved chain, as the publisher keeps the
  * actions still owed to the canonical relay, so a reload still knows which
@@ -21,7 +22,7 @@
 import { normalizeURL } from 'nostr-tools/utils'
 import type { NostrEvent } from './events'
 import type { RelayAnswer } from './relayOutcome'
-import { DEFAULT_RELAY, isRetiredRelay } from '../store/useRelays'
+import { DEFAULT_RELAY, SECOND_RELAY, isRetiredRelay } from '../store/useRelays'
 
 /** Where an identity's set is saved: normalized relay URLs, the canonical relay left implicit. */
 const holdersKeyFor = (pubkey: string): string => `onosendai:chain-holders:${pubkey}`
@@ -46,9 +47,15 @@ function load(pubkey: string): Set<string> {
   return set
 }
 
-/** The relays that hold `pubkey`'s chain (normalized URLs), the canonical relay always among them. */
+/**
+ * The relays that hold `pubkey`'s chain (normalized URLs), the canonical relay
+ * always among them. So is the former canonical relay while it is pinned
+ * (useRelays SECOND_RELAY): every chain was published there until 2026-11-05,
+ * and a move made on another device may have reached only it before the
+ * history catch-up, so a head is not confirmed without waiting for it.
+ */
 export function chainHolders(pubkey: string): Set<string> {
-  return new Set([normalizeURL(DEFAULT_RELAY), ...load(pubkey)])
+  return new Set([normalizeURL(DEFAULT_RELAY), normalizeURL(SECOND_RELAY), ...load(pubkey)])
 }
 
 /** These relays hold `pubkey`'s chain: one took a chain event, or sent one back. Saved at once. */

@@ -50,8 +50,9 @@ import { authGatedNet, CANON, type AuthGatedNet } from '../../lib/__tests__/auth
 import { spawnTemplate } from '../../lib/events'
 
 const BAGS = 105
-const SIGN_IN_FAILED = 'Could not sign in to cyberspace.nostr1.com.'
+const SIGN_IN_FAILED = 'Could not sign in to relay.onosendai.tech.'
 const NOTHING = 'Nothing hidden on the relay yet.'
+const BACKUP_SIGN_IN_FAILED = 'Could not sign in to backup cyberspace.nostr1.com.'
 
 interface Visit {
   net: AuthGatedNet
@@ -139,6 +140,59 @@ let stopTab: (() => void) | undefined
 
 beforeEach(() => { vi.useFakeTimers() })
 afterEach(() => { vi.useRealTimers(); vi.doUnmock('../useLoot') })
+
+describe('HIDDEN BAGS on a canonical relay with open reads (relay.onosendai.tech, 2026-11-05)', () => {
+  it('fills from the canonical relay with the bunker never answering its challenge, and never says it could not sign in', async () => {
+    const v = await visit((net) => { net.openReads = true; net.bunker.authDelay = Infinity })
+    // The read waits for its AUTH first (relay.ts authRelay) until that gives
+    // up at 30 s; then the relay, which never needed it, answers. On a relay
+    // that gates reads the same bunker leaves the list saying it could not
+    // sign in (below). Not waiting at all on a relay with open reads is a
+    // follow-up, not this switch.
+    for (let t = 0; t < 30; t++) {
+      await v.wait(1_000)
+      expect(v.loot().trouble).toBeNull()
+      expect(v.panel()).not.toContain(SIGN_IN_FAILED)
+    }
+    await v.wait(5_000)
+    expect(v.loot().items).toHaveLength(BAGS)
+    expect(v.loot().trouble).toBeNull()
+    expect(v.panel()).not.toContain(SIGN_IN_FAILED)
+    expect(v.panel()).toContain(`${BAGS} HIDDEN`)
+  }, 60_000)
+
+  it('with the bunker refusing, says it could not sign in to the backup relay, and RETRY there clears it once the bunker allows', async () => {
+    const v = await visit((net) => { net.openReads = true; net.gatedBackup = true; net.bunker.refuseAuth = 100 })
+    await v.wait(10_000)
+    expect(v.loot().items).toHaveLength(BAGS)
+    expect(v.loot().trouble).toBeNull()
+    expect(v.panel()).not.toContain(SIGN_IN_FAILED)
+    expect(v.panel()).toContain(BACKUP_SIGN_IN_FAILED)
+    expect(v.panel()).toContain('RETRY')
+    // The person allows this client in the signer, then taps RETRY on the backup's line.
+    v.net.bunker.refuseAuth = 0
+    const { retryBackup } = await import('../../hud/RelayTrouble')
+    const { refreshLoot } = await import('../useLoot')
+    retryBackup(refreshLoot)
+    await v.wait(10_000)
+    expect(v.panel()).not.toContain(BACKUP_SIGN_IN_FAILED)
+    expect(v.loot().items).toHaveLength(BAGS)
+  }, 60_000)
+
+  it('says nothing about the backup relay once it is signed in to', async () => {
+    const v = await visit((net) => { net.openReads = true; net.gatedBackup = true })
+    await v.wait(10_000)
+    expect(v.loot().items).toHaveLength(BAGS)
+    expect(v.panel()).not.toContain(BACKUP_SIGN_IN_FAILED)
+  }, 60_000)
+
+  it('fills with the bunker refusing its challenge', async () => {
+    const v = await visit((net) => { net.openReads = true; net.bunker.refuseAuth = 5 })
+    await v.wait(10_000)
+    expect(v.loot().items).toHaveLength(BAGS)
+    expect(v.loot().trouble).toBeNull()
+  }, 60_000)
+})
 
 describe('HIDDEN BAGS when the bunker cannot sign the relay in', () => {
   it('says it could not sign in, never that nothing is hidden, and fills once the signer is back', async () => {

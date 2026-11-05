@@ -46,7 +46,10 @@ import { spawnTemplate } from '../events'
 import { hopEvent, nextId } from './chainFixtures'
 
 type Holders = typeof import('../chainHolders')
-const CANONICAL = normalizeURL('wss://cyberspace.nostr1.com')
+const CANONICAL = normalizeURL('wss://relay.onosendai.tech')
+/** The former canonical relay, pinned second after the 2026-11-05 switch: it holds every chain too. */
+const SECOND = normalizeURL('wss://cyberspace.nostr1.com')
+const BASE = [CANONICAL, SECOND]
 
 /** A fresh page: every module loaded again, storage as it was. */
 async function page(): Promise<{ holders: Holders; store: typeof import('../../store/useCyberspace'); pub: typeof import('../publisher') }> {
@@ -57,25 +60,25 @@ async function page(): Promise<{ holders: Holders; store: typeof import('../../s
 const event = (pubkey: string): NostrEvent => ({ ...spawnTemplate(pubkey, 1_000), id: nextId(), pubkey, sig: '0'.repeat(128) })
 
 describe('the relays that hold a chain', () => {
-  it('the canonical relay always; another only once it sent back one of the identity\'s events; saved per identity, and a reload still knows it', async () => {
+  it('the canonical relay and the pinned former one always; another only once it sent back one of the identity\'s events; saved per identity, and a reload still knows it', async () => {
     localStorage.clear()
     let { holders } = await page()
     const pk = 'a7'.repeat(32)
     const other = 'b8'.repeat(32)
-    expect([...holders.chainHolders(pk)]).toEqual([CANONICAL])
+    expect([...holders.chainHolders(pk)]).toEqual(BASE)
     holders.noteHoldersFrom(pk, [
       { url: 'wss://holds.example', outcome: 'answered', events: [event(pk)] },
       { url: 'wss://empty.example', outcome: 'answered', events: [] },
       { url: 'wss://someone-else.example', outcome: 'answered', events: [event(other)] },
       { url: 'wss://late.example', outcome: 'unreachable', reason: 'no answer in time', events: [event(pk)] },
     ])
-    const want = [CANONICAL, normalizeURL('wss://holds.example'), normalizeURL('wss://late.example')].sort()
+    const want = [...BASE, normalizeURL('wss://holds.example'), normalizeURL('wss://late.example')].sort()
     expect([...holders.chainHolders(pk)].sort()).toEqual(want)
-    expect([...holders.chainHolders(other)]).toEqual([CANONICAL])
+    expect([...holders.chainHolders(other)]).toEqual(BASE)
     // Reload.
     ;({ holders } = await page())
     expect([...holders.chainHolders(pk)].sort()).toEqual(want)
-    expect([...holders.chainHolders(other)]).toEqual([CANONICAL])
+    expect([...holders.chainHolders(other)]).toEqual(BASE)
   })
 
   it('a retired relay leaves a saved set on the next page, on disk too, and the others stay', async () => {
@@ -84,7 +87,7 @@ describe('the relays that hold a chain', () => {
     const key = `onosendai:chain-holders:${pk}`
     localStorage.setItem(key, JSON.stringify(['wss://onosendai.feeds.relay.tools/', 'wss://holds.example/']))
     const { holders } = await page()
-    expect([...holders.chainHolders(pk)]).toEqual([CANONICAL, 'wss://holds.example/'])
+    expect([...holders.chainHolders(pk)]).toEqual([...BASE, 'wss://holds.example/'])
     expect(JSON.parse(localStorage.getItem(key)!)).toEqual(['wss://holds.example/'])
   })
 
@@ -93,7 +96,7 @@ describe('the relays that hold a chain', () => {
     const pk = 'd1'.repeat(32)
     localStorage.setItem(`onosendai:chain-holders:${pk}`, JSON.stringify(['bad url', 'wss://holds.example/']))
     const { holders } = await page()
-    expect([...holders.chainHolders(pk)]).toEqual([CANONICAL, 'wss://holds.example/'])
+    expect([...holders.chainHolders(pk)]).toEqual([...BASE, 'wss://holds.example/'])
   })
 
   it('a relay that took one of the chain\'s actions holds it, saved beside the chain', async () => {

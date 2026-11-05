@@ -478,6 +478,16 @@ export function onAuthChange(fn: (url: string, ok: boolean) => void): () => void
   return () => { authListeners.delete(fn) }
 }
 
+/**
+ * Whether this visit's sign-in to a relay failed and stands: the signer
+ * refused or ran out of time, or the relay turned the AUTH down. RETRY
+ * (retryFailedAuth) clears it on success. For the pinned backup relay's line
+ * (hud/RelayTrouble BackupTrouble), whose reads need the sign-in.
+ */
+export function signInFailed(url: string): boolean {
+  return authFailed.has(normalizeURL(url))
+}
+
 function noteAuth(url: string, ok: boolean, err?: unknown, bySigner: 'timeout' | 'refused' | null = null): void {
   if (ok) { authFailed.delete(url); mayAskFresh.delete(url) }
   else authFailed.set(url, { reason: err instanceof Error ? err.message : String(err ?? 'failed'), bySigner })
@@ -833,6 +843,16 @@ export function dropRelays(relays: string[]): void {
 /** What nostr-tools resolves a publish with when the relay could not be reached. */
 const CONNECTION_FAILURE = 'connection failure'
 
+/**
+ * NIP-01's "already have this event": the relay holds this exact id, so it
+ * took it. strfry (cyberspace.nostr1.com) says so with OK true, grain
+ * (relay.onosendai.tech) with OK false, which nostr-tools rejects. Taken for
+ * a refusal, an event a relay had stored while its first OK was lost, or that
+ * the history copy put there first, was asked of the canonical relay forever,
+ * and the strip said it was not there.
+ */
+const DUPLICATE = /^duplicate:/i
+
 async function publishOnce(listed: string[], event: NostrEvent): Promise<PublishResult> {
   const relays = skipHung(listed)
   if (relays.length === 0) return { ok: false, reason: HUNG_REASON }
@@ -845,10 +865,11 @@ async function publishOnce(listed: string[], event: NostrEvent): Promise<Publish
   // RESOLVES with the string "connection failure: ...". Counted as fulfilled,
   // an event sent while offline was marked published and never sent again,
   // and a LIVE chain read as on the relay when no relay had it.
-  const failed = (r: PromiseSettledResult<string>): string | null =>
-    r.status === 'rejected'
-      ? String(r.reason?.message ?? r.reason)
-      : String(r.value).startsWith(CONNECTION_FAILURE) ? String(r.value) : null
+  const failed = (r: PromiseSettledResult<string>): string | null => {
+    if (r.status === 'fulfilled') return String(r.value).startsWith(CONNECTION_FAILURE) ? String(r.value) : null
+    const why = String(r.reason?.message ?? r.reason)
+    return DUPLICATE.test(why) ? null : why
+  }
   results.forEach((r, i) => {
     if (r.status === 'rejected' && /publish timed out/.test(String(r.reason))) noteTimeout(relays[i])
     else if (failed(r) === null) noteAnswered(relays[i])

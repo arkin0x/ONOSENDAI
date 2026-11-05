@@ -12,7 +12,7 @@
  * words, since the action they answer is public.
  */
 
-import { RelayTrouble } from './RelayTrouble'
+import { BackupTrouble, RelayTrouble } from './RelayTrouble'
 import { useState } from 'react'
 import { nip19 } from 'nostr-tools'
 import { MAX_COMMENT_LENGTH, commentParent, countComments, type Comment, type CommentParent, type CommentSubject } from '../lib/comments'
@@ -94,6 +94,7 @@ function CommentSection({ state, placeholder, note }: { state: CommentsState; pl
         <button className="comment__reply" onClick={refresh} disabled={loading}>{loading ? 'LOADING…' : 'REFRESH'}</button>
       </div>
       {trouble && !loading && <RelayTrouble trouble={trouble} onRetry={refresh} />}
+      {!loading && <BackupTrouble onRetry={refresh} />}
       {comments.length === 0 && !loading && !trouble && <p className="comments__empty">No comments yet.</p>}
       {comments.length > 0 && (
         <ul className="comments__list">

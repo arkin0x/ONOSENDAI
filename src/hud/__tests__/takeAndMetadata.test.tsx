@@ -30,6 +30,9 @@ if (typeof localStorage === 'undefined') {
 }
 
 vi.mock('../../lib/relay', () => ({
+  // The backup relay's sign-in line (RelayTrouble BackupTrouble): signed in.
+  onAuthChange: () => () => {},
+  signInFailed: () => false,
   publishMany: vi.fn(async () => ({ ok: true })),
   query: vi.fn(async () => []),
   queryAny: vi.fn(async () => []),

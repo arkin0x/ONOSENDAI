@@ -42,6 +42,9 @@ vi.mock('../../lib/relay', () => {
     queryAnyChecked: vi.fn(async (_r: string[], f: Parameters<typeof answer>[0]) => ({ events: await answer(f), trouble: null })),
     queryEach: vi.fn(async () => []),
     relaySet: () => ['wss://relay.test'],
+    // The backup relay's sign-in line (RelayTrouble BackupTrouble): signed in.
+    onAuthChange: () => () => {},
+    signInFailed: () => false,
   }
 })
 // The turning model draws to a canvas; the bar's cover measures a real box.

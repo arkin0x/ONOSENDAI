@@ -23,7 +23,7 @@
  * remembers it.
  */
 
-import { HIDDEN_KIND, bagEntries, unbag, type Hidden } from '../lib/hidden'
+import { BagUnreadable, HIDDEN_KIND, bagEntries, unbag, type Hidden } from '../lib/hidden'
 import { bytesToHex, hexToBytes } from '../lib/events'
 import { doorHeightOf } from '../lib/looks'
 import { openerFor, type Opener } from '../lib/chests'
@@ -220,5 +220,10 @@ export async function reopenRoom(door: Hidden): Promise<void> {
   try {
     const opened = said ? await fillRoom(door, secret) : await enterRoom(door, secret)
     if (opened) lastReopen.set(key, { at: Date.now(), found: opened.found })
-  } catch { /* unreachable now: the next scan asks again */ }
+  } catch (err) {
+    // A room bag found that does not open with its key is found: asked again as seldom
+    // as one that opened, since it will not open sooner. Anything else: unreachable now,
+    // and the next scan asks again.
+    if (err instanceof BagUnreadable) lastReopen.set(key, { at: Date.now(), found: true })
+  }
 }

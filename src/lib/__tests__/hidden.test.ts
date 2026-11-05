@@ -19,6 +19,7 @@ import {
   messageInnerTemplate,
   shardInnerTemplate,
   shardRefusal,
+  BagUnreadable,
   unbag,
 } from '../hidden'
 
@@ -113,10 +114,10 @@ describe('unbag', () => {
     expect(msgItem.keyHex).toBe(bytesToHex(rk.key))
   })
 
-  it('stays shut to the wrong region', async () => {
+  it('stays shut to the wrong region, and says so rather than reading as empty', async () => {
     const outer = await bag([finalizeEvent(shardInnerTemplate(shard, at, 0, 1), sk)])
     const wrong = regionKeyAt({ ...at, x: at.x + (1n << 6n) }, 6, 20).key
-    expect(await unbag(outer, wrong)).toEqual([])
+    await expect(unbag(outer, wrong)).rejects.toBeInstanceOf(BagUnreadable)
   })
 
   it('drops an item signed by someone other than the wrapper, keeps the rest', async () => {
@@ -183,11 +184,11 @@ describe('what opening a bag found (spec 7.6: the reader is told)', () => {
   it('notes an opaque payload, and leaves no reading for a key that did not open the bag', async () => {
     const ct = await encryptForRegion(rk.key, 'just some text, not a list')
     const outer = finalizeEvent({ kind: HIDDEN_KIND, created_at: 100, content: '', tags: [['d', rk.lookupId], ['encrypted', 'aes-256-gcm', ct], ['version', '2'], ['h', '6']] }, sk)
-    expect(await unbag(outer, rk.key)).toEqual([])
+    await expect(unbag(outer, rk.key)).rejects.toBeInstanceOf(BagUnreadable)
     expect(bagReading(outer.id)).toEqual({ entries: 0, readable: 0, opaque: true })
     const wrong = regionKeyAt({ ...at, x: at.x + 5000n }, 6, 20)
     const sealed = await bag([m0()])
-    expect(await unbag(sealed, wrong.key)).toEqual([])
+    await expect(unbag(sealed, wrong.key)).rejects.toBeInstanceOf(BagUnreadable)
     expect(bagReading(sealed.id)).toBeUndefined()
   })
 })

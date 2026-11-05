@@ -14,7 +14,7 @@
 
 import { useEffect, useRef } from 'react'
 import { query } from '../lib/relay'
-import { HIDDEN_KIND } from '../lib/hidden'
+import { HIDDEN_KIND, type Hidden } from '../lib/hidden'
 import { unbagRemembered } from '../lib/foundCache'
 import { bagsToOpen } from '../lib/bagVersions'
 import { hexToBytes } from '../lib/events'
@@ -137,6 +137,9 @@ export function useDiscovery(): void {
 
       const found = []
       const opened: string[] = []
+      // Bags that did not open with their key: not current, so what an older
+      // version of one gave stays (lib/hidden.ts BagUnreadable).
+      const unread = new Set<string>()
       for (const ev of events) {
         // A scan superseded while it opens its list stops opening it: the
         // newer one is opening the same bags, and its finds are the ones
@@ -152,7 +155,13 @@ export function useDiscovery(): void {
         const height = heights.get(region) ?? 0
         const h = BigInt(height)
         const origin = { at: { x: (anchor.x >> h) << h, y: (anchor.y >> h) << h, z: (anchor.z >> h) << h }, plane }
-        const items = await unbagRemembered(ev, hexToBytes(keyHex), resolveReference, origin, height)
+        let items: Hidden[]
+        try {
+          items = await unbagRemembered(ev, hexToBytes(keyHex), resolveReference, origin, height)
+        } catch {
+          unread.add(ev.id)
+          continue
+        }
         if (items.length > 0) opened.push(region)
         found.push(...items)
       }
@@ -196,7 +205,7 @@ export function useDiscovery(): void {
       if (id === reqId.current) {
         // Asked before addDiscovered, which records these as seen.
         const fresh = useShards.getState().freshOf(found)
-        useShards.getState().dropStale(events, deletions, found)
+        useShards.getState().dropStale(unread.size > 0 ? events.filter((e) => !unread.has(e.id)) : events, deletions, found)
         useShards.getState().addDiscovered(found)
         useShards.getState().honorRetractions(keys.keys(), events, deletions)
         useShards.getState().setScanning(false)

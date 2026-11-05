@@ -1066,19 +1066,37 @@ function noteReading(bagId: string, reading: BagReading): void {
 }
 
 /**
+ * A bag that does not open with its key: no ciphertext, one that does not
+ * decrypt, or a decryption that is not a list of entries. A corrupt bag, or
+ * a hostile one under someone's lookup id. It is not an empty bag: read as
+ * one, the newest version of a bag stood for "holds nothing", and every find
+ * read from an older version went with it, a room behind a door in it too
+ * (RESCAN ALL, lib/bagVersions.ts staleFinds). So unbag throws it, and a
+ * scan leaves what it already holds from that address as it was.
+ */
+export class BagUnreadable extends Error {
+  constructor(readonly bagId: string) {
+    super('This bag does not open with its key.')
+    this.name = 'BagUnreadable'
+  }
+}
+
+/**
  * `seen`, when given, is told how many of the bag's entries are references
  * (0 when it does not open): what lib/foundCache.ts asks before keeping an
  * opening, since a reference may open differently next time (a newer version
  * of the object, or one fetched that could not be before).
+ *
+ * Throws BagUnreadable for a bag that does not open with `regionKey`.
  */
 export async function unbag(outer: NostrEvent, regionKey: Uint8Array, resolve?: ResolveReference, origin?: RegionOrigin, height?: number, seen?: { references: number }, room?: { doorId: string }): Promise<Hidden[]> {
   const ct = ciphertextOf(outer)
-  if (!ct) return []
+  if (!ct) throw new BagUnreadable(outer.id)
   const json = await decryptForRegion(regionKey, ct)
-  if (!json) return []
+  if (!json) throw new BagUnreadable(outer.id)
   let entries: unknown
-  try { entries = JSON.parse(json) } catch { noteReading(outer.id, { entries: 0, readable: 0, opaque: true }); return [] }
-  if (!Array.isArray(entries)) { noteReading(outer.id, { entries: 0, readable: 0, opaque: true }); return [] }
+  try { entries = JSON.parse(json) } catch { entries = null }
+  if (!Array.isArray(entries)) { noteReading(outer.id, { entries: 0, readable: 0, opaque: true }); throw new BagUnreadable(outer.id) }
   if (seen) seen.references = entries.filter(isReference).length
   const keyHex = bytesToHex(regionKey)
   const regionHeight = height ?? heightHint(outer) ?? 0

@@ -6,11 +6,25 @@
  * Real bags, real keys, real signatures; no relay.
  */
 
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+
+// The real unbag, unless a test asks the next opening to fail as a dropped fetch or a busy worker would.
+const failNext = vi.hoisted(() => ({ with: null as Error | null }))
+vi.mock('../hidden', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../hidden')>()
+  return {
+    ...actual,
+    unbag: async (...a: Parameters<typeof actual.unbag>) => {
+      const err = failNext.with
+      if (err) { failNext.with = null; throw err }
+      return actual.unbag(...a)
+    },
+  }
+})
 import { finalizeEvent, generateSecretKey, type NostrEvent } from 'nostr-tools/pure'
 import { newShard, type ShardModel } from 'sno-core/shards'
 import { regionKeyAt } from '../shardCrypto'
-import { bagTemplate, messageInnerTemplate, objectTemplate, referenceTo, shardInnerTemplate, type Reference } from '../hidden'
+import { BagUnreadable, bagTemplate, messageInnerTemplate, objectTemplate, referenceTo, shardInnerTemplate, type Reference } from '../hidden'
 import { OPENED_MIN_CHARS, forgetOpened, openedSize, setFoundSink, unbagRemembered } from '../foundCache'
 
 const hider = generateSecretKey()
@@ -63,8 +77,8 @@ describe('a scan does not open again what it already opened', () => {
     expect(elsewhere[0]).not.toBe(first[0])
     const taller = await unbagRemembered(outer, rk.key, undefined, origin, 7)
     expect(taller[0]).not.toBe(first[0])
-    // A key that does not open it opens nothing, as before.
-    expect(await unbagRemembered(outer, regionKeyAt({ ...at, x: at.x + 10_000n }, 6, 20).key, undefined, origin, 6)).toEqual([])
+    // A key that does not open it says so (lib/hidden.ts BagUnreadable).
+    await expect(unbagRemembered(outer, regionKeyAt({ ...at, x: at.x + 10_000n }, 6, 20).key, undefined, origin, 6)).rejects.toBeInstanceOf(BagUnreadable)
     const newer = await cityBag(101)
     const reopened = await unbagRemembered(newer, rk.key, undefined, origin, 6)
     expect(reopened[0]).not.toBe(first[0])
@@ -134,11 +148,30 @@ describe('a scan does not open again what it already opened', () => {
     expect(seen.map((h) => h.text ?? h.shard?.name).sort()).toEqual(['beside it', 'cistern'])
   })
 
-  it('counts even a bag that opens to nothing, so their number is bounded too', async () => {
+  it('counts even a bag that does not open, so their number is bounded too', async () => {
     const outer = await cityBag()
     const wrong = regionKeyAt({ ...at, x: at.x + 10_000n }, 6, 20).key
     forgetOpened(OPENED_MIN_CHARS * 3)
-    for (let i = 0; i < 10; i++) await unbagRemembered(outer, wrong, undefined, { ...origin, at: { ...origin.at, z: BigInt(i) * 64n } }, 6)
+    for (let i = 0; i < 10; i++) await unbagRemembered(outer, wrong, undefined, { ...origin, at: { ...origin.at, z: BigInt(i) * 64n } }, 6).catch(() => null)
     expect(forgetOpened()).toBeLessThanOrEqual(3)
+  })
+
+  it('an opening that failed for any other reason is not kept: the next scan opens the bag for real', async () => {
+    const outer = await cityBag()
+    failNext.with = new Error('the worker was busy')
+    const failed = await unbagRemembered(outer, rk.key, undefined, origin, 6).catch((e: unknown) => e)
+    expect(failed).toBeInstanceOf(Error)
+    expect(failed).not.toBeInstanceOf(BagUnreadable)
+    expect(forgetOpened()).toBe(0)
+    const opened = await unbagRemembered(outer, rk.key, undefined, origin, 6)
+    expect(opened.map((h) => h.shard?.name ?? h.text)).toEqual(['cistern', 'baths', 'the stairway down'])
+  })
+
+  it('a bag that does not open is kept as such: found again, it is not decrypted again, and still says so', async () => {
+    const outer = await cityBag()
+    const wrong = regionKeyAt({ ...at, x: at.x + 10_000n }, 6, 20).key
+    await expect(unbagRemembered(outer, wrong, undefined, origin, 6)).rejects.toBeInstanceOf(BagUnreadable)
+    await expect(unbagRemembered(outer, wrong, undefined, origin, 6)).rejects.toBeInstanceOf(BagUnreadable)
+    expect(forgetOpened()).toBe(1)
   })
 })

@@ -30,6 +30,7 @@ import { hexToBytes, type NostrEvent } from '../../lib/events'
 import { HIDDEN_KIND, OBJECT_KIND, bagEntries, unbag, type KeyItem, type Hidden } from '../../lib/hidden'
 import { roomKey, roomLookupId, roomOf } from '../../lib/doors'
 import { regionKeyOffThread } from '../../lib/regionKeyOffThread'
+import { encryptForRegion } from '../../lib/shardCrypto'
 import type { Position } from '../../lib/space'
 import { useStash } from '../../hud/stash'
 import { doorSecret, resetDoorSecrets, keepDoorSecret } from '../doorSecrets'
@@ -39,7 +40,9 @@ import { useInventory } from '../useInventory'
 import { useWorkshop } from '../useWorkshop'
 import { resetOpenedChests } from '../useOpenedChests'
 import { behindDoor, ownBagIn, positionOf, regionOf, useShards, type MyDeployment } from '../useShards'
-import { enterRoom, openRoom, doorAsFound } from '../rooms'
+import { enterRoom, openRoom, doorAsFound, reopenRoom, resetReopens } from '../rooms'
+import { query } from '../../lib/relay'
+import { BagUnreadable } from '../../lib/hidden'
 
 const S = () => useShards.getState()
 const C = () => useCyberspace.getState()
@@ -587,6 +590,81 @@ describe('after a placement in a room, the next left out of it', () => {
     goTo({ ...CURSOR, x: CURSOR.x + 1n })
     await S().deploy(); expect(S().deployError).toBeNull(); S().cancelDeploy()
     expect(newestBag(d.lookupId)!.tags.some((t) => t[0] === 'H')).toBe(true)
+  }, 30000)
+})
+
+describe('a room bag that does not open with its key (review of #609)', () => {
+  /** A newer room bag under the room's address and key whose contents are not a list: what a corrupt writer leaves. */
+  const corruptRoom = async (inside: MyDeployment): Promise<void> => {
+    const now = newestBag(inside.lookupId)!
+    const ct = await encryptForRegion(hexToBytes(inside.keyHex), '"not a list"')
+    relay.events.push({ id: 'c'.repeat(64), kind: HIDDEN_KIND, pubkey: me(), created_at: now.created_at + 10, content: '', tags: [['d', inside.lookupId], ['encrypted', 'aes-256-gcm', ct], ['version', '2']] })
+  }
+  const ROOM_UNREADABLE = 'The room behind this door does not open with its key. Nothing has changed.'
+
+  for (const contents of [true, false]) {
+    it(`DELETE ${contents ? 'with' : 'without'} its contents refuses, and nothing is signed, sent or taken off the list`, async () => {
+      const d = await sealDoor()
+      const inside = await hide('behind it', HEIGHT)
+      await corruptRoom(inside)
+      const before = sent()
+      const rows = S().mine.map((m) => m.eventId).sort()
+      expect(await S().deleteDoor(d.eventId, contents)).toBe(ROOM_UNREADABLE)
+      expect(sent()).toBe(before)
+      expect(retracted(inside.lookupId)).toBe(false)
+      expect(S().mine.map((m) => m.eventId).sort()).toEqual(rows)
+    }, 30000)
+  }
+
+  it('a new lock (rotating the room key) refuses, and nothing is signed, sent or taken off the list', async () => {
+    const d = await sealDoor()
+    const inside = await hide('behind it', HEIGHT)
+    await corruptRoom(inside)
+    const before = sent()
+    const rows = S().mine.map((m) => m.eventId).sort()
+    expect(await S().resealDoor(d.eventId, { name: 'North Door', requires: 'new', lock: lockOf(forgeKey('New')) })).toBe(ROOM_UNREADABLE)
+    expect(sent()).toBe(before)
+    expect(retracted(inside.lookupId)).toBe(false)
+    expect(S().mine.map((m) => m.eventId).sort()).toEqual(rows)
+    expect(doors()[0].eventId).toBe(d.eventId)
+  }, 30000)
+
+  it('OPEN reads it as an error, not a room that came back empty, and a scan asks for it again as seldom as for a room found', async () => {
+    const d = await sealDoor()
+    const inside = await hide('behind it', HEIGHT)
+    await corruptRoom(inside)
+    const door = doorAsFound(d.eventId)!
+    const secret = doorSecret(me(), d.eventId)!
+    await expect(openRoom(door, secret)).rejects.toBeInstanceOf(BagUnreadable)
+    resetReopens()
+    const asked = (): number => vi.mocked(query).mock.calls.filter((c) => (c[0] as { '#d'?: string[] })['#d']?.includes(inside.lookupId)).length
+    const t0 = Date.now()
+    const clock = vi.spyOn(Date, 'now')
+    try {
+      clock.mockReturnValue(t0)
+      await reopenRoom(door)
+      const once = asked()
+      expect(once).toBeGreaterThan(0)
+      // Past the 30 s a missing room waits: not asked again.
+      clock.mockReturnValue(t0 + 60_000)
+      await reopenRoom(door)
+      expect(asked()).toBe(once)
+      // Past the 5 min a found room waits: asked again.
+      clock.mockReturnValue(t0 + 6 * 60_000)
+      await reopenRoom(door)
+      expect(asked()).toBeGreaterThan(once)
+    } finally {
+      clock.mockRestore()
+    }
+  }, 30000)
+
+  it('a new name on the same lock goes ahead: it never reads or rewrites the room, whose bag stays as it was', async () => {
+    const d = await sealDoor()
+    const inside = await hide('behind it', HEIGHT)
+    await corruptRoom(inside)
+    expect(await S().resealDoor(d.eventId, { name: 'South Door', requires: `the ${lock.name}`, lock: lockOf() })).toBeNull()
+    expect(newestBag(inside.lookupId)!.id).toBe('c'.repeat(64))
+    expect(retracted(inside.lookupId)).toBe(false)
   }, 30000)
 })
 

@@ -6,7 +6,21 @@
  * Real bags, real keys, real signatures; no relay.
  */
 
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+
+// The real unbag, unless a test asks the next opening to fail as a dropped fetch or a busy worker would.
+const failNext = vi.hoisted(() => ({ with: null as Error | null }))
+vi.mock('../hidden', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../hidden')>()
+  return {
+    ...actual,
+    unbag: async (...a: Parameters<typeof actual.unbag>) => {
+      const err = failNext.with
+      if (err) { failNext.with = null; throw err }
+      return actual.unbag(...a)
+    },
+  }
+})
 import { finalizeEvent, generateSecretKey, type NostrEvent } from 'nostr-tools/pure'
 import { newShard, type ShardModel } from 'sno-core/shards'
 import { regionKeyAt } from '../shardCrypto'
@@ -140,6 +154,17 @@ describe('a scan does not open again what it already opened', () => {
     forgetOpened(OPENED_MIN_CHARS * 3)
     for (let i = 0; i < 10; i++) await unbagRemembered(outer, wrong, undefined, { ...origin, at: { ...origin.at, z: BigInt(i) * 64n } }, 6).catch(() => null)
     expect(forgetOpened()).toBeLessThanOrEqual(3)
+  })
+
+  it('an opening that failed for any other reason is not kept: the next scan opens the bag for real', async () => {
+    const outer = await cityBag()
+    failNext.with = new Error('the worker was busy')
+    const failed = await unbagRemembered(outer, rk.key, undefined, origin, 6).catch((e: unknown) => e)
+    expect(failed).toBeInstanceOf(Error)
+    expect(failed).not.toBeInstanceOf(BagUnreadable)
+    expect(forgetOpened()).toBe(0)
+    const opened = await unbagRemembered(outer, rk.key, undefined, origin, 6)
+    expect(opened.map((h) => h.shard?.name ?? h.text)).toEqual(['cistern', 'baths', 'the stairway down'])
   })
 
   it('a bag that does not open is kept as such: found again, it is not decrypted again, and still says so', async () => {

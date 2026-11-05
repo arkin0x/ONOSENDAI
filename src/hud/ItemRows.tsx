@@ -28,7 +28,7 @@ import { useProfile } from '../hooks/useProfile'
 import { cashuLabel, readCashuToken } from '../lib/cashu'
 import { chestSealer, openWithSecret, openWithSigner, openerFor, readContents, requiresLabel, revealedIn, type ChestEntry, type Opener } from '../lib/chests'
 import { positionOf, useShards } from '../store/useShards'
-import { hiddenLabel, itemLineage, type ChestItem } from '../lib/hidden'
+import { BagUnreadable, hiddenLabel, itemLineage, type ChestItem } from '../lib/hidden'
 import { ItemFace } from './ItemIcon'
 import { ShardThumb } from './ShardThumb'
 import { holdsEntry, holdsItem, openingKeys, type HeldFrom, type HeldItem, type HeldPlace } from '../lib/inventory'
@@ -242,8 +242,11 @@ export function ChestBlock({ id, chest, author, verified, place, sealer: given, 
     // Then the room: what is behind it settles out of static where it stands
     // (door A), the first time only. The card has gone by now, so what went wrong
     // is said where it can be seen (§3.7.3: not found is not the same as empty).
-    const opened = await fillRoom(at, secret, first ? (items) => useCeremony.getState().mark(items) : undefined).catch(() => undefined)
+    let unreadable = false
+    const opened = await fillRoom(at, secret, first ? (items) => useCeremony.getState().mark(items) : undefined).catch((err: unknown) => { unreadable = err instanceof BagUnreadable; return undefined })
     if (opened === null) return
+    // The relays have the room, but its bag does not open with its key: not missing, so not "may only be missing".
+    if (unreadable) { useToast.getState().show({ label: 'THE ROOM WILL NOT OPEN', meta: `${chest.name} is open. The room behind it is unreadable.`, mark: 'build' }); return }
     if (!opened?.found) useToast.getState().show({ label: 'THE ROOM COULD NOT BE RETRIEVED', meta: `${chest.name} is open, but what is behind it did not come back from your relays. It may only be missing from them.`, mark: 'build' })
   }
 

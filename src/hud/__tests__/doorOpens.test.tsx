@@ -42,6 +42,7 @@ import { forgeKey, sealEntries } from '../../lib/chests'
 import { HIDDEN_KIND, bagTemplate, chestInnerTemplate, chestItemOf, messageInnerTemplate, rumorOf, type BagEntry, type Hidden } from '../../lib/hidden'
 import { ROOM_BAG_SETTINGS, newDoorSecret, roomEntries, roomKey, roomLookupId } from '../../lib/doors'
 import { regionKeyOffThread } from '../../lib/regionKeyOffThread'
+import { encryptForRegion } from '../../lib/shardCrypto'
 import type { Position } from '../../lib/space'
 import { mount, settled } from '../../test/elementRoot'
 import { doorSecretOnlySaid, resetDoorSecrets } from '../../store/rooms'
@@ -130,6 +131,20 @@ describe('OPEN on a door', () => {
     const card = await mount(<SecretModal />)
     await card.press(/^OPEN$/)
     await vi.waitFor(() => expect(useToast.getState().toast?.label).toBe('THE ROOM COULD NOT BE RETRIEVED'))
+    expect(openedByHand(me(), found.eventId, found.chest!.lockPubkey)).toBe(true)
+    await card.unmount()
+  })
+
+  it('a room bag the relays hold that does not open with its key is said as unreadable, not as missing, and the door stays open', async () => {
+    const { found, room } = await door()
+    const d = room.tags.find((t) => t[0] === 'd')![1]
+    const ct = await encryptForRegion(generateSecretKey(), '[]')
+    relay.events = [finalizeEvent({ kind: HIDDEN_KIND, created_at: T + 1, content: '', tags: [['d', d], ['encrypted', 'aes-256-gcm', ct], ['version', '2']] }, hider)]
+    useShards.setState({ discovered: { [found.eventId]: found }, selectedSecret: found.eventId })
+    const card = await mount(<SecretModal />)
+    await card.press(/^OPEN$/)
+    await vi.waitFor(() => expect(useToast.getState().toast?.label).toBe('THE ROOM WILL NOT OPEN'))
+    expect(useToast.getState().toast?.meta).toBe('North Door is open. The room behind it is unreadable.')
     expect(openedByHand(me(), found.eventId, found.chest!.lockPubkey)).toBe(true)
     await card.unmount()
   })

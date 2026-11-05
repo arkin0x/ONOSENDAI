@@ -49,6 +49,7 @@ import { signedTableOnly } from '../lib/carried'
 import { deployCeiling, deployRoute, localKeyCeiling, needsAsk, regionKeyQuote } from '../lib/deployPlan'
 import { useSecrets } from './useSecrets'
 import {
+  BagUnreadable,
   DEFAULT_BAG_SETTINGS,
   HIDDEN_KIND,
   bagEntries,
@@ -1428,6 +1429,8 @@ export function storedMine(mine: readonly MyDeployment[]): string {
 
 const BAG_NOT_READ = 'No relay answered, so this bag could not be read. Nothing was changed. Try again when one answers.'
 const SWITCHED = 'You switched identity while this was on its way, so it was not sent.'
+/** The room's newest bag does not open with its key (lib/hidden.ts BagUnreadable): its rows are left as they are. */
+const ROOM_UNREADABLE = 'The room behind this door does not open with its key. Nothing has changed.'
 /** The deploy bar's note while a hide waits for a HIDE AGAIN or BROADCAST to land (holdBags). */
 const BAG_WAIT_NOTE = 'Waiting for a bag already going out'
 /** The hide waiting on the bag lock, if one is: CANCEL may end it, since it has signed nothing yet. */
@@ -2157,7 +2160,14 @@ export const useShards = create<ShardsState>((set, get) => {
     const found = doorAsFound(d.eventId)
     const h = BigInt(place.height)
     const at = positionOf(d)
-    const read = await unbag(newest, key, resolveReference, { at: { x: (at.x >> h) << h, y: (at.y >> h) << h, z: (at.z >> h) << h }, plane: d.plane }, place.height, undefined, { doorId: found?.eventId ?? d.eventId })
+    let read: Hidden[]
+    try {
+      read = await unbag(newest, key, resolveReference, { at: { x: (at.x >> h) << h, y: (at.y >> h) << h, z: (at.z >> h) << h }, plane: d.plane }, place.height, undefined, { doorId: found?.eventId ?? d.eventId })
+    } catch (err) {
+      // Read as empty, the rewrite after this would drop all of it.
+      if (err instanceof BagUnreadable) return ROOM_UNREADABLE
+      throw err
+    }
     if (cyber().identity.pubkey !== owner) return SWITCHED
     get().addDiscovered(read)
     // Filed under this door: what the relay names by any door of the room is one room.
@@ -3714,12 +3724,18 @@ export const useShards = create<ShardsState>((set, get) => {
         const cube = held && (!held.heights || (held.heights.x === held.heights.y && held.heights.y === held.heights.z)) ? held.height : undefined
         const height = cube ?? get().mine.find((d) => d.lookupId === lookupId)?.height
         const found: Hidden[] = []
-        for (const ev of events) found.push(...await unbagRemembered(ev, hexToBytes(keyHex), resolveReference, undefined, height))
+        // A bag that does not open with this key is not current: what an older
+        // version of it gave stays, and the rest still open (lib/hidden.ts BagUnreadable).
+        const read: NostrEvent[] = []
+        for (const ev of events) {
+          try { found.push(...await unbagRemembered(ev, hexToBytes(keyHex), resolveReference, undefined, height)) } catch { continue }
+          read.push(ev)
+        }
         // What this scan opened for the first time gets the ceremony: the
         // decode in the scene and the chip that says how many.
         const fresh = get().freshOf(found)
         // What is gone from the bag is known only from the canonical relay's answer.
-        if (!asked.trouble) get().dropStale(events, deletions, found)
+        if (!asked.trouble) get().dropStale(read, deletions, found)
         if (found.length > 0) get().addDiscovered(found)
         get().honorRetractions([lookupId], events, deletions)
         if (fresh.length > 0) useCeremony.getState().mark(fresh)
@@ -4052,7 +4068,7 @@ export const useShards = create<ShardsState>((set, get) => {
       for (const ev of events) {
         const h = BigInt(item.height)
         const p = positionOf(item)
-        const items = await unbag(ev, rk.key, resolveReference, { at: { x: (p.x >> h) << h, y: (p.y >> h) << h, z: (p.z >> h) << h }, plane: item.plane }, item.height, undefined, item.room)
+        const items = await unbag(ev, rk.key, resolveReference, { at: { x: (p.x >> h) << h, y: (p.y >> h) << h, z: (p.z >> h) << h }, plane: item.plane }, item.height, undefined, item.room).catch(() => [])
         if (items.some((h) => h.eventId === eventId)) return 'found'
         // The bag opened and this item is in it, signed, yet unbag dropped it:
         // the format refused it, and every other client will too.

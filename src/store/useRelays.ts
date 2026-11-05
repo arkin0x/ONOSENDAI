@@ -2,7 +2,9 @@
  * useRelays.ts — which relays this client talks to.
  *
  * The canonical relay (DEFAULT_RELAY) is the default for everyone and is
- * always present: it is where the shared world lives, so it cannot be removed. On top of it you
+ * always present: it is where the shared world lives, so it cannot be removed.
+ * The former canonical relay (SECOND_RELAY) is pinned after it while the
+ * 2026-11-05 switch settles. On top of them you
  * add your own, and everything the client does — publishing movement and
  * hidden content, discovering it, reading other chains — fans out across the
  * whole set. Persisted locally, so your relays survive a reload.
@@ -19,8 +21,26 @@ import { create } from 'zustand'
  * the self-check, NIP-42 auth, the panels) reads it from this constant or
  * from relay.ts CYBERSPACE_RELAY, which is this constant. Moving cyberspace
  * to another relay is a change to this line alone.
+ *
+ * Since 2026-11-05 it is the owner's own relay, which holds the full history
+ * copied from wss://cyberspace.nostr1.com. Reads are open; it asks for NIP-42
+ * AUTH only for protected (NIP-70) events, and takes events up to 512 KB.
  */
-export const DEFAULT_RELAY = 'wss://cyberspace.nostr1.com'
+export const DEFAULT_RELAY = 'wss://relay.onosendai.tech'
+
+/**
+ * The former canonical relay, pinned second for about two weeks after the
+ * switch (the owner, 2026-11-05): every action still reaches people and
+ * clients that read only it, and a chain whose newest moves reached only it
+ * (before the history catch-up) is still found. It also counts as holding
+ * every chain (chainHolders.ts). It gates reads with NIP-42 AUTH and refuses
+ * events over about 262 KB. Ending the window is deleting this constant and
+ * its uses; nothing saved names it, because the pinned relays are never saved.
+ */
+export const SECOND_RELAY = 'wss://cyberspace.nostr1.com'
+
+/** The relays every list starts with, in order, and that cannot be removed. */
+export const PINNED_RELAYS: readonly string[] = [DEFAULT_RELAY, SECOND_RELAY]
 
 /**
  * Hosts this client never dials, whichever list names them: a saved relay
@@ -79,15 +99,15 @@ function load(): string[] {
     // A retired relay leaves the saved list too, so this browser stops carrying it.
     const kept = urls.filter((u) => !isRetiredRelay(u))
     if (kept.length !== urls.length) save(kept)
-    // The default is always first and always present.
-    return [DEFAULT_RELAY, ...kept.filter((u) => u !== DEFAULT_RELAY)]
+    // The pinned relays are always first and always present, the canonical one first.
+    return [...PINNED_RELAYS, ...kept.filter((u) => !PINNED_RELAYS.includes(u))]
   } catch {
-    return [DEFAULT_RELAY]
+    return [...PINNED_RELAYS]
   }
 }
 
 function save(relays: string[]): void {
-  try { localStorage.setItem(STORAGE, JSON.stringify(relays.filter((r) => r !== DEFAULT_RELAY))) } catch { /* private mode */ }
+  try { localStorage.setItem(STORAGE, JSON.stringify(relays.filter((r) => !PINNED_RELAYS.includes(r)))) } catch { /* private mode */ }
 }
 
 export const useRelays = create<RelaysState>((set, get) => ({
@@ -104,13 +124,13 @@ export const useRelays = create<RelaysState>((set, get) => ({
   },
 
   remove: (url) => {
-    if (url === DEFAULT_RELAY) return
+    if (PINNED_RELAYS.includes(url)) return
     const relays = get().relays.filter((r) => r !== url)
     set({ relays })
     save(relays)
   },
 
-  reset: () => { set({ relays: [DEFAULT_RELAY] }); save([DEFAULT_RELAY]) },
+  reset: () => { set({ relays: [...PINNED_RELAYS] }); save([...PINNED_RELAYS]) },
 }))
 
 /** The current relay set, for the non-React relay helpers. */

@@ -14,10 +14,16 @@ and the terrain underneath shows where the temporal work is concentrated.
 ## Relays and auth
 
 The client speaks NIP-42: it answers a relay's AUTH challenge with the session
-key before reading or writing, so an auth-required relay works. cyberspace.nostr1.com
-requires auth; publishing (movement `kind:3333`, hidden content `kind:33330`,
-deletions `kind:5`) works for any pubkey, and reading requires the relay to
-authorize the pubkey for REQs.
+key before reading or writing, so an auth-required relay works.
+
+The canonical relay is `wss://relay.onosendai.tech` (since 2026-11-05), the
+owner's own relay, holding the full history copied from
+`wss://cyberspace.nostr1.com`. Reads are open; it asks for AUTH only for
+protected (NIP-70) events, and takes events up to 512 KB. For about two weeks
+`wss://cyberspace.nostr1.com` stays pinned second (`SECOND_RELAY` in
+`src/store/useRelays.ts`): every action goes to both, and it counts as holding
+every chain. It requires auth for reads and refuses events over about 262 KB,
+so a large bag can land on the canonical relay and still be refused by it.
 
 ## Running it
 
@@ -167,7 +173,7 @@ coordinate and plane are AES-256-GCM encrypted to the region key
 `sha256(region_bytes)`, and only the `lookup_id = sha256(key)` is public, so
 the coordinate never leaves in the clear. The derivation is spec section 7.2
 exactly, so a shard hidden here is one the reference CLI can find and open. The
-events go to `wss://cyberspace.nostr1.com` alongside movement. CANCEL on a
+events go to the canonical relay alongside movement. CANCEL on a
 deploy started from the bench goes back to the bench. The green box is the
 region it will be found in; one too big for the view is drawn clipped around
 the cursor, with ZOOM OUT walls on the faces it continues through.
@@ -242,8 +248,8 @@ action before it, and the avatar is back at its pubkey with nothing behind it.
 It arms a warning first, in v1's words, because it cannot be undone.
 
 **Local / Live.** The switch under RECALL and COMMIT decides whether events
-leave the device. Live (the default) publishes each one to
-`wss://cyberspace.nostr1.com` as it is signed, in chain order, and the proof
+leave the device. Live (the default) publishes each one to the canonical
+relay `wss://relay.onosendai.tech` as it is signed, in chain order, and the proof
 chain panel shows how many the relay has acknowledged. Local keeps them here;
 switching to Live later publishes the whole backlog, oldest first, so every
 prefix the relay holds is itself a valid chain.

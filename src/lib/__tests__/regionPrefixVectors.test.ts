@@ -13,7 +13,8 @@
  * there and copy it here unchanged. A vector this code disagrees with is a
  * finding about one implementation or the other, never a vector to edit.
  *
- * Every vector runs through parseCoordRoute exactly as a /C/ path does, then
+ * Every vector runs through parseCoordRoute exactly as a /C/ path does (and
+ * a /c/ path reads the same), then
  * prefixRegion (1 to 63 characters) or coordPlace (64): the hex, the kind,
  * the plane, and each axis's min, max, height and size; and every point
  * decodes to its axes and lies inside the box exactly when the vector says.
@@ -25,7 +26,7 @@ import { coordToXyz } from 'cyberspace-core'
 import { coordPlace, parseCoordRoute, prefixRegion } from '../coordRoute'
 
 const FILE = 'src/lib/__tests__/vectors/region-prefix-vectors.json'
-const SHA256 = 'eaeec282fffae9bf6c96b2345d2480da417dc9de7e66ed98547a7b407ce7c9e1'
+const SHA256 = '4dc1cca6e28f1d5fe40cbf100a0733d258be14536ecd68a4c08261952ad02fa5'
 
 interface Axis { min: string; max: string; height: number; size: string }
 interface Point { coord: string; x: string; y: string; z: string; plane: 0 | 1 }
@@ -46,13 +47,15 @@ const vectors: Vector[] = JSON.parse(bytes.toString('utf8')).vectors
 describe('region-prefix-vectors.json', () => {
   it('is the spec root\'s copy, byte for byte', () => {
     expect(createHash('sha256').update(bytes).digest('hex')).toBe(SHA256)
-    expect(vectors.length).toBe(48)
+    expect(vectors.length).toBe(64)
   })
 
   for (const v of vectors) {
     it(v.name, () => {
       const route = parseCoordRoute('/C/' + v.input)
       expect(route).not.toBeNull()
+      // A lowercase /c/ reads the same.
+      expect(parseCoordRoute('/c/' + v.input)).toEqual(route)
       if (!v.valid) {
         expect(route!.kind).toBe('invalid')
         return

@@ -24,7 +24,7 @@
  * this device as the line arrives and kept there (useNotifications).
  */
 
-import { RelayTrouble } from './RelayTrouble'
+import { BackupTrouble, RelayTrouble } from './RelayTrouble'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { AtSign, MessageCircle, MessageSquare } from 'lucide-react'
@@ -287,6 +287,7 @@ export function NotificationsModal(): JSX.Element | null {
         </div>
         <div className="notif__scroll" ref={list}>
           {trouble && !loading && <RelayTrouble trouble={trouble} onRetry={() => void useNotifications.getState().poll()} />}
+          {!loading && <BackupTrouble onRetry={() => void useNotifications.getState().poll()} />}
           {items.length === 0 && !loading && !trouble && <p className="comments__empty">Nothing yet. Reactions and comments on your moves and hidden items, and chat lines that tag you, land here.</p>}
           <ul className="notif__list">
             {items.map((n) => <Row key={n.id} n={n} words={opened[n.id]} />)}

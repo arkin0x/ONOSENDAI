@@ -9,7 +9,7 @@
  * chest.
  */
 
-import { RelayTrouble } from './RelayTrouble'
+import { BackupTrouble, RelayTrouble } from './RelayTrouble'
 import { useEffect, useMemo, useState } from 'react'
 import { useProfile } from '../hooks/useProfile'
 import { useEscape } from '../hooks/useEscape'
@@ -63,6 +63,7 @@ export function ItemFeedPicker({ onPick, onClose }: { onPick: (l: ItemListing) =
         </header>
         <input className="avatars__input" value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search items by name" aria-label="Search items" autoFocus />
         {trouble && !loading && <RelayTrouble trouble={trouble} onRetry={() => void useItemFeed.getState().load()} />}
+        {!loading && <BackupTrouble onRetry={() => void useItemFeed.getState().load()} />}
         <ul className="secrets__list">
           {shown.length === 0 && !(trouble && !loading && listings.length === 0) && (
             <li className="secrets__empty">{loading ? 'Reading the item feed…' : listings.length === 0 ? 'No items are listed on your relays yet.' : 'No listed item matches.'}</li>

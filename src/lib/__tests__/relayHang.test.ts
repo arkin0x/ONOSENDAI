@@ -389,6 +389,38 @@ describe('a relay that opens and then says nothing', () => {
   })
 })
 
+describe('the canonical relay slow to connect (6 s) with the pinned former one up (review of #606)', () => {
+  afterEach(() => { net.rules.connectMs.delete(CANON); net.rules.hold.delete(SECOND); net.rules.hold.delete(CANON); dropRelays([CANON, SECOND]) })
+
+  it('passes, degraded, on the former canonical relay\'s answer when it holds the anchor', async () => {
+    dropRelays([CANON, SECOND])
+    const c = aChain()
+    net.rules.connectMs.set(CANON, 6000)
+    net.rules.hold.set(SECOND, [c.spawn, c.hop1])
+    const got = await within(6500, confirmChainEvents(c.pubkey, c.spawn.id, [c.spawn, c.hop1], { since: c.hop1.created_at, anchorId: c.hop1.id }))
+    expect(got.settled).toBe(true)
+    expect(got.value).not.toBeNull()
+  })
+
+  it('refuses when the former canonical relay answers without the anchor: its silence says nothing about a newer move', async () => {
+    dropRelays([CANON, SECOND])
+    const c = aChain()
+    net.rules.connectMs.set(CANON, 6000)
+    const got = await within(6500, confirmChainEvents(c.pubkey, c.spawn.id, [c.spawn, c.hop1], { since: c.hop1.created_at, anchorId: c.hop1.id }))
+    expect(got.settled).toBe(true)
+    expect(got.value).toBeNull()
+  })
+
+  it('finds a newer move only the former canonical relay holds, and hands it back', async () => {
+    dropRelays([CANON, SECOND])
+    const c = aChain()
+    net.rules.connectMs.set(CANON, 6000)
+    net.rules.hold.set(SECOND, [c.spawn, c.hop1, c.hop2])
+    const got = await within(6500, confirmChainEvents(c.pubkey, c.spawn.id, [c.spawn, c.hop1], { since: c.hop1.created_at, anchorId: c.hop1.id }))
+    expect(got.value?.some((e) => e.id === c.hop2.id)).toBe(true)
+  })
+})
+
 describe('a relay that already holds the event (grain, the canonical relay since 2026-11-05)', () => {
   afterEach(() => { net.rules.duplicate.delete(CANON); dropRelays([CANON]) })
 

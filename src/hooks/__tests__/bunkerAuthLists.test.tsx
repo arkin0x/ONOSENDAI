@@ -52,6 +52,7 @@ import { spawnTemplate } from '../../lib/events'
 const BAGS = 105
 const SIGN_IN_FAILED = 'Could not sign in to relay.onosendai.tech.'
 const NOTHING = 'Nothing hidden on the relay yet.'
+const BACKUP_SIGN_IN_FAILED = 'Could not sign in to backup cyberspace.nostr1.com.'
 
 interface Visit {
   net: AuthGatedNet
@@ -158,6 +159,31 @@ describe('HIDDEN BAGS on a canonical relay with open reads (relay.onosendai.tech
     expect(v.loot().trouble).toBeNull()
     expect(v.panel()).not.toContain(SIGN_IN_FAILED)
     expect(v.panel()).toContain(`${BAGS} HIDDEN`)
+  }, 60_000)
+
+  it('with the bunker refusing, says it could not sign in to the backup relay, and RETRY there clears it once the bunker allows', async () => {
+    const v = await visit((net) => { net.openReads = true; net.gatedBackup = true; net.bunker.refuseAuth = 100 })
+    await v.wait(10_000)
+    expect(v.loot().items).toHaveLength(BAGS)
+    expect(v.loot().trouble).toBeNull()
+    expect(v.panel()).not.toContain(SIGN_IN_FAILED)
+    expect(v.panel()).toContain(BACKUP_SIGN_IN_FAILED)
+    expect(v.panel()).toContain('RETRY')
+    // The person allows this client in the signer, then taps RETRY on the backup's line.
+    v.net.bunker.refuseAuth = 0
+    const { retryBackup } = await import('../../hud/RelayTrouble')
+    const { refreshLoot } = await import('../useLoot')
+    retryBackup(refreshLoot)
+    await v.wait(10_000)
+    expect(v.panel()).not.toContain(BACKUP_SIGN_IN_FAILED)
+    expect(v.loot().items).toHaveLength(BAGS)
+  }, 60_000)
+
+  it('says nothing about the backup relay once it is signed in to', async () => {
+    const v = await visit((net) => { net.openReads = true; net.gatedBackup = true })
+    await v.wait(10_000)
+    expect(v.loot().items).toHaveLength(BAGS)
+    expect(v.panel()).not.toContain(BACKUP_SIGN_IN_FAILED)
   }, 60_000)
 
   it('fills with the bunker refusing its challenge', async () => {

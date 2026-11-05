@@ -478,6 +478,16 @@ export function onAuthChange(fn: (url: string, ok: boolean) => void): () => void
   return () => { authListeners.delete(fn) }
 }
 
+/**
+ * Whether this visit's sign-in to a relay failed and stands: the signer
+ * refused or ran out of time, or the relay turned the AUTH down. RETRY
+ * (retryFailedAuth) clears it on success. For the pinned backup relay's line
+ * (hud/RelayTrouble BackupTrouble), whose reads need the sign-in.
+ */
+export function signInFailed(url: string): boolean {
+  return authFailed.has(normalizeURL(url))
+}
+
 function noteAuth(url: string, ok: boolean, err?: unknown, bySigner: 'timeout' | 'refused' | null = null): void {
   if (ok) { authFailed.delete(url); mayAskFresh.delete(url) }
   else authFailed.set(url, { reason: err instanceof Error ? err.message : String(err ?? 'failed'), bySigner })

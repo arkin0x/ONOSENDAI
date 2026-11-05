@@ -27,7 +27,7 @@ import { Box } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { refreshLoot, useLoot } from '../hooks/useLoot'
-import { RelayTrouble } from './RelayTrouble'
+import { BackupTrouble, RelayTrouble } from './RelayTrouble'
 import { bagReading, messagePreview } from '../lib/hidden'
 import { NFT_WORDS, replaceNftLinks } from '../lib/nftLink'
 import { useBagReadingsVersion } from '../hooks/useBagReadings'
@@ -170,6 +170,7 @@ function BagList({ mode }: { mode: Mode }): JSX.Element {
       {trouble
         ? <RelayTrouble trouble={trouble} onRetry={refreshLoot} />
         : status === 'error' && <p className="notice">Could not reach {relayName}.</p>}
+      <BackupTrouble onRetry={refreshLoot} />
 
       <ul className="avatars__list loot__list">
         {shown.slice(0, SHOWN).map(row)}

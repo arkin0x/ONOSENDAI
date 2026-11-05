@@ -167,7 +167,7 @@ describe('a finished HOSAKA ride is checked here before anything is signed', { t
 })
 
 describe('the ride record survives a reload', () => {
-  beforeEach(() => localStorage.removeItem('onosendai:cloudJob'))
+  beforeEach(() => { localStorage.removeItem('onosendai:cloudJob'); localStorage.removeItem('onosendai:cloudJob:kept') })
   const record: PendingCloudJob = {
     version: 1, jobId: 'job-ride', pollToken: 'tok', action: 'ride', pubkey: 'p',
     from: wirePosition({ x: 1n, y: 2n, z: 3n }), to: wirePosition({ x: 1n << 84n, y: 5n, z: 6n }), plane: 1,

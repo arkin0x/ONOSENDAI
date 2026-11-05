@@ -106,6 +106,7 @@ beforeAll(() => {
 beforeEach(() => {
   for (const f of Object.values(fake)) if (typeof f === 'function') f.mockReset()
   localStorage.removeItem('onosendai:cloudJob')
+  localStorage.removeItem('onosendai:cloudJob:kept')
   useRideRun.setState({ error: null, progress: null, hosaka: false, path: null })
   useCyberspace.setState({
     cloudPrefs: { mode: 'auto', autoMaxSats: 0, apiUrl: 'http://fake', profile: 'time' },

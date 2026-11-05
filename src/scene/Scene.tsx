@@ -34,6 +34,7 @@ import { watchContext } from '../lib/glContext'
 import { broadcastDpr, isBroadcast, isPortraitBroadcast, portraitFov, recoverLostContext } from '../lib/tv/broadcast'
 import { keepPrograms } from '../lib/keepPrograms'
 import { sortWithoutBoxing } from '../lib/sortNoAlloc'
+import { FrameDriver } from './frameDriver'
 import { BG } from '../lib/palette'
 import { GRID_RADIUS, cellDelta, claimScreenAxes, levelScreenAxes, originShift, renderDirection, viewAxes, type Position } from '../lib/space'
 import { carryOrbit } from '../lib/zoomOrbit'
@@ -1000,22 +1001,6 @@ function Rig(): JSX.Element {
 }
 
 /**
- * R3F zeroes the clock whenever the frameloop changes. Several things here
- * time themselves from clock.elapsedTime (fleet cube fades, the crossing
- * flash, a glide), so a pause would leave them waiting for a time that had
- * already passed. This keeps the last elapsed time seen and puts it back when
- * drawing resumes: to everything in the scene the pause never happened.
- */
-function ClockKeeper(): null {
-  const clock = useThree((s) => s.clock)
-  const frameloop = useThree((s) => s.frameloop)
-  const last = useRef(0)
-  useFrame(() => { last.current = clock.elapsedTime })
-  useEffect(() => { if (frameloop !== 'never' && last.current > 0) clock.elapsedTime = last.current }, [frameloop, clock])
-  return null
-}
-
-/**
  * The last word on a tagged texel: alpha 1. The tag (colour with alpha 0)
  * is valid inside the composer's buffers but not on the canvas, which
  * composites premultiplied: a compositor is free to clamp colour to alpha,
@@ -1123,10 +1108,6 @@ const COMPOSER_SAMPLES = typeof window === 'undefined' ? 4 : composerSamples(can
  * has nothing to say to it.
  */
 export const Scene = memo(function Scene(): JSX.Element {
-  // The workshop is an opaque, full-screen bench with its own canvas. Drawing
-  // the world under it is pure cost, and on a phone it was most of the frame:
-  // the bench measured 3 fps with the world running behind it.
-  const covered = useWorkshop((s) => s.open)
   if (import.meta.env.DEV) { const w = window as unknown as { __sceneRenders?: number }; w.__sceneRenders = (w.__sceneRenders ?? 0) + 1 }
   // The composer's children, made once. EffectComposer rebuilds its passes
   // whenever its `children` prop is a new element, and it only removes the
@@ -1150,13 +1131,14 @@ export const Scene = memo(function Scene(): JSX.Element {
       // (2026-10-15; screenshots identical with and without).
       gl={{ antialias: false, powerPreference: 'high-performance' }}
       style={{ background: BG }}
-      frameloop={covered ? 'never' : 'always'}
+      frameloop="never"
       // A lost context is said in the console (lib/glContext). Shader
       // programs are compiled once, not again at every cut (lib/keepPrograms).
       // On the stream, a loss that does not come back reloads (lib/tv/broadcast).
       onCreated={({ gl, scene }) => { watchContext(gl.domElement, 'main view'); recoverLostContext(gl.domElement); keepPrograms(gl, scene); sortWithoutBoxing(gl) }}
     >
-      <ClockKeeper />
+      {/* Draws the view: frameloop "never" and this, every frame or none past 60 a second when nothing moves. */}
+      <FrameDriver />
       {/* Fog to pure black: the only distance cue in an otherwise empty field. */}
       <fog attach="fog" args={[0x000000, GRID_RADIUS * 0.9, GRID_RADIUS * 4]} />
       <ambientLight intensity={0.8} />

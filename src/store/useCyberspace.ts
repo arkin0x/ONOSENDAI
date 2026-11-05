@@ -4252,6 +4252,13 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
         stagedCubes = r.keys_pending === true
       }
     }
+    // Noted on the record before the signer is asked: a declined signature
+    // keeps the record, and SIGN AND CONTINUE signs it later, so the cubes are
+    // taken up from there (keptCloudStepSigned). Only while it is still this job.
+    if (stagedCubes) {
+      const onDisk = loadCloudJob(final.pubkey)
+      if (onDisk?.jobId === final.jobId) saveCloudJob({ ...onDisk, keysPending: true })
+    }
     await get().finishProof(msg)
     if (!proofOnChain(get().events, msg)) {
       // Another identity is in hand now (a switch while the signer was
@@ -4346,6 +4353,12 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
    */
   const keptCloudStepSigned = (record: PendingCloudJob, msg: Extract<ProofResponse, { type: 'done' }>): void => {
     clearCloudJob(record.pubkey, record.jobId)
+    // A staged hop whose cubes HOSAKA was still computing: the ticket runCloud
+    // writes for one signed at once, so they are collected all the same.
+    if (record.keysPending && record.action === 'hop') {
+      saveKeysTicket({ version: 1, pubkey: record.pubkey, jobId: record.jobId, pollToken: record.pollToken, to: record.to, plane: record.plane, at: Date.now() })
+      void get().collectCloudKeys()
+    }
     const cost = msg.costMsats ?? record.costMsats
     set({ spentMsats: addSpent(get().genesisId, cost) })
     useToast.getState().show({ label: `CLOUD COMPUTE JOB COMPLETE - ${record.jobId.slice(0, 8)}`, meta: 'Thanks for using HOSAKA!', mark: 'hosaka' })
@@ -6599,8 +6612,11 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
     // being checked (resumeCloudJob) was read from disk, never offered here: its
     // invoice may be paid already, so it is kept whatever its stage says.
     const keep = cloud.job !== null && (cloud.status === 'error' || cloud.status === 'checking' || cloud.job.stage !== 'awaiting_payment')
-    // Only this identity's: another's kept job waits on disk for it (review of #589).
-    if (!keep) clearCloudJob(cloud.job?.pubkey ?? get().identity.pubkey, cloud.job?.jobId)
+    // Only the job this flow holds. With none in hand (a quote, or a submit not
+    // answered yet) nothing of this flow is on disk, and a record that is, such
+    // as the paid job a declined step is bought again over, stays. Another
+    // identity's kept job waits on disk for it (review of #589).
+    if (!keep && cloud.job) clearCloudJob(cloud.job.pubkey, cloud.job.jobId)
     set({
       pendingTarget: null,
       proof: IDLE_PROOF,

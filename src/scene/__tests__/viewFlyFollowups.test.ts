@@ -251,6 +251,81 @@ describe('4. after a fly the camera goes back to its own follow', () => {
     expect(r.locked.current).toBe(false)
     expect(flyFollow).toBeDefined()
   })
+
+  it('RETURN while a fly button is held: the camera follows the cursor after, as RETURN framed it', () => {
+    cs().viewHere()
+    const r = rig(true)
+    rigViewFly(r, eye, target, 0.05, 0)
+    r.locked.current = false // an orbit
+    rigViewFly(r, eye, target, 0.05, 10)
+    useViewFly.getState().setButton(1)
+    rigViewFly(r, eye, target, 0.05, 20)
+    expect(r.locked.current).toBe(true)
+    // RETURN: the view ends and its framing locks the camera, with the button still held.
+    cs().clearFocus()
+    r.locked.current = true
+    rigViewFly(r, eye, target, 0.05, 80)
+    expect(r.locked.current).toBe(true)
+    rigViewFly(r, eye, target, 0.05, 100)
+    expect(r.locked.current).toBe(true)
+  })
+
+  it('an orbit then a fly in one touch: after the fly the camera stands, as the orbit left it', () => {
+    const f = new FlyFollow()
+    f.frame(true, false, false)
+    // One finger lands (onStart unlocks) and orbits; a second lands and flies.
+    expect(f.frame(false, false, true, true)).toBe(false)
+    expect(f.frame(false, true, true, true)).toBe(true)
+    expect(f.frame(true, false, true, true)).toBe(false)
+    expect(f.frame(false, false, false)).toBe(false)
+  })
+
+  it('the gesture: a lone finger that drags orbited; one that only lands, or a second finger moving, did not', () => {
+    const g = new FlyGesture()
+    g.down(1, 100, 100, 0); g.move(1, 103, 100)
+    expect(g.orbited).toBe(false)
+    g.down(2, 300, 100, 0); g.move(2, 340, 100); g.move(1, 160, 100)
+    expect(g.orbited).toBe(false)
+    g.clear()
+    g.down(1, 100, 100, 0); g.move(1, 160, 100)
+    expect(g.orbited).toBe(true)
+    g.down(2, 300, 100, 10)
+    expect(g.orbited).toBe(true)
+    // A new touch starts again.
+    g.up(1, 20); g.up(2, 20)
+    g.down(3, 0, 0, 30)
+    expect(g.orbited).toBe(false)
+  })
+
+  it('through the rig: one finger orbits, a second lands and flies, a lift ends it: the camera stands as the orbit left it', () => {
+    cs().viewHere()
+    const r = rig(true)
+    rigViewFly(r, eye, target, 0.05, 0)
+    flyGesture.down(1, 100, 100, 10)
+    r.locked.current = false // OrbitControls onStart
+    flyGesture.move(1, 160, 100) // the orbit
+    rigViewFly(r, eye, target, 0.05, 20)
+    flyGesture.down(2, 300, 100, 30)
+    rigViewFly(r, eye, target, 0.05, 30 + FLY_HOLD_MS)
+    expect(r.locked.current).toBe(true)
+    flyGesture.up(2, 400)
+    rigViewFly(r, eye, target, 0.05, 400)
+    expect(r.locked.current).toBe(false)
+  })
+
+  it('through the rig: a two-finger fly with no orbit still follows after, as before the touch', () => {
+    cs().viewHere()
+    const r = rig(true)
+    rigViewFly(r, eye, target, 0.05, 0)
+    flyGesture.down(1, 100, 100, 10)
+    r.locked.current = false // OrbitControls onStart, no drag
+    flyGesture.down(2, 300, 100, 12)
+    rigViewFly(r, eye, target, 0.05, 12 + FLY_HOLD_MS)
+    expect(r.locked.current).toBe(true)
+    flyGesture.up(2, 400)
+    rigViewFly(r, eye, target, 0.05, 400)
+    expect(r.locked.current).toBe(true)
+  })
 })
 
 describe('5. lifts and lost lifts (review F3)', () => {

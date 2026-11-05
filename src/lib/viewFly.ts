@@ -125,8 +125,12 @@ export class FlyGesture {
   private points = new Map<number, { x: number; y: number }>()
   private base: { count: number; spread: number; at: number } | null = null
   private mode: 'idle' | 'wait' | 'fly' | 'pinch' = 'idle'
+  /** Where the touch's first finger landed, while it is the only one down. */
+  private lone: { x: number; y: number } | null = null
+  private dragged = false
 
   down(id: number, x: number, y: number, now: number): void {
+    if (this.points.size === 0) { this.lone = { x, y }; this.dragged = false } else this.lone = null
     this.points.set(id, { x, y })
     this.restart(now, true)
   }
@@ -136,6 +140,7 @@ export class FlyGesture {
     if (!p) return
     p.x = x
     p.y = y
+    if (this.lone && this.points.size === 1 && Math.hypot(x - this.lone.x, y - this.lone.y) > PINCH_SLOP_PX) this.dragged = true
     if (this.base?.count !== 2 || this.mode === 'pinch' || this.mode === 'idle') return
     const change = Math.abs(this.spread() - this.base.spread)
     if (change > Math.max(PINCH_SLOP_PX, this.base.spread * PINCH_SLOP_SHARE)) this.mode = 'pinch'
@@ -156,6 +161,17 @@ export class FlyGesture {
     this.points.clear()
     this.base = null
     this.mode = 'idle'
+    this.lone = null
+    this.dragged = false
+  }
+
+  /**
+   * Whether this touch orbited before any other finger landed: its one finger
+   * dragged past the slop, which is OrbitControls turning the camera. Its
+   * unlock is one the user asked for (FlyFollow).
+   */
+  get orbited(): boolean {
+    return this.dragged
   }
 
   /** Which way to fly now. */
@@ -216,21 +232,30 @@ export function flyDir(s: Pick<ViewFlyState, 'button' | 'touch'> = useViewFly.ge
  * "Before" is read while no finger is on the scene: the first finger of a
  * touch is the orbit's, which unlocks the camera the moment it lands
  * (OrbitControls onStart), and a two-finger fly would otherwise hand back an
- * unlock the user never asked for.
+ * unlock the user never asked for. Unless that finger did orbit before the
+ * fly began: then the unlock is the user's, and the fly hands it back.
  */
 export class FlyFollow {
   private flying = false
   private was = true
   private steady = true
 
-  /** This frame's lock, given the rig's lock, whether a fly is under way and whether a finger is on the scene. */
-  frame(locked: boolean, flying: boolean, fingersDown: boolean): boolean {
+  /**
+   * This frame's lock, given the rig's lock, whether a fly is under way and
+   * whether a finger is on the scene. `orbited`: the touch under way turned the
+   * camera with one finger before the fly began (FlyGesture.orbited), so the
+   * camera goes back to standing, as that orbit left it, not to the follow from
+   * before the touch. `viewOpen`: a fly may still go on (canFly). A fly that
+   * ended with the view (RETURN, BUILD) hands back nothing: that change framed
+   * the camera and set its follow itself, and the "before" was a view now gone.
+   */
+  frame(locked: boolean, flying: boolean, fingersDown: boolean, orbited = false, viewOpen = true): boolean {
     if (flying) {
-      if (!this.flying) { this.flying = true; this.was = this.steady }
+      if (!this.flying) { this.flying = true; this.was = orbited ? false : this.steady }
       return true
     }
     let out = locked
-    if (this.flying) { this.flying = false; out = this.was }
+    if (this.flying) { this.flying = false; if (viewOpen) out = this.was }
     if (!fingersDown) this.steady = out
     return out
   }

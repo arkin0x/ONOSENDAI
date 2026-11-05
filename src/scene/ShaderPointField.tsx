@@ -321,6 +321,8 @@ export function ShaderPointField({ volume, win }: Props): JSX.Element {
     },
     transparent: true,
     depthWrite: false,
+    // Its slow pulse never stops, so its uniforms do not count as the view moving: it runs at the idle rate (lib/frameGate).
+    userData: { ambient: true },
   }), [])
 
   useEffect(() => () => material.dispose(), [material])

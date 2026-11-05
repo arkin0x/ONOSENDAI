@@ -167,7 +167,9 @@ describe('cloud routes', () => {
     fake.balance.mockResolvedValue({ pubkey: S().identity.pubkey, balance_msats: 5000, ledger: [] })
     vi.mocked(postProof).mockClear()
     storage.removeItem('onosendai:cloudJob')
+    storage.removeItem('onosendai:cloudJob:kept')
     storage.removeItem('onosendai:cloudDeposit')
+    storage.removeItem('onosendai:cloudDeposit:kept')
     storage.removeItem('onosendai:spent')
     storage.removeItem('onosendai:hosakaBalance')
     useCyberspace.setState({ cloud: { ...S().cloud, balance: null, balanceChecking: false, balanceError: null } })
@@ -539,6 +541,7 @@ describe('cloud routes', () => {
     // The deposit record stays: if the wallet paid anyway, the next load claims it.
     expect(loadCloudDeposit(S().identity.pubkey)?.depositId).toBe('d1')
     storage.removeItem('onosendai:cloudDeposit')
+    storage.removeItem('onosendai:cloudDeposit:kept')
 
     fake.balance.mockResolvedValue({ pubkey: S().identity.pubkey, balance_msats: 5000, ledger: [] })
     fake.submitHop.mockResolvedValue(funded('job-3'))

@@ -168,6 +168,12 @@ export interface PendingCloudJob {
    * hyperjump needs besides HOSAKA's proof, so a reload signs the same ride.
    */
   ride?: PendingRide
+  /**
+   * A staged hop's result is in hand and HOSAKA is still computing its
+   * destination cubes on the same job. Whoever signs the hop later (SIGN AND
+   * CONTINUE after a declined signature) takes the cubes up as runCloud does.
+   */
+  keysPending?: true
 }
 
 export interface PendingRide {
@@ -189,33 +195,92 @@ function rideOfRecord(raw: unknown): PendingRide | null {
 }
 
 /**
- * The kept job records, one per identity, as stored under JOB_KEY: `{ version: 2,
- * jobs: { [pubkey]: record } }`. Before this the key held one record, version 1,
- * for whoever bought last, so a second identity buying on the same device wrote
- * over the first identity's paid job and its RESUME was gone. That old shape is
- * still read, as the one record of the identity it names.
+ * A table kept per identity in localStorage: `{ version: 2, [field]: { [pubkey]: entry },
+ * unowned? }` under `key`, and the same again under `key + KEPT_COPY`, which no
+ * earlier build knows.
+ *
+ * Builds before the per-identity tables (before #597 for the job record, #599 for
+ * the deposit and the cubes ticket) keep one entry for whoever used it last: they
+ * write that one entry over the whole key and remove the key when it is done, so
+ * a tab left open on one wipes every other identity's entry, paid sats included.
+ * Their key cannot be kept from them, so the copy is what was there: when the key
+ * holds one old entry, or is gone, or cannot be read, the table is the copy with
+ * that old entry (if any) laid over it, and both are written back at once. A
+ * table under the key is the truth, since builds since #597 and #599 read it,
+ * change one entry and write it back: the copy follows it.
  */
-interface StoredCloudJobs { version: 2; jobs: Record<string, unknown> }
+interface KeptTable { entries: Record<string, unknown>; unowned?: unknown }
 
-function readCloudJobs(): StoredCloudJobs {
-  const raw = localStorage.getItem(JOB_KEY)
-  if (!raw) return { version: 2, jobs: {} }
-  const r = JSON.parse(raw) as { version?: unknown; jobs?: unknown; pubkey?: unknown }
-  if (r?.version === 2 && r.jobs && typeof r.jobs === 'object' && !Array.isArray(r.jobs)) return { version: 2, jobs: { ...(r.jobs as Record<string, unknown>) } }
-  // The single record of before, filed under the identity it names.
-  if (r?.version === 1 && typeof r.pubkey === 'string') return { version: 2, jobs: { [r.pubkey]: r } }
-  return { version: 2, jobs: {} }
+interface KeptSpec {
+  key: string
+  field: string
+  /** The one entry an earlier build keeps under the key, as a table, or null when it is not one. */
+  legacy: (raw: { [k: string]: unknown }) => KeptTable | null
 }
 
-function writeCloudJobs(all: StoredCloudJobs): void {
-  if (Object.keys(all.jobs).length === 0) localStorage.removeItem(JOB_KEY)
-  else localStorage.setItem(JOB_KEY, JSON.stringify(all))
+/** Where the copy of a kept table lives, beside its key. */
+export const KEPT_COPY = ':kept'
+
+const isTable = (v: unknown): v is Record<string, unknown> => !!v && typeof v === 'object' && !Array.isArray(v)
+
+function parseKept(raw: string | null, spec: KeptSpec): { table: KeptTable; old: boolean } | null {
+  if (!raw) return null
+  const r = JSON.parse(raw) as { [k: string]: unknown } | null
+  if (!r || typeof r !== 'object') return null
+  const entries = r[spec.field]
+  if (r.version === 2 && isTable(entries)) return { table: { entries: { ...entries }, ...(r.unowned !== undefined ? { unowned: r.unowned } : {}) }, old: false }
+  const one = spec.legacy(r)
+  return one ? { table: one, old: true } : null
+}
+
+function storeKept(key: string, spec: KeptSpec, t: KeptTable): void {
+  if (Object.keys(t.entries).length === 0 && t.unowned === undefined) { localStorage.removeItem(key); return }
+  localStorage.setItem(key, JSON.stringify({ version: 2, [spec.field]: t.entries, ...(t.unowned !== undefined ? { unowned: t.unowned } : {}) }))
+}
+
+function writeKept(spec: KeptSpec, t: KeptTable): void {
+  storeKept(spec.key, spec, t)
+  storeKept(spec.key + KEPT_COPY, spec, t)
+}
+
+/** The table, repaired from its copy when an earlier build wrote over or removed the key. Throws only when storage itself does. */
+function readKept(spec: KeptSpec): KeptTable {
+  let main: { table: KeptTable; old: boolean } | null | undefined
+  try { main = parseKept(localStorage.getItem(spec.key), spec) } catch { main = undefined }
+  let copy: KeptTable | null
+  try { copy = parseKept(localStorage.getItem(spec.key + KEPT_COPY), spec)?.table ?? null } catch { copy = null }
+  if (main && !main.old) {
+    if (JSON.stringify(copy) !== JSON.stringify(main.table)) storeKept(spec.key + KEPT_COPY, spec, main.table)
+    return main.table
+  }
+  if (!copy) {
+    if (main) writeKept(spec, main.table)
+    return main?.table ?? { entries: {} }
+  }
+  // Written over by one old entry (it is the newest for its identity), removed, or unreadable: the copy holds the rest.
+  const unowned = main?.table.unowned ?? copy.unowned
+  const table: KeptTable = { entries: { ...copy.entries, ...(main?.table.entries ?? {}) }, ...(unowned !== undefined ? { unowned } : {}) }
+  writeKept(spec, table)
+  return table
+}
+
+/**
+ * The kept job records, one per identity, under JOB_KEY as `jobs` (a kept table,
+ * above). Before #597 the key held one record, version 1, for whoever bought
+ * last, so a second identity buying on the same device wrote over the first
+ * identity's paid job and its RESUME was gone. That old shape is still read, as
+ * the one record of the identity it names.
+ */
+const JOBS: KeptSpec = {
+  key: JOB_KEY,
+  field: 'jobs',
+  legacy: (r) => (r.version === 1 && typeof r.pubkey === 'string' ? { entries: { [r.pubkey]: r } } : null),
 }
 
 /** This identity's kept HOSAKA job, or null. Another identity's record is never returned, and never touched by the two below. */
 export function loadCloudJob(pubkey: string): PendingCloudJob | null {
   try {
-    const r = readCloudJobs().jobs[pubkey] as Partial<PendingCloudJob> | undefined
+    const r = readKept(JOBS).entries[pubkey] as Partial<PendingCloudJob> | undefined
     if (!r || r.pubkey !== pubkey) return null
     if (r.version !== 1 || typeof r.jobId !== 'string' || typeof r.pollToken !== 'string') return null
     if (r.action !== 'hop' && r.action !== 'sidestep' && r.action !== 'ride') return null
@@ -246,6 +311,7 @@ export function loadCloudJob(pubkey: string): PendingCloudJob | null {
       ...(typeof r.estSeconds === 'number' && Number.isFinite(r.estSeconds) ? { estSeconds: r.estSeconds } : {}),
       ...(typeof r.computingAt === 'number' && Number.isFinite(r.computingAt) ? { computingAt: r.computingAt } : {}),
       ...(ride ? { ride } : {}),
+      ...(r.keysPending === true && r.action === 'hop' ? { keysPending: true as const } : {}),
     }
   } catch {
     return null
@@ -255,11 +321,9 @@ export function loadCloudJob(pubkey: string): PendingCloudJob | null {
 /** Kept under the identity that bought it, beside any other identity's. */
 export function saveCloudJob(record: PendingCloudJob): void {
   try {
-    let all: StoredCloudJobs
-    // Unreadable as a whole: nothing in it can be resumed, so it is started again.
-    try { all = readCloudJobs() } catch { all = { version: 2, jobs: {} } }
-    all.jobs[record.pubkey] = record
-    writeCloudJobs(all)
+    const all = readKept(JOBS)
+    all.entries[record.pubkey] = record
+    writeKept(JOBS, all)
   } catch { /* private mode */ }
 }
 
@@ -269,11 +333,11 @@ export function saveCloudJob(record: PendingCloudJob): void {
  */
 export function clearCloudJob(pubkey: string, jobId?: string): void {
   try {
-    const all = readCloudJobs()
-    const r = all.jobs[pubkey] as { jobId?: unknown } | undefined
+    const all = readKept(JOBS)
+    const r = all.entries[pubkey] as { jobId?: unknown } | undefined
     if (!r || (jobId !== undefined && r.jobId !== jobId)) return
-    delete all.jobs[pubkey]
-    writeCloudJobs(all)
+    delete all.entries[pubkey]
+    writeKept(JOBS, all)
   } catch { /* private mode, or a record that cannot be read */ }
 }
 
@@ -290,7 +354,7 @@ export function clearCloudJob(pubkey: string, jobId?: string): void {
  */
 export interface PendingKeys {
   version: 1
-  /** The identity whose hop this was. A ticket kept before tickets were per identity has none (StoredKeys `unowned`). */
+  /** The identity whose hop this was. A ticket kept before tickets were per identity has none (TICKETS `unowned`). */
   pubkey: string
   jobId: string
   pollToken: string
@@ -302,28 +366,16 @@ export interface PendingKeys {
 }
 
 /**
- * The tickets, one per identity, as stored under KEYS_TICKET_KEY: `{ version: 2,
- * tickets: { [pubkey]: ticket }, unowned? }`. The key used to hold one ticket for
- * whoever hopped last, so a second identity's paid hop wrote over the first one's
- * cubes. That old ticket names no identity: it is kept as `unowned`, for whichever
- * identity collects first, as it was before, and never written over.
+ * The tickets, one per identity, under KEYS_TICKET_KEY as `tickets` (a kept
+ * table). Before #599 the key held one ticket for whoever hopped last, so a
+ * second identity's paid hop wrote over the first one's cubes. That old ticket
+ * names no identity: it is kept as `unowned`, for whichever identity collects
+ * first, as it was before, and never written over.
  */
-interface StoredKeys { version: 2; tickets: Record<string, unknown>; unowned?: unknown }
-
-function readKeysTickets(): StoredKeys {
-  const raw = localStorage.getItem(KEYS_TICKET_KEY)
-  if (!raw) return { version: 2, tickets: {} }
-  const r = JSON.parse(raw) as { version?: unknown; tickets?: unknown; unowned?: unknown }
-  if (r?.version === 2 && r.tickets && typeof r.tickets === 'object' && !Array.isArray(r.tickets)) {
-    return { version: 2, tickets: { ...(r.tickets as Record<string, unknown>) }, ...(r.unowned !== undefined ? { unowned: r.unowned } : {}) }
-  }
-  if (r?.version === 1) return { version: 2, tickets: {}, unowned: r }
-  return { version: 2, tickets: {} }
-}
-
-function writeKeysTickets(all: StoredKeys): void {
-  if (Object.keys(all.tickets).length === 0 && all.unowned === undefined) localStorage.removeItem(KEYS_TICKET_KEY)
-  else localStorage.setItem(KEYS_TICKET_KEY, JSON.stringify(all))
+const TICKETS: KeptSpec = {
+  key: KEYS_TICKET_KEY,
+  field: 'tickets',
+  legacy: (r) => (r.version === 1 ? { entries: {}, unowned: r } : null),
 }
 
 function ticketOf(raw: unknown, pubkey: string): PendingKeys | null {
@@ -337,8 +389,8 @@ function ticketOf(raw: unknown, pubkey: string): PendingKeys | null {
 /** This identity's ticket, else the one kept before tickets were per identity. Never another identity's. */
 export function loadKeysTicket(pubkey: string): PendingKeys | null {
   try {
-    const all = readKeysTickets()
-    const own = all.tickets[pubkey] as { pubkey?: unknown } | undefined
+    const all = readKept(TICKETS)
+    const own = all.entries[pubkey] as { pubkey?: unknown } | undefined
     if (own && own.pubkey === pubkey) return ticketOf(own, pubkey)
     return all.unowned !== undefined ? ticketOf(all.unowned, pubkey) : null
   } catch {
@@ -349,22 +401,21 @@ export function loadKeysTicket(pubkey: string): PendingKeys | null {
 /** Kept under the identity that hopped, beside any other identity's. */
 export function saveKeysTicket(t: PendingKeys): void {
   try {
-    let all: StoredKeys
-    try { all = readKeysTickets() } catch { all = { version: 2, tickets: {} } }
-    all.tickets[t.pubkey] = t
-    writeKeysTickets(all)
+    const all = readKept(TICKETS)
+    all.entries[t.pubkey] = t
+    writeKept(TICKETS, all)
   } catch { /* private mode */ }
 }
 
 /** Forget this job's ticket: this identity's, or the unowned one, only while it is still that job. */
 export function clearKeysTicket(pubkey: string, jobId: string): void {
   try {
-    const all = readKeysTickets()
-    const own = all.tickets[pubkey] as { jobId?: unknown } | undefined
-    if (own?.jobId === jobId) delete all.tickets[pubkey]
+    const all = readKept(TICKETS)
+    const own = all.entries[pubkey] as { jobId?: unknown } | undefined
+    if (own?.jobId === jobId) delete all.entries[pubkey]
     else if ((all.unowned as { jobId?: unknown } | undefined)?.jobId === jobId) delete all.unowned
     else return
-    writeKeysTickets(all)
+    writeKept(TICKETS, all)
   } catch { /* private mode, or a ticket that cannot be read */ }
 }
 
@@ -804,33 +855,21 @@ export interface PendingCloudDeposit {
 }
 
 /**
- * The deposits, one per identity, as stored under DEPOSIT_KEY: `{ version: 2,
- * deposits: { [pubkey]: deposit } }`. The key used to hold one deposit, so a
- * second identity buying on the same device wrote over the first one's paid,
- * unclaimed deposit. That old shape is still read, as the deposit of the
- * identity it names.
+ * The deposits, one per identity, under DEPOSIT_KEY as `deposits` (a kept table).
+ * Before #599 the key held one deposit, so a second identity buying on the same
+ * device wrote over the first one's paid, unclaimed deposit. That old shape is
+ * still read, as the deposit of the identity it names.
  */
-interface StoredDeposits { version: 2; deposits: Record<string, unknown> }
-
-function readDeposits(): StoredDeposits {
-  const raw = localStorage.getItem(DEPOSIT_KEY)
-  if (!raw) return { version: 2, deposits: {} }
-  const r = JSON.parse(raw) as { version?: unknown; deposits?: unknown; depositId?: unknown; pubkey?: unknown }
-  if (r?.version === 2 && r.deposits && typeof r.deposits === 'object' && !Array.isArray(r.deposits)) return { version: 2, deposits: { ...(r.deposits as Record<string, unknown>) } }
-  // The single deposit of before, filed under the identity it names.
-  if (typeof r?.depositId === 'string' && typeof r.pubkey === 'string') return { version: 2, deposits: { [r.pubkey]: r } }
-  return { version: 2, deposits: {} }
-}
-
-function writeDeposits(all: StoredDeposits): void {
-  if (Object.keys(all.deposits).length === 0) localStorage.removeItem(DEPOSIT_KEY)
-  else localStorage.setItem(DEPOSIT_KEY, JSON.stringify(all))
+const DEPOSITS: KeptSpec = {
+  key: DEPOSIT_KEY,
+  field: 'deposits',
+  legacy: (r) => (typeof r.depositId === 'string' && typeof r.pubkey === 'string' ? { entries: { [r.pubkey]: r } } : null),
 }
 
 /** This identity's deposit in flight, or null. Another identity's is never returned, and never touched by the two below. */
 export function loadCloudDeposit(pubkey: string): PendingCloudDeposit | null {
   try {
-    const d = readDeposits().deposits[pubkey] as PendingCloudDeposit | undefined
+    const d = readKept(DEPOSITS).entries[pubkey] as PendingCloudDeposit | undefined
     return d && typeof d.depositId === 'string' && d.pubkey === pubkey ? d : null
   } catch {
     return null
@@ -840,21 +879,20 @@ export function loadCloudDeposit(pubkey: string): PendingCloudDeposit | null {
 /** Kept under the identity that asked for the invoice, beside any other identity's. */
 export function saveCloudDeposit(d: PendingCloudDeposit): void {
   try {
-    let all: StoredDeposits
-    try { all = readDeposits() } catch { all = { version: 2, deposits: {} } }
-    all.deposits[d.pubkey] = d
-    writeDeposits(all)
+    const all = readKept(DEPOSITS)
+    all.entries[d.pubkey] = d
+    writeKept(DEPOSITS, all)
   } catch { /* storage unavailable */ }
 }
 
 /** Forget this identity's deposit, only while it is still `depositId`, so a newer one of the same identity stays. */
 export function clearCloudDeposit(pubkey: string, depositId: string): void {
   try {
-    const all = readDeposits()
-    const d = all.deposits[pubkey] as { depositId?: unknown } | undefined
+    const all = readKept(DEPOSITS)
+    const d = all.entries[pubkey] as { depositId?: unknown } | undefined
     if (!d || d.depositId !== depositId) return
-    delete all.deposits[pubkey]
-    writeDeposits(all)
+    delete all.entries[pubkey]
+    writeKept(DEPOSITS, all)
   } catch { /* storage unavailable, or a record that cannot be read */ }
 }
 

@@ -51,7 +51,7 @@ vi.mock('../../lib/workers', async (importOriginal) => {
 import { bytesToHex, computeHopProofV2, deriveRegionKeys } from 'cyberspace-core'
 import { useCalibration } from '../../lib/calibration'
 import { hopTemplate } from '../../lib/events'
-import type { HosakaJob, HosakaLimits } from '../../lib/hosaka'
+import { HosakaError, type HosakaJob, type HosakaLimits } from '../../lib/hosaka'
 import type { Position } from '../../lib/space'
 import { postProof } from '../../lib/workers'
 import { loadCloudDeposit, loadCloudJob, loadKeysTicket, saveKeysTicket, wirePosition } from '../../lib/cloud'
@@ -121,7 +121,9 @@ describe('a route step whose position moved while the route waited', () => {
     fake.quote.mockImplementation(async (kind: 'hop' | 'sidestep') => quote(kind))
     vi.mocked(postProof).mockClear()
     storage.removeItem('onosendai:cloudJob')
+    storage.removeItem('onosendai:cloudJob:kept')
     storage.removeItem('onosendai:cloudDeposit')
+    storage.removeItem('onosendai:cloudDeposit:kept')
   })
 
   it('funding: the local first step starts from where the chain stands after the deposit, under the new head', async () => {
@@ -269,7 +271,9 @@ describe('a funded route that ends or pauses', () => {
     fake.balance.mockResolvedValue({ pubkey: S().identity.pubkey, balance_msats: 5000, ledger: [] })
     vi.mocked(postProof).mockClear()
     storage.removeItem('onosendai:cloudJob')
+    storage.removeItem('onosendai:cloudJob:kept')
     storage.removeItem('onosendai:cloudDeposit')
+    storage.removeItem('onosendai:cloudDeposit:kept')
   })
 
   it('its replan, finding the chain already at the end, ends the cloud flow too: nothing reads PAID until X', async () => {
@@ -354,6 +358,72 @@ describe('a funded route that ends or pauses', () => {
     expect(S().position).toEqual(to)
     await signedAndCleaned(spent)
   })
+
+  /** On the leaf touching an h13 wall: one HOSAKA hop across it is the whole route. */
+  const acrossH13 = async (): Promise<{ from: Position; to: Position }> => {
+    useCalibration.setState({ status: 'measured', hopHeight: 12, sidestepHeight: 12 })
+    const s = S()
+    const block = (s.position.x >> 13n) << 13n
+    const from = { ...s.position, x: block + 4095n }
+    if (from.x !== s.position.x) await moved(from)
+    const to = { ...from, x: from.x ^ (1n << 12n) }
+    useCyberspace.setState({ cursor: to })
+    return { from, to }
+  }
+
+  it('SIGN AND CONTINUE on a staged hop collects the cubes HOSAKA was still computing when the signature was declined (#589)', async () => {
+    useCyberspace.setState({ cloudPrefs: { ...S().cloudPrefs, profile: 'loot' } })
+    const { from, to } = await acrossH13()
+    const before = S().events.length
+    const hop = hopResult(from, to, S().plane, S().prevEventId)
+    const lookup = '12'.repeat(32)
+    fake.submitHop.mockResolvedValue(funded())
+    // The hop alone first, its cubes still computing; then the cubes.
+    fake.waitForJob
+      .mockResolvedValueOnce({ id: 'job-1', status: 'computing', cost_msats: 1000, result: { ...hop, keys_pending: true, destination_keys: null }, error: null } as HosakaJob)
+      .mockResolvedValueOnce(completed({ ...hop, keys_pending: false, destination_keys: [{ height: 13, secret_key: 'ef'.repeat(32), lookup_id: lookup }] }))
+    const sign = S().signEvent
+    useCyberspace.setState({ signEvent: async () => { throw new Error('user declined') } })
+    try {
+      await S().commit()
+      await vi.waitFor(() => { expect(S().cloud.status).toBe('error') })
+    } finally {
+      useCyberspace.setState({ signEvent: sign })
+    }
+    expect(S().plan?.awaiting).not.toBeNull()
+    expect(useSecrets.getState().keys[lookup]).toBeUndefined()
+
+    S().resumePlan()
+    await vi.waitFor(() => { expect(S().events).toHaveLength(before + 1) })
+    expect(S().position).toEqual(to)
+    await vi.waitFor(() => { expect(useSecrets.getState().keys[lookup]?.height).toBe(13) })
+    expect(fake.waitForJob).toHaveBeenCalledTimes(2)
+    expect(loadKeysTicket(S().identity.pubkey)).toBeNull()
+    expect(loadCloudJob(S().identity.pubkey)).toBeNull()
+  })
+
+  it('CANCEL while a paused step is bought again keeps that step\'s paid job record', async () => {
+    await placeSpawn()
+    await acrossH13()
+    const me = S().identity.pubkey
+    fake.submitHop.mockResolvedValue(funded())
+    // Paid, then HOSAKA paused hops: the record is kept for RESUME and the route pauses.
+    fake.waitForJob.mockRejectedValueOnce(HosakaError.fromResponse(503, { detail: { error: 'hop_paused', hint: 'Paused.', charged: false } }))
+    await S().commit()
+    await vi.waitFor(() => { expect(S().plan).toMatchObject({ status: 'paused' }) })
+    expect(loadCloudJob(me)?.jobId).toBe('job-1')
+
+    // RESUME buys the same step again (its idempotency key names the same job).
+    // CANCEL while that submit is out, with no job in hand yet.
+    const submit = deferred<HosakaJob>()
+    fake.submitHop.mockReturnValue(submit.promise)
+    S().resumePlan()
+    await vi.waitFor(() => { expect(S().cloud.status).toBe('quoting') })
+    expect(S().cloud.job).toBeNull()
+    S().cancelCloud()
+    expect(loadCloudJob(me)?.jobId).toBe('job-1')
+    S().cancelPlan()
+  })
 })
 
 describe('a cloud step whose proof is refused because the head moved while the signer was asked (review of #589, F1)', () => {
@@ -372,7 +442,9 @@ describe('a cloud step whose proof is refused because the head moved while the s
     fake.balance.mockResolvedValue({ pubkey: S().identity.pubkey, balance_msats: 5000, ledger: [] })
     vi.mocked(postProof).mockClear()
     storage.removeItem('onosendai:cloudJob')
+    storage.removeItem('onosendai:cloudJob:kept')
     storage.removeItem('onosendai:cloudDeposit')
+    storage.removeItem('onosendai:cloudDeposit:kept')
     useToast.setState({ toast: null })
   })
 
@@ -555,7 +627,9 @@ describe('two identities on one device, each buying a HOSAKA step (review of #58
     fake.balance.mockImplementation(async () => ({ pubkey: S().identity.pubkey, balance_msats: 5000, ledger: [] }))
     vi.mocked(postProof).mockClear()
     storage.removeItem('onosendai:cloudJob')
+    storage.removeItem('onosendai:cloudJob:kept')
     storage.removeItem('onosendai:cloudDeposit')
+    storage.removeItem('onosendai:cloudDeposit:kept')
   })
 
   /** Signed in as this key, its chain on the leaf touching an h13 wall, saved as a move would save it (adoptChain). */

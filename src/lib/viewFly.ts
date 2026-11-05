@@ -148,6 +148,8 @@ export class FlyGesture {
 
   up(id: number, now: number): void {
     if (!this.points.delete(id)) return
+    // The touch is over: its orbit is not the next fly's (a HUD button's, or the next touch's).
+    if (this.points.size === 0) { this.lone = null; this.dragged = false }
     this.restart(now, false)
   }
 

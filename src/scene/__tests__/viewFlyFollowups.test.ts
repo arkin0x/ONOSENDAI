@@ -313,6 +313,30 @@ describe('4. after a fly the camera goes back to its own follow', () => {
     expect(r.locked.current).toBe(false)
   })
 
+  it('through the rig: an orbit whose touch has ended is not the next fly\'s: a cursor step re-locks, a button fly hands back the follow', () => {
+    cs().viewHere()
+    const r = rig(true)
+    rigViewFly(r, eye, target, 0.05, 0)
+    // One finger orbits, and lifts.
+    flyGesture.down(1, 100, 100, 10)
+    r.locked.current = false // OrbitControls onStart
+    flyGesture.move(1, 160, 100)
+    rigViewFly(r, eye, target, 0.05, 20)
+    flyGesture.up(1, 30)
+    rigViewFly(r, eye, target, 0.05, 40)
+    expect(flyGesture.orbited).toBe(false)
+    // A cursor step: its glide locks the camera to follow again (Scene.tsx).
+    r.locked.current = true
+    rigViewFly(r, eye, target, 0.05, 60)
+    // The HUD's fly button, held and let go.
+    useViewFly.getState().setButton(1)
+    rigViewFly(r, eye, target, 0.05, 80)
+    expect(r.locked.current).toBe(true)
+    useViewFly.getState().setButton(0)
+    rigViewFly(r, eye, target, 0.05, 160)
+    expect(r.locked.current).toBe(true)
+  })
+
   it('through the rig: a two-finger fly with no orbit still follows after, as before the touch', () => {
     cs().viewHere()
     const r = rig(true)

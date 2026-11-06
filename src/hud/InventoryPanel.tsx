@@ -123,13 +123,13 @@ export function ArchiveButton({ item }: { item: Pick<HeldItem, 'id' | 'archived'
  * tap. The last copy of a key one of your chests or doors is sealed to is
  * refused, naming them, with ARCHIVE offered instead (useShards itemStillNeeded).
  */
-export function DeleteItem({ item, asking = false }: { item: Pick<HeldItem, 'id' | 'name'> & Partial<Pick<HeldItem, 'type' | 'key' | 'archived'>>; asking?: boolean }): JSX.Element {
+export function DeleteItem({ item, asking = false }: { item: Pick<HeldItem, 'id' | 'name'> & Partial<HeldItem>; asking?: boolean }): JSX.Element {
   const [confirming, setConfirming] = useState(asking)
   const [busy, setBusy] = useState(false)
   const [refusal, setRefusal] = useState<string | null>(null)
   const [needed, setNeeded] = useState(false)
   const ask = (): void => {
-    const why = item.type ? itemStillNeeded({ id: item.id, type: item.type, key: item.key }, useShards.getState().mine, useInventory.getState().items, useCyberspace.getState().identity.pubkey) : null
+    const why = item.type && item.event ? itemStillNeeded({ id: item.id, type: item.type, key: item.key, name: item.name, event: item.event, place: item.place ?? null }, useShards.getState().mine, useInventory.getState().items, useCyberspace.getState().identity.pubkey) : null
     setRefusal(why)
     setNeeded(!!why)
     if (!why) setConfirming(true)

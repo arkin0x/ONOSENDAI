@@ -31,7 +31,8 @@ vi.mock('../../lib/relay', () => ({
 }))
 
 import { forgeKey, openWithSecret, openerFor, readContents } from '../../lib/chests'
-import { chestItemOf, type KeyItem } from '../../lib/hidden'
+import { KEY_KIND, chestItemOf, keyItemOf, type KeyItem } from '../../lib/hidden'
+import type { NostrEvent } from '../../lib/events'
 import { heldFromForged, openingKeys, sealableKeys, splitPanels, unarchived } from '../../lib/inventory'
 import { lookTagsOf } from '../../lib/looks'
 import { deployPoint, type Position } from '../../lib/space'
@@ -345,6 +346,99 @@ describe('a chest of yours: EDIT, MOVE, ADD', () => {
     useInventory.getState().archiveMade(key.inner as never, key.key!, { lookupId: key.lookupId, bagId: key.bagId, at: key.at, plane: key.plane, height: key.height })
     expect(Object.keys(useInventory.getState().items)).toEqual([key.eventId])
     expect(useInventory.getState().items[key.eventId].archived).toBeGreaterThan(0)
+  })
+
+  describe('a key forged inside a chest of yours, with another chest sealed to it (review of #614)', () => {
+    const K = (): KeyItem => forgeKey('Inner Key')
+    /** Seal a chest at this height and return its row, found by name. */
+    async function sealNamed(name: string, height: number, over: Partial<ChestDraft>): Promise<MyDeployment> {
+      S().startPlaceChest()
+      S().setDeployHeight(height)
+      S().placeChest()
+      await S().sealPlacedChest(draft({ name, ...over }))
+      expect(S().deployError).toBeNull()
+      return S().mine.find((d) => d.chest?.name === name)!
+    }
+    /** "Outer" holds a new key K; "Second" is sealed to K. Nothing is held. */
+    async function outerAndSecond(): Promise<{ k: KeyItem; outer: MyDeployment; second: MyDeployment; kEvent: NostrEvent }> {
+      const k = K()
+      const outer = await sealNamed('Outer', 4, { contents: [{ kind: 'message', text: 'inside' }, { kind: 'key', key: k }] })
+      const second = await sealNamed('Second', 6, { lock: { pubkey: k.itemPubkey, label: 'Inner Key' } })
+      expect(Object.keys(useInventory.getState().items)).toEqual([])
+      const kEvent = (outer.sealed ?? []).find((e) => (e as NostrEvent).kind === KEY_KIND) as NostrEvent
+      expect(keyItemOf(kEvent)?.itemPubkey).toBe(k.itemPubkey)
+      return { k, outer: S().mine.find((d) => d.eventId === outer.eventId)!, second, kEvent }
+    }
+    const WHY = 'The key “Inner Key” inside it opens chest “Second”. Delete or reseal that first.'
+    const secondOpens = (second: MyDeployment, k: KeyItem): boolean => openerFor(second.chest!, openingKeys(useInventory.getState().items), C().identity.pubkey)?.by === 'key' && openWithSecret(second.chest!, k.secretHex).length > 0
+
+    it('DELETE of the chest is refused, naming what K opens; ARCHIVE keeps K, then DELETE goes and the other chest still opens', async () => {
+      const { k, outer, second } = await outerAndSecond()
+      expect(keyStillNeeded(outer, S().mine, useInventory.getState().items, C().identity.pubkey)).toBe(WHY)
+      await S().deleteInstance(outer.eventId)
+      expect(S().mine.some((m) => m.eventId === outer.eventId)).toBe(true)
+      expect(S().lostKeys?.map((l) => l.key.itemPubkey)).toEqual([k.itemPubkey])
+      S().archiveLost()
+      const row = Object.values(useInventory.getState().items).find((it) => it.key?.itemPubkey === k.itemPubkey)!
+      expect(row.archived).toBeGreaterThan(0)
+      expect(row.key?.secretHex).toBe(k.secretHex)
+      await S().deleteInstance(outer.eventId)
+      expect(S().mine.some((m) => m.eventId === outer.eventId)).toBe(false)
+      expect(secondOpens(second, k)).toBe(true)
+    })
+
+    it('FORGET of the chest gone from its bag is refused the same way, and goes after ARCHIVE', async () => {
+      const { k, outer, second } = await outerAndSecond()
+      useShards.setState({ mine: S().mine.map((m) => (m.eventId === outer.eventId ? { ...m, goneFrom: 1 } : m)) })
+      expect(S().forgetRow(outer.eventId)).toBe(WHY)
+      expect(S().mine.some((m) => m.eventId === outer.eventId)).toBe(true)
+      S().archiveLost()
+      expect(S().forgetRow(outer.eventId)).toBeNull()
+      expect(S().mine.some((m) => m.eventId === outer.eventId)).toBe(false)
+      expect(secondOpens(second, k)).toBe(true)
+    })
+
+    it('an EDIT that leaves K out is refused, the chest untouched; after ARCHIVE it seals', async () => {
+      const { k, outer, second } = await outerAndSecond()
+      const message = (outer.sealed ?? []).find((e) => (e as NostrEvent).kind !== KEY_KIND)!
+      const without = { ...draft({ name: 'Outer' }), lock: draft().lock!, contents: [{ kind: 'sealed' as const, entry: message, label: 'inside', type: 'message' as const }] }
+      expect(await S().resealChest(outer.eventId, without)).toBe(WHY)
+      expect(S().mine.find((m) => m.eventId === outer.eventId)?.inner.id).toBe(outer.inner.id)
+      S().archiveLost()
+      expect(await S().resealChest(outer.eventId, without)).toBeNull()
+      expect(S().mine.find((m) => m.chest?.name === 'Outer')?.inner.id).not.toBe(outer.inner.id)
+      expect(secondOpens(second, k)).toBe(true)
+    })
+
+    it('REMOVE FROM CHEST of K is refused; after ARCHIVE it comes out', async () => {
+      const { k, outer, second, kEvent } = await outerAndSecond()
+      // The hider opened "Outer" in play with its own lock, held, and K was revealed.
+      useInventory.getState().add([heldFromForged(C().identity.pubkey, { ...outer.inner, sig: outer.inner.sig ?? '' } as never, lock, { lookupId: outer.lookupId, bagId: outer.bagId, at: outer.at, plane: outer.plane, height: outer.height }, 1)])
+      useShards.setState({ discovered: { [kEvent.id]: { eventId: kEvent.id, inner: kEvent, keyHex: outer.keyHex, bagId: outer.bagId, lookupId: outer.lookupId, author: kEvent.pubkey, at: positionOf(outer), plane: outer.plane, height: outer.height, createdAt: kEvent.created_at, type: 'key', key: k, chestId: outer.eventId } } })
+      expect(await S().removeFromChest(kEvent.id)).toBe(WHY)
+      expect(S().mine.find((m) => m.eventId === outer.eventId)).toBeDefined()
+      S().archiveLost()
+      expect(await S().removeFromChest(kEvent.id)).toBeNull()
+      expect(opened(S().mine.find((m) => m.chest?.name === 'Outer')!)).toEqual(['inside'])
+      expect(secondOpens(second, k)).toBe(true)
+    })
+  })
+
+  it('HIDE AGAIN of an archived key keeps it under ARCHIVED (review of #614)', async () => {
+    S().startDeployKey(lock)
+    S().setDeployHeight(5)
+    await S().deploy()
+    S().cancelDeploy()
+    const key = S().mine.find((m) => m.type === 'key')!
+    S().takeFound([key.eventId])
+    useInventory.getState().archive(key.eventId)
+    useShards.setState({ mine: S().mine.map((m) => (m.eventId === key.eventId ? { ...m, goneFrom: 1 } : m)) })
+    expect(await S().hideAgain(key.eventId)).toBeNull()
+    await useInventory.getState().flush()
+    const rows = Object.values(useInventory.getState().items).filter((it) => it.key?.itemPubkey === lock.itemPubkey)
+    expect(rows).toHaveLength(1)
+    expect(rows[0].id).not.toBe(key.eventId)
+    expect(rows[0].archived).toBeGreaterThan(0)
   })
 
   it('nobody else’s chest moves or reseals', async () => {

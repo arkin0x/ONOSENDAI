@@ -86,6 +86,8 @@ import {
   type KeyItem,
   MESSAGE_KIND,
   CHEST_KIND,
+  KEY_KIND,
+  keyItemOf,
   isReference,
 } from '../lib/hidden'
 import { retractionTemplate } from '../lib/published'
@@ -888,35 +890,90 @@ export function freshCopyTemplate(previous: Pick<NostrEvent, 'kind' | 'content' 
   return { kind: previous.kind, created_at: createdAt, content: previous.content, tags: previous.tags.filter((t) => !(t[0] === 'd' && /^[0-9a-f]{64}$/.test(t[1] ?? ''))).map((t) => [...t]) }
 }
 
+/** A key whose secret a step would drop: its name, the key, its event, and where an archived row of it says it was. */
+export interface LostKey {
+  name: string
+  key: KeyItem
+  event: NostrEvent
+  place: HeldPlace | null
+  /** The row being dropped is this key itself, not a chest it was forged into. */
+  self: boolean
+}
+
+/** A step refused because it would drop the last copy of a key something of yours is sealed to. */
+export interface KeyLoss {
+  why: string
+  keys: LostKey[]
+}
+
+/** Where a deployment row stands, as ITEMS keeps a place. */
+function rowPlace(d: Pick<MyDeployment, 'lookupId' | 'bagId' | 'at' | 'plane' | 'height'>): HeldPlace {
+  return { lookupId: d.lookupId, bagId: d.bagId, at: d.at, plane: d.plane, height: d.height }
+}
+
+/** The keys a deployment row of yours keeps the secret of: its own key, and each key forged inside it (its sealed contents). */
+export function keysOfRow(d: MyDeployment, me: string): LostKey[] {
+  const place = rowPlace(d)
+  const own = d.key ? [{ name: d.key.name, key: d.key, event: d.inner as NostrEvent, place, self: true }] : []
+  const inside: LostKey[] = []
+  for (const e of d.sealed ?? []) {
+    const ev = e as Partial<NostrEvent>
+    if (typeof ev.id !== 'string' || ev.pubkey !== me || ev.kind !== KEY_KIND || !Array.isArray(ev.tags) || typeof ev.content !== 'string') continue
+    const key = keyItemOf(ev as NostrEvent)
+    if (key) inside.push({ name: key.name, key, event: ev as NostrEvent, place, self: false })
+  }
+  return [...own, ...inside]
+}
+
 /**
- * Why a key's secret cannot leave this device, or null when it can (review
- * of #614). Hiding no longer holds a key, so its deployment row (and the
- * bag's copy) can be the only place its secret is kept: deleting that while
- * a chest or door of yours is sealed to it would leave them unopenable for
- * good. Refused while no other copy is kept here (an ITEMS row, archived
- * ones included, another row of yours, or a chest of yours it was forged
- * into: madeKeys) and something of yours is sealed to it. `skip` is the copy
- * being deleted. The refusal offers ARCHIVE instead (arkinox, 2026-11-06).
+ * Which of these keys a step would drop for good, and why it is refused
+ * (review of #614). Hiding no longer holds a key, so a key's only copy can be
+ * its deployment row, or the sealed contents of a chest of yours it was
+ * forged into. Dropping that while a chest or door of yours is sealed to it
+ * would leave them unopenable. Refused when a candidate is kept nowhere after
+ * the step (`mineAfter` rows and chests, ITEMS archived rows included, or
+ * `alsoKept`) and something in `mineAfter` is sealed to it. ARCHIVE keeps it
+ * (arkinox, 2026-11-06), and the step may then go ahead.
  */
-function secretNeeded(pk: string, mine: readonly MyDeployment[], items: Record<string, HeldItem>, me: string, skip: { row?: string; item?: string }): string | null {
-  if (Object.values(items).some((it) => it.id !== skip.item && it.key?.itemPubkey === pk)) return null
-  const others = mine.filter((m) => m.eventId !== skip.row)
-  if (madeKeys(others, me).some((k) => k.key.itemPubkey === pk)) return null
-  const opens = others.filter((m) => m.chest?.lockPubkey === pk && m.inner.pubkey === me)
-  if (opens.length === 0) return null
-  const names = opens.map((m) => `${m.chest!.door !== undefined ? 'door' : 'chest'} “${m.chest!.name}”`)
-  const list = names.length === 1 ? names[0] : `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}`
-  return `This key opens ${list}. Delete or reseal ${names.length === 1 ? 'that' : 'those'} first.`
+export function keysLost(candidates: readonly LostKey[], mineAfter: readonly MyDeployment[], items: Record<string, HeldItem>, me: string, alsoKept: ReadonlySet<string> = new Set()): KeyLoss | null {
+  const kept = new Set(alsoKept)
+  for (const it of Object.values(items)) if (it.key) kept.add(it.key.itemPubkey)
+  for (const k of madeKeys(mineAfter, me)) kept.add(k.key.itemPubkey)
+  const lost: LostKey[] = []
+  const lines: string[] = []
+  let opened = 0
+  for (const c of candidates) {
+    const pk = c.key.itemPubkey
+    if (kept.has(pk)) continue
+    kept.add(pk)
+    const opens = mineAfter.filter((m) => m.chest?.lockPubkey === pk && m.inner.pubkey === me)
+    if (opens.length === 0) continue
+    lost.push(c)
+    opened += opens.length
+    const names = opens.map((m) => `${m.chest!.door !== undefined ? 'door' : 'chest'} “${m.chest!.name}”`)
+    const list = names.length === 1 ? names[0] : `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}`
+    lines.push(`${c.self ? 'This key' : `The key “${c.name}” inside it`} opens ${list}.`)
+  }
+  if (lost.length === 0) return null
+  return { why: `${lines.join(' ')} Delete or reseal ${opened === 1 ? 'that' : 'those'} first.`, keys: lost }
 }
 
-/** DELETE or FORGET of a deployment row of yours: secretNeeded for a key's row, null for anything else. */
-export function keyStillNeeded(d: Pick<MyDeployment, 'eventId' | 'type' | 'key'>, mine: readonly MyDeployment[], items: Record<string, HeldItem>, me: string): string | null {
-  return d.type === 'key' && d.key ? secretNeeded(d.key.itemPubkey, mine, items, me, { row: d.eventId }) : null
+/** DELETE or FORGET of a deployment row of yours: its own key and the keys forged inside it (keysLost). */
+export function rowLoss(d: MyDeployment, mine: readonly MyDeployment[], items: Record<string, HeldItem>, me: string): KeyLoss | null {
+  return keysLost(keysOfRow(d, me), mine.filter((m) => m.eventId !== d.eventId), items, me)
 }
 
-/** DELETE of an ITEMS row: secretNeeded for a key's row, null for anything else. */
-export function itemStillNeeded(item: Pick<HeldItem, 'id' | 'type' | 'key'>, mine: readonly MyDeployment[], items: Record<string, HeldItem>, me: string): string | null {
-  return item.type === 'key' && item.key ? secretNeeded(item.key.itemPubkey, mine, items, me, { item: item.id }) : null
+/** rowLoss, in words, or null when the row may go. */
+export function keyStillNeeded(d: MyDeployment, mine: readonly MyDeployment[], items: Record<string, HeldItem>, me: string): string | null {
+  return rowLoss(d, mine, items, me)?.why ?? null
+}
+
+/** DELETE of an ITEMS row: keysLost for a key's row, null for anything else. */
+export function itemStillNeeded(item: Pick<HeldItem, 'id' | 'type' | 'key' | 'name' | 'event' | 'place'>, mine: readonly MyDeployment[], items: Record<string, HeldItem>, me: string): string | null {
+  if (item.type !== 'key' || !item.key) return null
+  const rest = { ...items }
+  delete rest[item.id]
+  return keysLost([{ name: item.name, key: item.key, event: item.event, place: item.place, self: true }], mine, rest, me)?.why ?? null
 }
 
 /**
@@ -1231,6 +1288,13 @@ interface ShardsState {
    * something of yours is sealed to (keyStillNeeded); null otherwise.
    */
   forgetRow: (eventId: string) => string | null
+  /**
+   * The keys the last refused step would have dropped (keysLost), for the
+   * ARCHIVE it offers beside its words; null otherwise.
+   */
+  lostKeys: LostKey[] | null
+  /** ARCHIVE on a refused step: an archived ITEMS row for each key it would have dropped, so the step can then go ahead. */
+  archiveLost: () => void
   /** What a chest of yours holds, as sealed: kept from sealing, else opened with what opens it; a refusal in words otherwise. */
   chestEntries: (eventId: string) => Promise<BagEntry[] | string>
   /** EDIT and ADD on a chest of yours: sealed again with this draft (name, lock, label, contents) where it stands. A refusal in words, or null. */
@@ -2737,10 +2801,16 @@ export const useShards = create<ShardsState>((set, get) => {
       const owner = cyber().identity.pubkey
       const d = rowsOf(owner).find((m) => m.eventId === eventId && m.goneFrom !== undefined)
       if (!d) return null
-      const needed = keyStillNeeded(d, rowsOf(owner), useInventory.getState().items, owner)
-      if (needed) return needed
+      const loss = rowLoss(d, rowsOf(owner), useInventory.getState().items, owner)
+      set({ lostKeys: loss?.keys ?? null })
+      if (loss) return loss.why
       void commitRows(owner, rowsOf(owner).filter((m) => m.eventId !== eventId))
       return null
+    },
+    lostKeys: null,
+    archiveLost: () => {
+      for (const k of get().lostKeys ?? []) useInventory.getState().archiveMade(k.event, k.key, k.place)
+      set({ lostKeys: null })
     },
     chestEntries: async (eventId) => {
       const d = get().mine.find((m) => m.eventId === eventId)
@@ -2766,6 +2836,18 @@ export const useShards = create<ShardsState>((set, get) => {
       if (!d.sealed && !draft.contents.some((c) => c.kind === 'sealed')) {
         const inside = await get().chestEntries(eventId)
         if (typeof inside === 'string') return inside
+      }
+      // An EDIT or ADD that leaves out the last copy of a key forged inside it,
+      // while something of yours is sealed to that key, is refused (keysLost),
+      // with ARCHIVE offered. What was inside is the kept copy, else what opens.
+      const before = d.sealed ?? (await get().chestEntries(eventId))
+      if (Array.isArray(before)) {
+        const keptSealed = draft.contents.flatMap((c) => (c.kind === 'sealed' ? [c.entry] : []))
+        const forged = new Set(draft.contents.flatMap((c) => (c.kind === 'key' ? [c.key.itemPubkey] : [])))
+        const me = cyber().identity.pubkey
+        const loss = keysLost(keysOfRow({ ...d, key: undefined, sealed: before }, me), get().mine.map((m) => (m.eventId === eventId ? { ...m, sealed: keptSealed } : m)), useInventory.getState().items, me, forged)
+        set({ lostKeys: loss?.keys ?? null })
+        if (loss) return loss.why
       }
       try {
         const createdAt = Math.floor(Date.now() / 1000)
@@ -3820,8 +3902,10 @@ export const useShards = create<ShardsState>((set, get) => {
       const item = get().mine.find((d) => d.eventId === eventId)
       if (!item) return
       const cs = cyber()
-      // The last copy of a key something of yours is sealed to stays (keyStillNeeded); the card says why.
-      if (keyStillNeeded(item, get().mine, useInventory.getState().items, cs.identity.pubkey)) return
+      // The last copy of a key something of yours is sealed to stays, its own or one forged inside it (rowLoss); the card says why.
+      const loss = rowLoss(item, get().mine, useInventory.getState().items, cs.identity.pubkey)
+      set({ lostKeys: loss?.keys ?? null })
+      if (loss) return
       const key = hexToBytes(item.keyHex)
       // Taking something down reaches the relay whenever the bag is already
       // there, LOCAL or not. LOCAL used to silence this, which meant a
@@ -3934,6 +4018,12 @@ export const useShards = create<ShardsState>((set, get) => {
       }
       const resealed = resealWithout(chest.chest, raw, eventId)
       if (!resealed) return 'That is no longer inside this chest.'
+      // Taking out the last copy of a key something of yours is sealed to is refused (keysLost), with ARCHIVE offered.
+      const leftIds = new Set(resealed.left.map(entryKey))
+      const taken = raw.filter((e) => !leftIds.has(entryKey(e)))
+      const loss = keysLost(keysOfRow({ ...chest, key: undefined, sealed: taken }, me), get().mine.map((m) => (m.eventId === chest.eventId ? { ...m, sealed: resealed.left } : m)), useInventory.getState().items, me)
+      set({ lostKeys: loss?.keys ?? null })
+      if (loss) return loss.why
       // As the identity that asked: a switch while its signer opened the chest refuses, rather than signing as the next one.
       await replaceChest(chest, resealed.chest, resealed.left, undefined, me)
       const deleted = { ...get().deleted, [eventId]: true as const }

@@ -36,9 +36,8 @@ import { itemKind } from '../lib/comments'
 import { useProfile } from '../hooks/useProfile'
 import { profileLabel } from '../store/useProfiles'
 import { useCyberspace } from '../store/useCyberspace'
-import { editable, keyStillNeeded, movable as movableDep, muteSubject, useShards, type WorldItem } from '../store/useShards'
+import { editable, movable as movableDep, muteSubject, rowLoss, useShards, type WorldItem } from '../store/useShards'
 import { useInventory } from '../store/useInventory'
-import type { NostrEvent } from '../lib/events'
 import { addToRoom, editPlaced, movePlaced } from '../store/useBuilder'
 import { DeleteDoorCard, DoorOwnerBlock } from './DoorOwner'
 import { doorSecret } from '../store/doorSecrets'
@@ -106,11 +105,9 @@ export function SecretModal(): JSX.Element | null {
   const [refusal, setRefusal] = useState<string | null>(null)
   // A DELETE refused for the last copy of a key offers ARCHIVE instead (arkinox, 2026-11-06).
   const [archiveOffer, setArchiveOffer] = useState(false)
+  // An archived ITEMS row for each key the refused step would drop (useShards lostKeys); the step may then go ahead.
   const archive = (): void => {
-    if (!item) return
-    const d = useShards.getState().mine.find((m) => m.eventId === item.key)
-    if (!d?.key) return
-    useInventory.getState().archiveMade(d.inner as NostrEvent, d.key, { lookupId: d.lookupId, bagId: d.bagId, at: d.at, plane: d.plane, height: d.height })
+    useShards.getState().archiveLost()
     setArchiveOffer(false)
     setRefusal('ARCHIVED')
   }
@@ -195,7 +192,7 @@ export function SecretModal(): JSX.Element | null {
       close(); void useShards.getState().deleteInstance(item.key); return
     }
     setRemoving(true); setRefusal(null)
-    void useShards.getState().removeFromChest(item.key).then((why) => { setRemoving(false); if (why) setRefusal(why); else close() }, (err: unknown) => { setRemoving(false); setRefusal(err instanceof Error ? err.message : String(err)) })
+    void useShards.getState().removeFromChest(item.key).then((why) => { setRemoving(false); if (why) { setRefusal(why); setArchiveOffer(!!useShards.getState().lostKeys) } else close() }, (err: unknown) => { setRemoving(false); setRefusal(err instanceof Error ? err.message : String(err)) })
   }
 
   return (
@@ -346,11 +343,13 @@ export function SecretModal(): JSX.Element | null {
               disabled={hiding}
               title={hiding ? DELETE_WAITS : "Rewrite this region's bag without it, or delete the whole envelope when it is the last thing of yours there. Copies others already took stay with them. This cannot be undone."}
               onClick={() => {
-                // The last copy of a key one of your chests or doors is sealed to is not deleted (keyStillNeeded).
+                // The last copy of a key one of your chests or doors is sealed to is not deleted:
+                // this key, or one forged inside this chest (rowLoss). ARCHIVE is offered instead.
                 const s = useShards.getState()
                 const row = s.mine.find((d) => d.eventId === item.key)
-                const needed = row ? keyStillNeeded(row, s.mine, useInventory.getState().items, useCyberspace.getState().identity.pubkey) : null
-                if (needed) { setRefusal(needed); setArchiveOffer(true); return }
+                const loss = row ? rowLoss(row, s.mine, useInventory.getState().items, useCyberspace.getState().identity.pubkey) : null
+                useShards.setState({ lostKeys: loss?.keys ?? null })
+                if (loss) { setRefusal(loss.why); setArchiveOffer(true); return }
                 setArchiveOffer(false)
                 setConfirming('delete')
               }}

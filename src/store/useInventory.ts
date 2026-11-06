@@ -108,7 +108,7 @@ interface InventoryState {
    * still open when its world copy is deleted. A keypair already in ITEMS is
    * archived where it stands instead.
    */
-  archiveMade: (event: NostrEvent, key: KeyItem, place: HeldPlace) => HeldItem
+  archiveMade: (event: NostrEvent, key: KeyItem, place: HeldPlace | null) => HeldItem
   has: (id: string) => boolean
 }
 
@@ -257,7 +257,10 @@ export const useInventory = create<InventoryState>((set, get) => {
     /** One identity's rows of this keypair other than the copy, and the copy in their place. */
     const swap = (rows: HeldItem[]): { before: HeldItem[]; item: HeldItem } => {
       const before = rows.filter((it) => it.id !== event.id && it.type === 'key' && it.key?.itemPubkey === key.itemPubkey && it.event.pubkey === who)
-      return { before, item: heldFromForged(who, event, key, place, before.reduce((at, it) => Math.min(at, it.at), now())) }
+      // Filed away under ARCHIVED, the copy stays filed away (review of #614).
+      const archived = before.find((it) => it.archived)?.archived
+      const item = heldFromForged(who, event, key, place, before.reduce((at, it) => Math.min(at, it.at), now()))
+      return { before, item: archived ? { ...item, archived } : item }
     }
     /** The copy on disk first, then the old rows off it: a failure between keeps both, never neither. */
     const write = (item: HeldItem, before: HeldItem[]): Promise<void> => {
@@ -381,7 +384,8 @@ export const useInventory = create<InventoryState>((set, get) => {
     const owner = ownerNow()
     const already = Object.values(get().items).find((it) => it.key?.itemPubkey === key.itemPubkey)
     if (already) { get().archive(already.id); return get().items[already.id] ?? already }
-    const row = { ...heldFromForged(owner, event, key, place, now()), archived: now() }
+    // Where it was, when known; a key forged inside a chest says the chest's place.
+    const row: HeldItem = { ...heldFromForged(owner, event, key, place as HeldPlace, now()), place, archived: now() }
     get().add([row])
     return get().items[row.id] ?? row
   },

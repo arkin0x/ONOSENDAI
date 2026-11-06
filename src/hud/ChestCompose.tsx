@@ -147,6 +147,7 @@ export function ChestCompose({ onDone, target = { mode: 'place' } }: { onDone: (
   // A hidden chest's contents, opened from what this device kept, or with what opens it.
   const [loading, setLoading] = useState(!!editing && !isDoor)
   const [status, setStatus] = useState<string | null>(null)
+  const lostKeys = useShards((s) => s.lostKeys)
   // What is inside could not be read here: sealing it again would wipe it, so nothing goes in or out.
   const [unread, setUnread] = useState(false)
   const saving = useStash((s) => s.chestSaving)
@@ -352,6 +353,8 @@ export function ChestCompose({ onDone, target = { mode: 'place' } }: { onDone: (
       </>}
 
       {(status ?? (editing ? null : deployError)) && <span className="chest__status notice" role="status">{status ?? deployError}</span>}
+      {/* EDIT or ADD refused for dropping the last copy of a key (useShards keysLost): ARCHIVE keeps it, then SEAL again. */}
+      {editing && status && lostKeys && <button className="chest__act" onClick={() => { useShards.getState().archiveLost(); setStatus('ARCHIVED') }} title="File the key away in ITEMS under ARCHIVED, then seal again">ARCHIVE</button>}
       {!editing && ask ? (
         <div className="shards__actions">
           <button className="avatars__go" onClick={() => useShards.getState().confirmDeploy()}>{ask.sats !== null ? `${ask.sats} SATS` : 'SEAL VIA HOSAKA'}</button>

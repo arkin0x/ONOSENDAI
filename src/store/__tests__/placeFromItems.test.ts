@@ -32,14 +32,14 @@ vi.mock('../../lib/relay', () => ({
 import { finalizeEvent, generateSecretKey, verifyEvent } from 'nostr-tools/pure'
 import type { NostrEvent } from '../../lib/events'
 import { forgeKey } from '../../lib/chests'
-import { addHeld, heldFromEntry, heldFromFind, heldFromForged, holdsEntry, holdsItem, type HeldItem } from '../../lib/inventory'
+import { addHeld, heldFromEntry, heldFromFind, heldFromForged, holdsEntry, holdsItem, unarchived, type HeldItem } from '../../lib/inventory'
 import { takeableOf } from '../../hud/ItemRows'
 import { itemLineage, keyInnerTemplate, keyItemOf, messageInnerTemplate, type Hidden } from '../../lib/hidden'
 import type { Position } from '../../lib/space'
 import { useBuilder } from '../useBuilder'
 import { useCyberspace } from '../useCyberspace'
 import { useInventory } from '../useInventory'
-import { PLACE_COIN, PLACE_KIND, PLACE_NFT, PLACE_NOT_YOURS, copyTemplateAt, placeCopyOf, placingCopy, positionOf, repeatable, useShards } from '../useShards'
+import { PLACE_COIN, PLACE_KIND, PLACE_NFT, PLACE_NOT_YOURS, copyTemplateAt, keyStillNeeded, placeCopyOf, placingCopy, positionOf, repeatable, useShards } from '../useShards'
 
 const S = () => useShards.getState()
 const I = () => useInventory.getState()
@@ -243,5 +243,61 @@ describe('a message carrying a nonfungible.cash claim link is a bearer thing, as
     expect(repeatable({ type: 'message', text: `for you: ${LINK}` })).toBe(false)
     expect(repeatable({ type: 'message', text: 'cashuAeyJ0b2tlbiI6W3sibWludCI6Imh0dHBzOi8vbWludC50ZXN0IiwicHJvb2ZzIjpbXX1dfQ' })).toBe(false)
     expect(repeatable({ type: 'message', text: 'meet me here' })).toBe(true)
+  })
+})
+
+describe('PLACE beside ARCHIVE and the last-copy guard (#614)', () => {
+  it('a placed copy of a key keeps its secret: DELETE of the first goes ahead, and the last copy is refused', async () => {
+    const first = await hideAndHold()
+    const k = I().items[first.id].key!
+    // A chest of yours sealed to it.
+    S().startPlaceChest()
+    S().setDeployHeight(6)
+    S().placeChest()
+    await S().sealPlacedChest({ name: 'Wind Chest', lock: { pubkey: k.itemPubkey, label: 'Silver Key' }, requires: '', contents: [{ kind: 'message', text: 'inside' }] })
+    expect(S().deployError).toBeNull()
+    standAt(THERE)
+    expect(S().placeFromItems(first.id)).toBeNull()
+    await S().deploy()
+    const original = S().mine.find((m) => m.eventId === first.id)!
+    const copy = S().mine.find((m) => m.type === 'key' && m.eventId !== first.id)!
+    const me = C().identity.pubkey
+    // Not in ITEMS any more: the two placed rows are the only copies.
+    useInventory.setState({ items: {} })
+    expect(keyStillNeeded(original, S().mine, {}, me)).toBeNull()
+    await S().deleteInstance(original.eventId)
+    expect(S().mine.some((m) => m.eventId === original.eventId)).toBe(false)
+    expect(keyStillNeeded(copy, S().mine, {}, me)).toBe('This key opens chest “Wind Chest”. Delete or reseal that first.')
+  })
+
+  it('an archived key has PLACE only if you made it, and PLACE works from ARCHIVED', async () => {
+    const first = await hideAndHold()
+    useInventory.getState().archive(first.id)
+    const row = I().items[first.id]
+    expect(row.archived).toBeGreaterThan(0)
+    expect(typeof placeCopyOf(row, C().identity.pubkey)).toBe('object')
+    const someone = generateSecretKey()
+    const key = forgeKey('Their Key')
+    const theirs = finalizeEvent(keyInnerTemplate(key, at, 0, 5), someone) as NostrEvent
+    const found = { ...heldFromFind(C().identity.pubkey, { eventId: theirs.id, inner: theirs, keyHex: 'aa'.repeat(32), bagId: 'b', lookupId: 'l', author: theirs.pubkey, at, plane: 0, height: 4, createdAt: 5, type: 'key', key }, 1)!, archived: 2 }
+    expect(placeCopyOf(found, C().identity.pubkey)).toBe(PLACE_NOT_YOURS)
+    expect(S().placeFromItems(first.id)).toBeNull()
+    expect(placingCopy(S().pending)).toBe(true)
+  })
+
+  it('holding by keypair counts an archived row everywhere but the world’s draw', () => {
+    const me = C().identity.pubkey
+    const key = forgeKey('Silver Key')
+    const sk = generateSecretKey()
+    const a = finalizeEvent(keyInnerTemplate(key, at, 0, 5), sk) as NostrEvent
+    const b = finalizeEvent(keyInnerTemplate(key, { ...at, x: 9n }, 0, 6), sk) as NostrEvent
+    const row = { ...heldFromForged(me, a, key, place, 1), archived: 3 }
+    const items = { [row.id]: row }
+    // Held for TAKE, ITEMS and chests: another instance adds nothing and is not offered.
+    expect(holdsItem(items, b.id, null, b.pubkey, undefined, key.itemPubkey)).toBe(true)
+    expect(addHeld(items, [heldFromForged(me, b, key, place, 2)]).added).toEqual([])
+    expect(holdsEntry(items, { id: b.id, event: b, verified: true, body: { type: 'key', key } } as never)).toBe(true)
+    // Not drawn as held in the world (WorldMessages reads ITEMS without archived rows).
+    expect(holdsItem(unarchived(items), b.id, null, b.pubkey, undefined, key.itemPubkey)).toBe(false)
   })
 })

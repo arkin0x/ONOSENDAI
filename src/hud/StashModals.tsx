@@ -85,6 +85,7 @@ function ItemRow({ d, onGo, onMove }: { d: MyDeployment; onGo: () => void; onMov
   const me = useCyberspace((s) => s.identity.pubkey)
   const [hiding, setHiding] = useState(false)
   const [why, setWhy] = useState<string | null>(null)
+  const lostKeys = useShards((s) => s.lostKeys)
   const [asking, setAsking] = useState(false)
   const canAgain = useShards((s) => againHideable(d, s.mine))
   // GONE FROM ITS BAG (useShards `goneFrom`): moved or removed from another
@@ -108,11 +109,12 @@ function ItemRow({ d, onGo, onMove }: { d: MyDeployment; onGo: () => void; onMov
           <span className="shards__meta shards__meta--gone">GONE FROM ITS BAG</span>
           {asking && <span className="shards__meta shards__meta--gone" role="status">MAY ALREADY BE ELSEWHERE</span>}
           {why && <span className="shards__meta shards__meta--gone" role="status">{why}</span>}
+          {why && lostKeys && <button className="shards__move" onClick={() => { useShards.getState().archiveLost(); setWhy('ARCHIVED') }} title="File the key away in ITEMS under ARCHIVED, then FORGET">ARCHIVE</button>}
         </span>
         {canAgain && <button className="shards__move" disabled={hiding} onClick={again} title="Hide a fresh copy where it was">{hiding ? 'HIDING…' : asking ? 'HIDE ANOTHER' : 'HIDE AGAIN'}</button>}
         {asking
           ? <button className="shards__move" onClick={() => setAsking(false)}>CANCEL</button>
-          : <button className="shards__move" disabled={hiding} onClick={() => useShards.getState().forgetRow(d.eventId)} title="Drop it from this list. Nothing is published">FORGET</button>}
+          : <button className="shards__move" disabled={hiding} onClick={() => setWhy(useShards.getState().forgetRow(d.eventId))} title="Drop it from this list. Nothing is published">FORGET</button>}
       </li>
     )
   }

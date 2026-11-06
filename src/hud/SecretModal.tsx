@@ -36,7 +36,8 @@ import { itemKind } from '../lib/comments'
 import { useProfile } from '../hooks/useProfile'
 import { profileLabel } from '../store/useProfiles'
 import { useCyberspace } from '../store/useCyberspace'
-import { editable, movable as movableDep, muteSubject, useShards, type WorldItem } from '../store/useShards'
+import { editable, movable as movableDep, muteSubject, rowLoss, useShards, type WorldItem } from '../store/useShards'
+import { useInventory } from '../store/useInventory'
 import { addToRoom, editPlaced, movePlaced } from '../store/useBuilder'
 import { DeleteDoorCard, DoorOwnerBlock } from './DoorOwner'
 import { doorSecret } from '../store/doorSecrets'
@@ -102,6 +103,14 @@ export function SecretModal(): JSX.Element | null {
   // as every hook here must be.
   const [removing, setRemoving] = useState(false)
   const [refusal, setRefusal] = useState<string | null>(null)
+  // A DELETE refused for the last copy of a key offers ARCHIVE instead (arkinox, 2026-11-06).
+  const [archiveOffer, setArchiveOffer] = useState(false)
+  // An archived ITEMS row for each key the refused step would drop (useShards lostKeys); the step may then go ahead.
+  const archive = (): void => {
+    useShards.getState().archiveLost()
+    setArchiveOffer(false)
+    setRefusal('ARCHIVED')
+  }
   // The confirmation card over this modal, for DELETE or REMOVE FROM CHEST
   // (arkinox, 2026-10-10: "we need a confirmation step").
   const [confirming, setConfirming] = useState<'delete' | 'remove' | null>(null)
@@ -183,7 +192,7 @@ export function SecretModal(): JSX.Element | null {
       close(); void useShards.getState().deleteInstance(item.key); return
     }
     setRemoving(true); setRefusal(null)
-    void useShards.getState().removeFromChest(item.key).then((why) => { setRemoving(false); if (why) setRefusal(why); else close() }, (err: unknown) => { setRemoving(false); setRefusal(err instanceof Error ? err.message : String(err)) })
+    void useShards.getState().removeFromChest(item.key).then((why) => { setRemoving(false); if (why) { setRefusal(why); setArchiveOffer(!!useShards.getState().lostKeys) } else close() }, (err: unknown) => { setRemoving(false); setRefusal(err instanceof Error ? err.message : String(err)) })
   }
 
   return (
@@ -333,7 +342,17 @@ export function SecretModal(): JSX.Element | null {
               className="secret__act secret__act--danger"
               disabled={hiding}
               title={hiding ? DELETE_WAITS : "Rewrite this region's bag without it, or delete the whole envelope when it is the last thing of yours there. Copies others already took stay with them. This cannot be undone."}
-              onClick={() => setConfirming('delete')}
+              onClick={() => {
+                // The last copy of a key one of your chests or doors is sealed to is not deleted:
+                // this key, or one forged inside this chest (rowLoss). ARCHIVE is offered instead.
+                const s = useShards.getState()
+                const row = s.mine.find((d) => d.eventId === item.key)
+                const loss = row ? rowLoss(row, s.mine, useInventory.getState().items, useCyberspace.getState().identity.pubkey) : null
+                useShards.setState({ lostKeys: loss?.keys ?? null })
+                if (loss) { setRefusal(loss.why); setArchiveOffer(true); return }
+                setArchiveOffer(false)
+                setConfirming('delete')
+              }}
             >DELETE</button>
           )}
           {mine && item.chestId && (
@@ -346,6 +365,7 @@ export function SecretModal(): JSX.Element | null {
           )}
         </div>
         {(refusal ?? convertWhy) && <p className="secret__status" role="status">{refusal ?? convertWhy}</p>}
+        {archiveOffer && <div className="secret__actions"><button className="secret__act" onClick={archive} title="File it away in ITEMS under ARCHIVED: its secret stays here, so what it opens still opens">ARCHIVE</button></div>}
 
         {/* The technical facts under one closed METADATA (arkinox,
             2026-10-26: "Collapse all the technical info on the chest, door,

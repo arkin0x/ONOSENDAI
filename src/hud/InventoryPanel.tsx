@@ -21,7 +21,12 @@
  * The confirmation says it cannot be taken back. PLACE puts a new instance
  * of something you made at the build cursor, with every setting it has: an
  * item (the same key), a message or a sound, never what was found or taken
- * from someone else (arkinox, 2026-11-06; useShards placeCopyOf).
+ * from someone else (arkinox, 2026-11-06; useShards placeCopyOf). ARCHIVE
+ * files a row away under ARCHIVED, the second view behind the panel's
+ * INVENTORY / ARCHIVED toggle, and UNARCHIVE brings it back (arkinox,
+ * 2026-11-06). An archived key still opens and seals what it did; DELETE of
+ * the last copy of a key your chests or doors are sealed to is refused, and
+ * offers ARCHIVE instead.
  */
 
 import { takeIntoKeeping, you } from '../lib/carried'
@@ -42,7 +47,7 @@ import { formatAgo, formatStamp, shortHex } from '../lib/time'
 import { useCyberspace } from '../store/useCyberspace'
 import { useInventory } from '../store/useInventory'
 import { profileLabel } from '../store/useProfiles'
-import { placeCopyOf, useShards } from '../store/useShards'
+import { itemStillNeeded, placeCopyOf, useShards } from '../store/useShards'
 import { useWorkshop } from '../store/useWorkshop'
 import { MessageText } from './CashuCard'
 import { AudioCard } from './AudioCard'
@@ -110,11 +115,29 @@ const LISTING_WARNING = [
 /** The DELETE confirmation: an item is a secret key, and this copy of it goes. */
 const DELETE_WARNING = 'Its secret key leaves this identity\u2019s ITEMS on this device. Nothing is published or retracted. COPY it first to keep a way back; otherwise it returns only if you find it and TAKE it again.'
 
-/** DELETE and its confirmation, naming the item. Nothing goes until the second tap. */
-export function DeleteItem({ item, asking = false }: { item: Pick<HeldItem, 'id' | 'name'>; asking?: boolean }): JSX.Element {
+/** ARCHIVE, or UNARCHIVE on a row already filed away: the row moves between INVENTORY and ARCHIVED. */
+export function ArchiveButton({ item }: { item: Pick<HeldItem, 'id' | 'archived'> }): JSX.Element {
+  return item.archived
+    ? <button className="chest__act" onClick={() => useInventory.getState().unarchive(item.id)} title="Back to INVENTORY">UNARCHIVE</button>
+    : <button className="chest__act" onClick={() => useInventory.getState().archive(item.id)} title="File it away under ARCHIVED. It still opens what it opens">ARCHIVE</button>
+}
+
+/**
+ * DELETE and its confirmation, naming the item. Nothing goes until the second
+ * tap. The last copy of a key one of your chests or doors is sealed to is
+ * refused, naming them, with ARCHIVE offered instead (useShards itemStillNeeded).
+ */
+export function DeleteItem({ item, asking = false }: { item: Pick<HeldItem, 'id' | 'name'> & Partial<HeldItem>; asking?: boolean }): JSX.Element {
   const [confirming, setConfirming] = useState(asking)
   const [busy, setBusy] = useState(false)
   const [refusal, setRefusal] = useState<string | null>(null)
+  const [needed, setNeeded] = useState(false)
+  const ask = (): void => {
+    const why = item.type && item.event ? itemStillNeeded({ id: item.id, type: item.type, key: item.key, name: item.name, event: item.event, place: item.place ?? null }, useShards.getState().mine, useInventory.getState().items, useCyberspace.getState().identity.pubkey) : null
+    setRefusal(why)
+    setNeeded(!!why)
+    if (!why) setConfirming(true)
+  }
   const remove = async (): Promise<void> => {
     setBusy(true)
     setRefusal(null)
@@ -127,8 +150,9 @@ export function DeleteItem({ item, asking = false }: { item: Pick<HeldItem, 'id'
   }
   return (
     <>
-      <button className="chest__act chest__act--danger" onClick={() => setConfirming(true)} title="Delete it from your ITEMS">DELETE</button>
+      <button className="chest__act chest__act--danger" onClick={ask} title="Delete it from your ITEMS">DELETE</button>
       {refusal && <span className="held__refusal" role="status">{refusal}</span>}
+      {needed && !item.archived && <button className="chest__act" onClick={() => { useInventory.getState().archive(item.id); setNeeded(false); setRefusal(null) }} title="File it away under ARCHIVED. It still opens what it opens">ARCHIVE</button>}
       {confirming && (
         <ConfirmModal
           title={`Delete \u201c${item.name}\u201d?`}
@@ -204,6 +228,7 @@ function KeyRow({ item, opens }: { item: HeldItem; opens: number }): JSX.Element
         {mine && (
           <button className={`chest__act ${listed ? 'is-on' : ''}`} disabled={listed || busy} onClick={() => setConfirming(true)} title={listed ? 'Listed in the ITEM FEED: anyone can seal a chest to it' : 'Publish this item to the ITEM FEED so anyone can seal a chest to it'}>{busy ? 'LISTING…' : listed ? 'LISTED' : 'PUBLISH'}</button>
         )}
+        <ArchiveButton item={item} />
         <DeleteItem item={item} />
       </span>
       {refusal && <span className="held__refusal" role="status">{refusal}</span>}
@@ -317,6 +342,7 @@ export function TakenRow({ item }: { item: HeldItem }): JSX.Element {
         {item.type === 'audio' && item.audio && <button className={`chest__act ${open ? 'is-on' : ''}`} onClick={() => setOpen((o) => !o)} aria-expanded={open} title="Play it or save it">LISTEN</button>}
         {item.place && <button className={`chest__act ${details ? 'is-on' : ''}`} onClick={() => setDetails((d) => !d)} aria-expanded={details}>DETAILS</button>}
         <PlaceButton item={item} onRefused={setRefusal} />
+        <ArchiveButton item={item} />
         {clearable && (
           <button className="held__clear" onClick={() => useInventory.getState().clearTaken([item.id])} title="Clear it from TAKEN" aria-label={`Clear ${label} from TAKEN`}>
             <X size={14} aria-hidden />
@@ -356,7 +382,7 @@ export function InventoryPanel(): JSX.Element {
   // Nothing by someone blocked, or muted by its id, is listed (store/useMutes); never what you forged.
   const muted = useMutes((s) => s.muted)
   const self = useCyberspace((s) => s.identity.pubkey)
-  const { keys, taken } = useMemo(
+  const { keys, taken, archived } = useMemo(
     () => splitPanels([], Object.values(items).filter((it) => !hidesThing(muted, { authors: [it.author], ids: [it.id, itemLineage(it.event)] }, self))).loot,
     [items, muted, self],
   )
@@ -375,6 +401,9 @@ export function InventoryPanel(): JSX.Element {
     if (r.ok) setPaste('')
   }
   const count = keys.length + taken.length
+  // INVENTORY, or what was filed away under ARCHIVED (arkinox, 2026-11-06).
+  const [view, setView] = useState<'inventory' | 'archived'>('inventory')
+  const showing = view === 'archived' && archived.length > 0 ? 'archived' : 'inventory'
 
   return (
     <section className="panel panel--loot">
@@ -387,9 +416,25 @@ export function InventoryPanel(): JSX.Element {
         </span>
       </header>
 
+      {archived.length > 0 && (
+        <div className="held__views" role="tablist">
+          <button className={`tag tag--tap ${showing === 'inventory' ? 'is-on' : ''}`} role="tab" aria-selected={showing === 'inventory'} onClick={() => setView('inventory')}>INVENTORY</button>
+          <button className={`tag tag--tap ${showing === 'archived' ? 'is-on' : ''}`} role="tab" aria-selected={showing === 'archived'} onClick={() => setView('archived')}>ARCHIVED {archived.length}</button>
+        </div>
+      )}
+
+      {showing === 'archived' && (
+        <div className="shards__section">
+          <span className="legend__label">Archived</span>
+          <ul className="secrets__list held__list">
+            {archived.map((a) => (a.type === 'key' ? <KeyRow key={a.id} item={a} opens={a.key ? chestsOpenedBy(a.key, chests).length : 0} /> : <TakenRow key={a.id} item={a} />))}
+          </ul>
+        </div>
+      )}
+
       {/* Two sections, so each keeps its heading: the keypair items you hold,
           then what was taken out of chests. */}
-      {keys.length > 0 && (
+      {showing === 'inventory' && keys.length > 0 && (
         <div className="shards__section">
           <span className="legend__label">Items you hold</span>
           <ul className="secrets__list held__list">
@@ -398,7 +443,7 @@ export function InventoryPanel(): JSX.Element {
         </div>
       )}
 
-      {taken.length > 0 && (
+      {showing === 'inventory' && taken.length > 0 && (
         <div className="shards__section">
           <span className="held__takenhead">
             <span className="legend__label">Taken</span>
@@ -410,7 +455,7 @@ export function InventoryPanel(): JSX.Element {
         </div>
       )}
 
-      {count === 0 && <p className="avatars__empty">Nothing held yet.</p>}
+      {showing === 'inventory' && count === 0 && <p className="avatars__empty">Nothing held yet.</p>}
 
       {/* An item from another device, as COPY wrote it. The prefix is the wire format and keeps its name. */}
       <form className="loot__paste" onSubmit={(e) => { e.preventDefault(); doPaste() }}>

@@ -63,7 +63,7 @@ import { openedKey } from '../store/useOpenedChests'
 import { GRID_RADIUS, itemCentre, type ViewAxes } from '../lib/space'
 import { alignedOrigin, useCyberspace } from '../store/useCyberspace'
 import { itemMovingId, useShards } from '../store/useShards'
-import { heldLineages, holdsItem } from '../lib/inventory'
+import { heldLineages, holdsItem, unarchived } from '../lib/inventory'
 import { LABEL_PRIORITY, WorldLabel } from './WorldLabel'
 import { findCashuToken } from '../lib/cashu'
 import { NFT_WORDS, replaceNftLinks } from '../lib/nftLink'
@@ -208,7 +208,8 @@ export function WorldMessages({ axes }: Props): JSX.Element | null {
   const muted = useMutes((s) => s.muted)
   const births = useCeremony((s) => s.births)
   const me = useCyberspace((s) => s.identity.pubkey)
-  const held = useInventory((s) => s.items)
+  // What is filed away under ARCHIVED is not drawn as held (arkinox, 2026-11-06).
+  const held = useUnarchived()
   // A key its hider moved is the same item under a new id: held by its lineage too (lib/inventory.ts holdsItem).
   const heldLin = useMemo(() => heldLineages(held), [held])
   // MOVE (useShards startMoveItem): the original stays where it stands, as
@@ -673,4 +674,10 @@ function WorldMark({ kind, at, opacity = 1 }: { kind: MarkKind; at: [number, num
       </lineSegments>
     </group>
   )
+}
+
+/** ITEMS without what is filed away under ARCHIVED, one object while ITEMS stays the same. */
+function useUnarchived(): ReturnType<typeof unarchived> {
+  const items = useInventory((s) => s.items)
+  return useMemo(() => unarchived(items), [items])
 }

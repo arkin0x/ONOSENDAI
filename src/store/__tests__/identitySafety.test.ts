@@ -387,6 +387,9 @@ describe('one bag rewrite at a time beside a hide (review of #595)', () => {
     await S().deploy(); expect(S().deployError).toBeNull(); S().cancelDeploy()
     const k = S().mine.find((m) => m.type === 'key')!
     const ofKey = () => Object.values(useInventory.getState().items).filter((it) => it.key?.itemPubkey === lock.itemPubkey)
+    // Picked up by TAKE, never by hiding (arkinox, 2026-11-06).
+    expect(ofKey()).toEqual([])
+    S().takeFound([k.eventId])
     expect(ofKey().map((it) => it.id)).toEqual([k.inner.id])
     markGone(k.eventId)
     expect(await S().hideAgain(k.eventId)).toBeNull()
@@ -394,6 +397,18 @@ describe('one bag rewrite at a time beside a hide (review of #595)', () => {
     expect(copy.eventId).not.toBe(k.eventId)
     expect(ofKey().map((it) => it.id)).toEqual([copy.inner.id])
     expect(ofKey()[0].place?.bagId).toBe(copy.bagId)
+  })
+
+  it('HIDE AGAIN of a key never picked up does not start holding it (arkinox, 2026-11-06)', async () => {
+    S().startDeployKey(lock); S().setDeployHeight(HEIGHT)
+    await S().deploy(); expect(S().deployError).toBeNull(); S().cancelDeploy()
+    const k = S().mine.find((m) => m.type === 'key')!
+    const ofKey = () => Object.values(useInventory.getState().items).filter((it) => it.key?.itemPubkey === lock.itemPubkey)
+    markGone(k.eventId)
+    expect(await S().hideAgain(k.eventId)).toBeNull()
+    await useInventory.getState().flush()
+    expect(S().mine.find((m) => m.type === 'key')!.eventId).not.toBe(k.eventId)
+    expect(ofKey()).toEqual([])
   })
 
   /** A large shard lined up to PLACE while HIDE AGAIN holds the bag lock, its read held. */

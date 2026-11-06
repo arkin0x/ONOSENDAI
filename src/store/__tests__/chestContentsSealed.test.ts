@@ -83,7 +83,8 @@ async function entriesOf(bag: NostrEvent, keyHex: string): Promise<Hidden[]> {
 }
 
 /**
- * The hider's setup: a key item they hold (hidden elsewhere, height 5), and
+ * The hider's setup: a key item they hold (hidden elsewhere, height 5, and
+ * picked up with TAKE, since hiding holds nothing: arkinox, 2026-11-06), and
  * a chest sealed to it at height 3 holding a shard and a message, then their
  * own scan of the chest's region, which opens it with the held key.
  */
@@ -93,6 +94,7 @@ async function hiderWithOpenedChest(): Promise<{ chestLookup: string; chestKey: 
   useShards.setState({ deployHeight: 5 })
   await S().deploy()
   expect(S().deployStatus).toBe('done')
+  S().takeFound([S().mine.find((d) => d.type === 'key')!.eventId])
   const shard = benchShard('Secret Crucifix')
   S().startDeployChest({ name: 'Wind Chest', lock: { pubkey: lock.itemPubkey, label: 'Wind Key' }, requires: 'the Wind Key', contents: [{ kind: 'shard', shardId: shard.id }, { kind: 'message', text: 'behind the door' }] })
   useShards.setState({ deployHeight: 3 })
@@ -339,5 +341,46 @@ describe('Cyberspace TV', () => {
     expect(opened.flatMap((o) => o.items).map((h) => h.type)).toEqual(['chest'])
     // Not the whole bag as TV opened it, so it is never kept as a find to open again whole.
     expect(opened.every((o) => !o.whole)).toBe(true)
+  })
+})
+
+describe('a key you made and never picked up (hiding holds nothing, arkinox 2026-11-06; review of #614)', () => {
+  it('still keeps your chest’s contents out of the open bag: a record that claimed them is healed at the next hide, the key never held', async () => {
+    const lock = forgeKey('Wind Key')
+    S().startDeployKey(lock)
+    useShards.setState({ deployHeight: 5 })
+    await S().deploy()
+    expect(Object.keys(useInventory.getState().items)).toEqual([])
+    const shard = benchShard('Secret Crucifix')
+    S().startDeployChest({ name: 'Wind Chest', lock: { pubkey: lock.itemPubkey, label: 'Wind Key' }, requires: 'the Wind Key', contents: [{ kind: 'shard', shardId: shard.id }, { kind: 'message', text: 'behind the door' }] })
+    useShards.setState({ deployHeight: 3 })
+    await S().deploy()
+    const chest = S().mine.find((d) => d.type === 'chest')!
+    // Nothing held, nothing opened in play: only the key this identity made can tell what is inside.
+    expect(Object.values(S().discovered).filter((h) => h.chestId === chest.eventId)).toEqual([])
+    // The record written the old way: the chest's contents claimed as deployments of its bag.
+    const claimed = chest.sealed!.map((e) => {
+      const ev = e as NostrEvent
+      return { ...chest, eventId: ev.id, inner: ev, type: 'message' as const, text: ev.content, chest: undefined, sealed: undefined }
+    })
+    useShards.setState({ mine: [...S().mine, ...claimed] })
+    S().startDeployMessage('later')
+    useShards.setState({ deployHeight: 3 })
+    await S().deploy()
+    expect(S().deployStatus).toBe('done')
+    expect((await entriesOf(lastBag(chest.lookupId), chest.keyHex)).map((h) => h.type).sort()).toEqual(['chest', 'message'])
+    expect(Object.keys(useInventory.getState().items)).toEqual([])
+  })
+
+  it('REMOVE FROM CHEST still opens your chest with it once it has left ITEMS', async () => {
+    const { chestLookup, chestKey } = await hiderWithOpenedChest()
+    const lock = Object.values(useInventory.getState().items).find((it) => it.key?.name === 'Wind Key')!
+    // Picked up, opened in play, then deleted from ITEMS: the placed row still keeps its secret.
+    useInventory.setState({ items: {} })
+    const message = Object.values(S().discovered).find((h) => h.chestId && h.type === 'message')!
+    expect(await S().removeFromChest(message.eventId)).toBeNull()
+    const items = await entriesOf(lastBag(chestLookup), chestKey)
+    expect(items.map((h) => h.type)).toEqual(['chest'])
+    expect(readContents(openWithSecret(items[0].chest!, lock.key!.secretHex)).map((c) => c.body.type)).toEqual(['shard'])
   })
 })

@@ -103,7 +103,7 @@
 
 import { create } from 'zustand'
 import { samePosition, useCyberspace } from './useCyberspace'
-import { copyLinedUp, movable, movingId, positionOf, useShards, type DeployPending } from './useShards'
+import { copyLinedUp, movable, movingId, placingCopy, positionOf, useShards, type DeployPending } from './useShards'
 import { useWorkshop } from './useWorkshop'
 import { placedStep } from '../lib/space'
 import { useHyperspace } from './useHyperspace'
@@ -356,8 +356,9 @@ function endUnder(switched = false): void {
     // (chestBack); a shard's deploy leaves its model unchanged in the
     // workshop. The deploy's height and bag settings go with it.
     // A move of anything leaves it where it stood: it is placed already, and
-    // a draft of it would hide a second copy.
-    const moving = movingId(pending) !== null
+    // a draft of it would hide a second copy. PLACE from ITEMS is the same:
+    // the item is still in ITEMS, one tap from PLACE again.
+    const moving = movingId(pending) !== null || placingCopy(pending)
     if (pending.type === 'message' && !moving) useBuilder.setState({ messageDraft: pending.text })
     else if (!moving && (pending.type === 'audio' || pending.type === 'key' || (pending.type === 'chest' && !pending.door))) useBuilder.setState({ itemDraft: pending })
     // Not back to the Models modal, or the chest composer: the view went somewhere on purpose.

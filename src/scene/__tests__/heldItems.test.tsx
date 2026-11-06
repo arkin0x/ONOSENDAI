@@ -143,7 +143,7 @@ describe('an item taken from someone else', () => {
 
 describe('an item not held, yours placed and not picked up included', () => {
   it('is its whole model in motion (bob and both spins), its outline and its name, as before', async () => {
-    const m = await draw(createElement(ItemMark, { id: 'k', text: '⚷ Silver Key', sub: '— you', at: AT, wears: WEARS, axes: AXES }))
+    const m = await draw(createElement(ItemMark, { id: 'k', text: '⚷ Silver Key', sub: 'by you', at: AT, wears: WEARS, axes: AXES }))
     const [mesh] = of(m, 'shardmesh')
     // Full: no share of its opacity taken off (ShardMesh's dim defaults to 1).
     expect(mesh.props.dim ?? 1).toBe(1)
@@ -155,7 +155,7 @@ describe('an item not held, yours placed and not picked up included', () => {
   })
 
   it('moves only as its tags say: a key with no motion stands still', async () => {
-    const m = await draw(createElement(ItemMark, { id: 'k', text: '⚷ Silver Key', sub: '— you', at: AT, wears: { ...WEARS, animation: [] }, axes: AXES }))
+    const m = await draw(createElement(ItemMark, { id: 'k', text: '⚷ Silver Key', sub: 'by you', at: AT, wears: { ...WEARS, animation: [] }, axes: AXES }))
     expect(moves(m)).toEqual({ lifts: false, turns: false })
     await m.unmount()
   })

@@ -41,9 +41,12 @@
  * PLAY and DOWNLOAD. Its name is on that card, not floating in the world
  * (FLOATING_NAME).
  *
- * An item this identity holds is not drawn: the note's blue box alone stays
- * where it was, its tap still opening its card (arkinox, 2026-11-01; lib/
- * worldMarks itemDrawAs). TAKE fades it out over that box (scene/ItemVanish).
+ * An item this identity holds is drawn at half: its model at half opacity, in
+ * motion as ever, and, for one you made yourself, the note's blue box round
+ * it at half too; one taken from someone else has no box (arkinox,
+ * 2026-11-06, which replaces the solid box of 2026-11-01; lib/worldMarks
+ * itemDrawAs, HeldItemMark). Its tap still opens its card. TAKE fades the
+ * whole model out over it (scene/ItemVanish).
  */
 
 import { useEffect, useMemo, useRef, useState } from 'react'
@@ -66,7 +69,7 @@ import { findCashuToken } from '../lib/cashu'
 import { NFT_WORDS, replaceNftLinks } from '../lib/nftLink'
 import { useProfile } from '../hooks/useProfile'
 import { profileLabel } from '../store/useProfiles'
-import { coinKind, itemDrawAs, markShown, type MarkKind } from '../lib/worldMarks'
+import { coinKind, HELD_OPACITY, itemDrawAs, madeBy, markShown, type MarkKind } from '../lib/worldMarks'
 import { useCashu } from '../hud/useCashu'
 import { TapTarget } from './TapTarget'
 import { regionBox, type Box } from '../lib/clip'
@@ -258,15 +261,15 @@ export function WorldMessages({ axes }: Props): JSX.Element | null {
         if (w.coin) return <CoinItem key={w.key} text={w.text} at={w.centre} scaleExp={scaleExp} onTap={open} />
         if (w.type === 'message') return <NoteItem key={w.key} w={w} birth={births[w.key]} onTap={open} />
         if (w.type === 'audio') return <AudioMark key={w.key} title={w.text} at={w.centre} onTap={open} />
-        // A key: the cube and its short name, or the box alone while it is held.
+        // A key: the cube and its short name, or at half while it is held.
         const play = vanishing[openedKey(me, w.key)]
-        const draw = itemDrawAs(holdsItem(held, w.key, w.lineage, w.itemAuthor, heldLin), itemsRead, !!play)
+        const draw = itemDrawAs(holdsItem(held, w.key, w.lineage, w.itemAuthor, heldLin), itemsRead, madeBy(w.itemAuthor, me))
         return (
           <group key={w.key}>
             {draw === 'item'
               ? <ItemMark id={w.key} text={w.text} sub={author(w)} at={w.centre} wears={w.wears} region={w.region} axes={axes} onTap={open} />
-              : <PlacedBox at={w.centre} appear={draw === 'vanishing' ? play : undefined} />}
-            {draw === 'vanishing' && <ItemVanish id={w.key} label={{ text: w.text, color: NOTE, sub: author(w), subColor: ACCENT }} at={w.centre} wears={w.wears} region={w.region} axes={axes} minPx={NOTE_EDGE_PX} play={play} clear={{ trueSide: placedBoxSide(scaleExp), minPx: 0 }} />}
+              : <HeldItemMark id={w.key} own={draw === 'own'} at={w.centre} wears={w.wears} region={w.region} axes={axes} appear={play} />}
+            {draw !== 'item' && play && <ItemVanish id={w.key} label={{ text: w.text, color: NOTE, sub: author(w), subColor: ACCENT }} at={w.centre} wears={w.wears} region={w.region} axes={axes} minPx={NOTE_EDGE_PX} play={play} clear={{ trueSide: placedBoxSide(scaleExp), minPx: 0 }} />}
             {/* The mark is a fixed size on screen at any zoom, so its target is
                 too: a fingertip over the mark (TapTarget). */}
             <TapTarget px={TAP_PX} at={w.centre} onTap={open} />
@@ -327,6 +330,33 @@ export function ItemMark({ id, text, sub, at, opacity = 1, wears, region = null,
     <>
       <WorldMark kind="note" at={at} opacity={opacity} />
       {FLOATING_NAME.item && <WorldLabel text={label.text} color={label.color} at={at} align="center" px={13} sub={label.sub} subColor={label.subColor} opacity={opacity} recede="name" />}
+    </>
+  )
+}
+
+/**
+ * A held item (arkinox, 2026-11-06): its model at HELD_OPACITY, in motion
+ * as ever, with no name and no outline of its own. One you made yourself
+ * (`own`) stands in the note's blue box at the same half; one taken from
+ * someone else has no box. While its model loads, and when there is none,
+ * the box at half alone marks the place, for a taken item too, so the spot
+ * is never empty. Under TAKE (`appear`) the box fades in to its half.
+ */
+export function HeldItemMark({ id, own, at, wears, region = null, axes, appear }: {
+  id: string
+  own: boolean
+  at: [number, number, number]
+  wears?: ItemWears
+  region?: Box | null
+  axes: ViewAxes
+  appear?: Vanishing
+}): JSX.Element {
+  const model = useItemModel(wears?.model)
+  const drawn = itemMarkShape(model, axes) === 'model'
+  return (
+    <>
+      {(own || !drawn) && <PlacedBox at={at} opacity={HELD_OPACITY} appear={appear} />}
+      {model && drawn && <ItemModelMark id={id} model={model} animation={wears?.animation ?? NO_MOTION} at={at} region={region} axes={axes} minPx={NOTE_EDGE_PX} held={HELD_OPACITY} />}
     </>
   )
 }
@@ -520,7 +550,7 @@ const PLACED_BOX_FACE = '#24527f'
  *    over it, which turned with the view. Writing depth, the box hides what
  *    is behind it and is hidden only by what is in front, from any side.
  *
- * Drawn today at full opacity only; an `opacity` under 1 would take the
+ * Under 1 (a held item's box at half, a box being moved) it takes the
  * see-through face's blend instead, which keeps the tag under it.
  */
 export function placedBoxProps(opacity: number): Record<string, unknown> {
@@ -554,15 +584,16 @@ export function setBoxLook(material: Material, object: { renderOrder: number }, 
 }
 
 /**
- * Where a held item or a sound stands: a blue box of a fixed size in the world.
- * It is not sized to the screen, so it reads as a thing in the place, and it
- * is solid, so it is the same blue box from every side (placedBoxProps). The
+ * Where a sound stands, and round an item you made and hold: a blue box of a
+ * fixed size in the world. It is not sized to the screen, so it reads as a
+ * thing in the place. A sound's is solid, so it is the same blue box from
+ * every side (placedBoxProps); a held item's is at half (HeldItemMark), so
+ * its model shows inside it, and draws after the opaque faces. The
  * faces sit a hair behind their edges (polygonOffset), so the edges always
  * draw over them.
  *
- * Under TAKE (`appear`) it fades in as the item fades out, see-through and
- * writing no depth until the fade is done (setBoxLook): solid from the start,
- * it hid the item inside it and cut the middle out of its name.
+ * Under TAKE (`appear`) it fades in up to its `opacity` as the item fades
+ * out, see-through and writing no depth until it is solid (setBoxLook).
  */
 export function PlacedBox({ at, opacity = 1, appear }: { at: [number, number, number]; opacity?: number; appear?: Vanishing }): JSX.Element {
   const side = placedBoxSide(useCyberspace((s) => s.scaleExp))
@@ -576,7 +607,9 @@ export function PlacedBox({ at, opacity = 1, appear }: { at: [number, number, nu
   })
   // While it appears, its first frame is drawn as it starts: not there yet.
   const start = appear ? Math.min(opacity, boxAppearOpacity(performance.now() - appear.at, appear.calm) * opacity) : opacity
-  const order = appear && start < 1 ? TRANSLUCENT_ORDER : 0
+  // See-through, it writes no depth, so it draws after the opaque faces: at
+  // order 0 a room sorted nearer would paint over it (setBoxLook).
+  const order = start < 1 ? TRANSLUCENT_ORDER : 0
   return (
     <group position={at} scale={side}>
       <mesh ref={fill} geometry={PLACED_BOX_FILL} renderOrder={order}>

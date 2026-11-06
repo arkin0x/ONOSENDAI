@@ -34,8 +34,8 @@ describe('the box of a held item and of a sound', () => {
     expect(placedBoxSide(10) * 2 ** 10).toBe(0.5)
   })
 
-  it('draws for a held item and for a sound, and is not sized to the screen', () => {
-    expect(source).toMatch(/: <PlacedBox at=\{w\.centre\} appear=/)
+  it('draws round an item you made and hold, at half, and for a sound, and is not sized to the screen', () => {
+    expect(source).toMatch(/\{\(own \|\| !drawn\) && <PlacedBox at=\{at\} opacity=\{HELD_OPACITY\} appear=\{appear\} \/>\}/)
     expect(source).toMatch(/<PlacedBox at=\{at\} opacity=\{opacity\} \/>\s*<AudioNote/)
     const body = source.slice(source.indexOf('function PlacedBox'), source.indexOf('The line color and opacity'))
     // Its size is the world's, never the screen's: its one frame is TAKE's fade, which sizes nothing.
@@ -140,7 +140,34 @@ describe('the box under TAKE', () => {
 
   it('is handed TAKE and its clear by the world’s items', () => {
     const source = readFileSync(new URL('../WorldMessages.tsx', import.meta.url), 'utf8')
-    expect(source).toMatch(/<PlacedBox at=\{w\.centre\} appear=\{draw === 'vanishing' \? play : undefined\} \/>/)
+    expect(source).toMatch(/<HeldItemMark id=\{w\.key\} own=\{draw === 'own'\} [^\n]*appear=\{play\} \/>/)
+    expect(source).toMatch(/\{draw !== 'item' && play && <ItemVanish /)
     expect(source).toMatch(/<ItemVanish [^\n]*clear=\{\{ trueSide: placedBoxSide\(scaleExp\), minPx: 0 \}\}/)
+  })
+})
+
+describe('the box at half (a held item you made, arkinox 2026-11-06)', () => {
+  it('fades in under TAKE only up to its half, see-through and drawn after the opaque faces, never solid', async () => {
+    let now = 1000
+    const clock = vi.spyOn(performance, 'now').mockImplementation(() => now)
+    frames.length = 0
+    const m = await mount(createElement(PlacedBox, { at: [0, 0, 0], opacity: 0.5, appear: { at: 1000, calm: false } }))
+    const fill = Object.assign(m.all().find((h) => h.type === 'mesh')!, { material: new MeshBasicMaterial(placedBoxProps(0)), renderOrder: TRANSLUCENT_ORDER })
+    const edges = Object.assign(m.all().find((h) => h.type === 'lineSegments')!, { material: new LineBasicMaterial(placedBoxProps(0)), renderOrder: TRANSLUCENT_ORDER })
+    now = 1000 + VANISH_MS * 2
+    for (const frame of frames) frame({})
+    for (const o of [fill, edges]) {
+      expect(o.material.opacity).toBeCloseTo(0.5, 9)
+      expect(o.material.depthWrite).toBe(false)
+      expect(o.renderOrder).toBe(TRANSLUCENT_ORDER)
+    }
+    clock.mockRestore()
+    await m.unmount()
+  })
+
+  it('still, it draws after the opaque faces, so a room sorted nearer cannot paint over it', async () => {
+    const m = await mount(createElement(PlacedBox, { at: [0, 0, 0], opacity: 0.5 }))
+    expect(m.all().find((h) => h.type === 'mesh')!.props.renderOrder).toBe(TRANSLUCENT_ORDER)
+    await m.unmount()
   })
 })

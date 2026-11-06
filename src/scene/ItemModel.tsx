@@ -79,11 +79,15 @@ interface MotionProps {
   opacity?: number
   /** Drawn as a ghost, so a fade of its materials is real (scene/ItemVanish). */
   ghost?: boolean
+  /** The model's share of its own opacity (ShardMesh `dim`): a held item's half. */
+  dim?: number
+  /** Its blue outline; a held item has none of its own (WorldMessages HeldItemMark). */
+  outline?: boolean
   frameRef?: MutableRefObject<Group | null>
 }
 
 /** The box and the model in motion, in the model's own units, centred on the place. */
-export function ModelInMotion({ model, animation, id, box, amplitude, planes, lit = false, opacity = 1, ghost = false, frameRef }: MotionProps): JSX.Element {
+export function ModelInMotion({ model, animation, id, box, amplitude, planes, lit = false, opacity = 1, ghost = false, dim = 1, outline = true, frameRef }: MotionProps): JSX.Element {
   const bob = useRef<Group>(null)
   const turnY = useRef<Group>(null)
   const turnX = useRef<Group>(null)
@@ -101,14 +105,16 @@ export function ModelInMotion({ model, animation, id, box, amplitude, planes, li
   const c = model.extent.centre
   return (
     <group ref={frameRef}>
-      <lineSegments geometry={CUBE_EDGES} position={shape.centre} scale={shape.size} frustumCulled={false}>
-        <lineBasicMaterial color={ITEM_BOX_BLUE} toneMapped={false} transparent opacity={BOX_OPACITY * opacity} depthWrite={false} userData-share={BOX_OPACITY} />
-      </lineSegments>
+      {outline && (
+        <lineSegments geometry={CUBE_EDGES} position={shape.centre} scale={shape.size} frustumCulled={false}>
+          <lineBasicMaterial color={ITEM_BOX_BLUE} toneMapped={false} transparent opacity={BOX_OPACITY * opacity} depthWrite={false} userData-share={BOX_OPACITY} />
+        </lineSegments>
+      )}
       <group ref={bob}>
         <group ref={turnY}>
           <group ref={turnX}>
             <group position={[-c[0], -c[1], -c[2]]}>
-              <ShardMesh shard={model.shard} world={!lit} lit={lit} ghost={ghost} clipPlanes={planes} />
+              <ShardMesh shard={model.shard} world={!lit} lit={lit} ghost={ghost} dim={dim} clipPlanes={planes} />
             </group>
           </group>
         </group>
@@ -140,10 +146,15 @@ interface MarkProps {
   label?: { text: string; color: string; sub: string; subColor: string }
   /** Going out after a TAKE: the model drawn as a ghost, the label read from this each frame (scene/ItemVanish). */
   vanish?: MutableRefObject<number>
+  /**
+   * Held (arkinox, 2026-11-06): the model at this share of its opacity, in
+   * motion as ever, with no outline of its own. WorldMessages HeldItemMark.
+   */
+  held?: number
 }
 
 /** An item in the world as the model it wears: the scene's and Cyberspace TV's (WorldMessages ItemMark). */
-export function ItemModelMark({ id, model, animation, at, region, axes, minPx, opacity = 1, onTap, label, vanish }: MarkProps): JSX.Element {
+export function ItemModelMark({ id, model, animation, at, region, axes, minPx, opacity = 1, onTap, label, vanish, held }: MarkProps): JSX.Element {
   const scaleExp = useCyberspace((s) => s.scaleExp)
   const gl = useThree((s) => s.gl)
   const unit = model.shard.unit
@@ -202,7 +213,7 @@ export function ItemModelMark({ id, model, animation, at, region, axes, minPx, o
     <>
       <group ref={outer} position={at}>
         <group matrix={turn} matrixAutoUpdate={false}>
-          <ModelInMotion model={model} animation={animation} id={id} box={cut.box} amplitude={size.amplitude} planes={planes?.world} opacity={opacity} ghost={!!vanish} frameRef={frame} />
+          <ModelInMotion model={model} animation={animation} id={id} box={cut.box} amplitude={size.amplitude} planes={planes?.world} opacity={opacity} ghost={!!vanish} dim={held} outline={held === undefined} frameRef={frame} />
         </group>
       </group>
       {/* Outside the scaled group: a target and a label size themselves from

@@ -369,7 +369,13 @@ export function modelPrint(shard: ShardModel): string {
  * 2026-10-30: "hide it on the chest so it feels like you took it").
  */
 export function holdsEntry(items: Record<string, HeldItem>, entry: ChestEntry): boolean {
-  return !!items[entry.id] || (entry.body.type === 'shard' && !!entry.body.shard && holdsModel(items, entry.body.shard))
+  // Held as addHeld would refuse it: by its id, by a held lineage of its
+  // author's, or, for a key, by its keypair (review of #615: TAKE on another
+  // instance of a key held added nothing and stayed offered, and TAKE ALL
+  // never finished).
+  const keypair = entry.body.type === 'key' ? entry.body.key?.itemPubkey : null
+  if (holdsItem(items, entry.id, itemLineage(entry.event), entry.event?.pubkey, undefined, keypair)) return true
+  return entry.body.type === 'shard' && !!entry.body.shard && holdsModel(items, entry.body.shard)
 }
 
 export function holdsModel(items: Record<string, HeldItem>, shard: ShardModel): boolean {

@@ -33,6 +33,7 @@
  */
 
 import { findCashuToken } from '../lib/cashu'
+import { hasNftLink } from '../lib/nftLink'
 import { clampUnit, normalizeStored } from 'sno-core/shards'
 import { snapOffered, wrapSpin } from '../lib/pose'
 import { create } from 'zustand'
@@ -721,7 +722,8 @@ export function sealingDoor(s: Pick<ShardsState, 'mine' | 'pending' | 'deployLea
 export function repeatable(pending: DeployPending): boolean {
   switch (pending.type) {
     case 'shard': return !pending.intoChest && !pending.edit
-    case 'message': return !pending.move && findCashuToken(pending.text) === null
+    // A coin or a nonfungible.cash claim link is a bearer thing: a copy would copy it (review of #615).
+    case 'message': return !pending.move && findCashuToken(pending.text) === null && !hasNftLink(pending.text)
     case 'key': return false
     case 'chest': return false
     case 'audio': return !pending.move
@@ -909,6 +911,7 @@ export function copyTemplateAt(previous: Pick<NostrEvent, 'kind' | 'content' | '
 /** Why PLACE is not on an ITEMS row, in words, or null when it is. */
 export const PLACE_NOT_YOURS = 'Only what you made can be placed again.'
 export const PLACE_COIN = 'A coin is money: placing it again would copy it.'
+export const PLACE_NFT = 'A claim link is whoever holds it: placing it again would copy it.'
 export const PLACE_KIND = 'Only an item, a message or a sound can be placed again from ITEMS.'
 
 /**
@@ -918,14 +921,15 @@ export const PLACE_KIND = 'Only an item, a message or a sound can be placed agai
  * no PLACE (owner ruling). A key and a message are copied whole
  * (copyTemplateAt), a key keeping its keypair; a sound as PLACE AGAIN copies
  * it, its file sealed again under a fresh key (`reseal`). A message holding a
- * coin is refused, as PLACE AGAIN refuses it (repeatable), and so are a
+ * coin or a nonfungible.cash claim link is refused, as PLACE AGAIN refuses it
+ * (repeatable), both being bearer things. So are a
  * chest, a door and a model: a chest's contents and a door's room are not
  * copied, and a model goes out from the workshop (MOVE TO WORKSHOP).
  */
 export function placeCopyOf(item: Pick<HeldItem, 'type' | 'event' | 'verified' | 'key' | 'text' | 'audio'>, me: string): DeployPending | string {
   if (!me || item.event?.pubkey !== me || !item.verified) return PLACE_NOT_YOURS
   if (item.type === 'key' && item.key) return { type: 'key', key: item.key, copy: item.event }
-  if (item.type === 'message' && item.text !== undefined) return findCashuToken(item.text) !== null ? PLACE_COIN : { type: 'message', text: item.text, copy: item.event }
+  if (item.type === 'message' && item.text !== undefined) return findCashuToken(item.text) !== null ? PLACE_COIN : hasNftLink(item.text) ? PLACE_NFT : { type: 'message', text: item.text, copy: item.event }
   if (item.type === 'audio' && item.audio) return { type: 'audio', audio: item.audio, reseal: true }
   return PLACE_KIND
 }

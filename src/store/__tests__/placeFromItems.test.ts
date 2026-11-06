@@ -32,13 +32,14 @@ vi.mock('../../lib/relay', () => ({
 import { finalizeEvent, generateSecretKey, verifyEvent } from 'nostr-tools/pure'
 import type { NostrEvent } from '../../lib/events'
 import { forgeKey } from '../../lib/chests'
-import { addHeld, heldFromEntry, heldFromFind, heldFromForged, holdsItem, type HeldItem } from '../../lib/inventory'
+import { addHeld, heldFromEntry, heldFromFind, heldFromForged, holdsEntry, holdsItem, type HeldItem } from '../../lib/inventory'
+import { takeableOf } from '../../hud/ItemRows'
 import { itemLineage, keyInnerTemplate, keyItemOf, messageInnerTemplate, type Hidden } from '../../lib/hidden'
 import type { Position } from '../../lib/space'
 import { useBuilder } from '../useBuilder'
 import { useCyberspace } from '../useCyberspace'
 import { useInventory } from '../useInventory'
-import { PLACE_COIN, PLACE_KIND, PLACE_NOT_YOURS, copyTemplateAt, placeCopyOf, placingCopy, positionOf, useShards } from '../useShards'
+import { PLACE_COIN, PLACE_KIND, PLACE_NFT, PLACE_NOT_YOURS, copyTemplateAt, placeCopyOf, placingCopy, positionOf, repeatable, useShards } from '../useShards'
 
 const S = () => useShards.getState()
 const I = () => useInventory.getState()
@@ -203,5 +204,44 @@ describe('holding is by keypair (lib/inventory.ts)', () => {
     expect(holdsItem(items, b.id, null, b.pubkey, undefined, key.itemPubkey)).toBe(true)
     expect(holdsItem(items, b.id, null, b.pubkey)).toBe(false)
     expect(addHeld(items, [heldFromForged(me, b, key, place, 2)]).added).toEqual([])
+  })
+})
+
+describe('a chest entry that is another instance of a key held (review of #615)', () => {
+  it('is held: not offered for TAKE, so TAKE ALL has nothing left of it to take, and TAKE would add nothing anyway', () => {
+    const me = C().identity.pubkey
+    const key = forgeKey('Silver Key')
+    const sk = generateSecretKey()
+    const first = finalizeEvent(keyInnerTemplate(key, at, 0, 5), sk) as NostrEvent
+    const inChest = finalizeEvent(keyInnerTemplate(key, { ...at, y: 7n }, 0, 6), sk) as NostrEvent
+    const items = { [first.id]: heldFromForged(me, first, key, place, 1) }
+    const entry = { id: inChest.id, event: inChest, verified: true, body: { type: 'key' as const, key } }
+    expect(holdsEntry(items, entry as never)).toBe(true)
+    expect(takeableOf([entry as never], items)).toEqual([])
+    expect(addHeld(items, [heldFromEntry(me, entry as never, { chestId: 'c', chestName: 'Wind Chest' }, place, 2)]).added).toEqual([])
+    // Another keypair in the same chest is still offered.
+    const other = forgeKey('Brass Key')
+    const otherEv = finalizeEvent(keyInnerTemplate(other, at, 0, 7), sk) as NostrEvent
+    const otherEntry = { id: otherEv.id, event: otherEv, verified: true, body: { type: 'key' as const, key: other } }
+    expect(takeableOf([entry as never, otherEntry as never], items).map((e) => e.id)).toEqual([otherEv.id])
+  })
+})
+
+describe('a message carrying a nonfungible.cash claim link is a bearer thing, as a coin is (review of #615)', () => {
+  const KEY = btoa(String.fromCharCode(...Uint8Array.from({ length: 32 }, (_, i) => (i * 17 + 3) & 0xff))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')
+  const LINK = `https://nonfungible.cash/claim/6fa4292bb0367fd9330d289a9c002d99#${KEY}`
+
+  it('has no PLACE in ITEMS', () => {
+    const me = C().identity.pubkey
+    const text = `for you: ${LINK}`
+    const msg = { ...messageInnerTemplate(text, at, 0, 5), pubkey: me, id: 'n1', sig: '' } as NostrEvent
+    const row = heldFromEntry(me, { event: msg, body: { type: 'message', text }, verified: true } as never, { chestId: 'c', chestName: 'Wind Chest' }, place, 1)
+    expect(placeCopyOf(row, me)).toBe(PLACE_NFT)
+  })
+
+  it('and no PLACE AGAIN after it goes out, as a coin has none; plain words still do', () => {
+    expect(repeatable({ type: 'message', text: `for you: ${LINK}` })).toBe(false)
+    expect(repeatable({ type: 'message', text: 'cashuAeyJ0b2tlbiI6W3sibWludCI6Imh0dHBzOi8vbWludC50ZXN0IiwicHJvb2ZzIjpbXX1dfQ' })).toBe(false)
+    expect(repeatable({ type: 'message', text: 'meet me here' })).toBe(true)
   })
 })

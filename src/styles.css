@@ -9464,6 +9464,8 @@ a.feed__act { text-decoration: none; }
 .held__row { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 8px; }
 .held__row .chest { grid-column: 2; }
 .held__acts { display: flex; gap: 4px; align-items: center; }
+.held__views { display: flex; gap: 6px; margin: 4px 0 6px; }
+.held__views .tag--tap.is-on { color: var(--accent); border-color: var(--accent); }
 /* An item you hold: the picture beside the name and its line, both the full
  * width of the row, and DETAILS, COPY, PUBLISH and DELETE on a row of their
  * own under them, lined up with the name (arkinox, 2026-11-03). */

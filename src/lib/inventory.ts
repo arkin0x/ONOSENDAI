@@ -99,6 +99,26 @@ export interface HeldItem {
    * once the same key is found in play.
    */
   watched?: true
+  /**
+   * Unix seconds when it was filed away under ARCHIVED (arkinox, 2026-11-06:
+   * "refuse and offer archive instead to file it away behind a modal.
+   * Inventory and Archived"). Still held for what a key does: it opens and
+   * seals chests and doors, and keeps its secret on this device. Not drawn
+   * as held in the world (WorldMessages), and out of the INVENTORY list.
+   * UNARCHIVE takes it back.
+   */
+  archived?: number
+}
+
+/** What is not filed away under ARCHIVED: what the world draws as held. */
+export function unarchived(items: Record<string, HeldItem>): Record<string, HeldItem> {
+  let out: Record<string, HeldItem> | null = null
+  for (const [id, it] of Object.entries(items)) {
+    if (!it.archived) continue
+    out ??= { ...items }
+    delete out[id]
+  }
+  return out ?? items
 }
 
 export function rowKeyOf(owner: string, id: string): string {
@@ -152,7 +172,11 @@ export function heldFromFind(owner: string, h: Hidden, at: number, watched = fal
   return watched ? { ...held, watched: true } : held
 }
 
-/** A key the identity forged and hid, held at once so chests can be sealed to it (B1 §3.1). */
+/**
+ * A key the identity forged, held as forged: picked up by TAKE on one of its
+ * own (arkinox, 2026-11-06: hiding no longer holds it, B1 §3.1 as amended).
+ * Rows held at hiding before then stay.
+ */
 export function heldFromForged(owner: string, event: NostrEvent, key: KeyItem, place: HeldPlace, at: number): HeldItem {
   return row(owner, event, { type: 'key', key }, true, 'forged', place, null, at)
 }
@@ -271,6 +295,76 @@ export function openingKeys(items: Record<string, HeldItem>, auto = false): Open
   return out
 }
 
+/** A key this identity made: its id (its event's), its name, when, and the key. */
+export interface MadeKey {
+  id: string
+  name: string
+  at: number
+  key: KeyItem
+}
+
+/** What madeKeys reads of a deployment row of this identity's (store/useShards MyDeployment). */
+export interface MadeRow {
+  eventId: string
+  inner: { pubkey: string; created_at: number }
+  createdAt: number
+  key?: KeyItem
+  /** A chest's contents as sealed, kept on the device that sealed it. */
+  sealed?: readonly unknown[]
+}
+
+/**
+ * The keys this identity made on this device, held or not (arkinox,
+ * 2026-11-06: "when i place an item: i want to pick it up for the first time,
+ * not have it automatically"): each key it placed, from its deployment rows,
+ * and each key it forged inside a chest it placed, from that chest's contents
+ * as sealed. Their secrets were never anywhere else, so nothing is asked
+ * again. Only its own: a row or an entry by another identity is left out.
+ * One per keypair, the first met.
+ */
+export function madeKeys(rows: readonly MadeRow[], me: string): MadeKey[] {
+  const out: MadeKey[] = []
+  const seen = new Set<string>()
+  const add = (k: MadeKey): void => { if (!seen.has(k.key.itemPubkey)) { seen.add(k.key.itemPubkey); out.push(k) } }
+  for (const d of rows) {
+    if (!me || d.inner.pubkey !== me) continue
+    if (d.key) add({ id: d.eventId, name: d.key.name, at: d.createdAt, key: d.key })
+    for (const e of d.sealed ?? []) {
+      const ev = e as Partial<NostrEvent>
+      if (typeof ev.id !== 'string' || ev.pubkey !== me || typeof ev.kind !== 'number' || !Array.isArray(ev.tags) || typeof ev.content !== 'string') continue
+      const key = keyItemOf(ev as NostrEvent)
+      if (key) add({ id: ev.id, name: key.name, at: ev.created_at ?? d.createdAt, key })
+    }
+  }
+  return out
+}
+
+/**
+ * What the hider's own work opens a chest of theirs with: the keys held, and
+ * every key it made (madeKeys), held or not. For EDIT, ADD, CONVERT and the
+ * bag's guard against carrying a chest's contents in the open, never for
+ * opening a chest in play, which takes a key held (openingKeys).
+ */
+export function hiderKeys(items: Record<string, HeldItem>, rows: readonly MadeRow[], me: string): OpeningKey[] {
+  const out = openingKeys(items)
+  const have = new Set(out.map((k) => k.itemPubkey))
+  for (const m of madeKeys(rows, me)) if (!have.has(m.key.itemPubkey)) { have.add(m.key.itemPubkey); out.push({ id: m.id, itemPubkey: m.key.itemPubkey, secretHex: m.key.secretHex }) }
+  return out
+}
+
+/**
+ * The keys a chest or a door can be sealed to from the composer: every key
+ * held, then every key this identity made and has not picked up (madeKeys),
+ * newest first, one per keypair.
+ */
+export function sealableKeys(items: Record<string, HeldItem>, rows: readonly MadeRow[], me: string): MadeKey[] {
+  const held = Object.values(items).filter((it): it is HeldItem & { key: KeyItem } => it.type === 'key' && !!it.key).map((it) => ({ id: it.id, name: it.name, at: it.at, key: it.key }))
+  const have = new Set(held.map((k) => k.key.itemPubkey))
+  const out: MadeKey[] = [...held]
+  for (const m of madeKeys(rows, me)) if (!have.has(m.key.itemPubkey)) { have.add(m.key.itemPubkey); out.push(m) }
+  return out.sort((a, b) => b.at - a.at)
+}
+
 /** Which of these chests a key opens: those whose lock is the key's public key. */
 export function chestsOpenedBy(key: Pick<KeyItem, 'itemPubkey'>, chests: Array<{ id: string; chest: ChestItem }>): string[] {
   return chests.filter((c) => c.chest.lockPubkey === key.itemPubkey).map((c) => c.id)
@@ -291,10 +385,12 @@ export interface DiscoveredPlace {
 
 /** What the LOOT panel shows: the keys held, and the contents taken from chests. */
 export interface Loot {
-  /** Newest held first. */
+  /** Newest held first, not archived. */
   keys: HeldItem[]
-  /** Everything taken that is not a key, newest first. */
+  /** Everything taken that is not a key, newest first, not archived. */
   taken: HeldItem[]
+  /** Everything filed away under ARCHIVED, newest first. */
+  archived: HeldItem[]
 }
 
 const newestFirst = <T extends { at: number }>(a: T, b: T): number => b.at - a.at
@@ -322,8 +418,9 @@ export function splitPanels(discovered: Hidden[], held: HeldItem[]): { discovere
   return {
     discovered: grouped,
     loot: {
-      keys: held.filter((it) => it.type === 'key').sort(newestFirst),
-      taken: held.filter((it) => it.type !== 'key' && !it.cleared).sort(newestFirst),
+      keys: held.filter((it) => it.type === 'key' && !it.archived).sort(newestFirst),
+      taken: held.filter((it) => it.type !== 'key' && !it.cleared && !it.archived).sort(newestFirst),
+      archived: held.filter((it) => !!it.archived).sort(newestFirst),
     },
   }
 }

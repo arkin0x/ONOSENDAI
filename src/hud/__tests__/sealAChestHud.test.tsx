@@ -33,7 +33,8 @@ vi.mock('../../lib/relay', () => ({
 import { finalizeEvent, generateSecretKey, getPublicKey } from 'nostr-tools/pure'
 import type { NostrEvent } from '../../lib/events'
 import { forgeKey, sealEntries } from '../../lib/chests'
-import { chestInnerTemplate, chestItemOf, messageInnerTemplate, type ChestItem } from '../../lib/hidden'
+import { chestInnerTemplate, chestItemOf, keyInnerTemplate, messageInnerTemplate, type ChestItem } from '../../lib/hidden'
+import { heldFromForged } from '../../lib/inventory'
 import { useCyberspace } from '../../store/useCyberspace'
 import { useInventory } from '../../store/useInventory'
 import { useShards, type MyDeployment } from '../../store/useShards'
@@ -91,6 +92,32 @@ describe('the chest modal after PLACE CHEST', () => {
     for (const t of ['+ MESSAGE', '+ SHARD', '+ ITEM', '+ AUDIO', 'MOVE', 'CANCEL', 'SEAL (LOCAL)']) expect(html).toContain(t)
     expect(html).not.toContain('>AIM<')
     useShards.getState().cancelDeploy()
+  })
+})
+
+describe('the lock: keys you hold, and keys you placed and never picked up (arkinox, 2026-11-06)', () => {
+  it('lists a key you placed and never picked up beside one you hold, and nobody else’s', () => {
+    const me = useCyberspace.getState().identity
+    const sk = generateSecretKey()
+    useCyberspace.setState({ identity: { ...me, pubkey: getPublicKey(sk) }, live: false })
+    const placed = forgeKey('Placed Key')
+    const event = finalizeEvent(keyInnerTemplate(placed, at, 0, 5), sk) as NostrEvent
+    const row: MyDeployment = { eventId: event.id, inner: event, type: 'key', key: placed, bagId: 'bag', at: { x: '1', y: '2', z: '3' }, plane: 0, height: 4, lookupId: 'lookup', keyHex: 'aa'.repeat(32), relays: [], createdAt: 5, published: false }
+    const theirs = forgeKey('Their Key')
+    const theirEvent = finalizeEvent(keyInnerTemplate(theirs, at, 0, 6), generateSecretKey()) as NostrEvent
+    const held = forgeKey('Held Key')
+    const heldEvent = finalizeEvent(keyInnerTemplate(held, at, 0, 2), sk) as NostrEvent
+    useShards.setState({ mine: [row, { ...row, eventId: theirEvent.id, inner: theirEvent, key: theirs }] })
+    useInventory.setState({ owner: getPublicKey(sk), items: { [heldEvent.id]: heldFromForged(getPublicKey(sk), heldEvent, held, { lookupId: 'l', bagId: 'b', at: { x: '1', y: '2', z: '3' }, plane: 0, height: 4 }, 2) }, storage: 'memory' })
+    useShards.getState().startPlaceChest({ name: 'Wind Chest', lock: null, requires: '', contents: [{ kind: 'message', text: 'inside' }] })
+    useShards.getState().placeChest()
+    const html = render(<ChestCompose onDone={() => undefined} />)
+    const select = html.slice(html.indexOf('aria-label="Seal to an item you hold or made"'))
+    const options = [...select.slice(0, select.indexOf('</select>')).matchAll(/<option[^>]*>([^<]*)<\/option>/g)].map((m) => m[1])
+    expect(options).toEqual(['paste a public key below', 'Placed Key', 'Held Key'])
+    useShards.getState().cancelDeploy()
+    useInventory.setState({ items: {} })
+    useCyberspace.setState({ identity: me })
   })
 })
 

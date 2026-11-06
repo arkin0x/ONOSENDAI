@@ -56,7 +56,7 @@ async function tapOpen(chest: Hidden, lock: { itemPubkey: string; secretHex: str
 }
 
 describe('hiding a key', () => {
-  it('writes a signed kind 3340 item into the bag and holds the key at once, marked forged', async () => {
+  it('writes a signed kind 3340 item into the bag and holds nothing until its hider picks it up with TAKE, then as forged (arkinox, 2026-11-06)', async () => {
     const key = forgeKey('Wind Key', 'opens the first door')
     S().startDeployKey(key)
     await S().deploy()
@@ -70,6 +70,10 @@ describe('hiding a key', () => {
     expect(keyItemOf(d.inner)).toEqual({ ...key, about: 'opens the first door' })
     expect(d.key).toEqual(key)
 
+    // "i want to pick it up for the first time, not have it automatically"
+    expect(I().items[d.eventId]).toBeUndefined()
+    expect(Object.values(I().items)).toHaveLength(0)
+    S().takeFound([d.eventId])
     const held = I().items[d.eventId]
     expect(held?.source).toBe('forged')
     expect(held?.key).toEqual(key)
@@ -96,7 +100,7 @@ describe('hiding a key', () => {
 })
 
 describe('hiding a chest', () => {
-  it('signs and seals its contents to the lock, holds the key forged inside, and opens with the lock', async () => {
+  it('signs and seals its contents to the lock, holds nothing forged inside it, and opens with the lock', async () => {
     const lock = forgeKey('Wind Key')
     const inside = forgeKey('Fire Key')
     S().startDeployChest({
@@ -135,10 +139,8 @@ describe('hiding a chest', () => {
     expect(message.tags).toContainEqual(['-'])
     expect(readContents(raw)[0].verified).toBe(false)
 
-    // The key forged inside is held by the hider, with the chest's place.
-    const held = Object.values(I().items).find((it) => it.key?.itemPubkey === inside.itemPubkey)
-    expect(held?.source).toBe('forged')
-    expect(held?.place?.lookupId).toBe(d.lookupId)
+    // The key forged inside is not held until it is taken out (arkinox, 2026-11-06).
+    expect(Object.values(I().items).some((it) => it.key?.itemPubkey === inside.itemPubkey)).toBe(false)
     // The lock was never hidden here, so it is not held: a chest can be sealed to a key one does not hold.
     expect(Object.values(I().items).some((it) => it.key?.itemPubkey === lock.itemPubkey)).toBe(false)
   })

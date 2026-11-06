@@ -240,8 +240,10 @@ describe('MOVE into another region', () => {
 })
 
 describe('a moved key is the same item', () => {
-  it('stays held once, its row at the new place, and its blue box with it', async () => {
+  it('picked up, stays held once, its row at the new place, and its held look with it', async () => {
     const first = await hide('key', at(1n))
+    expect(Object.keys(useInventory.getState().items)).toEqual([])
+    S().takeFound([first])
     expect(Object.keys(useInventory.getState().items)).toEqual([first])
     const moved = await move(first, at(9n))
     const items = useInventory.getState().items
@@ -251,6 +253,15 @@ describe('a moved key is the same item', () => {
     // The world reads it as held (WorldMessages itemDrawAs), and KeyLine offers no TAKE.
     const w = S().worldItems().find((x) => x.key === moved.eventId)!
     expect(holdsItem(items, w.key, w.lineage, w.event?.pubkey)).toBe(true)
+  })
+
+  it('never picked up, a moved key stays not held (arkinox, 2026-11-06)', async () => {
+    const first = await hide('key', at(1n))
+    const moved = await move(first, at(9n))
+    const items = useInventory.getState().items
+    expect(Object.keys(items)).toEqual([])
+    const w = S().worldItems().find((x) => x.key === moved.eventId)!
+    expect(holdsItem(items, w.key, w.lineage, w.event?.pubkey)).toBe(false)
   })
 
   it('a finder who took the old version holds the moved one already: TAKE adds nothing', async () => {
@@ -332,6 +343,7 @@ describe('a move cancelled or failed midway', () => {
 
   it('a bag the signer refuses publishes nothing and keeps the old copy', async () => {
     const first = await hide('key', at(1n))
+    S().takeFound([first])
     const before = S().mine
     sent.length = 0
     useCyberspace.setState({ signEvent: async (t) => { if (t.kind === HIDDEN_KIND) throw new Error('declined'); return realSign(t) } })

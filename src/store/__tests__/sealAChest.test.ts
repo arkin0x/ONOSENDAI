@@ -30,9 +30,9 @@ vi.mock('../../lib/relay', () => ({
   relaySet: () => ['wss://relay.test'],
 }))
 
-import { forgeKey, openWithSecret, readContents } from '../../lib/chests'
+import { forgeKey, openWithSecret, openerFor, readContents } from '../../lib/chests'
 import { chestItemOf, type KeyItem } from '../../lib/hidden'
-import { heldFromForged } from '../../lib/inventory'
+import { heldFromForged, openingKeys, sealableKeys, splitPanels, unarchived } from '../../lib/inventory'
 import { lookTagsOf } from '../../lib/looks'
 import { deployPoint, type Position } from '../../lib/space'
 import { buildStepOf } from '../../lib/buildCursor'
@@ -41,7 +41,7 @@ import { sealAChest } from '../../hud/ShardsPanel'
 import { useBuilder } from '../useBuilder'
 import { useCyberspace } from '../useCyberspace'
 import { useInventory } from '../useInventory'
-import { fillingChest, keyStillNeeded, lookTagsFor, placingChest, pendingEmpty, positionOf, useShards, type ChestDraft, type LookChoice, type MyDeployment } from '../useShards'
+import { fillingChest, itemStillNeeded, keyStillNeeded, lookTagsFor, placingChest, pendingEmpty, positionOf, useShards, type ChestDraft, type LookChoice, type MyDeployment } from '../useShards'
 
 const S = () => useShards.getState()
 const C = () => useCyberspace.getState()
@@ -292,6 +292,59 @@ describe('a chest of yours: EDIT, MOVE, ADD', () => {
     // A door counts as a chest does, and says so.
     const asDoor = S().mine.map((m) => (m.eventId === chest.eventId ? { ...m, chest: { ...m.chest!, door: 4 } } : m))
     expect(keyStillNeeded(key, asDoor, {}, me)).toBe('This key opens door “Wind Chest”. Delete or reseal that first.')
+  })
+
+  it('ARCHIVE instead of DELETE (arkinox, 2026-11-06): the refused key is filed away with its secret, DELETE then goes ahead, its chest still opens and seals, UNARCHIVE brings it back', async () => {
+    S().startDeployKey(lock)
+    S().setDeployHeight(5)
+    await S().deploy()
+    S().cancelDeploy()
+    const key = S().mine.find((m) => m.type === 'key')!
+    const chest = await sealOne()
+    const me = C().identity.pubkey
+    expect(keyStillNeeded(key, S().mine, useInventory.getState().items, me)).not.toBeNull()
+    // ARCHIVE on the never-picked-up key: an archived ITEMS row holding its secret.
+    const row = useInventory.getState().archiveMade(key.inner as never, key.key!, { lookupId: key.lookupId, bagId: key.bagId, at: key.at, plane: key.plane, height: key.height })
+    expect(row.archived).toBeGreaterThan(0)
+    expect(row.key?.secretHex).toBe(lock.secretHex)
+    expect(splitPanels([], Object.values(useInventory.getState().items)).loot).toMatchObject({ keys: [], archived: [{ id: key.eventId }] })
+    // The secret is kept here now, so DELETE of the world copy goes ahead.
+    expect(keyStillNeeded(key, S().mine, useInventory.getState().items, me)).toBeNull()
+    await S().deleteInstance(key.eventId)
+    expect(S().mine.some((m) => m.eventId === key.eventId)).toBe(false)
+    // The archived key still opens its chest, in play and for EDIT, and can still be sealed to.
+    expect(openerFor(chest.chest!, openingKeys(useInventory.getState().items), me)).toMatchObject({ by: 'key' })
+    useShards.setState({ mine: S().mine.map((x) => (x.eventId === chest.eventId ? { ...x, sealed: undefined } : x)) })
+    const inside = await S().chestEntries(chest.eventId)
+    expect(Array.isArray(inside) && inside.length).toBe(1)
+    expect(sealableKeys(useInventory.getState().items, S().mine, me).map((k) => k.key.itemPubkey)).toContain(lock.itemPubkey)
+    // ITEMS DELETE of that archived row is now the last copy: refused, naming the chest.
+    expect(itemStillNeeded(row, S().mine, useInventory.getState().items, me)).toBe('This key opens chest “Wind Chest”. Delete or reseal that first.')
+    // UNARCHIVE: back in INVENTORY.
+    useInventory.getState().unarchive(row.id)
+    expect(useInventory.getState().items[row.id].archived).toBeUndefined()
+    expect(splitPanels([], Object.values(useInventory.getState().items)).loot.keys.map((k) => k.id)).toEqual([row.id])
+  })
+
+  it('ARCHIVE on any row files it away and keeps it held for what a key does; a keypair already in ITEMS is archived where it stands', async () => {
+    S().startDeployKey(lock)
+    S().setDeployHeight(5)
+    await S().deploy()
+    S().cancelDeploy()
+    const key = S().mine.find((m) => m.type === 'key')!
+    S().takeFound([key.eventId])
+    useInventory.getState().archive(key.eventId)
+    const items = useInventory.getState().items
+    expect(Object.keys(items)).toEqual([key.eventId])
+    expect(items[key.eventId].archived).toBeGreaterThan(0)
+    expect(openingKeys(items).map((k) => k.itemPubkey)).toEqual([lock.itemPubkey])
+    // Not drawn as held in the world.
+    expect(unarchived(items)).toEqual({})
+    // archiveMade on the same keypair archives that row, never a second one.
+    useInventory.getState().unarchive(key.eventId)
+    useInventory.getState().archiveMade(key.inner as never, key.key!, { lookupId: key.lookupId, bagId: key.bagId, at: key.at, plane: key.plane, height: key.height })
+    expect(Object.keys(useInventory.getState().items)).toEqual([key.eventId])
+    expect(useInventory.getState().items[key.eventId].archived).toBeGreaterThan(0)
   })
 
   it('nobody else’s chest moves or reseals', async () => {

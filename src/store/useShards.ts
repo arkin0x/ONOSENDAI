@@ -889,24 +889,34 @@ export function freshCopyTemplate(previous: Pick<NostrEvent, 'kind' | 'content' 
 }
 
 /**
- * Why a key of yours cannot be deleted or forgotten here, or null when it can
- * (review of #614). Hiding no longer holds a key, so its deployment row (and
- * the bag's copy) can be the only place its secret is kept: deleting that
- * while a chest or door of yours is sealed to it would leave them unopenable
- * for good. Refused while it is not held, no other row or chest of yours
- * keeps the same keypair (madeKeys), and something of yours is sealed to it.
+ * Why a key's secret cannot leave this device, or null when it can (review
+ * of #614). Hiding no longer holds a key, so its deployment row (and the
+ * bag's copy) can be the only place its secret is kept: deleting that while
+ * a chest or door of yours is sealed to it would leave them unopenable for
+ * good. Refused while no other copy is kept here (an ITEMS row, archived
+ * ones included, another row of yours, or a chest of yours it was forged
+ * into: madeKeys) and something of yours is sealed to it. `skip` is the copy
+ * being deleted. The refusal offers ARCHIVE instead (arkinox, 2026-11-06).
  */
-export function keyStillNeeded(d: Pick<MyDeployment, 'eventId' | 'type' | 'key'>, mine: readonly MyDeployment[], items: Record<string, HeldItem>, me: string): string | null {
-  if (d.type !== 'key' || !d.key) return null
-  const pk = d.key.itemPubkey
-  if (openingKeys(items).some((k) => k.itemPubkey === pk)) return null
-  const others = mine.filter((m) => m.eventId !== d.eventId)
+function secretNeeded(pk: string, mine: readonly MyDeployment[], items: Record<string, HeldItem>, me: string, skip: { row?: string; item?: string }): string | null {
+  if (Object.values(items).some((it) => it.id !== skip.item && it.key?.itemPubkey === pk)) return null
+  const others = mine.filter((m) => m.eventId !== skip.row)
   if (madeKeys(others, me).some((k) => k.key.itemPubkey === pk)) return null
   const opens = others.filter((m) => m.chest?.lockPubkey === pk && m.inner.pubkey === me)
   if (opens.length === 0) return null
   const names = opens.map((m) => `${m.chest!.door !== undefined ? 'door' : 'chest'} “${m.chest!.name}”`)
   const list = names.length === 1 ? names[0] : `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}`
   return `This key opens ${list}. Delete or reseal ${names.length === 1 ? 'that' : 'those'} first.`
+}
+
+/** DELETE or FORGET of a deployment row of yours: secretNeeded for a key's row, null for anything else. */
+export function keyStillNeeded(d: Pick<MyDeployment, 'eventId' | 'type' | 'key'>, mine: readonly MyDeployment[], items: Record<string, HeldItem>, me: string): string | null {
+  return d.type === 'key' && d.key ? secretNeeded(d.key.itemPubkey, mine, items, me, { row: d.eventId }) : null
+}
+
+/** DELETE of an ITEMS row: secretNeeded for a key's row, null for anything else. */
+export function itemStillNeeded(item: Pick<HeldItem, 'id' | 'type' | 'key'>, mine: readonly MyDeployment[], items: Record<string, HeldItem>, me: string): string | null {
+  return item.type === 'key' && item.key ? secretNeeded(item.key.itemPubkey, mine, items, me, { item: item.id }) : null
 }
 
 /**

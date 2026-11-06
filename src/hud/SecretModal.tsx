@@ -38,6 +38,7 @@ import { profileLabel } from '../store/useProfiles'
 import { useCyberspace } from '../store/useCyberspace'
 import { editable, keyStillNeeded, movable as movableDep, muteSubject, useShards, type WorldItem } from '../store/useShards'
 import { useInventory } from '../store/useInventory'
+import type { NostrEvent } from '../lib/events'
 import { addToRoom, editPlaced, movePlaced } from '../store/useBuilder'
 import { DeleteDoorCard, DoorOwnerBlock } from './DoorOwner'
 import { doorSecret } from '../store/doorSecrets'
@@ -103,6 +104,16 @@ export function SecretModal(): JSX.Element | null {
   // as every hook here must be.
   const [removing, setRemoving] = useState(false)
   const [refusal, setRefusal] = useState<string | null>(null)
+  // A DELETE refused for the last copy of a key offers ARCHIVE instead (arkinox, 2026-11-06).
+  const [archiveOffer, setArchiveOffer] = useState(false)
+  const archive = (): void => {
+    if (!item) return
+    const d = useShards.getState().mine.find((m) => m.eventId === item.key)
+    if (!d?.key) return
+    useInventory.getState().archiveMade(d.inner as NostrEvent, d.key, { lookupId: d.lookupId, bagId: d.bagId, at: d.at, plane: d.plane, height: d.height })
+    setArchiveOffer(false)
+    setRefusal('ARCHIVED')
+  }
   // The confirmation card over this modal, for DELETE or REMOVE FROM CHEST
   // (arkinox, 2026-10-10: "we need a confirmation step").
   const [confirming, setConfirming] = useState<'delete' | 'remove' | null>(null)
@@ -339,7 +350,8 @@ export function SecretModal(): JSX.Element | null {
                 const s = useShards.getState()
                 const row = s.mine.find((d) => d.eventId === item.key)
                 const needed = row ? keyStillNeeded(row, s.mine, useInventory.getState().items, useCyberspace.getState().identity.pubkey) : null
-                if (needed) { setRefusal(needed); return }
+                if (needed) { setRefusal(needed); setArchiveOffer(true); return }
+                setArchiveOffer(false)
                 setConfirming('delete')
               }}
             >DELETE</button>
@@ -354,6 +366,7 @@ export function SecretModal(): JSX.Element | null {
           )}
         </div>
         {(refusal ?? convertWhy) && <p className="secret__status" role="status">{refusal ?? convertWhy}</p>}
+        {archiveOffer && <div className="secret__actions"><button className="secret__act" onClick={archive} title="File it away in ITEMS under ARCHIVED: its secret stays here, so what it opens still opens">ARCHIVE</button></div>}
 
         {/* The technical facts under one closed METADATA (arkinox,
             2026-10-26: "Collapse all the technical info on the chest, door,

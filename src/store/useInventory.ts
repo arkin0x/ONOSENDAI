@@ -98,6 +98,17 @@ interface InventoryState {
   remove: (id: string) => Promise<boolean>
   /** PASTE: hold a key from its text. */
   paste: (text: string) => PasteResult
+  /** ARCHIVE: file a row away under ARCHIVED; still held for what a key does (lib/inventory.ts HeldItem `archived`). */
+  archive: (id: string) => void
+  /** UNARCHIVE: back to INVENTORY. */
+  unarchive: (id: string) => void
+  /**
+   * ARCHIVE on a key this identity made and never picked up (no ITEMS row):
+   * an archived row holding its secret, so the chests and doors sealed to it
+   * still open when its world copy is deleted. A keypair already in ITEMS is
+   * archived where it stands instead.
+   */
+  archiveMade: (event: NostrEvent, key: KeyItem, place: HeldPlace) => HeldItem
   has: (id: string) => boolean
 }
 
@@ -349,6 +360,31 @@ export const useInventory = create<InventoryState>((set, get) => {
   },
 
   has: (id) => !!get().items[id],
+
+  archive: (id) => {
+    const it = get().items[id]
+    if (!it || it.archived) return
+    const row = { ...it, archived: now() }
+    set({ items: { ...get().items, [id]: row } })
+    void persist([row])
+  },
+
+  unarchive: (id) => {
+    const it = get().items[id]
+    if (!it?.archived) return
+    const { archived: _, ...row } = it
+    set({ items: { ...get().items, [id]: row } })
+    void persist([row])
+  },
+
+  archiveMade: (event, key, place) => {
+    const owner = ownerNow()
+    const already = Object.values(get().items).find((it) => it.key?.itemPubkey === key.itemPubkey)
+    if (already) { get().archive(already.id); return get().items[already.id] ?? already }
+    const row = { ...heldFromForged(owner, event, key, place, now()), archived: now() }
+    get().add([row])
+    return get().items[row.id] ?? row
+  },
   }
 })
 

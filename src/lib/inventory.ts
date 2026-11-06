@@ -99,6 +99,26 @@ export interface HeldItem {
    * once the same key is found in play.
    */
   watched?: true
+  /**
+   * Unix seconds when it was filed away under ARCHIVED (arkinox, 2026-11-06:
+   * "refuse and offer archive instead to file it away behind a modal.
+   * Inventory and Archived"). Still held for what a key does: it opens and
+   * seals chests and doors, and keeps its secret on this device. Not drawn
+   * as held in the world (WorldMessages), and out of the INVENTORY list.
+   * UNARCHIVE takes it back.
+   */
+  archived?: number
+}
+
+/** What is not filed away under ARCHIVED: what the world draws as held. */
+export function unarchived(items: Record<string, HeldItem>): Record<string, HeldItem> {
+  let out: Record<string, HeldItem> | null = null
+  for (const [id, it] of Object.entries(items)) {
+    if (!it.archived) continue
+    out ??= { ...items }
+    delete out[id]
+  }
+  return out ?? items
 }
 
 export function rowKeyOf(owner: string, id: string): string {
@@ -365,10 +385,12 @@ export interface DiscoveredPlace {
 
 /** What the LOOT panel shows: the keys held, and the contents taken from chests. */
 export interface Loot {
-  /** Newest held first. */
+  /** Newest held first, not archived. */
   keys: HeldItem[]
-  /** Everything taken that is not a key, newest first. */
+  /** Everything taken that is not a key, newest first, not archived. */
   taken: HeldItem[]
+  /** Everything filed away under ARCHIVED, newest first. */
+  archived: HeldItem[]
 }
 
 const newestFirst = <T extends { at: number }>(a: T, b: T): number => b.at - a.at
@@ -396,8 +418,9 @@ export function splitPanels(discovered: Hidden[], held: HeldItem[]): { discovere
   return {
     discovered: grouped,
     loot: {
-      keys: held.filter((it) => it.type === 'key').sort(newestFirst),
-      taken: held.filter((it) => it.type !== 'key' && !it.cleared).sort(newestFirst),
+      keys: held.filter((it) => it.type === 'key' && !it.archived).sort(newestFirst),
+      taken: held.filter((it) => it.type !== 'key' && !it.cleared && !it.archived).sort(newestFirst),
+      archived: held.filter((it) => !!it.archived).sort(newestFirst),
     },
   }
 }

@@ -34,17 +34,31 @@ export function markShown(kind: MarkKind, scaleExp: number): boolean {
   return kind === 'coin' || scaleExp <= MESSAGE_SCALE_MAX
 }
 
-/** How the world draws an item: as itself, going out after a TAKE, or as the blue box it leaves. */
-export type ItemDraw = 'item' | 'vanishing' | 'box'
+/**
+ * How the world draws an item: as itself, or held, by the hand that made it
+ * ('own') or taken from someone else ('taken').
+ */
+export type ItemDraw = 'item' | 'own' | 'taken'
+
+/** How strongly a held item is drawn: its model at half, and the box round your own at half (arkinox, 2026-11-06). */
+export const HELD_OPACITY = 0.5
 
 /**
- * Holding an item takes it out of this identity's world: its model and name
- * go, and the note's blue box stays where it was (arkinox, 2026-11-01). A
- * local reading; nothing is published and nobody else's world changes. Until
- * ITEMS is read it is the box, so a reload never shows what is held, and only
- * a TAKE this session plays the fade.
+ * Holding an item draws it at half (arkinox, 2026-11-06, which replaces the
+ * solid blue box of 2026-11-01 that hid the model): its model at
+ * HELD_OPACITY, in motion as ever. An item you made yourself (`own`: its
+ * event is the signed-in identity's, however it came to be held) stands in
+ * its blue box at half; one taken from someone else has no box. A local
+ * reading; nothing is published and nobody else's world changes. Until ITEMS
+ * is read it is drawn as held, so a reload never shows a held item whole for
+ * a moment.
  */
-export function itemDrawAs(held: boolean, itemsRead: boolean, vanishing: boolean): ItemDraw {
-  if (held && vanishing) return 'vanishing'
-  return held || !itemsRead ? 'box' : 'item'
+export function itemDrawAs(held: boolean, itemsRead: boolean, own: boolean): ItemDraw {
+  if (held || !itemsRead) return own ? 'own' : 'taken'
+  return 'item'
+}
+
+/** Whether the signed-in identity (`me`) made an item: its event is theirs. Nobody signed in made nothing. */
+export function madeBy(author: string | null | undefined, me: string): boolean {
+  return !!me && author === me
 }

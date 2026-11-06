@@ -156,6 +156,13 @@ interface Props {
    * placed objects too, so no part of an avatar is see-through either.
    */
   ignoreOpacity?: boolean
+  /**
+   * Drawn at this share of its own opacity, and so see-through as a shard of
+   * that opacity is (shardFaces.ts), its placed objects too: an item you hold
+   * is drawn at half (arkinox, 2026-11-06; WorldMessages HeldItemMark). 1, the
+   * default, changes nothing.
+   */
+  dim?: number
 }
 
 const STATIC = [0, 0.9, 1] as const
@@ -320,18 +327,18 @@ export function ShardMesh(props: Props): ReactNode {
   return <ShardBoundary shard={props.shard}><ShardMeshBody {...props} /></ShardBoundary>
 }
 
-export function ShardMeshBody({ shard: given, scale = 1, ghost = false, birth, dissolve, onFaceClick, world = false, headlamp = world, lit = false, clip, clipPlanes, pose, nested, placed = false, onPartClick, selectedParts, cull = false, ignoreOpacity = false, budget }: Props): JSX.Element | null {
+export function ShardMeshBody({ shard: given, scale = 1, ghost = false, birth, dissolve, onFaceClick, world = false, headlamp = world, lit = false, clip, clipPlanes, pose, nested, placed = false, onPartClick, selectedParts, cull = false, ignoreOpacity = false, dim = 1, budget }: Props): JSX.Element | null {
   // What everything below is drawn at: the object's own opacity (DECK-0003
   // §1.11, with its 10% floor), times a ghost's; an avatar ignores its own.
   // A placed object reaches here with its own model, so it never takes its
   // parent's (§1.10). See shardFaces.ts for how see-through faces blend.
-  const opacity = shardOpacity(given, { ghost, ignoreOpacity })
+  const opacity = shardOpacity(given, { ghost, ignoreOpacity }) * dim
   // This shard's own share, without a ghost's, written on each of its own
   // materials for whatever animates them by material (WorldShards' EDIT
   // breath), which reaches placed parts too and must not give them ours.
   // Set as one key (R3F's pierced `userData-share`), never by replacing
   // userData: TV keeps its own state there (TvFinds lookOne).
-  const own = shardOpacity(given, { ignoreOpacity })
+  const own = shardOpacity(given, { ignoreOpacity }) * dim
   const order = shardOrder(opacity, ghost)
   const bench = benchOrders(opacity, ghost)
   // The objects this one places, fetched once for the whole app; a part's own
@@ -566,7 +573,7 @@ export function ShardMeshBody({ shard: given, scale = 1, ghost = false, birth, d
   })
 
   const placements = (given.parts?.length ?? 0) > 0
-    ? <Placements shard={given} byRef={resolved} nested={nested} lit={lit} ghost={ghost} world={world} headlamp={headlamp} pose={pose} onPartClick={onPartClick} selected={selectedParts} cull={cull} ignoreOpacity={ignoreOpacity} allowance={allowance} near={near} rootTrusted={trusted} />
+    ? <Placements shard={given} byRef={resolved} nested={nested} lit={lit} ghost={ghost} world={world} headlamp={headlamp} pose={pose} onPartClick={onPartClick} selected={selectedParts} cull={cull} ignoreOpacity={ignoreOpacity} dim={dim} allowance={allowance} near={near} rootTrusted={trusted} />
     : null
   // An object may be nothing but the arrangement of others (§1.9 rule 13).
   if (shard.vertices.length === 0) return placements ? <group scale={scale}>{placements}</group> : null
@@ -780,7 +787,7 @@ function cutBox(shard: ShardModel, list: readonly Listed[], cut: readonly number
   return min[0] === Infinity ? null : { min, max }
 }
 
-function Placements({ shard, byRef, nested, lit, ghost, world, headlamp, pose, onPartClick, selected, cull, ignoreOpacity, allowance, near, rootTrusted = false }: {
+function Placements({ shard, byRef, nested, lit, ghost, world, headlamp, pose, onPartClick, selected, cull, ignoreOpacity, dim, allowance, near, rootTrusted = false }: {
   shard: ShardModel
   byRef: Map<string, Resolved>
   nested?: Placed[]
@@ -793,6 +800,7 @@ function Placements({ shard, byRef, nested, lit, ghost, world, headlamp, pose, o
   selected?: number[]
   cull: boolean
   ignoreOpacity: boolean
+  dim: number
   /** How many placed objects it may draw from each share, at every depth (scene/meshBudget.ts); undefined for no budget. */
   allowance?: Allowance
   /** Whether the shard itself is trusted, for which share pays for each placement. */
@@ -818,9 +826,9 @@ function Placements({ shard, byRef, nested, lit, ghost, world, headlamp, pose, o
     if (r.missing === 'objects') return null
     const model = r.model && r.model.unit + part.step >= 0 && r.model.unit + part.step <= MAX_UNIT ? r.model : null
     const matrix = new Matrix4().fromArray(partMatrix(part, shard.unit, model ? model.unit : shard.unit))
-    let body: ReactNode = <lineSegments geometry={CUBE_EDGES}><lineBasicMaterial color={ACCENT} toneMapped={false} transparent opacity={ghost ? 0.45 : 0.8} /></lineSegments>
+    let body: ReactNode = <lineSegments geometry={CUBE_EDGES}><lineBasicMaterial color={ACCENT} toneMapped={false} transparent opacity={(ghost ? 0.45 : 0.8) * dim} /></lineSegments>
     // The part's own model, so its own opacity, never the parent's (§1.10).
-    if (model) body = <ShardMesh shard={model} placed nested={r.children} lit={lit} ghost={ghost} world={world} headlamp={headlamp} cull={cull} ignoreOpacity={ignoreOpacity} />
+    if (model) body = <ShardMesh shard={model} placed nested={r.children} lit={lit} ghost={ghost} world={world} headlamp={headlamp} cull={cull} dim={dim} ignoreOpacity={ignoreOpacity} />
     // Selected: an amber box around what the placement draws, in its own frame so it turns with it.
     const box = selected?.includes(i) ? (model ? placedBounds(model, r.children) : null) ?? { min: [-0.5, -0.5, -0.5], max: [0.5, 0.5, 0.5] } : null
     return (

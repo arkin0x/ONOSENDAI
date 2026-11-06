@@ -18,11 +18,15 @@
  * retracts nothing, and the item can be found and TAKEN again. An item you forged can be PUBLISHED to the ITEM FEED (a kind
  * 33340 listing, lib/itemListing.ts): its name, picture and public key, never
  * its private key, so anyone can seal a chest to it (arkinox, 2026-10-13).
- * The confirmation says it cannot be taken back. ARCHIVE files a row away
- * under ARCHIVED, the second view behind the panel's INVENTORY / ARCHIVED
- * toggle, and UNARCHIVE brings it back (arkinox, 2026-11-06). An archived key
- * still opens and seals what it did; DELETE of the last copy of a key your
- * chests or doors are sealed to is refused, and offers ARCHIVE instead.
+ * The confirmation says it cannot be taken back. PLACE puts a new instance
+ * of something you made at the build cursor, with every setting it has: an
+ * item (the same key), a message or a sound, never what was found or taken
+ * from someone else (arkinox, 2026-11-06; useShards placeCopyOf). ARCHIVE
+ * files a row away under ARCHIVED, the second view behind the panel's
+ * INVENTORY / ARCHIVED toggle, and UNARCHIVE brings it back (arkinox,
+ * 2026-11-06). An archived key still opens and seals what it did; DELETE of
+ * the last copy of a key your chests or doors are sealed to is refused, and
+ * offers ARCHIVE instead.
  */
 
 import { takeIntoKeeping, you } from '../lib/carried'
@@ -43,7 +47,7 @@ import { formatAgo, formatStamp, shortHex } from '../lib/time'
 import { useCyberspace } from '../store/useCyberspace'
 import { useInventory } from '../store/useInventory'
 import { profileLabel } from '../store/useProfiles'
-import { itemStillNeeded, useShards } from '../store/useShards'
+import { itemStillNeeded, placeCopyOf, useShards } from '../store/useShards'
 import { useWorkshop } from '../store/useWorkshop'
 import { MessageText } from './CashuCard'
 import { AudioCard } from './AudioCard'
@@ -165,7 +169,17 @@ export function DeleteItem({ item, asking = false }: { item: Pick<HeldItem, 'id'
   )
 }
 
-/** A held keypair item: its picture or the kind's icon, name, who forged it, where and when, what it opens, DETAILS, COPY and DELETE. */
+/**
+ * PLACE on a row of your own make (useShards placeCopyOf): a new instance at
+ * the build cursor, BUILD mode coming up on it. Nothing for anything else.
+ */
+function PlaceButton({ item, onRefused }: { item: HeldItem; onRefused: (why: string | null) => void }): JSX.Element | null {
+  const me = useCyberspace((s) => s.identity.pubkey)
+  if (typeof placeCopyOf(item, me) === 'string') return null
+  return <button className="chest__act" onClick={() => onRefused(useShards.getState().placeFromItems(item.id))} title="Place a new instance of it at the build cursor, with every setting it has">PLACE</button>
+}
+
+/** A held keypair item: its picture or the kind's icon, name, who forged it, where and when, what it opens, DETAILS, COPY, PLACE and DELETE. */
 function KeyRow({ item, opens }: { item: HeldItem; opens: number }): JSX.Element {
   const me = useCyberspace((s) => s.identity.pubkey)
   const profile = useProfile(item.author || null)
@@ -210,6 +224,7 @@ function KeyRow({ item, opens }: { item: HeldItem; opens: number }): JSX.Element
       <span className="held__acts">
         <button className={`chest__act ${open ? 'is-on' : ''}`} onClick={() => setOpen((o) => !o)} aria-expanded={open}>DETAILS</button>
         <button className={`chest__act ${copied ? 'is-on' : ''}`} onClick={copy} title="Copy the item as text, to paste into ITEMS on another device">{copied ? 'COPIED' : 'COPY'}</button>
+        <PlaceButton item={item} onRefused={setRefusal} />
         {mine && (
           <button className={`chest__act ${listed ? 'is-on' : ''}`} disabled={listed || busy} onClick={() => setConfirming(true)} title={listed ? 'Listed in the ITEM FEED: anyone can seal a chest to it' : 'Publish this item to the ITEM FEED so anyone can seal a chest to it'}>{busy ? 'LISTING…' : listed ? 'LISTED' : 'PUBLISH'}</button>
         )}
@@ -285,6 +300,7 @@ export function TakenRow({ item }: { item: HeldItem }): JSX.Element {
   const [details, setDetails] = useState(false)
   const me = useCyberspace((s) => s.identity.pubkey)
   const [moved, setMoved] = useState(false)
+  const [refusal, setRefusal] = useState<string | null>(null)
   const { raw, token } = readCashuToken(item.type === 'message' ? item.text : null)
   const cashu = useCashu(raw ? item.text : null)
   const coin = raw !== null
@@ -325,6 +341,7 @@ export function TakenRow({ item }: { item: HeldItem }): JSX.Element {
         {item.type === 'message' && <button className={`chest__act ${open ? 'is-on' : ''}`} onClick={() => setOpen((o) => !o)} aria-expanded={open}>{coin || hasNftLink(item.text) ? 'CARD' : 'READ'}</button>}
         {item.type === 'audio' && item.audio && <button className={`chest__act ${open ? 'is-on' : ''}`} onClick={() => setOpen((o) => !o)} aria-expanded={open} title="Play it or save it">LISTEN</button>}
         {item.place && <button className={`chest__act ${details ? 'is-on' : ''}`} onClick={() => setDetails((d) => !d)} aria-expanded={details}>DETAILS</button>}
+        <PlaceButton item={item} onRefused={setRefusal} />
         <ArchiveButton item={item} />
         {clearable && (
           <button className="held__clear" onClick={() => useInventory.getState().clearTaken([item.id])} title="Clear it from TAKEN" aria-label={`Clear ${label} from TAKEN`}>
@@ -332,6 +349,7 @@ export function TakenRow({ item }: { item: HeldItem }): JSX.Element {
           </button>
         )}
       </span>
+      {refusal && <span className="held__refusal" role="status">{refusal}</span>}
       {details && (
         <div className="held__details">
           <dl><Provenance item={item} /></dl>

@@ -33,6 +33,7 @@
  */
 
 import { findCashuToken } from '../lib/cashu'
+import { hasNftLink } from '../lib/nftLink'
 import { clampUnit, normalizeStored } from 'sno-core/shards'
 import { snapOffered, wrapSpin } from '../lib/pose'
 import { create } from 'zustand'
@@ -42,7 +43,7 @@ import { forgetReference, resolveReference } from '../lib/references'
 import { unbagRemembered } from '../lib/foundCache'
 import { bagAddressOf, bagsToOpen, retractedAt, staleFinds } from '../lib/bagVersions'
 import { itemTargetOf, type ItemTarget } from '../lib/comments'
-import { bytesToHex, hexToBytes, type EventTemplate, type NostrEvent } from '../lib/events'
+import { bytesToHex, hexToBytes, positionHex, type EventTemplate, type NostrEvent } from '../lib/events'
 import { regionKeyAt } from '../lib/shardCrypto'
 import { regionKeyOffThread } from '../lib/regionKeyOffThread'
 import { signedTableOnly } from '../lib/carried'
@@ -496,9 +497,18 @@ export type DeployPending =
    * (lib/hidden.ts movedTemplate), so its reactions, mutes, once-triggers
    * and notifications follow it as an EDIT's do.
    */
-  | { type: 'message'; text: string; move?: { eventId: string } }
-  /** A key forged in the composer: the keypair is made there, so its public key can be shown and sealed to before it is hidden. */
-  | { type: 'key'; key: KeyItem; move?: { eventId: string } }
+  | { type: 'message'; text: string; move?: { eventId: string }; copy?: NostrEvent }
+  /**
+   * A key forged in the composer: the keypair is made there, so its public key can be shown and sealed to before it is hidden.
+   *
+   * With `copy` (here and on a message) it is PLACE on an ITEMS row of your
+   * own make (arkinox, 2026-11-06: "place the same item again easily once its
+   * in my inventory ... just a new instance"): a new instance of that event at
+   * the build cursor, its kind, content and every tag as they were, newer,
+   * with no lineage (copyTemplateAt). A key's copy is the same key: its
+   * keypair and secret, as HIDE AGAIN's is.
+   */
+  | { type: 'key'; key: KeyItem; move?: { eventId: string }; copy?: NostrEvent }
   /**
    * A chest (chest and door design, R18: "placed first, then filled with
    * ADD"). `look`: what it wears (the hide bar's model row); absent, the
@@ -714,7 +724,8 @@ export function sealingDoor(s: Pick<ShardsState, 'mine' | 'pending' | 'deployLea
 export function repeatable(pending: DeployPending): boolean {
   switch (pending.type) {
     case 'shard': return !pending.intoChest && !pending.edit
-    case 'message': return !pending.move && findCashuToken(pending.text) === null
+    // A coin or a nonfungible.cash claim link is a bearer thing: a copy would copy it (review of #615).
+    case 'message': return !pending.move && findCashuToken(pending.text) === null && !hasNftLink(pending.text)
     case 'key': return false
     case 'chest': return false
     case 'audio': return !pending.move
@@ -974,6 +985,46 @@ export function itemStillNeeded(item: Pick<HeldItem, 'id' | 'type' | 'key' | 'na
   const rest = { ...items }
   delete rest[item.id]
   return keysLost([{ name: item.name, key: item.key, event: item.event, place: item.place, self: true }], mine, rest, me)?.why ?? null
+}
+
+/**
+ * PLACE from ITEMS: freshCopyTemplate of an item, standing at a new place
+ * (its `C` the build cursor's), every other tag as it was.
+ */
+export function copyTemplateAt(previous: Pick<NostrEvent, 'kind' | 'content' | 'tags'>, at: Position, plane: Plane, createdAt: number): EventTemplate {
+  const t = freshCopyTemplate(previous, createdAt)
+  return { ...t, tags: [['C', positionHex(at, plane)], ...t.tags.filter((tag) => tag[0] !== 'C')] }
+}
+
+/** Why PLACE is not on an ITEMS row, in words, or null when it is. */
+export const PLACE_NOT_YOURS = 'Only what you made can be placed again.'
+export const PLACE_COIN = 'A coin is money: placing it again would copy it.'
+export const PLACE_NFT = 'A claim link is whoever holds it: placing it again would copy it.'
+export const PLACE_KIND = 'Only an item, a message or a sound can be placed again from ITEMS.'
+
+/**
+ * What PLACE on an ITEMS row lines up (arkinox, 2026-11-06), or why not. Only
+ * what the signed-in identity made itself: its event is theirs and its
+ * author a fact (`verified`); something found or taken from someone else has
+ * no PLACE (owner ruling). A key and a message are copied whole
+ * (copyTemplateAt), a key keeping its keypair; a sound as PLACE AGAIN copies
+ * it, its file sealed again under a fresh key (`reseal`). A message holding a
+ * coin or a nonfungible.cash claim link is refused, as PLACE AGAIN refuses it
+ * (repeatable), both being bearer things. So are a
+ * chest, a door and a model: a chest's contents and a door's room are not
+ * copied, and a model goes out from the workshop (MOVE TO WORKSHOP).
+ */
+export function placeCopyOf(item: Pick<HeldItem, 'type' | 'event' | 'verified' | 'key' | 'text' | 'audio'>, me: string): DeployPending | string {
+  if (!me || item.event?.pubkey !== me || !item.verified) return PLACE_NOT_YOURS
+  if (item.type === 'key' && item.key) return { type: 'key', key: item.key, copy: item.event }
+  if (item.type === 'message' && item.text !== undefined) return findCashuToken(item.text) !== null ? PLACE_COIN : hasNftLink(item.text) ? PLACE_NFT : { type: 'message', text: item.text, copy: item.event }
+  if (item.type === 'audio' && item.audio) return { type: 'audio', audio: item.audio, reseal: true }
+  return PLACE_KIND
+}
+
+/** Whether a deploy is PLACE from ITEMS of a key or a message: a copy, never a composer's draft. */
+export function placingCopy(pending: DeployPending | null): boolean {
+  return !!pending && (pending.type === 'key' || pending.type === 'message') && !!pending.copy
 }
 
 /**
@@ -1276,6 +1327,13 @@ interface ShardsState {
    * bag's settings, so PLACE where it is changes nothing but its version.
    */
   startMoveItem: (eventId: string) => void
+  /**
+   * PLACE on an ITEMS row: line up a new instance of it at the build cursor
+   * (placeCopyOf), which brings BUILD mode up. Null when lined up; why not,
+   * in words, otherwise. A copy lined up again after a placement stands down
+   * first; any other deploy lined up refuses.
+   */
+  placeFromItems: (id: string) => string | null
   /**
    * HIDE AGAIN on a row GONE FROM ITS BAG: a fresh copy (new id, no lineage)
    * hidden in its bag at its place, in the marked row's stead. Resolves to
@@ -2787,6 +2845,16 @@ export const useShards = create<ShardsState>((set, get) => {
         deployAsk: null,
       })
     },
+    placeFromItems: (id) => {
+      const item = useInventory.getState().items[id]
+      if (!item) return 'That is no longer in your ITEMS.'
+      const pending = placeCopyOf(item, cyber().identity.pubkey)
+      if (typeof pending === 'string') return pending
+      if (copyLinedUp(get())) get().cancelDeploy()
+      if (get().pending || get().deployStatus === 'working') return 'Finish or cancel what is lined up first.'
+      set({ pending, ...freshDeploy, deployNote: null, deployAsk: null })
+      return null
+    },
     hideAgain: async (eventId) => {
       const cs = cyber()
       const owner = cs.identity.pubkey
@@ -3397,7 +3465,7 @@ export const useShards = create<ShardsState>((set, get) => {
         if (!pending.key.name.trim()) return
         // Moved, it is the very item it was: its keypair, name and every tag.
         key = movedItem?.key ?? { ...pending.key, name: pending.key.name.trim(), about: pending.key.about.trim() }
-        innerTemplate = movedItem ? movedTemplate(movedItem.inner, at, plane, movedAt) : keyInnerTemplate(key, at, plane, createdAt)
+        innerTemplate = movedItem ? movedTemplate(movedItem.inner, at, plane, movedAt) : pending.copy ? copyTemplateAt(pending.copy, at, plane, createdAt) : keyInnerTemplate(key, at, plane, createdAt)
       } else if (pending.type === 'chest') {
         // Signed and sealed inside the try below: the contents are signed by
         // the identity, which may be a remote signer, and the bar shows it.
@@ -3418,7 +3486,7 @@ export const useShards = create<ShardsState>((set, get) => {
       } else {
         text = movedItem?.text ?? pending.text.trim()
         if (!text.trim()) return
-        innerTemplate = movedItem ? movedTemplate(movedItem.inner, at, plane, movedAt) : messageInnerTemplate(text, at, plane, createdAt)
+        innerTemplate = movedItem ? movedTemplate(movedItem.inner, at, plane, movedAt) : pending.copy ? copyTemplateAt(pending.copy, at, plane, createdAt) : messageInnerTemplate(text, at, plane, createdAt)
       }
 
       // PUT IN CHEST: the shard's inner event, built above exactly as a hide

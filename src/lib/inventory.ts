@@ -210,21 +210,41 @@ export function lineageKey(author: string, lineage: string): string {
  */
 export function heldLineages(items: Record<string, HeldItem>): Set<string> {
   const out = new Set<string>()
-  for (const it of Object.values(items)) out.add(lineageKey(it.event.pubkey, itemLineage(it.event) ?? it.id))
+  for (const it of Object.values(items)) {
+    out.add(lineageKey(it.event.pubkey, itemLineage(it.event) ?? it.id))
+    if (it.type === 'key' && it.key) out.add(keypairKey(it.key.itemPubkey))
+  }
   return out
 }
 
-/** Whether this item is held: by its own id, or as a version, by the same author, of one held (heldLineages). */
-export function holdsItem(items: Record<string, HeldItem>, id: string, lineage?: string | null, author?: string | null, lineages?: ReadonlySet<string>): boolean {
+/**
+ * A key's keypair among held lineages. Holding a key is holding its keypair
+ * (lib/hidden.ts KeyItem secretHex), so every instance of it is held: one
+ * PLACEd again from ITEMS is the same key (arkinox, 2026-11-06), as HIDE
+ * AGAIN's copy is.
+ */
+export function keypairKey(itemPubkey: string): string {
+  return `key:${itemPubkey}`
+}
+
+/**
+ * Whether this item is held: by its own id, as a version, by the same
+ * author, of one held (heldLineages), or, for a key, by its keypair
+ * (`keypair`, its item public key).
+ */
+export function holdsItem(items: Record<string, HeldItem>, id: string, lineage?: string | null, author?: string | null, lineages?: ReadonlySet<string>, keypair?: string | null): boolean {
   if (items[id]) return true
-  return !!lineage && !!author && (lineages ?? heldLineages(items)).has(lineageKey(author, lineage))
+  const held = lineages ?? heldLineages(items)
+  if (keypair && held.has(keypairKey(keypair))) return true
+  return !!lineage && !!author && held.has(lineageKey(author, lineage))
 }
 
 /**
  * Hold more items. One row per item: an item already held keeps its row, so
  * a key read twice (a rescan, a second device's bag) is held once, and so is
- * a version of it its hider moved (holdsItem), and the place and time of the
- * first holding stand. Returns what was new.
+ * a version of it its hider moved, or another instance of its keypair
+ * (holdsItem), and the place and time of the first holding stand. Returns
+ * what was new.
  */
 export function addHeld(items: Record<string, HeldItem>, add: HeldItem[]): { items: Record<string, HeldItem>; added: HeldItem[] } {
   const added: HeldItem[] = []
@@ -232,10 +252,12 @@ export function addHeld(items: Record<string, HeldItem>, add: HeldItem[]): { ite
   const lineages = heldLineages(items)
   for (const item of add) {
     const lineage = lineageKey(item.event.pubkey, itemLineage(item.event) ?? item.id)
-    if (next[item.id] || lineages.has(lineage)) continue
+    const keypair = item.type === 'key' && item.key ? keypairKey(item.key.itemPubkey) : null
+    if (next[item.id] || lineages.has(lineage) || (keypair && lineages.has(keypair))) continue
     if (next === items) next = { ...items }
     next[item.id] = item
     lineages.add(lineage)
+    if (keypair) lineages.add(keypair)
     added.push(item)
   }
   return { items: next, added }
@@ -444,7 +466,13 @@ export function modelPrint(shard: ShardModel): string {
  * 2026-10-30: "hide it on the chest so it feels like you took it").
  */
 export function holdsEntry(items: Record<string, HeldItem>, entry: ChestEntry): boolean {
-  return !!items[entry.id] || (entry.body.type === 'shard' && !!entry.body.shard && holdsModel(items, entry.body.shard))
+  // Held as addHeld would refuse it: by its id, by a held lineage of its
+  // author's, or, for a key, by its keypair (review of #615: TAKE on another
+  // instance of a key held added nothing and stayed offered, and TAKE ALL
+  // never finished).
+  const keypair = entry.body.type === 'key' ? entry.body.key?.itemPubkey : null
+  if (holdsItem(items, entry.id, itemLineage(entry.event), entry.event?.pubkey, undefined, keypair)) return true
+  return entry.body.type === 'shard' && !!entry.body.shard && holdsModel(items, entry.body.shard)
 }
 
 export function holdsModel(items: Record<string, HeldItem>, shard: ShardModel): boolean {

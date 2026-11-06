@@ -66,12 +66,13 @@ interface InventoryState {
   holdFinds: (finds: Hidden[], watched?: boolean, inChest?: (h: Hidden) => InChest | null) => HeldItem[]
   /** A scan found these in play: a key held as watched (TV showed it) is an ordinary key from here on. Holds nothing new. */
   markPlayed: (finds: Hidden[]) => void
-  /** Hold a key this identity forged and hid, at once (B1 §3.1). */
+  /** Hold a key this identity forged: TAKE on one of its own (hiding holds nothing, arkinox 2026-11-06). */
   holdForged: (event: NostrEvent, key: KeyItem, place: HeldPlace) => HeldItem
   /**
-   * A key this identity forged and has now MOVED: its row, held by whichever
-   * version was forged, says where it stands now. Nothing new is held, since
-   * the moved version is the same item (lib/inventory.ts holdsItem).
+   * A key this identity made and has now MOVED: its row, held by whichever
+   * version was picked up, says where it stands now. Nothing new is held, since
+   * the moved version is the same item (lib/inventory.ts holdsItem), and a
+   * key never picked up stays not held.
    */
   relocate: (lineage: string, place: HeldPlace) => void
   /**
@@ -79,6 +80,8 @@ interface InventoryState {
    * event with no lineage, so relocate cannot find it. The one row of its keypair
    * holds the copy at its place, and the row of the version before goes, so ITEMS
    * never lists one keypair twice (review of #595). Held since when it was first held.
+   * A keypair with no row is not held, and HIDE AGAIN does not start holding it
+   * (arkinox, 2026-11-06: picked up by TAKE, never by hiding).
    * `owner` is the identity that hid it: when another is signed in by now, its
    * rows are changed where they are kept, not skipped (review of #599).
    */
@@ -228,7 +231,8 @@ export const useInventory = create<InventoryState>((set, get) => {
     const items = { ...get().items }
     const changed: HeldItem[] = []
     for (const it of Object.values(items)) {
-      if (it.source !== 'forged' || it.event.pubkey !== it.owner || (itemLineage(it.event) ?? it.id) !== lineage) continue
+      // Its own, however it was picked up: TAKE in the world holds one as found.
+      if (it.event.pubkey !== it.owner || (itemLineage(it.event) ?? it.id) !== lineage) continue
       items[it.id] = { ...it, place }
       changed.push(items[it.id])
     }
@@ -257,6 +261,7 @@ export const useInventory = create<InventoryState>((set, get) => {
     }
     if (who === ownerNow()) {
       const { before, item } = swap(Object.values(get().items))
+      if (before.length === 0) return
       const items = { ...get().items }
       for (const it of before) { delete items[it.id]; removed.add(it.rowKey) }
       items[item.id] = item
@@ -271,6 +276,7 @@ export const useInventory = create<InventoryState>((set, get) => {
     let rows: HeldItem[]
     try { rows = await readHeld(d, who) } catch (err) { console.warn(`[inventory] could not read items: ${describeError(err)}`); return }
     const { before, item } = swap(rows)
+    if (before.length === 0) return
     for (const it of before) removed.add(it.rowKey)
     removed.delete(item.rowKey)
     await write(item, before)

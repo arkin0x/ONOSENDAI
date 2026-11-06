@@ -83,7 +83,8 @@ async function entriesOf(bag: NostrEvent, keyHex: string): Promise<Hidden[]> {
 }
 
 /**
- * The hider's setup: a key item they hold (hidden elsewhere, height 5), and
+ * The hider's setup: a key item they hold (hidden elsewhere, height 5, and
+ * picked up with TAKE, since hiding holds nothing: arkinox, 2026-11-06), and
  * a chest sealed to it at height 3 holding a shard and a message, then their
  * own scan of the chest's region, which opens it with the held key.
  */
@@ -93,6 +94,7 @@ async function hiderWithOpenedChest(): Promise<{ chestLookup: string; chestKey: 
   useShards.setState({ deployHeight: 5 })
   await S().deploy()
   expect(S().deployStatus).toBe('done')
+  S().takeFound([S().mine.find((d) => d.type === 'key')!.eventId])
   const shard = benchShard('Secret Crucifix')
   S().startDeployChest({ name: 'Wind Chest', lock: { pubkey: lock.itemPubkey, label: 'Wind Key' }, requires: 'the Wind Key', contents: [{ kind: 'shard', shardId: shard.id }, { kind: 'message', text: 'behind the door' }] })
   useShards.setState({ deployHeight: 3 })

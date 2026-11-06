@@ -46,6 +46,7 @@ import { findCashuToken } from '../lib/cashu'
 import { hasNftLink } from '../lib/nftLink'
 import { useCyberspace } from '../store/useCyberspace'
 import { useInventory } from '../store/useInventory'
+import { sealableKeys } from '../lib/inventory'
 import { lookModelOf, useShards, type ChestContent, type ChestDraft, type ChestLock } from '../store/useShards'
 import { creditOf, useWorkshop } from '../store/useWorkshop'
 import { composeVerdict, SETTLE_MS, useCashu } from './useCashu'
@@ -110,7 +111,10 @@ export function ChestCompose({ onDone, target = { mode: 'place' } }: { onDone: (
   const me = useCyberspace((s) => s.identity.pubkey)
   const live = useCyberspace((s) => s.live)
   const items = useInventory((s) => s.items)
-  const keys = useMemo(() => Object.values(items).filter((it) => it.type === 'key' && it.key).sort((a, b) => b.at - a.at), [items])
+  // The keys you hold, and the keys you made and have not picked up: hiding
+  // no longer holds a key (arkinox, 2026-11-06), and you can still seal to it.
+  const mine = useShards((s) => s.mine)
+  const keys = useMemo(() => sealableKeys(items, mine, me), [items, mine, me])
   const models = useWorkshop((s) => s.shards)
   // + SHARD's list: last edited or deployed first, as the workshop's (Workshop.tsx).
   const byRecent = useNewestFirst(models, modelRef, modelEditedAt)
@@ -249,12 +253,12 @@ export function ChestCompose({ onDone, target = { mode: 'place' } }: { onDone: (
       {look && <div className="secret__spin secret__spin--look"><CardSpin shard={look} size={150} wide /></div>}
       {fields && <input className="avatars__input" value={name} onChange={(e) => setName(e.target.value.slice(0, MAX_ITEM_NAME))} placeholder={isDoor ? 'Name the door' : 'Name the chest'} maxLength={MAX_ITEM_NAME} autoFocus={!editing || editing.fields} aria-label={isDoor ? 'Door name' : 'Chest name'} />}
 
-      {/* The lock: an item you hold, or a pasted public key. */}
+      {/* The lock: an item you hold or made, or a pasted public key. */}
       {fields && (
         <div className="compose__row">
           <span className="legend__label">Lock</span>
-          <select className="avatars__input compose__select" value={lockKeyId} onChange={(e) => { setLockKeyId(e.target.value); if (e.target.value) setFeedLock(null) }} aria-label="Seal to an item you hold" title={`An item in your ITEMS: whoever holds it opens the ${isDoor ? 'door' : 'chest'}`}>
-            <option value="">{keys.length === 0 ? 'no items in your ITEMS' : 'paste a public key below'}</option>
+          <select className="avatars__input compose__select" value={lockKeyId} onChange={(e) => { setLockKeyId(e.target.value); if (e.target.value) setFeedLock(null) }} aria-label="Seal to an item you hold or made" title={`An item you hold or made: whoever holds it opens the ${isDoor ? 'door' : 'chest'}`}>
+            <option value="">{keys.length === 0 ? 'no items yet' : 'paste a public key below'}</option>
             {keys.map((k) => <option key={k.id} value={k.id}>{k.name}</option>)}
           </select>
           <button className="chest__act" onClick={() => setPicking(true)} title="Choose a listed item from the ITEM FEED, even one you have never held">ITEM FEED</button>

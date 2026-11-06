@@ -205,13 +205,13 @@ describe('a chest of yours: EDIT, MOVE, ADD', () => {
     expect(positionOf(row)).toEqual(positionOf(d))
   })
 
-  it('ADD puts more in it where it stands; a forged item inside is held at once', async () => {
+  it('ADD puts more in it where it stands; a forged item inside is not held until taken out (arkinox, 2026-11-06)', async () => {
     const d = await sealOne()
     const kept = (await S().chestEntries(d.eventId)) as never[]
     const why = await S().resealChest(d.eventId, { ...draft(), lock: draft().lock!, contents: [...kept.map((entry) => ({ kind: 'sealed' as const, entry, label: 'x', type: 'message' as const })), { kind: 'message', text: 'more' }, { kind: 'key', key: forgeKey('Next Key') }] })
     expect(why).toBeNull()
     expect(opened(chestRow()!)).toEqual(['inside', 'more', 'Next Key'])
-    expect(Object.values(useInventory.getState().items).some((i) => i.name === 'Next Key')).toBe(true)
+    expect(Object.values(useInventory.getState().items).some((i) => i.name === 'Next Key')).toBe(false)
   })
 
   it('a chest claimed from another device opens with the key you hold to be edited; without it, says so', async () => {
@@ -221,6 +221,20 @@ describe('a chest of yours: EDIT, MOVE, ADD', () => {
     useInventory.getState().add([heldFromForged(C().identity.pubkey, { ...d.inner, sig: d.inner.sig ?? '' } as never, lock, { lookupId: d.lookupId, bagId: d.bagId, at: d.at, plane: d.plane, height: d.height }, 1)])
     const entries = await S().chestEntries(d.eventId)
     expect(Array.isArray(entries) && entries.length).toBe(1)
+  })
+
+  it('a chest sealed to a key you placed and never picked up still opens for EDIT and ADD (arkinox, 2026-11-06)', async () => {
+    S().startDeployKey(lock)
+    S().setDeployHeight(5)
+    await S().deploy()
+    expect(S().deployError).toBeNull()
+    S().cancelDeploy()
+    expect(Object.keys(useInventory.getState().items)).toEqual([])
+    const d = await sealOne()
+    useShards.setState({ mine: S().mine.map((x) => (x.eventId === d.eventId ? { ...x, sealed: undefined } : x)) })
+    const entries = await S().chestEntries(d.eventId)
+    expect(Array.isArray(entries) && entries.length).toBe(1)
+    expect(Object.keys(useInventory.getState().items)).toEqual([])
   })
 
   it('nobody else’s chest moves or reseals', async () => {

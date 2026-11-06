@@ -93,7 +93,7 @@ import { audioInnerTemplate, fadeAt, type AudioItem } from '../lib/audioItem'
 import { resealCopy } from '../lib/audioFile'
 import { movableIntoRoom, openWithSecret, openWithSigner, openerFor, placeOf as eventPlace, plaintextWithSecret, readContents, resealWithout, revealedIn, sealEntries, sealedInside, sealerOf, type ChestEntry, type OpeningKey } from '../lib/chests'
 import { openedByHand, restoreOpened } from './useOpenedChests'
-import { openingKeys, placeOf, type HeldItem, type HeldPlace, type InChest } from '../lib/inventory'
+import { hiderKeys, openingKeys, placeOf, type HeldItem, type HeldPlace, type InChest } from '../lib/inventory'
 import { useInventory } from './useInventory'
 import { useShardFolders } from './useShardFolders'
 import { creditOf, useWorkshop } from './useWorkshop'
@@ -1693,7 +1693,8 @@ export const useShards = create<ShardsState>((set, get) => {
    * claim a chest's contents as deployments (claimOwn), so this also mends
    * a record or a relay copy written that way, and a row that names
    * something left out goes from the record. What is inside is known from
-   * the keys held here (lib/chests.ts sealedInside) and from what this
+   * the keys held here and the keys this identity made, held or not
+   * (lib/inventory.ts hiderKeys; lib/chests.ts sealedInside), and from what this
    * session revealed out of those chests; a chest nothing here opens adds
    * nothing to leave out.
    *
@@ -1718,7 +1719,7 @@ export const useShards = create<ShardsState>((set, get) => {
     // This work began under another identity: it must not be signed by, or touch the list of, the one signed in now.
     if (cyber().identity.pubkey !== owner) throw new Error(SWITCHED)
     const looked = [...inners, ...before]
-    const inside = sealedInside(looked, openingKeys(useInventory.getState().items))
+    const inside = sealedInside(looked, hiderKeys(useInventory.getState().items, get().mine, owner))
     const chests = new Set(looked.filter((e): e is NostrEvent => !isReference(e) && e.kind === CHEST_KIND).map((e) => e.id))
     for (const h of Object.values(get().discovered)) if (h.chestId && chests.has(h.chestId)) inside.add(h.eventId)
     const entries = inside.size > 0 ? inners.filter((e) => !inside.has(entryKey(e))) : inners
@@ -2383,10 +2384,10 @@ export const useShards = create<ShardsState>((set, get) => {
       const deleted = { ...get().deleted, [eventId]: true as const }
       set({ deleted })
       saveDeleted(deleted)
-      // A key you hid is yours to hold at once (B1 §3.1), this copy too, in
-      // the place of the version before: one ITEMS row per keypair (review of
-      // #595). In the items of the identity that hid it, whoever is signed in
-      // by now (review of #599).
+      // A key you hold is held as this copy, in the place of the version
+      // before: one ITEMS row per keypair (review of #595); one you never
+      // picked up stays not held (arkinox, 2026-11-06). In the items of the
+      // identity that hid it, whoever is signed in by now (review of #599).
       if (d.key) void useInventory.getState().holdAgain(inner, d.key, { lookupId: d.lookupId, bagId: event.id, at: d.at, plane: d.plane, height: d.height }, owner)
       return null
     } catch (err) {
@@ -2707,7 +2708,7 @@ export const useShards = create<ShardsState>((set, get) => {
       if (!d?.chest) return 'Only the chest’s hider can change what is inside it, from the device that hid it.'
       if (d.sealed) return d.sealed
       const cs = cyber()
-      const opener = openerFor(d.chest, openingKeys(useInventory.getState().items), cs.identity.pubkey)
+      const opener = openerFor(d.chest, hiderKeys(useInventory.getState().items, get().mine, cs.identity.pubkey), cs.identity.pubkey)
       if (!opener) return 'Opening the chest needs the key it is sealed to, which this device does not hold.'
       try {
         return opener.by === 'key' ? openWithSecret(d.chest, opener.key.secretHex) : await openWithSigner(d.chest, cs.decryptSealed)
@@ -2732,8 +2733,7 @@ export const useShards = create<ShardsState>((set, get) => {
         const sealed = await sealChest(draft, positionOf(d), d.plane, createdAt)
         // Its look, and everything else it carried, stay as they were.
         await replaceChest(d, { ...sealed.chest, ...(d.chest.look ? { look: d.chest.look } : {}) }, sealed.entries)
-        const place: HeldPlace = { lookupId: d.lookupId, bagId: d.bagId, at: d.at, plane: d.plane, height: d.height }
-        for (const f of sealed.forged) useInventory.getState().holdForged(f.event, f.key, place)
+        // A key forged inside it is not held until it is taken out (arkinox, 2026-11-06).
         return null
       } catch (err) {
         return err instanceof Error ? err.message : String(err)
@@ -2923,7 +2923,7 @@ export const useShards = create<ShardsState>((set, get) => {
       let list: unknown[]
       if (d.sealed) list = d.sealed
       else {
-        const opener = openerFor(d.chest, openingKeys(useInventory.getState().items), me)
+        const opener = openerFor(d.chest, hiderKeys(useInventory.getState().items, get().mine, me), me)
         if (!opener) return 'Opening the chest needs the key it is sealed to, which this device does not hold.'
         try {
           const parsed = JSON.parse(opener.by === 'key' ? plaintextWithSecret(d.chest, opener.key.secretHex) : await cs.decryptSealed(d.chest.senderPubkey, d.chest.payload)) as unknown
@@ -3222,7 +3222,6 @@ export const useShards = create<ShardsState>((set, get) => {
       let chest: ChestItem | undefined
       let audio: AudioItem | undefined
       // Keys forged inside a chest, held by the hider once the chest is hidden.
-      let forgedInside: Array<{ event: NostrEvent; key: KeyItem }> = []
       // What a chest holds, as sealed, kept on this device (MyDeployment `sealed`).
       let sealedInside: BagEntry[] | undefined
       // A door's secret, kept on this device from the moment it is sealed (4.11).
@@ -3371,7 +3370,6 @@ export const useShards = create<ShardsState>((set, get) => {
           } else {
             const sealed = await sealChest(pending, at, plane, createdAt, owner)
             chest = { ...sealed.chest, look }
-            forgedInside = sealed.forged
             sealedInside = sealed.entries
           }
           innerTemplate = chestInnerTemplate(chest, at, plane, createdAt)
@@ -3566,14 +3564,14 @@ export const useShards = create<ShardsState>((set, get) => {
           ...(sealedInside ? { sealed: sealedInside } : {}),
           ...(into ? { room: { doorId: into.eventId } } : {}),
         }
-        // A key you hid is yours to hold at once, alone or inside a chest, so
-        // chests can be sealed to it from here on (B1 §3.1).
+        // A key you hide is not held until you pick it up with TAKE, alone or
+        // inside a chest (arkinox, 2026-11-06: "i want to pick it up for the
+        // first time, not have it automatically"). Chests can still be sealed
+        // to it: the composer lists the keys you made (lib/inventory.ts
+        // sealableKeys). Moved, a key you hold says where it stands now
+        // (relocate); one you never picked up stays not held.
         const place: HeldPlace = { lookupId: rk.lookupId, bagId: event.id, at: storedAt(at), plane, height: deployHeight }
-        // Moved, it is held already, as the version forged (lib/inventory.ts
-        // holdsItem): the row says where it stands now, and nothing is held twice.
         if (key && movedItem) useInventory.getState().relocate(itemLineage(movedItem.inner) ?? movedItem.eventId, place)
-        else if (key) useInventory.getState().holdForged(inner, key, place)
-        for (const f of forgedInside) useInventory.getState().holdForged(f.event, f.key, place)
         // Every item now in this region's bag shares its new envelope, status and settings.
         // Onto the list of the identity that hid it, even if another has signed in meanwhile.
         const mine = [
@@ -3885,7 +3883,7 @@ export const useShards = create<ShardsState>((set, get) => {
       if (!chest?.chest) return 'Only the chest’s hider can change what is inside it, from the device that hid it.'
       const cs = cyber()
       const me = cs.identity.pubkey
-      const opener = openerFor(chest.chest, openingKeys(useInventory.getState().items), me)
+      const opener = openerFor(chest.chest, hiderKeys(useInventory.getState().items, get().mine, me), me)
       if (!opener) return 'Opening the chest needs the key it is sealed to, which this device does not hold.'
       let raw: BagEntry[]
       try {
@@ -4036,7 +4034,8 @@ export const useShards = create<ShardsState>((set, get) => {
       }
       const inv = useInventory.getState()
       const added = [...(inPlay.length > 0 ? inv.holdFinds(inPlay, false, inChest) : []), ...(watchedOnly.length > 0 ? inv.holdFinds(watchedOnly, true, inChest) : [])]
-      // One of your own you deleted from ITEMS is no find, so it is held again as forged, on this TAKE only.
+      // One of your own is no find: TAKE picks it up as forged, the first time
+      // (hiding holds nothing, arkinox 2026-11-06) or after a DELETE from ITEMS.
       for (const id of eventIds) {
         const d = discovered[id] ? undefined : get().mine.find((x) => x.eventId === id)
         if (!d?.key || !d.inner || inv.has(id)) continue

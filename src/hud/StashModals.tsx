@@ -112,7 +112,7 @@ function ItemRow({ d, onGo, onMove }: { d: MyDeployment; onGo: () => void; onMov
         {canAgain && <button className="shards__move" disabled={hiding} onClick={again} title="Hide a fresh copy where it was">{hiding ? 'HIDING…' : asking ? 'HIDE ANOTHER' : 'HIDE AGAIN'}</button>}
         {asking
           ? <button className="shards__move" onClick={() => setAsking(false)}>CANCEL</button>
-          : <button className="shards__move" disabled={hiding} onClick={() => useShards.getState().forgetRow(d.eventId)} title="Drop it from this list. Nothing is published">FORGET</button>}
+          : <button className="shards__move" disabled={hiding} onClick={() => setWhy(useShards.getState().forgetRow(d.eventId))} title="Drop it from this list. Nothing is published">FORGET</button>}
       </li>
     )
   }

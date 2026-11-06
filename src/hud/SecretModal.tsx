@@ -36,7 +36,8 @@ import { itemKind } from '../lib/comments'
 import { useProfile } from '../hooks/useProfile'
 import { profileLabel } from '../store/useProfiles'
 import { useCyberspace } from '../store/useCyberspace'
-import { editable, movable as movableDep, muteSubject, useShards, type WorldItem } from '../store/useShards'
+import { editable, keyStillNeeded, movable as movableDep, muteSubject, useShards, type WorldItem } from '../store/useShards'
+import { useInventory } from '../store/useInventory'
 import { addToRoom, editPlaced, movePlaced } from '../store/useBuilder'
 import { DeleteDoorCard, DoorOwnerBlock } from './DoorOwner'
 import { doorSecret } from '../store/doorSecrets'
@@ -333,7 +334,14 @@ export function SecretModal(): JSX.Element | null {
               className="secret__act secret__act--danger"
               disabled={hiding}
               title={hiding ? DELETE_WAITS : "Rewrite this region's bag without it, or delete the whole envelope when it is the last thing of yours there. Copies others already took stay with them. This cannot be undone."}
-              onClick={() => setConfirming('delete')}
+              onClick={() => {
+                // The last copy of a key one of your chests or doors is sealed to is not deleted (keyStillNeeded).
+                const s = useShards.getState()
+                const row = s.mine.find((d) => d.eventId === item.key)
+                const needed = row ? keyStillNeeded(row, s.mine, useInventory.getState().items, useCyberspace.getState().identity.pubkey) : null
+                if (needed) { setRefusal(needed); return }
+                setConfirming('delete')
+              }}
             >DELETE</button>
           )}
           {mine && item.chestId && (

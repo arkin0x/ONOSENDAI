@@ -93,7 +93,7 @@ import { audioInnerTemplate, fadeAt, type AudioItem } from '../lib/audioItem'
 import { resealCopy } from '../lib/audioFile'
 import { movableIntoRoom, openWithSecret, openWithSigner, openerFor, placeOf as eventPlace, plaintextWithSecret, readContents, resealWithout, revealedIn, sealEntries, sealedInside, sealerOf, type ChestEntry, type OpeningKey } from '../lib/chests'
 import { openedByHand, restoreOpened } from './useOpenedChests'
-import { hiderKeys, openingKeys, placeOf, type HeldItem, type HeldPlace, type InChest } from '../lib/inventory'
+import { hiderKeys, madeKeys, openingKeys, placeOf, type HeldItem, type HeldPlace, type InChest } from '../lib/inventory'
 import { useInventory } from './useInventory'
 import { useShardFolders } from './useShardFolders'
 import { creditOf, useWorkshop } from './useWorkshop'
@@ -889,6 +889,27 @@ export function freshCopyTemplate(previous: Pick<NostrEvent, 'kind' | 'content' 
 }
 
 /**
+ * Why a key of yours cannot be deleted or forgotten here, or null when it can
+ * (review of #614). Hiding no longer holds a key, so its deployment row (and
+ * the bag's copy) can be the only place its secret is kept: deleting that
+ * while a chest or door of yours is sealed to it would leave them unopenable
+ * for good. Refused while it is not held, no other row or chest of yours
+ * keeps the same keypair (madeKeys), and something of yours is sealed to it.
+ */
+export function keyStillNeeded(d: Pick<MyDeployment, 'eventId' | 'type' | 'key'>, mine: readonly MyDeployment[], items: Record<string, HeldItem>, me: string): string | null {
+  if (d.type !== 'key' || !d.key) return null
+  const pk = d.key.itemPubkey
+  if (openingKeys(items).some((k) => k.itemPubkey === pk)) return null
+  const others = mine.filter((m) => m.eventId !== d.eventId)
+  if (madeKeys(others, me).some((k) => k.key.itemPubkey === pk)) return null
+  const opens = others.filter((m) => m.chest?.lockPubkey === pk && m.inner.pubkey === me)
+  if (opens.length === 0) return null
+  const names = opens.map((m) => `${m.chest!.door !== undefined ? 'door' : 'chest'} “${m.chest!.name}”`)
+  const list = names.length === 1 ? names[0] : `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}`
+  return `This key opens ${list}. Delete or reseal ${names.length === 1 ? 'that' : 'those'} first.`
+}
+
+/**
  * What a gone row's HIDE AGAIN asks first: a key item, a chest, or a message
  * carrying a cashu token may already stand somewhere else (another device may
  * have moved it), and a second copy duplicates a key or a token.
@@ -1194,8 +1215,12 @@ interface ShardsState {
    * null when it went out, else why not (and the row stays marked).
    */
   hideAgain: (eventId: string) => Promise<string | null>
-  /** FORGET on a row GONE FROM ITS BAG: this device's record of it goes. Nothing is published. */
-  forgetRow: (eventId: string) => void
+  /**
+   * FORGET on a row GONE FROM ITS BAG: this device's record of it goes.
+   * Nothing is published. Refused, in words, for the last copy of a key
+   * something of yours is sealed to (keyStillNeeded); null otherwise.
+   */
+  forgetRow: (eventId: string) => string | null
   /** What a chest of yours holds, as sealed: kept from sealing, else opened with what opens it; a refusal in words otherwise. */
   chestEntries: (eventId: string) => Promise<BagEntry[] | string>
   /** EDIT and ADD on a chest of yours: sealed again with this draft (name, lock, label, contents) where it stands. A refusal in words, or null. */
@@ -2700,8 +2725,12 @@ export const useShards = create<ShardsState>((set, get) => {
     },
     forgetRow: (eventId) => {
       const owner = cyber().identity.pubkey
-      if (!rowsOf(owner).some((m) => m.eventId === eventId && m.goneFrom !== undefined)) return
+      const d = rowsOf(owner).find((m) => m.eventId === eventId && m.goneFrom !== undefined)
+      if (!d) return null
+      const needed = keyStillNeeded(d, rowsOf(owner), useInventory.getState().items, owner)
+      if (needed) return needed
       void commitRows(owner, rowsOf(owner).filter((m) => m.eventId !== eventId))
+      return null
     },
     chestEntries: async (eventId) => {
       const d = get().mine.find((m) => m.eventId === eventId)
@@ -3781,6 +3810,8 @@ export const useShards = create<ShardsState>((set, get) => {
       const item = get().mine.find((d) => d.eventId === eventId)
       if (!item) return
       const cs = cyber()
+      // The last copy of a key something of yours is sealed to stays (keyStillNeeded); the card says why.
+      if (keyStillNeeded(item, get().mine, useInventory.getState().items, cs.identity.pubkey)) return
       const key = hexToBytes(item.keyHex)
       // Taking something down reaches the relay whenever the bag is already
       // there, LOCAL or not. LOCAL used to silence this, which meant a

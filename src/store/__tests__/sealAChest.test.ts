@@ -41,7 +41,7 @@ import { sealAChest } from '../../hud/ShardsPanel'
 import { useBuilder } from '../useBuilder'
 import { useCyberspace } from '../useCyberspace'
 import { useInventory } from '../useInventory'
-import { fillingChest, lookTagsFor, placingChest, pendingEmpty, positionOf, useShards, type ChestDraft, type LookChoice, type MyDeployment } from '../useShards'
+import { fillingChest, keyStillNeeded, lookTagsFor, placingChest, pendingEmpty, positionOf, useShards, type ChestDraft, type LookChoice, type MyDeployment } from '../useShards'
 
 const S = () => useShards.getState()
 const C = () => useCyberspace.getState()
@@ -235,6 +235,63 @@ describe('a chest of yours: EDIT, MOVE, ADD', () => {
     const entries = await S().chestEntries(d.eventId)
     expect(Array.isArray(entries) && entries.length).toBe(1)
     expect(Object.keys(useInventory.getState().items)).toEqual([])
+  })
+
+  it('CONVERT TO DOOR opens a chest sealed to a key you placed and never picked up (review of #614)', async () => {
+    S().startDeployKey(lock)
+    S().setDeployHeight(5)
+    await S().deploy()
+    expect(S().deployError).toBeNull()
+    S().cancelDeploy()
+    const d = await sealOne()
+    // Claimed from another device: no sealed copy kept, so CONVERT must open it.
+    useShards.setState({ mine: S().mine.map((x) => (x.eventId === d.eventId ? { ...x, sealed: undefined } : x)) })
+    expect(Object.keys(useInventory.getState().items)).toEqual([])
+    expect(await S().convertToDoor(d.eventId)).toBeNull()
+    expect(S().mine.find((m) => m.type === 'chest')?.chest?.door).toBeDefined()
+  })
+
+  it('DELETE refuses the key while a chest of yours is sealed to it and nothing else keeps its secret, naming what it opens (review of #614)', async () => {
+    S().startDeployKey(lock)
+    S().setDeployHeight(5)
+    await S().deploy()
+    S().cancelDeploy()
+    const key = S().mine.find((m) => m.type === 'key')!
+    const chest = await sealOne()
+    const why = keyStillNeeded(key, S().mine, useInventory.getState().items, C().identity.pubkey)
+    expect(why).toBe('This key opens chest “Wind Chest”. Delete or reseal that first.')
+    await S().deleteInstance(key.eventId)
+    expect(S().mine.some((m) => m.eventId === key.eventId)).toBe(true)
+    // FORGET on the same row, gone from its bag, refuses with the same words.
+    useShards.setState({ mine: S().mine.map((m) => (m.eventId === key.eventId ? { ...m, goneFrom: 1 } : m)) })
+    expect(S().forgetRow(key.eventId)).toBe(why)
+    expect(S().mine.some((m) => m.eventId === key.eventId)).toBe(true)
+    useShards.setState({ mine: S().mine.map((m) => (m.eventId === key.eventId ? { ...m, goneFrom: undefined } : m)) })
+    // Picked up, its secret is in ITEMS: DELETE goes ahead.
+    S().takeFound([key.eventId])
+    expect(keyStillNeeded(key, S().mine, useInventory.getState().items, C().identity.pubkey)).toBeNull()
+    await S().deleteInstance(key.eventId)
+    expect(S().mine.some((m) => m.eventId === key.eventId)).toBe(false)
+    void chest
+  })
+
+  it('DELETE of that key goes ahead once nothing of yours is sealed to it, or another copy keeps its secret', async () => {
+    S().startDeployKey(lock)
+    S().setDeployHeight(5)
+    await S().deploy()
+    S().cancelDeploy()
+    const key = S().mine.find((m) => m.type === 'key')!
+    const me = C().identity.pubkey
+    expect(keyStillNeeded(key, S().mine, {}, me)).toBeNull()
+    const chest = await sealOne()
+    expect(keyStillNeeded(key, S().mine, {}, me)).not.toBeNull()
+    // A second row of the same keypair (a copy placed again) keeps its secret.
+    expect(keyStillNeeded(key, [...S().mine, { ...key, eventId: 'copy' }], {}, me)).toBeNull()
+    // Nothing sealed to it any more.
+    expect(keyStillNeeded(key, S().mine.filter((m) => m.eventId !== chest.eventId), {}, me)).toBeNull()
+    // A door counts as a chest does, and says so.
+    const asDoor = S().mine.map((m) => (m.eventId === chest.eventId ? { ...m, chest: { ...m.chest!, door: 4 } } : m))
+    expect(keyStillNeeded(key, asDoor, {}, me)).toBe('This key opens door “Wind Chest”. Delete or reseal that first.')
   })
 
   it('nobody else’s chest moves or reseals', async () => {

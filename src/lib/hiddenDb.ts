@@ -10,9 +10,13 @@
  *   tombstones  { bucket, key, at }          taken off this list here, so a later
  *                                            merge from localStorage leaves it off
  *   secrets     { owner, doorId, secret, onlySaid }
- *   closed      { owner, doorId, lock, room, shut, below }   doors closed with CLOSE
- *                                            (store/closedDoors.ts), one record each
- *   meta        { key, value }
+ *   meta        { key, value }               also each door closed with CLOSE
+ *                                            (store/closedDoors.ts), one record each:
+ *                                            key `closed\0<owner>\0<door id>`, value
+ *                                            { owner, doorId, lock, room, shut, below }.
+ *                                            In `meta` so the database stays at version
+ *                                            1: a bump is blocked by any open tab of an
+ *                                            older build, which never lets go.
  *
  * Nothing here knows about zustand; store/hiddenStorage.ts decides when to read
  * and write.
@@ -21,12 +25,13 @@
 import { META_STORE, openDatabase, request } from './idb'
 
 export const HIDDEN_DB = 'onosendai:hidden'
-/** 2 adds `closed` (CLOSE on a door, 2026-11); nothing else changed, so an upgrade only creates it. */
-const DB_VERSION = 2
+const DB_VERSION = 1
 const ROWS = 'rows'
 const TOMBSTONES = 'tombstones'
 const SECRETS = 'secrets'
-const CLOSED = 'closed'
+/** Where a closed door's record is kept in `meta`. */
+const CLOSED_PREFIX = 'closed\0'
+export const closedKey = (owner: string, doorId: string): string => `${CLOSED_PREFIX}${owner}\0${doorId}`
 const OPEN_TIMEOUT_MS = 8000
 /** Committed means on disk, not in a cache: a door's secret waits on this before the door goes out. */
 const STRICT = { durability: 'strict' } as IDBTransactionOptions
@@ -47,7 +52,12 @@ export type Change =
   | { unclosed: { owner: string; doorId: string } }
 
 export function openHiddenDb(timeoutMs: number = OPEN_TIMEOUT_MS): Promise<IDBDatabase> {
-  const opening = openDatabase(HIDDEN_DB, DB_VERSION, [[ROWS, ['bucket', 'key']], [TOMBSTONES, ['bucket', 'key']], [SECRETS, ['owner', 'doorId']], [CLOSED, ['owner', 'doorId']], [META_STORE, 'key']])
+  const opening = openDatabase(HIDDEN_DB, DB_VERSION, [[ROWS, ['bucket', 'key']], [TOMBSTONES, ['bucket', 'key']], [SECRETS, ['owner', 'doorId']], [META_STORE, 'key']]).then((db) => {
+    // A later build asking for a newer version: let go at once, so its open is never
+    // blocked by this tab. Whoever cached this connection hears it too (versionchange).
+    db.onversionchange = () => db.close()
+    return db
+  })
   let timedOut = false
   let timer: ReturnType<typeof setTimeout> | undefined
   const timeout = new Promise<never>((_, reject) => {
@@ -78,16 +88,22 @@ export async function probe(db: IDBDatabase): Promise<void> {
 }
 
 /** Everything, for the read before the first draw. */
+/** The closed doors' records in `meta` whose keys start with `prefix`. */
+async function closedIn(meta: IDBObjectStore, prefix: string): Promise<ClosedRecord[]> {
+  const got = await request(meta.getAll(IDBKeyRange.bound(prefix, `${prefix}\uffff`))) as Array<{ value?: ClosedRecord }>
+  return got.map((m) => m.value).filter((v): v is ClosedRecord => !!v && typeof v.doorId === 'string' && typeof v.owner === 'string')
+}
+
 export async function readEverything(db: IDBDatabase): Promise<{ rows: RowRecord[]; secrets: SecretRecord[]; closed: ClosedRecord[] }> {
-  const tx = db.transaction([ROWS, SECRETS, CLOSED], 'readonly')
-  const [rows, secrets, closed] = await Promise.all([request(tx.objectStore(ROWS).getAll()), request(tx.objectStore(SECRETS).getAll()), request(tx.objectStore(CLOSED).getAll())])
-  return { rows: rows as RowRecord[], secrets: secrets as SecretRecord[], closed: closed as ClosedRecord[] }
+  const tx = db.transaction([ROWS, SECRETS, META_STORE], 'readonly')
+  const [rows, secrets, closed] = await Promise.all([request(tx.objectStore(ROWS).getAll()), request(tx.objectStore(SECRETS).getAll()), closedIn(tx.objectStore(META_STORE), CLOSED_PREFIX)])
+  return { rows: rows as RowRecord[], secrets: secrets as SecretRecord[], closed }
 }
 
 /** One identity's closed doors as they stand on disk now: read before deciding to open any door again. */
 export async function readClosed(db: IDBDatabase, owner: string): Promise<ClosedRecord[]> {
-  const tx = db.transaction(CLOSED, 'readonly')
-  return ((await request(tx.objectStore(CLOSED).getAll())) as ClosedRecord[]).filter((r) => r.owner === owner)
+  const tx = db.transaction(META_STORE, 'readonly')
+  return closedIn(tx.objectStore(META_STORE), `${CLOSED_PREFIX}${owner}\0`)
 }
 
 /**
@@ -99,12 +115,12 @@ export async function readClosed(db: IDBDatabase, owner: string): Promise<Closed
  */
 export async function addMissing(db: IDBDatabase, rows: Array<{ record: RowRecord; alsoGoneFrom?: string }>, secrets: SecretRecord[], gone: Array<{ bucket: string; key: string }>, closed: ClosedRecord[] = []): Promise<{ rows: RowRecord[]; secrets: SecretRecord[]; closed: ClosedRecord[] }> {
   const added: { rows: RowRecord[]; secrets: SecretRecord[]; closed: ClosedRecord[] } = { rows: [], secrets: [], closed: [] }
-  const tx = db.transaction([ROWS, TOMBSTONES, SECRETS, CLOSED], 'readwrite', STRICT)
+  const tx = db.transaction([ROWS, TOMBSTONES, SECRETS, META_STORE], 'readwrite', STRICT)
   const finished = done(tx)
   const r = tx.objectStore(ROWS)
   const t = tx.objectStore(TOMBSTONES)
   const s = tx.objectStore(SECRETS)
-  const c = tx.objectStore(CLOSED)
+  const m = tx.objectStore(META_STORE)
   for (const g of gone) { t.put({ ...g, at: Date.now() }); r.delete([g.bucket, g.key]) }
   await Promise.all([
     ...rows.map(async ({ record, alsoGoneFrom }) => {
@@ -119,7 +135,8 @@ export async function addMissing(db: IDBDatabase, rows: Array<{ record: RowRecor
       if (await request(s.get([rec.owner, rec.doorId])) === undefined) { s.put(rec); added.secrets.push(rec) }
     }),
     ...closed.map(async (rec) => {
-      if (await request(c.get([rec.owner, rec.doorId])) === undefined) { c.put(rec); added.closed.push(rec) }
+      const key = closedKey(rec.owner, rec.doorId)
+      if (await request(m.get(key)) === undefined) { m.put({ key, value: rec }); added.closed.push(rec) }
     }),
   ])
   await finished
@@ -128,13 +145,13 @@ export async function addMissing(db: IDBDatabase, rows: Array<{ record: RowRecor
 
 /** One queue's worth of changes, all or none. */
 export async function commit(db: IDBDatabase, changes: readonly Change[]): Promise<void> {
-  const tx = db.transaction([ROWS, TOMBSTONES, SECRETS, CLOSED], 'readwrite', STRICT)
+  const tx = db.transaction([ROWS, TOMBSTONES, SECRETS, META_STORE], 'readwrite', STRICT)
   const finished = done(tx)
   for (const c of changes) {
     if ('put' in c) { tx.objectStore(ROWS).put(c.put); tx.objectStore(TOMBSTONES).delete([c.put.bucket, c.put.key]) }
     else if ('del' in c) { tx.objectStore(ROWS).delete([c.del.bucket, c.del.key]); tx.objectStore(TOMBSTONES).put({ ...c.del, at: Date.now() }) }
-    else if ('closed' in c) tx.objectStore(CLOSED).put(c.closed)
-    else if ('unclosed' in c) tx.objectStore(CLOSED).delete([c.unclosed.owner, c.unclosed.doorId])
+    else if ('closed' in c) tx.objectStore(META_STORE).put({ key: closedKey(c.closed.owner, c.closed.doorId), value: c.closed })
+    else if ('unclosed' in c) tx.objectStore(META_STORE).delete(closedKey(c.unclosed.owner, c.unclosed.doorId))
     else tx.objectStore(SECRETS).put(c.secret)
   }
   await finished
@@ -142,11 +159,11 @@ export async function commit(db: IDBDatabase, changes: readonly Change[]): Promi
 
 /** What another tab named, as it now stands. */
 export async function readSome(db: IDBDatabase, rows: Array<[string, string]>, secrets: Array<[string, string]>, closed: Array<[string, string]> = []): Promise<{ rows: Array<RowRecord | undefined>; secrets: Array<SecretRecord | undefined>; closed: Array<ClosedRecord | undefined> }> {
-  const tx = db.transaction([ROWS, SECRETS, CLOSED], 'readonly')
+  const tx = db.transaction([ROWS, SECRETS, META_STORE], 'readonly')
   const [a, b, c] = await Promise.all([
     Promise.all(rows.map((k) => request(tx.objectStore(ROWS).get(k)) as Promise<RowRecord | undefined>)),
     Promise.all(secrets.map((k) => request(tx.objectStore(SECRETS).get(k)) as Promise<SecretRecord | undefined>)),
-    Promise.all(closed.map((k) => request(tx.objectStore(CLOSED).get(k)) as Promise<ClosedRecord | undefined>)),
+    Promise.all(closed.map(async ([owner, doorId]) => ((await request(tx.objectStore(META_STORE).get(closedKey(owner, doorId)))) as { value?: ClosedRecord } | undefined)?.value)),
   ])
   return { rows: a, secrets: b, closed: c }
 }

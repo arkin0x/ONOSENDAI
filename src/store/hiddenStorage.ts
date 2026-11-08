@@ -219,6 +219,17 @@ function writeLocal(): boolean {
   return ok
 }
 
+/**
+ * The database, opened and cached. A later build asking for a newer version closes it
+ * (lib/hiddenDb openHiddenDb), and the cache lets go of it too, so the next write opens
+ * afresh rather than writing to a closed connection.
+ */
+async function openDb(): Promise<IDBDatabase> {
+  const d = await openHiddenDb()
+  d.addEventListener('versionchange', () => { if (db === d) db = null })
+  return d
+}
+
 function afterDecided(then: () => Promise<boolean>): Promise<boolean> {
   return mode === 'pending' && ready ? ready.then(then, then) : then()
 }
@@ -241,7 +252,7 @@ async function commitDirty(): Promise<boolean> {
   const batch = dirty
   dirty = new Map()
   try {
-    const d = db ?? (db = await openHiddenDb())
+    const d = db ?? (db = await openDb())
     await withTimeout(commit(d, [...batch.values()]), COMMIT_TIMEOUT_MS)
     announce(batch)
     return true
@@ -277,7 +288,7 @@ function listen(): void {
 
 async function heard(m: { rows: Array<[string, string]>; secrets: Array<[string, string]>; closed?: Array<[string, string]> }): Promise<void> {
   try {
-    const d = db ?? (db = await openHiddenDb())
+    const d = db ?? (db = await openDb())
     const got = await readSome(d, m.rows, m.secrets, m.closed ?? [])
     m.rows.forEach(([name, key], i) => {
       if (dirty.has(`r\0${name}\0${key}`)) return
@@ -335,7 +346,7 @@ export function dropClosed(owner: string, doorId: string): Promise<boolean> {
 export async function refreshClosed(owner: string): Promise<void> {
   if (mode !== 'indexeddb') return
   try {
-    const d = db ?? (db = await openHiddenDb())
+    const d = db ?? (db = await openDb())
     const recs = await readClosed(d, owner)
     const mine: Record<string, ClosedRecord> = {}
     for (const r of recs) mine[r.doorId] = r
@@ -422,7 +433,7 @@ async function decide(): Promise<HiddenStorage> {
   if (typeof indexedDB === 'undefined') return 'local'
   let d: IDBDatabase
   try {
-    d = await openHiddenDb()
+    d = await openDb()
     await probe(d)
   } catch { return 'local' }
   try {

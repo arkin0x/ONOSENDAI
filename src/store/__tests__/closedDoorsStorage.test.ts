@@ -188,3 +188,57 @@ describe('no cap (N1)', () => {
     expect(ids.every((id) => b.cd.closedByMe(X, id, LOCK))).toBe(true)
   })
 })
+
+describe('the database stays at version 1 (re-review of #616)', () => {
+  /** The database as the deployed build made it: version 1, its four stores, a row and a door secret. */
+  async function deployedDb(): Promise<void> {
+    const req = indexedDB.open('onosendai:hidden', 1)
+    req.onupgradeneeded = () => {
+      const d = req.result
+      d.createObjectStore('rows', { keyPath: ['bucket', 'key'] })
+      d.createObjectStore('tombstones', { keyPath: ['bucket', 'key'] })
+      d.createObjectStore('secrets', { keyPath: ['owner', 'doorId'] })
+      d.createObjectStore('meta', { keyPath: 'key' })
+    }
+    const d = await new Promise<IDBDatabase>((resolve, reject) => { req.onsuccess = () => resolve(req.result); req.onerror = () => reject(req.error) })
+    const tx = d.transaction(['rows', 'secrets'], 'readwrite')
+    tx.objectStore('rows').put({ bucket: X, key: 'row-1', seq: 1, json: JSON.stringify({ eventId: 'row-1' }) })
+    tx.objectStore('secrets').put({ owner: X, doorId: door(9), secret: 'ab'.repeat(32) })
+    await new Promise<void>((resolve) => { tx.oncomplete = () => resolve() })
+    d.close()
+  }
+
+  async function shape(): Promise<{ version: number; stores: string[] }> {
+    const req = indexedDB.open('onosendai:hidden')
+    const d = await new Promise<IDBDatabase>((resolve) => { req.onsuccess = () => resolve(req.result) })
+    const out = { version: d.version, stores: [...d.objectStoreNames].sort() }
+    d.close()
+    return out
+  }
+
+  it('an existing version 1 database with rows and door secrets works unchanged, and gains close records with no version change', async () => {
+    await deployedDb()
+    const a = await page()
+    expect(a.st.storageMode()).toBe('indexeddb')
+    expect(a.st.secretRecord(X, door(9))?.secret).toBe('ab'.repeat(32))
+    expect(a.st.entriesIn(X).map((e) => e.row?.eventId)).toEqual(['row-1'])
+    expect(await a.cd.writeClosed([closeRec(door(1))])).toBe(true)
+    a.st.resetHiddenForTests()
+    expect(await shape()).toEqual({ version: 1, stores: ['meta', 'rows', 'secrets', 'tombstones'] })
+    const b = await page()
+    expect(b.cd.closedByMe(X, door(1), LOCK)).toBe(true)
+    expect(b.st.secretRecord(X, door(9))?.secret).toBe('ab'.repeat(32))
+    expect(b.st.entriesIn(X).map((e) => e.row?.eventId)).toEqual(['row-1'])
+  })
+
+  it('lets go at once when a later build asks for a newer version, so its open is never blocked', async () => {
+    await page()
+    const req = indexedDB.open('onosendai:hidden', 2)
+    const outcome = await new Promise<string>((resolve) => {
+      req.onblocked = () => resolve('blocked')
+      req.onsuccess = () => { req.result.close(); resolve('opened') }
+      req.onerror = () => resolve('error')
+    })
+    expect(outcome).toBe('opened')
+  })
+})

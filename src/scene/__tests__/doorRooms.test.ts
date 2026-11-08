@@ -5,12 +5,12 @@
  * grid per nest (the walls nearest you), no label, and nothing at all while the Builder is off.
  */
 
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import type { Position, ViewAxes } from '../../lib/space'
 import { alignedOrigin } from '../../store/useCyberspace'
 import { gridPeriod } from '../Rooms'
 import {
-  ROOM_GRID_OPACITY, ROOM_WALL_LABEL, ROOM_WALL_LOOK, ROOM_WALL_OPACITY, doorRooms, gridCorner, inRoom, realFaces, roomBoxes, type RoomSpec,
+  ROOM_GRID_OPACITY, ROOM_WALL_LABEL, ROOM_WALL_LOOK, ROOM_WALL_OPACITY, doorRooms, gridCorner, inRoom, realFaces, roomBoxes, roomGridPool, type RoomSpec,
 } from '../DoorRooms'
 
 const AXES: ViewAxes = { right: { axis: 'x', dir: 1 }, up: { axis: 'y', dir: 1 }, out: { axis: 'z', dir: 1 } } as ViewAxes
@@ -146,6 +146,15 @@ describe('one grid per nest', () => {
     expect(boxes.map((b) => b.grid)).toEqual([true, true])
   })
 
+  it('from outside, a room keeps its grid when the room around it is clipped about a door far off', () => {
+    // A 2^20 room clipped about its door at its low corner; the small room
+    // 300 cells along, inside it in space but nowhere near its drawn box.
+    const big = room('big', P(C + 3n), 20, 1)
+    const small = room('small', P(C + 300n, C + 3n, C + 3n), 4, 2)
+    const boxes = seen([big, small], P(C - 50n, C + 3n, C + 3n))
+    expect(boxes.map((b) => [b.key, b.grid])).toEqual([['big', true], ['small', true]])
+  })
+
   it('one room drawn twice (a second door being placed in it) is gridded once', () => {
     const boxes = seen([room('a', P(C + 3n), 3), room('placing', P(C + 5n), 3)], P(C))
     expect(boxes.map((b) => b.grid)).toEqual([true, false])
@@ -167,5 +176,48 @@ describe('only while the Builder is on', () => {
     expect(doorRooms([], 'a'.repeat(64), false, 0, placing)).toEqual([])
     expect(roomBoxes(doorRooms([], 'a'.repeat(64), false, 0, placing), P(C), alignedOrigin(P(C), 0), 0, AXES)).toEqual([])
     expect(doorRooms([], 'a'.repeat(64), true, 0, placing)).toHaveLength(1)
+  })
+})
+
+describe('two rooms bigger than the view, both around you', () => {
+  it('breathe once: the outer room leaves the faces it shares with the inner one to it', () => {
+    // A 2^20 room around a 2^12 one; you deep inside both: both clip to one 25-cell box about you.
+    const deep = P(C + 2048n)
+    const boxes = seen([room('outer', P(C + 3n), 20, 1), room('inner', P(C + 3n), 12, 2)], deep)
+    expect(boxes[0].size).toEqual(boxes[1].size)
+    expect(boxes[0].centre).toEqual(boxes[1].centre)
+    expect(boxes.map((b) => [b.key, b.faces.length, b.wallFaces.length])).toEqual([['outer', 6, 0], ['inner', 6, 6]])
+  })
+
+  it('keeps every breathing face when the boxes differ', () => {
+    // Near the inner room's top: its top faces are real, so the outer one still breathes there.
+    const nearTop = P(C + 4096n - 4n)
+    const [outer, inner] = seen([room('outer', P(C + 3n), 20, 1), room('inner', P(C + 3n), 12, 2)], nearTop)
+    expect(outer.wallFaces).toEqual(outer.faces)
+    expect(inner.wallFaces).toEqual(inner.faces)
+  })
+})
+
+describe('the grid material outlives the grid', () => {
+  it('a room giving its material back and the next taking one get the same material, never disposed', () => {
+    const m = roomGridPool.take()
+    const dispose = vi.spyOn(m, 'dispose')
+    roomGridPool.give(m)
+    const again = roomGridPool.take()
+    expect(again).toBe(m)
+    roomGridPool.give(again)
+    expect(dispose).not.toHaveBeenCalled()
+  })
+
+  it('a material mounted again after a give (StrictMode) is not handed to another room', () => {
+    const m = roomGridPool.take()
+    roomGridPool.give(m)
+    roomGridPool.hold(m)
+    const other = roomGridPool.take()
+    expect(other).not.toBe(m)
+    roomGridPool.give(other)
+    roomGridPool.give(m)
+    roomGridPool.give(m)
+    expect([roomGridPool.take(), roomGridPool.take()]).toEqual(expect.arrayContaining([m, other]))
   })
 })

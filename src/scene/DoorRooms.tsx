@@ -37,9 +37,9 @@
  * theirs.
  */
 
-import { useEffect, useLayoutEffect, useMemo } from 'react'
+import { useEffect, useLayoutEffect, useMemo, useState } from 'react'
 import { useFrame } from '@react-three/fiber'
-import { BoxGeometry, EdgesGeometry, MeshBasicMaterial, type BufferGeometry, type Material } from 'three'
+import { BoxGeometry, EdgesGeometry, MeshBasicMaterial, type BufferGeometry, type Material, type ShaderMaterial } from 'three'
 import { deployPoint, type Position, type ViewAxes } from '../lib/space'
 import { buildPlane, buildStepOf } from '../lib/buildCursor'
 import type { OwnDoor } from '../lib/doors'
@@ -79,6 +79,24 @@ export const ROOM_WALL_LABEL = null
 
 /** Hides a face of the gridded box: a cut face, whose breathing wall stands there instead. */
 const NO_FACE = new MeshBasicMaterial({ visible: false })
+
+/**
+ * The rooms' grid materials, kept for the session and never disposed. A room
+ * gains and loses its grid as you step from an outer room into an inner one,
+ * zoom it below a cell, or turn the Builder off and on, and in BUILD there is
+ * often no other grid material alive: disposing the last one makes three
+ * delete the shader program, and the next gridded room compiles it again on
+ * the main thread, the per-step stall Rooms.tsx's gridMaterial measured in
+ * WALK (review of #619). A room takes one when it mounts and gives it back
+ * when it unmounts; there are only ever as many as rooms on screen at once.
+ */
+const gridPool: ShaderMaterial[] = []
+export const roomGridPool = {
+  take(): ShaderMaterial { return gridPool.pop() ?? gridMaterial() },
+  /** Mark a taken material in use again: StrictMode's second mount follows a give. */
+  hold(m: ShaderMaterial): void { const i = gridPool.indexOf(m); if (i >= 0) gridPool.splice(i, 1) },
+  give(m: ShaderMaterial): void { if (!gridPool.includes(m)) gridPool.push(m) },
+}
 
 /**
  * Which rooms to outline: none outside BUILD and DEPLOY (R8), and only your
@@ -137,6 +155,16 @@ function nestsIn(a: RoomSpec, b: RoomSpec): boolean {
   return a.height < b.height && inRoom(a.at, b.at, b.height)
 }
 
+/** Whether drawn box `a` holds drawn box `b` on every axis. */
+function boxHolds(a: DrawnRegion, b: DrawnRegion): boolean {
+  return [0, 1, 2].every((i) => a.centre[i] - a.size[i] / 2 <= b.centre[i] - b.size[i] / 2 + 1e-6 && a.centre[i] + a.size[i] / 2 >= b.centre[i] + b.size[i] / 2 - 1e-6)
+}
+
+/** Whether two drawn boxes are the same box. */
+function sameBox(a: DrawnRegion, b: DrawnRegion): boolean {
+  return boxHolds(a, b) && boxHolds(b, a)
+}
+
 /** Whether `a` and `b` are one room. */
 function sameRoom(a: RoomSpec, b: RoomSpec): boolean {
   return a.height === b.height && inRoom(a.at, b.at, b.height)
@@ -187,6 +215,13 @@ export interface RoomBox extends DrawnRegion {
   /** Clipped about the viewer (true) rather than the door. */
   aboutViewer: boolean
   grid: boolean
+  /**
+   * The cut faces that breathe: all of them, less those a room inside it
+   * that you also stand in already breathes in the same place (two rooms
+   * bigger than the view clip to one box about you, and two frames on one
+   * face doubled the signal).
+   */
+  wallFaces: ClipFace[]
   corner: [number, number, number]
 }
 
@@ -205,12 +240,17 @@ export function roomBoxes(rooms: readonly RoomSpec[], viewer: Position, origin: 
   }
   // The walls nearest you (see the file's comment). Only a room that can
   // carry a grid takes it from another: a room smaller than a cell has none.
+  // From outside, a room gives its grid up only to a room around it whose
+  // drawn box holds its own: a big room clipped about a door far off does not
+  // stand around it on screen, and would leave it a bare outline.
   const gridded = drawn.filter((d) => d.region.whole)
   return drawn.map(({ spec, region, inside }, i) => {
     const repeat = drawn.slice(0, i).some((o) => sameRoom(o.spec, spec))
     const nearest = inside
       ? !gridded.some((o) => o.inside && nestsIn(o.spec, spec))
-      : gridded.every((o) => !nestsIn(spec, o.spec) || o.inside)
+      : gridded.every((o) => !nestsIn(spec, o.spec) || o.inside || !boxHolds(o.region, region))
+    const twins = inside ? drawn.filter((o) => o.inside && nestsIn(o.spec, spec) && sameBox(o.region, region)) : []
+    const wallFaces = region.faces.filter((f) => !twins.some((o) => o.region.faces.some((g) => g.slot === f.slot && g.sign === f.sign)))
     return {
       ...region,
       key: spec.key,
@@ -218,6 +258,7 @@ export function roomBoxes(rooms: readonly RoomSpec[], viewer: Position, origin: 
       depth: spec.depth,
       aboutViewer: inside,
       grid: region.whole && !repeat && nearest,
+      wallFaces,
       corner: gridCorner(spec.at, origin, spec.height, scaleExp, axes),
     }
   })
@@ -271,23 +312,25 @@ export function DoorRooms({ axes }: { axes: ViewAxes }): JSX.Element | null {
 function Room({ box, edges }: { box: RoomBox; edges: BufferGeometry }): JSX.Element {
   // The same numbers come back on every cursor step for a room you are not
   // in; held by value, so its walls' planes are not rebuilt for nothing.
-  const shapeKey = `${box.centre.join()}|${box.size.join()}|${box.faces.map((f) => `${f.slot}${f.sign}`).join()}`
+  const faceKey = (faces: readonly ClipFace[]): string => faces.map((f) => `${f.slot}${f.sign}`).join()
+  const shapeKey = `${box.centre.join()}|${box.size.join()}|${faceKey(box.faces)}|${faceKey(box.wallFaces)}`
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  const shape = useMemo(() => ({ centre: box.centre, size: box.size, faces: box.faces }), [shapeKey])
+  const shape = useMemo(() => ({ centre: box.centre, size: box.size, faces: box.faces, wallFaces: box.wallFaces }), [shapeKey])
 
-  // One grid material per room while it carries the grid, its numbers written
-  // in place (as Rooms keeps its walls'); the shader program is shared.
-  const material = useMemo(() => (box.grid ? gridMaterial() : null), [box.grid])
-  useEffect(() => () => material?.dispose(), [material])
+  // One grid material for the room's whole life on screen, from the pool
+  // (roomGridPool): its numbers are written in place (as Rooms keeps its
+  // walls'), and gaining or losing the grid mounts or drops the mesh only.
+  const [material] = useState(() => roomGridPool.take())
+  useEffect(() => { roomGridPool.hold(material); return () => roomGridPool.give(material) }, [material])
   const facesKey = realFaces(shape.faces).join()
-  const materials = useMemo<Material[] | null>(
-    () => (material ? realFaces(shape.faces).map((real) => (real ? material : NO_FACE)) : null),
+  const materials = useMemo<Material[]>(
+    () => realFaces(shape.faces).map((real) => (real ? material : NO_FACE)),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [material, facesKey],
   )
   const [cx, cy, cz] = box.corner
   useLayoutEffect(() => {
-    if (material) setGrid(material, ROOM_RED, ROOM_GRID_OPACITY, box.height, [cx, cy, cz])
+    setGrid(material, ROOM_RED, ROOM_GRID_OPACITY, box.height, [cx, cy, cz])
   }, [material, box.height, cx, cy, cz])
 
   return (
@@ -297,10 +340,10 @@ function Room({ box, edges }: { box: RoomBox; edges: BufferGeometry }): JSX.Elem
           <lineBasicMaterial color={ROOM_RED} toneMapped={false} transparent opacity={0.95} depthTest={false} />
         </lineSegments>
       ))}
-      {materials && (
+      {box.grid && (
         <mesh geometry={UNIT_BOX} material={materials} position={shape.centre} scale={shape.size} frustumCulled={false} renderOrder={WALL_RENDER_ORDER} />
       )}
-      <ClipWalls centre={shape.centre} size={shape.size} faces={shape.faces} color={ROOM_RED} hideNear look={ROOM_WALL_LOOK} opacity={ROOM_WALL_OPACITY} label={ROOM_WALL_LABEL} />
+      <ClipWalls centre={shape.centre} size={shape.size} faces={shape.wallFaces} color={ROOM_RED} hideNear look={ROOM_WALL_LOOK} opacity={ROOM_WALL_OPACITY} label={ROOM_WALL_LABEL} />
     </group>
   )
 }

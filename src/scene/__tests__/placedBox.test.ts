@@ -14,7 +14,7 @@ vi.mock('../WorldLabel', async (real) => {
 })
 
 // Loaded once, here, not inside a test's time limit: WorldMessages pulls in much of the scene.
-import { AudioMark, PlacedBox, placedBoxProps, placedBoxSide } from '../WorldMessages'
+import { AudioMark, ENCOMPASS_ORDER, PlacedBox, placedBoxProps, placedBoxSide, setBoxLook } from '../WorldMessages'
 import { ItemVanish } from '../ItemVanish'
 import { TAG_BLEND, TRANSLUCENT_ORDER } from '../shardFaces'
 import { VANISH_MS } from '../../lib/ceremony'
@@ -182,5 +182,23 @@ describe('the box at half (a held item you made, arkinox 2026-11-06)', () => {
     const m = await mount(createElement(PlacedBox, { at: [0, 0, 0], opacity: 0.5 }))
     expect(m.all().find((h) => h.type === 'mesh')!.props.renderOrder).toBe(TRANSLUCENT_ORDER)
     await m.unmount()
+  })
+
+  it('sized round a model, it draws after the model at half, still and through TAKE; the fixed box keeps its order (review of #617)', async () => {
+    const order = (m: Awaited<ReturnType<typeof mount>>): unknown[] => m.all().filter((h) => h.type === 'mesh' || h.type === 'lineSegments').map((h) => h.props.renderOrder)
+    const sized = await mount(createElement(PlacedBox, { at: [0, 0, 0], opacity: 0.5, size: [1, 4, 1] }))
+    expect(order(sized)).toEqual([ENCOMPASS_ORDER, ENCOMPASS_ORDER])
+    await sized.unmount()
+    const fixed = await mount(createElement(PlacedBox, { at: [0, 0, 0], opacity: 0.5 }))
+    expect(order(fixed)).toEqual([TRANSLUCENT_ORDER, TRANSLUCENT_ORDER])
+    await fixed.unmount()
+    // setBoxLook: see-through at the order handed it, TRANSLUCENT_ORDER by default, solid at 0.
+    const o = { renderOrder: 0 }
+    setBoxLook(new MeshBasicMaterial(), o, 0.25, ENCOMPASS_ORDER)
+    expect(o.renderOrder).toBe(ENCOMPASS_ORDER)
+    setBoxLook(new MeshBasicMaterial(), o, 0.25)
+    expect(o.renderOrder).toBe(TRANSLUCENT_ORDER)
+    setBoxLook(new MeshBasicMaterial(), o, 1, ENCOMPASS_ORDER)
+    expect(o.renderOrder).toBe(0)
   })
 })

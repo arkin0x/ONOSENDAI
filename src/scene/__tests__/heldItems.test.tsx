@@ -12,7 +12,7 @@
  *  - Held with its model loading or missing: the fixed box at half alone, no name.
  */
 import { describe, expect, it, vi } from 'vitest'
-import { LineBasicMaterial, MeshBasicMaterial, PerspectiveCamera, Euler, Vector3 } from 'three'
+import { LineBasicMaterial, Matrix4, MeshBasicMaterial, PerspectiveCamera, Euler, Vector3 } from 'three'
 
 const frames: Array<(state: unknown) => void> = []
 const model = vi.hoisted(() => ({
@@ -41,8 +41,8 @@ import type { ItemAnimation } from '../../lib/itemModel'
 import type { ViewAxes } from '../../lib/space'
 import { mount, type Host, type Mounted } from '../../test/elementRoot'
 import { HELD_OPACITY } from '../../lib/worldMarks'
-import { TRANSLUCENT_ORDER } from '../shardFaces'
-import { HeldItemMark, ItemMark, placedBoxProps, placedBoxSide } from '../WorldMessages'
+import { DOTS_ORDER, shardOrder } from '../shardFaces'
+import { ENCOMPASS_ORDER, HeldItemMark, ItemMark, placedBoxProps, placedBoxSide } from '../WorldMessages'
 import { VANISH_MS } from '../../lib/ceremony'
 import type { Box } from '../../lib/clip'
 import { useCyberspace } from '../../store/useCyberspace'
@@ -92,16 +92,27 @@ async function draw(el: Parameters<typeof mount>[0], loaded: unknown = LOADED): 
  */
 function poseAt(m: Mounted, seconds: number): string[] {
   const groups = of(m, 'group').map((h) => {
-    const o = h as Host & { position?: Vector3; rotation?: Euler; scale?: Vector3 }
+    const o = h as Host & { position?: Vector3; rotation?: Euler; scale?: Vector3; matrixWorld?: Matrix4; updateWorldMatrix?: () => void }
     o.position ??= new Vector3()
     o.rotation ??= new Euler()
     o.scale ??= new Vector3(1, 1, 1)
+    // A model cut at its region's walls carries its planes through the frame's world matrix.
+    o.matrixWorld ??= new Matrix4()
+    o.updateWorldMatrix ??= () => {}
     return o as Host & { position: Vector3; rotation: Euler }
   })
   const camera = new PerspectiveCamera(50, 0.5, 0.01, 1000)
   camera.position.set(0, 0, 3)
   for (const f of frames) f({ clock: { elapsedTime: seconds }, camera, size: { width: 400, height: 800 } })
   return groups.map((g) => [g.position.y, g.rotation.y, g.rotation.x].map((n) => n.toFixed(6)).join(','))
+}
+
+/** The groups that lift or turn between two moments: the model's bob and turns. */
+function movingGroups(m: Mounted): Set<Host> {
+  const a = poseAt(m, 0.3)
+  const b = poseAt(m, 1.1)
+  const groups = of(m, 'group')
+  return new Set(groups.filter((_, i) => a[i] !== b[i]))
 }
 
 /** Whether the model moves: some group lifts or turns between two moments. */
@@ -120,9 +131,9 @@ describe('an item you made and hold', () => {
     const [mesh] = of(m, 'shardmesh')
     expect(mesh.props.dim).toBe(HELD_OPACITY)
     expect(HELD_OPACITY).toBe(0.5)
-    // The note's blue box, at half and never solid, drawn after the opaque faces.
+    // The note's blue box, at half and never solid, drawn after the opaque faces and the model at half.
     expect(boxFill(m)).toHaveLength(1)
-    expect(boxFill(m)[0].props.renderOrder).toBe(TRANSLUCENT_ORDER)
+    expect(boxFill(m)[0].props.renderOrder).toBe(ENCOMPASS_ORDER)
     const faces = of(m, 'meshBasicMaterial')
     expect(faces).toHaveLength(1)
     expect(faces[0].props.opacity).toBe(HELD_OPACITY)
@@ -146,13 +157,22 @@ describe('an item you made and hold', () => {
       expect(boxFill(m)).toHaveLength(1)
       expect(of(m, 'lineBasicMaterial').map((h) => h.props.opacity)).toEqual([HELD_OPACITY])
       expect(of(m, 'meshBasicMaterial')[0].props.polygonOffset).toBe(true)
-      expect(of(m, 'lineSegments').every((h) => h.props.renderOrder === TRANSLUCENT_ORDER)).toBe(true)
-      // In the model's frame (under the view's turn) and still: not inside the groups that bob and turn.
+      // After the model at half, always: never sorted against it by centre (review of #617).
+      expect([...boxFill(m), ...of(m, 'lineSegments')].map((h) => h.props.renderOrder)).toEqual([ENCOMPASS_ORDER, ENCOMPASS_ORDER])
+      expect(ENCOMPASS_ORDER).toBeGreaterThan(shardOrder(HELD_OPACITY, false))
+      expect(ENCOMPASS_ORDER).toBeLessThan(DOTS_ORDER)
+      // In the model's frame (under the view's turn) and still: no group above
+      // it bobs or turns, while the model sits under the ones that do.
       const trail = pathTo(m, box)
       expect(trail.some((h) => h.props.matrixAutoUpdate === false)).toBe(true)
+      const moving = movingGroups(m)
+      expect(moving.size).toBeGreaterThan(0)
+      expect(trail.filter((h) => moving.has(h))).toEqual([])
       const motion = pathTo(m, of(m, 'shardmesh')[0])
-      const still = motion.slice(0, motion.findIndex((h) => h.type === 'shardmesh') - 4)
-      expect(trail.slice(0, -1)).toEqual(still)
+      expect(motion.filter((h) => moving.has(h)).length).toBeGreaterThan(0)
+      // Its parent is the model's frame: the group the moving ones hang from.
+      const frame = motion[motion.findIndex((h) => moving.has(h)) - 1]
+      expect(trail[trail.length - 2]).toBe(frame)
       await m.unmount()
     }
   })
@@ -173,15 +193,24 @@ describe('an item you made and hold', () => {
     const m = await draw(createElement(HeldItemMark, { id: 'k', own: true, at: AT, wears: WEARS, axes: AXES, appear: { at: 1000, calm: false } }))
     expect(of(m, 'meshBasicMaterial')[0].props.opacity).toBe(0)
     expect(placeOf(boxGroup(m)).scale).not.toBe(placedBoxSide(0))
+    expect(boxFill(m)[0].props.renderOrder).toBe(ENCOMPASS_ORDER)
+    const fill = Object.assign(boxFill(m)[0], { material: new MeshBasicMaterial(placedBoxProps(0)), renderOrder: ENCOMPASS_ORDER })
+    const edges = Object.assign(of(m, 'lineSegments')[0], { material: new LineBasicMaterial(placedBoxProps(0)), renderOrder: ENCOMPASS_ORDER })
+    // Mid-TAKE: still after the model, the fade never puts it back at TRANSLUCENT_ORDER.
+    now = 1000 + VANISH_MS / 2
+    poseAt(m, 0)
+    for (const o of [fill, edges]) {
+      expect(o.material.opacity).toBeGreaterThan(0)
+      expect(o.material.opacity).toBeLessThan(HELD_OPACITY)
+      expect(o.renderOrder).toBe(ENCOMPASS_ORDER)
+    }
     now = 1000 + VANISH_MS * 2
-    const fill = Object.assign(boxFill(m)[0], { material: new MeshBasicMaterial(placedBoxProps(0)), renderOrder: TRANSLUCENT_ORDER })
-    const edges = Object.assign(of(m, 'lineSegments')[0], { material: new LineBasicMaterial(placedBoxProps(0)), renderOrder: TRANSLUCENT_ORDER })
     // Every frame, the model's and the box's, as three would run them.
     poseAt(m, 0)
     for (const o of [fill, edges]) {
       expect(o.material.opacity).toBeCloseTo(HELD_OPACITY, 9)
       expect(o.material.depthWrite).toBe(false)
-      expect(o.renderOrder).toBe(TRANSLUCENT_ORDER)
+      expect(o.renderOrder).toBe(ENCOMPASS_ORDER)
     }
     clock.mockRestore()
     await m.unmount()

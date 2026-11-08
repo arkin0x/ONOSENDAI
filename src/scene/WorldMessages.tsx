@@ -45,9 +45,8 @@
  * motion as ever, and, for one you made yourself, the note's blue box round
  * it at half too, the model's own box (2026-11-08); one taken from someone
  * else has no box (arkinox, 2026-11-06, which replaces the solid box of
- * 2026-11-01; lib/worldMarks
- * itemDrawAs, HeldItemMark). Its tap still opens its card. TAKE fades the
- * whole model out over it (scene/ItemVanish).
+ * 2026-11-01; lib/worldMarks itemDrawAs, HeldItemMark). Its tap still opens
+ * its card. TAKE fades the whole model out over it (scene/ItemVanish).
  */
 
 import { useEffect, useMemo, useRef, useState } from 'react'
@@ -580,27 +579,37 @@ const BOX_SEE_THROUGH = placedBoxProps(0.5)
 const BOX_SOLID = { ...placedBoxProps(1), depthWrite: true }
 
 /**
+ * Where a box round a held model draws while it is see-through: after the
+ * model at half (TRANSLUCENT_ORDER), always. At the same order three sorts
+ * the two by their centres, which only the bob separates, and the model blinks
+ * bright and dim under the box twice a bob (review of #617). Before the dots
+ * (DOTS_ORDER) and the overlays, as every see-through face is.
+ */
+export const ENCOMPASS_ORDER = TRANSLUCENT_ORDER + 0.5
+
+/**
  * A box's material and draw order at `opacity` while it appears: below 1 the
  * see-through face's blend, no depth written and drawn after opaque faces
- * (TRANSLUCENT_ORDER), so the item fading out inside it and its name stay in
- * sight; at 1 exactly the solid, tagged box it then stays. Nothing allocated.
+ * (`seeThrough`, TRANSLUCENT_ORDER unless the box is round a model), so the
+ * item fading out inside it and its name stay in sight; at 1 exactly the
+ * solid, tagged box it then stays. Nothing allocated.
  */
-export function setBoxLook(material: Material, object: { renderOrder: number }, opacity: number): void {
+export function setBoxLook(material: Material, object: { renderOrder: number }, opacity: number, seeThrough = TRANSLUCENT_ORDER): void {
   const solid = opacity >= 1
   Object.assign(material, solid ? BOX_SOLID : BOX_SEE_THROUGH)
   material.opacity = solid ? 1 : Math.max(0, opacity)
   material.depthWrite = solid
-  object.renderOrder = solid ? 0 : TRANSLUCENT_ORDER
+  object.renderOrder = solid ? 0 : seeThrough
 }
 
 /**
  * Where a sound stands, and round an item you made and hold while its model
- * loads or when it has none: a blue box of a fixed size in the world. It is not sized to the screen, so it reads as a
- * thing in the place. A sound's is solid, so it is the same blue box from
- * every side (placedBoxProps); a held item's is at half (HeldItemMark), so
- * its model shows inside it, and draws after the opaque faces. The
- * faces sit a hair behind their edges (polygonOffset), so the edges always
- * draw over them.
+ * loads or when it has none: a blue box of a fixed size in the world, never
+ * sized to the screen, so it reads as a thing in the place. A sound's is
+ * solid, so it is the same blue box from every side (placedBoxProps); a held
+ * item's is at half (HeldItemMark), so what is inside it shows, and draws
+ * after the opaque faces. The faces sit a hair behind their edges
+ * (polygonOffset), so the edges always draw over them.
  *
  * Under TAKE (`appear`) it fades in up to its `opacity` as the item fades
  * out, see-through and writing no depth until it is solid (setBoxLook).
@@ -608,23 +617,26 @@ export function setBoxLook(material: Material, object: { renderOrder: number }, 
  * With a `size` it is that size in its parent's frame instead of the fixed
  * side: a held item you made has its model's own box, the one the placement
  * preview draws (HeldItemMark, ItemModel `encompass`; arkinox, 2026-11-08).
+ * It scales with the model, so it is as large on screen as the model is. It
+ * draws after the model at half (ENCOMPASS_ORDER), through TAKE too.
  */
 export function PlacedBox({ at, opacity = 1, appear, size }: { at: [number, number, number]; opacity?: number; appear?: Vanishing; size?: [number, number, number] }): JSX.Element {
   const fixed = placedBoxSide(useCyberspace((s) => s.scaleExp))
   const side = size ?? fixed
+  const seeThrough = size ? ENCOMPASS_ORDER : TRANSLUCENT_ORDER
   const fill = useRef<Mesh>(null)
   const edges = useRef<LineSegments>(null)
   useFrame(() => {
     if (!appear) return
     const o = boxAppearOpacity(performance.now() - appear.at, appear.calm) * opacity
-    if (fill.current) setBoxLook(fill.current.material as Material, fill.current, o)
-    if (edges.current) setBoxLook(edges.current.material as Material, edges.current, o)
+    if (fill.current) setBoxLook(fill.current.material as Material, fill.current, o, seeThrough)
+    if (edges.current) setBoxLook(edges.current.material as Material, edges.current, o, seeThrough)
   })
   // While it appears, its first frame is drawn as it starts: not there yet.
   const start = appear ? Math.min(opacity, boxAppearOpacity(performance.now() - appear.at, appear.calm) * opacity) : opacity
   // See-through, it writes no depth, so it draws after the opaque faces: at
   // order 0 a room sorted nearer would paint over it (setBoxLook).
-  const order = start < 1 ? TRANSLUCENT_ORDER : 0
+  const order = start < 1 ? seeThrough : 0
   return (
     <group position={at} scale={side}>
       <mesh ref={fill} geometry={PLACED_BOX_FILL} renderOrder={order}>

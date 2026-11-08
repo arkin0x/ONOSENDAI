@@ -21,10 +21,19 @@
  * lose the room from then on"). Today the lock is signed into the chest's
  * own event, so a new lock is a new id anyway; this holds once a door's
  * identity outlives its lock (its room, spec #82).
+ *
+ * CLOSE (arkinox, 2026-11-01): a door this identity opened can be closed again,
+ * on this device only (store/closedDoors.ts keeps it, per identity and per lock),
+ * so a reload, a scan or a relay update never opens it again: only OPEN does. A
+ * door closed is not opened by hand (openedByHand), whatever was kept of its
+ * opening, so every reader of that (the look, WALK, the reload's reopening) sees it
+ * shut. Its secret stays kept (store/doorSecrets), so OPEN needs no key again.
  */
 
 import { create } from 'zustand'
 import type { ChestEntry } from '../lib/chests'
+import { closedByMe, closedRecord, writeClosed } from './closedDoors'
+import { onHiddenChange } from './hiddenStorage'
 
 const OPENED_KEY = 'onosendai:chests-opened'
 /** Enough for years of play; the oldest opened fall off past it, and show OPEN again. */
@@ -67,12 +76,31 @@ function save(all: Record<string, string[]>): void {
 }
 
 /**
+ * CLOSE closed these doors (store/rooms closeDoor): what this session read of each
+ * is forgotten, and a fresh record handed out, so every card and the world redraw
+ * them shut. Their openings stay kept, and their secrets: OPEN opens them again
+ * with no key. The closes themselves are kept in store/closedDoors.ts.
+ */
+export function shutInSession(me: string, doorIds: Iterable<string>): void {
+  useOpenedChests.setState((s) => {
+    const opened = { ...s.opened }
+    for (const id of doorIds) delete opened[openedKey(me, id)]
+    return { opened }
+  })
+}
+
+/** A door closed or opened in another tab, or the store decided: a fresh record, so everything drawn from it is drawn again. */
+onHiddenChange(() => { useOpenedChests.setState((s) => ({ opened: { ...s.opened } })) })
+
+/**
  * Whether this identity opened this chest by hand on this device, under the
  * lock it has now (`lock`, its lock pubkey). A bare id kept before locks were
  * is kept from now on with the lock it is first asked with, which its id
  * named, so it does not outlive a new lock either.
  */
 export function openedByHand(me: string, chestId: string, lock: string): boolean {
+  // Closed with CLOSE: shut, until OPEN.
+  if (closedByMe(me, chestId, lock)) return false
   const all = keptIds()
   const ids = all[me]
   if (!ids) return false
@@ -104,8 +132,14 @@ export function openedContents(opened: Record<string, ChestEntry[]>, me: string,
   return openedByHand(me, chestId, lock) ? opened[openedKey(me, chestId)] ?? null : null
 }
 
-/** OPEN opened it: what was inside, for the session, and its id with its lock, kept, so a reload opens it again. */
+/** OPEN opened it: what was inside, for the session, and its id with its lock, kept, so a reload opens it again. A close before is undone. */
 export function rememberOpened(me: string, chestId: string, lock: string, contents: ChestEntry[]): void {
+  // Closed with CLOSE before: open now. What is still to close below it stays so (store/closedDoors).
+  const was = closedRecord(me, chestId)
+  if (was?.shut) {
+    const { shut: _shut, ...open } = was
+    void writeClosed([open])
+  }
   useOpenedChests.setState((s) => ({ opened: { ...s.opened, [openedKey(me, chestId)]: contents } }))
   const all = keptIds()
   const ids = all[me] ?? []

@@ -25,7 +25,7 @@ import { useShards, type WorldItem } from '../store/useShards'
 import { useMutes } from '../store/useMutes'
 import { setDrawnLooks, useOpenCeremony } from '../store/useOpenCeremony'
 import { ChestCeremony } from './ChestCeremony'
-import { DoorCeremony } from './DoorCeremony'
+import { DoorCeremony, DoorCloses } from './DoorCeremony'
 import { ChestLoot, HOVER_Y, LOOT_SIDE } from './ChestLoot'
 import { ShardMesh } from './ShardMesh'
 import { chestLoot, type LootObject } from '../lib/lootObjects'
@@ -148,7 +148,9 @@ export function ChestLooks({ axes }: { axes: ViewAxes }): JSX.Element | null {
   return (
     <>
       {placed.map((w) => {
-        const ceremony = w.opened ? playing[openedKey(me, w.key)] : undefined
+        // Opening plays on an open look, closing (CLOSE) on a shut one: a stale one of either is not drawn.
+        const now = playing[openedKey(me, w.key)]
+        const ceremony = now && w.opened === !now.closing ? now : undefined
         const model = drawnLook(w.look, w.opened)
         const loot = w.loot.length > 0
         return (
@@ -167,7 +169,7 @@ export function ChestLooks({ axes }: { axes: ViewAxes }): JSX.Element | null {
             {ceremony || loot
               ? () => (
                 <>
-                  {ceremony ? (ceremony.kind === 'door' ? <DoorCeremony look={w.look} at={ceremony.at} calm={ceremony.calm} frame={w.frame} /> : <ChestCeremony look={w.look} at={ceremony.at} calm={ceremony.calm} frame={w.frame} />) : model && <ShardMesh shard={model} world {...w.frame} />}
+                  {ceremony ? (ceremony.kind === 'door' ? (ceremony.closing ? <DoorCloses look={w.look} at={ceremony.at} frame={w.frame} /> : <DoorCeremony look={w.look} at={ceremony.at} calm={ceremony.calm} frame={w.frame} />) : <ChestCeremony look={w.look} at={ceremony.at} calm={ceremony.calm} frame={w.frame} />) : model && <ShardMesh shard={model} world {...w.frame} />}
                   {loot && <ChestLoot loot={w.loot} ceremony={ceremony} still={still} />}
                 </>
               )

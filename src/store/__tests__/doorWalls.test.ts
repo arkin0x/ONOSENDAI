@@ -25,6 +25,7 @@ import type { Hidden } from '../../lib/hidden'
 import type { Position } from '../../lib/space'
 import { useCyberspace } from '../useCyberspace'
 import { openedByHand, openedContents, rememberOpened, resetOpenedChests, useOpenedChests } from '../useOpenedChests'
+import { resetClosedDoors, writeClosed } from '../closedDoors'
 import { useShards } from '../useShards'
 import { doorWallKey, stepLimit, wallItems, wallItemsAt } from '../walkWalls'
 import { builtInLookTags } from '../../lib/looks'
@@ -53,7 +54,9 @@ const FRONT: Position = { x: AT.x, y: AT.y + 1n, z: AT.z + 3n }
 
 beforeEach(() => {
   localStorage.removeItem('onosendai:chests-opened')
+  localStorage.removeItem('onosendai:doors-closed')
   resetOpenedChests()
+  resetClosedDoors()
   useCyberspace.setState({ identity: { ...useCyberspace.getState().identity, pubkey: ME } })
   useShards.setState({ mine: [], discovered: { [DOOR]: chest(DOOR, [['title', 'Gate'], ['door', '6']]), [CHEST]: chest(CHEST, [['title', 'Box']], CHEST_AT) } })
 })
@@ -242,5 +245,58 @@ describe('a door written with look tags', () => {
     // Inside the region, the same wall holds: the cut is what let it through.
     const low: Position = { x: AT.x, y: AT.y + 1n, z: AT.z + 3n }
     expect(stepLimit(low, 'z', -1, 10n, wallItemsAt(1, low)).reach).toBeLessThan(10n)
+  })
+})
+
+describe('a door closed with CLOSE traps nobody (arkinox, 2026-11-01)', () => {
+  // The door's room: the 64-gibson cube of height 6 that holds AT, which is its lowest corner.
+  // In front (+z) is inside the room; behind (-z) is outside it.
+  const P = (dx: bigint, dy: bigint, dz: bigint): Position => ({ x: AT.x + dx, y: AT.y + dy, z: AT.z + dz })
+  const INSIDE_ROOM = P(0n, 1n, 3n)
+  const OUTSIDE_ROOM = P(0n, 1n, -2n)
+  const step = (at: Position, dir: 1 | -1, n = 10n): bigint => stepLimit(at, 'z', dir, n, wallItemsAt(1, at)).reach
+  const rememberClosed = (me: string, doorId: string, lock: string): void => { void writeClosed([{ owner: me, doorId, lock, room: '', shut: true }]) }
+  const close = (): void => { rememberOpened(ME, DOOR, LOCK, []); rememberClosed(ME, DOOR, LOCK) }
+
+  it('is a wall again, as its closed look', () => {
+    close()
+    expect(doorWalls(1)).toEqual([doorWallKey(DOOR)])
+    expect(wallItems(1).find((w) => w.key === doorWallKey(DOOR))!.closedRoom).toBe(6)
+  })
+
+  it('a walker inside its room walks out through the doorway', () => {
+    close()
+    expect(step(INSIDE_ROOM, -1)).toBe(10n)
+  })
+
+  it('a walker inside its slab steps out either way', () => {
+    close()
+    for (const at of [P(0n, 1n, 0n), P(0n, 2n, 0n)]) {
+      expect(step(at, 1, 5n)).toBe(5n)
+      expect(step(at, -1, 5n)).toBe(5n)
+    }
+  })
+
+  it('a walker outside its room is stopped by it, as by any closed door', () => {
+    close()
+    expect(step(OUTSIDE_ROOM, 1)).toBeLessThan(10n)
+  })
+
+  it('a door never opened is as it was: it holds a walker inside its room too', () => {
+    expect(step(INSIDE_ROOM, -1)).toBeLessThan(10n)
+    expect(wallItems(1).find((w) => w.key === doorWallKey(DOOR))!.closedRoom).toBeUndefined()
+  })
+
+  it('another identity\u2019s close changes nothing for you', () => {
+    rememberOpened('9'.repeat(64), DOOR, LOCK, [])
+    rememberClosed('9'.repeat(64), DOOR, LOCK)
+    expect(step(INSIDE_ROOM, -1)).toBeLessThan(10n)
+  })
+
+  it('OPEN again lets everyone through, as before', () => {
+    close()
+    rememberOpened(ME, DOOR, LOCK, [])
+    expect(doorWalls(1)).toEqual([])
+    expect(step(OUTSIDE_ROOM, 1)).toBe(10n)
   })
 })

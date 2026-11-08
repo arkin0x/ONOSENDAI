@@ -24,12 +24,18 @@
  */
 
 import type { MyDeployment } from './useShards'
-import { addMissing, commit, HIDDEN_DB, openHiddenDb, probe, readEverything, readSome, type Change, type RowRecord, type SecretRecord } from '../lib/hiddenDb'
+import { addMissing, commit, HIDDEN_DB, openHiddenDb, probe, readClosed, readEverything, readSome, type Change, type ClosedRecord, type RowRecord, type SecretRecord } from '../lib/hiddenDb'
 
 export const BARE_KEY = 'onosendai:deployments'
 const DELETED_KEY = 'onosendai:deployments-deleted'
 export const SECRETS_KEY = 'onosendai:door-secrets'
 export const ONLY_SAID_KEY = 'onosendai:door-secrets-only-said'
+/**
+ * The doors closed with CLOSE, in localStorage: the store in local mode, and a copy
+ * otherwise (store/closedDoors.ts), so a session that falls back to local mode still
+ * finds them closed. Added to the database on every load, never over a record there.
+ */
+export const CLOSED_KEY = 'onosendai:doors-closed'
 /** Rows whose record does not prove who placed them, or that cannot be shown: kept, listed for nobody. */
 export const UNCLAIMED = 'unclaimed'
 const UNCLAIMED_KEY = 'onosendai:deployments-unclaimed'
@@ -62,6 +68,9 @@ interface Entry { key: string; seq: number; json: string; row: MyDeployment | nu
 let mode: HiddenStorage = 'local'
 let buckets: Map<string, Map<string, Entry>> | null = null
 let secrets: Record<string, Record<string, SecretRecord>> = {}
+let closed: Record<string, Record<string, ClosedRecord>> = {}
+/** Bumped on every change heard or decided, for a component that reads synchronously (useSyncExternalStore). */
+let version = 0
 let dirty = new Map<string, Change>()
 let chain: Promise<boolean> = Promise.resolve(true)
 let db: IDBDatabase | null = null
@@ -77,7 +86,8 @@ const storedAs = new WeakMap<object, string>()
 
 export function storageMode(): HiddenStorage { return mode }
 export function onHiddenChange(fn: () => void): () => void { listeners.add(fn); return () => listeners.delete(fn) }
-function changed(): void { for (const fn of listeners) fn() }
+export function hiddenVersion(): number { return version }
+function changed(): void { version++; for (const fn of listeners) fn() }
 
 function parsed(json: string): MyDeployment | null {
   try { return JSON.parse(json) as MyDeployment } catch { return null }
@@ -192,7 +202,7 @@ export function saveRows(name: string, rows: readonly MyDeployment[], stored: (d
 /** The rows that differ from the frozen list, and the frozen rows taken off: enough to rebuild each list, and small. */
 function writeLocal(): boolean {
   const names = new Set([...dirty.values()].map((c) => ('put' in c ? c.put.bucket : 'del' in c ? c.del.bucket : '')).filter(Boolean))
-  dirty = new Map([...dirty].filter(([, c]) => 'secret' in c))
+  dirty = new Map([...dirty].filter(([, c]) => 'secret' in c || 'closed' in c || 'unclosed' in c))
   const deleted = deletedIds()
   const bare = new Map<string, { name: string; json: string }>()
   for (const d of readArray(BARE_KEY)) bare.set(rowKey(d), { name: bareBucket(d, deleted), json: JSON.stringify(d) })
@@ -207,6 +217,17 @@ function writeLocal(): boolean {
     } catch { ok = false }
   }
   return ok
+}
+
+/**
+ * The database, opened and cached. A later build asking for a newer version closes it
+ * (lib/hiddenDb openHiddenDb), and the cache lets go of it too, so the next write opens
+ * afresh rather than writing to a closed connection.
+ */
+async function openDb(): Promise<IDBDatabase> {
+  const d = await openHiddenDb()
+  d.addEventListener('versionchange', () => { if (db === d) db = null })
+  return d
 }
 
 function afterDecided(then: () => Promise<boolean>): Promise<boolean> {
@@ -231,7 +252,7 @@ async function commitDirty(): Promise<boolean> {
   const batch = dirty
   dirty = new Map()
   try {
-    const d = db ?? (db = await openHiddenDb())
+    const d = db ?? (db = await openDb())
     await withTimeout(commit(d, [...batch.values()]), COMMIT_TIMEOUT_MS)
     announce(batch)
     return true
@@ -246,26 +267,29 @@ async function commitDirty(): Promise<boolean> {
 function announce(batch: Map<string, Change>): void {
   const rows: Array<[string, string]> = []
   const said: Array<[string, string]> = []
+  const shut: Array<[string, string]> = []
   for (const c of batch.values()) {
     if ('put' in c) rows.push([c.put.bucket, c.put.key])
     else if ('del' in c) rows.push([c.del.bucket, c.del.key])
+    else if ('closed' in c) shut.push([c.closed.owner, c.closed.doorId])
+    else if ('unclosed' in c) shut.push([c.unclosed.owner, c.unclosed.doorId])
     else said.push([c.secret.owner, c.secret.doorId])
   }
-  try { channel?.postMessage({ rows, secrets: said }) } catch { /* a closed channel: the next load reads it */ }
+  try { channel?.postMessage({ rows, secrets: said, closed: shut }) } catch { /* a closed channel: the next load reads it */ }
 }
 
 function listen(): void {
   if (channel || typeof BroadcastChannel === 'undefined') return
   try {
     channel = new BroadcastChannel(CHANNEL)
-    channel.onmessage = (e: MessageEvent<{ rows: Array<[string, string]>; secrets: Array<[string, string]> }>) => { void heard(e.data) }
+    channel.onmessage = (e: MessageEvent<{ rows: Array<[string, string]>; secrets: Array<[string, string]>; closed?: Array<[string, string]> }>) => { void heard(e.data) }
   } catch { channel = null }
 }
 
-async function heard(m: { rows: Array<[string, string]>; secrets: Array<[string, string]> }): Promise<void> {
+async function heard(m: { rows: Array<[string, string]>; secrets: Array<[string, string]>; closed?: Array<[string, string]> }): Promise<void> {
   try {
-    const d = db ?? (db = await openHiddenDb())
-    const got = await readSome(d, m.rows, m.secrets)
+    const d = db ?? (db = await openDb())
+    const got = await readSome(d, m.rows, m.secrets, m.closed ?? [])
     m.rows.forEach(([name, key], i) => {
       if (dirty.has(`r\0${name}\0${key}`)) return
       const rec = got.rows[i]
@@ -273,6 +297,12 @@ async function heard(m: { rows: Array<[string, string]>; secrets: Array<[string,
       else bucketOf(name).delete(key)
     })
     for (const rec of got.secrets) if (rec) (secrets[rec.owner] ??= {})[rec.doorId] = rec
+    ;(m.closed ?? []).forEach(([owner, doorId], i) => {
+      if (dirty.has(`c\0${owner}\0${doorId}`)) return
+      const rec = got.closed[i]
+      if (rec) (closed[owner] ??= {})[doorId] = rec
+      else if (closed[owner]) delete closed[owner][doorId]
+    })
     changed()
   } catch { /* the next load reads it */ }
 }
@@ -289,6 +319,46 @@ export function putSecret(rec: SecretRecord): Promise<boolean> {
   return flush()
 }
 
+// -- doors closed with CLOSE (store/closedDoors.ts) -----------------------------
+
+/** This identity's closed doors as the database holds them, by door id. */
+export function closedOf(owner: string): Readonly<Record<string, ClosedRecord>> { return closed[owner] ?? {} }
+
+/** Keep a closed door's record, one record, in the database. Resolves true once committed on disk. */
+export function putClosed(rec: ClosedRecord): Promise<boolean> {
+  (closed[rec.owner] ??= {})[rec.doorId] = rec
+  dirty.set(`c\0${rec.owner}\0${rec.doorId}`, { closed: rec })
+  return flush()
+}
+
+/** Take a closed door's record off, that one record. Resolves true once committed. */
+export function dropClosed(owner: string, doorId: string): Promise<boolean> {
+  if (closed[owner]) delete closed[owner][doorId]
+  dirty.set(`c\0${owner}\0${doorId}`, { unclosed: { owner, doorId } })
+  return flush()
+}
+
+/**
+ * Read this identity's closed doors from the database again, as another tab may have
+ * written them since: before deciding to open a door again (store/rooms reopenRoom).
+ * What this session has not committed yet stays as it is here.
+ */
+export async function refreshClosed(owner: string): Promise<void> {
+  if (mode !== 'indexeddb') return
+  try {
+    const d = db ?? (db = await openDb())
+    const recs = await readClosed(d, owner)
+    const mine: Record<string, ClosedRecord> = {}
+    for (const r of recs) mine[r.doorId] = r
+    for (const [k, c] of dirty) {
+      if (!k.startsWith(`c\0${owner}\0`)) continue
+      if ('closed' in c) mine[c.closed.doorId] = c.closed
+      else if ('unclosed' in c) delete mine[c.unclosed.doorId]
+    }
+    closed[owner] = mine
+  } catch { /* the database did not answer: what is in memory stands */ }
+}
+
 /** Until the database has been looked at, whether it will be used is not known. */
 export function hiddenDecided(): Promise<HiddenStorage> { return ready ?? Promise.resolve(mode) }
 
@@ -303,6 +373,35 @@ function askToPersist(): void {
 }
 
 /** The frozen values and each list's own changes, as records to add. Read fresh on every load: a stale tab may have written since. */
+/**
+ * The closed doors kept in localStorage (CLOSED_KEY), as records: `{ owner: { door id:
+ * { lock, room, shut, below } } }`, or an older `{ owner: ["<door id>:<lock>"] }`, each
+ * entry closed with its doors below still to close. Unreadable is none.
+ */
+export function closedFromLocalStorage(): ClosedRecord[] {
+  const out: ClosedRecord[] = []
+  try {
+    const raw = JSON.parse(localStorage.getItem(CLOSED_KEY) ?? '{}') as unknown
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return out
+    for (const [owner, doors] of Object.entries(raw as Record<string, unknown>)) {
+      if (Array.isArray(doors)) {
+        for (const e of doors) {
+          if (typeof e !== 'string') continue
+          const [doorId, lock] = e.split(':')
+          if (doorId && lock) out.push({ owner, doorId, lock, room: '', shut: true, below: true })
+        }
+      } else if (doors && typeof doors === 'object') {
+        for (const [doorId, v] of Object.entries(doors as Record<string, unknown>)) {
+          const r = v as Partial<ClosedRecord> | null
+          if (!r || typeof r.lock !== 'string') continue
+          out.push({ owner, doorId, lock: r.lock, room: typeof r.room === 'string' ? r.room : '', ...(r.shut ? { shut: true as const } : {}), ...(r.below ? { below: true as const } : {}) })
+        }
+      }
+    }
+  } catch { /* unreadable: none */ }
+  return out
+}
+
 function fromLocalStorage(): { rows: Array<{ record: RowRecord; alsoGoneFrom?: string }>; secrets: SecretRecord[]; gone: Array<{ bucket: string; key: string }> } {
   const rows: Array<{ record: RowRecord; alsoGoneFrom?: string }> = []
   const gone: Array<{ bucket: string; key: string }> = []
@@ -334,19 +433,21 @@ async function decide(): Promise<HiddenStorage> {
   if (typeof indexedDB === 'undefined') return 'local'
   let d: IDBDatabase
   try {
-    d = await openHiddenDb()
+    d = await openDb()
     await probe(d)
   } catch { return 'local' }
   try {
     askToPersist()
     const from = fromLocalStorage()
-    const added = await addMissing(d, from.rows, from.secrets, from.gone)
+    const added = await addMissing(d, from.rows, from.secrets, from.gone, closedFromLocalStorage())
     const all = await readEverything(d)
     // Read back and compared, byte for byte, before anything is read from here.
     const held = new Map(all.rows.map((r) => [`${r.bucket}\0${r.key}`, r.json]))
     const heldSecrets = new Map(all.secrets.map((r) => [`${r.owner}\0${r.doorId}`, r.secret]))
     for (const r of added.rows) if (held.get(`${r.bucket}\0${r.key}`) !== r.json) throw new Error('a row did not read back')
     for (const r of added.secrets) if (heldSecrets.get(`${r.owner}\0${r.doorId}`) !== r.secret) throw new Error('a door secret did not read back')
+    const heldClosed = new Set(all.closed.map((r) => `${r.owner}\0${r.doorId}`))
+    for (const r of added.closed) if (!heldClosed.has(`${r.owner}\0${r.doorId}`)) throw new Error('a closed door did not read back')
     // Read back: what local mode took off is tombstoned now, so its list need not replay.
     for (const name of localBuckets()) { try { localStorage.removeItem(goneKey(name)) } catch { /* the next load tries again */ } }
     if (expired) { d.close(); return 'local' }
@@ -358,10 +459,14 @@ async function decide(): Promise<HiddenStorage> {
     }
     secrets = {}
     for (const s of all.secrets) (secrets[s.owner] ??= {})[s.doorId] = s
+    closed = {}
+    for (const c of all.closed) (closed[c.owner] ??= {})[c.doorId] = c
     // What the session changed while this was deciding goes on top, and is written next.
     for (const c of dirty.values()) {
       if ('put' in c) { let b = view.get(c.put.bucket); if (!b) view.set(c.put.bucket, b = new Map()); b.set(c.put.key, { key: c.put.key, seq: c.put.seq, json: c.put.json, row: parsed(c.put.json) }) }
       else if ('del' in c) view.get(c.del.bucket)?.delete(c.del.key)
+      else if ('closed' in c) (closed[c.closed.owner] ??= {})[c.closed.doorId] = c.closed
+      else if ('unclosed' in c) delete closed[c.unclosed.owner]?.[c.unclosed.doorId]
       else (secrets[c.secret.owner] ??= {})[c.secret.doorId] = c.secret
     }
     buckets = view
@@ -403,6 +508,6 @@ export { HIDDEN_DB }
 export function resetHiddenForTests(): void {
   try { channel?.close() } catch { /* already closed */ }
   try { db?.close() } catch { /* already closed */ }
-  channel = null; db = null; ready = null; expired = false; buckets = null; secrets = {}; dirty = new Map(); mode = 'local'; chain = Promise.resolve(true)
+  channel = null; db = null; ready = null; expired = false; buckets = null; secrets = {}; closed = {}; dirty = new Map(); mode = 'local'; chain = Promise.resolve(true)
   listeners.clear()
 }

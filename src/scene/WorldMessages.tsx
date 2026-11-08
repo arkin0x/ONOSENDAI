@@ -43,8 +43,9 @@
  *
  * An item this identity holds is drawn at half: its model at half opacity, in
  * motion as ever, and, for one you made yourself, the note's blue box round
- * it at half too; one taken from someone else has no box (arkinox,
- * 2026-11-06, which replaces the solid box of 2026-11-01; lib/worldMarks
+ * it at half too, the model's own box (2026-11-08); one taken from someone
+ * else has no box (arkinox, 2026-11-06, which replaces the solid box of
+ * 2026-11-01; lib/worldMarks
  * itemDrawAs, HeldItemMark). Its tap still opens its card. TAKE fades the
  * whole model out over it (scene/ItemVanish).
  */
@@ -69,7 +70,7 @@ import { findCashuToken } from '../lib/cashu'
 import { NFT_WORDS, replaceNftLinks } from '../lib/nftLink'
 import { useProfile } from '../hooks/useProfile'
 import { profileLabel } from '../store/useProfiles'
-import { coinKind, HELD_OPACITY, itemDrawAs, madeBy, markShown, type MarkKind } from '../lib/worldMarks'
+import { coinKind, HELD_OPACITY, heldBox, itemDrawAs, madeBy, markShown, type MarkKind } from '../lib/worldMarks'
 import { useCashu } from '../hud/useCashu'
 import { TapTarget } from './TapTarget'
 import { regionBox, type Box } from '../lib/clip'
@@ -340,10 +341,15 @@ export function ItemMark({ id, text, sub, at, opacity = 1, wears, region = null,
 /**
  * A held item (arkinox, 2026-11-06): its model at HELD_OPACITY, in motion
  * as ever, with no name and no outline of its own. One you made yourself
- * (`own`) stands in the note's blue box at the same half; one taken from
- * someone else has no box. While its model loads, and when there is none,
- * the box at half alone marks the place, for a taken item too, so the spot
- * is never empty. Under TAKE (`appear`) the box fades in to its half.
+ * (`own`) stands in the note's blue box at the same half, and the box is the
+ * model's own: the size the placement preview draws, holding the model
+ * through its whole motion and cut at its region's walls, in the model's
+ * frame (arkinox, 2026-11-08: "i wanted the box on an item to encompass the
+ * item like shown in the item placement preview"). One taken from someone
+ * else has no box. While its model loads, and when there is none, the fixed
+ * box at half alone marks the place, for a taken item too, so the spot is
+ * never empty (lib/worldMarks heldBox). Under TAKE (`appear`) the box fades
+ * in to its half.
  */
 export function HeldItemMark({ id, own, at, wears, region = null, axes, appear }: {
   id: string
@@ -356,10 +362,11 @@ export function HeldItemMark({ id, own, at, wears, region = null, axes, appear }
 }): JSX.Element {
   const model = useItemModel(wears?.model)
   const drawn = itemMarkShape(model, axes) === 'model'
+  const box = heldBox(own, drawn)
   return (
     <>
-      {(own || !drawn) && <PlacedBox at={at} opacity={HELD_OPACITY} appear={appear} />}
-      {model && drawn && <ItemModelMark id={id} model={model} animation={wears?.animation ?? NO_MOTION} at={at} region={region} axes={axes} minPx={NOTE_EDGE_PX} held={HELD_OPACITY} />}
+      {box === 'placed' && <PlacedBox at={at} opacity={HELD_OPACITY} appear={appear} />}
+      {model && drawn && <ItemModelMark id={id} model={model} animation={wears?.animation ?? NO_MOTION} at={at} region={region} axes={axes} minPx={NOTE_EDGE_PX} held={HELD_OPACITY} encompass={box === 'model' ? (s) => <PlacedBox at={s.centre} size={s.size} opacity={HELD_OPACITY} appear={appear} /> : undefined} />}
     </>
   )
 }
@@ -587,8 +594,8 @@ export function setBoxLook(material: Material, object: { renderOrder: number }, 
 }
 
 /**
- * Where a sound stands, and round an item you made and hold: a blue box of a
- * fixed size in the world. It is not sized to the screen, so it reads as a
+ * Where a sound stands, and round an item you made and hold while its model
+ * loads or when it has none: a blue box of a fixed size in the world. It is not sized to the screen, so it reads as a
  * thing in the place. A sound's is solid, so it is the same blue box from
  * every side (placedBoxProps); a held item's is at half (HeldItemMark), so
  * its model shows inside it, and draws after the opaque faces. The
@@ -597,9 +604,14 @@ export function setBoxLook(material: Material, object: { renderOrder: number }, 
  *
  * Under TAKE (`appear`) it fades in up to its `opacity` as the item fades
  * out, see-through and writing no depth until it is solid (setBoxLook).
+ *
+ * With a `size` it is that size in its parent's frame instead of the fixed
+ * side: a held item you made has its model's own box, the one the placement
+ * preview draws (HeldItemMark, ItemModel `encompass`; arkinox, 2026-11-08).
  */
-export function PlacedBox({ at, opacity = 1, appear }: { at: [number, number, number]; opacity?: number; appear?: Vanishing }): JSX.Element {
-  const side = placedBoxSide(useCyberspace((s) => s.scaleExp))
+export function PlacedBox({ at, opacity = 1, appear, size }: { at: [number, number, number]; opacity?: number; appear?: Vanishing; size?: [number, number, number] }): JSX.Element {
+  const fixed = placedBoxSide(useCyberspace((s) => s.scaleExp))
+  const side = size ?? fixed
   const fill = useRef<Mesh>(null)
   const edges = useRef<LineSegments>(null)
   useFrame(() => {

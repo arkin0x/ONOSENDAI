@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { MESSAGE_SCALE_MAX, coinKind, itemDrawAs, madeBy, markShown, type CoinState } from '../worldMarks'
+import { MESSAGE_SCALE_MAX, coinKind, heldBox, itemDrawAs, madeBy, markShown, type CoinState } from '../worldMarks'
 
 describe('coinKind', () => {
   it('only a redeemed token makes a spent coin', () => {
@@ -50,5 +50,18 @@ describe('madeBy', () => {
     expect(madeBy('bb', 'aa')).toBe(false)
     expect(madeBy(undefined, 'aa')).toBe(false)
     expect(madeBy('', '')).toBe(false)
+  })
+})
+
+describe('heldBox (arkinox, 2026-11-06 and 2026-11-08)', () => {
+  it('a held item you made, its model drawn: the model\u2019s own box', () => {
+    expect(heldBox(true, true)).toBe('model')
+  })
+  it('a held item taken from someone else, its model drawn: no box', () => {
+    expect(heldBox(false, true)).toBeNull()
+  })
+  it('its model loading or missing, yours or taken: the fixed box marks the place', () => {
+    expect(heldBox(true, false)).toBe('placed')
+    expect(heldBox(false, false)).toBe('placed')
   })
 })

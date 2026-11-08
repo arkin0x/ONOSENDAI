@@ -62,3 +62,17 @@ export function itemDrawAs(held: boolean, itemsRead: boolean, own: boolean): Ite
 export function madeBy(author: string | null | undefined, me: string): boolean {
   return !!me && author === me
 }
+
+/**
+ * The blue box a held item stands in (WorldMessages HeldItemMark), given
+ * whether you made it (`own`) and whether its model is drawn:
+ *  - 'model': one you made, its model drawn: the model's own box, the one
+ *    the placement preview draws (arkinox, 2026-11-08);
+ *  - 'placed': its model loading or missing, yours or taken: the box of a
+ *    fixed size marks the place, so the spot is never empty;
+ *  - null: one taken from someone else, its model drawn: no box (2026-11-06).
+ */
+export function heldBox(own: boolean, drawn: boolean): 'model' | 'placed' | null {
+  if (!drawn) return 'placed'
+  return own ? 'model' : null
+}

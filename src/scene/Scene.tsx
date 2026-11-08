@@ -86,6 +86,7 @@ import { PresenceAvatars } from './PresenceAvatars'
 import { WorldShards } from './WorldShards'
 import { WorldMessages } from './WorldMessages'
 import { ChestLooks } from './ChestLooks'
+import { BuildOccluders } from './BuildOccluders'
 import { HiddenAudio } from './HiddenAudio'
 import { AudioSpheres } from './AudioSpheres'
 import { StarredMarks } from './StarredMarks'
@@ -233,6 +234,8 @@ function World(): JSX.Element {
       {/* Each hidden sound's full-volume sphere, behind the Settings switch (AudioSpheres). */}
       <AudioSpheres axes={axes} />
       <ChestLooks axes={axes} />
+      {/* In build mode, dims the shards and looks above that stand between the camera and the build cursor. */}
+      <BuildOccluders axes={axes} />
       <StarredMarks axes={axes} />
       <ShardGhost axes={axes} />
       <DeployRegionBox axes={axes} />

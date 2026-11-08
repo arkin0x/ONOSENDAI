@@ -36,6 +36,7 @@ import { headlampUniforms } from './headlamp'
 import { ShardMesh } from './ShardMesh'
 import { TapTarget } from './TapTarget'
 import { LABEL_PRIORITY, WorldLabel } from './WorldLabel'
+import { useBuildDimmed } from './BuildOccluders'
 
 const IDENTITY = new Matrix4()
 
@@ -106,13 +107,15 @@ interface Props {
    * What else is drawn in the look's own frame, scaled and turned with it:
    * the model is the default, and a ceremony draws its own instead.
    */
-  children?: (frame: { model: ShardModel | null } & LookFrame) => ReactNode
+  children?: (frame: { model: ShardModel | null; dim: number } & LookFrame) => ReactNode
   /** How a custom look is drawn: where it is cut, how it stands, and its share of the scene's budget. */
   frame?: LookFrame
+  /** Its key among what may block the build cursor (BuildOccluders); absent, it never dims. */
+  occluder?: string
 }
 
 /** A chest or a door as its look, sized, turned with the view, and tappable. */
-export function LookMark({ look, model, at, axes, minPx, label, onTap, clearTop = 0, children, frame }: Props): JSX.Element {
+export function LookMark({ look, model, at, axes, minPx, label, onTap, clearTop = 0, children, frame, occluder }: Props): JSX.Element {
   const scaleExp = useCyberspace((s) => s.scaleExp)
   // A standing look's pose is ShardMesh's (LookFrame); any other turns with the view here.
   const standing = !!frame?.pose
@@ -133,6 +136,8 @@ export function LookMark({ look, model, at, axes, minPx, label, onTap, clearTop 
   }, [bounds, atTrue, minPx, clearTop])
   const outer = useRef<Group>(null)
   const drawn = useRef<Group | null>(null)
+  // Dimmed while it stands between the camera and the build cursor.
+  const dim = useBuildDimmed(occluder, drawn)
   useFrame((state) => {
     const g = outer.current
     if (!g) return
@@ -147,7 +152,7 @@ export function LookMark({ look, model, at, axes, minPx, label, onTap, clearTop 
       <group ref={outer} position={at}>
         <group matrix={turn} matrixAutoUpdate={false}>
           <group ref={drawn}>
-            {children ? children({ model, ...frame }) : model && <ShardMesh shard={model} world {...frame} />}
+            {children ? children({ model, dim, ...frame }) : model && <ShardMesh shard={model} world {...frame} dim={dim} />}
           </group>
         </group>
       </group>

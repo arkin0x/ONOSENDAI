@@ -853,8 +853,8 @@ function Placements({ shard, byRef, nested, lit, ghost, world, headlamp, pose, o
       position={[(outline.min[0] + outline.max[0]) / 2, (outline.min[1] + outline.max[1]) / 2, (outline.min[2] + outline.max[2]) / 2]}
       scale={[Math.max(outline.max[0] - outline.min[0], 0.05), Math.max(outline.max[1] - outline.min[1], 0.05), Math.max(outline.max[2] - outline.min[2], 0.05)]}
     >
-      {/* Its share kept as the EDIT breath and TV's look scale it (WorldShards breatheMaterial). */}
-      <lineBasicMaterial color={ACCENT} toneMapped={false} transparent opacity={CUT_OPACITY} userData-share={CUT_OPACITY} />
+      {/* Its share kept as the EDIT breath, TV's look and the build dim's fade scale it (WorldShards breatheMaterial, BuildOccluders fadeMaterial); dimmed with the rest of its shard. */}
+      <lineBasicMaterial color={ACCENT} toneMapped={false} transparent opacity={CUT_OPACITY * dim} userData-share={CUT_OPACITY * dim} />
     </lineSegments>
   )
   return turn ? <group matrix={turn} matrixAutoUpdate={false}>{drawn}{cutOutline}</group> : <>{drawn}{cutOutline}</>

@@ -165,11 +165,13 @@ export function ChestLooks({ axes }: { axes: ViewAxes }): JSX.Element | null {
             onTap={() => useShards.getState().selectSecret(w.key)}
             clearTop={loot ? LOOT_TOP : 0}
             frame={w.frame}
+            // Dims while it blocks the build cursor; not mid-ceremony, which sets its own materials each frame.
+            occluder={ceremony ? undefined : `look:${w.key}`}
           >
             {ceremony || loot
-              ? () => (
+              ? ({ dim }) => (
                 <>
-                  {ceremony ? (ceremony.kind === 'door' ? (ceremony.closing ? <DoorCloses look={w.look} at={ceremony.at} frame={w.frame} /> : <DoorCeremony look={w.look} at={ceremony.at} calm={ceremony.calm} frame={w.frame} />) : <ChestCeremony look={w.look} at={ceremony.at} calm={ceremony.calm} frame={w.frame} />) : model && <ShardMesh shard={model} world {...w.frame} />}
+                  {ceremony ? (ceremony.kind === 'door' ? (ceremony.closing ? <DoorCloses look={w.look} at={ceremony.at} frame={w.frame} /> : <DoorCeremony look={w.look} at={ceremony.at} calm={ceremony.calm} frame={w.frame} />) : <ChestCeremony look={w.look} at={ceremony.at} calm={ceremony.calm} frame={w.frame} />) : model && <ShardMesh shard={model} world {...w.frame} dim={dim} />}
                   {loot && <ChestLoot loot={w.loot} ceremony={ceremony} still={still} />}
                 </>
               )

@@ -29,7 +29,7 @@
  * frame writes a few numbers and allocates nothing.
  */
 
-import { useEffect, useMemo, useRef, type MutableRefObject } from 'react'
+import { useEffect, useMemo, useRef, type MutableRefObject, type ReactNode } from 'react'
 import { useFrame, useThree } from '@react-three/fiber'
 import { Matrix4, Plane, Vector3, type Group, type PerspectiveCamera } from 'three'
 import type { Box } from '../lib/clip'
@@ -83,11 +83,20 @@ interface MotionProps {
   dim?: number
   /** Its blue outline; a held item has none of its own (WorldMessages HeldItemMark). */
   outline?: boolean
+  /**
+   * Drawn in place of the outline, handed the outline's own centre and size
+   * in the model's frame: a held item you made stands in the note's blue box
+   * at half, sized as this box (WorldMessages HeldItemMark, arkinox 2026-11-08).
+   */
+  encompass?: ItemBoxSlot
   frameRef?: MutableRefObject<Group | null>
 }
 
+/** What draws a box in the model's frame, given the outline's centre and size (lib/itemModel boxShape). */
+export type ItemBoxSlot = (shape: { centre: [number, number, number]; size: [number, number, number] }) => ReactNode
+
 /** The box and the model in motion, in the model's own units, centred on the place. */
-export function ModelInMotion({ model, animation, id, box, amplitude, planes, lit = false, opacity = 1, ghost = false, dim = 1, outline = true, frameRef }: MotionProps): JSX.Element {
+export function ModelInMotion({ model, animation, id, box, amplitude, planes, lit = false, opacity = 1, ghost = false, dim = 1, outline = true, encompass, frameRef }: MotionProps): JSX.Element {
   const bob = useRef<Group>(null)
   const turnY = useRef<Group>(null)
   const turnX = useRef<Group>(null)
@@ -105,7 +114,7 @@ export function ModelInMotion({ model, animation, id, box, amplitude, planes, li
   const c = model.extent.centre
   return (
     <group ref={frameRef}>
-      {outline && (
+      {encompass ? encompass(shape) : outline && (
         <lineSegments geometry={CUBE_EDGES} position={shape.centre} scale={shape.size} frustumCulled={false}>
           <lineBasicMaterial color={ITEM_BOX_BLUE} toneMapped={false} transparent opacity={BOX_OPACITY * opacity} depthWrite={false} userData-share={BOX_OPACITY} />
         </lineSegments>
@@ -151,10 +160,12 @@ interface MarkProps {
    * motion as ever, with no outline of its own. WorldMessages HeldItemMark.
    */
   held?: number
+  /** Drawn in place of the outline, at the outline's size in the model's frame (ModelInMotion `encompass`). */
+  encompass?: ItemBoxSlot
 }
 
 /** An item in the world as the model it wears: the scene's and Cyberspace TV's (WorldMessages ItemMark). */
-export function ItemModelMark({ id, model, animation, at, region, axes, minPx, opacity = 1, onTap, label, vanish, held }: MarkProps): JSX.Element {
+export function ItemModelMark({ id, model, animation, at, region, axes, minPx, opacity = 1, onTap, label, vanish, held, encompass }: MarkProps): JSX.Element {
   const scaleExp = useCyberspace((s) => s.scaleExp)
   const gl = useThree((s) => s.gl)
   const unit = model.shard.unit
@@ -213,7 +224,7 @@ export function ItemModelMark({ id, model, animation, at, region, axes, minPx, o
     <>
       <group ref={outer} position={at}>
         <group matrix={turn} matrixAutoUpdate={false}>
-          <ModelInMotion model={model} animation={animation} id={id} box={cut.box} amplitude={size.amplitude} planes={planes?.world} opacity={opacity} ghost={!!vanish} dim={held} outline={held === undefined} frameRef={frame} />
+          <ModelInMotion model={model} animation={animation} id={id} box={cut.box} amplitude={size.amplitude} planes={planes?.world} opacity={opacity} ghost={!!vanish} dim={held} outline={held === undefined} encompass={encompass} frameRef={frame} />
         </group>
       </group>
       {/* Outside the scaled group: a target and a label size themselves from

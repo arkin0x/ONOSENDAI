@@ -14,7 +14,7 @@ vi.mock('../WorldLabel', async (real) => {
 })
 
 // Loaded once, here, not inside a test's time limit: WorldMessages pulls in much of the scene.
-import { AudioMark, PlacedBox, placedBoxProps, placedBoxSide } from '../WorldMessages'
+import { AudioMark, ENCOMPASS_ORDER, PlacedBox, placedBoxProps, placedBoxSide, setBoxLook } from '../WorldMessages'
 import { ItemVanish } from '../ItemVanish'
 import { TAG_BLEND, TRANSLUCENT_ORDER } from '../shardFaces'
 import { VANISH_MS } from '../../lib/ceremony'
@@ -35,7 +35,10 @@ describe('the box of a held item and of a sound', () => {
   })
 
   it('draws round an item you made and hold, at half, and for a sound, and is not sized to the screen', () => {
-    expect(source).toMatch(/\{\(own \|\| !drawn\) && <PlacedBox at=\{at\} opacity=\{HELD_OPACITY\} appear=\{appear\} \/>\}/)
+    // The fixed box while a held item's model loads or when it has none; a
+    // held item you made with its model drawn has the model's own box (heldItems.test).
+    expect(source).toMatch(/\{box === 'placed' && <PlacedBox at=\{at\} opacity=\{HELD_OPACITY\} appear=\{appear\} \/>\}/)
+    expect(source).toMatch(/encompass=\{box === 'model' \? \(s\) => <PlacedBox at=\{s\.centre\} size=\{s\.size\} opacity=\{HELD_OPACITY\} appear=\{appear\} \/> : undefined\}/)
     expect(source).toMatch(/<PlacedBox at=\{at\} opacity=\{opacity\} \/>\s*<AudioNote/)
     const body = source.slice(source.indexOf('function PlacedBox'), source.indexOf('The line color and opacity'))
     // Its size is the world's, never the screen's: its one frame is TAKE's fade, which sizes nothing.
@@ -165,9 +168,37 @@ describe('the box at half (a held item you made, arkinox 2026-11-06)', () => {
     await m.unmount()
   })
 
+  it('with a size, is that size in its parent\u2019s frame instead of the fixed side (the model\u2019s own box, 2026-11-08)', async () => {
+    useCyberspace.setState({ scaleExp: 0 })
+    const sized = await mount(createElement(PlacedBox, { at: [0, 0.1, 0], opacity: 0.5, size: [2, 1.5, 0.75] }))
+    expect(sized.all().find((h) => h.type === 'group')!.props).toMatchObject({ position: [0, 0.1, 0], scale: [2, 1.5, 0.75] })
+    await sized.unmount()
+    const fixed = await mount(createElement(PlacedBox, { at: [0, 0, 0], opacity: 0.5 }))
+    expect(fixed.all().find((h) => h.type === 'group')!.props.scale).toBe(placedBoxSide(0))
+    await fixed.unmount()
+  })
+
   it('still, it draws after the opaque faces, so a room sorted nearer cannot paint over it', async () => {
     const m = await mount(createElement(PlacedBox, { at: [0, 0, 0], opacity: 0.5 }))
     expect(m.all().find((h) => h.type === 'mesh')!.props.renderOrder).toBe(TRANSLUCENT_ORDER)
     await m.unmount()
+  })
+
+  it('sized round a model, it draws after the model at half, still and through TAKE; the fixed box keeps its order (review of #617)', async () => {
+    const order = (m: Awaited<ReturnType<typeof mount>>): unknown[] => m.all().filter((h) => h.type === 'mesh' || h.type === 'lineSegments').map((h) => h.props.renderOrder)
+    const sized = await mount(createElement(PlacedBox, { at: [0, 0, 0], opacity: 0.5, size: [1, 4, 1] }))
+    expect(order(sized)).toEqual([ENCOMPASS_ORDER, ENCOMPASS_ORDER])
+    await sized.unmount()
+    const fixed = await mount(createElement(PlacedBox, { at: [0, 0, 0], opacity: 0.5 }))
+    expect(order(fixed)).toEqual([TRANSLUCENT_ORDER, TRANSLUCENT_ORDER])
+    await fixed.unmount()
+    // setBoxLook: see-through at the order handed it, TRANSLUCENT_ORDER by default, solid at 0.
+    const o = { renderOrder: 0 }
+    setBoxLook(new MeshBasicMaterial(), o, 0.25, ENCOMPASS_ORDER)
+    expect(o.renderOrder).toBe(ENCOMPASS_ORDER)
+    setBoxLook(new MeshBasicMaterial(), o, 0.25)
+    expect(o.renderOrder).toBe(TRANSLUCENT_ORDER)
+    setBoxLook(new MeshBasicMaterial(), o, 1, ENCOMPASS_ORDER)
+    expect(o.renderOrder).toBe(0)
   })
 })

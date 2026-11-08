@@ -88,12 +88,19 @@ interface Props {
   ceremony?: { at: number; calm: boolean }
   /** The viewer asked for less motion: hovering loot holds still. */
   still: boolean
+  /**
+   * The chest's own dim while it stands between the camera and the build
+   * cursor (BuildOccluders): the loot hovers inside the chest's drawn group,
+   * which the dim's fade writes onto, so it must be drawn at the same dim or
+   * the fade's last step leaves it five times too bright (review of #618).
+   */
+  dim?: number
 }
 
-export function ChestLoot({ loot, ceremony, still }: Props): JSX.Element {
+export function ChestLoot({ loot, ceremony, still, dim = 1 }: Props): JSX.Element {
   return (
     <>
-      {loot.map((o, i) => <Loot key={o.key} o={o} i={i} n={loot.length} ceremony={ceremony} still={still} />)}
+      {loot.map((o, i) => <Loot key={o.key} o={o} i={i} n={loot.length} ceremony={ceremony} still={still} dim={dim} />)}
     </>
   )
 }
@@ -146,7 +153,7 @@ function useFit(model: ShardModel, known: ModelExtent | null): { k: number; cent
   return useMemo(() => lootFit(known ?? own ?? (measured?.model === model ? measured.extent : null)), [known, own, measured, model])
 }
 
-function Loot({ o, i, n, ceremony, still }: { o: LootObject; i: number; n: number; ceremony?: Props['ceremony']; still: boolean }): JSX.Element | null {
+function Loot({ o, i, n, ceremony, still, dim }: { o: LootObject; i: number; n: number; ceremony?: Props['ceremony']; still: boolean; dim: number }): JSX.Element | null {
   const { model, extent } = useLootModel(o)
   const fit = useFit(model, extent)
   const home = useMemo(() => hoverAt(i, n), [i, n])
@@ -191,7 +198,7 @@ function Loot({ o, i, n, ceremony, still }: { o: LootObject; i: number; n: numbe
         <group ref={fading} scale={fit.k}>
           <group position={fit.centre}>
             {/* A ghost only while it fades in on the calm path: its opacity is real then. */}
-            <ShardMesh shard={model} world ghost={calm && !!ceremony} />
+            <ShardMesh shard={model} world ghost={calm && !!ceremony} dim={dim} />
           </group>
         </group>
       </group>

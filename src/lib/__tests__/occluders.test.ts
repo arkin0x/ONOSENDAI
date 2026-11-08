@@ -7,8 +7,8 @@
  */
 
 import { describe, expect, it } from 'vitest'
-import { BoxGeometry, BufferGeometry, DoubleSide, Float32BufferAttribute, Group, Mesh, MeshBasicMaterial, Points, PointsMaterial, Vector3 } from 'three'
-import { CORNER_INSET, cellPoints, fadeToward, nineVectors, pickOccluders, sameSet, settleDimmed, type OccluderTarget } from '../occluders'
+import { BoxGeometry, BufferGeometry, DoubleSide, Float32BufferAttribute, FrontSide, Group, IcosahedronGeometry, Mesh, MeshBasicMaterial, PlaneGeometry, Points, PointsMaterial, Raycaster, Vector3, type Intersection } from 'three'
+import { CORNER_INSET, cellPoints, fadeToward, nineVectors, pickOccluders, pickWithin, sameSet, settleDimmed, type OccluderTarget } from '../occluders'
 
 /** A solid box, centred at `at`, `size` across, as a shard's group holds its faces. */
 function box(key: string, at: [number, number, number], size: [number, number, number]): OccluderTarget {
@@ -162,5 +162,122 @@ describe('fadeToward and sameSet', () => {
   it('sets by members', () => {
     expect(sameSet(new Set(['a', 'b']), new Set(['b', 'a']))).toBe(true)
     expect(sameSet(new Set(['a']), new Set(['b']))).toBe(false)
+  })
+})
+
+describe('the picker\'s own ray test (review of #618)', () => {
+  /** Whether three's Mesh.raycast finds a face on the segment from `a` to `b`, short of `b` by `margin`. */
+  function threeSays(mesh: Mesh, a: Vector3, b: Vector3, margin: number): boolean {
+    const d = b.clone().sub(a)
+    const len = d.length()
+    const rc = new Raycaster(a, d.divideScalar(len), 0, len - margin)
+    const hits: Intersection[] = []
+    mesh.raycast(rc, hits)
+    return hits.length > 0
+  }
+
+  it('agrees with three\'s Mesh.raycast, ray for ray, on turned, scaled, subdivided shapes', () => {
+    let seed = 7
+    const r = (): number => (seed = (seed * 16807) % 2147483647) / 2147483647
+    const shapes = [new IcosahedronGeometry(2, 3), new BoxGeometry(3, 1, 2, 6, 3, 4), new PlaneGeometry(6, 6, 12, 12)]
+    let agreed = 0, hits = 0
+    for (let n = 0; n < 300; n++) {
+      const mesh = new Mesh(shapes[n % 3], new MeshBasicMaterial({ side: n % 4 === 0 ? FrontSide : DoubleSide }))
+      mesh.position.set(r() * 4 - 2, r() * 4 - 2, r() * 4 - 2)
+      mesh.rotation.set(r() * 6, r() * 6, r() * 6)
+      mesh.scale.set(0.5 + r(), 0.5 + r(), 0.5 + r())
+      const g = new Group()
+      g.add(mesh)
+      g.updateMatrixWorld(true)
+      const eye = new Vector3(r() * 20 - 10, r() * 20 - 10, 12)
+      const pts = cellPoints(new Vector3(r() * 4 - 2, r() * 4 - 2, r() * 4 - 2), nineVectors())
+      const expected = pts.some((p) => threeSays(mesh, eye, p, 0.02))
+      const got = pickOccluders([{ key: 'm', object: g }], eye, pts).size === 1
+      if (got === expected) agreed++
+      if (expected) hits++
+    }
+    expect(agreed).toBe(300)
+    // The case mix really did test both answers.
+    expect(hits).toBeGreaterThan(30)
+    expect(hits).toBeLessThan(270)
+  })
+
+  it('a FrontSide face is not hit from behind; a DoubleSide face is', () => {
+    // A plane facing +z (toward the camera) and one turned to face away.
+    const make = (side: typeof FrontSide | typeof DoubleSide, away: boolean): OccluderTarget => {
+      const m = new Mesh(new PlaneGeometry(6, 6), new MeshBasicMaterial({ side }))
+      if (away) m.rotation.y = Math.PI
+      const g = new Group(); g.add(m); g.position.set(0, 0, 5); g.updateMatrixWorld(true)
+      return { key: `${side}-${away}`, object: g }
+    }
+    const pts = cursorAt(0, 0, 0)
+    expect(pickOccluders([make(FrontSide, false)], eye, pts).size).toBe(1)
+    expect(pickOccluders([make(FrontSide, true)], eye, pts).size).toBe(0)
+    expect(pickOccluders([make(DoubleSide, true)], eye, pts).size).toBe(1)
+  })
+
+  it('tests the positions a shard rests at, not its live buffer mid-birth (userData.rest)', () => {
+    // A wall whose live buffer is scattered off the line of sight, as a birth's scramble leaves it, with its final positions handed over.
+    const wall = new PlaneGeometry(6, 6)
+    const rest = (wall.attributes.position.array as Float32Array).slice()
+    const live = wall.attributes.position.array as Float32Array
+    for (let i = 0; i < live.length; i += 3) live[i] += 40
+    wall.userData.rest = rest
+    const g = new Group(); g.add(new Mesh(wall, new MeshBasicMaterial({ side: DoubleSide }))); g.position.set(0, 0, 5); g.updateMatrixWorld(true)
+    // Its sphere measured at rest too, as ShardMesh does (settleBounds).
+    const at = new BufferGeometry(); at.setAttribute('position', new Float32BufferAttribute(rest, 3)); at.computeBoundingSphere()
+    wall.boundingSphere = at.boundingSphere
+    expect([...pickOccluders([{ key: 'w', object: g }], eye, cursorAt(0, 0, 0))]).toEqual(['w'])
+  })
+
+  it('within a budget: asks at least one shard, keeps the rest as they were, and starts the next pick where it stopped', () => {
+    const shards = ['a', 'b', 'c', 'd'].map((k, i) => box(k, [0, 0, 5 + i * 0.6], i === 1 ? [0.2, 0.2, 0.2] : [4, 4, 0.2]))
+    // A clock that has always just run out.
+    let t = 0
+    const now = (): number => (t += 10)
+    const first = pickWithin(shards, eye, cursorAt(0, 0, 0), { budgetMs: 1, start: 0, carry: new Set(['c']), now })
+    expect(first.done).toBe(false)
+    expect(first.next).toBe(1)
+    // 'a' was asked and blocks; 'c' was not reached and was blocking before, so it stays.
+    expect([...first.blocking].sort()).toEqual(['a', 'c'])
+    const all = pickWithin(shards, eye, cursorAt(0, 0, 0), { start: first.next })
+    expect(all.done).toBe(true)
+    expect([...all.blocking].sort()).toEqual(['a', 'b', 'c', 'd'])
+  })
+
+  it('benchmark: several 5,000-face shards whose bounds hold the line of sight cost well under a millisecond a recompute', () => {
+    const mat = new MeshBasicMaterial({ side: DoubleSide })
+    const shard = (key: string, geo: BufferGeometry, at: [number, number, number]): OccluderTarget => {
+      const g = new Group(); g.add(new Mesh(geo, mat)); g.position.set(...at); g.updateMatrixWorld(true)
+      return { key, object: g }
+    }
+    const faces = (geo: BufferGeometry): number => (geo.index ? geo.index.count : geo.attributes.position.count) / 3
+    const camera = new Vector3(3, 4, 9)
+    const shards = [
+      // A room round both the camera and the cursor: its walls all about, none between.
+      shard('room', new BoxGeometry(40, 20, 40, 20, 20, 20), [0, 5, 0]),
+      // A floor under the cursor, its top the cell's bottom face.
+      shard('floor', new PlaneGeometry(40, 40, 50, 50).rotateX(-Math.PI / 2), [0, -0.5, 0]),
+      // Two dense walls beside the line of sight, their spheres over it.
+      shard('left', new IcosahedronGeometry(3, 15), [-4.5, 2, 4]),
+      shard('right', new IcosahedronGeometry(3, 15), [7.5, 2, 4]),
+      // One dense wall right across it.
+      shard('across', new PlaneGeometry(6, 6, 50, 50), [1.5, 2, 4.5]),
+    ]
+    for (const t of shards) expect(faces((t.object.children[0] as Mesh).geometry)).toBeGreaterThanOrEqual(4800)
+    const pts = cursorAt(0, 0, 0)
+    // The first pick builds each hierarchy once.
+    expect([...pickOccluders(shards, camera, pts)]).toEqual(['across'])
+    const runs: number[] = []
+    for (let i = 0; i < 60; i++) {
+      camera.x = 3 + Math.sin(i) * 0.5
+      const t0 = performance.now()
+      pickOccluders(shards, camera, pts)
+      runs.push(performance.now() - t0)
+    }
+    runs.sort((a, b) => a - b)
+    const median = runs[runs.length >> 1]
+    console.log(`[occluders bench] 5 shards of ~5,000 faces round the line of sight: median ${median.toFixed(3)} ms, worst ${runs[runs.length - 1].toFixed(3)} ms per recompute`)
+    expect(median).toBeLessThan(1)
   })
 })

@@ -27,7 +27,8 @@ import { createElement, type RefObject } from 'react'
 import { Group, LineBasicMaterial, Mesh, MeshBasicMaterial, BoxGeometry, type Object3D } from 'three'
 import { newShard, type ShardModel } from 'sno-core/shards'
 import { mount, settled, type Host, type Mounted } from '../../test/elementRoot'
-import { BuildOccluders, DIM, FADE_MS, dimsOccluders, fadeMaterial, useBuildDimmed } from '../BuildOccluders'
+import { BuildOccluders, DIM, FADE_MS, castNow, dimsOccluders, fadeMaterial, useBuildDimmed, type CastClock } from '../BuildOccluders'
+import { ChestLoot } from '../ChestLoot'
 import { PlacedShard, type PlacedShardDraw } from '../WorldShards'
 import { LookMark } from '../LookMark'
 import { createDiscMaterial, SHARD_DOTS } from '../pointDisc'
@@ -232,5 +233,116 @@ describe('fadeMaterial', () => {
     const m = new LineBasicMaterial({ transparent: true, opacity: 0.8 })
     fadeMaterial(m, 5)
     expect(m.opacity).toBe(0.8)
+  })
+})
+
+describe('review of #618', () => {
+  function Counted({ k, group, renders }: { k: string; group: RefObject<Object3D>; renders: { n: number } }): JSX.Element {
+    renders.n++
+    const dim = useBuildDimmed(k, group)
+    return createElement('probe', { dim })
+  }
+  const tick = (ms: number): void => { frames[frames.length - 1]({}, ms / 1000) }
+
+  it('N1: a whole dim cycle is two renders, one at each end', async () => {
+    const group = new Group()
+    const face = new MeshBasicMaterial({ transparent: true })
+    face.userData.share = DIM
+    group.add(new Mesh(new BoxGeometry(1, 1, 1), face))
+    const renders = { n: 0 }
+    const m = await mount(createElement(Counted, { k: 'n1', group: { current: group }, renders }))
+    const mounted = renders.n
+    setDimmed(new Set(['n1']))
+    await settled()
+    for (let i = 0; i < 12; i++) tick(20)
+    setDimmed(new Set())
+    await settled()
+    for (let i = 0; i < 12; i++) { tick(20); await settled(1) }
+    await settled()
+    expect(renders.n - mounted).toBe(2)
+    await m.unmount()
+  })
+
+  it('B2: the loot hovering over a chest is drawn at the chest\'s dim', async () => {
+    const loot = [{ key: 'l1', kind: 'shard', shard: cube('loot') }, { key: 'l2', kind: 'shard', shard: cube('loot2') }] as never
+    const m = await mount(createElement(ChestLoot, { loot, still: true, dim: DIM }))
+    const meshes = m.all().filter((h: Host) => h.type === 'shardmesh')
+    expect(meshes.length).toBe(2)
+    for (const h of meshes) expect(h.props.dim).toBe(DIM)
+    await m.unmount()
+  })
+
+  it('B2 and N2: one full dim cycle leaves every material where it began, loot and placeholder included', async () => {
+    // A chest's drawn group as ShardMesh draws it at `dim`: faces and placeholder lines keep their share (dim included), the disc its own material.
+    const group = new Group()
+    const translucentLoot = new MeshBasicMaterial({ transparent: true })
+    const placeholder = new LineBasicMaterial({ transparent: true })
+    const chestFace = new MeshBasicMaterial({ transparent: true })
+    group.add(new Mesh(new BoxGeometry(1, 1, 1), chestFace), new Mesh(new BoxGeometry(1, 1, 1), translucentLoot), new Mesh(new BoxGeometry(1, 1, 1), placeholder))
+    const dots = new Mesh(new BoxGeometry(1, 1, 1))
+    group.add(dots)
+    // What ShardMesh does with the dim its parent hands it: every share and opacity follow, and the disc is made again.
+    const drawAt = (dim: number): void => {
+      chestFace.opacity = chestFace.userData.share = 1 * dim
+      translucentLoot.opacity = translucentLoot.userData.share = 0.4 * dim
+      placeholder.opacity = placeholder.userData.share = 0.8 * dim
+      dots.material = createDiscMaterial(SHARD_DOTS, 0.4 * 0.55 * dim, false)
+    }
+    drawAt(1)
+    function Drawn({ k }: { k: string }): JSX.Element {
+      const dim = useBuildDimmed(k, { current: group })
+      // Applied with the render, as R3F applies props in its commit.
+      drawAt(dim)
+      return createElement('probe', { dim })
+    }
+    const m = await mount(createElement(Drawn, { k: 'cyc' }))
+    setDimmed(new Set(['cyc']))
+    await settled()
+    for (let i = 0; i < 12; i++) tick(20)
+    expect(translucentLoot.opacity).toBeCloseTo(0.4 * DIM)
+    expect(placeholder.opacity).toBeCloseTo(0.8 * DIM)
+    setDimmed(new Set())
+    await settled()
+    // Halfway back, the placeholder fades with the rest rather than jumping.
+    tick(FADE_MS / 2)
+    expect(placeholder.opacity).toBeCloseTo(0.8 * 0.6)
+    for (let i = 0; i < 12; i++) { tick(20); await settled(1) }
+    await settled()
+    expect(chestFace.opacity).toBeCloseTo(1)
+    expect(translucentLoot.opacity).toBeCloseTo(0.4)
+    expect(placeholder.opacity).toBeCloseTo(0.8)
+    expect((dots.material as ReturnType<typeof createDiscMaterial>).uniforms.uOpacity.value).toBeCloseTo(0.4 * 0.55)
+    await m.unmount()
+  })
+
+  describe('S1: when to cast', () => {
+    const clock = (): CastClock => ({ frames: 0, dirtyAt: -1, computed: -Infinity, recheck: Infinity })
+
+    it('a change is cast a frame after it is seen, never on the frame itself', () => {
+      const c = clock()
+      expect(castNow(c, true, 0, 50)).toBe(false)
+      expect(castNow(c, false, 16, 50)).toBe(true)
+      expect(castNow(c, false, 100, 50)).toBe(false)
+    })
+
+    it('a cast on a frame that moved is followed by one more, once the matrices caught up', () => {
+      const c = clock()
+      castNow(c, true, 0, 50)
+      // Moving again on the very frame the cast runs.
+      expect(castNow(c, true, 16, 50)).toBe(true)
+      // Still dirty: the next frame past the throttle casts again, though nothing more moved.
+      expect(castNow(c, false, 32, 50)).toBe(false)
+      expect(castNow(c, false, 70, 50)).toBe(true)
+      expect(castNow(c, false, 200, 50)).toBe(false)
+    })
+
+    it('a hold running out casts on its own', () => {
+      const c = clock()
+      castNow(c, true, 0, 50)
+      castNow(c, false, 16, 50)
+      c.recheck = 140
+      expect(castNow(c, false, 100, 50)).toBe(false)
+      expect(castNow(c, false, 141, 50)).toBe(true)
+    })
   })
 })

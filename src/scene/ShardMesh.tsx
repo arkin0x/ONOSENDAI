@@ -235,33 +235,49 @@ export function shardGeometry(shard: ShardModel, clip?: Box, pose?: Pose): { pos
   return { ...cut, faces, drawn: faces.map((_, i) => i) }
 }
 
+/**
+ * A geometry's bounds, measured now, while the shared position buffer still
+ * holds the shard's final positions. A shard being born scrambles that buffer
+ * for SHARD_DECODE_MS, and three measures a geometry only the first time it
+ * is asked (a tap target's box, a ray test's sphere): asked mid-scramble, the
+ * sphere of a wall slab missed part of the finished wall by up to a cell and
+ * a half, for good (review of #618). `rest` is those final positions, for a
+ * ray test that walks the triangles themselves (lib/occluders.ts bvhOf).
+ */
+export function settleBounds(g: BufferGeometry, rest?: ArrayLike<number>): BufferGeometry {
+  g.computeBoundingBox()
+  g.computeBoundingSphere()
+  if (rest) g.userData.rest = rest
+  return g
+}
+
 /** A shard's points and lines: one vertex each, with the colours again under the name the disc shader reads (scene/pointDisc). */
 function plainGeometry(posAttr: BufferAttribute, colAttr: BufferAttribute): BufferGeometry {
   const g = new BufferGeometry()
   g.setAttribute('position', posAttr)
   g.setAttribute('color', colAttr)
-  return withDiscColors(g, colAttr)
+  return settleBounds(withDiscColors(g, colAttr))
 }
 
-/** A shard's faces. */
-function indexedGeometry(posAttr: BufferAttribute, colAttr: BufferAttribute, index: number[]): BufferGeometry {
+/** A shard's faces; `rest` the final positions (settleBounds). */
+function indexedGeometry(posAttr: BufferAttribute, colAttr: BufferAttribute, index: number[], rest: ArrayLike<number>): BufferGeometry {
   const g = new BufferGeometry()
   g.setAttribute('position', posAttr)
   g.setAttribute('color', colAttr)
   g.setIndex(index)
   g.computeVertexNormals()
-  return g
+  return settleBounds(g, rest)
 }
 
 /** The same triangles wound the other way: the insides, for a lit draw. */
-function insideGeometry(posAttr: BufferAttribute, colAttr: BufferAttribute, index: number[]): BufferGeometry {
+function insideGeometry(posAttr: BufferAttribute, colAttr: BufferAttribute, index: number[], rest: ArrayLike<number>): BufferGeometry {
   const g = new BufferGeometry()
   g.setAttribute('position', posAttr)
   g.setAttribute('color', colAttr)
   const flipped: number[] = []
   for (let i = 0; i + 2 < index.length; i += 3) flipped.push(index[i], index[i + 2], index[i + 1])
   g.setIndex(flipped)
-  return g
+  return settleBounds(g, rest)
 }
 
 /** LINES mode: every edge of every face, once. Null with no edges to draw. */
@@ -273,7 +289,7 @@ function outlineGeometry(posAttr: BufferAttribute, colAttr: BufferAttribute, fac
   g.setAttribute('position', posAttr)
   g.setAttribute('color', colAttr)
   g.setIndex(idx)
-  return g
+  return settleBounds(g)
 }
 
 /** One object's buffers, for all its placements (placedBuffers.ts): no decode writes to them, so no second copy of any array. */
@@ -283,12 +299,12 @@ function buildPlaced(model: ShardModel): PlacedBuffers<ShardModel> {
   const posAttr = new BufferAttribute(positions, 3)
   const colAttr = new BufferAttribute(colors, 3)
   const plain = plainGeometry(posAttr, colAttr)
-  const indexed = indexedGeometry(posAttr, colAttr, index)
+  const indexed = indexedGeometry(posAttr, colAttr, index, positions)
   const outline = outlineGeometry(posAttr, colAttr, faces)
   let inside: BufferGeometry | null = null
   return {
     shard, positions, colors, index, faces, drawn, plain, indexed, outline,
-    inside: () => (inside ??= insideGeometry(posAttr, colAttr, index)),
+    inside: () => (inside ??= insideGeometry(posAttr, colAttr, index, positions)),
     geometries: () => [plain, indexed, ...(outline ? [outline] : []), ...(inside ? [inside] : [])],
   }
 }
@@ -420,7 +436,9 @@ export function ShardMeshBody({ shard: given, scale = 1, ghost = false, birth, d
 
   const plain = useMemo(() => shared?.plain ?? plainGeometry(posAttr!, colAttr!), [posAttr, colAttr, shared])
 
-  const indexed = useMemo(() => shared?.indexed ?? indexedGeometry(posAttr!, colAttr!, index), [posAttr, colAttr, index, shared])
+  // Made with the buffer at its final positions: a birth's scramble writes them only from the next frame (settleBounds).
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const indexed = useMemo(() => shared?.indexed ?? indexedGeometry(posAttr!, colAttr!, index, positions), [posAttr, colAttr, index, shared])
 
   // The inside of every face as a front face of its own: the same triangles
   // wound the other way. Flat shading takes a face's normal from the screen,
@@ -429,7 +447,9 @@ export function ShardMeshBody({ shard: given, scale = 1, ghost = false, birth, d
   // lights like the outsides do.
   const inside = useMemo(() => {
     if (!lit) return null
-    return shared ? shared.inside() : insideGeometry(posAttr!, colAttr!, index)
+    return shared ? shared.inside() : insideGeometry(posAttr!, colAttr!, index, positions)
+    // `positions` changes only with posAttr (sharedBufferDeps).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [posAttr, colAttr, index, lit, shared])
 
   // The points, drawn as the terrain field draws its gibsons: a feathered disc
@@ -826,7 +846,8 @@ function Placements({ shard, byRef, nested, lit, ghost, world, headlamp, pose, o
     if (r.missing === 'objects') return null
     const model = r.model && r.model.unit + part.step >= 0 && r.model.unit + part.step <= MAX_UNIT ? r.model : null
     const matrix = new Matrix4().fromArray(partMatrix(part, shard.unit, model ? model.unit : shard.unit))
-    let body: ReactNode = <lineSegments geometry={CUBE_EDGES}><lineBasicMaterial color={ACCENT} toneMapped={false} transparent opacity={(ghost ? 0.45 : 0.8) * dim} /></lineSegments>
+    // Its own share (without a ghost's), as every face and line keeps one, so the EDIT breath and the build dim's fade scale it rather than skip it.
+    let body: ReactNode = <lineSegments geometry={CUBE_EDGES}><lineBasicMaterial color={ACCENT} toneMapped={false} transparent opacity={(ghost ? 0.45 : 0.8) * dim} userData-share={0.8 * dim} /></lineSegments>
     // The part's own model, so its own opacity, never the parent's (§1.10).
     if (model) body = <ShardMesh shard={model} placed nested={r.children} lit={lit} ghost={ghost} world={world} headlamp={headlamp} cull={cull} dim={dim} ignoreOpacity={ignoreOpacity} />
     // Selected: an amber box around what the placement draws, in its own frame so it turns with it.

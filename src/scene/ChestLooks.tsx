@@ -172,7 +172,7 @@ export function ChestLooks({ axes }: { axes: ViewAxes }): JSX.Element | null {
               ? ({ dim }) => (
                 <>
                   {ceremony ? (ceremony.kind === 'door' ? (ceremony.closing ? <DoorCloses look={w.look} at={ceremony.at} frame={w.frame} /> : <DoorCeremony look={w.look} at={ceremony.at} calm={ceremony.calm} frame={w.frame} />) : <ChestCeremony look={w.look} at={ceremony.at} calm={ceremony.calm} frame={w.frame} />) : model && <ShardMesh shard={model} world {...w.frame} dim={dim} />}
-                  {loot && <ChestLoot loot={w.loot} ceremony={ceremony} still={still} />}
+                  {loot && <ChestLoot loot={w.loot} ceremony={ceremony} still={still} dim={dim} />}
                 </>
               )
               : undefined}

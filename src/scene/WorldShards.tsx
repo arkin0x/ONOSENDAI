@@ -24,6 +24,7 @@ import { placedPose, type Pose } from '../lib/pose'
 import type { ShardModel } from 'sno-core/shards'
 import { TapTarget, farCullDoublings } from './TapTarget'
 import { useMutes } from '../store/useMutes'
+import { useBuildDimmed } from './BuildOccluders'
 
 const REACH = GRID_RADIUS * 8
 /** Past this many doublings out from its unit, a shard with no placed objects can never be seen (TapTarget farCullDoublings). */
@@ -237,7 +238,7 @@ export function WorldShards({ axes }: Props): JSX.Element | null {
 
   return (
     <>
-      {placed.map((w) => <PlacedShard key={w.key} w={w} birth={births[w.key]} moving={w.key === moving} />)}
+      {placed.map((w) => <PlacedShard key={w.key} w={w} birth={births[w.key]} moving={w.key === moving} occludes />)}
     </>
   )
 }
@@ -247,10 +248,13 @@ export function WorldShards({ axes }: Props): JSX.Element | null {
  * measured from the drawn group, and off while it is too small to see
  * (TapTarget; arkinox, 2026-09-30). Cyberspace TV's have no tap target, and
  * hand their drawn group to TV, which sets how they look each frame (TvFinds).
+ * The world's own (`occludes`) dim while they block the build cursor
+ * (BuildOccluders), except the one EDIT is moving.
  */
-export function PlacedShard({ w, birth, moving = false, tappable = true, drawnRef }: { w: PlacedShardDraw; birth: number | undefined; moving?: boolean; tappable?: boolean; drawnRef?: (g: Group | null) => void }): JSX.Element {
+export function PlacedShard({ w, birth, moving = false, tappable = true, drawnRef, occludes = false }: { w: PlacedShardDraw; birth: number | undefined; moving?: boolean; tappable?: boolean; drawnRef?: (g: Group | null) => void; occludes?: boolean }): JSX.Element {
   const drawn = useRef<Group | null>(null)
   const setDrawn = useCallback((g: Group | null) => { drawn.current = g; drawnRef?.(g) }, [drawnRef])
+  const dim = useBuildDimmed(occludes && !moving ? w.key : undefined, drawn)
   // Its placed objects are drawn within the scene's budget, by trust and nearest first (scene/meshBudget.ts).
   const trusted = trustedPlacement(w.container, w.author)
   const budget = useMemo(() => ({ key: w.key, trusted, centre: w.centre, scale: w.scale }), [w.key, trusted, w.centre, w.scale])
@@ -265,7 +269,7 @@ export function PlacedShard({ w, birth, moving = false, tappable = true, drawnRe
   return (
     <group position={w.centre}>
       <group ref={setDrawn}>
-        <ShardMesh shard={w.shard} scale={w.scale} birth={birth} world ghost={moving} clip={w.clip} pose={w.pose} budget={budget} />
+        <ShardMesh shard={w.shard} scale={w.scale} birth={birth} world ghost={moving} clip={w.clip} pose={w.pose} budget={budget} dim={moving ? 1 : dim} />
       </group>
       {/* Not tappable while it moves: the ghost is the one being aimed. */}
       {!moving && tappable && <TapTarget measure={drawn} onTap={() => useShards.getState().selectSecret(w.key)} />}

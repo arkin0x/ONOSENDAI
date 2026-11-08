@@ -95,7 +95,8 @@ import { retractionTemplate } from '../lib/published'
 import { audioInnerTemplate, fadeAt, type AudioItem } from '../lib/audioItem'
 import { resealCopy } from '../lib/audioFile'
 import { movableIntoRoom, openWithSecret, openWithSigner, openerFor, placeOf as eventPlace, plaintextWithSecret, readContents, resealWithout, revealedIn, sealEntries, sealedInside, sealerOf, type ChestEntry, type OpeningKey } from '../lib/chests'
-import { closedByMe, closedDoorIds, openedByHand, restoreOpened } from './useOpenedChests'
+import { openedByHand, restoreOpened } from './useOpenedChests'
+import { closeArriving, closedByMe, closedDoorIds } from './closedDoors'
 import { hiderKeys, madeKeys, openingKeys, placeOf, type HeldItem, type HeldPlace, type InChest } from '../lib/inventory'
 import { useInventory } from './useInventory'
 import { useShardFolders } from './useShardFolders'
@@ -4159,6 +4160,9 @@ export const useShards = create<ShardsState>((set, get) => {
       // readAgain). Nothing TV showed is restored, and a key TV showed opens
       // nothing (review of #390).
       const keys: OpeningKey[] = openingKeys(useInventory.getState().items, true)
+      // A door of a room this identity closed (§3.7.5, one room, one state) comes in closed,
+      // before anything here asks whether it was opened by hand (store/closedDoors).
+      if (!watched) void closeArriving(me, items)
       // A door closed with CLOSE is not opened by hand (store/useOpenedChests): never reopened here.
       const byHand = (h: Hidden): boolean => h.type === 'chest' && !!h.chest && openedByHand(me, h.eventId, h.chest.lockPubkey)
       // A door opened by hand opens its room again with the secret this

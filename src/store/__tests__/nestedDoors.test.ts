@@ -46,7 +46,8 @@ import { doorSecret, resetDoorSecrets } from '../doorSecrets'
 import { useBuilder } from '../useBuilder'
 import { useCyberspace } from '../useCyberspace'
 import { useInventory } from '../useInventory'
-import { closedByMe, openedByHand, rememberOpened, resetOpenedChests } from '../useOpenedChests'
+import { openedByHand, rememberOpened, resetOpenedChests } from '../useOpenedChests'
+import { closedByMe, resetClosedDoors } from '../closedDoors'
 import { behindDoor, behindDoorDeep, closedRoomTest, doorDepth, effectiveDoorHeight, positionOf, sealingDoor, useShards, type MyDeployment } from '../useShards'
 import { closeDoor, openRoom, reopenClosedDoor } from '../rooms'
 
@@ -94,6 +95,7 @@ beforeEach(() => {
   localStorage.removeItem('onosendai:doors-closed')
   resetDoorSecrets()
   resetOpenedChests()
+  resetClosedDoors()
   useShards.setState({ mine: [], deleted: {}, deletedBags: {}, discovered: {}, pending: null, chestBack: null, deployHeight: 0, deployUnit: 0, deployTurn: [0, 0, 0], deployStatus: 'idle', deployError: null, selectedSecret: null, deployLeaveOut: null, deployInto: null, deployDoorHeight: null, placedLast: null })
   useBuilder.getState().exit()
   useStash.getState().close()
@@ -377,7 +379,7 @@ describe('CLOSE on a door of yours (arkinox, 2026-11-01)', () => {
     expect(texts()).toEqual(['deep inside', 'outer thing'])
     // Opened by hand here, as any finder opens it: its card then offers CLOSE.
     rememberOpened(me(), outer.eventId, outer.chest!.lockPubkey, [])
-    const closed = closeDoor(asFound(outer))
+    const { closed } = await closeDoor(asFound(outer))
     expect(closed).toEqual(expect.arrayContaining([outer.eventId, inner.eventId]))
     expect(texts()).toEqual([])
     expect(S().worldItems().map((w) => w.key)).not.toContain(inner.eventId)
@@ -406,8 +408,9 @@ describe('CLOSE on a door of yours (arkinox, 2026-11-01)', () => {
     }
     expect(closedRoomTest(state, me())).toBeNull()
     rememberOpened(me(), OUT, LOCK, [])
+    // As the first build of CLOSE kept it: `${door}:${lock}`, read as closed.
     localStorage.setItem('onosendai:doors-closed', JSON.stringify({ [me()]: [`${OUT}:${LOCK}`] }))
-    resetOpenedChests()
+    resetClosedDoors()
     const shut = closedRoomTest(state, me())!
     expect(['a', 'b', 'e'].map((c) => shut(c.repeat(64)))).toEqual([true, true, true])
     expect([OUT, 'd'.repeat(64)].map((id) => shut(id))).toEqual([false, false])

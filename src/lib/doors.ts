@@ -109,6 +109,16 @@ export function roomOf(at: Position, plane: number, h: number): string {
 }
 
 /**
+ * A room as one state (§3.7.5): its signer and roomOf, so every door of it, found
+ * now or later, names the same one. Null for a chest or a malformed door.
+ */
+export function roomKeyOf(door: { at: Position; plane: number; inner?: { pubkey?: string; tags?: readonly unknown[] } }): string | null {
+  const h = doorHeightOf(door.inner?.tags)
+  const signer = door.inner?.pubkey
+  return typeof h === 'number' && signer ? `${signer}:${roomOf(door.at, door.plane, h)}` : null
+}
+
+/**
  * Whether a door may stand where it was found (§3.7.1), or why not: its
  * height must be well formed, at most the height of the bag holding it, and,
  * inside a room, lower than the room's. A reader MUST drop a door that breaks

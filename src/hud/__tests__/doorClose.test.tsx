@@ -53,7 +53,8 @@ import { mount, settled } from '../../test/elementRoot'
 import { doorSecret, reopenRoom, resetDoorSecrets, resetReopens } from '../../store/rooms'
 import { useCyberspace } from '../../store/useCyberspace'
 import { useInventory } from '../../store/useInventory'
-import { closedByMe, openedByHand, resetOpenedChests } from '../../store/useOpenedChests'
+import { openedByHand, resetOpenedChests } from '../../store/useOpenedChests'
+import { closedByMe, resetClosedDoors } from '../../store/closedDoors'
 import { useShards } from '../../store/useShards'
 import { setDrawnLooks, useOpenCeremony } from '../../store/useOpenCeremony'
 import { doorWallKey, wallItems } from '../../store/walkWalls'
@@ -65,8 +66,7 @@ const T = 1_800_000_000
 const me = (): string => useCyberspace.getState().identity.pubkey
 
 /** A door sealed to `lock` at AT, of height `h`, its room bag holding `inside`; `room` when it stands in another door's room. */
-async function sealedDoor(name: string, lock: ReturnType<typeof forgeKey>, h: number, inside: (signer: string) => BagEntry[]): Promise<{ event: NostrEvent; room: NostrEvent; secret: string }> {
-  const secret = newDoorSecret()
+async function sealedDoor(name: string, lock: ReturnType<typeof forgeKey>, h: number, inside: (signer: string) => BagEntry[], secret = newDoorSecret()): Promise<{ event: NostrEvent; room: NostrEvent; secret: string }> {
   const sealed = sealEntries(roomEntries(secret) as BagEntry[], lock.itemPubkey)
   const t = chestInnerTemplate({ name, lockPubkey: lock.itemPubkey, senderPubkey: sealed.senderPubkey, requires: '', payload: sealed.payload }, AT, 1, T)
   t.tags.splice(t.tags.length - 1, 0, ['door', String(h)])
@@ -90,6 +90,43 @@ async function nested(): Promise<{ lock: ReturnType<typeof forgeKey>; outer: Hid
   const bagKey = (await regionKeyOffThread(AT, 3, 20)).key
   const found: Hidden = { eventId: outer.event.id, inner: outer.event, keyHex: bytesToHex(bagKey), bagId: 'f'.repeat(64), lookupId: 'e'.repeat(64), author: outer.event.pubkey, at: AT, plane: 1, height: 3, createdAt: T, type: 'chest', chest: chestItemOf(outer.event)! }
   return { lock, outer: found, innerId: inner.event.id }
+}
+
+/** A door event as this device finds it in a bag of its own height. */
+async function asFound(event: NostrEvent, h: number): Promise<Hidden> {
+  const bagKey = (await regionKeyOffThread(AT, h, 20)).key
+  return { eventId: event.id, inner: event, keyHex: bytesToHex(bagKey), bagId: 'f'.repeat(64), lookupId: 'e'.repeat(64), author: event.pubkey, at: AT, plane: 1, height: h, createdAt: T, type: 'chest', chest: chestItemOf(event)! }
+}
+
+/**
+ * Two doors of one room (§3.7.5): one signer, one height, one region, one secret,
+ * each sealed to the held Silver Key. Its room holds a note.
+ */
+async function twoDoors(oneSecret = true): Promise<{ a: Hidden; b: Hidden; holdB: () => void }> {
+  const lock = forgeKey('Silver Key')
+  const held = finalizeEvent({ kind: 3340, created_at: T, content: '', tags: [] }, hider) as NostrEvent
+  useInventory.getState().holdForged(held, lock, { lookupId: 'e'.repeat(64), bagId: 'f'.repeat(64), at: { x: '0', y: '0', z: '0' }, plane: 1, height: 3 })
+  const secret = newDoorSecret()
+  const inside = (signer: string): BagEntry[] => [rumorOf(messageInnerTemplate('one room', AT, 1, T), signer)]
+  const a = await sealedDoor('North Door', lock, 3, inside, secret)
+  // Two secrets: b has a key of its own, not held yet.
+  const lockB = oneSecret ? lock : forgeKey('Gold Key')
+  const b = await sealedDoor('East Door', lockB, 3, inside, oneSecret ? secret : newDoorSecret())
+  relay.events = [a.room, b.room]
+  const holdB = (): void => {
+    const heldB = finalizeEvent({ kind: 3340, created_at: T, content: lockB.itemPubkey, tags: [] }, hider) as NostrEvent
+    useInventory.getState().holdForged(heldB, lockB, { lookupId: 'e'.repeat(64), bagId: 'f'.repeat(64), at: { x: '0', y: '0', z: '0' }, plane: 1, height: 3 })
+  }
+  return { a: await asFound(a.event, 3), b: await asFound(b.event, 3), holdB }
+}
+
+/** A reload: memory gone, what is kept read again, nothing found yet. */
+function reload(): void {
+  resetOpenedChests()
+  resetDoorSecrets()
+  resetClosedDoors()
+  resetReopens()
+  useShards.setState({ discovered: {} })
 }
 
 const S = () => useShards.getState()
@@ -131,6 +168,7 @@ beforeEach(() => {
   for (const k of ['onosendai:door-secrets', 'onosendai:door-secrets-only-said', 'onosendai:chests-opened', 'onosendai:doors-closed']) localStorage.removeItem(k)
   resetDoorSecrets()
   resetOpenedChests()
+  resetClosedDoors()
   resetReopens()
   vi.mocked(publish).mockClear()
   vi.mocked(publishMany).mockClear()
@@ -222,6 +260,7 @@ describe('closed stays closed (arkinox, 2026-10-26: nothing opens by itself)', (
     // A reload: what is in memory goes; what is kept comes back from storage.
     resetOpenedChests()
     resetDoorSecrets()
+    resetClosedDoors()
     resetReopens()
     useShards.setState({ discovered: {} })
     const asked = relay.asked
@@ -235,9 +274,9 @@ describe('closed stays closed (arkinox, 2026-10-26: nothing opens by itself)', (
     expect(doorSecret(me(), n.outer.eventId)).not.toBeNull()
     expect(await buttonsOn(n.outer.eventId)).toEqual(['OPEN'])
     // Kept under this identity, and no other.
-    const kept = JSON.parse(localStorage.getItem('onosendai:doors-closed')!) as Record<string, string[]>
+    const kept = JSON.parse(localStorage.getItem('onosendai:doors-closed')!) as Record<string, Record<string, { lock: string; shut?: true }>>
     expect(Object.keys(kept)).toEqual([me()])
-    expect(kept[me()]).toContain(`${n.outer.eventId}:${n.outer.chest!.lockPubkey}`)
+    expect(kept[me()][n.outer.eventId]).toMatchObject({ lock: n.outer.chest!.lockPubkey, shut: true })
     expect(closedByMe('9'.repeat(64), n.outer.eventId)).toBe(false)
   })
 
@@ -265,5 +304,132 @@ describe('closed stays closed (arkinox, 2026-10-26: nothing opens by itself)', (
     await new Promise((r) => setTimeout(r, 20))
     expect(roomTexts()).toEqual([])
     expect(openedByHand(me(), n.outer.eventId, n.outer.chest!.lockPubkey)).toBe(false)
+  })
+})
+
+describe('a door inside a closed room not loaded at the close (review of #616, B1)', () => {
+  it('after a reload, CLOSE while the reopening is still fetching: OPEN brings the room back and the inner door stays closed', async () => {
+    const n = await openBoth()
+    reload()
+    const { query } = await import('../../lib/relay')
+    let answer: (v: unknown[]) => void = () => {}
+    vi.mocked(query).mockImplementationOnce(() => new Promise((r) => { answer = r as typeof answer }))
+    S().addDiscovered([n.outer])
+    // The reload reopens the outer door by itself, as it did before CLOSE, and asks for its room.
+    await vi.waitFor(() => expect(openedByHand(me(), n.outer.eventId, n.outer.chest!.lockPubkey)).toBe(true))
+    expect(S().discovered[n.innerId]).toBeUndefined()
+    await press(n.outer.eventId, /^CLOSE$/)
+    answer([relay.events[0]])
+    await settled()
+    expect(roomTexts()).toEqual([])
+    await press(n.outer.eventId, /^OPEN$/)
+    await vi.waitFor(() => expect(roomTexts()).toEqual(['Inner Door', 'in the outer room']))
+    await settled()
+    await new Promise((r) => setTimeout(r, 20))
+    expect(closedByMe(me(), n.innerId)).toBe(true)
+    expect(roomTexts()).not.toContain('deep inside')
+    expect(await buttonsOn(n.innerId)).toEqual(['OPEN'])
+  })
+
+  it('OPEN then CLOSE before the room comes: the inner door it held starts closed on the next OPEN', async () => {
+    const n = await openBoth()
+    reload()
+    // Found again, not reopened by itself (no scan here), and closed before its room was ever fetched.
+    useShards.setState({ discovered: { [n.outer.eventId]: n.outer } })
+    await press(n.outer.eventId, /^CLOSE$/)
+    // OPEN, and CLOSE again while its room is on the way.
+    const { query } = await import('../../lib/relay')
+    let answer: (v: unknown[]) => void = () => {}
+    vi.mocked(query).mockImplementationOnce(() => new Promise((r) => { answer = r as typeof answer }))
+    await press(n.outer.eventId, /^OPEN$/)
+    await press(n.outer.eventId, /^CLOSE$/)
+    answer([relay.events[0]])
+    await settled()
+    expect(roomTexts()).toEqual([])
+    await press(n.outer.eventId, /^OPEN$/)
+    await vi.waitFor(() => expect(roomTexts()).toContain('Inner Door'))
+    await settled()
+    expect(closedByMe(me(), n.innerId)).toBe(true)
+    expect(roomTexts()).not.toContain('deep inside')
+  })
+
+  it('a room that fails to come on OPEN: still to close below, so a later reopening by a scan brings the inner door closed', async () => {
+    const n = await openBoth()
+    reload()
+    useShards.setState({ discovered: { [n.outer.eventId]: n.outer } })
+    await press(n.outer.eventId, /^CLOSE$/)
+    const { query } = await import('../../lib/relay')
+    vi.mocked(query).mockRejectedValueOnce(new Error('every relay fell over'))
+    await press(n.outer.eventId, /^OPEN$/)
+    await settled()
+    expect(roomTexts()).toEqual([])
+    // A reload, and the scan finds it: open, so it reopens by itself, and the room comes this time.
+    reload()
+    S().addDiscovered([n.outer])
+    await vi.waitFor(() => expect(roomTexts()).toContain('Inner Door'))
+    await settled()
+    await new Promise((r) => setTimeout(r, 20))
+    expect(closedByMe(me(), n.innerId)).toBe(true)
+    expect(roomTexts()).not.toContain('deep inside')
+  })
+
+  it('once the room has come back whole, a later reload does not close the inner door again after its own OPEN', async () => {
+    const n = await openBoth()
+    await press(n.outer.eventId, /^CLOSE$/)
+    await press(n.outer.eventId, /^OPEN$/)
+    await vi.waitFor(() => expect(roomTexts()).toContain('Inner Door'))
+    await press(n.innerId, /^OPEN$/)
+    await vi.waitFor(() => expect(roomTexts()).toContain('deep inside'))
+    reload()
+    S().addDiscovered([n.outer])
+    await vi.waitFor(() => expect(roomTexts()).toContain('deep inside'))
+    expect(closedByMe(me(), n.innerId)).toBe(false)
+  })
+})
+
+describe('one room, one state (review of #616, S1 and Q4)', () => {
+  it('a second door of the room, not loaded at the close, comes in closed and opens nothing', async () => {
+    const { a, b } = await twoDoors()
+    useShards.setState({ discovered: { [a.eventId]: a, [b.eventId]: b } })
+    await press(a.eventId, /^OPEN$/)
+    await vi.waitFor(() => expect(roomTexts()).toEqual(['one room']))
+    expect(openedByHand(me(), b.eventId, b.chest!.lockPubkey)).toBe(true)
+    reload()
+    // Only the north door is found before the close.
+    useShards.setState({ discovered: { [a.eventId]: a } })
+    await press(a.eventId, /^CLOSE$/)
+    const asked = relay.asked
+    S().addDiscovered([b])
+    await settled()
+    await new Promise((r) => setTimeout(r, 20))
+    expect(closedByMe(me(), b.eventId, b.chest!.lockPubkey)).toBe(true)
+    expect(openedByHand(me(), b.eventId, b.chest!.lockPubkey)).toBe(false)
+    expect(relay.asked).toBe(asked)
+    expect(roomTexts()).toEqual([])
+    // Asked directly, it refuses too.
+    resetReopens()
+    await reopenRoom(b)
+    expect(relay.asked).toBe(asked)
+    // OPEN on either opens the room, both doors with it.
+    await press(b.eventId, /^OPEN$/)
+    await vi.waitFor(() => expect(roomTexts()).toEqual(['one room']))
+    expect(openedByHand(me(), a.eventId, a.chest!.lockPubkey)).toBe(true)
+    expect(closedByMe(me(), a.eventId)).toBe(false)
+    expect(published()).toBe(0)
+  })
+
+  it('a door open only because the other was, whose own key is held, offers CLOSE too, and closes the whole room', async () => {
+    // Two secrets at one height (§3.7.5 forbids it, a reader meets it): b owes its own OPEN.
+    const { a, b, holdB } = await twoDoors(false)
+    useShards.setState({ discovered: { [a.eventId]: a, [b.eventId]: b } })
+    await press(a.eventId, /^OPEN$/)
+    await vi.waitFor(() => expect(roomTexts()).toEqual(['one room']))
+    holdB()
+    // b's secret is only said, and its own seal holds another: it owes its own OPEN (rooms ownOpenOwed), and offers CLOSE.
+    expect(await buttonsOn(b.eventId)).toEqual(['OPEN', 'CLOSE'])
+    await press(b.eventId, /^CLOSE$/)
+    expect(closedByMe(me(), a.eventId)).toBe(true)
+    expect(closedByMe(me(), b.eventId)).toBe(true)
+    expect(roomTexts()).toEqual([])
   })
 })

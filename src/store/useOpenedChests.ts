@@ -23,19 +23,19 @@
  * identity outlives its lock (its room, spec #82).
  *
  * CLOSE (arkinox, 2026-11-01): a door this identity opened can be closed again,
- * on this device only. Closed is kept beside opened, per identity and per lock
- * (`${door id}:${lock}`), so a reload, a scan or a relay update never opens it
- * again: only OPEN does, which forgets the close. A door closed is not opened by
- * hand (openedByHand), whatever was kept of its opening, so every reader of that
- * (the look, WALK, the reload's reopening) sees it shut. Its secret stays kept
- * (store/doorSecrets), so OPEN needs no key the second time.
+ * on this device only (store/closedDoors.ts keeps it, per identity and per lock),
+ * so a reload, a scan or a relay update never opens it again: only OPEN does. A
+ * door closed is not opened by hand (openedByHand), whatever was kept of its
+ * opening, so every reader of that (the look, WALK, the reload's reopening) sees it
+ * shut. Its secret stays kept (store/doorSecrets), so OPEN needs no key again.
  */
 
 import { create } from 'zustand'
 import type { ChestEntry } from '../lib/chests'
+import { closedByMe, closedRecord, writeClosed } from './closedDoors'
+import { onHiddenChange } from './hiddenStorage'
 
 const OPENED_KEY = 'onosendai:chests-opened'
-const CLOSED_KEY = 'onosendai:doors-closed'
 /** Enough for years of play; the oldest opened fall off past it, and show OPEN again. */
 const OPENED_MAX = 2000
 
@@ -75,70 +75,22 @@ function save(all: Record<string, string[]>): void {
   try { localStorage.setItem(OPENED_KEY, JSON.stringify(all)) } catch { /* quota or private mode: it stays open this session */ }
 }
 
-/** The doors closed with CLOSE, by identity, as `${door id}:${lock}`. */
-let closed: Record<string, string[]> | null = null
-
-function closedIds(): Record<string, string[]> {
-  if (closed) return closed
-  try {
-    const raw = JSON.parse(localStorage.getItem(CLOSED_KEY) ?? '{}') as unknown
-    closed = {}
-    if (raw && typeof raw === 'object' && !Array.isArray(raw)) {
-      for (const [owner, ids] of Object.entries(raw as Record<string, unknown>)) {
-        if (Array.isArray(ids)) closed[owner] = ids.filter((x): x is string => typeof x === 'string')
-      }
-    }
-  } catch { closed = {} }
-  return closed
-}
-
-function saveClosed(all: Record<string, string[]>): void {
-  try { localStorage.setItem(CLOSED_KEY, JSON.stringify(all)) } catch { /* quota or private mode: it stays closed this session */ }
-}
-
 /**
- * Whether this identity closed this door with CLOSE, under this lock. Without a
- * lock, under any: for what stands in a room whose door is not at hand.
+ * CLOSE closed these doors (store/rooms closeDoor): what this session read of each
+ * is forgotten, and a fresh record handed out, so every card and the world redraw
+ * them shut. Their openings stay kept, and their secrets: OPEN opens them again
+ * with no key. The closes themselves are kept in store/closedDoors.ts.
  */
-export function closedByMe(me: string, doorId: string, lock?: string): boolean {
-  const ids = closedIds()[me]
-  if (!ids) return false
-  return lock === undefined ? ids.some((e) => keptFor(e, doorId)) : ids.includes(keptAs(doorId, lock))
-}
-
-/** The door ids this identity closed, under any lock: what worldOf leaves out the rooms of. */
-export function closedDoorIds(me: string): Set<string> {
-  return new Set((closedIds()[me] ?? []).map((e) => e.split(':')[0]))
-}
-
-/**
- * CLOSE closed it: kept, so it stays closed across a reload, and what this
- * session read of it forgotten, so every card and the world redraw it shut.
- * Its opening stays kept, and its secret too: OPEN opens it again with no key.
- */
-export function rememberClosed(me: string, doorId: string, lock: string): void {
-  const all = closedIds()
-  const ids = all[me] ?? []
-  if (!ids.includes(keptAs(doorId, lock))) {
-    all[me] = [...ids.filter((e) => !keptFor(e, doorId)), keptAs(doorId, lock)].slice(-OPENED_MAX)
-    saveClosed(all)
-  }
-  // A fresh record even when this session read nothing of it: every card and the world draw from it, and redraw it shut.
+export function shutInSession(me: string, doorIds: Iterable<string>): void {
   useOpenedChests.setState((s) => {
     const opened = { ...s.opened }
-    delete opened[openedKey(me, doorId)]
+    for (const id of doorIds) delete opened[openedKey(me, id)]
     return { opened }
   })
 }
 
-/** OPEN on a door closed before: the close forgotten, under every lock. */
-function forgetClosed(me: string, doorId: string): void {
-  const all = closedIds()
-  const ids = all[me]
-  if (!ids || !ids.some((e) => keptFor(e, doorId))) return
-  all[me] = ids.filter((e) => !keptFor(e, doorId))
-  saveClosed(all)
-}
+/** A door closed or opened in another tab, or the store decided: a fresh record, so everything drawn from it is drawn again. */
+onHiddenChange(() => { useOpenedChests.setState((s) => ({ opened: { ...s.opened } })) })
 
 /**
  * Whether this identity opened this chest by hand on this device, under the
@@ -180,9 +132,14 @@ export function openedContents(opened: Record<string, ChestEntry[]>, me: string,
   return openedByHand(me, chestId, lock) ? opened[openedKey(me, chestId)] ?? null : null
 }
 
-/** OPEN opened it: what was inside, for the session, and its id with its lock, kept, so a reload opens it again. A close before is forgotten. */
+/** OPEN opened it: what was inside, for the session, and its id with its lock, kept, so a reload opens it again. A close before is undone. */
 export function rememberOpened(me: string, chestId: string, lock: string, contents: ChestEntry[]): void {
-  forgetClosed(me, chestId)
+  // Closed with CLOSE before: open now. What is still to close below it stays so (store/closedDoors).
+  const was = closedRecord(me, chestId)
+  if (was?.shut) {
+    const { shut: _shut, ...open } = was
+    void writeClosed([open])
+  }
   useOpenedChests.setState((s) => ({ opened: { ...s.opened, [openedKey(me, chestId)]: contents } }))
   const all = keptIds()
   const ids = all[me] ?? []
@@ -220,10 +177,9 @@ export function restoreOpened(me: string, chestId: string, contents: ChestEntry[
   useOpenedChests.setState((s) => ({ opened: { ...s.opened, [openedKey(me, chestId)]: contents } }))
 }
 
-/** For tests: forget what is kept (opened and closed), so the next read is from localStorage, and every refusal. */
+/** For tests: forget what is kept, so the next read is from localStorage, and every refusal. */
 export function resetOpenedChests(): void {
   kept = null
-  closed = null
   refused.clear()
   useOpenedChests.setState({ opened: {} })
 }

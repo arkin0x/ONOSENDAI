@@ -25,7 +25,7 @@
  * row that draws one (ItemFace); the key line itself is the words.
  */
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import { useProfile } from '../hooks/useProfile'
 import { cashuLabel, readCashuToken } from '../lib/cashu'
 import { chestSealer, openWithSecret, openWithSigner, openerFor, readContents, requiresLabel, revealedIn, type ChestEntry, type Opener } from '../lib/chests'
@@ -37,13 +37,15 @@ import { holdsEntry, holdsItem, openingKeys, type HeldFrom, type HeldItem, type 
 import { safeNpub } from '../lib/npub'
 import { useCyberspace } from '../store/useCyberspace'
 import { useInventory } from '../store/useInventory'
-import { closedByMe, forgetRefusal, openedByHand, openedContents, openedKey, readRefused, refuseRead, rememberOpened, useOpenedChests } from '../store/useOpenedChests'
+import { forgetRefusal, openedByHand, openedContents, openedKey, readRefused, refuseRead, rememberOpened, useOpenedChests } from '../store/useOpenedChests'
 import { celebrateClose, celebrateOpen, celebrateReopen, takeAndVanish } from '../store/useOpenCeremony'
 import { useCeremony } from '../store/useCeremony'
 import { isDoor, lookOf } from '../lib/looks'
 import { doorSecretWithKey, doorSecretWithSigner } from '../lib/doors'
 import { closeDoor, doorAsFound, doorSecret, fillRoom, ownOpenOwed, openDoorNow, reopenClosedDoor } from '../store/rooms'
 import { useToast } from '../store/useToast'
+import { closedByMe } from '../store/closedDoors'
+import { hiddenDecided, hiddenVersion, onHiddenChange, storageMode } from '../store/hiddenStorage'
 import { chestLoot } from '../lib/lootObjects'
 import { landedAt } from '../lib/ceremony'
 import { resumeAudio } from '../lib/audioContext'
@@ -216,11 +218,16 @@ export function ChestBlock({ id, chest, author, verified, place, sealer: given, 
   const handOpened = openedByHand(me, id, chest.lockPubkey)
   // Open only because another door of its room was, and its own key is here now (§3.7.5).
   const owed = door && handOpened && ownOpenOwed(me, id, chest, opener)
+  // The door secrets and closes are read from the hidden store, which may still be loading: drawn again when it is.
+  useSyncExternalStore(onHiddenChange, hiddenVersion, hiddenVersion)
   // CLOSE (arkinox, 2026-11-01): a door open here, its secret kept, so OPEN can open it again with no key.
+  // One open only because another door of its room was ("owed") closes too, and closes the whole room.
   const secretKept = door && !!doorSecret(me, id)
-  const canClose = secretKept && handOpened && !owed
+  const canClose = secretKept && handOpened
   // Closed with CLOSE: OPEN with no key, from the kept secret, and nothing else opens it.
-  const closedHere = secretKept && closedByMe(me, id, chest.lockPubkey)
+  // While the store is still loading, OPEN waits for it rather than guessing.
+  const closedRec = door && closedByMe(me, id, chest.lockPubkey)
+  const closedHere = closedRec && (secretKept || storageMode() === 'pending')
   const readKey = `${openedKey(me, id)}:${chest.lockPubkey}`
   const tried = useRef<string | null>(null)
   const [, setRefusals] = useState(0)
@@ -277,21 +284,32 @@ export function ChestBlock({ id, chest, author, verified, place, sealer: given, 
   }
 
   // CLOSE: here only, nothing published. The door shuts and its room dissolves, sub doors with it.
-  const shut = (): void => {
+  // Kept before the world redraws it; a close not kept says so (store/closedDoors).
+  const shut = async (): Promise<void> => {
+    if (busy) return
     const at = doorAsFound(id)
     if (!at) { setStatus('This door is no longer here.'); return }
     setStatus(null)
-    closeDoor(at)
-    celebrateClose({ me, chestId: id })
+    setBusy(true)
+    try {
+      await closeDoor(at)
+      celebrateClose({ me, chestId: id })
+    } finally { setBusy(false) }
   }
 
   const open = async (): Promise<void> => {
     if (busy) return
-    if (closedHere) {
+    if (closedRec) {
+      // Closed with CLOSE: the kept secret opens it, once the store has been read. Only a
+      // secret truly gone falls back to a first OPEN, with what opens it.
       setBusy(true)
       setStatus(null)
-      try { await reopenDoor() } finally { setBusy(false) }
-      return
+      let reopened = false
+      try {
+        await hiddenDecided()
+        if (doorSecret(me, id)) { await reopenDoor(); reopened = true }
+      } finally { setBusy(false) }
+      if (reopened) return
     }
     if (!opener) return
     // Inside the tap, so a phone lets the ceremony's sound out (lib/audioContext).
@@ -337,9 +355,9 @@ export function ChestBlock({ id, chest, author, verified, place, sealer: given, 
           </span>
         </span>
         {canClose && (
-          <button className="chest__act" onClick={shut} title="Close it here. Nothing is sent.">CLOSE</button>
+          <button className="chest__act" onClick={() => void shut()} disabled={busy} title="Close it here. Nothing is sent.">CLOSE</button>
         )}
-        {(closedHere || (opener && (!entries || owed) && !canClose)) && (
+        {(closedHere || (opener && (!entries || owed) && (!canClose || owed))) && (
           <button className="chest__act" onClick={() => void open()} disabled={busy || rereading} title={closedHere ? 'Open it again here. Its secret is kept on this device.' : `Decrypt it here with ${opensWith}`}>{busy || rereading ? 'OPENING' : 'OPEN'}</button>
         )}
       </div>

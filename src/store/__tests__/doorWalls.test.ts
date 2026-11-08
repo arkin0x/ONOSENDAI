@@ -24,7 +24,8 @@ vi.mock('../../lib/contacts', () => ({ GENERAL_RELAYS: [], followsOf: async () =
 import type { Hidden } from '../../lib/hidden'
 import type { Position } from '../../lib/space'
 import { useCyberspace } from '../useCyberspace'
-import { openedByHand, openedContents, rememberClosed, rememberOpened, resetOpenedChests, useOpenedChests } from '../useOpenedChests'
+import { openedByHand, openedContents, rememberOpened, resetOpenedChests, useOpenedChests } from '../useOpenedChests'
+import { resetClosedDoors, writeClosed } from '../closedDoors'
 import { useShards } from '../useShards'
 import { doorWallKey, stepLimit, wallItems, wallItemsAt } from '../walkWalls'
 import { builtInLookTags } from '../../lib/looks'
@@ -55,6 +56,7 @@ beforeEach(() => {
   localStorage.removeItem('onosendai:chests-opened')
   localStorage.removeItem('onosendai:doors-closed')
   resetOpenedChests()
+  resetClosedDoors()
   useCyberspace.setState({ identity: { ...useCyberspace.getState().identity, pubkey: ME } })
   useShards.setState({ mine: [], discovered: { [DOOR]: chest(DOOR, [['title', 'Gate'], ['door', '6']]), [CHEST]: chest(CHEST, [['title', 'Box']], CHEST_AT) } })
 })
@@ -253,6 +255,7 @@ describe('a door closed with CLOSE traps nobody (arkinox, 2026-11-01)', () => {
   const INSIDE_ROOM = P(0n, 1n, 3n)
   const OUTSIDE_ROOM = P(0n, 1n, -2n)
   const step = (at: Position, dir: 1 | -1, n = 10n): bigint => stepLimit(at, 'z', dir, n, wallItemsAt(1, at)).reach
+  const rememberClosed = (me: string, doorId: string, lock: string): void => { void writeClosed([{ owner: me, doorId, lock, room: '', shut: true }]) }
   const close = (): void => { rememberOpened(ME, DOOR, LOCK, []); rememberClosed(ME, DOOR, LOCK) }
 
   it('is a wall again, as its closed look', () => {

@@ -95,7 +95,7 @@ import { retractionTemplate } from '../lib/published'
 import { audioInnerTemplate, fadeAt, type AudioItem } from '../lib/audioItem'
 import { resealCopy } from '../lib/audioFile'
 import { movableIntoRoom, openWithSecret, openWithSigner, openerFor, placeOf as eventPlace, plaintextWithSecret, readContents, resealWithout, revealedIn, sealEntries, sealedInside, sealerOf, type ChestEntry, type OpeningKey } from '../lib/chests'
-import { openedByHand, restoreOpened } from './useOpenedChests'
+import { closedByMe, closedDoorIds, openedByHand, restoreOpened } from './useOpenedChests'
 import { hiderKeys, madeKeys, openingKeys, placeOf, type HeldItem, type HeldPlace, type InChest } from '../lib/inventory'
 import { useInventory } from './useInventory'
 import { useShardFolders } from './useShardFolders'
@@ -4159,6 +4159,7 @@ export const useShards = create<ShardsState>((set, get) => {
       // readAgain). Nothing TV showed is restored, and a key TV showed opens
       // nothing (review of #390).
       const keys: OpeningKey[] = openingKeys(useInventory.getState().items, true)
+      // A door closed with CLOSE is not opened by hand (store/useOpenedChests): never reopened here.
       const byHand = (h: Hidden): boolean => h.type === 'chest' && !!h.chest && openedByHand(me, h.eventId, h.chest.lockPubkey)
       // A door opened by hand opens its room again with the secret this
       // device kept (store/rooms.ts), quietly, after the scan; never one
@@ -4315,19 +4316,55 @@ export const useShards = create<ShardsState>((set, get) => {
     const out: WorldItem[] = []
     const seen = new Set<string>()
     const me = useCyberspace.getState().identity.pubkey
+    const shut = closedRoomTest(state, me)
     for (const d of state.mine) {
       seen.add(d.eventId)
       // Gone from its bag: not there to draw (DEPLOYED lists it, with HIDE AGAIN and FORGET).
       if (!inItsBag(d)) continue
+      // In a room whose door you closed (CLOSE): dissolved with it, yours too, until OPEN.
+      if (shut?.(d.eventId)) continue
       out.push({ key: d.eventId, type: d.type, at: positionOf(d), plane: d.plane, height: d.height, mine: true, author: me, shard: d.shard, text: d.text, keyItem: d.key, chest: d.chest, audio: d.audio, createdAt: d.createdAt, lookupId: d.lookupId, bagId: d.bagId, ...(d.room ? { roomKeyHex: d.keyHex } : {}), target: itemTargetOf(d.inner, d.ref), event: d.inner as NostrEvent, ...lineageOf(d.inner, d.ref) })
     }
     for (const h of Object.values(state.discovered)) {
       if (seen.has(h.eventId)) continue
+      if (shut?.(h.eventId)) continue
       out.push({ key: h.eventId, type: h.type, at: h.at, plane: h.plane, height: h.height, mine: false, author: h.author, shard: h.shard, text: h.text, keyItem: h.key, chest: h.chest, audio: h.audio, createdAt: h.createdAt, lookupId: h.lookupId, bagId: h.bagId, ...(h.room && h.keyHex ? { roomKeyHex: h.keyHex } : {}), target: itemTargetOf(h.inner, h.ref), chestId: h.chestId, event: h.inner as NostrEvent | undefined, ...lineageOf(h.inner, h.ref) })
     }
     return oneVersionEach(out)
   }
 })
+
+/**
+ * Whether a thing stands in a room whose door this identity closed (CLOSE,
+ * arkinox, 2026-11-01), or in a room inside one, or came out of a chest that
+ * does: dissolved with the room, until OPEN. Null when no door is closed, the
+ * usual case, so the world is read as it always was.
+ */
+export function closedRoomTest(state: Pick<ShardsState, 'mine' | 'discovered'>, me: string): ((id: string) => boolean) | null {
+  const closed = closedDoorIds(me)
+  if (closed.size === 0) return null
+  const info = new Map<string, { room?: string; chestId?: string; lock?: string }>()
+  for (const d of state.mine) info.set(d.eventId, { room: d.room?.doorId, lock: d.chest?.lockPubkey })
+  for (const h of Object.values(state.discovered)) if (!info.has(h.eventId)) info.set(h.eventId, { room: h.room?.doorId, chestId: h.chestId, lock: h.chest?.lockPubkey })
+  const known = new Map<string, boolean>()
+  const shut = (id: string, depth = 0): boolean => {
+    const was = known.get(id)
+    if (was !== undefined) return was
+    const t = info.get(id)
+    let out = false
+    if (t && depth < 64) {
+      if (t.room) {
+        const door = info.get(t.room)
+        // Under the lock the door has now; a door not at hand, under any.
+        out = (closed.has(t.room) && closedByMe(me, t.room, door?.lock)) || shut(t.room, depth + 1)
+      }
+      if (!out && t.chestId) out = shut(t.chestId, depth + 1)
+    }
+    known.set(id, out)
+    return out
+  }
+  return shut
+}
 
 // The build STEP belongs to one deploy: when it ends, hidden or canceled, or
 // another is lined up in its place, the step goes back to the zoom. A

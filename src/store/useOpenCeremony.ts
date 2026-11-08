@@ -14,7 +14,7 @@
  */
 
 import { create } from 'zustand'
-import { VANISH_MS, afterOpen, calmVanish, ceremonyLength, type CeremonyKind } from '../lib/ceremony'
+import { VANISH_MS, afterOpen, afterReopen, calmVanish, ceremonyLength, type CeremonyKind } from '../lib/ceremony'
 import { ceremonyFeedback } from '../lib/ceremonySound'
 import { openedKey } from './useOpenedChests'
 import { useLootView } from './useLootView'
@@ -26,20 +26,22 @@ export interface Playing {
   kind: CeremonyKind
   at: number
   calm: boolean
+  /** A door closing (CLOSE): its open look fading back into the closed one (scene/DoorCeremony DoorCloses). */
+  closing?: true
 }
 
 interface OpenCeremonyState {
   /** By openedKey(identity, chest id). */
   playing: Record<string, Playing>
-  begin: (me: string, chestId: string, kind: CeremonyKind, calm: boolean, at?: number) => void
+  begin: (me: string, chestId: string, kind: CeremonyKind, calm: boolean, at?: number, closing?: true) => void
   end: (key: string) => void
 }
 
 export const useOpenCeremony = create<OpenCeremonyState>((set, get) => ({
   playing: {},
-  begin: (me, chestId, kind, calm, at = performance.now()) => {
+  begin: (me, chestId, kind, calm, at = performance.now(), closing) => {
     const key = openedKey(me, chestId)
-    set({ playing: { ...get().playing, [key]: { kind, at, calm } } })
+    set({ playing: { ...get().playing, [key]: { kind, at, calm, ...(closing ? { closing } : {}) } } })
     setTimeout(() => { if (get().playing[key]?.at === at) get().end(key) }, ceremonyLength(kind, calm) + 50)
   },
   end: (key) => {
@@ -83,6 +85,31 @@ export function celebrateOpen(o: { me: string; chestId: string; kind: CeremonyKi
   if (plan.yieldCards) yieldToWorld()
   if (plan.ceremony) useOpenCeremony.getState().begin(o.me, o.chestId, o.kind, o.calm)
   if (plan.feedback) ceremonyFeedback(o.kind, Date.now(), plan.ceremony ? o.landMs : undefined)
+  return plan
+}
+
+/**
+ * OPEN on a door closed with CLOSE (arkinox, 2026-11-01: a SHORT reveal): the card
+ * yields when the door is drawn, and the door plays the short crossfade from shut
+ * to open (lib/ceremony.ts afterReopen), the calm path's, shorter than the first
+ * OPEN's slab decoding away. No sound, no loot, no reveal of the room.
+ */
+export function celebrateReopen(o: { me: string; chestId: string }): ReturnType<typeof afterReopen> {
+  const plan = afterReopen(lookDrawn(o.chestId))
+  if (plan.yieldCards) yieldToWorld()
+  if (plan.ceremony) useOpenCeremony.getState().begin(o.me, o.chestId, 'door', true)
+  return plan
+}
+
+/**
+ * CLOSE on an opened door: the card yields when the door is drawn, so the door is
+ * seen closing, and its open look fades back into the closed one, as briefly.
+ * No sound.
+ */
+export function celebrateClose(o: { me: string; chestId: string }): ReturnType<typeof afterReopen> {
+  const plan = afterReopen(lookDrawn(o.chestId))
+  if (plan.yieldCards) yieldToWorld()
+  if (plan.ceremony) useOpenCeremony.getState().begin(o.me, o.chestId, 'door', true, performance.now(), true)
   return plan
 }
 

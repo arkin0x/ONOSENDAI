@@ -46,9 +46,9 @@ import { doorSecret, resetDoorSecrets } from '../doorSecrets'
 import { useBuilder } from '../useBuilder'
 import { useCyberspace } from '../useCyberspace'
 import { useInventory } from '../useInventory'
-import { resetOpenedChests } from '../useOpenedChests'
-import { behindDoor, behindDoorDeep, doorDepth, effectiveDoorHeight, positionOf, sealingDoor, useShards, type MyDeployment } from '../useShards'
-import { openRoom } from '../rooms'
+import { closedByMe, openedByHand, rememberOpened, resetOpenedChests } from '../useOpenedChests'
+import { behindDoor, behindDoorDeep, closedRoomTest, doorDepth, effectiveDoorHeight, positionOf, sealingDoor, useShards, type MyDeployment } from '../useShards'
+import { closeDoor, openRoom, reopenClosedDoor } from '../rooms'
 
 const S = () => useShards.getState()
 const C = () => useCyberspace.getState()
@@ -91,6 +91,7 @@ beforeEach(() => {
   lock = forgeKey('Silver Key')
   localStorage.removeItem('onosendai:door-secrets')
   localStorage.removeItem('onosendai:chests-opened')
+  localStorage.removeItem('onosendai:doors-closed')
   resetDoorSecrets()
   resetOpenedChests()
   useShards.setState({ mine: [], deleted: {}, deletedBags: {}, discovered: {}, pending: null, chestBack: null, deployHeight: 0, deployUnit: 0, deployTurn: [0, 0, 0], deployStatus: 'idle', deployError: null, selectedSecret: null, deployLeaveOut: null, deployInto: null, deployDoorHeight: null, placedLast: null })
@@ -362,5 +363,59 @@ describe('MOVE, DELETE and EDIT with a door behind a door', () => {
     expect(await S().resealDoor(inner.eventId, { name: 'Renamed', requires: '', lock: lockOf() })).toBeNull()
     const seen = await openRoom(asFound(named('Outer')), doorSecret(me(), outer.eventId)!)
     expect(seen.items.map((h) => h.chest?.name)).toEqual(['Renamed'])
+  })
+})
+
+describe('CLOSE on a door of yours (arkinox, 2026-11-01)', () => {
+  const texts = (): string[] => S().worldItems().filter((w) => w.type === 'message').map((w) => w.text ?? '').sort()
+
+  it('what you hid in its room leaves the world with it, the inner room too; OPEN brings the outer back, the inner stays closed', async () => {
+    const outer = await sealDoor('Outer', OUTER)
+    const inner = await sealDoor('Inner', OUTER, INNER)
+    await hide('outer thing', OUTER)
+    await hide('deep inside', INNER)
+    expect(texts()).toEqual(['deep inside', 'outer thing'])
+    // Opened by hand here, as any finder opens it: its card then offers CLOSE.
+    rememberOpened(me(), outer.eventId, outer.chest!.lockPubkey, [])
+    const closed = closeDoor(asFound(outer))
+    expect(closed).toEqual(expect.arrayContaining([outer.eventId, inner.eventId]))
+    expect(texts()).toEqual([])
+    expect(S().worldItems().map((w) => w.key)).not.toContain(inner.eventId)
+    expect(S().worldItems().map((w) => w.key)).toContain(outer.eventId)
+    // Nothing was written: the rows are as they were, and every secret is kept.
+    expect(S().mine.map((d) => d.text).filter(Boolean).sort()).toEqual(['deep inside', 'outer thing'])
+    expect(doorSecret(me(), outer.eventId)).not.toBeNull()
+    expect(doorSecret(me(), inner.eventId)).not.toBeNull()
+    const sent = relay.events.length
+    expect(reopenClosedDoor(asFound(outer))).toBe(doorSecret(me(), outer.eventId))
+    expect(relay.events.length).toBe(sent)
+    expect(openedByHand(me(), outer.eventId, outer.chest!.lockPubkey)).toBe(true)
+    expect(closedByMe(me(), inner.eventId, inner.chest!.lockPubkey)).toBe(true)
+    expect(texts()).toEqual(['outer thing'])
+    expect(S().worldItems().map((w) => w.key)).toContain(inner.eventId)
+    reopenClosedDoor(asFound(inner))
+    expect(texts()).toEqual(['deep inside', 'outer thing'])
+  })
+
+  it('closedRoomTest: nothing closed reads the world as it was; a room inside a closed room is closed, and what came out of a chest there', () => {
+    const OUT = '1'.repeat(64), IN = '2'.repeat(64), CHEST = '3'.repeat(64), LOCK = '4'.repeat(64)
+    const row = (eventId: string, room?: string, chest = false): MyDeployment => ({ eventId, ...(room ? { room: { doorId: room } } : {}), ...(chest ? { chest: { lockPubkey: LOCK } } : {}) }) as unknown as MyDeployment
+    const state = {
+      mine: [row(OUT, undefined, true), row(IN, OUT, true), row('a'.repeat(64), OUT), row('b'.repeat(64), IN), row(CHEST, OUT, true), row('d'.repeat(64))],
+      discovered: { ['e'.repeat(64)]: { eventId: 'e'.repeat(64), chestId: CHEST } as unknown as Hidden },
+    }
+    expect(closedRoomTest(state, me())).toBeNull()
+    rememberOpened(me(), OUT, LOCK, [])
+    localStorage.setItem('onosendai:doors-closed', JSON.stringify({ [me()]: [`${OUT}:${LOCK}`] }))
+    resetOpenedChests()
+    const shut = closedRoomTest(state, me())!
+    expect(['a', 'b', 'e'].map((c) => shut(c.repeat(64)))).toEqual([true, true, true])
+    expect([OUT, 'd'.repeat(64)].map((id) => shut(id))).toEqual([false, false])
+    expect(shut(IN)).toBe(true)
+    // Another identity on this device closed nothing.
+    expect(closedRoomTest(state, '9'.repeat(64))).toBeNull()
+    // Closed under an old lock: the door's lock now is another, so its room is not closed.
+    const relocked = { ...state, mine: state.mine.map((d) => (d.eventId === OUT ? row(OUT) : d)).map((d) => (d.eventId === OUT ? ({ ...d, chest: { lockPubkey: '5'.repeat(64) } } as unknown as MyDeployment) : d)) }
+    expect(closedRoomTest(relocked, me())!('a'.repeat(64))).toBe(false)
   })
 })

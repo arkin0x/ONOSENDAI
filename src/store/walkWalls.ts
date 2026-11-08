@@ -66,8 +66,9 @@ import type { AxisName, Position, ViewAxes } from '../lib/space'
 import { constrainOf, enclosed, firstHit, wallMesh, type WallMesh } from '../lib/walkConstrain'
 import { useShards, type WorldItem } from './useShards'
 import { useCyberspace } from './useCyberspace'
-import { openedByHand } from './useOpenedChests'
-import { drawnLook, lookOf } from '../lib/looks'
+import { closedByMe, openedByHand } from './useOpenedChests'
+import { doorHeightOf, drawnLook, lookOf } from '../lib/looks'
+import { inRoom } from '../lib/doors'
 
 /**
  * The frame the walls are measured in: screen right +X, up +Y, out of the
@@ -96,6 +97,12 @@ export type WallItem = Pick<WorldItem, 'key' | 'at' | 'height' | 'plane'> & Part
    * and never pass through the door (review of the ceremony, #532).
    */
   inside?: boolean
+  /**
+   * A door this identity closed with CLOSE, and its room's height: it never
+   * holds a walker inside its room or its slab, so a close never traps anyone
+   * (wallItemsAt), and stops one coming in from outside, as any closed door.
+   */
+  closedRoom?: number
 }
 
 /** No cut at all, for an uncut wall: wider than anything a wall mesh can reach. */
@@ -931,7 +938,9 @@ export function wallItems(plane: number): WallItem[] {
     // Opened by hand, this session or before, under the lock it has now (R10).
     const model = drawnLook(look, openedByHand(me, w.key, w.chest.lockPubkey))
     if (!model || constrainOf(model) === 'off') continue
-    looks.push({ key: doorWallKey(w.key), at: w.at, height: w.height, plane: w.plane, author: w.author, mine: w.mine, shard: model, uncut: look.name !== 'custom', door: look.kind === 'door' })
+    const roomHeight = look.kind === 'door' ? doorHeightOf(w.event?.tags) : undefined
+    const closedRoom = typeof roomHeight === 'number' && closedByMe(me, w.key, w.chest.lockPubkey) ? roomHeight : undefined
+    looks.push({ key: doorWallKey(w.key), at: w.at, height: w.height, plane: w.plane, author: w.author, mine: w.mine, shard: model, uncut: look.name !== 'custom', door: look.kind === 'door', ...(closedRoom !== undefined ? { closedRoom } : {}) })
   }
   return looks.length > 0 ? [...shards, ...looks] : shards
 }
@@ -939,11 +948,26 @@ export function wallItems(plane: number): WallItem[] {
 /**
  * The walls of a walker at `from`: wallItems, where a door opened by hand
  * before on this device is open after a reload too, whether a key or a
- * signer opened it (store/useOpenedChests openedByHand), and a closed door
+ * signer opened it (store/useOpenedChests openedByHand), a door closed with
+ * CLOSE lets a walker inside its room go (closedDoorLets), and a closed door
  * whose slab already holds them is marked `inside`: they can step out of it
  * (review of #532), on their own side only (review of the ceremony). What
  * every WALK step, fall and jump asks.
  */
 export function wallItemsAt(plane: number, from: Position): WallItem[] {
-  return wallItems(plane).map((w) => ((w.uncut || w.door) && enclosesWalker(w, from) ? { ...w, inside: true } : w))
+  return wallItems(plane)
+    .filter((w) => !closedDoorLets(w, from))
+    .map((w) => ((w.uncut || w.door) && enclosesWalker(w, from) ? { ...w, inside: true } : w))
+}
+
+/**
+ * Nobody is trapped by CLOSE (arkinox, 2026-11-01: "you can't get trapped"). A
+ * door closed with CLOSE is no wall at all to a walker who stands inside its room
+ * (the aligned cube of its height that holds it, DECK-0004 §3.7.1) or inside its
+ * slab: they walk out through the doorway. From outside the room it stops them,
+ * as any closed door does, until OPEN.
+ */
+export function closedDoorLets(w: WallItem, from: Position): boolean {
+  if (w.closedRoom === undefined) return false
+  return inRoom(w.at, w.closedRoom, from) || enclosesWalker(w, from)
 }

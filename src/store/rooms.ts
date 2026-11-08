@@ -35,7 +35,7 @@ import { regionKeyOffThread } from '../lib/regionKeyOffThread'
 import { MAX_COMPUTE_HEIGHT, useCyberspace } from './useCyberspace'
 import { useInventory } from './useInventory'
 import { positionOf, useShards } from './useShards'
-import { rememberOpened } from './useOpenedChests'
+import { closedByMe, openedByHand, rememberClosed, rememberOpened } from './useOpenedChests'
 import { doorSecret, doorSecretOnlySaid, keepDoorSecret } from './doorSecrets'
 
 export { doorSecret, doorSecretOnlySaid, keepDoorSecret, resetDoorSecrets } from './doorSecrets'
@@ -139,13 +139,15 @@ function ownSecret(chest: NonNullable<Hidden['chest']>, opener: Opener): string 
  * whoever comes to hold its key (ownOpenOwed): its room is never lost to this door's
  * secret.
  */
-export function openDoorNow(door: Hidden, secretHex: string): void {
+export function openDoorNow(door: Hidden, secretHex: string, how?: { quiet: true }): void {
   const me = useCyberspace.getState().identity.pubkey
   keepDoorSecret(me, door.eventId, secretHex)
   if (door.chest) rememberOpened(me, door.eventId, door.chest.lockPubkey, [])
   const keys = openingKeys(useInventory.getState().items)
   for (const d of doorsOfRoom(door)) {
     if (d.eventId === door.eventId || !d.chest) continue
+    // A reload's reopening never opens a door you closed (CLOSE): only OPEN does.
+    if (how?.quiet && closedByMe(me, d.eventId, d.chest.lockPubkey)) continue
     const own = ownSecret(d.chest, openerFor(d.chest, keys, me))
     if (own !== null && own !== secretHex) continue
     if (own === null && doorSecret(me, d.eventId) && !doorSecretOnlySaid(me, d.eventId)) continue
@@ -175,6 +177,8 @@ export async function fillRoom(door: Hidden, secretHex: string, mark?: (items: H
   const me = useCyberspace.getState().identity.pubkey
   const opened = await openRoom(door, secretHex)
   if (useCyberspace.getState().identity.pubkey !== me) return null
+  // Closed while its room was on the way (CLOSE): the room stays dissolved.
+  if (door.chest && closedByMe(me, door.eventId, door.chest.lockPubkey)) return null
   if (opened.items.length > 0) {
     useShards.getState().addDiscovered(opened.items)
     mark?.(opened.items)
@@ -182,11 +186,105 @@ export async function fillRoom(door: Hidden, secretHex: string, mark?: (items: H
   return opened
 }
 
-/** Both: the door open, then its room. */
-export async function enterRoom(door: Hidden, secretHex: string, mark?: (items: Hidden[]) => void): Promise<OpenedRoom | null> {
+/** Both: the door open, then its room. `quiet`: a reload's reopening, which opens no door you closed. */
+export async function enterRoom(door: Hidden, secretHex: string, mark?: (items: Hidden[]) => void, how?: { quiet: true }): Promise<OpenedRoom | null> {
   if (door.chestId) throw new Error('A door found inside a chest does not open a room.')
-  openDoorNow(door, secretHex)
+  openDoorNow(door, secretHex, how)
   return fillRoom(door, secretHex, mark)
+}
+
+/** What a close reads of a thing found or hidden: enough to follow rooms and chests down. */
+interface Held { eventId: string; room?: { doorId: string }; chestId?: string; door: boolean; lock?: string }
+
+/** Everything this device holds in the world, found or hidden, as a close reads it. */
+function heldThings(): Held[] {
+  const s = useShards.getState()
+  const out = new Map<string, Held>()
+  for (const d of s.mine) out.set(d.eventId, { eventId: d.eventId, room: d.room, door: d.chest?.door !== undefined, lock: d.chest?.lockPubkey })
+  for (const h of Object.values(s.discovered)) {
+    if (out.has(h.eventId)) continue
+    out.set(h.eventId, { eventId: h.eventId, room: h.room, chestId: h.chestId, door: h.type === 'chest' && heightOfDoor(h) !== null, lock: h.chest?.lockPubkey })
+  }
+  return [...out.values()]
+}
+
+/**
+ * CLOSE on an opened door (arkinox, 2026-11-01): the door closes and its room
+ * dissolves, here and nowhere else. Every door of the room closes with it
+ * (§3.7.5: one room, one state), and every door found inside the room, and
+ * inside theirs, all the way down (§3.7.6), each kept closed for this identity
+ * (store/useOpenedChests rememberClosed). What stood in those rooms, and what
+ * came out of a chest there, goes from the finds; what you hid there yourself
+ * is left out of the world while its door is closed (useShards worldOf).
+ *
+ * Nothing is published and no relay is asked. The secrets stay kept, so OPEN
+ * opens each again with no key (reopenClosedDoor), and nothing else does.
+ * Returns the ids of the doors closed.
+ */
+export function closeDoor(door: Hidden): string[] {
+  const me = useCyberspace.getState().identity.pubkey
+  const things = heldThings()
+  // The doors whose rooms dissolve: this room's, then each door standing in a dissolving room.
+  const rooms = new Set(doorsOfRoom(door).map((d) => d.eventId))
+  const gone = new Set<string>()
+  let grew = true
+  while (grew) {
+    grew = false
+    for (const t of things) {
+      if (gone.has(t.eventId)) continue
+      if ((t.room && rooms.has(t.room.doorId)) || (t.chestId && gone.has(t.chestId))) {
+        gone.add(t.eventId)
+        if (t.door) rooms.add(t.eventId)
+        grew = true
+      }
+    }
+  }
+  const closed: string[] = []
+  const lockOf = new Map(things.map((t) => [t.eventId, t.lock]))
+  for (const d of doorsOfRoom(door)) if (d.chest) lockOf.set(d.eventId, d.chest.lockPubkey)
+  for (const id of rooms) {
+    const lock = lockOf.get(id)
+    if (!lock) continue
+    // A door you opened, or whose secret is kept here (yours, sealed on this device): shut until OPEN.
+    if (!openedByHand(me, id, lock) && !doorSecret(me, id)) continue
+    rememberClosed(me, id, lock)
+    closed.push(id)
+    lastReopen.delete(`${me}/${id}`)
+  }
+  const s = useShards.getState()
+  const discovered = { ...s.discovered }
+  for (const id of gone) delete discovered[id]
+  // A fresh record even when nothing left it, so everything drawn from it is drawn again.
+  useShards.setState({ discovered })
+  return closed
+}
+
+/**
+ * OPEN on a door closed with CLOSE: no key, since its secret is kept here, and
+ * at once, as any OPEN (openDoorNow). Every door of its room that this close shut
+ * opens with it (§3.7.5); a door inside the room stays closed until its own OPEN.
+ * The room is then fetched as it is now (fillRoom), with no reveal of its own:
+ * the card's caller plays the short one. The secret, or null when none is kept.
+ */
+export function reopenClosedDoor(door: Hidden): string | null {
+  const me = useCyberspace.getState().identity.pubkey
+  const secret = doorSecret(me, door.eventId)
+  if (!secret || !door.chest) return null
+  const room = doorsOfRoom(door)
+  if (doorSecretOnlySaid(me, door.eventId)) {
+    // Only said by another door of the room: that door opens it, as it did, so this
+    // secret is never kept as this door's own.
+    const owner = room.find((d) => d.eventId !== door.eventId && !!d.chest && doorSecret(me, d.eventId) === secret && !doorSecretOnlySaid(me, d.eventId))
+    if (owner) openDoorNow(owner, secret)
+    rememberOpened(me, door.eventId, door.chest.lockPubkey, [])
+  } else openDoorNow(door, secret)
+  // The rest of the room this close shut, a door of yours you never opened by hand included.
+  for (const d of room) {
+    if (d.chest && closedByMe(me, d.eventId, d.chest.lockPubkey) && doorSecret(me, d.eventId) === secret) rememberOpened(me, d.eventId, d.chest.lockPubkey, [])
+  }
+  // A fresh record, so what you hid in the room is drawn again (useShards worldOf).
+  useShards.setState({ discovered: { ...useShards.getState().discovered } })
+  return secret
 }
 
 /** How soon an opened door's room is asked for again by a scan: a found room rarely, one not found soon, since it may only be missing from the relays asked. */
@@ -204,6 +302,8 @@ export function resetReopens(): void { lastReopen.clear() }
  */
 export async function reopenRoom(door: Hidden): Promise<void> {
   const me = useCyberspace.getState().identity.pubkey
+  // Closed with CLOSE: never opened again by a reload or a scan (arkinox, 2026-10-26), only by OPEN.
+  if (door.chest && closedByMe(me, door.eventId, door.chest.lockPubkey)) return
   const secret = doorSecret(me, door.eventId)
   if (!secret) return
   // A secret only said is the room of the door that said it, which opens it
@@ -218,7 +318,7 @@ export async function reopenRoom(door: Hidden): Promise<void> {
   // Claimed before the wait: scans do not stack up behind a slow relay.
   lastReopen.set(key, { at: Date.now(), found: was?.found ?? false })
   try {
-    const opened = said ? await fillRoom(door, secret) : await enterRoom(door, secret)
+    const opened = said ? await fillRoom(door, secret) : await enterRoom(door, secret, undefined, { quiet: true })
     if (opened) lastReopen.set(key, { at: Date.now(), found: opened.found })
   } catch (err) {
     // A room bag found that does not open with its key is found: asked again as seldom

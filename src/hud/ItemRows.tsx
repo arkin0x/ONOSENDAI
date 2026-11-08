@@ -19,7 +19,9 @@
  * Used by the bag record (LootDetail), the nearby list (NearbyLootModal), the
  * item modal (SecretModal) and the ITEMS panel's taken chests, so a chest
  * opens the same way from every door. Opening is a local act: nothing is
- * published. An item's picture stands where its kind's icon would, in every
+ * published. An opened door has CLOSE instead (arkinox, 2026-11-01), local
+ * too: the door shuts and its room dissolves (store/rooms closeDoor), and its
+ * OPEN then needs no key, its secret being kept here. An item's picture stands where its kind's icon would, in every
  * row that draws one (ItemFace); the key line itself is the words.
  */
 
@@ -28,19 +30,19 @@ import { useProfile } from '../hooks/useProfile'
 import { cashuLabel, readCashuToken } from '../lib/cashu'
 import { chestSealer, openWithSecret, openWithSigner, openerFor, readContents, requiresLabel, revealedIn, type ChestEntry, type Opener } from '../lib/chests'
 import { positionOf, useShards } from '../store/useShards'
-import { BagUnreadable, hiddenLabel, itemLineage, keyItemOf, type ChestItem } from '../lib/hidden'
+import { BagUnreadable, hiddenLabel, itemLineage, keyItemOf, type ChestItem, type Hidden } from '../lib/hidden'
 import { ItemFace } from './ItemIcon'
 import { ShardThumb } from './ShardThumb'
 import { holdsEntry, holdsItem, openingKeys, type HeldFrom, type HeldItem, type HeldPlace } from '../lib/inventory'
 import { safeNpub } from '../lib/npub'
 import { useCyberspace } from '../store/useCyberspace'
 import { useInventory } from '../store/useInventory'
-import { forgetRefusal, openedByHand, openedContents, openedKey, readRefused, refuseRead, rememberOpened, useOpenedChests } from '../store/useOpenedChests'
-import { celebrateOpen, takeAndVanish } from '../store/useOpenCeremony'
+import { closedByMe, forgetRefusal, openedByHand, openedContents, openedKey, readRefused, refuseRead, rememberOpened, useOpenedChests } from '../store/useOpenedChests'
+import { celebrateClose, celebrateOpen, celebrateReopen, takeAndVanish } from '../store/useOpenCeremony'
 import { useCeremony } from '../store/useCeremony'
 import { isDoor, lookOf } from '../lib/looks'
 import { doorSecretWithKey, doorSecretWithSigner } from '../lib/doors'
-import { doorAsFound, fillRoom, ownOpenOwed, openDoorNow } from '../store/rooms'
+import { closeDoor, doorAsFound, doorSecret, fillRoom, ownOpenOwed, openDoorNow, reopenClosedDoor } from '../store/rooms'
 import { useToast } from '../store/useToast'
 import { chestLoot } from '../lib/lootObjects'
 import { landedAt } from '../lib/ceremony'
@@ -214,6 +216,11 @@ export function ChestBlock({ id, chest, author, verified, place, sealer: given, 
   const handOpened = openedByHand(me, id, chest.lockPubkey)
   // Open only because another door of its room was, and its own key is here now (§3.7.5).
   const owed = door && handOpened && ownOpenOwed(me, id, chest, opener)
+  // CLOSE (arkinox, 2026-11-01): a door open here, its secret kept, so OPEN can open it again with no key.
+  const secretKept = door && !!doorSecret(me, id)
+  const canClose = secretKept && handOpened && !owed
+  // Closed with CLOSE: OPEN with no key, from the kept secret, and nothing else opens it.
+  const closedHere = secretKept && closedByMe(me, id, chest.lockPubkey)
   const readKey = `${openedKey(me, id)}:${chest.lockPubkey}`
   const tried = useRef<string | null>(null)
   const [, setRefusals] = useState(0)
@@ -241,18 +248,52 @@ export function ChestBlock({ id, chest, author, verified, place, sealer: given, 
     openDoorNow(at, secret)
     celebrateOpen({ me, chestId: id, kind: 'door', first, calm: prefersReducedMotion() })
     // Then the room: what is behind it settles out of static where it stands
-    // (door A), the first time only. The card has gone by now, so what went wrong
-    // is said where it can be seen (§3.7.3: not found is not the same as empty).
+    // (door A), the first time only.
+    await enterTheRoom(at, secret, first ? (items) => useCeremony.getState().mark(items) : undefined)
+  }
+
+  /**
+   * The room behind a door just opened, fetched as it is now. The card has gone by
+   * now, so what went wrong is said where it can be seen (§3.7.3: not found is not
+   * the same as empty).
+   */
+  const enterTheRoom = async (at: Hidden, secret: string, mark?: (items: Hidden[]) => void): Promise<void> => {
     let unreadable = false
-    const opened = await fillRoom(at, secret, first ? (items) => useCeremony.getState().mark(items) : undefined).catch((err: unknown) => { unreadable = err instanceof BagUnreadable; return undefined })
+    const opened = await fillRoom(at, secret, mark).catch((err: unknown) => { unreadable = err instanceof BagUnreadable; return undefined })
     if (opened === null) return
     // The relays have the room, but its bag does not open with its key: not missing, so not "may only be missing".
     if (unreadable) { useToast.getState().show({ label: 'THE ROOM WILL NOT OPEN', meta: `${chest.name} is open. The room behind it is unreadable.`, mark: 'build' }); return }
     if (!opened?.found) useToast.getState().show({ label: 'THE ROOM COULD NOT BE RETRIEVED', meta: `${chest.name} is open, but what is behind it did not come back from your relays. It may only be missing from them.`, mark: 'build' })
   }
 
+  // OPEN on a door closed with CLOSE: no key (its secret is kept), at once, and the short reveal.
+  const reopenDoor = async (): Promise<void> => {
+    const at = doorAsFound(id)
+    if (!at) { setStatus('This door is no longer here.'); return }
+    const secret = reopenClosedDoor(at)
+    if (!secret) return
+    celebrateReopen({ me, chestId: id })
+    await enterTheRoom(at, secret)
+  }
+
+  // CLOSE: here only, nothing published. The door shuts and its room dissolves, sub doors with it.
+  const shut = (): void => {
+    const at = doorAsFound(id)
+    if (!at) { setStatus('This door is no longer here.'); return }
+    setStatus(null)
+    closeDoor(at)
+    celebrateClose({ me, chestId: id })
+  }
+
   const open = async (): Promise<void> => {
-    if (!opener || busy) return
+    if (busy) return
+    if (closedHere) {
+      setBusy(true)
+      setStatus(null)
+      try { await reopenDoor() } finally { setBusy(false) }
+      return
+    }
+    if (!opener) return
     // Inside the tap, so a phone lets the ceremony's sound out (lib/audioContext).
     resumeAudio()
     // Once per chest, per identity, per device: a chest opened by hand before plays nothing.
@@ -292,11 +333,14 @@ export function ChestBlock({ id, chest, author, verified, place, sealer: given, 
           {/* The card names it above its look (SecretModal); every list names it here. */}
           {named && <span className="item__name" title={chest.name}>{chest.name}</span>}
           <span className="item__meta" title={opensWith ? `Opens with ${opensWith}` : 'The hider’s label of what opens it'}>
-            {entries || rereading ? 'OPEN' : `REQUIRES: ${requiresLabel(chest)}`} · hidden by {who}{!verified && <> · <Unsigned /></>}
+            {closedHere ? 'CLOSED' : entries || rereading || canClose ? 'OPEN' : `REQUIRES: ${requiresLabel(chest)}`} · hidden by {who}{!verified && <> · <Unsigned /></>}
           </span>
         </span>
-        {opener && (!entries || owed) && (
-          <button className="chest__act" onClick={() => void open()} disabled={busy || rereading} title={`Decrypt it here with ${opensWith}`}>{busy || rereading ? 'OPENING' : 'OPEN'}</button>
+        {canClose && (
+          <button className="chest__act" onClick={shut} title="Close it here. Nothing is sent.">CLOSE</button>
+        )}
+        {(closedHere || (opener && (!entries || owed) && !canClose)) && (
+          <button className="chest__act" onClick={() => void open()} disabled={busy || rereading} title={closedHere ? 'Open it again here. Its secret is kept on this device.' : `Decrypt it here with ${opensWith}`}>{busy || rereading ? 'OPENING' : 'OPEN'}</button>
         )}
       </div>
       {status && <span className="chest__status" role="status">{status}</span>}

@@ -66,10 +66,15 @@ export interface DrawnRegion {
  * `maxCells` across, else the part of it within `maxCells / 2` cells of the
  * cursor on each axis, with the faces it was cut at. Null when it is too
  * small to see.
+ *
+ * `about` is the point a big region is clipped around, the cursor unless
+ * given: a door's room is clipped about the viewer while the viewer stands in
+ * it (DoorRooms). It must lie in the region.
  */
 export function drawnRegion(
   cursor: { x: bigint; y: bigint; z: bigint }, origin: { x: bigint; y: bigint; z: bigint },
   height: number, scaleExp: number, axes: ViewAxes, maxCells: number,
+  about: { x: bigint; y: bigint; z: bigint } = cursor,
 ): DrawnRegion | null {
   const exp = height - scaleExp
   const centre: [number, number, number] = [0, 0, 0]
@@ -102,7 +107,7 @@ export function drawnRegion(
     let from = lo
     let to = hi
     if (side > maxCells) {
-      const c = cellDelta(alignTo(cursor[a.axis], scaleExp), origin[a.axis], scaleExp)
+      const c = cellDelta(alignTo(about[a.axis], scaleExp), origin[a.axis], scaleExp)
       from = Math.max(lo, c - half)
       to = Math.min(hi, c + half)
       // In render space the low world side is the -dir side.

@@ -11,13 +11,19 @@
  * region box uses the same walls (arkinox, 2026-10-16: "make it like the blue
  * region for moves with the zoom out expanding walls when the cube doesn't
  * fit").
+ *
+ * A door's room uses them too (DoorRooms), drawn as frames rather than
+ * fills (`look="frame"`): you stand inside a big room, so the camera is often
+ * inside its drawn box, and from in there every line of sight crosses a cut
+ * wall; filled walls turned the whole view red (2026-11-08). A frame is the
+ * face's outline breathing outward the same way, and lines never wash.
  */
 
 import { useEffect, useMemo, useRef } from 'react'
 import { useFrame } from '@react-three/fiber'
 import {
-  AddEquation, CustomBlending, DoubleSide, EqualStencilFunc, Group, MeshBasicMaterial,
-  NotEqualStencilFunc, OneFactor, OneMinusSrcAlphaFactor, PlaneGeometry, SrcAlphaFactor, Vector3, ZeroFactor,
+  AddEquation, type BufferGeometry, CustomBlending, DoubleSide, EdgesGeometry, EqualStencilFunc, Group, LineBasicMaterial,
+  MeshBasicMaterial, NotEqualStencilFunc, OneFactor, OneMinusSrcAlphaFactor, PlaneGeometry, SrcAlphaFactor, Vector3, ZeroFactor,
 } from 'three'
 import { WorldLabel } from './WorldLabel'
 import { FACE_TAG_STENCIL } from './ShardMesh'
@@ -64,7 +70,7 @@ export interface ClipFace {
 }
 
 interface Wall extends ClipFace {
-  geometry: PlaneGeometry
+  geometry: BufferGeometry
   rotation: [number, number, number]
   /** Face centre at rest, in cells; each breath departs from here. */
   base: [number, number, number]
@@ -84,9 +90,15 @@ interface Props {
    * marks the face.
    */
   hideNear?: boolean
+  /** Peak opacity of a breath; WALL_OPACITY unless a quieter box asks for less (a door's room, DoorRooms). */
+  opacity?: number
+  /** The words on each wall, or null for none (a door's room carries no label, arkinox 2026-11-08). */
+  label?: string | null
+  /** A filled translucent plane (the default), or only its outline (a door's room: see the file's comment). */
+  look?: 'fill' | 'frame'
 }
 
-export function ClipWalls({ centre, size, faces, color, hideNear = false }: Props): JSX.Element | null {
+export function ClipWalls({ centre, size, faces, color, hideNear = false, opacity = WALL_OPACITY, label = 'ZOOM OUT', look = 'fill' }: Props): JSX.Element | null {
   const walls = useMemo<Wall[]>(() => faces.map(({ slot, sign }) => {
     // PlaneGeometry faces +Z; rotate it to face the slot's render axis. Its
     // extents are the face's own two render axes, so the plane is exactly
@@ -97,8 +109,12 @@ export function ClipWalls({ centre, size, faces, color, hideNear = false }: Prop
     const h = slot === 1 ? size[2] : size[1]
     const base: [number, number, number] = [centre[0], centre[1], centre[2]]
     base[slot] += (sign * size[slot]) / 2
-    return { slot, sign, geometry: new PlaneGeometry(w, h), rotation, base }
-  }), [faces, centre, size])
+    const plane = new PlaneGeometry(w, h)
+    if (look === 'fill') return { slot, sign, geometry: plane, rotation, base }
+    const frame = new EdgesGeometry(plane)
+    plane.dispose()
+    return { slot, sign, geometry: frame, rotation, base }
+  }), [faces, centre, size, look])
 
   useEffect(() => () => { for (const w of walls) w.geometry.dispose() }, [walls])
 
@@ -108,17 +124,18 @@ export function ClipWalls({ centre, size, faces, color, hideNear = false }: Prop
   // that carries a wall past the camera still has to be readable from behind;
   // depthWrite off, so a translucent plane never punches a hole in what sits
   // behind it.
-  const materials = useMemo(() => [OFF_FACES, OVER_FACES].map((split) => new MeshBasicMaterial({
+  // A frame is lines, which neither tag nor cover a face: one material, no split.
+  const materials = useMemo(() => (look === 'frame' ? [new LineBasicMaterial({ color, transparent: true, opacity, depthWrite: false, toneMapped: false })] : [OFF_FACES, OVER_FACES].map((split) => new MeshBasicMaterial({
     color,
     transparent: true,
-    opacity: WALL_OPACITY,
+    opacity,
     side: DoubleSide,
     // One pass, not three's back-then-front pair (see ShardMesh).
     forceSinglePass: true,
     depthWrite: false,
     toneMapped: false,
     ...split,
-  })), [color])
+  }))), [color, opacity, look])
   useEffect(() => () => { for (const m of materials) m.dispose() }, [materials])
 
   const meshes = useRef<Array<Group | null>>([])
@@ -134,7 +151,7 @@ export function ClipWalls({ centre, size, faces, color, hideNear = false }: Prop
     // Ease-out: the wall departs briskly and decelerates as it fades, which
     // reads as emanating from the box rather than drifting off it.
     const eased = 1 - (1 - t) ** 3
-    for (const m of materials) m.opacity = WALL_OPACITY * (1 - eased)
+    for (const m of materials) m.opacity = opacity * (1 - eased)
     for (let i = 0; i < walls.length; i++) {
       const mesh = meshes.current[i]
       if (!mesh) continue
@@ -158,14 +175,15 @@ export function ClipWalls({ centre, size, faces, color, hideNear = false }: Prop
       {walls.map((w, i) => (
         <group key={`${w.slot}${w.sign}`} ref={(g) => { shown.current[i] = g }}>
           <group ref={(g) => { meshes.current[i] = g }} position={w.base}>
-            {materials.map((m, k) => (
+            {materials.map((m, k) => (look === 'frame'
+              ? <lineSegments key={k} geometry={w.geometry} material={m} rotation={w.rotation} frustumCulled={false} renderOrder={OVERLAY_ORDER} />
               // OVERLAY_ORDER: over see-through shards, so their texels keep the bloom tag (shardFaces.ts).
-              <mesh key={k} geometry={w.geometry} material={m} rotation={w.rotation} frustumCulled={false} renderOrder={OVERLAY_ORDER} />
+              : <mesh key={k} geometry={w.geometry} material={m} rotation={w.rotation} frustumCulled={false} renderOrder={OVERLAY_ORDER} />
             ))}
           </group>
           {/* The remedy, written on the thing asking for it. Small and the
               box's own color: an instruction, not an alert. */}
-          <WorldLabel text="ZOOM OUT" color={color} at={w.base} px={11} align="center" />
+          {label !== null && <WorldLabel text={label} color={color} at={w.base} px={11} align="center" />}
         </group>
       ))}
     </>

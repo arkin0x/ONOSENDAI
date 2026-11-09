@@ -131,4 +131,13 @@ describe('CLOSE on the crash note', () => {
     expect(useShards.getState().selectedSecret).toBeNull()
     expect(card()).toBe('')
   })
+
+  it('after a HUD or menu crash leaves the card open, with its unsent comment draft (review of #622)', () => {
+    const dep = mineAt(25)
+    useShards.setState({ mine: [dep], selectedSecret: dep.eventId })
+    const note = new CrashNote({ where: 'the menu', children: null })
+    note.setState = () => {}
+    ;(note as unknown as { close: () => void }).close()
+    expect(useShards.getState().selectedSecret).toBe(dep.eventId)
+  })
 })

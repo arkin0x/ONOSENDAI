@@ -86,9 +86,10 @@ describe('TEST DISCOVERY on a bag above height 20', () => {
     const { dep, bag } = await deploy()
     useShards.setState({ mine: [dep] })
     relay.bags = [bag]
-    expect(await useShards.getState().testDiscovery(dep.eventId)).toBe('found')
+    // Checked with the stored key, and the result says why: no device derives 25.
+    expect(await useShards.getState().testDiscovery(dep.eventId)).toEqual({ outcome: 'found', key: { via: 'stored', why: 'height', height: HEIGHT } })
     relay.bags = []
-    expect(await useShards.getState().testDiscovery(dep.eventId)).toBe('missing')
+    expect((await useShards.getState().testDiscovery(dep.eventId)).outcome).toBe('missing')
     expect(regionKeyAt).not.toHaveBeenCalled()
   })
 })

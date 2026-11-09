@@ -1857,8 +1857,11 @@ kbd {
 .doorowner__view .item__name { min-width: 0; flex: 0 1 auto; }
 .doorowner__view:hover .item__name, .doorowner__view:focus-visible .item__name { color: var(--accent); }
 .doorowner__height { flex: none; font-size: 9px; letter-spacing: 0.06em; color: var(--dim); }
+.doorowner__cut { flex: none; font-size: 9px; letter-spacing: 0.06em; color: var(--warn); }
 /* The door-name chip on the hide bar (4.3): the door what you place is sealed to, with its X. */
 .deploybar__doorchip { display: flex; align-items: center; gap: 6px; padding: 4px 8px; border: 1px solid #ff3b4e; border-radius: 3px; color: #ff8a95; font-size: 11px; }
+/* SEAL IN ROOM on a MOVE or EDIT: offered, not taken; dim until tapped. */
+.deploybar__doorchip--offer { width: 100%; background: none; border-style: dashed; border-color: rgba(255, 59, 78, 0.55); color: #ff8a95; opacity: 0.85; font: inherit; font-size: 11px; cursor: pointer; text-align: left; }
 .deploybar__doorchip-name { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 /* Four models on a phone-narrow bar: they wrap rather than clip. */
 .deploybar__row--model .deploybar__choices { flex-wrap: wrap; }

@@ -251,6 +251,13 @@ export function heldList(keys: Record<string, HeldKey>, sort: SecretsSort = 'rec
     : list.sort((a, b) => b.at - a.at || volumeExponent(b) - volumeExponent(a))
 }
 
+/** The key held for the cube of this height holding `at`, in this plane, or null. A movement's box is not a cube and never answers. */
+export function heldCube(keys: Record<string, HeldKey>, at: { x: bigint; y: bigint; z: bigint }, plane: Plane, height: number): HeldKey | null {
+  const s = BigInt(height)
+  const base = { x: String((at.x >> s) << s), y: String((at.y >> s) << s), z: String((at.z >> s) << s) }
+  return Object.values(keys).find((k) => k.plane === plane && k.height === height && !k.heights && k.base.x === base.x && k.base.y === base.y && k.base.z === base.z) ?? null
+}
+
 export const useSecrets = create<SecretsState>((set, get) => ({
   keys: {},
   storage: { mode: 'loading', reason: null, bytes: 0, places: 0, placeKeys: 0, budget: SECRETS_BUDGET_BYTES, persisted: 'unasked', error: null, backstopError: null },
@@ -352,6 +359,9 @@ export const useSecrets = create<SecretsState>((set, get) => ({
   setSort: (sort) => set({ sort }),
 
   buy: async (at, plane, height) => {
+    // A key held for this very cube is the same key: never bought twice (review of #633).
+    const already = heldCube(get().keys, at, plane, height)
+    if (already) return already
     if (get().buying) return null
     const cs = useCyberspace.getState()
     set({ buying: { height, status: 'submitting', costMsats: 0, estSeconds: null, startedAt: Date.now() }, buyError: null })

@@ -177,6 +177,34 @@ describe('the chip while a door moves', () => {
   })
 })
 
+describe('SEAL IN ROOM on a MOVE (review of #633)', () => {
+  it('a MOVE in the room is offered the room, not taken; tapped, the room chip and its height; × keeps it out', async () => {
+    const away: Position = { ...CURSOR, x: CURSOR.x + (1n << 20n) }
+    useCyberspace.setState({ cursor: away, anchor: away })
+    S().startDeployMessage('to move')
+    S().setDeployHeight(2)
+    await S().deploy()
+    S().cancelDeploy()
+    const row = S().mine.find((d) => d.text === 'to move')!
+    useCyberspace.setState({ cursor: CURSOR, anchor: CURSOR })
+    await sealedDoor()
+    S().startMoveItem(row.eventId)
+    const bar = await mount(<DeployBar />)
+    expect(S().deployHeight).toBe(2)
+    expect(bar.says('SEAL IN ROOM · North Door')).toBe(true)
+    await bar.press('SEAL IN ROOM')
+    expect(S().deployHeight).toBe(HEIGHT)
+    expect(bar.says('SEAL IN ROOM')).toBe(false)
+    expect(bar.says('North Door')).toBe(true)
+    await bar.press('×')
+    expect(S().deploySealMove).toBe(false)
+    expect(S().deployHeight).toBe(2)
+    expect(bar.says('SEAL IN ROOM · North Door')).toBe(true)
+    await bar.unmount()
+    S().cancelDeploy()
+  })
+})
+
 describe('CONVERT TO DOOR, by its button', () => {
   it('says what blocks it, on the card, and the chest stays', async () => {
     const lock = forgeKey('Silver Key')

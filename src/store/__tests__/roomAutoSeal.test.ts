@@ -19,11 +19,11 @@ if (typeof localStorage === 'undefined') {
   }
 }
 
-const relay = vi.hoisted(() => ({ events: [] as Array<{ id: string; kind: number; pubkey: string; created_at: number; tags: string[][]; content: string }> }))
+const relay = vi.hoisted(() => ({ events: [] as Array<{ id: string; kind: number; pubkey: string; created_at: number; tags: string[][]; content: string }>, refuse: (_e: { kind: number; tags: string[][] }) => false as boolean }))
 vi.mock('../../lib/relay', () => {
   const answer = async (f: { kinds?: number[]; authors?: string[]; '#d'?: string[] }): Promise<unknown[]> => relay.events.filter((e) => (!f.kinds || f.kinds.includes(e.kind)) && (!f.authors || f.authors.includes(e.pubkey)) && (!f['#d'] || f['#d'].includes(e.tags.find((t) => t[0] === 'd')?.[1] ?? '')))
   return {
-    publishMany: vi.fn(async (_r: string[], ev: (typeof relay.events)[number]) => { relay.events.push(ev); return { ok: true } }),
+    publishMany: vi.fn(async (_r: string[], ev: (typeof relay.events)[number]) => { if (relay.refuse(ev)) return { ok: false }; relay.events.push(ev); return { ok: true } }),
     query: vi.fn(answer),
     queryAny: vi.fn((_r: string[], f: Parameters<typeof answer>[0]) => answer(f)),
     queryEach: vi.fn(async (f: Parameters<typeof answer>[0]) => [{ url: 'wss://relay.test', outcome: 'answered', events: await answer(f) }]),
@@ -33,17 +33,22 @@ vi.mock('../../lib/relay', () => {
 
 import { newShard, type ShardModel, type ShardPayload } from 'sno-core/shards'
 import { forgeKey } from '../../lib/chests'
-import { innermostRoomAt, roomOf, type OwnDoor } from '../../lib/doors'
+import { innermostRoomAt, roomKey, roomLookupId, roomOf, type OwnDoor } from '../../lib/doors'
 import type { AudioItem } from '../../lib/audioItem'
-import type { KeyItem } from '../../lib/hidden'
+import { HIDDEN_KIND, bagTemplate, type KeyItem } from '../../lib/hidden'
+import { hexToBytes } from '../../lib/events'
+import { BAG_SAFE_BYTES } from '../../lib/bagSize'
 import type { Position } from '../../lib/space'
 import { useStash } from '../../hud/stash'
-import { resetDoorSecrets } from '../doorSecrets'
+import { doorSecret, resetDoorSecrets } from '../doorSecrets'
+import { resetClosedDoors } from '../closedDoors'
+import { closeDoor } from '../rooms'
 import { useBuilder } from '../useBuilder'
 import { useCyberspace } from '../useCyberspace'
 import { useInventory } from '../useInventory'
-import { resetOpenedChests } from '../useOpenedChests'
-import { autoRoomFor, positionOf, useShards, type MyDeployment } from '../useShards'
+import { rememberOpened, resetOpenedChests } from '../useOpenedChests'
+import { heldCube, useSecrets } from '../useSecrets'
+import { SEAL_BUSY, autoRoomFor, hereInRoom, positionOf, useShards, type MyDeployment } from '../useShards'
 import { useWorkshop } from '../useWorkshop'
 
 const S = () => useShards.getState()
@@ -96,6 +101,9 @@ const audio: AudioItem = {
 
 beforeEach(() => {
   relay.events = []
+  relay.refuse = () => false
+  localStorage.removeItem('onosendai:doors-closed')
+  resetClosedDoors()
   lock = forgeKey('Silver Key')
   localStorage.removeItem('onosendai:door-secrets')
   localStorage.removeItem('onosendai:chests-opened')
@@ -158,7 +166,7 @@ describe('every kind of thing joins the room, whatever height was chosen', () =>
     expect(row.shard?.unit).toBe(9)
   })
 
-  it('a MOVE of something of yours into the room joins it too', async () => {
+  it('a MOVE or EDIT keeps its own bag and height; SEAL IN ROOM moves it in (review of #633)', async () => {
     goTo(AWAY)
     S().startDeployMessage('moved in')
     const was = await hideAt(2)
@@ -166,12 +174,41 @@ describe('every kind of thing joins the room, whatever height was chosen', () =>
     goTo(CURSOR)
     const door = await sealDoor('Room', ROOM)
     S().startMoveItem(was.eventId)
+    expect(S().deployHeight).toBe(2)
+    expect(S().deployRoomSnap).toBeNull()
+    expect(autoRoomFor({ ...S(), deploySealMove: true }, me(), CURSOR, door.plane)?.name).toBe('Room')
+    await S().deploy()
+    expect(S().deployError).toBeNull()
+    const stayed = S().mine.find((d) => d.text === 'moved in')!
+    expect(stayed.room).toBeUndefined()
+    expect(stayed.height).toBe(2)
+    S().cancelDeploy()
+    // Asked: SEAL IN ROOM.
+    S().startMoveItem(stayed.eventId)
+    S().setDeploySealMove(true)
     expect(S().deployHeight).toBe(ROOM)
     await S().deploy()
     expect(S().deployError).toBeNull()
     const moved = S().mine.find((d) => d.text === 'moved in')!
     expect(moved.room).toEqual({ doorId: door.eventId })
     expect(moved.height).toBe(ROOM)
+    S().cancelDeploy()
+    expect(S().deploySealMove).toBe(false)
+  })
+
+  it('an EDIT of a shard at the room\u2019s own height, hidden before the door, stays out unless asked', async () => {
+    const shard = benchShard(3)
+    S().startDeployShard(shard.id)
+    const before = await hideAt(ROOM)
+    expect(before.room).toBeUndefined()
+    await sealDoor('Room', ROOM)
+    S().startEditShard(before.eventId)
+    await S().deploy()
+    expect(S().deployError).toBeNull()
+    const shards = S().mine.filter((d) => d.type === 'shard')
+    expect(shards).toHaveLength(1)
+    expect(shards[0].room).toBeUndefined()
+    expect(shards[0].height).toBe(ROOM)
     S().cancelDeploy()
   })
 })
@@ -254,5 +291,149 @@ describe('nested rooms: the innermost', () => {
     expect(innermostRoomAt(doors, at, 0, (d) => d.height > 3)?.eventId).toBe('mid')
     expect(innermostRoomAt(doors, at, 1)?.eventId).toBe('other plane')
     expect(innermostRoomAt(doors, { ...at, x: at.x + (1n << 20n) }, 0)).toBeNull()
+  })
+})
+
+describe('rooms you CLOSEd, and keys already held (review of #633)', () => {
+  it('a room CLOSEd here never takes a placement on its own', async () => {
+    const door = await sealDoor('Room', ROOM)
+    rememberOpened(me(), door.eventId, door.chest!.lockPubkey, [])
+    await closeDoor({ eventId: door.eventId, inner: door.inner, keyHex: door.keyHex, bagId: door.bagId, lookupId: door.lookupId, author: me(), at: positionOf(door), plane: door.plane, height: door.height, createdAt: door.createdAt, type: 'chest', chest: door.chest })
+    S().startDeployMessage('not into a closed room')
+    S().setDeployHeight(2)
+    expect(S().deployRoomSnap).toBeNull()
+    expect(S().deployHeight).toBe(2)
+    S().cancelDeploy()
+  })
+
+  it('a placement into a room uses the room key held here: no key is computed, nothing is bought', async () => {
+    const door = await sealDoor('Room', ROOM)
+    const notes: string[] = []
+    const stop = useShards.subscribe((s) => { if (s.deployNote) notes.push(s.deployNote) })
+    S().startDeployMessage('first in')
+    const first = await hideAt(1)
+    S().startDeployMessage('second in')
+    const second = await hideAt(3)
+    stop()
+    expect(notes.some((n) => /Computing the 2\^|HOSAKA/.test(n))).toBe(false)
+    const key = roomKey(hexToBytes(door.keyHex), hexToBytes(doorSecret(me(), door.eventId)!))
+    expect([first.lookupId, second.lookupId]).toEqual([roomLookupId(key), roomLookupId(key)])
+  })
+
+  it('buying a key already held for that cube returns it, and asks HOSAKA nothing', async () => {
+    const at = CURSOR
+    const held = { lookupId: 'ab'.repeat(32), keyHex: 'cd'.repeat(32), height: 10, base: { x: String((at.x >> 10n) << 10n), y: String((at.y >> 10n) << 10n), z: String((at.z >> 10n) << 10n) }, plane: 0 as const, source: 'cloud' as const, at: 1 }
+    useSecrets.setState({ keys: { [held.lookupId]: held }, buying: null })
+    const ask = vi.spyOn(useCyberspace.getState(), 'buyRegionKey')
+    expect(heldCube(useSecrets.getState().keys, at, 0, 10)).toEqual(held)
+    expect(heldCube(useSecrets.getState().keys, at, 0, 11)).toBeNull()
+    expect(await useSecrets.getState().buy(at, 0, 10)).toEqual(held)
+    expect(ask).not.toHaveBeenCalled()
+    ask.mockRestore()
+    useSecrets.setState({ keys: {} })
+  })
+})
+
+describe('SEAL into a room (review of #633)', () => {
+  const big = (i: number): string => `${String(i).padStart(3, '0')} ${'abcdefghij'.repeat(999)}`
+  const dOf = (e: { tags: string[][] }): string => e.tags.find((t) => t[0] === 'd')?.[1] ?? ''
+
+  /** Before the door: `n` messages in its cube, spread over heights 0 to 3, so over four bags. */
+  async function hiddenBefore(n: number, text: (i: number) => string = (i) => `thing ${i}`): Promise<MyDeployment[]> {
+    const rows: MyDeployment[] = []
+    for (let i = 0; i < n; i++) {
+      goTo({ ...CURSOR, y: CURSOR.y + BigInt(i) })
+      S().startDeployMessage(text(i))
+      rows.push(await hideAt(i % 4))
+    }
+    goTo(CURSOR)
+    return rows
+  }
+
+  it('refuses, before anything is signed, a room bag that would pass the canonical limit', async () => {
+    const rows = await hiddenBefore(24, big)
+    const door = await sealDoor('Room', ROOM)
+    expect(hereInRoom(S().mine, door)).toHaveLength(24)
+    const sent = relay.events.length
+    const sign = vi.spyOn(useCyberspace.getState(), 'signEvent')
+    const why = await S().sealIntoRoom(door.eventId, rows.map((r) => r.eventId))
+    expect(why).toMatch(/Too large for one bag/)
+    expect(sign).not.toHaveBeenCalled()
+    sign.mockRestore()
+    expect(relay.events.length).toBe(sent)
+    expect(S().mine.filter((d) => d.room)).toEqual([])
+  }, 60000)
+
+  it('a placement that would grow a room bag past the limit is refused at HIDE, and nothing goes out', async () => {
+    await sealDoor('Room', ROOM)
+    let refused: string | null = null
+    for (let i = 0; i < 30 && !refused; i++) {
+      S().startDeployMessage(big(i))
+      S().setDeployHeight(2)
+      await S().deploy()
+      refused = S().deployError
+      S().cancelDeploy()
+    }
+    expect(refused).toMatch(/Too large for one bag/)
+    const roomBags = relay.events.filter((e) => e.kind === HIDDEN_KIND && S().mine.some((d) => d.room && d.lookupId === dOf(e)))
+    expect(Math.max(...roomBags.map((e) => JSON.stringify(e).length))).toBeLessThanOrEqual(BAG_SAFE_BYTES)
+  }, 60000)
+
+  it('two SEAL ALLs at once: the second is refused while the first goes out', async () => {
+    const rows = await hiddenBefore(4)
+    const door = await sealDoor('Room', ROOM)
+    const ids = rows.map((r) => r.eventId)
+    const first = S().sealIntoRoom(door.eventId, ids)
+    expect(S().sealingRoom).toBe(door.eventId)
+    expect(await S().sealIntoRoom(door.eventId, ids)).toBe(SEAL_BUSY)
+    expect(await first).toBeNull()
+    expect(S().sealingRoom).toBeNull()
+    expect(S().mine.filter((d) => d.room?.doorId === door.eventId)).toHaveLength(4)
+  })
+
+  it('a move that fails after others went says how many did, never that nothing moved', async () => {
+    const rows = await hiddenBefore(2)
+    const door = await sealDoor('Room', ROOM)
+    const room = roomLookupId(roomKey(hexToBytes(door.keyHex), hexToBytes(doorSecret(me(), door.eventId)!)))
+    let writes = 0
+    relay.refuse = (e) => e.kind === HIDDEN_KIND && dOf(e) === room && ++writes >= 2
+    const why = await S().sealIntoRoom(door.eventId, rows.map((r) => r.eventId))
+    relay.refuse = () => false
+    expect(why).toMatch(/^1 OF 2 MOVED\./)
+    expect(why).not.toMatch(/Nothing has moved/i)
+    expect(S().mine.filter((d) => d.room?.doorId === door.eventId)).toHaveLength(1)
+  })
+
+  it('a row its bag no longer holds (moved on another device) is left out, never brought back', async () => {
+    goTo(CURSOR)
+    S().startDeployMessage('stays')
+    const a = await hideAt(2)
+    S().startDeployMessage('moved elsewhere')
+    const b = await hideAt(2)
+    expect(a.lookupId).toBe(b.lookupId)
+    // Another device rewrote the bag without it.
+    const newer = Math.max(...relay.events.filter((e) => dOf(e) === a.lookupId).map((e) => e.created_at)) + 5
+    const template = await bagTemplate([a.inner], hexToBytes(a.keyHex), a.lookupId, a.height, newer, HIDDEN_KIND, { ...a.bag!, heightTag: true })
+    relay.events.push(await useCyberspace.getState().signEvent(template) as never)
+    const door = await sealDoor('Room', ROOM)
+    const why = await S().sealIntoRoom(door.eventId, [a.eventId, b.eventId])
+    expect(why).toBe('1 OF 2 MOVED. 1 WAS MOVED OR DELETED ON ANOTHER DEVICE.')
+    expect(S().mine.find((d) => d.eventId === a.eventId)?.room).toEqual({ doorId: door.eventId })
+    expect(S().mine.find((d) => d.eventId === b.eventId)?.room).toBeUndefined()
+    // And it is not listed again: gone from its bag.
+    expect(hereInRoom(S().mine, door).map((d) => d.eventId)).not.toContain(b.eventId)
+  })
+
+  it('HERE lists rows filed under the other door of the room around this one (§3.7.5)', async () => {
+    const a = await sealDoor('A', ROOM)
+    goTo({ ...CURSOR, x: CURSOR.x + 3n })
+    const b = await sealDoor('B', ROOM)
+    goTo(CURSOR)
+    S().startDeployMessage('under B')
+    const x = await hideAt(ROOM)
+    useShards.setState({ mine: S().mine.map((d) => (d.eventId === x.eventId ? { ...d, room: { doorId: b.eventId } } : d)) })
+    const inner = await sealDoor('Inner', ROOM, INNER)
+    expect(inner.room?.doorId === a.eventId || inner.room?.doorId === b.eventId).toBe(true)
+    expect(hereInRoom(S().mine, inner).map((d) => d.eventId)).toContain(x.eventId)
   })
 })

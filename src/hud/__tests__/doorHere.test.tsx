@@ -42,7 +42,7 @@ vi.mock('../../hooks/useCover', () => ({ useCover: () => () => undefined }))
 vi.mock('../ui/Switch', () => ({ Field: () => null, Switch: () => null }))
 
 import { forgeKey } from '../../lib/chests'
-import { doorReturnWaiting, resetDoorReturn, watchDoorReturn } from '../../lib/doorReturn'
+import { doorReturnWaiting, resetDoorReturn, restoreDoorReturn, viewFromDoor, watchDoorReturn } from '../../lib/doorReturn'
 import type { Position } from '../../lib/space'
 import { mount, type Host } from '../../test/elementRoot'
 import { resetDoorSecrets } from '../../store/doorSecrets'
@@ -141,7 +141,7 @@ describe('a row flies to it; RETURN comes back to the card, scrolled as it was',
     expect(S().selectedSecret).toBeNull()
     expect(C().focus?.item).toBe(true)
     expect(C().focus?.position).toEqual(positionOf(target))
-    expect(doorReturnWaiting()).toMatchObject({ doorId: door.eventId, listTop: 137 })
+    expect(doorReturnWaiting()).toMatchObject({ owner: me(), doorId: door.eventId, listTop: 137 })
     expect(card.says('North Door')).toBe(false)
     // RETURN on the viewing bar.
     C().clearFocus()
@@ -153,6 +153,23 @@ describe('a row flies to it; RETURN comes back to the card, scrolled as it was',
     expect(card.says(`HERE · ${MANY}`)).toBe(true)
     expect(doorReturnWaiting()).toBeNull()
     await card.unmount()
+  })
+
+  it('only for the identity that left it, and only while the door is still there (review of #633)', async () => {
+    const { door } = await crowdedRoom()
+    restoreDoorReturn({ owner: 'f'.repeat(64), doorId: door.eventId, listTop: 0, cardTop: 0 })
+    expect(S().selectedSecret).toBeNull()
+    restoreDoorReturn({ owner: me(), doorId: 'e'.repeat(64), listTop: 0, cardTop: 0 })
+    expect(S().selectedSecret).toBeNull()
+    // Waiting, then another identity signs in: dropped.
+    viewFromDoor({ doorId: door.eventId, listTop: 0, cardTop: 0 }, CURSOR, 0, 'X', 0)
+    expect(doorReturnWaiting()?.owner).toBe(me())
+    const was = C().identity
+    useCyberspace.setState({ identity: { ...was, pubkey: 'f'.repeat(64) } })
+    expect(doorReturnWaiting()).toBeNull()
+    useCyberspace.setState({ identity: was })
+    C().clearFocus()
+    expect(S().selectedSecret).toBeNull()
   })
 
   it('a view that was not from a door brings no card back', async () => {

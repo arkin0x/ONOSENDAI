@@ -18,6 +18,7 @@ import { doorSecret } from '../store/doorSecrets'
 import { useCyberspace } from '../store/useCyberspace'
 import { behindDoor, behindDoorDeep, doorsBeside, hereInRoom, positionOf, useShards, type MyDeployment } from '../store/useShards'
 import { takeDoorScroll, viewFromDoor } from '../lib/doorReturn'
+import { fitsAt, reachGibsons } from '../lib/deployFit'
 import { hiddenLabel } from '../lib/hidden'
 import { ConfirmModal } from './ConfirmModal'
 import { ItemIcon } from './ItemIcon'
@@ -47,7 +48,8 @@ function cardOf(list: HTMLElement | null): Element | null {
 export function DoorOwnerBlock({ door }: { door: MyDeployment }): JSX.Element | null {
   const me = useCyberspace((s) => s.identity.pubkey)
   const mine = useShards((s) => s.mine)
-  const [busy, setBusy] = useState(false)
+  // In the store, by door, so a card closed and opened again mid-SEAL still waits (review of #633).
+  const busy = useShards((s) => s.sealingRoom !== null)
   const [status, setStatus] = useState<string | null>(null)
   const list = useRef<HTMLUListElement>(null)
   // Back from a row's VIEW: the list, and the card around it, scrolled as they were.
@@ -69,9 +71,12 @@ export function DoorOwnerBlock({ door }: { door: MyDeployment }): JSX.Element | 
   const behind = behindDoor(mine, door)
   const here = hereInRoom(mine, door)
   const seal = (ids: string[]): void => {
-    setBusy(true); setStatus(null)
-    void useShards.getState().sealIntoRoom(door.eventId, ids).then((why) => { setBusy(false); setStatus(why) })
+    setStatus(null)
+    void useShards.getState().sealIntoRoom(door.eventId, ids).then(setStatus)
   }
+  const h = door.chest?.door ?? 0
+  // A shard reaching past the room's walls is cut by them once inside (lib/deployFit fitsAt): said on its row, not refused.
+  const cut = (d: MyDeployment): boolean => !!d.shard && !fitsAt(positionOf(d), reachGibsons(d.shard, d.shard.unit), h)
   const view = (d: MyDeployment): void => {
     const card = cardOf(list.current)
     viewFromDoor({ doorId: door.eventId, listTop: list.current?.scrollTop ?? 0, cardTop: card?.scrollTop ?? 0 }, positionOf(d), d.plane, hiddenLabel(d, 48).toUpperCase(), d.type === 'shard' ? d.shard?.unit ?? 0 : 0)
@@ -89,12 +94,13 @@ export function DoorOwnerBlock({ door }: { door: MyDeployment }): JSX.Element | 
                 <button className="doorowner__view" onClick={() => view(d)} title="Fly to it">
                   <span className="item__name">{hiddenLabel(d, 48)}</span>
                   <span className="doorowner__height">H{d.height}</span>
+                  {cut(d) && <span className="doorowner__cut" title="Larger than the room: its walls cut it">CUT</span>}
                 </button>
-                <button className="chest__act chest__act--take" disabled={busy} onClick={() => seal([d.eventId])} title="Seal it behind this door">SEAL</button>
+                <button className="chest__act chest__act--take" disabled={busy} onClick={() => seal([d.eventId])} title={`MOVES TO H${h} · ONLY THIS DOOR FINDS IT`}>SEAL</button>
               </li>
             ))}
           </ul>
-          <div className="chest__all"><button className="chest__act chest__act--take" disabled={busy} onClick={() => seal(here.map((d) => d.eventId))} title="Seal everything here behind this door">SEAL ALL</button></div>
+          <div className="chest__all"><button className="chest__act chest__act--take" disabled={busy} onClick={() => seal(here.map((d) => d.eventId))} title={`ALL TO H${h} · ONLY THIS DOOR FINDS THEM`}>{busy ? 'SEALING…' : 'SEAL ALL'}</button></div>
         </>
       )}
       {status && <span className="chest__status" role="status">{status}</span>}

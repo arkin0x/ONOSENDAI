@@ -17,8 +17,9 @@ import { useCyberspace } from '../store/useCyberspace'
 import { useShards } from '../store/useShards'
 import type { Position } from './space'
 
-/** The card a HERE row left: its door, and how far its list and the card itself were scrolled. */
+/** The card a HERE row left: whose door, which, and how far its list and the card itself were scrolled. */
 export interface DoorReturn {
+  owner: string
   doorId: string
   listTop: number
   cardTop: number
@@ -30,8 +31,8 @@ let waiting: DoorReturn | null = null
 let scroll: DoorReturn | null = null
 
 /** VIEW from a door's HERE list: remember the card, close it, and fly to the thing. */
-export function viewFromDoor(back: DoorReturn, at: Position, plane: Plane, label: string, scaleExp: number): void {
-  waiting = back
+export function viewFromDoor(back: Omit<DoorReturn, 'owner'>, at: Position, plane: Plane, label: string, scaleExp: number): void {
+  waiting = { ...back, owner: useCyberspace.getState().identity.pubkey }
   useShards.getState().selectSecret(null)
   useCyberspace.getState().focusItem(at, plane, label, scaleExp)
 }
@@ -49,8 +50,14 @@ export function doorReturnWaiting(): DoorReturn | null {
   return waiting
 }
 
-/** Put the card back. Exported for the test; the watch below calls it. */
+/**
+ * Put the card back. Exported for the test; the watch below calls it. Only for
+ * the identity that left it, and only while the door is still among its own
+ * rows (deleted or moved since, there is no card to come back to).
+ */
 export function restoreDoorReturn(r: DoorReturn): void {
+  if (useCyberspace.getState().identity.pubkey !== r.owner) return
+  if (!useShards.getState().mine.some((d) => d.eventId === r.doorId)) return
   scroll = r
   // The door's card, and nothing over it: a Nearby list a VIEW before this one would bring back stays shut.
   useShards.getState().setNearbyOpen(false)
@@ -59,6 +66,8 @@ export function restoreDoorReturn(r: DoorReturn): void {
 
 export function watchDoorReturn(): () => void {
   return useCyberspace.subscribe((state, previous) => {
+    // Another identity signed in: what the last one left waits for nobody.
+    if (state.identity.pubkey !== previous.identity.pubkey) { waiting = null; scroll = null }
     if (previous.focus === null || state.focus !== null) return
     const r = waiting
     if (!r) return

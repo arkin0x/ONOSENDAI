@@ -61,10 +61,11 @@ export function storedKeyNote(key: DiscoveryKey): string | null {
 }
 
 /** The button's tooltip: what the test will do on this path, or why it refused. */
-function testTitle(test: TestState, key: DiscoveryKey, room: boolean): string {
+function testTitle(test: TestState, key: DiscoveryKey, room: boolean, gone = false): string {
   if (test === 'refused') return 'The bag is there and this item is in it, signed, but the format refuses it, so every client drops it and only this device shows it. Fix it in the workshop and hide it again; DELETE removes this copy.'
   if (test === 'underived') return 'This device could not derive the key from the coordinate (its key worker failed or ran out of time), so the relay was never asked. Tap to try again.'
   if (test === 'wrongKey') return 'The key derived from the coordinate is not the key this bag was sealed with, so it is filed where no stranger looks.'
+  if (gone) return 'This is gone from its bag, so this asks the relay with the stored key and derives nothing: it reads as not found unless the bag holds it again.'
   if (key.via === 'stored') {
     return key.why === 'height'
       ? `This device can't derive height ${key.height}, so this asks the relay with the stored key and opens what comes back. It cannot prove a stranger finds it.`
@@ -106,7 +107,10 @@ export function WireData({ dep, initialTest = 'idle', initialChecked = null }: {
     setTest(result.outcome)
   }
   const note = checked && test !== 'idle' && test !== 'testing' ? storedKeyNote(checked) : null
-  const words = test !== 'testing' ? TEST_WORDS[test] : path.via === 'stored' ? STORED_TESTING : dep.room ? ROOM_TESTING : TEST_WORDS.testing
+  // A row GONE FROM ITS BAG is asked about with its stored key and nothing is
+  // derived (useShards testDiscovery), so it never says DERIVING (review of #625).
+  const derives = path.via === 'derived' && dep.goneFrom === undefined
+  const words = test !== 'testing' ? TEST_WORDS[test] : !derives ? STORED_TESTING : dep.room ? ROOM_TESTING : TEST_WORDS.testing
   // Why the format refuses it, when it does: the same words the deploy bar
   // would have used, so the fix is named here too.
   const refusal = test === 'refused' && dep.shard ? shardRefusal(dep.shard) : null
@@ -137,7 +141,7 @@ export function WireData({ dep, initialTest = 'idle', initialChecked = null }: {
       {dep.published && (
         <button
           className={`secret__act eventdata__test eventdata__test--${test}`}
-          title={testTitle(test, path, !!dep.room)}
+          title={testTitle(test, path, !!dep.room, dep.goneFrom !== undefined)}
           onClick={() => void runTest()}
           disabled={test === 'testing'}
         >{/* One mark to a state: the radar until there is a result, then its ✓ or ✗. */}

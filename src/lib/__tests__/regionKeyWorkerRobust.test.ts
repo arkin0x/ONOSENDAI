@@ -46,12 +46,24 @@ class FakeWorker {
 
 const AT = { x: 1n, y: 2n, z: 3n }
 const realWorker = (globalThis as { Worker?: unknown }).Worker
+/** A fast machine's measurements: every height's floor stands. */
+const FAST = { 10: 1, 20: 50 }
+
+/** The page, as far as visibility goes: one for the file, since the module watches the first it sees. */
+const page = {
+  visibilityState: 'visible' as 'visible' | 'hidden',
+  listeners: [] as Array<() => void>,
+  addEventListener(type: string, fn: () => void): void { if (type === 'visibilitychange') this.listeners.push(fn) },
+  set(state: 'visible' | 'hidden'): void { this.visibilityState = state; for (const fn of this.listeners) fn() },
+}
+;(globalThis as { document?: unknown }).document = page
 
 beforeEach(() => {
   made = []
   constructorThrows = false
   ;(globalThis as { Worker?: unknown }).Worker = FakeWorker
-  useCalibration.setState({ cantorMsByHeight: undefined })
+  useCalibration.setState({ cantorMsByHeight: FAST })
+  page.visibilityState = 'visible'
 })
 
 afterEach(() => {
@@ -62,11 +74,17 @@ afterEach(() => {
 
 describe('regionKeyTimeoutMs', () => {
   it('gives ten minutes at height 20, halving per height below, never under a minute', () => {
-    expect(regionKeyTimeoutMs(20)).toBe(H20_TIMEOUT_MS)
-    expect(regionKeyTimeoutMs(19)).toBe(H20_TIMEOUT_MS / 2)
-    expect(regionKeyTimeoutMs(17)).toBe(H20_TIMEOUT_MS / 8)
-    expect(regionKeyTimeoutMs(12)).toBe(MIN_TIMEOUT_MS)
-    expect(regionKeyTimeoutMs(1)).toBe(MIN_TIMEOUT_MS)
+    expect(regionKeyTimeoutMs(20, FAST)).toBe(H20_TIMEOUT_MS)
+    expect(regionKeyTimeoutMs(19, FAST)).toBe(H20_TIMEOUT_MS / 2)
+    expect(regionKeyTimeoutMs(17, FAST)).toBe(H20_TIMEOUT_MS / 8)
+    expect(regionKeyTimeoutMs(12, FAST)).toBe(MIN_TIMEOUT_MS)
+    expect(regionKeyTimeoutMs(1, FAST)).toBe(MIN_TIMEOUT_MS)
+  })
+
+  it('gives the ten minutes at any height before the device is measured (review of #625)', () => {
+    expect(regionKeyTimeoutMs(1)).toBe(H20_TIMEOUT_MS)
+    expect(regionKeyTimeoutMs(12, {})).toBe(H20_TIMEOUT_MS)
+    expect(regionKeyTimeoutMs(21)).toBe(H20_TIMEOUT_MS * 2)
   })
 
   it('never allows less than ten times what this device measured for the three axes', () => {
@@ -117,7 +135,7 @@ describe('regionKeyOffThread', () => {
     await Promise.resolve()
     expect(settled).not.toHaveBeenCalled()
     vi.advanceTimersByTime(2000)
-    await expect(p).rejects.toThrow(/did not answer within 10 min at height 20/)
+    await expect(p).rejects.toThrow(/did not answer within 10 min at height 20\. Try again\./)
     expect(made[0].ended).toBe(true)
     void regionKeyOffThread(AT, 10, 20).catch(() => undefined)
     expect(made).toHaveLength(2)
@@ -139,6 +157,34 @@ describe('regionKeyOffThread', () => {
     expect(bSettled).not.toHaveBeenCalled()
     vi.advanceTimersByTime(MIN_TIMEOUT_MS)
     await expect(b).rejects.toThrow(/did not answer/)
+  })
+
+  it('a page hidden at any point since the call re-arms its timer instead of ending the worker: backgrounding never kills a deploy', async () => {
+    vi.useFakeTimers()
+    const p = regionKeyOffThread(AT, 20, 20)
+    const settled = vi.fn()
+    p.then(settled, settled)
+    // The phone locked for a while, and came back.
+    page.set('hidden')
+    page.set('visible')
+    vi.advanceTimersByTime(H20_TIMEOUT_MS + 1000)
+    await Promise.resolve()
+    expect(settled).not.toHaveBeenCalled()
+    expect(made[0].ended).toBe(false)
+    // Its full time again, visible throughout: now it is hung.
+    vi.advanceTimersByTime(H20_TIMEOUT_MS)
+    await expect(p).rejects.toThrow(/Try again/)
+    expect(made[0].ended).toBe(true)
+  })
+
+  it('a page hidden when the time runs out re-arms too, and the answer that comes later is taken', async () => {
+    vi.useFakeTimers()
+    const p = regionKeyOffThread(AT, 20, 20)
+    page.set('hidden')
+    vi.advanceTimersByTime(H20_TIMEOUT_MS * 3)
+    expect(made[0].ended).toBe(false)
+    made[0].answer(made[0].asked[0])
+    await expect(p).resolves.toMatchObject({ lookupId: 'lookup20' })
   })
 
   it('a worker that cannot even be made refuses the call instead of throwing', async () => {

@@ -43,7 +43,7 @@ function aligned(v: bigint, h: number): bigint {
 /** Whether a box (a base and a height per axis) holds a point. */
 export function regionContains(region: NearbyRegion, p: Position): boolean {
   // A corner stored inexact (lib/secrets/base.ts) holds nothing, rather than throwing.
-  const base = baseOf(region.base)
+  const base = baseOf(region.base, region.heights)
   if (!base) return false
   for (const a of ['x', 'y', 'z'] as const) {
     if (aligned(p[a], region.heights[a]) !== base[a]) return false

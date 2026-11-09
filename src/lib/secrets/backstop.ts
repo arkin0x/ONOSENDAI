@@ -54,26 +54,47 @@ export interface RefusedKey {
 }
 
 /** The keys set aside so far, oldest first. */
+/**
+ * Everything the record holds, as it is: well formed or not. What cannot be
+ * read as a list is kept as one entry, so a later set-aside never writes over
+ * it (review of #629).
+ */
+function refusedEntries(): unknown[] {
+  const raw = storage()?.getItem(REFUSED_KEY) ?? null
+  if (!raw) return []
+  try {
+    const parsed: unknown = JSON.parse(raw)
+    return Array.isArray(parsed) ? parsed : [{ unreadable: raw }]
+  } catch {
+    return [{ unreadable: raw }]
+  }
+}
+
+function isRefusedKey(r: unknown): r is RefusedKey {
+  const k = r as RefusedKey | null
+  return !!k && typeof k === 'object' && typeof k.keyHex === 'string' && typeof k.lookupId === 'string'
+}
+
+/** The keys set aside so far, oldest first; an entry missing its key or lookup id is passed over, not thrown on. */
 export function readRefused(): RefusedKey[] {
   try {
-    const parsed: unknown = JSON.parse(storage()?.getItem(REFUSED_KEY) ?? '[]')
-    return Array.isArray(parsed) ? parsed.filter((r): r is RefusedKey => !!r && typeof r === 'object' && typeof (r as RefusedKey).keyHex === 'string') : []
+    return refusedEntries().filter(isRefusedKey)
   } catch {
     return []
   }
 }
 
 /**
- * Set a refused key aside (REFUSED_KEY), once per key. Returns null when it
- * landed, else why it did not.
+ * Set a refused key aside (REFUSED_KEY), once per key. Every entry already
+ * there stays, a corrupt one too. Returns null when it landed, else why not.
  */
 export function setAsideRefused(key: RefusedKey): string | null {
   const s = storage()
   if (!s) return 'localStorage is not available here'
   try {
-    const kept = readRefused()
-    if (kept.some((r) => r.keyHex.toLowerCase() === key.keyHex.toLowerCase() && r.lookupId.toLowerCase() === key.lookupId.toLowerCase())) return null
-    s.setItem(REFUSED_KEY, JSON.stringify([...kept, key]))
+    const entries = refusedEntries()
+    if (entries.filter(isRefusedKey).some((r) => r.keyHex.toLowerCase() === key.keyHex.toLowerCase() && r.lookupId.toLowerCase() === key.lookupId.toLowerCase())) return null
+    s.setItem(REFUSED_KEY, JSON.stringify([...entries, key]))
     return null
   } catch (err) {
     return describeError(err)

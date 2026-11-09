@@ -70,6 +70,17 @@ export function SecretsModal({ onClose }: { onClose: () => void }): JSX.Element 
     return () => { for (const t of pending) window.clearTimeout(t) }
   }, [])
   const [keysShown, setKeysShown] = useState(PAGE)
+  // A key whose corner is not known exactly (lib/secrets/base.ts), once its
+  // jump was tapped: the reason under its row, and for a bought key the offer
+  // to read its HOSAKA job again. `gone` when HOSAKA no longer has it.
+  const [corner, setCorner] = useState<Record<string, 'unknown' | 'asking' | 'gone'>>({})
+  const askHosaka = (k: HeldKey): void => {
+    setCorner((prev) => ({ ...prev, [k.lookupId]: 'asking' }))
+    void useSecrets.getState().refetchCorner(k.lookupId).then(
+      (r) => setCorner((prev) => ({ ...prev, [k.lookupId]: r === 'gone' ? 'gone' : 'unknown' })),
+      () => setCorner((prev) => ({ ...prev, [k.lookupId]: 'gone' })),
+    )
+  }
   const places = usePlacePages(placesVersion, storage.mode)
 
   const anchor = useCyberspace((s) => s.anchor)
@@ -110,9 +121,13 @@ export function SecretsModal({ onClose }: { onClose: () => void }): JSX.Element 
     // thing you asked about at the edge of the screen and everything else in
     // the middle. Half a side along each axis, per axis, because a movement's
     // region is a box.
-    // A corner stored inexact (lib/secrets/base.ts) has nowhere to go: the list stays.
-    const base = baseOf(k.base)
-    if (!base) return
+    // A corner stored inexact (lib/secrets/base.ts) has nowhere to go: the
+    // list stays, and says why under the row (review of #629).
+    const base = baseOf(k.base, k.heights ?? k.height)
+    if (!base) {
+      setCorner((prev) => ({ ...prev, [k.lookupId]: prev[k.lookupId] ?? 'unknown' }))
+      return
+    }
     const mid = (axis: 'x' | 'y' | 'z'): bigint => {
       const h = BigInt(k.heights ? k.heights[axis] : k.height)
       return base[axis] + (1n << h) / 2n
@@ -312,6 +327,19 @@ export function SecretsModal({ onClose }: { onClose: () => void }): JSX.Element 
                     >✕</button>
                   </li>
                   {scanError(k.lookupId)}
+                  {corner[k.lookupId] && !baseOf(k.base, k.heights ?? k.height) && (
+                    <li className="secrets__error secrets__row-error">
+                      Nowhere to look: this key was bought before its corner was kept exactly. SCAN still asks with it.
+                      {k.source === 'cloud' && !cloudOff && corner[k.lookupId] !== 'gone' && (
+                        <> <button
+                          className="secrets__scan"
+                          disabled={corner[k.lookupId] === 'asking'}
+                          onClick={() => askHosaka(k)}
+                          title="Read this key's HOSAKA job again for its exact corner. Nothing is bought."
+                        >{corner[k.lookupId] === 'asking' ? 'ASKING…' : 'ASK HOSAKA'}</button></>
+                      )}
+                    </li>
+                  )}
                   </Fragment>
                 )
               })}

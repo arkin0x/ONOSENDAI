@@ -162,7 +162,9 @@ describe('a stored inexact corner is repaired on load, and no bought key is drop
   })
 
   it('from the deploy row that names it: exact, in the list, IndexedDB and the backstop', async () => {
-    const k = goodKey(9, { source: 'cloud', height: H, base: STORED_BAD })
+    // What an earlier build really stored: String() of each rounded axis. (A row is taken only where it fits that.)
+    const b = alignedBase(AT, H)
+    const k = goodKey(9, { source: 'cloud', height: H, base: { x: rounded(b.x), y: rounded(b.y), z: rounded(b.z) } })
     mem.set(BOUGHT_KEY, JSON.stringify({ [k.lookupId]: k }))
     const { secrets } = await boot(({ shards }) => {
       shards.useShards.setState({ mine: [{ lookupId: k.lookupId, height: H, at: { x: AT.x.toString(), y: AT.y.toString(), z: AT.z.toString() } } as never] })

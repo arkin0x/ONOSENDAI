@@ -10,6 +10,7 @@
  */
 
 import type { EventTemplate } from './events'
+import { attributed } from './client'
 
 /** The canonical relay's limit on one event, in bytes. */
 export const CANONICAL_EVENT_BYTES = 262_200
@@ -17,9 +18,13 @@ export const CANONICAL_EVENT_BYTES = 262_200
 /** The most a bag may grow to here: under the canonical limit, with room for what this estimate does not see. */
 export const BAG_SAFE_BYTES = 240_000
 
-/** A signed event's size from its template: the template, and its id, pubkey and signature as they serialize. */
+/**
+ * A signed event's size from its template: the template with the client tag
+ * every signer adds (lib/client.ts attributed), and its id, pubkey and
+ * signature as they serialize.
+ */
 export function signedBytes(template: EventTemplate): number {
-  const event = { ...template, id: '0'.repeat(64), pubkey: '0'.repeat(64), sig: '0'.repeat(128) }
+  const event = { ...attributed(template), id: '0'.repeat(64), pubkey: '0'.repeat(64), sig: '0'.repeat(128) }
   return new TextEncoder().encode(JSON.stringify(event)).length
 }
 

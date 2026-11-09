@@ -202,6 +202,8 @@ export interface HiddenRowLike {
   lookupId: string
   inner?: { id?: string; kind: number; tags: string[][] }
   ref?: string[]
+  /** The lineage an inline shard kept when it went by reference to fit its bag (store/useShards MyDeployment `lineage`). */
+  lineage?: string
 }
 
 /**
@@ -214,6 +216,7 @@ export interface HiddenRowLike {
  * | the row's own id | that row |
  * | the inner event as this device holds it now | a shard by reference, refreshed since it was hidden |
  * | the first version's id (`d`) | an item carried inline and moved by EDIT (itemLineage) |
+ * | the lineage it kept | an inline shard that went by reference to fit its bag |
  * | the object's address (`a`) | a shard by reference, republished under that address since |
  * | the bag (a comment's `A`) | the first row in that bag |
  */
@@ -222,7 +225,8 @@ export function hiddenRowFor<T extends HiddenRowLike>(rows: readonly T[], on: { 
   const byId = id
     ? rows.find((d) => d.eventId === id) ??
       rows.find((d) => d.inner?.id === id) ??
-      rows.find((d) => !d.ref && d.inner?.id !== undefined && itemLineage(d.inner as { id: string; kind: number; tags: string[][] }) === id)
+      rows.find((d) => !d.ref && d.inner?.id !== undefined && itemLineage(d.inner as { id: string; kind: number; tags: string[][] }) === id) ??
+      rows.find((d) => d.lineage === id)
     : undefined
   return byId ??
     (on.address ? rows.find((d) => d.ref?.[0] === 'a' && d.ref[1] === on.address) : undefined) ??

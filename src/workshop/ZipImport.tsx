@@ -29,7 +29,7 @@ const MODES: Array<{ mode: DupMode; label: string; help: string }> = [
 const size = (n: number): string => (n < 1024 ? `${n} B` : n < 1048576 ? `${(n / 1024).toFixed(n < 10240 ? 1 : 0)} KB` : `${(n / 1048576).toFixed(1)} MB`)
 
 /** The tag at a row's end: what is happening to it, or what will. */
-function status(row: ImportRow, mode: DupMode, dup: Dup, needs: string | undefined): { label: string; tone: string; title?: string } {
+function status(row: ImportRow, mode: DupMode, dup: Dup, needs: string | undefined, noun: string): { label: string; tone: string; title?: string } {
   if (row.read === 'waiting') return { label: 'WAITING', tone: 'tag--local' }
   if (row.read === 'reading') return { label: 'READING', tone: 'tag--sending' }
   if (row.read === 'error') return { label: 'ERROR', tone: 'tag--failed', title: row.error ?? undefined }
@@ -42,7 +42,7 @@ function status(row: ImportRow, mode: DupMode, dup: Dup, needs: string | undefin
     const act = dupAction(dup, mode).act
     const title = dup.in === 'same' ? `One of your shards has this address: ${row.id}`
       : dup.in === 'published' ? `Your relays already hold an object of yours at this address: ${row.id}`
-        : dup.in === 'name' ? 'One of your shards has this name' : 'Same path twice in this zip'
+        : dup.in === 'name' ? 'One of your shards has this name' : `Same path twice in this ${noun}`
     const label = act === 'skip' ? ({ same: 'YOURS', published: 'PUBLISHED', name: 'TAKEN', zip: 'TWICE' } as const)[dup.in]
       : act === 'update' || (dup.in === 'published' && act === 'new') ? 'UPDATE' : 'AS COPY'
     return { label, tone: 'tag--sending', title }
@@ -115,7 +115,7 @@ export function ZipImport(): JSX.Element | null {
         <ul className="zipimport__list">
           {s.rows.map((r) => {
             const dup = s.dups[r.key] ?? null
-            const tag = status(r, s.dupMode, dup, blocked.get(r.key))
+            const tag = status(r, s.dupMode, dup, blocked.get(r.key), s.noun)
             const folder = r.folder.join('/')
             return (
               <li key={r.key} className={`zipimport__row ${r.picked ? '' : 'is-off'}`}>

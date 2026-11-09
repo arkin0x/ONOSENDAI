@@ -868,16 +868,17 @@ export function Workshop(): JSX.Element | null {
     const files = list ? Array.from(list) : []
     // While the import's list is open, a drop on it (React carries a portal's events here) changes nothing.
     if (!files.length || importing || useShardImport.getState().open) return
-    const route = await routeImport(files)
-    // A zip, or an SNO object, is bulk import: every shard file a new shard of yours (workshop/ZipImport).
-    if (route.to === 'none') { say(route.error); return }
-    if (route.to === 'zip') { void useShardImport.getState().openZip(route.file); return }
-    if (route.to === 'shards') { void useShardImport.getState().openFiles(route.files); return }
-    const s = w().current()
-    if (!s) return
+    // READING from the moment the files are sniffed, so a second pick or drop meanwhile is not a second import.
     setImporting(true)
-    say(`Reading ${files.find((f) => !/\.(mtl|bin)$/i.test(f.name))?.name ?? files[0].name}…`)
     try {
+      const route = await routeImport(files)
+      // A zip, or an SNO object, is bulk import: every shard file a new shard of yours (workshop/ZipImport).
+      if (route.to === 'none') { say(route.error); return }
+      if (route.to === 'zip') { void useShardImport.getState().openZip(route.file); return }
+      if (route.to === 'shards') { void useShardImport.getState().openFiles(route.files); return }
+      const s = w().current()
+      if (!s) return
+      say(`Reading ${files.find((f) => !/\.(mtl|bin)$/i.test(f.name))?.name ?? files[0].name}…`)
       const res = await importFiles(files, { fit: importFitFor(s.extent), unit: s.unit, palette: s.palette ?? BUILT_IN, color: w().color })
       if (!res.ok) { say(res.error); return }
       w().insertImport(res.shard, `${res.report.summary}.`)

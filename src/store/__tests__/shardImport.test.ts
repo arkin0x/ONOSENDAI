@@ -57,7 +57,7 @@ import { useCyberspace } from '../useCyberspace'
 import { useWorkshop } from '../useWorkshop'
 import { withConstrain } from '../../lib/walkConstrain'
 import { usePublished } from '../usePublished'
-import { NOT_SNO_OR_GLTF, routeImport, timing, useShardImport } from '../useShardImport'
+import { NOT_SNO_OR_GLTF, looseName, routeImport, timing, useShardImport } from '../useShardImport'
 
 const sno = (name: string, x = 1): string => JSON.stringify({
   v: 2, name, unit: 0, mode: 'solid',
@@ -822,6 +822,75 @@ describe('a .json picked or dropped without a zip (arkinox, 2026-11-09: "I cant 
   it('a glTF .json picked beside an SNO object is read as a 3D file, not refused as an SNO object', async () => {
     await imp().openFiles([chicken(), gltfJson()])
     expect(imp().rows.map((r) => [r.name, r.kind, r.read])).toEqual([['blue-chicken', 'sno', 'ok'], ['tri', 'mesh', 'ok']])
+  })
+
+  describe('a glTF .json and its .bin beside an SNO object', () => {
+    /** The triangle as a glTF .json whose buffer is a file named `bin`. */
+    const withBin = (name: string, type: string, bin: string): File[] => [
+      new File([JSON.stringify(tri({ uri: bin }))], name, { type }),
+      new File([new Uint8Array(pos.buffer)], bin, { type: 'application/octet-stream' }),
+    ]
+
+    it('reads the .bin when it shares the glTF\'s name', async () => {
+      await imp().openFiles([chicken(), ...withBin('tri.json', 'application/json', 'tri.bin')])
+      expect(imp().rows.map((r) => [r.name, r.id, r.kind, r.read])).toEqual([['blue-chicken', 'import/blue-chicken', 'sno', 'ok'], ['tri', 'import/tri', 'mesh', 'ok']])
+      expect(imp().skipped).toEqual([])
+    })
+
+    it('reads the .bin the glTF names when the names differ (scene.json + buffer0.bin)', async () => {
+      await imp().openFiles([chicken(), ...withBin('scene.json', 'application/json', 'buffer0.bin')])
+      expect(imp().rows.map((r) => [r.name, r.id, r.kind, r.read])).toEqual([['blue-chicken', 'import/blue-chicken', 'sno', 'ok'], ['scene', 'import/scene', 'mesh', 'ok']])
+      expect(imp().skipped).toEqual([])
+      expect(rowOf('scene').shard!.faces.length).toBeGreaterThan(0)
+    })
+
+    it('a .gltf a picker typed application/json keeps its name: scene, not scene.gltf', async () => {
+      await imp().openFiles([chicken(), ...withBin('scene.gltf', 'application/json', 'buffer0.bin')])
+      expect(imp().rows.map((r) => [r.name, r.id, r.kind, r.read])).toEqual([['blue-chicken', 'import/blue-chicken', 'sno', 'ok'], ['scene', 'import/scene', 'mesh', 'ok']])
+      expect(imp().skipped).toEqual([])
+    })
+  })
+
+  it('a re-download\'s " (1)" is dropped, so importing it again offers UPDATE in place', async () => {
+    await imp().openFiles([chicken()])
+    await imp().start()
+    imp().close()
+    const changed = JSON.stringify({ ...JSON.parse(CHICKEN), mode: 'points' })
+    await imp().openFiles([new File([changed], 'blue-chicken (1).json', { type: 'application/json' })])
+    expect(imp().rows.map((r) => [r.name, r.id])).toEqual([['blue-chicken', 'import/blue-chicken']])
+    expect(imp().dups[rowOf('blue-chicken').key]).toEqual({ in: 'same', id: 'import/blue-chicken' })
+    imp().setDupMode('update')
+    await imp().start()
+    expect(rowOf('blue-chicken').outcome).toBe('update')
+    expect(mine().map((x) => [x.id, x.mode])).toEqual([['import/blue-chicken', 'points']])
+  })
+
+  it('names each loose file for what it holds, without a re-download\'s " (N)"', () => {
+    expect(looseName('blue-chicken (1).json', 'sno')).toBe('blue-chicken.json')
+    expect(looseName('blue-chicken (12)', 'sno')).toBe('blue-chicken.json')
+    expect(looseName('blue-chicken', 'sno')).toBe('blue-chicken.json')
+    expect(looseName('scene.json', 'gltf')).toBe('scene.gltf')
+    expect(looseName('scene (2).JSON', 'gltf')).toBe('scene.gltf')
+    expect(looseName('scene.gltf', 'gltf')).toBe('scene.gltf')
+    expect(looseName('scene', 'gltf')).toBe('scene.gltf')
+    expect(looseName('tri (1).glb', null)).toBe('tri.glb')
+    expect(looseName('buffer0 (1).bin', null)).toBe('buffer0.bin')
+    // Never down to nothing, or to a dotfile.
+    expect(looseName('(1).json', 'sno')).toBe('(1).json')
+    expect(looseName('room(3).ply', null)).toBe('room(3).ply')
+  })
+
+  it('says "import", not "zip", for loose files', async () => {
+    await imp().openFiles([chicken(), chicken()])
+    expect(imp().noun).toBe('import')
+    await imp().start()
+    expect(imp().rows.map((r) => r.failure)).toEqual([null, 'Same name in this import'])
+    imp().close()
+    await imp().openFiles([new File(['hello'], 'README.txt')])
+    expect(imp().error).toBe('No shard files in that import.')
+    imp().close()
+    await imp().openZip(kitZip())
+    expect(imp().noun).toBe('zip')
   })
 
   it('the workshop\'s picker and its drop both take this route, and the picker offers a .json', () => {

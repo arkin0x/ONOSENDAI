@@ -36,13 +36,20 @@
  * since one may glide or turn with nothing else changing (useBuildDim
  * occludersMoved). An avatar drawn as the marker, a cage of lines, never
  * blocks, as lines never do.
+ *
+ * Your own avatar is not counted while the cursor's cell is the one it stands
+ * in (cursorOnOwnAvatar; arkinox, 2026-11-09): entering BUILD from your head
+ * puts the cursor there (useBuilder enter), and the picker counted your
+ * avatar as standing between the camera and that cell, so it dimmed itself
+ * every time BUILD opened. On its own cell it is the thing aimed at, not
+ * something in the way. Everyone else's avatar is counted as before.
  */
 
 import { useEffect, useLayoutEffect, useRef, useState, type RefObject } from 'react'
 import { useFrame } from '@react-three/fiber'
 import { Vector3, type Group, type Material, type Object3D } from 'three'
-import { aimCentres, type ViewAxes } from '../lib/space'
-import { cubeAt } from '../lib/buildCursor'
+import { aimCentres, alignTo, type Position, type ViewAxes } from '../lib/space'
+import { avatarInBuild, buildPlane, cubeAt, type AvatarSource, type BuildCursorSource } from '../lib/buildCursor'
 import { cellPoints, fadeToward, nineVectors, pickWithin, settleDimmed, type OccluderTarget } from '../lib/occluders'
 import { alignedOrigin, useCyberspace } from '../store/useCyberspace'
 import { useBuilder } from '../store/useBuilder'
@@ -82,6 +89,24 @@ export function dimsOccluders(builderActive: boolean, walking: boolean): boolean
 export function tapsPassThrough(key: string | undefined): boolean {
   if (key === undefined || !useBuildDim.getState().dimmed.has(key)) return false
   return dimsOccluders(useBuilder.getState().active, useCyberspace.getState().walking)
+}
+
+/** The key your own avatar registers under (Avatar, useAvatarOccluder). */
+export const OWN_AVATAR_KEY = 'avatar:you'
+/** What the picker leaves out while the cursor is on your own avatar's cell. */
+const SKIP_OWN: ReadonlySet<string> = new Set([OWN_AVATAR_KEY])
+
+/**
+ * Whether the build cursor's cell, at the zoom on show and in the plane built
+ * in, is the cell your avatar stands in: where your avatar is drawn in the
+ * Builder (lib/buildCursor avatarInBuild, the spectated one's while
+ * spectating, as Avatar draws it then).
+ */
+export function cursorOnOwnAvatar(s: AvatarSource & BuildCursorSource & { scaleExp: number }, cursor: Position, scrub: number | null): boolean {
+  const own = avatarInBuild(s, scrub)
+  if (!own || own.plane !== buildPlane(s)) return false
+  const k = s.scaleExp
+  return alignTo(cursor.x, k) === alignTo(own.position.x, k) && alignTo(cursor.y, k) === alignTo(own.position.y, k) && alignTo(cursor.z, k) === alignTo(own.position.z, k)
 }
 
 /** This fade step's multiplier, read by `fadeOne`; hoisted, so a frame allocates nothing. */
@@ -264,7 +289,9 @@ export function BuildOccluders({ axes }: { axes: ViewAxes }): JSX.Element | null
     cell.set(c[0], c[1], c[2]).applyMatrix4(g.matrixWorld)
     cellPoints(cell, points)
     // Within a budget: past it, the shards not reached keep what they were, and the next cast starts where this one stopped.
-    const picked = pickWithin(l.targets, eye, points, { budgetMs: PICK_BUDGET_MS, start: l.next, carry: l.blocking })
+    // Your own avatar, on the cursor's cell, is what is aimed at: never in the way.
+    const skip = cursorOnOwnAvatar(s, live, useBuilder.getState().scrub) ? SKIP_OWN : undefined
+    const picked = pickWithin(l.targets, eye, points, { budgetMs: PICK_BUDGET_MS, start: l.next, carry: l.blocking, skip })
     l.next = picked.next
     l.blocking = picked.blocking
     if (!picked.done && l.dirtyAt < 0) l.dirtyAt = l.frames

@@ -46,6 +46,7 @@ import { importBytes } from '../lib/meshImport'
 import { shardRefusal } from '../lib/hidden'
 import { publishState, shardFingerprint } from '../lib/published'
 import { queryEach } from '../lib/relay'
+import { isRateLimited } from '../lib/rateLimit'
 import { SNO_KIND } from 'sno-core/feed'
 import { shardFromText, useWorkshop } from './useWorkshop'
 import { saveFailure } from './workshopStorage'
@@ -54,11 +55,15 @@ import { useCyberspace } from './useCyberspace'
 
 /** The run's pace, in one object so a test can shorten it. */
 export const timing = {
-  /** Between one publish and the next: a kit of fifty is not a burst. */
-  gapMs: 300,
+  /**
+   * Between one publish and the next: a kit of fifty is not a burst. Shards
+   * are addressable (kind 33331), which relay.onosendai.tech takes at 3 a
+   * second on a connection; this, and the send itself, keep under it.
+   */
+  gapMs: 350,
   /** One send, sign and relays together: past the signer's patience (15 s, and once more after a reconnect) and two relay waits. */
   sendDeadlineMs: 90_000,
-  /** A relay that said rate-limited is asked again after this, times the attempt. */
+  /** A relay that said it was sent to too fast is asked again after this, times the attempt. */
   rateBackoffMs: 3000,
 }
 /** Sends of one shard while a relay says rate-limited. */
@@ -381,7 +386,8 @@ export const useShardImport = create<ShardImportState>((set, get) => {
         // Sent already, this very version (a send that timed out here and landed anyway).
         if (publishState(usePublished.getState().ledger[shard.id], shardFingerprint(shard), me) === 'published') { patch(key, { run: 'done' }); inHand = null; continue }
         let outcome = await sendWithin(shard, stopped)
-        for (let tries = 1; !outcome.ok && /^rate-limited\b/i.test(outcome.detail) && tries < RATE_TRIES; tries++) {
+        // In the relay's own words: relay.onosendai.tech says "Rate limit exceeded for category: ...", not NIP-01's "rate-limited:".
+        for (let tries = 1; !outcome.ok && isRateLimited(outcome.detail) && tries < RATE_TRIES; tries++) {
           if (halted()) break
           await pause(timing.rateBackoffMs * tries)
           if (halted()) break

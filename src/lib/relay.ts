@@ -13,6 +13,7 @@
 
 import { AbstractSimplePool } from 'nostr-tools/abstract-pool'
 import type { AbstractRelay } from 'nostr-tools/abstract-relay'
+import { RATE_LIMITED, TOO_BIG, isRateLimited } from './rateLimit'
 import { deferCheck, verifyOnce, verifyUnlessDeferred } from './verifiedSigs'
 import { answerChecks } from './sigCheck'
 import type { Filter } from 'nostr-tools/filter'
@@ -819,8 +820,61 @@ export function relaySet(): string[] {
 /** `accepted`, when known: the relays that took the event (normalized URLs). */
 export type PublishResult = { ok: true; accepted?: string[] } | { ok: false; reason: string }
 
-/** A relay's own refusal (NIP-01 OK false prefixes): asking again would get the same answer. */
+/**
+ * A relay's own refusal, asking again would get the same answer: NIP-01's
+ * OK false prefixes, and grain's size refusals (TOO_BIG), which carry no
+ * prefix and were taken for a dead socket, dropping the canonical one.
+ */
 const REFUSED = /^(blocked|invalid|duplicate|pow|rate-limited|restricted|error)\b/i
+const refused = (reason: string): boolean => REFUSED.test(reason) || TOO_BIG.test(reason)
+
+/**
+ * A relay saying "too fast" (lib/rateLimit.ts RATE_LIMITED). Not NIP-01's
+ * prefix, relay.onosendai.tech's words slipped past REFUSED, and a send
+ * refused for its rate was taken for a dead socket: the shared socket was
+ * dropped (every feed on it reconnecting, its AUTH gone) and the event sent
+ * again over a fresh one, whose fresh allowance dodged the per-connection
+ * limit and spent one of the 30 connections a minute the relay allows from
+ * one address. It is a refusal for now: the socket is kept, and whoever
+ * sent backs off.
+ */
+export { isRateLimited }
+
+/**
+ * The least time between two sends to one relay, whoever sends: the
+ * publisher's drain, the canonical relay's catch-up, anything else.
+ * relay.onosendai.tech takes 10 events a second on one connection (a burst
+ * of 20) and 8 a second of kind 3333; one every 150 ms is under 7, so a
+ * backlog of any size drains without ever tripping it.
+ */
+export const SEND_GAP_MS = 150
+/**
+ * The same for addressable events (kinds 30000 to 39999: shards, bags),
+ * which grain takes at 3 a second (a burst of 8) on a connection. Their own
+ * gate, beside the other one: together under 10 a second.
+ */
+export const ADDRESSABLE_GAP_MS = 350
+const addressable = (kind: number): boolean => kind >= 30000 && kind < 40000
+/**
+ * Per relay, the gap after its latest send: the next send waits for it, and
+ * opens a gap of its own when it goes. A chain of timers rather than times,
+ * so sends started together queue up behind each other, and nothing here
+ * reads the clock. The limit is the connection's, so a dropped socket takes
+ * its gate with it (dropRelays): the next send goes over a fresh one.
+ */
+const sendGate = new Map<string, Promise<void>>()
+
+/** Wait for this send's turn on every relay it goes to, and hold the turn after it, for its kind's gap. */
+async function paceSends(listed: string[], kind: number): Promise<void> {
+  const urls = listed.map((url) => normalizeURL(url) + (addressable(kind) ? '#addressable' : ''))
+  const gap = addressable(kind) ? ADDRESSABLE_GAP_MS : SEND_GAP_MS
+  const before = Promise.all(urls.map((url) => sendGate.get(url)))
+  const after = before.then(() => new Promise<void>((resolve) => setTimeout(resolve, gap)))
+  for (const url of urls) sendGate.set(url, after)
+  // The gate is forgotten once its time is up and nothing queued behind it.
+  void after.then(() => { for (const url of urls) if (sendGate.get(url) === after) sendGate.delete(url) })
+  await before
+}
 
 /**
  * Drop the sockets to these relays so the next operation opens fresh ones.
@@ -833,6 +887,8 @@ export function dropRelays(relays: string[]): void {
   try { getPool().close(relays) } catch { /* nothing open */ }
   for (const url of relays) {
     const key = normalizeURL(url)
+    sendGate.delete(key)
+    sendGate.delete(`${key}#addressable`)
     authedFor.delete(key)
     authedAs.delete(key)
     // Dropped on purpose: the new socket's AUTH may ask, even after the signer failed (heldBack).
@@ -853,13 +909,19 @@ const CONNECTION_FAILURE = 'connection failure'
  */
 const DUPLICATE = /^duplicate:/i
 
-async function publishOnce(listed: string[], event: NostrEvent): Promise<PublishResult> {
+/** publishOnce's result: on a failure, each relay's own reason too (null: it took it), by the URL it was given. */
+type OnceResult = PublishResult & { byRelay?: Map<string, string | null> }
+/** The result as callers see it, without the per-relay detail. */
+const plain = (r: OnceResult): PublishResult => (r.ok ? r : { ok: false, reason: r.reason })
+
+async function publishOnce(listed: string[], event: NostrEvent): Promise<OnceResult> {
   const relays = skipHung(listed)
   if (relays.length === 0) return { ok: false, reason: HUNG_REASON }
   // Protected events (the `-` tag) are only accepted from an authenticated
   // author, and the relay does not challenge on the EVENT itself, so we must
   // already be authed before publishing.
   await authAll(relays)
+  await paceSends(relays, event.kind)
   const results = await Promise.allSettled(getPool().publish(relays, event, { maxWait: MAX_WAIT_MS, onauth: authSign }))
   // nostr-tools does not reject when it cannot connect: that relay's promise
   // RESOLVES with the string "connection failure: ...". Counted as fulfilled,
@@ -884,8 +946,9 @@ async function publishOnce(listed: string[], event: NostrEvent): Promise<Publish
     // A socket that took the EVENT and never said OK is the socket, not the signer: retried as before.
     return f !== null && r.status === 'rejected' && !/publish timed out/.test(f) && signerHolds(relays[i]) ? AUTH_STALLED : f
   }
-  const reason = results.map(why).find(Boolean)
-  return { ok: false, reason: reason || 'no relay accepted it' }
+  const reasons = results.map(why)
+  const reason = reasons.find(Boolean)
+  return { ok: false, reason: reason || 'no relay accepted it', byRelay: new Map(relays.map((url, i) => [url, reasons[i] ?? null])) }
 }
 
 /**
@@ -897,16 +960,27 @@ async function publishOnce(listed: string[], event: NostrEvent): Promise<Publish
 export async function publishMany(relays: string[], event: NostrEvent): Promise<PublishResult> {
   if (relays.length === 0) return { ok: false, reason: 'no relays configured' }
   const first = await publishOnce(relays, event)
-  if (first.ok || REFUSED.test(first.reason)) return first
+  if (first.ok) return plain(first)
   // Only the others are asked again, over fresh sockets, as on v2, a relay
   // that turned its AUTH down among them. A relay the signer holds up is not:
   // a fresh socket brings a fresh challenge and asks the signer again, which
   // only the RETRY paths may do (retryFailedAuth), and its socket is held for
   // a late answer (verification of #236, finding 4; review of #570).
-  const again = relays.filter((url) => !signerHolds(url))
-  if (again.length === 0) return first
+  // Nor is a relay that refused it, or said it came too fast, whatever the
+  // others said and in whatever order: its socket answered, and is kept. A
+  // dead socket beside it (the canonical relay is first in relaySet, so it
+  // is usually first here) is still dialled again.
+  const own = (url: string): string => first.byRelay?.get(url) ?? (relays.length === 1 ? first.reason : '')
+  const kept = (url: string): boolean => refused(own(url)) || RATE_LIMITED.test(own(url))
+  const again = relays.filter((url) => !signerHolds(url) && !kept(url))
+  if (again.length === 0) return plain(first)
   dropRelays(again)
-  return publishOnce(again, event)
+  const second = await publishOnce(again, event)
+  if (second.ok) return plain(second)
+  // Said back the reason that tells the caller most: "too fast" (wait and
+  // try again) over a refusal, over whatever the dialled-again sockets said.
+  const keptReasons = relays.filter(kept).map(own)
+  return { ok: false, reason: keptReasons.find((r) => RATE_LIMITED.test(r)) ?? keptReasons[0] ?? second.reason }
 }
 
 /**
@@ -920,8 +994,8 @@ export async function publishMany(relays: string[], event: NostrEvent): Promise<
  * address. The failure is reported, and the caller decides when to try
  * again. NIP-01's duplicate counts as taken (publishOnce).
  */
-export function publishOnceTo(url: string, event: NostrEvent): Promise<PublishResult> {
-  return publishOnce([url], event)
+export async function publishOnceTo(url: string, event: NostrEvent): Promise<PublishResult> {
+  return plain(await publishOnce([url], event))
 }
 
 let countSerial = 0
@@ -973,6 +1047,9 @@ export async function countRelay(url: string, filter: Filter, maxWait = MAX_WAIT
  */
 export async function publishLight(event: NostrEvent): Promise<boolean> {
   const url = normalizeURL(CYBERSPACE_RELAY)
+  if (!pool?.listConnectionStatus().get(url) || authPending(url)) return false
+  await paceSends([url], event.kind)
+  // Looked at again after the wait: the socket may have gone, or an AUTH begun, meanwhile, and this never opens one or signs in (#396).
   if (!pool?.listConnectionStatus().get(url) || authPending(url)) return false
   const [result] = await Promise.allSettled(getPool().publish([url], event, { maxWait: MAX_WAIT_MS }))
   return result?.status === 'fulfilled' && !String(result.value).startsWith(CONNECTION_FAILURE)

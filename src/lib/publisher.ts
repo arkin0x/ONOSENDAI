@@ -30,6 +30,7 @@
 import { normalizeURL } from 'nostr-tools/utils'
 import { getEventHash } from 'nostr-tools/pure'
 import { CYBERSPACE_RELAY, askRelay, countRelay, publish, publishOnceTo } from './relay'
+import { TOO_BIG } from './rateLimit'
 import { AUTH_STALLED } from './relayOutcome'
 import { confirmChainEvents } from './chains'
 import { noteChainHolders } from './chainHolders'
@@ -198,7 +199,8 @@ export const CANONICAL_SEND_GAP_MS = 250
 const CANONICAL_REPORT_EVERY = 10
 /**
  * A relay's refusal of this one event, whatever is sent after it (NIP-01
- * prefixes): the pass goes on to the next. Anything else ends the pass, the
+ * prefixes, and grain's size refusals, rateLimit.ts TOO_BIG): the pass goes
+ * on to the next. Anything else ends the pass, the
  * backoff trying again later: a rate limit (relay.onosendai.tech says "Rate
  * limit exceeded for category: regular" or "Global event rate limit
  * exceeded", other relays NIP-01's "rate-limited:"), where the next event
@@ -452,7 +454,7 @@ async function reconcileOnce(pubkey: string): Promise<void> {
     const result = await publishOnceTo(CANONICAL, entry.event).catch((err: unknown) => ({ ok: false as const, reason: String(err) }))
     if (switched()) return
     if (result.ok) { notOnCanonical.delete(entry.event.id); continue }
-    if (!REFUSED_FOR_GOOD.test(result.reason)) return
+    if (!REFUSED_FOR_GOOD.test(result.reason) && !TOO_BIG.test(result.reason)) return
     // Not on the relay, and it says it will not take it: counted, and the rest go on.
     entry.missing = true
   }

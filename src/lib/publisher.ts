@@ -28,7 +28,8 @@
  */
 
 import { normalizeURL } from 'nostr-tools/utils'
-import { CYBERSPACE_RELAY, publish, publishMany } from './relay'
+import { getEventHash } from 'nostr-tools/pure'
+import { CYBERSPACE_RELAY, askRelay, publish, publishOnceTo } from './relay'
 import { confirmChainEvents } from './chains'
 import { noteChainHolders } from './chainHolders'
 import { chainLanded, onReleased } from './chainStore'
@@ -172,17 +173,45 @@ const CANONICAL = normalizeURL(CYBERSPACE_RELAY)
 const CANONICAL_RETRY_MS = 5_000
 /** After this long without the canonical relay, the status strip says so. */
 export const CANONICAL_LATE_MS = 60_000
+/**
+ * Ids asked about in one REQ: relay.onosendai.tech (grain) answers at most
+ * 500 events to a filter, and each REQ carries one filter.
+ */
+export const CANONICAL_CHECK_BATCH = 500
+/** How long one batch of the check waits for the relay's answer. */
+const CANONICAL_CHECK_MS = 8_000
+/**
+ * The pause between two re-sends to the canonical relay. It takes 10 events
+ * a second on one connection and 8 a second of kind 3333; one at a time, each
+ * waiting for its OK and then this long, stays well under both.
+ */
+export const CANONICAL_SEND_GAP_MS = 250
 
-/** Events another relay took and the canonical relay has not, with when they were first sent. */
-const notOnCanonical = new Map<string, { event: NostrEvent; since: number }>()
+/**
+ * One event another relay took and the canonical relay may not have. `since`
+ * is when it was first sent. `missing` is whether the canonical relay, asked
+ * for it by id, answered without it: only that is a reason to send it again,
+ * and only that is counted on the status strip. An entry starts unchecked,
+ * whether this page's own send just missed the canonical relay, the startup
+ * self-check did not see it in the canonical relay's newest page, or a reload
+ * left it in storage; the next check decides.
+ */
+interface Pending { event: NostrEvent; since: number; missing: boolean }
+
+/** Events another relay took and the canonical relay has not been seen to hold. */
+const notOnCanonical = new Map<string, Pending>()
 let canonicalHandle: ReturnType<typeof setTimeout> | null = null
 let canonicalBackoff = CANONICAL_RETRY_MS
+/** The check and re-send in progress, so a second call joins it rather than starting another. */
+let reconciling: Promise<void> | null = null
 
 /**
  * Where that set is kept for an identity, beside its saved chain: a reload
  * used to forget it, and the canonical relay never got those events
  * (verification of #236, finding 3). Event ids and when each was first sent;
- * the events themselves are in the saved chain.
+ * the events themselves are in the saved chain. Whether an entry was found
+ * missing is not kept: what a reload brings back is asked about again before
+ * it is counted, so a list the relay has since caught up on clears silently.
  */
 const pendingKeyFor = (pubkey: string): string => `onosendai:canonical-pending:${pubkey}`
 
@@ -203,13 +232,17 @@ function restorePending(): void {
   const byId = new Map(s.events.map((e) => [e.id, e]))
   for (const [id, since] of Object.entries(saved)) {
     const event = byId.get(id)
-    if (event && !notOnCanonical.has(id)) notOnCanonical.set(id, { event, since })
+    if (event && !notOnCanonical.has(id)) notOnCanonical.set(id, { event, since, missing: false })
   }
   reportCanonicalLate()
   scheduleCanonical()
 }
 
-/** How many of them have waited past CANONICAL_LATE_MS, for the status strip. */
+/**
+ * How many have waited past CANONICAL_LATE_MS, for the status strip. Only
+ * entries a check found missing count: a stale list in storage, or a check
+ * the relay did not answer, never raises the warning on its own.
+ */
 function reportCanonicalLate(): void {
   const now = Date.now()
   // Only what is on the chain in hand counts: another identity's set waits
@@ -217,8 +250,8 @@ function reportCanonicalLate(): void {
   const onChain = new Set(useCyberspace.getState().events.map((e) => e.id))
   let late = 0
   let nextLate = Infinity
-  for (const [id, { since }] of notOnCanonical) {
-    if (!onChain.has(id)) continue
+  for (const [id, { since, missing }] of notOnCanonical) {
+    if (!missing || !onChain.has(id)) continue
     if (now - since >= CANONICAL_LATE_MS) late++
     else nextLate = Math.min(nextLate, since + CANONICAL_LATE_MS)
   }
@@ -230,45 +263,124 @@ function reportCanonicalLate(): void {
 let lateHandle: ReturnType<typeof setTimeout> | undefined
 
 function scheduleCanonical(): void {
-  if (canonicalHandle === null && notOnCanonical.size > 0) canonicalHandle = setTimeout(retryCanonical, canonicalBackoff)
+  if (canonicalHandle === null && reconciling === null && notOnCanonical.size > 0) canonicalHandle = setTimeout(() => { canonicalHandle = null; void reconcileCanonical() }, canonicalBackoff)
 }
 
-/** Keep asking the canonical relay to take `event` until it does. */
+/** Keep asking the canonical relay to take `event` until it holds it. */
 function awaitCanonical(event: NostrEvent): void {
-  if (!notOnCanonical.has(event.id)) notOnCanonical.set(event.id, { event, since: Date.now() })
+  if (!notOnCanonical.has(event.id)) notOnCanonical.set(event.id, { event, since: Date.now(), missing: false })
   savePending(event.pubkey)
   reportCanonicalLate()
   scheduleCanonical()
 }
 
 /**
- * Published events the canonical relay was found not to hold (the startup
- * self-check, lib/selfSync.ts): asked again in the background like any
- * other, whatever this page remembers.
+ * Published events the canonical relay may not hold (the startup self-check,
+ * lib/selfSync.ts): checked by id in the background like any other, and sent
+ * again only if the canonical relay does not have them.
  */
 export function requeueForCanonical(events: NostrEvent[]): void {
-  for (const e of events) awaitCanonical(e)
+  // Saved and counted once for the lot: per event, a long chain's suspects
+  // rewrote the whole saved set once each, on every load.
+  const now = Date.now()
+  const pubkeys = new Set<string>()
+  for (const e of events) {
+    if (!notOnCanonical.has(e.id)) notOnCanonical.set(e.id, { event: e, since: now, missing: false })
+    pubkeys.add(e.pubkey)
+  }
+  for (const pk of pubkeys) savePending(pk)
+  reportCanonicalLate()
+  scheduleCanonical()
 }
 
-async function retryCanonical(): Promise<void> {
-  canonicalHandle = null
-  // Held while a newer deploy's rules stand: asked again on the usual backoff.
-  if (movementBlocked()) { canonicalBackoff = Math.min(canonicalBackoff * 2, RETRY_MAX_MS); scheduleCanonical(); return }
-  const s = useCyberspace.getState()
-  const ids = new Set(s.events.map((e) => e.id))
-  for (const [id, { event }] of [...notOnCanonical]) {
-    // An event no longer on this device's chain (a respawn, another chain
-    // kept) is not worth sending; another identity's is still in its own
-    // storage, for when that identity is back.
-    if (!ids.has(id)) { notOnCanonical.delete(id); continue }
-    const result = await publishMany([CANONICAL], event)
-    if (result.ok) notOnCanonical.delete(id)
+/** The event the relay sent back is the one asked for: its id is the hash of what came. */
+function sameEvent(e: NostrEvent): boolean {
+  try { return getEventHash(e) === e.id } catch { return false }
+}
+
+/**
+ * Bring the canonical relay up to this device's chain, and the pending set
+ * down to what it truly lacks. Runs on the backoff while anything is pending;
+ * exported so a test can run one pass and wait for it.
+ *
+ * First the relay is asked which pending ids it already holds, by id, in
+ * batches of CANONICAL_CHECK_BATCH, one REQ after another over the one socket
+ * the pool keeps to it. Every id it sends back (checked against the event's
+ * own hash) is dropped. A batch the relay did not answer (a timeout, a
+ * refusal, no socket) proves nothing: its entries stay as they were, neither
+ * dropped nor counted. What an answered batch lacks is missing for certain.
+ *
+ * Then only that is sent again, in chain order, one event at a time over the
+ * same socket, never a fresh one per event, paced by CANONICAL_SEND_GAP_MS;
+ * the relay's OK true "duplicate:" counts as taken. The first failure ends
+ * the pass, and the backoff tries again later. An event the relay truly
+ * never got is sent again on every pass until it lands.
+ *
+ * A newer deploy's rules (versionGate) hold the sends, not the check: asking
+ * is not publishing, so a stale list still clears while the hold stands.
+ */
+export function reconcileCanonical(): Promise<void> {
+  if (canonicalHandle !== null) { clearTimeout(canonicalHandle); canonicalHandle = null }
+  reconciling ??= (async () => {
+    const pubkey = useCyberspace.getState().identity.pubkey
+    try {
+      await reconcileOnce(pubkey)
+    } catch {
+      // Whatever escaped is a pass that did not finish: tried again on the backoff.
+    } finally {
+      reconciling = null
+      savePending(pubkey)
+      reportCanonicalLate()
+      if (notOnCanonical.size === 0) canonicalBackoff = CANONICAL_RETRY_MS
+      else { canonicalBackoff = Math.min(canonicalBackoff * 2, RETRY_MAX_MS); scheduleCanonical() }
+    }
+  })()
+  return reconciling
+}
+
+async function reconcileOnce(pubkey: string): Promise<void> {
+  const switched = (): boolean => useCyberspace.getState().identity.pubkey !== pubkey
+  // An event no longer on this device's chain (a respawn, another chain
+  // kept) is not worth sending; another identity's is still in its own
+  // storage, for when that identity is back.
+  const onChain = new Set(useCyberspace.getState().events.map((e) => e.id))
+  for (const id of [...notOnCanonical.keys()]) if (!onChain.has(id)) notOnCanonical.delete(id)
+
+  const ids = [...notOnCanonical.keys()]
+  for (let i = 0; i < ids.length; i += CANONICAL_CHECK_BATCH) {
+    const batch = ids.slice(i, i + CANONICAL_CHECK_BATCH)
+    const answer = await askRelay(CANONICAL, { ids: batch, limit: batch.length }, () => {}, { maxWait: CANONICAL_CHECK_MS }).catch(() => null)
+    if (switched()) return
+    // Unknown, not missing: the rest of the check waits for the next pass.
+    if (!answer || answer.outcome !== 'answered') break
+    const held = new Set(answer.events.filter((e) => notOnCanonical.has(e.id) && sameEvent(e)).map((e) => e.id))
+    for (const id of batch) {
+      const entry = notOnCanonical.get(id)
+      if (!entry) continue
+      if (held.has(id)) notOnCanonical.delete(id)
+      else entry.missing = true
+    }
   }
-  savePending(s.identity.pubkey)
+  // The check's verdict is on the strip before the sends, which can take a while.
+  savePending(pubkey)
   reportCanonicalLate()
-  if (notOnCanonical.size === 0) { canonicalBackoff = CANONICAL_RETRY_MS; return }
-  canonicalBackoff = Math.min(canonicalBackoff * 2, RETRY_MAX_MS)
-  canonicalHandle = setTimeout(retryCanonical, canonicalBackoff)
+
+  // Held while a newer deploy's rules stand: sent on a later pass.
+  if (movementBlocked()) return
+  const order = new Map(useCyberspace.getState().events.map((e, i) => [e.id, i]))
+  const missing = [...notOnCanonical.values()]
+    .filter((p) => p.missing && order.has(p.event.id))
+    .sort((a, b) => order.get(a.event.id)! - order.get(b.event.id)!)
+  for (let i = 0; i < missing.length; i++) {
+    if (i > 0) await new Promise((r) => setTimeout(r, CANONICAL_SEND_GAP_MS))
+    if (switched() || movementBlocked()) return
+    const { event } = missing[i]
+    if (!notOnCanonical.has(event.id)) continue
+    const result = await publishOnceTo(CANONICAL, event).catch((err: unknown) => ({ ok: false as const, reason: String(err) }))
+    if (switched()) return
+    if (!result.ok) return
+    notOnCanonical.delete(event.id)
+  }
 }
 
 /** Idempotent. Subscribes once for the life of the page. */

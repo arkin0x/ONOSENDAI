@@ -910,6 +910,19 @@ export async function publishMany(relays: string[], event: NostrEvent): Promise<
 }
 
 /**
+ * Send to one relay once, over the socket in hand, and never redial on a
+ * failure. For a backlog sent one event after another (publisher.ts
+ * reconcileCanonical): publishMany drops the socket and dials a fresh one
+ * whenever a send fails for any reason but a refusal, so a backlog that
+ * kept failing opened one connection per event, and relay.onosendai.tech
+ * allows 30 a minute from one address. A failure here is reported, and the
+ * caller decides when to try again. NIP-01's duplicate counts as taken.
+ */
+export function publishOnceTo(url: string, event: NostrEvent): Promise<PublishResult> {
+  return publishOnce([url], event)
+}
+
+/**
  * Send something that does not matter if it is lost: one try, to the
  * canonical relay only, over a socket that is already open and not waiting
  * on an AUTH. Never drops a socket, never retries, never asks the signer to

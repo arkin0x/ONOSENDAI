@@ -93,13 +93,26 @@ async function check(pubkey: string): Promise<void> {
 }
 
 /**
- * Published events of this device's chain that the canonical relay, asked
- * just now, does not hold: another relay took them and the canonical relay
- * never did, and a reload forgot that it still had to (verification of
- * #236, finding 3). They are sent to it again in the background. They are
- * never dropped from this device's chain for it: the chain this device holds
- * stays the chain, and the canonical relay is brought up to it. Nothing is
- * sent when the canonical relay did not answer, or when its newest spawn is
+ * Published events of this device's chain that the canonical relay's answer
+ * just now did not include: another relay may have taken them and the
+ * canonical relay never did, and a reload forgot that it still had to
+ * (verification of #236, finding 3).
+ *
+ * That answer is not a list of everything the relay holds. The relay sends
+ * at most 500 events to a filter (relay.onosendai.tech, grain), and the chain
+ * read fills the holes below that page from this device's own events rather
+ * than paging (chains.ts gatherChain), so on a chain longer than one page
+ * every older event is left out of it. Read as "missing", that made every
+ * load requeue the whole older chain: 1520 of the owner's actions the relay
+ * held, warned about as not there (2026-11-09). So these are only suspects:
+ * the publisher asks the canonical relay for them by id before it sends or
+ * counts any of them (publisher.ts reconcileCanonical), and only what it
+ * truly lacks goes out again.
+ *
+ * They are never dropped from this device's chain for it: the chain this
+ * device holds stays the chain, and the canonical relay is brought up to it.
+ * Nothing is handed over when the canonical relay did not answer (a timeout,
+ * a refusal, a hole: unknown, never missing), or when its newest spawn is
  * newer than this chain's (this chain is the old one then).
  */
 function requeueMissingOnCanonical(pubkey: string, answers: RelayAnswer[]): void {

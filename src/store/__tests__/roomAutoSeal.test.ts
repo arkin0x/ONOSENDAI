@@ -336,31 +336,31 @@ describe('SEAL into a room (review of #633)', () => {
     return rows
   }
 
-  it('refuses, before anything is signed, a room bag that would pass the canonical limit', async () => {
+  it('SEAL of more than one room bag holds inline: since sealed entries (spec §7.6, #89) the largest move out, and the room bag stays under the limit', async () => {
     const rows = await hiddenBefore(24, big)
     const door = await sealDoor('Room', ROOM)
     expect(hereInRoom(S().mine, door)).toHaveLength(24)
-    const sent = relay.events.length
-    const sign = vi.spyOn(useCyberspace.getState(), 'signEvent')
     const why = await S().sealIntoRoom(door.eventId, rows.map((r) => r.eventId))
-    expect(why).toMatch(/Too large for one bag/)
-    expect(sign).not.toHaveBeenCalled()
-    sign.mockRestore()
-    expect(relay.events.length).toBe(sent)
-    expect(S().mine.filter((d) => d.room)).toEqual([])
+    expect(why).toBeNull()
+    expect(S().mine.filter((d) => d.room?.doorId === door.eventId)).toHaveLength(24)
+    const room = roomLookupId(roomKey(hexToBytes(door.keyHex), hexToBytes(doorSecret(me(), door.eventId)!)))
+    const roomBags = relay.events.filter((e) => e.kind === HIDDEN_KIND && dOf(e) === room)
+    expect(Math.max(...roomBags.map((e) => JSON.stringify(e).length))).toBeLessThanOrEqual(BAG_SAFE_BYTES)
+    // What moved out went as sealed entries, sealed with the room's key.
+    expect(relay.events.some((e) => e.kind === 33335)).toBe(true)
+    expect(S().mine.some((d) => d.room && d.sealedRef)).toBe(true)
   }, 60000)
 
-  it('a placement that would grow a room bag past the limit is refused at HIDE, and nothing goes out', async () => {
+  it('placements past what a room bag holds inline still go, entries moving out as sealed entries, and no room bag passes the limit', async () => {
     await sealDoor('Room', ROOM)
-    let refused: string | null = null
-    for (let i = 0; i < 30 && !refused; i++) {
+    for (let i = 0; i < 30; i++) {
       S().startDeployMessage(big(i))
       S().setDeployHeight(2)
       await S().deploy()
-      refused = S().deployError
+      expect(S().deployError).toBeNull()
       S().cancelDeploy()
     }
-    expect(refused).toMatch(/Too large for one bag/)
+    expect(S().mine.filter((d) => d.room && d.type === 'message')).toHaveLength(30)
     const roomBags = relay.events.filter((e) => e.kind === HIDDEN_KIND && S().mine.some((d) => d.room && d.lookupId === dOf(e)))
     expect(Math.max(...roomBags.map((e) => JSON.stringify(e).length))).toBeLessThanOrEqual(BAG_SAFE_BYTES)
   }, 60000)

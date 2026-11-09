@@ -820,15 +820,15 @@ export interface BagContents { shard: number; message: number; key: number; ches
  * opened, or kept when it was sealed (lib/sealed.ts sealedItemOf). Any other
  * reference, and a sealed entry whose item was never read, counts as nothing.
  */
-export function bagContents(inners: readonly (BagEntry | ChatRumor)[]): BagContents {
+export function bagContents(inners: readonly (BagEntry | ChatRumor)[], held?: ReadonlyMap<string, Pick<Rumor, 'kind' | 'content' | 'tags'>>): BagContents {
   const out: BagContents = { shard: 0, message: 0, key: 0, chest: 0, cashu: 0, nft: 0, audio: 0, door: 0 }
   for (const entry of inners) {
     let e: Pick<Rumor, 'kind' | 'content' | 'tags'>
     if (isReference(entry)) {
       if (entry[0] === 'a' && entry[1].startsWith(`${OBJECT_KIND}:`)) { out.shard++; continue }
-      const held = sealedRefParts(entry) ? sealedItemOf(entry) : undefined
-      if (!held) continue
-      e = held
+      const item = sealedRefParts(entry) ? held?.get(entry[1]) ?? sealedItemOf(entry) : undefined
+      if (!item) continue
+      e = item
     } else e = entry
     if (e.kind === SHARD_KIND) out.shard++
     else if (e.kind === MESSAGE_KIND) { out.message++; out.cashu += cashuTokensAsWritten(e.content).length; out.nft += countNftLinks(e.content) }
@@ -858,9 +858,9 @@ export const CONTENTS_KINDS = ['shard', 'message', 'key', 'chest', 'cashu', 'nft
  * `cashu` one); with `money` alone, `["contents", "cashu"]` while a
  * token is inside, and nothing once none is. Spec §7.7 "Contents" (#75).
  */
-export function bagContentsTags(inners: readonly (BagEntry | ChatRumor)[], settings: Pick<BagSettings, 'contents' | 'money'>): string[][] {
+export function bagContentsTags(inners: readonly (BagEntry | ChatRumor)[], settings: Pick<BagSettings, 'contents' | 'money'>, held?: ReadonlyMap<string, Pick<Rumor, 'kind' | 'content' | 'tags'>>): string[][] {
   if (!settings.contents && !settings.money) return []
-  const c = bagContents(inners)
+  const c = bagContents(inners, held)
   if (settings.contents) return CONTENTS_KINDS.filter((k) => c[k] > 0).map((k) => ['contents', k, String(c[k])])
   return c.cashu > 0 ? [['contents', 'cashu']] : []
 }
@@ -971,8 +971,8 @@ export interface BagPlace { at: Position; plane: Plane }
  * and buys little anyway — the location encryption is the real gate, and anyone
  * who can decrypt can re-sign identical content as themselves regardless.
  */
-export async function bagTemplate(inners: readonly (BagEntry | ChatRumor)[], regionKey: Uint8Array, lookupId: string, height: number, createdAt: number, kind: number = HIDDEN_KIND, settings: BagSettings = DEFAULT_BAG_SETTINGS, place?: BagPlace): Promise<EventTemplate> {
-  return bagTemplateAround(inners, await encryptForRegion(regionKey, JSON.stringify(inners)), lookupId, height, createdAt, kind, settings, place)
+export async function bagTemplate(inners: readonly (BagEntry | ChatRumor)[], regionKey: Uint8Array, lookupId: string, height: number, createdAt: number, kind: number = HIDDEN_KIND, settings: BagSettings = DEFAULT_BAG_SETTINGS, place?: BagPlace, held?: ReadonlyMap<string, Pick<Rumor, 'kind' | 'content' | 'tags'>>): Promise<EventTemplate> {
+  return bagTemplateAround(inners, await encryptForRegion(regionKey, JSON.stringify(inners)), lookupId, height, createdAt, kind, settings, place, held)
 }
 
 /**
@@ -981,7 +981,7 @@ export async function bagTemplate(inners: readonly (BagEntry | ChatRumor)[], reg
  * to measure a bag without sealing it, since the length follows the
  * plaintext's (sealedLength).
  */
-export function bagTemplateAround(inners: readonly (BagEntry | ChatRumor)[], ciphertext: string, lookupId: string, height: number, createdAt: number, kind: number = HIDDEN_KIND, settings: BagSettings = DEFAULT_BAG_SETTINGS, place?: BagPlace): EventTemplate {
+export function bagTemplateAround(inners: readonly (BagEntry | ChatRumor)[], ciphertext: string, lookupId: string, height: number, createdAt: number, kind: number = HIDDEN_KIND, settings: BagSettings = DEFAULT_BAG_SETTINGS, place?: BagPlace, held?: ReadonlyMap<string, Pick<Rumor, 'kind' | 'content' | 'tags'>>): EventTemplate {
   const tags: string[][] = [['d', lookupId], ['encrypted', ALGO, ciphertext], ['version', '2']]
   if (settings.heightTag) tags.push([HEIGHT_TAG, String(height)])
   if (settings.hint) {
@@ -989,7 +989,7 @@ export function bagTemplateAround(inners: readonly (BagEntry | ChatRumor)[], cip
     if (!hintFits(settings.hint, height)) throw new Error(`A hint box of heights ${settings.hint.join(', ')} cannot contain a height ${height} region.`)
     tags.push(...hintTags(place.at, place.plane, settings.hint))
   }
-  tags.push(...bagContentsTags(inners, settings))
+  tags.push(...bagContentsTags(inners, settings, held))
   return { kind, created_at: createdAt, content: settings.riddle.trim().slice(0, MAX_RIDDLE_LENGTH), tags }
 }
 
@@ -1193,12 +1193,14 @@ export async function unbag(outer: NostrEvent, regionKey: Uint8Array, resolve?: 
  * One item per identity, the first in the bag's list (spec §7.6 Reading,
  * rule 6): two entries that yield the same item id, or the same lineage id,
  * are one item, wherever each was stored (inline, or in a sealed entry). A
- * LIVE LINK and a hidden object are keyed as they always were.
+ * reference to an object (a LIVE LINK, a hidden object) is left as it always
+ * was: one object placed at two points is two entries (entryKey).
  */
 function firstOfEach(items: Hidden[]): Hidden[] {
   const seen = new Set<string>()
   return items.filter((h) => {
-    const lineage = h.ref ? null : itemLineage(h.inner)
+    if (h.ref) return true
+    const lineage = itemLineage(h.inner)
     const keys = [h.eventId, ...(lineage && lineage !== h.eventId ? [lineage] : [])]
     if (keys.some((k) => seen.has(k))) return false
     for (const k of keys) seen.add(k)

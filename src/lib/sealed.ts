@@ -192,43 +192,53 @@ function norm(url: string): string {
   try { return normalizeURL(url) } catch { return url }
 }
 
-/** A signed sealed entry going out before the bag that names it, and the relay its reference names. */
-export interface OutgoingSealed { event: NostrEvent; hint: string }
+/**
+ * A signed sealed entry going out before the bag that names it, and the relay
+ * its reference names. `fresh` when it was sealed for this very bag: only such
+ * an entry is retracted when the bag does not go out, since one carried from
+ * an earlier version may still be the one a row of yours names.
+ */
+export interface OutgoingSealed { event: NostrEvent; hint: string; fresh?: boolean }
+
+/** The reference that names a signed sealed entry, for retracting it. */
+function refOf(s: OutgoingSealed): string[] {
+  return ['a', sealedAddress(s.event.pubkey, s.event.tags.find((t) => t[0] === 'd')?.[1] ?? ''), s.hint]
+}
 
 /**
  * Send a bag after the sealed entries it names (spec §7.6 Writing): each goes
  * first to the relay its reference names, which must take it, then to the
  * other relays; the bag goes only to the relays that took every one, so a
- * reader who asks one relay never finds the bag without its entries. Nothing
- * of the bag goes out when the hinted relay refuses an entry: the entries
- * already sent are then retracted, since no bag names them. Once the bag is
- * out, the sealed entries the bag before it named and this one does not
- * (`dropped`) are retracted.
+ * reader who asks one relay never finds the bag without its entries. When the
+ * bag cannot go out (the hinted relay refused an entry, no relay took them
+ * all, or no relay took the bag), the entries sealed for it that did go out
+ * are retracted, since no bag names them. Once the bag is out, the sealed
+ * entries the bag before it named and this one does not (`dropped`) are
+ * retracted.
  */
 export async function sendBagWithSealed(relays: string[], bag: NostrEvent, sealed: readonly OutgoingSealed[], dropped: readonly string[][], deps: SendDeps): Promise<{ ok: boolean; accepted: string[]; reason?: string }> {
   let open = [...relays]
-  const sent: OutgoingSealed[] = []
+  const out: OutgoingSealed[] = []
+  const undo = async (reason: string): Promise<{ ok: false; accepted: string[]; reason: string }> => {
+    for (const done of out) if (done.fresh) await deps.retract?.(refOf(done)).catch(() => undefined)
+    return { ok: false, accepted: [], reason }
+  }
   for (const s of sealed) {
     const first = s.hint && relays.includes(s.hint) ? [s.hint] : []
     const rest = relays.filter((r) => !first.includes(r))
     const head = first.length > 0 ? await deps.publish(first, s.event).catch(() => ({ ok: false as const })) : null
-    if (head && !head.ok) {
-      for (const done of sent) await deps.retract?.(['a', sealedAddress(done.event.pubkey, done.event.tags.find((t) => t[0] === 'd')?.[1] ?? ''), done.hint]).catch(() => undefined)
-      return { ok: false, accepted: [], reason: 'No relay took an entry moved out of the bag. Nothing was sent.' }
-    }
+    if (head && !head.ok) return undo('No relay took an entry moved out of the bag. Nothing was sent.')
+    if (head) out.push(s)
     const tail = rest.length > 0 ? await deps.publish(rest, s.event).catch(() => ({ ok: false as const, accepted: [] as string[] })) : { ok: true, accepted: [] as string[] }
     // A relay that did not say it took this entry gets no bag naming it.
     const took = new Set([...first, ...(tail.accepted ?? (tail.ok ? rest : []))].map(norm))
-    if (!head && took.size === 0) {
-      for (const done of sent) await deps.retract?.(['a', sealedAddress(done.event.pubkey, done.event.tags.find((t) => t[0] === 'd')?.[1] ?? ''), done.hint]).catch(() => undefined)
-      return { ok: false, accepted: [], reason: 'No relay took an entry moved out of the bag. Nothing was sent.' }
-    }
+    if (!head && took.size > 0) out.push(s)
+    if (took.size === 0) return undo('No relay took an entry moved out of the bag. Nothing was sent.')
     open = open.filter((r) => took.has(norm(r)))
-    sent.push(s)
   }
-  if (open.length === 0) return { ok: false, accepted: [], reason: 'No relay took every entry moved out of the bag. Nothing was sent.' }
+  if (open.length === 0) return undo('No relay took every entry moved out of the bag. Nothing was sent.')
   const result = await deps.publish(open, bag).catch(() => ({ ok: false as const, accepted: [] as string[] }))
-  if (!result.ok) return { ok: false, accepted: [], reason: 'No relay took the bag.' }
+  if (!result.ok) return undo('No relay took the bag.')
   for (const ref of dropped) await deps.retract?.(ref).catch(() => undefined)
   return { ok: true, accepted: result.accepted ?? open }
 }

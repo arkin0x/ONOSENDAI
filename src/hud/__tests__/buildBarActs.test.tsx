@@ -149,6 +149,14 @@ describe('the BUILD bar: RETURN TO AVATAR beside EXIT', () => {
   const away = (): void => { S().moveCursor(moveDirection(S().axes(), 'up')) }
   const realToAvatar = useBuilder.getState().toAvatar
   afterEach(() => { useBuilder.setState({ toAvatar: realToAvatar }) })
+  // The test renderer hands a ref the host record itself (elementRoot.ts),
+  // so a focus spy set on EXIT's record is what the bar's ref calls.
+  const exitWithFocusSpy = (bar: Mounted): ReturnType<typeof vi.fn> => {
+    const exit = bar.buttons(/^EXIT$/)[0] as Host & { focus?: () => void }
+    const focus = vi.fn()
+    exit.focus = focus
+    return focus
+  }
 
   it('is not there at all on your avatar, where it would do nothing', async () => {
     await enter()
@@ -179,10 +187,36 @@ describe('the BUILD bar: RETURN TO AVATAR beside EXIT', () => {
     away()
     await settled()
     expect(headButtons(bar)).toEqual(['RETURN TO AVATAR', 'EXIT'])
+    exitWithFocusSpy(bar)
     await bar.press('RETURN TO AVATAR')
     expect(S().cursor).toEqual(S().position)
     expect(useBuilder.getState().active).toBe(true)
     expect(headButtons(bar)).toEqual(['EXIT'])
+    await bar.unmount()
+  })
+
+  it('hands the focus to EXIT when pressed, since it leaves the screen', async () => {
+    await enter()
+    away()
+    const bar = await mount(<BuildBar />)
+    const focus = exitWithFocusSpy(bar)
+    await bar.press('RETURN TO AVATAR')
+    expect(home(bar)).toBeUndefined()
+    expect(focus).toHaveBeenCalledTimes(1)
+    await bar.unmount()
+  })
+
+  it('leaves the focus alone when X does the same from the canvas', async () => {
+    await enter()
+    away()
+    const bar = await mount(<BuildBar />)
+    const focus = exitWithFocusSpy(bar)
+    // What the X key calls (hooks/useKeyboard.ts), not the button's onClick.
+    useBuilder.getState().toAvatar()
+    await settled()
+    expect(home(bar)).toBeUndefined()
+    expect(S().cursor).toEqual(S().position)
+    expect(focus).not.toHaveBeenCalled()
     await bar.unmount()
   })
 
@@ -192,6 +226,7 @@ describe('the BUILD bar: RETURN TO AVATAR beside EXIT', () => {
     const toAvatar = vi.fn()
     useBuilder.setState({ toAvatar })
     const bar = await mount(<BuildBar />)
+    exitWithFocusSpy(bar)
     await bar.press('RETURN TO AVATAR')
     expect(toAvatar).toHaveBeenCalledTimes(1)
     await bar.unmount()

@@ -31,6 +31,7 @@ import { axisDistance } from '../lib/nearby'
 import { Explanation } from './Explanation'
 import { useStash } from './stash'
 import { useCover } from '../hooks/useCover'
+import { useRef } from 'react'
 import { DoorClosedLocked, House, Wrench } from 'lucide-react'
 import { ItemIcon } from './ItemIcon'
 import { sealAChest, sealADoor } from './ShardsPanel'
@@ -56,7 +57,18 @@ export function BuildBar(): JSX.Element | null {
   // The last placement, for AGAIN after a CANCEL: its name, or null.
   const again = useAgainName()
   const againType = useShards((s) => s.placedLast?.pending.type ?? 'shard')
+  // Where focus goes when RETURN TO AVATAR is pressed and leaves the screen.
+  const exitRef = useRef<HTMLButtonElement>(null)
   if (!active) return null
+
+  // RETURN TO AVATAR pressed (a click, a tap, Enter or Space on it): back to
+  // your avatar, where the button is no longer rendered, so focus moves to
+  // EXIT beside it rather than falling off the bar. The X shortcut calls
+  // toAvatar on its own (hooks/useKeyboard.ts) and moves no focus.
+  const returnToAvatar = (): void => {
+    useBuilder.getState().toAvatar()
+    exitRef.current?.focus()
+  }
 
   const stop = (): void => {
     const s = useCyberspace.getState()
@@ -79,11 +91,12 @@ export function BuildBar(): JSX.Element | null {
         {/* Not rendered on your avatar, where it would do nothing. Its cell
             in the header is EXIT's left on a wide bar and the row under
             EXIT on a narrow one (styles.css .buildbar__head), so EXIT
-            stays put when it comes and goes. X does the same. */}
+            stays put when it comes and goes, and takes the focus when
+            it goes (returnToAvatar). X does the same, focus untouched. */}
         {!onAvatar && (
-          <button className="buildbar__act buildbar__home" onClick={() => useBuilder.getState().toAvatar()} aria-label="Return to avatar" title="Return to avatar: bring the build cursor and the view back to your avatar, still building (X)"><House className="buildbar__icon" size={ICON} strokeWidth={2.25} aria-hidden />RETURN TO AVATAR</button>
+          <button className="buildbar__act buildbar__home" onClick={returnToAvatar} aria-label="Return to avatar" title="Return to avatar: bring the build cursor and the view back to your avatar, still building (X)"><House className="buildbar__icon" size={ICON} strokeWidth={2.25} aria-hidden />RETURN TO AVATAR</button>
         )}
-        <button className="hyperbar__end buildbar__exit" onClick={() => useBuilder.getState().exit()} title="Leave build mode. The view stays where it is (Esc, or B)">EXIT</button>
+        <button ref={exitRef} className="hyperbar__end buildbar__exit" onClick={() => useBuilder.getState().exit()} title="Leave build mode. The view stays where it is (Esc, or B)">EXIT</button>
       </div>
 
       {moving && (

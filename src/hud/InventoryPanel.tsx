@@ -264,6 +264,16 @@ export const KEY_ITEMS_HEADING = 'KEY ITEMS — MAY UNLOCK DOORS OR CHESTS'
 /** The heading over what was taken out of chests (arkinox, 2026-11-09). */
 export const OTHER_LOOT_HEADING = 'OTHER LOOT'
 
+/**
+ * The header chip, named after the two headings (2026-11-09): "3 KEY ITEMS ·
+ * 4 LOOT", "1 KEY ITEM", the loot count without a plural, NOTHING HELD when
+ * empty.
+ */
+export function heldCount(keys: number, loot: number): string {
+  if (keys + loot === 0) return 'NOTHING HELD'
+  return `${keys} KEY ITEM${keys === 1 ? '' : 'S'}${loot > 0 ? ` · ${loot} LOOT` : ''}`
+}
+
 /** How long MOVED INTO WORKSHOP stays in a row's place before the row leaves the list (arkinox, 2026-10-11). */
 export const MOVED_NOTICE_MS = 5000
 
@@ -328,7 +338,8 @@ export function TakenRow({ item }: { item: HeldItem }): JSX.Element {
     )
   }
   return (
-    <li className="secrets__row held__row">
+    // Laid out as a key item row: its buttons wrap under the name on a narrow phone, the X with them (arkinox, 2026-11-09).
+    <li className="secrets__row held__row held__row--loot">
       {item.type === 'shard' && item.shard ? <ShardThumb shard={item.shard} /> : <ItemIcon className={`chest__glyph chest__glyph--${coin ? 'cashu' : item.type}`} type={item.type} coin={coin} />}
       {item.type === 'chest' && item.chest
         ? <ChestBlock id={item.id} chest={item.chest} author={item.author} verified={item.verified} place={item.place} sealer={item.verified ? item.event.pubkey : undefined} />
@@ -418,7 +429,7 @@ export function InventoryPanel(): JSX.Element {
         <h2>Items</h2>
         <span className="loot__tags">
           {storage === 'memory' && <span className="tag" title="IndexedDB could not be opened; what you hold lasts this session only">THIS SESSION</span>}
-          <span className="tag">{count === 0 ? 'NOTHING HELD' : `${keys.length} ITEM${keys.length === 1 ? '' : 'S'}${taken.length > 0 ? ` · ${taken.length} TAKEN` : ''}`}</span>
+          <span className="tag">{heldCount(keys.length, taken.length)}</span>
         </span>
       </header>
 

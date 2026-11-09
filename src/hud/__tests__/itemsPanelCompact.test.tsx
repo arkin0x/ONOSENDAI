@@ -2,7 +2,9 @@
  * itemsPanelCompact.test.tsx: the ITEMS panel's two headings and its key
  * item buttons (arkinox, 2026-11-09: "the buttons on the Items are way too
  * large. Make them like the buttons below on the 'taken' things", and the
- * headings KEY ITEMS — MAY UNLOCK DOORS OR CHESTS and OTHER LOOT). Mounted,
+ * headings KEY ITEMS — MAY UNLOCK DOORS OR CHESTS and OTHER LOOT), the
+ * header chip named after them, and the OTHER LOOT rows wrapping as the key
+ * item rows do, so nothing runs off the panel at 320px. Mounted,
  * each store brought up to date first; the size is read from styles.css.
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest'
@@ -41,7 +43,7 @@ import { mount, textOf, type Host } from '../../test/elementRoot'
 import { useCyberspace } from '../../store/useCyberspace'
 import { useInventory } from '../../store/useInventory'
 import { useShards } from '../../store/useShards'
-import { InventoryPanel, KEY_ITEMS_HEADING, OTHER_LOOT_HEADING } from '../InventoryPanel'
+import { heldCount, InventoryPanel, KEY_ITEMS_HEADING, OTHER_LOOT_HEADING } from '../InventoryPanel'
 
 const at = { x: 1n, y: 2n, z: 3n }
 const place = { lookupId: 'l', bagId: 'b', at: { x: '1', y: '2', z: '3' }, plane: 0 as const, height: 4 }
@@ -100,6 +102,22 @@ describe('ITEMS headings', () => {
   })
 })
 
+describe('the header chip', () => {
+  it('counts KEY ITEMS and LOOT, singular for one key item, LOOT for any count, NOTHING HELD when empty', async () => {
+    expect(heldCount(3, 4)).toBe('3 KEY ITEMS · 4 LOOT')
+    expect(heldCount(1, 1)).toBe('1 KEY ITEM · 1 LOOT')
+    expect(heldCount(2, 0)).toBe('2 KEY ITEMS')
+    expect(heldCount(0, 5)).toBe('0 KEY ITEMS · 5 LOOT')
+    expect(heldCount(0, 0)).toBe('NOTHING HELD')
+    const restore = seed()
+    const m = await mount(createElement(InventoryPanel))
+    expect(m.says('1 KEY ITEM · 1 LOOT')).toBe(true)
+    expect(m.all().some((h) => /TAKEN/.test(textOf(h)) && cls(h) === 'tag')).toBe(false)
+    await m.unmount()
+    restore()
+  })
+})
+
 describe('key item buttons', () => {
   it('are the OTHER LOOT rows’ chest__act buttons, DELETE keeping its danger class and LISTED its disabled state', async () => {
     const restore = seed()
@@ -116,6 +134,22 @@ describe('key item buttons', () => {
     for (const b of buttonsIn(taken).filter((b) => cls(b) !== 'held__clear')) expect(cls(b).split(' ')).toContain('chest__act')
     await m.unmount()
     restore()
+  })
+
+  it('share one wrapping row with the OTHER LOOT rows: the taken row carries held__row--loot, and both classes get the same flex-wrap layout, buttons pushed right and allowed to wrap', async () => {
+    const restore = seed()
+    const m = await mount(createElement(InventoryPanel))
+    const [taken] = rowsOf(m.all(), false)
+    expect(cls(taken).split(' ')).toContain('held__row--loot')
+    await m.unmount()
+    restore()
+    // Comments out, so a rule's selector is only its selector.
+    const css = readFileSync(new URL('../../styles.css', import.meta.url), 'utf8').replace(/\/\*[\s\S]*?\*\//g, '')
+    const ruleFor = (part: string): string[] => [...css.matchAll(/([^{}]+)\{([^{}]*)\}/g)].filter(([, sel]) => sel.split(',').some((x) => x.trim() === part)).map(([, , body]) => body)
+    for (const row of ['.held__row--item', '.held__row--loot']) {
+      expect(ruleFor(row).join(';')).toMatch(/display: flex;.*flex-wrap: wrap/)
+      expect(ruleFor(`${row} > .held__acts`).join(';')).toMatch(/margin-left: auto;.*flex-wrap: wrap/)
+    }
   })
 
   it('carry no size of their own in styles.css: no fingertip minimum on a key item row or its DELETE, nothing resizing .chest__act under .held__row--item', () => {

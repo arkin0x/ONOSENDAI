@@ -9482,16 +9482,18 @@ a.feed__act { text-decoration: none; }
 .held__acts { display: flex; gap: 4px; align-items: center; }
 .held__views { display: flex; gap: 6px; margin: 4px 0 6px; }
 .held__views .tag--tap.is-on { color: var(--accent); border-color: var(--accent); }
-/* A key item, laid out as an OTHER LOOT row (arkinox, 2026-11-09): its
- * buttons on the right, beside the name when they fit and on the line under
- * it when they do not, wrapping there on a phone. The name keeps at least
- * 140px, so six buttons never squeeze it to "Si..." (arkinox, 2026-11-03).
- * DETAILS and a refusal open under all of it, as on the loot rows. */
-.held__row--item { display: flex; flex-wrap: wrap; align-items: center; column-gap: 8px; row-gap: 4px; }
-.held__row--item > .chest__glyph { flex: none; }
-.held__row--item > .item__line { flex: 1 1 140px; }
-.held__row--item > .held__acts { flex: 0 1 auto; margin-left: auto; flex-wrap: wrap; justify-content: flex-end; }
-.held__row--item > .held__refusal, .held__row--item > .held__details { flex: 1 1 100%; }
+/* A key item and an OTHER LOOT row, laid out alike (arkinox, 2026-11-09):
+ * the picture, the name, and the small buttons on the right, beside the name
+ * when they fit and on the line under it when they do not, wrapping there on
+ * a narrow phone, the X with them, so nothing runs off the panel at 320px.
+ * The name keeps at least 120px, so buttons never squeeze it to "Si..."
+ * (arkinox, 2026-11-03). DETAILS and a refusal open under all of it. */
+.held__row--item, .held__row--loot { display: flex; flex-wrap: wrap; align-items: center; column-gap: 8px; row-gap: 4px; }
+.held__row--item > .chest__glyph, .held__row--loot > .chest__glyph, .held__row--loot > .shardthumb { flex: none; }
+.held__row--item > .item__line, .held__row--loot > .item__line, .held__row--loot > .chest { flex: 1 1 120px; }
+.held__row--item > .held__acts, .held__row--loot > .held__acts { flex: 0 1 auto; margin-left: auto; flex-wrap: wrap; justify-content: flex-end; }
+.held__row--item > .held__refusal, .held__row--item > .held__details,
+.held__row--loot > .held__refusal, .held__row--loot > .held__details { flex: 1 1 100%; }
 .held__refusal { grid-column: 1 / -1; font-size: 10px; color: var(--danger); padding-left: 22px; }
 .held__details { grid-column: 1 / -1; display: flex; flex-direction: column; gap: 4px; padding: 2px 0 2px 22px; font-size: 10px; }
 .held__details dl { display: grid; grid-template-columns: auto 1fr; gap: 3px 10px; margin: 0; }

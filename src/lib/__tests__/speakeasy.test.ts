@@ -32,9 +32,9 @@ const A_SAME_CELL = A.slice(0, 63) + 'b'
 const B = A.slice(0, 30) + 'f' + A.slice(31)
 const REGION = '0fe6b3deeb67e952f852e8c1df15'
 
-/** An entry as the relay lists one: its url is always public_url/<region>, named or not. */
+/** An entry as the relay lists one: its url is always public_url/C/<region>, named or not (the owner, 2026-11-09). */
 function entry(region: string, name: string | null = null): Record<string, unknown> {
-  return { region, name, url: `wss://relay.onosendai.tech/${region}`, created_at: 1762300000 }
+  return { region, name, url: `wss://relay.onosendai.tech/C/${region}`, created_at: 1762300000 }
 }
 
 function answering(body: unknown, status = 200): ReturnType<typeof vi.fn> {
@@ -50,7 +50,7 @@ describe('the relay base and the URLs', () => {
 
   it('asks the well-known path with the coordinate, and links the region page', () => {
     expect(lookupUrl(A)).toBe(`${BASE}/.well-known/cyberspace-speakeasies?coord=${A}`)
-    expect(dashboardUrl(REGION)).toBe(`${BASE}/${REGION}`)
+    expect(dashboardUrl(REGION)).toBe(`${BASE}/C/${REGION}`)
   })
 
   it('labels by name, else by a short region', () => {
@@ -64,7 +64,7 @@ describe('reading the answer', () => {
   it('reads the contract, longest region first', () => {
     const got = parseSpeakeasies({ speakeasies: [entry('0f'), entry(REGION, 'fiatjafs-speakeasy'), entry('0fe6')] }, A, BASE)
     expect(got?.map((s) => s.region)).toEqual([REGION, '0fe6', '0f'])
-    expect(got?.[0]).toEqual({ region: REGION, name: 'fiatjafs-speakeasy', url: `wss://relay.onosendai.tech/${REGION}`, created_at: 1762300000 })
+    expect(got?.[0]).toEqual({ region: REGION, name: 'fiatjafs-speakeasy', url: `wss://relay.onosendai.tech/C/${REGION}`, created_at: 1762300000 })
   })
 
   it('takes an empty list as none here', () => {
@@ -84,7 +84,7 @@ describe('reading the answer', () => {
         { ...entry('0fe6'), region: '0FE6' }, // not normalized
         entry('ff'), // does not hold the coordinate
         { ...entry('0f'), url: 'wss://evil.example/0f' }, // another host
-        { ...entry('0f'), url: 'https://relay.onosendai.tech/0f' }, // not a relay address
+        { ...entry('0f'), url: 'https://relay.onosendai.tech/C/0f' }, // not a relay address
         { ...entry('0f'), name: 7 },
         { ...entry('0f'), created_at: 'yesterday' },
         null,
@@ -94,20 +94,23 @@ describe('reading the answer', () => {
     expect(got?.map((s) => s.region)).toEqual([REGION])
   })
 
-  it('takes only the url wss://<relay host>/<region>: not a name path, not the bare host, not another path', () => {
+  it('takes only the url wss://<relay host>/C/<region>: not a name path, a bare region path, a lowercase c, the bare host or another path', () => {
     const got = parseSpeakeasies({
       speakeasies: [
-        { ...entry(REGION, 'fiatjafs-speakeasy'), url: 'wss://relay.onosendai.tech/fiatjafs-speakeasy' }, // a name path: a redirect for a websocket
+        { ...entry(REGION, 'fiatjafs-speakeasy'), url: 'wss://relay.onosendai.tech/fiatjafs-speakeasy' }, // a name path: the relay never lists it as the url
         { ...entry('0fe6'), url: 'wss://relay.onosendai.tech' }, // the bare host: the default relay
         { ...entry('0fe6'), url: 'wss://relay.onosendai.tech/' },
-        { ...entry('0f'), url: 'wss://relay.onosendai.tech/0fe6' }, // another region's path
-        { ...entry('0f'), url: 'ws://relay.onosendai.tech/0f' }, // not wss
-        { ...entry('0f'), url: 'wss://relay.onosendai.tech/0f/x' },
+        { ...entry('0fe6'), url: 'wss://relay.onosendai.tech/0fe6' }, // the bare /<region>, before the 2026-11-09 ruling
+        { ...entry('0fe6'), url: 'wss://relay.onosendai.tech/c/0fe6' }, // the C is case-exact
+        { ...entry(REGION, 'fiatjafs-speakeasy'), url: 'wss://relay.onosendai.tech/C/fiatjafs-speakeasy' }, // a name under /C/
+        { ...entry('0f'), url: 'wss://relay.onosendai.tech/C/0fe6' }, // another region's path
+        { ...entry('0f'), url: 'ws://relay.onosendai.tech/C/0f' }, // not wss
+        { ...entry('0f'), url: 'wss://relay.onosendai.tech/C/0f/x' },
       ],
     }, A, BASE)
     expect(got).toEqual([])
     // Written a little differently, the same address is still taken, in its normal form.
-    expect(parseSpeakeasies({ speakeasies: [{ ...entry('0fe6'), url: 'WSS://Relay.Onosendai.Tech/0fe6/' }] }, A, BASE)?.map((s) => s.url)).toEqual(['wss://relay.onosendai.tech/0fe6'])
+    expect(parseSpeakeasies({ speakeasies: [{ ...entry('0fe6'), url: 'WSS://Relay.Onosendai.Tech/C/0fe6/' }] }, A, BASE)?.map((s) => s.url)).toEqual(['wss://relay.onosendai.tech/C/0fe6'])
   })
 
   it('shows a name only in ruling D3\'s form, else the short region', () => {

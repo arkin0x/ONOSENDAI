@@ -40,9 +40,9 @@ import { useSpeakeasies } from '../../hooks/useSpeakeasies'
 import { useRelays } from '../../store/useRelays'
 import { SpeakeasyLine, addSpeakeasy, joined } from '../SpeakeasyLine'
 
-// The relay lists a named speakeasy at its region path too (public_url/<region>).
-const NAMED: Speakeasy = { region: '0fe6b3deeb67e952f852e8c1df15', name: 'fiatjafs-speakeasy', url: 'wss://relay.onosendai.tech/0fe6b3deeb67e952f852e8c1df15', created_at: 1762300000 }
-const PLAIN: Speakeasy = { region: '0fe6', name: null, url: 'wss://relay.onosendai.tech/0fe6', created_at: 1762300000 }
+// The relay lists a named speakeasy at its region path too (public_url/C/<region>, the owner, 2026-11-09).
+const NAMED: Speakeasy = { region: '0fe6b3deeb67e952f852e8c1df15', name: 'fiatjafs-speakeasy', url: 'wss://relay.onosendai.tech/C/0fe6b3deeb67e952f852e8c1df15', created_at: 1762300000 }
+const PLAIN: Speakeasy = { region: '0fe6', name: null, url: 'wss://relay.onosendai.tech/C/0fe6', created_at: 1762300000 }
 
 function fakeLookup(list: Speakeasy[]): SpeakeasyLookup & { asked: Array<string | null>; watched: () => number } {
   const asked: Array<string | null> = []
@@ -117,7 +117,7 @@ describe('the speakeasy line', () => {
     expect(m.buttons('ADD RELAY')).toHaveLength(2)
     expect(m.says('JOINED')).toBe(false)
     const hrefs = links(m.all()).map((a) => a.props.href)
-    expect(hrefs).toEqual(['https://relay.onosendai.tech/0fe6b3deeb67e952f852e8c1df15', 'https://relay.onosendai.tech/0fe6'])
+    expect(hrefs).toEqual(['https://relay.onosendai.tech/C/0fe6b3deeb67e952f852e8c1df15', 'https://relay.onosendai.tech/C/0fe6'])
     for (const a of links(m.all())) expect(a.props.target).toBe('_blank')
     await m.unmount()
   })
@@ -133,8 +133,8 @@ describe('the speakeasy line', () => {
   it('ADD RELAY puts it in your relays, saved like any other, and the line turns to JOINED', async () => {
     const m = await mount(<SpeakeasyLine lookup={fakeLookup([PLAIN])} />)
     await m.press('ADD RELAY')
-    expect(useRelays.getState().relays).toContain('wss://relay.onosendai.tech/0fe6')
-    expect(JSON.parse(localStorage.getItem('onosendai:relays') ?? '[]')).toContain('wss://relay.onosendai.tech/0fe6')
+    expect(useRelays.getState().relays).toContain('wss://relay.onosendai.tech/C/0fe6')
+    expect(JSON.parse(localStorage.getItem('onosendai:relays') ?? '[]')).toContain('wss://relay.onosendai.tech/C/0fe6')
     expect(m.says('JOINED')).toBe(true)
     expect(m.buttons('ADD RELAY')).toHaveLength(0)
     await m.unmount()
@@ -146,7 +146,7 @@ describe('mounted again after the head moved (the Hud unmounts when the menu clo
   const OUT = 'f'.repeat(64)
 
   it('the first render already leaves out a speakeasy the head has left: no flash', async () => {
-    const fetchFn = (async () => new Response(JSON.stringify({ speakeasies: [{ region: REGION, name: null, url: `wss://relay.onosendai.tech/${REGION}`, created_at: 1 }] }), { status: 200 })) as unknown as typeof fetch
+    const fetchFn = (async () => new Response(JSON.stringify({ speakeasies: [{ region: REGION, name: null, url: `wss://relay.onosendai.tech/C/${REGION}`, created_at: 1 }] }), { status: 200 })) as unknown as typeof fetch
     const lookup = createSpeakeasyLookup({ fetchFn, base: 'https://relay.onosendai.tech', debounceMs: 1 })
     const seen: string[][] = []
     const hook = (c: string | null): Speakeasy[] => { const r = useSpeakeasies(c, false, lookup); seen.push(r.map((s) => s.region)); return r }
@@ -183,12 +183,12 @@ describe('joined and the add path', () => {
   })
 
   it('reads the relay list as the store normalizes it', () => {
-    expect(joined({ ...PLAIN, url: 'wss://relay.onosendai.tech/0fe6/' }, ['wss://relay.onosendai.tech/0fe6'])).toBe(true)
+    expect(joined({ ...PLAIN, url: 'wss://relay.onosendai.tech/C/0fe6/' }, ['wss://relay.onosendai.tech/C/0fe6'])).toBe(true)
   })
 
   it('adds through the relay store, once', () => {
-    expect(addSpeakeasy(PLAIN)).toBe('wss://relay.onosendai.tech/0fe6')
-    expect(addSpeakeasy(PLAIN)).toBe('wss://relay.onosendai.tech/0fe6')
-    expect(useRelays.getState().relays.filter((r) => r === 'wss://relay.onosendai.tech/0fe6')).toHaveLength(1)
+    expect(addSpeakeasy(PLAIN)).toBe('wss://relay.onosendai.tech/C/0fe6')
+    expect(addSpeakeasy(PLAIN)).toBe('wss://relay.onosendai.tech/C/0fe6')
+    expect(useRelays.getState().relays.filter((r) => r === 'wss://relay.onosendai.tech/C/0fe6')).toHaveLength(1)
   })
 })

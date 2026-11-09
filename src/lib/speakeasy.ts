@@ -3,7 +3,9 @@
  * relay-speakeasies design, 2026-11-04).
  *
  * A speakeasy is a paid, location-gated relay on the canonical relay's host:
- * wss://relay.onosendai.tech/<region> or /<name>. Only an AUTHed pubkey whose
+ * wss://relay.onosendai.tech/C/<region> (the owner, 2026-11-09: the same
+ * /C/ path as www.onosendai.tech/C/<region>); a bought name also answers at
+ * /<name>, but the relay never lists that. Only an AUTHed pubkey whose
  * valid chain head is inside the region may read or write there. The region
  * is exactly the /C/ prefix form (coordRoute.ts, ruling D7): every coordinate
  * whose 64 hex start with it, in both planes.
@@ -31,7 +33,7 @@ export interface Speakeasy {
   region: string
   /** The name bought for it (ruling D3's form), or null. */
   name: string | null
-  /** The relay address: exactly wss://<relay host>/<region>. */
+  /** The relay address: exactly wss://<relay host>/C/<region>. */
   url: string
   created_at: number
 }
@@ -85,9 +87,9 @@ export function lookupUrl(coord: string, base: string = speakeasyBase()): string
   return `${base}/.well-known/cyberspace-speakeasies?coord=${coord}`
 }
 
-/** The region's page on the relay, in a browser. */
+/** The region's page on the relay, in a browser: <base>/C/<region>. */
 export function dashboardUrl(region: string, base: string = speakeasyBase()): string {
-  return `${base}/${region}`
+  return `${base}/C/${region}`
 }
 
 /** What a speakeasy is called on screen: its name, or its region shortened. */
@@ -105,10 +107,11 @@ export function inRegion(s: Speakeasy, coord: string): boolean {
  * The relay's answer, read strictly: null when it is not the contract's shape
  * at all, else the entries that hold up, longest region first, one per url.
  * An entry is dropped when its region is not hex, is not a prefix of `coord`,
- * or its url is not exactly wss://<relay host>/<region>: a press of ADD RELAY
- * adds that url, and the relay always lists public_url/<region> (a /<name>
- * path answers a websocket with a redirect, and a bare host is the default
- * relay). A name not in ruling D3's form is shown as the short region.
+ * or its url is not exactly wss://<relay host>/C/<region>, with a capital C:
+ * a press of ADD RELAY adds that url, and the relay always lists
+ * public_url/C/<region> (the owner, 2026-11-09). A /<name> path, a bare
+ * /<region>, a lowercase /c/ or the bare host (the default relay) is dropped.
+ * A name not in ruling D3's form is shown as the short region.
  */
 export function parseSpeakeasies(body: unknown, coord: string, base: string = speakeasyBase()): Speakeasy[] | null {
   if (!body || typeof body !== 'object' || !Array.isArray((body as { speakeasies?: unknown }).speakeasies)) return null
@@ -127,7 +130,7 @@ export function parseSpeakeasies(body: unknown, coord: string, base: string = sp
     if (typeof e.created_at !== 'number' || !Number.isFinite(e.created_at)) continue
     if (typeof e.url !== 'string') continue
     const url = normalizeRelay(e.url)
-    if (url !== `${origin}/${e.region}` || seen.has(url)) continue
+    if (url !== `${origin}/C/${e.region}` || seen.has(url)) continue
     seen.add(url)
     const name = typeof e.name === 'string' && NAME.test(e.name) ? e.name : null
     out.push({ region: e.region, name, url, created_at: e.created_at })

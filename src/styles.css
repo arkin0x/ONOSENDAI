@@ -809,10 +809,20 @@ body {
  * it goes top left on every screen, opposite the compass on a phone and beside
  * the panel column on a desktop.
  */
+/* Where the stack starts, and where the 3D compass sits across from it, as
+ * numbers a bar in the stack can be sized by: the compass reserve is its
+ * inset from the right, its width, and an 8px gap. Phone values here, the
+ * desktop ones (min-width: 1101px) further down. */
+:root {
+  --instruments-left: 8px;
+  --compass-right: 12px;
+  --compass-size: 84px;
+  --compass-reserve: calc(var(--compass-right) + var(--compass-size) + 8px);
+}
 .instruments {
   position: absolute;
   top: 12px;
-  left: 8px;
+  left: var(--instruments-left);
   /* Above the 3D compass (10) and its rotation submenu (101): the
      instrument stack is what is being read, nothing may cover it. */
   z-index: 102;
@@ -4847,14 +4857,10 @@ kbd {
   bottom: auto;
   top: 12px;
   left: auto;
-  right: 12px;
+  right: var(--compass-right);
   transform: none;
-}
-@media (max-width: 1100px) {
-  .compass-3d {
-    width: 84px;
-    height: 84px;
-  }
+  width: var(--compass-size);
+  height: var(--compass-size);
 }
 
 /* ---------- Summoned controls: view menu, hint chip ---------- */
@@ -5016,22 +5022,20 @@ kbd {
     right: 332px;
   }
 
-  /* Same reason as the hamburger: flush left on a desktop is underneath 320px
-   * of panels, so it moves to the scene's left edge, 352px in. It stays at the
-   * top. It used to follow the compass to the bottom and sit above the
-   * hamburger, which put the one readout you drive by in the corner you look
-   * at least, behind the pad's row of buttons on a short window. */
-  .instruments {
-    left: 352px;
-  }
-
-
-  /* The compass is top-right on every width now (the chat took the bottom
+  /* The instrument stack, for the same reason as the hamburger: flush left
+   * on a desktop is underneath 320px of panels, so it moves to the scene's
+   * left edge, 352px in. It stays at the top. It used to follow the compass
+   * to the bottom and sit above the hamburger, which put the one readout you
+   * drive by in the corner you look at least, behind the pad's row of
+   * buttons on a short window.
+   * The compass is top-right on every width now (the chat took the bottom
    * centre). Flush right on a desktop is underneath the 300px panel column,
-   * so it moves to the scene's right edge, 332px in, like the pad; and the
-   * view menu hangs off it, directly beneath. */
-  .compass-3d {
-    right: 332px;
+   * so it moves to the scene's right edge, 332px in, like the pad, at its
+   * full 120px; and the view menu hangs off it, directly beneath. */
+  :root {
+    --instruments-left: 352px;
+    --compass-right: 332px;
+    --compass-size: 120px;
   }
 
   .viewmenu {
@@ -5553,15 +5557,10 @@ kbd {
   box-shadow: 0 0 14px rgba(247, 147, 26, 0.18);
   font-size: 9px;
   letter-spacing: 0.1em;
-  /* Stops short of the 3D compass, top right (84px at 12px in, plus an 8px
-     gap, from the stack's 8px left edge): a long VIEWING label ran under it
+  /* Stops short of the 3D compass, top right (the stack's left edge and
+     the compass reserve, .instruments): a long VIEWING label ran under it
      and covered its tap target (smoke test, 2026-10-16). */
-  max-width: calc(100vw - 112px);
-}
-@media (min-width: 1101px) {
-  /* Desktop: the stack starts 352px in, the 120px compass sits 332px in
-     from the right. */
-  .hyperbar { max-width: calc(100vw - 812px); }
+  max-width: calc(100vw - var(--instruments-left) - var(--compass-reserve));
 }
 
 .hyperbar__glyph {
@@ -8665,11 +8664,15 @@ kbd {
 :root {
   --build: #f2f7ff;
 }
+/* The whole width of the scene up to the compass (arkinox, 2026-11-09),
+ * clear of a notch on either side. */
 .hyperbar.buildbar {
   flex-direction: column;
   align-items: stretch;
   gap: 6px;
-  width: 340px;
+  margin-left: env(safe-area-inset-left, 0px);
+  width: calc(100vw - var(--instruments-left) - var(--compass-reserve) - env(safe-area-inset-left, 0px) - env(safe-area-inset-right, 0px));
+  max-width: none;
   border-color: rgba(242, 247, 255, 0.55);
   box-shadow: 0 0 14px rgba(242, 247, 255, 0.14);
 }
@@ -8744,23 +8747,27 @@ kbd {
   white-space: normal;
   max-width: 320px;
 }
+/* Every button in a cell of one size, always in the same order, wrapping to
+ * another row when the bar is narrow (arkinox, 2026-11-09: "sit nicely in
+ * the same spot every time"). The cell is the longest label, MESSAGE, with
+ * its icon. */
 .buildbar__acts {
-  display: flex;
-  flex-wrap: wrap;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(76px, 1fr));
   gap: 6px;
 }
 .buildbar__act {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 7px;
-  flex: 1 1 auto;
+  gap: 5px;
+  min-width: 0;
   font-family: inherit;
   font-size: 8px;
   letter-spacing: 0.12em;
   font-weight: 700;
-  height: 30px;
-  padding: 0 8px;
+  height: 26px;
+  padding: 0 6px;
   border-radius: 6px;
   color: var(--build);
   background: transparent;
@@ -8768,7 +8775,7 @@ kbd {
   cursor: pointer;
   white-space: nowrap;
 }
-/* One icon size on all three, at the text's cap height and a hair over. */
+/* One icon size on every button, at the text's cap height and a hair over. */
 .buildbar__icon {
   flex: none;
 }
@@ -8790,11 +8797,6 @@ kbd {
   gap: 4px;
 }
 @media (max-width: 1100px) {
-  /* Clear of the compass in the top right corner: the instrument stack sits
-     above it, so a full-width bar would cover it. */
-  .hyperbar.buildbar {
-    width: min(340px, calc(100vw - 112px));
-  }
   /* EXPLAIN never covers a phone: it scrolls inside a third of the screen. */
   .buildbar .explain__well {
     max-height: 35vh;

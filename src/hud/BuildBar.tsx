@@ -12,7 +12,7 @@
  * the workshop's close; Escape does the same, as a chip on the Escape stack
  * that the mode itself registers (store/useBuilder.ts), after anything opened
  * inside the mode (a deploy's bar closes first).
- * RETURN TO AVATAR brings the build cursor back to you without leaving.
+ * AVATAR (return to avatar) brings the build cursor back to you without leaving.
  *
  * While a deploy is lined up the deploy bar is the working surface and the
  * instrument stack, this bar with it, steps aside (App.tsx), as it always has.
@@ -27,10 +27,11 @@ import { axisDistance } from '../lib/nearby'
 import { Explanation } from './Explanation'
 import { useStash } from './stash'
 import { useCover } from '../hooks/useCover'
-import { House, Wrench } from 'lucide-react'
+import { DoorClosedLocked, House, Wrench } from 'lucide-react'
 import { ItemIcon } from './ItemIcon'
+import { sealAChest, sealADoor } from './ShardsPanel'
 
-/** The buttons' icons, one size for all four, matched to the 8px capitals beside them. */
+/** The buttons' icons, one size for all, matched to the 8px capitals beside them. */
 const ICON = 12
 
 export function BuildBar(): JSX.Element | null {
@@ -48,7 +49,7 @@ export function BuildBar(): JSX.Element | null {
   // waiting on you and moves nothing. It is not the Builder's, and the bar
   // says so, with a STOP, since the pad's STOP is not shown while building.
   const moving = useCyberspace(moveUnderWay)
-  // The last placement, for PLACE AGAIN after a CANCEL: its name, or null.
+  // The last placement, for AGAIN after a CANCEL: its name, or null.
   const again = useAgainName()
   const againType = useShards((s) => s.placedLast?.pending.type ?? 'shard')
   if (!active) return null
@@ -81,12 +82,19 @@ export function BuildBar(): JSX.Element | null {
         </div>
       )}
 
+      {/* Nouns, not verbs, every button always there in the same cell
+          (arkinox, 2026-11-09): what can be placed, then AGAIN and AVATAR.
+          AGAIN stays in its cell, dimmed, when there is nothing to place
+          again, so nothing after it moves. The tooltips keep the verbs. */}
       <div className="buildbar__acts">
-        <button className="buildbar__act" onClick={() => useStash.getState().openModels()} title="Choose one of your models and place it at the build cursor"><ItemIcon type="shard" className="buildbar__icon" size={ICON} />PLACE OBJECT</button>
-        <button className="buildbar__act" onClick={() => useStash.getState().openMessage()} title="Write a message and hide it at the build cursor"><ItemIcon type="message" className="buildbar__icon" size={ICON} />HIDE MESSAGE</button>
-        <button className="buildbar__act" onClick={() => useStash.getState().openAudio()} title="Hide an audio file at the build cursor, encrypted; only finders can play it"><ItemIcon type="audio" className="buildbar__icon" size={ICON} />PLACE AUDIO</button>
-        {again !== null && <button className="buildbar__act" onClick={() => useShards.getState().placeAgain()} title={`Place "${again}" again, with the same settings`}><ItemIcon type={againType} className="buildbar__icon" size={ICON} />PLACE AGAIN</button>}
-        <button className="buildbar__act" disabled={onAvatar} onClick={() => useBuilder.getState().toAvatar()} title="Bring the build cursor and the view back to your avatar, still building (X)"><House className="buildbar__icon" size={ICON} strokeWidth={2.25} aria-hidden />RETURN TO AVATAR</button>
+        <button className="buildbar__act" onClick={() => useStash.getState().openModels()} title="Place object: choose one of your models and place it at the build cursor"><ItemIcon type="shard" className="buildbar__icon" size={ICON} />OBJECT</button>
+        <button className="buildbar__act" onClick={() => useStash.getState().openMessage()} title="Hide message: write a message and hide it at the build cursor"><ItemIcon type="message" className="buildbar__icon" size={ICON} />MESSAGE</button>
+        <button className="buildbar__act" onClick={() => useStash.getState().openAudio()} title="Place audio: hide an audio file at the build cursor, encrypted; only finders can play it"><ItemIcon type="audio" className="buildbar__icon" size={ICON} />AUDIO</button>
+        <button className="buildbar__act" onClick={() => useStash.getState().openKey()} title="Forge an item: a keypair hidden at the build cursor; whoever finds it can TAKE it, and a chest can be sealed to it"><ItemIcon type="key" className="buildbar__icon" size={ICON} />ITEM</button>
+        <button className="buildbar__act" onClick={sealAChest} title="Seal a chest: place a chest, then seal a message, a model or an item in it to an item or a person"><ItemIcon type="chest" className="buildbar__icon" size={ICON} />CHEST</button>
+        <button className="buildbar__act" onClick={sealADoor} title="Seal a door: place a door, then whatever you place in its red cube at its height is sealed to it"><DoorClosedLocked className="item-icon buildbar__icon" size={ICON} strokeWidth={2.5} aria-hidden />DOOR</button>
+        <button className="buildbar__act" disabled={again === null} onClick={() => useShards.getState().placeAgain()} title={again === null ? 'Place again: nothing placed yet this session' : `Place "${again}" again, with the same settings`}><ItemIcon type={againType} className="buildbar__icon" size={ICON} />AGAIN</button>
+        <button className="buildbar__act" disabled={onAvatar} onClick={() => useBuilder.getState().toAvatar()} title="Return to avatar: bring the build cursor and the view back to your avatar, still building (X)"><House className="buildbar__icon" size={ICON} strokeWidth={2.25} aria-hidden />AVATAR</button>
       </div>
 
       <Explanation>
@@ -98,7 +106,7 @@ export function BuildBar(): JSX.Element | null {
           {/* The cutoff in words a touch screen shows: the deploy bar's chip
               explains itself only in a tooltip (arkinox, 2026-10-19). */}
           <li>At height {SCAN_MAX_HEIGHT} or less, any view that stops inside that box finds it; at {SCAN_MAX_HEIGHT + 1} or more, only someone who knows the spot and height.</li>
-          <li>After a placement, PLACE AGAIN lines it up with the same settings.</li>
+          <li>After a placement, AGAIN lines it up with the same settings.</li>
           <li>While placing, STEP (, and . on a keyboard) moves and snaps it in smaller steps inside the cube, shown by the small white box, without moving the camera.</li>
           <li>Building never moves your avatar and signs no move.{onAvatar ? '' : ` Your avatar is ${formatDistance(axisDistance(cursor, position))} away.`}</li>
           <li>EXIT, Esc or B leaves build mode; the view stays where it is.</li>

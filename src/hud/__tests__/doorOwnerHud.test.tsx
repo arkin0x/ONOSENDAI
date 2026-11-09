@@ -86,9 +86,11 @@ beforeEach(() => {
 })
 
 describe('SEAL A DOOR', () => {
-  it('is live now, beside FORGE AN ITEM and SEAL A CHEST', () => {
+  it('is live now as DOOR, beside ITEM and CHEST', () => {
     const html = render(<ShardsPanel />)
-    const door = html.slice(html.lastIndexOf('<button', html.indexOf('SEAL A DOOR')), html.indexOf('SEAL A DOOR'))
+    const at = html.indexOf(' DOOR</button>')
+    expect(at).toBeGreaterThan(-1)
+    const door = html.slice(html.lastIndexOf('<button', at), at)
     expect(door).not.toContain('disabled')
     expect(door).not.toContain('Soon')
   })

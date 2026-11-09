@@ -20,6 +20,7 @@ import { BoxGeometry, EdgesGeometry } from 'three'
 import { GRID_RADIUS, cellDelta, type AxisName, type ViewAxes } from '../lib/space'
 import { alignedOrigin, useCyberspace } from '../store/useCyberspace'
 import { useSecrets, type HeldKey } from '../store/useSecrets'
+import { baseOf } from '../lib/secrets/base'
 import { WorldLabel } from './WorldLabel'
 
 /** The green of "found here", dimmer than the deploy box so it sits behind the work. */
@@ -48,12 +49,16 @@ interface Props {
 /** Whether `outer` covers every gibson of `inner`, on all three axes. */
 export function contains(outer: HeldKey, inner: HeldKey): boolean {
   if (outer.lookupId === inner.lookupId || outer.plane !== inner.plane) return false
+  // A corner stored inexact (lib/secrets/base.ts) nests in nothing.
+  const outerBase = baseOf(outer.base)
+  const innerBase = baseOf(inner.base)
+  if (!outerBase || !innerBase) return false
   for (const axis of ['x', 'y', 'z'] as const) {
     const ho = BigInt(outer.heights ? outer.heights[axis] : outer.height)
     const hi = BigInt(inner.heights ? inner.heights[axis] : inner.height)
     if (hi > ho) return false
-    const lo = BigInt(outer.base[axis])
-    const v = BigInt(inner.base[axis])
+    const lo = outerBase[axis]
+    const v = innerBase[axis]
     // Aligned blocks nest or miss: the inner one is inside when its base
     // falls in the outer one and it does not run past the outer's end.
     if (v < lo || v + (1n << hi) > lo + (1n << ho)) return false
@@ -107,6 +112,9 @@ export function SecretRegions({ axes }: Props): JSX.Element | null {
     }
     for (const key of Object.values(keys)) {
       if (key.plane !== anchorPlane) continue
+      // A corner stored inexact (lib/secrets/base.ts) cannot be drawn: skipped, never thrown in the scene.
+      const base = baseOf(key.base)
+      if (!base) continue
       const widest = sideOf(key.height)
       // Smaller than the cell you are looking at: there is nothing to see and
       // nothing to aim at, so it waits until you zoom back in. Measured on the
@@ -121,7 +129,7 @@ export function SecretRegions({ axes }: Props): JSX.Element | null {
         // A hop's region is a box: each axis is as wide as its own crossing.
         const side = sideOf(key.heights ? key.heights[axis] : key.height)
         sides[i] = side
-        const lo = cellDelta(BigInt(key.base[axis]), origin[axis], scaleExp)
+        const lo = cellDelta(base[axis], origin[axis], scaleExp)
         centre[i] = (lo + (side - 1) / 2) * a.dir
         // Always the same corner: +X and +Z, at the region's floor. A key
         // hanging at a fixed corner says which cage it belongs to, where one

@@ -61,6 +61,28 @@ export function updateBought(add: HeldKey[], remove: string[] = []): string | nu
 }
 
 /**
+ * Put right the corner of bought keys already kept here, and nothing else:
+ * never adds a key, never removes one (lib/secrets/base.ts repairBase).
+ * Returns null when it landed or there was nothing to do, else why not.
+ */
+export function repairBoughtBases(fixed: HeldKey[]): string | null {
+  const s = storage()
+  if (!s || fixed.length === 0) return null
+  try {
+    const kept = parseLegacy(s.getItem(BOUGHT_KEY))
+    let changed = false
+    for (const k of fixed) {
+      const was = kept[k.lookupId]
+      if (was) { kept[k.lookupId] = { ...was, base: k.base }; changed = true }
+    }
+    if (changed) s.setItem(BOUGHT_KEY, JSON.stringify(kept))
+    return null
+  } catch (err) {
+    return describeError(err)
+  }
+}
+
+/**
  * A forget made without IndexedDB, and when, in seconds. The time decides
  * whether it still applies: a key first held after it was held again since,
  * and is kept.

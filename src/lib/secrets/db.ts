@@ -307,6 +307,20 @@ export function writeKeys(db: IDBDatabase, puts: HeldKey[], deletes: string[]): 
 }
 
 /**
+ * Put right the corner of keys already stored, and nothing else: each row
+ * keeps everything it had but `base`. A row not there is left alone (this
+ * never adds a key, and never removes one). For a stored corner that was not
+ * an exact integer (lib/secrets/base.ts repairBase).
+ */
+export function repairKeyBases(db: IDBDatabase, fixed: HeldKey[]): Promise<Totals> {
+  const durable = fixed.some((k) => k.source === 'cloud')
+  return tallied(db, [KEYS_STORE], durable, (t) => {
+    const keys = t.store(KEYS_STORE)
+    for (const k of fixed) t.req(keys.get(k.lookupId), (was: HeldKey | undefined) => { if (was) t.put(KEYS_STORE, { ...was, base: k.base }, was) })
+  })
+}
+
+/**
  * Record a place and its keys. Standing on it again moves its time; a key
  * already stored is not stored again, only told the plane it was last
  * stood in.

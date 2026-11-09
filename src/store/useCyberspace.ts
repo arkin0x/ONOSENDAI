@@ -21,6 +21,7 @@ import { bigintBitLimit, movementCapabilityIssue } from '../lib/proofCapability'
 import { create } from 'zustand'
 import { destinationHeights, holdCloudDestinationKeys, holdDestinationCubes } from '../lib/destinationKeys'
 import { localKeyCeiling, regionKeyQuote } from '../lib/deployPlan'
+import { checkBoughtKey, wrongKeyMessage } from '../lib/regionKeyCheck'
 import { experienceRatio, recordJobExperience } from '../lib/experience'
 import { lineStateOf, rideStatsOf, zeroLengthRideRefusal } from '../lib/hyperspace/ride'
 import { checkCloudRide, type CloudRideCheck } from '../lib/cloudRide'
@@ -1095,7 +1096,7 @@ export interface CyberspaceState {
    * and the job starts when the invoice settles. Resolves to the key, or to
    * the reason it did not.
    */
-  buyRegionKey: (at: Position, plane: Plane, height: number) => Promise<{ ok: true; result: HosakaRegionKeyResult } | { ok: false; error: string }>
+  buyRegionKey: (at: Position, plane: Plane, height: number, expect?: { lookupId?: string }) => Promise<{ ok: true; result: HosakaRegionKeyResult } | { ok: false; error: string }>
   /**
    * Buy a ride's proof from HOSAKA and sign the hyperjump (onosendai-launch
    * #35 P5; arkinox, 2026-10-11): submit with the ride's idempotency key,
@@ -6416,7 +6417,7 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
     }
   },
 
-  buyRegionKey: async (at, plane, height) => {
+  buyRegionKey: async (at, plane, height, expect) => {
     const { cloud, cloudPrefs, plan, proof } = get()
     if (cloudPrefs.mode === 'off') return { ok: false, error: 'Cloud compute is off in the Cloud compute panel.' }
     // A route in flight owns the cloud flow and its invoice, and a hop in hand would lose its proof.
@@ -6474,6 +6475,11 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
       recordJobExperience(outcome.record, height)
       const r = done.result as HosakaRegionKeyResult
       if (!r.secret_key || !r.lookup_id) return { ok: false, error: 'HOSAKA returned no key.' }
+      // Checked before anything uses it: a wrong key seals a bag nobody can
+      // find (lib/regionKeyCheck.ts). Refused, never kept; what was paid
+      // stays as any other finished job's.
+      const wrong = await checkBoughtKey(r, { at, height, lookupId: expect?.lookupId })
+      if (wrong) return { ok: false, error: wrongKeyMessage(wrong) }
       return { ok: true, result: r }
     } catch (err) {
       if (abort.signal.aborted) { set({ cloud: { ...get().cloud, ...idle } }); return { ok: false, error: 'Cancelled.' } }

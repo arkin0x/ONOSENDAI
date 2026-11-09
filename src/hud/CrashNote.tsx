@@ -18,6 +18,9 @@ import { useShards } from '../store/useShards'
 interface Props {
   /** Which part of the screen this guards, for the note's title. */
   where: string
+  /** Whether CLOSE also closes the open card: true for the modal boundary,
+   * where the card is one of the modals; a HUD or menu crash leaves it open. */
+  closesCard?: boolean
   children: ReactNode
 }
 
@@ -59,7 +62,7 @@ export class CrashNote extends Component<Props, State> {
     // Only a crash in the modal boundary closes the card: the card is one of its
     // modals. A HUD or menu crash leaves it open, with any unsent comment draft
     // (review of #622).
-    if (this.props.where === 'a modal') useShards.getState().selectSecret(null)
+    if (this.props.closesCard) useShards.getState().selectSecret(null)
     this.setState({ error: null, stack: '', copied: false })
   }
 

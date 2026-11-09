@@ -88,8 +88,11 @@ export interface HeldItem {
   audio?: AudioItem
   /**
    * Unix seconds when it left the TAKEN list: moved into the workshop, or
-   * cleared (arkinox, 2026-10-11). The row is kept, hidden, so the chest it
-   * came out of still says TAKEN and it cannot be taken a second time.
+   * cleared with its X (arkinox, 2026-10-11). The row is kept on disk but is
+   * no longer in ITEMS (inItems), so the chest it came out of offers it
+   * again with TAKE (arkinox, 2026-11-09: "it should check each item against
+   * my ITEMS current state. anything missing should appear again"), and a
+   * TAKE of it holds it afresh in this row's place (addHeld).
    */
   cleared?: number
   /**
@@ -108,6 +111,20 @@ export interface HeldItem {
    * UNARCHIVE takes it back.
    */
   archived?: number
+}
+
+/**
+ * What is in ITEMS now: INVENTORY and ARCHIVED, without the rows cleared off
+ * the TAKEN list (`cleared`), which no list shows.
+ */
+export function inItems(items: Record<string, HeldItem>): Record<string, HeldItem> {
+  let out: Record<string, HeldItem> | null = null
+  for (const [id, it] of Object.entries(items)) {
+    if (!it.cleared) continue
+    out ??= { ...items }
+    delete out[id]
+  }
+  return out ?? items
 }
 
 /** What is not filed away under ARCHIVED: what the world draws as held. */
@@ -243,17 +260,22 @@ export function holdsItem(items: Record<string, HeldItem>, id: string, lineage?:
  * Hold more items. One row per item: an item already held keeps its row, so
  * a key read twice (a rescan, a second device's bag) is held once, and so is
  * a version of it its hider moved, or another instance of its keypair
- * (holdsItem), and the place and time of the first holding stand. Returns
- * what was new.
+ * (holdsItem), and the place and time of the first holding stand. Only what
+ * is in ITEMS counts (inItems): a row cleared off the TAKEN list is replaced
+ * by the item held afresh. `byLineage: false` is a chest's TAKE, which goes
+ * by the item's own identity (holdsEntry): its id, or a key's keypair, never
+ * a lineage shared with another item. Returns what was new.
  */
-export function addHeld(items: Record<string, HeldItem>, add: HeldItem[]): { items: Record<string, HeldItem>; added: HeldItem[] } {
+export function addHeld(items: Record<string, HeldItem>, add: HeldItem[], { byLineage = true }: { byLineage?: boolean } = {}): { items: Record<string, HeldItem>; added: HeldItem[] } {
   const added: HeldItem[] = []
   let next = items
-  const lineages = heldLineages(items)
+  const lineages = heldLineages(inItems(items))
   for (const item of add) {
     const lineage = lineageKey(item.event.pubkey, itemLineage(item.event) ?? item.id)
     const keypair = item.type === 'key' && item.key ? keypairKey(item.key.itemPubkey) : null
-    if (next[item.id] || lineages.has(lineage) || (keypair && lineages.has(keypair))) continue
+    const was = next[item.id]
+    // A cleared row gives way to the same item held again, never to another cleared copy.
+    if ((was && (!was.cleared || item.cleared)) || (byLineage && lineages.has(lineage)) || (keypair && lineages.has(keypair))) continue
     if (next === items) next = { ...items }
     next[item.id] = item
     lineages.add(lineage)
@@ -458,26 +480,31 @@ export function modelPrint(shard: ShardModel): string {
   return JSON.stringify(toPayload(withAuthoredConstrain({ ...shard, id: '', name: '' })))
 }
 
-/** Whether a shard with this model is already held, cleared or not: taking it again would only duplicate it. */
 /**
- * Whether a chest's content is held already: by its id, or (one shard per
- * model, arkinox, 2026-10-11) a shard whose model is held under any name.
- * What is held is hidden on the chest, in its rows and its loot (arkinox,
- * 2026-10-30: "hide it on the chest so it feels like you took it").
+ * Whether a chest's content is in ITEMS now (arkinox, 2026-11-09: "it should
+ * check each item against my ITEMS current state. anything missing should
+ * appear again"), and so hidden on the chest, in its rows and its loot
+ * (arkinox, 2026-10-30: "hide it on the chest so it feels like you took
+ * it"). In ITEMS is INVENTORY and ARCHIVED, never a row cleared off the
+ * TAKEN list (inItems). Matched by the item's own identity: its id; for a
+ * key, its keypair, held under any row (keys ARE items: every instance of
+ * one is the same key, review of #615); for a shard, one per model (arkinox,
+ * 2026-10-11), its model held under any name. Never by an author's lineage
+ * shared with some other item. A chest's TAKE refuses exactly what this
+ * holds (store/useInventory take), so TAKE ALL always finishes.
  */
 export function holdsEntry(items: Record<string, HeldItem>, entry: ChestEntry): boolean {
-  // Held as addHeld would refuse it: by its id, by a held lineage of its
-  // author's, or, for a key, by its keypair (review of #615: TAKE on another
-  // instance of a key held added nothing and stayed offered, and TAKE ALL
-  // never finished).
+  const row = items[entry.id]
+  if (row && !row.cleared) return true
   const keypair = entry.body.type === 'key' ? entry.body.key?.itemPubkey : null
-  if (holdsItem(items, entry.id, itemLineage(entry.event), entry.event?.pubkey, undefined, keypair)) return true
+  if (keypair) for (const it of Object.values(items)) if (!it.cleared && it.type === 'key' && it.key?.itemPubkey === keypair) return true
   return entry.body.type === 'shard' && !!entry.body.shard && holdsModel(items, entry.body.shard)
 }
 
+/** Whether a shard with this model is in ITEMS (inItems): taking it again would only duplicate it. */
 export function holdsModel(items: Record<string, HeldItem>, shard: ShardModel): boolean {
   const print = modelPrint(shard)
-  for (const it of Object.values(items)) if (it.shard && modelPrint(it.shard) === print) return true
+  for (const it of Object.values(items)) if (!it.cleared && it.shard && modelPrint(it.shard) === print) return true
   return false
 }
 

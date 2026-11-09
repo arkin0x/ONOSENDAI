@@ -25,29 +25,39 @@
  *
  * What is inside is taken, not placed (DECK-0004 §3.4, spec #82): nothing in
  * a chest is aimed at a point of its own any more. A door is for that.
+ *
+ * + ITEM offers two ways in (arkinox, 2026-11-09: "id like to customize the
+ * items I place"). FROM MY ITEMS lists the items in your ITEMS that you made
+ * (the PLACE rule, useShards chestCopyOf), each with its picture, and puts
+ * the chosen one in as the same key with all its settings. FORGE NEW opens
+ * the whole forge (ItemForgeFields, as FORGE AN ITEM): name, picture, model
+ * and motions; ADD puts it in, CANCEL drops it with its keypair. Neither is
+ * held until it is taken out (arkinox, 2026-11-06); the lock list still
+ * offers it, as a key you made.
  */
 
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { CardSpin } from '../scene/CardSpin'
 import { readContents } from '../lib/chests'
-import { entryKey, type BagEntry, type HiddenType } from '../lib/hidden'
+import { entryKey, keyItemOf, KEY_KIND, type BagEntry, type HiddenType, type KeyItem } from '../lib/hidden'
 import { turnShard } from '../lib/turn'
 import { ItemFeedPicker } from './ItemFeedPicker'
 import { lockFromListing } from '../lib/itemListing'
-import { ItemIcon } from './ItemIcon'
+import { ItemFace, ItemIcon } from './ItemIcon'
+import { ItemForgeFields } from './ItemForgeFields'
 import { ShardFolders, modelEditedAt, modelName, modelRef, useNewestFirst } from './ShardFolders'
 import { ShardThumb } from './ShardThumb'
 import type { ShardModel } from 'sno-core/shards'
 import { nip19 } from 'nostr-tools'
 import { forgeKey, isLockPubkey, NIP44_MAX_PLAINTEXT, sizeRefusal, templateBytes } from '../lib/chests'
 import { attributed } from '../lib/client'
-import { MAX_ITEM_NAME, MAX_MESSAGE_LENGTH, keyInnerTemplate, messageInnerTemplate, shardInnerTemplate } from '../lib/hidden'
+import { MAX_ITEM_NAME, MAX_MESSAGE_LENGTH, messageInnerTemplate, shardInnerTemplate } from '../lib/hidden'
 import { findCashuToken } from '../lib/cashu'
 import { hasNftLink } from '../lib/nftLink'
 import { useCyberspace } from '../store/useCyberspace'
 import { useInventory } from '../store/useInventory'
 import { sealableKeys } from '../lib/inventory'
-import { lookModelOf, useShards, type ChestContent, type ChestDraft, type ChestLock } from '../store/useShards'
+import { chestCopiesOf, chestKeyTemplate, lookModelOf, useShards, type ChestContent, type ChestDraft, type ChestLock } from '../store/useShards'
 import { creditOf, useWorkshop } from '../store/useWorkshop'
 import { composeVerdict, SETTLE_MS, useCashu } from './useCashu'
 import { useSettled } from './useSettled'
@@ -76,6 +86,31 @@ function contentLabel(c: ChestContent, shardName: (id: string) => string): strin
   if (c.kind === 'audio') return c.audio.title
   if (c.kind === 'sealed') return c.label
   return c.key.name
+}
+
+/** The item a content is, when it is one: added, or kept as sealed. */
+function keyOf(c: ChestContent): KeyItem | null {
+  if (c.kind === 'key') return c.key
+  if (c.kind !== 'sealed' || c.type !== 'key') return null
+  const e = c.entry as { kind?: unknown; content?: unknown; tags?: unknown }
+  return e.kind === KEY_KIND && typeof e.content === 'string' && Array.isArray(e.tags) ? keyItemOf(e as Parameters<typeof keyItemOf>[0]) : null
+}
+
+/** The keypairs a chest's contents already hold: an item added, or one kept as sealed. */
+function keypairsIn(contents: readonly ChestContent[]): Set<string> {
+  const out = new Set<string>()
+  for (const c of contents) {
+    const k = keyOf(c)
+    if (k) out.add(k.itemPubkey)
+  }
+  return out
+}
+
+/** What an item carries besides its name, in a word or two: its model and motions. */
+function itemSettings(key: KeyItem): string {
+  if (!key.model) return 'NO MODEL'
+  const motions = (key.animation ?? []).map((a) => (a === 'bob' ? 'BOB' : a === 'spin-y' ? 'ROTATE Y' : 'ROTATE X'))
+  return ['MODEL', ...motions].join(' · ')
 }
 
 /** What a row's icon is: its kind, a kept entry's own. */
@@ -165,9 +200,13 @@ export function ChestCompose({ onDone, target = { mode: 'place' } }: { onDone: (
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
   // What is being added: one editor open at a time.
-  const [adding, setAdding] = useState<'message' | 'shard' | 'key' | 'audio' | null>(null)
+  // + ITEM: `item` asks FROM MY ITEMS or FORGE NEW; `mine` lists your own; `forge` is the forge.
+  const [adding, setAdding] = useState<'message' | 'shard' | 'item' | 'mine' | 'forge' | 'audio' | null>(null)
   const [text, setText] = useState('')
-  const [keyName, setKeyName] = useState('')
+  // FORGE NEW's item, its keypair made when the forge opens; dropped by CANCEL.
+  const [forging, setForging] = useState<KeyItem | null>(null)
+  const ownItems = useMemo(() => chestCopiesOf(items, me), [items, me])
+  const updateForging = useCallback((f: (k: KeyItem) => KeyItem) => setForging((k) => (k ? f(k) : k)), [])
 
   const heldLock = keys.find((k) => k.id === lockKeyId)
   const lock: ChestLock | null = heldLock?.key ? { pubkey: heldLock.key.itemPubkey, label: heldLock.name } : feedLock ?? parseLock(pasted)
@@ -192,7 +231,7 @@ export function ChestCompose({ onDone, target = { mode: 'place' } }: { onDone: (
     const templates = contents.flatMap((c) => {
       if (c.kind === 'sealed') return []
       if (c.kind === 'message') return [attributed(messageInnerTemplate(c.text.trim(), at, 0, SAMPLE_CREATED_AT))]
-      if (c.kind === 'key') return [attributed(keyInnerTemplate(c.key, at, 0, SAMPLE_CREATED_AT))]
+      if (c.kind === 'key') return [attributed(chestKeyTemplate(c, at, 0, SAMPLE_CREATED_AT))]
       if (c.kind === 'audio') return [attributed(audioInnerTemplate(c.audio, at, 0, SAMPLE_CREATED_AT))]
       if (c.aimed) { const { kind, created_at, tags, content } = c.aimed.signed; return [{ kind, created_at, tags, content }] }
       const model = models.find((s) => s.id === c.shardId)
@@ -206,9 +245,15 @@ export function ChestCompose({ onDone, target = { mode: 'place' } }: { onDone: (
   }, [contents, models, me])
   const refusal = sizeRefusal(bytes)
 
-  const add = (c: ChestContent): void => { setContents((list) => [...list, c]); setAdding(null); setText(''); setKeyName('') }
+  const add = (c: ChestContent): void => { setContents((list) => [...list, c]); setAdding(null); setText(''); setForging(null) }
+  const inChest = useMemo(() => keypairsIn(contents), [contents])
+  const forgeNew = (): void => { setForging(forgeKey('')); setAdding('forge') }
+  const dropForge = (): void => { setForging(null); setAdding(null) }
   const remove = (i: number): void => setContents((list) => list.filter((_, j) => j !== i))
-  const ready = name.trim().length > 0 && !!lock && (isDoor || contents.length > 0) && !refusal && !loading && !unread
+  // An editor open (FORGE NEW above all): SEAL, SAVE and MOVE wait, so a configured item and its keypair are never dropped unseen (review of #627).
+  const midAdd = adding !== null
+  const MID_ADD = 'ADD OR CANCEL THE ITEM FIRST'
+  const ready = name.trim().length > 0 && !!lock && (isDoor || contents.length > 0) && !refusal && !loading && !unread && !midAdd
   const current = (): ChestDraft => ({ name: name.trim(), lock, requires: requires.trim(), contents })
   // Placing: the draft rides on the chest being placed, so closing the modal (back to the bar) keeps it.
   useEffect(() => {
@@ -237,7 +282,7 @@ export function ChestCompose({ onDone, target = { mode: 'place' } }: { onDone: (
     void useShards.getState().sealPlacedChest({ ...current(), lock })
   }
   // MOVE before it is sealed: back to the hide bar, the draft kept on the chest being placed.
-  const move = (): void => { useShards.getState().unplaceChest(current()); onDone() }
+  const move = (): void => { if (midAdd) return; useShards.getState().unplaceChest(current()); onDone() }
   const cancel = (): void => { if (!editing) useShards.getState().cancelDeploy(true); onDone() }
 
   // The chest in 3D across the top, as it will stand: the model the bar chose, turned as the bar turned it.
@@ -294,7 +339,7 @@ export function ChestCompose({ onDone, target = { mode: 'place' } }: { onDone: (
         <ul className="compose__list">
           {contents.map((c, i) => (
             <li key={i} className="chest__row">
-              {c.kind === 'shard' && modelOf(c.shardId) ? <ShardThumb shard={modelOf(c.shardId)!} own /> : <ItemIcon className={`chest__glyph chest__glyph--${c.kind === 'message' && findCashuToken(c.text) ? 'cashu' : contentType(c)}`} type={contentType(c)} coin={c.kind === 'message' && !!findCashuToken(c.text)} />}
+              {c.kind === 'shard' && modelOf(c.shardId) ? <ShardThumb shard={modelOf(c.shardId)!} own /> : keyOf(c) ? <ItemFace className="chest__glyph chest__glyph--key" type="key" image={keyOf(c)?.image} /> : <ItemIcon className={`chest__glyph chest__glyph--${c.kind === 'message' && findCashuToken(c.text) ? 'cashu' : contentType(c)}`} type={contentType(c)} coin={c.kind === 'message' && !!findCashuToken(c.text)} />}
               <span className="item__name" title={contentLabel(c, shardName)}>{contentLabel(c, shardName)}</span>
               <button className="chest__act" onClick={() => remove(i)} aria-label="Take it out" title="Take it out of the chest">×</button>
             </li>
@@ -305,7 +350,7 @@ export function ChestCompose({ onDone, target = { mode: 'place' } }: { onDone: (
         <div className="compose__row">
           <button className="chest__act" onClick={() => setAdding('message')} title="A message, which may hold a cashu token">+ MESSAGE</button>
           <button className="chest__act" onClick={() => setAdding('shard')} disabled={models.length === 0} title={models.length === 0 ? 'Nothing in your workshop yet' : 'One of your workshop models'}>+ SHARD</button>
-          <button className="chest__act" onClick={() => setAdding('key')} title="A new item forged here, for the next chest">+ ITEM</button>
+          <button className="chest__act" onClick={() => setAdding('item')} title="An item you made, or a new one forged here">+ ITEM</button>
           <button className="chest__act" onClick={() => setAdding('audio')} title="An audio file, encrypted and uploaded now">+ AUDIO</button>
         </div>
       ) : adding === 'audio' ? (
@@ -337,13 +382,51 @@ export function ChestCompose({ onDone, target = { mode: 'place' } }: { onDone: (
             <button className="chest__act" onClick={() => setAdding(null)}>CANCEL</button>
           </div>
         </>
-      ) : (
+      ) : adding === 'item' ? (
         <div className="compose__row">
-          <input className="avatars__input" value={keyName} onChange={(e) => setKeyName(e.target.value.slice(0, MAX_ITEM_NAME))} placeholder="Name the item inside" maxLength={MAX_ITEM_NAME} autoFocus aria-label="Item to seal" />
-          <button className="chest__act" onClick={() => { setAdding(null); setKeyName('') }}>CANCEL</button>
-          <button className="chest__act" disabled={!keyName.trim()} onClick={() => add({ kind: 'key', key: forgeKey(keyName.trim()) })}>ADD</button>
+          <button className="chest__act" onClick={() => setAdding('mine')} title="The same item, every setting kept: only items you made">FROM MY ITEMS</button>
+          <button className="chest__act" onClick={forgeNew} title="Forge a new item: name, picture, model and motions">FORGE NEW</button>
+          <button className="chest__act" onClick={() => setAdding(null)}>CANCEL</button>
         </div>
-      )}
+      ) : adding === 'mine' ? (
+        <>
+          {ownItems.length === 0
+            ? <span className="chest__status" role="status">NO ITEMS YOU MADE</span>
+            : (
+              <ul className="objpick__list compose__models" aria-label="Item from your ITEMS">
+                {ownItems.map(({ item, content }) => {
+                  const there = inChest.has(content.key.itemPubkey)
+                  // The chest's own lock: sealed inside, it would open nothing from outside (review of #627).
+                  const isLock = lock?.pubkey === content.key.itemPubkey
+                  const blocked = there || isLock
+                  return (
+                    <li key={item.id}>
+                      <button className="objpick__row" disabled={blocked} onClick={() => add(content)} title={there ? 'Already in this chest' : isLock ? 'This item is the chest’s lock' : `Seal "${item.name}" in the chest, the same item`}>
+                        <ItemFace className="chest__glyph chest__glyph--key" type="key" image={content.key.image} />
+                        <span className="objpick__name">{item.name}</span>
+                        <span className="objpick__meta">{there ? 'IN CHEST' : isLock ? 'IS THE LOCK' : itemSettings(content.key)}</span>
+                      </button>
+                    </li>
+                  )
+                })}
+              </ul>
+            )}
+          <div className="compose__row">
+            <button className="chest__act" onClick={() => setAdding('item')}>BACK</button>
+            <button className="chest__act" onClick={() => setAdding(null)}>CANCEL</button>
+          </div>
+        </>
+      ) : forging ? (
+        <>
+          {/* Its own heading, so its name is not read as the chest's. */}
+          <span className="legend__label">NEW ITEM</span>
+          <ItemForgeFields item={forging} onChange={updateForging} idPrefix="chest-item" />
+          <div className="compose__row">
+            <button className="chest__act" onClick={dropForge}>CANCEL</button>
+            <button className="chest__act" disabled={!forging.name.trim()} onClick={() => add({ kind: 'key', key: { ...forging, name: forging.name.trim(), about: forging.about.trim() } })} title="Put the item in the chest">ADD</button>
+          </div>
+        </>
+      ) : null}
 
       {/* The one hard limit, as a meter. */}
       <div className={`compose__meter ${refusal ? 'is-over' : ''}`} title="NIP-44 seals at most 65,535 bytes">
@@ -363,8 +446,8 @@ export function ChestCompose({ onDone, target = { mode: 'place' } }: { onDone: (
       ) : (
         <div className="shards__actions">
           <button className="avatars__go" onClick={cancel} disabled={working}>CANCEL</button>
-          {!editing && <button className="avatars__go" onClick={move} disabled={working} title="Back to the hide bar, to place it somewhere else">MOVE</button>}
-          <button className="avatars__go" disabled={!ready || working} onClick={seal} title={refusal ?? (!lock ? 'Pick an item or paste a public key to seal to' : !isDoor && contents.length === 0 ? 'Put something in it first' : editing ? 'Seal it again where it stands' : undefined)}>
+          {!editing && <button className="avatars__go" onClick={move} disabled={working || midAdd} title={midAdd ? MID_ADD : 'Back to the hide bar, to place it somewhere else'}>MOVE</button>}
+          <button className="avatars__go" disabled={!ready || working} onClick={seal} title={midAdd ? MID_ADD : refusal ?? (!lock ? 'Pick an item or paste a public key to seal to' : !isDoor && contents.length === 0 ? 'Put something in it first' : editing ? 'Seal it again where it stands' : undefined)}>
             {working ? (deployNote && !editing ? `${deployNote.toUpperCase()}…` : 'SEALING…') : editing ? 'SAVE' : live ? 'SEAL & PUBLISH' : 'SEAL (LOCAL)'}
           </button>
         </div>

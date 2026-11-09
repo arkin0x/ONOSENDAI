@@ -175,3 +175,29 @@ describe('TEST DISCOVERY on a room bag', () => {
     expect(regionKeyOffThread).not.toHaveBeenCalled()
   })
 })
+
+describe('TEST DISCOVERY when the derivation fails, or the row is gone (review of #624)', () => {
+  it('says it could not derive the key, never NOT FOUND, and does not ask the relay', async () => {
+    const rk = regionKeyAt(AT, HEIGHT, 20)
+    const { dep, bag } = await deploy(rk.key, rk.lookupId)
+    useShards.setState({ mine: [dep] })
+    relay.bags = [bag]
+    vi.mocked(regionKeyOffThread).mockRejectedValueOnce(new Error('The region worker failed to start or crashed.'))
+    expect(await test(dep.eventId)).toEqual({ outcome: 'underived', key: { via: 'derived' } })
+    expect(queryChecked).not.toHaveBeenCalled()
+    // The retry derives again, and finds it.
+    expect((await test(dep.eventId)).outcome).toBe('found')
+  })
+
+  it('a row GONE FROM ITS BAG whose door was rekeyed is not compared: the relay says missing, never WRONG KEY', async () => {
+    // The row's stored room key is from a lock this device no longer holds.
+    keepDoorSecret(ME, DOOR_ID, newDoorSecret())
+    const old = roomKey(regionKeyAt(AT, HEIGHT, 20).key, hexToBytes(newDoorSecret()))
+    const { dep } = await deploy(old, roomLookupId(old), { doorId: DOOR_ID })
+    useShards.setState({ mine: [{ ...dep, goneFrom: T + 10 }] })
+    relay.bags = []
+    expect((await test(dep.eventId)).outcome).toBe('missing')
+    expect(regionKeyOffThread).not.toHaveBeenCalled()
+    expect(queryChecked).toHaveBeenCalledWith({ kinds: [HIDDEN_KIND], '#d': [roomLookupId(old)] })
+  })
+})

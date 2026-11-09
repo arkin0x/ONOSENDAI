@@ -134,6 +134,21 @@ describe('an opened chest\'s rows', () => {
     expect(html).not.toContain('TAKEN')
   })
 
+  it('offer a row again once it has left ITEMS, and keep an ARCHIVED one hidden (arkinox, 2026-11-09)', () => {
+    const owner = useCyberspace.getState().identity.pubkey
+    // The note cleared off TAKEN with its X, the model moved to the workshop (cleared too), the key archived.
+    useInventory.setState({ items: {
+      [note.id]: { ...heldFromEntry(owner, entries[1], from, null, 1), cleared: 2 },
+      [s.id]: { ...heldFromEntry(owner, entries[0], from, null, 1), cleared: 2 },
+      [k.event.id]: { ...heldFromEntry(owner, entries[2], from, null, 1), archived: 3 },
+    } })
+    const html = render(<ChestContents entries={entries} from={from} place={null} />)
+    expect(takes(html)).toEqual(['TAKE', 'TAKE', 'TAKE ALL'])
+    expect(html).toContain('>inside<')
+    expect(html).not.toContain('Inside Key')
+    expect(html).not.toContain('Everything here is in your ITEMS')
+  })
+
   it('say everything is held once it is, with no TAKE ALL left', () => {
     const owner = useCyberspace.getState().identity.pubkey
     const items: Record<string, HeldItem> = {}

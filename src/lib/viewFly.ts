@@ -253,3 +253,16 @@ export function setFlyLanding(source: (() => Position | null) | null): void {
 export function flyLanding(): Position | null {
   return landingSource ? landingSource() : null
 }
+
+/**
+ * Land an unlanded VIEW fly now, before something reads the cursor as it
+ * stands: BUILD entering asks whether the cursor has left your avatar
+ * (useBuilder enter). The scene's fly registers how (scene/ViewFly.ts).
+ */
+let lander: (() => void) | null = null
+export function setFlyLander(fn: (() => void) | null): void {
+  lander = fn
+}
+export function landFly(): void {
+  lander?.()
+}

@@ -40,7 +40,7 @@ import { alignedOrigin, samePosition, useCyberspace } from '../store/useCyberspa
 import { useBuilder } from '../store/useBuilder'
 import { useTv } from '../store/useTv'
 import { aimCentres, GRID_RADIUS, type AxisName, type Position, type ViewAxes } from '../lib/space'
-import { canFly, flyDir, FlyGesture, landingOf, setFlyLanding, useViewFly } from '../lib/viewFly'
+import { canFly, flyDir, FlyGesture, landingOf, PINCH_SLOP_PX, setFlyLander, setFlyLanding, useViewFly } from '../lib/viewFly'
 import { cursorGlide, OFFSET_EPS, PanGesture, setViewCentre, ViewOffset, type Vec3Out } from '../lib/viewCamera'
 
 /** The scene's fly gesture (two and three fingers at rest; off for now), fed by useFlyTouches. */
@@ -83,14 +83,27 @@ const driven = (): boolean => {
 // A pad press before the fly lands steps from where the view has flown (useCyberspace moveCursor).
 setFlyLanding(() => (driven() && !useCyberspace.getState().walking ? flownLanding() : null))
 
-/** The re-anchor the fly just made, for the rig's focus effect to pass over. */
-let flyReanchor = false
-/** True once after the fly re-anchored the view: the focus change is the fly's, not a new subject. */
-export function takeFlyReanchor(): boolean {
-  const was = flyReanchor
-  flyReanchor = false
-  return was
+/**
+ * The focus the fly's last re-anchor made (reanchorView writes a new focus
+ * object), for the rig's focus effect to pass over. Identity, not a flag: a
+ * flag set by a re-anchor the effect never saw (it did not run for it) stuck,
+ * and the next real change of focus (RETURN, a stop) was passed over as the
+ * fly's, the camera left on the avatar (review of #635, B1).
+ */
+let flyFocus: unknown = null
+/**
+ * Whether `focus` (the store's now) is the one the fly's re-anchor made, so
+ * this change of focus is the fly's and not a new subject. Every call
+ * forgets the record: it answers for the effect run that asks, never later.
+ */
+export function takeFlyReanchor(focus: unknown): boolean {
+  const mine = focus !== null && focus === flyFocus
+  flyFocus = null
+  return mine
 }
+
+/** The mouse on the scene, for the rig's follow (StartLock): a button down, and whether a plain left drag has orbited. */
+export const sceneMouse = { down: false, dragged: false }
 
 /** The camera, as the frame sees it: where it is, where it looks, its field of view and the canvas height. */
 export interface RigCamera {
@@ -112,6 +125,12 @@ export class ViewRigOffset {
   private lastValid = false
   private lastScale: number | null = null
   private landing: Position | null = null
+  /** The camera's offset from its target last frame: a change is the user orbiting or zooming. */
+  private orbit = new Vector3()
+  private orbitValid = false
+  /** Where (aim, drawn frame) a re-anchor was last asked and declined, so it is not asked again every frame. */
+  private declinedAt = new Vector3()
+  private declined = false
 
   /** True while a fly is under way (the rig's glide waits it out). */
   flying = false
@@ -125,6 +144,11 @@ export class ViewRigOffset {
     const building = useBuilder.getState().active
     const tv = useTv.getState().on
     useViewFly.getState().setTouch(flyGesture.dir(performance.now()))
+    // An orbit, a pinch or a wheel in progress is not rest: no landing under it.
+    look.copy(cam.position).sub(cam.target)
+    if (this.orbitValid && look.distanceToSquared(this.orbit) > 1e-10) viewOffset.hold()
+    this.orbit.copy(look)
+    this.orbitValid = true
 
     // A zoom: an unlanded fly lands now, where it was flown at the old zoom,
     // and the rig frames the new zoom afresh (apply sees the scale change).
@@ -239,15 +263,27 @@ export class ViewRigOffset {
     setViewCentre(want.x, want.y, want.z)
     // Flown out of the field's reach: the view re-anchors on where it has
     // flown, the cursor staying where it waits (useCyberspace reanchorView).
-    if (viewOffset.flown && (Math.abs(aim.x) > GRID_RADIUS || Math.abs(aim.y) > GRID_RADIUS || Math.abs(aim.z) > GRID_RADIUS)) {
+    // Asked again only once the view has gone a cell on from where it was
+    // last declined, so a decline costs nothing per frame (review N2).
+    if (viewOffset.flown && (Math.abs(aim.x) > GRID_RADIUS || Math.abs(aim.y) > GRID_RADIUS || Math.abs(aim.z) > GRID_RADIUS) &&
+      !(this.declined && aim.distanceToSquared(this.declinedAt) < 1)) {
       const at = driven() ? flownLanding() : null
       if (at) {
         const s = useCyberspace.getState()
         const before = s.anchor
         s.reanchorView(at)
-        if (useCyberspace.getState().anchor !== before) flyReanchor = true
+        const after = useCyberspace.getState()
+        if (after.anchor !== before) { flyFocus = after.focus; this.declined = false } else { this.declinedAt.copy(aim); this.declined = true }
       }
     }
+  }
+
+  /** Land an unlanded fly now, at once (BUILD entering: useBuilder asks through landFly). */
+  landNow(): void {
+    if (!viewOffset.flown || !driven()) return
+    this.land(flownLanding())
+    viewOffset.release()
+    this.landing = null
   }
 
   /** The rig re-framed the camera itself (a cut or a re-frame in its effect): nothing owed, nothing to compare with. */
@@ -255,6 +291,7 @@ export class ViewRigOffset {
     viewOffset.clear()
     this.applied.set(0, 0, 0)
     this.lastValid = false
+    this.declined = false
     cursorGlide.share = 0
     setViewCentre(0, 0, 0)
   }
@@ -270,6 +307,9 @@ export class ViewRigOffset {
 /** The rig's one offset. */
 export const viewRig = new ViewRigOffset()
 
+// BUILD entering lands an unlanded fly before it reads the cursor (useBuilder enter, review N6).
+setFlyLander(() => viewRig.landNow())
+
 type Listening = Pick<EventTarget, 'addEventListener' | 'removeEventListener'>
 
 /**
@@ -281,13 +321,17 @@ type Listening = Pick<EventTarget, 'addEventListener' | 'removeEventListener'>
 export function installFlyTouches(surface: Listening, doc: Listening, win: Listening, clock: () => number = () => performance.now()): () => void {
   const touch = (e: PointerEvent): boolean => e.pointerType === 'touch'
   let mouse: { id: number; x: number; y: number } | null = null
+  // A plain left press: OrbitControls' orbit, once it drags past the slop.
+  let orbiting: { id: number; x: number; y: number } | null = null
   const down = (ev: Event): void => {
     const e = ev as PointerEvent
     if (e.pointerType === 'mouse') {
+      sceneMouse.down = true
+      sceneMouse.dragged = false
       if (e.button === 2 || (e.button === 0 && e.shiftKey)) {
         mouse = { id: e.pointerId, x: e.clientX, y: e.clientY }
         panGesture.setMouse(true)
-      }
+      } else if (e.button === 0) orbiting = { id: e.pointerId, x: e.clientX, y: e.clientY }
       return
     }
     if (!touch(e)) return
@@ -300,6 +344,7 @@ export function installFlyTouches(surface: Listening, doc: Listening, win: Liste
   }
   const move = (ev: Event): void => {
     const e = ev as PointerEvent
+    if (orbiting && e.pointerId === orbiting.id && Math.hypot(e.clientX - orbiting.x, e.clientY - orbiting.y) > PINCH_SLOP_PX) sceneMouse.dragged = true
     if (mouse && e.pointerId === mouse.id) {
       // A release this listener never heard (let go off the page) ends the drag.
       if ((e.buttons & 3) === 0) { mouse = null; panGesture.setMouse(false); return }
@@ -314,6 +359,7 @@ export function installFlyTouches(surface: Listening, doc: Listening, win: Liste
   }
   const up = (ev: Event): void => {
     const e = ev as PointerEvent
+    if (e.pointerType === 'mouse') { sceneMouse.down = false; sceneMouse.dragged = false; orbiting = null }
     if (mouse && e.pointerId === mouse.id) { mouse = null; panGesture.setMouse(false); return }
     if (!touch(e)) return
     flyGesture.up(e.pointerId, clock())
@@ -329,6 +375,9 @@ export function installFlyTouches(surface: Listening, doc: Listening, win: Liste
     flyGesture.clear()
     panGesture.clear()
     mouse = null
+    orbiting = null
+    sceneMouse.down = false
+    sceneMouse.dragged = false
     useViewFly.getState().setTouch(0)
   }
   // In the capture phase, so the gestures have counted a finger before

@@ -103,7 +103,9 @@ import { useTv } from '../store/useTv'
 import { CAMERA_NEAR, FOV } from './camera'
 import { headlampReach, headlampUniforms } from './headlamp'
 import { canvasPixels, composerSamples } from './composerBudget'
-import { panGesture, takeFlyReanchor, useFlyTouches, viewRig, type RigCamera } from './ViewFly'
+import { fogFar, FOG_FAR, FOG_NEAR, FOG_START_SHARE, VIEW_FOG_SCALE } from './fog'
+import { flyGesture, panGesture, sceneMouse, takeFlyReanchor, useFlyTouches, viewRig, type RigCamera } from './ViewFly'
+import { StartLock } from '../lib/viewCamera'
 
 /** Starting distance from the cursor, in cells. Orbit takes over from here. */
 const START_DISTANCE = 26
@@ -353,40 +355,28 @@ function CellMetric(): null {
  */
 const HEADLAMP_PRIORITY = 0.75
 
-/** Where the scene's fog begins and where it is black, in render cells: TV's and WALK's. */
-const FOG_NEAR = GRID_RADIUS * 0.9
-const FOG_FAR = GRID_RADIUS * 4
 /**
- * How much further off the fog begins and ends in the third-person views
- * (HOP, VIEW, BUILD, spectating): arkinox, 2026-11-09: "can we also make the
- * default fog more distant? things turn black when they are still pretty
- * close." The camera orbits 26 cells out, so the fog began before the cursor
- * (21.6) and took more than a third of a shard 50 cells away; at twice the
- * distances it begins at 43.2 and is black at 192. The headlamp only dims,
- * to DISTANCE_FLOOR at worst (headlamp.ts); the black was the fog's.
- * Cyberspace TV's shots and WALK's eye keep the fog they were tuned with.
- */
-export const VIEW_FOG_SCALE = 2
-
-/**
- * The scene's fog, further off in the third-person views (VIEW_FOG_SCALE).
- * One Fog for the page, its distances moved in place: a new Fog object would
- * send every fogged material back for its program (three compares the fog
- * by identity), where the distances are uniforms read every frame.
+ * The scene's fog, further off in the third-person views (VIEW_FOG_SCALE),
+ * its end held inside the layers' reach (CULL_REACH) as the camera moves.
+ * One Fog for the page, its distances moved in place every frame: a new Fog
+ * object would send every fogged material back for its program (three
+ * compares the fog by identity), where the distances are uniforms.
  */
 function SceneFog(): JSX.Element {
-  const tv = useTv((s) => s.on)
-  const walking = useCyberspace((s) => s.walking)
   const fog = useRef<Fog>(null)
-  const k = tv || walking ? 1 : VIEW_FOG_SCALE
-  // In the commit, before the frame that shows the mode is drawn.
   useLayoutEffect(() => {
-    if (!fog.current) return
-    fog.current.near = FOG_NEAR * k
-    fog.current.far = FOG_FAR * k
     // The browser harness reads and sets it, as it reads __rig.
     if (import.meta.env.DEV) (window as unknown as { __fog?: unknown }).__fog = fog.current
-  }, [k])
+  }, [])
+  useFrame((state) => {
+    const f = fog.current
+    if (!f) return
+    // The browser harness can pin the fog, to shoot the old one against the new.
+    if (import.meta.env.DEV) { const pin = (window as unknown as { __fogFixed?: [number, number] }).__fogFixed; if (pin) { f.near = pin[0]; f.far = pin[1]; return } }
+    const far = fogFar(useTv.getState().on || useCyberspace.getState().walking, state.camera.position.length())
+    f.near = far * FOG_START_SHARE
+    f.far = far
+  }, HEADLAMP_PRIORITY)
   return <fog ref={fog} attach="fog" args={[0x000000, FOG_NEAR * VIEW_FOG_SCALE, FOG_FAR * VIEW_FOG_SCALE]} />
 }
 
@@ -555,7 +545,8 @@ function Rig(): JSX.Element {
   const view = useCyberspace((s) => s.view)
   const genesisId = useCyberspace((s) => s.genesisId)
   const focusPubkey = useCyberspace((s) => s.focusPubkey())
-  const focusPoint = useCyberspace((s) => (s.focus ? s.focus.position.x.toString() : ''))
+  // All three axes: a focus that moves along y or z alone is a change of focus too (review of #635, B1).
+  const focusPoint = useCyberspace((s) => (s.focus ? `${s.focus.position.x},${s.focus.position.y},${s.focus.position.z}` : ''))
   // Scrubbing the chain moves the anchor along history. A step within the fly
   // bound glides there the way a hyperspace click does, and a step too far to
   // fly cuts, but neither touches the orbit you have chosen: re-framing
@@ -722,8 +713,9 @@ function Rig(): JSX.Element {
       before.exploreIndex === exploreIndex && before.focusPubkey === focusPubkey && before.focusPoint !== focusPoint
     // VIEW's fly re-anchored the view on where it has flown (scene/ViewFly.ts):
     // the camera is already there and the per-frame origin shift carries it,
-    // so there is nothing to glide to and no follow to change.
-    const flyMoved = takeFlyReanchor()
+    // so there is nothing to glide to and no follow to change. Only when the
+    // focus now is the very one that re-anchor made.
+    const flyMoved = takeFlyReanchor(s.focus)
     if (focusOnly && flyMoved) {
       trace('focus-fly')
       return
@@ -835,10 +827,12 @@ function Rig(): JSX.Element {
   useFlyTouches(surface)
   // The camera as the offset reads it, gathered once so the frame allocates nothing.
   const rigCam = useMemo<RigCamera>(() => ({ position: new Vector3(), target: new Vector3(), quaternion: new Quaternion(), fov: FOV, heightPx: 1 }), [])
-  // Two fingers landing start OrbitControls (onStart) before anyone knows
-  // whether they pinch or pan: a pinch unlocks the camera as it always has,
-  // once it shows itself; a pan leaves the follow as it was.
-  const pinchUnlock = useRef(false)
+  // OrbitControls starts (onStart) the moment a finger or button lands,
+  // before anyone knows whether it orbits, pinches or pans: the unlock waits
+  // for an orbit or a pinch to show itself, and a pan leaves the follow as it
+  // was (lib/viewCamera.ts StartLock; review of #635, S1).
+  const startLock = useMemo(() => new StartLock(), [])
+  const pressed = (): number => panGesture.fingers + (sceneMouse.down ? 1 : 0)
   // The frame's target, with the offset added (viewRig.apply).
   const aimAt = useMemo(() => new Vector3(), [])
 
@@ -860,9 +854,7 @@ function Rig(): JSX.Element {
     viewRig.before(rigCam, dt)
     // A fly glides by the offset, not the follow: no stretched glide under it.
     if (viewRig.flying) glideLeft.current = 0
-    if (pinchUnlock.current) {
-      if (panGesture.pinching) { locked.current = false; pinchUnlock.current = false } else if (panGesture.fingers < 2) pinchUnlock.current = false
-    }
+    if (startLock.frame(panGesture.pinching, flyGesture.orbited || sceneMouse.dragged, pressed())) locked.current = false
     const s = useCyberspace.getState()
     // A pan's fingers drifting apart never zoom (lib/viewCamera.ts PanGesture).
     c.enableZoom = !s.walking && !panGesture.panning
@@ -1081,7 +1073,7 @@ function Rig(): JSX.Element {
       minDistance={ORBIT_MIN_DISTANCE}
       maxDistance={GRID_RADIUS * 4}
       dampingFactor={0.12}
-      onStart={() => { if (panGesture.fingers >= 2) pinchUnlock.current = true; else locked.current = false }}
+      onStart={() => { if (startLock.start(pressed())) locked.current = false }}
     />
   )
 }

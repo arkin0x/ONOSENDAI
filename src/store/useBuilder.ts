@@ -111,6 +111,7 @@ import { BRIEF_TOAST_MS, useToast } from './useToast'
 import { depName, useStash } from '../hud/stash'
 import { registerEscape } from '../hooks/useEscape'
 import { buildPlane, placedCursor } from '../lib/buildCursor'
+import { landFly } from '../lib/viewFly'
 
 /** How a session of BUILD mode began: the BUILD control (or B), or a DEPLOY. */
 export type BuildEntry = 'build' | 'deploy'
@@ -258,6 +259,9 @@ export const useBuilder = create<BuilderState>((set, get) => ({
     if (hs.viewOwned || hs.scrubHeight !== null) {
       useHyperspace.setState({ scrubHeight: null, viewOwned: false, returnScaleExp: null, returnFocus: null, viewedStop: null })
     }
+    // VIEW's fly not yet landed lands now: the cursor below, and whether it
+    // has left your avatar, are where the view has flown (lib/viewFly.ts).
+    landFly()
     const cs = useCyberspace.getState()
     // Where you are looking is where building starts, from BUILD and from
     // DEPLOY alike (arkinox, 2026-10-07, ruling A on review finding 3): a

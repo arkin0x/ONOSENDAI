@@ -7,7 +7,7 @@
  */
 
 import { describe, expect, it } from 'vitest'
-import { EASE_BACK_MS, LAND_IDLE_MS, LAND_LERP_MS, PAN_SLOP_PX, PanGesture, ViewOffset, ease, type OffsetEvent } from '../viewCamera'
+import { EASE_BACK_MS, LAND_IDLE_MS, LAND_LERP_MS, PAN_SLOP_PX, PanGesture, StartLock, ViewOffset, ease, type OffsetEvent } from '../viewCamera'
 import { FLY_CELLS_PER_SECOND, FLY_MAX_DT } from '../viewFly'
 
 const off = (v: ViewOffset): [number, number, number] => { const o = v.offset({ x: 0, y: 0, z: 0 }); return [o.x, o.y, o.z] }
@@ -271,5 +271,56 @@ describe('PanGesture: two fingers, a pinch or a pan', () => {
     expect(out).toEqual({ x: 5, y: -2 })
     g.setMouse(false)
     expect(g.panning).toBe(false)
+  })
+})
+
+describe('StartLock: when the camera stops following the cursor (review of #635, S1)', () => {
+  it('a two-finger pan never unlocks: the first finger\'s start alone only arms it', () => {
+    const l = new StartLock()
+    expect(l.start(1)).toBe(false) // the first finger lands: OrbitControls starts
+    expect(l.start(2)).toBe(false) // the second
+    for (let i = 0; i < 30; i++) expect(l.frame(false, false, 2)).toBe(false) // panning
+    expect(l.frame(false, false, 0)).toBe(false) // lifted
+    expect(l.frame(true, true, 2)).toBe(false) // nothing armed any more
+  })
+
+  it('a pinch unlocks once it shows itself', () => {
+    const l = new StartLock()
+    l.start(1); l.start(2)
+    expect(l.frame(false, false, 2)).toBe(false)
+    expect(l.frame(true, false, 2)).toBe(true)
+    expect(l.frame(true, false, 2)).toBe(false)
+  })
+
+  it('a real one-finger (or mouse) drag unlocks; a tap that never drags does not', () => {
+    const drag = new StartLock()
+    drag.start(1)
+    expect(drag.frame(false, true, 1)).toBe(true)
+    const tap = new StartLock()
+    tap.start(1)
+    expect(tap.frame(false, false, 1)).toBe(false)
+    expect(tap.frame(false, false, 0)).toBe(false)
+  })
+
+  it('the wheel (a start with nothing pressed) unlocks at once, as a pinch does', () => {
+    expect(new StartLock().start(0)).toBe(true)
+  })
+})
+
+describe('ViewOffset.hold: an orbit or a zoom is not rest (review N5)', () => {
+  it('holds the landing off and calls a glide back', () => {
+    const v = new ViewOffset()
+    v.fly(0, 0, -1, 1, 0.1)
+    v.rest()
+    v.step(LAND_IDLE_MS - 100)
+    v.hold()
+    expect(v.step(200)).toBe('none')
+    expect(run(v, LAND_IDLE_MS - 250, 16, 0)).not.toContain('glide-start')
+    expect(run(v, 100, 16, 0)).toContain('glide-start')
+    run(v, 100, 16, 0)
+    const g = v.glide
+    v.hold()
+    v.step(16)
+    expect(v.glide).toBeLessThan(g)
   })
 })

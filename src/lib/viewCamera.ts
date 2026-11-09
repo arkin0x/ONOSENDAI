@@ -118,6 +118,15 @@ export class ViewOffset {
     this.moved()
   }
 
+  /**
+   * The camera moved by the user's hand without the offset changing (an
+   * orbit, a pinch, a wheel): that is not rest either, so no landing comes
+   * while it goes on, and a glide under way goes back.
+   */
+  hold(): void {
+    this.moved()
+  }
+
   /** A frame with no fly asked for: the next fly is a new one. */
   rest(): void {
     this.flying = false
@@ -395,5 +404,34 @@ export class PanGesture {
   private pair(): [{ x: number; y: number }, { x: number; y: number }] {
     const it = this.points.values()
     return [it.next().value!, it.next().value!]
+  }
+}
+
+/**
+ * When OrbitControls' start (Scene.tsx onStart) unlocks the camera from
+ * following the cursor. The start comes the moment a finger or button lands,
+ * before anyone knows what the press is: the first finger of a two-finger pan
+ * starts it alone. So a start only arms the unlock; it happens once the press
+ * shows itself as an orbit (a lone finger or the mouse dragged past the slop)
+ * or a pinch, and never for a pan, which leaves the follow as it was. A start
+ * with nothing pressed is the wheel's zoom, a pinch by another name: it
+ * unlocks at once. The same rule for the mouse and for touch.
+ */
+export class StartLock {
+  private pending = false
+
+  /** OrbitControls started with `pressed` fingers and buttons on the scene; true: unlock now. */
+  start(pressed: number): boolean {
+    if (pressed === 0) { this.pending = false; return true }
+    this.pending = true
+    return false
+  }
+
+  /** A frame of the press: true when it has just shown itself as an orbit or a pinch (unlock now). */
+  frame(pinching: boolean, dragged: boolean, pressed: number): boolean {
+    if (!this.pending) return false
+    if (pinching || dragged) { this.pending = false; return true }
+    if (pressed === 0) this.pending = false
+    return false
   }
 }

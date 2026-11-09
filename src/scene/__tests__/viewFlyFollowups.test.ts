@@ -9,7 +9,7 @@
  * 3. The view window (and the terrain's new data) catches up during a fly,
  *    every FLY_REFRESH_MS, and follows the view when it is flown or panned
  *    off the cursor.
- * 4. A pinch unlocks the camera as it always did; a pan does not.
+ * 4. An orbit or a pinch unlocks the camera's follow; a pan never does.
  * 5. A lift never starts a fly, and a lost lift resets the finger count
  *    (the touch flies on, as they may be again).
  */
@@ -234,13 +234,33 @@ describe('3. the view window catches up during a fly', () => {
   })
 })
 
-describe('4. a pinch unlocks the camera as it always did; a pan does not', () => {
-  it("the Rig's onStart leaves two fingers to the frame, which unlocks once they pinch", () => {
+describe('4. the follow: an orbit or a pinch unlocks it, a pan never does (review of #635, S1)', () => {
+  it("the Rig's onStart only arms the unlock; the frame unlocks on a pinch or a real drag", () => {
     const body = rigBody()
-    expect(body).toMatch(/onStart=\{\(\) => \{ if \(panGesture\.fingers >= 2\) pinchUnlock\.current = true; else locked\.current = false \}\}/)
-    expect(body).toMatch(/if \(panGesture\.pinching\) \{ locked\.current = false; pinchUnlock\.current = false \}/)
+    expect(body).toMatch(/onStart=\{\(\) => \{ if \(startLock\.start\(pressed\(\)\)\) locked\.current = false \}\}/)
+    expect(body).toMatch(/if \(startLock\.frame\(panGesture\.pinching, flyGesture\.orbited \|\| sceneMouse\.dragged, pressed\(\)\)\) locked\.current = false/)
     // A pan's fingers drifting apart do not zoom.
     expect(body).toMatch(/c\.enableZoom = !s\.walking && !panGesture\.panning/)
+  })
+
+  it('the mouse: a plain left drag past the slop counts as an orbit, a click does not, and the press is counted before OrbitControls hears it', async () => {
+    const { sceneMouse } = await import('../ViewFly')
+    const surface = new EventTarget(); const doc = new EventTarget(); const win = new EventTarget()
+    const off = installFlyTouches(surface, doc, win, () => 0)
+    const ev = (type: string, init: Record<string, unknown>): Event => Object.assign(new Event(type), init)
+    // OrbitControls' own listener, added after ours, without capture: it must see the press counted.
+    let countedAtStart = false
+    surface.addEventListener('pointerdown', () => { countedAtStart = sceneMouse.down })
+    surface.dispatchEvent(ev('pointerdown', { pointerType: 'mouse', pointerId: 1, button: 0, clientX: 0, clientY: 0 }))
+    expect(countedAtStart).toBe(true)
+    doc.dispatchEvent(ev('pointermove', { pointerType: 'mouse', pointerId: 1, buttons: 1, clientX: 4, clientY: 0 }))
+    expect(sceneMouse.dragged).toBe(false)
+    doc.dispatchEvent(ev('pointermove', { pointerType: 'mouse', pointerId: 1, buttons: 1, clientX: 30, clientY: 0 }))
+    expect(sceneMouse.dragged).toBe(true)
+    doc.dispatchEvent(ev('pointerup', { pointerType: 'mouse', pointerId: 1 }))
+    expect(sceneMouse.down).toBe(false)
+    expect(sceneMouse.dragged).toBe(false)
+    off()
   })
 })
 

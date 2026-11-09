@@ -33,7 +33,8 @@ vi.mock('../../lib/relay', async (importOriginal) => ({
   relaySet: () => ['wss://relay.test'],
 }))
 
-import { flyGesture, panGesture, viewOffset, viewRig, type RigCamera } from '../ViewFly'
+import { flyGesture, panGesture, takeFlyReanchor, viewOffset, viewRig, type RigCamera } from '../ViewFly'
+import { readFileSync } from 'node:fs'
 import { FLY_CELLS_PER_SECOND, renderToCyber, useViewFly } from '../../lib/viewFly'
 import { cursorGlide, EASE_BACK_MS, LAND_IDLE_MS, LAND_LERP_MS } from '../../lib/viewCamera'
 import { alignedOrigin, useCyberspace } from '../../store/useCyberspace'
@@ -386,5 +387,101 @@ describe('the pan', () => {
     h.frame()
     lift()
     expect(h.cam.target.distanceTo(before)).toBeLessThan(1e-9)
+  })
+})
+
+describe('review of #635', () => {
+  it('B1: a fly re-anchor along z alone is the fly\'s only while its focus stands; RETURN after it is a real change of focus', () => {
+    cs().viewHere()
+    h.frame()
+    const anchor = { ...cs().anchor }
+    useViewFly.getState().setButton(1)
+    h.run(4000)
+    useViewFly.getState().setButton(0)
+    const a = ahead()
+    const axis = (['x', 'y', 'z'] as const).find((k) => a[k] !== 0)!
+    // Moved along the line of sight only: the old focusPoint (x alone) never changed, so the effect never ran.
+    expect(cs().anchor[axis]).not.toBe(anchor[axis])
+    for (const k of ['x', 'y', 'z'] as const) if (k !== axis) expect(cs().anchor[k]).toBe(anchor[k])
+    const flown = cs().focus
+    // RETURN, with no effect run in between: the change is not the fly's.
+    cs().clearFocus()
+    expect(takeFlyReanchor(cs().focus)).toBe(false)
+    // And asked for the fly's own focus after any run, it has forgotten it too.
+    expect(takeFlyReanchor(flown)).toBe(false)
+  })
+
+  it('B1: the effect\'s focus point reads all three axes, and it asks with the focus it sees', () => {
+    const src = readFileSync('src/scene/Scene.tsx', 'utf8')
+    expect(src).toMatch(/const focusPoint = useCyberspace\(\(s\) => \(s\.focus \? `\$\{s\.focus\.position\.x\},\$\{s\.focus\.position\.y\},\$\{s\.focus\.position\.z\}` : ''\)\)/)
+    expect(src).toMatch(/const flyMoved = takeFlyReanchor\(s\.focus\)/)
+  })
+
+  it('B1: the fly\'s own re-anchor is recognised by the focus it made', () => {
+    cs().viewHere()
+    h.frame()
+    useViewFly.getState().setButton(1)
+    let seen = false
+    for (let i = 0; i < 300 && !seen; i++) {
+      const before = cs().focus
+      h.frame()
+      if (cs().focus !== before) seen = takeFlyReanchor(cs().focus)
+    }
+    expect(seen).toBe(true)
+  })
+
+  it('N5: orbiting or zooming after a fly holds the landing off; it comes 2 s after the hand stops', () => {
+    cs().viewHere()
+    h.frame()
+    const from = cs().cursor
+    useViewFly.getState().setButton(1)
+    h.run(500)
+    useViewFly.getState().setButton(0)
+    // Three seconds of orbit: the camera turns about its target every frame.
+    for (let t = 0; t < 3000; t += DT * 1000) {
+      const o = h.cam.position.clone().sub(h.cam.target).applyAxisAngle(new Vector3(0, 1, 0), 0.01)
+      h.cam.position.copy(h.cam.target).add(o)
+      h.frame()
+    }
+    expect(cs().cursor).toBe(from)
+    h.run(LAND_IDLE_MS - 100)
+    expect(cs().cursor).toBe(from)
+    h.run(LAND_LERP_MS + 300)
+    expect(cs().cursor).not.toBe(from)
+  })
+
+  it('N2: a re-anchor the store declines is not asked again every frame', () => {
+    cs().viewHere()
+    h.frame()
+    useViewFly.getState().setButton(1)
+    h.run(100)
+    useViewFly.getState().setButton(0)
+    // Panned far off the field (the flight itself is small): the view centre is out of reach, the landing is not.
+    const spy = vi.spyOn(cs(), 'reanchorView')
+    const calls = (): number => spy.mock.calls.length
+    useCyberspace.setState({ reanchorView: spy as never })
+    panGesture.down(1, 100, 400); panGesture.down(2, 300, 400)
+    for (let i = 1; i <= 20; i++) { panGesture.move(1, 100 + i * 100, 400); panGesture.move(2, 300 + i * 100, 400) }
+    h.frame()
+    panGesture.up(1); panGesture.up(2)
+    expect(Math.abs(h.cam.target.x)).toBeGreaterThan(24)
+    for (let i = 0; i < 60; i++) h.frame()
+    // Asked once, declined, and not asked again while the view stays put.
+    expect(calls()).toBe(1)
+    spy.mockRestore()
+  })
+
+  it('N6: BUILD entering lands an unlanded fly before it asks whether the cursor left the avatar', () => {
+    cs().viewHere()
+    h.frame()
+    const from = cs().cursor
+    useViewFly.getState().setButton(1)
+    h.run(1000)
+    useViewFly.getState().setButton(0)
+    h.frame()
+    useBuilder.getState().enter('build')
+    expect(cs().cursor).not.toBe(from)
+    expect(useBuilder.getState().leftAvatar).toBe(true)
+    expect(viewOffset.flown).toBe(false)
   })
 })

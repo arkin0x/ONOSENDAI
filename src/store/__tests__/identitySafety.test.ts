@@ -137,7 +137,7 @@ beforeEach(() => {
   reloadLocalView()
   resetDoorSecrets(); resetOpenedChests()
   signIn(home)
-  useShards.setState({ mine: [], deleted: {}, deletedBags: {}, discovered: {}, pending: null, chestBack: null, deployHeight: 0, deployUnit: 0, deployTurn: [0, 0, 0], deployStatus: 'idle', deployError: null, deployNote: null, selectedSecret: null, deployLeaveOut: null, deployInto: null, deployDoorHeight: null, placedLast: null, broadcasting: null, broadcastError: null, broadcastFailed: null })
+  useShards.setState({ mine: [], deleted: {}, deletedBags: {}, discovered: {}, pending: null, chestBack: null, deployHeight: 0, deployUnit: 0, deployTurn: [0, 0, 0], deployStatus: 'idle', deployError: null, deployNote: null, selectedSecret: null, deployLeaveOut: [], deployRoomSnap: null, deployInto: null, deployDoorHeight: null, placedLast: null, broadcasting: null, broadcastError: null, broadcastFailed: null })
   useBuilder.getState().exit(); useStash.getState().close()
   useInventory.setState({ owner: home, items: {}, storage: 'memory' })
   useCyberspace.setState({ live: true, position: CURSOR, anchor: CURSOR, cursor: CURSOR, spectate: null, exploreIndex: null, transit: null })

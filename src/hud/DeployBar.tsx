@@ -77,7 +77,7 @@ import { noCallout, useRepeatable } from '../hooks/useRepeatable'
 import { MAX_UNIT, type ShardModel } from 'sno-core/shards'
 import { formatCellSize, formatDistance } from 'sno-core/scale'
 import { fadeStep, inscribedRadius, sourceLocal } from '../lib/audioItem'
-import { LINK_PROTECTED, SCAN_MAX_HEIGHT, effectiveDoorHeight, fillingChest, movingId, placingChest, sealingDoor, lookModelOf, lookTagsFor, type LookChoice, aimedOf, atLastSpot, copyLinedUp, isProtected, ownBagIn, pendingEmpty, pendingName, positionOf, regionOf, useShards } from '../store/useShards'
+import { LINK_PROTECTED, SCAN_MAX_HEIGHT, autoRoomFor, fillingChest, placedDoorHeight, movingId, placingChest, sealingDoor, lookModelOf, lookTagsFor, type LookChoice, aimedOf, atLastSpot, copyLinedUp, isProtected, ownBagIn, pendingEmpty, pendingName, positionOf, regionOf, useShards } from '../store/useShards'
 import { aimedPoint } from '../lib/chests'
 import { snapOffered } from '../lib/pose'
 import { MAX_RIDDLE_LENGTH } from '../lib/hidden'
@@ -292,10 +292,18 @@ export function DeployBar({ pad = false }: { pad?: boolean }): JSX.Element | nul
   const me = useCyberspace((s) => s.identity.pubkey)
   const leaveOut = useShards((s) => s.deployLeaveOut)
   const chosenRoom = useShards((s) => s.deployDoorHeight)
-  const doorHeight = effectiveDoorHeight(chosenRoom, height)
+  // Joining a room of yours on its own (syncRoomSnap): the height is the room's until the X.
+  const snap = useShards((s) => s.deployRoomSnap)
+  const doorHeight = placedDoorHeight({ deployHeight: height, deployDoorHeight: chosenRoom, deployRoomSnap: snap })
+  const sealMove = useShards((s) => s.deploySealMove)
   const sealing = useMemo(
-    () => (pending ? sealingDoor({ mine, pending, deployLeaveOut: leaveOut, deployDoorHeight: chosenRoom }, me, deployPoint(cursor, step, height), plane, height) : null),
-    [pending, mine, leaveOut, chosenRoom, me, cursor, step, height, plane],
+    () => (pending ? sealingDoor({ mine, pending, deployLeaveOut: leaveOut, deployDoorHeight: chosenRoom, deployRoomSnap: snap, deploySealMove: sealMove }, me, deployPoint(cursor, step, height), plane, height) : null),
+    [pending, mine, leaveOut, chosenRoom, snap, sealMove, me, cursor, step, height, plane],
+  )
+  // A MOVE or EDIT keeps its own bag (review of #633): a room under it is offered, SEAL IN ROOM, never taken on its own.
+  const offer = useMemo(
+    () => (pending && moving && !sealMove ? autoRoomFor({ mine, pending, deployLeaveOut: leaveOut, deployDoorHeight: chosenRoom, deployHeight: height, deployRoomSnap: snap, deploySealMove: true }, me, cursor, plane) : null),
+    [pending, moving, sealMove, mine, leaveOut, chosenRoom, height, snap, me, cursor, plane],
   )
   // A chest with shards aimed inside: where each stands, with its reach, in
   // the plane the chest is being placed in. One aimed in the other plane can
@@ -373,13 +381,16 @@ export function DeployBar({ pad = false }: { pad?: boolean }): JSX.Element | nul
     ? `Signs it here, at this size and pose, for the chest "${chestName ?? ''}". Nothing is published until the chest is hidden.`
     : route !== 'local' ? undefined : height === 0 ? 'No key work at height 0' : localSeconds === null ? 'Computed on this machine; the benchmark has not run yet' : `Computed on this machine, ${waitLabel(localSeconds)}`
   // Why the height row reads as it does: lowered under what was aimed, or raised for it, or for a shard's edge.
-  const heightTip = outside > 0
+  const fitTip = outside > 0
     ? `${outside} aimed inside ${outside === 1 ? 'stands' : 'stand'} at the chest when it opens: outside this region`
     : fit.auto && fit.height !== null && fit.cause === 'contents'
       ? 'Raised to hold what is aimed inside. Lower it and whatever falls outside stands at the chest when it opens'
       : fit.auto && fit.height !== null && fit.cause === 'edge'
         ? 'Raised because it sits across a region edge; move it to hide lower'
         : undefined
+  // In a room both are said: why the height is the room's, and what that height leaves outside or cuts (review of #633).
+  const roomTip = snap ? `The room\u2019s height: it joins the room. The \u00d7 leaves it out, at the height you chose${fitH !== null && fitH > height ? '. Larger than the room: its walls cut it' : ''}` : undefined
+  const heightTip = [roomTip, fitTip].filter(Boolean).join('. ') || undefined
 
   return (
     <div ref={coverRef} className={deployBarClass(pad)} role="dialog" aria-label={intoChest ? 'Aim shard for chest' : pending.type === 'shard' ? 'Deploy shard' : door ? 'Hide door' : `Hide ${pending.type}`}>
@@ -414,8 +425,14 @@ export function DeployBar({ pad = false }: { pad?: boolean }): JSX.Element | nul
           <DoorClosedLocked size={13} strokeWidth={2.25} aria-hidden />
           <span className="deploybar__doorchip-name">{sealing.name}</span>
           {/* A door moving stays in the bag that holds it (R7): nothing to leave out of. */}
-          {!(door && moving) && <button className="deploybar__doorchip-x" aria-label="Leave this one out of the door" title="Leave this one out: it goes in the place's ordinary bag" onClick={() => useShards.getState().setDeployLeaveOut(roomOf(sealing.at, sealing.plane, sealing.height))} {...noCallout}>×</button>}
+          {!(door && moving) && <button className="deploybar__doorchip-x" aria-label="Leave this one out of the door" title={sealMove ? 'Keep it out: it stays in its own bag' : 'Leave this one out: an ordinary placement, at the height you chose'} onClick={() => { const s = useShards.getState(); if (s.deploySealMove) s.setDeploySealMove(false); else s.setDeployLeaveOut(roomOf(sealing.at, sealing.plane, sealing.height)) }} {...noCallout}>×</button>}
         </div>
+      )}
+      {!sealing && offer && (
+        <button className="deploybar__doorchip deploybar__doorchip--offer" title="Move it into this room, at the room's height: only whoever opens the door finds it" onClick={() => useShards.getState().setDeploySealMove(true)} {...noCallout}>
+          <DoorClosedLocked size={13} strokeWidth={2.25} aria-hidden />
+          <span className="deploybar__doorchip-name">SEAL IN ROOM · {offer.name}</span>
+        </button>
       )}
       {/* Comments answer the bag, which is the region at its height: a move
           out of it leaves them behind (reactions name the shard and follow). */}
@@ -459,11 +476,12 @@ export function DeployBar({ pad = false }: { pad?: boolean }): JSX.Element | nul
           kind="height"
           label="HIDE AT HEIGHT"
           hintTitle={heightTip}
-          hint={`${height === 0 ? 'this exact gibson' : `found within ${formatCellSize(height)}`}${fit.auto && fit.height !== null && fit.cause === 'contents' && height > 0 ? ' · raised to hold what is inside' : ''}`}
+          hint={snap ? 'SET BY THE ROOM' : `${height === 0 ? 'this exact gibson' : `found within ${formatCellSize(height)}`}${fit.auto && fit.height !== null && fit.cause === 'contents' && height > 0 ? ' · raised to hold what is inside' : ''}`}
         >
-          <button className="deploybar__btn" {...bind(() => { useShards.setState({ deployHeightAuto: false }); useShards.getState().setDeployHeight(useShards.getState().deployHeight - 1) })} disabled={height <= (door ? 1 : 0)} aria-label="Lower height">−</button>
+          {/* In a room, the room's height holds: the X on the room chip above gives the steppers back. */}
+          <button className="deploybar__btn" {...bind(() => { useShards.setState({ deployHeightAuto: false }); useShards.getState().setDeployHeight(useShards.getState().deployHeight - 1) })} disabled={!!snap || height <= (door ? 1 : 0)} aria-label="Lower height">−</button>
           <span className="deploybar__value">{height}</span>
-          <button className="deploybar__btn" {...bind(() => { useShards.setState({ deployHeightAuto: false }); useShards.getState().setDeployHeight(useShards.getState().deployHeight + 1) })} disabled={height >= ceiling} aria-label="Higher height">+</button>
+          <button className="deploybar__btn" {...bind(() => { useShards.setState({ deployHeightAuto: false }); useShards.getState().setDeployHeight(useShards.getState().deployHeight + 1) })} disabled={!!snap || height >= ceiling} aria-label="Higher height">+</button>
           {/* Why an automatic height rose is a tooltip only (arkinox, 2026-10-08),
               except a chest raised for what is aimed inside, which says so in
               a few words in the note (arkinox, 2026-10-10). */}
@@ -474,9 +492,10 @@ export function DeployBar({ pad = false }: { pad?: boolean }): JSX.Element | nul
           a door behind that door. */}
       {door && !moving && (
         <DeployRow kind="roomheight" label="ROOM HEIGHT" hint={`locks ${formatCellSize(doorHeight)}`}>
-          <button className="deploybar__btn" {...bind(() => { const s = useShards.getState(); s.setDeployDoorHeight(Math.max(1, effectiveDoorHeight(s.deployDoorHeight, s.deployHeight) - 1)) })} disabled={doorHeight <= 1} aria-label="Lower room height">−</button>
+          <button className="deploybar__btn" {...bind(() => { const s = useShards.getState(); s.setDeployDoorHeight(Math.max(1, placedDoorHeight(s) - 1)) })} disabled={doorHeight <= 1} aria-label="Lower room height">−</button>
           <span className="deploybar__value">{doorHeight}</span>
-          <button className="deploybar__btn" {...bind(() => { const s = useShards.getState(); const next = effectiveDoorHeight(s.deployDoorHeight, s.deployHeight) + 1; s.setDeployDoorHeight(next >= s.deployHeight ? null : next) })} disabled={doorHeight >= height} aria-label="Higher room height">+</button>
+          {/* Inside a room of yours its own stays lower than that room's (§3.7.6), so + stops one short of it. */}
+          <button className="deploybar__btn" {...bind(() => { const s = useShards.getState(); const next = placedDoorHeight(s) + 1; s.setDeployDoorHeight(s.deployRoomSnap ? Math.min(next, s.deployHeight - 1) : next >= s.deployHeight ? null : next) })} disabled={snap ? doorHeight >= height - 1 : doorHeight >= height} aria-label="Higher room height">+</button>
         </DeployRow>
       )}
 

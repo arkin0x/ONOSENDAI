@@ -41,7 +41,8 @@ import { OVERLAY_ORDER } from '../scene/shardFaces'
 import { ShardLights } from '../scene/shardLight'
 import { nextSelection, ownAddress, useWorkshop, type Tool } from '../store/useWorkshop'
 import { partMatrix } from 'sno-core/parts'
-import { OwnPartsContext } from '../lib/parts'
+import { OwnPartsContext, useResolved } from '../lib/parts'
+import { BASE_FAR, BASE_NEAR, MIN_DISTANCE, clipPlanes, fitDistance, nextMaxDistance, reachFor, reachRadius, shardSphere, type Sphere } from './benchReach'
 import { useCyberspace } from '../store/useCyberspace'
 import { Hold, noteGesture, tapSlop } from './deadZone'
 import { HandleDots, HandleHalos, HandleHits, PressMemory, dotCapacity, type Halo } from './handleDots'
@@ -62,7 +63,7 @@ function snap(p: Vector3, level: number, step: number, plane: WorkPlane): P3 {
   if (plane === 2) return [q(p.x), q(p.y), level]
   return [q(p.x), level, -q(p.z)]
 }
-/** Where the camera sits from its target when sent home: the bench's opening view. */
+/** Where the camera sits from its target when sent home: the bench's opening view, pulled back along it for a shard too big to fit there. */
 const HOME: P3 = [10, 9, 12]
 /** Ticks to render units, one axis (for Y, which is not mirrored). */
 const U = (t: number): number => t / TICKS_PER_UNIT
@@ -685,14 +686,20 @@ function Keys(): null {
  * Sends the camera home on request (the default oblique view, the target kept),
  * and shares its orientation with the compass every frame.
  */
-function ViewDriver(): null {
+function ViewDriver({ sphere }: { sphere: { current: Sphere | null } }): null {
   const camera = useThree((s) => s.camera)
   const controls = useThree((s) => s.controls) as unknown as { target: Vector3; update: () => void } | null
   const request = useBenchView((s) => s.request)
   useFrame(() => { benchPose.copy(camera.quaternion) })
   useEffect(() => {
     if (!request || !controls) return
-    camera.position.copy(controls.target).add(new Vector3(HOME[0], HOME[1], HOME[2]))
+    // Home is the opening view's direction, at its distance or farther: as far
+    // as the whole shard needs to fit from the target (benchReach.ts), so a
+    // court sent home is seen whole rather than from inside its walls.
+    const home = new Vector3(HOME[0], HOME[1], HOME[2])
+    const cam = camera as PerspectiveCamera
+    home.setLength(Math.max(home.length(), fitDistance(reachRadius(sphere.current, controls.target), cam.fov, cam.aspect)))
+    camera.position.copy(controls.target).add(home)
     controls.update()
   }, [request]) // eslint-disable-line react-hooks/exhaustive-deps
   // The orbit ball (Workshop OrbitSphere) turns the camera about the controls'
@@ -709,6 +716,40 @@ function ViewDriver(): null {
     })
     return () => setOrbitSink(null)
   }, [camera, controls])
+  return null
+}
+
+/**
+ * The orbit's reach and the camera's depth, for the shard on the bench
+ * (benchReach.ts; arkinox, 2026-11-09, a Maze Kit court that would not fit
+ * the view). The sphere round everything the shard draws, its placed objects
+ * resolved as ShardMesh resolves them, is measured when the shard or what it
+ * places changes; each frame then sets how far the controls may pull back to
+ * see it whole from where they aim, and pulls the far plane out past it and
+ * the near plane out with the distance. A small shard keeps 60 and the planes
+ * the bench always had.
+ */
+function Reach({ sphere }: { sphere: { current: Sphere | null } }): null {
+  const shard = useWorkshop((s) => s.current())
+  const resolved = useResolved(shard ?? null)
+  const camera = useThree((s) => s.camera) as PerspectiveCamera
+  const controls = useThree((s) => s.controls) as unknown as { target: Vector3; maxDistance: number } | null
+  const invalidate = useThree((s) => s.invalidate)
+  const measured = useMemo(() => (shard ? shardSphere(shard, resolved) : null), [shard, resolved])
+  useLayoutEffect(() => { sphere.current = measured; invalidate() }, [sphere, measured, invalidate])
+  useFrame(() => {
+    if (!controls) return
+    const distance = camera.position.distanceTo(controls.target)
+    const r = reachRadius(sphere.current, controls.target)
+    controls.maxDistance = nextMaxDistance(reachFor(r, camera.fov, camera.aspect), distance)
+    const { near, far } = clipPlanes(distance, r)
+    // Only on a real change: a still bench must not rebuild its projection every frame.
+    if (Math.abs(near - camera.near) > camera.near * 0.05 || Math.abs(far - camera.far) > camera.far * 0.05) {
+      camera.near = near
+      camera.far = far
+      camera.updateProjectionMatrix()
+    }
+  })
   return null
 }
 
@@ -773,6 +814,8 @@ function BenchImpl(): JSX.Element {
   const extent = shard?.extent ?? GRID_HALF
   const showAvatar = useWorkshop((s) => s.showAvatar)
   const partSel = useWorkshop((s) => s.partSel)
+  // What the shard on the bench draws, round: Reach measures it, the home view fits it.
+  const sphere = useRef<Sphere | null>(null)
   const first = useRef(true)
   useEffect(() => { first.current = false }, [])
 
@@ -806,7 +849,7 @@ function BenchImpl(): JSX.Element {
   // whole selection; DESELECT, the pad's hub and Esc let go there.
   return (
     <Canvas
-      camera={{ fov: 50, position: [10, 9, 12], near: 0.05, far: 200 }}
+      camera={{ fov: 50, position: HOME, near: BASE_NEAR, far: BASE_FAR }}
       dpr={[1, 2]}
       gl={{ antialias: true }}
       frameloop="demand"
@@ -834,16 +877,18 @@ function BenchImpl(): JSX.Element {
           the marquee's and the orbit ball turns the view (arkinox,
           2026-10-10). Two fingers, or the right button, pan
           the view in the screen plane; pinch or the wheel dollies, in to 0.6 of a
-          gibson so a fifth-gibson step fills a good share of a phone's screen.
-          These are the controls' own bindings. */}
-      <OrbitControls makeDefault enablePan screenSpacePanning panSpeed={0.9} enableRotate={tool !== 'select'} minDistance={0.6} maxDistance={60} dampingFactor={0.12} />
+          gibson so a fifth-gibson step fills a good share of a phone's screen,
+          and out as far as the whole shard needs to fit, 60 at the least
+          (Reach sets maxDistance each frame). These are the controls' own bindings. */}
+      <OrbitControls makeDefault enablePan screenSpacePanning panSpeed={0.9} enableRotate={tool !== 'select'} minDistance={MIN_DISTANCE} dampingFactor={0.12} />
+      <Reach sphere={sphere} />
       <OrbitHold />
       <Marquee />
       <Aim />
       <Keys />
       <BenchWake />
       <AxesReporter />
-      <ViewDriver />
+      <ViewDriver sphere={sphere} />
       {/* Axes, in the compass's colors, so X is red here and out there. */}
       <BenchAxes reach={extent + 1} />
       <Grid />

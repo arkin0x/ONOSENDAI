@@ -27,8 +27,8 @@ export interface FoundChip {
   /** Everything found since the chip was last tapped away. */
   count: number
   at: number
-  /** The finds counted, by event id. */
-  ids: string[]
+  /** The finds counted, newest first, each with the line and region size the chip would give it. */
+  finds: ChipFind[]
   /**
    * Those counted that left the finds because a room they stand in was closed
    * (CLOSE, store/rooms closeDoor): out of the count until they are found again,
@@ -37,9 +37,25 @@ export interface FoundChip {
   away: string[]
 }
 
+/** One find the chip counts: its id, and its line and region size as the chip shows them. */
+export interface ChipFind { id: string; label: string; meta: string }
+
 /** How many the chip says were found here: everything since the last tap, less what stands in a room closed since. */
 export function chipCount(chip: FoundChip | null): number {
   return chip ? chip.count - chip.away.length : 0
+}
+
+/**
+ * What the chip's lines name: the newest find still in the world, not one standing in
+ * a room closed since (arkinox, 2026-11-09). With that room open again, the newest of
+ * all again. Null when every find counted is closed away (the chip is not drawn then).
+ */
+export function chipLine(chip: FoundChip | null): { label: string; meta: string } | null {
+  if (!chip) return null
+  if (chip.away.length === 0) return { label: chip.label, meta: chip.meta }
+  const away = new Set(chip.away)
+  const here = chip.finds.find((f) => !away.has(f.id))
+  return here ? { label: here.label, meta: here.meta } : null
 }
 
 interface CeremonyState {
@@ -126,14 +142,15 @@ export const useCeremony = create<CeremonyState>((set, get) => ({
     // since the last tap, and the chip stays until it is.
     const was = get().chip
     const count = (was?.count ?? 0) + items.length
-    const ids = [...(was?.ids ?? []), ...items.map((h) => h.eventId)]
-    set({ births, chip: { id: `${now}`, label, meta: regionLabel(first.height), count, at: now, ids, away: was?.away ?? [] } })
+    // Newest first: this mark's first find is the one the chip names.
+    const finds = [...items.map((h, i) => ({ id: h.eventId, label: i === 0 ? label : hiddenLabel(h, 40), meta: regionLabel(h.height) })), ...(was?.finds ?? [])]
+    set({ births, chip: { id: `${now}`, label, meta: regionLabel(first.height), count, at: now, finds, away: was?.away ?? [] } })
   },
 
   leave: (gone) => {
     const chip = get().chip
     if (!chip) return
-    const counted = new Set(chip.ids)
+    const counted = new Set(chip.finds.map((f) => f.id))
     const away = new Set(chip.away)
     for (const id of gone) if (counted.has(id)) away.add(id)
     if (away.size === chip.away.length) return

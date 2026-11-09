@@ -66,7 +66,9 @@ import { setDrawnLooks, useOpenCeremony } from '../../store/useOpenCeremony'
 import { SecretModal } from '../SecretModal'
 import { KeyFoundChip } from '../KeyFoundChip'
 import { Row } from '../NearbyLootModal'
-import { chipCount, useCeremony } from '../../store/useCeremony'
+import { chipCount, chipLine, useCeremony } from '../../store/useCeremony'
+import { hiddenLabel } from '../../lib/hidden'
+import { regionLabel } from '../../lib/loot'
 import type { NearbyItem } from '../../hooks/useNearbyLoot'
 import { renderToStaticMarkup } from 'react-dom/server'
 
@@ -145,6 +147,17 @@ beforeEach(() => {
   sounds.close = 0
   sounds.open = 0
 })
+
+/** The found chip's region line now, or null when it is not drawn. */
+async function chipMeta(): Promise<string | null> {
+  const w = window as unknown as { requestAnimationFrame?: unknown; cancelAnimationFrame?: unknown }
+  w.requestAnimationFrame = () => 0
+  w.cancelAnimationFrame = () => undefined
+  const chip = await mount(<KeyFoundChip />)
+  const words = chip.all().length === 0 ? null : chip.all().filter((h) => h.props.className === 'hyperbar__meta').map(textOf).join('')
+  await chip.unmount()
+  return words
+}
 
 /** What the found chip shows now, or null when it is not drawn. */
 async function chipSays(): Promise<string | null> {
@@ -227,6 +240,39 @@ describe('(2) the found chip leaves out finds in a room you closed', () => {
     expect(await chipSays()).toBe('1 FOUND HERE')
   })
 
+  it('names the newest find still in the world, and the newest of all again once its room is open (arkinox, 2026-11-09)', async () => {
+    const n = await nested()
+    useShards.setState({ discovered: { [n.outer.eventId]: n.outer } })
+    // A find by the road first, of another region size, then both rooms opened.
+    const road: Hidden = { eventId: '9'.repeat(64), bagId: 'f'.repeat(64), lookupId: 'e'.repeat(64), author: 'a'.repeat(64), at: AT, plane: 1, height: 6, createdAt: T, type: 'message', text: 'by the road' }
+    useShards.getState().addDiscovered([road])
+    useCeremony.getState().mark([road])
+    await press(n.outer.eventId, /^OPEN$/)
+    await vi.waitFor(() => expect(roomTexts()).toEqual(['Inner Door', 'in the outer room']))
+    const outerNewest = chipLine(useCeremony.getState().chip)!
+    await press(n.innerId, /^OPEN$/)
+    await vi.waitFor(() => expect(roomTexts()).toContain('deep inside'))
+    const deep = Object.values(S().discovered).find((h) => h.text === 'deep inside')!
+    const newest = { label: hiddenLabel(deep, 40), meta: regionLabel(deep.height) }
+    const at = useCeremony.getState().chip!.at
+    expect(chipLine(useCeremony.getState().chip)).toEqual(newest)
+    // CLOSE: every room find is closed away; the road is the newest still here.
+    await press(n.outer.eventId, /^CLOSE$/)
+    expect(chipLine(useCeremony.getState().chip)).toEqual({ label: hiddenLabel(road, 40), meta: regionLabel(6) })
+    expect(await chipMeta()).toBe(`${regionLabel(6)} · tap to see`)
+    // OPEN on the outer door: its room is here again, the inner room still closed.
+    await press(n.outer.eventId, /^OPEN$/)
+    await vi.waitFor(() => expect(roomTexts()).toEqual(['Inner Door', 'in the outer room']))
+    expect(chipLine(useCeremony.getState().chip)).toEqual(outerNewest)
+    expect(outerNewest).not.toEqual(newest)
+    // The inner door's own OPEN: the newest of all again, and no decode started anew.
+    await press(n.innerId, /^OPEN$/)
+    await vi.waitFor(() => expect(roomTexts()).toContain('deep inside'))
+    expect(chipLine(useCeremony.getState().chip)).toEqual(newest)
+    expect(await chipMeta()).toBe(`${newest.meta} · tap to see`)
+    expect(useCeremony.getState().chip!.at).toBe(at)
+  })
+
   it('a tap clears it all: a room opened after the tap brings nothing back', async () => {
     const n = await openBoth()
     await press(n.outer.eventId, /^CLOSE$/)
@@ -242,6 +288,7 @@ describe('(2) the found chip leaves out finds in a room you closed', () => {
     useCeremony.getState().mark([a])
     useCeremony.getState().leave(['8'.repeat(64)])
     expect(useCeremony.getState().chip?.away).toEqual([])
+    expect(chipLine(useCeremony.getState().chip)?.label).toBe(hiddenLabel(a, 40))
     expect(chipCount(useCeremony.getState().chip)).toBe(1)
   })
 })

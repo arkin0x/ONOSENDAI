@@ -16,7 +16,9 @@
  *
  * DELETE (remove) takes a row off this identity's ITEMS, here and on disk,
  * and publishes nothing. The item is then not held: it can be found and TAKEN
- * again, and nothing brings it back but a TAKE, a PASTE or forging it.
+ * again, and nothing brings it back but a TAKE, a PASTE or forging it. A row
+ * cleared off the TAKEN list (its X, MOVE TO WORKSHOP) stays on disk but is
+ * out of ITEMS the same way: the chest it came out of offers it again.
  *
  * The identity is watched from load() rather than at module load, because
  * this store sits inside the stores' import cycle (useCyberspace imports the
@@ -159,6 +161,21 @@ export const useInventory = create<InventoryState>((set, get) => {
     return who
   }
 
+  /**
+   * Hold these rows (addHeld), here and on disk. `byLineage: false` is a
+   * chest's TAKE: by the item's own identity only, as the chest hides it
+   * (lib/inventory.ts holdsEntry).
+   */
+  const hold = (list: HeldItem[], byLineage = true): HeldItem[] => {
+    // Every row is built for the owner as it stands (ownerNow), so all of them are this identity's.
+    ownerNow()
+    const { items, added } = addHeld(get().items, list, { byLineage })
+    for (const r of added) removed.delete(r.rowKey)
+    if (added.length > 0) set({ items })
+    void persist(added)
+    return added
+  }
+
   return {
   owner: '',
   items: {},
@@ -191,15 +208,7 @@ export const useInventory = create<InventoryState>((set, get) => {
     void persist(added)
   },
 
-  add: (list) => {
-    // Every row is built for the owner as it stands (ownerNow), so all of them are this identity's.
-    ownerNow()
-    const { items, added } = addHeld(get().items, list)
-    for (const r of added) removed.delete(r.rowKey)
-    if (added.length > 0) set({ items })
-    void persist(added)
-    return added
-  },
+  add: (list) => hold(list),
 
   flush: () => writes,
 
@@ -300,7 +309,7 @@ export const useInventory = create<InventoryState>((set, get) => {
     const owner = ownerNow()
     const at = now()
     // One shard per model (arkinox, 2026-10-11): a content whose geometry is
-    // already held, under any name, is not taken again, nor twice in one
+    // in ITEMS, under any name, is not taken again, nor twice in one
     // TAKE ALL (a chest's two identical Columns are one shard to take).
     const fresh: HeldItem[] = []
     let seen = get().items
@@ -310,7 +319,9 @@ export const useInventory = create<InventoryState>((set, get) => {
       if (row.shard) seen = { ...seen, [row.id]: row }
       fresh.push(row)
     }
-    return get().add(fresh)
+    // By the item's own identity, as the chest hides it (holdsEntry): what it
+    // offers, TAKE holds, so TAKE ALL always finishes.
+    return hold(fresh, false)
   },
 
   clearTaken: (ids) => {

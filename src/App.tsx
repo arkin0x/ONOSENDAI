@@ -71,6 +71,7 @@ import { setMenuCovering, useKeyboard } from './hooks/useKeyboard'
 import { useEscape, useModalUp } from './hooks/useEscape'
 import { useProofListener } from './hooks/useProofListener'
 import { useIsMobile } from './hooks/useIsMobile'
+import { useMenuOpen } from './hooks/useMenuOpen'
 import { useTargets } from './hooks/useTargets'
 import { startCalibration } from './lib/calibration'
 import { startPublisher } from './lib/publisher'
@@ -181,8 +182,10 @@ export default function App(): JSX.Element {
   // Panels start open on a desktop and closed on a phone, and after that the
   // hamburger owns it on both. It used to be derived from the breakpoint, which
   // was necessary while the hamburger only existed on mobile: a stored `false`
-  // would have stranded a desktop HUD with no control to bring it back.
-  const [panelsOpen, setPanelsOpen] = useState(!isMobile)
+  // would have stranded a desktop HUD with no control to bring it back. With
+  // the hamburger on both, open or closed is kept across a refresh, and the
+  // default above is only for a first visit (hooks/useMenuOpen.ts).
+  const [panelsOpen, setPanelsOpen] = useMenuOpen(!isMobile)
   const showPanels = panelsOpen && !spectating
 
   // Reading a hidden thing owns the screen: the top-aligned modal sits where
@@ -401,7 +404,7 @@ export default function App(): JSX.Element {
       <DeployBar pad={showPad && !offerUp && !modalUp} />
       {/* One boundary for the record and its neighbors: a crash in one modal
           shows its error where the modal was, and the scene stays up. */}
-      <CrashNote where="a modal">
+      <CrashNote where="a modal" closesCard>
         <StashModals />
         <SecretModal />
         <ActionModal />

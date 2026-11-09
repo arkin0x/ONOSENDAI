@@ -45,6 +45,7 @@ import { bagAddressOf, bagsToOpen, retractedAt, staleFinds } from '../lib/bagVer
 import { itemTargetOf, type ItemTarget } from '../lib/comments'
 import { bytesToHex, hexToBytes, positionHex, type EventTemplate, type NostrEvent } from '../lib/events'
 import { regionKeyOffThread } from '../lib/regionKeyOffThread'
+import { WRONG_KEY, keyFitsLookup, wrongKeyMessage } from '../lib/regionKeyCheck'
 import { signedTableOnly } from '../lib/carried'
 import { deployCeiling, deployRoute, localKeyCeiling, needsAsk, regionKeyQuote } from '../lib/deployPlan'
 import { useSecrets } from './useSecrets'
@@ -361,8 +362,15 @@ export type ChestContent =
   | { kind: 'message'; text: string }
   /** One of your workshop models, carried inline; aimed, it is already signed where it should stand. */
   | { kind: 'shard'; shardId: string; aimed?: AimedShard }
-  /** A new key forged inline, for chaining: it is held by you the moment the chest is hidden. */
-  | { kind: 'key'; key: KeyItem }
+  /**
+   * An item (a keypair): one forged here with the full forge (FORGE NEW), or
+   * with `copy`, one from your ITEMS that you made (FROM MY ITEMS; arkinox,
+   * 2026-11-09: "id like to customize the items I place"). A copy is the
+   * same key, sealed as PLACE from ITEMS places it (copyTemplateAt): its
+   * keypair, secret and every tag. Neither is held until it is taken out
+   * (arkinox, 2026-11-06).
+   */
+  | { kind: 'key'; key: KeyItem; copy?: NostrEvent }
   /** Hidden audio, its file already encrypted and uploaded (AudioCompose): sealed in at the chest's place. */
   | { kind: 'audio'; audio: AudioItem }
   /**
@@ -1022,6 +1030,39 @@ export function placeCopyOf(item: Pick<HeldItem, 'type' | 'event' | 'verified' |
   return PLACE_KIND
 }
 
+/**
+ * FROM MY ITEMS in the chest composer (arkinox, 2026-11-09): an ITEMS row as
+ * a chest content, or why not. The same rule as PLACE from ITEMS
+ * (placeCopyOf: only what you made; arkinox, 2026-11-06: "Only items I
+ * made"), and only an item (a keypair), the same key with all its settings.
+ * Not a row filed away under ARCHIVED.
+ */
+export function chestCopyOf(item: Pick<HeldItem, 'type' | 'event' | 'verified' | 'key' | 'text' | 'audio' | 'archived'>, me: string): Extract<ChestContent, { kind: 'key' }> | string {
+  if (item.archived) return PLACE_ARCHIVED
+  const p = placeCopyOf(item, me)
+  if (typeof p === 'string') return p
+  return p.type === 'key' && p.copy ? { kind: 'key', key: p.key, copy: p.copy } : PLACE_ITEM_ONLY
+}
+
+/** Why FROM MY ITEMS leaves a row out, beyond placeCopyOf's reasons. */
+export const PLACE_ARCHIVED = 'An archived item stays filed away. Unarchive it first.'
+export const PLACE_ITEM_ONLY = 'Only an item goes in from ITEMS. A message or a sound has its own button.'
+
+/** What FROM MY ITEMS lists: each ITEMS row chestCopyOf takes, newest first. */
+export function chestCopiesOf(items: Record<string, HeldItem>, me: string): Array<{ item: HeldItem; content: Extract<ChestContent, { kind: 'key' }> }> {
+  const out: Array<{ item: HeldItem; content: Extract<ChestContent, { kind: 'key' }> }> = []
+  for (const item of Object.values(items)) {
+    const content = chestCopyOf(item, me)
+    if (typeof content !== 'string') out.push({ item, content })
+  }
+  return out.sort((a, b) => b.item.at - a.item.at)
+}
+
+/** A chest's item as the event template it is signed from: a copy as PLACE from ITEMS copies it, else the forged item's own. */
+export function chestKeyTemplate(c: Extract<ChestContent, { kind: 'key' }>, at: Position, plane: Plane, createdAt: number): EventTemplate {
+  return c.copy ? copyTemplateAt(c.copy, at, plane, createdAt) : keyInnerTemplate(c.key, at, plane, createdAt)
+}
+
 /** Whether a deploy is PLACE from ITEMS of a key or a message: a copy, never a composer's draft. */
 export function placingCopy(pending: DeployPending | null): boolean {
   return !!pending && (pending.type === 'key' || pending.type === 'message') && !!pending.copy
@@ -1469,7 +1510,10 @@ interface ShardsState {
    * device sealed the bag with, ask the relays, open what comes back.
    * `wrongKey`: the derived key or lookup id is not the stored one, so the bag
    * is sealed where no stranger looks (a wrong key bought from HOSAKA, say);
-   * the relay is not asked. `refused` means the bag came back and this item is
+   * the relay is not asked. `underived`: the derivation itself failed (the
+   * region worker crashed or ran out of time), so nothing was compared and the
+   * relay was not asked either. A row GONE FROM ITS BAG is not compared, and
+   * the relay says it is missing. `refused` means the bag came back and this item is
    * in it, but the format refuses it, so no client can show it; the fix is in
    * the workshop, not on the relay. `unread`: no relay's bag held it, and the
    * canonical relay refused (no AUTH) or was not heard from, so nothing is
@@ -1711,7 +1755,7 @@ export type DiscoveryKey = { via: 'derived' } | { via: 'stored'; why: 'height' |
 
 /** What TEST DISCOVERY found, and with which key (DiscoveryKey). */
 export interface DiscoveryResult {
-  outcome: 'found' | 'missing' | 'refused' | 'unread' | 'wrongKey'
+  outcome: 'found' | 'missing' | 'refused' | 'unread' | 'wrongKey' | 'underived'
   key: DiscoveryKey
 }
 
@@ -2210,7 +2254,9 @@ export const useShards = create<ShardsState>((set, get) => {
         // A rumor, as in a bag (DECK-0007 §3): the chest's signature vouches for it.
         signed.push(rumorOf(audioInnerTemplate(c.audio, at, plane, createdAt), cs.identity.pubkey))
       } else {
-        const event = await signAsOwner(keyInnerTemplate(c.key, at, plane, createdAt))
+        // A copy from ITEMS is the same key as this identity made it: one made by another (a draft outlives a switch) is not signed again as yours.
+        if (c.copy && c.copy.pubkey !== cs.identity.pubkey) throw new Error('An item in this chest was made by another identity. Take it out and add it again.')
+        const event = await signAsOwner(chestKeyTemplate(c, at, plane, createdAt))
         signed.push(event)
         forged.push({ event, key: c.key })
       }
@@ -3604,8 +3650,12 @@ export const useShards = create<ShardsState>((set, get) => {
           set({ deployNote: `HOSAKA has the 2^${deployHeight} key` })
           // HOSAKA's requests are signed too.
           still()
+          // Hiding has no lookup id to compare against yet: the purchase checks
+          // what it can (lib/regionKeyCheck.ts) and refuses a wrong key.
           const held = await useSecrets.getState().buy(at, plane, deployHeight)
           if (!held) throw new Error(useSecrets.getState().buyError ?? 'HOSAKA could not compute the key.')
+          // Never seal with a key whose lookup id is not its own (spec §7.2), whatever held it.
+          if (!keyFitsLookup(held.keyHex, held.lookupId)) throw new Error(wrongKeyMessage('its lookup id is not the sha256 of its key'))
           rk = { key: hexToBytes(held.keyHex), lookupId: held.lookupId }
         } else {
           set({ deployNote: `Computing the 2^${deployHeight} key on this machine` })
@@ -3803,6 +3853,13 @@ export const useShards = create<ShardsState>((set, get) => {
           item,
         ]
         commitRows(cs.identity.pubkey, mine)
+        // The row as kept: its lookup id must be sha256 of its key (spec
+        // §7.2, rooms too), or a stranger looks where it is not. Checked on
+        // what was stored, not on what was meant to be.
+        const kept = rowsOf(cs.identity.pubkey).find((d) => d.eventId === item.eventId)
+        if (kept && !keyFitsLookup(kept.keyHex, kept.lookupId)) {
+          useToast.getState().show({ label: 'KEY CHECK FAILED', meta: `${route === 'cloud' ? `${WRONG_KEY}. ` : ''}The lookup id this was filed under is not the one its key gives, so strangers cannot find it. Tap it and TEST DISCOVERY.`, mark: 'build' })
+        }
         // Placed: first in your shard lists from now. Local, and never the
         // deploy's failure; not for an identity switched to meanwhile.
         if (cyber().identity.pubkey === cs.identity.pubkey) {
@@ -4302,11 +4359,21 @@ export const useShards = create<ShardsState>((set, get) => {
       // still find it and say FOUND (review of #622). Above the ceiling, and in
       // a room whose door secret this device lacks, the stored key is all
       // there is, and the result says so.
-      if (key.via === 'derived') {
-        const region = await regionKeyOffThread(positionOf(item), item.height, MAX_COMPUTE_HEIGHT)
-        const secret = item.room ? doorSecret(me, item.room.doorId) : null
-        const roomK = secret ? roomKey(region.key, hexToBytes(secret)) : null
-        const derived = roomK ? { key: roomK, lookupId: roomLookupId(roomK) } : region
+      // A row GONE FROM ITS BAG (goneFrom) is not compared: its door may have
+      // been rekeyed since (retargetRoom), so a fresh key would differ for a
+      // reason that is not a wrong key. The relay says where it is: missing.
+      if (key.via === 'derived' && inItsBag(item)) {
+        // A derivation that fails (its worker crashed, or ran out of time)
+        // says so, never NOT FOUND: the relay was never asked.
+        let derived: { key: Uint8Array; lookupId: string }
+        try {
+          const region = await regionKeyOffThread(positionOf(item), item.height, MAX_COMPUTE_HEIGHT)
+          const secret = item.room ? doorSecret(me, item.room.doorId) : null
+          const roomK = secret ? roomKey(region.key, hexToBytes(secret)) : null
+          derived = roomK ? { key: roomK, lookupId: roomLookupId(roomK) } : region
+        } catch {
+          return { outcome: 'underived', key }
+        }
         if (bytesToHex(derived.key) !== item.keyHex.toLowerCase() || derived.lookupId !== item.lookupId) return { outcome: 'wrongKey', key }
         rk = derived
       }

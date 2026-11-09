@@ -369,7 +369,7 @@ export function ChestBlock({ id, chest, author, verified, place, sealer: given, 
   )
 }
 
-/** What TAKE ALL takes: every content here not yet held. */
+/** What TAKE ALL takes: every content here not in ITEMS now (lib/inventory.ts holdsEntry). */
 export function takeableOf(entries: ChestEntry[], items: Record<string, HeldItem>): ChestEntry[] {
   return entries.filter((e) => !holdsEntry(items, e))
 }
@@ -379,8 +379,10 @@ export function takeableOf(entries: ChestEntry[], items: Record<string, HeldItem
  * ALL under the last. What is held is not listed (arkinox, 2026-10-30: "if
  * an item is in your inventory and in the chest, hide it on the chest so it
  * feels like you took it"), so a row leaves the list as it is taken, and its
- * loot leaves the chest in the world (scene/ChestLoot). With everything
- * held, the list says so.
+ * loot leaves the chest in the world (scene/ChestLoot). Checked against ITEMS
+ * as it is now (arkinox, 2026-11-09: "anything missing should appear
+ * again"): a row deleted from ITEMS, or cleared off TAKEN, comes back with
+ * TAKE, after a reload too. With everything held, the list says so.
  */
 export function ChestContents({ entries, from, place }: { entries: ChestEntry[]; from: HeldFrom; place: HeldPlace | null }): JSX.Element {
   const items = useInventory((s) => s.items)

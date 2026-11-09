@@ -102,7 +102,7 @@ export function takeFlyReanchor(focus: unknown): boolean {
   return mine
 }
 
-/** The mouse on the scene, for the rig's follow (StartLock): a button down, and whether a plain left drag has orbited. */
+/** The mouse on the scene, for the rig's follow (StartLock): a button down, and whether a plain left (orbit) or middle (dolly) drag has moved the camera. */
 export const sceneMouse = { down: false, dragged: false }
 
 /** The camera, as the frame sees it: where it is, where it looks, its field of view and the canvas height. */
@@ -331,7 +331,8 @@ export function installFlyTouches(surface: Listening, doc: Listening, win: Liste
       if (e.button === 2 || (e.button === 0 && e.shiftKey)) {
         mouse = { id: e.pointerId, x: e.clientX, y: e.clientY }
         panGesture.setMouse(true)
-      } else if (e.button === 0) orbiting = { id: e.pointerId, x: e.clientX, y: e.clientY }
+      // The left button orbits and the middle dollies: either, dragged, is the hand moving the camera (StartLock).
+      } else if (e.button === 0 || e.button === 1) orbiting = { id: e.pointerId, x: e.clientX, y: e.clientY }
       return
     }
     if (!touch(e)) return

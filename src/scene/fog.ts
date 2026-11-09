@@ -47,3 +47,16 @@ export function fogFar(base: boolean, fromOrigin: number): number {
   if (base) return FOG_FAR
   return Math.max(FOG_FAR, Math.min(FOG_FAR * VIEW_FOG_SCALE, CULL_REACH - fromOrigin))
 }
+
+/**
+ * How quickly the fog's distances follow their target, in seconds (an
+ * exponential time constant): a re-anchor changes the camera's distance from
+ * the render origin in one frame (a fly every field width, a landing), and the
+ * fog eases there instead of stepping (review of #635, S2a).
+ */
+export const FOG_TAU = 0.4
+
+/** The fog's `current` distance one frame of `dt` seconds closer to `target`, the same at any frame rate. */
+export function easeFog(current: number, target: number, dt: number): number {
+  return target + (current - target) * Math.exp(-Math.max(0, dt) / FOG_TAU)
+}

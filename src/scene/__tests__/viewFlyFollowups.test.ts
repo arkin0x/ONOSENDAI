@@ -243,7 +243,7 @@ describe('4. the follow: an orbit or a pinch unlocks it, a pan never does (revie
     expect(body).toMatch(/c\.enableZoom = !s\.walking && !panGesture\.panning/)
   })
 
-  it('the mouse: a plain left drag past the slop counts as an orbit, a click does not, and the press is counted before OrbitControls hears it', async () => {
+  it('the mouse: a plain left drag (or a middle one) past the slop counts as the hand moving the camera, a click does not, and the press is counted before OrbitControls hears it', async () => {
     const { sceneMouse } = await import('../ViewFly')
     const surface = new EventTarget(); const doc = new EventTarget(); const win = new EventTarget()
     const off = installFlyTouches(surface, doc, win, () => 0)
@@ -260,6 +260,13 @@ describe('4. the follow: an orbit or a pinch unlocks it, a pan never does (revie
     doc.dispatchEvent(ev('pointerup', { pointerType: 'mouse', pointerId: 1 }))
     expect(sceneMouse.down).toBe(false)
     expect(sceneMouse.dragged).toBe(false)
+    // The middle button dollies: dragged, it unlocks like the wheel or a pinch (review N7).
+    surface.dispatchEvent(ev('pointerdown', { pointerType: 'mouse', pointerId: 2, button: 1, clientX: 0, clientY: 0 }))
+    expect(sceneMouse.down).toBe(true)
+    expect(panGesture.panning).toBe(false)
+    doc.dispatchEvent(ev('pointermove', { pointerType: 'mouse', pointerId: 2, buttons: 4, clientX: 0, clientY: 30 }))
+    expect(sceneMouse.dragged).toBe(true)
+    doc.dispatchEvent(ev('pointerup', { pointerType: 'mouse', pointerId: 2 }))
     off()
   })
 })

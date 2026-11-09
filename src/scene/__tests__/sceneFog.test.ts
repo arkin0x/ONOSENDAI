@@ -23,15 +23,61 @@ describe('the scene fog', () => {
     expect(src).not.toMatch(/<fog attach="fog" args=\{\[0x000000, GRID_RADIUS \* 0\.9, GRID_RADIUS \* 4\]\} \/>/)
   })
 
-  it('keeps the old distances in TV and WALK, and moves one Fog in place every frame rather than making a new one', () => {
+  it('keeps the old distances in TV and WALK, and eases one Fog in place every frame rather than making a new one', () => {
     expect(fogBody).toMatch(/fogFar\(useTv\.getState\(\)\.on \|\| useCyberspace\.getState\(\)\.walking, state\.camera\.position\.length\(\)\)/)
-    expect(fogBody).toMatch(/f\.near = far \* FOG_START_SHARE/)
-    expect(fogBody).toMatch(/f\.far = far/)
+    expect(fogBody).toMatch(/f\.far = easeFog\(f\.far, far, dt\)/)
+    expect(fogBody).toMatch(/f\.near = f\.far \* FOG_START_SHARE/)
     // The args are the Fog's first and only construction.
     expect(fogBody).toMatch(/args=\{\[0x000000, FOG_NEAR \* VIEW_FOG_SCALE, FOG_FAR \* VIEW_FOG_SCALE\]\}/)
   })
 
+  it('S2a: a re-anchor\'s jump in the target is eased, the same at any frame rate, never a step', async () => {
+    const { easeFog, FOG_TAU } = await import('../fog')
+    // The reviewer's measured jump: 190.8 to 166.3 in one frame.
+    const run = (fps: number, seconds: number): { far: number; worst: number } => {
+      let far = 190.8
+      let worst = 0
+      for (let i = 0; i < Math.round(fps * seconds); i++) {
+        const next = easeFog(far, 166.3, 1 / fps)
+        worst = Math.max(worst, Math.abs(next - far))
+        far = next
+      }
+      return { far, worst }
+    }
+    const a = run(30, 1)
+    const b = run(60, 1)
+    const c = run(144, 1)
+    expect(a.far).toBeCloseTo(b.far, 9)
+    expect(b.far).toBeCloseTo(c.far, 9)
+    // One time constant takes 1 - 1/e of the way.
+    expect(easeFog(190.8, 166.3, FOG_TAU)).toBeCloseTo(166.3 + 24.5 / Math.E, 9)
+    // At 60 fps no frame moves the end by more than 1.1 cells (it was 24.5 in one).
+    expect(b.worst).toBeLessThan(1.1)
+    expect(easeFog(100, 150, 0)).toBe(100)
+  })
+
+  it('S2b: three fogs by straight-line distance, so the bound below is exact at every screen edge', async () => {
+    const { ShaderChunk, ShaderLib } = await import('three')
+    await import('../radialFog')
+    expect(ShaderChunk.fog_vertex).toMatch(/vFogDepth = length\( mvPosition\.xyz \);/)
+    expect(ShaderChunk.fog_vertex).not.toMatch(/- mvPosition\.z/)
+    // The built-in shaders the world draws with (and the headlamp patches) include that chunk.
+    for (const lib of [ShaderLib.basic, ShaderLib.points]) expect(lib.vertexShader).toMatch(/#include <fog_vertex>/)
+    // Installed before anything compiles: main.tsx's first import, and the scene's.
+    const main = readFileSync('src/main.tsx', 'utf8')
+    expect(main.indexOf("import './scene/radialFog'")).toBeLessThan(main.indexOf("import App from './App'"))
+    expect(main.indexOf("import './scene/radialFog'")).toBeGreaterThanOrEqual(0)
+    expect(src).toMatch(/import '\.\/radialFog'/)
+    // No shader of ours carries its own copy of three's fog depth.
+    for (const f of readdirSync('src/scene')) {
+      if (!/\.(ts|tsx)$/.test(f) || f === 'radialFog.ts') continue
+      expect(readFileSync(`src/scene/${f}`, 'utf8'), f).not.toMatch(/vFogDepth\s*=/)
+    }
+  })
+
   it('S2: the fog is black before the cull line: at most CULL_REACH less the camera\'s distance from the origin, never nearer than the old 96, 192 at most', async () => {
+    // Radial fog (S2b): a thing on the cull sphere is at least CULL_REACH - d from a camera d from
+    // the origin, straight-line, in every direction; fogged by that same distance, it is black.
     const { fogFar, CULL_REACH, VIEW_FOG_SCALE } = await import('../fog')
     expect(CULL_REACH).toBe(192)
     expect(fogFar(true, 0)).toBe(96)

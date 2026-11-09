@@ -105,9 +105,12 @@ async function check(pubkey: string): Promise<void> {
  * every older event is left out of it. Read as "missing", that made every
  * load requeue the whole older chain: 1520 of the owner's actions the relay
  * held, warned about as not there (2026-11-09). So these are only suspects:
- * the publisher asks the canonical relay for them by id before it sends or
- * counts any of them (publisher.ts reconcileCanonical), and only what it
- * truly lacks goes out again.
+ * the publisher checks them by id on the canonical relay (a COUNT, then the
+ * ids of a batch that counted short) before it counts any of them
+ * (publisher.ts reconcileCanonical). What it lacks goes out again, and so
+ * does what it could not be asked about (a read refused for want of AUTH,
+ * or no answer three passes in a row), where its "duplicate:" clears what
+ * it had.
  *
  * They are never dropped from this device's chain for it: the chain this
  * device holds stays the chain, and the canonical relay is brought up to it.

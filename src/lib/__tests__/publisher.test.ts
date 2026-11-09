@@ -25,6 +25,7 @@ vi.mock('../relay', async (importOriginal) => ({
   publish: (e: NostrEvent) => { sent.push(e.id); return Promise.resolve(pub.acceptedBy ? { ok: true as const, accepted: pub.acceptedBy } : { ok: true as const }) },
   // The canonical relay's background check by id (publisher.ts
   // reconcileCanonical): it answers, holding none of them.
+  countRelay: () => Promise.resolve(null),
   askRelay: (url: string) => Promise.resolve({ url, outcome: 'answered' as const, events: [] }),
   // And its re-send of what it lacks.
   publishOnceTo: (url: string, e: NostrEvent) => {

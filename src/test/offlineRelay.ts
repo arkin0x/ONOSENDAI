@@ -18,6 +18,8 @@ export const offlineRelay = {
   authForRead: async (_url: string): Promise<void> => {},
   publish: async (_event: NostrEvent) => ({ ok: true as const }),
   publishMany: async (relays: string[], _event: NostrEvent) => ({ ok: true as const, accepted: relays }),
+  // No count to be had: whoever asks falls back to a REQ, answered with nothing.
+  countRelay: async (_url: string, _filter: Filter, _maxWait?: number): Promise<number | null> => null,
   publishOnceTo: async (url: string, _event: NostrEvent) => ({ ok: true as const, accepted: [normalizeURL(url)] }),
   publishLight: async (_event: NostrEvent): Promise<boolean> => true,
   query: async (_filter: Filter): Promise<NostrEvent[]> => [],

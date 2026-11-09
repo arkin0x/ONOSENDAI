@@ -15,10 +15,10 @@
  * relay's newest page of 500 for all it holds) shown as missing and sent
  * again one event at a time, forever.
  *
- * The canonical relay is a fake here, at the level of relay.ts: askRelay
- * answers a check by id from `stored` (at most 500 to a filter, as grain
- * does), publishOnceTo is a re-send. canonicalReconcile.test.ts drives the
- * same pass over a fake socket.
+ * The canonical relay is a fake here, at the level of relay.ts: countRelay
+ * and askRelay answer a check by id from `stored` (at most 500 to a filter,
+ * as grain does), publishOnceTo is a send. canonicalReconcile.test.ts
+ * drives the same pass over a fake socket, AUTH and all.
  */
 
 import { describe, expect, it, vi } from 'vitest'
@@ -45,8 +45,16 @@ const net = vi.hoisted(() => {
     stored: [] as Array<{ id: string }>,
     /** How many ids each check REQ asked about. */
     checks: [] as number[],
-    /** The check gets no answer in time. */
+    /** How many ids each COUNT asked about. */
+    counts: [] as number[],
+    /** The REQ of the check gets no answer in time. */
     checkFails: false,
+    /** ...but sends back what it had before time ran out. */
+    partialOnFail: false,
+    /** COUNT is not to be had (unsupported, refused, no answer). */
+    countFails: false,
+    /** What the canonical relay says to a send of these ids, instead of taking it. */
+    refuse: new Map<string, string>(),
   }
 })
 vi.mock('../relay', async (importOriginal) => {
@@ -58,13 +66,22 @@ vi.mock('../relay', async (importOriginal) => {
     publishOnceTo: async (_url: string, e: { id: string }) => {
       net.toCanonical.push(e.id)
       net.sentAt.push(Date.now())
+      const refused = net.refuse.get(e.id)
+      if (refused) return { ok: false as const, reason: refused }
       return net.canonicalOk ? { ok: true as const, accepted: [actual.CYBERSPACE_RELAY] } : { ok: false as const, reason: 'timeout' }
+    },
+    countRelay: async (_url: string, filter: { ids?: string[] }) => {
+      net.counts.push(filter.ids?.length ?? 0)
+      if (net.countFails) return null
+      const want = new Set(filter.ids ?? [])
+      return net.stored.filter((e) => want.has(e.id)).length
     },
     askRelay: async (url: string, filter: { ids?: string[]; limit?: number }) => {
       net.checks.push(filter.ids?.length ?? 0)
-      if (net.checkFails) return { url, outcome: 'unreachable' as const, reason: 'no answer in time', events: [] }
       const want = new Set(filter.ids ?? [])
-      return { url, outcome: 'answered' as const, events: net.stored.filter((e) => want.has(e.id)).slice(0, Math.min(500, filter.limit ?? 500)) }
+      const held = net.stored.filter((e) => want.has(e.id)).slice(0, Math.min(500, filter.limit ?? 500))
+      if (net.checkFails) return { url, outcome: 'unreachable' as const, reason: 'no answer in time', events: net.partialOnFail ? held : [] }
+      return { url, outcome: 'answered' as const, events: held }
     },
   }
 })
@@ -112,12 +129,17 @@ function hold(store: Store, events: NostrEvent[]): void {
 }
 function reset(): void {
   localStorage.clear()
-  net.toCanonical = []; net.sentAt = []; net.canonicalOk = false; net.canonicalHolds = []; net.stored = []; net.checks = []; net.checkFails = false
+  net.toCanonical = []; net.sentAt = []; net.canonicalOk = false; net.canonicalHolds = []; net.stored = []; net.checks = []; net.counts = []
+  net.checkFails = false; net.partialOnFail = false; net.countFails = false; net.refuse = new Map()
 }
 const keyOf = (pk: string): string => `onosendai:canonical-pending:${pk}`
-/** What a reload of a page that last saw these as not on the canonical relay finds in storage, `ago` ms old. */
-function leftInStorage(pk: string, events: NostrEvent[], ago: number): void {
-  localStorage.setItem(keyOf(pk), JSON.stringify(Object.fromEntries(events.map((e) => [e.id, Date.now() - ago]))))
+/**
+ * What a reload finds in storage, `ago` ms old: as a build before this one
+ * saved every entry, and this one saves an entry not known to be missing
+ * (a bare time), or, with `missing`, one known to be ([time, 1]).
+ */
+function leftInStorage(pk: string, events: NostrEvent[], ago: number, missing = false): void {
+  localStorage.setItem(keyOf(pk), JSON.stringify(Object.fromEntries(events.map((e) => [e.id, missing ? [Date.now() - ago, 1] : Date.now() - ago]))))
 }
 /** The most the strip ever showed while `run` ran. */
 async function highest(store: Store, run: () => Promise<void>): Promise<number> {
@@ -128,7 +150,7 @@ async function highest(store: Store, run: () => Promise<void>): Promise<number> 
 }
 
 describe('actions the canonical relay has not taken', () => {
-  it('survive a reload: asked for again, and the strip says so at once when the first check finds them still missing after a minute', async () => {
+  it('survive a reload: still known to be missing, shown at once when they have waited past a minute, and asked for again', async () => {
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] })
     try {
       reset()
@@ -151,17 +173,14 @@ describe('actions the canonical relay has not taken', () => {
       vi.setSystemTime(reloadedAt)
       ;({ store, pub } = await page())
       hold(store, chain)
+      expect(store.useCyberspace.getState().canonicalLate).toBe(0)
       net.toCanonical = []
       pub.startPublisher()
-      // What storage says is not yet a finding: nothing shown until the relay is asked.
-      expect(store.useCyberspace.getState().canonicalLate).toBe(0)
-      await vi.advanceTimersByTimeAsync(5_000)
-      // Asked: it truly lacks it, and it has waited past a minute already.
-      expect(net.toCanonical).toEqual([chain[2].id])
+      // The canonical relay never said OK to it, and that is remembered.
       expect(store.useCyberspace.getState().canonicalLate).toBe(1)
       net.canonicalOk = true
-      await vi.advanceTimersByTimeAsync(10_000)
-      expect(net.toCanonical).toEqual([chain[2].id, chain[2].id])
+      await vi.advanceTimersByTimeAsync(5_000)
+      expect(net.toCanonical).toEqual([chain[2].id])
       expect(store.useCyberspace.getState().canonicalLate).toBe(0)
       expect(localStorage.getItem(keyOf(pk))).toBeNull()
     } finally {
@@ -190,6 +209,31 @@ describe('actions the canonical relay has not taken', () => {
     }
   }, 20_000)
 
+  it('a real outage of the canonical relay shows: its own send never OK\'d and its check unanswered, an action is counted at the minute and sent again every pass', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] })
+    try {
+      reset(); net.countFails = true; net.checkFails = true
+      const { store, pub } = await page()
+      const chain = chainOf(store, 2)
+      hold(store, chain.slice(0, 2))
+      pub.startPublisher()
+      store.useCyberspace.setState({ live: true })
+      await vi.advanceTimersByTimeAsync(10)
+      store.useCyberspace.setState({ events: chain, prevEventId: chain[2].id, published: { ...store.useCyberspace.getState().published, [chain[2].id]: 'queued' } })
+      await vi.advanceTimersByTimeAsync(10)
+      await vi.advanceTimersByTimeAsync(61_000)
+      expect(store.useCyberspace.getState().canonicalLate).toBe(1)
+      // Passes at 5, 15 and 35 s: sent each time, whatever the unanswered check.
+      expect(net.toCanonical).toEqual([chain[2].id, chain[2].id, chain[2].id])
+      // The relay comes back: it lands, and the strip clears.
+      net.countFails = false; net.checkFails = false; net.canonicalOk = true
+      await vi.advanceTimersByTimeAsync(40_000)
+      expect(store.useCyberspace.getState().canonicalLate).toBe(0)
+    } finally {
+      vi.useRealTimers()
+    }
+  }, 20_000)
+
   it('the startup check finds published actions the canonical relay lacks, sends them to it, and never shortens this device\'s chain', async () => {
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] })
     try {
@@ -213,7 +257,7 @@ describe('actions the canonical relay has not taken', () => {
     }
   }, 20_000)
 
-  it('a stale list of 1520 a reload brought back, all of them on the canonical relay: one batched check clears it, nothing is sent, and the strip never shows it', async () => {
+  it('a stale list of 1520 an older build saved, all of them on the canonical relay: a COUNT per batch clears it, no events are fetched or sent, and the strip never shows it', async () => {
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] })
     try {
       reset()
@@ -228,20 +272,21 @@ describe('actions the canonical relay has not taken', () => {
         await vi.advanceTimersByTimeAsync(5_000)
       })
       expect(top).toBe(0)
-      // 1520 ids, 500 to a REQ.
-      expect(net.checks).toEqual([500, 500, 500, 20])
+      // 1520 ids, 250 to a COUNT, and every count whole: no REQ at all.
+      expect(net.counts).toEqual([250, 250, 250, 250, 250, 250, 20])
+      expect(net.checks).toEqual([])
       expect(net.toCanonical).toEqual([])
       expect(store.useCyberspace.getState().canonicalLate).toBe(0)
       expect(localStorage.getItem(keyOf(pk))).toBeNull()
       // And nothing is asked again.
       await vi.advanceTimersByTimeAsync(120_000)
-      expect(net.checks).toHaveLength(4)
+      expect(net.counts).toHaveLength(7)
     } finally {
       vi.useRealTimers()
     }
   }, 20_000)
 
-  it('of a stale list, only the 3 the relay truly lacks are sent again, in chain order, paced, and the rest clear', async () => {
+  it('of a stale list, only the 3 the relay truly lacks are sent again, in chain order, paced; only the batches that counted short are fetched', async () => {
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] })
     try {
       reset(); net.canonicalOk = true
@@ -254,6 +299,7 @@ describe('actions the canonical relay has not taken', () => {
       leftInStorage(pk, chain.slice(1), 6 * 3_600_000)
       pub.startPublisher()
       await vi.advanceTimersByTimeAsync(6_000)
+      expect(net.checks).toEqual([250, 250])
       expect(net.toCanonical).toEqual(lacking.map((e) => e.id))
       expect(net.sentAt[1] - net.sentAt[0]).toBeGreaterThanOrEqual(pub.CANONICAL_SEND_GAP_MS)
       expect(net.sentAt[2] - net.sentAt[1]).toBeGreaterThanOrEqual(pub.CANONICAL_SEND_GAP_MS)
@@ -264,10 +310,10 @@ describe('actions the canonical relay has not taken', () => {
     }
   }, 20_000)
 
-  it('a check the canonical relay does not answer keeps the list and counts none of it; the next one that is answered decides', async () => {
+  it('a check the canonical relay does not answer counts none of a stale list; after three such passes the list is sent anyway, and what the relay had clears', async () => {
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] })
     try {
-      reset(); net.checkFails = true; net.canonicalOk = true
+      reset(); net.checkFails = true; net.countFails = true; net.canonicalOk = true
       const { store, pub } = await page()
       const pk = store.useCyberspace.getState().identity.pubkey
       const chain = chainOf(store, 12)
@@ -276,23 +322,87 @@ describe('actions the canonical relay has not taken', () => {
       leftInStorage(pk, chain.slice(1), 6 * 3_600_000)
       const top = await highest(store, async () => {
         pub.startPublisher()
-        await vi.advanceTimersByTimeAsync(5_000)
+        // Passes at 5 and 15 s: unanswered, nothing sent, nothing dropped.
+        await vi.advanceTimersByTimeAsync(15_000)
+        expect(net.checks).toEqual([12, 12])
+        expect(net.toCanonical).toEqual([])
+        expect(Object.keys(JSON.parse(localStorage.getItem(keyOf(pk)) ?? '{}'))).toHaveLength(12)
+        // The third, at 35 s: still unanswered, so all 12 go out, paced, in chain order.
+        await vi.advanceTimersByTimeAsync(20_000 + 12 * pub.CANONICAL_SEND_GAP_MS)
       })
       expect(top).toBe(0)
-      expect(net.checks).toEqual([12])
-      // A timeout is not "missing": nothing sent, nothing dropped.
-      expect(net.toCanonical).toEqual([])
-      expect(Object.keys(JSON.parse(localStorage.getItem(keyOf(pk)) ?? '{}'))).toHaveLength(12)
-      net.checkFails = false
-      await vi.advanceTimersByTimeAsync(11_000)
-      expect(net.toCanonical).toEqual([chain[10].id, chain[11].id, chain[12].id])
+      expect(net.toCanonical).toEqual(chain.slice(1).map((e) => e.id))
       expect(localStorage.getItem(keyOf(pk))).toBeNull()
     } finally {
       vi.useRealTimers()
     }
   }, 20_000)
 
-  it('the startup check on a chain longer than the relay\'s 500 to a filter finds none missing when the relay holds them all', async () => {
+  it('a check that ran out of time still drops what it sent back, and marks nothing missing', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] })
+    try {
+      reset(); net.checkFails = true; net.partialOnFail = true; net.countFails = true; net.canonicalOk = true
+      const { store, pub } = await page()
+      const pk = store.useCyberspace.getState().identity.pubkey
+      const chain = chainOf(store, 12)
+      hold(store, chain)
+      net.stored = chain.slice(0, 10)
+      leftInStorage(pk, chain.slice(1), 6 * 3_600_000)
+      pub.startPublisher()
+      await vi.advanceTimersByTimeAsync(5_000)
+      expect(Object.keys(JSON.parse(localStorage.getItem(keyOf(pk)) ?? '{}')).sort()).toEqual([chain[10].id, chain[11].id, chain[12].id].sort())
+      expect(net.toCanonical).toEqual([])
+      expect(store.useCyberspace.getState().canonicalLate).toBe(0)
+    } finally {
+      vi.useRealTimers()
+    }
+  }, 20_000)
+
+  it('an event the relay refuses for good is skipped and counted, and the rest go on; rate-limited ends the pass', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] })
+    try {
+      reset(); net.canonicalOk = true
+      const { store, pub } = await page()
+      const pk = store.useCyberspace.getState().identity.pubkey
+      const chain = chainOf(store, 6)
+      hold(store, chain)
+      net.stored = [chain[0]]
+      net.refuse.set(chain[1].id, 'invalid: not a hop this relay will keep')
+      net.refuse.set(chain[4].id, 'rate-limited: slow down')
+      leftInStorage(pk, chain.slice(1), 6 * 3_600_000)
+      pub.startPublisher()
+      await vi.advanceTimersByTimeAsync(6_500)
+      // 1 refused for good, 2 and 3 taken, 4 rate-limited: 5 and 6 wait for the next pass.
+      expect(net.toCanonical).toEqual([chain[1], chain[2], chain[3], chain[4]].map((e) => e.id))
+      expect(Object.keys(JSON.parse(localStorage.getItem(keyOf(pk)) ?? '{}')).sort()).toEqual([chain[1], chain[4], chain[5], chain[6]].map((e) => e.id).sort())
+      expect(store.useCyberspace.getState().canonicalLate).toBe(4)
+    } finally {
+      vi.useRealTimers()
+    }
+  }, 20_000)
+
+  it('during a long send the strip counts down as they land, not only at the end', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] })
+    try {
+      reset(); net.canonicalOk = true
+      const { store, pub } = await page()
+      const pk = store.useCyberspace.getState().identity.pubkey
+      const chain = chainOf(store, 25)
+      hold(store, chain)
+      leftInStorage(pk, chain.slice(1), 6 * 3_600_000, true)
+      pub.startPublisher()
+      expect(store.useCyberspace.getState().canonicalLate).toBe(25)
+      // The pass starts at 5 s; ten sends, 250 ms apart, are out by 7.25 s.
+      await vi.advanceTimersByTimeAsync(5_000 + 10 * pub.CANONICAL_SEND_GAP_MS + 10)
+      expect(store.useCyberspace.getState().canonicalLate).toBe(15)
+      await vi.advanceTimersByTimeAsync(25 * pub.CANONICAL_SEND_GAP_MS)
+      expect(store.useCyberspace.getState().canonicalLate).toBe(0)
+    } finally {
+      vi.useRealTimers()
+    }
+  }, 20_000)
+
+  it('the startup check on a chain longer than the relay\'s 500 to a filter finds none missing when the relay holds them all, by COUNT alone', async () => {
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] })
     try {
       reset(); net.canonicalOk = true
@@ -309,8 +419,9 @@ describe('actions the canonical relay has not taken', () => {
         recheckNow()
         await vi.advanceTimersByTimeAsync(70_000)
       })
-      // The 700 below the page were asked about by id, and all are there.
-      expect(net.checks).toEqual([500, 200])
+      // The 700 below the page were counted by id, and all are there.
+      expect(net.counts).toEqual([250, 250, 200])
+      expect(net.checks).toEqual([])
       expect(net.toCanonical).toEqual([])
       expect(top).toBe(0)
       expect(localStorage.getItem(keyOf(pk))).toBeNull()

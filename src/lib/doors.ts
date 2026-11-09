@@ -158,3 +158,19 @@ export function roomDoorAt(doors: readonly OwnDoor[], at: Position, plane: numbe
   const here = doors.filter((d) => d.height === height && d.plane === plane && inRoom(d.at, d.height, at))
   return here.find((d) => !d.secret) ?? here[0] ?? null
 }
+
+/**
+ * The room a placement joins on its own (arkinox, 2026-11-09: "id rather
+ * everything I place in the room be added unless I hit the X"): of the doors
+ * whose room holds the point, in its plane, the innermost, which is the lowest
+ * (§3.7.6: a room inside a room is a smaller cube). `fits` says which rooms
+ * may hold this placement at all: a door, only one higher than its own room
+ * (§3.7.1, §3.7.6). Doors of one room are one answer, as roomDoorAt picks it.
+ * Whatever height was chosen does not matter: the placement goes to the room's.
+ */
+export function innermostRoomAt(doors: readonly OwnDoor[], at: Position, plane: number, fits: (d: OwnDoor) => boolean = () => true): OwnDoor | null {
+  const holding = doors.filter((d) => d.plane === plane && inRoom(d.at, d.height, at) && fits(d))
+  if (holding.length === 0) return null
+  const lowest = Math.min(...holding.map((d) => d.height))
+  return roomDoorAt(holding, at, plane, lowest)
+}

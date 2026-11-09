@@ -50,8 +50,8 @@ interface Props {
 export function contains(outer: HeldKey, inner: HeldKey): boolean {
   if (outer.lookupId === inner.lookupId || outer.plane !== inner.plane) return false
   // A corner stored inexact (lib/secrets/base.ts) nests in nothing.
-  const outerBase = baseOf(outer.base)
-  const innerBase = baseOf(inner.base)
+  const outerBase = baseOf(outer.base, outer.heights ?? outer.height)
+  const innerBase = baseOf(inner.base, inner.heights ?? inner.height)
   if (!outerBase || !innerBase) return false
   for (const axis of ['x', 'y', 'z'] as const) {
     const ho = BigInt(outer.heights ? outer.heights[axis] : outer.height)
@@ -113,7 +113,7 @@ export function SecretRegions({ axes }: Props): JSX.Element | null {
     for (const key of Object.values(keys)) {
       if (key.plane !== anchorPlane) continue
       // A corner stored inexact (lib/secrets/base.ts) cannot be drawn: skipped, never thrown in the scene.
-      const base = baseOf(key.base)
+      const base = baseOf(key.base, key.heights ?? key.height)
       if (!base) continue
       const widest = sideOf(key.height)
       // Smaller than the cell you are looking at: there is nothing to see and

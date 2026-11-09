@@ -42,7 +42,7 @@
 
 import { MAX_UNIT, fromPayload, ticksOf, toPayload, type ShardModel } from 'sno-core/shards'
 import { keepOwnTable } from './carried'
-import { turnShard, type Turns } from './turn'
+import { turnDirection, turnShard, type Turns } from './turn'
 import { chosenConstrainOf, withConstrain, type Constrain } from './walkConstrain'
 import chestClosed from './looks/chest.json'
 import chestOpen from './looks/chest-open.json'
@@ -196,7 +196,7 @@ export const DEFAULT_LOOK_ADDRESSES: ReadonlyMap<string, { name: LookName; part:
 )
 
 /** A default model as this client holds it: which it is, and the wrapper that says so on the wire. */
-interface DefaultLook { name: LookName; part: 'closed' | 'open'; wrapper: ShardModel; turned: boolean }
+interface DefaultLook { name: LookName; part: 'closed' | 'open'; wrapper: ShardModel; turned: boolean; turns: Turns }
 const defaultOf = new WeakMap<ShardModel, DefaultLook>()
 
 /** A wrapper placing one model at its origin, at its own size (the FEED wrapper's shape, useShards feedWrapper). */
@@ -222,7 +222,7 @@ export function builtInLook(name: LookName): Look {
   if (name === 'treasure') look.lid = treasureLid(closed)
   for (const part of ['closed', 'open'] as const) {
     const model = look[part]
-    if (model) defaultOf.set(model, { name, part, wrapper: wrapperOf(model, defaultLookAddress(DEFAULT_LOOK_DS[name][part])), turned: false })
+    if (model) defaultOf.set(model, { name, part, wrapper: wrapperOf(model, defaultLookAddress(DEFAULT_LOOK_DS[name][part])), turned: false, turns: [0, 0, 0] })
   }
   cache.set(name, look)
   return look
@@ -317,7 +317,7 @@ function expandDefault(w: ShardModel): ShardModel | null {
       const shaped: ShardModel = { ...turnShard(base, turns), id: w.id, unit, up: w.up, spin: w.spin }
       const chosen = chosenConstrainOf(w)
       out = chosen ? withConstrain(shaped, chosen) : shaped
-      defaultOf.set(out, { name: hit.name, part: hit.part, wrapper: { ...w, unit }, turned: turns.some((t) => t % 4 !== 0) })
+      defaultOf.set(out, { name: hit.name, part: hit.part, wrapper: { ...w, unit }, turned: turns.some((t) => t % 4 !== 0), turns })
     }
   }
   expanded.set(w, out)
@@ -414,6 +414,38 @@ export function lookOf(item: LookSubject): Look | null {
   }
   custom.set(tags, look)
   return look
+}
+
+/**
+ * Which way a look faces, as a turn about Y in its own frame (radians, as
+ * three's rotation.y): the side its lid opens toward and its lock plate is
+ * on. The built-in TREASURE faces +Z (TREASURE_HINGE: the lock plate at the
+ * front, the lid leaning back to -Z), so 0 is +Z. A default model by
+ * reference carries the hide bar's TURN, baked into its points (lib/turn.ts),
+ * and faces where that TURN sent its front: the open look's TURN first, since
+ * the loot floats out of the open chest, else the closed one's. A look with
+ * no notion of a front (an inline model, a MINE or FEED model, whose TURN is
+ * baked in with nothing left to read it from) follows TREASURE's convention
+ * and faces +Z. A TURN that tips the front straight up or down (011, 013,
+ * 031, 033 ...: the chest lying on its back or its face) leaves no side it
+ * faces, and its width, always level then, says the way instead: the facing
+ * that runs the row along the chest's width as turned, so the loot lies
+ * across the chest, not along its height (review of #638); untipped, that is
+ * +Z, as before. What floats out of an opened chest
+ * lines up across this front and faces it (scene/ChestLoot; arkinox,
+ * 2026-11-09: "the chest is opened from the front so the items should be in
+ * a line facing the front of the chest").
+ */
+export function lookFacing(look: Pick<Look, 'closed' | 'open'>): number {
+  const known = (look.open && defaultOf.get(look.open)) || defaultOf.get(look.closed)
+  if (!known) return 0
+  // The TURN turns the points as stored, whose Z is the render frame's negated (TREASURE_HINGE): render +Z is stored -Z, and back.
+  const [x, , z] = turnDirection([0, 0, -1], known.turns)
+  if (x !== 0 || z !== 0) return Math.atan2(x, -z)
+  // The front up or down: the row (ChestLoot's X, turned by the facing to render (cos, -sin)) along the
+  // width (+X, as stored and as rendered) as turned, its render direction (wx, -wz). `+ 0` makes -0 a 0.
+  const [wx, , wz] = turnDirection([1, 0, 0], known.turns)
+  return Math.atan2(wz, wx) + 0
 }
 
 /**

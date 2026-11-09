@@ -196,6 +196,6 @@ describe('the strip when the canonical relay is behind (option B)', () => {
   it('says how many are not on the canonical relay yet, in a few words, once they are late', () => {
     const status = chainStatusOf({ ...quiet, canonicalLate: 2 })
     expect(status).toEqual({ kind: 'canonical', count: 2 })
-    expect(chainStatusLabel(status!, null)).toBe('2 NOT ON THE MAIN RELAY YET')
+    expect(chainStatusLabel(status!, null)).toBe('SYNCING · 2')
   })
 })

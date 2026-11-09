@@ -1,4 +1,5 @@
 import { signerWaiting } from '../lib/authOpen'
+import { flyLanding } from '../lib/viewFly'
 import { chainHolders } from '../lib/chainHolders'
 import { bigintBitLimit, movementCapabilityIssue } from '../lib/proofCapability'
 /**
@@ -951,6 +952,12 @@ export interface CyberspaceState {
    */
   aimView: (position: Position, plane: Plane) => void
   /**
+   * Re-anchor a driven view on `position` when it has left the field's reach,
+   * as a cursor move there would (rideView), with the cursor staying where it
+   * is: VIEW's fly carries the camera on ahead of the cursor (scene/ViewFly.ts).
+   */
+  reanchorView: (position: Position) => void
+  /**
    * Turn what is on screen into a driven view: a spectated avatar or an
    * action of history becomes a free view at that place, the spectation kept
    * and history left. BUILD mode entered from there starts its build cursor
@@ -1097,7 +1104,7 @@ export interface CyberspaceState {
    * and the job starts when the invoice settles. Resolves to the key, or to
    * the reason it did not.
    */
-  buyRegionKey: (at: Position, plane: Plane, height: number, expect?: { lookupId?: string }) => Promise<{ ok: true; result: HosakaRegionKeyResult } | { ok: false; error: string }>
+  buyRegionKey: (at: Position, plane: Plane, height: number, expect?: { lookupId?: string }) => Promise<{ ok: true; result: HosakaRegionKeyResult; job?: { id: string; pollToken: string; apiUrl: string } } | { ok: false; error: string }>
   /**
    * Buy a ride's proof from HOSAKA and sign the hyperjump (onosendai-launch
    * #35 P5; arkinox, 2026-10-11): submit with the ride's idempotency key,
@@ -4969,8 +4976,11 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
   },
 
   moveCursor: (dir) => {
-    const { cursor, scaleExp } = get()
+    const { scaleExp } = get()
     if (!get().canDrive()) return
+    // VIEW's fly not yet landed (lib/viewFly.ts flyLanding): the press steps
+    // from where the view has flown, not from where the cursor still waits.
+    const cursor = flyLanding() ?? get().cursor
     // WALK's cursor is its predicted head, moved only by a step (useWalk).
     if (get().walking) return
     // One cell of the zoom, or one build STEP while a deploy is lined up in
@@ -4980,8 +4990,8 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
     const next: Position = { ...cursor }
     next[dir.axis] = clampAxis(cursor[dir.axis] + step)
 
-    // Clamped against the axis wall: nowhere to go.
-    if (next[dir.axis] === cursor[dir.axis]) return
+    // Clamped against the axis wall: nowhere to go (but to where a fly left the view).
+    if (next[dir.axis] === cursor[dir.axis] && cursor === get().cursor) return
     set({ cursor: next })
     rideView(next)
   },
@@ -5790,6 +5800,8 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
     rideView(next)
   },
 
+  reanchorView: (position) => rideView({ ...position }),
+
   viewHere: () => { if (get().atHead()) get().driveHere(VIEW_FOCUS_LABEL) },
 
   viewing: () => get().focus?.drive === true && get().focus?.label === VIEW_FOCUS_LABEL && get().exploreIndex === null,
@@ -6490,7 +6502,9 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
         })
         return { ok: false, error: wrongKeyMessage(wrong, aside) }
       }
-      return { ok: true, result: r }
+      // The job, so its answer can be read again later without signing (useSecrets HeldKey jobId).
+      // With the HOSAKA it came from: a poll token is only ever sent back there (review of #637).
+      return { ok: true, result: r, job: { id: done.id, pollToken: outcome.record.pollToken, apiUrl: client.apiUrl } }
     } catch (err) {
       if (abort.signal.aborted) { set({ cloud: { ...get().cloud, ...idle } }); return { ok: false, error: 'Cancelled.' } }
       if (id === requestId) set({ cloud: { ...get().cloud, ...idle } })

@@ -720,6 +720,12 @@ export interface HosakaClient {
   submitRide: (previousEventId: string, fromHeight: number, toHeight: number, signal?: AbortSignal) => Promise<HosakaJob>
   /** Reads with the poll token; no signature, so a bunker is never prompted per poll. */
   getJob: (jobId: string, pollToken: string, signal?: AbortSignal) => Promise<HosakaJob>
+  /**
+   * Every job of the signed-in pubkey, with its result (GET /api/v1/jobs,
+   * NIP-98 signed): for reading a finished job again when its poll token was
+   * not kept. Reads only; nothing is bought.
+   */
+  listJobs?: (signal?: AbortSignal) => Promise<{ jobs: HosakaJob[]; count?: number }>
   startJob: (jobId: string, signal?: AbortSignal) => Promise<HosakaJob>
   claimDeposit: (depositId: string, signal?: AbortSignal) => Promise<HosakaDeposit>
   balance: (signal?: AbortSignal) => Promise<HosakaBalance>
@@ -952,6 +958,7 @@ export function createHosaka(opts: HosakaClientOptions): HosakaClient {
     startJob: (jobId, signal) => request<HosakaJob>(`/api/v1/jobs/${jobId}/start`, { method: 'POST', auth: true, signal }),
     claimDeposit,
     balance: (signal) => request<HosakaBalance>('/api/v1/balance', { method: 'GET', auth: true, signal }),
+    listJobs: (signal) => request<{ jobs: HosakaJob[]; count?: number }>('/api/v1/jobs', { method: 'GET', auth: true, signal }),
     deposit: (amountMsats, signal) =>
       request<HosakaDeposit>('/api/v1/deposit', { method: 'POST', auth: true, body: { amount_msats: amountMsats }, signal }),
 

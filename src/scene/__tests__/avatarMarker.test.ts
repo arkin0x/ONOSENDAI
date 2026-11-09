@@ -69,7 +69,7 @@ describe('your own marker against a shard', () => {
 
   it('is the marker Avatar.tsx draws: render order 9.5, no depth test', () => {
     const src = readFileSync(new URL('../Avatar.tsx', import.meta.url), 'utf8')
-    expect(src).toMatch(/<AvatarShape [^>]*renderOrder=\{9\.5\} depthTest=\{false\} firstPerson=\{walking\} \/>/)
+    expect(src).toMatch(/<AvatarShape [^>]*renderOrder=\{9\.5\} depthTest=\{false\} firstPerson=\{walking\} dim=\{dim\} \/>/)
   })
 })
 

@@ -8,7 +8,8 @@
  * rays from the camera to the cursor's cell, its centre and its corners,
  * against the shards' own faces, within PICK_BUDGET_MS. Asked at most every RECOMPUTE_MS, and only
  * when the camera, the cursor, the zoom, the view or the set of shards has
- * changed, a frame after the change so every matrix it reads has been drawn.
+ * changed, or an avatar has moved, a frame after the change so every matrix
+ * it reads has been drawn.
  *
  * A blocking shard is drawn at DIM of its own opacity through ShardMesh's
  * `dim`, see-through as a shard of that opacity is (shardFaces.ts). The dim
@@ -20,7 +21,21 @@
  * shard comes back only after HOLD_MS of not blocking (occluders settleDimmed),
  * so it does not flicker as the cursor steps along an edge.
  *
- * Taps are left as they were: a dimmed shard still takes its own tap.
+ * Taps pass through a dimmed shard (arkinox, 2026-11-09): while it is dimmed
+ * in BUILD or DEPLOY its tap target takes no rays (TapTarget `occluder`,
+ * tapsPassThrough), so a tap reaches whatever is behind it: a shard, a chest,
+ * an item, an avatar, or nothing, which toggles the controls as any empty tap
+ * does. Asked at the tap from the store, never held in React state, so there
+ * is no render to flicker and nothing left over when the Builder closes. Not
+ * dimmed, it takes its taps as before.
+ *
+ * Avatars, yours and everyone else's, dim the same way while they block the
+ * cursor (Avatar, OtherAvatar): the same picker, DIM and fade. They register
+ * only while the Builder is on, since outside it an avatar is never
+ * see-through (ShardMesh `ignoreOpacity`, DECK-0003 §3.3), and as movers,
+ * since one may glide or turn with nothing else changing (useBuildDim
+ * occludersMoved). An avatar drawn as the marker, a cage of lines, never
+ * blocks, as lines never do.
  */
 
 import { useEffect, useLayoutEffect, useRef, useState, type RefObject } from 'react'
@@ -31,7 +46,7 @@ import { cubeAt } from '../lib/buildCursor'
 import { cellPoints, fadeToward, nineVectors, pickWithin, settleDimmed, type OccluderTarget } from '../lib/occluders'
 import { alignedOrigin, useCyberspace } from '../store/useCyberspace'
 import { useBuilder } from '../store/useBuilder'
-import { occluderTargets, occluderVersion, registerOccluder, setDimmed, useBuildDim } from '../store/useBuildDim'
+import { occluderTargets, occludersMoved, occluderVersion, registerOccluder, setDimmed, useBuildDim } from '../store/useBuildDim'
 
 /** The share of its own opacity a blocking shard is drawn at. */
 export const DIM = 0.2
@@ -56,6 +71,17 @@ const EYE_EPSILON = 1e-3
  */
 export function dimsOccluders(builderActive: boolean, walking: boolean): boolean {
   return builderActive && !walking
+}
+
+/**
+ * Whether a tap passes through the target registered under `key` now: it is
+ * dimmed, and the scene dims at all. Read at the tap, from the stores, so a
+ * dimmed set left behind by a Builder that has closed (or a key never
+ * dimmed) takes its taps as ever.
+ */
+export function tapsPassThrough(key: string | undefined): boolean {
+  if (key === undefined || !useBuildDim.getState().dimmed.has(key)) return false
+  return dimsOccluders(useBuilder.getState().active, useCyberspace.getState().walking)
 }
 
 /** This fade step's multiplier, read by `fadeOne`; hoisted, so a frame allocates nothing. */
@@ -97,18 +123,19 @@ export function fadeMaterial(one: Material, k: number): void {
  * A shard that may block the build cursor: registers `group` under `key`
  * while `key` is given, and answers the `dim` to draw it at, fading the
  * materials in between. No key (a shard EDIT is moving, a door mid-ceremony),
- * no dimming at all.
+ * no dimming at all. `moves`: it glides or turns on its own (an avatar), so
+ * the picker watches it move (useBuildDim occludersMoved).
  *
  * Two renders a cycle and no more: one when it starts to block (drawn at DIM,
  * see-through), one when it has faded back to full (drawn opaque again).
  * Whether it blocks is followed by a subscription into a ref, not a selector,
  * so stopping blocking re-renders nothing: the fade back runs on the frame.
  */
-export function useBuildDimmed(key: string | undefined, group: RefObject<Object3D | null>): number {
+export function useBuildDimmed(key: string | undefined, group: RefObject<Object3D | null>, moves = false): number {
   useEffect(() => {
     const g = group.current
-    return key !== undefined && g ? registerOccluder(key, g) : undefined
-  }, [key, group])
+    return key !== undefined && g ? registerOccluder(key, g, moves) : undefined
+  }, [key, group, moves])
   // Drawn at DIM: from when it starts to block until it is back at full.
   const [drawDim, setDrawDim] = useState(false)
   const drawing = useRef(drawDim)
@@ -146,6 +173,21 @@ export function useBuildDimmed(key: string | undefined, group: RefObject<Object3
     if (target === 1 && level.current === 1) setDrawDim(false)
   })
   return dim
+}
+
+/**
+ * An avatar that may block the build cursor: registered as `avatar:<name>`,
+ * a mover, only while the scene dims (the Builder on, not in WALK) and a
+ * name is given, and the `dim` to draw it at. Anywhere else no key, so an
+ * avatar is never see-through outside the Builder (DECK-0003 §3.3). The key
+ * goes to its tap target too, so a dimmed avatar is tapped through.
+ */
+export function useAvatarOccluder(name: string | undefined, drawn: RefObject<Object3D | null>): { occluder: string | undefined; dim: number } {
+  const building = useBuilder((s) => s.active)
+  const walking = useCyberspace((s) => s.walking)
+  const occluder = name !== undefined && dimsOccluders(building, walking) ? `avatar:${name}` : undefined
+  const dim = useBuildDimmed(occluder, drawn, true)
+  return { occluder, dim }
 }
 
 /** When to cast: the frame count, the frame a change was first seen (-1 for none), the last cast and a recheck time. */
@@ -191,7 +233,8 @@ export function BuildOccluders({ axes }: { axes: ViewAxes }): JSX.Element | null
   const last = useRef({ cursor: null as unknown, anchor: null as unknown, scaleExp: NaN, axes: null as unknown, version: -1, targets: [] as OccluderTarget[], next: 0, blocking: new Set<string>() as ReadonlySet<string>, computed: -Infinity, dirtyAt: -1, frames: 0, recheck: Infinity })
 
   useEffect(() => {
-    if (on) return
+    // Unmounted while on: nothing is left dimmed behind it.
+    if (on) return () => setDimmed(new Set())
     seen.current.clear()
     last.current.cursor = null
     last.current.blocking = new Set()
@@ -208,7 +251,9 @@ export function BuildOccluders({ axes }: { axes: ViewAxes }): JSX.Element | null
     eye.setFromMatrixPosition(state.camera.matrixWorld)
     const now = performance.now()
     const version = occluderVersion()
-    const moved = live !== l.cursor || s.anchor !== l.anchor || s.scaleExp !== l.scaleExp || axes !== l.axes || version !== l.version || Number.isNaN(lastEye.x) || eye.distanceToSquared(lastEye) > EYE_EPSILON * EYE_EPSILON
+    // Movers first, so each frame's look at them is taken whatever else moved.
+    const glided = occludersMoved()
+    const moved = glided || live !== l.cursor || s.anchor !== l.anchor || s.scaleExp !== l.scaleExp || axes !== l.axes || version !== l.version || Number.isNaN(lastEye.x) || eye.distanceToSquared(lastEye) > EYE_EPSILON * EYE_EPSILON
     if (moved) {
       l.cursor = live; l.anchor = s.anchor; l.scaleExp = s.scaleExp; l.axes = axes
       lastEye.copy(eye)

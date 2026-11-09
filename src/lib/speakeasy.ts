@@ -17,6 +17,10 @@
  * per frame: a change of coordinate waits DEBOUNCE_MS for the head to settle,
  * and each cell's answer is kept for a while. A failure shows nothing and says
  * nothing.
+ *
+ * Only a coordinate already on the relays is ever sent (publishedHeadHex): the
+ * head of the published part of your chain, and only while LIVE. A move kept
+ * on this device, held, or waiting to go out is never told to anyone.
  */
 
 import { DEFAULT_RELAY, normalizeRelay } from '../store/useRelays'
@@ -25,9 +29,9 @@ import { DEFAULT_RELAY, normalizeRelay } from '../store/useRelays'
 export interface Speakeasy {
   /** The region, normalized: 1 to 64 lowercase hex, a prefix of the coordinate asked. */
   region: string
-  /** The name bought for it, or null. */
+  /** The name bought for it (ruling D3's form), or null. */
   name: string | null
-  /** The relay address, wss:// on the relay's own host. */
+  /** The relay address: exactly wss://<relay host>/<region>. */
   url: string
   created_at: number
 }
@@ -46,11 +50,30 @@ export const DEBOUNCE_MS = 2000
 export const ANSWER_TTL_MS = 10 * 60_000
 /** How long a failed ask counts as "none here" before the cell is asked again. */
 export const FAILURE_TTL_MS = 60_000
+/** How long one ask may take before it counts as a failure, so a hung answer cannot hold a cell. */
+export const FETCH_TIMEOUT_MS = 10_000
 /** Cells kept at once; the oldest goes first. */
 const MAX_CELLS = 64
 
 const COORD = /^[0-9a-f]{64}$/
 const REGION = /^[0-9a-f]{1,64}$/
+/** A speakeasy name (ruling D3): lowercase letters, digits and dashes, 3 to 40. */
+const NAME = /^[a-z0-9-]{3,40}$/
+
+/**
+ * The head of the published part of a chain: the last action of the longest
+ * run from the spawn whose every event the relays took (published 'ok'). Its
+ * coordHex is the identity's position, never a place inside a game (events.ts
+ * ActionEvent). Null when nothing is published yet.
+ */
+export function publishedHeadHex(chain: ReadonlyArray<{ id: string; coordHex: string }>, published: Readonly<Record<string, string>>): string | null {
+  let head: string | null = null
+  for (const a of chain) {
+    if (published[a.id] !== 'ok') break
+    head = a.coordHex
+  }
+  return head
+}
 
 /** The relay's web address, from DEFAULT_RELAY: wss://host becomes https://host. */
 export function speakeasyBase(relay: string = DEFAULT_RELAY): string {
@@ -80,40 +103,57 @@ export function inRegion(s: Speakeasy, coord: string): boolean {
 
 /**
  * The relay's answer, read strictly: null when it is not the contract's shape
- * at all, else the entries that hold up, longest region first. An entry is
- * dropped when its region is not hex, is not a prefix of `coord`, or its url
- * is not a wss:// address on the relay's own host (`base`): a press of ADD
- * RELAY adds exactly that url, so it must be the relay's.
+ * at all, else the entries that hold up, longest region first, one per url.
+ * An entry is dropped when its region is not hex, is not a prefix of `coord`,
+ * or its url is not exactly wss://<relay host>/<region>: a press of ADD RELAY
+ * adds that url, and the relay always lists public_url/<region> (a /<name>
+ * path answers a websocket with a redirect, and a bare host is the default
+ * relay). A name not in ruling D3's form is shown as the short region.
  */
 export function parseSpeakeasies(body: unknown, coord: string, base: string = speakeasyBase()): Speakeasy[] | null {
   if (!body || typeof body !== 'object' || !Array.isArray((body as { speakeasies?: unknown }).speakeasies)) return null
-  let host: string
-  try { host = new URL(base).host } catch { return null }
+  let origin: string
+  try {
+    const u = new URL(base)
+    origin = `${u.protocol === 'http:' ? 'ws:' : 'wss:'}//${u.host}`
+  } catch { return null }
   const out: Speakeasy[] = []
+  const seen = new Set<string>()
   for (const raw of (body as { speakeasies: unknown[] }).speakeasies) {
     if (!raw || typeof raw !== 'object') continue
     const e = raw as Record<string, unknown>
     if (typeof e.region !== 'string' || !REGION.test(e.region) || !coord.startsWith(e.region)) continue
     if (e.name !== null && e.name !== undefined && typeof e.name !== 'string') continue
     if (typeof e.created_at !== 'number' || !Number.isFinite(e.created_at)) continue
-    if (typeof e.url !== 'string' || !/^wss:\/\//i.test(e.url)) continue
+    if (typeof e.url !== 'string') continue
     const url = normalizeRelay(e.url)
-    if (!url) continue
-    try { if (new URL(url).host !== host) continue } catch { continue }
-    const name = typeof e.name === 'string' && e.name.trim() ? e.name.trim() : null
+    if (url !== `${origin}/${e.region}` || seen.has(url)) continue
+    seen.add(url)
+    const name = typeof e.name === 'string' && NAME.test(e.name) ? e.name : null
     out.push({ region: e.region, name, url, created_at: e.created_at })
   }
   return out.sort((a, b) => b.region.length - a.region.length)
 }
 
-/** Ask the relay about one coordinate. Null on any failure: no answer, a 400, a bad payload. */
-export async function fetchSpeakeasies(coord: string, fetchFn: typeof fetch, base: string = speakeasyBase(), signal?: AbortSignal): Promise<Speakeasy[] | null> {
-  try {
-    const res = await fetchFn(lookupUrl(coord, base), { headers: { accept: 'application/json' }, signal })
+/**
+ * Ask the relay about one coordinate. Null on any failure: no answer, a 400, a
+ * bad payload, or no full answer within FETCH_TIMEOUT_MS. The time limit is
+ * this module's own timer (not AbortSignal.timeout), so it aborts the request
+ * and also gives up on a fetch that ignores the abort.
+ */
+export async function fetchSpeakeasies(coord: string, fetchFn: typeof fetch, base: string = speakeasyBase(), timeoutMs: number = FETCH_TIMEOUT_MS): Promise<Speakeasy[] | null> {
+  const abort = new AbortController()
+  let timer: ReturnType<typeof setTimeout> | undefined
+  const late = new Promise<null>((resolve) => { timer = setTimeout(() => { abort.abort(); resolve(null) }, timeoutMs) })
+  const asked = (async (): Promise<Speakeasy[] | null> => {
+    const res = await fetchFn(lookupUrl(coord, base), { headers: { accept: 'application/json' }, signal: abort.signal })
     if (res.status !== 200) return null
     return parseSpeakeasies(await res.json(), coord, base)
-  } catch {
-    return null
+  })().catch(() => null)
+  try {
+    return await Promise.race([asked, late])
+  } finally {
+    clearTimeout(timer)
   }
 }
 
@@ -130,6 +170,12 @@ export interface SpeakeasyLookup {
   /** The speakeasies the head stands in now, longest region first. */
   current: () => Speakeasy[]
   subscribe: (fn: () => void) => () => void
+  /**
+   * Someone is looking (the panel is open): while any watch is held, a head
+   * that stays put is asked about again when its cell's answer expires.
+   * Returns the release.
+   */
+  watch: () => () => void
 }
 
 const NONE: Speakeasy[] = []
@@ -148,6 +194,8 @@ export function createSpeakeasyLookup(opts: SpeakeasyLookupOptions): SpeakeasyLo
   let coord: string | null = null
   let shown: Speakeasy[] = NONE
   let timer: ReturnType<typeof setTimeout> | null = null
+  let refresh: ReturnType<typeof setTimeout> | null = null
+  let watchers = 0
 
   const show = (list: Speakeasy[]): void => {
     const next = coord ? list.filter((s) => inRegion(s, coord as string)) : NONE
@@ -170,6 +218,15 @@ export function createSpeakeasyLookup(opts: SpeakeasyLookupOptions): SpeakeasyLo
     while (cells.size > MAX_CELLS) cells.delete(cells.keys().next().value as string)
   }
 
+  /** While watched, ask the head's cell again the moment its answer expires. */
+  const plan = (): void => {
+    if (refresh) { clearTimeout(refresh); refresh = null }
+    if (!coord || watchers === 0) return
+    const hit = cells.get(coord.slice(0, CACHE_PREFIX_HEX))
+    if (!hit) return
+    refresh = setTimeout(() => { refresh = null; if (coord && watchers > 0) ask(coord) }, Math.max(0, hit.until - now()))
+  }
+
   const ask = (at: string): void => {
     const cell = at.slice(0, CACHE_PREFIX_HEX)
     if (asking.has(cell) || fresh(cell)) return
@@ -177,7 +234,7 @@ export function createSpeakeasyLookup(opts: SpeakeasyLookupOptions): SpeakeasyLo
     void fetchSpeakeasies(at, opts.fetchFn, base()).then((list) => {
       asking.delete(cell)
       keep(cell, list ?? NONE, list ? ANSWER_TTL_MS : FAILURE_TTL_MS)
-      if (coord && coord.slice(0, CACHE_PREFIX_HEX) === cell) show(list ?? NONE)
+      if (coord && coord.slice(0, CACHE_PREFIX_HEX) === cell) { show(list ?? NONE); plan() }
     })
   }
 
@@ -187,9 +244,10 @@ export function createSpeakeasyLookup(opts: SpeakeasyLookupOptions): SpeakeasyLo
       if (c === coord) return
       coord = c
       if (timer) { clearTimeout(timer); timer = null }
-      if (!c) { show(NONE); return }
+      if (!c) { show(NONE); plan(); return }
       const hit = fresh(c.slice(0, CACHE_PREFIX_HEX))
-      if (hit) { show(hit); return }
+      if (hit) { show(hit); plan(); return }
+      plan()
       // Not asked yet: what was shown stays while it still holds the head.
       show(shown)
       timer = setTimeout(() => { timer = null; if (coord) ask(coord) }, debounceMs)
@@ -198,6 +256,17 @@ export function createSpeakeasyLookup(opts: SpeakeasyLookupOptions): SpeakeasyLo
     subscribe: (fn) => {
       listeners.add(fn)
       return () => { listeners.delete(fn) }
+    },
+    watch: () => {
+      watchers++
+      plan()
+      let held = true
+      return () => {
+        if (!held) return
+        held = false
+        watchers--
+        plan()
+      }
     },
   }
 }

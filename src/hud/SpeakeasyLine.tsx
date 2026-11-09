@@ -8,12 +8,19 @@
  * relays exactly as the Relays panel's ADD does. Once it is in your relays the
  * line says JOINED. A speakeasy asks for NIP-42 AUTH, which the relay layer
  * answers for every relay in the set (lib/relay.ts automaticallyAuth).
+ *
+ * Asked only while LIVE, and only about the head of the published part of
+ * your chain (lib/speakeasy.ts publishedHeadHex): the relay judges the head it
+ * holds, and a move still on this device (LOCAL, held, waiting for the network
+ * or a conflict) is never sent anywhere. While the panel is unfolded, a head
+ * that stays put is asked about again when its answer expires.
  */
 
 import { useSpeakeasies } from '../hooks/useSpeakeasies'
-import { dashboardUrl, speakeasyLabel, type Speakeasy, type SpeakeasyLookup } from '../lib/speakeasy'
+import { dashboardUrl, publishedHeadHex, speakeasyLabel, type Speakeasy, type SpeakeasyLookup } from '../lib/speakeasy'
 import { normalizeRelay, useRelays } from '../store/useRelays'
 import { useCyberspace } from '../store/useCyberspace'
+import { usePanelLayout } from '../store/usePanelLayout'
 
 /** Whether the speakeasy's address is already one of your relays. */
 export function joined(s: Speakeasy, relays: readonly string[]): boolean {
@@ -27,9 +34,10 @@ export function addSpeakeasy(s: Speakeasy): string | null {
 }
 
 export function SpeakeasyLine({ lookup }: { lookup?: SpeakeasyLookup }): JSX.Element | null {
-  // Your chain head, once there is a chain: a speakeasy admits a head on the relay.
-  const coord = useCyberspace((s) => (s.events.length > 0 ? s.coordHex() : null))
-  const here = useSpeakeasies(coord, lookup)
+  // Your published head, and only while LIVE: a string, so the selector is stable.
+  const coord = useCyberspace((s) => (s.live ? publishedHeadHex(s.actions(), s.published) : null))
+  const open = usePanelLayout((s) => s.collapsed.position !== true)
+  const here = useSpeakeasies(coord, open, lookup)
   const relays = useRelays((s) => s.relays)
   if (here.length === 0) return null
   return (

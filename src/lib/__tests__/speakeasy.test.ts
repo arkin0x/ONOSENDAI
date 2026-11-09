@@ -12,11 +12,13 @@ import {
   CACHE_PREFIX_HEX,
   DEBOUNCE_MS,
   FAILURE_TTL_MS,
+  FETCH_TIMEOUT_MS,
   createSpeakeasyLookup,
   dashboardUrl,
   fetchSpeakeasies,
   lookupUrl,
   parseSpeakeasies,
+  publishedHeadHex,
   speakeasyBase,
   speakeasyLabel,
 } from '../speakeasy'
@@ -30,8 +32,9 @@ const A_SAME_CELL = A.slice(0, 63) + 'b'
 const B = A.slice(0, 30) + 'f' + A.slice(31)
 const REGION = '0fe6b3deeb67e952f852e8c1df15'
 
-function entry(region: string, name: string | null = null, path = region): Record<string, unknown> {
-  return { region, name, url: `wss://relay.onosendai.tech/${path}`, created_at: 1762300000 }
+/** An entry as the relay lists one: its url is always public_url/<region>, named or not. */
+function entry(region: string, name: string | null = null): Record<string, unknown> {
+  return { region, name, url: `wss://relay.onosendai.tech/${region}`, created_at: 1762300000 }
 }
 
 function answering(body: unknown, status = 200): ReturnType<typeof vi.fn> {
@@ -59,9 +62,9 @@ describe('the relay base and the URLs', () => {
 
 describe('reading the answer', () => {
   it('reads the contract, longest region first', () => {
-    const got = parseSpeakeasies({ speakeasies: [entry('0f'), entry(REGION, 'fiatjafs-speakeasy', 'fiatjafs-speakeasy'), entry('0fe6')] }, A, BASE)
+    const got = parseSpeakeasies({ speakeasies: [entry('0f'), entry(REGION, 'fiatjafs-speakeasy'), entry('0fe6')] }, A, BASE)
     expect(got?.map((s) => s.region)).toEqual([REGION, '0fe6', '0f'])
-    expect(got?.[0]).toEqual({ region: REGION, name: 'fiatjafs-speakeasy', url: 'wss://relay.onosendai.tech/fiatjafs-speakeasy', created_at: 1762300000 })
+    expect(got?.[0]).toEqual({ region: REGION, name: 'fiatjafs-speakeasy', url: `wss://relay.onosendai.tech/${REGION}`, created_at: 1762300000 })
   })
 
   it('takes an empty list as none here', () => {
@@ -91,6 +94,35 @@ describe('reading the answer', () => {
     expect(got?.map((s) => s.region)).toEqual([REGION])
   })
 
+  it('takes only the url wss://<relay host>/<region>: not a name path, not the bare host, not another path', () => {
+    const got = parseSpeakeasies({
+      speakeasies: [
+        { ...entry(REGION, 'fiatjafs-speakeasy'), url: 'wss://relay.onosendai.tech/fiatjafs-speakeasy' }, // a name path: a redirect for a websocket
+        { ...entry('0fe6'), url: 'wss://relay.onosendai.tech' }, // the bare host: the default relay
+        { ...entry('0fe6'), url: 'wss://relay.onosendai.tech/' },
+        { ...entry('0f'), url: 'wss://relay.onosendai.tech/0fe6' }, // another region's path
+        { ...entry('0f'), url: 'ws://relay.onosendai.tech/0f' }, // not wss
+        { ...entry('0f'), url: 'wss://relay.onosendai.tech/0f/x' },
+      ],
+    }, A, BASE)
+    expect(got).toEqual([])
+    // Written a little differently, the same address is still taken, in its normal form.
+    expect(parseSpeakeasies({ speakeasies: [{ ...entry('0fe6'), url: 'WSS://Relay.Onosendai.Tech/0fe6/' }] }, A, BASE)?.map((s) => s.url)).toEqual(['wss://relay.onosendai.tech/0fe6'])
+  })
+
+  it('shows a name only in ruling D3\'s form, else the short region', () => {
+    const names = ['fiatjafs-speakeasy', 'ab', 'x'.repeat(41), 'Fiatjaf', 'has space', 'émoji', 'a'.repeat(40), 'abc']
+    const got = names.map((name) => parseSpeakeasies({ speakeasies: [entry(REGION, name)] }, A, BASE)?.[0]?.name)
+    expect(got).toEqual(['fiatjafs-speakeasy', null, null, null, null, null, 'a'.repeat(40), 'abc'])
+    const plain = parseSpeakeasies({ speakeasies: [entry(REGION, 'Bad Name')] }, A, BASE)?.[0]
+    expect(plain && speakeasyLabel(plain)).toBe('0fe6b3…df15')
+  })
+
+  it('lists each url once', () => {
+    const got = parseSpeakeasies({ speakeasies: [entry(REGION, 'first-one'), entry(REGION, 'second-one'), entry('0f')] }, A, BASE)
+    expect(got?.map((s) => [s.region, s.name])).toEqual([[REGION, 'first-one'], ['0f', null]])
+  })
+
   it('answers null for a 400, a 500, bad JSON, a bad payload and a failed fetch', async () => {
     expect(await fetchSpeakeasies(A, answering({ error: 'bad coord' }, 400) as unknown as typeof fetch, BASE)).toBeNull()
     expect(await fetchSpeakeasies(A, answering({}, 500) as unknown as typeof fetch, BASE)).toBeNull()
@@ -103,6 +135,52 @@ describe('reading the answer', () => {
     const fetchFn = answering({ speakeasies: [entry(REGION)] })
     expect(await fetchSpeakeasies(A, fetchFn as unknown as typeof fetch, BASE)).toHaveLength(1)
     expect(fetchFn).toHaveBeenCalledWith(`${BASE}/.well-known/cyberspace-speakeasies?coord=${A}`, expect.anything())
+  })
+})
+
+describe('the head that is asked about', () => {
+  const chain = [{ id: 's', coordHex: 'c0' }, { id: 'h1', coordHex: 'c1' }, { id: 'h2', coordHex: 'c2' }]
+
+  it('is the last action of the published run from the spawn', () => {
+    expect(publishedHeadHex(chain, { s: 'ok', h1: 'ok', h2: 'ok' })).toBe('c2')
+    expect(publishedHeadHex(chain, { s: 'ok', h1: 'ok', h2: 'sending' })).toBe('c1')
+    expect(publishedHeadHex(chain, { s: 'ok', h1: 'ok' })).toBe('c1')
+  })
+
+  it('stops at the first event not on the relays, whatever comes after it', () => {
+    expect(publishedHeadHex(chain, { s: 'ok', h1: 'queued', h2: 'ok' })).toBe('c0')
+  })
+
+  it('is nothing when nothing is published', () => {
+    expect(publishedHeadHex(chain, {})).toBeNull()
+    expect(publishedHeadHex([], {})).toBeNull()
+  })
+})
+
+describe('a hung answer', () => {
+  beforeEach(() => { vi.useFakeTimers() })
+  afterEach(() => { vi.useRealTimers() })
+
+  it('is aborted and given up on after FETCH_TIMEOUT_MS', async () => {
+    let signal: AbortSignal | undefined
+    const fetchFn = vi.fn((_url: string, init?: RequestInit) => { signal = init?.signal ?? undefined; return new Promise<Response>(() => undefined) })
+    const got = fetchSpeakeasies(A, fetchFn as unknown as typeof fetch, BASE)
+    await vi.advanceTimersByTimeAsync(FETCH_TIMEOUT_MS)
+    expect(await got).toBeNull()
+    expect(signal?.aborted).toBe(true)
+  })
+
+  it('does not hold its cell: the lookup counts it a failure and asks again later', async () => {
+    const fetchFn = vi.fn(() => new Promise<Response>(() => undefined))
+    const lookup = createSpeakeasyLookup({ fetchFn: fetchFn as unknown as typeof fetch, base: BASE })
+    lookup.update(A)
+    await vi.advanceTimersByTimeAsync(DEBOUNCE_MS + FETCH_TIMEOUT_MS)
+    expect(lookup.current()).toEqual([])
+    lookup.update(B)
+    await vi.advanceTimersByTimeAsync(FAILURE_TTL_MS)
+    lookup.update(A)
+    await vi.advanceTimersByTimeAsync(DEBOUNCE_MS)
+    expect(fetchFn.mock.calls.filter((c) => String((c as unknown[])[0]).includes(`coord=${A}`))).toHaveLength(2)
   })
 })
 
@@ -257,5 +335,53 @@ describe('the lookup: debounced, cached per cell', () => {
     lookup.update(A)
     expect(lookup.current()).toHaveLength(1)
     expect(fetchFn).toHaveBeenCalledTimes(1)
+  })
+  it('a head that stays put is asked again when its answer expires, while watched', async () => {
+    const fetchFn = answering({ speakeasies: [] })
+    const lookup = make(fetchFn)
+    const release = lookup.watch()
+    lookup.update(A)
+    await vi.advanceTimersByTimeAsync(DEBOUNCE_MS)
+    expect(fetchFn).toHaveBeenCalledTimes(1)
+    await vi.advanceTimersByTimeAsync(ANSWER_TTL_MS - 1)
+    expect(fetchFn).toHaveBeenCalledTimes(1)
+    await vi.advanceTimersByTimeAsync(1)
+    expect(fetchFn).toHaveBeenCalledTimes(2)
+    await vi.advanceTimersByTimeAsync(ANSWER_TTL_MS)
+    expect(fetchFn).toHaveBeenCalledTimes(3)
+    release()
+    await vi.advanceTimersByTimeAsync(ANSWER_TTL_MS * 3)
+    expect(fetchFn).toHaveBeenCalledTimes(3)
+  })
+
+  it('nobody watching: a head that stays put asks nothing more', async () => {
+    const fetchFn = answering({ speakeasies: [] })
+    const lookup = make(fetchFn)
+    lookup.update(A)
+    await vi.advanceTimersByTimeAsync(DEBOUNCE_MS + ANSWER_TTL_MS * 3)
+    expect(fetchFn).toHaveBeenCalledTimes(1)
+  })
+
+  it('a watch with no head asks nothing, and a head gone stops the refresh', async () => {
+    const fetchFn = answering({ speakeasies: [] })
+    const lookup = make(fetchFn)
+    lookup.watch()
+    await vi.advanceTimersByTimeAsync(ANSWER_TTL_MS)
+    expect(fetchFn).not.toHaveBeenCalled()
+    lookup.update(A)
+    await vi.advanceTimersByTimeAsync(DEBOUNCE_MS)
+    lookup.update(null)
+    await vi.advanceTimersByTimeAsync(ANSWER_TTL_MS * 2)
+    expect(fetchFn).toHaveBeenCalledTimes(1)
+  })
+
+  it('watching again after the answer expired asks at once', async () => {
+    const fetchFn = answering({ speakeasies: [] })
+    const lookup = make(fetchFn)
+    lookup.update(A)
+    await vi.advanceTimersByTimeAsync(DEBOUNCE_MS + ANSWER_TTL_MS)
+    lookup.watch()
+    await vi.advanceTimersByTimeAsync(0)
+    expect(fetchFn).toHaveBeenCalledTimes(2)
   })
 })

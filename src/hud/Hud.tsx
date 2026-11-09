@@ -221,9 +221,9 @@ export function PositionPanel(): JSX.Element {
         Where your avatar stands: its X, Y and Z, the sector they fall in, and
         the coordinate of your chain head. Tap any figure to copy it. LINK
         copies a link that opens ONOSENDAI looking at your avatar. To look
-        somewhere else without moving, use the View panel. SPEAKEASY shows up
-        when your chain head is inside one: a private relay for that region.
-        ADD RELAY adds it to your relays.
+        somewhere else without moving, use the View panel. While LIVE,
+        SPEAKEASY shows up when your chain head is inside one: a private relay
+        for that region. ADD RELAY adds it to your relays.
       </Explanation>
     </section>
   )

@@ -36,7 +36,7 @@ vi.mock('../../lib/relay', () => {
 import { forgeKey } from '../../lib/chests'
 import { hexToBytes } from '../../lib/events'
 import { HIDDEN_KIND, bagEntries, chestItemOf, type Hidden, type KeyItem } from '../../lib/hidden'
-import { doorSecretWithKey } from '../../lib/doors'
+import { doorSecretWithKey, roomOf } from '../../lib/doors'
 import type { Position } from '../../lib/space'
 import { deployPoint } from '../../lib/space'
 import { buildStepOf } from '../../lib/buildCursor'
@@ -96,7 +96,7 @@ beforeEach(() => {
   resetDoorSecrets()
   resetOpenedChests()
   resetClosedDoors()
-  useShards.setState({ mine: [], deleted: {}, deletedBags: {}, discovered: {}, pending: null, chestBack: null, deployHeight: 0, deployUnit: 0, deployTurn: [0, 0, 0], deployStatus: 'idle', deployError: null, selectedSecret: null, deployLeaveOut: null, deployInto: null, deployDoorHeight: null, placedLast: null })
+  useShards.setState({ mine: [], deleted: {}, deletedBags: {}, discovered: {}, pending: null, chestBack: null, deployHeight: 0, deployUnit: 0, deployTurn: [0, 0, 0], deployStatus: 'idle', deployError: null, selectedSecret: null, deployLeaveOut: [], deployRoomSnap: null, deployInto: null, deployDoorHeight: null, placedLast: null })
   useBuilder.getState().exit()
   useStash.getState().close()
   useInventory.setState({ owner: me(), items: {}, storage: 'memory' })
@@ -148,11 +148,67 @@ describe('heights never compete (4.5)', () => {
     expect(sealingDoor(S(), me(), at, inner.plane, INNER - 1)).toBeNull()
     S().cancelDeploy()
     expect((await hide('inner one', INNER)).room).toEqual({ doorId: inner.eventId })
-    expect((await hide('outer one', OUTER)).room).toEqual({ doorId: outer.eventId })
-    // Inside the outer cube, outside the inner: no door at the inner's height here.
+    // In both cubes, whatever height was chosen: the innermost room, at its height (arkinox, 2026-11-09).
+    const chosenOuter = await hide('outer one', OUTER)
+    expect(chosenOuter.room).toEqual({ doorId: inner.eventId })
+    expect(chosenOuter.height).toBe(INNER)
+    // Inside the outer cube, outside the inner: the outer room, at its height.
     goTo({ ...CURSOR, x: CURSOR.x + (1n << BigInt(INNER)) })
-    expect((await hide('beside it', INNER)).room).toBeUndefined()
+    const beside = await hide('beside it', INNER)
+    expect(beside.room).toEqual({ doorId: outer.eventId })
+    expect(beside.height).toBe(OUTER)
     expect((await hide('in the outer', OUTER)).room).toEqual({ doorId: outer.eventId })
+  })
+
+  it('the X leaves out one room at a time, the innermost first; out of both, the height chosen', async () => {
+    const outer = await sealDoor('Outer', OUTER)
+    const inner = await sealDoor('Inner', OUTER, INNER)
+    S().startDeployMessage('peeled')
+    S().setDeployHeight(2)
+    expect(S().deployHeight).toBe(INNER)
+    const at = deployPoint(CURSOR, buildStepOf(C()), S().deployHeight)
+    expect(sealingDoor(S(), me(), at, inner.plane, S().deployHeight)?.name).toBe('Inner')
+    S().setDeployLeaveOut(roomOf(positionOf(inner), inner.plane, INNER))
+    expect(S().deployHeight).toBe(OUTER)
+    expect(sealingDoor(S(), me(), deployPoint(CURSOR, buildStepOf(C()), OUTER), inner.plane, OUTER)?.name).toBe('Outer')
+    S().setDeployLeaveOut(roomOf(positionOf(outer), outer.plane, OUTER))
+    expect(S().deployHeight).toBe(2)
+    expect(S().deployRoomSnap).toBeNull()
+    await S().deploy()
+    expect(S().deployError).toBeNull()
+    const left = textRow('peeled')
+    expect(left.room).toBeUndefined()
+    expect(left.height).toBe(2)
+    S().cancelDeploy()
+  })
+
+  it('a door joins only a room higher than its own (§3.7.6): the innermost that is; in none, left out at the height chosen', async () => {
+    const outer = await sealDoor('Outer', OUTER)
+    const inner = await sealDoor('Inner', OUTER, INNER)
+    // Its own room as high as the inner one: not inside it. The outer one takes it.
+    S().startPlaceDoor()
+    S().setDeployHeight(INNER)
+    expect(S().deployHeight).toBe(OUTER)
+    expect(S().deployRoomSnap?.chosen).toBe(INNER)
+    S().cancelDeploy()
+    // Lower than the inner one: the inner one takes it, its own room what was chosen.
+    S().startPlaceDoor()
+    S().setDeployHeight(INNER - 1)
+    expect(S().deployHeight).toBe(INNER)
+    S().placeChest()
+    await S().sealPlacedChest({ name: 'Deepest', lock: lockOf(), requires: 'x', contents: [] })
+    expect(S().deployError).toBeNull()
+    const deepest = named('Deepest')
+    expect(deepest.room).toEqual({ doorId: inner.eventId })
+    expect(deepest.height).toBe(INNER)
+    expect(deepest.chest?.door).toBe(INNER - 1)
+    // As high as the outer one, or higher: no room holds it, and it stays where it was chosen.
+    S().startPlaceDoor()
+    S().setDeployHeight(OUTER + 1)
+    expect(S().deployHeight).toBe(OUTER + 1)
+    expect(S().deployRoomSnap).toBeNull()
+    S().cancelDeploy()
+    expect(outer.room).toBeUndefined()
   })
 })
 
@@ -259,7 +315,14 @@ describe('the red cube’s lines (4.4, R6)', () => {
     expect(roomLines(3)[0]).toBe(1)
     expect(roomLines(3)[1]).toBeLessThan(1)
     // A room's outline is as deep as the deepest of its doors: a second door of B's room, at the top level.
-    const sibling = await sealDoor('B too', OUTER)
+    // Left out of A with the X, so it stands at the top level.
+    S().startPlaceDoor()
+    S().setDeployHeight(OUTER)
+    S().setDeployLeaveOut(roomOf(positionOf(a), a.plane, 8))
+    S().placeChest()
+    await S().sealPlacedChest({ name: 'B too', lock: lockOf(), requires: 'x', contents: [] })
+    expect(S().deployError).toBeNull()
+    const sibling = named('B too')
     expect(sibling.chest?.door).toBe(OUTER)
     expect(doorDepth(S().mine, sibling)).toBe(1)
     // Whichever of the room's rows comes first.
@@ -314,7 +377,10 @@ describe('MOVE, DELETE and EDIT with a door behind a door', () => {
     const outer = await sealDoor('Outer', OUTER)
     const inner = await sealDoor('Inner', OUTER, INNER)
     const deep = await hide('deep inside', INNER)
+    // In the outer room, outside the inner one's cube.
+    goTo({ ...CURSOR, x: CURSOR.x + (1n << BigInt(INNER)) })
     await hide('outer thing', OUTER)
+    goTo(CURSOR)
     expect(behindDoorDeep(S().mine, outer)).toHaveLength(3)
     expect(behindDoor(S().mine, outer)).toHaveLength(2)
     const outerRoom = behindDoor(S().mine, outer)[0].lookupId
@@ -374,7 +440,9 @@ describe('CLOSE on a door of yours (arkinox, 2026-11-01)', () => {
   it('what you hid in its room leaves the world with it, the inner room too; OPEN brings the outer back, the inner stays closed', async () => {
     const outer = await sealDoor('Outer', OUTER)
     const inner = await sealDoor('Inner', OUTER, INNER)
+    goTo({ ...CURSOR, x: CURSOR.x + (1n << BigInt(INNER)) })
     await hide('outer thing', OUTER)
+    goTo(CURSOR)
     await hide('deep inside', INNER)
     expect(texts()).toEqual(['deep inside', 'outer thing'])
     // Opened by hand here, as any finder opens it: its card then offers CLOSE.

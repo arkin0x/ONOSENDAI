@@ -2,8 +2,10 @@
  * DoorOwner.tsx: what a door's card shows the one who sealed it (chest and
  * door design, 4.7, 4.8, 4.11, R3, R12).
  *
- * `BEHIND IT · 7`, and `HERE · 3`: what you already hid in its room at its
- * height, with SEAL on each and SEAL ALL (R3). DELETE's card is the folder
+ * `BEHIND IT · 7`, and `HERE · 3`: what you already hid in its room, at any
+ * height, with SEAL on each and SEAL ALL (R3). The list scrolls, never cut
+ * short; a row's name flies to it, and RETURN reopens this card on the same
+ * door, scrolled as it was (lib/doorReturn.ts). DELETE's card is the folder
  * delete's pattern (R12): one switch, off leaves what was behind it where it
  * stands, as ordinary placements; on deletes it too, with a count, and the
  * button turns red. The switch is not offered without the door secret, which
@@ -11,10 +13,11 @@
  * several doors, which goes alone (§3.7.8).
  */
 
-import { useState } from 'react'
+import { useLayoutEffect, useRef, useState } from 'react'
 import { doorSecret } from '../store/doorSecrets'
 import { useCyberspace } from '../store/useCyberspace'
-import { behindDoor, behindDoorDeep, doorsBeside, hereInRoom, useShards, type MyDeployment } from '../store/useShards'
+import { behindDoor, behindDoorDeep, doorsBeside, hereInRoom, positionOf, useShards, type MyDeployment } from '../store/useShards'
+import { takeDoorScroll, viewFromDoor } from '../lib/doorReturn'
 import { hiddenLabel } from '../lib/hidden'
 import { ConfirmModal } from './ConfirmModal'
 import { ItemIcon } from './ItemIcon'
@@ -35,12 +38,33 @@ export function deleteDoorWords(behind: number, alone: boolean, contents: boolea
     : { title, lines: ['What was behind it stays where it stands, unsealed: anyone at the place can find it.'], confirmLabel: 'DELETE DOOR', danger: false }
 }
 
+/** The card a door's list scrolls inside, whose own scroll RETURN puts back too. None where there is no page (a test's renderer). */
+function cardOf(list: HTMLElement | null): Element | null {
+  return typeof list?.closest === 'function' ? list.closest('.modal__card') : null
+}
+
 /** BEHIND IT and HERE, on a door of yours. */
 export function DoorOwnerBlock({ door }: { door: MyDeployment }): JSX.Element | null {
   const me = useCyberspace((s) => s.identity.pubkey)
   const mine = useShards((s) => s.mine)
   const [busy, setBusy] = useState(false)
   const [status, setStatus] = useState<string | null>(null)
+  const list = useRef<HTMLUListElement>(null)
+  // Back from a row's VIEW: the list, and the card around it, scrolled as they were.
+  // Again a frame on, once the card above it has drawn (its 3D look).
+  useLayoutEffect(() => {
+    const back = takeDoorScroll(door.eventId)
+    if (!back) return
+    const put = (): void => {
+      if (list.current) list.current.scrollTop = back.listTop
+      const card = cardOf(list.current)
+      if (card) card.scrollTop = back.cardTop
+    }
+    put()
+    if (typeof requestAnimationFrame !== 'function') return
+    const frame = requestAnimationFrame(put)
+    return () => cancelAnimationFrame(frame)
+  }, [door.eventId])
   if (!doorSecret(me, door.eventId)) return null
   const behind = behindDoor(mine, door)
   const here = hereInRoom(mine, door)
@@ -48,22 +72,29 @@ export function DoorOwnerBlock({ door }: { door: MyDeployment }): JSX.Element | 
     setBusy(true); setStatus(null)
     void useShards.getState().sealIntoRoom(door.eventId, ids).then((why) => { setBusy(false); setStatus(why) })
   }
+  const view = (d: MyDeployment): void => {
+    const card = cardOf(list.current)
+    viewFromDoor({ doorId: door.eventId, listTop: list.current?.scrollTop ?? 0, cardTop: card?.scrollTop ?? 0 }, positionOf(d), d.plane, hiddenLabel(d, 48).toUpperCase(), d.type === 'shard' ? d.shard?.unit ?? 0 : 0)
+  }
   return (
     <div className="doorowner">
       <span className="legend__label doorowner__count">BEHIND IT · {behind.length}</span>
       {here.length > 0 && (
         <>
           <span className="legend__label doorowner__count">HERE · {here.length}</span>
-          <ul className="chest__contents">
+          <ul ref={list} className="chest__contents doorowner__here" aria-label="Here, not behind the door">
             {here.map((d) => (
               <li key={d.eventId} className="chest__row">
                 <ItemIcon className={`chest__glyph chest__glyph--${d.type}`} type={d.type} />
-                <span className="item__line"><span className="item__name" title={hiddenLabel(d, 48)}>{hiddenLabel(d, 48)}</span></span>
+                <button className="doorowner__view" onClick={() => view(d)} title="Fly to it">
+                  <span className="item__name">{hiddenLabel(d, 48)}</span>
+                  <span className="doorowner__height">H{d.height}</span>
+                </button>
                 <button className="chest__act chest__act--take" disabled={busy} onClick={() => seal([d.eventId])} title="Seal it behind this door">SEAL</button>
               </li>
             ))}
-            <li className="chest__all"><button className="chest__act chest__act--take" disabled={busy} onClick={() => seal(here.map((d) => d.eventId))} title="Seal everything here behind this door">SEAL ALL</button></li>
           </ul>
+          <div className="chest__all"><button className="chest__act chest__act--take" disabled={busy} onClick={() => seal(here.map((d) => d.eventId))} title="Seal everything here behind this door">SEAL ALL</button></div>
         </>
       )}
       {status && <span className="chest__status" role="status">{status}</span>}

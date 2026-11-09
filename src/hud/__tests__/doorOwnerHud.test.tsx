@@ -135,9 +135,11 @@ describe('the door’s card', () => {
     useShards.setState({ mine: [d, behind, here, higher] })
     const html = render(<DoorOwnerBlock door={d} />)
     expect(html).toContain('BEHIND IT · 1')
-    expect(html).toContain('HERE · 1')
+    // Every height (arkinox, 2026-11-09): what stands higher is listed too, with its height.
+    expect(html).toContain('HERE · 2')
     expect(html).toContain('out here')
-    expect(html).not.toContain('higher')
+    expect(html).toContain('higher')
+    expect(html).toContain('H5')
     expect(html).toContain('>SEAL<')
     expect(html).toContain('>SEAL ALL<')
   })

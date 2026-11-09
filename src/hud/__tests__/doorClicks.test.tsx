@@ -86,7 +86,7 @@ beforeEach(() => {
   localStorage.removeItem('onosendai:chests-opened')
   resetDoorSecrets()
   resetOpenedChests()
-  useShards.setState({ mine: [], deleted: {}, deletedBags: {}, discovered: {}, pending: null, deployHeight: 0, deployUnit: 0, deployTurn: [0, 0, 0], deployStatus: 'idle', deployError: null, selectedSecret: null, deployLeaveOut: null, deployInto: null, placedLast: null })
+  useShards.setState({ mine: [], deleted: {}, deletedBags: {}, discovered: {}, pending: null, deployHeight: 0, deployUnit: 0, deployTurn: [0, 0, 0], deployStatus: 'idle', deployError: null, selectedSecret: null, deployLeaveOut: [], deployRoomSnap: null, deployInto: null, placedLast: null })
   useBuilder.getState().exit()
   useStash.getState().close()
   useInventory.setState({ owner: me(), items: {}, storage: 'memory' })
@@ -167,11 +167,11 @@ describe('the chip while a door moves', () => {
     expect(moving.says('×')).toBe(false)
     await moving.unmount()
     S().cancelDeploy()
-    // The same chip on anything else still has its X.
+    // The same chip on anything else still has its X. In both cubes, the innermost room takes it, whatever height.
     S().startDeployMessage('not a door')
     S().setDeployHeight(HEIGHT)
     const other = await mount(<DeployBar />)
-    expect(other.says('North Door')).toBe(true)
+    expect(other.says('Inner Door')).toBe(true)
     expect(other.says('×')).toBe(true)
     await other.unmount()
   })

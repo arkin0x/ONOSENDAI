@@ -101,7 +101,7 @@ import { useInventory } from './useInventory'
 import { useShardFolders } from './useShardFolders'
 import { creditOf, useWorkshop } from './useWorkshop'
 import { deletionFilters, isDeleted, type Credit, type FeedObject } from 'sno-core/feed'
-import { ROOM_BAG_SETTINGS, inRoom, newDoorSecret, roomDoorAt, roomEntries, roomKey, roomLookupId, roomOf, type OwnDoor } from '../lib/doors'
+import { ROOM_BAG_SETTINGS, inRoom, innermostRoomAt, newDoorSecret, roomDoorAt, roomEntries, roomKey, roomLookupId, roomOf, type OwnDoor } from '../lib/doors'
 import { commitDoorSecret, doorSecret, keepDoorSecret } from './doorSecrets'
 import { entriesIn, isListed, noteStored, onHiddenChange, reloadLocalView, saveRows, UNCLAIMED } from './hiddenStorage'
 import { builtInLook, builtInLookTags, doorHeightOf, isDoor, keptInChest, lookOf, lookTags, lookTagsOf, posedLook, posedWrapper, wireLook, wireOpenLook, type LookName, type LookPose } from '../lib/looks'
@@ -664,12 +664,54 @@ export function doorsBeside(mine: readonly MyDeployment[], door: MyDeployment): 
   return mine.filter((m) => m.eventId !== door.eventId && m.chest?.door === h && m.inner.pubkey === door.inner.pubkey && roomOf(positionOf(m), m.plane, h) === room)
 }
 
-/** What you already hid in a door's room at its height and did not seal behind it (R3): ordinary placements. Never a door. */
+/**
+ * What you already hid in a door's room and did not seal behind it (R3), at
+ * any height (arkinox, 2026-11-09: the list was "missing a lot of shards"; it
+ * kept only what stood at the room's own height). Every placement of yours
+ * whose point is inside the room's cube, in its plane: an ordinary one, or one
+ * in a room this door stands in (the room around it), which SEAL moves one room
+ * deeper. Never a door, never what is behind another door here.
+ */
 export function hereInRoom(mine: readonly MyDeployment[], door: MyDeployment): MyDeployment[] {
   const h = door.chest?.door
   if (h === undefined) return []
   const at = positionOf(door)
-  return mine.filter((m) => !m.room && m.eventId !== door.eventId && m.chest?.door === undefined && m.height === h && m.plane === door.plane && inRoom(at, h, positionOf(m)))
+  const around = new Set<string>()
+  for (let d: MyDeployment | undefined = door; d?.room && !around.has(d.room.doorId); d = mine.find((m) => m.eventId === d?.room?.doorId)) around.add(d.room.doorId)
+  return mine.filter((m) => (!m.room || around.has(m.room.doorId)) && m.eventId !== door.eventId && m.chest?.door === undefined && m.plane === door.plane && inRoom(at, h, positionOf(m)))
+}
+
+/** The height the hide bar's HIDE AT HEIGHT was set to: the one a room's height stands in for while the placement joins that room. */
+export function chosenHeight(s: Pick<ShardsState, 'deployHeight' | 'deployRoomSnap'>): number {
+  return s.deployRoomSnap?.chosen ?? s.deployHeight
+}
+
+/**
+ * The height of the room of a door being placed. Joining a room of yours, it
+ * is what ROOM HEIGHT set, or else the height that was chosen to hide it at,
+ * never the room's own (that would make it a second door of that room, R5).
+ * Otherwise effectiveDoorHeight, as it always was.
+ */
+export function placedDoorHeight(s: Pick<ShardsState, 'deployHeight' | 'deployDoorHeight' | 'deployRoomSnap'>): number {
+  return s.deployRoomSnap ? Math.min(s.deployDoorHeight ?? s.deployRoomSnap.chosen, s.deployHeight) : effectiveDoorHeight(s.deployDoorHeight, s.deployHeight)
+}
+
+/**
+ * The room of yours a placement joins on its own, whatever height was chosen
+ * (arkinox, 2026-11-09): the innermost whose cube holds the point and not left
+ * out with the X. Every kind of hidden thing, a MOVE or an EDIT included; never
+ * an aim into a chest, and never a door being moved, which stays in its own
+ * room at its own height (R7). A door being placed joins only a room higher
+ * than its own (§3.7.6 MUST); in any other it is left out, at the chosen height,
+ * where one of the room's height is a second door of that room (R5).
+ */
+export function autoRoomFor(s: Pick<ShardsState, 'mine' | 'pending' | 'deployLeaveOut' | 'deployDoorHeight' | 'deployHeight' | 'deployRoomSnap'>, me: string, at: Position, plane: number): OwnDoor | null {
+  const p = s.pending
+  if (!p || (p.type === 'shard' && p.intoChest)) return null
+  if (p.type === 'chest' && p.move && s.mine.find((d) => d.eventId === p.move?.eventId)?.chest?.door !== undefined) return null
+  const own = p.type === 'chest' && p.door && !p.move ? s.deployDoorHeight ?? chosenHeight(s) : null
+  const left = new Set(s.deployLeaveOut)
+  return innermostRoomAt(ownDoors(s.mine, me), at, plane, (d) => !left.has(roomOf(d.at, d.plane, d.height)) && (own === null || own < d.height))
 }
 
 /**
@@ -677,8 +719,9 @@ export function hereInRoom(mine: readonly MyDeployment[], door: MyDeployment): M
  * 4.3): yours, its room holding the point, hidden at exactly its height, and
  * not left out with the X. A door at the same height in the same room joins
  * the room rather than entering it (R5). An aim into a chest hides nothing.
+ * The height is the room's whenever the point is in one (autoRoomFor).
  */
-export function sealingDoor(s: Pick<ShardsState, 'mine' | 'pending' | 'deployLeaveOut' | 'deployDoorHeight'>, me: string, at: Position, plane: number, height: number): OwnDoor | null {
+export function sealingDoor(s: Pick<ShardsState, 'mine' | 'pending' | 'deployLeaveOut' | 'deployDoorHeight'> & Partial<Pick<ShardsState, 'deployRoomSnap'>>, me: string, at: Position, plane: number, height: number): OwnDoor | null {
   const p = s.pending
   if (!p || (p.type === 'shard' && p.intoChest)) return null
   if (p.type === 'chest' && p.move) {
@@ -689,9 +732,9 @@ export function sealingDoor(s: Pick<ShardsState, 'mine' | 'pending' | 'deployLea
   }
   // A door of the room's own height joins that room (R5); a lower one goes
   // into it like anything else (R6, §3.7.6), its own room a smaller cube inside.
-  if (p.type === 'chest' && p.door && !p.move && effectiveDoorHeight(s.deployDoorHeight, height) === height) return null
+  if (p.type === 'chest' && p.door && !p.move && placedDoorHeight({ deployHeight: height, deployDoorHeight: s.deployDoorHeight, deployRoomSnap: s.deployRoomSnap ?? null }) === height) return null
   const d = roomDoorAt(ownDoors(s.mine, me), at, plane, height)
-  if (!d || s.deployLeaveOut === roomOf(d.at, d.plane, d.height)) return null
+  if (!d || s.deployLeaveOut.includes(roomOf(d.at, d.plane, d.height))) return null
   return d
 }
 
@@ -1291,9 +1334,18 @@ interface ShardsState {
   startDeployChest: (draft: ChestDraft & { lock: ChestLock }) => void
   /** The hide bar's model row: what the chest being hidden wears. SCALE and WALK start from that model's own. */
   setDeployLook: (look: LookChoice) => void
-  /** The room the door-name chip's X left this one placement out of (R2), as lib/doors roomOf says it. */
-  deployLeaveOut: string | null
+  /** The rooms the door-name chip's X left this one placement out of (R2), as lib/doors roomOf says them: one X for each room, the innermost first. */
+  deployLeaveOut: string[]
+  /** Leave this placement out of one more room; null asks every room again. */
   setDeployLeaveOut: (room: string | null) => void
+  /**
+   * The placement joining a room of yours on its own (autoRoomFor): that room,
+   * and the height chosen before the room's took its place, which comes back
+   * when the cursor leaves the room or the X leaves it out. Null when none.
+   */
+  deployRoomSnap: { room: string; chosen: number } | null
+  /** Join the room under the placement, or leave it, as autoRoomFor says now. Called on every change it depends on; safe to call again. */
+  syncRoomSnap: () => void
   /** A door being placed: the height of its own room, when the ROOM HEIGHT row set it; else the height it is hidden at. */
   deployDoorHeight: number | null
   setDeployDoorHeight: (h: number | null) => void
@@ -1301,7 +1353,7 @@ interface ShardsState {
   deployInto: number | null
   /** SEAL A DOOR (4.2): a door on the hide bar to place first. */
   startPlaceDoor: () => void
-  /** DOOR: seal what you already hid in its room at its height into it (R3): a rewrite of both bags. A refusal in words, or null. */
+  /** DOOR: seal what you already hid in its room, at any height, into it (R3): a rewrite of both bags for each bag they leave, each at the room's height after. A refusal in words, or null. */
   sealIntoRoom: (doorId: string, eventIds: string[]) => Promise<string | null>
   /** EDIT on a door of yours: name and label, and a new lock, which rotates the room key (R10). A refusal in words, or null. */
   resealDoor: (eventId: string, draft: Pick<ChestDraft, 'name' | 'requires'> & { lock: ChestLock }) => Promise<string | null>
@@ -2158,6 +2210,20 @@ export const useShards = create<ShardsState>((set, get) => {
   }
 
   /** The same fresh-deploy state every start shares: no pose, no link, the bag settings at their defaults. */
+  /**
+   * What a new height changes on the hide bar. Below the snap's height there
+   * is no snap: the control goes away, and so does what it was set to, rather
+   * than lying in wait. A hint smaller than the region cannot contain it (spec
+   * §7.7): the sector hint goes off above height 30 the way the snap goes off
+   * below its own height.
+   */
+  const heightPatch = (height: number): Partial<ShardsState> => {
+    const offered = snapOffered(buildPlane(cyber()), height)
+    const bag = get().deployBag
+    const hintGone = bag.hint !== null && !hintFits(bag.hint, height)
+    return { deployHeight: height, deployAsk: null, ...(offered ? {} : { deployUp: false, deployFollow: false }), ...(hintGone ? { deployBag: { ...bag, hint: null } } : {}) }
+  }
+
   const freshDeploy = {
     deployLink: false, deployHeightAuto: false, deployUnit: 0, deployUp: false, deploySpin: 0, deployTurn: [0, 0, 0] as Turns, deployFollow: false, deployConstrain: CONSTRAIN_DEFAULT,
     deployBag: DEFAULT_BAG_SETTINGS, deployBagFrom: null, deployStatus: 'idle' as const, deployError: null,
@@ -2692,8 +2758,9 @@ export const useShards = create<ShardsState>((set, get) => {
     deployNote: null,
     deployAsk: null,
     deployError: null,
-    deployLeaveOut: null,
-    setDeployLeaveOut: (room) => set({ deployLeaveOut: room }),
+    deployLeaveOut: [],
+    setDeployLeaveOut: (room) => set({ deployLeaveOut: room === null ? [] : get().deployLeaveOut.includes(room) ? get().deployLeaveOut : [...get().deployLeaveOut, room] }),
+    deployRoomSnap: null,
     deployInto: null,
     deployDoorHeight: null,
     setDeployDoorHeight: (h) => set({ deployDoorHeight: h }),
@@ -2746,6 +2813,8 @@ export const useShards = create<ShardsState>((set, get) => {
         pending: { type: 'shard', shardId: eventId, edit: { eventId } },
         deployLink: false,
         deployHeight: d.height,
+        // Its own height, chosen: a room it lands in stands in for it until it leaves.
+        deployRoomSnap: null,
         deployHeightAuto: false,
         deployUnit: d.shard.unit,
         deployConstrain: authoredConstrainOf(d.shard),
@@ -2807,6 +2876,8 @@ export const useShards = create<ShardsState>((set, get) => {
     placeChest: () => {
       const p = get().pending
       if (!placingChest(p) || p?.type !== 'chest') return
+      // At the height of the room it joins, if it joins one (syncRoomSnap).
+      get().syncRoomSnap()
       // Where it lands, fixed now: the deploy point of the build cursor at the bar's height (deploy, below).
       const { position, plane } = buildCursorOf(cyber())
       set({ pending: { ...p, spot: { at: deployPoint(position, buildStepOf(cyber()), get().deployHeight), plane } }, deployError: null })
@@ -2847,6 +2918,8 @@ export const useShards = create<ShardsState>((set, get) => {
         pending: { type: 'chest', name: d.chest.name, lock: { pubkey: d.chest.lockPubkey, label: d.chest.requires || 'its lock' }, requires: d.chest.requires, contents: [], look, move: { eventId }, ...(door ? { door: true as const } : {}) },
         ...freshDeploy,
         deployHeight: d.height,
+        // Its own height, chosen: a room it lands in stands in for it until it leaves.
+        deployRoomSnap: null,
         deployHeightAuto: false,
         deployUnit: model?.unit ?? 0,
         deployConstrain: model ? authoredConstrainOf(model) : CONSTRAIN_DEFAULT,
@@ -2869,6 +2942,8 @@ export const useShards = create<ShardsState>((set, get) => {
         pending,
         ...freshDeploy,
         deployHeight: d.height,
+        // Its own height, chosen: a room it lands in stands in for it until it leaves.
+        deployRoomSnap: null,
         deployBag: { ...DEFAULT_BAG_SETTINGS, ...(d.bag ?? {}) },
         deployBagFrom: ownBagIn(get().mine, regionOf(positionOf(d), d.plane, d.height)),
         deployNote: null,
@@ -2969,7 +3044,12 @@ export const useShards = create<ShardsState>((set, get) => {
       try {
         const place = await doorLocation(door)
         const key = roomKey(place.key, hexToBytes(secret))
-        await moveEntries(rows, { key, lookupId: roomLookupId(key), height: place.height, room: { doorId } }, me)
+        // One move for each bag they come out of: what HERE lists stands at any
+        // height (hereInRoom), and each height is a bag of its own. One at a
+        // time, each reading the room bag the one before it wrote.
+        const bags = new Map<string, MyDeployment[]>()
+        for (const r of rows) bags.set(r.lookupId, [...(bags.get(r.lookupId) ?? []), r])
+        for (const group of bags.values()) await moveEntries(group, { key, lookupId: roomLookupId(key), height: place.height, room: { doorId } }, me)
         return null
       } catch (err) {
         return err instanceof Error ? err.message : String(err)
@@ -3256,15 +3336,35 @@ export const useShards = create<ShardsState>((set, get) => {
     // warns about.
     setDeployHeight: (h) => {
       const height = Math.max(0, Math.min(get().deployCeiling(), Math.round(h)))
-      // Below the snap's height there is no snap: the control goes away, and
-      // so does what it was set to, rather than lying in wait.
-      const offered = snapOffered(buildPlane(cyber()), height)
-      // A hint smaller than the region cannot contain it (spec §7.7): the
-      // sector hint goes off above height 30 the way the snap goes off below
-      // its own height, rather than lying in wait.
-      const bag = get().deployBag
-      const hintGone = bag.hint !== null && !hintFits(bag.hint, height)
-      set({ deployHeight: height, deployAsk: null, ...(offered ? {} : { deployUp: false, deployFollow: false }), ...(hintGone ? { deployBag: { ...bag, hint: null } } : {}) })
+      // Joining a room, the room's height stands: this is the height chosen,
+      // which comes back when the placement leaves the room (syncRoomSnap).
+      const snap = get().deployRoomSnap
+      if (snap) {
+        if (snap.chosen !== height) set({ deployRoomSnap: { ...snap, chosen: height } })
+        return
+      }
+      set(heightPatch(height))
+    },
+    syncRoomSnap: () => {
+      const s = get()
+      // Hiding, the height is the one it went out at, whatever the cursor does.
+      if (s.deployStatus === 'working') return
+      const snap = s.deployRoomSnap
+      if (!s.pending) {
+        if (snap) set({ deployRoomSnap: null, ...heightPatch(snap.chosen) })
+        return
+      }
+      const cs = cyber()
+      // A chest placed first (R18) stands where PLACE CHEST put it. Otherwise
+      // the build cursor: the deploy point at any height up to a room's is in
+      // the same cube of that height as the cursor (space.ts deployPoint).
+      const spot = s.pending.type === 'chest' ? s.pending.spot : undefined
+      const room = autoRoomFor(s, cs.identity.pubkey, spot?.at ?? buildCursorOf(cs).position, spot?.plane ?? buildPlane(cs))
+      if (room) {
+        const key = roomOf(room.at, room.plane, room.height)
+        if (snap?.room === key && s.deployHeight === room.height) return
+        set({ deployRoomSnap: { room: key, chosen: snap?.chosen ?? s.deployHeight }, ...heightPatch(room.height) })
+      } else if (snap) set({ deployRoomSnap: null, ...heightPatch(snap.chosen) })
     },
     setDeployUnit: (unit) => set({ deployUnit: clampUnit(unit) }),
     setDeployConstrain: (c) => set({ deployConstrain: c }),
@@ -3307,7 +3407,11 @@ export const useShards = create<ShardsState>((set, get) => {
     declineDeploy: () => set({ deployAsk: null }),
 
     deploy: async (confirmed = false) => {
+      // The room under the placement, joined now, whatever the subscriptions saw last.
+      get().syncRoomSnap()
       const { pending, deployHeight, deployUnit, deployUp, deploySpin, deployTurn, deployConstrain, deployBag, deployBagFrom, deployLink } = get()
+      // What PLACE AGAIN starts from: the height chosen, which a room's stands in for while it holds the placement.
+      const chosen = chosenHeight(get())
       if (!pending) return
       // One hide at a time. Space (or a second tap) while the key is being
       // computed and the bag sealed used to start a second deploy of the same
@@ -3375,7 +3479,7 @@ export const useShards = create<ShardsState>((set, get) => {
         return
       }
       // A door locks a region: a height of at least 1 (§3.7.1).
-      const doorHeight = effectiveDoorHeight(get().deployDoorHeight, deployHeight)
+      const doorHeight = placedDoorHeight(get())
       if (pending.type === 'chest' && pending.door && !pending.move && doorHeight < 1) {
         set({ deployStatus: 'error', deployError: 'A door locks a region: hide it at height 1 or more.' })
         return
@@ -3856,7 +3960,7 @@ export const useShards = create<ShardsState>((set, get) => {
           const placedLast: PlacedLast | null = again
             ? {
               pending: again,
-              settings: { deployHeight, deployHeightAuto: s.deployHeightAuto, deployUnit, deployUp, deploySpin, deployTurn: [...deployTurn] as Turns, deployFollow: s.deployFollow, deployLink },
+              settings: { deployHeight: chosen, deployHeightAuto: s.deployHeightAuto, deployUnit, deployUp, deploySpin, deployTurn: [...deployTurn] as Turns, deployFollow: s.deployFollow, deployLink },
               step: cs.buildStep, spot, count: s.placedLast?.pending === pending ? s.placedLast.count + 1 : 1,
             }
             : s.placedLast
@@ -4457,6 +4561,11 @@ function followIdentity(tries = 0): void {
     useShards.setState(closes ? { mine, selectedSecret: null } : { mine })
     claim(owner)
   })
+  // The room a placement joins follows the build cursor (syncRoomSnap).
+  useCyberspace.subscribe((s, prev) => {
+    if (s.cursor === prev.cursor && s.plane === prev.plane && s.anchorPlane === prev.anchorPlane && s.focus === prev.focus && s.identity.pubkey === prev.identity.pubkey) return
+    if (useShards.getState().pending) useShards.getState().syncRoomSnap()
+  })
   // Stored rows changed under this list: the move finished, or another tab wrote.
   onHiddenChange(() => {
     useShards.setState({ mine: loadMine(useCyberspace.getState().identity.pubkey) })
@@ -4475,7 +4584,14 @@ if (import.meta.env.DEV && typeof window !== 'undefined') {
 // The X on the door-name chip leaves one placement out (R2): whatever is
 // lined up next asks again. A chest being placed and then filled is one placement.
 useShards.subscribe((s, prev) => {
-  if (s.pending === prev.pending || s.deployLeaveOut === null) return
+  if (s.pending === prev.pending || s.deployLeaveOut.length === 0) return
   if (s.pending?.type === 'chest' && prev.pending?.type === 'chest') return
-  useShards.setState({ deployLeaveOut: null })
+  useShards.setState({ deployLeaveOut: [] })
+})
+
+// The room a placement joins follows what it depends on here: what is lined
+// up, your doors, the X, and ROOM HEIGHT. The cursor's side is followIdentity's.
+useShards.subscribe((s, prev) => {
+  if (s.pending === prev.pending && s.mine === prev.mine && s.deployHeight === prev.deployHeight && s.deployLeaveOut === prev.deployLeaveOut && s.deployDoorHeight === prev.deployDoorHeight && s.deployRoomSnap === prev.deployRoomSnap && s.deployStatus === prev.deployStatus) return
+  s.syncRoomSnap()
 })

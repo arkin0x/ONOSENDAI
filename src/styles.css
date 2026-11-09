@@ -1851,6 +1851,12 @@ kbd {
 /* A door of yours on its card: what is behind it, and what could be (DoorOwner). */
 .doorowner { display: flex; flex-direction: column; gap: 6px; margin-bottom: 14px; }
 .doorowner__count { color: var(--fg); }
+/* HERE: every thing of yours in the room, never cut short; a long list scrolls inside the card. */
+.doorowner__here { max-height: 40vh; max-height: 40dvh; overflow-y: auto; overscroll-behavior: contain; }
+.doorowner__view { display: flex; align-items: center; gap: 6px; min-width: 0; flex: 1 1 auto; padding: 0; border: 0; background: none; color: inherit; font: inherit; text-align: left; cursor: pointer; }
+.doorowner__view .item__name { min-width: 0; flex: 0 1 auto; }
+.doorowner__view:hover .item__name, .doorowner__view:focus-visible .item__name { color: var(--accent); }
+.doorowner__height { flex: none; font-size: 9px; letter-spacing: 0.06em; color: var(--dim); }
 /* The door-name chip on the hide bar (4.3): the door what you place is sealed to, with its X. */
 .deploybar__doorchip { display: flex; align-items: center; gap: 6px; padding: 4px 8px; border: 1px solid #ff3b4e; border-radius: 3px; color: #ff8a95; font-size: 11px; }
 .deploybar__doorchip-name { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

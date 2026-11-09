@@ -97,7 +97,40 @@ const MEASURED_SLACK = 10
 export function regionKeyTimeoutMs(height: number, cantorMsByHeight?: Record<number, number>): number {
   const floor = Math.max(MIN_TIMEOUT_MS, H20_TIMEOUT_MS * 2 ** (height - 20))
   const seconds = localKeySeconds(height, cantorMsByHeight)
-  return Math.max(floor, seconds === null ? 0 : seconds * 1000 * MEASURED_SLACK)
+  // Not yet measured (the benchmark waits out startup, and a phone's first
+  // derivation can come before it): nothing says this device is fast, so the
+  // ten minutes height 20 gets, at any height (review of #625).
+  if (seconds === null) return Math.max(floor, H20_TIMEOUT_MS)
+  return Math.max(floor, seconds * 1000 * MEASURED_SLACK)
+}
+
+/** A clock that only moves forward: Date.now() jumps with the wall clock (review of #625). */
+function monotonic(): number {
+  return typeof performance !== 'undefined' && typeof performance.now === 'function' ? performance.now() : Date.now()
+}
+
+/**
+ * When the page was last hidden (monotonic), or -Infinity. A hidden tab's
+ * timers and workers are throttled or frozen, so a derivation that ran out of
+ * time while the page was in the background is not hung: a deploy left
+ * running while the phone was locked must not be killed for it.
+ */
+let lastHidden = -Infinity
+let watchingVisibility = false
+
+function watchVisibility(): void {
+  if (watchingVisibility || typeof document === 'undefined' || typeof document.addEventListener !== 'function') return
+  watchingVisibility = true
+  if (document.visibilityState === 'hidden') lastHidden = monotonic()
+  // On every change, either way: leaving hidden means it was hidden until
+  // that moment, so a call re-armed while hidden still sees it (review of #632).
+  document.addEventListener('visibilitychange', () => { lastHidden = monotonic() })
+}
+
+/** Whether the page was hidden at any point since `since` (monotonic), or is now. */
+function hiddenSince(since: number): boolean {
+  if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return true
+  return lastHidden >= since
 }
 
 /**
@@ -126,6 +159,7 @@ export function endRegionKeyWorker(reason = 'The region worker was ended.'): voi
 }
 
 function sharedWorker(): Worker {
+  watchVisibility()
   if (worker) return worker
   const w = new Worker(new URL('../workers/region.worker.ts', import.meta.url), { type: 'module' })
   const failed = (reason: string) => (): void => { if (worker === w) endRegionKeyWorker(reason) }
@@ -147,7 +181,7 @@ export function regionKeyOffThread(at: Position, height: number, maxComputeHeigh
     return Promise.reject(err instanceof Error ? err : new Error(String(err)))
   }
   const id = nextId++
-  const now = Date.now()
+  const now = monotonic()
   queueEnds = Math.max(now, queueEnds) + regionKeyTimeoutMs(height, useCalibration.getState().cantorMsByHeight)
   const timeout = queueEnds - now
   return new Promise((resolve, reject) => {
@@ -169,9 +203,27 @@ export function regionKeyOffThread(at: Position, height: number, maxComputeHeigh
         else reject(new Error(`The region worker gave no key at height ${height}.`))
       }
     }
-    const timer = setTimeout(() => {
-      if (worker === w) endRegionKeyWorker(`The region worker did not answer within ${Math.round(timeout / 60_000)} min at height ${height}.`)
-    }, timeout)
+    // The clock this call is judged by: from when it was asked, or from the
+    // last time its time ran out while the page was hidden.
+    let since = now
+    let rearmed = false
+    const expire = (): void => {
+      if (worker !== w) return
+      // Hidden at any point since: throttled, not hung. Its full time again, from now.
+      if (hiddenSince(since)) {
+        since = monotonic()
+        rearmed = true
+        // A call asked after this waits behind it: its clock starts where this one's now ends (review of #632).
+        queueEnds = Math.max(queueEnds, since + timeout)
+        timer = setTimeout(expire, timeout)
+        return
+      }
+      const minutes = Math.round(timeout / 60_000)
+      endRegionKeyWorker(rearmed
+        ? `The region worker did not answer at height ${height} in ${minutes} min with the page in view. Try again.`
+        : `The region worker did not answer within ${minutes} min at height ${height}. Try again.`)
+    }
+    let timer = setTimeout(expire, timeout)
     waiting.set(id, (err) => { end(); reject(err) })
     w.addEventListener('message', onMessage)
     const request: RegionRequest = { id, x: at.x.toString(), y: at.y.toString(), z: at.z.toString(), heights: [height], maxComputeHeight }

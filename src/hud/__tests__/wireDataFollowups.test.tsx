@@ -39,7 +39,8 @@ import { useCalibration } from '../../lib/calibration'
 import { useCyberspace } from '../../store/useCyberspace'
 import { keepDoorSecret, resetDoorSecrets } from '../../store/rooms'
 import type { MyDeployment } from '../../store/useShards'
-import { ROOM_TESTING, TEST_WORDS, WireData } from '../WireData'
+import { ROOM_TESTING, STORED_TESTING, TEST_WORDS, WireData } from '../WireData'
+import { readFileSync } from 'node:fs'
 
 async function deployment(over: Partial<MyDeployment> = {}): Promise<MyDeployment> {
   const inner = await useCyberspace.getState().signEvent({ kind: MESSAGE_KIND, created_at: 1_800_000_000, content: 'hidden', tags: [] })
@@ -90,5 +91,18 @@ describe('TEST DISCOVERY follow-ups (review of #624)', () => {
     expect(renderToStaticMarkup(<WireData dep={dep} initialTest="testing" />)).toContain(escaped("can't derive height 18"))
     useCalibration.setState({ hopHeight: 19 })
     expect(renderToStaticMarkup(<WireData dep={dep} initialTest="testing" />)).toContain(TEST_WORDS.testing)
+  })
+
+  it('a row GONE FROM ITS BAG never says DERIVING: it is asked about with its stored key (review of #625)', async () => {
+    const html = renderToStaticMarkup(<WireData dep={await deployment({ goneFrom: 1_800_000_010 })} initialTest="testing" />)
+    expect(html).toContain(STORED_TESTING)
+    expect(html).not.toContain(TEST_WORDS.testing)
+    expect(html).toContain('gone from its bag')
+    expect(html).not.toContain('as a stranger would')
+  })
+
+  it('the two retry states have their own color (review of #625)', () => {
+    const css = readFileSync(new URL('../../styles.css', import.meta.url), 'utf8')
+    for (const state of ['unread', 'underived']) expect(css).toMatch(new RegExp(`\\.eventdata__test--${state}[,:\\s{]`))
   })
 })

@@ -266,8 +266,9 @@ export const MOVED_NOTICE_MS = 5000
 const isCoin = (text: string | undefined): boolean => readCashuToken(text ?? null).raw !== null
 /**
  * What CLEAR ALL leaves: coins, and messages holding a nonfungible.cash claim
- * link. A cleared row can never be taken again, so an unclaimed NFT swept up
- * with the rest would be out of reach for good (review of #440). An NFT row
+ * link. A cleared row leaves ITEMS and comes back only from its chest, so an
+ * unclaimed NFT swept up with the rest would be out of reach unless that
+ * chest is opened again (review of #440). An NFT row
  * keeps its own X, since whether it was claimed is never known here.
  */
 const keptFromAll = (text: string | undefined): boolean => isCoin(text) || hasNftLink(text)

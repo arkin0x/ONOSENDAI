@@ -90,8 +90,12 @@ describe('the corner helpers, tightened', () => {
     // where its unit (2^8) is under 2^20: it could be a corner, so it stands.
     const fine = ((1n << 60n) + (1n << 20n)).toString()
     expect(exactInteger(fine, 20)).toBe(BigInt(fine))
-    // At h4 the unit 2^8 is wider than 2^4: a double-exact value there may be a rounded one.
-    expect(exactInteger(fine, 4)).toBeNull()
+    // At h4 the unit 2^8 is wider than 2^4, but this text is not what String()
+    // writes for that Number ("1152921504607895600"): it was not a Number's, so it stands (review of #637).
+    expect(String(Number(fine))).not.toBe(fine)
+    expect(exactInteger(fine, 4)).toBe(BigInt(fine))
+    // What String() writes for it is refused there: the shortest digits padded with zeros.
+    expect(exactInteger(String(Number(fine)), 4)).toBeNull()
     // Not a multiple of 2^height: not a corner.
     expect(exactInteger(((1n << 60n) + 1n).toString(), 20)).toBeNull()
     // Near 2^84 a decimal string is never String()'s (that writes an exponent): exact.
@@ -100,6 +104,18 @@ describe('the corner helpers, tightened', () => {
     // Without a height, as before.
     expect(exactInteger(((1n << 60n) + 1n).toString())).toBe((1n << 60n) + 1n)
     expect(baseOf(b20, 20)).toEqual({ x: BigInt(b20.x), y: BigInt(b20.y), z: BigInt(b20.z) })
+  })
+
+  it.each([
+    ['18014821451756593', 0, '18014821451756590'],
+    ['681667213383155189760', 11, '681667213383155200000'],
+    ['999717417494795088688', 4, '999717417494795100000'],
+  ])('a corner %s at h%i stored rounded as %s is not taken as exact (review of #637)', (corner, height, stored) => {
+    expect(String(Number(corner))).toBe(stored)
+    expect(exactInteger(stored, height)).toBeNull()
+    expect(baseOf({ x: stored, y: '0', z: '0' }, height)).toBeNull()
+    // And the true corner, written in full, still is.
+    expect(exactInteger(corner, height)).toBe(BigInt(corner))
   })
 
   it('a deploy row is taken only where it fits what was stored', () => {
@@ -203,11 +219,11 @@ describe('the store', () => {
   it('a key bought now keeps its HOSAKA job and poll token', async () => {
     const { secrets, cs } = await boot()
     cs.useCyberspace.setState({
-      buyRegionKey: async () => ({ ok: true as const, result: { secret_key: 'ab'.repeat(32), lookup_id: 'cd'.repeat(32), height: H, base: want }, job: { id: 'job7', pollToken: 'tok7' } }),
+      buyRegionKey: async () => ({ ok: true as const, result: { secret_key: 'ab'.repeat(32), lookup_id: 'cd'.repeat(32), height: H, base: want }, job: { id: 'job7', pollToken: 'tok7', apiUrl: 'http://hosaka.invalid' } }),
     })
     const held = await secrets.useSecrets.getState().buy(AT, 0, H)
-    expect(held).toMatchObject({ jobId: 'job7', pollToken: 'tok7', base: want })
-    expect(JSON.parse(mem.get(BOUGHT_KEY)!)['cd'.repeat(32)]).toMatchObject({ jobId: 'job7', pollToken: 'tok7' })
+    expect(held).toMatchObject({ jobId: 'job7', pollToken: 'tok7', jobApiUrl: 'http://hosaka.invalid', base: want })
+    expect(JSON.parse(mem.get(BOUGHT_KEY)!)['cd'.repeat(32)]).toMatchObject({ jobId: 'job7', pollToken: 'tok7', jobApiUrl: 'http://hosaka.invalid' })
   })
 
   /** The job's answer as Python writes it: the corner as bare integers. */
@@ -215,12 +231,12 @@ describe('the store', () => {
     `{"id": "job1", "status": "completed", "job_type": "region_key", "cost_msats": 2000, "error": null, "result": {"secret_key": "${'ab'.repeat(32)}", "lookup_id": "${lookupId}", "height": ${H}, "base": {"x": ${want.x}, "y": ${want.y}, "z": ${want.z}}}}`
 
   it('an old key\'s corner, read again from its job with the poll token: exact, kept everywhere, nothing bought', async () => {
-    const k = boughtKey(4, { jobId: 'job1', pollToken: 'tok1' })
+    const k = boughtKey(4, { jobId: 'job1', pollToken: 'tok1', jobApiUrl: 'http://hosaka.invalid' })
     mem.set(BOUGHT_KEY, JSON.stringify({ [k.lookupId]: k }))
     const { secrets, cs } = await boot()
     cs.useCyberspace.setState({ cloudPrefs: { ...cs.useCyberspace.getState().cloudPrefs, mode: 'ask' } })
     hosaka.jobText = pythonJob(k.lookupId)
-    expect(await secrets.useSecrets.getState().refetchCorner(k.lookupId)).toBe('fixed')
+    expect(await secrets.useSecrets.getState().refetchCorner(k.lookupId)).toEqual({ outcome: 'fixed' })
     expect(hosaka.getJob).toHaveBeenCalledWith('job1', 'tok1')
     expect(secrets.useSecrets.getState().keys[k.lookupId].base).toEqual(want)
     await settle()
@@ -233,20 +249,94 @@ describe('the store', () => {
     const { secrets, cs } = await boot()
     cs.useCyberspace.setState({ cloudPrefs: { ...cs.useCyberspace.getState().cloudPrefs, mode: 'ask' } })
     hosaka.listText = `{"jobs": [${pythonJob('ee'.repeat(32))}, ${pythonJob(k.lookupId)}], "count": 2}`
-    expect(await secrets.useSecrets.getState().refetchCorner(k.lookupId)).toBe('fixed')
+    expect(await secrets.useSecrets.getState().refetchCorner(k.lookupId)).toEqual({ outcome: 'fixed' })
     expect(secrets.useSecrets.getState().keys[k.lookupId].base).toEqual(want)
   })
 
   it('a job HOSAKA no longer has, or cloud compute off: quietly left as it was', async () => {
-    const k = boughtKey(6, { jobId: 'gone', pollToken: 'tok' })
+    const k = boughtKey(6, { jobId: 'gone', pollToken: 'tok', jobApiUrl: 'http://hosaka.invalid' })
     mem.set(BOUGHT_KEY, JSON.stringify({ [k.lookupId]: k }))
     const { secrets, cs } = await boot()
     cs.useCyberspace.setState({ cloudPrefs: { ...cs.useCyberspace.getState().cloudPrefs, mode: 'ask' } })
-    expect(await secrets.useSecrets.getState().refetchCorner(k.lookupId)).toBe('gone')
+    expect(await secrets.useSecrets.getState().refetchCorner(k.lookupId)).toEqual({ outcome: 'gone' })
     expect(secrets.useSecrets.getState().keys[k.lookupId].base).toEqual(STORED_BAD)
     cs.useCyberspace.setState({ cloudPrefs: { ...cs.useCyberspace.getState().cloudPrefs, mode: 'off' } })
     hosaka.jobText = pythonJob(k.lookupId)
-    expect(await secrets.useSecrets.getState().refetchCorner(k.lookupId)).toBe('gone')
+    expect(await secrets.useSecrets.getState().refetchCorner(k.lookupId)).toEqual({ outcome: 'gone' })
     expect(secrets.useSecrets.getState().keys[k.lookupId].base).toEqual(STORED_BAD)
+  })
+
+  it('never sends a poll token to another HOSAKA: under a different URL, the signed list is asked (review of #637)', async () => {
+    const k = boughtKey(7, { jobId: 'job1', pollToken: 'tok1', jobApiUrl: 'https://another-hosaka.example' })
+    mem.set(BOUGHT_KEY, JSON.stringify({ [k.lookupId]: k }))
+    const { secrets, cs } = await boot()
+    cs.useCyberspace.setState({ cloudPrefs: { ...cs.useCyberspace.getState().cloudPrefs, mode: 'ask' } })
+    hosaka.getJob.mockClear()
+    hosaka.jobText = pythonJob(k.lookupId)
+    hosaka.listText = `{"jobs": [${pythonJob(k.lookupId)}]}`
+    expect(await secrets.useSecrets.getState().refetchCorner(k.lookupId)).toEqual({ outcome: 'fixed' })
+    expect(hosaka.getJob).not.toHaveBeenCalled()
+  })
+
+  it('a poll token HOSAKA no longer takes falls back to the signed list', async () => {
+    const k = boughtKey(8, { jobId: 'job1', pollToken: 'stale', jobApiUrl: 'http://hosaka.invalid' })
+    mem.set(BOUGHT_KEY, JSON.stringify({ [k.lookupId]: k }))
+    const { secrets, cs } = await boot()
+    cs.useCyberspace.setState({ cloudPrefs: { ...cs.useCyberspace.getState().cloudPrefs, mode: 'ask' } })
+    // The module the store loaded (boot resets modules), so its HosakaError is the store's.
+    const { HosakaError } = await import('../../hosaka')
+    hosaka.getJob.mockRejectedValueOnce(new HosakaError(401, 'unauthorized', 'token'))
+    hosaka.listText = `{"jobs": [${pythonJob(k.lookupId)}]}`
+    expect(await secrets.useSecrets.getState().refetchCorner(k.lookupId)).toEqual({ outcome: 'fixed' })
+  })
+
+  it('a failure that may pass (network, signer) says why and leaves the key as it was (review of #637)', async () => {
+    const k = boughtKey(9)
+    mem.set(BOUGHT_KEY, JSON.stringify({ [k.lookupId]: k }))
+    const { secrets, cs } = await boot()
+    cs.useCyberspace.setState({ cloudPrefs: { ...cs.useCyberspace.getState().cloudPrefs, mode: 'ask' } })
+    const real = await vi.importActual<typeof import('../../hosaka')>('../../hosaka')
+    const fake = (await import('../../hosaka')).createHosaka({ apiUrl: 'x', sign: async () => { throw new Error('x') } }) as unknown as { listJobs: ReturnType<typeof vi.fn> }
+    fake.listJobs.mockRejectedValueOnce(new real.HosakaError(0, 'network', 'Failed to fetch'))
+    const r = await secrets.useSecrets.getState().refetchCorner(k.lookupId)
+    expect(r.outcome).toBe('failed')
+    expect(r.outcome === 'failed' && r.reason.length).toBeGreaterThan(0)
+    expect(secrets.useSecrets.getState().keys[k.lookupId].base).toEqual(STORED_BAD)
+  })
+
+  it('a corner made exact while HOSAKA was asked is left alone (review of #637)', async () => {
+    const k = boughtKey(10, { jobId: 'job1', pollToken: 'tok1', jobApiUrl: 'http://hosaka.invalid' })
+    mem.set(BOUGHT_KEY, JSON.stringify({ [k.lookupId]: k }))
+    const { secrets, cs } = await boot()
+    cs.useCyberspace.setState({ cloudPrefs: { ...cs.useCyberspace.getState().cloudPrefs, mode: 'ask' } })
+    const real = await vi.importActual<typeof import('../../hosaka')>('../../hosaka')
+    hosaka.getJob.mockImplementationOnce(async () => {
+      // The deploy rows land meanwhile and fix it.
+      secrets.useSecrets.setState((s) => ({ keys: { ...s.keys, [k.lookupId]: { ...s.keys[k.lookupId], base: want } } }))
+      return real.parseJsonExactIntegers(pythonJob(k.lookupId))
+    })
+    expect(await secrets.useSecrets.getState().refetchCorner(k.lookupId)).toEqual({ outcome: 'unchanged' })
+    expect(secrets.useSecrets.getState().keys[k.lookupId].base).toEqual(want)
+  })
+
+  it('a repair that gives back the same strings writes nothing (review of #637)', async () => {
+    // 2^53 + 2 at h0: String() writes it in full, so the stored text reads as a
+    // Number's and is held inexact; the row gives back exactly the same strings.
+    const v = ((1n << 53n) + 2n).toString()
+    expect(String(Number(v))).toBe(v)
+    const k = boughtKey(11, { height: 0, base: { x: v, y: v, z: v } })
+    mem.set(BOUGHT_KEY, JSON.stringify({ [k.lookupId]: k }))
+    let writes = 0
+    const realSet = (globalThis as { localStorage: Storage }).localStorage.setItem
+    ;(globalThis as { localStorage: Storage }).localStorage.setItem = (key: string, val: string) => { if (key === BOUGHT_KEY) writes++; realSet(key, val) }
+    try {
+      await boot(({ shards }) => {
+        shards.useShards.setState({ mine: [{ lookupId: k.lookupId, height: 0, at: { x: v, y: v, z: v } } as never] })
+      })
+      await settle()
+    } finally {
+      ;(globalThis as { localStorage: Storage }).localStorage.setItem = realSet
+    }
+    expect(writes).toBe(0)
   })
 })

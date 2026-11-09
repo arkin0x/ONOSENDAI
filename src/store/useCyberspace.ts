@@ -1097,7 +1097,7 @@ export interface CyberspaceState {
    * and the job starts when the invoice settles. Resolves to the key, or to
    * the reason it did not.
    */
-  buyRegionKey: (at: Position, plane: Plane, height: number, expect?: { lookupId?: string }) => Promise<{ ok: true; result: HosakaRegionKeyResult; job?: { id: string; pollToken: string } } | { ok: false; error: string }>
+  buyRegionKey: (at: Position, plane: Plane, height: number, expect?: { lookupId?: string }) => Promise<{ ok: true; result: HosakaRegionKeyResult; job?: { id: string; pollToken: string; apiUrl: string } } | { ok: false; error: string }>
   /**
    * Buy a ride's proof from HOSAKA and sign the hyperjump (onosendai-launch
    * #35 P5; arkinox, 2026-10-11): submit with the ride's idempotency key,
@@ -6491,7 +6491,8 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
         return { ok: false, error: wrongKeyMessage(wrong, aside) }
       }
       // The job, so its answer can be read again later without signing (useSecrets HeldKey jobId).
-      return { ok: true, result: r, job: { id: done.id, pollToken: outcome.record.pollToken } }
+      // With the HOSAKA it came from: a poll token is only ever sent back there (review of #637).
+      return { ok: true, result: r, job: { id: done.id, pollToken: outcome.record.pollToken, apiUrl: client.apiUrl } }
     } catch (err) {
       if (abort.signal.aborted) { set({ cloud: { ...get().cloud, ...idle } }); return { ok: false, error: 'Cancelled.' } }
       if (id === requestId) set({ cloud: { ...get().cloud, ...idle } })

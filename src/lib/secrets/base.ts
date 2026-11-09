@@ -46,11 +46,13 @@ function ulpOf(v: bigint): bigint {
  *
  * Given the height of the cube it is the corner of, a decimal string past
  * 2^53 is held to more (review of #629): it must be a multiple of 2^height,
- * and one below 10^21 that a double holds exactly is refused where a double
- * would have rounded a corner of that height (2^height under its unit). Such
- * a string is what String() of a rounded Number looks like there: below
- * 10^21 String() writes plain digits, not an exponent. Near 2^84, where the
- * corners are, a rounded Number always reads with an exponent.
+ * and one below 10^21 that reads exactly as String() of a Number writes it
+ * is refused where a double would have rounded a corner of that height
+ * (2^height under its unit). Below 10^21 String() writes plain digits, the
+ * shortest that round-trip padded with zeros ("18014821451756590"), so that
+ * text is the mark of a rounded Number, the same check recovery makes
+ * (review of #637). Near 2^84, where the corners are, a rounded Number always
+ * reads with an exponent.
  */
 export function exactInteger(v: unknown, height?: number): bigint | null {
   if (typeof v === 'bigint') return v
@@ -61,7 +63,7 @@ export function exactInteger(v: unknown, height?: number): bigint | null {
   if (height === undefined || n < TWO_53) return n
   const side = 1n << BigInt(height)
   if (n % side !== 0n) return null
-  if (n < PLAIN_DECIMAL_LIMIT && side < ulpOf(n) && BigInt(Number(s)) === n) return null
+  if (n < PLAIN_DECIMAL_LIMIT && side < ulpOf(n) && String(Number(s)) === s) return null
   return n
 }
 

@@ -38,7 +38,8 @@
 import { create } from 'zustand'
 import type { Plane } from 'cyberspace-core'
 import { cloudClient, useCyberspace } from './useCyberspace'
-import type { HosakaJob } from '../lib/hosaka'
+import { HosakaError, type HosakaJob } from '../lib/hosaka'
+import { describeCloudError } from '../lib/cloud'
 import { useShards } from './useShards'
 import type { Position } from '../lib/space'
 import { EVICT_PLACES_PER_PASS, EVICT_TO, SECRETS_BUDGET_BYTES, bytesOfAll, earnedToEvict, trimByCount } from '../lib/secrets/budget'
@@ -91,6 +92,8 @@ export interface HeldKey {
    */
   jobId?: string
   pollToken?: string
+  /** The HOSAKA the job and its poll token belong to: the token is never sent anywhere else (review of #637). */
+  jobApiUrl?: string
 }
 
 /** A key being bought: what it is for, and how far along. */
@@ -245,9 +248,13 @@ interface SecretsState {
    * poll token when it was kept, without signing; else the signed list of
    * this pubkey's jobs. Reads only: nothing is bought or paid again. `fixed`
    * when the corner is exact now, `gone` when HOSAKA no longer has the job
-   * (or cloud compute is off), `unchanged` when there was nothing to do.
+   * (or cloud compute is off), `unchanged` when there was nothing to do,
+   * `failed` with a reason when asking did not work this time (the signer
+   * timed out or refused, the network, HOSAKA busy) and may work again.
+   * The poll token goes only to the HOSAKA it came from; under any other,
+   * the signed list is asked instead.
    */
-  refetchCorner: (lookupId: string) => Promise<'fixed' | 'gone' | 'unchanged'>
+  refetchCorner: (lookupId: string) => Promise<{ outcome: 'fixed' | 'gone' | 'unchanged' } | { outcome: 'failed'; reason: string }>
 }
 
 /** How the list is ordered. */
@@ -395,7 +402,7 @@ export const useSecrets = create<SecretsState>((set, get) => ({
       plane,
       source: 'cloud',
       at: Math.floor(Date.now() / 1000),
-      ...(outcome.job ? { jobId: outcome.job.id, pollToken: outcome.job.pollToken } : {}),
+      ...(outcome.job ? { jobId: outcome.job.id, pollToken: outcome.job.pollToken, jobApiUrl: outcome.job.apiUrl } : {}),
     }
     get().hold([held])
     set({ buying: null })
@@ -406,26 +413,40 @@ export const useSecrets = create<SecretsState>((set, get) => ({
 
   refetchCorner: async (lookupId) => {
     const k = get().keys[lookupId]
-    if (!k || k.source !== 'cloud' || baseOf(k.base, k.heights ?? k.height)) return 'unchanged'
+    if (!k || k.source !== 'cloud' || baseOf(k.base, k.heights ?? k.height)) return { outcome: 'unchanged' }
     const cs = useCyberspace.getState()
-    if (cs.cloudPrefs.mode === 'off') return 'gone'
+    if (cs.cloudPrefs.mode === 'off') return { outcome: 'gone' }
     const client = cloudClient(cs.cloudPrefs.apiUrl)
-    let jobs: HosakaJob[]
+    // The job no longer there: gone for good. Anything else may work next time, and says why.
+    const missing = (err: unknown): boolean => err instanceof HosakaError && err.status === 404
+    let jobs: HosakaJob[] | null = null
     try {
-      if (k.jobId && k.pollToken) jobs = [await client.getJob(k.jobId, k.pollToken)]
-      else if (client.listJobs) jobs = (await client.listJobs()).jobs ?? []
-      else return 'gone'
-    } catch {
-      // Not retrievable (expired, unreachable, refused): left as it is, quietly.
-      return 'gone'
+      // The poll token only to the HOSAKA it came from (review of #637).
+      if (k.jobId && k.pollToken && k.jobApiUrl === client.apiUrl) {
+        try {
+          jobs = [await client.getJob(k.jobId, k.pollToken)]
+        } catch (err) {
+          // A token HOSAKA no longer takes: the signed list may still have the job.
+          if (!(err instanceof HosakaError) || (err.status !== 401 && err.status !== 403)) throw err
+        }
+      }
+      if (!jobs) {
+        if (!client.listJobs) return { outcome: 'gone' }
+        jobs = (await client.listJobs()).jobs ?? []
+      }
+    } catch (err) {
+      return missing(err) ? { outcome: 'gone' } : { outcome: 'failed', reason: describeCloudError(err) }
     }
+    // Read again after the wait: the deploy rows may have fixed it meanwhile (review of #637).
+    const now = get().keys[lookupId]
+    if (!now || baseOf(now.base, now.heights ?? now.height)) return { outcome: 'unchanged' }
     for (const job of jobs) {
-      const base = cornerFromJob(job?.result, k)
+      const base = cornerFromJob(job?.result, now)
       if (!base) continue
-      applyBaseRepairs([{ ...k, base }])
-      return 'fixed'
+      applyBaseRepairs([{ ...now, base }])
+      return { outcome: 'fixed' }
     }
-    return 'gone'
+    return { outcome: 'gone' }
   },
 
   load: () => {
@@ -699,7 +720,8 @@ function repairStoredBases(): void {
       try { at = row ? { x: BigInt(row.at.x), y: BigInt(row.at.y), z: BigInt(row.at.z) } : undefined } catch { at = undefined }
       // repairBase takes the row's point only where it fits what was stored.
       const base = repairBase(k.base, k.heights ?? k.height, at)
-      if (base) fixed.push({ ...k, base })
+      // The same strings back (a decimal held inexact that nothing can improve on): nothing to write (review of #637).
+      if (base && (base.x !== k.base.x || base.y !== k.base.y || base.z !== k.base.z)) fixed.push({ ...k, base })
     } catch (err) {
       console.warn('[secrets] could not repair a stored corner:', describeError(err))
     }

@@ -46,6 +46,16 @@ export interface RowKit {
   }
   /** MOVE TO FOLDER, or the row's checkbox while selecting. */
   tool: JSX.Element
+  /**
+   * Whether SELECT is on. A tap on the row itself should then pick it or let
+   * it go (`toggle`), as its checkbox does, and not open it: opening may take
+   * the list away, and the picks with it (review of PR 631).
+   */
+  selecting: boolean
+  /** Whether the row is picked, while selecting. */
+  picked: boolean
+  /** Pick the row, or let it go. */
+  toggle: () => void
 }
 
 interface Props<T> {
@@ -222,6 +232,7 @@ export function ShardFolders<T>({ items, refOf, nameOf, row, deleteContents }: P
 
   const kitFor = (item: T): RowKit => {
     const ref = refOf(item)
+    const toggle = (): void => setPicked((cur) => { const next = new Set(cur); if (next.has(ref)) next.delete(ref); else next.add(ref); return next })
     const tool = selecting ? (
       <input
         type="checkbox"
@@ -235,14 +246,15 @@ export function ShardFolders<T>({ items, refOf, nameOf, row, deleteContents }: P
         <FolderInput size={13} strokeWidth={2.25} aria-hidden />
       </button>
     )
-    if (!drag) return { drag: {}, tool }
+    const kit = { tool, selecting, picked: selecting && picked.has(ref), toggle }
+    if (!drag) return { drag: {}, ...kit }
     return {
+      ...kit,
       drag: {
         draggable: true,
         onDragStart: (e) => startDrag(e, { kind: 'shards', refs: selecting && picked.has(ref) ? pickedNow : [ref] }),
         onDragEnd: () => { draggingFolder = null; setOver(null) },
       },
-      tool,
     }
   }
 

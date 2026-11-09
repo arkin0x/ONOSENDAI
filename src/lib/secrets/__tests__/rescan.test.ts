@@ -316,6 +316,16 @@ describe('RESCAN ALL, over IndexedDB', () => {
     expect(s().keys[lookup(0)].source).toBe('hop')
   })
 
+  it('completes with a bought key whose corner an earlier build stored as a rounded Number ("1.93e+25"), and opens what it holds', async () => {
+    const { secrets, rescan } = await boot()
+    const s = secrets.useSecrets.getState
+    s().hold([heldKey(0), heldKey(1, { source: 'cloud', height: 20, base: { x: '1.93e+25', y: '2.4178516392292583e+25', z: '1.9342813113834067e+25' } })])
+    relay.events = [bag(0), bag(1)]
+    const status = await rescan.rescanAll()
+    expect(status).toMatchObject({ running: false, asked: 2, found: 2, error: null, skipped: [] })
+    expect(s().keys[lookup(1)]).toBeDefined()
+  })
+
   it('never has more than RESCAN_PARALLEL requests open, across batches, split halves and pages', async () => {
     const { secrets, rescan } = await boot()
     // 160 held keys: two batches. Every id busy enough to be split down to

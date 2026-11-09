@@ -81,8 +81,10 @@ describe('the workshop shell, on every tap and paint', () => {
     expect(workshop).toMatch(/if \(!pricing \|\| !shard \|\| !buildable\)/)
   })
   it('keeps the shard list out of its own render: memoized, reading the shards itself', () => {
-    expect(workshop).toMatch(/const ShardList = memo\(function ShardList\(\{ currentId \}: \{ currentId: string \}\)/)
-    expect(workshop).toMatch(/<ShardList currentId=\{shard\.id\} \/>/)
+    expect(workshop).toMatch(/const ShardList = memo\(function ShardList\(\{ currentId, onOpen \}: \{ currentId: string; onOpen: \(\) => void \}\)/)
+    expect(workshop).toMatch(/<ShardList currentId=\{shard\.id\} onOpen=\{closeMenu\} \/>/)
+    // The close it is handed is stable, or the memo would draw it on every render.
+    expect(workshop).toMatch(/const closeMenu = useCallback\(\(\) => setPanel\(null\), \[\]\)/)
     const shell = workshop.slice(workshop.indexOf('export function Workshop('))
     expect(shell).not.toMatch(/useWorkshop\(\(s\) => s\.shards\)/)
     expect(shell).not.toMatch(/useNewestFirst\(/)

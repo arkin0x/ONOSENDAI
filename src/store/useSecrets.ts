@@ -43,11 +43,12 @@ import type { Position } from '../lib/space'
 import { EVICT_PLACES_PER_PASS, EVICT_TO, SECRETS_BUDGET_BYTES, bytesOfAll, earnedToEvict, trimByCount } from '../lib/secrets/budget'
 import {
   describeError, evictPlaces, forgetPlace as forgetPlaceRow, forgetPlacesUpTo, migrateFromLocalStorage, openSecretsDb,
-  readKeys, readLegacyList, readTotals, recordPlace as recordPlaceRow, syncLegacy, writeKeys, type Totals,
+  readKeys, readLegacyList, readTotals, recordPlace as recordPlaceRow, repairKeyBases, syncLegacy, writeKeys, type Totals,
 } from '../lib/secrets/db'
-import { clearForgets, dropApplied, noteFallback, readBought, readFallback, updateBought } from '../lib/secrets/backstop'
+import { clearForgets, dropApplied, noteFallback, readBought, readFallback, repairBoughtBases, updateBought } from '../lib/secrets/backstop'
 import { attach, backendNow, fallBack, memory, run } from '../lib/secrets/vault'
 import { placeOf, type ScanKey } from '../lib/secrets/places'
+import { alignedBase, repairBase } from '../lib/secrets/base'
 
 export { bytesOf } from '../lib/secrets/budget'
 export type { Place, PlaceKey, ScanKey } from '../lib/secrets/places'
@@ -226,8 +227,8 @@ interface SecretsState {
    * with nothing in it the purchase stops and says so, since topping up is the
    * Cloud panel's business and not a thing to do behind a modal.
    */
-  /** Buy the key from HOSAKA; resolves to the held key, or null with buyError set. */
-  buy: (at: { x: bigint; y: bigint; z: bigint }, plane: Plane, height: number) => Promise<HeldKey | null>
+  /** Buy the key from HOSAKA; resolves to the held key, or null with buyError set. `expect.lookupId`: the bag's lookup id, when buying to open a bag already seen; the key must hash to it. A key that fails any check reads HOSAKA RETURNED A WRONG KEY and is never held. */
+  buy: (at: { x: bigint; y: bigint; z: bigint }, plane: Plane, height: number, expect?: { lookupId?: string }) => Promise<HeldKey | null>
 }
 
 /** How the list is ordered. */
@@ -351,13 +352,14 @@ export const useSecrets = create<SecretsState>((set, get) => ({
 
   setSort: (sort) => set({ sort }),
 
-  buy: async (at, plane, height) => {
+  buy: async (at, plane, height, expect) => {
     if (get().buying) return null
     const cs = useCyberspace.getState()
     set({ buying: { height, status: 'submitting', costMsats: 0, estSeconds: null, startedAt: Date.now() }, buyError: null })
     // The store's job driver: a short balance gets the job's own invoice in
     // the invoice modal, and the job starts when it settles.
-    const outcome = await cs.buyRegionKey(at, plane, height)
+    // A key that fails its checks (lib/regionKeyCheck.ts) comes back as an error and is never held.
+    const outcome = await cs.buyRegionKey(at, plane, height, expect)
     if (!outcome.ok) {
       set({ buying: null, buyError: outcome.error })
       return null
@@ -366,12 +368,11 @@ export const useSecrets = create<SecretsState>((set, get) => ({
     const held: HeldKey = {
       lookupId: r.lookup_id,
       keyHex: r.secret_key,
-      height: r.height ?? height,
-      base: {
-        x: String(r.base?.x ?? (at.x >> BigInt(height)) << BigInt(height)),
-        y: String(r.base?.y ?? (at.y >> BigInt(height)) << BigInt(height)),
-        z: String(r.base?.z ?? (at.z >> BigInt(height)) << BigInt(height)),
-      },
+      // The cube asked for, computed here: HOSAKA's `base` came as bare JSON
+      // integers a Number rounded near 2^84, stored as "1.93...e+25", which
+      // then threw in every reader (lib/secrets/base.ts). Never from the answer.
+      height,
+      base: alignedBase(at, height),
       plane,
       source: 'cloud',
       at: Math.floor(Date.now() / 1000),
@@ -407,6 +408,8 @@ export const useSecrets = create<SecretsState>((set, get) => ({
           }
         }
       }
+      // Never the load's failure: a repair that cannot run leaves the keys as they were.
+      try { repairStoredBases() } catch (err) { console.warn('[secrets] could not repair stored corners:', describeError(err)) }
       void checkPersisted()
     })()
     return loading
@@ -628,6 +631,35 @@ function fallBackToLocal(reason: string): void {
   setKeys(keys)
   // What this session did before the load settled is this session's to record.
   saveKeys(Object.values(early).filter((k) => keys[k.lookupId]), forgets)
+}
+
+/**
+ * Put right the corner of every held key stored inexact (lib/secrets/base.ts):
+ * a bought key from before the corner was computed here kept HOSAKA's rounded
+ * Number ("1.93...e+25"), which threw in every reader. From where it was
+ * hidden when a deploy row of this identity names it, else from the rounded
+ * value when only one aligned corner fits it; a corner that cannot be known
+ * is left as it is and ignored by every reader. Only `base` changes, in the
+ * list, in IndexedDB and in the bought-key backstop: no key is dropped.
+ */
+function repairStoredBases(): void {
+  const rows = useShards.getState().mine
+  const fixed: HeldKey[] = []
+  for (const k of Object.values(useSecrets.getState().keys)) {
+    const row = rows.find((d) => d.lookupId === k.lookupId && d.height === k.height && !k.heights)
+    const at = row ? { x: BigInt(row.at.x), y: BigInt(row.at.y), z: BigInt(row.at.z) } : undefined
+    const base = repairBase(k.base, k.heights ?? k.height, at)
+    if (base) fixed.push({ ...k, base })
+  }
+  if (fixed.length === 0) return
+  useSecrets.setState((s) => {
+    const keys = { ...s.keys }
+    for (const k of fixed) if (keys[k.lookupId]) keys[k.lookupId] = { ...keys[k.lookupId], base: k.base }
+    return { keys }
+  })
+  if (backendNow() === 'idb') void persist((db) => repairKeyBases(db, fixed))
+  const failed = repairBoughtBases(fixed)
+  if (failed) useSecrets.setState((s) => ({ storage: { ...s.storage, backstopError: failed } }))
 }
 
 function storageManager(): StorageManager | undefined {

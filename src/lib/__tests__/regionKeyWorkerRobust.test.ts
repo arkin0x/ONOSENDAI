@@ -46,12 +46,24 @@ class FakeWorker {
 
 const AT = { x: 1n, y: 2n, z: 3n }
 const realWorker = (globalThis as { Worker?: unknown }).Worker
+/** A fast machine's measurements: every height's floor stands. */
+const FAST = { 10: 1, 20: 50 }
+
+/** The page, as far as visibility goes: one for the file, since the module watches the first it sees. */
+const page = {
+  visibilityState: 'visible' as 'visible' | 'hidden',
+  listeners: [] as Array<() => void>,
+  addEventListener(type: string, fn: () => void): void { if (type === 'visibilitychange') this.listeners.push(fn) },
+  set(state: 'visible' | 'hidden'): void { this.visibilityState = state; for (const fn of this.listeners) fn() },
+}
+;(globalThis as { document?: unknown }).document = page
 
 beforeEach(() => {
   made = []
   constructorThrows = false
   ;(globalThis as { Worker?: unknown }).Worker = FakeWorker
-  useCalibration.setState({ cantorMsByHeight: undefined })
+  useCalibration.setState({ cantorMsByHeight: FAST })
+  page.visibilityState = 'visible'
 })
 
 afterEach(() => {
@@ -62,11 +74,17 @@ afterEach(() => {
 
 describe('regionKeyTimeoutMs', () => {
   it('gives ten minutes at height 20, halving per height below, never under a minute', () => {
-    expect(regionKeyTimeoutMs(20)).toBe(H20_TIMEOUT_MS)
-    expect(regionKeyTimeoutMs(19)).toBe(H20_TIMEOUT_MS / 2)
-    expect(regionKeyTimeoutMs(17)).toBe(H20_TIMEOUT_MS / 8)
-    expect(regionKeyTimeoutMs(12)).toBe(MIN_TIMEOUT_MS)
-    expect(regionKeyTimeoutMs(1)).toBe(MIN_TIMEOUT_MS)
+    expect(regionKeyTimeoutMs(20, FAST)).toBe(H20_TIMEOUT_MS)
+    expect(regionKeyTimeoutMs(19, FAST)).toBe(H20_TIMEOUT_MS / 2)
+    expect(regionKeyTimeoutMs(17, FAST)).toBe(H20_TIMEOUT_MS / 8)
+    expect(regionKeyTimeoutMs(12, FAST)).toBe(MIN_TIMEOUT_MS)
+    expect(regionKeyTimeoutMs(1, FAST)).toBe(MIN_TIMEOUT_MS)
+  })
+
+  it('gives the ten minutes at any height before the device is measured (review of #625)', () => {
+    expect(regionKeyTimeoutMs(1)).toBe(H20_TIMEOUT_MS)
+    expect(regionKeyTimeoutMs(12, {})).toBe(H20_TIMEOUT_MS)
+    expect(regionKeyTimeoutMs(21)).toBe(H20_TIMEOUT_MS * 2)
   })
 
   it('never allows less than ten times what this device measured for the three axes', () => {
@@ -117,7 +135,7 @@ describe('regionKeyOffThread', () => {
     await Promise.resolve()
     expect(settled).not.toHaveBeenCalled()
     vi.advanceTimersByTime(2000)
-    await expect(p).rejects.toThrow(/did not answer within 10 min at height 20/)
+    await expect(p).rejects.toThrow(/did not answer within 10 min at height 20\. Try again\./)
     expect(made[0].ended).toBe(true)
     void regionKeyOffThread(AT, 10, 20).catch(() => undefined)
     expect(made).toHaveLength(2)
@@ -139,6 +157,85 @@ describe('regionKeyOffThread', () => {
     expect(bSettled).not.toHaveBeenCalled()
     vi.advanceTimersByTime(MIN_TIMEOUT_MS)
     await expect(b).rejects.toThrow(/did not answer/)
+  })
+
+  it('a page hidden at any point since the call re-arms its timer instead of ending the worker: backgrounding never kills a deploy', async () => {
+    vi.useFakeTimers()
+    const p = regionKeyOffThread(AT, 20, 20)
+    const settled = vi.fn()
+    p.then(settled, settled)
+    // The phone locked for a while, and came back.
+    page.set('hidden')
+    page.set('visible')
+    vi.advanceTimersByTime(H20_TIMEOUT_MS + 1000)
+    await Promise.resolve()
+    expect(settled).not.toHaveBeenCalled()
+    expect(made[0].ended).toBe(false)
+    // Its full time again, visible throughout: now it is hung.
+    vi.advanceTimersByTime(H20_TIMEOUT_MS)
+    await expect(p).rejects.toThrow(/Try again/)
+    expect(made[0].ended).toBe(true)
+  })
+
+  it('a page hidden when the time runs out re-arms too, and the answer that comes later is taken', async () => {
+    vi.useFakeTimers()
+    const p = regionKeyOffThread(AT, 20, 20)
+    page.set('hidden')
+    vi.advanceTimersByTime(H20_TIMEOUT_MS * 3)
+    expect(made[0].ended).toBe(false)
+    made[0].answer(made[0].asked[0])
+    await expect(p).resolves.toMatchObject({ lookupId: 'lookup20' })
+  })
+
+  it('hidden across a re-arm and back in view only near the end of the second window: still not ended (review of #632)', async () => {
+    vi.useFakeTimers()
+    const p = regionKeyOffThread(AT, 20, 20)
+    const settled = vi.fn()
+    p.then(settled, settled)
+    page.set('hidden')
+    // Runs out while hidden: re-armed.
+    vi.advanceTimersByTime(H20_TIMEOUT_MS + 10)
+    expect(made[0].ended).toBe(false)
+    // Still hidden (the phone stays locked), back in view only for the last tenth.
+    vi.advanceTimersByTime(H20_TIMEOUT_MS * 0.9)
+    page.set('visible')
+    vi.advanceTimersByTime(H20_TIMEOUT_MS * 0.1 + 10)
+    await Promise.resolve()
+    expect({ ended: made[0].ended, settled: settled.mock.calls.length }).toEqual({ ended: false, settled: 0 })
+    // A full window in view after that: hung, and the message does not claim the whole wait.
+    vi.advanceTimersByTime(H20_TIMEOUT_MS)
+    await expect(p).rejects.toThrow(/did not answer at height 20 in 10 min with the page in view\. Try again\./)
+  })
+
+  it('a call asked after a re-arm waits behind it: it never ends the worker before the re-armed call\'s own time (review of #632)', async () => {
+    vi.useFakeTimers()
+    const M = 60_000
+    const a = regionKeyOffThread(AT, 20, 20)
+    const aSettled = vi.fn()
+    a.then(aSettled, aSettled)
+    // A blip at 1 min; A runs out at 10 min and re-arms to 20.
+    vi.advanceTimersByTime(M); page.set('hidden'); page.set('visible')
+    vi.advanceTimersByTime(9 * M + 10)
+    // Another blip at 11 min: A will re-arm again at 20, to 30.
+    vi.advanceTimersByTime(M); page.set('hidden'); page.set('visible')
+    vi.advanceTimersByTime(M)
+    // Asked at 12 min, queued behind A.
+    const d = regionKeyOffThread(AT, 20, 20)
+    d.catch(() => undefined)
+    // 22 min: past what D's clock would be from the old queue end, no hide since it was asked.
+    vi.advanceTimersByTime(10 * M + 10)
+    await Promise.resolve()
+    expect({ ended: made[0].ended, aSettled: aSettled.mock.calls.length }).toEqual({ ended: false, aSettled: 0 })
+  })
+
+  it('a call that answers after re-arms clears its timer', async () => {
+    vi.useFakeTimers()
+    const p = regionKeyOffThread(AT, 20, 20)
+    page.set('hidden')
+    vi.advanceTimersByTime(H20_TIMEOUT_MS * 2.5)
+    made[0].answer(made[0].asked[0])
+    await expect(p).resolves.toMatchObject({ lookupId: 'lookup20' })
+    expect(vi.getTimerCount()).toBe(0)
   })
 
   it('a worker that cannot even be made refuses the call instead of throwing', async () => {

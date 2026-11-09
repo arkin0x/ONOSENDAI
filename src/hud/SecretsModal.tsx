@@ -32,6 +32,7 @@ import { formatAgo } from '../lib/time'
 import { axisDistance } from '../lib/nearby'
 import { RESCAN_BATCH, describeSkips, rescanAll, rescanPlace, type Skip } from '../lib/secrets/rescan'
 import { describeError } from '../lib/secrets/db'
+import { baseOf } from '../lib/secrets/base'
 import { pagePlaces } from '../lib/secrets/vault'
 import { useCyberspace } from '../store/useCyberspace'
 import { SECRETS_MAX, useSecrets, heldList, type HeldKey, type Place, type SecretsSort, type SecretsStorage } from '../store/useSecrets'
@@ -109,9 +110,12 @@ export function SecretsModal({ onClose }: { onClose: () => void }): JSX.Element 
     // thing you asked about at the edge of the screen and everything else in
     // the middle. Half a side along each axis, per axis, because a movement's
     // region is a box.
+    // A corner stored inexact (lib/secrets/base.ts) has nowhere to go: the list stays.
+    const base = baseOf(k.base)
+    if (!base) return
     const mid = (axis: 'x' | 'y' | 'z'): bigint => {
       const h = BigInt(k.heights ? k.heights[axis] : k.height)
-      return BigInt(k.base[axis]) + (1n << h) / 2n
+      return base[axis] + (1n << h) / 2n
     }
     useSecrets.getState().setOpen(false)
     useSecrets.getState().focus(k.lookupId)

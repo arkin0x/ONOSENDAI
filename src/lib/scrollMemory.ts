@@ -6,8 +6,10 @@
  *
  * A list is named by a key, its owner's pubkey and the list's own name
  * (scrollKey), so two lists never share a place and one identity never lands
- * where another left off. The place is kept in memory for the session and in
- * sessionStorage, so a reload keeps it too; sessionStorage may be missing or
+ * where another left off: a list taken up under an identity with no place
+ * kept starts at the top. The place is kept in memory as the user scrolls,
+ * and written to sessionStorage when the list goes and when the page does
+ * (pagehide), so a reload keeps it too; sessionStorage may be missing or
  * refuse (private mode, a full quota), and then memory alone serves.
  *
  * attachScrollMemory watches one scrolling element under one key. Every
@@ -67,11 +69,23 @@ export function recallScroll(key: string): number {
   return 0
 }
 
-/** Keep a place for a key, in memory and, where it can, in sessionStorage. */
-export function rememberScroll(key: string, top: number): void {
+/** Keep a place for a key, in memory and, unless `persist` is false, in sessionStorage too. */
+export function rememberScroll(key: string, top: number, persist = true): void {
   const n = Math.max(0, Math.round(top))
   places.set(key, n)
+  if (persist) persistScroll(key)
+}
+
+/** Write the place held in memory for a key to sessionStorage, where it can. */
+function persistScroll(key: string): void {
+  const n = places.get(key)
+  if (n === undefined) return
   try { window.sessionStorage.setItem(PREFIX + key, String(n)) } catch { /* memory only */ }
+}
+
+/** The page's own events, where there is a page. */
+function pageEvents(): Pick<Window, 'addEventListener' | 'removeEventListener'> | null {
+  try { return typeof window.addEventListener === 'function' ? window : null } catch { return null }
 }
 
 /** Forget every place held in memory (tests; sessionStorage is left). */
@@ -88,6 +102,10 @@ export function forgetScrollMemory(): void {
 export function attachScrollMemory(el: ScrollBox, key: string, isReady: () => boolean = () => true): ScrollMemory {
   const target = recallScroll(key)
   let done = target <= 0
+  // Nothing kept under this key: the top. The same element taken up again
+  // under another identity would otherwise keep the last one's place, and
+  // remember it as this one's.
+  if (done && el.scrollTop !== 0) el.scrollTop = 0
   // Where the restore last put the list: a scroll anywhere else is the user's.
   let ours = el.scrollTop
   let watcher: MutationObserver | null = null
@@ -105,13 +123,23 @@ export function attachScrollMemory(el: ScrollBox, key: string, isReady: () => bo
     ours = el.scrollTop
     finish()
   }
+  // Memory on every scroll; sessionStorage once, when the list or the page goes.
+  let unsaved = false
   const onScroll = (): void => {
     if (!done && Math.abs(el.scrollTop - ours) > 1) finish()
-    if (done) rememberScroll(key, el.scrollTop)
+    if (!done) return
+    rememberScroll(key, el.scrollTop, false)
+    unsaved = true
   }
+  const flush = (): void => {
+    if (unsaved) persistScroll(key)
+    unsaved = false
+  }
+  const page = pageEvents()
 
   el.addEventListener('scroll', onScroll, { passive: true })
   for (const t of INTENT) el.addEventListener(t, finish, { passive: true })
+  page?.addEventListener('pagehide', flush)
   settle()
   // Rows that arrive without the caller drawing (a memoized list inside it)
   // try the restore again as they land.
@@ -127,6 +155,8 @@ export function attachScrollMemory(el: ScrollBox, key: string, isReady: () => bo
       watcher = null
       el.removeEventListener('scroll', onScroll)
       for (const t of INTENT) el.removeEventListener(t, finish)
+      page?.removeEventListener('pagehide', flush)
+      flush()
     },
   }
 }

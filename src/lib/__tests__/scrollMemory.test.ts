@@ -147,6 +147,21 @@ describe('scroll memory', () => {
     expect(mineAgain.scrollTop).toBe(1600)
   })
 
+  it('takes up the same element under another identity at the top, not at the last one\'s place', () => {
+    const box = new Box(5000)
+    const mine = attachScrollMemory(box, MENU)
+    box.scrollTo(1600)
+    mine.detach()
+    // The identity switches while the list stays on screen: one element, a new key.
+    const theirs = attachScrollMemory(box, scrollKey('workshop-menu', THEM))
+    expect(box.scrollTop).toBe(0)
+    box.fire('scroll')
+    expect(recallScroll(scrollKey('workshop-menu', THEM))).toBe(0)
+    theirs.detach()
+    attachScrollMemory(box, MENU)
+    expect(box.scrollTop).toBe(1600)
+  })
+
   it('stops listening when detached', () => {
     const box = new Box(5000)
     const m = attachScrollMemory(box, MENU)
@@ -157,24 +172,47 @@ describe('scroll memory', () => {
     expect(recallScroll(MENU)).toBe(400)
   })
 
-  it('survives a reload through sessionStorage', () => {
+  it('survives a reload through sessionStorage, written when the list goes, not on every scroll', () => {
     const kept = new Map<string, string>()
-    vi.stubGlobal('window', { sessionStorage: { getItem: (k: string) => kept.get(k) ?? null, setItem: (k: string, v: string) => { kept.set(k, v) } } })
+    const setItem = vi.fn((k: string, v: string) => { kept.set(k, v) })
+    vi.stubGlobal('window', { sessionStorage: { getItem: (k: string) => kept.get(k) ?? null, setItem } })
     const box = new Box(5000)
-    attachScrollMemory(box, MENU)
-    box.scrollTo(1333)
+    const m = attachScrollMemory(box, MENU)
+    for (const top of [200, 600, 1000, 1333]) box.scrollTo(top)
+    expect(setItem).not.toHaveBeenCalled()
+    m.detach()
+    expect(setItem).toHaveBeenCalledTimes(1)
     forgetScrollMemory()
     const reloaded = new Box(5000)
     attachScrollMemory(reloaded, MENU)
     expect(reloaded.scrollTop).toBe(1333)
   })
 
+  it('writes sessionStorage when the page goes (pagehide), the list still on screen', () => {
+    const kept = new Map<string, string>()
+    const page = new Map<string, () => void>()
+    vi.stubGlobal('window', {
+      sessionStorage: { getItem: (k: string) => kept.get(k) ?? null, setItem: (k: string, v: string) => { kept.set(k, v) } },
+      addEventListener: (t: string, fn: () => void) => { page.set(t, fn) },
+      removeEventListener: (t: string) => { page.delete(t) },
+    })
+    const box = new Box(5000)
+    const m = attachScrollMemory(box, MENU)
+    box.scrollTo(2222)
+    expect([...kept.values()]).toEqual([])
+    page.get('pagehide')!()
+    expect([...kept.values()]).toEqual(['2222'])
+    m.detach()
+    expect(page.has('pagehide')).toBe(false)
+  })
+
   it('works from memory alone where sessionStorage refuses', () => {
     const refuse = (): never => { throw new Error('SecurityError') }
     vi.stubGlobal('window', { sessionStorage: { getItem: refuse, setItem: refuse } })
     const box = new Box(5000)
-    attachScrollMemory(box, MENU)
+    const live = attachScrollMemory(box, MENU)
     box.scrollTo(250)
+    live.detach()
     const again = new Box(5000)
     attachScrollMemory(again, MENU)
     expect(again.scrollTop).toBe(250)

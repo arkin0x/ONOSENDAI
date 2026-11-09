@@ -655,10 +655,12 @@ function copy(id: string): void {
  * Tapping a shard opens it and closes MENU, so the bench is in sight
  * (arkinox, 2026-11-09: "in workshop, tapping a shard in MENU should close
  * the menu"); `onOpen` is that close, and must be stable to keep the memo.
- * The row's other tools (duplicate, copy, move, delete) leave MENU open.
+ * The row's other tools (duplicate, copy, move, delete) leave MENU open,
+ * and while SELECT is on a tap on the row picks it or lets it go instead,
+ * so the picks are not lost to a closing menu (review of PR 631).
  * MENU opens again where it was scrolled to (hooks/useScrollMemory).
  */
-const ShardList = memo(function ShardList({ currentId, onOpen }: { currentId: string; onOpen: () => void }): JSX.Element {
+export const ShardList = memo(function ShardList({ currentId, onOpen }: { currentId: string; onOpen: () => void }): JSX.Element {
   const shards = useWorkshop((s) => s.shards)
   const w = useWorkshop.getState
   // The list's order (the comment below says why).
@@ -669,7 +671,7 @@ const ShardList = memo(function ShardList({ currentId, onOpen }: { currentId: st
           A deploy counts as an edit here, inside its folder (arkinox, 2026-10-23). */}
       <ShardFolders items={byRecent} refOf={modelRef} nameOf={modelName} deleteContents={DELETE_CONTENTS} row={(s, f) => (
         <li key={s.id} className={s.id === currentId ? 'is-current' : ''} {...f.drag}>
-          <button className="workshop__pick" onClick={() => { w().select(s.id); onOpen() }}>
+          <button className="workshop__pick" aria-pressed={f.selecting ? f.picked : undefined} onClick={() => { if (f.selecting) { f.toggle(); return } w().select(s.id); onOpen() }}>
             <ShardThumb shard={s} own />
             <span className="workshop__pick-name">{s.name}</span>
             <span className="workshop__pick-meta">{s.vertices.length} v · {s.faces.length} f{s.parts?.length ? ` · ${s.parts.length} parts` : ''} · {s.mode}</span>

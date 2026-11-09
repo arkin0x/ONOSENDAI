@@ -25,6 +25,7 @@ import { usePublished } from '../store/usePublished'
 import { useEscape } from '../hooks/useEscape'
 import { ShardFolders, useNewestFirst } from '../hud/ShardFolders'
 import { useScrollMemory } from '../hooks/useScrollMemory'
+import { useShardFolders } from '../store/useShardFolders'
 import { ShardThumb } from '../hud/ShardThumb'
 
 const OBJECT_KIND = 33331
@@ -98,8 +99,10 @@ export function ObjectPicker({ onClose }: { onClose: () => void }): JSX.Element 
   }, [me])
   // Newest first, a deploy counted as an edit, as every list of your shards (hud/ShardFolders).
   const byRecent = useNewestFirst(mine ?? NONE, foundRef, foundEditedAt)
-  // The list comes back where it was scrolled to the next time STAMP's picker opens.
-  const listScroll = useScrollMemory('workshop-stamp-objects', mine !== null)
+  // The list comes back where it was scrolled to the next time STAMP's picker
+  // opens: ready once the relays answered and the folders are read.
+  const foldersRead = useShardFolders((s) => s.storage !== 'loading')
+  const listScroll = useScrollMemory('workshop-stamp-objects', mine !== null && foldersRead)
 
   const choose = (o: StampObject): void => {
     useWorkshop.getState().setStampObject(o)

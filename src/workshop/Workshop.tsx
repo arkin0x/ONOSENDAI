@@ -21,7 +21,7 @@
  */
 
 import { carriesSealedParts } from '../lib/carried'
-import { memo, useEffect, useMemo, useRef, useState } from 'react'
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Field, Switch } from '../hud/ui/Switch'
 import { Vector3 } from 'three'
 import { Compass3D } from '../scene/Compass3D'
@@ -61,6 +61,8 @@ import { stackedSpots } from '../lib/weld'
 import { ObjectPicker } from './ObjectPicker'
 import { ShardFolders, modelEditedAt, modelName, modelRef, useNewestFirst, type DeleteContents } from '../hud/ShardFolders'
 import { useEscape } from '../hooks/useEscape'
+import { useScrollMemory } from '../hooks/useScrollMemory'
+import { useShardFolders } from '../store/useShardFolders'
 import { ShardThumb } from '../hud/ShardThumb'
 
 const TOOLS: Tool[] = ['view', 'stamp', 'add', 'select', 'face']
@@ -649,8 +651,16 @@ function copy(id: string): void {
  * list inside it, a tap on a face walked every row of a Maze Kit library, a
  * hundred and more, each with its thumbnail and its buttons. It draws when the
  * shards change or another is opened, and not otherwise.
+ *
+ * Tapping a shard opens it and closes MENU, so the bench is in sight
+ * (arkinox, 2026-11-09: "in workshop, tapping a shard in MENU should close
+ * the menu"); `onOpen` is that close, and must be stable to keep the memo.
+ * The row's other tools (duplicate, copy, move, delete) leave MENU open,
+ * and while SELECT is on a tap on the row picks it or lets it go instead,
+ * so the picks are not lost to a closing menu (review of PR 631).
+ * MENU opens again where it was scrolled to (hooks/useScrollMemory).
  */
-const ShardList = memo(function ShardList({ currentId }: { currentId: string }): JSX.Element {
+export const ShardList = memo(function ShardList({ currentId, onOpen }: { currentId: string; onOpen: () => void }): JSX.Element {
   const shards = useWorkshop((s) => s.shards)
   const w = useWorkshop.getState
   // The list's order (the comment below says why).
@@ -661,7 +671,7 @@ const ShardList = memo(function ShardList({ currentId }: { currentId: string }):
           A deploy counts as an edit here, inside its folder (arkinox, 2026-10-23). */}
       <ShardFolders items={byRecent} refOf={modelRef} nameOf={modelName} deleteContents={DELETE_CONTENTS} row={(s, f) => (
         <li key={s.id} className={s.id === currentId ? 'is-current' : ''} {...f.drag}>
-          <button className="workshop__pick" onClick={() => w().select(s.id)}>
+          <button className="workshop__pick" aria-pressed={f.selecting ? f.picked : undefined} onClick={() => { if (f.selecting) { f.toggle(); return } w().select(s.id); onOpen() }}>
             <ShardThumb shard={s} own />
             <span className="workshop__pick-name">{s.name}</span>
             <span className="workshop__pick-meta">{s.vertices.length} v · {s.faces.length} f{s.parts?.length ? ` · ${s.parts.length} parts` : ''} · {s.mode}</span>
@@ -793,6 +803,13 @@ export function Workshop(): JSX.Element | null {
     return () => document.removeEventListener('pointerdown', shut, true)
   }, [viewOpen])
   const bind = useRepeatable()
+  // MENU comes back where it was scrolled to: after a shard is opened, the
+  // workshop closed for a deploy or a look and opened again, or another panel
+  // was open in between (arkinox, 2026-11-09: "the list of shards is very
+  // long"). Ready once the folders are read, since folding changes its height.
+  const foldersRead = useShardFolders((s) => s.storage !== 'loading')
+  const menuScroll = useScrollMemory('workshop-menu', foldersRead)
+  const closeMenu = useCallback(() => setPanel(null), [])
   // Every hook above this line, none below it: the early return that follows
   // changes which hooks run, and React counts them. This one sat after the
   // return for a day and opening the workshop threw React #310 (2026-09-24).
@@ -932,7 +949,7 @@ export function Workshop(): JSX.Element | null {
           PASTE and IMPORT. The open shard's own settings are under SHARD,
           and the avatar's under AVATAR. */}
       {panel === 'menu' && shard && (
-        <div className="ws__panel" role="region" aria-label="Menu">
+        <div className="ws__panel" role="region" aria-label="Menu" ref={menuScroll}>
           <div className="ws__panel-title">SHARDS ({shardCount})</div>
           <div className="workshop__list-row">
             <button className="workshop__new" onClick={() => w().create()}>+ NEW SHARD</button>
@@ -948,7 +965,7 @@ export function Workshop(): JSX.Element | null {
               </div>
             </div>
           )}
-          <ShardList currentId={shard.id} />
+          <ShardList currentId={shard.id} onOpen={closeMenu} />
           <div className="workshop__row">
             <button className="workshop__btn workshop__btn--danger" disabled={!hasContent} onClick={() => { if (window.confirm('Delete all vertices, faces and placed objects in the scene?')) w().clearShard() }} title="Empty this scene (undoable)">CLEAR THIS SCENE</button>
             <span className="workshop__gap" />

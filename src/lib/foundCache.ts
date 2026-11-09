@@ -22,6 +22,7 @@
  */
 
 import { verifyEvent } from 'nostr-tools/pure'
+import { forgetSealedItems } from './sealed'
 import { BagUnreadable, HIDDEN_KIND, ciphertextOf, entryKey, forgetParsedObjects, unbag, type Hidden, type Reference, type RegionOrigin, type ResolveReference } from './hidden'
 import { bytesToHex, hexToBytes } from './events'
 import type { NostrEvent } from './events'
@@ -256,8 +257,9 @@ const opening = new Map<string, Promise<{ items: Hidden[]; refs: Record<string, 
  * (OPENED_KEPT_CHARS by default).
  */
 export function forgetOpened(budget: number = OPENED_KEPT_CHARS): number {
-  // What references opened to is plaintext of this identity's too.
+  // What references opened to is plaintext of this identity's too, sealed entries' items with it.
   forgetParsedObjects()
+  forgetSealedItems()
   const n = openedBags.size
   openedBags.clear()
   opening.clear()

@@ -54,7 +54,10 @@ function unreadableTitle(bagId: string): string {
   const r = bagReading(bagId)
   if (!r) return 'Opened'
   if (r.opaque) return 'Opened: this bag holds something other than a list of items'
-  return `Opened: ${r.entries === 0 ? 'nothing inside' : `none of its ${r.entries} entries can be read by this client`}`
+  // Spec §7.6 Reading: say there is more than was read, and that an entry was refused, rather than nothing.
+  const more = r.skipped ? `. ${r.skipped} more not fetched` : ''
+  const refused = r.refused ? `. ${r.refused} refused` : ''
+  return `Opened: ${r.entries === 0 ? 'nothing inside' : `none of its ${r.entries} entries can be read by this client`}${more}${refused}`
 }
 
 type Mode = 'hidden' | 'discovered'

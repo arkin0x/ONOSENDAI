@@ -7891,14 +7891,11 @@ kbd {
 .nearby__lock--closed { color: var(--fg); }
 /* A fingertip on a phone; the buttons keep their look. */
 @media (max-width: 640px) {
-  .nearby__row .chest__act, .nearby__row .nearby__view, .secrets__box .secrets__close, .held__acts .chest__act--danger { min-height: 44px; min-width: 44px; }
+  .nearby__row .chest__act, .nearby__row .nearby__view, .secrets__box .secrets__close { min-height: 44px; min-width: 44px; }
 }
-/* An item's row of buttons in ITEMS: DETAILS, COPY, PUBLISH and DELETE all
- * the same fingertip height, not DELETE alone (review of #584). On a narrow
- * screen, as above, and on any touch screen however wide. */
-@media (max-width: 640px), (pointer: coarse) {
-  .held__row--item .held__acts .chest__act { min-height: 44px; min-width: 44px; }
-}
+/* A key item's buttons in ITEMS are the OTHER LOOT rows' small ones, at every
+ * width (arkinox, 2026-11-09: "the buttons on the Items are way too large.
+ * Make them like the buttons below on the 'taken' things"), DELETE too. */
 /* DELETE on a held item: it destroys something, so it does not read as COPY does. */
 .chest__act.chest__act--danger { color: var(--danger); border-color: color-mix(in srgb, var(--danger) 50%, transparent); background: transparent; }
 .chest__act.chest__act--danger:hover { background: color-mix(in srgb, var(--danger) 14%, transparent); }
@@ -9485,11 +9482,16 @@ a.feed__act { text-decoration: none; }
 .held__acts { display: flex; gap: 4px; align-items: center; }
 .held__views { display: flex; gap: 6px; margin: 4px 0 6px; }
 .held__views .tag--tap.is-on { color: var(--accent); border-color: var(--accent); }
-/* An item you hold: the picture beside the name and its line, both the full
- * width of the row, and DETAILS, COPY, PUBLISH and DELETE on a row of their
- * own under them, lined up with the name (arkinox, 2026-11-03). */
-.held__row--item { grid-template-columns: auto minmax(0, 1fr); row-gap: 6px; }
-.held__row--item .held__acts { grid-column: 2 / -1; flex-wrap: wrap; }
+/* A key item, laid out as an OTHER LOOT row (arkinox, 2026-11-09): its
+ * buttons on the right, beside the name when they fit and on the line under
+ * it when they do not, wrapping there on a phone. The name keeps at least
+ * 140px, so six buttons never squeeze it to "Si..." (arkinox, 2026-11-03).
+ * DETAILS and a refusal open under all of it, as on the loot rows. */
+.held__row--item { display: flex; flex-wrap: wrap; align-items: center; column-gap: 8px; row-gap: 4px; }
+.held__row--item > .chest__glyph { flex: none; }
+.held__row--item > .item__line { flex: 1 1 140px; }
+.held__row--item > .held__acts { flex: 0 1 auto; margin-left: auto; flex-wrap: wrap; justify-content: flex-end; }
+.held__row--item > .held__refusal, .held__row--item > .held__details { flex: 1 1 100%; }
 .held__refusal { grid-column: 1 / -1; font-size: 10px; color: var(--danger); padding-left: 22px; }
 .held__details { grid-column: 1 / -1; display: flex; flex-direction: column; gap: 4px; padding: 2px 0 2px 22px; font-size: 10px; }
 .held__details dl { display: grid; grid-template-columns: auto 1fr; gap: 3px 10px; margin: 0; }

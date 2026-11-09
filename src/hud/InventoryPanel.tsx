@@ -208,9 +208,9 @@ function KeyRow({ item, opens }: { item: HeldItem; opens: number }): JSX.Element
     if (why) setRefusal(why)
   }
   return (
-    // The buttons on a row of their own, under the name and its line
-    // (arkinox, 2026-11-03: four buttons beside them squeezed the name to
-    // "Si..." and the details to a word or two a line).
+    // Laid out as an OTHER LOOT row, with its small buttons (arkinox,
+    // 2026-11-09): on the right, beside the name when they fit, under it when
+    // they do not, so they never squeeze the name to "Si..." (2026-11-03).
     <li className="secrets__row held__row held__row--item">
       <ItemFace className="chest__glyph chest__glyph--key" type="key" image={item.key?.image} />
       <span className="item__line">
@@ -258,6 +258,11 @@ function KeyRow({ item, opens }: { item: HeldItem; opens: number }): JSX.Element
     </li>
   )
 }
+
+/** The heading over the keypair items you hold (arkinox, 2026-11-09, verbatim). */
+export const KEY_ITEMS_HEADING = 'KEY ITEMS — MAY UNLOCK DOORS OR CHESTS'
+/** The heading over what was taken out of chests (arkinox, 2026-11-09). */
+export const OTHER_LOOT_HEADING = 'OTHER LOOT'
 
 /** How long MOVED INTO WORKSHOP stays in a row's place before the row leaves the list (arkinox, 2026-10-11). */
 export const MOVED_NOTICE_MS = 5000
@@ -345,7 +350,7 @@ export function TakenRow({ item }: { item: HeldItem }): JSX.Element {
         <PlaceButton item={item} onRefused={setRefusal} />
         <ArchiveButton item={item} />
         {clearable && (
-          <button className="held__clear" onClick={() => useInventory.getState().clearTaken([item.id])} title="Clear it from TAKEN" aria-label={`Clear ${label} from TAKEN`}>
+          <button className="held__clear" onClick={() => useInventory.getState().clearTaken([item.id])} title="Clear it from OTHER LOOT" aria-label={`Clear ${label} from OTHER LOOT`}>
             <X size={14} aria-hidden />
           </button>
         )}
@@ -434,10 +439,11 @@ export function InventoryPanel(): JSX.Element {
       )}
 
       {/* Two sections, so each keeps its heading: the keypair items you hold,
-          then what was taken out of chests. */}
+          then what was taken out of chests. The headings are arkinox's own
+          words (2026-11-09), the dash included. */}
       {showing === 'inventory' && keys.length > 0 && (
         <div className="shards__section">
-          <span className="legend__label">Items you hold</span>
+          <span className="legend__label">{KEY_ITEMS_HEADING}</span>
           <ul className="secrets__list held__list">
             {keys.map((k) => <KeyRow key={k.id} item={k} opens={k.key ? chestsOpenedBy(k.key, chests).length : 0} />)}
           </ul>
@@ -447,8 +453,8 @@ export function InventoryPanel(): JSX.Element {
       {showing === 'inventory' && taken.length > 0 && (
         <div className="shards__section">
           <span className="held__takenhead">
-            <span className="legend__label">Taken</span>
-            <button className="tag tag--tap" onClick={() => useInventory.getState().clearTaken(taken.filter((t) => clearsWithAll(t, keptFromAll)).map((t) => t.id))} title="Clear everything from TAKEN except coins and NFT links, which are cleared one at a time">CLEAR ALL</button>
+            <span className="legend__label">{OTHER_LOOT_HEADING}</span>
+            <button className="tag tag--tap" onClick={() => useInventory.getState().clearTaken(taken.filter((t) => clearsWithAll(t, keptFromAll)).map((t) => t.id))} title="Clear everything from OTHER LOOT except coins and NFT links, which are cleared one at a time">CLEAR ALL</button>
           </span>
           <ul className="secrets__list held__list">
             {taken.map((t) => <TakenRow key={t.id} item={t} />)}

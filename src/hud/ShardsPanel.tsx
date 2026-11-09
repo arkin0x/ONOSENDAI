@@ -107,19 +107,17 @@ export function ShardsPanel(): JSX.Element {
 
       {/* Items, chests and doors (B1 §3.1; chest and door design, arkinox
           2026-10-26: "buttons should be forge an item / seal a chest / seal a
-          door"; 2026-11-09, the verbs dropped: ITEM, CHEST, DOOR, as the
-          BUILD bar has them, the verbs kept in the tooltips). An item is a
-          keypair hidden in a bag, composed in a modal first. A chest and a
-          door are placed first, then filled (R18; 2026-10-31: "tap, choose
-          location, choose contents for both doors and chests"): the hide bar
-          comes up at once, and the chest's modal after PLACE CHEST or PLACE
-          DOOR. */}
+          door"). An item is a keypair hidden in a bag, composed in a modal
+          first. A chest and a door are placed first, then filled (R18;
+          2026-10-31: "tap, choose location, choose contents for both doors
+          and chests"): the hide bar comes up at once, and the chest's modal
+          after PLACE CHEST or PLACE DOOR. */}
       <div className="shards__section">
         <span className="legend__label">Place an item, a chest or a door</span>
         <div className="shards__modes">
-          <button className="avatars__go shards__compose-open" onClick={() => useStash.getState().openKey()} title="Forge an item: a keypair hidden as an item; whoever finds it can TAKE it, and a chest can be sealed to it"><ItemIcon type="key" className="shards__build-icon" size={13} strokeWidth={2.5} /> ITEM</button>
-          <button className="avatars__go shards__compose-open" onClick={sealAChest} title="Seal a chest: place a chest, then seal a message, a model or an item in it to an item or a person"><ItemIcon type="chest" className="shards__build-icon" size={13} strokeWidth={2.5} /> CHEST</button>
-          <button className="avatars__go shards__compose-open" onClick={sealADoor} title="Seal a door: place a door, then whatever you place in its red cube at its height is sealed to it"><DoorClosedLocked className="item-icon shards__build-icon" size={13} strokeWidth={2.5} aria-hidden /> DOOR</button>
+          <button className="avatars__go shards__compose-open" onClick={() => useStash.getState().openKey()} title="Forge a keypair as an item and hide it; whoever finds it can TAKE it, and a chest can be sealed to it"><ItemIcon type="key" className="shards__build-icon" size={13} strokeWidth={2.5} /> FORGE AN ITEM</button>
+          <button className="avatars__go shards__compose-open" onClick={sealAChest} title="Place a chest, then seal a message, a model or an item in it to an item or a person"><ItemIcon type="chest" className="shards__build-icon" size={13} strokeWidth={2.5} /> SEAL A CHEST</button>
+          <button className="avatars__go shards__compose-open" onClick={sealADoor} title="Place a door, then whatever you place in its red cube at its height is sealed to it"><DoorClosedLocked className="item-icon shards__build-icon" size={13} strokeWidth={2.5} aria-hidden /> SEAL A DOOR</button>
         </div>
       </div>
 

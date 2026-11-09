@@ -8664,8 +8664,9 @@ kbd {
 :root {
   --build: #f2f7ff;
 }
-/* The whole width of the scene up to the compass (arkinox, 2026-11-09),
- * clear of a notch on either side. */
+/* The whole width of the scene up to the compass (arkinox, 2026-11-09).
+ * The safe-area terms are 0 today (index.html has no viewport-fit=cover);
+ * they keep the bar clear of a notch if that is ever turned on. */
 .hyperbar.buildbar {
   flex-direction: column;
   align-items: stretch;

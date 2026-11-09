@@ -1,8 +1,7 @@
 /**
  * sealAChestHud.test.tsx: the three distinct buttons (arkinox, 2026-10-26:
  * "buttons should be forge an item / seal a chest / seal a door"; 2026-10-31:
- * "i thought we talked about these being distinct"; 2026-11-09: the verbs
- * dropped, ITEM, CHEST, DOOR, as the BUILD bar has them), the chest modal after
+ * "i thought we talked about these being distinct"), the chest modal after
  * PLACE CHEST, and EDIT · MOVE · ADD · DELETE on a chest of yours, for you
  * alone (4.8). Rendered to a string, each store brought up to date first.
  */
@@ -70,11 +69,10 @@ const actions = (html: string): string[] => {
   return [...row.slice(0, row.indexOf('</div>')).matchAll(/<button[^>]*>(?:<svg.*?<\/svg>)?([^<]*)<\/button>/g)].map((m) => m[1])
 }
 
-describe('ITEM / CHEST / DOOR', () => {
-  it('are three distinct buttons, each live, by their nouns', () => {
+describe('FORGE AN ITEM / SEAL A CHEST / SEAL A DOOR', () => {
+  it('are three distinct buttons, each live', () => {
     const html = render(<ShardsPanel />)
-    for (const verb of ['FORGE AN ITEM', 'SEAL A CHEST', 'SEAL A DOOR']) expect(html).not.toContain(verb)
-    const i = html.indexOf(' ITEM</button>'), c = html.indexOf(' CHEST</button>'), d = html.indexOf(' DOOR</button>')
+    const i = html.indexOf('FORGE AN ITEM'), c = html.indexOf('SEAL A CHEST'), d = html.indexOf('SEAL A DOOR')
     expect(i).toBeGreaterThan(-1)
     expect(c).toBeGreaterThan(i)
     expect(d).toBeGreaterThan(c)

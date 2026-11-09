@@ -85,16 +85,18 @@ export function BuildBar(): JSX.Element | null {
       {/* Nouns, not verbs, every button always there in the same cell
           (arkinox, 2026-11-09): what can be placed, then AGAIN and AVATAR.
           AGAIN stays in its cell, dimmed, when there is nothing to place
-          again, so nothing after it moves. The tooltips keep the verbs. */}
+          again, so nothing after it moves. The tooltips keep the verbs, and
+          so do the accessible names, each holding its visible word (WCAG
+          2.5.3, label in name). */}
       <div className="buildbar__acts">
-        <button className="buildbar__act" onClick={() => useStash.getState().openModels()} title="Place object: choose one of your models and place it at the build cursor"><ItemIcon type="shard" className="buildbar__icon" size={ICON} />OBJECT</button>
-        <button className="buildbar__act" onClick={() => useStash.getState().openMessage()} title="Hide message: write a message and hide it at the build cursor"><ItemIcon type="message" className="buildbar__icon" size={ICON} />MESSAGE</button>
-        <button className="buildbar__act" onClick={() => useStash.getState().openAudio()} title="Place audio: hide an audio file at the build cursor, encrypted; only finders can play it"><ItemIcon type="audio" className="buildbar__icon" size={ICON} />AUDIO</button>
-        <button className="buildbar__act" onClick={() => useStash.getState().openKey()} title="Forge an item: a keypair hidden at the build cursor; whoever finds it can TAKE it, and a chest can be sealed to it"><ItemIcon type="key" className="buildbar__icon" size={ICON} />ITEM</button>
-        <button className="buildbar__act" onClick={sealAChest} title="Seal a chest: place a chest, then seal a message, a model or an item in it to an item or a person"><ItemIcon type="chest" className="buildbar__icon" size={ICON} />CHEST</button>
-        <button className="buildbar__act" onClick={sealADoor} title="Seal a door: place a door, then whatever you place in its red cube at its height is sealed to it"><DoorClosedLocked className="item-icon buildbar__icon" size={ICON} strokeWidth={2.5} aria-hidden />DOOR</button>
-        <button className="buildbar__act" disabled={again === null} onClick={() => useShards.getState().placeAgain()} title={again === null ? 'Place again: nothing placed yet this session' : `Place "${again}" again, with the same settings`}><ItemIcon type={againType} className="buildbar__icon" size={ICON} />AGAIN</button>
-        <button className="buildbar__act" disabled={onAvatar} onClick={() => useBuilder.getState().toAvatar()} title="Return to avatar: bring the build cursor and the view back to your avatar, still building (X)"><House className="buildbar__icon" size={ICON} strokeWidth={2.25} aria-hidden />AVATAR</button>
+        <button className="buildbar__act" onClick={() => useStash.getState().openModels()} aria-label="Place object" title="Place object: choose one of your models and place it at the build cursor"><ItemIcon type="shard" className="buildbar__icon" size={ICON} />OBJECT</button>
+        <button className="buildbar__act" onClick={() => useStash.getState().openMessage()} aria-label="Hide message" title="Hide message: write a message and hide it at the build cursor"><ItemIcon type="message" className="buildbar__icon" size={ICON} />MESSAGE</button>
+        <button className="buildbar__act" onClick={() => useStash.getState().openAudio()} aria-label="Place audio" title="Place audio: hide an audio file at the build cursor, encrypted; only finders can play it"><ItemIcon type="audio" className="buildbar__icon" size={ICON} />AUDIO</button>
+        <button className="buildbar__act" onClick={() => useStash.getState().openKey()} aria-label="Forge an item" title="Forge an item: a keypair hidden at the build cursor; whoever finds it can TAKE it, and a chest can be sealed to it"><ItemIcon type="key" className="buildbar__icon" size={ICON} />ITEM</button>
+        <button className="buildbar__act" onClick={sealAChest} aria-label="Seal a chest" title="Seal a chest: place a chest, then seal a message, a model or an item in it to an item or a person"><ItemIcon type="chest" className="buildbar__icon" size={ICON} />CHEST</button>
+        <button className="buildbar__act" onClick={sealADoor} aria-label="Seal a door" title="Seal a door: place a door, then whatever you place in its red cube at its height is sealed to it"><DoorClosedLocked className="item-icon buildbar__icon" size={ICON} strokeWidth={2.5} aria-hidden />DOOR</button>
+        <button className="buildbar__act" disabled={again === null} onClick={() => useShards.getState().placeAgain()} aria-label="Place again" title={again === null ? 'Place again: nothing placed yet this session' : `Place "${again}" again, with the same settings`}><ItemIcon type={againType} className="buildbar__icon" size={ICON} />AGAIN</button>
+        <button className="buildbar__act" disabled={onAvatar} onClick={() => useBuilder.getState().toAvatar()} aria-label="Return to avatar" title="Return to avatar: bring the build cursor and the view back to your avatar, still building (X)"><House className="buildbar__icon" size={ICON} strokeWidth={2.25} aria-hidden />AVATAR</button>
       </div>
 
       <Explanation>

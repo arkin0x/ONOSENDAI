@@ -74,6 +74,14 @@ describe('the BUILD bar: ITEM, CHEST, DOOR, and no verbs', () => {
     await bar.unmount()
   })
 
+  it('names each button by its full phrase, its visible word inside it (label in name)', async () => {
+    const bar = await mount(<BuildBar />)
+    const names = ['Place object', 'Hide message', 'Place audio', 'Forge an item', 'Seal a chest', 'Seal a door', 'Place again', 'Return to avatar']
+    expect(acts(bar).map((h) => h.props['aria-label'])).toEqual(names)
+    for (const h of acts(bar)) expect(String(h.props['aria-label']).toUpperCase()).toContain(textOf(h))
+    await bar.unmount()
+  })
+
   it('AGAIN holds its cell, dimmed, when there is nothing to place again: nothing after it moves', async () => {
     const bar = await mount(<BuildBar />)
     expect(acts(bar)).toHaveLength(ORDER.length)

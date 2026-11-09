@@ -28,21 +28,27 @@
  * run before anything is published that would be gone on a reload: each
  * shard is published only once its write has committed.
  * A second zip waits until a run is over.
+ *
+ * A .json SNO object picked or dropped on its own (or with other files) comes
+ * in the same way, as if it were the one file at the top of a zip named
+ * LOOSE_ZIP (openFiles): the same naming, limits, review, SKIP/COPY/UPDATE and
+ * publishing (arkinox, 2026-11-09: "I cant import a blue chicken json file by
+ * itself"). routeImport says which door IMPORT's picked or dropped files take.
  */
 
 import { create } from 'zustand'
-import { GRID_HALF, neededExtent, uuid, type ShardModel } from 'sno-core/shards'
+import { GRID_HALF, fromPayload, neededExtent, uuid, type ShardModel } from 'sno-core/shards'
 import { importFitFor } from 'sno-core/meshToShard'
 import { mtlNames } from 'sno-core/obj'
 import { BUILT_IN } from 'sno-core/snoPalette'
 import { listZip, readEntry, ZipError, type ZipEntry } from '../lib/zipRead'
 import {
-  ZIP_MAX_BYTES, ZIP_MAX_ENTRIES, ZIP_MAX_ENTRY_BYTES, ZIP_MAX_TOTAL_BYTES, companionsFor, copyName, dupAction, findDups, planZip,
+  ZIP_MAX_BYTES, ZIP_MAX_ENTRIES, ZIP_MAX_ENTRY_BYTES, ZIP_MAX_TOTAL_BYTES, companionsFor, copyName, dupAction, findDups, isJsonFile, isZipFile, planZip,
   blockedRows, hasPlaceholders, offlinePicture, refTargets, resolveRefs, withoutPlaceholderHints,
-  type Companion, type Dup, type DupMode, type PlannedRow, type SkippedFile,
+  type Companion, type Dup, type DupMode, type PlannedRow, type SkippedFile, type ZipPlan,
 } from '../lib/shardZip'
 import { folderApi, placeInFolders } from '../lib/importFolders'
-import { importBytes } from '../lib/meshImport'
+import { importBytes, tooLarge } from '../lib/meshImport'
 import { shardRefusal } from '../lib/hidden'
 import { publishState, shardFingerprint } from '../lib/published'
 import { queryEach } from '../lib/relay'
@@ -97,6 +103,8 @@ export interface ShardImportState {
   open: boolean
   fileName: string
   phase: Phase
+  /** What the list calls what is being imported: 'zip', or 'import' for loose files. */
+  noun: Noun
   /** Why the zip as a whole cannot be read. */
   error: string | null
   rows: ImportRow[]
@@ -125,6 +133,8 @@ export interface ShardImportState {
   stall: string | null
   /** Start on a zip picked or dropped; refused while a run is going. */
   openZip: (file: File) => Promise<void>
+  /** Start on loose files picked or dropped (a .json SNO object among them), each as if at the top of a zip named LOOSE_ZIP. */
+  openFiles: (files: File[]) => Promise<void>
   toggle: (key: string) => void
   pickAll: (on: boolean) => void
   setDupMode: (mode: DupMode) => void
@@ -137,10 +147,13 @@ export interface ShardImportState {
   close: () => void
 }
 
+/** What the list's words call what is being imported: a zip, or loose files picked or dropped. */
+type Noun = 'zip' | 'import'
+
 /** Each open or close: a loop from an earlier one sees a newer number and stops. */
 let generation = 0
-/** The open zip's bytes, directory and companions, until every file has been read. */
-let zip: { bytes: Uint8Array; entries: Map<string, ZipEntry>; companions: Record<string, Companion[]>; budget: number } | null = null
+/** The open zip's reader, directory and companions, until every file has been read. */
+let zip: { noun: Noun; read: (entry: ZipEntry, cap: number) => Uint8Array; entries: Map<string, ZipEntry>; companions: Record<string, Companion[]>; budget: number } | null = null
 /** The run going now, with what ends its waits when STOP is pressed. */
 let current: { stopped: Promise<void>; stop: () => void } | null = null
 
@@ -149,7 +162,70 @@ const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout
 const text = new TextDecoder('utf-8')
 const baseName = (path: string): string => path.split('/').pop() ?? path
 
-const blank = { open: false, fileName: '', phase: 'opening' as Phase, error: null, rows: [], skipped: [], dups: {}, dupMode: 'skip' as DupMode, publish: false, foldersOn: false, kit: '', published: [] as string[], remote: 'idle' as const, checkedFor: '', ran: false, stopAsked: false, stall: null }
+/**
+ * The zip loose files are read as if they came in: so a lone blue-chicken.json
+ * is the shard `import/blue-chicken` (lib/shardZip kitIds), the same address
+ * each time it is imported, and UPDATE finds it again.
+ */
+export const LOOSE_ZIP = 'import.zip'
+/** What IMPORT says of a .json that is neither. */
+export const NOT_SNO_OR_GLTF = 'NOT AN SNO OR glTF FILE'
+
+/** What a .json holds: an SNO object (as PASTE and a zip read one: fromPayload, through shardFromText), a glTF 2 file, or neither. Parsed once. */
+export function jsonKind(json: string): 'sno' | 'gltf' | null {
+  let raw: unknown
+  try { raw = JSON.parse(json) } catch { return null }
+  if (fromPayload(raw, 'probe')) return 'sno'
+  const asset = raw && typeof raw === 'object' && !Array.isArray(raw) ? (raw as { asset?: unknown }).asset : undefined
+  return asset && typeof asset === 'object' && typeof (asset as { version?: unknown }).version === 'string' ? 'gltf' : null
+}
+
+/**
+ * A loose file's name as its entry in the zip it is read as. A browser saves
+ * a second download as "blue-chicken (1).json" (a phone does it every time),
+ * and that is the same file, so the " (N)" goes, as kitIds drops it from a
+ * zip's name, and importing it again finds the same shard. A .json is named
+ * for what it holds: a glTF as <stem>.gltf (one already called .gltf stays),
+ * so it is read as a 3D file and its .bin is found beside it whatever the
+ * .bin is called; an SNO object known only by its type as <name>.json.
+ */
+export function looseName(name: string, kind: 'sno' | 'gltf' | null): string {
+  const plain = name.replace(/^(.*\S)\s+\(\d+\)(\.[^.]*)?$/, '$1$2')
+  if (kind === 'gltf') return /\.gltf$/i.test(plain) ? plain : `${plain.replace(/\.json$/i, '')}.gltf`
+  if (kind === 'sno' && !/\.json$/i.test(plain)) return `${plain}.json`
+  return plain
+}
+
+/** Where IMPORT's picked or dropped files go: bulk import of a zip, bulk import of loose files, the 3D importer, or nowhere and why. */
+export type ImportRoute =
+  | { to: 'zip'; file: File }
+  | { to: 'shards'; files: File[] }
+  | { to: 'mesh'; files: File[] }
+  | { to: 'none'; error: string }
+
+/**
+ * Which door these files take. A zip goes alone to bulk import. Every .json
+ * is read and sniffed: one that is neither an SNO object nor a glTF stops
+ * them all with NOT_SNO_OR_GLTF; if any is an SNO object, every file goes to
+ * bulk import (openFiles), as a zip of them would; otherwise they are 3D
+ * files for IMPORT's reader, a glTF .json among them, as before.
+ */
+export async function routeImport(files: File[]): Promise<ImportRoute> {
+  const zips = files.filter(isZipFile)
+  if (zips.length) return zips.length > 1 || files.length > 1 ? { to: 'none', error: 'Import one zip at a time, on its own.' } : { to: 'zip', file: zips[0] }
+  let sno = false
+  for (const f of files.filter(isJsonFile)) {
+    const big = tooLarge([f])
+    if (big) return { to: 'none', error: big }
+    let kind: 'sno' | 'gltf' | null
+    try { kind = jsonKind(await f.text()) } catch { return { to: 'none', error: 'That file could not be opened.' } }
+    if (!kind) return { to: 'none', error: files.length > 1 ? `${f.name}: ${NOT_SNO_OR_GLTF}` : NOT_SNO_OR_GLTF }
+    if (kind === 'sno') sno = true
+  }
+  return sno ? { to: 'shards', files } : { to: 'mesh', files }
+}
+
+const blank = { open: false, fileName: '', noun: 'zip' as Noun, phase: 'opening' as Phase, error: null, rows: [], skipped: [], dups: {}, dupMode: 'skip' as DupMode, publish: false, foldersOn: false, kit: '', published: [] as string[], remote: 'idle' as const, checkedFor: '', ran: false, stopAsked: false, stall: null }
 
 /** The ids of your shards, for what exists already (lib/shardZip blockedRows). */
 export function mineIds(): string[] {
@@ -218,12 +294,12 @@ function namedFiles(file: string, bytes: Uint8Array): string[] {
 
 /** One file of the zip as a shard named after it, through PASTE's or IMPORT's door. */
 async function readRow(row: ImportRow): Promise<{ shard: ShardModel; picture: ShardModel; note: string | null } | { error: string }> {
-  if (!zip) return { error: 'The zip is closed.' }
+  if (!zip) return { error: 'The import is closed.' }
   const entry = zip.entries.get(row.key)
-  if (!entry) return { error: 'Missing from the zip.' }
+  if (!entry) return { error: `Missing from the ${zip.noun}.` }
   let bytes: Uint8Array
   try {
-    bytes = readEntry(zip.bytes, entry, ZIP_MAX_ENTRY_BYTES)
+    bytes = zip.read(entry, ZIP_MAX_ENTRY_BYTES)
   } catch (e) {
     return { error: e instanceof ZipError ? e.message : 'It could not be read.' }
   }
@@ -242,9 +318,9 @@ async function readRow(row: ImportRow): Promise<{ shard: ShardModel; picture: Sh
       const e = zip.entries.get(c.key)
       if (!e) continue
       if (used + e.size > ZIP_MAX_ENTRY_BYTES) return { error: `Over ${ZIP_MAX_ENTRY_BYTES / 1048576} MB with ${c.file}` }
-      if (e.size > zip.budget) return { error: `Past ${ZIP_MAX_TOTAL_BYTES / 1048576} MB for the zip` }
+      if (e.size > zip.budget) return { error: `Past ${ZIP_MAX_TOTAL_BYTES / 1048576} MB for the ${zip.noun}` }
       zip.budget -= e.size
-      try { files.push({ name: c.file, bytes: readEntry(zip.bytes, e, ZIP_MAX_ENTRY_BYTES - used) }) } catch { continue /* a model without its MTL still comes in */ }
+      try { files.push({ name: c.file, bytes: zip.read(e, ZIP_MAX_ENTRY_BYTES - used) }) } catch { continue /* a model without its MTL still comes in */ }
       used += e.size
     }
     // A new shard's grid, as IMPORT fits a file into a new, empty shard.
@@ -357,7 +433,7 @@ export const useShardImport = create<ShardImportState>((set, get) => {
           if (!me && hasPlaceholders(r.shard.refs)) { patch(key, { run: 'failed', failure: 'Log in first' }); inHand = null; continue }
           const model: ShardModel = r.shard.refs && me ? { ...r.shard, refs: resolveRefs(r.shard.refs, targets, me) } : r.shard
           const action = dupAction(dups[key] ?? null, mode)
-          if (action.act === 'skip') { patch(key, { run: 'skipped', failure: dups[key]?.in === 'zip' ? 'Same name in this zip' : 'In your shards' }); inHand = null; continue }
+          if (action.act === 'skip') { patch(key, { run: 'skipped', failure: dups[key]?.in === 'zip' ? `Same name in this ${get().noun}` : 'In your shards' }); inHand = null; continue }
           let saved: boolean
           if (action.act === 'update') {
             const res = await ws.replaceShard(action.id, model)
@@ -419,6 +495,40 @@ export const useShardImport = create<ShardImportState>((set, get) => {
     }
   }
 
+  /** A zip's (or loose files') plan read row by row into shards, then checked against your relays and put up for review. */
+  const readAll = async (g: number, plan: ZipPlan, entries: ZipEntry[], read: (entry: ZipEntry, cap: number) => Uint8Array): Promise<void> => {
+    const noun = get().noun
+    zip = { noun, read, entries: new Map(entries.map((e) => [String(e.index), e])), companions: plan.companions, budget: Math.max(0, ZIP_MAX_TOTAL_BYTES - plan.total) }
+    const rows: ImportRow[] = plan.rows.map((p) => ({
+      ...p, read: p.error ? 'error' : 'waiting', shard: null, picture: null, note: null, picked: !p.error, run: 'idle', shardId: null, outcome: null, failure: null,
+    }))
+    if (rows.length === 0) set({ error: `No shard files in that ${noun}.` })
+    set({ rows, skipped: plan.skipped, kit: plan.kit, phase: 'reading' })
+    for (const { key } of rows) {
+      if (g !== generation) return
+      const r = row(key)
+      if (!r || r.read !== 'waiting') continue
+      patch(key, { read: 'reading' })
+      const res = await readRow(r)
+      if (g !== generation) return
+      if ('error' in res) patch(key, { read: 'error', error: res.error, picked: false })
+      else patch(key, { read: 'ok', shard: res.shard, picture: res.picture, note: res.note })
+      // A breath between files, so the list paints as it fills.
+      await sleep(0)
+    }
+    if (g !== generation) return
+    zip = null
+    // What your relays already hold at these addresses (another device, or another kit with this folder name).
+    const { published, remote, checkedFor } = await checkRelays()
+    if (g !== generation) return
+    // A reference to a piece of the kit that will not exist would draw as a placeholder.
+    const targets = refTargets(get().rows)
+    const ok = get().rows.filter((r) => r.read === 'ok')
+    const blocked = blockedRows(ok.map((r) => ({ key: r.key, id: r.id, refs: r.shard?.refs })), targets, new Set([...useWorkshop.getState().shards.map((x) => x.id), ...published]), new Set(ok.map((r) => r.id)))
+    for (const [key, missing] of blocked) patch(key, { read: 'error', error: `Places ${missing}, not in this ${noun}`, picked: false })
+    set({ phase: 'review', published, remote, checkedFor, dups: dupsFor(get().rows, get().kit, published) })
+  }
+
   return {
     ...blank,
 
@@ -440,35 +550,31 @@ export const useShardImport = create<ShardImportState>((set, get) => {
         return
       }
       const plan = planZip(entries, file.name)
-      zip = { bytes, entries: new Map(entries.map((e) => [String(e.index), e])), companions: plan.companions, budget: Math.max(0, ZIP_MAX_TOTAL_BYTES - plan.total) }
-      const rows: ImportRow[] = plan.rows.map((p) => ({
-        ...p, read: p.error ? 'error' : 'waiting', shard: null, picture: null, note: null, picked: !p.error, run: 'idle', shardId: null, outcome: null, failure: null,
-      }))
-      if (rows.length === 0) set({ error: 'No shard files in that zip.' })
-      set({ rows, skipped: plan.skipped, kit: plan.kit, phase: 'reading' })
-      for (const { key } of rows) {
-        if (g !== generation) return
-        const r = row(key)
-        if (!r || r.read !== 'waiting') continue
-        patch(key, { read: 'reading' })
-        const res = await readRow(r)
-        if (g !== generation) return
-        if ('error' in res) patch(key, { read: 'error', error: res.error, picked: false })
-        else patch(key, { read: 'ok', shard: res.shard, picture: res.picture, note: res.note })
-        // A breath between files, so the list paints as it fills.
-        await sleep(0)
-      }
-      if (g !== generation) return
+      await readAll(g, plan, entries, (e, cap) => readEntry(bytes, e, cap))
+    },
+
+    openFiles: async (list) => {
+      if (get().phase === 'running') return
+      const g = ++generation
       zip = null
-      // What your relays already hold at these addresses (another device, or another kit with this folder name).
-      const { published, remote, checkedFor } = await checkRelays()
+      const files = [...list]
+      set({ ...blank, open: true, noun: 'import', fileName: files.length === 1 ? files[0].name : `${files.length} files`, foldersOn: !!folderApi() })
+      // Everything picked is read at once, so all of it under a zip's own ceiling.
+      const total = files.reduce((t, f) => t + f.size, 0)
+      if (total > ZIP_MAX_BYTES) { set({ error: `Those files are ${Math.round(total / 1048576)} MB. Import reads up to ${ZIP_MAX_BYTES / 1048576} MB at once.`, phase: 'review' }); return }
+      let loose: Uint8Array[]
+      try { loose = await Promise.all(files.map(async (f) => new Uint8Array(await f.arrayBuffer()))) } catch { if (g === generation) set({ error: 'Those files could not be opened.', phase: 'review' }); return }
       if (g !== generation) return
-      // A reference to a piece of the kit that will not exist would draw as a placeholder.
-      const targets = refTargets(get().rows)
-      const ok = get().rows.filter((r) => r.read === 'ok')
-      const blocked = blockedRows(ok.map((r) => ({ key: r.key, id: r.id, refs: r.shard?.refs })), targets, new Set([...useWorkshop.getState().shards.map((x) => x.id), ...published]), new Set(ok.map((r) => r.id)))
-      for (const [key, missing] of blocked) patch(key, { read: 'error', error: `Places ${missing}, not in this zip`, picked: false })
-      set({ phase: 'review', published, remote, checkedFor, dups: dupsFor(get().rows, get().kit, published) })
+      // Each a file at the top of the zip, named for what it holds before the zip's plan reads the names (looseName).
+      const entries: ZipEntry[] = files.map((f, index) => ({
+        index, name: looseName(f.name, isJsonFile(f) ? jsonKind(text.decode(loose[index])) : null), dir: false, method: 0, encrypted: false,
+        compressedSize: f.size, size: loose[index].length, offset: 0, crc: 0,
+      }))
+      const plan = planZip(entries, LOOSE_ZIP)
+      await readAll(g, plan, entries, (e, cap) => {
+        if (e.size > cap) throw new ZipError('It is too large.')
+        return loose[e.index]
+      })
     },
 
     toggle: (key) => {

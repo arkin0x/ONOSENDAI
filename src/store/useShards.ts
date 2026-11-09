@@ -45,6 +45,7 @@ import { bagAddressOf, bagsToOpen, retractedAt, staleFinds } from '../lib/bagVer
 import { itemTargetOf, type ItemTarget } from '../lib/comments'
 import { bytesToHex, hexToBytes, positionHex, type EventTemplate, type NostrEvent } from '../lib/events'
 import { regionKeyOffThread } from '../lib/regionKeyOffThread'
+import { WRONG_KEY, keyFitsLookup, wrongKeyMessage } from '../lib/regionKeyCheck'
 import { signedTableOnly } from '../lib/carried'
 import { deployCeiling, deployRoute, localKeyCeiling, needsAsk, regionKeyQuote } from '../lib/deployPlan'
 import { useSecrets } from './useSecrets'
@@ -3649,8 +3650,12 @@ export const useShards = create<ShardsState>((set, get) => {
           set({ deployNote: `HOSAKA has the 2^${deployHeight} key` })
           // HOSAKA's requests are signed too.
           still()
+          // Hiding has no lookup id to compare against yet: the purchase checks
+          // what it can (lib/regionKeyCheck.ts) and refuses a wrong key.
           const held = await useSecrets.getState().buy(at, plane, deployHeight)
           if (!held) throw new Error(useSecrets.getState().buyError ?? 'HOSAKA could not compute the key.')
+          // Never seal with a key whose lookup id is not its own (spec §7.2), whatever held it.
+          if (!keyFitsLookup(held.keyHex, held.lookupId)) throw new Error(wrongKeyMessage('its lookup id is not the sha256 of its key'))
           rk = { key: hexToBytes(held.keyHex), lookupId: held.lookupId }
         } else {
           set({ deployNote: `Computing the 2^${deployHeight} key on this machine` })
@@ -3848,6 +3853,13 @@ export const useShards = create<ShardsState>((set, get) => {
           item,
         ]
         commitRows(cs.identity.pubkey, mine)
+        // The row as kept: its lookup id must be sha256 of its key (spec
+        // §7.2, rooms too), or a stranger looks where it is not. Checked on
+        // what was stored, not on what was meant to be.
+        const kept = rowsOf(cs.identity.pubkey).find((d) => d.eventId === item.eventId)
+        if (kept && !keyFitsLookup(kept.keyHex, kept.lookupId)) {
+          useToast.getState().show({ label: 'KEY CHECK FAILED', meta: `${route === 'cloud' ? `${WRONG_KEY}. ` : ''}The lookup id this was filed under is not the one its key gives, so strangers cannot find it. Tap it and TEST DISCOVERY.`, mark: 'build' })
+        }
         // Placed: first in your shard lists from now. Local, and never the
         // deploy's failure; not for an identity switched to meanwhile.
         if (cyber().identity.pubkey === cs.identity.pubkey) {

@@ -227,8 +227,8 @@ interface SecretsState {
    * with nothing in it the purchase stops and says so, since topping up is the
    * Cloud panel's business and not a thing to do behind a modal.
    */
-  /** Buy the key from HOSAKA; resolves to the held key, or null with buyError set. */
-  buy: (at: { x: bigint; y: bigint; z: bigint }, plane: Plane, height: number) => Promise<HeldKey | null>
+  /** Buy the key from HOSAKA; resolves to the held key, or null with buyError set. `expect.lookupId`: the bag's lookup id, when buying to open a bag already seen; the key must hash to it. A key that fails any check reads HOSAKA RETURNED A WRONG KEY and is never held. */
+  buy: (at: { x: bigint; y: bigint; z: bigint }, plane: Plane, height: number, expect?: { lookupId?: string }) => Promise<HeldKey | null>
 }
 
 /** How the list is ordered. */
@@ -352,13 +352,14 @@ export const useSecrets = create<SecretsState>((set, get) => ({
 
   setSort: (sort) => set({ sort }),
 
-  buy: async (at, plane, height) => {
+  buy: async (at, plane, height, expect) => {
     if (get().buying) return null
     const cs = useCyberspace.getState()
     set({ buying: { height, status: 'submitting', costMsats: 0, estSeconds: null, startedAt: Date.now() }, buyError: null })
     // The store's job driver: a short balance gets the job's own invoice in
     // the invoice modal, and the job starts when it settles.
-    const outcome = await cs.buyRegionKey(at, plane, height)
+    // A key that fails its checks (lib/regionKeyCheck.ts) comes back as an error and is never held.
+    const outcome = await cs.buyRegionKey(at, plane, height, expect)
     if (!outcome.ok) {
       set({ buying: null, buyError: outcome.error })
       return null

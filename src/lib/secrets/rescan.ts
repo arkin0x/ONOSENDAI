@@ -42,6 +42,7 @@ import { useCeremony } from '../../store/useCeremony'
 import { useSecrets, type HeldKey, type RescanStatus } from '../../store/useSecrets'
 import { useShards } from '../../store/useShards'
 import type { Place, PlaceKey } from './places'
+import { baseOf } from './base'
 import { placeById, placeKeyPages, placeKeysAmong, placeKeysOf } from './vault'
 
 /** Lookup ids per request. */
@@ -75,8 +76,16 @@ export interface RescanEntry {
   promote?: HeldKey
 }
 
-function originOf(base: { x: string; y: string; z: string }, plane: HeldKey['plane']): RegionOrigin {
-  return { at: { x: BigInt(base.x), y: BigInt(base.y), z: BigInt(base.z) }, plane }
+/**
+ * Where a reference with no point of its own is drawn, or undefined when the
+ * stored corner is not an exact integer (a bought key from before the corner
+ * was computed locally, lib/secrets/base.ts): the key is still asked about,
+ * and what it opens drawn at its own points. Never throws: one such key used
+ * to fail every batch of RESCAN ALL.
+ */
+function originOf(base: { x: string; y: string; z: string }, plane: HeldKey['plane']): RegionOrigin | undefined {
+  const at = baseOf(base)
+  return at ? { at, plane } : undefined
 }
 
 /** A held key as an entry. A box (one height per axis) is not a cube and carries no height or origin. */

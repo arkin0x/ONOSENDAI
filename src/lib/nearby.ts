@@ -12,6 +12,7 @@
 
 import type { Plane } from 'cyberspace-core'
 import type { Position } from './space'
+import { baseOf } from './secrets/base'
 
 export interface NearbyRegion {
   base: { x: bigint | string; y: bigint | string; z: bigint | string }
@@ -31,7 +32,7 @@ export interface NearbyKey {
   plane: Plane
   height: number
   heights?: { x: number; y: number; z: number }
-  base: { x: string; y: string; z: string }
+  base: { x: string | bigint; y: string | bigint; z: string | bigint }
 }
 
 function aligned(v: bigint, h: number): bigint {
@@ -41,8 +42,11 @@ function aligned(v: bigint, h: number): bigint {
 
 /** Whether a box (a base and a height per axis) holds a point. */
 export function regionContains(region: NearbyRegion, p: Position): boolean {
+  // A corner stored inexact (lib/secrets/base.ts) holds nothing, rather than throwing.
+  const base = baseOf(region.base)
+  if (!base) return false
   for (const a of ['x', 'y', 'z'] as const) {
-    if (aligned(p[a], region.heights[a]) !== BigInt(region.base[a])) return false
+    if (aligned(p[a], region.heights[a]) !== base[a]) return false
   }
   return true
 }

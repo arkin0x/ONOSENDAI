@@ -45,7 +45,7 @@ import { buildPlane, buildStepOf } from '../lib/buildCursor'
 import type { OwnDoor } from '../lib/doors'
 import { useBuilder } from '../store/useBuilder'
 import { alignedOrigin, useCyberspace } from '../store/useCyberspace'
-import { doorDepth, effectiveDoorHeight, ownDoors, sealingDoor, useShards, type MyDeployment } from '../store/useShards'
+import { doorDepth, ownDoors, placedDoorHeight, sealingDoor, useShards, type MyDeployment } from '../store/useShards'
 import { ClipWalls, type ClipFace } from './ClipWalls'
 import { drawnRegion, type DrawnRegion } from './DeployRegionBox'
 import { GRID_SPAN_CELLS, UNIT_BOX, WALL_RENDER_ORDER, gridMaterial, setGrid, tickWallClock } from './Rooms'
@@ -278,6 +278,7 @@ export function DoorRooms({ axes }: { axes: ViewAxes }): JSX.Element | null {
   const height = useShards((s) => s.deployHeight)
   const chosenRoom = useShards((s) => s.deployDoorHeight)
   const leaveOut = useShards((s) => s.deployLeaveOut)
+  const snap = useShards((s) => s.deployRoomSnap)
   const pending = useShards((s) => s.pending)
   // A door being placed: its cube follows the height (4.2).
   const placing = useShards((s) => (s.pending?.type === 'chest' && s.pending.door && !s.pending.move ? s.pending.spot?.at ?? true : null))
@@ -289,12 +290,12 @@ export function DoorRooms({ axes }: { axes: ViewAxes }): JSX.Element | null {
     if (building && placing) {
       const at = placing === true ? deployPoint(cursor, step, height) : placing
       // Lower than a room of yours it would seal into: as deep as it will stand.
-      const into = sealingDoor({ mine, pending, deployLeaveOut: leaveOut, deployDoorHeight: chosenRoom }, me, at, plane, height)
+      const into = sealingDoor({ mine, pending, deployLeaveOut: leaveOut, deployDoorHeight: chosenRoom, deployRoomSnap: snap }, me, at, plane, height)
       const outer = into ? mine.find((m) => m.eventId === into.eventId) : undefined
-      place = { at, height: effectiveDoorHeight(chosenRoom, height), depth: outer ? doorDepth(mine, outer) + 1 : 1 }
+      place = { at, height: placedDoorHeight({ deployHeight: height, deployDoorHeight: chosenRoom, deployRoomSnap: snap }), depth: outer ? doorDepth(mine, outer) + 1 : 1 }
     }
     return roomBoxes(doorRooms(mine, me, building, plane, place), cursor, alignedOrigin(anchor, scaleExp), scaleExp, axes)
-  }, [mine, me, building, plane, anchor, scaleExp, axes, placing, cursor, step, height, chosenRoom, leaveOut, pending])
+  }, [mine, me, building, plane, anchor, scaleExp, axes, placing, cursor, step, height, chosenRoom, leaveOut, snap, pending])
 
   // The grids breathe on the walls' shared clock (Rooms.tsx).
   const anyGrid = boxes.some((b) => b.grid)

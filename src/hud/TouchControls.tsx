@@ -37,7 +37,7 @@
  * as before (lib/walkKeys.ts): W, S, A, D, Space or R, C or F.
  */
 
-import { useState, type ReactNode } from 'react'
+import { useEffect, useState, type ReactNode } from 'react'
 import { Box, Globe, MapPinOff } from 'lucide-react'
 import { ConfirmModal } from './ConfirmModal'
 import { busyLabel, useCyberspace } from '../store/useCyberspace'
@@ -56,6 +56,8 @@ import { useBuilder } from '../store/useBuilder'
 import { buildHeld, buildToHop, cycleMode, padMode } from '../store/padMode'
 import { useCover } from '../hooks/useCover'
 import { ForwardArrow3D, ReverseArrow3D } from './ui/FlyArrows'
+import { canFly, useViewFly } from '../lib/viewFly'
+import { flyHold } from './ViewFlyButtons'
 
 /**
  * arkinox's wording, kept exactly as he wrote it, bullet shapes and blank
@@ -82,6 +84,8 @@ export interface PadKey {
   disabled?: boolean
   hint?: boolean
   scale?: boolean
+  /** In VIEW a held press flies the view this way instead (FAR forward, NEAR back; lib/viewFly.ts). */
+  fly?: 1 | -1
 }
 
 /**
@@ -156,6 +160,11 @@ export function TouchControls(): JSX.Element {
   // GRAVITY in WALK (store/useWalk.ts): JUMP jumps, DOWN does nothing.
   const gravity = useWalk((s) => s.gravity)
   const building = useBuilder((s) => s.active)
+  // VIEW: FAR and NEAR fly the view while held, as the fly buttons do
+  // (arkinox, 2026-11-09: "smooth and not tied to the nearest cursor block").
+  const flies = useCyberspace((s) => canFly(s, building))
+  useEffect(() => { if (!flies) useViewFly.getState().setPad(0) }, [flies])
+  useEffect(() => () => useViewFly.getState().setPad(0), [])
   // A deploy lined up that leaving BUILD would cancel: BUILD and RECALL wait
   // for PLACE or CANCEL (store/padMode.ts buildHeld).
   const held = useShards((s) => buildHeld(s))
@@ -196,9 +205,9 @@ export function TouchControls(): JSX.Element {
     // symbol and it is not enough on its own, because the two differ only by a
     // small mark inside the circle and that mark is the first thing to go at
     // this size. The word carries the meaning; the glyph carries the convention.
-    { cell: 'away', glyph: '⊗', sub: 'FAR', title: 'Away from camera (R)', act: move('away') },
+    { cell: 'away', glyph: '⊗', sub: 'FAR', title: 'Away from camera (R)', act: move('away'), fly: 1 },
     { cell: 'up', glyph: '▲', title: 'Up (W)', act: move('up') },
-    { cell: 'toward', glyph: '⊙', sub: 'NEAR', title: 'Toward camera (F)', act: move('toward') },
+    { cell: 'toward', glyph: '⊙', sub: 'NEAR', title: 'Toward camera (F)', act: move('toward'), fly: -1 },
     { cell: 'left', glyph: '◀', title: 'Left (A)', act: move('left') },
     { cell: 'right', glyph: '▶', title: 'Right (D)', act: move('right') },
     // Left is Q and right is E, matching where those keys sit on a keyboard.
@@ -281,7 +290,7 @@ export function TouchControls(): JSX.Element {
             title={b.title}
             aria-label={b.title}
             disabled={b.disabled}
-            {...bind(b.act)}
+            {...(flies && b.fly ? flyHold('pad', b.fly) : bind(b.act))}
           >
             {b.glyph}
             {b.sub && <span className="touchpad__sub">{b.sub}</span>}

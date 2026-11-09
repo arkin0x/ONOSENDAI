@@ -83,8 +83,8 @@ export interface RescanEntry {
  * and what it opens drawn at its own points. Never throws: one such key used
  * to fail every batch of RESCAN ALL.
  */
-function originOf(base: { x: string; y: string; z: string }, plane: HeldKey['plane']): RegionOrigin | undefined {
-  const at = baseOf(base)
+function originOf(base: { x: string; y: string; z: string }, plane: HeldKey['plane'], height: number): RegionOrigin | undefined {
+  const at = baseOf(base, height)
   return at ? { at, plane } : undefined
 }
 
@@ -92,7 +92,7 @@ function originOf(base: { x: string; y: string; z: string }, plane: HeldKey['pla
 export function heldEntry(k: HeldKey): RescanEntry {
   const cube = !k.heights || (k.heights.x === k.heights.y && k.heights.y === k.heights.z)
   return cube
-    ? { lookupId: k.lookupId, keyHex: k.keyHex, height: k.height, origin: originOf(k.base, k.plane) }
+    ? { lookupId: k.lookupId, keyHex: k.keyHex, height: k.height, origin: originOf(k.base, k.plane, k.height) }
     : { lookupId: k.lookupId, keyHex: k.keyHex }
 }
 
@@ -107,7 +107,7 @@ export function placeKeyEntry(k: PlaceKey, now: number): RescanEntry {
     lookupId: k.lookupId,
     keyHex: k.keyHex,
     height: k.height,
-    origin: originOf(k.base, plane),
+    origin: originOf(k.base, plane, k.height),
     promote: { lookupId: k.lookupId, keyHex: k.keyHex, height: k.height, base: k.base, plane, source: 'scan', at: now },
   }
 }

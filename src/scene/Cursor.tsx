@@ -36,6 +36,7 @@ import { nextActionFor } from '../store/useOffer'
 import { ACCENT, BUILD, DANGER, SIDESTEP, WARN } from '../lib/palette'
 import { useBuilder } from '../store/useBuilder'
 import { cubeAt } from '../lib/buildCursor'
+import { cursorGlide } from '../lib/viewCamera'
 /** Paid legs: the cloud's warm gold, the color the HUD uses for HOSAKA. */
 const CLOUD = '#ffd27d'
 import { aimCentres, placeCentre, type Position, type ViewAxes } from '../lib/space'
@@ -287,7 +288,17 @@ export function Cursor({ axes }: Props): JSX.Element | null {
     const s = useCyberspace.getState()
     const live = cubeAt(s, useBuilder.getState().active)
     const { cell, point: b } = aimCentres(live, alignedOrigin(s.anchor, s.scaleExp), s.scaleExp, axes)
-    if (outline.current) outline.current.position.set(cell[0], cell[1], cell[2])
+    if (outline.current) {
+      outline.current.position.set(cell[0], cell[1], cell[2])
+      // VIEW's fly landing: the box glides to where the view now centres
+      // before the cursor moves there (lib/viewCamera.ts cursorGlide).
+      const g = cursorGlide
+      if (g.share > 0 && g.from === s.cursor) {
+        outline.current.position.x += g.dx * g.share
+        outline.current.position.y += g.dy * g.share
+        outline.current.position.z += g.dz * g.share
+      }
+    }
     if (ghost.current && points.ghostOnCursor) ghost.current.position.set(b[0], b[1], b[2])
     // The leg that ends on the cursor follows it within the frame.
     if (restLeg.visible) setSegmentEnd(restLeg, restGeometry, b)

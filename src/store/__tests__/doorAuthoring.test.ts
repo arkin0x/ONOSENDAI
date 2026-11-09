@@ -110,7 +110,7 @@ beforeEach(() => {
   localStorage.removeItem('onosendai:chests-opened')
   resetDoorSecrets()
   resetOpenedChests()
-  useShards.setState({ mine: [], deleted: {}, deletedBags: {}, discovered: {}, pending: null, chestBack: null, deployHeight: 0, deployUnit: 0, deployTurn: [0, 0, 0], deployStatus: 'idle', deployError: null, selectedSecret: null, deployLeaveOut: null, deployInto: null, placedLast: null })
+  useShards.setState({ mine: [], deleted: {}, deletedBags: {}, discovered: {}, pending: null, chestBack: null, deployHeight: 0, deployUnit: 0, deployTurn: [0, 0, 0], deployStatus: 'idle', deployError: null, selectedSecret: null, deployLeaveOut: [], deployRoomSnap: null, deployInto: null, placedLast: null })
   useBuilder.getState().exit()
   useStash.getState().close()
   useInventory.setState({ owner: me(), items: {}, storage: 'memory' })
@@ -179,14 +179,14 @@ describe('what is placed in its room (R1, height-specific)', () => {
     expect(await finderReads(d, secret)).toEqual({ found: true, texts: ['behind it'] })
   })
 
-  it('at any other height, in the same place: an ordinary placement', async () => {
+  it('at any other height, in its cube: it joins the room anyway, at the room\u2019s height (arkinox, 2026-11-09)', async () => {
     const d = await sealDoor()
     const above = await hide('above it', HEIGHT + 1)
     const below = await hide('below it', HEIGHT - 1)
-    expect(above.room).toBeUndefined()
-    expect(below.room).toBeUndefined()
-    expect(above.bag?.heightTag).toBe(true)
-    expect(behindDoor(S().mine, d)).toEqual([])
+    expect(above.room).toEqual({ doorId: d.eventId })
+    expect(below.room).toEqual({ doorId: d.eventId })
+    expect([above.height, below.height]).toEqual([HEIGHT, HEIGHT])
+    expect(behindDoor(S().mine, d).map((m) => m.text).sort()).toEqual(['above it', 'below it'])
   })
 
   it('outside its cube, at its height: an ordinary placement', async () => {
@@ -195,14 +195,18 @@ describe('what is placed in its room (R1, height-specific)', () => {
     expect((await hide('next door', HEIGHT)).room).toBeUndefined()
   })
 
-  it('the chip names the door only inside its cube and at its height; nothing locks the height', async () => {
+  it('the chip names the door only inside its cube and at its height; in the cube the room\u2019s height holds, the chosen one kept for outside', async () => {
     const d = await sealDoor()
     S().startDeployMessage('x')
     const at = deployPoint(CURSOR, buildStepOf(C()), HEIGHT)
     expect(sealingDoor(S(), me(), at, d.plane, HEIGHT)?.name).toBe('North Door')
     expect(sealingDoor(S(), me(), at, d.plane, HEIGHT + 1)).toBeNull()
     S().setDeployHeight(HEIGHT + 1)
+    expect(S().deployHeight).toBe(HEIGHT)
+    expect(S().deployRoomSnap?.chosen).toBe(HEIGHT + 1)
+    goTo({ ...CURSOR, x: CURSOR.x + (1n << 12n) })
     expect(S().deployHeight).toBe(HEIGHT + 1)
+    expect(S().deployRoomSnap).toBeNull()
     S().cancelDeploy()
   })
 
@@ -242,7 +246,7 @@ describe('the X on the chip (R2)', () => {
     expect(left.room).toBeUndefined()
     expect(left.lookupId).toBe(d.lookupId)
     S().cancelDeploy()
-    expect(S().deployLeaveOut).toBeNull()
+    expect(S().deployLeaveOut).toEqual([])
     expect((await hide('sealed again', HEIGHT)).room).toEqual({ doorId: d.eventId })
   })
 })
@@ -280,19 +284,25 @@ describe('HERE: what you already hid there (R3)', () => {
   it('lists it, SEAL moves it behind the door and out of the ordinary bag', async () => {
     const before = await hide('already here', HEIGHT)
     const stays = await hide('also here', HEIGHT)
-    const elsewhere = await hide('other height', HEIGHT + 1)
+    const higher = await hide('other height', HEIGHT + 1)
+    goTo({ ...CURSOR, x: CURSOR.x + (1n << 12n) })
+    const outside = await hide('outside the cube', HEIGHT)
+    goTo(CURSOR)
     const d = await sealDoor()
-    expect(hereInRoom(S().mine, d).map((m) => m.eventId).sort()).toEqual([before.eventId, stays.eventId].sort())
-    expect(hereInRoom(S().mine, d).map((m) => m.eventId)).not.toContain(elsewhere.eventId)
+    // Every height (arkinox, 2026-11-09: the list was "missing a lot of shards").
+    expect(hereInRoom(S().mine, d).map((m) => m.eventId).sort()).toEqual([before.eventId, stays.eventId, higher.eventId].sort())
+    expect(hereInRoom(S().mine, d).map((m) => m.eventId)).not.toContain(outside.eventId)
     expect(await S().sealIntoRoom(d.eventId, [before.eventId])).toBeNull()
     const moved = row(before.eventId)
     expect(moved.room).toEqual({ doorId: d.eventId })
-    expect(hereInRoom(S().mine, row(d.eventId)).map((m) => m.eventId)).toEqual([stays.eventId])
+    expect(hereInRoom(S().mine, row(d.eventId)).map((m) => m.eventId).sort()).toEqual([stays.eventId, higher.eventId].sort())
     expect((await finderReads(row(d.eventId), doorSecret(me(), d.eventId)!)).texts).toEqual(['already here'])
-    // SEAL ALL: the rest.
-    expect(await S().sealIntoRoom(d.eventId, [stays.eventId])).toBeNull()
+    // SEAL ALL: the rest, out of two bags, each now at the room's height.
+    expect(await S().sealIntoRoom(d.eventId, [stays.eventId, higher.eventId])).toBeNull()
     expect(hereInRoom(S().mine, row(d.eventId))).toEqual([])
-    expect((await finderReads(row(d.eventId), doorSecret(me(), d.eventId)!)).texts.sort()).toEqual(['already here', 'also here'])
+    expect(row(higher.eventId).height).toBe(HEIGHT)
+    expect(row(higher.eventId).room).toEqual({ doorId: d.eventId })
+    expect((await finderReads(row(d.eventId), doorSecret(me(), d.eventId)!)).texts.sort()).toEqual(['already here', 'also here', 'other height'])
   })
 
   it('never lists a door', async () => {
@@ -530,6 +540,8 @@ describe('chests stop placing their contents; CONVERT TO DOOR (R13)', () => {
   it('refuses a door, someone else’s chest, and a chest at height 0', async () => {
     const d = await sealDoor()
     expect(await S().convertToDoor(d.eventId)).toMatch(/Only the chest/)
+    // Out of the door's cube, where nothing joins its room.
+    goTo({ ...CURSOR, x: CURSOR.x + (1n << 12n) })
     S().startPlaceChest()
     S().setDeployHeight(0)
     S().placeChest()

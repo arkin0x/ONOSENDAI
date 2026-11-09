@@ -1019,6 +1019,57 @@ export async function countRelay(url: string, filter: Filter, maxWait = MAX_WAIT
 }
 
 /**
+ * Send to one relay, once. It goes over the pool's socket to that relay,
+ * which is opened if none is (and signed in to first if the relay has
+ * challenged, as every publish here is), and a failure never drops that
+ * socket to dial a fresh one and send again, as publishMany does after any
+ * failure but a refusal. A backlog sent one event after another
+ * (publisher.ts reconcileCanonical) through publishMany opened a connection
+ * per failed event, and relay.onosendai.tech allows 30 a minute from one
+ * address. The failure is reported, and the caller decides when to try
+ * again. NIP-01's duplicate counts as taken (publishOnce).
+ */
+export function publishOnceTo(url: string, event: NostrEvent): Promise<PublishResult> {
+  return publishOnce([url], event)
+}
+
+let countSerial = 0
+
+/**
+ * NIP-45: how many events `filter` matches on one relay, or null when that
+ * could not be learned (no socket, no answer within `maxWait`, a CLOSED:
+ * COUNT unsupported, or refused for want of AUTH). Never signs in: a count
+ * is a cheap first look, and whoever asks falls back to a REQ, which does.
+ * nostr-tools puts no deadline on a COUNT, so this does, and forgets the
+ * request when it passes.
+ */
+export async function countRelay(url: string, filter: Filter, maxWait = MAX_WAIT_MS): Promise<number | null> {
+  const norm = normalizeURL(url)
+  const deadline = Date.now() + maxWait
+  const left = (): number => Math.max(0, deadline - Date.now())
+  let relay: AbstractRelay
+  try {
+    relay = await getPool().ensureRelay(norm, { connectionTimeout: Math.max(1_000, left()) })
+  } catch {
+    return null
+  }
+  const id = `count:onosendai:${++countSerial}`
+  let timer: ReturnType<typeof setTimeout> | undefined
+  try {
+    const n = await Promise.race([
+      relay.count([filter], { id }),
+      new Promise<null>((resolve) => { timer = setTimeout(() => resolve(null), left()) }),
+    ])
+    return typeof n === 'number' && Number.isFinite(n) ? n : null
+  } catch {
+    return null
+  } finally {
+    clearTimeout(timer)
+    ;(relay as unknown as { openCountRequests?: Map<string, unknown> }).openCountRequests?.delete(id)
+  }
+}
+
+/**
  * Send something that does not matter if it is lost: one try, to the
  * canonical relay only, over a socket that is already open and not waiting
  * on an AUTH. Never drops a socket, never retries, never asks the signer to

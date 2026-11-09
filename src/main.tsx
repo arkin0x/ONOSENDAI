@@ -1,3 +1,5 @@
+// First, before anything compiles a material: the scene fogs by straight-line distance (scene/radialFog.ts).
+import './scene/radialFog'
 import React from 'react'
 import ReactDOM from 'react-dom/client'
 import App from './App'

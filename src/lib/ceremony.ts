@@ -161,11 +161,21 @@ export function afterOpen(first: boolean, drawn: boolean): AfterOpen {
 }
 
 /**
- * What OPEN on a door closed with CLOSE does, and what CLOSE does (arkinox,
- * 2026-11-01: re-open has a SHORT reveal, no loot): the card yields and the door
- * plays the calm crossfade (CALM_FADE_MS, shorter than the first OPEN's slab
- * decoding away) when it is drawn; no sound either way. Every time, not once.
+ * What OPEN on a door closed with CLOSE does (arkinox, 2026-11-01: re-open has a
+ * SHORT reveal, no loot): the card yields and the door plays the calm crossfade
+ * (CALM_FADE_MS, shorter than the first OPEN's slab decoding away) when it is
+ * drawn. Silent (arkinox, 2026-11-09). Every time, not once.
  */
 export function afterReopen(drawn: boolean): AfterOpen {
   return { yieldCards: drawn, ceremony: drawn, feedback: false }
+}
+
+/**
+ * What CLOSE does: as a re-open (the card yields, the calm crossfade back to shut
+ * when drawn), and a soft lock tick with the door's short buzz, offered every time,
+ * drawn or not, each through the OPEN ceremony's own 10 s gates (arkinox, 2026-11-09;
+ * lib/ceremonySound closeFeedback).
+ */
+export function afterClose(drawn: boolean): AfterOpen {
+  return { yieldCards: drawn, ceremony: drawn, feedback: true }
 }

@@ -29,7 +29,8 @@
  * or a relay (closeDoor, reopenClosedDoor). One room, one state: a door of a closed
  * room found later is closed too, and nothing opens a room while any door of it is
  * closed (store/closedDoors.ts). The doors inside a closed room start closed when it
- * opens again, those not loaded at the close included (`below`).
+ * opens again, those not loaded at the close included (`below`). What left the finds
+ * leaves the found chip's count too, and comes back to it with OPEN (store/useCeremony).
  */
 
 import { BagUnreadable, HIDDEN_KIND, bagEntries, unbag, type Hidden } from '../lib/hidden'
@@ -44,6 +45,7 @@ import { regionKeyOffThread } from '../lib/regionKeyOffThread'
 import { MAX_COMPUTE_HEIGHT, useCyberspace } from './useCyberspace'
 import { useInventory } from './useInventory'
 import { positionOf, useShards } from './useShards'
+import { useCeremony } from './useCeremony'
 import { openedByHand, rememberOpened, shutInSession } from './useOpenedChests'
 import { belowPending, closeArriving, closedByMe, recordsOfRoom, refreshClosedDoors, roomShut, writeClosed, type ClosedRecord } from './closedDoors'
 import { doorSecret, doorSecretOnlySaid, keepDoorSecret } from './doorSecrets'
@@ -294,6 +296,8 @@ export async function closeDoor(door: Hidden): Promise<{ closed: string[]; kept:
   for (const id of gone) delete discovered[id]
   // A fresh record even when nothing left it, so everything drawn from it is drawn again.
   useShards.setState({ discovered })
+  // What left counts no more on the found chip, until OPEN brings it back (store/useCeremony).
+  useCeremony.getState().leave(gone)
   return { closed, kept }
 }
 

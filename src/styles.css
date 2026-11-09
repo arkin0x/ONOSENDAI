@@ -7870,6 +7870,7 @@ kbd {
 .nearby__lock { letter-spacing: 0.1em; }
 .nearby__lock--locked { color: var(--dim); }
 .nearby__lock--open { color: var(--ok); }
+.nearby__lock--closed { color: var(--fg); }
 /* A fingertip on a phone; the buttons keep their look. */
 @media (max-width: 640px) {
   .nearby__row .chest__act, .nearby__row .nearby__view, .secrets__box .secrets__close, .held__acts .chest__act--danger { min-height: 44px; min-width: 44px; }

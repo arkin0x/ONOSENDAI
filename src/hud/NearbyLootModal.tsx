@@ -51,7 +51,7 @@ function whereOf(item: NearbyItem): string {
   return `${item.plane === 1 ? 'Ideaspace' : 'Dataspace'}, height ${item.height}`
 }
 
-/** LOCKED or OPEN, as the world draws it (store/useOpenedChests lockWord). */
+/** LOCKED, OPEN or CLOSED (closed with CLOSE, opens again with no key), as the world draws it (store/useOpenedChests lockWord). */
 function LockStatus({ id, lock, me }: { id: string; lock: string; me: string }): JSX.Element {
   useOpenedChests((s) => s.opened)
   const word = lockWord(me, id, lock)

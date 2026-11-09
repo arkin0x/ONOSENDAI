@@ -4,13 +4,15 @@
  * When a scan opens a bag, a chip rises in the instruments stack saying how
  * many were found here, with the last find's label resolving out of glyphs in
  * step with the scene. It has no clock: it stays until tapped, more finds
- * add to its count, and the tap opens the Nearby Loot list.
+ * add to its count, and the tap opens the Nearby Loot list. Finds standing in a
+ * room closed since (CLOSE) leave the count, and come back with OPEN; with
+ * every find counted closed away, the chip waits unseen (store/useCeremony chipCount).
  */
 
 import { useEffect, useState } from 'react'
 import { decodeText, seedOf, TEXT_DECODE_MS } from '../lib/decode'
 import { foundLabel } from '../lib/nearby'
-import { useCeremony } from '../store/useCeremony'
+import { chipCount, useCeremony } from '../store/useCeremony'
 import { useShards } from '../store/useShards'
 
 export function KeyFoundChip(): JSX.Element | null {
@@ -32,13 +34,14 @@ export function KeyFoundChip(): JSX.Element | null {
     return () => window.cancelAnimationFrame(raf)
   }, [chip])
 
-  if (!chip) return null
+  const count = chipCount(chip)
+  if (!chip || count <= 0) return null
   const open = (): void => { useCeremony.getState().dismiss(); useShards.getState().setNearbyOpen(true) }
   return (
     <div className="hyperbar hyperbar--found" role="status" onClick={open} title="Tap to see what was found here">
       <span className="hyperbar__glyph" aria-hidden="true">◈</span>
       <span className="hyperbar__text">
-        <span className="hyperbar__label">{foundLabel(chip.count)}</span>
+        <span className="hyperbar__label">{foundLabel(count)}</span>
         <span className="hyperbar__meta">{chip.meta} · tap to see</span>
       </span>
       <span className="foundchip__decode">{shown}</span>

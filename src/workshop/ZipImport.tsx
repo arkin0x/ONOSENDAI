@@ -147,7 +147,8 @@ export function ZipImport(): JSX.Element | null {
           Every .json SNO object and 3D file ({'PLY, STL, OBJ with its MTL, glTF or GLB, VOX'}) in the zip becomes one of
           your shards, named after its file, with its path in the zip as its address, so the same zip imported again
           finds the same pieces. A reference from one piece to another in the zip is pointed at yours. {s.foldersOn ? 'Its folders in the zip become folders here.' : 'Folders in the zip are kept for when the workshop has folders.'} Hidden
-          files and __MACOSX are skipped. A 3D file is fitted to a new shard&apos;s grid, as IMPORT fits one. If one of your
+          files and __MACOSX are skipped. A .json SNO object picked or dropped without a zip comes in the same way, as if
+          it were alone in a zip named import.zip: its address is import/ and its name. A 3D file is fitted to a new shard&apos;s grid, as IMPORT fits one. If one of your
           shards has the name, or the address is already yours (here, or on your relays): SKIP leaves it out, COPY adds a copy, UPDATE replaces a piece
           imported before at the same address, so everything placing it draws the new one. A shard that only shares a
           name is never replaced. With PUBLISH on, each shard is signed and sent as PUBLISH

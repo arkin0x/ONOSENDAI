@@ -13,7 +13,10 @@
  * never answers fails the send at the deadline, two in a row pause the run,
  * and STOP ends the wait at once; a rate-limited relay is asked again after
  * a wait; and once the workshop has folders each new shard goes in its zip
- * folder.
+ * folder. A .json picked or dropped without a zip is sniffed (routeImport):
+ * an SNO object comes in as a zip of it would, a glTF goes to IMPORT's 3D
+ * reader as before, anything else is NOT AN SNO OR glTF FILE, and an SNO
+ * object picked with a GLB brings both in as shards.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -43,14 +46,18 @@ vi.mock('../../lib/importFolders', async (importOriginal) => ({
   folderApi: vi.fn(() => null),
 }))
 
+import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
 import { strToU8, zipSync } from 'fflate'
+import { BUILT_IN } from 'sno-core/snoPalette'
+import { importFiles } from '../../lib/meshImport'
 import { folderApi } from '../../lib/importFolders'
 import { publishMany, queryEach } from '../../lib/relay'
 import { useCyberspace } from '../useCyberspace'
 import { useWorkshop } from '../useWorkshop'
 import { withConstrain } from '../../lib/walkConstrain'
 import { usePublished } from '../usePublished'
-import { timing, useShardImport } from '../useShardImport'
+import { NOT_SNO_OR_GLTF, routeImport, timing, useShardImport } from '../useShardImport'
 
 const sno = (name: string, x = 1): string => JSON.stringify({
   v: 2, name, unit: 0, mode: 'solid',
@@ -705,5 +712,130 @@ describe('the WALK setting (DECK-0003 §1.12)', () => {
     await imp().start()
     expect(mine().find((x) => x.id === id)!.extra).toEqual({ constrain: 'all' })
     expect(wordSent(id)).toBe('all')
+  })
+})
+
+describe('a .json picked or dropped without a zip (arkinox, 2026-11-09: "I cant import a blue chicken json file by itself")', () => {
+  // His own blue chicken, as the zip in onosendai/sno/blue-chicken holds it.
+  const CHICKEN = readFileSync(join(__dirname, '..', 'fixtures', 'blue-chicken.json'), 'utf8')
+  const chicken = (name = 'blue-chicken.json', type = 'application/json'): File => new File([CHICKEN], name, { type })
+  const pos = new Float32Array([0, 0, 0, 1, 0, 0, 0, 1, 0])
+  const tri = (buffer: Record<string, unknown>): Record<string, unknown> => ({
+    asset: { version: '2.0' }, scene: 0, scenes: [{ nodes: [0] }], nodes: [{ mesh: 0 }],
+    meshes: [{ primitives: [{ attributes: { POSITION: 0 }, mode: 4 }] }],
+    buffers: [{ ...buffer, byteLength: pos.byteLength }], bufferViews: [{ buffer: 0, byteOffset: 0, byteLength: pos.byteLength }],
+    accessors: [{ bufferView: 0, componentType: 5126, count: 3, type: 'VEC3', min: [0, 0, 0], max: [1, 1, 0] }],
+  })
+  /** A triangle as a glTF .json, its buffer a data URI. */
+  const gltfJson = (name = 'tri.json'): File => {
+    const b64 = Buffer.from(new Uint8Array(pos.buffer)).toString('base64')
+    return new File([JSON.stringify(tri({ uri: `data:application/octet-stream;base64,${b64}` }))], name, { type: 'application/json' })
+  }
+  /** The same triangle as a GLB: its JSON chunk and its BIN chunk. */
+  const glb = (name = 'tri.glb'): File => {
+    const pad = (b: Uint8Array, fill: number): Uint8Array => { const out = new Uint8Array(Math.ceil(b.length / 4) * 4).fill(fill); out.set(b); return out }
+    const json = pad(new TextEncoder().encode(JSON.stringify(tri({}))), 0x20)
+    const bin = pad(new Uint8Array(pos.buffer), 0)
+    const out = new Uint8Array(12 + 8 + json.length + 8 + bin.length)
+    const dv = new DataView(out.buffer)
+    dv.setUint32(0, 0x46546c67, true); dv.setUint32(4, 2, true); dv.setUint32(8, out.length, true)
+    dv.setUint32(12, json.length, true); dv.setUint32(16, 0x4e4f534a, true); out.set(json, 20)
+    const at = 20 + json.length
+    dv.setUint32(at, bin.length, true); dv.setUint32(at + 4, 0x004e4942, true); out.set(bin, at + 8)
+    return new File([out], name, { type: 'model/gltf-binary' })
+  }
+
+  it('a lone SNO .json goes to bulk import and comes in as a zip of it would, at import/<its name>', async () => {
+    const route = await routeImport([chicken()])
+    expect(route.to).toBe('shards')
+    if (route.to !== 'shards') return
+    await imp().openFiles(route.files)
+    const s = imp()
+    expect(s.error).toBeNull()
+    expect(s.phase).toBe('review')
+    expect(s.fileName).toBe('blue-chicken.json')
+    expect(s.publish).toBe(false)
+    expect(s.rows.map((r) => [r.name, r.id, r.folder.join('/'), r.kind, r.read])).toEqual([['blue-chicken', 'import/blue-chicken', '', 'sno', 'ok']])
+    expect(rowOf('blue-chicken').shard!.faces).toHaveLength(578)
+    await imp().start()
+    expect(mine().map((x) => [x.id, x.name, x.faces.length])).toEqual([['import/blue-chicken', 'blue-chicken', 578]])
+    // PUBLISH starts off, as for a zip: nothing went out.
+    expect(sent()).toHaveLength(0)
+  })
+
+  it('the same file again is the same shard: SKIP leaves it, UPDATE replaces it in place', async () => {
+    await imp().openFiles([chicken()])
+    await imp().start()
+    imp().close()
+    const changed = JSON.stringify({ ...JSON.parse(CHICKEN), mode: 'points' })
+    await imp().openFiles([new File([changed], 'blue-chicken.json')])
+    expect(imp().dups[rowOf('blue-chicken').key]).toEqual({ in: 'same', id: 'import/blue-chicken' })
+    await imp().start()
+    expect(rowOf('blue-chicken').run).toBe('skipped')
+    expect(mine()[0].mode).toBe('solid')
+    imp().setDupMode('update')
+    await imp().retry()
+    expect(rowOf('blue-chicken').outcome).toBe('update')
+    expect(mine().map((x) => [x.id, x.mode])).toEqual([['import/blue-chicken', 'points']])
+  })
+
+  it('a .json known only by its type still reads as an SNO object', async () => {
+    const route = await routeImport([chicken('blue-chicken', 'application/json')])
+    expect(route.to).toBe('shards')
+    if (route.to === 'shards') await imp().openFiles(route.files)
+    expect(imp().rows.map((r) => [r.name, r.read])).toEqual([['blue-chicken', 'ok']])
+  })
+
+  it('a glTF .json still goes to IMPORT\'s 3D reader, which reads it', async () => {
+    const file = gltfJson()
+    const route = await routeImport([file])
+    expect(route).toEqual({ to: 'mesh', files: [file] })
+    const res = await importFiles([file], { fit: 8, unit: 0, palette: BUILT_IN, color: [255, 255, 255] })
+    expect(res.ok).toBe(true)
+    expect(imp().open).toBe(false)
+  })
+
+  it('a .json that is neither says NOT AN SNO OR glTF FILE', async () => {
+    expect(await routeImport([new File(['{"hello":"world"}'], 'notes.json')])).toEqual({ to: 'none', error: NOT_SNO_OR_GLTF })
+    expect(await routeImport([new File(['not json at all'], 'notes.json')])).toEqual({ to: 'none', error: NOT_SNO_OR_GLTF })
+    expect(await routeImport([new File(['{"v":2,"name":"cut short"'], 'broken.json')])).toEqual({ to: 'none', error: NOT_SNO_OR_GLTF })
+    // Among others, it names the file.
+    expect(await routeImport([chicken(), new File(['[]'], 'list.json')])).toEqual({ to: 'none', error: `list.json: ${NOT_SNO_OR_GLTF}` })
+    expect(NOT_SNO_OR_GLTF).toBe('NOT AN SNO OR glTF FILE')
+  })
+
+  it('an SNO .json picked with a GLB brings both in, each a new shard', async () => {
+    const route = await routeImport([chicken(), glb()])
+    expect(route.to).toBe('shards')
+    if (route.to !== 'shards') return
+    await imp().openFiles(route.files)
+    expect(imp().fileName).toBe('2 files')
+    expect(imp().rows.map((r) => [r.name, r.id, r.kind, r.read])).toEqual([
+      ['blue-chicken', 'import/blue-chicken', 'sno', 'ok'],
+      ['tri', 'import/tri', 'mesh', 'ok'],
+    ])
+    await imp().start()
+    expect(mine().map((x) => x.id).sort()).toEqual(['import/blue-chicken', 'import/tri'])
+    expect(mine().find((x) => x.id === 'import/tri')!.faces.length).toBeGreaterThan(0)
+  })
+
+  it('a glTF .json picked beside an SNO object is read as a 3D file, not refused as an SNO object', async () => {
+    await imp().openFiles([chicken(), gltfJson()])
+    expect(imp().rows.map((r) => [r.name, r.kind, r.read])).toEqual([['blue-chicken', 'sno', 'ok'], ['tri', 'mesh', 'ok']])
+  })
+
+  it('the workshop\'s picker and its drop both take this route, and the picker offers a .json', () => {
+    const src = readFileSync(join(__dirname, '..', '..', 'workshop', 'Workshop.tsx'), 'utf8')
+    expect(src).toContain('const route = await routeImport(files)')
+    expect(src).toContain("if (route.to === 'shards') { void useShardImport.getState().openFiles(route.files); return }")
+    expect(src).toContain('accept={IMPORT_PICKER_ACCEPT}')
+    expect(src).toContain('void importFromFiles(e.dataTransfer.files)')
+  })
+
+  it('without an SNO object, GLBs and glTFs stay with IMPORT\'s 3D reader; a zip still goes alone', async () => {
+    expect((await routeImport([glb(), gltfJson()])).to).toBe('mesh')
+    const zip = kitZip()
+    expect(await routeImport([zip])).toEqual({ to: 'zip', file: zip })
+    expect(await routeImport([zip, chicken()])).toEqual({ to: 'none', error: 'Import one zip at a time, on its own.' })
   })
 })

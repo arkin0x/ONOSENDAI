@@ -249,7 +249,8 @@ export function WorldShards({ axes }: Props): JSX.Element | null {
  * (TapTarget; arkinox, 2026-09-30). Cyberspace TV's have no tap target, and
  * hand their drawn group to TV, which sets how they look each frame (TvFinds).
  * The world's own (`occludes`) dim while they block the build cursor
- * (BuildOccluders), except the one EDIT is moving.
+ * (BuildOccluders), except the one EDIT is moving, and take no taps while
+ * dimmed, so a tap reaches what is behind them.
  */
 export function PlacedShard({ w, birth, moving = false, tappable = true, drawnRef, occludes = false }: { w: PlacedShardDraw; birth: number | undefined; moving?: boolean; tappable?: boolean; drawnRef?: (g: Group | null) => void; occludes?: boolean }): JSX.Element {
   const drawn = useRef<Group | null>(null)
@@ -272,7 +273,8 @@ export function PlacedShard({ w, birth, moving = false, tappable = true, drawnRe
         <ShardMesh shard={w.shard} scale={w.scale} birth={birth} world ghost={moving} clip={w.clip} pose={w.pose} budget={budget} dim={moving ? 1 : dim} />
       </group>
       {/* Not tappable while it moves: the ghost is the one being aimed. */}
-      {!moving && tappable && <TapTarget measure={drawn} onTap={() => useShards.getState().selectSecret(w.key)} />}
+      {/* Dimmed in build mode, a tap passes through it (BuildOccluders tapsPassThrough). */}
+      {!moving && tappable && <TapTarget measure={drawn} occluder={occludes ? w.key : undefined} onTap={() => useShards.getState().selectSecret(w.key)} />}
     </group>
   )
 }

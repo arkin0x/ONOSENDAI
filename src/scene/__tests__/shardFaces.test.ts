@@ -113,7 +113,8 @@ describe('where it is wired (ShardMesh and the avatar)', () => {
   })
 
   it('an avatar, and its parts, ignore their opacity (§3.3)', () => {
-    expect(avatar).toMatch(/<ShardMesh shard=\{shard\} world cull=\{firstPerson\} ignoreOpacity \/>/)
+    // Its own opacity is ignored; only the build dim (BuildOccluders, in BUILD alone) sees through it.
+    expect(avatar).toMatch(/<ShardMesh shard=\{shard\} world cull=\{firstPerson\} ignoreOpacity dim=\{dim\} \/>/)
     expect(readFileSync('src/hud/PersonModal.tsx', 'utf8')).toMatch(/<Preview shard=\{shard\} ignoreOpacity \/>/)
     expect(readFileSync('src/hud/TvSegments.tsx', 'utf8')).toMatch(/ignoreOpacity=\{item\?\.kind !== 'object'\}/)
   })

@@ -23,6 +23,12 @@
  * whose box holds the camera, or whose box is more than MAX_SCREENS screens
  * across, takes no taps; it is still drawn, so its faces stand around you.
  *
+ * A shard or avatar dimmed in build mode, because it stands between the
+ * camera and the build cursor, takes no taps either (`occluder`; arkinox,
+ * 2026-11-09): the tap passes through to what is behind it, as it would
+ * through glass. Asked at each tap (BuildOccluders tapsPassThrough), so the
+ * target never holds a state of its own that could outlive the dim.
+ *
  * farCullDoublings below is the guaranteed form of the same idea for shards
  * zoomed far out: past that many doublings no shard of its own geometry can
  * show MIN_VISIBLE_PX at any camera distance, so it is not drawn at all.
@@ -34,6 +40,7 @@ import { Box3, Mesh, PerspectiveCamera, Raycaster, Vector3, type Camera, type In
 import { MAX_EXTENT } from 'sno-core/shards'
 import { CAMERA_NEAR, FOV } from './camera'
 import { markSceneTapHandled } from '../hooks/useCanvasTap'
+import { tapsPassThrough } from './BuildOccluders'
 
 /** Below this many pixels across, an object is a speck and takes no taps. */
 export const MIN_VISIBLE_PX = 4
@@ -138,6 +145,12 @@ interface Props {
    * the controls.
    */
   yields?: boolean
+  /**
+   * The key its drawn object is registered under among what may block the
+   * build cursor (BuildOccluders): while that is dimmed, the target takes no
+   * rays, and a tap reaches what is behind it.
+   */
+  occluder?: string
 }
 
 /**
@@ -161,6 +174,8 @@ export interface TapSpec {
   measure?: RefObject<Object3D>
   px?: number
   at?: [number, number, number]
+  /** Its key among what may block the build cursor: dimmed, it takes no rays. */
+  occluder?: string
 }
 
 /**
@@ -197,10 +212,14 @@ export function tapRaycast(view: () => TapView, spec: { current: TapSpec }, out:
   /** Places and sizes the target `m`; false when it takes no taps. */
   const place = (m: Mesh): boolean => {
     if (!m.parent) return false
+    const { measure, px, at, occluder } = spec.current
+    // Dimmed in build mode: see-through, and so tapped through. Left out of
+    // the ray's hits altogether, so nothing else under the tap (a yielding
+    // avatar, a large shard's exact test) counts it either.
+    if (tapsPassThrough(occluder)) return false
     const { camera, size: screen } = view()
     const cam = camera as PerspectiveCamera
     const fov = cam.fov ?? 50
-    const { measure, px, at } = spec.current
 
     if (px !== undefined) {
       if (at) centre.set(at[0], at[1], at[2]); else centre.set(0, 0, 0)
@@ -257,17 +276,18 @@ export function tapRaycast(view: () => TapView, spec: { current: TapSpec }, out:
   }
 }
 
-export function TapTarget({ onTap, measure, px, at, yields = false }: Props): JSX.Element {
+export function TapTarget({ onTap, measure, px, at, yields = false, occluder }: Props): JSX.Element {
   const hit = useRef<Mesh>(null)
   const get = useThree((s) => s.get)
   const precise = useRef(new Raycaster())
   // What the measurement reads, kept to the committed props: the raycast
   // below is made once, and a render React throws away must not move it.
-  const spec = useRef<TapSpec>({ measure, px, at })
+  const spec = useRef<TapSpec>({ measure, px, at, occluder })
   useLayoutEffect(() => {
     spec.current.measure = measure
     spec.current.px = px
     spec.current.at = at
+    spec.current.occluder = occluder
   })
   const measured = useRef<TapMeasure>({ across: 0, perPxWorld: 0 })
   const raycast = useMemo(() => tapRaycast(get as () => TapView, spec, measured.current), [get])

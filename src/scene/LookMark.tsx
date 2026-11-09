@@ -110,7 +110,7 @@ interface Props {
   children?: (frame: { model: ShardModel | null; dim: number } & LookFrame) => ReactNode
   /** How a custom look is drawn: where it is cut, how it stands, and its share of the scene's budget. */
   frame?: LookFrame
-  /** Its key among what may block the build cursor (BuildOccluders); absent, it never dims. */
+  /** Its key among what may block the build cursor (BuildOccluders); absent, it never dims. Dimmed, a tap passes through it. */
   occluder?: string
 }
 
@@ -157,7 +157,7 @@ export function LookMark({ look, model, at, axes, minPx, label, onTap, clearTop 
         </group>
       </group>
       {/* Outside the scaled group: a target and a label size themselves from the camera. */}
-      {onTap && <group position={at}><TapTarget measure={drawn} onTap={onTap} /></group>}
+      {onTap && <group position={at}><TapTarget measure={drawn} occluder={occluder} onTap={onTap} /></group>}
       {label && <WorldLabel text={label.text} color={label.color} at={at} align="center" px={13} sub={label.sub} subColor={label.subColor} clear={clear} recede="name" />}
     </>
   )

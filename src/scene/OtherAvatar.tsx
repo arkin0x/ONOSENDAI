@@ -21,9 +21,14 @@
  * and decays to zero. Only their own move glides; your hop moves everybody's
  * render coordinates, and since the offset is relative, that shift is applied
  * whole as the rest of the world's is.
+ *
+ * In build mode it dims while it stands between the camera and the build
+ * cursor, as a shard does, and a tap passes through it then (BuildOccluders;
+ * arkinox, 2026-11-09). It registers only while the Builder is on: anywhere
+ * else an avatar is never see-through (AvatarShape, DECK-0003 §3.3).
  */
 
-import { useEffect, useLayoutEffect, useRef } from 'react'
+import { useEffect, useId, useLayoutEffect, useRef } from 'react'
 import { useFrame } from '@react-three/fiber'
 import type { Group, Quaternion } from 'three'
 import { AvatarLerp, type Vec3 } from '../lib/avatarLerp'
@@ -31,6 +36,7 @@ import type { Position } from '../lib/space'
 import { drawnAvatars } from '../lib/targets'
 import { usePersonCard } from '../store/usePersonCard'
 import { AvatarShape } from './AvatarShape'
+import { useAvatarOccluder } from './BuildOccluders'
 import { TapTarget } from './TapTarget'
 import { WorldLabel } from './WorldLabel'
 
@@ -69,6 +75,10 @@ export function OtherAvatar({ pubkey, color, center, position, place, turn, labe
   const out = useRef<Vec3>([0, 0, 0])
   const last = useRef<Position>(position)
   const zoomWas = useRef(scaleExp)
+  // Its key among what may block the build cursor, only while the Builder is
+  // on; unique to this one drawing, since two lists may draw the same pubkey.
+  const id = useId()
+  const { occluder, dim } = useAvatarOccluder(`${pubkey}:${id}`, drawn)
   // Before the move's effect below, so a move landing in the same commit as
   // a zoom adds its own offset (in the new zoom's cells) to a glide already
   // put in them.
@@ -111,9 +121,9 @@ export function OtherAvatar({ pubkey, color, center, position, place, turn, labe
   return (
     <group ref={placed}>
       <group ref={drawn} quaternion={turn}>
-        <AvatarShape pubkey={pubkey} color={color} keepShape={keepShape} />
+        <AvatarShape pubkey={pubkey} color={color} keepShape={keepShape} dim={dim} />
       </group>
-      {tappable && <TapTarget measure={drawn} onTap={() => usePersonCard.getState().open(pubkey)} />}
+      {tappable && <TapTarget measure={drawn} occluder={occluder} onTap={() => usePersonCard.getState().open(pubkey)} />}
       <WorldLabel text={label} color={color} at={[0, 0.9, 0]} align="center" px={labelPx} opacity={labelOpacity} />
     </group>
   )

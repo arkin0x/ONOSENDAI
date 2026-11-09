@@ -48,9 +48,17 @@ interface Props {
   outline?: boolean
   /** Its own shape at any zoom, never the marker (Cyberspace TV: avatarDrawKept). */
   keepShape?: boolean
+  /**
+   * The share of full opacity to draw a shard at: only ever below 1 in build
+   * mode, while the avatar stands between the camera and the build cursor
+   * (BuildOccluders). It is the one thing that makes an avatar see-through;
+   * the shard's own opacity is still ignored. The marker is lines, which
+   * never block, so it never takes it.
+   */
+  dim?: number
 }
 
-export function AvatarShape({ pubkey, color, renderOrder = 0, depthTest = true, firstPerson = false, outline = false, keepShape = false }: Props): JSX.Element | null {
+export function AvatarShape({ pubkey, color, renderOrder = 0, depthTest = true, firstPerson = false, outline = false, keepShape = false, dim = 1 }: Props): JSX.Element | null {
   const shard = useAvatarShard(pubkey)
   const scaleExp = useCyberspace((s) => s.scaleExp)
   const spectator = spectatorScale(scaleExp)
@@ -59,8 +67,8 @@ export function AvatarShape({ pubkey, color, renderOrder = 0, depthTest = true, 
     const k = draw.mesh
     return (
       <group scale={[k, k, k]}>
-        {/* An avatar is opaque whatever its shard says (DECK-0003 §3.3). */}
-        <ShardMesh shard={shard} world cull={firstPerson} ignoreOpacity />
+        {/* An avatar is opaque whatever its shard says (DECK-0003 §3.3); only the build dim sees through it. */}
+        <ShardMesh shard={shard} world cull={firstPerson} ignoreOpacity dim={dim} />
       </group>
     )
   }

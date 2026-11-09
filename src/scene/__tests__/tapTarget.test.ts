@@ -4,11 +4,15 @@
  * large one's target is exactly what it draws (arkinox, 2026-09-30).
  */
 
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it } from 'vitest'
 import { MAX_EXTENT } from 'sno-core/shards'
 import { BoxGeometry, Group, Mesh, MeshBasicMaterial, PerspectiveCamera, Raycaster, Scene, Vector2, Vector3 } from 'three'
 import { MAX_SCREENS, MAX_VIEWPORT_PX, MIN_TARGET_PX, MIN_VISIBLE_PX, farCullDoublings, pxPerUnit, tapRaycast, targetSpan, yieldsTap, type TapSpec, type TapView } from '../TapTarget'
 import { CAMERA_NEAR, FOV } from '../camera'
+import { tapsPassThrough } from '../BuildOccluders'
+import { setDimmed } from '../../store/useBuildDim'
+import { useBuilder } from '../../store/useBuilder'
+import { useCyberspace } from '../../store/useCyberspace'
 
 describe('pxPerUnit', () => {
   it('is the viewport height over the view height at that distance', () => {
@@ -149,5 +153,85 @@ describe('tapRaycast: a target is placed when a ray asks (2026-10-20)', () => {
     expect(w.target.userData.tapPriority).toBe('mark')
     // MIN_TARGET_PX across at 10 units: its world size is that many pixels' worth.
     expect(w.target.scale.x * pxPerUnit(FOV, 800, 10)).toBeCloseTo(MIN_TARGET_PX)
+  })
+})
+
+describe('a dimmed occluder is tapped through (arkinox, 2026-11-09)', () => {
+  /** A wall nearer the camera and a shard behind it, each with its own target, on one line of sight down -z. */
+  function behind() {
+    const scene = new Scene()
+    const make = (z: number, key: string) => {
+      const holder = new Group()
+      holder.position.set(0, 0, z)
+      const drawn = new Group()
+      drawn.add(new Mesh(new BoxGeometry(2, 2, 2), new MeshBasicMaterial()))
+      const target = new Mesh(new BoxGeometry(1, 1, 1), new MeshBasicMaterial())
+      holder.add(drawn, target)
+      scene.add(holder)
+      return { target, spec: { current: { measure: { current: drawn }, occluder: key } as TapSpec } }
+    }
+    const wall = make(-6, 'wall')
+    const back = make(-12, 'back')
+    const camera = new PerspectiveCamera(FOV, 1, CAMERA_NEAR, 6000)
+    scene.updateMatrixWorld(true)
+    camera.updateMatrixWorld(true)
+    const view = (): TapView => ({ camera, size: { width: 800, height: 800 }, internal: { lastEvent: { current: null } } })
+    wall.target.raycast = tapRaycast(view, wall.spec, { across: 0, perPxWorld: 0 })
+    back.target.raycast = tapRaycast(view, back.spec, { across: 0, perPxWorld: 0 })
+    /** What a tap at the centre of the view hits first, as R3F orders them: nearest first. */
+    const first = (): Mesh | null => {
+      const ray = new Raycaster()
+      ray.setFromCamera(new Vector2(0, 0), camera)
+      return (ray.intersectObjects([wall.target, back.target])[0]?.object as Mesh | undefined) ?? null
+    }
+    return { wall, back, first }
+  }
+
+  afterEach(() => {
+    setDimmed(new Set())
+    useBuilder.setState({ active: false })
+    useCyberspace.setState({ walking: false })
+  })
+
+  it('not dimmed, the nearer one takes the tap as before', () => {
+    useBuilder.setState({ active: true })
+    const w = behind()
+    expect(w.first()).toBe(w.wall.target)
+  })
+
+  it('dimmed with the Builder on, the tap passes through to what is behind it', () => {
+    useBuilder.setState({ active: true })
+    const w = behind()
+    setDimmed(new Set(['wall']))
+    expect(w.first()).toBe(w.back.target)
+    // Stops blocking: it takes taps again on the very next tap.
+    setDimmed(new Set())
+    expect(w.first()).toBe(w.wall.target)
+  })
+
+  it('a dimmed set left behind once the Builder has closed, or in WALK, never swallows a tap', () => {
+    const w = behind()
+    setDimmed(new Set(['wall']))
+    expect(w.first()).toBe(w.wall.target)
+    useBuilder.setState({ active: true })
+    useCyberspace.setState({ walking: true })
+    expect(w.first()).toBe(w.wall.target)
+  })
+
+  it('a target with no occluder key is never tapped through', () => {
+    useBuilder.setState({ active: true })
+    const w = behind()
+    w.wall.spec.current.occluder = undefined
+    setDimmed(new Set(['wall']))
+    expect(w.first()).toBe(w.wall.target)
+  })
+
+  it('tapsPassThrough: only a dimmed key, only while the scene dims', () => {
+    setDimmed(new Set(['k']))
+    expect(tapsPassThrough('k')).toBe(false)
+    useBuilder.setState({ active: true })
+    expect(tapsPassThrough('k')).toBe(true)
+    expect(tapsPassThrough('other')).toBe(false)
+    expect(tapsPassThrough(undefined)).toBe(false)
   })
 })

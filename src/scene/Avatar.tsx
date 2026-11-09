@@ -55,6 +55,11 @@
  * at once, with no glide from wherever it last was. Driven per frame from
  * the store (lib/walkGhost.ts), not from React, so a landing cannot draw
  * one frame of it at the new head before a re-render hides it.
+ *
+ * In build mode it dims while it stands between the camera and the build
+ * cursor, as shards and other avatars do, and a tap passes through it then
+ * (BuildOccluders; arkinox, 2026-11-09). Only while the Builder is on: an
+ * avatar is otherwise never see-through (AvatarShape, DECK-0003 §3.3).
  */
 
 import { useMemo, useRef } from 'react'
@@ -73,6 +78,7 @@ import { avatarInBuild } from '../lib/buildCursor'
 import { usePersonCard } from '../store/usePersonCard'
 import { useLayers } from '../store/useLayers'
 import { AvatarShape } from './AvatarShape'
+import { useAvatarOccluder } from './BuildOccluders'
 import { TapTarget } from './TapTarget'
 
 /** How far from the build cursor's field the avatar is still drawn in BUILD mode, as PresenceAvatars culls. */
@@ -146,6 +152,13 @@ export function Avatar(): JSX.Element | null {
       ? anchorCentre(anchor, scaleExp, axes)
       : placeCentre(shownPosition, alignedOrigin(anchor, scaleExp), scaleExp, axes)
   }, [anchor, scaleExp, view, shownPosition])
+  // Whether it is drawn at all: not while looking at a shard, and in BUILD
+  // mode not in another plane than the one you build in, nor beyond the
+  // field, where it would be a speck a universe away.
+  const shown = !(focus && !placed) && !(placed && (shownPosition === null || shownPlane !== anchorPlane || Math.hypot(...at) > REACH))
+  // Among what may block the build cursor while drawn with the Builder on;
+  // named only while drawn, so it registers once its group is there.
+  const { occluder, dim } = useAvatarOccluder(shown ? 'you' : undefined, drawn)
 
   useFrame(({ camera }, dt) => {
     const g = group.current
@@ -197,10 +210,7 @@ export function Avatar(): JSX.Element | null {
     d.quaternion.slerp(facing, 1 - Math.exp(-dt / 0.15))
   })
 
-  if (focus && !placed) return null
-  // In BUILD mode: not in another plane than the one you build in, and not
-  // beyond the field, where it would be a speck a universe away.
-  if (placed && (shownPosition === null || shownPlane !== anchorPlane || Math.hypot(...at) > REACH)) return null
+  if (!shown) return null
 
   return (
     <>
@@ -221,9 +231,9 @@ export function Avatar(): JSX.Element | null {
           ghost and the deploy box's walls at 10, so they lie over it on every
           frame rather than by distance (review of #494). */}
       <group ref={drawn}>
-        {!(walking && hiddenInWalk) && <AvatarShape pubkey={pubkey} color="#ff2323" renderOrder={9.5} depthTest={false} firstPerson={walking} />}
+        {!(walking && hiddenInWalk) && <AvatarShape pubkey={pubkey} color="#ff2323" renderOrder={9.5} depthTest={false} firstPerson={walking} dim={dim} />}
       </group>
-      {!walking && <TapTarget measure={drawn} yields onTap={() => usePersonCard.getState().open(pubkey)} />}
+      {!walking && <TapTarget measure={drawn} yields occluder={occluder} onTap={() => usePersonCard.getState().open(pubkey)} />}
     </group>
     </>
   )

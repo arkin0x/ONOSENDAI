@@ -250,7 +250,10 @@ export function ChestCompose({ onDone, target = { mode: 'place' } }: { onDone: (
   const forgeNew = (): void => { setForging(forgeKey('')); setAdding('forge') }
   const dropForge = (): void => { setForging(null); setAdding(null) }
   const remove = (i: number): void => setContents((list) => list.filter((_, j) => j !== i))
-  const ready = name.trim().length > 0 && !!lock && (isDoor || contents.length > 0) && !refusal && !loading && !unread
+  // An editor open (FORGE NEW above all): SEAL, SAVE and MOVE wait, so a configured item and its keypair are never dropped unseen (review of #627).
+  const midAdd = adding !== null
+  const MID_ADD = 'ADD OR CANCEL THE ITEM FIRST'
+  const ready = name.trim().length > 0 && !!lock && (isDoor || contents.length > 0) && !refusal && !loading && !unread && !midAdd
   const current = (): ChestDraft => ({ name: name.trim(), lock, requires: requires.trim(), contents })
   // Placing: the draft rides on the chest being placed, so closing the modal (back to the bar) keeps it.
   useEffect(() => {
@@ -279,7 +282,7 @@ export function ChestCompose({ onDone, target = { mode: 'place' } }: { onDone: (
     void useShards.getState().sealPlacedChest({ ...current(), lock })
   }
   // MOVE before it is sealed: back to the hide bar, the draft kept on the chest being placed.
-  const move = (): void => { useShards.getState().unplaceChest(current()); onDone() }
+  const move = (): void => { if (midAdd) return; useShards.getState().unplaceChest(current()); onDone() }
   const cancel = (): void => { if (!editing) useShards.getState().cancelDeploy(true); onDone() }
 
   // The chest in 3D across the top, as it will stand: the model the bar chose, turned as the bar turned it.
@@ -393,12 +396,15 @@ export function ChestCompose({ onDone, target = { mode: 'place' } }: { onDone: (
               <ul className="objpick__list compose__models" aria-label="Item from your ITEMS">
                 {ownItems.map(({ item, content }) => {
                   const there = inChest.has(content.key.itemPubkey)
+                  // The chest's own lock: sealed inside, it would open nothing from outside (review of #627).
+                  const isLock = lock?.pubkey === content.key.itemPubkey
+                  const blocked = there || isLock
                   return (
                     <li key={item.id}>
-                      <button className="objpick__row" disabled={there} onClick={() => add(content)} title={there ? 'Already in this chest' : `Seal "${item.name}" in the chest, the same item`}>
+                      <button className="objpick__row" disabled={blocked} onClick={() => add(content)} title={there ? 'Already in this chest' : isLock ? 'This item is the chest’s lock' : `Seal "${item.name}" in the chest, the same item`}>
                         <ItemFace className="chest__glyph chest__glyph--key" type="key" image={content.key.image} />
                         <span className="objpick__name">{item.name}</span>
-                        <span className="objpick__meta">{there ? 'IN CHEST' : itemSettings(content.key)}</span>
+                        <span className="objpick__meta">{there ? 'IN CHEST' : isLock ? 'IS THE LOCK' : itemSettings(content.key)}</span>
                       </button>
                     </li>
                   )
@@ -412,6 +418,8 @@ export function ChestCompose({ onDone, target = { mode: 'place' } }: { onDone: (
         </>
       ) : forging ? (
         <>
+          {/* Its own heading, so its name is not read as the chest's. */}
+          <span className="legend__label">NEW ITEM</span>
           <ItemForgeFields item={forging} onChange={updateForging} idPrefix="chest-item" />
           <div className="compose__row">
             <button className="chest__act" onClick={dropForge}>CANCEL</button>
@@ -438,8 +446,8 @@ export function ChestCompose({ onDone, target = { mode: 'place' } }: { onDone: (
       ) : (
         <div className="shards__actions">
           <button className="avatars__go" onClick={cancel} disabled={working}>CANCEL</button>
-          {!editing && <button className="avatars__go" onClick={move} disabled={working} title="Back to the hide bar, to place it somewhere else">MOVE</button>}
-          <button className="avatars__go" disabled={!ready || working} onClick={seal} title={refusal ?? (!lock ? 'Pick an item or paste a public key to seal to' : !isDoor && contents.length === 0 ? 'Put something in it first' : editing ? 'Seal it again where it stands' : undefined)}>
+          {!editing && <button className="avatars__go" onClick={move} disabled={working || midAdd} title={midAdd ? MID_ADD : 'Back to the hide bar, to place it somewhere else'}>MOVE</button>}
+          <button className="avatars__go" disabled={!ready || working} onClick={seal} title={midAdd ? MID_ADD : refusal ?? (!lock ? 'Pick an item or paste a public key to seal to' : !isDoor && contents.length === 0 ? 'Put something in it first' : editing ? 'Seal it again where it stands' : undefined)}>
             {working ? (deployNote && !editing ? `${deployNote.toUpperCase()}…` : 'SEALING…') : editing ? 'SAVE' : live ? 'SEAL & PUBLISH' : 'SEAL (LOCAL)'}
           </button>
         </div>

@@ -109,6 +109,15 @@ export function ItemForgeFields({ item: key, onChange: setKey, idPrefix = 'item'
   const [iconWanted, setIconWanted] = useState(false)
   const iconUrl = useThumbs((s) => (key.model ? s.urls[iconKey(key.model.address)] : undefined))
   const iconQueued = useThumbs((s) => (key.model ? s.queue.some((j) => j.key === iconKey(key.model!.address)) : false))
+  // A picture decodes later: it lands only on the item it was chosen for, and
+  // never once these fields are gone (CANCEL), so a late one cannot dress the
+  // next forge (review of #627).
+  const live = useRef(true)
+  useEffect(() => { live.current = true; return () => { live.current = false } }, [])
+  const wear = (forPubkey: string) => (picture: { image: string; imageDim: PictureDim }): void => {
+    if (live.current) setKey((k) => (k.itemPubkey === forPubkey ? { ...k, ...picture } : k))
+  }
+  const refused = (err: unknown): void => { if (live.current) setPictureNote(err instanceof Error ? err.message : String(err)) }
 
   const copy = (what: string, text: string): void => {
     void navigator.clipboard?.writeText(text).then(() => {
@@ -119,10 +128,7 @@ export function ItemForgeFields({ item: key, onChange: setKey, idPrefix = 'item'
   const choosePicture = (file: File | undefined): void => {
     if (!file) return
     setPictureNote(null)
-    pictureFrom(file).then(
-      (picture) => setKey((k) => ({ ...k, ...picture })),
-      (err: unknown) => setPictureNote(err instanceof Error ? err.message : String(err)),
-    )
+    pictureFrom(file).then(wear(key.itemPubkey), refused)
   }
   const removePicture = (): void => {
     setPictureNote(null)
@@ -176,11 +182,10 @@ export function ItemForgeFields({ item: key, onChange: setKey, idPrefix = 'item'
     if (!iconUrl && !iconQueued) { setIconWanted(false); setPictureNote('The model could not be drawn.'); return }
     if (!iconUrl) return
     setIconWanted(false)
-    pictureFromUrl(iconUrl).then(
-      (picture) => setKey((k) => ({ ...k, ...picture })),
-      (err: unknown) => setPictureNote(err instanceof Error ? err.message : String(err)),
-    )
-  }, [iconWanted, iconUrl, iconQueued, setKey])
+    pictureFromUrl(iconUrl).then(wear(key.itemPubkey), refused)
+    // wear and refused are fresh each render; what they close over is read through refs and the item's own key.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [iconWanted, iconUrl, iconQueued, setKey, key.itemPubkey])
 
   return (
     <>

@@ -29,6 +29,8 @@ if (typeof localStorage === 'undefined') {
   }
 }
 
+/** How long the stub Image takes to load. */
+const imageDelay = { ms: 0 }
 /** The PNG the stub canvas hands back for a picture. */
 const PNG = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=='
 // The picture is drawn on a canvas from an Image (ItemForgeFields pictureFrom): stubs that load at once.
@@ -44,7 +46,8 @@ const PNG = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJA
   naturalHeight = 48
   onload: (() => void) | null = null
   onerror: (() => void) | null = null
-  set src(_: string) { setTimeout(() => this.onload?.(), 0) }
+  // A test may hold the decode back (imageDelay), to land after CANCEL.
+  set src(_: string) { setTimeout(() => this.onload?.(), imageDelay.ms) }
 }
 
 const MODEL_ADDRESS = `33331:${'cd'.repeat(32)}:lantern`
@@ -86,6 +89,7 @@ const CURSOR = { x: (1n << 70n) + 0x1d3c5a7f9n, y: (1n << 60n) + 0x2b4n, z: (1n 
 let lock: KeyItem
 
 beforeEach(() => {
+  imageDelay.ms = 0
   lock = forgeKey('Wind Key')
   useShards.setState({ mine: [], deleted: {}, discovered: {}, pending: null, chestBack: null, deployHeight: 0, deployUnit: 0, deployTurn: [0, 0, 0], deployStatus: 'idle', deployError: null, selectedSecret: null })
   useBuilder.getState().exit()
@@ -328,6 +332,88 @@ describe('+ ITEM: FROM MY ITEMS or FORGE NEW', () => {
     await type(m, 'Item name', 'Inner Key')
     await m.press(/^ADD$/)
     expect(options()).toEqual(was)
+    await m.unmount()
+    S().cancelDeploy()
+  })
+})
+
+describe('review of #627', () => {
+  const pick = async (m: Mounted, file = 'p.png'): Promise<void> => {
+    ;(byLabel(m, 'Picture file').props.onChange as (e: unknown) => void)({ target: { files: [new File(['x'], file, { type: 'image/png' })], value: file } })
+  }
+
+  it('SEAL and MOVE wait while an item is being added, so a forged item is never dropped unseen', async () => {
+    const m = await openPlaced()
+    await m.press('+ MESSAGE')
+    await type(m, 'Message to seal', 'inside')
+    await vi.waitFor(() => expect(m.buttons(/^ADD/).some((b) => !b.props.disabled)).toBe(true))
+    await m.press(/^ADD/)
+    expect(m.buttons('SEAL (LOCAL)')[0].props.disabled).toBe(false)
+    await m.press('+ ITEM')
+    await m.press('FORGE NEW')
+    // Its own heading, apart from the chest's fields.
+    expect(m.says('NEW ITEM')).toBe(true)
+    await type(m, 'Item name', 'Half Done')
+    for (const b of ['SEAL (LOCAL)', 'MOVE']) {
+      const [btn] = m.buttons(b)
+      expect(btn.props.disabled).toBe(true)
+      expect(btn.props.title).toBe('ADD OR CANCEL THE ITEM FIRST')
+    }
+    await m.press(/^ADD$/)
+    expect(m.buttons('SEAL (LOCAL)')[0].props.disabled).toBe(false)
+    expect(m.buttons('MOVE')[0].props.disabled).toBe(false)
+    await m.unmount()
+    S().cancelDeploy()
+  })
+
+  it('SAVE waits too, on a chest of yours', async () => {
+    const m = await openPlaced()
+    await m.press('+ MESSAGE')
+    await type(m, 'Message to seal', 'inside')
+    await vi.waitFor(() => expect(m.buttons(/^ADD/).some((b) => !b.props.disabled)).toBe(true))
+    await m.press(/^ADD/)
+    const d = await sealIt(m)
+    await m.unmount()
+    const e = await mount(<ChestCompose onDone={() => undefined} target={{ mode: 'edit', eventId: d.eventId, fields: false }} />)
+    await vi.waitFor(() => expect(e.says('OPENING')).toBe(false))
+    expect(e.buttons('SAVE')[0].props.disabled).toBe(false)
+    await e.press('+ ITEM')
+    await e.press('FORGE NEW')
+    expect(e.buttons('SAVE')[0].props.disabled).toBe(true)
+    expect(e.buttons('SAVE')[0].props.title).toBe('ADD OR CANCEL THE ITEM FIRST')
+    await e.press('CANCEL')
+    expect(e.buttons('SAVE')[0].props.disabled).toBe(false)
+    await e.unmount()
+  })
+
+  it('FROM MY ITEMS marks the chest’s own lock and will not seal it inside', async () => {
+    const { mineKey } = await stockItems()
+    S().startPlaceChest({ name: 'Wind Chest', lock: { pubkey: mineKey.key!.itemPubkey, label: 'Silver Key' }, requires: '', contents: [] })
+    S().setDeployHeight(4)
+    S().placeChest()
+    const m = await mount(<ChestCompose onDone={() => undefined} />)
+    await m.press('+ ITEM')
+    await m.press('FROM MY ITEMS')
+    expect(m.says('IS THE LOCK')).toBe(true)
+    expect(m.buttons('Silver Key')[0].props.disabled).toBe(true)
+    await m.unmount()
+    S().cancelDeploy()
+  })
+
+  it('a picture that decodes after CANCEL does not dress the next forge', async () => {
+    imageDelay.ms = 80
+    const m = await openPlaced()
+    await m.press('+ ITEM')
+    await m.press('FORGE NEW')
+    await pick(m)
+    await m.press('CANCEL')
+    await m.press('+ ITEM')
+    await m.press('FORGE NEW')
+    await new Promise((r) => setTimeout(r, 200))
+    expect(m.all().some((h) => h.type === 'img' && h.props.src === PNG)).toBe(false)
+    // A picture chosen for this forge still lands.
+    await pick(m)
+    await vi.waitFor(() => expect(m.all().some((h) => h.type === 'img' && h.props.src === PNG)).toBe(true))
     await m.unmount()
     S().cancelDeploy()
   })

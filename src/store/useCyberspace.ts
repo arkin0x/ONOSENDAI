@@ -1,4 +1,5 @@
 import { signerWaiting } from '../lib/authOpen'
+import { flyLanding } from '../lib/viewFly'
 import { chainHolders } from '../lib/chainHolders'
 import { bigintBitLimit, movementCapabilityIssue } from '../lib/proofCapability'
 /**
@@ -950,6 +951,12 @@ export interface CyberspaceState {
    * chain, or the plane lined up at it. Does nothing without a driven view.
    */
   aimView: (position: Position, plane: Plane) => void
+  /**
+   * Re-anchor a driven view on `position` when it has left the field's reach,
+   * as a cursor move there would (rideView), with the cursor staying where it
+   * is: VIEW's fly carries the camera on ahead of the cursor (scene/ViewFly.ts).
+   */
+  reanchorView: (position: Position) => void
   /**
    * Turn what is on screen into a driven view: a spectated avatar or an
    * action of history becomes a free view at that place, the spectation kept
@@ -4969,8 +4976,11 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
   },
 
   moveCursor: (dir) => {
-    const { cursor, scaleExp } = get()
+    const { scaleExp } = get()
     if (!get().canDrive()) return
+    // VIEW's fly not yet landed (lib/viewFly.ts flyLanding): the press steps
+    // from where the view has flown, not from where the cursor still waits.
+    const cursor = flyLanding() ?? get().cursor
     // WALK's cursor is its predicted head, moved only by a step (useWalk).
     if (get().walking) return
     // One cell of the zoom, or one build STEP while a deploy is lined up in
@@ -4980,8 +4990,8 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
     const next: Position = { ...cursor }
     next[dir.axis] = clampAxis(cursor[dir.axis] + step)
 
-    // Clamped against the axis wall: nowhere to go.
-    if (next[dir.axis] === cursor[dir.axis]) return
+    // Clamped against the axis wall: nowhere to go (but to where a fly left the view).
+    if (next[dir.axis] === cursor[dir.axis] && cursor === get().cursor) return
     set({ cursor: next })
     rideView(next)
   },
@@ -5789,6 +5799,8 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
     set({ cursor: next, ...(plane !== get().anchorPlane ? { anchorPlane: plane, focus: { ...focus, plane } } : {}) })
     rideView(next)
   },
+
+  reanchorView: (position) => rideView({ ...position }),
 
   viewHere: () => { if (get().atHead()) get().driveHere(VIEW_FOCUS_LABEL) },
 

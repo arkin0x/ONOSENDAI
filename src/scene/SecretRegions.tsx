@@ -137,7 +137,9 @@ export function SecretRegions({ axes }: Props): JSX.Element | null {
         corner[i] = (lo + (axis === 'y' ? -0.5 : side - 0.5)) * a.dir
         far = Math.max(far, Math.abs(centre[i]))
       })
-      if (far > GRID_RADIUS * 4) continue
+      // The reach every culled layer shares (Scene.tsx CULL_REACH): the fog is
+      // black before it, so a cage never pops at the line (review of #635, S2).
+      if (far > GRID_RADIUS * 8) continue
       out.push({ key, centre, corner, sides })
     }
     /*

@@ -15,6 +15,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { originShift, type Position } from '../lib/space'
 import { alignedOrigin, useCyberspace } from '../store/useCyberspace'
 import { flyDir } from '../lib/viewFly'
+import { useViewCentre } from '../lib/viewCamera'
 
 export interface ViewWindow {
   right: number
@@ -69,11 +70,16 @@ interface ReadWindow extends ViewWindow {
   view: unknown
 }
 
-/** The window the cursor is in right now, read straight off the store. */
+/**
+ * The window the view centres on right now, read straight off the store: the
+ * cursor's, or where a fly or a pan has taken the camera off it
+ * (lib/viewCamera.ts useViewCentre).
+ */
 function read(): ReadWindow {
   const s = useCyberspace.getState()
   const [right, up, out] = s.cursorOffset()
-  return { right: Math.round(right), up: Math.round(up), out: Math.round(out), origin: alignedOrigin(s.anchor, s.scaleExp), scaleExp: s.scaleExp, view: s.view }
+  const off = useViewCentre.getState()
+  return { right: Math.round(right) + off.right, up: Math.round(up) + off.up, out: Math.round(out) + off.out, origin: alignedOrigin(s.anchor, s.scaleExp), scaleExp: s.scaleExp, view: s.view }
 }
 
 const sameOrigin = (a: Position, b: Position): boolean => a.x === b.x && a.y === b.y && a.z === b.z
@@ -162,8 +168,11 @@ export function watchCursorSettle(fire: () => void, clock: () => number = () => 
       s.view !== prev.view
     ) schedule()
   })
+  // The camera flown or panned off the cursor by another whole cell.
+  const unsubscribeCentre = useViewCentre.subscribe(schedule)
   schedule()
   return () => {
+    unsubscribeCentre()
     unsubscribe()
     if (handle !== null) clearTimeout(handle)
   }

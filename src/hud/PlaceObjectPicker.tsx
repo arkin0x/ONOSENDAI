@@ -25,6 +25,8 @@ import { FeedList } from './FeedList'
 import { Explanation } from './Explanation'
 import { ShardFolders, modelEditedAt, modelName, modelRef, useNewestFirst } from './ShardFolders'
 import { ShardThumb } from './ShardThumb'
+import { useScrollMemory } from '../hooks/useScrollMemory'
+import { useShardFolders } from '../store/useShardFolders'
 
 /** Where objects to place come from. */
 export type SourceId = 'mine' | 'feed'
@@ -76,6 +78,9 @@ export function PlaceObjectPicker(): JSX.Element {
 function ModelsSource({ toFeed }: { toFeed: () => void }): JSX.Element {
   const shards = useWorkshop((s) => s.shards)
   const list: ShardModel[] = useNewestFirst(shards, modelRef, modelEditedAt)
+  // Back where it was scrolled to after a deploy is canceled or placed, as the workshop's MENU is.
+  const foldersRead = useShardFolders((s) => s.storage !== 'loading')
+  const listScroll = useScrollMemory('place-object-mine', foldersRead)
   if (list.length === 0) {
     return (
       <div className="objpick__empty">
@@ -90,7 +95,7 @@ function ModelsSource({ toFeed }: { toFeed: () => void }): JSX.Element {
   return (
     <>
       <p className="login__note">Choose one of your models. You aim and place it next; CANCEL before placing brings you back here.</p>
-      <ul className="objpick__list">
+      <ul className="objpick__list" ref={listScroll}>
         <ShardFolders items={list} refOf={modelRef} nameOf={modelName} row={(s, f) => {
           const empty = s.vertices.length === 0 && (s.parts?.length ?? 0) === 0
           return (

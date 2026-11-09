@@ -51,9 +51,12 @@ export class CrashNote extends Component<Props, State> {
   }
 
   private close = (): void => {
-    // Leave whatever was open, so the same render is not tried again at once.
+    // Leave whatever was open, so the same render is not tried again at once:
+    // a card that crashed and stayed selected crashed again on CLOSE, a loop
+    // only RELOAD left (2026-11-09).
     useLootView.getState().select(null)
     useShards.getState().setNearbyOpen(false)
+    useShards.getState().selectSecret(null)
     this.setState({ error: null, stack: '', copied: false })
   }
 

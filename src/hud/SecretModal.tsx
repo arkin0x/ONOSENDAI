@@ -278,7 +278,7 @@ export function SecretModal(): JSX.Element | null {
             />}
 
         {item.author && item.lookupId && (
-          <Comments subject={{ author: item.author, lookupId: item.lookupId, itemId: item.lineage ?? item.key, type: item.type, target: item.target, at: item.at, height: item.height, roomKeyHex: item.roomKeyHex }} />
+          <Comments subject={{ author: item.author, lookupId: item.lookupId, itemId: item.lineage ?? item.key, type: item.type, target: item.target, at: item.at, height: item.height, bagKeyHex: item.bagKeyHex }} />
         )}
 
         {/* The actions between two rules: the comments above, the event data

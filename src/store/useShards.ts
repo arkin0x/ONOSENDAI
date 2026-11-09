@@ -44,7 +44,6 @@ import { unbagRemembered } from '../lib/foundCache'
 import { bagAddressOf, bagsToOpen, retractedAt, staleFinds } from '../lib/bagVersions'
 import { itemTargetOf, type ItemTarget } from '../lib/comments'
 import { bytesToHex, hexToBytes, positionHex, type EventTemplate, type NostrEvent } from '../lib/events'
-import { regionKeyAt } from '../lib/shardCrypto'
 import { regionKeyOffThread } from '../lib/regionKeyOffThread'
 import { signedTableOnly } from '../lib/carried'
 import { deployCeiling, deployRoute, localKeyCeiling, needsAsk, regionKeyQuote } from '../lib/deployPlan'
@@ -233,8 +232,8 @@ export interface WorldItem {
   lookupId?: string
   /** The bag's event id, for the inventory's record of where a thing was found. */
   bagId?: string
-  /** In a room: the room key, which seals its comments (lib/comments CommentSubject). */
-  roomKeyHex?: string
+  /** The key that opened its bag, which seals its comments: the region key, or in a room the room key (lib/comments CommentSubject). */
+  bagKeyHex?: string
   /** For an item hidden by reference: the event comments answer (lib/comments ItemTarget). */
   target?: ItemTarget
   /**
@@ -4261,9 +4260,12 @@ export const useShards = create<ShardsState>((set, get) => {
     testDiscovery: async (eventId) => {
       const item = get().mine.find((d) => d.eventId === eventId)
       if (!item || !item.published) return 'missing'
-      // Region key derived fresh from the coordinate, as a stranger would.
-      // In a room, its key is the room key, which no coordinate alone gives.
-      const rk = item.room ? { key: hexToBytes(item.keyHex), lookupId: item.lookupId } : regionKeyAt(positionOf(item), item.height, MAX_COMPUTE_HEIGHT)
+      // The key and lookup id this device sealed the bag with: the region key
+      // at the coordinate (or, in a room, the room key). Never derived again
+      // here: on the main thread a key near height 20 froze the page, and a
+      // bag hidden above 20 through HOSAKA has a key no client computes, so
+      // the test threw and read as missing (2026-11-09).
+      const rk = { key: hexToBytes(item.keyHex), lookupId: item.lookupId }
       // Any relay's bag answers it. Only a miss with the canonical relay in
       // trouble (no AUTH, not heard from) is unread rather than missing.
       const { events, trouble } = await queryChecked({ kinds: [HIDDEN_KIND], '#d': [rk.lookupId] })
@@ -4327,12 +4329,12 @@ export const useShards = create<ShardsState>((set, get) => {
       if (!inItsBag(d)) continue
       // In a room whose door you closed (CLOSE): dissolved with it, yours too, until OPEN.
       if (shut?.(d.eventId)) continue
-      out.push({ key: d.eventId, type: d.type, at: positionOf(d), plane: d.plane, height: d.height, mine: true, author: me, shard: d.shard, text: d.text, keyItem: d.key, chest: d.chest, audio: d.audio, createdAt: d.createdAt, lookupId: d.lookupId, bagId: d.bagId, ...(d.room ? { roomKeyHex: d.keyHex } : {}), target: itemTargetOf(d.inner, d.ref), event: d.inner as NostrEvent, ...lineageOf(d.inner, d.ref) })
+      out.push({ key: d.eventId, type: d.type, at: positionOf(d), plane: d.plane, height: d.height, mine: true, author: me, shard: d.shard, text: d.text, keyItem: d.key, chest: d.chest, audio: d.audio, createdAt: d.createdAt, lookupId: d.lookupId, bagId: d.bagId, bagKeyHex: d.keyHex, target: itemTargetOf(d.inner, d.ref), event: d.inner as NostrEvent, ...lineageOf(d.inner, d.ref) })
     }
     for (const h of Object.values(state.discovered)) {
       if (seen.has(h.eventId)) continue
       if (shut?.(h.eventId)) continue
-      out.push({ key: h.eventId, type: h.type, at: h.at, plane: h.plane, height: h.height, mine: false, author: h.author, shard: h.shard, text: h.text, keyItem: h.key, chest: h.chest, audio: h.audio, createdAt: h.createdAt, lookupId: h.lookupId, bagId: h.bagId, ...(h.room && h.keyHex ? { roomKeyHex: h.keyHex } : {}), target: itemTargetOf(h.inner, h.ref), chestId: h.chestId, event: h.inner as NostrEvent | undefined, ...lineageOf(h.inner, h.ref) })
+      out.push({ key: h.eventId, type: h.type, at: h.at, plane: h.plane, height: h.height, mine: false, author: h.author, shard: h.shard, text: h.text, keyItem: h.key, chest: h.chest, audio: h.audio, createdAt: h.createdAt, lookupId: h.lookupId, bagId: h.bagId, ...(h.keyHex ? { bagKeyHex: h.keyHex } : {}), target: itemTargetOf(h.inner, h.ref), chestId: h.chestId, event: h.inner as NostrEvent | undefined, ...lineageOf(h.inner, h.ref) })
     }
     return oneVersionEach(out)
   }

@@ -55,7 +55,7 @@ import { positionOf, useShards, type MyDeployment } from '../../store/useShards'
 import { EventData, kindName } from '../EventData'
 import { PublishRow } from '../PublishSwitch'
 import { SecretModal } from '../SecretModal'
-import { STORED_TESTING, TEST_WORDS, WireData, relayNames, storedKeyNote } from '../WireData'
+import { ROOM_TESTING, STORED_TESTING, TEST_WORDS, WireData, relayNames, storedKeyNote } from '../WireData'
 import { keepDoorSecret, resetDoorSecrets } from '../../store/rooms'
 import { regionKeyOffThread } from '../../lib/regionKeyOffThread'
 import { regionKeyAt } from '../../lib/shardCrypto'
@@ -110,7 +110,7 @@ describe('the wire facts (WireData)', () => {
 
   it('shows each result of the test in its own words and color', async () => {
     const dep = await deployment({ published: true, relays: ['wss://relay.test'] })
-    for (const state of ['testing', 'found', 'missing', 'refused', 'unread', 'wrongKey'] as const) {
+    for (const state of ['testing', 'found', 'missing', 'refused', 'unread', 'wrongKey', 'underived'] as const) {
       const html = renderToStaticMarkup(<WireData dep={dep} initialTest={state} />)
       expect(html).toContain(`eventdata__test--${state}`)
       expect(html).toContain(TEST_WORDS[state].replace('&', '&amp;'))
@@ -328,7 +328,8 @@ describe('TEST DISCOVERY says which key it checks with (review of #622)', () => 
     expect(renderToStaticMarkup(<WireData dep={dep} initialTest="missing" initialChecked={{ via: 'stored', why: 'door', height: 8 }} />)).toContain(escaped(note))
     keepDoorSecret(me, 'dd'.repeat(32), 'ab'.repeat(32))
     const withSecret = renderToStaticMarkup(<WireData dep={dep} initialTest="testing" />)
-    expect(withSecret).toContain(TEST_WORDS.testing)
+    expect(withSecret).toContain(ROOM_TESTING)
+    expect(withSecret).not.toContain(TEST_WORDS.testing)
     expect(withSecret).toContain('Derive the room key from the coordinate and the door secret')
   })
 

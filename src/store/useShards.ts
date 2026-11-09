@@ -1469,7 +1469,10 @@ interface ShardsState {
    * device sealed the bag with, ask the relays, open what comes back.
    * `wrongKey`: the derived key or lookup id is not the stored one, so the bag
    * is sealed where no stranger looks (a wrong key bought from HOSAKA, say);
-   * the relay is not asked. `refused` means the bag came back and this item is
+   * the relay is not asked. `underived`: the derivation itself failed (the
+   * region worker crashed or ran out of time), so nothing was compared and the
+   * relay was not asked either. A row GONE FROM ITS BAG is not compared, and
+   * the relay says it is missing. `refused` means the bag came back and this item is
    * in it, but the format refuses it, so no client can show it; the fix is in
    * the workshop, not on the relay. `unread`: no relay's bag held it, and the
    * canonical relay refused (no AUTH) or was not heard from, so nothing is
@@ -1711,7 +1714,7 @@ export type DiscoveryKey = { via: 'derived' } | { via: 'stored'; why: 'height' |
 
 /** What TEST DISCOVERY found, and with which key (DiscoveryKey). */
 export interface DiscoveryResult {
-  outcome: 'found' | 'missing' | 'refused' | 'unread' | 'wrongKey'
+  outcome: 'found' | 'missing' | 'refused' | 'unread' | 'wrongKey' | 'underived'
   key: DiscoveryKey
 }
 
@@ -4302,11 +4305,21 @@ export const useShards = create<ShardsState>((set, get) => {
       // still find it and say FOUND (review of #622). Above the ceiling, and in
       // a room whose door secret this device lacks, the stored key is all
       // there is, and the result says so.
-      if (key.via === 'derived') {
-        const region = await regionKeyOffThread(positionOf(item), item.height, MAX_COMPUTE_HEIGHT)
-        const secret = item.room ? doorSecret(me, item.room.doorId) : null
-        const roomK = secret ? roomKey(region.key, hexToBytes(secret)) : null
-        const derived = roomK ? { key: roomK, lookupId: roomLookupId(roomK) } : region
+      // A row GONE FROM ITS BAG (goneFrom) is not compared: its door may have
+      // been rekeyed since (retargetRoom), so a fresh key would differ for a
+      // reason that is not a wrong key. The relay says where it is: missing.
+      if (key.via === 'derived' && inItsBag(item)) {
+        // A derivation that fails (its worker crashed, or ran out of time)
+        // says so, never NOT FOUND: the relay was never asked.
+        let derived: { key: Uint8Array; lookupId: string }
+        try {
+          const region = await regionKeyOffThread(positionOf(item), item.height, MAX_COMPUTE_HEIGHT)
+          const secret = item.room ? doorSecret(me, item.room.doorId) : null
+          const roomK = secret ? roomKey(region.key, hexToBytes(secret)) : null
+          derived = roomK ? { key: roomK, lookupId: roomLookupId(roomK) } : region
+        } catch {
+          return { outcome: 'underived', key }
+        }
         if (bytesToHex(derived.key) !== item.keyHex.toLowerCase() || derived.lookupId !== item.lookupId) return { outcome: 'wrongKey', key }
         rk = derived
       }

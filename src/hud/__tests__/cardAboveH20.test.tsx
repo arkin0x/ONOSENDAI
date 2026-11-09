@@ -125,11 +125,20 @@ describe('CLOSE on the crash note', () => {
   it('clears the open card, so the same render is not tried again', () => {
     const dep = mineAt(25)
     useShards.setState({ mine: [dep], selectedSecret: dep.eventId })
-    const note = new CrashNote({ where: 'a modal', children: null })
+    const note = new CrashNote({ where: 'a modal', closesCard: true, children: null })
     note.setState = () => {}
     ;(note as unknown as { close: () => void }).close()
     expect(useShards.getState().selectedSecret).toBeNull()
     expect(card()).toBe('')
+  })
+
+  it('closes the card by its closesCard prop, never by the words of its title (review of #624)', () => {
+    const dep = mineAt(25)
+    useShards.setState({ mine: [dep], selectedSecret: dep.eventId })
+    const note = new CrashNote({ where: 'a modal', children: null })
+    note.setState = () => {}
+    ;(note as unknown as { close: () => void }).close()
+    expect(useShards.getState().selectedSecret).toBe(dep.eventId)
   })
 
   it('after a HUD or menu crash leaves the card open, with its unsent comment draft (review of #622)', () => {

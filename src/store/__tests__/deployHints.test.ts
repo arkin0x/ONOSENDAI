@@ -234,10 +234,10 @@ describe('a bag another relay sent, with the canonical relay in trouble', () => 
     const bag = lastBag()
     canonTrouble = 'unreachable'
     relayBags = [bag]
-    expect(await useShards.getState().testDiscovery(dep.eventId)).toBe('found')
+    expect((await useShards.getState().testDiscovery(dep.eventId)).outcome).toBe('found')
     relayBags = []
-    expect(await useShards.getState().testDiscovery(dep.eventId)).toBe('unread')
+    expect((await useShards.getState().testDiscovery(dep.eventId)).outcome).toBe('unread')
     canonTrouble = null
-    expect(await useShards.getState().testDiscovery(dep.eventId)).toBe('missing')
+    expect((await useShards.getState().testDiscovery(dep.eventId)).outcome).toBe('missing')
   })
 })

@@ -56,7 +56,10 @@ export class CrashNote extends Component<Props, State> {
     // only RELOAD left (2026-11-09).
     useLootView.getState().select(null)
     useShards.getState().setNearbyOpen(false)
-    useShards.getState().selectSecret(null)
+    // Only a crash in the modal boundary closes the card: the card is one of its
+    // modals. A HUD or menu crash leaves it open, with any unsent comment draft
+    // (review of #622).
+    if (this.props.where === 'a modal') useShards.getState().selectSecret(null)
     this.setState({ error: null, stack: '', copied: false })
   }
 

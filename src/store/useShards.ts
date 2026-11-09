@@ -1465,13 +1465,19 @@ interface ShardsState {
   setScanning: (scanning: boolean) => void
   /**
    * Prove the round trip a stranger would make: derive the key from the
-   * coordinate, ask the relays, open what comes back. `refused` means the bag
-   * came back and this item is in it, but the format refuses it, so no client
-   * can show it; the fix is in the workshop, not on the relay. `unread`:
-   * no relay's bag held it, and the canonical relay refused (no AUTH) or was
-   * not heard from, so nothing is known either way.
+   * coordinate (discoveryKeyOf), require it to be the key and lookup id this
+   * device sealed the bag with, ask the relays, open what comes back.
+   * `wrongKey`: the derived key or lookup id is not the stored one, so the bag
+   * is sealed where no stranger looks (a wrong key bought from HOSAKA, say);
+   * the relay is not asked. `refused` means the bag came back and this item is
+   * in it, but the format refuses it, so no client can show it; the fix is in
+   * the workshop, not on the relay. `unread`: no relay's bag held it, and the
+   * canonical relay refused (no AUTH) or was not heard from, so nothing is
+   * known either way. Where this device cannot derive the key (above its
+   * ceiling, or a room without its door secret) the stored key is used, and
+   * `key` says so.
    */
-  testDiscovery: (eventId: string) => Promise<'found' | 'missing' | 'refused' | 'unread'>
+  testDiscovery: (eventId: string) => Promise<DiscoveryResult>
   pendingShard: () => ShardModel | null
   worldItems: () => WorldItem[]
   /**
@@ -1690,6 +1696,30 @@ export function loadDeletedBags(): Record<string, true> {
 
 function saveDeletedBags(bags: Record<string, true>): void {
   try { localStorage.setItem(DELETED_BAGS_KEY, JSON.stringify(Object.keys(bags))) } catch { /* quota or private mode */ }
+}
+
+/**
+ * How TEST DISCOVERY gets the key of a bag of yours. `derived`: from the
+ * coordinate, as a stranger would (in a room, the room key from the derived
+ * region key and the door secret, DECK-0004 §3.7.2), always off the main
+ * thread. `stored`: the key this device sealed it with, because this device
+ * cannot derive the region key at its height (`height`, above localKeyCeiling)
+ * or holds no secret for its door (`door`). Decided without deriving anything,
+ * so a card may ask it while it renders.
+ */
+export type DiscoveryKey = { via: 'derived' } | { via: 'stored'; why: 'height' | 'door'; height: number }
+
+/** What TEST DISCOVERY found, and with which key (DiscoveryKey). */
+export interface DiscoveryResult {
+  outcome: 'found' | 'missing' | 'refused' | 'unread' | 'wrongKey'
+  key: DiscoveryKey
+}
+
+/** Which key TEST DISCOVERY will use for a bag of yours (DiscoveryKey): a comparison, never a derivation. */
+export function discoveryKeyOf(item: Pick<MyDeployment, 'height' | 'room'>, me: string): DiscoveryKey {
+  if (item.height > localKeyCeiling()) return { via: 'stored', why: 'height', height: item.height }
+  if (item.room && !doorSecret(me, item.room.doorId)) return { via: 'stored', why: 'door', height: item.height }
+  return { via: 'derived' }
 }
 
 export function positionOf(d: { at: { x: string; y: string; z: string } }): Position {
@@ -4259,13 +4289,27 @@ export const useShards = create<ShardsState>((set, get) => {
 
     testDiscovery: async (eventId) => {
       const item = get().mine.find((d) => d.eventId === eventId)
-      if (!item || !item.published) return 'missing'
+      const me = cyber().identity.pubkey
+      const key: DiscoveryKey = item ? discoveryKeyOf(item, me) : { via: 'derived' }
+      if (!item || !item.published) return { outcome: 'missing', key }
       // The key and lookup id this device sealed the bag with: the region key
-      // at the coordinate (or, in a room, the room key). Never derived again
-      // here: on the main thread a key near height 20 froze the page, and a
-      // bag hidden above 20 through HOSAKA has a key no client computes, so
-      // the test threw and read as missing (2026-11-09).
-      const rk = { key: hexToBytes(item.keyHex), lookupId: item.lookupId }
+      // at the coordinate (or, in a room, the room key). Never derived on the
+      // main thread: near height 20 that froze the page.
+      let rk = { key: hexToBytes(item.keyHex), lookupId: item.lookupId }
+      // Up to this device's ceiling the key is derived again, as a stranger
+      // would, and must be the stored one: a key HOSAKA got wrong (heights a
+      // phone hands it) seals a bag nobody finds, and the stored key alone would
+      // still find it and say FOUND (review of #622). Above the ceiling, and in
+      // a room whose door secret this device lacks, the stored key is all
+      // there is, and the result says so.
+      if (key.via === 'derived') {
+        const region = await regionKeyOffThread(positionOf(item), item.height, MAX_COMPUTE_HEIGHT)
+        const secret = item.room ? doorSecret(me, item.room.doorId) : null
+        const roomK = secret ? roomKey(region.key, hexToBytes(secret)) : null
+        const derived = roomK ? { key: roomK, lookupId: roomLookupId(roomK) } : region
+        if (bytesToHex(derived.key) !== item.keyHex.toLowerCase() || derived.lookupId !== item.lookupId) return { outcome: 'wrongKey', key }
+        rk = derived
+      }
       // Any relay's bag answers it. Only a miss with the canonical relay in
       // trouble (no AUTH, not heard from) is unread rather than missing.
       const { events, trouble } = await queryChecked({ kinds: [HIDDEN_KIND], '#d': [rk.lookupId] })
@@ -4274,12 +4318,12 @@ export const useShards = create<ShardsState>((set, get) => {
         const h = BigInt(item.height)
         const p = positionOf(item)
         const items = await unbag(ev, rk.key, resolveReference, { at: { x: (p.x >> h) << h, y: (p.y >> h) << h, z: (p.z >> h) << h }, plane: item.plane }, item.height, undefined, item.room).catch(() => [])
-        if (items.some((h) => h.eventId === eventId)) return 'found'
+        if (items.some((h) => h.eventId === eventId)) return { outcome: 'found', key }
         // The bag opened and this item is in it, signed, yet unbag dropped it:
         // the format refused it, and every other client will too.
         if (!refused) refused = (await bagInners(ev, rk.key)).some((e) => e.id === eventId)
       }
-      return refused ? 'refused' : trouble ? 'unread' : 'missing'
+      return { outcome: refused ? 'refused' : trouble ? 'unread' : 'missing', key }
     },
 
     pendingShard: () => {

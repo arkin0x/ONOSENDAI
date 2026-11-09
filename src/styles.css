@@ -2032,8 +2032,12 @@ kbd {
 .eventdata__test--missing,
 .eventdata__test--missing:hover,
 .eventdata__test--refused,
-.eventdata__test--refused:hover { color: var(--danger); border-color: var(--danger); background: rgba(255, 59, 107, 0.08); }
+.eventdata__test--refused:hover,
+.eventdata__test--wrongKey,
+.eventdata__test--wrongKey:hover { color: var(--danger); border-color: var(--danger); background: rgba(255, 59, 107, 0.08); }
 .eventdata__refusal { margin: 0; font-size: 10px; line-height: 1.5; color: var(--danger); overflow-wrap: anywhere; }
+/* TEST DISCOVERY checked with the stored key, not one derived here: said under the result. */
+.eventdata__note { margin: 0; font-size: 10px; line-height: 1.5; color: var(--warn); overflow-wrap: anywhere; }
 .eventdata__json {
   position: relative;
   border: 1px solid var(--border);

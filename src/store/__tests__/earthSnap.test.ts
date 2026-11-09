@@ -31,6 +31,8 @@ vi.mock('../../lib/relay', () => ({
 
 import { newShard, type ShardModel, type ShardPayload } from 'sno-core/shards'
 import { SNAP_MIN_HEIGHT } from '../../lib/pose'
+import { lookupIdOf } from '../../lib/regionKeyCheck'
+import { hexToBytes } from '../../lib/events'
 import { useCyberspace } from '../useCyberspace'
 import { useSecrets } from '../useSecrets'
 import { useShards } from '../useShards'
@@ -80,8 +82,10 @@ beforeEach(() => {
     cloudPrefs: { ...useCyberspace.getState().cloudPrefs, mode: 'ask' },
     cloud: { ...useCyberspace.getState().cloud, limits: { max_hop_height: 30 } as never },
   })
-  // The key HOSAKA would have sold, so the deploy can finish without one.
-  useSecrets.setState({ buy: async () => ({ keyHex: 'ab'.repeat(32), lookupId: 'cd'.repeat(32) }) as never })
+  // The key HOSAKA would have sold, so the deploy can finish without one. Its
+  // lookup id is its own (sha256 of the key, spec §7.2): a deploy refuses to
+  // seal with one that is not (lib/regionKeyCheck.ts).
+  useSecrets.setState({ buy: async () => ({ keyHex: 'ab'.repeat(32), lookupId: lookupIdOf(hexToBytes('ab'.repeat(32))) }) as never })
 })
 
 describe('SNAP TO EARTH travels with the shard', () => {

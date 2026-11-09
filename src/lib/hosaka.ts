@@ -516,6 +516,44 @@ export function jsonWithBigints(value: unknown): string {
     .replace(/"__big:(\d+)"/g, '$1')
 }
 
+/**
+ * JSON.parse that keeps every integer exact: a bare integer literal too big
+ * for a double (hosaka-api is Python, and sends an 85-bit coordinate such as
+ * a region key's `base` as one) comes back as its decimal string instead of
+ * a Number with its low bits gone. Every other value parses as JSON.parse
+ * parses it. Readers take such fields with lib/secrets/base exactInteger,
+ * which accepts the string, a bigint or a safe integer, and refuses the rest.
+ */
+export function parseJsonExactIntegers(text: string): unknown {
+  let out = ''
+  let i = 0
+  const n = text.length
+  while (i < n) {
+    const c = text[i]
+    if (c === '"') {
+      // A string, copied whole: a number inside it is not a number.
+      let j = i + 1
+      while (j < n && text[j] !== '"') j += text[j] === '\\' ? 2 : 1
+      out += text.slice(i, j + 1)
+      i = j + 1
+      continue
+    }
+    if (c === '-' || (c >= '0' && c <= '9')) {
+      const m = /^-?\d+(\.\d+)?([eE][+-]?\d+)?/.exec(text.slice(i, i + 400))
+      if (m) {
+        const token = m[0]
+        const integer = m[1] === undefined && m[2] === undefined
+        out += integer && !Number.isSafeInteger(Number(token)) ? `"${token}"` : token
+        i += token.length
+        continue
+      }
+    }
+    out += c
+    i++
+  }
+  return JSON.parse(out)
+}
+
 function randomNonce(): string {
   const bytes = new Uint8Array(8)
   crypto.getRandomValues(bytes)
@@ -779,7 +817,8 @@ export function createHosaka(opts: HosakaClientOptions): HosakaClient {
     const text = await res.text()
     let data: unknown = null
     if (text) {
-      try { data = JSON.parse(text) } catch { data = text }
+      // Integers too big for a double stay exact, as decimal strings (parseJsonExactIntegers).
+      try { data = parseJsonExactIntegers(text) } catch { data = text }
     }
     if (!res.ok) throw HosakaError.fromResponse(res.status, data, res.headers?.get?.('retry-after'))
     return data as T

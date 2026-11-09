@@ -2044,6 +2044,11 @@ kbd {
 .eventdata__test--refused:hover,
 .eventdata__test--wrongKey,
 .eventdata__test--wrongKey:hover { color: var(--danger); border-color: var(--danger); background: rgba(255, 59, 107, 0.08); }
+/* Nothing known either way (the relay was not heard from, or the key could not be derived): a retry, in the in-progress amber. */
+.eventdata__test--unread,
+.eventdata__test--unread:hover,
+.eventdata__test--underived,
+.eventdata__test--underived:hover { color: var(--warn); border-color: var(--warn); background: rgba(255, 176, 32, 0.06); }
 .eventdata__refusal { margin: 0; font-size: 10px; line-height: 1.5; color: var(--danger); overflow-wrap: anywhere; }
 /* TEST DISCOVERY checked with the stored key, not one derived here: said under the result. */
 .eventdata__note { margin: 0; font-size: 10px; line-height: 1.5; color: var(--warn); overflow-wrap: anywhere; }

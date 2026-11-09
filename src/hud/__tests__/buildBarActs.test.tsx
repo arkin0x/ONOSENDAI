@@ -31,14 +31,16 @@ vi.mock('../../scene/ShardSpin', () => ({ ShardSpin: () => null }))
 // The bar's cover measures a real box.
 vi.mock('../../hooks/useCover', () => ({ useCover: () => () => undefined }))
 
-import { mount, textOf, type Host, type Mounted } from '../../test/elementRoot'
+import { mount, settled, textOf, type Host, type Mounted } from '../../test/elementRoot'
 import { useBuilder } from '../../store/useBuilder'
 import { useCyberspace } from '../../store/useCyberspace'
 import { useShards } from '../../store/useShards'
 import { useStash } from '../stash'
+import { placeSpawn } from '../../store/fixtures/placeSpawn'
+import { moveDirection } from '../../lib/moves'
 import { BuildBar } from '../BuildBar'
 
-const ORDER = ['OBJECT', 'MESSAGE', 'AUDIO', 'ITEM', 'CHEST', 'DOOR', 'AGAIN', 'AVATAR']
+const ORDER = ['OBJECT', 'MESSAGE', 'AUDIO', 'ITEM', 'CHEST', 'DOOR', 'AGAIN']
 
 const acts = (bar: Mounted): Host[] => bar.all().filter((h) => h.type === 'button' && h.props.className === 'buildbar__act')
 const act = (bar: Mounted, label: string): Host => acts(bar).find((h) => textOf(h) === label)!
@@ -60,7 +62,7 @@ describe('the BUILD bar: ITEM, CHEST, DOOR, and no verbs', () => {
   it('shows every button by its noun, in one fixed order', async () => {
     const bar = await mount(<BuildBar />)
     expect(acts(bar).map(textOf)).toEqual(ORDER)
-    for (const verb of ['PLACE OBJECT', 'HIDE MESSAGE', 'PLACE AUDIO', 'PLACE AGAIN', 'RETURN TO AVATAR', 'FORGE AN ITEM', 'SEAL A CHEST', 'SEAL A DOOR']) expect(bar.says(verb)).toBe(false)
+    for (const verb of ['PLACE OBJECT', 'HIDE MESSAGE', 'PLACE AUDIO', 'PLACE AGAIN', 'FORGE AN ITEM', 'SEAL A CHEST', 'SEAL A DOOR']) expect(bar.says(verb)).toBe(false)
     await bar.unmount()
   })
 
@@ -70,13 +72,12 @@ describe('the BUILD bar: ITEM, CHEST, DOOR, and no verbs', () => {
     expect(act(bar, 'CHEST').props.title).toMatch(/^Seal a chest/)
     expect(act(bar, 'DOOR').props.title).toMatch(/^Seal a door/)
     expect(act(bar, 'OBJECT').props.title).toMatch(/^Place object/)
-    expect(act(bar, 'AVATAR').props.title).toMatch(/^Return to avatar/)
     await bar.unmount()
   })
 
   it('names each button by its full phrase, its visible word inside it (label in name)', async () => {
     const bar = await mount(<BuildBar />)
-    const names = ['Place object', 'Hide message', 'Place audio', 'Forge an item', 'Seal a chest', 'Seal a door', 'Place again', 'Return to avatar']
+    const names = ['Place object', 'Hide message', 'Place audio', 'Forge an item', 'Seal a chest', 'Seal a door', 'Place again']
     expect(acts(bar).map((h) => h.props['aria-label'])).toEqual(names)
     for (const h of acts(bar)) expect(String(h.props['aria-label']).toUpperCase()).toContain(textOf(h))
     await bar.unmount()
@@ -86,7 +87,6 @@ describe('the BUILD bar: ITEM, CHEST, DOOR, and no verbs', () => {
     const bar = await mount(<BuildBar />)
     expect(acts(bar)).toHaveLength(ORDER.length)
     expect(act(bar, 'AGAIN').props.disabled).toBe(true)
-    expect(acts(bar).map(textOf).indexOf('AVATAR')).toBe(ORDER.indexOf('AVATAR'))
     await bar.unmount()
   })
 
@@ -124,6 +124,76 @@ describe('the BUILD bar: ITEM, CHEST, DOOR, and no verbs', () => {
     useStash.getState().close()
     await bar.press(/^AUDIO$/)
     expect(useStash.getState().audio).toBe(true)
+    await bar.unmount()
+  })
+})
+
+/**
+ * RETURN TO AVATAR (arkinox, 2026-11-09: "lets move "Avatar" up to the same
+ * row as the exit button. Change it to "Return to Avatar" and make it
+ * disappear when its inactive"). In the header beside EXIT, and only while
+ * the build cursor is away from your avatar.
+ */
+describe('the BUILD bar: RETURN TO AVATAR beside EXIT', () => {
+  const S = () => useCyberspace.getState()
+  const head = (bar: Mounted): Host => bar.all().find((h) => h.props.className === 'buildbar__head')!
+  const headButtons = (bar: Mounted): string[] => head(bar).children.filter((c): c is Host => typeof c !== 'string' && c.type === 'button').map(textOf)
+  const home = (bar: Mounted): Host | undefined => bar.buttons('RETURN TO AVATAR')[0]
+  // A real session, as BUILD (B) opens one: the build cursor starts on your avatar.
+  const enter = async (): Promise<void> => {
+    useBuilder.getState().exit()
+    S().clearFocus()
+    await placeSpawn()
+    useBuilder.getState().enter('build')
+  }
+  const away = (): void => { S().moveCursor(moveDirection(S().axes(), 'up')) }
+  const realToAvatar = useBuilder.getState().toAvatar
+  afterEach(() => { useBuilder.setState({ toAvatar: realToAvatar }) })
+
+  it('is not there at all on your avatar, where it would do nothing', async () => {
+    await enter()
+    const bar = await mount(<BuildBar />)
+    expect(useBuilder.getState().active).toBe(true)
+    expect(home(bar)).toBeUndefined()
+    expect(headButtons(bar)).toEqual(['EXIT'])
+    await bar.unmount()
+  })
+
+  it('is in the header, just left of EXIT, when the cursor is away from your avatar', async () => {
+    await enter()
+    away()
+    const bar = await mount(<BuildBar />)
+    expect(headButtons(bar)).toEqual(['RETURN TO AVATAR', 'EXIT'])
+    expect(acts(bar).map(textOf)).toEqual(ORDER)
+    const b = home(bar)!
+    expect(b.props.disabled).toBeFalsy()
+    expect(b.props['aria-label']).toBe('Return to avatar')
+    expect(b.props.title).toMatch(/^Return to avatar: .*\(X\)$/)
+    await bar.unmount()
+  })
+
+  it('comes as the cursor leaves your avatar and goes once pressed, EXIT staying last', async () => {
+    await enter()
+    const bar = await mount(<BuildBar />)
+    expect(headButtons(bar)).toEqual(['EXIT'])
+    away()
+    await settled()
+    expect(headButtons(bar)).toEqual(['RETURN TO AVATAR', 'EXIT'])
+    await bar.press('RETURN TO AVATAR')
+    expect(S().cursor).toEqual(S().position)
+    expect(useBuilder.getState().active).toBe(true)
+    expect(headButtons(bar)).toEqual(['EXIT'])
+    await bar.unmount()
+  })
+
+  it('calls toAvatar when pressed', async () => {
+    await enter()
+    away()
+    const toAvatar = vi.fn()
+    useBuilder.setState({ toAvatar })
+    const bar = await mount(<BuildBar />)
+    await bar.press('RETURN TO AVATAR')
+    expect(toAvatar).toHaveBeenCalledTimes(1)
     await bar.unmount()
   })
 })

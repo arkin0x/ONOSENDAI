@@ -12,7 +12,11 @@
  * the workshop's close; Escape does the same, as a chip on the Escape stack
  * that the mode itself registers (store/useBuilder.ts), after anything opened
  * inside the mode (a deploy's bar closes first).
- * AVATAR (return to avatar) brings the build cursor back to you without leaving.
+ * RETURN TO AVATAR brings the build cursor back to you without leaving. It
+ * sits beside EXIT and is there only while the cursor is away from you
+ * (arkinox, 2026-11-09: "move Avatar up to the same row as the exit button
+ * ... make it disappear when its inactive"). On a narrow bar it drops to a
+ * second header row, under EXIT on the right, so EXIT never moves.
  *
  * While a deploy is lined up the deploy bar is the working surface and the
  * instrument stack, this bar with it, steps aside (App.tsx), as it always has.
@@ -72,6 +76,13 @@ export function BuildBar(): JSX.Element | null {
             {plane === 0 ? 'DATASPACE' : 'IDEASPACE'} · 2^{scaleExp} · {formatCellSize(scaleExp)}
           </span>
         </span>
+        {/* Not rendered on your avatar, where it would do nothing. Its cell
+            in the header is EXIT's left on a wide bar and the row under
+            EXIT on a narrow one (styles.css .buildbar__head), so EXIT
+            stays put when it comes and goes. X does the same. */}
+        {!onAvatar && (
+          <button className="buildbar__act buildbar__home" onClick={() => useBuilder.getState().toAvatar()} aria-label="Return to avatar" title="Return to avatar: bring the build cursor and the view back to your avatar, still building (X)"><House className="buildbar__icon" size={ICON} strokeWidth={2.25} aria-hidden />RETURN TO AVATAR</button>
+        )}
         <button className="hyperbar__end buildbar__exit" onClick={() => useBuilder.getState().exit()} title="Leave build mode. The view stays where it is (Esc, or B)">EXIT</button>
       </div>
 
@@ -83,7 +94,8 @@ export function BuildBar(): JSX.Element | null {
       )}
 
       {/* Nouns, not verbs, every button always there in the same cell
-          (arkinox, 2026-11-09): what can be placed, then AGAIN and AVATAR.
+          (arkinox, 2026-11-09): what can be placed, then AGAIN. RETURN TO
+          AVATAR moved up beside EXIT the same day.
           AGAIN stays in its cell, dimmed, when there is nothing to place
           again, so nothing after it moves. The tooltips keep the verbs, and
           so do the accessible names, each holding its visible word (WCAG
@@ -96,7 +108,6 @@ export function BuildBar(): JSX.Element | null {
         <button className="buildbar__act" onClick={sealAChest} aria-label="Seal a chest" title="Seal a chest: place a chest, then seal a message, a model or an item in it to an item or a person"><ItemIcon type="chest" className="buildbar__icon" size={ICON} />CHEST</button>
         <button className="buildbar__act" onClick={sealADoor} aria-label="Seal a door" title="Seal a door: place a door, then whatever you place in its red cube at its height is sealed to it"><DoorClosedLocked className="item-icon buildbar__icon" size={ICON} strokeWidth={2.5} aria-hidden />DOOR</button>
         <button className="buildbar__act" disabled={again === null} onClick={() => useShards.getState().placeAgain()} aria-label="Place again" title={again === null ? 'Place again: nothing placed yet this session' : `Place "${again}" again, with the same settings`}><ItemIcon type={againType} className="buildbar__icon" size={ICON} />AGAIN</button>
-        <button className="buildbar__act" disabled={onAvatar} onClick={() => useBuilder.getState().toAvatar()} aria-label="Return to avatar" title="Return to avatar: bring the build cursor and the view back to your avatar, still building (X)"><House className="buildbar__icon" size={ICON} strokeWidth={2.25} aria-hidden />AVATAR</button>
       </div>
 
       <Explanation>

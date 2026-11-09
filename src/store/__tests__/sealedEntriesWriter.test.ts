@@ -23,28 +23,41 @@ if (typeof localStorage === 'undefined') {
   }
 }
 
-const relay = vi.hoisted(() => ({ events: [] as Array<{ id: string; kind: number; pubkey: string; created_at: number; tags: string[][]; content: string; sig?: string }>, sent: [] as string[], refuseKind: -1 }))
+const relay = vi.hoisted(() => ({
+  events: [] as Array<{ id: string; kind: number; pubkey: string; created_at: number; tags: string[][]; content: string; sig?: string }>,
+  sent: [] as string[],
+  refuseKind: -1,
+  /** Your relays (relaySet). */
+  urls: ['wss://relay.test'],
+  /** A relay among them that refuses kind 33335 outright, as relay.onosendai.tech did before it listed it (review of #645, B1). */
+  refuseSealedAt: null as string | null,
+  /** The relays each event was sent to, by id. */
+  sentTo: new Map<string, string[]>(),
+}))
 vi.mock('../../lib/relay', () => {
   const answer = async (f: { kinds?: number[]; authors?: string[]; ids?: string[]; '#d'?: string[]; '#a'?: string[] }): Promise<unknown[]> => relay.events.filter((e) => (!f.kinds || f.kinds.includes(e.kind)) && (!f.authors || f.authors.includes(e.pubkey)) && (!f.ids || f.ids.includes(e.id)) && (!f['#d'] || f['#d'].includes(e.tags.find((t) => t[0] === 'd')?.[1] ?? '')) && (!f['#a'] || e.tags.some((t) => t[0] === 'a' && f['#a']!.includes(t[1]))))
   return {
     // An addressable event replaces its older version, as a relay does; an older one is refused.
-    publishMany: vi.fn(async (_r: string[], ev: (typeof relay.events)[number]) => {
-      if (relay.refuseKind === ev.kind) return { ok: false, reason: 'blocked: test' }
+    publishMany: vi.fn(async (asked: string[], ev: (typeof relay.events)[number]) => {
+      if (relay.refuseKind === ev.kind) return { ok: false, reason: 'blocked: test', refused: true }
+      const urls = asked.filter((u) => !(ev.kind === 33335 && relay.refuseSealedAt !== null && u.replace(/\/$/, '') === relay.refuseSealedAt))
+      if (urls.length === 0) return { ok: false, reason: 'blocked: kind 33335 is not accepted', refused: true }
+      relay.sentTo.set(ev.id, [...(relay.sentTo.get(ev.id) ?? []), ...urls.map((u) => u.replace(/\/$/, ''))])
       const d = ev.tags.find((t) => t[0] === 'd')?.[1]
       if (ev.kind >= 30000 && ev.kind < 40000) {
         const was = relay.events.find((e) => e.kind === ev.kind && e.pubkey === ev.pubkey && e.tags.find((t) => t[0] === 'd')?.[1] === d)
         if (was && was.created_at > ev.created_at) return { ok: false, reason: 'invalid: older' }
         relay.events = relay.events.filter((e) => e !== was)
       }
-      relay.events.push(ev)
+      if (!relay.events.includes(ev)) relay.events.push(ev)
       relay.sent.push(ev.id)
-      return { ok: true, accepted: ['wss://relay.test/'] }
+      return { ok: true, accepted: urls.map((u) => (u.endsWith('/') ? u : `${u}/`)) }
     }),
     publishRetried: vi.fn(async () => true),
     query: vi.fn(answer),
     queryAny: vi.fn((_r: string[], f: Parameters<typeof answer>[0]) => answer(f)),
     queryEach: vi.fn(async (f: Parameters<typeof answer>[0]) => [{ url: 'wss://relay.test', outcome: 'answered', events: await answer(f) }]),
-    relaySet: () => ['wss://relay.test'],
+    relaySet: () => relay.urls,
   }
 })
 
@@ -53,7 +66,7 @@ import { bytesToHex, hexToBytes, type NostrEvent } from '../../lib/events'
 import { HIDDEN_KIND, MESSAGE_KIND, bagEntries, bagTemplate, readBagContents, rumorOf, unbag, type BagEntry, type KeyItem, type Rumor } from '../../lib/hidden'
 import { BAG_SAFE_BYTES } from '../../lib/bagSize'
 import { bagBytes } from '../../lib/bagFit'
-import { SEALED_KIND, SEALED_PREVIEW, openSealed } from '../../lib/sealed'
+import { SEALED_KIND, SEALED_PREVIEW, forgetSealedItems, openSealed } from '../../lib/sealed'
 import { roomKey, roomLookupId, ROOM_BAG_SETTINGS } from '../../lib/doors'
 import { resolveReference } from '../../lib/references'
 import type { Position } from '../../lib/space'
@@ -63,7 +76,7 @@ import { useBuilder } from '../useBuilder'
 import { useCyberspace } from '../useCyberspace'
 import { useInventory } from '../useInventory'
 import { resetOpenedChests } from '../useOpenedChests'
-import { positionOf, useShards, type MyDeployment } from '../useShards'
+import { forgetSealedState, positionOf, useShards, type MyDeployment } from '../useShards'
 
 const S = () => useShards.getState()
 const C = () => useCyberspace.getState()
@@ -126,9 +139,14 @@ function roomOf(door: MyDeployment): { key: Uint8Array; lookupId: string } {
 }
 
 beforeEach(() => {
+  forgetSealedState()
+  forgetSealedItems()
   relay.events = []
   relay.sent = []
   relay.refuseKind = -1
+  relay.urls = ['wss://relay.test']
+  relay.refuseSealedAt = null
+  relay.sentTo = new Map()
   lock = forgeKey('Silver Key')
   localStorage.removeItem('onosendai:door-secrets')
   localStorage.removeItem('onosendai:chests-opened')
@@ -173,7 +191,7 @@ describe('a full bag moves entries out as sealed entries (spec §7.6 Size)', () 
     // The reference names its address, a relay that took it, and the item's own C; the payload is the item, byte for byte.
     for (const ref of refs) {
       const ev = out.find((e) => ref[1] === `${SEALED_KIND}:${me()}:${dOf(e)}`)!
-      expect(ref[2]).toBe('wss://relay.test')
+      expect(ref[2]).toBe('')
       const item = JSON.parse((await openSealed(ev, key))!) as Rumor
       expect(ref[3]).toBe(item.tags.find((t) => t[0] === 'C')![1])
       expect(item.kind).toBe(MESSAGE_KIND)
@@ -321,4 +339,89 @@ describe('contents (§7.7) and carrying forward', () => {
     // And the rows took their sealed state back from the relays' copy.
     expect(S().mine.filter((d) => d.sealedRef).length).toBeGreaterThanOrEqual(refsBefore.length)
   }, 60000)
+})
+
+/** Every sealed entry this bag names, as an address, is on the relay holding ciphertext. */
+function missingSealed(entries: BagEntry[]): string[][] {
+  return sealedRefs(entries).filter((r) => !relay.events.some((e) => e.kind === SEALED_KIND && `${SEALED_KIND}:${e.pubkey}:${dOf(e)}` === r[1] && e.tags.some((t) => t[0] === 'encrypted')))
+}
+
+describe('review of #645', () => {
+  it('B1: the first relay refuses kind 33335, the second takes it: the write still goes, and the bag goes only where its entries went', async () => {
+    relay.urls = ['wss://first.test', 'wss://second.test']
+    const { row: first } = await hideMessage('first')
+    const key = hexToBytes(first!.keyHex)
+    await fill(first!.lookupId, key, positionOf(first!), H, FULL)
+    relay.refuseSealedAt = 'wss://first.test'
+    const { row, error } = await hideMessage(ONE_MORE)
+    expect(error).toBeNull()
+    expect(row?.published).toBe(true)
+    const bag = newestBag(first!.lookupId)
+    const refs = sealedRefs(await bagEntries(bag as NostrEvent, key))
+    expect(refs.length).toBeGreaterThan(0)
+    // No hint: no single relay has to take every sealed entry.
+    for (const r of refs) expect(r[2]).toBe('')
+    expect(relay.sentTo.get(bag.id)).toEqual(['wss://second.test'])
+  }, 60000)
+
+  it('B2: an entry sealed while LOCAL goes out before the bag on the next LIVE write to that bag', async () => {
+    const { row: first } = await hideMessage('first', H, true)
+    const key = hexToBytes(first!.keyHex)
+    await fill(first!.lookupId, key, positionOf(first!), H, FULL)
+    // LOCAL: the overflow seals, and nothing is sent.
+    useCyberspace.setState({ live: false })
+    const sentBefore = relay.sent.length
+    expect((await hideMessage(ONE_MORE)).error).toBeNull()
+    expect(relay.sent.length).toBe(sentBefore)
+    expect(S().mine.some((d) => d.sealedRef && d.published === false)).toBe(true)
+    // LIVE again: a small hide in the same bag.
+    useCyberspace.setState({ live: true })
+    expect((await hideMessage('small one after going live')).error).toBeNull()
+    const bag = newestBag(first!.lookupId)
+    const entries = await bagEntries(bag as NostrEvent, key)
+    expect(sealedRefs(entries).length).toBeGreaterThan(0)
+    expect(missingSealed(entries)).toEqual([])
+    const found = await unbag(bag as NostrEvent, key, resolveReference, undefined, H)
+    expect(found.some((h) => h.text?.startsWith('one more'))).toBe(true)
+  }, 60000)
+
+  it('should-fix 2: a signer that refuses the bag after its sealed entries leaves no row naming a sealed entry, then or on the next write', async () => {
+    const { row: first } = await hideMessage('first')
+    const key = hexToBytes(first!.keyHex)
+    await fill(first!.lookupId, key, positionOf(first!), H, FULL)
+    const sign = C().signEvent
+    useCyberspace.setState({ signEvent: async (t, ...rest) => { if (t.kind === HIDDEN_KIND) throw new Error('The signer refused.'); return sign(t, ...rest) } })
+    // Smaller than the messages already there: one of those (a row of yours) is what moves out.
+    const { error } = await hideMessage(`medium ${'w'.repeat(3_000)}`)
+    useCyberspace.setState({ signEvent: sign })
+    expect(error).not.toBeNull()
+    expect(S().mine.some((d) => d.sealedRef)).toBe(false)
+    // The next write commits rows: none takes on the entries the refused bag would have named.
+    expect((await hideMessage('small')).error).toBeNull()
+    const bag = newestBag(first!.lookupId)
+    const named = new Set(sealedRefs(await bagEntries(bag as NostrEvent, key)).map((r) => r[1]))
+    for (const d of S().mine.filter((m) => m.sealedRef)) expect(named.has(d.sealedRef![1])).toBe(true)
+    expect(missingSealed(await bagEntries(bag as NostrEvent, key))).toEqual([])
+  }, 60000)
+
+  it('should-fix 3: a lock change retracts a sealed entry the old room bag names, though this device deleted its row', async () => {
+    const door = await sealDoor()
+    const room = roomOf(door)
+    expect((await hideMessage('behind')).error).toBeNull()
+    await fill(room.lookupId, room.key, positionOf(door), H, FULL, { doorId: door.eventId })
+    expect((await hideMessage(ONE_MORE)).error).toBeNull()
+    const gone = S().mine.find((d) => d.room && d.sealedRef)!
+    expect(gone).toBeDefined()
+    const address = gone.sealedRef![1]
+    // Deleted on this device, and no relay took the rewrite: the old room bag still names it.
+    useShards.setState({ mine: S().mine.filter((d) => d.eventId !== gone.eventId), deleted: { ...S().deleted, [gone.eventId]: true } })
+    expect(sealedRefs(await bagEntries(newestBag(room.lookupId) as NostrEvent, room.key)).some((r) => r[1] === address)).toBe(true)
+    const next = forgeKey('Gold Key')
+    expect(await S().resealDoor(door.eventId, { name: 'Vault', requires: 'x', lock: { pubkey: next.itemPubkey, label: next.name } })).toBeNull()
+    // No ciphertext is left at its address for the old room key to open.
+    const d = address.split(':')[2]
+    const at = relay.events.filter((e) => e.kind === SEALED_KIND && dOf(e) === d)
+    expect(at).toHaveLength(1)
+    expect(at[0].tags).toEqual([['d', d]])
+  }, 120000)
 })

@@ -14,9 +14,9 @@ vi.mock('../relay', () => ({
   relaySet: () => ['wss://mine.test', 'wss://also-mine.test'],
 }))
 
-import { REFERENCE_BATCH, resolveReference } from '../references'
+import { REFERENCE_BATCH, REFERENCES_KEPT_BYTES, forgetReferences, referencesKept, resolveReference } from '../references'
 
-beforeEach(() => { asked.length = 0; filters.length = 0; held.length = 0 })
+beforeEach(() => { asked.length = 0; filters.length = 0; held.length = 0; forgetReferences() })
 
 describe('resolveReference', () => {
   it('ignores a hint that is not one of the user relays', async () => {
@@ -53,5 +53,40 @@ describe('batched fetching (spec §7.6 Reading, rule 2)', () => {
   it('a hint to a relay the user does not use is never asked, in a batch too', async () => {
     await Promise.all([0, 1, 2].map((i) => resolveReference(['a', `33335:${author}:${'h'.repeat(31)}${i}`, 'wss://beacon.example', ''])))
     expect(asked.flat()).not.toContain('wss://beacon.example')
+  })
+})
+
+describe('the answers kept (review of #645, should-fix 4)', () => {
+  const author = 'cd'.repeat(32)
+  const tick = (): Promise<void> => new Promise((r) => setTimeout(r, 0))
+
+  it('an answer past its minute goes at the next ask, whoever asks', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] })
+    try {
+      await resolveReference(['e', '4'.repeat(64), '', ''])
+      await resolveReference(['e', '5'.repeat(64), '', ''])
+      expect(referencesKept().count).toBe(2)
+      vi.setSystemTime(Date.now() + 61_000)
+      await resolveReference(['e', '6'.repeat(64), '', ''])
+      // The two old answers went; only the new one is kept.
+      expect(referencesKept().count).toBe(1)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('the events kept take no more than the byte budget, oldest first out', async () => {
+    forgetReferences(20_000)
+    const ds = Array.from({ length: 10 }, (_, i) => `${i}`.padStart(32, 'b'))
+    for (const [i, d] of ds.entries()) held.push({ id: `${i}`.padStart(64, 'e'), kind: 33335, pubkey: author, created_at: 1000 + i, tags: [['d', d], ['encrypted', 'aes-256-gcm', 'x'.repeat(5_000), 'cyberspace:region']] })
+    for (const d of ds) { await resolveReference(['a', `33335:${author}:${d}`, '', '']); await tick() }
+    const kept = referencesKept()
+    expect(kept.bytes).toBeLessThanOrEqual(20_000)
+    expect(kept.count).toBeLessThan(ds.length)
+    // The newest is still kept: asked again, it is not fetched again.
+    const before = filters.length
+    await resolveReference(['a', `33335:${author}:${ds[ds.length - 1]}`, '', ''])
+    expect(filters.length).toBe(before)
+    expect(REFERENCES_KEPT_BYTES).toBeGreaterThan(0)
   })
 })

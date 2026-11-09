@@ -111,6 +111,9 @@ describe('the spec vectors (§7.6 Golden vectors)', () => {
     expect(resolve.asked.some((r) => r[1] === reject.nested.reference[1])).toBe(true)
     // The reader is told something was found and refused, not that nothing was.
     expect(bagReading(bag.id)).toMatchObject({ entries: 4, readable: 1, refused: 3 })
+    // DISCOVERED says so though something in the bag reads (review of #645): not only when nothing does.
+    const { openedTitle } = await import('../../hud/DiscoveredPanel')
+    expect(openedTitle(bag.id, 1)).toBe('Opened: 1 items. 3 refused')
     // The door's payload decrypts to a door, so the refusal is the reader's, not the cipher's.
     const door = JSON.parse((await openSealed(reject.door.sealed.event, regionKey))!) as NostrEvent
     expect(door.kind).toBe(3341)
@@ -216,5 +219,7 @@ describe('mixed and many references', () => {
     await unbag(bag, regionKey, resolve, undefined, 12)
     expect(resolve.asked).toHaveLength(MAX_REFERENCES_PER_BAG)
     expect(bagReading(bag.id)?.skipped).toBe(5)
+    const { openedTitle } = await import('../../hud/DiscoveredPanel')
+    expect(openedTitle(bag.id, 3)).toBe('Opened: 3 items. 5 more not fetched')
   })
 })

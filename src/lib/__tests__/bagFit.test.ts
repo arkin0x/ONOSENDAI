@@ -41,6 +41,24 @@ describe('measuring a bag without sealing it', () => {
   })
 })
 
+describe('sizes in UTF-8 bytes, as a relay counts (review of #645)', () => {
+  const wide = (chars: number): BagEntry => rumorOf({ kind: MESSAGE_KIND, created_at: 1_800_000_000, content: '\u20ac'.repeat(chars), tags: [C, ['-']] }, me) as BagEntry
+
+  it('a candidate\'s bytes are its JSON\'s UTF-8 bytes, not its length in characters', () => {
+    const e = wide(2_000)
+    const c = sealFor(e, me, 'd'.repeat(32), '', new Set())!
+    expect(c.bytes).toBe(new TextEncoder().encode(JSON.stringify(e)).length)
+    expect(c.bytes).toBeGreaterThan(JSON.stringify(e).length)
+  })
+
+  it('growthRefusal counts bytes: fewer characters but more bytes than before is growth', () => {
+    const before = [message(3_000)]
+    const after = [wide(1_500)]
+    expect(JSON.stringify(after).length).toBeLessThan(JSON.stringify(before).length)
+    expect(growthRefusal(after, before, BAG_SAFE_BYTES + 1)).toMatch(/Too large for one bag/)
+  })
+})
+
 describe('which entries go by reference', () => {
   it('only a signed shard of the writer, with its point, is a candidate; its reference names a 33331 at that point', () => {
     const c = referenceFor(shard(100), me, 'd1', 'wss://relay.test')!

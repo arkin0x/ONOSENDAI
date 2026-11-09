@@ -20,7 +20,34 @@ import { entryKey, type Reference } from './hidden'
 import type { NostrEvent } from './events'
 
 const TTL_MS = 60_000
-const cache = new Map<string, { at: number; event: Promise<NostrEvent | null> }>()
+/**
+ * The answers kept, oldest first (an answer asked again goes last). Bounded
+ * two ways: an answer past TTL_MS goes at the next ask, whoever asks; and the
+ * events kept take at most REFERENCES_KEPT_BYTES (UTF-8, as signed), oldest
+ * first out, as lib/hidden.ts bounds what it parses. A full bag names some
+ * 850 sealed entries, each up to one event in size, and Cyberspace TV scans
+ * without pause, so a cache that only ever replaced a key grew without end.
+ */
+const cache = new Map<string, { at: number; event: Promise<NostrEvent | null>; size: number }>()
+export const REFERENCES_KEPT_BYTES = 8 * 1024 * 1024
+let budget = REFERENCES_KEPT_BYTES
+let keptBytes = 0
+const encoder = new TextEncoder()
+
+function drop(key: string): void {
+  const was = cache.get(key)
+  if (!was) return
+  cache.delete(key)
+  keptBytes -= was.size
+}
+
+/** Answers past their minute go, and the oldest go while the rest take more than the budget. The map is oldest first, so this stops at the first that stays. */
+function sweep(now: number): void {
+  for (const [k, v] of cache) {
+    if (now - v.at < TTL_MS && keptBytes <= budget) break
+    drop(k)
+  }
+}
 
 /** The most `d` values or ids one query carries: small enough that a relay's own result limit never cuts an answer short. */
 export const REFERENCE_BATCH = 100
@@ -105,14 +132,39 @@ function fetchReference(ref: Reference): Promise<NostrEvent | null> {
 /** The event a reference names, or null. Pass to unbag as its resolver. */
 export function resolveReference(ref: Reference): Promise<NostrEvent | null> {
   const key = entryKey(ref)
+  const now = Date.now()
+  sweep(now)
   const hit = cache.get(key)
-  if (hit && Date.now() - hit.at < TTL_MS) return hit.event
+  if (hit && now - hit.at < TTL_MS) return hit.event
+  drop(key)
   const event = fetchReference(ref).catch(() => null)
-  cache.set(key, { at: Date.now(), event })
+  const entry = { at: now, event, size: 0 }
+  cache.set(key, entry)
+  // Its size is known once it lands: counted then, if it is still the one kept.
+  void event.then((ev) => {
+    if (!ev || cache.get(key) !== entry) return
+    entry.size = encoder.encode(JSON.stringify(ev)).length
+    keptBytes += entry.size
+    sweep(Date.now())
+  })
   return event
 }
 
 /** Forget a cached answer, for example after publishing the object it names. */
 export function forgetReference(ref: Reference): void {
-  cache.delete(entryKey(ref))
+  drop(entryKey(ref))
+}
+
+/** Forget every cached answer, and say how many there were: in tests, where `bytes` sets the bound. */
+export function forgetReferences(bytes: number = REFERENCES_KEPT_BYTES): number {
+  const n = cache.size
+  cache.clear()
+  keptBytes = 0
+  budget = bytes
+  return n
+}
+
+/** How much the cache holds, for tests: how many answers, and the bytes of the events among them. */
+export function referencesKept(): { count: number; bytes: number } {
+  return { count: cache.size, bytes: keptBytes }
 }

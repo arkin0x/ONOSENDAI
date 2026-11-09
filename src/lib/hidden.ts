@@ -817,8 +817,9 @@ export interface BagContents { shard: number; message: number; key: number; ches
  * its kind. A reference to a kind 33331 object as a shard, from its
  * coordinate alone. A sealed entry (33335) by the item it holds, exactly as if
  * that item stood inline, when that item is known: read when its bag was
- * opened, or kept when it was sealed (lib/sealed.ts sealedItemOf). Any other
- * reference, and a sealed entry whose item was never read, counts as nothing.
+ * opened, or kept when it was sealed (lib/sealed.ts sealedItemOf), whether
+ * the bag names it by an `a` reference or an `e`. Any other reference, and a
+ * sealed entry whose item was never read, counts as nothing.
  */
 export function bagContents(inners: readonly (BagEntry | ChatRumor)[], held?: ReadonlyMap<string, Pick<Rumor, 'kind' | 'content' | 'tags'>>): BagContents {
   const out: BagContents = { shard: 0, message: 0, key: 0, chest: 0, cashu: 0, nft: 0, audio: 0, door: 0 }
@@ -826,7 +827,8 @@ export function bagContents(inners: readonly (BagEntry | ChatRumor)[], held?: Re
     let e: Pick<Rumor, 'kind' | 'content' | 'tags'>
     if (isReference(entry)) {
       if (entry[0] === 'a' && entry[1].startsWith(`${OBJECT_KIND}:`)) { out.shard++; continue }
-      const item = sealedRefParts(entry) ? held?.get(entry[1]) ?? sealedItemOf(entry) : undefined
+      // An `e` reference says no kind: it counts by its item only once it was read as a sealed entry (sealedItemOf by event id).
+      const item = sealedRefParts(entry) ? held?.get(entry[1]) ?? sealedItemOf(entry) : entry[0] === 'e' ? sealedItemOf(entry) : undefined
       if (!item) continue
       e = item
     } else e = entry

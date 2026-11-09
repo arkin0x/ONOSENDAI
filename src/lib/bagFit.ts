@@ -39,7 +39,7 @@
 import { bagSizeRefusal, signedBytes } from './bagSize'
 import { AUDIO_KIND } from './audioItem'
 import { bagTemplateAround, CHEST_KIND, entryKey, isReference, KEY_KIND, MESSAGE_KIND, OBJECT_KIND, SHARD_KIND, HIDDEN_KIND, type BagEntry, type BagPlace, type BagSettings, type Reference, type Rumor } from './hidden'
-import { SEALED_KIND, SEALED_PREVIEW, sealedReference } from './sealed'
+import { SEALED_KIND, SEALED_PREVIEW, sealedReference, utf8Bytes } from './sealed'
 
 /** The inline kinds a write may move by reference to fit a bag: the shard, whose referenced form is the kind 33331 object. */
 export const REFERENCEABLE_KINDS: ReadonlySet<number> = new Set([SHARD_KIND])
@@ -57,7 +57,7 @@ export type HeldItems = ReadonlyMap<string, Pick<Rumor, 'kind' | 'content' | 'ta
 
 /** The base64 length of `nonce || ciphertext || tag` for this plaintext (spec §7.6 cipher): 12 + its UTF-8 bytes + 16, padded. */
 export function sealedLength(plaintext: string): number {
-  return 4 * Math.ceil((12 + new TextEncoder().encode(plaintext).length + 16) / 3)
+  return 4 * Math.ceil((12 + utf8Bytes(plaintext) + 16) / 3)
 }
 
 /** A bag's signed size from its entries, without encrypting them: lib/hidden.ts bagTemplate around a stand-in of the same length. `held` names what planned sealed entries hold, for its contents. */
@@ -69,11 +69,12 @@ export function bagBytes(entries: readonly BagEntry[], lookupId: string, height:
 /**
  * Why a bag of these entries is not written, or null: what signBag refuses,
  * past the cap and larger than the bag it replaces (`before`), so a write that
- * shrinks a bag already past it still goes.
+ * shrinks a bag already past it still goes. Larger in UTF-8 bytes, as a relay
+ * counts: a string's length counts a multibyte character as one.
  */
 export function growthRefusal(entries: readonly BagEntry[], before: readonly BagEntry[], bytes: number): string | null {
   const tooBig = bagSizeRefusal(bytes)
-  return tooBig && JSON.stringify(entries).length > JSON.stringify(before).length ? tooBig : null
+  return tooBig && utf8Bytes(JSON.stringify(entries)) > utf8Bytes(JSON.stringify(before)) ? tooBig : null
 }
 
 /** One entry being written, and the reference it becomes if it goes by reference. */
@@ -101,7 +102,7 @@ export function referenceFor(entry: BagEntry, owner: string, d: string, relayHin
   if (typeof entry.sig !== 'string' || entry.sig.length === 0 || typeof entry.content !== 'string') return null
   const at = entry.tags.find((t) => t[0] === 'C')?.[1]
   if (!at) return null
-  return { key: entry.id, bytes: JSON.stringify(entry).length, ref: ['a', `${OBJECT_KIND}:${owner}:${d}`, relayHint, at], d, form: 'object' }
+  return { key: entry.id, bytes: utf8Bytes(JSON.stringify(entry)), ref: ['a', `${OBJECT_KIND}:${owner}:${d}`, relayHint, at], d, form: 'object' }
 }
 
 /**
@@ -123,10 +124,11 @@ export function sealFor(entry: BagEntry, owner: string, d: string, relayHint: st
   if (!at) return null
   const ref = sealedReference(owner, d, relayHint, at)
   const json = JSON.stringify(entry)
-  if (!force && json.length <= JSON.stringify(ref).length) return null
+  const bytes = utf8Bytes(json)
+  if (!force && bytes <= utf8Bytes(JSON.stringify(ref))) return null
   // An entry too large for one event cannot be stored sealed either (spec §7.6 Size): it stays, and the bag says why.
   if (bagSizeRefusal(signedBytes({ kind: SEALED_KIND, created_at: 0, content: SEALED_PREVIEW, tags: [['d', d], ['encrypted', 'aes-256-gcm', 'A'.repeat(sealedLength(json)), 'cyberspace:region'], ['alt', SEALED_PREVIEW]] }))) return null
-  return { key: entry.id, bytes: json.length, ref, d, form: 'sealed', item: entry as Rumor }
+  return { key: entry.id, bytes, ref, d, form: 'sealed', item: entry as Rumor }
 }
 
 /** The items the sealed candidates among these hold, by the address each reference names. */

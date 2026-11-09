@@ -133,24 +133,69 @@ export async function openSealed(ev: Pick<NostrEvent, 'tags'>, key: Uint8Array):
  * The items sealed entries were read or written to hold, by address: what
  * §7.7 counts a sealed entry by ("read when opening or kept when sealing"),
  * what a rewrite matches a row of yours against when its item now stands in a
- * sealed entry, and the event a retraction empties. Session-local and bounded,
- * least recently touched first out; it holds plaintext, so it goes with the
- * identity (forgetSealedItems).
+ * sealed entry, and the event a retraction empties. Session-local, and
+ * bounded by bytes (UTF-8, the item's JSON and the event's), least recently
+ * touched first out, as lib/hidden.ts bounds the objects it parses: a full bag
+ * names some 850 sealed entries, each up to one event in size, so a bound by
+ * count alone was not a bound. Every use has a way back when an entry is gone
+ * from here: a row keeps its sealed entry, a rewrite reads the bag's own again
+ * (learnSealed), a retraction asks the relays. It holds plaintext, so it goes
+ * with the identity (forgetSealedItems).
  */
-const KEPT_SEALED = 4096
-const sealedItems = new Map<string, { item: SealedItem; event?: NostrEvent }>()
+export const SEALED_KEPT_BYTES = 8 * 1024 * 1024
+let sealedBudget = SEALED_KEPT_BYTES
+let sealedBytes = 0
+const sealedItems = new Map<string, { item: SealedItem; event?: NostrEvent; size: number }>()
+/** The address a sealed entry's event id was read at: an `e` reference to a sealed entry counts by its item too (§7.7). */
+const sealedAddressById = new Map<string, string>()
 
-/** Note that the sealed entry at `address` holds `item` (and is `event`, when known). */
-export function rememberSealed(address: string, item: SealedItem, event?: NostrEvent): void {
-  const was = sealedItems.get(address)
-  sealedItems.delete(address)
-  sealedItems.set(address, { item, event: event ?? (was && was.item.id === item.id ? was.event : undefined) })
-  while (sealedItems.size > KEPT_SEALED) sealedItems.delete(sealedItems.keys().next().value as string)
+const encoder = new TextEncoder()
+/** A string's length in UTF-8 bytes, which is what a relay counts. */
+export function utf8Bytes(s: string): number {
+  return encoder.encode(s).length
 }
 
-/** The item a reference's sealed entry is known to hold, or undefined (unread: counts as nothing, §7.7). */
+function dropSealed(address: string): void {
+  const was = sealedItems.get(address)
+  if (!was) return
+  sealedItems.delete(address)
+  sealedBytes -= was.size
+  if (was.event && sealedAddressById.get(was.event.id) === address) sealedAddressById.delete(was.event.id)
+}
+
+/** Note that the sealed entry at `address` holds `item` (and is `event`, when known). One larger than the whole budget is not kept. */
+export function rememberSealed(address: string, item: SealedItem, event?: NostrEvent): void {
+  const was = sealedItems.get(address)
+  const ev = event ?? (was && was.item.id === item.id ? was.event : undefined)
+  dropSealed(address)
+  const size = utf8Bytes(JSON.stringify(item)) + (ev ? utf8Bytes(JSON.stringify(ev)) : 0)
+  if (size > sealedBudget) return
+  sealedItems.set(address, { item, event: ev, size })
+  sealedBytes += size
+  if (ev) sealedAddressById.set(ev.id, address)
+  for (const k of sealedItems.keys()) {
+    if (sealedBytes <= sealedBudget) break
+    dropSealed(k)
+  }
+}
+
+/** Where a reference's sealed entry is kept here: by its address, or for an `e` reference by the event id it was read as. */
+function keptAt(ref: readonly string[]): string | undefined {
+  if (typeof ref[1] !== 'string') return undefined
+  if (ref[0] === 'a') return ref[1]
+  if (ref[0] === 'e') return sealedAddressById.get(ref[1])
+  return undefined
+}
+
+/**
+ * The item a reference's sealed entry is known to hold, or undefined (unread:
+ * counts as nothing, §7.7). An `e` reference answers only once the event it
+ * names was read as a sealed entry: it does not say its kind, so it is never
+ * guessed.
+ */
 export function sealedItemOf(ref: readonly string[]): SealedItem | undefined {
-  return ref[0] === 'a' && typeof ref[1] === 'string' ? sealedItems.get(ref[1])?.item : undefined
+  const at = keptAt(ref)
+  return at ? sealedItems.get(at)?.item : undefined
 }
 
 /** The signed sealed entry last seen at a reference's address, when known. */
@@ -158,9 +203,19 @@ export function sealedEventOf(ref: readonly string[]): NostrEvent | undefined {
   return ref[0] === 'a' && typeof ref[1] === 'string' ? sealedItems.get(ref[1])?.event : undefined
 }
 
-/** Forget every sealed item: on a change of identity, and in tests. */
-export function forgetSealedItems(): void {
+/** Forget every sealed item, and say how many there were: on a change of identity, and in tests, where `budget` sets the bound. */
+export function forgetSealedItems(budget: number = SEALED_KEPT_BYTES): number {
+  const n = sealedItems.size
   sealedItems.clear()
+  sealedAddressById.clear()
+  sealedBytes = 0
+  sealedBudget = budget
+  return n
+}
+
+/** How much the sealed items kept here take, for tests: how many, and their bytes. */
+export function sealedItemsKept(): { count: number; bytes: number } {
+  return { count: sealedItems.size, bytes: sealedBytes }
 }
 
 /** The emptied sealed entry (spec §7.6 Retracting): only its `d`, an empty `content`, no `encrypted` tag. */
@@ -177,14 +232,22 @@ export function sealedDeletionTemplate(pubkey: string, d: string, eventIds: read
   return { kind: 5, created_at: createdAt, content: '', tags: [['a', sealedAddress(pubkey, d)], ...eventIds.map((id) => ['e', id]), ['k', String(SEALED_KIND)]] }
 }
 
-/** A relay publish, as lib/relay.ts publishMany answers. */
-export type Publish = (relays: string[], event: NostrEvent) => Promise<{ ok: boolean; accepted?: string[] }>
+/**
+ * A relay publish, as lib/relay.ts publishMany answers: `refused` on a
+ * failure when every relay asked refused it outright, none of them holding it
+ * (a timeout is no refusal: the relay may have stored the event).
+ */
+export type Publish = (relays: string[], event: NostrEvent) => Promise<{ ok: boolean; accepted?: string[]; refused?: boolean }>
 
 /** What sending a bag after its sealed entries needs. */
 export interface SendDeps {
   publish: Publish
-  /** Retract the sealed entries a bag that was just published no longer names (retractSealed, bound). */
-  retract?: (ref: string[]) => Promise<void>
+  /**
+   * Retract a sealed entry (retractSealed, bound), on these relays only: the
+   * ones that took the bag that stopped naming it, or for an entry no bag
+   * names, the ones that took the entry.
+   */
+  retract?: (ref: string[], relays: string[]) => Promise<void>
 }
 
 /** A relay URL as lib/relay.ts reports what took an event. */
@@ -194,33 +257,58 @@ function norm(url: string): string {
 
 /**
  * A signed sealed entry going out before the bag that names it, and the relay
- * its reference names. `fresh` when it was sealed for this very bag: only such
- * an entry is retracted when the bag does not go out, since one carried from
- * an earlier version may still be the one a row of yours names.
+ * its reference names (ONOSENDAI writes the empty hint: any relay that takes
+ * it will do). `fresh` when it was sealed for this very bag: only such an
+ * entry is ever retracted when the bag does not go out, since one carried from
+ * an earlier version may still be the one a row of yours, or a bag on a
+ * relay, names.
  */
 export interface OutgoingSealed { event: NostrEvent; hint: string; fresh?: boolean }
 
 /** The reference that names a signed sealed entry, for retracting it. */
-function refOf(s: OutgoingSealed): string[] {
+export function refOf(s: Pick<OutgoingSealed, 'event' | 'hint'>): string[] {
   return ['a', sealedAddress(s.event.pubkey, s.event.tags.find((t) => t[0] === 'd')?.[1] ?? ''), s.hint]
+}
+
+/** What sending a bag after its sealed entries came to. */
+export interface SendResult {
+  ok: boolean
+  /** The relays that took the bag. */
+  accepted: string[]
+  reason?: string
+  /**
+   * The fresh sealed entries that went out for a bag whose fate is not known:
+   * no relay said it took the bag, and not every relay refused it (a timeout:
+   * one may have stored it). They are left on the relays, since a stored bag
+   * may name them, for the next write of the bag to settle: kept if it names
+   * them, retracted if not.
+   */
+  unsettled?: OutgoingSealed[]
 }
 
 /**
  * Send a bag after the sealed entries it names (spec §7.6 Writing): each goes
- * first to the relay its reference names, which must take it, then to the
- * other relays; the bag goes only to the relays that took every one, so a
- * reader who asks one relay never finds the bag without its entries. When the
- * bag cannot go out (the hinted relay refused an entry, no relay took them
- * all, or no relay took the bag), the entries sealed for it that did go out
- * are retracted, since no bag names them. Once the bag is out, the sealed
- * entries the bag before it named and this one does not (`dropped`) are
- * retracted.
+ * first to the relay its reference names, when that is one of `relays`, which
+ * must take it, then to the other relays; the bag goes only to the relays that
+ * took every one, so a reader who asks one relay never finds the bag without
+ * its entries.
+ *
+ * When the bag cannot go out, the entries sealed for it are retracted only
+ * when no relay can hold a bag that names them: the bag was never sent (an
+ * entry went nowhere), or every relay refused it outright. A bag that failed
+ * otherwise (a timeout) may be stored: its fresh entries are left, and said
+ * back as `unsettled`.
+ *
+ * Once the bag is out, the sealed entries the bag before it named and this one
+ * does not (`dropped`) are retracted on the relays that took this bag, and
+ * only there: a relay that did not take it still serves the bag before, which
+ * names them.
  */
-export async function sendBagWithSealed(relays: string[], bag: NostrEvent, sealed: readonly OutgoingSealed[], dropped: readonly string[][], deps: SendDeps): Promise<{ ok: boolean; accepted: string[]; reason?: string }> {
+export async function sendBagWithSealed(relays: string[], bag: NostrEvent, sealed: readonly OutgoingSealed[], dropped: readonly string[][], deps: SendDeps): Promise<SendResult> {
   let open = [...relays]
-  const out: OutgoingSealed[] = []
-  const undo = async (reason: string): Promise<{ ok: false; accepted: string[]; reason: string }> => {
-    for (const done of out) if (done.fresh) await deps.retract?.(refOf(done)).catch(() => undefined)
+  const out: { s: OutgoingSealed; took: string[] }[] = []
+  const undo = async (reason: string): Promise<SendResult> => {
+    for (const done of out) if (done.s.fresh) await deps.retract?.(refOf(done.s), done.took).catch(() => undefined)
     return { ok: false, accepted: [], reason }
   }
   for (const s of sealed) {
@@ -228,19 +316,58 @@ export async function sendBagWithSealed(relays: string[], bag: NostrEvent, seale
     const rest = relays.filter((r) => !first.includes(r))
     const head = first.length > 0 ? await deps.publish(first, s.event).catch(() => ({ ok: false as const })) : null
     if (head && !head.ok) return undo('No relay took an entry moved out of the bag. Nothing was sent.')
-    if (head) out.push(s)
     const tail = rest.length > 0 ? await deps.publish(rest, s.event).catch(() => ({ ok: false as const, accepted: [] as string[] })) : { ok: true, accepted: [] as string[] }
     // A relay that did not say it took this entry gets no bag naming it.
     const took = new Set([...first, ...(tail.accepted ?? (tail.ok ? rest : []))].map(norm))
-    if (!head && took.size > 0) out.push(s)
+    if (took.size > 0) out.push({ s, took: relays.filter((r) => took.has(norm(r))) })
     if (took.size === 0) return undo('No relay took an entry moved out of the bag. Nothing was sent.')
     open = open.filter((r) => took.has(norm(r)))
   }
   if (open.length === 0) return undo('No relay took every entry moved out of the bag. Nothing was sent.')
-  const result = await deps.publish(open, bag).catch(() => ({ ok: false as const, accepted: [] as string[] }))
-  if (!result.ok) return undo('No relay took the bag.')
-  for (const ref of dropped) await deps.retract?.(ref).catch(() => undefined)
-  return { ok: true, accepted: result.accepted ?? open }
+  const result = await deps.publish(open, bag).catch(() => ({ ok: false as const, accepted: [] as string[], refused: false }))
+  if (!result.ok) {
+    if (result.refused === true) return undo('No relay took the bag.')
+    return { ok: false, accepted: [], reason: 'No relay said it took the bag.', unsettled: out.filter((o) => o.s.fresh).map((o) => o.s) }
+  }
+  const accepted = result.accepted ?? open.map(norm)
+  const tookBag = open.filter((r) => accepted.includes(norm(r)))
+  for (const ref of dropped) await deps.retract?.(ref, tookBag.length > 0 ? tookBag : open).catch(() => undefined)
+  return { ok: true, accepted }
+}
+
+/**
+ * What a rewrite of a bag must send before it, and retract after it (spec
+ * §7.6 Writing, Retracting), compared by address, never by the whole
+ * reference (its hint and coordinate may differ between two versions that name
+ * the same sealed entry):
+ *
+ * - `carry`: `owner`'s sealed entries the new bag names that the relays'
+ *   newest version of it (`onRelay`) does not, so may not be on any relay yet
+ *   (one sealed while LOCAL). Compared with what a relay holds, never with the
+ *   rewrite's own list, which already holds this device's rows. When the
+ *   relays' version is unknown (`null`), every one it names.
+ * - `dropped`: `owner`'s sealed entries `before` (the bag as it stood, the
+ *   relays' and this device's) named that the new bag does not.
+ *
+ * `fresh` are the addresses sealed for this very bag, which go out anyway.
+ */
+export function sealedChanges(entries: readonly unknown[], before: readonly unknown[], onRelay: readonly unknown[] | null, owner: string, fresh: ReadonlySet<string> = new Set()): { carry: string[][]; dropped: string[][] } {
+  const own = (es: readonly unknown[]): string[][] => es.filter((e): e is string[] => isSealedRef(e) && (e as string[])[1].split(':')[1] === owner)
+  const named = new Set(own(entries).map((e) => e[1]))
+  const held = onRelay ? new Set(own(onRelay).map((e) => e[1])) : null
+  const seen = new Set<string>()
+  const carry = own(entries).filter((e) => {
+    if (fresh.has(e[1]) || (held && held.has(e[1])) || seen.has(e[1])) return false
+    seen.add(e[1])
+    return true
+  })
+  const gone = new Set<string>()
+  const dropped = own(before).filter((e) => {
+    if (named.has(e[1]) || gone.has(e[1])) return false
+    gone.add(e[1])
+    return true
+  })
+  return { carry, dropped }
 }
 
 /** What retracting a sealed entry needs. */
@@ -284,6 +411,6 @@ export async function retractSealed(ref: readonly string[], deps: RetractDeps): 
   const ids = [...(live ? [live.id] : current ? [current.id] : []), emptied.id]
   const deletion = await deps.sign(sealedDeletionTemplate(parts.pubkey, parts.d, ids, Math.max(now, emptied.created_at)))
   await deps.publish(deps.relays, deletion)
-  sealedItems.delete(sealedAddress(parts.pubkey, parts.d))
+  dropSealed(sealedAddress(parts.pubkey, parts.d))
   return { emptied, deletion }
 }

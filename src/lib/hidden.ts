@@ -183,7 +183,17 @@ export function wantsReference(shard: ShardModel): boolean {
  */
 export async function objectTemplate(shard: ShardModel, regionKey: Uint8Array, d: string, createdAt: number): Promise<EventTemplate> {
   // OPAQUE for a shard whose author never chose (DECK-0003 §1.12), as every hidden shard.
-  const ciphertext = await encryptForRegion(regionKey, JSON.stringify(toPayload(withAuthoredConstrain(shard))))
+  return objectTemplateOf(JSON.stringify(toPayload(withAuthoredConstrain(shard))), regionKey, d, createdAt)
+}
+
+/**
+ * objectTemplate from a payload already written: an inline shard's `content`,
+ * sealed exactly as it was carried, for a shard that goes by reference because
+ * its bag would not hold it inline (lib/bagFit.ts). The same object, byte for
+ * byte, that a reader would have read inline.
+ */
+export async function objectTemplateOf(payload: string, regionKey: Uint8Array, d: string, createdAt: number): Promise<EventTemplate> {
+  const ciphertext = await encryptForRegion(regionKey, payload)
   return {
     kind: OBJECT_KIND,
     created_at: createdAt,
@@ -931,7 +941,17 @@ export interface BagPlace { at: Position; plane: Plane }
  * who can decrypt can re-sign identical content as themselves regardless.
  */
 export async function bagTemplate(inners: readonly (BagEntry | ChatRumor)[], regionKey: Uint8Array, lookupId: string, height: number, createdAt: number, kind: number = HIDDEN_KIND, settings: BagSettings = DEFAULT_BAG_SETTINGS, place?: BagPlace): Promise<EventTemplate> {
-  const tags: string[][] = [['d', lookupId], ['encrypted', ALGO, await encryptForRegion(regionKey, JSON.stringify(inners))], ['version', '2']]
+  return bagTemplateAround(inners, await encryptForRegion(regionKey, JSON.stringify(inners)), lookupId, height, createdAt, kind, settings, place)
+}
+
+/**
+ * bagTemplate around a ciphertext already made: everything but the
+ * encryption. lib/bagFit.ts passes a stand-in of the ciphertext's exact length
+ * to measure a bag without sealing it, since the length follows the
+ * plaintext's (sealedLength).
+ */
+export function bagTemplateAround(inners: readonly (BagEntry | ChatRumor)[], ciphertext: string, lookupId: string, height: number, createdAt: number, kind: number = HIDDEN_KIND, settings: BagSettings = DEFAULT_BAG_SETTINGS, place?: BagPlace): EventTemplate {
+  const tags: string[][] = [['d', lookupId], ['encrypted', ALGO, ciphertext], ['version', '2']]
   if (settings.heightTag) tags.push([HEIGHT_TAG, String(height)])
   if (settings.hint) {
     if (!place) throw new Error('A hint needs the place it points to.')

@@ -77,10 +77,11 @@ import { noCallout, useRepeatable } from '../hooks/useRepeatable'
 import { MAX_UNIT, type ShardModel } from 'sno-core/shards'
 import { formatCellSize, formatDistance } from 'sno-core/scale'
 import { fadeStep, inscribedRadius, sourceLocal } from '../lib/audioItem'
-import { LINK_PROTECTED, SCAN_MAX_HEIGHT, autoRoomFor, fillingChest, placedDoorHeight, movingId, placingChest, sealingDoor, lookModelOf, lookTagsFor, type LookChoice, aimedOf, atLastSpot, copyLinedUp, isProtected, ownBagIn, pendingEmpty, pendingName, positionOf, regionOf, useShards } from '../store/useShards'
+import { LINK_PROTECTED, SCAN_MAX_HEIGHT, autoRoomFor, deployBagMeter, posedForDeploy, type BagMeter, fillingChest, placedDoorHeight, movingId, placingChest, sealingDoor, lookModelOf, lookTagsFor, type LookChoice, aimedOf, atLastSpot, copyLinedUp, isProtected, ownBagIn, pendingEmpty, pendingName, positionOf, regionOf, useShards } from '../store/useShards'
 import { aimedPoint } from '../lib/chests'
 import { snapOffered } from '../lib/pose'
 import { MAX_RIDDLE_LENGTH } from '../lib/hidden'
+import { BAG_SAFE_BYTES } from '../lib/bagSize'
 import { findCashuToken } from '../lib/cashu'
 import { AXIS_BITS, SECTOR_HEIGHT, SECTOR_HINT, isSectorHint, searchExponent } from '../lib/hint'
 import { deployPoint } from '../lib/space'
@@ -184,6 +185,21 @@ export function LookRow({ choices, look, refusal }: { choices: readonly (keyof t
         <button className={`deploybar__toggle ${other !== null ? 'is-on' : ''}`} aria-pressed={other !== null} title="Any model from MINE or FEED" onClick={() => setPicking(true)} {...noCallout}>OTHER</button>
       </span>
       {picking && <LookPicker onPick={pick} onClose={() => setPicking(false)} />}
+    </DeployRow>
+  )
+}
+
+/**
+ * The bag's size with the shard in it, against what one bag may be
+ * (lib/bagSize.ts): BY REFERENCE when the shard goes out as its own object,
+ * and why; TOO LARGE, with the deploy's own words, when even that does not fit.
+ */
+export function BagMeterRow({ meter }: { meter: BagMeter }): JSX.Element {
+  const of = `${meter.bytes.toLocaleString('en-US')} of ${BAG_SAFE_BYTES.toLocaleString('en-US')} bytes`
+  const form = meter.refusal ? 'TOO LARGE' : meter.fitted ? 'BY REFERENCE: THE BAG IS FULL' : meter.byReference ? 'BY REFERENCE' : 'INLINE'
+  return (
+    <DeployRow kind="bagsize" label="BAG" hint={meter.refusal ?? (meter.fitted ? 'Too large to carry inline here, so it goes out as its own sealed object and the bag names it.' : undefined)}>
+      <span className="deploybar__value" data-testid="bag-meter">{of} · {form}</span>
     </DeployRow>
   )
 }
@@ -300,6 +316,18 @@ export function DeployBar({ pad = false }: { pad?: boolean }): JSX.Element | nul
     () => (pending ? sealingDoor({ mine, pending, deployLeaveOut: leaveOut, deployDoorHeight: chosenRoom, deployRoomSnap: snap, deploySealMove: sealMove }, me, deployPoint(cursor, step, height), plane, height) : null),
     [pending, mine, leaveOut, chosenRoom, snap, sealMove, me, cursor, step, height, plane],
   )
+  // The bag this shard goes into, as this device knows it, with the shard in
+  // the form it would go out in: by reference when it is large, or when the
+  // bag would not hold it inline (lib/bagFit.ts), so the meter shows it fits.
+  const editRow = useShards((s) => {
+    const id = s.pending?.type === 'shard' ? s.pending.edit?.eventId : undefined
+    return id ? s.mine.find((m) => m.eventId === id) ?? null : null
+  })
+  const meter: BagMeter | null = useMemo(() => {
+    if (!shard || intoChest || link || pending?.type !== 'shard') return null
+    const posed = posedForDeploy(shard, false, { deployUp: up, deploySpin: spin, deployTurn: turn, deployUnit: unit, deployConstrain: constrain }, plane, height)
+    return deployBagMeter(mine, posed, { at: deployPoint(cursor, step, height), plane, height, settings: bag, owner: me, door: sealing, edit: editRow ?? undefined })
+  }, [shard, intoChest, link, pending, up, spin, turn, unit, constrain, plane, height, mine, cursor, step, bag, me, sealing, editRow])
   // A MOVE or EDIT keeps its own bag (review of #633): a room under it is offered, SEAL IN ROOM, never taken on its own.
   const offer = useMemo(
     () => (pending && moving && !sealMove ? autoRoomFor({ mine, pending, deployLeaveOut: leaveOut, deployDoorHeight: chosenRoom, deployHeight: height, deployRoomSnap: snap, deploySealMove: true }, me, cursor, plane) : null),
@@ -462,6 +490,9 @@ export function DeployBar({ pad = false }: { pad?: boolean }): JSX.Element | nul
         <span className="deploybar__value">2^{step}</span>
         <button className="deploybar__btn" {...bind(() => stepBuild(1))} disabled={!stepOpen || step >= scaleExp} aria-label="Coarser step (period)" title="Coarser step (.)">+</button>
       </DeployRow>
+
+      {/* How full the bag is with this shard in it, in the form it goes out in. */}
+      {meter && <BagMeterRow meter={meter} />}
 
       {/* What a chest wears (D2, D3): a built-in or OTHER, from MINE or FEED. */}
       {pending.type === 'chest' && look && <LookRow choices={door ? DOOR_LOOKS : CHEST_LOOKS} look={look} refusal={lookRefusal} />}

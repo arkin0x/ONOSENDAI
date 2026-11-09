@@ -401,7 +401,7 @@ export default function App(): JSX.Element {
       <DeployBar pad={showPad && !offerUp && !modalUp} />
       {/* One boundary for the record and its neighbors: a crash in one modal
           shows its error where the modal was, and the scene stays up. */}
-      <CrashNote where="a modal">
+      <CrashNote where="a modal" closesCard>
         <StashModals />
         <SecretModal />
         <ActionModal />

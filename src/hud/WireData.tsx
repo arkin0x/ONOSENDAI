@@ -27,13 +27,14 @@ import { useState } from 'react'
 import { Radar } from 'lucide-react'
 import { positionHex } from '../lib/events'
 import { shardRefusal } from '../lib/hidden'
+import { useCalibration } from '../lib/calibration'
 import { useCyberspace } from '../store/useCyberspace'
 import { discoveryKeyOf, positionOf, useShards, type DiscoveryKey, type MyDeployment } from '../store/useShards'
 import { CopyValue } from './EventData'
 
-export type TestState = 'idle' | 'testing' | 'found' | 'missing' | 'refused' | 'unread' | 'wrongKey'
+export type TestState = 'idle' | 'testing' | 'found' | 'missing' | 'refused' | 'unread' | 'wrongKey' | 'underived'
 
-/** What TEST DISCOVERY says in each state. `testing` is the derived path's; the stored key's is STORED_TESTING. */
+/** What TEST DISCOVERY says in each state. `testing` is the derived path's for a region bag; a room bag's is ROOM_TESTING, the stored key's STORED_TESTING. */
 export const TEST_WORDS: Record<TestState, string> = {
   idle: 'TEST DISCOVERY',
   testing: 'DERIVING REGION KEY…',
@@ -42,10 +43,14 @@ export const TEST_WORDS: Record<TestState, string> = {
   refused: '✗ ON THE RELAY, BUT NO CLIENT CAN OPEN IT',
   unread: '✗ COULD NOT READ THE RELAY, TAP TO RETRY',
   wrongKey: '✗ WRONG KEY: STRANGERS CANNOT FIND IT',
+  underived: '✗ COULD NOT DERIVE THE KEY, TAP TO RETRY',
 }
 
 /** The test under way with the stored key: nothing is derived. */
 export const STORED_TESTING = 'CHECKING WITH THE STORED KEY…'
+
+/** The test under way in a room: the room key is derived, from the region key and the door secret. */
+export const ROOM_TESTING = 'DERIVING ROOM KEY…'
 
 /** The line under a result checked with the stored key, or null when the key was derived. */
 export function storedKeyNote(key: DiscoveryKey): string | null {
@@ -58,6 +63,7 @@ export function storedKeyNote(key: DiscoveryKey): string | null {
 /** The button's tooltip: what the test will do on this path, or why it refused. */
 function testTitle(test: TestState, key: DiscoveryKey, room: boolean): string {
   if (test === 'refused') return 'The bag is there and this item is in it, signed, but the format refuses it, so every client drops it and only this device shows it. Fix it in the workshop and hide it again; DELETE removes this copy.'
+  if (test === 'underived') return 'This device could not derive the key from the coordinate (its key worker failed or ran out of time), so the relay was never asked. Tap to try again.'
   if (test === 'wrongKey') return 'The key derived from the coordinate is not the key this bag was sealed with, so it is filed where no stranger looks.'
   if (key.via === 'stored') {
     return key.why === 'height'
@@ -79,6 +85,10 @@ export function WireData({ dep, initialTest = 'idle', initialChecked = null }: {
   // The key the last result was checked with: its note stays with that result.
   const [checked, setChecked] = useState<DiscoveryKey | null>(initialChecked)
   const me = useCyberspace((s) => s.identity.pubkey)
+  // The ceiling discoveryKeyOf compares against is the calibration's: a
+  // benchmark or cache read that lands after the card opened moves it, and
+  // this re-renders so the path below follows.
+  useCalibration((s) => s.hopHeight)
   // Which path the test takes: a comparison of heights and a stored secret,
   // never a derivation, so it is safe to ask while rendering.
   const path = discoveryKeyOf(dep, me)
@@ -96,7 +106,7 @@ export function WireData({ dep, initialTest = 'idle', initialChecked = null }: {
     setTest(result.outcome)
   }
   const note = checked && test !== 'idle' && test !== 'testing' ? storedKeyNote(checked) : null
-  const words = test === 'testing' && path.via === 'stored' ? STORED_TESTING : TEST_WORDS[test]
+  const words = test !== 'testing' ? TEST_WORDS[test] : path.via === 'stored' ? STORED_TESTING : dep.room ? ROOM_TESTING : TEST_WORDS.testing
   // Why the format refuses it, when it does: the same words the deploy bar
   // would have used, so the fix is named here too.
   const refusal = test === 'refused' && dep.shard ? shardRefusal(dep.shard) : null

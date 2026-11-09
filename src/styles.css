@@ -8677,14 +8677,18 @@ kbd {
   box-shadow: 0 0 14px rgba(242, 247, 255, 0.14);
 }
 /* The wrench, BUILD with its line, then EXIT at the right edge, always in
- * the first row. RETURN TO AVATAR (only while the cursor is away from you)
- * goes in the row under EXIT, on the right, when the bar is narrow, and
- * just left of EXIT when there is room (arkinox, 2026-11-09: "move Avatar up
- * to the same row as the exit button"). Either way EXIT does not move when it
- * comes and goes, and BUILD's line keeps its room on a phone. */
+ * the first row. RETURN TO AVATAR (only while it has something to do) goes
+ * in the row under EXIT, on the right, when the bar is narrow, and just left
+ * of EXIT when there is room (arkinox, 2026-11-09: "move Avatar up to the
+ * same row as the exit button"). The narrow bar keeps that row, its 30px
+ * and the gap above it, while the button is gone, so neither EXIT nor any
+ * row below the header moves when it comes and goes, and the cover the bar
+ * reports (hooks/useCover) holds still: nothing after a button moves
+ * (#643). BUILD's line keeps its room on a phone. */
 .buildbar__head {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr) auto;
+  grid-template-rows: auto 30px;
   align-items: center;
   column-gap: 10px;
   row-gap: 6px;
@@ -8703,6 +8707,7 @@ kbd {
 @container buildbar (min-width: 380px) {
   .buildbar__head {
     grid-template-columns: auto minmax(0, 1fr) auto auto;
+    grid-template-rows: auto;
   }
   .buildbar__head > .buildbar__home { grid-column: 3; grid-row: 1; }
   .buildbar__head > .buildbar__exit { grid-column: 4; }

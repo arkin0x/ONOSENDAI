@@ -13,10 +13,11 @@
  * that the mode itself registers (store/useBuilder.ts), after anything opened
  * inside the mode (a deploy's bar closes first).
  * RETURN TO AVATAR brings the build cursor back to you without leaving. It
- * sits beside EXIT and is there only while the cursor is away from you
- * (arkinox, 2026-11-09: "move Avatar up to the same row as the exit button
- * ... make it disappear when its inactive"). On a narrow bar it drops to a
- * second header row, under EXIT on the right, so EXIT never moves.
+ * sits beside EXIT and is there only while it has something to do: the
+ * cursor away from you, or a chain explorer mark to clear (arkinox,
+ * 2026-11-09: "move Avatar up to the same row as the exit button ... make it
+ * disappear when its inactive"). On a narrow bar it has a second header row,
+ * under EXIT on the right, kept even while it is gone, so nothing moves.
  *
  * While a deploy is lined up the deploy bar is the working surface and the
  * instrument stack, this bar with it, steps aside (App.tsx), as it always has.
@@ -31,7 +32,7 @@ import { axisDistance } from '../lib/nearby'
 import { Explanation } from './Explanation'
 import { useStash } from './stash'
 import { useCover } from '../hooks/useCover'
-import { useRef } from 'react'
+import { useLayoutEffect, useRef } from 'react'
 import { DoorClosedLocked, House, Wrench } from 'lucide-react'
 import { ItemIcon } from './ItemIcon'
 import { sealAChest, sealADoor } from './ShardsPanel'
@@ -57,18 +58,24 @@ export function BuildBar(): JSX.Element | null {
   // The last placement, for AGAIN after a CANCEL: its name, or null.
   const again = useAgainName()
   const againType = useShards((s) => s.placedLast?.pending.type ?? 'shard')
-  // Where focus goes when RETURN TO AVATAR is pressed and leaves the screen.
+  // A mark from the chain explorer ([ ] Home End) can stand with the cursor
+  // on your avatar (your own head, a boarding head): RETURN TO AVATAR still
+  // clears it (toAvatar), so it stays while the mark does.
+  const marked = useBuilder((s) => s.scrub !== null)
+  const showHome = !onAvatar || marked
+  // When RETURN TO AVATAR leaves the screen while it has the focus, however
+  // it was done (pressed, Enter or Space on it, or X with it focused), the
+  // focus goes to EXIT beside it rather than falling off the bar. Focus is
+  // never taken from anywhere else: X from the canvas leaves it there.
   const exitRef = useRef<HTMLButtonElement>(null)
-  if (!active) return null
-
-  // RETURN TO AVATAR pressed (a click, a tap, Enter or Space on it): back to
-  // your avatar, where the button is no longer rendered, so focus moves to
-  // EXIT beside it rather than falling off the bar. The X shortcut calls
-  // toAvatar on its own (hooks/useKeyboard.ts) and moves no focus.
-  const returnToAvatar = (): void => {
-    useBuilder.getState().toAvatar()
+  const homeFocused = useRef(false)
+  useLayoutEffect(() => {
+    if (!active) { homeFocused.current = false; return }
+    if (showHome || !homeFocused.current) return
+    homeFocused.current = false
     exitRef.current?.focus()
-  }
+  }, [active, showHome])
+  if (!active) return null
 
   const stop = (): void => {
     const s = useCyberspace.getState()
@@ -88,13 +95,12 @@ export function BuildBar(): JSX.Element | null {
             {plane === 0 ? 'DATASPACE' : 'IDEASPACE'} · 2^{scaleExp} · {formatCellSize(scaleExp)}
           </span>
         </span>
-        {/* Not rendered on your avatar, where it would do nothing. Its cell
-            in the header is EXIT's left on a wide bar and the row under
-            EXIT on a narrow one (styles.css .buildbar__head), so EXIT
-            stays put when it comes and goes, and takes the focus when
-            it goes (returnToAvatar). X does the same, focus untouched. */}
-        {!onAvatar && (
-          <button className="buildbar__act buildbar__home" onClick={returnToAvatar} aria-label="Return to avatar" title="Return to avatar: bring the build cursor and the view back to your avatar, still building (X)"><House className="buildbar__icon" size={ICON} strokeWidth={2.25} aria-hidden />RETURN TO AVATAR</button>
+        {/* Not rendered when it would do nothing. Its cell in the header
+            is EXIT's left on a wide bar and the row under EXIT on a narrow
+            one, kept while it is gone (styles.css .buildbar__head), so
+            nothing moves when it comes and goes. X does the same. */}
+        {showHome && (
+          <button className="buildbar__act buildbar__home" onClick={() => useBuilder.getState().toAvatar()} onFocus={() => { homeFocused.current = true }} onBlur={() => { homeFocused.current = false }} aria-label="Return to avatar" title="Return to avatar: bring the build cursor and the view back to your avatar, still building (X)"><House className="buildbar__icon" size={ICON} strokeWidth={2.25} aria-hidden />RETURN TO AVATAR</button>
         )}
         <button ref={exitRef} className="hyperbar__end buildbar__exit" onClick={() => useBuilder.getState().exit()} title="Leave build mode. The view stays where it is (Esc, or B)">EXIT</button>
       </div>

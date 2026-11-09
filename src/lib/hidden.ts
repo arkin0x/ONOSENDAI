@@ -35,7 +35,10 @@
  * `content` and `["encrypted", "aes-256-gcm", ct, "cyberspace:region"]`,
  * sealed with the same region key as the bag and saying nothing about where
  * it is. A large shard is hidden this way, as a kind 33331 object (DECK-0003
- * §3.2, §3.4), so one big shard does not make the whole bag big.
+ * §3.2, §3.4), so one big shard does not make the whole bag big. Any other
+ * entry a full bag moves out goes as a sealed entry, kind 33335 (spec §7.6
+ * Sealed entries, lib/sealed.ts): its payload is the very item the bag would
+ * hold inline, and it reads exactly as that item would (fromReference).
  *
  * The envelope does not carry NIP-70's `-` (bagTemplate says why); the items
  * inside it do.
@@ -64,6 +67,7 @@ import { mentionTags } from './mentions'
 import { cashuTokensAsWritten } from './cashu'
 import { countNftLinks, NFT_WORDS, replaceNftLinks } from './nftLink'
 import { AUDIO_KIND, audioItemOf, type AudioItem } from './audioItem'
+import { SEALED_KIND, openSealed, rememberSealed, sealedAddress, sealedEventRefusal, sealedItemOf, sealedPayload, sealedRefParts } from './sealed'
 
 /** The location-encrypted envelope (spec §8.6). */
 export const HIDDEN_KIND = 33330
@@ -158,12 +162,16 @@ export function linkKey(lookupId: string, ref: Reference): string {
 }
 
 /**
- * The most references one bag may make this client fetch, and how many at
- * once. Opening a bag is cheap; each reference is a relay query, so a bag
- * stuffed with them must not turn one find into a flood.
+ * The most references one bag may make this client fetch, and how many it
+ * opens at once. A bag of references alone holds some 850 of them under the
+ * 240,000-byte cap (spec §7.6 Size), so this is above that: a full bag opens
+ * whole. The fetches are batched (lib/references.ts: one query per kind and
+ * author, in chunks), so the bound is on work, not round trips. A bag past it
+ * says how many it did not fetch (BagReading `skipped`, spec §7.6 Reading,
+ * rule 8).
  */
-export const MAX_REFERENCES_PER_BAG = 64
-const REFERENCE_CONCURRENCY = 4
+export const MAX_REFERENCES_PER_BAG = 1024
+const REFERENCE_CONCURRENCY = 8
 
 /** Where a reference without its own point is drawn: the base of the region the bag is sealed to. */
 export interface RegionOrigin { at: Position; plane: Plane }
@@ -465,6 +473,15 @@ export interface Hidden {
    * the key that placed it (spec §7.6).
    */
   ref?: Reference
+  /**
+   * Set when the item was read from a sealed entry (kind 33335, spec §7.6):
+   * the bag's reference to it, and the signed sealed entry. The item itself
+   * is `inner`, read exactly as if it stood inline, so it is identified,
+   * attributed and placed by its own id, lineage and `C`; `ref` stays unset.
+   * A rewrite of the bag carries the reference, never the item inline.
+   */
+  sealedRef?: Reference
+  sealedEvent?: NostrEvent
   /**
    * Set when this was revealed from inside a chest: that chest's inner event
    * id. It is then not a bag entry but part of the chest's sealed contents,
@@ -795,10 +812,26 @@ export const DEFAULT_BAG_SETTINGS: BagSettings = { heightTag: true, hint: null, 
  */
 export interface BagContents { shard: number; message: number; key: number; chest: number; cashu: number; nft: number; audio: number; door: number }
 
-export function bagContents(inners: readonly (BagEntry | ChatRumor)[]): BagContents {
+/**
+ * What a bag holds, counted as spec §7.7 counts (Contents). An inline item by
+ * its kind. A reference to a kind 33331 object as a shard, from its
+ * coordinate alone. A sealed entry (33335) by the item it holds, exactly as if
+ * that item stood inline, when that item is known: read when its bag was
+ * opened, or kept when it was sealed (lib/sealed.ts sealedItemOf), whether
+ * the bag names it by an `a` reference or an `e`. Any other reference, and a
+ * sealed entry whose item was never read, counts as nothing.
+ */
+export function bagContents(inners: readonly (BagEntry | ChatRumor)[], held?: ReadonlyMap<string, Pick<Rumor, 'kind' | 'content' | 'tags'>>): BagContents {
   const out: BagContents = { shard: 0, message: 0, key: 0, chest: 0, cashu: 0, nft: 0, audio: 0, door: 0 }
-  for (const e of inners) {
-    if (isReference(e)) { out.shard++; continue }
+  for (const entry of inners) {
+    let e: Pick<Rumor, 'kind' | 'content' | 'tags'>
+    if (isReference(entry)) {
+      if (entry[0] === 'a' && entry[1].startsWith(`${OBJECT_KIND}:`)) { out.shard++; continue }
+      // An `e` reference says no kind: it counts by its item only once it was read as a sealed entry (sealedItemOf by event id).
+      const item = sealedRefParts(entry) ? held?.get(entry[1]) ?? sealedItemOf(entry) : entry[0] === 'e' ? sealedItemOf(entry) : undefined
+      if (!item) continue
+      e = item
+    } else e = entry
     if (e.kind === SHARD_KIND) out.shard++
     else if (e.kind === MESSAGE_KIND) { out.message++; out.cashu += cashuTokensAsWritten(e.content).length; out.nft += countNftLinks(e.content) }
     else if (e.kind === KEY_KIND) out.key++
@@ -827,9 +860,9 @@ export const CONTENTS_KINDS = ['shard', 'message', 'key', 'chest', 'cashu', 'nft
  * `cashu` one); with `money` alone, `["contents", "cashu"]` while a
  * token is inside, and nothing once none is. Spec §7.7 "Contents" (#75).
  */
-export function bagContentsTags(inners: readonly (BagEntry | ChatRumor)[], settings: Pick<BagSettings, 'contents' | 'money'>): string[][] {
+export function bagContentsTags(inners: readonly (BagEntry | ChatRumor)[], settings: Pick<BagSettings, 'contents' | 'money'>, held?: ReadonlyMap<string, Pick<Rumor, 'kind' | 'content' | 'tags'>>): string[][] {
   if (!settings.contents && !settings.money) return []
-  const c = bagContents(inners)
+  const c = bagContents(inners, held)
   if (settings.contents) return CONTENTS_KINDS.filter((k) => c[k] > 0).map((k) => ['contents', k, String(c[k])])
   return c.cashu > 0 ? [['contents', 'cashu']] : []
 }
@@ -940,8 +973,8 @@ export interface BagPlace { at: Position; plane: Plane }
  * and buys little anyway — the location encryption is the real gate, and anyone
  * who can decrypt can re-sign identical content as themselves regardless.
  */
-export async function bagTemplate(inners: readonly (BagEntry | ChatRumor)[], regionKey: Uint8Array, lookupId: string, height: number, createdAt: number, kind: number = HIDDEN_KIND, settings: BagSettings = DEFAULT_BAG_SETTINGS, place?: BagPlace): Promise<EventTemplate> {
-  return bagTemplateAround(inners, await encryptForRegion(regionKey, JSON.stringify(inners)), lookupId, height, createdAt, kind, settings, place)
+export async function bagTemplate(inners: readonly (BagEntry | ChatRumor)[], regionKey: Uint8Array, lookupId: string, height: number, createdAt: number, kind: number = HIDDEN_KIND, settings: BagSettings = DEFAULT_BAG_SETTINGS, place?: BagPlace, held?: ReadonlyMap<string, Pick<Rumor, 'kind' | 'content' | 'tags'>>): Promise<EventTemplate> {
+  return bagTemplateAround(inners, await encryptForRegion(regionKey, JSON.stringify(inners)), lookupId, height, createdAt, kind, settings, place, held)
 }
 
 /**
@@ -950,7 +983,7 @@ export async function bagTemplate(inners: readonly (BagEntry | ChatRumor)[], reg
  * to measure a bag without sealing it, since the length follows the
  * plaintext's (sealedLength).
  */
-export function bagTemplateAround(inners: readonly (BagEntry | ChatRumor)[], ciphertext: string, lookupId: string, height: number, createdAt: number, kind: number = HIDDEN_KIND, settings: BagSettings = DEFAULT_BAG_SETTINGS, place?: BagPlace): EventTemplate {
+export function bagTemplateAround(inners: readonly (BagEntry | ChatRumor)[], ciphertext: string, lookupId: string, height: number, createdAt: number, kind: number = HIDDEN_KIND, settings: BagSettings = DEFAULT_BAG_SETTINGS, place?: BagPlace, held?: ReadonlyMap<string, Pick<Rumor, 'kind' | 'content' | 'tags'>>): EventTemplate {
   const tags: string[][] = [['d', lookupId], ['encrypted', ALGO, ciphertext], ['version', '2']]
   if (settings.heightTag) tags.push([HEIGHT_TAG, String(height)])
   if (settings.hint) {
@@ -958,7 +991,7 @@ export function bagTemplateAround(inners: readonly (BagEntry | ChatRumor)[], cip
     if (!hintFits(settings.hint, height)) throw new Error(`A hint box of heights ${settings.hint.join(', ')} cannot contain a height ${height} region.`)
     tags.push(...hintTags(place.at, place.plane, settings.hint))
   }
-  tags.push(...bagContentsTags(inners, settings))
+  tags.push(...bagContentsTags(inners, settings, held))
   return { kind, created_at: createdAt, content: settings.riddle.trim().slice(0, MAX_RIDDLE_LENGTH), tags }
 }
 
@@ -1066,6 +1099,10 @@ export interface BagReading {
   entries: number
   readable: number
   opaque: boolean
+  /** References past MAX_REFERENCES_PER_BAG, not fetched: more is in the bag than was read (spec §7.6 Reading, rule 8). */
+  skipped?: number
+  /** Sealed entries found and refused (spec §7.6 Reading, rules 1 and 4): another signer's, a nested one, a door. */
+  refused?: number
 }
 const readings = new Map<string, BagReading>()
 const readingListeners = new Set<() => void>()
@@ -1079,7 +1116,7 @@ export function onBagReadings(listener: () => void): () => void {
 }
 function noteReading(bagId: string, reading: BagReading): void {
   const prev = readings.get(bagId)
-  if (prev && prev.entries === reading.entries && prev.readable === reading.readable && prev.opaque === reading.opaque) return
+  if (prev && prev.entries === reading.entries && prev.readable === reading.readable && prev.opaque === reading.opaque && (prev.skipped ?? 0) === (reading.skipped ?? 0) && (prev.refused ?? 0) === (reading.refused ?? 0)) return
   readings.set(bagId, reading)
   readingsVersion++
   for (const listener of readingListeners) listener()
@@ -1123,23 +1160,60 @@ export async function unbag(outer: NostrEvent, regionKey: Uint8Array, resolve?: 
   const facts: BagFacts = { height: regionHeight, bag: bagSettingsOf(outer, regionHeight), ...(room ? { room } : {}) }
   const heightKnown = height !== undefined || heightHint(outer) !== null
   const out: (Hidden | null)[] = entries.map((entry) => (Array.isArray(entry) ? null : fromInner(entry as Rumor, outer, keyHex, facts, heightKnown, origin)))
-  // References are fetched a few at a time, and only so many per bag; an
-  // entry that cannot be fetched or opened is a missing entry, dropped like
-  // an item that fails to verify.
+  const refs = entries.map((e, i) => [e, i] as const).filter(([e]) => isReference(e))
+  const fetched = refs.slice(0, MAX_REFERENCES_PER_BAG)
+  const skipped = resolve ? refs.length - fetched.length : 0
+  const tally = { refused: 0 }
+  // Every reference is asked for at once, so a batching resolver
+  // (lib/references.ts) fetches a bag's sealed entries in a few queries; they
+  // are then opened a few at a time. An entry that cannot be fetched or opened
+  // is a missing entry, dropped like an item that fails to verify; one past
+  // the cap is not fetched at all, and the reading says how many.
   if (resolve) {
-    const refs = entries.map((e, i) => [e, i] as const).filter(([e]) => isReference(e)).slice(0, MAX_REFERENCES_PER_BAG)
+    const asked = new Map<number, Promise<NostrEvent | null>>()
+    for (const [ref, i] of fetched) {
+      if (!foreignSealed(ref as Reference, outer.pubkey)) asked.set(i, resolve(ref as Reference).catch(() => null))
+      else tally.refused++
+    }
     let next = 0
     const worker = async (): Promise<void> => {
-      while (next < refs.length) {
-        const [ref, i] = refs[next++]
-        out[i] = await fromReference(ref as Reference, outer, regionKey, keyHex, resolve, facts, origin).catch(() => null)
+      while (next < fetched.length) {
+        const [ref, i] = fetched[next++]
+        const target = asked.get(i)
+        if (!target) continue
+        out[i] = await fromReference(ref as Reference, outer, regionKey, keyHex, () => target, facts, origin, heightKnown, tally).catch(() => null)
       }
     }
-    await Promise.all(Array.from({ length: Math.min(REFERENCE_CONCURRENCY, refs.length) }, worker))
+    await Promise.all(Array.from({ length: Math.min(REFERENCE_CONCURRENCY, fetched.length) }, worker))
   }
-  const items = out.filter((h): h is Hidden => h !== null)
-  noteReading(outer.id, { entries: entries.length, readable: items.length, opaque: false })
+  const items = firstOfEach(out.filter((h): h is Hidden => h !== null))
+  noteReading(outer.id, { entries: entries.length, readable: items.length, opaque: false, ...(skipped > 0 ? { skipped } : {}), ...(tally.refused > 0 ? { refused: tally.refused } : {}) })
   return items
+}
+
+/**
+ * One item per identity, the first in the bag's list (spec §7.6 Reading,
+ * rule 6): two entries that yield the same item id, or the same lineage id,
+ * are one item, wherever each was stored (inline, or in a sealed entry). A
+ * reference to an object (a LIVE LINK, a hidden object) is left as it always
+ * was: one object placed at two points is two entries (entryKey).
+ */
+function firstOfEach(items: Hidden[]): Hidden[] {
+  const seen = new Set<string>()
+  return items.filter((h) => {
+    if (h.ref) return true
+    const lineage = itemLineage(h.inner)
+    const keys = [h.eventId, ...(lineage && lineage !== h.eventId ? [lineage] : [])]
+    if (keys.some((k) => seen.has(k))) return false
+    for (const k of keys) seen.add(k)
+    return true
+  })
+}
+
+/** A reference to a sealed entry by a key other than the bag's: dropped without fetching (spec §7.6 Reading, rule 1). */
+function foreignSealed(ref: Reference, signer: string): boolean {
+  const parts = sealedRefParts(ref)
+  return parts !== null && parts.pubkey !== signer
 }
 
 /**
@@ -1201,11 +1275,9 @@ export function forgetParsedObjects(budget: number = PARSED_KEPT_CHARS): number 
  * someone else's object is a placement, attributed to the bag's author, while
  * the content stays that event's own (spec §7.6).
  */
-async function fromReference(ref: Reference, outer: NostrEvent, regionKey: Uint8Array, keyHex: string, resolve: ResolveReference, facts: BagFacts, origin?: RegionOrigin): Promise<Hidden | null> {
-  // The point is optional (spec §7.6): without one the entry is located no
-  // more precisely than the region, and is drawn at the region's base.
-  const coordHex = ref[3]
-  if (!coordHex && !origin) return null
+async function fromReference(ref: Reference, outer: NostrEvent, regionKey: Uint8Array, keyHex: string, resolve: ResolveReference, facts: BagFacts, origin?: RegionOrigin, heightKnown = true, tally?: { refused: number }): Promise<Hidden | null> {
+  // Another signer's sealed entry is never fetched (spec §7.6 Reading, rule 1).
+  if (foreignSealed(ref, outer.pubkey)) { if (tally) tally.refused++; return null }
   const target = await resolve(ref)
   if (!target || !verifyOnce(target)) return null
   if (ref[0] === 'e' && target.id !== ref[1]) return null
@@ -1213,6 +1285,11 @@ async function fromReference(ref: Reference, outer: NostrEvent, regionKey: Uint8
     const [kind, pubkey, ...rest] = ref[1].split(':')
     if (String(target.kind) !== kind || target.pubkey !== pubkey || tag(target, 'd') !== rest.join(':')) return null
   }
+  if (target.kind === SEALED_KIND) return fromSealed(ref, target, outer, regionKey, keyHex, facts, origin, heightKnown, tally)
+  // The point is optional (spec §7.6): without one the entry is located no
+  // more precisely than the region, and is drawn at the region's base.
+  const coordHex = ref[3]
+  if (!coordHex && !origin) return null
   // Sealed to this place (DECK-0003 §3.4), or another author's public object
   // placed by reference (§3.1, §3.2: a LIVE LINK from the Shard Feed), whose
   // payload is its content as published.
@@ -1268,6 +1345,57 @@ async function fromReference(ref: Reference, outer: NostrEvent, regionKey: Uint8
     return { ...base, type: 'message', text: plain.slice(0, MAX_MESSAGE_LENGTH) }
   }
   return null
+}
+
+/**
+ * A sealed entry (kind 33335) -> the item it holds, read exactly as if it
+ * stood inline in the bag that names it (spec §7.6 Sealed entries, Reading):
+ * signed by the bag's signer, and saying nothing of where it is, or dropped;
+ * emptied, or not opening with this bag's key (the region key, or the room key
+ * of a room bag), a missing entry; a payload that is not one event, is itself
+ * a sealed entry, or is a door, refused. Then the item goes through fromInner
+ * as an inline item does: its signature, or a rumor of the bag's signer that
+ * the bag vouches for, its own `C` for its place, its own id for its identity.
+ * The reference's coordinate is only for a reader that could not fetch it.
+ */
+async function fromSealed(ref: Reference, target: NostrEvent, outer: NostrEvent, regionKey: Uint8Array, keyHex: string, facts: BagFacts, origin: RegionOrigin | undefined, heightKnown: boolean, tally?: { refused: number }): Promise<Hidden | null> {
+  const why = sealedEventRefusal(target, outer.pubkey)
+  if (why === 'signer') { if (tally) tally.refused++; return null }
+  if (why) return null
+  const plain = await openSealed(target, regionKey)
+  if (plain === null) return null
+  const payload = sealedPayload(plain)
+  if (!payload.item) { if (tally) tally.refused++; return null }
+  const item = payload.item as Rumor
+  const read = fromInner(item, outer, keyHex, facts, heightKnown, origin)
+  if (!read) return null
+  rememberSealed(sealedAddress(target.pubkey, tag(target, 'd') ?? ''), payload.item, target)
+  return { ...read, sealedRef: ref, sealedEvent: target }
+}
+
+/**
+ * The items of a bag's own sealed entries, learned for a rewrite of it: each
+ * `a` reference to a sealed entry of `signer`'s, fetched (batched), checked
+ * and opened with the bag's key as a reader does (fromSealed), its item kept
+ * by address (lib/sealed.ts rememberSealed) for counting it (§7.7) and for
+ * matching a row of yours against it. Answers the item by the reference's
+ * entryKey. A reference that does not resolve or open is left unknown, and
+ * the rewrite carries it forward as it is.
+ */
+export async function learnSealed(entries: readonly BagEntry[], signer: string, key: Uint8Array, resolve: ResolveReference): Promise<Map<string, { item: Rumor; event: NostrEvent }>> {
+  const own = entries.filter((e): e is Reference => isReference(e) && sealedRefParts(e)?.pubkey === signer).slice(0, MAX_REFERENCES_PER_BAG)
+  const asked = own.map((ref) => resolve(ref).catch(() => null))
+  const out = new Map<string, { item: Rumor; event: NostrEvent }>()
+  await Promise.all(own.map(async (ref, i) => {
+    const ev = await asked[i]
+    if (!ev || ev.kind !== SEALED_KIND || ev.pubkey !== signer || tag(ev, 'd') !== sealedRefParts(ref)?.d || !verifyOnce(ev) || sealedEventRefusal(ev, signer)) return
+    const plain = await openSealed(ev, key)
+    const payload = plain === null ? null : sealedPayload(plain)
+    if (!payload?.item || !innerAuthentic(payload.item, signer)) return
+    rememberSealed(ref[1], payload.item, ev)
+    out.set(entryKey(ref), { item: payload.item as Rumor, event: ev })
+  }))
+  return out
 }
 
 /**

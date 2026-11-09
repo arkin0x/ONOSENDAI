@@ -7,9 +7,9 @@
 import { describe, expect, it } from 'vitest'
 import { finalizeEvent, generateSecretKey, getPublicKey } from 'nostr-tools/pure'
 import { BAG_SAFE_BYTES, signedBytes } from '../bagSize'
-import { bagBytes, growthRefusal, planFit, referenceFor, sealedLength, withReferences, type FitCandidate } from '../bagFit'
+import { bagBytes, growthRefusal, heldBy, planFit, referenceFor, sealFor, sealedLength, withReferences, type FitCandidate } from '../bagFit'
 import { encryptForRegion } from '../shardCrypto'
-import { DEFAULT_BAG_SETTINGS, MESSAGE_KIND, OBJECT_KIND, SHARD_KIND, bagTemplate, rumorOf, type BagEntry } from '../hidden'
+import { CHEST_KIND, DEFAULT_BAG_SETTINGS, KEY_KIND, MESSAGE_KIND, OBJECT_KIND, SHARD_KIND, bagContents, bagTemplate, rumorOf, type BagEntry } from '../hidden'
 
 const sk = generateSecretKey()
 const me = getPublicKey(sk)
@@ -38,6 +38,24 @@ describe('measuring a bag without sealing it', () => {
     expect(growthRefusal(big, [], BAG_SAFE_BYTES)).toBeNull()
     expect(growthRefusal(big, [], BAG_SAFE_BYTES + 1)).toMatch(/Too large for one bag/)
     expect(growthRefusal(big, [message(20)], BAG_SAFE_BYTES + 1)).toBeNull()
+  })
+})
+
+describe('sizes in UTF-8 bytes, as a relay counts (review of #645)', () => {
+  const wide = (chars: number): BagEntry => rumorOf({ kind: MESSAGE_KIND, created_at: 1_800_000_000, content: '\u20ac'.repeat(chars), tags: [C, ['-']] }, me) as BagEntry
+
+  it('a candidate\'s bytes are its JSON\'s UTF-8 bytes, not its length in characters', () => {
+    const e = wide(2_000)
+    const c = sealFor(e, me, 'd'.repeat(32), '', new Set())!
+    expect(c.bytes).toBe(new TextEncoder().encode(JSON.stringify(e)).length)
+    expect(c.bytes).toBeGreaterThan(JSON.stringify(e).length)
+  })
+
+  it('growthRefusal counts bytes: fewer characters but more bytes than before is growth', () => {
+    const before = [message(3_000)]
+    const after = [wide(1_500)]
+    expect(JSON.stringify(after).length).toBeLessThan(JSON.stringify(before).length)
+    expect(growthRefusal(after, before, BAG_SAFE_BYTES + 1)).toMatch(/Too large for one bag/)
   })
 })
 
@@ -79,3 +97,38 @@ describe('which entries go by reference', () => {
     expect(plan.refusal).toBe('too large')
   })
 })
+
+describe('sealed entries (spec §7.6 Sealed entries): what may move out, and how it fits', () => {
+  const D = '0'.repeat(32)
+  const signed = (kind: number, bytes: number, extra: string[][] = []): BagEntry => finalizeEvent({ kind, created_at: 1_800_000_000, content: 'k'.repeat(bytes), tags: [C, ...extra, ['-']] }, sk) as BagEntry
+  it('a message, a key item, a chest and a standing shard may; a door, a fresh shard, a stranger’s item, and one smaller than its reference may not', () => {
+    const none = new Set<string>()
+    expect(sealFor(message(500), me, D, 'wss://r', none)?.form).toBe('sealed')
+    expect(sealFor(signed(KEY_KIND, 500), me, D, 'wss://r', none)?.form).toBe('sealed')
+    expect(sealFor(signed(CHEST_KIND, 500), me, D, 'wss://r', none)?.form).toBe('sealed')
+    expect(sealFor(signed(CHEST_KIND, 500, [['door', '4']]), me, D, 'wss://r', none)).toBeNull()
+    const s = shard(500) as { id: string }
+    expect(sealFor(s as BagEntry, me, D, 'wss://r', none)).toBeNull()
+    expect(sealFor(s as BagEntry, me, D, 'wss://r', new Set([s.id]))?.form).toBe('sealed')
+    expect(sealFor(shard(500, generateSecretKey()), me, D, 'wss://r', new Set([(shard(500) as { id: string }).id]))).toBeNull()
+    // Any item carries an id and a pubkey, so its reference is smaller; a reference with a very long hint is not.
+    expect(sealFor(message(1), me, D, `wss://${'r'.repeat(400)}`, none)).toBeNull()
+  })
+  it('the reference names the sealed entry’s address, the hint, and the item’s own C; an entry too large for one event stays', () => {
+    const c = sealFor(message(500), me, D, 'wss://r', new Set())!
+    expect(c.ref).toEqual(['a', `33335:${me}:${D}`, 'wss://r', C[1]])
+    expect(sealFor(message(BAG_SAFE_BYTES), me, D, 'wss://r', new Set())).toBeNull()
+  })
+  it('a bag of messages past a cap fits once its largest move out, largest first; contents count what they hold', () => {
+    const es = [message(100), message(9_000), message(4_000), message(9_500)]
+    const candidates = es.flatMap((e, i) => sealFor(e, me, i.toString(16).padStart(32, '0'), 'wss://r', new Set()) ?? [])
+    const cap = bagBytes(es, lookupId, 9, DEFAULT_BAG_SETTINGS) - 9_000
+    const plan = planFit(es, candidates, refusedAt(cap))
+    expect(plan.refusal).toBeNull()
+    expect([...plan.convert.values()].map((c) => c.bytes)).toEqual([JSON.stringify(es[3]).length])
+    const written = withReferences(es, plan.convert)
+    expect(bagContents(written, heldBy(plan.convert.values())).message).toBe(4)
+    expect(bagContents(written).message).toBe(3)
+  })
+})
+

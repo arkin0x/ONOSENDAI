@@ -19,8 +19,17 @@
  *
  * Only shards (kind 3330), of the writer's own, signed: a by-reference payload
  * is defined for the kind 33331 object alone (DECK-0003 §3.4), and an inline
- * shard's content is exactly that payload. Other kinds stay inline until their
- * referenced form is specified (REFERENCEABLE_KINDS).
+ * shard's content is exactly that payload (REFERENCEABLE_KINDS).
+ *
+ * Every other entry moves out as a sealed entry (kind 33335, spec §7.6 Sealed
+ * entries, lib/sealed.ts): its payload is the item itself, byte for byte, so
+ * its id, lineage, place and author stay exactly what they were, and an entry
+ * already standing in the bag is a candidate too (sealFor), not only what the
+ * write is writing. Messages, key items, chests, hidden audio, and a shard
+ * already standing (which as a 33331 object would get a new id). Never a door:
+ * a door stays inline in the bag that holds it (spec §7.6). A fresh shard
+ * still goes as a 33331 object, the form the spec prefers for shards. All
+ * candidates go largest first, whichever their form.
  *
  * Pure. Sizes are measured without sealing anything: AES-GCM's ciphertext
  * length follows the plaintext's (sealedLength), so a bag's signed size is
@@ -28,30 +37,44 @@
  */
 
 import { bagSizeRefusal, signedBytes } from './bagSize'
-import { bagTemplateAround, entryKey, isReference, OBJECT_KIND, SHARD_KIND, HIDDEN_KIND, type BagEntry, type BagPlace, type BagSettings, type Reference } from './hidden'
+import { AUDIO_KIND } from './audioItem'
+import { bagTemplateAround, CHEST_KIND, entryKey, isReference, KEY_KIND, MESSAGE_KIND, OBJECT_KIND, SHARD_KIND, HIDDEN_KIND, type BagEntry, type BagPlace, type BagSettings, type Reference, type Rumor } from './hidden'
+import { SEALED_KIND, SEALED_PREVIEW, sealedReference, utf8Bytes } from './sealed'
 
 /** The inline kinds a write may move by reference to fit a bag: the shard, whose referenced form is the kind 33331 object. */
 export const REFERENCEABLE_KINDS: ReadonlySet<number> = new Set([SHARD_KIND])
 
+/**
+ * The inline kinds a write may move out into a sealed entry (spec §7.6, What
+ * may be sealed): every kind this client hides. A kind it does not know is
+ * carried forward as it stands (Carrying forward), never moved; a door (a
+ * chest with a `door` tag) never leaves its bag.
+ */
+export const SEALABLE_KINDS: ReadonlySet<number> = new Set([SHARD_KIND, MESSAGE_KIND, KEY_KIND, CHEST_KIND, AUDIO_KIND])
+
+/** The items planned sealed entries hold, by address, so a bag's contents are measured as they will be written (§7.7). */
+export type HeldItems = ReadonlyMap<string, Pick<Rumor, 'kind' | 'content' | 'tags'>>
+
 /** The base64 length of `nonce || ciphertext || tag` for this plaintext (spec §7.6 cipher): 12 + its UTF-8 bytes + 16, padded. */
 export function sealedLength(plaintext: string): number {
-  return 4 * Math.ceil((12 + new TextEncoder().encode(plaintext).length + 16) / 3)
+  return 4 * Math.ceil((12 + utf8Bytes(plaintext) + 16) / 3)
 }
 
-/** A bag's signed size from its entries, without encrypting them: lib/hidden.ts bagTemplate around a stand-in of the same length. */
-export function bagBytes(entries: readonly BagEntry[], lookupId: string, height: number, settings: BagSettings, place?: BagPlace, createdAt = Math.floor(Date.now() / 1000)): number {
-  const template = bagTemplateAround(entries, 'A'.repeat(sealedLength(JSON.stringify(entries))), lookupId, height, createdAt, HIDDEN_KIND, settings, place)
+/** A bag's signed size from its entries, without encrypting them: lib/hidden.ts bagTemplate around a stand-in of the same length. `held` names what planned sealed entries hold, for its contents. */
+export function bagBytes(entries: readonly BagEntry[], lookupId: string, height: number, settings: BagSettings, place?: BagPlace, createdAt = Math.floor(Date.now() / 1000), held?: HeldItems): number {
+  const template = bagTemplateAround(entries, 'A'.repeat(sealedLength(JSON.stringify(entries))), lookupId, height, createdAt, HIDDEN_KIND, settings, place, held)
   return signedBytes(template)
 }
 
 /**
  * Why a bag of these entries is not written, or null: what signBag refuses,
  * past the cap and larger than the bag it replaces (`before`), so a write that
- * shrinks a bag already past it still goes.
+ * shrinks a bag already past it still goes. Larger in UTF-8 bytes, as a relay
+ * counts: a string's length counts a multibyte character as one.
  */
 export function growthRefusal(entries: readonly BagEntry[], before: readonly BagEntry[], bytes: number): string | null {
   const tooBig = bagSizeRefusal(bytes)
-  return tooBig && JSON.stringify(entries).length > JSON.stringify(before).length ? tooBig : null
+  return tooBig && utf8Bytes(JSON.stringify(entries)) > utf8Bytes(JSON.stringify(before)) ? tooBig : null
 }
 
 /** One entry being written, and the reference it becomes if it goes by reference. */
@@ -63,6 +86,10 @@ export interface FitCandidate {
   ref: Reference
   /** The `d` of the object the reference names. */
   d: string
+  /** What it becomes: a kind 33331 object (referenceFor), or a sealed entry holding the item (sealFor). */
+  form: 'object' | 'sealed'
+  /** For a sealed entry, the item it will hold: the inline entry itself. */
+  item?: Rumor
 }
 
 /**
@@ -75,7 +102,40 @@ export function referenceFor(entry: BagEntry, owner: string, d: string, relayHin
   if (typeof entry.sig !== 'string' || entry.sig.length === 0 || typeof entry.content !== 'string') return null
   const at = entry.tags.find((t) => t[0] === 'C')?.[1]
   if (!at) return null
-  return { key: entry.id, bytes: JSON.stringify(entry).length, ref: ['a', `${OBJECT_KIND}:${owner}:${d}`, relayHint, at], d }
+  return { key: entry.id, bytes: utf8Bytes(JSON.stringify(entry)), ref: ['a', `${OBJECT_KIND}:${owner}:${d}`, relayHint, at], d, form: 'object' }
+}
+
+/**
+ * The sealed entry an inline entry would move out into, under `d`, or null
+ * when it is not one a write may move (spec §7.6 Sealed entries): an item of
+ * `owner`'s, of a kind this client hides (SEALABLE_KINDS), with its point,
+ * never a door, and smaller as a reference than inline (a sealed entry never
+ * makes its bag larger), and small enough to be an event of its own under the
+ * cap (lib/bagSize.ts). A shard only when it already stands in the bag
+ * (`standing`), or the caller forces it: a fresh one goes as a 33331 object
+ * (referenceFor), the form the spec prefers. The reference's coordinate is the
+ * item's own `C`, as the spec asks.
+ */
+export function sealFor(entry: BagEntry, owner: string, d: string, relayHint: string, standing: ReadonlySet<string>, force = false): FitCandidate | null {
+  if (isReference(entry) || !SEALABLE_KINDS.has(entry.kind) || entry.pubkey !== owner || typeof entry.id !== 'string') return null
+  if (entry.kind === CHEST_KIND && entry.tags.some((t) => t[0] === 'door')) return null
+  if (entry.kind === SHARD_KIND && !standing.has(entry.id) && !force) return null
+  const at = entry.tags.find((t) => t[0] === 'C')?.[1]
+  if (!at) return null
+  const ref = sealedReference(owner, d, relayHint, at)
+  const json = JSON.stringify(entry)
+  const bytes = utf8Bytes(json)
+  if (!force && bytes <= utf8Bytes(JSON.stringify(ref))) return null
+  // An entry too large for one event cannot be stored sealed either (spec §7.6 Size): it stays, and the bag says why.
+  if (bagSizeRefusal(signedBytes({ kind: SEALED_KIND, created_at: 0, content: SEALED_PREVIEW, tags: [['d', d], ['encrypted', 'aes-256-gcm', 'A'.repeat(sealedLength(json)), 'cyberspace:region'], ['alt', SEALED_PREVIEW]] }))) return null
+  return { key: entry.id, bytes, ref, d, form: 'sealed', item: entry as Rumor }
+}
+
+/** The items the sealed candidates among these hold, by the address each reference names. */
+export function heldBy(candidates: Iterable<FitCandidate>): Map<string, Rumor> {
+  const out = new Map<string, Rumor>()
+  for (const c of candidates) if (c.form === 'sealed' && c.item) out.set(c.ref[1], c.item)
+  return out
 }
 
 /** The entries with these candidates in their reference form. */

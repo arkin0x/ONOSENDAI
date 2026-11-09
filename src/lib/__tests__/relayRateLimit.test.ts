@@ -43,8 +43,10 @@ const net = vi.hoisted(() => {
     limitAll: null as string | null,
     /** The other relay refuses every connection. */
     otherDown: false,
+    /** The other relay refuses every EVENT, with these words. */
+    otherRefuses: null as string | null,
     reset(): void {
-      state.sockets = new Map(); state.sent = []; state.minGapMs = 125; state.limitAll = null; state.otherDown = false
+      state.sockets = new Map(); state.sent = []; state.minGapMs = 125; state.limitAll = null; state.otherDown = false; state.otherRefuses = null
     },
   }
   class LimitingSocket {
@@ -82,6 +84,7 @@ const net = vi.hoisted(() => {
         const now = Date.now()
         let reason = ''
         if (this.url === CANON && state.limitAll) reason = state.limitAll
+        else if (this.url === OTHER && state.otherRefuses) reason = state.otherRefuses
         else if (this.url === CANON && now - this.lastEventAt < state.minGapMs) reason = 'Rate limit exceeded for category: regular'
         const ok = reason === ''
         if (ok) this.lastEventAt = now
@@ -217,5 +220,29 @@ describe('a send that must not disturb the feeds (publishLight, #396)', () => {
     expect(await waiting).toBe(false)
     expect(net.sockets.get(net.CANON)).toBe(1)
     expect(net.sent).toHaveLength(1)
+  }, 30_000)
+})
+
+describe('a failure says whether every relay refused it outright (review of #645, B3)', () => {
+  it('every relay refused: refused, so no relay holds it', async () => {
+    net.limitAll = 'blocked: kind not accepted'
+    net.otherRefuses = 'blocked: kind not accepted'
+    const result = await publishMany([net.CANON, net.OTHER], anEvent())
+    expect(result.ok).toBe(false)
+    expect(!result.ok && result.refused).toBe(true)
+  }, 30_000)
+
+  it('one refused and the other never answered (a dead socket): not refused, since that one may hold it', async () => {
+    net.limitAll = 'blocked: kind not accepted'
+    net.otherDown = true
+    const result = await publishMany([net.CANON, net.OTHER], anEvent())
+    expect(result.ok).toBe(false)
+    expect(!result.ok && result.refused === true).toBe(false)
+  }, 30_000)
+
+  it('a lone relay\'s size refusal is a refusal', async () => {
+    net.limitAll = 'Global event size limit exceeded'
+    const result = await publishMany([net.CANON], anEvent())
+    expect(!result.ok && result.refused).toBe(true)
   }, 30_000)
 })

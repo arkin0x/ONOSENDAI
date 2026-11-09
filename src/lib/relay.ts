@@ -817,8 +817,15 @@ export function relaySet(): string[] {
   return currentRelays()
 }
 
-/** `accepted`, when known: the relays that took the event (normalized URLs). */
-export type PublishResult = { ok: true; accepted?: string[] } | { ok: false; reason: string }
+/**
+ * `accepted`, when known: the relays that took the event (normalized URLs).
+ * `refused`, on a failure, present (and true) only when every relay asked
+ * answered with a refusal of its own (an OK false, a size refusal, "too
+ * fast"), so none of them holds the event. A timeout, a dead socket, a hung relay or a signer holding up AUTH is
+ * no such answer: that relay may have stored it (lib/sealed.ts
+ * sendBagWithSealed takes back nothing on such a failure).
+ */
+export type PublishResult = { ok: true; accepted?: string[] } | { ok: false; reason: string; refused?: boolean }
 
 /**
  * A relay's own refusal, asking again would get the same answer: NIP-01's
@@ -973,14 +980,16 @@ export async function publishMany(relays: string[], event: NostrEvent): Promise<
   const own = (url: string): string => first.byRelay?.get(url) ?? (relays.length === 1 ? first.reason : '')
   const kept = (url: string): boolean => refused(own(url)) || RATE_LIMITED.test(own(url))
   const again = relays.filter((url) => !signerHolds(url) && !kept(url))
-  if (again.length === 0) return plain(first)
+  if (again.length === 0) return { ok: false, reason: first.reason, ...(relays.every(kept) ? { refused: true } : {}) }
   dropRelays(again)
   const second = await publishOnce(again, event)
   if (second.ok) return plain(second)
+  const ownAgain = (url: string): string => second.byRelay?.get(url) ?? (again.length === 1 ? second.reason : '')
+  const definite = (url: string): boolean => kept(url) || (again.includes(url) && (refused(ownAgain(url)) || RATE_LIMITED.test(ownAgain(url))))
   // Said back the reason that tells the caller most: "too fast" (wait and
   // try again) over a refusal, over whatever the dialled-again sockets said.
   const keptReasons = relays.filter(kept).map(own)
-  return { ok: false, reason: keptReasons.find((r) => RATE_LIMITED.test(r)) ?? keptReasons[0] ?? second.reason }
+  return { ok: false, reason: keptReasons.find((r) => RATE_LIMITED.test(r)) ?? keptReasons[0] ?? second.reason, ...(relays.every(definite) ? { refused: true } : {}) }
 }
 
 /**

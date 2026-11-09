@@ -3,7 +3,10 @@
  * takes, whoever writes it (review of #633). Every bag write passes signBag,
  * which refuses one past the cap and larger than the bag it replaces, before
  * the signer is asked; a write that shrinks a bag already past the cap (a
- * DELETE, the H8 recovery) still goes. The cap is lowered here, through a
+ * DELETE, the H8 recovery) still goes. Since sealed entries (spec §7.6, #89)
+ * a full bag first moves entries out into kind 33335 events, largest first,
+ * and is refused only when even that cannot make it fit (here: a cap lowered
+ * below what any one of its entries needs as an event of its own). The cap is lowered here, through a
  * stand-in for lib/bagSize that keeps its words, to make an old oversized bag
  * cheaply; the reviewer's own case runs at the real cap. The relay is a mock
  * that keeps what is published. No network.
@@ -43,7 +46,9 @@ vi.mock('../../lib/bagSize', async (load) => {
 })
 
 import { forgeKey } from '../../lib/chests'
-import { HIDDEN_KIND, bagTemplate, type KeyItem } from '../../lib/hidden'
+import { HIDDEN_KIND, bagEntries, bagTemplate, unbag, type KeyItem } from '../../lib/hidden'
+import { resolveReference } from '../../lib/references'
+import type { NostrEvent } from '../../lib/events'
 import { hexToBytes } from '../../lib/events'
 import { BAG_SAFE_BYTES } from '../../lib/bagSize'
 import type { Position } from '../../lib/space'
@@ -106,7 +111,7 @@ beforeEach(() => {
 })
 
 describe('every bag write keeps under the cap (review of #633)', () => {
-  it('the reviewer’s case: an EDIT of a chest in a full room is refused, and no room bag passes the cap', async () => {
+  it('the reviewer’s case, since sealed entries: an EDIT of a chest in a full room goes, entries move out, and no room bag passes the cap', async () => {
     await sealDoor('Room', ROOM)
     S().startPlaceChest()
     S().setDeployHeight(2)
@@ -116,16 +121,20 @@ describe('every bag write keeps under the cap (review of #633)', () => {
     S().cancelDeploy()
     const chest = S().mine.find((d) => d.type === 'chest' && d.chest?.door === undefined)!
     expect(chest.room).toBeTruthy()
-    let refused: string | null = null
-    for (let n = 0; n < 30 && !refused; n++) refused = await hide(big(n))
-    expect(refused).toMatch(/Too large for one bag/)
-    const sent = relay.events.length
+    // Thirty messages of about 10 KB: past the cap inline, every one goes in, moved out into sealed entries as it fills.
+    for (let n = 0; n < 30; n++) expect(await hide(big(n))).toBeNull()
     const contents = Array.from({ length: 6 }, (_, i) => ({ kind: 'message' as const, text: big(100 + i) }))
     const why = await S().resealChest(chest.eventId, { name: 'Box', lock: lockOf(), requires: 'x', contents })
-    expect(why).toMatch(/Too large for one bag/)
-    expect(relay.events.length).toBe(sent)
+    expect(why).toBeNull()
     expect(Math.max(...bagsAt(chest.lookupId).map((e) => JSON.stringify(e).length))).toBeLessThanOrEqual(BAG_SAFE_BYTES)
-  }, 120000)
+    // Everything reads back from the room bag, the messages and the edited chest alike.
+    const room = newestBag(chest.lookupId) as NostrEvent
+    const key = hexToBytes(S().mine.find((d) => d.lookupId === chest.lookupId)!.keyHex)
+    expect((await bagEntries(room, key)).some((e) => Array.isArray(e) && e[1].startsWith('33335:'))).toBe(true)
+    const found = await unbag(room, key, resolveReference, undefined, 2)
+    expect(found.filter((h) => h.type === 'message')).toHaveLength(30)
+    expect(found.filter((h) => h.type === 'chest' && !h.chest?.door)).toHaveLength(1)
+  }, 180000)
 
   it('a bag already past the cap: a new hide is refused, a DELETE that shrinks it still goes', async () => {
     for (let i = 0; i < 6; i++) expect(await hide(big(i))).toBeNull()
@@ -133,11 +142,17 @@ describe('every bag write keeps under the cap (review of #633)', () => {
     const size = JSON.stringify(newestBag(lookupId)).length
     // The cap drops under what the bag already is: an old bag, as H8 was.
     cap.bytes = size - 5000
-    expect(await hide(big(50))).toMatch(/Too large for one bag/)
+    // A sealed entry makes room: the largest goes out, and the bag fits the cap.
+    expect(await hide(big(50))).toBeNull()
+    expect(JSON.stringify(newestBag(lookupId)).length).toBeLessThanOrEqual(cap.bytes)
+    // Under a cap below what any one entry needs as an event of its own, nothing can make room: refused, in words.
+    const fitted = JSON.stringify(newestBag(lookupId)).length
+    cap.bytes = 1000
+    expect(await hide(big(51))).toMatch(/Too large for one bag/)
     const victim = S().mine.find((d) => d.text === big(0))!
     await S().deleteInstance(victim.eventId)
     const after = newestBag(lookupId)
-    expect(JSON.stringify(after).length).toBeLessThan(size)
+    expect(JSON.stringify(after).length).toBeLessThan(fitted)
     expect(S().mine.some((d) => d.eventId === victim.eventId)).toBe(false)
   }, 60000)
 
@@ -153,7 +168,8 @@ describe('every bag write keeps under the cap (review of #633)', () => {
     relay.events.push(await C().signEvent(template) as never)
     expect(await hide('one more, to read the bag')).toBeNull()
     expect(S().mine.find((d) => d.eventId === gone.eventId)?.goneFrom).toBeDefined()
-    cap.bytes = JSON.stringify(newestBag(lookupId)).length + 2000
+    // A cap no entry fits under as an event of its own: nothing can move out, so it is refused.
+    cap.bytes = Math.min(JSON.stringify(newestBag(lookupId)).length + 2000, 1000)
     const sent = relay.events.length
     expect(await S().hideAgain(gone.eventId)).toMatch(/Too large for one bag/)
     expect(relay.events.length).toBe(sent)

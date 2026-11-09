@@ -250,7 +250,7 @@ describe('a shard goes by reference when its bag would not hold it inline', () =
     expect(relay.events.some((e) => e.kind === OBJECT_KIND)).toBe(false)
   }, 60000)
 
-  it('a bag full of entries that cannot go by reference still refuses, in the same words, with nothing signed or sent', async () => {
+  it('a bag full of messages makes room since sealed entries (spec §7.6, #89): the coil goes as an object, a message as a sealed entry, both before the bag', async () => {
     const model = coil()
     // Start the bag with a message, so the fill is all messages.
     S().startDeployMessage('first')
@@ -258,20 +258,27 @@ describe('a shard goes by reference when its bag would not hold it inline', () =
     await S().deploy()
     S().cancelDeploy()
     const first = S().mine.find((d) => d.text === 'first')!
-    await fill(first.lookupId, hexToBytes(first.keyHex), positionOf(first), H, BAG_SAFE_BYTES - 40)
-    const sent = relay.events.length
-    const real = C().signEvent
-    let signed = 0
-    useCyberspace.setState({ signEvent: ((...args: Parameters<typeof real>) => { signed++; return real(...args) }) as typeof real })
-    try {
-      const { row, error } = await place(model)
-      expect(error).toMatch(/^Too large for one bag: [\d,]+ of 240,000 bytes\. Nothing was sent\.$/)
-      expect(row).toBeUndefined()
-      expect(relay.events.length).toBe(sent)
-      expect(signed).toBe(0)
-    } finally {
-      useCyberspace.setState({ signEvent: real })
-    }
+    const key = hexToBytes(first.keyHex)
+    await fill(first.lookupId, key, positionOf(first), H, BAG_SAFE_BYTES - 40)
+    const sent = relay.sent.length
+    const { row, error } = await place(model)
+    expect(error).toBeNull()
+    // The fresh shard still goes as a 33331 object, the form the spec prefers for shards.
+    expect(row?.inner.kind).toBe(OBJECT_KIND)
+    const bag = newestBag(first.lookupId)
+    expect(JSON.stringify(bag).length).toBeLessThanOrEqual(BAG_SAFE_BYTES)
+    const out = relay.events.filter((e) => relay.sent.slice(sent).includes(e.id))
+    const sealed = out.filter((e) => e.kind === 33335)
+    expect(sealed.length).toBeGreaterThan(0)
+    for (const e of sealed) expect(relay.sent.indexOf(e.id)).toBeLessThan(relay.sent.indexOf(bag.id))
+    // Mixed references in one bag: the object and the sealed entries, and every message still reads, by its own id.
+    const entries = await bagEntries(bag as NostrEvent, key)
+    expect(entries.some((e) => Array.isArray(e) && e[1].startsWith(`${OBJECT_KIND}:`))).toBe(true)
+    expect(entries.some((e) => Array.isArray(e) && e[1].startsWith('33335:'))).toBe(true)
+    const found = await unbag(bag as NostrEvent, key, resolveReference, undefined, H)
+    const messages = S().mine.filter((d) => d.type === 'message' && d.lookupId === first.lookupId)
+    expect(found.filter((h) => h.type === 'message').map((h) => h.eventId).sort()).toEqual(messages.map((d) => d.eventId).sort())
+    expect(found.find((h) => h.eventId === row!.inner.id)?.shard?.vertices).toHaveLength(model.vertices.length)
   }, 60000)
 
   it('SEAL of an inline shard into a full room moves it by reference; the room fits and reads it back', async () => {
@@ -356,10 +363,11 @@ describe('the deploy bar’s meter shows the form it goes out in', () => {
     const { row } = await place(model, H)
     expect(row?.ref).toBeDefined()
     expect(Math.abs(full.bytes - JSON.stringify(newestBag(first.lookupId)).length)).toBeLessThanOrEqual(64)
-    // Filled past what even a reference fits.
+    // Filled to the cap with messages: since sealed entries, they move out and it still fits.
     await fill(first.lookupId, hexToBytes(first.keyHex), point, H, BAG_SAFE_BYTES - 40)
     const over = meterAt(point, first.plane, first.bag!)
-    expect(over.refusal).toMatch(/Too large for one bag/)
+    expect(over.refusal).toBeNull()
+    expect(over.bytes).toBeLessThanOrEqual(BAG_SAFE_BYTES)
   }, 60000)
 })
 

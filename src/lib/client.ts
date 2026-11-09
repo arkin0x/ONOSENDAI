@@ -23,6 +23,13 @@
  *   seal's tags to be empty, and the wrap exists to reveal nothing about who
  *   sent it or with what: a client tag on it would name the app outside the
  *   encryption. The rumor inside is never signed, so it is never attributed.
+ * - A sealed entry (kind 33335, spec §7.6) is not attributed: the spec asks a
+ *   writer not to add a `client` tag, so that one writer's sealed entries do
+ *   not differ from another's in anything but their ciphertext, and forbids
+ *   any other tag. Its emptied form, written to retract one, is the same kind.
+ *   Nor is the NIP-09 deletion that retracts one (kind 5 with `k` 33335): it
+ *   names the sealed entry's address, and a `client` tag on it would tie that
+ *   address to the app all the same (review of #645).
  */
 
 import type { EventTemplate } from './events'
@@ -32,12 +39,17 @@ export const CLIENT_NAME = 'ONOSENDAI'
 /** NIP-89 client attribution, by name only until the app has a handler event. */
 export const CLIENT_TAG: [string, string] = ['client', CLIENT_NAME]
 
-/** Auth events (NIP-42 relay auth, Blossom upload auth, NIP-98 HTTP auth), and the NIP-17 seal and gift wrap. */
-const UNATTRIBUTED_KINDS = new Set([22242, 24242, 27235, 13, 1059])
+/** Auth events (NIP-42 relay auth, Blossom upload auth, NIP-98 HTTP auth), the NIP-17 seal and gift wrap, and a sealed entry (33335). */
+const UNATTRIBUTED_KINDS = new Set([22242, 24242, 27235, 13, 1059, 33335])
 
-/** The template with ONOSENDAI's client tag, unless it is an auth event, a seal or a wrap, or already names a client. */
+/** Whether a template is the deletion of a sealed entry (kind 5 whose `k` is 33335, lib/sealed.ts sealedDeletionTemplate). */
+function deletesSealed(template: EventTemplate): boolean {
+  return template.kind === 5 && template.tags.some((t) => t[0] === 'k' && t[1] === '33335')
+}
+
+/** The template with ONOSENDAI's client tag, unless it is an auth event, a seal or a wrap, a sealed entry or its deletion, or already names a client. */
 export function attributed<T extends EventTemplate>(template: T): T {
-  if (UNATTRIBUTED_KINDS.has(template.kind)) return template
+  if (UNATTRIBUTED_KINDS.has(template.kind) || deletesSealed(template)) return template
   if (template.tags.some((t) => t[0] === 'client')) return template
   return { ...template, tags: [...template.tags, [...CLIENT_TAG]] }
 }

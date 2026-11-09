@@ -49,12 +49,30 @@ import { everyWhileVisible } from '../lib/whileVisible'
 /** Rows a panel shows before VIEW MORE takes over. */
 const SHOWN = 4
 
+/**
+ * What else a reading says beyond what was read (spec §7.6 Reading): that the
+ * bag names more than was fetched, and that entries were refused. Said
+ * whether or not anything in the bag reads: a bag of 900 references that
+ * shows 1,024 items still holds more.
+ */
+function beyondRead(r: { skipped?: number; refused?: number } | undefined): string {
+  if (!r) return ''
+  const more = r.skipped ? `. ${r.skipped} more not fetched` : ''
+  const refused = r.refused ? `. ${r.refused} refused` : ''
+  return `${more}${refused}`
+}
+
 /** Why an opened bag shows no items: the reading's word, for a tooltip. */
-function unreadableTitle(bagId: string): string {
+export function unreadableTitle(bagId: string): string {
   const r = bagReading(bagId)
   if (!r) return 'Opened'
   if (r.opaque) return 'Opened: this bag holds something other than a list of items'
-  return `Opened: ${r.entries === 0 ? 'nothing inside' : `none of its ${r.entries} entries can be read by this client`}`
+  return `Opened: ${r.entries === 0 ? 'nothing inside' : `none of its ${r.entries} entries can be read by this client`}${beyondRead(r)}`
+}
+
+/** An opened bag with items: how many, and what the reading says beyond them (beyondRead). */
+export function openedTitle(bagId: string, count: number): string {
+  return `Opened: ${count} items${beyondRead(bagReading(bagId))}`
 }
 
 type Mode = 'hidden' | 'discovered'
@@ -141,7 +159,7 @@ function BagList({ mode }: { mode: Mode }): JSX.Element {
           <ProfileBadge pubkey={it.author} />
           {it.author === me && <span className="avatars__you">YOURS</span>}
           {kinds.has(it.bagId)
-            ? <span className="tag tag--live loot__kinds" title={`Opened: ${kinds.get(it.bagId)?.count ?? 0} items`}>{kinds.get(it.bagId)?.kinds.map((k) => <ItemIcon key={`${k.type}:${k.coin}`} type={k.type} coin={k.coin} size={10} />)}</span>
+            ? <span className="tag tag--live loot__kinds" title={openedTitle(it.bagId, kinds.get(it.bagId)?.count ?? 0)}>{kinds.get(it.bagId)?.kinds.map((k) => <ItemIcon key={`${k.type}:${k.coin}`} type={k.type} coin={k.coin} size={10} />)}</span>
             : opened.has(it.bagId) && <span className="tag loot__kinds" title={unreadableTitle(it.bagId)}>∅</span>}
           <span className="avatars__when" title={formatStamp(it.createdAt)}>{formatAgo(it.createdAt, now)}</span>
         </div>

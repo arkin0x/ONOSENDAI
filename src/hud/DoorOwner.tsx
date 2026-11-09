@@ -13,12 +13,14 @@
  * several doors, which goes alone (§3.7.8).
  */
 
-import { useLayoutEffect, useRef, useState } from 'react'
+import { useCallback, useLayoutEffect, useRef, useState } from 'react'
 import { doorSecret } from '../store/doorSecrets'
 import { useCyberspace } from '../store/useCyberspace'
 import { behindDoor, behindDoorDeep, doorsBeside, hereInRoom, positionOf, useShards, type MyDeployment } from '../store/useShards'
 import { takeDoorScroll, viewFromDoor } from '../lib/doorReturn'
 import { fitsAt, reachGibsons } from '../lib/deployFit'
+import { useScrollMemory } from '../hooks/useScrollMemory'
+import { rememberScroll, scrollKey } from '../lib/scrollMemory'
 import { hiddenLabel } from '../lib/hidden'
 import { ConfirmModal } from './ConfirmModal'
 import { ItemIcon } from './ItemIcon'
@@ -51,14 +53,22 @@ export function DoorOwnerBlock({ door }: { door: MyDeployment }): JSX.Element | 
   // In the store, by door, so a card closed and opened again mid-SEAL still waits (review of #633).
   const busy = useShards((s) => s.sealingRoom !== null)
   const [status, setStatus] = useState<string | null>(null)
-  const list = useRef<HTMLUListElement>(null)
-  // Back from a row's VIEW: the list, and the card around it, scrolled as they were.
+  const list = useRef<HTMLUListElement | null>(null)
+  // The list keeps its place, per door and identity (hooks/useScrollMemory), as the
+  // workshop MENU does; every row is drawn at once, so it is ready as it mounts.
+  const listName = `door-here:${door.eventId}`
+  const remember = useScrollMemory(listName)
+  const listRef = useCallback((el: HTMLUListElement | null) => {
+    list.current = el
+    // Only a real element scrolls (a test's renderer draws records).
+    remember(el && typeof el.addEventListener === 'function' ? el : null)
+  }, [remember])
+  // Back from a row's VIEW: the card around the list, scrolled as it was.
   // Again a frame on, once the card above it has drawn (its 3D look).
   useLayoutEffect(() => {
     const back = takeDoorScroll(door.eventId)
     if (!back) return
     const put = (): void => {
-      if (list.current) list.current.scrollTop = back.listTop
       const card = cardOf(list.current)
       if (card) card.scrollTop = back.cardTop
     }
@@ -79,6 +89,8 @@ export function DoorOwnerBlock({ door }: { door: MyDeployment }): JSX.Element | 
   const cut = (d: MyDeployment): boolean => !!d.shard && !fitsAt(positionOf(d), reachGibsons(d.shard, d.shard.unit), h)
   const view = (d: MyDeployment): void => {
     const card = cardOf(list.current)
+    // The list's place as it stands at the tap, whatever its last scroll event said.
+    if (list.current) rememberScroll(scrollKey(listName, me), list.current.scrollTop)
     viewFromDoor({ doorId: door.eventId, listTop: list.current?.scrollTop ?? 0, cardTop: card?.scrollTop ?? 0 }, positionOf(d), d.plane, hiddenLabel(d, 48).toUpperCase(), d.type === 'shard' ? d.shard?.unit ?? 0 : 0)
   }
   return (
@@ -87,7 +99,7 @@ export function DoorOwnerBlock({ door }: { door: MyDeployment }): JSX.Element | 
       {here.length > 0 && (
         <>
           <span className="legend__label doorowner__count">HERE · {here.length}</span>
-          <ul ref={list} className="chest__contents doorowner__here" aria-label="Here, not behind the door">
+          <ul ref={listRef} className="chest__contents doorowner__here" aria-label="Here, not behind the door">
             {here.map((d) => (
               <li key={d.eventId} className="chest__row">
                 <ItemIcon className={`chest__glyph chest__glyph--${d.type}`} type={d.type} />

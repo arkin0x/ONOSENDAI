@@ -7,8 +7,9 @@
  * The fly is the item VIEW every card already uses (useCyberspace focusItem),
  * and RETURN is that view's own: the focus ends. Before it looks away, the
  * tap keeps which door's card it left and how far its list and the card were
- * scrolled; when the focus ends, the card opens on the same door and the
- * list puts both scrolls back as it mounts (DoorOwner takeDoorScroll). As
+ * scrolled; when the focus ends, the card opens on the same door. The list
+ * comes back where it was by its own memory (hooks/useScrollMemory, per door),
+ * and the card around it by takeDoorScroll as it mounts. As
  * lib/nearbyReturn.ts does for the Nearby list, started from the app.
  */
 

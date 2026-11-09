@@ -45,6 +45,7 @@ import { forgeKey } from '../../lib/chests'
 import { doorReturnWaiting, resetDoorReturn, restoreDoorReturn, viewFromDoor, watchDoorReturn } from '../../lib/doorReturn'
 import type { Position } from '../../lib/space'
 import { mount, type Host } from '../../test/elementRoot'
+import { recallScroll, scrollKey } from '../../lib/scrollMemory'
 import { resetDoorSecrets } from '../../store/doorSecrets'
 import { useBuilder } from '../../store/useBuilder'
 import { useCyberspace } from '../../store/useCyberspace'
@@ -149,7 +150,8 @@ describe('a row flies to it; RETURN comes back to the card, scrolled as it was',
     await vi.waitFor(() => expect(hereList(card.all())).toBeTruthy())
     const back = hereList(card.all())!
     expect(back).not.toBe(list)
-    expect((back as unknown as { scrollTop: number }).scrollTop).toBe(137)
+    // The list's place is kept for this door and identity (hooks/useScrollMemory puts it back on a page; lib/scrollMemory's own tests drive that).
+    expect(recallScroll(scrollKey(`door-here:${door.eventId}`, me()))).toBe(137)
     expect(card.says(`HERE · ${MANY}`)).toBe(true)
     expect(doorReturnWaiting()).toBeNull()
     await card.unmount()

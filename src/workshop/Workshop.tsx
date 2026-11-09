@@ -34,12 +34,12 @@ import { clampOpacity, dragHistory, opacityAt, opacityFraction, opacityPercent, 
 import { CONSTRAINS, CONSTRAIN_TIPS, authoredConstrainOf, withAuthoredConstrain } from '../lib/walkConstrain'
 import { stepDivision } from './divisions'
 import { IMPORT_FORMATS_LABEL } from 'sno-core/importFile'
-import { IMPORT_PICKER_ACCEPT, isZipFile } from '../lib/shardZip'
+import { IMPORT_PICKER_ACCEPT } from '../lib/shardZip'
 import { importFitFor } from 'sno-core/meshToShard'
 import { BUILT_IN } from 'sno-core/snoPalette'
 import { importFiles } from '../lib/meshImport'
 import { ZipImport } from './ZipImport'
-import { useShardImport } from '../store/useShardImport'
+import { routeImport, useShardImport } from '../store/useShardImport'
 import { formatCellSize } from 'sno-core/scale'
 import { FACED, FACING_LABEL, FLOOR, MAX_SIZE, MIN_SIZE, STAMPS, STAMP_HELP, type StampKind } from 'sno-core/stamps'
 import { useAvatars } from '../store/useAvatars'
@@ -861,24 +861,24 @@ export function Workshop(): JSX.Element | null {
    * (lib/meshImport), fitted to half this shard's grid (sno-core importFitFor)
    * with its lowest point on the working plane, and put down selected, one UNDO from gone. In an
    * empty shard it becomes the shard. The line it leaves says what happened,
-   * simplified or not.
+   * simplified or not. A zip, or a .json SNO object (with whatever was picked
+   * beside it), goes to bulk import instead (store/useShardImport routeImport).
    */
   const importFromFiles = async (list: FileList | File[] | null): Promise<void> => {
     const files = list ? Array.from(list) : []
-    // A zip is bulk import: every shard file in it a new shard of yours (workshop/ZipImport).
     // While the import's list is open, a drop on it (React carries a portal's events here) changes nothing.
-    if (useShardImport.getState().open) return
-    const zips = files.filter(isZipFile)
-    if (zips.length) {
-      if (zips.length > 1 || files.length > 1) { say('Import one zip at a time, on its own.'); return }
-      void useShardImport.getState().openZip(zips[0])
-      return
-    }
-    const s = w().current()
-    if (!files.length || importing || !s) return
+    if (!files.length || importing || useShardImport.getState().open) return
+    // READING from the moment the files are sniffed, so a second pick or drop meanwhile is not a second import.
     setImporting(true)
-    say(`Reading ${files.find((f) => !/\.(mtl|bin)$/i.test(f.name))?.name ?? files[0].name}…`)
     try {
+      const route = await routeImport(files)
+      // A zip, or an SNO object, is bulk import: every shard file a new shard of yours (workshop/ZipImport).
+      if (route.to === 'none') { say(route.error); return }
+      if (route.to === 'zip') { void useShardImport.getState().openZip(route.file); return }
+      if (route.to === 'shards') { void useShardImport.getState().openFiles(route.files); return }
+      const s = w().current()
+      if (!s) return
+      say(`Reading ${files.find((f) => !/\.(mtl|bin)$/i.test(f.name))?.name ?? files[0].name}…`)
       const res = await importFiles(files, { fit: importFitFor(s.extent), unit: s.unit, palette: s.palette ?? BUILT_IN, color: w().color })
       if (!res.ok) { say(res.error); return }
       w().insertImport(res.shard, `${res.report.summary}.`)
@@ -954,7 +954,7 @@ export function Workshop(): JSX.Element | null {
           <div className="workshop__list-row">
             <button className="workshop__new" onClick={() => w().create()}>+ NEW SHARD</button>
             <button className="workshop__btn" onClick={() => void paste()} title="An object copied from here or anywhere">PASTE</button>
-            <button className="workshop__btn" disabled={importing} onClick={() => fileInput.current?.click()} title={`A 3D file, fitted to the grid and put down here: ${IMPORT_FORMATS_LABEL}. Or a .zip of shards, each a new shard. Or drop one on the workshop.`}>{importing ? 'READING' : 'IMPORT'}</button>
+            <button className="workshop__btn" disabled={importing} onClick={() => fileInput.current?.click()} title={`A 3D file, fitted to the grid and put down here: ${IMPORT_FORMATS_LABEL}. Or a .json SNO object, or a .zip of shards, each a new shard. Or drop one on the workshop.`}>{importing ? 'READING' : 'IMPORT'}</button>
           </div>
           {pasteOpen && (
             <div className="workshop__paste">

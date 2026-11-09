@@ -21,12 +21,14 @@ if (typeof localStorage === 'undefined') {
   }
 }
 
-const relay = vi.hoisted(() => ({ events: [] as Array<{ id: string; kind: number; pubkey: string; created_at: number; tags: string[][]; content: string }>, sent: [] as string[] }))
+const relay = vi.hoisted(() => ({ events: [] as Array<{ id: string; kind: number; pubkey: string; created_at: number; tags: string[][]; content: string }>, sent: [] as string[], refuseKind: -1 }))
 vi.mock('../../lib/relay', () => {
   const answer = async (f: { kinds?: number[]; authors?: string[]; ids?: string[]; '#d'?: string[] }): Promise<unknown[]> => relay.events.filter((e) => (!f.kinds || f.kinds.includes(e.kind)) && (!f.authors || f.authors.includes(e.pubkey)) && (!f.ids || f.ids.includes(e.id)) && (!f['#d'] || f['#d'].includes(e.tags.find((t) => t[0] === 'd')?.[1] ?? '')))
   return {
     // An addressable event replaces its older version, as a relay does.
     publishMany: vi.fn(async (_r: string[], ev: (typeof relay.events)[number]) => {
+      // A relay that refuses one kind, for a write that must fail after its object went out.
+      if (relay.refuseKind === ev.kind) return { ok: false }
       const d = ev.tags.find((t) => t[0] === 'd')?.[1]
       if (ev.kind >= 30000 && ev.kind < 40000) relay.events = relay.events.filter((e) => !(e.kind === ev.kind && e.pubkey === ev.pubkey && e.tags.find((t) => t[0] === 'd')?.[1] === d))
       relay.events.push(ev)
@@ -60,7 +62,9 @@ import { useCyberspace } from '../useCyberspace'
 import { useInventory } from '../useInventory'
 import { useWorkshop } from '../useWorkshop'
 import { resetOpenedChests } from '../useOpenedChests'
-import { deployBagMeter, hereInRoom, ownDoors, positionOf, useShards, type MyDeployment } from '../useShards'
+import { bagRowsFor, deployBagMeter, hereInRoom, ownDoors, plannedShard, positionOf, regionOf, useShards, type MyDeployment, type WorldItem } from '../useShards'
+import { itemParent, sealedComment, threadComments, type CommentSubject } from '../../lib/comments'
+import { hiddenRowFor } from '../../lib/notifications'
 
 const S = () => useShards.getState()
 const C = () => useCyberspace.getState()
@@ -158,6 +162,7 @@ function roomOf(door: MyDeployment): { key: Uint8Array; lookupId: string } {
 beforeEach(() => {
   relay.events = []
   relay.sent = []
+  relay.refuseKind = -1
   lock = forgeKey('Silver Key')
   localStorage.removeItem('onosendai:door-secrets')
   localStorage.removeItem('onosendai:chests-opened')
@@ -214,7 +219,11 @@ describe('a shard goes by reference when its bag would not hold it inline', () =
     const lookupId = seed.row!.lookupId
     const key = hexToBytes(seed.row!.keyHex)
     await fill(lookupId, key, positionOf(seed.row!), H, 236_000)
-    const { row, error } = await place(model)
+    // A second shard with the same geometry: the same one at the same point in
+    // the same second would be the very same event, and the bag holds it once.
+    const twin: ShardModel = { ...model, id: 'coil-twin', name: 'cistern-coil twin' }
+    useWorkshop.setState({ shards: [model, twin] })
+    const { row, error } = await place(twin)
     expect(error).toBeNull()
     expect(row?.ref).toBeDefined()
     // The first coil, inline before, keeps its form: only what this write wrote changed.
@@ -227,7 +236,10 @@ describe('a shard goes by reference when its bag would not hold it inline', () =
     expect(byRef.ref).toEqual(row!.ref)
     expect(byRef.shard!.vertices).toEqual(inline.shard!.vertices)
     expect(byRef.shard!.vertices).toHaveLength(model.vertices.length)
-    expect(payloadOf(byRef.shard!)).toBe(payloadOf(inline.shard!))
+    expect(byRef.shard!.name).toBe(twin.name)
+    // The object's payload is the inline item's content, byte for byte.
+    const enc = row!.inner.tags.find((t) => t[0] === 'encrypted')!
+    expect(await decryptForRegion(key, enc[2])).toBe(payloadOf(twin))
   }, 60000)
 
   it('the same shard into an empty bag stays inline', async () => {
@@ -325,7 +337,9 @@ describe('the deploy bar’s meter shows the form it goes out in', () => {
     const H = 5
     const model = coil()
     const at = CURSOR
-    const empty = deployBagMeter(S().mine, model, { at, plane: buildPlane(C()), height: H, settings: S().deployBag, owner: me(), door: null })
+    const planned = plannedShard(model, me())
+    const meterAt = (point: Position, plane: number, settings: MyDeployment['bag'] & object) => deployBagMeter(bagRowsFor(S().mine, { region: regionOf(point, plane as 0 | 1, H), door: null }), planned, { height: H, settings, owner: me(), room: false, place: { at: point, plane: plane as 0 | 1 } })
+    const empty = meterAt(at, buildPlane(C()), S().deployBag)
     expect(empty).toMatchObject({ byReference: false, fitted: false, refusal: null })
     S().startDeployMessage('first')
     S().setDeployHeight(H)
@@ -335,7 +349,7 @@ describe('the deploy bar’s meter shows the form it goes out in', () => {
     const first = S().mine.find((d) => d.text === 'first')!
     const point = positionOf(first)
     await fill(first.lookupId, hexToBytes(first.keyHex), point, H, 236_000)
-    const full = deployBagMeter(S().mine, model, { at: point, plane: first.plane, height: H, settings: first.bag!, owner: me(), door: null })
+    const full = meterAt(point, first.plane, first.bag!)
     expect(full).toMatchObject({ byReference: true, fitted: true, refusal: null })
     expect(full.bytes).toBeLessThanOrEqual(BAG_SAFE_BYTES)
     // What the meter says is what goes out.
@@ -344,7 +358,176 @@ describe('the deploy bar’s meter shows the form it goes out in', () => {
     expect(Math.abs(full.bytes - JSON.stringify(newestBag(first.lookupId)).length)).toBeLessThanOrEqual(64)
     // Filled past what even a reference fits.
     await fill(first.lookupId, hexToBytes(first.keyHex), point, H, BAG_SAFE_BYTES - 40)
-    const over = deployBagMeter(S().mine, { ...model, id: 'again' }, { at: point, plane: first.plane, height: H, settings: first.bag!, owner: me(), door: null })
+    const over = meterAt(point, first.plane, first.bag!)
     expect(over.refusal).toMatch(/Too large for one bag/)
   }, 60000)
+})
+
+/** What the comment panel is given for a world item (hud/SecretModal): its lineage when it has one, else its key. */
+function subjectOf(w: WorldItem): CommentSubject {
+  return { author: w.author!, lookupId: w.lookupId!, itemId: w.lineage ?? w.key, type: w.type, target: w.target, at: w.at, height: w.height, bagKeyHex: w.bagKeyHex }
+}
+
+describe('an inline shard that converts keeps what names it (owner ruling 2026-10-16: comments survive EDIT)', () => {
+  it('EDIT in its own bag, now full: by reference, the object first; old comments and notifications still find it', async () => {
+    const model = coil()
+    const { row: first } = await place(model)
+    expect(first?.ref).toBeUndefined()
+    const key = hexToBytes(first!.keyHex)
+    // A comment on it as it stands inline, sealed to its bag.
+    const before = S().worldItems().find((w) => w.key === first!.eventId)!
+    const old = subjectOf(before)
+    const comment = await C().signEvent(await sealedComment(old, itemParent(old), 'nice coil', Math.floor(Date.now() / 1000), key)) as NostrEvent
+    // The bag fills to just under the cap around it; the EDIT turns it, which makes it larger.
+    await fill(first!.lookupId, key, positionOf(first!), H, BAG_SAFE_BYTES - 200)
+    const sent = relay.sent.length
+    S().startEditShard(first!.eventId)
+    S().setDeployHeight(H)
+    S().turnDeploy(2)
+    await S().deploy()
+    expect(S().deployError).toBeNull()
+    S().cancelDeploy()
+    const shards = S().mine.filter((d) => d.type === 'shard')
+    expect(shards).toHaveLength(1)
+    const row = shards[0]
+    expect(row.ref).toBeDefined()
+    expect(row.inner.kind).toBe(OBJECT_KIND)
+    expect(row.lookupId).toBe(first!.lookupId)
+    expect(row.lineage).toBe(first!.eventId)
+    const bag = newestBag(first!.lookupId)
+    expect(relay.sent.slice(sent)).toEqual([row.inner.id, bag.id])
+    expect(JSON.stringify(bag).length).toBeLessThanOrEqual(BAG_SAFE_BYTES)
+    // The old inline entry is gone from the bag.
+    const entries = await bagEntries(bag as NostrEvent, key)
+    expect(entries.some((e) => !Array.isArray(e) && e.id === first!.eventId)).toBe(false)
+    // The comment made on the inline version threads under the converted item.
+    const after = S().worldItems().find((w) => w.key === row.eventId)!
+    expect(after.lineage).toBe(first!.eventId)
+    expect(threadComments([comment], subjectOf(after)).map((c) => c.id)).toEqual([comment.id])
+    // A comment made now names the object's address too, so a finder (no lineage) threads it.
+    const next = subjectOf(after)
+    const fresh = await C().signEvent(await sealedComment(next, itemParent(next), 'still nice', Math.floor(Date.now() / 1000), key)) as NostrEvent
+    const finder: CommentSubject = { ...next, itemId: row.inner.id }
+    expect(threadComments([fresh], finder).map((c) => c.id)).toEqual([fresh.id])
+    // A reaction or comment naming the old id still reaches this row.
+    expect(hiddenRowFor(S().mine, { id: first!.eventId })?.eventId).toBe(row.eventId)
+  }, 60000)
+
+  it('EDIT whose bag no relay takes: the new object is retracted, and the old row stands', async () => {
+    const model = coil()
+    const { row: first } = await place(model)
+    await fill(first!.lookupId, hexToBytes(first!.keyHex), positionOf(first!), H, BAG_SAFE_BYTES - 200)
+    relay.refuseKind = HIDDEN_KIND
+    const sent = relay.sent.length
+    S().startEditShard(first!.eventId)
+    S().setDeployHeight(H)
+    S().turnDeploy(2)
+    await S().deploy()
+    const error = S().deployError
+    S().cancelDeploy()
+    relay.refuseKind = -1
+    expect(error).toMatch(/No relay took/)
+    const out = relay.events.filter((e) => relay.sent.slice(sent).includes(e.id))
+    const object = out.find((e) => e.kind === OBJECT_KIND)
+    expect(object).toBeDefined()
+    const deletion = out.find((e) => e.kind === 5)
+    expect(deletion?.tags.some((t) => t[0] === 'a' && t[1] === `${OBJECT_KIND}:${me()}:${dOf(object!)}`) || deletion?.tags.some((t) => t[0] === 'e' && t[1] === object!.id)).toBe(true)
+    expect(S().mine.find((d) => d.eventId === first!.eventId)).toBeDefined()
+    expect(S().mine.filter((d) => d.type === 'shard')).toHaveLength(1)
+  }, 60000)
+})
+
+describe('CONVERT of a chest holding a shard into a full room', () => {
+  /** A chest at the cursor, height H, holding the coil, sealed before any door stands there. */
+  async function chestWithCoil(): Promise<MyDeployment> {
+    coil()
+    const before = new Set(S().mine.map((d) => d.eventId))
+    S().startPlaceChest()
+    S().setDeployHeight(H)
+    S().placeChest()
+    await S().sealPlacedChest({ name: 'Crate', lock: { pubkey: lock.itemPubkey, label: lock.name }, requires: 'x', contents: [{ kind: 'shard', shardId: coil().id }] })
+    expect(S().deployError).toBeNull()
+    S().cancelDeploy()
+    return S().mine.find((d) => !before.has(d.eventId) && d.type === 'chest')!
+  }
+
+  it('the shard goes by reference, its object before the room bag, keeping its lineage; the room reads it', async () => {
+    const chest = await chestWithCoil()
+    expect(chest.room).toBeUndefined()
+    const door = await sealDoor()
+    const room = roomOf(door)
+    S().startDeployMessage('behind')
+    S().setDeployHeight(H)
+    await S().deploy()
+    expect(S().deployError).toBeNull()
+    S().cancelDeploy()
+    await fill(room.lookupId, room.key, positionOf(door), H, 236_000, { doorId: door.eventId })
+    const sent = relay.sent.length
+    expect(await S().convertToDoor(chest.eventId)).toBeNull()
+    const moved = S().mine.find((d) => d.type === 'shard')!
+    expect(moved.ref).toBeDefined()
+    expect(moved.inner.kind).toBe(OBJECT_KIND)
+    expect(moved.lookupId).toBe(room.lookupId)
+    expect(moved.lineage).toMatch(/^[0-9a-f]{64}$/)
+    expect(moved.ref![2]).toBe('wss://relay.test')
+    const bag = newestBag(room.lookupId)
+    const out = relay.sent.slice(sent)
+    expect(out.indexOf(moved.inner.id)).toBeGreaterThanOrEqual(0)
+    expect(out.indexOf(bag.id)).toBeGreaterThan(out.indexOf(moved.inner.id))
+    expect(JSON.stringify(bag).length).toBeLessThanOrEqual(BAG_SAFE_BYTES)
+    const found = await unbag(bag as NostrEvent, room.key, resolveReference, undefined, H, undefined, { doorId: door.eventId })
+    expect(found.find((h) => h.eventId === moved.inner.id)?.shard?.vertices).toHaveLength(coil().vertices.length)
+  }, 90000)
+
+  it('while LOCAL, a CONVERT that fails takes nothing back: no retraction is signed or sent', async () => {
+    useCyberspace.setState({ live: false })
+    const chest = await chestWithCoil()
+    const door = await sealDoor()
+    const room = roomOf(door)
+    S().startDeployMessage('behind')
+    S().setDeployHeight(H)
+    await S().deploy()
+    expect(S().deployError).toBeNull()
+    S().cancelDeploy()
+    await fill(room.lookupId, room.key, positionOf(door), H, 236_000, { doorId: door.eventId })
+    const sent = relay.sent.length
+    const real = C().signEvent
+    const kinds: number[] = []
+    // The new door's chest is refused by the signer, after the room bag and the object are signed.
+    useCyberspace.setState({ signEvent: ((t: Parameters<typeof real>[0], p?: number) => { kinds.push(t.kind); if (t.kind === 3341) return Promise.reject(new Error('refused')); return real(t, p) }) as typeof real })
+    try {
+      expect(await S().convertToDoor(chest.eventId)).toMatch(/refused/)
+    } finally {
+      useCyberspace.setState({ signEvent: real })
+    }
+    expect(kinds).toContain(OBJECT_KIND)
+    expect(kinds).not.toContain(5)
+    expect(relay.sent.length).toBe(sent)
+  }, 90000)
+})
+
+describe('the plan measures what is signed (review of #640: the client tag)', () => {
+  it('a sweep across the line: never refused when by reference would fit, and never past the cap', async () => {
+    const model = coil()
+    const seen: string[] = []
+    for (let target = 217_560; target <= 217_700; target += 10) {
+      relay.events = []
+      relay.sent = []
+      useShards.setState({ mine: [], deleted: {}, deletedBags: {}, discovered: {} })
+      S().startDeployMessage('seed')
+      S().setDeployHeight(H)
+      await S().deploy()
+      expect(S().deployError).toBeNull()
+      S().cancelDeploy()
+      const seed = S().mine[0]
+      await fill(seed.lookupId, hexToBytes(seed.keyHex), positionOf(seed), H, target)
+      const { row, error } = await place(model)
+      expect(error, `at ${target}`).toBeNull()
+      expect(JSON.stringify(newestBag(seed.lookupId)).length, `at ${target}`).toBeLessThanOrEqual(BAG_SAFE_BYTES)
+      seen.push(row?.ref ? 'ref' : 'inline')
+    }
+    // The sweep crosses the line: some went inline, some by reference.
+    expect(seen).toContain('inline')
+    expect(seen).toContain('ref')
+  }, 240000)
 })

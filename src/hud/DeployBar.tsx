@@ -77,7 +77,7 @@ import { noCallout, useRepeatable } from '../hooks/useRepeatable'
 import { MAX_UNIT, type ShardModel } from 'sno-core/shards'
 import { formatCellSize, formatDistance } from 'sno-core/scale'
 import { fadeStep, inscribedRadius, sourceLocal } from '../lib/audioItem'
-import { LINK_PROTECTED, SCAN_MAX_HEIGHT, autoRoomFor, deployBagMeter, posedForDeploy, type BagMeter, fillingChest, placedDoorHeight, movingId, placingChest, sealingDoor, lookModelOf, lookTagsFor, type LookChoice, aimedOf, atLastSpot, copyLinedUp, isProtected, ownBagIn, pendingEmpty, pendingName, positionOf, regionOf, useShards } from '../store/useShards'
+import { LINK_PROTECTED, SCAN_MAX_HEIGHT, autoRoomFor, bagRowsFor, deployBagMeter, plannedShard, posedForDeploy, type BagMeter, fillingChest, placedDoorHeight, movingId, placingChest, sealingDoor, lookModelOf, lookTagsFor, type LookChoice, aimedOf, atLastSpot, copyLinedUp, isProtected, ownBagIn, pendingEmpty, pendingName, positionOf, regionOf, useShards } from '../store/useShards'
 import { aimedPoint } from '../lib/chests'
 import { snapOffered } from '../lib/pose'
 import { MAX_RIDDLE_LENGTH } from '../lib/hidden'
@@ -323,11 +323,28 @@ export function DeployBar({ pad = false }: { pad?: boolean }): JSX.Element | nul
     const id = s.pending?.type === 'shard' ? s.pending.edit?.eventId : undefined
     return id ? s.mine.find((m) => m.eventId === id) ?? null : null
   })
+  // Built in three parts so a step of the cursor costs nothing: the shard's
+  // entry once per pose (its payload and hash are the costly part), the bag's
+  // rows once per target bag (a region, or a room), and the measure from those.
+  const metered = !!shard && !intoChest && !link && pending?.type === 'shard'
+  const posed = useMemo(
+    () => (metered && shard ? posedForDeploy(shard, false, { deployUp: up, deploySpin: spin, deployTurn: turn, deployUnit: unit, deployConstrain: constrain }, plane, height) : null),
+    [metered, shard, up, spin, turn, unit, constrain, plane, height],
+  )
+  const planned = useMemo(() => (posed ? plannedShard(posed, me) : null), [posed, me])
+  const sealingId = sealing?.eventId ?? null
+  const bagRows = useMemo(
+    () => (planned ? bagRowsFor(mine, { region, door: sealing, edit: editRow ?? undefined }) : []),
+    // The target bag, by name: `sealing` is the door named by `sealingId`.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [planned, mine, region, sealingId, editRow],
+  )
   const meter: BagMeter | null = useMemo(() => {
-    if (!shard || intoChest || link || pending?.type !== 'shard') return null
-    const posed = posedForDeploy(shard, false, { deployUp: up, deploySpin: spin, deployTurn: turn, deployUnit: unit, deployConstrain: constrain }, plane, height)
-    return deployBagMeter(mine, posed, { at: deployPoint(cursor, step, height), plane, height, settings: bag, owner: me, door: sealing, edit: editRow ?? undefined })
-  }, [shard, intoChest, link, pending, up, spin, turn, unit, constrain, plane, height, mine, cursor, step, bag, me, sealing, editRow])
+    if (!planned) return null
+    const s = useCyberspace.getState()
+    const place = bagRows[0] ? { at: positionOf(bagRows[0]), plane: bagRows[0].plane } : { at: deployPoint(s.cursor, buildStepOf(s), height), plane }
+    return deployBagMeter(bagRows, planned, { height, settings: bag, owner: me, room: sealingId !== null, place, edit: editRow ?? undefined })
+  }, [planned, bagRows, height, bag, me, sealingId, editRow, plane])
   // A MOVE or EDIT keeps its own bag (review of #633): a room under it is offered, SEAL IN ROOM, never taken on its own.
   const offer = useMemo(
     () => (pending && moving && !sealMove ? autoRoomFor({ mine, pending, deployLeaveOut: leaveOut, deployDoorHeight: chosenRoom, deployHeight: height, deployRoomSnap: snap, deploySealMove: true }, me, cursor, plane) : null),

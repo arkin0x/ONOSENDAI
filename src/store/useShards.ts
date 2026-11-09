@@ -45,6 +45,7 @@ import { bagAddressOf, bagsToOpen, retractedAt, staleFinds } from '../lib/bagVer
 import { itemTargetOf, type ItemTarget } from '../lib/comments'
 import { bytesToHex, hexToBytes, positionHex, type EventTemplate, type NostrEvent } from '../lib/events'
 import { getEventHash } from 'nostr-tools/pure'
+import { attributed } from '../lib/client'
 import { regionKeyOffThread } from '../lib/regionKeyOffThread'
 import { WRONG_KEY, keyFitsLookup, wrongKeyMessage } from '../lib/regionKeyCheck'
 import { signedTableOnly } from '../lib/carried'
@@ -71,6 +72,7 @@ import {
   itemLineage,
   referenceTo,
   wantsReference,
+  REFERENCE_THRESHOLD_BYTES,
   type BagEntry,
   type Reference,
   type Rumor,
@@ -147,6 +149,15 @@ export interface MyDeployment {
   inner: Rumor
   /** Set when the item is hidden by reference: the entry the bag carries instead of `inner` (spec §7.6). */
   ref?: Reference
+  /**
+   * The lineage of an inline shard that went by reference because its bag
+   * could not hold it inline (lib/bagFit.ts): the first version's id its
+   * comments and reactions name (lib/hidden.ts itemLineage). The object has
+   * an address of its own, which comments made from now name; this keeps the
+   * earlier ones under it too (owner ruling, 2026-10-16: comments survive
+   * EDIT). Only on this device's row: the reference says nothing of it.
+   */
+  lineage?: string
   /** The envelope currently holding it; changes when the bag is rewritten. */
   bagId: string
   /**
@@ -925,6 +936,15 @@ function lineageOf(inner: Rumor | undefined, ref: Reference | undefined): { line
   return l ? { lineage: l } : {}
 }
 
+/**
+ * The lineage a row of yours answers to, as a spread: the one it kept when it
+ * went by reference to fit its bag (MyDeployment `lineage`), else its own as
+ * an inline item. What a row takes with it when it goes by reference.
+ */
+function keptLineage(d: Pick<MyDeployment, 'inner' | 'ref' | 'lineage'>): { lineage?: string } {
+  return d.lineage ? { lineage: d.lineage } : lineageOf(d.inner, d.ref)
+}
+
 /** Why an EDIT stopped: the shard it moves is no longer among your deployments here. */
 export const EDIT_GONE = 'That shard is no longer among what this device hid, so there is nothing to move.'
 /**
@@ -1283,30 +1303,49 @@ export interface BagMeter {
 }
 
 /**
- * The bag a shard is going into, as this device knows it: its rows in that bag
- * (a room's behind `door`, else the region's), and the shard planned in, by
- * reference when it is large or when the bag would not hold it inline, the
- * same decision deploy makes (lib/bagFit.ts). An estimate: the relays' copy,
- * which deploy reads first, may hold entries this device has no row for.
- * `edit` is the row an EDIT replaces, left out of the bag it stands in.
+ * A shard's inline entry as a deploy would write it, for measuring: its
+ * payload, its client tag and canonical id, at a stand-in point (every point
+ * is the same length of hex, so its size is the size anywhere). Built once
+ * per posed shard: the payload and the hash are the costly part, and neither
+ * depends on where the cursor is.
  */
-export function deployBagMeter(mine: readonly MyDeployment[], shard: ShardModel, o: { at: Position; plane: Plane; height: number; settings: BagSettings; owner: string; door: OwnDoor | null; edit?: MyDeployment }): BagMeter {
-  const region = regionOf(o.at, o.plane, o.height)
-  const doorIds = o.door ? new Set(mine.filter((m) => m.chest?.door === o.door!.height && roomOf(positionOf(m), m.plane, o.door!.height) === roomOf(o.door!.at, o.door!.plane, o.door!.height)).map((m) => m.eventId)) : null
-  const rows = mine.filter((m) => inItsBag(m) && m.eventId !== o.edit?.eventId && (doorIds ? !!m.room && doorIds.has(m.room.doorId) : !m.room && regionOf(positionOf(m), m.plane, m.height) === region))
+export function plannedShard(shard: ShardModel, owner: string): NostrEvent {
+  return plannedItem(shardInnerTemplate(shard, { x: 0n, y: 0n, z: 0n }, 0, Math.floor(Date.now() / 1000)), owner, false)
+}
+
+/**
+ * Your rows in the bag a placement goes into: a room's behind `door`, else the
+ * region's (`region`, as regionOf names it). `edit` is the row an EDIT
+ * replaces, left out. Changes only when the target bag does.
+ */
+export function bagRowsFor(mine: readonly MyDeployment[], o: { region: string; door: OwnDoor | null; edit?: MyDeployment }): MyDeployment[] {
+  const door = o.door
+  const doorIds = door ? new Set(mine.filter((m) => m.chest?.door === door.height && roomOf(positionOf(m), m.plane, door.height) === roomOf(door.at, door.plane, door.height)).map((m) => m.eventId)) : null
+  return mine.filter((m) => inItsBag(m) && m.eventId !== o.edit?.eventId && (doorIds ? !!m.room && doorIds.has(m.room.doorId) : !m.room && regionOf(positionOf(m), m.plane, m.height) === o.region))
+}
+
+/**
+ * The bag a shard is going into, as this device knows it (`rows`, bagRowsFor),
+ * with the shard (`planned`, plannedShard) in it in the form it would go out
+ * in: by reference when it is large or when the bag would not hold it inline,
+ * the same decision deploy makes (lib/bagFit.ts). An estimate: the relays'
+ * copy, which deploy reads first, may hold entries this device has no row
+ * for. `edit` is the row an EDIT replaces: one by reference stays so.
+ */
+export function deployBagMeter(rows: readonly MyDeployment[], planned: NostrEvent, o: { height: number; settings: BagSettings; owner: string; room: boolean; place: { at: Position; plane: Plane }; edit?: MyDeployment }): BagMeter {
   const before = rows.map(entryOf)
-  const settings = o.door ? ROOM_BAG_SETTINGS : o.settings
-  const place = { at: o.at, plane: o.plane }
+  const settings = o.room ? ROOM_BAG_SETTINGS : o.settings
   const lookupId = rows[0]?.lookupId ?? '0'.repeat(64)
-  const measure = (es: readonly BagEntry[]): number => bagBytes(es, lookupId, o.height, settings, place)
+  const measure = (es: readonly BagEntry[]): number => bagBytes(es, lookupId, o.height, settings, o.place)
   const refused = (es: readonly BagEntry[]): string | null => growthRefusal(es, before, measure(es))
-  const large = o.edit ? !!o.edit.ref : wantsReference(shard)
-  const hint = relaySet()[0] ?? ''
+  const hint = widestHint()
+  const at = planned.tags.find((t) => t[0] === 'C')?.[1] ?? ''
+  // Large by itself: its payload (the content) past the threshold, as wantsReference measures it.
+  const large = o.edit ? !!o.edit.ref : new TextEncoder().encode(planned.content).length > REFERENCE_THRESHOLD_BYTES
   if (large) {
-    const es = mergeEntries(before, [['a', `${OBJECT_KIND}:${o.owner}:${'0'.repeat(32)}`, hint, positionHex(o.at, o.plane)]])
+    const es = mergeEntries(before, [['a', `${OBJECT_KIND}:${o.owner}:${'0'.repeat(32)}`, hint, at]])
     return { bytes: measure(es), byReference: true, fitted: false, refusal: refused(es) }
   }
-  const planned = plannedItem(shardInnerTemplate(shard, o.at, o.plane, Math.floor(Date.now() / 1000)), o.owner, false)
   const es = mergeEntries(before, [planned])
   const candidate = referenceFor(planned, o.owner, '0'.repeat(32), hint)
   const plan = planFit(es, candidate ? [candidate] : [], refused)
@@ -1963,7 +2002,18 @@ function mergeEntries(a: BagEntry[], b: BagEntry[]): BagEntry[] {
  */
 function plannedItem(template: EventTemplate, owner: string, asRumor: boolean): NostrEvent {
   if (asRumor) return rumorOf(template, owner) as NostrEvent
-  return { ...template, pubkey: owner, id: getEventHash({ ...template, pubkey: owner }), sig: '0'.repeat(128) }
+  // Every signer adds ONOSENDAI's client tag (lib/client.ts): measured and hashed with it, as it is signed.
+  const signed = attributed(template)
+  return { ...signed, pubkey: owner, id: getEventHash({ ...signed, pubkey: owner }), sig: '0'.repeat(128) }
+}
+
+/**
+ * The relay hint a reference is measured with before its object goes out: the
+ * longest URL it could name. The object's reference names the relay that took
+ * it (republish), never a longer one, so a bag measured this way still fits.
+ */
+function widestHint(): string {
+  return relaySet().reduce((a, b) => (b.length > a.length ? b : a), '')
 }
 
 /** A fresh `d` for one placement of an object: 16 random bytes, derived from nothing (DECK-0003 §3.4). */
@@ -2141,7 +2191,7 @@ export const useShards = create<ShardsState>((set, get) => {
    * their reference form from the start.
    */
   function fitByReference(inners: BagEntry[], fresh: BagEntry[], lookupId: string, height: number, settings: BagSettings, place: { at: Position; plane: Plane }, before: BagEntry[], owner: string, forced: ReadonlySet<string> = new Set()): { refs: Map<string, FitCandidate>; refusal: string | null } {
-    const hint = relaySet()[0] ?? ''
+    const hint = widestHint()
     const candidates = fresh.flatMap((e) => referenceFor(e, owner, placementId(), hint) ?? [])
     const chosen = new Map(candidates.filter((c) => forced.has(c.key)).map((c) => [c.key, c] as const))
     const refused = (es: readonly BagEntry[]): string | null => {
@@ -2708,9 +2758,10 @@ export const useShards = create<ShardsState>((set, get) => {
     return cs.signEvent({ kind: 5, created_at: nextBagAt(lookupId), content: 'hidden content removed', tags: [['a', `${HIDDEN_KIND}:${owner}:${lookupId}`], ...(bagId ? [['e', bagId]] : []), ['k', String(HIDDEN_KIND)]] })
   }
 
-  async function retractBag(lookupId: string, bagId: string | null, owner: string): Promise<void> {
+  /** Retract a bag, best effort: whether a relay took the retraction. */
+  async function retractBag(lookupId: string, bagId: string | null, owner: string): Promise<boolean> {
     const del = await bagRetraction(lookupId, bagId, owner)
-    try { await publishMany(relaySet(), del) } catch { /* best effort */ }
+    try { return (await publishMany(relaySet(), del)).ok } catch { return false }
   }
 
   /** Where a move is going. */
@@ -2726,9 +2777,11 @@ export const useShards = create<ShardsState>((set, get) => {
      * Each resealed object, and the old one signed again a second newer, to put
      * back if the move does not land. An inline shard that goes by reference to
      * fit the target (lib/bagFit.ts) is a new object with nothing to put back
-     * (`back` absent): if the move does not land, it is retracted.
+     * (`back` absent): if the move does not land, it is retracted. Its
+     * reference names `hint`, chosen before the bag is signed, so the move
+     * goes only once that relay holds it.
      */
-    objects: Array<{ rowId: string; next: NostrEvent; back?: NostrEvent }>
+    objects: Array<{ rowId: string; next: NostrEvent; back?: NostrEvent; hint?: string }>
     to: MoveTarget
     settings: BagSettings
     bag: NostrEvent
@@ -2770,11 +2823,12 @@ export const useShards = create<ShardsState>((set, get) => {
     const moved: MyDeployment[] = []
     const objects: StagedMove['objects'] = []
     for (const r of rows) {
-      const fitted = fit.refs.get(entryKey(entryOf(r)))
-      if (fitted && !r.ref && r.shard) {
+      // A candidate is an inline shard (lib/bagFit.ts referenceFor): its content is the object's payload.
+      const fitted = r.ref ? undefined : fit.refs.get(entryKey(entryOf(r)))
+      if (fitted) {
         const next = await objectFor(r.inner as NostrEvent, fitted, to.key, Math.max(now, r.inner.created_at + 1), owner)
-        objects.push({ rowId: r.eventId, next })
-        moved.push({ ...r, eventId: next.id, inner: next, ref: fitted.ref })
+        objects.push({ rowId: r.eventId, next, hint: fitted.ref[2] })
+        moved.push({ ...r, eventId: next.id, inner: next, ref: fitted.ref, ...keptLineage(r) })
       } else if (r.ref && r.shard && r.inner.pubkey === me && r.inner.kind === OBJECT_KIND && r.inner.tags.some((t) => t[0] === 'encrypted')) {
         const at = Math.max(now, r.inner.created_at + 1)
         // Before each signature, as each follows a wait: one signed in since is never asked (review of #599).
@@ -2811,9 +2865,14 @@ export const useShards = create<ShardsState>((set, get) => {
     const sent: StagedMove['objects'] = []
     const fail = async (words: string): Promise<never> => { await undoObjects(sent, stage.owner); throw new Error(words) }
     for (const o of stage.objects) {
-      const ok = await publishMany(relaySet(), o.next).then((r) => r.ok, () => false)
+      // A new object must be on the relay its reference names: a finder looks there.
+      const ok = o.hint
+        ? await publishMany([o.hint], o.next).then((r) => r.ok, () => false)
+        : await publishMany(relaySet(), o.next).then((r) => r.ok, () => false)
       if (!ok) await fail('No relay took a shard being moved. Nothing has moved.')
       sent.push(o)
+      const rest = o.hint ? relaySet().filter((u) => u !== o.hint) : []
+      if (rest.length > 0) void publishMany(rest, o.next).catch(() => undefined)
     }
     const ok = await publishMany(relaySet(), stage.bag).then((r) => r.ok, () => false)
     if (!ok) await fail('No relay took the new bag. Nothing has moved.')
@@ -2976,9 +3035,10 @@ export const useShards = create<ShardsState>((set, get) => {
       if (fitted) {
         // The object first: a bag never names what no relay has.
         inner = await objectFor(planned, fitted, key, template.created_at, owner)
-        ref = fitted.ref
+        const took = await republish(inner)
+        if (!took) return 'No relay took the shard. Try again when one is reachable.'
+        ref = [fitted.ref[0], fitted.ref[1], took, ...fitted.ref.slice(3)]
         forgetReference(ref)
-        if (!(await publishMany(relaySet(), inner).then((r) => r.ok, () => false))) return 'No relay took the shard. Try again when one is reachable.'
       }
       const sent = await publishBag(mergeEntries(existing.entries, [ref ?? inner]), key, d.lookupId, d.height, true, settings, { at, plane: d.plane }, undefined, existing.entries, owner)
         .catch(async (err: unknown) => { if (ref) await retractObject(inner).catch(() => undefined); throw err })
@@ -3607,14 +3667,16 @@ export const useShards = create<ShardsState>((set, get) => {
       let before: BagEntry[] = []
       // A shard from the chest that went by reference to fit the room (lib/bagFit.ts): its object, by the chest entry's id.
       const objects = new Map<string, { object: NostrEvent; ref: Reference }>()
+      // The objects that went out: only these are ever taken back, and only while LIVE.
+      const sentObjects: NostrEvent[] = []
       // The chest stands, so what was copied comes out: a bag this write made goes
       // (§3.7.8), and a room already there goes back to what it held.
       // The objects of shards that went by reference go once no bag names them:
-      // never while a room bag that could not be put back still does.
+      // never while a room bag that could not be put back, or retracted, still does.
       const takeBack = async (): Promise<void> => {
-        const dropObjects = async (): Promise<void> => { for (const o of objects.values()) await retractObject(o.object).catch(() => undefined) }
+        const dropObjects = async (): Promise<void> => { if (live) for (const o of sentObjects) await retractObject(o).catch(() => undefined) }
         if (!published) { await dropObjects(); return }
-        if (before.length === 0) { await retractBag(lookupId, bagId, me); await dropObjects(); return }
+        if (before.length === 0) { if (await retractBag(lookupId, bagId, me)) await dropObjects(); return }
         const back = await publishBag(before, key, lookupId, d.height, live, ROOM_BAG_SETTINGS, { at: here, plane: d.plane }, undefined, before, me).catch(() => null)
         if (!back?.published) return
         await commitRows(me, rowsOf(me).map((m) => (m.lookupId === lookupId ? { ...m, bagId: back.event.id, bagAt: back.event.created_at } : m)))
@@ -3633,13 +3695,17 @@ export const useShards = create<ShardsState>((set, get) => {
             const c = isReference(e) ? undefined : fit.refs.get(e.id)
             if (c) objects.set(c.key, { object: await objectFor(e as NostrEvent, c, key, Math.max(Math.floor(Date.now() / 1000), (e as NostrEvent).created_at), me), ref: c.ref })
           }
-          // The objects first: a bag never names what no relay has.
+          // The objects first: a bag never names what no relay has. Each
+          // reference names the relay that took its object (republish).
           if (live) {
-            for (const o of objects.values()) {
-              if (!(await publishMany(relaySet(), o.object).then((r) => r.ok, () => false))) {
+            for (const [id, o] of objects) {
+              const took = await republish(o.object)
+              if (!took) {
                 await takeBack()
                 return 'No relay took a shard from the chest. The chest stays as it was.'
               }
+              sentObjects.push(o.object)
+              objects.set(id, { object: o.object, ref: [o.ref[0], o.ref[1], took, ...o.ref.slice(3)] })
             }
           }
           inside = inside.map((e) => (isReference(e) ? e : objects.get(e.id)?.ref ?? e))
@@ -3675,7 +3741,7 @@ export const useShards = create<ShardsState>((set, get) => {
           const p = eventPlace(e.event)!
           const { sig, ...rumor } = e.event
           const o = objects.get(e.id)
-          if (o) return { eventId: o.object.id, inner: o.object, ref: o.ref, type: e.body.type, shard: e.body.shard, bagId, at: storedAt(p.at), plane: d.plane, height: d.height, lookupId, keyHex, relays: relaySet(), createdAt: e.event.created_at, published, bag: ROOM_BAG_SETTINGS, room: { doorId: row.eventId } }
+          if (o) return { eventId: o.object.id, inner: o.object, ref: o.ref, ...keptLineage({ inner: e.event }), type: e.body.type, shard: e.body.shard, bagId, at: storedAt(p.at), plane: d.plane, height: d.height, lookupId, keyHex, relays: relaySet(), createdAt: e.event.created_at, published, bag: ROOM_BAG_SETTINGS, room: { doorId: row.eventId } }
           return { eventId: e.id, inner: sig ? e.event : rumor, type: e.body.type, shard: e.body.shard, text: e.body.text, key: e.body.key, chest: e.body.chest, audio: e.body.audio, bagId, at: storedAt(p.at), plane: d.plane, height: d.height, lookupId, keyHex, relays: relaySet(), createdAt: e.event.created_at, published, bag: ROOM_BAG_SETTINGS, room: { doorId: row.eventId } }
         })
         // Any room bag's other rows name its newest envelope; the door's bag is this write's own.
@@ -4125,7 +4191,8 @@ export const useShards = create<ShardsState>((set, get) => {
         // this region's bag only if `deployBagFrom` names this region.
         const region = regionOf(at, plane, deployHeight)
         const seeded = deployBagFrom?.region === region ? deployBagFrom.settings : DEFAULT_BAG_SETTINGS
-        const settings: BagSettings = into ? ROOM_BAG_SETTINGS : resolveBagSettings(deployBag, seeded, existing.settings, deployHeight)
+        const settingsOf = (current: BagSettings | null): BagSettings => (into ? ROOM_BAG_SETTINGS : resolveBagSettings(deployBag, seeded, current, deployHeight))
+        let settings: BagSettings = settingsOf(existing.settings)
         // A large shard is hidden by reference (spec §7.6, DECK-0003 §3.2): it
         // becomes its own kind 33331 object sealed with the same key, and the
         // bag carries only a tag naming it. A move of one reseals it under its own `d`.
@@ -4137,7 +4204,7 @@ export const useShards = create<ShardsState>((set, get) => {
         // either way refuses it now, in signBag's words, and nothing was signed.
         let fitted = false
         if (!link && innerTemplate) {
-          const planned: BagEntry = large ? ['a', `${OBJECT_KIND}:${owner}:${objectD}`, relaySet()[0] ?? '', positionHex(at, plane)] : plannedItem(innerTemplate, owner, pending.type === 'message' || pending.type === 'audio')
+          const planned: BagEntry = large ? ['a', `${OBJECT_KIND}:${owner}:${objectD}`, widestHint(), positionHex(at, plane)] : plannedItem(innerTemplate, owner, pending.type === 'message' || pending.type === 'audio')
           const fit = fitByReference(mergeEntries(standing, [planned]), large ? [] : [planned], rk.lookupId, deployHeight, settings, { at, plane }, existing.entries, owner)
           if (fit.refusal) throw new Error(fit.refusal)
           const c = fit.refs.get(entryKey(planned))
@@ -4154,6 +4221,46 @@ export const useShards = create<ShardsState>((set, get) => {
         // EDIT of a reference shard: the old object signed again, for a failed move to put back.
         let rollback: NostrEvent | undefined
         let objectSent = false
+        // The shard as its own kind 33331 object, and the reference the bag
+        // carries: a large one, a move of one, or one the bag cannot hold inline.
+        const sealObject = async (shard: ShardModel): Promise<NostrEvent> => {
+          // A move reseals the same object under its own `d`, which replaces
+          // it on the relays and keeps its address, the thing its comments
+          // and reactions name (arkinox, 2026-10-16).
+          // A row from before a move made elsewhere would reseal the old
+          // model over the moved one: refused (review of #369).
+          if (was?.ref && live) {
+            const still = await addressStillThis(referenced(was.inner))
+            if (still !== 'this') throw new Error(still === 'newer' ? EDIT_STALE : EDIT_UNANSWERED)
+          }
+          // Newer than the version it replaces even within the same second
+          // (a retry right after a rollback), or relays would keep that one.
+          const objectAt = was ? Math.max(createdAt, was.inner.created_at + 1) : createdAt
+          // An inline shard moved into a bag that cannot hold it inline is a new
+          // object under a fresh `d`, published first like any new one.
+          const sealed = await signAsOwner(await objectTemplate(shard, rk.key, objectD, objectAt))
+          inner = sealed
+          let hint = relaySet()[0] ?? ''
+          if (was?.ref && live) {
+            // A move publishes nothing until everything is signed: the
+            // object goes out after the bag is signed (publishBag's
+            // beforeSend), and the old version, signed again a second newer,
+            // is what goes back if the new bag reaches no relay, so a failed
+            // move never leaves the old place unreadable (review of #369).
+            // Only while live: LOCAL publishes nothing, so there is nothing to put back.
+            rollback = await signAsOwner({ kind: was.inner.kind, created_at: objectAt + 1, content: was.inner.content, tags: was.inner.tags })
+          } else if (live) {
+            // The reference names the relay that took it, as BROADCAST's does:
+            // a finder is pointed only at a relay that has the object.
+            still()
+            const took = await republish(inner)
+            if (!took) throw new Error('No relay took the shard. Try again when one is reachable.')
+            hint = took
+          }
+          ref = referenceTo(inner, at, plane, hint)
+          forgetReference(ref)
+          return sealed
+        }
         if (link && object) {
           // LIVE LINK: the bag names the author's own object, signed by them;
           // nothing new is signed for the item. A finder looks it up on their
@@ -4178,36 +4285,7 @@ export const useShards = create<ShardsState>((set, get) => {
           }
           ref = referenceTo(inner, at, plane, hint)
         } else if (pending.type === 'shard' && shard && (large || fitted)) {
-          // A move reseals the same object under its own `d`, which replaces
-          // it on the relays and keeps its address, the thing its comments
-          // and reactions name (arkinox, 2026-10-16).
-          // A row from before a move made elsewhere would reseal the old
-          // model over the moved one: refused (review of #369).
-          if (was?.ref && live) {
-            const still = await addressStillThis(referenced(was.inner))
-            if (still !== 'this') throw new Error(still === 'newer' ? EDIT_STALE : EDIT_UNANSWERED)
-          }
-          // Newer than the version it replaces even within the same second
-          // (a retry right after a rollback), or relays would keep that one.
-          const objectAt = was ? Math.max(createdAt, was.inner.created_at + 1) : createdAt
-          // An inline shard moved into a bag that cannot hold it inline is a new
-          // object under a fresh `d`, published first like any new one.
-          inner = await signAsOwner(await objectTemplate(shard, rk.key, objectD, objectAt))
-          if (was?.ref && live) {
-            // A move publishes nothing until everything is signed: the
-            // object goes out after the bag is signed (publishBag's
-            // beforeSend), and the old version, signed again a second newer,
-            // is what goes back if the new bag reaches no relay, so a failed
-            // move never leaves the old place unreadable (review of #369).
-            // Only while live: LOCAL publishes nothing, so there is nothing to put back.
-            rollback = await signAsOwner({ kind: was.inner.kind, created_at: objectAt + 1, content: was.inner.content, tags: was.inner.tags })
-          } else if (live) {
-            still()
-            const sent = await publishMany(relaySet(), inner)
-            if (!sent.ok) throw new Error('No relay took the shard. Try again when one is reachable.')
-          }
-          ref = referenceTo(inner, at, plane, relaySet()[0] ?? '')
-          forgetReference(ref)
+          inner = await sealObject(shard)
         } else {
           if (!innerTemplate) throw new Error('Nothing to hide.')
           // A message is sealed as a rumor and never goes to the signer: a
@@ -4229,7 +4307,28 @@ export const useShards = create<ShardsState>((set, get) => {
         let event: NostrEvent
         let published: boolean
         try {
-          const allInners = mergeEntries(standing, [ref ?? inner])
+          // The bag again, just before it is signed: a signer that took its time,
+          // or another device, may have changed it since it was read. Measured
+          // with the entry as signed, so a plan made from a template never
+          // passes a bag signBag would refuse: an inline shard that no longer
+          // fits goes by reference now, and one that cannot fit either way is
+          // refused, in words, before the bag is signed.
+          const latest = live ? await gatherInners(rk.lookupId, rk.key, live, deployHeight, owner) : existing
+          const now = gone ? latest.entries.filter((e) => entryKey(e) !== gone) : latest.entries
+          settings = settingsOf(latest.settings)
+          if (!link) {
+            const entry: BagEntry = ref ?? inner
+            const fit = fitByReference(mergeEntries(now, [entry]), ref ? [] : [entry], rk.lookupId, deployHeight, settings, { at, plane }, latest.entries, owner)
+            if (fit.refusal) throw new Error(fit.refusal)
+            const late = ref ? undefined : fit.refs.get(inner.id)
+            if (late && pending.type === 'shard' && shard) {
+              fitted = true
+              objectD = late.d
+              set({ deployNote: 'This bag is full: storing it by reference' })
+              inner = await sealObject(shard)
+            }
+          }
+          const allInners = mergeEntries(now, [ref ?? inner])
           const sendObject = was && rollback && live
             ? async () => {
               still()
@@ -4238,7 +4337,7 @@ export const useShards = create<ShardsState>((set, get) => {
               objectSent = true
             }
             : undefined
-          ;({ event, published } = await publishBag(allInners, rk.key, rk.lookupId, deployHeight, live, settings, { at, plane }, sendObject, existing.entries, cs.identity.pubkey))
+          ;({ event, published } = await publishBag(allInners, rk.key, rk.lookupId, deployHeight, live, settings, { at, plane }, sendObject, latest.entries, cs.identity.pubkey))
           // A move whose new bag no relay took has not happened: the old
           // copy stays, and is never taken down (review of #369).
           if (was && live && !published) throw new Error('No relay took the moved shard. It stays where it was.')
@@ -4296,6 +4395,9 @@ export const useShards = create<ShardsState>((set, get) => {
           bag: settings,
           ...(sealedInside ? { sealed: sealedInside } : {}),
           ...(into ? { room: { doorId: into.eventId } } : {}),
+          // An inline shard moved into the reference form keeps the lineage its
+          // comments and reactions name (keptLineage); one already converted keeps it.
+          ...(was && ref ? keptLineage(was) : {}),
         }
         // A key you hide is not held until you pick it up with TAKE, alone or
         // inside a chest (arkinox, 2026-11-06: "i want to pick it up for the
@@ -4904,7 +5006,7 @@ export const useShards = create<ShardsState>((set, get) => {
       if (!inItsBag(d)) continue
       // In a room whose door you closed (CLOSE): dissolved with it, yours too, until OPEN.
       if (shut?.(d.eventId)) continue
-      out.push({ key: d.eventId, type: d.type, at: positionOf(d), plane: d.plane, height: d.height, mine: true, author: me, shard: d.shard, text: d.text, keyItem: d.key, chest: d.chest, audio: d.audio, createdAt: d.createdAt, lookupId: d.lookupId, bagId: d.bagId, bagKeyHex: d.keyHex, target: itemTargetOf(d.inner, d.ref), event: d.inner as NostrEvent, ...lineageOf(d.inner, d.ref) })
+      out.push({ key: d.eventId, type: d.type, at: positionOf(d), plane: d.plane, height: d.height, mine: true, author: me, shard: d.shard, text: d.text, keyItem: d.key, chest: d.chest, audio: d.audio, createdAt: d.createdAt, lookupId: d.lookupId, bagId: d.bagId, bagKeyHex: d.keyHex, target: itemTargetOf(d.inner, d.ref), event: d.inner as NostrEvent, ...keptLineage(d) })
     }
     for (const h of Object.values(state.discovered)) {
       if (seen.has(h.eventId)) continue

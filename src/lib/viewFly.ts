@@ -1,26 +1,31 @@
 /**
- * viewFly.ts - VIEW's free fly (arkinox, 2026-11-02): "in view mode, a
- * two-finger touch free-flies in the direction the camera faces; the cursor
- * stays in the same position relative to the camera and snaps to whatever
- * gibson is nearest. A three-finger touch goes in reverse." Two buttons above
- * the menu button do the same, forward and back, for as long as they are
- * held (hud/ViewFlyButtons.tsx).
+ * viewFly.ts - VIEW's free fly (arkinox, 2026-11-02, reworked 2026-11-09).
  *
- * The pure parts live here: which way a touch says to fly (FlyGesture), how
- * fast at a zoom (flySpeed), and one frame of flight (flyStep). The scene's
- * rig runs a frame of it before it frames the cursor (tickViewFly), so the
- * camera, which follows the cursor, keeps its place behind it.
+ * 2026-11-02: "in view mode, a two-finger touch free-flies in the direction
+ * the camera faces". Two buttons above the menu button do the same, forward
+ * and back, for as long as they are held (hud/ViewFlyButtons.tsx).
  *
- * The speed is in cells of the zoom, not gibsons: FLY_CELLS_PER_SECOND cells a
- * second at 2^0 and at 2^80 alike, so a fly feels the same at every scale.
- * The cursor is whole gibsons, so each frame's travel is added to what the
- * frames before left over and the cursor goes to the nearest gibson; the
- * remainder waits for the next frame, so a slow fly at 2^0 is not lost to
- * rounding.
+ * 2026-11-09: "when using the move forward and backward functions in VIEW
+ * mode, I want the movement to be smooth and not tied to the nearest cursor
+ * block. I want the cursor to instead stay where it is until you stop moving
+ * for 2 seconds and then have the cursor box LERP to the nearest cell, but
+ * only when you are stopped. The movement should be smooth and linear. [...]
+ * Two-fingers to go forward can be turned off for now. Turn off three-finger
+ * reverse for now too."
+ *
+ * So a fly moves the camera, not the cursor: the viewpoint glides along the
+ * line it looks down, FLY_CELLS_PER_SECOND cells of the zoom a second, and
+ * the cursor waits (lib/viewCamera.ts holds the offset and the timing). Held
+ * from the fly buttons, the pad's FAR and NEAR, or R and F, all in VIEW.
+ *
+ * The pure parts live here: which way a touch says to fly (FlyGesture, off
+ * for now behind TOUCH_FLY_FORWARD and TOUCH_FLY_REVERSE), how fast at a zoom
+ * (flySpeed), who is asking to fly (useViewFly), and where a fly lands the
+ * cursor once it comes to rest (landingOf).
  */
 
 import { create } from 'zustand'
-import { clampAxis, type AxisName, type Position, type ViewAxes } from './space'
+import { alignTo, clampAxis, CONTINUOUS_SCALE_MIN, type AxisName, type Position, type ViewAxes } from './space'
 
 /** Cells of the current zoom flown per second: a held pad key steps about nine a second (useRepeatable). */
 export const FLY_CELLS_PER_SECOND = 8
@@ -33,13 +38,13 @@ export const PINCH_SLOP_PX = 8
 export const PINCH_SLOP_SHARE = 0.04
 
 /**
- * How often a fly writes the cursor to the store, in ms: 20 a second. Every
- * write re-renders whatever reads the cursor (the pad, the proof panel, the
- * cursor box, the rooms), and at a zoom where each frame reaches a new gibson
- * that was every frame. The camera eases toward the cursor (FOLLOW_TAU), so
- * a step every 50 ms still reads as a glide.
+ * The touch flies, kept so they can come back (arkinox, 2026-11-09: "Two-
+ * fingers to go forward can be turned off for now. Turn off three-finger
+ * reverse for now too."). Two fingers that drag are the camera's pan now
+ * (lib/viewCamera.ts PanGesture); two at rest do nothing.
  */
-export const FLY_WRITE_MS = 50
+export const TOUCH_FLY_FORWARD = false
+export const TOUCH_FLY_REVERSE = false
 
 /** Forward, back, or not flying. */
 export type FlyDir = 1 | -1 | 0
@@ -72,41 +77,10 @@ export function renderToCyber(dir: readonly [number, number, number], axes: View
   return out
 }
 
-/** Gibsons not yet flown on each axis: what rounding to the nearest gibson left over. */
-export type FlyCarry = Record<AxisName, number>
-export const NO_CARRY: Readonly<FlyCarry> = { x: 0, y: 0, z: 0 }
-
-/**
- * One frame of flight: `along` (a unit vector in cyberspace components) times
- * the speed at `scaleExp` for `dt` seconds, `sign` forward or back, added to
- * the carry, and the cursor moved to the nearest gibson of where that puts
- * it. An axis at the edge of space stops there and drops its carry. `moved`
- * is false when the cursor is where it was, so nothing need be written.
- */
-export function flyStep(
-  cursor: Position, carry: Readonly<FlyCarry>, along: Readonly<Record<AxisName, number>>, sign: 1 | -1, dt: number, scaleExp: number,
-): { cursor: Position; carry: FlyCarry; moved: boolean } {
-  const travel = flySpeed(scaleExp) * Math.min(Math.max(dt, 0), FLY_MAX_DT) * sign
-  const next: Position = { ...cursor }
-  const left: FlyCarry = { x: 0, y: 0, z: 0 }
-  let moved = false
-  for (const axis of ['x', 'y', 'z'] as const) {
-    const want = carry[axis] + along[axis] * travel
-    const whole = Math.round(want)
-    if (whole === 0) { left[axis] = want; continue }
-    const to = clampAxis(cursor[axis] + BigInt(whole))
-    // Against the wall: the axis stops, and what was owed with it.
-    if (to - cursor[axis] !== BigInt(whole)) { next[axis] = to; moved ||= to !== cursor[axis]; continue }
-    next[axis] = to
-    left[axis] = want - whole
-    moved = true
-  }
-  return { cursor: next, carry: left, moved }
-}
-
 /**
  * What a touch on the scene says about flying: two fingers at rest fly
- * forward, three fly back, after FLY_HOLD_MS. Two fingers that spread or
+ * forward, three fly back, after FLY_HOLD_MS, each only while it is on
+ * (TOUCH_FLY_FORWARD, TOUCH_FLY_REVERSE; both off since 2026-11-09). Two fingers that spread or
  * close past the slop are a pinch, the camera's zoom, and do not fly for the
  * rest of that touch, even if they come to rest; a fly already under way
  * stops when they do. One finger is the camera's orbit and never flies, and
@@ -122,6 +96,9 @@ export function flyStep(
  * for its direction every frame with the time; it keeps no timers.
  */
 export class FlyGesture {
+  /** Which touch flies are on: two fingers forward, three back (TOUCH_FLY_FORWARD, TOUCH_FLY_REVERSE). */
+  constructor(private readonly on: { forward: boolean; reverse: boolean } = { forward: TOUCH_FLY_FORWARD, reverse: TOUCH_FLY_REVERSE }) {}
+
   private points = new Map<number, { x: number; y: number }>()
   private base: { count: number; spread: number; at: number } | null = null
   private mode: 'idle' | 'wait' | 'fly' | 'pinch' = 'idle'
@@ -180,7 +157,8 @@ export class FlyGesture {
   dir(now: number): FlyDir {
     if (this.mode === 'wait' && this.base && now - this.base.at >= FLY_HOLD_MS) this.mode = 'fly'
     if (this.mode !== 'fly' || !this.base) return 0
-    return this.base.count === 2 ? 1 : -1
+    if (this.base.count === 2) return this.on.forward ? 1 : 0
+    return this.on.reverse ? -1 : 0
   }
 
   /** The fingers on the scene now. */
@@ -202,63 +180,76 @@ export class FlyGesture {
 }
 
 /**
- * Who is asking to fly, and which way: the buttons, and a touch on the
- * scene. A held button wins over the scene, though a hand doing both is rare.
+ * Who is asking to fly, and which way: the fly buttons, the pad's FAR and
+ * NEAR held in VIEW, R and F held in VIEW, and a touch on the scene. The
+ * first that asks wins, in that order; a hand doing two at once is rare.
  */
 interface ViewFlyState {
   button: FlyDir
+  pad: FlyDir
+  key: FlyDir
   touch: FlyDir
   setButton: (dir: FlyDir) => void
+  setPad: (dir: FlyDir) => void
+  setKey: (dir: FlyDir) => void
   setTouch: (dir: FlyDir) => void
 }
 
 export const useViewFly = create<ViewFlyState>((set, get) => ({
   button: 0,
+  pad: 0,
+  key: 0,
   touch: 0,
   setButton: (button) => { if (get().button !== button) set({ button }) },
+  setPad: (pad) => { if (get().pad !== pad) set({ pad }) },
+  setKey: (key) => { if (get().key !== key) set({ key }) },
   setTouch: (touch) => { if (get().touch !== touch) set({ touch }) },
 }))
 
 /** The way being flown now, from whichever asks. */
-export function flyDir(s: Pick<ViewFlyState, 'button' | 'touch'> = useViewFly.getState()): FlyDir {
-  return s.button !== 0 ? s.button : s.touch
+export function flyDir(s: Pick<ViewFlyState, 'button' | 'touch'> & Partial<Pick<ViewFlyState, 'pad' | 'key'>> = useViewFly.getState()): FlyDir {
+  return s.button || s.pad || s.key || s.touch || 0
 }
 
 /**
- * Whether the rig's camera follows the cursor (locked) across a fly. A fly
- * locks it, so the cursor keeps its place in front of the camera; when the
- * fly ends the camera goes back to what it was doing before (review of #592):
- * following the cursor, or standing where an orbit left it and only turning
- * to it.
- *
- * "Before" is read while no finger is on the scene: the first finger of a
- * touch is the orbit's, which unlocks the camera the moment it lands
- * (OrbitControls onStart), and a two-finger fly would otherwise hand back an
- * unlock the user never asked for. Unless that finger did orbit before the
- * fly began: then the unlock is the user's, and the fly hands it back.
+ * Where a fly lands the cursor: the gibson nearest the point the view now
+ * centres on. `flown` is how far the view has flown from the cursor, in
+ * cyberspace components and cells of `scaleExp` (render cells mapped through
+ * the view's axes, renderToCyber). The view centred on the cursor as it is
+ * drawn: its cell's centre below CONTINUOUS_SCALE_MIN, its true place from
+ * there up (space.ts placeCentre), so the flight is added to that, and the
+ * cursor lands in the cell the view centres on, not one off from it by the
+ * cursor's place inside its old cell. At 2^0 this is the cursor plus the
+ * flight to the nearest gibson, exactly as the fly snapped before. An axis
+ * that ends in the cursor's own cell keeps the cursor's coordinate, so a fly
+ * too short to leave the cell changes nothing. An axis at the edge of space
+ * stops there.
  */
-export class FlyFollow {
-  private flying = false
-  private was = true
-  private steady = true
-
-  /**
-   * This frame's lock, given the rig's lock, whether a fly is under way and
-   * whether a finger is on the scene. `orbited`: the touch under way turned the
-   * camera with one finger before the fly began (FlyGesture.orbited), so the
-   * camera goes back to standing, as that orbit left it, not to the follow from
-   * before the touch. `viewOpen`: a fly may still go on (canFly). A fly that
-   * ended with the view (RETURN, BUILD) hands back nothing: that change framed
-   * the camera and set its follow itself, and the "before" was a view now gone.
-   */
-  frame(locked: boolean, flying: boolean, fingersDown: boolean, orbited = false, viewOpen = true): boolean {
-    if (flying) {
-      if (!this.flying) { this.flying = true; this.was = orbited ? false : this.steady }
-      return true
-    }
-    let out = locked
-    if (this.flying) { this.flying = false; if (viewOpen) out = this.was }
-    if (!fingersDown) this.steady = out
-    return out
+export function landingOf(cursor: Position, flown: Readonly<Record<AxisName, number>>, scaleExp: number): Position {
+  const out: Position = { ...cursor }
+  const cell = 2 ** scaleExp
+  for (const axis of ['x', 'y', 'z'] as const) {
+    // The gibson the cursor is drawn at (its cell's centre gibson below the
+    // continuous range), then the flight to the nearest whole gibson.
+    const drawn = scaleExp === 0 || scaleExp >= CONTINUOUS_SCALE_MIN ? cursor[axis] : alignTo(cursor[axis], scaleExp) + (1n << BigInt(scaleExp - 1))
+    const to = clampAxis(drawn + BigInt(Math.round(flown[axis] * cell)))
+    // Still in the cursor's own cell: the cursor stays exactly where it was.
+    out[axis] = alignTo(to, scaleExp) === alignTo(cursor[axis], scaleExp) && scaleExp < CONTINUOUS_SCALE_MIN ? cursor[axis] : to
   }
+  return out
+}
+
+/**
+ * Where an unlanded fly would put the cursor right now, asked by the store's
+ * pad move (useCyberspace moveCursor): a press within the two seconds before
+ * a fly lands steps from where the view has flown, not from where the cursor
+ * still waits, so the camera is not pulled back the whole way. The scene's
+ * fly registers the answer (scene/ViewFly.ts); null when nothing is flown.
+ */
+let landingSource: (() => Position | null) | null = null
+export function setFlyLanding(source: (() => Position | null) | null): void {
+  landingSource = source
+}
+export function flyLanding(): Position | null {
+  return landingSource ? landingSource() : null
 }

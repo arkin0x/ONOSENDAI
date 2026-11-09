@@ -29,6 +29,7 @@ import type { RotateDirection } from '../lib/space'
 import { stepBuild } from '../store/buildStep'
 import { useWalk } from '../store/useWalk'
 import { walkMove, walkPress } from '../lib/walkKeys'
+import { canFly, useViewFly } from '../lib/viewFly'
 
 const MOVE_KEYS: Record<string, MoveName> = {
   KeyW: 'up',
@@ -122,6 +123,17 @@ export function walkCancel(): void {
   const walk = useWalk.getState()
   if (walk.behind > 0 || walk.open !== null || walk.falling || useCyberspace.getState().proof.status === 'computing') walk.stop()
   else walk.exit()
+}
+
+/** R or F let go: the fly that key started stops (a different key held since keeps its own). */
+export function flyKeyUp(code: 'KeyR' | 'KeyF'): void {
+  const f = useViewFly.getState()
+  if (f.key === (code === 'KeyR' ? 1 : -1)) f.setKey(0)
+}
+
+/** The window lost focus: no keyup will come for a held R or F. */
+function flyKeysReleased(): void {
+  useViewFly.getState().setKey(0)
 }
 
 export function useKeyboard(): void {
@@ -281,6 +293,12 @@ export function useKeyboard(): void {
         event.preventDefault()
         // In WALK R and F are up and down, answered above.
         if (store.walking) return
+        // In VIEW they fly the view while held, as the fly buttons do
+        // (lib/viewFly.ts; arkinox, 2026-11-09): the key's own repeat adds nothing.
+        if (canFly(store, building)) {
+          useViewFly.getState().setKey(event.code === 'KeyR' ? 1 : -1)
+          return
+        }
         store.moveCursor(moveDirection(axes, MOVE_KEYS[event.code]))
         return
       }
@@ -303,6 +321,8 @@ export function useKeyboard(): void {
 
     const onKeyUp = (event: KeyboardEvent) => {
       walkKeyUp(event.code)
+      // R or F let go: VIEW's fly from that key stops.
+      if (event.code === 'KeyR' || event.code === 'KeyF') flyKeyUp(event.code)
       // A button with focus activates on Space's keyup: in WALK that Space
       // was a step up, not a press of the button.
       if (event.code === 'Space' && useCyberspace.getState().walking) event.preventDefault()
@@ -310,7 +330,9 @@ export function useKeyboard(): void {
     window.addEventListener('keydown', onKeyDown)
     window.addEventListener('keyup', onKeyUp)
     window.addEventListener('blur', walkKeysReleased)
+    window.addEventListener('blur', flyKeysReleased)
     return () => {
+      window.removeEventListener('blur', flyKeysReleased)
       window.removeEventListener('keydown', onKeyDown)
       window.removeEventListener('keyup', onKeyUp)
       window.removeEventListener('blur', walkKeysReleased)

@@ -1,23 +1,54 @@
 /**
- * viewFly.test.ts - the rules of VIEW's free fly (arkinox, 2026-11-02): two
- * fingers fly forward, three back; a pinch is the camera's and never flies;
- * one finger is the orbit's; the speed is the same in cells at every zoom;
- * the cursor lands on the nearest gibson.
+ * viewFly.test.ts - the rules of VIEW's free fly (arkinox, 2026-11-02 and
+ * 2026-11-09): two fingers fly forward, three back, but only while those
+ * gestures are on, and both are off for now; a pinch is the camera's and
+ * never flies; one finger is the orbit's; the speed is the same in cells at
+ * every zoom; a fly lands the cursor on the gibson nearest where the view
+ * centres.
  */
 
 import { describe, expect, it } from 'vitest'
 import { AXIS_MAX } from 'cyberspace-core'
 import {
-  canFly, flyDir, flySpeed, flyStep, FlyGesture, FLY_CELLS_PER_SECOND, FLY_HOLD_MS, FLY_MAX_DT, NO_CARRY, renderToCyber,
+  canFly, flyDir, flySpeed, FlyGesture as BaseGesture, FLY_CELLS_PER_SECOND, FLY_HOLD_MS, landingOf, renderToCyber, TOUCH_FLY_FORWARD, TOUCH_FLY_REVERSE,
 } from '../viewFly'
-import type { ViewAxes } from '../space'
+import { alignTo, type ViewAxes } from '../space'
+
+/** The gesture with both touch flies on, as they were before 2026-11-09 and may be again. */
+class FlyGesture extends BaseGesture {
+  constructor() { super({ forward: true, reverse: true }) }
+}
 
 /** Fingers at rest, `spread` pixels apart along x, all down at `t`. */
 function rest(g: FlyGesture, n: number, t = 0, spread = 200): void {
   for (let i = 0; i < n; i++) g.down(i + 1, 100 + (i * spread) / Math.max(1, n - 1), 400, t)
 }
 
-describe('FlyGesture: which way a touch flies', () => {
+describe('the touch flies are off for now (arkinox, 2026-11-09)', () => {
+  it('two fingers at rest and three at rest fly nowhere with the flags as shipped', () => {
+    expect(TOUCH_FLY_FORWARD).toBe(false)
+    expect(TOUCH_FLY_REVERSE).toBe(false)
+    const g = new BaseGesture()
+    rest(g, 2)
+    expect(g.dir(10_000)).toBe(0)
+    g.clear()
+    rest(g, 3)
+    expect(g.dir(10_000)).toBe(0)
+  })
+
+  it('each can come back on its own', () => {
+    const fwd = new BaseGesture({ forward: true, reverse: false })
+    rest(fwd, 2)
+    expect(fwd.dir(FLY_HOLD_MS)).toBe(1)
+    fwd.clear(); rest(fwd, 3)
+    expect(fwd.dir(FLY_HOLD_MS)).toBe(0)
+    const back = new BaseGesture({ forward: false, reverse: true })
+    rest(back, 3)
+    expect(back.dir(FLY_HOLD_MS)).toBe(-1)
+  })
+})
+
+describe('FlyGesture (with the touch flies on): which way a touch flies', () => {
   it('two fingers at rest fly forward, once they have rested FLY_HOLD_MS', () => {
     const g = new FlyGesture()
     rest(g, 2)
@@ -150,6 +181,13 @@ describe('the buttons win over the scene', () => {
     expect(flyDir({ button: 1, touch: -1 })).toBe(1)
     expect(flyDir({ button: -1, touch: 0 })).toBe(-1)
   })
+
+  it('the pad (FAR, NEAR) and the keys (R, F) fly too, after the buttons and before a touch', () => {
+    expect(flyDir({ button: 0, pad: 1, key: 0, touch: 0 })).toBe(1)
+    expect(flyDir({ button: 0, pad: 0, key: -1, touch: 0 })).toBe(-1)
+    expect(flyDir({ button: 0, pad: -1, key: 1, touch: 1 })).toBe(-1)
+    expect(flyDir({ button: 1, pad: -1, key: -1, touch: -1 })).toBe(1)
+  })
 })
 
 describe('canFly: only in a free view', () => {
@@ -173,76 +211,55 @@ describe('the speed scales with the zoom', () => {
     for (const e of [0, 7, 40, 83]) expect(flySpeed(e + 1)).toBe(2 * flySpeed(e))
   })
 
-  it('a second of flight crosses FLY_CELLS_PER_SECOND cells at 2^0, 2^20 and 2^60', () => {
-    const along = { x: 1, y: 0, z: 0 }
-    for (const e of [0, 20, 60]) {
-      let cursor = { x: 1n << 70n, y: 0n, z: 0n }
-      let carry = { ...NO_CARRY }
-      for (let i = 0; i < 20; i++) ({ cursor, carry } = flyStep(cursor, carry, along, 1, 0.05, e))
-      expect(Number(cursor.x - (1n << 70n)) / 2 ** e).toBeCloseTo(FLY_CELLS_PER_SECOND, 6)
-    }
-  })
 })
 
-describe('flyStep: the cursor on the nearest gibson', () => {
+describe('landingOf: where the cursor lands once the fly comes to rest', () => {
   const origin = { x: 1000n, y: 1000n, z: 1000n }
 
-  it('a slow frame at 2^0 moves nothing and carries the fraction, until it adds up to the nearest gibson', () => {
-    // 8 cells a second at 1/60 s is 0.133 of a gibson a frame.
-    let r = flyStep(origin, NO_CARRY, { x: 0, y: 0, z: 1 }, 1, 1 / 60, 0)
-    expect(r.moved).toBe(false)
-    expect(r.cursor).toEqual(origin)
-    expect(r.carry.z).toBeCloseTo(8 / 60, 9)
-    const frames = [r]
-    for (let i = 0; i < 5; i++) { r = flyStep(r.cursor, r.carry, { x: 0, y: 0, z: 1 }, 1, 1 / 60, 0); frames.push(r) }
-    // 4 frames: 0.533, the nearest gibson is one on.
-    expect(frames.map((f) => f.cursor.z - origin.z)).toEqual([0n, 0n, 0n, 1n, 1n, 1n])
-    expect(frames[3].carry.z).toBeCloseTo(4 * 8 / 60 - 1, 9)
+  it('at 2^0, the cursor plus the flight to the nearest gibson, as the fly snapped before', () => {
+    expect(landingOf(origin, { x: 0, y: 0, z: 3.4 }, 0)).toEqual({ ...origin, z: 1003n })
+    expect(landingOf(origin, { x: 0, y: 0, z: 3.6 }, 0)).toEqual({ ...origin, z: 1004n })
+    expect(landingOf(origin, { x: -2.2, y: 0.4, z: 0 }, 0)).toEqual({ x: 998n, y: 1000n, z: 1000n })
   })
 
-  it('whole gibsons land exactly, with nothing carried', () => {
-    // 8 cells a second of 4 gibsons, for 1/16 s: 2 gibsons.
-    const r = flyStep(origin, NO_CARRY, { x: 1, y: 0, z: 0 }, 1, 0.0625, 2)
-    expect(r.cursor).toEqual({ ...origin, x: 1002n })
-    expect(r.carry.x).toBe(0)
+  it('a flight too short to leave the cursor\'s cell changes nothing', () => {
+    expect(landingOf(origin, { x: 0.3, y: -0.2, z: 0.1 }, 0)).toEqual(origin)
+    const c = { x: (5n << 10n) + 7n, y: 3n << 10n, z: 9n << 10n }
+    expect(landingOf(c, { x: 0.4, y: 0, z: -0.3 }, 10)).toEqual(c)
   })
 
-  it('back goes the other way', () => {
-    const r = flyStep(origin, NO_CARRY, { x: 1, y: 0, z: 0 }, -1, 0.0625, 2)
-    expect(r.cursor.x).toBe(998n)
+  it('below the continuous range, the cell the view centres on: the flight is added to the cell\'s centre, not the cursor\'s corner', () => {
+    // The cursor sits at the low corner of its 2^4 cell; the view centres on
+    // the cell's centre and flies 1.4 cells on x: the centre plus 1.4 cells
+    // is 1.9 cells from the corner, inside the next cell.
+    const e = 4
+    const c = { x: 160n, y: 160n, z: 160n }
+    const to = landingOf(c, { x: 1.4, y: 0, z: 0 }, e)
+    expect(alignTo(to.x, e)).toBe(alignTo(c.x, e) + 16n)
+    // Measured from the corner it would have stayed in the same cell (1.4 cells from it).
+    expect(alignTo(c.x + BigInt(Math.round(1.4 * 16)), e)).toBe(alignTo(c.x, e) + 16n)
+    // And three cells of flight land three cells on.
+    expect(alignTo(landingOf(c, { x: 0, y: -3, z: 0 }, e).y, e)).toBe(alignTo(c.y, e) - 48n)
   })
 
-  it('a slanting line of sight moves every axis it leans along, each to its nearest gibson', () => {
-    const k = Math.SQRT1_2
-    const r = flyStep(origin, NO_CARRY, { x: k, y: -k, z: 0 }, 1, 0.1, 4)
-    // 8 * 16 * 0.1 = 12.8 gibsons along the line: 9.05 on x and -9.05 on y.
-    expect(r.cursor).toEqual({ x: 1009n, y: 991n, z: 1000n })
-    expect(r.carry.x).toBeCloseTo(12.8 * k - 9, 9)
-    expect(r.carry.y).toBeCloseTo(-12.8 * k + 9, 9)
+  it('a second of flight is FLY_CELLS_PER_SECOND cells at 2^0, 2^20 and 2^60', () => {
+    for (const e of [0, 20, 60]) {
+      const c = { x: 1n << 70n, y: 0n, z: 0n }
+      const to = landingOf(c, { x: FLY_CELLS_PER_SECOND, y: 0, z: 0 }, e)
+      expect(Number(to.x - alignTo(c.x, e)) / 2 ** e).toBeCloseTo(FLY_CELLS_PER_SECOND + (e === 0 ? 0 : 0.5), 6)
+    }
   })
 
-  it('stops at the edge of space and drops what that axis owed', () => {
+  it('stops at the edge of space', () => {
     const edge = { x: AXIS_MAX, y: 5n, z: 0n }
-    const r = flyStep(edge, NO_CARRY, { x: 1, y: 0, z: 0 }, 1, 0.1, 10)
-    expect(r.cursor.x).toBe(AXIS_MAX)
-    expect(r.carry.x).toBe(0)
-    expect(r.moved).toBe(false)
-    const low = flyStep({ x: 3n, y: 5n, z: 0n }, NO_CARRY, { x: 1, y: 0, z: 0 }, -1, 0.1, 10)
-    expect(low.cursor.x).toBe(0n)
-    expect(low.moved).toBe(true)
+    expect(landingOf(edge, { x: 40, y: 0, z: 0 }, 0).x).toBe(AXIS_MAX)
+    expect(landingOf({ x: 3n, y: 5n, z: 0n }, { x: -40, y: 0, z: 0 }, 0).x).toBe(0n)
   })
 
-  it('a long frame (a tab coming back) flies no further than FLY_MAX_DT', () => {
-    const r = flyStep(origin, NO_CARRY, { x: 1, y: 0, z: 0 }, 1, 30, 0)
-    expect(r.cursor.x - origin.x).toBe(BigInt(Math.round(FLY_CELLS_PER_SECOND * FLY_MAX_DT)))
-  })
-
-  it('works at the top of the ladder, where a gibson is far below a cell', () => {
+  it('works at the top of the ladder, where the cursor is drawn at its true place', () => {
     const mid = { x: 1n << 84n, y: 1n << 84n, z: 1n << 84n }
-    const r = flyStep(mid, NO_CARRY, { x: 0, y: 1, z: 0 }, 1, 0.05, 80)
-    expect(r.moved).toBe(true)
-    const cells = Number(r.cursor.y - mid.y) / 2 ** 80
-    expect(cells).toBeCloseTo(FLY_CELLS_PER_SECOND * 0.05, 9)
+    const to = landingOf(mid, { x: 0, y: 0.4, z: 0 }, 80)
+    expect(Number(to.y - mid.y) / 2 ** 80).toBeCloseTo(0.4, 9)
   })
 })
 

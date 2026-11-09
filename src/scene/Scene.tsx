@@ -26,7 +26,7 @@ import { EffectComposer, Bloom } from '@react-three/postprocessing'
 import { BlendFunction, Effect, type BloomEffect, type EffectComposer as PostComposer } from 'postprocessing'
 import { memo, useEffect, useLayoutEffect, useMemo, useRef } from 'react'
 import { useFrame } from '@react-three/fiber'
-import { Quaternion, Vector3, type PerspectiveCamera } from 'three'
+import { Quaternion, Vector3, type Fog, type PerspectiveCamera } from 'three'
 import { applyLensShift, lensShift, stepShift, uncoveredBand, type Cover } from '../lib/coverBand'
 import { readCovers, setCoverWatch } from '../hooks/useCover'
 import { useBuilder } from '../store/useBuilder'
@@ -103,7 +103,7 @@ import { useTv } from '../store/useTv'
 import { CAMERA_NEAR, FOV } from './camera'
 import { headlampReach, headlampUniforms } from './headlamp'
 import { canvasPixels, composerSamples } from './composerBudget'
-import { rigViewFly, useFlyTouches, type FlyRig } from './ViewFly'
+import { panGesture, takeFlyReanchor, useFlyTouches, viewRig, type RigCamera } from './ViewFly'
 
 /** Starting distance from the cursor, in cells. Orbit takes over from here. */
 const START_DISTANCE = 26
@@ -352,6 +352,43 @@ function CellMetric(): null {
  * after every cut was shaded for the shot before it (review of #456).
  */
 const HEADLAMP_PRIORITY = 0.75
+
+/** Where the scene's fog begins and where it is black, in render cells: TV's and WALK's. */
+const FOG_NEAR = GRID_RADIUS * 0.9
+const FOG_FAR = GRID_RADIUS * 4
+/**
+ * How much further off the fog begins and ends in the third-person views
+ * (HOP, VIEW, BUILD, spectating): arkinox, 2026-11-09: "can we also make the
+ * default fog more distant? things turn black when they are still pretty
+ * close." The camera orbits 26 cells out, so the fog began before the cursor
+ * (21.6) and took more than a third of a shard 50 cells away; at twice the
+ * distances it begins at 43.2 and is black at 192. The headlamp only dims,
+ * to DISTANCE_FLOOR at worst (headlamp.ts); the black was the fog's.
+ * Cyberspace TV's shots and WALK's eye keep the fog they were tuned with.
+ */
+export const VIEW_FOG_SCALE = 2
+
+/**
+ * The scene's fog, further off in the third-person views (VIEW_FOG_SCALE).
+ * One Fog for the page, its distances moved in place: a new Fog object would
+ * send every fogged material back for its program (three compares the fog
+ * by identity), where the distances are uniforms read every frame.
+ */
+function SceneFog(): JSX.Element {
+  const tv = useTv((s) => s.on)
+  const walking = useCyberspace((s) => s.walking)
+  const fog = useRef<Fog>(null)
+  const k = tv || walking ? 1 : VIEW_FOG_SCALE
+  // In the commit, before the frame that shows the mode is drawn.
+  useLayoutEffect(() => {
+    if (!fog.current) return
+    fog.current.near = FOG_NEAR * k
+    fog.current.far = FOG_FAR * k
+    // The browser harness reads and sets it, as it reads __rig.
+    if (import.meta.env.DEV) (window as unknown as { __fog?: unknown }).__fog = fog.current
+  }, [k])
+  return <fog ref={fog} attach="fog" args={[0x000000, FOG_NEAR * VIEW_FOG_SCALE, FOG_FAR * VIEW_FOG_SCALE]} />
+}
 
 /**
  * Keeps the world's headlamp (scene/headlamp.ts) in step: on or off with the
@@ -656,6 +693,7 @@ function Rig(): JSX.Element {
       const offset = keptOffset()
       const [x, y, z] = s.cursorOffset()
       glideLeft.current = 0
+      viewRig.reset()
       smooth.current.set(x, y, z)
       c.target.copy(smooth.current)
       c.object.position.copy(smooth.current).add(offset)
@@ -682,6 +720,14 @@ function Rig(): JSX.Element {
     // SPECTATE and RETURN re-frame straight on, as boot does.
     const focusOnly = before !== null && before.view === view && before.genesisId === genesisId &&
       before.exploreIndex === exploreIndex && before.focusPubkey === focusPubkey && before.focusPoint !== focusPoint
+    // VIEW's fly re-anchored the view on where it has flown (scene/ViewFly.ts):
+    // the camera is already there and the per-frame origin shift carries it,
+    // so there is nothing to glide to and no follow to change.
+    const flyMoved = takeFlyReanchor()
+    if (focusOnly && flyMoved) {
+      trace('focus-fly')
+      return
+    }
     // A focus that begins or ends where the scene already stands: VIEW
     // turned on or off at your head, which anchors the view exactly where you
     // are. Nothing moved, so the camera stays exactly as it was, orbit and
@@ -709,6 +755,7 @@ function Rig(): JSX.Element {
       const offset = keptOffset()
       const [x, y, z] = s.cursorOffset()
       glideLeft.current = 0
+      viewRig.reset()
       smooth.current.set(x, y, z)
       c.target.copy(smooth.current)
       c.object.position.copy(smooth.current).add(offset)
@@ -720,6 +767,7 @@ function Rig(): JSX.Element {
     }
     trace('reframe')
     glideLeft.current = 0
+    viewRig.reset()
     const [x, y, z] = s.cursorOffset()
     smooth.current.set(x, y, z)
     c.target.copy(smooth.current)
@@ -782,10 +830,17 @@ function Rig(): JSX.Element {
       doc.removeEventListener('pointercancel', up, true)
     }
   }, [surface])
-  // VIEW's fly: two fingers at rest on the scene fly forward, three back (scene/ViewFly.ts).
+  // The scene's touches and the mouse's right or Shift drag, to VIEW's fly
+  // and the camera's pan (scene/ViewFly.ts).
   useFlyTouches(surface)
-  // The refs the fly drives, gathered once so the frame allocates nothing.
-  const flyRig = useMemo<FlyRig>(() => ({ locked, glideLeft }), [])
+  // The camera as the offset reads it, gathered once so the frame allocates nothing.
+  const rigCam = useMemo<RigCamera>(() => ({ position: new Vector3(), target: new Vector3(), quaternion: new Quaternion(), fov: FOV, heightPx: 1 }), [])
+  // Two fingers landing start OrbitControls (onStart) before anyone knows
+  // whether they pinch or pan: a pinch unlocks the camera as it always has,
+  // once it shows itself; a pan leaves the follow as it was.
+  const pinchUnlock = useRef(false)
+  // The frame's target, with the offset added (viewRig.apply).
+  const aimAt = useMemo(() => new Vector3(), [])
 
   useFrame((state, dt) => {
     const c = controls.current
@@ -793,11 +848,24 @@ function Rig(): JSX.Element {
     // GRAVITY's fall (store/useWalk.ts) takes its frame first: it can land,
     // which moves the cursor read below.
     tickFall()
-    // So does VIEW's fly, which moves the cursor along the camera's line of
-    // sight, locks the camera to it while it flies, hands the camera back its
-    // own follow after, and keeps the re-anchor glide out of it (ViewFly.ts).
-    rigViewFly(flyRig, c.object.position, c.target, dt)
+    // So does the camera's offset from its orbit (ViewFly.ts): VIEW's fly
+    // glides the view along the line of sight while the cursor waits, the
+    // pan takes its frame, and a fly at rest long enough lands the cursor,
+    // which moves the cursor read below.
+    rigCam.position.copy(c.object.position)
+    rigCam.target.copy(c.target)
+    rigCam.quaternion.copy(state.camera.quaternion)
+    rigCam.fov = (state.camera as { fov?: number }).fov ?? FOV
+    rigCam.heightPx = state.size.height
+    viewRig.before(rigCam, dt)
+    // A fly glides by the offset, not the follow: no stretched glide under it.
+    if (viewRig.flying) glideLeft.current = 0
+    if (pinchUnlock.current) {
+      if (panGesture.pinching) { locked.current = false; pinchUnlock.current = false } else if (panGesture.fingers < 2) pinchUnlock.current = false
+    }
     const s = useCyberspace.getState()
+    // A pan's fingers drifting apart never zoom (lib/viewCamera.ts PanGesture).
+    c.enableZoom = !s.walking && !panGesture.panning
     lastOffset.current.copy(c.object.position).sub(c.target)
     // The anchor, not the position: in history the scene is drawn from the
     // action being looked at, and the camera has to ride that the same way it
@@ -840,9 +908,15 @@ function Rig(): JSX.Element {
       ty += up[1] * k
       tz += up[2] * k
     }
+    // How far the render frame moved since the last frame, for the offset to
+    // tell a moved frame from a moved cursor; null when there is no path (a
+    // zoom, a cut, the first frame).
+    let continuous: [number, number, number] | null = null
     if (prevOrigin.current && prevScale.current === s.scaleExp) {
       const shift = originShift(prevOrigin.current, origin, s.scaleExp, s.axes())
+      continuous = shift
       if (Math.max(Math.abs(shift[0]), Math.abs(shift[1]), Math.abs(shift[2])) >= GLIDE_MAX_CELLS) {
+        continuous = null
         // Too far to fly: a cut, the same one the effect above makes for a
         // chain step that far. This path is for the anchor changes that do
         // not pass through the effect, whose dependencies are the framing
@@ -869,6 +943,15 @@ function Rig(): JSX.Element {
         smooth.current.z += shift[2]
       }
     }
+
+    // The camera's offset from its orbit (a pan, a fly not yet landed, or the
+    // ease back from either): the camera and the follow point take its
+    // change straight, locked or not, and the target comes back with it.
+    aimAt.set(tx, ty, tz)
+    viewRig.apply(aimAt, continuous, c.object.position, smooth.current)
+    tx = aimAt.x
+    ty = aimAt.y
+    tz = aimAt.z
 
     // A zoom rescales every render coordinate, so there is no continuous path
     // between the old framing and the new one to ease along.
@@ -998,7 +1081,7 @@ function Rig(): JSX.Element {
       minDistance={ORBIT_MIN_DISTANCE}
       maxDistance={GRID_RADIUS * 4}
       dampingFactor={0.12}
-      onStart={() => { locked.current = false }}
+      onStart={() => { if (panGesture.fingers >= 2) pinchUnlock.current = true; else locked.current = false }}
     />
   )
 }
@@ -1143,7 +1226,7 @@ export const Scene = memo(function Scene(): JSX.Element {
       {/* Draws the view: frameloop "never" and this, every frame or none past 60 a second when nothing moves. */}
       <FrameDriver />
       {/* Fog to pure black: the only distance cue in an otherwise empty field. */}
-      <fog attach="fog" args={[0x000000, GRID_RADIUS * 0.9, GRID_RADIUS * 4]} />
+      <SceneFog />
       <ambientLight intensity={0.8} />
       <directionalLight position={[10, 10, 10]} intensity={1.2} />
       <Rig />

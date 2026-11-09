@@ -27,6 +27,7 @@ import { Euler, Vector3 } from 'three'
 import { newShard, type ShardModel } from 'sno-core/shards'
 import { mount, type Host } from '../../test/elementRoot'
 import { builtInLook, builtInLookTags, lookFacing, lookOf, type Look } from '../../lib/looks'
+import { turnDirection } from '../../lib/turn'
 import type { LootObject } from '../../lib/lootObjects'
 import { ChestLoot, LOOT_ROUND, LOOT_UP } from '../ChestLoot'
 import { lookBounds } from '../LookMark'
@@ -120,7 +121,7 @@ describe('which way a look faces (lookFacing)', () => {
     expect(lookFacing({ closed: cube('mine'), open: null })).toBe(0)
   })
 
-  it('a TURN that tips the front straight up faces +Z too', () => {
+  it('a TURN that tips the front straight up, its width unturned, faces +Z too: the row along the width', () => {
     const tags = builtInLookTags('treasure', { unit: 0, turn: [1, 0, 0], constrain: 'all' })
     expect(lookFacing(lookOf({ type: 'chest', event: { tags } })!)).toBe(0)
   })
@@ -133,5 +134,74 @@ describe('which way a look faces (lookFacing)', () => {
     const b = lookBounds(look.open!)
     expect((b.min[2] + b.max[2]) / 2).toBeGreaterThan(0.1)
     expect(Math.cos(lookFacing(look))).toBeCloseTo(-1, 9)
+  })
+})
+
+/** The chest's width as drawn at a TURN, from its own closed points: the one axis TREASURE spans evenly about its middle (X, -0.45 to 0.45; its height starts at 0 and its depth is uneven). A unit axis of the render frame. */
+function widthOfModel(closed: ShardModel): Vector3 {
+  const b = lookBounds(closed)
+  const even = [0, 1, 2].filter((i) => Math.abs(b.min[i] + b.max[i]) < 1e-6 && b.max[i] > 0.4)
+  expect(even.length).toBe(1)
+  return new Vector3(...([0, 1, 2].map((i) => (i === even[0] ? 1 : 0)) as [number, number, number]))
+}
+
+/** The chest's front as turned, in the render frame (lookFacing's convention: stored -Z is render +Z, so the Z flips). */
+function frontOfTurn(turns: [number, number, number]): Vector3 {
+  const [x, y, z] = turnDirection([0, 0, -1], turns)
+  return new Vector3(x, y, -z)
+}
+
+/** Which way ChestLoot's row runs at a facing: its X turned about Y by the facing. */
+const rowAt = (facing: number): Vector3 => new Vector3(1, 0, 0).applyEuler(new Euler(0, facing, 0))
+
+describe('the loot row on a tipped chest (review of #638)', () => {
+  const turnsOf = (n: number): [number, number, number] => [Math.floor(n / 16), Math.floor(n / 4) % 4, n % 4]
+
+  it('TURN 011, the chest on its face: the row runs along its width, not its height', async () => {
+    const tags = builtInLookTags('treasure', { unit: 0, turn: [0, 1, 1], constrain: 'all' })
+    const look = lookOf({ type: 'chest', event: { tags } })!
+    expect(Math.abs(frontOfTurn([0, 1, 1]).y)).toBe(1)
+    const width = widthOfModel(look.closed)
+    // Its width lies along Z here; the old +Z facing ran the row along X, its height.
+    expect(Math.abs(width.z)).toBe(1)
+    const facing = lookFacing(look)
+    expect(Math.abs(rowAt(facing).dot(width))).toBeCloseTo(1, 9)
+    // As ChestLoot mounts it: the row from its first object to its last.
+    const { at } = await mountedRow(4, facing)
+    const row = at[3].clone().sub(at[0]).normalize()
+    expect(Math.abs(row.dot(width))).toBeCloseTo(1, 9)
+    expect(Math.abs(row.y)).toBeLessThan(1e-9)
+  })
+
+  it('at all 64 TURNs: the row is level and across the front, and along the width wherever the width is level', () => {
+    let tipped = 0
+    let level = 0
+    for (let n = 0; n < 64; n++) {
+      const turns = turnsOf(n)
+      const tags = builtInLookTags('treasure', { unit: 0, turn: turns, constrain: 'all' })
+      const look = lookOf({ type: 'chest', event: { tags } })!
+      const label = `TURN ${turns.join('')}`
+      const front = frontOfTurn(turns)
+      const width = widthOfModel(look.closed)
+      const facing = lookFacing(look)
+      const row = rowAt(facing)
+      expect(Math.abs(row.dot(front)), label).toBeLessThan(1e-9)
+      if (Math.abs(width.y) < 0.5) {
+        level++
+        expect(Math.abs(row.dot(width)), label).toBeCloseTo(1, 9)
+      }
+      if (Math.abs(front.y) === 1) {
+        tipped++
+        // Tipped, the width is always level (it is square to the front), so the row is always along it.
+        expect(Math.abs(width.y), label).toBe(0)
+      } else {
+        // A level front: the facing is that front, as it always was.
+        const faces = new Vector3(0, 0, 1).applyEuler(new Euler(0, facing, 0))
+        expect(faces.dot(front), label).toBeCloseTo(1, 9)
+      }
+    }
+    // The 64 triples reach the 24 orientations unevenly: 24 of them tip the front up or down.
+    expect(tipped).toBe(24)
+    expect(level).toBeGreaterThan(tipped)
   })
 })

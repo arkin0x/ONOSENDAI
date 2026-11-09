@@ -24,8 +24,9 @@ describe('the scene fog', () => {
   })
 
   it('keeps the old distances in TV and WALK, and eases one Fog in place every frame rather than making a new one', () => {
-    expect(fogBody).toMatch(/fogFar\(useTv\.getState\(\)\.on \|\| useCyberspace\.getState\(\)\.walking, state\.camera\.position\.length\(\)\)/)
-    expect(fogBody).toMatch(/f\.far = easeFog\(f\.far, far, dt\)/)
+    expect(fogBody).toMatch(/const base = useTv\.getState\(\)\.on \|\| useCyberspace\.getState\(\)\.walking\n/)
+    expect(fogBody).toMatch(/f\.far = fogFarStep\(f\.far, mode\.current, base, state\.camera\.position\.length\(\), dt\)\n\s*mode\.current = base\n/)
+    expect(fogBody).toMatch(/const mode = useRef<boolean \| null>\(null\)/)
     expect(fogBody).toMatch(/f\.near = f\.far \* FOG_START_SHARE/)
     // The args are the Fog's first and only construction.
     expect(fogBody).toMatch(/args=\{\[0x000000, FOG_NEAR \* VIEW_FOG_SCALE, FOG_FAR \* VIEW_FOG_SCALE\]\}/)
@@ -54,6 +55,41 @@ describe('the scene fog', () => {
     // At 60 fps no frame moves the end by more than 1.1 cells (it was 24.5 in one).
     expect(b.worst).toBeLessThan(1.1)
     expect(easeFog(100, 150, 0)).toBe(100)
+  })
+
+  it('N10: the first frame jumps straight to the target, in any mode, from the Fog\'s first distances', async () => {
+    const { fogFarStep, fogFar, FOG_FAR, VIEW_FOG_SCALE } = await import('../fog')
+    // The 24/7 broadcast page: TV on from the first frame, the Fog built at 192.
+    expect(fogFarStep(FOG_FAR * VIEW_FOG_SCALE, null, true, 40, 1 / 60)).toBe(96)
+    // A third-person view 26 out: 166 at once, not eased down from 192.
+    expect(fogFarStep(FOG_FAR * VIEW_FOG_SCALE, null, false, 26, 1 / 60)).toBe(fogFar(false, 26))
+    // Even with no time passed.
+    expect(fogFarStep(FOG_FAR * VIEW_FOG_SCALE, null, true, 0, 0)).toBe(96)
+  })
+
+  it('N10: TV or WALK on or off jumps to the new mode\'s fog; within a mode a re-anchor still eases', async () => {
+    const { fogFarStep, easeFog, fogFar } = await import('../fog')
+    // Entering TV or WALK from the usual orbit: 166 to 96 in one frame.
+    expect(fogFarStep(166, false, true, 26, 1 / 60)).toBe(96)
+    // Leaving: 96 to the third-person 166 in one frame.
+    expect(fogFarStep(96, true, false, 26, 1 / 60)).toBe(166)
+    // A re-anchor within a third-person view: eased, exactly as before.
+    expect(fogFarStep(190.8, false, false, 192 - 166.3, 1 / 60)).toBe(easeFog(190.8, 166.3, 1 / 60))
+    expect(fogFarStep(190.8, false, false, 192 - 166.3, 1 / 60)).toBeGreaterThan(189)
+    // And a frame run as SceneFog runs it: orbit, TV on, a TV cut far off, TV off.
+    let far = 192
+    let mode: boolean | null = null
+    const frame = (base: boolean, d: number): number => { far = fogFarStep(far, mode, base, d, 1 / 60); mode = base; return far }
+    expect(frame(false, 26)).toBe(166)
+    expect(frame(false, 26)).toBe(166)
+    expect(frame(true, 26)).toBe(96)
+    // In TV the end is 96 wherever the camera is: nothing to ease.
+    expect(frame(true, 300)).toBe(96)
+    expect(frame(false, 26)).toBe(166)
+    // A re-anchor after: eased from 166 toward the new target, not jumped.
+    const next = frame(false, 60)
+    expect(next).toBeLessThan(166)
+    expect(next).toBeGreaterThan(fogFar(false, 60))
   })
 
   it('S2b: three fogs by straight-line distance, so the bound below is exact at every screen edge', async () => {

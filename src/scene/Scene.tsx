@@ -104,7 +104,7 @@ import { CAMERA_NEAR, FOV } from './camera'
 import { headlampReach, headlampUniforms } from './headlamp'
 import { canvasPixels, composerSamples } from './composerBudget'
 import './radialFog'
-import { easeFog, fogFar, FOG_FAR, FOG_NEAR, FOG_START_SHARE, VIEW_FOG_SCALE } from './fog'
+import { fogFarStep, FOG_FAR, FOG_NEAR, FOG_START_SHARE, VIEW_FOG_SCALE } from './fog'
 import { flyGesture, panGesture, sceneMouse, takeFlyReanchor, useFlyTouches, viewRig, type RigCamera } from './ViewFly'
 import { StartLock } from '../lib/viewCamera'
 
@@ -359,12 +359,16 @@ const HEADLAMP_PRIORITY = 0.75
 /**
  * The scene's fog, further off in the third-person views (VIEW_FOG_SCALE),
  * its end held inside the layers' reach (CULL_REACH) as the camera moves.
- * One Fog for the page, its distances eased in place every frame: a new Fog
+ * One Fog for the page, its distances moved in place every frame (eased
+ * within a mode, straight to the target on the first frame and on a change
+ * of mode, fog.ts fogFarStep): a new Fog
  * object would send every fogged material back for its program (three
  * compares the fog by identity), where the distances are uniforms.
  */
 function SceneFog(): JSX.Element {
   const fog = useRef<Fog>(null)
+  // The mode the last frame's fog was for (TV or WALK, or a third-person view); null before the first.
+  const mode = useRef<boolean | null>(null)
   useLayoutEffect(() => {
     // The browser harness reads and sets it, as it reads __rig.
     if (import.meta.env.DEV) (window as unknown as { __fog?: unknown }).__fog = fog.current
@@ -374,10 +378,12 @@ function SceneFog(): JSX.Element {
     if (!f) return
     // The browser harness can pin the fog, to shoot the old one against the new.
     if (import.meta.env.DEV) { const pin = (window as unknown as { __fogFixed?: [number, number] }).__fogFixed; if (pin) { f.near = pin[0]; f.far = pin[1]; return } }
-    const far = fogFar(useTv.getState().on || useCyberspace.getState().walking, state.camera.position.length())
-    // Eased: a re-anchor moves the camera's distance from the origin in one
-    // frame, and the distant scene must not step darker with it (review S2a).
-    f.far = easeFog(f.far, far, dt)
+    const base = useTv.getState().on || useCyberspace.getState().walking
+    // Eased within a mode: a re-anchor moves the camera's distance from the
+    // origin in one frame, and the distant scene must not step darker with it
+    // (review S2a). The first frame and a change of mode jump there (N10).
+    f.far = fogFarStep(f.far, mode.current, base, state.camera.position.length(), dt)
+    mode.current = base
     f.near = f.far * FOG_START_SHARE
   }, HEADLAMP_PRIORITY)
   return <fog ref={fog} attach="fog" args={[0x000000, FOG_NEAR * VIEW_FOG_SCALE, FOG_FAR * VIEW_FOG_SCALE]} />

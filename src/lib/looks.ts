@@ -426,8 +426,12 @@ export function lookOf(item: LookSubject): Look | null {
  * the loot floats out of the open chest, else the closed one's. A look with
  * no notion of a front (an inline model, a MINE or FEED model, whose TURN is
  * baked in with nothing left to read it from) follows TREASURE's convention
- * and faces +Z. A TURN that tips the front straight up or down leaves no
- * side it faces, and it faces +Z too. What floats out of an opened chest
+ * and faces +Z. A TURN that tips the front straight up or down (011, 013,
+ * 031, 033 ...: the chest lying on its back or its face) leaves no side it
+ * faces, and its width, always level then, says the way instead: the facing
+ * that runs the row along the chest's width as turned, so the loot lies
+ * across the chest, not along its height (review of #638); untipped, that is
+ * +Z, as before. What floats out of an opened chest
  * lines up across this front and faces it (scene/ChestLoot; arkinox,
  * 2026-11-09: "the chest is opened from the front so the items should be in
  * a line facing the front of the chest").
@@ -437,7 +441,11 @@ export function lookFacing(look: Pick<Look, 'closed' | 'open'>): number {
   if (!known) return 0
   // The TURN turns the points as stored, whose Z is the render frame's negated (TREASURE_HINGE): render +Z is stored -Z, and back.
   const [x, , z] = turnDirection([0, 0, -1], known.turns)
-  return x === 0 && z === 0 ? 0 : Math.atan2(x, -z)
+  if (x !== 0 || z !== 0) return Math.atan2(x, -z)
+  // The front up or down: the row (ChestLoot's X, turned by the facing to render (cos, -sin)) along the
+  // width (+X, as stored and as rendered) as turned, its render direction (wx, -wz). `+ 0` makes -0 a 0.
+  const [wx, , wz] = turnDirection([1, 0, 0], known.turns)
+  return Math.atan2(wz, wx) + 0
 }
 
 /**

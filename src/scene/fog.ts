@@ -60,3 +60,19 @@ export const FOG_TAU = 0.4
 export function easeFog(current: number, target: number, dt: number): number {
   return target + (current - target) * Math.exp(-Math.max(0, dt) / FOG_TAU)
 }
+
+/**
+ * The fog's end one frame of `dt` seconds on, for a camera `fromOrigin` from
+ * the render origin in a mode whose fog is TV's and WALK's own (`base`), the
+ * end now `current` and the previous frame's mode `was` (null before the
+ * first frame). Within a mode it eases (easeFog): a re-anchor moves the target
+ * in one frame. The first frame and a change of mode (TV or WALK on or off)
+ * jump straight to the target: the fog belongs to the view, and easing from
+ * the third-person fog to TV's 96 took a second on entering, and the 24/7
+ * broadcast page one or two to settle from the Fog's first distances
+ * (review of #635, N10).
+ */
+export function fogFarStep(current: number, was: boolean | null, base: boolean, fromOrigin: number, dt: number): number {
+  const target = fogFar(base, fromOrigin)
+  return was === base ? easeFog(current, target, dt) : target
+}

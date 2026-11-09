@@ -9,8 +9,11 @@
  * kept per identity on this device; everything after it is unread, which is
  * what lights the dot on NOTIFICATIONS and raises the toast under XOR BITS.
  *
- * A comment sealed to one of your own bags is opened with that bag's region
- * key, which this device can derive because it hid the bag.
+ * A comment sealed to one of your own bags is opened with the key this
+ * device holds for that bag (the key it was sealed with: the region key, or
+ * a room's key), never derived again here: a bag above height 20, hidden
+ * through HOSAKA, has a key no client computes (2026-11-09). A comment that
+ * does not open is left sealed; it never fails the rest of the page.
  *
  * Only ONOSENDAI's own traffic is kept (lib/notifications.ts classify): a
  * like on an ordinary note is not a notification here (arkinox, 2026-09-30).
@@ -24,10 +27,11 @@ import { relaysFor } from '../lib/inbox'
 import { classify, fromRelays, mergeNotifications, resolve, unreadCount, type Candidate, type Known, type Notification, type Target } from '../lib/notifications'
 import { GENERAL_RELAYS } from '../lib/contacts'
 import { onCanonicalSignIn, queryAny, queryAnyChecked, type ReadTrouble } from '../lib/relay'
-import { decryptForRegion, regionKeyAt } from '../lib/shardCrypto'
+import { decryptForRegion } from '../lib/shardCrypto'
+import { hexToBytes } from '../lib/events'
 import { REACTION_KIND } from '../lib/social'
-import { MAX_COMPUTE_HEIGHT, useCyberspace } from './useCyberspace'
-import { positionOf, useShards } from './useShards'
+import { useCyberspace } from './useCyberspace'
+import { useShards } from './useShards'
 
 /** Notifications per page, first and older. */
 export const PAGE = 30
@@ -116,10 +120,12 @@ async function openSealed(list: Notification[], me: string): Promise<Record<stri
     if (!n.ciphertext || !n.bag) return
     const [, author, lookupId] = n.bag.split(':')
     if (author !== me) return
-    const dep = mine.find((d) => d.lookupId === lookupId)
+    const dep = mine.find((d) => d.lookupId === lookupId && d.keyHex)
     if (!dep) return
-    const words = await decryptForRegion(regionKeyAt(positionOf(dep), dep.height, MAX_COMPUTE_HEIGHT).key, n.ciphertext)
-    if (words?.trim()) out[n.id] = words.trim()
+    try {
+      const words = await decryptForRegion(hexToBytes(dep.keyHex), n.ciphertext)
+      if (words?.trim()) out[n.id] = words.trim()
+    } catch { /* left sealed */ }
   }))
   return out
 }

@@ -85,8 +85,17 @@ function CommentRow({ c, me, depth, posting, onPost }: { c: Comment; me: string;
 function CommentSection({ state, placeholder, note }: { state: CommentsState; placeholder: string; note: string[] }): JSX.Element {
   const me = useCyberspace((s) => s.identity.pubkey)
   const signerKind = useCyberspace((s) => s.signerKind)
-  const { comments, loading, error, trouble, posting, post, refresh } = state
+  const { comments, loading, error, trouble, posting, unavailable, post, refresh } = state
   const n = countComments(comments)
+  // No key for them on this device (hooks/useComments): said in one line, no list, no composer.
+  if (unavailable) {
+    return (
+      <section className="comments" aria-label="Comments">
+        <div className="comments__head"><span className="secret__label">Comments</span></div>
+        <p className="comments__empty">COMMENTS UNAVAILABLE</p>
+      </section>
+    )
+  }
   return (
     <section className="comments" aria-label="Comments">
       <div className="comments__head">

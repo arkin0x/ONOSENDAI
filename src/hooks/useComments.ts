@@ -2,8 +2,14 @@
  * useComments: the comments on one hidden item, and posting one.
  *
  * Fetched once per subject from the app's relays (every comment on the
- * bag, threaded to this item), opened with the bag's region key, which this
- * client derives from where the bag is, exactly as it did to open the bag.
+ * bag, threaded to this item), opened with the key that opened the bag: the
+ * bag's region key, or in a room the room key (DECK-0006). Every bag this
+ * device hid or found holds that key (`bagKeyHex`), so nothing is computed.
+ * Only a subject without it has the region key derived from where the bag
+ * is, in the region worker and never during render (a key at height 20
+ * froze the page for seconds; above 20 cyberspace-core refuses and the card
+ * crashed, 2026-11-09), and only up to this machine's limit: above it the
+ * section says COMMENTS UNAVAILABLE.
  * Posted by sealing the words under that key, signing the kind 1111 with the
  * active signer and publishing it to the same relays. A posted comment is
  * shown at once; a failed publish says so and keeps the text.
@@ -13,7 +19,8 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { MAX_COMMENT_LENGTH, commentsFilter, itemParent, openComments, sealedComment, threadComments, type Comment, type CommentParent, type CommentSubject } from '../lib/comments'
 import { hexToBytes, type NostrEvent } from '../lib/events'
 import { onCanonicalSignIn, publish, queryChecked, type ReadTrouble } from '../lib/relay'
-import { regionKeyAt } from '../lib/shardCrypto'
+import { regionKeyOffThread } from '../lib/regionKeyOffThread'
+import { localKeyCeiling } from '../lib/deployPlan'
 import { MAX_COMPUTE_HEIGHT, useCyberspace } from '../store/useCyberspace'
 import { useMutes } from '../store/useMutes'
 import { pruneThread } from '../lib/muteList'
@@ -25,6 +32,11 @@ export interface CommentsState {
   /** Why the canonical relay gave the last read nothing, if it did not answer (it is not "no comments"). */
   trouble: ReadTrouble | null
   posting: boolean
+  /**
+   * No key can be had for these comments: the bag's key is not held here and
+   * its height is above what this machine computes. Absent for public comments.
+   */
+  unavailable?: boolean
   /** Post a comment on the item, or a reply to one of its comments. Resolves true when a relay accepted it. */
   post: (text: string, parent?: CommentParent) => Promise<boolean>
   refresh: () => void
@@ -39,10 +51,31 @@ export function useComments(subject: CommentSubject | null): CommentsState {
   const [posting, setPosting] = useState(false)
   const [tick, setTick] = useState(0)
   const key = subject ? `${subject.author}:${subject.lookupId}:${subject.itemId}` : null
-  // The region key is a function of the bag (its place and height), so it is derived once per subject.
-  // In a room it is the room key, which the find already carries.
+  // The key that opened the bag, held by every bag hidden or found here
+  // (the region key, or in a room the room key): read, never computed.
+  const heldHex = subject?.bagKeyHex
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  const regionKey = useMemo(() => (subject ? (subject.roomKeyHex ? hexToBytes(subject.roomKeyHex) : regionKeyAt(subject.at, subject.height, MAX_COMPUTE_HEIGHT).key) : null), [key])
+  const held = useMemo(() => (heldHex ? hexToBytes(heldHex) : null), [key, heldHex])
+  // Not held, and above what this machine computes: no key to be had. Cheap to
+  // tell, so it is told in render; the key itself never is.
+  const unavailable = !!subject && !held && subject.height > Math.min(MAX_COMPUTE_HEIGHT, localKeyCeiling())
+  // Not held but within reach: derived in the region worker, once per subject.
+  const [derived, setDerived] = useState<{ key: string; regionKey: Uint8Array | null } | null>(null)
+  useEffect(() => {
+    if (!subject || held || unavailable) return
+    let alive = true
+    // A refusal thrown before the promise (no Worker, computed inline) reads as a rejection.
+    Promise.resolve()
+      .then(() => regionKeyOffThread(subject.at, subject.height, MAX_COMPUTE_HEIGHT))
+      .then((rk) => { if (alive) setDerived({ key: key!, regionKey: rk.key }) })
+      .catch(() => { if (alive) setDerived({ key: key!, regionKey: null }) })
+    return () => { alive = false }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [key, held, unavailable])
+  const regionKey = held ?? (derived && derived.key === key ? derived.regionKey : null)
+  // Derived and still refused (the worker failed): no key, as above the limit.
+  const failed = !held && !!derived && derived.key === key && !derived.regionKey
+  const waiting = !!subject && !regionKey && !unavailable && !failed
 
   useEffect(() => {
     if (!subject || !regionKey) return
@@ -54,7 +87,7 @@ export function useComments(subject: CommentSubject | null): CommentsState {
       .finally(() => { if (alive) setLoading(false) })
     return () => { alive = false }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [key, tick])
+  }, [key, tick, regionKey])
 
   // Refused for want of AUTH: read again once the relay signs this visit in.
   useEffect(() => (trouble ? onCanonicalSignIn(() => setTick((t) => t + 1)) : undefined), [trouble])
@@ -83,5 +116,5 @@ export function useComments(subject: CommentSubject | null): CommentsState {
   const muted = useMutes((s) => s.muted)
   const me = useCyberspace((s) => s.identity.pubkey)
   const comments = subject ? pruneThread(threadComments(events, subject, opened), muted, me) : []
-  return { comments, loading, error, trouble, posting, post, refresh: () => setTick((t) => t + 1) }
+  return { comments, loading: loading || waiting, error, trouble, posting, unavailable: unavailable || failed, post, refresh: () => setTick((t) => t + 1) }
 }

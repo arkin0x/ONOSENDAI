@@ -124,9 +124,11 @@ describe('OPEN on a door', () => {
     useShards.setState({ discovered: { [b.door.eventId]: b.door } })
     await enterRoom(b.door, b.secret)
     const w = useShards.getState().worldItems().find((x) => x.type === 'message')!
-    expect(w.roomKeyHex).toBe(bytesToHex(b.key))
+    expect(w.bagKeyHex).toBe(bytesToHex(b.key))
     // The door itself stands in an ordinary bag: its comments stay the region's.
-    expect(useShards.getState().worldItems().find((x) => x.key === b.door.eventId)?.roomKeyHex).toBeUndefined()
+    const door = useShards.getState().worldItems().find((x) => x.key === b.door.eventId)!
+    expect(door.bagKeyHex).toBe(b.door.keyHex)
+    expect(door.bagKeyHex).not.toBe(bytesToHex(b.key))
   })
 
   it('an item behind a door waits for TAKE: nothing is held by opening', async () => {

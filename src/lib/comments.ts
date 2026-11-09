@@ -56,11 +56,15 @@ export interface CommentSubject {
   at: Position
   height: number
   /**
-   * For something in a room: the room key, which seals its comments instead
-   * of the region's (DECK-0004 §3.7.2), so a reader at the place who has not
-   * opened the door cannot read them.
+   * The key that opened the bag, as hex, which is the key that seals its
+   * comments (DECK-0006): the region key at `at` and `height`, or, for
+   * something in a room, the room key (DECK-0004 §3.7.2), so a reader at the
+   * place who has not opened the door cannot read them. Every bag this device
+   * hid or found holds it. With it nothing is derived; without it the region
+   * key is derived from `at` and `height`, off the main thread, and only up
+   * to this machine's limit (hooks/useComments).
    */
-  roomKeyHex?: string
+  bagKeyHex?: string
 }
 
 /** What a comment answers: the item, or another comment. */

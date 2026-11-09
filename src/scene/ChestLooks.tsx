@@ -15,7 +15,7 @@
 import { useEffect, useMemo, useRef, useSyncExternalStore } from 'react'
 import { ACCENT } from '../lib/palette'
 import { GRID_RADIUS, itemCentre, type ViewAxes } from '../lib/space'
-import { drawnLook, lookOf, lookStand, type Look } from '../lib/looks'
+import { drawnLook, lookFacing, lookOf, lookStand, type Look } from '../lib/looks'
 import { regionBox } from '../lib/clip'
 import type { ShardModel } from 'sno-core/shards'
 import { markShown } from '../lib/worldMarks'
@@ -172,7 +172,7 @@ export function ChestLooks({ axes }: { axes: ViewAxes }): JSX.Element | null {
               ? ({ dim }) => (
                 <>
                   {ceremony ? (ceremony.kind === 'door' ? (ceremony.closing ? <DoorCloses look={w.look} at={ceremony.at} frame={w.frame} /> : <DoorCeremony look={w.look} at={ceremony.at} calm={ceremony.calm} frame={w.frame} />) : <ChestCeremony look={w.look} at={ceremony.at} calm={ceremony.calm} frame={w.frame} />) : model && <ShardMesh shard={model} world {...w.frame} dim={dim} />}
-                  {loot && <ChestLoot loot={w.loot} ceremony={ceremony} still={still} dim={dim} />}
+                  {loot && <ChestLoot loot={w.loot} ceremony={ceremony} still={still} dim={dim} facing={lookFacing(w.look)} />}
                 </>
               )
               : undefined}

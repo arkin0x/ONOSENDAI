@@ -54,12 +54,18 @@ export function shardSphere(shard: ShardModel, byRef: ReadonlyMap<string, Resolv
  * The radius round the orbit's target that holds the whole sphere: the
  * camera turns about its target, not the shard's centre (a pan moves the
  * target, and it opens on the vertices' centroid), so the sphere grows by how
- * far that target stands off. Zero for a shard that draws nothing.
+ * far that target stands off, but by no more than the shard's own radius.
+ * Unclamped, it ran away: a pan moves the target farther the farther out the
+ * camera is, so each pinch at the limit (a dolly and a pan together on a
+ * phone) raised the limit about a third again, without end (review of #636).
+ * Clamped, the reach radius is at most twice the shard's, and a target
+ * panned off past that is the user's own choice of view. Zero for a shard
+ * that draws nothing.
  */
 export function reachRadius(sphere: Sphere | null, target: { x: number; y: number; z: number }): number {
   if (!sphere) return 0
   const [x, y, z] = sphere.center
-  return sphere.radius + Math.hypot(target.x - x, target.y - y, target.z - z)
+  return sphere.radius + Math.min(sphere.radius, Math.hypot(target.x - x, target.y - y, target.z - z))
 }
 
 /**

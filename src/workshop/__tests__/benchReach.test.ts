@@ -106,14 +106,36 @@ describe('shardSphere and reachRadius (what the bench draws, round)', () => {
     expect(reachRadius(null, { x: 5, y: 5, z: 5 })).toBe(0)
   })
   it('wraps the vertices, Z drawn mirrored', () => {
-    const s = shardSphere(shardAt([[-24, 0, -24], [24, 10, 24]]), none)!
+    // Model Z runs -24..10, so its middle is -7 in the model and +7 as drawn (render Z is model -Z).
+    const s = shardSphere(shardAt([[-24, 0, -24], [24, 10, 10]]), none)!
     expect(s.center[0]).toBeCloseTo(0, 9)
     expect(s.center[1]).toBeCloseTo(5, 9)
-    expect(s.center[2]).toBeCloseTo(0, 9)
-    expect(s.radius).toBeCloseTo(Math.hypot(24, 5, 24), 9)
+    expect(s.center[2]).toBeCloseTo(7, 9)
+    expect(s.radius).toBeCloseTo(Math.hypot(24, 5, 17), 9)
     // From a target at its centre the reach is its radius; off centre it grows by the offset.
-    expect(reachRadius(s, { x: 0, y: 5, z: 0 })).toBeCloseTo(s.radius, 9)
-    expect(reachRadius(s, { x: 3, y: 5, z: 4 })).toBeCloseTo(s.radius + 5, 9)
+    expect(reachRadius(s, { x: 0, y: 5, z: 7 })).toBeCloseTo(s.radius, 9)
+    expect(reachRadius(s, { x: 3, y: 5, z: 11 })).toBeCloseTo(s.radius + 5, 9)
+    // But by no more than its own radius, however far off the target is.
+    expect(reachRadius(s, { x: 1e6, y: 5, z: 7 })).toBeCloseTo(2 * s.radius, 9)
+  })
+  it('repeated pans at the limit never push the reach past twice the shard (review of #636)', () => {
+    // A phone pinch dollies and pans at once, and a pan moves the target by a
+    // share of the camera's distance: at the limit, a long way. Unclamped,
+    // the limit grew about 1.34x a pinch without end.
+    const s = shardSphere(shardAt([[-24, -5, -24], [24, 6, 24]]), none)!
+    const bound = reachFor(2 * s.radius, FOV, PHONE)
+    for (const share of [0.1, 0.3, 1]) {
+      const target = { x: s.center[0], y: s.center[1], z: s.center[2] }
+      let max = reachFor(reachRadius(s, target), FOV, PHONE)
+      for (let i = 0; i < 50; i++) {
+        // Zoomed all the way out, then a pan of a share of that distance, away from the shard.
+        const distance = max
+        target.x += distance * share
+        max = nextMaxDistance(reachFor(reachRadius(s, target), FOV, PHONE), distance)
+        expect(max).toBeLessThanOrEqual(bound + 1e-9)
+      }
+      expect(max).toBeCloseTo(bound, 6)
+    }
   })
   it('takes in a placed object where its placement puts it, scaled as drawn', () => {
     const ref: Ref = ['a', '30001:abc:pillar']

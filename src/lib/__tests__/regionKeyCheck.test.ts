@@ -114,10 +114,39 @@ describe('checkBoughtKey: and the key this device derives, where it can', () => 
 })
 
 describe('wrongKeyMessage', () => {
-  it('says HOSAKA returned a wrong key, why, and that it was not used, with no em dash', () => {
-    const m = wrongKeyMessage('it is for another cube')
-    expect(m.startsWith(`${WRONG_KEY}: it is for another cube.`)).toBe(true)
-    expect(m).toContain('not kept or used')
-    expect(m).not.toContain(String.fromCharCode(0x2014))
+  it('says HOSAKA returned a wrong key, why, that it was not used, and whether it was set aside, with no em dash', () => {
+    const aside = wrongKeyMessage('it is for another cube', null)
+    expect(aside).toBe(`${WRONG_KEY}: it is for another cube. It was set aside, not used: nothing was hidden or opened with it.`)
+    expect(wrongKeyMessage('x', 'quota exceeded')).toContain('could not be set aside on this device (quota exceeded)')
+    expect(wrongKeyMessage('x')).toContain('It was not used: nothing was hidden')
+    for (const m of [aside, wrongKeyMessage('x'), wrongKeyMessage('x', 'q')]) expect(m).not.toContain(String.fromCharCode(0x2014))
+  })
+})
+
+describe('a corner near 2^84, as Python sends it (review of #626)', () => {
+  // Every axis past 2^84, with low bits a double cannot hold, aligned to h20.
+  const FAR: Position = { x: (1n << 84n) + (1n << 83n) + 12_345_678_901_234_567n, y: (1n << 84n) + 987_654_321_987_654_321n, z: (1n << 84n) + 55_555_555_555n }
+  const H20 = 20n
+  const corner = { x: ((FAR.x >> H20) << H20).toString(), y: ((FAR.y >> H20) << H20).toString(), z: ((FAR.z >> H20) << H20).toString() }
+  const rk = regionKeyAt(AT, HEIGHT, 20)
+  const key = { secret_key: bytesToHex(rk.key), lookup_id: rk.lookupId, height: 20 }
+  /** Python's json.dumps text for the answer, its corner bare integers. */
+  const python = `{"secret_key": "${key.secret_key}", "lookup_id": "${key.lookup_id}", "height": 20, "base": {"x": ${corner.x}, "y": ${corner.y}, "z": ${corner.z}}}`
+
+  it('a corner JSON.parse rounded is not compared, and never refuses the right cube\'s key', () => {
+    const parsed = JSON.parse(python) as HosakaRegionKeyResult
+    expect(String(parsed.base.x)).not.toBe(corner.x)
+    expect(boughtKeyProblem(parsed, { at: FAR, height: 20 })).toBeNull()
+  })
+
+  it('an exact corner, as a decimal string, is compared: the right cube passes, another is refused', () => {
+    expect(boughtKeyProblem({ ...key, base: corner }, { at: FAR, height: 20 })).toBeNull()
+    const off = { ...corner, z: (BigInt(corner.z) + (1n << 20n)).toString() }
+    expect(boughtKeyProblem({ ...key, base: off }, { at: FAR, height: 20 })).toMatch(/another cube/)
+  })
+
+  it('a rounded axis is skipped while an exact one is still compared', () => {
+    const mixed = { x: Number(corner.x), y: (BigInt(corner.y) + (1n << 20n)).toString(), z: Number(corner.z) }
+    expect(boughtKeyProblem({ ...key, base: mixed }, { at: FAR, height: 20 })).toMatch(/another cube/)
   })
 })

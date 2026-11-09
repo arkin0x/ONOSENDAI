@@ -22,6 +22,7 @@ import { create } from 'zustand'
 import { destinationHeights, holdCloudDestinationKeys, holdDestinationCubes } from '../lib/destinationKeys'
 import { localKeyCeiling, regionKeyQuote } from '../lib/deployPlan'
 import { checkBoughtKey, wrongKeyMessage } from '../lib/regionKeyCheck'
+import { setAsideRefused } from '../lib/secrets/backstop'
 import { experienceRatio, recordJobExperience } from '../lib/experience'
 import { lineStateOf, rideStatsOf, zeroLengthRideRefusal } from '../lib/hyperspace/ride'
 import { checkCloudRide, type CloudRideCheck } from '../lib/cloudRide'
@@ -6476,10 +6477,19 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
       const r = done.result as HosakaRegionKeyResult
       if (!r.secret_key || !r.lookup_id) return { ok: false, error: 'HOSAKA returned no key.' }
       // Checked before anything uses it: a wrong key seals a bag nobody can
-      // find (lib/regionKeyCheck.ts). Refused, never kept; what was paid
-      // stays as any other finished job's.
+      // find (lib/regionKeyCheck.ts). Refused, never held; set aside, since it
+      // was paid for and a refusal could be wrong. What was paid stays as any
+      // other finished job's.
       const wrong = await checkBoughtKey(r, { at, height, lookupId: expect?.lookupId })
-      if (wrong) return { ok: false, error: wrongKeyMessage(wrong) }
+      if (wrong) {
+        const h = BigInt(height)
+        const aside = setAsideRefused({
+          lookupId: String(r.lookup_id), keyHex: String(r.secret_key), height, plane, why: wrong, jobId: done.id,
+          base: { x: ((at.x >> h) << h).toString(), y: ((at.y >> h) << h).toString(), z: ((at.z >> h) << h).toString() },
+          at: Math.floor(Date.now() / 1000),
+        })
+        return { ok: false, error: wrongKeyMessage(wrong, aside) }
+      }
       return { ok: true, result: r }
     } catch (err) {
       if (abort.signal.aborted) { set({ cloud: { ...get().cloud, ...idle } }); return { ok: false, error: 'Cancelled.' } }

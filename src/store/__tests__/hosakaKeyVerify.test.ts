@@ -57,6 +57,7 @@ import { publishMany } from '../../lib/relay'
 import { regionKeyOffThread } from '../../lib/regionKeyOffThread'
 import { regionKeyAt } from '../../lib/shardCrypto'
 import { WRONG_KEY, keyFitsLookup } from '../../lib/regionKeyCheck'
+import { REFUSED_KEY, readBought, readRefused } from '../../lib/secrets/backstop'
 import { bytesToHex } from '../../lib/events'
 import type { Position } from '../../lib/space'
 
@@ -127,9 +128,36 @@ describe('the Region keys BUY (useSecrets.buy)', () => {
     hosaka.state.result = result(AT, { lookup_id: 'ee'.repeat(32) })
     expect(await useSecrets.getState().buy(AT, 0, HEIGHT)).toBeNull()
     expect(useSecrets.getState().buyError).toMatch(new RegExp(`^${WRONG_KEY}`))
-    expect(useSecrets.getState().buyError).toContain('not kept or used')
+    expect(useSecrets.getState().buyError).toContain('It was set aside, not used')
     expect(Object.keys(useSecrets.getState().keys)).toHaveLength(0)
     expect(useSecrets.getState().buying).toBeNull()
+  })
+
+  it('sets a refused key aside, once, where nothing offers it as held, so a false refusal can be put right', async () => {
+    hosaka.state.result = result(ELSEWHERE)
+    expect(await useSecrets.getState().buy(AT, 0, HEIGHT)).toBeNull()
+    expect(await useSecrets.getState().buy(AT, 0, HEIGHT)).toBeNull()
+    const aside = readRefused()
+    expect(aside).toHaveLength(1)
+    expect(aside[0]).toMatchObject({
+      keyHex: (hosaka.state.result as { secret_key: string }).secret_key, lookupId: regionKeyAt(ELSEWHERE, HEIGHT, 20).lookupId,
+      height: HEIGHT, plane: 0, base: BASE, jobId: 'job1', why: expect.stringMatching(/not the key this device derives/),
+    })
+    // Never held, never in the bought-key backstop, never in the list.
+    expect(Object.keys(useSecrets.getState().keys)).toHaveLength(0)
+    expect(readBought()).toEqual({})
+  })
+
+  it('says so when the key could not be set aside', async () => {
+    hosaka.state.result = result(ELSEWHERE)
+    const realSet = localStorage.setItem
+    localStorage.setItem = (k: string, v: string) => { if (k === REFUSED_KEY) throw new Error('quota exceeded'); realSet(k, v) }
+    try {
+      const out = await C().buyRegionKey(AT, 0, HEIGHT)
+      expect(!out.ok && out.error).toContain('could not be set aside on this device (quota exceeded)')
+    } finally {
+      localStorage.setItem = realSet
+    }
   })
 
   it('holds the right one', async () => {
@@ -171,7 +199,7 @@ describe('a deploy above this device\'s ceiling never seals with a wrong key', (
   })
 
   it('a purchase that refused the key fails the deploy with its words', async () => {
-    await deployWith(async () => { useSecrets.setState({ buyError: `${WRONG_KEY}: it is for another cube. It was not kept or used, and nothing was hidden or opened with it.` }); return null })
+    await deployWith(async () => { useSecrets.setState({ buyError: `${WRONG_KEY}: it is for another cube. It was set aside, not used: nothing was hidden or opened with it.` }); return null })
     expect(useShards.getState().deployError).toMatch(new RegExp(`^${WRONG_KEY}: it is for another cube`))
     expect(useShards.getState().mine).toHaveLength(0)
   })

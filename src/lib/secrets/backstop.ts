@@ -1,7 +1,7 @@
 /**
  * backstop.ts: what localStorage keeps beside IndexedDB, and why.
  *
- * Two records, neither of them the old list (`onosendai:secrets`), which from
+ * Two records (and REFUSED_KEY, below), neither of them the old list (`onosendai:secrets`), which from
  * this build on is only ever read: by the one-time copy into IndexedDB, and
  * by db.syncLegacy, which takes in keys a tab still on an older build adds.
  *
@@ -28,6 +28,57 @@ import { describeError, parseLegacy } from './db'
 
 export const BOUGHT_KEY = 'onosendai:secrets:bought'
 export const FALLBACK_KEY = 'onosendai:secrets:fallback'
+/**
+ * Keys HOSAKA sold that failed a check at purchase (lib/regionKeyCheck.ts),
+ * set aside rather than destroyed: they were paid for, and a refusal could be
+ * wrong. Nothing reads this as a held key, so a key here never seals, opens
+ * or is offered anywhere; it is only kept, so a false refusal can be put
+ * right. Nothing clears it.
+ */
+export const REFUSED_KEY = 'onosendai:secrets:refused'
+
+/** A refused key, as it was set aside: the key, the cube it was bought for, and why it was refused. */
+export interface RefusedKey {
+  lookupId: string
+  keyHex: string
+  height: number
+  /** The cube asked for, computed from where it was bought, as decimal strings. */
+  base: { x: string; y: string; z: string }
+  plane: number
+  /** Why it was refused, in the words the purchase showed. */
+  why: string
+  /** HOSAKA's job, when known. */
+  jobId?: string
+  /** When it was set aside, in seconds since the epoch. */
+  at: number
+}
+
+/** The keys set aside so far, oldest first. */
+export function readRefused(): RefusedKey[] {
+  try {
+    const parsed: unknown = JSON.parse(storage()?.getItem(REFUSED_KEY) ?? '[]')
+    return Array.isArray(parsed) ? parsed.filter((r): r is RefusedKey => !!r && typeof r === 'object' && typeof (r as RefusedKey).keyHex === 'string') : []
+  } catch {
+    return []
+  }
+}
+
+/**
+ * Set a refused key aside (REFUSED_KEY), once per key. Returns null when it
+ * landed, else why it did not.
+ */
+export function setAsideRefused(key: RefusedKey): string | null {
+  const s = storage()
+  if (!s) return 'localStorage is not available here'
+  try {
+    const kept = readRefused()
+    if (kept.some((r) => r.keyHex.toLowerCase() === key.keyHex.toLowerCase() && r.lookupId.toLowerCase() === key.lookupId.toLowerCase())) return null
+    s.setItem(REFUSED_KEY, JSON.stringify([...kept, key]))
+    return null
+  } catch (err) {
+    return describeError(err)
+  }
+}
 
 function storage(): Storage | null {
   try { return typeof localStorage === 'undefined' ? null : localStorage } catch { return null }

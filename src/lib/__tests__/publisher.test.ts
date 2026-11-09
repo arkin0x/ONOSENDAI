@@ -23,10 +23,15 @@ const pub = vi.hoisted(() => ({ acceptedBy: null as string[] | null, canonicalFa
 vi.mock('../relay', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../relay')>()),
   publish: (e: NostrEvent) => { sent.push(e.id); return Promise.resolve(pub.acceptedBy ? { ok: true as const, accepted: pub.acceptedBy } : { ok: true as const }) },
-  publishMany: (relays: string[], e: NostrEvent) => {
+  // The canonical relay's background check by id (publisher.ts
+  // reconcileCanonical): it answers, holding none of them.
+  countRelay: () => Promise.resolve(null),
+  askRelay: (url: string) => Promise.resolve({ url, outcome: 'answered' as const, events: [] }),
+  // And its re-send of what it lacks.
+  publishOnceTo: (url: string, e: NostrEvent) => {
     pub.toCanonical.push(e.id)
     if (pub.canonicalFailsLeft > 0) { pub.canonicalFailsLeft--; return Promise.resolve({ ok: false as const, reason: 'timeout' }) }
-    return Promise.resolve({ ok: true as const, accepted: relays })
+    return Promise.resolve({ ok: true as const, accepted: [url] })
   },
 }))
 

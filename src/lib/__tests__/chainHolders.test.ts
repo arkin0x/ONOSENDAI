@@ -31,6 +31,10 @@ vi.mock('../relay', async (importOriginal) => {
     ...actual,
     publish: async () => ({ ok: true as const, accepted: net.accepted }),
     publishMany: async () => ({ ok: true as const, accepted: [actual.CYBERSPACE_RELAY] }),
+    // The canonical relay's background check and re-send (publisher.ts reconcileCanonical), never the real socket.
+    countRelay: async () => null,
+    askRelay: async (url: string) => ({ url, outcome: 'answered' as const, events: [] }),
+    publishOnceTo: async () => ({ ok: true as const, accepted: [actual.CYBERSPACE_RELAY] }),
   }
 })
 // The fixtures carry no real signatures; the background check takes them as authentic.

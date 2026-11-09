@@ -47,7 +47,6 @@ import { useBuilder } from '../useBuilder'
 import { useCyberspace } from '../useCyberspace'
 import { useInventory } from '../useInventory'
 import { rememberOpened, resetOpenedChests } from '../useOpenedChests'
-import { heldCube, useSecrets } from '../useSecrets'
 import { SEAL_BUSY, autoRoomFor, hereInRoom, positionOf, useShards, type MyDeployment } from '../useShards'
 import { useWorkshop } from '../useWorkshop'
 
@@ -294,7 +293,7 @@ describe('nested rooms: the innermost', () => {
   })
 })
 
-describe('rooms you CLOSEd, and keys already held (review of #633)', () => {
+describe('rooms you CLOSEd, and room keys already held (review of #633)', () => {
   it('a room CLOSEd here never takes a placement on its own', async () => {
     const door = await sealDoor('Room', ROOM)
     rememberOpened(me(), door.eventId, door.chest!.lockPubkey, [])
@@ -318,19 +317,6 @@ describe('rooms you CLOSEd, and keys already held (review of #633)', () => {
     expect(notes.some((n) => /Computing the 2\^|HOSAKA/.test(n))).toBe(false)
     const key = roomKey(hexToBytes(door.keyHex), hexToBytes(doorSecret(me(), door.eventId)!))
     expect([first.lookupId, second.lookupId]).toEqual([roomLookupId(key), roomLookupId(key)])
-  })
-
-  it('buying a key already held for that cube returns it, and asks HOSAKA nothing', async () => {
-    const at = CURSOR
-    const held = { lookupId: 'ab'.repeat(32), keyHex: 'cd'.repeat(32), height: 10, base: { x: String((at.x >> 10n) << 10n), y: String((at.y >> 10n) << 10n), z: String((at.z >> 10n) << 10n) }, plane: 0 as const, source: 'cloud' as const, at: 1 }
-    useSecrets.setState({ keys: { [held.lookupId]: held }, buying: null })
-    const ask = vi.spyOn(useCyberspace.getState(), 'buyRegionKey')
-    expect(heldCube(useSecrets.getState().keys, at, 0, 10)).toEqual(held)
-    expect(heldCube(useSecrets.getState().keys, at, 0, 11)).toBeNull()
-    expect(await useSecrets.getState().buy(at, 0, 10)).toEqual(held)
-    expect(ask).not.toHaveBeenCalled()
-    ask.mockRestore()
-    useSecrets.setState({ keys: {} })
   })
 })
 

@@ -2037,8 +2037,8 @@ export const useShards = create<ShardsState>((set, get) => {
    * #407): otherwise a bag written the old way would keep it beside the new
    * chest, or carry it loose with no chest at all.
    */
-  async function publishBag(inners: BagEntry[], key: Uint8Array, lookupId: string, height: number, live: boolean, settings: BagSettings, place: { at: Position; plane: Plane }, beforeSend?: () => Promise<void>, before: BagEntry[] = [], owner = cyber().identity.pubkey, grows = false): Promise<{ event: NostrEvent; published: boolean }> {
-    const event = await signBag(inners, key, lookupId, height, settings, place, before, owner, grows)
+  async function publishBag(inners: BagEntry[], key: Uint8Array, lookupId: string, height: number, live: boolean, settings: BagSettings, place: { at: Position; plane: Plane }, beforeSend?: () => Promise<void>, before: BagEntry[] = [], owner = cyber().identity.pubkey): Promise<{ event: NostrEvent; published: boolean }> {
+    const event = await signBag(inners, key, lookupId, height, settings, place, before, owner)
     // Anything that must go out only once the bag is signed (an EDIT's
     // resealed object): a signer that refuses the bag stops it here.
     if (beforeSend) await beforeSend()
@@ -2048,11 +2048,13 @@ export const useShards = create<ShardsState>((set, get) => {
 
   /**
    * The bag signed, and nothing sent: publishBag's first half, for what must sign
-   * everything before anything goes out. `grows`: a write that adds to the bag (a
-   * hide, a move into it), refused in words before the signer is asked when the
-   * bag would pass what the canonical relay takes (lib/bagSize.ts).
+   * everything before anything goes out. Every bag write passes here, so here is
+   * where one too large is refused, in words, before the signer is asked: past
+   * what the canonical relay takes (lib/bagSize.ts) and larger than the bag it
+   * replaces (`before`, which every caller reads first). A write that shrinks a
+   * bag already past it (a DELETE, a REMOVE, a move out of it) still goes.
    */
-  async function signBag(inners: BagEntry[], key: Uint8Array, lookupId: string, height: number, settings: BagSettings, place: { at: Position; plane: Plane }, before: BagEntry[] = [], owner = cyber().identity.pubkey, grows = false): Promise<NostrEvent> {
+  async function signBag(inners: BagEntry[], key: Uint8Array, lookupId: string, height: number, settings: BagSettings, place: { at: Position; plane: Plane }, before: BagEntry[] = [], owner = cyber().identity.pubkey): Promise<NostrEvent> {
     // This work began under another identity: it must not be signed by, or touch the list of, the one signed in now.
     if (cyber().identity.pubkey !== owner) throw new Error(SWITCHED)
     const looked = [...inners, ...before]
@@ -2066,8 +2068,9 @@ export const useShards = create<ShardsState>((set, get) => {
     }
     const createdAt = nextBagAt(lookupId)
     const template = await bagTemplate(entries, key, lookupId, height, createdAt, HIDDEN_KIND, settings, place)
-    const tooBig = grows ? bagSizeRefusal(signedBytes(template)) : null
-    if (tooBig) throw new Error(tooBig)
+    // Larger than before, by what is sealed inside: the bag's size follows its plaintext.
+    const tooBig = bagSizeRefusal(signedBytes(template))
+    if (tooBig && JSON.stringify(entries).length > JSON.stringify(before).length) throw new Error(tooBig)
     return cyber().signEvent(template)
   }
 
@@ -2654,7 +2657,7 @@ export const useShards = create<ShardsState>((set, get) => {
     const target = await gatherInners(to.lookupId, to.key, targetLive, to.height, me)
     const settings = to.room ? ROOM_BAG_SETTINGS : target.settings ?? DEFAULT_BAG_SETTINGS
     const place = { at: positionOf(src), plane: src.plane }
-    const bag = await signBag(mergeEntries(target.entries, moved.map(entryOf)), to.key, to.lookupId, to.height, settings, place, target.entries, me, true)
+    const bag = await signBag(mergeEntries(target.entries, moved.map(entryOf)), to.key, to.lookupId, to.height, settings, place, target.entries, me)
     let source: StagedMove['source'] = null
     if (!keepSource) {
       const was = await gatherInners(src.lookupId, srcKey, sourceLive, src.height, me)
@@ -3455,7 +3458,7 @@ export const useShards = create<ShardsState>((set, get) => {
         if (inside.length > 0) {
           const room = await gatherInners(lookupId, key, live, d.height, me)
           before = room.entries
-          const written = await publishBag(mergeEntries(room.entries, inside), key, lookupId, d.height, live, ROOM_BAG_SETTINGS, { at: here, plane: d.plane }, undefined, room.entries, me, true)
+          const written = await publishBag(mergeEntries(room.entries, inside), key, lookupId, d.height, live, ROOM_BAG_SETTINGS, { at: here, plane: d.plane }, undefined, room.entries, me)
           bagId = written.event.id
           published = written.published
           if (live && !published) return 'No relay took the room. The chest stays as it was.'
@@ -4033,7 +4036,7 @@ export const useShards = create<ShardsState>((set, get) => {
               objectSent = true
             }
             : undefined
-          ;({ event, published } = await publishBag(allInners, rk.key, rk.lookupId, deployHeight, live, settings, { at, plane }, sendObject, existing.entries, cs.identity.pubkey, true))
+          ;({ event, published } = await publishBag(allInners, rk.key, rk.lookupId, deployHeight, live, settings, { at, plane }, sendObject, existing.entries, cs.identity.pubkey))
           // A move whose new bag no relay took has not happened: the old
           // copy stays, and is never taken down (review of #369).
           if (was && live && !published) throw new Error('No relay took the moved shard. It stays where it was.')

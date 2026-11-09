@@ -15,6 +15,11 @@
  * CEREMONY_GAP_MS, the buzz at most once per CEREMONY_GAP_MS, so opening
  * ten chests in a row sounds the first and stays quiet until ten seconds
  * have passed. The ceremony's picture is never gated.
+ *
+ * CLOSE on a door (arkinox, 2026-11-09) sounds a soft lock tick (doorClosing)
+ * with the door's short buzz, through the same two gates (closeFeedback): a
+ * close right after an opening is quiet, and the other way round. OPEN on a
+ * closed door is silent and offers nothing here.
  */
 
 import { audioContext } from './audioContext'
@@ -41,6 +46,28 @@ export function ceremonyFeedback(kind: CeremonyKind, now = Date.now(), landMs?: 
   const sound = onceEvery(sounded, 'ceremony', now, CEREMONY_GAP_MS)
   if (sound) play(kind, landMs)
   const buzz = buzzGate(['ceremony'], now, CEREMONY_GAP_MS, CEREMONY_BUZZ[kind])
+  return { sound, buzz }
+}
+
+/**
+ * Sound and buzz for CLOSE on a door: the soft lock tick and the door's buzz, each
+ * only if the gate it shares with every opening lets it. Call inside or right
+ * after the tap (CLOSE), with resumeAudio() already called in the tap.
+ */
+export function closeFeedback(now = Date.now()): Feedback {
+  const sound = onceEvery(sounded, 'ceremony', now, CEREMONY_GAP_MS)
+  if (sound) {
+    try {
+      const ac = audioContext()
+      if (ac) {
+        if (ac.state === 'suspended') void ac.resume()
+        doorClosing(ac, ac.currentTime)
+      }
+    } catch {
+      /* no audio here */
+    }
+  }
+  const buzz = buzzGate(['ceremony'], now, CEREMONY_GAP_MS, CEREMONY_BUZZ.door)
   return { sound, buzz }
 }
 
@@ -86,25 +113,37 @@ function envelope(ac: AudioContext, t0: number, peak: number, length: number, at
   return g
 }
 
+/** How a lock's tick sounds: the band its noise is heard through and how loud each half is. */
+interface Tick { band: number; noisePeak: number; clickPeak: number }
+/** The chest's tick as its lid unlocks. */
+const OPEN_TICK: Tick = { band: 2600, noisePeak: 0.12, clickPeak: 0.07 }
+/** CLOSE's tick: softer and lower, a latch settling rather than springing. */
+export const CLOSE_TICK: Tick = { band: 1500, noisePeak: 0.05, clickPeak: 0.045 }
+
 /** The lock's tick: 60 ms of noise through a narrow band, and a low click under it. */
-function lockTick(ac: AudioContext, t0: number): void {
+function lockTick(ac: AudioContext, t0: number, tick: Tick = OPEN_TICK): void {
   const src = ac.createBufferSource()
   src.buffer = noise(ac)
   const band = ac.createBiquadFilter()
   band.type = 'bandpass'
-  band.frequency.setValueAtTime(2600, t0)
+  band.frequency.setValueAtTime(tick.band, t0)
   band.Q.setValueAtTime(4, t0)
   src.connect(band)
-  band.connect(envelope(ac, t0, 0.12, 0.06, 0.002))
+  band.connect(envelope(ac, t0, tick.noisePeak, 0.06, 0.002))
   src.start(t0)
   src.stop(t0 + 0.07)
   const click = ac.createOscillator()
   click.type = 'sine'
   click.frequency.setValueAtTime(190, t0)
   click.frequency.exponentialRampToValueAtTime(90, t0 + 0.04)
-  click.connect(envelope(ac, t0, 0.07, 0.05, 0.002))
+  click.connect(envelope(ac, t0, tick.clickPeak, 0.05, 0.002))
   click.start(t0)
   click.stop(t0 + 0.06)
+}
+
+/** A door closing (CLOSE): one soft lock tick, under a tenth of a second, and nothing after. */
+function doorClosing(ac: AudioContext, t0: number): void {
+  lockTick(ac, t0, CLOSE_TICK)
 }
 
 /** Rising notes, each a sine with a quiet octave above it. */

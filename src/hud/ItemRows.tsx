@@ -289,6 +289,8 @@ export function ChestBlock({ id, chest, author, verified, place, sealer: given, 
     if (busy) return
     const at = doorAsFound(id)
     if (!at) { setStatus('This door is no longer here.'); return }
+    // Inside the tap, so a phone lets the close's tick out (lib/audioContext).
+    resumeAudio()
     setStatus(null)
     setBusy(true)
     try {

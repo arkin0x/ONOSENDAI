@@ -33,7 +33,8 @@
 import { create } from 'zustand'
 import type { ChestEntry } from '../lib/chests'
 import { closedByMe, closedRecord, writeClosed } from './closedDoors'
-import { onHiddenChange } from './hiddenStorage'
+import { onHiddenChange, storageMode } from './hiddenStorage'
+import { doorSecret } from './doorSecrets'
 
 const OPENED_KEY = 'onosendai:chests-opened'
 /** Enough for years of play; the oldest opened fall off past it, and show OPEN again. */
@@ -118,9 +119,16 @@ export function openedByHand(me: string, chestId: string, lock: string): boolean
  * was (the secret only said, store/rooms.ts), and LOCKED for one holding
  * another secret, which that door's opening left shut. Not whether this
  * session has read the contents: a reload forgets those, and it stays open.
+ *
+ * CLOSED for a door this identity closed with CLOSE whose OPEN needs no key,
+ * its secret kept (arkinox, 2026-11-09), as its card says (hud/ItemRows), the
+ * hidden store still loading included. LOCKED stays for a door never opened,
+ * and for one closed whose secret is gone, since only its key opens it then.
  */
-export function lockWord(me: string, chestId: string, lock: string): 'OPEN' | 'LOCKED' {
-  return openedByHand(me, chestId, lock) ? 'OPEN' : 'LOCKED'
+export function lockWord(me: string, chestId: string, lock: string): 'OPEN' | 'LOCKED' | 'CLOSED' {
+  if (openedByHand(me, chestId, lock)) return 'OPEN'
+  const reopens = closedByMe(me, chestId, lock) && (!!doorSecret(me, chestId) || storageMode() === 'pending')
+  return reopens ? 'CLOSED' : 'LOCKED'
 }
 
 /**

@@ -14,8 +14,8 @@
  */
 
 import { create } from 'zustand'
-import { VANISH_MS, afterOpen, afterReopen, calmVanish, ceremonyLength, type CeremonyKind } from '../lib/ceremony'
-import { ceremonyFeedback } from '../lib/ceremonySound'
+import { VANISH_MS, afterClose, afterOpen, afterReopen, calmVanish, ceremonyLength, type CeremonyKind } from '../lib/ceremony'
+import { ceremonyFeedback, closeFeedback } from '../lib/ceremonySound'
 import { openedKey } from './useOpenedChests'
 import { useLootView } from './useLootView'
 import { useShards } from './useShards'
@@ -103,13 +103,15 @@ export function celebrateReopen(o: { me: string; chestId: string }): ReturnType<
 
 /**
  * CLOSE on an opened door: the card yields when the door is drawn, so the door is
- * seen closing, and its open look fades back into the closed one, as briefly.
- * No sound.
+ * seen closing, and its open look fades back into the closed one, as briefly. A soft
+ * lock tick and the door's short buzz are offered, each through the gate every
+ * opening shares (arkinox, 2026-11-09; lib/ceremonySound closeFeedback).
  */
-export function celebrateClose(o: { me: string; chestId: string }): ReturnType<typeof afterReopen> {
-  const plan = afterReopen(lookDrawn(o.chestId))
+export function celebrateClose(o: { me: string; chestId: string }): ReturnType<typeof afterClose> {
+  const plan = afterClose(lookDrawn(o.chestId))
   if (plan.yieldCards) yieldToWorld()
   if (plan.ceremony) useOpenCeremony.getState().begin(o.me, o.chestId, 'door', true, performance.now(), true)
+  if (plan.feedback) closeFeedback()
   return plan
 }
 

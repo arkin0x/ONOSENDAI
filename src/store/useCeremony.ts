@@ -27,6 +27,35 @@ export interface FoundChip {
   /** Everything found since the chip was last tapped away. */
   count: number
   at: number
+  /** The finds counted, newest first, each with the line and region size the chip would give it. */
+  finds: ChipFind[]
+  /**
+   * Those counted that left the finds because a room they stand in was closed
+   * (CLOSE, store/rooms closeDoor): out of the count until they are found again,
+   * which OPEN on the door does (arkinox, 2026-11-09). See chipCount.
+   */
+  away: string[]
+}
+
+/** One find the chip counts: its id, and its line and region size as the chip shows them. */
+export interface ChipFind { id: string; label: string; meta: string }
+
+/** How many the chip says were found here: everything since the last tap, less what stands in a room closed since. */
+export function chipCount(chip: FoundChip | null): number {
+  return chip ? chip.count - chip.away.length : 0
+}
+
+/**
+ * What the chip's lines name: the newest find still in the world, not one standing in
+ * a room closed since (arkinox, 2026-11-09). With that room open again, the newest of
+ * all again. Null when every find counted is closed away (the chip is not drawn then).
+ */
+export function chipLine(chip: FoundChip | null): { label: string; meta: string } | null {
+  if (!chip) return null
+  if (chip.away.length === 0) return { label: chip.label, meta: chip.meta }
+  const away = new Set(chip.away)
+  const here = chip.finds.find((f) => !away.has(f.id))
+  return here ? { label: here.label, meta: here.meta } : null
 }
 
 interface CeremonyState {
@@ -35,10 +64,32 @@ interface CeremonyState {
   chip: FoundChip | null
   /** Items just opened by a scan; starts their decode and raises the chip. */
   mark: (items: Hidden[]) => void
+  /** These finds left with a room closed (CLOSE): out of the chip's count, kept to come back. */
+  leave: (ids: Iterable<string>) => void
   dismiss: () => void
   /** DEV: fabricate a found bag beside the avatar and run the ceremony on it. */
   preview: () => void
   clearPreview: () => void
+}
+
+/**
+ * A find that left with a closed room is back in the count the moment it is among
+ * the finds again: OPEN on the door fills its room again (store/rooms fillRoom),
+ * and a chest opened in it before restores what it held. Nothing is marked again,
+ * so no find ceremony plays a second time and the chip's line does not decode anew.
+ * Watched from the first close on (useShards is still loading when this module is).
+ */
+let watching = false
+function watchReturns(): void {
+  if (watching) return
+  watching = true
+  useShards.subscribe((s, prev) => {
+    if (s.discovered === prev.discovered) return
+    const chip = useCeremony.getState().chip
+    if (!chip || chip.away.length === 0) return
+    const away = chip.away.filter((id) => !s.discovered[id])
+    if (away.length !== chip.away.length) useCeremony.setState({ chip: { ...chip, away } })
+  })
 }
 
 const PREVIEW_AUTHOR = 'ab'.repeat(32)
@@ -89,8 +140,22 @@ export const useCeremony = create<CeremonyState>((set, get) => ({
     const label = hiddenLabel(first, 40)
     // Finds pile onto a chip nobody has tapped yet: the count is everything
     // since the last tap, and the chip stays until it is.
-    const count = (get().chip?.count ?? 0) + items.length
-    set({ births, chip: { id: `${now}`, label, meta: regionLabel(first.height), count, at: now } })
+    const was = get().chip
+    const count = (was?.count ?? 0) + items.length
+    // Newest first: this mark's first find is the one the chip names.
+    const finds = [...items.map((h, i) => ({ id: h.eventId, label: i === 0 ? label : hiddenLabel(h, 40), meta: regionLabel(h.height) })), ...(was?.finds ?? [])]
+    set({ births, chip: { id: `${now}`, label, meta: regionLabel(first.height), count, at: now, finds, away: was?.away ?? [] } })
+  },
+
+  leave: (gone) => {
+    const chip = get().chip
+    if (!chip) return
+    const counted = new Set(chip.finds.map((f) => f.id))
+    const away = new Set(chip.away)
+    for (const id of gone) if (counted.has(id)) away.add(id)
+    if (away.size === chip.away.length) return
+    watchReturns()
+    set({ chip: { ...chip, away: [...away] } })
   },
 
   dismiss: () => set({ chip: null }),

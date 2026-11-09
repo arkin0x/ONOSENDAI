@@ -187,6 +187,57 @@ describe('regionKeyOffThread', () => {
     await expect(p).resolves.toMatchObject({ lookupId: 'lookup20' })
   })
 
+  it('hidden across a re-arm and back in view only near the end of the second window: still not ended (review of #632)', async () => {
+    vi.useFakeTimers()
+    const p = regionKeyOffThread(AT, 20, 20)
+    const settled = vi.fn()
+    p.then(settled, settled)
+    page.set('hidden')
+    // Runs out while hidden: re-armed.
+    vi.advanceTimersByTime(H20_TIMEOUT_MS + 10)
+    expect(made[0].ended).toBe(false)
+    // Still hidden (the phone stays locked), back in view only for the last tenth.
+    vi.advanceTimersByTime(H20_TIMEOUT_MS * 0.9)
+    page.set('visible')
+    vi.advanceTimersByTime(H20_TIMEOUT_MS * 0.1 + 10)
+    await Promise.resolve()
+    expect({ ended: made[0].ended, settled: settled.mock.calls.length }).toEqual({ ended: false, settled: 0 })
+    // A full window in view after that: hung, and the message does not claim the whole wait.
+    vi.advanceTimersByTime(H20_TIMEOUT_MS)
+    await expect(p).rejects.toThrow(/did not answer at height 20 in 10 min with the page in view\. Try again\./)
+  })
+
+  it('a call asked after a re-arm waits behind it: it never ends the worker before the re-armed call\'s own time (review of #632)', async () => {
+    vi.useFakeTimers()
+    const M = 60_000
+    const a = regionKeyOffThread(AT, 20, 20)
+    const aSettled = vi.fn()
+    a.then(aSettled, aSettled)
+    // A blip at 1 min; A runs out at 10 min and re-arms to 20.
+    vi.advanceTimersByTime(M); page.set('hidden'); page.set('visible')
+    vi.advanceTimersByTime(9 * M + 10)
+    // Another blip at 11 min: A will re-arm again at 20, to 30.
+    vi.advanceTimersByTime(M); page.set('hidden'); page.set('visible')
+    vi.advanceTimersByTime(M)
+    // Asked at 12 min, queued behind A.
+    const d = regionKeyOffThread(AT, 20, 20)
+    d.catch(() => undefined)
+    // 22 min: past what D's clock would be from the old queue end, no hide since it was asked.
+    vi.advanceTimersByTime(10 * M + 10)
+    await Promise.resolve()
+    expect({ ended: made[0].ended, aSettled: aSettled.mock.calls.length }).toEqual({ ended: false, aSettled: 0 })
+  })
+
+  it('a call that answers after re-arms clears its timer', async () => {
+    vi.useFakeTimers()
+    const p = regionKeyOffThread(AT, 20, 20)
+    page.set('hidden')
+    vi.advanceTimersByTime(H20_TIMEOUT_MS * 2.5)
+    made[0].answer(made[0].asked[0])
+    await expect(p).resolves.toMatchObject({ lookupId: 'lookup20' })
+    expect(vi.getTimerCount()).toBe(0)
+  })
+
   it('a worker that cannot even be made refuses the call instead of throwing', async () => {
     constructorThrows = true
     await expect(regionKeyOffThread(AT, 10, 20)).rejects.toThrow(/no worker for you/)

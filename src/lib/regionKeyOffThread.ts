@@ -122,7 +122,9 @@ function watchVisibility(): void {
   if (watchingVisibility || typeof document === 'undefined' || typeof document.addEventListener !== 'function') return
   watchingVisibility = true
   if (document.visibilityState === 'hidden') lastHidden = monotonic()
-  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') lastHidden = monotonic() })
+  // On every change, either way: leaving hidden means it was hidden until
+  // that moment, so a call re-armed while hidden still sees it (review of #632).
+  document.addEventListener('visibilitychange', () => { lastHidden = monotonic() })
 }
 
 /** Whether the page was hidden at any point since `since` (monotonic), or is now. */
@@ -204,15 +206,22 @@ export function regionKeyOffThread(at: Position, height: number, maxComputeHeigh
     // The clock this call is judged by: from when it was asked, or from the
     // last time its time ran out while the page was hidden.
     let since = now
+    let rearmed = false
     const expire = (): void => {
       if (worker !== w) return
       // Hidden at any point since: throttled, not hung. Its full time again, from now.
       if (hiddenSince(since)) {
         since = monotonic()
+        rearmed = true
+        // A call asked after this waits behind it: its clock starts where this one's now ends (review of #632).
+        queueEnds = Math.max(queueEnds, since + timeout)
         timer = setTimeout(expire, timeout)
         return
       }
-      endRegionKeyWorker(`The region worker did not answer within ${Math.round(timeout / 60_000)} min at height ${height}. Try again.`)
+      const minutes = Math.round(timeout / 60_000)
+      endRegionKeyWorker(rearmed
+        ? `The region worker did not answer at height ${height} in ${minutes} min with the page in view. Try again.`
+        : `The region worker did not answer within ${minutes} min at height ${height}. Try again.`)
     }
     let timer = setTimeout(expire, timeout)
     waiting.set(id, (err) => { end(); reject(err) })

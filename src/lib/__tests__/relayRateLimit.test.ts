@@ -101,7 +101,17 @@ const net = vi.hoisted(() => {
 
 import { finalizeEvent, generateSecretKey } from 'nostr-tools/pure'
 import type { NostrEvent } from '../events'
-import { SEND_GAP_MS, dropRelays, isRateLimited, publishMany } from '../relay'
+import { ADDRESSABLE_GAP_MS, SEND_GAP_MS, dropRelays, isRateLimited, publishLight, publishMany } from '../relay'
+
+/** Sockets the pool opens to the dead relay for one attempt at a send, measured with the canonical relay taking it (so no second attempt). */
+async function dialsPerAttempt(): Promise<number> {
+  net.reset(); dropRelays([net.CANON, net.OTHER]); net.otherDown = true
+  const ok = await publishMany([net.CANON, net.OTHER], anEvent())
+  expect(ok.ok).toBe(true)
+  const n = net.sockets.get(net.OTHER) ?? 0
+  net.reset(); dropRelays([net.CANON, net.OTHER])
+  return n
+}
 
 const sk = generateSecretKey()
 let n = 0
@@ -140,15 +150,30 @@ describe('a relay that says "too fast"', () => {
     expect(net.sent).toHaveLength(1)
   }, 30_000)
 
-  it('beside a relay whose socket failed: only that one is dialled again, the rate-limited socket is kept', async () => {
-    net.limitAll = 'Rate limit exceeded for category: regular'
-    net.otherDown = true
-    const result = await publishMany([net.OTHER, net.CANON], anEvent())
-    expect(result.ok).toBe(false)
-    expect(net.sockets.get(net.CANON)).toBe(1)
-    // Dialled again (a refused connection costs the pool two tries a send), while the canonical socket stayed.
-    expect(net.sockets.get(net.OTHER)).toBeGreaterThanOrEqual(2)
-    expect(net.sent.filter((s) => s.url === net.CANON)).toHaveLength(1)
+  for (const order of ['canonical first, as relaySet lists them', 'canonical last'] as const) {
+    it(`beside a relay whose socket failed (${order}): only that one is dialled again, the rate-limited socket is kept, and "too fast" is what is said back`, async () => {
+      const once = await dialsPerAttempt()
+      net.limitAll = 'Rate limit exceeded for category: regular'
+      net.otherDown = true
+      const relays = order === 'canonical last' ? [net.OTHER, net.CANON] : [net.CANON, net.OTHER]
+      const result = await publishMany(relays, anEvent())
+      expect(result.ok).toBe(false)
+      expect(result.ok ? '' : result.reason).toMatch(/rate limit exceeded/i)
+      expect(net.sockets.get(net.CANON)).toBe(1)
+      expect(net.sent.filter((s) => s.url === net.CANON)).toHaveLength(1)
+      // A second attempt at the dead one: twice what one attempt dials.
+      expect(net.sockets.get(net.OTHER)).toBe(2 * once)
+    }, 30_000)
+  }
+
+  it('an event too big for the relay (grain\'s size refusals) keeps the socket, and is not sent again', async () => {
+    for (const words of ['Global event size limit exceeded', 'Event size limit exceeded for kind 3333', 'Content length limit exceeded']) {
+      net.reset(); dropRelays([net.CANON]); net.limitAll = words
+      const result = await publishMany([net.CANON], anEvent())
+      expect(result.ok).toBe(false)
+      expect(net.sockets.get(net.CANON)).toBe(1)
+      expect(net.sent).toHaveLength(1)
+    }
   }, 30_000)
 })
 
@@ -171,5 +196,26 @@ describe('a backlog sent as fast as the caller can', () => {
     expect(results.every((r) => r.ok)).toBe(true)
     expect(net.sent.filter((s) => !s.ok)).toEqual([])
     expect(net.sockets.get(net.CANON)).toBe(1)
+  }, 30_000)
+
+  it('addressable events (shards) on their own, wider gap: no faster than 3 a second on a connection', async () => {
+    const shards = Array.from({ length: 5 }, (_, i) => finalizeEvent({ kind: 33331, created_at: 1_790_000_000 + i, tags: [['d', `s${i}`]], content: '' }, sk) as unknown as NostrEvent)
+    for (const e of shards) expect((await publishMany([net.CANON], e)).ok).toBe(true)
+    for (let i = 1; i < net.sent.length; i++) expect(net.sent[i].at - net.sent[i - 1].at).toBeGreaterThanOrEqual(ADDRESSABLE_GAP_MS - 10)
+  }, 30_000)
+})
+
+describe('a send that must not disturb the feeds (publishLight, #396)', () => {
+  it('opens nothing: with no socket it is not sent, and a socket gone while it waited its turn is not reopened', async () => {
+    expect(await publishLight(anEvent())).toBe(false)
+    expect(net.sockets.get(net.CANON) ?? 0).toBe(0)
+    // A socket open, and a send on it just now, so the light one waits its turn...
+    expect((await publishMany([net.CANON], anEvent())).ok).toBe(true)
+    const waiting = publishLight(anEvent())
+    // ...during which the socket goes.
+    dropRelays([net.CANON])
+    expect(await waiting).toBe(false)
+    expect(net.sockets.get(net.CANON)).toBe(1)
+    expect(net.sent).toHaveLength(1)
   }, 30_000)
 })

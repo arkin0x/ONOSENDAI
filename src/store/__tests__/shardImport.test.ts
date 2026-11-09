@@ -294,6 +294,15 @@ describe('failure and retry', () => {
     expect(imp().rows.filter((r) => r.run === 'done')).toHaveLength(3)
     expect(calls).toBe(4)
   })
+
+  it('asks again after a wait when the relay says so in its own words (relay.onosendai.tech)', async () => {
+    let calls = 0
+    vi.mocked(publishMany).mockImplementation(async () => (++calls === 1 ? { ok: false, reason: 'Rate limit exceeded for category: addressable' } : { ok: true, accepted: ['wss://relay.test'] }))
+    await openPublishing(kitZip())
+    await imp().start()
+    expect(imp().rows.filter((r) => r.run === 'done')).toHaveLength(3)
+    expect(calls).toBe(4)
+  })
 })
 
 describe('folders', () => {

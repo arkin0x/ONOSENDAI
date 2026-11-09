@@ -275,12 +275,14 @@ export function ChainStatusModal(): JSX.Element | null {
     )
   }
   if (status.kind === 'canonical') {
+    // The owner's words (2026-11-09): plain, short, and no relay URL or "actions".
+    const n = status.count
     return (
       <ConfirmModal
-        title={`${status.count} action${status.count === 1 ? '' : 's'} not on ${DEFAULT_RELAY} yet`}
+        title={`${n} move${n === 1 ? '' : 's'} still syncing`}
         cardClassName="chainexplain"
-        body={<p>Published to your other relays; {DEFAULT_RELAY}, where every device looks, has not taken {status.count === 1 ? 'it' : 'them'} yet, and ONOSENDAI keeps trying.</p>}
-        confirmLabel="UNDERSTOOD"
+        body={<p>They're saved, but relay.onosendai.tech hasn't confirmed {n === 1 ? 'it' : 'them'} yet, so your other devices may not see {n === 1 ? 'it' : 'them'}. ONOSENDAI keeps trying.</p>}
+        confirmLabel="OK"
         cancelLabel={null}
         danger={false}
         onConfirm={close}

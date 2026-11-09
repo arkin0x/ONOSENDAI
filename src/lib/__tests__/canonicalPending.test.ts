@@ -9,7 +9,7 @@
  * What would go wrong silently: a reload forgetting that the canonical
  * relay never took some actions, so devices that read only that relay never
  * see them; the self-check reading the canonical relay's shorter chain and
- * leaving it short; "N NOT ON THE MAIN RELAY YET" vanishing on reload, or
+ * leaving it short; "SYNCING · N" vanishing on reload, or
  * showing at 75 s instead of 60; and, the other way, a list the relay has
  * long caught up on (a stale one in storage, or the self-check taking the
  * relay's newest page of 500 for all it holds) shown as missing and sent
@@ -358,7 +358,7 @@ describe('actions the canonical relay has not taken', () => {
     }
   }, 20_000)
 
-  it('an event the relay refuses for good is skipped and counted, and the rest go on; rate-limited ends the pass', async () => {
+  it('an event the relay refuses for good is skipped and counted, and the rest go on; a rate limit, in the relay\'s own words, ends the pass', async () => {
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] })
     try {
       reset(); net.canonicalOk = true
@@ -368,7 +368,7 @@ describe('actions the canonical relay has not taken', () => {
       hold(store, chain)
       net.stored = [chain[0]]
       net.refuse.set(chain[1].id, 'invalid: not a hop this relay will keep')
-      net.refuse.set(chain[4].id, 'rate-limited: slow down')
+      net.refuse.set(chain[4].id, 'Rate limit exceeded for category: regular')
       leftInStorage(pk, chain.slice(1), 6 * 3_600_000)
       pub.startPublisher()
       await vi.advanceTimersByTimeAsync(6_500)
@@ -376,6 +376,30 @@ describe('actions the canonical relay has not taken', () => {
       expect(net.toCanonical).toEqual([chain[1], chain[2], chain[3], chain[4]].map((e) => e.id))
       expect(Object.keys(JSON.parse(localStorage.getItem(keyOf(pk)) ?? '{}')).sort()).toEqual([chain[1], chain[4], chain[5], chain[6]].map((e) => e.id).sort())
       expect(store.useCyberspace.getState().canonicalLate).toBe(4)
+    } finally {
+      vi.useRealTimers()
+    }
+  }, 20_000)
+
+  it('"error:" from the relay is its storage for the moment, not the event: it ends the pass, and nothing after it is sent until the next', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] })
+    try {
+      reset(); net.canonicalOk = true
+      const { store, pub } = await page()
+      const pk = store.useCyberspace.getState().identity.pubkey
+      const chain = chainOf(store, 4)
+      hold(store, chain)
+      net.stored = [chain[0]]
+      net.refuse.set(chain[2].id, 'error: failed to save event: database is locked')
+      leftInStorage(pk, chain.slice(1), 6 * 3_600_000)
+      pub.startPublisher()
+      await vi.advanceTimersByTimeAsync(6_500)
+      expect(net.toCanonical).toEqual([chain[1], chain[2]].map((e) => e.id))
+      // The storage is back: the next pass sends the rest, from where it stopped.
+      net.refuse.clear()
+      await vi.advanceTimersByTimeAsync(10_000)
+      expect(net.toCanonical).toEqual([chain[1], chain[2], chain[2], chain[3], chain[4]].map((e) => e.id))
+      expect(localStorage.getItem(keyOf(pk))).toBeNull()
     } finally {
       vi.useRealTimers()
     }

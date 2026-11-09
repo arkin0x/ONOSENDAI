@@ -189,7 +189,7 @@ export function chainStatusLabel(status: ChainStatus, check: SelfCheck | null): 
       return check.cause.kind === 'offline' ? 'HELD · OFFLINE' : check.cause.kind === 'refused' ? 'HELD · RELAY REFUSED' : 'HELD · NO ANSWER'
     }
     case 'waiting': return `${status.count} WAITING · ${status.why === 'offline' ? 'OFFLINE' : 'NO RELAY'}`
-    case 'canonical': return `${status.count} NOT ON THE MAIN RELAY YET`
+    case 'canonical': return `SYNCING · ${status.count}`
   }
 }
 

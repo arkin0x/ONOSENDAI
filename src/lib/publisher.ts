@@ -198,10 +198,14 @@ export const CANONICAL_SEND_GAP_MS = 250
 const CANONICAL_REPORT_EVERY = 10
 /**
  * A relay's refusal of this one event, whatever is sent after it (NIP-01
- * prefixes): the pass goes on to the next. rate-limited is not one of them:
- * the next would be refused too, so the pass ends there.
+ * prefixes): the pass goes on to the next. Anything else ends the pass, the
+ * backoff trying again later: a rate limit (relay.onosendai.tech says "Rate
+ * limit exceeded for category: regular" or "Global event rate limit
+ * exceeded", other relays NIP-01's "rate-limited:"), where the next event
+ * would be refused too, and "error:", which on this relay is always its
+ * storage for the moment, not the event.
  */
-const REFUSED_FOR_GOOD = /^(invalid|blocked|restricted|pow|error):/i
+const REFUSED_FOR_GOOD = /^(invalid|blocked|restricted|pow):/i
 
 /**
  * One event another relay took and the canonical relay may not have. `since`
@@ -358,8 +362,9 @@ function refusedForAuth(reason: string): boolean {
  * at a time over the same socket (publishOnceTo: never a fresh socket per
  * event), CANONICAL_SEND_GAP_MS apart; the relay's OK true "duplicate:"
  * counts as held. A refusal of one event for good (invalid, blocked,
- * restricted) skips it; any other failure, rate-limited included, ends the
- * pass, and the backoff tries again. An event the relay truly never got is
+ * restricted, pow) skips it; any other failure ends the pass (a rate limit,
+ * in whatever words the relay puts it, an "error:", a timeout), and the
+ * backoff tries again. An event the relay truly never got is
  * sent again on every pass until it lands.
  *
  * A newer deploy's rules (versionGate) hold the sends, not the check: asking

@@ -31,6 +31,8 @@ import { GAMES_OFF_MESSAGE, WALK_BUSY_MESSAGE, useGame, type GameSession } from 
 import { choiceOffered, useTutorial } from '../../store/useTutorial'
 import { CHOICE } from '../script'
 import { DUNGEON_FAILED_MESSAGE, registerDungeonChoice } from '../dungeon'
+import { GAME_BUSY_MESSAGE } from '../../store/useCyberspace'
+import { VERSION_BLOCKED_MESSAGE } from '../../lib/versionGate'
 
 const GAMES_KEY = 'onosendai:games'
 const dungeon = CHOICE.choices!.find((c) => c.id === 'dungeon')!
@@ -50,7 +52,7 @@ afterEach(() => {
 
 // One sequence: a registration cannot be taken back, so games-off is checked before games-on.
 describe('the DUNGEON choice', () => {
-  it('is not offered with games off (the default, and always on the production host)', () => {
+  it('is not offered with games off (the default)', () => {
     localStorage.removeItem(GAMES_KEY)
     // Loading the module with games off registered nothing, and asking again registers nothing.
     expect(registerDungeonChoice()).toBe(false)
@@ -90,13 +92,22 @@ describe('the DUNGEON choice', () => {
     expect(useTutorial.getState().active).toBe(false)
   })
 
-  it('says a signer\'s or relay\'s refusal, or a throw, in plain words on the card', async () => {
+  it('shows the chain\'s own refusals as they are, and a signer\'s or relay\'s raw error, or a throw, in plain words', async () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
-    entry.next = () => Promise.resolve('Something went wrong: relay wss://x closed with code 1006')
     useTutorial.getState().start({ restart: true })
-    useTutorial.getState().choose('dungeon')
-    await settle()
-    expect(useTutorial.getState().choiceNote).toBe(DUNGEON_FAILED_MESSAGE)
+    for (const words of [GAME_BUSY_MESSAGE, VERSION_BLOCKED_MESSAGE]) {
+      entry.next = () => Promise.resolve(words)
+      useTutorial.getState().choose('dungeon')
+      await settle()
+      expect(useTutorial.getState().choiceNote).toBe(words)
+    }
+    expect(warn).not.toHaveBeenCalled()
+    for (const raw of ['Something went wrong: relay wss://x closed with code 1006', 'Signing failed: bunker said no']) {
+      entry.next = () => Promise.resolve(raw)
+      useTutorial.getState().choose('dungeon')
+      await settle()
+      expect(useTutorial.getState().choiceNote).toBe(DUNGEON_FAILED_MESSAGE)
+    }
     entry.next = () => Promise.reject(new Error('boom'))
     useTutorial.getState().choose('dungeon')
     await settle()

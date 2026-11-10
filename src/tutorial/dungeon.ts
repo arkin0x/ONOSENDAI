@@ -8,29 +8,28 @@
  * off nothing is registered and the card shows HYPERSPACE and AGENTS only.
  *
  * The card waits while the entry publishes and goes away once the game is on
- * screen. A refusal stays on the card in short plain words: game mode's own
- * refusals are already that; anything else (a signer's or relay's words) is
- * said as DUNGEON_FAILED_MESSAGE here and left in full in the console and on
- * the Proof chain panel (useGame `message`).
+ * screen. A refusal stays on the card in plain words: game mode's and the
+ * chain's refusals are written for the player already (finish your walk,
+ * wait for your move to land, RELOAD) and are shown as they are; only a raw
+ * error (a signer's or relay's own words, wrapped as "Signing failed:" or
+ * "Something went wrong:") is said as DUNGEON_FAILED_MESSAGE, and left in
+ * full in the console.
  */
 
-import {
-  COVERED_MESSAGE, GAME_ALREADY_MESSAGE, GAMES_OFF_MESSAGE, WALK_BUSY_MESSAGE,
-  enterTutorialDungeon, gamesEnabled, useGame,
-} from '../store/useGame'
+import { enterTutorialDungeon, gamesEnabled, useGame } from '../store/useGame'
 import { registerTutorialChoice } from '../store/useTutorial'
 
 /** The `when` the script's dungeon choice names (tutorial/script.ts CHOICE). */
 export const DUNGEON_CHOICE = 'dungeon'
 export const DUNGEON_FAILED_MESSAGE = 'The dungeon did not open. Try again.'
 
-/** Game mode's refusals that already read as short plain words. */
-const PLAIN_REFUSALS = new Set([GAMES_OFF_MESSAGE, GAME_ALREADY_MESSAGE, WALK_BUSY_MESSAGE, COVERED_MESSAGE])
+/** A raw error, not a refusal written for the player (lib/signWithin.ts signingFailed, useGame failed). */
+const RAW_ERROR = /^(Signing failed|Something went wrong):/
 
 /** What the card says for a refusal. */
 export function dungeonRefusal(why: string): string {
-  if (PLAIN_REFUSALS.has(why)) return why
-  console.warn('[tutorial] the dungeon refused:', why)
+  if (!RAW_ERROR.test(why)) return why
+  console.warn('[tutorial] the dungeon did not open:', why)
   return DUNGEON_FAILED_MESSAGE
 }
 
@@ -45,7 +44,7 @@ export function enterDungeonFromTutorial(): Promise<string | null> {
     function settle(note: string | null): void { unsubscribe(); resolve(note) }
     enterTutorialDungeon().then(
       (why) => settle(why ? dungeonRefusal(why) : null),
-      (err: unknown) => settle(dungeonRefusal(err instanceof Error ? err.message : String(err))),
+      (err: unknown) => { console.warn('[tutorial] the dungeon did not open:', err); settle(DUNGEON_FAILED_MESSAGE) },
     )
   })
 }

@@ -10430,6 +10430,8 @@ html.tv-broadcast body { overflow: hidden; }
 .tutorial-choice__about { color: var(--dim); font-size: 11px; letter-spacing: 0; text-transform: none; }
 .tutorial-card__go--done { background: none; color: var(--dim); border-color: var(--border); }
 .tutorial__note { margin: 0; color: var(--warn); font-size: 12px; }
+.tutorial__note:empty { position: absolute; }
+.tutorial-choice[aria-disabled="true"] { opacity: 0.35; cursor: default; }
 
 /* In-game mode (game/GameView.tsx, DECK-0002 §2.3): the game's world full
    screen over cyberspace, its bar on top, its pad at the bottom. Pink, the

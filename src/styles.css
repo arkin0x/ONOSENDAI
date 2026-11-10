@@ -3300,7 +3300,6 @@ kbd {
 /* A bouncy shard's chip (Workshop.tsx BounceChip), small enough for a list row and the SHARD counts line. */
 .ws__bounce-chip {
   display: inline-block;
-  font-size: 7px;
   padding: 1px 5px;
   line-height: 1.4;
   margin-left: 4px;

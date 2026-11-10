@@ -47,7 +47,7 @@ import {
 import { withOpacity } from '../lib/opacityStep'
 import { noTable, signedTableOnly, you } from '../lib/carried'
 import { authoredConstrainOf, chosenConstrainOf, withConstrain, type Constrain } from '../lib/walkConstrain'
-import { withBounce, type Bounce } from '../lib/walkBounce'
+import { bounceOf, springboardOf, withBounce, type Bounce } from '../lib/walkBounce'
 import { addPart, quarterTurnPart, removeParts } from 'sno-core/parts'
 import { FLOOR, MAX_SIZE, MIN_SIZE, stamp, type Facing, type StampKind, type WorkPlane } from 'sno-core/stamps'
 import { BUILT_IN, hexAt, remap, samePalette, snapHex, type Palette } from 'sno-core/snoPalette'
@@ -1762,7 +1762,14 @@ export const useWorkshop = create<WorkshopState>((set, get) => {
       // tool) keeps the word the bench's author chose: an OFF or ALL set here
       // survives the update (DECK-0003 §1.12). A word in the file wins.
       const chose = chosenConstrainOf(old)
-      const walk = chose && !chosenConstrainOf(next) ? withConstrain(next, chose) : next
+      const walled = chose && !chosenConstrainOf(next) ? withConstrain(next, chose) : next
+      // BOUNCE likewise (ruling of 2026-11-10, review of #653): a file that
+      // reads as no bounce (absent or malformed) keeps the bench's, bounce
+      // and springboard as a pair. A valid bounce in the file wins, with the
+      // file's own springboard: never the file's bounce with the bench's
+      // springboard.
+      const benchBounce = bounceOf(old)
+      const walk = benchBounce !== 0 && bounceOf(walled) === 0 ? withBounce(walled, benchBounce, springboardOf(old)) : walled
       const list = shards.slice()
       list[i] = walk
       // On the bench it is an edit like any other: UNDO brings the old one back.

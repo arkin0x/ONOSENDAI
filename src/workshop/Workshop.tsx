@@ -197,7 +197,7 @@ export function BounceRow(): JSX.Element {
           </div>
         </>
       )}
-      <div className="ws__explain">Walkers with gravity on bounce off its top.</div>
+      {bounce !== 0 && <div className="ws__explain">Walkers with gravity on bounce off its top.</div>}
     </>
   )
 }

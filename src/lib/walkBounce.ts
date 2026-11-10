@@ -129,6 +129,11 @@ export function clampBounce(n: number): number {
  * learned the field) is dropped, so it can never shadow the new value. The
  * same object when it already says exactly that, so a press that changes
  * nothing is no edit.
+ *
+ * When `bounce` is promoted into DECK-0003, sno-core needs a lift for
+ * `bounce` and `springboard` (as it has for its other known fields, so
+ * toPayload and fromPayload carry them at the top level), and this writer
+ * should then write them at the top level instead of into `extra`.
  */
 export function withBounce<T extends ShardModel>(s: T, raw: unknown, springboard = false): T {
   const b = readBounce(raw)

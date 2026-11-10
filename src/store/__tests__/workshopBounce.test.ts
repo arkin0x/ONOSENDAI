@@ -76,6 +76,23 @@ describe('setBounce', () => {
     expect(fields(bench())).toEqual({ bounce: 12, springboard: true })
   })
 
+  it('REDO walks forward again, and a press that changes nothing after an UNDO keeps REDO', () => {
+    ws().setBounce(12, true)
+    ws().setBounce('reflect')
+    ws().setBounce(0)
+    ws().undo()
+    ws().undo()
+    expect(fields(bench())).toEqual({ bounce: 12, springboard: true })
+    ws().redo()
+    expect(fields(bench())).toEqual({ bounce: 'reflect', springboard: false })
+    // The same setting pressed again is no edit: the step forward to OFF is still there.
+    ws().setBounce('reflect', true)
+    expect(ws().future).toHaveLength(1)
+    ws().redo()
+    expect(bench()).not.toHaveProperty('extra')
+    expect(ws().future).toHaveLength(0)
+  })
+
   it('the same setting again is no edit, so no empty undo step', () => {
     ws().setBounce(6, true)
     const past = ws().past.length

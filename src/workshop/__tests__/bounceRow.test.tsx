@@ -71,7 +71,7 @@ describe('BOUNCE in the SHARD panel', () => {
     expect(bounce).toBeGreaterThan(constrain)
   })
 
-  it('OFF: three choices, OFF pressed, no stepper and no SPRINGBOARD; the explain line shows', () => {
+  it('OFF: three choices, OFF pressed, no stepper, no SPRINGBOARD and no explain line', () => {
     const html = row()
     expect(html).toContain('>OFF<')
     expect(html).toContain('>HEIGHT<')
@@ -79,8 +79,15 @@ describe('BOUNCE in the SHARD panel', () => {
     expect(pressed(html)).toEqual(['OFF'])
     expect(html).not.toContain('springboard')
     expect(html).not.toContain('Bounce height')
-    expect(html).toContain('Walkers with gravity on bounce off its top.')
+    expect(html).not.toContain('Walkers with gravity on bounce off its top.')
     expect(html).not.toContain('—')
+  })
+
+  it('the explain line shows once it bounces, with a height or REFLECT', () => {
+    useWorkshop.getState().setBounce(6)
+    expect(row()).toContain('Walkers with gravity on bounce off its top.')
+    useWorkshop.getState().setBounce('reflect')
+    expect(row()).toContain('Walkers with gravity on bounce off its top.')
   })
 
   it('a fixed height: HEIGHT and its preset pressed, the stepper, and SPRINGBOARD to toggle', () => {

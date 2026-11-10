@@ -60,7 +60,7 @@ export const TAKE: TutorialStep = {
 export const TO_PLOT: TutorialStep = {
   id: 'to-plot',
   title: 'The dirt',
-  caption: 'There was a seed in the chest. See the dirt? Go stand on it.',
+  caption: 'The dirt is for a seed. Go stand on it.',
   hint: 'Tap COMMIT to move there.',
   scene: { target: 'self' },
   wait: 'at-plot',
@@ -72,8 +72,8 @@ export const PLANT: TutorialStep = {
   id: 'plant',
   title: 'Plant it',
   caption: `Go into BUILD and plant the ${TREE} on the dirt.`,
-  hint: `BUILD (B), SEED, ${TREE}, PLANT, then place it here.`,
-  explain: 'A seed is yours: you sign it and do a little work for it on this device, and it stays where you plant it. Everyone who finds it grows the same tree, a little more every day.',
+  hint: `BUILD, SEED, ${TREE}, SMALL, PLANT, then HIDE.`,
+  explain: 'A seed is yours. You sign it and do a little work for it on this device, and it stays where you plant it. Everyone who finds it grows the same tree, a little more every day.',
   wait: 'plant',
 }
 
@@ -82,6 +82,7 @@ export const BUD: TutorialStep = {
   id: 'bud',
   title: 'It grows',
   caption: 'It will grow over time. Check back later.',
+  effect: 'leave-build',
   image: { src: TUTORIAL_BUD_PICTURE, alt: `The ${TUTORIAL_DNA.name} as it starts to bud` },
 }
 

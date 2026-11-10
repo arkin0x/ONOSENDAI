@@ -71,6 +71,12 @@ function standAt(layout: TutorialLayout, items: WallItem[], x: number, z: number
   return 30 - Number(f.drop)
 }
 
+/** Where a walker dropped over box-frame (f, r) comes to stand, as a box-frame u, or null. */
+function standAt0(layout: TutorialLayout, items: WallItem[], f: number, r: number): number | null {
+  const fall = fallLimit(toWorld(layout.frame, f, r, 20), items, () => true)
+  return fall.lands ? 20 - Number(fall.drop) : null
+}
+
 /** The course z cells along x 0 where a walker stands at course height `y`. */
 function cellsAt(layout: TutorialLayout, items: WallItem[], y: number, from: number, to: number): number[] {
   const out: number[] = []
@@ -110,14 +116,18 @@ describe.each([[1, 1], [1, -1], [-1, 1], [-1, -1]] as const)('the course, facing
     for (const z of [7, 13, 14, 20, 21]) expect(standAt(layout, items, 0, z), `gap z ${z}`).toBe(-2)
 
     // The dirt plot (A5): a walker stands on it at u 1, on its 4 by 4 cells, which count as on the plot.
-    for (const f of [12, 15]) for (const r of [2, 5]) {
+    for (const f of [12, 16]) for (const r of [2, 6]) {
       const top = toWorld(layout.frame, f, r, 20)
       const fall = fallLimit(top, items, () => true)
       expect(fall.lands, `plot f ${f} r ${r}`).toBe(true)
       expect(20 - Number(fall.drop)).toBe(PLOT_STAND.u)
       expect(onPlot(layout.frame, toWorld(layout.frame, f, r, 1))).toBe(true)
     }
-    expect(onPlot(layout.frame, toWorld(layout.frame, PLOT_AT.f + 3, PLOT_AT.r, 1))).toBe(false)
+    for (const [f, r] of [[11, 4], [17, 4], [14, 1], [14, 7]]) {
+      expect(onPlot(layout.frame, toWorld(layout.frame, f, r, 1)), `off the plot f ${f} r ${r}`).toBe(false)
+      expect(standAt0(layout, items, f, r)).not.toBe(PLOT_STAND.u)
+    }
+    void PLOT_AT
 
     // Back up: from the floor behind the start, walking forward climbs the step and onto the start square.
     let at = courseToWorld(layout.frame, [0, -2, -10])

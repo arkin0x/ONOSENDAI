@@ -139,7 +139,7 @@ export function TutorialCoach(): JSX.Element | null {
           <h2 className="demo__title">{step.title}</h2>
         </div>
         <p className="demo__caption"><CaptionText caption={caption} /></p>
-        {step.image && <img className="tutorial__image" src={step.image.src} alt={step.image.alt} />}
+        {step.image && <img className="tutorial__image" src={step.image.src} alt={step.image.alt} width={382} height={201} onError={(e) => { e.currentTarget.style.display = 'none' }} />}
         {step.explain && explaining && <p className="demo__caption tutorial__explain">{step.explain}</p>}
       </div>
       {step.wait ? (

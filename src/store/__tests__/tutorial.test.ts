@@ -392,6 +392,13 @@ describe('the engine', () => {
     const plant = TUTORIAL_SCRIPT.steps.find((st) => st.id === 'plant')!
     expect(plant.hint).toContain(TUTORIAL_DNA.name.toUpperCase())
     expect(TUTORIAL_SCRIPT.steps.find((st) => st.id === 'bud')!.image?.src).toBe(TUTORIAL_BUD_PICTURE)
+    // The tree is a starter, so the composer offers it by name; the picture is on disk.
+    const { STARTER_DNAS } = await import('../../lib/seeds/starterDnas')
+    expect(STARTER_DNAS).toContain(TUTORIAL_DNA)
+    expect(TUTORIAL_DNA.name).toBe('oak')
+    const { existsSync } = await import('node:fs')
+    const { join } = await import('node:path')
+    expect(existsSync(join(__dirname, '../../../public', TUTORIAL_BUD_PICTURE))).toBe(true)
   })
 
   it('choice seams: a run with a step runs first then goes there; a run that fails leaves the card; a missing step changes nothing; a gate holds; a double tap does nothing twice', async () => {

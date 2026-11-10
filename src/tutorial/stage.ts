@@ -10,8 +10,8 @@
  *
  * Three bags:
  *   - the covering bag (tutorial/layout.ts cover): the blue box, the
- *     bounce course (tutorial/course.ts), the dirt plot and the tutorial
- *     tree's DNA (tutorial/dna.ts), seen from the spawn;
+ *     bounce course (tutorial/course.ts) and the dirt plot, seen from the
+ *     spawn;
  *   - the box bag (the blue box's own height-3 region): the treasure chest,
  *     locked to that region (DECK-0004 §3.8, the region's lock), so whoever
  *     stands in the box carries the key that opens it (store/useKeyring). In
@@ -37,8 +37,6 @@ import { lockOf } from '../lib/locks'
 import type { Position } from '../lib/space'
 import { BOX_HEIGHT, regionBase, toWorld, type TutorialLayout } from './layout'
 import { BACK_STEP, CATCH_FLOOR, COURSE, FINISH_CHEST, PLOT, PLOT_AT, courseToWorld, type CoursePart } from './course'
-import { TUTORIAL_DNA } from './dna'
-import { dnaTemplate } from '../lib/seeds/plant'
 import trophyPayload from './pieces/trophy.json'
 import platSquare6 from './pieces/plat-square-6.json'
 import platSquare4 from './pieces/plat-square-4.json'
@@ -88,9 +86,8 @@ export interface StageIds {
   finishChest: string
   finishContents: string[]
   finishLookup: string
-  /** The dirt plot shard and the tutorial tree's DNA event. */
+  /** The dirt plot shard. */
   plot: string
-  dna: string
 }
 
 export interface Stage {
@@ -108,7 +105,7 @@ export interface Stage {
 /** Caption copy that lives in the staged things, drafts in the owner's voice (design §7, question 7). */
 export const STAGE_TEXT = {
   chestName: 'Treasure chest',
-  message: `You found it. Whatever you TAKE is yours, in your ITEMS. There is a seed for you too: plant the ${TUTORIAL_DNA.name.toUpperCase()} on the dirt.`,
+  message: 'You found it. Whatever you TAKE is yours, in your ITEMS.',
   welcomeName: 'Welcome',
   welcomeAbout: 'Your first day in cyberspace.',
   finishName: 'Finish chest',
@@ -206,14 +203,15 @@ export async function buildStage(secret: Uint8Array, player: string, layout: Tut
 
   const blueBox = sign(shardInnerTemplate(blueBoxModel(), boxMiddle, plane, createdAt))
   const course = COURSE.map((part, i) => sign(shardInnerTemplate(pieceModel(PIECES[part.piece], `tutorial-course-${i}`), courseToWorld(frame, part.at), plane, createdAt)))
-  // The dirt plot, and the tutorial tree's DNA beside it (A5, T6): a bag is
-  // where a reader looks first for the DNA of a seed planted there (DECK-0008
-  // §8.2), and a DNA is read from a bag's entries, not from inside a chest.
+  // The dirt plot (A5). The tutorial tree's DNA is not staged: the player
+  // picks it in the SEED composer, which signs it under their own key (a
+  // DNA's id names its signer), so no seed would ever name one the guide
+  // signed. One shared DNA for every newcomer needs the composer to plant
+  // from an existing DNA event: a question for the Seeds client.
   const plot = sign(shardInnerTemplate(pieceModel(PLOT, 'tutorial-plot'), toWorld(frame, PLOT_AT.f, PLOT_AT.r, PLOT_AT.u), plane, createdAt))
-  const dna = sign(dnaTemplate(TUTORIAL_DNA.text, TUTORIAL_DNA.caps, createdAt))
 
   const bags = await Promise.all([
-    sealBag(sign, [blueBox, ...course, plot, dna], coverKey.key, coverKey.lookupId, cover.height, createdAt, cover.base, plane),
+    sealBag(sign, [blueBox, ...course, plot], coverKey.key, coverKey.lookupId, cover.height, createdAt, cover.base, plane),
     sealBag(sign, [chest], boxKey.key, boxKey.lookupId, BOX_HEIGHT, createdAt, b, plane),
     sealBag(sign, [finishChest], finishKey.key, finishKey.lookupId, BOX_HEIGHT, createdAt, finishBase, plane),
   ])
@@ -233,7 +231,6 @@ export async function buildStage(secret: Uint8Array, player: string, layout: Tut
       finishContents: finishContents.map(entryId),
       finishLookup: finishKey.lookupId,
       plot: plot.id,
-      dna: dna.id,
     },
   }
 }

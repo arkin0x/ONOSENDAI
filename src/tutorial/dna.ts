@@ -16,11 +16,12 @@
 
 import { STARTER_DNAS, type StarterDna } from '../lib/seeds/starterDnas'
 
-const oak = STARTER_DNAS.find((d) => d.name === 'oak')
-if (!oak) throw new Error('The oak starter is missing.')
-
-/** The DNA the tutorial's seed grows. */
-export const TUTORIAL_DNA: StarterDna = oak
+/**
+ * The DNA the tutorial's seed grows: a starter, so the composer offers it by
+ * name (a test holds it among STARTER_DNAS, and fails loudly if the owner's
+ * tree goes in before the composer offers it).
+ */
+export const TUTORIAL_DNA: StarterDna = STARTER_DNAS.find((d) => d.name === 'oak') ?? STARTER_DNAS[0]
 
 /** Its picture as it starts to bud, for the step after planting. */
 export const TUTORIAL_BUD_PICTURE = '/tutorial/bud.png'

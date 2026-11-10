@@ -215,13 +215,45 @@ describe('the director', () => {
     expect(useTutorial.getState().done).toBe(false)
     useCyberspace.setState({ events: [{ id: 'e', tags: [] } as never], position: stand, headPlane: layout!.plane })
     expect(useTutorial.getState().done).toBe(true)
-    useShards.setState({ mine: [{ eventId: 'old', type: 'seed' } as never] })
+    // Planted: a seed of the player's own, on the dirt, growing the tutorial DNA, out unless LOCAL.
+    const { dnaResolver } = await import('../../lib/seeds/seedSources')
+    const { TUTORIAL_DNA } = await import('../dna')
+    const { seedTemplate, dnaTemplate } = await import('../../lib/seeds/plant')
+    const { STARTER_DNAS } = await import('../../lib/seeds/starterDnas')
+    const { finalizeEvent, generateSecretKey, getPublicKey } = await import('nostr-tools/pure')
+    const { minePow } = await import('nostr-tools/nip13')
+    const me = generateSecretKey()
+    const dnaOf = (text: string, caps = TUTORIAL_DNA.caps) => { const ev = finalizeEvent(dnaTemplate(text, caps, 1_800_000_000), me); dnaResolver.note(ev as never); return ev }
+    const oak = dnaOf(TUTORIAL_DNA.text)
+    const fern = dnaOf(STARTER_DNAS.find((d) => d.name !== TUTORIAL_DNA.name)!.text)
+    const seedRow = (dnaId: string, at: { x: bigint; y: bigint; z: bigint }, published = true) => {
+      // With the work a seed owes at the base price (DECK-0008 §8.2), or no reader reads it.
+      const t = seedTemplate({ dnaId, relayHint: '', planted: 900_000, scale: 0, at, plane: layout!.plane, title: '', createdAt: 1_800_000_000 })
+      const inner = finalizeEvent(minePow({ ...t, pubkey: getPublicKey(me) }, 16), me)
+      return { eventId: inner.id, type: 'seed', inner, at: { x: String(at.x), y: String(at.y), z: String(at.z) }, plane: layout!.plane, published } as never
+    }
     useTutorial.getState().start({ at: 'plant' })
     expect(useTutorial.getState().done).toBe(false)
-    useShards.setState({ mine: [{ eventId: 'old', type: 'seed' } as never, { eventId: 'x', type: 'shard' } as never] })
+    useCyberspace.getState().setLive(true)
+    // Another tree on the dirt; the tree far off; the tree on the dirt but no relay took it (LIVE): none count.
+    useShards.setState({ mine: [seedRow(fern.id, stand)] })
+    await new Promise((r) => setTimeout(r, 20))
     expect(useTutorial.getState().done).toBe(false)
-    useShards.setState({ mine: [{ eventId: 'old', type: 'seed' } as never, { eventId: 'new', type: 'seed' } as never] })
-    expect(useTutorial.getState().done).toBe(true)
+    useShards.setState({ mine: [seedRow(oak.id, { ...stand, x: stand.x + 40n })] })
+    expect(useTutorial.getState().done).toBe(false)
+    useShards.setState({ mine: [seedRow(oak.id, stand, false)] })
+    expect(useTutorial.getState().done).toBe(false)
+    useShards.setState({ mine: [seedRow(oak.id, stand)] })
+    // Its DNA is resolved (asynchronously), then it counts.
+    await vi.waitFor(() => { expect(useTutorial.getState().done).toBe(true) })
+    // A reload after planting finds it planted.
+    useTutorial.getState().start({ at: 'plant' })
+    await vi.waitFor(() => { expect(useTutorial.getState().done).toBe(true) })
+    // The bud leaves BUILD, so the course step can line its COMMIT up.
+    const { useBuilder } = await import('../../store/useBuilder')
+    useBuilder.setState({ active: true } as never)
+    useTutorial.getState().start({ at: 'bud' })
+    expect(useBuilder.getState().active).toBe(false)
     useShards.setState({ mine: [] })
     useCyberspace.setState({ events: [] })
   })

@@ -139,10 +139,10 @@ export function slabPayload(name: string, hx: number, hz: number, color: number)
 }
 
 /**
- * The dirt plot (A5): a 4 by 4 patch, its top at the box's floor, a little
+ * The dirt plot (A5): a 5 by 5 patch, its top at the box's floor, a little
  * way from the box and away from the course (a walker stands on box frame
- * f 12 to 15, r 2 to 5, as a slab's cells run from -2 to 1 about its
- * middle, the same whichever way the layout faces).
+ * f 12 to 16, r 2 to 6, the slab's corners -2 and +2 about its middle
+ * counting as cells too, the same whichever way the layout faces).
  */
 export const PLOT_AT = { f: 14, r: 4, u: 0 } as const
 /** Where a player stands on the plot, and where a seed planted there sits. */
@@ -152,7 +152,7 @@ export const PLOT = slabPayload('Dirt', 2, 2, 121)
 /** Whether a world point is on the plot, standing or planted (one cell above its top, or two). */
 export function onPlot(frame: Frame, at: Position): boolean {
   const a = toWorld(frame, PLOT_AT.f - 2, PLOT_AT.r - 2, 1)
-  const b = toWorld(frame, PLOT_AT.f + 1, PLOT_AT.r + 1, 2)
+  const b = toWorld(frame, PLOT_AT.f + 2, PLOT_AT.r + 2, 2)
   for (const k of ['x', 'y', 'z'] as const) {
     const lo = a[k] < b[k] ? a[k] : b[k]
     const hi = a[k] > b[k] ? a[k] : b[k]

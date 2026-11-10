@@ -33,6 +33,11 @@ import { useOpenedChests, openedKey } from '../store/useOpenedChests'
 import { useInventory } from '../store/useInventory'
 import { useWalk } from '../store/useWalk'
 import { useWorkshop } from '../store/useWorkshop'
+import { useBuilder } from '../store/useBuilder'
+import { positionOf } from '../store/useShards'
+import { seedItemOf } from '../lib/seeds/seedItem'
+import { dnaResolver } from '../lib/seeds/seedSources'
+import { TUTORIAL_DNA } from './dna'
 import { markViewedStop, ownHyperspaceView } from '../store/useHyperspace'
 import { EARTH_SCALE_EXP } from '../lib/hyperspace/interest'
 import { PLOT_STAND, START_STAND, atStart, courseToWorld, onDeck, onPlot } from './course'
@@ -130,7 +135,7 @@ function aimOnce(place: (layout: TutorialLayout) => Position): () => (() => void
       aimed = aimAt(place(layout), layout)
       if (aimed) off()
     }
-    const offs = [useTutorialStage.subscribe(aim), useCyberspace.subscribe((s, prev) => { if (s.proof.status !== prev.proof.status || s.walking !== prev.walking || s.position !== prev.position) aim() })]
+    const offs = [useTutorialStage.subscribe(aim), useCyberspace.subscribe((s, prev) => { if (s.proof.status !== prev.proof.status || s.walking !== prev.walking || s.position !== prev.position || s.focus !== prev.focus) aim() })]
     const off = (): void => { for (const o of offs.splice(0)) o() }
     aim()
     return off
@@ -258,14 +263,37 @@ registerTutorialEffect('view-earth', () => {
 registerTutorialWatcher('at-plot', (onDone) => watchArrival((at, layout) => onPlot(layout.frame, at), onDone))
 
 /**
- * A seed planted (A5): a seed of the player's own in their rows that was not
- * there when the step came up. Planting is theirs: BUILD, SEED, PLANT, and
- * the deploy that mines its work (the Seeds client, store/useShards).
+ * The tutorial tree planted (A5): a seed of the player's own on the dirt,
+ * growing the tutorial DNA, and out (published) unless they are LOCAL.
+ * Planting is theirs: BUILD, SEED, the tree, PLANT, and the deploy that
+ * mines its work (the Seeds client, store/useShards), whose row appears only
+ * once the seed is mined and its bag written. A state, not "since the step
+ * came up": a reload after planting finds it planted.
  */
+export function tutorialTreePlanted(onUnknown?: () => void): boolean {
+  const layout = useTutorialStage.getState().layout
+  if (!layout) return false
+  const live = useCyberspace.getState().live
+  return useShards.getState().mine.some((d) => {
+    if (d.type !== 'seed' || !d.inner || (live && !d.published)) return false
+    if (d.plane !== layout.plane || !onPlot(layout.frame, positionOf(d))) return false
+    const seed = seedItemOf(d.inner)
+    if (!seed) return false
+    const v = dnaResolver.verdict(seed.dnaId)
+    if (!v || v.state === 'fetching') { if (onUnknown) void dnaResolver.resolve(seed.dnaId).then(onUnknown, onUnknown); return false }
+    return v.state === 'ok' && v.text === TUTORIAL_DNA.text
+  })
+}
+
 registerTutorialWatcher('plant', (onDone) => {
-  const seeds = (): string[] => useShards.getState().mine.filter((d) => d.type === 'seed').map((d) => d.eventId)
-  const before = new Set(seeds())
-  return watchUntil(() => seeds().some((id) => !before.has(id)), onDone, [(l) => useShards.subscribe((s, prev) => { if (s.mine !== prev.mine) l() })])
+  let again: () => void = () => {}
+  const off = watchUntil(() => tutorialTreePlanted(() => again()), onDone, [onStage, (l) => { again = l; return useShards.subscribe((s, prev) => { if (s.mine !== prev.mine) l() }) }])
+  return () => { again = () => {}; off() }
+})
+
+/** The bud: out of BUILD (planting leaves a copy of the seed lined up), so the next step's COMMIT is there to tap. */
+registerTutorialEffect('leave-build', () => {
+  if (useBuilder.getState().active) useBuilder.getState().exit()
 })
 
 /** The plot step lines the cursor up on the dirt, so one COMMIT moves you there. */

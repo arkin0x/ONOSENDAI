@@ -27,7 +27,6 @@ import { startCoordRoute } from './store/useCoordRoute'
 import { DemoCoach } from './hud/DemoCoach'
 import { TutorialCoach } from './hud/TutorialCoach'
 import { watchFirstArrival } from './store/useTutorial'
-import { applyTutorialFlag } from './tutorial/gate'
 import { TvScreen } from './hud/TvScreen'
 import { isTvPath, useTv } from './store/useTv'
 import { isBroadcast, reloadBroadcast } from './lib/tv/broadcast'
@@ -130,11 +129,11 @@ export default function App(): JSX.Element {
     window.addEventListener('popstate', onPop)
     return () => window.removeEventListener('popstate', onPop)
   }, [])
-  // The first-arrival tutorial (store/useTutorial.ts): ?tutorial=1 or =0 sets
-  // this device's switch (off in production until the owner turns it on);
-  // with it on, a brand-new identity gets the tutorial and a player who left
-  // one unfinished resumes it.
-  useEffect(() => { applyTutorialFlag(); return watchFirstArrival() }, [])
+  // The first-arrival tutorial (store/useTutorial.ts): with this device's
+  // switch on (tutorial/gate.ts, off in production until the owner turns it
+  // on), a brand-new identity gets the tutorial and a player who left one
+  // unfinished resumes it.
+  useEffect(() => watchFirstArrival(), [])
   // onosendai.tech/tv: Cyberspace TV (store/useTv.ts). Back off /tv turns
   // it off, Forward onto /tv turns it on, as loading that address would.
   useEffect(() => {

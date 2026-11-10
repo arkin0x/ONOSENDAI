@@ -9,12 +9,13 @@
  * No keys of its own: the player's keys are the scene's (WASD, Space).
  */
 
-import { useCallback, useRef } from 'react'
+import { useCallback, useEffect, useRef } from 'react'
 import { createPortal } from 'react-dom'
 import { ChevronDown, ChevronRight, ChevronUp, X } from 'lucide-react'
 import { useTutorial } from '../store/useTutorial'
 import { useDemo } from '../store/useDemo'
 import { useCover } from '../hooks/useCover'
+import { useEscape } from '../hooks/useEscape'
 import { CaptionText, useCoachOffsets } from './DemoCoach'
 
 export function TutorialCoach(): JSX.Element | null {
@@ -33,6 +34,12 @@ export function TutorialCoach(): JSX.Element | null {
   const coverRef = useCover('top', shown && !modal && !minimized)
   const panelRef = useCallback((el: HTMLDivElement | null) => { ref.current = el; coverRef(el) }, [coverRef])
   useCoachOffsets(ref, shown && !modal, minimized)
+  // The welcome is a modal like any other: Escape answers it (FIND IT), the
+  // pad steps aside while it is up (useModalUp), and its button has the
+  // focus, so Space presses it rather than committing a first move behind it.
+  const go = useRef<HTMLButtonElement | null>(null)
+  useEscape('modal', shown && modal, () => useTutorial.getState().next())
+  useEffect(() => { if (shown && modal) go.current?.focus() }, [shown, modal, index])
 
   if (!shown || !step) return null
   const t = useTutorial.getState()
@@ -52,7 +59,7 @@ export function TutorialCoach(): JSX.Element | null {
           </div>
           <h2 className="modal__title">{step.title}</h2>
           <p className="demo__caption"><CaptionText caption={caption} /></p>
-          <button className="demo__btn demo__btn--next tutorial-card__go" onClick={t.next}>{step.go ?? (last ? 'FINISH' : 'NEXT')}</button>
+          <button ref={go} className="demo__btn demo__btn--next tutorial-card__go" onClick={t.next}>{step.go ?? (last ? 'FINISH' : 'NEXT')}</button>
         </div>
       </div>,
       document.body,
@@ -89,7 +96,7 @@ export function TutorialCoach(): JSX.Element | null {
         {step.explain && explaining && <p className="demo__caption tutorial__explain">{step.explain}</p>}
       </div>
       {step.wait && (
-        <div className={`demo__wait ${done ? 'is-done' : ''}`}>
+        <div className={`demo__wait ${done ? 'is-done' : ''}`} aria-live="polite">
           <span>{done ? '✓ Done' : step.hint ?? 'Your turn.'}</span>
         </div>
       )}

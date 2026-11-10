@@ -34,7 +34,8 @@ vi.mock('../useCyberspace', async (orig) => {
 import { MINTED_KEY, useCyberspace } from '../useCyberspace'
 import { ADVANCE_MS, isNewArrival, registerTutorialWatcher, useTutorial, watchFirstArrival } from '../useTutorial'
 import { useDemo } from '../useDemo'
-import { PROGRESS_PREFIX, TUTORIAL_SWITCH_KEY, applyTutorialFlag, readProgress, tutorialEnabled, tutorialSwitch, writeProgress } from '../../tutorial/gate'
+import { PROGRESS_PREFIX, TUTORIAL_SWITCH_KEY, applyTutorialFlag, noteLanding, readProgress, setTutorialSwitch, tutorialEnabled, tutorialSwitch, useTutorialSwitch, writeProgress } from '../../tutorial/gate'
+import { useTv } from '../useTv'
 import { TUTORIAL_SCRIPT } from '../../tutorial/script'
 import type { TutorialScript } from '../../tutorial/types'
 
@@ -42,10 +43,15 @@ const pubkey = (): string => useCyberspace.getState().identity.pubkey
 const g = globalThis as { window?: unknown }
 let hadWindow: unknown
 
-/** The bare address, as a first arrival lands on it. */
+/** The address the page landed on (main.tsx notes it before the first render). */
 function atAddress(pathname: string): void {
   g.window = { location: { pathname, search: '', hash: '' }, history: { state: null, replaceState: () => {} } }
+  noteLanding(pathname)
 }
+/** The switch on, as ?tutorial=1 leaves it. */
+const switchOn = (): void => setTutorialSwitch(true)
+/** The decision waits for the saved chain's read (savedChainLoaded): let it land. */
+const flush = (): Promise<void> => new Promise((r) => setTimeout(r, 0))
 
 beforeEach(() => {
   hadWindow = g.window
@@ -54,6 +60,7 @@ beforeEach(() => {
   if (useTutorial.getState().active) useTutorial.getState().pause()
   useTutorial.setState({ script: TUTORIAL_SCRIPT })
   localStorage.removeItem(TUTORIAL_SWITCH_KEY)
+  useTutorialSwitch.setState({ value: null })
   localStorage.removeItem(PROGRESS_PREFIX + pubkey())
   // A key this app made on this device, with no chain, and the relays found none.
   localStorage.setItem(MINTED_KEY, pubkey())
@@ -83,21 +90,28 @@ describe('the device switch (off in production)', () => {
     expect(replaced.pop()).toBe('/')
     // No flag: nothing set, the address left alone.
     expect(applyTutorialFlag({ pathname: '/', search: '?x=1', hash: '' }, history)).toBe(null)
+    // A value that is neither on nor off: nothing changes, and it stays on the address.
+    expect(applyTutorialFlag({ pathname: '/', search: '?tutorial=yes', hash: '' }, history)).toBe(null)
+    expect(tutorialSwitch()).toBe(false)
     expect(replaced).toEqual([])
+    // The row reads the same switch at once.
+    expect(useTutorialSwitch.getState().value).toBe(false)
   })
 })
 
 describe('first arrival', () => {
-  it('starts nothing with the switch off, even for a brand-new identity', () => {
+  it('starts nothing with the switch off, even for a brand-new identity', async () => {
     expect(isNewArrival()).toBe(true)
     const stop = watchFirstArrival()
+    await flush()
     expect(useTutorial.getState().active).toBe(false)
     stop()
   })
 
-  it('starts at the welcome for a brand-new identity on the bare address', () => {
-    localStorage.setItem(TUTORIAL_SWITCH_KEY, 'on')
+  it('starts at the welcome for a brand-new identity on the bare address', async () => {
+    switchOn()
     const stop = watchFirstArrival()
+    await flush()
     const t = useTutorial.getState()
     expect(t.active).toBe(true)
     expect(t.script.steps[t.index].id).toBe('welcome')
@@ -105,27 +119,34 @@ describe('first arrival', () => {
     stop()
   })
 
-  it('a key made on this page load is new at once, whatever the relays have yet to say', () => {
-    localStorage.setItem(TUTORIAL_SWITCH_KEY, 'on')
+  it('a key made on this page load is new at once, whatever the relays have yet to say', async () => {
+    switchOn()
     minted.onLoad = true
     useCyberspace.setState({ selfCheck: { pubkey: pubkey(), status: 'checking' } })
     const stop = watchFirstArrival()
+    await flush()
     expect(useTutorial.getState().active).toBe(true)
     stop()
   })
 
-  it('waits for the relay check before judging a key made on an earlier load', () => {
-    localStorage.setItem(TUTORIAL_SWITCH_KEY, 'on')
+  it('waits for the relay check before judging a key made on an earlier load, and through an answer that could not say', async () => {
+    switchOn()
     useCyberspace.setState({ selfCheck: { pubkey: pubkey(), status: 'checking' } })
     const stop = watchFirstArrival()
+    await flush()
+    expect(useTutorial.getState().active).toBe(false)
+    // Offline: the self-sync asks again later, and the tutorial waits for it.
+    useCyberspace.setState({ selfCheck: { pubkey: pubkey(), status: 'unknown', cause: { kind: 'offline' } } })
+    await flush()
     expect(useTutorial.getState().active).toBe(false)
     useCyberspace.setState({ selfCheck: { pubkey: pubkey(), status: 'none' } })
+    await flush()
     expect(useTutorial.getState().active).toBe(true)
     stop()
   })
 
-  it('is not for an identity with a chain, an imported key, another address, or under the tour', () => {
-    localStorage.setItem(TUTORIAL_SWITCH_KEY, 'on')
+  it('is not for an identity with a chain, an imported key, another address, or under the tour or TV', async () => {
+    switchOn()
     useCyberspace.setState({ selfCheck: { pubkey: pubkey(), status: 'found' } })
     // The relays found a chain the device has not loaded yet: not new.
     expect(isNewArrival()).toBe(false)
@@ -134,30 +155,81 @@ describe('first arrival', () => {
     useCyberspace.setState({ signerKind: 'local' })
     atAddress('/demo')
     let stop = watchFirstArrival()
+    await flush()
     expect(useTutorial.getState().active).toBe(false)
     stop()
     atAddress('/workshop')
     stop = watchFirstArrival()
+    await flush()
     expect(useTutorial.getState().active).toBe(false)
     stop()
+    // Landed on a /C/ link whose view put / on the address since: still not a first arrival.
+    atAddress('/C/abc')
+    ;(g.window as { location: { pathname: string } }).location.pathname = '/'
+    stop = watchFirstArrival()
+    await flush()
+    expect(useTutorial.getState().active).toBe(false)
+    stop()
+    atAddress('/')
+    useDemo.getState().start()
+    stop = watchFirstArrival()
+    await flush()
+    expect(useTutorial.getState().active).toBe(false)
+    stop()
+    useDemo.getState().exit()
+    useTv.setState({ on: true })
+    useTutorial.getState().start()
+    expect(useTutorial.getState().active).toBe(false)
+    useTv.setState({ on: false })
   })
 
-  it('resumes a run left unfinished at its step, and never one that ended', () => {
-    localStorage.setItem(TUTORIAL_SWITCH_KEY, 'on')
+  it('resumes a run left unfinished at its step, and never one that ended', async () => {
+    switchOn()
     const script: TutorialScript = { steps: [{ id: 'a', title: 'A', caption: 'a' }, { id: 'b', title: 'B', caption: 'b' }] }
     useTutorial.setState({ script })
     writeProgress(pubkey(), { step: 'b' })
     // A chain since then (they moved): resumed anyway, it is theirs.
     useCyberspace.setState({ selfCheck: { pubkey: pubkey(), status: 'found' } })
     let stop = watchFirstArrival()
+    await flush()
     expect(useTutorial.getState().active).toBe(true)
     expect(useTutorial.getState().index).toBe(1)
     stop()
     useTutorial.getState().end('skipped')
     expect(readProgress(pubkey())).toEqual({ step: 'b', ended: 'skipped' })
     stop = watchFirstArrival()
+    await flush()
     expect(useTutorial.getState().active).toBe(false)
     stop()
+  })
+
+  it('reads stored progress that is corrupt as none, and a step no longer in the script as the first', async () => {
+    localStorage.setItem(PROGRESS_PREFIX + pubkey(), '{not json')
+    expect(readProgress(pubkey())).toBe(null)
+    localStorage.setItem(PROGRESS_PREFIX + pubkey(), JSON.stringify({ step: 7 }))
+    expect(readProgress(pubkey())).toBe(null)
+    localStorage.setItem(PROGRESS_PREFIX + pubkey(), JSON.stringify({ step: 'welcome', ended: 'maybe' }))
+    expect(readProgress(pubkey())).toBe(null)
+    switchOn()
+    writeProgress(pubkey(), { step: 'a-step-since-removed' })
+    const stop = watchFirstArrival()
+    await flush()
+    expect(useTutorial.getState().active).toBe(true)
+    expect(useTutorial.getState().index).toBe(0)
+    stop()
+  })
+})
+
+describe('the script', () => {
+  it('has unique ids, starts at the welcome, and no modal step waits or gates', () => {
+    const ids = TUTORIAL_SCRIPT.steps.map((s) => s.id)
+    expect(new Set(ids).size).toBe(ids.length)
+    expect(ids[0]).toBe('welcome')
+    for (const s of TUTORIAL_SCRIPT.steps) if (s.modal) { expect(s.wait, s.id).toBeUndefined(); expect(s.gate, s.id).toBeUndefined() }
+  })
+
+  it('has no em dash in any line the player reads', () => {
+    for (const s of TUTORIAL_SCRIPT.steps) for (const t of [s.title, s.caption, s.captionDone, s.explain, s.hint, s.go]) if (t) expect(t, s.id).not.toMatch(/\u2014/)
   })
 })
 
@@ -208,13 +280,43 @@ describe('the engine', () => {
     expect(readProgress(pubkey())).toEqual({ step: 'z' })
   })
 
-  it('goes away for another identity and for the /demo tour, keeping progress', () => {
-    localStorage.setItem(TUTORIAL_SWITCH_KEY, 'on')
+  it('goes away for the /demo tour and for TV, keeping progress', async () => {
+    switchOn()
     const stop = watchFirstArrival()
+    await flush()
     expect(useTutorial.getState().active).toBe(true)
     useDemo.getState().start()
     expect(useTutorial.getState().active).toBe(false)
     expect(readProgress(pubkey())).toEqual({ step: 'welcome' })
+    useDemo.getState().exit()
+    useTutorial.getState().start({ at: 'welcome' })
+    useTv.setState({ on: true })
+    expect(useTutorial.getState().active).toBe(false)
+    useTv.setState({ on: false })
     stop()
+  })
+
+  it('goes away when another identity signs in, and that identity has its own progress', async () => {
+    switchOn()
+    const stop = watchFirstArrival()
+    await flush()
+    expect(useTutorial.getState().active).toBe(true)
+    const me = pubkey()
+    const other = 'f'.repeat(64)
+    const was = useCyberspace.getState().identity
+    useCyberspace.setState({ identity: { ...was, pubkey: other } })
+    expect(useTutorial.getState().active).toBe(false)
+    expect(readProgress(me)).toEqual({ step: 'welcome' })
+    expect(readProgress(other)).toBe(null)
+    useCyberspace.setState({ identity: was })
+    stop()
+  })
+
+  it('passing the last step with its wait still to do is a skip, not a finish', () => {
+    registerTutorialWatcher('never-wait' as never, () => () => {})
+    useTutorial.setState({ script: { steps: [{ id: 'only', title: 'O', caption: 'o', wait: 'never-wait' as never }] } })
+    useTutorial.getState().start()
+    useTutorial.getState().next()
+    expect(readProgress(pubkey())).toEqual({ step: 'only', ended: 'skipped' })
   })
 })

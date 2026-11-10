@@ -104,13 +104,16 @@ const LIFTS = [0, 1, -1, 2, -2] as const
 export function tutorialLayout(spawn: Position, plane: Plane): TutorialLayout {
   const own = regionBase(spawn, BOX_HEIGHT)
   const cube = 1n << BigInt(BOX_HEIGHT)
-  for (let h = COVER_MIN; h <= COVER_MAX; h++) {
-    const coverBase = regionBase(spawn, h)
-    for (const fwd of [1, -1] as const) {
-      for (const side of [1, -1] as const) {
-        for (const lift of LIFTS) {
-          // The next cube along the forward axis, at the spawn's own X, and Y moved by `lift` cubes.
-          const boxBase = { x: own.x, y: own.y + BigInt(lift) * cube, z: own.z + BigInt(fwd) * cube }
+  // Ahead first, then level with the spawn, at any cover up to COVER_MAX:
+  // the box is meant to be seen from the starting view. Then the smallest
+  // cover, then the side.
+  for (const fwd of [1, -1] as const) {
+    for (const lift of LIFTS) {
+      // The next cube along the forward axis, at the spawn's own X, and Y moved by `lift` cubes.
+      const boxBase = { x: own.x, y: own.y + BigInt(lift) * cube, z: own.z + BigInt(fwd) * cube }
+      for (let h = COVER_MIN; h <= COVER_MAX; h++) {
+        const coverBase = regionBase(spawn, h)
+        for (const side of [1, -1] as const) {
           const frame: Frame = { fwd, side, boxBase }
           const { lo, hi } = footprintBounds(frame)
           if (inside(lo, hi, coverBase, h)) return { plane, spawn, frame, cover: { height: h, base: coverBase } }

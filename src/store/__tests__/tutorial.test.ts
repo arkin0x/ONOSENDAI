@@ -235,10 +235,11 @@ describe('the script', () => {
 
 describe('the engine', () => {
   it('never touches the publishing switch: the player is LIVE as before, and stays so', () => {
+    useTutorial.setState({ script: { steps: [TUTORIAL_SCRIPT.steps[0]] } })
     useCyberspace.getState().setLive(true)
     useTutorial.getState().start()
     expect(useCyberspace.getState().live).toBe(true)
-    useTutorial.getState().next() // FIND IT on the welcome, the last step in this slice
+    useTutorial.getState().next() // FIND IT on the welcome, here the last step
     expect(useTutorial.getState().active).toBe(false)
     expect(readProgress(pubkey())?.ended).toBe('finished')
     expect(useCyberspace.getState().live).toBe(true)

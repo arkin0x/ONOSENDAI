@@ -24,8 +24,11 @@ import type { DemoAction, DemoScene, DemoStep } from '../demo/types'
  */
 export type TutorialWait = Exclude<DemoAction, 'spawn'> | TutorialAction
 
-/** The tutorial's own waits, one per staged thing. */
-export type TutorialAction = never
+/**
+ * The tutorial's own waits, one per staged thing (tutorial/director.ts):
+ * the treasure chest found, opened by hand, and something in it taken.
+ */
+export type TutorialAction = 'see-chest' | 'open-chest' | 'take'
 
 export interface TutorialStep {
   /** Unique across the script; also what a player's saved progress names. */
@@ -54,6 +57,8 @@ export interface TutorialStep {
   gate?: boolean
   /** As the /demo step's: where to put the cursor on entering the step. */
   aim?: DemoStep['aim']
+  /** A registered effect run as the step comes up (store/useTutorial.ts registerTutorialEffect). */
+  effect?: string
 }
 
 export interface TutorialScript {

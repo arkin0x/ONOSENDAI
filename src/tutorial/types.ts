@@ -19,8 +19,10 @@ import type { DemoAction, DemoScene, DemoStep } from '../demo/types'
  * (demo/types.ts DemoAction) is watched by the /demo engine's own watcher;
  * any other name is a tutorial watcher (store/useTutorial.ts
  * TUTORIAL_WATCHERS), registered by the part of the tutorial that stages it.
+ * Not the tour's 'spawn', which is about the tour's own key and counts at
+ * once anywhere else.
  */
-export type TutorialWait = DemoAction | TutorialAction
+export type TutorialWait = Exclude<DemoAction, 'spawn'> | TutorialAction
 
 /** The tutorial's own waits, one per staged thing. */
 export type TutorialAction = never
@@ -35,7 +37,8 @@ export interface TutorialStep {
   captionDone?: string
   /**
    * A centered card instead of the top panel, with one button (`go`): the
-   * welcome. The card has no SKIP of its own beyond SKIP TUTORIAL.
+   * welcome. The card has no SKIP of its own beyond SKIP TUTORIAL, so a
+   * modal step never has a `wait` or a `gate` (tested on the script).
    */
   modal?: boolean
   /** The modal card's button. */

@@ -22,9 +22,9 @@ import { create } from 'zustand'
 import { TUTORIAL_SCRIPT } from '../tutorial/script'
 import type { TutorialScript, TutorialStep, TutorialWait } from '../tutorial/types'
 import type { DemoAction } from '../demo/types'
-import { readProgress, tutorialEnabled, writeProgress } from '../tutorial/gate'
+import { landedPath, readProgress, tutorialOn, writeProgress } from '../tutorial/gate'
 import { aimCursor, applyScene, useDemo, watchAction } from './useDemo'
-import { appMinted, keyMintedOnLoad, useCyberspace } from './useCyberspace'
+import { appMinted, keyMintedOnLoad, savedChainLoaded, useCyberspace } from './useCyberspace'
 import { useTv } from './useTv'
 
 /** How long a done step stays on screen, its ✓ showing, before the next comes up. */
@@ -80,17 +80,27 @@ export function isNewArrival(): boolean {
   return appMinted(pubkey) === true && cs.selfCheck.pubkey === pubkey && cs.selfCheck.status === 'none'
 }
 
-/** Whether the identity on screen can be judged yet: made on this load, or its relay check has an answer. */
+/**
+ * Whether the identity on screen can be judged yet: made on this load, a
+ * chain in hand, or a relay check that said "found" or "none". A check that
+ * could not say (offline, unreachable) is asked again by the self-sync, and
+ * the tutorial waits for that answer rather than deciding on none.
+ */
 function settled(): boolean {
   const cs = useCyberspace.getState()
   const pubkey = cs.identity.pubkey
   if (keyMintedOnLoad() === pubkey || cs.events.length > 0) return true
-  return cs.selfCheck.pubkey === pubkey && cs.selfCheck.status !== 'checking'
+  return cs.selfCheck.pubkey === pubkey && (cs.selfCheck.status === 'none' || cs.selfCheck.status === 'found')
 }
 
-/** The address a first arrival lands on: the bare app, not /demo, /tv, /C/, /workshop or any other route. */
+/** Whether the page landed on the bare app, not /demo, /tv, /C/, /workshop or any other route (tutorial/gate.ts noteLanding). */
 function plainAddress(): boolean {
-  try { return window.location.pathname === '/' } catch { return false }
+  return landedPath() === '/'
+}
+
+/** Why the tutorial cannot start now: the /demo tour or Cyberspace TV is on. */
+function blocked(): boolean {
+  return useDemo.getState().active || useTv.getState().on
 }
 
 interface TutorialState {
@@ -135,10 +145,11 @@ export const useTutorial = create<TutorialState>((set, get) => {
     if (!step || !pubkey) return
     set({ index, done: !step.wait, explaining: false })
     writeProgress(pubkey, { step: step.id })
-    if (step.scene) applyScene(step.scene, step.wait === 'walk')
+    if (step.scene) applyScene(step.scene, step.wait === 'walk', (c) => { stepCleanups.push(c) })
     if (step.wait) {
       stepCleanups.push(watchWait(step.wait, () => {
-        if (get().index !== index || !get().active) return
+        // Once: a watcher that calls twice must not start a second timer.
+        if (get().index !== index || !get().active || get().done) return
         set({ done: true })
         // On by itself, a moment after the ✓: the next thing to do comes up.
         advanceTimer = setTimeout(() => { advanceTimer = null; if (get().active && get().index === index) get().next() }, ADVANCE_MS)
@@ -162,6 +173,10 @@ export const useTutorial = create<TutorialState>((set, get) => {
     script: TUTORIAL_SCRIPT,
 
     start: (opts = {}) => {
+      // Never over the tour or TV, which would put it away again at once.
+      if (blocked()) return
+      // Started again while running (RESTART): what the run had going stops first.
+      if (get().active) stop()
       const pubkey = useCyberspace.getState().identity.pubkey
       if (opts.restart) writeProgress(pubkey, null)
       const steps = get().script.steps
@@ -178,7 +193,8 @@ export const useTutorial = create<TutorialState>((set, get) => {
       if (step?.gate && !s.done) return
       const i = s.index + 1
       if (i < s.script.steps.length) enter(i)
-      else get().end('finished')
+      // Past the last step with its wait still to do is a skip, not a finish.
+      else get().end(step?.wait && !s.done ? 'skipped' : 'finished')
     },
 
     end: (how) => {
@@ -210,6 +226,19 @@ export const useTutorial = create<TutorialState>((set, get) => {
  */
 export function watchFirstArrival(): () => void {
   let decidedFor: string | null = null
+  let stopped = false
+  // Once the saved chain is in hand (a chain read from its rows can land
+  // after the relays have answered "none"), and only for the identity still
+  // on screen.
+  const decide = (pubkey: string): void => {
+    if (stopped || useCyberspace.getState().identity.pubkey !== pubkey) return
+    if (!settled()) { decidedFor = null; return }
+    if (!tutorialOn() || useTutorial.getState().active || blocked() || !plainAddress()) return
+    const p = readProgress(pubkey)
+    if (p?.ended) return
+    if (p) useTutorial.getState().start({ at: p.step })
+    else if (isNewArrival()) useTutorial.getState().start()
+  }
   const check = (): void => {
     const cs = useCyberspace.getState()
     const pubkey = cs.identity.pubkey
@@ -218,17 +247,12 @@ export function watchFirstArrival(): () => void {
     if (t.active && t.pubkey !== pubkey) t.pause()
     if (decidedFor === pubkey || !settled()) return
     decidedFor = pubkey
-    if (!tutorialEnabled() || useTutorial.getState().active) return
-    if (useDemo.getState().active || useTv.getState().on || !plainAddress()) return
-    const p = readProgress(pubkey)
-    if (p?.ended) return
-    if (p) useTutorial.getState().start({ at: p.step })
-    else if (isNewArrival()) useTutorial.getState().start()
+    void savedChainLoaded().then(() => decide(pubkey), () => decide(pubkey))
   }
   check()
   const offCs = useCyberspace.subscribe(check)
   // The tour and the tutorial never run together: the tour wins, the tutorial waits for the next load.
   const offDemo = useDemo.subscribe((d) => { if (d.active) useTutorial.getState().pause() })
   const offTv = useTv.subscribe((v) => { if (v.on) useTutorial.getState().pause() })
-  return () => { offCs(); offDemo(); offTv() }
+  return () => { stopped = true; offCs(); offDemo(); offTv() }
 }

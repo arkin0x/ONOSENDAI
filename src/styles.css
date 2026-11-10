@@ -9732,6 +9732,8 @@ a.feed__act { text-decoration: none; }
   background-image: linear-gradient(rgba(255, 176, 32, 0.16), rgba(255, 176, 32, 0.16));
   border-color: rgba(255, 176, 32, 0.35);
 }
+/* WALK's keys are held (store/walkHold.ts): a press never becomes a pan or a zoom. */
+.touchpad--mode-walk .touchpad__key { touch-action: none; }
 .touchpad--mode-walk .touchpad__key:not(:active),
 .touchops--mode-walk .touchops__cancel:not(:active) {
   background-image: linear-gradient(rgba(255, 59, 107, 0.18), rgba(255, 59, 107, 0.18));
@@ -9770,17 +9772,23 @@ a.feed__act { text-decoration: none; }
   color: var(--fg, #c8f5ff);
 }
 .touchpad__key--forward { grid-area: forward; position: relative; }
-/* FORWARD's outer thirds go diagonally (store/walkHold.ts): a small mark in
- * each top corner, over the side arrow that third stands above. */
-.touchpad__lean {
+/* FORWARD's ends go diagonally (store/walkHold.ts): each end zone, 22% of
+ * its width (TouchControls LEAN_ZONE), marked off by a dashed edge, with a
+ * small mark in its top corner. */
+.touchpad__zone {
   position: absolute;
-  top: 4px;
+  top: 0;
+  bottom: 0;
+  width: 22%;
+  padding-top: 4px;
   font-size: 8px;
+  line-height: 1;
   color: var(--dim, #7fa6bd);
   pointer-events: none;
+  box-sizing: border-box;
 }
-.touchpad__lean--left { left: 6px; }
-.touchpad__lean--right { right: 6px; }
+.touchpad__zone--left { left: 0; padding-left: 5px; text-align: left; border-right: 1px dashed rgba(255, 120, 150, 0.45); }
+.touchpad__zone--right { right: 0; padding-right: 5px; text-align: right; border-left: 1px dashed rgba(255, 120, 150, 0.45); }
 .touchpad__key--backward { grid-area: backward; }
 .touchpad__key--backward .touchpad__sub { font-size: 6px; }
 .touchpad__key--jump {

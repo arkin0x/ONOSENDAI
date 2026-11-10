@@ -17,13 +17,21 @@
  * | a thumb slides on FORWARD | its side changes for the next press, with no press of its own |
  * | let go | the source goes; with none left, the loop stops, and nothing more is pressed |
  * | the keyboard's own repeats | ignored (hooks/useKeyboard.ts): the loop is the repeat |
- * | WALK ends or begins, or the window loses focus | everything held is let go |
+ * | WALK ends or begins, a STOP, the window loses focus or the page is hidden, Meta (Cmd) goes down or up | everything held is let go: macOS sends no keyup for a key let go while Cmd is down, so it would walk on forever |
+ * | WALK's input closes (store/walkInput.ts: the menu, a modal, the workshop, TV, a text field) | nothing new is held, and the next beat lets go of everything |
  *
  * What is held combines, so two directions held are one diagonal press, as
  * W with D held always was on the keyboard (lib/walkKeys.ts) and now is on
  * the pad too: forward or back with a side is 45 degrees to that side of
  * the way you face (lib/walkSlide.ts walkHeading); a side alone is a step
  * to that side of the way you face; opposite directions cancel.
+ *
+ * Each pad key and key is its own source, so a second finger never ends the
+ * first: FORWARD held, JUMP pressed and let go is a running jump, and the
+ * walk goes on.
+ *
+ * Up and down held are read as held by a bounce (store/useWalk.ts (E)):
+ * Up held adds its jump to every landing, Down held absorbs every landing.
  *
  * A press is exactly the press a tap makes (store/useWalk.ts press), so a
  * hold of N presses builds the same open segment, closes it at the same
@@ -36,6 +44,7 @@
 
 import { useCyberspace } from './useCyberspace'
 import { useWalk } from './useWalk'
+import { walkInputOpen } from './walkInput'
 import type { HeldDir } from '../lib/walkKeys'
 
 export type { HeldDir }
@@ -63,6 +72,11 @@ export function heldNow(): HeldDir {
   return { fwd: sign(fwd), strafe: sign(strafe), vert: sign(vert) }
 }
 
+/** What `source` holds, if it is held. */
+export function heldBy(source: string): HeldDir | undefined {
+  return held.get(source)
+}
+
 /** Whether anything is held. */
 export function holding(): boolean {
   return held.size > 0
@@ -83,7 +97,7 @@ function verticalPress(vert: -1 | 0 | 1): void {
 
 /** One beat of the loop: what is held, pressed once. */
 function beat(): void {
-  if (!useCyberspace.getState().walking || held.size === 0) { holdReleaseAll(); return }
+  if (held.size === 0 || !walkInputOpen()) { holdReleaseAll(); return }
   const d = heldNow()
   if (useWalk.getState().gravity) { verticalPress(d.vert); levelPress(d) }
   else if (!levelPress(d)) verticalPress(d.vert)
@@ -102,12 +116,16 @@ function stopLoop(): void {
 /**
  * `source` goes down holding `dir`: one press at once, then one every
  * WALK_HOLD_MS while anything is held. Down again without a let go (a lost
- * keyup) is a fresh press, as a tap is.
+ * keyup) is a fresh press, as a tap is. Pressed with the input closed
+ * (store/walkInput.ts), nothing. The press is what everything held makes
+ * together: JUMP pressed while DOWN is held cancels, as the two held do.
  */
 export function holdStart(source: string, dir: HeldDir): void {
+  if (!walkInputOpen()) return
   held.set(source, dir)
-  if (dir.vert !== 0) verticalPress(dir.vert)
-  if (dir.fwd !== 0 || dir.strafe !== 0) levelPress(heldNow())
+  const now = heldNow()
+  if (dir.vert !== 0) verticalPress(now.vert)
+  if (dir.fwd !== 0 || dir.strafe !== 0) levelPress(now)
   restart()
 }
 

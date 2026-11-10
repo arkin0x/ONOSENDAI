@@ -106,6 +106,7 @@ import { floorPad, stepLimit, takeWallWait, wallItemsAt, wallsBuilt, warmWalls, 
 import { JUMP_HEIGHT, JUMP_SPEED, WALK_GRAVITY, arcApex, arcHeight, arcPeak, arcSpeed, fallLimit, jumpRise, launchSpeed, loadGravity, reachedHeight, saveGravity } from './walkGravity'
 import { launchHeight } from '../lib/walkBounce'
 import { walkFacing, walkFall } from '../lib/walkEye'
+import { heldNow, holdReleaseAll } from './walkHold'
 
 /** What the LOSING SYNC warning waits for: this many moves not yet proven. */
 export const SYNC_WARN_AT = 3
@@ -264,6 +265,9 @@ export const useWalk = create<WalkState>((set, get) => ({
   stop: (message = null) => {
     const cs = useCyberspace.getState()
     clearSettle()
+    // Whatever is held stops walking too (review of #651): a STOP, or a step
+    // that did not land, is never walked on by a held key or pad key.
+    holdReleaseAll()
     // A fall not yet resolved has made nothing: it goes with the queue.
     dropFall()
     set({ queue: [], open: null, running: null, behind: 0 })
@@ -482,9 +486,9 @@ let downInAirAt: number | null = null
  * How long before a bounce's landing an Up or Down press in the air still
  * counts, in ms, measured from when the arc reached the floor (worked out
  * from the arc, not from the frame that saw it), so the window is the same
- * at any frame rate. The pad has no held state for Up or Down (only WASD
- * keyups are tracked), so "holding jump as you land" is read as a press just
- * before it; a held key's repeats keep it fresh. Of the two, the later wins.
+ * at any frame rate. Up or Down held as it lands (store/walkHold.ts, the
+ * keyboard's or the pad's) counts as pressed at the landing, so a held Down
+ * absorbs every landing while it is held. Of the two, the later wins.
  */
 export const BOUNCE_BOOST_MS = 250
 
@@ -556,13 +560,14 @@ function jump(from: Position): void {
  * a springboard, which launches on any arrival, a level walk onto a pad flush
  * with the floor included (arkinox, 2026-11-10). A fixed height launches;
  * "reflect" reflects a fall of 0, which is no launch, springboard or not. A
- * Down press within BOUNCE_BOOST_MS before the arrival absorbs it: you stand.
+ * Down press within BOUNCE_BOOST_MS before the arrival, or Down held
+ * (store/walkHold.ts), absorbs it: you stand.
  * The launch is a jump of that height from `at`, so the walk segment that
  * brought you here closes there as a normal hop (beginFall) and every bounce
  * after it, back onto the same pad, makes nothing.
  */
 function padLaunch(at: Position, rose: boolean): void {
-  if (downInAirAt !== null && nowMs() - downInAirAt <= BOUNCE_BOOST_MS) return
+  if ((downInAirAt !== null && nowMs() - downInAirAt <= BOUNCE_BOOST_MS) || heldNow().vert < 0) return
   const cs = useCyberspace.getState()
   const items = wallItemsAt(cs.plane, at)
   takeWallWait()
@@ -664,8 +669,10 @@ function bounceOff(f: Fall, now: number): boolean {
   // When the arc reached the floor: the descending root of v0 t - g t^2 / 2 = bottom.
   const landAt = f.t0 + ((f.v0 + Math.sqrt(f.v0 * f.v0 - 2 * WALK_GRAVITY * f.bottomN)) / WALK_GRAVITY) * 1000
   const recent = (at: number | null): at is number => at !== null && at >= landAt - BOUNCE_BOOST_MS
-  const up = recent(upInAirAt) ? upInAirAt : null
-  const down = recent(downInAirAt) ? downInAirAt : null
+  // Up or Down held now (store/walkHold.ts): pressed at the landing.
+  const held = heldNow().vert
+  const up = held > 0 ? landAt : recent(upInAirAt) ? upInAirAt : null
+  const down = held < 0 ? landAt : recent(downInAirAt) ? downInAirAt : null
   // Down absorbs (D5): it lands, as (A). The later of Up and Down wins.
   if (down !== null && (up === null || down >= up)) return false
   // The walls where it landed, fresh: a bounce can go on for minutes, and its

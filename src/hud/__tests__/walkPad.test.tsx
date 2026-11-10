@@ -133,6 +133,8 @@ describe('the WALK pad', () => {
     expect(cells()).toEqual(['gravity', 'forward', 'left', 'backward', 'right', 'jump', 'down'])
     expect(drawn().some((b) => b.props.className === 'touchpad__hub')).toBe(false)
     expect(find('touchpad__key--forward').props.title).toBe('Forward (W)')
+    // Its ends go diagonally (store/walkHold.ts), and the label says so.
+    expect((find('touchpad__key--forward').props as { 'aria-label'?: string })['aria-label']).toBe('Forward (W); its ends go diagonally')
     expect(find('touchpad__key--backward').props.title).toBe('Backward (S)')
     expect(find('touchpad__key--jump').props.children).toContain('JUMP')
   })
@@ -200,7 +202,7 @@ describe('the WALK pad', () => {
     useWalk.getState().enter()
     useWalk.getState().setGravity(true)
     expect(find('touchpad__key--down').props.disabled).toBeFalsy()
-    expect(find('touchpad__key--down').props.title).toBe('Down: absorbs a bounce (C or F)')
+    expect(find('touchpad__key--down').props.title).toBe('Down: hold to absorb a bounce (C or F)')
     expect(find('touchpad__key--jump').props.title).toBe('Jump (Space or R)')
     useWalk.getState().setGravity(false)
     expect(find('touchpad__key--down').props.disabled).toBeFalsy()

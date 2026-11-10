@@ -12,7 +12,12 @@
  *   way you face, a diagonal included (it went along the screen's axis);
  * - a hold publishes what the same taps publish: the same hops, as many;
  * - under GRAVITY the pad's DOWN is on, and held through a bounce's fall it
- *   absorbs the landing, where one early tap does not (review of #649).
+ *   absorbs the landing, where one early tap does not (review of #649);
+ *
+ * Review of #651: a lost keyup (Cmd on macOS), a hidden page, a STOP, the
+ * menu, a modal or the workshop let go of every hold; a thumb resting on a
+ * zone line of FORWARD makes one hop, not one a beat; JUMP with FORWARD held
+ * is a running jump that walks on; a bounce reads Up and Down as held.
  */
 import { provedFor } from '../fixtures/provedHop'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -54,11 +59,14 @@ import { useShards } from '../useShards'
 import { clearWalls } from '../walkWalls'
 import { useCalibration } from '../../lib/calibration'
 import { walkFacing } from '../../lib/walkEye'
-import { walkKeyDown, walkKeyUp, walkKeysReleased } from '../../hooks/useKeyboard'
-import { padHold, padLean, walkPad, type PadKey } from '../../hud/TouchControls'
+import { setMenuCovering, walkKeyDown, walkKeyUp, walkKeysReleased, walkMetaRelease } from '../../hooks/useKeyboard'
+import { registerEscape } from '../../hooks/useEscape'
+import { useWorkshop } from '../useWorkshop'
+import { LEAN_SLOP_PX, LEAN_ZONE, padHold, padLean, walkPad, type PadKey } from '../../hud/TouchControls'
 import type { Position, ViewAxes } from '../../lib/space'
 import { newShard, type ShardModel } from 'sno-core/shards'
 import { withConstrain } from '../../lib/walkConstrain'
+import { JUMP_SPEED, WALK_GRAVITY } from '../walkGravity'
 import type { WorldItem } from '../useShards'
 
 /** Right +X, up +Y, toward the camera +Z: level, as WALK's keys are. */
@@ -90,10 +98,10 @@ const pad = (cell: string): PadKey => {
   if (!k) throw new Error(`no ${cell}`)
   return k
 }
-const pointer = (across = 0.5) => ({
+const pointer = (across = 0.5, px = 0) => ({
   preventDefault: () => {},
   stopPropagation: () => {},
-  clientX: 100 + across * 120,
+  clientX: 100 + across * 120 + px,
   currentTarget: { getBoundingClientRect: () => ({ left: 100, width: 120 }) },
 }) as unknown as React.PointerEvent
 
@@ -117,6 +125,8 @@ beforeEach(async () => {
 
 afterEach(() => {
   walkKeysReleased()
+  setMenuCovering(false)
+  useWorkshop.setState({ open: false })
   useWalk.getState().exit()
   vi.useRealTimers()
 })
@@ -229,7 +239,7 @@ describe('two directions held go diagonally', () => {
 })
 
 describe('the touch pad', () => {
-  it('FORWARD pressed in its right third goes forward and right, in its left third forward and left', () => {
+  it('FORWARD pressed in its right end goes forward and right, in its left end forward and left', () => {
     walk()
     face(0)
     const fwd = padHold(pad('forward'))
@@ -301,13 +311,116 @@ describe('the touch pad', () => {
     }
   })
 
-  it('reads the thumb in thirds, and with nothing to measure, the middle', () => {
-    const rect = { getBoundingClientRect: () => ({ left: 0, width: 90 }) }
-    expect(padLean({ clientX: 10, currentTarget: rect })).toBe(-1)
-    expect(padLean({ clientX: 45, currentTarget: rect })).toBe(0)
-    expect(padLean({ clientX: 80, currentTarget: rect })).toBe(1)
+  it('reads the thumb in zones of 22%, 56% and 22%, and with nothing to measure, the middle', () => {
+    const rect = { getBoundingClientRect: () => ({ left: 0, width: 100 }) }
+    expect(LEAN_ZONE).toBeCloseTo(0.22, 6)
+    expect(padLean({ clientX: 21, currentTarget: rect })).toBe(-1)
+    expect(padLean({ clientX: 23, currentTarget: rect })).toBe(0)
+    expect(padLean({ clientX: 77, currentTarget: rect })).toBe(0)
+    expect(padLean({ clientX: 79, currentTarget: rect })).toBe(1)
     expect(padLean({ clientX: 500, currentTarget: rect })).toBe(1)
     expect(padLean({ clientX: 10 })).toBe(0)
+  })
+
+  it('a sliding thumb changes the lean only LEAN_SLOP_PX past a line', () => {
+    const rect = { getBoundingClientRect: () => ({ left: 0, width: 100 }) }
+    const at = (x: number, was: -1 | 0 | 1) => padLean({ clientX: x, currentTarget: rect }, was)
+    expect(at(22 + LEAN_SLOP_PX - 1, -1)).toBe(-1)
+    expect(at(22 + LEAN_SLOP_PX, -1)).toBe(0)
+    expect(at(22 - LEAN_SLOP_PX + 1, 0)).toBe(0)
+    expect(at(22 - LEAN_SLOP_PX, 0)).toBe(-1)
+    expect(at(78 + LEAN_SLOP_PX - 1, 0)).toBe(0)
+    expect(at(78 + LEAN_SLOP_PX, 0)).toBe(1)
+    expect(at(78 - LEAN_SLOP_PX + 1, 1)).toBe(1)
+  })
+})
+
+describe('every hold is let go when no release can come (review of #651)', () => {
+  it('a lost keyup: Meta down or up, or a key with Meta held, lets go of every hold', () => {
+    walk()
+    face(0)
+    walkKeyDown(key('KeyW'))
+    vi.advanceTimersByTime(WALK_HOLD_MS)
+    // Cmd goes down; macOS will send no keyup for W.
+    expect(walkMetaRelease({ code: 'MetaLeft', metaKey: true, key: 'Meta' })).toBe(true)
+    expect(holding()).toBe(false)
+    vi.advanceTimersByTime(WALK_HOLD_MS * 20)
+    expect(moved(start)).toEqual([0, 0, -2])
+
+    padHold(pad('forward')).onPointerDown(pointer())
+    walkKeyDown(key('KeyD'))
+    expect(walkMetaRelease({ code: 'KeyD', metaKey: true })).toBe(true)
+    expect(holding()).toBe(false)
+    walkKeyDown(key('KeyW'))
+    expect(walkMetaRelease({ code: 'MetaRight', metaKey: false, key: 'Meta' })).toBe(true)
+    expect(holding()).toBe(false)
+    expect(walkMetaRelease({ code: 'KeyW', metaKey: false, key: 'w' })).toBe(false)
+  })
+
+  it('losing focus or the page hidden lets go of the pad\'s holds too', () => {
+    walk()
+    face(0)
+    padHold(pad('forward')).onPointerDown(pointer())
+    walkKeysReleased()
+    expect(holding()).toBe(false)
+    vi.advanceTimersByTime(WALK_HOLD_MS * 5)
+    expect(moved(start)).toEqual([0, 0, -1])
+  })
+
+  it('STOP mid-hold: the hold goes with the walk, and nothing more is walked', () => {
+    walk()
+    face(0)
+    walkKeyDown(key('KeyW'))
+    vi.advanceTimersByTime(WALK_HOLD_MS * 2)
+    useWalk.getState().stop('refused')
+    expect(holding()).toBe(false)
+    const at = moved(start)
+    vi.advanceTimersByTime(WALK_HOLD_MS * 5)
+    expect(moved(start)).toEqual(at)
+
+    padHold(pad('forward')).onPointerDown(pointer())
+    useWalk.getState().stop()
+    expect(holding()).toBe(false)
+  })
+
+  it('the menu covering the scene: nothing is held, and a hold under it is let go at the next beat', () => {
+    walk()
+    face(0)
+    setMenuCovering(true)
+    walkKeyDown(key('KeyW'))
+    padHold(pad('forward')).onPointerDown(pointer())
+    expect(holding()).toBe(false)
+    expect(moved(start)).toEqual([0, 0, 0])
+    setMenuCovering(false)
+    padHold(pad('forward')).onPointerDown(pointer())
+    expect(moved(start)).toEqual([0, 0, -1])
+    setMenuCovering(true)
+    vi.advanceTimersByTime(WALK_HOLD_MS * 5)
+    expect(holding()).toBe(false)
+    expect(moved(start)).toEqual([0, 0, -1])
+  })
+
+  it('a modal or the workshop: the same', () => {
+    walk()
+    face(0)
+    const off = registerEscape('modal', () => {})
+    padHold(pad('forward')).onPointerDown(pointer())
+    walkKeyDown(key('KeyW'))
+    expect(holding()).toBe(false)
+    off()
+    walkKeyDown(key('KeyW'))
+    expect(moved(start)).toEqual([0, 0, -1])
+    const off2 = registerEscape('modal', () => {})
+    vi.advanceTimersByTime(WALK_HOLD_MS * 3)
+    expect(holding()).toBe(false)
+    expect(moved(start)).toEqual([0, 0, -1])
+    off2()
+
+    useWorkshop.setState({ open: true })
+    padHold(pad('forward')).onPointerDown(pointer())
+    expect(walkKeyDown(key('KeyW'))).toBe(false)
+    expect(holding()).toBe(false)
+    expect(moved(start)).toEqual([0, 0, -1])
   })
 })
 
@@ -379,6 +492,21 @@ describe('a hold publishes what the same taps publish', () => {
     expect(held).toEqual(tapped)
   })
 
+  it('a thumb jittering 3 px either side of a zone line for 10 beats: one hop, not one a beat', async () => {
+    const tapped = await run(() => { for (let k = 0; k < 10; k++) useWalk.getState().press('away', -1) })
+    const jittered = await run(() => {
+      const fwd = padHold(pad('forward'))
+      fwd.onPointerDown(pointer(LEAN_ZONE, -3))
+      for (let k = 0; k < 9; k++) {
+        fwd.onPointerMove?.(pointer(LEAN_ZONE, k % 2 ? -3 : 3))
+        vi.advanceTimersByTime(WALK_HOLD_MS)
+      }
+      fwd.onPointerUp()
+    })
+    expect(tapped.ends).toEqual([[-10, 0, -10]])
+    expect(jittered).toEqual(tapped)
+  })
+
   it('four beats of FORWARD with RIGHT held on the pad, four diagonal taps: one hop to the same place', async () => {
     const tapped = await run(() => { for (let k = 0; k < 4; k++) useWalk.getState().press('away', 1) })
     const held = await run(() => {
@@ -393,14 +521,14 @@ describe('a hold publishes what the same taps publish', () => {
 })
 
 describe('the pad\'s DOWN under GRAVITY absorbs a bounce (review of #649)', () => {
-  /** A floor whose top is 1 under the walker, its payload bouncing to 8 (as walkBounce.test.ts builds it). */
-  function bouncePad(): void {
+  /** A floor whose top is 1 under the walker, 40 gibsons square, its payload bouncing to `bounce` (as walkBounce.test.ts builds it). */
+  function bouncePad(bounce: number | null = 8): void {
     const vertices: ShardModel['vertices'] = []
     const faces: Array<[number, number, number]> = []
-    for (const x of [-10, 10]) for (const y of [-1, 0]) for (const z of [-10, 10]) vertices.push({ p: [x, y, z], c: [1, 1, 1] })
+    for (const x of [-20, 20]) for (const y of [-1, 0]) for (const z of [-20, 20]) vertices.push({ p: [x, y, z], c: [1, 1, 1] })
     for (const [a, b, c, d] of [[0, 1, 3, 2], [4, 6, 7, 5], [0, 4, 5, 1], [2, 3, 7, 6], [0, 2, 6, 4], [1, 5, 7, 3]]) faces.push([a, b, c], [a, c, d])
     const model = withConstrain({ ...newShard('Pad'), mode: 'solid', vertices, faces }, 'all')
-    const shard = { ...model, extra: { ...model.extra, bounce: 8 } }
+    const shard = bounce === null ? model : { ...model, extra: { ...model.extra, bounce } }
     const plane = useCyberspace.getState().plane as WorldItem['plane']
     const items: WorldItem[] = [{ key: 'pad', type: 'shard', at: { ...start, y: start.y - 1n }, plane, height: 84, mine: false, shard }]
     useShards.setState({ worldItems: () => items })
@@ -411,12 +539,12 @@ describe('the pad\'s DOWN under GRAVITY absorbs a bounce (review of #649)', () =
   function frames(ms: number): void {
     for (let t = 0; t < ms; t += 16) { clock += 16; vi.advanceTimersByTime(16); tickFall() }
   }
-
-  const down = (): PadKey => {
-    const k = walkPad(true, () => () => {}).find((b) => b.cell === 'down')
-    if (!k) throw new Error('no down')
+  const gpad = (cell: string): PadKey => {
+    const k = walkPad(true, () => () => {}).find((b) => b.cell === cell)
+    if (!k) throw new Error(`no ${cell}`)
     return k
   }
+  const down = (): PadKey => gpad('down')
 
   beforeEach(() => {
     vi.spyOn(performance, 'now').mockImplementation(() => clock)
@@ -456,5 +584,127 @@ describe('the pad\'s DOWN under GRAVITY absorbs a bounce (review of #649)', () =
     frames(600)
     expect(fallState()).not.toBeNull()
     expect(fallState()!.v0).toBeGreaterThan(0)
+  })
+})
+
+describe('GRAVITY with holds (review of #651)', () => {
+  function floorWith(bounce: number | null): void {
+    const vertices: ShardModel['vertices'] = []
+    const faces: Array<[number, number, number]> = []
+    for (const x of [-20, 20]) for (const y of [-1, 0]) for (const z of [-20, 20]) vertices.push({ p: [x, y, z], c: [1, 1, 1] })
+    for (const [a, b, c, d] of [[0, 1, 3, 2], [4, 6, 7, 5], [0, 4, 5, 1], [2, 3, 7, 6], [0, 2, 6, 4], [1, 5, 7, 3]]) faces.push([a, b, c], [a, c, d])
+    const model = withConstrain({ ...newShard('Floor'), mode: 'solid', vertices, faces }, 'all')
+    const shard = bounce === null ? model : { ...model, extra: { ...model.extra, bounce } }
+    const plane = useCyberspace.getState().plane as WorldItem['plane']
+    useShards.setState({ worldItems: () => [{ key: 'floor', type: 'shard', at: { ...start, y: start.y - 1n }, plane, height: 84, mine: false, shard }] })
+  }
+
+  let clock = 2_000_000
+  function frames(ms: number): void {
+    for (let t = 0; t < ms; t += 16) { clock += 16; vi.advanceTimersByTime(16); tickFall() }
+  }
+  function fallFrames(ms: number): void {
+    for (let t = 0; t < ms; t += 16) { clock += 16; tickFall() }
+  }
+  const gpad = (cell: string): PadKey => {
+    const k = walkPad(true, () => () => {}).find((b) => b.cell === cell)
+    if (!k) throw new Error(`no ${cell}`)
+    return k
+  }
+
+  beforeEach(() => {
+    vi.spyOn(performance, 'now').mockImplementation(() => clock)
+  })
+  afterEach(() => {
+    vi.mocked(performance.now).mockRestore()
+  })
+
+  function begin(bounce: number | null): void {
+    floorWith(bounce)
+    useWalk.getState().setGravity(true)
+    walk()
+  }
+
+  it('a running jump on the pad: JUMP pressed with FORWARD held jumps, and FORWARD walks on through the air and after', () => {
+    begin(null)
+    face(0)
+    const fwd = padHold(gpad('forward'))
+    const jump = padHold(gpad('jump'))
+    fwd.onPointerDown(pointer())
+    frames(WALK_HOLD_MS)
+    jump.onPointerDown(pointer())
+    expect(fallState()).not.toBeNull()
+    jump.onPointerUp()
+    // FORWARD is still held: the walk goes on in the air.
+    expect(holding()).toBe(true)
+    const inAir = moved(start)[2]
+    frames(WALK_HOLD_MS * 3)
+    expect(fallState()).not.toBeNull()
+    expect(moved(start)[2]).toBeLessThan(inAir)
+    // Landed, and still walking.
+    frames(1500)
+    expect(fallState()).toBeNull()
+    const landed = moved(start)
+    expect(landed[1]).toBe(0)
+    frames(WALK_HOLD_MS * 2)
+    expect(moved(start)[2]).toBe(landed[2] - 2)
+    fwd.onPointerUp()
+  })
+
+  it('a held diagonal while bouncing: W and D held steer 45 degrees every beat, and the bounce goes on', () => {
+    begin(8)
+    face(0)
+    useWalk.getState().press('up')
+    frames(100)
+    walkKeyDown(key('KeyW'))
+    walkKeyDown(key('KeyD'))
+    // From here (W's first step was straight, before D went down) every beat is a diagonal.
+    const base = moved(start)
+    const off = (): [number, number] => { const p = moved(start); return [p[0] - base[0], p[2] - base[2]] }
+    frames(WALK_HOLD_MS * 4)
+    const m = off()
+    expect(m[0]).toBeGreaterThanOrEqual(4)
+    expect(m[0]).toBe(-m[1])
+    frames(1000)
+    const n = off()
+    expect(n[0]).toBeGreaterThan(m[0])
+    expect(n[0]).toBe(-n[1])
+    // Still in the air: landings bounced.
+    expect(fallState()).not.toBeNull()
+  })
+
+  it('a held Down absorbs every landing while held, read from the hold itself (no beats)', () => {
+    begin(8)
+    useWalk.getState().press('up')
+    fallFrames(100)
+    padHold(gpad('down')).onPointerDown(pointer())
+    fallFrames(700)
+    expect(fallState()).toBeNull()
+    expect(useCyberspace.getState().cursor).toEqual(start)
+    // Down still held: the next jump's landing is absorbed too.
+    useWalk.getState().press('up')
+    expect(fallState()).not.toBeNull()
+    fallFrames(800)
+    expect(fallState()).toBeNull()
+    expect(useCyberspace.getState().cursor).toEqual(start)
+  })
+
+  it('Up held adds its jump to a bounce, read from the hold itself', () => {
+    begin(8)
+    useWalk.getState().press('up')
+    fallFrames(100)
+    padHold(gpad('jump')).onPointerDown(pointer())
+    // Its own press was far too early to count; held, it counts at the landing: 8 plus the jump's 3.
+    for (let t = 0; t < 2000 && fallState() && fallState()!.v0 <= JUMP_SPEED + 1e-9; t += 16) fallFrames(16)
+    expect(fallState()!.v0).toBeCloseTo(Math.sqrt(2 * WALK_GRAVITY * 11), 6)
+  })
+
+  it('JUMP pressed while DOWN is held: the two cancel, and nothing jumps', () => {
+    begin(null)
+    const down = padHold(gpad('down'))
+    down.onPointerDown(pointer())
+    padHold(gpad('jump')).onPointerDown(pointer())
+    expect(fallState()).toBeNull()
+    down.onPointerUp()
   })
 })

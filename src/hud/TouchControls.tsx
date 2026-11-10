@@ -39,8 +39,11 @@
  * WALK's keys walk while held, from the press on, and what is held
  * combines (store/walkHold.ts; play test of 2026-11-10): FORWARD or BACK
  * held with a side arrow goes 45 degrees to that side, and FORWARD's own
- * outer thirds, which stand over the side arrows, do it with one thumb.
- * Slide the thumb along FORWARD while holding and the walk veers with it.
+ * ends (LEAN_ZONE of its width each, marked off) do it with one thumb.
+ * Slide the thumb along FORWARD while holding and the walk veers with it,
+ * once it is LEAN_SLOP_PX past a line, so a thumb resting on one never
+ * turns the walk back and forth (a hop a turn). Each key is its own hold:
+ * JUMP pressed with FORWARD held is a running jump, and FORWARD walks on.
  */
 
 import { useEffect, useState, type ReactNode } from 'react'
@@ -64,7 +67,7 @@ import { useCover } from '../hooks/useCover'
 import { ForwardArrow3D, ReverseArrow3D } from './ui/FlyArrows'
 import { canFly, useViewFly } from '../lib/viewFly'
 import { flyHold } from './ViewFlyButtons'
-import { holdEnd, holdEndAll, holdMove, holdStart } from '../store/walkHold'
+import { heldBy, holdEnd, holdEndAll, holdMove, holdStart } from '../store/walkHold'
 import { walkHeldDir, type HeldDir } from '../lib/walkKeys'
 
 /**
@@ -96,8 +99,10 @@ export interface PadKey {
   fly?: 1 | -1
   /** WALK: the direction this key holds while pressed (store/walkHold.ts). */
   hold?: HeldDir
-  /** WALK's FORWARD: pressed in its left or right third it also holds that side, a diagonal. */
+  /** WALK's FORWARD: pressed in either end zone it also holds that side, a diagonal. */
   lean?: boolean
+  /** The aria-label, when it says more than the title. */
+  label?: string
 }
 
 /**
@@ -113,24 +118,25 @@ export interface PadKey {
  * | DOWN | C or F | - |
  *
  * Under GRAVITY JUMP is a jump, and DOWN moves nothing but absorbs a bounce
- * pressed or held just before the landing (store/useWalk.ts (E), ruled D5),
+ * pressed just before the landing, or every landing while held
+ * (store/useWalk.ts (E), ruled D5),
  * so it stays on: on a phone it is the only way to absorb one (review of
  * #649). With gravity off, JUMP and DOWN are one cell up and down.
  * The forward and reverse arrows are the pair VIEW's fly keys wear too
  * (hud/ui/FlyArrows.tsx).
  *
  * Each key holds its direction while pressed (store/walkHold.ts), and
- * FORWARD leans: its outer thirds hold forward and that side, a diagonal.
+ * FORWARD leans: its end zones hold forward and that side, a diagonal.
  */
 export function walkPad(gravity: boolean, move: (name: MoveName) => () => void): PadKey[] {
   const key = (name: MoveName): Pick<PadKey, 'act' | 'hold'> => ({ act: move(name), hold: walkHeldDir(name) })
   return [
-    { cell: 'forward', glyph: <ForwardArrow3D size={26} />, sub: 'FORWARD', title: 'Forward (W)', ...key('away'), lean: true },
+    { cell: 'forward', glyph: <ForwardArrow3D size={26} />, sub: 'FORWARD', title: 'Forward (W)', label: 'Forward (W); its ends go diagonally', ...key('away'), lean: true },
     { cell: 'left', glyph: '◀', title: 'Left (A)', ...key('left') },
     { cell: 'backward', glyph: <ReverseArrow3D size={20} />, sub: 'BACK', title: 'Backward (S)', ...key('toward') },
     { cell: 'right', glyph: '▶', title: 'Right (D)', ...key('right') },
     { cell: 'jump', glyph: 'JUMP', title: gravity ? 'Jump (Space or R)' : 'Jump: up one cell (Space or R)', ...key('up') },
-    { cell: 'down', glyph: '▼', title: gravity ? 'Down: absorbs a bounce (C or F)' : 'Down one cell (C or F)', ...key('down') },
+    { cell: 'down', glyph: '▼', title: gravity ? 'Down: hold to absorb a bounce (C or F)' : 'Down one cell (C or F)', ...key('down') },
   ]
 }
 
@@ -140,16 +146,31 @@ interface PadPointer {
   currentTarget?: { getBoundingClientRect?: () => { left: number; width: number } } | null
 }
 
+/** Each end zone of FORWARD, as a share of its width (ruled in review of #651: straight on is the big middle). */
+export const LEAN_ZONE = 0.22
+
+/** How far past a zone's line a sliding thumb must go, in CSS pixels, before the lean changes. */
+export const LEAN_SLOP_PX = 8
+
 /**
  * Which side a press on a leaning key holds, from where the thumb is across
- * it: its left third left, its right third right, the middle neither. A thumb
- * slid past either end keeps that end's side.
+ * it: its left LEAN_ZONE left, its right LEAN_ZONE right, the middle neither.
+ * A thumb slid past either end keeps that end's side. `was`, the side held
+ * so far, holds until the thumb is LEAN_SLOP_PX outside its zone, so a thumb
+ * resting on a line does not flip the walk's heading every beat (each flip a
+ * turn, and a turn a hop).
  */
-export function padLean(e: PadPointer): -1 | 0 | 1 {
+export function padLean(e: PadPointer, was?: -1 | 0 | 1): -1 | 0 | 1 {
   const r = e.currentTarget?.getBoundingClientRect?.()
-  if (!r || !(r.width > 0) || typeof e.clientX !== 'number') return 0
-  const across = (e.clientX - r.left) / r.width
-  return across < 1 / 3 ? -1 : across > 2 / 3 ? 1 : 0
+  if (!r || !(r.width > 0) || typeof e.clientX !== 'number') return was ?? 0
+  const x = e.clientX - r.left
+  const left = r.width * LEAN_ZONE
+  const right = r.width * (1 - LEAN_ZONE)
+  const plain = x < left ? -1 : x > right ? 1 : 0
+  if (was === undefined || plain === was) return plain
+  // How far outside the zone it held so far.
+  const out = was === -1 ? x - left : was === 1 ? right - x : x < left ? left - x : x - right
+  return out >= LEAN_SLOP_PX ? plain : was
 }
 
 /**
@@ -168,7 +189,7 @@ export function padHold(b: PadKey): {
 } {
   const source = `pad:${b.cell}`
   const hold = b.hold ?? { fwd: 0, strafe: 0, vert: 0 }
-  const dir = (e: PadPointer): HeldDir => (b.lean ? { ...hold, strafe: padLean(e) } : hold)
+  const dir = (e: PadPointer, was?: -1 | 0 | 1): HeldDir => (b.lean ? { ...hold, strafe: padLean(e, was) } : hold)
   const end = (): void => holdEnd(source)
   return {
     onPointerDown: (e) => {
@@ -177,7 +198,7 @@ export function padHold(b: PadKey): {
       e.stopPropagation()
       holdStart(source, dir(e))
     },
-    ...(b.lean ? { onPointerMove: (e: React.PointerEvent) => holdMove(source, dir(e)) } : {}),
+    ...(b.lean ? { onPointerMove: (e: React.PointerEvent) => { const was = heldBy(source); if (was) holdMove(source, dir(e, was.strafe)) } } : {}),
     onPointerUp: end,
     onPointerCancel: end,
     onPointerLeave: end,
@@ -362,12 +383,12 @@ export function TouchControls(): JSX.Element {
               (!atHead && !b.scale ? ' is-standdown' : '')
             }
             title={b.title}
-            aria-label={b.title}
+            aria-label={b.label ?? b.title}
             disabled={b.disabled}
             {...(walking && b.hold ? padHold(b) : flies && b.fly ? flyHold('pad', b.fly) : bind(b.act))}
           >
-            {/* FORWARD's ends go diagonally: a mark in each top corner. */}
-            {b.lean && <><span className="touchpad__lean touchpad__lean--left" aria-hidden>◤</span><span className="touchpad__lean touchpad__lean--right" aria-hidden>◥</span></>}
+            {/* FORWARD's ends go diagonally: each end zone marked off, with its mark. */}
+            {b.lean && <><span className="touchpad__zone touchpad__zone--left" aria-hidden>◤</span><span className="touchpad__zone touchpad__zone--right" aria-hidden>◥</span></>}
             {b.glyph}
             {b.sub && <span className="touchpad__sub">{b.sub}</span>}
           </button>

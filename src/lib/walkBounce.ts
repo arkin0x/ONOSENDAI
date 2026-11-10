@@ -20,7 +20,7 @@
  * flush"), exactly `true` and nothing else, makes a fixed-height pad launch
  * on any arrival onto its top: a level walk onto it (a pad flush with the
  * floor), a step up or down onto it, or a landing. Without it a pad launches
- * on landings, and on a step up onto a fixed height (ruling of 2026-11-10).
+ * on landings, and on a step up onto a fixed height (decided 2026-11-10; not an owner ruling).
  * With "reflect" it adds nothing: walking on, you fell from nowhere, so the
  * reflected height is 0 and only landings launch. Touching counts: walking
  * along the exact seam between a plain floor and a flush springboard
@@ -31,7 +31,7 @@
  * most BOUNCE_MAX; a Down press just before it absorbs the bounce, and the
  * walker lands and stands. Stepping up onto a fixed-height pad (the stair
  * step-up) launches as a landing would; onto a "reflect" pad it does
- * nothing, since it fell from nowhere (ruling of 2026-11-10). sno-core does
+ * nothing, since it fell from nowhere (decided 2026-11-10; not an owner ruling). sno-core does
  * not know the field, so it rides in the model's `extra` like `constrain`
  * (lib/walkConstrain.ts), and an older reader passes it through untouched.
  *

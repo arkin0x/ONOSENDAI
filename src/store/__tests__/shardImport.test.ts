@@ -939,7 +939,7 @@ describe('BOUNCE through a lone .json (the owner\'s hand-made test shards, maze-
     }
   })
 
-  describe('UPDATE (ruling of 2026-11-10, review of #653)', () => {
+  describe('UPDATE keeps the bench bounce (decided 2026-11-10, review of #653)', () => {
     const id = 'maze-kit/forest/rotunda'
     const sentOf = (d: string) => JSON.parse(sent().find((e) => dOf(e) === d)!.content) as { bounce?: unknown; springboard?: unknown }
     async function benchThenUpdate(bench: (s: import('sno-core/shards').ShardModel) => import('sno-core/shards').ShardModel, file: string): Promise<import('sno-core/shards').ShardModel> {

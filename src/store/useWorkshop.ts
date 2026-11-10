@@ -1763,7 +1763,7 @@ export const useWorkshop = create<WorkshopState>((set, get) => {
       // survives the update (DECK-0003 §1.12). A word in the file wins.
       const chose = chosenConstrainOf(old)
       const walled = chose && !chosenConstrainOf(next) ? withConstrain(next, chose) : next
-      // BOUNCE likewise (ruling of 2026-11-10, review of #653): a file that
+      // BOUNCE likewise (decided 2026-11-10 to match CONSTRAIN, review of #653; not an owner ruling): a file that
       // reads as no bounce (absent or malformed) keeps the bench's, bounce
       // and springboard as a pair. A valid bounce in the file wins, with the
       // file's own springboard: never the file's bounce with the bench's

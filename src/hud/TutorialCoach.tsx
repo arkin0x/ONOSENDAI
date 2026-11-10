@@ -57,6 +57,9 @@ export function TutorialCoach(): JSX.Element | null {
   // then picks nothing that costs anything, rather than ending the tutorial.
   const firstChoice = useRef<HTMLButtonElement | null>(null)
   useTutorial((s) => s.choicesVersion)
+  // A choice under way (entering the dungeon publishes): its card waits, and why one did not go stays on it.
+  const choosing = useTutorial((s) => s.choosing)
+  const choiceNote = useTutorial((s) => s.choiceNote)
   useEffect(() => { if (shown && modal) (firstChoice.current ?? go.current)?.focus() }, [shown, modal, index])
 
   // The control a step points at wears the /demo tour's pulsing ring
@@ -99,11 +102,12 @@ export function TutorialCoach(): JSX.Element | null {
           <h2 className="modal__title">{step.title}</h2>
           <p className="demo__caption"><CaptionText caption={caption} /></p>
           {step.choices?.filter(choiceOffered).map((c, i) => (
-            <button key={c.id} ref={i === 0 ? firstChoice : undefined} className="demo__btn tutorial-choice" onClick={() => t.choose(c.id)}>
+            <button key={c.id} ref={i === 0 ? firstChoice : undefined} className="demo__btn tutorial-choice" onClick={() => t.choose(c.id)} disabled={choosing !== null} aria-busy={choosing === c.id}>
               <span className="tutorial-choice__label">{c.label}</span>
-              <span className="tutorial-choice__about">{c.about}</span>
+              <span className="tutorial-choice__about">{choosing === c.id ? 'One moment.' : c.about}</span>
             </button>
           ))}
+          {choiceNote && <p className="demo__caption tutorial__note" role="status">{choiceNote}</p>}
           <button ref={go} className={`demo__btn tutorial-card__go ${step.choices ? 'tutorial-card__go--done' : 'demo__btn--next'}`} onClick={t.next}>{step.go ?? (last ? 'FINISH' : 'NEXT')}</button>
         </div>
       </div>,

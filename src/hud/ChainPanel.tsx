@@ -35,6 +35,7 @@ import { BrokenChainNotice } from './BrokenChain'
 import { PUBLISH_TAG_LABEL, PUBLISH_TAG_TITLE, publishTag } from '../lib/release'
 import { useCyberspace } from '../store/useCyberspace'
 import { enterTutorialDungeon, gamesEnabled, useGame } from '../store/useGame'
+import { useTutorial } from '../store/useTutorial'
 import { TUTORIAL_GAME } from '../lib/games/tutorialGame'
 import { canLeave, gameFor } from '../lib/games/registry'
 import { useBuilder, walkChain } from '../store/useBuilder'
@@ -53,6 +54,8 @@ export function ChainPanel(): JSX.Element {
   // Why the last ENTER GAME was refused, while no game is on screen to say it.
   const gameNote = useGame((s) => (s.session ? null : s.message))
   const entering = useGame((s) => s.busy === 'entering')
+  // While the tutorial runs, its final card is the way into the dungeon (tutorial/dungeon.ts).
+  const tutorialOn = useTutorial((s) => s.active)
   const published = useCyberspace((s) => s.published)
   const publishError = useCyberspace((s) => s.publishError)
   const live = useCyberspace((s) => s.live)
@@ -254,8 +257,9 @@ export function ChainPanel(): JSX.Element {
       ) : null}
 
       {/* With games on (lib/games/flag.ts), a way into the tutorial dungeon
-          until the first-arrival tutorial offers it (DECK-0002 §2). */}
-      {gamesEnabled() && !game && events.length > 0 && (
+          for anyone not in the first-arrival tutorial, whose final card
+          offers it instead (DECK-0002 §2): one door at a time. */}
+      {gamesEnabled() && !tutorialOn && !game && events.length > 0 && (
         <p className="notice notice--game">
           {TUTORIAL_GAME.name}{entering ? ': ENTERING' : gameNote ? `: ${gameNote}` : ''}
           <button className="tag tag--tap" onClick={() => { void enterTutorialDungeon() }}>ENTER GAME</button>

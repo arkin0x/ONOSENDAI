@@ -104,6 +104,7 @@ import { movableIntoRoom, openWithSecret, openWithSigner, openerFor, placeOf as 
 import { openedByHand, restoreOpened } from './useOpenedChests'
 import { closeArriving, closedByMe, closedDoorIds } from './closedDoors'
 import { hiderKeys, madeKeys, openingKeys, placeOf, type HeldItem, type HeldPlace, type InChest } from '../lib/inventory'
+import { lookupLock, startKeyring } from './useKeyring'
 import { useInventory } from './useInventory'
 import { useShardFolders } from './useShardFolders'
 import { creditOf, useWorkshop } from './useWorkshop'
@@ -412,6 +413,19 @@ export interface ChestLock {
   pubkey: string
   /** For the bar and the ghost: the key's name, or "a person". */
   label: string
+  /** A region's or a room's lock (DECK-0004 §3.8), not an item's or a person's; absent for those. */
+  kind?: 'region' | 'room'
+  /** How REGION picked it, so the composer comes back to the same choice. */
+  region?: RegionChoice
+  /** Which room key ROOM picked: its room bag's `d`. */
+  room?: { lookupId: string }
+}
+
+/** A region lock as the LOCK block picked it: around the chest, around you, or a key from your keyring, and its height. */
+export interface RegionChoice {
+  from: 'chest' | 'me' | 'keyring'
+  height: number
+  lookupId?: string
 }
 
 /**
@@ -3821,7 +3835,7 @@ export const useShards = create<ShardsState>((set, get) => {
       if (!d?.chest) return 'Only the chest’s hider can change what is inside it, from the device that hid it.'
       if (d.sealed) return d.sealed
       const cs = cyber()
-      const opener = openerFor(d.chest, hiderKeys(useInventory.getState().items, get().mine, cs.identity.pubkey), cs.identity.pubkey)
+      const opener = openerFor(d.chest, hiderKeys(useInventory.getState().items, get().mine, cs.identity.pubkey), cs.identity.pubkey, lookupLock)
       if (!opener) return 'Opening the chest needs the key it is sealed to, which this device does not hold.'
       try {
         return opener.by === 'key' ? openWithSecret(d.chest, opener.key.secretHex) : await openWithSigner(d.chest, cs.decryptSealed)
@@ -4060,7 +4074,7 @@ export const useShards = create<ShardsState>((set, get) => {
       let list: unknown[]
       if (d.sealed) list = d.sealed
       else {
-        const opener = openerFor(d.chest, hiderKeys(useInventory.getState().items, get().mine, me), me)
+        const opener = openerFor(d.chest, hiderKeys(useInventory.getState().items, get().mine, me), me, lookupLock)
         if (!opener) return 'Opening the chest needs the key it is sealed to, which this device does not hold.'
         try {
           const parsed = JSON.parse(opener.by === 'key' ? plaintextWithSecret(d.chest, opener.key.secretHex) : await cs.decryptSealed(d.chest.senderPubkey, d.chest.payload)) as unknown
@@ -5155,7 +5169,7 @@ export const useShards = create<ShardsState>((set, get) => {
       if (!chest?.chest) return 'Only the chest’s hider can change what is inside it, from the device that hid it.'
       const cs = cyber()
       const me = cs.identity.pubkey
-      const opener = openerFor(chest.chest, hiderKeys(useInventory.getState().items, get().mine, me), me)
+      const opener = openerFor(chest.chest, hiderKeys(useInventory.getState().items, get().mine, me), me, lookupLock)
       if (!opener) return 'Opening the chest needs the key it is sealed to, which this device does not hold.'
       let raw: BagEntry[]
       try {
@@ -5238,6 +5252,7 @@ export const useShards = create<ShardsState>((set, get) => {
       // readAgain). Nothing TV showed is restored, and a key TV showed opens
       // nothing (review of #390).
       const keys: OpeningKey[] = openingKeys(useInventory.getState().items, true)
+      startKeyring()
       // A door of a room this identity closed (§3.7.5, one room, one state) comes in closed,
       // before anything here asks whether it was opened by hand (store/closedDoors).
       if (!watched) void closeArriving(me, items)
@@ -5252,7 +5267,8 @@ export const useShards = create<ShardsState>((set, get) => {
       const revealed: Hidden[] = []
       while (queue.length > 0) {
         const door = queue.shift()!
-        const opener = openerFor(door.chest!, keys, '')
+        // A key you carry opens it too (DECK-0004 §3.8), once its lock is derived: a later scan catches up.
+        const opener = openerFor(door.chest!, keys, '', lookupLock)
         if (!opener || opener.by !== 'key') continue
         let contents: ChestEntry[]
         try { contents = readContents(openWithSecret(door.chest!, opener.key.secretHex), sealerOf(door)) } catch { continue }

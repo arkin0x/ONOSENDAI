@@ -34,6 +34,8 @@ import { BagUnreadable, hiddenLabel, itemLineage, keyItemOf, type ChestItem, typ
 import { ItemFace } from './ItemIcon'
 import { ShardThumb } from './ShardThumb'
 import { holdsEntry, holdsItem, openingKeys, type HeldFrom, type HeldItem, type HeldPlace } from '../lib/inventory'
+import { carriedLabel } from '../lib/keyringLocks'
+import { useKeyringLookup } from '../store/useKeyring'
 import { safeNpub } from '../lib/npub'
 import { useCyberspace } from '../store/useCyberspace'
 import { useInventory } from '../store/useInventory'
@@ -193,7 +195,9 @@ export function ChestBlock({ id, chest, author, verified, place, sealer: given, 
   const items = useInventory((s) => s.items)
   const me = useCyberspace((s) => s.identity.pubkey)
   const keys = useMemo(() => openingKeys(items), [items])
-  const opener = useMemo(() => openerFor(chest, keys, me), [chest, keys, me])
+  // A region or room key you carry opens it too (DECK-0004 §3.8): one lookup, on this device.
+  const keyring = useKeyringLookup()
+  const opener = useMemo(() => openerFor(chest, keys, me, keyring), [chest, keys, me, keyring])
   const found = useShards((s) => s.discovered[id])
   const ownInner = useShards((s) => s.mine.find((d) => d.eventId === id)?.inner)
   const sealer = chestSealer(given, found, ownInner)
@@ -345,7 +349,9 @@ export function ChestBlock({ id, chest, author, verified, place, sealer: given, 
     }
   }
 
-  const opensWith = opener === null ? null : opener.by === 'self' ? 'your identity' : items[opener.key.id]?.name ?? 'an item you hold'
+  const carried = opener?.by === 'key' ? opener.key.carried : undefined
+  const opensWith = opener === null ? null : opener.by === 'self' ? 'your identity' : carried ? 'a key you carry' : items[opener.key.id]?.name ?? 'an item you hold'
+  const offerOpen = closedHere || (opener && (!entries || owed) && (!canClose || owed))
   return (
     <div className="chest">
       <div className="chest__head">
@@ -359,10 +365,11 @@ export function ChestBlock({ id, chest, author, verified, place, sealer: given, 
         {canClose && (
           <button className="chest__act" onClick={() => void shut()} disabled={busy} title="Close it here. Nothing is sent.">CLOSE</button>
         )}
-        {(closedHere || (opener && (!entries || owed) && (!canClose || owed))) && (
+        {offerOpen && (
           <button className="chest__act" onClick={() => void open()} disabled={busy || rereading} title={closedHere ? 'Open it again here. Its secret is kept on this device.' : `Decrypt it here with ${opensWith}`}>{busy || rereading ? 'OPENING' : 'OPEN'}</button>
         )}
       </div>
+      {offerOpen && !closedHere && carried && <span className="chest__fits">A key you carry fits: {carriedLabel(carried)}</span>}
       {status && <span className="chest__status" role="status">{status}</span>}
       {shown && shown.length > 0 && <ChestContents entries={shown} from={from} place={place} />}
     </div>

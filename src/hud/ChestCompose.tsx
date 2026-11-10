@@ -57,13 +57,36 @@ import { hasNftLink } from '../lib/nftLink'
 import { useCyberspace } from '../store/useCyberspace'
 import { useInventory } from '../store/useInventory'
 import { sealableKeys } from '../lib/inventory'
-import { chestCopiesOf, chestKeyTemplate, lookModelOf, useShards, type ChestContent, type ChestDraft, type ChestLock } from '../store/useShards'
+import { chestCopiesOf, chestKeyTemplate, lookModelOf, positionOf, useShards, type ChestContent, type ChestDraft, type ChestLock } from '../store/useShards'
 import { creditOf, useWorkshop } from '../store/useWorkshop'
 import { composeVerdict, SETTLE_MS, useCashu } from './useCashu'
 import { useSettled } from './useSettled'
 import { AudioUpload } from './AudioCompose'
 import { audioInnerTemplate } from '../lib/audioItem'
 import { useStash } from './stash'
+import { lockOfHex } from '../lib/locks'
+import { carriedLabel } from '../lib/keyringLocks'
+import { keyringEntry, roomKeysNow, startKeyring, useKeyring } from '../store/useKeyring'
+import { REGION_REQUIRES, RegionLockPicker } from './RegionLockPicker'
+import { RoomLockSelect } from './RoomLockSelect'
+
+/** What opens it, as the LOCK block offers (arkinox, 2026-11-10): a key item, a person, a region, a room. */
+type LockMode = 'item' | 'person' | 'region' | 'room'
+const LOCK_MODES: Array<[LockMode, string, string]> = [
+  ['item', 'KEY ITEM', 'Whoever holds the item opens it'],
+  ['person', 'PERSON', 'Only that person opens it'],
+  ['region', 'REGION', 'Whoever carries the region’s key opens it'],
+  ['room', 'ROOM', 'Whoever opened the room opens it'],
+]
+
+/** A pasted npub, as a person's lock. */
+function parsePerson(text: string): ChestLock | null {
+  try {
+    const d = nip19.decode(text.trim())
+    if (d.type === 'npub' && isLockPubkey(d.data)) return { pubkey: d.data, label: 'a person' }
+  } catch { /* not an npub */ }
+  return null
+}
 
 /** A pasted lock: an item's public key as hex, or a person's npub; either must name a point on the curve. */
 function parseLock(text: string): ChestLock | null {
@@ -161,6 +184,14 @@ export function ChestCompose({ onDone, target = { mode: 'place' } }: { onDone: (
     if (hidden?.chest) {
       const c = hidden.chest
       const held = keys.find((k) => k.key?.itemPubkey === c.lockPubkey)
+      // A region or room you carry whose lock it is (DECK-0004 §3.8).
+      const carried = held ? undefined : keyringEntry(c.lockPubkey)?.key
+      if (carried) {
+        const lock: ChestLock = carried.kind === 'region'
+          ? { pubkey: c.lockPubkey, label: carriedLabel(carried), kind: 'region', region: { from: 'keyring', height: carried.height, lookupId: carried.lookupId } }
+          : { pubkey: c.lockPubkey, label: carriedLabel(carried), kind: 'room', room: { lookupId: carried.lookupId } }
+        return { name: c.name, requires: c.requires, contents: [], lock }
+      }
       return { name: c.name, requires: c.requires, contents: [], lock: { pubkey: c.lockPubkey, label: held ? held.name : c.lockPubkey === me ? 'a person' : c.requires || 'its lock' } }
     }
     return pending ? { name: pending.name, lock: pending.lock, requires: pending.requires, contents: pending.contents } : { name: '', lock: null, requires: '', contents: [] }
@@ -173,11 +204,24 @@ export function ChestCompose({ onDone, target = { mode: 'place' } }: { onDone: (
   // A restored label that was never written still follows the lock once one is picked.
   const [requiresTouched, setRequiresTouched] = useState(start.requires.trim() !== '')
   const kept = start.lock
-  const [lockKeyId, setLockKeyId] = useState<string>(() => (kept ? keys.find((k) => k.key?.itemPubkey === kept.pubkey)?.id ?? '' : keys[0]?.id ?? ''))
-  // A lock chosen from the ITEM FEED: a listed item, held or not. A kept lock that is neither held, a person nor pasted came from there.
-  const [feedLock, setFeedLock] = useState<ChestLock | null>(() => (kept && kept.label !== 'a person' && kept.label !== 'a pasted key' && !keys.some((k) => k.key?.itemPubkey === kept.pubkey) ? kept : null))
+  // What opens it: the kind of the kept lock, else a key item, as before.
+  const [mode, setMode] = useState<LockMode>(kept?.kind ?? (kept?.label === 'a person' ? 'person' : 'item'))
+  const keptItem = kept && !kept.kind ? kept : null
+  const [lockKeyId, setLockKeyId] = useState<string>(() => (keptItem ? keys.find((k) => k.key?.itemPubkey === keptItem.pubkey)?.id ?? '' : kept ? '' : keys[0]?.id ?? ''))
+  // A lock chosen from the ITEM FEED: a listed item, held or not. A kept lock that is neither held, a person, pasted, a region nor a room came from there.
+  const [feedLock, setFeedLock] = useState<ChestLock | null>(() => (keptItem && keptItem.label !== 'a person' && keptItem.label !== 'a pasted key' && !keys.some((k) => k.key?.itemPubkey === keptItem.pubkey) ? keptItem : null))
   const [picking, setPicking] = useState(false)
-  const [pasted, setPasted] = useState(kept && kept.label === 'a pasted key' && !keys.some((k) => k.key?.itemPubkey === kept.pubkey) ? kept.pubkey : kept?.label === 'a person' ? nip19.npubEncode(kept.pubkey) : '')
+  const [pasted, setPasted] = useState(keptItem && keptItem.label === 'a pasted key' && !keys.some((k) => k.key?.itemPubkey === keptItem.pubkey) ? keptItem.pubkey : '')
+  const [person, setPerson] = useState(keptItem?.label === 'a person' ? nip19.npubEncode(keptItem.pubkey) : '')
+  // REGION's lock, computed by its picker; ROOM's choice, by room bag `d`.
+  const [regionLock, setRegionLock] = useState<ChestLock | null>(kept?.kind === 'region' ? kept : null)
+  const [roomId, setRoomId] = useState(kept?.kind === 'room' ? kept.room?.lookupId ?? '' : '')
+  // The room keys you carry, for ROOM: read again as the keyring changes.
+  startKeyring()
+  const keyringVersion = useKeyring((s) => s.version)
+  const discovered = useShards((s) => s.discovered)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const rooms = useMemo(() => roomKeysNow(), [keyringVersion, discovered, mine])
   const [contents, setContents] = useState<ChestContent[]>(start.contents)
   // A hidden chest's contents, opened from what this device kept, or with what opens it.
   const [loading, setLoading] = useState(!!editing && !isDoor)
@@ -208,13 +252,26 @@ export function ChestCompose({ onDone, target = { mode: 'place' } }: { onDone: (
   const ownItems = useMemo(() => chestCopiesOf(items, me), [items, me])
   const updateForging = useCallback((f: (k: KeyItem) => KeyItem) => setForging((k) => (k ? f(k) : k)), [])
 
-  const heldLock = keys.find((k) => k.id === lockKeyId)
-  const lock: ChestLock | null = heldLock?.key ? { pubkey: heldLock.key.itemPubkey, label: heldLock.name } : feedLock ?? parseLock(pasted)
+  const heldLock = mode === 'item' ? keys.find((k) => k.id === lockKeyId) : undefined
+  const room = rooms.find((r) => r.lookupId === roomId) ?? (mode === 'room' && !roomId ? rooms[0] : undefined)
+  const roomLock = useMemo((): ChestLock | null => {
+    if (!room) return kept?.kind === 'room' && kept.room?.lookupId === roomId ? kept : null
+    const l = lockOfHex(room.keyHex)
+    return l ? { pubkey: l.pubkey, label: room.kind === 'room' && room.name ? `the room ${room.name}` : 'a room', kind: 'room', room: { lookupId: room.lookupId } } : null
+  }, [room, roomId, kept])
+  const lock: ChestLock | null = mode === 'region' ? regionLock
+    : mode === 'room' ? roomLock
+      : mode === 'person' ? parsePerson(person)
+        : heldLock?.key ? { pubkey: heldLock.key.itemPubkey, label: heldLock.name } : feedLock ?? parseLock(pasted)
   // The hider's label of what opens it starts as the lock's own name until typed over.
   useEffect(() => {
     if (requiresTouched) return
-    setRequires(heldLock ? `the ${heldLock.name}` : feedLock ? `the ${feedLock.label}` : lock?.label === 'a person' ? 'being the one it was sealed for' : '')
-  }, [heldLock, feedLock, lock?.label, requiresTouched])
+    setRequires(mode === 'region' ? REGION_REQUIRES : mode === 'room' ? 'the key of a room' : heldLock ? `the ${heldLock.name}` : feedLock && mode === 'item' ? `the ${feedLock.label}` : lock?.label === 'a person' ? 'being the one it was sealed for' : '')
+  }, [mode, heldLock, feedLock, lock?.label, requiresTouched])
+  // Where the chest stands and its height, for REGION's default: as placed, or as hidden.
+  const deployHeight = useShards((s) => s.deployHeight)
+  const spot = hidden ? { at: positionOf(hidden), plane: hidden.plane } : pending?.spot ?? null
+  const chestHeight = hidden ? hidden.height : deployHeight
 
   // A Cashu token in a message is read, and its mint asked, once the text holds still.
   const settled = useSettled(text, SETTLE_MS) === text
@@ -260,7 +317,7 @@ export function ChestCompose({ onDone, target = { mode: 'place' } }: { onDone: (
     if (!editing) useShards.getState().keepChestDraft({ name: name.trim(), lock, requires: requires.trim(), contents })
     // lock is derived from these three
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [editing, name, requires, contents, lockKeyId, feedLock, pasted])
+  }, [editing, name, requires, contents, lockKeyId, feedLock, pasted, mode, person, regionLock, roomLock])
 
   // Placing: the deploy's own state, shown here while the bar is out of the way.
   const deployStatus = useShards((s) => s.deployStatus)
@@ -299,10 +356,20 @@ export function ChestCompose({ onDone, target = { mode: 'place' } }: { onDone: (
       {look && <div className="secret__spin secret__spin--look"><CardSpin shard={look} size={150} wide /></div>}
       {fields && <input className="avatars__input" value={name} onChange={(e) => setName(e.target.value.slice(0, MAX_ITEM_NAME))} placeholder={isDoor ? 'Name the door' : 'Name the chest'} maxLength={MAX_ITEM_NAME} autoFocus={!editing || editing.fields} aria-label={isDoor ? 'Door name' : 'Chest name'} />}
 
-      {/* The lock: an item you hold or made, or a pasted public key. */}
+      {/* The LOCK block, one for chests and doors: this place always, then what opens it. */}
       {fields && (
+        <div className="lock">
+          <span className="legend__label">LOCK · WHAT OPENS IT</span>
+          <span className="lock__note">THIS PLACE · always</span>
+          <div className="compose__row" role="radiogroup" aria-label="What opens it">
+            {LOCK_MODES.filter(([m]) => m !== 'room' || rooms.length > 0 || mode === 'room').map(([m, label, title]) => (
+              <button key={m} className={`chest__act ${mode === m ? 'is-on' : ''}`} role="radio" aria-checked={mode === m} onClick={() => setMode(m)} title={title}>{label}</button>
+            ))}
+          </div>
+        </div>
+      )}
+      {fields && mode === 'item' && (
         <div className="compose__row">
-          <span className="legend__label">Lock</span>
           <select className="avatars__input compose__select" value={lockKeyId} onChange={(e) => { setLockKeyId(e.target.value); if (e.target.value) setFeedLock(null) }} aria-label="Seal to an item you hold or made" title={`An item you hold or made: whoever holds it opens the ${isDoor ? 'door' : 'chest'}`}>
             <option value="">{keys.length === 0 ? 'no items yet' : 'paste a public key below'}</option>
             {keys.map((k) => <option key={k.id} value={k.id}>{k.name}</option>)}
@@ -310,7 +377,7 @@ export function ChestCompose({ onDone, target = { mode: 'place' } }: { onDone: (
           <button className="chest__act" onClick={() => setPicking(true)} title="Choose a listed item from the ITEM FEED, even one you have never held">ITEM FEED</button>
         </div>
       )}
-      {fields && !heldLock && feedLock && (
+      {fields && mode === 'item' && !heldLock && feedLock && (
         <div className="compose__row">
           <span className="item__name" title={feedLock.pubkey}>sealed to {feedLock.label}, from the item feed</span>
           <button className="chest__act" onClick={() => setFeedLock(null)} aria-label="Clear the item feed lock" title="Clear this lock">×</button>
@@ -327,8 +394,17 @@ export function ChestCompose({ onDone, target = { mode: 'place' } }: { onDone: (
           }}
         />
       )}
-      {fields && !heldLock && !feedLock && (
-        <input className={`avatars__input ${pasted.trim() && !lock ? 'is-bad' : ''}`} value={pasted} onChange={(e) => setPasted(e.target.value)} placeholder="an item public key (hex) or an npub" spellCheck={false} autoComplete="off" aria-label="Seal to a pasted public key" title="An item’s public key seals it to that item; an npub seals it to that person" />
+      {fields && mode === 'item' && !heldLock && !feedLock && (
+        <input className={`avatars__input ${pasted.trim() && !lock ? 'is-bad' : ''}`} value={pasted} onChange={(e) => setPasted(e.target.value)} placeholder="an item public key (hex)" spellCheck={false} autoComplete="off" aria-label="Seal to a pasted public key" title="An item’s public key seals it to that item" />
+      )}
+      {fields && mode === 'person' && (
+        <input className={`avatars__input ${person.trim() && !lock ? 'is-bad' : ''}`} value={person} onChange={(e) => setPerson(e.target.value)} placeholder="an npub" spellCheck={false} autoComplete="off" aria-label="Seal to a person" title="Only this person opens it, with their own signer" />
+      )}
+      {fields && mode === 'region' && (
+        <RegionLockPicker spot={spot} chestHeight={chestHeight} noun={isDoor ? 'door' : 'chest'} kept={kept?.kind === 'region' ? kept : null} onLock={setRegionLock} />
+      )}
+      {fields && mode === 'room' && (
+        <RoomLockSelect rooms={rooms} value={room?.lookupId ?? roomId} keptLabel={!room && kept?.kind === 'room' ? kept.label : null} onPick={setRoomId} />
       )}
       {fields && <input className="avatars__input" value={requires} onChange={(e) => { setRequires(e.target.value.slice(0, MAX_ITEM_NAME)); setRequiresTouched(true) }} placeholder="What opens it, for those who cannot" maxLength={MAX_ITEM_NAME} aria-label="Requires" title={`Shown to anyone who finds the ${isDoor ? 'door' : 'chest'} without its key`} />}
 
@@ -447,7 +523,7 @@ export function ChestCompose({ onDone, target = { mode: 'place' } }: { onDone: (
         <div className="shards__actions">
           <button className="avatars__go" onClick={cancel} disabled={working}>CANCEL</button>
           {!editing && <button className="avatars__go" onClick={move} disabled={working || midAdd} title={midAdd ? MID_ADD : 'Back to the hide bar, to place it somewhere else'}>MOVE</button>}
-          <button className="avatars__go" disabled={!ready || working} onClick={seal} title={midAdd ? MID_ADD : refusal ?? (!lock ? 'Pick an item or paste a public key to seal to' : !isDoor && contents.length === 0 ? 'Put something in it first' : editing ? 'Seal it again where it stands' : undefined)}>
+          <button className="avatars__go" disabled={!ready || working} onClick={seal} title={midAdd ? MID_ADD : refusal ?? (!lock ? 'Pick what opens it' : !isDoor && contents.length === 0 ? 'Put something in it first' : editing ? 'Seal it again where it stands' : undefined)}>
             {working ? (deployNote && !editing ? `${deployNote.toUpperCase()}…` : 'SEALING…') : editing ? 'SAVE' : live ? 'SEAL & PUBLISH' : 'SEAL (LOCAL)'}
           </button>
         </div>

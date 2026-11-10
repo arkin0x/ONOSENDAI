@@ -100,7 +100,7 @@ import { MAX_COMPUTE_HEIGHT, samePosition, useCyberspace } from './useCyberspace
 import { BRIEF_TOAST_MS, useToast } from './useToast'
 import { standing, walkStep, type WalkStep } from './walkStep'
 import { planWalkMove, walkHeading } from '../lib/walkSlide'
-import { floorPad, stepLimit, takeWallWait, wallItemsAt, wallsBuilt, warmWalls, type WallItem } from './walkWalls'
+import { anyBounce, floorPad, stepLimit, takeWallWait, wallItemsAt, wallsBuilt, warmWalls, type WallItem } from './walkWalls'
 import { JUMP_HEIGHT, JUMP_SPEED, WALK_GRAVITY, arcApex, arcHeight, arcPeak, arcSpeed, fallLimit, jumpRise, launchSpeed, loadGravity, reachedHeight, saveGravity } from './walkGravity'
 import { launchHeight } from '../lib/walkBounce'
 import { walkFacing, walkFall } from '../lib/walkEye'
@@ -353,7 +353,7 @@ export const useWalk = create<WalkState>((set, get) => ({
     // Off a floor under gravity: this segment ends here, and the fall begins.
     if (gravity) fallIfAirborne()
     // Onto a bounce pad: a step up onto a fixed height, or any arrival onto a springboard, launches (E).
-    if (gravity && !fall) padLaunch(next, next.y > from.y)
+    if (gravity && !fall) padLaunch(next, next.y > from.y, items)
   },
 
   settle: () => {
@@ -537,14 +537,17 @@ function jump(from: Position): void {
  * with the floor included (arkinox, 2026-11-10). A fixed height launches;
  * "reflect" reflects a fall of 0, which is no launch, springboard or not. A
  * Down press within BOUNCE_BOOST_MS before the arrival absorbs it: you stand.
+ * Asked on every press under gravity, so it costs nothing until some wall
+ * built has a bounce (walkWalls anyBounce), and it reads the walls the press
+ * already gathered (`items`).
  * The launch is a jump of that height from `at`, so the walk segment that
  * brought you here closes there as a normal hop (beginFall) and every bounce
  * after it, back onto the same pad, makes nothing.
  */
-function padLaunch(at: Position, rose: boolean): void {
+function padLaunch(at: Position, rose: boolean, items: WallItem[]): void {
+  if (!anyBounce()) return
   if (downInAirAt !== null && nowMs() - downInAirAt <= BOUNCE_BOOST_MS) return
   const cs = useCyberspace.getState()
-  const items = wallItemsAt(cs.plane, at)
   takeWallWait()
   const pad = floorPad(at, items)
   const h = rose || pad.springboard ? launchHeight(pad.bounce, 0, false, JUMP_HEIGHT) : 0

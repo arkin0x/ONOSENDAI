@@ -380,9 +380,24 @@ function nodesOf(placed: readonly Placed[]): number {
   return n
 }
 
+/**
+ * Whether any wall built since the last clearWalls has a bounce on its own
+ * faces or on an object it places (lib/walkBounce.ts): until one has, no
+ * floor can bounce, so WALK asks floorPad nothing (store/useWalk.ts
+ * padLaunch). Set as walls are built and kept until clearWalls, so a pad
+ * walked away from still counts: that costs only a query, never a launch.
+ */
+let bounceBuilt = false
+
+/** Whether any wall built since the last clearWalls bounces: off, a press asks no floor query. */
+export function anyBounce(): boolean {
+  return bounceBuilt
+}
+
 function build(w: WallItem, placed: readonly Placed[], starved = false, first = false): Entry {
   const pose = placedPose(WALL_AXES, w.shard.up && w.plane === 0 ? { at: w.at, spin: w.shard.spin } : undefined)
   const mesh = wallMesh(w.shard, placed, pose)
+  if (!bounceBuilt && (!!mesh.ownBounce || mesh.placements.some((p) => !!p.bounce))) bounceBuilt = true
   const missingAt = placed.some(function gone(p): boolean { return p.missing === 'unreachable' || p.children.some(gone) }) ? Date.now() : null
   return { item: w, starved, first, walk: walkNo, shard: w.shard, missingAt, where: whereOf(w), mesh, clip: w.uncut ? NO_CUT : regionBox(w.at, w.height, w.shard.unit, WALL_AXES), reach: reachOf(mesh, w.shard.unit) }
 }
@@ -656,6 +671,7 @@ function later(fn: (idle?: IdleDeadline) => void): void {
 /** Forget every shard's walls: for tests, and an identity switch has no need of them either. */
 export function clearWalls(): void {
   entries.clear()
+  bounceBuilt = false
   waited = false
   landed()
   walkNo++
@@ -795,6 +811,12 @@ export function stepLimit(from: Position, axis: AxisName, dir: 1 | -1, length: b
   return middle && middle.reach < stop.reach ? middle : stop
 }
 
+/** How many times floorPad has been asked: for the test that a world with no bounce asks it nothing. */
+let padQueryCount = 0
+export function padQueries(): number {
+  return padQueryCount
+}
+
 /** The floor under a walker, as a bounce reads it (floorPad). */
 export interface Pad {
   bounce: Bounce
@@ -812,6 +834,7 @@ export interface Pad {
  * exactly the same height (a pad flush with a floor), the one that bounces.
  */
 export function floorPad(at: Position, items: readonly WallItem[]): Pad {
+  padQueryCount++
   const none: Pad = { bounce: 0, springboard: false }
   const under = stepLimit(at, 'y', -1, 1n, items, true)
   if (under.reach !== 0n || !under.by) return none

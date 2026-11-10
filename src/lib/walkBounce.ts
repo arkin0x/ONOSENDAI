@@ -22,15 +22,18 @@
  * floor), a step up or down onto it, or a landing. Without it a pad launches
  * on landings, and on a step up onto a fixed height (ruling of 2026-11-10).
  * With "reflect" it adds nothing: walking on, you fell from nowhere, so the
- * reflected height is 0 and only landings launch.
+ * reflected height is 0 and only landings launch. Touching counts: walking
+ * along the exact seam between a plain floor and a flush springboard
+ * launches, as intended ("touching the pad will launch you"). A Down press
+ * just before walking on keeps you standing.
  *
  * An Up press just before the landing adds JUMP_HEIGHT to either, still at
  * most BOUNCE_MAX; a Down press just before it absorbs the bounce, and the
- * walker lands and stands. Stepping up onto a fixed-height pad (the stair step-up)
- * launches as a landing would; onto a "reflect" pad it does nothing, since it
- * fell from nowhere (ruling of 2026-11-10). sno-core does not know the field, so it rides in the
- * model's `extra` like `constrain` (lib/walkConstrain.ts), and an older
- * reader passes it through untouched.
+ * walker lands and stands. Stepping up onto a fixed-height pad (the stair
+ * step-up) launches as a landing would; onto a "reflect" pad it does
+ * nothing, since it fell from nowhere (ruling of 2026-11-10). sno-core does
+ * not know the field, so it rides in the model's `extra` like `constrain`
+ * (lib/walkConstrain.ts), and an older reader passes it through untouched.
  *
  * Whose `bounce` a face has: the payload that owns the face, as each object
  * is judged by its own `constrain` (§1.10). A shard's own faces bounce by the

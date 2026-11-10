@@ -28,6 +28,7 @@ import { mentionNotification } from '../lib/notifications'
 import { useNotifications } from './useNotifications'
 import { useMutes } from './useMutes'
 import { hidesThing } from '../lib/muteList'
+import { placeOf } from '../lib/chests'
 
 export interface ChatLine {
   /** The inner event's id: the line's identity, what stops a repeat. */
@@ -207,7 +208,11 @@ export const useChat = create<ChatState>((set, get) => ({
     try {
       set({ sendStatus: 'signing', sendError: null })
       // The line is a rumor, never signed: only the envelope is (chatRumor).
-      const inner = chatRumor(chatInnerTemplate(wire.text, cyber.position, cyber.plane, now, key.lookupId, wire.pubkeys), cyber.identity.pubkey)
+      // Its C is where you stand: the head's position in the head's plane,
+      // never the plane lined up for the next hop. The room is shared by both
+      // planes, and the C is what tells listeners which one you spoke in
+      // (DECK-0005 §3.2, The plane).
+      const inner = chatRumor(chatInnerTemplate(wire.text, cyber.position, cyber.headPlane, now, key.lookupId, wire.pubkeys), cyber.identity.pubkey)
       set({ sendStatus: 'sending' })
       const outer = await cyber.signEvent(await bagTemplate([inner], hexToBytes(key.keyHex), key.lookupId, key.height, now, CHAT_BAG_KIND))
       const result = await publishMany(relaySet(), outer)
@@ -233,7 +238,15 @@ export const useChat = create<ChatState>((set, get) => ({
     const secrets = useSecrets.getState()
     const key = secrets.current[region] ?? secrets.neighbors[region]
     if (!key) return
-    const inners = await chatInners(outer, hexToBytes(key.keyHex))
+    // A room's key and d are shared by both planes (spec §7.6 Planes), so a
+    // line said at these X, Y and Z in the other plane opens here too. Only
+    // lines whose C is in the plane you listen from are heard; a line with no
+    // C names no plane and is heard in both (DECK-0005 §3.2, The plane).
+    const plane = useCyberspace.getState().anchorPlane
+    const inners = (await chatInners(outer, hexToBytes(key.keyHex))).filter((e) => {
+      const said = placeOf(e)
+      return said === null || said.plane === plane
+    })
     if (inners.length === 0) return
     const me = useCyberspace.getState().identity.pubkey
     // A line by someone blocked, or one muted by its id, never lands: no

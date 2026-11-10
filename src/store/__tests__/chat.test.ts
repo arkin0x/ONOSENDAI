@@ -52,6 +52,7 @@ describe('receiving', () => {
   beforeEach(() => {
     useChat.setState({ lines: [], open: false, unread: 0, muted: true })
     useSecrets.setState({ current: { [region]: { keyHex: bytesToHex(regionKey), height: 12 } } })
+    useCyberspace.setState({ anchorPlane: 0 })
   })
 
   it('opens an envelope from someone else, unfolds the dock and keeps the line', async () => {
@@ -103,6 +104,35 @@ describe('receiving', () => {
     await useChat.getState().receive(outer)
     await useChat.getState().receive(outer)
     expect(useChat.getState().lines).toHaveLength(1)
+  })
+
+  // A room's key and d are the same in both planes (spec §7.6 Planes), so an
+  // envelope said at these X, Y and Z in the other plane opens with this key;
+  // only the line's C says which plane it was said in (DECK-0005 §3.2).
+  it('hears a line only in the plane its C names', async () => {
+    const sk = generateSecretKey()
+    const twin = finalizeEvent(chatInnerTemplate('from the twin plane', { x: 1n, y: 2n, z: 3n }, 1, 6, region), sk)
+    await useChat.getState().receive(finalizeEvent(await bagTemplate([twin], regionKey, region, 12, 6, CHAT_BAG_KIND), sk))
+    expect(useChat.getState().lines).toHaveLength(0)
+    expect(useChat.getState().open).toBe(false)
+    const here = finalizeEvent(chatInnerTemplate('from this plane', { x: 1n, y: 2n, z: 3n }, 0, 7, region), sk)
+    await useChat.getState().receive(finalizeEvent(await bagTemplate([here], regionKey, region, 12, 7, CHAT_BAG_KIND), sk))
+    expect(useChat.getState().lines.map((l) => l.text)).toEqual(['from this plane'])
+    // Listening from ideaspace, the same twin line is heard.
+    useCyberspace.setState({ anchorPlane: 1 })
+    await useChat.getState().receive(finalizeEvent(await bagTemplate([twin], regionKey, region, 12, 6, CHAT_BAG_KIND), sk))
+    expect(useChat.getState().lines.map((l) => l.text)).toContain('from the twin plane')
+  })
+
+  it('hears a line with no C in either plane', async () => {
+    const sk = generateSecretKey()
+    const bare = finalizeEvent({ kind: 23333, created_at: 8, content: 'no place said', tags: [['d', region]] }, sk)
+    for (const plane of [0, 1] as const) {
+      useChat.setState({ lines: [] })
+      useCyberspace.setState({ anchorPlane: plane })
+      await useChat.getState().receive(finalizeEvent(await bagTemplate([bare], regionKey, region, 12, 8, CHAT_BAG_KIND), sk))
+      expect(useChat.getState().lines.map((l) => l.text)).toEqual(['no place said'])
+    }
   })
 
   it('clear forgets everything on this device', () => {

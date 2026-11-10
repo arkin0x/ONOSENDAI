@@ -96,6 +96,8 @@ describe('a line that tags you, arriving', () => {
   beforeEach(() => {
     useChat.setState({ lines: [], open: false, unread: 0, mentionsUnread: 0, muted: true, revealId: null })
     useSecrets.setState({ current: { [region]: { keyHex: bytesToHex(regionKey), height: 12 } } })
+    // The lines below are said in dataspace; a line is heard only in the plane its C names (DECK-0005 §3.2).
+    useCyberspace.setState({ anchorPlane: 0 })
     useNotifications.setState({ me, items: [] })
     usePad.setState({ open: true })
     // A phone with the controls out: the dock stays folded.

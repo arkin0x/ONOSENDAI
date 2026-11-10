@@ -32,7 +32,7 @@ vi.mock('../useCyberspace', async (orig) => {
 })
 
 import { MINTED_KEY, useCyberspace } from '../useCyberspace'
-import { ADVANCE_MS, choiceOffered, isNewArrival, registerTutorialChoice, registerTutorialEffect, registerTutorialWatcher, runTutorialEffect, useTutorial, watchFirstArrival } from '../useTutorial'
+import { ADVANCE_MS, CHOICE_FAILED_MESSAGE, choiceOffered, isNewArrival, registerTutorialChoice, registerTutorialEffect, registerTutorialWatcher, runTutorialEffect, useTutorial, watchFirstArrival } from '../useTutorial'
 import { useDemo } from '../useDemo'
 import { PROGRESS_PREFIX, TUTORIAL_SWITCH_KEY, applyTutorialFlag, noteLanding, readProgress, setTutorialSwitch, tutorialEnabled, tutorialSwitch, useTutorialSwitch, writeProgress } from '../../tutorial/gate'
 import { useTv } from '../useTv'
@@ -338,7 +338,7 @@ describe('the engine', () => {
     expect(useTutorial.getState().script.steps[useTutorial.getState().index].id).toBe('after')
   })
 
-  it('a choice that names `when` is offered only once registered, and its run happens after the tutorial ends', async () => {
+  it('a choice that names `when` is offered only once registered; its run happens while the card is up, and the tutorial ends once it went', async () => {
     const dungeon = { id: 'd', label: 'D', about: 'd', when: 'test-dungeon' }
     useTutorial.setState({ script: { steps: [{ id: 'c', title: 'C', caption: 'c', modal: true, choices: [dungeon] }] } })
     expect(choiceOffered(dungeon)).toBe(false)
@@ -346,13 +346,50 @@ describe('the engine', () => {
     useTutorial.getState().choose('d')
     // Not offered: nothing happens.
     expect(useTutorial.getState().active).toBe(true)
-    let ran = false
-    registerTutorialChoice('test-dungeon', { run: () => { ran = useTutorial.getState().active === false } })
+    let upWhileRunning: boolean | null = null
+    registerTutorialChoice('test-dungeon', { run: () => { upWhileRunning = useTutorial.getState().active } })
     expect(choiceOffered(dungeon)).toBe(true)
     useTutorial.getState().choose('d')
+    expect(useTutorial.getState().choosing).toBe('d')
     await new Promise((r) => setTimeout(r, 0))
-    expect(ran).toBe(true)
+    expect(upWhileRunning).toBe(true)
+    expect(useTutorial.getState().active).toBe(false)
     expect(readProgress(pubkey())?.ended).toBe('finished')
+  })
+
+  it('a run that returns words is a refusal: the card stays with them, the next choice clears them, and a run gone stale settles nothing', async () => {
+    let answer: string | null = 'Finish your walk first.'
+    let release: (() => void) | null = null
+    registerTutorialChoice('test-refuse', { run: () => answer })
+    registerTutorialChoice('test-slow', { run: () => new Promise<null>((r) => { release = () => r(null) }) })
+    useTutorial.setState({ script: { steps: [
+      { id: 'c', title: 'C', caption: 'c', modal: true, choices: [{ id: 'r', label: 'R', about: 'r', when: 'test-refuse' }, { id: 's', label: 'S', about: 's', when: 'test-slow' }, { id: 'b', label: 'B', about: 'b', step: 'b' }] },
+      { id: 'b', title: 'B', caption: 'b', branch: true },
+    ] } })
+    useTutorial.getState().start()
+    useTutorial.getState().choose('r')
+    await new Promise((r) => setTimeout(r, 0))
+    expect(useTutorial.getState().active).toBe(true)
+    expect(useTutorial.getState().index).toBe(0)
+    expect(useTutorial.getState().choosing).toBe(null)
+    expect(useTutorial.getState().choiceNote).toBe('Finish your walk first.')
+    // Tried again and it went: the note goes with the card.
+    answer = null
+    useTutorial.getState().choose('r')
+    expect(useTutorial.getState().choiceNote).toBe(null)
+    await new Promise((r) => setTimeout(r, 0))
+    expect(useTutorial.getState().active).toBe(false)
+    // A slow run the player walks away from (RESTART): it settles nothing on the new run.
+    useTutorial.getState().start({ restart: true })
+    useTutorial.getState().choose('s')
+    await new Promise((r) => setTimeout(r, 0))
+    expect(useTutorial.getState().choosing).toBe('s')
+    useTutorial.getState().start({ restart: true })
+    expect(useTutorial.getState().choosing).toBe(null)
+    release!()
+    await new Promise((r) => setTimeout(r, 0))
+    expect(useTutorial.getState().active).toBe(true)
+    expect(useTutorial.getState().index).toBe(0)
   })
 
   it('the script offers HYPERSPACE and AGENTS, and the dungeon only once Track C registers it', () => {
@@ -398,15 +435,21 @@ describe('the engine', () => {
     expect(useTutorial.getState().index).toBe(0)
     expect(useTutorial.getState().active).toBe(true)
     fail = true
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
     useTutorial.getState().choose('g')
     await new Promise((r) => setTimeout(r, 0))
+    warn.mockRestore()
     expect(runs).toBe(1)
     expect(useTutorial.getState().index).toBe(0)
+    expect(useTutorial.getState().choiceNote).toBe(CHOICE_FAILED_MESSAGE)
     fail = false
     useTutorial.getState().choose('g')
     useTutorial.getState().choose('g')
     await new Promise((r) => setTimeout(r, 0))
+    // The second tap came while the first ran: one run, not two.
+    expect(runs).toBe(2)
     expect(useTutorial.getState().script.steps[useTutorial.getState().index].id).toBe('inside')
+    expect(useTutorial.getState().choiceNote).toBe(null)
     useTutorial.getState().choose('g')
     await new Promise((r) => setTimeout(r, 0))
     expect(useTutorial.getState().script.steps[useTutorial.getState().index].id).toBe('inside')

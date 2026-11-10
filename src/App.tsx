@@ -29,6 +29,8 @@ import { TutorialCoach } from './hud/TutorialCoach'
 import { watchFirstArrival } from './store/useTutorial'
 // The tutorial's staged things and the waits on them (registered on load; stages only while it runs).
 import './tutorial/director'
+// The final card's DUNGEON, when games are on for this device.
+import './tutorial/dungeon'
 import { GameView } from './game/GameView'
 import { GameChip } from './hud/GameChip'
 import { TvScreen } from './hud/TvScreen'

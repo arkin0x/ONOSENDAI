@@ -47,6 +47,7 @@ import {
 import { withOpacity } from '../lib/opacityStep'
 import { noTable, signedTableOnly, you } from '../lib/carried'
 import { authoredConstrainOf, chosenConstrainOf, withConstrain, type Constrain } from '../lib/walkConstrain'
+import { bounceOf, springboardOf, withBounce, type Bounce } from '../lib/walkBounce'
 import { addPart, quarterTurnPart, removeParts } from 'sno-core/parts'
 import { FLOOR, MAX_SIZE, MIN_SIZE, stamp, type Facing, type StampKind, type WorkPlane } from 'sno-core/stamps'
 import { BUILT_IN, hexAt, remap, samePalette, snapHex, type Palette } from 'sno-core/snoPalette'
@@ -437,6 +438,14 @@ export interface WorkshopState {
    * edit. Undoable like MODE.
    */
   setConstrain: (c: Constrain) => void
+  /**
+   * Whether walkers with GRAVITY on bounce off the shard (lib/walkBounce.ts):
+   * 0 for none, a whole number of gibsons from 1 to 24, or "reflect"; with a
+   * fixed height, `springboard` launches on walk-on too. Written only as the
+   * walker reads it (withBounce): OFF removes both fields, and nothing invalid
+   * is ever stored. Undoable like MODE.
+   */
+  setBounce: (b: Bounce, springboard?: boolean) => void
   setUnit: (unit: number) => void
   /** The build grid's half-width for the current shard, never below what its vertices need. */
   setExtent: (extent: number) => void
@@ -1031,6 +1040,8 @@ export const useWorkshop = create<WorkshopState>((set, get) => {
     setOpacity: (percent) => edit((s) => withOpacity(s, percent)),
     // Already so: no edit, so no undo step that changes nothing.
     setConstrain: (c) => edit((s) => (authoredConstrainOf(s) === c ? null : withConstrain(s, c))),
+    // Already so: the same object back, so no edit and no empty undo step.
+    setBounce: (b, springboard = false) => edit((s) => { const n = withBounce(s, b, springboard); return n === s ? null : n }),
     setUnit: (unit) => edit((s) => ({ ...s, unit: clampUnit(unit) })),
     // FACE works on corners it picks itself, and its panel only appears with
     // nothing else selected, so a point still held from SELECT hid FILL behind
@@ -1751,7 +1762,14 @@ export const useWorkshop = create<WorkshopState>((set, get) => {
       // tool) keeps the word the bench's author chose: an OFF or ALL set here
       // survives the update (DECK-0003 §1.12). A word in the file wins.
       const chose = chosenConstrainOf(old)
-      const walk = chose && !chosenConstrainOf(next) ? withConstrain(next, chose) : next
+      const walled = chose && !chosenConstrainOf(next) ? withConstrain(next, chose) : next
+      // BOUNCE likewise (decided 2026-11-10 to match CONSTRAIN, review of #653; not an owner ruling): a file that
+      // reads as no bounce (absent or malformed) keeps the bench's, bounce
+      // and springboard as a pair. A valid bounce in the file wins, with the
+      // file's own springboard: never the file's bounce with the bench's
+      // springboard.
+      const benchBounce = bounceOf(old)
+      const walk = benchBounce !== 0 && bounceOf(walled) === 0 ? withBounce(walled, benchBounce, springboardOf(old)) : walled
       const list = shards.slice()
       list[i] = walk
       // On the bench it is an edit like any other: UNDO brings the old one back.

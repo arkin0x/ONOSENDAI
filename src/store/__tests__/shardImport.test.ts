@@ -56,7 +56,7 @@ import { publishMany, queryEach } from '../../lib/relay'
 import { useCyberspace } from '../useCyberspace'
 import { useWorkshop } from '../useWorkshop'
 import { wallMesh, withConstrain } from '../../lib/walkConstrain'
-import { bounceOf, springboardOf } from '../../lib/walkBounce'
+import { bounceOf, springboardOf, withBounce } from '../../lib/walkBounce'
 import { toPayload } from 'sno-core/shards'
 import { usePublished } from '../usePublished'
 import { NOT_SNO_OR_GLTF, looseName, routeImport, timing, useShardImport } from '../useShardImport'
@@ -937,5 +937,89 @@ describe('BOUNCE through a lone .json (the owner\'s hand-made test shards, maze-
       // At the collider: its own faces bounce by it.
       expect(wallMesh(stored, []).ownBounce).toBe(want)
     }
+  })
+
+  describe('UPDATE keeps the bench bounce (decided 2026-11-10, review of #653)', () => {
+    const id = 'maze-kit/forest/rotunda'
+    const sentOf = (d: string) => JSON.parse(sent().find((e) => dOf(e) === d)!.content) as { bounce?: unknown; springboard?: unknown }
+    async function benchThenUpdate(bench: (s: import('sno-core/shards').ShardModel) => import('sno-core/shards').ShardModel, file: string): Promise<import('sno-core/shards').ShardModel> {
+      await openPublishing(kitZip())
+      await imp().start()
+      imp().close()
+      useWorkshop.setState({ shards: mine().map((s) => (s.id === id ? bench(s) : s)) })
+      vi.mocked(publishMany).mockClear()
+      await openPublishing(kitZip({ 'maze-kit/forest/rotunda.json': file }))
+      imp().setDupMode('update')
+      await imp().start()
+      return mine().find((x) => x.id === id)!
+    }
+
+    it('a file that reads as no bounce keeps the bench\'s bounce and springboard, as a pair, on the bench and the wire', async () => {
+      const after = await benchThenUpdate((s) => withBounce(s, 12, true), sno('changed', 3))
+      expect(after.vertices[1].p).toEqual([3, 0, 0])
+      expect(after.extra).toMatchObject({ bounce: 12, springboard: true })
+      expect(sentOf(id)).toMatchObject({ bounce: 12, springboard: true })
+    })
+
+    it('a malformed bounce is no bounce: the bench\'s pair replaces it, and a stray springboard in the file is not kept beside it', async () => {
+      const file = JSON.stringify({ ...JSON.parse(sno('changed', 3)), bounce: 99, springboard: true })
+      const after = await benchThenUpdate((s) => withBounce(s, 'reflect'), file)
+      expect(bounceOf(after)).toBe('reflect')
+      expect(springboardOf(after)).toBe(false)
+      expect(after.extra).not.toHaveProperty('springboard')
+      expect(sentOf(id).bounce).toBe('reflect')
+      expect(sentOf(id).springboard).toBeUndefined()
+    })
+
+    it('a valid bounce in the file wins, with the file\'s own springboard: never the bench\'s springboard beside it', async () => {
+      const file = JSON.stringify({ ...JSON.parse(sno('changed', 3)), bounce: 6 })
+      const after = await benchThenUpdate((s) => withBounce(s, 12, true), file)
+      expect(bounceOf(after)).toBe(6)
+      expect(springboardOf(after)).toBe(false)
+      expect(sentOf(id).bounce).toBe(6)
+      expect(sentOf(id).springboard).toBeUndefined()
+      imp().close()
+      vi.mocked(publishMany).mockClear()
+      await openPublishing(kitZip({ 'maze-kit/forest/rotunda.json': JSON.stringify({ ...JSON.parse(sno('again', 4)), bounce: 'reflect' }) }))
+      imp().setDupMode('update')
+      await imp().start()
+      const again = mine().find((x) => x.id === id)!
+      expect(bounceOf(again)).toBe('reflect')
+      expect(springboardOf(again)).toBe(false)
+    })
+
+    it('a bench with no bounce takes the file as it is', async () => {
+      const file = JSON.stringify({ ...JSON.parse(sno('changed', 3)), bounce: 18, springboard: true })
+      const after = await benchThenUpdate((s) => s, file)
+      expect(bounceOf(after)).toBe(18)
+      expect(springboardOf(after)).toBe(true)
+      // The bench after that UPDATE bounces 18; turned OFF there, a file without bounce leaves it OFF.
+      imp().close()
+      const plain = await benchThenUpdate((s) => withBounce(s, 0), sno('plain', 2))
+      expect(bounceOf(plain)).toBe(0)
+      expect(plain).not.toHaveProperty('extra')
+    })
+  })
+
+  it('a shard set to bounce in the workshop goes out as its payload and comes back through a zip with both fields, on the bench and the wire', async () => {
+    const id0 = useWorkshop.getState().create('Springboard')
+    useWorkshop.getState().select(id0)
+    useWorkshop.setState({ shards: mine().map((s) => (s.id === id0 ? { ...s, mode: 'solid' as const, vertices: [{ p: [0, 0, 0], c: [1, 1, 1] }, { p: [1, 0, 0], c: [1, 1, 1] }, { p: [0, 0, 1], c: [1, 1, 1] }], faces: [[0, 1, 2]] } : s)) })
+    useWorkshop.getState().setBounce(18, true)
+    const json = useWorkshop.getState().exportCurrent()!
+    const reflect = JSON.stringify({ ...JSON.parse(json), name: 'Reflector', bounce: 'reflect', springboard: undefined })
+    useWorkshop.setState({ shards: [], currentId: null })
+    await openPublishing(kitZip({ 'maze-kit/pads/springboard.json': json, 'maze-kit/pads/reflector.json': reflect }))
+    await imp().start()
+    const spring = mine().find((x) => x.id === 'maze-kit/pads/springboard')!
+    expect(spring.extra).toMatchObject({ bounce: 18, springboard: true })
+    expect(bounceOf(spring)).toBe(18)
+    expect(springboardOf(spring)).toBe(true)
+    const refl = mine().find((x) => x.id === 'maze-kit/pads/reflector')!
+    expect(bounceOf(refl)).toBe('reflect')
+    expect(springboardOf(refl)).toBe(false)
+    const wire = JSON.parse(sent().find((e) => dOf(e) === 'maze-kit/pads/springboard')!.content) as { bounce?: unknown; springboard?: unknown }
+    expect(wire.bounce).toBe(18)
+    expect(wire.springboard).toBe(true)
   })
 })

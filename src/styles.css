@@ -3290,6 +3290,22 @@ kbd {
   padding: 3px 6px;
 }
 
+/* BOUNCE's one-line explain in the SHARD panel, as quiet as the counts line. */
+.ws__explain {
+  font-size: 9px;
+  letter-spacing: 0.08em;
+  color: var(--dim);
+}
+
+/* A bouncy shard's chip (Workshop.tsx BounceChip), small enough for a list row and the SHARD counts line. */
+.ws__bounce-chip {
+  display: inline-block;
+  padding: 1px 5px;
+  line-height: 1.4;
+  margin-left: 4px;
+  vertical-align: 1px;
+}
+
 .workshop__list-row {
   display: flex;
   gap: 4px;

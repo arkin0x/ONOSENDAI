@@ -6,7 +6,7 @@
  * Top left, a row of chips: MENU (the shard list, NEW, PASTE and IMPORT,
  * clear, explain), GRID (the level the placing tools work on, the deploy
  * scale multiplier, and the grid's own size), SHARD (the open shard: name,
- * the Shard Feed, its counts, DRAW, OPACITY, CONSTRAIN) and AVATAR (what you
+ * the Shard Feed, its counts, DRAW, OPACITY, CONSTRAIN, BOUNCE) and AVATAR (what you
  * wear, the ghost for scale, SET AVATAR), each opening one panel below the
  * row; UNDO and REDO float beside them. Bottom left, TOOLS (STAMP, ADD,
  * SELECT, FACE and each tool's options). Top right, DEPLOY and the way out. Bottom right,
@@ -32,6 +32,7 @@ import { Explanation } from '../hud/Explanation'
 import { DIVISIONS, MAX_EXTENT, MAX_UNIT, MIN_EXTENT, MODES, OPACITY_FLOOR, TICKS_PER_UNIT, neededExtent, rgbToHex, ticksOf, toPayload, unitsLabel, type ShardMode , type ShardModel} from 'sno-core/shards'
 import { clampOpacity, dragHistory, opacityAt, opacityFraction, opacityPercent, stepOpacity } from '../lib/opacityStep'
 import { CONSTRAINS, CONSTRAIN_TIPS, authoredConstrainOf, withAuthoredConstrain } from '../lib/walkConstrain'
+import { BOUNCE_MAX, BOUNCE_MIN, BOUNCE_PRESETS, BOUNCE_REFLECT, BOUNCE_START, bounceChip, bounceChipTip, bounceOf, clampBounce, springboardOf } from '../lib/walkBounce'
 import { stepDivision } from './divisions'
 import { IMPORT_FORMATS_LABEL } from 'sno-core/importFile'
 import { IMPORT_PICKER_ACCEPT } from '../lib/shardZip'
@@ -144,6 +145,63 @@ function StorageWarning(): JSX.Element | null {
  * right now), the corners CONNECT and DELETE, the hub counts the points and
  * clears them.
  */
+/**
+ * BOUNCE (lib/walkBounce.ts; arkinox, 2026-11-10: "can i make bounce surfaces
+ * in the workshop now then?"): OFF, a fixed HEIGHT, or REFLECT, three buttons
+ * like CONSTRAIN's. With a HEIGHT, a stepper (hold to repeat) and one-tap
+ * presets, and SPRINGBOARD, which launches on walk-on too; REFLECT has no
+ * SPRINGBOARD, since walking on you fell from nowhere. Every press goes
+ * through setBounce, which writes only what a walker reads, so no value this
+ * row can make is invalid, and OFF removes both fields.
+ */
+export function BounceRow(): JSX.Element {
+  const bounce = useWorkshop((s) => { const c = s.current(); return c ? bounceOf(c) : 0 })
+  const spring = useWorkshop((s) => { const c = s.current(); return c ? springboardOf(c) : false })
+  const bind = useRepeatable()
+  const w = useWorkshop.getState
+  const fixed = typeof bounce === 'number' && bounce > 0 ? bounce : null
+  // Read again at the press, so a held stepper climbs from where it is now.
+  const step = (by: number): void => {
+    const c = w().current()
+    const b = c ? bounceOf(c) : 0
+    if (!c || typeof b !== 'number' || b === 0) return
+    w().setBounce(clampBounce(b + by), springboardOf(c))
+  }
+  return (
+    <>
+      <div className="workshop__row">
+        <span className="workshop__label">BOUNCE</span>
+        <div className="workshop__modes" role="group" aria-label="Bounce">
+          <button className={`workshop__mode ${bounce === 0 ? 'is-on' : ''}`} aria-pressed={bounce === 0} title="No bounce" onClick={() => w().setBounce(0)}>OFF</button>
+          <button className={`workshop__mode ${fixed !== null ? 'is-on' : ''}`} aria-pressed={fixed !== null} title="Launch walkers a set height" onClick={() => { if (fixed === null) w().setBounce(BOUNCE_START) }}>HEIGHT</button>
+          <button className={`workshop__mode ${bounce === BOUNCE_REFLECT ? 'is-on' : ''}`} aria-pressed={bounce === BOUNCE_REFLECT} title={`Bounce back to the height fallen from, up to ${BOUNCE_MAX}`} onClick={() => w().setBounce(BOUNCE_REFLECT)}>REFLECT</button>
+        </div>
+      </div>
+      {fixed !== null && (
+        <>
+          <div className="workshop__row" role="group" aria-label="Bounce height">
+            <span className="workshop__label">GIBSONS</span>
+            <button className="workshop__btn" {...bind(() => step(-1))} disabled={fixed <= BOUNCE_MIN} aria-label="Lower bounce" title="Lower">−</button>
+            <span className="workshop__value">{fixed}</span>
+            <button className="workshop__btn" {...bind(() => step(1))} disabled={fixed >= BOUNCE_MAX} aria-label="Higher bounce" title="Higher">+</button>
+            <div className="workshop__modes" role="group" aria-label="Bounce presets">
+              {BOUNCE_PRESETS.map((n) => (
+                <button key={n} className={`workshop__mode ${fixed === n ? 'is-on' : ''}`} aria-pressed={fixed === n} title={`Launch ${n} gibsons`} onClick={() => w().setBounce(n, spring)}>{n}</button>
+              ))}
+            </div>
+          </div>
+          <div className="workshop__row">
+            <Field id="ws-springboard" label="springboard" hint="launch on walk-on">
+              <Switch id="ws-springboard" className="ui-switch--ok" checked={spring} onCheckedChange={(v) => { const c = w().current(); const b = c ? bounceOf(c) : 0; if (typeof b === 'number' && b > 0) w().setBounce(b, v) }} />
+            </Field>
+          </div>
+        </>
+      )}
+      {bounce !== 0 && <div className="ws__explain">Walkers with gravity on bounce off its top.</div>}
+    </>
+  )
+}
+
 /**
  * OPACITY in SHARD (arkinox, 2026-10-23: "turn this into a slider with
  * number entry like the hyperspace chip"): the hyperspace scrubber's rail,
@@ -644,6 +702,13 @@ function copy(id: string): void {
   copyShard(s, `Copied "${s.name}" to the clipboard. PASTE it here or anywhere.`)
 }
 
+/** A bouncy shard's chip (lib/walkBounce.ts bounceChip): BOUNCE 12, SPRING 12 or REFLECT, and nothing for a shard that does not bounce. */
+export function BounceChip({ shard }: { shard: Pick<ShardModel, 'extra'> }): JSX.Element | null {
+  const label = bounceChip(shard)
+  if (!label) return null
+  return <span className="workshop__tag ws__bounce-chip" title={bounceChipTip(shard)}>{label}</span>
+}
+
 /**
  * The SHARDS list in MENU, reading what it lists itself and memoized on which
  * one is open, so a tap on the bench no longer draws it. Workshop renders on
@@ -674,7 +739,8 @@ export const ShardList = memo(function ShardList({ currentId, onOpen }: { curren
           <button className="workshop__pick" aria-pressed={f.selecting ? f.picked : undefined} onClick={() => { if (f.selecting) { f.toggle(); return } w().select(s.id); onOpen() }}>
             <ShardThumb shard={s} own />
             <span className="workshop__pick-name">{s.name}</span>
-            <span className="workshop__pick-meta">{s.vertices.length} v · {s.faces.length} f{s.parts?.length ? ` · ${s.parts.length} parts` : ''} · {s.mode}</span>
+            {/* The chip rides in the facts line: the row is a two-row grid beside its picture. */}
+            <span className="workshop__pick-meta">{s.vertices.length} v · {s.faces.length} f{s.parts?.length ? ` · ${s.parts.length} parts` : ''} · {s.mode}{bounceChip(s) && <> <BounceChip shard={s} /></>}</span>
           </button>
           <button className="workshop__mini" title="Duplicate" aria-label={`Duplicate ${s.name}`} onClick={() => w().duplicate(s.id)}><CopyPlus size={13} strokeWidth={2.25} aria-hidden /></button>
           <button className="workshop__mini" title="Copy to the clipboard" aria-label={`Copy ${s.name} to the clipboard`} onClick={() => copy(s.id)}><ClipboardCopy size={13} strokeWidth={2.25} aria-hidden /></button>
@@ -1057,6 +1123,7 @@ export function Workshop(): JSX.Element | null {
           )}
           <div className="ws__stats">
             {shard.vertices.length} vertices · {shard.faces.length} faces · unit 2^{shard.unit} = {formatCellSize(shard.unit)}
+            {bounceChip(shard) && <> · <BounceChip shard={shard} /></>}
             {shard.mode !== 'solid' && shard.faces.length > 0 && <> · faces draw in SOLID</>}
             {shard.facecolors && <> · <button className="workshop__link" onClick={() => w().clearFaceColors()} title="Give every face back to its corners, so colors blend across them again">{shard.facecolors.length} face colors, clear</button></>}
           </div>
@@ -1083,6 +1150,9 @@ export function Workshop(): JSX.Element | null {
               ))}
             </div>
           </div>
+          {/* Whether walkers with GRAVITY on bounce off its top (lib/walkBounce.ts),
+              beside CONSTRAIN, its closest sibling (arkinox, 2026-11-10). */}
+          <BounceRow />
         </div>
       )}
 

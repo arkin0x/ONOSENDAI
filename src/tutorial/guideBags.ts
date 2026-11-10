@@ -21,15 +21,39 @@ import type { NostrEvent } from 'nostr-tools'
 
 /** The guide's bags by lookup id (`d`); empty unless the tutorial is running. */
 const byLookup = new Map<string, NostrEvent>()
+/**
+ * Every guide key that staged on this device this visit, kept after the bags
+ * go: a card about something a guide sealed never asks relays about its
+ * author (useProfile) and offers nothing that would name it in an event.
+ */
+const guides = new Set<string>()
+/** Shards that let a tap through to what is inside them (the blue box around the chest). */
+const passTaps = new Set<string>()
 
-/** Put the guide's bags in place of any before (null or empty takes them all away). */
-export function setGuideBags(bags: readonly NostrEvent[] | null): void {
+/**
+ * Put the guide's bags in place of any before (null or empty takes them all
+ * away). `opts.passTaps`: item ids that take no taps.
+ */
+export function setGuideBags(bags: readonly NostrEvent[] | null, opts: { passTaps?: readonly string[] } = {}): void {
   byLookup.clear()
+  passTaps.clear()
   for (const b of bags ?? []) {
     const d = b.tags.find((t) => t[0] === 'd')?.[1]
     if (d) byLookup.set(d, b)
+    guides.add(b.pubkey)
   }
+  for (const id of opts.passTaps ?? []) passTaps.add(id)
   for (const l of listeners) l()
+}
+
+/** Whether a pubkey is a tutorial guide key from this device. */
+export function isGuideAuthor(pubkey: string | null | undefined): boolean {
+  return !!pubkey && guides.size > 0 && guides.has(pubkey)
+}
+
+/** Whether a world item lets taps through (scene/WorldShards). */
+export function passesTaps(itemId: string): boolean {
+  return passTaps.size > 0 && passTaps.has(itemId)
 }
 
 /** The guide's bags under any of these lookup ids. */

@@ -21,9 +21,9 @@ export const WELCOME: TutorialStep = {
 export const BOX: TutorialStep = {
   id: 'box',
   title: 'The blue box',
-  caption: "The chest is in the blue box. Being there is how you find what's hidden there.",
+  caption: "The chest is in the blue box. Being somewhere is how you find what's hidden there.",
   captionDone: "You're in.",
-  hint: 'Tap COMMIT (or press Space) to move into the box.',
+  hint: 'Tap COMMIT to move into the box.',
   explain: 'Every place in cyberspace has a key, and the only way to get it is to be there or to do the work of being there. Things are hidden at a place under its key, so you find them by going there. The box is one region, 8 gibsons on a side.',
   scene: { target: 'self' },
   wait: 'see-chest',
@@ -37,7 +37,7 @@ export const OPEN: TutorialStep = {
   caption: 'Tap the chest, then OPEN.',
   hint: 'Tap the chest (or FOUND HERE), then OPEN.',
   explain: "Nothing opens by itself. This chest is locked to the box's region, and standing in the box gave you its key.",
-  scene: { target: 'keep', highlight: '.hyperbar--found' },
+  scene: { target: 'keep', highlight: '.foundchip' },
   wait: 'open-chest',
 }
 
@@ -47,7 +47,7 @@ export const TAKE: TutorialStep = {
   title: 'Take it',
   caption: "What's in the chest is yours once you TAKE it.",
   hint: 'Tap the chest again, then TAKE ALL.',
-  scene: { target: 'keep', highlight: '.hyperbar--found' },
+  scene: { target: 'keep', highlight: '.foundchip' },
   explain: 'What you take goes in your ITEMS, in the menu. A shard you take can be placed in the world, built with, or changed in the workshop.',
   wait: 'take',
 }

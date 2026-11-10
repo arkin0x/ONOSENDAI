@@ -71,6 +71,27 @@ describe('the director', () => {
     expect(useTutorialStage.getState().stage).toBe(null)
   })
 
+  it('takes what the guide sealed off the screen when the tutorial goes away', async () => {
+    useTutorial.getState().start({ restart: true })
+    await staged()
+    const stage = useTutorialStage.getState().stage!
+    const theirs = { eventId: stage.ids.chest, author: stage.guide } as never
+    const other = { eventId: 'x'.repeat(64), author: 'y'.repeat(64) } as never
+    useShards.setState({ discovered: { [stage.ids.chest]: theirs, ['x'.repeat(64)]: other } })
+    useTutorial.getState().pause()
+    expect(Object.keys(useShards.getState().discovered)).toEqual(['x'.repeat(64)])
+  })
+
+  it('never lets a staging a RESTART overtook overwrite the kept stage', async () => {
+    useTutorial.getState().start({ restart: true })
+    useTutorial.getState().start({ restart: true })
+    await staged()
+    for (let i = 0; i < 50; i++) await new Promise((r) => setTimeout(r, 10))
+    const shown = useTutorialStage.getState().stage!
+    const kept = JSON.parse(localStorage.getItem(`onosendai:tutorial:stage:${pubkey()}`)!) as { ids: { chest: string } }
+    expect(kept.ids.chest).toBe(shown.ids.chest)
+  })
+
   it('reuses the kept stage on a resume, and stages a new chest on RESTART', async () => {
     useTutorial.getState().start({ restart: true })
     await staged()

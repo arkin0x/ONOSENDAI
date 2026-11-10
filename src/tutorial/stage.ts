@@ -65,7 +65,7 @@ export interface Stage {
   player: string
   /** The guide key that signed it. */
   guide: string
-  /** The spawn it was laid out from, as `x,y,z,plane`, so a stage for another spawn is never reused. */
+  /** The layout it was staged for (stageKey), so a stage for another spawn or layout is never reused. */
   at: string
   bags: NostrEvent[]
   ids: StageIds
@@ -163,15 +163,21 @@ export async function buildStage(secret: Uint8Array, player: string, layout: Tut
     v: STAGE_VERSION,
     player,
     guide,
-    at: spawnTag(layout),
+    at: stageKey(layout),
     bags,
     ids: { blueBox: blueBox.id, chest: chest.id, chestContents: [trophy.id, message.id, welcome.id], boxLookup: boxKey.lookupId },
   }
 }
 
-/** A layout's spawn as a stage names it. */
-export function spawnTag(layout: Pick<TutorialLayout, 'spawn' | 'plane'>): string {
-  return `${layout.spawn.x},${layout.spawn.y},${layout.spawn.z},${layout.plane}`
+/**
+ * What a kept stage must match to be reused: the version and the whole
+ * layout (spawn, frame, cover), so a stage from another spawn or from a
+ * layout tuned since is staged again. A change to what is staged at the same
+ * places (a piece, a chest's contents) bumps STAGE_VERSION.
+ */
+export function stageKey(layout: TutorialLayout): string {
+  const p = (v: Position): string => `${v.x},${v.y},${v.z}`
+  return `${STAGE_VERSION}|${p(layout.spawn)}|${layout.plane}|${layout.frame.fwd},${layout.frame.side},${p(layout.frame.boxBase)}|${layout.cover.height},${p(layout.cover.base)}`
 }
 
 /** A player's kept stage, if it is whole, of this version, for this guide and this spawn. */

@@ -44,7 +44,7 @@ export function KeyFoundChip(): JSX.Element | null {
   if (!chip || !line || count <= 0) return null
   const open = (): void => { useCeremony.getState().dismiss(); useShards.getState().setNearbyOpen(true) }
   return (
-    <div className="hyperbar hyperbar--found" role="status" onClick={open} title="Tap to see what was found here">
+    <div className="hyperbar hyperbar--found foundchip" role="status" onClick={open} title="Tap to see what was found here">
       <span className="hyperbar__glyph" aria-hidden="true">◈</span>
       <span className="hyperbar__text">
         <span className="hyperbar__label">{foundLabel(count)}</span>

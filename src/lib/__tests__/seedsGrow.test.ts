@@ -227,6 +227,10 @@ describe('the engine, from a seed to a drawn bloom', () => {
     expect(views.get(s1.id)?.status).toBe('mixed')
     expect(bloomStateLine(views.get(s1.id))).toBe('Mixed DNA, coming soon.')
     expect(views.get(s2.id)?.status).toBe('dna-missing')
+    // Looked at again while still missing: the same view, not a new one for the store.
+    const was = views.get(s2.id)
+    await engine.refresh(s2.id)
+    expect(views.get(s2.id)).toBe(was)
     expect(grow).not.toHaveBeenCalled()
     const none = engineFor([crystal], { tip: null })
     none.engine.want([seed])

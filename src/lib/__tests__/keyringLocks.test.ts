@@ -40,6 +40,30 @@ describe('a lock stored beside its key', () => {
   })
 })
 
+describe('seeding thousands of stored locks at startup (re-review of #648)', () => {
+  it('computes nothing: no hash, no multiplication, until a secret is read, then once', () => {
+    const keys = Array.from({ length: 4_400 }, (_, i) => region(i % 256 + 256 * Math.floor(i / 256)))
+    // Stored locks: any well-formed public key will do for the count; one real one is checked below.
+    const real = locks.lockOfHex(keys[0].keyHex)!
+    const stored = keys.map((k, i) => ({ ...k, keyHex: bytesToHex(sha256(new Uint8Array([i >> 8, i & 255, 3]))), lookupId: `S${i}`, lock: i === 0 ? real.pubkey : bytesToHex(sha256(new Uint8Array([i >> 8, i & 255, 4]))) }))
+    stored[0] = { ...stored[0], keyHex: keys[0].keyHex }
+    const hash = vi.spyOn(locks, 'lockSecret')
+    const derive = vi.spyOn(locks, 'lockOfHex')
+    const cache = new LockCache()
+    const { byLock, todo } = planKeyring(stored, cache)
+    expect(todo).toHaveLength(0)
+    expect(byLock.size).toBe(4_400)
+    expect(hash).not.toHaveBeenCalled()
+    expect(derive).not.toHaveBeenCalled()
+    // Opening with it reads the secret: computed then, and right.
+    const opening = openingKeyOf(byLock.get(real.pubkey)!)
+    expect(opening.secretHex).toBe(real.secretHex)
+    expect(byLock.get(real.pubkey)!.lock.secretHex).toBe(real.secretHex)
+    expect(hash).toHaveBeenCalledTimes(1)
+    hash.mockRestore(); derive.mockRestore()
+  })
+})
+
 describe('planKeyring and deriveSlice', () => {
   it('index what is known at once, and derive the rest until the clock says stop, at least one per slice', () => {
     const cache = new LockCache()

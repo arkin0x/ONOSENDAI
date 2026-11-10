@@ -55,7 +55,9 @@ import { noteRoomKey, rebuildKeyringNow, resetKeyring } from '../../store/useKey
 import { useStash } from '../stash'
 import { ChestCompose } from '../ChestCompose'
 import { SecretsModal } from '../SecretsModal'
-import { roomOf } from '../../lib/doors'
+import { roomKey, roomLookupId, roomOf } from '../../lib/doors'
+import { hexToBytes } from '../../lib/events'
+import { keepDoorSecret } from '../../store/doorSecrets'
 import { ChestBlock } from '../ItemRows'
 
 const S = () => useShards.getState()
@@ -342,6 +344,31 @@ describe('review of #648', () => {
     await vi.waitFor(() => expect(text(m)).toContain('This chest stands in that room. Whoever opens the room opens it.'))
     await m.unmount()
     S().cancelDeploy()
+  })
+
+  it('8 (re-review): a door’s own room stays out even when the room key names a door not loaded here', async () => {
+    const sk = generateSecretKey()
+    useCyberspace.setState({ identity: { ...C().identity, pubkey: getPublicKey(sk) } })
+    await settled()
+    const at = { x: 1n << 30n, y: 1n << 30n, z: 1n << 30n }
+    const door = myDoor(at, 0, 4, sk)
+    useShards.setState({ mine: [door] })
+    // This device sealed it: its secret is kept, so its room's `d` is known.
+    const secret = '66'.repeat(32)
+    keepDoorSecret(C().identity.pubkey, door.eventId, secret)
+    await settled()
+    const ownD = roomLookupId(roomKey(hexToBytes(door.keyHex), hexToBytes(secret)))
+    // Its room key, as opened through a sibling door this device has not loaded; and another room's.
+    noteRoomKey(C().identity.pubkey, { lookupId: ownD, keyHex: '55'.repeat(32), doorId: 'sibling-not-loaded', name: 'Own Room' })
+    let m = await mount(<ChestCompose onDone={() => undefined} target={{ mode: 'edit', eventId: door.eventId, fields: true }} />)
+    expect(m.buttons('ROOM')).toHaveLength(0)
+    await m.unmount()
+    noteRoomKey(C().identity.pubkey, { lookupId: 'another-room', keyHex: '77'.repeat(32), doorId: 'elsewhere', name: 'Far Room' })
+    m = await mount(<ChestCompose onDone={() => undefined} target={{ mode: 'edit', eventId: door.eventId, fields: true }} />)
+    await m.press('ROOM')
+    const select = byLabel(m, 'Seal to a room you opened')
+    expect(select.children.map((o) => textOf(o as Host))).toEqual(['Far Room'])
+    await m.unmount()
   })
 
   it('10: EDIT opened before the keyring knew the lock shows REGION once it does', async () => {

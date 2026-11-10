@@ -68,7 +68,11 @@ import { lockOfHex } from '../lib/locks'
 import { carriedLabel } from '../lib/keyringLocks'
 import { keyringEntry, useKeyring, useRoomKeys } from '../store/useKeyring'
 import type { KeyringLock } from '../lib/keyringLocks'
-import { roomKeyOf } from '../lib/doors'
+import { roomKey, roomKeyOf, roomLookupId } from '../lib/doors'
+import { hexToBytes } from '../lib/events'
+import { doorSecret } from '../store/doorSecrets'
+import type { Hidden } from '../lib/hidden'
+import type { MyDeployment } from '../store/useShards'
 import { doorAsFound } from '../store/rooms'
 import { REGION_REQUIRES, RegionLockPicker } from './RegionLockPicker'
 import { RoomLockSelect } from './RoomLockSelect'
@@ -88,6 +92,26 @@ function carriedLock(pubkey: string, e: KeyringLock): ChestLock {
   return k.kind === 'region'
     ? { pubkey, label: carriedLabel(k), kind: 'region', region: { from: 'keyring', height: k.height, lookupId: k.lookupId } }
     : { pubkey, label: carriedLabel(k), kind: 'room', room: { lookupId: k.lookupId } }
+}
+
+/**
+ * Everything that names a door's own room, so ROOM never offers it, even when
+ * a room key's door has not loaded here yet (review of #648): the ids of the
+ * room's doors this device knows, and the room bag's `d` from a kept secret.
+ */
+function ownRoomRefs(ownRoom: string, me: string, mine: readonly MyDeployment[], discovered: Record<string, Hidden>, self: string | null): { doorIds: Set<string>; lookupIds: Set<string> } {
+  const doorIds = new Set<string>(self ? [self] : [])
+  const lookupIds = new Set<string>()
+  for (const d of mine) {
+    const h = d.chest?.door
+    if (h === undefined || roomKeyOf({ at: positionOf(d), plane: d.plane, inner: d.inner }) !== ownRoom) continue
+    doorIds.add(d.eventId)
+    const secret = doorSecret(me, d.eventId)
+    if (!secret || d.room || d.height !== h || !d.keyHex) continue
+    try { lookupIds.add(roomLookupId(roomKey(hexToBytes(d.keyHex), hexToBytes(secret)))) } catch { /* a malformed row names nothing */ }
+  }
+  for (const f of Object.values(discovered)) if (f.type === 'chest' && roomKeyOf(f) === ownRoom) doorIds.add(f.eventId)
+  return { doorIds, lookupIds }
 }
 
 /** A pasted npub, as a person's lock. */
@@ -280,7 +304,9 @@ export function ChestCompose({ onDone, target = { mode: 'place' } }: { onDone: (
   const standsIn = hidden ? (hidden.room ? roomOfKey(hidden.room.doorId) : null) : roomSnap ? `${me}:${roomSnap.room}` : null
   // A door never locks to its own room: whoever could open it would already be inside.
   // Every render: a handful of rooms, and the doors they name may arrive after the room keys do.
-  const rooms = ownRoom ? allRooms.filter((r) => r.kind !== 'room' || roomOfKey(r.doorId) !== ownRoom) : allRooms
+  const discoveredNow = useShards((s) => s.discovered)
+  const own = ownRoom ? ownRoomRefs(ownRoom, me, mine, discoveredNow, hidden?.eventId ?? null) : null
+  const rooms = own ? allRooms.filter((r) => r.kind !== 'room' || !(own.doorIds.has(r.doorId) || own.lookupIds.has(r.lookupId) || roomOfKey(r.doorId) === ownRoom)) : allRooms
   const heldLock = mode === 'item' ? keys.find((k) => k.id === lockKeyId) : undefined
   const room = rooms.find((r) => r.lookupId === roomId) ?? (mode === 'room' && !roomId ? rooms[0] : undefined)
   const roomLock = useMemo((): ChestLock | null => {

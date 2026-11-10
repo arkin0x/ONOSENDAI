@@ -82,22 +82,43 @@ export class LockCache {
     return lock
   }
   /**
-   * A lock stored beside its key: its secret recomputed (one hash, which also
-   * applies the validity rule), its public key taken as stored, no point
-   * multiplication. Only ever a value this device derived and wrote.
+   * A lock stored beside its key: its public key taken as stored, and nothing
+   * else computed now. Its secret is one SHA-256 of the key, worked out the
+   * first time something reads it (to open a chest), so seeding thousands of
+   * stored locks at startup costs only a map insert each (review of #648).
+   * Only ever a value this device derived and wrote, which is why the validity
+   * rule was already met.
    */
   seed(keyHex: string, pubkey: string): Lock | null {
     const k = keyHex.toLowerCase()
     if (this.locks.has(k)) return this.locks.get(k) ?? null
     if (!/^[0-9a-f]{64}$/.test(pubkey) || !/^[0-9a-f]{64}$/.test(k)) return this.derive(k)
-    const secret = lockSecret(hexToBytes(k))
-    const lock = secret ? { secretHex: bytesToHex(secret), pubkey } : null
+    const lock = lazyLock(k, pubkey)
     this.locks.set(k, lock)
     return lock
   }
   /** The cached lock of a key; undefined when not known yet. */
   peek(keyHex: string): Lock | null | undefined { return this.locks.get(keyHex.toLowerCase()) }
   clear(): void { this.locks.clear() }
+}
+
+/**
+ * A lock whose public key is known and whose secret is computed on first read
+ * and kept: the hash of the key (locks.ts lockSecret). A key whose hash fails
+ * the validity rule could not have had a lock stored, so that never happens;
+ * if it did, the secret reads as empty and no chest opens with it.
+ */
+export function lazyLock(keyHex: string, pubkey: string): Lock {
+  let secret: string | null = null
+  const lock = { pubkey } as Lock
+  Object.defineProperty(lock, 'secretHex', {
+    enumerable: true,
+    get(): string {
+      if (secret === null) { const s = lockSecret(hexToBytes(keyHex)); secret = s ? bytesToHex(s) : '' }
+      return secret
+    },
+  })
+  return lock
 }
 
 /** Priority of a key in the index: lower first. */

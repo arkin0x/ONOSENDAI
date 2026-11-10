@@ -62,15 +62,21 @@ export const STOOD_EVERY_MS = 60_000
 const SAVE_AFTER_MS = 2_000
 
 interface KeyringState {
-  /** Bumped whenever the index changes, so a card asks again. */
+  /** Bumped when the index changes, so a card asks again: at most every BUMP_EVERY_MS while slices run, and once at the end. */
   version: number
+  /** Bumped only when a room key is noted, so a list of rooms does not redraw for region keys. */
+  roomsVersion: number
   /** Keys whose lock is still to be derived. */
   pending: number
   /** How many locks are indexed. */
   size: number
 }
 
-export const useKeyring = create<KeyringState>(() => ({ version: 0, pending: 0, size: 0 }))
+export const useKeyring = create<KeyringState>(() => ({ version: 0, roomsVersion: 0, pending: 0, size: 0 }))
+
+/** While slices run, the index is announced at most this often (wall clock), and again when they finish. */
+export const BUMP_EVERY_MS = 250
+let lastBump = 0
 
 /** The clock slices are measured by; replaceable in tests. */
 let now: () => number = () => (typeof performance !== 'undefined' ? performance.now() : Date.now())
@@ -133,6 +139,7 @@ export function noteRoomKey(me: string, room: { lookupId: string; keyHex: string
   if (mine.has(room.lookupId)) return
   mine.set(room.lookupId, { kind: 'room', ...room })
   noted.set(me, mine)
+  useKeyring.setState((s) => ({ roomsVersion: s.roomsVersion + 1 }))
   schedule()
 }
 
@@ -173,20 +180,22 @@ export function useKeyringLookup(): (lockPubkey: string) => OpeningKey | undefin
 
 /** The room keys you carry, as a panel lists them: read again as the keyring, the finds and your own rows change. */
 export function useRoomKeys(): CarriedKey[] {
-  const version = useKeyring((s) => s.version)
+  // Not the keyring's version: region keys come and go far more often than rooms, and the KEYRING button reads this.
+  const roomsVersion = useKeyring((s) => s.roomsVersion)
+  const me = useCyberspace((s) => s.identity.pubkey)
   const discovered = useShards((s) => s.discovered)
   const mine = useShards((s) => s.mine)
   startKeyring()
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  return useMemo(() => roomKeysNow(), [version, discovered, mine])
+  return useMemo(() => roomKeysNow(), [roomsVersion, me, discovered, mine])
 }
 
 /** The lookup as of the current index; replaced whenever the index is. */
 let lookup: (lockPubkey: string) => OpeningKey | undefined = (lockPubkey) => lookupLock(lockPubkey)
 
-/** The index changed: a new lookup, a new version, the counts. */
+/** The index changed: a new lookup and a new version when `bump`, the counts always (nothing redraws for those alone). */
 function changed(bump: boolean): void {
-  if (bump) lookup = (lockPubkey) => lookupLock(lockPubkey)
+  if (bump) { lookup = (lockPubkey) => lookupLock(lockPubkey); lastBump = Date.now() }
   const pending = todo.length - cursor
   useKeyring.setState((s) => ({ version: bump ? s.version + 1 : s.version, pending, size: index.size }))
 }
@@ -240,8 +249,10 @@ function slice(): void {
   const { next, derived } = deriveSlice(todo, cursor, cache, index, () => now() >= end)
   cursor = next
   queueSave(derived)
-  changed(true)
-  if (cursor < todo.length) sliceTimer = setTimeout(slice, 16)
+  const done = cursor >= todo.length
+  // Every card that shows a chest asks again on a bump: not on every frame of a long derivation.
+  changed(done || Date.now() - lastBump >= BUMP_EVERY_MS)
+  if (!done) sliceTimer = setTimeout(slice, 16)
 }
 
 /** A rebuild soon: changes come in bursts (a scan, a load). */
@@ -293,6 +304,8 @@ async function readStood(): Promise<void> {
 function placesChanged(urgent: boolean): void {
   if (urgent) {
     if (stoodTimer !== null) { clearTimeout(stoodTimer); stoodTimer = null }
+    // Places gone may be stood on again: their locks are stored again then (a lock already there is not rewritten).
+    for (const id of saved) if (id.startsWith('stood:')) saved.delete(id)
     if (useSecrets.getState().storage.places === 0 && stood.length > 0) { stood = []; schedule() }
     void readStood()
     return
@@ -317,7 +330,11 @@ export function startKeyring(): void {
   let me = useCyberspace.getState().identity.pubkey
   unsubs = [
     useSecrets.subscribe((s) => {
-      if (s.keys !== keys || s.current !== current) { keys = s.keys; current = s.current; schedule() }
+      if (s.keys !== keys || s.current !== current) {
+        // A key forgotten may be held again later in this session: its lock is stored again then.
+        if (s.keys !== keys) for (const id of saved) if (id.startsWith('held:') && !s.keys[id.slice(5)]) saved.delete(id)
+        keys = s.keys; current = s.current; schedule()
+      }
       if (s.placesForgotten !== forgotten) { forgotten = s.placesForgotten; places = s.placesVersion; placesChanged(true) }
       else if (s.placesVersion !== places) { places = s.placesVersion; placesChanged(false) }
       // The vault came up (memory to IndexedDB, or to its fallback): what it holds is read now.
@@ -364,5 +381,6 @@ export function resetKeyring(): void {
   saved.clear()
   now = () => (typeof performance !== 'undefined' ? performance.now() : Date.now())
   lookup = (lockPubkey) => lookupLock(lockPubkey)
-  useKeyring.setState({ version: 0, pending: 0, size: 0 })
+  lastBump = 0
+  useKeyring.setState({ version: 0, roomsVersion: 0, pending: 0, size: 0 })
 }

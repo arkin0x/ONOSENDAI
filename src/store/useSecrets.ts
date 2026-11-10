@@ -586,7 +586,16 @@ function placesChanged(removed = false): void {
  * elsewhere the session's cache is enough. Never adds or drops a key.
  */
 export async function saveLocks(held: Array<{ lookupId: string; lock: string }>, places: Array<{ lookupId: string; lock: string }>): Promise<void> {
-  if (backendNow() !== 'idb' || (held.length === 0 && places.length === 0)) return
+  if (held.length === 0 && places.length === 0) return
+  // The held rows in memory carry it too, so whatever writes them next writes it with them.
+  const keys = useSecrets.getState().keys
+  let next: Record<string, HeldKey> | null = null
+  for (const l of held) {
+    const k = keys[l.lookupId]
+    if (k && k.lock !== l.lock) { next ??= { ...keys }; next[l.lookupId] = { ...k, lock: l.lock } }
+  }
+  if (next) useSecrets.setState({ keys: next })
+  if (backendNow() !== 'idb') return
   await persist((db) => writeLocks(db, held, places))
 }
 

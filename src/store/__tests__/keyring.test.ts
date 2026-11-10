@@ -26,7 +26,7 @@ import { memory } from '../../lib/secrets/vault'
 import * as secretsModule from '../useSecrets'
 import { useSecrets, type HeldKey } from '../useSecrets'
 import { useShards } from '../useShards'
-import { SLICE_MS, STOOD_EVERY_MS, keyringEntry, lookupLock, noteRoomKey, rebuildKeyringNow, resetKeyring, roomKeysNow, setKeyringClock, startKeyring, useKeyring } from '../useKeyring'
+import { BUMP_EVERY_MS, SLICE_MS, STOOD_EVERY_MS, keyringEntry, lookupLock, noteRoomKey, rebuildKeyringNow, resetKeyring, roomKeysNow, setKeyringClock, startKeyring, useKeyring } from '../useKeyring'
 
 const hexOf = (i: number): string => bytesToHex(sha256(new Uint8Array([i >> 8, i & 255, 9])))
 const held = (i: number, extra: Partial<HeldKey> = {}): HeldKey => ({ lookupId: `L${i}`, keyHex: hexOf(i), height: 5, base: { x: '0', y: '0', z: '0' }, plane: 0, source: 'scan', at: 1_790_000_000 + i, ...extra })
@@ -120,6 +120,60 @@ describe('the pump', () => {
     expect(save).toHaveBeenCalledTimes(1)
     expect(save.mock.calls[0][0]).toEqual([{ lookupId: 'L1', lock: l1 }])
     expect(save.mock.calls[0][1]).toEqual([{ lookupId: 'K2', lock: l2 }])
+  })
+})
+
+describe('re-review of #648', () => {
+  it('a long derivation bumps the version at most every BUMP_EVERY_MS, and once at the end', async () => {
+    vi.useFakeTimers()
+    let t = 0
+    setKeyringClock(() => t++)
+    const keys: Record<string, HeldKey> = {}
+    for (let i = 0; i < 300; i++) keys[`L${i}`] = held(i)
+    useSecrets.setState({ keys })
+    let bumps = 0
+    let v = useKeyring.getState().version
+    const off = useKeyring.subscribe((st) => { if (st.version !== v) { bumps++; v = st.version } })
+    startKeyring()
+    await settle(16 * 80)
+    off()
+    expect(useKeyring.getState().pending).toBe(0)
+    expect(useKeyring.getState().size).toBe(300)
+    // About fifty slices took about 800 ms: a handful of bumps, not one per slice.
+    expect(bumps).toBeGreaterThanOrEqual(2)
+    expect(bumps).toBeLessThanOrEqual(Math.ceil((16 * 80) / BUMP_EVERY_MS) + 2)
+  })
+
+  it('room keys have their own version: a region key changes the keyring’s, not the rooms’', async () => {
+    vi.useFakeTimers()
+    startKeyring()
+    const rooms = useKeyring.getState().roomsVersion
+    useSecrets.setState({ keys: { L1: held(1) } })
+    await settle(300)
+    expect(useKeyring.getState().roomsVersion).toBe(rooms)
+    noteRoomKey(useCyberspace.getState().identity.pubkey, { lookupId: 'R1', keyHex: hexOf(77), doorId: 'd', name: 'n' })
+    expect(useKeyring.getState().roomsVersion).toBe(rooms + 1)
+  })
+
+  it('a key forgotten and held again in the same session has its lock stored again', async () => {
+    vi.useFakeTimers()
+    const save = vi.spyOn(secretsModule, 'saveLocks').mockResolvedValue()
+    useSecrets.setState({ keys: { L1: held(1) } })
+    startKeyring()
+    await settle(3_000)
+    expect(save).toHaveBeenCalledTimes(1)
+    useSecrets.setState({ keys: {} })
+    await settle(300)
+    useSecrets.setState({ keys: { L1: held(1) } })
+    await settle(3_000)
+    expect(save).toHaveBeenCalledTimes(2)
+    expect(save.mock.calls[1][0]).toEqual([{ lookupId: 'L1', lock: lockOf(1) }])
+  })
+
+  it('a stored lock is kept on the held row in memory, so the next write of it carries it', async () => {
+    useSecrets.setState({ keys: { L1: held(1) } })
+    await secretsModule.saveLocks([{ lookupId: 'L1', lock: lockOf(1) }], [])
+    expect(useSecrets.getState().keys.L1.lock).toBe(lockOf(1))
   })
 })
 

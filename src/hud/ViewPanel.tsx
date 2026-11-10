@@ -18,12 +18,17 @@
  * device as before (store/useLayers.ts for the dots, boxes and headlamp, useCyberspace
  * showTrail and showSecrets for the other two). It is a view preference
  * only: nothing here changes a proof, a move, the cursor or the chain.
+ *
+ * One row is not a view preference: Tutorial (TutorialRow, below), the
+ * first-arrival tutorial's switch, shown only where it has been offered.
  */
 
-import type { ReactNode } from 'react'
+import { useState, type ReactNode } from 'react'
 import { useCyberspace } from '../store/useCyberspace'
 import { useLayers } from '../store/useLayers'
 import { useWalk } from '../store/useWalk'
+import { useTutorial } from '../store/useTutorial'
+import { setTutorialSwitch, tutorialSwitch } from '../tutorial/gate'
 import { Field, Switch } from './ui/Switch'
 import { Explanation } from './Explanation'
 
@@ -141,6 +146,7 @@ export function ViewPanel(): JSX.Element {
           <Switch id={r.id} checked={r.on} onCheckedChange={r.set} />
         </Field>
       ))}
+      <TutorialRow />
       <Explanation>
         Each switch turns one thing in the scene on or off. It changes only what
         this device draws, and the choice is kept on this device: nothing here
@@ -160,8 +166,37 @@ export function ViewPanel(): JSX.Element {
         darker, so shapes of one color show their depth; off, every face is
         exactly its own color. Sound spheres are blue rings around each hidden
         sound you have found or placed: inside one it plays at full volume, and
-        it fades to silence at its region's walls.
+        it fades to silence at its region's walls. Tutorial, on a device where it
+        is offered, walks a brand-new identity through its first few minutes on
+        arrival, and RESTART TUTORIAL starts it again from the welcome.
       </Explanation>
     </section>
+  )
+}
+
+/**
+ * The first-arrival tutorial's switch and RESTART TUTORIAL (store/useTutorial.ts,
+ * tutorial/gate.ts). Off in production: the row shows only on a device where
+ * ?tutorial=1 or ?tutorial=0 was opened, until the owner turns the tutorial on
+ * for new identities.
+ */
+function TutorialRow(): JSX.Element | null {
+  const [on, setOn] = useState(tutorialSwitch)
+  const running = useTutorial((s) => s.active)
+  if (on === null) return null
+  const set = (v: boolean): void => {
+    setTutorialSwitch(v)
+    setOn(v)
+    if (!v) useTutorial.getState().pause()
+  }
+  return (
+    <>
+      <Field id="view-tutorial" label="Tutorial" hint="Guide a new identity on arrival.">
+        <Switch id="view-tutorial" checked={on} onCheckedChange={set} />
+      </Field>
+      {on && (
+        <button className="avatars__go tutorial-restart" onClick={() => useTutorial.getState().start({ restart: true })} disabled={running}>RESTART TUTORIAL</button>
+      )}
+    </>
   )
 }

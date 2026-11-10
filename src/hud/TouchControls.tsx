@@ -35,6 +35,12 @@
  * FORWARD where FAR, up and NEAR were, BACKWARD where down was, JUMP where
  * + and the scale readout were, and DOWN where - was. The keys are the same
  * as before (lib/walkKeys.ts): W, S, A, D, Space or R, C or F.
+ *
+ * WALK's keys walk while held, from the press on, and what is held
+ * combines (store/walkHold.ts; play test of 2026-11-10): FORWARD or BACK
+ * held with a side arrow goes 45 degrees to that side, and FORWARD's own
+ * outer thirds, which stand over the side arrows, do it with one thumb.
+ * Slide the thumb along FORWARD while holding and the walk veers with it.
  */
 
 import { useEffect, useState, type ReactNode } from 'react'
@@ -58,6 +64,8 @@ import { useCover } from '../hooks/useCover'
 import { ForwardArrow3D, ReverseArrow3D } from './ui/FlyArrows'
 import { canFly, useViewFly } from '../lib/viewFly'
 import { flyHold } from './ViewFlyButtons'
+import { holdEnd, holdEndAll, holdMove, holdStart } from '../store/walkHold'
+import { walkHeldDir, type HeldDir } from '../lib/walkKeys'
 
 /**
  * arkinox's wording, kept exactly as he wrote it, bullet shapes and blank
@@ -86,6 +94,10 @@ export interface PadKey {
   scale?: boolean
   /** In VIEW a held press flies the view this way instead (FAR forward, NEAR back; lib/viewFly.ts). */
   fly?: 1 | -1
+  /** WALK: the direction this key holds while pressed (store/walkHold.ts). */
+  hold?: HeldDir
+  /** WALK's FORWARD: pressed in its left or right third it also holds that side, a diagonal. */
+  lean?: boolean
 }
 
 /**
@@ -104,16 +116,72 @@ export interface PadKey {
  * DOWN is off. With gravity off, JUMP and DOWN are one cell up and down.
  * The forward and reverse arrows are the pair VIEW's fly keys wear too
  * (hud/ui/FlyArrows.tsx).
+ *
+ * Each key holds its direction while pressed (store/walkHold.ts), and
+ * FORWARD leans: its outer thirds hold forward and that side, a diagonal.
  */
 export function walkPad(gravity: boolean, move: (name: MoveName) => () => void): PadKey[] {
+  const key = (name: MoveName): Pick<PadKey, 'act' | 'hold'> => ({ act: move(name), hold: walkHeldDir(name) })
   return [
-    { cell: 'forward', glyph: <ForwardArrow3D size={26} />, sub: 'FORWARD', title: 'Forward (W)', act: move('away') },
-    { cell: 'left', glyph: '◀', title: 'Left (A)', act: move('left') },
-    { cell: 'backward', glyph: <ReverseArrow3D size={20} />, sub: 'BACK', title: 'Backward (S)', act: move('toward') },
-    { cell: 'right', glyph: '▶', title: 'Right (D)', act: move('right') },
-    { cell: 'jump', glyph: 'JUMP', title: gravity ? 'Jump (Space or R)' : 'Jump: up one cell (Space or R)', act: move('up') },
-    { cell: 'down', glyph: '▼', title: gravity ? 'Down: off under gravity (C or F)' : 'Down one cell (C or F)', act: move('down'), disabled: gravity },
+    { cell: 'forward', glyph: <ForwardArrow3D size={26} />, sub: 'FORWARD', title: 'Forward (W)', ...key('away'), lean: true },
+    { cell: 'left', glyph: '◀', title: 'Left (A)', ...key('left') },
+    { cell: 'backward', glyph: <ReverseArrow3D size={20} />, sub: 'BACK', title: 'Backward (S)', ...key('toward') },
+    { cell: 'right', glyph: '▶', title: 'Right (D)', ...key('right') },
+    { cell: 'jump', glyph: 'JUMP', title: gravity ? 'Jump (Space or R)' : 'Jump: up one cell (Space or R)', ...key('up') },
+    { cell: 'down', glyph: '▼', title: gravity ? 'Down: off under gravity (C or F)' : 'Down one cell (C or F)', ...key('down'), disabled: gravity },
   ]
+}
+
+/** A pointer on a pad key, as much of it as a lean reads. */
+interface PadPointer {
+  clientX?: number
+  currentTarget?: { getBoundingClientRect?: () => { left: number; width: number } } | null
+}
+
+/**
+ * Which side a press on a leaning key holds, from where the thumb is across
+ * it: its left third left, its right third right, the middle neither. A thumb
+ * slid past either end keeps that end's side.
+ */
+export function padLean(e: PadPointer): -1 | 0 | 1 {
+  const r = e.currentTarget?.getBoundingClientRect?.()
+  if (!r || !(r.width > 0) || typeof e.clientX !== 'number') return 0
+  const across = (e.clientX - r.left) / r.width
+  return across < 1 / 3 ? -1 : across > 2 / 3 ? 1 : 0
+}
+
+/**
+ * A WALK key's handlers: held from pointerdown to pointerup, pointercancel
+ * or leave, walking all the while (store/walkHold.ts). A leaning key reads
+ * the thumb's place on the press and as it slides.
+ */
+export function padHold(b: PadKey): {
+  onPointerDown: (e: React.PointerEvent) => void
+  onPointerMove?: (e: React.PointerEvent) => void
+  onPointerUp: () => void
+  onPointerCancel: () => void
+  onPointerLeave: () => void
+  onLostPointerCapture: () => void
+  onContextMenu: (e: React.MouseEvent) => void
+} {
+  const source = `pad:${b.cell}`
+  const hold = b.hold ?? { fwd: 0, strafe: 0, vert: 0 }
+  const dir = (e: PadPointer): HeldDir => (b.lean ? { ...hold, strafe: padLean(e) } : hold)
+  const end = (): void => holdEnd(source)
+  return {
+    onPointerDown: (e) => {
+      // Keeps the press off the canvas, and off a scroll or a synthetic click.
+      e.preventDefault()
+      e.stopPropagation()
+      holdStart(source, dir(e))
+    },
+    ...(b.lean ? { onPointerMove: (e: React.PointerEvent) => holdMove(source, dir(e)) } : {}),
+    onPointerUp: end,
+    onPointerCancel: end,
+    onPointerLeave: end,
+    onLostPointerCapture: end,
+    ...noCallout,
+  }
 }
 
 export function TouchControls(): JSX.Element {
@@ -154,6 +222,10 @@ export function TouchControls(): JSX.Element {
   const home = useCyberspace((s) => s.atHead())
   const viewing = useCyberspace((s) => s.viewing())
   const walking = useCyberspace((s) => s.walking)
+  // A WALK key held as the pad goes away (the menu covers it, an offer comes
+  // up) or WALK ends gets no pointerup: let go of it here.
+  useEffect(() => { if (!walking) holdEndAll('pad:') }, [walking])
+  useEffect(() => () => holdEndAll('pad:'), [])
   // Steps pressed in WALK and not yet proven, queued or still being walked:
   // STOP has something to stop.
   const behind = useWalk((s) => s.behind + (s.open ? 1 : 0) + (s.falling ? 1 : 0))
@@ -290,8 +362,10 @@ export function TouchControls(): JSX.Element {
             title={b.title}
             aria-label={b.title}
             disabled={b.disabled}
-            {...(flies && b.fly ? flyHold('pad', b.fly) : bind(b.act))}
+            {...(walking && b.hold ? padHold(b) : flies && b.fly ? flyHold('pad', b.fly) : bind(b.act))}
           >
+            {/* FORWARD's ends go diagonally: a mark in each top corner. */}
+            {b.lean && <><span className="touchpad__lean touchpad__lean--left" aria-hidden>◤</span><span className="touchpad__lean touchpad__lean--right" aria-hidden>◥</span></>}
             {b.glyph}
             {b.sub && <span className="touchpad__sub">{b.sub}</span>}
           </button>

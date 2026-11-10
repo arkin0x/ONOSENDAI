@@ -9769,7 +9769,18 @@ a.feed__act { text-decoration: none; }
   gap: 2px;
   color: var(--fg, #c8f5ff);
 }
-.touchpad__key--forward { grid-area: forward; }
+.touchpad__key--forward { grid-area: forward; position: relative; }
+/* FORWARD's outer thirds go diagonally (store/walkHold.ts): a small mark in
+ * each top corner, over the side arrow that third stands above. */
+.touchpad__lean {
+  position: absolute;
+  top: 4px;
+  font-size: 8px;
+  color: var(--dim, #7fa6bd);
+  pointer-events: none;
+}
+.touchpad__lean--left { left: 6px; }
+.touchpad__lean--right { right: 6px; }
 .touchpad__key--backward { grid-area: backward; }
 .touchpad__key--backward .touchpad__sub { font-size: 6px; }
 .touchpad__key--jump {

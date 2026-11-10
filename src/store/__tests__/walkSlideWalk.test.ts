@@ -376,6 +376,8 @@ describe('the keyboard', () => {
     face(45)
     walkKeyDown(key('KeyW'))
     expect(moved(start)).toEqual([1, 0, -1])
+    // Let go of W first: W and S held together cancel (store/walkHold.ts).
+    walkKeyUp('KeyW')
     walkKeyDown(key('KeyS'))
     expect(moved(start)).toEqual([0, 0, 0])
   })

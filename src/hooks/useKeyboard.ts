@@ -8,7 +8,9 @@
  *
  * WALK has its own keys, first-person style (lib/walkKeys.ts): W forward,
  * S back, A and D sideways, Space or R up, C or F down, every press a step;
- * W or S with A or D held steps diagonally, 45 degrees to that side. They are answered before anything else, so in WALK Space never
+ * W or S with A or D held steps diagonally, 45 degrees to that side. A held
+ * key walks from the press on (store/walkHold.ts): the keyboard's own
+ * repeats, which came after a pause, are ignored. They are answered before anything else, so in WALK Space never
  * commits, scrolls or presses a focused button. Z switches WALK's GRAVITY
  * (store/useWalk.ts); the workshop bench's own Z (undo) is never reached
  * from here, since nothing of WALK's is answered with the workshop open.
@@ -28,7 +30,8 @@ import { moveDirection, type MoveName } from '../lib/moves'
 import type { RotateDirection } from '../lib/space'
 import { stepBuild } from '../store/buildStep'
 import { useWalk } from '../store/useWalk'
-import { walkMove, walkPress } from '../lib/walkKeys'
+import { walkHeldDir, walkMove } from '../lib/walkKeys'
+import { holdEnd, holdEndAll, holdStart } from '../store/walkHold'
 import { canFly, useViewFly } from '../lib/viewFly'
 
 const MOVE_KEYS: Record<string, MoveName> = {
@@ -84,9 +87,9 @@ export function walkKeyDown(event: Pick<KeyboardEvent, 'code' | 'ctrlKey' | 'shi
   const step = walkMove(event)
   if (step) {
     event.preventDefault()
-    if (WALK_LETTERS.has(event.code)) walkHeld.add(event.code)
-    const press = walkPress(step, event.code, walkHeld)
-    useWalk.getState().press(press.name, press.strafe)
+    // Held, the key walks from the press on (store/walkHold.ts), so the
+    // keyboard's repeats, which begin after a pause, add nothing.
+    if (!event.repeat) holdStart(`key:${event.code}`, walkHeldDir(step))
     return true
   }
   // Space is WALK's up even when it is not a step (a modifier held):
@@ -104,18 +107,14 @@ export function walkKeyDown(event: Pick<KeyboardEvent, 'code' | 'ctrlKey' | 'shi
   return false
 }
 
-/** The letters that combine into a diagonal (lib/walkKeys.ts walkPress), and those of them held down now. */
-const WALK_LETTERS = new Set(['KeyW', 'KeyA', 'KeyS', 'KeyD'])
-const walkHeld = new Set<string>()
-
-/** A key let go: no longer held for a diagonal. */
+/** A key let go: it stops walking, and is no longer held into a diagonal (store/walkHold.ts). */
 export function walkKeyUp(code: string): void {
-  walkHeld.delete(code)
+  holdEnd(`key:${code}`)
 }
 
 /** Every key let go: the window lost focus, so no keyup will come for what was held. */
 export function walkKeysReleased(): void {
-  walkHeld.clear()
+  holdEndAll('key:')
 }
 
 /** X in WALK: stop the steps still to prove (a fall still in the air is some), or with none, back to HOP. */

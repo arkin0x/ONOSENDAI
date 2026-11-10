@@ -10428,4 +10428,4 @@ html.tv-broadcast body { overflow: hidden; }
 .tutorial-choice { flex: 0 0 auto; flex-direction: column; align-items: flex-start; gap: 2px; padding: 8px 10px; min-height: 0; height: auto; text-align: left; }
 .tutorial-choice__label { color: var(--accent); font-weight: 600; letter-spacing: 0.08em; }
 .tutorial-choice__about { color: var(--dim); font-size: 11px; letter-spacing: 0; text-transform: none; }
-.tutorial-card__go--done { justify-content: center; }
+.tutorial-card__go--done { background: none; color: var(--dim); border-color: var(--border); }

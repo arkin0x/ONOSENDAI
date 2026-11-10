@@ -20,6 +20,14 @@ import { useEscape } from '../hooks/useEscape'
 import { CaptionText, useCoachOffsets } from './DemoCoach'
 import { useTutorialStage } from '../tutorial/director'
 
+/** How far along a step is, 0 to 1, along the steps that are not branches; a branch is the end. */
+export function progressOf(steps: ReadonlyArray<{ branch?: boolean }>, index: number): number {
+  if (steps[index]?.branch) return 1
+  const through = steps.filter((s) => !s.branch).length
+  const before = steps.slice(0, index + 1).filter((s) => !s.branch).length
+  return through === 0 ? 1 : before / through
+}
+
 export function TutorialCoach(): JSX.Element | null {
   const active = useTutorial((s) => s.active)
   const index = useTutorial((s) => s.index)
@@ -45,7 +53,11 @@ export function TutorialCoach(): JSX.Element | null {
   // focus, so Space presses it rather than committing a first move behind it.
   const go = useRef<HTMLButtonElement | null>(null)
   useEscape('modal', shown && modal, () => useTutorial.getState().next())
-  useEffect(() => { if (shown && modal) go.current?.focus() }, [shown, modal, index])
+  // A card with choices puts the focus on the first: a stray Enter or Space
+  // then picks nothing that costs anything, rather than ending the tutorial.
+  const firstChoice = useRef<HTMLButtonElement | null>(null)
+  useTutorial((s) => s.choicesVersion)
+  useEffect(() => { if (shown && modal) (firstChoice.current ?? go.current)?.focus() }, [shown, modal, index])
 
   // The control a step points at wears the /demo tour's pulsing ring
   // (styles.css .demo-pulse) while the step waits; nothing is clicked.
@@ -86,8 +98,8 @@ export function TutorialCoach(): JSX.Element | null {
           </div>
           <h2 className="modal__title">{step.title}</h2>
           <p className="demo__caption"><CaptionText caption={caption} /></p>
-          {step.choices?.filter(choiceOffered).map((c) => (
-            <button key={c.id} className="demo__btn tutorial-choice" onClick={() => t.choose(c.id)}>
+          {step.choices?.filter(choiceOffered).map((c, i) => (
+            <button key={c.id} ref={i === 0 ? firstChoice : undefined} className="demo__btn tutorial-choice" onClick={() => t.choose(c.id)}>
               <span className="tutorial-choice__label">{c.label}</span>
               <span className="tutorial-choice__about">{c.about}</span>
             </button>
@@ -107,7 +119,7 @@ export function TutorialCoach(): JSX.Element | null {
           <span className="demo__bartitle">{step.title}</span>
           <ChevronDown size={14} aria-hidden />
         </button>
-        <button className="demo__icon" onClick={t.next} disabled={held} aria-label={last ? 'Finish' : waiting ? 'Skip this step' : 'Next'}><ChevronRight size={14} /></button>
+        <button className="demo__icon" onClick={t.next} disabled={held} aria-label={(last || step.branch) ? 'Finish' : waiting ? 'Skip this step' : 'Next'}><ChevronRight size={14} /></button>
       </div>
     )
   }
@@ -120,7 +132,8 @@ export function TutorialCoach(): JSX.Element | null {
         <button className="demo__icon" onClick={() => t.setMinimized(true)} aria-label="Fold the caption" title="Fold"><ChevronUp size={14} /></button>
         <button className="demo__icon" onClick={() => t.end('skipped')} aria-label="Skip the tutorial" title="Skip the tutorial"><X size={14} /></button>
       </div>
-      <div className="demo__bar-track" aria-hidden><div className="demo__bar-fill" style={{ width: `${((index + 1) / script.steps.length) * 100}%` }} /></div>
+      {/* How far along, counting the way through (branches after the choice count as its end). */}
+      <div className="demo__bar-track" aria-hidden><div className="demo__bar-fill" style={{ width: `${progressOf(script.steps, index) * 100}%` }} /></div>
       <div className="demo__body" key={index}>
         <div className="demo__titlerow">
           <h2 className="demo__title">{step.title}</h2>

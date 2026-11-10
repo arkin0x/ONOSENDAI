@@ -47,6 +47,7 @@ import {
 import { withOpacity } from '../lib/opacityStep'
 import { noTable, signedTableOnly, you } from '../lib/carried'
 import { authoredConstrainOf, chosenConstrainOf, withConstrain, type Constrain } from '../lib/walkConstrain'
+import { withBounce, type Bounce } from '../lib/walkBounce'
 import { addPart, quarterTurnPart, removeParts } from 'sno-core/parts'
 import { FLOOR, MAX_SIZE, MIN_SIZE, stamp, type Facing, type StampKind, type WorkPlane } from 'sno-core/stamps'
 import { BUILT_IN, hexAt, remap, samePalette, snapHex, type Palette } from 'sno-core/snoPalette'
@@ -437,6 +438,14 @@ export interface WorkshopState {
    * edit. Undoable like MODE.
    */
   setConstrain: (c: Constrain) => void
+  /**
+   * Whether walkers with GRAVITY on bounce off the shard (lib/walkBounce.ts):
+   * 0 for none, a whole number of gibsons from 1 to 24, or "reflect"; with a
+   * fixed height, `springboard` launches on walk-on too. Written only as the
+   * walker reads it (withBounce): OFF removes both fields, and nothing invalid
+   * is ever stored. Undoable like MODE.
+   */
+  setBounce: (b: Bounce, springboard?: boolean) => void
   setUnit: (unit: number) => void
   /** The build grid's half-width for the current shard, never below what its vertices need. */
   setExtent: (extent: number) => void
@@ -1031,6 +1040,8 @@ export const useWorkshop = create<WorkshopState>((set, get) => {
     setOpacity: (percent) => edit((s) => withOpacity(s, percent)),
     // Already so: no edit, so no undo step that changes nothing.
     setConstrain: (c) => edit((s) => (authoredConstrainOf(s) === c ? null : withConstrain(s, c))),
+    // Already so: the same object back, so no edit and no empty undo step.
+    setBounce: (b, springboard = false) => edit((s) => { const n = withBounce(s, b, springboard); return n === s ? null : n }),
     setUnit: (unit) => edit((s) => ({ ...s, unit: clampUnit(unit) })),
     // FACE works on corners it picks itself, and its panel only appears with
     // nothing else selected, so a point still held from SELECT hid FILL behind

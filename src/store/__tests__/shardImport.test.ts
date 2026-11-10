@@ -938,4 +938,26 @@ describe('BOUNCE through a lone .json (the owner\'s hand-made test shards, maze-
       expect(wallMesh(stored, []).ownBounce).toBe(want)
     }
   })
+
+  it('a shard set to bounce in the workshop goes out as its payload and comes back through a zip with both fields, on the bench and the wire', async () => {
+    const id0 = useWorkshop.getState().create('Springboard')
+    useWorkshop.getState().select(id0)
+    useWorkshop.setState({ shards: mine().map((s) => (s.id === id0 ? { ...s, mode: 'solid' as const, vertices: [{ p: [0, 0, 0], c: [1, 1, 1] }, { p: [1, 0, 0], c: [1, 1, 1] }, { p: [0, 0, 1], c: [1, 1, 1] }], faces: [[0, 1, 2]] } : s)) })
+    useWorkshop.getState().setBounce(18, true)
+    const json = useWorkshop.getState().exportCurrent()!
+    const reflect = JSON.stringify({ ...JSON.parse(json), name: 'Reflector', bounce: 'reflect', springboard: undefined })
+    useWorkshop.setState({ shards: [], currentId: null })
+    await openPublishing(kitZip({ 'maze-kit/pads/springboard.json': json, 'maze-kit/pads/reflector.json': reflect }))
+    await imp().start()
+    const spring = mine().find((x) => x.id === 'maze-kit/pads/springboard')!
+    expect(spring.extra).toMatchObject({ bounce: 18, springboard: true })
+    expect(bounceOf(spring)).toBe(18)
+    expect(springboardOf(spring)).toBe(true)
+    const refl = mine().find((x) => x.id === 'maze-kit/pads/reflector')!
+    expect(bounceOf(refl)).toBe('reflect')
+    expect(springboardOf(refl)).toBe(false)
+    const wire = JSON.parse(sent().find((e) => dOf(e) === 'maze-kit/pads/springboard')!.content) as { bounce?: unknown; springboard?: unknown }
+    expect(wire.bounce).toBe(18)
+    expect(wire.springboard).toBe(true)
+  })
 })

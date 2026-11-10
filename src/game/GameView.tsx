@@ -192,7 +192,7 @@ function GameScreen(): JSX.Element | null {
     setExitFailed(refused !== null)
   }
 
-  const status = busy === 'entering' ? 'ENTERING' : busy === 'teleporting' ? 'TELEPORTING' : busy === 'exiting' ? 'LEAVING' : world === null || at === null ? 'LOADING THE WORLD' : null
+  const status = busy === 'entering' ? 'ENTERING' : busy === 'teleporting' ? 'TELEPORTING' : busy === 'exiting' ? 'LEAVING' : world === null && !worldError ? 'LOADING THE WORLD' : null
 
   return (
     <div className="gameview" role="application" aria-label={`${game.name}: in a game`}>

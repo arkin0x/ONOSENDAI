@@ -26,9 +26,8 @@ import { fromPayload, newShard, type ShardModel, type ShardVertex } from 'sno-co
 import { bagTemplate, shardInnerTemplate } from '../../hidden'
 import { hexToBytes } from '../../events'
 import { TUTORIAL_DUNGEON_LAYOUT, TUTORIAL_ENTRY, TUTORIAL_GAME } from '../tutorialGame'
-import { ENTRY_TAG } from '../world'
+import { ENTRY_TAG, worldKey } from '../world'
 import { withConstrain } from '../../walkConstrain'
-import { worldKey } from '../world'
 
 const asked = process.env.GEN_TUTORIAL_DUNGEON === '1'
 

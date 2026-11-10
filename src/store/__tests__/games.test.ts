@@ -288,4 +288,29 @@ describe('what the review of #660 found untested', () => {
     expect(S().events.length).toBe(count)
     expect('event' in await S().exitGame(second)).toBe(true)
   })
+
+  it('resume goes to the last game position on the record before the entry point (DECK-0002 §7)', async () => {
+    await enterTutorialDungeon()
+    await worldLoaded()
+    for (let i = 0; i < 30 && !G().busy; i++) G().step('z', -1)
+    for (let i = 0; i < 200 && G().busy; i++) await new Promise((r) => setTimeout(r, 5))
+    expect(G().session!.at).toEqual(TUTORIAL_GAME.pads[0].to)
+    useGame.setState({ session: null })
+    expect(G().resume()).toBe(true)
+    await worldLoaded()
+    expect(G().session!.at).toEqual(TUTORIAL_GAME.pads[0].to)
+  })
+
+  it('a world that fails to load: nobody moves, LEAVING still works, and the exit is valid', async () => {
+    const broken = { ...TUTORIAL_GAME, world: { kind: 'fixture' as const, load: async () => { throw new Error('relay down') } } }
+    expect(await G().enter(broken)).toBeNull()
+    for (let i = 0; i < 200 && G().session!.worldError === null; i++) await new Promise((r) => setTimeout(r, 5))
+    expect(G().session!.worldError).toBe('relay down')
+    expect(G().session!.at).toBeNull()
+    G().step('z', -1)
+    expect(G().session!.at).toBeNull()
+    expect(await G().exit()).toBeNull()
+    expect(tagOf(last(), 'A')?.[1]).toBe('exit-virtual')
+    expect(firstBreak(S().actions())).toBeNull()
+  })
 })

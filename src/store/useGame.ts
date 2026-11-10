@@ -11,9 +11,10 @@
  * cyberspace (game/GameView.tsx), a press moves you one gibson by its rules
  * (lib/games/play.ts) on this device, signing nothing, and a pad signs a
  * `teleport`. Its run is not anchored (DECK-0002 §6.1): its steps are not
- * events anyone keeps, so an anchor would commit to nothing checkable. EXIT publishes exit-virtual, which puts you back where
- * you entered (spec §8.11.4 rule 2), and the view comes back exactly as it was
- * when you entered: the same place, zoom, look and mode (DECK-0002 §7).
+ * events anyone keeps, so an anchor would commit to nothing checkable.
+ * EXIT publishes exit-virtual, which puts you back where you entered (spec
+ * §8.11.4 rule 2), and the view comes back exactly as it was when you
+ * entered: the same place, zoom, look and mode (DECK-0002 §7).
  *
  * Every event goes through the store's own signing (useCyberspace enterGame,
  * signGameAction, exitGame), which confirms the head first and queues it like
@@ -121,7 +122,8 @@ export const useGame = create<GameState>((set, get) => {
     loadWorld(session.game).then(
       // You appear at the entry point by virtue of having entered (DECK-0002 §2.2), or where the record left you.
       (world) => { const now = get().session; if (now?.entryId === session.entryId) set({ session: { ...now, world: world.shards, at: now.at ?? now.resumeAt ?? world.entry, worldError: world.shards.length ? null : 'This game has no world yet.' } }) },
-      (err) => { if (get().session?.entryId === session.entryId) set({ session: { ...get().session!, world: [], worldError: err instanceof Error ? err.message : String(err) } }) },
+      // No world: a resumed player is still drawn where the record left them; nobody moves without walls (step).
+      (err) => { const now = get().session; if (now?.entryId === session.entryId) set({ session: { ...now, world: [], at: now.at ?? now.resumeAt, worldError: err instanceof Error ? err.message : String(err) } }) },
     )
   }
 
@@ -192,7 +194,7 @@ export const useGame = create<GameState>((set, get) => {
       set({ busy: 'exiting', message: null })
       let left: Awaited<ReturnType<CyberspaceState['exitGame']>>
       try {
-        left = await useCyberspace.getState().exitGame(session?.entryId ?? open?.id, session?.at ? hexAt(session.game, session.at) : undefined)
+        left = await useCyberspace.getState().exitGame(session?.entryId ?? open?.id, (session?.at ?? session?.resumeAt) ? hexAt(session!.game, (session!.at ?? session!.resumeAt)!) : undefined)
       } catch (err) {
         left = { refused: failed(err) }
       }

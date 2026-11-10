@@ -9,13 +9,16 @@
  */
 
 import { verifyEvent } from 'nostr-tools/pure'
-import { HIDDEN_KIND, dOf, unbag } from '../hidden'
+import { HIDDEN_KIND, ciphertextOf, dOf, innerAuthentic, unbag, type Rumor } from '../hidden'
+import { coordToXyz, hexToCoord } from 'cyberspace-core'
+import { decryptForRegion } from '../shardCrypto'
+import { inRegion } from './play'
 import { resolveReference } from '../references'
 import { query, queryAny } from '../relay'
 import { regionKeyAt } from '../shardCrypto'
 import type { NostrEvent } from '../events'
-import type { GameDef } from './types'
 import type { WorldShard } from './play'
+import type { GameDef } from './types'
 import type { Position } from '../space'
 
 /** A game's world as read (DECK-0002 §5.1, §2.2): its shards, and the entry point. */
@@ -58,6 +61,35 @@ async function worldBags(game: GameDef, lookupId: string): Promise<NostrEvent[]>
 }
 
 /**
+ * The entry point a bag's own list names (DECK-0002 §2.2): the `C` of its
+ * first entry stored inline that carries the `entry` tag, is authentic as an
+ * item of the bag (signed by the game key, or a rumor the bag vouches for)
+ * and lies inside the region, in its plane, whatever its kind, drawable or
+ * not. Read from the list itself, before any item is read for drawing, so a
+ * kind this client cannot read still counts. A reference never counts: its
+ * tags are its author's (review of #667). Null when none does.
+ */
+async function entryOf(game: GameDef, bag: NostrEvent, key: Uint8Array): Promise<Position | null> {
+  const ct = ciphertextOf(bag)
+  const json = ct ? await decryptForRegion(key, ct) : null
+  let list: unknown
+  try { list = json ? JSON.parse(json) : null } catch { list = null }
+  if (!Array.isArray(list)) return null
+  for (const e of list) {
+    if (!e || typeof e !== 'object' || Array.isArray(e)) continue
+    const tags = (e as { tags?: unknown }).tags
+    if (!Array.isArray(tags) || !tags.some((t) => Array.isArray(t) && t[0] === ENTRY_TAG)) continue
+    if (!innerAuthentic(e as Partial<Rumor>, game.pubkey)) continue
+    const c = tags.find((t) => Array.isArray(t) && t[0] === 'C')?.[1]
+    if (typeof c !== 'string' || !/^[0-9a-f]{64}$/.test(c)) continue
+    const { x, y, z, plane } = coordToXyz(hexToCoord(c))
+    const at = { x, y, z }
+    if (plane === game.region.plane && inRegion(game, at)) return at
+  }
+  return null
+}
+
+/**
  * The world: its shards and its entry point. A bag is addressable, so of the bags with the region's
  * `d` only the game key's newest counts, as for any author's place (spec
  * §7.6). Every bag is checked here whatever its source: signed by the game
@@ -71,11 +103,11 @@ export async function loadWorld(game: GameDef): Promise<World> {
   const newest = bags[0]
   if (!newest) return { shards: [], entry: regionCentre(game) }
   const { base, height, plane } = game.region
-  const items = (await unbag(newest, key, resolveReference, { at: base, plane }, height)).filter((it) => it.plane === plane)
-  // The first item in the bag's list that carries the entry tag (unbag keeps the list's order); the region's centre when none does.
-  const marked = items.find((it) => it.inner?.tags.some((t) => t[0] === ENTRY_TAG))
+  const entry = (await entryOf(game, newest, key)) ?? regionCentre(game)
+  // Only what lies inside the region, in its plane: the world is drawn there and nowhere else (review of #667).
+  const items = (await unbag(newest, key, resolveReference, { at: base, plane }, height)).filter((it) => it.plane === plane && inRegion(game, it.at))
   return {
     shards: items.filter((it) => it.type === 'shard' && it.shard).map((it) => ({ key: it.eventId, shard: it.shard!, at: it.at, height: it.height })),
-    entry: marked ? { ...marked.at } : regionCentre(game),
+    entry,
   }
 }

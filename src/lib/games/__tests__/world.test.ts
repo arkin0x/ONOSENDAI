@@ -9,7 +9,7 @@ import { describe, expect, it } from 'vitest'
 import { finalizeEvent, generateSecretKey, getPublicKey } from 'nostr-tools/pure'
 import { newShard } from 'sno-core/shards'
 import { bagTemplate, shardInnerTemplate } from '../../hidden'
-import type { NostrEvent } from '../../events'
+import { positionHex, type NostrEvent } from '../../events'
 import { ENTRY_TAG, loadWorld, regionCentre, worldKey } from '../world'
 import { TUTORIAL_GAME } from '../tutorialGame'
 import type { GameDef } from '../types'
@@ -69,5 +69,32 @@ describe('loading a game world', () => {
   it('the bundled placeholder marks its entry point at TUTORIAL_ENTRY', async () => {
     const { TUTORIAL_ENTRY } = await import('../tutorialGame')
     expect((await loadWorld(TUTORIAL_GAME)).entry).toEqual(TUTORIAL_ENTRY)
+  })
+
+  it('counts a marker of a kind no client draws, first in the list (review of #667)', async () => {
+    const p1 = { ...at, z: at.z + 5n }
+    const p2 = { ...at, z: at.z + 9n }
+    const invisible = finalizeEvent({ kind: 30999, created_at: 100, tags: [['C', positionHex(p1, 1)], [ENTRY_TAG]], content: '' }, gameSk)
+    const b = await bag(gameSk, 'x', 100, undefined, [invisible, item(gameSk, 'shard', 101, p2, true)])
+    const world = await loadWorld(gameOf([b]))
+    expect(world.entry).toEqual(p1)
+    expect(world.shards.map((w) => w.shard.name)).toEqual(['shard'])
+  })
+
+  it('skips a marker outside the region, in the other plane, or not the game key\'s, for the next one (review of #667)', async () => {
+    const outside = { ...at, x: TUTORIAL_GAME.region.base.x + 1000n }
+    const p2 = { ...at, z: at.z + 9n }
+    const otherPlane = (() => { const t = shardInnerTemplate(shard('ideaspace twin'), at, 0, 100); return finalizeEvent({ ...t, tags: [...t.tags, [ENTRY_TAG]] }, gameSk) })()
+    const forged = finalizeEvent({ kind: 30999, created_at: 100, tags: [['C', positionHex(at, 1)], [ENTRY_TAG]], content: '' }, stranger)
+    const b = await bag(gameSk, 'x', 100, undefined, [item(gameSk, 'far', 100, outside, true), otherPlane, forged, item(gameSk, 'good', 101, p2, true)])
+    const world = await loadWorld(gameOf([b]))
+    expect(world.entry).toEqual(p2)
+    // The far shard is not drawn either: the world is inside its region.
+    expect(world.shards.map((w) => w.shard.name)).toEqual(['good'])
+  })
+
+  it('the region\'s centre at height 0 is its base', () => {
+    const base = TUTORIAL_GAME.region.base
+    expect(regionCentre({ region: { base, height: 0, plane: 1 } })).toEqual(base)
   })
 })

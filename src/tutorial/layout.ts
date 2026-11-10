@@ -28,8 +28,8 @@ import type { Position } from '../lib/space'
 
 /** The blue box's height: an 8-gibson cube. */
 export const BOX_HEIGHT = 3
-/** The smallest covering region tried. */
-export const COVER_MIN = 6
+/** The smallest covering region tried: the footprint is 96 deep, more than a height-6 cube holds. */
+export const COVER_MIN = 7
 /** The largest: within the discovery scan's heights (useShards SCAN_MAX_HEIGHT 12). */
 export const COVER_MAX = 12
 

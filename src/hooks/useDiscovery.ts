@@ -14,7 +14,7 @@
 
 import { useEffect, useRef, useState } from 'react'
 import { query } from '../lib/relay'
-import { HIDDEN_KIND, type Hidden } from '../lib/hidden'
+import { HIDDEN_KIND, unbag, type Hidden } from '../lib/hidden'
 import type { NostrEvent } from 'nostr-tools'
 import { unbagRemembered } from '../lib/foundCache'
 import { bagsToOpen } from '../lib/bagVersions'
@@ -139,7 +139,7 @@ export function useDiscovery(): void {
        * current, so what an older version of one gave stays: lib/hidden.ts
        * BagUnreadable).
        */
-      const openBags = async (events: readonly NostrEvent[]): Promise<{ found: Hidden[]; opened: string[]; unread: Set<string> }> => {
+      const openBags = async (events: readonly NostrEvent[], guideIds: ReadonlySet<string> = new Set()): Promise<{ found: Hidden[]; opened: string[]; unread: Set<string> }> => {
         const found: Hidden[] = []
         const opened: string[] = []
         const unread = new Set<string>()
@@ -160,7 +160,10 @@ export function useDiscovery(): void {
           const origin = { at: { x: (anchor.x >> h) << h, y: (anchor.y >> h) << h, z: (anchor.z >> h) << h }, plane }
           let items: Hidden[]
           try {
-            items = await unbagRemembered(ev, hexToBytes(keyHex), resolveReference, origin, height)
+            // A tutorial guide's bag is opened and forgotten: never kept in
+            // the found bags, which outlive the tutorial and ask relays about
+            // their authors (lib/foundCache.ts).
+            items = guideIds.has(ev.id) ? await unbag(ev, hexToBytes(keyHex), resolveReference, origin, height) : await unbagRemembered(ev, hexToBytes(keyHex), resolveReference, origin, height)
           } catch {
             unread.add(ev.id)
             continue
@@ -215,11 +218,14 @@ export function useDiscovery(): void {
       // again with the relays' answer below, where they join it after the
       // relays' own checks: never asked about, never sent anywhere.
       const guided = guideBagsFor(keys.keys())
+      const guideIds = new Set(guided.map((g) => g.id))
       if (guided.length > 0) {
-        const early = await openBags(guided)
+        const early = await openBags(guided, guideIds)
         if (id !== reqId.current) return
         holdOpened(early.opened)
         const fresh = useShards.getState().freshOf(early.found)
+        // A guide bag staged again (RESTART) replaces what the one before it gave.
+        useShards.getState().dropStale(guided, [], early.found)
         useShards.getState().addDiscovered(early.found)
         useCeremony.getState().mark(fresh)
       }
@@ -233,7 +239,7 @@ export function useDiscovery(): void {
       const { bags: relayBags, deletions } = await bagsToOpen(sent, query, useShards.getState().ownDoorAddresses(keys.keys()))
       if (id !== reqId.current) return
       const events = guided.length > 0 ? [...relayBags, ...guided] : relayBags
-      const { found, opened, unread } = await openBags(events)
+      const { found, opened, unread } = await openBags(events, guideIds)
       holdOpened(opened)
       if (id === reqId.current) {
         // Asked before addDiscovered, which records these as seen.

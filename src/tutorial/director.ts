@@ -34,7 +34,7 @@ import { START_STAND, atStart, courseToWorld } from './course'
 import { regionKeyOffThread } from '../lib/regionKeyOffThread'
 import type { Position } from '../lib/space'
 import { setGuideBags } from './guideBags'
-import type { TutorialLayout } from './layout'
+import { inRegion, type TutorialLayout } from './layout'
 import type { Stage } from './stage'
 
 interface StageState {
@@ -59,13 +59,17 @@ async function stageFor(player: string, restart: boolean): Promise<void> {
     const spawn = spawnPlace(player)
     const layout = tutorialLayout({ x: spawn.x, y: spawn.y, z: spawn.z }, spawn.plane as Plane)
     const guide = guideKey()
-    let stage = restart ? null : st.readStage(player, guide.pubkey, st.spawnTag(layout))
+    const current = (): boolean => mine === run && useTutorial.getState().active && useTutorial.getState().pubkey === player
+    let stage = restart ? null : st.readStage(player, guide.pubkey, st.stageKey(layout))
     if (!stage) {
       stage = await st.buildStage(guide.secret, player, layout, (at, h) => regionKeyOffThread(at, h, MAX_COMPUTE_HEIGHT))
+      // Kept only by the staging still current: one a RESTART overtook never overwrites what replaced it.
+      if (!current()) return
       st.writeStage(stage, player)
     }
-    if (mine !== run || !useTutorial.getState().active || useTutorial.getState().pubkey !== player) return
-    setGuideBags(stage.bags)
+    if (!current()) return
+    // The blue box lets taps through to the chest inside it.
+    setGuideBags(stage.bags, { passTaps: [stage.ids.blueBox] })
     useTutorialStage.setState({ stage, layout })
   } catch (err) {
     if (mine !== run) return
@@ -74,23 +78,58 @@ async function stageFor(player: string, restart: boolean): Promise<void> {
   }
 }
 
+/** The tutorial went away: its bags, and everything they gave, go with it. */
 function unstage(): void {
   run++
+  const guide = useTutorialStage.getState().stage?.guide
   setGuideBags(null)
   useTutorialStage.setState({ stage: null, layout: null, error: null })
+  if (guide) dropGuideFinds(guide)
+}
+
+/** Take every find the guide sealed off the screen (the blue box, the chest and what came out of it). */
+function dropGuideFinds(guide: string): void {
+  const discovered = useShards.getState().discovered
+  if (!Object.values(discovered).some((h) => h.author === guide)) return
+  useShards.setState({ discovered: Object.fromEntries(Object.entries(discovered).filter(([, h]) => h.author !== guide)) })
 }
 
 /**
- * Put the cursor at a place, at zoom 2^0, as the pad would line it up, so one
- * COMMIT (or Space) moves you there: only at your head, never in WALK or
- * mid-proof. The /demo `aim` counts gibsons along the view's axes; this names
- * the place itself, which stays right whichever way the layout faces.
+ * Put the cursor at a place of the layout, at zoom 2^0, as the pad would line
+ * it up, so one COMMIT moves you there: only at your head, never in WALK or
+ * mid-proof, and only from inside the tutorial's covering region in its
+ * plane, so the hop it lines up is a short one (a player who wandered off is
+ * not handed a long route). The /demo `aim` counts gibsons along the view's
+ * axes; this names the place itself, right whichever way the layout faces.
+ * Whether it aimed.
  */
-export function aimAt(at: Position): void {
+export function aimAt(at: Position, layout: TutorialLayout): boolean {
   const cs = useCyberspace.getState()
-  if (!cs.atHead() || cs.walking || cs.proof.status === 'computing') return
+  if (!cs.atHead() || cs.walking || cs.proof.status === 'computing') return false
+  if (cs.headPlane !== layout.plane || !inRegion(cs.position, layout.cover.base, layout.cover.height)) return false
   if (cs.scaleExp !== 0) cs.adjustScale(-cs.scaleExp)
-  useCyberspace.setState({ cursor: { ...at }, plane: useCyberspace.getState().headPlane })
+  useCyberspace.setState({ cursor: { ...at }, plane: layout.plane })
+  return true
+}
+
+/**
+ * A step effect that aims once at a place of the layout, as soon as it can:
+ * the stage in, and the player at their head, in the cover (aimAt).
+ */
+function aimOnce(place: (layout: TutorialLayout) => Position): () => (() => void) | void {
+  return () => {
+    let aimed = false
+    const aim = (): void => {
+      const layout = useTutorialStage.getState().layout
+      if (aimed || !layout) return
+      aimed = aimAt(place(layout), layout)
+      if (aimed) off()
+    }
+    const offs = [useTutorialStage.subscribe(aim), useCyberspace.subscribe((s, prev) => { if (s.proof.status !== prev.proof.status || s.walking !== prev.walking || s.position !== prev.position) aim() })]
+    const off = (): void => { for (const o of offs.splice(0)) o() }
+    aim()
+    return off
+  }
 }
 
 /** Run `check` now and on every change of the stores it reads, until it says done; then `onDone` once. */
@@ -133,18 +172,10 @@ onTutorialLifecycle({
 })
 
 /** The box step lines the cursor up in the blue box, once it is staged, so one COMMIT moves you in. */
-registerTutorialEffect('aim-box', () => {
-  let aimed = false
-  const aim = (): void => {
-    const layout = useTutorialStage.getState().layout
-    if (aimed || !layout) return
-    aimed = true
-    const b = layout.frame.boxBase
-    aimAt({ x: b.x + 4n, y: b.y + 4n, z: b.z + 4n })
-  }
-  aim()
-  return aimed ? undefined : useTutorialStage.subscribe(aim)
-})
+registerTutorialEffect('aim-box', aimOnce((layout) => {
+  const b = layout.frame.boxBase
+  return { x: b.x + 4n, y: b.y + 4n, z: b.z + 4n }
+}))
 
 /**
  * Arrival (T7): `inside` is true of where the player stands, their chain's
@@ -179,14 +210,4 @@ registerTutorialWatcher('take-finish', (onDone) => watchUntil(() => {
 }, onDone, [onStage, (l) => useInventory.subscribe((s, prev) => { if (s.items !== prev.items) l() })]))
 
 /** The course step lines the cursor up on the start square, so one COMMIT moves you there. */
-registerTutorialEffect('aim-start', () => {
-  let aimed = false
-  const aim = (): void => {
-    const layout = useTutorialStage.getState().layout
-    if (aimed || !layout) return
-    aimed = true
-    aimAt(courseToWorld(layout.frame, START_STAND))
-  }
-  aim()
-  return aimed ? undefined : useTutorialStage.subscribe(aim)
-})
+registerTutorialEffect('aim-start', aimOnce((layout) => courseToWorld(layout.frame, START_STAND)))

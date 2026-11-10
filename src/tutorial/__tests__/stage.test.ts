@@ -21,8 +21,8 @@ import { lockOf } from '../../lib/locks'
 import { NIP44_MAX_PLAINTEXT, openWithSecret, plaintextBytes, readContents } from '../../lib/chests'
 import { BAG_SAFE_BYTES } from '../../lib/bagSize'
 import { BOX_HEIGHT, COVER_MAX, FOOTPRINT, inRegion, regionBase, toWorld, tutorialLayout } from '../layout'
-import { STAGE_TEXT, buildStage, readStage, spawnTag, writeStage, type KeyAt } from '../stage'
-import { guideBagsFor, isGuideBag, onGuideBags, setGuideBags } from '../guideBags'
+import { STAGE_TEXT, buildStage, readStage, stageKey, writeStage, type KeyAt } from '../stage'
+import { guideBagsFor, isGuideAuthor, isGuideBag, onGuideBags, passesTaps, setGuideBags } from '../guideBags'
 import { COURSE, FINISH_CHEST, START_STAND, atStart, courseToWorld } from '../course'
 import type { Position } from '../../lib/space'
 
@@ -185,12 +185,18 @@ describe('the stage', () => {
     const l = tutorialLayout(MID, 0)
     const stage = await buildStage(guide, player, l, keyAt)
     const m = new Map<string, string>()
-    ;(globalThis as { localStorage?: unknown }).localStorage = { getItem: (k: string) => m.get(k) ?? null, setItem: (k: string, v: string) => { m.set(k, v) }, removeItem: (k: string) => { m.delete(k) } }
-    expect(writeStage(stage, player)).toBe(true)
-    expect(readStage(player, stage.guide, spawnTag(l))?.ids).toEqual(stage.ids)
-    expect(readStage(player, 'b'.repeat(64), spawnTag(l))).toBe(null)
-    expect(readStage(player, stage.guide, spawnTag({ spawn: { ...MID, z: MID.z + 1n }, plane: 0 }))).toBe(null)
-    expect(readStage('c'.repeat(64), stage.guide, spawnTag(l))).toBe(null)
+    const g = globalThis as { localStorage?: unknown }
+    const had = g.localStorage
+    g.localStorage = { getItem: (k: string) => m.get(k) ?? null, setItem: (k: string, v: string) => { m.set(k, v) }, removeItem: (k: string) => { m.delete(k) } }
+    try {
+      expect(writeStage(stage, player)).toBe(true)
+      expect(readStage(player, stage.guide, stageKey(l))?.ids).toEqual(stage.ids)
+      expect(readStage(player, 'b'.repeat(64), stageKey(l))).toBe(null)
+      expect(readStage(player, stage.guide, stageKey(tutorialLayout({ ...MID, z: MID.z + 1n }, 0)))).toBe(null)
+      // The same spawn, a layout tuned since: staged again.
+      expect(readStage(player, stage.guide, stageKey({ ...l, cover: { ...l.cover, height: l.cover.height + 1 } }))).toBe(null)
+      expect(readStage('c'.repeat(64), stage.guide, stageKey(l))).toBe(null)
+    } finally { g.localStorage = had }
   })
 })
 
@@ -205,8 +211,16 @@ describe('the guide\'s bags on this device', () => {
     expect(guideBagsFor(['f'.repeat(64)])).toEqual([])
     expect(guideBagsFor([lookups[1], 'f'.repeat(64)])).toEqual([stage.bags[1]])
     expect(isGuideBag(stage.bags[0].id)).toBe(true)
+    expect(isGuideAuthor(stage.guide)).toBe(true)
+    expect(isGuideAuthor('f'.repeat(64))).toBe(false)
+    setGuideBags(stage.bags, { passTaps: [stage.ids.blueBox] })
+    expect(passesTaps(stage.ids.blueBox)).toBe(true)
+    expect(passesTaps(stage.ids.chest)).toBe(false)
     setGuideBags(null)
-    expect(heard).toBe(2)
+    expect(passesTaps(stage.ids.blueBox)).toBe(false)
+    // A guide stays known after its bags go: a card still never asks about it.
+    expect(isGuideAuthor(stage.guide)).toBe(true)
+    expect(heard).toBe(3)
     expect(guideBagsFor(lookups)).toEqual([])
     off()
   })

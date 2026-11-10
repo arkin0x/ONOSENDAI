@@ -56,10 +56,12 @@ export function TutorialCoach(): JSX.Element | null {
       for (const el of marked) el.classList.add('demo-pulse')
     }
     mark()
-    // The control may come and go (a chip appears once something is found).
-    const mo = new MutationObserver(() => { if (marked.length === 0 || marked.some((el) => !el.isConnected)) mark() })
+    // The control may come and go (a chip appears once something is found):
+    // looked for again after the page changes, at most once a frame.
+    let frame = 0
+    const mo = new MutationObserver(() => { if (!frame) frame = requestAnimationFrame(() => { frame = 0; mark() }) })
     mo.observe(document.body, { childList: true, subtree: true })
-    return () => { mo.disconnect(); for (const el of marked) el.classList.remove('demo-pulse') }
+    return () => { mo.disconnect(); if (frame) cancelAnimationFrame(frame); for (const el of marked) el.classList.remove('demo-pulse') }
   }, [highlight])
 
   if (!shown || !step) return null

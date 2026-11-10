@@ -65,13 +65,22 @@ export function runTutorialEffect(name: string): void {
 /**
  * What a choice does that a step cannot (TutorialChoice `when`): the dungeon
  * enters a game (Track C, the Games DECK). Unregistered, the choice is not
- * offered. `run` happens after the tutorial ends, as the player's own choice.
+ * offered; registering it later shows it at once (the coach redraws).
+ *
+ * The seam for Track C: `registerTutorialChoice('dungeon', { run })` from
+ * any module, at any time. `run` is the player's own choice and may return a
+ * promise (publishing enter-virtual is async): a choice with a `step` runs
+ * `run` and goes to that step, so a coach step can follow the player into
+ * the game; one without ends the tutorial as finished first, then runs. A
+ * `run` that throws or rejects is logged and the tutorial stays where it is
+ * (for a choice with a step) so the player can choose again.
  */
-export interface TutorialChoiceRun { run: () => void }
+export interface TutorialChoiceRun { run: () => void | Promise<void> }
 const TUTORIAL_CHOICES = new Map<string, TutorialChoiceRun>()
 
 export function registerTutorialChoice(name: string, choice: TutorialChoiceRun): void {
   TUTORIAL_CHOICES.set(name, choice)
+  useTutorial.setState((s) => ({ choicesVersion: s.choicesVersion + 1 }))
 }
 
 /** Whether a choice is offered: no `when`, or one registered under it. */
@@ -150,6 +159,8 @@ interface TutorialState {
   minimized: boolean
   /** The EXPLAIN pill is open. */
   explaining: boolean
+  /** Bumped whenever a choice is registered, so the coach shows it. */
+  choicesVersion: number
   script: TutorialScript
   /** Start (or resume) for the identity on screen; `at` names a step, `restart` begins again from the first. */
   start: (opts?: { at?: string; restart?: boolean }) => void
@@ -188,7 +199,7 @@ export const useTutorial = create<TutorialState>((set, get) => {
       const back = steps.findIndex((s) => s.id === step.needsWalk)
       if (back >= 0 && from !== back) { enter(back); return }
       let past = index
-      while (past < steps.length && steps[past].needsWalk) past++
+      while (past < steps.length && (steps[past].needsWalk || steps[past].branch)) past++
       if (past < steps.length) { enter(past); return }
       get().end('skipped')
       return
@@ -233,6 +244,7 @@ export const useTutorial = create<TutorialState>((set, get) => {
     done: true,
     minimized: false,
     explaining: false,
+    choicesVersion: 0,
     script: TUTORIAL_SCRIPT,
 
     start: (opts = {}) => {
@@ -265,15 +277,22 @@ export const useTutorial = create<TutorialState>((set, get) => {
     choose: (choiceId) => {
       const s = get()
       if (!s.active) return
-      const choice = s.script.steps[s.index]?.choices?.find((c) => c.id === choiceId)
+      const here = s.script.steps[s.index]
+      if (here?.gate && !s.done) return
+      const choice = here?.choices?.find((c) => c.id === choiceId)
       if (!choice || !choiceOffered(choice)) return
       const run = choice.when ? TUTORIAL_CHOICES.get(choice.when) : undefined
+      const runIt = (): Promise<void> => Promise.resolve().then(() => run?.run())
       if (choice.step) {
         const at = s.script.steps.findIndex((st) => st.id === choice.step)
-        if (at >= 0) { enter(at); return }
+        if (at < 0) { console.warn(`[tutorial] choice ${choice.id} names no step ${choice.step}`); return }
+        const index = s.index
+        if (!run) { enter(at); return }
+        void runIt().then(() => { if (get().active && get().index === index) enter(at) }, (err: unknown) => console.warn('[tutorial] choice failed:', err))
+        return
       }
       get().end('finished')
-      if (run) { try { run.run() } catch (err) { console.warn('[tutorial] choice failed:', err) } }
+      void runIt().catch((err: unknown) => console.warn('[tutorial] choice failed:', err))
     },
 
     end: (how) => {
@@ -322,8 +341,13 @@ export function watchFirstArrival(): () => void {
     const cs = useCyberspace.getState()
     const pubkey = cs.identity.pubkey
     const t = useTutorial.getState()
-    // Someone else signed in: this run is theirs no longer. Their progress stays.
-    if (t.active && t.pubkey !== pubkey) t.pause()
+    // Someone else signed in: this run is theirs no longer. Their progress
+    // stays, unless it was on a last word after the choice (logging in is
+    // what AGENTS asks for), which counts as finished.
+    if (t.active && t.pubkey !== pubkey) {
+      if (t.script.steps[t.index]?.branch) t.end('finished')
+      else t.pause()
+    }
     if (decidedFor === pubkey || !settled()) return
     decidedFor = pubkey
     void savedChainLoaded().then(() => decide(pubkey), () => decide(pubkey))

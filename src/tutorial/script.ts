@@ -145,7 +145,7 @@ export const WORKSHOP: TutorialStep = {
   title: 'The workshop',
   caption: 'Change what you found, or make something new.',
   hint: 'OPEN WORKSHOP. Close it when you are done.',
-  explain: 'The workshop is where shards are made: points, faces and colors on a grid. What you make there you can place in the world in BUILD, hide in a bag or put in a chest.',
+  explain: 'The workshop is where shards are made, on a grid. Anything you make there can go into the world: place it in BUILD.',
   action: { label: 'OPEN WORKSHOP', effect: 'open-workshop' },
   wait: 'workshop',
 }
@@ -168,9 +168,9 @@ export const CHOICE: TutorialStep = {
 export const EARTH: TutorialStep = {
   id: 'earth',
   title: 'Earth',
-  caption: 'That is Earth. Every Bitcoin block lands somewhere on it. Looking is free.',
-  hint: 'To go: menu, HYPERSPACE, pick a block, BOARD.',
-  explain: 'A hyperspace ride follows the chain of Bitcoin blocks. It costs work for every block you pass, done on this device, or sats if HOSAKA does the work for you. Nothing is spent until you press BOARD.',
+  caption: 'That is Earth. Bitcoin blocks land all over it. Looking is free.',
+  hint: 'To go: menu, HYPERSPACE, pick a block, BOARD, then RIDE.',
+  explain: 'A hyperspace ride follows the chain of Bitcoin blocks. It costs work for every block you pass, done on this device, or sats if HOSAKA does the work for you. Nothing is spent until you RIDE.',
   scene: { target: 'keep', highlight: '.hamburger-menu' },
   effect: 'view-earth',
   branch: true,
@@ -180,8 +180,8 @@ export const EARTH: TutorialStep = {
 export const AGENTS: TutorialStep = {
   id: 'agents',
   title: 'Your AI',
-  caption: 'Your AI can be in cyberspace with you, and you can talk to it here.',
-  hint: 'Open the menu, then AGENTS.',
+  caption: 'Your AI can be in cyberspace with you, and you can talk to it here. It needs your Nostr account.',
+  hint: 'Open the menu, AGENTS, then LOG IN.',
   scene: { target: 'keep', highlight: '.hamburger-menu' },
   branch: true,
 }

@@ -10429,7 +10429,6 @@ html.tv-broadcast body { overflow: hidden; }
 .tutorial-choice { flex: 0 0 auto; flex-direction: column; align-items: flex-start; gap: 2px; padding: 8px 10px; min-height: 0; height: auto; text-align: left; }
 .tutorial-choice__label { color: var(--accent); font-weight: 600; letter-spacing: 0.08em; }
 .tutorial-choice__about { color: var(--dim); font-size: 11px; letter-spacing: 0; text-transform: none; }
-.tutorial-card__go--done { justify-content: center; }
 /* A seed's card (BloomCard, DECK-0008): the bloom turning, one line for its state, then its facts. */
 .bloom { display: flex; flex-direction: column; margin-bottom: 12px; }
 .bloom__state { margin: 0 0 10px; font-size: 12px; color: var(--fg); text-align: center; }
@@ -10477,3 +10476,4 @@ html.tv-broadcast body { overflow: hidden; }
 .seedc__price { margin: 2px 0 4px; font-size: 9px; letter-spacing: 0.1em; color: var(--dim); }
 .seedc__row .seedc__label--wide { flex: 0 0 auto; margin-right: 4px; }
 .tutorial__image { display: block; width: 100%; max-height: 160px; object-fit: contain; border-radius: 6px; background: rgba(0, 0, 0, 0.35); }
+.tutorial-card__go--done { background: none; color: var(--dim); border-color: var(--border); }

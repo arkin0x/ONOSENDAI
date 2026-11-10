@@ -225,4 +225,28 @@ describe('the director', () => {
     useShards.setState({ mine: [] })
     useCyberspace.setState({ events: [] })
   })
+
+  it('waits on a workshop already open, and on a shard DEPLOY lined up to place, before the next card comes', async () => {
+    const { useWorkshop } = await import('../../store/useWorkshop')
+    useWorkshop.setState({ open: true })
+    useTutorial.getState().start({ restart: true })
+    useTutorial.getState().start({ at: 'workshop' })
+    expect(useTutorial.getState().done).toBe(false)
+    // DEPLOY: the workshop closes and a placement is lined up.
+    useShards.setState({ pending: { type: 'shard' } as never })
+    useWorkshop.setState({ open: false })
+    expect(useTutorial.getState().done).toBe(false)
+    useShards.setState({ pending: null })
+    expect(useTutorial.getState().done).toBe(true)
+  })
+
+  it('shows Earth without moving the player into another plane', async () => {
+    const { runTutorialEffect } = await import('../../store/useTutorial')
+    useCyberspace.setState({ plane: 1, headPlane: 1, anchorPlane: 1 } as never)
+    runTutorialEffect('view-earth')
+    expect(useCyberspace.getState().focus?.label).toBe('EARTH')
+    expect(useCyberspace.getState().headPlane).toBe(1)
+    useCyberspace.getState().clearFocus(true)
+    expect(useCyberspace.getState().plane).toBe(1)
+  })
 })

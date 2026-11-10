@@ -79,16 +79,23 @@ export type SeedsResponse =
   | { type: 'bloom'; id: number; key: string; growth: BloomGrowth; buffers: BloomBuffers }
   | { type: 'partial'; id: number; key: string; generation: number; targetGeneration: number }
   | { type: 'error'; id: number; key: string; error: string }
-  | { type: 'blob-times'; id: number; startHeight: number; times: Uint32Array | null; error?: string }
+  | { type: 'blob-times'; id: number; startHeight: number; times: Uint32Array | null; hashes?: Uint8Array; error?: string }
 
-/** Grown strings kept, least recently used first out. Each is at most a symbol cap of symbols. */
-export const GROWN_KEPT = 64
+/**
+ * Grown strings kept, least recently used first out: as many as the page
+ * keeps seeds (useBlooms BLOOMS_KEPT), so a bloom grown a slice at a time is
+ * never pushed out between its slices. Each is at most a symbol cap of
+ * symbols; the starters' run to a few thousand.
+ */
+export const GROWN_KEPT = 128
 /** Parsed DNAs kept by text. */
 const PARSED_KEPT = 32
 
 /** One worker's memory: parsed DNAs and grown strings. */
 export class GrowCache {
   readonly grown = new Map<string, GrownSymbols>()
+  /** The hash each kept string's weather came from, by height: a string grown from other hashes does not apply. */
+  private weather = new Map<string, Record<number, string>>()
   private parsed = new Map<string, Dna>()
 
   dna(text: string): Dna | string {
@@ -105,14 +112,30 @@ export class GrowCache {
     return read.dna
   }
 
-  keep(key: string, g: GrownSymbols): void {
+  keep(key: string, g: GrownSymbols, hashes: Record<number, string>): void {
     this.grown.delete(key)
     this.grown.set(key, g)
-    while (this.grown.size > GROWN_KEPT) this.grown.delete(this.grown.keys().next().value as string)
+    const used: Record<number, string> = {}
+    for (const h of g.weatherBlocks) used[h] = hashes[h]
+    this.weather.set(key, used)
+    while (this.grown.size > GROWN_KEPT) {
+      const oldest = this.grown.keys().next().value as string
+      this.grown.delete(oldest)
+      this.weather.delete(oldest)
+    }
+  }
+
+  /** The kept string for a seed, when the weather it was grown from is the weather asked for now. */
+  from(key: string, hashes: Record<number, string>): GrownSymbols | undefined {
+    const g = this.grown.get(key)
+    if (!g) return undefined
+    const used = this.weather.get(key) ?? {}
+    if (g.weatherBlocks.some((h) => used[h] !== hashes[h])) { this.forget([key]); return undefined }
+    return g
   }
 
   forget(keys: readonly string[]): void {
-    for (const k of keys) this.grown.delete(k)
+    for (const k of keys) { this.grown.delete(k); this.weather.delete(k) }
   }
 }
 
@@ -133,9 +156,9 @@ export function handleGrow(req: GrowRequest, cache: GrowCache): { answer: SeedsR
   const seed = plantingOf(req.seed)
   const hash = (h: number): string | undefined => req.hashes[h]
   try {
-    const from = cache.grown.get(req.key)
+    const from = cache.from(req.key, req.hashes)
     const grown = growSymbols(dna, seed, req.clock, hash, { ...(from ? { from } : {}), maxSteps: req.maxSteps })
-    cache.keep(req.key, grown)
+    cache.keep(req.key, grown, req.hashes)
     if (grown.stopped === 'budget') {
       return { answer: { type: 'partial', id: req.id, key: req.key, generation: grown.generation, targetGeneration: grown.targetGeneration }, transfer: [] }
     }
@@ -167,13 +190,13 @@ export function handleGrow(req: GrowRequest, cache: GrowCache): { answer: SeedsR
 /** Where a blob's bytes come from: the Cache API the header sync fills, else the network. Replaced in tests. */
 export type BlobLoader = (url: string, sha256: string) => Promise<Uint8Array>
 
-/** The header times of one blob, its chain checked against its checkpoint (headerBook blobChainTimes). */
+/** The header times and block hashes of one blob, its chain checked against its checkpoint (headerBook blobChainTimes). */
 export async function handleBlobTimes(req: BlobTimesRequest, load: BlobLoader): Promise<{ answer: SeedsResponse; transfer: ArrayBuffer[] }> {
   try {
     const bytes = await load(req.url, req.sha256)
-    const times = blobChainTimes(bytes, req.count, req.prevHash, req.finalHash)
-    if (!times) return { answer: { type: 'blob-times', id: req.id, startHeight: req.startHeight, times: null, error: 'The blob does not chain to its checkpoint.' }, transfer: [] }
-    return { answer: { type: 'blob-times', id: req.id, startHeight: req.startHeight, times }, transfer: [times.buffer as ArrayBuffer] }
+    const read = blobChainTimes(bytes, req.count, req.prevHash, req.finalHash)
+    if (!read) return { answer: { type: 'blob-times', id: req.id, startHeight: req.startHeight, times: null, error: 'The blob does not chain to its checkpoint.' }, transfer: [] }
+    return { answer: { type: 'blob-times', id: req.id, startHeight: req.startHeight, times: read.times, hashes: read.hashes }, transfer: [read.times.buffer as ArrayBuffer, read.hashes.buffer as ArrayBuffer] }
   } catch (e) {
     return { answer: { type: 'blob-times', id: req.id, startHeight: req.startHeight, times: null, error: e instanceof Error ? e.message : String(e) }, transfer: [] }
   }

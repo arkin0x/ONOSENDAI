@@ -53,6 +53,7 @@ import { ConfirmModal } from './ConfirmModal'
 import { ItemFace } from './ItemIcon'
 import { CardSpin } from '../scene/CardSpin'
 import { BloomCard } from './BloomCard'
+import { seedItemOf } from '../lib/seeds/seedItem'
 import { drawnLook, lookOf } from '../lib/looks'
 import { openedByHand, useOpenedChests } from '../store/useOpenedChests'
 import { EventData } from './EventData'
@@ -162,7 +163,7 @@ export function SecretModal(): JSX.Element | null {
   const goTo = (): void => {
     close()
     const label = item.type === 'message' ? name : item.type === 'key' ? item.keyItem?.name ?? 'key' : item.type === 'chest' ? item.chest?.name ?? 'chest' : item.type === 'audio' ? item.audio?.title ?? 'audio' : item.type === 'seed' ? 'seed' : item.shard?.name ?? 'shard'
-    useCyberspace.getState().focusItem(item.at, item.plane, label, item.type === 'shard' ? item.shard?.unit ?? 0 : 0)
+    useCyberspace.getState().focusItem(item.at, item.plane, label, item.type === 'shard' ? item.shard?.unit ?? 0 : item.type === 'seed' && item.event ? seedItemOf(item.event)?.scale ?? 0 : 0)
   }
   // Where it was found, for what is taken out of a chest here.
   const place = { lookupId: item.lookupId ?? '', bagId: item.bagId ?? '', at: { x: item.at.x.toString(), y: item.at.y.toString(), z: item.at.z.toString() }, plane: item.plane, height: item.height }

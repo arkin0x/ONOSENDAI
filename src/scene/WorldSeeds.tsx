@@ -22,6 +22,7 @@ import { useBlooms, wantSeeds } from '../store/useBlooms'
 import { seedItemOf, seedsInPlane, type SeedItem } from '../lib/seeds/seedItem'
 import { bloomShard } from '../lib/seeds/bloomShard'
 import type { ShardModel } from 'sno-core/shards'
+import type { NostrEvent } from '../lib/events'
 import { PlacedShard, placeShard, useSteadied, type PlacedShardDraw } from './WorldShards'
 
 const REACH = GRID_RADIUS * 8
@@ -34,6 +35,14 @@ function seedMark(unit: number): ShardModel {
   const faces = new Uint32Array([0, 2, 4, 2, 1, 4, 1, 3, 4, 3, 0, 4, 2, 0, 5, 1, 2, 5, 3, 1, 5, 0, 3, 5])
   return bloomShard({ positions, colors, faces }, 'seed', unit, `seed-mark:${unit}`)
 }
+/** Seeds read once per event: the view moves every frame, and the tags do not. */
+const read = new WeakMap<object, SeedItem | null>()
+function seedOfEvent(ev: NostrEvent): SeedItem | null {
+  let s = read.get(ev)
+  if (s === undefined) read.set(ev, (s = seedItemOf(ev)))
+  return s
+}
+
 const marks = new Map<number, ShardModel>()
 function markFor(unit: number): ShardModel {
   let m = marks.get(unit)
@@ -57,7 +66,7 @@ export function WorldSeeds({ axes }: { axes: ViewAxes }): JSX.Element | null {
     const origin = alignedOrigin(anchor, scaleExp)
     const out: Array<{ w: WorldItem; seed: SeedItem }> = []
     for (const w of seedsInPlane(useShards.getState().drawnItems(), anchorPlane)) {
-      const seed = w.event ? seedItemOf(w.event) : null
+      const seed = w.event ? seedOfEvent(w.event) : null
       if (!seed) continue
       const placed = placeShard({ ...w, shard: markFor(seed.scale) }, origin, scaleExp, axes)
       if (Number.isFinite(placed.scale) && Math.hypot(...placed.centre) <= REACH) out.push({ w, seed })

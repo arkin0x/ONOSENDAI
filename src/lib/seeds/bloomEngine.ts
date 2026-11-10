@@ -10,15 +10,19 @@
  *      coming soon; one missing or refused says so.
  *   3. Its work is checked against its DNA's price (sno-core workOk): a seed
  *      that paid less than its DNA asks is skipped, never grown (§7).
- *   4. The clock is the tip of the Bitcoin line minus 6 (§4.1), and the
- *      planted height is clamped with header times (seedClock.ts). Until it
- *      is settled the seed draws as its axiom, generation 0 (§4.2).
+ *   4. The clock is the trusted tip minus 6 (§4.1): NTH's newest verified
+ *      anchor (seedSources.ts), never the stop index, which any key's kind
+ *      321 can fill. The planted height is clamped with header times
+ *      (seedClock.ts). Until it is settled the seed draws as its axiom,
+ *      generation 0 (§4.2).
  *   5. A DNA whose caps could pass this device's budget (bloomBudget.ts) also
  *      draws as its axiom until GROW ANYWAY.
  *   6. The bloom grows and draws in the worker (growJob.ts), a slice at a
  *      time, one request at a time, and comes back as buffers made into a
- *      shard (bloomShard.ts). A driving block the page lacks leaves it
- *      behind, drawn at the generation it reached (§4.1).
+ *      shard (bloomShard.ts). The hashes that drive its weather come only
+ *      from verified headers (the header book: NTH's anchors, the blobs). A
+ *      driving block the page lacks leaves it behind, drawn at the
+ *      generation it reached (§4.1).
  *
  * Nothing here blocks: every step is a promise, and the worker does the
  * arithmetic. The engine takes its sources as arguments so a test can run it
@@ -71,29 +75,40 @@ export interface BloomDeps {
   dna: Pick<DnaResolver, 'resolve' | 'verdict'>
   book: HeaderBook
   fetchHeaders: HeaderFetch
-  /** The best tip height of the Bitcoin line, or null before it is known. */
+  /** The trusted tip height of the Bitcoin line, or null before it is known. */
   tip: () => number | null
-  /** A block hash from the hyperspace index, by height. */
-  indexHash: (height: number) => string | null | undefined
   /** One request to the seeds worker (growClient growInWorker). */
   grow: (req: Omit<GrowRequest, 'id' | 'type'>) => Promise<SeedsResponse>
+  /** Let the worker drop what it keeps for seeds no longer wanted (growClient forgetInWorker). */
+  forget?: (ids: string[]) => void
   /** This device's step budget (bloomBudget deviceBudget). */
   budget: number
   /** Told whenever a seed's view changes. */
   onView: (id: string, view: BloomView) => void
 }
 
-/** The hashes of the blocks that drive a bloom's generations (§4.1), as far as the page holds them. */
+/** The heights of the blocks that drive a bloom's generations up to the clock's (§4.1). */
+export function drivingHeights(planting: PlantingWire, clock: number): number[] {
+  if (planting.planted === null) return []
+  const g = targetGeneration({ coord: planting.coord, planted: planting.planted, scale: planting.scale, caps: planting.caps }, clock)
+  const out: number[] = []
+  for (let k = 1; k <= g; k++) out.push(planting.planted + k * BLOCKS_PER_GENERATION)
+  return out
+}
+
+/** The hashes of the driving blocks, as far as the page holds them. */
 export function drivingHashes(planting: PlantingWire, clock: number, hash: (h: number) => string | null | undefined): Record<number, string> {
   const out: Record<number, string> = {}
-  if (planting.planted === null) return out
-  const g = targetGeneration({ coord: planting.coord, planted: planting.planted, scale: planting.scale, caps: planting.caps }, clock)
-  for (let k = 1; k <= g; k++) {
-    const h = planting.planted + k * BLOCKS_PER_GENERATION
+  for (const h of drivingHeights(planting, clock)) {
     const hex = hash(h)
     if (typeof hex === 'string' && /^[0-9a-f]{64}$/.test(hex)) out[h] = hex
   }
   return out
+}
+
+/** The driving hashes in one short string, for telling whether a bloom drawn before was drawn from the same weather. */
+function weatherPrint(hashes: Record<number, string>): string {
+  return Object.keys(hashes).map(Number).sort((a, b) => a - b).map((h) => `${h}:${hashes[h].slice(-16)}`).join(',')
 }
 
 function dnaStatus(v: DnaVerdict): BloomStatus {
@@ -135,13 +150,15 @@ export class BloomEngine {
     for (const id of this.seeds.keys()) if (!only || only(this.views.get(id))) void this.refresh(id)
   }
 
-  /** Forget seeds no longer wanted, keeping at most `keep` (the newest wanted). */
+  /** Forget seeds no longer wanted, here and in the worker. */
   forget(ids: readonly string[]): void {
     for (const id of ids) {
       this.seeds.delete(id)
       this.views.delete(id)
       this.drawnFor.delete(id)
+      this.anyway.delete(id)
     }
+    this.deps.forget?.([...ids])
   }
 
   wanted(): string[] { return [...this.seeds.keys()] }
@@ -157,7 +174,13 @@ export class BloomEngine {
       try {
         do {
           this.dirty.delete(id)
-          await this.pass(id)
+          try {
+            await this.pass(id)
+          } catch (e) {
+            // Never left reading or growing for good: the card says it did not grow.
+            const v = this.views.get(id)
+            this.set(id, { ...(v ?? { seedId: id }), status: 'error', error: e instanceof Error ? e.message : String(e) })
+          }
         } while (this.dirty.has(id))
       } finally {
         this.running.delete(id)
@@ -203,12 +226,15 @@ export class BloomEngine {
     const settled = planted.state === 'settled' ? planted.height : null
     const heavy = tooHeavy(verdict.caps, this.deps.budget) && !this.anyway.has(id)
     const planting: PlantingWire = { coord: seed.coord, planted: heavy ? null : settled, scale: seed.scale, caps: verdict.caps }
-    const hash = (h: number): string | null | undefined => this.deps.book.hash(h) ?? this.deps.indexHash(h)
-    const hashes = drivingHashes(planting, clock, hash)
+    // The weather only from verified headers: fetched for the driving heights the book lacks.
+    const lacking = drivingHeights(planting, clock).filter((h) => !this.deps.book.hash(h))
+    if (lacking.length > 0) await this.deps.fetchHeaders(lacking)
+    const hashes = drivingHashes(planting, clock, (h) => this.deps.book.hash(h))
     const status: BloomStatus = heavy ? 'heavy' : settled === null ? (planted.state === 'pending' && planted.waiting ? 'waiting' : 'pending') : 'grown'
     const base: BloomView = { seedId: id, status, dna, clock, ...(settled !== null ? { planted: settled } : {}) }
-    // The same block, the same planting, the same hashes: the bloom drawn is already right.
-    const drawKey = `${verdict.id}|${clock}|${planting.planted}|${Object.keys(hashes).length}`
+    // The same planting, the same weather, and the same block (an axiom is the
+    // same at every block): the bloom drawn is already right.
+    const drawKey = `${verdict.id}|${planting.planted ?? 'axiom'}|${planting.planted === null ? '' : clock}|${weatherPrint(hashes)}`
     const prev = this.views.get(id)
     if (this.drawnFor.get(id) === drawKey && prev?.shard) {
       if (prev.status !== status) this.set(id, { ...prev, ...base, growth: prev.growth, shard: prev.shard })
@@ -226,11 +252,21 @@ export class BloomEngine {
     this.set(id, { ...base, growth: answer.growth, shard })
   }
 
-  /** One bloom through the worker, slice after slice, each slice queued behind the other blooms'. */
+  /**
+   * One bloom through the worker, slice after slice, each slice queued behind
+   * the other blooms'. It ends: a seed forgotten meanwhile stops it, and a
+   * slice that made no progress (its string pushed out of the worker's
+   * memory between slices) is followed by one call that grows it whole.
+   */
   private async growAll(req: Omit<GrowRequest, 'id' | 'type'>): Promise<SeedsResponse> {
+    let last = -1
+    let ask = req
     for (;;) {
-      const answer = await this.enqueue(() => this.deps.grow(req))
+      if (!this.seeds.has(req.key)) return { type: 'error', id: 0, key: req.key, error: 'No longer wanted.' }
+      const answer = await this.enqueue(() => this.deps.grow(ask))
       if (answer.type !== 'partial') return answer
+      if (answer.generation <= last) ask = { ...req, maxSteps: Number.MAX_SAFE_INTEGER }
+      last = answer.generation
     }
   }
 

@@ -1052,10 +1052,12 @@ interface BagFacts { height: number; bag: BagSettings; room?: { doorId: string }
 function fromInner(inner: Rumor, outer: NostrEvent, keyHex: string, facts: BagFacts, heightKnown = true, origin?: RegionOrigin): Hidden | null {
   // By the same key that wrapped it, and signed, or a message sealed as a
   // rumor (innerAuthentic).
-  if (!innerAuthentic(inner, outer.pubkey)) return null
   // A DNA carried for the seeds planted from it (DECK-0008 §8.1, Public or
-  // hidden): the bag is where a reader looks for it first (§8.2).
-  if (inner.kind === DNA_KIND) { noteBagDna(inner as NostrEvent); return null }
+  // hidden): the bag is where a reader looks for it first (§8.2). One of
+  // another author's is placed unchanged, signed by them, so it is not held
+  // to the bag's signer; the resolver checks its id and signature itself.
+  if (inner && typeof inner === 'object' && inner.kind === DNA_KIND) { noteBagDna(inner as NostrEvent); return null }
+  if (!innerAuthentic(inner, outer.pubkey)) return null
 
   const coordHex = tag(inner, 'C')
   if (!coordHex) return null

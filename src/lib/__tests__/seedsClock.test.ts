@@ -77,9 +77,17 @@ describe('header times from a blob', () => {
     return { bytes, last: bytesToHex(reverse32(p)), times }
   }
 
-  it('reads every time when the chain ends at its checkpoint', () => {
+  it('reads every time and block hash when the chain ends at its checkpoint', () => {
     const { bytes, last, times } = chain(5)
-    expect([...blobChainTimes(bytes, 5, '00'.repeat(32), last)!]).toEqual(times)
+    const read = blobChainTimes(bytes, 5, '00'.repeat(32), last)!
+    expect([...read.times]).toEqual(times)
+    expect(bytesToHex(read.hashes.subarray(4 * 32))).toBe(last)
+    // Kept whole in the book: a time and a hash at any of its heights, no map of 50,000.
+    const book = new HeaderBook()
+    book.addBlob({ start: 100, ...read })
+    expect(book.time(104)).toBe(times[4])
+    expect(book.hash(104)).toBe(last)
+    expect(book.has(105)).toBe(false)
   })
 
   it('reads nothing when a record was changed, or the checkpoint is another', () => {
@@ -101,12 +109,14 @@ describe('fetching headers by authors and #B', () => {
     })
     const heights = Array.from({ length: 150 }, (_, i) => 975200 + i)
     await fetchAnchorHeaders(book, heights, query)
-    expect(query).toHaveBeenCalledTimes(Math.ceil(150 / B_PER_QUERY))
+    // Two chunks, and the heights of the first that did not come back asked once more on their own.
+    expect(query).toHaveBeenCalledTimes(Math.ceil(150 / B_PER_QUERY) + 1)
+    expect(query.mock.calls[1][0]['#B']).toHaveLength(B_PER_QUERY - 1)
     expect(book.has(975256)).toBe(true)
     expect(book.isAbsent(975255)).toBe(true)
     // Asked again: nothing it holds or knows to be absent goes out.
     await fetchAnchorHeaders(book, heights, query)
-    expect(query).toHaveBeenCalledTimes(2)
+    expect(query).toHaveBeenCalledTimes(3)
   })
 
   it('an absent height is asked for again after a while', () => {
@@ -155,6 +165,21 @@ describe('the planted height, clamped with injected headers (§4.2)', () => {
     const book = new HeaderBook()
     const got = await settlePlanted(c.stated, c.created_at, c.settled_from_clock, book, fetcher(book, holed))
     expect(got).toMatchObject({ state: 'pending', waiting: true })
+  })
+
+  it('what is fetched follows created_at, never the planted height a planter wrote', async () => {
+    const c = vectors.clamp.cases[0]
+    const asked: number[] = []
+    const book = new HeaderBook()
+    const fetch = async (heights: number[]): Promise<void> => {
+      asked.push(...heights)
+      for (const h of heights) { const t = times.get(h); if (t !== undefined) book.addTimes(h, [t]) }
+      book.markAbsent(heights)
+    }
+    const got = await settlePlanted(0, c.created_at, c.settled_from_clock, book, fetch)
+    // Stated 0, raised to E: and nothing near height 0 was asked for.
+    expect(got).toMatchObject({ state: 'settled', height: c.E })
+    expect(Math.min(...asked)).toBeGreaterThan(c.settled_from_clock - 400)
   })
 
   it('the prediction covers the median window at the clock and the blocks around the planted height', () => {

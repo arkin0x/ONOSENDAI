@@ -111,8 +111,9 @@ describe('the engine, from a seed to a drawn bloom', () => {
   const times = clampTimes()
   for (let h = 970620; h <= 971200; h++) times.set(h, 1791544000 + (h - 970620) * 600)
 
-  function engineFor(dnaEvents: NostrEvent[], o: { tip?: number | null; budget?: number } = {}) {
+  function engineFor(dnaEvents: NostrEvent[], o: { tip?: number | null; budget?: number; grow?: typeof growInWorker } = {}) {
     resetInlineGrowth()
+    const fetched: number[] = []
     const fetch = vi.fn(async (ids: string[]) => dnaEvents.filter((e) => ids.includes(e.id)))
     const dna = new DnaResolver({ fetch, load: async () => undefined, save: async () => {} })
     const book = new HeaderBook()
@@ -121,14 +122,18 @@ describe('the engine, from a seed to a drawn bloom', () => {
     const engine = new BloomEngine({
       dna,
       book,
-      fetchHeaders: async (heights) => { for (const h of heights) { const t = times.get(h); if (t !== undefined) book.addTimes(h, [t]) } book.markAbsent(heights) },
+      // Verified headers only: times, and the hashes that drive the weather, come through here.
+      fetchHeaders: async (heights) => {
+        fetched.push(...heights)
+        for (const h of heights) { const t = times.get(h); if (t !== undefined) book.add({ height: h, hash: synthetic(h), time: t }) }
+        book.markAbsent(heights)
+      },
       tip: () => (o.tip === undefined ? 970524 + 3 * 144 + 6 : o.tip),
-      indexHash: synthetic,
-      grow,
+      grow: o.grow ?? grow,
       budget: o.budget ?? DESKTOP_BUDGET,
       onView: (id, v) => views.set(id, v),
     })
-    return { engine, views, fetch, grow }
+    return { engine, views, fetch, grow, fetched }
   }
 
   async function settle(engine: BloomEngine, id: string): Promise<void> {
@@ -139,8 +144,8 @@ describe('the engine, from a seed to a drawn bloom', () => {
   const seedEvent = mineSeedEvent({ dnaId: crystal.id, planted: honest.stated, at, plane: 0, createdAt: honest.created_at })
   const seed = seedItemOf(seedEvent)!
 
-  it('grows the bloom sno-core grows, at day 3', async () => {
-    const { engine, views } = engineFor([crystal])
+  it('grows the bloom sno-core grows, at day 3, its weather fetched as verified headers', async () => {
+    const { engine, views, fetched } = engineFor([crystal])
     engine.want([seed])
     await settle(engine, seed.id)
     const v = views.get(seed.id)!
@@ -151,6 +156,34 @@ describe('the engine, from a seed to a drawn bloom', () => {
     expect(bloomStateLine(v)).toBeNull()
     const bloom = growBloom(parseDna(crystal.content), { coord: seed.coord, planted: 970524, scale: 0 }, v.clock!, synthetic)
     expect({ ...v.shard!, id: 'x' }).toEqual(modelOfPayload(bloom.sno, 'x'))
+    for (const k of [1, 2, 3]) expect(fetched).toContain(970524 + k * 144)
+  })
+
+  it('a slice that made no progress is followed by one that grows it whole; a forgotten seed stops', async () => {
+    const asks: number[] = []
+    const stuck = vi.fn(async (req: Parameters<typeof growInWorker>[0]) => {
+      asks.push(req.maxSteps)
+      // The worker forgot it between slices: generation 1 every time, until asked for all of it.
+      if (req.maxSteps < Number.MAX_SAFE_INTEGER) return { type: 'partial' as const, id: 0, key: req.key, generation: 1, targetGeneration: 3 }
+      return growInWorker(req)
+    })
+    const { engine, views } = engineFor([crystal], { grow: stuck })
+    engine.want([seed])
+    await settle(engine, seed.id)
+    expect(views.get(seed.id)?.status).toBe('grown')
+    expect(asks.slice(-1)[0]).toBe(Number.MAX_SAFE_INTEGER)
+    expect(asks.length).toBe(3)
+
+    let calls = 0
+    const forever = vi.fn(async (req: Parameters<typeof growInWorker>[0]) => {
+      calls++
+      if (calls === 2) other.engine.forget([seed.id])
+      return { type: 'partial' as const, id: 0, key: req.key, generation: calls, targetGeneration: 99 }
+    })
+    const other = engineFor([crystal], { grow: forever })
+    other.engine.want([seed])
+    await settle(other.engine, seed.id)
+    expect(calls).toBe(2)
   })
 
   it('the same block again: nothing is grown twice', async () => {

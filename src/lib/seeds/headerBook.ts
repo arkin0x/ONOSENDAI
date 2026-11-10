@@ -99,24 +99,34 @@ export function headerOfAnchor(ev: Pick<NostrEvent, 'kind' | 'pubkey' | 'tags'> 
   return { height, hash: h, time: headerTimeOf(bytes) }
 }
 
+/** One header blob's times and block hashes (display order, 32 bytes a block), from `start`. */
+export interface BlobHeaders {
+  start: number
+  times: Uint32Array
+  hashes: Uint8Array
+}
+
 /**
- * Every header time of one header blob, or null when its chain does not hold:
- * each record is rebuilt into its wire header with the previous block's hash,
- * and the last block's hash must be `finalHashDisplay`, the manifest's
- * checkpoint (already checked against the embedded list by the caller). The
- * chain of hashes commits every header to that checkpoint, so every time in
- * it is the real block's. Pure; runs in the seeds worker.
+ * Every header time and block hash of one header blob, or null when its chain
+ * does not hold: each record is rebuilt into its wire header with the
+ * previous block's hash, and the last block's hash must be
+ * `finalHashDisplay`, the manifest's checkpoint (already checked against the
+ * embedded list by the caller). The chain of hashes commits every header to
+ * that checkpoint, so every time and hash in it is the real block's. Pure;
+ * runs in the seeds worker.
  */
-export function blobChainTimes(bytes: Uint8Array, count: number, prevHashDisplay: string, finalHashDisplay: string): Uint32Array | null {
+export function blobChainTimes(bytes: Uint8Array, count: number, prevHashDisplay: string, finalHashDisplay: string): { times: Uint32Array; hashes: Uint8Array } | null {
   if (bytes.byteLength !== count * HEADER_RECORD_SIZE || !HEX64.test(prevHashDisplay) || !HEX64.test(finalHashDisplay)) return null
   const times = new Uint32Array(count)
+  const hashes = new Uint8Array(count * 32)
   let prev = reverse32(hexToBytes(prevHashDisplay))
   for (let i = 0; i < count; i++) {
     const rec = readRecord(bytes, i)
     times[i] = rec.time
     prev = sha256d(wireHeader(rec, prev))
+    hashes.set(reverse32(prev), i * 32)
   }
-  return bytesToHex(reverse32(prev)) === finalHashDisplay ? times : null
+  return bytesToHex(reverse32(prev)) === finalHashDisplay ? { times, hashes } : null
 }
 
 /** How long a height asked for and not found stays absent before it is asked for again. */
@@ -126,6 +136,8 @@ export const ABSENT_MS = 5 * 60_000
 export class HeaderBook {
   private times = new Map<number, number>()
   private hashes = new Map<number, string>()
+  /** Whole blobs, kept as their arrays: 50,000 heights each, never 50,000 map entries. */
+  private blobs: BlobHeaders[] = []
   private absent = new Map<number, number>()
   private listeners = new Set<() => void>()
   /** Rises whenever a header is added. */
@@ -133,9 +145,32 @@ export class HeaderBook {
 
   constructor(private now: () => number = () => Date.now()) {}
 
-  time(height: number): number | undefined { return this.times.get(height) }
-  hash(height: number): string | undefined { return this.hashes.get(height) }
-  has(height: number): boolean { return this.times.has(height) }
+  private blobOf(height: number): BlobHeaders | undefined {
+    return this.blobs.find((b) => height >= b.start && height < b.start + b.times.length)
+  }
+
+  time(height: number): number | undefined {
+    const t = this.times.get(height)
+    if (t !== undefined) return t
+    const b = this.blobOf(height)
+    return b ? b.times[height - b.start] : undefined
+  }
+
+  hash(height: number): string | undefined {
+    const h = this.hashes.get(height)
+    if (h !== undefined) return h
+    const b = this.blobOf(height)
+    return b ? bytesToHex(b.hashes.subarray((height - b.start) * 32, (height - b.start + 1) * 32)) : undefined
+  }
+
+  has(height: number): boolean { return this.times.has(height) || this.blobOf(height) !== undefined }
+
+  /** The highest height with a header, or null: the trusted tip, when the book is fed NTH's newest anchors. */
+  top(): number | null {
+    let top: number | null = null
+    for (const h of this.times.keys()) if (top === null || h > top) top = h
+    return top
+  }
 
   /** True while a height was asked for and not found, less than ABSENT_MS ago. */
   isAbsent(height: number): boolean {
@@ -145,7 +180,7 @@ export class HeaderBook {
 
   markAbsent(heights: Iterable<number>): void {
     const until = this.now() + ABSENT_MS
-    for (const h of heights) if (!this.times.has(h)) this.absent.set(h, until)
+    for (const h of heights) if (!this.has(h)) this.absent.set(h, until)
   }
 
   add(header: VerifiedHeader): void {
@@ -156,13 +191,21 @@ export class HeaderBook {
     this.bump()
   }
 
-  /** Times from a verified blob, `times[i]` at `startHeight + i`. */
+  /** Times from injected headers (tests), `times[i]` at `startHeight + i`. */
   addTimes(startHeight: number, times: ArrayLike<number>): void {
     for (let i = 0; i < times.length; i++) {
       this.times.set(startHeight + i, times[i])
       this.absent.delete(startHeight + i)
     }
     if (times.length > 0) this.bump()
+  }
+
+  /** A verified blob, whole (blobChainTimes). */
+  addBlob(blob: BlobHeaders): void {
+    if (blob.hashes.length !== blob.times.length * 32 || this.blobs.some((b) => b.start === blob.start)) return
+    this.blobs.push(blob)
+    for (const h of [...this.absent.keys()]) if (h >= blob.start && h < blob.start + blob.times.length) this.absent.delete(h)
+    this.bump()
   }
 
   onChange(listener: () => void): () => void {
@@ -190,8 +233,7 @@ export type AnchorQuery = (filter: { kinds: number[]; authors: string[]; '#B': s
  */
 export async function fetchAnchorHeaders(book: HeaderBook, heights: Iterable<number>, query: AnchorQuery, verify?: (ev: NostrEvent) => boolean): Promise<void> {
   const want = [...new Set(heights)].filter((h) => h >= 0 && !book.has(h) && !book.isAbsent(h)).sort((a, b) => a - b)
-  for (let i = 0; i < want.length; i += B_PER_QUERY) {
-    const chunk = want.slice(i, i + B_PER_QUERY)
+  const ask = async (chunk: number[]): Promise<void> => {
     let events: NostrEvent[] = []
     try {
       events = await query({ kinds: [321], authors: [NTH_PUBKEY], '#B': chunk.map(String), limit: chunk.length * 3 })
@@ -200,6 +242,25 @@ export async function fetchAnchorHeaders(book: HeaderBook, heights: Iterable<num
       const header = headerOfAnchor(ev, verify)
       if (header && chunk.includes(header.height)) book.add(header)
     }
+  }
+  for (let i = 0; i < want.length; i += B_PER_QUERY) {
+    const chunk = want.slice(i, i + B_PER_QUERY)
+    await ask(chunk)
+    // Asked once more, on their own, before they count as absent: several
+    // anchors to a height (§2.5) can fill a query's limit before every height is in.
+    const missing = chunk.filter((h) => !book.has(h))
+    if (missing.length > 0 && missing.length < chunk.length) await ask(missing)
     book.markAbsent(chunk)
   }
+}
+
+/** NTH's newest anchors, verified, into the book: its top is then the tip this client trusts. */
+export async function fetchNthTip(book: HeaderBook, query: (filter: { kinds: number[]; authors: string[]; limit: number }) => Promise<NostrEvent[]>, verify?: (ev: NostrEvent) => boolean): Promise<number | null> {
+  let events: NostrEvent[] = []
+  try { events = await query({ kinds: [321], authors: [NTH_PUBKEY], limit: 12 }) } catch { events = [] }
+  for (const ev of events) {
+    const header = headerOfAnchor(ev, verify)
+    if (header) book.add(header)
+  }
+  return book.top()
 }

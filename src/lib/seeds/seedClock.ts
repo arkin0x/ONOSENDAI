@@ -28,19 +28,31 @@ export type PlantedState = PlantedHeight & {
 export type HeaderFetch = (heights: number[]) => Promise<void>
 
 /**
- * The heights a pass of the clamp will read for a seed planted near
- * `planted`, at `clock`: the median time past window at the clock, the
- * windows of the gallop down from it as far as the planted height, and the
- * blocks around the planted height where E and F lie. A prediction only:
- * whatever else a pass needs it asks for.
+ * The heights a pass of the clamp will read for a seed whose `created_at`
+ * lies near height `near`, at `clock`: the median time past window at the
+ * clock, the windows of the gallop down from it as far as `near`, and the
+ * blocks around `near` where E and F lie. A prediction only: whatever else a
+ * pass needs it asks for.
  */
-export function predictedHeights(planted: number, clock: number): number[] {
+export function predictedHeights(near: number, clock: number): number[] {
   const out = new Set<number>()
   const window = (top: number): void => { for (let h = top - 10; h <= top; h++) if (h >= 0) out.add(h) }
   window(clock)
-  for (let step = 1; clock - step >= Math.max(10, planted - 300); step *= 2) window(clock - step)
-  for (let h = planted - 30; h <= Math.min(clock, planted + 30); h++) if (h >= 0) out.add(h)
+  for (let step = 1; clock - step >= Math.max(10, near - 300); step *= 2) window(clock - step)
+  for (let h = near - 30; h <= Math.min(clock, near + 30); h++) if (h >= 0) out.add(h)
   return [...out].sort((a, b) => a - b)
+}
+
+/**
+ * About the height whose header time is `t`, from the clock's own header and
+ * ten minutes a block. Where E and F will be found (§4.2) depends on the
+ * seed's `created_at`, never on the `planted` its planter wrote, so a seed
+ * that states an absurd height makes this client fetch nothing for it.
+ */
+export function heightNear(t: number, clock: number, book: Pick<HeaderBook, 'time'>): number {
+  const top = book.time(clock)
+  if (top === undefined) return clock
+  return Math.max(0, Math.min(clock, clock - Math.round((top - t) / 600)))
 }
 
 /** The most fetches one call of `settlePlanted` makes before it leaves the seed pending for now. */
@@ -55,7 +67,9 @@ export async function settlePlanted(stated: number, createdAt: number, clock: nu
   const time = (h: number): number | undefined => book.time(h)
   let result: PlantedState = effectivePlantedHeight(stated, createdAt, clock, time)
   if (result.state !== 'pending' || result.missingHeader === undefined) return result
-  await fetch(predictedHeights(stated, clock))
+  // The clock's own window first: it says how far back `created_at` lies.
+  await fetch(predictedHeights(clock, clock))
+  await fetch(predictedHeights(heightNear(createdAt, clock, book), clock))
   for (let round = 0; round < SETTLE_ROUNDS; round++) {
     result = effectivePlantedHeight(stated, createdAt, clock, time)
     if (result.state !== 'pending' || result.missingHeader === undefined) return result

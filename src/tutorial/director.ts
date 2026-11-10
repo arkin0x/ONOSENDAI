@@ -30,7 +30,7 @@ import { useShards } from '../store/useShards'
 import { useOpenedChests, openedKey } from '../store/useOpenedChests'
 import { useInventory } from '../store/useInventory'
 import { useWalk } from '../store/useWalk'
-import { START_STAND, atStart, courseToWorld } from './course'
+import { START_STAND, atStart, courseToWorld, onDeck } from './course'
 import { regionKeyOffThread } from '../lib/regionKeyOffThread'
 import type { Position } from '../lib/space'
 import { setGuideBags } from './guideBags'
@@ -198,10 +198,16 @@ registerTutorialWatcher('gravity', (onDone) => watchUntil(
   [(l) => useCyberspace.subscribe((s, prev) => { if (s.walking !== prev.walking) l() }), (l) => useWalk.subscribe(l)],
 ))
 
+/**
+ * The finish (T7): standing on the deck, and the finish chest found. Both:
+ * a boosted bounce can fly through the deck's region and come down past it,
+ * which reveals the chest to a player who did not finish.
+ */
 registerTutorialWatcher('see-finish', (onDone) => watchUntil(() => {
-  const id = useTutorialStage.getState().stage?.ids.finishChest
-  return !!id && !!useShards.getState().discovered[id]
-}, onDone, [onStage, (l) => useShards.subscribe((s, prev) => { if (s.discovered !== prev.discovered) l() })]))
+  const { stage, layout } = useTutorialStage.getState()
+  const cs = useCyberspace.getState()
+  return !!stage && !!layout && !!useShards.getState().discovered[stage.ids.finishChest] && cs.events.length > 0 && cs.headPlane === layout.plane && onDeck(layout.frame, cs.position)
+}, onDone, [onStage, (l) => useShards.subscribe((s, prev) => { if (s.discovered !== prev.discovered) l() }), (l) => useCyberspace.subscribe((s, prev) => { if (s.position !== prev.position || s.headPlane !== prev.headPlane) l() })]))
 
 registerTutorialWatcher('take-finish', (onDone) => watchUntil(() => {
   const ids = useTutorialStage.getState().stage?.ids.finishContents ?? []

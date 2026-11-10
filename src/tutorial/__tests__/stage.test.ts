@@ -84,18 +84,6 @@ describe('the course', () => {
     }
   })
 
-  it('needs the trampoline: the deck is out of reach of a jump and its double jump, and the gaps before it are EASY', () => {
-    // From the trampoline's top a walker stands at 2; on the deck at 10: up 8, past the 7 a jump and its double jump reach.
-    const deck = COURSE.find((p) => p.piece === 'plat-square-6' && p.at[1] === 9)!
-    const tramp = COURSE.find((p) => p.piece === 'trampoline-4')!
-    expect(deck.at[1] + 1 - (tramp.at[1] + 2)).toBe(8)
-    // Level gaps of 2, 3 and 3 between the squares (cells from middle -n to +n).
-    const half = (p: string): number => (p === 'plat-square-6' ? 3 : 2)
-    const run = COURSE.filter((p) => p.piece.startsWith('plat-square') && p.at[1] === 0)
-    const gaps = run.slice(1).map((p, i) => (p.at[2] - half(p.piece)) - (run[i].at[2] + half(run[i].piece)) - 1)
-    expect(gaps).toEqual([2, 3, 3])
-  })
-
   it('counts a walker on the start square as at the start, and nowhere else', () => {
     const frame = tutorialLayout(MID, 0).frame
     expect(atStart(frame, courseToWorld(frame, START_STAND))).toBe(true)

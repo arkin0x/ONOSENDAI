@@ -56,7 +56,7 @@ export const TAKE: TutorialStep = {
 export const TO_COURSE: TutorialStep = {
   id: 'to-course',
   title: 'The course',
-  caption: 'See the platforms? Go to the start line.',
+  caption: 'See the platforms? Go to the start.',
   hint: 'Tap COMMIT to move there.',
   scene: { target: 'self' },
   wait: 'at-start',
@@ -82,6 +82,7 @@ export const GRAVITY: TutorialStep = {
   hint: 'Tap GRAVITY (or press Z).',
   scene: { target: 'keep', highlight: '.touchpad__key--gravity' },
   wait: 'gravity',
+  needsWalk: 'walk',
 }
 
 /** The run: three gaps and the trampoline up to the finish deck. */
@@ -90,7 +91,8 @@ export const RUN: TutorialStep = {
   title: 'Run it',
   caption: 'Jump the gaps to the trampoline. It throws you up to the finish.',
   hint: 'JUMP (Space) to jump, again in the air to jump higher.',
-  explain: 'A jump takes you 5 up and as far as you press forward in the air. Press JUMP again in the air for 3 more. The finish is too high to jump to: land on the trampoline and press forward while it throws you. Fall off and you land on the floor below; the step at the back takes you up to the start.',
+  needsWalk: 'walk',
+  explain: 'A jump takes you 5 up and as far as you press forward in the air. Press JUMP again in the air for 3 more. The finish is too high to jump to: land on the trampoline and press forward while it throws you. Fall off and you land on the floor below; walk to the step behind the start to climb back up.',
   wait: 'see-finish',
 }
 
@@ -98,9 +100,9 @@ export const RUN: TutorialStep = {
 export const FINISH: TutorialStep = {
   id: 'finish',
   title: 'You made it',
-  caption: 'Another chest. OPEN it and TAKE what is inside: pieces to build your own course.',
-  hint: 'Tap the chest, OPEN, then TAKE ALL.',
-  scene: { target: 'keep', highlight: '.hyperbar--found' },
+  caption: 'Another chest, with pieces to build a course of your own. OPEN it and TAKE them.',
+  hint: 'Tap the chest to OPEN it, then again to TAKE ALL.',
+  scene: { target: 'keep', highlight: '.foundchip' },
   wait: 'take-finish',
 }
 

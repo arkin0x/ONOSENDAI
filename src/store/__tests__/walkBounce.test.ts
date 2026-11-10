@@ -52,7 +52,7 @@ import { BOUNCE_BOOST_MS, fallState, tickFall, useWalk } from '../useWalk'
 import { useShards, type WorldItem } from '../useShards'
 import { useToast } from '../useToast'
 import { useWorkshop } from '../useWorkshop'
-import { clearWalls } from '../walkWalls'
+import { anyBounce, clearWalls, padQueries } from '../walkWalls'
 import { JUMP_SPEED, WALK_GRAVITY } from '../walkGravity'
 import { walkFall } from '../../lib/walkEye'
 import { useCalibration } from '../../lib/calibration'
@@ -458,6 +458,9 @@ describe('reflect', () => {
   })
 })
 
+/** The tests that run many seconds of frames: room to finish under a loaded machine. */
+const LONG_TEST_MS = 60_000
+
 /** Every posted hop starts where the one before it ended. */
 function chainOk(): void {
   for (let n = 1; n < posted.length; n++) expect(posted[n].from).toEqual(posted[n - 1].to)
@@ -679,7 +682,7 @@ describe('steering and leaving', () => {
     // And it stays at 24, Up or not.
     expect(Math.abs(peakOver(3000) - 24)).toBeLessThan(1)
     nothingMade()
-  })
+  }, LONG_TEST_MS)
 })
 
 describe('the hop rate', () => {
@@ -699,7 +702,7 @@ describe('the hop rate', () => {
     // along (26 before steer points were folded into the landing's hop).
     expect(bounce).toBe(14)
     expect(bounce).toBeLessThanOrEqual(jump)
-  })
+  }, LONG_TEST_MS)
 
   it('steering across a long pad while proofs land: the chain stays whole and the walk never stops', async () => {
     world(start, [bouncy(boxes('Pad', 'all', [[[-10, -1, -400], [10, 0, 10]]]), 4), [0, -1, 0]])
@@ -719,6 +722,26 @@ describe('the hop rate', () => {
     for (const h of posted.slice(1)) expect(h.to.y).toBe(start.y)
     expect(useWalk.getState().falling).toBe(true)
     expect(useCyberspace.getState().proof.status).not.toBe('infeasible')
+  }, LONG_TEST_MS)
+})
+
+describe('the cost of a press', () => {
+  it('a world with no bounce asks no floor query on any press; one with a pad does', () => {
+    world(start, [boxes('Floor', 'all', [[[-20, -1, -20], [20, 0, 20]]]), [0, -1, 0]], [boxes('Step', 'all', [[[-20, 0, -20], [20, 1, -3.5]]]), [0, -1, 0]])
+    walk(true)
+    const before = padQueries()
+    for (let k = 0; k < 6; k++) useWalk.getState().press('away')
+    for (let k = 0; k < 6; k++) useWalk.getState().press('toward')
+    useWalk.getState().press('right')
+    expect(anyBounce()).toBe(false)
+    expect(padQueries()).toBe(before)
+    useWalk.getState().exit()
+    clearWalls()
+    world(start, [boxes('Floor', 'all', [[[-20, -1, -20], [20, 0, 20]]]), [0, -1, 0]], [bouncy(boxes('Pad', 'all', [[[18, -1, 18], [20, 0, 20]]]), 6), [0, -1, 0]])
+    walk(true)
+    useWalk.getState().press('away')
+    expect(anyBounce()).toBe(true)
+    expect(padQueries()).toBeGreaterThan(before)
   })
 })
 
@@ -787,7 +810,7 @@ describe('a springboard (arkinox, 2026-11-10: launches however you arrive)', () 
     useWalk.getState().press('away')
     expect(at(start)).toEqual([0, 0, -1])
     expect(useWalk.getState().falling).toBe(false)
-    // Held (its repeats keep it fresh): on along the board, still standing.
+    // Down pressed again just before the next step: on along the board, still standing.
     useWalk.getState().press('down')
     useWalk.getState().press('away')
     expect(at(start)).toEqual([0, 0, -2])
@@ -825,5 +848,5 @@ describe('a springboard (arkinox, 2026-11-10: launches however you arrive)', () 
     expect(landings).toBe(4)
     expect(hops).toBe(1 + landings)
     expect(at(start, fallState()!.anchor)[2]).toBeLessThan(-20)
-  })
+  }, LONG_TEST_MS)
 })

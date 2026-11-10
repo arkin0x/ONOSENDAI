@@ -40,7 +40,7 @@ import { walkStep } from '../../store/walkStep'
 import { clearWalls, type WallItem } from '../../store/walkWalls'
 import { regionBase, type TutorialLayout } from '../layout'
 import { buildStage, type KeyAt } from '../stage'
-import { COURSE, courseToWorld } from '../course'
+import { courseToWorld } from '../course'
 
 const keyAt: KeyAt = async (at, h) => { const rk = regionKeyAt(at, h, 20); return { key: rk.key, lookupId: rk.lookupId } }
 const BASE = 1n << 40n

@@ -23,6 +23,30 @@ export interface GamePad {
   to: Position
 }
 
+/** A box of game positions, both corners included (game logic). */
+export interface GameZone {
+  lo: Position
+  hi: Position
+}
+
+/**
+ * The key (game logic): the world shard standing at `at` is its look. It is
+ * taken by a tap within reach, never by walking into it, and it lives only in
+ * the game: no key item of cyberspace is made, taken or published for it.
+ */
+export interface GameKey {
+  at: Position
+}
+
+/**
+ * The key door (game logic): the world shards standing at `at` are its looks.
+ * One that holds a walker (DECK-0003 §1.12) is the closed look, one that does
+ * not is the open look. The key opens it, by a tap within reach.
+ */
+export interface GameDoor {
+  at: Position
+}
+
 /** Where the world's bags come from (DECK-0002 §5.1). */
 export type GameWorldSource =
   /** The relays: the game key's bags with the region's lookup id. */
@@ -43,4 +67,12 @@ export interface GameDef {
   /** The teleport pads, the mechanic cyberspace does not have. */
   pads: readonly GamePad[]
   world: GameWorldSource
+  /** Gravity and jumps (lib/games/gravity.ts). Absent: the game is flown through, UP and DOWN. */
+  gravity?: boolean
+  /** The key that opens the door, if the game has one. */
+  key?: GameKey
+  /** The door the key opens. */
+  door?: GameDoor
+  /** Reaching it clears the game: the clear time stops and the exit card shows. */
+  exit?: GameZone
 }

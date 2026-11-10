@@ -9,23 +9,33 @@
  * come back: nothing here touches its view.
  *
  * Controls are the game's (DECK-0002 §8, game logic): forward, back and the
- * sides go the way the camera faces, snapped to the nearest axis; UP and DOWN
- * go along Y. There is no gravity in the dungeon. Drag to look around.
+ * sides go the way the camera faces, snapped to the nearest axis. In a game
+ * with gravity JUMP jumps (twice in the air for the double jump) and a tick
+ * on every frame carries the fall; in one without, UP and DOWN go along Y.
+ * TAKE and OPEN show by the key and the door, and are always a tap. The clock
+ * runs on the bar from the entry; the exit zone stops it and shows the exit
+ * card. Drag to look around.
  *
- * Keys: W A S D or the arrows, Space or E up, Shift, Q or C down.
+ * Keys: W A S D or the arrows (held, a press every 110 ms, as WALK's hold),
+ * Space to jump (or up), E or Enter for TAKE and OPEN, Shift, Q or C down.
  */
 
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { Canvas, useFrame, useThree } from '@react-three/fiber'
+import { KeyRound } from 'lucide-react'
 import { BoxGeometry, EdgesGeometry, Vector3, type Group } from 'three'
 import { useGame } from '../store/useGame'
 import { placeShard } from '../scene/WorldShards'
 import { ShardMesh } from '../scene/ShardMesh'
 import { itemCentre, type AxisName, type Position, type ViewAxes } from '../lib/space'
 import { BG, GAME } from '../lib/palette'
-import { useRepeatable } from '../hooks/useRepeatable'
+import { noCallout, useRepeatable } from '../hooks/useRepeatable'
 import type { GameDef } from '../lib/games/types'
 import type { WorldShard } from '../lib/games/play'
+import { clockMs, formatClearTime, keyTaken, offerAt, worldNow, type Progress } from '../lib/games/progress'
+
+/** A held direction key presses at once and then every this many ms: WALK's hold (store/walkHold.ts WALK_HOLD_MS). */
+const HOLD_MS = 110
 
 /** The game's frame: cyberspace X right, Y up, Z into the screen (render Z flipped, as WorldShards draws). */
 const AXES: ViewAxes = { right: { axis: 'x', dir: 1 }, up: { axis: 'y', dir: 1 }, out: { axis: 'z', dir: -1 } }
@@ -115,9 +125,30 @@ function Rig({ target, look }: { target: [number, number, number]; look: React.M
   return null
 }
 
-function GameCanvas({ game, world, at, look }: { game: GameDef; world: WorldShard[] | null; at: Position; look: React.MutableRefObject<Look> }): JSX.Element {
+/** The key's mark: a slow gold ring round it while it lies there, so it is seen from below. */
+function KeyMark({ at }: { at: [number, number, number] }): JSX.Element {
+  const ring = useRef<Group>(null)
+  useFrame(({ clock }) => {
+    if (!ring.current) return
+    const t = clock.elapsedTime
+    ring.current.position.y = 1 + 0.2 * Math.sin(t * 2.4)
+    ring.current.rotation.y = t * 1.2
+  })
+  return (
+    <group position={at}>
+      <group ref={ring}>
+        <mesh><torusGeometry args={[1.1, 0.06, 8, 40]} /><meshBasicMaterial color="#ffd23f" /></mesh>
+      </group>
+    </group>
+  )
+}
+
+function GameCanvas({ game, world, at, look, progress }: { game: GameDef; world: WorldShard[] | null; at: Position; look: React.MutableRefObject<Look>; progress: Progress }): JSX.Element {
   const me = centreOf(game, at)
   const pads = useMemo(() => game.pads.map((p) => centreOf(game, p.at)), [game])
+  const taken = keyTaken(progress)
+  // The key gone once taken, the door's closed or open look (lib/games/progress.ts).
+  const drawn = useMemo(() => (world ? worldNow(game, world, progress).drawn : null), [game, world, taken, progress.doorOpen])
   return (
     <Canvas camera={{ fov: 70, near: 0.05, far: 400, position: [me[0], me[1], me[2] + CAMERA_DISTANCE] }} dpr={[1, 2]} gl={{ antialias: true }} style={{ background: BG }}>
       <fog attach="fog" args={[BG, 6, 60]} />
@@ -125,18 +156,30 @@ function GameCanvas({ game, world, at, look }: { game: GameDef; world: WorldShar
       <directionalLight position={[10, 18, 6]} intensity={1.1} />
       <pointLight position={me} intensity={6} distance={12} decay={1.6} color="#ffe2f4" />
       <Rig target={me} look={look} />
-      {world && <Shards game={game} world={world} />}
+      {drawn && <Shards game={game} world={drawn} />}
       {pads.map((p, i) => <PadMark key={i} at={p} />)}
+      {game.key && !taken && <KeyMark at={centreOf(game, game.key.at)} />}
       <Player at={me} />
     </Canvas>
   )
 }
 
-type Press = 'forward' | 'back' | 'left' | 'right' | 'up' | 'down'
+type Press = 'forward' | 'back' | 'left' | 'right' | 'up' | 'down' | 'jump'
 
 function PadButton({ press, label, onPress }: { press: Press; label: ReactNode; onPress: (p: Press) => void }): JSX.Element {
   const repeat = useRepeatable()
   return <button className={`gamepad__btn gamepad__btn--${press}`} aria-label={press} {...repeat(() => onPress(press))}>{label}</button>
+}
+
+/** The clock on the bar: running from the entry, stopped at the clear time. */
+function Clock({ progress }: { progress: Progress }): JSX.Element {
+  const [, redraw] = useState(0)
+  useEffect(() => {
+    if (progress.clearedMs !== null) return
+    const t = window.setInterval(() => redraw((n) => n + 1), 100)
+    return () => clearInterval(t)
+  }, [progress.clearedMs])
+  return <span className="gameview__clock" aria-label="time">{formatClearTime(clockMs(progress, Date.now()))}</span>
 }
 
 export function GameView(): JSX.Element | null {
@@ -153,39 +196,73 @@ function GameScreen(): JSX.Element | null {
   const look = useRef<Look>({ yaw: Math.PI, pitch: 0.35 })
   const [exitFailed, setExitFailed] = useState(false)
 
+  const gravity = session?.game.gravity === true
   const onPress = (p: Press): void => {
     const g = useGame.getState()
-    if (p === 'up') g.step('y', 1)
+    if (p === 'jump') g.jump()
+    else if (p === 'up') { if (g.session?.game.gravity) g.jump(); else g.step('y', 1) }
     else if (p === 'down') g.step('y', -1)
     else { const s = stepFor(look.current.yaw, p); g.step(s.axis, s.dir) }
   }
+  /** TAKE or OPEN, whichever is offered where you stand. */
+  const act = (): void => {
+    const g = useGame.getState()
+    const s = g.session
+    if (!s?.at) return
+    const offer = offerAt(s.game, s.progress, s.at)
+    if (offer === 'take') g.take()
+    else if (offer === 'open') g.open()
+  }
+
+  // Under gravity, the fall and the jump move on every frame (lib/games/gravity.ts tick).
+  useEffect(() => {
+    if (!gravity) return
+    let raf = 0
+    const frame = (): void => { useGame.getState().tick(); raf = requestAnimationFrame(frame) }
+    raf = requestAnimationFrame(frame)
+    return () => cancelAnimationFrame(raf)
+  }, [gravity])
 
   // The game's keys, only while the game is on screen (the cyberspace keys stand down: hooks/useKeyboard.ts).
   useEffect(() => {
     if (!session) return
-    const keys: Record<string, Press> = {
+    const dirs: Record<string, Press> = {
       KeyW: 'forward', ArrowUp: 'forward', KeyS: 'back', ArrowDown: 'back', KeyA: 'left', ArrowLeft: 'left', KeyD: 'right', ArrowRight: 'right',
-      Space: 'up', KeyE: 'up', ShiftLeft: 'down', ShiftRight: 'down', KeyQ: 'down', KeyC: 'down',
+      ShiftLeft: 'down', ShiftRight: 'down', KeyQ: 'down', KeyC: 'down',
     }
+    // A held direction: a press at once, then every HOLD_MS, whatever the keyboard's own repeat does (WALK's hold).
+    const held = new Map<string, number>()
+    const release = (code: string): void => { const t = held.get(code); if (t !== undefined) { clearInterval(t); held.delete(code) } }
+    const releaseAll = (): void => { for (const code of [...held.keys()]) release(code) }
     const down = (e: KeyboardEvent): void => {
       if (e.metaKey || e.ctrlKey || e.altKey) return
-      const p = keys[e.code]
-      if (!p) return
       if ((e.target as HTMLElement | null)?.closest?.('input, textarea, [contenteditable="true"]')) return
+      if (e.code === 'Space') { e.preventDefault(); if (!e.repeat) onPress('up'); return }
+      if (e.code === 'KeyE' || e.code === 'Enter') { e.preventDefault(); if (!e.repeat) act(); return }
+      const p = dirs[e.code]
+      if (!p) return
       e.preventDefault()
+      if (e.repeat || held.has(e.code)) return
       onPress(p)
+      held.set(e.code, window.setInterval(() => onPress(p), HOLD_MS))
     }
-    // A focused button presses on Space's keyup: UP must never press EXIT GAME (review of #660).
-    const up = (e: KeyboardEvent): void => { if (e.code === 'Space' || e.code === 'Enter') e.preventDefault() }
+    // A focused button presses on Space's keyup: JUMP must never press EXIT GAME (review of #660).
+    const up = (e: KeyboardEvent): void => {
+      release(e.code)
+      if (e.code === 'Space' || e.code === 'Enter') e.preventDefault()
+    }
     window.addEventListener('keydown', down)
     window.addEventListener('keyup', up)
-    return () => { window.removeEventListener('keydown', down); window.removeEventListener('keyup', up) }
+    window.addEventListener('blur', releaseAll)
+    return () => { releaseAll(); window.removeEventListener('keydown', down); window.removeEventListener('keyup', up); window.removeEventListener('blur', releaseAll) }
   }, [session !== null])
 
   // Drag to look: yaw with the horizontal, pitch with the vertical, kept above the floor and below straight down.
   const drag = useRef<{ x: number; y: number; id: number } | null>(null)
   if (!session) return null
-  const { game, world, worldError, at } = session
+  const { game, world, worldError, at, progress } = session
+  const offer = at ? offerAt(game, progress, at) : null
+  const cleared = progress.clearedMs !== null
 
   const leave = async (): Promise<void> => {
     const refused = await useGame.getState().exit()
@@ -210,10 +287,12 @@ function GameScreen(): JSX.Element | null {
         onPointerCancel={() => { drag.current = null }}
       >
         {/* You appear at the entry point once the world says where it is (DECK-0002 §2.2). */}
-        {at && <GameCanvas game={game} world={world} at={at} look={look} />}
+        {at && <GameCanvas game={game} world={world} at={at} look={look} progress={progress} />}
       </div>
       <div className="gameview__bar">
         <span className="gameview__name">{game.name}</span>
+        {game.exit && <Clock progress={progress} />}
+        {progress.keyHeld && <span className="gameview__key" aria-label="You have the key"><KeyRound size={14} strokeWidth={2.5} aria-hidden /></span>}
         {status && <span className="gameview__status">{status}</span>}
         <button className="gameview__exit" disabled={busy !== null} onClick={(e) => { e.currentTarget.blur(); void leave() }}>EXIT GAME</button>
       </div>
@@ -223,17 +302,35 @@ function GameScreen(): JSX.Element | null {
           {exitFailed && message && <button className="tag tag--tap" onClick={() => { setExitFailed(false); useGame.getState().hide() }}>BACK TO CYBERSPACE</button>}
         </p>
       )}
-      <div className="gamepad" aria-label="game controls">
+      {offer && (
+        <div className="gameview__act">
+          {offer === 'locked'
+            ? <span className="gameview__locked" role="status">LOCKED</span>
+            : <button className="gameview__actbtn" disabled={busy !== null} onClick={(e) => { e.currentTarget.blur(); act() }}>{offer === 'take' ? 'TAKE' : 'OPEN'}</button>}
+        </div>
+      )}
+      {cleared && (
+        <div className="gameview__card" role="dialog" aria-label="Dungeon clear">
+          <span className="gameview__cardtitle">CLEAR</span>
+          <span className="gameview__cardtime">{formatClearTime(progress.clearedMs!)}</span>
+          <button className="gameview__exit gameview__exit--card" disabled={busy !== null} onClick={(e) => { e.currentTarget.blur(); void leave() }}>EXIT GAME</button>
+        </div>
+      )}
+      <div className="gamepad" aria-label="game controls" hidden={cleared}>
         <div className="gamepad__dirs">
           <PadButton press="forward" label="▲" onPress={onPress} />
           <PadButton press="left" label="◀" onPress={onPress} />
           <PadButton press="right" label="▶" onPress={onPress} />
           <PadButton press="back" label="▼" onPress={onPress} />
         </div>
-        <div className="gamepad__lift">
-          <PadButton press="up" label="UP" onPress={onPress} />
-          <PadButton press="down" label="DOWN" onPress={onPress} />
-        </div>
+        {game.gravity
+          ? <div className="gamepad__lift"><button className="gamepad__btn gamepad__btn--jump" aria-label="jump" {...noCallout} onPointerDown={(e) => { e.preventDefault(); onPress('jump') }}>JUMP</button></div>
+          : (
+            <div className="gamepad__lift">
+              <PadButton press="up" label="UP" onPress={onPress} />
+              <PadButton press="down" label="DOWN" onPress={onPress} />
+            </div>
+          )}
       </div>
     </div>
   )

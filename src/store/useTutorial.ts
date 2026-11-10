@@ -151,14 +151,36 @@ function cleanupStep(): void {
 }
 
 export const useTutorial = create<TutorialState>((set, get) => {
-  const enter = (index: number): void => {
+  const enter = (index: number, from?: number): void => {
     cleanupStep()
-    const step: TutorialStep | undefined = get().script.steps[index]
+    const steps = get().script.steps
+    const step: TutorialStep | undefined = steps[index]
     const pubkey = get().pubkey
     if (!step || !pubkey) return
+    // A step that needs WALK, come to without walking: back to the step that
+    // asks for WALK, unless that is the one just SKIPped, in which case past
+    // everything that needs it.
+    if (step.needsWalk && !useCyberspace.getState().walking) {
+      const back = steps.findIndex((s) => s.id === step.needsWalk)
+      if (back >= 0 && from !== back) { enter(back); return }
+      let past = index
+      while (past < steps.length && steps[past].needsWalk) past++
+      if (past < steps.length) { enter(past); return }
+      get().end('skipped')
+      return
+    }
     set({ index, done: !step.wait, explaining: false })
     writeProgress(pubkey, { step: step.id })
     if (step.scene) applyScene(step.scene, step.wait === 'walk', (c) => { stepCleanups.push(c) })
+    // Leaving WALK while such a step is up goes back to the step that asks for it.
+    if (step.needsWalk) {
+      stepCleanups.push(useCyberspace.subscribe((s, prev) => {
+        if (prev.walking && !s.walking && get().active && get().index === index) {
+          const back = get().script.steps.findIndex((st) => st.id === step.needsWalk)
+          if (back >= 0) queueMicrotask(() => { if (get().active && get().index === index) enter(back) })
+        }
+      }))
+    }
     if (step.wait) {
       stepCleanups.push(watchWait(step.wait, () => {
         // Once: a watcher that calls twice must not start a second timer.
@@ -209,7 +231,7 @@ export const useTutorial = create<TutorialState>((set, get) => {
       const step = s.script.steps[s.index]
       if (step?.gate && !s.done) return
       const i = s.index + 1
-      if (i < s.script.steps.length) enter(i)
+      if (i < s.script.steps.length) enter(i, s.index)
       // Past the last step with its wait still to do is a skip, not a finish.
       else get().end(step?.wait && !s.done ? 'skipped' : 'finished')
     },

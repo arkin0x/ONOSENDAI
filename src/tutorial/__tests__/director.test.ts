@@ -41,6 +41,8 @@ import { useTutorialStage } from '../director'
 import { guideBagsFor } from '../guideBags'
 import { GUIDE_KEY } from '../guide'
 import { TUTORIAL_SCRIPT } from '../script'
+import { START_STAND, courseToWorld } from '../course'
+import { useWalk } from '../../store/useWalk'
 
 const pubkey = (): string => useCyberspace.getState().identity.pubkey
 /** Until the stage is in (staging computes two region keys and signs a few events). */
@@ -65,7 +67,7 @@ describe('the director', () => {
     expect(stage.guide).not.toBe(pubkey())
     expect(localStorage.getItem(GUIDE_KEY)).toMatch(/^[0-9a-f]{64}$/)
     const lookups = stage.bags.map((b) => b.tags.find((t) => t[0] === 'd')![1])
-    expect(guideBagsFor(lookups)).toHaveLength(2)
+    expect(guideBagsFor(lookups)).toHaveLength(3)
     useTutorial.getState().pause()
     expect(guideBagsFor(lookups)).toEqual([])
     expect(useTutorialStage.getState().stage).toBe(null)
@@ -136,5 +138,53 @@ describe('the director', () => {
     expect(useTutorial.getState().done).toBe(false)
     useInventory.setState({ items: { [stage.ids.chestContents[1]]: { id: stage.ids.chestContents[1] } as never } })
     expect(useTutorial.getState().done).toBe(true)
+  })
+
+  it('counts the course: the start reached, WALK and GRAVITY on, the finish chest found and taken from', async () => {
+    useTutorial.getState().start({ restart: true })
+    await staged()
+    const { stage, layout } = useTutorialStage.getState()
+    const go = (id: string): void => useTutorial.getState().start({ at: id })
+    go('to-course')
+    await staged()
+    expect(useTutorial.getState().done).toBe(false)
+    // The aim effect lined the cursor up on the start square, at 2^0.
+    const want = courseToWorld(layout!.frame, START_STAND)
+    expect(useCyberspace.getState().cursor).toEqual(want)
+    // Standing somewhere else on the chain: not yet; on the start square: done.
+    const head = (at: { x: bigint; y: bigint; z: bigint }): void => useCyberspace.setState({ events: [{ id: 'e', tags: [] } as never], position: at, headPlane: layout!.plane })
+    head({ ...want, z: want.z + 40n })
+    expect(useTutorial.getState().done).toBe(false)
+    head(want)
+    expect(useTutorial.getState().done).toBe(true)
+    useWalk.setState({ gravity: false })
+    useCyberspace.setState({ walking: true })
+    go('gravity')
+    await staged()
+    expect(useTutorial.getState().done).toBe(false)
+    useWalk.setState({ gravity: true })
+    expect(useTutorial.getState().done).toBe(true)
+    useCyberspace.setState({ walking: false })
+    go('run')
+    await staged()
+    // RUN needs WALK: resumed without it, the tutorial goes back to the WALK step.
+    expect(useTutorial.getState().script.steps[useTutorial.getState().index].id).toBe('walk')
+    useCyberspace.setState({ walking: true })
+    go('run')
+    await staged()
+    expect(useTutorial.getState().script.steps[useTutorial.getState().index].id).toBe('run')
+    // Found but not standing on the deck (a bounce flew through its region): not yet.
+    useShards.setState({ discovered: { ...useShards.getState().discovered, [stage!.ids.finishChest]: {} as never } })
+    expect(useTutorial.getState().done).toBe(false)
+    head(courseToWorld(layout!.frame, [0, 10, 31]))
+    expect(useTutorial.getState().done).toBe(true)
+    useCyberspace.setState({ walking: false })
+    go('finish')
+    await staged()
+    expect(useTutorial.getState().done).toBe(false)
+    useInventory.setState({ items: { [stage!.ids.finishContents[2]]: { id: stage!.ids.finishContents[2] } as never } })
+    expect(useTutorial.getState().done).toBe(true)
+    useCyberspace.setState({ events: [], position: useCyberspace.getState().position })
+    useWalk.setState({ gravity: false })
   })
 })

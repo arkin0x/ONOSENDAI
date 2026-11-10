@@ -26,9 +26,11 @@ export type TutorialWait = Exclude<DemoAction, 'spawn'> | TutorialAction
 
 /**
  * The tutorial's own waits, one per staged thing (tutorial/director.ts):
- * the treasure chest found, opened by hand, and something in it taken.
+ * the treasure chest found, opened by hand, and something in it taken; the
+ * course's start reached, gravity on in WALK, the finish chest found and
+ * something in it taken.
  */
-export type TutorialAction = 'see-chest' | 'open-chest' | 'take'
+export type TutorialAction = 'see-chest' | 'open-chest' | 'take' | 'at-start' | 'gravity' | 'see-finish' | 'take-finish'
 
 export interface TutorialStep {
   /** Unique across the script; also what a player's saved progress names. */
@@ -57,6 +59,13 @@ export interface TutorialStep {
   gate?: boolean
   /** As the /demo step's: where to put the cursor on entering the step. */
   aim?: DemoStep['aim']
+  /**
+   * The step needs WALK: shown while not walking (a reload, which never
+   * keeps WALK; RECALL; leaving WALK mid-run), the tutorial goes back to the
+   * step with this id instead. Passed by SKIP on that step, the steps that
+   * need WALK are passed over too.
+   */
+  needsWalk?: string
   /** A registered effect run as the step comes up (store/useTutorial.ts registerTutorialEffect). */
   effect?: string
 }

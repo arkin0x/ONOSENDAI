@@ -20,7 +20,7 @@ import { createPortal } from 'react-dom'
 import { GENERAL_RELAYS } from '../lib/contacts'
 import type { NostrEvent } from '../lib/events'
 import { publishMany, queryAny, relaySet } from '../lib/relay'
-import { SERVER_LIST_KIND, explainUpload, uploadBlob } from '../lib/blossom'
+import { SERVER_LIST_KIND, explainUpload, serverAnswered, uploadBlob } from '../lib/blossom'
 import { BlossomServerPicker, useBlossomChoice } from './BlossomServer'
 import { fieldsOf, mergeProfile, newest, parseContent, profileProblems, profileTemplate, type ProfileField, type ProfileFields } from '../lib/profileEdit'
 import { shortHex } from '../lib/time'
@@ -132,6 +132,8 @@ export function ProfileModal({ onClose }: { onClose: () => void }): JSX.Element 
       setStatus({ kind: 'ok', text: `Uploaded to ${host} (${Math.max(1, Math.round(file.size / 1024))} KB). Publish the profile to use it.` })
       blossom.remember(target)
     } catch (e) {
+      // The server answered, even with a no (one that wants a subscription): it sticks (owner 2026-11-10).
+      if (serverAnswered(e)) blossom.remember(target)
       setStatus({ kind: 'err', text: explainUpload(e) })
     } finally {
       setUploading(null)

@@ -124,6 +124,9 @@ import {
   hyperjumpTemplate,
 } from '../lib/events'
 import { lookBeforeMove, movementBlocked, useVersionGate, VERSION_BLOCKED_MESSAGE } from '../lib/versionGate'
+import { enterVirtualTemplate, exitVirtualTemplate, type Links } from '../lib/games/bracket'
+import type { GameDef } from '../lib/games/types'
+import { canLeave, gameFor } from '../lib/games/registry'
 import { cancelProof, postProof, PROOF_WORKER_FAILED_MESSAGE, type ProofMode, type ProofResponse } from '../lib/workers'
 import { staleFormatCut } from '../lib/staleFormat'
 import { offloadFrom, cloudSeconds } from '../lib/crossover'
@@ -228,6 +231,20 @@ function settledChain(events: NostrEvent[], prevEventId: string, pubkey: string)
   return order[order.length - 1].id === prevEventId && order.length === events.length
 }
 
+/** What signing a game's event came to (enterGame, signGameAction, exitGame): the event, or why not. */
+export type GameSigned = { event: NostrEvent } | { refused: string }
+
+/** Refusals of a game's events, in words (DECK-0002 §2, §7). */
+export const GAME_NEEDS_CHAIN_MESSAGE = 'Move once first. A game holds your place in cyberspace, and you have no place on your chain yet.'
+export const GAME_AT_HEAD_MESSAGE = 'Go back to your avatar first. A game is entered from where you stand.'
+export const GAME_BUSY_MESSAGE = 'Wait for your move to land first.'
+export const GAME_IN_TRANSIT_MESSAGE = 'Leave hyperspace first.'
+export const GAME_NOT_OPEN_MESSAGE = 'You are not in this game.'
+export const GAME_MOVED_MESSAGE = 'Your chain moved while that was being signed, so nothing was sent. Try again.'
+export const GAME_STALE_MESSAGE = 'Your identity changed, so nothing was signed.'
+export const GAME_CHOOSE_FIRST_MESSAGE = 'Another version of your chain is waiting for your choice. Choose which to keep first.'
+export const GAME_OTHER_BRACKET_MESSAGE = 'Your chain is in a different game now, so nothing was signed.'
+
 /**
  * Why nothing moves while a game holds the avatar. This client never
  * publishes inside a virtual bracket: every event there belongs to the game,
@@ -239,6 +256,13 @@ function settledChain(events: NostrEvent[], prevEventId: string, pubkey: string)
  */
 export const GAME_HOLDS_MESSAGE =
   'A game holds your avatar. This identity entered a game from another client, and until that client publishes an exit, every action on your chain belongs to the game. A hop, sidestep or ride signed now would make your whole chain invalid from that point, so ONOSENDAI will not sign one. Leave the game in the client you entered it with, and you can move again from the place you entered it. If that client is gone, a respawn also leaves the game (spec §8.11.4): it starts a new chain at your spawn point, and what leaving without an exit means is up to the game. The Proof chain panel shows the game.'
+
+/**
+ * Why nothing moves in cyberspace while you are in a game ONOSENDAI plays
+ * (DECK-0002 §2.3): every move inside the bracket is the game's, and EXIT
+ * GAME, here, brings you back to where you entered.
+ */
+export const IN_GAME_HERE_MESSAGE = 'You are in a game. Leave it (EXIT GAME, or the IN A GAME chip) to move in cyberspace again; you come back where you entered.'
 
 /**
  * THE SWITCH for refusing moves on a broken chain (review of #224, S2), on
@@ -281,7 +305,8 @@ export function whyNoMove(chain: ActionEvent[]): string | null {
   if (movementBlocked()) return VERSION_BLOCKED_MESSAGE
   const broken = REFUSE_MOVES_ON_BROKEN_CHAIN ? firstBreak(chain) : null
   if (broken) return brokenChainMessage(broken)
-  if (openBracket(chain)) return GAME_HOLDS_MESSAGE
+  const open = openBracket(chain)
+  if (open) return gameFor(open.game?.pubkey) || canLeave(open.game?.pubkey) ? IN_GAME_HERE_MESSAGE : GAME_HOLDS_MESSAGE
   return null
 }
 
@@ -993,6 +1018,27 @@ export interface CyberspaceState {
   transit: TransitState | null
   /** §3: sign and queue an enter-hyperspace event from the current position. */
   boardHyperspace: () => Promise<void>
+  /**
+   * DECK-0002 §2: enter `game` from where you stand. The head is confirmed,
+   * then enter-virtual (spec §8.11.1) is signed and queued: `c` and `C` the
+   * chain head's own `C`, the game's region and its pubkey. Never inside a
+   * bracket (brackets do not nest), never on a broken chain, never before the
+   * first move. Resolves to the entry, or to the words it was refused with.
+   */
+  enterGame: (game: GameDef) => Promise<GameSigned>
+  /**
+   * DECK-0002 §4: sign a game action inside the bracket `entryId` of `game`,
+   * which must be the one open at the head, built from the chain's links by
+   * `build`. Never on a broken chain.
+   */
+  signGameAction: (game: Pick<GameDef, 'pubkey'>, entryId: string, build: (links: Links) => EventTemplate) => Promise<GameSigned>
+  /**
+   * DECK-0002 §7: sign exit-virtual closing the bracket open at the head:
+   * its entry named, `C` the entry's `c` (spec §8.11.3). With `entryId`, only
+   * that bracket. `gameHex`, where you were inside the game, goes in the
+   * exit's free `c`.
+   */
+  exitGame: (entryId?: string, gameHex?: string) => Promise<GameSigned>
   /** §5: sign and queue the hyperjump for a computed ride, arriving at the stop. */
   completeRide: (ride: CompletedRide) => Promise<void>
   /**
@@ -3539,6 +3585,69 @@ const FIRST_MOVE_WAIT_MS = 4000
 let firstMoveInFlight = false
 
 
+/**
+ * Sign one of a game's events onto your own chain at its head (DECK-0002 §2,
+ * §4, §7): from your head only, never mid-move, after the first move, and
+ * only once the head is confirmed (confirmHead), as for any action. `check`
+ * says why the chain refuses it, asked before the confirmation and again on
+ * whatever the confirmation folded in; `build` makes it from the links. The
+ * event is queued like a hop and drains while LIVE (lib/publisher.ts).
+ */
+async function signGameEvent(
+  get: () => CyberspaceState,
+  set: (partial: Partial<CyberspaceState>) => void,
+  check: (chain: ActionEvent[]) => string | null,
+  build: (links: Links, chain: ActionEvent[]) => EventTemplate,
+): Promise<GameSigned> {
+  const before = get()
+  if (before.exploreIndex !== null || before.spectate !== null) return { refused: GAME_AT_HEAD_MESSAGE }
+  if (before.transit !== null) return { refused: GAME_IN_TRANSIT_MESSAGE }
+  if (before.events.length === 0 || !before.genesisId || !before.prevEventId) return { refused: GAME_NEEDS_CHAIN_MESSAGE }
+  if (before.proof.status === 'computing' || before.plan?.status === 'running' || before.cloud.status !== 'idle') return { refused: GAME_BUSY_MESSAGE }
+  // A choice between two versions of the chain comes first, as for a hop (finishProof).
+  if (before.chainConflict) return { refused: GAME_CHOOSE_FIRST_MESSAGE }
+  const early = check(parsedChain(before.events))
+  if (early) return { refused: early }
+  const refusal = await confirmHead(() => set({ proof: { ...IDLE_PROOF, message: HEAD_RETRYING_MESSAGE } }))
+  if (get().proof.message === HEAD_RETRYING_MESSAGE) set({ proof: IDLE_PROOF })
+  if (refusal === STALE_CONFIRMATION) return { refused: GAME_STALE_MESSAGE }
+  if (refusal) return { refused: refusal }
+  if (get().chainConflict) return { refused: GAME_CHOOSE_FIRST_MESSAGE }
+  // The head the player chose from is the one signed onto: a move folded in
+  // while the relays were asked (another device) is said, and nothing is signed.
+  if (get().prevEventId !== before.prevEventId || get().identity.pubkey !== before.identity.pubkey) return { refused: headMovedWords(get().events, 'Try again from where you are now.') }
+  const { events, genesisId, prevEventId } = get()
+  if (events.length === 0 || !genesisId || !prevEventId) return { refused: GAME_NEEDS_CHAIN_MESSAGE }
+  const chain = parsedChain(events)
+  const late = check(chain)
+  if (late) return { refused: late }
+  let template: EventTemplate
+  try {
+    template = build({ createdAt: nextCreatedAt(events[events.length - 1]), genesisId, previousId: prevEventId }, chain)
+  } catch (err) {
+    return { refused: err instanceof Error ? err.message : String(err) }
+  }
+  let event: NostrEvent
+  try {
+    event = await get().signEvent(template)
+  } catch (err) {
+    return { refused: signingFailed(err) }
+  }
+  // The chain may have moved on while a remote signer thought about it.
+  if (get().prevEventId !== prevEventId || get().identity.pubkey !== before.identity.pubkey) return { refused: GAME_MOVED_MESSAGE }
+  const published: Record<string, PublishStatus> = { ...get().published, [event.id]: 'queued' }
+  const nextEvents = [...get().events, event]
+  set({
+    events: nextEvents,
+    prevEventId: event.id,
+    published,
+    // None of a game's events moves you (spec §8.11.4 rules 1 and 2): the position stays.
+    positionHistory: [...get().positionHistory, { ...get().position }],
+  })
+  saveChain(nextEvents, published, get().chain)
+  return { event }
+}
+
 export const useCyberspace = create<CyberspaceState>((set, get, api) => {
   /**
    * The self-check's status for `pubkey` once it is no longer `checking`, or
@@ -5943,6 +6052,35 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
     })
     saveChain(nextEvents, published, get().chain)
   },
+
+  // Brackets never nest (spec §8.11.4 rule 3), and an entry on a broken
+  // chain counts for nothing: whyNoMove says both, in their own words.
+  enterGame: async (game) => signGameEvent(get, set, whyNoMove, (links, chain) => {
+    const here = chainHead(chain)?.coordHex
+    if (!here) throw new Error(GAME_NEEDS_CHAIN_MESSAGE)
+    return enterVirtualTemplate({ ...links, coordHex: here, game })
+  }),
+
+  signGameAction: async (game, entryId, build) => signGameEvent(get, set, (chain) => {
+    const open = openBracket(chain)
+    if (!open || open.game?.pubkey !== game.pubkey) return GAME_NOT_OPEN_MESSAGE
+    if (open.id !== entryId) return GAME_OTHER_BRACKET_MESSAGE
+    const broken = firstBreak(chain)
+    return broken ? brokenChainMessage(broken) : null
+  }, (links) => build(links)),
+
+  exitGame: async (entryId, gameHex) => signGameEvent(get, set, (chain) => {
+    const open = openBracket(chain)
+    if (!open) return GAME_NOT_OPEN_MESSAGE
+    if (entryId && open.id !== entryId) return GAME_OTHER_BRACKET_MESSAGE
+    const broken = firstBreak(chain)
+    return broken ? brokenChainMessage(broken) : null
+  }, (links, chain) => {
+    const open = openBracket(chain)
+    if (!open) throw new Error(GAME_NOT_OPEN_MESSAGE)
+    // The base position held since the entry: its `c`, which an enter-virtual's coordHex is (events.ts).
+    return exitVirtualTemplate({ ...links, entryId: open.id, coordHex: open.coordHex, ...(gameHex ? { gameHex } : {}) })
+  }),
 
   confirmHeadNow: async () => {
     const refusal = await confirmHead(() => set({ proof: { ...IDLE_PROOF, message: HEAD_RETRYING_MESSAGE } }))

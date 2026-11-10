@@ -2,7 +2,7 @@
  * SeedCompose.tsx - SEED in BUILD (DECK-0008): pick a DNA, see what it grows,
  * and plant it at the build cursor.
  *
- * A DNA is one of the six starters (the spec's vectors, the Seed Garden's) or
+ * A DNA is one of the six original DNAs (the spec's vectors, the Seed Garden's) or
  * one pasted or imported as text, checked as it is typed (sno-core
  * tryParseDna; the engine's words under the box). The preview grows the bloom
  * in the seeds worker at the build cursor's terroir, at a block age from day
@@ -13,8 +13,8 @@
  *
  * Caps (§7), shown to people as the SIZE LIMIT (owner, 2026-11-10: "size
  * limit" reads at once; the code and the DNA's `caps` tag keep the spec's
- * word): the starters' (8,000 vertices, 6,000 symbols, 40 days; 21 bits) or
- * the free caps (2,048, 2,048, 32 days; 16 bits). A starter defaults to its
+ * word): the original DNAs' (8,000 vertices, 6,000 symbols, 40 days; 21 bits) or
+ * the free caps (2,048, 2,048, 32 days; 16 bits). An original DNA defaults to its
  * own, a pasted DNA to the free caps; a bloom stops growing at its caps.
  *
  * The bloom at day 31, grown where the seed lands, says how far it reaches;
@@ -36,14 +36,14 @@ import { positionHex } from '../lib/events'
 import { useCalibration } from '../lib/calibration'
 import { minerCount } from '../lib/avatarWorker'
 import { describeDuration } from '../lib/avatarMine'
-import { STARTER_CAPS, STARTER_DNAS } from '../lib/seeds/starterDnas'
+import { ORIGINAL_CAPS, ORIGINAL_DNAS, originalDnaId } from '../lib/seeds/originalDnas'
 import { bloomReachGibsons, dnaTextRefusal, miningSeconds, PREVIEW_DAYS, previewRequest, readDnaText, seedHideFor, SEED_HIDE_MAX, type SeedFit } from '../lib/seeds/plant'
 import type { Position } from '../lib/space'
 import type { Plane } from 'cyberspace-core'
 import { MAX_COMPUTE_HEIGHT } from '../store/useCyberspace'
 import { growInWorker } from '../lib/seeds/growClient'
 import { bloomShard } from '../lib/seeds/bloomShard'
-import { headerBook, trustedTip } from '../lib/seeds/seedSources'
+import { dnaResolver, headerBook, trustedTip } from '../lib/seeds/seedSources'
 
 /** The largest DNA text a written DNA may be (DECK-0008 §3.1), so an import reads no more. */
 const MAX_DNA_BYTES = 8192
@@ -110,25 +110,43 @@ function useSeedFit(text: string, ok: boolean, caps: Caps, cursor: Position, pla
   return result
 }
 
+/** The owner's published event for an original DNA, resolved (lib/seeds/dnaStore), and its size limit. */
+function useOwnerDna(id: string | null): { state: 'none' | 'fetching' | 'missing' } | { state: 'ok'; caps: Caps } {
+  const [got, setGot] = useState<{ id: string; caps: Caps | null } | null>(null)
+  useEffect(() => {
+    if (!id) return
+    let stale = false
+    void dnaResolver.resolve(id).then((v) => { if (!stale) setGot({ id, caps: v.state === 'ok' ? v.caps : null }) })
+    return () => { stale = true }
+  }, [id])
+  if (!id) return { state: 'none' }
+  if (!got || got.id !== id) return { state: 'fetching' }
+  return got.caps ? { state: 'ok', caps: got.caps } : { state: 'missing' }
+}
+
 export function SeedCompose({ onDone }: { onDone: () => void }): JSX.Element {
-  // A starter by index, or the pasted text.
+  // An original DNA by index, or the pasted text.
   const [pick, setPick] = useState<number | 'paste'>(0)
   const [pasted, setPasted] = useState('')
   const [importError, setImportError] = useState<string | null>(null)
   const [day, setDay] = useState(PREVIEW_DAYS)
   const [scale, setScale] = useState(0)
   const fileRef = useRef<HTMLInputElement>(null)
-  // Small caps or the starters'; null follows the pick (a starter its own, a pasted DNA the free caps).
+  // Small caps or the original DNAs'; null follows the pick (an original DNA its own, a pasted DNA the free caps).
   const [capsPick, setCapsPick] = useState<'small' | 'large' | null>(null)
   const cursor = useCyberspace((s) => s.cursor)
   const plane = useCyberspace(buildPlane)
   const step = useCyberspace(buildStepOf)
   const sha256PerSec = useCalibration((s) => s.sha256PerSec)
 
-  const text = pick === 'paste' ? pasted : STARTER_DNAS[pick].text
+  const text = pick === 'paste' ? pasted : ORIGINAL_DNAS[pick].text
   const refusal = pick === 'paste' && !pasted.trim() ? null : dnaTextRefusal(text)
   const ok = refusal === null && text.trim() !== ''
-  const caps: Caps = (capsPick ?? (pick === 'paste' ? 'small' : 'large')) === 'small' ? BASE_CAPS : STARTER_CAPS
+  // An original DNA the owner has published is planted as that event, at its own size limit (owner ruling 2026-11-10).
+  const ownerId = pick === 'paste' ? null : originalDnaId(ORIGINAL_DNAS[pick].name)
+  const owned = useOwnerDna(ownerId)
+  const chosen: Caps = (capsPick ?? (pick === 'paste' ? 'small' : 'large')) === 'small' ? BASE_CAPS : ORIGINAL_CAPS
+  const caps: Caps = ownerId && owned.state === 'ok' ? owned.caps : chosen
   // Where the seed lands, at the height it will hide at, and that height.
   const seedFit = useSeedFit(text, ok, caps, cursor, plane, step, scale)
   const coord = useMemo(() => positionHex(seedFit.point, plane), [seedFit.point, plane])
@@ -151,14 +169,15 @@ export function SeedCompose({ onDone }: { onDone: () => void }): JSX.Element {
 
   const plant = (): void => {
     if (!ok) return
-    useShards.getState().startDeploySeed({ text, caps, scale, title: '', ...(seedFit.fit ? { fit: seedFit.fit } : {}) })
+    if (ownerId && owned.state !== 'ok') return
+    useShards.getState().startDeploySeed({ text, caps, scale, title: '', ...(ownerId ? { dnaId: ownerId } : {}), ...(seedFit.fit ? { fit: seedFit.fit } : {}) })
     onDone()
   }
 
   return (
     <div className="shards__compose seedc">
       <div className="seedc__picks" role="group" aria-label="DNA">
-        {STARTER_DNAS.map((d, i) => (
+        {ORIGINAL_DNAS.map((d, i) => (
           <button key={d.name} aria-pressed={pick === i} className={`seedc__pick ${pick === i ? 'is-on' : ''}`} onClick={() => { setPick(i); setCapsPick(null) }}>{d.name.toUpperCase()}</button>
         ))}
         <button aria-pressed={pick === 'paste'} className={`seedc__pick ${pick === 'paste' ? 'is-on' : ''}`} onClick={() => { setPick('paste'); setCapsPick(null) }}>PASTE</button>
@@ -189,11 +208,15 @@ export function SeedCompose({ onDone }: { onDone: () => void }): JSX.Element {
         <span className="seedc__value">2^{scale}</span>
         <button className="seedc__step" onClick={() => setScale((u) => Math.min(MAX_SCALE, u + 1))} disabled={scale === MAX_SCALE} aria-label="Larger scale">+</button>
       </div>
+      {ownerId ? (
+        <p className="seedc__price">{owned.state === 'ok' ? 'SIZE LIMIT SET BY THIS DNA' : owned.state === 'missing' ? 'THIS DNA IS NOT ON YOUR RELAYS YET' : 'FETCHING THIS DNA…'}</p>
+      ) : (
       <div className="seedc__row" role="group" aria-label="Size limit">
         <span className="secret__label seedc__label--wide">SIZE LIMIT</span>
         <button aria-pressed={caps === BASE_CAPS} className={`seedc__pick ${caps === BASE_CAPS ? 'is-on' : ''}`} onClick={() => setCapsPick('small')} title="2,048 vertices, 2,048 symbols, 32 days">SMALL</button>
-        <button aria-pressed={caps === STARTER_CAPS} className={`seedc__pick ${caps === STARTER_CAPS ? 'is-on' : ''}`} onClick={() => setCapsPick('large')} title="8,000 vertices, 6,000 symbols, 40 days">LARGE</button>
+        <button aria-pressed={caps === ORIGINAL_CAPS} className={`seedc__pick ${caps === ORIGINAL_CAPS ? 'is-on' : ''}`} onClick={() => setCapsPick('large')} title="8,000 vertices, 6,000 symbols, 40 days">LARGE</button>
       </div>
+      )}
       <p className="seedc__price">
         PRICE {price} BITS · {seconds === null ? 'MINING TIME UNKNOWN UNTIL CALIBRATED' : `${describeDuration(seconds).toUpperCase()} TO MINE HERE`}
       </p>
@@ -203,7 +226,7 @@ export function SeedCompose({ onDone }: { onDone: () => void }): JSX.Element {
 
       <div className="shards__actions">
         <button className="avatars__go" onClick={onDone}>CANCEL</button>
-        <button className="avatars__go" disabled={!ok || seedFit.state === 'pending'} onClick={plant} title="Aim it at the build cursor; its work is mined when you hide it">PLANT ▸</button>
+        <button className="avatars__go" disabled={!ok || seedFit.state === 'pending' || (ownerId !== null && owned.state !== 'ok')} onClick={plant} title="Aim it at the build cursor; its work is mined when you hide it">PLANT ▸</button>
       </div>
       <Explanation>
         <ul className="buildbar__explain">

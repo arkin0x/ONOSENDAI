@@ -100,6 +100,7 @@ import { dnaTextRefusal, draftPrice, seedWorkHolds, type SeedDraft } from '../li
 import { MineCancelled } from '../lib/avatarWorker'
 import { cancelMining, isMining, plantedTemplate, seedDraftName } from './plantSeed'
 import { dnaResolver } from '../lib/seeds/seedSources'
+import { modelTurnsOf, seedSnapOffered } from '../lib/seeds/orientation'
 import { seedItemOf } from '../lib/seeds/seedItem'
 import { SEALED_KIND, freshSealedD, isSealedRef, refOf, rememberSealed, utf8Bytes, retractSealed, sealedChanges, sealedEventOf, sealedItemOf, sealedRefParts, sealedTemplate, sendBagWithSealed, type OutgoingSealed } from '../lib/sealed'
 import { retractionTemplate } from '../lib/published'
@@ -4702,7 +4703,9 @@ export const useShards = create<ShardsState>((set, get) => {
         if (pending.type === 'seed') {
           seedPrice = draftPrice(pending.seed)
           const current = (): boolean => get().pending === pending
-          const planted = await plantedTemplate(pending, { at, plane, createdAt, owner, live: cs.live, sign: signAsOwner, current, note: (n) => { if (current()) set({ deployNote: n }) }, mining: (on) => { if (current()) set({ deployMining: on }) } })
+          // TURN, SNAP TO EARTH and FINE ROTATION, as the seed's tags write them (§5.7): standing on Earth only in dataspace.
+          const stand = { turn: modelTurnsOf(deployTurn), up: deployUp && seedSnapOffered(plane), spin: wrapSpin(deploySpin) }
+          const planted = await plantedTemplate(pending, { at, plane, createdAt, owner, live: cs.live, sign: signAsOwner, current, stand, note: (n) => { if (current()) set({ deployNote: n }) }, mining: (on) => { if (current()) set({ deployMining: on }) } })
           if (!current()) return
           innerTemplate = planted
           still()

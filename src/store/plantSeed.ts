@@ -27,7 +27,7 @@ import type { Position } from '../lib/space'
 import { dnaMatches, dnaTemplate, draftPrice, dnaTextRefusal, readDnaText, seedTemplate, type SeedDraft } from '../lib/seeds/plant'
 import { checkDna, idbDnaCache } from '../lib/seeds/dnaStore'
 import { dnaResolver, refreshTrustedTip, trustedTip } from '../lib/seeds/seedSources'
-import { DNA_KIND } from '../lib/seeds/seedItem'
+import { DNA_KIND, type SeedStand } from '../lib/seeds/seedItem'
 
 /** The name a seed draft goes by: its DNA's, or its title. Parsed once per text (plant.ts readDnaText). */
 export function seedDraftName(draft: SeedDraft): string {
@@ -80,6 +80,12 @@ async function publishTo(ev: NostrEvent): Promise<string | null> {
 
 /** The DNA this seed plants, on the relays when live, and the relay hint its `dna` tag names. */
 export async function dnaFor(draft: SeedDraft, owner: string, live: boolean, createdAt: number, sign: (t: EventTemplate) => Promise<NostrEvent>): Promise<{ event: NostrEvent; hint: string }> {
+  // An original DNA the owner has published: that event, by id, for every seed of it (owner ruling 2026-11-10).
+  if (draft.dnaId) {
+    const v = await dnaResolver.resolve(draft.dnaId)
+    if (v.state !== 'ok' || !dnaMatches(v.event, draft.text, draft.caps)) throw new Error('The original DNA is not on your relays yet. Try again in a moment.')
+    return { event: v.event, hint: relaySet()[0] ?? '' }
+  }
   const key = keyOf(owner, draft)
   let ev: NostrEvent | undefined = kept.get(key)
   // One of yours this device signed before, LOCAL or not, kept in IndexedDB: no second copy after a reload.
@@ -115,6 +121,8 @@ export interface PlantContext {
   sign: (t: EventTemplate) => Promise<NostrEvent>
   /** Whether this planting is still the deploy lined up: once another replaces it, its mining stops. */
   current: () => boolean
+  /** How the bloom stands, from the deploy bar's TURN, SNAP TO EARTH and FINE ROTATION (§5.7), as the tags write it. */
+  stand?: SeedStand
   note: (n: string) => void
   mining: (on: boolean) => void
 }
@@ -138,7 +146,7 @@ export async function plantedTemplate(pending: { type: 'seed'; seed: SeedDraft }
   if (!o.current()) throw new MineCancelled()
   // Attributed before it is mined, as an avatar is (lib/client.ts): the signer adds no client tag to a
   // template that names one, so the work, done over every tag, still holds on what it signs.
-  const template = attributed(seedTemplate({ dnaId: dna.event.id, relayHint: dna.hint, planted: clockHeight(tip), scale: draft.scale, at: o.at, plane: o.plane, title: draft.title, createdAt: o.createdAt }))
+  const template = attributed(seedTemplate({ dnaId: dna.event.id, relayHint: dna.hint, planted: clockHeight(tip), scale: draft.scale, at: o.at, plane: o.plane, title: draft.title, createdAt: o.createdAt, ...(o.stand ? { stand: o.stand } : {}) }))
   o.note('Mining the seed')
   o.mining(true)
   const mineable: MineTemplate = { pubkey: o.owner, created_at: template.created_at, kind: template.kind, tags: template.tags, content: template.content }

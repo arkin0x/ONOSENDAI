@@ -98,6 +98,7 @@ import { useEscape } from '../hooks/useEscape'
 import { useCover } from '../hooks/useCover'
 import { fitCause, fitHeight, fitHeightAll, outsideAt, reachGibsons, type FitPoint } from '../lib/deployFit'
 import { seedDraftHeight } from '../lib/seeds/plant'
+import { seedSnapOffered } from '../lib/seeds/orientation'
 import { CHEST_LOOKS, DOOR_LOOKS, LOOK_LABELS } from '../lib/looks'
 import { LookPicker } from './LookPicker'
 import { SHALLOW_WARN, shallowBag, shallowExplain } from '../lib/shallowBag'
@@ -425,6 +426,10 @@ export function DeployBar({ pad = false }: { pad?: boolean }): JSX.Element | nul
   // WALK, but not the snap.
   const isMessage = pending.type !== 'shard'
   const sized = pending.type === 'shard' || pending.type === 'chest'
+  // A seed turns as a shard does, and stands on Earth wherever it is planted in
+  // dataspace (DECK-0008 §5.7; owner ruling 2026-11-10). Its scale is set in SEED.
+  const seedStands = pending.type === 'seed'
+  const snapHere = seedStands ? seedSnapOffered(plane) : !isMessage && !link && snapOffered(plane, height)
   const title = intoChest ? 'AIM' : moving ? (pending.type === 'shard' ? 'EDIT' : 'MOVE') : pending.type === 'shard' ? 'DEPLOY' : door ? 'HIDE DOOR' : `HIDE ${pending.type.toUpperCase()}`
   const name = pendingName(pending, shard)
   const empty = pendingEmpty(pending, shard)
@@ -629,7 +634,7 @@ export function DeployBar({ pad = false }: { pad?: boolean }): JSX.Element | nul
 
       {/* Quarter turns about the object's own origin, for this deployment only:
           exact on the lattice, and every reader draws them (lib/turn.ts). */}
-      {sized && !link && (
+      {((sized && !link) || seedStands) && (
         <DeployRow kind="turn" label="TURN">
           {(['X', 'Y', 'Z'] as const).map((name, axis) => (
             <button key={name} className={`deploybar__btn deploybar__turn ${turn[axis] ? 'is-on' : ''}`} onClick={() => useShards.getState().turnDeploy(axis as 0 | 1 | 2)} aria-label={`Turn a quarter about ${name}, now ${turn[axis] * 90} degrees`} {...noCallout}>
@@ -663,7 +668,7 @@ export function DeployBar({ pad = false }: { pad?: boolean }): JSX.Element | nul
 
       {/* Standing on the ground, where there is ground: dataspace, and big
           enough that an orientation could ever be seen. */}
-      {!isMessage && !link && snapOffered(plane, height) && (
+      {snapHere && (
         <DeployRow kind="snap" label="SNAP TO EARTH" hint={up ? 'bottom to Earth' : null}>
           <button
             className={`deploybar__toggle ${up ? 'is-on' : ''}`}
@@ -674,7 +679,7 @@ export function DeployBar({ pad = false }: { pad?: boolean }): JSX.Element | nul
         </DeployRow>
       )}
 
-      {!isMessage && !link && snapOffered(plane, height) && up && (
+      {snapHere && up && (
         <DeployRow kind="spin" label="FINE ROTATION" hint={follow ? 'orbit to aim' : null}>
           <button
             className={`deploybar__toggle ${follow ? 'is-on' : ''}`}

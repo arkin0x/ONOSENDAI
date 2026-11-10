@@ -18,7 +18,8 @@ import { deployPoint, type Position } from '../space'
 import { expectedTries, triesPerSec } from '../avatarMine'
 import { positionHex, type EventTemplate, type NostrEvent } from '../events'
 import type { Plane } from 'cyberspace-core'
-import { DNA_KIND, SEED_KIND } from './seedItem'
+import { DNA_KIND, SEED_KIND, type SeedStand } from './seedItem'
+import { standTags } from './orientation'
 
 /** What the SEED composer hands the deploy. */
 export interface SeedDraft {
@@ -29,6 +30,12 @@ export interface SeedDraft {
   scale: number
   /** The planter's name for this planting, or empty. */
   title: string
+  /**
+   * The owner's published event for this original DNA (originalDnas
+   * ORIGINAL_DNA_IDS): every seed of it names that event, and none signs a
+   * DNA of its own. Absent for a pasted DNA, or while it is unpublished.
+   */
+  dnaId?: string
   /**
    * Its hide height as SEED found it (seedHideFor), for the cursor and step it
    * was measured at. Anywhere else (the cursor moved, AGAIN) the deploy hides
@@ -105,13 +112,15 @@ export function dnaMatches(ev: Pick<NostrEvent, 'kind' | 'content' | 'tags'>, te
  * the scale when it is not 0, the `C`, a title when there is one, and `-`.
  * The miner adds the nonce tag, last, with the committed target.
  */
-export function seedTemplate(o: { dnaId: string; relayHint: string; planted: number; scale: number; at: Position; plane: Plane; title: string; createdAt: number }): EventTemplate {
+export function seedTemplate(o: { dnaId: string; relayHint: string; planted: number; scale: number; at: Position; plane: Plane; title: string; createdAt: number; stand?: SeedStand }): EventTemplate {
   const tags: string[][] = [['dna', o.dnaId, o.relayHint], ['planted', String(o.planted)]]
   if (o.scale !== 0) tags.push(['scale', String(o.scale)])
   tags.push(['C', positionHex(o.at, o.plane)])
   // At most 64 characters (§8.2), cut by code point so no pair is split.
   const title = Array.from(o.title.trim().replace(/\s+/g, ' ')).slice(0, 64).join('')
   if (title) tags.push(['title', title])
+  // How its bloom stands (§5.7): nothing for +Y up on Cyberspace's axes.
+  if (o.stand) tags.push(...standTags(o.stand, o.plane))
   tags.push(['-'])
   return { kind: SEED_KIND, created_at: o.createdAt, tags, content: '' }
 }

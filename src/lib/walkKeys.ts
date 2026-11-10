@@ -19,8 +19,8 @@
  * | W or S with A or D held | 45 degrees to that side of the way you face | FORWARD or BACK held with a side arrow, or FORWARD pressed near either end |
  *
  * Forward and back go the way you face, snapped to 8 directions: a diagonal
- * near 45 degrees, and a slide along a wall you are angled into
- * (lib/walkSlide.ts); A and D go along the facing's right the same way. The
+ * anywhere from 22.5 to 67.5 degrees off an axis, one step on both axes,
+ * and a slide along a wall you are angled into (lib/walkSlide.ts); A and D go along the facing's right the same way. The
  * pad's keys do the same. A held key walks from the press on, its own
  * repeats ignored (store/walkHold.ts, walkHeldDir below).
  *

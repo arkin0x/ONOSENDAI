@@ -4,8 +4,11 @@
  * walls and the store (RULED 2026-11-03):
  *
  * - facing snaps to 8 directions, a diagonal within 22.5 degrees of 45;
- * - a diagonal is one step changing two axes, only when both side cells are
- *   open, otherwise a slide along the open side;
+ * - a diagonal is one step changing two axes, round whichever side of its
+ *   square is open (2026-11-10: it no longer needs both); a wall on both
+ *   sides (a crack) or in the diagonal cell is a slide along the open side;
+ * - under GRAVITY the side cells need no floor (a diagonal bridge), and a
+ *   slide is taken only onto a floor;
  * - a blocked press slides only toward the side it is angled to, and
  *   straight on into a flat wall does nothing;
  * - nothing ever moves backward; BACKWARD mirrors all of it.
@@ -162,20 +165,24 @@ describe('a press among walls', () => {
     expect(rel(big.from, planWalkMove(big.from, head(40)!, 4n, big.step).to)).toEqual([4, -4])
   })
 
-  it('never cuts a corner: a side cell shut, it slides along the open side instead', () => {
-    // North shut: east.
+  it('a side cell shut, the diagonal goes round the open side; both shut (a crack), nothing (2026-11-10)', () => {
+    // North shut: round by the east.
     let g = grid(['.#.', '.@.'])
     let m = planWalkMove(g.from, head(45)!, 1n, g.step)
-    expect(m).toMatchObject({ kind: 'slide', along: d('x', 1) })
-    expect(rel(g.from, m.to)).toEqual([1, 0])
-    // East shut: north.
+    expect(m).toMatchObject({ kind: 'diagonal', by: null })
+    expect(rel(g.from, m.to)).toEqual([1, -1])
+    // East shut: round by the north.
     g = grid(['...', '.@#'])
     m = planWalkMove(g.from, head(45)!, 1n, g.step)
-    expect(m).toMatchObject({ kind: 'slide', along: d('z', -1) })
-    expect(rel(g.from, m.to)).toEqual([0, -1])
-    // Both shut: nothing, though the diagonal cell is open.
+    expect(m).toMatchObject({ kind: 'diagonal', by: null })
+    expect(rel(g.from, m.to)).toEqual([1, -1])
+    // Both shut: nothing, though the diagonal cell is open. No squeezing through a crack.
     g = grid(['.#.', '.@#'])
     expect(planWalkMove(g.from, head(45)!, 1n, g.step)).toMatchObject({ kind: 'held', to: g.from, by: 'wall' })
+    // A side shut and the diagonal cell shut: along the open side.
+    g = grid(['.##', '.@.'])
+    m = planWalkMove(g.from, head(45)!, 1n, g.step)
+    expect(m).toMatchObject({ kind: 'slide', along: d('x', 1) })
   })
 
   it('both sides open but the diagonal cell shut: along the side nearer the facing', () => {
@@ -216,12 +223,13 @@ describe('a press among walls', () => {
     expect(rel(g.from, m.to)).toEqual([0, -32])
   })
 
-  it('under GRAVITY (stands) both side cells must hold you, and it stops where it walks off', () => {
+  it('under GRAVITY (stands) the side cells need no floor, and it stops where it walks off', () => {
     const g = grid(['...', '...', '.@.'])
-    // Only the start and the diagonal cell hold you: the sides are pits.
+    // Only the start and the diagonal cell hold you: the sides are pits. A diagonal bridge, walked (2026-11-10).
     const floorAt = (cells: string[], o: Position = g.from) => (at: Position) => cells.includes(`${at.x - o.x},${at.z - o.z}`)
     const pits = planWalkMove(g.from, head(45)!, 1n, g.step, { stands: floorAt(['0,0', '1,-1']) })
-    expect(pits.kind).not.toBe('diagonal')
+    expect(pits).toMatchObject({ kind: 'diagonal' })
+    expect(rel(g.from, pits.to)).toEqual([1, -1])
     const sides = planWalkMove(g.from, head(45)!, 1n, g.step, { stands: floorAt(['0,0', '1,0', '0,-1']) })
     expect(sides.kind).toBe('diagonal')
     // Two gibsons, the first diagonal cell off the floor: it ends there, where the fall starts.
@@ -229,6 +237,19 @@ describe('a press among walls', () => {
     const off = planWalkMove(big.from, head(45)!, 2n, big.step, { stands: floorAt(['0,0', '1,0', '0,-1'], big.from) })
     expect(off).toMatchObject({ kind: 'diagonal' })
     expect(rel(big.from, off.to)).toEqual([1, -1])
+  })
+
+  it('under GRAVITY a slide is taken only onto a floor: never off a ledge sideways', () => {
+    const floorAt = (cells: string[], o: Position) => (at: Position) => cells.includes(`${at.x - o.x},${at.z - o.z}`)
+    // The diagonal cell shut; with floor only where you stand, nothing.
+    let g = grid(['..#', '.@.'])
+    expect(planWalkMove(g.from, head(30)!, 1n, g.step, { stands: floorAt(['0,0'], g.from) })).toMatchObject({ kind: 'held', to: g.from })
+    // Floor to the east only: the slide goes east, though north is nearer the facing.
+    expect(planWalkMove(g.from, head(30)!, 1n, g.step, { stands: floorAt(['0,0', '1,0'], g.from) })).toMatchObject({ kind: 'slide', along: d('x', 1) })
+    // A straight press angled into a wall slides only onto a floor.
+    g = grid(['###', '.@.'])
+    expect(planWalkMove(g.from, head(10)!, 1n, g.step, { stands: floorAt(['0,0'], g.from) }).kind).toBe('held')
+    expect(planWalkMove(g.from, head(10)!, 1n, g.step, { stands: floorAt(['0,0', '1,0'], g.from) })).toMatchObject({ kind: 'slide', along: d('x', 1) })
   })
 
   it('never moves backward, among random walls at any angle', () => {
@@ -248,12 +269,9 @@ describe('a press among walls', () => {
       expect(dx * f.x * fwd).toBeGreaterThanOrEqual(-1e-9)
       expect(dz * f.z * fwd).toBeGreaterThanOrEqual(-1e-9)
       expect(Math.abs(dx) + Math.abs(dz)).toBeLessThanOrEqual(2)
-      // Never into a wall, and a diagonal only with both sides open.
+      // Never into a wall, and a diagonal only with a side open: never through a crack.
       expect(rows[2 + dz][2 + dx]).not.toBe('#')
-      if (m.kind === 'diagonal') {
-        expect(rows[2][2 + dx]).toBe('.')
-        expect(rows[2 + dz][2]).toBe('.')
-      }
+      if (m.kind === 'diagonal') expect(rows[2][2 + dx] === '.' || rows[2 + dz][2] === '.').toBe(true)
     }
   })
 })

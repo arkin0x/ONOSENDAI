@@ -17,9 +17,13 @@
  *
  * Review of #594 (the reviewer's probes, now with what they must do): a
  * diagonal is walked gibson by gibson, so a pillar inside a coarse step's
- * square holds it; past 16 gibsons a press is no diagonal; under GRAVITY
- * both side cells must hold you; facing 50 then 40 is one diagonal, one hop;
- * and a diagonal segment is budgeted for both its trees.
+ * square holds it; past 16 gibsons a press is no diagonal; facing 50 then 40
+ * is one diagonal, one hop; and a diagonal segment is budgeted for both its
+ * trees. Its rule that under GRAVITY both side cells must hold you, and the
+ * 2026-11-03 rule that no corner is ever cut, went with the play test of
+ * 2026-11-10 (store/__tests__/walkDiagonalGround.test.ts): a diagonal goes
+ * round one wall at its side and over a gap at its side, never through a
+ * crack, and under GRAVITY a slide never walks off a ledge.
  */
 import { provedFor } from '../fixtures/provedHop'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
@@ -266,25 +270,26 @@ describe('a diagonal', () => {
     }
   })
 
-  it('into a wall, slides along it and never through its corner', () => {
+  it('into a wall, slides along it, and round its corner diagonally once the diagonal cell is open', () => {
     world(start, floor(), corridor('all'))
     walk()
     face(45)
     forward(1)
     expect(moved(start)).toEqual([1, 0, -1])
-    // The right wall is at x 2: on along it, -Z only.
+    // The right wall is at x 2: the diagonal cell is in it, so on along it, -Z only.
     forward(3)
     expect(moved(start)).toEqual([1, 0, -4])
-    // Past the inner corner (z -4.5) the diagonal opens again.
+    // At the inner corner (z -4.5) the diagonal cell is open: round the corner
+    // by the open side, diagonally (2026-11-10), not a straight step first.
     forward(1)
-    expect(moved(start)).toEqual([1, 0, -5])
+    expect(moved(start)).toEqual([2, 0, -5])
     forward(1)
-    expect(moved(start)).toEqual([2, 0, -6])
-    forward(1)
-    expect(moved(start)).toEqual([3, 0, -7])
-    // The end wall: along it, +X.
+    expect(moved(start)).toEqual([3, 0, -6])
     forward(1)
     expect(moved(start)).toEqual([4, 0, -7])
+    // The end wall: along it, +X.
+    forward(1)
+    expect(moved(start)).toEqual([5, 0, -7])
   })
 
   it('climbs a riser on the way, the same on both ways round its square', () => {
@@ -330,15 +335,14 @@ describe('under GRAVITY', () => {
     expect(useWalk.getState().queue.map((p) => moved(start, p))).toEqual([[1, 0, -1]])
   })
 
-  it('a diagonal whose side cell is past a ledge\'s edge is the straight step instead: no diagonal over a gap (review of #594)', () => {
+  it('a diagonal toward a ledge\'s edge walks off it the way you face, never a straight step (2026-11-10)', () => {
     world(start, boxes('Ledge', 'all', [[[-10, -2, -10], [0.5, -1, 10]]]), boxes('Low', 'all', [[[-10, -6, -10], [20, -5, 10]]]))
     useWalk.getState().setGravity(true)
     walk()
     face(45)
     forward(1)
-    expect(moved(start)).not.toEqual([1, 0, -1])
-    const m = moved(start)
-    expect(Math.abs(m[0]) + Math.abs(m[2])).toBe(1)
+    expect(moved(start)).toEqual([1, 0, -1])
+    expect(fallState()).not.toBeNull()
   })
 })
 
@@ -384,15 +388,24 @@ describe('the keyboard', () => {
 })
 
 describe('review of #594', () => {
-  it('a post across either way round a one-gibson diagonal holds it: the press slides instead', () => {
+  it('a post across one way round a one-gibson diagonal: it goes the other way round; posts across both: it slides', () => {
     // Across the way that goes +X first and then -Z, along x 1.
     world(start, floor(), boxes('Post', 'all', [[[0.8, -1, -0.7], [1.2, 3, -0.3]]]))
     walk()
     face(45)
     forward(1)
+    expect(moved(start)).toEqual([1, 0, -1])
+    useWalk.getState().exit()
+    useCyberspace.setState({ cursor: { ...start } })
+    // And across the other way too, along z -1: neither way round is open.
+    world(start, floor(), boxes('Post', 'all', [[[0.8, -1, -0.7], [1.2, 3, -0.3]], [[0.3, -1, -1.2], [0.7, 3, -0.8]]]))
+    clearWalls()
+    walk()
+    face(45)
+    forward(1)
     const m = moved(start)
     expect(m).not.toEqual([1, 0, -1])
-    expect(Math.abs(m[0]) + Math.abs(m[2])).toBe(1)
+    expect(Math.abs(m[0]) + Math.abs(m[2])).toBeLessThanOrEqual(1)
   })
 
   it('known limit: a post wholly inside one gibson\'s square, touching neither way round, is not seen (the walls are asked along axes)', () => {
@@ -431,7 +444,7 @@ describe('review of #594', () => {
     expect(moved(start)).toEqual([0, 0, -32])
   })
 
-  it('under GRAVITY no diagonal crosses between two pits onto a floor that touches only at a corner', () => {
+  it('under GRAVITY a diagonal crosses between two pits onto a floor that touches only at a corner (2026-11-10: a diagonal bridge)', () => {
     world(start,
       boxes('A', 'all', [[[-0.5, -2, -0.5], [0.5, -1, 0.5]]]),
       boxes('D', 'all', [[[0.5, -2, -1.5], [1.5, -1, -0.5]]]),
@@ -440,11 +453,9 @@ describe('review of #594', () => {
     walk()
     face(45)
     forward(1)
-    const m = moved(start)
-    // The straight step instead: one axis, off the edge, and the fall starts.
-    expect(m).not.toEqual([1, 0, -1])
-    expect(Math.abs(m[0]) + Math.abs(m[2])).toBe(1)
-    expect(fallState()).not.toBeNull()
+    // Onto D, standing: no straight step off the edge, and no fall.
+    expect(moved(start)).toEqual([1, 0, -1])
+    expect(fallState()).toBeNull()
   })
 
   it('under GRAVITY straight into either side cell falls (control)', () => {

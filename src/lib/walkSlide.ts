@@ -20,13 +20,26 @@
  * | straight | open (or open part way) | the straight step, as before |
  * | straight, angled 5 degrees or more to a side | blocked | one step to that side, if it is open: a slide along the wall |
  * | straight on (under 5 degrees) | blocked | nothing, as before |
- * | diagonal | both side cells and the diagonal cell open, gibson by gibson | ONE step changing two axes: one hop, one chain event |
- * | diagonal | a side cell blocked, or the diagonal cell (under GRAVITY, a side cell you would not stand in) | a slide along the side that is open (the nearer to your facing first); no corner is ever cut |
- * | diagonal | both sides blocked | nothing |
+ * | diagonal | the diagonal cell reachable round at least one side of its square, gibson by gibson | ONE step changing two axes: one hop, one chain event |
+ * | diagonal | a side cell blocked by a wall, the other open | still the diagonal, round the open side (arkinox, 2026-11-10: a diagonal must not turn into steps along the grid) |
+ * | diagonal | under GRAVITY, no floor under a side cell | still the diagonal: only where you land matters, so a 1-wide diagonal bridge is walked |
+ * | diagonal | both side cells walls (a diagonal crack), or the diagonal cell a wall | no diagonal: a slide along a side that is open (the nearer to your facing first), else nothing |
  * | diagonal, a press longer than 16 gibsons | any | no diagonal: the straight step, or the slide |
+ * | any slide, under GRAVITY | the side has no floor | not taken: a slide never walks you off a ledge sideways |
  *
  * Every move it makes is along an axis your heading leans toward, so a press
  * never takes you backward. Nothing here decides what a wall is.
+ *
+ * The corner rule (arkinox's play test, 2026-11-10: "when i face diagonal
+ * across the grid of gibsons my movement tended to snap to adjacent gibsons
+ * instead of actually moving diagonally, which made me fall a few times").
+ * Until then a diagonal needed both side cells open, and under GRAVITY both
+ * standing (RULED 2026-11-03, review of #594); anything else became a
+ * straight step, which next to a rail or a pillar zigzagged along the grid,
+ * one hop a step, and on a narrow or diagonal walkway stepped off the edge.
+ * Now a diagonal needs one clear way round its square and a place to land;
+ * it is refused only by a wall on both sides, which is too narrow a gap to
+ * squeeze through, or by a wall in the diagonal cell itself.
  */
 
 import type { AxisDirection, AxisName, Position } from './space'
@@ -134,9 +147,9 @@ export const DIAGONAL_MAX = 16n
 export interface WalkPlanOptions {
   /**
    * Under GRAVITY: whether you stand at a point (store/walkStep.ts standing).
-   * A diagonal then needs both side cells standing, so it never crosses a
-   * gap a straight step into either side would fall through (review of
-   * #594), and it ends on the first gibson past an edge, where the fall starts.
+   * A diagonal then ends on the first gibson past an edge, where the fall
+   * starts; the side cells it passes need no floor (a diagonal bridge). A
+   * slide, which is not the way you face, is taken only onto a floor.
    */
   stands?: (at: Position) => boolean
 }
@@ -149,39 +162,48 @@ export interface WalkPlanOptions {
  * A diagonal is walked one gibson at a time (review of #594: a whole press's
  * square left its inside untested, so a pillar in the middle of a coarse
  * step was walked through). Each one-gibson diagonal is the two L-shaped ways
- * round its square, each a straight step `step` has cleared: both must go
- * their gibson and meet at one place, so both side cells are open, the
- * corner is never cut, and a stair on the way is climbed the same on both.
- * What `step` cannot see is a post wholly inside one gibson's square,
- * touching neither way round: the walls are asked along axes only.
+ * round its square, each two straight steps `step` has cleared: one way that
+ * goes both its gibsons is enough (main axis first when both do; under
+ * GRAVITY the one that lands on a floor first). Both ways shut is a wall on
+ * both sides or in the diagonal cell, and no diagonal. What `step` cannot see
+ * is a wall inside one gibson's square that neither way round touches: a
+ * post in the middle, or the corner of a wall beside the way taken, which
+ * the step passes within half a gibson of. The walls are asked along axes
+ * only.
  *
  * Held part way, the diagonal stops on the last gibson it reached. Held on
  * its first gibson, or longer than DIAGONAL_MAX, it is no diagonal: the
  * straight step if it goes its whole way, else the slide along the side,
- * else whichever goes at all.
+ * else whichever goes at all; under GRAVITY only one that lands on a floor.
  */
 export function planWalkMove<B>(from: Position, heading: WalkHeading, length: bigint, step: Stepper<B>, options: WalkPlanOptions = {}): WalkMove<B> {
   const { main, side, lean } = heading
+  const { stands } = options
+  /** Under GRAVITY a slide lands on a floor or is not taken: it is not the way you face, so it never walks you off a ledge. */
+  const landsOk = (to: Position): boolean => !stands || stands(to)
   if (!side) {
     const ahead = step(from, main.axis, main.dir, length)
     if (!samePlace(ahead.to, from)) return { to: ahead.to, by: ahead.by, kind: 'straight', along: main, side: null }
     if (lean) {
       const slid = step(from, lean.axis, lean.dir, length)
-      if (!samePlace(slid.to, from)) return { to: slid.to, by: slid.by, kind: 'slide', along: lean, side: null }
+      if (!samePlace(slid.to, from) && landsOk(slid.to)) return { to: slid.to, by: slid.by, kind: 'slide', along: lean, side: null }
     }
     return { to: from, by: ahead.by, kind: 'held', along: null, side: null }
   }
-  const { stands } = options
-  /** One gibson diagonally from `at`, or what held it. */
+  /** One way round a gibson's square from `at`: `first` then `second`, each a whole gibson, or what held it. */
+  const roundBy = (at: Position, first: AxisDirection, second: AxisDirection): { to: Position } | { by: B | null } => {
+    const one = step(at, first.axis, first.dir, 1n)
+    if (!whole(at, one, first, 1n)) return { by: one.by }
+    const two = step(one.to, second.axis, second.dir, 1n)
+    if (!whole(one.to, two, second, 1n)) return { by: two.by }
+    return { to: two.to }
+  }
+  /** One gibson diagonally from `at`, round whichever side is open, or what held it. */
   const oneGibson = (at: Position): { to: Position } | { by: B | null } => {
-    const a = step(at, main.axis, main.dir, 1n)
-    const b = step(at, side.axis, side.dir, 1n)
-    if (!whole(at, a, main, 1n) || !whole(at, b, side, 1n)) return { by: a.by ?? b.by }
-    if (stands && (!stands(a.to) || !stands(b.to))) return { by: null }
-    const ab = step(a.to, side.axis, side.dir, 1n)
-    const ba = step(b.to, main.axis, main.dir, 1n)
-    if (!whole(a.to, ab, side, 1n) || !whole(b.to, ba, main, 1n) || !samePlace(ab.to, ba.to)) return { by: ab.by ?? ba.by }
-    return { to: ab.to }
+    const ways = [roundBy(at, main, side), roundBy(at, side, main)]
+    const open = ways.flatMap((w) => ('to' in w ? [w.to] : []))
+    if (open.length === 0) return { by: ways.map((w) => ('by' in w ? w.by : null)).find((b) => b !== null) ?? null }
+    return { to: (stands && open.find(stands)) || open[0] }
   }
   if (length <= DIAGONAL_MAX) {
     let at = from
@@ -199,7 +221,7 @@ export function planWalkMove<B>(from: Position, heading: WalkHeading, length: bi
   const a = step(from, main.axis, main.dir, length)
   const b = step(from, side.axis, side.dir, length)
   const ways: Array<[StepResult<B>, AxisDirection, boolean]> = [[a, main, whole(from, a, main, length)], [b, side, whole(from, b, side, length)]]
-  const go = ways.find(([, , open]) => open) ?? ways.find(([r]) => !samePlace(r.to, from))
+  const go = ways.find(([r, , open]) => open && landsOk(r.to)) ?? ways.find(([r]) => !samePlace(r.to, from) && landsOk(r.to))
   if (go) return { to: go[0].to, by: go[0].by, kind: 'slide', along: go[1], side: null }
   return { to: from, by: a.by ?? b.by, kind: 'held', along: null, side: null }
 }

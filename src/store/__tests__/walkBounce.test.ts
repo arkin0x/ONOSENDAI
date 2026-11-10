@@ -721,3 +721,109 @@ describe('the hop rate', () => {
     expect(useCyberspace.getState().proof.status).not.toBe('infeasible')
   })
 })
+
+describe('a springboard (arkinox, 2026-11-10: launches however you arrive)', () => {
+  /** `s` a springboard too. */
+  const board = (s: ShardModel, v: unknown = true): ShardModel => ({ ...s, extra: { ...s.extra, springboard: v } })
+  /** A plain floor ending half a gibson ahead, and from there a pad flush with it, 12 gibsons wide along the way on. */
+  const flush = (pad: ShardModel): void => {
+    world(start, [boxes('Floor', 'all', [LEDGE]), [0, -1, 0]], [pad, [0, -1, 0]])
+  }
+  const PAD: [V3, V3] = [[-10, -1, -40], [10, 0, -0.5]]
+  const on = { x: 0n, y: 0n, z: -1n }
+
+  it('a level walk onto a flush springboard launches; the walk is one hop to it, and bouncing on makes nothing', async () => {
+    flush(board(bouncy(boxes('Board', 'all', [PAD]), 12)))
+    walk(true)
+    useWalk.getState().press('away')
+    const top = { ...start, z: start.z + on.z }
+    expect(useCyberspace.getState().cursor).toEqual(top)
+    expect(useWalk.getState().falling).toBe(true)
+    expect(fallState()!.v0).toBeCloseTo(Math.sqrt(2 * WALK_GRAVITY * 12), 6)
+    // The walk segment closed at the launch point: one normal hop.
+    expect(useWalk.getState().queue).toEqual([top])
+    await vi.waitFor(() => expect(posted).toHaveLength(1))
+    expect(posted[0]).toMatchObject({ from: start, to: top })
+    await land()
+    expect(Math.abs(peakOver(1500) - 12)).toBeLessThan(1)
+    for (let t = 0; t < 10_000; t += 16) frame(16)
+    expect(useWalk.getState().falling).toBe(true)
+    expect(posted).toHaveLength(1)
+    expect(useWalk.getState()).toMatchObject({ queue: [], open: null, behind: 0 })
+  })
+
+  it('without springboard, a level walk onto the same pad does not launch', () => {
+    flush(bouncy(boxes('Pad', 'all', [PAD]), 12))
+    walk(true)
+    useWalk.getState().press('away')
+    expect(at(start)).toEqual([0, 0, -1])
+    expect(useWalk.getState().falling).toBe(false)
+  })
+
+  it('only true makes one: "true" and 1 do not launch on a walk-on', () => {
+    for (const v of ['true', 1]) {
+      clearWalls()
+      flush(board(bouncy(boxes(`Board ${String(v)}`, 'all', [PAD]), 12), v))
+      walk(true)
+      useWalk.getState().press('away')
+      expect(useWalk.getState().falling).toBe(false)
+      useWalk.getState().exit()
+    }
+  })
+
+  it('with "reflect" it adds nothing: a walk-on fell from nowhere', () => {
+    flush(board(bouncy(boxes('Board', 'all', [PAD]), 'reflect')))
+    walk(true)
+    useWalk.getState().press('away')
+    expect(at(start)).toEqual([0, 0, -1])
+    expect(useWalk.getState().falling).toBe(false)
+  })
+
+  it('Down just before walking on absorbs it: you stand on it; a Down long before does not', () => {
+    flush(board(bouncy(boxes('Board', 'all', [PAD]), 12)))
+    walk(true)
+    useWalk.getState().press('down')
+    clock += 100
+    useWalk.getState().press('away')
+    expect(at(start)).toEqual([0, 0, -1])
+    expect(useWalk.getState().falling).toBe(false)
+    // Held (its repeats keep it fresh): on along the board, still standing.
+    useWalk.getState().press('down')
+    useWalk.getState().press('away')
+    expect(at(start)).toEqual([0, 0, -2])
+    expect(useWalk.getState().falling).toBe(false)
+    // Let go: the next step on the board launches.
+    clock += 1000
+    useWalk.getState().press('away')
+    expect(useWalk.getState().falling).toBe(true)
+  })
+
+  it('a step up onto a springboard launches too, and a landing on it bounces, as on any pad', () => {
+    world(start, [boxes('Floor', 'all', [FLOOR]), [0, -1, 0]], [board(bouncy(boxes('Board', 'all', [[[-10, 0, -10], [10, 1, -0.5]]]), 6)), [0, -1, 0]])
+    walk(true)
+    useWalk.getState().press('away')
+    expect(at(start)).toEqual([0, 1, -1])
+    expect(fallState()!.v0).toBeCloseTo(Math.sqrt(2 * WALK_GRAVITY * 6), 6)
+  })
+
+  it('steering on along a wide springboard: one hop a landing, no storm', () => {
+    flush(board(bouncy(boxes('Board', 'all', [[[-10, -1, -400], [10, 0, -0.5]]]), 12)))
+    walk(true)
+    let landings = 0
+    let last = -1
+    const hops = queuedBy(() => {
+      useWalk.getState().press('away')
+      for (let t = 0; t < 5000; t += 16) {
+        frame(16)
+        if (t % 96 === 0) useWalk.getState().press('away')
+        const f = fallState()
+        if (f && f.t0 !== last) { if (last !== -1) landings++; last = f.t0 }
+      }
+    })
+    // A bounce at 12 is 1.2 s: the walk-on, then a hop at each landing somewhere new along the board.
+    expect(useWalk.getState().falling).toBe(true)
+    expect(landings).toBe(4)
+    expect(hops).toBe(1 + landings)
+    expect(at(start, fallState()!.anchor)[2]).toBeLessThan(-20)
+  })
+})

@@ -56,7 +56,7 @@ import { publishMany, queryEach } from '../../lib/relay'
 import { useCyberspace } from '../useCyberspace'
 import { useWorkshop } from '../useWorkshop'
 import { wallMesh, withConstrain } from '../../lib/walkConstrain'
-import { bounceOf } from '../../lib/walkBounce'
+import { bounceOf, springboardOf } from '../../lib/walkBounce'
 import { toPayload } from 'sno-core/shards'
 import { usePublished } from '../usePublished'
 import { NOT_SNO_OR_GLTF, looseName, routeImport, timing, useShardImport } from '../useShardImport'
@@ -915,7 +915,7 @@ describe('BOUNCE through a lone .json (the owner\'s hand-made test shards, maze-
   const fixture = (name: string): File => new File([readFileSync(join(__dirname, '../fixtures/bounce-test', `${name}.json`), 'utf8')], `${name}.json`, { type: 'application/json' })
 
   it('keeps `bounce` from the file to the bench, the wire and the collider', async () => {
-    for (const [name, want] of [['bounce-pad-12', 12], ['bounce-pad-reflect', 'reflect'], ['bounce-test-tower', 0]] as const) {
+    for (const [name, want, spring] of [['bounce-pad-12', 12, false], ['bounce-pad-reflect', 'reflect', false], ['bounce-test-tower', 0, false], ['bounce-springboard-12', 12, true]] as const) {
       const route = await routeImport([fixture(name)])
       expect(route.to).toBe('shards')
       if (route.to !== 'shards') return
@@ -929,6 +929,9 @@ describe('BOUNCE through a lone .json (the owner\'s hand-made test shards, maze-
       expect(stored.extra?.bounce).toBe(want === 0 ? undefined : want)
       expect(stored.extra?.constrain).toBe('all')
       expect(bounceOf(stored)).toBe(want)
+      expect(springboardOf(stored)).toBe(spring)
+      expect((toPayload(stored) as { springboard?: unknown }).springboard).toBe(spring ? true : undefined)
+      expect(wallMesh(stored, []).ownSpringboard).toBe(spring)
       // On the wire, as it publishes.
       expect((toPayload(stored) as { bounce?: unknown }).bounce).toBe(want === 0 ? undefined : want)
       // At the collider: its own faces bounce by it.

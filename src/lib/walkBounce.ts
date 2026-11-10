@@ -15,6 +15,15 @@
  * | `"reflect"` (arkinox, 2026-11-10: "a bounce option that simply reflects whatever height you fell from") | the height its fall's top was above where it landed, at most BOUNCE_MAX, so it bounces in place forever until it moves off in the air or gravity goes off |
  * | anything else (absent, a fraction, out of range, another string) | nowhere: no bounce |
  *
+ * A second flat field, `springboard` (arkinox, 2026-11-10: "a springboard
+ * option where touching the pad will launch you even if you walk onto it
+ * flush"), exactly `true` and nothing else, makes a fixed-height pad launch
+ * on any arrival onto its top: a level walk onto it (a pad flush with the
+ * floor), a step up or down onto it, or a landing. Without it a pad launches
+ * on landings, and on a step up onto a fixed height (ruling of 2026-11-10).
+ * With "reflect" it adds nothing: walking on, you fell from nowhere, so the
+ * reflected height is 0 and only landings launch.
+ *
  * An Up press just before the landing adds JUMP_HEIGHT to either, still at
  * most BOUNCE_MAX; a Down press just before it absorbs the bounce, and the
  * walker lands and stands. Stepping up onto a fixed-height pad (the stair step-up)
@@ -68,6 +77,20 @@ export function launchHeight(b: Bounce, fell: number, boost: boolean, boostBy: n
   const base = b === BOUNCE_REFLECT ? Math.floor(fell + REFLECT_EPS) : b
   const h = Math.min(BOUNCE_MAX, base + (boost ? boostBy : 0))
   return h >= BOUNCE_MIN ? h : 0
+}
+
+/** The springboard field (provisional). */
+export const SPRINGBOARD_FIELD = 'springboard'
+
+/** A payload's `springboard`: exactly `true`; anything else (`"true"`, 1, absent) is no springboard. */
+export function readSpringboard(raw: unknown): boolean {
+  return raw === true
+}
+
+/** A model's springboard, top level first, as bounceOf reads `bounce`. */
+export function springboardOf(s: Pick<ShardModel, 'extra'>): boolean {
+  const top = (s as { springboard?: unknown }).springboard
+  return readSpringboard(top !== undefined ? top : s.extra?.[SPRINGBOARD_FIELD])
 }
 
 /** A model's bounce, top level first for a sno-core that has learned the field (as constrainOf reads `constrain`). */

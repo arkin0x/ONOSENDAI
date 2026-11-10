@@ -18,6 +18,10 @@
  *   - the finish bag (the finish deck's height-3 region): the finish chest,
  *     locked the same way, with course pieces to build a course of your own.
  *
+ * The guide signs through lib/signers.ts localSigner, like every raw key in
+ * the app (clientTagGuard.test.ts), so its events carry ONOSENDAI's client
+ * tag as a player's own bags do; nothing it signs is published either way.
+ *
  * The welcome item is a placeholder signed by the guide key until the owner
  * publishes theirs; theirs then goes in as their own signed event, which a
  * chest reads as theirs (lib/chests.ts readContents).
@@ -27,8 +31,10 @@
  * is signed twice. RESTART stages again: a new chest to open.
  */
 
-import { finalizeEvent, getPublicKey } from 'nostr-tools/pure'
+import { getPublicKey } from 'nostr-tools/pure'
 import type { NostrEvent } from 'nostr-tools'
+import type { EventTemplate } from '../lib/events'
+import { localSigner } from '../lib/signers'
 import { fromPayload, type ShardModel, type ShardPayload } from 'sno-core/shards'
 import { DEFAULT_BAG_SETTINGS, HIDDEN_KIND, bagTemplate, chestInnerTemplate, keyInnerTemplate, messageInnerTemplate, rumorOf, shardInnerTemplate, type BagEntry, type ChestItem, type KeyItem } from '../lib/hidden'
 import { forgeKey, sealEntries } from '../lib/chests'
@@ -140,16 +146,20 @@ export function pieceModel(payload: unknown, id: string): ShardModel {
   return model
 }
 
+/** A signer for templates as the guide (lib/signers.ts localSigner). */
+type Sign = (t: EventTemplate) => Promise<NostrEvent>
+
 /** Sign as the guide. */
-function signer(secret: Uint8Array): (t: Parameters<typeof finalizeEvent>[0]) => NostrEvent {
-  return (t) => finalizeEvent(t, secret) as NostrEvent
+function signer(secret: Uint8Array): Sign {
+  const guide = localSigner(secret)
+  return (t) => guide.signEvent(t) as Promise<NostrEvent>
 }
 
 /**
  * Seal one bag of the guide's at a region: its entries under that region's
  * key, signed by the guide. `at` is any point inside the region.
  */
-async function sealBag(sign: (t: Parameters<typeof finalizeEvent>[0]) => NostrEvent, inners: BagEntry[], key: Uint8Array, lookupId: string, height: number, createdAt: number, at: Position, plane: TutorialLayout['plane']): Promise<NostrEvent> {
+async function sealBag(sign: Sign, inners: BagEntry[], key: Uint8Array, lookupId: string, height: number, createdAt: number, at: Position, plane: TutorialLayout['plane']): Promise<NostrEvent> {
   return sign(await bagTemplate(inners, key, lookupId, height, createdAt, HIDDEN_KIND, DEFAULT_BAG_SETTINGS, { at, plane }))
 }
 
@@ -176,7 +186,7 @@ export async function buildStage(secret: Uint8Array, player: string, layout: Tut
   const [coverKey, boxKey, finishKey] = await Promise.all([keyAt(cover.base, cover.height), keyAt(b, BOX_HEIGHT), keyAt(finishBase, BOX_HEIGHT)])
 
   /** A chest at `at`, sealed to the lock of the region whose key is `key`, holding `contents`. */
-  const chestOf = (name: string, key: Uint8Array, at: Position, contents: BagEntry[]): NostrEvent => {
+  const chestOf = (name: string, key: Uint8Array, at: Position, contents: BagEntry[]): Promise<NostrEvent> => {
     const lock = lockOf(key)
     if (!lock) throw new Error('This region has no lock.')
     const sealed = sealEntries(contents, lock.pubkey)
@@ -185,21 +195,21 @@ export async function buildStage(secret: Uint8Array, player: string, layout: Tut
   }
 
   // The treasure chest's contents, each placed at the chest, sealed to the box region's lock.
-  const trophy = sign(shardInnerTemplate(pieceModel(trophyPayload, 'tutorial-trophy'), chestAt, plane, createdAt))
+  const trophy = await sign(shardInnerTemplate(pieceModel(trophyPayload, 'tutorial-trophy'), chestAt, plane, createdAt))
   const message = rumorOf(messageInnerTemplate(STAGE_TEXT.message, chestAt, plane, createdAt), guide)
-  const welcome = sign(keyInnerTemplate(welcomeItem(), chestAt, plane, createdAt))
+  const welcome = await sign(keyInnerTemplate(welcomeItem(), chestAt, plane, createdAt))
   const contents: BagEntry[] = [trophy, message, welcome]
-  const chest = chestOf(STAGE_TEXT.chestName, boxKey.key, chestAt, contents)
+  const chest = await chestOf(STAGE_TEXT.chestName, boxKey.key, chestAt, contents)
 
   // The finish chest's: pieces to build with, and a line on what they are for.
   const finishContents: BagEntry[] = [
-    ...FINISH_KIT.map(([payload, id]) => sign(shardInnerTemplate(pieceModel(payload, `tutorial-${id}`), finishAt, plane, createdAt))),
+    ...await Promise.all(FINISH_KIT.map(([payload, id]) => sign(shardInnerTemplate(pieceModel(payload, `tutorial-${id}`), finishAt, plane, createdAt)))),
     rumorOf(messageInnerTemplate(STAGE_TEXT.finishMessage, finishAt, plane, createdAt), guide),
   ]
-  const finishChest = chestOf(STAGE_TEXT.finishName, finishKey.key, finishAt, finishContents)
+  const finishChest = await chestOf(STAGE_TEXT.finishName, finishKey.key, finishAt, finishContents)
 
-  const blueBox = sign(shardInnerTemplate(blueBoxModel(), boxMiddle, plane, createdAt))
-  const course = COURSE.map((part, i) => sign(shardInnerTemplate(pieceModel(PIECES[part.piece], `tutorial-course-${i}`), courseToWorld(frame, part.at), plane, createdAt)))
+  const blueBox = await sign(shardInnerTemplate(blueBoxModel(), boxMiddle, plane, createdAt))
+  const course = await Promise.all(COURSE.map((part, i) => sign(shardInnerTemplate(pieceModel(PIECES[part.piece], `tutorial-course-${i}`), courseToWorld(frame, part.at), plane, createdAt))))
 
   const bags = await Promise.all([
     sealBag(sign, [blueBox, ...course], coverKey.key, coverKey.lookupId, cover.height, createdAt, cover.base, plane),

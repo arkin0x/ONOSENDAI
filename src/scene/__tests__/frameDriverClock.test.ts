@@ -43,6 +43,9 @@ vi.mock('../../store/useWorkshop', async (importOriginal) => {
   return { ...actual, useWorkshop: Object.assign((sel: (s: { open: boolean }) => unknown) => sel(bench), actual.useWorkshop) }
 })
 
+// A game on screen covers the scene too (game/GameView.tsx); none is, here.
+vi.mock('../../store/useGame', () => ({ useGame: (sel: (s: { session: null }) => unknown) => sel({ session: null }) }))
+
 const { FrameDriver } = await import('../frameDriver')
 
 /** The display: frame callbacks queued, run by `frame(t)` at time t, with performance.now at t too. */

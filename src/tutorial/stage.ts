@@ -19,8 +19,9 @@
  *     locked the same way, with course pieces to build a course of your own.
  *
  * The guide signs through lib/signers.ts localSigner, like every raw key in
- * the app (clientTagGuard.test.ts), so its events carry ONOSENDAI's client
- * tag as a player's own bags do; nothing it signs is published either way.
+ * the app (clientTagGuard.test.ts), so its signed events carry ONOSENDAI's
+ * client tag as a player's own do (the chests' messages are unsigned rumors,
+ * untagged, as a player's are); nothing it signs is published either way.
  *
  * The welcome item is a placeholder signed by the guide key until the owner
  * publishes theirs; theirs then goes in as their own signed event, which a
@@ -68,7 +69,13 @@ const FINISH_KIT: Array<[unknown, string]> = [[platSquare4, 'platform'], [padBou
 /** What a region-locked chest says opens it, as the composer writes it (hud/RegionLockPicker REGION_REQUIRES). */
 const REGION_REQUIRES = 'the key of a place'
 
-/** Bump when what a stage holds changes, so a kept stage from before is staged again. */
+/**
+ * Bump when what a stage holds changes, so a kept stage from before is staged
+ * again. Not for a change only to tags nothing reads, such as the client tag
+ * the guide's events gained when they moved to lib/signers.ts: a kept stage
+ * without it still plays the same, and a bump would hand a player a new,
+ * unopened chest.
+ */
 export const STAGE_VERSION = 3
 
 /** One player's stage, by pubkey. */
@@ -152,7 +159,7 @@ type Sign = (t: EventTemplate) => Promise<NostrEvent>
 /** Sign as the guide. */
 function signer(secret: Uint8Array): Sign {
   const guide = localSigner(secret)
-  return (t) => guide.signEvent(t) as Promise<NostrEvent>
+  return (t) => guide.signEvent(t)
 }
 
 /**

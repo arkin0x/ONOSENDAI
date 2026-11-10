@@ -153,6 +153,10 @@ describe('the stage', () => {
       expect(c.verified).toBe(true)
       expect(c.event.pubkey).toBe(stage.guide)
     }
+    // The signed items inside are attributed too; the message is a rumor, never signed, so never tagged.
+    expect(contents[0].event.tags).toContainEqual(CLIENT_TAG)
+    expect(contents[2].event.tags).toContainEqual(CLIENT_TAG)
+    expect(contents[1].event.tags).not.toContainEqual(CLIENT_TAG)
     expect(contents[1].body.text).toBe(STAGE_TEXT.message)
     expect(contents[2].body.key?.name).toBe(STAGE_TEXT.welcomeName)
 
